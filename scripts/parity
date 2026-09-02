@@ -1,0 +1,57 @@
+#!/bin/bash
+# Diff the token stream of two llama-cli builds on the same model and prompt.
+#
+# This is the correctness gate for the port: greedy sampling with a fixed seed
+# makes the output a function of the model and the arithmetic alone, so any
+# difference is a real difference in what the code computes.
+#
+# Usage: scripts/parity <model.gguf> [prompt] [n_predict]
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+APPLE="$ROOT/cmake-build/apple/bin/llama-cli"
+ZIG="$ROOT/cmake-build/zig/bin/llama-cli"
+
+MODEL="${1:?usage: scripts/parity <model.gguf> [prompt] [n_predict]}"
+PROMPT="${2:-Explain gravity in one sentence:}"
+NPRED="${3:-64}"
+
+for bin in "$APPLE" "$ZIG"; do
+    if [ ! -x "$bin" ]; then
+        echo "missing: $bin" >&2
+        echo "run 'make buildmacos' and 'make buildmacos-zig' first" >&2
+        exit 2
+    fi
+done
+
+run() {
+    "$1" -m "$MODEL" -ngl 99 --temp 0 -s 42 -n "$NPRED" -st -p "$PROMPT" 2>/dev/null
+}
+
+# The banner carries the build id and the trailer carries throughput; both
+# differ between builds by design and say nothing about correctness.
+strip_chrome() {
+    sed -n '/^> /,$p' | grep -vE '^\[ Prompt:|^Exiting\.\.\.$'
+}
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+run "$APPLE" | strip_chrome > "$tmp/apple.txt"
+run "$ZIG"   | strip_chrome > "$tmp/zig.txt"
+
+if [ ! -s "$tmp/apple.txt" ] || [ ! -s "$tmp/zig.txt" ]; then
+    echo "FAIL: one or both builds produced no output" >&2
+    exit 1
+fi
+
+if diff -u "$tmp/apple.txt" "$tmp/zig.txt" > "$tmp/diff.txt"; then
+    echo "PASS: token-identical ($(wc -l < "$tmp/apple.txt" | tr -d ' ') lines)"
+    echo
+    cat "$tmp/apple.txt"
+    exit 0
+fi
+
+echo "FAIL: outputs differ"
+cat "$tmp/diff.txt"
+exit 1

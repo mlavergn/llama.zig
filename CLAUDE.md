@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Port llama.cpp to pure Zig.** The deliverable is the `llama-cli` binary reimplemented in Zig — not a recreation of the llama.cpp repo, and not a Zig wrapper around the C++ library. `README.md` has the five stages; `PLAN.md` has the detailed plan, scope measurements, and open questions.
 
-Where we are: **Stage 0.** The Zig scaffold builds and its tests pass. No llama.cpp code has been ported yet. Every design decision made now is being made for a codebase that will eventually hold roughly 150,000 lines of ported code, so favor structure that scales over structure that is convenient today.
+Where we are: **Stages 1 and 2 complete.** The whole tree compiles with `zig cc` under upstream's own CMake and is token-identical to an Apple-clang build; `zig build reference` then compiles ggml and libllama with no CMake at all and matches the same reference byte for byte. No llama.cpp code has been *ported* yet — the sources still compile as C, C++, and Obj-C. Stages 3 and 4 replace them file by file.
 
 ## `llama.cpp/` is reference material only
 
@@ -23,27 +23,48 @@ Read it constantly — for behavior, for numerics, for the shape of a data struc
 
 ## What we own
 
-`build.zig`, `build.zig.zon`, `src/`, `cli/`, `Makefile`, and the markdown at the root. That is the whole of this project's code.
+`build.zig`, `build.zig.zon`, `build/`, `src/`, `cli/`, `harness/`, `Makefile`, and the markdown at the root. That is the whole of this project's code.
+
+- **`build/llamacpp.zig`** declares the reference tree's build graph, replacing its CMake for the macOS arm64 configuration. It compiles upstream sources unmodified.
+- **`build/metal_embed.zig`** is a build-time tool that flattens one Metal kernel and its headers into a single MSL file plus an assembly stub. It replaces the `cat`/`sed` pipeline CMake uses for `GGML_METAL_EMBED_LIBRARY`.
+- **`harness/smoke.zig`** loads a model through libllama's C ABI and generates. It is the only check that proves inference actually works, and it rehearses the C-ABI boundary that Stages 3 and 4 depend on.
+
+Note `build/` holds build *sources*, not build output. CMake's output directory was moved to `cmake-build/` to free the name.
 
 `src/base.zig` and `cli/client.zig` are placeholder greeting code carried over from the Zig template this repo started from. They exist to demonstrate the conventions below and are expected to be deleted as real code lands. Do not build on them.
 
 ## Build state
 
-All steps pass. The build produces `zig-out/bin/llamazig` and `zig-out/lib/libllamazig.a`; the module import name is `llamazig`.
+All steps pass.
 
 ```sh
-zig build          # everything
-zig build lib      # static library -> zig-out/lib/libllamazig.a
-zig build cli      # CLI            -> zig-out/bin/llamazig
-zig build run      # run the CLI; args after `--`
-zig build test     # unit tests (currently 9)
-zig build docs     # autodoc        -> zig-out/docs/
+zig build            # the llamazig scaffold -> zig-out/bin/llamazig  (fast, ~0.2s)
+zig build lib        # static library        -> zig-out/lib/libllamazig.a
+zig build cli        # CLI                   -> zig-out/bin/llamazig
+zig build run        # run the CLI; args after `--`
+zig build test       # unit tests (9); -Dtest-filter="..." narrows the run
+zig build docs       # autodoc               -> zig-out/docs/
+
+zig build reference  # llama.cpp -> zig-out/lib/{libggml.a, libllama.a}
+zig build smoke      # load a model and generate; args after `--`
 ```
 
-Known rough edges, both tracked in `PLAN.md` Stage 0:
+The stage-1 builds go through CMake and live in a separate tree:
 
-- **`-Dtest-filter` does not filter.** It is declared and fed to the generated `config` options module, but never passed to `b.addTest(.filters = ...)`. To run a single test, invoke the compiler directly: `zig test src/module.zig --test-filter "falls back to the default subject"`. Wiring it into the `addTest` calls would be a welcome fix.
-- **`llama.cpp/` and the `*.gguf` files are untracked and not in `.gitignore`.** The GGUFs total ~3.8 GB. Settle this before the first commit; `main` has no commits yet.
+```sh
+make cmake           # fetch CMake into .tools/ -- not installed on this machine
+make buildmacos      # control build, Apple clang -> cmake-build/apple/
+make buildmacos-zig  # same sources via zig cc    -> cmake-build/zig/
+make parity          # diff their token streams; the correctness gate
+```
+
+The reference build is deliberately **not** part of the default step — it is ~130k lines of C++ and takes ~16s in release, versus 0.2s for the scaffold.
+
+```sh
+zig build smoke --release=fast -- Qwen3.5-2B-Q4_K_M.gguf "The capital of France is" 24
+```
+
+Remaining Stage 0 item: **`llama.cpp/` is an untracked nested clone, not yet a submodule.** `main` still has no commits, so pinning it is free now and expensive later. `*.gguf` is ignored.
 
 ## Toolchain
 
@@ -87,6 +108,21 @@ For when Stages 3 and 4 begin:
 - **Correctness is measured against the reference build,** not against reading the code. Diff token output from the ported binary and the `make buildmacos` binary on the same model, prompt, and seed.
 - **ggml's macro-heavy headers hold real logic in the preprocessor.** `ggml-impl.h`, `ggml-common.h`, and `simd-mappings.h` become `comptime` functions and generics — a rewrite, not a translation.
 - **The Metal kernels under `ggml/src/ggml-metal/kernels/` are never ported.** They are Metal Shading Language compiled by the GPU driver; they travel as embedded data.
+
+## Building the reference tree
+
+Facts established by getting `zig build reference` working. They are easy to
+rediscover the hard way, so they are recorded here.
+
+- **`zig cc`, `zig c++`, and Obj-C all work** against the macOS SDK under Zig 0.16.0, including `-framework Foundation` and libc++.
+- **Do not pass `-fobjc-arc`.** Upstream's `.m` files use manual reference counting and bridge freely between `void *` and Obj-C object pointers; ARC rejects them outright.
+- **`sanitize_c` must be `.off`.** Zig enables the C sanitizers in Debug, and upstream is not UBSan-clean — it aborts in `llama-graph.cpp` on `applying non-zero offset to null pointer`. Reference code compiles as shipped; we do not fix it.
+- **The Metal shaders need no `xcrun metal`.** With `GGML_METAL_EMBED_LIBRARY`, the `.metal` *source* is flattened and `.incbin`-ed into a `__DATA,__ggml_metallib` section, and the driver compiles it at load time. `build/metal_embed.zig` does the flattening. Never enable the non-embed path: it requires `xcrun -sdk macosx metal`, which Zig can never replace.
+- **CMake's `-G Xcode` cannot drive `zig cc`.** It shells out to `xcodebuild`, which picks Apple clang and ignores `CMAKE_C_COMPILER`. Moot now that `build.zig` owns the build.
+- **Metal is reproducible run-to-run.** Three greedy runs on the same model and prompt produced token-identical output, so the token-parity gate in `PLAN.md` is usable as written.
+- **CMake is not on PATH and `/usr/local` is root-owned.** `make cmake` fetches 4.4.3 into `.tools/`. The Makefile's `CMAKE` variable prefers that over PATH. `ninja` is still absent, which is why the generator is `-G "Unix Makefiles"` — `make` is present.
+- **The parity gate works and passes.** `scripts/parity` diffs the Apple-clang and zig-cc `llama-cli` binaries at `--temp 0` with a fixed seed. 4/4 prompts token-identical. Use it after any change that could affect arithmetic.
+- **`zig cc` and Apple clang do not select the same ARM features.** CMake's probe through `zig cc` reports `HAVE_MATMUL_INT8 - Failed` and `HAVE_SVE - Failed` where Apple clang may not. Output is identical regardless, so this costs throughput rather than correctness — but the two builds are not running the same quant kernels. Revisit when Stage 3 ports `arch/arm/`.
 
 ## macOS SDK resolution
 

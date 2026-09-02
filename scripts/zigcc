@@ -1,0 +1,4 @@
+#!/bin/sh
+# CMake's CMAKE_C_COMPILER takes one executable path, but the Zig C compiler is
+# invoked as two words. This wrapper is the whole reason it exists.
+exec zig cc "$@"

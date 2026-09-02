@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const zon = @import("build.zig.zon");
+const llamacpp = @import("build/llamacpp.zig");
 
 const Xcode = struct {
     const Self = @This();
@@ -107,6 +108,11 @@ pub fn build(b: *std.Build) !void {
     const test_filter = b.option([]const u8, "test-filter", "Run unit tests that match filter") orelse "";
     options.addOption([]const u8, "test_filter", test_filter);
 
+    // `addTest` takes a list, and an empty string would match nothing rather
+    // than everything, so an unset option has to become an empty list.
+    const test_filters: []const []const u8 =
+        if (test_filter.len == 0) &.{} else &.{test_filter};
+
     // -------------------------------------------------------------------------
     // Module
 
@@ -163,6 +169,58 @@ pub fn build(b: *std.Build) !void {
     cli_step.dependOn(&cli_install.step);
 
     // -------------------------------------------------------------------------
+    // llama.cpp reference build
+    //
+    // Builds the vendored tree with the Zig toolchain, replacing its CMake.
+    // These are reference artifacts, not the port: nothing under `llama.cpp/`
+    // is modified, and the sources compile exactly as upstream ships them.
+
+    const sdk: ?[]const u8 = if (builtin.os.tag == .macos) blk: {
+        var xcode = try Xcode.init(b.allocator, b.graph.io);
+        try xcode.resolve();
+        break :blk xcode.sdk;
+    } else null;
+
+    const reference = try llamacpp.add(b, .{
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+        .sdk = sdk,
+    });
+
+    const ggml_install = b.addInstallArtifact(reference.ggml, .{});
+    const llama_install = b.addInstallArtifact(reference.llama, .{});
+
+    const reference_step = b.step("reference", "Build the llama.cpp reference libraries");
+    reference_step.dependOn(&ggml_install.step);
+    reference_step.dependOn(&llama_install.step);
+
+    // End-to-end check: load a model through libllama's C ABI and generate.
+    // Compiling and linking says nothing about whether inference works, and
+    // the Metal path in particular can only be proven by running it.
+
+    const smoke_module = b.createModule(.{
+        .root_source_file = b.path("harness/smoke.zig"),
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    smoke_module.addIncludePath(b.path("llama.cpp/include"));
+    smoke_module.addIncludePath(b.path("llama.cpp/ggml/include"));
+    smoke_module.linkLibrary(reference.llama);
+    smoke_module.linkLibrary(reference.ggml);
+    if (sdk) |path| smoke_module.addFrameworkPath(.{ .cwd_relative = path });
+
+    const smoke = b.addExecutable(.{ .name = "smoke", .root_module = smoke_module });
+
+    const smoke_run = b.addRunArtifact(smoke);
+    smoke_run.has_side_effects = true;
+    if (b.args) |args| smoke_run.addArgs(args);
+
+    const smoke_step = b.step("smoke", "Run inference against the reference build");
+    smoke_step.dependOn(&smoke_run.step);
+
+    // -------------------------------------------------------------------------
     // Run
 
     const cli_run = b.addRunArtifact(cli);
@@ -183,6 +241,7 @@ pub fn build(b: *std.Build) !void {
 
     const tests = b.addTest(.{
         .root_module = module,
+        .filters = test_filters,
     });
 
     const tests_run = b.addRunArtifact(tests);
@@ -203,6 +262,7 @@ pub fn build(b: *std.Build) !void {
 
     const cli_tests = b.addTest(.{
         .root_module = cli_tests_module,
+        .filters = test_filters,
     });
 
     const cli_tests_run = b.addRunArtifact(cli_tests);

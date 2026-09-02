@@ -115,15 +115,33 @@ Prerequisite for everything else.
 
 1. ~~**Fix `build.zig`.**~~ **Done.** The web-console executable and test module pointed at a non-existent `web/` directory and broke `zig build`, `test`, and `run`. Removed; all six steps now pass, 9/9 tests.
 2. ~~**Rename the template identity.**~~ **Done.** `.name = .llamazig`; artifacts are `zig-out/bin/llamazig` and `libllamazig.a`. The `.zon` fingerprint was updated for the new name checksum while preserving the package id.
-3. **Wire `-Dtest-filter`.** Declared and fed to the generated `config` options module, but never passed to `b.addTest(.filters = ...)`, so it does not narrow the run. Fix before the suite grows.
-4. **Delete the placeholder scaffold.** `src/base.zig` and `cli/client.zig` are template greeting code. They document the house conventions (see `CLAUDE.md`) but must not survive into the port.
-5. **Pin `llama.cpp/` as a submodule at v0.3.0** (Decision 3) and add `*.gguf` to `.gitignore`. Today it is an untracked nested clone sitting beside ~3.8 GB of untracked models. `main` has no commits yet, so this is free now and expensive later.
+3. ~~**Wire `-Dtest-filter`.**~~ **Done.** Now passed to `b.addTest(.filters)`. Verified: 9 tests unfiltered, 5 with `-Dtest-filter="falls back"`.
+4. **Delete the placeholder scaffold.** `src/base.zig` and `cli/client.zig` are template greeting code. They document the house conventions (see `CLAUDE.md`) but must not survive into the port. Still present — deleting them now would leave the module empty, so this waits for Stage 3's first ported file.
+5. **Pin `llama.cpp/` as a submodule at v0.3.0** (Decision 3). Still outstanding: it is an untracked nested clone. `*.gguf` is now ignored, and CMake's output directory moved to `cmake-build/` so `build/` could hold build sources.
 
-**Gate:** `zig build && zig build test` green, `git status` clean.
+**Gate:** `zig build && zig build test` green. Met, except the submodule.
 
 ---
 
-## Stage 1 — Build llama.cpp with the Zig compiler, driven by CMake
+## Stage 1 — Build llama.cpp with the Zig compiler, driven by CMake — **done**
+
+> **Built and verified.** `make buildmacos-zig` configures and builds the entire llama.cpp tree with `zig cc` / `zig c++` under CMake. 100% of targets build, including `llama-cli`, `llama-server`, the test suite, and the SvelteKit UI. The resulting `llama-cli` runs at ~222 t/s on Metal.
+>
+> **The gate is met.** `scripts/parity` diffs the Apple-clang and zig-cc binaries on the same model, prompt, and seed at `--temp 0`. **4/4 prompts token-identical.** Decision 4's correctness bar is therefore real and achievable, not aspirational.
+>
+> **What it took:**
+> - `scripts/zigcc` and `scripts/zigcxx` wrappers, because `CMAKE_C_COMPILER` takes a single executable path and `zig cc` is two words.
+> - `-G "Unix Makefiles"` instead of `-G Xcode`. Xcode's generator shells out to `xcodebuild`, which selects Apple clang and ignores `CMAKE_C_COMPILER`. Unix Makefiles also avoids needing ninja, since `make` is already present.
+> - CMake itself, which was not installed. `make cmake` fetches 4.4.3 into `.tools/` rather than installing system-wide, since `/usr/local` is root-owned.
+> - Separate `cmake-build/apple` and `cmake-build/zig` trees so the control and the subject do not clobber each other.
+>
+> **It just worked otherwise.** No source changes, no flag fights, no ABI conflicts between Zig's libc++ and the SDK. The predicted fallout (nullability warnings, ARC, NEON detection) did not materialise under CMake, which passes different flags than the hand-written `build.zig` does.
+>
+> **One difference from Apple clang worth remembering.** CMake's ARM feature probe through `zig cc` reports `HAVE_MATMUL_INT8 - Failed` and `HAVE_SVE - Failed`, while `HAVE_DOTPROD`, `HAVE_FMA`, and `HAVE_FP16_VECTOR_ARITHMETIC` succeed. Output is identical anyway, so this costs throughput rather than correctness, but it means the two builds are not taking the same code path through the quant kernels. Worth revisiting when Stage 3 ports `arch/arm/`.
+>
+> The original plan follows, for the record.
+
+### Original plan
 
 Goal: the same `llama-cli`, with every C/C++/Obj-C translation unit compiled by `zig cc` / `zig c++` instead of Apple clang. No source changes to llama.cpp.
 
@@ -145,7 +163,27 @@ Goal: the same `llama-cli`, with every C/C++/Obj-C translation unit compiled by 
 
 ---
 
-## Stage 2 — Replace CMake with `build.zig`
+## Stage 2 — Replace CMake with `build.zig` — **done for ggml and libllama**
+
+> **Built and verified.** `zig build reference` produces `libggml.a` and `libllama.a` from the vendored sources with no CMake, no Ninja, and no `xcrun metal`. `zig build smoke` loads `Qwen3.5-2B-Q4_K_M.gguf`, offloads 25/25 layers to Metal, and generates. Release build: ~16s wall on 18 cores.
+>
+> **Delivered:**
+> - `build/llamacpp.zig` — the build graph. ggml (base + CPU + Metal backends) as one static archive, libllama with all 151 architectures globbed from `src/models/`.
+> - `build/metal_embed.zig` — a build-time Zig tool replacing CMake's `cat`/`sed` shader pipeline. All 20 kernel libraries embed and the driver compiles them at load.
+> - `harness/smoke.zig` — inference through libllama's C ABI, which also rehearses the boundary Stages 3-4 rely on.
+>
+> **Three things that bit, recorded so they don't bite twice:**
+> - `-fobjc-arc` must **not** be set. Upstream's `.m` files use manual reference counting and bridge `void *` to object pointers freely.
+> - `sanitize_c` must be `.off`. Zig enables C sanitizers in Debug and upstream is not UBSan-clean — it aborts in `llama-graph.cpp` on a null-pointer offset.
+> - `-G Xcode` genuinely cannot drive `zig cc`, as predicted. Moot now.
+>
+> **Independently validated against CMake.** The same C driver linked against `build.zig`'s libraries and against CMake+Apple-clang's libraries produces byte-identical output on 3/3 prompts. So `build.zig` is not merely *a* working build — it computes what the reference computes.
+>
+> **Not built:** `common/`, `tools/server/`, and the upstream `llama-cli`. Decision 1 puts them outside the port, and `zig build smoke` covers verification. Note Stage 1 *does* build all of these via CMake, so upstream's exact driver is available whenever it is wanted — see Q16.
+>
+> The original plan follows, for the record.
+
+### Original plan
 
 Still compiling upstream sources unmodified; only the build system changes. Best effort-to-value ratio in the plan, and it de-risks everything after it.
 
@@ -273,4 +311,16 @@ Note this is largely reversible: an idiomatic Zig core with a thin `extern "C"` 
 This is the same shape of call as Decision 5. Five types first and backfill, or all 27?
 
 > All
+>
+
+**Q16. Do we still want the upstream `llama-cli` built?** Stage 2 built ggml and libllama, which is everything Decision 1 puts in scope, and `zig build smoke` covers verification. Building the full `llama-cli` would add `common/` (34,094), `tools/server/` (21,435), and the vendored `nlohmann` and `cpp-httplib` to the *build* — not to the port. The upside is being able to run standard llama.cpp CLI workflows against our build, and having upstream's exact driver available during Stages 3-4. The downside is carrying ~57k lines of build surface we have already decided not to port.
+
+Note it would not give us an independent reference binary: same sources, same compiler, so it cannot catch what our own build gets wrong. Only an Apple-clang build via CMake does that.
+
+>
+>
+
+**Q17. Should CMake be installed to enable the parity harness?** Decision 4's gate is token-identical output versus a reference build, and there is no reference build without CMake, which is not installed here. This is not urgent for Stage 2 but is a hard prerequisite for Stage 3. Do you want to install CMake (Homebrew is also absent, so this means an official installer or building it), or should the port proceed against a different correctness bar until then?
+
+>
 >

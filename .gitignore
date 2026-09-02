@@ -1,4 +1,10 @@
-build
+# Build output
 zig-out
 .zig-cache
+cmake-build
 
+# Models are downloaded via the Makefile, not tracked (~1.2 GB each)
+*.gguf
+
+# Locally installed build tools (CMake), not tracked
+.tools

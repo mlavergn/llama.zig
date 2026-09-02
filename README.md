@@ -14,9 +14,18 @@ The primary goal is for llama.cpp, which becomes llamazig, to build for **macOS*
 
 The port proceeds in five stages. Each one has to land before the next begins.
 
-### 1. Build with the Zig compiler, driven by the existing Make and CMake
+### 1. Build with the Zig compiler, driven by the existing Make and CMake — *done*
 
-Keep llama.cpp's build system, but have it invoke `zig cc` / `zig c++` instead of the platform toolchain. Target this configuration:
+llama.cpp's own build system, with `zig cc` / `zig c++` in place of the platform toolchain. The whole tree builds, `llama-cli` included, and its output is token-identical to an Apple-clang build of the same sources.
+
+```sh
+make cmake           # fetch CMake into .tools/ (not installed on this machine)
+make buildmacos      # control build, Apple clang  -> cmake-build/apple/
+make buildmacos-zig  # same sources via zig cc     -> cmake-build/zig/
+make parity          # diff the two, greedy, fixed seed
+```
+
+The generator is `-G "Unix Makefiles"`, not `-G Xcode`: Xcode's generator shells out to `xcodebuild`, which selects Apple clang and ignores `CMAKE_C_COMPILER`. It also avoids needing ninja. Target configuration:
 
 ```sh
 cmake ../llama.cpp \
@@ -37,11 +46,18 @@ cmake ../llama.cpp \
   -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO
 ```
 
-### 2. Migrate the build system to Zig
+### 2. Migrate the build system to Zig — *done for ggml and libllama*
 
-Once we can build using only the Zig compiler, replace CMake with `build.zig`.
+`build.zig` compiles the vendored tree with the Zig toolchain and no CMake at all. The `-D` options above are hardcoded as the macOS defaults. The sources are compiled exactly as upstream ships them; nothing under `llama.cpp/` is modified.
 
-llama.cpp uses CMake files that need porting to the Zig build system. `build.zig` should replace CMake **completely**. The `-D` options above become the hardcoded macOS defaults rather than flags a caller has to pass.
+```sh
+zig build reference   # -> zig-out/lib/{libggml.a, libllama.a}
+zig build smoke -- Qwen3.5-2B-Q4_K_M.gguf "The capital of France is"
+```
+
+Working: ggml with its CPU and Metal backends, all 20 Metal shader libraries embedded, and libllama with all 151 model architectures. Inference runs with 25/25 layers offloaded to the GPU. Verified against CMake: the same driver linked against `build.zig`'s libraries and against the Apple-clang libraries gives byte-identical output.
+
+Not yet built here: `common/`, `tools/server/`, and the upstream `llama-cli`. Those are outside the port's scope and are available from the Stage 1 build when needed.
 
 ### 3. Convert the C files to Zig
 
@@ -60,10 +76,12 @@ Target macOS, iOS, Linux (arm64), and Linux (x86_64). This is the end goal.
 Requires **Zig 0.16.0**.
 
 ```sh
-make build      # zig build         -> zig-out/bin/llamazig, zig-out/lib/libllamazig.a
-make dist       # zig build --release=fast
-zig build test  # run the unit tests
-zig build docs  # generate docs into zig-out/docs/
+make build       # zig build         -> zig-out/bin/llamazig
+make dist        # zig build --release=fast
+make reference   # build ggml + libllama from the vendored sources
+make smoke       # load a model and generate, to prove it works
+zig build test   # run the unit tests (-Dtest-filter="..." narrows)
+zig build docs   # generate docs into zig-out/docs/
 ```
 
 To work with the reference implementation:
@@ -84,7 +102,12 @@ make qwen35xl    # Qwen3.5-2B UD-Q4_K_XL (1.34 GB, dynamic quant, better quality
 
 ## Status
 
-Stage 0 — the Zig scaffold builds and its tests pass. No llama.cpp code has been ported yet.
+**Stages 1 and 2 complete.**
+
+- The whole llama.cpp tree compiles with `zig cc` under its own CMake, and the resulting `llama-cli` is token-identical to an Apple-clang build (`make parity`, 4/4 prompts).
+- `zig build reference` builds ggml and libllama with no CMake at all, and matches the Apple-clang libraries byte for byte through the same driver.
+
+No llama.cpp code has been *ported* yet — the sources still compile as C, C++, and Obj-C. Stages 3 and 4 replace them file by file.
 
 The reference implementation is pinned at llama.cpp **v0.3.0**.
 
@@ -94,7 +117,11 @@ The reference implementation is pinned at llama.cpp **v0.3.0**.
 |---|---|
 | `src/` | The llamazig library. `module.zig` is the barrel; `root.zig` exists only so autodoc has a root. |
 | `cli/` | The command-line executable. Thin — the behavior lives in `client.zig` so tests can reach it. |
-| `build.zig` | The build graph: `lib`, `cli`, `run`, `test`, `docs`. Will grow to replace llama.cpp's CMake in Stage 2. |
+| `build.zig` | The build graph: `lib`, `cli`, `run`, `test`, `docs`, `reference`, `smoke`. |
+| `build/` | Build sources, not build output. `llamacpp.zig` replaces llama.cpp's CMake; `metal_embed.zig` flattens Metal shaders for embedding. |
+| `harness/` | `smoke.zig` — loads a model through libllama's C ABI and generates, proving the reference build actually infers. |
+| `scripts/` | `zigcc` / `zigcxx` wrappers so CMake can drive the Zig toolchain, and `parity` to diff two builds' token streams. |
+| `.tools/` | Locally installed CMake. Not tracked; `make cmake` fetches it. |
 | `llama.cpp/` | The upstream reference clone at v0.3.0. Source material for the port, not our code. |
 
 ## See also
