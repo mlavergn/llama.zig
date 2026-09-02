@@ -1,0 +1,99 @@
+#!/bin/bash
+# Diff our llamazig CLI's output against the C reference, end to end.
+#
+# What this adds over scripts/parity-port
+# ---------------------------------------
+# `parity-port` links one C driver against two libraries, so it isolates the
+# port. This runs the *actual binary a user runs* against a reference driver, so
+# it also covers everything the CLI itself does: argument parsing, tokenizer
+# flags, the sampler chain, the decode loop, and where the prompt is echoed.
+#
+# A bug in any of those is invisible to `parity-port` and would ship.
+#
+# Greedy on both sides
+# --------------------
+# `--temp 0` on our side; `llama_sampler_init_greedy()` on the reference's.
+# Those are only the same answer because `llama_sampler_temp_impl` does the
+# argmax at temp <= 0 *after* the rest of the chain, and every truncating
+# sampler keeps the highest-logit token. That equivalence is the thing this
+# script checks -- if the sampler chain in cli/session.zig is reordered, this is
+# what notices.
+#
+# Usage: scripts/parity-cli <model.gguf> [n_predict]
+#   Requires: zig build cli --release=fast
+#             make buildmacos   (the Apple-clang reference libraries)
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODEL="${1:?usage: scripts/parity-cli <model.gguf> [n_predict]}"
+NPRED="${2:-32}"
+
+CLI=zig-out/bin/llamazig
+[ -x "$CLI" ] || { echo "missing $CLI -- run 'zig build cli --release=fast'" >&2; exit 2; }
+
+REF_LIBS=(
+    cmake-build/apple/src/libllama.a
+    cmake-build/apple/ggml/src/libggml.a
+    cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
+    cmake-build/apple/ggml/src/libggml-cpu.a
+    cmake-build/apple/ggml/src/libggml-base.a
+)
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make buildmacos'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# The reference side: greedy decode through the stock C libraries, printing the
+# completion only. Deliberately not our CLI recompiled -- that would compare the
+# CLI against itself.
+# The reference side lives in harness/raw_completion.c, shared with
+# `make ref-raw` so the two cannot drift apart.
+
+FRAMEWORKS=(-lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+            -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks")
+zig cc harness/raw_completion.c -o "$tmp/ref" -std=c11 -I llama.cpp/include -I llama.cpp/ggml/include \
+    "${REF_LIBS[@]}" "${FRAMEWORKS[@]}" 2>/dev/null \
+    || { echo "FAIL: could not link the reference driver" >&2; exit 1; }
+
+PROMPTS=(
+    "The capital of France is"
+    "Explain gravity in one sentence:"
+    "def fibonacci(n):"
+    "Write a haiku about winter:"
+    "List three prime numbers:"
+    "Translate to French: good morning"
+)
+
+pass=0
+fail=0
+for p in "${PROMPTS[@]}"; do
+    "$tmp/ref" "$MODEL" "$p" "$NPRED" no-prompt,no-timings 0 2>/dev/null > "$tmp/a.txt"; rc_ref=$?
+    # Both sides are told to emit the completion alone: no prompt echo and no
+    # timings line. The reference prints both by default now, so that it can be
+    # compared against `make port` -- which means this has to suppress them on
+    # both sides rather than only on ours.
+    "$CLI" -m "$MODEL" -p "$p" -n "$NPRED" --temp 0 --no-display-prompt --no-show-timings \
+        2>/dev/null > "$tmp/b.txt"; rc_cli=$?
+    printf '  %-36s ' "$(echo "$p" | cut -c1-34)"
+    if [ "$rc_ref" -ne 0 ] || [ "$rc_cli" -ne 0 ]; then
+        echo "FAIL (exit: reference=$rc_ref cli=$rc_cli)"; fail=$((fail+1))
+    elif [ ! -s "$tmp/a.txt" ]; then
+        echo "FAIL (reference produced no output)"; fail=$((fail+1))
+    elif diff -q "$tmp/a.txt" "$tmp/b.txt" >/dev/null; then
+        echo "identical"; pass=$((pass+1))
+    else
+        echo "DIFFERS"; diff "$tmp/a.txt" "$tmp/b.txt" | head -6; fail=$((fail+1))
+    fi
+done
+
+echo
+if [ "$fail" -eq 0 ]; then
+    echo "PASS: $pass/$pass prompts identical"
+    exit 0
+fi
+echo "FAIL: $fail of $((pass+fail)) prompts differ"
+exit 1

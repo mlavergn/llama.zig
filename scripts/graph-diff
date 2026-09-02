@@ -1,0 +1,82 @@
+#!/bin/bash
+# Diff the graphs the ported constructors build against the reference ones.
+#
+# Token parity says "the model answered differently". This says "ggml_rope_ext,
+# op_params slot 5 differs" -- before any arithmetic runs, so a wrong shape or a
+# value in the wrong slot is named rather than inferred.
+#
+# It needs no model and no inference: graph construction only. That makes it
+# fast, deterministic, and usable long before a translation unit is complete.
+#
+# Requires: make buildmacos  (the reference libraries)
+#           zig build reference --release=fast  (the ported ones)
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+REF_LIBS=(
+    cmake-build/apple/ggml/src/libggml.a
+    cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
+    cmake-build/apple/ggml/src/libggml-cpu.a
+    cmake-build/apple/ggml/src/libggml-base.a
+)
+# The ported Zig alone. This used to matter because zig-out/lib/libggml.a still
+# contained ggml.c, so linking it would have compared C against C -- the mistake
+# that made an earlier version of this check pass while testing nothing.
+#
+# ggml.c is swapped out now, so that archive holds the port instead. The hazard
+# has inverted rather than gone away: pointing PORT_LIBS at it would still
+# compare the port against itself, and pointing REF_LIBS at it would too. The
+# reference side must stay the Apple-clang CMake build above, which is the only
+# genuinely-C ggml left in the tree.
+PORT_LIBS=(zig-out/lib/libggml-ported.a)
+
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make buildmacos'" >&2; exit 2; }
+done
+for lib in "${PORT_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build ported-lib --release=fast'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+FRAMEWORKS=(-lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+            -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks")
+
+zig cc harness/graph_dump.c -o "$tmp/ref" -std=c11 -I llama.cpp/ggml/include \
+    "${REF_LIBS[@]}" "${FRAMEWORKS[@]}" 2>"$tmp/ref.log" \
+    || { echo "FAIL: could not link against the reference libraries" >&2; tail -5 "$tmp/ref.log" >&2; exit 1; }
+
+zig cc harness/graph_dump.c -o "$tmp/port" -std=c11 -I llama.cpp/ggml/include \
+    "${PORT_LIBS[@]}" "${FRAMEWORKS[@]}" 2>"$tmp/port.log" \
+    || { echo "FAIL: could not link against the ported libraries" >&2; tail -5 "$tmp/port.log" >&2; exit 1; }
+
+"$tmp/ref"  > "$tmp/ref.txt"  2>"$tmp/ref.err";  rc_ref=$?
+"$tmp/port" > "$tmp/port.txt" 2>"$tmp/port.err"; rc_port=$?
+
+# A crash on either side is a failure, not a pass with no output to compare.
+if [ "$rc_ref" -ne 0 ] || [ "$rc_port" -ne 0 ]; then
+    echo "FAIL: dump exited non-zero (reference=$rc_ref ported=$rc_port)" >&2
+    tail -5 "$tmp/ref.err" "$tmp/port.err" >&2
+    exit 1
+fi
+if [ ! -s "$tmp/ref.txt" ]; then
+    echo "FAIL: the reference produced no output" >&2
+    exit 1
+fi
+
+nodes=$(grep -c "op=" "$tmp/ref.txt")
+if diff -u "$tmp/ref.txt" "$tmp/port.txt" > "$tmp/diff.txt"; then
+    echo "PASS: $nodes nodes identical"
+    exit 0
+fi
+
+echo "FAIL: graphs differ"
+echo
+head -60 "$tmp/diff.txt"
+differing=$(grep -c "^[-+][a-z]" "$tmp/diff.txt")
+echo
+echo "($differing differing lines of $nodes nodes)"
+exit 1

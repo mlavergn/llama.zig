@@ -1,0 +1,70 @@
+#!/bin/bash
+# Extract the i-quant codebook tables from ggml-quants.c into Zig.
+#
+# `iq2xs_init_impl` and `iq3xs_init_impl` embed six lookup tables as
+# function-local `static const` arrays -- 4,616 numbers in all. Being local to a
+# function, they are not in `ggml-common.h` and so not reachable through the
+# `@cImport` that supplies every other table the port uses.
+#
+# Transcribing them by hand would be the single largest source of silent error
+# in this file: a wrong digit anywhere produces a codebook that quantizes
+# without complaint and decodes to noise. So they are copied by a script, and
+# `src/ggml/quants/grids.zig` is generated output rather than source.
+#
+# Re-run only if the pin moves. Any change in the values is a change in the
+# quantization codebooks and needs explaining.
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+SRC=llama.cpp/ggml/src/ggml-quants.c
+[ -f "$SRC" ] || { echo "missing $SRC -- run 'make clone'" >&2; exit 2; }
+
+python3 - "$SRC" > src/ggml/quants/grids.zig <<'PY'
+import re, sys
+
+src = open(sys.argv[1]).read()
+
+# Each table is `static const uint16_t NAME[SIZE] = { ... };` inside a function.
+pattern = re.compile(
+    r"static const uint16_t (\w+)\[([^\]]+)\]\s*=\s*\{(.*?)\};", re.S)
+
+tables = []
+for m in pattern.finditer(src):
+    name, size, body = m.group(1), m.group(2), m.group(3)
+    values = [int(v) for v in re.findall(r"-?\d+", body)]
+    tables.append((name, size, values))
+
+print('''//! The i-quant codebook tables.
+//!
+//! # Provenance
+//!
+//! **Not a port, and not hand-written.** Extracted from
+//! `llama.cpp/ggml/src/ggml-quants.c` (v0.3.0, `c1d0e7a00`) by
+//! `scripts/iq-grids`.
+//!
+//! # Why these are not imported
+//!
+//! Every other table the port uses -- `iq2xxs_grid`, `ksigns_iq2xs`,
+//! `kvalues_iq4nl` -- lives in `ggml-common.h` and comes through `@cImport`.
+//! These six do not: they are `static const` arrays declared *inside*
+//! `iq2xs_init_impl` and `iq3xs_init_impl`, so no header exposes them.
+//!
+//! They are the codebooks the i-quant search matches against. A single wrong
+//! digit produces a quantizer that runs without complaint and decodes to
+//! noise, which is why they are copied by a script rather than by a person.''')
+print()
+total = 0
+for name, size, values in tables:
+    total += len(values)
+    print(f"/// `{name}[{size}]` (ggml-quants.c).")
+    print(f"pub const {name} = [_]u16{{")
+    for i in range(0, len(values), 16):
+        print("    " + " ".join(f"{v}," for v in values[i:i+16]))
+    print("};")
+    print()
+print(f"// {len(tables)} tables, {total} values.", file=sys.stderr)
+PY
+
+zig fmt src/ggml/quants/grids.zig >/dev/null
+echo "wrote src/ggml/quants/grids.zig ($(grep -c 'pub const' src/ggml/quants/grids.zig) tables, $(wc -l < src/ggml/quants/grids.zig) lines)"

@@ -1,0 +1,55 @@
+//! Barrel for the ported ggml.
+//!
+//! # Provenance
+//!
+//! Everything under `src/ggml/` is a port of C sources in the pinned reference
+//! checkout, v0.3.0 (`c1d0e7a00`).
+//!
+//! **Every ported file states its source as a full path from the repository
+//! root, with extension** — `llama.cpp/ggml/src/ggml-alloc.c`, not
+//! `ggml-alloc.c` — so the original can be opened without guessing where it
+//! lives. A file drawing on more than one source lists all of them.
+//!
+//! Within a file, each ported declaration names the C function and the line it
+//! started at, using the bare filename since the header has already established
+//! the path. Line numbers are as of the pinned commit and only move if the pin
+//! moves, which per Decision 3 it does not.
+//!
+//! This file is the exception: it is a barrel, not a port of anything, and
+//! `ported.zig` is likewise scaffolding.
+//!
+//! # How the swap works
+//!
+//! A ported file keeps the C ABI of the translation unit it replaces: same
+//! symbols, same signatures. `build/llamacpp.zig` drops the `.c` file from the
+//! source list, and the still-C++ code above links against these exports
+//! without noticing. That makes every file an independent, revertible step
+//! that the parity harness can check on its own.
+
+const std = @import("std");
+
+comptime {
+    // Ported translation units export C symbols that nothing in Zig references,
+    // so they need forcing into the compilation or the archive ships without
+    // them and the link fails with symbols the C++ side still expects.
+    _ = @import("alloc.zig"); // ggml-alloc.c
+    // ggml.c, split across seven files:
+    _ = @import("impl.zig");
+    _ = @import("types.zig");
+    _ = @import("context.zig");
+    _ = @import("runtime.zig");
+    _ = @import("ops.zig");
+    _ = @import("graph.zig");
+    _ = @import("quantize.zig");
+    // ggml-quants.c, split across src/ggml/quants/:
+    _ = @import("quants/module.zig");
+    // ggml-cpu/ggml-cpu.c, split across src/ggml/cpu/:
+    _ = @import("cpu/module.zig");
+}
+
+// -----------------------------------------------------------------------------
+// Unit Tests
+
+test {
+    std.testing.refAllDecls(@This());
+}

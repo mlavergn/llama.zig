@@ -1,0 +1,118 @@
+#!/bin/bash
+# Run upstream's test-backend-ops against the ported ggml.
+#
+# What this gate is for
+# ---------------------
+# `test-backend-ops` builds ~21,000 op configurations -- every op, across types,
+# shapes, broadcasts and permutations -- and for each one compares the Metal
+# backend against the CPU backend. It is by far the broadest exercise of the
+# ported constructors: `scripts/graph-diff` builds 131 nodes, this builds
+# thousands, and it *executes* them instead of only inspecting the graph.
+#
+# What it CANNOT catch, and why that matters
+# ------------------------------------------
+# It compares two backends against each other, not against the C. Both read the
+# same `op_params` from the same ported constructor, so a constructor that is
+# consistently wrong makes both backends wrong in the same way and they still
+# agree. Verified by injection: halving the softmax scale in `ops.zig` leaves
+# this test at "2/2 backends passed", while `scripts/graph-diff` names both
+# SOFT_MAX nodes immediately.
+#
+# So this does not replace the graph diff. It catches what the graph diff
+# cannot: a constructor that crashes, trips an assertion, or emits a shape some
+# backend has no kernel for, on a configuration the 131-node dump never builds.
+#
+# Modes:
+#   scripts/backend-ops            run against the ported libraries
+#   scripts/backend-ops --diff     also run against the C reference and diff
+#                                  the output, which catches any port-induced
+#                                  change in the test list itself
+#
+# Requires: zig build reference --release=fast
+#           make buildmacos   (only for --diff)
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+DIFF=0
+[ "${1:-}" = "--diff" ] && DIFF=1
+
+SRC=llama.cpp/tests/test-backend-ops.cpp
+[ -f "$SRC" ] || { echo "missing $SRC -- run 'make clone'" >&2; exit 2; }
+
+PORT_LIBS=(zig-out/lib/libggml.a)
+REF_LIBS=(
+    cmake-build/apple/ggml/src/libggml.a
+    cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
+    cmake-build/apple/ggml/src/libggml-cpu.a
+    cmake-build/apple/ggml/src/libggml-base.a
+)
+
+for lib in "${PORT_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+FRAMEWORKS=(-lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+            -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks")
+INCLUDES=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src)
+
+build() {
+    local out="$1"; shift
+    zig c++ "$SRC" -o "$out" -std=c++17 -O2 -w "${INCLUDES[@]}" "$@" "${FRAMEWORKS[@]}" 2>"$tmp/cc.log" \
+        || { echo "FAIL: could not build test-backend-ops" >&2; tail -5 "$tmp/cc.log" >&2; exit 1; }
+}
+
+echo "building against the ported libraries..."
+build "$tmp/port" "${PORT_LIBS[@]}"
+
+echo "running (~21k op configurations, a few minutes)..."
+"$tmp/port" test > "$tmp/port.log" 2>&1
+rc=$?
+
+cases=$(grep -cE '^  [A-Z_0-9]+\(' "$tmp/port.log")
+summary=$(grep -E 'backends passed' "$tmp/port.log" | tail -1)
+
+if [ "$rc" -ne 0 ]; then
+    echo "FAIL: test-backend-ops exited $rc"
+    grep -iE "FAIL|error|not supported" "$tmp/port.log" | head -20
+    exit 1
+fi
+
+echo "  $cases op configurations, $summary"
+
+if [ "$DIFF" -eq 0 ]; then
+    echo "PASS: all op configurations agree between backends"
+    exit 0
+fi
+
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make buildmacos'" >&2; exit 2; }
+done
+
+echo "building against the C reference..."
+build "$tmp/ref" "${REF_LIBS[@]}"
+echo "running the reference..."
+"$tmp/ref" test > "$tmp/ref.log" 2>&1 || { echo "FAIL: reference run exited non-zero" >&2; exit 1; }
+
+# Shader-compile timings, throughput figures and pointers vary run to run and
+# say nothing about the port.
+norm() {
+    sed -E 's/\x1b\[[0-9;]*m//g
+            s/0x[0-9a-f]+/0xPTR/g
+            s/[0-9]+\.[0-9]+ (sec|us|ms)/T \1/g
+            s/[0-9]+\.[0-9]+ (GB\/s|TFLOPS?)/T \1/g' "$1"
+}
+norm "$tmp/port.log" > "$tmp/port.norm"
+norm "$tmp/ref.log"  > "$tmp/ref.norm"
+
+if diff -q "$tmp/port.norm" "$tmp/ref.norm" >/dev/null; then
+    echo "PASS: $(wc -l < "$tmp/port.norm" | tr -d ' ') lines identical, ported vs reference"
+    exit 0
+fi
+echo "FAIL: output differs between ported and reference builds"
+diff "$tmp/port.norm" "$tmp/ref.norm" | head -30
+exit 1

@@ -1,0 +1,42 @@
+#!/bin/bash
+# Regenerate src/ggml/quants/golden.zig from the C reference.
+#
+# Run once at the pinned commit; the output is committed and the port is tested
+# against it.
+#
+# Note `-ffp-contract=off` below, and that ggml-quants.c is compiled here
+# rather than taken from the reference archive. Zig language code does not fuse
+# multiply-add; the C does by default, and the last-bit difference changes the
+# bytes a quantizer emits. Building the reference strict makes the two
+# comparable without modelling a particular compiler version.s FMA choices.
+# See the note at the top of src/ggml/quants/helpers.zig. Re-run only if the pin moves, and treat any change in the values
+# as a change in upstream behaviour that needs explaining.
+#
+# Requires: make buildmacos
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+REF_LIBS=(
+    cmake-build/apple/ggml/src/libggml.a
+    cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
+    cmake-build/apple/ggml/src/libggml-cpu.a
+    cmake-build/apple/ggml/src/libggml-base.a
+)
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make buildmacos'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+zig cc harness/quants_golden.c llama.cpp/ggml/src/ggml-quants.c -o "$tmp/gen" -std=c11 -w -O2 -ffp-contract=off \
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src \
+    "${REF_LIBS[@]}" \
+    -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks"
+
+mkdir -p src/ggml/quants
+"$tmp/gen" src/ggml/quants/golden.zig
+zig fmt src/ggml/quants/golden.zig >/dev/null
+echo "wrote src/ggml/quants/golden.zig ($(grep -c '\.name =' src/ggml/quants/golden.zig) types)"

@@ -1,0 +1,71 @@
+#!/bin/bash
+# Prove that ported Zig is on the execution path.
+#
+# Comparing token output cannot distinguish code that is correct from code that
+# never runs. A swapped symbol can be defined, referenced and linked while the
+# program reaches a different implementation entirely -- that is not
+# hypothetical, it is what made the incremental-swap trial report 6/6 parity on
+# code that was never called.
+#
+# So: build with the probe on, run inference, and require the abort. A clean run
+# means the ported implementation was bypassed, whatever `nm` says.
+#
+# Usage: scripts/probe-ported [model.gguf]
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODEL="${1:-Qwen3.5-2B-Q4_K_M.gguf}"
+MARKER="LLAMAZIG PORTED CODE REACHED"
+
+[ -f "$MODEL" ] || { echo "missing model: $MODEL" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+echo "== probe off: inference must succeed =="
+if ! zig build smoke --release=fast -- "$MODEL" "hi" 4 > "$tmp/off.txt" 2> "$tmp/off.err"; then
+    echo "FAIL: inference does not work with the probe off" >&2
+    tail -5 "$tmp/off.err" >&2
+    exit 1
+fi
+if grep -q "$MARKER" "$tmp/off.err"; then
+    echo "FAIL: probe fired when it should be compiled out" >&2
+    exit 1
+fi
+echo "  ok, and no marker leaked into a normal build"
+
+echo "== probe on (allocator): ported code must be reached =="
+# Expected to abort, so a zero exit here is the failure.
+zig build smoke --release=fast -Dprobe-ported=true -- "$MODEL" "hi" 4 > "$tmp/on.txt" 2> "$tmp/on.err"
+rc=$?
+
+if ! grep -q "$MARKER" "$tmp/on.err"; then
+    echo "FAIL: the allocator probe never fired (exit $rc)" >&2
+    echo "  The ported implementation is linked but not executed. Output-based" >&2
+    echo "  checks cannot be trusted until this passes." >&2
+    tail -5 "$tmp/on.err" >&2
+    exit 1
+fi
+echo "  ok, ported code aborted as required (exit $rc)"
+
+# The CPU backend needs its own run: the allocator probe fires while the graph
+# is still being planned, so it would mask this one every time.
+echo "== probe on (CPU backend): the ported dispatch must be reached =="
+zig build smoke --release=fast -Dprobe-cpu=true -- "$MODEL" "hi" 4 > "$tmp/cpu.txt" 2> "$tmp/cpu.err"
+rc=$?
+
+if ! grep -q "$MARKER" "$tmp/cpu.err"; then
+    echo "FAIL: the CPU probe never fired (exit $rc)" >&2
+    echo "  ggml-cpu.c is ported but the graph never reached the ported" >&2
+    echo "  dispatch. With Metal carrying the model most ops go to the GPU," >&2
+    echo "  but some fall back, and none of them did." >&2
+    tail -5 "$tmp/cpu.err" >&2
+    exit 1
+fi
+echo "  ok, the CPU dispatch aborted as required (exit $rc)"
+
+echo
+echo "PASS: ported code is on the execution path"
+exit 0

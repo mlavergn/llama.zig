@@ -1,0 +1,126 @@
+#!/bin/bash
+# Diff inference output between the ported libraries and the C reference.
+#
+# This is the gate for stages 3 and 4. `scripts/parity` compares two *builds*
+# of the same C sources, which catches toolchain differences; this compares the
+# same driver linked against two different *libraries*, which is what catches a
+# porting bug.
+#
+# Both sides run the identical driver (harness/smoke.zig, compiled once per
+# side), so any difference in output comes from the libraries alone.
+#
+# Usage: scripts/parity-port <model.gguf> [n_predict]
+#   Requires: make buildmacos   (the Apple-clang reference libraries)
+#             zig build reference --release=fast   (the ported libraries)
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODEL="${1:?usage: scripts/parity-port <model.gguf> [n_predict]}"
+NPRED="${2:-48}"
+
+APPLE_LIBS=(
+    cmake-build/apple/src/libllama.a
+    cmake-build/apple/ggml/src/libggml.a
+    cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
+    cmake-build/apple/ggml/src/libggml-cpu.a
+    cmake-build/apple/ggml/src/libggml-base.a
+)
+PORT_LIBS=(zig-out/lib/libllama.a zig-out/lib/libggml.a)
+
+for lib in "${APPLE_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make buildmacos'" >&2; exit 2; }
+done
+for lib in "${PORT_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# A small C driver rather than harness/smoke.zig: it has to be linked twice
+# against different library sets, which the build graph does not express.
+cat > "$tmp/driver.c" <<'DRIVER'
+#include "llama.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+int main(int argc, char **argv) {
+    llama_backend_init();
+    struct llama_model_params mp = llama_model_default_params();
+    mp.n_gpu_layers = 99;
+    struct llama_model *model = llama_model_load_from_file(argv[1], mp);
+    if (!model) return 1;
+    const struct llama_vocab *vocab = llama_model_get_vocab(model);
+    llama_token toks[512];
+    int n = llama_tokenize(vocab, argv[2], (int)strlen(argv[2]), toks, 512, true, true);
+    if (n < 0) return 1;
+    struct llama_context_params cp = llama_context_default_params();
+    cp.n_ctx = 512; cp.n_batch = 512;
+    struct llama_context *ctx = llama_init_from_model(model, cp);
+    if (!ctx) return 1;
+    struct llama_sampler *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
+    struct llama_batch batch = llama_batch_get_one(toks, n);
+    llama_token id;
+    for (int i = 0; i < atoi(argv[3]); i++) {
+        if (llama_decode(ctx, batch)) return 1;
+        id = llama_sampler_sample(smpl, ctx, -1);
+        if (llama_vocab_is_eog(vocab, id)) break;
+        char buf[256];
+        int k = llama_token_to_piece(vocab, id, buf, sizeof buf, 0, true);
+        if (k > 0) fwrite(buf, 1, (size_t)k, stdout);
+        batch = llama_batch_get_one(&id, 1);
+    }
+    printf("\n");
+    llama_sampler_free(smpl);
+    llama_free(ctx);
+    llama_model_free(model);
+    llama_backend_free();
+    return 0;
+}
+DRIVER
+
+FRAMEWORKS=(-lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+            -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks")
+INCLUDES=(-I llama.cpp/include -I llama.cpp/ggml/include)
+
+zig cc "$tmp/driver.c" -o "$tmp/ref"  -std=c11 "${INCLUDES[@]}" "${APPLE_LIBS[@]}" "${FRAMEWORKS[@]}" 2>/dev/null \
+    || { echo "FAIL: could not link against the reference libraries" >&2; exit 1; }
+zig cc "$tmp/driver.c" -o "$tmp/port" -std=c11 "${INCLUDES[@]}" "${PORT_LIBS[@]}"  "${FRAMEWORKS[@]}" 2>/dev/null \
+    || { echo "FAIL: could not link against the ported libraries" >&2; exit 1; }
+
+PROMPTS=(
+    "The capital of France is"
+    "Explain gravity in one sentence:"
+    "def fibonacci(n):"
+    "Write a haiku about winter:"
+    "List three prime numbers:"
+    "Translate to French: good morning"
+)
+
+pass=0
+fail=0
+for p in "${PROMPTS[@]}"; do
+    "$tmp/ref"  "$MODEL" "$p" "$NPRED" 2>/dev/null > "$tmp/a.txt"; rc_ref=$?
+    "$tmp/port" "$MODEL" "$p" "$NPRED" 2>/dev/null > "$tmp/b.txt"; rc_port=$?
+    printf '  %-36s ' "$(echo "$p" | cut -c1-34)"
+    if [ "$rc_ref" -ne 0 ] || [ "$rc_port" -ne 0 ]; then
+        echo "FAIL (exit: reference=$rc_ref ported=$rc_port)"; fail=$((fail+1))
+    elif [ ! -s "$tmp/a.txt" ]; then
+        echo "FAIL (reference produced no output)"; fail=$((fail+1))
+    elif diff -q "$tmp/a.txt" "$tmp/b.txt" >/dev/null; then
+        echo "identical"; pass=$((pass+1))
+    else
+        echo "DIFFERS"; diff "$tmp/a.txt" "$tmp/b.txt" | head -6; fail=$((fail+1))
+    fi
+done
+
+echo
+if [ "$fail" -eq 0 ]; then
+    echo "PASS: $pass/$pass prompts identical"
+    exit 0
+fi
+echo "FAIL: $fail of $((pass+fail)) prompts differ"
+exit 1

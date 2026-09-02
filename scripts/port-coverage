@@ -1,0 +1,121 @@
+#!/bin/bash
+# Report how much of a C translation unit has been ported, by symbol.
+#
+# The port swaps whole translation units: a file cannot be linked beside the C
+# it replaces until every symbol is present, because the linker pulls the C
+# object in for the ones still missing and then finds duplicates for the rest.
+# So "how many symbols" is the real progress measure, and "which names" is the
+# real completeness check -- a typo in an exported name is otherwise invisible
+# until the swap fails to link.
+#
+# The contract comes from compiling the C file itself, so this needs only the
+# llama.cpp checkout: no CMake build, no reference libraries.
+#
+# Usage: scripts/port-coverage [--list]
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+PORTED_DIR=src/ggml
+
+[ -d llama.cpp/ggml/src ] || { echo "missing llama.cpp -- run 'make clone'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+INCLUDES=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu)
+DEFINES=(-DGGML_USE_CPU -DGGML_USE_METAL -DGGML_SCHED_MAX_COPIES=4
+         -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE
+         -DGGML_VERSION='"0.3.0"' -DGGML_COMMIT='"c1d0e7a00"')
+
+todo_total=0
+
+# Reports one translation unit: compile the C for its symbol contract, compile
+# the Zig that replaces it, and compare the exported names.
+#
+# Args: <label> <c-source> <swapped: yes|no> <zig file>...
+report_unit() {
+    local label="$1" src="$2" swapped="$3"; shift 3
+    local files=("$@")
+    local d="$tmp/$label"
+    mkdir -p "$d"
+
+    if ! zig cc -c "$src" -o "$d/ref.o" -std=c11 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
+        echo "failed to compile $src:" >&2
+        tail -5 "$d/cc.log" >&2
+        exit 1
+    fi
+    nm -g --defined-only "$d/ref.o" | awk '{print $3}' | sed 's/^_//' | grep . | sort -u > "$d/want.txt"
+
+    : > "$d/objs.txt"
+    local f
+    for f in "${files[@]}"; do
+        [ -f "$f" ] || continue
+        local base
+        base="$(basename "$f" .zig)"
+        # alloc.zig and cpu/forward.zig read their probe flags from the
+        # `config` module the build graph supplies; a bare build-obj has to
+        # stand one in. Every flag build.zig defines has to appear here, or the
+        # compile fails and this script reports nothing at all.
+        printf 'pub const probe_ported = false;\npub const probe_cpu = false;\n' > "$d/config.zig"
+        if ! zig build-obj -femit-bin="$d/$base.o" "${INCLUDES[@]}" -lc \
+                --dep config -Mroot="$f" -Mconfig="$d/config.zig" 2>"$d/$base.log"; then
+            echo "failed to compile $f:" >&2
+            grep error "$d/$base.log" | head -5 >&2
+            exit 1
+        fi
+        echo "$d/$base.o" >> "$d/objs.txt"
+    done
+
+    # shellcheck disable=SC2046
+    nm -g --defined-only $(cat "$d/objs.txt") 2>/dev/null \
+        | awk '{print $3}' | sed 's/^_//' | sort -u > "$d/have.txt"
+
+    comm -12 "$d/have.txt" "$d/want.txt" > "$d/done.txt"
+    comm -13 "$d/have.txt" "$d/want.txt" > "$d/todo.txt"
+
+    local total done_n todo_n
+    total=$(wc -l < "$d/want.txt" | tr -d ' ')
+    done_n=$(wc -l < "$d/done.txt" | tr -d ' ')
+    todo_n=$(wc -l < "$d/todo.txt" | tr -d ' ')
+    todo_total=$((todo_total + todo_n))
+
+    if [ "$todo_n" -eq 0 ]; then
+        if [ "$swapped" = "yes" ]; then
+            printf '  %-18s%s / %s symbols (100%%), complete and swapped into the build\n' "$label" "$done_n" "$total"
+        else
+            printf '  %-18s%s / %s symbols (100%%), complete -- NOT swapped in yet\n' "$label" "$done_n" "$total"
+        fi
+    else
+        printf '  %-18s%s / %s symbols (%s%%), %s remaining\n' \
+            "$label" "$done_n" "$total" "$((done_n * 100 / total))" "$todo_n"
+    fi
+
+    if [ "${LIST:-0}" = "1" ] && [ "$todo_n" -gt 0 ]; then
+        printf '\n  %s remaining:\n' "$label"
+        sed 's/^/    /' "$d/todo.txt"
+        printf '\n'
+    fi
+}
+
+[ "${1:-}" = "--list" ] && LIST=1
+
+# Both units compile through `ported.zig`: it imports every ported file, and a
+# Zig module may not import above its root, so the quants cannot be compiled on
+# their own. Each unit's contract still comes from its own C file, so the
+# comparison stays per-translation-unit.
+report_unit "ggml.c" llama.cpp/ggml/src/ggml.c yes "$PORTED_DIR/ported.zig"
+
+printf '  %-18scomplete and swapped into the build\n' "ggml-alloc.c"
+
+report_unit "ggml-quants.c" llama.cpp/ggml/src/ggml-quants.c yes "$PORTED_DIR/ported.zig"
+
+report_unit "ggml-cpu.c" llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c yes "$PORTED_DIR/ported.zig"
+
+report_unit "ggml-cpu/quants.c" llama.cpp/ggml/src/ggml-cpu/quants.c yes "$PORTED_DIR/ported.zig"
+
+report_unit "arch/arm/quants.c" llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c yes "$PORTED_DIR/ported.zig"
+
+exit 0
+

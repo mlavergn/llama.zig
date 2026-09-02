@@ -1,0 +1,40 @@
+#!/bin/bash
+# Print the shipped ARM dot-product kernel's result for every prefix of a row.
+#
+# A diagnostic, not a gate. When `arm/golden.zig` reports a mismatch this says
+# *where*: the first prefix that diverges isolates the loop iteration, and
+# `nblk = 1` versus `nblk = 2` separates the scalar tail from the vector body.
+#
+# Built with `-ffp-contract=on`, matching how the file ships and how
+# `scripts/vecdot-golden` captures the ARM goldens.
+#
+# Usage: scripts/vecdot-prefix <kernel>
+# Requires: make buildmacos
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+REF_LIBS=(
+    cmake-build/apple/ggml/src/libggml.a
+    cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
+    cmake-build/apple/ggml/src/libggml-cpu.a
+    cmake-build/apple/ggml/src/libggml-base.a
+)
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make buildmacos'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+zig cc harness/vecdot_prefix.c \
+    llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c \
+    llama.cpp/ggml/src/ggml-cpu/quants.c \
+    llama.cpp/ggml/src/ggml-quants.c \
+    -o "$tmp/prefix" -std=c11 -w -O2 -ffp-contract=on \
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
+    "${REF_LIBS[@]}" \
+    -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks"
+
+"$tmp/prefix" "$@"

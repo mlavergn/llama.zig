@@ -43,9 +43,9 @@ const metal_kernels = [_][]const u8{
 };
 
 const ggml_base_sources = [_][]const u8{
-    "ggml/src/ggml.c",
-    "ggml/src/ggml-alloc.c",
-    "ggml/src/ggml-quants.c",
+    // Empty: ggml-alloc.c is ported (src/ggml/alloc.zig), ggml.c is ported
+    // (src/ggml/*.zig), and ggml-quants.c is ported (src/ggml/quants/).
+    // Nothing under ggml/src/ is compiled as C any more.
 };
 
 const ggml_base_cxx_sources = [_][]const u8{
@@ -60,9 +60,8 @@ const ggml_base_cxx_sources = [_][]const u8{
 };
 
 const ggml_cpu_c_sources = [_][]const u8{
-    "ggml/src/ggml-cpu/ggml-cpu.c",
-    "ggml/src/ggml-cpu/quants.c",
-    "ggml/src/ggml-cpu/arch/arm/quants.c",
+    // Empty: ggml-cpu.c, ggml-cpu/quants.c and ggml-cpu/arch/arm/quants.c are
+    // all ported. **No C compiles anywhere under ggml/src/ any more.**
 };
 
 const ggml_cpu_cxx_sources = [_][]const u8{
@@ -134,6 +133,10 @@ pub const Artifacts = struct {
     ggml: *std.Build.Step.Compile,
     /// libllama, linked against `ggml`.
     llama: *std.Build.Step.Compile,
+    /// The ggml module, exposed so the ported Zig under `src/ggml/` can be
+    /// unit-tested. Tests need the same C sources and frameworks the library
+    /// does, because ported code calls back into the parts still in C.
+    ggml_module: *std.Build.Module,
 };
 
 /// Options that shape the reference build.
@@ -142,6 +145,22 @@ pub const Options = struct {
     optimize: std.builtin.OptimizeMode,
     /// macOS SDK path, used as the framework search path. Null off macOS.
     sdk: ?[]const u8 = null,
+    /// Makes ported code abort on a hot path, to prove it is executing.
+    ///
+    /// Comparing output cannot distinguish code that is correct from code that
+    /// never runs. A swapped symbol can be defined, referenced and linked while
+    /// the program reaches a different implementation entirely -- not
+    /// hypothetical, that is what sank the incremental swap trial.
+    /// `scripts/probe-ported` builds with this on and requires the abort, so a
+    /// silent bypass fails loudly.
+    probe_ported: bool = false,
+    /// The same, for the ported CPU backend.
+    ///
+    /// A separate flag because a single one would only prove whichever site
+    /// runs first. `ggml-alloc.c` runs while the graph is being planned and
+    /// `ggml-cpu.c` while it is being computed, so each needs its own run to
+    /// be shown reachable.
+    probe_cpu: bool = false,
 };
 
 /// Declares the ggml and llama static libraries and returns them.
@@ -157,7 +176,7 @@ pub const Options = struct {
 pub fn add(b: *std.Build, opts: Options) !Artifacts {
     const ggml = try addGgml(b, opts);
     const llama = try addLlama(b, opts, ggml);
-    return .{ .ggml = ggml, .llama = llama };
+    return .{ .ggml = ggml, .llama = llama, .ggml_module = ggml.root_module };
 }
 
 /// Builds ggml with its CPU and Metal backends as a single static archive.
@@ -174,6 +193,11 @@ pub fn add(b: *std.Build, opts: Options) !Artifacts {
 /// Return: the ggml static library; propagates allocation failure.
 fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     const mod = b.createModule(.{
+        // Rooting the module at our Zig barrel is what lets ported code share
+        // an archive with the C it replaces: Zig objects and C objects land in
+        // the same `libggml.a`, and the C++ above links against whichever of
+        // the two currently defines a symbol.
+        .root_source_file = b.path("src/ggml/module.zig"),
         .target = opts.target,
         .optimize = opts.optimize,
         .link_libc = true,
@@ -184,6 +208,11 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
         // as shipped, not code we fix, so the checks come off.
         .sanitize_c = .off,
     });
+
+    const options = b.addOptions();
+    options.addOption(bool, "probe_ported", opts.probe_ported);
+    options.addOption(bool, "probe_cpu", opts.probe_cpu);
+    mod.addOptions("config", options);
 
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
     mod.addIncludePath(b.path(root ++ "/ggml/src"));
@@ -210,6 +239,11 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
         .files = &ggml_base_sources ++ &ggml_cpu_c_sources,
         .flags = &(c_flags ++ defines),
     });
+
+    // ggml.c is ported and swapped out: see src/ggml/{impl,types,context,
+    // runtime,ops,graph,quantize}.zig, reached through the module barrel this
+    // library is rooted at. Nothing compiles it any more, so the linker's
+    // missing-symbol errors are what prove the port is complete.
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = &ggml_base_cxx_sources ++ &ggml_cpu_cxx_sources ++ &ggml_metal_cxx_sources,
@@ -271,6 +305,163 @@ fn embedMetalKernel(b: *std.Build, kind: []const u8) std.Build.LazyPath {
     run.addFileArg(b.path(b.fmt(metal ++ "/kernels/{s}.metal", .{kind})));
 
     return out_asm;
+}
+
+/// The C translation units the ported-but-not-yet-swapped Zig depends on.
+///
+/// Deliberately short: it must never include a file whose symbols overlap the
+/// ported code, or the test link fails with duplicates. See
+/// `src/ggml/ported.zig`.
+const ported_test_c_sources = [_][]const u8{
+    // Empty: every C translation unit under ggml/src/ is ported. The traits
+    // table resolves entirely to Zig.
+};
+
+const ported_test_cxx_sources = [_][]const u8{
+    "ggml/src/ggml-threading.cpp",
+    // Linkable since the graph section landed: it needs the graph and
+    // allocator symbols, which the port now provides. Before that,
+    // `ported.zig` stubbed the one backend function the ported code called.
+    "ggml/src/ggml-backend.cpp",
+    // ggml-backend.cpp calls into the meta-buffer backend; it comes along.
+    "ggml/src/ggml-backend-meta.cpp",
+    // The ported `ggml-cpu.c` dispatches into these: the op kernels, the
+    // vector helpers, the extra-buffer hooks, and the llamafile fast path.
+    // Everything under ggml-cpu/ except ggml-cpu.c itself, which is ours.
+    "ggml/src/ggml-cpu/ggml-cpu.cpp",
+    "ggml/src/ggml-cpu/repack.cpp",
+    "ggml/src/ggml-cpu/hbm.cpp",
+    "ggml/src/ggml-cpu/traits.cpp",
+    "ggml/src/ggml-cpu/binary-ops.cpp",
+    "ggml/src/ggml-cpu/unary-ops.cpp",
+    "ggml/src/ggml-cpu/vec.cpp",
+    "ggml/src/ggml-cpu/ops.cpp",
+    "ggml/src/ggml-cpu/amx/amx.cpp",
+    "ggml/src/ggml-cpu/amx/mmq.cpp",
+    "ggml/src/ggml-cpu/llamafile/sgemm.cpp",
+    "ggml/src/ggml-cpu/arch/arm/repack.cpp",
+};
+
+/// Builds a static library from the ported Zig alone, for verification.
+///
+/// The point is to make the ported constructors *reachable* before `ggml.c` is
+/// swapped in. Linking a driver against `libggml.a` proves nothing today: that
+/// archive still contains `ggml.c`, so a caller reaches the C implementation
+/// and a comparison would be C against C. This library contains only the Zig,
+/// plus the two C translation units it genuinely depends on, so anything that
+/// links it *must* reach the port.
+///
+/// Return: the library; callers link it instead of `libggml.a`.
+pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
+    const mod = b.createModule(.{
+        .root_source_file = b.path("src/ggml/ported.zig"),
+        .target = opts.target,
+        .optimize = opts.optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+        .sanitize_c = .off,
+    });
+
+    const options = b.addOptions();
+    options.addOption(bool, "probe_ported", opts.probe_ported);
+    options.addOption(bool, "probe_cpu", opts.probe_cpu);
+    mod.addOptions("config", options);
+
+    mod.addIncludePath(b.path(root ++ "/ggml/include"));
+    mod.addIncludePath(b.path(root ++ "/ggml/src"));
+    // The CPU sources reach their own headers unqualified.
+    mod.addIncludePath(b.path(root ++ "/ggml/src/ggml-cpu"));
+
+    const defines = [_][]const u8{
+        "-DGGML_USE_CPU",
+        "-DGGML_SCHED_MAX_COPIES=4",
+        "-DGGML_USE_ACCELERATE",
+        "-DACCELERATE_NEW_LAPACK",
+        "-DACCELERATE_LAPACK_ILP64",
+        "-DGGML_USE_LLAMAFILE",
+        "-DGGML_VERSION=\"0.3.0\"",
+        "-DGGML_COMMIT=\"c1d0e7a00\"",
+    };
+
+    mod.addCSourceFiles(.{
+        .root = b.path(root),
+        .files = &ported_test_c_sources,
+        .flags = &(c_flags ++ defines),
+    });
+    mod.addCSourceFiles(.{
+        .root = b.path(root),
+        .files = &ported_test_cxx_sources,
+        .flags = &(cxx_flags ++ defines),
+    });
+
+    if (opts.sdk) |sdk| mod.addFrameworkPath(.{ .cwd_relative = sdk });
+    // `-DGGML_USE_ACCELERATE` sends the vector helpers in `ops.cpp` and
+    // `binary-ops.cpp` to vDSP, so the framework has to come with them.
+    mod.linkFramework("Accelerate", .{});
+    return b.addLibrary(.{ .name = "ggml-ported", .root_module = mod, .linkage = .static });
+}
+
+/// Declares a test step for the ported Zig that has not been swapped in yet.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `opts`: target, optimize mode, and macOS SDK path.
+///
+/// Return: the test module, for the caller to attach to a step.
+pub fn portedTestModule(b: *std.Build, opts: Options) *std.Build.Module {
+    return portedTestModuleInner(b, opts, "src/ggml/ported.zig", &ported_test_c_sources);
+}
+
+fn portedTestModuleInner(
+    b: *std.Build,
+    opts: Options,
+    root_source: []const u8,
+    c_sources: []const []const u8,
+) *std.Build.Module {
+    const mod = b.createModule(.{
+        .root_source_file = b.path(root_source),
+        .target = opts.target,
+        .optimize = opts.optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+        .sanitize_c = .off,
+    });
+
+    const options = b.addOptions();
+    options.addOption(bool, "probe_ported", false);
+    options.addOption(bool, "probe_cpu", false);
+    mod.addOptions("config", options);
+
+    mod.addIncludePath(b.path(root ++ "/ggml/include"));
+    mod.addIncludePath(b.path(root ++ "/ggml/src"));
+    // The CPU sources reach their own headers unqualified.
+    mod.addIncludePath(b.path(root ++ "/ggml/src/ggml-cpu"));
+
+    const defines = [_][]const u8{
+        "-DGGML_USE_CPU",
+        "-DGGML_SCHED_MAX_COPIES=4",
+        "-DGGML_USE_ACCELERATE",
+        "-DACCELERATE_NEW_LAPACK",
+        "-DACCELERATE_LAPACK_ILP64",
+        "-DGGML_USE_LLAMAFILE",
+        "-DGGML_VERSION=\"0.3.0\"",
+        "-DGGML_COMMIT=\"c1d0e7a00\"",
+    };
+
+    mod.addCSourceFiles(.{
+        .root = b.path(root),
+        .files = c_sources,
+        .flags = &(c_flags ++ defines),
+    });
+    mod.addCSourceFiles(.{
+        .root = b.path(root),
+        .files = &ported_test_cxx_sources,
+        .flags = &(cxx_flags ++ defines),
+    });
+
+    if (opts.sdk) |sdk| mod.addFrameworkPath(.{ .cwd_relative = sdk });
+    mod.linkFramework("Accelerate", .{});
+    return mod;
 }
 
 /// Builds libllama, including every architecture under `src/models/`.

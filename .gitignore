@@ -8,3 +8,18 @@ cmake-build
 
 # Locally installed build tools (CMake), not tracked
 .tools
+
+# Stray object files from ad-hoc compiler probes
+*.o
+
+# Editable copy of llama.cpp used to develop the Zig build system.
+# The patch under patches/ is the deliverable, not this tree.
+llama.cpp.zmake
+
+# Superseded backup of the previous editable copy.
+llama.cpp.xxx
+
+.inferise
+
+# Inferise session logs (tool output, not project code)
+.inferise/

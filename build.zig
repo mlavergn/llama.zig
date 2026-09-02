@@ -142,33 +142,6 @@ pub fn build(b: *std.Build) !void {
     lib_step.dependOn(&lib_install.step);
 
     // -------------------------------------------------------------------------
-    // CLI
-
-    const cli_module = b.createModule(.{
-        .root_source_file = cfg.cli_source_file,
-        .target = cfg.target,
-        .optimize = cfg.optimize,
-    });
-
-    const cli = b.addExecutable(.{
-        .name = cfg.name,
-        .root_module = cli_module,
-    });
-    cli.root_module.addOptions("config", options);
-    cli.root_module.addImport(cfg.mod_name, module);
-
-    cli.root_module.addIncludePath(b.path("src"));
-    cli.root_module.linkLibrary(lib);
-
-    // depend on lib being built
-    cli.step.dependOn(&lib.step);
-    b.installArtifact(cli);
-
-    const cli_install = b.addInstallArtifact(cli, .{});
-    const cli_step = b.step("cli", "Build the CLI app");
-    cli_step.dependOn(&cli_install.step);
-
-    // -------------------------------------------------------------------------
     // llama.cpp reference build
     //
     // Builds the vendored tree with the Zig toolchain, replacing its CMake.
@@ -181,14 +154,48 @@ pub fn build(b: *std.Build) !void {
         break :blk xcode.sdk;
     } else null;
 
+    // Proves ported code is on the execution path. See scripts/probe-ported.
+    const probe_ported = b.option(bool, "probe-ported", "Abort from ported code on a hot path, to prove it runs") orelse false;
+    const probe_cpu = b.option(bool, "probe-cpu", "Abort from the ported CPU backend, to prove it runs") orelse false;
+
     const reference = try llamacpp.add(b, .{
         .target = cfg.target,
         .optimize = cfg.optimize,
         .sdk = sdk,
+        .probe_ported = probe_ported,
+        .probe_cpu = probe_cpu,
     });
 
     const ggml_install = b.addInstallArtifact(reference.ggml, .{});
     const llama_install = b.addInstallArtifact(reference.llama, .{});
+
+    // Tests for ported ggml code that has not been swapped into the library
+    // yet. See src/ggml/ported.zig for why this cannot live in `test`.
+    const ported_tests = b.addTest(.{
+        .root_module = llamacpp.portedTestModule(b, .{
+            .target = cfg.target,
+            .optimize = cfg.optimize,
+            .sdk = sdk,
+        }),
+        .filters = test_filters,
+    });
+    const ported_tests_run = b.addRunArtifact(ported_tests);
+    ported_tests_run.has_side_effects = true;
+
+    const ported_step = b.step("test-port", "Test ported ggml code not yet swapped in");
+    ported_step.dependOn(&ported_tests_run.step);
+
+    // The ported Zig on its own, so verification can reach it before ggml.c is
+    // swapped in. See build/llamacpp.zig.
+    const ported_lib = llamacpp.addPortedGgml(b, .{
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+        .sdk = sdk,
+        .probe_ported = probe_ported,
+        .probe_cpu = probe_cpu,
+    });
+    const ported_lib_step = b.step("ported-lib", "Build a library from the ported Zig alone");
+    ported_lib_step.dependOn(&b.addInstallArtifact(ported_lib, .{}).step);
 
     const reference_step = b.step("reference", "Build the llama.cpp reference libraries");
     reference_step.dependOn(&ggml_install.step);
@@ -219,6 +226,39 @@ pub fn build(b: *std.Build) !void {
 
     const smoke_step = b.step("smoke", "Run inference against the reference build");
     smoke_step.dependOn(&smoke_run.step);
+
+    // -------------------------------------------------------------------------
+    // CLI
+    //
+    // Declared after the reference build because it links against it. The CLI
+    // is our own Zig binary talking to libllama's C ABI, not upstream's
+    // `llama-cli` relinked -- see PLAN.md Decision 20. As `ggml.c` and then
+    // llama's own sources are ported, the library underneath changes and this
+    // does not.
+
+    const cli_module = b.createModule(.{
+        .root_source_file = cfg.cli_source_file,
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    cli_module.addOptions("config", options);
+    cli_module.addIncludePath(b.path("llama.cpp/include"));
+    cli_module.addIncludePath(b.path("llama.cpp/ggml/include"));
+    cli_module.linkLibrary(reference.llama);
+    cli_module.linkLibrary(reference.ggml);
+    if (sdk) |path| cli_module.addFrameworkPath(.{ .cwd_relative = path });
+
+    const cli = b.addExecutable(.{
+        .name = cfg.name,
+        .root_module = cli_module,
+    });
+    b.installArtifact(cli);
+
+    const cli_install = b.addInstallArtifact(cli, .{});
+    const cli_step = b.step("cli", "Build the CLI app");
+    cli_step.dependOn(&cli_install.step);
 
     // -------------------------------------------------------------------------
     // Run
@@ -256,9 +296,17 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("cli/module.zig"),
         .target = cfg.target,
         .optimize = cfg.optimize,
+        .link_libc = true,
+        .link_libcpp = true,
     });
     cli_tests_module.addOptions("config", options);
-    cli_tests_module.addImport(cfg.mod_name, module);
+    // `session.zig` imports llama.h, so even the argument-parsing tests need
+    // the header and the library behind it.
+    cli_tests_module.addIncludePath(b.path("llama.cpp/include"));
+    cli_tests_module.addIncludePath(b.path("llama.cpp/ggml/include"));
+    cli_tests_module.linkLibrary(reference.llama);
+    cli_tests_module.linkLibrary(reference.ggml);
+    if (sdk) |path| cli_tests_module.addFrameworkPath(.{ .cwd_relative = path });
 
     const cli_tests = b.addTest(.{
         .root_module = cli_tests_module,
@@ -268,6 +316,16 @@ pub fn build(b: *std.Build) !void {
     const cli_tests_run = b.addRunArtifact(cli_tests);
     cli_tests_run.has_side_effects = true;
     tests_step.dependOn(&cli_tests_run.step);
+
+    // Unit tests for the ported ggml. They compile the whole reference tree,
+    // because ported code still calls the parts that have not been ported yet.
+    const ggml_tests = b.addTest(.{
+        .root_module = reference.ggml_module,
+        .filters = test_filters,
+    });
+    const ggml_tests_run = b.addRunArtifact(ggml_tests);
+    ggml_tests_run.has_side_effects = true;
+    tests_step.dependOn(&ggml_tests_run.step);
 
     // -------------------------------------------------------------------------
     // Docs

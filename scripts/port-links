@@ -1,0 +1,34 @@
+#!/bin/bash
+# Check that every citation in the port still points at the C it names.
+#
+# A ported declaration carries the C it replaces, the file it came from, and
+# the line that definition starts on:
+#
+#     /// Ports `ggml_hash_set_new` (ggml.c:6516).
+#
+# Those citations are the map from this port back to upstream: when the pin
+# moves, they are what tells you which of our functions a given upstream change
+# touches. A stale line number is worse than no line number, because it sends
+# you to the wrong function with no indication that it did -- and 216 of the
+# first 790 were stale, because nothing checked them.
+#
+# The revision is part of each citation -- `(ggml.c:6516 @c1d0e7a00)` -- because
+# an upstream sync re-reads one function at a time, not a whole file. The
+# checker reads each cited file as it was at that citation's own commit, via
+# `git show <sha>:<path>`. HEAD is passed in only as the fast path: a citation
+# at HEAD is read from the working tree instead of shelling out.
+#
+# Usage: scripts/port-links
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+[ -d llama.cpp/ggml/src ] || { echo "missing llama.cpp -- run 'make clone'" >&2; exit 2; }
+
+SHA="$(git -C llama.cpp rev-parse HEAD 2>/dev/null)" || {
+    echo "llama.cpp is not a git checkout -- cannot establish the pin" >&2
+    exit 2
+}
+
+exec zig run harness/port_links.zig -- src cli -- llama.cpp "$SHA"

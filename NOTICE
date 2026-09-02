@@ -1,0 +1,47 @@
+llamazig
+========
+
+This project is a port of llama.cpp to Zig. It is a derivative work: the code
+under `src/` is a line-by-line translation of C and C++ from the llama.cpp
+project, not an independent implementation. Each ported file names the source
+file and the pinned commit it was translated from.
+
+llamazig itself is MIT licensed; see LICENSE.
+
+
+llama.cpp
+---------
+
+Ported from https://github.com/ggerganov/llama.cpp at tag v0.3.0
+(commit c1d0e7a004015f23bc0233470b747b596f29b264).
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+vibe-jinja
+----------
+
+Chat templating uses https://github.com/gremlin-labs/vibe-jinja, which is MIT
+licensed. It is consumed as a pinned dependency rather than vendored, so its
+licence text travels with the dependency itself. If it is ever vendored into
+this repository, its notice must be reproduced here.

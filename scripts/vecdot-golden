@@ -1,0 +1,72 @@
+#!/bin/bash
+# Regenerate src/ggml/cpu/quants/golden.zig from the C reference.
+#
+# Run once at the pinned commit; the output is committed and the port is tested
+# against it. Re-run only if the pin moves, and treat any change in the values
+# as a change in upstream behaviour that needs explaining.
+#
+# Note `-ffp-contract=off`, and that quants.c and ggml-quants.c are compiled
+# here rather than taken from the reference archive. Zig fuses `a*b + c` only
+# where `@mulAdd` says so; the C contracts it by default, and the last-bit
+# difference changes the dot product. Building the reference strict makes the
+# two comparable without modelling a particular clang version's FMA choices.
+# See the note at the top of src/ggml/quants/helpers.zig.
+#
+# Requires: make buildmacos
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+REF_LIBS=(
+    cmake-build/apple/ggml/src/libggml.a
+    cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
+    cmake-build/apple/ggml/src/libggml-cpu.a
+    cmake-build/apple/ggml/src/libggml-base.a
+)
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make buildmacos'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# Both quant translation units are compiled here rather than taken from the
+# reference archive. quants.c has to be, because on this architecture
+# arch/arm/quants.c provides the real entry points and the `_generic` names are
+# unreferenced; arch/arm/quants.c comes along so the two tables in the harness
+# resolve from the same build.
+#
+# `-ffp-contract` differs between the two runs, and deliberately:
+#
+#  - The generic kernels are dead code here. Their goldens are built **off**, so
+#    the reference rounds the way plain Zig does and the comparison measures the
+#    port rather than a clang version's FMA choices.
+#  - The ARM kernels are live -- every quantized mul_mat on the CPU goes through
+#    one -- so their goldens are built **as shipped**, with contraction on. The
+#    fusion sites there are explicit intrinsics (`vmlaq_n_f32`, `vfmaq_f32`),
+#    not expressions the compiler chose, so the port can name them with
+#    `@mulAdd` and match exactly.
+build() {
+    local out="$1"; shift
+    zig cc harness/vecdot_golden.c \
+        llama.cpp/ggml/src/ggml-cpu/quants.c \
+        llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c \
+        llama.cpp/ggml/src/ggml-quants.c \
+        -o "$out" -std=c11 -w -O2 "$@" \
+        -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
+        "${REF_LIBS[@]}" \
+        -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+        -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks"
+}
+
+mkdir -p src/ggml/cpu/quants/arm
+
+build "$tmp/gen-off" -ffp-contract=off
+"$tmp/gen-off" generic > src/ggml/cpu/quants/golden.zig
+zig fmt src/ggml/cpu/quants/golden.zig >/dev/null
+echo "wrote src/ggml/cpu/quants/golden.zig ($(grep -c '^pub const .* = Dot{' src/ggml/cpu/quants/golden.zig) kernels, contract off)"
+
+build "$tmp/gen-on" -ffp-contract=on
+"$tmp/gen-on" arm > src/ggml/cpu/quants/arm/golden.zig
+zig fmt src/ggml/cpu/quants/arm/golden.zig >/dev/null
+echo "wrote src/ggml/cpu/quants/arm/golden.zig ($(grep -c '^pub const .* = Dot{' src/ggml/cpu/quants/arm/golden.zig) kernels, contract on)"
