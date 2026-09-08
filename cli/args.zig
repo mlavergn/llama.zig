@@ -86,6 +86,13 @@ pub const Args = struct {
     /// we are not, so `main` warns. Decision 30: say so plainly rather than
     /// behaving differently in silence.
     one_shot: bool = false,
+    /// `-cnv`, `--conversation`, `-i`, `--interactive`.
+    ///
+    /// Multi-turn: each line read from stdin becomes a user turn, the whole
+    /// conversation is re-rendered through the chat template, and the reply is
+    /// appended to the history. Implies chat mode, since a conversation with
+    /// no template is just concatenated text.
+    interactive: bool = false,
     /// `--no-display-prompt` inverted. Upstream echoes the prompt by default.
     display_prompt: bool = true,
     /// `--show-timings` / `--no-show-timings`.
@@ -95,9 +102,45 @@ pub const Args = struct {
     /// too -- see the note in `session.zig` about why that is worth knowing.
     show_timings: bool = true,
 
+    /// `--jinja` / `--no-jinja`.
+    ///
+    /// Upstream defaults this to true and uses it to pick between its Jinja
+    /// engine and a legacy one. We have one engine, so it reads as "template
+    /// the prompt at all": `--no-jinja` forces raw completion even when a
+    /// system prompt or a template was given.
+    jinja: bool = true,
+    /// `--chat-template TEMPLATE` -- Jinja source, overriding the model's.
+    chat_template: []const u8 = "",
+    /// `--chat-template-file FNAME` -- the same, read from a file.
+    chat_template_file: []const u8 = "",
+    /// `-sys, --system-prompt TEXT`.
+    system_prompt: []const u8 = "",
+    /// `-sysf, --system-prompt-file FNAME`.
+    system_prompt_file: []const u8 = "",
+
+    /// Whether to render the prompt through a chat template.
+    ///
+    /// **Opt-in, where upstream templates by default.** Our default mode is
+    /// raw completion, and it is what `make port` and `make ref` diff against
+    /// each other; templating by default would silently change the one gate
+    /// that covers the whole binary. Any chat flag turns it on. See SPEC
+    /// section 6.1.
+    chat: bool = false,
+
     /// Set when parsing consumed the whole command line and the caller should
     /// exit successfully without generating -- `-h` and `--version`.
     done: bool = false,
+
+    /// Whether the prompt should be templated.
+    ///
+    /// Parameters:
+    /// - `self`: parsed arguments.
+    ///
+    /// Return: true when a chat flag asked for it and `--no-jinja` did not
+    /// veto it.
+    pub fn useChatTemplate(self: Args) bool {
+        return self.chat and self.jinja;
+    }
 };
 
 /// What went wrong, as distinct from how it is reported.
@@ -200,8 +243,15 @@ const specs = [_]Spec{
     .{ .names = &.{"--no-display-prompt"}, .help = "do not echo the prompt before the completion" },
     .{ .names = &.{"--show-timings"}, .help = "print prompt and generation tokens/second (default)" },
     .{ .names = &.{"--no-show-timings"}, .help = "suppress the timings line" },
+    .{ .names = &.{"--jinja"}, .help = "render the prompt through the model's chat template" },
+    .{ .names = &.{"--no-jinja"}, .help = "raw completion; never apply a chat template" },
+    .{ .names = &.{"--chat-template"}, .value = "TEXT", .help = "Jinja template to use instead of the model's" },
+    .{ .names = &.{"--chat-template-file"}, .value = "FNAME", .help = "the same, read from a file" },
+    .{ .names = &.{ "-sys", "--system-prompt" }, .value = "TEXT", .help = "system message prepended to the conversation" },
+    .{ .names = &.{ "-sysf", "--system-prompt-file" }, .value = "FNAME", .help = "the same, read from a file" },
     .{ .names = &.{ "-st", "--single-turn" }, .help = "generate once and exit (the only mode today)" },
     .{ .names = &.{ "-no-cnv", "--no-conversation" }, .help = "same; the spelling tools/main uses" },
+    .{ .names = &.{ "-cnv", "--conversation", "-i", "--interactive" }, .help = "multi-turn conversation, reading turns from stdin" },
 };
 
 /// Whether `flag` names an option this binary accepts.
@@ -228,8 +278,7 @@ pub fn help(w: *std.Io.Writer) !void {
         \\features this port supports; anything else is refused rather than
         \\ignored.
         \\
-        \\Only one-shot completion works today. Interactive conversation is not
-        \\implemented yet, so -cnv is refused rather than silently ignored.
+        \\One-shot by default; -cnv holds a multi-turn conversation on stdin.
         \\
         \\options:
         \\
@@ -339,8 +388,28 @@ pub fn parse(argv: []const []const u8, w: *std.Io.Writer) !Result {
             args.display_prompt = false;
         } else if (eq(a, &.{"--show-timings"})) {
             args.show_timings = true;
+        } else if (eq(a, &.{"--jinja"})) {
+            args.jinja = true;
+            args.chat = true;
+        } else if (eq(a, &.{"--no-jinja"})) {
+            args.jinja = false;
+        } else if (eq(a, &.{"--chat-template"})) {
+            args.chat_template = value(argv, &i) orelse return missing(a);
+            args.chat = true;
+        } else if (eq(a, &.{"--chat-template-file"})) {
+            args.chat_template_file = value(argv, &i) orelse return missing(a);
+            args.chat = true;
+        } else if (eq(a, &.{ "-sys", "--system-prompt" })) {
+            args.system_prompt = value(argv, &i) orelse return missing(a);
+            args.chat = true;
+        } else if (eq(a, &.{ "-sysf", "--system-prompt-file" })) {
+            args.system_prompt_file = value(argv, &i) orelse return missing(a);
+            args.chat = true;
         } else if (eq(a, &.{"--no-show-timings"})) {
             args.show_timings = false;
+        } else if (eq(a, &.{ "-cnv", "--conversation", "-i", "--interactive" })) {
+            args.interactive = true;
+            args.chat = true;
         } else if (eq(a, &.{ "-st", "--single-turn", "-no-cnv", "--no-conversation" })) {
             args.one_shot = true;
         } else if (upstream.contains(a)) {
@@ -506,10 +575,21 @@ test "a real upstream flag is refused differently from a typo" {
     try testing.expectEqual(Error.UnknownFlag, typo.fail.err);
 }
 
-test "asking for interactive mode is refused rather than silently ignored" {
-    // Accepting -cnv and then running one-shot would be the worst outcome: the
-    // user gets a plausible answer to a different question.
-    for ([_][]const u8{ "-cnv", "--conversation", "-i", "--interactive", "-if", "-mli" }) |flag| {
+test "every spelling of interactive mode is accepted, and implies chat" {
+    // A conversation with no chat template is just concatenated text, so the
+    // flag turns templating on rather than leaving it to be asked for twice.
+    for ([_][]const u8{ "-cnv", "--conversation", "-i", "--interactive" }) |flag| {
+        const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", flag });
+        try testing.expect(r.ok.interactive);
+        try testing.expect(r.ok.useChatTemplate());
+    }
+}
+
+test "interactive spellings we do not implement are still refused" {
+    // -if starts interactive *and* takes a file; -mli is multiline input. Both
+    // change what a turn is, so accepting them would answer a different
+    // question from the one asked.
+    for ([_][]const u8{ "-if", "-mli" }) |flag| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", flag });
         try testing.expectEqual(Error.UnsupportedFlag, r.fail.err);
     }

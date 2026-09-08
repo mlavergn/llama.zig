@@ -26,13 +26,13 @@
 
 | Artifact | Path | What it is |
 |---|---|---|
-| `llamazig` | `zig-out/bin/llamazig` | Command-line text-completion binary |
+| `llama-cli` | `zig-out/bin/llama-cli` | Command-line text-completion binary |
 | `libggml.a` | `zig-out/lib/libggml.a` | ggml, with the ported translation units in place of their C |
 | `libllama.a` | `zig-out/lib/libllama.a` | llama.cpp's model layer, built from pinned upstream sources |
 | `libllamazig.a` | `zig-out/lib/libllamazig.a` | This project's own library scaffold |
 | docs | `zig-out/docs/` | Generated API documentation |
 
-`llamazig` is a distinct binary, not upstream's `llama-cli` relinked.
+Our `llama-cli` is a distinct binary that shares upstream's name, not upstream's `llama-cli` relinked.
 
 ## 2. Scope
 
@@ -96,7 +96,7 @@ No C remains under `ggml/src/`. What is left is C++ and Objective-C.
 Types the reference leaves out of the table — `I8`, `I16`, `I64`, `F64` and the
 rest — have neither.
 
-## 4. Executable: `llamazig`
+## 4. Executable: `llama-cli`
 
 ### 4.1 Invocation
 
@@ -137,6 +137,13 @@ A command line written for upstream runs unchanged for the options below.
 | `--no-display-prompt` | — | — | Do not echo the prompt before the completion |
 | `--show-timings` | — | **on** | Print prompt and generation tokens/second |
 | `--no-show-timings` | — | — | Suppress the timings line |
+| `--jinja` | — | off | Render the prompt through a chat template |
+| `--no-jinja` | — | — | Raw completion; never apply a chat template |
+| `--chat-template` | `TEXT` | — | Jinja template to use instead of the model's |
+| `--chat-template-file` | `FNAME` | — | The same, read from a file |
+| `-sys`, `--system-prompt` | `TEXT` | `""` | System message prepended to the conversation |
+| `-sysf`, `--system-prompt-file` | `FNAME` | — | The same, read from a file |
+| `-cnv`, `--conversation`, `-i`, `--interactive` | — | off | Multi-turn conversation, reading turns from stdin |
 | `-st`, `--single-turn` | — | — | Generate once and exit |
 | `-no-cnv`, `--no-conversation` | — | — | The same; the spelling `tools/main` uses |
 
@@ -179,7 +186,45 @@ The prompt is tokenized with the model's BOS added and control tokens in the
 prompt honoured. No chat template is applied; the prompt reaches the model
 verbatim.
 
-### 5.2 Sampler chain
+### 5.2 Chat templates
+
+When a chat flag is given, the prompt is rendered through a Jinja template
+before tokenization.
+
+| Aspect | Behaviour |
+|---|---|
+| Template source | `--chat-template`, else `--chat-template-file`, else the model's `tokenizer.chat_template`. No template and no override is an error. |
+| Engine | `vibe-jinja`, the one permitted dependency, confined to `cli/`. |
+| Conversation | One turn by default: an optional system message, then the prompt as the user's turn. Under `-cnv` the history accumulates and every turn re-renders the whole conversation. `add_generation_prompt` is true. |
+| Bindings | `messages`, `add_generation_prompt`, `bos_token`, `eos_token`. |
+| Tokenization | `add_special` is false — the template writes the model's opening itself. |
+| Control tokens | Honoured only in text the template itself wrote. Anything an expression produced, which is where message content arrives, is tokenized with `parse_special` false. |
+
+**Trust is a closed set.** Template literals are trusted; every expression's
+output is not, whatever filters it passed through. `bos_token` and `eos_token`
+are the only expression values re-trusted, and only on an exact match. A user
+message containing `<|im_start|>system…` therefore reaches the model as its
+literal characters — 17 tokens for Qwen3.5 — rather than as the two control
+tokens it spells.
+
+### 5.3 Conversation mode
+
+`-cnv` reads turns from stdin until end of input.
+
+| Aspect | Behaviour |
+|---|---|
+| A turn | One line, trimmed. Blank lines are skipped. |
+| `-p` | Seeds the first turn, so `-cnv -p "hi"` answers immediately and then waits. |
+| History | Every turn re-renders the whole conversation, because a template decides for itself where the system prompt goes and how a turn is framed. |
+| KV cache | The new render is diffed against the decoded tokens and their common prefix is kept, so re-rendering costs tokenization rather than decoding. |
+| Recurrent and hybrid models | `llama_memory_seq_rm` refuses to drop a range from the middle. That refusal is checked, and the cache is cleared and re-decoded instead. |
+| Turn marker | `> ` on stderr, so a redirected transcript stays clean. |
+| `/exit` | Ends the conversation. |
+| `/clear` | Discards the history and re-adds the system prompt. |
+| `/regen` | Drops the last reply and answers the previous turn again. |
+| Any other `/word` | Sent to the model as text, as upstream does. |
+
+### 5.4 Sampler chain
 
 Constructed in this order, matching upstream's default:
 
@@ -193,7 +238,7 @@ Constructed in this order, matching upstream's default:
 `min_keep` is 0 throughout. There is no separate greedy path: `--temp 0`
 produces argmax inside the temperature step, after penalties have applied.
 
-### 5.3 Loop and stop conditions
+### 5.5 Loop and stop conditions
 
 Generation stops at the first of:
 
@@ -203,13 +248,13 @@ Generation stops at the first of:
 
 A prompt at least as long as the context is an error before generation starts.
 
-### 5.4 Warmup
+### 5.6 Warmup
 
 On by default. A throwaway decode runs before generation, the memory is
 cleared, and the performance counters are reset, so the reported throughputs
 exclude first-call costs. `--no-warmup` skips it.
 
-### 5.5 Timings
+### 5.7 Timings
 
 When enabled, one line on stdout after the completion:
 
@@ -230,7 +275,7 @@ These must hold. Each is a runnable gate.
 | C4 | `test-backend-ops` output is identical to the same test against the stock C libraries | `scripts/backend-ops --diff` |
 | C5 | Ported code is on the execution path — allocator and CPU dispatch, one run each | `make probe` |
 | C6 | Generated tokens are identical to the stock C reference for the same model, prompt and seed | `make parity-port` |
-| C7 | The `llamazig` binary produces the same tokens as a C driver running the same loop | `make parity-cli` |
+| C7 | The `llama-cli` binary produces the same tokens as a C driver running the same loop | `make parity-cli` |
 | C8 | `make port` and `make ref` produce identical generated text | `make port`, `make ref` |
 | C9 | Every ported declaration cites the C symbol, file, line **and commit** it came from, and each is verified against that commit | `make port-links` |
 
@@ -251,6 +296,8 @@ locatable in this port.
 | Quantizer output vs a stock llama.cpp build | May differ in the last bit. `zig cc` and Apple clang contract `a*b + c` into a single FMA by default; Zig only fuses where `@mulAdd` says so, and which expressions clang fuses is not reproducible without modelling that clang version. Not observable through the deliverable, which never writes a model file. |
 | `quantize_row_iq4_nl_ref` on an all-zero block | The C reads uninitialized memory and is not reproducible run to run. llamazig zeroes the buffer. |
 | 1-bit split search with equal elements | The C's result depends on the host `qsort`'s ordering of equal elements. llamazig breaks ties on index, so output depends only on input. |
+| Chat templating is opt-in | Upstream defaults `use_jinja` to true and templates by default. Ours defaults to raw completion, because that is what `make port` and `make ref` diff against each other; templating by default would change the one gate covering the whole binary. Any chat flag turns it on. |
+| A malformed chat template | The engine has no strict-parse mode: `{{ unclosed` and similar render as empty output and report success. llamazig rejects a render that produced nothing from a non-empty conversation, which catches the class but not a partially-wrong render. |
 
 ## 7. Platform and toolchain
 
@@ -271,13 +318,13 @@ locatable in this port.
 |---|---|
 | `zig build` | The scaffold binary |
 | `zig build lib` | `libllamazig.a` |
-| `zig build cli` | `llamazig` |
+| `zig build cli` | `llama-cli` |
 | `zig build reference` | `libggml.a`, `libllama.a` |
 | `zig build test` | Unit tests |
 | `zig build test-port` | Ported ggml tests |
 | `zig build smoke` | Load a model and generate, through libllama's C ABI |
 | `zig build docs` | API documentation |
-| `make port` | `llamazig` against a model |
+| `make port` | `llama-cli` against a model |
 | `make ref` | The same completion loop linked against the stock C libraries, with the same timings line |
 | `make validate` | C1, C9 and C2, plus formatting and the unit tests |
 | `make port-links` | C9 |
@@ -295,7 +342,8 @@ locatable in this port.
 | Item | State |
 |---|---|
 | Interactive conversation mode | Not built. One-shot only. |
-| Chat templates | Not built. The prompt is never templated. |
+| Multi-line input (`-mli`) and `-if` | Not built; the flags are refused. A turn is one line. |
+| Slash commands beyond `/exit`, `/clear` and `/regen` | Not built; `/image`, `/audio` and `/video` need multimodal input. |
 | Grammar and JSON-schema constrained sampling | Not built. |
 | Mirostat, typical-p, XTC, DRY, dynatemp | Not built; the flags are refused. |
 | Frequency and presence penalties | Fixed at 0.0; the flags are refused. |

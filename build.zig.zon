@@ -14,5 +14,11 @@
     // chat templates, used by `cli/` only. See PLAN.md Decisions 25 and 27.
     // The library itself stays dependency-free, so anything linking
     // libllamazig inherits nothing.
-    .dependencies = .{},
+    //
+    // A sibling checkout, like `llama.cpp/` and `llama.cpp.zmake/`: its own
+    // repository, untracked here. `vibe-jinja` publishes for Zig 0.15.2; the
+    // checkout carries the 0.16 migration on top.
+    .dependencies = .{
+        .vibe_jinja = .{ .path = "vibe-jinja" },
+    },
 }

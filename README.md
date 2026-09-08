@@ -107,7 +107,7 @@ Target macOS, iOS, Linux (arm64), and Linux (x86_64). This is the end goal.
 Requires **Zig 0.16.0**.
 
 ```sh
-make build       # zig build         -> zig-out/bin/llamazig
+make build       # zig build         -> zig-out/bin/llama-cli
 make dist        # zig build --release=fast
 make reference   # build ggml + libllama from the vendored sources
 make smoke       # load a model and generate, to prove it works
@@ -159,7 +159,7 @@ respectively, a spread far wider than any difference between them. Read those
 as "no measurable change", not as a comparison — and note `make ref` links the
 Apple-clang libraries, so a compiler difference is folded in too.
 
-There is also a working CLI. `llamazig` is our own binary, not upstream's
+There is also a working CLI. `llama-cli` is our own binary, not upstream's
 relinked: it mimics `llama-cli`'s flag surface for the features we support and
 refuses the rest rather than ignoring them. One-shot completion only —
 interactive conversation is still owed.

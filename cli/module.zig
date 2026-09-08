@@ -12,11 +12,15 @@
 
 const std = @import("std");
 
+pub const c = @import("c.zig");
 pub const args = @import("args.zig");
+pub const chat = @import("chat.zig");
 pub const session = @import("session.zig");
 pub const upstream_flags = @import("upstream_flags.zig");
 
 pub const Args = args.Args;
+pub const Template = chat.Template;
+pub const Message = chat.Message;
 pub const Session = session.Session;
 
 // -----------------------------------------------------------------------------
@@ -24,6 +28,8 @@ pub const Session = session.Session;
 
 test {
     std.testing.refAllDecls(@This());
+    _ = @import("c.zig");
     _ = @import("args.zig");
+    _ = @import("chat.zig");
     _ = @import("session.zig");
 }

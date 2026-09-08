@@ -90,7 +90,7 @@ pub fn build(b: *std.Build) !void {
     const cfg = Config{
         .name = @tagName(zon.name),
         .mod_name = @tagName(zon.name),
-        .cli_name = @tagName(zon.name) ++ "-cli",
+        .cli_name = "llama-cli",
         .target = b.standardTargetOptions(.{}),
         .optimize = b.standardOptimizeOption(.{}),
         .module_source_file = b.path("src/module.zig"),
@@ -236,6 +236,14 @@ pub fn build(b: *std.Build) !void {
     // llama's own sources are ported, the library underneath changes and this
     // does not.
 
+    // Chat templates are Jinja, so the CLI takes the project's one permitted
+    // dependency. `b.dependency` runs its `build.zig`, which is what declares
+    // the module.
+    const jinja_module = b.dependency("vibe_jinja", .{
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+    }).module("vibe_jinja");
+
     const cli_module = b.createModule(.{
         .root_source_file = cfg.cli_source_file,
         .target = cfg.target,
@@ -244,6 +252,10 @@ pub fn build(b: *std.Build) !void {
         .link_libcpp = true,
     });
     cli_module.addOptions("config", options);
+    // The one permitted dependency, and only here: chat templates are Jinja,
+    // and `libllamazig` must stay dependency-free. See PLAN.md Decisions 25
+    // and 27.
+    cli_module.addImport("vibe_jinja", jinja_module);
     cli_module.addIncludePath(b.path("llama.cpp/include"));
     cli_module.addIncludePath(b.path("llama.cpp/ggml/include"));
     cli_module.linkLibrary(reference.llama);
@@ -251,7 +263,7 @@ pub fn build(b: *std.Build) !void {
     if (sdk) |path| cli_module.addFrameworkPath(.{ .cwd_relative = path });
 
     const cli = b.addExecutable(.{
-        .name = cfg.name,
+        .name = cfg.cli_name,
         .root_module = cli_module,
     });
     b.installArtifact(cli);
@@ -300,6 +312,7 @@ pub fn build(b: *std.Build) !void {
         .link_libcpp = true,
     });
     cli_tests_module.addOptions("config", options);
+    cli_tests_module.addImport("vibe_jinja", jinja_module);
     // `session.zig` imports llama.h, so even the argument-parsing tests need
     // the header and the library behind it.
     cli_tests_module.addIncludePath(b.path("llama.cpp/include"));
@@ -316,6 +329,12 @@ pub fn build(b: *std.Build) !void {
     const cli_tests_run = b.addRunArtifact(cli_tests);
     cli_tests_run.has_side_effects = true;
     tests_step.dependOn(&cli_tests_run.step);
+
+    // The CLI's tests on their own. `test` also runs the library's, which take
+    // about a minute; this step exists so a change under `cli/` can be
+    // iterated on -- and fault-injected -- without paying for that.
+    const cli_tests_step = b.step("test-cli", "Run the CLI's unit tests only");
+    cli_tests_step.dependOn(&cli_tests_run.step);
 
     // Unit tests for the ported ggml. They compile the whole reference tree,
     // because ported code still calls the parts that have not been ported yet.

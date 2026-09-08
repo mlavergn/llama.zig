@@ -30,7 +30,7 @@ cd "$ROOT" || exit 2
 MODEL="${1:?usage: scripts/parity-cli <model.gguf> [n_predict]}"
 NPRED="${2:-32}"
 
-CLI=zig-out/bin/llamazig
+CLI=zig-out/bin/llama-cli
 [ -x "$CLI" ] || { echo "missing $CLI -- run 'zig build cli --release=fast'" >&2; exit 2; }
 
 REF_LIBS=(

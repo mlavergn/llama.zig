@@ -19,10 +19,12 @@
 
 const std = @import("std");
 const args_mod = @import("args.zig");
+const chat = @import("chat.zig");
 
-pub const c = @cImport({
-    @cInclude("llama.h");
-});
+/// libllama's C ABI. Re-exported so callers can reach it as
+/// `cli.session.c`; the import itself lives in `c.zig`, because two
+/// `@cImport`s of one header produce two incompatible sets of types.
+pub const c = @import("c.zig").api;
 
 /// Failures that are worth telling apart from each other.
 ///
@@ -50,6 +52,12 @@ pub const Session = struct {
     sampler: *c.llama_sampler,
     /// Borrowed from the caller's `Args`; not owned.
     settings: args_mod.Args,
+    /// Tokens currently held in the KV cache, in order.
+    ///
+    /// `generateTurn` diffs the next turn's prompt against this to find how
+    /// much of the cache it can keep, so a conversation does not re-decode its
+    /// whole history every turn.
+    decoded: std.ArrayList(c.llama_token) = .empty,
 
     /// Loads a model and builds the context and sampler chain.
     ///
@@ -113,6 +121,7 @@ pub const Session = struct {
     /// Return: nothing. Frees in reverse order of acquisition, which libllama
     /// requires: the context holds a reference to the model.
     pub fn deinit(self: *Self) void {
+        self.decoded.deinit(self.allocator);
         c.llama_sampler_free(self.sampler);
         c.llama_free(self.ctx);
         c.llama_model_free(self.model);
@@ -126,9 +135,48 @@ pub const Session = struct {
     ///
     /// Return: a newly allocated token slice the caller frees.
     pub fn tokenize(self: *Self, prompt: []const u8) ![]c.llama_token {
+        return self.tokenizeText(prompt, .{});
+    }
+
+    /// How a run of text should be tokenized.
+    pub const TokenizeOptions = struct {
+        /// Whether libllama prepends the model's BOS.
+        ///
+        /// False for chat prompts: the template already writes whatever
+        /// opening the model expects, and a second BOS is a different prompt.
+        add_special: bool = true,
+        /// Whether control-token spellings in the text become control tokens.
+        ///
+        /// False for anything derived from message content. See the header of
+        /// `chat.zig`: this is the flag the whole trust scheme exists to set
+        /// correctly.
+        parse_special: bool = true,
+    };
+
+    /// Tokenizes one run of text.
+    ///
+    /// Parameters:
+    /// - `self`: the session.
+    /// - `text`: the text to tokenize.
+    /// - `opts`: how to treat specials.
+    ///
+    /// Return: the tokens, owned by the caller.
+    pub fn tokenizeText(
+        self: *Self,
+        text: []const u8,
+        opts: TokenizeOptions,
+    ) ![]c.llama_token {
         // Negative return means "too small, and this is how many I need", so
         // the first call sizes the buffer rather than guessing.
-        const probe = c.llama_tokenize(self.vocab, prompt.ptr, @intCast(prompt.len), null, 0, true, true);
+        const probe = c.llama_tokenize(
+            self.vocab,
+            text.ptr,
+            @intCast(text.len),
+            null,
+            0,
+            opts.add_special,
+            opts.parse_special,
+        );
         const n_max: usize = @intCast(if (probe < 0) -probe else probe);
 
         const tokens = try self.allocator.alloc(c.llama_token, n_max);
@@ -136,16 +184,49 @@ pub const Session = struct {
 
         const n = c.llama_tokenize(
             self.vocab,
-            prompt.ptr,
-            @intCast(prompt.len),
+            text.ptr,
+            @intCast(text.len),
             tokens.ptr,
             @intCast(tokens.len),
-            true, // add_special: the BOS the model expects
-            true, // parse_special: honour control tokens written in the prompt
+            opts.add_special,
+            opts.parse_special,
         );
         if (n < 0) return Error.TokenizeFailed;
 
         return self.allocator.realloc(tokens, @intCast(n));
+    }
+
+    /// Tokenizes a rendered chat prompt, run by run.
+    ///
+    /// **This is where the trust marking is spent.** Each segment is
+    /// tokenized on its own so that control tokens are honoured only in the
+    /// runs the template itself wrote; a `<|im_start|>` that arrived inside a
+    /// user message tokenizes as its literal characters instead.
+    ///
+    /// `add_special` is false throughout -- the template writes the model's
+    /// opening itself, and only the first segment could have taken a BOS
+    /// anyway.
+    ///
+    /// Parameters:
+    /// - `self`: the session.
+    /// - `segments`: the rendered prompt, from `chat.Template.applySegments`.
+    ///
+    /// Return: the tokens, owned by the caller.
+    pub fn tokenizeSegments(self: *Self, segments: []const chat.Segment) ![]c.llama_token {
+        var out: std.ArrayList(c.llama_token) = .empty;
+        errdefer out.deinit(self.allocator);
+
+        for (segments) |seg| {
+            if (seg.text.len == 0) continue;
+            const part = try self.tokenizeText(seg.text, .{
+                .add_special = false,
+                .parse_special = seg.trusted,
+            });
+            defer self.allocator.free(part);
+            try out.appendSlice(self.allocator, part);
+        }
+
+        return out.toOwnedSlice(self.allocator);
     }
 
     /// Generates a completion and streams it to `w`.
@@ -161,6 +242,53 @@ pub const Session = struct {
     pub fn generate(self: *Self, prompt: []const u8, w: *std.Io.Writer) !usize {
         const tokens = try self.tokenize(prompt);
         defer self.allocator.free(tokens);
+        return self.generateTokens(tokens, prompt, w);
+    }
+
+    /// Generates from a rendered chat prompt.
+    ///
+    /// Parameters:
+    /// - `self`: the session.
+    /// - `segments`: the rendered prompt, trust-marked.
+    /// - `w`: destination.
+    ///
+    /// Return: the number of tokens generated.
+    pub fn generateChat(
+        self: *Self,
+        segments: []const chat.Segment,
+        w: *std.Io.Writer,
+    ) !usize {
+        const tokens = try self.tokenizeSegments(segments);
+        defer self.allocator.free(tokens);
+
+        // Echo the templated text, which is what the model actually received.
+        var display: std.ArrayList(u8) = .empty;
+        defer display.deinit(self.allocator);
+        if (self.settings.display_prompt) {
+            for (segments) |seg| try display.appendSlice(self.allocator, seg.text);
+        }
+
+        return self.generateTokens(tokens, display.items, w);
+    }
+
+    /// The decode loop, shared by the raw and chat paths.
+    ///
+    /// Parameters:
+    /// - `self`: the session.
+    /// - `prompt_tokens`: the prompt, already tokenized.
+    /// - `display`: text to echo first, when `--no-display-prompt` was not
+    ///   given.
+    /// - `w`: destination; flushed after every token.
+    ///
+    /// Return: the number of tokens generated.
+    pub fn generateTokens(
+        self: *Self,
+        prompt_tokens: []c.llama_token,
+        display: []const u8,
+        w: *std.Io.Writer,
+    ) !usize {
+        const tokens = prompt_tokens;
+        const prompt = display;
 
         const n_ctx = c.llama_n_ctx(self.ctx);
         if (tokens.len >= n_ctx) return Error.PromptTooLong;
@@ -196,6 +324,88 @@ pub const Session = struct {
             // Stopping here rather than letting llama_decode fail: running out
             // of context is a normal end to a generation, not an error.
             if (used >= n_ctx) break;
+
+            batch = c.llama_batch_get_one(&id, 1);
+        }
+
+        try w.print("\n", .{});
+        try w.flush();
+        return generated;
+    }
+
+    /// Generates one assistant turn, keeping whatever KV prefix still applies.
+    ///
+    /// The next turn's prompt is the whole conversation re-rendered, so most
+    /// of it is already decoded. Rather than assume the new render extends the
+    /// old one -- which depends on what the template does -- this compares the
+    /// two token sequences and keeps their common prefix. A template that
+    /// rewrites earlier turns simply gets a shorter prefix and more work, not
+    /// a wrong answer.
+    ///
+    /// Parameters:
+    /// - `self`: the session.
+    /// - `segments`: the whole conversation, rendered and trust-marked.
+    /// - `w`: destination for the reply, flushed after every token.
+    /// - `reply`: receives the reply text, for appending to the history.
+    ///
+    /// Return: the number of tokens generated.
+    pub fn generateTurn(
+        self: *Self,
+        segments: []const chat.Segment,
+        w: *std.Io.Writer,
+        reply: *std.ArrayList(u8),
+    ) !usize {
+        const tokens = try self.tokenizeSegments(segments);
+        defer self.allocator.free(tokens);
+
+        const n_ctx = c.llama_n_ctx(self.ctx);
+        if (tokens.len >= n_ctx) return Error.PromptTooLong;
+
+        var keep: usize = 0;
+        while (keep < tokens.len and keep < self.decoded.items.len and
+            tokens[keep] == self.decoded.items[keep]) : (keep += 1)
+        {}
+
+        // An empty suffix would decode nothing and leave no logits to sample.
+        if (keep == tokens.len and keep > 0) keep -= 1;
+
+        if (keep < self.decoded.items.len) {
+            const mem = c.llama_get_memory(self.ctx);
+            // Recurrent and hybrid models cannot drop a range from the middle;
+            // `seq_rm` says so rather than failing loudly, so a discarded
+            // result means decoding the next turn on top of a stale cache.
+            if (keep == 0 or !c.llama_memory_seq_rm(mem, 0, @intCast(keep), -1)) {
+                c.llama_memory_clear(mem, true);
+                keep = 0;
+            }
+            self.decoded.shrinkRetainingCapacity(keep);
+        }
+
+        const suffix = tokens[self.decoded.items.len..];
+        try self.decoded.appendSlice(self.allocator, suffix);
+
+        var id: c.llama_token = undefined;
+        var batch = c.llama_batch_get_one(@constCast(suffix.ptr), @intCast(suffix.len));
+
+        var generated: usize = 0;
+        while (self.settings.n_predict < 0 or generated < @as(usize, @intCast(self.settings.n_predict))) {
+            if (c.llama_decode(self.ctx, batch) != 0) return Error.DecodeFailed;
+
+            id = c.llama_sampler_sample(self.sampler, self.ctx, -1);
+            if (!self.settings.ignore_eos and c.llama_vocab_is_eog(self.vocab, id)) break;
+
+            var piece: [256]u8 = undefined;
+            const n = c.llama_token_to_piece(self.vocab, id, &piece, piece.len, 0, true);
+            if (n > 0) {
+                const text = piece[0..@intCast(n)];
+                try reply.appendSlice(self.allocator, text);
+                try w.print("{s}", .{text});
+                try w.flush();
+            }
+
+            generated += 1;
+            try self.decoded.append(self.allocator, id);
+            if (self.decoded.items.len >= n_ctx) break;
 
             batch = c.llama_batch_get_one(&id, 1);
         }

@@ -211,7 +211,21 @@ tracked by this one.
 
 Note `build/` holds build *sources*, not build output. CMake's output directory was moved to `cmake-build/` to free the name.
 
-- **`cli/`** is `llamazig`, our `llama-cli` replacement. `args.zig` parses upstream's flag surface, `session.zig` loads a model and generates, `main.zig` stays thin. `upstream_flags.zig` is a generated inventory of every flag upstream accepts, used only to tell "you typed a real flag we have not got to yet" apart from "you made a typo".
+- **`cli/`** builds `llama-cli`, our replacement for upstream's binary of that name — same name so an existing command line runs unchanged against it, but it is our Zig binary, not upstream's linked against our library. `args.zig` parses upstream's flag surface, `session.zig` loads a model and generates, `chat.zig` renders chat templates, `main.zig` stays thin. `c.zig` holds the single `@cImport` of `llama.h` — two of them produce two incompatible `*llama_model`, and the error says only that `*cimport.struct_llama_model` will not coerce to `*cimport.struct_llama_model`. `upstream_flags.zig` is a generated inventory of every flag upstream accepts, used only to tell "you typed a real flag we have not got to yet" apart from "you made a typo".
+
+**Chat templates are Jinja, and trust runs the other way from upstream's.** `vibe-jinja` is the one permitted dependency, wired into `cli/` only. Three things about it are worth knowing before touching `cli/chat.zig`:
+
+- **Template literals are trusted; everything an expression emits is not.** Upstream marks strings that came *from* input (`common/jinja/README.md`); we mark the complement, so trust is the closed set the template author wrote rather than the open set we remembered to taint. A filter chain, a `set`, a loop variable — all reach output through an expression and all come out untrusted with nothing tracking them. `Session.tokenizeSegments` then sets `parse_special` per run. Measured: the attack text tokenizes to 7 tokens *including the real `<|im_start|>`* with it on, and 17 harmless ones with it off.
+- **The marking rides on `Environment.finalize`, and the bytecode VM ignores it.** `applyFinalize` has exactly one call site, `compiler.zig:642`, on the AST path. `jinja.compiler.compile` picks the bytecode VM whenever the template allows it, which silently drops the marking and returns a prompt that looks correct and is entirely trusted. `chat.zig` calls `Compiler.compile(template, false)` for that reason. Found by tests failing, not by reading.
+- **Marking is idempotent on purpose.** Qwen3.5 does `{% set c = render_content(...) %}{{ c }}`, so a macro's already-marked output passes through `mark` again; wrapping twice nested the sentinels and swallowed the macro body's own literal text into an untrusted run.
+
+**The engine has no strict-parse mode.** `{{ unclosed`, `{% bogusstatement %}`, a `for` with no `endfor` and `{{ 1 + }}` each render as **empty output and report success**. `chat.zig` rejects a render that produced nothing from a non-empty conversation; that is the only thing standing between a broken template and a silently empty prompt.
+
+**`-cnv` holds a conversation, and re-renders the whole history every turn.** A template decides for itself where the system prompt goes and how a turn is framed, so appending to the previous render is not safe in general. `Session.generateTurn` diffs the new prompt against the decoded tokens and keeps their common prefix, so the re-render costs tokenization rather than decoding.
+
+**`llama_memory_seq_rm` returns a bool, and on Qwen3.5 it returns false.** Recurrent and hybrid models cannot drop a range from the middle of the cache; the refusal is the only signal, and discarding it decodes the next turn on top of a stale cache at wrong positions. The symptom was the model emitting `<|im_end|>` as literal text mid-reply, which reads as a template bug and is not one. `generateTurn` checks the result and clears the cache instead. Found by a three-turn conversation, not by any unit test.
+
+**Chat templating is opt-in, where upstream templates by default.** Raw completion is what `make port` and `make ref` diff against each other, so defaulting it on would change the one gate that covers the whole binary. Any chat flag turns it on; `--no-jinja` vetoes.
 
 The greeting placeholders this repo started from (`src/base.zig`, `cli/client.zig`) are gone.
 
@@ -220,11 +234,12 @@ The greeting placeholders this repo started from (`src/base.zig`, `cli/client.zi
 All steps pass.
 
 ```sh
-zig build            # the llamazig scaffold -> zig-out/bin/llamazig  (fast, ~0.2s)
+zig build            # the llamazig scaffold -> zig-out/bin/llama-cli (fast, ~0.2s)
 zig build lib        # static library        -> zig-out/lib/libllamazig.a
-zig build cli        # CLI                   -> zig-out/bin/llamazig  (links libllama)
+zig build cli        # CLI                   -> zig-out/bin/llama-cli (links libllama)
 zig build run        # run the CLI; args after `--`
-zig build test       # unit tests (109); -Dtest-filter="..." narrows the run
+zig build test       # unit tests; -Dtest-filter="..." narrows the run
+zig build test-cli   # the CLI's tests only (~6s, vs ~1m for the library's)
 zig build docs       # autodoc               -> zig-out/docs/
 
 zig build reference  # llama.cpp -> zig-out/lib/{libggml.a, libllama.a}
@@ -252,6 +267,8 @@ Remaining Stage 0 item: **`llama.cpp/` is an untracked nested clone, not yet a s
 
 Zig **0.16.0**, declared as `minimum_zig_version` in `build.zig.zon` and what is installed. The code uses the 0.16 std APIs — `std.process.Init` as the `main` parameter, `std.Io` threaded explicitly through constructors, `std.Io.Writer` rather than the old writer interfaces. Do not fall back to pre-0.16 idioms.
 
+`vibe-jinja/` is a sibling checkout like `llama.cpp/` — its own repository, untracked here, carrying a Zig 0.16 migration on top of upstream's 0.15.2 release. `build.zig.zon` takes it as a path dependency.
+
 The library must never gain external dependencies. This is a hard constraint, not a preference: the point of the port is that `zig build` alone produces the binary, and anything linking `libllamazig` inherits nothing.
 
 **One exception has been granted, and only one:** `gremlin-labs/vibe-jinja` (pure Zig, MIT) for chat templates, confined to `cli/`. See `PLAN.md` Decisions 25 and 27. Pin an exact commit, never a branch. Do not add a second dependency without the same explicit grant.
@@ -267,6 +284,7 @@ make buildios     # reference CMake build for iOS
 make qwen35       # download a Qwen3.5-2B GGUF (also qwen35xs, qwen35xl)
 make port         # our ported CLI
 make ref          # the same completion loop against the stock C libraries
+make cli          # our CLI in interactive conversation mode
 make ref-chat     # upstream's llama-cli REPL (different thing -- see below)
 ```
 
