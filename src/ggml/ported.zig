@@ -15,11 +15,11 @@
 //!
 //! So the ported files cannot be tested inside the real library until the whole
 //! translation unit is finished. This root exists to test them before then. It
-//! imports only ported code, and `zig build test-port` links it against the two
-//! C translation units the ported code genuinely depends on -- `ggml-quants.c`
-//! for the reference conversion routines the traits table points at, and
-//! `ggml-threading.c` for the critical section -- neither of which overlaps
-//! with `ggml.c`.
+//! imports only ported code, and `zig build test-port` links it against the
+//! C++ translation units the ported code genuinely depends on -- the backend,
+//! and the CPU op kernels the ported dispatch calls into. None of them
+//! overlaps with `ggml.c`. Nothing C is linked at all any more, and since
+//! `ggml-threading.cpp` was ported the critical section comes from here too.
 //!
 //! Once `ggml.c` is fully ported, this becomes redundant: the files move into
 //! `module.zig` and are tested as part of the library.
@@ -45,6 +45,12 @@ comptime {
     _ = @import("quantize.zig");
     _ = @import("quants/module.zig");
     _ = @import("cpu/module.zig");
+    _ = @import("threading.zig"); // ggml-threading.cpp
+    _ = @import("backend_reg.zig"); // ggml-backend-reg.cpp + ggml-backend-dl.cpp
+    _ = @import("gguf.zig"); // gguf.cpp
+    // ggml-backend.cpp, split in two: the vtable dispatch and the scheduler.
+    _ = @import("backend.zig");
+    _ = @import("backend_sched.zig");
 }
 
 test {
@@ -59,4 +65,10 @@ test {
     _ = @import("quantize.zig");
     _ = @import("quants/module.zig");
     _ = @import("cpu/module.zig");
+    _ = @import("threading.zig"); // ggml-threading.cpp
+    _ = @import("backend_reg.zig"); // ggml-backend-reg.cpp + ggml-backend-dl.cpp
+    _ = @import("gguf.zig"); // gguf.cpp
+    // ggml-backend.cpp, split in two: the vtable dispatch and the scheduler.
+    _ = @import("backend.zig");
+    _ = @import("backend_sched.zig");
 }

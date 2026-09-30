@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff backend-ops parity-cli port ref ref-chat validate
+.PHONY: build cli llama.cpp probe graph-diff sched-diff backend-ops parity-cli port ref ref-chat validate
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -113,6 +113,8 @@ validate:
 	./scripts/port-coverage
 	@printf '\n== upstream citations ==\n'
 	./scripts/port-links
+	@printf '\n== scheduler diff vs reference ==\n'
+	@./scripts/sched-diff || { [ -f cmake-build/apple/ggml/src/libggml.a ] || echo "  skipped: no reference build (run 'make buildmacos')"; }
 	@printf '\n== graph diff vs reference ==\n'
 	@if [ -f cmake-build/apple/ggml/src/libggml.a ]; then zig build ported-lib --release=fast && ./scripts/graph-diff; else echo "  skipped: no reference build (run 'make buildmacos')"; fi
 	@printf '\nvalidate: OK\n'
@@ -133,6 +135,12 @@ port-links:
 graph-diff:
 	zig build ported-lib --release=fast
 	./scripts/graph-diff
+
+# Diff the scheduler's backend assignments against the reference ones.
+# Nothing else covers them: see the header of scripts/sched-diff.
+sched-diff:
+	zig build reference
+	./scripts/sched-diff
 
 # Diff our CLI's output against the C reference, end to end.
 parity-cli: buildcli
@@ -166,9 +174,16 @@ port: buildcli
 	@printf '\n'
 
 # Run the same completion loop linked against the stock C libraries.
+#
+# Linked with Apple's clang, not `zig cc`. These objects come from the
+# Apple-clang CMake build, and since Xcode 27 Zig's linker cannot consume them
+# -- "failed to resolve relocations and write atoms: Overflow" on
+# llama-model.cpp.o and friends. Apple's own linker takes them without
+# complaint, and this target is the Apple-clang reference side anyway, so the
+# compiler confound it documents is unchanged.
 ref:
 	@test -f cmake-build/apple/src/libllama.a || { echo "missing the reference libraries -- run 'make buildmacos'" >&2; exit 2; }
-	@zig cc harness/raw_completion.c -o $(SCRATCH)/raw_completion -std=c11 -w -I llama.cpp/include -I llama.cpp/ggml/include cmake-build/apple/src/libllama.a cmake-build/apple/ggml/src/libggml.a cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a cmake-build/apple/ggml/src/libggml-cpu.a cmake-build/apple/ggml/src/libggml-base.a -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate -F "$$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks"
+	@clang harness/raw_completion.c -o $(SCRATCH)/raw_completion -std=c11 -w -I llama.cpp/include -I llama.cpp/ggml/include cmake-build/apple/src/libllama.a cmake-build/apple/ggml/src/libggml.a cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a cmake-build/apple/ggml/src/libggml-cpu.a cmake-build/apple/ggml/src/libggml-base.a -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate -F "$$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks"
 	@printf '\n$$ raw_completion %s %s %s --temp %s -s %s\n' "$(MODEL)" "'$(PROMPT)'" "$(NPRED)" "$(TEMP)" "$(SEED)"
 	@$(SCRATCH)/raw_completion "$(MODEL)" "$(PROMPT)" $(NPRED) show $(TEMP) $(SEED) 2>/dev/null
 	@printf '\n'

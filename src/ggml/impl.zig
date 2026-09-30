@@ -48,6 +48,10 @@ pub const c = @cImport({
     @cInclude("ggml-quants.h");
     @cInclude("ggml-threading.h");
     @cInclude("ggml-cpu.h");
+    // The GGUF container format: `enum gguf_type`, `struct gguf_init_params`
+    // and `gguf_reader_callback_t`, for `gguf.zig`. It includes only `ggml.h`,
+    // so unlike `ggml-impl.h` it imports cleanly.
+    @cInclude("gguf.h");
 });
 
 // -----------------------------------------------------------------------------
@@ -179,6 +183,13 @@ pub fn ggmlCalloc(num: usize, size: usize) ?*anyopaque {
 /// - `n`: alignment; must be a power of two, as in the C macro.
 ///
 /// Return: `x` rounded up to the next multiple of `n`.
+/// Ports `TENSOR_ALIGNMENT` (ggml-impl.h:44 @c1d0e7a00).
+///
+/// The alignment every backend buffer rounds its base up to. Lives here
+/// rather than in `backend.zig` because `context.zig` wants it too, and
+/// `ggml-impl.h` is not importable.
+pub const tensor_alignment: usize = 32;
+
 pub inline fn pad(x: usize, n: usize) usize {
     return (x + n - 1) & ~(n - 1);
 }

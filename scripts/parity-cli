@@ -53,11 +53,24 @@ trap 'rm -rf "$tmp"' EXIT
 # The reference side lives in harness/raw_completion.c, shared with
 # `make ref-raw` so the two cannot drift apart.
 
-FRAMEWORKS=(-lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
-            -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks")
-zig cc harness/raw_completion.c -o "$tmp/ref" -std=c11 -I llama.cpp/include -I llama.cpp/ggml/include \
-    "${REF_LIBS[@]}" "${FRAMEWORKS[@]}" 2>/dev/null \
-    || { echo "FAIL: could not link the reference driver" >&2; exit 1; }
+# Apple's libc++, not Zig's. Zig 0.16 cannot build its own against the macOS 27
+# SDK -- see `testcase/` and the note above `appleCxxFlags` in
+# `build/llamacpp.zig`. `libc++abi` carries the `__cxa_*` symbols that
+# `libc++.tbd` does not re-export. Revert to `-lc++` when the toolchain is
+# fixed; `make -C testcase cxx20` passing is the signal.
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+FRAMEWORKS=("$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd"
+            -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+            -F "$SDK/System/Library/Frameworks")
+# Apple's clang, not `zig cc`: `REF_LIBS` are Apple-clang objects from the CMake
+# build, and since Xcode 27 Zig's linker rejects them with "failed to resolve
+# relocations and write atoms: Overflow". Apple's linker takes them, and this is
+# the Apple-clang reference side regardless. Apple's driver finds its own
+# libc++, so `FRAMEWORKS` is not used here.
+clang harness/raw_completion.c -o "$tmp/ref" -std=c11 -w -I llama.cpp/include -I llama.cpp/ggml/include \
+    "${REF_LIBS[@]}" -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    2>"$tmp/ref-link.log" \
+    || { echo "FAIL: could not link the reference driver" >&2; tail -5 "$tmp/ref-link.log" >&2; exit 1; }
 
 PROMPTS=(
     "The capital of France is"

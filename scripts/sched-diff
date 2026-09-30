@@ -1,0 +1,63 @@
+#!/bin/bash
+# Diff the scheduler's backend assignments against the reference C.
+#
+# `ggml_backend_sched_split_graph` decides which backend runs each node, in
+# five passes. **No other gate can see those decisions.** `make parity-cli`
+# cannot: at --temp 0 the sampler takes an argmax, and `make backend-ops` has
+# shown Metal and CPU agree on all 21,093 op configurations, so moving an op
+# between them changes the last bits and not the token. `make graph-diff`
+# cannot either: it exercises constructors and never builds a scheduler.
+#
+# Measured, not assumed -- breaking pass 2's CPU skip or pass 4's view_src
+# propagation leaves `make parity-cli` at 6/6 and `make graph-diff` at 131/131.
+# This is the gate that catches them.
+#
+# `harness/sched_dump.c` stands up two stub devices that differ only in which
+# ops they claim, so where each node lands is a direct readout of the passes.
+#
+# Usage: scripts/sched-diff
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+REF_LIBS=(
+    cmake-build/apple/ggml/src/libggml.a
+    cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
+    cmake-build/apple/ggml/src/libggml-cpu.a
+    cmake-build/apple/ggml/src/libggml-base.a
+)
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make buildmacos'" >&2; exit 2; }
+done
+[ -f zig-out/lib/libggml.a ] || { echo "missing zig-out/lib/libggml.a -- run 'zig build reference'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+FW=(-framework Foundation -framework Metal -framework MetalKit -framework Accelerate)
+INC=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src)
+
+# The reference side is Apple-clang objects; since Xcode 27 Zig's linker cannot
+# consume them, so Apple's driver links it. See NOTES.md.
+clang harness/sched_dump.c -o "$tmp/ref" -std=c11 -w "${INC[@]}" \
+    "${REF_LIBS[@]}" -lc++ "${FW[@]}" 2>"$tmp/ref.log" \
+    || { echo "FAIL: could not link against the reference libraries" >&2; tail -5 "$tmp/ref.log" >&2; exit 1; }
+
+# Apple's libc++, not Zig's -- Zig 0.16 cannot build its own against SDK 27.
+zig cc harness/sched_dump.c -o "$tmp/port" -std=c11 -w "${INC[@]}" \
+    zig-out/lib/libggml.a "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    "${FW[@]}" -F "$SDK/System/Library/Frameworks" 2>"$tmp/port.log" \
+    || { echo "FAIL: could not link against the ported libraries" >&2; tail -5 "$tmp/port.log" >&2; exit 1; }
+
+"$tmp/ref"  > "$tmp/ref.txt"  2>/dev/null
+"$tmp/port" > "$tmp/port.txt" 2>/dev/null
+
+if diff -u "$tmp/ref.txt" "$tmp/port.txt" > "$tmp/diff.txt"; then
+    printf 'PASS: %d scheduler assignments identical\n' "$(grep -c -- '->' "$tmp/ref.txt")"
+    exit 0
+fi
+
+echo "FAIL: the ported scheduler assigns differently" >&2
+head -40 "$tmp/diff.txt" >&2
+exit 1

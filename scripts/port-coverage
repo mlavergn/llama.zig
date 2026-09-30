@@ -31,22 +31,55 @@ DEFINES=(-DGGML_USE_CPU -DGGML_USE_METAL -DGGML_SCHED_MAX_COPIES=4
 
 todo_total=0
 
-# Reports one translation unit: compile the C for its symbol contract, compile
-# the Zig that replaces it, and compare the exported names.
+# Reports one translation unit: compile the reference source for its symbol
+# contract, compile the Zig that replaces it, and compare the exported names.
 #
-# Args: <label> <c-source> <swapped: yes|no> <zig file>...
+# `LANG_` selects the compiler and the contract filter, and defaults to C:
+#
+#   c    -- `zig cc`, and every exported symbol is part of the contract.
+#   cxx  -- `zig c++`, and the contract is the *unmangled* exports only.
+#
+# The C++ filter is not a shortcut. A C++ translation unit exports thousands of
+# mangled symbols -- `gguf.cpp` alone exports 2,002 -- but they are template
+# instantiations and inline functions, emitted weakly into every object that
+# needs them. Measured against the undefined symbols of every other object in
+# `libggml.a` and `libllama.a`: across all 24 C++ units in ggml, the only
+# mangled symbols reached from outside their own file belong to four of them
+# (`ggml-backend-dl`, `traits`, `ggml-cpu`, `ggml-metal-tuning`). Those four
+# carry a note in PLAN.md and must be ported together with the units that need
+# their vtables; for every other file the real contract is its C ABI.
+#
+# Args: <label> <source> <swapped: yes|no> <zig file>...
 report_unit() {
     local label="$1" src="$2" swapped="$3"; shift 3
     local files=("$@")
     local d="$tmp/$label"
+    local lang="${LANG_:-c}"
     mkdir -p "$d"
 
-    if ! zig cc -c "$src" -o "$d/ref.o" -std=c11 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
+    if [ "$lang" = "cxx" ]; then
+        if ! zig c++ -c "$src" -o "$d/ref.o" -std=c++17 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
+            echo "failed to compile $src:" >&2
+            tail -5 "$d/cc.log" >&2
+            exit 1
+        fi
+    elif ! zig cc -c "$src" -o "$d/ref.o" -std=c11 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
         echo "failed to compile $src:" >&2
         tail -5 "$d/cc.log" >&2
         exit 1
     fi
-    nm -g --defined-only "$d/ref.o" | awk '{print $3}' | sed 's/^_//' | grep . | sort -u > "$d/want.txt"
+    # One leading underscore is the Mach-O C prefix; a second, before `Z`, marks
+    # an Itanium-mangled C++ name. Strip exactly one, then filter.
+    nm -g --defined-only "$d/ref.o" | awk '{print $3}' | sed 's/^_//' | grep . | sort -u > "$d/want-all.txt"
+    if [ "$lang" = "cxx" ]; then
+        # `__clang_call_terminate` is a compiler-emitted landing-pad helper for
+        # the C++ exception path, coalesced across every object that needs one.
+        # It belongs to the runtime, not to the translation unit, and no Zig
+        # port produces it.
+        grep -v '^_Z' "$d/want-all.txt" | grep -v '^__clang_call_terminate$' > "$d/want.txt" || :
+    else
+        cp "$d/want-all.txt" "$d/want.txt"
+    fi
 
     : > "$d/objs.txt"
     local f
@@ -58,7 +91,7 @@ report_unit() {
         # `config` module the build graph supplies; a bare build-obj has to
         # stand one in. Every flag build.zig defines has to appear here, or the
         # compile fails and this script reports nothing at all.
-        printf 'pub const probe_ported = false;\npub const probe_cpu = false;\n' > "$d/config.zig"
+        printf 'pub const probe_ported = false;\npub const probe_cpu = false;\npub const use_metal = true;\n' > "$d/config.zig"
         if ! zig build-obj -femit-bin="$d/$base.o" "${INCLUDES[@]}" -lc \
                 --dep config -Mroot="$f" -Mconfig="$d/config.zig" 2>"$d/$base.log"; then
             echo "failed to compile $f:" >&2
@@ -83,12 +116,12 @@ report_unit() {
 
     if [ "$todo_n" -eq 0 ]; then
         if [ "$swapped" = "yes" ]; then
-            printf '  %-18s%s / %s symbols (100%%), complete and swapped into the build\n' "$label" "$done_n" "$total"
+            printf '  %-22s%s / %s symbols (100%%), complete and swapped into the build\n' "$label" "$done_n" "$total"
         else
-            printf '  %-18s%s / %s symbols (100%%), complete -- NOT swapped in yet\n' "$label" "$done_n" "$total"
+            printf '  %-22s%s / %s symbols (100%%), complete -- NOT swapped in yet\n' "$label" "$done_n" "$total"
         fi
     else
-        printf '  %-18s%s / %s symbols (%s%%), %s remaining\n' \
+        printf '  %-22s%s / %s symbols (%s%%), %s remaining\n' \
             "$label" "$done_n" "$total" "$((done_n * 100 / total))" "$todo_n"
     fi
 
@@ -107,7 +140,7 @@ report_unit() {
 # comparison stays per-translation-unit.
 report_unit "ggml.c" llama.cpp/ggml/src/ggml.c yes "$PORTED_DIR/ported.zig"
 
-printf '  %-18scomplete and swapped into the build\n' "ggml-alloc.c"
+printf '  %-22scomplete and swapped into the build\n' "ggml-alloc.c"
 
 report_unit "ggml-quants.c" llama.cpp/ggml/src/ggml-quants.c yes "$PORTED_DIR/ported.zig"
 
@@ -116,6 +149,29 @@ report_unit "ggml-cpu.c" llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c yes "$PORTED_DIR
 report_unit "ggml-cpu/quants.c" llama.cpp/ggml/src/ggml-cpu/quants.c yes "$PORTED_DIR/ported.zig"
 
 report_unit "arch/arm/quants.c" llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c yes "$PORTED_DIR/ported.zig"
+
+# Stage 4: the C++ translation units. The contract is the unmangled exports --
+# see the note on `LANG_` above.
+LANG_=cxx report_unit "ggml-threading.cpp" llama.cpp/ggml/src/ggml-threading.cpp yes "$PORTED_DIR/ported.zig"
+
+# ggml-backend-dl.cpp has no unmangled exports at all -- its three functions
+# have C++ linkage -- so there is nothing for this to compare. It left the
+# build with the registry, which was its only caller.
+LANG_=cxx report_unit "ggml-backend-reg.cpp" llama.cpp/ggml/src/ggml-backend-reg.cpp yes "$PORTED_DIR/ported.zig"
+
+# gguf.cpp exports 2,002 symbols and 61 of them are the contract. The two the
+# C++ has beyond those -- `gguf_type_size` and `gguf_write_to_buf` -- are
+# declared in ggml-impl.h inside `#ifdef __cplusplus` under the comment "expose
+# GGUF internals for test code", which gives them C++ linkage. Their only caller
+# anywhere is tests/test-gguf.cpp, which this project does not build, so the
+# `_Z` filter drops them and the port does not reproduce them.
+LANG_=cxx report_unit "gguf.cpp" llama.cpp/ggml/src/gguf.cpp yes "$PORTED_DIR/ported.zig"
+
+# ggml-backend.cpp is split across two Zig files: the vtable dispatch and the
+# graph scheduler. 102 C-ABI symbols of 243 exports; the mangled remainder is
+# template and inline noise that no other object references.
+LANG_=cxx report_unit "ggml-backend.cpp" llama.cpp/ggml/src/ggml-backend.cpp yes \
+    "$PORTED_DIR/backend.zig" "$PORTED_DIR/backend_sched.zig"
 
 exit 0
 

@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## The goal
 
-**Port llama.cpp to Zig — pure Zig apart from the Metal Objective-C host layer.** The deliverable is a `llama-cli` reimplemented in Zig: not a recreation of the llama.cpp repo, and not a Zig wrapper around the C++ library. `SPEC.md` states what the deliverable is and does — artifacts, flag surface, generation semantics, and the conformance gates. `README.md` has the five stages; `PLAN.md` has the detailed plan, scope measurements, decisions, and open questions. Read `SPEC.md` first when the question is "what should this do"; `PLAN.md` when it is "why is it done this way".
+**Port llama.cpp to Zig — pure Zig apart from the Metal Objective-C host layer.** The deliverable is a `llama-cli` reimplemented in Zig: not a recreation of the llama.cpp repo, and not a Zig wrapper around the C++ library. `SPEC.md` states what the deliverable is and does — artifacts, flag surface, generation semantics, and the conformance gates. `README.md` has the five stages; `PLAN.md` has the forward plan — decisions, scope measurements, and what comes next; `NOTES.md` is the record of how each completed step was actually done and what each gate caught. Read `SPEC.md` first when the question is "what should this do", `PLAN.md` when it is "what is decided and what is next", and `NOTES.md` when it is "why is it done this way".
 
 Two decisions worth knowing before touching anything:
 
 - **`ggml-metal-device.m` and `ggml-metal-context.m` stay Objective-C** (3,091 lines), compiled by `zig cc`. Zig has no Obj-C frontend, and reaching Metal from Zig would mean hand-writing every call against `objc_msgSend`. Everything else is ported.
 - **Our `llama-cli` mimics upstream's argument set** for the features we support, so an existing command line runs unchanged against it. It is our own Zig binary, not upstream's linked against our library.
 
-Where we are: **Stages 1, 2 and 3 complete.**
+Where we are: **Stages 1, 2 and 3 complete; Stage 4 started.**
 
 **No C compiles anywhere under `llama.cpp/ggml/src/` any more.** All six translation units are Zig, 598 exported symbols, every one swapped in and byte-verified. `ggml_base_sources` and `ggml_cpu_c_sources` in `build/llamacpp.zig` are both empty.
 
@@ -22,13 +22,22 @@ Where we are: **Stages 1, 2 and 3 complete.**
 - `ggml-cpu/quants.c` → 45/45 symbols, split across `src/ggml/cpu/quants/`.
 - `ggml-cpu/arch/arm/quants.c` → 28/28 symbols, split across `src/ggml/cpu/quants/arm/`.
 
-What remains is C++ and Obj-C: the op kernels in `ggml-cpu/ops.cpp` and `vec.cpp`, the backend registry, the Metal host layer, and all of libllama. That is Stage 4.
+**For a C++ translation unit the contract is its *unmangled* exports.** `scripts/port-coverage` takes `LANG_=cxx`, compiles with `zig c++`, and filters out `_Z…` names and `__clang_call_terminate`. That filter is measured, not assumed — see above. A file among the four exceptions must be ported together with whatever needs its vtables.
+
+**Stage 4 has begun, and the measurement that shapes it is done.** Every exported symbol of every ggml C++ object was intersected with the undefined symbols of every other object in `libggml.a` and `libllama.a`: **the external contract of 20 of the 24 C++ translation units in ggml is a pure C ABI.** A C++ file exports thousands of mangled symbols — `gguf.cpp` alone exports 2,002 — but they are template instantiations and inline functions, emitted weakly into every object that needs them, and almost none are reached from outside. So the Stage 3 swap mechanism carries over unchanged for the large majority. `PLAN.md` names the four exceptions and what each forces.
+
+Two C++ translation units are ported and swapped:
+
+- `ggml-threading.cpp` → `src/ggml/threading.zig` (3 symbols).
+- `ggml-backend-reg.cpp` → `src/ggml/backend_reg.zig` (16 symbols). It took `ggml-backend-dl.cpp` out of the build with it: those three `dl_*` functions have C++ linkage Zig cannot provide, and the registry was their only caller.
+
+What remains is the rest of the C++ and the Obj-C: the op kernels in `ggml-cpu/ops.cpp` and `vec.cpp`, `gguf.cpp`, `ggml-backend.cpp`, the Metal host layer, and all of libllama.
 
 `make validate` reports the exact counts.
 
 **Porting a translation unit is treated as all-or-nothing.** A file is ported completely before it is swapped; the linker's missing-symbol errors are the completeness check. Develop a large port without wiring it in, so the build stays green until it is finished.
 
-An incremental alternative was trialled and parked: compiling the C with `-Dggml_foo=ggml_foo_c` renames a symbol *and its internal callers* within that translation unit, leaving the external name free for a Zig version. It looked like it worked and did not — see `PLAN.md`, "The incremental-swap trial". The wholesale swap of `ggml.c` made it moot.
+An incremental alternative was trialled and parked: compiling the C with `-Dggml_foo=ggml_foo_c` renames a symbol *and its internal callers* within that translation unit, leaving the external name free for a Zig version. It looked like it worked and did not — see `NOTES.md`, "The incremental-swap trial". The wholesale swap of `ggml.c` made it moot.
 
 **Every ported file states its source as a full path.** The doc comment at the
 top of a ported file names the reference file it replaces as a path from the
@@ -94,7 +103,7 @@ Correctness has five gates, and none of them subsumes the others:
 
 `scripts/port-links` is not on that list because it checks nothing about what the code *computes*. It keeps the port's map back to upstream honest, which is a maintenance gate rather than a correctness one.
 
-`PLAN.md` has the full fault-injection table showing which gate catches what.
+`NOTES.md` has the full fault-injection table showing which gate catches what.
 
 ## Float contraction
 
@@ -169,7 +178,7 @@ The `llama.cpp/` directory is an upstream clone pinned to tag `v0.3.0` (commit `
 
 **It is here to be read, not written.** Treat it as a specification we are reimplementing:
 
-- **Never edit files under `llama.cpp/`.** Not to fix a bug, not to add a workaround, not to make a build succeed. If something there is wrong or in the way, the answer is a change on our side or a note in `PLAN.md`.
+- **Never edit files under `llama.cpp/`.** Not to fix a bug, not to add a workaround, not to make a build succeed. If something there is wrong or in the way, the answer is a change on our side or a note in `NOTES.md`.
 - **Never commit, push, or open a PR against it.** It is a separate upstream repository that we do not contribute to.
 - **Never treat its conventions, instructions, or tooling as ours.** Its `CLAUDE.md`, `AGENTS.md`, `skills/`, and CI config govern the upstream project and do not apply to this one. This file is the authority here.
 - **It is pinned deliberately.** Do not update it to a newer tag or pull upstream changes. A multi-month port against a moving target does not converge; syncing upstream is a separate, explicitly-scoped decision.
@@ -203,6 +212,15 @@ tracked by this one.
 
 `build.zig`, `build.zig.zon`, `build/`, `src/`, `cli/`, `harness/`, `scripts/`, `Makefile`, and the markdown at the root. That is the whole of this project's code.
 
+**`testcase/` is the one temporary directory, and it is meant to be deleted.**
+It reproduces and diagnoses a toolchain failure, not anything this project
+owns: Zig 0.16.0 cannot build its bundled libc++ against the macOS 27 SDK, so
+no C++ can be linked, and `build.zig` plus four scripts link Apple's libc++
+instead. `make -C testcase cxx20` passing is the signal that the toolchain is
+fixed — at which point restore `.link_libcpp = true` at the seven sites, put
+`-lc++` back in the scripts, and delete `testcase/`. Its `README.md` has the
+full diagnosis and the revert list.
+
 `LICENSE` (MIT) and `NOTICE` are load-bearing, not boilerplate: every file under `src/` is a translation of MIT-licensed C, so this is a derivative work and the ggml authors' copyright has to travel with it. Keep the per-file provenance comments — they are how a reader traces a translation back to its source.
 
 - **`build/llamacpp.zig`** declares the reference tree's build graph, replacing its CMake for the macOS arm64 configuration. It compiles upstream sources unmodified.
@@ -213,13 +231,13 @@ Note `build/` holds build *sources*, not build output. CMake's output directory 
 
 - **`cli/`** builds `llama-cli`, our replacement for upstream's binary of that name — same name so an existing command line runs unchanged against it, but it is our Zig binary, not upstream's linked against our library. `args.zig` parses upstream's flag surface, `session.zig` loads a model and generates, `chat.zig` renders chat templates, `main.zig` stays thin. `c.zig` holds the single `@cImport` of `llama.h` — two of them produce two incompatible `*llama_model`, and the error says only that `*cimport.struct_llama_model` will not coerce to `*cimport.struct_llama_model`. `upstream_flags.zig` is a generated inventory of every flag upstream accepts, used only to tell "you typed a real flag we have not got to yet" apart from "you made a typo".
 
-**Chat templates are Jinja, and trust runs the other way from upstream's.** `vibe-jinja` is the one permitted dependency, wired into `cli/` only. Three things about it are worth knowing before touching `cli/chat.zig`:
+**Chat templates are Jinja, and trust runs the other way from upstream's.** `zigjinja` is the one permitted dependency, wired into `cli/` only. Three things about it are worth knowing before touching `cli/chat.zig`:
 
 - **Template literals are trusted; everything an expression emits is not.** Upstream marks strings that came *from* input (`common/jinja/README.md`); we mark the complement, so trust is the closed set the template author wrote rather than the open set we remembered to taint. A filter chain, a `set`, a loop variable — all reach output through an expression and all come out untrusted with nothing tracking them. `Session.tokenizeSegments` then sets `parse_special` per run. Measured: the attack text tokenizes to 7 tokens *including the real `<|im_start|>`* with it on, and 17 harmless ones with it off.
 - **The marking rides on `Environment.finalize`, and the bytecode VM ignores it.** `applyFinalize` has exactly one call site, `compiler.zig:642`, on the AST path. `jinja.compiler.compile` picks the bytecode VM whenever the template allows it, which silently drops the marking and returns a prompt that looks correct and is entirely trusted. `chat.zig` calls `Compiler.compile(template, false)` for that reason. Found by tests failing, not by reading.
 - **Marking is idempotent on purpose.** Qwen3.5 does `{% set c = render_content(...) %}{{ c }}`, so a macro's already-marked output passes through `mark` again; wrapping twice nested the sentinels and swallowed the macro body's own literal text into an untrusted run.
 
-**The engine has no strict-parse mode.** `{{ unclosed`, `{% bogusstatement %}`, a `for` with no `endfor` and `{{ 1 + }}` each render as **empty output and report success**. `chat.zig` rejects a render that produced nothing from a non-empty conversation; that is the only thing standing between a broken template and a silently empty prompt.
+**The engine's strict parsing is partial.** `{{ unclosed`, a `for` with no `endfor` and `{{ 1 + }}` are reported as parse errors, but `{% bogusstatement %}` still renders as **empty output and reports success**. `chat.zig` rejects a render that produced nothing from a non-empty conversation; that guard is still the only thing standing between that class of broken template and a silently empty prompt. (Under `vibe-jinja` all five rendered empty and reported success; `zigjinja` v2.0.1 fixed the swallowed syntax errors.)
 
 **`-cnv` holds a conversation, and re-renders the whole history every turn.** A template decides for itself where the system prompt goes and how a turn is framed, so appending to the previous render is not safe in general. `Session.generateTurn` diffs the new prompt against the decoded tokens and keeps their common prefix, so the re-render costs tokenization rather than decoding.
 
@@ -267,11 +285,11 @@ Remaining Stage 0 item: **`llama.cpp/` is an untracked nested clone, not yet a s
 
 Zig **0.16.0**, declared as `minimum_zig_version` in `build.zig.zon` and what is installed. The code uses the 0.16 std APIs — `std.process.Init` as the `main` parameter, `std.Io` threaded explicitly through constructors, `std.Io.Writer` rather than the old writer interfaces. Do not fall back to pre-0.16 idioms.
 
-`vibe-jinja/` is a sibling checkout like `llama.cpp/` — its own repository, untracked here, carrying a Zig 0.16 migration on top of upstream's 0.15.2 release. `build.zig.zon` takes it as a path dependency.
+`zigjinja` is a sibling repository checked out beside this one at `../zigjinja` — its own repository, already on Zig 0.16. `build.zig.zon` takes it as a path dependency. It is a fork of `gremlin-labs/vibe-jinja`, which this project depended on previously as a nested `vibe-jinja/` checkout.
 
 The library must never gain external dependencies. This is a hard constraint, not a preference: the point of the port is that `zig build` alone produces the binary, and anything linking `libllamazig` inherits nothing.
 
-**One exception has been granted, and only one:** `gremlin-labs/vibe-jinja` (pure Zig, MIT) for chat templates, confined to `cli/`. See `PLAN.md` Decisions 25 and 27. Pin an exact commit, never a branch. Do not add a second dependency without the same explicit grant.
+**One exception has been granted, and only one:** `inferise/zigjinja` (pure Zig, MIT) for chat templates, confined to `cli/`. See `PLAN.md` Decisions 25 and 27. Pin an exact commit, never a branch. Do not add a second dependency without the same explicit grant.
 
 ## Commands
 
@@ -369,7 +387,7 @@ rediscover the hard way, so they are recorded here.
 - **`sanitize_c` must be `.off`.** Zig enables the C sanitizers in Debug, and upstream is not UBSan-clean — it aborts in `llama-graph.cpp` on `applying non-zero offset to null pointer`. Reference code compiles as shipped; we do not fix it.
 - **The Metal shaders need no `xcrun metal`.** With `GGML_METAL_EMBED_LIBRARY`, the `.metal` *source* is flattened and `.incbin`-ed into a `__DATA,__ggml_metallib` section, and the driver compiles it at load time. `build/metal_embed.zig` does the flattening. Never enable the non-embed path: it requires `xcrun -sdk macosx metal`, which Zig can never replace.
 - **CMake's `-G Xcode` cannot drive `zig cc`.** It shells out to `xcodebuild`, which picks Apple clang and ignores `CMAKE_C_COMPILER`. Moot now that `build.zig` owns the build.
-- **Metal is reproducible run-to-run.** Three greedy runs on the same model and prompt produced token-identical output, so the token-parity gate in `PLAN.md` is usable as written.
+- **Metal is reproducible run-to-run.** Three greedy runs on the same model and prompt produced token-identical output, so the token-parity gate is usable as written.
 - **CMake is not on PATH and `/usr/local` is root-owned.** `make cmake` fetches 4.4.3 into `.tools/`. The Makefile's `CMAKE` variable prefers that over PATH. `ninja` is still absent, which is why the generator is `-G "Unix Makefiles"` — `make` is present.
 - **The parity gate works and passes.** `scripts/parity` diffs the Apple-clang and zig-cc `llama-cli` binaries at `--temp 0` with a fixed seed. 4/4 prompts token-identical. Use it after any change that could affect arithmetic.
 - **`zig cc` and Apple clang do not select the same ARM features.** CMake's probe through `zig cc` reports `HAVE_MATMUL_INT8 - Failed` and `HAVE_SVE - Failed` where Apple clang may not. Output is identical regardless, so this costs throughput rather than correctness — but the two builds are not running the same quant kernels. Revisit when Stage 3 ports `arch/arm/`.

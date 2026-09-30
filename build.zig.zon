@@ -1,7 +1,7 @@
 .{
     .name = .llamazig,
     .description = "Llamacpp Zig Port",
-    .version = "0.0.1",
+    .version = "0.0.2",
     .fingerprint = 0xb16f7afa8792d6b2,
     .minimum_zig_version = "0.16.0",
     .paths = .{
@@ -10,15 +10,17 @@
     // IMPORTANT: This module must NEVER have any external dependencies. The
     // point of the port is that `zig build` alone produces the binary.
     //
-    // One exception is granted, and only one: `vibe-jinja` (pure Zig, MIT) for
+    // One exception is granted, and only one: `zigjinja` (pure Zig, MIT) for
     // chat templates, used by `cli/` only. See PLAN.md Decisions 25 and 27.
     // The library itself stays dependency-free, so anything linking
     // libllamazig inherits nothing.
     //
-    // A sibling checkout, like `llama.cpp/` and `llama.cpp.zmake/`: its own
-    // repository, untracked here. `vibe-jinja` publishes for Zig 0.15.2; the
-    // checkout carries the 0.16 migration on top.
+    // A sibling repository checked out beside this one, like `llama.cpp.zmake/`:
+    // its own repository, untracked here, already on Zig 0.16.
     .dependencies = .{
-        .vibe_jinja = .{ .path = "vibe-jinja" },
+        .zigjinja = .{
+            .path = "../zigjinja",
+            .clone = "git@github.com:inferise/zigjinja.git",
+        },
     },
 }

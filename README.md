@@ -6,7 +6,8 @@ A port of [llama.cpp](https://github.com/ggerganov/llama.cpp) to Zig, for cross-
 |---|---|
 | [`SPEC.md`](SPEC.md) | **What** it is and does — artifacts, flags, behaviour, conformance |
 | `README.md` | **Why**, and where the port has got to |
-| [`PLAN.md`](PLAN.md) | **How** — sequencing, decisions, measurements |
+| [`PLAN.md`](PLAN.md) | **How** — decisions, scope measurements, what comes next |
+| [`NOTES.md`](NOTES.md) | **Why** — the record of each completed step and what each gate caught |
 
 ## Goal
 
@@ -176,7 +177,7 @@ and each negative-tested by injecting a fault and confirming it fails:
 | `make port` / `make ref` | the CLI binary against the same loop on stock libraries |
 
 Token parity is coarser than it looks — doubling RoPE's `freq_base` passes it —
-which is why the graph diff and `test-backend-ops` exist alongside. `PLAN.md`
+which is why the graph diff and `test-backend-ops` exist alongside. `NOTES.md`
 carries the measurements.
 
 The reference implementation is pinned at llama.cpp **v0.3.0**.
@@ -206,5 +207,6 @@ pinned commit each file was translated from.
 
 ## See also
 
-- [`PLAN.md`](PLAN.md) — detailed implementation plan, scope measurements, risks, and open questions.
+- [`PLAN.md`](PLAN.md) — the forward plan: decisions, scope measurements, risks, and what comes next.
+- [`NOTES.md`](NOTES.md) — the record: how each completed step was done, and the false passes found by injection.
 - [`CLAUDE.md`](CLAUDE.md) — build state, toolchain notes, and code conventions.

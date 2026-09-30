@@ -82,8 +82,15 @@ int main(int argc, char **argv) {
 }
 DRIVER
 
-FRAMEWORKS=(-lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
-            -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks")
+# Apple's libc++, not Zig's. Zig 0.16 cannot build its own against the macOS 27
+# SDK -- see `testcase/` and the note above `appleCxxFlags` in
+# `build/llamacpp.zig`. `libc++abi` carries the `__cxa_*` symbols that
+# `libc++.tbd` does not re-export. Revert to `-lc++` when the toolchain is
+# fixed; `make -C testcase cxx20` passing is the signal.
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+FRAMEWORKS=("$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd"
+            -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+            -F "$SDK/System/Library/Frameworks")
 INCLUDES=(-I llama.cpp/include -I llama.cpp/ggml/include)
 
 zig cc "$tmp/driver.c" -o "$tmp/ref"  -std=c11 "${INCLUDES[@]}" "${APPLE_LIBS[@]}" "${FRAMEWORKS[@]}" 2>/dev/null \

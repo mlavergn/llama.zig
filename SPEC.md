@@ -8,11 +8,12 @@
 > |---|---|---|
 > | `README.md` | **why** | Motivation, context, current status |
 > | `SPEC.md` | **what** | This file: surface, behaviour, guarantees |
-> | `PLAN.md` | **how** | Sequencing, decisions, measurements, open questions |
+> | `PLAN.md` | **how** | Decisions, scope measurements, what comes next |
+> | `NOTES.md` | **why** | The record of each completed step and what each gate caught |
 >
 > **Rules for this file.** Describe observable behaviour, not implementation.
 > State facts, not rationale. Prefer tables to paragraphs. A sentence that
-> answers "why did we…" belongs in `PLAN.md`; one that answers "how is it
+> answers "why did we…" belongs in `NOTES.md`; one that answers "how is it
 > done" belongs in `PLAN.md` or in the code. Everything here must be true of
 > the current tree — a spec that describes an intention is a plan.
 >
@@ -194,7 +195,7 @@ before tokenization.
 | Aspect | Behaviour |
 |---|---|
 | Template source | `--chat-template`, else `--chat-template-file`, else the model's `tokenizer.chat_template`. No template and no override is an error. |
-| Engine | `vibe-jinja`, the one permitted dependency, confined to `cli/`. |
+| Engine | `zigjinja`, the one permitted dependency, confined to `cli/`. |
 | Conversation | One turn by default: an optional system message, then the prompt as the user's turn. Under `-cnv` the history accumulates and every turn re-renders the whole conversation. `add_generation_prompt` is true. |
 | Bindings | `messages`, `add_generation_prompt`, `bos_token`, `eos_token`. |
 | Tokenization | `add_special` is false — the template writes the model's opening itself. |
@@ -306,7 +307,7 @@ locatable in this port.
 | Build tool | Zig **0.16.0**, no CMake, no Ninja |
 | Host and target | macOS on Apple Silicon (arm64) |
 | Library dependencies | **None.** `libllamazig` links nothing outside the standard library and the system frameworks. |
-| CLI dependencies | One, granted by exception: `gremlin-labs/vibe-jinja`, pinned to an exact commit, confined to `cli/`. |
+| CLI dependencies | One, granted by exception: `inferise/zigjinja` (a fork of `gremlin-labs/vibe-jinja`), pinned to an exact commit, confined to `cli/`. |
 | System frameworks | Foundation, Metal, MetalKit, Accelerate |
 | Reference pin | llama.cpp tag `v0.3.0`, commit `c1d0e7a00` |
 

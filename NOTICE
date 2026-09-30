@@ -38,10 +38,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-vibe-jinja
-----------
+zigjinja
+--------
 
-Chat templating uses https://github.com/gremlin-labs/vibe-jinja, which is MIT
-licensed. It is consumed as a pinned dependency rather than vendored, so its
-licence text travels with the dependency itself. If it is ever vendored into
-this repository, its notice must be reproduced here.
+Chat templating uses https://github.com/inferise/zigjinja, which is MIT
+licensed. It is a fork of https://github.com/gremlin-labs/vibe-jinja and
+carries both copyrights. It is consumed as a pinned dependency rather than
+vendored, so its licence text travels with the dependency itself. If it is
+ever vendored into this repository, its notice must be reproduced here.

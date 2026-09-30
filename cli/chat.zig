@@ -6,7 +6,7 @@
 //! **Not a port.** Our own code. It covers the ground `common_chat_templates`
 //! does in `llama.cpp/common/chat.cpp` (v0.3.0, `c1d0e7a00`) -- find the
 //! model's template, bind the conversation to it, render -- but shares no code
-//! with it, and renders through `vibe-jinja` rather than upstream's bundled
+//! with it, and renders through `zigjinja` rather than upstream's bundled
 //! Jinja.
 //!
 //! # Why Jinja at all
@@ -52,7 +52,7 @@
 //! text is exactly one of those is re-trusted, and only then.
 
 const std = @import("std");
-const jinja = @import("vibe_jinja");
+const jinja = @import("zigjinja");
 
 /// libllama's C ABI; see `c.zig` for why it is imported there and not here.
 pub const c = @import("c.zig").api;
@@ -489,19 +489,22 @@ test "bos and eos are bound by name" {
     try testing.expectEqualStrings("<s>|</s>", out);
 }
 
-test "a malformed template is caught, though the engine reports success" {
-    // The engine has no strict-parse mode: each renders empty with no error, so the guard is the only thing catching them.
-    for ([_][]const u8{
-        "{% for x in %}",
-        "{{ unclosed",
-        "{% bogusstatement %}",
-        "{% for x in [1,2] %}",
-        "{{ 1 + }}",
-    }) |src| {
-        var t = try Template.init(testing.allocator, src);
+test "a malformed template is caught, whether or not the engine reports it" {
+    // The engine parses most of these strictly, but not all: `{% bogusstatement %}`
+    // renders empty and reports success, so the empty-render guard is still the
+    // only thing catching it.
+    const cases = [_]struct { src: []const u8, want: Error }{
+        .{ .src = "{% for x in %}", .want = Error.TemplateFailed },
+        .{ .src = "{{ unclosed", .want = Error.TemplateFailed },
+        .{ .src = "{% bogusstatement %}", .want = Error.EmptyRender },
+        .{ .src = "{% for x in [1,2] %}", .want = Error.TemplateFailed },
+        .{ .src = "{{ 1 + }}", .want = Error.TemplateFailed },
+    };
+    for (cases) |case| {
+        var t = try Template.init(testing.allocator, case.src);
         defer t.deinit();
         try testing.expectError(
-            Error.EmptyRender,
+            case.want,
             t.apply(&.{.{ .role = "user", .content = "hi" }}, .{}),
         );
     }

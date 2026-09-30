@@ -56,13 +56,21 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-FRAMEWORKS=(-lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
-            -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks")
+# Apple's libc++, not Zig's. Zig 0.16 cannot build its own against the macOS 27
+# SDK -- see `testcase/` and the note above `appleCxxFlags` in
+# `build/llamacpp.zig`. `libc++abi` carries the `__cxa_*` symbols that
+# `libc++.tbd` does not re-export. Revert to `-lc++` when the toolchain is
+# fixed; `make -C testcase cxx20` passing is the signal.
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+FRAMEWORKS=("$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd"
+            -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+            -F "$SDK/System/Library/Frameworks")
 INCLUDES=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src)
 
 build() {
     local out="$1"; shift
-    zig c++ "$SRC" -o "$out" -std=c++17 -O2 -w "${INCLUDES[@]}" "$@" "${FRAMEWORKS[@]}" 2>"$tmp/cc.log" \
+    zig c++ "$SRC" -o "$out" -std=c++17 -O2 -w -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+        "${INCLUDES[@]}" "$@" "${FRAMEWORKS[@]}" 2>"$tmp/cc.log" \
         || { echo "FAIL: could not build test-backend-ops" >&2; tail -5 "$tmp/cc.log" >&2; exit 1; }
 }
 

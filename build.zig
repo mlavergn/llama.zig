@@ -4,6 +4,93 @@ const builtin = @import("builtin");
 const zon = @import("build.zig.zon");
 const llamacpp = @import("build/llamacpp.zig");
 
+const Git = struct {
+    const Self = @This();
+
+    /// Clones every missing cloneable dependency and exits 1; returns when none are missing.
+    ///
+    /// Parameters:
+    /// - `b`: the build graph.
+    ///
+    /// Return: nothing when all are present; otherwise never.
+    pub fn cloneDeps(b: *std.Build) if (Self.hasAllDeps()) void else noreturn {
+        if (comptime Self.hasAllDeps()) return;
+        const io = b.graph.io;
+        var missing: usize = 0;
+        var cloned: usize = 0;
+        inline for (@typeInfo(@TypeOf(zon.dependencies)).@"struct".fields) |field| {
+            if (comptime Self.isCloneable(field.name) and !Self.isCloned(field.name)) {
+                const dep = @field(zon.dependencies, field.name);
+                const dest = b.pathFromRoot(dep.path);
+                missing += 1;
+                if (std.Io.Dir.cwd().access(io, dest, .{})) |_| {
+                    std.debug.print("{s} exists but is not a Zig package\n", .{dep.path});
+                } else |err| switch (err) {
+                    error.FileNotFound => if (Self.clone(io, dep.clone, dest)) {
+                        cloned += 1;
+                    } else |clone_err| {
+                        std.debug.print("git clone {s} {s} failed [{any}]\n", .{ dep.clone, dep.path, clone_err });
+                    },
+                    else => std.debug.print("cannot check {s} [{any}]\n", .{ dep.path, err }),
+                }
+            }
+        }
+        if (cloned > 0) std.debug.print("cloned {d} of {d} missing dependencies; re-run zig build\n", .{ cloned, missing });
+        std.process.exit(1);
+    }
+
+    /// Reports whether every cloneable dependency is present.
+    ///
+    /// Return: `true` when none is missing.
+    fn hasAllDeps() bool {
+        inline for (@typeInfo(@TypeOf(zon.dependencies)).@"struct".fields) |field| {
+            if (Self.isCloneable(field.name) and !Self.isCloned(field.name)) return false;
+        }
+        return true;
+    }
+
+    /// Reports whether dependency `name` was present when the build runner was compiled.
+    ///
+    /// Parameters:
+    /// - `name`: the dependency's field name in `build.zig.zon`.
+    ///
+    /// Return: `true` when present, or when this package is not the root.
+    fn isCloned(comptime name: []const u8) bool {
+        const deps = @import("root").dependencies;
+        for (deps.root_deps) |dep| {
+            if (std.mem.eql(u8, dep[0], name)) return @hasDecl(@field(deps.packages, dep[1]), "build_zig");
+        }
+        return true;
+    }
+
+    /// Reports whether dependency `name` declares both a `.path` and a `.clone`.
+    ///
+    /// Parameters:
+    /// - `name`: the dependency's field name in `build.zig.zon`.
+    ///
+    /// Return: `true` when both fields are present.
+    fn isCloneable(comptime name: []const u8) bool {
+        const Dep = @TypeOf(@field(zon.dependencies, name));
+        return @hasField(Dep, "path") and @hasField(Dep, "clone");
+    }
+
+    /// Clones the repository at `url` into `dest`.
+    ///
+    /// Parameters:
+    /// - `io`: IO the `git` child is spawned on.
+    /// - `url`: the repository to clone.
+    /// - `dest`: the directory to clone into.
+    ///
+    /// Return: nothing on success; `error.GitCloneFailed` when `git` fails.
+    fn clone(io: std.Io, url: []const u8, dest: []const u8) !void {
+        var child = try std.process.spawn(io, .{ .argv = &.{ "git", "clone", url, dest } });
+        switch (try child.wait(io)) {
+            .exited => |code| if (code != 0) return error.GitCloneFailed,
+            else => return error.GitCloneFailed,
+        }
+    }
+};
+
 const Xcode = struct {
     const Self = @This();
     allocator: std.mem.Allocator,
@@ -86,6 +173,9 @@ const Config = struct {
 /// Return: nothing on success; propagates errors from option parsing, version
 /// parsing, and macOS SDK resolution.
 pub fn build(b: *std.Build) !void {
+    // Pre-flight: ensure any local dependencies are cloned
+    Git.cloneDeps(b);
+
     // Build config
     const cfg = Config{
         .name = @tagName(zon.name),
@@ -210,13 +300,15 @@ pub fn build(b: *std.Build) !void {
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
-        .link_libcpp = true,
+        // Apple's libc++, not Zig's -- see the note in build/llamacpp.zig.
+        .link_libcpp = false,
     });
     smoke_module.addIncludePath(b.path("llama.cpp/include"));
     smoke_module.addIncludePath(b.path("llama.cpp/ggml/include"));
     smoke_module.linkLibrary(reference.llama);
     smoke_module.linkLibrary(reference.ggml);
     if (sdk) |path| smoke_module.addFrameworkPath(.{ .cwd_relative = path });
+    llamacpp.linkAppleLibcxx(b, smoke_module, sdk);
 
     const smoke = b.addExecutable(.{ .name = "smoke", .root_module = smoke_module });
 
@@ -239,28 +331,30 @@ pub fn build(b: *std.Build) !void {
     // Chat templates are Jinja, so the CLI takes the project's one permitted
     // dependency. `b.dependency` runs its `build.zig`, which is what declares
     // the module.
-    const jinja_module = b.dependency("vibe_jinja", .{
+    const jinja_module = b.dependency("zigjinja", .{
         .target = cfg.target,
         .optimize = cfg.optimize,
-    }).module("vibe_jinja");
+    }).module("zigjinja");
 
     const cli_module = b.createModule(.{
         .root_source_file = cfg.cli_source_file,
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
-        .link_libcpp = true,
+        // Apple's libc++, not Zig's -- see the note in build/llamacpp.zig.
+        .link_libcpp = false,
     });
     cli_module.addOptions("config", options);
     // The one permitted dependency, and only here: chat templates are Jinja,
     // and `libllamazig` must stay dependency-free. See PLAN.md Decisions 25
     // and 27.
-    cli_module.addImport("vibe_jinja", jinja_module);
+    cli_module.addImport("zigjinja", jinja_module);
     cli_module.addIncludePath(b.path("llama.cpp/include"));
     cli_module.addIncludePath(b.path("llama.cpp/ggml/include"));
     cli_module.linkLibrary(reference.llama);
     cli_module.linkLibrary(reference.ggml);
     if (sdk) |path| cli_module.addFrameworkPath(.{ .cwd_relative = path });
+    llamacpp.linkAppleLibcxx(b, cli_module, sdk);
 
     const cli = b.addExecutable(.{
         .name = cfg.cli_name,
@@ -309,10 +403,11 @@ pub fn build(b: *std.Build) !void {
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
-        .link_libcpp = true,
+        // Apple's libc++, not Zig's -- see the note in build/llamacpp.zig.
+        .link_libcpp = false,
     });
     cli_tests_module.addOptions("config", options);
-    cli_tests_module.addImport("vibe_jinja", jinja_module);
+    cli_tests_module.addImport("zigjinja", jinja_module);
     // `session.zig` imports llama.h, so even the argument-parsing tests need
     // the header and the library behind it.
     cli_tests_module.addIncludePath(b.path("llama.cpp/include"));
@@ -320,6 +415,7 @@ pub fn build(b: *std.Build) !void {
     cli_tests_module.linkLibrary(reference.llama);
     cli_tests_module.linkLibrary(reference.ggml);
     if (sdk) |path| cli_tests_module.addFrameworkPath(.{ .cwd_relative = path });
+    llamacpp.linkAppleLibcxx(b, cli_tests_module, sdk);
 
     const cli_tests = b.addTest(.{
         .root_module = cli_tests_module,

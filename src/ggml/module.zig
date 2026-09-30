@@ -45,6 +45,12 @@ comptime {
     _ = @import("quants/module.zig");
     // ggml-cpu/ggml-cpu.c, split across src/ggml/cpu/:
     _ = @import("cpu/module.zig");
+    _ = @import("threading.zig"); // ggml-threading.cpp
+    _ = @import("backend_reg.zig"); // ggml-backend-reg.cpp + ggml-backend-dl.cpp
+    _ = @import("gguf.zig"); // gguf.cpp
+    // ggml-backend.cpp, split in two: the vtable dispatch and the scheduler.
+    _ = @import("backend.zig");
+    _ = @import("backend_sched.zig");
 }
 
 // -----------------------------------------------------------------------------
