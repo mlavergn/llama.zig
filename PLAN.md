@@ -56,6 +56,7 @@ Settled in review. The plan below assumes all of these.
 | 36 | Definition of complete | **ggml and libllama both ported, `llama-cli` running Qwen3.5 with token parity.** All 151 architectures and cross-platform are named follow-on milestones, not part of this push. |
 | 37 | Licence | **MIT**, matching llama.cpp and `zigjinja`. |
 | 38 | Copyright holder | **`Marc Lavergne`, provisionally.** Taken from the repository's git author config; revisit before any public release. |
+| 40 | Order within Stage 4 | **Gated work first.** `ggml-backend-meta.cpp` and `ggml-opt.cpp` move to the end of Stage 4's ggml half, behind the `ggml-cpu/` C++. Neither is on the inference path, so neither has an end-to-end gate — and meta is **~96% unexecutable on this machine**: `ggml_backend_meta_device` is only built under `LLAMA_SPLIT_MODE_TENSOR`, our CLI never sets `split_mode`, and there is one GPU. The `ggml-cpu/` C++ is the opposite: covered by **`backend-ops`**, which runs CPU against Metal over 21,093 op configurations. Note that is the *only* gate that reaches it — measured, by putting an abort in `ggml_compute_forward_mul` and watching `make port` finish without hitting it. On a Metal machine the CPU op kernels never execute during inference, so `parity-cli` and `make port` cannot see them at all. One real gate still beats meta and opt's zero. Supersedes the ordering in "Order of work" step 1. |
 | 39 | Threading primitives in ported code | **pthreads directly**, not `std.Io.Mutex` / `std.Io.Condition`. Zig 0.16 requires an `Io` on every call and a backend entered through a C ABI has none. `std.Thread.spawn` is still used for the workers. |
 
 ---
@@ -319,7 +320,101 @@ a ggml backtrace when a C++ exception escapes. It stays until the C++ that can
 throw is gone, then it is dropped rather than ported. Recorded here so that is a
 decision and not an oversight.
 
-**2. `ggml-cpu/` C++** (28,125) — `ops.cpp` holds the CPU op implementations
+**2. `ggml-cpu/` C++** (28,125 raw, **15,488 live** on this target) —
+
+`binary-ops.cpp`, `unary-ops.cpp` and `vec.cpp` are **ported** —
+`src/ggml/cpu/binary_ops.zig` (4 symbols), `src/ggml/cpu/unary_ops.zig` (23)
+and `src/ggml/cpu/vec.zig` (10). Templates map cleanly onto `comptime`, as
+predicted.
+
+**`backend-ops` is the only gate this whole group has.** Measured, not assumed:
+an `impl.abort` at the top of `ggml_compute_forward_mul` lets `make port`
+finish without hitting it — on a Metal machine the CPU op kernels never run
+during inference, so `parity-cli`, `make port` and `graph-diff` cannot see
+them. Run `backend-ops` after every file here; `make validate` does **not**
+run it.
+
+**`vec.cpp` got its gate built first, and that was the right call.** Its three
+dot products are *accumulating* reductions where summation order and FP
+contraction decide the last bits, and nothing in the project could see them.
+`scripts/vec-golden` + `harness/vec_golden.c` + `src/ggml/cpu/vec_testing.zig`
+now capture the exact bits the C produces, compared on **bits**, contraction
+**on**.
+
+It paid for itself immediately: with the first six input patterns, replacing
+the **pairwise** `vaddvq_f32` with an ordered `@reduce(.Add, ...)` passed
+everything — the exact trap `CLAUDE.md` warns about, invisible to the gate
+built to catch it. A seventh pattern, `skewed`, keys magnitude on `i % 4`,
+which is the lane index, and closes it. See `NOTES.md`.
+
+**The general lesson for the rest of this group: build the oracle before the
+port, not after.** A port written first will be checked against whatever gate
+happens to exist, and a gate written second gets tuned, however unconsciously,
+to pass the code already written.
+
+### Porting `ops.cpp`: the split, and where it is up to
+
+**8,273 live lines, 88 exported symbols** — the largest translation unit in
+ggml, and ported over many sittings. `scripts/ops-check` reports progress;
+`make ops-diff` is the gate, and it was built first.
+
+**`ggml_compute_forward_mul_mat` is *not* in those 88.** It came with
+`ggml-cpu.c` and is already `src/ggml/cpu/mulmat.zig`. Check the contract
+before assuming a `ggml_compute_forward_*` belongs to this file.
+
+**`ops.cpp` stays in the build until all 88 exist.** Two definitions of a
+symbol in one static archive is not a link error — the linker picks one
+silently — so a half-wired port would build, run, and be quietly wrong.
+`scripts/ops-check` compiles the port against a throwaway root instead, which
+type-checks it without wiring it in.
+
+The split follows the C's own `// ggml_compute_forward_xxx` banner comments,
+which are its only internal structure:
+
+| file | C lines | symbols | |
+|---|---|---|---|
+| `dup.zig` | 15–575, 4828–4843 | dup, cpy, cont | **3, done** |
+| `arith.zig` | 576–1281 | add, add_id, add1, acc | 4 |
+| `reduce.zig` | 1282–1695 | sum, cumsum, sum_rows, mean, argmax, count_equal | 6 |
+| `repeat.zig` | 1696–2108 | repeat, repeat_back, concat | 3 |
+| `activation.zig` | 2109–3691 | unary, glu, silu_back, leaky_relu | 4 |
+| `norm.zig` | 3692–4235 | norm, rms_norm, rms_norm_mul_fused, rms_norm_back, group_norm, l2_norm | 6 |
+| `linalg.zig` | 4236–4827 | out_prod, scale, set | 3 |
+| `gather.zig` | 4844–5448 | get_rows, get_rows_back, set_rows, diag, diag_mask_inf, diag_mask_zero | 6 |
+| `softmax.zig` | 5449–5815 | soft_max, soft_max_ext_back, clamp | 3 |
+| `rope.zig` | 5816–6152 | rope, rope_back | 2 |
+| `conv.zig` | 6153–7542 | conv_transpose_1d/2d, im2col, im2col_back_f32, im2col_3d, col2im_1d, conv_2d, conv_3d, conv_2d_dw | 9 |
+| `pool.zig` | 7543–7836 | pool_1d, pool_2d, pool_2d_back | 3 |
+| `pad.zig` | 7837–8335 | upscale, pad, pad_reflect_1d, roll, arange, timestep_embedding | 6 |
+| `sort.zig` | 8336–~8500 | argsort, top_k, tri, fill, fwht | 5 |
+| `attention.zig` | ~8500–9561 | flash_attn_ext, flash_attn_back, lightning_indexer | 3 |
+| `ssm.zig` | 9562–9871 | ssm_conv, ssm_scan | 2 |
+| `window.zig` | 9872–10267 | win_part, win_unpart, get_rel_pos, add_rel_pos | 4 |
+| `recurrent.zig` | 10268–11465 | rwkv_wkv6/7, gla, gated_delta_net, dsv4_hc_comb/pre/post | 7 |
+| `custom.zig` | 11466–end | map_custom1/2/3, custom, cross_entropy_loss(_back), opt_step_adamw, opt_step_sgd, solve_tri | 8 |
+
+Two conventions this file forces, both already hit:
+
+- **The C uses `i00`…`i13` as loop indices and Zig reserves `i<N>` as integer
+  type names.** Renamed `j00`…`j13`, digit for digit, as `cpu/mulmat.zig`
+  already does. Do not renumber them.
+- **A citation at a `template<…>` line is wrong**; it goes on the definition
+  beneath. `port-links` has now caught this in four separate files.
+
+**Measure live lines, not raw ones, before estimating anything here.** `zig cc -E`
+plus the linemarkers gives the count that compiles on this target, and the gap
+is large: `llamafile/sgemm.cpp` is 4,164 raw but **391 live** — the templated
+x86 bulk is behind `__AVX__`/`__AVX512F__`, so `PLAN.md` calling it "the awkward
+one" was wrong. `amx/mmq.cpp` (2,511), `amx/amx.cpp` (249) and `hbm.cpp` (55)
+are **entirely dead** here, 2,815 lines that need no port at all. `ops.cpp` is
+12,021 raw and 8,436 live; `arch/arm/repack.cpp` 5,156 and 2,528;
+`repack.cpp` 4,836 and 3,164.
+
+That also shrinks the vtable cluster: `amx.cpp` has 0 live lines, so
+`traits.cpp` + `repack.cpp` + `arch/arm/repack.cpp` is **three** files and
+5,720 live lines, not four.
+
+ `ops.cpp` holds the CPU op implementations
 (212 symbols, 88 reached externally) and `repack.cpp` the quantized-weight
 repacking. Loops over tensors rather than STL-heavy abstraction, so it ports
 more like Stage 3 than like libllama. Two constraints from the measurement: the
@@ -500,10 +595,31 @@ end to end. What it includes, and one part of it is easy to undercount:
    Worth recording for the files still to come: it contains **no `throw`, no
    `catch`, no `std::string`, no templates and no virtual functions** — the
    difficulty was the five-pass assignment algorithm, not the C++.
-5. **`ggml-backend-meta.cpp`** (2,495 lines, 4 symbols) and **`ggml-opt.cpp`**
-   (1,094, 9). Neither is on the inference path — which means neither has an
-   end-to-end gate, and unit tests plus `port-coverage` are all that will
-   cover them.
+5. ~~`ggml-backend-meta.cpp` and `ggml-opt.cpp`~~ — **deferred to the end of
+   the ggml half by Decision 40.** Measured counts: meta is **8** symbols over
+   2,495 lines (not 4), opt is **37** over 1,094 (not 9).
+
+   Neither is on the inference path, so neither has an end-to-end gate. Worse,
+   meta is **~96% unexecutable here**: `ggml_backend_meta_device` is only
+   constructed under `LLAMA_SPLIT_MODE_TENSOR` (`llama.cpp:176, 217`), our CLI
+   never sets `split_mode`, and this machine has one GPU. `alloc.zig:1318`
+   guards its allocator path behind `buft_is_meta`, always false. Only the
+   three `is_meta` predicates run, and they always return false. Porting 2,400
+   lines of multi-GPU tensor-parallel machinery that cannot be executed or
+   gated is the worst value in the project; it waits until it is the only
+   thing left.
+
+   `ggml-opt.cpp` additionally holds a `std::mt19937` whose `std::shuffle`
+   order is **implementation-defined** — `std::uniform_int_distribution` is
+   unspecified, so libc++ and libstdc++ differ. That is the third instance of
+   the category in `CLAUDE.md`, "Where the C's own answer is unspecified", and
+   it gets the same treatment: implement MT19937 faithfully, document the
+   shuffle divergence, do not chase it.
+
+**Every symbol count this plan carried for Stage 4's first group was low** —
+gguf 44 vs 61, backend 82 vs 102, meta 4 vs 8, opt 9 vs 37. Measure the
+contract with `port-coverage` before estimating; the original survey figures
+are not usable as estimates.
 6. **`ggml.cpp`** (26 lines, 0 symbols) — dropped rather than ported, once no
    C++ in the build can throw. See the note under "Order of work" above.
 

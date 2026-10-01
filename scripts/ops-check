@@ -1,0 +1,67 @@
+#!/bin/bash
+# Compile the in-progress ops.cpp port and report how much of its contract
+# exists, without wiring it into the build.
+#
+# `ops.cpp` is 8,273 live lines and 88 exported symbols, so it is ported over
+# many sittings. The all-or-nothing rule says a translation unit is swapped in
+# only when it is complete -- and here that matters more than usual, because
+# two definitions of a symbol in one static archive is **not** a link error:
+# the linker picks one silently. Wiring a half-done ops.zig in would therefore
+# produce a library that builds, runs, and is wrong.
+#
+# So this compiles the port against a throwaway root instead, which type-checks
+# every kernel and lists the symbols it exports, while ops.cpp stays in the
+# build and keeps providing them.
+#
+# Usage: scripts/ops-check
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+printf 'comptime {\n    _ = @import("cpu/ops/module.zig");\n}\n' > src/ggml/.ops_check_root.zig
+trap 'rm -rf "$tmp"; rm -f src/ggml/.ops_check_root.zig' EXIT
+
+printf 'pub const probe_ported = false;\npub const probe_cpu = false;\n' > "$tmp/config.zig"
+
+if ! zig build-obj -femit-bin="$tmp/check.o" \
+        -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu -lc \
+        --dep config -Mroot=src/ggml/.ops_check_root.zig -Mconfig="$tmp/config.zig" 2>"$tmp/err"; then
+    echo "FAIL: the ops port does not compile"
+    head -30 "$tmp/err"
+    exit 1
+fi
+
+# The contract is ops.cpp's unmangled exports, the same filter port-coverage
+# applies to a C++ translation unit.
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+zig c++ -c llama.cpp/ggml/src/ggml-cpu/ops.cpp -o "$tmp/ops.o" -std=c++17 -w -O2 \
+    -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
+    -DNDEBUG -DGGML_USE_CPU -DGGML_USE_ACCELERATE 2>/dev/null
+
+nm -gUj "$tmp/ops.o"  2>/dev/null | sed 's/^_//' | grep -v '^_Z' | grep -v '__clang_call_terminate' | sort -u > "$tmp/want"
+nm -gUj "$tmp/check.o" 2>/dev/null | sed 's/^_//' | grep -v '^_Z' | sort -u > "$tmp/have"
+
+want=$(wc -l < "$tmp/want" | tr -d ' ')
+have=$(comm -12 "$tmp/want" "$tmp/have" | wc -l | tr -d ' ')
+# The check object transitively pulls in the rest of the ported library, so
+# "extra" is only meaningful within ops.cpp's own namespace.
+# `mul_mat` came with ggml-cpu.c and lives in cpu/mulmat.zig; it is pulled in
+# transitively and is not this port's.
+extra=$(comm -13 "$tmp/want" "$tmp/have" | grep '^ggml_compute_forward_' \
+    | grep -v '^ggml_compute_forward_mul_mat$' || true)
+
+printf 'ops.cpp  %s / %s symbols (%d%%), compiles; not yet swapped in\n' \
+    "$have" "$want" "$(( have * 100 / want ))"
+
+if [ -n "$extra" ]; then
+    echo "=== ggml_compute_forward_* EXPORTED BUT NOT IN ops.cpp's CONTRACT ==="
+    echo "$extra"
+fi
+if [ "${1:-}" = "--missing" ]; then
+    echo "=== STILL MISSING ==="
+    comm -23 "$tmp/want" "$tmp/have"
+fi

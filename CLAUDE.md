@@ -26,12 +26,21 @@ Where we are: **Stages 1, 2 and 3 complete; Stage 4 started.**
 
 **Stage 4 has begun, and the measurement that shapes it is done.** Every exported symbol of every ggml C++ object was intersected with the undefined symbols of every other object in `libggml.a` and `libllama.a`: **the external contract of 20 of the 24 C++ translation units in ggml is a pure C ABI.** A C++ file exports thousands of mangled symbols — `gguf.cpp` alone exports 2,002 — but they are template instantiations and inline functions, emitted weakly into every object that needs them, and almost none are reached from outside. So the Stage 3 swap mechanism carries over unchanged for the large majority. `PLAN.md` names the four exceptions and what each forces.
 
-Two C++ translation units are ported and swapped:
+Seven C++ translation units are ported and swapped:
 
 - `ggml-threading.cpp` → `src/ggml/threading.zig` (3 symbols).
 - `ggml-backend-reg.cpp` → `src/ggml/backend_reg.zig` (16 symbols). It took `ggml-backend-dl.cpp` out of the build with it: those three `dl_*` functions have C++ linkage Zig cannot provide, and the registry was their only caller.
+- `gguf.cpp` → `src/ggml/gguf.zig` (61 symbols). The first STL-heavy unit.
+- `ggml-backend.cpp` → `src/ggml/backend.zig` + `src/ggml/backend_sched.zig` (102 symbols), split along the C's own `// scheduler` seam.
+- `ggml-cpu/binary-ops.cpp` → `src/ggml/cpu/binary_ops.zig` (4 symbols).
+- `ggml-cpu/unary-ops.cpp` → `src/ggml/cpu/unary_ops.zig` (23 symbols).
+- `ggml-cpu/vec.cpp` → `src/ggml/cpu/vec.zig` (10 symbols).
 
-What remains is the rest of the C++ and the Obj-C: the op kernels in `ggml-cpu/ops.cpp` and `vec.cpp`, `gguf.cpp`, `ggml-backend.cpp`, the Metal host layer, and all of libllama.
+**Both counts `PLAN.md` carried for this group were low** — gguf was recorded as 44 and backend as 82. Measure the contract before estimating a C++ file; do not trust the survey figure.
+
+`ggml-backend.cpp` is also the counterexample to "C++ is the hard part": it has **zero `throw`, zero `catch`**, no `std::string`, no `std::map`, no templates and no virtual functions. Its own first line is `// Note: porting this file to C++ is a work in progress`. What made it hard was the five-pass assignment algorithm in `ggml_backend_sched_split_graph`.
+
+Only `ggml-backend-meta.cpp` (4 symbols), `ggml-opt.cpp` (9) and `ggml.cpp` (0, to be dropped) remain in `ggml_base_cxx_sources`. What remains beyond them is the `ggml-cpu/` C++, the Metal host layer, and all of libllama.
 
 `make validate` reports the exact counts.
 
@@ -89,15 +98,65 @@ checker only looked for the word `Ports`.
 
 **`make validate` is the fast check; parity is the real one.** `validate` runs formatting, the scaffold, the unit tests, the ported tests in both debug and release, `scripts/port-coverage`, `scripts/port-links`, and the graph diff. It proves the port is *consistent*, not *correct*.
 
-Correctness has five gates, and none of them subsumes the others:
+Correctness has eight gates, and none of them subsumes the others:
 
 - **`make graph-diff`** builds 131 nodes through every constructor family and diffs op, shape, strides, `op_params`, and `src[]` against the C. Needs no model. **The sharpest gate for the port's actual failure mode** — a constructor writing the wrong thing — and the only one that catches a halved softmax scale. It found the real `ggml_permute` bug.
-- **`make backend-ops`** runs upstream's `test-backend-ops` against our library: 21,093 op configurations, Metal against CPU, all passing. The broadest exercise, and the only one that *executes* the constructors at scale. **It cannot catch a consistently-wrong constructor** — both backends read the same `op_params` and agree. It catches crashes, assertion failures, and shapes a backend has no kernel for. `--diff` also compares output against the C reference (25,176 lines identical).
+- **`make backend-ops`** runs upstream's `test-backend-ops` against our library: 21,093 op configurations, Metal against CPU, all passing. The broadest exercise, and the only one that *executes* the constructors at scale. **It cannot catch a consistently-wrong constructor** — both backends read the same `op_params` and agree. It catches crashes, assertion failures, and shapes a backend has no kernel for. `--diff` runs the same binary against the C reference and diffs the two
+  **logs** — 25,176 lines identical. Read that for what it is: on a clean run
+  `test-backend-ops` prints an op descriptor and `OK`, and prints the error
+  value *only when it exceeds the threshold*, so the diff compares which
+  configurations ran and which passed, **not** any computed value. It is a
+  structural check, and it does not make `backend-ops` a value-level oracle.
 - **`make probe`** proves ported code is *on the execution path*. Green does not mean running: two definitions of a symbol in one static archive is not a link error, the linker just picks one silently. It takes **two runs**, `-Dprobe-ported` and `-Dprobe-cpu`, because the allocator fires while the graph is being planned and would mask the CPU dispatch every time.
 - **`scripts/vecdot-prefix` localises a dot-product mismatch.** Not a gate — a diagnostic. It asks the shipped C kernel for every prefix of a row, so the first prefix that diverges isolates the loop iteration, and `nblk = 1` versus `nblk = 2` separates the scalar tail from the vector body. It is what turned an unguessable 1-ULP difference in `iq4_nl` into a solved equation.
 - **The `_generic` dot products have no gate but their goldens.** `arch-fallback.h` renames nothing from `quants.c` on ARM and `arch/arm/quants.c` supplies every real entry point, so all 25 `ggml_vec_dot_*_generic` are exported and unreachable. `test-backend-ops` cannot see them and neither can token parity. `src/ggml/cpu/quants/golden.zig` holds the exact `f32` bits the C produces for **six** input patterns, regenerated by `scripts/vecdot-golden`. Compare on **bits**, never a tolerance.
 
   Two holes in that golden set were found by injection and closed. **Every `nvfp4` ARM golden was `0x00000000`** because the harness never called `ggml_cpu_init` and `GGML_CPU_UE4M3_TO_FP32` is a *table lookup* on NEON — a kernel returning zero would have passed all six. And **no pattern hit an exact tie**, so swapping round-half-to-even for round-half-away passed everything; the `ties` pattern exists to fix that. `testing.zig` now refuses a golden row that is entirely zero.
+- **The float dot products have no gate but their goldens either.**
+  `ggml_vec_dot_f32`, `_f16` and `_bf16` are accumulating reductions that
+  nothing else can see: `make port` never reaches the CPU kernels on a Metal
+  machine, and `backend-ops` compares with a tolerance.
+  `src/ggml/cpu/vec_golden.zig` holds the exact bits for **seven** patterns at
+  two lengths, regenerated by `scripts/vec-golden`, contraction **on**.
+  Compare on **bits**.
+
+  The seventh pattern exists because of an escape. With six, swapping the
+  **pairwise** `vaddvq_f32` for an ordered `@reduce(.Add, ...)` passed
+  everything — the trap named below in "Porting notes", invisible to the gate
+  meant to catch it. The two reductions differ on 23.5% of random 4-lane
+  vectors, so six patterns agreeing was luck. Lane `k` holds every element
+  with `i % 4 == k`, so `skewed` keys magnitude on `i % 4`; no pattern that
+  varies magnitude per *element* can reach it.
+
+- **`make ops-diff`** is the **only value-level oracle for `ggml-cpu`**. It
+  executes 109 ops on the CPU backend with fixed inputs and compares the
+  output **on bits** against the stock C. Nothing else can: `graph-diff` runs
+  with `no_alloc` and never computes, `backend-ops` compares with a tolerance,
+  and `make port` never reaches the CPU kernels on a Metal machine.
+
+  Three things about it are not interchangeable with the other diffs:
+
+  - **Its reference is `llama.cpp.zmake`, not the Apple-clang CMake build,**
+    and **both sides must be `--release=fast`.** `graph-diff` and `sched-diff`
+    compare structure, which no compiler changes; this compares bits, and both
+    a different compiler *and* a different optimization level move them.
+    Measured: against Apple clang the baseline failed on `xielu` and Q6_K
+    `mul_mat`, and at a mismatched optimization level on `rope` and
+    `timestep_embedding` — all with `ops.cpp` unported and identical on both
+    sides.
+  - **The reference run writes its quantized blocks and the port replays
+    them.** `ggml_quantize_chunk` produces different Q6_K bytes in the two
+    builds (Q4_K and Q8_0 match), which is the accepted consequence of leaving
+    the quantizers' fusions unnamed. Without sharing, the two `mul_mat`
+    kernels get different weights and the gate stops being about the kernel.
+  - **Activations run twice, at amplitude 1 and 30.** With `[-1, 1)` inputs
+    only, a `softplus` cutoff moved from 20 to 2 escapes, because no input
+    reaches either threshold. **A gate's input distribution is as much a part
+    of it as its comparison.**
+
+  Negative-tested 4/4, including both faults that escaped `backend-ops`.
+
+- **`make sched-diff`** diffs the scheduler's backend assignments against the reference C, through two stub devices in `harness/sched_dump.c` that differ only in which ops they claim. **Nothing else can see those decisions.** Measured: turning off pass 4's `view_src` propagation leaves `parity-cli` at 6/6 and `graph-diff` at 131/131. Parity has to miss it — at `--temp 0` the sampler takes an argmax and `backend-ops` has shown Metal and CPU agree on all 21,093 op configurations, so moving an op between backends shifts the last bits and not the token. **Token parity measures *what* was computed, never *where*.** One fault still escapes even this: removing pass 2's CPU skip, because pass 3 re-derives the same answer.
 - **`make parity-cli`** runs the actual `llamazig` binary against a reference C driver, both greedy. Covers what `parity-port` structurally cannot, because it lives in the binary rather than the library: argument parsing, tokenizer flags, the sampler chain, the decode loop. Negative-tested — a `--temp` that parses but never reaches the sampler fails all six prompts.
 - **`scripts/parity-port`** diffs generated tokens against the Apple-clang reference. End-to-end and **coarse** — measured, not guessed: doubling RoPE's `freq_base` passes, and so does halving the softmax scale. It catches structural faults (`ADD` as `SUB` fails all six prompts) and gross numeric ones (`freq_base = 1.0` fails all six). Never read a parity pass as "the numerics are right".
 
@@ -129,8 +188,17 @@ availability of an oracle.**
   kernels, so their goldens are captured with contraction **on** and the port
   matches the shipped binary bit for bit.
 
-The rule that separates the two: **name a fusion only when something can tell
-you you got it wrong.** `scripts/vecdot-prefix` is that something.
+- **In `cpu/unary_ops.zig`, `xielu` names its two.** `make ops-diff` is the
+  oracle, and it found the site: the C fuses, strict Zig did not, and the
+  result was 1 ULP out while `backend-ops` passed it. **Which** multiply
+  clang fuses was measured, not reasoned about — two feed each add, and over
+  200k inputs `fma(alpha_p*x, x, beta*x)` matches all 99,596 positive samples
+  where fusing the `beta` term matches 91%. It is the **left** operand of the
+  `+`.
+
+The rule that separates these: **name a fusion only when something can tell
+you you got it wrong.** `scripts/vecdot-prefix` and `make ops-diff` are that
+something; for the quantizers there is nothing, so they stay plain.
 
 ## Threads in ported code
 
@@ -169,6 +237,8 @@ the goal:
 **A filtered test run can hide a compile error.** `zig build test -Dtest-filter=...` skips codegen for non-matching tests, so a broken test body in an unselected test passes silently. Worse, a filter that matches *nothing* reports a comfortable row of passes: `-Dtest-filter="_K dot matches the C\|widening product"` is a literal string, not an alternation, and it matched zero tests while looking green. **Confirm the count changed, and run unfiltered before believing anything.**
 
 **A gate proves nothing until it has been made to fail.** Four separate false passes in this project came from a check that was green because it was testing nothing. Inject a fault, confirm the gate fails, then trust it — and confirm the build actually succeeded and the artifact actually changed, because a failed build leaves the previous library in place and the gate will happily pass on it.
+
+**And confirm the injection changes the computation, or it is not evidence about the gate.** Two of the `vec.cpp` faults read as escapes and were not: one widened an `f16` product but still stored an `f16` accumulator each iteration, and one was *provably* a no-op — `f16` has an 11-bit significand, the product needs at most 22 bits and `f32` holds 24, so widening either side of that multiply cannot change a bit (checked over 576M pairs). Both would have been written up as holes in the golden set.
 
 **The reference is `llama.cpp.zmake`** — the stock C sources built by the Zig toolchain. Both sides are then compiled by the same toolchain, so the port is the only variable. `scripts/parity-port` still points at the old Apple-clang CMake build and needs repointing. Note `llama.cpp.zmake` is a separate repository and is never modified by this project.
 

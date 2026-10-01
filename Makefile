@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff backend-ops parity-cli port ref ref-chat validate
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff backend-ops parity-cli port ref ref-chat validate
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -141,6 +141,17 @@ graph-diff:
 sched-diff:
 	zig build reference
 	./scripts/sched-diff
+
+# Diff the CPU op kernels' computed output against the reference C, on bits.
+# The only value-level oracle for ggml-cpu -- see the header of scripts/ops-diff.
+#
+# Both sides must be --release=fast: the reference is the stock C built by the
+# same Zig toolchain, and an optimization difference moves the last bit. The
+# reference lives in llama.cpp.zmake, which is a separate repository.
+ops-diff:
+	cd llama.cpp.zmake && zig build lib --release=fast
+	zig build reference --release=fast
+	./scripts/ops-diff
 
 # Diff our CLI's output against the C reference, end to end.
 parity-cli: buildcli

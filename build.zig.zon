@@ -1,26 +1,16 @@
 .{
     .name = .llamazig,
-    .description = "Llamacpp Zig Port",
-    .version = "0.0.2",
+    .description = "Llama.cpp Zig Port",
+    .version = "0.0.3",
     .fingerprint = 0xb16f7afa8792d6b2,
     .minimum_zig_version = "0.16.0",
     .paths = .{
         "src",
     },
-    // IMPORTANT: This module must NEVER have any external dependencies. The
-    // point of the port is that `zig build` alone produces the binary.
-    //
-    // One exception is granted, and only one: `zigjinja` (pure Zig, MIT) for
-    // chat templates, used by `cli/` only. See PLAN.md Decisions 25 and 27.
-    // The library itself stays dependency-free, so anything linking
-    // libllamazig inherits nothing.
-    //
-    // A sibling repository checked out beside this one, like `llama.cpp.zmake/`:
-    // its own repository, untracked here, already on Zig 0.16.
     .dependencies = .{
         .zigjinja = .{
             .path = "../zigjinja",
             .clone = "git@github.com:inferise/zigjinja.git",
-        },
+        },  
     },
 }

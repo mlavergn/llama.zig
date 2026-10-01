@@ -1,0 +1,77 @@
+#!/bin/bash
+# Diff the CPU op kernels' computed output against the reference C, on bits.
+#
+# This is the **only value-level oracle for ggml-cpu**. The others cannot do
+# the job:
+#
+#  - `scripts/graph-diff` runs with no_alloc and never computes. It checks the
+#    structure a constructor produces, not the numbers a kernel writes.
+#  - `make backend-ops` executes, but compares CPU against Metal with NMSE at
+#    1e-7. Measured on unary-ops.cpp: a `softplus` cutoff moved from 20 to 2
+#    gives NMSE around 8e-9 and passes. Its `--diff` mode does not close that
+#    -- `test-backend-ops` prints the error value only when it exceeds the
+#    threshold, so a clean log carries no computed values and the diff is
+#    structural.
+#  - `make port` and `make parity-cli` never reach the CPU kernels on a Metal
+#    machine at all.
+#
+# One thread on both sides: the CPU backend sums per-thread chunks, so a
+# different thread count is a different summation order and a different last
+# bit.
+#
+# The reference side is `llama.cpp.zmake` -- the **stock C sources built by the
+# same Zig toolchain** -- and not the Apple-clang CMake build the other diffs
+# use. That matters here and nowhere else: `graph-diff` and `sched-diff`
+# compare structure, which no compiler changes, but this compares bits, and a
+# compiler that contracts an expression differently moves the last one.
+#
+# Measured, which is how this was found: against the Apple-clang reference the
+# baseline failed on `xielu` and on a Q6_K `mul_mat` with ops.cpp unported and
+# byte-identical on both sides -- a compiler difference reported as a port bug.
+#
+# Requires: make -C llama.cpp.zmake lib, zig build reference
+# Usage: scripts/ops-diff
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+REF_LIBS=( llama.cpp.zmake/zig-out/lib/libggml.a )
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make -C llama.cpp.zmake lib'" >&2; exit 2; }
+done
+[ -f zig-out/lib/libggml.a ] || { echo "missing zig-out/lib/libggml.a -- run 'zig build reference'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+FW=(-framework Foundation -framework Metal -framework MetalKit -framework Accelerate)
+INC=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src)
+
+# Both sides are Zig-linked, because both sides are Zig-built. The Apple-clang
+# detour the other diff scripts need does not apply.
+zig cc harness/ops_dump.c -o "$tmp/ref" -std=c11 -w -O2 "${INC[@]}" \
+    "${REF_LIBS[@]}" "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    "${FW[@]}" -F "$SDK/System/Library/Frameworks" 2>"$tmp/ref.log" \
+    || { echo "FAIL: could not link against the reference libraries" >&2; tail -20 "$tmp/ref.log" >&2; exit 1; }
+
+# Apple's libc++, not Zig's -- Zig 0.16 cannot build its own against SDK 27.
+zig cc harness/ops_dump.c -o "$tmp/port" -std=c11 -w -O2 "${INC[@]}" \
+    zig-out/lib/libggml.a "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    "${FW[@]}" -F "$SDK/System/Library/Frameworks" 2>"$tmp/port.log" \
+    || { echo "FAIL: could not link against the ported libraries" >&2; tail -20 "$tmp/port.log" >&2; exit 1; }
+
+# The reference writes its quantized blocks; the port replays them. The two
+# builds' quantizers do not agree (Q6_K differs, Q4_K and Q8_0 match), and that
+# is accepted -- see the note in harness/ops_dump.c. Sharing the bytes keeps
+# this gate about the kernels rather than about the quantizers.
+"$tmp/ref"  write-q "$tmp/q.bin" > "$tmp/ref.txt"  2>/dev/null || { echo "FAIL: reference run aborted" >&2; exit 1; }
+"$tmp/port" read-q  "$tmp/q.bin" > "$tmp/port.txt" 2>/dev/null || { echo "FAIL: ported run aborted" >&2; exit 1; }
+
+if diff -u "$tmp/ref.txt" "$tmp/port.txt" > "$tmp/diff.txt"; then
+    printf 'PASS: %d op results identical, ported vs reference\n' "$(grep -c 'hash=' "$tmp/ref.txt")"
+    exit 0
+fi
+echo "FAIL: computed output differs between ported and reference builds"
+head -40 "$tmp/diff.txt"
+exit 1

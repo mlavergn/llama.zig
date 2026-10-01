@@ -47,6 +47,12 @@ comptime {
     _ = @import("threading.zig");
     // ggml-cpu/quants.c, split across src/ggml/cpu/quants/:
     _ = @import("quants/module.zig");
+    _ = @import("binary_ops.zig"); // ggml-cpu/binary-ops.cpp
+    _ = @import("unary_ops.zig"); // ggml-cpu/unary-ops.cpp
+    _ = @import("vec.zig"); // ggml-cpu/vec.cpp
+    // Not a port: the golden check for vec.cpp's float dot products.
+    _ = @import("vec.zig");
+    _ = @import("vec_testing.zig");
 }
 
 // -----------------------------------------------------------------------------
@@ -63,4 +69,8 @@ test {
     _ = @import("forward.zig");
     _ = @import("plan.zig");
     _ = @import("threading.zig");
+    _ = @import("binary_ops.zig");
+    _ = @import("unary_ops.zig");
+    _ = @import("vec.zig");
+    _ = @import("vec_testing.zig");
 }

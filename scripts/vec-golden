@@ -1,0 +1,73 @@
+#!/bin/bash
+# Regenerate src/ggml/cpu/vec_golden.zig from the C reference.
+#
+# Run once at the pinned commit; the output is committed and the port is tested
+# against it. Re-run only if the pin moves, and treat any change in the values
+# as a change in upstream behaviour that needs explaining.
+#
+# Why this exists alongside scripts/vecdot-golden
+# -----------------------------------------------
+# That script covers the *quantized* kernels. These are the three float dot
+# products in ggml-cpu/vec.cpp, and nothing else in the project can check them:
+# `make backend-ops` compares CPU against Metal with a tolerance, and on a Metal
+# machine they never run under `make port` at all -- measured, by putting an
+# abort in a CPU kernel and watching inference finish without hitting it.
+#
+# They are accumulating reductions, so the answer depends on accumulator
+# structure and summation order. All three differ: f32 uses four NEON
+# accumulators and a tree reduction ending in the *pairwise* `vaddvq_f32`; f16
+# accumulates in half precision; bf16 has no SIMD arm here at all and sums in
+# double.
+#
+# Contraction: on
+# ---------------
+# Matching the ARM quant goldens, and for the same reason. The fusion sites in
+# vec.cpp are explicit `GGML_F32_VEC_FMA` intrinsics rather than expressions a
+# compiler chose, so the port can name them with `@mulAdd` and match exactly.
+# See CLAUDE.md, "Float contraction".
+#
+# vec.cpp is compiled here rather than taken from the reference archive, so the
+# contraction setting is ours to choose. The object precedes the archive on the
+# link line, so its definitions win over the archive's vec.o.
+#
+# Requires: make buildmacos
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+REF_LIBS=(
+    cmake-build/apple/ggml/src/libggml.a
+    cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
+    cmake-build/apple/ggml/src/libggml-cpu.a
+    cmake-build/apple/ggml/src/libggml-base.a
+)
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make buildmacos'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+INC=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu)
+DEFS=(-DNDEBUG -DGGML_USE_CPU -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE
+      -DGGML_VERSION='"0.3.0"' -DGGML_COMMIT='"c1d0e7a00"')
+
+# Apple's libc++, not Zig's: Zig 0.16 cannot build its own against the macOS 27
+# SDK. See testcase/ and the note in build/llamacpp.zig.
+zig c++ -c llama.cpp/ggml/src/ggml-cpu/vec.cpp -o "$tmp/vec.o" \
+    -std=c++17 -w -O2 -ffp-contract=on \
+    -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+    "${INC[@]}" "${DEFS[@]}"
+
+zig cc harness/vec_golden.c "$tmp/vec.o" -o "$tmp/gen" \
+    -std=c11 -w -O2 -ffp-contract=on \
+    "${INC[@]}" "${DEFS[@]}" \
+    "${REF_LIBS[@]}" \
+    "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks"
+
+"$tmp/gen" > src/ggml/cpu/vec_golden.zig
+zig fmt src/ggml/cpu/vec_golden.zig >/dev/null
+echo "wrote src/ggml/cpu/vec_golden.zig ($(grep -c '^pub const .* = Dot{' src/ggml/cpu/vec_golden.zig) kernel/length pairs, contract on)"

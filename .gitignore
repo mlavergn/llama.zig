@@ -8,6 +8,7 @@ cmake-build
 
 # Locally installed build tools (CMake), not tracked
 .tools
+.vscode
 
 # Stray object files from ad-hoc compiler probes
 *.o

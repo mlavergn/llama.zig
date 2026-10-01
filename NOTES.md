@@ -1711,3 +1711,421 @@ stored value is -1, so the condition is false either way. The port guards it.
 Nothing observable changes; no gate would have caught either choice. Same call
 as `quantize_row_iq4_nl_ref`: where the C's answer is accidental, reproducing
 it is not the goal.
+
+---
+
+## Reordering Stage 4, and what the measurement showed
+
+Decision 40 moves `ggml-backend-meta.cpp` and `ggml-opt.cpp` to the end of the
+ggml half, behind the `ggml-cpu/` C++. The reason is coverage, not size.
+
+**`ggml-backend-meta.cpp` is ~96% unexecutable on this machine.**
+`ggml_backend_meta_device` is constructed only under `LLAMA_SPLIT_MODE_TENSOR`
+(`llama.cpp:176` and `:217`), our CLI never sets `split_mode`, and there is one
+GPU. `alloc.zig:1318` guards the allocator path behind `buft_is_meta`, which is
+always false. Of its 2,495 lines only the three `is_meta` predicates ever run,
+and they always return false. Porting 2,400 lines of multi-GPU tensor-parallel
+machinery that can be neither executed nor gated is the worst value in the
+project; it waits until nothing else is left.
+
+**`ggml-opt.cpp` carries an unspecified-behaviour case**, the third in this
+project. `ggml_opt_dataset_shuffle` calls `std::shuffle` with a
+`std::mt19937`. MT19937 is fully specified and portable — Zig's std has no
+implementation, but it is about forty lines. `std::shuffle`'s *distribution* is
+not: `std::uniform_int_distribution` is implementation-defined, so libc++ and
+libstdc++ produce different orders from the same generator state. Same
+treatment as `quantize_row_iq4_nl_ref` and the `qsort` tie-break — implement
+the generator faithfully, document the divergence, do not chase it.
+
+**Every symbol count the plan carried for this stage was low.** gguf 44 → 61,
+backend 82 → 102, meta 4 → 8, opt 9 → **37**. Four for four. The original
+survey counted something other than the unmangled exports; run `port-coverage`
+before estimating anything in Stage 4.
+
+## Porting `ggml-cpu/binary-ops.cpp`
+
+154 lines into `src/ggml/cpu/binary_ops.zig`, 4 symbols. The first of the
+`ggml-cpu/` C++.
+
+**Its only gate is `backend-ops`, and finding that out cost a round of
+injections.** All four faults — `add` computing `a - b`, the vDSP routine
+swapped for the wrong one, vDSP's operands reversed, the broadcast modulo
+dropped — passed `make parity-cli` 6/6. Even `add` becoming `sub`.
+
+The reason is not subtlety, it is that **the code never runs**. Putting
+`impl.abort` at the top of `ggml_compute_forward_mul` and running `make port`
+completes normally and never hits it: on a Metal machine the model executes
+entirely on the GPU, and the CPU op kernels are dead during inference. Token
+parity cannot gate a kernel that is never called.
+
+`make backend-ops` is the one gate that reaches them, because it explicitly
+runs CPU against Metal across 21,093 op configurations. Re-run against it, all
+four faults are **caught**:
+
+| Fault | `parity-cli` | `backend-ops` |
+|---|---|---|
+| `add` computes `a - b` | escaped | caught |
+| vDSP routine swapped for the wrong one | escaped | caught |
+| vDSP operands reversed | escaped | caught |
+| broadcast modulo dropped | escaped | caught |
+
+That generalises to the whole group — `ops.cpp`'s 8,436 live lines, `vec.cpp`,
+`unary-ops.cpp`, the repack cluster. **There is exactly one gate for the CPU op
+kernels, and it must be run after every one of these files.** A green
+`make validate` says nothing about them: it does not run `backend-ops`.
+
+### Templates map one-for-one onto comptime
+
+The C++ is three nested function templates — over the scalar operation and
+over the three element types — expanded by a seven-arm `if` on the runtime type
+triple. Zig's `comptime` parameters express exactly that, so `applyBinaryOp`
+takes the same four compile-time arguments and `binaryOp` is the same seven-arm
+chain. Nothing moved between compile time and run time in either direction.
+This is the case `PLAN.md` predicted when it said templates "usually come out
+cleaner"; it is the first time that has actually been true.
+
+The one place the shapes differ is the operation itself. The C++ passes
+`op_add` and friends as function-pointer template arguments and then, under
+Accelerate, *compares that pointer* against `op_add` to pick a vDSP routine.
+A comptime enum carries both jobs and makes the second a switch rather than a
+pointer identity test.
+
+### The Accelerate path is live, and keeping it is not optional
+
+`build/llamacpp.zig` defines `GGML_USE_ACCELERATE`, so the all-`f32` case goes
+through `vDSP_vadd`, `vDSP_vsub`, `vDSP_vmul` and `vDSP_vdiv` instead of the
+scalar loop. These are element-wise with no accumulation, so they are
+IEEE-exact and the choice costs nothing numerically — it is taken for
+throughput. Dropping it would be a silent performance regression that **no gate
+in this project measures**, which is exactly why it is called out here.
+
+`vDSP_vsub`'s argument order is the trap: the C passes `(src1, src0)` and that
+is what yields `src0 - src1`. Reversing it is an easy, plausible-looking edit.
+
+### Two more citation traps, both the ambiguity class
+
+- `binary-ops.cpp:49` is the `template <...>` line; the definition starts at
+  50. `port-links` caught the off-by-one.
+- **Five files named `common.h` live in the reference tree** (`common/`,
+  `ggml-cpu/`, `ggml-cann/`, `ggml-cpu/amx/`, `ggml-metal/kernels/`), so the
+  bare name is ambiguous and every citation to it was refused. Qualified to
+  `ggml-cpu/common.h`. That is the third time the checker has caught this —
+  after `ggml-backend-reg.cpp` and `ggml-backend.cpp`.
+
+### And more reserved integer names
+
+`i01`, `i02`, `i03`, `i10`, `i11`, `i12`, `i13` all parse as Zig integer types.
+Renamed digit for digit, as `cpu/mulmat.zig` already does. The list in
+`CLAUDE.md` names `i1`, `i2`, `i3`, `i11`, `i12`, `i13`; it is really *any*
+`i` followed by digits, and this file hit four more of them.
+
+### One thing `port-coverage` needed
+
+Anything under `src/ggml/cpu/` imports `../impl.zig`, which a per-file module
+root cannot see — `error: import of file outside module path`. Its
+`report_unit` entry is rooted at `ported.zig` like the other `cpu/` units,
+rather than at the file itself.
+
+## Porting `ggml-cpu/unary-ops.cpp`
+
+337 lines into `src/ggml/cpu/unary_ops.zig`, 23 symbols, compiled clean on the
+first attempt. Same gate situation as `binary-ops.cpp`: **`backend-ops` only**.
+
+### libm, not Zig's builtins
+
+Every transcendental goes through an `extern` declaration of the libm function
+the C calls — `expf`, `tanhf`, `logf`, `sqrtf` and the rest — rather than
+`@exp`, `@tanh` or `std.math`. Zig's builtins lower to LLVM intrinsics, which
+are free to differ from the platform's libm in the last bit.
+
+The reason to care is that **nothing here would catch it**: `make backend-ops`
+compares CPU against Metal with a *tolerance*, not bit-for-bit, and these
+kernels never run under `make port`. Unlike the NEON dot products, there is no
+`vecdot-prefix` equivalent to pin the shape. Calling the same function the C
+calls removes the question instead of measuring it, which is the right trade
+when no oracle exists.
+
+### Three traps in the arithmetic
+
+- **`op_expm1` is `expf(x) - 1.0f`, not `expm1f(x)`** (unary-ops.cpp:76). The
+  two differ near zero, and `op_elu` four functions earlier *does* use
+  `expm1f`. Reading the file quickly, this looks like a bug to tidy; it is
+  not ours to tidy.
+- **The two template families have different assertions.** `apply_unary_op`
+  requires `ggml_is_contiguous_rows` on both tensors; `apply_unary_op_functor`
+  requires only `ggml_is_contiguous_1`. Collapsing them into one generic —
+  which Zig makes tempting, since the bodies are otherwise identical — would
+  silently tighten one path or loosen the other.
+- **`xielu` reads `op_params` indices 1 to 4**, not 0 to 3.
+
+### The entry points are generated, and the C's are not
+
+The C writes out twenty-two one-line forwarders by hand. Here they come from a
+`comptime` loop over the `Op` enum with `@export`, so the list cannot drift out
+of step with the operations it dispatches to. `port-coverage` confirms the
+generated names match the C's exactly, 23/23 — which is the check that makes
+the generation safe rather than clever.
+
+### Not ported, deliberately
+
+`unary_op_params` (unary-ops.cpp:157) is a third template family over
+`float (*)(float, ggml_tensor *)`. Nothing instantiates it, so the C++ emits no
+code and it has no symbol. Recorded so the absence reads as a decision.
+
+### What `backend-ops` can and cannot see, measured
+
+Five faults injected, gate = `backend-ops`:
+
+| Fault | Result |
+|---|---|
+| `relu` threshold `>0` becomes `>1` | caught |
+| `hardsigmoid` divisor 6 becomes 5 | caught |
+| `xielu` reads `op_params` 0..3 instead of 1..4 | caught |
+| `op_expm1` uses `expm1f` instead of `expf(x)-1` | **escaped** |
+| `softplus` cutoff 20 becomes 2 | **escaped** |
+
+The two escapes are not a reachability problem — putting `impl.abort` in the
+generated `softplus` makes `backend-ops` exit 134 (SIGABRT), so the kernel is
+definitely run. They are a *metric* problem.
+
+`test-backend-ops` compares with **NMSE against a `1e-7` threshold**, over
+inputs drawn uniformly from **[-150, 150]**. The softplus fault changes the
+result only for `x` in (2, 20), by `log(1 + e^-x)` — an error that decays
+exponentially — while the signal is dominated by large `|x|`:
+
+    Σerr²  ≈ ∫₂²⁰ e^(-2x) dx / 300  ≈ 3e-5
+    Σa²    ≈ ∫₀¹⁵⁰ x²    dx / 300  ≈ 3750
+    NMSE   ≈ 8e-9  <  1e-7
+
+`expm1f` escapes for the same reason from the other end: it differs from
+`expf(x)-1` only near zero, a thin slice of a wide range.
+
+**So the rule for this group is: `backend-ops` catches faults that are wrong
+across the input domain, and misses faults confined to a band of it.** That is
+a different limitation from the one already recorded for it ("cannot catch a
+consistently-wrong constructor"), and it is the reason the float dot products
+in `vec.cpp` get goldens rather than relying on this gate — see
+`scripts/vec-golden`.
+
+### `port-links` earned its place again
+
+Seven citations in this one file pointed one to three lines early, all at
+`template <...>` headers rather than the definition beneath them. Same class as
+`binary-ops.cpp:49`. Writing these by eye does not work; the checker is the
+only reason they are right.
+
+## Porting `ggml-cpu/vec.cpp` — and the gate that had to exist first
+
+484 lines into `src/ggml/cpu/vec.zig`, 10 symbols. The file is small; the gate
+in front of it was the work.
+
+### Three dot products, three different accumulator shapes
+
+`ggml_vec_dot_f32`, `_f16` and `_bf16` look interchangeable and are not. Each
+accumulates differently, and each difference is load-bearing:
+
+| | body | reduce | tail |
+|---|---|---|---|
+| `f32` | 4 × `f32x4`, `vfmaq_f32`, step 16 | tree 2→1, then **pairwise** `vaddvq_f32` | `f32` scalar |
+| `f16` | 4 × `f16x8`, step 32 — **half precision** | tree, widen both halves, add, pairwise | **`double`** |
+| `bf16` | no SIMD arm compiles here at all | — | **`double`**, plain loop |
+
+A port that reads the f32 kernel and then "tidies" the other two to match is
+wrong three ways: the f16 body really does accumulate in half precision, and
+the two tails use a wider type than their bodies.
+
+### The gate did not exist, so `vec.cpp` could not be ported first
+
+`PLAN.md` had flagged this as a decision to take deliberately rather than by
+default. Nothing in the project could see these kernels:
+
+- **`make port` and `make parity-cli` never reach them.** On a Metal machine
+  the CPU kernels do not run during inference — measured on `binary-ops.cpp`,
+  by putting an `impl.abort` in one and watching generation finish.
+- **`make backend-ops` compares with NMSE at `1e-7`.** The `unary-ops.cpp`
+  round had already shown that misses a fault confined to a band of the input
+  domain.
+- **`scripts/vecdot-prefix` and `scripts/vecdot-golden` cover only the
+  *quantized* kernels.**
+
+So `harness/vec_golden.c` + `scripts/vec-golden` + `src/ggml/cpu/vec_golden.zig`
++ `src/ggml/cpu/vec_testing.zig` were built first, against the C, and the port
+was written afterwards. Same split as `src/ggml/cpu/quants/`: a generated
+golden file and a hand-written driver. Contraction **on**, because the fusion
+sites are explicit `GGML_F32_VEC_FMA` intrinsics rather than expressions a
+compiler chose — the rule from `CLAUDE.md`, "Float contraction".
+
+### The gate passed, then failed, and the failure is the point
+
+The port matched all six patterns at both lengths on the first run. That is a
+reason for suspicion, not confidence, so the faults went in — and **one
+escaped: replacing the pairwise `vaddvq_f32` with an ordered
+`@reduce(.Add, ...)` passed every pattern at both lengths.**
+
+That is the exact trap `CLAUDE.md` already warns about, invisible to the gate
+built to catch it. Three measurements pinned down why:
+
+- A brute-force search over random 4-lane vectors puts the two reductions at
+  odds **23.5% of the time**. Six patterns agreeing was luck, not a property
+  of the reduction.
+- They differ only when the two **pairs** differ enough in magnitude for the
+  grouping to change a rounding: `vaddvq_f32` computes `(l0+l1) + (l2+l3)`,
+  an ordered sum computes `((l0+l1)+l2) + l3`.
+- **Lane `k` of the surviving accumulator holds every element with
+  `i % 4 == k`**, so keying magnitude on `i % 4` is the only way to shape the
+  lanes from the input. `lopsided` varies magnitude per *element* and not per
+  *lane*, which is precisely why it cannot reach this.
+
+Hence a seventh pattern, `skewed`: three small lanes against one dominant one,
+`x[i] = lcg() * (i % 4 == 3 ? 1.0f : 0x1p-8f)`. The scale is a power of two so
+the scaling is exact and the pattern tests the reduction rather than the
+multiply. Predicted `0xC035D443` from a standalone reproduction before
+touching the harness; the regenerated golden agrees.
+
+With it, 5/5:
+
+| Fault | Result |
+|---|---|
+| f32 reduce: tree → left-to-right | caught |
+| f32 reduce: pairwise → `@reduce(.Add, ...)` | caught (**escaped before `skewed`**) |
+| f16 accumulator widened to `f32` | caught |
+| f32 FMA unfused (`a*b` then `+`) | caught |
+| bf16 accumulates in `f32`, not `double` | caught |
+
+### Two injections that were wrong, and what they cost
+
+Worth recording because both looked like escapes and neither was:
+
+- **"f16 body accumulates in f32"** computed the product in `f32` and then
+  stored back to `f16` every iteration, so the accumulator was still `f16`
+  between steps — nearly a no-op. Rewritten to widen the accumulator itself,
+  it is caught.
+- **"f16 tail product widened before multiply"** is a *provable* no-op. `f16`
+  has an 11-bit significand, the product needs at most 22, and `f32` holds 24,
+  so the `f32` multiply is exact and widening either side of it cannot change
+  the result. Checked exhaustively over 576M pairs: zero differ. Dropped
+  rather than counted as an escape.
+
+**An injection that does not change the computation is not evidence about the
+gate.** Both of these would have been written up as holes in the golden set.
+
+### A correction
+
+An intermediate measurement here reported `lopsided` as bit-identical to
+`random`, which would have made it a dead pattern. It is not — the reproduction
+had mistranscribed its second scale as `1e4f` where the harness says `4.0f`.
+Against the actual code it gives `0x3B575ABF` and discriminates summation order
+as documented.
+
+### Two transitions the swap forced
+
+- `ggml_table_gelu_f16` and `ggml_table_gelu_quick_f16` (65,536 entries each)
+  were *defined* by `vec.o` and declared `extern var` by `cpu/convert.zig`,
+  which fills them. They are now `pub export var` in `vec.zig`, and
+  `convert.zig` imports them instead.
+- The NEON helpers `vec.cpp` needs that the quant kernels do not —
+  `dup_n_f32`, `sub_f32`, `div_f32`, `fms_f32`, `fma_f16`, `add_f16`,
+  `cvt_f32_f16_half` — are local to `vec.zig` rather than added to
+  `quants/arm/neon.zig`. `neon.addvq_f32` and `neon.fma_f32` are imported from
+  there, because those two are the subtle ones and there should be one
+  definition of each.
+
+### `port-links` again
+
+One citation wrong: `ggml_float` given as `ggml-impl.h:60`, where it is
+`vec.h:15`. Fifth file in which writing a citation by eye produced a wrong one.
+
+## `scripts/ops-diff` — a value-level oracle for `ggml-cpu`, built before the port
+
+`ops.cpp` is 8,436 live lines and 92 symbols, the largest file left in ggml.
+Before writing a line of it, the question from the `vec.cpp` round was applied:
+**what oracle does this need?** The answer was that it had none.
+
+- `scripts/graph-diff` runs with `no_alloc = true`. It checks the *structure* a
+  constructor produces and never computes, so a kernel that builds the right
+  graph and fills it with wrong numbers is invisible to it.
+- `make backend-ops` executes, but compares CPU against Metal with **NMSE at
+  `1e-7`**. The `unary-ops.cpp` round measured what that misses.
+- `make port` and `make parity-cli` never reach the CPU kernels on a Metal
+  machine at all.
+
+So `harness/ops_dump.c` + `scripts/ops-diff`: 109 ops executed on the CPU
+backend with fixed inputs, output compared on **bits** against the stock C.
+Same two-build shape as `graph-diff` and `sched-diff`. One thread on both
+sides — the CPU backend sums per-thread chunks, so a different thread count is
+a different summation order and a different last bit.
+
+### `--diff` is not what it sounds like
+
+Worth stating plainly because it was nearly relied on. `CLAUDE.md` said
+`backend-ops --diff` "compares output against the C reference (25,176 lines
+identical)". It compares the two **logs**. `test-backend-ops` prints an op
+descriptor and `OK`, and prints the error value *only when it exceeds the
+threshold* (`test-backend-ops.cpp:1476`), so a clean log carries no computed
+values whatsoever. The diff is structural. It does not make `backend-ops` a
+value-level oracle, and the wording has been corrected.
+
+### The baseline failed four times, and only one was a port bug
+
+`ops.cpp` was unported and byte-identical on both sides, so the baseline should
+have been clean. It was not, four separate times:
+
+| What failed | Cause | Kind |
+|---|---|---|
+| `xielu`, Q6_K `mul_mat` | reference built by **Apple clang** | gate |
+| `rope`, `rope_ext`, `timestep_embedding` | reference built at a **different optimization level** | gate |
+| `xielu` | **real: unnamed FMA** in `unary_ops.zig` | **port** |
+| Q6_K `mul_mat` | harness **quantized inputs with the library under test** | gate |
+
+Three of the four were defects in the gate. That ratio is the argument for
+building a gate and breaking it before trusting it, and for building it
+*before* the port rather than after: had `ops.cpp` already been ported, every
+one of these would have read as a porting bug in 8,436 lines of new code.
+
+**The compiler confound is specific to this gate.** `graph-diff` and
+`sched-diff` link the Apple-clang CMake build and are right to: structure does
+not depend on the compiler. Bits do. `ops-diff` links `llama.cpp.zmake` — the
+stock C built by the same Zig toolchain — so the port is the only variable, and
+it must be built `--release=fast` to match.
+
+### The real bug: `xielu` was 1 ULP out
+
+The C compiles `alpha_p * x * x + beta * x` at `-ffp-contract=on` and fuses it;
+strict Zig did not. `backend-ops` passes it, which is the band-blindness
+already recorded for that gate showing up again.
+
+Which multiply clang fuses is the real question, since **two feed each add**.
+Measured over 200k inputs rather than guessed: for `x > 0`,
+`fma(alpha_p*x, x, beta*x)` matches **all 99,596** positive samples, where
+fusing the `beta` term matches 91% of them. That is the **left** operand of the
+`+`. The negative branch is ambiguous — both fusings agree on every sample — so
+the same left-operand rule settles it rather than the data.
+
+This is the project's contraction rule working as written: *name a fusion only
+when something can tell you you got it wrong*. For the quantizers nothing can,
+so they stay plain. For `xielu` something now can, so it is named.
+
+### The quantizers disagree, and the harness has to route around it
+
+The Q6_K `mul_mat` difference was not the dot product. Measured directly:
+`ggml_quantize_chunk` produces **different Q6_K bytes** in the two builds,
+while Q4_K and Q8_0 match. That is the documented, accepted consequence of
+leaving the quantizers' FMA sites unnamed — the deliverable reads model files
+and never writes one.
+
+But it meant the two `mul_mat` kernels were being fed different weights, so the
+comparison was not about the kernel at all. The reference run now writes its
+quantized blocks to a file and the ported run replays them. The LCG is advanced
+identically on the reading side so the two runs stay in step.
+
+### Input amplitude is part of the gate
+
+First injection round: `softplus` with its cutoff moved from 20 to 2
+**escaped** — the same fault that escaped `backend-ops`. Not a weakness in the
+comparison this time: the LCG produces values in `[-1, 1)`, so no input ever
+reaches a threshold of 2 *or* 20 and both arms take the same branch for every
+element. The fault was unreachable.
+
+The activation ops are now run twice, at amplitude 1 and at 30. **A gate's
+input distribution is as much a part of it as its comparison**, and a
+threshold fault is the case that shows the difference.

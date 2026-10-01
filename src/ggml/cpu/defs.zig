@@ -124,6 +124,142 @@ pub inline fn cpuRelax() void {
     asm volatile ("yield" ::: .{ .memory = true });
 }
 
+/// The locals `GGML_TENSOR_UNARY_OP_LOCALS` (ggml.h:314 @c1d0e7a00) declares.
+///
+/// The one-input counterpart of `BinaryLocals`: sixteen names rather than
+/// twenty-four. `ops.cpp` opens most of its kernels with this macro.
+pub const UnaryLocals = struct {
+    ne00: i64,
+    ne01: i64,
+    ne02: i64,
+    ne03: i64,
+    nb00: usize,
+    nb01: usize,
+    nb02: usize,
+    nb03: usize,
+
+    ne0: i64,
+    ne1: i64,
+    ne2: i64,
+    ne3: i64,
+    nb0: usize,
+    nb1: usize,
+    nb2: usize,
+    nb3: usize,
+
+    /// Parameters:
+    /// - `src0`: the input, supplying the `*0*` names.
+    /// - `dst`: the result, supplying the unsuffixed names.
+    ///
+    /// Return: the sixteen locals, by value.
+    pub fn of(src0: *const Tensor, dst: *const Tensor) UnaryLocals {
+        return .{
+            .ne00 = src0.ne[0],
+            .ne01 = src0.ne[1],
+            .ne02 = src0.ne[2],
+            .ne03 = src0.ne[3],
+            .nb00 = src0.nb[0],
+            .nb01 = src0.nb[1],
+            .nb02 = src0.nb[2],
+            .nb03 = src0.nb[3],
+
+            .ne0 = dst.ne[0],
+            .ne1 = dst.ne[1],
+            .ne2 = dst.ne[2],
+            .ne3 = dst.ne[3],
+            .nb0 = dst.nb[0],
+            .nb1 = dst.nb[1],
+            .nb2 = dst.nb[2],
+            .nb3 = dst.nb[3],
+        };
+    }
+};
+
+/// The locals `GGML_TENSOR_TERNARY_OP_LOCALS` (ggml.h:328 @c1d0e7a00)
+/// declares: thirty-two names, for three inputs and a result.
+pub const TernaryLocals = struct {
+    ne00: i64,
+    ne01: i64,
+    ne02: i64,
+    ne03: i64,
+    nb00: usize,
+    nb01: usize,
+    nb02: usize,
+    nb03: usize,
+
+    ne10: i64,
+    ne11: i64,
+    ne12: i64,
+    ne13: i64,
+    nb10: usize,
+    nb11: usize,
+    nb12: usize,
+    nb13: usize,
+
+    ne20: i64,
+    ne21: i64,
+    ne22: i64,
+    ne23: i64,
+    nb20: usize,
+    nb21: usize,
+    nb22: usize,
+    nb23: usize,
+
+    ne0: i64,
+    ne1: i64,
+    ne2: i64,
+    ne3: i64,
+    nb0: usize,
+    nb1: usize,
+    nb2: usize,
+    nb3: usize,
+
+    /// Parameters:
+    /// - `src0`, `src1`, `src2`: the three inputs.
+    /// - `dst`: the result, supplying the unsuffixed names.
+    ///
+    /// Return: the thirty-two locals, by value.
+    pub fn of(src0: *const Tensor, src1: *const Tensor, src2: *const Tensor, dst: *const Tensor) TernaryLocals {
+        return .{
+            .ne00 = src0.ne[0],
+            .ne01 = src0.ne[1],
+            .ne02 = src0.ne[2],
+            .ne03 = src0.ne[3],
+            .nb00 = src0.nb[0],
+            .nb01 = src0.nb[1],
+            .nb02 = src0.nb[2],
+            .nb03 = src0.nb[3],
+
+            .ne10 = src1.ne[0],
+            .ne11 = src1.ne[1],
+            .ne12 = src1.ne[2],
+            .ne13 = src1.ne[3],
+            .nb10 = src1.nb[0],
+            .nb11 = src1.nb[1],
+            .nb12 = src1.nb[2],
+            .nb13 = src1.nb[3],
+
+            .ne20 = src2.ne[0],
+            .ne21 = src2.ne[1],
+            .ne22 = src2.ne[2],
+            .ne23 = src2.ne[3],
+            .nb20 = src2.nb[0],
+            .nb21 = src2.nb[1],
+            .nb22 = src2.nb[2],
+            .nb23 = src2.nb[3],
+
+            .ne0 = dst.ne[0],
+            .ne1 = dst.ne[1],
+            .ne2 = dst.ne[2],
+            .ne3 = dst.ne[3],
+            .nb0 = dst.nb[0],
+            .nb1 = dst.nb[1],
+            .nb2 = dst.nb[2],
+            .nb3 = dst.nb[3],
+        };
+    }
+};
+
 /// The locals `GGML_TENSOR_BINARY_OP_LOCALS` (ggml.h:320 @c1d0e7a00) declares.
 ///
 /// The macro drops twenty-four names into the enclosing scope. Zig has no

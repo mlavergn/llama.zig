@@ -37,8 +37,11 @@ pub export var ggml_table_f32_ue4m3: [1 << 8]f32 = @splat(0);
 
 /// The GELU tables, still C++ in `ggml-cpu/vec.cpp` but filled here because
 /// `ggml_cpu_init` is what fills them (vec.h:62, vec.h:65).
-extern var ggml_table_gelu_f16: [1 << 16]c.ggml_fp16_t;
-extern var ggml_table_gelu_quick_f16: [1 << 16]c.ggml_fp16_t;
+// Defined by `cpu/vec.zig`, which ports `vec.cpp` where the C declares them.
+// They were `extern var` against `vec.o` until that file was ported.
+const vec = @import("vec.zig");
+const ggml_table_gelu_f16 = &vec.ggml_table_gelu_f16;
+const ggml_table_gelu_quick_f16 = &vec.ggml_table_gelu_quick_f16;
 
 // -----------------------------------------------------------------------------
 // Scalar conversions

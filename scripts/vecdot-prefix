@@ -34,7 +34,9 @@ zig cc harness/vecdot_prefix.c \
     -o "$tmp/prefix" -std=c11 -w -O2 -ffp-contract=on \
     -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
     "${REF_LIBS[@]}" \
-    -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    "$(xcrun --sdk macosx --show-sdk-path)/usr/lib/libc++.tbd" \
+    "$(xcrun --sdk macosx --show-sdk-path)/usr/lib/libc++abi.tbd" \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks"
 
 "$tmp/prefix" "$@"

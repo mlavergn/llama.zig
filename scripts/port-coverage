@@ -173,5 +173,17 @@ LANG_=cxx report_unit "gguf.cpp" llama.cpp/ggml/src/gguf.cpp yes "$PORTED_DIR/po
 LANG_=cxx report_unit "ggml-backend.cpp" llama.cpp/ggml/src/ggml-backend.cpp yes \
     "$PORTED_DIR/backend.zig" "$PORTED_DIR/backend_sched.zig"
 
+# The ggml-cpu/ C++, taken in order of size. These are on the hot path and
+# covered by backend-ops, parity-cli and graph-diff -- unlike the two files
+# Decision 40 deferred.
+# Rooted at `ported.zig`, not the file itself: anything under `cpu/` imports
+# `../impl.zig`, which a per-file module root cannot see.
+LANG_=cxx report_unit "binary-ops.cpp" llama.cpp/ggml/src/ggml-cpu/binary-ops.cpp yes \
+    "$PORTED_DIR/ported.zig"
+LANG_=cxx report_unit "unary-ops.cpp" llama.cpp/ggml/src/ggml-cpu/unary-ops.cpp yes \
+    "$PORTED_DIR/ported.zig"
+LANG_=cxx report_unit "vec.cpp" llama.cpp/ggml/src/ggml-cpu/vec.cpp yes \
+    "$PORTED_DIR/ported.zig"
+
 exit 0
 
