@@ -1011,10 +1011,19 @@ pub export fn ggml_backend_multi_buffer_set_usage(buffer: c.ggml_backend_buffer_
 /// `ggml_dup_tensor` gives the same shape and type but contiguous strides;
 /// this copies the source's `nb` over the top so the layout matches too.
 /// Shared with `backend_sched.zig`, which is the heavier user.
+///
+/// **Do not write this as `dup.*.nb[i] = tensor.*.nb[i]`.** Zig 0.16 types
+/// `p.*.arr[i]` as the whole array when `p` is a C pointer (`[*c]T`), and
+/// indexes in steps of the array's size: that loop copied 128 bytes starting
+/// at `nb`, so every scheduler input copy inherited its source's `op`,
+/// `op_params`, `flags` and first three `src` pointers. Outputs stayed right,
+/// which is why nothing caught it until `scripts/node-diff --gpu` printed the
+/// copies' ops. `p[0].arr[i]`, or a `*T`, indexes correctly. See NOTES.md.
 pub fn dupTensorLayout(ctx: ?*c.ggml_context, tensor: [*c]const c.ggml_tensor) [*c]c.ggml_tensor {
-    const dup = c.ggml_dup_tensor(ctx, tensor);
+    const dup = impl.one(c.ggml_tensor, c.ggml_dup_tensor(ctx, tensor));
+    const src = impl.one(c.ggml_tensor, @constCast(tensor));
     for (0..c.GGML_MAX_DIMS) |i| {
-        dup.*.nb[i] = tensor.*.nb[i];
+        dup.nb[i] = src.nb[i];
     }
     return dup;
 }
@@ -1670,12 +1679,32 @@ test "dupTensorLayout keeps the source's strides, not contiguous ones" {
     const base = c.ggml_new_tensor_2d(gctx, c.GGML_TYPE_F32, 4, 8);
     // A transpose has non-contiguous strides, which `ggml_dup_tensor` alone
     // would discard -- that is the whole reason this helper exists.
-    const t = c.ggml_transpose(gctx, base);
-    const dup = dupTensorLayout(gctx, t);
+    const t = impl.one(c.ggml_tensor, c.ggml_transpose(gctx, base));
+    const dup = impl.one(c.ggml_tensor, dupTensorLayout(gctx, t));
 
+    // Through single-item pointers: `t.*.nb[i]` on a `[*c]` is the whole
+    // array, and this test used to pass by comparing two wrong reads.
     for (0..c.GGML_MAX_DIMS) |i| {
-        try std.testing.expectEqual(t.*.nb[i], dup.*.nb[i]);
-        try std.testing.expectEqual(t.*.ne[i], dup.*.ne[i]);
+        try std.testing.expectEqual(t.nb[i], dup.nb[i]);
+        try std.testing.expectEqual(t.ne[i], dup.ne[i]);
     }
-    try std.testing.expectEqual(t.*.type, dup.*.type);
+    try std.testing.expectEqual(t.type, dup.type);
+}
+
+test "dupTensorLayout touches nothing past the strides" {
+    const gctx = c.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true });
+    defer c.ggml_free(gctx);
+
+    const a = c.ggml_new_tensor_2d(gctx, c.GGML_TYPE_F32, 4, 8);
+    const b = c.ggml_new_tensor_2d(gctx, c.GGML_TYPE_F32, 4, 8);
+    const src = impl.one(c.ggml_tensor, c.ggml_add(gctx, a, b));
+    _ = c.ggml_set_output(src);
+
+    const dup = impl.one(c.ggml_tensor, dupTensorLayout(gctx, src));
+
+    // A fresh tensor: no op, no sources, no flags. The C pointer-indexing bug
+    // above copied all three from `src`.
+    try std.testing.expectEqual(@as(c.enum_ggml_op, c.GGML_OP_NONE), dup.op);
+    try std.testing.expectEqual(@as(i32, 0), dup.flags);
+    try std.testing.expect(dup.src[0] == null and dup.src[1] == null);
 }

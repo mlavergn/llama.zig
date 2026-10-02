@@ -184,6 +184,10 @@ LANG_=cxx report_unit "unary-ops.cpp" llama.cpp/ggml/src/ggml-cpu/unary-ops.cpp 
     "$PORTED_DIR/ported.zig"
 LANG_=cxx report_unit "vec.cpp" llama.cpp/ggml/src/ggml-cpu/vec.cpp yes \
     "$PORTED_DIR/ported.zig"
+# ops.cpp, split by op family across cpu/ops/. Its value-level gate is
+# `make ops-diff`, which backend-ops and parity cannot stand in for.
+LANG_=cxx report_unit "ops.cpp" llama.cpp/ggml/src/ggml-cpu/ops.cpp yes \
+    "$PORTED_DIR/ported.zig"
 
 exit 0
 

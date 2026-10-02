@@ -66,6 +66,19 @@ void ggml_vec_dot_bf16(int n, float * s, size_t bs,       ggml_bf16_t * x, size_
 // and the tail wrong passes every NELEM-only check.
 #define NELEM_TAIL 519
 
+// Two short lengths, for the f32 kernel's leftover loop. The reference
+// compiler vectorizes that loop as a strict in-order reduction: groups of four
+// products are rounded (`fmul.4s`) and added one by one, and only the last
+// `t % 4` elements are fused (`fmadd`). NELEM_TAIL's 7-element tail after a
+// sum of ~8 lands on the same bits whether the port fuses all, none or the
+// right split -- measured -- so it cannot see this. Six lengths, because two
+// were not enough: with 11 and 27 only, an all-unfused tail still passed --
+// only a few patterns discriminate, each about a third of the time. Each
+// leaves a tail that is both rounded groups and a fused remainder; 27, 30 and
+// 46 add one or two vector steps in front of it.
+static const int short_lens[] = { 11, 13, 14, 27, 30, 46 };
+#define NSHORT ((int) (sizeof short_lens / sizeof short_lens[0]))
+
 enum pattern { P_RANDOM, P_ZEROS, P_SIGNS, P_OPPOSED, P_LOPSIDED, P_TIES, P_SKEWED, NPATTERNS };
 
 static const char * pattern_names[NPATTERNS] = {
@@ -189,11 +202,13 @@ int main(void) {
     printf("//! against Metal with a tolerance, and on a Metal machine they never\n");
     printf("//! run under `make port` at all.\n");
     printf("//!\n");
-    printf("//! Each kernel is captured at two lengths: `nelem`, a whole number of\n");
+    printf("//! Each kernel is captured at four lengths: `nelem`, a whole number of\n");
     printf("//! vector steps, and `nelem_tail`, which leaves a scalar remainder.\n");
     printf("//! The tails accumulate in a different type from the bodies, so a\n");
     printf("//! port that gets the body right and the tail wrong passes the first\n");
-    printf("//! and fails the second.\n");
+    printf("//! and fails the second. The `_nN` constants, at the `short_lens`, exist\n");
+    printf("//! for the f32 leftover loop, which the compiler vectorizes into rounded\n");
+    printf("//! groups of four and a fused remainder; see `harness/vec_golden.c`.\n");
     printf("\n");
     printf("/// One kernel's result for each input pattern, as raw `f32` bits.\n");
     printf("pub const Dot = struct {\n");
@@ -205,11 +220,21 @@ int main(void) {
     printf("pub const nelem = %d;\n\n", NELEM);
     printf("/// A length that leaves a scalar tail for both the f32 and f16 steps.\n");
     printf("pub const nelem_tail = %d;\n\n", NELEM_TAIL);
+    printf("/// Lengths whose tail is rounded groups of four and a fused remainder.\n");
+    printf("pub const short_lens = [_]usize{ ");
+    for (int i = 0; i < NSHORT; i++) printf("%d, ", short_lens[i]);
+    printf("};\n\n");
 
-    const int lens[2]       = { NELEM, NELEM_TAIL };
-    const char * sufs[2]    = { "", "_tail" };
+    int lens[2 + NSHORT];
+    char sufs[2 + NSHORT][16];
+    lens[0] = NELEM;      strcpy(sufs[0], "");
+    lens[1] = NELEM_TAIL; strcpy(sufs[1], "_tail");
+    for (int i = 0; i < NSHORT; i++) {
+        lens[2 + i] = short_lens[i];
+        snprintf(sufs[2 + i], sizeof sufs[0], "_n%d", short_lens[i]);
+    }
 
-    for (int li = 0; li < 2; li++) {
+    for (int li = 0; li < 2 + NSHORT; li++) {
         const int n = lens[li];
 
         for (int k = 0; k < 3; k++) {

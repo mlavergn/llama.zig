@@ -423,7 +423,8 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
 /// time, the mask vectors being shifted down by two after each group.
 ///
 /// The epilogue is one statement -- `sumf += d * sumi - dmin * sumi_mins` --
-/// where `q4_K` uses two. Kept as written.
+/// where `q4_K` uses two, and it contracts differently from the two-statement
+/// form: see the note at the site.
 pub export fn ggml_vec_dot_q5_K_q8_K(
     n: c_int,
     s: [*c]f32,
@@ -505,12 +506,12 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
             sc += 1;
         }
 
-        sumf = @mulAdd(
-            f32,
-            -dmin,
-            @as(f32, @floatFromInt(sumi_mins)),
-            @mulAdd(f32, d, @as(f32, @floatFromInt(sumi)), sumf),
-        );
+        // `sumf += d * sumi - dmin * sumi_mins`: clang contracts the
+        // right-hand side alone, fusing its left product and rounding the
+        // right one, then adds that to `sumf` -- `fnmul`, `fmadd`, `fadd` in
+        // the reference `quants.o`. This was a fused chain into `sumf`, which
+        // the goldens could not tell apart and a CPU-only decode could.
+        sumf += @mulAdd(f32, d, @as(f32, @floatFromInt(sumi)), -(dmin * @as(f32, @floatFromInt(sumi_mins))));
     }
 
     s[0] = sumf;

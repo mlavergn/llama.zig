@@ -272,6 +272,15 @@ fn runInteractive(
         defer reply.deinit(gpa);
 
         _ = try session.generateTurn(segments, out, &reply);
+        // Say when the reply was cut off rather than finished: without this
+        // the prompt comes back mid-sentence and the cut looks like the
+        // model's. stderr, so a piped transcript holds only the reply.
+        switch (session.last_stop) {
+            .eog => {},
+            .n_predict => try err.print("[reply cut off: -n {d} tokens reached]\n", .{settings.n_predict}),
+            .context_full => try err.print("[reply cut off: context full; /clear to start over, or raise -c]\n", .{}),
+        }
+        try err.flush();
 
         try history.append(gpa, .{ .role = "assistant", .content = try gpa.dupe(u8, reply.items) });
     }

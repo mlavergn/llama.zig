@@ -322,17 +322,19 @@ decision and not an oversight.
 
 **2. `ggml-cpu/` C++** (28,125 raw, **15,488 live** on this target) —
 
-`binary-ops.cpp`, `unary-ops.cpp` and `vec.cpp` are **ported** —
-`src/ggml/cpu/binary_ops.zig` (4 symbols), `src/ggml/cpu/unary_ops.zig` (23)
-and `src/ggml/cpu/vec.zig` (10). Templates map cleanly onto `comptime`, as
-predicted.
+`binary-ops.cpp`, `unary-ops.cpp`, `vec.cpp` and `ops.cpp` are **ported** —
+`src/ggml/cpu/binary_ops.zig` (4 symbols), `src/ggml/cpu/unary_ops.zig` (23),
+`src/ggml/cpu/vec.zig` (10) and `src/ggml/cpu/ops/` (88). Templates map
+cleanly onto `comptime`, as predicted.
 
-**`backend-ops` is the only gate this whole group has.** Measured, not assumed:
-an `impl.abort` at the top of `ggml_compute_forward_mul` lets `make port`
-finish without hitting it — on a Metal machine the CPU op kernels never run
-during inference, so `parity-cli`, `make port` and `graph-diff` cannot see
-them. Run `backend-ops` after every file here; `make validate` does **not**
-run it.
+**On a Metal machine the CPU op kernels never run during inference.**
+Measured: an `impl.abort` at the top of `ggml_compute_forward_mul` lets
+`make port` finish without hitting it, so `parity-cli`, `make port` and
+`graph-diff` cannot see this group. Its gates are `make ops-diff` (bits, fixed
+cases), `make node-diff` (bits, a real model's graph on the CPU device) and
+`make parity-port-cpu` (tokens, CPU alone), plus `backend-ops` for crashes and
+gross errors. `make validate` runs **none** of them; run all four after every
+file here.
 
 **`vec.cpp` got its gate built first, and that was the right call.** Its three
 dot products are *accumulating* reductions where summation order and FP
@@ -352,75 +354,50 @@ port, not after.** A port written first will be checked against whatever gate
 happens to exist, and a gate written second gets tuned, however unconsciously,
 to pass the code already written.
 
-### Porting `ops.cpp`: the split, and where it is up to
+### `ops.cpp`: done
 
-**8,273 live lines, 88 exported symbols** — the largest translation unit in
-ggml, and ported over many sittings. `scripts/ops-check` reports progress;
-`make ops-diff` is the gate, and it was built first.
+**88 of 88 symbols, swapped in**, split by op family across 19 files under
+`src/ggml/cpu/ops/` — the split follows the C's own `// ggml_compute_forward_xxx`
+banners. Ported in one sitting by seven parallel workers, one op family group
+each, against an oracle extended *before* the swap: `make ops-diff` went from
+109 cases to ~300, at one thread **and three**, and covers every family. See
+`NOTES.md`, "Porting `ggml-cpu/ops.cpp`".
 
-**`ggml_compute_forward_mul_mat` is *not* in those 88.** It came with
-`ggml-cpu.c` and is already `src/ggml/cpu/mulmat.zig`. Check the contract
-before assuming a `ggml_compute_forward_*` belongs to this file.
+**`ggml_compute_forward_mul_mat` is not among the 88.** It came with
+`ggml-cpu.c` and is `src/ggml/cpu/mulmat.zig`. Check the contract before
+assuming a `ggml_compute_forward_*` belongs to a file.
 
-**`ops.cpp` stays in the build until all 88 exist.** Two definitions of a
-symbol in one static archive is not a link error — the linker picks one
-silently — so a half-wired port would build, run, and be quietly wrong.
-`scripts/ops-check` compiles the port against a throwaway root instead, which
-type-checks it without wiring it in.
+What the swap found, none of which any gate before it could see:
 
-The split follows the C's own `// ggml_compute_forward_xxx` banner comments,
-which are its only internal structure:
+- **Two compiler behaviours the port has to reproduce**, both in
+  `src/ggml/cpu/ops/common.zig`: clang folds a `sinf`/`cosf` pair into
+  Apple's `__sincosf_stret`, which rounds differently; and the loop
+  vectorizer turns a plain `acc += a[i]*b[i]` reduction into rounded groups
+  of four and a fused remainder, behind runtime alias guards.
+- **Four bugs in code ported in earlier sessions**, all found end to end:
+  `ggml_vec_dot_f32`'s scalar tail (the same vectorizer behaviour), and the
+  `q5_K`, `tq1_0` and `tq2_0` dot-product epilogues. Their goldens passed all
+  four.
+- **A Zig 0.16 miscompile**: `p.*.arr[i]` through a `[*c]` indexes in steps
+  of the whole array. It corrupted every scheduler input copy.
 
-| file | C lines | symbols | |
-|---|---|---|---|
-| `dup.zig` | 15–575, 4828–4843 | dup, cpy, cont | **3, done** |
-| `arith.zig` | 576–1281 | add, add_id, add1, acc | 4 |
-| `reduce.zig` | 1282–1695 | sum, cumsum, sum_rows, mean, argmax, count_equal | 6 |
-| `repeat.zig` | 1696–2108 | repeat, repeat_back, concat | 3 |
-| `activation.zig` | 2109–3691 | unary, glu, silu_back, leaky_relu | 4 |
-| `norm.zig` | 3692–4235 | norm, rms_norm, rms_norm_mul_fused, rms_norm_back, group_norm, l2_norm | 6 |
-| `linalg.zig` | 4236–4827 | out_prod, scale, set | 3 |
-| `gather.zig` | 4844–5448 | get_rows, get_rows_back, set_rows, diag, diag_mask_inf, diag_mask_zero | 6 |
-| `softmax.zig` | 5449–5815 | soft_max, soft_max_ext_back, clamp | 3 |
-| `rope.zig` | 5816–6152 | rope, rope_back | 2 |
-| `conv.zig` | 6153–7542 | conv_transpose_1d/2d, im2col, im2col_back_f32, im2col_3d, col2im_1d, conv_2d, conv_3d, conv_2d_dw | 9 |
-| `pool.zig` | 7543–7836 | pool_1d, pool_2d, pool_2d_back | 3 |
-| `pad.zig` | 7837–8335 | upscale, pad, pad_reflect_1d, roll, arange, timestep_embedding | 6 |
-| `sort.zig` | 8336–~8500 | argsort, top_k, tri, fill, fwht | 5 |
-| `attention.zig` | ~8500–9561 | flash_attn_ext, flash_attn_back, lightning_indexer | 3 |
-| `ssm.zig` | 9562–9871 | ssm_conv, ssm_scan | 2 |
-| `window.zig` | 9872–10267 | win_part, win_unpart, get_rel_pos, add_rel_pos | 4 |
-| `recurrent.zig` | 10268–11465 | rwkv_wkv6/7, gla, gated_delta_net, dsv4_hc_comb/pre/post | 7 |
-| `custom.zig` | 11466–end | map_custom1/2/3, custom, cross_entropy_loss(_back), opt_step_adamw, opt_step_sgd, solve_tri | 8 |
+Two new gates came out of it: `make node-diff`, every node of a real model's
+decode on bits, and `make parity-port-cpu`, which loads the model on the CPU
+alone. On a Metal machine they and `ops-diff` are the only things that ever
+run the CPU kernels.
 
-Two conventions this file forces, both already hit:
+**Measure live lines, not raw ones, before estimating anything in this
+group.** `zig cc -E` plus the linemarkers gives the count that compiles on this
+target, and the gap is large: `llamafile/sgemm.cpp` is 4,164 raw but **391
+live** — the templated x86 bulk is behind `__AVX__`/`__AVX512F__`.
+`amx/mmq.cpp` (2,511), `amx/amx.cpp` (249) and `hbm.cpp` (55) are **entirely
+dead** here, 2,815 lines that need no port at all. `arch/arm/repack.cpp` is
+5,156 raw and 2,528 live; `repack.cpp` 4,836 and 3,164.
 
-- **The C uses `i00`…`i13` as loop indices and Zig reserves `i<N>` as integer
-  type names.** Renamed `j00`…`j13`, digit for digit, as `cpu/mulmat.zig`
-  already does. Do not renumber them.
-- **A citation at a `template<…>` line is wrong**; it goes on the definition
-  beneath. `port-links` has now caught this in four separate files.
-
-**Measure live lines, not raw ones, before estimating anything here.** `zig cc -E`
-plus the linemarkers gives the count that compiles on this target, and the gap
-is large: `llamafile/sgemm.cpp` is 4,164 raw but **391 live** — the templated
-x86 bulk is behind `__AVX__`/`__AVX512F__`, so `PLAN.md` calling it "the awkward
-one" was wrong. `amx/mmq.cpp` (2,511), `amx/amx.cpp` (249) and `hbm.cpp` (55)
-are **entirely dead** here, 2,815 lines that need no port at all. `ops.cpp` is
-12,021 raw and 8,436 live; `arch/arm/repack.cpp` 5,156 and 2,528;
-`repack.cpp` 4,836 and 3,164.
-
-That also shrinks the vtable cluster: `amx.cpp` has 0 live lines, so
-`traits.cpp` + `repack.cpp` + `arch/arm/repack.cpp` is **three** files and
-5,720 live lines, not four.
-
- `ops.cpp` holds the CPU op implementations
-(212 symbols, 88 reached externally) and `repack.cpp` the quantized-weight
-repacking. Loops over tensors rather than STL-heavy abstraction, so it ports
-more like Stage 3 than like libllama. Two constraints from the measurement: the
-`traits.cpp` / `repack.cpp` / `arch/arm/repack.cpp` / `amx.cpp` vtable cluster
-moves as a unit, and `llamafile/sgemm.cpp` (4,164) is templated matmul kernels
-and is the awkward one.
+That shrinks the vtable cluster: `amx.cpp` has 0 live lines, so `traits.cpp`
++ `repack.cpp` + `arch/arm/repack.cpp` is **three** files and 5,720 live
+lines, plus `ggml-cpu.cpp`, whose `ggml_backend_cpu_get_extra_buffer_types()`
+returns a `std::vector` and so moves with them.
 
 **3. `ggml-metal` host layer** (13,269). Decision 13 settles the hard part: the
 **3,091 lines of Obj-C** in `ggml-metal-device.m` (2,352) and
@@ -622,12 +599,30 @@ contract with `port-coverage` before estimating; the original survey figures
 are not usable as estimates.
 6. **`ggml.cpp`** (26 lines, 0 symbols) — dropped rather than ported, once no
    C++ in the build can throw. See the note under "Order of work" above.
+7. ~~`ggml-cpu/binary-ops.cpp`, `unary-ops.cpp`, `vec.cpp`, `ops.cpp`~~ —
+   **done.** 125 symbols between them. `ops.cpp` is the largest translation
+   unit in ggml; see "`ops.cpp`: done" above.
+8. **`llamafile/sgemm.cpp`** (391 live lines). Templated NEON matmul kernels,
+   called from `mulmat.zig`. Self-contained, and its gate already exists:
+   `ops-diff` runs f32 and quantized `mul_mat` at shapes that take it.
+9. **The vtable cluster** — `traits.cpp`, `repack.cpp`, `arch/arm/repack.cpp`
+   and `ggml-cpu.cpp`, together. Virtual dispatch across translation units;
+   the C++ class hierarchy becomes a Zig vtable struct, and every class
+   deriving from `extra_buffer_type` moves at once. `repack` reorders
+   `Q4_0`/`Q4_K`/`IQ4_NL` weights into interleaved blocks, so `node-diff` on
+   a model with those types is its gate, alongside `ops-diff`.
 
-Then the `ggml-cpu/` C++, where the vtable cluster forces its own grouping.
+That empties `ggml-cpu/`. Then the Metal host layer, then libllama.
 
-**Two open items carried from Stage 0**, both listed above: pinning
-`llama.cpp/` as a submodule, and repointing `scripts/parity-port` at
-`llama.cpp.zmake`.
+**One open item carried from Stage 0**: pinning `llama.cpp/` as a submodule.
+Repointing `scripts/parity-port` at `llama.cpp.zmake` is done.
+
+**Tidy-up the `ops.cpp` port left behind**, deliberately not done in the
+sitting that ported it (Decision 24: do not over-invest in the C-shaped
+intermediate). Seven workers each wrote their own small helpers — a byte
+offset `at`, `std::min`/`std::max` stand-ins that keep the C++'s NaN
+behaviour, the NEON reduce — so there are several copies of each. Fold them
+into `ops/common.zig` when the files are next touched.
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:
 

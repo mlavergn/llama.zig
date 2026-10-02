@@ -50,8 +50,9 @@ comptime {
     _ = @import("binary_ops.zig"); // ggml-cpu/binary-ops.cpp
     _ = @import("unary_ops.zig"); // ggml-cpu/unary-ops.cpp
     _ = @import("vec.zig"); // ggml-cpu/vec.cpp
+    // ggml-cpu/ops.cpp, split by op family across src/ggml/cpu/ops/:
+    _ = @import("ops/module.zig");
     // Not a port: the golden check for vec.cpp's float dot products.
-    _ = @import("vec.zig");
     _ = @import("vec_testing.zig");
 }
 
@@ -72,5 +73,6 @@ test {
     _ = @import("binary_ops.zig");
     _ = @import("unary_ops.zig");
     _ = @import("vec.zig");
+    _ = @import("ops/module.zig");
     _ = @import("vec_testing.zig");
 }

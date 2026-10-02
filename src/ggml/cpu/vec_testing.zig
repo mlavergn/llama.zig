@@ -239,3 +239,19 @@ test "the float dot products match the C on a length with a scalar tail" {
     try checkKernel(.f16_, golden.nelem_tail, golden.dot_f16_tail);
     try checkKernel(.bf16_, golden.nelem_tail, golden.dot_bf16_tail);
 }
+
+test "the float dot products match the C on short lengths" {
+    // The f32 kernel's leftover loop is not compiled as it reads: the
+    // reference vectorizes it into rounded groups of four products and fuses
+    // only the last `t % 4`. `nelem_tail`'s seven-element tail cannot tell
+    // fused, unfused and split apart -- measured -- so these lengths exist
+    // to. See `vectorizedTail` in `vec.zig`.
+    ggml_cpu_init();
+
+    inline for (golden.short_lens) |n| {
+        const suf = std.fmt.comptimePrint("_n{d}", .{n});
+        try checkKernel(.f32_, n, @field(golden, "dot_f32" ++ suf));
+        try checkKernel(.f16_, n, @field(golden, "dot_f16" ++ suf));
+        try checkKernel(.bf16_, n, @field(golden, "dot_bf16" ++ suf));
+    }
+}

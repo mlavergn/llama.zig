@@ -279,6 +279,9 @@ These must hold. Each is a runnable gate.
 | C7 | The `llama-cli` binary produces the same tokens as a C driver running the same loop | `make parity-cli` |
 | C8 | `make port` and `make ref` produce identical generated text | `make port`, `make ref` |
 | C9 | Every ported declaration cites the C symbol, file, line **and commit** it came from, and each is verified against that commit | `make port-links` |
+| C10 | Every CPU op kernel computes the same **bits** as the stock C on ~300 fixed cases, at 1 and 3 threads | `make ops-diff` |
+| C11 | Every node of a real model's prompt decode and one single-token decode computes the same bits as the stock C, CPU and Metal | `make node-diff` |
+| C6b | C6 with the model on the CPU device alone, so the ported CPU kernels carry the whole forward pass | `make parity-port-cpu` |
 
 `make validate` runs everything checkable without a model: formatting, the
 scaffold, the unit tests, the ported tests in debug and release, C1, C9 and C2.
@@ -294,6 +297,7 @@ locatable in this port.
 
 | Case | Behaviour |
 |---|---|
+| `argsort` / `top_k` order among **equal** keys | The C uses `std::sort`/`std::partial_sort`, whose order for ties is libc++-specific. llamazig sorts stably, so ties resolve by index. Identical whenever keys are distinct. |
 | Quantizer output vs a stock llama.cpp build | May differ in the last bit. `zig cc` and Apple clang contract `a*b + c` into a single FMA by default; Zig only fuses where `@mulAdd` says so, and which expressions clang fuses is not reproducible without modelling that clang version. Not observable through the deliverable, which never writes a model file. |
 | `quantize_row_iq4_nl_ref` on an all-zero block | The C reads uninitialized memory and is not reproducible run to run. llamazig zeroes the buffer. |
 | 1-bit split search with equal elements | The C's result depends on the host `qsort`'s ordering of equal elements. llamazig breaks ties on index, so output depends only on input. |
@@ -333,6 +337,9 @@ locatable in this port.
 | `make graph-diff` | C2 |
 | `make backend-ops` | C3 (add `--diff` to the script for C4) |
 | `make parity-port` | C6 |
+| `make parity-port-cpu` | C6b |
+| `make ops-diff` | C10 |
+| `make node-diff` | C11 (`ARGS=--gpu` for Metal) |
 | `make parity-cli` | C7 |
 
 `make port` and `make ref` share `MODEL`, `PROMPT`, `NPRED`, `TEMP`, `SEED` and

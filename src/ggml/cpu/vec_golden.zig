@@ -13,11 +13,13 @@
 //! against Metal with a tolerance, and on a Metal machine they never
 //! run under `make port` at all.
 //!
-//! Each kernel is captured at two lengths: `nelem`, a whole number of
+//! Each kernel is captured at four lengths: `nelem`, a whole number of
 //! vector steps, and `nelem_tail`, which leaves a scalar remainder.
 //! The tails accumulate in a different type from the bodies, so a
 //! port that gets the body right and the tail wrong passes the first
-//! and fails the second.
+//! and fails the second. The `_nN` constants, at the `short_lens`, exist
+//! for the f32 leftover loop, which the compiler vectorizes into rounded
+//! groups of four and a fused remainder; see `harness/vec_golden.c`.
 
 /// One kernel's result for each input pattern, as raw `f32` bits.
 pub const Dot = struct {
@@ -35,6 +37,16 @@ pub const nelem = 512;
 
 /// A length that leaves a scalar tail for both the f32 and f16 steps.
 pub const nelem_tail = 519;
+
+/// Lengths whose tail is rounded groups of four and a fused remainder.
+pub const short_lens = [_]usize{
+    11,
+    13,
+    14,
+    27,
+    30,
+    46,
+};
 
 pub const dot_f32 = Dot{
     .random = 0x41037124, //  8.21512222
@@ -94,4 +106,184 @@ pub const dot_bf16_tail = Dot{
     .lopsided = 0x3B671EAF, //  0.00352660916
     .ties = 0x46446600, //  12569.5
     .skewed = 0xC0362E63, // -2.84658122
+};
+
+pub const dot_f32_n11 = Dot{
+    .random = 0x3F6FBC11, //  0.936463416
+    .zeros = 0x00000000, //  0
+    .signs = 0xBE800000, // -0.25
+    .opposed = 0xC08B4B06, // -4.35290813
+    .lopsided = 0x39C46400, //  0.00037458539
+    .ties = 0x467AF200, //  16060.5
+    .skewed = 0x3E1CDD1B, //  0.1531872
+};
+
+pub const dot_f16_n11 = Dot{
+    .random = 0x3F6FAC8F, //  0.936226785
+    .zeros = 0x00000000, //  0
+    .signs = 0xBE800000, // -0.25
+    .opposed = 0xC08B4E86, // -4.35333538
+    .lopsided = 0x39C4573C, //  0.000374490279
+    .ties = 0x467AF200, //  16060.5
+    .skewed = 0x3E1CDFC7, //  0.153197393
+};
+
+pub const dot_bf16_n11 = Dot{
+    .random = 0x3F6FD940, //  0.936908722
+    .zeros = 0x00000000, //  0
+    .signs = 0xBE800000, // -0.25
+    .opposed = 0xC08B89F0, // -4.36058807
+    .lopsided = 0x39C437C8, //  0.000374255935
+    .ties = 0x467AF200, //  16060.5
+    .skewed = 0x3E1D2C5E, //  0.15348956
+};
+
+pub const dot_f32_n13 = Dot{
+    .random = 0x3F9FA5A9, //  1.24724305
+    .zeros = 0x00000000, //  0
+    .signs = 0x3F800000, //  1
+    .opposed = 0xC0A7EEA8, // -5.24788284
+    .lopsided = 0x3A02C86D, //  0.000498897221
+    .ties = 0x467AE800, //  16058
+    .skewed = 0x3ED1F6A0, //  0.410084724
+};
+
+pub const dot_f16_n13 = Dot{
+    .random = 0x3F9FA06C, //  1.24708319
+    .zeros = 0x00000000, //  0
+    .signs = 0x3F800000, //  1
+    .opposed = 0xC0A7F068, // -5.24809647
+    .lopsided = 0x3A02C068, //  0.000498777721
+    .ties = 0x467AE800, //  16058
+    .skewed = 0x3ED1FFB8, //  0.410154104
+};
+
+pub const dot_bf16_n13 = Dot{
+    .random = 0x3F9FAB00, //  1.24740601
+    .zeros = 0x00000000, //  0
+    .signs = 0x3F800000, //  1
+    .opposed = 0xC0A82210, // -5.25415802
+    .lopsided = 0x3A02A044, //  0.000498298788
+    .ties = 0x467AE800, //  16058
+    .skewed = 0x3ED1F1E8, //  0.410048723
+};
+
+pub const dot_f32_n14 = Dot{
+    .random = 0x3F86FCB5, //  1.05458701
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FE00000, //  1.75
+    .opposed = 0xC0AC444E, // -5.38333797
+    .lopsided = 0x39DD29B5, //  0.000421834789
+    .ties = 0x467AE700, //  16057.75
+    .skewed = 0x3ED193FC, //  0.409332156
+};
+
+pub const dot_f16_n14 = Dot{
+    .random = 0x3F86F85A, //  1.05445409
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FE00000, //  1.75
+    .opposed = 0xC0AC46CA, // -5.38364124
+    .lopsided = 0x39DD170C, //  0.00042169576
+    .ties = 0x467AE700, //  16057.75
+    .skewed = 0x3ED19D18, //  0.409401655
+};
+
+pub const dot_bf16_n14 = Dot{
+    .random = 0x3F870B40, //  1.05503082
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FE00000, //  1.75
+    .opposed = 0xC0AC7290, // -5.38898468
+    .lopsided = 0x39DD0348, //  0.000421548495
+    .ties = 0x467AE700, //  16057.75
+    .skewed = 0x3ED18F6A, //  0.409297287
+};
+
+pub const dot_f32_n27 = Dot{
+    .random = 0x3F631A24, //  0.887117624
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FF00000, //  1.875
+    .opposed = 0xC11D88C4, // -9.84589005
+    .lopsided = 0x39BA0AC2, //  0.000354846998
+    .ties = 0x46794A00, //  15954.5
+    .skewed = 0x3FBDAB10, //  1.48178291
+};
+
+pub const dot_f16_n27 = Dot{
+    .random = 0x3F631C05, //  0.887146294
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FF00000, //  1.875
+    .opposed = 0xC11D8A0F, // -9.84620571
+    .lopsided = 0x39B9F208, //  0.00035466277
+    .ties = 0x46794A00, //  15954.5
+    .skewed = 0x3FBDB340, //  1.48203278
+};
+
+pub const dot_bf16_n27 = Dot{
+    .random = 0x3F634CED, //  0.887892544
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FF00000, //  1.875
+    .opposed = 0xC11D8F92, // -9.84755135
+    .lopsided = 0x39B991C5, //  0.000353945565
+    .ties = 0x46794A00, //  15954.5
+    .skewed = 0x3FBD92FF, //  1.48104846
+};
+
+pub const dot_f32_n30 = Dot{
+    .random = 0x3F49D846, //  0.788456321
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FA00000, //  1.25
+    .opposed = 0xC12C73F8, // -10.7783127
+    .lopsided = 0x39A559EA, //  0.000315382436
+    .ties = 0x4678F700, //  15933.75
+    .skewed = 0x3FB0E71B, //  1.38205278
+};
+
+pub const dot_f16_n30 = Dot{
+    .random = 0x3F49DDAE, //  0.788538814
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FA00000, //  1.25
+    .opposed = 0xC12C73CA, // -10.7782688
+    .lopsided = 0x39A5440F, //  0.0003152196
+    .ties = 0x4678F700, //  15933.75
+    .skewed = 0x3FB0F09A, //  1.38234258
+};
+
+pub const dot_bf16_n30 = Dot{
+    .random = 0x3F4A17AD, //  0.789423764
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FA00000, //  1.25
+    .opposed = 0xC12C748A, // -10.7784519
+    .lopsided = 0x39A4E695, //  0.000314523146
+    .ties = 0x4678F700, //  15933.75
+    .skewed = 0x3FB0CF09, //  1.38131821
+};
+
+pub const dot_f32_n46 = Dot{
+    .random = 0xBE663210, // -0.224800348
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FD00000, //  1.625
+    .opposed = 0xC184B625, // -16.5889378
+    .lopsided = 0xB8BC9387, // -8.99201768e-05
+    .ties = 0x46772700, //  15817.75
+    .skewed = 0x3F0043EE, //  0.501036525
+};
+
+pub const dot_f16_n46 = Dot{
+    .random = 0xBE661A1F, // -0.224709019
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FD00000, //  1.625
+    .opposed = 0xC184BD3A, // -16.5923958
+    .lopsided = 0xB8BD0680, // -9.01343301e-05
+    .ties = 0x46771E00, //  15815.5
+    .skewed = 0x3F00629A, //  0.50150454
+};
+
+pub const dot_bf16_n46 = Dot{
+    .random = 0xBE66380C, // -0.224823177
+    .zeros = 0x00000000, //  0
+    .signs = 0x3FD00000, //  1.625
+    .opposed = 0xC184B96A, // -16.5905342
+    .lopsided = 0xB8BF0F6C, // -9.11046227e-05
+    .ties = 0x46772700, //  15817.75
+    .skewed = 0x3F004334, //  0.501025438
 };

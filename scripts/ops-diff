@@ -65,8 +65,26 @@ zig cc harness/ops_dump.c -o "$tmp/port" -std=c11 -w -O2 "${INC[@]}" \
 # builds' quantizers do not agree (Q6_K differs, Q4_K and Q8_0 match), and that
 # is accepted -- see the note in harness/ops_dump.c. Sharing the bytes keeps
 # this gate about the kernels rather than about the quantizers.
-"$tmp/ref"  write-q "$tmp/q.bin" > "$tmp/ref.txt"  2>/dev/null || { echo "FAIL: reference run aborted" >&2; exit 1; }
-"$tmp/port" read-q  "$tmp/q.bin" > "$tmp/port.txt" 2>/dev/null || { echo "FAIL: ported run aborted" >&2; exit 1; }
+#
+# Each side runs twice, at one thread and at three. At one thread every
+# kernel's `ith`/`nth` split is the trivial one, so a wrong row partition --
+# the bug a port of a threaded kernel actually has -- cannot show. Three is
+# still deterministic: the split depends on the count, not on which thread
+# takes a chunk.
+for nt in 1 3; do
+    OPS_THREADS=$nt "$tmp/ref"  write-q "$tmp/q.bin" > "$tmp/ref.$nt.txt"  2>"$tmp/ref.err" \
+        || { echo "FAIL: reference run aborted at $nt thread(s)" >&2; head -3 "$tmp/ref.err" >&2; exit 1; }
+    OPS_THREADS=$nt "$tmp/port" read-q  "$tmp/q.bin" > "$tmp/port.$nt.txt" 2>"$tmp/port.err" \
+        || { echo "FAIL: ported run aborted at $nt thread(s)" >&2; head -3 "$tmp/port.err" >&2; exit 1; }
+    sed "s/^/[nt=$nt] /" "$tmp/ref.$nt.txt"  >> "$tmp/ref.txt"
+    sed "s/^/[nt=$nt] /" "$tmp/port.$nt.txt" >> "$tmp/port.txt"
+done
+
+# OPS_DIFF_OUT=<dir> keeps both full outputs, for when 40 lines of diff is
+# not enough to see which ops fail.
+if [ -n "${OPS_DIFF_OUT:-}" ]; then
+    mkdir -p "$OPS_DIFF_OUT" && cp "$tmp/ref.txt" "$tmp/port.txt" "$OPS_DIFF_OUT/"
+fi
 
 if diff -u "$tmp/ref.txt" "$tmp/port.txt" > "$tmp/diff.txt"; then
     printf 'PASS: %d op results identical, ported vs reference\n' "$(grep -c 'hash=' "$tmp/ref.txt")"

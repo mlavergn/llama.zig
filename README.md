@@ -165,20 +165,23 @@ relinked: it mimics `llama-cli`'s flag surface for the features we support and
 refuses the rest rather than ignoring them. One-shot completion only —
 interactive conversation is still owed.
 
-**How correctness is checked.** Five gates, none of which subsumes the others,
-and each negative-tested by injecting a fault and confirming it fails:
+**How correctness is checked.** Several gates, none of which subsumes the
+others, and each negative-tested by injecting a fault and confirming it fails:
 
 | Gate | What it covers |
 |---|---|
 | `make graph-diff` | 131 constructor nodes vs the C — shapes, strides, `op_params`, wiring |
+| `make ops-diff` | ~300 CPU op cases computed and compared **on bits** against the stock C, at 1 and 3 threads |
+| `make node-diff` | every node of a real Qwen3.5 decode, on bits, CPU (default) or Metal |
 | `make backend-ops` | 21,093 op configurations, Metal against CPU |
 | `make probe` | proves ported code is on the execution path at all — allocator and CPU dispatch, one run each |
-| `make parity-port` | tokens, ported libraries vs stock, one driver |
+| `make parity-port` / `parity-port-cpu` | tokens, ported libraries vs stock, one driver — on Metal, or on the CPU alone |
 | `make port` / `make ref` | the CLI binary against the same loop on stock libraries |
 
 Token parity is coarser than it looks — doubling RoPE's `freq_base` passes it —
-which is why the graph diff and `test-backend-ops` exist alongside. `NOTES.md`
-carries the measurements.
+which is why the bit-level diffs exist alongside. On a Metal machine inference
+never reaches the CPU kernels at all, so only `ops-diff`, `node-diff` and the
+`--cpu` parity runs can see them. `NOTES.md` carries the measurements.
 
 The reference implementation is pinned at llama.cpp **v0.3.0**.
 

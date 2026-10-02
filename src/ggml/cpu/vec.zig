@@ -196,12 +196,42 @@ pub export fn ggml_vec_dot_f32(
     sum[0] = add_f32(sum[0], sum[1]);
     sumf = neon.addvq_f32(sum[0]);
 
-    var k: usize = @intCast(np);
-    while (k < @as(usize, @intCast(n))) : (k += 1) {
-        sumf += x[k] * y[k];
-    }
+    sumf = vectorizedTail(x, y, @intCast(np), @intCast(n), sumf);
 
     s.* = sumf;
+}
+
+/// The leftover loop `for (; i < n; ++i) sumf += x[i]*y[i];` **as the
+/// reference compiler emits it**, which is not as it reads.
+///
+/// `sumf += x[i]*y[i]` is one expression, so at `-ffp-contract=on` clang
+/// marks it `llvm.fmuladd` — "fused or not, the backend's choice". The loop
+/// vectorizer then turns the loop into a strict, in-order reduction: four
+/// products per step with `fmul.4s`, **unfused**, added into `sumf` one lane
+/// at a time with scalar `fadd` so the order is kept. Only what is left after
+/// whole groups of four runs scalar, and that part is `fmadd`, **fused**.
+///
+/// So over a tail of `t` elements the first `t - t % 4` are rounded product
+/// then add, and the last `t % 4` are fused. Measured, not read off the
+/// source: the disassembly of the reference `vec.o` shows the split, and
+/// this model matches the reference bit for bit at every `n` from 1 to 47,
+/// 3,000 random rows each. Purely fused was 1 ULP out on the conv kernels'
+/// two-element dot products; purely unfused was out at `n = 11`.
+///
+/// Parameters:
+/// - `x`, `y`: the operands.
+/// - `start`, `end`: the half-open tail range.
+/// - `acc`: the running sum.
+///
+/// Return: the sum with the tail folded in.
+pub inline fn vectorizedTail(x: [*]const f32, y: [*]const f32, start: usize, end: usize, acc: f32) f32 {
+    var sumf = acc;
+    const t = end - start;
+    const split = start + (t - t % 4);
+    var k = start;
+    while (k < split) : (k += 1) sumf += x[k] * y[k];
+    while (k < end) : (k += 1) sumf = @mulAdd(f32, x[k], y[k], sumf);
+    return sumf;
 }
 
 /// Ports `ggml_vec_dot_bf16` (vec.cpp:139 @c1d0e7a00).

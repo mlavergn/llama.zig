@@ -9,28 +9,40 @@
 # Both sides run the identical driver (harness/smoke.zig, compiled once per
 # side), so any difference in output comes from the libraries alone.
 #
-# Usage: scripts/parity-port <model.gguf> [n_predict]
-#   Requires: make buildmacos   (the Apple-clang reference libraries)
-#             zig build reference --release=fast   (the ported libraries)
+# The reference is `llama.cpp.zmake` -- the stock C built by the same Zig
+# toolchain, at the same optimization level -- so the port is the only
+# variable. It used to be the Apple-clang CMake build, which folds a compiler
+# difference into the comparison; that is harmless on Metal, where the GPU does
+# the arithmetic, and fatal for `--cpu`, where the last bit is the compiler's.
+#
+# `--cpu` loads the model on the CPU device alone, so the whole forward pass
+# runs through the ported `ggml-cpu` kernels. Without it, on a Metal machine,
+# those kernels are never reached by inference at all -- measured, by aborting
+# in one and watching generation finish -- and this gate says nothing about
+# them.
+#
+# Usage: scripts/parity-port [--cpu] <model.gguf> [n_predict]
+#   Requires: make -C llama.cpp.zmake lib --release=fast   (the reference)
+#             zig build reference --release=fast           (the ported libraries)
 set -u
+
+MODE=gpu
+if [ "${1:-}" = "--cpu" ]; then
+    MODE=cpu
+    shift
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
-MODEL="${1:?usage: scripts/parity-port <model.gguf> [n_predict]}"
+MODEL="${1:?usage: scripts/parity-port [--cpu] <model.gguf> [n_predict]}"
 NPRED="${2:-48}"
 
-APPLE_LIBS=(
-    cmake-build/apple/src/libllama.a
-    cmake-build/apple/ggml/src/libggml.a
-    cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
-    cmake-build/apple/ggml/src/libggml-cpu.a
-    cmake-build/apple/ggml/src/libggml-base.a
-)
+REF_LIBS=(llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
 PORT_LIBS=(zig-out/lib/libllama.a zig-out/lib/libggml.a)
 
-for lib in "${APPLE_LIBS[@]}"; do
-    [ -f "$lib" ] || { echo "missing $lib -- run 'make buildmacos'" >&2; exit 2; }
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make -C llama.cpp.zmake lib'" >&2; exit 2; }
 done
 for lib in "${PORT_LIBS[@]}"; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
@@ -50,6 +62,16 @@ int main(int argc, char **argv) {
     llama_backend_init();
     struct llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = 99;
+    /* argv[4] == "cpu": the CPU device alone, so no op can be scheduled
+     * onto Metal -- n_gpu_layers = 0 would still leave the device in the
+     * list for the scheduler to use. */
+    ggml_backend_dev_t cpu_only[2] = { NULL, NULL };
+    const int cpu = argc > 4 && strcmp(argv[4], "cpu") == 0;
+    if (cpu) {
+        cpu_only[0] = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+        mp.devices = cpu_only;
+        mp.n_gpu_layers = 0;
+    }
     struct llama_model *model = llama_model_load_from_file(argv[1], mp);
     if (!model) return 1;
     const struct llama_vocab *vocab = llama_model_get_vocab(model);
@@ -58,6 +80,10 @@ int main(int argc, char **argv) {
     if (n < 0) return 1;
     struct llama_context_params cp = llama_context_default_params();
     cp.n_ctx = 512; cp.n_batch = 512;
+    if (cpu) {
+        cp.offload_kqv = false;
+        cp.op_offload = false;
+    }
     struct llama_context *ctx = llama_init_from_model(model, cp);
     if (!ctx) return 1;
     struct llama_sampler *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
@@ -93,7 +119,7 @@ FRAMEWORKS=("$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd"
             -F "$SDK/System/Library/Frameworks")
 INCLUDES=(-I llama.cpp/include -I llama.cpp/ggml/include)
 
-zig cc "$tmp/driver.c" -o "$tmp/ref"  -std=c11 "${INCLUDES[@]}" "${APPLE_LIBS[@]}" "${FRAMEWORKS[@]}" 2>/dev/null \
+zig cc "$tmp/driver.c" -o "$tmp/ref"  -std=c11 "${INCLUDES[@]}" "${REF_LIBS[@]}" "${FRAMEWORKS[@]}" 2>/dev/null \
     || { echo "FAIL: could not link against the reference libraries" >&2; exit 1; }
 zig cc "$tmp/driver.c" -o "$tmp/port" -std=c11 "${INCLUDES[@]}" "${PORT_LIBS[@]}"  "${FRAMEWORKS[@]}" 2>/dev/null \
     || { echo "FAIL: could not link against the ported libraries" >&2; exit 1; }
@@ -110,8 +136,8 @@ PROMPTS=(
 pass=0
 fail=0
 for p in "${PROMPTS[@]}"; do
-    "$tmp/ref"  "$MODEL" "$p" "$NPRED" 2>/dev/null > "$tmp/a.txt"; rc_ref=$?
-    "$tmp/port" "$MODEL" "$p" "$NPRED" 2>/dev/null > "$tmp/b.txt"; rc_port=$?
+    "$tmp/ref"  "$MODEL" "$p" "$NPRED" "$MODE" 2>/dev/null > "$tmp/a.txt"; rc_ref=$?
+    "$tmp/port" "$MODEL" "$p" "$NPRED" "$MODE" 2>/dev/null > "$tmp/b.txt"; rc_port=$?
     printf '  %-36s ' "$(echo "$p" | cut -c1-34)"
     if [ "$rc_ref" -ne 0 ] || [ "$rc_port" -ne 0 ]; then
         echo "FAIL (exit: reference=$rc_ref ported=$rc_port)"; fail=$((fail+1))

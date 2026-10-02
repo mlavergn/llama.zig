@@ -1,0 +1,73 @@
+#!/bin/bash
+# Diff every graph node's output, ported vs reference, on a real model.
+#
+# `harness/node_dump.c` hashes the output of each node of one prompt decode
+# and one single-token decode. It is linked once against the ported libraries
+# and once against `llama.cpp.zmake` -- the stock C built by the same Zig
+# toolchain -- and the listings are diffed. The first differing line is the
+# first op that computed a different bit.
+#
+# This is the gate between `make ops-diff` (exact, but only the shapes it was
+# written for) and token parity (the model's real graph, but coarse: a
+# last-bit difference has to move an argmax to show). It found three
+# dot-product epilogues the vec_dot goldens had passed -- see NOTES.md.
+#
+# By default the model runs on the CPU device alone: on a Metal machine the
+# CPU kernels are otherwise never reached by inference. `--gpu` runs it on
+# Metal instead, which checks the ported host code around the GPU kernels.
+#
+# Usage: scripts/node-diff [--gpu] <model.gguf> [prompt]
+#   Requires: make -C llama.cpp.zmake lib --release=fast, zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODE=cpu
+if [ "${1:-}" = "--gpu" ]; then MODE=gpu; shift; fi
+MODEL="${1:?usage: scripts/node-diff [--gpu] <model.gguf> [prompt]}"
+PROMPT="${2:-Explain gravity in one sentence, then give an example from daily life:}"
+
+REF_LIBS=(llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
+PORT_LIBS=(zig-out/lib/libllama.a zig-out/lib/libggml.a)
+for lib in "${REF_LIBS[@]}" "${PORT_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make node-diff'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# Apple's libc++, not Zig's -- see `testcase/`.
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+FW=("$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd"
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+    -F "$SDK/System/Library/Frameworks")
+INC=(-I llama.cpp/include -I llama.cpp/ggml/include)
+
+zig cc harness/node_dump.c -o "$tmp/ref"  -std=c11 -O2 "${INC[@]}" "${REF_LIBS[@]}"  "${FW[@]}" 2>"$tmp/ref.log" \
+    || { echo "FAIL: could not link against the reference libraries" >&2; tail -5 "$tmp/ref.log" >&2; exit 1; }
+zig cc harness/node_dump.c -o "$tmp/port" -std=c11 -O2 "${INC[@]}" "${PORT_LIBS[@]}" "${FW[@]}" 2>"$tmp/port.log" \
+    || { echo "FAIL: could not link against the ported libraries" >&2; tail -5 "$tmp/port.log" >&2; exit 1; }
+
+# Two thread counts, for the same reason ops-diff runs two: one thread makes
+# every kernel's row split the trivial one.
+fail=0
+for nt in 1 4; do
+    "$tmp/ref"  "$MODEL" "$PROMPT" "$nt" "$MODE" > "$tmp/ref.txt"  2>/dev/null || { echo "FAIL: reference run aborted (threads=$nt)"; exit 1; }
+    "$tmp/port" "$MODEL" "$PROMPT" "$nt" "$MODE" > "$tmp/port.txt" 2>/dev/null || { echo "FAIL: ported run aborted (threads=$nt)"; exit 1; }
+    nodes=$(wc -l < "$tmp/ref.txt" | tr -d ' ')
+    [ "$nodes" -gt 0 ] || { echo "FAIL: no nodes observed (threads=$nt)"; exit 1; }
+    if diff -q "$tmp/ref.txt" "$tmp/port.txt" > /dev/null; then
+        printf '  %-4s threads=%d  %s nodes identical\n' "$MODE" "$nt" "$nodes"
+    else
+        printf '  %-4s threads=%d  DIFFERS; first divergent nodes:\n' "$MODE" "$nt"
+        diff "$tmp/ref.txt" "$tmp/port.txt" | grep '^[<>]' | head -6
+        fail=1
+    fi
+done
+
+if [ "$fail" -eq 0 ]; then
+    echo "PASS: every node identical, ported vs reference"
+    exit 0
+fi
+echo "FAIL: node outputs differ between ported and reference builds"
+exit 1

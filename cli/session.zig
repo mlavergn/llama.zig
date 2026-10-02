@@ -41,6 +41,20 @@ pub const Error = error{
     PromptTooLong,
 };
 
+/// Why the last generation ended.
+///
+/// Only `eog` is the model finishing. The other two cut a reply off, and a
+/// conversation has to say so: otherwise the prompt just comes back mid-answer
+/// and the cut reads as the model's own.
+pub const Stop = enum {
+    /// The model emitted an end-of-generation token.
+    eog,
+    /// `-n` tokens were generated.
+    n_predict,
+    /// The context filled up.
+    context_full,
+};
+
 /// A loaded model and everything needed to generate from it.
 pub const Session = struct {
     const Self = @This();
@@ -58,6 +72,8 @@ pub const Session = struct {
     /// much of the cache it can keep, so a conversation does not re-decode its
     /// whole history every turn.
     decoded: std.ArrayList(c.llama_token) = .empty,
+    /// Why the most recent `generate`, `generateChat` or `generateTurn` ended.
+    last_stop: Stop = .eog,
 
     /// Loads a model and builds the context and sampler chain.
     ///
@@ -82,7 +98,17 @@ pub const Session = struct {
         const vocab = c.llama_model_get_vocab(model) orelse return Error.NoVocab;
 
         var ctx_params = c.llama_context_default_params();
-        if (settings.n_ctx > 0) ctx_params.n_ctx = @intCast(settings.n_ctx);
+        // 0 is passed through, not skipped: libllama reads it as "the
+        // context the model was trained with", which is what `-c 0` means
+        // upstream and what `Args` documents. Skipping it left libllama's own
+        // default of 512 tokens, and a conversation's history and reply had
+        // to fit in that -- replies were cut off mid-answer.
+        //
+        // Upstream additionally shrinks an unset context to fit device memory
+        // (`common_fit_params`, in `common/`, which this project does not
+        // build). Where it would have shrunk it, this fails to create the
+        // context instead; `-c` sets it by hand.
+        if (settings.n_ctx >= 0) ctx_params.n_ctx = @intCast(settings.n_ctx);
         if (settings.n_batch > 0) ctx_params.n_batch = @intCast(settings.n_batch);
         if (settings.n_threads > 0) {
             ctx_params.n_threads = settings.n_threads;
@@ -238,7 +264,7 @@ pub const Session = struct {
     ///   is produced rather than at exit.
     ///
     /// Return: the number of tokens generated. Stops at end-of-generation, at
-    /// `n_predict`, or when the context is full.
+    /// `n_predict`, or when the context is full; `last_stop` says which.
     pub fn generate(self: *Self, prompt: []const u8, w: *std.Io.Writer) !usize {
         const tokens = try self.tokenize(prompt);
         defer self.allocator.free(tokens);
@@ -306,11 +332,15 @@ pub const Session = struct {
 
         var generated: usize = 0;
         var used: usize = tokens.len;
+        self.last_stop = .n_predict;
         while (self.settings.n_predict < 0 or generated < @as(usize, @intCast(self.settings.n_predict))) {
             if (c.llama_decode(self.ctx, batch) != 0) return Error.DecodeFailed;
 
             id = c.llama_sampler_sample(self.sampler, self.ctx, -1);
-            if (!self.settings.ignore_eos and c.llama_vocab_is_eog(self.vocab, id)) break;
+            if (!self.settings.ignore_eos and c.llama_vocab_is_eog(self.vocab, id)) {
+                self.last_stop = .eog;
+                break;
+            }
 
             var piece: [256]u8 = undefined;
             const n = c.llama_token_to_piece(self.vocab, id, &piece, piece.len, 0, true);
@@ -323,7 +353,10 @@ pub const Session = struct {
             used += 1;
             // Stopping here rather than letting llama_decode fail: running out
             // of context is a normal end to a generation, not an error.
-            if (used >= n_ctx) break;
+            if (used >= n_ctx) {
+                self.last_stop = .context_full;
+                break;
+            }
 
             batch = c.llama_batch_get_one(&id, 1);
         }
@@ -388,11 +421,15 @@ pub const Session = struct {
         var batch = c.llama_batch_get_one(@constCast(suffix.ptr), @intCast(suffix.len));
 
         var generated: usize = 0;
+        self.last_stop = .n_predict;
         while (self.settings.n_predict < 0 or generated < @as(usize, @intCast(self.settings.n_predict))) {
             if (c.llama_decode(self.ctx, batch) != 0) return Error.DecodeFailed;
 
             id = c.llama_sampler_sample(self.sampler, self.ctx, -1);
-            if (!self.settings.ignore_eos and c.llama_vocab_is_eog(self.vocab, id)) break;
+            if (!self.settings.ignore_eos and c.llama_vocab_is_eog(self.vocab, id)) {
+                self.last_stop = .eog;
+                break;
+            }
 
             var piece: [256]u8 = undefined;
             const n = c.llama_token_to_piece(self.vocab, id, &piece, piece.len, 0, true);
@@ -405,7 +442,10 @@ pub const Session = struct {
 
             generated += 1;
             try self.decoded.append(self.allocator, id);
-            if (self.decoded.items.len >= n_ctx) break;
+            if (self.decoded.items.len >= n_ctx) {
+                self.last_stop = .context_full;
+                break;
+            }
 
             batch = c.llama_batch_get_one(&id, 1);
         }

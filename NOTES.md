@@ -2129,3 +2129,170 @@ element. The fault was unreachable.
 The activation ops are now run twice, at amplitude 1 and at 30. **A gate's
 input distribution is as much a part of it as its comparison**, and a
 threshold fault is the case that shows the difference.
+
+## Porting `ggml-cpu/ops.cpp`
+
+88 symbols, 8,436 live lines, ported in one sitting and swapped in whole.
+`src/ggml/cpu/ops/` holds it in 19 files that follow the C's own
+`// ggml_compute_forward_xxx` banners, plus `common.zig` and `vecinline.zig`
+for what they share.
+
+### How: the oracle first, then seven workers
+
+The `vec.h` inlines every family calls — `mad`, `scale`, the gelu and glu
+variants — were ported first into `vecinline.zig`, by hand, because several
+have live NEON arms that compute **in half precision** (`vfmaq_f16`,
+`vmulq_f16`) for the first `n & ~31` elements and in `f32` for the rest. The
+split is real and a unit test pins it with a value that rounds differently on
+each side of it.
+
+Then the remaining 75 symbols went to seven parallel workers, one group of op
+families each, every one writing only its own files and checking them with a
+per-file compile of the contract (`scripts/ops-check --only`, since removed:
+`port-coverage` covers the contract now that the port is swapped). While they
+worked, `harness/ops_dump.c` grew from 109 cases to ~300 covering every
+family, and `scripts/ops-diff` started running the whole suite twice, at one
+thread and at three. The baseline — both sides still the C `ops.cpp` — had to
+pass before anything was swapped, and it did not, at first; see below.
+
+`refAllDecls` is not a compile check for an `inline` or generic helper: it
+does not analyse their bodies. An injected type error in an unused `inline fn`
+compiled clean. `vecinline.zig`'s tests call every helper for that reason.
+
+### The baseline failed on code ported before this sitting
+
+Extending `ops-diff` before the swap paid for itself before a line of the
+port was wired in. With `ops.cpp` identical on both sides, three new conv
+cases failed by 1 ULP. All three reach the already-ported
+`ggml_vec_dot_f32`, and its scalar tail was the bug — though not the bug it
+first looked like.
+
+The C's tail is `sumf += x[i]*y[i]`, one expression, so clang contracts it.
+Fusing every step fixed the two-element dot products and broke the
+eleven-element ones. The disassembly of the reference `vec.o` showed why: the
+loop vectorizer turns that loop into a **strict, in-order reduction** —
+products in groups of four with `fmul.4s`, **unfused**, added into `sumf` one
+lane at a time — and only the `t % 4` left over run scalar, as `fmadd`,
+**fused**. `fmuladd` lets the backend choose, and it chooses differently in
+the two halves. That model matches the reference bit for bit at every `n`
+from 1 to 47, 3,000 random rows each. It is `vectorizedTail` in `vec.zig`.
+
+The `vec_golden` gate passed the unfused tail, the fused one *and* the split
+one: its 519-element case leaves a seven-element tail after a sum near 8,
+where none of the three moves a bit. It now has six short lengths. Two were
+not enough — an all-unfused tail still passed with 11 and 27, because only a
+few of the seven input patterns discriminate, each about a third of the time.
+With six, both wrong variants fail.
+
+### What the swap itself found
+
+With the port wired in, 13 of 227 cases failed. Three causes:
+
+- **Apple's merged sine and cosine.** Every f32 rope and
+  `timestep_embedding`, a few ULP on rare elements. Clang folds `sinf(x)` and
+  `cosf(x)` of one argument into a single `__sincosf_stret` call, and that
+  routine does not round as the separate ones do: over 10.9M arguments, `sin`
+  differs in 4.0% and `cos` in 0.5%. The reference `ops.o` imports
+  `___sincosf_stret` and neither `_sinf` nor `_cosf`. `common.sinCos` calls
+  the same routine. f16 rope passed throughout — its rounding to half
+  precision hid the difference.
+- **The vectorized reduction again**, in `ssm_conv`'s window sum and in
+  `ssm_scan`'s state update — Mamba-1's despite an `expf` in the loop body:
+  the vectorizer scalarizes the call per lane. Here it also showed the
+  guards, read off the LLVM IR of the same loop: more than three iterations,
+  and for every array the loop loads, `(store_row - load_row)` as an unsigned
+  byte difference at least 64. `ssm_scan` reads the previous state from the
+  buffer it is writing for every token after the first, so those tokens take
+  the all-fused scalar loop and the first one does not.
+  `common.strictLoopVectorized` encodes both.
+- **A harness bug, not a port bug.** `im2col_back` varied run to run on both
+  sides. `ggml.h` labels its first argument "convolution kernel"; the kernel
+  reads `src[0]` as the gradient, and `ggml.c:7032` passes `(grad, kernel)`.
+  Passed in header order it read past the end of a 108-float tensor.
+
+**The rule this adds to "Float contraction" in `CLAUDE.md`**: `@mulAdd` is
+right for an elementwise `a*b + c`, which the vectorizer keeps fused as
+`fmla`. For a *reduction* loop over contiguous memory it is right only for the
+scalar remainder. Which loops the vectorizer takes is a cost-model decision,
+so each such site is one the oracle confirmed, not one read off the source.
+
+### Fault injection
+
+| Fault | Caught by | Cases |
+|---|---|---|
+| `rwkv_wkv6` state update unfused | ops-diff | 1 |
+| `gated_delta_net` drops its last row | ops-diff | 5 |
+| imrope condition inverted | ops-diff | 4 |
+| flash-attn softcap rescale skipped | ops-diff | 1 |
+| `getThreadRange` drops the remainder rows | ops-diff, **3 threads only** | 4 |
+| split-KV partial merge unfused | ops-diff, **3 threads only** | 2 |
+| tiled flash-attn GEMM unfused | ops-diff | 6 |
+| tiled flash-attn sink merge unfused | ops-diff — **escaped first** | 2 |
+
+Two of eight show only at three threads: at one thread every row split is the
+trivial one and the split-KV path never splits. The escape was the input
+distribution again: with sinks in `[-1, 1)` a sink rarely beats a row's
+maximum score, the `ms = 1` branch is exact, and fused and unfused agree. The
+sinks are now drawn from `[-4, 4)`. The flash-attention fast paths needed
+their own cases at all — split-KV wants one query row against ≥512 keys,
+tiled wants ≥64 query rows — and the first shapes reached neither.
+
+### CPU-only inference found three more, and a compiler bug
+
+All of that passed, and so did every token gate — none of which reaches a CPU
+kernel on this machine. `scripts/parity-port` was repointed at
+`llama.cpp.zmake` (the open item from Stage 0) and given `--cpu`, which loads
+the model on the CPU device alone. **4 of 6 prompts diverged.**
+
+Putting the C `ops.cpp` back did not change that, so it predated this port.
+`harness/node_dump.c` — the eval callback hashing every node of a decode —
+named the first differing node: a `MUL_MAT` with **Q5_K** weights. `ops-diff`
+had Q4_K, Q6_K and Q8_0 only. With every quantized type added at 1 and 7
+columns, three failed:
+
+- **`q5_K`**: `sumf += d * sumi - dmin * sumi_mins`. Clang contracts the
+  right-hand side alone — `fnmul`, `fmadd`, `fadd` in the reference — and the
+  port had a fused chain into `sumf`.
+- **`tq1_0` and `tq2_0`**: `sumf += d * (float) isum` fuses; the port's shared
+  epilogue returned `d * isum` for the caller to add.
+
+All three had passed their vec_dot goldens. With them fixed, CPU-only parity
+is 6/6 and every node of the prompt and one decode step is bit-identical on
+three Qwen3.5 quantizations at one and four threads. That check is now
+`make node-diff`.
+
+`node-diff --gpu` then failed on outputs that were *identical*: the
+scheduler's input copies carried an `op` of `GET_ROWS` where the C's are
+`NONE`. Traced to `dupTensorLayout`:
+
+```zig
+for (0..c.GGML_MAX_DIMS) |i| dup.*.nb[i] = tensor.*.nb[i];
+```
+
+**Zig 0.16 types `p.*.arr[i]` as the whole array when `p` is a C pointer**,
+and indexes in steps of the array's size. That loop copied 128 bytes from
+`nb`: the source's `op`, `op_params`, `flags` and `src[0..2]` landed in every
+copy. `p[0].arr[i]`, `*T`, `[*]T` and `?*T` all index correctly; only
+`[*c]T` deref does not, in Debug and ReleaseFast alike. Its unit test passed
+because it compared `t.*.nb[i]` with `dup.*.nb[i]` — two equally wrong reads.
+It was the only occurrence in the tree. The test now checks through
+single-item pointers and asserts the copy has no op, flags or sources; it
+fails on the old loop.
+
+### Where the C's answer is unspecified
+
+- **`argsort` and `top_k` among equal keys.** `std::sort` and
+  `std::partial_sort` order ties in a libc++-specific way. The port sorts
+  stably with the C's comparator, so ties resolve by index. Identical whenever
+  keys are distinct, which every `ops-diff` input is.
+- **`flash_attn_back`** is ported but unreachable: its constructor aborts at
+  `ggml.c:5523`, "TODO: adapt to ggml_flash_attn_ext() changes".
+
+### Not ported, deliberately
+
+The C's `assert`s compile out under `NDEBUG`. Most of the port keeps them as
+`std.debug.assert`, the convention elsewhere in the tree — but in ReleaseFast
+that is an optimizer **assumption**, not a no-op, so one that can be false at
+run time is undefined behaviour where the C simply carries on.
+`soft_max`'s `assert(sum > 0.0)` is one: a fully masked row gives a NaN sum. It
+is a comment, not an assert.

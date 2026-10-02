@@ -60,22 +60,29 @@ inline fn digit(q: u8x16) i8x16 {
 ///
 /// Folds the two integer accumulators, subtracts the right operand's group
 /// sums -- which is the `-1` of the `{0,1,2} -> {-1,0,1}` mapping, applied
-/// once per element rather than per lane -- and scales.
+/// once per element rather than per lane -- and scales it into `sumf`.
+///
+/// The C's last line is `sumf += d * (float) vaddvq_s32(sumi0)`: one
+/// expression, so clang fuses it. This used to return `d * isum` for the
+/// caller to add, which rounds the product first. The golden patterns could
+/// not tell the two apart; a CPU-only Qwen3.5 decode against the reference
+/// could, and `make ops-diff` now has the cases that do.
 ///
 /// Parameters:
 /// - `sumi0`, `sumi1`: the two accumulators.
 /// - `y`: the `q8_K` block, for its `bsums`.
 /// - `d`: the product of the two blocks' deltas.
+/// - `sumf`: the running sum.
 ///
-/// Return: this super-block's contribution.
-inline fn epilogue(sumi0_in: i32x4, sumi1: i32x4, y: *const blocks.Q8_K, d: f32) f32 {
+/// Return: `sumf` with this super-block's contribution added, fused.
+inline fn epilogue(sumi0_in: i32x4, sumi1: i32x4, y: *const blocks.Q8_K, d: f32, sumf: f32) f32 {
     const ysum0 = neon.loadFrom(i16x8, &y.bsums);
     const ysum1 = neon.loadFrom(i16x8, y.bsums[8..]);
 
     var sumi0 = neon.add(sumi0_in, sumi1);
     sumi0 = neon.sub(sumi0, neon.paddlq_s16(neon.add(ysum0, ysum1)));
 
-    return d * @as(f32, @floatFromInt(neon.addvq_s32(sumi0)));
+    return @mulAdd(f32, d, @as(f32, @floatFromInt(neon.addvq_s32(sumi0))), sumf);
 }
 
 /// Ports `k_shift` (arch/arm/quants.c:3952 @c1d0e7a00).
@@ -159,7 +166,7 @@ pub export fn ggml_vec_dot_tq1_0_q8_K(
             }
         }
 
-        sumf += epilogue(sumi0, sumi1, &y[i], f(x[i].d) * y[i].d);
+        sumf = epilogue(sumi0, sumi1, &y[i], f(x[i].d) * y[i].d, sumf);
     }
 
     s[0] = sumf;
@@ -219,7 +226,7 @@ pub export fn ggml_vec_dot_tq2_0_q8_K(
             }
         }
 
-        sumf += epilogue(sumi0, sumi1, &y[i], f(x[i].d) * y[i].d);
+        sumf = epilogue(sumi0, sumi1, &y[i], f(x[i].d) * y[i].d, sumf);
     }
 
     s[0] = sumf;

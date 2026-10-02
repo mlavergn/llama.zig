@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff backend-ops parity-cli port ref ref-chat validate
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -100,7 +100,7 @@ dist:
 # Run every check that needs no model or reference build.
 validate:
 	@printf '\n== formatting ==\n'
-	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig cli/*.zig
+	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig cli/*.zig
 	@printf '\n== scaffold ==\n'
 	zig build
 	@printf '\n== unit tests ==\n'
@@ -163,8 +163,26 @@ backend-ops:
 	./scripts/backend-ops $(ARGS)
 
 # Diff inference output between the ported and reference libraries.
+# Both sides --release=fast, against llama.cpp.zmake: see scripts/parity-port.
 parity-port:
+	cd llama.cpp.zmake && zig build lib --release=fast
+	zig build reference --release=fast
 	./scripts/parity-port $(MODEL)
+
+# Every graph node of a real model's decode, ported vs reference, on bits. CPU
+# by default; ARGS=--gpu for Metal. See the header of scripts/node-diff.
+node-diff:
+	cd llama.cpp.zmake && zig build lib --release=fast
+	zig build reference --release=fast
+	./scripts/node-diff $(ARGS) $(MODEL)
+
+# The same, with the model on the CPU device alone, so inference runs through
+# the ported ggml-cpu kernels -- which on a Metal machine it otherwise never
+# does.
+parity-port-cpu:
+	cd llama.cpp.zmake && zig build lib --release=fast
+	zig build reference --release=fast
+	./scripts/parity-port --cpu $(MODEL)
 
 #
 # Run
@@ -175,8 +193,11 @@ smoke:
 	zig build smoke -- "$(MODEL)" "$(PROMPT)"
 
 # Launch our CLI in interactive conversation mode.
+# No -n: a reply runs to end-of-generation, as upstream's conversation mode
+# does. NPRED is for the port/ref pair, where 512 tokens keeps a diff short;
+# here it cut replies off mid-answer. ARGS="-n N" still caps it.
 cli: buildcli
-	@$(PORT_CLI) -m "$(MODEL)" -cnv -n $(NPRED) --temp $(TEMP) -s $(SEED) $(ARGS)
+	@$(PORT_CLI) -m "$(MODEL)" -cnv --temp $(TEMP) -s $(SEED) $(ARGS)
 
 # Run our CLI on a raw completion.
 port: buildcli

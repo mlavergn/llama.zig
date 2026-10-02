@@ -16,6 +16,7 @@
 //! `ops.cpp` port, whose files share it through `module.zig`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("../../impl.zig");
 const defs = @import("../defs.zig");
 
@@ -94,3 +95,77 @@ pub inline fn min64(a: i64, b: i64) i64 {
 /// `CACHE_LINE_SIZE` is 64 on this target -- the `#else` arm of ops.h:12-19,
 /// the POWER9 arm being the one that uses 256.
 pub const cache_line_size_f32: usize = 64 / @sizeOf(f32);
+
+/// A sine and cosine of the same argument, computed as the reference build
+/// computes them.
+pub const SinCos = struct { sin: f32, cos: f32 };
+
+/// Mirrors the `__float2` that `__sincosf_stret` returns (math.h).
+const Float2 = extern struct { sin: f32, cos: f32 };
+
+extern fn __sincosf_stret(x: f32) Float2;
+extern fn sincosf(x: f32, s: *f32, cc: *f32) void;
+
+/// `sinf(x)` and `cosf(x)` **as clang emits them when both appear**.
+///
+/// Not a port of anything: the C calls `sinf` and `cosf`. But clang folds a
+/// `sinf`/`cosf` pair on one argument into a single libcall -- on Darwin,
+/// `__sincosf_stret` -- and Apple's combined routine does not round as the
+/// separate ones do. Measured over 10.9M arguments: `sin` differs in 4.0% of
+/// them, `cos` in 0.5%. The reference `ops.o` imports `___sincosf_stret` and
+/// neither `_sinf` nor `_cosf`, so the port has to call the same routine to
+/// produce the same bits. It is what `make ops-diff` caught on every f32 rope
+/// and on `timestep_embedding`.
+///
+/// Off Darwin clang emits `sincosf` for the same pair, so that is the
+/// fallback; Stage 5 has to re-measure it against glibc rather than assume.
+///
+/// Parameters:
+/// - `x`: the argument.
+///
+/// Return: both values, by value.
+pub inline fn sinCos(x: f32) SinCos {
+    if (comptime builtin.os.tag.isDarwin()) {
+        const r = __sincosf_stret(x);
+        return .{ .sin = r.sin, .cos = r.cos };
+    }
+    var sv: f32 = undefined;
+    var cv: f32 = undefined;
+    sincosf(x, &sv, &cv);
+    return .{ .sin = sv, .cos = cv };
+}
+
+/// Whether the reference compiler runs the **vectorized** form of a plain C
+/// loop that reduces `acc += a[i] * b[i]` while storing to `store[i]`.
+///
+/// The loop vectorizer turns such a loop into a strict in-order reduction:
+/// groups of four products are rounded (`fmul.4s`) and added one lane at a
+/// time, and only what is left over runs scalar, fused (`fmadd`). But it only
+/// takes that form when two runtime guards pass, read off the LLVM IR of the
+/// same loop compiled by the same toolchain:
+///
+/// - more than three iterations, else the scalar loop runs throughout; and
+/// - for every array the loop loads, `(store_row - load_row)` as an
+///   **unsigned** byte difference is at least 64 -- the vector body's
+///   footprint. A load that starts up to 63 bytes below the store could be
+///   overwritten before it is read, so the loop falls back to scalar.
+///
+/// The second guard is not academic. `ssm_scan` reads the previous state from
+/// the buffer it is writing for every token after the first (`s0 = s`), so
+/// the difference is zero and those tokens take the all-fused scalar loop
+/// while the first one does not.
+///
+/// Parameters:
+/// - `trip`: the loop's iteration count.
+/// - `store`: the first address the loop stores to.
+/// - `loads`: the first address of each array the loop loads.
+///
+/// Return: true when the vectorized form runs.
+pub inline fn strictLoopVectorized(trip: i64, store: *const anyopaque, loads: []const *const anyopaque) bool {
+    if (trip <= 3) return false;
+    const st = @intFromPtr(store);
+    for (loads) |l| {
+        if (st -% @intFromPtr(l) < 64) return false;
+    }
+    return true;
+}
