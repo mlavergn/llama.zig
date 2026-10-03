@@ -188,6 +188,8 @@ LANG_=cxx report_unit "vec.cpp" llama.cpp/ggml/src/ggml-cpu/vec.cpp yes \
 # `make ops-diff`, which backend-ops and parity cannot stand in for.
 LANG_=cxx report_unit "ops.cpp" llama.cpp/ggml/src/ggml-cpu/ops.cpp yes \
     "$PORTED_DIR/ported.zig"
+LANG_=cxx report_unit "llamafile/sgemm.cpp" llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp yes \
+    "$PORTED_DIR/ported.zig"
 
 exit 0
 

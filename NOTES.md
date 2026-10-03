@@ -2296,3 +2296,168 @@ that is an optimizer **assumption**, not a no-op, so one that can be false at
 run time is undefined behaviour where the C simply carries on.
 `soft_max`'s `assert(sum > 0.0)` is one: a fully masked row gives a NaN sum. It
 is a comment, not an assert.
+
+## Porting `ggml-cpu/llamafile/sgemm.cpp`
+
+530 lines of Zig from **391 live** C++ lines of 4,164 — the templated x86 bulk
+is behind `__AVX__`, `__AVX512F__` and `__AVX2__`. One exported symbol,
+`llamafile_sgemm`, which returns **false** when it has no kernel for a shape
+or type pair; `cpu/mulmat.zig` then computes the product itself. Returning
+false is a normal outcome, not an error.
+
+Four instantiations are live and nothing else: `tinyBLAS<4, f32x4>`,
+`tinyBLAS<8, f16x8>`, and `tinyBLAS_Q0_ARM` over `block_q8_0` and
+`block_q4_0`. `BF16`, `Q5_0` and `IQ4_NL` all reach a `return false` here.
+The C's six template parameters collapse to three, because `D == V` and
+`TA == TB == T` at both float instantiations and `TC` is always `f32`.
+
+### The gate was three-quarters there, and the quarter mattered
+
+`PLAN.md` said the gate already existed — `ops-diff` runs f32 and quantized
+`mul_mat` at shapes that reach it. **Measured, that was true of three of the
+four instantiations.** The f16 kernel needs `n >= 8` (sgemm.cpp:3975) and the
+harness topped out at `n = 7`, so nothing exercised it.
+
+Two `n = 8` cases closed it, and reachability was then *proved* rather than
+assumed: disabling the `llamafile_sgemm` call in `mulmat.zig` moves exactly
+five rows of `ops-diff` output — the f32 `n=4` case, the two new `n=8` cases,
+and q4_0/q8_0 at `n=7` — at both thread counts. That is the positive-execution
+probe the project already uses for the CPU dispatch, applied to a fast path.
+
+**A gate that covers a file is not the same as a gate that covers every arm
+of it**, and the plan's one-line claim could not tell the difference.
+
+### The gate caught the port's one real bug immediately
+
+The C dispatches `mnpack<4, 6, 4>(m, n, SIZE_N, 12)`. The trailing `12` is
+`BN`, an ordinary argument; the `4` before it is `BM`, a template parameter.
+The port took the `12` as `BM`, so the kernel asserted `m % 48 == 0` where the
+C asserts `m % 16 == 0`, and aborted on the first run. Positional template
+arguments invite exactly this, and one `ops-diff` run named it.
+
+### Injection: 6/6, and one non-fault
+
+| Fault | Result |
+|---|---|
+| f32/f16 FMA unfused | caught |
+| `hsum` pairwise → ordered `@reduce` | caught |
+| q4_0 low-nibble bias 8 → 7 | caught |
+| q4_0 high-nibble shift 4 → 3 | caught |
+| q8_0 dot reads `lo` twice instead of `lo`+`hi` | caught |
+| f16 entry threshold 8 → 2 | caught |
+| Q0 tile-shape cap `min(.,3)` → `min(.,2)` | **no-op** |
+
+The last one is not an escape. The tile shape only decides which output
+elements are grouped and which thread computes them; each element is still
+one thread's exact dot product over the same `l` order, written once. It
+cannot change a bit. Third time the "confirm the injection changes the
+computation" rule has paid for itself.
+
+### The f16 NEON helpers moved before they were copied
+
+`cpu/vec.zig` had kept `fma_f16`, `add_f16` and `cvt_f32_f16_half` local,
+deliberately, while it was the only user. `sgemm.zig` is the second, so they
+moved to `quants/arm/neon.zig` and `vec.zig` aliases them — the morning's
+tidy rule applied *before* the third copy existed rather than after.
+
+### `port-links` needed 18 corrections in this file, nearly all one class
+
+The citations backticked `hsum(float32x4_t)`, `class tinyBLAS`,
+`tinyBLAS::gemm`. The checker wants the **bare identifier** before the
+parentheses, with the overload or class named in the prose. Worth knowing
+before porting another file full of C++ member functions.
+
+## The vtable cluster, measured
+
+`traits.cpp`, `repack.cpp`, `arch/arm/repack.cpp` and `ggml-cpu.cpp` — 6,180
+live lines. The plan says they move as one unit. **They do, and the reason is
+five symbols, not the 261 mangled exports the four objects carry.**
+
+The first measurement asked the wrong question: intersecting the cluster's
+mangled exports with the undefined symbols of every *other* object in
+`libggml.a` gives **zero**, so the cluster's *external* contract is a pure C
+ABI like the other twenty. That says nothing about coupling *within* it,
+which is what forces the unit.
+
+Measuring that instead, the whole cross-reference matrix is:
+
+| from | to | refs | kind |
+|---|---|---|---|
+| `repack.cpp` | `arch/arm/repack.cpp` | 28 | **all unmangled** — `ggml_gemm_*`, `ggml_gemv_*` |
+| `arch/arm/repack.cpp` | `repack.cpp` | 7 | **all unmangled** — the `_generic` fallbacks |
+| `repack.cpp` | `traits.cpp` | 4 | **mangled** |
+| `traits.cpp` | `ggml-cpu.cpp` | 1 | **mangled** |
+| `repack.cpp` | `ggml-cpu.cpp` | 1 | unmangled — `ggml_backend_cpu_reg` |
+
+The five C++ ones are precisely:
+
+- `ggml::cpu::tensor_traits::~tensor_traits()`
+- `ggml::cpu::extra_buffer_type::~extra_buffer_type()`
+- `typeinfo for ggml::cpu::tensor_traits`
+- `typeinfo for ggml::cpu::extra_buffer_type`
+- `ggml_backend_cpu_get_extra_buffer_types()` — returns
+  `std::vector<ggml_backend_buffer_type_t> &` (ggml-cpu.cpp:42)
+
+So the shape of the work is: `traits.cpp` declares two abstract base classes,
+`repack.cpp` derives from them, and `ggml-cpu.cpp` hands the derived instances
+out through a `std::vector` reference. The bases become a Zig vtable struct,
+the derived types become structs carrying a pointer to one, and the vector
+becomes a static array — the same move `backend_reg.zig` already made for the
+registry.
+
+**`repack.cpp` and `arch/arm/repack.cpp` are mutually dependent across 35
+plain C symbols** and would have to move together regardless of any C++.
+
+## `GGML_USE_CPU_REPACK` was off, and `repack` was dead code
+
+Found while checking the vtable cluster's gate before porting it. The chain,
+each step measured:
+
+- **Upstream's CMake defaults `GGML_CPU_REPACK` to `ON`**
+  (ggml/CMakeLists.txt:152), and `cmake-build/apple/CMakeCache.txt:407`
+  confirms the reference CMake build has it.
+- **Neither `build/llamacpp.zig` nor `llama.cpp.zmake/build.zig` defined
+  it.** Compiling `ggml-cpu.cpp` both ways: **0** references to the repack
+  buffer type without the flag, **1** with it.
+- So the buffer type was never registered, the extra-buffer list was empty,
+  and `ggml_cpu_extra_compute_forward` always returned false.
+- **`repack.cpp` (3,164 live lines) and `arch/arm/repack.cpp` (2,528)
+  compiled into the library and could never execute** — 5,692 lines in the
+  same position as `hbm.cpp` and `amx/`.
+
+Confirmed by execution, not inference: panicking on the one entry point,
+`ggml_cpu_extra_compute_forward`, a CPU-only decode of Q4_K_M and IQ4_XS
+completed without hitting it. With the flag on, the same probe fires.
+
+The flag is now set on both sides and the baseline is green with it:
+`ops-diff` 596/596, `node-diff` 2750 nodes at 1 and 4 threads,
+`parity-port --cpu` 6/6.
+
+### Two false conclusions along the way
+
+Worth recording because both looked like findings:
+
+- **"repack never fires with the flag on."** The probe script grepped the
+  *parity harness's* stdout, and the panic goes to the subprocess's stderr.
+  The detection was broken, not the path.
+- **"enabling the flag broke the ported CPU path."** `parity-port --cpu`
+  came back `ported=134` (SIGABRT). The library still had the panic probe
+  compiled in — the source was restored but not rebuilt. Rebuilt clean, it
+  passes 6/6.
+
+**Restore the source *and* rebuild before reading a gate**, and check where
+a probe's output actually goes before concluding from its silence.
+
+### The guard this needed
+
+`scripts/check-reference-pin` already asserted that the reference compiles
+the same upstream commit. A commit is not the whole contract: a build
+**flag** that differs changes which code compiles on each side, and with
+`GGML_USE_CPU_REPACK` on one side only every bit-exact gate diverges for a
+reason that has nothing to do with the port. The guard now checks the flag
+too.
+
+Negative-testing it caught a bug in the check itself: `grep -c` prints `0`
+**and** exits 1 when there is no match, so `|| echo 0` appended a second
+line and the integer comparison never ran. The check was silently useless
+until the fault injection showed it.

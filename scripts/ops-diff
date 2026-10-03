@@ -35,6 +35,10 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
+# The reference must be the same upstream commit we port from; this gate
+# compares on bits and would otherwise report a version gap as a port bug.
+. "$ROOT/scripts/check-reference-pin"
+
 REF_LIBS=( llama.cpp.zmake/zig-out/lib/libggml.a )
 for lib in "${REF_LIBS[@]}"; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'make -C llama.cpp.zmake lib'" >&2; exit 2; }

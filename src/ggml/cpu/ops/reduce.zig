@@ -17,7 +17,6 @@
 //! `i1`, `i2`, `i3`, `i01`, `i02`, `i03` are Zig integer type names. Renamed
 //! `j1`, `j2`, `j3`, `j01`, `j02`, `j03`, digit for digit.
 
-const std = @import("std");
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");

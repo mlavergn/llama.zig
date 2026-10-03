@@ -19,7 +19,6 @@
 //! `j1`, `j2`, `j3`, `j11`, digit for digit — the `cpu/mulmat.zig`
 //! convention. Do not renumber them.
 
-const std = @import("std");
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");

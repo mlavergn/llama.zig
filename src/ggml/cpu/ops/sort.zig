@@ -37,9 +37,8 @@ const ComputeParams = common.ComputeParams;
 
 extern fn sqrtf(x: f32) f32;
 
-inline fn off(i: i64, nb: usize) usize {
-    return @as(usize, @intCast(i)) * nb;
-}
+/// Byte offset `i*nb`; see `common.byteOff`.
+const off = common.byteOff;
 
 // -----------------------------------------------------------------------------
 // fill

@@ -42,9 +42,8 @@ const f32x4 = neon.f32x4;
 extern fn expf(x: f32) f32;
 extern fn logf(x: f32) f32;
 
-inline fn off(i: i64, nb: usize) usize {
-    return @as(usize, @intCast(i)) * nb;
-}
+/// Byte offset `i*nb`; see `common.byteOff`.
+const off = common.byteOff;
 
 /// Ports `ggml_compute_softplus_f32` (ggml-impl.h:107 @c1d0e7a00) through
 /// libm.
@@ -252,10 +251,7 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
                         }
 
                         // reduce sum0..sum3 to sum0
-                        sum[0] = sum[0] + sum[2];
-                        sum[1] = sum[1] + sum[3];
-                        sum[0] = sum[0] + sum[1];
-                        sumf = neon.addvq_f32(sum[0]);
+                        sumf = common.f32VecReduce(&sum);
 
                         // d_state
                         //

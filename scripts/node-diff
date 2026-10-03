@@ -27,6 +27,10 @@ if [ "${1:-}" = "--gpu" ]; then MODE=gpu; shift; fi
 MODEL="${1:?usage: scripts/node-diff [--gpu] <model.gguf> [prompt]}"
 PROMPT="${2:-Explain gravity in one sentence, then give an example from daily life:}"
 
+# The reference must be the same upstream commit we port from; this gate
+# compares on bits and would otherwise report a version gap as a port bug.
+. "$ROOT/scripts/check-reference-pin"
+
 REF_LIBS=(llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
 PORT_LIBS=(zig-out/lib/libllama.a zig-out/lib/libggml.a)
 for lib in "${REF_LIBS[@]}" "${PORT_LIBS[@]}"; do

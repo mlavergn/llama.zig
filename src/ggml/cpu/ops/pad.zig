@@ -48,26 +48,19 @@ const ComputeParams = common.ComputeParams;
 extern fn expf(x: f32) f32;
 extern fn logf(x: f32) f32;
 
-/// A stride as the signed integer the C's index arithmetic promotes it to.
-inline fn s(x: usize) i64 {
-    return @intCast(x);
-}
+/// Stride as `i64`; see `common.sz`.
+const s = common.sz;
 
-/// The `f32` at byte offset `off` from `base`.
+/// Typed pointer to one `f32`; see `common.ref`.
 inline fn at(base: ?*anyopaque, off: i64) *f32 {
-    const p: [*]u8 = @ptrCast(base.?);
-    return @ptrCast(@alignCast(p + @as(usize, @intCast(off))));
+    return common.ref(f32, base, off);
 }
 
-/// `std::min(a, b)` on floats: `(b < a) ? b : a`.
-inline fn stdMin(a: f32, b: f32) f32 {
-    return if (b < a) b else a;
-}
+/// `std::min` with the C++'s NaN behaviour; see `common.stdMin`.
+const stdMin = common.stdMin;
 
-/// `std::max(a, b)` on floats: `(a < b) ? b : a`.
-inline fn stdMax(a: f32, b: f32) f32 {
-    return if (a < b) b else a;
-}
+/// `std::max` with the C++'s NaN behaviour; see `common.stdMax`.
+const stdMax = common.stdMax;
 
 /// `(float) i`, the C's implicit promotion of an `int64_t` operand.
 inline fn f(i: i64) f32 {

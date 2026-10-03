@@ -53,18 +53,15 @@ const f32x4 = neon.f32x4;
 extern fn expf(x: f32) f32;
 extern fn sqrtf(x: f32) f32;
 
-inline fn barrier(params: *const ComputeParams) void {
-    threading.ggml_barrier(@ptrCast(@alignCast(params.threadpool.?)));
-}
+/// `ggml_barrier(params->threadpool)`; see `common.barrier`.
+const barrier = common.barrier;
 
 inline fn f32Data(t: *const Tensor) [*]f32 {
     return @ptrCast(@alignCast(t.data.?));
 }
 
-inline fn at(comptime T: type, base: ?*anyopaque, off: usize) *T {
-    const b: [*]u8 = @ptrCast(base.?);
-    return @ptrCast(@alignCast(b + off));
-}
+/// Typed pointer to one element; see `common.ref`.
+const at = common.ref;
 
 /// The head range `[h_start, h_end)` thread `ith` owns, as `rwkv_wkv6`, `gla`
 /// and `rwkv_wkv7` each compute it inline. The C does the arithmetic in
@@ -779,25 +776,11 @@ pub export fn ggml_compute_forward_dsv4_hc_post(params: *const ComputeParams, ds
     }
 }
 
-/// `GGML_F32_STEP` and `GGML_F32_EPR` (simd-mappings.h:337, 338 @c1d0e7a00),
-/// the NEON arm: four `float32x4_t` per step.
-const f32_step: usize = 16;
-const f32_epr: usize = 4;
-
-/// Ports the NEON `GGML_F32x4_REDUCE` (simd-mappings.h:349 @c1d0e7a00): halve,
-/// halve, then one **pairwise** `vaddvq_f32`. The C widens the result to
-/// `ggml_float` and every caller here narrows it straight back to `float`,
-/// which is lossless, so the round trip is left out.
-inline fn f32VecReduce(x: *[4]f32x4) f32 {
-    x[0] = x[0] + x[2];
-    x[1] = x[1] + x[3];
-    x[0] = x[0] + x[1];
-    return neon.addvq_f32(x[0]);
-}
-
-inline fn load4(p: [*]const f32) f32x4 {
-    return p[0..4].*;
-}
+/// The NEON SIMD mapping; see `common.zig`.
+const f32_step = common.f32_step;
+const f32_epr = common.f32_epr;
+const f32VecReduce = common.f32VecReduce;
+const load4 = common.load4;
 
 /// Ports `ggml_compute_forward_rwkv_wkv7_f32` (ops.cpp:11251 @c1d0e7a00), the
 /// `GGML_SIMD` arm without SVE or RVV — the NEON one.

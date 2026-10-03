@@ -64,14 +64,11 @@ extern fn floor(x: f64) f64;
 
 const inf = std.math.inf(f32);
 
-inline fn off(i: i64, nb: usize) usize {
-    return @as(usize, @intCast(i)) * nb;
-}
+/// Byte offset `i*nb`; see `common.byteOff`.
+const off = common.byteOff;
 
-inline fn at(comptime T: type, base: ?*anyopaque, byte_off: usize) [*]T {
-    const b: [*]u8 = @ptrCast(base.?);
-    return @ptrCast(@alignCast(b + byte_off));
-}
+/// Typed pointer at a byte offset; see `common.ptr`.
+const at = common.ptr;
 
 /// Ports `GGML_FA_TILE_Q` (ggml-cpu/common.h:9 @c1d0e7a00), the query rows
 /// per tile of the tiled path.

@@ -28,6 +28,7 @@ pub const reduce = @import("reduce.zig");
 pub const repeat = @import("repeat.zig");
 pub const rope = @import("rope.zig");
 pub const softmax = @import("softmax.zig");
+pub const sgemm = @import("sgemm.zig");
 pub const sort = @import("sort.zig");
 pub const ssm = @import("ssm.zig");
 pub const vecinline = @import("vecinline.zig");
@@ -51,6 +52,7 @@ comptime {
     _ = repeat;
     _ = rope;
     _ = softmax;
+    _ = sgemm;
     _ = sort;
     _ = ssm;
     _ = vecinline;

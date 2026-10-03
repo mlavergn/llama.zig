@@ -36,14 +36,12 @@ const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 
-/// A non-negative index times a byte stride: the C's `int64_t * size_t`.
-inline fn at(i: i64, nb: usize) usize {
-    return @as(usize, @intCast(i)) * nb;
-}
+/// Byte offset `i*nb`; see `common.byteOff`.
+const at = common.byteOff;
 
 /// Zeroes `dst` from thread 0 and waits for every thread — the prologue the
 /// three `out_prod` kernels share verbatim.
-fn zeroDst(params: *const ComputeParams, dst: *Tensor, l: common.BinaryLocals) void {
+fn zeroDstAndSync(params: *const ComputeParams, dst: *Tensor, l: common.BinaryLocals) void {
     if (params.ith == 0) {
         vec.set_f32(l.ne0 * l.ne1 * l.ne2 * l.ne3, @ptrCast(@alignCast(dst.data.?)), 0);
     }
@@ -82,7 +80,7 @@ fn outProdF32(params: *const ComputeParams, dst: *Tensor) void {
     // nb01 >= nb00 - src0 is not transposed
     //   compute by src0 rows
 
-    zeroDst(params, dst, l);
+    zeroDstAndSync(params, dst, l);
 
     // parallelize by last three dimensions
 
@@ -201,7 +199,7 @@ fn outProdWiden(comptime is_f16: bool, params: *const ComputeParams, dst: *Tenso
     impl.assert(l.ne2 == l.ne02, "ne2 == ne02");
     impl.assert(l.ne3 == l.ne03, "ne3 == ne03");
 
-    zeroDst(params, dst, l);
+    zeroDstAndSync(params, dst, l);
 
     // total rows in dst
     const nr = l.ne1 * l.ne2 * l.ne3;

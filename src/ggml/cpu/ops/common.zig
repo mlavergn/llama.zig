@@ -19,6 +19,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const impl = @import("../../impl.zig");
 const defs = @import("../defs.zig");
+const threading = @import("../threading.zig");
+const neon = @import("../quants/arm/neon.zig");
 
 const c = impl.c;
 
@@ -27,6 +29,101 @@ pub const ComputeParams = defs.ComputeParams;
 pub const UnaryLocals = defs.UnaryLocals;
 pub const BinaryLocals = defs.BinaryLocals;
 pub const TernaryLocals = defs.TernaryLocals;
+
+// -----------------------------------------------------------------------------
+// Addressing and comparison helpers
+//
+// **Not ports.** The C writes these inline at every use -- `i01*nb01` for an
+// offset, `(char *) t->data + off` for an access -- and spelling that out in
+// Zig costs an `@intCast` and an `@alignCast` each time, which buries the
+// index arithmetic the C's is meant to be read against.
+//
+// Each of the `ops.cpp` files grew its own copy while the port was being
+// written in parallel; these are the single definitions they now alias. The
+// names stay short for the same reason the C's expressions are terse.
+
+/// A byte offset: index times stride, as the C writes `i01*nb01`.
+pub inline fn byteOff(i: i64, nb: usize) usize {
+    return @as(usize, @intCast(i)) * nb;
+}
+
+/// A stride widened to `i64`, for offset arithmetic the C does in signed
+/// values.
+pub inline fn sz(nb: usize) i64 {
+    return @intCast(nb);
+}
+
+/// A typed many-pointer at a byte offset from a tensor's `data`.
+///
+/// The offset is `anytype` because the C mixes `int64_t` and `size_t` at
+/// these sites and the port follows it rather than normalising.
+pub inline fn ptr(comptime T: type, base: ?*anyopaque, byte_off: anytype) [*]T {
+    const b: [*]u8 = @ptrCast(base.?);
+    return @ptrCast(@alignCast(b + @as(usize, @intCast(byte_off))));
+}
+
+/// As `ptr`, for a single element rather than a run of them.
+pub inline fn ref(comptime T: type, base: ?*anyopaque, byte_off: anytype) *T {
+    const b: [*]u8 = @ptrCast(base.?);
+    return @ptrCast(@alignCast(b + @as(usize, @intCast(byte_off))));
+}
+
+/// Ports `std::min(a, b)` as libc++ defines it: `(b < a) ? b : a`.
+///
+/// **Not `@min`, which drops a NaN.** The C++'s returns `a` whenever the
+/// comparison is false, so a NaN input passes through. Several of these
+/// kernels feed it values that can be NaN.
+pub inline fn stdMin(a: f32, b: f32) f32 {
+    return if (b < a) b else a;
+}
+
+/// Ports `std::max(a, b)`: `(a < b) ? b : a`. Not `@max`, for the reason
+/// given on `stdMin`.
+pub inline fn stdMax(a: f32, b: f32) f32 {
+    return if (a < b) b else a;
+}
+
+/// `ggml_barrier(params->threadpool)`, which the C writes directly.
+pub inline fn barrier(params: *const ComputeParams) void {
+    threading.ggml_barrier(@ptrCast(@alignCast(params.threadpool.?)));
+}
+
+// -----------------------------------------------------------------------------
+// The NEON SIMD mapping
+//
+// `simd-mappings.h` is macro-only, so these are the NEON arm of those macros
+// written out once. `recurrent.zig` and `ssm.zig` both run the same
+// four-accumulator reduction; it was open-coded in one and named in the other
+// while the port was written in parallel.
+
+pub const f32x4 = neon.f32x4;
+
+/// `GGML_F32_STEP` and `GGML_F32_EPR` (simd-mappings.h:337, 338 @c1d0e7a00),
+/// the NEON arm: four `float32x4_t` per step.
+pub const f32_step: usize = 16;
+pub const f32_epr: usize = 4;
+
+/// Ports the NEON `GGML_F32x4_REDUCE` (simd-mappings.h:349 @c1d0e7a00):
+/// halve, halve, then one **pairwise** `vaddvq_f32`.
+///
+/// The pairwise step is load-bearing. `neon.addvq_f32` reduces as
+/// `(l0+l1)+(l2+l3)`; `@reduce(.Add, ...)` is ordered and differs on 23.5% of
+/// random lane vectors. See `CLAUDE.md`, "Porting notes".
+///
+/// The C widens the result to `ggml_float` and every caller here narrows it
+/// straight back to `float`, which is lossless, so the round trip is left
+/// out.
+pub inline fn f32VecReduce(x: *[4]f32x4) f32 {
+    x[0] = x[0] + x[2];
+    x[1] = x[1] + x[3];
+    x[0] = x[0] + x[1];
+    return neon.addvq_f32(x[0]);
+}
+
+/// A four-lane load, as `GGML_F32x4_LOAD` (simd-mappings.h:343 @c1d0e7a00).
+pub inline fn load4(p: [*]const f32) f32x4 {
+    return p[0..4].*;
+}
 
 /// Ports the `to_f32` half of `type_conversion_table`
 /// (ggml-cpu/common.h:48 @c1d0e7a00).

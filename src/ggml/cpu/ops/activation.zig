@@ -414,13 +414,8 @@ fn gegluQuick(params: *const ComputeParams, dst: *Tensor) void {
     gluByType(vec.geglu_quick_f32, vec.geglu_quick_f16, params, dst);
 }
 
-/// Ports `std::min(a, b)` as libc++ defines it: `(b < a) ? b : a`.
-///
-/// Not `@min`, which drops a NaN. The C++'s returns `a` whenever the
-/// comparison is false, so a NaN input passes through.
-inline fn stdMin(a: f32, b: f32) f32 {
-    return if (b < a) b else a;
-}
+/// `std::min` with the C++'s NaN behaviour; see `common.stdMin`.
+const stdMin = common.stdMin;
 
 /// Ports `std::clamp(v, lo, hi)` as libc++ defines it:
 /// `v < lo ? lo : (hi < v ? hi : v)`. A NaN `v` passes through.

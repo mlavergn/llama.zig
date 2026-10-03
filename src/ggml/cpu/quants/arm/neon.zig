@@ -420,6 +420,37 @@ pub inline fn mul_n_f32(v: f32x4, x: f32) f32x4 {
     return v * s;
 }
 
+// -----------------------------------------------------------------------------
+// Half-precision vectors
+//
+// `cpu/vec.zig` kept these local when it was the only user; `ops/sgemm.zig`
+// needs the same three, so they live here now rather than in a second copy.
+
+/// `float16x8_t`.
+pub const f16x8 = @Vector(8, f16);
+
+/// `float16x4_t`.
+pub const f16x4 = @Vector(4, f16);
+
+/// Ports `vfmaq_f16(c, b, a)`: `a*b + c` in half precision, **fused** --
+/// one rounding, not two.
+pub inline fn fma_f16(acc: f16x8, a: f16x8, b: f16x8) f16x8 {
+    return @mulAdd(f16x8, a, b, acc);
+}
+
+/// Ports `vaddq_f16`.
+pub inline fn add_f16(a: f16x8, b: f16x8) f16x8 {
+    return a + b;
+}
+
+/// Ports `vcvt_f32_f16(vget_low_f16(v))` and its `vget_high_f16` twin:
+/// widen one half of an `f16x8` to `f32x4`.
+pub inline fn cvt_f32_f16_half(v: f16x8, comptime upper: bool) f32x4 {
+    const base: usize = if (upper) 4 else 0;
+    const half: f16x4 = .{ v[base], v[base + 1], v[base + 2], v[base + 3] };
+    return @floatCast(half);
+}
+
 /// Ports `vmlaq_n_f32`: `a + v * x`, **fused**.
 ///
 /// The intrinsic reads as a multiply and an add, and clang emits `fmla` for it

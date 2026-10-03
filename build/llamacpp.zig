@@ -147,7 +147,6 @@ const ggml_cpu_cxx_sources = [_][]const u8{
     "ggml/src/ggml-cpu/traits.cpp",
     "ggml/src/ggml-cpu/amx/amx.cpp",
     "ggml/src/ggml-cpu/amx/mmq.cpp",
-    "ggml/src/ggml-cpu/llamafile/sgemm.cpp",
     "ggml/src/ggml-cpu/arch/arm/repack.cpp",
 };
 
@@ -308,6 +307,13 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
         "-DACCELERATE_NEW_LAPACK",
         "-DACCELERATE_LAPACK_ILP64",
         "-DGGML_USE_LLAMAFILE",
+        // Upstream's CMake defaults GGML_CPU_REPACK to ON
+        // (ggml/CMakeLists.txt:152). Without it `ggml-cpu.cpp` never
+        // registers the repack buffer type, the extra-buffer list is
+        // empty, and `repack.cpp` plus `arch/arm/repack.cpp` compile
+        // into the library unreachable -- 5,692 live lines of dead
+        // code. Measured, by panicking on the one entry point.
+        "-DGGML_USE_CPU_REPACK",
         "-DGGML_METAL_EMBED_LIBRARY",
         "-DGGML_VERSION=\"0.3.0\"",
         "-DGGML_COMMIT=\"c1d0e7a00\"",
@@ -419,7 +425,6 @@ const ported_test_cxx_sources = [_][]const u8{
     "ggml/src/ggml-cpu/traits.cpp",
     "ggml/src/ggml-cpu/amx/amx.cpp",
     "ggml/src/ggml-cpu/amx/mmq.cpp",
-    "ggml/src/ggml-cpu/llamafile/sgemm.cpp",
     "ggml/src/ggml-cpu/arch/arm/repack.cpp",
 };
 
@@ -465,6 +470,13 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
         "-DACCELERATE_NEW_LAPACK",
         "-DACCELERATE_LAPACK_ILP64",
         "-DGGML_USE_LLAMAFILE",
+        // Upstream's CMake defaults GGML_CPU_REPACK to ON
+        // (ggml/CMakeLists.txt:152). Without it `ggml-cpu.cpp` never
+        // registers the repack buffer type, the extra-buffer list is
+        // empty, and `repack.cpp` plus `arch/arm/repack.cpp` compile
+        // into the library unreachable -- 5,692 live lines of dead
+        // code. Measured, by panicking on the one entry point.
+        "-DGGML_USE_CPU_REPACK",
         "-DGGML_VERSION=\"0.3.0\"",
         "-DGGML_COMMIT=\"c1d0e7a00\"",
     };
@@ -534,6 +546,13 @@ fn portedTestModuleInner(
         "-DACCELERATE_NEW_LAPACK",
         "-DACCELERATE_LAPACK_ILP64",
         "-DGGML_USE_LLAMAFILE",
+        // Upstream's CMake defaults GGML_CPU_REPACK to ON
+        // (ggml/CMakeLists.txt:152). Without it `ggml-cpu.cpp` never
+        // registers the repack buffer type, the extra-buffer list is
+        // empty, and `repack.cpp` plus `arch/arm/repack.cpp` compile
+        // into the library unreachable -- 5,692 live lines of dead
+        // code. Measured, by panicking on the one entry point.
+        "-DGGML_USE_CPU_REPACK",
         "-DGGML_VERSION=\"0.3.0\"",
         "-DGGML_COMMIT=\"c1d0e7a00\"",
     };

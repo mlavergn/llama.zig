@@ -38,6 +38,10 @@ cd "$ROOT" || exit 2
 MODEL="${1:?usage: scripts/parity-port [--cpu] <model.gguf> [n_predict]}"
 NPRED="${2:-48}"
 
+# The reference must be the same upstream commit we port from; this gate
+# compares on bits and would otherwise report a version gap as a port bug.
+. "$ROOT/scripts/check-reference-pin"
+
 REF_LIBS=(llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
 PORT_LIBS=(zig-out/lib/libllama.a zig-out/lib/libggml.a)
 

@@ -32,11 +32,8 @@ const fp16 = c.ggml_fp16_t;
 /// `FLT_MAX`, which the max pools start from negated.
 const flt_max = std.math.floatMax(f32);
 
-/// `std::max(a, b)`: `(a < b) ? b : a`. See the file header for why this is
-/// not `@max`.
-inline fn stdMax(a: f32, b: f32) f32 {
-    return if (a < b) b else a;
-}
+/// `std::max` with the C++'s NaN behaviour; see `common.stdMax`.
+const stdMax = common.stdMax;
 
 /// Reads element `j` of a row as `f32`, from `f32` or `f16` storage.
 inline fn loadF32(is_f32: bool, row: [*]const u8, j: i64) f32 {

@@ -602,27 +602,86 @@ are not usable as estimates.
 7. ~~`ggml-cpu/binary-ops.cpp`, `unary-ops.cpp`, `vec.cpp`, `ops.cpp`~~ —
    **done.** 125 symbols between them. `ops.cpp` is the largest translation
    unit in ggml; see "`ops.cpp`: done" above.
-8. **`llamafile/sgemm.cpp`** (391 live lines). Templated NEON matmul kernels,
-   called from `mulmat.zig`. Self-contained, and its gate already exists:
-   `ops-diff` runs f32 and quantized `mul_mat` at shapes that take it.
+8. ~~`llamafile/sgemm.cpp`~~ — **done.** `src/ggml/cpu/ops/sgemm.zig`, one
+   symbol, 391 live lines of 4,164. The claim that its gate already existed
+   was **three-quarters true**: the f16 kernel needs `n >= 8` and the harness
+   topped out at 7, so one of the four live instantiations was uncovered.
+   Two cases closed it and a probe proved all four are now reached. See
+   `NOTES.md`.
+**`GGML_USE_CPU_REPACK` is now defined on both sides.** It was not, and
+upstream's CMake defaults it on, so `repack.cpp` and `arch/arm/repack.cpp`
+were compiling into the library unreachable — 5,692 live lines of dead code.
+Measured, and confirmed by execution. That is what makes the cluster below
+real work rather than deletable; see `NOTES.md`.
+
 9. **The vtable cluster** — `traits.cpp`, `repack.cpp`, `arch/arm/repack.cpp`
-   and `ggml-cpu.cpp`, together. Virtual dispatch across translation units;
-   the C++ class hierarchy becomes a Zig vtable struct, and every class
-   deriving from `extra_buffer_type` moves at once. `repack` reorders
-   `Q4_0`/`Q4_K`/`IQ4_NL` weights into interleaved blocks, so `node-diff` on
-   a model with those types is its gate, alongside `ops-diff`.
+   and `ggml-cpu.cpp`, together, 6,180 live lines. **Measured, and the unit
+   is forced by five symbols, not by the 261 mangled exports the four
+   objects carry** — the cluster's *external* contract is a pure C ABI like
+   the other twenty.
+
+   The five are `ggml::cpu::tensor_traits::~tensor_traits()`,
+   `ggml::cpu::extra_buffer_type::~extra_buffer_type()`, the typeinfo for
+   both, and `ggml_backend_cpu_get_extra_buffer_types()`, which returns a
+   `std::vector<ggml_backend_buffer_type_t> &` (ggml-cpu.cpp:42). So:
+   `traits.cpp` declares two abstract bases, `repack.cpp` derives from them,
+   `ggml-cpu.cpp` hands the instances out. Bases become a Zig vtable struct,
+   derived types become structs holding a pointer to one, the vector becomes
+   a static array — the move `backend_reg.zig` already made.
+
+   **`repack.cpp` and `arch/arm/repack.cpp` are mutually dependent across 35
+   plain C symbols** (`ggml_gemm_*`/`ggml_gemv_*` one way, the `_generic`
+   fallbacks the other) and would move together with or without the C++.
+
+   `repack` reorders `Q4_0`/`Q4_K`/`IQ4_NL` weights into interleaved blocks,
+   so `node-diff` on a model with those types is its gate, alongside
+   `ops-diff`. **Check that gate arm by arm before porting** — sgemm's was
+   three-quarters covered and the plan could not tell.
 
 That empties `ggml-cpu/`. Then the Metal host layer, then libllama.
 
-**One open item carried from Stage 0**: pinning `llama.cpp/` as a submodule.
+**Stage 0 is closed.** `llama.cpp/` is a submodule pinned at `c1d0e7a00`;
+this plan and `CLAUDE.md` both claimed otherwise long after it was done, which
+is worth remembering about status lines in these files — check the tree, not
+the prose.
+
+**The reference-pin question is settled, and not the way it was posed.**
+`llama.cpp.zmake` vendors no sources — it is the build system, and the
+llama.cpp it compiles is an untracked checkout inside it. Submoduling it
+would pin the `build.zig` and leave the sources unpinned, which is the half
+that matters. `scripts/check-reference-pin` asserts instead that the checkout
+is at our submodule's commit, and the three bit-exact gates source it.
+Decision 41.
 Repointing `scripts/parity-port` at `llama.cpp.zmake` is done.
 
-**Tidy-up the `ops.cpp` port left behind**, deliberately not done in the
-sitting that ported it (Decision 24: do not over-invest in the C-shaped
-intermediate). Seven workers each wrote their own small helpers — a byte
-offset `at`, `std::min`/`std::max` stand-ins that keep the C++'s NaN
-behaviour, the NEON reduce — so there are several copies of each. Fold them
-into `ops/common.zig` when the files are next touched.
+**The `ops.cpp` tidy-up is done.** Seven workers writing in parallel each
+grew their own small helpers; 21 duplicate bodies across 18 files are now one
+definition each in `ops/common.zig`, with a one-line alias where a file used
+a different local spelling:
+
+| helper | copies | |
+|---|---|---|
+| byte offset `i*nb` | 6 | named `at` in three files and `off` in three |
+| typed pointer at a byte offset | 5 | three signatures, differing only in the offset's integer type and `[*]T` vs `*T` |
+| stride widened to `i64` | 4 | |
+| `std::min` / `std::max` | 4 | |
+| `ggml_barrier(params->threadpool)` | 2 | |
+| the NEON `GGML_F32x4_REDUCE` | 2 | named in `recurrent.zig`, open-coded in `ssm.zig` |
+
+**The call sites were left alone.** Folding the bodies removes the thing that
+can drift; rewriting ~240 call sites to a new spelling would have risked a
+transcription error for no gain, and each file still reads against the C.
+
+Two things the survey turned up that the note above had wrong:
+
+- **`zeroDst` is not a duplicate.** `conv.zig`'s memsets the whole tensor;
+  `linalg.zig`'s fills `f32` zeros on thread 0 and then barriers. Merging
+  them on the strength of the shared name would have been a real bug. The
+  latter is now `zeroDstAndSync`, so the difference is visible.
+- **Three files imported `std` without using it.** Pre-existing, unrelated to
+  the parallel writing; dropped.
+
+Gate: `make ops-diff`, 592 op results identical either side of the fold.
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:
 

@@ -38,16 +38,11 @@ extern fn powf(x: f32, y: f32) f32;
 extern fn expf(x: f32) f32;
 extern fn log2(x: f64) f64;
 
-/// A typed pointer `off` bytes into a tensor's data.
-inline fn at(comptime T: type, data: ?*anyopaque, off: i64) [*]T {
-    const base: [*]u8 = @ptrCast(data.?);
-    return @ptrCast(@alignCast(base + @as(usize, @intCast(off))));
-}
+/// Typed pointer at a byte offset; see `common.ptr`.
+const at = common.ptr;
 
-/// Narrows a `size_t` stride to `int64_t`.
-inline fn s(nb: usize) i64 {
-    return @intCast(nb);
-}
+/// Stride as `i64`; see `common.sz`.
+const s = common.sz;
 
 /// The C's `MIN` macro (ggml-impl.h:36 @c1d0e7a00), over `f32`.
 inline fn minF(a: f32, b: f32) f32 {

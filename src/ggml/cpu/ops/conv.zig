@@ -55,9 +55,8 @@ inline fn uz(x: i64) usize {
     return @intCast(x);
 }
 
-inline fn barrier(params: *const ComputeParams) void {
-    threading.ggml_barrier(@ptrCast(@alignCast(params.threadpool.?)));
-}
+/// `ggml_barrier(params->threadpool)`; see `common.barrier`.
+const barrier = common.barrier;
 
 /// Zeroes the whole work buffer, the C's `memset(params->wdata, 0, params->wsize)`.
 inline fn zeroWork(params: *const ComputeParams) void {

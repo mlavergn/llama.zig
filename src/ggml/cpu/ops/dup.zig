@@ -22,7 +22,6 @@
 //! uses, so the index arithmetic still reads against the C line by line. Do
 //! not renumber them.
 
-const std = @import("std");
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 

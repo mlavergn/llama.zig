@@ -43,10 +43,8 @@ extern fn vDSP_vsadd(a: [*]const f32, ia: Stride, b: *const f32, cc: [*]f32, ic:
 extern fn vDSP_measqv(a: [*]const f32, ia: Stride, cc: *f32, n: Length) void;
 extern fn fmaxf(x: f32, y: f32) f32;
 
-/// A non-negative index times a byte stride: the C's `int64_t * size_t`.
-inline fn at(i: i64, nb: usize) usize {
-    return @as(usize, @intCast(i)) * nb;
-}
+/// Byte offset `i*nb`; see `common.byteOff`.
+const at = common.byteOff;
 
 /// Ports `ggml_compute_forward_norm_f32` (ops.cpp:3694 @c1d0e7a00), the
 /// `GGML_USE_ACCELERATE` arm of its contiguous path.

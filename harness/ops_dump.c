@@ -408,6 +408,20 @@ int main(int argc, char ** argv) {
 
     puts("=== matmul, every quantized type ===");
     {
+        /* n >= 8, which is the only shape that reaches llamafile_sgemm's F16
+         * kernel: sgemm.cpp:3975 returns false below 8, and the sweep below
+         * tops out at 7. Measured before porting sgemm.cpp -- the F32 and
+         * Q0 paths were already covered at n = 4 and n = 7, the F16 one was
+         * not covered at all. F32 at n = 8 comes along for the width. */
+        run_amp("mul_mat f16 x f32 [512 x 16] x 8",
+                ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 512, 16),
+                                  ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, 8)), 0, 1.0f);
+        run_amp("mul_mat f32 x f32 [512 x 16] x 8",
+                ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, 16),
+                                  ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, 8)), 0, 1.0f);
+    }
+
+    {
         /* Every type with a CPU vec_dot, at 1 column (the decode path) and 7
          * (a short prompt). Only Q4_K, Q6_K and Q8_0 were here at first, and
          * a Q5_K divergence surfaced end to end instead -- measured, as the

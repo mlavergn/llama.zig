@@ -402,7 +402,24 @@ The reference build is deliberately **not** part of the default step — it is ~
 zig build smoke --release=fast -- Qwen3.5-2B-Q4_K_M.gguf "The capital of France is" 24
 ```
 
-Remaining Stage 0 item: **`llama.cpp/` is an untracked nested clone, not yet a submodule.** `main` still has no commits, so pinning it is free now and expensive later. `*.gguf` is ignored.
+**`llama.cpp/` is a submodule**, pinned at `c1d0e7a00` (v0.3.0) in
+`.gitmodules`. `*.gguf` is ignored.
+
+**`llama.cpp.zmake/` tracks the build system only** — `build.zig`,
+`build.zig.zon`, `Makefile`, `zig/`. Its own `.gitignore` says so: *"the
+llama.cpp sources, fetched by `make clone`. Not vendored here: this
+repository is the build system, not a fork."* So the sources the gates
+actually compile live in an **untracked** checkout at
+`llama.cpp.zmake/llama.cpp`.
+
+**Submoduling `llama.cpp.zmake` would therefore not pin the reference** — it
+would pin the `build.zig` and leave the sources exactly as unpinned.
+`scripts/check-reference-pin` does the job instead: every gate that compares
+on bits (`ops-diff`, `node-diff`, `parity-port`) sources it and aborts unless
+that checkout is at the same commit as our `llama.cpp` submodule. Without it
+a drifted reference would compile a *different upstream* and the gate would
+report the version gap as a porting bug. Negative-tested 3/3 by moving the
+checkout back five commits.
 
 ## Toolchain
 

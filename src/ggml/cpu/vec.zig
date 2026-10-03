@@ -76,10 +76,10 @@ const GgmlFloat = f64;
 // bug and it is already documented there.
 
 /// Eight `f16` lanes, matching `float16x8_t`.
-const f16x8 = @Vector(8, f16);
+const f16x8 = neon.f16x8;
 
 /// Four `f16` lanes, matching `float16x4_t`.
-const f16x4 = @Vector(4, f16);
+const f16x4 = neon.f16x4;
 
 /// Ports `vdupq_n_f32`.
 inline fn dup_n_f32(x: f32) f32x4 {
@@ -110,26 +110,12 @@ inline fn fms_f32(a: f32x4, b: f32x4, cc: f32x4) f32x4 {
     return @mulAdd(f32x4, -b, cc, a);
 }
 
-/// Ports `vfmaq_f16`: `a + b * cc` over eight half-precision lanes, fused.
-///
-/// The accumulation really is in `f16`; widening it would change the result
-/// everywhere this is used.
-inline fn fma_f16(a: f16x8, b: f16x8, cc: f16x8) f16x8 {
-    return @mulAdd(f16x8, b, cc, a);
-}
-
-/// Ports `vaddq_f16`.
-inline fn add_f16(a: f16x8, b: f16x8) f16x8 {
-    return a + b;
-}
-
-/// Ports `vget_low_f16` and `vget_high_f16` followed by `vcvt_f32_f16`:
-/// the lower or upper four `f16` lanes widened to `f32`.
-inline fn cvt_f32_f16_half(v: f16x8, comptime upper: bool) f32x4 {
-    const base: usize = if (upper) 4 else 0;
-    const half: f16x4 = .{ v[base], v[base + 1], v[base + 2], v[base + 3] };
-    return @floatCast(half);
-}
+/// The half-precision NEON helpers; see `quants/arm/neon.zig`. They lived
+/// here while this was their only user, and moved when `ops/sgemm.zig`
+/// became the second.
+const fma_f16 = neon.fma_f16;
+const add_f16 = neon.add_f16;
+const cvt_f32_f16_half = neon.cvt_f32_f16_half;
 
 // -----------------------------------------------------------------------------
 // The gelu lookup tables

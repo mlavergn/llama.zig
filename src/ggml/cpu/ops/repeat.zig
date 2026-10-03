@@ -29,12 +29,8 @@ const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 
-/// A non-negative index times a byte stride: the C's `int64_t * size_t`,
-/// which converts the index to unsigned. Every index these kernels form is
-/// non-negative, so the `@intCast` checks what the C assumes.
-inline fn at(i: i64, nb: usize) usize {
-    return @as(usize, @intCast(i)) * nb;
-}
+/// Byte offset `i*nb`; see `common.byteOff`.
+const at = common.byteOff;
 
 /// Ports `ggml_compute_forward_repeat_f32` (ops.cpp:1698 @c1d0e7a00) and
 /// `ggml_compute_forward_repeat_f16` (ops.cpp:1742 @c1d0e7a00).

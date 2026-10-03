@@ -42,16 +42,11 @@ const ComputeParams = common.ComputeParams;
 extern fn powf(x: f32, y: f32) f32;
 extern fn logf(x: f32) f32;
 
-/// A typed pointer `off` bytes into a tensor's data.
-inline fn at(comptime T: type, data: ?*anyopaque, off: i64) [*]T {
-    const base: [*]u8 = @ptrCast(data.?);
-    return @ptrCast(@alignCast(base + @as(usize, @intCast(off))));
-}
+/// Typed pointer at a byte offset; see `common.ptr`.
+const at = common.ptr;
 
-/// Narrows a `size_t` stride to `int64_t`.
-inline fn s(nb: usize) i64 {
-    return @intCast(nb);
-}
+/// Stride as `i64`; see `common.sz`.
+const s = common.sz;
 
 /// Ports `rope_yarn_ramp` (ops.cpp:5818 @c1d0e7a00).
 ///
