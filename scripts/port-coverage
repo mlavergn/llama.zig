@@ -77,6 +77,15 @@ report_unit() {
         # It belongs to the runtime, not to the translation unit, and no Zig
         # port produces it.
         grep -v '^_Z' "$d/want-all.txt" | grep -v '^__clang_call_terminate$' > "$d/want.txt" || :
+        # `MANGLED_` names the exceptional file whose contract *is* mangled.
+        # `ggml-metal-tuning.cpp` has **zero** unmangled exports, so the
+        # filter above leaves an empty contract and this script would read
+        # `0 / 0 symbols (100%)` for a file nobody had touched -- the same
+        # trap `repack.cpp` sprang, in its purest form. Listing the mangled
+        # names makes the count real.
+        if [ -n "${MANGLED_:-}" ]; then
+            printf '%s\n' $MANGLED_ | sort -u > "$d/want.txt"
+        fi
     else
         cp "$d/want-all.txt" "$d/want.txt"
     fi
@@ -207,6 +216,19 @@ LANG_=cxx report_unit "arch/arm/repack.cpp" llama.cpp/ggml/src/ggml-cpu/arch/arm
 # The Metal host layer. The two .m files are never ported (Decision 13);
 # the boundary with them is a pure C ABI, measured.
 LANG_=cxx report_unit "ggml-metal-common.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-common.cpp yes \
+    "$PORTED_DIR/ported.zig"
+# ggml-metal-tuning.cpp has no unmangled exports at all: its whole contract
+# is seven C++-linkage functions in `namespace ggml_metal_tuning`, which the
+# Zig exports under their mangled names. Without MANGLED_ this line would
+# read `0 / 0 symbols (100%)` for an untouched file.
+MANGLED_="_ZN17ggml_metal_tuning11fa_vec_pickE20ggml_metal_device_idiiiixx
+_ZN17ggml_metal_tuning18fa_vec_baseline_neEii
+_ZN17ggml_metal_tuning18fa_vec_ne01_bucketEx
+_ZN17ggml_metal_tuning18fa_vec_ne11_bucketEx
+_ZN17ggml_metal_tuning19fa_vec_baseline_cfgEii
+_ZN17ggml_metal_tuning19fa_vec_set_overrideENS_12fa_vec_cfg_tE
+_ZN17ggml_metal_tuning21fa_vec_clear_overrideEv" \
+LANG_=cxx report_unit "ggml-metal-tuning.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.cpp yes \
     "$PORTED_DIR/ported.zig"
 
 exit 0

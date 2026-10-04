@@ -157,7 +157,9 @@ const ggml_metal_cxx_sources = [_][]const u8{
     "ggml/src/ggml-metal/ggml-metal-device.cpp",
     // ggml-metal-common.cpp is ported -- src/ggml/metal/common.zig.
     "ggml/src/ggml-metal/ggml-metal-ops.cpp",
-    "ggml/src/ggml-metal/ggml-metal-tuning.cpp",
+    // ggml-metal-tuning.cpp is ported -- src/ggml/metal/tuning.zig. Its
+    // seven entry points are C++-linkage, so the Zig exports them under
+    // their mangled names and the three C++ callers link unchanged.
 };
 
 const ggml_metal_objc_sources = [_][]const u8{

@@ -1,0 +1,43 @@
+#!/bin/bash
+# Call the port's by-value-struct entry points as a C caller does.
+#
+# **The gate for a toolchain bug, not a translation bug.** Zig 0.16 on
+# aarch64-macos miscompiles an `extern struct` *received* by value across
+# the C ABI unless its size is a multiple of 4 with no padding: the callee
+# sees zeros. Zig as the caller is unaffected.
+#
+# `ggml_bf16_to_fp32` takes `ggml_bf16_t`, two bytes, and returned 0.0 for
+# every input from the day `ggml.c` was ported. Nine correctness gates
+# missed it: the row variant takes a pointer and works, Zig-internal
+# callers never cross the C ABI, and no model on the inference path calls
+# the scalar form. Only a C caller can see it, which is what this is.
+#
+# Add an entry here whenever a port exports a function taking a struct by
+# value. The harness header records the measured rule.
+#
+# Usage: scripts/abi-check
+#   Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+for lib in zig-out/lib/libggml.a; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# Apple's libc++, not Zig's -- see `testcase/` and the note above
+# `appleCxxFlags` in `build/llamacpp.zig`.
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+zig cc harness/abi_structs.c -o "$tmp/abi" -std=c11 -O2 \
+    -I llama.cpp/ggml/include \
+    zig-out/lib/libggml.a \
+    "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/err" \
+    || { echo "FAIL: could not build the ABI harness" >&2; head -20 "$tmp/err" >&2; exit 1; }
+
+"$tmp/abi"

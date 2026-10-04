@@ -13,9 +13,13 @@
 const std = @import("std");
 
 pub const common = @import("common.zig");
+pub const tuning = @import("tuning.zig");
+pub const tuning_table = @import("tuning_table.zig");
 
 comptime {
     _ = common;
+    _ = tuning;
+    _ = tuning_table;
 }
 
 // -----------------------------------------------------------------------------

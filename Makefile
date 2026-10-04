@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff abi-check tuning-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -152,6 +152,21 @@ ops-diff:
 	cd llama.cpp.zmake && zig build lib --release=fast
 	zig build reference --release=fast
 	./scripts/ops-diff
+
+# Sweep the flash-attention tuning lookup against the reference.
+# tuning_table.zig is 936 transcribed rows and no other gate can tell a
+# dropped row from a kept one. See the header of scripts/tuning-diff.
+tuning-diff:
+	zig build reference --release=fast
+	./scripts/tuning-diff
+
+# Call the port's by-value-struct entry points as a C caller does.
+# The gate for a toolchain bug: Zig 0.16 miscompiles an extern struct
+# received by value across the C ABI unless its size is a multiple of 4
+# with no padding. See the header of scripts/abi-check.
+abi-check:
+	zig build reference --release=fast
+	./scripts/abi-check
 
 # Diff every interleaved repack kernel against the reference C++, on bits.
 # The only oracle those 36 kernels have: test-backend-ops never allocates a

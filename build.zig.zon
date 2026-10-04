@@ -1,7 +1,7 @@
 .{
     .name = .llamazig,
     .description = "Llama.cpp Zig Port",
-    .version = "0.0.7",
+    .version = "0.0.8",
     .fingerprint = 0xb16f7afa8792d6b2,
     .minimum_zig_version = "0.16.0",
     .paths = .{

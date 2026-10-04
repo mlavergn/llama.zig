@@ -1,0 +1,64 @@
+#!/bin/bash
+# Sweep the flash-attention tuning lookup against the reference, exhaustively.
+#
+# `src/ggml/metal/tuning_table.zig` is 936 rows transcribed from a
+# generated C table, and no other gate can tell a dropped row from a kept
+# one: `node-diff --gpu` reaches only the few keys a Qwen3.5 decode uses on
+# this one SKU, and `backend-ops` only those its FA cases cover. This
+# sweeps every device id, every KV type, every head-size pair, both sides
+# of every bucket edge and the family fallback -- ~400k lookups.
+#
+# The reference's seven entry points are renamed with -D on the identifier
+# rather than the mangled symbol: `fa_vec_pick` lives in a namespace, so
+# renaming the identifier yields `ggml_metal_tuning::ref_fa_vec_pick`, a
+# different mangled name. The harness includes the header with the same
+# -D set, so its declarations match.
+#
+# Usage: scripts/tuning-diff
+#   Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+LIB=zig-out/lib/libggml.a
+[ -f "$LIB" ] || { echo "missing $LIB -- run 'zig build reference --release=fast'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+CXX=(zig c++ -std=c++17 -w -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1"
+     -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu
+     -I llama.cpp/ggml/src/ggml-metal
+     -DNDEBUG -DGGML_USE_CPU -DGGML_USE_METAL -DGGML_METAL_EMBED_LIBRARY
+     -DGGML_SCHED_MAX_COPIES=4 -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE)
+
+RENAME=(-Dfa_vec_ne11_bucket=ref_fa_vec_ne11_bucket
+        -Dfa_vec_ne01_bucket=ref_fa_vec_ne01_bucket
+        -Dfa_vec_baseline_ne=ref_fa_vec_baseline_ne
+        -Dfa_vec_baseline_cfg=ref_fa_vec_baseline_cfg
+        -Dfa_vec_set_override=ref_fa_vec_set_override
+        -Dfa_vec_clear_override=ref_fa_vec_clear_override
+        -Dfa_vec_pick=ref_fa_vec_pick)
+
+"${CXX[@]}" "${RENAME[@]}" -c llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.cpp \
+    -o "$tmp/ref_tuning.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile the renamed reference tuning" >&2; head -8 "$tmp/err" >&2; exit 1; }
+
+n=$(nm -gUj "$tmp/ref_tuning.o" | grep -c 'ref_fa_vec')
+echo "reference: $n entry points renamed to ref_*"
+[ "$n" -eq 7 ] || { echo "FAIL: expected 7 renamed entry points, got $n" >&2; exit 1; }
+
+# NOTE: no "${RENAME[@]}" here, deliberately. The renames belong to the
+# reference translation unit alone -- applying them to the harness renames
+# its declarations of *our* names too, so both sides of every comparison
+# call the reference and the gate passes unconditionally. That is exactly
+# what happened first time: four injected faults all passed.
+"${CXX[@]}" harness/tuning_diff.cpp "$tmp/ref_tuning.o" "$LIB" \
+    -o "$tmp/tuning_diff" \
+    "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
+
+"$tmp/tuning_diff"

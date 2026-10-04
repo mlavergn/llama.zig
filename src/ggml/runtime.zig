@@ -321,8 +321,18 @@ export fn ggml_fp32_to_fp16(x: f32) c.ggml_fp16_t {
 }
 
 /// Ports `ggml_bf16_to_fp32` (ggml.c:459 @c1d0e7a00).
-export fn ggml_bf16_to_fp32(x: c.ggml_bf16_t) f32 {
-    return impl.bf16ToFp32(x.bits);
+///
+/// **The parameter is spelled `u16`, not `c.ggml_bf16_t`, because Zig
+/// 0.16 miscompiles the struct.** `ggml_bf16_t` is `struct { uint16_t
+/// bits; }` — two bytes — and an `extern struct` that size received by
+/// value across the C ABI arrives as **zeros** on aarch64-macos. This
+/// function returned 0.0 for every input from the day `ggml.c` was
+/// ported, and no gate saw it; `harness/abi_structs.zig` is the gate that
+/// does now. `u16` has the same size and is passed correctly, and the C
+/// caller is unaffected: `ggml_bf16_t` is a one-field struct over exactly
+/// those bits. See `CLAUDE.md`, "Threads in ported code".
+export fn ggml_bf16_to_fp32(x: u16) f32 {
+    return impl.bf16ToFp32(x);
 }
 
 /// Ports `ggml_fp32_to_bf16` (ggml.c:464 @c1d0e7a00).

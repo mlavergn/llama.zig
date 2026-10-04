@@ -26,7 +26,7 @@ Where we are: **Stages 1, 2 and 3 complete; Stage 4 under way — all of `ggml/s
 
 **Stage 4 has begun, and the measurement that shapes it is done.** Every exported symbol of every ggml C++ object was intersected with the undefined symbols of every other object in `libggml.a` and `libllama.a`: **the external contract of 20 of the 24 C++ translation units in ggml is a pure C ABI.** A C++ file exports thousands of mangled symbols — `gguf.cpp` alone exports 2,002 — but they are template instantiations and inline functions, emitted weakly into every object that needs them, and almost none are reached from outside. So the Stage 3 swap mechanism carries over unchanged for the large majority. `PLAN.md` names the four exceptions and what each forces.
 
-Fourteen C++ translation units are ported and swapped:
+Fifteen C++ translation units are ported and swapped:
 
 - `ggml-threading.cpp` → `src/ggml/threading.zig` (3 symbols).
 - `ggml-backend-reg.cpp` → `src/ggml/backend_reg.zig` (16 symbols). It took `ggml-backend-dl.cpp` out of the build with it: those three `dl_*` functions have C++ linkage Zig cannot provide, and the registry was their only caller.
@@ -39,6 +39,7 @@ Fourteen C++ translation units are ported and swapped:
 - `ggml-cpu/llamafile/sgemm.cpp` → `src/ggml/cpu/ops/sgemm.zig` (1 symbol).
 - The **vtable cluster**, which had to move as one unit because `repack.cpp` derives from the two abstract bases `traits.cpp` declares: `ggml-cpu/traits.cpp` → `src/ggml/cpu/extra.zig` (2 symbols), `ggml-cpu/ggml-cpu.cpp` → `src/ggml/cpu/cpu_backend.zig` (7), `ggml-cpu/repack.cpp` + `ggml-cpu/arch/arm/repack.cpp` → `src/ggml/cpu/repack/` (36 + 28).
 - `ggml-metal/ggml-metal-common.cpp` → `src/ggml/metal/common.zig` (6 symbols). The Metal group's first unit, and the only one with no Metal API in it.
+- `ggml-metal/ggml-metal-tuning.cpp` → `src/ggml/metal/{tuning,tuning_table}.zig` (7 symbols). **Its contract is entirely C++-linkage** — seven functions in `namespace ggml_metal_tuning`, zero unmangled exports — so `port-coverage` would read it as 0/0 = 100% without the `MANGLED_` list it now takes. Zig exports the mangled names with `@export`, which is what lets the three C++ files that call it stay C++ while each is ported separately.
 
 **Both counts `PLAN.md` carried for this group were low** — gguf was recorded as 44 and backend as 82. Measure the contract before estimating a C++ file; do not trust the survey figure.
 
@@ -117,7 +118,7 @@ indistinguishable from one that passes.**
 
 **`make validate` is the fast check; parity is the real one.** `validate` runs formatting, the scaffold, the unit tests, the ported tests in both debug and release, `scripts/port-coverage`, `scripts/port-links`, and the graph diff. It proves the port is *consistent*, not *correct*.
 
-Correctness has ten gates, and none of them subsumes the others:
+Correctness has twelve gates, and none of them subsumes the others:
 
 - **`make graph-diff`** builds 131 nodes through every constructor family and diffs op, shape, strides, `op_params`, and `src[]` against the C. Needs no model. **The sharpest gate for the port's actual failure mode** — a constructor writing the wrong thing — and the only one that catches a halved softmax scale. It found the real `ggml_permute` bug.
 - **`make backend-ops`** runs upstream's `test-backend-ops` against our library: 21,093 op configurations, Metal against CPU, all passing. The broadest exercise, and the only one that *executes* the constructors at scale. **It cannot catch a consistently-wrong constructor** — both backends read the same `op_params` and agree. It catches crashes, assertion failures, and shapes a backend has no kernel for. `--diff` runs the same binary against the C reference and diffs the two
@@ -225,6 +226,8 @@ Correctness has ten gates, and none of them subsumes the others:
   with the wrong `op`. The first differing line names the op.
 
 - **`make node-diff ARGS=--gpu` is the only gate that sees the Metal host layer**, and the CPU default cannot. Measured with an unconditional abort in `ggml_graph_optimize`: the `--gpu` run dies, the CPU run passes 2750 nodes. Metal node hashes are reproducible run to run and across builds, so this is an exact oracle and not merely a smoke test — verified before porting anything in `ggml-metal/`, not after.
+- **`make tuning-diff`** sweeps **3.5M** flash-attention tuning lookups against the reference — every device id, KV type, head-size pair, both sides of every bucket edge, the family fallback. `tuning_table.zig` is 936 transcribed rows and no other gate can tell a dropped row from a kept one: `node-diff --gpu` reaches only the few keys one decode uses on one SKU. **It passed while testing nothing, twice over** — the archive held both definitions of each mangled symbol, and the harness had been compiled with the reference's `-D` renames so both sides called the reference. 5/5 after fixing both.
+- **`make abi-check`** calls the port's by-value-struct entry points **as a C caller does**. It is the gate for a toolchain bug rather than a translation one, and it exists because nine gates missed `ggml_bf16_to_fp32` returning 0.0 for every input — the row variant takes a pointer and works, Zig-internal callers never cross the C ABI, and nothing in a decode calls the scalar form. Negative-tested 4 of 11; the two zero inputs pass vacuously, which is why non-zero ones are in it.
 - **`make sched-diff`** diffs the scheduler's backend assignments against the reference C, through two stub devices in `harness/sched_dump.c` that differ only in which ops they claim. **Nothing else can see those decisions.** Measured: turning off pass 4's `view_src` propagation leaves `parity-cli` at 6/6 and `graph-diff` at 131/131. Parity has to miss it — at `--temp 0` the sampler takes an argmax and `backend-ops` has shown Metal and CPU agree on all 21,093 op configurations, so moving an op between backends shifts the last bits and not the token. **Token parity measures *what* was computed, never *where*.** One fault still escapes even this: removing pass 2's CPU skip, because pass 3 re-derives the same answer.
 - **`make parity-cli`** runs the actual `llamazig` binary against a reference C driver, both greedy. Covers what `parity-port` structurally cannot, because it lives in the binary rather than the library: argument parsing, tokenizer flags, the sampler chain, the decode loop. Negative-tested — a `--temp` that parses but never reaches the sampler fails all six prompts.
 
@@ -328,6 +331,30 @@ copy its source's `op`, `flags` and `src` pointers. `p[0].arr[i]`, `*T`,
 `[*]T` and `?*T` are all fine: narrow a `[*c]` with `impl.one` before indexing
 an array field through it. A test written in the same style passes vacuously —
 it reads both sides equally wrong.
+
+**Zig can supply a C++-mangled symbol, where the signature is POD.**
+`@export(&f, .{ .name = "_ZN17ggml_metal_tuning11fa_vec_pick…" })` resolves
+and the ABI matches, which is what let `ggml-metal-tuning.cpp` be ported
+alone instead of dragging the other three Metal C++ files with it. Take the
+name from `nm` on the reference object, never construct it. `CLAUDE.md`'s
+older note that `ggml-backend-dl.cpp` has "C++ linkage Zig cannot provide"
+remains true of *that* file: its signatures name `std::filesystem::path`.
+
+**Zig 0.16 miscompiles a small `extern struct` *received* by value across
+the C ABI.** The callee sees **zeros**. Measured over ten shapes on
+aarch64-macos: broken unless the size is a multiple of 4 with no padding —
+1, 2, 4-with-padding, 6 bytes and a 2-byte struct forced to `align(4)` all
+fail; one `u32`, one `f32`, 8 bytes, 12 bytes and 16 bytes all work.
+Alignment is not the rule: 8 bytes at align 1 works and 2 bytes at align 4
+fails. It is **one-directional** — Zig as the *caller* passes them
+correctly.
+
+This had broken `ggml_bf16_to_fp32` since `ggml.c` was ported: `ggml_bf16_t`
+is `struct { uint16_t bits; }`, and the function returned 0.0 for every
+input. **Nine gates missed it** because the row variant takes a pointer,
+Zig-internal callers never cross the C ABI, and no decode calls the scalar
+form. **Declare such a parameter as an integer of the same size and
+`@bitCast`**, and add the entry point to `harness/abi_structs.c`.
 
 **Zig reserves every `iN` and `uN` as an integer type name, and the C uses
 half of them as loop indices.** Hit so far: `i0`, `i1`, `i2`, `i3`, `i11`,

@@ -2836,3 +2836,182 @@ redundant" once `ggml.c` is fully ported. It is, and everything else under
 re-exports `module.zig` and the two cannot diverge. Negative-tested —
 dropping the metal import from `module.zig` alone now reads
 `0 / 6 symbols (0%)`.
+
+## Zig 0.16 miscompiles a small `extern struct` received by value, and it had broken a shipped function
+
+Found while measuring the Metal group, not by any gate.
+
+`ggml-metal.cpp` calls five `ggml_metal_tuning::` functions directly, so
+porting it needs those symbols — which are C++-linkage. The question was
+whether Zig can supply a mangled C++ name. It can: `@export` with
+`.name = "_ZN17ggml_metal_tuning19fa_vec_baseline_cfgEii"` resolves, and
+a `fa_vec_cfg_t` **returned** by value comes back correct.
+
+A `fa_vec_cfg_t` **parameter** did not. The C++ caller passed `{42, 17}`
+and the Zig callee saw `{0, 0}`. Narrowing it:
+
+- Not the mangling. A plain `export fn zz_echo(cfg: Cfg) Cfg` fails the
+  same way.
+- **One-directional.** Zig as the *caller* passes small structs to C
+  correctly; only Zig as the *callee* is affected.
+
+Ten shapes, measured rather than reasoned about:
+
+| struct | size | result |
+|---|---:|---|
+| one `u8` | 1 | zeros |
+| one `u16` | 2 | zeros |
+| `u16` + `u8` + pad | 4 | zeros |
+| one `u32` | 4 | **correct** |
+| one `f32` | 4 | **correct** |
+| 3 × `u16` | 6 | zeros |
+| 8 × `u8` | 8 | **correct** |
+| 2 × `f32` | 8 | **correct** |
+| 3 × `u32` | 12 | **correct** |
+| `bool` + pointer | 16 | **correct** |
+| one `u16 align(4)` | 4 | zeros |
+
+Alignment is not the rule — 8 bytes at align 1 works and 2 bytes at
+align 4 fails. What fits every point is **size a multiple of 4 with no
+padding**. The practical rule is simpler: **do not take a small `extern
+struct` by value in an exported function.** Declare the parameter as an
+integer of the same size and `@bitCast`; that was measured correct.
+
+### It had broken `ggml_bf16_to_fp32` since `ggml.c` was ported
+
+`ggml_bf16_t` is `struct { uint16_t bits; }`. `runtime.zig` had
+
+```zig
+export fn ggml_bf16_to_fp32(x: c.ggml_bf16_t) f32 {
+    return impl.bf16ToFp32(x.bits);
+}
+```
+
+and a C caller got **0.0 for every input**. Confirmed against the built
+`libggml.a`, not inferred.
+
+**Nine correctness gates missed it**, and the reason is structural rather
+than unlucky: `ggml_bf16_to_fp32_row` takes a *pointer* and works, so
+every dequantizing path is fine; Zig-internal callers never cross the C
+ABI; and nothing in a Qwen3.5 decode calls the scalar form. Only a C
+caller can see it.
+
+Auditing the rest of the exported surface found exactly one other
+by-value struct parameter — `gguf_init_params`, 16 bytes, `bool` plus a
+pointer — and it is **correct**, which is consistent with model loading
+having always worked.
+
+### The gate
+
+`scripts/abi-check` + `harness/abi_structs.c`: a C driver calling the
+port's by-value-struct and scalar entry points and checking the values
+arrive. 11 checks. Negative-tested by restoring the broken signature — 4
+of 11 fail.
+
+**Only four, and which four matters.** With the struct broken the callee
+reads zeros, so `0x0000 → 0.0` and `0x8000 → -0.0` both still compare
+equal and pass. A gate whose inputs are all zero cannot see a bug that
+reads zero — the same lesson `ops-diff` taught about input amplitude and
+the `nvfp4` goldens taught about all-zero rows, in a third form.
+
+## `PLAN.md` had the Metal tuning coupling wrong
+
+The Stage 4 exception table says of `ggml-metal-tuning.cpp`: "Called only
+by `ggml-metal-ops.cpp`. Small; port the pair together."
+
+Measured, by intersecting each object's undefined symbols with the
+`_ZN17ggml_metal_tuning` exports:
+
+| object | tuning symbols referenced |
+|---|---:|
+| `ggml-metal.o` | 5 |
+| `ggml-metal-ops.o` | 2 |
+| `ggml-metal-device.o` | 1 |
+
+**Three translation units, not one.** Since every remaining Metal C++
+file needs it, tuning either goes first or all four go together as 7,509
+live lines. Going first is possible because Zig can export the mangled
+names — see above — so the three C++ files keep linking unchanged while
+each is ported in its own step.
+
+## Porting `ggml-metal-tuning.cpp` — and a gate that was green twice over
+
+1,053 live lines, of which 936 are a generated table. The logic is three
+bucket functions, a baseline lookup, and `fa_vec_pick`, which chooses the
+`(Q, NE)` a flash-attention vector kernel is instantiated at.
+
+### It had to go first, and Zig can supply the mangled names
+
+Its seven entry points are the only **C++-linkage** symbols left in ggml,
+and `PLAN.md` recorded them as "called only by `ggml-metal-ops.cpp`".
+Measured: `ggml-metal.o` references five, `ggml-metal-ops.o` two,
+`ggml-metal-device.o` one. Three translation units, so every remaining
+Metal C++ file needs this one.
+
+That left two options: all four together as 7,509 live lines, or make Zig
+provide the C++-linkage symbols. `@export` with the mangled name works —
+
+```zig
+@export(&abiPick, .{ .name = "_ZN17ggml_metal_tuning11fa_vec_pickE20ggml_metal_device_idiiiixx" });
+```
+
+— and the names were taken from `nm` on the reference object rather than
+constructed. `CLAUDE.md`'s note that `ggml-backend-dl.cpp` has "C++ linkage
+Zig cannot provide" is still true of *that* file, whose signatures name
+`std::filesystem::path`; these seven are POD. So the three C++ callers keep
+linking while each is ported in its own step.
+
+One of the seven needed the workaround from the same day's ABI finding:
+`fa_vec_set_override` takes `fa_vec_cfg_t` by value, which Zig 0.16 hands a
+callee as zeros, so the thunk takes a `u16` and `@bitCast`s.
+
+### The table was transcribed by script
+
+The C's own comment reads "Generated by `ggml-metal-tuning fa-vec`; do not
+hand-edit." 936 rows is past the point where hand-copying is honest, so a
+regex extracted them, **skipped none**, and the count was checked against
+the C's own. `tuning_table.zig` records that.
+
+### The gate passed, and was testing nothing — for two separate reasons
+
+`scripts/tuning-diff` sweeps 3,528,489 lookups: every device id, every KV
+type, every head-size pair, both sides of every bucket edge, the family
+fallback, and the override. It passed on the first run. Then **all four
+fault injections passed too.**
+
+Two independent causes, both of them this project's standing traps:
+
+- **The archive held both definitions.** `ggml-metal-tuning.cpp` was still
+  in `build/llamacpp.zig`, so `libggml.a` carried the mangled symbols twice
+  — `ggml-metal-tuning.o` and `libggml_zcu.o` — and the linker picked one
+  silently. Checked with `nm` per object, which is the only way to see it.
+- **The harness was compiled with the reference's `-D` renames.** Those
+  renames are what turn the reference's definitions into `ref_*`; applying
+  them to the harness renamed its declarations of *our* names too, so every
+  comparison called the reference twice. The script now renames the
+  reference translation unit alone, and the harness says so at the top.
+
+With both fixed, 5/5 caught:
+
+| Injected | Lookups differing |
+|---|---:|
+| one table row dropped | 15 |
+| `ne11` bucket edge 16384 → 16383 | 1,933 |
+| `baseline_ne` drops the 192/128 pair | 44,456 |
+| family-9 fallback → generic | 45,375 |
+| one `cfg` value changed | 10 |
+
+### `port-coverage` would have read 0/0 = 100%
+
+This file has **no unmangled exports at all**, so the `grep -v '^_Z'` filter
+leaves an empty contract and the script would have called an untouched file
+complete — the `repack.cpp` trap in its purest form. `report_unit` now takes
+`MANGLED_`, an explicit list for the exceptional file, and reports 7/7.
+Negative-tested at 6/7 (85%) by withholding one export.
+
+### Which gate sees it
+
+An `impl.abort` in the exported `fa_vec_pick`: `node-diff ARGS=--gpu`
+**dies**, `node-diff` on the CPU passes 2750 nodes. Flash-attention kernel
+selection is Metal-only, so the `--gpu` run is the only end-to-end gate
+that reaches this file — the same split `ggml-metal-common.cpp` has.

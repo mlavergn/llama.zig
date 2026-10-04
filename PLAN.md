@@ -285,7 +285,7 @@ when it was ported; an earlier count of 44 was wrong.
 | `ggml-backend-dl.cpp` | 3 functions, one taking `std::filesystem::path &` | Only `ggml-backend-reg.cpp` calls them. **Port the two together**; the Zig registry calls `dlopen` directly and the file disappears. |
 | `ggml-cpu/traits.cpp` | **vtables and RTTI** for `ggml::cpu::extra_buffer_type` and `tensor_traits` | Real virtual dispatch across TUs. Cannot move until every class deriving from them moves — `repack.cpp`, `arch/arm/repack.cpp`, `amx.cpp`. **One cluster, ported together.** |
 | `ggml-cpu/ggml-cpu.cpp` | `ggml_backend_cpu_get_extra_buffer_types()`, returning `std::vector` | Same cluster as above. |
-| `ggml-metal/ggml-metal-tuning.cpp` | 7 functions in a C++ namespace | Called only by `ggml-metal-ops.cpp`. Small; port the pair together. |
+| `ggml-metal/ggml-metal-tuning.cpp` | 7 functions in a C++ namespace | **This row was wrong.** Measured: `ggml-metal.o` references 5 of them, `ggml-metal-ops.o` 2, `ggml-metal-device.o` 1 — **three** translation units, so every remaining Metal C++ file needs it. It goes first, and the other three stay C++ meanwhile, because **Zig can export the mangled names** with `@export`. See `NOTES.md`. |
 
 That is the whole of the C++-linkage problem in ggml. It is three clusters, not
 a pervasive condition, and it was the thing worth knowing before starting.
@@ -428,16 +428,24 @@ target. It found four distinct faults in one run where `node-diff` found
 one, three of them in dead shapes. See `NOTES.md`.
 
 **3. `ggml-metal` host layer** (13,269). **Started.**
-`ggml-metal-common.cpp` is ported and swapped — `src/ggml/metal/common.zig`,
-6/6 symbols — chosen first because it holds no Metal API at all. Measured
+`ggml-metal-common.cpp` and `ggml-metal-tuning.cpp` are ported and swapped
+— `src/ggml/metal/{common,tuning,tuning_table}.zig`, 6/6 and 7/7 — the
+first because it holds no Metal API at all, the second because **every
+remaining Metal C++ file calls it**. Measured
 before starting: four of the five C++ units have a pure C ABI contract, the
 Objective-C boundary is pure C in both directions (9 symbols out, 57 in),
 and `node-diff --gpu` is an exact oracle that the CPU default cannot
-substitute for. **`ggml-metal-tuning.cpp` has zero unmangled exports and
-seven mangled, all seven reached by `ggml-metal-ops.cpp`** — the last of
-the four exceptions, and the sharpest form of the `repack.cpp` trap, since
-`port-coverage` would read it as 0/0 = 100%. The pair moves together, 5,121
-live lines, and is the largest unit left in ggml.
+substitute for. **`ggml-metal-tuning.cpp` had zero unmangled exports and
+seven mangled** — the last of the four exceptions, and the sharpest form of
+the `repack.cpp` trap, since `port-coverage` read it as 0/0 = 100%. It is
+done: Zig exports the seven under their mangled names, so the three C++
+files that call it — `ggml-metal.cpp` (5), `ggml-metal-ops.cpp` (2),
+`ggml-metal-device.cpp` (1), **not one as this plan said** — keep linking
+and can each be ported on their own.
+
+What is left in `ggml-metal/` is therefore three independent units:
+`ggml-metal.cpp` (694 live, 6 symbols), `ggml-metal-device.cpp` (1,694, 73)
+and `ggml-metal-ops.cpp` (4,068, 66), plus the two `.m` files that stay.
 
 Decision 13 settles the hard part: the
 **3,091 lines of Obj-C** in `ggml-metal-device.m` (2,352) and
