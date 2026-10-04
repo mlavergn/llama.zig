@@ -427,7 +427,19 @@ the first divergent node. Half of them cannot even be selected on this
 target. It found four distinct faults in one run where `node-diff` found
 one, three of them in dead shapes. See `NOTES.md`.
 
-**3. `ggml-metal` host layer** (13,269). Decision 13 settles the hard part: the
+**3. `ggml-metal` host layer** (13,269). **Started.**
+`ggml-metal-common.cpp` is ported and swapped — `src/ggml/metal/common.zig`,
+6/6 symbols — chosen first because it holds no Metal API at all. Measured
+before starting: four of the five C++ units have a pure C ABI contract, the
+Objective-C boundary is pure C in both directions (9 symbols out, 57 in),
+and `node-diff --gpu` is an exact oracle that the CPU default cannot
+substitute for. **`ggml-metal-tuning.cpp` has zero unmangled exports and
+seven mangled, all seven reached by `ggml-metal-ops.cpp`** — the last of
+the four exceptions, and the sharpest form of the `repack.cpp` trap, since
+`port-coverage` would read it as 0/0 = 100%. The pair moves together, 5,121
+live lines, and is the largest unit left in ggml.
+
+Decision 13 settles the hard part: the
 **3,091 lines of Obj-C** in `ggml-metal-device.m` (2,352) and
 `ggml-metal-context.m` (739) **stay as Obj-C**, compiled by `zig cc`. Only the
 10,178 lines of C++ around them are ported. `ggml-metal-tuning.cpp` pairs with

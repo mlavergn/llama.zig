@@ -26,7 +26,7 @@ Where we are: **Stages 1, 2 and 3 complete; Stage 4 under way — all of `ggml/s
 
 **Stage 4 has begun, and the measurement that shapes it is done.** Every exported symbol of every ggml C++ object was intersected with the undefined symbols of every other object in `libggml.a` and `libllama.a`: **the external contract of 20 of the 24 C++ translation units in ggml is a pure C ABI.** A C++ file exports thousands of mangled symbols — `gguf.cpp` alone exports 2,002 — but they are template instantiations and inline functions, emitted weakly into every object that needs them, and almost none are reached from outside. So the Stage 3 swap mechanism carries over unchanged for the large majority. `PLAN.md` names the four exceptions and what each forces.
 
-Thirteen C++ translation units are ported and swapped:
+Fourteen C++ translation units are ported and swapped:
 
 - `ggml-threading.cpp` → `src/ggml/threading.zig` (3 symbols).
 - `ggml-backend-reg.cpp` → `src/ggml/backend_reg.zig` (16 symbols). It took `ggml-backend-dl.cpp` out of the build with it: those three `dl_*` functions have C++ linkage Zig cannot provide, and the registry was their only caller.
@@ -38,6 +38,7 @@ Thirteen C++ translation units are ported and swapped:
 - `ggml-cpu/ops.cpp` → `src/ggml/cpu/ops/` (88 symbols, 19 files by op family). The largest translation unit in ggml.
 - `ggml-cpu/llamafile/sgemm.cpp` → `src/ggml/cpu/ops/sgemm.zig` (1 symbol).
 - The **vtable cluster**, which had to move as one unit because `repack.cpp` derives from the two abstract bases `traits.cpp` declares: `ggml-cpu/traits.cpp` → `src/ggml/cpu/extra.zig` (2 symbols), `ggml-cpu/ggml-cpu.cpp` → `src/ggml/cpu/cpu_backend.zig` (7), `ggml-cpu/repack.cpp` + `ggml-cpu/arch/arm/repack.cpp` → `src/ggml/cpu/repack/` (36 + 28).
+- `ggml-metal/ggml-metal-common.cpp` → `src/ggml/metal/common.zig` (6 symbols). The Metal group's first unit, and the only one with no Metal API in it.
 
 **Both counts `PLAN.md` carried for this group were low** — gguf was recorded as 44 and backend as 82. Measure the contract before estimating a C++ file; do not trust the survey figure.
 
@@ -109,6 +110,8 @@ surfaced 52 problems that had always been there. Negative-tested: a
 wrapped citation drifted by two now fails. Same class as the `Mirrors …`
 hole, and the same lesson — **a checker that silently skips input is
 indistinguishable from one that passes.**
+
+**The library root is `src/ggml/module.zig`, and it is the only import list.** `ported.zig` re-exports it rather than repeating it, because repeating it let the two diverge: `port-coverage` compiles `ported.zig` while the library is built from `module.zig`, so a file added to one and not the other read `6 / 6 symbols (100%), complete and swapped into the build` for a library containing none of them. The linker caught that one only because something referenced the symbols — a kernel reached through a dispatch table would have passed. Add a newly ported file to `module.zig`.
 
 **`ggml-impl.h` is not importable** — it includes `<arm_neon.h>`, whose `__mfp8` type translate-c cannot parse. `src/ggml/impl.zig` hand-writes what ported code needs from it: assertions, logging, `GGML_PAD`, the hash set, the float conversions, `struct ggml_cgraph`, and C-pointer narrowing helpers. Add to it rather than trying to widen the import.
 
@@ -221,6 +224,7 @@ Correctness has ten gates, and none of them subsumes the others:
   Qwen3.5 decode, and the Zig `[*c]` miscompile below as scheduler copies
   with the wrong `op`. The first differing line names the op.
 
+- **`make node-diff ARGS=--gpu` is the only gate that sees the Metal host layer**, and the CPU default cannot. Measured with an unconditional abort in `ggml_graph_optimize`: the `--gpu` run dies, the CPU run passes 2750 nodes. Metal node hashes are reproducible run to run and across builds, so this is an exact oracle and not merely a smoke test — verified before porting anything in `ggml-metal/`, not after.
 - **`make sched-diff`** diffs the scheduler's backend assignments against the reference C, through two stub devices in `harness/sched_dump.c` that differ only in which ops they claim. **Nothing else can see those decisions.** Measured: turning off pass 4's `view_src` propagation leaves `parity-cli` at 6/6 and `graph-diff` at 131/131. Parity has to miss it — at `--temp 0` the sampler takes an argmax and `backend-ops` has shown Metal and CPU agree on all 21,093 op configurations, so moving an op between backends shifts the last bits and not the token. **Token parity measures *what* was computed, never *where*.** One fault still escapes even this: removing pass 2's CPU skip, because pass 3 re-derives the same answer.
 - **`make parity-cli`** runs the actual `llamazig` binary against a reference C driver, both greedy. Covers what `parity-port` structurally cannot, because it lives in the binary rather than the library: argument parsing, tokenizer flags, the sampler chain, the decode loop. Negative-tested — a `--temp` that parses but never reaches the sampler fails all six prompts.
 
@@ -325,10 +329,12 @@ copy its source's `op`, `flags` and `src` pointers. `p[0].arr[i]`, `*T`,
 an array field through it. A test written in the same style passes vacuously —
 it reads both sides equally wrong.
 
-**Zig reserves `i1`, `i2`, `i3`, `i11`, `i12` and `i13` as integer type names,
-and the C uses every one of them as a loop index.** `src/ggml/cpu/mulmat.zig`
-renames them `j11`, `j12`, `j13` and so on, digit for digit, so the index
-arithmetic can still be read against the C line by line. Do not renumber them.
+**Zig reserves every `iN` and `uN` as an integer type name, and the C uses
+half of them as loop indices.** Hit so far: `i0`, `i1`, `i2`, `i3`, `i11`,
+`i12`, `i13` and `u12`. `src/ggml/cpu/mulmat.zig`, `cpu/repack/dispatch.zig`
+and `metal/common.zig` rename them `j11`, `j12`, `j13` and so on, digit for
+digit, so the index arithmetic can still be read against the C line by line.
+Do not renumber them.
 
 ## Where the C's own answer is unspecified
 

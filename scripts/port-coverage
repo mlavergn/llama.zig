@@ -204,6 +204,10 @@ LANG_=cxx report_unit "repack.cpp" llama.cpp/ggml/src/ggml-cpu/repack.cpp yes \
     "$PORTED_DIR/ported.zig"
 LANG_=cxx report_unit "arch/arm/repack.cpp" llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp yes \
     "$PORTED_DIR/ported.zig"
+# The Metal host layer. The two .m files are never ported (Decision 13);
+# the boundary with them is a pure C ABI, measured.
+LANG_=cxx report_unit "ggml-metal-common.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-common.cpp yes \
+    "$PORTED_DIR/ported.zig"
 
 exit 0
 

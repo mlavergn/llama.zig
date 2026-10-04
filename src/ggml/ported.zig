@@ -21,8 +21,20 @@
 //! overlaps with `ggml.c`. Nothing C is linked at all any more, and since
 //! `ggml-threading.cpp` was ported the critical section comes from here too.
 //!
-//! Once `ggml.c` is fully ported, this becomes redundant: the files move into
-//! `module.zig` and are tested as part of the library.
+//! That moment has arrived: `ggml.c` is fully ported, and so is everything
+//! else under `ggml/src/`. What is left of this root is the *name* --
+//! `zig build test-port` and `scripts/port-coverage` both point at it --
+//! so it now simply re-exports `module.zig`.
+//!
+//! **It used to repeat `module.zig`'s import list, and that was a hole.**
+//! `port-coverage` compiles *this* root and reads its symbols, while the
+//! library is built from `module.zig`. Adding a newly ported file to one
+//! and not the other made the coverage report read
+//! `6 / 6 symbols (100%), complete and swapped into the build` for a
+//! library that contained none of them. The linker caught it only because
+//! something happened to reference those symbols; a new export that
+//! nothing calls yet would have passed. One list cannot diverge from
+//! itself.
 //!
 //! # The backend is real here, not stubbed
 //!
@@ -35,40 +47,10 @@
 const std = @import("std");
 
 comptime {
-    _ = @import("alloc.zig");
-    _ = @import("impl.zig");
-    _ = @import("types.zig");
-    _ = @import("context.zig");
-    _ = @import("runtime.zig");
-    _ = @import("ops.zig");
-    _ = @import("graph.zig");
-    _ = @import("quantize.zig");
-    _ = @import("quants/module.zig");
-    _ = @import("cpu/module.zig");
-    _ = @import("threading.zig"); // ggml-threading.cpp
-    _ = @import("backend_reg.zig"); // ggml-backend-reg.cpp + ggml-backend-dl.cpp
-    _ = @import("gguf.zig"); // gguf.cpp
-    // ggml-backend.cpp, split in two: the vtable dispatch and the scheduler.
-    _ = @import("backend.zig");
-    _ = @import("backend_sched.zig");
+    _ = @import("module.zig");
 }
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("alloc.zig");
-    _ = @import("impl.zig");
-    _ = @import("types.zig");
-    _ = @import("context.zig");
-    _ = @import("runtime.zig");
-    _ = @import("ops.zig");
-    _ = @import("graph.zig");
-    _ = @import("quantize.zig");
-    _ = @import("quants/module.zig");
-    _ = @import("cpu/module.zig");
-    _ = @import("threading.zig"); // ggml-threading.cpp
-    _ = @import("backend_reg.zig"); // ggml-backend-reg.cpp + ggml-backend-dl.cpp
-    _ = @import("gguf.zig"); // gguf.cpp
-    // ggml-backend.cpp, split in two: the vtable dispatch and the scheduler.
-    _ = @import("backend.zig");
-    _ = @import("backend_sched.zig");
+    _ = @import("module.zig");
 }

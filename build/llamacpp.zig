@@ -155,7 +155,7 @@ const ggml_cpu_cxx_sources = [_][]const u8{
 const ggml_metal_cxx_sources = [_][]const u8{
     "ggml/src/ggml-metal/ggml-metal.cpp",
     "ggml/src/ggml-metal/ggml-metal-device.cpp",
-    "ggml/src/ggml-metal/ggml-metal-common.cpp",
+    // ggml-metal-common.cpp is ported -- src/ggml/metal/common.zig.
     "ggml/src/ggml-metal/ggml-metal-ops.cpp",
     "ggml/src/ggml-metal/ggml-metal-tuning.cpp",
 };

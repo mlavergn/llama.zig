@@ -150,15 +150,15 @@ the C it replaces:
 | `ggml-cpu/quants.c` | 1,339 | ported, swapped in — 45/45 symbols |
 | `ggml-cpu/arch/arm/quants.c` | 4,319 | ported, swapped in — 28/28 symbols |
 
-Thirteen C++ translation units have followed them, so **nothing under
+Fourteen C++ translation units have followed them, so **nothing under
 `ggml/src/ggml-cpu/` compiles from C or C++ any more** — the op kernels
 (`ops.cpp`, `vec.cpp`, `binary-ops.cpp`, `unary-ops.cpp`), the llamafile
 fast path (`llamafile/sgemm.cpp`), and the vtable cluster that had to move
 as one unit (`traits.cpp`, `ggml-cpu.cpp`, `repack.cpp`,
 `arch/arm/repack.cpp`). Above ggml-cpu, `ggml-threading.cpp`,
 `ggml-backend-reg.cpp`, `gguf.cpp` and `ggml-backend.cpp` are ported too.
-What is left is `ggml-backend-meta.cpp`, `ggml-opt.cpp`, the Metal host
-layer and all of libllama.
+What is left is `ggml-backend-meta.cpp`, `ggml-opt.cpp`, most of the Metal
+host layer — `ggml-metal-common.cpp` is ported — and all of libllama.
 
 Throughput is unchanged by the port, as far as this machine can tell.
 Generation sits at 222-234 t/s on Qwen3.5-2B Q4_K_M for both `make port` and

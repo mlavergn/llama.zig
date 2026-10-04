@@ -2732,3 +2732,107 @@ had always been there:
 Negative-tested: a wrapped citation with a line number drifted by two now
 fails, where before it passed. **A checker that silently skips its input
 is indistinguishable from one that passes it.**
+
+## Porting `ggml-metal-common.cpp` — the Metal group's first unit
+
+### The measurement that picked it
+
+Before touching anything, the five Metal C++ translation units, with
+"mangled reached from outside" computed the way the original Stage 4
+survey did — intersecting each object's mangled exports with every *other*
+object's undefined symbols:
+
+| TU | raw | live | unmangled | mangled reached |
+|---|---:|---:|---:|---:|
+| `ggml-metal.cpp` | 998 | 694 | 6 | 0 |
+| `ggml-metal-device.cpp` | 2,267 | 1,694 | 73 | 0 |
+| `ggml-metal-common.cpp` | 457 | 299 | 6 | 0 |
+| `ggml-metal-ops.cpp` | 5,369 | 4,068 | 66 | 0 |
+| `ggml-metal-tuning.cpp` | 1,087 | 1,053 | **0** | **7 of 7** |
+
+`ggml-metal-tuning.cpp` is the last of the four exceptions `PLAN.md`
+names, and it is the sharpest form of the `repack.cpp` trap: **zero
+unmangled exports means `port-coverage` would read it as 0/0 = 100% with
+not a line written.** Its seven are all in `namespace ggml_metal_tuning`
+and all reached only by `ggml-metal-ops.cpp`; the pair moves together.
+
+The boundary with the Objective-C that stays is a pure C ABI in both
+directions — the `.m` files need 9 symbols from the C++ group and supply
+57 to it, none C++-linkage. So Decision 13 costs nothing structurally.
+
+`ggml-metal-common.cpp` was chosen first because **it contains no Metal
+API at all**: its own header opens "helper functions for ggml-metal that
+are too difficult to implement in Objective-C", and the body is interval
+arithmetic plus a reordering pass the C itself notes "is generic and not
+specific to metal". It proves the swap mechanism for `ggml-metal/` with
+none of the Metal surface.
+
+### The oracle was verified before the port, not after
+
+`make node-diff ARGS=--gpu` hashes every node of a real decode on Metal.
+Two runs before porting: 2750 nodes identical at one and four threads,
+both times — so Metal node hashes are reproducible run to run **and**
+across builds, and the gate is usable as an exact oracle for this group.
+That is a far better starting position than `ggml-cpu` had, where nothing
+could see the kernels at all.
+
+### Green did not mean running, and the probe says which gate covers it
+
+An unconditional `impl.abort` at the top of `ggml_graph_optimize`:
+
+- `make node-diff ARGS=--gpu` — **dies**. The function is on the path.
+- `make node-diff` (CPU) — **passes, 2750 nodes identical.** The CPU
+  backend never calls it.
+
+So exactly one gate covers this file, and it is not the default one.
+
+### Fault injection: 3 of 4, and the fourth is provably inert
+
+| Injected | Result |
+|---|---|
+| `N_FORWARD` 64 → 16 (shorter reorder window) | caught, diverges at node 25 |
+| `node_info::dst()` ignoring fused tensors | caught, diverges at node 8 |
+| `GGML_OP_MUL_MAT` dropped from `h_safe` | caught, diverges at node 13 |
+| overlap test `mr.p1 >= cmp.p0` → `>` | **passed** |
+
+The fourth was checked rather than written up as a hole, per the rule the
+`vec.cpp` faults established. Instrumenting the port to abort whenever
+`mr.p1 == cmp.p0` holds with the two ranges in the same buffer and not
+both sources: **it never fires** on this graph. The two spellings cannot
+differ on this input, so the injection changes nothing and says nothing
+about the gate.
+
+### Allocation failure has to abort, not degrade
+
+The C's `std::vector::push_back` and `new` throw with nothing to catch
+them, so they reach `std::terminate`. The first draft returned `false`
+instead — and every caller reads `false` as *no conflict found*, which
+would silently produce a **different graph order** and report itself
+through `node-diff` as a porting bug. Allocation failures abort.
+
+## `port-coverage` reported 100% for a library with none of the symbols
+
+Found by the linker, one step after the coverage report said the port was
+`complete and swapped into the build`.
+
+`src/ggml/ported.zig` and `src/ggml/module.zig` each carried their own
+copy of the import list. The library is built from `module.zig`;
+`port-coverage` and `zig build test-port` compile `ported.zig`. Adding
+`metal/module.zig` to the second and not the first produced:
+
+```
+ggml-metal-common.cpp 6 / 6 symbols (100%), complete and swapped into the build
+```
+
+with `nm` on `libggml.a` showing **none** of the six. The link failed
+afterwards only because `ggml-metal-ops.cpp` happens to call them; a newly
+exported symbol that nothing references yet — a kernel reached only
+through a dispatch table, which this project has by the dozen — would have
+passed both.
+
+`ported.zig`'s own header had said since it was written that it "becomes
+redundant" once `ggml.c` is fully ported. It is, and everything else under
+`ggml/src/` with it, so the duplicated list is gone: `ported.zig` now
+re-exports `module.zig` and the two cannot diverge. Negative-tested —
+dropping the metal import from `module.zig` alone now reads
+`0 / 6 symbols (0%)`.
