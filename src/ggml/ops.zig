@@ -4577,8 +4577,8 @@ pub export fn ggml_dsv4_hc_post(
 // userdata pointer are stashed in `op_params`, which is why these are the only
 // ops whose parameters are not plain numbers.
 
-/// The shared body of `ggml_map_custom1`, `_2`, and `_3` (ggml.c:5968, 6012,
-/// 6060).
+/// The shared body of `ggml_map_custom1_impl`, `ggml_map_custom2_impl` and
+/// `ggml_map_custom3_impl` (ggml.c:5968, 6012, 6060 @c1d0e7a00).
 ///
 /// The three C functions differ only in how many sources they wire up and
 /// which `ggml_map_customN_op_params` they write. Those three structs have

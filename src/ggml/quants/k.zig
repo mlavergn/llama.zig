@@ -327,8 +327,10 @@ pub export fn dequantize_row_q3_K(x: [*c]const blocks.Q3_K, y_in: [*c]f32, k: i6
 // twelve bytes of 6-bit fields; they differ only in how many bits each weight
 // gets. The shared parts are factored out below rather than written twice.
 
-/// The scale and min fitting `q4_K` and `q5_K` share (ggml-quants.c:1470,
-/// 1657).
+/// The scale and min fitting `quantize_row_q4_K_ref` and
+/// `quantize_row_q5_K_ref` share (ggml-quants.c:1457, 1644 @c1d0e7a00) --
+/// the `for (int j = 0; j < QK_K/32; ++j)` loop in each, at :1470 and
+/// :1657.
 ///
 /// The weighting is not the plain magnitude the other formats use: it is
 /// `sqrt(mean(x^2)) + |x|`, which stops a sub-block of uniformly tiny weights

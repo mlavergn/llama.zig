@@ -141,13 +141,15 @@ const ggml_cpu_c_sources = [_][]const u8{
 };
 
 const ggml_cpu_cxx_sources = [_][]const u8{
-    "ggml/src/ggml-cpu/ggml-cpu.cpp",
-    "ggml/src/ggml-cpu/repack.cpp",
+    // ggml-cpu.cpp, traits.cpp, repack.cpp and arch/arm/repack.cpp used to
+    // be here. They are ported now -- src/ggml/cpu/{cpu_backend,extra}.zig
+    // and src/ggml/cpu/repack/ -- and had to move together, because
+    // repack.cpp derives from the two abstract bases traits.cpp declares.
+    // What is left are three translation units that are empty on this
+    // target: hbm.cpp needs GGML_USE_CPU_HBM, the two amx files __AMX_INT8__.
     "ggml/src/ggml-cpu/hbm.cpp",
-    "ggml/src/ggml-cpu/traits.cpp",
     "ggml/src/ggml-cpu/amx/amx.cpp",
     "ggml/src/ggml-cpu/amx/mmq.cpp",
-    "ggml/src/ggml-cpu/arch/arm/repack.cpp",
 };
 
 const ggml_metal_cxx_sources = [_][]const u8{
@@ -416,16 +418,12 @@ const ported_test_cxx_sources = [_][]const u8{
     // (src/ggml/backend.zig, src/ggml/backend_sched.zig) and comes from
     // `ported.zig`. The meta-buffer backend it calls into stays.
     "ggml/src/ggml-backend-meta.cpp",
-    // The ported `ggml-cpu.c` dispatches into these: the op kernels, the
-    // vector helpers, the extra-buffer hooks, and the llamafile fast path.
-    // Everything under ggml-cpu/ except ggml-cpu.c itself, which is ours.
-    "ggml/src/ggml-cpu/ggml-cpu.cpp",
-    "ggml/src/ggml-cpu/repack.cpp",
+    // All that is left under ggml-cpu/ are three translation units that are
+    // empty on this target: hbm.cpp needs GGML_USE_CPU_HBM, the two amx
+    // files __AMX_INT8__.
     "ggml/src/ggml-cpu/hbm.cpp",
-    "ggml/src/ggml-cpu/traits.cpp",
     "ggml/src/ggml-cpu/amx/amx.cpp",
     "ggml/src/ggml-cpu/amx/mmq.cpp",
-    "ggml/src/ggml-cpu/arch/arm/repack.cpp",
 };
 
 /// Builds a static library from the ported Zig alone, for verification.

@@ -286,8 +286,9 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
         ith: i64,
         nth: i64,
 
-        /// Ports `load_lo`/`load_hi` for `block_q8_0` (sgemm.cpp:1320, 1324
-        /// @c1d0e7a00): the two halves of a 32-byte `qs`, loaded as-is.
+        /// For `block_q8_0`, ports `load_lo` and `load_hi`
+        /// (sgemm.cpp:1320, 1324 @c1d0e7a00): the two halves of a 32-byte
+        /// `qs`, loaded as-is.
         inline fn loadLoQ8(b: *const c.block_q8_0) i8x16 {
             return @bitCast(@as(@Vector(16, i8), b.qs[0..16].*));
         }
@@ -295,9 +296,9 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
             return @bitCast(@as(@Vector(16, i8), b.qs[16..32].*));
         }
 
-        /// Ports `load_lo`/`load_hi` for `block_q4_0` (sgemm.cpp:1328, 1334
-        /// @c1d0e7a00): one 16-byte load, masked low or shifted high, then
-        /// the `-8` bias both nibbles carry.
+        /// For `block_q4_0`, ports `load_lo` and `load_hi`
+        /// (sgemm.cpp:1328, 1334 @c1d0e7a00): one 16-byte load, masked low
+        /// or shifted high, then the `-8` bias both nibbles carry.
         ///
         /// **NEON integer arithmetic wraps**, so the subtraction is `-%`.
         inline fn loadLoQ4(b: *const c.block_q4_0) i8x16 {

@@ -1,0 +1,78 @@
+#!/bin/bash
+# Diff every interleaved repack kernel against the reference C++, on bits.
+#
+# **The oracle those 36 kernels did not have.** They are unreachable from
+# `test-backend-ops`, which never allocates a CPU_REPACK buffer; from
+# `make ops-diff`, whose tensors live in a plain CPU buffer; and from
+# `make port`, which runs on Metal. `make node-diff` reaches them, but it
+# reports the *first* divergent node and stops -- one kernel per run, with
+# a model load and two decodes in between.
+#
+# Measured, swapping the cluster in: node-diff named `MUL_MAT ffn_out-0`
+# and nothing else; this named `ggml_gemm_q6_K_8x4_q8_K`, and the fault was
+# `half * 1024` where the C has `half * 512`.
+#
+# How the reference is reached: the three reference translation units are
+# compiled with every one of their unmangled exports renamed to `ref_*` on
+# the command line, so both implementations link into one process. That is
+# the same `-D` rename NOTES.md records as unusable for *swapping* a
+# translation unit -- it renames internal callers too -- which is exactly
+# what is wanted here: the renamed object is self-consistent and calls its
+# own kernels, not ours.
+#
+# Usage: scripts/repack-diff
+#   Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+LIB=zig-out/lib/libggml.a
+[ -f "$LIB" ] || { echo "missing $LIB -- run 'zig build reference --release=fast'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+CXX=(zig c++ -std=c++17 -w -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1"
+     -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu
+     -DNDEBUG -DGGML_USE_CPU -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE -DGGML_USE_CPU_REPACK)
+
+# traits.cpp comes along because repack.cpp derives from the two abstract
+# bases it declares; without it the object has unresolved vtables.
+FILES=(repack.cpp arch/arm/repack.cpp traits.cpp)
+
+# Pass 1: discover what to rename. Every unmangled export of the three,
+# which is also exactly what our library defines, so renaming all of them
+# is what keeps the two sets apart at link time.
+: > "$tmp/syms"
+for f in "${FILES[@]}"; do
+    "${CXX[@]}" -c "llama.cpp/ggml/src/ggml-cpu/$f" -o "$tmp/probe.o" 2>/dev/null \
+        || { echo "FAIL: cannot compile the reference $f" >&2; exit 1; }
+    nm -gUj "$tmp/probe.o" | sed 's/^_//' | grep -v '^_Z' | grep -v '__clang_call_terminate' >> "$tmp/syms"
+done
+sort -u "$tmp/syms" -o "$tmp/syms"
+
+DEFS=()
+while read -r s; do DEFS+=("-D${s}=ref_${s}"); done < "$tmp/syms"
+
+OBJS=()
+for f in "${FILES[@]}"; do
+    o="$tmp/ref_$(echo "$f" | tr '/' '_').o"
+    "${CXX[@]}" "${DEFS[@]}" -c "llama.cpp/ggml/src/ggml-cpu/$f" -o "$o" 2>"$tmp/err" \
+        || { echo "FAIL: cannot compile the renamed reference $f" >&2; head -8 "$tmp/err" >&2; exit 1; }
+    OBJS+=("$o")
+done
+echo "reference: $(wc -l < "$tmp/syms" | tr -d ' ') exports renamed to ref_*"
+
+# Apple's libc++, not Zig's -- see `testcase/` and the note above
+# `appleCxxFlags` in `build/llamacpp.zig`.
+zig build-exe -femit-bin="$tmp/repack_diff" -OReleaseFast -lc \
+    -I llama.cpp/ggml/include \
+    harness/repack_diff.zig \
+    "${OBJS[@]}" "$LIB" \
+    "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
+
+"$tmp/repack_diff"

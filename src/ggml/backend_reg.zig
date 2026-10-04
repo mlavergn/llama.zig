@@ -77,8 +77,9 @@ const Libc = struct {
 // -----------------------------------------------------------------------------
 // Dynamic library loading
 //
-// Ports the non-Windows arm of `ggml-backend-dl.h` (ggml-backend-dl.h:29
-// @c1d0e7a00) together with the bodies in `ggml-backend-dl.cpp`. Kept as
+// Ports the non-Windows arm of `ggml-backend-dl.h`, whose `dl_handle`
+// (ggml-backend-dl.h:30 @c1d0e7a00) is a plain `void` there, together with
+// the bodies in `ggml-backend-dl.cpp`. Kept as
 // file-private helpers rather than exported symbols: the C++ exported them
 // with C++ linkage, which nothing outside `ggml-backend-reg.cpp` ever called.
 

@@ -190,6 +190,20 @@ LANG_=cxx report_unit "ops.cpp" llama.cpp/ggml/src/ggml-cpu/ops.cpp yes \
     "$PORTED_DIR/ported.zig"
 LANG_=cxx report_unit "llamafile/sgemm.cpp" llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp yes \
     "$PORTED_DIR/ported.zig"
+# The vtable cluster. These four move as one unit -- repack.cpp derives
+# from the two abstract bases traits.cpp declares -- and for repack.cpp the
+# unmangled count below is NOT the whole contract: its buffer type,
+# `extra_buffer_type` and `tensor_traits` instantiations all have C++
+# linkage. `scripts/cluster-check` is what covers that half, by asserting a
+# flag the port has to flip; `make node-diff` is what proves it works.
+LANG_=cxx report_unit "ggml-cpu/traits.cpp" llama.cpp/ggml/src/ggml-cpu/traits.cpp yes \
+    "$PORTED_DIR/ported.zig"
+LANG_=cxx report_unit "ggml-cpu.cpp" llama.cpp/ggml/src/ggml-cpu/ggml-cpu.cpp yes \
+    "$PORTED_DIR/ported.zig"
+LANG_=cxx report_unit "repack.cpp" llama.cpp/ggml/src/ggml-cpu/repack.cpp yes \
+    "$PORTED_DIR/ported.zig"
+LANG_=cxx report_unit "arch/arm/repack.cpp" llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp yes \
+    "$PORTED_DIR/ported.zig"
 
 exit 0
 

@@ -25,10 +25,10 @@
 //!
 //! # What is still C
 //!
-//! The rest of `ggml/src/ggml-cpu/` is untouched: the kernels in `ops.cpp`,
-//! `vec.cpp` and `repack.cpp`, the NEON dot products in `arch/arm/quants.c`,
-//! and the backend registration in `ggml-cpu.cpp`. The NEON kernels are the
-//! remainder of Stage 3 step 5; the C++ is Stage 4.
+//! Nothing under `ggml/src/ggml-cpu/` compiles from C or C++ on this
+//! target any more, apart from three translation units that are empty
+//! here: `hbm.cpp` (needs `GGML_USE_CPU_HBM`), `amx/amx.cpp` and
+//! `amx/mmq.cpp` (both `__AMX_INT8__`).
 
 const std = @import("std");
 
@@ -52,6 +52,12 @@ comptime {
     _ = @import("vec.zig"); // ggml-cpu/vec.cpp
     // ggml-cpu/ops.cpp, split by op family across src/ggml/cpu/ops/:
     _ = @import("ops/module.zig");
+    // The vtable cluster, which moves as one unit -- ggml-cpu/traits.cpp,
+    // ggml-cpu.cpp, repack.cpp and arch/arm/repack.cpp. See
+    // `repack/module.zig` for why a partial swap reads as success.
+    _ = @import("extra.zig"); // ggml-cpu/traits.cpp
+    _ = @import("cpu_backend.zig"); // ggml-cpu/ggml-cpu.cpp
+    _ = @import("repack/module.zig"); // ggml-cpu/repack.cpp, arch/arm/repack.cpp
     // Not a port: the golden check for vec.cpp's float dot products.
     _ = @import("vec_testing.zig");
 }

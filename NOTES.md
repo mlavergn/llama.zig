@@ -2461,3 +2461,274 @@ Negative-testing it caught a bug in the check itself: `grep -c` prints `0`
 **and** exits 1 when there is no match, so `|| echo 0` appended a second
 line and the integer comparison never ran. The check was silently useless
 until the fault injection showed it.
+
+## Porting the vtable cluster: `traits.cpp`, `ggml-cpu.cpp`, both `repack.cpp`
+
+The four files that had to move together, and the gate that did not exist
+when they did.
+
+### The symbol count said 100% for a port that could not work
+
+`scripts/port-coverage` reads a C++ translation unit's contract as its
+*unmangled* exports. For `repack.cpp` that is 36 symbols — the gemv, gemm
+and `quantize_mat` kernels — and all 36 were ported before any of the
+dispatch was. `cluster-check` reported `36 / 36 symbols (100%)`.
+
+It was not close to working. Everything that decides *when* those kernels
+run has C++ linkage and never appears in `nm -gU | grep -v _Z`:
+
+- the `CPU_REPACK` buffer type and its five iface functions,
+- `extra_buffer_type::{supports_op, get_tensor_traits}`,
+- the sixteen `tensor_traits<BLOC_TYPE, INTER_SIZE, NB_COLS, PARAM_TYPE>`
+  instantiations and their `work_size` / `compute_forward` /
+  `forward_mul_mat` / `forward_mul_mat_id` / `repack`,
+- `ggml_repack_get_optimal_repack_type` and the eleven `repack_*_to_*_bl`
+  block converters it selects between.
+
+About 940 live lines, invisible to the contract. Swapping the cluster in at
+that point produced a library that linked, ran, and built a **structurally
+different graph** — `node-diff` failed on the first `MUL_MAT`, because with
+the buffer type stubbed to null nothing was ever repacked.
+
+**`repack.cpp` is one of the four translation units `CLAUDE.md` names as
+exceptions to the unmangled-exports contract. This is what that exception
+costs if you forget it.** `scripts/cluster-check` now prints a second line
+and generates a throwaway root asserting `repack.dispatch_implemented` at
+comptime, so the count cannot stand alone again. Negative-tested both ways.
+
+### The C++ that had to become Zig
+
+Nothing exotic, in the end:
+
+- **The template becomes a comptime-parameterised struct.** `TensorTraits`
+  takes the C's four template parameters and resolves `gemv`, `gemm`,
+  `quantize_mat` and `repack` through three comptime tables — the C writes
+  those as explicit specialisations, one function each.
+- **The vtable is explicit**, as `cpu/extra.zig` already set up for
+  `traits.cpp`. `tensor_traits_base`'s extra `repack` method becomes a
+  second field after the base, which is sound for the same reason the C++
+  downcast in `set_tensor` is: the base is at offset zero.
+- **The buffer type is a magic static**, because its `.device` member is a
+  call. Same acquire-load-plus-pthread-mutex shape as `cpu_backend.zig`.
+- **The five `<…, 1, 16>` instantiations are RISC-V.** They and the five
+  `*_16_bl` converters and four `make_block_*x16` interleavers beside them
+  are inside `#if defined __riscv_zvfh`, `static`, and unreferenced here.
+  Not ported; `blocks.zig` still carries their layouts.
+
+Three Zig traps on the way, all of them ones this file already records:
+`i1`, `i11`, `i12` and `u12` are reserved integer type names and the C uses
+every one as a loop index; `.?` does not narrow a `[*c]`, `impl.one` does;
+and `p.*.ne[2]` on a `[*c]` types as the whole `[4]i64`, which the compiler
+happened to catch here and does not always.
+
+## `scripts/repack-diff` — the oracle 36 kernels did not have
+
+`node-diff` passed after one fix. That was not the same as the kernels
+being right.
+
+### Why they had no gate
+
+The 36 interleaved kernels are unreachable from every gate but one:
+
+- **`test-backend-ops`** never allocates a `CPU_REPACK` buffer, so no op it
+  builds can select a `tensor_traits`.
+- **`make ops-diff`** builds its tensors in a plain CPU buffer, for the
+  same reason.
+- **`make port` / `parity-port`** run on Metal.
+- **`make node-diff`** does reach them — and reports the *first* divergent
+  node and stops. One kernel per run, with a model load and two decodes in
+  between.
+
+And half of them are unreachable even at runtime on this target:
+`ggml_repack_get_optimal_repack_type` gates the `8x8` and `4x8` shapes
+behind AVX2, AVX-512, SVE or `__ARM_FEATURE_MATMUL_INT8`, none of which
+`zig cc` selects here. They are exported, compiled, and dead — the same
+position as the 25 `_generic` dot products.
+
+### How the reference is reached
+
+The three reference translation units are compiled with **every one of
+their 66 unmangled exports renamed to `ref_*` on the command line**, so
+both implementations link into one process and can be called back to back
+on identical bytes.
+
+That is the same `-D` rename recorded above as unusable for *swapping* a
+translation unit, because it renames internal callers too. Here that is
+exactly the property wanted: the renamed object is self-consistent and
+calls its own kernels, not ours.
+
+The inputs are random bytes with only the `d`/`dmin`/`e` scale fields
+pulled back to a finite range. Every other bit pattern is a legal quant and
+none can reach a NaN, so leaving them random is what makes the test wide;
+a NaN would make a bit comparison meaningless. **The block layouts in
+`harness/repack_diff.zig` are written out from `repack.h` rather than
+imported from `src/`** — importing them would mean a mistyped bound
+produced two wrong buffers that agreed with each other.
+
+### What it found, in one run
+
+`node-diff` named `MUL_MAT ffn_out-0` and stopped. `repack-diff` reported
+**12 of 36 kernels differing**, in four distinct faults:
+
+1. **`ggml_gemm_q6_K_8x4_q8_K`: `half * 1024` and `half * 512` where the C
+   has `half * 512` and `half * 256`.** The one fault on the live path, and
+   the only one `node-diff` could see. Found in one run instead of one run
+   per kernel.
+2. **`bsums[0] + bsums[1]` added at `i16` width.** The C promotes both to
+   `int`; Zig adds two `i16` as `i16`. In range the sums are at most ±2032
+   so nothing wraps in practice — but it is illegal behaviour in a safe
+   build, and against random input it turned two kernels' output into
+   nonsense. Four sites, `q4_k.zig` and `q5_k.zig`.
+3. **The contracted epilogue, at twenty sites.** `sumf[j] += sumi *
+   GGML_CPU_FP16_TO_FP32(b_ptr[l].d[j]) * a_ptr[l].d` fuses under clang's
+   default `-ffp-contract=on`; strict Zig does not. One ULP, in ten
+   kernels. `src/ggml/cpu/repack/epilogue.zig` names it.
+
+   **Which** multiply is fused was read off the reference's disassembly,
+   not reasoned about — `ref_ggml_gemv_iq4_nl_8x8_q8_0` at `-O2`:
+   `scvtf` / `fcvt` / `fmul s2, s2, s3` / `fmadd s2, s2, s1, s4`. The inner
+   product rounds; the outer one fuses with the add. Same shape as `xielu`:
+   the left operand of the `+`.
+4. **`ggml_gemv_q5_K_8x8_q8_K` deferred a bias the C subtracts in place.**
+   The C's comment says `// FUSED BIAS: Compute and subtract bias
+   immediately`; the port accumulated it in an integer across all four
+   sub-blocks and subtracted once at the end. `sb_min` is constant across
+   `sb`, so it is the same arithmetic and not the same rounding. Its 8x4
+   sibling genuinely does defer, which is why only one of the two was
+   wrong.
+
+36 of 36 identical after. Three of those four faults are in code that
+cannot execute on this target, which is the point: **they were found
+because the gate does not care what the dispatch would have selected.**
+
+### It covers the converters too, through the real buffer type
+
+The kernels are exported and can be called directly. The eleven
+`repack_*_to_*_bl` converters are `static`, so the only way to reach the
+reference's is the way the model loader does: allocate a tensor in the
+`CPU_REPACK` buffer type and write to it. That turned out to be the better
+route anyway — it puts `ggml_repack_get_optimal_repack_type`, `init_tensor`
+and `set_tensor` under the same comparison, and a type the dispatch does
+not select repacks on neither side, so **"which instantiation did you
+choose" is itself part of what is diffed**.
+
+Reaching the two buffer types needed one thing from each side:
+
+- **The reference's only exported name for it is mangled.** `repack.h`
+  declares `ggml_backend_cpu_repack_buffer_type` outside any `extern "C"`,
+  so it is `_Z35ggml_backend_cpu_repack_buffer_typev` and `-D` cannot
+  rename it. The harness takes it with `@extern` by that name — the same
+  fact that makes the symbol count not the contract, seen from a third
+  direction.
+- **Ours is reached through the registry**, via the
+  `ggml_backend_dev_get_extra_bufts` proc address, which is what
+  `llama.cpp` itself calls. That is pure C ABI and puts `cpu_backend.zig`'s
+  extra-buffer list under the check too.
+
+44 checks in all: 36 kernels and 8 types.
+
+### Negative-tested 4/4, one per layer
+
+| Injected | Where | Reported as |
+|---|---|---|
+| a `vdotq_laneq_s32` lane index, 2 → 3 | `arm/q4_0.zig`, a **live** kernel | `gemv_q4_0_4x4_q8_0` |
+| a scale nibble mask, `0xF` → `0x7` | `q2_k.zig`, a generic **no other gate can reach** | `gemv_q2_K_8x8_q8_K` |
+| the source block a scale group is packed from | `convert.zig`'s `make_block_q4_Kx8` | `q4_K`, 96 of 1152 bytes |
+| the instantiation the dispatch selects, `8x4` → `8x8` | `dispatch.zig` | `q6_K`, 1339 of 1680 bytes |
+
+The second is the one that matters for the gate's existence: the same run
+printed `q2_K  not selected on this target, both sides`, so nothing that
+goes through `ggml_repack_get_optimal_repack_type` could ever have
+executed that kernel.
+
+### `make validate`'s formatting list is a gate too
+
+`zig fmt --check` is enumerated by directory in the Makefile, and
+`src/ggml/cpu/repack/` and `src/ggml/cpu/repack/arm/` were not in it — 22
+new files, unchecked. Added.
+
+### The one fault only the Debug build could see
+
+Every ReleaseFast gate passed the cluster — `repack-diff` 36/36, `ops-diff`
+596/596, `node-diff` 2750 nodes × 2 thread counts, `backend-ops` 21,093
+configurations, `probe`, `parity-port` 6/6, `parity-port-cpu` 6/6. Then
+`make parity-cli` failed **all six prompts with SIGABRT**, before a token
+was generated:
+
+```
+thread panic: cast causes pointer to be null
+  src/ggml/impl.zig:225 in one
+  src/ggml/backend.zig:863 in ggml_backend_dev_supports_op
+  …
+  llama.cpp/src/llama-context.cpp:2440 in graph_reserve
+```
+
+`ggml_backend_cpu_device_supports_op` opened with
+
+```zig
+const src0 = impl.one(Tensor, op.src[0]);
+const src1 = impl.one(Tensor, op.src[1]);
+```
+
+where the C has two plain pointer copies that may be null, dereferenced
+only by the arms that need them. The scheduler asks `supports_op` about
+**leaf** tensors, and a leaf weight has `op == GGML_OP_NONE` and no sources
+at all.
+
+**Narrowing a null `[*c]` to `*T` is checked in a safe build and unchecked
+in ReleaseFast.** Every bit-exact gate in this project builds
+`--release=fast`, on purpose — they compare bits, and the optimization
+level moves them. So the whole of that list is blind to this class of
+fault, and will stay blind. `make parity-cli` builds the CLI in Debug and
+is the only thing that runs the library with safety on against a real
+model.
+
+Two things follow:
+
+- **`impl.one` is not a free substitute for a pointer copy.** Use it where
+  the C dereferences unconditionally; keep the optional where the C does
+  not. `srcOf` in `cpu_backend.zig` is that distinction written down.
+- **A gate's optimization level is part of what it can see**, the same way
+  `ops-diff` showed its input distribution and thread count are. Six
+  ReleaseFast gates agreeing says nothing about safety-checked behaviour.
+
+## `port-links` was silently skipping wrapped citations
+
+Found by accident, while adding one: a citation whose `(…)` wraps across
+two comment lines —
+
+```zig
+/// Ports `ggml_backend_cpu_repack_buffer_type_get_name` (ggml-cpu/repack.cpp:4745
+/// @c1d0e7a00).
+```
+
+— was **not checked**. `findCitation` parses a single line, and an
+unclosed `(` hits its `orelse continue`: no citation, no error, nothing.
+Deliberately pointing one at the wrong line and watching `port-links` say
+`PASS` is how it surfaced.
+
+**36 citations across nine files were wrapped that way**, 16 of them
+long-standing in `backend_reg.zig`, `gguf.zig`, `backend_sched.zig`,
+`ops.zig` and `quants/k.zig`, and 20 of them written this sitting — several
+of which I had *created* by reflowing previously-checked one-line
+citations to fit 80 columns. That is the worst shape of this bug: tidying
+the prose silently removed the check.
+
+Wrapping at 80 columns is normal in this codebase, so the fix joins
+continuation comment lines before parsing rather than forbidding the wrap.
+`logicalLine` appends following comment lines, stripped of their `///`,
+while the citation stays unclosed, up to two of them.
+
+The checked count went **1,703 → 1,779**, and 52 problems appeared that
+had always been there:
+
+| Class | Count | Example |
+|---|---:|---|
+| citation names fewer symbols than numbers | 42 | `unary-ops.cpp:3, 7, 11, …, 96` named no symbol at all; now lists all 22 `op_*` |
+| wrong line | 6 | `copy_experts` cited at its last call site, not its definition |
+| missing commit | 5 | `ggml.c:5968, 6012, 6060` |
+| symbol pairing off by one | 2 | `load_lo`/`load_hi` with a third backticked name after them |
+
+Negative-tested: a wrapped citation with a line number drifted by two now
+fails, where before it passed. **A checker that silently skips its input
+is indistinguishable from one that passes it.**

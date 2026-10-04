@@ -134,7 +134,8 @@ make qwen35xl    # Qwen3.5-2B UD-Q4_K_XL (1.34 GB, dynamic quant, better quality
 
 ## Status
 
-**Stages 1, 2 and 3 complete.**
+**Stages 1, 2 and 3 complete. Stage 4 is under way: all of
+`ggml/src/ggml-cpu/` is Zig now, along with five of the `ggml/src/*.cpp`.**
 
 **No C compiles anywhere under `llama.cpp/ggml/src/` any more.** All six
 translation units are Zig — 598 exported symbols, each byte-verified against
@@ -149,9 +150,15 @@ the C it replaces:
 | `ggml-cpu/quants.c` | 1,339 | ported, swapped in — 45/45 symbols |
 | `ggml-cpu/arch/arm/quants.c` | 4,319 | ported, swapped in — 28/28 symbols |
 
-Everything above ggml is still C++ and Obj-C; Stage 4 replaces it. That
-includes the CPU op kernels in `ggml-cpu/ops.cpp` and `vec.cpp`, which the
-ported dispatch calls into, and all of libllama.
+Thirteen C++ translation units have followed them, so **nothing under
+`ggml/src/ggml-cpu/` compiles from C or C++ any more** — the op kernels
+(`ops.cpp`, `vec.cpp`, `binary-ops.cpp`, `unary-ops.cpp`), the llamafile
+fast path (`llamafile/sgemm.cpp`), and the vtable cluster that had to move
+as one unit (`traits.cpp`, `ggml-cpu.cpp`, `repack.cpp`,
+`arch/arm/repack.cpp`). Above ggml-cpu, `ggml-threading.cpp`,
+`ggml-backend-reg.cpp`, `gguf.cpp` and `ggml-backend.cpp` are ported too.
+What is left is `ggml-backend-meta.cpp`, `ggml-opt.cpp`, the Metal host
+layer and all of libllama.
 
 Throughput is unchanged by the port, as far as this machine can tell.
 Generation sits at 222-234 t/s on Qwen3.5-2B Q4_K_M for both `make port` and
@@ -173,6 +180,7 @@ others, and each negative-tested by injecting a fault and confirming it fails:
 | `make graph-diff` | 131 constructor nodes vs the C — shapes, strides, `op_params`, wiring |
 | `make ops-diff` | ~300 CPU op cases computed and compared **on bits** against the stock C, at 1 and 3 threads |
 | `make node-diff` | every node of a real Qwen3.5 decode, on bits, CPU (default) or Metal |
+| `make repack-diff` | all 36 interleaved repack kernels against the reference C++, on bits, in one process |
 | `make backend-ops` | 21,093 op configurations, Metal against CPU |
 | `make probe` | proves ported code is on the execution path at all — allocator and CPU dispatch, one run each |
 | `make parity-port` / `parity-port-cpu` | tokens, ported libraries vs stock, one driver — on Metal, or on the CPU alone |
@@ -180,8 +188,10 @@ others, and each negative-tested by injecting a fault and confirming it fails:
 
 Token parity is coarser than it looks — doubling RoPE's `freq_base` passes it —
 which is why the bit-level diffs exist alongside. On a Metal machine inference
-never reaches the CPU kernels at all, so only `ops-diff`, `node-diff` and the
-`--cpu` parity runs can see them. `NOTES.md` carries the measurements.
+never reaches the CPU kernels at all, so only `ops-diff`, `node-diff`,
+`repack-diff` and the `--cpu` parity runs can see them. Some kernels no gate
+but `repack-diff` can reach, because the dispatch cannot select them on this
+CPU at all. `NOTES.md` carries the measurements.
 
 The reference implementation is pinned at llama.cpp **v0.3.0**.
 
@@ -193,7 +203,7 @@ The reference implementation is pinned at llama.cpp **v0.3.0**.
 | `cli/` | The command-line executable. Thin — the behavior lives in `client.zig` so tests can reach it. |
 | `build.zig` | The build graph: `lib`, `cli`, `run`, `test`, `docs`, `reference`, `smoke`. |
 | `build/` | Build sources, not build output. `llamacpp.zig` replaces llama.cpp's CMake; `metal_embed.zig` flattens Metal shaders for embedding. |
-| `harness/` | `smoke.zig` — loads a model through libllama's C ABI and generates, proving the reference build actually infers. |
+| `harness/` | `smoke.zig` — loads a model through libllama's C ABI and generates, proving the reference build actually infers. The other files here are gate drivers. |
 | `scripts/` | `zigcc` / `zigcxx` wrappers so CMake can drive the Zig toolchain, and `parity` to diff two builds' token streams. |
 | `.tools/` | Locally installed CMake. Not tracked; `make cmake` fetches it. |
 | `llama.cpp/` | The upstream reference clone at v0.3.0. Source material for the port, not our code. |

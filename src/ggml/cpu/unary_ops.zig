@@ -78,7 +78,10 @@ extern fn fmaxf(x: f32, y: f32) f32;
 // C++ passes each as a function-pointer template argument; an enum selects
 // them at comptime here, as in `binary_ops.zig`.
 
-/// Ports the scalar op functions of `unary-ops.cpp`
+/// Ports `op_abs`, `op_sgn`, `op_neg`, `op_step`, `op_tanh`, `op_elu`,
+/// `op_relu`, `op_sigmoid`, `op_hardsigmoid`, `op_exp`, `op_hardswish`,
+/// `op_sqr`, `op_sqrt`, `op_sin`, `op_cos`, `op_log`, `op_expm1`,
+/// `op_softplus`, `op_floor`, `op_ceil`, `op_round` and `op_trunc`
 /// (unary-ops.cpp:3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47, 51, 64, 68,
 /// 72, 76, 80, 84, 88, 92, 96 @c1d0e7a00); names and numbers pair up in order.
 const Op = enum {

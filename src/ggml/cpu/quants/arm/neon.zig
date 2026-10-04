@@ -520,6 +520,117 @@ pub inline fn dotq_s32(acc: i32x4, a: i8x16, b: i8x16) i32x4 {
     return acc +% g0 +% g1 +% g2 +% g3;
 }
 
+/// Ports `vdotq_laneq_s32`: `dotq_s32` with one 32-bit lane of `b`
+/// broadcast across all four.
+///
+/// The ACLE spells this as a lane index; clang expands it to
+/// `vdotq_s32(acc, a, splatq_laneq(b, lane))`, which is what this is. The
+/// splat is on the **32-bit** reinterpretation, so it replicates four
+/// consecutive `i8` values, not one.
+///
+/// `idx` is `comptime` because the instruction encodes it. Named `idx`
+/// rather than `lane` because this file already has a `lane` accessor.
+pub inline fn dotq_laneq_s32(acc: i32x4, a: i8x16, b: i8x16, comptime idx: u2) i32x4 {
+    const words: i32x4 = @bitCast(b);
+    const splat: i32x4 = @splat(words[idx]);
+    return dotq_s32(acc, a, @bitCast(splat));
+}
+
+/// Ports `vpadd_s32`: the **two-lane** pairwise add,
+/// `[a0+a1, b0+b1]`. Not `a + b`.
+pub inline fn padd_s32(a: i32x2, b: i32x2) i32x2 {
+    return .{ a[0] +% a[1], b[0] +% b[1] };
+}
+
+/// Ports `vmla_s32`: the two-lane integer `acc + a * b`, wrapping.
+pub inline fn mla_s32x2(acc: i32x2, a: i32x2, b: i32x2) i32x2 {
+    return acc +% (a *% b);
+}
+
+/// Ports `vcvt_f32_s32` for two lanes.
+pub inline fn cvt_f32_s32x2(v: i32x2) @Vector(2, f32) {
+    return @floatFromInt(v);
+}
+
+/// Ports `vmlal_lane_s16`: `acc + widen(a) * widen(b[idx])`, the lane
+/// variant of `mlal_s16`. `idx` is `comptime` because the instruction
+/// encodes it.
+pub inline fn mlal_lane_s16(acc: i32x4, a: i16x4, b: i16x4, comptime idx: u2) i32x4 {
+    const splat: i16x4 = @splat(b[idx]);
+    return acc +% mull_s16(a, splat);
+}
+
+/// Ports `vmlaq_s32`: integer `acc + a * b`, wrapping.
+pub inline fn mlaq_s32(acc: i32x4, a: i32x4, b: i32x4) i32x4 {
+    return acc +% (a *% b);
+}
+
+/// Ports `vsliq_n_u8`: shift-left-and-insert. The low `n` bits of `a` are
+/// kept and `b` is shifted up by `n` into the rest.
+///
+/// `q5_K` uses it to fold a single high bit onto a masked nibble, where
+/// `a` is already `& 0x0f` and `b` is 0 or 1 — so in that use it is
+/// `a | (b << 4)`. The general form is written here because that is what
+/// the instruction does, and a caller that has not pre-masked `a` would
+/// otherwise get a silently different answer.
+pub inline fn sli_n_u8(a: u8x16, b: u8x16, comptime n: u3) u8x16 {
+    const keep: u8x16 = @splat((@as(u8, 1) << n) - 1);
+    return (a & keep) | (b << @as(@Vector(16, u3), @splat(n)));
+}
+
+/// Ports `vmovl_s16`: widen `i16x4` to `i32x4`, sign-extending.
+pub inline fn movl_s16(v: i16x4) i32x4 {
+    return v;
+}
+
+/// Ports `vmlsq_f32`: `acc - a * b`, **fused** — one rounding, like its
+/// `vmlaq_f32` counterpart. The subtraction is folded into the FMA by
+/// negating the multiplier, not applied afterwards.
+pub inline fn mlsq_f32(acc: f32x4, a: f32x4, b: f32x4) f32x4 {
+    return @mulAdd(f32x4, -a, b, acc);
+}
+
+/// Ports `vmlal_s16`: `acc + widen(a) * widen(b)`, a widening
+/// multiply-accumulate from `i16x4` pairs into `i32x4`.
+pub inline fn mlal_s16(acc: i32x4, a: i16x4, b: i16x4) i32x4 {
+    return acc +% mull_s16(a, b);
+}
+
+/// Ports `vcvtq_n_f32_s32`: convert to `f32` **and** divide by `2^n`, in
+/// one instruction.
+///
+/// The repack kernels use it to undo a `<< 4` they applied to the weights
+/// before the dot product, where the scalar `_generic` form instead shifts
+/// the integer sum right by four. The two are not the same rounding: this
+/// scales an exact integer, the shift truncates.
+pub inline fn cvtq_n_f32_s32(v: i32x4, comptime n: comptime_int) f32x4 {
+    const scale: f32x4 = @splat(1.0 / @as(f32, 1 << n));
+    return cvt_f32_s32(v) * scale;
+}
+
+/// Ports `vld1q_dup_s64` reinterpreted as `i8x16`: one 8-byte group
+/// broadcast into both halves of a vector.
+pub inline fn dupq_i8x16_from8(p: [*]const i8) i8x16 {
+    const half: @Vector(8, i8) = p[0..8].*;
+    return combine(half, half);
+}
+
+/// Ports `vcvt_f32_f16`: widen four `f16` to `f32x4`.
+pub inline fn cvt_f32_f16(v: f16x4) f32x4 {
+    return @floatCast(v);
+}
+
+/// Ports `vld1_f16`: four `f16` from memory, as the `u16` the import gives.
+pub inline fn load_f16x4(p: [*]const u16) f16x4 {
+    return @bitCast(@as(@Vector(4, u16), p[0..4].*));
+}
+
+/// Ports `vld1_dup_f16`: one `f16` broadcast to all four lanes.
+pub inline fn dup_f16x4(v: u16) f16x4 {
+    const bits: @Vector(4, u16) = @splat(v);
+    return @bitCast(bits);
+}
+
 // -----------------------------------------------------------------------------
 // Unit Tests
 

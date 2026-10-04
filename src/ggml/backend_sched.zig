@@ -661,7 +661,7 @@ export fn ggml_backend_sched_split_graph(sched_: c.ggml_backend_sched_t, graph: 
                             // **A deliberate difference.** The C writes this
                             // with `tensor_backend_id` applied to both `src`
                             // and `src->view_src` in one condition, at
-                            // `n_supported` (src/ggml-backend.cpp:1218
+                            // `n_supported` (src/ggml-backend.cpp:1212
                             // @c1d0e7a00), and `||`
                             // short-circuits, so the second term is evaluated
                             // whenever the first is false -- with `view_src`
@@ -1238,8 +1238,9 @@ fn computeSplits(sched: *Sched) c.enum_ggml_status {
 
                     // group consecutive experts and copy them together
                     const Copier = struct {
-                        /// Ports the `copy_experts` lambda (src/ggml-backend.cpp:1716
-                        /// @c1d0e7a00). A closure over six locals in the C; here
+                        /// Ports the `copy_experts` lambda
+                        /// (src/ggml-backend.cpp:1689 @c1d0e7a00). A closure
+                        /// over six locals in the C; here
                         /// they are passed, since Zig has no capturing closures.
                         fn copyExperts(
                             sb: c.ggml_backend_t,

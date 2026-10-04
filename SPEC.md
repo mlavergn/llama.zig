@@ -60,17 +60,43 @@ symbol names, same signatures. Callers link against them without change.
 | `ggml/src/ggml-cpu/quants.c` | 1,339 | 45 | `src/ggml/cpu/quants/` |
 | `ggml/src/ggml-cpu/arch/arm/quants.c` | 4,319 | 28 | `src/ggml/cpu/quants/arm/` |
 
-`scripts/port-coverage` derives each symbol contract by compiling the C and
-reports the count.
+And thirteen C++ translation units:
+
+| Reference source | Lines | Exported symbols | Replaced by |
+|---|---:|---:|---|
+| `ggml/src/ggml-threading.cpp` | 12 | 3 | `src/ggml/threading.zig` |
+| `ggml/src/ggml-backend-reg.cpp` | 593 | 16 | `src/ggml/backend_reg.zig` |
+| `ggml/src/gguf.cpp` | 1,706 | 61 | `src/ggml/gguf.zig` |
+| `ggml/src/ggml-backend.cpp` | 2,443 | 102 | `src/ggml/{backend,backend_sched}.zig` |
+| `ggml/src/ggml-cpu/binary-ops.cpp` | 154 | 4 | `src/ggml/cpu/binary_ops.zig` |
+| `ggml/src/ggml-cpu/unary-ops.cpp` | 337 | 23 | `src/ggml/cpu/unary_ops.zig` |
+| `ggml/src/ggml-cpu/vec.cpp` | 613 | 10 | `src/ggml/cpu/vec.zig` |
+| `ggml/src/ggml-cpu/ops.cpp` | 12,021 | 88 | `src/ggml/cpu/ops/` |
+| `ggml/src/ggml-cpu/llamafile/sgemm.cpp` | 4,164 | 1 | `src/ggml/cpu/ops/sgemm.zig` |
+| `ggml/src/ggml-cpu/traits.cpp` | 36 | 2 | `src/ggml/cpu/extra.zig` |
+| `ggml/src/ggml-cpu/ggml-cpu.cpp` | 712 | 7 | `src/ggml/cpu/cpu_backend.zig` |
+| `ggml/src/ggml-cpu/repack.cpp` | 4,836 | 36 | `src/ggml/cpu/repack/` |
+| `ggml/src/ggml-cpu/arch/arm/repack.cpp` | 5,156 | 28 | `src/ggml/cpu/repack/arm/` |
+
+`scripts/port-coverage` derives each symbol contract by compiling the source
+and reports the count. For a C++ file the contract is the *unmangled*
+exports — with one documented exception: `repack.cpp` also has a C++-linkage
+dispatch layer that no symbol count can see, and `scripts/cluster-check`
+covers that half.
+
+The last four move as one unit: `repack.cpp` derives from the two abstract
+bases `traits.cpp` declares, and `ggml-cpu.cpp` registers the buffer type
+`repack.cpp` builds.
 
 ### 3.2 What is not Zig
 
-No C remains under `ggml/src/`. What is left is C++ and Objective-C.
+No C remains under `ggml/src/`, and nothing under `ggml/src/ggml-cpu/`
+compiles from C++ either. What is left is C++ and Objective-C.
 
 | Component | Language | Note |
 |---|---|---|
-| `ggml-cpu/ops.cpp`, `vec.cpp`, `repack.cpp`, `traits.cpp`, `llamafile/sgemm.cpp` | C++ | CPU op kernels, reached through the ported dispatch |
-| `ggml-backend*.cpp`, `gguf.cpp`, `ggml-opt.cpp` | C++ | Backend registry, scheduler, file format |
+| `ggml-cpu/hbm.cpp`, `amx/amx.cpp`, `amx/mmq.cpp` | C++ | All three empty on this target: `GGML_USE_CPU_HBM` and `__AMX_INT8__` are off |
+| `ggml-backend-meta.cpp`, `ggml-opt.cpp`, `ggml.cpp` | C++ | Meta buffers, the optimizer API, and a `std::terminate` handler to be dropped rather than ported |
 | `ggml-metal/*.cpp` | C++ | Metal backend host code |
 | `ggml-metal-device.m`, `ggml-metal-context.m` | Objective-C | Metal object interface; stays Objective-C permanently |
 | `ggml-metal/kernels/*.metal` | MSL | Compiled by the GPU driver at load; never ported |

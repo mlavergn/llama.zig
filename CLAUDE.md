@@ -11,7 +11,7 @@ Two decisions worth knowing before touching anything:
 - **`ggml-metal-device.m` and `ggml-metal-context.m` stay Objective-C** (3,091 lines), compiled by `zig cc`. Zig has no Obj-C frontend, and reaching Metal from Zig would mean hand-writing every call against `objc_msgSend`. Everything else is ported.
 - **Our `llama-cli` mimics upstream's argument set** for the features we support, so an existing command line runs unchanged against it. It is our own Zig binary, not upstream's linked against our library.
 
-Where we are: **Stages 1, 2 and 3 complete; Stage 4 started.**
+Where we are: **Stages 1, 2 and 3 complete; Stage 4 under way — all of `ggml/src/ggml-cpu/` is Zig.**
 
 **No C compiles anywhere under `llama.cpp/ggml/src/` any more.** All six translation units are Zig, 598 exported symbols, every one swapped in and byte-verified. `ggml_base_sources` and `ggml_cpu_c_sources` in `build/llamacpp.zig` are both empty.
 
@@ -26,7 +26,7 @@ Where we are: **Stages 1, 2 and 3 complete; Stage 4 started.**
 
 **Stage 4 has begun, and the measurement that shapes it is done.** Every exported symbol of every ggml C++ object was intersected with the undefined symbols of every other object in `libggml.a` and `libllama.a`: **the external contract of 20 of the 24 C++ translation units in ggml is a pure C ABI.** A C++ file exports thousands of mangled symbols — `gguf.cpp` alone exports 2,002 — but they are template instantiations and inline functions, emitted weakly into every object that needs them, and almost none are reached from outside. So the Stage 3 swap mechanism carries over unchanged for the large majority. `PLAN.md` names the four exceptions and what each forces.
 
-Eight C++ translation units are ported and swapped:
+Thirteen C++ translation units are ported and swapped:
 
 - `ggml-threading.cpp` → `src/ggml/threading.zig` (3 symbols).
 - `ggml-backend-reg.cpp` → `src/ggml/backend_reg.zig` (16 symbols). It took `ggml-backend-dl.cpp` out of the build with it: those three `dl_*` functions have C++ linkage Zig cannot provide, and the registry was their only caller.
@@ -36,12 +36,16 @@ Eight C++ translation units are ported and swapped:
 - `ggml-cpu/unary-ops.cpp` → `src/ggml/cpu/unary_ops.zig` (23 symbols).
 - `ggml-cpu/vec.cpp` → `src/ggml/cpu/vec.zig` (10 symbols).
 - `ggml-cpu/ops.cpp` → `src/ggml/cpu/ops/` (88 symbols, 19 files by op family). The largest translation unit in ggml.
+- `ggml-cpu/llamafile/sgemm.cpp` → `src/ggml/cpu/ops/sgemm.zig` (1 symbol).
+- The **vtable cluster**, which had to move as one unit because `repack.cpp` derives from the two abstract bases `traits.cpp` declares: `ggml-cpu/traits.cpp` → `src/ggml/cpu/extra.zig` (2 symbols), `ggml-cpu/ggml-cpu.cpp` → `src/ggml/cpu/cpu_backend.zig` (7), `ggml-cpu/repack.cpp` + `ggml-cpu/arch/arm/repack.cpp` → `src/ggml/cpu/repack/` (36 + 28).
 
 **Both counts `PLAN.md` carried for this group were low** — gguf was recorded as 44 and backend as 82. Measure the contract before estimating a C++ file; do not trust the survey figure.
 
 `ggml-backend.cpp` is also the counterexample to "C++ is the hard part": it has **zero `throw`, zero `catch`**, no `std::string`, no `std::map`, no templates and no virtual functions. Its own first line is `// Note: porting this file to C++ is a work in progress`. What made it hard was the five-pass assignment algorithm in `ggml_backend_sched_split_graph`.
 
-Only `ggml-backend-meta.cpp` (4 symbols), `ggml-opt.cpp` (9) and `ggml.cpp` (0, to be dropped) remain in `ggml_base_cxx_sources`. What remains beyond them is the rest of the `ggml-cpu/` C++ — `llamafile/sgemm.cpp` and the vtable cluster (`traits.cpp`, `repack.cpp`, `arch/arm/repack.cpp`, `ggml-cpu.cpp`) — the Metal host layer, and all of libllama.
+Only `ggml-backend-meta.cpp` (4 symbols), `ggml-opt.cpp` (9) and `ggml.cpp` (0, to be dropped) remain in `ggml_base_cxx_sources`. **Nothing under `ggml-cpu/` compiles from C or C++ any more** except three translation units that are empty on this target: `hbm.cpp` needs `GGML_USE_CPU_HBM`, `amx/amx.cpp` and `amx/mmq.cpp` need `__AMX_INT8__`. What remains is the Metal host layer and all of libllama.
+
+**For `repack.cpp` the unmangled-export contract is not the whole contract, and that cost a day.** Its 36 unmangled symbols are the gemv/gemm and `quantize_mat` kernels; the `CPU_REPACK` buffer type, `extra_buffer_type` and the sixteen `tensor_traits` instantiations that decide when to call them are all C++-linkage and invisible to `nm -gU | grep -v _Z`. Measured: with the dispatch stubbed, `port-coverage` read `36 / 36 symbols (100%)` and `node-diff` failed on the first `MUL_MAT`. `scripts/cluster-check` now asserts `repack.dispatch_implemented` at comptime so the count cannot stand alone again.
 
 `make validate` reports the exact counts.
 
@@ -95,11 +99,22 @@ stale**, two pointing at the wrong file entirely, and every `Mirrors …` citati
 in `blocks.zig` had never been checked at all because the first version of the
 checker only looked for the word `Ports`.
 
+**A citation may wrap across comment lines, and for a long time that meant
+it was not checked at all.** `findCitation` reads one line, and an
+unclosed `(` fell through its `orelse continue` — no citation, no error,
+no check. **36 citations across nine files** were wrapped that way, 16 of
+them long-standing. The checker now joins continuation comment lines
+before parsing, which took the checked count from 1,703 to 1,779 and
+surfaced 52 problems that had always been there. Negative-tested: a
+wrapped citation drifted by two now fails. Same class as the `Mirrors …`
+hole, and the same lesson — **a checker that silently skips input is
+indistinguishable from one that passes.**
+
 **`ggml-impl.h` is not importable** — it includes `<arm_neon.h>`, whose `__mfp8` type translate-c cannot parse. `src/ggml/impl.zig` hand-writes what ported code needs from it: assertions, logging, `GGML_PAD`, the hash set, the float conversions, `struct ggml_cgraph`, and C-pointer narrowing helpers. Add to it rather than trying to widen the import.
 
 **`make validate` is the fast check; parity is the real one.** `validate` runs formatting, the scaffold, the unit tests, the ported tests in both debug and release, `scripts/port-coverage`, `scripts/port-links`, and the graph diff. It proves the port is *consistent*, not *correct*.
 
-Correctness has nine gates, and none of them subsumes the others:
+Correctness has ten gates, and none of them subsumes the others:
 
 - **`make graph-diff`** builds 131 nodes through every constructor family and diffs op, shape, strides, `op_params`, and `src[]` against the C. Needs no model. **The sharpest gate for the port's actual failure mode** — a constructor writing the wrong thing — and the only one that catches a halved softmax scale. It found the real `ggml_permute` bug.
 - **`make backend-ops`** runs upstream's `test-backend-ops` against our library: 21,093 op configurations, Metal against CPU, all passing. The broadest exercise, and the only one that *executes* the constructors at scale. **It cannot catch a consistently-wrong constructor** — both backends read the same `op_params` and agree. It catches crashes, assertion failures, and shapes a backend has no kernel for. `--diff` runs the same binary against the C reference and diffs the two
@@ -167,6 +182,36 @@ Correctness has nine gates, and none of them subsumes the others:
   Negative-tested 12/12 across two rounds, including both faults that escaped
   `backend-ops`, after closing one escape by widening an input range.
 
+- **`make repack-diff`** is the **only oracle the 36 interleaved `repack`
+  kernels have.** They are unreachable from `test-backend-ops` and
+  `ops-diff`, which never allocate a `CPU_REPACK` buffer, and from `make
+  port`, which runs on Metal. `node-diff` reaches them and stops at the
+  *first* divergent node — one kernel per run, with a model load and two
+  decodes in between. This calls every gemv, gemm and `quantize_mat` next
+  to the reference C++ **in one process** and compares on **bits**.
+
+  It works by compiling the three reference translation units with all 66
+  of their unmangled exports renamed to `ref_*` on the command line. That
+  is the same `-D` rename `NOTES.md` records as unusable for *swapping* a
+  translation unit, because it renames internal callers too — which is
+  exactly what is wanted here.
+
+  Measured, on the swap: `node-diff` named one node; this named twelve
+  kernels and four distinct faults, three of them in shapes
+  `ggml_repack_get_optimal_repack_type` cannot select on this target and
+  so dead to every other gate. **Half of these kernels are exported and
+  unreachable here** — the `8x8` and `4x8` shapes need AVX2, AVX-512, SVE
+  or `__ARM_FEATURE_MATMUL_INT8` — the same position as the `_generic` dot
+  products above.
+
+  It also covers the eleven block converters, which are `static` in the C
+  and have no exported name: those run **through the real buffer type**, so
+  `ggml_repack_get_optimal_repack_type`, `init_tensor` and `set_tensor` are
+  diffed too, and *which instantiation each side chose* is part of the
+  comparison. 44 checks. Negative-tested 4/4 — one live kernel, one
+  generic no other gate can reach, one converter, one wrong dispatch
+  choice.
+
 - **`make node-diff`** hashes the output of **every node** of a real model's
   decode — a prompt and one single-token step — and diffs ported against
   `llama.cpp.zmake`, at 1 and 4 threads. CPU device by default, `ARGS=--gpu`
@@ -178,6 +223,8 @@ Correctness has nine gates, and none of them subsumes the others:
 
 - **`make sched-diff`** diffs the scheduler's backend assignments against the reference C, through two stub devices in `harness/sched_dump.c` that differ only in which ops they claim. **Nothing else can see those decisions.** Measured: turning off pass 4's `view_src` propagation leaves `parity-cli` at 6/6 and `graph-diff` at 131/131. Parity has to miss it — at `--temp 0` the sampler takes an argmax and `backend-ops` has shown Metal and CPU agree on all 21,093 op configurations, so moving an op between backends shifts the last bits and not the token. **Token parity measures *what* was computed, never *where*.** One fault still escapes even this: removing pass 2's CPU skip, because pass 3 re-derives the same answer.
 - **`make parity-cli`** runs the actual `llamazig` binary against a reference C driver, both greedy. Covers what `parity-port` structurally cannot, because it lives in the binary rather than the library: argument parsing, tokenizer flags, the sampler chain, the decode loop. Negative-tested — a `--temp` that parses but never reaches the sampler fails all six prompts.
+
+  **It is also the only gate that runs the library with Zig's safety checks on.** Every bit-exact gate above builds `--release=fast`, deliberately — they compare bits and the optimization level moves them — so none of them can see an illegal narrowing, an integer overflow or an out-of-bounds index. Measured: `ggml_backend_cpu_device_supports_op` narrowed `op->src[0]` with `impl.one` before the `GGML_OP_NONE` early return, and the scheduler asks about **leaf** tensors, which have no sources. Seven ReleaseFast gates passed; this one aborted before the first token. **A gate's optimization level is part of what it can see.**
 - **`scripts/parity-port`** diffs generated tokens against `llama.cpp.zmake`. `--cpu` (`make parity-port-cpu`) loads the model on the CPU device alone, so the ported CPU kernels carry the whole forward pass — on a Metal machine they otherwise never do; it was 4/6 prompts divergent until the three epilogues above were fixed. End-to-end and **coarse** — measured, not guessed: doubling RoPE's `freq_base` passes, and so does halving the softmax scale. It catches structural faults (`ADD` as `SUB` fails all six prompts) and gross numeric ones (`freq_base = 1.0` fails all six). Never read a parity pass as "the numerics are right".
 
 `scripts/port-links` is not on that list because it checks nothing about what the code *computes*. It keeps the port's map back to upstream honest, which is a maintenance gate rather than a correctness one.
@@ -216,10 +263,19 @@ availability of an oracle.**
   where fusing the `beta` term matches 91%. It is the **left** operand of the
   `+`.
 
+- **In `cpu/repack/epilogue.zig`, one helper names the fusion for twenty
+  sites.** Every generic `repack` gemv and gemm ends on `sumf[j] += sumi *
+  GGML_CPU_FP16_TO_FP32(b_ptr[l].d[j]) * a_ptr[l].d`, and strict Zig was 1
+  ULP out in ten kernels. `make repack-diff` is the oracle. **Which**
+  multiply was read straight off the reference's disassembly:
+  `ref_ggml_gemv_iq4_nl_8x8_q8_0` at `-O2` emits `fmul s2, s2, s3` then
+  `fmadd s2, s2, s1, s4` — the inner product rounds, the outer one fuses
+  with the add. The **left** operand of the `+` again.
+
 The rule that separates these: **name a fusion only when something can tell
-you you got it wrong.** `scripts/vecdot-prefix`, `make ops-diff` and `make
-node-diff` are that something; for the quantizers there is nothing, so they
-stay plain.
+you you got it wrong.** `scripts/vecdot-prefix`, `make ops-diff`, `make
+repack-diff` and `make node-diff` are that something; for the quantizers
+there is nothing, so they stay plain.
 
 **One expression is fused; one *reduction loop* is not, entirely.** The
 loop vectorizer turns `acc += a[i] * b[i]` over contiguous memory into a

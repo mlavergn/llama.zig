@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -100,7 +100,7 @@ dist:
 # Run every check that needs no model or reference build.
 validate:
 	@printf '\n== formatting ==\n'
-	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig cli/*.zig
+	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig src/ggml/cpu/repack/*.zig src/ggml/cpu/repack/arm/*.zig cli/*.zig
 	@printf '\n== scaffold ==\n'
 	zig build
 	@printf '\n== unit tests ==\n'
@@ -152,6 +152,15 @@ ops-diff:
 	cd llama.cpp.zmake && zig build lib --release=fast
 	zig build reference --release=fast
 	./scripts/ops-diff
+
+# Diff every interleaved repack kernel against the reference C++, on bits.
+# The only oracle those 36 kernels have: test-backend-ops never allocates a
+# CPU_REPACK buffer, ops-diff's tensors live in a plain CPU buffer, and
+# `make port` runs on Metal. node-diff reaches them but stops at the first
+# divergent node. See the header of scripts/repack-diff.
+repack-diff:
+	zig build reference --release=fast
+	./scripts/repack-diff
 
 # Diff our CLI's output against the C reference, end to end.
 parity-cli: buildcli

@@ -95,9 +95,13 @@ fn swigluF32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32) void {
 // gelu, gelu_erf, gelu_quick, silu
 
 /// Ports `ggml_compute_forward_gelu_f32` and `ggml_compute_forward_gelu_f16`
-/// (ops.cpp:2111, 2158 @c1d0e7a00), and with them the `gelu_erf`,
-/// `gelu_quick` and `silu` pairs (ops.cpp:2341, 2388, 2460, 2507, 2579, 2626
-/// @c1d0e7a00), which are the same body over a different `ggml_vec_*`.
+/// (ops.cpp:2111, 2158 @c1d0e7a00), and with them
+/// `ggml_compute_forward_gelu_erf_f32`, `ggml_compute_forward_gelu_erf_f16`,
+/// `ggml_compute_forward_gelu_quick_f32`,
+/// `ggml_compute_forward_gelu_quick_f16`, `ggml_compute_forward_silu_f32`
+/// and `ggml_compute_forward_silu_f16`
+/// (ops.cpp:2341, 2388, 2460, 2507, 2579, 2626 @c1d0e7a00), which are the
+/// same body over a different `ggml_vec_*`.
 ///
 /// Rows are split across threads; within a row the kernel runs over `nc`
 /// contiguous elements.
@@ -354,9 +358,15 @@ const GluRows = struct {
 };
 
 /// Ports `ggml_compute_forward_reglu_f32` and `ggml_compute_forward_reglu_f16`
-/// (ops.cpp:2892, 2951 @c1d0e7a00), and the `geglu`, `swiglu`, `geglu_erf`
-/// and `geglu_quick` pairs (ops.cpp:3035, 3094, 3178, 3237, 3408, 3467, 3551,
-/// 3610 @c1d0e7a00), which differ from it only in the `ggml_vec_*` called.
+/// (ops.cpp:2892, 2951 @c1d0e7a00), and with them
+/// `ggml_compute_forward_geglu_f32`, `ggml_compute_forward_geglu_f16`,
+/// `ggml_compute_forward_swiglu_f32`, `ggml_compute_forward_swiglu_f16`,
+/// `ggml_compute_forward_geglu_erf_f32`,
+/// `ggml_compute_forward_geglu_erf_f16`,
+/// `ggml_compute_forward_geglu_quick_f32` and
+/// `ggml_compute_forward_geglu_quick_f16`
+/// (ops.cpp:3035, 3094, 3178, 3237, 3408, 3467, 3551, 3610 @c1d0e7a00),
+/// which differ from it only in the `ggml_vec_*` called.
 fn gluRows(
     comptime T: type,
     comptime kernel: anytype,

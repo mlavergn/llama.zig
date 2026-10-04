@@ -1,0 +1,95 @@
+#!/bin/bash
+# Compile the vtable-cluster port against a throwaway root and report
+# contract coverage.
+#
+# The cluster is swapped in now, so `scripts/port-coverage` reports the same
+# four files as part of `make validate`. What is still only here is the
+# second line: the comptime assertion that the dispatch layer is real. Keep
+# it for the next of the four exceptions.
+#
+# `traits.cpp`, `repack.cpp`, `arch/arm/repack.cpp` and `ggml-cpu.cpp` move
+# as one unit: `repack.cpp` derives from the two abstract bases `traits.cpp`
+# declares, so porting any one of them alone leaves the others' vtable and
+# RTTI references unresolved. Measured — the whole C++ coupling is five
+# symbols; see NOTES.md, "The vtable cluster, measured".
+#
+# Two definitions of a symbol in one static archive is not a link error, so a
+# half-wired cluster would build, run and be quietly wrong. This compiles
+# against a throwaway root instead.
+#
+# Usage: scripts/cluster-check [--missing]
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+tmp="$(mktemp -d)"
+root=src/ggml/.cluster_check_root.zig
+trap 'rm -rf "$tmp"; rm -f "$root"' EXIT
+
+cat > "$root" <<'ZIG'
+comptime {
+    _ = @import("cpu/extra.zig");
+    _ = @import("cpu/cpu_backend.zig");
+    _ = @import("cpu/repack/module.zig");
+}
+ZIG
+printf 'pub const probe_ported = false;\npub const probe_cpu = false;\n' > "$tmp/config.zig"
+
+if ! zig build-obj -femit-bin="$tmp/check.o" \
+        -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu -lc \
+        --dep config -Mroot="$root" -Mconfig="$tmp/config.zig" 2>"$tmp/err"; then
+    echo "FAIL: the cluster port does not compile"
+    head -30 "$tmp/err"
+    exit 1
+fi
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+: > "$tmp/want"
+for f in traits.cpp ggml-cpu.cpp repack.cpp arch/arm/repack.cpp; do
+    o="$tmp/$(echo "$f" | tr '/' '_').o"
+    zig c++ -c "llama.cpp/ggml/src/ggml-cpu/$f" -o "$o" -std=c++17 -w -O2 \
+        -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+        -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
+        -DNDEBUG -DGGML_USE_CPU -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE -DGGML_USE_CPU_REPACK 2>/dev/null
+    n=$(nm -gUj "$o" 2>/dev/null | sed 's/^_//' | grep -v '^_Z' | grep -v '__clang_call_terminate' | sort -u | tee -a "$tmp/want" | wc -l | tr -d ' ')
+    have_f=$(comm -12 <(nm -gUj "$o" 2>/dev/null | sed 's/^_//' | grep -v '^_Z' | sort -u) \
+                      <(nm -gUj "$tmp/check.o" 2>/dev/null | sed 's/^_//' | sort -u) | wc -l | tr -d ' ')
+    printf '  %-22s %3s / %-3s\n' "$f" "$have_f" "$n"
+done
+sort -u "$tmp/want" -o "$tmp/want"
+nm -gUj "$tmp/check.o" 2>/dev/null | sed 's/^_//' | sort -u > "$tmp/have"
+want=$(wc -l < "$tmp/want" | tr -d ' ')
+have=$(comm -12 "$tmp/want" "$tmp/have" | wc -l | tr -d ' ')
+printf 'cluster  %s / %s unmangled symbols (%d%%), compiles\n' \
+    "$have" "$want" "$(( have * 100 / want ))"
+
+# The symbol count is NOT the contract for this cluster, and reporting it
+# alone is how a stubbed dispatch read as 100%. `repack.cpp` is one of the
+# four translation units CLAUDE.md names as exceptions: its buffer type,
+# `extra_buffer_type` and `tensor_traits` instantiations all have C++
+# linkage and never appear in `nm -gU | grep -v _Z`.
+#
+# So the count is followed by a comptime assertion on a flag the port must
+# flip when that layer is real. No linking involved -- the whole ported
+# library is one object, so pulling it in here would duplicate every symbol.
+cat > "$tmp/dispatch.zig" <<'ZIG'
+const repack = @import("cpu/repack/module.zig");
+comptime {
+    if (!repack.dispatch_implemented) {
+        @compileError("repack dispatch not ported: buffer type, extra_buffer_type and tensor_traits are C++-linkage and invisible to the symbol count above");
+    }
+}
+ZIG
+cp "$tmp/dispatch.zig" src/ggml/.cluster_dispatch.zig
+trap 'rm -rf "$tmp"; rm -f "$root" src/ggml/.cluster_dispatch.zig' EXIT
+if zig build-obj -femit-bin="$tmp/dispatch.o" \
+        -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu -lc \
+        --dep config -Mroot=src/ggml/.cluster_dispatch.zig -Mconfig="$tmp/config.zig" 2>"$tmp/derr"; then
+    echo "dispatch  implemented"
+else
+    echo "dispatch  NOT IMPLEMENTED -- the symbol count above is not this file's contract"
+    grep -o "repack dispatch not ported:.*" "$tmp/derr" | head -1
+    exit 1
+fi
+[ "${1:-}" = "--missing" ] && { echo "=== STILL MISSING ==="; comm -23 "$tmp/want" "$tmp/have"; }
+exit 0

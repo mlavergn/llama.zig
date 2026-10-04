@@ -320,12 +320,15 @@ a ggml backtrace when a C++ exception escapes. It stays until the C++ that can
 throw is gone, then it is dropped rather than ported. Recorded here so that is a
 decision and not an oversight.
 
-**2. `ggml-cpu/` C++** (28,125 raw, **15,488 live** on this target) —
+**2. `ggml-cpu/` C++** (28,125 raw, **15,488 live** on this target) — **done.**
 
-`binary-ops.cpp`, `unary-ops.cpp`, `vec.cpp` and `ops.cpp` are **ported** —
-`src/ggml/cpu/binary_ops.zig` (4 symbols), `src/ggml/cpu/unary_ops.zig` (23),
-`src/ggml/cpu/vec.zig` (10) and `src/ggml/cpu/ops/` (88). Templates map
-cleanly onto `comptime`, as predicted.
+Every live translation unit is ported: `binary-ops.cpp` (4 symbols),
+`unary-ops.cpp` (23), `vec.cpp` (10), `ops.cpp` (88),
+`llamafile/sgemm.cpp` (1), and the vtable cluster — `traits.cpp` (2),
+`ggml-cpu.cpp` (7), `repack.cpp` (36) and `arch/arm/repack.cpp` (28). What
+still compiles from C++ here is `hbm.cpp`, `amx/amx.cpp` and `amx/mmq.cpp`,
+all three **empty on this target**. Templates map cleanly onto `comptime`,
+as predicted.
 
 **On a Metal machine the CPU op kernels never run during inference.**
 Measured: an `impl.abort` at the top of `ggml_compute_forward_mul` lets
@@ -398,6 +401,31 @@ That shrinks the vtable cluster: `amx.cpp` has 0 live lines, so `traits.cpp`
 + `repack.cpp` + `arch/arm/repack.cpp` is **three** files and 5,720 live
 lines, plus `ggml-cpu.cpp`, whose `ggml_backend_cpu_get_extra_buffer_types()`
 returns a `std::vector` and so moves with them.
+
+### The vtable cluster: done, and what it cost
+
+All four swapped in one step, which is the only way they go: `repack.cpp`
+derives from the two abstract bases `traits.cpp` declares, and two
+definitions of a symbol in one static archive is not a link error.
+
+Two things are worth carrying forward from it.
+
+**The unmangled-export contract is not the contract for `repack.cpp`, and
+believing it cost a day.** All 36 unmangled symbols were ported and
+`cluster-check` read 100% while the ~940 lines that decide when to call
+them — the buffer type, `extra_buffer_type`, sixteen `tensor_traits`
+instantiations, `ggml_repack_get_optimal_repack_type`, eleven block
+converters — were still C++ and still stubbed. `node-diff` failed on the
+first `MUL_MAT`. The script now asserts a flag at comptime that the port
+has to flip. **Before porting any of the remaining four exceptions, work
+out what its contract actually is.**
+
+**`make repack-diff` is a new gate and it was overdue.** The 36 kernels
+had no oracle: `test-backend-ops` and `ops-diff` never allocate a
+`CPU_REPACK` buffer, `make port` runs on Metal, and `node-diff` stops at
+the first divergent node. Half of them cannot even be selected on this
+target. It found four distinct faults in one run where `node-diff` found
+one, three of them in dead shapes. See `NOTES.md`.
 
 **3. `ggml-metal` host layer** (13,269). Decision 13 settles the hard part: the
 **3,091 lines of Obj-C** in `ggml-metal-device.m` (2,352) and
@@ -614,11 +642,14 @@ were compiling into the library unreachable — 5,692 live lines of dead code.
 Measured, and confirmed by execution. That is what makes the cluster below
 real work rather than deletable; see `NOTES.md`.
 
-9. **The vtable cluster** — `traits.cpp`, `repack.cpp`, `arch/arm/repack.cpp`
-   and `ggml-cpu.cpp`, together, 6,180 live lines. **Measured, and the unit
-   is forced by five symbols, not by the 261 mangled exports the four
-   objects carry** — the cluster's *external* contract is a pure C ABI like
-   the other twenty.
+9. ~~**The vtable cluster**~~ — **done.** `traits.cpp`, `repack.cpp`,
+   `arch/arm/repack.cpp` and `ggml-cpu.cpp`, swapped in one step, 6,180 live
+   lines, 73 unmangled symbols. **The unit is forced by five symbols, not by
+   the 261 mangled exports the four objects carry** — the cluster's
+   *external* contract is a pure C ABI like the other twenty. What the
+   external contract did *not* cover was `repack.cpp`'s own C++-linkage
+   dispatch; see "The vtable cluster: done, and what it cost" above, and
+   `make repack-diff`, the gate it needed.
 
    The five are `ggml::cpu::tensor_traits::~tensor_traits()`,
    `ggml::cpu::extra_buffer_type::~extra_buffer_type()`, the typeinfo for
@@ -634,11 +665,17 @@ real work rather than deletable; see `NOTES.md`.
    fallbacks the other) and would move together with or without the C++.
 
    `repack` reorders `Q4_0`/`Q4_K`/`IQ4_NL` weights into interleaved blocks,
-   so `node-diff` on a model with those types is its gate, alongside
-   `ops-diff`. **Check that gate arm by arm before porting** — sgemm's was
-   three-quarters covered and the plan could not tell.
+   so `node-diff` on a model with those types was expected to be its gate,
+   alongside `ops-diff`. **"Check that gate arm by arm before porting" was
+   the right instruction and it was not followed.** `node-diff` reaches the
+   kernels but reports one node and stops; `ops-diff` never allocates a
+   `CPU_REPACK` buffer and cannot reach them at all; and half the kernels
+   cannot be selected on this CPU. `make repack-diff` is what the group
+   actually needed, and it found four faults where `node-diff` found one.
 
-That empties `ggml-cpu/`. Then the Metal host layer, then libllama.
+**`ggml-cpu/` is empty.** What still compiles from C++ there — `hbm.cpp`,
+`amx/amx.cpp`, `amx/mmq.cpp` — is zero live lines on this target. Next the
+Metal host layer, then libllama.
 
 **Stage 0 is closed.** `llama.cpp/` is a submodule pinned at `c1d0e7a00`;
 this plan and `CLAUDE.md` both claimed otherwise long after it was done, which

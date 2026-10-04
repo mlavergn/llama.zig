@@ -210,6 +210,57 @@ fn isComment(line: []const u8) bool {
     return std.mem.startsWith(u8, t, "//");
 }
 
+/// Whether `line` opens a citation it does not close -- `(ggml.c:6516`
+/// with the `)` on the next comment line.
+///
+/// **This was a silent hole.** `findCitation` parses one line, and an
+/// unclosed `(` simply fell through its `orelse continue`: no citation, no
+/// error, no check. 36 citations across nine files were wrapped that way
+/// and had never been looked at, in the same class as the `Mirrors …` ones
+/// `CLAUDE.md` records. Wrapping at 80 columns is normal here, so the fix
+/// is to join the continuation rather than forbid it.
+fn opensUnclosedCitation(line: []const u8) bool {
+    const open = std.mem.lastIndexOfScalar(u8, line, '(') orelse return false;
+    if (std.mem.indexOfScalarPos(u8, line, open, ')') != null) return false;
+    const tail = line[open + 1 ..];
+    // A citation's head is `<path with a dot>:<digit>`; prose is not.
+    const colon = std.mem.indexOfScalar(u8, tail, ':') orelse return false;
+    if (std.mem.indexOfScalar(u8, tail[0..colon], '.') == null) return false;
+    if (std.mem.indexOfScalar(u8, tail[0..colon], ' ') != null) return false;
+    return colon + 1 < tail.len and std.ascii.isDigit(tail[colon + 1]);
+}
+
+/// A comment line's text, with its `//`, `///` or `//!` marker removed.
+fn commentPayload(line: []const u8) []const u8 {
+    var t = std.mem.trimStart(u8, line, " \t");
+    if (!std.mem.startsWith(u8, t, "//")) return "";
+    t = t[2..];
+    if (t.len > 0 and (t[0] == '/' or t[0] == '!')) t = t[1..];
+    return std.mem.trimStart(u8, t, " \t");
+}
+
+/// `lines[idx]`, with following comment lines joined on while the citation
+/// it opens stays unclosed. Two continuations is more than any real
+/// citation needs and stops a runaway.
+fn logicalLine(
+    arena: std.mem.Allocator,
+    lines: []const []const u8,
+    idx: usize,
+) ![]const u8 {
+    if (!opensUnclosedCitation(lines[idx])) return lines[idx];
+
+    var joined: std.ArrayList(u8) = .empty;
+    try joined.appendSlice(arena, lines[idx]);
+    var j = idx + 1;
+    while (j < lines.len and j <= idx + 2) : (j += 1) {
+        if (!isComment(lines[j])) break;
+        try joined.append(arena, ' ');
+        try joined.appendSlice(arena, commentPayload(lines[j]));
+        if (!opensUnclosedCitation(joined.items)) break;
+    }
+    return joined.items;
+}
+
 /// Pulls every citation out of one of our source files.
 ///
 /// A citation names as many symbols as it gives line numbers, and they pair up
@@ -226,7 +277,8 @@ fn scanFile(
     var split = std.mem.splitScalar(u8, text, '\n');
     while (split.next()) |l| try lines.append(arena, l);
 
-    for (lines.items, 0..) |line, idx| {
+    for (0..lines.items.len) |idx| {
+        const line = try logicalLine(arena, lines.items, idx);
         const cite = findCitation(line) orelse continue;
         const file = cite.file;
 
