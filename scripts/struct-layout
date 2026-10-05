@@ -7,6 +7,12 @@
 # every ported file sees. The struct is 19 fields of which the port reads
 # seven; the rest exist only to place those seven correctly.
 #
+# It also checks two generated files for the same reason: the 112
+# `FC_*`/`OP_*`/`N_*` constants in `metal/impl_c.zig`, and the 65
+# `ggml_metal_kargs_*` structs in `metal/kargs.zig` -- 936 fields the
+# Metal kernels read **by offset**, where one wrong offset feeds a kernel
+# a different number with nothing in the ported code able to notice.
+#
 # CLAUDE.md calls hand-transcription "the single largest source of silent
 # error". This asks the C compiler instead of trusting the transcription:
 # sizeof, alignof, every offsetof, and every field's width.
@@ -24,6 +30,20 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+build_harness() {
+    zig c++ "$1" "$LIB" -o "$2" \
+        -std=c++17 -w -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+        -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-metal \
+        "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+        -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+        -F "$SDK/System/Library/Frameworks" 2>"$tmp/err" \
+        || { echo "FAIL: could not build $1" >&2; head -20 "$tmp/err" >&2; exit 1; }
+}
+
+build_harness harness/kargs_layout.cpp "$tmp/kargs"
+"$tmp/kargs" || exit 1
+echo
 
 zig c++ harness/struct_layout.cpp "$LIB" -o "$tmp/layout" \
     -std=c++17 -w -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" \

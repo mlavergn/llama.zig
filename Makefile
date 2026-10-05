@@ -164,7 +164,10 @@ metal-diff:
 # Compare the hand-declared Metal structs against the real headers.
 # device_c.zig hand-declares ggml_metal_device_props rather than widening
 # impl.zig's cImport; this asks the C compiler whether the transcription is
-# right. See the header of scripts/struct-layout.
+# right, and whether the generated metal/impl_c.zig and metal/kargs.zig
+# agree with ggml-metal-impl.h -- 65 kargs structs and 936 fields the
+# Metal kernels read by offset. Regenerate those with scripts/gen-kargs.
+# See the header of scripts/struct-layout.
 struct-layout:
 	zig build reference --release=fast
 	./scripts/struct-layout

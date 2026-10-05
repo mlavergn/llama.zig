@@ -62,6 +62,41 @@ pub const Event = opaque {};
 /// Mirrors `ggml_metal_t` (ggml-metal-context.h:13 @c1d0e7a00).
 pub const Context = opaque {};
 
+/// Mirrors `ggml_metal_library_t` (ggml-metal-device.h:98 @c1d0e7a00).
+pub const Library = opaque {};
+/// Mirrors `ggml_metal_pipeline_t` (ggml-metal-device.h:33 @c1d0e7a00).
+pub const Pipeline = opaque {};
+/// Mirrors `ggml_metal_cv_t` (ggml-metal-device.h:20 @c1d0e7a00): a
+/// wrapper over `MTLFunctionConstantValues`.
+pub const Cv = opaque {};
+/// Mirrors `ggml_metal_pipelines_t` (ggml-metal-device.h:39 @c1d0e7a00).
+/// The struct behind it is ours — `library.zig` defines it, since
+/// `ggml-metal-device.cpp` did.
+pub const Pipelines = opaque {};
+
+/// Mirrors `struct ggml_metal_pipeline_with_params` (ggml-metal-device.h:47
+/// @c1d0e7a00).
+///
+/// **Returned by value by all 68 `get_pipeline_*` functions**, which makes
+/// its ABI load-bearing: it is 40 bytes with interior padding, and Zig
+/// 0.16 is known to mishandle small `extern struct`s *received* by value
+/// (see `CLAUDE.md`). `make struct-layout` checks the layout and the
+/// return path, because a silent mismatch here would corrupt every
+/// pipeline lookup at once.
+pub const PipelineWithParams = extern struct {
+    pipeline: ?*Pipeline,
+
+    nsg: c_int,
+
+    nr0: c_int,
+    nr1: c_int,
+
+    smem: usize,
+
+    c4: bool,
+    cnt: bool,
+};
+
 /// Mirrors `struct ggml_metal_device_props` (ggml-metal-device.h:264
 /// @c1d0e7a00).
 ///
@@ -105,6 +140,72 @@ pub extern fn ggml_metal_device_event_free(dev: *Device, ev: *Event) void;
 pub extern fn ggml_metal_device_event_synchronize(dev: *Device, ev: *Event) void;
 pub extern fn ggml_metal_device_get_memory(dev: *Device, free: *usize, total: *usize) void;
 pub extern fn ggml_metal_device_supports_op(dev: *Device, op: *const Tensor) bool;
+
+pub extern fn ggml_metal_device_init(device: c_int, n_devices: c_int) ?*Device;
+pub extern fn ggml_metal_device_free(dev: *Device) void;
+
+pub extern fn ggml_metal_cv_init() ?*Cv;
+pub extern fn ggml_metal_cv_free(cv: *Cv) void;
+pub extern fn ggml_metal_cv_set_int16(cv: *Cv, value: i16, idx: i32) void;
+pub extern fn ggml_metal_cv_set_int32(cv: *Cv, value: i32, idx: i32) void;
+pub extern fn ggml_metal_cv_set_bool(cv: *Cv, value: bool, idx: i32) void;
+
+/// `ggml_metal_pipeline_init` (ggml-metal-device.h:35 @c1d0e7a00).
+///
+/// Lives in the `.m`; it only `calloc`s the wrapper and leaves `obj` nil,
+/// which is why the unit tests can make real handles without a device.
+/// `struct ggml_metal_buffer_id` (ggml-metal-device.h:9 @c1d0e7a00).
+///
+/// A Metal buffer handle and a byte offset into it. 16 bytes, which is one
+/// of the shapes the Zig 0.16 by-value-struct ABI bug does **not** affect
+/// — but it is both returned by value from `ggml_metal_buffer_get_id` and
+/// passed by value to `ggml_metal_encoder_set_buffer`, so
+/// `make struct-layout` checks its layout and round-trips one rather than
+/// relying on that measurement holding.
+pub const BufferId = extern struct {
+    /// `id<MTLBuffer>`.
+    metal: ?*anyopaque,
+    offs: usize,
+};
+
+/// `ggml_metal_cmd_buf_t` (ggml-metal-device.h:67 @c1d0e7a00) — an opaque
+/// `id<MTLCommandBuffer>`, which the C spells as `void *`.
+pub const CmdBuf = ?*anyopaque;
+
+/// `ggml_metal_encoder_t` (ggml-metal-device.h:73 @c1d0e7a00).
+pub const Encoder = opaque {};
+
+// The encoder surface `ggml-metal-ops.cpp` drives. All of it lives in
+// `ggml-metal-device.m`, which stays Objective-C (Decision 13).
+
+pub extern fn ggml_metal_encoder_init(cmd_buf_raw: CmdBuf, concurrent: bool) ?*Encoder;
+pub extern fn ggml_metal_encoder_free(encoder: *Encoder) void;
+pub extern fn ggml_metal_encoder_debug_group_push(encoder: *Encoder, name: [*:0]const u8) void;
+pub extern fn ggml_metal_encoder_debug_group_pop(encoder: *Encoder) void;
+pub extern fn ggml_metal_encoder_set_pipeline(encoder: *Encoder, pipeline: PipelineWithParams) void;
+pub extern fn ggml_metal_encoder_set_bytes(encoder: *Encoder, data: ?*anyopaque, size: usize, idx: c_int) void;
+pub extern fn ggml_metal_encoder_set_buffer(encoder: *Encoder, buffer: BufferId, idx: c_int) void;
+pub extern fn ggml_metal_encoder_set_threadgroup_memory_size(encoder: *Encoder, size: usize, idx: c_int) void;
+pub extern fn ggml_metal_encoder_dispatch_threadgroups(encoder: *Encoder, tg0: c_int, tg1: c_int, tg2: c_int, tptg0: c_int, tptg1: c_int, tptg2: c_int) void;
+pub extern fn ggml_metal_encoder_memory_barrier(encoder: *Encoder) void;
+pub extern fn ggml_metal_encoder_end_encoding(encoder: *Encoder) void;
+
+/// `ggml_metal_pipeline_max_theads_per_threadgroup`
+/// (ggml-metal-device.h:61 @c1d0e7a00). The misspelling is upstream's.
+pub extern fn ggml_metal_pipeline_max_theads_per_threadgroup(pipeline: PipelineWithParams) c_int;
+
+/// `ggml_metal_device_get_library` (ggml-metal-device.h:304 @c1d0e7a00).
+pub extern fn ggml_metal_device_get_library(dev: *Device) ?*Library;
+
+/// `ggml_metal_buffer_get_id` (ggml-metal-device.h:343 @c1d0e7a00).
+pub extern fn ggml_metal_buffer_get_id(buf: *Buffer, t: *const c.ggml_tensor) BufferId;
+
+pub extern fn ggml_metal_pipeline_init() ?*Pipeline;
+pub extern fn ggml_metal_pipeline_free(pipeline: *Pipeline) void;
+
+pub extern fn ggml_metal_library_get_pipeline(lib: *Library, name: [*:0]const u8) PipelineWithParams;
+pub extern fn ggml_metal_library_compile_pipeline(lib: *Library, base: [*:0]const u8, name: [*:0]const u8, cv: ?*Cv) PipelineWithParams;
+pub extern fn ggml_metal_library_get_device(lib: *Library) *Device;
 
 pub extern fn ggml_metal_buffer_init(dev: *Device, size: usize, shared: bool) ?*Buffer;
 pub extern fn ggml_metal_buffer_map(dev: *Device, ptr: ?*anyopaque, size: usize, max_tensor_size: usize) ?*Buffer;
@@ -156,6 +257,44 @@ pub extern fn ggml_metal_op_flash_attn_ext_extra_kv_f16(op: *const Tensor) usize
 export fn zz_props_sizeof() usize {
     return @sizeOf(DeviceProps);
 }
+
+/// The same facts for `PipelineWithParams`, plus a value the C side reads
+/// back to prove the **return** ABI — 40 bytes with interior padding,
+/// returned by value 68 times over.
+export fn zz_pwp_sizeof() usize {
+    return @sizeOf(PipelineWithParams);
+}
+export fn zz_pwp_nfields() usize {
+    return @typeInfo(PipelineWithParams).@"struct".fields.len;
+}
+export fn zz_pwp_offset(i: usize) usize {
+    const fields = @typeInfo(PipelineWithParams).@"struct".fields;
+    inline for (fields, 0..) |f, k| {
+        if (k == i) return @offsetOf(PipelineWithParams, f.name);
+    }
+    return std.math.maxInt(usize);
+}
+export fn zz_pwp_field_size(i: usize) usize {
+    const fields = @typeInfo(PipelineWithParams).@"struct".fields;
+    inline for (fields, 0..) |f, k| {
+        if (k == i) return @sizeOf(f.type);
+    }
+    return std.math.maxInt(usize);
+}
+
+/// Returns a struct with every field set to a distinct marker, so the C
+/// side can confirm each one survives the return.
+export fn zz_pwp_roundtrip() PipelineWithParams {
+    return .{
+        .pipeline = @ptrFromInt(0xdead0000),
+        .nsg = 11,
+        .nr0 = 22,
+        .nr1 = 33,
+        .smem = 44444,
+        .c4 = true,
+        .cnt = false,
+    };
+}
 export fn zz_props_alignof() usize {
     return @alignOf(DeviceProps);
 }
@@ -184,6 +323,42 @@ export fn zz_props_field_size(i: usize) usize {
         if (k == i) return @sizeOf(f.type);
     }
     return std.math.maxInt(usize);
+}
+
+// `BufferId`'s layout and round-trip, for `harness/struct_layout.cpp`.
+
+export fn zz_bid_sizeof() usize {
+    return @sizeOf(BufferId);
+}
+
+export fn zz_bid_alignof() usize {
+    return @alignOf(BufferId);
+}
+
+export fn zz_bid_nfields() usize {
+    return @typeInfo(BufferId).@"struct".fields.len;
+}
+
+export fn zz_bid_offset(i: usize) usize {
+    inline for (@typeInfo(BufferId).@"struct".fields, 0..) |f, k| {
+        if (k == i) return @offsetOf(BufferId, f.name);
+    }
+    return std.math.maxInt(usize);
+}
+
+export fn zz_bid_field_size(i: usize) usize {
+    inline for (@typeInfo(BufferId).@"struct".fields, 0..) |f, k| {
+        if (k == i) return @sizeOf(f.type);
+    }
+    return std.math.maxInt(usize);
+}
+
+/// Takes a `BufferId` **by value** from C and hands the two fields back,
+/// so the gate can see whether the receive path carries them. This is the
+/// direction Zig 0.16 gets wrong for some shapes.
+export fn zz_bid_roundtrip(in: BufferId, out_metal: *?*anyopaque, out_offs: *usize) void {
+    out_metal.* = in.metal;
+    out_offs.* = in.offs;
 }
 
 // -----------------------------------------------------------------------------

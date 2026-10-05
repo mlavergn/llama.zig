@@ -232,6 +232,8 @@ _ZN17ggml_metal_tuning19fa_vec_set_overrideENS_12fa_vec_cfg_tE
 _ZN17ggml_metal_tuning21fa_vec_clear_overrideEv" \
 LANG_=cxx report_unit "ggml-metal-tuning.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.cpp yes \
     "$PORTED_DIR/ported.zig"
+LANG_=cxx report_unit "ggml-metal-device.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-device.cpp yes \
+    "$PORTED_DIR/ported.zig"
 
 exit 0
 

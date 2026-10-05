@@ -3174,3 +3174,178 @@ library keeps its Metal exports; only that one test root skips them.
 **And the failure was in a sweep I had already called green.** The
 `validate` step failed forty lines above the passes that got quoted. Read
 the whole output, not the tail.
+
+## Porting `ggml-metal-device.cpp` — and what `node-diff --gpu` actually reaches
+
+`ggml-metal-device.cpp` (2,267 raw, 1,694 live, 73 unmangled exports) is
+`src/ggml/metal/library.zig`. It is almost entirely one shape repeated 68
+times: build `base`, the MSL function name; build `name`, the cache key —
+the same string unless the kernel is specialised by function constants, in
+which case the key carries them; look the key up; compile on a miss. A
+`Name` helper holds the C's `char[256]` and `getOrCompile` holds the
+look-up-then-compile pair, which is most of why 1,694 lines of C became
+~1,900 lines of Zig with the doc comments.
+
+Four things were worth the detour.
+
+### The 112 constants are generated and checked, not typed
+
+The kernel names and the `ggml_metal_cv_set_*` calls carry 112
+`#define`s from `ggml-metal-impl.h`: 16 `FC_*` bases, 43 `OP_*_NUM`
+op numbers, 52 `N_SG_*`/`N_R0_*` kernel-shape values, `SZ_SIMDGROUP`,
+and the one computed define `N_MM_NK_TOTAL`.
+
+A wrong one is **the quietest fault available in this file**. `FC_UNARY`
+is the base index of a Metal function constant slot, so `FC_UNARY + 1`
+instead of `+ 0` writes the op number into the slot the *next* constant
+owns: the kernel compiles, runs, and does something else. `N_R0_Q4_K`
+sets how many rows a dot-product kernel handles per thread, so a wrong
+value reads out of bounds. Nothing in the ported Zig can notice either —
+there is no assertion these could violate.
+
+So `src/ggml/metal/impl_c.zig` is **extracted from the header by script**,
+and `harness/struct_layout.cpp` includes the real header and compares all
+112 by name *and* value, in order, with the count cross-checked so a
+constant added upstream shows up as a mismatch rather than as nothing.
+`make struct-layout` went from 41 facts to 289.
+
+Negative-tested 3/3: an `FC_` index drifted by one, an `OP_` number
+wrong, and a constant deleted — the last caught three ways at once (count,
+then the name at each shifted position).
+
+### `ggml_metal_pipeline_with_params` is returned by value 68 times
+
+Every one of these functions returns the 40-byte struct by value. After
+the `ggml_bf16_to_fp32` bug — where Zig 0.16 miscompiled a small
+`extern struct` *received* by value and a shipped function returned 0.0
+for every input — this was checked rather than assumed: layout, field by
+field, **and** the return path, via `zz_pwp_roundtrip`. Correct. The risk
+is in receiving, not returning.
+
+### `node-diff --gpu` reaches far less of this file than it appears to
+
+This is the part worth remembering. Six faults were injected and all six
+read `PASS` on `node-diff --gpu`. None of them was evidence about the
+gate.
+
+Unconditional aborts in each site, with `node-diff --gpu` asked whether
+the run dies, measured which sites a Qwen3.5-2B Q4_K decode actually
+executes:
+
+| site | reached? |
+| --- | --- |
+| `mul_mv`, float arm (`ne00 >= 32`) | **no** — the weights are Q4_K |
+| `mul_mm`, `!has_tensor` arm | **no** — this machine has the tensor instructions |
+| `flash_attn_ext`, `bc_mask` differing | **no** |
+| `norm` at `n_fuse == 2` | **no** |
+| `soft_max` | **no** |
+| `count_equal` | **no** |
+| `rope`, the `is_neox` arm | **no** |
+| `mul_mv`, `r2 != r3` | **no** — both are always 1 here |
+| `mul_mv`, `r3 != 1` | **no** |
+| `mul_mv`, quantized arm | **yes** (the control, and it aborted) |
+
+**Nine of ten probed sites never execute.** The one that does is the
+control, and it is the only reason the nine negatives can be trusted.
+
+So **nine** injected faults read `PASS` and not one of them is evidence
+about the gate: the float-`mul_mv` suffix, the `mul_mm` shared-memory
+budget, `flash_attn_ext`'s `bc_mask` threshold, `rms_norm` at
+`n_fuse == 2`, `soft_max`'s suffix, `count_equal`'s simdgroup loop,
+`rope`'s neox arm naming the *norm* kernel, `mul_mv` swapping `r2` and
+`r3` between their constant slots, and `mul_mv` dropping `r3` from its
+cache key. The last three are worth naming individually because each
+*looks* like it must change the answer — a different RoPE layout, a
+transposed broadcast, two shapes colliding on one pipeline — and each is
+a no-op on this graph. Same lesson as the two `vec.cpp` faults that read
+as escapes and were provably no-ops: **confirm the injection changes the
+computation, or it is not evidence about the gate.**
+
+The conclusion to carry forward: **`library.zig` is swapped in with every
+existing gate green, and the existing gates cover a thin slice of it.**
+What would actually gate it is a `metal-diff`-style harness that calls
+each `get_pipeline_*` beside the reference C++ and compares the chosen
+kernel name and the `pipeline_with_params` fields. That needs the `-D`
+rename *and* a capture seam, because the reference builds its names into
+stack buffers and hands them straight to the `.m` — there is no return
+value to diff. Not attempted here.
+
+Six process faults on the way to that table, each of which produced a
+full page of green:
+
+- The first injection run hashed `zig-out/lib/libllamazig.a` to prove the
+  artifact changed. That library **does not contain the Metal module at
+  all** — the barrel gates it on `config.use_metal` — so the hash was
+  identical for all six runs and every gate ran against an unmodified
+  library. The gates link `zig-out/lib/libggml.a` from `zig build
+  reference`. An artifact-changed check is worth nothing if it watches the
+  wrong artifact.
+- `zig build test -Dtest-filter="a\|b"` is a literal string, not an
+  alternation — already recorded here, and hit again. Worse, the
+  workaround of grepping each filter's output for `error|FAIL` missed two
+  **crashed** tests, which print neither. Only the unfiltered run shows
+  `2 crashed`.
+- **`timeout` does not exist on macOS**, and neither does `gtimeout`.
+  Wrapping each gate in `timeout 600 …` made every invocation exit `127`,
+  so a four-fault battery reported no verdict at all — **including its
+  baseline**, which is the tell. Printing the command's return code next
+  to its verdict is what caught it.
+- A runner written as `{ build && gate; } || echo "NOT APPLIED"` fired the
+  `||` branch on *success*, because the shell function's value was its
+  last `[ … ]` test rather than the gate's. It printed `NOT APPLIED` under
+  a correct build hash and swallowed the verdict. Sequential steps that
+  each print, with nothing inferred from exit status, replaced it.
+- A script written through a nested heredoc mangled its own embedded
+  Python and hung for twelve minutes with no output. Write the script to a
+  file and run the file.
+
+**Five of these six were in the measuring apparatus, not the port.** Every
+one of them would have supported a confident and wrong write-up, and what
+caught each was checking a mechanical fact — the artifact's hash, the
+command's return code, whether the site executes — rather than reading the
+verdict line.
+
+### Two unit tests crashed the moment the file joined the build
+
+`library.zig`'s cache tests put `@ptrFromInt(0x1000)` in the map as stand-in
+pipeline handles. That was fine while the file compiled standalone and
+became a segfault the moment it was wired into the barrel and linked
+against the real `.m`: `ggml_metal_pipelines_free` frees every value it
+holds — as the C does — and `ggml_metal_pipeline_free` dereferences
+`pipeline->obj` with no null guard, so a fake pointer and `null` are
+equally fatal. The tests now make real handles with the `.m`'s own
+`ggml_metal_pipeline_init`, which only `calloc`s a wrapper with `obj =
+nil`; `[nil release]` is a no-op, so the real teardown path is still the
+one under test.
+
+## The `kargs` structs are generated, and the name check is the one that earns its place
+
+`ggml-metal-ops.cpp` fills **65 `ggml_metal_kargs_*` structs carrying 936
+fields** and hands each to a Metal kernel as a block of bytes. The kernel
+reads them **by offset**. So a field at the wrong offset feeds the kernel a
+different number, and unlike almost every other fault class in this port
+there is nothing that could notice: no assertion violated, no pointer
+invalidated, no symbol missing.
+
+`src/ggml/metal/kargs.zig` is therefore generated from the header by
+`scripts/gen-kargs`, and `make struct-layout` compares every struct's size
+and alignment and every field's offset, width and name against
+`ggml-metal-impl.h`. **3,069 facts.**
+
+Two things worth keeping:
+
+- **The generator must fail, not warn, on input it cannot read.** Its
+  first version matched `type name;` and silently skipped seven array
+  fields (`uint64_t o1[8]`, `int32_t nef1[3]` and friends) — printing a
+  warning to stderr and reporting "929 fields" where the header has 936.
+  Those structs would have come out the wrong size. It now `exit`s on an
+  unparsed field. Same class as `port-links` skipping wrapped citations
+  and the first `Mirrors …` checker: **a generator that silently drops
+  input is indistinguishable from one that worked.**
+- **Comparing field *names*, not just offsets, catches a fault nothing
+  else does.** Negative-tested 4/4: a dropped field, a widened field and a
+  shortened array all move `sizeof` or an offset. But **two adjacent
+  same-size fields swapped move nothing** — identical `sizeof`, identical
+  `alignof`, identical offsets for every field — and `concat.ne00`/`ne01`
+  transposed is exactly the typo a 936-field transcription invites. Only
+  the name comparison sees it.

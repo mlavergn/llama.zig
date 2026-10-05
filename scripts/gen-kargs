@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""Generate the Metal kernel argument structs, and their layout check.
+
+`ggml-metal-ops.cpp` builds 65 `ggml_metal_kargs_*` structs and hands each
+to a Metal kernel as a block of bytes. They carry 936 fields between them,
+all scalars, and a kernel reads them by offset: a field at the wrong offset
+feeds the kernel a different number and nothing in the ported code can
+notice. So they are generated from the header rather than typed, and every
+field's offset and width is compared against the real header by
+`make struct-layout`.
+
+Writes:
+  src/ggml/metal/kargs.zig     the extern structs
+  harness/kargs_layout.cpp     offsetof/sizeof assertions against the header
+
+Run after moving the upstream pin.
+"""
+import re
+import sys
+
+HDR = "llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h"
+COMMIT = "c1d0e7a00"
+
+ZIG_TYPE = {
+    "int32_t": "i32", "uint64_t": "u64", "int64_t": "i64", "float": "f32",
+    "int16_t": "i16", "uint32_t": "u32", "uint16_t": "u16", "int8_t": "i8",
+    "uint8_t": "u8", "size_t": "usize", "bool": "bool", "int": "c_int",
+}
+
+def parse(path):
+    lines = open(path).read().split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() == "typedef struct {":
+            start = i + 1  # 1-based line of the opening brace
+            fields = []
+            j = i + 1
+            while j < len(lines) and not lines[j].startswith("}"):
+                m = re.match(r"\s+([a-z0-9_]+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[(\d+)\])?\s*;", lines[j])
+                if m:
+                    fields.append((m.group(1), m.group(2), int(m.group(3)) if m.group(3) else None))
+                elif lines[j].strip() and not lines[j].strip().startswith("//"):
+                    # A field this script cannot read must stop it. A
+                    # generator that silently drops one emits a struct of
+                    # the wrong size and reports success -- the same class
+                    # of hole as a checker that skips its input.
+                    sys.exit(f"gen-kargs: unparsed field at {path}:{j+1}: {lines[j]!r}")
+                j += 1
+            m = re.match(r"\}\s*(ggml_metal_kargs_[a-z0-9_]+)\s*;", lines[j]) if j < len(lines) else None
+            if m:
+                out.append((m.group(1), start, fields))
+            i = j
+        i += 1
+    return out
+
+structs = [s for s in parse(HDR) if s[0].startswith("ggml_metal_kargs_")]
+nfields = sum(len(f) for _, _, f in structs)
+print(f"{len(structs)} kargs structs, {nfields} fields")
+
+# ---------------------------------------------------------------- kargs.zig
+z = ['''//! The argument blocks the Metal kernels read.
+//!
+//! # Provenance
+//!
+//! Mirrors the `ggml_metal_kargs_*` structs of
+//! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at v0.3.0
+//! (`''' + COMMIT + '''`).
+//!
+//! # Generated, not written
+//!
+//! `ggml-metal-ops.cpp` fills one of these per op and hands it to a kernel
+//! as a block of bytes, which the kernel reads **by offset**. A field at
+//! the wrong offset therefore feeds the kernel a different number, and
+//! there is nothing in the ported code that could notice -- no assertion
+//! it violates, no pointer it invalidates.
+//!
+//! So this file is produced by `scripts/gen-kargs` from the header, and
+//! `make struct-layout` compares every struct's size and alignment and
+//! every field's offset and width against the real header. Do not edit it
+//! by hand; change the generator and re-run it.
+//!
+//! The header cannot simply be imported: only `impl.zig`'s single
+//! `cImport` may hold it without creating two incompatible `*ggml_tensor`,
+//! and putting it there widens the `c` namespace every ported file sees.
+//! See `device_c.zig` for that reasoning in full.
+
+const std = @import("std");
+''']
+
+for name, line, fields in structs:
+    short = name[len("ggml_metal_kargs_"):]
+    z.append(f"/// Mirrors `{name}` (ggml-metal-impl.h:{line} @{COMMIT}).")
+    z.append(f"pub const {short} = extern struct {{")
+    for ctype, fname, count in fields:
+        zt = ZIG_TYPE.get(ctype)
+        if zt is None:
+            sys.exit(f"unmapped C type {ctype!r} in {name}")
+        if count is not None:
+            zt = f"[{count}]{zt}"
+        safe = f"@\"{fname}\"" if re.fullmatch(r"[iu]\d+", fname) else fname
+        z.append(f"    {safe}: {zt},")
+    z.append("};")
+    z.append("")
+
+z.append("""// -----------------------------------------------------------------------------
+// The gate's view
+//
+// `harness/kargs_layout.cpp` includes the real header and compares these
+// against `offsetof`/`sizeof`. Names travel with the numbers so a
+// reordering cannot let two wrong entries cancel.
+
+const all = .{
+""" + "".join(f"    {s[0][len('ggml_metal_kargs_'):]},\n" for s in structs) + """};
+
+export fn zz_kargs_count() usize {
+    return all.len;
+}
+
+export fn zz_kargs_name(i: usize) ?[*:0]const u8 {
+    @setEvalBranchQuota(200000);
+    inline for (all, 0..) |T, k| {
+        if (k == i) return @typeName(T)[(comptime std.mem.lastIndexOfScalar(u8, @typeName(T), '.').? + 1)..].ptr;
+    }
+    return null;
+}
+
+export fn zz_kargs_sizeof(i: usize) usize {
+    @setEvalBranchQuota(200000);
+    inline for (all, 0..) |T, k| {
+        if (k == i) return @sizeOf(T);
+    }
+    return std.math.maxInt(usize);
+}
+
+export fn zz_kargs_alignof(i: usize) usize {
+    @setEvalBranchQuota(200000);
+    inline for (all, 0..) |T, k| {
+        if (k == i) return @alignOf(T);
+    }
+    return std.math.maxInt(usize);
+}
+
+export fn zz_kargs_nfields(i: usize) usize {
+    @setEvalBranchQuota(200000);
+    inline for (all, 0..) |T, k| {
+        if (k == i) return @typeInfo(T).@"struct".fields.len;
+    }
+    return std.math.maxInt(usize);
+}
+
+export fn zz_kargs_field_offset(i: usize, f: usize) usize {
+    @setEvalBranchQuota(200000);
+    inline for (all, 0..) |T, k| {
+        if (k == i) {
+            inline for (@typeInfo(T).@"struct".fields, 0..) |fld, j| {
+                if (j == f) return @offsetOf(T, fld.name);
+            }
+            return std.math.maxInt(usize);
+        }
+    }
+    return std.math.maxInt(usize);
+}
+
+export fn zz_kargs_field_size(i: usize, f: usize) usize {
+    @setEvalBranchQuota(200000);
+    inline for (all, 0..) |T, k| {
+        if (k == i) {
+            inline for (@typeInfo(T).@"struct".fields, 0..) |fld, j| {
+                if (j == f) return @sizeOf(fld.type);
+            }
+            return std.math.maxInt(usize);
+        }
+    }
+    return std.math.maxInt(usize);
+}
+
+export fn zz_kargs_field_name(i: usize, f: usize) ?[*:0]const u8 {
+    @setEvalBranchQuota(200000);
+    inline for (all, 0..) |T, k| {
+        if (k == i) {
+            inline for (@typeInfo(T).@"struct".fields, 0..) |fld, j| {
+                if (j == f) return fld.name.ptr;
+            }
+            return null;
+        }
+    }
+    return null;
+}
+
+// -----------------------------------------------------------------------------
+// Unit Tests
+
+test {
+    std.testing.refAllDecls(@This());
+}
+
+test "every struct is an extern struct with the expected field count" {
+    // A guard on the generator rather than on the layout, which
+    // `make struct-layout` owns: if a struct came out empty, or as a
+    // non-extern struct whose layout Zig may reorder, that is a generator
+    // fault and no offset check would be meaningful.
+    inline for (@typeInfo(@This()).@"struct".decls) |d| {
+        const T = @field(@This(), d.name);
+        if (@TypeOf(T) != type) continue;
+        if (@typeInfo(T) != .@"struct") continue;
+        try std.testing.expectEqual(std.builtin.Type.ContainerLayout.@"extern", @typeInfo(T).@"struct".layout);
+        try std.testing.expect(@typeInfo(T).@"struct".fields.len > 0);
+    }
+}
+""")
+open("src/ggml/metal/kargs.zig", "w").write("\n".join(z))
+
+# ------------------------------------------------------- kargs_layout.cpp
+c = ['''/* Generated by scripts/gen-kargs -- do not edit.
+ *
+ * Asks the C compiler whether src/ggml/metal/kargs.zig agrees with
+ * ggml-metal-impl.h: every struct's size and alignment, and every field's
+ * offset and width. The Zig side exports the same facts through
+ * zz_kargs_*, so the two are compared without either side being trusted.
+ */
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+
+#include "ggml-metal-impl.h"
+
+extern "C" {
+    size_t zz_kargs_count(void);
+    const char *zz_kargs_name(size_t);
+    size_t zz_kargs_sizeof(size_t);
+    size_t zz_kargs_alignof(size_t);
+    size_t zz_kargs_nfields(size_t);
+    size_t zz_kargs_field_offset(size_t, size_t);
+    size_t zz_kargs_field_size(size_t, size_t);
+    const char *zz_kargs_field_name(size_t, size_t);
+}
+
+static int checks = 0;
+static int fails  = 0;
+
+static void cmp(const char *what, size_t zig, size_t c) {
+    checks++;
+    if (zig != c) {
+        printf("  %-56s zig %-8zu C %-8zu WRONG\\n", what, zig, c);
+        fails++;
+    }
+}
+
+static void cmp_s(const char *what, const char *zig, const char *c) {
+    checks++;
+    if (!zig || strcmp(zig, c) != 0) {
+        printf("  %-56s zig %-16s C %-16s WRONG\\n", what, zig ? zig : "(null)", c);
+        fails++;
+    }
+}
+
+int main(void) {
+    char lbl[256];
+
+    printf("=== ggml_metal_kargs_*: generated Zig vs the header ===\\n");
+''']
+
+c.append(f'    cmp("kargs struct count", zz_kargs_count(), {len(structs)});\n')
+for idx, (name, line, fields) in enumerate(structs):
+    short = name[len("ggml_metal_kargs_"):]
+    c.append(f'    /* {short} */')
+    c.append(f'    cmp_s("{short}: name", zz_kargs_name({idx}), "{short}");')
+    c.append(f'    cmp("{short}: sizeof", zz_kargs_sizeof({idx}), sizeof({name}));')
+    c.append(f'    cmp("{short}: alignof", zz_kargs_alignof({idx}), alignof({name}));')
+    c.append(f'    cmp("{short}: field count", zz_kargs_nfields({idx}), {len(fields)});')
+    for fidx, (ctype, fname, _count) in enumerate(fields):
+        c.append(f'    snprintf(lbl, sizeof lbl, "{short}.{fname} offset");')
+        c.append(f'    cmp(lbl, zz_kargs_field_offset({idx}, {fidx}), offsetof({name}, {fname}));')
+        c.append(f'    snprintf(lbl, sizeof lbl, "{short}.{fname} width");')
+        c.append(f'    cmp(lbl, zz_kargs_field_size({idx}, {fidx}), sizeof((({name} *) 0)->{fname}));')
+        c.append(f'    snprintf(lbl, sizeof lbl, "{short} field {fidx} name");')
+        c.append(f'    cmp_s(lbl, zz_kargs_field_name({idx}, {fidx}), "{fname}");')
+    c.append("")
+
+c.append('''    printf("\\n");
+    if (fails == 0) {
+        printf("PASS: %d kargs layout facts agree, generated Zig vs header\\n", checks);
+        return 0;
+    }
+    printf("FAIL: %d of %d kargs layout facts differ\\n", fails, checks);
+    return 1;
+}
+''')
+open("harness/kargs_layout.cpp", "w").write("\n".join(c))
+print("wrote src/ggml/metal/kargs.zig and harness/kargs_layout.cpp")
