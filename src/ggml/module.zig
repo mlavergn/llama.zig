@@ -27,6 +27,7 @@
 //! that the parity harness can check on its own.
 
 const std = @import("std");
+const config = @import("config");
 
 comptime {
     // Ported translation units export C symbols that nothing in Zig references,
@@ -52,7 +53,15 @@ comptime {
     _ = @import("backend.zig");
     _ = @import("backend_sched.zig");
     // ggml-metal/, the host layer. The two .m files stay Objective-C.
-    _ = @import("metal/module.zig");
+    //
+    // **Behind `config.use_metal`, like the registry's reference to it.**
+    // `metal/backend.zig` calls 39 functions that live in
+    // `ggml-metal-device.m`, `-context.m`, `-device.cpp` and `-ops.cpp`,
+    // and the `test-port` root deliberately links none of them — its own
+    // comment says "the ported registry must not reference the Metal
+    // backend". Importing this unconditionally made `make validate` fail
+    // with 39 undefined symbols at that step.
+    if (config.use_metal) _ = @import("metal/module.zig");
 }
 
 // -----------------------------------------------------------------------------

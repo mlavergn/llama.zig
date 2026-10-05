@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff abi-check tuning-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -152,6 +152,22 @@ ops-diff:
 	cd llama.cpp.zmake && zig build lib --release=fast
 	zig build reference --release=fast
 	./scripts/ops-diff
+
+# Compare the ported Metal vtables against the reference's, directly.
+# node-diff --gpu runs the graph and sees almost none of ggml-metal.cpp:
+# measured, dropping the FLASH_ATTN_EXT scratch terms from get_alloc_size
+# passed it. See the header of scripts/metal-diff.
+metal-diff:
+	zig build reference --release=fast
+	./scripts/metal-diff
+
+# Compare the hand-declared Metal structs against the real headers.
+# device_c.zig hand-declares ggml_metal_device_props rather than widening
+# impl.zig's cImport; this asks the C compiler whether the transcription is
+# right. See the header of scripts/struct-layout.
+struct-layout:
+	zig build reference --release=fast
+	./scripts/struct-layout
 
 # Sweep the flash-attention tuning lookup against the reference.
 # tuning_table.zig is 936 transcribed rows and no other gate can tell a

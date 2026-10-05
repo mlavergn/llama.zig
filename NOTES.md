@@ -3015,3 +3015,162 @@ An `impl.abort` in the exported `fa_vec_pick`: `node-diff ARGS=--gpu`
 **dies**, `node-diff` on the CPU passes 2750 nodes. Flash-attention kernel
 selection is Metal-only, so the `--gpu` run is the only end-to-end gate
 that reaches this file — the same split `ggml-metal-common.cpp` has.
+
+## Porting `ggml-metal.cpp` — the backend, device and registry
+
+694 live lines, 6 unmangled exports, pure C ABI. Nothing in it talks to
+Metal: every Metal call goes through `device_c.zig` to the two `.m` files
+that stay Objective-C.
+
+### Three buffer types and two ifaces collapse to one body each
+
+`diff`, with `shared`/`private` elided, says the two buffer ifaces are
+**identical but for the polarity of one assertion** —
+`ggml_metal_buffer_is_shared(ctx)` versus its negation — and the three
+buffer types differ only in a name suffix (`""`, `_Private`, `_Mapped`)
+and whether `alloc_buffer` asks for shared memory. So each is one
+comptime-parameterised body, as `repack/dispatch.zig` did for
+`tensor_traits`.
+
+`alloc_buffer` is worth reading twice: it *asks* for shared and then picks
+the iface from **what it got**, because a shared request can come back
+private.
+
+### Three facts checked rather than assumed
+
+- **`GGML_BACKEND_DL_IMPL(ggml_backend_metal_reg)`**, the C's last line,
+  expands to nothing: `ggml-backend-impl.h:264` defines it empty unless
+  `GGML_BACKEND_DL` is set, and this static build does not. That is why
+  `ggml_backend_init` is not among the exports.
+- **Zig 0.16's `std.c` declares `getenv` but not `setenv`.** The C sets
+  `AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1` as a macOS workaround, so the port
+  declares `setenv` as an `extern fn`.
+- **`supports_buft` compares `get_name` function pointers**, so the three
+  buffer types need distinguishable ones. Folding them would still give
+  the C's answer — all three comparisons would match the one address — but
+  the test checks the behaviour rather than the addresses, so the question
+  does not arise.
+
+### `device_c.zig`, and why the headers are not imported
+
+All three `ggml-metal-*.h` **do** import cleanly — measured; they are
+`extern "C"` and include only `ggml.h`, with the Objective-C behind them.
+Adding them to `impl.zig`'s `cImport` was tried and worked.
+
+It was reverted. That `cImport` is shared by every ported file, so the
+Metal headers would widen the `c` namespace the whole library sees and
+oblige six build and script sites to carry a new include path. A second
+`cImport` inside `metal/` is not an option: two of them produce two
+incompatible `*ggml_tensor`, which is the trap `cli/c.zig` records for
+`llama.h`. So `device_c.zig` hand-declares the 39 functions and the one
+struct this directory needs.
+
+**That makes `ggml_metal_device_props` a hand transcription, which
+`CLAUDE.md` calls "the single largest source of silent error".** It is 19
+fields of which the port reads seven; the other twelve exist only to place
+those seven at the right offsets, and a field typed `c_int` where the C
+has `size_t` would shift every later one and report nothing.
+
+So `make struct-layout` asks the C compiler: `sizeof`, `alignof`, every
+`offsetof`, and every field's width, against values the Zig exports. 41
+facts. Negative-tested 3/3 —
+
+| Injected | Caught as |
+|---|---|
+| `max_working_set_size` as `c_int` | `sizeof` 4 vs 8 |
+| a dropped `bool` field | field count 18 vs 19, plus four shifted offsets |
+| `name: [127]u8` | `sizeof(name)` 127 vs 128, `offsetof(desc)` off by one |
+
+**And it caught a real error on first use.** The struct doc, the harness
+comment and a unit test all said "22 fields". It is 19. The field-count
+check is what surfaced it — which is the whole reason that check is in
+there rather than just the offsets.
+
+### `port-links` caught 32 wrong line numbers in one file
+
+Every citation in `backend.zig` was written from the structure survey
+rather than checked against the C, and 32 of them were wrong. That is the
+gate doing exactly its job, and a reminder that a citation written from
+memory is worth nothing: the whole point is that it is the diff map when
+the pin moves. 1,900 citations across 101 files now resolve.
+
+### `node-diff --gpu` sees almost none of `ggml-metal.cpp`
+
+Six injections, and the first reading of them was wrong. Against
+`node-diff ARGS=--gpu`:
+
+| Injected | node-diff | Verdict |
+|---|---|---|
+| abort in `graph_compute` | **dies** | on the path |
+| `CUMSUM`/`ARGSORT` alloc size not doubled | passes | **inert** — neither op is in the graph |
+| `opBatchSize` reads `ne[1]` for `MUL_MAT_ID` | passes | **inert** — the op is not in the graph |
+| one `guid` byte | passes | **inert** — the guid is only compared against itself |
+| mapped buffer type asks for private memory | passes | **inert** — a probe shows mapped `alloc_buffer` is never called |
+| `get_alignment` 32 → 64, and → 16 | passes | reachable (probed), invisible |
+| **FLASH_ATTN_EXT scratch terms dropped** | **passes** | **a real escape** |
+
+The op census settled the inert ones. A Qwen3.5 decode on Metal is:
+
+```
+520 VIEW  432 RESHAPE  374 MUL_MAT  242 MUL  158 RMS_NORM  148 GET_ROWS
+144 CPY   132 ADD      72 SILU      72 SCALE  72 L2_NORM    48 SWIGLU
+48 SIGMOID 36 TRANSPOSE 36 SSM_CONV 36 SOFTPLUS 36 PERMUTE
+36 GATED_DELTA_NET 36 CONCAT 24 SET_ROWS 24 ROPE 12 FLASH_ATTN_EXT 12 CONT
+```
+
+No `CUMSUM`, `ARGSORT`, `TOP_K` or `MUL_MAT_ID`, so four of the switch's
+five arms are never evaluated.
+
+**The FA one is real and was nearly written off with them.** It was
+checked rather than assumed: instrumenting the port to abort when any of
+the four extras is non-zero made the run die, so the terms matter on this
+graph — and dropping them gives 2048 bytes where the reference gives
+331776, a 162× under-allocation, which `node-diff` passed. Had the first
+summary stood, that would have gone down as "probably inert".
+
+## `scripts/metal-diff` — the gate `ggml-metal.cpp` was missing
+
+Both registries in one process: the reference's six exports renamed with
+`-D`, then the buffer-type and device vtables asked the same questions
+over tensors built to reach every arm of the switch. 65 answers.
+
+Negative-tested 6/6, including the two `node-diff` could not see:
+
+| Injected | Answers differing |
+|---|---|
+| FA scratch terms dropped | 4 — 2048 vs 331776, and three more shapes |
+| `get_alignment` 32 → 16 | 1 |
+| `CUMSUM`/`ARGSORT` not doubled | 2 |
+| `TOP_K` arm dropped | 1 |
+| device type GPU → CPU | 1 |
+| `opBatchSize` reads `ne[1]` for `MUL_MAT_ID` | 4 |
+
+### The last one escaped the first version of this harness too
+
+Its `MUL_MAT_ID` probe was a single tensor with `ne[1] = 2, ne[2] = 16`.
+`offload_op` compares the batch size against
+`op_offload_min_batch_size`, which `ggml-metal-device.m:1196` defaults to
+**32** — and 2 and 16 are both below it, so reading the wrong dimension
+gave the same answer. The probes now straddle 32 in both directions,
+which took the gate from 44 checks to 65 and closed it.
+
+Third time this project has learned it: **a gate's input distribution is
+as much a part of it as its comparison.** `ops-diff` needed amplitude 30,
+the `nvfp4` goldens needed a non-zero row, `abi-check` needed a non-zero
+bf16, and this needed a batch size on the far side of a threshold.
+
+### `test-port` links no Metal, and that broke `validate`
+
+`metal/backend.zig` calls 39 functions that live in the Objective-C and in
+`-device.cpp`/`-ops.cpp`. The `test-port` root links none of them on
+purpose — its own comment reads "the ported registry must not reference
+the Metal backend" — so importing `metal/module.zig` unconditionally made
+`make validate` fail with 39 undefined symbols.
+
+`backend_reg.zig` already had the pattern: guard on `config.use_metal`.
+`module.zig`'s import of `metal/module.zig` now does the same. The real
+library keeps its Metal exports; only that one test root skips them.
+
+**And the failure was in a sweep I had already called green.** The
+`validate` step failed forty lines above the passes that got quoted. Read
+the whole output, not the tail.

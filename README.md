@@ -150,16 +150,16 @@ the C it replaces:
 | `ggml-cpu/quants.c` | 1,339 | ported, swapped in — 45/45 symbols |
 | `ggml-cpu/arch/arm/quants.c` | 4,319 | ported, swapped in — 28/28 symbols |
 
-Fifteen C++ translation units have followed them, so **nothing under
+Sixteen C++ translation units have followed them, so **nothing under
 `ggml/src/ggml-cpu/` compiles from C or C++ any more** — the op kernels
 (`ops.cpp`, `vec.cpp`, `binary-ops.cpp`, `unary-ops.cpp`), the llamafile
 fast path (`llamafile/sgemm.cpp`), and the vtable cluster that had to move
 as one unit (`traits.cpp`, `ggml-cpu.cpp`, `repack.cpp`,
 `arch/arm/repack.cpp`). Above ggml-cpu, `ggml-threading.cpp`,
 `ggml-backend-reg.cpp`, `gguf.cpp` and `ggml-backend.cpp` are ported too.
-What is left is `ggml-backend-meta.cpp`, `ggml-opt.cpp`, most of the Metal
-host layer — `ggml-metal-common.cpp` and `ggml-metal-tuning.cpp` are
-ported — and all of libllama.
+What is left is `ggml-backend-meta.cpp`, `ggml-opt.cpp`, part of the Metal
+host layer — `ggml-metal.cpp`, `-common.cpp` and `-tuning.cpp` are
+ported, leaving `-device.cpp` and `-ops.cpp` — and all of libllama.
 
 Throughput is unchanged by the port, as far as this machine can tell.
 Generation sits at 222-234 t/s on Qwen3.5-2B Q4_K_M for both `make port` and
@@ -183,6 +183,8 @@ others, and each negative-tested by injecting a fault and confirming it fails:
 | `make node-diff` | every node of a real Qwen3.5 decode, on bits, CPU (default) or Metal |
 | `make repack-diff` | all 36 interleaved repack kernels against the reference C++, on bits, in one process |
 | `make tuning-diff` | 3.5M flash-attention tuning lookups against the reference C++ |
+| `make struct-layout` | hand-declared Metal structs vs the real headers, via the C compiler |
+| `make metal-diff` | the Metal buffer-type and device vtables vs the reference's, in one process |
 | `make abi-check` | the port's by-value-struct entry points, called as C calls them |
 | `make backend-ops` | 21,093 op configurations, Metal against CPU |
 | `make probe` | proves ported code is on the execution path at all — allocator and CPU dispatch, one run each |

@@ -1,0 +1,62 @@
+#!/bin/bash
+# Compare the ported Metal vtables against the reference's, directly.
+#
+# **The gate `ggml-metal.cpp` was missing.** `make node-diff ARGS=--gpu`
+# runs the graph and hashes every node, which proves the backend computes
+# the right values -- and sees almost none of this file. Measured by
+# injection: dropping the four FLASH_ATTN_EXT scratch terms from
+# `get_alloc_size` passed node-diff, and those terms are non-zero on that
+# graph, so the fault was real and invisible. `get_alignment` 32 -> 16 and
+# 32 -> 64 passed too, though a probe shows the function is reached.
+#
+# The reference's six exports are renamed with -D so both registries live
+# in one process; the buffer-type and device vtables are then asked the
+# same questions. As in `tuning-diff`, the renames go to the reference
+# translation unit **only** -- applying them to the harness would rename
+# its declarations of our names too, and both sides would answer from the
+# reference.
+#
+# Usage: scripts/metal-diff
+#   Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+LIB=zig-out/lib/libggml.a
+[ -f "$LIB" ] || { echo "missing $LIB -- run 'zig build reference --release=fast'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+CXX=(zig c++ -std=c++17 -w -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1"
+     -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu
+     -I llama.cpp/ggml/src/ggml-metal
+     -DNDEBUG -DGGML_USE_CPU -DGGML_USE_METAL -DGGML_METAL_EMBED_LIBRARY
+     -DGGML_SCHED_MAX_COPIES=4 -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE)
+
+RENAME=(-Dggml_backend_metal_reg=ref_ggml_backend_metal_reg
+        -Dggml_backend_metal_init=ref_ggml_backend_metal_init
+        -Dggml_backend_is_metal=ref_ggml_backend_is_metal
+        -Dggml_backend_metal_set_abort_callback=ref_ggml_backend_metal_set_abort_callback
+        -Dggml_backend_metal_supports_family=ref_ggml_backend_metal_supports_family
+        -Dggml_backend_metal_capture_next_compute=ref_ggml_backend_metal_capture_next_compute)
+
+"${CXX[@]}" "${RENAME[@]}" -c llama.cpp/ggml/src/ggml-metal/ggml-metal.cpp \
+    -o "$tmp/ref_metal.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile the renamed reference ggml-metal.cpp" >&2; head -10 "$tmp/err" >&2; exit 1; }
+
+n=$(nm -gUj "$tmp/ref_metal.o" | sed 's/^_//' | grep -c '^ref_ggml_backend')
+echo "reference: $n exports renamed to ref_*"
+[ "$n" -eq 6 ] || { echo "FAIL: expected 6 renamed exports, got $n" >&2; exit 1; }
+
+# No "${RENAME[@]}" here: see the note above.
+zig cc harness/metal_diff.c -o "$tmp/metal_diff" -std=c11 -O2 \
+    -I llama.cpp/ggml/include \
+    "$tmp/ref_metal.o" "$LIB" \
+    "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
+
+"$tmp/metal_diff"

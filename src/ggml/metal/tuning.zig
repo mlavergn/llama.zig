@@ -68,7 +68,7 @@ const fa_vec_domain_batch: i8 = 1;
 /// - `ne11`: the KV length.
 ///
 /// Return: the bucket index, or the bucket count when past the last edge.
-fn ne11Bucket(ne11: i64) c_int {
+pub fn ne11Bucket(ne11: i64) c_int {
     for (fa_vec_ne11_buckets, 0..) |edge, i| {
         if (ne11 < edge) return @intCast(i);
     }
@@ -81,7 +81,7 @@ fn ne11Bucket(ne11: i64) c_int {
 /// - `ne01`: the query-row count.
 ///
 /// Return: the bucket index, or the bucket count when past the last edge.
-fn ne01Bucket(ne01: i64) c_int {
+pub fn ne01Bucket(ne01: i64) c_int {
     for (fa_vec_ne01_buckets, 0..) |edge, i| {
         if (ne01 < edge) return @intCast(i);
     }
@@ -101,7 +101,7 @@ fn ne01Bucket(ne01: i64) c_int {
 /// - `dv`: value head size.
 ///
 /// Return: the baseline `NE`, 4 when the pair has no instantiation.
-fn baselineNe(dk: c_int, dv: c_int) c_int {
+pub fn baselineNe(dk: c_int, dv: c_int) c_int {
     return switch (dk) {
         32 => if (dv == 32) 4 else 4,
         64 => if (dv == 64) 2 else 4,
@@ -132,6 +132,25 @@ fn familyRepresentative(gpu_family: c_int) DeviceId {
 
 var g_override_set: bool = false;
 var g_override_cfg: Cfg = .{ .Q = 1, .NE = 4 };
+
+/// Ports `fa_vec_set_override` (ggml-metal-tuning.cpp:1021 @c1d0e7a00).
+///
+/// `pub` because `metal/backend.zig` exposes it through the registry's
+/// `get_proc_address`, which `test-backend-ops` uses to sweep the FA
+/// configurations. That path reaches it directly rather than through the
+/// mangled C++ name.
+///
+/// Parameters:
+/// - `cfg`: the `(Q, NE)` every `pick` will return until cleared.
+pub fn setOverride(cfg: Cfg) void {
+    g_override_cfg = cfg;
+    g_override_set = true;
+}
+
+/// Ports `fa_vec_clear_override` (ggml-metal-tuning.cpp:1026 @c1d0e7a00).
+pub fn clearOverride() void {
+    g_override_set = false;
+}
 
 /// Ports `find_cfg` (ggml-metal-tuning.cpp:1030 @c1d0e7a00).
 ///
@@ -232,11 +251,10 @@ fn abiBaselineCfg(dk: c_int, dv: c_int) callconv(.c) Cfg {
 /// `u16` instead; the caller is unchanged, since that is what the register
 /// holds either way.
 fn abiSetOverride(bits: u16) callconv(.c) void {
-    g_override_cfg = @bitCast(bits);
-    g_override_set = true;
+    setOverride(@bitCast(bits));
 }
 fn abiClearOverride() callconv(.c) void {
-    g_override_set = false;
+    clearOverride();
 }
 fn abiPick(
     device_id: c_uint,

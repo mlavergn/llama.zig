@@ -1,0 +1,36 @@
+#!/bin/bash
+# Compare the hand-declared Metal structs against the real headers.
+#
+# `src/ggml/metal/device_c.zig` hand-declares `ggml_metal_device_props`
+# instead of importing `ggml-metal-device.h`, because that header would
+# have to join `impl.zig`'s single cImport and widen the `c` namespace
+# every ported file sees. The struct is 19 fields of which the port reads
+# seven; the rest exist only to place those seven correctly.
+#
+# CLAUDE.md calls hand-transcription "the single largest source of silent
+# error". This asks the C compiler instead of trusting the transcription:
+# sizeof, alignof, every offsetof, and every field's width.
+#
+# Usage: scripts/struct-layout
+#   Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+LIB=zig-out/lib/libggml.a
+[ -f "$LIB" ] || { echo "missing $LIB -- run 'zig build reference --release=fast'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+zig c++ harness/struct_layout.cpp "$LIB" -o "$tmp/layout" \
+    -std=c++17 -w -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-metal \
+    "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/err" \
+    || { echo "FAIL: could not build the layout harness" >&2; head -20 "$tmp/err" >&2; exit 1; }
+
+"$tmp/layout"

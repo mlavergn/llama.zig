@@ -443,9 +443,16 @@ files that call it — `ggml-metal.cpp` (5), `ggml-metal-ops.cpp` (2),
 `ggml-metal-device.cpp` (1), **not one as this plan said** — keep linking
 and can each be ported on their own.
 
-What is left in `ggml-metal/` is therefore three independent units:
-`ggml-metal.cpp` (694 live, 6 symbols), `ggml-metal-device.cpp` (1,694, 73)
-and `ggml-metal-ops.cpp` (4,068, 66), plus the two `.m` files that stay.
+`ggml-metal.cpp` is ported too — `src/ggml/metal/backend.zig`, 6/6 — so
+what is left in `ggml-metal/` is **two** units: `ggml-metal-device.cpp`
+(1,694 live, 73 symbols) and `ggml-metal-ops.cpp` (4,068, 66), plus the two
+`.m` files that stay.
+
+**The Metal headers are hand-declared, not imported** (`metal/device_c.zig`).
+They import cleanly, but only `impl.zig`'s single `cImport` can hold them
+without creating two incompatible `*ggml_tensor`, and putting them there
+widens the `c` namespace every ported file sees. `make struct-layout` is
+what keeps the hand-written `ggml_metal_device_props` honest.
 
 Decision 13 settles the hard part: the
 **3,091 lines of Obj-C** in `ggml-metal-device.m` (2,352) and

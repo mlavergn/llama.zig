@@ -60,7 +60,7 @@ symbol names, same signatures. Callers link against them without change.
 | `ggml/src/ggml-cpu/quants.c` | 1,339 | 45 | `src/ggml/cpu/quants/` |
 | `ggml/src/ggml-cpu/arch/arm/quants.c` | 4,319 | 28 | `src/ggml/cpu/quants/arm/` |
 
-And fifteen C++ translation units:
+And sixteen C++ translation units:
 
 | Reference source | Lines | Exported symbols | Replaced by |
 |---|---:|---:|---|
@@ -79,6 +79,7 @@ And fifteen C++ translation units:
 | `ggml/src/ggml-cpu/arch/arm/repack.cpp` | 5,156 | 28 | `src/ggml/cpu/repack/arm/` |
 | `ggml/src/ggml-metal/ggml-metal-common.cpp` | 457 | 6 | `src/ggml/metal/common.zig` |
 | `ggml/src/ggml-metal/ggml-metal-tuning.cpp` | 1,087 | 7 (mangled) | `src/ggml/metal/{tuning,tuning_table}.zig` |
+| `ggml/src/ggml-metal/ggml-metal.cpp` | 998 | 6 | `src/ggml/metal/backend.zig` |
 
 `scripts/port-coverage` derives each symbol contract by compiling the source
 and reports the count. For a C++ file the contract is the *unmangled*
@@ -99,7 +100,7 @@ compiles from C++ either. What is left is C++ and Objective-C.
 |---|---|---|
 | `ggml-cpu/hbm.cpp`, `amx/amx.cpp`, `amx/mmq.cpp` | C++ | All three empty on this target: `GGML_USE_CPU_HBM` and `__AMX_INT8__` are off |
 | `ggml-backend-meta.cpp`, `ggml-opt.cpp`, `ggml.cpp` | C++ | Meta buffers, the optimizer API, and a `std::terminate` handler to be dropped rather than ported |
-| `ggml-metal/*.cpp` | C++ | Metal backend host code: `ggml-metal.cpp`, `-device.cpp`, `-ops.cpp` |
+| `ggml-metal/*.cpp` | C++ | Metal backend host code: `-device.cpp`, `-ops.cpp` |
 | `ggml-metal-device.m`, `ggml-metal-context.m` | Objective-C | Metal object interface; stays Objective-C permanently |
 | `ggml-metal/kernels/*.metal` | MSL | Compiled by the GPU driver at load; never ported |
 | `src/llama*.cpp`, `src/models/*.cpp` | C++ | Model layer and every architecture |
