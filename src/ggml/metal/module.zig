@@ -18,6 +18,7 @@ pub const device_c = @import("device_c.zig");
 pub const impl_c = @import("impl_c.zig");
 pub const kargs = @import("kargs.zig");
 pub const library = @import("library.zig");
+pub const ops = @import("ops.zig");
 
 pub const tuning = @import("tuning.zig");
 pub const tuning_table = @import("tuning_table.zig");
@@ -29,6 +30,7 @@ comptime {
     _ = impl_c;
     _ = kargs;
     _ = library;
+    _ = ops;
     _ = tuning;
     _ = tuning_table;
 }

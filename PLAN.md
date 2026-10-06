@@ -444,10 +444,30 @@ files that call it — `ggml-metal.cpp` (5), `ggml-metal-ops.cpp` (2),
 `ggml-metal-device.cpp` (1), **not one as this plan said** — keep linking
 and can each be ported on their own.
 
-`ggml-metal.cpp` is ported too — `src/ggml/metal/backend.zig`, 6/6 — and so
-is `ggml-metal-device.cpp` — `src/ggml/metal/library.zig`, 73/73. What is
-left in `ggml-metal/` is **one** unit, `ggml-metal-ops.cpp` (4,068, 66),
-plus the two `.m` files that stay.
+**The Metal group is done.** `ggml-metal.cpp` →
+`src/ggml/metal/backend.zig` (6/6), `ggml-metal-device.cpp` →
+`library.zig` (73/73), `ggml-metal-ops.cpp` → `ops.zig` (66/66), plus
+`common.zig` (6/6) and `tuning.zig` (7/7). **`ggml_metal_cxx_sources` is
+empty**; only the two `.m` files remain, by Decision 13.
+
+`ggml-metal-ops.cpp` was the last and largest: 4,068 live lines, 53 per-op
+encoders behind one dispatch switch plus 13 further exports. Two things
+it established:
+
+- **A stubbed export is indistinguishable from a working one to a symbol
+  count.** Its 66 `ggml_metal_op_*` were deliberately *private* Zig
+  functions while the bodies were stubs — exporting them would have made
+  `port-coverage` read `66 / 66 (100%)` for a file whose every dispatch
+  aborted, exactly what `repack.cpp` did before `cluster-check` existed.
+  `ops.encoders_implemented` is the comptime guard, and the switch to
+  `pub export fn` was the *last* step, so the linker's missing-symbol
+  errors were what proved completeness.
+- **The `kargs` structs are generated, and that is load-bearing.** 66
+  structs, 946 fields, which the kernels read by offset. `make
+  struct-layout` checks all of them (3,103 facts). Zig also refuses a
+  struct literal with a field missing, where the C's designated
+  initialiser silently zero-fills — so a field added upstream breaks the
+  build instead of becoming 0.
 
 **`ggml-metal-ops.cpp` is next and its foundation is in place.** 4,068
 live lines, 66 unmangled exports, **zero mangled** — a pure C ABI contract,

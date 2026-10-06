@@ -15,7 +15,7 @@ Three decisions worth knowing before touching anything:
   - **No gate here can see it.** This machine is an Apple M5 Max with no `nvcc` and no NVIDIA GPU, and macOS has had no CUDA support since 10.13. Every correctness gate below is a local bit-exact diff, so for CUDA there are currently **none**. Resolving that is a prerequisite to writing CUDA code, not a follow-up — see the three options in `PLAN.md`.
 - **Our `llama-cli` mimics upstream's argument set** for the features we support, so an existing command line runs unchanged against it. It is our own Zig binary, not upstream's linked against our library.
 
-Where we are: **Stages 1, 2 and 3 complete; Stage 4 under way — all of `ggml/src/ggml-cpu/` is Zig.**
+Where we are: **Stages 1, 2 and 3 complete; Stage 4 under way — all of `ggml/src/ggml-cpu/` and all of `ggml/src/ggml-metal/` are Zig** (apart from the two Obj-C `.m` files).
 
 **No C compiles anywhere under `llama.cpp/ggml/src/` any more.** All six translation units are Zig, 598 exported symbols, every one swapped in and byte-verified. `ggml_base_sources` and `ggml_cpu_c_sources` in `build/llamacpp.zig` are both empty.
 
@@ -30,7 +30,7 @@ Where we are: **Stages 1, 2 and 3 complete; Stage 4 under way — all of `ggml/s
 
 **Stage 4 has begun, and the measurement that shapes it is done.** Every exported symbol of every ggml C++ object was intersected with the undefined symbols of every other object in `libggml.a` and `libllama.a`: **the external contract of 20 of the 24 C++ translation units in ggml is a pure C ABI.** A C++ file exports thousands of mangled symbols — `gguf.cpp` alone exports 2,002 — but they are template instantiations and inline functions, emitted weakly into every object that needs them, and almost none are reached from outside. So the Stage 3 swap mechanism carries over unchanged for the large majority. `PLAN.md` names the four exceptions and what each forces.
 
-Seventeen C++ translation units are ported and swapped:
+Eighteen C++ translation units are ported and swapped:
 
 - `ggml-threading.cpp` → `src/ggml/threading.zig` (3 symbols).
 - `ggml-backend-reg.cpp` → `src/ggml/backend_reg.zig` (16 symbols). It took `ggml-backend-dl.cpp` out of the build with it: those three `dl_*` functions have C++ linkage Zig cannot provide, and the registry was their only caller.
@@ -45,13 +45,14 @@ Seventeen C++ translation units are ported and swapped:
 - `ggml-metal/ggml-metal-common.cpp` → `src/ggml/metal/common.zig` (6 symbols). The Metal group's first unit, and the only one with no Metal API in it.
 - `ggml-metal/ggml-metal.cpp` → `src/ggml/metal/backend.zig` (6 symbols). The backend, device and registry. Its three buffer types and two buffer ifaces collapse to one comptime-parameterised body each — `diff` says the ifaces differ only in an assertion's polarity, and the buffer types only in a name suffix and whether `alloc_buffer` asks for shared memory.
 - `ggml-metal/ggml-metal-device.cpp` → `src/ggml/metal/library.zig` (73 symbols). 68 `get_pipeline_*` functions that each build an MSL function name and a cache key, plus the pipeline cache behind them. Its 112 `FC_*`/`OP_*`/`N_*`/`SZ_*` constants are **extracted from `ggml-metal-impl.h` by script** into `src/ggml/metal/impl_c.zig` and checked against the header by `make struct-layout` — a wrong one is the quietest fault in the Metal port, since `FC_UNARY + 1` names the slot a function constant is written to and an off-by-one silently configures a different kernel.
+- `ggml-metal/ggml-metal-ops.cpp` → `src/ggml/metal/ops.zig` (66 symbols). The op encoder: one graph node to one kernel dispatch. 4,068 live lines and the last Metal C++ unit — **`ggml_metal_cxx_sources` is now empty.** Its 66 `ggml_metal_op_*` were kept *private* while bodies were stubs, because exporting them would have let `port-coverage` read `66 / 66 (100%)` for a file whose every dispatch aborted, which is what `repack.cpp` did; `ops.encoders_implemented` is the comptime guard. Its argument structs are generated — see `metal/kargs.zig` under `make struct-layout`.
 - `ggml-metal/ggml-metal-tuning.cpp` → `src/ggml/metal/{tuning,tuning_table}.zig` (7 symbols). **Its contract is entirely C++-linkage** — seven functions in `namespace ggml_metal_tuning`, zero unmangled exports — so `port-coverage` would read it as 0/0 = 100% without the `MANGLED_` list it now takes. Zig exports the mangled names with `@export`, which is what lets the three C++ files that call it stay C++ while each is ported separately.
 
 **Both counts `PLAN.md` carried for this group were low** — gguf was recorded as 44 and backend as 82. Measure the contract before estimating a C++ file; do not trust the survey figure.
 
 `ggml-backend.cpp` is also the counterexample to "C++ is the hard part": it has **zero `throw`, zero `catch`**, no `std::string`, no `std::map`, no templates and no virtual functions. Its own first line is `// Note: porting this file to C++ is a work in progress`. What made it hard was the five-pass assignment algorithm in `ggml_backend_sched_split_graph`.
 
-Only `ggml-backend-meta.cpp` (4 symbols), `ggml-opt.cpp` (9) and `ggml.cpp` (0, to be dropped) remain in `ggml_base_cxx_sources`. In `ggml_metal_cxx_sources` only `ggml-metal-ops.cpp` (66 symbols) is left. **Nothing under `ggml-cpu/` compiles from C or C++ any more** except three translation units that are empty on this target: `hbm.cpp` needs `GGML_USE_CPU_HBM`, `amx/amx.cpp` and `amx/mmq.cpp` need `__AMX_INT8__`. What remains is the Metal host layer and all of libllama.
+Only `ggml-backend-meta.cpp` (4 symbols), `ggml-opt.cpp` (9) and `ggml.cpp` (0, to be dropped) remain in `ggml_base_cxx_sources`. **`ggml_metal_cxx_sources` is empty** — all of `ggml/src/ggml-metal/` is Zig apart from the two `.m` files that stay by Decision 13. **Nothing under `ggml-cpu/` compiles from C or C++ any more** except three translation units that are empty on this target: `hbm.cpp` needs `GGML_USE_CPU_HBM`, `amx/amx.cpp` and `amx/mmq.cpp` need `__AMX_INT8__`. What remains is **all of libllama**, plus the two Obj-C `.m` files that stay.
 
 **For `repack.cpp` the unmangled-export contract is not the whole contract, and that cost a day.** Its 36 unmangled symbols are the gemv/gemm and `quantize_mat` kernels; the `CPU_REPACK` buffer type, `extra_buffer_type` and the sixteen `tensor_traits` instantiations that decide when to call them are all C++-linkage and invisible to `nm -gU | grep -v _Z`. Measured: with the dispatch stubbed, `port-coverage` read `36 / 36 symbols (100%)` and `node-diff` failed on the first `MUL_MAT`. `scripts/cluster-check` now asserts `repack.dispatch_implemented` at comptime so the count cannot stand alone again.
 

@@ -3410,3 +3410,60 @@ truncates back to `int` for `nth` and `nk0`. Both narrowings are implicit
 and invisible. Porting it as if the field were 32-bit failed to compile,
 which is how the asymmetry was noticed; `encodePad` now writes both
 narrowings out.
+
+## Porting `ggml-metal-ops.cpp` — the last Metal unit
+
+4,068 live lines, 66 unmangled exports, zero mangled. It is the op
+encoder: per graph node, pick a pipeline (`library.zig`), fill the
+kernel's argument block (`kargs.zig`), bind the buffers, dispatch. 53
+per-op encoders behind one dispatch switch, plus `fwht`, `snake_fused`,
+`flash_attn_ext_use_vec`, the four `flash_attn_ext_extra_*` and the two
+`mul_mat_id_extra_*`.
+
+With it, **`ggml_metal_cxx_sources` is empty.** No C or C++ compiles
+anywhere under `ggml/src/` any more; the two Obj-C `.m` files stay by
+Decision 13.
+
+### The exports were held back on purpose, and that is the `repack.cpp` lesson applied
+
+A symbol count cannot tell a kernel dispatch from an `abort`. So the 66
+`ggml_metal_op_*` were written as **private** Zig functions while the
+bodies were stubs, and only switched to `pub export fn` once the last
+body was written. Had they been exported earlier, `port-coverage` would
+have read `66 / 66 symbols (100%), complete and swapped into the build`
+for a file in which every op aborted — which is precisely what
+`repack.cpp` reported with its dispatch stubbed.
+
+Holding them back also made the linker do the completeness check: the
+switch to exports was the final step, and nothing resolved until all 66
+existed. `ops.encoders_implemented` is the comptime guard, in the same
+shape as `repack.dispatch_implemented`.
+
+### Three things in the C worth knowing before touching this file
+
+- **`GGML_TENSOR_LOCALS` is null-guarded.** `GGML_TENSOR_LOCALS_1`
+  (ggml.h:298) expands to `(pointer) ? (pointer)->array[0] : 0`, so an
+  absent source contributes **zeros** to the `kargs` — not garbage, not a
+  dereference. `soft_max`, `rope` and `flash_attn_ext` all depend on
+  this, and writing an assertion there instead would be wrong.
+- **Several branches are commented out to a constant.** `extra_pad`'s
+  `use_vec` test is `if (false)`, `extra_tmp`'s is `if (true)`, and
+  `has_kvpad` is forced `true` in both — all so that scratch is always
+  reserved and graphs are not reallocated. Only the live arm is ported,
+  each with a note; reproducing the dead arm would be inventing code.
+- **`conv_2d_dw` writes `/*.nb02 =*/ nb03`** — the `nb02` field is fed
+  the weight tensor's `nb[3]`. Reproduced verbatim. Whether it is an
+  upstream slip cannot be settled from this side: the kernel reads the
+  field by offset, so if it is one, it is one the kernel was compiled
+  against. `node-diff --gpu` would be the arbiter and `CONV_2D_DW` is not
+  in a Qwen3.5 graph.
+
+### What the gates say
+
+`node-diff --gpu` is 2750/2750 nodes identical at 1 and 4 threads, on a
+graph where every Metal dispatch now goes through this file. That is the
+strongest statement available, and it is still narrow in the way
+`library.zig` already showed: one model, one prompt, one SKU. The ops a
+Qwen3.5 decode never reaches — `conv_*`, `pool_*`, `argsort`, `top_k`,
+`cumsum`, `count_equal`, the whole `dsv4_hc` group — are exercised only
+by `backend-ops`, which compares with a tolerance.

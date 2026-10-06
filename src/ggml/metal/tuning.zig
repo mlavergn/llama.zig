@@ -117,7 +117,7 @@ pub fn baselineNe(dk: c_int, dv: c_int) c_int {
 }
 
 /// Ports `fa_vec_baseline_cfg` (ggml-metal-tuning.cpp:61 @c1d0e7a00).
-fn baselineCfg(dk: c_int, dv: c_int) Cfg {
+pub fn baselineCfg(dk: c_int, dv: c_int) Cfg {
     return .{ .Q = 1, .NE = @intCast(baselineNe(dk, dv)) };
 }
 
@@ -193,7 +193,7 @@ fn lookup(dev: DeviceId, dtype: c_int, dk: c_int, dv: c_int, ne11_b: c_int, ne01
 /// - `ne11`: KV length. - `ne01`: query rows.
 ///
 /// Return: the `(Q, NE)` the FA vector kernel should be instantiated at.
-fn pick(
+pub fn pick(
     device_id: c_uint,
     gpu_family: c_int,
     dtype: c_int,
