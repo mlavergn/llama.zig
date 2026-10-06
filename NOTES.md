@@ -3349,3 +3349,64 @@ Two things worth keeping:
   `alignof`, identical offsets for every field — and `concat.ne00`/`ne01`
   transposed is exactly the typo a 936-field transcription invites. Only
   the name comparison sees it.
+
+## A generator that writes its own checker agrees with itself
+
+`scripts/gen-kargs` emits both `src/ggml/metal/kargs.zig` and the harness
+that checks it, `harness/kargs_layout.cpp`. That is convenient and it hid
+a missing struct completely.
+
+`ggml_metal_kargs_glu` is declared `typedef struct{` — **no space before
+the brace**. The parser matched the exact string `"typedef struct {"`, so
+the whole typedef was invisible: 65 structs parsed where the header
+declares 66.
+
+**`make struct-layout` reported `PASS: 3069 kargs layout facts agree`.**
+It had to: the harness is generated from the same parse, so both sides
+were missing the same struct and agreed with each other perfectly. The
+count cross-check that was supposed to prevent exactly this
+(`zz_kargs_count()` against the generator's list) compared the generator
+to *itself*.
+
+Found only because porting `ggml_metal_op_glu` needed `kargs.glu` and it
+was not there — i.e. by a compile error in unrelated work, not by the
+gate built to catch it.
+
+Two fixes:
+
+- the opening-brace matcher is now a regex, `typedef\s+struct\s*\{`;
+- the generator takes an **independent** count from the header's *closing*
+  lines, `^} ggml_metal_kargs_\w+;`, and exits naming the missing struct
+  if the two parses disagree. Negative-tested: reverting the matcher now
+  prints `the header declares 66 kargs structs but 65 were parsed. missed:
+  ['ggml_metal_kargs_glu']` and exits 1.
+
+The rule this adds to the ones already here: **a generated checker must be
+cross-checked against the source, never against the generator.** Same
+family as `ported.zig` and `module.zig` diverging, and as `port-links`
+skipping wrapped citations — a check whose input is filtered by the thing
+it is checking cannot see what the filter dropped.
+
+The first negative test of this was also vacuous, for the record: a `sed`
+whose backslash escaping did not match the file, so the "reverted"
+generator still had the fix and still printed 66. Caught by asserting the
+pattern was present before replacing it.
+
+## The generated `kargs` structs catch narrowings the C hides
+
+Two things fall out of generating these rather than hand-writing them,
+both of which showed up porting the encoders.
+
+**Zig refuses a struct literal with a field missing.** The generated
+structs carry no defaults, so every field must be named. The C's
+`ggml_metal_kargs_concat args = { .ne00 = …, … }` silently zero-fills
+anything omitted, and a field added upstream would quietly become 0 here;
+in Zig it is a compile error.
+
+**The widths are not uniform and the compiler says so.** `kargs_pad` has
+`int64_t ne0`, while the C's `GGML_TENSOR_LOCALS(int32_t, ne, op, ne)`
+locals feeding it are `int32_t` — so the C widens on the way in, then
+truncates back to `int` for `nth` and `nk0`. Both narrowings are implicit
+and invisible. Porting it as if the field were 32-bit failed to compile,
+which is how the asymmetry was noticed; `encodePad` now writes both
+narrowings out.

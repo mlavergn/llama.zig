@@ -26,7 +26,7 @@ The primary goal is for llama.cpp, which becomes llamazig, to build for **macOS*
 
 ## Stages
 
-The port proceeds in five stages. Each one has to land before the next begins.
+The port proceeds in six stages. Each one has to land before the next begins.
 
 ### 1. Build with the Zig compiler, driven by the existing Make and CMake — *done*
 
@@ -101,7 +101,20 @@ This will be challenging. The reliance on the STL and/or Boost is unknown. C++ d
 
 ### 5. Validate across platforms
 
-Target macOS, iOS, Linux (arm64), and Linux (x86_64). This is the end goal.
+Target macOS, iOS, Linux (arm64), and Linux (x86_64).
+
+### 6. CUDA
+
+A second GPU backend. The kernels stay CUDA — the same treatment the Metal
+kernels get — and Zig takes the host layer, launching through
+`cudaLaunchKernel` rather than the `<<<…>>>` syntax only `nvcc` can
+compile. It is ~43,900 lines across 278 files, roughly 3.3x the whole
+Metal backend.
+
+It needs an NVIDIA GPU to verify against: every correctness gate in this
+repository is a bit-exact diff against a locally-built reference, and none
+of them can run on the Apple Silicon machine this port is developed on.
+`PLAN.md` "Stage 6 — CUDA" has the measurement and the options.
 
 ## Getting started
 

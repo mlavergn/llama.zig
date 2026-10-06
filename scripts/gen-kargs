@@ -32,7 +32,7 @@ def parse(path):
     out = []
     i = 0
     while i < len(lines):
-        if lines[i].strip() == "typedef struct {":
+        if re.fullmatch(r"typedef\s+struct\s*\{", lines[i].strip()):
             start = i + 1  # 1-based line of the opening brace
             fields = []
             j = i + 1
@@ -56,7 +56,28 @@ def parse(path):
 
 structs = [s for s in parse(HDR) if s[0].startswith("ggml_metal_kargs_")]
 nfields = sum(len(f) for _, _, f in structs)
-print(f"{len(structs)} kargs structs, {nfields} fields")
+
+# An independent count, from the closing lines rather than the opening
+# ones. The two parses must agree.
+#
+# This exists because they once did not: `ggml_metal_kargs_glu` opens
+# `typedef struct{` with no space, the opening-brace matcher was an exact
+# string compare, and the struct vanished. `make struct-layout` still
+# reported "3,069 facts agree" — because `harness/kargs_layout.cpp` is
+# generated from this same parse, so both sides were missing the same
+# struct and agreed with each other. A generator that writes its own
+# checker has to be cross-checked against the source, not against itself.
+declared = re.findall(r"^\}\s*(ggml_metal_kargs_\w+)\s*;", open(HDR).read(), re.M)
+if len(declared) != len(structs):
+    missed = sorted(set(declared) - {s[0] for s in structs})
+    extra = sorted({s[0] for s in structs} - set(declared))
+    sys.exit(
+        f"gen-kargs: the header declares {len(declared)} kargs structs but "
+        f"{len(structs)} were parsed.\n"
+        f"  missed: {missed}\n  unexpected: {extra}"
+    )
+
+print(f"{len(structs)} kargs structs, {nfields} fields (header declares {len(declared)})")
 
 # ---------------------------------------------------------------- kargs.zig
 z = ['''//! The argument blocks the Metal kernels read.

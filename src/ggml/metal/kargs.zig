@@ -660,6 +660,20 @@ pub const conv_3d = extern struct {
     nb3: u64,
 };
 
+/// Mirrors `ggml_metal_kargs_glu` (ggml-metal-impl.h:773 @c1d0e7a00).
+pub const glu = extern struct {
+    ne00: i32,
+    nb01: u64,
+    ne10: i32,
+    nb11: u64,
+    ne0: i32,
+    nb1: u64,
+    i00: i32,
+    i10: i32,
+    alpha: f32,
+    limit: f32,
+};
+
 /// Mirrors `ggml_metal_kargs_sum` (ggml-metal-impl.h:786 @c1d0e7a00).
 pub const sum = extern struct {
     np: u64,
@@ -1261,6 +1275,7 @@ const all = .{
     conv_2d_dw,
     im2col,
     conv_3d,
+    glu,
     sum,
     sum_rows,
     cumsum_blk,

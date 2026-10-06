@@ -24,6 +24,7 @@ Settled in review. The plan below assumes all of these.
 | 4 | Correctness bar | **Token-identical output** vs. the reference build, fixed seed, `--temp 0`, canonical model `Qwen3.5-2B-Q4_K_M.gguf`. Logit-distance tolerance is the documented fallback if bit-exactness proves unreachable. Reference is `llama.cpp.zmake` — see Decision 17. |
 | 5 | Model architectures | **Qwen3.5 first**, backfill the rest later. |
 | 6 | Metal kernels | **Stay as MSL**, carried verbatim as embedded data. |
+| 6a | CUDA backend | **In scope.** The CUDA *kernels* stay as CUDA, like Decision 6's MSL; Zig takes the host layer. See "Stage 6 — CUDA" for the measurement, the split that is not the Metal split, and the open gate question. |
 | 7 | Ported code location | **Under `src/`.** See "Layout" below. |
 | 8 | Timeline | **Not a constraint.** Estimates removed from this plan; ordering and dependencies are what matter. |
 | 9 | Layout | **Mirror upstream's component boundaries under `src/`**, each with its own barrel. See below. |
@@ -574,6 +575,116 @@ Practical consequence: **do not over-invest in making the C-shaped intermediate
 pleasant.** It is scaffolding for one subsystem's lifetime.
 
 ---
+
+---
+
+## Stage 6 — CUDA
+
+**Decided: CUDA is in scope.** This section is the measurement and the
+shape of the work, not an estimate — `ggml-cuda` was measured the same way
+every other unit in this plan was.
+
+### Scope, measured
+
+| | |
+|---|---|
+| Files | **278** under `ggml/src/ggml-cuda/` |
+| `.cu` | **24,720** lines, 187 files |
+| `.cuh` | **18,747** lines, 86 files |
+| `.h` | 480 lines, 3 files |
+| **Total** | **~43,900 lines** |
+| `ggml-cuda.cu` | **5,583** lines — the backend/device/buffer layer, the analogue of `ggml-metal.cpp` |
+| `__global__` kernels | **145**, in 59 of the 187 `.cu` files |
+| `__device__` functions | 444 |
+| `<<<…>>>` launch sites | **161** |
+
+For comparison, all of `ggml/src/ggml-metal/` is 13,269 lines. **CUDA is
+roughly 3.3× the entire Metal backend**, and about 80% the size of
+`src/llama-*.cpp` (55,135), which Stage 4 treats as the main prize.
+
+### The Metal split does not transfer, and that is the central fact
+
+Decision 13 works for Metal because the two languages live in **different
+files**: MSL kernels in `ggml-metal/kernels/*.metal`, host code in
+`.cpp`/`.m`. Zig took the `.cpp`, the `.m` stayed Obj-C, and the boundary
+between them is a pure C ABI — measured, 9 symbols out and 57 in.
+
+CUDA has no such seam. **Host and device code are interleaved in the same
+translation unit**, and the 161 `<<<grid, block, shmem, stream>>>` launches
+sit *inside* the host functions. That syntax is device-aware and only
+`nvcc` or clang's CUDA frontend can compile it; Zig has no CUDA frontend
+any more than it has an Obj-C one.
+
+So "kernels stay, host layer ports" cannot be applied file-by-file the way
+it was for Metal. The route that *does* transfer:
+
+- **Kernels compile to PTX/cubin by `nvcc` and travel as device code** —
+  exactly Decision 6's treatment of MSL, and exactly what `CLAUDE.md`
+  already says about the Metal kernels: "they travel as embedded data".
+- **Each `<<<…>>>` becomes a `cudaLaunchKernel` call.** The CUDA *runtime*
+  API is plain C, so Zig can call it directly. That puts the Zig side in
+  the same position it already occupies for Metal, where it calls
+  `ggml_metal_encoder_dispatch_threadgroups` across a C ABI into the `.m`.
+- **`.cuh` headers are the `simd-mappings.h` problem again, 18,747 lines
+  of it.** They are macro- and template-heavy device code; the ones that
+  are purely `__device__` are not ported at all, they compile with the
+  kernels. Only the host-reachable declarations need Zig equivalents.
+
+Zig does list `nvptx` and `nvptx64` as targets, so emitting PTX from Zig
+is *conceivable* — but that backend is experimental and this plan does not
+depend on it. Kernels stay CUDA.
+
+### The open question, and it blocks writing code rather than planning it
+
+**No gate in this project can run for CUDA on this machine, and that is
+not a detail.** Measured here: the GPU is an Apple M5 Max, `nvcc` is not
+present, `nvidia-smi` is not present, and macOS has shipped no CUDA
+support since 10.13. All fourteen correctness gates are local bit-exact
+diffs against a reference build — `node-diff`, `ops-diff`, `metal-diff`,
+`backend-ops`, `parity-*`. For CUDA, every one of them is unavailable.
+
+That collides directly with this project's central rule, the one the whole
+`NOTES.md` fault-injection table exists to serve: **a gate proves nothing
+until it has been made to fail.** Porting ~43,900 lines of numerically
+sensitive kernel-dispatch code with *no* oracle would produce exactly the
+class of artifact this project has spent its entire history refusing —
+green, consistent, and unverified. The `library.zig` experience is the
+small version of this: nine of ten probed sites were unreachable by the
+one gate that existed, and nine injected faults were inert rather than
+caught.
+
+So before any CUDA code is written, one of these has to be chosen:
+
+1. **A CUDA machine or CI runner** with an NVIDIA GPU, which `node-diff`,
+   `ops-diff` and `backend-ops` can be pointed at. This is the only option
+   that preserves the project's correctness bar. `scripts/check-reference-pin`
+   already establishes the pattern of a gate refusing to run against a
+   drifted reference; the CUDA gates would refuse to run without hardware.
+2. **Compile-and-link only**, on a machine with the CUDA toolkit but no
+   GPU — catches ABI and signature faults, catches no numerics. Honest if
+   labelled as such; it is `port-coverage`, not `node-diff`.
+3. **Port unverified**, and say so in `CLAUDE.md` at the top of every
+   affected file. Not recommended: it would make "all steps pass" mean
+   something different for CUDA than for everything else in this
+   repository, which is the kind of quiet divergence `ported.zig` and
+   `module.zig` already taught us to avoid.
+
+**Recommendation: (1).** It is the only one that keeps one meaning of
+"ported and verified" across the repository. Until it is settled, the
+CUDA work that can proceed without hardware is the measurement above, the
+host/device boundary survey (which `.cuh` declarations are host-reachable),
+and the `build.zig` work to drive `nvcc` — none of which needs a GPU.
+
+### Ordering
+
+CUDA comes **after** Stage 4 finishes libllama, not before. Two reasons,
+both structural: `ggml-cuda.cu` is a `ggml-backend` implementation, so it
+depends on the backend and scheduler interfaces that Stage 4 has already
+ported and gated; and the Metal group is the worked example for what a
+backend port involves, so finishing it first is what makes the CUDA
+estimate above trustworthy rather than a survey figure — the lesson
+`PLAN.md` already records twice, where gguf was recorded as 44 symbols and
+measured at 61, and backend as 82 and measured at 102.
 
 ---
 

@@ -4,11 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## The goal
 
-**Port llama.cpp to Zig — pure Zig apart from the Metal Objective-C host layer.** The deliverable is a `llama-cli` reimplemented in Zig: not a recreation of the llama.cpp repo, and not a Zig wrapper around the C++ library. `SPEC.md` states what the deliverable is and does — artifacts, flag surface, generation semantics, and the conformance gates. `README.md` has the five stages; `PLAN.md` has the forward plan — decisions, scope measurements, and what comes next; `NOTES.md` is the record of how each completed step was actually done and what each gate caught. Read `SPEC.md` first when the question is "what should this do", `PLAN.md` when it is "what is decided and what is next", and `NOTES.md` when it is "why is it done this way".
+**Port llama.cpp to Zig — pure Zig apart from the GPU kernels and the Metal Objective-C host layer.** The deliverable is a `llama-cli` reimplemented in Zig: not a recreation of the llama.cpp repo, and not a Zig wrapper around the C++ library. `SPEC.md` states what the deliverable is and does — artifacts, flag surface, generation semantics, and the conformance gates. `README.md` has the stages; `PLAN.md` has the forward plan — decisions, scope measurements, and what comes next; `NOTES.md` is the record of how each completed step was actually done and what each gate caught. Read `SPEC.md` first when the question is "what should this do", `PLAN.md` when it is "what is decided and what is next", and `NOTES.md` when it is "why is it done this way".
 
-Two decisions worth knowing before touching anything:
+Three decisions worth knowing before touching anything:
 
 - **`ggml-metal-device.m` and `ggml-metal-context.m` stay Objective-C** (3,091 lines), compiled by `zig cc`. Zig has no Obj-C frontend, and reaching Metal from Zig would mean hand-writing every call against `objc_msgSend`. Everything else is ported.
+- **CUDA is in scope, and its kernels stay CUDA** — `PLAN.md` "Stage 6 — CUDA" has the measurement. Three things about it differ from Metal and are easy to get wrong:
+  - **It is big.** 278 files, ~43,900 lines (24,720 `.cu`, 18,747 `.cuh`), with `ggml-cuda.cu` alone at 5,583 — roughly **3.3× the whole Metal backend**.
+  - **The Metal split does not transfer.** Metal works because MSL and host code are in *different files*; CUDA interleaves them, and all **161** `<<<…>>>` launches sit inside host functions in syntax only `nvcc` can compile. The route that transfers is `cudaLaunchKernel`, which is plain C and callable from Zig — the same position Zig already occupies when it calls into `ggml-metal-device.m`.
+  - **No gate here can see it.** This machine is an Apple M5 Max with no `nvcc` and no NVIDIA GPU, and macOS has had no CUDA support since 10.13. Every correctness gate below is a local bit-exact diff, so for CUDA there are currently **none**. Resolving that is a prerequisite to writing CUDA code, not a follow-up — see the three options in `PLAN.md`.
 - **Our `llama-cli` mimics upstream's argument set** for the features we support, so an existing command line runs unchanged against it. It is our own Zig binary, not upstream's linked against our library.
 
 Where we are: **Stages 1, 2 and 3 complete; Stage 4 under way — all of `ggml/src/ggml-cpu/` is Zig.**
