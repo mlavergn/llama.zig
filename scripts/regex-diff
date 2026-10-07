@@ -1,0 +1,39 @@
+#!/bin/bash
+# Compare src/llama/regex.zig with libc++'s std::regex.
+#
+# A lazy grammar's trigger patterns are std::regex, ECMAScript grammar, and
+# where a match starts and which capture group is first non-empty decide the
+# text the grammar is fed. `make sampler-diff` runs five patterns; this runs
+# the real trigger patterns upstream's chat code builds and 30,000 random
+# ones, malformed ones included, through both engines in one process. See
+# harness/regex_diff.zig.
+#
+# Usage: scripts/regex-diff
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+zig c++ -std=c++17 -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+    -c harness/regex_ref.cpp -o "$tmp/ref.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile the reference" >&2; head -10 "$tmp/err" >&2; exit 1; }
+
+# `regex.zig` reaches `ggml_abort` and a C logger through `impl.zig`; the
+# ported ggml supplies the first, and nothing on these paths calls the second.
+[ -f zig-out/lib/libggml.a ] || { echo "missing zig-out/lib/libggml.a -- run 'zig build reference --release=fast'" >&2; exit 2; }
+
+# `-I` applies to the module declared after it, here the one that imports
+# llama.h.
+zig build-exe -femit-bin="$tmp/regex_diff" -OReleaseFast -lc \
+    --dep regex -Mroot=harness/regex_diff.zig \
+    -I llama.cpp/include -I llama.cpp/ggml/include -Mregex=src/llama/regex.zig \
+    "$tmp/ref.o" zig-out/lib/libggml.a "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
+
+"$tmp/regex_diff"

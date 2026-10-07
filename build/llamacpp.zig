@@ -175,7 +175,8 @@ const llama_sources = [_][]const u8{
     "src/llama-chat.cpp",
     "src/llama-context.cpp",
     "src/llama-cparams.cpp",
-    "src/llama-grammar.cpp",
+    // llama-grammar.cpp is ported -- src/llama/grammar/, with std::regex in
+    // src/llama/regex.zig. Its only caller was the sampler.
     "src/llama-graph.cpp",
     "src/llama-hparams.cpp",
     "src/llama-impl.cpp",
@@ -195,7 +196,9 @@ const llama_sources = [_][]const u8{
     "src/llama-model-saver.cpp",
     "src/llama-model.cpp",
     "src/llama-quant.cpp",
-    "src/llama-sampler.cpp",
+    // llama-sampler.cpp is ported -- src/llama/sampler/. The first of
+    // libllama, and the one piece that swaps ahead of the rest: its contract
+    // with llama-context.cpp is C (PLAN.md, Decision 42).
     "src/llama-vocab.cpp",
     "src/unicode-data.cpp",
     "src/unicode.cpp",
@@ -588,6 +591,10 @@ fn portedTestModuleInner(
 /// failures.
 fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.Build.Step.Compile {
     const mod = b.createModule(.{
+        // Rooted at the ported Zig, so its exports land in the same
+        // `libllama.a` as the C++ that calls them -- the move `addGgml`
+        // makes with `src/ggml/module.zig`.
+        .root_source_file = b.path("src/llama/module.zig"),
         .target = opts.target,
         .optimize = opts.optimize,
         .link_libc = true,

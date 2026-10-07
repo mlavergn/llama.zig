@@ -1,0 +1,106 @@
+#!/bin/bash
+# Compare src/llama/unicode.zig with llama.cpp's unicode.cpp.
+#
+# `unicode.cpp` is what turns text into the pieces a BPE vocabulary
+# tokenizes: code-point properties, UTF-8, the GPT-2 byte map, and
+# `unicode_regex_split`, which runs each model's pre-tokenizer patterns
+# through either a hand-written splitter or libc++'s std::regex. Its only
+# caller is `llama-vocab.cpp`, so until the vocabulary is ported nothing
+# downstream can see it; this links the unmodified C++ and the Zig port into
+# one process and compares them. See harness/unicode_diff.zig for what is
+# swept.
+#
+# The pattern sets are extracted from `llama-vocab.cpp` here, at run time,
+# so a set added upstream is a set tested.
+#
+# Usage: scripts/unicode-diff
+#   Requires: zig build reference --release=fast (for libggml.a)
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+CXX=(zig c++ -std=c++17 -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" -I llama.cpp/src)
+
+for src in llama.cpp/src/unicode.cpp llama.cpp/src/unicode-data.cpp harness/unicode_ref.cpp; do
+    "${CXX[@]}" -c "$src" -o "$tmp/$(basename "$src" .cpp).o" 2>"$tmp/err" \
+        || { echo "FAIL: cannot compile $src" >&2; head -10 "$tmp/err" >&2; exit 1; }
+done
+
+# Every `regex_exprs = { ... };` in the BPE tokenizer's constructor, as
+# hex, one `SET` per block. Commented-out patterns are skipped.
+python3 - llama.cpp/src/llama-vocab.cpp > "$tmp/sets" <<'EOF' || { echo "FAIL: cannot extract the pattern sets" >&2; exit 1; }
+import sys
+
+src = open(sys.argv[1], encoding="utf-8").read()
+start = src.index("llm_tokenizer_bpe(const llama_vocab & vocab) {")
+end = src.index("std::vector<std::string> regex_exprs;", start)
+body = src[start:end]
+
+ESC = {"\\": "\\", '"': '"', "'": "'", "r": "\r", "n": "\n", "t": "\t", "0": "\0"}
+
+def literals(line):
+    """The C string literals on one line, up to a // comment."""
+    out, i = [], 0
+    while i < len(line):
+        if line.startswith("//", i):
+            break
+        if line[i] != '"':
+            i += 1
+            continue
+        i += 1
+        s = []
+        while line[i] != '"':
+            if line[i] == "\\":
+                c = line[i + 1]
+                if c not in ESC:
+                    sys.exit(f"unknown escape \\{c} in: {line.strip()}")
+                s.append(ESC[c])
+                i += 2
+            else:
+                s.append(line[i])
+                i += 1
+        i += 1
+        out.append("".join(s))
+    return out
+
+n = 0
+pos = 0
+while True:
+    a = body.find("regex_exprs = {", pos)
+    if a < 0:
+        break
+    b = body.index("};", a)
+    pats = []
+    for line in body[a + len("regex_exprs = {"):b].split("\n"):
+        pats += literals(line)
+    if pats:
+        print("SET")
+        for p in pats:
+            print(p.encode("utf-8").hex())
+        n += 1
+    pos = b
+if n < 20:
+    sys.exit(f"only {n} pattern sets found -- has llama-vocab.cpp changed shape?")
+print(f"{n} pattern sets", file=sys.stderr)
+EOF
+
+[ -f zig-out/lib/libggml.a ] || { echo "missing zig-out/lib/libggml.a -- run 'zig build reference --release=fast'" >&2; exit 2; }
+
+# `-I` applies to the module declared after it, here the one that imports
+# llama.h through impl.zig.
+zig build-exe -femit-bin="$tmp/unicode_diff" -OReleaseFast -lc \
+    --dep unicode -Mroot=harness/unicode_diff.zig \
+    -I llama.cpp/include -I llama.cpp/ggml/include -Municode=src/llama/unicode.zig \
+    "$tmp/unicode.o" "$tmp/unicode-data.o" "$tmp/unicode_ref.o" \
+    zig-out/lib/libggml.a "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
+
+# Both sides print "Failed to process regex" for the synthetic error
+# patterns; that noise is not the result.
+"$tmp/unicode_diff" "$tmp/sets" llama.cpp/models/ggml-vocab-*.inp 2> >(grep -v '^Failed to process regex\|^Regex error' >&2)

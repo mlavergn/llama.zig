@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Generate src/llama/unicode_data.zig from llama.cpp/src/unicode-data.cpp.
+
+The C++ is itself generated (by upstream's scripts/gen-unicode-data.py) and is
+nothing but five tables: code-point range flags, the whitespace set, the
+lower- and upper-case maps, and the NFD ranges. ~7,000 lines of numbers are
+not something to transcribe by hand, so this reads them out of the C++ and
+writes the same tables as Zig arrays, in the same order.
+
+`scripts/unicode-diff` is what checks the result: it compares every flag,
+case mapping and NFD result for every code point against the C++.
+
+Usage: scripts/gen-unicode-data   (run from the repository root)
+"""
+import re
+import subprocess
+import sys
+
+SRC = "llama.cpp/src/unicode-data.cpp"
+OUT = "src/llama/unicode_data.zig"
+
+
+def block(text, name):
+    m = re.search(r"\b" + re.escape(name) + r"\s*=\s*\{(.*?)\n\};", text, re.S)
+    if not m:
+        sys.exit(f"cannot find {name} in {SRC}")
+    return m.group(1)
+
+
+def nums(s):
+    return [int(x, 16) for x in re.findall(r"0x[0-9A-Fa-f]+", s)]
+
+
+def line_of(text, name):
+    m = re.search(r"\b" + re.escape(name) + r"\s*=\s*\{", text)
+    return text.count("\n", 0, m.start()) + 1
+
+
+def main():
+    text = open(SRC).read()
+    sha = subprocess.run(["git", "-C", "llama.cpp", "rev-parse", "--short=9", "HEAD"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    header = open("llama.cpp/src/unicode-data.h").read()
+    nfd_line = header[:header.index("struct range_nfd")].count("\n") + 1
+    cite = lambda name: f"(unicode-data.cpp:{line_of(text, name)} @{sha})"
+
+    flags = nums(block(text, "unicode_ranges_flags"))
+    whitespace = nums(block(text, "unicode_set_whitespace"))
+    lower = nums(block(text, "unicode_map_lowercase"))
+    upper = nums(block(text, "unicode_map_uppercase"))
+    nfd = nums(block(text, "unicode_ranges_nfd"))
+
+    assert len(flags) % 2 == 0 and len(lower) % 2 == 0 and len(upper) % 2 == 0 and len(nfd) % 3 == 0
+
+    out = []
+    w = out.append
+    w("//! The Unicode tables `unicode.zig` reads.")
+    w("//!")
+    w("//! # Provenance")
+    w("//!")
+    w("//! **Generated** by `scripts/gen-unicode-data` from")
+    w("//! `llama.cpp/src/unicode-data.cpp` and `llama.cpp/src/unicode-data.h`")
+    w(f"//! (`{sha}`), which upstream itself generates. Do not edit; rerun the")
+    w("//! script. `scripts/unicode-diff` checks every code point against the C++.")
+    w("")
+    w(f"/// Ports `unicode_ranges_flags` {cite('unicode_ranges_flags')}: each")
+    w("/// entry's flags apply from its start up to the next entry's start. The")
+    w("/// last entry is the 0x110000 sentinel.")
+    w("pub const ranges_flags = [_]struct { u32, u16 }{")
+    for i in range(0, len(flags), 2):
+        w(f"    .{{ 0x{flags[i]:06X}, 0x{flags[i + 1]:04X} }},")
+    w("};")
+    w("")
+    w(f"/// Ports `unicode_set_whitespace` {cite('unicode_set_whitespace')},")
+    w("/// in the source's order.")
+    w("pub const set_whitespace = [_]u32{")
+    for v in whitespace:
+        w(f"    0x{v:06X},")
+    w("};")
+    w("")
+    w(f"/// Ports `unicode_map_lowercase` {cite('unicode_map_lowercase')},")
+    w("/// ascending by code point.")
+    w("pub const map_lowercase = [_][2]u32{")
+    for i in range(0, len(lower), 2):
+        w(f"    .{{ 0x{lower[i]:06X}, 0x{lower[i + 1]:06X} }},")
+    w("};")
+    w("")
+    w(f"/// Ports `unicode_map_uppercase` {cite('unicode_map_uppercase')}.")
+    w("pub const map_uppercase = [_][2]u32{")
+    for i in range(0, len(upper), 2):
+        w(f"    .{{ 0x{upper[i]:06X}, 0x{upper[i + 1]:06X} }},")
+    w("};")
+    w("")
+    w(f"/// Ports `range_nfd` (unicode-data.h:{nfd_line} @{sha}).")
+    w("pub const RangeNfd = struct { first: u32, last: u32, nfd: u32 };")
+    w("")
+    w(f"/// Ports `unicode_ranges_nfd` {cite('unicode_ranges_nfd')},")
+    w("/// ascending by start.")
+    w("pub const ranges_nfd = [_]RangeNfd{")
+    for i in range(0, len(nfd), 3):
+        w(f"    .{{ .first = 0x{nfd[i]:06X}, .last = 0x{nfd[i + 1]:06X}, .nfd = 0x{nfd[i + 2]:06X} }},")
+    w("};")
+    w("")
+
+    open(OUT, "w").write("\n".join(out))
+    print(f"wrote {OUT}: {len(flags) // 2} flag ranges, {len(whitespace)} whitespace, "
+          f"{len(lower) // 2} lower, {len(upper) // 2} upper, {len(nfd) // 3} nfd")
+
+
+main()

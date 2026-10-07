@@ -1,0 +1,41 @@
+#!/bin/bash
+# Compare src/llama/vocab/ with llama.cpp's llama-vocab.cpp, in one process.
+#
+# The vocabulary is ported ahead of libllama's single swap (PLAN.md,
+# Decision 42), so nothing downstream can see it yet: this links the C++
+# vocabulary, inside libllama.a, beside the Zig one and loads every
+# vocabulary file both ways. See harness/vocab_diff.zig for what is compared
+# and which files are synthesized.
+#
+# Usage: scripts/vocab-diff [extra.gguf...]
+#   Requires: zig build reference --release=fast
+#   Any Qwen3.5 model in the repository root is added automatically.
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+for lib in zig-out/lib/libllama.a zig-out/lib/libggml.a; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+# `-I` applies to the module declared after it, here the one that imports
+# llama.h and gguf.h through impl.zig.
+zig build-exe -femit-bin="$tmp/vocab_diff" -OReleaseFast -lc \
+    --dep staged -Mroot=harness/vocab_diff.zig \
+    -I llama.cpp/include -I llama.cpp/ggml/include -Mstaged=src/llama/staged.zig \
+    zig-out/lib/libllama.a zig-out/lib/libggml.a "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+models=(llama.cpp/models/ggml-vocab-*.gguf)
+for m in Qwen3.5-*.gguf; do
+    [ -f "$m" ] && { models+=("$m"); break; }
+done
+
+"$tmp/vocab_diff" "$tmp" llama.cpp/models/ggml-vocab-*.inp "${models[@]}" "$@"

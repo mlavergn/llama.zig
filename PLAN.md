@@ -59,6 +59,7 @@ Settled in review. The plan below assumes all of these.
 | 38 | Copyright holder | **`Marc Lavergne`, provisionally.** Taken from the repository's git author config; revisit before any public release. |
 | 40 | Order within Stage 4 | **Gated work first.** `ggml-backend-meta.cpp` and `ggml-opt.cpp` move to the end of Stage 4's ggml half, behind the `ggml-cpu/` C++. Neither is on the inference path, so neither has an end-to-end gate — and meta is **~96% unexecutable on this machine**: `ggml_backend_meta_device` is only built under `LLAMA_SPLIT_MODE_TENSOR`, our CLI never sets `split_mode`, and there is one GPU. The `ggml-cpu/` C++ is the opposite: covered by **`backend-ops`**, which runs CPU against Metal over 21,093 op configurations. Note that is the *only* gate that reaches it — measured, by putting an abort in `ggml_compute_forward_mul` and watching `make port` finish without hitting it. On a Metal machine the CPU op kernels never execute during inference, so `parity-cli` and `make port` cannot see them at all. One real gate still beats meta and opt's zero. Supersedes the ordering in "Order of work" step 1. |
 | 39 | Threading primitives in ported code | **pthreads directly**, not `std.Io.Mutex` / `std.Io.Condition`. Zig 0.16 requires an `Io` on every call and a backend entered through a C ABI has none. `std.Thread.spawn` is still used for the workers. |
+| 42 | libllama's swap unit | **Measured: libllama is one strongly connected component, so it swaps once, at `llama.h` — with one exception that goes first.** 22 of its core translation units plus every `models/*.cpp` reach each other through 367 mangled C++ symbols and 27 C ones; ggml's "the external contract is a pure C ABI" does not carry over. The exception is **`llama-sampler.cpp` + `llama-grammar.cpp`**: inbound, `llama-context.o` reaches them through the C `llama_sampler_i` vtable, three C functions and two mangled ones with plain-pointer signatures, which Zig can `@export`; outbound, every call into `llama_vocab` has a public C equivalent. So that pair is ported and swapped first, and everything else in libllama is developed beside the C++ and gated in-process subsystem by subsystem until the single swap. See "Order of work" step 4. |
 
 ---
 
@@ -529,6 +530,83 @@ context, graph, batch, kv-cache, sampler, chat. This is libllama and the actual
 prize. Sub-order matters: loader and vocab first (testable against known GGUF
 metadata without running inference), then graph and context, then kv-cache.
 
+**The ggml method does not carry over, measured.** The same intersection that
+settled ggml — every object's defined symbols against every other object's
+undefined ones, in `zig-out/lib/libllama.a` — gives the reverse answer here:
+
+| | ggml | libllama |
+|---|---|---|
+| C-ABI symbols crossing a translation-unit boundary | most of the contract | **27** |
+| C++-linkage symbols crossing one | almost none | **367** |
+| objects referencing another's vtable or typeinfo | 3, one cluster | **25** |
+
+Computing strongly connected components over that reference graph gives **one
+component of 22 core translation units plus all 146 model objects**, and
+leaves hanging off it: `llama-impl`, `-mmap`, `-arch`, `-hparams`, `-chat`,
+`-io`, `-memory`, `-cparams`, `unicode`, `unicode-data` (and `llama-quant`
+above it). The cycle is structural, not incidental: `llama_model` is a base
+class with one subclass per architecture, `llama_model_create` names every
+subclass's constructor, the models call back into `llm_graph_context`, and the
+kv-cache variants implement `llama_memory_i`. Most of the leaves are no easier
+— their inbound calls are mangled and take `std::string` or `std::vector`,
+which rules out the `@export` route `ggml-metal-tuning.cpp` used.
+
+So **the component swaps once, at its real external contract, `llama.h`**
+(Decision 42). Until then the Zig is developed beside the C++, not wired in,
+and each subsystem is gated **in-process against the C++ through `llama.h`** —
+the `repack-diff` shape — rather than by swapping it. Loader and vocab first
+still holds; it is now "first to be gated", not "first to be swapped".
+
+**One cluster peels off: `llama-sampler.cpp` + `llama-grammar.cpp`** (5,910
+lines). Its contract is **38 C functions plus two mangled ones** —
+`llama_sampler_backend_begin(llama_sampler *)` and
+`llama_sampler_backend_n_nodes(const llama_sampler *)`, plain pointers, so Zig
+can `@export` them. `llama-context.o` and `llama-graph.o` otherwise reach
+samplers only through the C `llama_sampler_i` vtable and
+`llama_sampler_chain_get`/`_n`/`llama_sampler_name`; `struct
+llama_sampler_chain`'s layout never crosses. Grammar's 349 mangled exports are
+called by the sampler alone. Outbound, the pair calls `llama_vocab` members
+whose public C wrappers are exact equivalents — `token_to_piece(id)` is the
+cache `llama_token_to_piece(…, lstrip = 0, special = true)` reads. The two
+exceptions are `llama_sampler_init_dry_testing`, a C++-linkage entry point for
+`tests/test-sampling.cpp` that is outside the contract, and the DRY clone's
+`llama_vocab dummy_vocab`, which only exists to call `init_dry` with no
+breakers.
+
+**Done.** `src/llama/sampler/`, `src/llama/grammar/`, with `std::regex`
+ported in `src/llama/regex.zig` and the libc++ algorithms the sampler depends
+on in `src/llama/libcxx.zig`; `llama_sources` is two files shorter. Its oracle
+was built first: `make sampler-diff`, 40,289 records on bits, plus
+`make libcxx-diff` and `make regex-diff` for the reproduced standard library.
+The sampler leans on three things the C++ standard leaves to the library —
+`std::discrete_distribution`, and the tie order of `std::sort` and
+`std::partial_sort` — so they are reproduced from the libc++ headers the
+reference is compiled against, and the oracle includes ties deliberately. It
+found two real bugs and four holes in itself; see `NOTES.md`, "libllama is one
+component".
+
+**Next: loader and vocab, gated in-process, not swapped.** The rest of
+libllama is the one component, so the work from here is written beside the
+C++ and checked against it through `llama.h` until the single swap. The
+first gate to build is a tokenizer diff -- tokenize and detokenize a corpus
+through the C++ vocab and through the Zig one in one process -- before
+`llama-vocab.cpp` (4,440 lines) is ported; then a GGUF-metadata and hparams
+diff for `llama-model-loader.cpp`.
+
+**Done within it: `llama-vocab.cpp`**, all six tokenizer types, gated by
+`make vocab-diff` (55.0M checks over 41 files, 22 of them synthesized for
+the types and error paths no real file reaches). Its metadata reader,
+`gguf_meta.zig`, is the first piece of `llama-model-loader.cpp`. See
+`NOTES.md`, "`llama-vocab.cpp` -- the vocabulary". **Next: the GGUF-metadata
+and hparams diff for `llama-model-loader.cpp`.**
+
+**Also done within it: `unicode.cpp` and `unicode-data.cpp`**, with their own
+in-process oracle, `make unicode-diff` (7.07M checks, every pattern set in
+`llama-vocab.cpp`). They needed `std::wregex` and `regex_iterator`, so
+`regex.zig` is now generic over the character type and `regex-diff` covers
+both engines. See `NOTES.md`, "`unicode.cpp` -- the vocabulary's first
+piece".
+
 **5. `src/models/qwen35.cpp`** (645) plus its shared scaffolding.
 
 **6. The Zig CLI.** Decision 26 pulled this forward and it is built — see
@@ -920,6 +998,12 @@ Two things the survey turned up that the note above had wrong:
   the parallel writing; dropped.
 
 Gate: `make ops-diff`, 592 op results identical either side of the fold.
+
+10. ~~`llama-sampler.cpp` + `llama-grammar.cpp`~~ — **done.** The first of
+    libllama, and the one piece that swaps ahead of the rest (Decision 42).
+    40 symbols, 38 C and two mangled. `make sampler-diff` 40,289 records,
+    `make libcxx-diff` 189,684 checks, `make regex-diff` 538,416. Next is the
+    tokenizer diff, then `llama-vocab.cpp` -- see "Order of work" step 4.
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:
 

@@ -275,6 +275,18 @@ pub fn build(b: *std.Build) !void {
     const ported_step = b.step("test-port", "Test ported ggml code not yet swapped in");
     ported_step.dependOn(&ported_tests_run.step);
 
+    // The ported libllama's unit tests. They compile with the library's own
+    // module -- rooted at src/llama/module.zig, with the C++ that is still
+    // C++ -- because the ported sampler calls into it through llama.h.
+    const llama_tests = b.addTest(.{
+        .root_module = reference.llama.root_module,
+        .filters = test_filters,
+    });
+    const llama_tests_run = b.addRunArtifact(llama_tests);
+    llama_tests_run.has_side_effects = true;
+    const llama_tests_step = b.step("test-llama", "Test the ported libllama");
+    llama_tests_step.dependOn(&llama_tests_run.step);
+
     // The ported Zig on its own, so verification can reach it before ggml.c is
     // swapped in. See build/llamacpp.zig.
     const ported_lib = llamacpp.addPortedGgml(b, .{

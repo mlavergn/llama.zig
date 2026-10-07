@@ -1,0 +1,75 @@
+#!/bin/bash
+# Diff every public sampler's output, ported vs reference, on bits.
+#
+# `harness/sampler_dump.c` drives `llama-sampler.cpp` and `llama-grammar.cpp`
+# through `llama.h` alone and prints, after every call, a hash of the whole
+# candidate array -- ids, logits and probabilities -- plus the selection. It is
+# linked once against `llama.cpp.zmake` and once against our libraries, and the
+# two listings are diffed.
+#
+# The only gate those two files have beyond token parity, and token parity is
+# not much of one here: `make parity-cli` builds a single chain and reads one
+# token per step, so a sampler that computes the wrong probabilities and picks
+# the same token passes it, and typical, XTC, top-n-sigma, the mirostats, DRY,
+# adaptive-p, infill, the grammars and the whole backend-sampling path are
+# never reached. See the header of the harness for its four sections.
+#
+# The reference side must be `llama.cpp.zmake`, built `--release=fast`, like
+# every gate that compares on bits.
+#
+# Usage: scripts/sampler-diff <model.gguf> [section...]
+#   Requires: make -C llama.cpp.zmake lib --release=fast, zig build reference --release=fast
+#   SAMPLER_DIFF_OUT=<dir> keeps both full listings.
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODEL="${1:?usage: scripts/sampler-diff <model.gguf> [section...]}"
+shift
+
+. "$ROOT/scripts/check-reference-pin"
+
+REF_LIBS=(llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
+PORT_LIBS=(zig-out/lib/libllama.a zig-out/lib/libggml.a)
+for lib in "${REF_LIBS[@]}" "${PORT_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make sampler-diff'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# Apple's libc++, not Zig's -- see `testcase/`.
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+FW=("$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd"
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+    -F "$SDK/System/Library/Frameworks")
+INC=(-I llama.cpp/include -I llama.cpp/ggml/include)
+
+zig cc harness/sampler_dump.c -o "$tmp/ref"  -std=c11 -O2 "${INC[@]}" "${REF_LIBS[@]}"  "${FW[@]}" 2>"$tmp/ref.log" \
+    || { echo "FAIL: could not link against the reference libraries" >&2; tail -5 "$tmp/ref.log" >&2; exit 1; }
+zig cc harness/sampler_dump.c -o "$tmp/port" -std=c11 -O2 "${INC[@]}" "${PORT_LIBS[@]}" "${FW[@]}" 2>"$tmp/port.log" \
+    || { echo "FAIL: could not link against the ported libraries" >&2; tail -5 "$tmp/port.log" >&2; exit 1; }
+
+"$tmp/ref"  "$MODEL" "$@" > "$tmp/ref.txt"  2>"$tmp/ref.err" \
+    || { echo "FAIL: reference run aborted" >&2; tail -3 "$tmp/ref.err" >&2; exit 1; }
+"$tmp/port" "$MODEL" "$@" > "$tmp/port.txt" 2>"$tmp/port.err" \
+    || { echo "FAIL: ported run aborted" >&2; tail -3 "$tmp/port.err" >&2; exit 1; }
+
+if [ -n "${SAMPLER_DIFF_OUT:-}" ]; then
+    mkdir -p "$SAMPLER_DIFF_OUT" && cp "$tmp/ref.txt" "$tmp/port.txt" "$SAMPLER_DIFF_OUT/"
+fi
+
+lines=$(wc -l < "$tmp/ref.txt" | tr -d ' ')
+[ "$lines" -gt 0 ] || { echo "FAIL: the reference produced no output"; exit 1; }
+
+if diff -q "$tmp/ref.txt" "$tmp/port.txt" > /dev/null; then
+    for s in syn chain grammar lazy dry infill vocab backend generate; do
+        n=$(grep -c "^$s " "$tmp/ref.txt" || true)
+        [ "$n" -gt 0 ] && printf '  %-8s %6d records\n' "$s" "$n"
+    done
+    echo "PASS: $lines sampler records identical, ported vs reference"
+    exit 0
+fi
+echo "FAIL: sampler output differs between ported and reference builds"
+diff "$tmp/ref.txt" "$tmp/port.txt" | head -40
+exit 1

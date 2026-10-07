@@ -21,7 +21,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
-for lib in zig-out/lib/libggml.a; do
+for lib in zig-out/lib/libggml.a zig-out/lib/libllama.a; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
 done
 
@@ -33,8 +33,8 @@ trap 'rm -rf "$tmp"' EXIT
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 
 zig cc harness/abi_structs.c -o "$tmp/abi" -std=c11 -O2 \
-    -I llama.cpp/ggml/include \
-    zig-out/lib/libggml.a \
+    -I llama.cpp/ggml/include -I llama.cpp/include \
+    zig-out/lib/libllama.a zig-out/lib/libggml.a \
     "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/err" \

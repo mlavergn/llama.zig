@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff libcxx-diff regex-diff unicode-diff vocab-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -100,7 +100,7 @@ dist:
 # Run every check that needs no model or reference build.
 validate:
 	@printf '\n== formatting ==\n'
-	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig src/ggml/cpu/repack/*.zig src/ggml/cpu/repack/arm/*.zig src/ggml/metal/*.zig cli/*.zig
+	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig src/ggml/cpu/repack/*.zig src/ggml/cpu/repack/arm/*.zig src/ggml/metal/*.zig src/llama/*.zig src/llama/sampler/*.zig src/llama/grammar/*.zig src/llama/vocab/*.zig cli/*.zig
 	@printf '\n== scaffold ==\n'
 	zig build
 	@printf '\n== unit tests ==\n'
@@ -109,6 +109,17 @@ validate:
 	zig build test-port --summary all
 	@printf '\n== ported ggml (release) ==\n'
 	zig build test-port --release=fast --summary all
+	@printf '\n== ported libllama (debug) ==\n'
+	zig build test-llama --summary all
+	@printf '\n== libc++ algorithms vs the SDK templates ==\n'
+	./scripts/libcxx-diff
+	@printf '\n== std::regex vs libc++ ==\n'
+	zig build reference --release=fast
+	./scripts/regex-diff
+	@printf '\n== unicode.cpp vs the port ==\n'
+	./scripts/unicode-diff
+	@printf '\n== llama-vocab.cpp vs the port ==\n'
+	./scripts/vocab-diff
 	@printf '\n== ported symbol coverage ==\n'
 	./scripts/port-coverage
 	@printf '\n== upstream citations ==\n'
@@ -195,6 +206,43 @@ abi-check:
 repack-diff:
 	zig build reference --release=fast
 	./scripts/repack-diff
+
+# Every public sampler and the grammar, ported vs reference, on bits.
+# parity-cli builds one chain and reads one token a step; this prints every
+# candidate's id, logit and probability after every call, and reaches the
+# samplers, grammars and backend-sampling path the CLI never configures. See
+# the header of scripts/sampler-diff.
+sampler-diff:
+	cd llama.cpp.zmake && zig build lib --release=fast
+	zig build reference --release=fast
+	./scripts/sampler-diff $(MODEL)
+
+# The libc++ sort, heap, mt19937 and distributions src/llama/libcxx.zig
+# reproduces, against the real templates, in one process. The sampler's tie
+# order and draws depend on them. See the header of scripts/libcxx-diff.
+libcxx-diff:
+	./scripts/libcxx-diff
+
+# src/llama/regex.zig against libc++'s std::regex, which the lazy grammar's
+# trigger patterns use. See the header of scripts/regex-diff.
+regex-diff:
+	zig build reference --release=fast
+	./scripts/regex-diff
+
+# src/llama/unicode.zig against the unmodified unicode.cpp, in one process:
+# every code point, UTF-8 decoding, the byte map, and every pre-tokenizer
+# pattern set in llama-vocab.cpp. See the header of scripts/unicode-diff.
+unicode-diff:
+	zig build reference --release=fast
+	./scripts/unicode-diff
+
+# src/llama/vocab/ against the C++ vocabulary inside libllama.a, in one
+# process: every vocabulary file upstream ships, the local Qwen3.5 model,
+# and synthesized files for the tokenizer types and error paths no real
+# file reaches. See the header of scripts/vocab-diff.
+vocab-diff:
+	zig build reference --release=fast
+	./scripts/vocab-diff
 
 # Diff our CLI's output against the C reference, end to end.
 parity-cli: buildcli

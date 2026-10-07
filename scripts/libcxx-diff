@@ -1,0 +1,30 @@
+#!/bin/bash
+# Compare src/llama/libcxx.zig with the libc++ templates it reproduces.
+#
+# The sampler sorts candidates with std::sort and std::partial_sort and draws
+# with std::discrete_distribution; the standard leaves the order of equal
+# elements and the drawing algorithm to the library, so the port reproduces
+# libc++'s exactly. This instantiates the real templates from the SDK headers
+# -- the same ones `build/llamacpp.zig` compiles llama-sampler.cpp against --
+# and compares every result in one process. See harness/libcxx_diff.zig.
+#
+# Usage: scripts/libcxx-diff
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+zig c++ -std=c++17 -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+    -c harness/libcxx_ref.cpp -o "$tmp/ref.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile the reference" >&2; head -10 "$tmp/err" >&2; exit 1; }
+
+zig build-exe -femit-bin="$tmp/libcxx_diff" -OReleaseFast -lc \
+    --dep libcxx -Mroot=harness/libcxx_diff.zig -Mlibcxx=src/llama/libcxx.zig \
+    "$tmp/ref.o" "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
+
+"$tmp/libcxx_diff"

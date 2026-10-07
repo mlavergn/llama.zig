@@ -30,6 +30,7 @@
  */
 #include "ggml.h"
 #include "gguf.h"
+#include "llama.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -115,6 +116,45 @@ int main(void) {
         } else {
             printf("  %-40s returned NULL   WRONG\n", "ggml_init");
             fails++;
+        }
+    }
+
+    /* llama_sampler_chain_params: struct { bool no_perf; }, ONE byte -- the
+     * shape the miscompile hits. The ported llama_sampler_chain_init takes
+     * it as a u8 and bit-casts. Observable through the timing: with
+     * no_perf set the chain must accumulate exactly nothing, and a callee
+     * that saw zeros would time every call. Each case also checks
+     * llama_perf_sampler, which *returns* a 16-byte struct. */
+    {
+        static llama_token_data cand[1 << 18];
+        for (int no_perf = 0; no_perf <= 1; no_perf++) {
+            struct llama_sampler_chain_params cp = llama_sampler_chain_default_params();
+            cp.no_perf = no_perf;
+            struct llama_sampler * c = llama_sampler_chain_init(cp);
+            llama_sampler_chain_add(c, llama_sampler_init_top_k(40));
+            for (int it = 0; it < 7; it++) {
+                for (int i = 0; i < (1 << 18); i++) {
+                    cand[i].id = i;
+                    cand[i].logit = (float) ((i * 2654435761u) % 1000) * 0.001f;
+                    cand[i].p = 0.0f;
+                }
+                llama_token_data_array a = { cand, 1 << 18, -1, false };
+                llama_sampler_apply(c, &a);
+                llama_sampler_accept(c, a.data[0].id);
+            }
+            struct llama_perf_sampler_data pd = llama_perf_sampler(c);
+            char label[64];
+            snprintf(label, sizeof label, "llama_perf_sampler(no_perf=%d).n_sample", no_perf);
+            check(label, pd.n_sample, 7);
+            checks++;
+            const int timed = pd.t_sample_ms > 0.0;
+            if (timed != !no_perf) {
+                printf("  %-40s %s   WRONG\n", no_perf ? "chain_init(no_perf=1) still timed" : "chain_init(no_perf=0) never timed", "");
+                fails++;
+            } else {
+                printf("  %-40s %s\n", no_perf ? "chain_init(no_perf=1)" : "chain_init(no_perf=0)", no_perf ? "untimed" : "timed");
+            }
+            llama_sampler_free(c);
         }
     }
 

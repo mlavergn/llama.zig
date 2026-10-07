@@ -15,7 +15,9 @@ Three decisions worth knowing before touching anything:
   - **No gate here can see it.** This machine is an Apple M5 Max with no `nvcc` and no NVIDIA GPU, and macOS has had no CUDA support since 10.13. Every correctness gate below is a local bit-exact diff, so for CUDA there are currently **none**. Resolving that is a prerequisite to writing CUDA code, not a follow-up — see the three options in `PLAN.md`.
 - **Our `llama-cli` mimics upstream's argument set** for the features we support, so an existing command line runs unchanged against it. It is our own Zig binary, not upstream's linked against our library.
 
-Where we are: **Stages 1, 2 and 3 complete; Stage 4 under way — all of `ggml/src/ggml-cpu/` and all of `ggml/src/ggml-metal/` are Zig** (apart from the two Obj-C `.m` files).
+Where we are: **Stages 1, 2 and 3 complete; Stage 4 under way — all of `ggml/src/ggml-cpu/` and all of `ggml/src/ggml-metal/` are Zig** (apart from the two Obj-C `.m` files), **and libllama has begun: `llama-sampler.cpp` and `llama-grammar.cpp` are Zig** (`src/llama/`), **and the vocabulary is ported and gated in-process** — `llama-vocab.cpp`, `unicode.cpp` and `unicode-data.cpp`, with every tokenizer type — and swaps with the rest of libllama. The in-process harnesses compile staged ports through `src/llama/staged.zig`, which re-exports them without the sampler's exports `libllama.a` already defines.
+
+**libllama does not swap file by file, and that is measured.** The intersection that settled ggml's method gives the reverse answer on `libllama.a`: 27 C-ABI symbols cross a translation-unit boundary against 367 C++-linkage ones, and 22 core translation units plus every model form **one strongly connected component** — `llama_model` is a class hierarchy, the kv-caches implement `llama_memory_i`, the models call `llm_graph_context`. So libllama swaps **once, at `llama.h`** (`PLAN.md`, Decision 42), and everything else in it is developed beside the C++ and gated in-process through `llama.h` until then. **The sampler and grammar were the one exception**: `llama-context.cpp` reaches them through the C `llama_sampler_i` vtable and two plain-pointer mangled functions, so they swapped first. `src/llama/module.zig` roots the libllama module; `src/llama/impl.zig` holds its one `@cImport` of `llama.h`.
 
 **No C compiles anywhere under `llama.cpp/ggml/src/` any more.** All six translation units are Zig, 598 exported symbols, every one swapped in and byte-verified. `ggml_base_sources` and `ggml_cpu_c_sources` in `build/llamacpp.zig` are both empty.
 
@@ -52,7 +54,7 @@ Eighteen C++ translation units are ported and swapped:
 
 `ggml-backend.cpp` is also the counterexample to "C++ is the hard part": it has **zero `throw`, zero `catch`**, no `std::string`, no `std::map`, no templates and no virtual functions. Its own first line is `// Note: porting this file to C++ is a work in progress`. What made it hard was the five-pass assignment algorithm in `ggml_backend_sched_split_graph`.
 
-Only `ggml-backend-meta.cpp` (4 symbols), `ggml-opt.cpp` (9) and `ggml.cpp` (0, to be dropped) remain in `ggml_base_cxx_sources`. **`ggml_metal_cxx_sources` is empty** — all of `ggml/src/ggml-metal/` is Zig apart from the two `.m` files that stay by Decision 13. **Nothing under `ggml-cpu/` compiles from C or C++ any more** except three translation units that are empty on this target: `hbm.cpp` needs `GGML_USE_CPU_HBM`, `amx/amx.cpp` and `amx/mmq.cpp` need `__AMX_INT8__`. What remains is **all of libllama**, plus the two Obj-C `.m` files that stay.
+Only `ggml-backend-meta.cpp` (4 symbols), `ggml-opt.cpp` (9) and `ggml.cpp` (0, to be dropped) remain in `ggml_base_cxx_sources`. **`ggml_metal_cxx_sources` is empty** — all of `ggml/src/ggml-metal/` is Zig apart from the two `.m` files that stay by Decision 13. **Nothing under `ggml-cpu/` compiles from C or C++ any more** except three translation units that are empty on this target: `hbm.cpp` needs `GGML_USE_CPU_HBM`, `amx/amx.cpp` and `amx/mmq.cpp` need `__AMX_INT8__`. What remains is **the rest of libllama** — every translation unit under `src/` but the sampler and grammar — plus the two Obj-C `.m` files that stay.
 
 **For `repack.cpp` the unmangled-export contract is not the whole contract, and that cost a day.** Its 36 unmangled symbols are the gemv/gemm and `quantize_mat` kernels; the `CPU_REPACK` buffer type, `extra_buffer_type` and the sixteen `tensor_traits` instantiations that decide when to call them are all C++-linkage and invisible to `nm -gU | grep -v _Z`. Measured: with the dispatch stubbed, `port-coverage` read `36 / 36 symbols (100%)` and `node-diff` failed on the first `MUL_MAT`. `scripts/cluster-check` now asserts `repack.dispatch_implemented` at comptime so the count cannot stand alone again.
 
@@ -125,7 +127,7 @@ indistinguishable from one that passes.**
 
 **`make validate` is the fast check; parity is the real one.** `validate` runs formatting, the scaffold, the unit tests, the ported tests in both debug and release, `scripts/port-coverage`, `scripts/port-links`, and the graph diff. It proves the port is *consistent*, not *correct*.
 
-Correctness has fourteen gates, and none of them subsumes the others:
+Correctness has nineteen gates, and none of them subsumes the others:
 
 - **`make graph-diff`** builds 131 nodes through every constructor family and diffs op, shape, strides, `op_params`, and `src[]` against the C. Needs no model. **The sharpest gate for the port's actual failure mode** — a constructor writing the wrong thing — and the only one that catches a halved softmax scale. It found the real `ggml_permute` bug.
 - **`make backend-ops`** runs upstream's `test-backend-ops` against our library: 21,093 op configurations, Metal against CPU, all passing. The broadest exercise, and the only one that *executes* the constructors at scale. **It cannot catch a consistently-wrong constructor** — both backends read the same `op_params` and agree. It catches crashes, assertion failures, and shapes a backend has no kernel for. `--diff` runs the same binary against the C reference and diffs the two
@@ -243,6 +245,11 @@ Correctness has fourteen gates, and none of them subsumes the others:
 - **`make parity-cli`** runs the actual `llamazig` binary against a reference C driver, both greedy. Covers what `parity-port` structurally cannot, because it lives in the binary rather than the library: argument parsing, tokenizer flags, the sampler chain, the decode loop. Negative-tested — a `--temp` that parses but never reaches the sampler fails all six prompts.
 
   **It is also the only gate that runs the library with Zig's safety checks on.** Every bit-exact gate above builds `--release=fast`, deliberately — they compare bits and the optimization level moves them — so none of them can see an illegal narrowing, an integer overflow or an out-of-bounds index. Measured: `ggml_backend_cpu_device_supports_op` narrowed `op->src[0]` with `impl.one` before the `GGML_OP_NONE` early return, and the scheduler asks about **leaf** tensors, which have no sources. Seven ReleaseFast gates passed; this one aborted before the first token. **A gate's optimization level is part of what it can see.**
+- **`make sampler-diff`** is the **value-level oracle for the ported sampler and grammar**. `harness/sampler_dump.c` drives them through `llama.h` alone and prints, after every call, a hash of every candidate's id, logit and probability bits — linked once against `llama.cpp.zmake`, once against ours. Five sections: the vocabulary-free samplers over seven input shapes and twelve sizes; the chain API; grammar, lazy grammar, DRY and infill on the real vocabulary; backend sampling on Metal; the CLI's chain at temperature 0.8 over a real decode. 40,289 records. `parity-cli` cannot stand in for it: one chain, `--temp 0`, one token a step. It found two real bugs — typical's unrolled entropy loop and libc++'s arithmetic heap, below — and four holes in itself, each closed and recorded in `NOTES.md`.
+- **`make libcxx-diff`** runs `src/llama/libcxx.zig` against the libc++ templates it reproduces — `std::sort`, `std::partial_sort`, `std::mt19937`, `generate_canonical`, `std::discrete_distribution` — instantiated from the SDK headers the reference compiles against, in one process. The sampler's tie order and draws depend on them, and the standard leaves both to the library. 189,684 checks.
+- **`make regex-diff`** runs `src/llama/regex.zig` against libc++'s `std::regex` and `std::wregex` — a lazy grammar's trigger patterns use the first, `unicode_regex_split` both: upstream's real trigger patterns; random ECMAScript patterns, malformed ones included, through search, match and a `regex_iterator` under `optimize | nosubs` over a random sub-range; the traits tables swept over every byte; and the wide engine swept over **all 0x110000 code points**, both matching and compiling. 43,537,552 checks, ~60 s. **It passed with the `NUL` collating name deleted** until the table sweep was added: random patterns only ever reached `[.space.]`. Negative-tested 6/6 on the wide and iterator additions.
+- **`make unicode-diff`** links the unmodified `unicode.cpp` and `unicode-data.cpp` beside `src/llama/unicode.zig` and compares: every code point's flags, case, Han-ness, NFD and encoding; every one- and two-byte UTF-8 string and boundary-chosen longer ones; the GPT-2 byte map both ways; and `unicode_regex_split` for **every pattern set in `llama-vocab.cpp`**, extracted at run time so the list cannot drift, plus synthetic sets for the collapse and error paths, over upstream's vocab test strings and 1,500 random ones. 7,070,454 checks. Its only caller is `llama-vocab.cpp`, so nothing downstream can see it until the vocabulary swaps. Negative-tested 13/13 effective — a fourteenth, kimi-k2's leading-character backtrack, is dead code in the C++ and so inert.
+- **`make vocab-diff`** loads every vocabulary file twice in one process — through the C++ in `libllama.a` (`llama_model_load_from_file`, `vocab_only`) and through `src/llama/vocab/` on the same metadata — and compares what loading logged (every `load:` line and the `print_info` block, or the exact error text), every `llama_vocab_*` scalar, every token's text, score bits and attributes, every piece under `special` × `lstrip` × buffer size, and tokenize/detokenize of upstream's vocab test strings plus random text with special tokens spliced in, under every flag combination. 19 upstream files, the local Qwen3.5 model, and 22 synthesized ones: RWKV, PLaMo-2, `hybriddna`, `whitespace`, `none`, flag and override variants, five load errors, and four cases built **because an injected fault escaped without them**. 55,016,050 checks, ~15 s. Negative-tested 23/23 effective, one provably inert.
 - **`scripts/parity-port`** diffs generated tokens against `llama.cpp.zmake`. `--cpu` (`make parity-port-cpu`) loads the model on the CPU device alone, so the ported CPU kernels carry the whole forward pass — on a Metal machine they otherwise never do; it was 4/6 prompts divergent until the three epilogues above were fixed. End-to-end and **coarse** — measured, not guessed: doubling RoPE's `freq_base` passes, and so does halving the softmax scale. It catches structural faults (`ADD` as `SUB` fails all six prompts) and gross numeric ones (`freq_base = 1.0` fails all six). Never read a parity pass as "the numerics are right".
 
 `scripts/port-links` is not on that list because it checks nothing about what the code *computes*. It keeps the port's map back to upstream honest, which is a maintenance gate rather than a correctness one.
@@ -317,6 +324,62 @@ side fuses**: `fmadd(d, x, -(m*y))`, then a plain add into `sumf`. And
 `sumf += d * x` returned from a helper as `d * x` is *not* the same as the C's
 one expression. Three dot products had exactly these bugs and passed their
 goldens.
+
+## libc++ in ported code
+
+The sampler's output depends on choices the C++ standard leaves to the
+library, so `src/llama/libcxx.zig` and `src/llama/regex.zig` reproduce
+Apple's libc++ 22.1.6 — the SDK's `c++/v1`, which `build/llamacpp.zig`
+compiles the reference against — rather than any correct algorithm. Two
+things about that were learned the hard way:
+
+- **libc++ heapifies arithmetic element types differently.** `__make_heap`
+  takes `__assume_both_children = is_arithmetic<value_type>`: it sifts over
+  the length rounded down to odd and finishes with a `__sift_up`. A
+  `llama_token_data` takes the general path, typical's `size_t` indices take
+  this one, and introsort only reaches the heap when its depth runs out — so
+  it showed as one swapped tie at 32000 candidates and nowhere smaller.
+  `Sorter.makeHeap` keys on `isArithmetic(T)`.
+- **Parts of `<regex>` live in the dylib, not the header.**
+  `__match_any_but_newline<char>::__exec` and the class- and collating-name
+  tables were **measured** with a probe over all 256 bytes, not guessed; the
+  tables in `regex.zig` are its output, and `regex-diff` sweeps them.
+- **`std::wregex` is not `std::regex` over wider characters.** Measured
+  over all 0x110000 code points: `__match_any_but_newline<wchar_t>` also
+  rejects U+2028 and U+2029; a wide class or collating name with any
+  character at or above 127 is no name at all; `\u` keeps all sixteen bits
+  where `char` keeps the low byte; and `__regex_traits_value` narrows
+  first, so U+0130–U+0133, whose low bytes are `'0'`–`'3'`, are *not*
+  digits — the injection that truncated instead failed 140,736 checks.
+  Classification is ASCII-only in the `"C"` locale, wide or narrow.
+- **`std::unordered_map`'s iteration order is libc++'s layout, and
+  upstream reads it.** `llama-vocab.cpp` takes the *first* `token_to_id`
+  entry whose text matches as EOT and forces `CONTROL` on it, so a vocabulary
+  with both `<|im_end|>` and `<|endoftext|>` depends on CityHash64, prime
+  bucket growth, head-of-group insertion and `__do_rehash`'s regrouping.
+  `libcxx.StringMap` reproduces all four; `libcxx-diff` compares its order
+  and bucket count with the real template's through 248,320 insertions.
+  **Apple's dylib does not define `_LIBCPP_ABI_FIX_CITYHASH_IMPLEMENTATION`**:
+  for 4–8-byte strings `__a << 3` is a 32-bit shift, measured, and the
+  "fixed" shift disagrees on 977 hashes.
+- **`std::sort` is stable below 30 elements by accident.** libc++ takes
+  insertion sort for short ranges, so `cache_special_tokens`'s unstable sort
+  only reorders equal lengths in a long list — an injection replacing it with
+  a stable sort passed every real vocabulary, and needed 64 overlapping
+  equal-length specials to fail.
+- **`regex_iterator` is two flags, not a loop.** After the first match
+  every search passes `__no_update_pos`, which makes `__search` call the
+  first attempt with `at_first = false` — so `^` never matches again — and
+  then `match_prev_avail`, which lets `\b` see the character before the
+  range. An empty match retries in place under `match_not_null |
+  match_continuous`, and `match_not_null` propagates into lookaheads
+  through the state's flags.
+
+**Grepping a disassembly for `fmadd` finds the fused sites; it does not say
+which iterations they cover.** Typical's `entropy += -p * logf(p)` showed one
+`fmsub`, and the port fused it everywhere — wrong. Read whole, the loop is
+unrolled by four with each product rounded, and only the `size % 4` tail is
+fused. Read the loop, not the instruction.
 
 ## Threads in ported code
 

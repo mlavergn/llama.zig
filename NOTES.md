@@ -3467,3 +3467,316 @@ strongest statement available, and it is still narrow in the way
 Qwen3.5 decode never reaches — `conv_*`, `pool_*`, `argsort`, `top_k`,
 `cumsum`, `count_equal`, the whole `dsv4_hc` group — are exercised only
 by `backend-ops`, which compares with a tolerance.
+
+## libllama is one component — and the sampler is the one piece that swaps first
+
+Before porting anything in `src/`, the measurement that settled ggml's
+method was rerun on `zig-out/lib/libllama.a`: every object's defined
+symbols against every other object's undefined ones. It gives the
+opposite answer. **27** C-ABI symbols cross a translation-unit boundary
+and **367** C++-linkage ones do, and 25 objects reference another's vtable
+or typeinfo. Strongly connected components over that graph: **22 core
+translation units and all 146 model objects in one component**, with
+`llama-impl`, `-mmap`, `-arch`, `-hparams`, `-chat`, `-io`, `-memory`,
+`-cparams`, `unicode`, `unicode-data` (and `llama-quant` above it) hanging
+off it. `llama_model` is a base class with a subclass per architecture,
+`llama_model_create` names every subclass's constructor, the models call
+back into `llm_graph_context`, and the kv-cache variants implement
+`llama_memory_i`. The leaves are no easier: their inbound calls are mangled
+and take `std::string` or `std::vector`.
+
+So libllama swaps **once**, at `llama.h` (`PLAN.md`, Decision 42), and
+is developed beside the C++ until then.
+
+**One cluster peels off: `llama-sampler.cpp` + `llama-grammar.cpp`.**
+Inbound, `llama-context.o` and `llama-graph.o` reach samplers through the C
+`llama_sampler_i` vtable, `llama_sampler_chain_get`/`_n`/`llama_sampler_name`,
+and two mangled functions with plain-pointer signatures
+(`llama_sampler_backend_begin`, `llama_sampler_backend_n_nodes`) that Zig
+exports under their `nm` names. `struct llama_sampler_chain`'s layout never
+crosses. Grammar's 349 mangled exports have one caller, the sampler.
+Outbound, the pair calls `llama_vocab` members whose C wrappers are exact
+equivalents. Ported: `src/llama/sampler/` (eight files), `src/llama/grammar/`,
+`src/llama/regex.zig`, `src/llama/libcxx.zig`. `port-coverage`: 40 / 40.
+
+### The oracle came first
+
+`harness/sampler_dump.c` drives both files through `llama.h` alone, so one
+source links against `llama.cpp.zmake` and against ours, and
+`make sampler-diff` diffs the listings. Five sections: every
+vocabulary-free sampler over seven input shapes and twelve sizes through
+apply, accept, clone, reset and copy; the chain API; grammar, lazy grammar,
+DRY and infill on the real vocabulary; backend sampling through a context
+on Metal; and the CLI's chain at temperature 0.8 over a real decode. Each
+record hashes every candidate's id, logit and probability bits. **40,289
+records.** It was green against the stock C++ on both sides before a line
+of Zig existed.
+
+`make parity-cli` was never going to be enough: it builds one chain at
+`--temp 0` and reads one token a step. Typical, XTC, top-n-sigma, both
+mirostats, DRY, adaptive-p, infill, every grammar and the whole
+backend-sampling path are invisible to it.
+
+### What the C++ leaves to libc++, reproduced from the SDK headers
+
+Three things the standard leaves to the library decide the sampler's
+output, so `libcxx.zig` reproduces libc++ 22.1.6 rather than writing any
+correct algorithm:
+
+- **The order `std::sort` and `std::partial_sort` leave ties in.**
+  Candidates are sorted by logit; ties are common; a top-k cut keeps
+  whichever tie the sort put first.
+- **`std::discrete_distribution`**: normalise, keep n-1 partial sums,
+  `upper_bound` on one `uniform_real_distribution<double>` draw.
+- **`generate_canonical`**: two engine draws for `double`, **one** for
+  `float` -- XTC's draw can return exactly 1.0. Reproduced, not fixed.
+
+`make libcxx-diff` runs each against the real template, instantiated from
+the same headers, in one process -- 189,684 checks.
+
+### Two bugs the oracle found, and the holes they came through
+
+**Typical's entropy loop is unrolled by four.** The disassembly showed one
+`fmsub` for `entropy += -p * logf(p)`, so the port fused it -- and diverged
+at 4096 candidates. Read in full, the loop is `and x23, x20, #~3`, then four
+`fmul`/`fsub` pairs per iteration, then an `fmsub` tail: the first
+`size & ~3` products are rounded before the subtract, only the remainder
+is fused. The vectorized-reduction shape `CLAUDE.md` records for `vec.zig`,
+here as a plain unroll because `logf` is a call. **Grepping the
+disassembly for fused instructions finds the sites; only reading the whole
+loop says which iterations they cover.**
+
+**libc++ heapifies arithmetic types differently.** One adjacent swap
+remained at 32000 candidates. A replay of the exact score array reproduced
+it in isolation, and comparing each of libc++'s internals
+(`std::__partition_with_equals_on_right`, `__insertion_sort_incomplete`,
+`__partial_sort`, `__introsort`) against the Zig on tie-heavy input put it
+in the heap: `__make_heap` takes `__assume_both_children =
+is_arithmetic<value_type>`, sifts over the length rounded down to odd, and
+finishes with a `__sift_up`. `llama_token_data` takes the general path;
+typical sorts **`size_t` indices**, which take this one, and introsort only
+falls back to the heap when its depth runs out -- which ties at 32000
+candidates do. `libcxx-diff` had tested partial sort on `token_data` only;
+it now partial-sorts indices too, and fails on the old code (284 checks).
+
+### Gaps closed by making the gates fail
+
+Every gate here was negative-tested, and four injections escaped first
+time. Each escape was a hole in the inputs, not in the comparison:
+
+| Fault | First result | Why | Closed by |
+|---|---|---|---|
+| collating name `NUL` dropped | `regex-diff` passed | random patterns only used `[.space.]` | sweeping every name in the measured tables against all 256 bytes |
+| DRY penalty in `float` | `sampler-diff` passed | 1.75, 1.1 and 3.0 round alike in float and double at the exponents the history reaches, and the penalty's last bit vanished when subtracted from a logit near 1 | a DRY case at base 1.13, multiplier 0.77 (differs at exponent 3), applied to all-zero logits as well |
+| infill thresholds | passed | no candidate sat between 0.2 and 0.25 or near one-third | variants with three text candidates near 0.45, 0.32, 0.23 |
+| partial UTF-8 floors | passed | no grammar ranged near U+0800 or U+10000 | `[ࠀ-ࡀ]` and `[\U00010000-\U00010040]` grammars |
+
+Three injections were **inert**, and are recorded as such rather than as
+escapes: mirostat's `mu` update unfused (an ulp in `mu` only matters when
+`powf(2, mu)` carries `k` across an integer), `dist`'s `>=` as `>` (needs
+`sum_run == sum_tgt` exactly), and top-k one short inside the CLI chain
+(top-p and min-p already cut below 40). Caught: dist summing in float,
+top-p's comparison, unfused penalties, XTC's draw, a lazy trigger ignoring
+its capture group, `chain_get(-1)`, the backend's uniform draw and min-p
+threshold, a doubled DRY penalty, a char range's upper bound -- and, for
+`regex-diff`, `.` rejecting NUL, loop captures not reset, lazy quantifiers
+made greedy, `\b` on an empty remainder, an unescaped `]` accepted, the
+complexity factor doubled, `search` skipping the end position, and `[[:w:]]`
+without `alnum`.
+
+### `std::regex` is ported, quirks included
+
+A lazy grammar's trigger patterns are `std::regex`, and where the match
+starts and which group is first non-empty decide the text the grammar is
+fed. `regex.zig` ports libc++'s node graph -- the same `__end_` splicing,
+the same backtracking driver, the same `4096 * length` complexity limit.
+The parts that live in the dylib were measured with a probe: `.` rejects
+exactly `\n` and `\r`; class names are case-insensitive and `[[:w:]]` is
+`alnum` plus `_`; 59 collating names resolve, case-sensitively, and no
+`SOH`-style control names do. `make regex-diff` runs the real trigger
+patterns upstream's chat code builds plus 30,000 random patterns,
+malformed ones included, and sweeps the tables: **538,416 checks.**
+
+### Smaller things worth knowing
+
+- **The 1-byte struct `llama_sampler_chain_params` does hit the Zig 0.16
+  ABI miscompile.** Declared naturally, `no_perf = true` arrived as zero
+  and the chain timed every call; `abi-check` caught it. The port takes a
+  `u8` and bit-casts.
+- **The `[*c]` array-field trap surfaced as a compile error** this time:
+  `tensor.*.ne[0]` through a `[*c]ggml_tensor` is typed as the whole
+  array. Every such site is `tensor[0].ne[0]`.
+- **`libllama.a` holds two members named `llama.o`** -- the Zig module and
+  `src/llama.cpp`. The linker does not care; `ar x` extracts only one.
+  `zig build-obj src/llama/module.zig` is the way to disassemble the port.
+- **Every throw that escapes through the C ABI terminates**, and the port
+  terminates at the same points with the same text: an empty grammar stack
+  after accepting a token, an invalid trigger regex, infill's negative
+  `resize` on a piece over 512 bytes.
+
+### What the gates say
+
+`sampler-diff` 40,289 records identical; `libcxx-diff` 189,684;
+`regex-diff` 538,416; `abi-check` 15/15; `parity-cli` 6/6 at `--temp 0`
+with the CLI in Debug, so with Zig's safety checks on; at temperature 0.8,
+`raw_completion` linked against both sides gave 12/12 identical 64-token
+generations over four seeds before the `generate` section made that
+permanent. `validate` runs the three oracles that need no model.
+
+## `unicode.cpp` — the vocabulary's first piece, gated before anything can see it
+
+`llama-vocab.cpp` is the only caller of `unicode.cpp`, and every function it
+calls is C++-linkage, so `src/llama/unicode.zig` exports nothing and swaps
+with the vocabulary. Until then no downstream gate can reach it. That is the
+reason the oracle was built first and in-process: `scripts/unicode-diff`
+compiles the unmodified `unicode.cpp` and `unicode-data.cpp` next to
+`harness/unicode_ref.cpp`, a C wrapper that turns each result or exception
+into plain data, and links them with the Zig port.
+
+### The tables are generated, and the generator is not the checker
+
+`unicode-data.cpp` is 7,034 lines of numbers that upstream itself generates.
+`scripts/gen-unicode-data` reads them out of the C++ into
+`src/llama/unicode_data.zig`, citations included. What checks the result is
+not the generator but `unicode-diff`'s sweep of all 0x110000 code points
+against the C++'s own lookups — the lesson of the `kargs` generator, which
+agreed with itself.
+
+### `unicode_regex_split` needed `std::wregex` and `regex_iterator`
+
+A pattern set with no `\p{..}` runs as a `std::wregex` over code points; one
+with a category runs as a `std::regex` over a "collapsed" byte per code
+point. Both go through `regex_iterator` under `optimize | nosubs`. So
+`regex.zig` became `BasicRegex(CharT)`, gained `nosubs`, a ranged search and
+`Iterator`, and `regex-diff` grew to match — 538,416 checks to 43,537,552.
+What the wide engine does differently was measured over every code point
+rather than read: `.` rejects U+2028 and U+2029 too, a wide name with a
+character at or above 127 is no name, and `__regex_traits_value` narrows
+before it reads a digit, so U+0130–U+0133 are not the digits their low
+bytes spell. The iterator's semantics are two flags: `__no_update_pos`
+turns `at_first` off after the first match, and `match_prev_avail` lets
+`\b` read the character before the range. `match_not_null` reaches into a
+lookahead through the state's flags, not by any code of its own.
+
+### Quirks carried over
+
+- **A custom splitter that returns nothing falls through to `std::regex`.**
+  That happens for every splitter on empty text, and the fallback gives no
+  pieces where the splitter's offsets would have given one empty piece.
+  Removing the fall-through failed 504 checks.
+- **AFMoE's digit groups absorb the text before them.** The first
+  `_add_token` of a digit run ends at the run's first group, so everything
+  since the last token joins it: `ab1234` is `ab1`, `234`.
+- **The llama3, qwen2 and qwen3.5 splitters test `flags.as_uint()` where
+  gpt2 tests `flags2`.** Worked through, the two differ only for a space at
+  the end of a span, and both then emit the same one-space token — kept
+  verbatim all the same.
+- **Kimi K2's leading-character backtrack is dead code.** `has_leading_char`
+  is set only when the next code point is a non-Han letter, which is the
+  loop condition that sets `has_letters`; `pos--` cannot run. The injection
+  that deleted it was inert, and is recorded as such, not as an escape.
+- **`unicode_cpt_to_utf8` throws above U+10FFFF, and a four-byte lead
+  decodes up to U+1FFFFF**, so `\xf4\x90\x80\x80` in a prompt ends the
+  split with `std::invalid_argument`. The port returns
+  `error.InvalidCodepoint` at the same point; what the vocabulary does with
+  it is for the vocabulary port.
+- **The byte map's inverse is a `std::unordered_map` keyed by string.** Its
+  keys are exactly the 256 canonical encodings, so the port decodes,
+  checks the round trip and indexes; a non-canonical `\xC1\xA1` would decode
+  to `a` and is refused, as `map.at` refuses it — an injection that dropped
+  the round-trip check failed 94 checks.
+
+### What the gates say
+
+`unicode-diff` 7,070,454 checks identical, ~20 s: 5.57M over code points,
+1.31M decodes, 66,052 byte-map lookups, 127,100 splits over 33 extracted
+sets and 16 synthetic ones. Negative-tested 13/13 effective, one inert.
+`regex-diff` 43,537,552, negative-tested 6/6 on the additions. `port-links`
+2,598 citations in 119 files.
+
+## `llama-vocab.cpp` — the vocabulary, ported and gated before the swap
+
+`src/llama/vocab/` is all of `llama-vocab.cpp`: `load`, every accessor, the
+special-token partition, `tokenize`, `token_to_piece`, `detokenize` and
+`print_info`, with one file per tokenizer — SPM, BPE (with the `hybriddna`
+and `whitespace` sessions), WPM, UGM, RWKV and PLaMo-2. It reads metadata
+through `src/llama/gguf_meta.zig`, a port of `GGUFMeta::GKV` and
+`llama_model_loader::get_key` — exact type checks, the error texts, and
+`--override-kv` with its warning for a mistyped override — that the model
+loader's port will reuse. Nothing is exported: libllama swaps once, so the
+port is reached only through `scripts/vocab-diff`, which compiles it through
+`src/llama/staged.zig` beside the C++ in `libllama.a`.
+
+### What the standard library decides
+
+- **`token_to_id`'s iteration order.** Four loops in `load` walk the
+  `std::unordered_map`, and the first token whose text matches becomes EOT
+  (or a FIM token) and has `CONTROL` forced on it. Qwen vocabularies have
+  both `<|im_end|>` and `<|endoftext|>`, so the answer is libc++'s hash-table
+  layout. `libcxx.StringMap` reproduces it — CityHash64 as Apple's dylib
+  computes it, prime bucket growth, head-of-group insertion and
+  `__do_rehash` — and `libcxx-diff` compares order and bucket count with the
+  real template. An injection that took the last match instead of the first
+  failed 13 checks across five real vocabularies.
+- **The merge queues' tie order.** SPM and BPE both use
+  `std::priority_queue`. Flipping either comparator's `left` tie-break
+  failed — SPM's on six files, BPE's 1,504 checks — so the heap is libc++'s
+  `push_heap`/`pop_heap`, from `libcxx.zig`.
+- **`cache_special_tokens`'s sort order**, which decides which of two
+  overlapping special tokens wins. See below: it took a purpose-built case
+  to see it.
+
+### C++ semantics that are easy to port wrongly
+
+- **`char` is signed.** RWKV's hex unescape tests `c >= 'a'`, so a byte above
+  0x7f takes the digit branch; `isspace` on a byte above 0x7f is false; the
+  `std::tolower` of the model name leaves those bytes alone.
+- **A GGUF string is read through `const char *`**, so a token text stops at
+  its first NUL whatever its stored length.
+- **`std::string::operator[]` returns NUL at `size()`**, which UGM's trie walk
+  reads one step past the end.
+- **UGM's backtrack assigns through a reference** to the last slot each step.
+  It never reads that slot back, so a value copy is equivalent — checked, not
+  assumed.
+- **`naive_trie::get_longest_prefix` is the longest *path*, not the longest
+  stored value.**
+- **A `runtime_error` inside `load` is caught** by `llama_model_load` and
+  reported as `error loading model vocabulary: ...`; the same exception from a
+  tokenizer escapes `llama_tokenize` and terminates. `impl.Exception` carries
+  the type and message to whichever boundary decides.
+- **`bpe_ranks.emplace` keeps the first duplicate merge; `token_to_id[w] = i`
+  keeps the last duplicate token.**
+
+### The gate, and the holes the injections found in it
+
+`vocab-diff` compares, per file: what loading logged, every scalar, every
+token, every piece, and tokenize/detokenize over upstream's vocab test
+strings and random text with special tokens spliced in, under every flag
+combination. 19 upstream files and the Qwen3.5 model reach SPM, BPE, WPM and
+UGM, the last with a real precompiled charsmap. RWKV, PLaMo-2, `hybriddna`,
+`whitespace` and `none` have no real files, so they are written with the
+ported gguf writer from upstream's.
+
+The first fault-injection round caught 15 of 22. **Six escaped, and each
+named an input the gate had never produced:**
+
+| Fault | Why it escaped | What closed it |
+|---|---|---|
+| unstable → stable special-token sort | libc++ insertion-sorts below 30 elements, which is stable | 64 overlapping equal-length specials, and texts where they meet |
+| `lstrip` leaving one space | the only lstrip token was UGM's, which drops a lone space anyway | a BPE vocabulary with jina's `<mask>` lstrip |
+| UGM unknown penalty 10 → 9 | no real input lets the unknown path compete | a T5 vocabulary whose scores put `a`+UNK 0.5 below `ac` |
+| PLaMo-2 `round` → `floor` | no two segmentations tied | scores that tie only after rounding |
+| `hybriddna` padding `A` → `C` | no padded k-mer was in the vocabulary | `GTAAAA` in it, and texts ending a span in `GT` |
+| default special id `>=` → `>` | no vocabulary had exactly 11 tokens | one that does |
+
+All six fail now, each on its own case. A seventh, WPM's `max_token_len +
+1` dropped to `+ 0`, is **provably inert**: no token is longer than
+`max_token_len`, so the extra length never matches. It was replaced by a
+WPM fault that is not, which fails 1,920 checks.
+
+### What the gates say
+
+`vocab-diff` 55,016,050 checks identical over 41 files, ~15 s,
+negative-tested 23/23 effective and one inert; `libcxx-diff` 452,904,
+4/4 on the hash table; `unicode-diff` 7,070,454; `regex-diff` 43,537,552;
+`port-links` 2,670 citations in 128 files; `validate` OK in 6 m 14 s.
