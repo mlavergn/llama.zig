@@ -1473,6 +1473,10 @@ still owed.
 A toolchain workaround, not a port decision, and it should be reverted when the
 toolchain is fixed. `make -C testcase cxx20` passing is the signal.
 
+**Reverted under Zig 0.17**, which builds its bundled libc++ against SDK 27.
+`testcase/` is gone; see "Zig 0.17: the reference, libc++, and the CPU pin"
+at the end of this file.
+
 ### What broke
 
 **Zig 0.16.0 cannot link any C++ on this machine.** A three-line hello-world
@@ -3780,3 +3784,201 @@ WPM fault that is not, which fails 1,920 checks.
 negative-tested 23/23 effective and one inert; `libcxx-diff` 452,904,
 4/4 on the hash table; `unicode-diff` 7,070,454; `regex-diff` 43,537,552;
 `port-links` 2,670 citations in 128 files; `validate` OK in 6 m 14 s.
+
+---
+
+## Zig 0.17: the reference, libc++, and the CPU pin
+
+The port moved to Zig 0.17 in v0.0.14 and `make validate` passed. That was
+not the whole of it: three things around the port had not moved with it,
+and two of them would have made a bit-exact gate wrong rather than red.
+
+### `llama.cpp.zmake` did not build
+
+Every gate that compares on bits -- `ops-diff`, `node-diff`, `parity-port`,
+`sampler-diff` -- links `llama.cpp.zmake`'s libraries, and its `build.zig`
+failed under 0.17 at the first API it touched (`b.build_root`). The
+libraries in its `zig-out/` were 0.16 builds from ten days earlier, so
+running those gates would have compared a 0.17 port against a 0.16
+reference, and a compiler moves bits.
+
+Decision 18 keeps that repository read-only from here; migrating it was
+granted explicitly for this change. What it took: `b.root` for
+`b.build_root`, `cwdRelativePath`, `std.lang.Optimize`, `addPassthruArgs`,
+`std.mem.find`, and two keys the `zig libc` file now requires --
+`darwin_sdk_dir` and a non-empty `crt_dir`, given the values Zig's own
+native detection writes. `appendGlob` also declares its directory with
+`dependOnDirectoryContents`, because 0.17 reuses a configured graph until a
+declared input changes. macOS, iOS and Linux all build.
+
+### `native` stopped meaning the baseline
+
+Zig 0.16 detected this M5 Max as the macOS baseline, `apple_m1`. 0.17 knows
+it as `apple_m5`, with i8mm. Our `build.zig` had already pinned its default
+CPU for that reason; nothing else had:
+
+- **The zmake reference built native compiled 158 i8mm instructions into
+  `libggml.a`**, against 0 in ours -- `__ARM_FEATURE_MATMUL_INT8` selects
+  different `quants.c` and `repack.cpp` kernels. Its `build.zig` now
+  defaults to the baseline as ours does.
+- **Every `zig cc`, `zig c++`, `zig build-exe` and `zig build-obj` in
+  `scripts/` compiled native**, 40 invocations. `repack-diff` compiles the
+  reference `repack.cpp` itself, and the harnesses compile the port's Zig,
+  where `features.zig` reads `builtin.cpu` -- so the reference and the
+  port each picked kernels by a CPU neither library was built for. All 40
+  now pass `-mcpu=baseline`. `translate-c` does not: none of the headers it
+  reads mention an ARM feature macro.
+
+### libc++
+
+`make -C testcase cxx20` passes under 0.17 and `zig c++ hello.cpp` links,
+so the workaround came out: `link_libcpp = true` at all seven sites,
+`appleCxxFlags` and `linkAppleLibcxx` gone, `-lc++` back in 22 scripts,
+`testcase/` deleted. `llama.cpp.zmake` likewise. The CLI now links libc++
+statically, with no `libc++.1.dylib` in `otool -L`.
+
+That is not a free switch for this project, because `libcxx.zig` and
+`regex.zig` reproduce the libc++ the reference links. Measured before
+switching: Zig's is 22.1.8 against the SDK's 22.1.6, `_LIBCPP_ABI_VERSION`
+1 on both, no `_LIBCPP_ABI_FIX_CITYHASH_IMPLEMENTATION` on either, the
+same regex constants and hardening mode; and every header the ports
+reproduce -- `<regex>`, `<random>`, `__hash_table`, `hash.h`, `sort`,
+`partial_sort`, `make_heap`, `sift_down`, the distribution engines -- is
+byte-identical. The compiled half, `<regex>`'s tables and the bucket
+primes, the gates check: `regex-diff` and `libcxx-diff` pass unchanged.
+
+The Apple-clang CMake build (`make ref`, `make parity`) still links
+Apple's libc++. It is the only reference that does now.
+
+### What the gates say
+
+All against the rebuilt zmake reference, both libraries baseline, both
+runtimes Zig's libc++:
+
+| gate | result |
+|---|---|
+| `abi-check` | 15 entry points |
+| `struct-layout` | 3,103 + 298 facts |
+| `metal-diff` | 65 answers |
+| `tuning-diff` | 3,528,489 lookups |
+| `repack-diff` | 44 checks |
+| `libcxx-diff` | 452,904 |
+| `regex-diff` | 43,537,552 |
+| `unicode-diff` | 7,070,454 |
+| `vocab-diff` | 55,016,050 |
+| `sampler-diff` | 40,289 records |
+| `ops-diff` | 596 op results |
+| `node-diff` | 2,750 nodes, 1 and 4 threads |
+| `node-diff --gpu` | 2,750 nodes, 1 and 4 threads |
+| `parity-port`, `parity-port-cpu`, `parity-cli` | 6/6 each |
+| `probe` | ported code on the execution path |
+| `backend-ops` | 21,093 op configurations |
+| `validate` | OK, 404 s |
+
+**One false red, and it was ours.** The first `validate` failed in
+`regex-diff` with `syntax error near unexpected token '}'` at line 44 --
+after printing its PASS. bash reads a script as it runs it, and the
+`-mcpu` edit landed in that file mid-run. The same run's `probe` and
+`backend-ops` failed on a compile error in a file being written beside
+them: Zig reports AstGen errors for every file an import list names, test
+blocks included, so a staged file that nothing reaches still breaks the
+library build. **Do not edit `src/` or `scripts/` while gates run.**
+
+The "Zig 0.16 miscompiles" notes in `CLAUDE.md` -- `[*c]` array fields,
+small structs received by value -- were probed under 0.17 with minimal
+reproductions: a C caller passing `struct { uint16_t }`, a 6-byte and a
+1-byte struct to Zig exports, and `p.*.x[i]` through a `[*c]` pointer,
+Debug and ReleaseFast. All four came back right. **That is weaker than it
+reads**: no 0.16 is installed to show those reproductions failed before,
+so they may simply not be the shape that broke. The workarounds stay, and
+`abi-check` still guards the entry points.
+
+
+---
+
+## The loader and the hyperparameters
+
+Everything `llama_model_load` does before `load_tensors`, ported and gated
+in-process: `llama-arch.cpp`, `llama-hparams.cpp`, and the metadata halves of
+`llama-model-loader.cpp` and `llama-model.cpp`, with Qwen3.5's
+`load_arch_hparams`.
+
+### Four generators, because most of it is tables
+
+`llama-arch.cpp` is four `std::map` initializers -- 148 architecture names,
+223 key formats, 247 tensor names, 242 tensor infos -- and a page of
+functions. `llama_hparams` is 156 members. `llama-model.cpp` carries the
+130-entry `llm_type` name switch, a 148-architecture RoPE switch and the
+architecture-to-class mapping. Typing those is the transcription error
+`CLAUDE.md` warns about, so `scripts/gen-arch`, `gen-hparams` and
+`gen-model-tables` read them from the source, and each is cross-checked
+against an independent count of what it parsed. That cross-check paid for
+itself immediately: `LLM_TYPE_8x7B` and four siblings have a lowercase `x`,
+the enumerator regex skipped them, and the generator said 125 types where the
+header has 130.
+
+Two things the generators preserve rather than smooth over:
+
+- **A map initializer keeps the first of a repeated key.**
+  `LLM_TENSOR_SSM_NORM` appears twice in `LLM_TENSOR_NAMES`. The strings
+  agree today; the first is the one `std::map` keeps.
+- **Four RoPE cases read the hyperparameters** (`dflash`, `glm4`,
+  `glm4_moe`, `hunyuan_vl`). They are named in the generator and ported by
+  hand; a fifth upstream would stop the generator rather than become a
+  silent fixed rule.
+
+### `Hparams` has upstream's layout, and that is what makes the gate exact
+
+`llama_hparams` is trivially copyable (`static_assert`) and the model
+value-initializes it, so `Hparams` is an `extern struct` with the same
+members in the same order, defaults from the member initializers and zero
+elsewhere. `loader-diff` first checks every member's offset and size, and
+the struct's size and alignment, against `offsetof`/`sizeof` in the C++ --
+then reads the reference model's `hparams` **through `Hparams`** and compares
+all 156 members bytewise. Negative-tested: swapping two members fails the
+layout check before any value is compared.
+
+### What the gate found
+
+- **`split.tensors.count` is an `int`.** The loader reads it into
+  `int n_tensors`, so the getter wants `INT32`; the port read `u32` and
+  threw "wrong type" on every split set. First run, first failure.
+- **`a % 0` is `a` on this machine.** Qwen3.5 marks recurrent layers with
+  `(i + 1) % full_attention_interval`; an interval of 0 is undefined in
+  C++. Compiled, it is `udiv` then `msub`, and `udiv` by zero gives zero, so
+  the remainder is the dividend. The port does that explicitly
+  (`remU32`), and the injection that made it 0 instead failed on
+  `is_recr_impl` -- which is the reference binary confirming the model.
+- **An empty log is a prefix of every log.** An architecture without a
+  ported `load_arch_hparams` is compared only as far as the port gets, by
+  requiring its log to be a prefix of the C++'s. The first version would
+  have passed a port that logged nothing. Loaded and unported cases now
+  must log on both sides; a constructor that throws first legitimately logs
+  nothing on either, and its message carries the comparison.
+
+### Negative tests
+
+`arch-diff`, 9/9: two architecture names swapped, the suffix's dot dropped,
+block and expert indices swapped, `qwen35` removed from the hybrid list, a
+tensor info dropped, a missing tensor name returning instead of aborting,
+`from_string` never matching, and a short `Kv` enum -- caught at compile time
+by the generated length check, and at run time, with the table shortened to
+match, by the past-the-end probe.
+
+`loader-diff`, 14/14: weights in plain name order (the type-tie file),
+newlines left unescaped in the metadata dump, truncation at 41 bytes,
+`a % 0 == 0`, pooling defaulting to `NONE`, the RoPE scale not inverted,
+`print_f` printing unsigned, boolean arrays not normalized to 0/1, the 0.8B
+and 2B size classes swapped, the split index unchecked, `n_ctx_orig_yarn`'s
+default lost, the tensor bounds check dropped, two `Hparams` members
+swapped, and integer overrides not narrowed. One injection first failed to
+*compile* -- an unused parameter -- and was rewritten until it did, because a
+build failure says nothing about the gate.
+
+### What it does not see
+
+Only Qwen3.5 has an architecture-specific step. Every other architecture
+is compared vocabulary-only, and in full only as far as the port's log is a
+prefix of the C++'s; its base hyperparameters are read but not compared.
+`gguf_kv` is compared in `std::unordered_map` order through
+`libcxx.StringMap`, but nothing in the port reads it yet.

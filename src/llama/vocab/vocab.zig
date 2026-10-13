@@ -32,6 +32,7 @@ const std = @import("std");
 const impl = @import("../impl.zig");
 const libcxx = @import("../libcxx.zig");
 const unicode = @import("../unicode.zig");
+const arch = @import("../arch.zig");
 const gguf_meta = @import("../gguf_meta.zig");
 const vm = @import("module.zig");
 
@@ -587,13 +588,14 @@ pub const Vocab = struct {
 
                 const idx = ml.find(.tokenizer_precompiled_charsmap);
                 if (idx != -1) {
-                    var nb: [128]u8 = undefined;
                     if (c.gguf_get_kv_type(ctx, idx) != c.GGUF_TYPE_ARRAY) {
-                        return exc.throw(.runtime_error, "invalid gguf type for {s}", .{ml.name(.tokenizer_precompiled_charsmap, &nb)});
+                        const kn = ml.name(.tokenizer_precompiled_charsmap);
+                        return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
                     }
                     const pc_type = c.gguf_get_arr_type(ctx, idx);
                     if (pc_type != c.GGUF_TYPE_INT8 and pc_type != c.GGUF_TYPE_UINT8) {
-                        return exc.throw(.runtime_error, "invalid gguf type for {s}", .{ml.name(.tokenizer_precompiled_charsmap, &nb)});
+                        const kn = ml.name(.tokenizer_precompiled_charsmap);
+                        return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
                     }
                     const n = c.gguf_get_arr_n(ctx, idx);
                     const pc: [*]const u8 = @ptrCast(c.gguf_get_arr_data(ctx, idx).?);
@@ -740,8 +742,8 @@ pub const Vocab = struct {
     fn readMerges(self: *Vocab, ml: *const gguf_meta.Meta, idx: i64, exc: *Exception) Thrown!void {
         const ctx = ml.ctx;
         if (c.gguf_get_kv_type(ctx, idx) != c.GGUF_TYPE_ARRAY or c.gguf_get_arr_type(ctx, idx) != c.GGUF_TYPE_STRING) {
-            var nb: [128]u8 = undefined;
-            return exc.throw(.runtime_error, "invalid gguf type for {s}", .{ml.name(.tokenizer_merges, &nb)});
+            const kn = ml.name(.tokenizer_merges);
+            return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
         }
         const n_merges: c_int = @truncate(@as(i64, @intCast(c.gguf_get_arr_n(ctx, idx))));
         var i: c_int = 0;
@@ -937,12 +939,12 @@ pub const Vocab = struct {
     /// The token list, scores and types: llama-vocab.cpp:2418-2501.
     fn readTokens(self: *Vocab, ml: *const gguf_meta.Meta, exc: *Exception) Thrown!void {
         const ctx = ml.ctx;
-        var nb: [128]u8 = undefined;
 
         const token_idx = ml.find(.tokenizer_list);
         if (token_idx == -1) return exc.throw(.runtime_error, "cannot find tokenizer vocab in model file\n", .{});
         if (c.gguf_get_kv_type(ctx, token_idx) != c.GGUF_TYPE_ARRAY or c.gguf_get_arr_type(ctx, token_idx) != c.GGUF_TYPE_STRING) {
-            return exc.throw(.runtime_error, "invalid gguf type for {s}", .{ml.name(.tokenizer_list, &nb)});
+            const kn = ml.name(.tokenizer_list);
+            return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
         }
 
         const n_tokens: u32 = @truncate(c.gguf_get_arr_n(ctx, token_idx));
@@ -954,7 +956,8 @@ pub const Vocab = struct {
             const kv_type = c.gguf_get_kv_type(ctx, score_idx);
             const arr_type = if (kv_type == c.GGUF_TYPE_ARRAY) c.gguf_get_arr_type(ctx, score_idx) else c.GGUF_TYPE_COUNT;
             if (arr_type != c.GGUF_TYPE_INT32 and arr_type != c.GGUF_TYPE_FLOAT32) {
-                return exc.throw(.runtime_error, "invalid gguf type for {s}", .{ml.name(.tokenizer_scores, &nb)});
+                const kn = ml.name(.tokenizer_scores);
+                return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
             }
             const n_scores: u32 = @truncate(c.gguf_get_arr_n(ctx, score_idx));
             if (n_scores < n_tokens) {
@@ -971,7 +974,8 @@ pub const Vocab = struct {
         const toktype_idx = ml.find(.tokenizer_token_type);
         if (toktype_idx != -1) {
             if (c.gguf_get_kv_type(ctx, toktype_idx) != c.GGUF_TYPE_ARRAY or c.gguf_get_arr_type(ctx, toktype_idx) != c.GGUF_TYPE_INT32) {
-                return exc.throw(.runtime_error, "invalid gguf type for {s}", .{ml.name(.tokenizer_token_type, &nb)});
+                const kn = ml.name(.tokenizer_token_type);
+                return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
             }
             const n_toktypes: u32 = @truncate(c.gguf_get_arr_n(ctx, toktype_idx));
             if (n_toktypes < n_tokens) {
@@ -1087,9 +1091,9 @@ pub const Vocab = struct {
         };
 
         for (special_token_types) |it| {
-            var nb: [128]u8 = undefined;
-            var kb: [129]u8 = undefined;
-            const key = ml.name(it.kv, &nb);
+            var kb: [arch.max_name + 1]u8 = undefined;
+            const key_name = ml.name(it.kv);
+            const key = key_name.slice();
             @memcpy(kb[0..key.len], key);
             kb[key.len] = 0;
             const key_z: [*:0]const u8 = @ptrCast(&kb);
@@ -1129,8 +1133,8 @@ pub const Vocab = struct {
             const idx = ml.find(.tokenizer_suppress_tokens);
             if (idx != -1) {
                 if (c.gguf_get_kv_type(ctx, idx) != c.GGUF_TYPE_ARRAY or c.gguf_get_arr_type(ctx, idx) != c.GGUF_TYPE_INT32) {
-                    var nb: [128]u8 = undefined;
-                    return exc.throw(.runtime_error, "invalid gguf type for {s}", .{ml.name(.tokenizer_suppress_tokens, &nb)});
+                    const kn = ml.name(.tokenizer_suppress_tokens);
+                    return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
                 }
                 const n: c_int = @truncate(@as(i64, @intCast(c.gguf_get_arr_n(ctx, idx))));
                 if (n > 0) {

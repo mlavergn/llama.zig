@@ -28,14 +28,12 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# Apple's libc++, not Zig's -- see `testcase/` and the note above
-# `appleCxxFlags` in `build/llamacpp.zig`.
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 
-zig cc harness/abi_structs.c -o "$tmp/abi" -std=c11 -O2 \
+zig cc -mcpu=baseline harness/abi_structs.c -o "$tmp/abi" -std=c11 -O2 \
     -I llama.cpp/ggml/include -I llama.cpp/include \
     zig-out/lib/libllama.a zig-out/lib/libggml.a \
-    "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/err" \
     || { echo "FAIL: could not build the ABI harness" >&2; head -20 "$tmp/err" >&2; exit 1; }

@@ -29,10 +29,10 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
     src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
     || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
 
-zig build-exe -femit-bin="$tmp/vocab_diff" -Ofast -lc \
+zig build-exe -mcpu baseline -femit-bin="$tmp/vocab_diff" -Ofast -lc \
     --dep staged -Mroot=harness/vocab_diff.zig \
     --dep llama_c -Mstaged=src/llama/staged.zig -Mllama_c="$tmp/llama_c.zig" \
-    zig-out/lib/libllama.a zig-out/lib/libggml.a "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    zig-out/lib/libllama.a zig-out/lib/libggml.a -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }

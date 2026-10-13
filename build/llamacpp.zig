@@ -30,71 +30,6 @@ const cxx_flags = [_][]const u8{"-std=c++17"} ++ quiet;
 // between void* and Obj-C object pointers, so ARC must stay off.
 const objc_flags = [_][]const u8{"-std=c11"} ++ quiet;
 
-// -----------------------------------------------------------------------------
-// Apple's libc++ instead of Zig's
-//
-// **Zig 0.16.0 cannot build its own libc++ against the macOS 27 SDK.** It
-// compiles `libcxx/src/random.cpp` with `-std=c++23`, which turns clang's
-// `modules` feature on; SDK 27's `<math.h>` then declines to define `INFINITY`
-// (C23 moved it to `<float.h>`) and libc++'s own
-// `__random/clamp_to_integral.h:47` uses `INFINITY` without including it. The
-// full diagnosis, with a six-line reproducer, is in `testcase/`.
-//
-// That `-std=c++23` is hardcoded inside the compiler binary: no flag, no
-// environment variable and no build option reaches it. So this build links
-// **Apple's** libc++ instead -- its headers and its `.tbd` together, a matched
-// pair, and the same C++ runtime the CMake reference build uses. That makes it
-// the closer match to `make buildmacos` as well as the workable choice.
-//
-// Two details that are easy to get wrong, both measured rather than reasoned
-// about:
-//
-// - The C++ headers go in with `-I`, not `-isystem`. `-isystem` puts them
-//   after clang's own include paths, and `<cstdio>` then fails with "tried
-//   including <stdio.h> but didn't find libc++'s <stdio.h> header".
-// - `link_libcpp = false` also switches the C++ header search off, which is
-//   why the include path has to be added by hand rather than merely dropped.
-//
-// **Revert this when the toolchain is fixed** -- `make -C testcase cxx20`
-// passing is the signal. Restore `.link_libcpp = true` at the four sites here
-// and the three in `build.zig`, drop `appleCxxFlags` and `linkAppleLibcxx`, and
-// delete `testcase/`.
-
-/// The C++ flags, plus whatever it takes to reach Apple's libc++ headers.
-///
-/// Parameters:
-/// - `b`: the build graph, for the allocator.
-/// - `sdk`: macOS SDK path; null off macOS, where Zig's own libc++ is used.
-/// - `defines`: the `-D` list for this translation-unit set.
-///
-/// Return: a flag list owned by the build graph.
-fn appleCxxFlags(b: *std.Build, sdk: ?[]const u8, defines: []const []const u8) []const []const u8 {
-    var flags: std.ArrayList([]const u8) = .empty;
-    flags.appendSlice(b.allocator, &cxx_flags) catch @panic("OOM");
-    if (sdk) |path| {
-        flags.append(b.allocator, "-nostdinc++") catch @panic("OOM");
-        flags.append(b.allocator, b.fmt("-I{s}/usr/include/c++/v1", .{path})) catch @panic("OOM");
-    }
-    flags.appendSlice(b.allocator, defines) catch @panic("OOM");
-    return flags.toOwnedSlice(b.allocator) catch @panic("OOM");
-}
-
-/// Links Apple's libc++ into `mod`, standing in for `link_libcpp = true`.
-///
-/// Parameters:
-/// - `b`: the build graph, for the allocator.
-/// - `mod`: the module that needs the C++ runtime.
-/// - `sdk`: macOS SDK path; null off macOS, where this is a no-op.
-///
-/// Return: nothing.
-pub fn linkAppleLibcxx(b: *std.Build, mod: *std.Build.Module, sdk: ?[]const u8) void {
-    const path = sdk orelse return;
-    mod.addObjectFile(b.graph.cwdRelativePath(b.fmt("{s}/usr/lib/libc++.tbd", .{path})));
-    // `libc++abi` as well: the `__cxa_*` guard, exception and personality
-    // symbols live there, and `libc++.tbd` does not re-export them.
-    mod.addObjectFile(b.graph.cwdRelativePath(b.fmt("{s}/usr/lib/libc++abi.tbd", .{path})));
-}
-
 /// Translates `src/ggml/c_import.h`, the ggml headers `src/ggml/impl.zig` imports.
 ///
 /// Zig 0.17 has no `@cImport`, so the header list that file imported inline is
@@ -322,8 +257,7 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
         .target = opts.target,
         .optimize = opts.optimize,
         .link_libc = true,
-        // Apple's libc++, not Zig's -- see the note above `appleCxxFlags`.
-        .link_libcpp = false,
+        .link_libcpp = true,
         // Upstream is not UBSan-clean -- it relies on pointer arithmetic that
         // is technically undefined but universally works, and Zig enables the
         // C sanitizers in Debug by default. This is reference code we compile
@@ -383,7 +317,7 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = &ggml_base_cxx_sources ++ &ggml_cpu_cxx_sources ++ &ggml_metal_cxx_sources,
-        .flags = appleCxxFlags(b, opts.sdk, &defines),
+        .flags = &(cxx_flags ++ defines),
     });
     mod.addCSourceFiles(.{
         .root = b.path(root),
@@ -396,9 +330,6 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     }
 
     if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
-    // A static archive never links, but this module is also the root of the
-    // `ggml_tests` executable, which does. See the note above `appleCxxFlags`.
-    linkAppleLibcxx(b, mod, opts.sdk);
     mod.linkFramework("Foundation", .{});
     mod.linkFramework("Metal", .{});
     mod.linkFramework("MetalKit", .{});
@@ -491,8 +422,7 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
         .target = opts.target,
         .optimize = opts.optimize,
         .link_libc = true,
-        // Apple's libc++, not Zig's -- see the note above `appleCxxFlags`.
-        .link_libcpp = false,
+        .link_libcpp = true,
         .sanitize_c = .off,
     });
 
@@ -537,7 +467,7 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = &ported_test_cxx_sources,
-        .flags = appleCxxFlags(b, opts.sdk, &defines),
+        .flags = &(cxx_flags ++ defines),
     });
 
     if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
@@ -569,8 +499,7 @@ fn portedTestModuleInner(
         .target = opts.target,
         .optimize = opts.optimize,
         .link_libc = true,
-        // Apple's libc++, not Zig's -- see the note above `appleCxxFlags`.
-        .link_libcpp = false,
+        .link_libcpp = true,
         .sanitize_c = .off,
     });
 
@@ -614,12 +543,11 @@ fn portedTestModuleInner(
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = &ported_test_cxx_sources,
-        .flags = appleCxxFlags(b, opts.sdk, &defines),
+        .flags = &(cxx_flags ++ defines),
     });
 
     if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
     mod.linkFramework("Accelerate", .{});
-    linkAppleLibcxx(b, mod, opts.sdk);
     return mod;
 }
 
@@ -644,8 +572,7 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.B
         .target = opts.target,
         .optimize = opts.optimize,
         .link_libc = true,
-        // Apple's libc++, not Zig's -- see the note above `appleCxxFlags`.
-        .link_libcpp = false,
+        .link_libcpp = true,
         // Upstream is not UBSan-clean -- it relies on pointer arithmetic that
         // is technically undefined but universally works, and Zig enables the
         // C sanitizers in Debug by default. This is reference code we compile
@@ -684,11 +611,10 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.B
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = files.items,
-        .flags = appleCxxFlags(b, opts.sdk, &defines),
+        .flags = &(cxx_flags ++ defines),
     });
 
     if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
-    linkAppleLibcxx(b, mod, opts.sdk);
     mod.linkLibrary(ggml);
 
     return b.addLibrary(.{ .name = "llama", .root_module = mod, .linkage = .static });

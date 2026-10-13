@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""Generate the llama-arch.cpp tables as Zig.
+
+`llama-arch.cpp` is four `std::map` initializers -- 148 architecture names,
+223 metadata key formats, 247 tensor name formats, 242 tensor infos -- over
+three enums in `llama-arch.h`, plus a handful of functions that read them.
+The tables are transcription and nothing else, so they are generated here
+rather than typed, and `make arch-diff` compares every lookup the functions
+make against the C++ in one process.
+
+Two things about the source the generator has to honour rather than smooth
+over:
+
+- **A map initializer keeps the first of a repeated key.** `LLM_TENSOR_SSM_NORM`
+  appears twice in `LLM_TENSOR_NAMES` (llama-arch.cpp:464, 489). The two
+  strings agree today; the first is the one `std::map` keeps, so it is the
+  one emitted.
+- **A key can be absent from a map.** Two tensors have no name and six no
+  info. The C++ aborts or throws on those; the tables carry `null` so the
+  port can do the same.
+
+Writes:
+  src/llama/arch_table.zig   the enums and the four tables
+
+Run after moving the upstream pin.
+"""
+import re
+import sys
+
+HDR = "llama.cpp/src/llama-arch.h"
+SRC = "llama.cpp/src/llama-arch.cpp"
+COMMIT = "c1d0e7a00"
+OUT = "src/llama/arch_table.zig"
+
+ZIG_KEYWORDS = {
+    "addrspace", "align", "allowzero", "and", "anyframe", "anytype", "asm",
+    "break", "callconv", "catch", "comptime", "const", "continue", "defer",
+    "else", "enum", "errdefer", "error", "export", "extern", "fn", "for", "if",
+    "inline", "linksection", "noalias", "noinline", "nosuspend", "opaque",
+    "or", "orelse", "packed", "pub", "resume", "return", "struct", "suspend",
+    "switch", "test", "threadlocal", "try", "union", "unreachable", "var",
+    "volatile", "while", "type", "bool", "void", "anyerror", "true", "false",
+    "null", "undefined",
+}
+
+
+def ident(name, prefix):
+    """`LLM_ARCH_QWEN35` -> `qwen35`, quoted when Zig would read it otherwise."""
+    s = name[len(prefix):].lower()
+    if s in ZIG_KEYWORDS or not re.fullmatch(r"[a-z_][a-z0-9_]*", s) or re.fullmatch(r"[iu][0-9]+", s):
+        return '@"%s"' % s
+    return s
+
+
+def line_of(text, needle):
+    """1-based line of the first occurrence of `needle`."""
+    at = text.index(needle)
+    return text.count("\n", 0, at) + 1
+
+
+def parse_enum(hdr, name):
+    m = re.search(r"enum " + name + r" \{(.*?)\n\};", hdr, re.S)
+    if not m:
+        sys.exit("gen-arch: enum %s not found" % name)
+    body = m.group(1)
+    vals = re.findall(r"^\s*([A-Z][A-Za-z0-9_]*)\s*(=\s*[^,]+)?,", body, re.M)
+    for v, init in vals:
+        if init:
+            sys.exit("gen-arch: %s has an explicit value; the tables assume 0..n-1" % v)
+    every = re.findall(r"^\s*([A-Za-z_]\w*)\b", re.sub(r"//[^\n]*", "", body), re.M)
+    if len(every) != len(vals):
+        sys.exit("gen-arch: enum %s has %d enumerators, %d parsed" % (name, len(every), len(vals)))
+    return [v for v, _ in vals], line_of(hdr, "enum " + name + " {")
+
+
+def parse_map(src, name, pattern):
+    head = re.search(r"static const std::map<[^>]*> " + name + r" = \{", src)
+    if not head:
+        sys.exit("gen-arch: map %s not found" % name)
+    end = src.index("\n};", head.end())
+    body = src[head.end():end]
+    first = {}
+    order = []
+    for m in re.finditer(pattern, body):
+        key = m.group(1)
+        if key in first:
+            continue  # std::map's initializer keeps the first
+        first[key] = m.groups()[1:]
+        order.append(key)
+    # Every entry must have been understood: count the opening braces of
+    # entries and compare, so a line the pattern missed fails loudly.
+    entries = len(re.findall(r"^\s*\{\s*(LLM_[A-Z0-9_]+)\s*,", body, re.M))
+    seen = len(re.findall(pattern, body))
+    if entries != seen:
+        sys.exit("gen-arch: %s: matched %d of %d entries" % (name, seen, entries))
+    return first, line_of(src, head.group(0))
+
+
+def zstr(s):
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def main():
+    hdr = open(HDR).read()
+    src = open(SRC).read()
+
+    archs, arch_line = parse_enum(hdr, "llm_arch")
+    kvs, kv_line = parse_enum(hdr, "llm_kv")
+    tensors, tensor_line = parse_enum(hdr, "llm_tensor")
+    layers, layer_line = parse_enum(hdr, "llm_tensor_layer")
+
+    arch_names, arch_names_line = parse_map(src, "LLM_ARCH_NAMES", r'\{\s*(LLM_ARCH_\w+)\s*,\s*"((?:[^"\\]|\\.)*)"\s*\}')
+    kv_names, kv_names_line = parse_map(src, "LLM_KV_NAMES", r'\{\s*(LLM_KV_\w+)\s*,\s*"((?:[^"\\]|\\.)*)"\s*\}')
+    tensor_names, tensor_names_line = parse_map(src, "LLM_TENSOR_NAMES", r'\{\s*(LLM_TENSOR_\w+)\s*,\s*"((?:[^"\\]|\\.)*)"\s*\}')
+    tensor_infos, tensor_infos_line = parse_map(
+        src, "LLM_TENSOR_INFOS", r"\{\s*(LLM_TENSOR_\w+)\s*,\s*\{\s*(LLM_TENSOR_LAYER_\w+)\s*,\s*(GGML_OP_\w+)\s*\}\s*\}")
+
+    # The port substitutes these by hand rather than calling vsnprintf, so
+    # it handles exactly what the tables use: `%s` once in a key or name,
+    # `%d` up to twice in a tensor name, and nothing else.
+    for table, label, spec, most in ((arch_names, "LLM_ARCH_NAMES", "%s", 0), (kv_names, "LLM_KV_NAMES", "%s", 1),
+                                     (tensor_names, "LLM_TENSOR_NAMES", "%d", 2)):
+        for k, v in table.items():
+            convs = re.findall(r"%.", v[0])
+            if any(cv != spec for cv in convs) or len(convs) > most:
+                sys.exit("gen-arch: %s[%s] = %r has conversions the port does not handle" % (label, k, v[0]))
+
+    for table, enum, label in ((arch_names, archs, "LLM_ARCH_NAMES"), (kv_names, kvs, "LLM_KV_NAMES"),
+                               (tensor_names, tensors, "LLM_TENSOR_NAMES"), (tensor_infos, tensors, "LLM_TENSOR_INFOS")):
+        stray = [k for k in table if k not in enum]
+        if stray:
+            sys.exit("gen-arch: %s names %s, which the enum does not" % (label, stray))
+
+    o = []
+    w = o.append
+    w("//! The `llama-arch.cpp` tables, generated by `scripts/gen-arch`.")
+    w("//!")
+    w("//! # Provenance")
+    w("//!")
+    w("//! Generated from, in the reference checkout:")
+    w("//!")
+    w("//! - `llama.cpp/src/llama-arch.h` -- the four enums")
+    w("//! - `llama.cpp/src/llama-arch.cpp` -- the four `std::map` initializers")
+    w("//!")
+    w("//! Both at v0.3.0 (`%s`). **Do not edit**: regenerate after moving the" % COMMIT)
+    w("//! pin, and `make arch-diff` compares every lookup against the C++.")
+    w("//!")
+    w("//! Each table is indexed by its enum's ordinal, which is the `std::map`'s")
+    w("//! key order, so iterating one is iterating the map. A key the map lacks")
+    w("//! is `null`. Where an initializer repeats a key, the first entry is the")
+    w("//! one kept, as `std::map`'s initializer keeps it.")
+    w("")
+    w('const c = @import("impl.zig").c;')
+    w("")
+
+    def emit_enum(zname, cname, line, vals, prefix):
+        w("/// Mirrors `%s` (llama-arch.h:%d @%s)." % (cname, line, COMMIT))
+        w("pub const %s = enum(c_int) {" % zname)
+        for v in vals:
+            w("    %s," % ident(v, prefix))
+        w("};")
+        w("")
+
+    emit_enum("Arch", "llm_arch", arch_line, archs, "LLM_ARCH_")
+    emit_enum("Kv", "llm_kv", kv_line, kvs, "LLM_KV_")
+    emit_enum("Tensor", "llm_tensor", tensor_line, tensors, "LLM_TENSOR_")
+    emit_enum("TensorLayer", "llm_tensor_layer", layer_line, layers, "LLM_TENSOR_LAYER_")
+
+    w("/// Mirrors `llm_tensor_info` (llama-arch.h:%d @%s)." % (line_of(hdr, "struct llm_tensor_info {"), COMMIT))
+    w("pub const TensorInfo = struct {")
+    w("    layer: TensorLayer,")
+    w("    op: c.enum_ggml_op,")
+    w("};")
+    w("")
+
+    def emit_names(zname, cname, line, enum, table, n_label):
+        w("/// Ports `%s` (llama-arch.cpp:%d @%s), by `%s` ordinal." % (cname, line, COMMIT, n_label))
+        w("pub const %s = [_]?[:0]const u8{" % zname)
+        for v in enum:
+            if v in table:
+                w("    %s," % zstr(table[v][0]))
+            else:
+                w("    null, // %s" % v)
+        w("};")
+        w("")
+
+    emit_names("arch_names", "LLM_ARCH_NAMES", arch_names_line, archs, arch_names, "Arch")
+    emit_names("kv_names", "LLM_KV_NAMES", kv_names_line, kvs, kv_names, "Kv")
+    emit_names("tensor_names", "LLM_TENSOR_NAMES", tensor_names_line, tensors, tensor_names, "Tensor")
+
+    w("/// Ports `LLM_TENSOR_INFOS` (llama-arch.cpp:%d @%s), by `Tensor` ordinal." % (tensor_infos_line, COMMIT))
+    w("pub const tensor_infos = [_]?TensorInfo{")
+    for v in tensors:
+        if v in tensor_infos:
+            layer, op = tensor_infos[v]
+            w("    .{ .layer = .%s, .op = c.%s }," % (ident(layer, "LLM_TENSOR_LAYER_"), op))
+        else:
+            w("    null, // %s" % v)
+    w("};")
+    w("")
+    w("comptime {")
+    w("    if (arch_names.len != @typeInfo(Arch).@\"enum\".field_names.len) @compileError(\"arch_names\");")
+    w("    if (kv_names.len != @typeInfo(Kv).@\"enum\".field_names.len) @compileError(\"kv_names\");")
+    w("    if (tensor_names.len != @typeInfo(Tensor).@\"enum\".field_names.len) @compileError(\"tensor_names\");")
+    w("    if (tensor_infos.len != @typeInfo(Tensor).@\"enum\".field_names.len) @compileError(\"tensor_infos\");")
+    w("}")
+    w("")
+
+    open(OUT, "w").write("\n".join(o))
+    print("wrote %s: %d archs, %d kvs, %d tensors (%d names, %d infos)" % (
+        OUT, len(archs), len(kvs), len(tensors), len(tensor_names), len(tensor_infos)))
+
+
+main()

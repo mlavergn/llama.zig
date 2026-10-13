@@ -38,16 +38,15 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# Apple's libc++, not Zig's -- see `testcase/`.
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
-FW=("$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd"
+FW=(-lc++
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
     -F "$SDK/System/Library/Frameworks")
 INC=(-I llama.cpp/include -I llama.cpp/ggml/include)
 
-zig cc harness/sampler_dump.c -o "$tmp/ref"  -std=c11 -O2 "${INC[@]}" "${REF_LIBS[@]}"  "${FW[@]}" 2>"$tmp/ref.log" \
+zig cc -mcpu=baseline harness/sampler_dump.c -o "$tmp/ref"  -std=c11 -O2 "${INC[@]}" "${REF_LIBS[@]}"  "${FW[@]}" 2>"$tmp/ref.log" \
     || { echo "FAIL: could not link against the reference libraries" >&2; tail -5 "$tmp/ref.log" >&2; exit 1; }
-zig cc harness/sampler_dump.c -o "$tmp/port" -std=c11 -O2 "${INC[@]}" "${PORT_LIBS[@]}" "${FW[@]}" 2>"$tmp/port.log" \
+zig cc -mcpu=baseline harness/sampler_dump.c -o "$tmp/port" -std=c11 -O2 "${INC[@]}" "${PORT_LIBS[@]}" "${FW[@]}" 2>"$tmp/port.log" \
     || { echo "FAIL: could not link against the ported libraries" >&2; tail -5 "$tmp/port.log" >&2; exit 1; }
 
 "$tmp/ref"  "$MODEL" "$@" > "$tmp/ref.txt"  2>"$tmp/ref.err" \

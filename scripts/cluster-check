@@ -42,7 +42,7 @@ zig translate-c -lc -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp
     src/ggml/c_import.h >"$tmp/ggml_c.zig" 2>"$tmp/terr" \
     || { echo "FAIL: cannot translate the ggml headers" >&2; head -10 "$tmp/terr" >&2; exit 1; }
 
-if ! zig build-obj -femit-bin="$tmp/check.o" \
+if ! zig build-obj -mcpu baseline -femit-bin="$tmp/check.o" \
         -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu -lc \
         --dep config --dep ggml_c -Mroot="$root" -Mconfig="$tmp/config.zig" -Mggml_c="$tmp/ggml_c.zig" 2>"$tmp/err"; then
     echo "FAIL: the cluster port does not compile"
@@ -54,8 +54,7 @@ SDK="$(xcrun --sdk macosx --show-sdk-path)"
 : > "$tmp/want"
 for f in traits.cpp ggml-cpu.cpp repack.cpp arch/arm/repack.cpp; do
     o="$tmp/$(echo "$f" | tr '/' '_').o"
-    zig c++ -c "llama.cpp/ggml/src/ggml-cpu/$f" -o "$o" -std=c++17 -w -O2 \
-        -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+    zig c++ -mcpu=baseline -c "llama.cpp/ggml/src/ggml-cpu/$f" -o "$o" -std=c++17 -w -O2 \
         -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
         -DNDEBUG -DGGML_USE_CPU -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE -DGGML_USE_CPU_REPACK 2>/dev/null
     n=$(nm -gUj "$o" 2>/dev/null | sed 's/^_//' | grep -v '^_Z' | grep -v '__clang_call_terminate' | sort -u | tee -a "$tmp/want" | wc -l | tr -d ' ')
@@ -89,7 +88,7 @@ comptime {
 ZIG
 cp "$tmp/dispatch.zig" src/ggml/.cluster_dispatch.zig
 trap 'rm -rf "$tmp"; rm -f "$root" src/ggml/.cluster_dispatch.zig' EXIT
-if zig build-obj -femit-bin="$tmp/dispatch.o" \
+if zig build-obj -mcpu baseline -femit-bin="$tmp/dispatch.o" \
         -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu -lc \
         --dep config --dep ggml_c -Mroot=src/ggml/.cluster_dispatch.zig -Mconfig="$tmp/config.zig" -Mggml_c="$tmp/ggml_c.zig" 2>"$tmp/derr"; then
     echo "dispatch  implemented"

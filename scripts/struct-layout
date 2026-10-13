@@ -32,10 +32,10 @@ trap 'rm -rf "$tmp"' EXIT
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 
 build_harness() {
-    zig c++ "$1" "$LIB" -o "$2" \
-        -std=c++17 -w -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+    zig c++ -mcpu=baseline "$1" "$LIB" -o "$2" \
+        -std=c++17 -w -O2 \
         -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-metal \
-        "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+        -lc++ \
         -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
         -F "$SDK/System/Library/Frameworks" 2>"$tmp/err" \
         || { echo "FAIL: could not build $1" >&2; head -20 "$tmp/err" >&2; exit 1; }
@@ -45,10 +45,10 @@ build_harness harness/kargs_layout.cpp "$tmp/kargs"
 "$tmp/kargs" || exit 1
 echo
 
-zig c++ harness/struct_layout.cpp "$LIB" -o "$tmp/layout" \
-    -std=c++17 -w -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+zig c++ -mcpu=baseline harness/struct_layout.cpp "$LIB" -o "$tmp/layout" \
+    -std=c++17 -w -O2 \
     -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-metal \
-    "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/err" \
     || { echo "FAIL: could not build the layout harness" >&2; head -20 "$tmp/err" >&2; exit 1; }

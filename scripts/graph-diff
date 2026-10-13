@@ -42,21 +42,16 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# Apple's libc++, not Zig's. Zig 0.16 cannot build its own against the macOS 27
-# SDK -- see `testcase/` and the note above `appleCxxFlags` in
-# `build/llamacpp.zig`. `libc++abi` carries the `__cxa_*` symbols that
-# `libc++.tbd` does not re-export. Revert to `-lc++` when the toolchain is
-# fixed; `make -C testcase cxx20` passing is the signal.
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
-FRAMEWORKS=("$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd"
+FRAMEWORKS=(-lc++
             -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
             -F "$SDK/System/Library/Frameworks")
 
-zig cc harness/graph_dump.c -o "$tmp/ref" -std=c11 -I llama.cpp/ggml/include \
+zig cc -mcpu=baseline harness/graph_dump.c -o "$tmp/ref" -std=c11 -I llama.cpp/ggml/include \
     "${REF_LIBS[@]}" "${FRAMEWORKS[@]}" 2>"$tmp/ref.log" \
     || { echo "FAIL: could not link against the reference libraries" >&2; tail -5 "$tmp/ref.log" >&2; exit 1; }
 
-zig cc harness/graph_dump.c -o "$tmp/port" -std=c11 -I llama.cpp/ggml/include \
+zig cc -mcpu=baseline harness/graph_dump.c -o "$tmp/port" -std=c11 -I llama.cpp/ggml/include \
     "${PORT_LIBS[@]}" "${FRAMEWORKS[@]}" 2>"$tmp/port.log" \
     || { echo "FAIL: could not link against the ported libraries" >&2; tail -5 "$tmp/port.log" >&2; exit 1; }
 

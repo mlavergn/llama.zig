@@ -27,15 +27,14 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-zig cc harness/vecdot_prefix.c \
+zig cc -mcpu=baseline harness/vecdot_prefix.c \
     llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c \
     llama.cpp/ggml/src/ggml-cpu/quants.c \
     llama.cpp/ggml/src/ggml-quants.c \
     -o "$tmp/prefix" -std=c11 -w -O2 -ffp-contract=on \
     -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
     "${REF_LIBS[@]}" \
-    "$(xcrun --sdk macosx --show-sdk-path)/usr/lib/libc++.tbd" \
-    "$(xcrun --sdk macosx --show-sdk-path)/usr/lib/libc++abi.tbd" \
+    -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks"
 

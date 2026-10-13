@@ -29,7 +29,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
-CXX=(zig c++ -std=c++17 -w -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1"
+CXX=(zig c++ -mcpu=baseline -std=c++17 -w -O2
      -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu
      -I llama.cpp/ggml/src/ggml-metal
      -DNDEBUG -DGGML_USE_CPU -DGGML_USE_METAL -DGGML_METAL_EMBED_LIBRARY
@@ -51,10 +51,10 @@ echo "reference: $n exports renamed to ref_*"
 [ "$n" -eq 6 ] || { echo "FAIL: expected 6 renamed exports, got $n" >&2; exit 1; }
 
 # No "${RENAME[@]}" here: see the note above.
-zig cc harness/metal_diff.c -o "$tmp/metal_diff" -std=c11 -O2 \
+zig cc -mcpu=baseline harness/metal_diff.c -o "$tmp/metal_diff" -std=c11 -O2 \
     -I llama.cpp/ggml/include \
     "$tmp/ref_metal.o" "$LIB" \
-    "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }

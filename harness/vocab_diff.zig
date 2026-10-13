@@ -219,8 +219,8 @@ fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
     };
     defer c.gguf_free(gctx);
     const arch_k = c.gguf_find_key(gctx, "general.architecture");
-    const arch = if (arch_k >= 0) staged.gguf_meta.cString(c.gguf_get_val_str(gctx, arch_k)) else "(unknown)";
-    var meta = staged.gguf_meta.Meta.init(gctx, arch, if (cs.overrides.len != 0) ovr.items.ptr else null);
+    const arch_name = if (arch_k >= 0) staged.gguf_meta.cString(c.gguf_get_val_str(gctx, arch_k)) else "";
+    var meta = staged.gguf_meta.Meta.init(gctx, staged.arch.archFromString(arch_name), if (cs.overrides.len != 0) ovr.items.ptr else null);
     defer meta.deinit();
     var vocab = Vocab.init() catch unreachable;
     defer vocab.deinit();

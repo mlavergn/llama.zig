@@ -13,7 +13,13 @@ pub const impl = @import("impl.zig");
 pub const libcxx = @import("libcxx.zig");
 pub const regex = @import("regex.zig");
 pub const unicode = @import("unicode.zig");
+pub const arch = @import("arch.zig");
+pub const arch_table = @import("arch_table.zig");
 pub const gguf_meta = @import("gguf_meta.zig");
+pub const hparams = @import("hparams.zig");
+pub const loader = @import("loader.zig");
+pub const model = @import("model.zig");
+pub const model_table = @import("model_table.zig");
 pub const vocab = @import("vocab/module.zig");
 
 // -----------------------------------------------------------------------------

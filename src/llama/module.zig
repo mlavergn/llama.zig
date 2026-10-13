@@ -37,7 +37,11 @@ test {
     _ = @import("libcxx.zig");
     _ = @import("regex.zig");
     _ = @import("unicode.zig");
+    _ = @import("arch.zig");
     _ = @import("gguf_meta.zig");
+    _ = @import("hparams.zig");
+    _ = @import("loader.zig");
+    _ = @import("model.zig");
     _ = @import("vocab/module.zig");
     _ = @import("grammar/parser.zig");
     _ = @import("grammar/grammar.zig");

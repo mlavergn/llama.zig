@@ -15,7 +15,7 @@ Three decisions worth knowing before touching anything:
   - **No gate here can see it.** This machine is an Apple M5 Max with no `nvcc` and no NVIDIA GPU, and macOS has had no CUDA support since 10.13. Every correctness gate below is a local bit-exact diff, so for CUDA there are currently **none**. Resolving that is a prerequisite to writing CUDA code, not a follow-up — see the three options in `PLAN.md`.
 - **Our `llama-cli` mimics upstream's argument set** for the features we support, so an existing command line runs unchanged against it. It is our own Zig binary, not upstream's linked against our library.
 
-Where we are: **Stages 1, 2 and 3 complete; Stage 4 under way — all of `ggml/src/ggml-cpu/` and all of `ggml/src/ggml-metal/` are Zig** (apart from the two Obj-C `.m` files), **and libllama has begun: `llama-sampler.cpp` and `llama-grammar.cpp` are Zig** (`src/llama/`), **and the vocabulary is ported and gated in-process** — `llama-vocab.cpp`, `unicode.cpp` and `unicode-data.cpp`, with every tokenizer type — and swaps with the rest of libllama. The in-process harnesses compile staged ports through `src/llama/staged.zig`, which re-exports them without the sampler's exports `libllama.a` already defines.
+Where we are: **Stages 1, 2 and 3 complete; Stage 4 under way — all of `ggml/src/ggml-cpu/` and all of `ggml/src/ggml-metal/` are Zig** (apart from the two Obj-C `.m` files), **and libllama has begun: `llama-sampler.cpp` and `llama-grammar.cpp` are Zig** (`src/llama/`), **and the vocabulary is ported and gated in-process** — `llama-vocab.cpp`, `unicode.cpp` and `unicode-data.cpp`, with every tokenizer type — **and so is everything `llama_model_load` does before `load_tensors`**: `llama-arch.cpp`, `llama-hparams.cpp`, the metadata half of `llama-model-loader.cpp`, and `llama-model.cpp`'s hyperparameters and `print_info` with Qwen3.5's `load_arch_hparams` — and all of it swaps with the rest of libllama. The in-process harnesses compile staged ports through `src/llama/staged.zig`, which re-exports them without the sampler's exports `libllama.a` already defines.
 
 **libllama does not swap file by file, and that is measured.** The intersection that settled ggml's method gives the reverse answer on `libllama.a`: 27 C-ABI symbols cross a translation-unit boundary against 367 C++-linkage ones, and 22 core translation units plus every model form **one strongly connected component** — `llama_model` is a class hierarchy, the kv-caches implement `llama_memory_i`, the models call `llm_graph_context`. So libllama swaps **once, at `llama.h`** (`PLAN.md`, Decision 42), and everything else in it is developed beside the C++ and gated in-process through `llama.h` until then. **The sampler and grammar were the one exception**: `llama-context.cpp` reaches them through the C `llama_sampler_i` vtable and two plain-pointer mangled functions, so they swapped first. `src/llama/module.zig` roots the libllama module; `src/llama/impl.zig` holds its one `@cImport` of `llama.h`.
 
@@ -127,7 +127,7 @@ indistinguishable from one that passes.**
 
 **`make validate` is the fast check; parity is the real one.** `validate` runs formatting, the scaffold, the unit tests, the ported tests in both debug and release, `scripts/port-coverage`, `scripts/port-links`, and the graph diff. It proves the port is *consistent*, not *correct*.
 
-Correctness has nineteen gates, and none of them subsumes the others:
+Correctness has twenty-one gates, and none of them subsumes the others:
 
 - **`make graph-diff`** builds 131 nodes through every constructor family and diffs op, shape, strides, `op_params`, and `src[]` against the C. Needs no model. **The sharpest gate for the port's actual failure mode** — a constructor writing the wrong thing — and the only one that catches a halved softmax scale. It found the real `ggml_permute` bug.
 - **`make backend-ops`** runs upstream's `test-backend-ops` against our library: 21,093 op configurations, Metal against CPU, all passing. The broadest exercise, and the only one that *executes* the constructors at scale. **It cannot catch a consistently-wrong constructor** — both backends read the same `op_params` and agree. It catches crashes, assertion failures, and shapes a backend has no kernel for. `--diff` runs the same binary against the C reference and diffs the two
@@ -250,6 +250,8 @@ Correctness has nineteen gates, and none of them subsumes the others:
 - **`make regex-diff`** runs `src/llama/regex.zig` against libc++'s `std::regex` and `std::wregex` — a lazy grammar's trigger patterns use the first, `unicode_regex_split` both: upstream's real trigger patterns; random ECMAScript patterns, malformed ones included, through search, match and a `regex_iterator` under `optimize | nosubs` over a random sub-range; the traits tables swept over every byte; and the wide engine swept over **all 0x110000 code points**, both matching and compiling. 43,537,552 checks, ~60 s. **It passed with the `NUL` collating name deleted** until the table sweep was added: random patterns only ever reached `[.space.]`. Negative-tested 6/6 on the wide and iterator additions.
 - **`make unicode-diff`** links the unmodified `unicode.cpp` and `unicode-data.cpp` beside `src/llama/unicode.zig` and compares: every code point's flags, case, Han-ness, NFD and encoding; every one- and two-byte UTF-8 string and boundary-chosen longer ones; the GPT-2 byte map both ways; and `unicode_regex_split` for **every pattern set in `llama-vocab.cpp`**, extracted at run time so the list cannot drift, plus synthetic sets for the collapse and error paths, over upstream's vocab test strings and 1,500 random ones. 7,070,454 checks. Its only caller is `llama-vocab.cpp`, so nothing downstream can see it until the vocabulary swaps. Negative-tested 13/13 effective — a fourteenth, kimi-k2's leading-character backtrack, is dead code in the C++ and so inert.
 - **`make vocab-diff`** loads every vocabulary file twice in one process — through the C++ in `libllama.a` (`llama_model_load_from_file`, `vocab_only`) and through `src/llama/vocab/` on the same metadata — and compares what loading logged (every `load:` line and the `print_info` block, or the exact error text), every `llama_vocab_*` scalar, every token's text, score bits and attributes, every piece under `special` × `lstrip` × buffer size, and tokenize/detokenize of upstream's vocab test strings plus random text with special tokens spliced in, under every flag combination. 19 upstream files, the local Qwen3.5 model, and 22 synthesized ones: RWKV, PLaMo-2, `hybriddna`, `whitespace`, `none`, flag and override variants, five load errors, and four cases built **because an injected fault escaped without them**. 55,016,050 checks, ~15 s. Negative-tested 23/23 effective, one provably inert.
+- **`make arch-diff`** asks `src/llama/arch.zig` and the C++ `llama-arch.o` every lookup `llama-arch.cpp` answers: every architecture's name and five predicates, `llm_arch_all`, `llm_arch_from_string` on every name and near misses, every metadata key for every architecture with and without a suffix, every tensor name over block and expert indices at the edges of `int`, every tensor info. The four tables are **generated** (`scripts/gen-arch`) and indexed by enum ordinal, so a name compared at an ordinal checks the enum's order too; ordinals past each enum's end go to the C++ alone and must miss its maps, and the two tensors with no name must make *both* sides abort, in forked children. 124,290 checks, ~1 s. Negative-tested 9/9.
+- **`make loader-diff`** runs the metadata half of `llama_model_load` twice per file in one process — through the C++ (`harness/loader_ref.cpp` drives `llama_model_loader`, `llama_model_create`, `load_hparams`, `load_vocab` and `print_info` exactly as `llama_model_load` does, stopping before `load_tensors`) and through `model.loadMetadata` — and compares **everything logged**, the error text, and **every `llama_hparams` member**: the C++ object is read through the port's layout-identical `Hparams` after every member's offset and size is checked against `offsetof` and `sizeof`. `Hparams`'s fields are generated (`scripts/gen-hparams`), as are the model-size names, the RoPE rules and the architecture-to-class map (`scripts/gen-model-tables`). Every upstream vocabulary file vocab-only and full, the local Qwen3.5 model, Qwen3.5's metadata edited one key at a time (38 edits, overrides of every type), small files with real tensors for the file-type guess and the bounds check, and seven split sets. 13,719 checks, ~35 s. Negative-tested 14/14. An architecture without a ported `load_arch_hparams` loads vocab-only, and past that its log must be a prefix of the C++'s — **which an empty log trivially is**, so a loaded or unported case must have logged something on both sides.
 - **`scripts/parity-port`** diffs generated tokens against `llama.cpp.zmake`. `--cpu` (`make parity-port-cpu`) loads the model on the CPU device alone, so the ported CPU kernels carry the whole forward pass — on a Metal machine they otherwise never do; it was 4/6 prompts divergent until the three epilogues above were fixed. End-to-end and **coarse** — measured, not guessed: doubling RoPE's `freq_base` passes, and so does halving the softmax scale. It catches structural faults (`ADD` as `SUB` fails all six prompts) and gross numeric ones (`freq_base = 1.0` fails all six). Never read a parity pass as "the numerics are right".
 
 `scripts/port-links` is not on that list because it checks nothing about what the code *computes*. It keeps the port's map back to upstream honest, which is a maintenance gate rather than a correctness one.
@@ -329,9 +331,13 @@ goldens.
 
 The sampler's output depends on choices the C++ standard leaves to the
 library, so `src/llama/libcxx.zig` and `src/llama/regex.zig` reproduce
-Apple's libc++ 22.1.6 — the SDK's `c++/v1`, which `build/llamacpp.zig`
-compiles the reference against — rather than any correct algorithm. Two
-things about that were learned the hard way:
+the libc++ the reference links rather than any correct algorithm. They were
+read from Apple's libc++ 22.1.6, the SDK's `c++/v1`; since Zig 0.17 the
+reference links **Zig's bundled 22.1.8** instead. The two have the same ABI
+configuration, and every header these ports reproduce — `<regex>`,
+`<random>`, `__hash_table`, `hash.h`, `sort`, `partial_sort`, `make_heap`,
+`sift_down` — is byte-identical between them; `libcxx-diff` and `regex-diff`
+cover the compiled half. Two things about that were learned the hard way:
 
 - **libc++ heapifies arithmetic element types differently.** `__make_heap`
   takes `__assume_both_children = is_arithmetic<value_type>`: it sifts over
@@ -497,15 +503,6 @@ tracked by this one.
 ## What we own
 
 `build.zig`, `build.zig.zon`, `build/`, `src/`, `cli/`, `harness/`, `scripts/`, `Makefile`, and the markdown at the root. That is the whole of this project's code.
-
-**`testcase/` is the one temporary directory, and it is meant to be deleted.**
-It reproduces and diagnoses a toolchain failure, not anything this project
-owns: Zig 0.16.0 cannot build its bundled libc++ against the macOS 27 SDK, so
-no C++ can be linked, and `build.zig` plus four scripts link Apple's libc++
-instead. `make -C testcase cxx20` passing is the signal that the toolchain is
-fixed — at which point restore `.link_libcpp = true` at the seven sites, put
-`-lc++` back in the scripts, and delete `testcase/`. Its `README.md` has the
-full diagnosis and the revert list.
 
 `LICENSE` (MIT) and `NOTICE` are load-bearing, not boilerplate: every file under `src/` is a translation of MIT-licensed C, so this is a derivative work and the ggml authors' copyright has to travel with it. Keep the per-file provenance comments — they are how a reader traces a translation back to its source.
 
@@ -685,7 +682,7 @@ For when Stages 3 and 4 begin:
 Facts established by getting `zig build reference` working. They are easy to
 rediscover the hard way, so they are recorded here.
 
-- **`zig cc`, `zig c++`, and Obj-C all work** against the macOS SDK under Zig 0.16.0, including `-framework Foundation` and libc++.
+- **`zig cc`, `zig c++`, and Obj-C all work** against the macOS SDK under Zig 0.17.0, including `-framework Foundation` and Zig's bundled libc++. Zig 0.16.0 could not build that libc++ against SDK 27 — `random.cpp` under a hardcoded `-std=c++23` lost `INFINITY` to the SDK's modules guard — so for a while everything linked Apple's `libc++.tbd` instead. `NOTES.md` has the diagnosis.
 - **Do not pass `-fobjc-arc`.** Upstream's `.m` files use manual reference counting and bridge freely between `void *` and Obj-C object pointers; ARC rejects them outright.
 - **`sanitize_c` must be `.off`.** Zig enables the C sanitizers in Debug, and upstream is not UBSan-clean — it aborts in `llama-graph.cpp` on `applying non-zero offset to null pointer`. Reference code compiles as shipped; we do not fix it.
 - **The Metal shaders need no `xcrun metal`.** With `GGML_METAL_EMBED_LIBRARY`, the `.metal` *source* is flattened and `.incbin`-ed into a `__DATA,__ggml_metallib` section, and the driver compiles it at load time. `build/metal_embed.zig` does the flattening. Never enable the non-embed path: it requires `xcrun -sdk macosx metal`, which Zig can never replace.

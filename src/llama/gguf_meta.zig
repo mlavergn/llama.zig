@@ -7,16 +7,13 @@
 //! - `llama.cpp/src/llama-model-loader.cpp` -- `GGUFMeta::GKV`, the typed
 //!   getter with its override handling, `llama_model_loader::get_key`, and
 //!   the override map the constructor builds
-//! - `llama.cpp/src/llama-arch.cpp` -- the `LLM_KV_NAMES` entries for the
-//!   keys read here, and `LLM_KV::operator()`
 //!
 //! All at v0.3.0 (`c1d0e7a00`).
 //!
 //! # Scope
 //!
-//! The keys `llama-vocab.cpp` reads, which is what is ported so far. The
-//! model loader's port extends `Kv` with the rest of `LLM_KV_NAMES`; the
-//! getter does not change.
+//! The getter for the types `llama-vocab.cpp` reads. Key names come from
+//! `arch.zig`, which carries every `llm_kv`.
 //!
 //! # Strings stop at the first NUL
 //!
@@ -27,91 +24,13 @@
 
 const std = @import("std");
 const impl = @import("impl.zig");
+const arch = @import("arch.zig");
 
 const c = impl.c;
 const allocator = impl.allocator;
 
-/// The `llm_kv` values read so far, with their `LLM_KV_NAMES` formats.
-pub const Kv = enum {
-    general_architecture,
-    general_name,
-    vocab_size,
-    tokenizer_model,
-    tokenizer_pre,
-    tokenizer_list,
-    tokenizer_token_type,
-    tokenizer_token_type_count,
-    tokenizer_scores,
-    tokenizer_merges,
-    tokenizer_bos_id,
-    tokenizer_eos_id,
-    tokenizer_eot_id,
-    tokenizer_eom_id,
-    tokenizer_unk_id,
-    tokenizer_sep_id,
-    tokenizer_pad_id,
-    tokenizer_mask_id,
-    tokenizer_add_bos,
-    tokenizer_add_eos,
-    tokenizer_add_sep,
-    tokenizer_add_prefix,
-    tokenizer_remove_extra_ws,
-    tokenizer_precompiled_charsmap,
-    tokenizer_normalizer_lowercase,
-    tokenizer_normalizer_strip_accents,
-    tokenizer_fim_pre_id,
-    tokenizer_fim_suf_id,
-    tokenizer_fim_mid_id,
-    tokenizer_fim_pad_id,
-    tokenizer_fim_rep_id,
-    tokenizer_fim_sep_id,
-    tokenizer_suppress_tokens,
-    tokenizer_prefix_id,
-    tokenizer_suffix_id,
-    tokenizer_middle_id,
-
-    /// Ports the `LLM_KV_NAMES` entries (llama-arch.cpp:159 @c1d0e7a00).
-    fn format(self: Kv) []const u8 {
-        return switch (self) {
-            .general_architecture => "general.architecture",
-            .general_name => "general.name",
-            .vocab_size => "%s.vocab_size",
-            .tokenizer_model => "tokenizer.ggml.model",
-            .tokenizer_pre => "tokenizer.ggml.pre",
-            .tokenizer_list => "tokenizer.ggml.tokens",
-            .tokenizer_token_type => "tokenizer.ggml.token_type",
-            .tokenizer_token_type_count => "tokenizer.ggml.token_type_count",
-            .tokenizer_scores => "tokenizer.ggml.scores",
-            .tokenizer_merges => "tokenizer.ggml.merges",
-            .tokenizer_bos_id => "tokenizer.ggml.bos_token_id",
-            .tokenizer_eos_id => "tokenizer.ggml.eos_token_id",
-            .tokenizer_eot_id => "tokenizer.ggml.eot_token_id",
-            .tokenizer_eom_id => "tokenizer.ggml.eom_token_id",
-            .tokenizer_unk_id => "tokenizer.ggml.unknown_token_id",
-            .tokenizer_sep_id => "tokenizer.ggml.seperator_token_id",
-            .tokenizer_pad_id => "tokenizer.ggml.padding_token_id",
-            .tokenizer_mask_id => "tokenizer.ggml.mask_token_id",
-            .tokenizer_add_bos => "tokenizer.ggml.add_bos_token",
-            .tokenizer_add_eos => "tokenizer.ggml.add_eos_token",
-            .tokenizer_add_sep => "tokenizer.ggml.add_sep_token",
-            .tokenizer_add_prefix => "tokenizer.ggml.add_space_prefix",
-            .tokenizer_remove_extra_ws => "tokenizer.ggml.remove_extra_whitespaces",
-            .tokenizer_precompiled_charsmap => "tokenizer.ggml.precompiled_charsmap",
-            .tokenizer_normalizer_lowercase => "tokenizer.ggml.normalizer.lowercase",
-            .tokenizer_normalizer_strip_accents => "tokenizer.ggml.normalizer.strip_accents",
-            .tokenizer_fim_pre_id => "tokenizer.ggml.fim_pre_token_id",
-            .tokenizer_fim_suf_id => "tokenizer.ggml.fim_suf_token_id",
-            .tokenizer_fim_mid_id => "tokenizer.ggml.fim_mid_token_id",
-            .tokenizer_fim_pad_id => "tokenizer.ggml.fim_pad_token_id",
-            .tokenizer_fim_rep_id => "tokenizer.ggml.fim_rep_token_id",
-            .tokenizer_fim_sep_id => "tokenizer.ggml.fim_sep_token_id",
-            .tokenizer_suppress_tokens => "tokenizer.ggml.suppress_tokens",
-            .tokenizer_prefix_id => "tokenizer.ggml.prefix_token_id",
-            .tokenizer_suffix_id => "tokenizer.ggml.suffix_token_id",
-            .tokenizer_middle_id => "tokenizer.ggml.middle_token_id",
-        };
-    }
-};
+/// The metadata keys, generated from `llm_kv`; see `arch.zig`.
+pub const Kv = arch.Kv;
 
 /// A string value as the C++ sees it through a `const char *`: up to the
 /// first NUL.
@@ -122,8 +41,8 @@ pub fn cString(p: [*c]const u8) []const u8 {
 /// The metadata of one GGUF file, with the caller's overrides.
 pub const Meta = struct {
     ctx: *const c.gguf_context,
-    /// `LLM_ARCH_NAMES.at(arch)`: the architecture name `%s` keys take.
-    arch_name: []const u8,
+    /// The architecture whose name `%s` keys take.
+    arch: arch.Arch,
     /// `kv_overrides`, keyed by the override's key.
     overrides: std.StringHashMapUnmanaged(c.llama_model_kv_override) = .empty,
 
@@ -134,12 +53,12 @@ pub const Meta = struct {
     ///
     /// Parameters:
     /// - `ctx`: the metadata; borrowed for the `Meta`'s lifetime.
-    /// - `arch_name`: the architecture's name; borrowed likewise.
+    /// - `which`: the architecture keys are named for.
     /// - `overrides`: the caller's list, or null.
     ///
     /// Return: the reader; free it with `deinit`.
-    pub fn init(ctx: *const c.gguf_context, arch_name: []const u8, overrides: ?[*]const c.llama_model_kv_override) Meta {
-        var m: Meta = .{ .ctx = ctx, .arch_name = arch_name };
+    pub fn init(ctx: *const c.gguf_context, which: arch.Arch, overrides: ?[*]const c.llama_model_kv_override) Meta {
+        var m: Meta = .{ .ctx = ctx, .arch = which };
         if (overrides) |list| {
             var i: usize = 0;
             while (list[i].key[0] != 0) : (i += 1) {
@@ -156,31 +75,29 @@ pub const Meta = struct {
         self.overrides.deinit(allocator);
     }
 
-    /// Ports the call operator of `LLM_KV` (llama-arch.cpp:923 @c1d0e7a00):
-    /// the format with the architecture name substituted, with no suffix.
+    /// The key's name, as `LLM_KV(arch)(kv)` formats it; see `arch.kvName`.
     ///
-    /// Parameters:
-    /// - `kv`: the key.
-    /// - `buf`: receives the name.
-    ///
-    /// Return: the name, borrowed from `buf`.
-    pub fn name(self: *const Meta, kv: Kv, buf: []u8) []const u8 {
-        const f = kv.format();
-        if (std.mem.find(u8, f, "%s")) |at| {
-            return std.mem.print(buf, "{s}{s}{s}", .{ f[0..at], self.arch_name, f[at + 2 ..] }) catch buf[0..0];
-        }
-        return f;
+    /// Return: the name.
+    pub fn name(self: *const Meta, kv: Kv) arch.Name {
+        return arch.kvName(self.arch, kv, null);
     }
 
     /// `gguf_find_key` on a key's name.
     ///
     /// Return: the key's index, or -1.
     pub fn find(self: *const Meta, kv: Kv) i64 {
-        var buf: [256]u8 = undefined;
-        var zbuf: [257]u8 = undefined;
-        const n = self.name(kv, &buf);
-        @memcpy(zbuf[0..n.len], n);
-        zbuf[n.len] = 0;
+        const n = self.name(kv);
+        return self.findNamed(n.slice());
+    }
+
+    /// `gguf_find_key` on a name.
+    ///
+    /// Return: the key's index, or -1.
+    pub fn findNamed(self: *const Meta, key: []const u8) i64 {
+        var zbuf: [arch.max_name + 1]u8 = undefined;
+        if (key.len > arch.max_name) return -1;
+        @memcpy(zbuf[0..key.len], key);
+        zbuf[key.len] = 0;
         return c.gguf_find_key(self.ctx, &zbuf);
     }
 
@@ -190,7 +107,8 @@ pub const Meta = struct {
     /// stored value, which must be exactly the type `T` maps to.
     ///
     /// Parameters:
-    /// - `T`: `bool`, `u32` or `[]const u8` (`std`'s `string`).
+    /// - `T`: `bool`, an integer of 8 to 64 bits, `c_int`, `f32`, `f64`, or
+    ///   `[]const u8` (`std::string`).
     /// - `kv`: the key.
     /// - `required`: whether a missing key throws.
     /// - `exc`: receives what is thrown.
@@ -199,40 +117,267 @@ pub const Meta = struct {
     /// `error.Thrown` -- a wrong stored type or a missing required key. A
     /// string borrows from the metadata or the override.
     pub fn getKey(self: *const Meta, comptime T: type, kv: Kv, required: bool, exc: *impl.Exception) impl.Thrown!?T {
-        var buf: [256]u8 = undefined;
-        const key = self.name(kv, &buf);
+        const n = self.name(kv);
+        return self.getKeyNamed(T, n.slice(), required, exc);
+    }
+
+    /// `getKey` on a name rather than an `llm_kv`, as the `std::string`
+    /// overload of `get_key` takes one.
+    pub fn getKeyNamed(self: *const Meta, comptime T: type, key: []const u8, required: bool, exc: *impl.Exception) impl.Thrown!?T {
         const ovrd = self.overrides.getPtr(key);
         if (tryOverride(T, ovrd)) |v| return v;
 
-        const k = self.find(kv);
+        const k = self.findNamed(key);
         if (k < 0) {
             if (required) return exc.throw(.runtime_error, "key not found in model: {s}", .{key});
             return null;
         }
         return try getKv(self.ctx, T, k, exc);
     }
+
+    /// Ports the `llama_pooling_type` specialization of `get_key`
+    /// (llama-model-loader.cpp:441 @c1d0e7a00): a `uint32_t` read, and
+    /// `LLAMA_POOLING_TYPE_UNSPECIFIED` when the key is absent.
+    ///
+    /// Return: the pooling type, or `error.Thrown`.
+    pub fn getPoolingType(self: *const Meta, kv: Kv, required: bool, exc: *impl.Exception) impl.Thrown!c_int {
+        const v = (try self.getKey(u32, kv, required, exc)) orelse return c.LLAMA_POOLING_TYPE_UNSPECIFIED;
+        return @bitCast(v);
+    }
+
+    /// Ports `llama_model_loader`'s `get_arr_n` (llama-model-loader.cpp:276
+    /// @c1d0e7a00): the length of an array-typed key.
+    ///
+    /// Return: the length, null when absent and not required, or
+    /// `error.Thrown` -- a missing required key or a key that is not an array.
+    pub fn getArrN(self: *const Meta, kv: Kv, required: bool, exc: *impl.Exception) impl.Thrown!?u32 {
+        const n = self.name(kv);
+        const key = n.slice();
+        const k = self.findNamed(key);
+        if (k < 0) {
+            if (required) return exc.throw(.runtime_error, "key not found in model: {s}", .{key});
+            return null;
+        }
+        const info = try arrayInfo(self.ctx, k, exc);
+        return @truncate(info.length);
+    }
+
+    /// Ports the `std::array` overload of `llama_model_loader`'s `get_arr`
+    /// (llama-model-loader.cpp:350 @c1d0e7a00): an array key into `result`,
+    /// whose length is `N_MAX`. A boolean array converts to 0 and 1.
+    ///
+    /// Parameters:
+    /// - `T`: `i32`, `u32`, `c_int` or `f32`.
+    /// - `key`: the key's name.
+    /// - `result`: receives the elements; the rest is left alone.
+    /// - `required`: whether a missing key throws.
+    /// - `exc`: receives what is thrown.
+    ///
+    /// Return: whether the key was read, or `error.Thrown`.
+    pub fn getArrInto(self: *const Meta, comptime T: type, key: []const u8, result: []T, required: bool, exc: *impl.Exception) impl.Thrown!bool {
+        const k = self.findNamed(key);
+        if (k < 0 or c.gguf_get_kv_type(self.ctx, k) != c.GGUF_TYPE_ARRAY) {
+            if (required) return exc.throw(.runtime_error, "array key not found in model: {s}", .{key});
+            return false;
+        }
+        const info = try arrayInfo(self.ctx, k, exc);
+        const type_ok = switch (info.gt) {
+            c.GGUF_TYPE_BOOL, c.GGUF_TYPE_UINT32, c.GGUF_TYPE_INT32 => isInt32(T),
+            c.GGUF_TYPE_FLOAT32 => T == f32,
+            c.GGUF_TYPE_STRING => false,
+            else => return exc.throw(.runtime_error, "{s} is not a string/float32/uint32/int32 array", .{key}),
+        };
+        if (!type_ok) return exc.throw(.runtime_error, "{s} has wrong array element type {s}", .{ key, cString(c.gguf_type_name(info.gt)) });
+        if (info.length > result.len) {
+            return exc.throw(.runtime_error, "array length {d} for key {s} exceeds max {d}", .{
+                @as(u32, @truncate(info.length)), key, @as(u32, @truncate(result.len)),
+            });
+        }
+        if (info.gt == c.GGUF_TYPE_BOOL) {
+            const values: [*]const i8 = @ptrCast(info.data.?);
+            for (result[0..info.length], values[0..info.length]) |*r, x| r.* = @intFromBool(x != 0);
+        } else {
+            const values: [*]align(1) const T = @ptrCast(info.data.?);
+            for (result[0..info.length], values[0..info.length]) |*r, x| r.* = x;
+        }
+        return true;
+    }
+
+    /// `getArrInto` on an `llm_kv`.
+    pub fn getArr(self: *const Meta, comptime T: type, kv: Kv, result: []T, required: bool, exc: *impl.Exception) impl.Thrown!bool {
+        const n = self.name(kv);
+        return self.getArrInto(T, n.slice(), result, required, exc);
+    }
+
+    /// Ports the `std::vector` overload of `llama_model_loader`'s `get_arr`
+    /// (llama-model-loader.cpp:305 @c1d0e7a00): an array key as a new list.
+    /// Unlike the `std::array` overload, a boolean array is refused.
+    ///
+    /// Parameters:
+    /// - `T`: `i32`, `u32`, `f32`, or `[]const u8` for a string array,
+    ///   whose elements borrow from the metadata.
+    /// - `kv`: the key.
+    /// - `required`: whether a missing key throws.
+    /// - `exc`: receives what is thrown.
+    ///
+    /// Return: the elements, owned by the caller and freed with `impl.allocator`;
+    /// null when absent and not required; or `error.Thrown`.
+    pub fn getArrList(self: *const Meta, comptime T: type, kv: Kv, required: bool, exc: *impl.Exception) impl.Thrown!?[]T {
+        const n = self.name(kv);
+        const key = n.slice();
+        const k = self.findNamed(key);
+        if (k < 0 or c.gguf_get_kv_type(self.ctx, k) != c.GGUF_TYPE_ARRAY) {
+            if (required) return exc.throw(.runtime_error, "array key not found in model: {s}", .{key});
+            return null;
+        }
+        const info = try arrayInfo(self.ctx, k, exc);
+        const type_ok = switch (info.gt) {
+            c.GGUF_TYPE_UINT32, c.GGUF_TYPE_INT32 => T != []const u8 and isInt32(T),
+            c.GGUF_TYPE_FLOAT32 => T == f32,
+            c.GGUF_TYPE_STRING => T == []const u8,
+            else => return exc.throw(.runtime_error, "{s} is not a string/float32/uint32/int32 array", .{key}),
+        };
+        if (!type_ok) return exc.throw(.runtime_error, "{s} has wrong array element type {s}", .{ key, cString(c.gguf_type_name(info.gt)) });
+        const out = allocator.alloc(T, info.length) catch impl.abort("gguf_meta", 0, "out of memory");
+        if (T == []const u8) {
+            for (out, 0..) |*r, i| r.* = cString(c.gguf_get_arr_str(self.ctx, k, i));
+        } else {
+            const values: [*]align(1) const T = @ptrCast(info.data.?);
+            for (out, values[0..info.length]) |*r, x| r.* = x;
+        }
+        return out;
+    }
+
+    /// Ports the `std::array` form of `llama_model_loader`'s `get_key_or_arr`
+    /// (llama-model-loader.cpp:454 @c1d0e7a00): an array of exactly `n`
+    /// elements, or one value repeated `n` times.
+    ///
+    /// Parameters:
+    /// - `T`: `u32`, `c_int` or `f32`.
+    /// - `kv`: the key.
+    /// - `result`: receives the elements; its length is `N_MAX`.
+    /// - `n`: how many elements.
+    /// - `required`: whether a missing key throws.
+    /// - `exc`: receives what is thrown.
+    ///
+    /// Return: whether the key was read, or `error.Thrown`.
+    pub fn getKeyOrArr(self: *const Meta, comptime T: type, kv: Kv, result: []T, n: u32, required: bool, exc: *impl.Exception) impl.Thrown!bool {
+        const nm = self.name(kv);
+        const key = nm.slice();
+        const k = self.findNamed(key);
+        if (k < 0) {
+            if (required) return exc.throw(.runtime_error, "key not found in model: {s}", .{key});
+            return false;
+        }
+        if (n > result.len) {
+            return exc.throw(.runtime_error, "n > N_MAX: {d} > {d} for key {s}", .{ n, @as(u32, @truncate(result.len)), key });
+        }
+        if (c.gguf_get_kv_type(self.ctx, k) == c.GGUF_TYPE_ARRAY) {
+            const info = try arrayInfo(self.ctx, k, exc);
+            if (n != info.length) {
+                return exc.throw(.runtime_error, "key {s} has wrong array length; expected {d}, got {d}", .{
+                    key, n, @as(u32, @truncate(info.length)),
+                });
+            }
+            return self.getArrInto(T, key, result, required, exc);
+        }
+        const value = (try self.getKeyNamed(T, key, required, exc)) orelse return false;
+        for (result[0..n]) |*r| r.* = value;
+        return true;
+    }
+
+    /// Ports the scalar form of `llama_model_loader`'s `get_key_or_arr`
+    /// (llama-model-loader.cpp:498 @c1d0e7a00): a `uint32_t`, refusing an
+    /// array -- with a throw only when the key is required.
+    ///
+    /// Return: the value, null when absent or an array and not required, or
+    /// `error.Thrown`.
+    pub fn getKeyOrArrScalar(self: *const Meta, kv: Kv, required: bool, exc: *impl.Exception) impl.Thrown!?u32 {
+        const nm = self.name(kv);
+        const key = nm.slice();
+        const id = self.findNamed(key);
+        if (id < 0) {
+            if (required) return exc.throw(.runtime_error, "key not found in model: {s}", .{key});
+            return null;
+        }
+        if (c.gguf_get_kv_type(self.ctx, id) == c.GGUF_TYPE_ARRAY) {
+            if (required) return exc.throw(.runtime_error, "expected scalar, found array for key: {s}", .{key});
+            return null;
+        }
+        return self.getKeyNamed(u32, key, required, exc);
+    }
 };
 
+fn isInt32(comptime T: type) bool {
+    return T == i32 or T == u32 or T == c_int;
+}
+
+/// Ports `GGUFMeta`'s `ArrayInfo` (llama-model-loader.cpp:140 @c1d0e7a00).
+const ArrayInfo = struct {
+    gt: c.enum_gguf_type,
+    length: usize,
+    data: ?*const anyopaque,
+};
+
+/// `GGUFMeta::GKV<ArrayInfo>::get_kv`: the array's element type, length and
+/// data, or a throw when the key is not an array.
+fn arrayInfo(ctx: *const c.gguf_context, k: i64, exc: *impl.Exception) impl.Thrown!ArrayInfo {
+    try checkType(ctx, k, c.GGUF_TYPE_ARRAY, exc);
+    const arr_type = c.gguf_get_arr_type(ctx, k);
+    return .{
+        .gt = arr_type,
+        .length = c.gguf_get_arr_n(ctx, k),
+        .data = if (arr_type == c.GGUF_TYPE_STRING) null else c.gguf_get_arr_data(ctx, k),
+    };
+}
+
+/// The storage type of `T`: `c_int` is `int32_t`.
+fn Stored(comptime T: type) type {
+    return if (T == c_int) i32 else T;
+}
+
 fn ggufType(comptime T: type) c.enum_gguf_type {
-    return switch (T) {
+    return switch (Stored(T)) {
         bool => c.GGUF_TYPE_BOOL,
+        u8 => c.GGUF_TYPE_UINT8,
+        u16 => c.GGUF_TYPE_UINT16,
         u32 => c.GGUF_TYPE_UINT32,
+        u64 => c.GGUF_TYPE_UINT64,
+        i8 => c.GGUF_TYPE_INT8,
+        i16 => c.GGUF_TYPE_INT16,
+        i32 => c.GGUF_TYPE_INT32,
+        i64 => c.GGUF_TYPE_INT64,
+        f32 => c.GGUF_TYPE_FLOAT32,
+        f64 => c.GGUF_TYPE_FLOAT64,
         []const u8 => c.GGUF_TYPE_STRING,
         else => @compileError("unsupported metadata type"),
     };
 }
 
-/// Ports `GGUFMeta::GKV<T>`'s `get_kv` (llama-model-loader.cpp:164 @c1d0e7a00).
-fn getKv(ctx: *const c.gguf_context, comptime T: type, k: i64, exc: *impl.Exception) impl.Thrown!T {
+fn checkType(ctx: *const c.gguf_context, k: i64, want: c.enum_gguf_type, exc: *impl.Exception) impl.Thrown!void {
     const kt = c.gguf_get_kv_type(ctx, k);
-    if (kt != ggufType(T)) {
+    if (kt != want) {
         return exc.throw(.runtime_error, "key {s} has wrong type {s} but expected type {s}", .{
-            cString(c.gguf_get_key(ctx, k)), cString(c.gguf_type_name(kt)), cString(c.gguf_type_name(ggufType(T))),
+            cString(c.gguf_get_key(ctx, k)), cString(c.gguf_type_name(kt)), cString(c.gguf_type_name(want)),
         });
     }
-    return switch (T) {
+}
+
+/// Ports `GGUFMeta::GKV<T>`'s `get_kv` (llama-model-loader.cpp:164 @c1d0e7a00).
+fn getKv(ctx: *const c.gguf_context, comptime T: type, k: i64, exc: *impl.Exception) impl.Thrown!T {
+    try checkType(ctx, k, ggufType(T), exc);
+    return switch (Stored(T)) {
         bool => c.gguf_get_val_bool(ctx, k),
+        u8 => c.gguf_get_val_u8(ctx, k),
+        u16 => c.gguf_get_val_u16(ctx, k),
         u32 => c.gguf_get_val_u32(ctx, k),
+        u64 => c.gguf_get_val_u64(ctx, k),
+        i8 => c.gguf_get_val_i8(ctx, k),
+        i16 => c.gguf_get_val_i16(ctx, k),
+        i32 => c.gguf_get_val_i32(ctx, k),
+        i64 => c.gguf_get_val_i64(ctx, k),
+        f32 => c.gguf_get_val_f32(ctx, k),
+        f64 => c.gguf_get_val_f64(ctx, k),
         []const u8 => cString(c.gguf_get_val_str(ctx, k)),
         else => unreachable,
     };
@@ -270,17 +415,22 @@ fn validateOverride(expected: c.enum_llama_model_kv_override_type, ovrd: ?*const
     return false;
 }
 
-/// Ports the `GGUFMeta::GKV::try_override` overloads for the types read
-/// here, one each for bool, integers and strings: `try_override`,
-/// `try_override`, `try_override` (llama-model-loader.cpp:217, 227, 247
-/// @c1d0e7a00). An integer override is the `int64_t` narrowed to `T`, as
-/// the C++'s assignment narrows it.
+/// Ports the four `GGUFMeta::GKV::try_override` overloads -- bool, integer,
+/// floating point, string: `try_override`, `try_override`, `try_override`,
+/// `try_override` (llama-model-loader.cpp:217, 227, 237, 247 @c1d0e7a00).
+/// An integer override is the `int64_t` narrowed to `T` and a float one the
+/// `double` rounded to `T`, as the C++'s assignments convert them.
 fn tryOverride(comptime T: type, ovrd: ?*const c.llama_model_kv_override) ?T {
     switch (T) {
         bool => if (validateOverride(c.LLAMA_KV_OVERRIDE_TYPE_BOOL, ovrd)) return ovrd.?.unnamed_0.val_bool,
-        u32 => if (validateOverride(c.LLAMA_KV_OVERRIDE_TYPE_INT, ovrd)) return @truncate(@as(u64, @bitCast(ovrd.?.unnamed_0.val_i64))),
         []const u8 => if (validateOverride(c.LLAMA_KV_OVERRIDE_TYPE_STR, ovrd)) return cString(&ovrd.?.unnamed_0.val_str),
-        else => @compileError("unsupported metadata type"),
+        f32, f64 => if (validateOverride(c.LLAMA_KV_OVERRIDE_TYPE_FLOAT, ovrd)) return @floatCast(ovrd.?.unnamed_0.val_f64),
+        else => {
+            const U = @Int(.unsigned, @bitSizeOf(T));
+            if (validateOverride(c.LLAMA_KV_OVERRIDE_TYPE_INT, ovrd)) {
+                return @bitCast(@as(U, @truncate(@as(u64, @bitCast(ovrd.?.unnamed_0.val_i64)))));
+            }
+        },
     }
     return null;
 }
@@ -293,8 +443,7 @@ test {
 }
 
 test "an arch-prefixed key takes the architecture name" {
-    var buf: [64]u8 = undefined;
-    const m: Meta = .{ .ctx = undefined, .arch_name = "qwen35" };
-    try std.testing.expectEqualStrings("qwen35.vocab_size", m.name(.vocab_size, &buf));
-    try std.testing.expectEqualStrings("tokenizer.ggml.model", m.name(.tokenizer_model, &buf));
+    const m: Meta = .{ .ctx = undefined, .arch = .qwen35 };
+    try std.testing.expectEqualStrings("qwen35.vocab_size", m.name(.vocab_size).slice());
+    try std.testing.expectEqualStrings("tokenizer.ggml.model", m.name(.tokenizer_model).slice());
 }

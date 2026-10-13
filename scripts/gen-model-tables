@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""Generate the llama-model.cpp tables that are pure transcription.
+
+- `llm_type` (llama-model.h) and `llm_type_name`'s switch: 120-odd model
+  sizes and their names.
+- `llama_model_rope_type`'s switch: which RoPE every architecture uses.
+  Most case groups end in a plain `return LLAMA_ROPE_TYPE_X;`; the few that
+  decide from the hyperparameters are listed here by name and ported by
+  hand in `model.zig`, and the generator stops if that list and the source
+  disagree -- a new conditional case upstream must not become a silent
+  fixed one.
+
+Writes:
+  src/llama/model_table.zig
+
+Run after moving the upstream pin. `make loader-diff` compares the results
+against the C++.
+"""
+import re
+import sys
+
+HDR = "llama.cpp/src/llama-model.h"
+SRC = "llama.cpp/src/llama-model.cpp"
+ARCH_HDR = "llama.cpp/src/llama-arch.h"
+COMMIT = "c1d0e7a00"
+OUT = "src/llama/model_table.zig"
+
+# Case groups whose return reads the model; model.zig ports these.
+CONDITIONAL = {"LLM_ARCH_DFLASH", "LLM_ARCH_GLM4", "LLM_ARCH_GLM4_MOE", "LLM_ARCH_HUNYUAN_VL"}
+
+hdr = open(HDR).read()
+src = open(SRC).read()
+arch_hdr = open(ARCH_HDR).read()
+
+
+def line_of(text, needle):
+    return text.count("\n", 0, text.index(needle)) + 1
+
+
+def enum_body(text, name):
+    m = re.search(r"enum " + name + r" \{(.*?)\n\};", text, re.S)
+    if not m:
+        sys.exit(f"gen-model-tables: enum {name} not found")
+    vals = re.findall(r"^\s*([A-Z][A-Za-z0-9_]*)\s*(=\s*[^,]+)?,", m.group(1), re.M)
+    for v, init in vals:
+        if init:
+            sys.exit(f"gen-model-tables: {v} has an explicit value")
+    every = re.findall(r"^\s*([A-Za-z_]\w*)\b", re.sub(r"//[^\n]*", "", m.group(1)), re.M)
+    if len(every) != len(vals):
+        sys.exit(f"gen-model-tables: enum {name} has {len(every)} enumerators, {len(vals)} parsed")
+    return [v for v, _ in vals]
+
+
+def func_body(text, signature):
+    at = text.index(signature)
+    open_at = text.index("{", at)
+    depth = 0
+    for i in range(open_at, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[open_at + 1:i], line_of(text, signature)
+    sys.exit(f"gen-model-tables: unbalanced {signature}")
+
+
+def ident(name, prefix):
+    s = name[len(prefix):].lower()
+    if re.fullmatch(r"[0-9].*", s) or re.fullmatch(r"[iu][0-9]+", s):
+        return f'@"{s}"'
+    return s
+
+
+types = enum_body(hdr, "llm_type")
+archs = enum_body(arch_hdr, "llm_arch")
+
+# llm_type_name
+body, type_name_line = func_body(src, "const char * llm_type_name(llm_type type) {")
+names = {}
+for t, n in re.findall(r"case\s+(LLM_TYPE_\w+)\s*:\s*return\s+\"([^\"]*)\"\s*;", body):
+    if t in names:
+        sys.exit(f"gen-model-tables: {t} named twice")
+    names[t] = n
+default = re.search(r"default\s*:\s*return\s+\"([^\"]*)\"\s*;", body).group(1)
+cases = len(re.findall(r"\bcase\b", body))
+if cases != len(names):
+    sys.exit(f"gen-model-tables: llm_type_name has {cases} cases, {len(names)} understood")
+
+# llama_model_rope_type
+body, rope_line = func_body(src, "llama_rope_type llama_model_rope_type(const llama_model * model) {")
+switch = body[body.index("switch (model->arch) {"):]
+rules = {}
+pending = []
+conditional_seen = set()
+for raw in switch.split("\n"):
+    code = raw.split("//", 1)[0].strip()
+    if not code:
+        continue
+    m = re.fullmatch(r"case\s+(LLM_ARCH_\w+)\s*:", code)
+    if m:
+        pending.append(m.group(1))
+        continue
+    m = re.fullmatch(r"return\s+(LLAMA_ROPE_TYPE_\w+)\s*;", code)
+    if m and pending:
+        for a in pending:
+            rules[a] = m.group(1)
+        pending = []
+        continue
+    if pending and code.startswith("return "):
+        for a in pending:
+            if a not in CONDITIONAL:
+                sys.exit(f"gen-model-tables: {a} returns `{code}`, which is not in CONDITIONAL")
+            rules[a] = "conditional"
+            conditional_seen.add(a)
+        pending = []
+        continue
+    if pending == ["LLM_ARCH_UNKNOWN"] and code.startswith("GGML_ABORT"):
+        rules["LLM_ARCH_UNKNOWN"] = "abort"
+        pending = []
+        continue
+    if code in ("switch (model->arch) {", "}", "return LLAMA_ROPE_TYPE_NONE;"):
+        continue
+    sys.exit(f"gen-model-tables: unparsed line in llama_model_rope_type: {raw!r}")
+if conditional_seen != CONDITIONAL:
+    sys.exit(f"gen-model-tables: CONDITIONAL is {sorted(CONDITIONAL)}, the source has {sorted(conditional_seen)}")
+stray = [a for a in rules if a not in archs]
+if stray:
+    sys.exit(f"gen-model-tables: rope switch names {stray}")
+listed = len(re.findall(r"\bcase\s+LLM_ARCH_", switch))
+if listed != len(rules):
+    sys.exit(f"gen-model-tables: rope switch has {listed} cases, {len(rules)} understood")
+
+# llama_model_mapping: which architectures have a model class.
+body, mapping_line = func_body(src, "static llama_model * llama_model_mapping(llm_arch arch, const llama_model_params & params) {")
+mapped = set()
+pending = []
+for raw in body.split("\n"):
+    code = raw.split("//", 1)[0].strip()
+    if not code or code in ("switch (arch) {", "}", "default:"):
+        continue
+    m = re.fullmatch(r"case\s+(LLM_ARCH_\w+)\s*:", code)
+    if m:
+        pending.append(m.group(1))
+        continue
+    if re.fullmatch(r"return\s+new\s+llama_model_\w+\s*\(\s*params\s*\)\s*;", code) and pending:
+        mapped.update(pending)
+        pending = []
+        continue
+    if code.startswith("throw std::runtime_error(std::string(\"unsupported model architecture"):
+        continue
+    sys.exit(f"gen-model-tables: unparsed line in llama_model_mapping: {raw!r}")
+if pending:
+    sys.exit(f"gen-model-tables: llama_model_mapping cases with no return: {pending}")
+stray = [a for a in mapped if a not in archs]
+if stray:
+    sys.exit(f"gen-model-tables: llama_model_mapping names {stray}")
+if len(re.findall(r"\bcase\s+LLM_ARCH_", body)) != len(mapped):
+    sys.exit("gen-model-tables: llama_model_mapping repeats a case")
+
+o = []
+w = o.append
+w("//! The `llama-model.cpp` tables, generated by `scripts/gen-model-tables`.")
+w("//!")
+w("//! # Provenance")
+w("//!")
+w("//! Generated from, in the reference checkout:")
+w("//!")
+w("//! - `llama.cpp/src/llama-model.h` -- `llm_type`")
+w("//! - `llama.cpp/src/llama-model.cpp` -- the switches of `llm_type_name`")
+w("//!   and `llama_model_rope_type`")
+w("//!")
+w(f"//! Both at v0.3.0 (`{COMMIT}`). **Do not edit**: regenerate after moving the")
+w("//! pin. The rope rules marked `.conditional` read the hyperparameters and are")
+w("//! ported by hand in `model.zig`.")
+w("")
+w('const c = @import("impl.zig").c;')
+w("")
+w(f"/// Mirrors `llm_type` (llama-model.h:{line_of(hdr, 'enum llm_type {')} @{COMMIT}).")
+w("pub const Type = enum(c_int) {")
+for t in types:
+    w(f"    {ident(t, 'LLM_TYPE_')},")
+w("};")
+w("")
+w(f"/// Ports `llm_type_name` (llama-model.cpp:{type_name_line} @{COMMIT}), by `Type` ordinal; the")
+w("/// switch's default where it names none.")
+w("pub const type_names = [_][:0]const u8{")
+for t in types:
+    w(f'    "{names.get(t, default)}",')
+w("};")
+w("")
+w("/// How `llama_model_rope_type` answers for one architecture.")
+w("pub const RopeRule = union(enum) {")
+w("    fixed: c.enum_llama_rope_type,")
+w("    /// Decided from the hyperparameters; see `model.zig`.")
+w("    conditional,")
+w("    /// `LLM_ARCH_UNKNOWN`: `GGML_ABORT(\"unknown architecture\")`.")
+w("    abort,")
+w("};")
+w("")
+w(f"/// Ports the switch of `llama_model_rope_type` (llama-model.cpp:{rope_line} @{COMMIT}), by")
+w("/// `arch.Arch` ordinal. An architecture the switch does not name falls out of")
+w("/// it to `LLAMA_ROPE_TYPE_NONE`.")
+w("pub const rope_rules = [_]RopeRule{")
+for a in archs:
+    r = rules.get(a, "LLAMA_ROPE_TYPE_NONE")
+    if r in ("conditional", "abort"):
+        w(f"    .{r}, // {a}")
+    else:
+        w(f"    .{{ .fixed = c.{r} }}, // {a}")
+w("};")
+w("")
+w(f"/// Ports the cases of `llama_model_mapping` (llama-model.cpp:{mapping_line} @{COMMIT}), by")
+w("/// `arch.Arch` ordinal: whether the architecture has a model class. One that")
+w("/// does not is `unsupported model architecture`.")
+w("pub const mapped = [_]bool{")
+for a in archs:
+    w(f"    {'true' if a in mapped else 'false'}, // {a}")
+w("};")
+w("")
+open(OUT, "w").write("\n".join(o))
+print(f"wrote {OUT}: {len(types)} model types ({len(names)} named), {len(archs)} rope rules "
+      f"({len(rules)} listed, {len(conditional_seen)} conditional), {len(mapped)} mapped architectures")

@@ -23,7 +23,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
-CXX=(zig c++ -std=c++17 -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" -I llama.cpp/src)
+CXX=(zig c++ -mcpu=baseline -std=c++17 -O2 -I llama.cpp/src)
 
 for src in llama.cpp/src/unicode.cpp llama.cpp/src/unicode-data.cpp harness/unicode_ref.cpp; do
     "${CXX[@]}" -c "$src" -o "$tmp/$(basename "$src" .cpp).o" 2>"$tmp/err" \
@@ -96,11 +96,11 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
     src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
     || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
 
-zig build-exe -femit-bin="$tmp/unicode_diff" -Ofast -lc \
+zig build-exe -mcpu baseline -femit-bin="$tmp/unicode_diff" -Ofast -lc \
     --dep unicode -Mroot=harness/unicode_diff.zig \
     --dep llama_c -Municode=src/llama/unicode.zig -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/unicode.o" "$tmp/unicode-data.o" "$tmp/unicode_ref.o" \
-    zig-out/lib/libggml.a "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    zig-out/lib/libggml.a -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }

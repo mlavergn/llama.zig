@@ -44,9 +44,8 @@ clang harness/sched_dump.c -o "$tmp/ref" -std=c11 -w "${INC[@]}" \
     "${REF_LIBS[@]}" -lc++ "${FW[@]}" 2>"$tmp/ref.log" \
     || { echo "FAIL: could not link against the reference libraries" >&2; tail -5 "$tmp/ref.log" >&2; exit 1; }
 
-# Apple's libc++, not Zig's -- Zig 0.16 cannot build its own against SDK 27.
-zig cc harness/sched_dump.c -o "$tmp/port" -std=c11 -w "${INC[@]}" \
-    zig-out/lib/libggml.a "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+zig cc -mcpu=baseline harness/sched_dump.c -o "$tmp/port" -std=c11 -w "${INC[@]}" \
+    zig-out/lib/libggml.a -lc++ \
     "${FW[@]}" -F "$SDK/System/Library/Frameworks" 2>"$tmp/port.log" \
     || { echo "FAIL: could not link against the ported libraries" >&2; tail -5 "$tmp/port.log" >&2; exit 1; }
 

@@ -18,13 +18,13 @@ trap 'rm -rf "$tmp"' EXIT
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 
-zig c++ -std=c++17 -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+zig c++ -mcpu=baseline -std=c++17 -O2 \
     -c harness/libcxx_ref.cpp -o "$tmp/ref.o" 2>"$tmp/err" \
     || { echo "FAIL: cannot compile the reference" >&2; head -10 "$tmp/err" >&2; exit 1; }
 
-zig build-exe -femit-bin="$tmp/libcxx_diff" -Ofast -lc \
+zig build-exe -mcpu baseline -femit-bin="$tmp/libcxx_diff" -Ofast -lc \
     --dep libcxx -Mroot=harness/libcxx_diff.zig -Mlibcxx=src/llama/libcxx.zig \
-    "$tmp/ref.o" "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" 2>"$tmp/berr" \
+    "$tmp/ref.o" -lc++ 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
 
 "$tmp/libcxx_diff"

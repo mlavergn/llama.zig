@@ -69,12 +69,12 @@ report_unit() {
     mkdir -p "$d"
 
     if [ "$lang" = "cxx" ]; then
-        if ! zig c++ -c "$src" -o "$d/ref.o" -std=c++17 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
+        if ! zig c++ -mcpu=baseline -c "$src" -o "$d/ref.o" -std=c++17 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
             echo "failed to compile $src:" >&2
             tail -5 "$d/cc.log" >&2
             exit 1
         fi
-    elif ! zig cc -c "$src" -o "$d/ref.o" -std=c11 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
+    elif ! zig cc -mcpu=baseline -c "$src" -o "$d/ref.o" -std=c11 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
         echo "failed to compile $src:" >&2
         tail -5 "$d/cc.log" >&2
         exit 1
@@ -120,7 +120,7 @@ report_unit() {
         # stand one in. Every flag build.zig defines has to appear here, or the
         # compile fails and this script reports nothing at all.
         printf 'pub const probe_ported = false;\npub const probe_cpu = false;\npub const use_metal = true;\n' > "$d/config.zig"
-        if ! zig build-obj -femit-bin="$d/$base.o" "${INCLUDES[@]}" -lc \
+        if ! zig build-obj -mcpu baseline -femit-bin="$d/$base.o" "${INCLUDES[@]}" -lc \
                 --dep config --dep ggml_c --dep llama_c -Mroot="$f" -Mconfig="$d/config.zig" \
                 -Mggml_c="$tmp/ggml_c.zig" -Mllama_c="$tmp/llama_c.zig" 2>"$d/$base.log"; then
             echo "failed to compile $f:" >&2

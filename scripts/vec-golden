@@ -53,18 +53,15 @@ INC=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-
 DEFS=(-DNDEBUG -DGGML_USE_CPU -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE
       -DGGML_VERSION='"0.3.0"' -DGGML_COMMIT='"c1d0e7a00"')
 
-# Apple's libc++, not Zig's: Zig 0.16 cannot build its own against the macOS 27
-# SDK. See testcase/ and the note in build/llamacpp.zig.
-zig c++ -c llama.cpp/ggml/src/ggml-cpu/vec.cpp -o "$tmp/vec.o" \
+zig c++ -mcpu=baseline -c llama.cpp/ggml/src/ggml-cpu/vec.cpp -o "$tmp/vec.o" \
     -std=c++17 -w -O2 -ffp-contract=on \
-    -nostdinc++ -I "$SDK/usr/include/c++/v1" \
     "${INC[@]}" "${DEFS[@]}"
 
-zig cc harness/vec_golden.c "$tmp/vec.o" -o "$tmp/gen" \
+zig cc -mcpu=baseline harness/vec_golden.c "$tmp/vec.o" -o "$tmp/gen" \
     -std=c11 -w -O2 -ffp-contract=on \
     "${INC[@]}" "${DEFS[@]}" \
     "${REF_LIBS[@]}" \
-    "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks"
 

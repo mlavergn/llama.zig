@@ -33,7 +33,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
-CXX=(zig c++ -std=c++17 -w -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1"
+CXX=(zig c++ -mcpu=baseline -std=c++17 -w -O2
      -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu
      -DNDEBUG -DGGML_USE_CPU -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE -DGGML_USE_CPU_REPACK)
 
@@ -64,16 +64,14 @@ for f in "${FILES[@]}"; do
 done
 echo "reference: $(wc -l < "$tmp/syms" | tr -d ' ') exports renamed to ref_*"
 
-# Apple's libc++, not Zig's -- see `testcase/` and the note above
-# `appleCxxFlags` in `build/llamacpp.zig`.
 # Zig 0.17 has no `@cImport`: the harness imports the public ggml headers as
 # the module `ggml_h`, translated from `harness/repack_diff.h`.
 zig translate-c -lc -I llama.cpp/ggml/include harness/repack_diff.h >"$tmp/ggml_h.zig" 2>"$tmp/terr" \
     || { echo "FAIL: cannot translate the ggml headers" >&2; head -10 "$tmp/terr" >&2; exit 1; }
-zig build-exe -femit-bin="$tmp/repack_diff" -Ofast -lc \
+zig build-exe -mcpu baseline -femit-bin="$tmp/repack_diff" -Ofast -lc \
     --dep ggml_h -Mroot=harness/repack_diff.zig -Mggml_h="$tmp/ggml_h.zig" \
     "${OBJS[@]}" "$LIB" \
-    "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }

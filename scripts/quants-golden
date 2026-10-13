@@ -30,11 +30,10 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-zig cc harness/quants_golden.c llama.cpp/ggml/src/ggml-quants.c -o "$tmp/gen" -std=c11 -w -O2 -ffp-contract=off \
+zig cc -mcpu=baseline harness/quants_golden.c llama.cpp/ggml/src/ggml-quants.c -o "$tmp/gen" -std=c11 -w -O2 -ffp-contract=off \
     -I llama.cpp/ggml/include -I llama.cpp/ggml/src \
     "${REF_LIBS[@]}" \
-    "$(xcrun --sdk macosx --show-sdk-path)/usr/lib/libc++.tbd" \
-    "$(xcrun --sdk macosx --show-sdk-path)/usr/lib/libc++abi.tbd" \
+    -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks"
 

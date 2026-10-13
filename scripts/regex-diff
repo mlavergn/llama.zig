@@ -18,7 +18,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 
-zig c++ -std=c++17 -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" \
+zig c++ -mcpu=baseline -std=c++17 -O2 \
     -c harness/regex_ref.cpp -o "$tmp/ref.o" 2>"$tmp/err" \
     || { echo "FAIL: cannot compile the reference" >&2; head -10 "$tmp/err" >&2; exit 1; }
 
@@ -32,10 +32,10 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
     src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
     || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
 
-zig build-exe -femit-bin="$tmp/regex_diff" -Ofast -lc \
+zig build-exe -mcpu baseline -femit-bin="$tmp/regex_diff" -Ofast -lc \
     --dep regex -Mroot=harness/regex_diff.zig \
     --dep llama_c -Mregex=src/llama/regex.zig -Mllama_c="$tmp/llama_c.zig" \
-    "$tmp/ref.o" zig-out/lib/libggml.a "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
+    "$tmp/ref.o" zig-out/lib/libggml.a -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }

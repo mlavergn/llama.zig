@@ -336,14 +336,12 @@ pub fn build(b: *std.Build) !void {
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
-        // Apple's libc++, not Zig's -- see the note in build/llamacpp.zig.
-        .link_libcpp = false,
+        .link_libcpp = true,
     });
     smoke_module.addImport("llama_h", llama_h_module);
     smoke_module.linkLibrary(reference.llama);
     smoke_module.linkLibrary(reference.ggml);
     if (sdk) |path| smoke_module.addFrameworkPath(b.graph.cwdRelativePath(path));
-    llamacpp.linkAppleLibcxx(b, smoke_module, sdk);
 
     const smoke = b.addExecutable(.{ .name = "smoke", .root_module = smoke_module });
 
@@ -376,8 +374,7 @@ pub fn build(b: *std.Build) !void {
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
-        // Apple's libc++, not Zig's -- see the note in build/llamacpp.zig.
-        .link_libcpp = false,
+        .link_libcpp = true,
     });
     cli_module.addOptions("config", options);
     // The one permitted dependency, and only here: chat templates are Jinja,
@@ -388,7 +385,6 @@ pub fn build(b: *std.Build) !void {
     cli_module.linkLibrary(reference.llama);
     cli_module.linkLibrary(reference.ggml);
     if (sdk) |path| cli_module.addFrameworkPath(b.graph.cwdRelativePath(path));
-    llamacpp.linkAppleLibcxx(b, cli_module, sdk);
 
     const cli = b.addExecutable(.{
         .name = cfg.cli_name,
@@ -435,8 +431,7 @@ pub fn build(b: *std.Build) !void {
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
-        // Apple's libc++, not Zig's -- see the note in build/llamacpp.zig.
-        .link_libcpp = false,
+        .link_libcpp = true,
     });
     cli_tests_module.addOptions("config", options);
     cli_tests_module.addImport("zigjinja", jinja_module);
@@ -446,7 +441,6 @@ pub fn build(b: *std.Build) !void {
     cli_tests_module.linkLibrary(reference.llama);
     cli_tests_module.linkLibrary(reference.ggml);
     if (sdk) |path| cli_tests_module.addFrameworkPath(b.graph.cwdRelativePath(path));
-    llamacpp.linkAppleLibcxx(b, cli_tests_module, sdk);
 
     const cli_tests = b.addTest(.{
         .root_module = cli_tests_module,
