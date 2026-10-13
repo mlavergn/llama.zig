@@ -274,7 +274,7 @@ fn chainInit(params: c.llama_sampler_chain_params) [*c]Sampler {
 ///
 /// Return: an empty chain.
 pub export fn llama_sampler_chain_init(params_bits: u8) callconv(.c) [*c]Sampler {
-    const params: c.llama_sampler_chain_params = @bitCast(params_bits);
+    const params = std.mem.bytesToValue(c.llama_sampler_chain_params, std.mem.asBytes(&params_bits));
     return chainInit(params);
 }
 

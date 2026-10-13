@@ -333,11 +333,11 @@ pub export fn ggml_gemm_q4_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
                     bsums_arr[q8_row] = neon.paddq_s16(loadq16(bp), loadq16(bp + 8));
                 }
 
-                var bias_acc: [acc_size]i32x4 = .{@as(i32x4, @splat(0))} ** acc_size;
+                var bias_acc: [acc_size]i32x4 = @splat(@as(i32x4, @splat(0)));
 
                 for (0..4) |sb| {
-                    var acc_lo: [acc_size]i32x4 = .{@as(i32x4, @splat(0))} ** acc_size;
-                    var acc_hi: [acc_size]i32x4 = .{@as(i32x4, @splat(0))} ** acc_size;
+                    var acc_lo: [acc_size]i32x4 = @splat(@as(i32x4, @splat(0)));
+                    var acc_hi: [acc_size]i32x4 = @splat(@as(i32x4, @splat(0)));
 
                     var q4sb_scales: [2]i16x8 = undefined;
                     var q4sb_mins: [2]i16x8 = undefined;

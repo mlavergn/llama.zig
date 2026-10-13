@@ -172,7 +172,7 @@ pub const Parser = struct {
     /// already exists.
     fn generateSymbolId(self: *Parser, base_name: []const u8) u32 {
         const next_id: u32 = @intCast(self.symbol_ids.count());
-        const name = std.fmt.allocPrint(impl.allocator, "{s}_{d}", .{ base_name, next_id }) catch oom();
+        const name = impl.allocator.print("{s}_{d}", .{ base_name, next_id }) catch oom();
         const gop = self.symbol_ids.getOrPut(impl.allocator, name) catch oom();
         if (gop.found_existing) {
             impl.allocator.free(name);

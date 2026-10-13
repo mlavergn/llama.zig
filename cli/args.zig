@@ -695,7 +695,7 @@ test "help lists every supported flag" {
     const text = w.buffered();
     for (specs) |s| {
         for (s.names) |n| {
-            if (std.mem.indexOf(u8, text, n) == null) {
+            if (std.mem.find(u8, text, n) == null) {
                 std.debug.print("help omits {s}\n", .{n});
                 return error.FlagMissingFromHelp;
             }

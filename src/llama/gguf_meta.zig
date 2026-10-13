@@ -166,8 +166,8 @@ pub const Meta = struct {
     /// Return: the name, borrowed from `buf`.
     pub fn name(self: *const Meta, kv: Kv, buf: []u8) []const u8 {
         const f = kv.format();
-        if (std.mem.indexOf(u8, f, "%s")) |at| {
-            return std.fmt.bufPrint(buf, "{s}{s}{s}", .{ f[0..at], self.arch_name, f[at + 2 ..] }) catch buf[0..0];
+        if (std.mem.find(u8, f, "%s")) |at| {
+            return std.mem.print(buf, "{s}{s}{s}", .{ f[0..at], self.arch_name, f[at + 2 ..] }) catch buf[0..0];
         }
         return f;
     }

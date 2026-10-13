@@ -221,7 +221,7 @@ fn readSets(path: []const u8) []Set {
 }
 
 fn readFile(path: []const u8) []u8 {
-    const f = std.c.fopen(@ptrCast(gpa.dupeZ(u8, path) catch unreachable), "rb") orelse {
+    const f = std.c.fopen(@ptrCast(gpa.dupeSentinel(u8, path, 0) catch unreachable), "rb") orelse {
         std.debug.print("cannot open {s}\n", .{path});
         std.process.exit(2);
     };

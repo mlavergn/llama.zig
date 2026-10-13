@@ -839,11 +839,11 @@ pub fn acceptImpl(grammar: *Grammar, token: Token) void {
     const piece = tokenToPiece(grammar.vocab, token, &piece_buf);
 
     if (grammar.awaiting_trigger) {
-        if (std.mem.indexOfScalar(Token, grammar.trigger_tokens.items, token) != null) {
+        if (std.mem.findScalar(Token, grammar.trigger_tokens.items, token) != null) {
             grammar.awaiting_trigger = false;
             grammar.trigger_buffer.clearRetainingCapacity();
             acceptToken(grammar, token, piece);
-            const z = impl.allocator.dupeZ(u8, piece) catch oom();
+            const z = impl.allocator.dupeSentinel(u8, piece, 0) catch oom();
             defer impl.allocator.free(z);
             impl.logDebug("Grammar triggered on token %u (`%s`)", .{ @as(c_uint, @bitCast(token)), z.ptr });
             return;
@@ -867,7 +867,7 @@ pub fn acceptImpl(grammar: *Grammar, token: Token) void {
                         acceptToken(grammar, tp.token, tok_piece);
                     }
 
-                    const constrained_str = impl.allocator.dupeZ(u8, grammar.trigger_buffer.items[start..]) catch oom();
+                    const constrained_str = impl.allocator.dupeSentinel(u8, grammar.trigger_buffer.items[start..], 0) catch oom();
                     defer impl.allocator.free(constrained_str);
                     grammar.trigger_buffer.clearRetainingCapacity();
                     grammar.trigger_buffer_positions.clearRetainingCapacity();
@@ -875,7 +875,7 @@ pub fn acceptImpl(grammar: *Grammar, token: Token) void {
                     return;
                 }
             }
-            const z = impl.allocator.dupeZ(u8, piece) catch oom();
+            const z = impl.allocator.dupeSentinel(u8, piece, 0) catch oom();
             defer impl.allocator.free(z);
             impl.logDebug("Grammar still awaiting trigger after token %d (`%s`)\n", .{ token, z.ptr });
             return;

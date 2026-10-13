@@ -11,7 +11,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const is_debug = builtin.mode == .Debug;
+pub const is_debug = builtin.mode == .debug;
 
 // `src/ggml/` is deliberately *not* re-exported here. It is built by
 // `build/llamacpp.zig` as its own module, with the include paths and build

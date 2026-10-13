@@ -363,7 +363,7 @@ const Bracket = struct {
         }
         if (!(self.neg_mask == 0 and self.neg_chars.items.len == 0)) {
             const in_neg_mask = isctype(ch, self.neg_mask);
-            const in_neg_chars = std.mem.indexOfScalar(u32, self.neg_chars.items, ch) != null;
+            const in_neg_chars = std.mem.findScalar(u32, self.neg_chars.items, ch) != null;
             if (!(in_neg_mask or in_neg_chars)) return true;
         }
         for (self.ranges.items) |r| {

@@ -55,7 +55,7 @@ const use_metal = config.use_metal;
 /// True when the C++ build would leave `NDEBUG` unset, which gates the
 /// registry's per-backend debug logging and the `silent` flag in
 /// `ggml_backend_load_all_from_path`.
-const debug_build = builtin.mode == .Debug;
+const debug_build = builtin.mode == .debug;
 
 /// The registry's vectors are private to this file and never cross the C ABI,
 /// but there is no allocator to be handed one at a C entry point. libc's is
@@ -532,7 +532,7 @@ extern fn _NSGetExecutablePath(buf: [*]u8, bufsize: *u32) c_int;
 ///
 /// Return: the slice of `buf` written, or null if the path did not fit. The
 /// C++ grows a `std::vector` until the call succeeds; the fixed buffer here is
-/// `std.fs.max_path_bytes`, which the call cannot exceed.
+/// `std.Io.Dir.max_path_bytes`, which the call cannot exceed.
 fn getExecutablePath(buf: []u8) ?[:0]const u8 {
     var size: u32 = @intCast(buf.len);
     if (_NSGetExecutablePath(buf.ptr, &size) != 0) return null;
@@ -543,7 +543,7 @@ fn getExecutablePath(buf: []u8) ?[:0]const u8 {
 
     // "remove executable name", keeping the separator: the C++ appends "/" to
     // the truncated string, so a path with no slash at all becomes "/".
-    const cut = if (std.mem.lastIndexOfScalar(u8, full, '/')) |i| i else 0;
+    const cut = if (std.mem.findScalarLast(u8, full, '/')) |i| i else 0;
     if (cut + 2 > buf.len) return null;
     buf[cut] = '/';
     buf[cut + 1] = 0;
@@ -570,8 +570,8 @@ const backend_filename_extension = ".so";
 /// Return: the loaded backend, or null if none was found. Borrowed; owned by
 /// the registry.
 fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8) c.ggml_backend_reg_t {
-    var prefix_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const file_prefix = std.fmt.bufPrint(
+    var prefix_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const file_prefix = std.mem.print(
         &prefix_buf,
         backend_filename_prefix ++ "{s}-",
         .{name},
@@ -579,8 +579,8 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
 
     // The C++ builds `search_paths` as a vector; two entries is the most this
     // configuration ever has, and `GGML_BACKEND_DIR` is not defined here.
-    var exe_buf: [std.fs.max_path_bytes]u8 = undefined;
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var exe_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     var search_paths: [2][]const u8 = undefined;
     var n_paths: usize = 0;
 
@@ -599,12 +599,12 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
     }
 
     var best_score: c_int = 0;
-    var best_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var best_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     var best_len: usize = 0;
 
     for (search_paths[0..n_paths]) |search_path| {
-        var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const dir_path = std.fmt.bufPrintZ(&dir_buf, "{s}", .{search_path}) catch continue;
+        var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const dir_path = std.mem.printSentinel(&dir_buf, "{s}", .{search_path}, 0) catch continue;
 
         // `fs::exists` then `directory_iterator`; `opendir` failing covers
         // both, including the C++'s `skip_permission_denied`.
@@ -622,8 +622,8 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
             if (!std.mem.startsWith(u8, entry_name, file_prefix)) continue;
             if (!std.mem.endsWith(u8, entry_name, backend_filename_extension)) continue;
 
-            var cand_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const cand = std.fmt.bufPrintZ(&cand_buf, "{s}/{s}", .{ search_path, entry_name }) catch continue;
+            var cand_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            const cand = std.mem.printSentinel(&cand_buf, "{s}/{s}", .{ search_path, entry_name }, 0) catch continue;
 
             const handle = dlLoadLibrary(cand.ptr) orelse {
                 if (!silent) {
@@ -656,11 +656,12 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
     if (best_score == 0) {
         // "try to load the base backend": `libggml-<name>.so`, unversioned.
         for (search_paths[0..n_paths]) |search_path| {
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const path = std.fmt.bufPrintZ(
+            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            const path = std.mem.printSentinel(
                 &path_buf,
                 "{s}/" ++ backend_filename_prefix ++ "{s}" ++ backend_filename_extension,
                 .{ search_path, name },
+                0,
             ) catch continue;
             if (Libc.access(path.ptr, Libc.F_OK) != 0) continue;
             return getReg().loadBackend(path.ptr, silent);

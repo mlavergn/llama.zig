@@ -58,7 +58,7 @@ const Name = struct {
     len: usize = 0,
 
     fn set(self: *Name, comptime fmt: []const u8, args: anytype) void {
-        const out = std.fmt.bufPrint(&self.buf, fmt, args) catch
+        const out = std.mem.print(&self.buf, fmt, args) catch
             impl.abort("metal: kernel name does not fit in 256 bytes");
         self.len = out.len;
         self.buf[self.len] = 0;
@@ -1428,7 +1428,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_vec(
     var qne_buf: [64]u8 = undefined;
     var qne_suffix: []const u8 = "";
     if (!(nqpsg == 1 and ne == tuning.baselineNe(dk, dv))) {
-        const out = std.fmt.bufPrint(&qne_buf, "_q{d}_ne{d}", .{ nqpsg, ne }) catch
+        const out = std.mem.print(&qne_buf, "_q{d}_ne{d}", .{ nqpsg, ne }) catch
             impl.abort("metal: flash_attn_ext_vec suffix does not fit");
         qne_suffix = out[0..@min(out.len, 15)];
     }
@@ -2135,7 +2135,7 @@ test "the pipeline cache copies its keys" {
     const fake = mc.ggml_metal_pipeline_init().?;
     {
         var scratch: [32]u8 = undefined;
-        const key = try std.fmt.bufPrintZ(&scratch, "kernel_{s}", .{"abc"});
+        const key = try std.mem.printSentinel(&scratch, "kernel_{s}", .{"abc"}, 0);
         ggml_metal_pipelines_add(ppls, key, fake);
         @memset(&scratch, 0xaa); // the caller's buffer goes away
     }

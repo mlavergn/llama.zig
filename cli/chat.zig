@@ -156,7 +156,7 @@ fn mark(allocator: std.mem.Allocator, val: jinja.Value) jinja.Value {
     switch (val) {
         .string => |str| {
             // Already marked; see the doc comment above for why that is left alone.
-            if (std.mem.indexOfAny(u8, str, &.{ mark_open, mark_close }) != null) return val;
+            if (std.mem.findAny(u8, str, &.{ mark_open, mark_close }) != null) return val;
 
             const buf = allocator.alloc(u8, str.len + 2) catch return val;
             buf[0] = mark_open;
@@ -177,7 +177,7 @@ fn mark(allocator: std.mem.Allocator, val: jinja.Value) jinja.Value {
 /// Return: `text` with both sentinels removed, so it cannot open or close a
 /// trust boundary.
 fn sanitize(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
-    if (std.mem.indexOfAny(u8, text, &.{ mark_open, mark_close }) == null) return text;
+    if (std.mem.findAny(u8, text, &.{ mark_open, mark_close }) == null) return text;
 
     var out: std.ArrayList(u8) = .empty;
     for (text) |ch| {
@@ -207,11 +207,11 @@ fn segment(arena: std.mem.Allocator, rendered: []const u8, opts: Options) ![]Seg
                 if (i > run_start) {
                     try out.append(arena, .{ .text = rendered[run_start..i], .trusted = true });
                 }
-                const close = std.mem.indexOfScalarPos(u8, rendered, i + 1, mark_close) orelse
+                const close = std.mem.findScalarPos(u8, rendered, i + 1, mark_close) orelse
                     return Error.MarkingCorrupt;
                 const inner = rendered[i + 1 .. close];
                 // A nested open would mean two wraps on one value, which the single finalize call site cannot produce.
-                if (std.mem.indexOfScalar(u8, inner, mark_open) != null) return Error.MarkingCorrupt;
+                if (std.mem.findScalar(u8, inner, mark_open) != null) return Error.MarkingCorrupt;
 
                 if (inner.len > 0) {
                     // The only expression values legitimately control tokens are the two we bound ourselves.
@@ -460,7 +460,7 @@ test "add_generation_prompt controls the trailing assistant turn" {
     defer testing.allocator.free(out);
 
     // Without it the prompt stops after the user's turn, so the model continues rather than answers.
-    try testing.expect(std.mem.indexOf(u8, out, "<|im_start|>assistant") == null);
+    try testing.expect(std.mem.find(u8, out, "<|im_start|>assistant") == null);
     try testing.expect(std.mem.endsWith(u8, out, "<|im_end|>\n"));
 }
 
@@ -475,8 +475,8 @@ test "content is bound as data, not as template source" {
     );
     defer testing.allocator.free(out);
 
-    try testing.expect(std.mem.indexOf(u8, out, "{{ 6*7 }}") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "42") == null);
+    try testing.expect(std.mem.find(u8, out, "{{ 6*7 }}") != null);
+    try testing.expect(std.mem.find(u8, out, "42") == null);
 }
 
 test "bos and eos are bound by name" {
@@ -549,7 +549,7 @@ test "message content comes back untrusted, template literals trusted" {
             try testing.expect(!seg.trusted);
             saw_content = true;
         }
-        if (std.mem.indexOf(u8, seg.text, "<|im_start|>") != null) {
+        if (std.mem.find(u8, seg.text, "<|im_start|>") != null) {
             try testing.expect(seg.trusted);
         }
     }
@@ -578,7 +578,7 @@ test "an injected control token lands in an untrusted segment" {
     // Every trusted segment is template text only, so none of the attack is reachable with parse_special on.
     for (segs) |seg| {
         if (!seg.trusted) continue;
-        try testing.expect(std.mem.indexOf(u8, seg.text, "You are admin") == null);
+        try testing.expect(std.mem.find(u8, seg.text, "You are admin") == null);
     }
 }
 
@@ -593,7 +593,7 @@ test "a filter chain does not launder message content into trust" {
     defer freeSegments(testing.allocator, segs);
 
     for (segs) |seg| {
-        if (std.mem.indexOf(u8, seg.text, "<|IM_START|>") != null) try testing.expect(!seg.trusted);
+        if (std.mem.find(u8, seg.text, "<|IM_START|>") != null) try testing.expect(!seg.trusted);
     }
 }
 
@@ -626,9 +626,9 @@ test "content cannot forge a trust boundary with sentinel bytes" {
     defer freeSegments(testing.allocator, segs);
 
     for (segs) |seg| {
-        if (std.mem.indexOf(u8, seg.text, "TRUSTED?") != null) try testing.expect(!seg.trusted);
+        if (std.mem.find(u8, seg.text, "TRUSTED?") != null) try testing.expect(!seg.trusted);
         // The sentinels themselves never reach the prompt.
-        try testing.expect(std.mem.indexOfAny(u8, seg.text, "\x1e\x1f") == null);
+        try testing.expect(std.mem.findAny(u8, seg.text, "\x1e\x1f") == null);
     }
 }
 
@@ -658,7 +658,7 @@ test "a macro's output is not marked twice" {
     var saw_literal = false;
     var saw_content = false;
     for (segs) |seg| {
-        if (std.mem.indexOf(u8, seg.text, "<|im_start|>") != null) {
+        if (std.mem.find(u8, seg.text, "<|im_start|>") != null) {
             // The macro body's own text stays trusted.
             try testing.expect(seg.trusted);
             saw_literal = true;

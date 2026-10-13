@@ -442,7 +442,7 @@ pub export fn ggml_vec_dot_mxfp4_q8_0(
 
     const nb = @divTrunc(n, c.QK_MXFP4);
 
-    const values = neon.loadFrom(i8x16, @ptrCast(&c.kvalues_mxfp4));
+    const values: i8x16 = c.kvalues_mxfp4;
 
     // `sumf` accumulates one fused term per iteration -- see the note on
     // `iq4_nl`, which shares this shape and where the ordering was pinned
@@ -519,7 +519,7 @@ pub export fn ggml_vec_dot_nvfp4_q8_0(
 
     const nb = @divTrunc(n, c.QK_NVFP4);
 
-    const values = neon.loadFrom(i8x16, @ptrCast(&c.kvalues_mxfp4));
+    const values: i8x16 = c.kvalues_mxfp4;
 
     var acc: f32x4 = @splat(0.0);
 
@@ -874,7 +874,7 @@ pub export fn ggml_vec_dot_iq4_nl_q8_0(
 
     const nb = @divTrunc(n, c.QK4_NL);
 
-    const values = neon.loadFrom(i8x16, @ptrCast(&c.kvalues_iq4nl));
+    const values: i8x16 = c.kvalues_iq4nl;
 
     // Two fused multiply-adds per iteration, not `sumf += A + B`.
     //

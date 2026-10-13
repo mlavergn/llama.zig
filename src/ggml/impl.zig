@@ -27,32 +27,10 @@ const std = @import("std");
 ///
 /// `ggml-impl.h` is deliberately absent -- see the module doc comment. Ported
 /// code reaches every C type and symbol through here, so this list is the
-/// single place that changes when a new header is needed.
-pub const c = @cImport({
-    // ggml-common.h holds the block layouts and, behind the IMPL define, the
-    // i-quant codebooks -- iq2xxs_grid, ksigns_iq2xs, kvalues_iq4nl and the
-    // rest, about 1,900 lines of tables.
-    //
-    // **Unlike ggml-impl.h, this header imports cleanly**, tables included, so
-    // the ported quantizers index the same arrays the C does rather than a
-    // hand-transcribed copy. Transcribing them would have been the single
-    // largest source of silent error in the file.
-    @cDefine("GGML_COMMON_DECL_C", "");
-    @cDefine("GGML_COMMON_IMPL_C", "");
-    @cInclude("ggml.h");
-    @cInclude("ggml-alloc.h");
-    @cInclude("ggml-backend.h");
-    @cInclude("ggml-backend-impl.h");
-    // Brings in ggml-common.h, and with it the block layouts, the QK block
-    // sizes, and the reference quantize/dequantize declarations.
-    @cInclude("ggml-quants.h");
-    @cInclude("ggml-threading.h");
-    @cInclude("ggml-cpu.h");
-    // The GGUF container format: `enum gguf_type`, `struct gguf_init_params`
-    // and `gguf_reader_callback_t`, for `gguf.zig`. It includes only `ggml.h`,
-    // so unlike `ggml-impl.h` it imports cleanly.
-    @cInclude("gguf.h");
-});
+/// single place that changes when a new header is needed. The list is
+/// `c_import.h`, translated by `build/llamacpp.zig` (Zig 0.17 has no
+/// `@cImport`).
+pub const c = @import("ggml_c");
 
 // -----------------------------------------------------------------------------
 // Logging and assertions
@@ -730,7 +708,7 @@ test "pad rounds up to the next multiple" {
 }
 
 test "bitset round-trips a single bit" {
-    var words = [_]Bitset{0} ** 4;
+    var words: [4]Bitset = @splat(0);
     try std.testing.expect(!bitsetGet(&words, 37));
     bitsetSet(&words, 37);
     try std.testing.expect(bitsetGet(&words, 37));

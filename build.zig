@@ -18,10 +18,10 @@ const Git = struct {
         const io = b.graph.io;
         var missing: usize = 0;
         var cloned: usize = 0;
-        inline for (@typeInfo(@TypeOf(zon.dependencies)).@"struct".fields) |field| {
-            if (comptime Self.isCloneable(field.name) and !Self.isCloned(field.name)) {
-                const dep = @field(zon.dependencies, field.name);
-                const dest = b.pathFromRoot(dep.path);
+        inline for (@typeInfo(@TypeOf(zon.dependencies)).@"struct".field_names) |name| {
+            if (comptime Self.isCloneable(name) and !Self.isCloned(name)) {
+                const dep = @field(zon.dependencies, name);
+                const dest = b.root.joinString(b.allocator, dep.path) catch @panic("OOM");
                 missing += 1;
                 if (std.Io.Dir.cwd().access(io, dest, .{})) |_| {
                     std.debug.print("{s} exists but is not a Zig package\n", .{dep.path});
@@ -43,8 +43,8 @@ const Git = struct {
     ///
     /// Return: `true` when none is missing.
     fn hasAllDeps() bool {
-        inline for (@typeInfo(@TypeOf(zon.dependencies)).@"struct".fields) |field| {
-            if (Self.isCloneable(field.name) and !Self.isCloned(field.name)) return false;
+        inline for (@typeInfo(@TypeOf(zon.dependencies)).@"struct".field_names) |name| {
+            if (Self.isCloneable(name) and !Self.isCloned(name)) return false;
         }
         return true;
     }
@@ -129,12 +129,19 @@ const Xcode = struct {
     /// Must be called exactly once after `init` and before `target` or `sdk`
     /// are read; on success both fields are valid for the handle's lifetime.
     ///
+    /// Zig 0.17 reuses a configured build graph until something it was told
+    /// about changes, and the SDK lookup is not something it can see. The
+    /// SDK's path carries its version (`MacOSX27.0.sdk`), so its
+    /// `SDKSettings.json` is made a configure input: an Xcode update removes
+    /// the path, and the next build configures again.
+    ///
     /// Parameters:
     /// - `self`: the handle to populate; mutated in place.
+    /// - `b`: the build graph, which records the SDK as a configure input.
     ///
     /// Return: nothing on success; returns `error.FailedToResolveSDK` when no
     /// SDK can be located, and propagates target-resolution errors.
-    pub fn resolve(self: *Self) !void {
+    pub fn resolve(self: *Self, b: *std.Build) !void {
         const query = std.Target.Query{
             .cpu_arch = .aarch64,
             .os_tag = .macos,
@@ -145,6 +152,7 @@ const Xcode = struct {
             self.io,
             &self.target,
         ) orelse return error.FailedToResolveSDK;
+        b.dependOnFileMetadata(b.graph.cwdRelativePath(b.pathJoin(&.{ self.sdk, "SDKSettings.json" })));
     }
 };
 
@@ -153,7 +161,7 @@ const Config = struct {
     mod_name: []const u8,
     cli_name: []const u8,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     module_source_file: std.Build.LazyPath,
     cli_source_file: std.Build.LazyPath,
     version: std.SemanticVersion,
@@ -181,7 +189,12 @@ pub fn build(b: *std.Build) !void {
         .name = @tagName(zon.name),
         .mod_name = @tagName(zon.name),
         .cli_name = "llama-cli",
-        .target = b.standardTargetOptions(.{}),
+        // Zig 0.17 recognises the M5 as `apple_m5`, with i8mm and SME, where
+        // 0.16 fell back to the macOS baseline (`apple_m1`). The ported ARM
+        // kernels are the non-i8mm arms only -- see `has_matmul_int8` in
+        // src/ggml/cpu/traits.zig -- so the default stays at the baseline the
+        // port was built and gated on. `-Dcpu` overrides it.
+        .target = b.standardTargetOptions(.{ .default_target = .{ .cpu_model = .baseline } }),
         .optimize = b.standardOptimizeOption(.{}),
         .module_source_file = b.path("src/module.zig"),
         .cli_source_file = b.path("cli/main.zig"),
@@ -223,8 +236,8 @@ pub fn build(b: *std.Build) !void {
 
     if (builtin.os.tag == .macos) {
         var xcode = try Xcode.init(b.allocator, b.graph.io);
-        try xcode.resolve();
-        lib.root_module.addFrameworkPath(.{ .cwd_relative = xcode.sdk });
+        try xcode.resolve(b);
+        lib.root_module.addFrameworkPath(b.graph.cwdRelativePath(xcode.sdk));
     }
 
     const lib_install = b.addInstallArtifact(lib, .{});
@@ -240,7 +253,7 @@ pub fn build(b: *std.Build) !void {
 
     const sdk: ?[]const u8 = if (builtin.os.tag == .macos) blk: {
         var xcode = try Xcode.init(b.allocator, b.graph.io);
-        try xcode.resolve();
+        try xcode.resolve(b);
         break :blk xcode.sdk;
     } else null;
 
@@ -307,6 +320,17 @@ pub fn build(b: *std.Build) !void {
     // Compiling and linking says nothing about whether inference works, and
     // the Metal path in particular can only be proven by running it.
 
+    // `llama.h`, translated once for the CLI and the smoke harness. Zig 0.17
+    // has no `@cImport`; see `cli/c_import.h`.
+    const llama_h = b.addTranslateC(.{
+        .root_source_file = b.path("cli/c_import.h"),
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+    });
+    llama_h.addIncludePath(b.path("llama.cpp/include"));
+    llama_h.addIncludePath(b.path("llama.cpp/ggml/include"));
+    const llama_h_module = llama_h.createModule();
+
     const smoke_module = b.createModule(.{
         .root_source_file = b.path("harness/smoke.zig"),
         .target = cfg.target,
@@ -315,18 +339,17 @@ pub fn build(b: *std.Build) !void {
         // Apple's libc++, not Zig's -- see the note in build/llamacpp.zig.
         .link_libcpp = false,
     });
-    smoke_module.addIncludePath(b.path("llama.cpp/include"));
-    smoke_module.addIncludePath(b.path("llama.cpp/ggml/include"));
+    smoke_module.addImport("llama_h", llama_h_module);
     smoke_module.linkLibrary(reference.llama);
     smoke_module.linkLibrary(reference.ggml);
-    if (sdk) |path| smoke_module.addFrameworkPath(.{ .cwd_relative = path });
+    if (sdk) |path| smoke_module.addFrameworkPath(b.graph.cwdRelativePath(path));
     llamacpp.linkAppleLibcxx(b, smoke_module, sdk);
 
     const smoke = b.addExecutable(.{ .name = "smoke", .root_module = smoke_module });
 
     const smoke_run = b.addRunArtifact(smoke);
     smoke_run.has_side_effects = true;
-    if (b.args) |args| smoke_run.addArgs(args);
+    smoke_run.addPassthruArgs();
 
     const smoke_step = b.step("smoke", "Run inference against the reference build");
     smoke_step.dependOn(&smoke_run.step);
@@ -361,11 +384,10 @@ pub fn build(b: *std.Build) !void {
     // and `libllamazig` must stay dependency-free. See PLAN.md Decisions 25
     // and 27.
     cli_module.addImport("zigjinja", jinja_module);
-    cli_module.addIncludePath(b.path("llama.cpp/include"));
-    cli_module.addIncludePath(b.path("llama.cpp/ggml/include"));
+    cli_module.addImport("llama_h", llama_h_module);
     cli_module.linkLibrary(reference.llama);
     cli_module.linkLibrary(reference.ggml);
-    if (sdk) |path| cli_module.addFrameworkPath(.{ .cwd_relative = path });
+    if (sdk) |path| cli_module.addFrameworkPath(b.graph.cwdRelativePath(path));
     llamacpp.linkAppleLibcxx(b, cli_module, sdk);
 
     const cli = b.addExecutable(.{
@@ -387,9 +409,7 @@ pub fn build(b: *std.Build) !void {
     cli_run.step.dependOn(b.getInstallStep());
 
     // Support arguments like: `zig build run -- argA argB`
-    if (b.args) |args| {
-        cli_run.addArgs(args);
-    }
+    cli_run.addPassthruArgs();
 
     const run_step = b.step("run", "Run the CLI app");
     run_step.dependOn(&cli_run.step);
@@ -422,11 +442,10 @@ pub fn build(b: *std.Build) !void {
     cli_tests_module.addImport("zigjinja", jinja_module);
     // `session.zig` imports llama.h, so even the argument-parsing tests need
     // the header and the library behind it.
-    cli_tests_module.addIncludePath(b.path("llama.cpp/include"));
-    cli_tests_module.addIncludePath(b.path("llama.cpp/ggml/include"));
+    cli_tests_module.addImport("llama_h", llama_h_module);
     cli_tests_module.linkLibrary(reference.llama);
     cli_tests_module.linkLibrary(reference.ggml);
-    if (sdk) |path| cli_tests_module.addFrameworkPath(.{ .cwd_relative = path });
+    if (sdk) |path| cli_tests_module.addFrameworkPath(b.graph.cwdRelativePath(path));
     llamacpp.linkAppleLibcxx(b, cli_tests_module, sdk);
 
     const cli_tests = b.addTest(.{
@@ -478,8 +497,8 @@ pub fn build(b: *std.Build) !void {
 
     if (builtin.os.tag == .macos) {
         var docs_xcode = try Xcode.init(b.allocator, b.graph.io);
-        try docs_xcode.resolve();
-        docs_lib.root_module.addFrameworkPath(.{ .cwd_relative = docs_xcode.sdk });
+        try docs_xcode.resolve(b);
+        docs_lib.root_module.addFrameworkPath(b.graph.cwdRelativePath(docs_xcode.sdk));
     }
 
     const docs = b.addInstallDirectory(.{

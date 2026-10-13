@@ -24,12 +24,12 @@ const impl = @import("impl.zig");
 const types = @import("types.zig");
 const c = impl.c;
 
-extern fn vsnprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ap: std.builtin.VaList) c_int;
+extern fn vsnprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ap: std.lang.VaList) c_int;
 extern fn printf(fmt: [*:0]const u8, ...) c_int;
 
 /// True when the C build would leave `NDEBUG` unset. `ggml_new_object` aborts
 /// rather than returning null in that case, and the difference is observable.
-const debug_build = builtin.mode == .Debug;
+const debug_build = builtin.mode == .debug;
 
 /// Ports `struct ggml_context` (ggml.c:974 @c1d0e7a00).
 ///
@@ -618,8 +618,8 @@ test "names truncate rather than overflow" {
     var ctx = testContext(&buf);
     const t = ggml_new_tensor_1d(&ctx, c.GGML_TYPE_F32, 1);
 
-    const long = "x" ** 128;
-    _ = ggml_set_name(t, long);
+    const long: [128:0]u8 = @splat('x');
+    _ = ggml_set_name(t, &long);
     try std.testing.expectEqual(@as(u8, 0), @as(u8, @bitCast(t.name[t.name.len - 1])));
     try std.testing.expectEqual(t.name.len - 1, std.mem.len(@as([*:0]const u8, @ptrCast(&t.name))));
 }

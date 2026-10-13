@@ -323,7 +323,7 @@ fn normalizePrefix(tokenizer: *const Tokenizer, input: []const u8, input_offset:
             return exc.throw(.runtime_error, "Index out of array bounds in precompiled charsmap!", .{});
         }
         const replacement = tokenizer.prefix_replacements[longest_prefix_offset..];
-        const repl_len = std.mem.indexOfScalar(u8, replacement, 0) orelse
+        const repl_len = std.mem.findScalar(u8, replacement, 0) orelse
             return exc.throw(.runtime_error, "Unterminated string in precompiled charsmap!", .{});
         return .{ .normalized = replacement[0..repl_len], .consumed_input = longest_prefix_length };
     }

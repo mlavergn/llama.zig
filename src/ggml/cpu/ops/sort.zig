@@ -391,5 +391,5 @@ test "the butterfly is an unnormalised Walsh-Hadamard transform" {
     var row = [_]f32{ 1, 0, 0, 0, 0, 0, 0, 0 };
     var len: usize = 1;
     while (len < 8) : (len <<= 1) butterfly(&row, 8, len);
-    try std.testing.expectEqual([_]f32{1} ** 8, row);
+    try std.testing.expectEqual(@as([8]f32, @splat(1)), row);
 }

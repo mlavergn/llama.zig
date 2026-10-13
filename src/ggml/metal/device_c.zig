@@ -265,19 +265,17 @@ export fn zz_pwp_sizeof() usize {
     return @sizeOf(PipelineWithParams);
 }
 export fn zz_pwp_nfields() usize {
-    return @typeInfo(PipelineWithParams).@"struct".fields.len;
+    return @typeInfo(PipelineWithParams).@"struct".field_names.len;
 }
 export fn zz_pwp_offset(i: usize) usize {
-    const fields = @typeInfo(PipelineWithParams).@"struct".fields;
-    inline for (fields, 0..) |f, k| {
-        if (k == i) return @offsetOf(PipelineWithParams, f.name);
+    inline for (@typeInfo(PipelineWithParams).@"struct".field_names, 0..) |name, k| {
+        if (k == i) return @offsetOf(PipelineWithParams, name);
     }
     return std.math.maxInt(usize);
 }
 export fn zz_pwp_field_size(i: usize) usize {
-    const fields = @typeInfo(PipelineWithParams).@"struct".fields;
-    inline for (fields, 0..) |f, k| {
-        if (k == i) return @sizeOf(f.type);
+    inline for (@typeInfo(PipelineWithParams).@"struct".field_types, 0..) |F, k| {
+        if (k == i) return @sizeOf(F);
     }
     return std.math.maxInt(usize);
 }
@@ -299,7 +297,7 @@ export fn zz_props_alignof() usize {
     return @alignOf(DeviceProps);
 }
 export fn zz_props_nfields() usize {
-    return @typeInfo(DeviceProps).@"struct".fields.len;
+    return @typeInfo(DeviceProps).@"struct".field_names.len;
 }
 
 /// The offset of field `i`, in declaration order, or `maxInt` past the end.
@@ -308,9 +306,8 @@ export fn zz_props_nfields() usize {
 /// field upstream cannot leave a new one unchecked: the harness compares
 /// `zz_props_nfields` too.
 export fn zz_props_offset(i: usize) usize {
-    const fields = @typeInfo(DeviceProps).@"struct".fields;
-    inline for (fields, 0..) |f, k| {
-        if (k == i) return @offsetOf(DeviceProps, f.name);
+    inline for (@typeInfo(DeviceProps).@"struct".field_names, 0..) |name, k| {
+        if (k == i) return @offsetOf(DeviceProps, name);
     }
     return std.math.maxInt(usize);
 }
@@ -318,9 +315,8 @@ export fn zz_props_offset(i: usize) usize {
 /// The size of field `i`, which catches a field of the right offset and
 /// the wrong width — `c_int` where the C has `size_t`, say.
 export fn zz_props_field_size(i: usize) usize {
-    const fields = @typeInfo(DeviceProps).@"struct".fields;
-    inline for (fields, 0..) |f, k| {
-        if (k == i) return @sizeOf(f.type);
+    inline for (@typeInfo(DeviceProps).@"struct".field_types, 0..) |F, k| {
+        if (k == i) return @sizeOf(F);
     }
     return std.math.maxInt(usize);
 }
@@ -336,19 +332,19 @@ export fn zz_bid_alignof() usize {
 }
 
 export fn zz_bid_nfields() usize {
-    return @typeInfo(BufferId).@"struct".fields.len;
+    return @typeInfo(BufferId).@"struct".field_names.len;
 }
 
 export fn zz_bid_offset(i: usize) usize {
-    inline for (@typeInfo(BufferId).@"struct".fields, 0..) |f, k| {
-        if (k == i) return @offsetOf(BufferId, f.name);
+    inline for (@typeInfo(BufferId).@"struct".field_names, 0..) |name, k| {
+        if (k == i) return @offsetOf(BufferId, name);
     }
     return std.math.maxInt(usize);
 }
 
 export fn zz_bid_field_size(i: usize) usize {
-    inline for (@typeInfo(BufferId).@"struct".fields, 0..) |f, k| {
-        if (k == i) return @sizeOf(f.type);
+    inline for (@typeInfo(BufferId).@"struct".field_types, 0..) |F, k| {
+        if (k == i) return @sizeOf(F);
     }
     return std.math.maxInt(usize);
 }
@@ -378,6 +374,6 @@ test "the device id enum matches the table's" {
     // `DeviceProps.device_id` is typed as the same enum the tuning table
     // indexes, so a renumbering there would silently change what this
     // port reads out of the props.
-    try std.testing.expectEqual(@as(c_uint, 15), @intFromEnum(DeviceId.m4_max));
+    try std.testing.expectEqual(@as(c_uint, 15), @backingInt(DeviceId.m4_max));
     try std.testing.expectEqual(@as(usize, 4), @sizeOf(DeviceId));
 }

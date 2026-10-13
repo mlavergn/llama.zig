@@ -493,7 +493,7 @@ pub fn main() !void {
         var pat: [64]u8 = undefined;
         for (names) |name| {
             for ([_][2][]const u8{ .{ "[[.", ".]]" }, .{ "[[=", "=]]" }, .{ "[[:", ":]]" }, .{ "[^[:", ":]]" } }) |wrap| {
-                const p = std.fmt.bufPrint(&pat, "{s}{s}{s}", .{ wrap[0], name, wrap[1] }) catch unreachable;
+                const p = std.mem.print(&pat, "{s}{s}{s}", .{ wrap[0], name, wrap[1] }) catch unreachable;
                 var b: usize = 0;
                 while (b < 256) : (b += 1) {
                     const in = [_]u8{@intCast(b)};

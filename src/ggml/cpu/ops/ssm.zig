@@ -225,7 +225,7 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
 
                         const np = nc & ~(f32_step - 1);
 
-                        var sum: [4]f32x4 = .{@as(f32x4, @splat(0.0))} ** 4;
+                        var sum: [4]f32x4 = @splat(@as(f32x4, @splat(0.0)));
 
                         const adA: f32x4 = @splat(dA);
                         const axdt: f32x4 = @splat(x_dt);

@@ -67,11 +67,11 @@ pub fn main(init: std.process.Init) !void {
 
     try joined.appendSlice(gpa, kernels_common);
     try joined.append(gpa, '\n');
-    if (std.mem.indexOf(u8, source, "#include \"dequantize.h\"") != null) {
+    if (std.mem.find(u8, source, "#include \"dequantize.h\"") != null) {
         try joined.appendSlice(gpa, dequantize);
         try joined.append(gpa, '\n');
     }
-    if (std.mem.indexOf(u8, source, "#include \"quantize.h\"") != null) {
+    if (std.mem.find(u8, source, "#include \"quantize.h\"") != null) {
         try joined.appendSlice(gpa, quantize);
         try joined.append(gpa, '\n');
     }
@@ -84,18 +84,18 @@ pub fn main(init: std.process.Init) !void {
     while (lines.next()) |line| {
         // `#pragma once` is meaningless once the headers are concatenated, and
         // would make the driver reject the combined source.
-        if (std.mem.indexOf(u8, line, "#pragma once") != null) continue;
+        if (std.mem.find(u8, line, "#pragma once") != null) continue;
 
         if (containsAny(line, &stripped_includes)) continue;
 
         // The two inlined headers are substituted in place, so a reader of the
         // generated file sees them where the original expected them.
-        if (std.mem.indexOf(u8, line, common_sentinel) != null) {
+        if (std.mem.find(u8, line, common_sentinel) != null) {
             try out.appendSlice(gpa, ggml_common);
             try out.append(gpa, '\n');
             continue;
         }
-        if (std.mem.indexOf(u8, line, impl_include) != null) {
+        if (std.mem.find(u8, line, impl_include) != null) {
             try out.appendSlice(gpa, metal_impl);
             try out.append(gpa, '\n');
             continue;
@@ -138,7 +138,7 @@ pub fn main(init: std.process.Init) !void {
 /// Return: true when at least one needle occurs in `line`.
 fn containsAny(line: []const u8, needles: []const []const u8) bool {
     for (needles) |needle| {
-        if (std.mem.indexOf(u8, line, needle) != null) return true;
+        if (std.mem.find(u8, line, needle) != null) return true;
     }
     return false;
 }

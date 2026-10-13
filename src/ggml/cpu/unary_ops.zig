@@ -395,14 +395,14 @@ fn unaryOpFunctor(params: *const ComputeParams, dst: *Tensor, op: anytype) void 
 // C writes all twenty-two out by hand.
 
 comptime {
-    for (@typeInfo(Op).@"enum".fields) |field| {
-        const op: Op = @enumFromInt(field.value);
+    for (@typeInfo(Op).@"enum".field_names) |name| {
+        const op: Op = @field(Op, name);
         const S = struct {
             fn f(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
                 unaryOp(op, params, dst);
             }
         };
-        @export(&S.f, .{ .name = "ggml_compute_forward_" ++ field.name, .linkage = .strong });
+        @export(&S.f, .{ .name = "ggml_compute_forward_" ++ name, .linkage = .strong });
     }
 }
 

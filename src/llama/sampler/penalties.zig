@@ -495,13 +495,13 @@ fn getOverlappingTokenSequences(vocab: ?*const c.struct_llama_vocab, str: []cons
     var token_id: Token = 0;
     while (token_id < n_tokens) : (token_id += 1) {
         const word = detokenizeOne(vocab, token_id, &word_buf);
-        if (std.mem.indexOf(u8, word, str) != null) {
+        if (std.mem.find(u8, word, str) != null) {
             addBreaker(token_sequences, token_id, &.{});
         } else {
             const word_len = word.len;
             const str_len = str.len;
             var from: usize = 0;
-            while (std.mem.indexOfScalarPos(u8, word, from, str[0])) |pos| {
+            while (std.mem.findScalarPos(u8, word, from, str[0])) |pos| {
                 from = pos + 1;
                 var match = true;
                 var i: usize = 1;

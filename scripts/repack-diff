@@ -66,9 +66,12 @@ echo "reference: $(wc -l < "$tmp/syms" | tr -d ' ') exports renamed to ref_*"
 
 # Apple's libc++, not Zig's -- see `testcase/` and the note above
 # `appleCxxFlags` in `build/llamacpp.zig`.
-zig build-exe -femit-bin="$tmp/repack_diff" -OReleaseFast -lc \
-    -I llama.cpp/ggml/include \
-    harness/repack_diff.zig \
+# Zig 0.17 has no `@cImport`: the harness imports the public ggml headers as
+# the module `ggml_h`, translated from `harness/repack_diff.h`.
+zig translate-c -lc -I llama.cpp/ggml/include harness/repack_diff.h >"$tmp/ggml_h.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate the ggml headers" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+zig build-exe -femit-bin="$tmp/repack_diff" -Ofast -lc \
+    --dep ggml_h -Mroot=harness/repack_diff.zig -Mggml_h="$tmp/ggml_h.zig" \
     "${OBJS[@]}" "$LIB" \
     "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \

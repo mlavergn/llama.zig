@@ -602,7 +602,7 @@ fn tiled(params: *const ComputeParams, dst: *Tensor, ir0: i64, ir1: i64) void {
                 vec.add_f32(@intCast(tile_rows * KV_TILE_SZ), KQ, KQ, mask32);
             }
 
-            var skip = [_]bool{false} ** Q_TILE_SZ;
+            var skip: [Q_TILE_SZ]bool = @splat(false);
 
             for (0..Q_TILE_SZ) |tq| {
                 const kq_row = KQ + tq * KV_TILE_SZ;
@@ -1260,7 +1260,7 @@ test "simd_gemm accumulates into C with one fused step per k" {
 
 test "simd_gemm is a plain matrix product" {
     // [1 2; 3 4] * [5 6; 7 8] = [19 22; 43 50], added to C = 1.
-    var C = [_]f32{1} ** 4;
+    var C: [4]f32 = @splat(1);
     simdGemm(&C, &[_]f32{ 1, 2, 3, 4 }, &[_]f32{ 5, 6, 7, 8 }, 2, 2, 2);
     try std.testing.expectEqual([4]f32{ 20, 23, 44, 51 }, C);
 }

@@ -30,7 +30,7 @@ const Gram = struct {
 };
 
 fn emptyZ() [:0]u8 {
-    return impl.allocator.dupeZ(u8, "") catch impl.abort(src, 0, "out of memory");
+    return impl.allocator.dupeSentinel(u8, "", 0) catch impl.abort(src, 0, "out of memory");
 }
 
 /// Ports `llama_sampler_grammar_name` (llama-sampler.cpp:2669 @c1d0e7a00).
@@ -66,7 +66,7 @@ fn grammarReset(smpl: [*c]Sampler) callconv(.c) void {
         owned.deinit(impl.allocator);
     }
     for (g.trigger_patterns.items) |tp| {
-        const z = impl.allocator.dupeZ(u8, tp.pattern) catch impl.abort(src, 2709, "out of memory");
+        const z = impl.allocator.dupeSentinel(u8, tp.pattern, 0) catch impl.abort(src, 2709, "out of memory");
         owned.append(impl.allocator, z) catch impl.abort(src, 2709, "out of memory");
         trigger_patterns_c.append(impl.allocator, z.ptr) catch impl.abort(src, 2709, "out of memory");
     }
@@ -88,8 +88,8 @@ fn grammarClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     if (ctx.grammar) |g| {
         impl.allocator.free(result_ctx.grammar_str);
         impl.allocator.free(result_ctx.grammar_root);
-        result_ctx.grammar_str = impl.allocator.dupeZ(u8, ctx.grammar_str) catch impl.abort(src, 2731, "out of memory");
-        result_ctx.grammar_root = impl.allocator.dupeZ(u8, ctx.grammar_root) catch impl.abort(src, 2732, "out of memory");
+        result_ctx.grammar_str = impl.allocator.dupeSentinel(u8, ctx.grammar_str, 0) catch impl.abort(src, 2731, "out of memory");
+        result_ctx.grammar_root = impl.allocator.dupeSentinel(u8, ctx.grammar_root, 0) catch impl.abort(src, 2732, "out of memory");
 
         result_ctx.grammar = grammar.cloneImpl(g);
     }
@@ -122,7 +122,7 @@ var grammar_iface: SamplerI = .{
 /// `llama_sampler_init_grammar_impl`, matches: `[.^$|()*+?\[\]{}\\]`; `regex_replace` with `"\\$0"` prefixes
 /// each with a backslash.
 fn isRegexSpecial(ch: u8) bool {
-    return std.mem.indexOfScalar(u8, ".^$|()*+?[]{}\\", ch) != null;
+    return std.mem.findScalar(u8, ".^$|()*+?[]{}\\", ch) != null;
 }
 
 /// Ports `llama_sampler_init_grammar_impl` (llama-sampler.cpp:2766 @c1d0e7a00).
@@ -165,8 +165,8 @@ fn initGrammarImpl(
 
         return core.llama_sampler_init(&grammar_iface, core.create(Gram, .{
             .vocab = vocab,
-            .grammar_str = impl.allocator.dupeZ(u8, std.mem.span(grammar_str.?)) catch impl.abort(src, 2802, "out of memory"),
-            .grammar_root = impl.allocator.dupeZ(u8, std.mem.span(grammar_root.?)) catch impl.abort(src, 2803, "out of memory"),
+            .grammar_str = impl.allocator.dupeSentinel(u8, std.mem.span(grammar_str.?), 0) catch impl.abort(src, 2802, "out of memory"),
+            .grammar_root = impl.allocator.dupeSentinel(u8, std.mem.span(grammar_root.?), 0) catch impl.abort(src, 2803, "out of memory"),
             .grammar = g,
         }));
     }

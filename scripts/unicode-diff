@@ -90,11 +90,15 @@ EOF
 
 [ -f zig-out/lib/libggml.a ] || { echo "missing zig-out/lib/libggml.a -- run 'zig build reference --release=fast'" >&2; exit 2; }
 
-# `-I` applies to the module declared after it, here the one that imports
-# llama.h through impl.zig.
-zig build-exe -femit-bin="$tmp/unicode_diff" -OReleaseFast -lc \
+# Zig 0.17 has no `@cImport`: `impl.zig` imports llama.h as the module
+# `llama_c`, translated from `src/llama/c_import.h` as build/llamacpp.zig does.
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+zig build-exe -femit-bin="$tmp/unicode_diff" -Ofast -lc \
     --dep unicode -Mroot=harness/unicode_diff.zig \
-    -I llama.cpp/include -I llama.cpp/ggml/include -Municode=src/llama/unicode.zig \
+    --dep llama_c -Municode=src/llama/unicode.zig -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/unicode.o" "$tmp/unicode-data.o" "$tmp/unicode_ref.o" \
     zig-out/lib/libggml.a "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \

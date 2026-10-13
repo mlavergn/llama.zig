@@ -586,9 +586,9 @@ checkout back five commits.
 
 ## Toolchain
 
-Zig **0.16.0**, declared as `minimum_zig_version` in `build.zig.zon` and what is installed. The code uses the 0.16 std APIs — `std.process.Init` as the `main` parameter, `std.Io` threaded explicitly through constructors, `std.Io.Writer` rather than the old writer interfaces. Do not fall back to pre-0.16 idioms.
+Zig **0.17.0**, declared as `minimum_zig_version` in `build.zig.zon` and what is installed. The code uses the 0.16 std APIs — `std.process.Init` as the `main` parameter, `std.Io` threaded explicitly through constructors, `std.Io.Writer` rather than the old writer interfaces. Do not fall back to pre-0.16 idioms.
 
-`zigjinja` is a sibling repository checked out beside this one at `../zigjinja` — its own repository, already on Zig 0.16. `build.zig.zon` takes it as a path dependency. It is a fork of `gremlin-labs/vibe-jinja`, which this project depended on previously as a nested `vibe-jinja/` checkout.
+`zigjinja` is a sibling repository checked out beside this one at `../zigjinja` — its own repository, already on Zig 0.17. `build.zig.zon` takes it as a path dependency. It is a fork of `gremlin-labs/vibe-jinja`, which this project depended on previously as a nested `vibe-jinja/` checkout.
 
 The library must never gain external dependencies. This is a hard constraint, not a preference: the point of the port is that `zig build` alone produces the binary, and anything linking `libllamazig` inherits nothing.
 

@@ -28,7 +28,7 @@ const c = impl.c;
 // Declared rather than imported: these come from headers `@cImport` does not
 // see, and the variadic signatures need the by-value `va_list` noted above.
 
-extern fn vsnprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ap: std.builtin.VaList) c_int;
+extern fn vsnprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ap: std.lang.VaList) c_int;
 extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 extern fn fputs(s: [*:0]const u8, stream: *anyopaque) c_int;
 extern fn fflush(stream: ?*anyopaque) c_int;
@@ -161,7 +161,7 @@ var logger_state: LoggerState = .{
 /// Formats into a small stack buffer first and only allocates when the message
 /// does not fit, which is why the argument list has to be copied before the
 /// first attempt consumes it.
-fn logInternalV(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ap: std.builtin.VaList) void {
+fn logInternalV(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ap: std.lang.VaList) void {
     const fmt = format orelse return;
 
     var ap_copy = @cVaCopy(@constCast(&ap));

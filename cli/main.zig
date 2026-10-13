@@ -14,7 +14,7 @@ const cli = @import("module.zig");
 
 /// Log configuration for the executable.
 pub const std_options: std.Options = .{
-    .log_level = if (builtin.mode == .Debug) .debug else .warn,
+    .log_level = if (builtin.mode == .debug) .debug else .warn,
 };
 
 /// Runs the CLI.

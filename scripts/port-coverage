@@ -24,6 +24,17 @@ PORTED_DIR=src/ggml
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+# Zig 0.17 has no `@cImport`: `src/ggml/impl.zig` imports ggml's headers as
+# the module `ggml_c`, translated from `src/ggml/c_import.h` as
+# build/llamacpp.zig does.
+zig translate-c -lc -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
+    src/ggml/c_import.h >"$tmp/ggml_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate the ggml headers" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+# `src/llama/impl.zig` likewise imports llama.h as `llama_c`.
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
 INCLUDES=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu)
 DEFINES=(-DGGML_USE_CPU -DGGML_USE_METAL -DGGML_SCHED_MAX_COPIES=4
          -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE
@@ -110,7 +121,8 @@ report_unit() {
         # compile fails and this script reports nothing at all.
         printf 'pub const probe_ported = false;\npub const probe_cpu = false;\npub const use_metal = true;\n' > "$d/config.zig"
         if ! zig build-obj -femit-bin="$d/$base.o" "${INCLUDES[@]}" -lc \
-                --dep config -Mroot="$f" -Mconfig="$d/config.zig" 2>"$d/$base.log"; then
+                --dep config --dep ggml_c --dep llama_c -Mroot="$f" -Mconfig="$d/config.zig" \
+                -Mggml_c="$tmp/ggml_c.zig" -Mllama_c="$tmp/llama_c.zig" 2>"$d/$base.log"; then
             echo "failed to compile $f:" >&2
             grep error "$d/$base.log" | head -5 >&2
             exit 1

@@ -193,7 +193,7 @@ fn typeNameOrNull(t: c_uint) ?[*:0]const u8 {
 /// Duplicates `bytes` into an owned NUL-terminated string. The C++ gets this
 /// from `std::string`'s copy constructor.
 fn dupeStr(bytes: []const u8) Str {
-    return allocator.dupeZ(u8, bytes) catch oom();
+    return allocator.dupeSentinel(u8, bytes, 0) catch oom();
 }
 
 /// Allocates a zero-filled `Str` of `n` bytes, standing in for
@@ -2569,7 +2569,7 @@ test "a malformed buffer is rejected rather than parsed" {
     try std.testing.expect(gguf_init_from_buffer(truncated, truncated.len, params) == null);
 
     // Right magic, version 0.
-    const v0 = "GGUF" ++ [_]u8{0} ** 20;
+    const v0 = "GGUF" ++ @as([20]u8, @splat(0));
     try std.testing.expect(gguf_init_from_buffer(v0, v0.len, params) == null);
 }
 
@@ -2685,7 +2685,7 @@ test "the serialised bytes are the ones the format specifies" {
         "b" ++ //                             5.1 key, no terminator
         [_]u8{ 7, 0, 0, 0 } ++ // 5.2 GGUF_TYPE_BOOL, stored as i32
         [_]u8{1} ++ //            5.3b the value, one int8
-        [_]u8{0} ** 26; // 7. padded up to the 32-byte default alignment
+        @as([26]u8, @splat(0)); // 7. padded up to the 32-byte default alignment
 
     try std.testing.expectEqual(@as(usize, 64), expect.len);
     try std.testing.expectEqualSlices(u8, expect, bytes);

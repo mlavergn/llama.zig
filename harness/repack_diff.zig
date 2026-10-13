@@ -38,11 +38,9 @@ const std = @import("std");
 /// The public ggml headers, for the converter half: it drives the real
 /// `CPU_REPACK` buffer type rather than calling a kernel, so it needs
 /// `ggml_tensor`, the context API and the backend-buffer API.
-const c = @cImport({
-    @cInclude("ggml.h");
-    @cInclude("ggml-backend.h");
-    @cInclude("ggml-cpu.h");
-});
+///
+/// Translated from `repack_diff.h` by `scripts/repack-diff`.
+const c = @import("ggml_h");
 
 /// The reference's `CPU_REPACK` buffer type, by its **mangled** name.
 ///

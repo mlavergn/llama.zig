@@ -322,7 +322,7 @@ pub const Session = struct {
             if (vocab.ignore_merges and vocab.textToToken(word) != token_null) {
                 self.symbols.append(allocator, .{ .prev = -1, .next = -1, .text = word }) catch oom();
                 offset = word.len;
-            } else if (tok_pre == .gemma4 and std.mem.indexOfNone(u8, word, "\n") == null) {
+            } else if (tok_pre == .gemma4 and std.mem.findNone(u8, word, "\n") == null) {
                 // fix for gemma 4, ref: https://github.com/ggml-org/llama.cpp/pull/21343
                 if (vocab.textToToken(word) != token_null) {
                     self.symbols.append(allocator, .{ .prev = -1, .next = -1, .text = word }) catch oom();
@@ -438,7 +438,7 @@ pub const Session = struct {
         var pos: usize = 0;
 
         while (pos < text.len) {
-            const start = std.mem.indexOfPos(u8, text, pos, open_tag) orelse {
+            const start = std.mem.findPos(u8, text, pos, open_tag) orelse {
                 if (pos < text.len) try self.tokenizeBpe(text[pos..], output, exc);
                 break;
             };
@@ -446,7 +446,7 @@ pub const Session = struct {
             output.append(allocator, dna_begin_id) catch oom();
 
             const content_start = start + open_tag.len;
-            const end = std.mem.indexOfPos(u8, text, content_start, close_tag);
+            const end = std.mem.findPos(u8, text, content_start, close_tag);
             const content_end = end orelse text.len;
 
             self.emitDnaKmers(text[content_start..content_end], k, dna_oov_id, output);

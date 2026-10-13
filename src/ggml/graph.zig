@@ -1128,7 +1128,7 @@ pub export fn ggml_build_backward_expand(ctx: *Context, cgraph: *CGraph, grad_ac
         if (node.type == c.GGML_TYPE_I32) continue;
 
         var node_needs_grad = (node.flags & c.GGML_TENSOR_FLAG_PARAM) != 0 or (node.flags & c.GGML_TENSOR_FLAG_LOSS) != 0;
-        var ignore_src = [_]bool{false} ** c.GGML_MAX_SRC;
+        var ignore_src: [c.GGML_MAX_SRC]bool = @splat(false);
         switch (node.op) {
             // gradients in node->src[0] for one reason or another have no
             // effect on output gradients

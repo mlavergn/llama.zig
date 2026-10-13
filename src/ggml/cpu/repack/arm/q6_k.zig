@@ -218,7 +218,7 @@ pub export fn ggml_gemv_q6_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
             const sb_scale_0 = q6_d_0 * q8_d;
             const sb_scale_1 = q6_d_1 * q8_d;
 
-            var acc: [col_pairs]neon.i32x2 = .{@as(neon.i32x2, @splat(0))} ** col_pairs;
+            var acc: [col_pairs]neon.i32x2 = @splat(@as(neon.i32x2, @splat(0)));
 
             var q6_scales: [16 * 8]i16 = undefined;
             for (0..16) |i| {
@@ -370,7 +370,7 @@ pub export fn ggml_gemm_q6_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
                     sbd_scale_4567[row] = q6_d_4567 * lane;
                 }
 
-                var acc_s32: [acc_size]i32x4 = .{@as(i32x4, @splat(0))} ** acc_size;
+                var acc_s32: [acc_size]i32x4 = @splat(@as(i32x4, @splat(0)));
 
                 var q6_scales: [16 * 8]i16 = undefined;
                 for (0..16) |i| {
@@ -383,8 +383,8 @@ pub export fn ggml_gemm_q6_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
                     const ql_base: [*]const u8 = @as([*]const u8, &q6_ptr[b].ql) + half * 512;
                     const qh_base: [*]const u8 = @as([*]const u8, &q6_ptr[b].qh) + half * 256;
                     for (0..4) |sb| {
-                        var acc_lo: [acc_size]i32x4 = .{@as(i32x4, @splat(0))} ** acc_size;
-                        var acc_hi: [acc_size]i32x4 = .{@as(i32x4, @splat(0))} ** acc_size;
+                        var acc_lo: [acc_size]i32x4 = @splat(@as(i32x4, @splat(0)));
+                        var acc_hi: [acc_size]i32x4 = @splat(@as(i32x4, @splat(0)));
 
                         const q8_base_l: [*]const i8 = @as([*]const i8, @ptrCast(&q8_ptr[b].qs)) + half * 512 + sb * 64;
                         const q8_base_h: [*]const i8 = @as([*]const i8, @ptrCast(&q8_ptr[b].qs)) + half * 512 + 256 + sb * 64;

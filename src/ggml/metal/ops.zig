@@ -4781,7 +4781,7 @@ pub export fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_
     } else {
         // half4x4 kernel
         var cfg = tuning.pick(
-            @intFromEnum(props_dev.device_id),
+            @backingInt(props_dev.device_id),
             props_dev.gpu_family,
             @intCast(s1.type),
             ne00,

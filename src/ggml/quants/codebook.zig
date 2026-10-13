@@ -55,7 +55,7 @@ const Iq2Entry = struct {
 };
 
 /// Ports `iq2_data` (ggml-quants.c:2826 @c1d0e7a00). Four slots: xxs, xs, 1-bit, s.
-var iq2_data = [_]Iq2Entry{.{}} ** 4;
+var iq2_data: [4]Iq2Entry = @splat(.{});
 
 /// Ports `iq2_data_index` (ggml-quants.c:2833 @c1d0e7a00).
 ///
@@ -315,7 +315,7 @@ const Iq3Entry = struct {
 };
 
 /// Ports `iq3_data` (ggml-quants.c:3686 @c1d0e7a00). Two slots: grid size 256 and 512.
-var iq3_data = [_]Iq3Entry{.{}} ** 2;
+var iq3_data: [2]Iq3Entry = @splat(.{});
 
 /// Ports `iq3_data_index` (ggml-quants.c:3691 @c1d0e7a00).
 fn iq3DataIndex(grid_size: c_int) usize {

@@ -2,8 +2,10 @@
 //!
 //! # Provenance
 //!
-//! **Not a port.** This is the `@cImport` of
-//! `llama.cpp/include/llama.h` (v0.3.0, `c1d0e7a00`), and nothing else.
+//! **Not a port.** This is the translation of
+//! `llama.cpp/include/llama.h` (v0.3.0, `c1d0e7a00`), and nothing else:
+//! `c_import.h`, which `build.zig` translates as the `llama_h` module, since
+//! Zig 0.17 has no `@cImport`.
 //!
 //! # Why it is its own file
 //!
@@ -16,6 +18,4 @@
 /// The header's declarations. `usingnamespace` is gone in Zig 0.16, so this
 /// is a named constant that callers reach through rather than a flattened
 /// namespace.
-pub const api = @cImport({
-    @cInclude("llama.h");
-});
+pub const api = @import("llama_h");

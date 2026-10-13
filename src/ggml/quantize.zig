@@ -239,7 +239,7 @@ test "the dispatch table covers every quantized format the C switches on" {
         // zero; they are not formats and belong in neither branch.
         if (types.ggml_blck_size(t) == 0) continue;
         if (!types.ggml_is_quantized(t)) continue;
-        if (std.mem.indexOfScalar(c.enum_ggml_type, &not_destinations, t) != null) {
+        if (std.mem.findScalar(c.enum_ggml_type, &not_destinations, t) != null) {
             try std.testing.expect(quantizerFor(t) == null);
             continue;
         }

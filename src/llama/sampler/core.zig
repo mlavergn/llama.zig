@@ -247,7 +247,7 @@ pub fn partialSortInto(cur: *const TokenDataArray, npartial: c_int, res: *std.Ar
     const n: usize = cur.size;
     const bucket_idx = impl.allocator.alloc(c_int, n) catch impl.abort(src, 146, "out of memory");
     defer impl.allocator.free(bucket_idx);
-    var histo = [_]c_int{0} ** nbuckets;
+    var histo: [nbuckets]c_int = @splat(0);
 
     for (0..n) |i| {
         const val = cur.data[i].logit;

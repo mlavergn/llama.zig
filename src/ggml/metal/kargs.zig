@@ -1319,7 +1319,7 @@ export fn zz_kargs_count() usize {
 export fn zz_kargs_name(i: usize) ?[*:0]const u8 {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
-        if (k == i) return @typeName(T)[(comptime std.mem.lastIndexOfScalar(u8, @typeName(T), '.').? + 1)..].ptr;
+        if (k == i) return @typeName(T)[(comptime std.mem.findScalarLast(u8, @typeName(T), '.').? + 1)..].ptr;
     }
     return null;
 }
@@ -1343,7 +1343,7 @@ export fn zz_kargs_alignof(i: usize) usize {
 export fn zz_kargs_nfields(i: usize) usize {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
-        if (k == i) return @typeInfo(T).@"struct".fields.len;
+        if (k == i) return @typeInfo(T).@"struct".field_names.len;
     }
     return std.math.maxInt(usize);
 }
@@ -1352,8 +1352,8 @@ export fn zz_kargs_field_offset(i: usize, f: usize) usize {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
         if (k == i) {
-            inline for (@typeInfo(T).@"struct".fields, 0..) |fld, j| {
-                if (j == f) return @offsetOf(T, fld.name);
+            inline for (@typeInfo(T).@"struct".field_names, 0..) |name, j| {
+                if (j == f) return @offsetOf(T, name);
             }
             return std.math.maxInt(usize);
         }
@@ -1365,8 +1365,8 @@ export fn zz_kargs_field_size(i: usize, f: usize) usize {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
         if (k == i) {
-            inline for (@typeInfo(T).@"struct".fields, 0..) |fld, j| {
-                if (j == f) return @sizeOf(fld.type);
+            inline for (@typeInfo(T).@"struct".field_types, 0..) |F, j| {
+                if (j == f) return @sizeOf(F);
             }
             return std.math.maxInt(usize);
         }
@@ -1378,8 +1378,8 @@ export fn zz_kargs_field_name(i: usize, f: usize) ?[*:0]const u8 {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
         if (k == i) {
-            inline for (@typeInfo(T).@"struct".fields, 0..) |fld, j| {
-                if (j == f) return fld.name.ptr;
+            inline for (@typeInfo(T).@"struct".field_names, 0..) |name, j| {
+                if (j == f) return name.ptr;
             }
             return null;
         }
@@ -1399,11 +1399,11 @@ test "every struct is an extern struct with the expected field count" {
     // `make struct-layout` owns: if a struct came out empty, or as a
     // non-extern struct whose layout Zig may reorder, that is a generator
     // fault and no offset check would be meaningful.
-    inline for (@typeInfo(@This()).@"struct".decls) |d| {
-        const T = @field(@This(), d.name);
+    inline for (@typeInfo(@This()).@"struct".decl_names) |name| {
+        const T = @field(@This(), name);
         if (@TypeOf(T) != type) continue;
         if (@typeInfo(T) != .@"struct") continue;
-        try std.testing.expectEqual(std.builtin.Type.ContainerLayout.@"extern", @typeInfo(T).@"struct".layout);
-        try std.testing.expect(@typeInfo(T).@"struct".fields.len > 0);
+        try std.testing.expectEqual(std.lang.Type.ContainerLayout.@"extern", @typeInfo(T).@"struct".layout);
+        try std.testing.expect(@typeInfo(T).@"struct".field_names.len > 0);
     }
 }

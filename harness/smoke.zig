@@ -12,9 +12,8 @@
 
 const std = @import("std");
 
-const c = @cImport({
-    @cInclude("llama.h");
-});
+/// `llama.h`, translated from `cli/c_import.h` by `build.zig`.
+const c = @import("llama_h");
 
 /// How many tokens to generate when the caller does not say.
 const default_predict: usize = 24;

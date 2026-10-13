@@ -32,11 +32,9 @@ const std = @import("std");
 
 /// `llama.h`, and through it `ggml.h`, `ggml-backend.h`, `ggml-cpu.h` and
 /// `ggml-opt.h`; and `gguf.h`, which the vocabulary and the model loader
-/// read metadata through.
-pub const c = @cImport({
-    @cInclude("llama.h");
-    @cInclude("gguf.h");
-});
+/// read metadata through. Translated from `c_import.h` by
+/// `build/llamacpp.zig` (Zig 0.17 has no `@cImport`).
+pub const c = @import("llama_c");
 
 /// `llama_token_data`, the element every sampler works on.
 pub const TokenData = c.llama_token_data;
@@ -205,7 +203,7 @@ pub const Exception = struct {
     /// Return: nothing.
     pub fn set(self: *Exception, kind: Kind, comptime fmt: []const u8, args: anytype) void {
         self.kind = kind;
-        const s = std.fmt.bufPrint(self.buf[0 .. self.buf.len - 1], fmt, args) catch self.buf[0 .. self.buf.len - 1];
+        const s = std.mem.print(self.buf[0 .. self.buf.len - 1], fmt, args) catch self.buf[0 .. self.buf.len - 1];
         self.len = s.len;
     }
 

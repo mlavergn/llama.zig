@@ -118,7 +118,7 @@ of them can run on the Apple Silicon machine this port is developed on.
 
 ## Getting started
 
-Requires **Zig 0.16.0**.
+Requires **Zig 0.17.0**.
 
 ```sh
 make build       # zig build         -> zig-out/bin/llama-cli

@@ -158,9 +158,9 @@ pub fn clearOverride() void {
 /// `static_assert(sizeof(fa_vec_key_t) == 8)` exists to license. The key
 /// has no padding, so one `u64` comparison is the same test.
 fn findCfg(k: Key) ?Cfg {
-    const want: u64 = @bitCast(k);
+    const want: u64 = @bitCast(std.mem.toBytes(k));
     for (table.fa_vec_tuned_table) |entry| {
-        if (@as(u64, @bitCast(entry.key)) == want) return entry.cfg;
+        if (@as(u64, @bitCast(std.mem.toBytes(entry.key))) == want) return entry.cfg;
     }
     return null;
 }
@@ -170,7 +170,7 @@ fn findCfg(k: Key) ?Cfg {
 /// `ne01` domain default with `ne11` collapsed.
 fn lookup(dev: DeviceId, dtype: c_int, dk: c_int, dv: c_int, ne11_b: c_int, ne01_b: c_int) ?Cfg {
     var k: Key = .{
-        .device_id = @intCast(@intFromEnum(dev)),
+        .device_id = @intCast(@backingInt(dev)),
         .dtype = @intCast(dtype),
         .dk = @intCast(dk),
         .dv = @intCast(dv),
@@ -212,7 +212,7 @@ pub fn pick(
 
     const ne01_b = ne01Bucket(ne01);
 
-    if (lookup(@enumFromInt(device_id), dtype, dk, dv, ne11_b, ne01_b)) |cfg| return cfg;
+    if (lookup(@fromBackingInt(@intCast(device_id)), dtype, dk, dv, ne11_b, ne01_b)) |cfg| return cfg;
 
     // family fallback: retry under the family's representative SKU
     if (gpu_family > 0) {
@@ -251,7 +251,7 @@ fn abiBaselineCfg(dk: c_int, dv: c_int) callconv(.c) Cfg {
 /// `u16` instead; the caller is unchanged, since that is what the register
 /// holds either way.
 fn abiSetOverride(bits: u16) callconv(.c) void {
-    setOverride(@bitCast(bits));
+    setOverride(std.mem.bytesToValue(Cfg, std.mem.asBytes(&bits)));
 }
 fn abiClearOverride() callconv(.c) void {
     clearOverride();
@@ -310,28 +310,28 @@ test "the bucket edges are half-open on the low side" {
 
 test "a short KV always takes the baseline, whatever the table says" {
     // ne11 < FA_VEC_NE11_BUCKETS[0] short-circuits before any lookup.
-    const got = pick(@intFromEnum(DeviceId.m4_max), 9, c.GGML_TYPE_F16, 128, 128, 512, 1);
+    const got = pick(@backingInt(DeviceId.m4_max), 9, c.GGML_TYPE_F16, 128, 128, 512, 1);
     try std.testing.expectEqual(baselineCfg(128, 128), got);
 }
 
 test "the override wins over everything, and clearing restores the table" {
     defer abiClearOverride();
-    const before = pick(@intFromEnum(DeviceId.m4_max), 9, c.GGML_TYPE_F16, 128, 128, 8192, 1);
+    const before = pick(@backingInt(DeviceId.m4_max), 9, c.GGML_TYPE_F16, 128, 128, 8192, 1);
 
     const forced: Cfg = .{ .Q = 7, .NE = 3 };
-    abiSetOverride(@bitCast(forced));
-    try std.testing.expectEqual(forced, pick(@intFromEnum(DeviceId.m4_max), 9, c.GGML_TYPE_F16, 128, 128, 8192, 1));
+    abiSetOverride(@bitCast(std.mem.toBytes(forced)));
+    try std.testing.expectEqual(forced, pick(@backingInt(DeviceId.m4_max), 9, c.GGML_TYPE_F16, 128, 128, 8192, 1));
 
     abiClearOverride();
-    try std.testing.expectEqual(before, pick(@intFromEnum(DeviceId.m4_max), 9, c.GGML_TYPE_F16, 128, 128, 8192, 1));
+    try std.testing.expectEqual(before, pick(@backingInt(DeviceId.m4_max), 9, c.GGML_TYPE_F16, 128, 128, 8192, 1));
 }
 
 test "an unknown device falls back through its family, then to baseline" {
     // gpu_family 9 maps to m4_max; family 0 means unknown and cannot.
-    const viaFamily = pick(@intFromEnum(DeviceId.generic), 9, c.GGML_TYPE_F16, 128, 128, 8192, 1);
-    const direct = pick(@intFromEnum(DeviceId.m4_max), 0, c.GGML_TYPE_F16, 128, 128, 8192, 1);
+    const viaFamily = pick(@backingInt(DeviceId.generic), 9, c.GGML_TYPE_F16, 128, 128, 8192, 1);
+    const direct = pick(@backingInt(DeviceId.m4_max), 0, c.GGML_TYPE_F16, 128, 128, 8192, 1);
     try std.testing.expectEqual(direct, viaFamily);
 
-    const noFamily = pick(@intFromEnum(DeviceId.generic), 0, c.GGML_TYPE_F16, 128, 128, 8192, 1);
+    const noFamily = pick(@backingInt(DeviceId.generic), 0, c.GGML_TYPE_F16, 128, 128, 8192, 1);
     try std.testing.expectEqual(baselineCfg(128, 128), noFamily);
 }

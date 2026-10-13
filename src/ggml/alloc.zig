@@ -65,7 +65,7 @@ const max_chunks = 16;
 const allocator_debug = false;
 
 /// True when the C build would have `NDEBUG` unset, gating its debug logging.
-const debug_logging = builtin.mode == .Debug;
+const debug_logging = builtin.mode == .debug;
 
 // -----------------------------------------------------------------------------
 // Op predicates

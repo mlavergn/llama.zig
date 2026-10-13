@@ -238,7 +238,7 @@ fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
         var want: std.ArrayList(u8) = .empty;
         defer want.deinit(gpa);
         want.print(gpa, "llama_model_load: error loading model: error loading model vocabulary: {s}\n", .{exc.what()}) catch unreachable;
-        if (std.mem.indexOf(u8, ref_log.items, want.items) == null) {
+        if (std.mem.find(u8, ref_log.items, want.items) == null) {
             fail("{s}: error differs: port \"{f}\"", .{ cs.name, std.zig.fmtString(exc.what()) });
         }
         return;
@@ -449,7 +449,7 @@ fn setStrs(ctx: *c.gguf_context, key: [:0]const u8, strs: []const []const u8) vo
         owned.deinit(gpa);
     }
     for (strs) |s| {
-        const z = gpa.dupeZ(u8, s) catch unreachable;
+        const z = gpa.dupeSentinel(u8, s, 0) catch unreachable;
         owned.append(gpa, z) catch unreachable;
         ptrs.append(gpa, z.ptr) catch unreachable;
     }
@@ -469,7 +469,7 @@ fn derive(dir: []const u8, base: [:0]const u8, name: []const u8, comptime edit: 
     const ctx = c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
     defer c.gguf_free(ctx);
     edit(ctx);
-    const path = std.fmt.allocPrintSentinel(gpa, "{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
+    const path = gpa.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
     if (!c.gguf_write_to_file(ctx, path.ptr, true)) @panic("cannot write a synthetic file");
     return path;
 }
@@ -483,7 +483,7 @@ fn findStrs(ctx: *c.gguf_context, key: [:0]const u8, out: *std.ArrayList([]const
 const edits = struct {
     fn rwkv(ctx: *c.gguf_context) void {
         var toks: std.ArrayList([]const u8) = .empty;
-        for (0..256) |b| toks.append(gpa, std.fmt.allocPrint(gpa, "\\x{x:0>2}", .{b}) catch unreachable) catch unreachable;
+        for (0..256) |b| toks.append(gpa, gpa.print("\\x{x:0>2}", .{b}) catch unreachable) catch unreachable;
         for ([_][]const u8{ "the", " the", "hello", " world", "\\n\\n", "ab\\\\c", "\\t", "  ", "中文", "\\x41BC", "\\x\xc3\xa9", "\\x\xffz" }) |w| toks.append(gpa, w) catch unreachable;
         c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "rwkv");
         _ = c.gguf_remove_key(ctx, "tokenizer.ggml.merges");
@@ -502,7 +502,7 @@ const edits = struct {
             scores.append(gpa, 0) catch unreachable;
         }
         for (0..256) |b| {
-            toks.append(gpa, std.fmt.allocPrint(gpa, "<0x{X:0>2}>", .{b}) catch unreachable) catch unreachable;
+            toks.append(gpa, gpa.print("<0x{X:0>2}>", .{b}) catch unreachable) catch unreachable;
             types.append(gpa, c.LLAMA_TOKEN_TYPE_BYTE) catch unreachable;
             scores.append(gpa, 0) catch unreachable;
         }
@@ -727,7 +727,7 @@ pub fn main(init: std.process.Init) !void {
                 try corpus.append(gpa, s);
             }
         } else {
-            const base = std.fs.path.basename(a);
+            const base = std.Io.Dir.path.basename(a);
             try cases.append(gpa, .{ .name = base, .path = a });
             try by_name.put(gpa, base, a);
         }

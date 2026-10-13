@@ -148,9 +148,9 @@ fn collectSymbols(
     text: []const u8,
 ) !void {
     var rest = text;
-    while (std.mem.indexOfScalar(u8, rest, '`')) |open| {
+    while (std.mem.findScalar(u8, rest, '`')) |open| {
         rest = rest[open + 1 ..];
-        const close = std.mem.indexOfScalar(u8, rest, '`') orelse return;
+        const close = std.mem.findScalar(u8, rest, '`') orelse return;
         var sym = rest[0..close];
         rest = rest[close + 1 ..];
 
@@ -180,24 +180,24 @@ const Citation = struct {
 /// a space in it -- is prose and is left alone.
 fn findCitation(line: []const u8) ?Citation {
     var from: usize = 0;
-    while (std.mem.indexOfScalarPos(u8, line, from, '(')) |open| {
+    while (std.mem.findScalarPos(u8, line, from, '(')) |open| {
         from = open + 1;
-        const close = std.mem.indexOfScalarPos(u8, line, open, ')') orelse continue;
+        const close = std.mem.findScalarPos(u8, line, open, ')') orelse continue;
         const inside = line[open + 1 .. close];
 
         // The commit trails the line numbers: `ggml.c:6516 @c1d0e7a00`.
         var body = inside;
         var sha: []const u8 = "";
-        if (std.mem.lastIndexOfScalar(u8, inside, '@')) |at| {
+        if (std.mem.findScalarLast(u8, inside, '@')) |at| {
             sha = std.mem.trim(u8, inside[at + 1 ..], " \t");
             body = std.mem.trimEnd(u8, inside[0..at], " \t");
         }
 
-        const colon = std.mem.lastIndexOfScalar(u8, body, ':') orelse continue;
+        const colon = std.mem.findScalarLast(u8, body, ':') orelse continue;
         const file = std.mem.trim(u8, body[0..colon], " \t");
         if (file.len == 0) continue;
-        if (std.mem.indexOfScalar(u8, file, ' ') != null) continue;
-        if (std.mem.indexOfScalar(u8, file, '.') == null) continue;
+        if (std.mem.findScalar(u8, file, ' ') != null) continue;
+        if (std.mem.findScalar(u8, file, '.') == null) continue;
 
         return .{ .at = open, .file = file, .nums = body[colon + 1 ..], .sha = sha };
     }
@@ -220,13 +220,13 @@ fn isComment(line: []const u8) bool {
 /// `CLAUDE.md` records. Wrapping at 80 columns is normal here, so the fix
 /// is to join the continuation rather than forbid it.
 fn opensUnclosedCitation(line: []const u8) bool {
-    const open = std.mem.lastIndexOfScalar(u8, line, '(') orelse return false;
-    if (std.mem.indexOfScalarPos(u8, line, open, ')') != null) return false;
+    const open = std.mem.findScalarLast(u8, line, '(') orelse return false;
+    if (std.mem.findScalarPos(u8, line, open, ')') != null) return false;
     const tail = line[open + 1 ..];
     // A citation's head is `<path with a dot>:<digit>`; prose is not.
-    const colon = std.mem.indexOfScalar(u8, tail, ':') orelse return false;
-    if (std.mem.indexOfScalar(u8, tail[0..colon], '.') == null) return false;
-    if (std.mem.indexOfScalar(u8, tail[0..colon], ' ') != null) return false;
+    const colon = std.mem.findScalar(u8, tail, ':') orelse return false;
+    if (std.mem.findScalar(u8, tail[0..colon], '.') == null) return false;
+    if (std.mem.findScalar(u8, tail[0..colon], ' ') != null) return false;
     return colon + 1 < tail.len and std.ascii.isDigit(tail[colon + 1]);
 }
 
@@ -368,7 +368,7 @@ fn collect(
         else
             isSource(entry.basename);
         if (!ok) continue;
-        try out.append(arena, try std.fmt.allocPrint(arena, "{s}/{s}", .{ root, entry.path }));
+        try out.append(arena, try arena.print("{s}/{s}", .{ root, entry.path }));
     }
 }
 
@@ -393,7 +393,7 @@ fn blobAt(
     sha: []const u8,
     rel: []const u8,
 ) !?[]u8 {
-    const spec = try std.fmt.allocPrint(arena, "{s}:{s}", .{ sha, rel });
+    const spec = try arena.print("{s}:{s}", .{ sha, rel });
     const res = std.process.run(arena, io, .{
         .argv = &.{ "git", "-C", ref_root, "show", spec },
         .stdout_limit = .limited(64 << 20),
@@ -436,7 +436,7 @@ fn nthLine(text: []const u8, n: usize) ?[]const u8 {
 fn definesAt(text: []const u8, n: usize, symbol: []const u8) bool {
     const first = nthLine(text, n) orelse return false;
     if (hasWord(first, symbol)) return true;
-    if (std.mem.indexOfScalar(u8, first, '{') == null) return false;
+    if (std.mem.findScalar(u8, first, '{') == null) return false;
 
     var depth: isize = 0;
     var i: usize = 1;
@@ -460,7 +460,7 @@ fn definesAt(text: []const u8, n: usize, symbol: []const u8) bool {
 fn hasWord(haystack: []const u8, needle: []const u8) bool {
     if (needle.len == 0) return false;
     var from: usize = 0;
-    while (std.mem.indexOfPos(u8, haystack, from, needle)) |at| {
+    while (std.mem.findPos(u8, haystack, from, needle)) |at| {
         const before_ok = at == 0 or !isIdent(haystack[at - 1]);
         const end = at + needle.len;
         const after_ok = end >= haystack.len or !isIdent(haystack[end]);
@@ -517,7 +517,7 @@ pub fn main(init: std.process.Init) !void {
     // have to be as accurate as the port's.
     var ref_paths: std.ArrayList([]const u8) = .empty;
     for ([_][]const u8{ "/ggml/include", "/ggml/src", "/include", "/src", "/common", "/tools" }) |sub| {
-        const p = try std.fmt.allocPrint(arena, "{s}{s}", .{ ref_root, sub });
+        const p = try arena.print("{s}{s}", .{ ref_root, sub });
         try collect(arena, io, &ref_paths, p, false);
     }
 
@@ -586,7 +586,7 @@ pub fn main(init: std.process.Init) !void {
         // Read the file as it was at the citation's own commit. The working
         // tree is the fast path for the overwhelmingly common case of a
         // citation at the checkout's HEAD.
-        const key = try std.fmt.allocPrint(arena, "{s}:{s}", .{ r.sha, target });
+        const key = try arena.print("{s}:{s}", .{ r.sha, target });
         const text = cache.get(key) orelse blk: {
             const at_head = !into_reference or
                 (want_sha.len >= r.sha.len and std.mem.startsWith(u8, want_sha, r.sha));

@@ -483,15 +483,15 @@ test "packTwelve never overflows a byte" {
     // `63 + (48 << 2) == 255` is the widest either expression reaches, so
     // the C's `int` arithmetic loses nothing to its narrowing store and the
     // `u8` arithmetic here cannot trap.
-    var s: [8]u8 = .{255} ** 8;
-    var m: [8]u8 = .{255} ** 8;
+    var s: [8]u8 = @splat(255);
+    var m: [8]u8 = @splat(255);
     var dst: [12]u8 = undefined;
     packTwelve(&dst, &s, &m);
     for (dst[0..8]) |v| try std.testing.expectEqual(@as(u8, 255), v);
     for (dst[8..12]) |v| try std.testing.expectEqual(@as(u8, 255), v);
 
-    s = .{0} ** 8;
-    m = .{0} ** 8;
+    s = @splat(0);
+    m = @splat(0);
     packTwelve(&dst, &s, &m);
     for (dst) |v| try std.testing.expectEqual(@as(u8, 0), v);
 }

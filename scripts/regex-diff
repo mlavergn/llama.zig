@@ -26,11 +26,15 @@ zig c++ -std=c++17 -O2 -nostdinc++ -I "$SDK/usr/include/c++/v1" \
 # ported ggml supplies the first, and nothing on these paths calls the second.
 [ -f zig-out/lib/libggml.a ] || { echo "missing zig-out/lib/libggml.a -- run 'zig build reference --release=fast'" >&2; exit 2; }
 
-# `-I` applies to the module declared after it, here the one that imports
-# llama.h.
-zig build-exe -femit-bin="$tmp/regex_diff" -OReleaseFast -lc \
+# Zig 0.17 has no `@cImport`: `impl.zig` imports llama.h as the module
+# `llama_c`, translated from `src/llama/c_import.h` as build/llamacpp.zig does.
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+zig build-exe -femit-bin="$tmp/regex_diff" -Ofast -lc \
     --dep regex -Mroot=harness/regex_diff.zig \
-    -I llama.cpp/include -I llama.cpp/ggml/include -Mregex=src/llama/regex.zig \
+    --dep llama_c -Mregex=src/llama/regex.zig -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/ref.o" zig-out/lib/libggml.a "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libc++abi.tbd" \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \

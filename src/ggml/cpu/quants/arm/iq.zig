@@ -761,7 +761,7 @@ pub export fn ggml_vec_dot_iq4_xs_q8_K(
     const y = as(blocks.Q8_K, vy);
     const nb = @divTrunc(n, c.QK_K);
 
-    const values = neon.loadFrom(i8x16, @ptrCast(&c.kvalues_iq4nl));
+    const values: i8x16 = c.kvalues_iq4nl;
     const m4b: u8x16 = @splat(0x0f);
 
     var sumf: f32 = 0;

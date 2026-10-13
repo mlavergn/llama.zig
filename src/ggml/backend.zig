@@ -693,7 +693,7 @@ pub export fn ggml_backend_tensor_copy(src: [*c]const c.ggml_tensor, dst: [*c]c.
 /// Mirrors `NDEBUG`, which gates the slow-copy warning above and several
 /// scheduler diagnostics. `build/llamacpp.zig` compiles the reference tree
 /// with `-DNDEBUG` only in release, matching Zig's own optimize mode.
-const debug_off = @import("builtin").mode != .Debug;
+const debug_off = @import("builtin").mode != .debug;
 
 /// Ports `ggml_backend_tensor_copy_async` (src/ggml-backend.cpp:500 @c1d0e7a00).
 ///

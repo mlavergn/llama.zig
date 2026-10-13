@@ -175,14 +175,14 @@ pub export fn ggml_gemm_q8_0_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const
             const b_ptr: [*]const blocks.block_q8_0x4 =
                 @as([*]const blocks.block_q8_0x4, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
 
-            var sumf: [4]f32x4 = .{@as(f32x4, @splat(0))} ** 4;
+            var sumf: [4]f32x4 = @splat(@as(f32x4, @splat(0)));
 
             var l: usize = 0;
             while (l < @as(usize, @intCast(nb))) : (l += 1) {
                 const a_d = neon.cvt_f32_f16(neon.load_f16x4(@ptrCast(&a_ptr[l].d)));
                 const b_d = neon.cvt_f32_f16(neon.load_f16x4(@ptrCast(&b_ptr[l].d)));
 
-                var sumi: [4]i32x4 = .{@as(i32x4, @splat(0))} ** 4;
+                var sumi: [4]i32x4 = @splat(@as(i32x4, @splat(0)));
 
                 var k_group: usize = 0;
                 while (k_group < 8) : (k_group += 4) {

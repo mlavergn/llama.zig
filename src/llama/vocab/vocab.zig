@@ -428,8 +428,8 @@ pub const Vocab = struct {
     ///
     /// Return: the merge's rank, or -1.
     pub fn findBpeRank(self: *const Vocab, left: []const u8, right: []const u8) i32 {
-        impl.assert(std.mem.indexOfScalar(u8, left, ' ') == null, "llama-vocab.cpp", 4092, "token_left.find(' ')   == std::string::npos");
-        impl.assert(std.mem.indexOfScalar(u8, right, ' ') == null, "llama-vocab.cpp", 4093, "token_right.find(' ')  == std::string::npos");
+        impl.assert(std.mem.findScalar(u8, left, ' ') == null, "llama-vocab.cpp", 4092, "token_left.find(' ')   == std::string::npos");
+        impl.assert(std.mem.findScalar(u8, right, ' ') == null, "llama-vocab.cpp", 4093, "token_right.find(' ')  == std::string::npos");
         return self.bpe_ranks.find(left, right) orelse -1;
     }
 
@@ -475,7 +475,7 @@ pub const Vocab = struct {
             type_wpm, type_bpe => return self.atKey(unicode.byteToUtf8(ch), exc),
             type_plamo2 => {
                 var buf: [8]u8 = undefined;
-                const s = std.fmt.bufPrint(&buf, "<0x{X:0>2}>", .{ch}) catch unreachable;
+                const s = std.mem.print(&buf, "<0x{X:0>2}>", .{ch}) catch unreachable;
                 return self.atKey(s, exc);
             },
             else => impl.abort("llama-vocab.cpp", 3939, "fatal error"),
@@ -709,7 +709,7 @@ pub const Vocab = struct {
                 self.linefeed_id = id;
             } else |_| {
                 var wbuf: [1025]u8 = undefined;
-                const w = std.fmt.bufPrintZ(&wbuf, "{s}", .{e2.what()}) catch unreachable;
+                const w = std.mem.printSentinel(&wbuf, "{s}", .{e2.what()}, 0) catch unreachable;
                 impl.logWarn("%s: SPM vocabulary, but newline token not found: %s! Using special_pad_id instead.", .{ "load", w.ptr });
                 self.linefeed_id = self.special_pad_id;
             }
@@ -751,7 +751,7 @@ pub const Vocab = struct {
             var second: []const u8 = "";
             // `word.find(' ', 1)`
             if (word.len > 1) {
-                if (std.mem.indexOfScalarPos(u8, word, 1, ' ')) |pos| {
+                if (std.mem.findScalarPos(u8, word, 1, ' ')) |pos| {
                     first = word[0..pos];
                     second = word[pos + 1 ..];
                 }
@@ -988,7 +988,7 @@ pub const Vocab = struct {
             var empty_buf: [32]u8 = undefined;
             if (word.len == 0) {
                 impl.logWarn("%s: empty token at index %u\n", .{ "load", i });
-                word = std.fmt.bufPrint(&empty_buf, "[EMPTY_{d}]", .{i}) catch unreachable;
+                word = std.mem.print(&empty_buf, "[EMPTY_{d}]", .{i}) catch unreachable;
             }
 
             const slot = self.token_to_id.getOrPut(word, 0) catch oom();
@@ -1206,8 +1206,8 @@ pub const Vocab = struct {
                 if ((attr.* & attr_control) == 0) continue;
                 if ((attr.* & attr_unused) == 0) {
                     // `strstr` on `c_str()`: the key up to its first NUL.
-                    const k = t.key[0 .. std.mem.indexOfScalar(u8, t.key, 0) orelse t.key.len];
-                    if (std.mem.indexOf(u8, k, "unused") != null) attr.* = attr.* | attr_unused;
+                    const k = t.key[0 .. std.mem.findScalar(u8, t.key, 0) orelse t.key.len];
+                    if (std.mem.find(u8, k, "unused") != null) attr.* = attr.* | attr_unused;
                 }
                 if ((attr.* & attr_unused) != 0) n_unused += 1;
             }
@@ -1464,7 +1464,7 @@ pub const Vocab = struct {
                         var base_offset = r.offset;
                         var base_length = r.length;
                         while (true) {
-                            const match = std.mem.indexOfPos(u8, raw_text[0 .. base_offset + base_length], base_offset, t) orelse {
+                            const match = std.mem.findPos(u8, raw_text[0 .. base_offset + base_length], base_offset, t) orelse {
                                 if (base_length > 0) next.append(allocator, .{ .raw = .{ .offset = base_offset, .length = base_length } }) catch oom();
                                 break;
                             };
@@ -1942,7 +1942,7 @@ fn oneOf(s: []const u8, comptime list: []const []const u8) bool {
 /// `_contains_any`: some needle occurs in `s`.
 fn containsAny(s: []const u8, comptime needles: []const []const u8) bool {
     inline for (needles) |n| {
-        if (std.mem.indexOf(u8, s, n) != null) return true;
+        if (std.mem.find(u8, s, n) != null) return true;
     }
     return false;
 }
@@ -2003,11 +2003,11 @@ fn strtolHex(s: []const u8) i64 {
 /// Ports `replace_all` (llama-impl.cpp:69 @c1d0e7a00).
 pub fn replaceAll(s: *std.ArrayList(u8), search: []const u8, replace: []const u8) void {
     if (search.len == 0) return;
-    if (std.mem.indexOf(u8, s.items, search) == null) return;
+    if (std.mem.find(u8, s.items, search) == null) return;
     var builder: std.ArrayList(u8) = .empty;
     builder.ensureTotalCapacity(allocator, s.items.len) catch oom();
     var last_pos: usize = 0;
-    while (std.mem.indexOfPos(u8, s.items, last_pos, search)) |pos| {
+    while (std.mem.findPos(u8, s.items, last_pos, search)) |pos| {
         builder.appendSlice(allocator, s.items[last_pos..pos]) catch oom();
         builder.appendSlice(allocator, replace) catch oom();
         last_pos = pos + search.len;
@@ -2042,7 +2042,7 @@ fn decodeText(t: []const u8, out: *std.ArrayList(u8), exc: *Exception) Thrown!vo
             out.appendSlice(allocator, "[UNK_BYTE_0x") catch oom();
             for (utf8) |ch| {
                 var hb: [2]u8 = undefined;
-                out.appendSlice(allocator, std.fmt.bufPrint(&hb, "{x:0>2}", .{ch}) catch unreachable) catch oom();
+                out.appendSlice(allocator, std.mem.print(&hb, "{x:0>2}", .{ch}) catch unreachable) catch oom();
             }
             out.appendSlice(allocator, t) catch oom();
             out.append(allocator, ']') catch oom();

@@ -291,7 +291,7 @@ fn backendFromBuffer(sched: *Sched, tensor: *const c.ggml_tensor, op: *const c.g
 }
 
 /// Mirrors `NDEBUG`, which gates the diagnostics in this file.
-const debug_off = @import("builtin").mode != .Debug;
+const debug_off = @import("builtin").mode != .debug;
 
 /// Ports `ggml_backend_sched_backend_id_from_cur` (src/ggml-backend.cpp:910 @c1d0e7a00).
 ///
@@ -378,13 +378,13 @@ var fmt_size_buffer: [128]u8 = undefined;
 
 fn fmtSize(size: usize) [*:0]const u8 {
     const s = if (size >= 1024 * 1024)
-        std.fmt.bufPrintZ(&fmt_size_buffer, "{d}M", .{size / 1024 / 1024})
+        std.mem.printSentinel(&fmt_size_buffer, "{d}M", .{size / 1024 / 1024}, 0)
     else
-        std.fmt.bufPrintZ(&fmt_size_buffer, "{d}K", .{size / 1024});
+        std.mem.printSentinel(&fmt_size_buffer, "{d}K", .{size / 1024}, 0);
     const out = s catch blk: {
         // 128 bytes is far more than any size needs; the C has no fallback
         // because `snprintf` cannot fail here either.
-        break :blk std.fmt.bufPrintZ(&fmt_size_buffer, "?", .{}) catch unreachable;
+        break :blk std.mem.printSentinel(&fmt_size_buffer, "?", .{}, 0) catch unreachable;
     };
     return out.ptr;
 }

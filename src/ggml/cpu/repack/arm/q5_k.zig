@@ -359,11 +359,11 @@ pub export fn ggml_gemm_q5_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
                     for (0..8) |i| qh[cg][i] = loadqu(@as([*]const u8, &q5_ptr[b].qh) + i * 32 + 16 * cg);
                 }
 
-                var bias_acc: [acc_size]i32x4 = .{@as(i32x4, @splat(0))} ** acc_size;
+                var bias_acc: [acc_size]i32x4 = @splat(@as(i32x4, @splat(0)));
 
                 for (0..4) |sb| {
-                    var acc_lo: [acc_size]i32x4 = .{@as(i32x4, @splat(0))} ** acc_size;
-                    var acc_hi: [acc_size]i32x4 = .{@as(i32x4, @splat(0))} ** acc_size;
+                    var acc_lo: [acc_size]i32x4 = @splat(@as(i32x4, @splat(0)));
+                    var acc_hi: [acc_size]i32x4 = @splat(@as(i32x4, @splat(0)));
 
                     var q5sb_scales: [2]i16x8 = undefined;
                     var q5sb_mins: [2]i16x8 = undefined;

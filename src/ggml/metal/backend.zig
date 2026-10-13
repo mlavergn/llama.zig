@@ -325,7 +325,7 @@ fn BufferType(comptime kind: Kind) type {
                         const u: usize = @intCast(i);
                         ctxs[u] = .{ .device = i, .name = undefined };
                         // `GGML_METAL_NAME + std::to_string(i) + suffix`.
-                        const written = std.fmt.bufPrint(
+                        const written = std.mem.print(
                             &ctxs[u].name,
                             "{s}{d}{s}",
                             .{ metal_name, i, kind.suffix() },
@@ -893,11 +893,11 @@ test "the three buffer types get distinct names per device" {
         .{ .private, "MTL0_Private" },
         .{ .mapped, "MTL0_Mapped" },
     }) |case| {
-        const got = try std.fmt.bufPrint(&buf, "{s}{d}{s}", .{ metal_name, 0, case[0].suffix() });
+        const got = try std.mem.print(&buf, "{s}{d}{s}", .{ metal_name, 0, case[0].suffix() });
         try std.testing.expectEqualStrings(case[1], got);
     }
 
-    const longest = try std.fmt.bufPrint(&buf, "{s}{d}{s}", .{ metal_name, max_devices - 1, Kind.private.suffix() });
+    const longest = try std.mem.print(&buf, "{s}{d}{s}", .{ metal_name, max_devices - 1, Kind.private.suffix() });
     try std.testing.expectEqualStrings("MTL15_Private", longest);
     // plus the NUL the port writes after it
     try std.testing.expect(longest.len + 1 <= buf.len);

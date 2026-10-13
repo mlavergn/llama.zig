@@ -35,9 +35,16 @@ comptime {
 ZIG
 printf 'pub const probe_ported = false;\npub const probe_cpu = false;\n' > "$tmp/config.zig"
 
+# Zig 0.17 has no `@cImport`: `src/ggml/impl.zig` imports ggml's headers as
+# the module `ggml_c`, translated from `src/ggml/c_import.h` as
+# build/llamacpp.zig does.
+zig translate-c -lc -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
+    src/ggml/c_import.h >"$tmp/ggml_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate the ggml headers" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
 if ! zig build-obj -femit-bin="$tmp/check.o" \
         -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu -lc \
-        --dep config -Mroot="$root" -Mconfig="$tmp/config.zig" 2>"$tmp/err"; then
+        --dep config --dep ggml_c -Mroot="$root" -Mconfig="$tmp/config.zig" -Mggml_c="$tmp/ggml_c.zig" 2>"$tmp/err"; then
     echo "FAIL: the cluster port does not compile"
     head -30 "$tmp/err"
     exit 1
@@ -84,7 +91,7 @@ cp "$tmp/dispatch.zig" src/ggml/.cluster_dispatch.zig
 trap 'rm -rf "$tmp"; rm -f "$root" src/ggml/.cluster_dispatch.zig' EXIT
 if zig build-obj -femit-bin="$tmp/dispatch.o" \
         -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu -lc \
-        --dep config -Mroot=src/ggml/.cluster_dispatch.zig -Mconfig="$tmp/config.zig" 2>"$tmp/derr"; then
+        --dep config --dep ggml_c -Mroot=src/ggml/.cluster_dispatch.zig -Mconfig="$tmp/config.zig" -Mggml_c="$tmp/ggml_c.zig" 2>"$tmp/derr"; then
     echo "dispatch  implemented"
 else
     echo "dispatch  NOT IMPLEMENTED -- the symbol count above is not this file's contract"

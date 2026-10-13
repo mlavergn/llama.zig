@@ -107,7 +107,7 @@ const glu_op_name = [_][*:0]const u8{
 };
 
 const type_traits = blk: {
-    var t = [_]c.ggml_type_traits{std.mem.zeroes(c.ggml_type_traits)} ** c.GGML_TYPE_COUNT;
+    var t: [c.GGML_TYPE_COUNT]c.ggml_type_traits = @splat(std.mem.zeroes(c.ggml_type_traits));
     t[c.GGML_TYPE_I8] = .{
         .type_name = "i8",
         .blck_size = 1,

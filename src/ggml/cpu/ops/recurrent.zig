@@ -851,7 +851,7 @@ fn rwkvWkv7F32(params: *const ComputeParams, dst: *Tensor) void {
 
                 var sa: f32 = 0;
                 {
-                    var sum: [4]f32x4 = .{zero} ** 4;
+                    var sum: [4]f32x4 = @splat(zero);
                     var j: usize = 0;
                     while (j < head_size) : (j += f32_step) {
                         for (0..4) |kk| {
@@ -866,7 +866,7 @@ fn rwkvWkv7F32(params: *const ComputeParams, dst: *Tensor) void {
                 const sa_vec: f32x4 = @splat(sa);
 
                 var j: usize = 0;
-                var result_vec: [4]f32x4 = .{zero} ** 4;
+                var result_vec: [4]f32x4 = @splat(zero);
                 while (j < head_size) : (j += f32_step) {
                     for (0..4) |kk| {
                         const t_h_j_offset = t_h_offset + j + kk * f32_epr;

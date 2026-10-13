@@ -162,7 +162,7 @@ pub export fn ggml_vec_dot_f32(
     var sumf: f32 = 0.0;
     const np = n & ~@as(c_int, 16 - 1);
 
-    var sum: [4]f32x4 = .{@as(f32x4, @splat(0.0))} ** 4;
+    var sum: [4]f32x4 = @splat(@as(f32x4, @splat(0.0)));
     var ax: [4]f32x4 = undefined;
     var ay: [4]f32x4 = undefined;
 
@@ -272,7 +272,7 @@ pub export fn ggml_vec_dot_f16(
     var sumf: GgmlFloat = 0.0;
     const np = n & ~@as(c_int, 32 - 1);
 
-    var sum: [4]f16x8 = .{@as(f16x8, @splat(0.0))} ** 4;
+    var sum: [4]f16x8 = @splat(@as(f16x8, @splat(0.0)));
 
     var i: c_int = 0;
     while (i < np) : (i += 32) {

@@ -88,7 +88,7 @@ pub const Session = struct {
         var model_params = c.llama_model_default_params();
         if (settings.n_gpu_layers >= 0) model_params.n_gpu_layers = settings.n_gpu_layers;
 
-        const model_path = try allocator.dupeZ(u8, settings.model);
+        const model_path = try allocator.dupeSentinel(u8, settings.model, 0);
         defer allocator.free(model_path);
 
         const model = c.llama_model_load_from_file(model_path.ptr, model_params) orelse

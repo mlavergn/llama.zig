@@ -629,8 +629,8 @@ test "mad_f32 fuses, in body and tail alike" {
     // 1 + 2^-12 squared needs 25 significand bits; only a fused multiply-add
     // keeps the 2^-24 term when the addend cancels the leading 1.
     const e: f32 = 1.0 + 0x1p-12;
-    var x = [_]f32{e} ** 17;
-    var y = [_]f32{-(1.0 + 0x1p-11)} ** 17;
+    var x: [17]f32 = @splat(e);
+    var y: [17]f32 = @splat(-(1.0 + 0x1p-11));
     mad_f32(17, &y, &x, e);
     for (y) |v| try testing.expectEqual(@as(f32, 0x1p-24), v);
 }

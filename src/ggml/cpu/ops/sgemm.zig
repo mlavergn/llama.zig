@@ -172,7 +172,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime T: type) type {
         /// held in registers; both are reproduced because the multiply
         /// order they feed `madd` differs, and these are FMAs.
         inline fn gemmBloc(self: *const Self, comptime RM: i64, comptime RN: i64, ii: i64, jj: i64) void {
-            var Cv: [RN][RM]V = .{.{@as(V, @splat(0))} ** RM} ** RN;
+            var Cv: [RN][RM]V = @splat(@splat(@as(V, @splat(0))));
 
             var l: i64 = 0;
             while (l < self.k) : (l += KN) {
@@ -398,7 +398,7 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
             while (job < end) : (job += 1) {
                 const ii = m0 + @divTrunc(job, xtiles) * RM;
                 const jj = n0 + @rem(job, xtiles) * RN;
-                var Cv: [RN][RM]f32x4 = .{.{@as(f32x4, @splat(0))} ** RM} ** RN;
+                var Cv: [RN][RM]f32x4 = @splat(@splat(@as(f32x4, @splat(0))));
 
                 var l: i64 = 0;
                 while (l < self.k) : (l += 1) {

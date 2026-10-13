@@ -89,10 +89,53 @@ fn appleCxxFlags(b: *std.Build, sdk: ?[]const u8, defines: []const []const u8) [
 /// Return: nothing.
 pub fn linkAppleLibcxx(b: *std.Build, mod: *std.Build.Module, sdk: ?[]const u8) void {
     const path = sdk orelse return;
-    mod.addObjectFile(.{ .cwd_relative = b.fmt("{s}/usr/lib/libc++.tbd", .{path}) });
+    mod.addObjectFile(b.graph.cwdRelativePath(b.fmt("{s}/usr/lib/libc++.tbd", .{path})));
     // `libc++abi` as well: the `__cxa_*` guard, exception and personality
     // symbols live there, and `libc++.tbd` does not re-export them.
-    mod.addObjectFile(.{ .cwd_relative = b.fmt("{s}/usr/lib/libc++abi.tbd", .{path}) });
+    mod.addObjectFile(b.graph.cwdRelativePath(b.fmt("{s}/usr/lib/libc++abi.tbd", .{path})));
+}
+
+/// Translates `src/ggml/c_import.h`, the ggml headers `src/ggml/impl.zig` imports.
+///
+/// Zig 0.17 has no `@cImport`, so the header list that file imported inline is
+/// translated here and added, as `ggml_c`, to every module rooted in `src/ggml/`.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `opts`: target and optimize mode.
+///
+/// Return: the translated module, owned by the build graph.
+fn ggmlCModule(b: *std.Build, opts: Options) *std.Build.Module {
+    const translate = b.addTranslateC(.{
+        .root_source_file = b.path("src/ggml/c_import.h"),
+        .target = opts.target,
+        .optimize = opts.optimize,
+    });
+    translate.addIncludePath(b.path(root ++ "/ggml/include"));
+    translate.addIncludePath(b.path(root ++ "/ggml/src"));
+    translate.addIncludePath(b.path(root ++ "/ggml/src/ggml-cpu"));
+    return translate.createModule();
+}
+
+/// Translates `src/llama/c_import.h`, the headers `src/llama/impl.zig` imports.
+///
+/// Zig 0.17 has no `@cImport`; the result is added to libllama's module as
+/// `llama_c`.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `opts`: target and optimize mode.
+///
+/// Return: the translated module, owned by the build graph.
+fn llamaCModule(b: *std.Build, opts: Options) *std.Build.Module {
+    const translate = b.addTranslateC(.{
+        .root_source_file = b.path("src/llama/c_import.h"),
+        .target = opts.target,
+        .optimize = opts.optimize,
+    });
+    translate.addIncludePath(b.path(root ++ "/include"));
+    translate.addIncludePath(b.path(root ++ "/ggml/include"));
+    return translate.createModule();
 }
 
 /// The Metal kernels embedded into the binary, one shader library per entry.
@@ -220,7 +263,7 @@ pub const Artifacts = struct {
 /// Options that shape the reference build.
 pub const Options = struct {
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     /// macOS SDK path, used as the framework search path. Null off macOS.
     sdk: ?[]const u8 = null,
     /// Makes ported code abort on a hot path, to prove it is executing.
@@ -298,6 +341,7 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     // Metal at all.
     options.addOption(bool, "use_metal", true);
     mod.addOptions("config", options);
+    mod.addImport("ggml_c", ggmlCModule(b, opts));
 
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
     mod.addIncludePath(b.path(root ++ "/ggml/src"));
@@ -351,7 +395,7 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
         mod.addAssemblyFile(embedMetalKernel(b, kind));
     }
 
-    if (opts.sdk) |sdk| mod.addFrameworkPath(.{ .cwd_relative = sdk });
+    if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
     // A static archive never links, but this module is also the root of the
     // `ggml_tests` executable, which does. See the note above `appleCxxFlags`.
     linkAppleLibcxx(b, mod, opts.sdk);
@@ -381,14 +425,14 @@ fn embedMetalKernel(b: *std.Build, kind: []const u8) std.Build.LazyPath {
         .root_module = b.createModule(.{
             .root_source_file = b.path("build/metal_embed.zig"),
             .target = b.graph.host,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
     });
 
     const run = b.addRunArtifact(tool);
     run.addArg(kind);
-    const out_metal = run.addOutputFileArg(b.fmt("ggml-metal-embed-{s}.metal", .{kind}));
-    const out_asm = run.addOutputFileArg(b.fmt("ggml-metal-embed-{s}.s", .{kind}));
+    const out_metal = run.addOutputFileArg2(b.fmt("ggml-metal-embed-{s}.metal", .{kind}), .{});
+    const out_asm = run.addOutputFileArg2(b.fmt("ggml-metal-embed-{s}.s", .{kind}), .{});
     _ = out_metal;
 
     const metal = root ++ "/ggml/src/ggml-metal";
@@ -460,6 +504,7 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
     // must not reference the Metal backend.
     options.addOption(bool, "use_metal", false);
     mod.addOptions("config", options);
+    mod.addImport("ggml_c", ggmlCModule(b, opts));
 
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
     mod.addIncludePath(b.path(root ++ "/ggml/src"));
@@ -495,7 +540,7 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
         .flags = appleCxxFlags(b, opts.sdk, &defines),
     });
 
-    if (opts.sdk) |sdk| mod.addFrameworkPath(.{ .cwd_relative = sdk });
+    if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
     // `-DGGML_USE_ACCELERATE` sends the vector helpers in `ops.cpp` and
     // `binary-ops.cpp` to vDSP, so the framework has to come with them.
     mod.linkFramework("Accelerate", .{});
@@ -536,6 +581,7 @@ fn portedTestModuleInner(
     // in its link. The ported registry must not reference the Metal backend.
     options.addOption(bool, "use_metal", false);
     mod.addOptions("config", options);
+    mod.addImport("ggml_c", ggmlCModule(b, opts));
 
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
     mod.addIncludePath(b.path(root ++ "/ggml/src"));
@@ -571,7 +617,7 @@ fn portedTestModuleInner(
         .flags = appleCxxFlags(b, opts.sdk, &defines),
     });
 
-    if (opts.sdk) |sdk| mod.addFrameworkPath(.{ .cwd_relative = sdk });
+    if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
     mod.linkFramework("Accelerate", .{});
     linkAppleLibcxx(b, mod, opts.sdk);
     return mod;
@@ -607,6 +653,7 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.B
         .sanitize_c = .off,
     });
 
+    mod.addImport("llama_c", llamaCModule(b, opts));
     mod.addIncludePath(b.path(root ++ "/include"));
     mod.addIncludePath(b.path(root ++ "/src"));
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
@@ -615,7 +662,10 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.B
     var files: std.ArrayList([]const u8) = .empty;
     try files.appendSlice(b.allocator, &llama_sources);
 
-    var dir = try b.build_root.handle.openDir(b.graph.io, root ++ "/src/models", .{ .iterate = true });
+    // Configure is cached, and this listing is not something Zig can see on
+    // its own: a model added or removed upstream must configure again.
+    b.dependOnDirectoryMetadata(b.path(root ++ "/src/models"));
+    var dir = try b.root.openDir(b.graph.io, root ++ "/src/models", .{ .iterate = true });
     defer dir.close(b.graph.io);
     var it = dir.iterate();
     while (try it.next(b.graph.io)) |entry| {
@@ -637,7 +687,7 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.B
         .flags = appleCxxFlags(b, opts.sdk, &defines),
     });
 
-    if (opts.sdk) |sdk| mod.addFrameworkPath(.{ .cwd_relative = sdk });
+    if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
     linkAppleLibcxx(b, mod, opts.sdk);
     mod.linkLibrary(ggml);
 

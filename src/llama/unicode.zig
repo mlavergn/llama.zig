@@ -963,7 +963,7 @@ fn ucatLookup(name: []const u8) ?u16 {
 
 fn usesCategory(regex_expr: []const u8) bool {
     for (ucat_enum) |e| {
-        if (std.mem.indexOf(u8, regex_expr, e[0]) != null) return true;
+        if (std.mem.find(u8, regex_expr, e[0]) != null) return true;
     }
     return false;
 }
@@ -1119,7 +1119,7 @@ pub fn regexSplit(text: []const u8, regex_exprs: []const []const u8, byte_encode
                         continue;
                     }
                     if (regex_expr[i] == '\\' and i + 3 < regex_expr.len and regex_expr[i + 1] == 'p' and regex_expr[i + 2] == '{') {
-                        if (std.mem.indexOfScalarPos(u8, regex_expr, i + 3, '}')) |closing_brace| {
+                        if (std.mem.findScalarPos(u8, regex_expr, i + 3, '}')) |closing_brace| {
                             if (closing_brace <= i + 10) {
                                 if (ucatLookup(regex_expr[i .. closing_brace + 1])) |cat| {
                                     if (!inside) collapsed.append(allocator, '[') catch oom();
