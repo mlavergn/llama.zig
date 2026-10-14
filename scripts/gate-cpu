@@ -1,0 +1,49 @@
+#!/bin/bash
+# The CPU a bit-exact gate's libraries were built for, and a check that they
+# were.
+#
+# Sourced by the gates that take GATE_CPU: ops-diff, repack-diff, node-diff,
+# parity-port.
+#
+# Why this exists
+# ---------------
+# Which kernels the CPU backend has is decided by the compiler's target, not
+# at run time: `ggml_cpu_has_matmul_int8` is `#if defined(__ARM_FEATURE_
+# MATMUL_INT8) return 1`, and on that one macro hang the two-row i8mm dot
+# products, five NEON gemms, the row count `mul_mat` asks for, and whether
+# llamafile's sgemm is compiled at all. So "the gate passed at apple_m3"
+# means nothing unless both libraries it ran were built for apple_m3. The
+# Makefile builds them that way, but a script run by hand against whatever
+# zig-out holds would pass on the baseline kernels and say nothing.
+#
+# The expected answer comes from the compiler, `zig cc -mcpu=$GATE_CPU -dM`,
+# not from a table here: that is the same question the C asks.
+#
+# Usage: . scripts/gate-cpu   then   gate_cpu_check <side> "<cpu: line>"
+GATE_CPU="${GATE_CPU:-baseline}"
+
+_gate_cpu_macros="$(zig cc -target aarch64-macos -mcpu="$GATE_CPU" -dM -E -x c /dev/null 2>&1)" \
+    || { echo "FAIL: zig cc does not know the CPU '$GATE_CPU'" >&2; echo "$_gate_cpu_macros" | head -3 >&2; exit 2; }
+
+_gate_cpu_has() { grep -q "^#define __ARM_FEATURE_$1 " <<<"$_gate_cpu_macros" && echo 1 || echo 0; }
+
+_gate_cpu_dotprod="$(_gate_cpu_has DOTPROD)"
+_gate_cpu_i8mm="$(_gate_cpu_has MATMUL_INT8)"
+_gate_cpu_sve="$(_gate_cpu_has SVE)"
+# ggml-cpu.c:45 undefines GGML_USE_LLAMAFILE under SVE or i8mm.
+_gate_cpu_llamafile=$(( _gate_cpu_sve || _gate_cpu_i8mm ? 0 : 1 ))
+
+GATE_CPU_EXPECT="cpu: dotprod=$_gate_cpu_dotprod matmul_int8=$_gate_cpu_i8mm sve=$_gate_cpu_sve llamafile=$_gate_cpu_llamafile"
+
+# gate_cpu_check <side> <line>: fail unless <line> is what a library built
+# for GATE_CPU reports.
+gate_cpu_check() {
+    if [ "$2" != "$GATE_CPU_EXPECT" ]; then
+        echo "FAIL: the $1 library was not built for GATE_CPU=$GATE_CPU" >&2
+        echo "  expected: $GATE_CPU_EXPECT" >&2
+        echo "  reported: $2" >&2
+        return 1
+    fi
+}
+
+echo "GATE_CPU=$GATE_CPU ($GATE_CPU_EXPECT)"

@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate xcframework xcframework-check
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -23,6 +23,15 @@ SEED    ?= 42
 SCRATCH ?= /tmp
 
 PARITY_NPRED ?= 32
+
+# The CPU the bit-exact gates build both libraries for: ops-diff,
+# repack-diff, node-diff, parity-port. The kernel arms that exist depend on
+# it -- i8mm's two-row dot products and gemms compile only for a CPU that
+# has i8mm -- so a target that ships for apple_m3 is gated at apple_m3 too:
+#   make ops-diff repack-diff node-diff GATE_CPU=apple_m3
+# See scripts/gate-cpu.
+GATE_CPU ?= baseline
+export GATE_CPU
 
 PORT_CLI := ./zig-out/bin/llama-cli
 REF_CLI  := llama.cpp.zmake/zig-out/macos/bin/llama-cli
@@ -55,6 +64,14 @@ clean:
 # Everything lives in xcfwk/; see xcfwk/README.md.
 xcframework:
 	$(MAKE) -C xcfwk
+
+# Performance of the stock C against the port; see metrics/README.md.
+perf:
+	$(MAKE) -C metrics
+
+# The same on the CPU device alone, so the ported CPU kernels carry the model.
+perf-cpu:
+	$(MAKE) -C metrics cpu
 
 # The xcframework plus every gate on it, and `validate ops-diff`.
 xcframework-check:
@@ -173,8 +190,8 @@ sched-diff:
 # same Zig toolchain, and an optimization difference moves the last bit. The
 # reference lives in llama.cpp.zmake, which is a separate repository.
 ops-diff:
-	cd llama.cpp.zmake && zig build lib --release=fast
-	zig build reference --release=fast
+	cd llama.cpp.zmake && zig build lib --release=fast -Dcpu=$(GATE_CPU)
+	zig build reference --release=fast -Dcpu=$(GATE_CPU)
 	./scripts/ops-diff
 
 # Compare the ported Metal vtables against the reference's, directly.
@@ -217,7 +234,7 @@ abi-check:
 # `make port` runs on Metal. node-diff reaches them but stops at the first
 # divergent node. See the header of scripts/repack-diff.
 repack-diff:
-	zig build reference --release=fast
+	zig build reference --release=fast -Dcpu=$(GATE_CPU)
 	./scripts/repack-diff
 
 # Every public sampler and the grammar, ported vs reference, on bits.
@@ -283,23 +300,23 @@ backend-ops:
 # Diff inference output between the ported and reference libraries.
 # Both sides --release=fast, against llama.cpp.zmake: see scripts/parity-port.
 parity-port:
-	cd llama.cpp.zmake && zig build lib --release=fast
-	zig build reference --release=fast
+	cd llama.cpp.zmake && zig build lib --release=fast -Dcpu=$(GATE_CPU)
+	zig build reference --release=fast -Dcpu=$(GATE_CPU)
 	./scripts/parity-port $(MODEL)
 
 # Every graph node of a real model's decode, ported vs reference, on bits. CPU
 # by default; ARGS=--gpu for Metal. See the header of scripts/node-diff.
 node-diff:
-	cd llama.cpp.zmake && zig build lib --release=fast
-	zig build reference --release=fast
+	cd llama.cpp.zmake && zig build lib --release=fast -Dcpu=$(GATE_CPU)
+	zig build reference --release=fast -Dcpu=$(GATE_CPU)
 	./scripts/node-diff $(ARGS) $(MODEL)
 
 # The same, with the model on the CPU device alone, so inference runs through
 # the ported ggml-cpu kernels -- which on a Metal machine it otherwise never
 # does.
 parity-port-cpu:
-	cd llama.cpp.zmake && zig build lib --release=fast
-	zig build reference --release=fast
+	cd llama.cpp.zmake && zig build lib --release=fast -Dcpu=$(GATE_CPU)
+	zig build reference --release=fast -Dcpu=$(GATE_CPU)
 	./scripts/parity-port --cpu $(MODEL)
 
 #

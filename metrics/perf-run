@@ -1,0 +1,126 @@
+#!/bin/bash
+# Run the perf driver against the reference and the port, alternating, and
+# write one results file.
+#
+# Not a gate: nothing here passes or fails on a number. It records, and
+# metrics/perf-report summarises.
+#
+# Why alternate: a laptop warms up over a session and its clocks follow, so a
+# block of reference runs followed by a block of port runs folds the thermal
+# drift into the comparison. Rounds go ref,port then port,ref, and the first
+# run of each side is thrown away -- it pays for the page cache and the GPU
+# clocking up, not for the library.
+#
+# A busy machine is refused, not measured. Measured: with another process
+# holding the GPU at 98%, Metal generation read 33 tok/s against
+# 233 on a quiet machine, on both sides, and the run looked fine. FORCE=1
+# measures anyway and the header says so.
+#
+# Usage: metrics/perf-run   (driven by metrics/Makefile; the environment
+#                            carries MODEL PROMPT NPRED RUNS COOLDOWN FLAGS
+#                            SUDO IDLE_MS TAIL_MS FORCE PORT_DESC)
+set -u
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
+cd "$ROOT" || exit 2
+
+# Comparing against a different upstream commit would report the version gap
+# as the port's performance.
+. "$ROOT/scripts/check-reference-pin"
+
+MODEL="${MODEL:-$ROOT/Qwen3.5-2B-Q4_K_M.gguf}"
+PROMPT="${PROMPT:-How was the transistor discovered?}"
+NPRED="${NPRED:-512}"
+RUNS="${RUNS:-5}"
+COOLDOWN="${COOLDOWN:-5}"
+FLAGS="${FLAGS:-}"
+SUDO="${SUDO-sudo}"
+IDLE_MS="${IDLE_MS:-2000}"
+TAIL_MS="${TAIL_MS:-1500}"
+
+REF="$HERE/build/perf-ref"
+PORT="$HERE/build/perf-port"
+for b in "$REF" "$PORT"; do
+    [ -x "$b" ] || { echo "missing $b -- run 'make -C metrics drivers'" >&2; exit 2; }
+done
+[ -f "$MODEL" ] || { echo "missing $MODEL -- run 'make qwen35'" >&2; exit 2; }
+
+# Preflight: the GPU's own utilisation, sampled for two seconds, and the
+# one-minute load average against a third of the cores.
+gpu_busy=0
+for _ in 1 2 3 4 5; do
+    u=$(ioreg -r -c IOAccelerator -d 1 | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2)
+    [ "${u:-0}" -gt "$gpu_busy" ] && gpu_busy=$u
+    sleep 0.5
+done
+load1=$(sysctl -n vm.loadavg | awk '{print $2}')
+ncpu=$(sysctl -n hw.ncpu)
+busy=""
+[ "$gpu_busy" -gt 10 ] && busy="GPU ${gpu_busy}% busy"
+awk -v l="$load1" -v n="$ncpu" 'BEGIN { exit !(l > n / 3) }' && busy="${busy:+$busy, }load average $load1 on $ncpu cores"
+if [ -n "$busy" ]; then
+    if [ -z "${FORCE:-}" ]; then
+        echo "FAIL: the machine is busy ($busy)." >&2
+        echo "      A measurement now would record the contention, not the libraries." >&2
+        ps -Ao pcpu,comm -r | sed -n '2,6p' | sed 's/^/        /' >&2
+        echo "      FORCE=1 measures anyway; the results header records it." >&2
+        exit 2
+    fi
+    echo "WARNING: measuring a busy machine ($busy), FORCE=1" >&2
+fi
+
+# One password prompt up front rather than one in the middle of a run.
+if [ -n "$SUDO" ]; then
+    $SUDO -v || exit 2
+fi
+
+mkdir -p "$HERE/results"
+stamp="$(date +%Y%m%d-%H%M%S)"
+suffix=""
+[ -n "$FLAGS" ] && suffix="-${FLAGS//,/-}"
+OUT="$HERE/results/$stamp$suffix.tsv"
+
+# What the numbers depend on besides the library. Power source and Low Power
+# Mode change clocks; a battery run is not comparable to a mains run.
+{
+    echo "# date      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "# commit    $(git rev-parse --short HEAD)$(git diff --quiet HEAD -- || echo '-dirty')"
+    echo "# port      ${PORT_DESC:-working tree}"
+    echo "# cpu       -Dcpu=${CPU:-baseline}, both sides"
+    echo "# upstream  $(git -C llama.cpp rev-parse --short HEAD)"
+    echo "# chip      $(sysctl -n machdep.cpu.brand_string)"
+    echo "# macos     $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+    echo "# power     $(pmset -g batt | head -1 | sed "s/.*'\(.*\)'.*/\1/")"
+    echo "# powermode $(pmset -g | awk '/powermode/ {print $2}')"
+    echo "# model     $(basename "$MODEL")"
+    echo "# prompt    $PROMPT"
+    echo "# npred     $NPRED"
+    echo "# runs      $RUNS"
+    echo "# flags     ${FLAGS:-gpu}"
+    echo "# sudo      ${SUDO:-no}"
+    echo "# preflight GPU ${gpu_busy}%, load $load1 on $ncpu cores${busy:+ -- FORCED}"
+} > "$OUT"
+
+run() { # side, round
+    local bin="$REF"
+    [ "$1" = port ] && bin="$PORT"
+    local line
+    line="$($SUDO env PERF_IDLE_MS="$IDLE_MS" PERF_TAIL_MS="$TAIL_MS" "$bin" "$MODEL" "$PROMPT" "$NPRED" "$1" "$FLAGS")" \
+        || { echo "FAIL: $1 run $2 exited non-zero" >&2; exit 1; }
+    [ "$2" -gt 0 ] && printf 'run=%s\t%s\n' "$2" "$line" >> "$OUT"
+    printf '  %-5s run %s  %s\n' "$1" "$2" "$(tr '\t' '\n' <<< "$line" | grep -E '^(ttft_ms|tg_tps)=' | tr '\n' ' ')"
+    sleep "$COOLDOWN"
+}
+
+echo "priming (discarded)"
+run ref 0
+run port 0
+for r in $(seq 1 "$RUNS"); do
+    if [ $((r % 2)) -eq 1 ]; then run ref "$r"; run port "$r"; else run port "$r"; run ref "$r"; fi
+done
+
+echo
+echo "results: ${OUT#"$ROOT"/}"
+echo
+"$HERE/perf-report" "$OUT"

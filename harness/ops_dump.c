@@ -293,6 +293,15 @@ int main(int argc, char ** argv) {
     /* The f16 and quant lookup tables have to be live before any kernel runs. */
     ggml_cpu_init();
 
+    /* The instruction set each library was compiled for, so a run at
+     * GATE_CPU=apple_m3 against a library built for the baseline -- or one
+     * side built for each -- shows as a diff on the first line rather than
+     * passing on the kernels it never reached. scripts/ops-diff also checks
+     * the value against the compiler's own answer for the CPU. */
+    printf("cpu: dotprod=%d matmul_int8=%d sve=%d llamafile=%d\n",
+           ggml_cpu_has_dotprod(), ggml_cpu_has_matmul_int8(), ggml_cpu_has_sve(),
+           ggml_cpu_has_llamafile());
+
     struct ggml_tensor * a2   = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4);
     struct ggml_tensor * b2   = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4);
     struct ggml_tensor * row  = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 1);
@@ -422,10 +431,16 @@ int main(int argc, char ** argv) {
     }
 
     {
-        /* Every type with a CPU vec_dot, at 1 column (the decode path) and 7
-         * (a short prompt). Only Q4_K, Q6_K and Q8_0 were here at first, and
-         * a Q5_K divergence surfaced end to end instead -- measured, as the
-         * first differing node of a CPU-only Qwen3.5 decode. */
+        /* Every type with a CPU vec_dot, at 1 column (the decode path), 2 and
+         * 7 (a short prompt). Only Q4_K, Q6_K and Q8_0 were here at first,
+         * and a Q5_K divergence surfaced end to end instead -- measured, as
+         * the first differing node of a CPU-only Qwen3.5 decode.
+         *
+         * 2 is for i8mm. With __ARM_FEATURE_MATMUL_INT8 the q4_0, q4_1,
+         * q8_0, q4_K and q6_K kernels take two rows per call, and
+         * ggml_compute_forward_mul_mat falls back to one whenever a column
+         * count or a chunk is odd -- so 1 and 7 alone never reach the
+         * two-row arm at all. */
         static const enum ggml_type qtypes[] = {
             GGML_TYPE_Q4_0, GGML_TYPE_Q4_1, GGML_TYPE_Q5_0, GGML_TYPE_Q5_1, GGML_TYPE_Q8_0,
             GGML_TYPE_Q2_K, GGML_TYPE_Q3_K, GGML_TYPE_Q4_K, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K,
@@ -434,8 +449,10 @@ int main(int argc, char ** argv) {
             GGML_TYPE_IQ1_S, GGML_TYPE_IQ1_M, GGML_TYPE_NVFP4, GGML_TYPE_Q1_0, GGML_TYPE_Q2_0,
             GGML_TYPE_BF16, GGML_TYPE_F16,
         };
+        static const int ncols[] = { 1, 2, 7 };
         for (size_t qi = 0; qi < sizeof qtypes / sizeof qtypes[0]; qi++) {
-            for (int nc = 1; nc <= 7; nc += 6) {
+            for (size_t ci = 0; ci < sizeof ncols / sizeof ncols[0]; ci++) {
+                const int nc = ncols[ci];
                 char label[96];
                 snprintf(label, sizeof label, "mul_mat %s x f32 [512 x 16] x %d", ggml_type_name(qtypes[qi]), nc);
                 run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, qtypes[qi], 512, 16),

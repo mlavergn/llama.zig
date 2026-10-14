@@ -1,0 +1,83 @@
+#!/bin/bash
+# Summarise a metrics/perf-run results file: the median of each metric per
+# side, the spread across runs, and port / ref.
+#
+# Medians, not means: one run that loses the GPU to WindowServer for 200 ms
+# moves a mean and not a median. Spread is (max - min) / median, so a ratio
+# smaller than the spread is not a difference this run can claim.
+#
+# It also flags contention it can see after the fact: GPU energy drawn
+# during the driver's idle window, before anything of ours is loaded, is
+# someone else's.
+#
+# It also checks the work was the same. Every run on both sides must have
+# decoded the same tokens (tok_hash) -- otherwise the rates are over
+# different work and the comparison says nothing.
+#
+# Usage: metrics/perf-report [results.tsv]   (default: the newest)
+set -u
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+FILE="${1:-$(ls -t "$HERE"/results/*.tsv 2>/dev/null | head -1)}"
+[ -f "$FILE" ] || { echo "no results file -- run 'make -C metrics'" >&2; exit 2; }
+
+grep '^# ' "$FILE" | sed 's/^# /  /'
+echo
+
+awk -F'\t' '
+function median(label, key,    n, i, j, t, a) {
+    n = cnt[label, key]
+    for (i = 1; i <= n; i++) a[i] = val[label, key, i]
+    for (i = 2; i <= n; i++) { t = a[i]; for (j = i - 1; j >= 1 && a[j] > t; j--) a[j + 1] = a[j]; a[j + 1] = t }
+    lo[label, key] = a[1]; hi[label, key] = a[n]
+    return n % 2 ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2
+}
+/^#/ || NF == 0 { next }
+{
+    label = ""
+    for (i = 1; i <= NF; i++) { split($i, kv, "="); if (kv[1] == "label") label = kv[2] }
+    labels[label] = 1
+    runs[label]++
+    for (i = 1; i <= NF; i++) {
+        split($i, kv, "=")
+        if (kv[1] == "tok_hash") hashes[kv[2]]++
+        if (kv[2] == "na") { na[label, kv[1]] = 1; continue }
+        val[label, kv[1], ++cnt[label, kv[1]]] = kv[2] + 0
+    }
+}
+END {
+    n = split("ttft_ms:ms:lower pp_tps:tok/s:higher tg_tps:tok/s:higher tg_ms_per_tok:ms:lower perf_tg_tps:tok/s:higher " \
+              "load_ms:ms:lower warmup_ms:ms:lower " \
+              "footprint_loaded_mb:MiB:lower footprint_peak_mb:MiB:lower rss_peak_mb:MiB:lower " \
+              "cpu_load_s:s:lower cpu_gen_s:s:lower cpu_gen_cores:cores:lower " \
+              "gpu_ttft_ms:ms:lower gpu_gen_s:s:lower gpu_gen_util:%:- " \
+              "gpu_w_gen:W:lower cpu_w_gen:W:lower dram_w_gen:W:lower ane_w_gen:W:lower soc_mj_per_tok:mJ:lower " \
+              "gpu_w_idle:W:- sys_w_idle:W:- sys_j_run:J:lower sys_mj_per_tok:mJ:lower", rows, " ")
+    printf "  %-20s %-6s %12s %8s %12s %8s %9s  %s\n", "metric", "unit", "ref", "spread", "port", "spread", "port/ref", "better"
+    printf "  %-20s %-6s %12s %8s %12s %8s %9s  %s\n", "------", "----", "---", "------", "----", "------", "--------", "------"
+    for (r = 1; r <= n; r++) {
+        split(rows[r], m, ":")
+        k = m[1]
+        for (side = 0; side < 2; side++) {
+            L = side ? "port" : "ref"
+            if (na[L, k] || !cnt[L, k]) { med[side] = "na"; spr[side] = ""; continue }
+            med[side] = median(L, k)
+            spr[side] = med[side] != 0 ? sprintf("%.1f%%", 100 * (hi[L, k] - lo[L, k]) / (med[side] < 0 ? -med[side] : med[side])) : ""
+        }
+        ratio = (med[0] != "na" && med[1] != "na" && med[0] != 0) ? sprintf("%.3f", med[1] / med[0]) : "-"
+        for (side = 0; side < 2; side++) shown[side] = (med[side] == "na") ? "na" : sprintf("%.2f", med[side])
+        printf "  %-20s %-6s %12s %8s %12s %8s %9s  %s\n", k, m[2], shown[0], spr[0], shown[1], spr[1], ratio, m[3]
+    }
+    printf "\n  runs: ref %d, port %d\n", runs["ref"], runs["port"]
+    for (side = 0; side < 2; side++) {
+        L = side ? "port" : "ref"
+        if (cnt[L, "gpu_w_idle"] && median(L, "gpu_w_idle") > 1.0) {
+            printf "  CONTENDED -- %s: the GPU drew %.1f W before anything was loaded; another process was using it\n", L, median(L, "gpu_w_idle")
+            bad = 1
+        }
+    }
+    nh = 0; for (h in hashes) nh++
+    if (nh == 1) print "  work: identical -- every run decoded the same tokens"
+    else { print "  WORK DIFFERS -- runs decoded different tokens; rates are over different work"; bad = 1 }
+    exit bad
+}' "$FILE"

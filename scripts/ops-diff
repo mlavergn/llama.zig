@@ -29,8 +29,16 @@
 # baseline failed on `xielu` and on a Q6_K `mul_mat` with ops.cpp unported and
 # byte-identical on both sides -- a compiler difference reported as a port bug.
 #
+# GATE_CPU names the CPU both libraries were built for, `baseline` when
+# unset; `make ops-diff GATE_CPU=apple_m3` builds them that way. It decides
+# which kernel arms exist -- i8mm's two-row dot products and gemms only
+# compile for a CPU that has it -- so the first line of each side's output
+# reports what the library was compiled with, and that line is checked
+# against the compiler's own answer for GATE_CPU. A library left over from
+# a build for another CPU would otherwise pass on the arms it never reached.
+#
 # Requires: make -C llama.cpp.zmake lib, zig build reference
-# Usage: scripts/ops-diff
+# Usage: [GATE_CPU=<cpu>] scripts/ops-diff
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
@@ -38,6 +46,7 @@ cd "$ROOT" || exit 2
 # The reference must be the same upstream commit we port from; this gate
 # compares on bits and would otherwise report a version gap as a port bug.
 . "$ROOT/scripts/check-reference-pin"
+. "$ROOT/scripts/gate-cpu"
 
 REF_LIBS=( llama.cpp.zmake/zig-out/lib/libggml.a )
 for lib in "${REF_LIBS[@]}"; do
@@ -54,12 +63,12 @@ INC=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src)
 
 # Both sides are Zig-linked, because both sides are Zig-built. The Apple-clang
 # detour the other diff scripts need does not apply.
-zig cc -mcpu=baseline harness/ops_dump.c -o "$tmp/ref" -std=c11 -w -O2 "${INC[@]}" \
+zig cc -mcpu="$GATE_CPU" harness/ops_dump.c -o "$tmp/ref" -std=c11 -w -O2 "${INC[@]}" \
     "${REF_LIBS[@]}" -lc++ \
     "${FW[@]}" -F "$SDK/System/Library/Frameworks" 2>"$tmp/ref.log" \
     || { echo "FAIL: could not link against the reference libraries" >&2; tail -20 "$tmp/ref.log" >&2; exit 1; }
 
-zig cc -mcpu=baseline harness/ops_dump.c -o "$tmp/port" -std=c11 -w -O2 "${INC[@]}" \
+zig cc -mcpu="$GATE_CPU" harness/ops_dump.c -o "$tmp/port" -std=c11 -w -O2 "${INC[@]}" \
     zig-out/lib/libggml.a -lc++ \
     "${FW[@]}" -F "$SDK/System/Library/Frameworks" 2>"$tmp/port.log" \
     || { echo "FAIL: could not link against the ported libraries" >&2; tail -20 "$tmp/port.log" >&2; exit 1; }
@@ -79,6 +88,8 @@ for nt in 1 3; do
         || { echo "FAIL: reference run aborted at $nt thread(s)" >&2; head -3 "$tmp/ref.err" >&2; exit 1; }
     OPS_THREADS=$nt "$tmp/port" read-q  "$tmp/q.bin" > "$tmp/port.$nt.txt" 2>"$tmp/port.err" \
         || { echo "FAIL: ported run aborted at $nt thread(s)" >&2; head -3 "$tmp/port.err" >&2; exit 1; }
+    gate_cpu_check reference "$(head -1 "$tmp/ref.$nt.txt")"  || exit 1
+    gate_cpu_check port      "$(head -1 "$tmp/port.$nt.txt")" || exit 1
     sed "s/^/[nt=$nt] /" "$tmp/ref.$nt.txt"  >> "$tmp/ref.txt"
     sed "s/^/[nt=$nt] /" "$tmp/port.$nt.txt" >> "$tmp/port.txt"
 done
