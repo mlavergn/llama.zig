@@ -5,17 +5,10 @@
 //! can call it beside the C++ that defines the same name. Importing this
 //! file exports all of them by name, which is libllama's single swap at
 //! `llama.h` (`PLAN.md`, Decision 42). Only `module.zig`, the library root,
-//! imports it; `staged.zig`, the harnesses' root, must not.
-//!
-//! One C++-linkage symbol is exported too: `llama_log_internal`, which
-//! `impl.zig`'s `logInfo` and friends call by its mangled name. In the
-//! harnesses that name resolves to the C++'s logger; here it resolves to
-//! `log.zig`'s, so the port logs through the callback `llama_log_set`
-//! installed without either side choosing at build time.
+//! imports it; `harness_root.zig`, the harnesses' root, must not.
 
 const std = @import("std");
 const api = @import("api/module.zig");
-const log = @import("log.zig");
 
 /// Entry points `api/` ports from `llama-ext.h`, which declares them with
 /// C++ linkage: they are no part of `llama.h`'s C contract, and the
@@ -47,7 +40,6 @@ comptime {
             @export(&f, .{ .name = name });
         }
     }
-    @export(&log.logInternal, .{ .name = "_Z18llama_log_internal14ggml_log_levelPKcz" });
 }
 
 // -----------------------------------------------------------------------------

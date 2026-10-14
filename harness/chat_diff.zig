@@ -35,10 +35,10 @@
 //! Usage: chat_diff <llama-chat.cpp> <file.gguf|file.jinja>...
 
 const std = @import("std");
-const staged = @import("staged");
+const harness_root = @import("harness_root");
 
-const c = staged.impl.c;
-const chat = staged.chat;
+const c = harness_root.impl.c;
+const chat = harness_root.chat;
 const Message = chat.Message;
 
 const gpa = std.heap.c_allocator;
@@ -195,7 +195,7 @@ fn checkApply(t: c_int, conv: []const Message, add_ass: bool) void {
     const r = ref_apply(t, conv.ptr, conv.len, add_ass, "sentinel", &ref_p, &ref_len);
     defer ref_free_buf(ref_p);
     out_list.clearRetainingCapacity();
-    out_list.appendSlice(staged.impl.allocator, "sentinel") catch unreachable;
+    out_list.appendSlice(harness_root.impl.allocator, "sentinel") catch unreachable;
     const p = chat.applyTemplate(@fromBackingInt(@intCast(t)), conv, &out_list, add_ass);
     var nb: [32]u8 = undefined;
     const what = std.fmt.bufPrint(&nb, "apply tmpl {d}", .{t}) catch unreachable;

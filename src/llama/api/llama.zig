@@ -232,7 +232,7 @@ pub fn llama_model_load_from_splits(paths: [*c][*c]const u8, n_paths: usize, par
 
 /// Ports `llama_model_load_from_file_ptr` (src/llama.cpp:485 @c1d0e7a00): a
 /// model read from an open file, which stays the caller's.
-pub fn llama_model_load_from_file_ptr(file: [*c]c.FILE, params: c.struct_llama_model_params) callconv(.c) ?*c.struct_llama_model {
+pub fn llama_model_load_from_file_ptr(file: ?*c.FILE, params: c.struct_llama_model_params) callconv(.c) ?*c.struct_llama_model {
     if (file == null) {
         impl.logError("%s: file is NULL\n", .{"llama_model_load_from_file_ptr"});
         return null;

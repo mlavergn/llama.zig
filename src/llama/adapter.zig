@@ -577,12 +577,12 @@ fn loraInitImpl(model: *Model, path_lora: [*:0]const u8, adapter: *Lora, exc: *E
 
     // set tensor data
     {
-        var gguf_file = try mmap.File.open(std.mem.span(path_lora), "rb", exc);
+        var gguf_file = try mmap.File.open(std.mem.span(path_lora), "rb", false, exc);
         defer gguf_file.close();
         var read_buf: std.ArrayList(u8) = .empty;
         defer read_buf.deinit(allocator);
         const SetTensor = struct {
-            fn run(g: *const c.gguf_context, file: *const mmap.File, buf: *std.ArrayList(u8), orig: *c.ggml_tensor, dev: *c.ggml_tensor, e: *Exception) Thrown!void {
+            fn run(g: *const c.gguf_context, file: *mmap.File, buf: *std.ArrayList(u8), orig: *c.ggml_tensor, dev: *c.ggml_tensor, e: *Exception) Thrown!void {
                 const offs = c.gguf_get_data_offset(g) +% c.gguf_get_tensor_offset(g, c.gguf_find_tensor(g, &orig.name));
                 const size = c.ggml_nbytes(orig);
                 if (offs +% size < offs or offs +% size > file.size) {

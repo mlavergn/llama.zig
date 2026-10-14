@@ -35,13 +35,13 @@
 //! Usage: adapter_diff <tmpdir> <model.gguf> [--quick]
 
 const std = @import("std");
-const staged = @import("staged");
+const harness_root = @import("harness_root");
 
-const c = staged.impl.c;
-const M = staged.model;
-const L = staged.adapter;
-const Pctx = staged.api.context;
-const Pad = staged.api.adapter;
+const c = harness_root.impl.c;
+const M = harness_root.model;
+const L = harness_root.adapter;
+const Pctx = harness_root.api.context;
+const Pad = harness_root.api.adapter;
 
 const gpa = std.heap.c_allocator;
 
@@ -896,6 +896,8 @@ pub fn main(init: std.process.Init) !void {
     const out_dir: ?[]const u8 = if (std.c.getenv("ADAPTER_DIFF_OUT")) |d| std.mem.span(d) else null;
 
     c.llama_log_set(logCb, null);
+
+    harness_root.api.impl.llama_log_set(logCb, null);
     c.ggml_log_set(logCb, null);
     c.llama_backend_init();
 

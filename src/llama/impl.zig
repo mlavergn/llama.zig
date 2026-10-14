@@ -20,13 +20,14 @@
 //! and library; nothing here passes a ggml pointer to Zig code in
 //! `src/ggml/`, only to ggml's exported C functions.
 //!
-//! # Logging into the C++ logger
+//! # Logging
 //!
-//! `llama_log_internal` stays in `llama-impl.cpp`, which is still C++, so the
-//! ported code logs through it and the callback `llama_log_set` installs
-//! keeps working. It has C++ linkage, so it is declared under its mangled
-//! name, taken from `nm` on the reference object: a C-variadic signature with
-//! only pointer and enum arguments, which Zig can call directly.
+//! The `LLAMA_LOG_*` macros go to `log.zig`'s `logInternal`, which formats
+//! with libc's `snprintf` and calls the callback `llama_log_set` installed.
+//! No C variadic is defined anywhere in libllama -- Zig *calls* one on every
+//! target, but cannot define one on every target -- so there is one path
+//! for all of them. An in-process harness reaches the port's logger through
+//! `api.impl.llama_log_set`, beside the C++'s.
 
 const std = @import("std");
 
@@ -54,20 +55,35 @@ pub const SamplerI = c.struct_llama_sampler_i;
 /// allocator instance that only Zig code could reach.
 pub const allocator = std.heap.c_allocator;
 
+/// C's `stdout`: `__stdoutp` on Darwin, `stdout` on glibc. The macro expands
+/// to a different variable on each, so it is read by name.
+///
+/// Return: the stream.
+pub fn cStdout() *c.FILE {
+    return @extern(*const *c.FILE, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stdoutp" else "stdout" }).*;
+}
+
+/// C's `stderr`; see `cStdout`.
+///
+/// Return: the stream.
+pub fn cStderr() *c.FILE {
+    return @extern(*const *c.FILE, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
+}
+
 // -----------------------------------------------------------------------------
 // Logging
 
-extern fn _Z18llama_log_internal14ggml_log_levelPKcz(level: c.enum_ggml_log_level, format: [*:0]const u8, ...) void;
+const log = @import("log.zig");
 
 /// Ports `LLAMA_LOG_WARN` (llama-impl.h:29 @c1d0e7a00).
 ///
 /// Parameters:
-/// - `format`: a printf format string, passed to the C++ logger unchanged.
+/// - `format`: a printf format string.
 /// - `args`: C-compatible arguments for it.
 ///
 /// Return: nothing.
 pub fn logWarn(comptime format: [:0]const u8, args: anytype) void {
-    @call(.auto, _Z18llama_log_internal14ggml_log_levelPKcz, .{ c.GGML_LOG_LEVEL_WARN, format.ptr } ++ args);
+    log.logInternal(c.GGML_LOG_LEVEL_WARN, format, args);
 }
 
 /// Ports `LLAMA_LOG_ERROR` (llama-impl.h:30 @c1d0e7a00).
@@ -78,7 +94,7 @@ pub fn logWarn(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logError(comptime format: [:0]const u8, args: anytype) void {
-    @call(.auto, _Z18llama_log_internal14ggml_log_levelPKcz, .{ c.GGML_LOG_LEVEL_ERROR, format.ptr } ++ args);
+    log.logInternal(c.GGML_LOG_LEVEL_ERROR, format, args);
 }
 
 /// Ports `LLAMA_LOG_INFO` (llama-impl.h:28 @c1d0e7a00).
@@ -89,7 +105,7 @@ pub fn logError(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logInfo(comptime format: [:0]const u8, args: anytype) void {
-    @call(.auto, _Z18llama_log_internal14ggml_log_levelPKcz, .{ c.GGML_LOG_LEVEL_INFO, format.ptr } ++ args);
+    log.logInternal(c.GGML_LOG_LEVEL_INFO, format, args);
 }
 
 /// Ports `LLAMA_LOG_DEBUG` (llama-impl.h:31 @c1d0e7a00).
@@ -100,7 +116,7 @@ pub fn logInfo(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logDebug(comptime format: [:0]const u8, args: anytype) void {
-    @call(.auto, _Z18llama_log_internal14ggml_log_levelPKcz, .{ c.GGML_LOG_LEVEL_DEBUG, format.ptr } ++ args);
+    log.logInternal(c.GGML_LOG_LEVEL_DEBUG, format, args);
 }
 
 /// Ports `LLAMA_LOG_CONT` (llama-impl.h:32 @c1d0e7a00): continues the
@@ -112,7 +128,7 @@ pub fn logDebug(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logCont(comptime format: [:0]const u8, args: anytype) void {
-    @call(.auto, _Z18llama_log_internal14ggml_log_levelPKcz, .{ c.GGML_LOG_LEVEL_CONT, format.ptr } ++ args);
+    log.logInternal(c.GGML_LOG_LEVEL_CONT, format, args);
 }
 
 // -----------------------------------------------------------------------------

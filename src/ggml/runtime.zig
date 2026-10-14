@@ -209,7 +209,8 @@ fn ggmlAbort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) callconv
         _ = vsnprintf(message[used..].ptr, message.len - used, fmt, ap);
     }
 
-    abortWith(&message);
+    // `snprintf` and `vsnprintf` both terminate what they write.
+    abortWith(@ptrCast(&message));
 }
 
 /// The second half of `ggml_abort` (ggml.c:252 @c1d0e7a00), once the message

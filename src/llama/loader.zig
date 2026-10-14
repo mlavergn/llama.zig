@@ -390,7 +390,7 @@ pub const Loader = struct {
                 self.meta.ctx = self.owned.?;
                 try self.readArch(exc);
 
-                self.files.append(allocator, try File.open(path, "rb", exc)) catch oom();
+                self.files.append(allocator, try File.open(path, "rb", self.use_direct_io, exc)) catch oom();
                 self.contexts.append(allocator, ctx.?) catch oom();
                 try self.addWeights(ctx.?, 0, self.meta.ctx, exc);
 
@@ -497,7 +497,7 @@ pub const Loader = struct {
                 return exc.throw(.runtime_error, "invalid split file idx: {d} (file: {s}), expected {d}", .{ idx_gguf, fname_split, idx });
             }
 
-            self.files.append(allocator, try File.open(fname_split, "rb", exc)) catch oom();
+            self.files.append(allocator, try File.open(fname_split, "rb", self.use_direct_io, exc)) catch oom();
             self.contexts.append(allocator, ctx.?) catch oom();
             try self.addWeights(ctx.?, idx, split_gguf, exc);
         }

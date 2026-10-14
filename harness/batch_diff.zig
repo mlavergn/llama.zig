@@ -32,11 +32,11 @@
 //! Usage: batch_diff <vocab.gguf> [seed]
 
 const std = @import("std");
-const staged = @import("staged");
+const harness_root = @import("harness_root");
 
-const c = staged.impl.c;
-const B = staged.batch;
-const M = staged.model;
+const c = harness_root.impl.c;
+const B = harness_root.batch;
+const M = harness_root.model;
 
 const gpa = std.heap.c_allocator;
 
@@ -725,7 +725,7 @@ fn runReserve(ra: *anyopaque, pa: *B.BatchAllocr, n_seq_tokens: u32, n_seqs: u32
 /// The vocabulary, on both sides.
 const Vocabs = struct {
     ref: *const c.llama_vocab,
-    port: *const staged.vocab.Vocab,
+    port: *const harness_root.vocab.Vocab,
 };
 
 /// Runs `init` on both allocators and compares; on success, runs every
@@ -1044,6 +1044,8 @@ pub fn main(init: std.process.Init) !void {
     const seed: u64 = if (args.len > 2) try std.fmt.parseInt(u64, args[2], 10) else 20261013;
 
     c.llama_log_set(logCb, null);
+
+    harness_root.api.impl.llama_log_set(logCb, null);
     c.ggml_log_set(logCb, null);
     log_target = null;
 
@@ -1055,7 +1057,7 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(1);
     };
     defer c.llama_model_free(ref_model);
-    var exc: staged.impl.Exception = .{};
+    var exc: harness_root.impl.Exception = .{};
     var splits: std.ArrayList([:0]const u8) = .empty;
     var params = M.defaultParams();
     params.vocab_only = true;

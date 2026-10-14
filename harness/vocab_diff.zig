@@ -2,7 +2,7 @@
 //!
 //! **Not a port.** The harness behind `scripts/vocab-diff`. It links the
 //! C++ vocabulary, inside `libllama.a`, and the Zig one, through
-//! `src/llama/staged.zig`, into one process; loads every GGUF file both
+//! `src/llama/harness_root.zig`, into one process; loads every GGUF file both
 //! ways -- the C++ through `llama_model_load_from_file` with `vocab_only`,
 //! the Zig through the same metadata -- and compares:
 //!
@@ -29,10 +29,10 @@
 //! Usage: vocab_diff <tmpdir> <file.gguf | corpus.inp>...
 
 const std = @import("std");
-const staged = @import("staged");
+const harness_root = @import("harness_root");
 
-const c = staged.impl.c;
-const V = staged.vocab;
+const c = harness_root.impl.c;
+const V = harness_root.vocab;
 const Vocab = V.Vocab;
 const Token = V.Token;
 
@@ -219,12 +219,12 @@ fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
     };
     defer c.gguf_free(gctx);
     const arch_k = c.gguf_find_key(gctx, "general.architecture");
-    const arch_name = if (arch_k >= 0) staged.gguf_meta.cString(c.gguf_get_val_str(gctx, arch_k)) else "";
-    var meta = staged.gguf_meta.Meta.init(gctx, staged.arch.archFromString(arch_name), if (cs.overrides.len != 0) ovr.items.ptr else null);
+    const arch_name = if (arch_k >= 0) harness_root.gguf_meta.cString(c.gguf_get_val_str(gctx, arch_k)) else "";
+    var meta = harness_root.gguf_meta.Meta.init(gctx, harness_root.arch.archFromString(arch_name), if (cs.overrides.len != 0) ovr.items.ptr else null);
     defer meta.deinit();
     var vocab = Vocab.init() catch unreachable;
     defer vocab.deinit();
-    var exc: staged.impl.Exception = .{};
+    var exc: harness_root.impl.Exception = .{};
     const loaded = if (vocab.load(&meta, &exc)) |_| true else |_| false;
     if (loaded) vocab.printInfo();
     log_target = null;
@@ -376,7 +376,7 @@ fn comparePieces(cs: Case, rv: *const c.llama_vocab, v: *const Vocab) void {
     const n: i32 = @intCast(v.nTokens());
     var rb: [512]u8 = undefined;
     var zb: [512]u8 = undefined;
-    var exc: staged.impl.Exception = .{};
+    var exc: harness_root.impl.Exception = .{};
     var id: i32 = 0;
     while (id < n) : (id += 1) {
         for ([_]bool{ false, true }) |special| {
@@ -397,7 +397,7 @@ fn comparePieces(cs: Case, rv: *const c.llama_vocab, v: *const Vocab) void {
 fn compareText(cs: Case, rv: *const c.llama_vocab, v: *const Vocab, t: []const u8) void {
     var rt: [4096]Token = undefined;
     var zt: [4096]Token = undefined;
-    var exc: staged.impl.Exception = .{};
+    var exc: harness_root.impl.Exception = .{};
     for ([_]bool{ false, true }) |add_special| {
         for ([_]bool{ false, true }) |parse_special| {
             checks += 1;
@@ -422,7 +422,7 @@ fn compareText(cs: Case, rv: *const c.llama_vocab, v: *const Vocab, t: []const u
 fn compareDetokenize(cs: Case, rv: *const c.llama_vocab, v: *const Vocab, ids: []const Token) void {
     var rb: [16384]u8 = undefined;
     var zb: [16384]u8 = undefined;
-    var exc: staged.impl.Exception = .{};
+    var exc: harness_root.impl.Exception = .{};
     for ([_]bool{ false, true }) |remove_special| {
         for ([_]bool{ false, true }) |unparse_special| {
             for ([_]usize{ rb.len, 3 }) |len| {
@@ -477,7 +477,7 @@ fn derive(dir: []const u8, base: [:0]const u8, name: []const u8, comptime edit: 
 fn findStrs(ctx: *c.gguf_context, key: [:0]const u8, out: *std.ArrayList([]const u8)) void {
     const k = c.gguf_find_key(ctx, key.ptr);
     const n = c.gguf_get_arr_n(ctx, k);
-    for (0..n) |i| out.append(gpa, gpa.dupe(u8, staged.gguf_meta.cString(c.gguf_get_arr_str(ctx, k, i))) catch unreachable) catch unreachable;
+    for (0..n) |i| out.append(gpa, gpa.dupe(u8, harness_root.gguf_meta.cString(c.gguf_get_arr_str(ctx, k, i))) catch unreachable) catch unreachable;
 }
 
 const edits = struct {
@@ -703,6 +703,8 @@ pub fn main(init: std.process.Init) !void {
     const dir = args[1];
 
     c.llama_log_set(logCb, null);
+
+    harness_root.api.impl.llama_log_set(logCb, null);
     c.llama_backend_init();
 
     var corpus: std.ArrayList([]const u8) = .empty;

@@ -1437,7 +1437,7 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
             }
 
             impl.logInfo("converting to %s .. ", .{typeName(new_type)});
-            _ = c.fflush(c.stdout());
+            _ = c.fflush(impl.cStdout());
 
             if (work.items.len < nelements * 4) work.resize(allocator, nelements * 4) catch oom();
             new_data = work.items.ptr;

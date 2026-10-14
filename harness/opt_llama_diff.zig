@@ -46,11 +46,11 @@
 //! Usage: opt_llama_diff <base-qwen35.gguf> <tmp-dir> [--abort <case> <ref|port>]
 
 const std = @import("std");
-const staged = @import("staged");
+const harness_root = @import("harness_root");
 
-const c = staged.impl.c;
-const M = staged.model;
-const A = staged.api;
+const c = harness_root.impl.c;
+const M = harness_root.model;
+const A = harness_root.api;
 
 const gpa = std.heap.c_allocator;
 
@@ -536,6 +536,8 @@ pub fn main(init: std.process.Init) !void {
     const path = try std.fmt.allocPrintSentinel(gpa, "{s}/tiny-qwen35-f32.gguf", .{args[2]}, 0);
 
     c.llama_log_set(logCb, null);
+
+    harness_root.api.impl.llama_log_set(logCb, null);
     c.ggml_log_set(logCb, null);
     c.llama_backend_init();
 

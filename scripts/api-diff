@@ -24,15 +24,15 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
-STAGED="${API_DIFF_STAGED:-src/llama/staged.zig}"
+HARNESS_ROOT="${API_DIFF_HARNESS_ROOT:-src/llama/harness_root.zig}"
 
 zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
     src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
     || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
 
 zig build-exe -mcpu baseline -femit-bin="$tmp/api_diff" -Ofast -lc \
-    --dep staged -Mroot=harness/api_diff.zig \
-    --dep llama_c -Mstaged="$STAGED" -Mllama_c="$tmp/llama_c.zig" \
+    --dep harness_root -Mroot=harness/api_diff.zig \
+    --dep llama_c -Mharness_root="$HARNESS_ROOT" -Mllama_c="$tmp/llama_c.zig" \
     zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \

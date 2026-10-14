@@ -64,7 +64,10 @@ const allocator = std.heap.c_allocator;
 extern fn powf(x: f32, y: f32) f32;
 extern fn fprintf(stream: *anyopaque, fmt: [*:0]const u8, ...) c_int;
 extern fn fflush(stream: ?*anyopaque) c_int;
-extern var __stderrp: *anyopaque;
+/// libc's `stderr`: `__stderrp` behind a macro on Darwin, itself on glibc.
+fn cStderr() *anyopaque {
+    return @extern(*const *anyopaque, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
+}
 
 // -----------------------------------------------------------------------------
 // Export switch
@@ -1607,7 +1610,7 @@ pub fn ggml_opt_epoch_callback_progress_bar(
     ibatch_max: i64,
     t_start_us: i64,
 ) callconv(.c) void {
-    _ = fprintf(__stderrp, "%s[", @as([*:0]const u8, if (train) "train: " else "val:   "));
+    _ = fprintf(cStderr(), "%s[", @as([*:0]const u8, if (train) "train: " else "val:   "));
 
     // The progress bar consists of partially filled blocks, unicode has 8 separate fill levels.
     const bar_length: i64 = 8;
@@ -1632,7 +1635,7 @@ pub fn ggml_opt_epoch_callback_progress_bar(
             "\u{258F}" // 1/8 filled
         else
             " ";
-        _ = fprintf(__stderrp, block);
+        _ = fprintf(cStderr(), block);
     }
 
     const batch_size = tensorOf(ggml_opt_inputs(opt_ctx)).ne[1];
@@ -1662,7 +1665,7 @@ pub fn ggml_opt_epoch_callback_progress_bar(
     t_eta_s -= t_eta_m * 60;
 
     _ = fprintf(
-        __stderrp,
+        cStderr(),
         "] data=%07lld/%07lld loss=%.5lf\u{b1}%.5lf acc=%.2lf\u{b1}%.2lf%% t=%02lld:%02lld:%02lld ETA=%02lld:%02lld:%02lld \r",
         idata,
         idata_max,
@@ -1678,9 +1681,9 @@ pub fn ggml_opt_epoch_callback_progress_bar(
         t_eta_s,
     );
     if (ibatch == ibatch_max) {
-        _ = fprintf(__stderrp, "\n");
+        _ = fprintf(cStderr(), "\n");
     }
-    _ = fflush(__stderrp);
+    _ = fflush(cStderr());
 
     _ = dataset;
 }
@@ -1765,11 +1768,11 @@ pub fn ggml_opt_fit(
         ggml_opt_result_reset(result_val);
 
         if (!silent) {
-            _ = fprintf(__stderrp, "%s: epoch %04lld/%04lld:\n", "ggml_opt_fit", epoch, nepoch);
+            _ = fprintf(cStderr(), "%s: epoch %04lld/%04lld:\n", "ggml_opt_fit", epoch, nepoch);
         }
         ggml_opt_epoch(opt_ctx, dataset, result_train, result_val, idata_split, epoch_callback, epoch_callback);
         if (!silent) {
-            _ = fprintf(__stderrp, "\n");
+            _ = fprintf(cStderr(), "\n");
         }
     }
 
@@ -1779,7 +1782,7 @@ pub fn ggml_opt_fit(
         t_total_s -= t_total_h * 3600;
         const t_total_m = @divTrunc(t_total_s, 60);
         t_total_s -= t_total_m * 60;
-        _ = fprintf(__stderrp, "%s: training took %02lld:%02lld:%02lld\n", "ggml_opt_fit", t_total_h, t_total_m, t_total_s);
+        _ = fprintf(cStderr(), "%s: training took %02lld:%02lld:%02lld\n", "ggml_opt_fit", t_total_h, t_total_m, t_total_s);
     }
 
     ggml_opt_free(opt_ctx);

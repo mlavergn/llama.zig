@@ -1,11 +1,11 @@
 //! The root the in-process harnesses compile.
 //!
-//! **Not a port.** libllama swaps once, at `llama.h` (`PLAN.md`, Decision
-//! 42), so the files ported ahead of that swap are reached only by their
-//! diff harnesses, which link them beside the C++ they replace. Those
-//! harnesses cannot root at `module.zig`: it carries the sampler's exports,
-//! which `libllama.a` already defines. This root re-exports the staged files
-//! and nothing that exports a symbol.
+//! **Not a port.** The in-process harnesses link the port beside upstream's
+//! C++ (`libllama-ref.a`) and call both under the same names. They cannot
+//! root at `module.zig`: it imports `exports.zig`, which exports every
+//! `llama.h` function and the sampler's, and two definitions of a symbol in
+//! one link pick one silently. This root re-exports the port's files and
+//! nothing that exports a symbol. Never import `exports.zig` from here.
 
 const std = @import("std");
 

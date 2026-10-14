@@ -40,8 +40,8 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
     || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
 
 zig build-exe -mcpu baseline -femit-bin="$tmp/loader_diff" -Ofast -lc \
-    --dep staged -Mroot=harness/loader_diff.zig \
-    --dep llama_c -Mstaged=src/llama/staged.zig -Mllama_c="$tmp/llama_c.zig" \
+    --dep harness_root -Mroot=harness/loader_diff.zig \
+    --dep llama_c -Mharness_root=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/loader_ref.o" zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \

@@ -36,11 +36,11 @@
 //! Usage: api_diff <tmpdir> <file.gguf | corpus.inp>...
 
 const std = @import("std");
-const staged = @import("staged");
+const harness_root = @import("harness_root");
 
-const c = staged.impl.c;
-const M = staged.model;
-const api = staged.api;
+const c = harness_root.impl.c;
+const M = harness_root.model;
+const api = harness_root.api;
 const Token = c.llama_token;
 
 const gpa = std.heap.c_allocator;
@@ -422,7 +422,7 @@ fn logScript(comptime s: Side, out: *std.ArrayList(u8)) void {
         if (s == .ref) {
             _Z18llama_log_internal14ggml_log_levelPKcz(lvl, "%s|%d|%.3f|%zu|%c\n", m.ptr, @as(c_int, -42), @as(f64, 2.5), @as(usize, 1) << 40, @as(c_int, 'Z'));
         } else {
-            staged.log.logInternal(lvl, "%s|%d|%.3f|%zu|%c\n", m.ptr, @as(c_int, -42), @as(f64, 2.5), @as(usize, 1) << 40, @as(c_int, 'Z'));
+            harness_root.log.logInternal(lvl, "%s|%d|%.3f|%zu|%c\n", .{ m.ptr, @as(c_int, -42), @as(f64, 2.5), @as(usize, 1) << 40, @as(c_int, 'Z') });
         }
         w(out, "log {d} -> level {d} \"{f}\"", .{ lvl, cap_level, std.zig.fmtString(mine.items) });
     };
@@ -430,8 +430,9 @@ fn logScript(comptime s: Side, out: *std.ArrayList(u8)) void {
     F(s, "llama_log_set")(null, null);
     F(s, "llama_log_get")(&cb, &ud);
     w(out, "get after null: cb null {} ud null {}", .{ cb == null, ud == null });
-    if (s == .port) w(out, "default restored {}", .{staged.log.g_logger_state.log_callback == @as(c.ggml_log_callback, staged.log.callbackDefault)}) else w(out, "default restored true", .{});
+    if (s == .port) w(out, "default restored {}", .{harness_root.log.g_logger_state.log_callback == @as(c.ggml_log_callback, harness_root.log.callbackDefault)}) else w(out, "default restored true", .{});
     c.llama_log_set(logCb, null);
+    harness_root.api.impl.llama_log_set(logCb, null);
     c.ggml_log_set(logCb, null);
 }
 
@@ -443,7 +444,7 @@ fn refDefaultLog(_: usize) void {
 
 fn portDefaultLog(_: usize) void {
     api.impl.llama_log_set(null, null);
-    staged.log.logInternal(c.GGML_LOG_LEVEL_INFO, "x:1: to stderr %d\n", @as(c_int, 7));
+    harness_root.log.logInternal(c.GGML_LOG_LEVEL_INFO, "x:1: to stderr %d\n", .{@as(c_int, 7)});
     c.ggml_abort("x", 1, "done");
 }
 
@@ -1034,6 +1035,8 @@ pub fn main(init: std.process.Init) !void {
     }
 
     c.llama_log_set(logCb, null);
+
+    harness_root.api.impl.llama_log_set(logCb, null);
     c.ggml_log_set(logCb, null);
     c.llama_backend_init();
 

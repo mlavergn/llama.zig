@@ -3709,7 +3709,8 @@ through `src/llama/gguf_meta.zig`, a port of `GGUFMeta::GKV` and
 `--override-kv` with its warning for a mistyped override — that the model
 loader's port will reuse. Nothing is exported: libllama swaps once, so the
 port is reached only through `scripts/vocab-diff`, which compiles it through
-`src/llama/staged.zig` beside the C++ in `libllama.a`.
+`src/llama/staged.zig` (now `harness_root.zig`) beside the C++ in
+`libllama.a`.
 
 ### What the standard library decides
 
@@ -4077,11 +4078,14 @@ and `libobjc`, nothing else).
   exports none of them unmangled, so neither does the port. The result is
   checked with `nm`: the port's `llama_*` text symbols equal the reference's,
   **240 = 240**.
-- **The logger needs no switch.** `impl.zig`'s `logInfo` and friends call the
-  C++'s mangled `_Z18llama_log_internal14ggml_log_levelPKcz`. `exports.zig`
-  exports `log.zig`'s `logInternal` under that name, so in `libllama.a` the
-  call resolves to Zig, and in a harness, which links the C++ instead, it
-  resolves to the C++. Neither side chooses at build time.
+- **The logger is Zig's own, and the harnesses set it.** `impl.zig`'s
+  `logInfo` and friends call `log.zig`'s `logInternal`, which formats with
+  `snprintf` and calls the callback `llama_log_set` installed, as
+  `llama_log_internal` does. A harness links the C++ beside the port, so it
+  installs its capture callback on both: `llama_log_set` for the C++ and
+  `api.impl.llama_log_set` for the port. (Until the rebase onto v0.0.18 the
+  port called the C++'s mangled `llama_log_internal` and `exports.zig`
+  exported a Zig variadic under that name; see below for why that went.)
 - **`libllama-ref.a`** is upstream's libllama, every translation unit
   including the sampler and grammar, compiled unmodified. The in-process
   harnesses link it: `loader`, `vocab`, `arch`, `batch`, `chat`, `api`,
@@ -4262,3 +4266,50 @@ in-process harness now linking `libllama-ref.a`. All pass:
   compiler_rt** into each slice by `ld -r`. Since the swap nothing in either
   library needs the C++ runtime, so that step carries dead weight and can go.
   `xcfwk/` was another session's work and is untouched here.
+
+### Rebased onto the Linux port (v0.0.18)
+
+v0.0.18 made the tree build and run on Linux aarch64 against a C++
+libllama. Rebasing the swap onto it conflicted only textually, in
+`loader.zig`, where `File` had moved to `mmap.zig` and taken 0.0.18's
+`errno` fix with it. But the Zig libllama had only ever been compiled for
+Darwin, and on Linux it neither built nor loaded a model:
+
+- **`llama_log_internal` was a Zig variadic**, which Zig 0.17 refuses to
+  define on aarch64 outside Apple and Windows. Unlike ggml's three, which
+  `ggml.h` exports and C callers reach with varargs, nothing outside
+  libllama calls it: it is C++-linkage and absent from `llama.h`. So rather
+  than a per-target C shim, the variadic is gone. `logInternal` takes its
+  arguments as a tuple and formats with `snprintf` -- Zig *calls* a C
+  variadic on every target -- and there is one path on every target. The
+  mangled export went with it; the harnesses install their callback on the
+  port's logger directly.
+- **Darwin's stdio and `errno` names**: `__stderrp` in `log.zig` and
+  `opt.zig`, `stdout()` in `quant.zig`, `__error` in `mmap.zig`.
+  `impl.cStdout` and `cStderr` read the right variable per OS. glibc's
+  `FILE` is opaque, so `llama_model_load_from_file_ptr` takes `?*c.FILE`.
+- **`_SC_PAGESIZE` was Darwin's 29; glibc's is 30.** `sysconf(29)` returned
+  some other setting, and the first `unmap_fragment` aborted on
+  `last % page_size == 0`. `PATH_MAX` was Darwin's 1024 too.
+- **`mmap.zig` had ported only the Darwin arms of `llama-mmap.cpp`.** The
+  `__linux__` ones are now in: direct I/O through an `O_DIRECT` descriptor,
+  with aligned-chunk reads, the `EINTR` retry, the buffered fallback on
+  `EFAULT`/`EINVAL` and zero-filled padding at EOF; `posix_fadvise` and
+  `MAP_POPULATE` on map; and the `RLIMIT_MEMLOCK` suggestion when `mlock`
+  fails. Zig 0.17 declares no Linux `struct stat`, so `init_fd`'s `fstat`
+  goes through `statx` for the same two fields.
+
+One fault ran the other way. v0.0.18's `ggmlAbort` passed a `*[2048]u8`
+where `[*:0]const u8` is wanted. Only targets where Zig defines the
+variadic compile that function, so 0.0.18 built on Linux and **did not
+build on macOS**.
+
+Checked in a Debian 13 container (glibc 2.41) under podman, against
+`libllama-ref.a` built for the same target. The CLI's greedy output equals
+macOS's CPU-only run token for token. A driver loading under each of `dio`,
+`mmap`, `none` and `mlock`, from a bind mount and from the container's own
+filesystem, gives a log and output byte-identical to the C++'s in all eight
+runs. Under `dio` neither side logs the buffered fallback, so the
+`O_DIRECT` path really ran. Under `mlock` both print the Linux hint. This
+needs glibc 2.36 or later: the sampler's `arc4random`, which was already
+there in 0.0.18, is missing from older glibc.

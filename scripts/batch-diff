@@ -39,8 +39,8 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
 # ReleaseSafe, not ReleaseFast: nothing here is compared on float arithmetic,
 # and the port's integer narrowing and bounds are checked.
 zig build-exe -mcpu baseline -femit-bin="$tmp/batch_diff" -OReleaseSafe -lc \
-    --dep staged -Mroot=harness/batch_diff.zig \
-    --dep llama_c -Mstaged=src/llama/staged.zig -Mllama_c="$tmp/llama_c.zig" \
+    --dep harness_root -Mroot=harness/batch_diff.zig \
+    --dep llama_c -Mharness_root=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/batch_ref.o" zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \

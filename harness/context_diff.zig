@@ -26,11 +26,11 @@
 //! Usage: context_diff <model.gguf> [--quick]
 
 const std = @import("std");
-const staged = @import("staged");
+const harness_root = @import("harness_root");
 
-const c = staged.impl.c;
-const M = staged.model;
-const api = staged.api.context;
+const c = harness_root.impl.c;
+const M = harness_root.model;
+const api = harness_root.api.context;
 
 const gpa = std.heap.c_allocator;
 
@@ -743,12 +743,12 @@ fn splitStates(rm: *c.struct_llama_model, pm: *M.Model) void {
     }
     var n_devices: usize = 2;
     while (n_devices <= 4) : (n_devices += 1) {
-        var ref_ud: staged.meta_split.Userdata = .{ .n_devices = n_devices, .model = @ptrCast(@alignCast(rm)) };
-        var port_ud: staged.meta_split.Userdata = .{ .n_devices = n_devices, .model = pm };
+        var ref_ud: harness_root.meta_split.Userdata = .{ .n_devices = n_devices, .model = @ptrCast(@alignCast(rm)) };
+        var port_ud: harness_root.meta_split.Userdata = .{ .n_devices = n_devices, .model = pm };
         const lists = [_][]const *c.ggml_tensor{ pm.tensors_by_name.items, extra.items };
         for (lists) |list| for (list) |t| {
             const a = _Z33llama_meta_device_get_split_statePK11ggml_tensorPv(t, &ref_ud);
-            const b = staged.meta_split.getSplitState(t, &port_ud);
+            const b = harness_root.meta_split.getSplitState(t, &port_ud);
             n += 1;
             checks += 1;
             if (!std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b))) {
@@ -805,6 +805,8 @@ pub fn main(init: std.process.Init) !void {
     const port_first = std.c.getenv("CONTEXT_DIFF_PORT_FIRST") != null;
 
     c.llama_log_set(logCb, null);
+
+    harness_root.api.impl.llama_log_set(logCb, null);
     c.ggml_log_set(logCb, null);
     c.llama_backend_init();
 
@@ -893,7 +895,7 @@ pub fn main(init: std.process.Init) !void {
                 side = which;
                 stream_out = true;
                 if (std.mem.eql(u8, which, "port")) {
-                    script(api, staged.api.state, @ptrCast(pm), cs, tokens[0..@intCast(nt)], n_vocab, n_embd);
+                    script(api, harness_root.api.state, @ptrCast(pm), cs, tokens[0..@intCast(nt)], n_vocab, n_embd);
                 } else {
                     script(c, c, rm, cs, tokens[0..@intCast(nt)], n_vocab, n_embd);
                 }
@@ -903,7 +905,7 @@ pub fn main(init: std.process.Init) !void {
             if (port_first) {
                 rec = &port;
                 side = "port";
-                script(api, staged.api.state, @ptrCast(pm), cs, tokens[0..@intCast(nt)], n_vocab, n_embd);
+                script(api, harness_root.api.state, @ptrCast(pm), cs, tokens[0..@intCast(nt)], n_vocab, n_embd);
                 n_nodes_seen = 0;
             }
             rec = &ref;
@@ -914,7 +916,7 @@ pub fn main(init: std.process.Init) !void {
                 n_nodes_seen = 0;
                 rec = &port;
                 side = "port";
-                script(api, staged.api.state, @ptrCast(pm), cs, tokens[0..@intCast(nt)], n_vocab, n_embd);
+                script(api, harness_root.api.state, @ptrCast(pm), cs, tokens[0..@intCast(nt)], n_vocab, n_embd);
             }
             rec = null;
 

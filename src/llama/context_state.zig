@@ -588,7 +588,7 @@ pub fn stateSeqSetData(ctx: *Context, seq_id: i32, src: [*]const u8, size: usize
 /// Return: whether it loaded, or `error.Thrown` for the caller to catch.
 pub fn stateLoadFile(ctx: *Context, filepath: [:0]const u8, tokens_out: [*]c.llama_token, n_token_capacity: usize, n_token_count_out: *usize, exc: *Exception) Thrown!bool {
     const func = "state_load_file";
-    var file = try mmap.File.open(filepath, "rb", exc);
+    var file = try mmap.File.open(filepath, "rb", false, exc);
     defer file.close();
 
     {
@@ -623,7 +623,7 @@ pub fn stateLoadFile(ctx: *Context, filepath: [:0]const u8, tokens_out: [*]c.lla
 
 /// Ports `llama_context`'s `state_save_file` (llama-context.cpp:3083 @c1d0e7a00).
 pub fn stateSaveFile(ctx: *Context, filepath: [:0]const u8, tokens: [*]const c.llama_token, n_token_count: usize, exc: *Exception) Thrown!bool {
-    var file = try mmap.File.open(filepath, "wb", exc);
+    var file = try mmap.File.open(filepath, "wb", false, exc);
     defer file.close();
 
     try file.writeU32(c.LLAMA_SESSION_MAGIC, exc);
@@ -641,7 +641,7 @@ pub fn stateSaveFile(ctx: *Context, filepath: [:0]const u8, tokens: [*]const c.l
 /// Ports `llama_context`'s `state_seq_load_file` (llama-context.cpp:3100 @c1d0e7a00).
 pub fn stateSeqLoadFile(ctx: *Context, seq_id: i32, filepath: [:0]const u8, tokens_out: ?[*]c.llama_token, n_token_capacity: usize, n_token_count_out: *usize, exc: *Exception) Thrown!usize {
     const func = "state_seq_load_file";
-    var file = try mmap.File.open(filepath, "rb", exc);
+    var file = try mmap.File.open(filepath, "rb", false, exc);
     defer file.close();
 
     {
@@ -687,7 +687,7 @@ pub fn stateSeqLoadFile(ctx: *Context, seq_id: i32, filepath: [:0]const u8, toke
 
 /// Ports `llama_context`'s `state_seq_save_file` (llama-context.cpp:3154 @c1d0e7a00).
 pub fn stateSeqSaveFile(ctx: *Context, seq_id: i32, filepath: [:0]const u8, tokens: [*]const c.llama_token, n_token_count: usize, exc: *Exception) Thrown!usize {
-    var file = try mmap.File.open(filepath, "wb", exc);
+    var file = try mmap.File.open(filepath, "wb", false, exc);
     defer file.close();
 
     try file.writeU32(c.LLAMA_STATE_SEQ_MAGIC, exc);

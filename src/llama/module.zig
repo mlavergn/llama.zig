@@ -15,7 +15,7 @@
 //! `libllama.a` here and compiles no C or C++ into it: `exports.zig` exports
 //! every function of `llama.h`, and the sampler exports its own.
 //!
-//! The in-process harnesses compile the same files through `staged.zig`,
+//! The in-process harnesses compile the same files through `harness_root.zig`,
 //! which exports nothing, and link upstream's C++ as `libllama-ref.a`
 //! beside them.
 

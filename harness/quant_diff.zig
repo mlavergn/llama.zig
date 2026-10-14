@@ -3,7 +3,7 @@
 //!
 //! **Not a port.** The harness behind `scripts/quant-diff`. Everything runs
 //! in one process, the C++ in `libllama.a` beside the port compiled through
-//! `staged.zig`, both converting through the same `ggml_quantize_chunk`:
+//! `harness_root.zig`, both converting through the same `ggml_quantize_chunk`:
 //!
 //! 1. **The saver's layer walk**: every entry of `layer_fields` is at
 //!    `8 * index` in the C++'s `llama_layer`, and there are
@@ -26,13 +26,13 @@
 //! Usage: quant_diff <tmpdir> [--quick] [--skip-big] [--only section] [model.gguf...]
 
 const std = @import("std");
-const staged = @import("staged");
+const harness_root = @import("harness_root");
 
-const c = staged.impl.c;
-const quant = staged.quant;
-const saver = staged.model_saver;
-const api = staged.api.quant;
-const M = staged.model;
+const c = harness_root.impl.c;
+const quant = harness_root.quant;
+const saver = harness_root.model_saver;
+const api = harness_root.api.quant;
+const M = harness_root.model;
 
 const gpa = std.heap.c_allocator;
 
@@ -315,7 +315,7 @@ fn computeBoth(name: []const u8, rm: *c.struct_llama_model, pm: *M.Model, params
 
     rec = &port;
     @memset(types, -1);
-    var exc: staged.impl.Exception = .{};
+    var exc: harness_root.impl.Exception = .{};
     var prc: c_int = 0;
     if (quant.quantInit(pm, params, &exc)) |qs| {
         defer quant.quantFree(qs);
@@ -333,7 +333,7 @@ fn computeBoth(name: []const u8, rm: *c.struct_llama_model, pm: *M.Model, params
 }
 
 fn allowsBoth(name: []const u8, rm: *c.struct_llama_model, pm: *M.Model, params: *const c.llama_model_quantize_params, list: *const TensorList) void {
-    var exc: staged.impl.Exception = .{};
+    var exc: harness_root.impl.Exception = .{};
     const qs = quant.quantInit(pm, params, &exc) catch return;
     defer quant.quantFree(qs);
     for (list.items.items) |t| {
@@ -361,7 +361,7 @@ fn makeModels(arch_name: [:0]const u8, d: DescCfg, rm_out: *?*c.struct_llama_mod
     var err: [1024]u8 = undefined;
     err[0] = 0;
     rm_out.* = qref_model(&desc, &err, err.len);
-    var exc: staged.impl.Exception = .{};
+    var exc: harness_root.impl.Exception = .{};
     pm_out.* = quant.modelFromMetadata(&desc, &exc) catch null;
     checks += 1;
     if ((rm_out.* == null) != (pm_out.* == null)) {
@@ -391,8 +391,8 @@ fn typeRules(quick: bool) void {
         var lists = [_]TensorList{ buildList(.dense_tied, 8, 0), buildList(.untied_odd, 8, 0), buildList(.moe, 8, 8) };
         defer for (&lists) |*l| l.deinit();
         var n_arch: usize = 0;
-        for (staged.arch.archAll()) |a| {
-            const an = staged.arch.archName(a);
+        for (harness_root.arch.archAll()) |a| {
+            const an = harness_root.arch.archName(a);
             var rm: ?*c.struct_llama_model = null;
             var pm: ?*M.Model = null;
             const ok = makeModels(an, .{ .n_layer = 8, .n_head = 32, .n_head_kv = 8, .n_expert = 0 }, &rm, &pm);
@@ -496,15 +496,15 @@ const FileSpec = struct {
 const n_embd_f: i64 = 256;
 const n_ff_f: i64 = 288;
 
-fn kvKey(a: staged.arch.Arch, kv: staged.arch.Kv, buf: *[256]u8) [*:0]const u8 {
-    const n = staged.arch.kvName(a, kv, null);
+fn kvKey(a: harness_root.arch.Arch, kv: harness_root.arch.Kv, buf: *[256]u8) [*:0]const u8 {
+    const n = harness_root.arch.kvName(a, kv, null);
     @memcpy(buf[0..n.len], n.slice());
     buf[n.len] = 0;
     return @ptrCast(buf);
 }
 
 fn setMeta(g: *c.gguf_context, s: FileSpec) void {
-    const a = staged.arch.archFromString(s.arch);
+    const a = harness_root.arch.archFromString(s.arch);
     var b: [256]u8 = undefined;
     c.gguf_set_val_str(g, "general.architecture", s.arch.ptr);
     c.gguf_set_val_str(g, "general.name", "synthetic");
@@ -1331,6 +1331,8 @@ pub fn main(init: std.process.Init) !void {
     }.f;
 
     c.llama_log_set(logCb, null);
+
+    harness_root.api.impl.llama_log_set(logCb, null);
     c.ggml_log_set(logCb, null);
     c.llama_backend_init();
 

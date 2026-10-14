@@ -2,7 +2,7 @@
 //!
 //! **Not a port.** The harness behind `scripts/arch-diff`. It links the C++
 //! `llama-arch.o`, inside `libllama.a` and reached through the C wrappers in
-//! `harness/arch_ref.cpp`, beside the Zig through `src/llama/staged.zig`, and
+//! `harness/arch_ref.cpp`, beside the Zig through `src/llama/harness_root.zig`, and
 //! asks both the same questions:
 //!
 //! - every architecture's name and its five predicates, and `llm_arch_all`;
@@ -23,10 +23,10 @@
 //! Usage: arch_diff
 
 const std = @import("std");
-const staged = @import("staged");
+const harness_root = @import("harness_root");
 
-const A = staged.arch;
-const c = staged.impl.c;
+const A = harness_root.arch;
+const c = harness_root.impl.c;
 
 extern fn ref_arch_unknown() c_int;
 extern fn ref_arch_name(arch: c_int) [*:0]const u8;
@@ -201,7 +201,7 @@ fn checkTensors() void {
     var buf: [512]u8 = undefined;
     for (std.enums.values(A.Tensor)) |t| {
         const ti: c_int = @backingInt(t);
-        if (staged.arch_table.tensor_names[@intCast(ti)] == null) {
+        if (harness_root.arch_table.tensor_names[@intCast(ti)] == null) {
             var rb: [4096]u8 = undefined;
             var pb: [4096]u8 = undefined;
             const r = abortsWith(&refTensorAbort, ti, &rb);
@@ -234,7 +234,7 @@ fn checkTensors() void {
             expectInt("tensor info past the enum throws", r, -1);
             continue;
         }
-        var exc: staged.impl.Exception = .{};
+        var exc: harness_root.impl.Exception = .{};
         if (A.tensorInfoFor(@fromBackingInt(@intCast(i)), &exc)) |info| {
             expectInt("tensor info throws", r, 0);
             expectInt("tensor info layer", layer, @backingInt(info.layer));

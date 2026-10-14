@@ -28,11 +28,11 @@
 //! Usage: loader_diff <tmpdir> <file.gguf>...
 
 const std = @import("std");
-const staged = @import("staged");
+const harness_root = @import("harness_root");
 
-const c = staged.impl.c;
-const Hparams = staged.hparams.Hparams;
-const M = staged.model;
+const c = harness_root.impl.c;
+const Hparams = harness_root.hparams.Hparams;
+const M = harness_root.model;
 
 const gpa = std.heap.c_allocator;
 
@@ -196,7 +196,7 @@ fn runCase(cs: Case) void {
 
     // Port.
     log_target = &port_log;
-    var exc: staged.impl.Exception = .{};
+    var exc: harness_root.impl.Exception = .{};
     var splits: std.ArrayList([:0]const u8) = .empty;
     defer {
         for (splits.items) |s| gpa.free(s);
@@ -914,6 +914,7 @@ pub fn main(init: std.process.Init) !void {
     }
     const dir = args[1];
     c.llama_log_set(logCb, null);
+    harness_root.api.impl.llama_log_set(logCb, null);
     c.ggml_log_set(logCb, null);
 
     std.debug.print("  llama_hparams layout\n", .{});
