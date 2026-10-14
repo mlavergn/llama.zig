@@ -187,6 +187,44 @@ const Config = struct {
 ///
 /// Return: nothing on success; propagates errors from option parsing, version
 /// parsing, and macOS SDK resolution.
+/// Resolves the `-Dcuda`, `-Dcuda-toolkit` and `-Dcuda-arch` options.
+///
+/// CUDA defaults to on for a Linux target when `<toolkit>/bin/nvcc` exists,
+/// so a plain `zig build cli` on a CUDA machine uses the GPU; `-Dcuda=false`
+/// turns it off. The architecture defaults to what `nvidia-smi` reports for
+/// the first GPU, with a Blackwell `12X` rewritten to `12Xa` exactly as
+/// upstream's CMake does (ggml/src/ggml-cuda/CMakeLists.txt).
+///
+/// Parameters:
+/// - `b`: the build graph the options are registered on.
+/// - `target`: the resolved target; CUDA is only defaulted on for Linux.
+///
+/// Return: the toolkit and architecture, or null when CUDA is off.
+fn cudaOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Cuda {
+    const toolkit = b.option([]const u8, "cuda-toolkit", "CUDA toolkit root (default /usr/local/cuda)") orelse "/usr/local/cuda";
+    const nvcc = b.pathJoin(&.{ toolkit, "bin", "nvcc" });
+    const found = if (std.Io.Dir.accessAbsolute(b.graph.io, nvcc, .{})) true else |_| false;
+    const default_on = target.result.os.tag == .linux and found;
+    const enabled = b.option(bool, "cuda", "Build the CUDA backend (default: on for Linux when nvcc is found)") orelse default_on;
+    if (!enabled) return null;
+
+    const arch = b.option([]const u8, "cuda-arch", "GPU architecture to compile for, e.g. 121a (default: from nvidia-smi)") orelse detect: {
+        var code: u8 = 0;
+        const out = b.runAllowFail(&.{ "nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader" }, &code, .ignore) catch
+            std.debug.panic("-Dcuda: nvidia-smi found no GPU; pass -Dcuda-arch=<e.g. 121a>", .{});
+        const line = std.mem.trim(u8, std.mem.sliceTo(out, '\n'), " \r\t");
+        var digits: std.ArrayList(u8) = .empty;
+        for (line) |ch| if (ch != '.') digits.append(b.allocator, ch) catch @panic("OOM");
+        // 12X is forward-compatible, 12Xa is not, and the FP4 tensor-core
+        // instructions need 12Xa.
+        if (digits.items.len == 3 and std.mem.startsWith(u8, digits.items, "12")) digits.append(b.allocator, 'a') catch @panic("OOM");
+        break :detect digits.items;
+    };
+    // nvcc compiles host code with the system g++; ask it where its runtime is.
+    const libstdcxx = std.mem.trim(u8, b.run(&.{ "g++", "-print-file-name=libstdc++.so" }), " \r\n\t");
+    return .{ .toolkit = toolkit, .arch = arch, .libstdcxx = libstdcxx };
+}
+
 pub fn build(b: *std.Build) !void {
     // Pre-flight: ensure any local dependencies are cloned
     Git.cloneDeps(b);
@@ -277,6 +315,7 @@ pub fn build(b: *std.Build) !void {
     const probe_ported = b.option(bool, "probe-ported", "Abort from ported code on a hot path, to prove it runs") orelse false;
     const probe_cpu = b.option(bool, "probe-cpu", "Abort from the ported CPU backend, to prove it runs") orelse false;
 
+    const cuda = cudaOptions(b, cfg.target);
     const reference = try llamacpp.add(b, .{
         .target = cfg.target,
         .optimize = cfg.optimize,
@@ -284,6 +323,7 @@ pub fn build(b: *std.Build) !void {
         .libc_file = libc_file,
         .probe_ported = probe_ported,
         .probe_cpu = probe_cpu,
+        .cuda = cuda,
     });
 
     const ggml_install = b.addInstallArtifact(reference.ggml, .{});
@@ -361,6 +401,7 @@ pub fn build(b: *std.Build) !void {
     smoke_module.linkLibrary(reference.llama);
     smoke_module.linkLibrary(reference.ggml);
     llamacpp.addSdkPaths(b, smoke_module, sdk);
+    llamacpp.addCudaLibraries(b, smoke_module, cuda);
 
     const smoke = b.addExecutable(.{ .name = "smoke", .root_module = smoke_module });
 
@@ -404,6 +445,7 @@ pub fn build(b: *std.Build) !void {
     cli_module.linkLibrary(reference.llama);
     cli_module.linkLibrary(reference.ggml);
     llamacpp.addSdkPaths(b, cli_module, sdk);
+    llamacpp.addCudaLibraries(b, cli_module, cuda);
 
     const cli = b.addExecutable(.{
         .name = cfg.cli_name,
@@ -460,6 +502,7 @@ pub fn build(b: *std.Build) !void {
     cli_tests_module.linkLibrary(reference.llama);
     cli_tests_module.linkLibrary(reference.ggml);
     llamacpp.addSdkPaths(b, cli_tests_module, sdk);
+    llamacpp.addCudaLibraries(b, cli_tests_module, cuda);
 
     const cli_tests = b.addTest(.{
         .root_module = cli_tests_module,

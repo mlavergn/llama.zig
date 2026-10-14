@@ -330,6 +330,23 @@ pub const Options = struct {
     /// `ggml-cpu.c` while it is being computed, so each needs its own run to
     /// be shown reachable.
     probe_cpu: bool = false,
+    /// Builds upstream's CUDA backend into `libggml.a`; null leaves it out.
+    /// See `addCuda`.
+    cuda: ?Cuda = null,
+};
+
+/// Where the CUDA toolkit is and which GPU to compile for.
+pub const Cuda = struct {
+    /// Toolkit root, e.g. `/usr/local/cuda`; `bin/nvcc` must exist under it.
+    toolkit: []const u8,
+    /// The `compute_`/`sm_` suffix to generate code for, e.g. `121a` for the
+    /// GB10. Upstream's CMake rewrites every plain `12X` to `12Xa`, because
+    /// the Blackwell FP4 tensor-core instructions need the
+    /// architecture-specific variant; the build option does the same.
+    arch: []const u8,
+    /// The host compiler's `libstdc++.so`, which `nvcc`'s objects need. Linked
+    /// by path: Zig reads a system library named `stdc++` as its own libc++.
+    libstdcxx: []const u8,
 };
 
 /// Declares the ggml and llama static libraries and returns them.
@@ -388,6 +405,8 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     // behind `#ifdef GGML_USE_METAL`, and the ported test root links no
     // Metal at all.
     options.addOption(bool, "use_metal", isApple(opts));
+    // Mirrors the `-DGGML_USE_CUDA` `addCuda` defines, for the same reason.
+    options.addOption(bool, "use_cuda", opts.cuda != null);
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
     addVarargsShim(b, mod, opts);
@@ -451,9 +470,131 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
         mod.linkFramework("Accelerate", .{});
     }
 
+    if (opts.cuda) |cuda| try addCuda(b, mod, cuda);
+
     const lib = b.addLibrary(.{ .name = "ggml", .root_module = mod, .linkage = .static });
     lib.setLibCFile(opts.libc_file);
     return lib;
+}
+
+/// The `-D` flags upstream's CMake gives every `ggml-cuda` translation unit
+/// for the configuration this build selects: `GGML_CUDA_FA_ALL_QUANTS` and
+/// `GGML_CUDA_GRAPHS` on, NCCL off (one GPU), the peer batch size at its
+/// default. Taken from the `flags.make` a stock CMake build of the pinned
+/// tree writes, minus the `GGML_BACKEND_SHARED`/`GGML_SHARED` pair, which
+/// only exist to export symbols from a `.so`.
+const cuda_defines = [_][]const u8{
+    "-DGGML_CUDA_FA_ALL_QUANTS",
+    "-DGGML_CUDA_PEER_MAX_BATCH_SIZE=128",
+    "-DGGML_CUDA_USE_GRAPHS",
+    "-DGGML_SCHED_MAX_COPIES=4",
+    "-D_GNU_SOURCE",
+    "-D_XOPEN_SOURCE=600",
+    "-DNDEBUG",
+};
+
+/// Compiles upstream's `ggml-cuda` with `nvcc` and adds it to the ggml module.
+///
+/// **This is the reference CUDA backend, not a port.** PLAN.md's Stage 6 has
+/// the Zig host layer calling `cudaLaunchKernel`; until that exists, the
+/// whole of `ggml/src/ggml-cuda/` -- host code included -- compiles unmodified,
+/// the position `llama.cpp.zmake` holds for the rest of the tree. Its
+/// external contract is C: every ggml symbol its objects leave undefined is a
+/// C-ABI export of the Zig ggml (measured with `nm -u` over all 187 objects),
+/// and it registers through `ggml_backend_cuda_reg`, which
+/// `src/ggml/backend_reg.zig` calls under `config.use_cuda`.
+///
+/// The source set is upstream's `CMakeLists.txt`'s: every `*.cu`, plus the
+/// `fattn-tile`, `fattn-mma`, `mmq`, `mmf` and -- under
+/// `GGML_CUDA_FA_ALL_QUANTS` -- `fattn-vec` template instances. One `nvcc` run
+/// per file, so the build graph parallelises and caches them individually; a
+/// clean build is ~2 minutes on the GB10's 20 cores.
+///
+/// `nvcc`'s host compiler is the system `g++`, so the objects need
+/// libstdc++, which is linked beside the CUDA runtime, cuBLAS and the driver
+/// (for VMM). They are compiled `-mno-outline-atomics`: g++ on aarch64
+/// otherwise calls libgcc's `__aarch64_cas4_sync` and friends, which Zig's
+/// compiler_rt does not define and Zig's linker does not pull from libgcc.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `mod`: the ggml module the objects and libraries are added to.
+/// - `cuda`: toolkit root and target architecture.
+///
+/// Return: nothing; propagates errors from reading the source directory.
+fn addCuda(b: *std.Build, mod: *std.Build.Module, cuda: Cuda) !void {
+    const dir_path = root ++ "/ggml/src/ggml-cuda";
+    const nvcc = b.pathJoin(&.{ cuda.toolkit, "bin", "nvcc" });
+    const gencode = b.fmt("--generate-code=arch=compute_{s},code=[compute_{s},sm_{s}]", .{ cuda.arch, cuda.arch, cuda.arch });
+
+    var files: std.ArrayList([]const u8) = .empty;
+    const instance_prefixes = [_][]const u8{ "fattn-tile", "fattn-mma", "mmq", "mmf", "fattn-vec" };
+    for ([_][]const u8{ "", "/template-instances" }) |sub| {
+        const path = b.fmt("{s}{s}", .{ dir_path, sub });
+        b.dependOnDirectoryMetadata(b.path(path));
+        var dir = try b.root.openDir(b.graph.io, path, .{ .iterate = true });
+        defer dir.close(b.graph.io);
+        var it = dir.iterate();
+        while (try it.next(b.graph.io)) |entry| {
+            if (entry.kind != .file) continue;
+            if (!std.mem.endsWith(u8, entry.name, ".cu")) continue;
+            if (sub.len != 0) {
+                const wanted = for (instance_prefixes) |prefix| {
+                    if (std.mem.startsWith(u8, entry.name, prefix)) break true;
+                } else false;
+                if (!wanted) continue;
+            }
+            try files.append(b.allocator, b.fmt("{s}/{s}", .{ path, entry.name }));
+        }
+    }
+    // Directory order is the filesystem's; sort so the archive is stable.
+    std.mem.sort([]const u8, files.items, {}, struct {
+        fn lessThan(_: void, l: []const u8, r: []const u8) bool {
+            return std.mem.lessThan(u8, l, r);
+        }
+    }.lessThan);
+
+    for (files.items) |file| {
+        const run = b.addSystemCommand(&.{ nvcc, "-c", "-O3", "-std=c++17", gencode, "-use_fast_math", "-extended-lambda", "-compress-mode=size", "-Xcompiler=-Wno-pedantic,-mno-outline-atomics" });
+        run.addArgs(&cuda_defines);
+        run.addDirectoryArg2(b.path(root ++ "/ggml/include"), .{ .prefix = "-I" });
+        run.addDirectoryArg2(b.path(root ++ "/ggml/src"), .{ .prefix = "-I" });
+        run.addDirectoryArg2(b.path(dir_path), .{ .prefix = "-I" });
+        // nvcc writes a make-style depfile, so editing a `.cuh` rebuilds
+        // exactly the objects that include it.
+        // `-MF` must be its own argument: nvcc rejects the joined form.
+        run.addArgs(&.{ "-MD", "-MF" });
+        _ = run.addDepFileOutputArg2("out.d", .{});
+        run.addFileArg(b.path(file));
+        run.addArg("-o");
+        const obj = run.addOutputFileArg2(b.fmt("{s}.o", .{std.fs.path.stem(file)}), .{});
+        mod.addObjectFile(obj);
+    }
+
+    addCudaLibraries(b, mod, cuda);
+}
+
+/// Adds the CUDA runtime, cuBLAS, the driver and libstdc++ to a module's link.
+///
+/// The ggml module declares them, but a search path does not travel with a
+/// static library to the executable that links it, so every module that
+/// links `libggml.a` built with CUDA calls this too. The toolkit's `lib64` is
+/// also added as an rpath, so the binary runs without `LD_LIBRARY_PATH` where
+/// the loader's cache does not already list it.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `mod`: the module whose link gains the libraries.
+/// - `cuda`: the toolkit root; null adds nothing.
+pub fn addCudaLibraries(b: *std.Build, mod: *std.Build.Module, cuda: ?Cuda) void {
+    const tk = cuda orelse return;
+    const lib64 = b.pathJoin(&.{ tk.toolkit, "lib64" });
+    mod.addLibraryPath(.{ .cwd_relative = lib64 });
+    mod.addRPath(.{ .cwd_relative = lib64 });
+    for ([_][]const u8{ "cudart", "cublas", "cublasLt", "cuda" }) |name| {
+        mod.linkSystemLibrary(name, .{});
+    }
+    mod.addObjectFile(.{ .cwd_relative = tk.libstdcxx });
 }
 
 /// Flattens one Metal kernel and returns the assembly stub that embeds it.
@@ -551,6 +692,7 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
     // link, exactly as in the ported test root above. The ported registry
     // must not reference the Metal backend.
     options.addOption(bool, "use_metal", false);
+    options.addOption(bool, "use_cuda", false);
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
     addVarargsShim(b, mod, opts);
@@ -630,6 +772,7 @@ fn portedTestModuleInner(
     // No `-DGGML_USE_METAL` in this root's define list, and no Metal sources
     // in its link. The ported registry must not reference the Metal backend.
     options.addOption(bool, "use_metal", false);
+    options.addOption(bool, "use_cuda", false);
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
     addVarargsShim(b, mod, opts);
@@ -693,6 +836,7 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) *std.Bu
     mod.addImport("llama_c", llamaCModule(b, opts));
     addSdkPaths(b, mod, opts.sdk);
     mod.linkLibrary(ggml);
+    addCudaLibraries(b, mod, opts.cuda);
 
     const lib = b.addLibrary(.{ .name = "llama", .root_module = mod, .linkage = .static });
     lib.setLibCFile(opts.libc_file);
@@ -757,6 +901,7 @@ fn addLlamaRef(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*st
 
     addSdkPaths(b, mod, opts.sdk);
     mod.linkLibrary(ggml);
+    addCudaLibraries(b, mod, opts.cuda);
 
     const lib = b.addLibrary(.{ .name = "llama-ref", .root_module = mod, .linkage = .static });
     lib.setLibCFile(opts.libc_file);

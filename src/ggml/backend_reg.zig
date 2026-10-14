@@ -28,9 +28,9 @@
 //!
 //! # What this build actually registers
 //!
-//! Metal then CPU, in that order, and nothing else: every other
-//! `register_backend` call in the C++ constructor sits behind a `GGML_USE_*`
-//! define that `build/llamacpp.zig` does not set. The order is load-bearing —
+//! CUDA (with `-Dcuda`), Metal (on Apple targets), then CPU, in that order, and
+//! nothing else: every other `register_backend` call in the C++ constructor
+//! sits behind a `GGML_USE_*` define that `build/llamacpp.zig` does not set. The order is load-bearing —
 //! `ggml_backend_init_best` prefers the first GPU device it finds, and device
 //! indices are what `llama.cpp` passes around.
 //!
@@ -51,6 +51,12 @@ const c = impl.c;
 /// be a `comptime` branch rather than a runtime one so the reference to
 /// `ggml_backend_metal_reg` is not emitted where nothing defines it.
 const use_metal = config.use_metal;
+
+/// Mirrors `GGML_USE_CUDA`, which `build/llamacpp.zig` defines when built with
+/// `-Dcuda`. The CUDA backend is upstream's `ggml-cuda`, compiled unmodified by
+/// `nvcc`; see `build/llamacpp.zig`'s `addCuda`. Comptime for the same reason as
+/// `use_metal`.
+const use_cuda = config.use_cuda;
 
 /// True when the C++ build would leave `NDEBUG` unset, which gates the
 /// registry's per-backend debug logging and the `silent` flag in
@@ -119,6 +125,10 @@ fn dlError() [*:0]const u8 {
 /// since `ggml-cpu.h` is already in it.
 extern fn ggml_backend_metal_reg() c.ggml_backend_reg_t;
 
+/// `ggml_backend_cuda_reg`, from `ggml-cuda.h`. Declared rather than imported,
+/// as `ggml_backend_metal_reg` is.
+extern fn ggml_backend_cuda_reg() c.ggml_backend_reg_t;
+
 const Entry = struct {
     reg: c.ggml_backend_reg_t,
     handle: ?*anyopaque,
@@ -132,12 +142,13 @@ const Registry = struct {
     /// Ports `ggml_backend_registry`'s constructor
     /// (src/ggml-backend-reg.cpp:119 @c1d0e7a00).
     ///
-    /// Only the `GGML_USE_METAL` and `GGML_USE_CPU` arms are compiled here, in
-    /// the C++'s order: Metal first, CPU last.
+    /// Only the `GGML_USE_CUDA`, `GGML_USE_METAL` and `GGML_USE_CPU` arms are
+    /// compiled here, in the C++'s order: CUDA first, CPU last.
     ///
     /// Return: nothing. Registration failures are not reportable through the
     /// C++ constructor either.
     fn init(self: *Registry) void {
+        if (use_cuda) self.registerBackend(ggml_backend_cuda_reg(), null);
         if (use_metal) self.registerBackend(ggml_backend_metal_reg(), null);
         self.registerBackend(c.ggml_backend_cpu_reg(), null);
     }
@@ -759,7 +770,12 @@ test "the registry reports the two backends this build compiles" {
     // Metal first, CPU last -- the order the C++ constructor registers them,
     // and what `ggml_backend_init_best` depends on. The ported test root
     // compiles without Metal, so it sees one.
-    try std.testing.expectEqual(@as(usize, if (use_metal) 2 else 1), ggml_backend_reg_count());
+    const gpu_regs: usize = @as(usize, @intFromBool(use_metal)) + @intFromBool(use_cuda);
+    try std.testing.expectEqual(gpu_regs + 1, ggml_backend_reg_count());
+
+    if (use_cuda) {
+        try std.testing.expectEqualStrings("CUDA", std.mem.sliceTo(c.ggml_backend_reg_name(ggml_backend_reg_get(0)), 0));
+    }
 
     if (use_metal) {
         // The Metal backend registers itself as `GGML_METAL_NAME`, which is

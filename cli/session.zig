@@ -64,6 +64,17 @@ pub const Session = struct {
     vocab: *const c.llama_vocab,
     ctx: *c.llama_context,
     sampler: *c.llama_sampler,
+    /// The CPU backend's persistent threadpool, attached to `ctx`.
+    ///
+    /// Without one, every `ggml_graph_compute` builds a disposable pool --
+    /// `n_threads - 1` `pthread_create`s and joins -- and a fully offloaded
+    /// model still runs a CPU split every token (the token-embedding
+    /// `GET_ROWS`, whose weights stay in host memory). Measured on a GB10 with
+    /// Qwen3.5-2B: decode 7.59 ms/token without a pool, 7.03 with one, 6.75 at
+    /// one thread. Upstream's CLI attaches one in `common_threadpools::init`
+    /// (common/common.cpp:1785). Null if creation failed, which leaves
+    /// libllama's per-call pools, as upstream does.
+    threadpool: ?*c.struct_ggml_threadpool = null,
     /// Borrowed from the caller's `Args`; not owned.
     settings: args_mod.Args,
     /// Tokens currently held in the KV cache, in order.
@@ -124,6 +135,16 @@ pub const Session = struct {
         const ctx = c.llama_init_from_model(model, ctx_params) orelse return Error.ContextFailed;
         errdefer c.llama_free(ctx);
 
+        // One pool serves prompt and generation alike, because `n_threads`
+        // and `n_threads_batch` are always equal here; upstream makes a
+        // second only when the two differ. `ggml_threadpool_params_init`
+        // supplies upstream's defaults, polling level 50 included.
+        var tpp: c.struct_ggml_threadpool_params = undefined;
+        c.ggml_threadpool_params_init(&tpp, c.llama_n_threads(ctx));
+        const threadpool = c.ggml_threadpool_new(&tpp);
+        if (threadpool) |tp| c.llama_attach_threadpool(ctx, tp, null);
+        errdefer if (threadpool) |tp| c.ggml_threadpool_free(tp);
+
         const sampler = try buildSampler(settings, vocab);
         errdefer c.llama_sampler_free(sampler);
 
@@ -135,11 +156,12 @@ pub const Session = struct {
             .vocab = vocab,
             .ctx = ctx,
             .sampler = sampler,
+            .threadpool = threadpool,
             .settings = settings,
         };
     }
 
-    /// Releases the model, context and sampler.
+    /// Releases the model, context, threadpool and sampler.
     ///
     /// Parameters:
     /// - `self`: the session to tear down.
@@ -150,6 +172,8 @@ pub const Session = struct {
         self.decoded.deinit(self.allocator);
         c.llama_sampler_free(self.sampler);
         c.llama_free(self.ctx);
+        // After the context: it holds the pool until it is freed.
+        if (self.threadpool) |tp| c.ggml_threadpool_free(tp);
         c.llama_model_free(self.model);
     }
 

@@ -5,3 +5,6 @@
  * **Not a port.**
  */
 #include "llama.h"
+/* `ggml_threadpool_new`, for the persistent CPU threadpool `Session` attaches,
+ * as upstream's `common_threadpools::init` does. */
+#include "ggml-cpu.h"
