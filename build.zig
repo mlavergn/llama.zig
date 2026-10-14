@@ -288,6 +288,7 @@ pub fn build(b: *std.Build) !void {
 
     const ggml_install = b.addInstallArtifact(reference.ggml, .{});
     const llama_install = b.addInstallArtifact(reference.llama, .{});
+    const llama_ref_install = b.addInstallArtifact(reference.llama_ref, .{});
 
     // Tests for ported ggml code that has not been swapped into the library
     // yet. See src/ggml/ported.zig for why this cannot live in `test`.
@@ -332,6 +333,7 @@ pub fn build(b: *std.Build) !void {
     const reference_step = b.step("reference", "Build the llama.cpp reference libraries");
     reference_step.dependOn(&ggml_install.step);
     reference_step.dependOn(&llama_install.step);
+    reference_step.dependOn(&llama_ref_install.step);
 
     // End-to-end check: load a model through libllama's C ABI and generate.
     // Compiling and linking says nothing about whether inference works, and

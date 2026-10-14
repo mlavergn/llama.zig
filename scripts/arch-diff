@@ -4,7 +4,7 @@
 # The architecture, key and tensor tables are generated (scripts/gen-arch),
 # and the functions over them are ported ahead of libllama's single swap
 # (PLAN.md, Decision 42), so nothing downstream can see either yet. This
-# links the C++ llama-arch.o, inside libllama.a, through C wrappers
+# links the C++ llama-arch.o, inside libllama-ref.a, through C wrappers
 # (harness/arch_ref.cpp) beside the Zig, and asks both every lookup. See
 # harness/arch_diff.zig for what is compared.
 #
@@ -14,7 +14,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
-for lib in zig-out/lib/libllama.a zig-out/lib/libggml.a; do
+for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
 done
 
@@ -36,7 +36,7 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
 zig build-exe -mcpu baseline -femit-bin="$tmp/arch_diff" -Ofast -lc \
     --dep staged -Mroot=harness/arch_diff.zig \
     --dep llama_c -Mstaged=src/llama/staged.zig -Mllama_c="$tmp/llama_c.zig" \
-    "$tmp/arch_ref.o" zig-out/lib/libllama.a zig-out/lib/libggml.a -lc++ \
+    "$tmp/arch_ref.o" zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }

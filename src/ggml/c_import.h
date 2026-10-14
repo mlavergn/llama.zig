@@ -35,3 +35,9 @@
  * so unlike `ggml-impl.h` it imports cleanly.
  */
 #include "gguf.h"
+/*
+ * The training API: `struct ggml_opt_params`, the optimizer and loss enums
+ * and the opaque handle typedefs, for `opt.zig`. It includes only `ggml.h`
+ * and `ggml-backend.h`, so it imports cleanly.
+ */
+#include "ggml-opt.h"

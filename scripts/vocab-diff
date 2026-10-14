@@ -3,7 +3,7 @@
 #
 # The vocabulary is ported ahead of libllama's single swap (PLAN.md,
 # Decision 42), so nothing downstream can see it yet: this links the C++
-# vocabulary, inside libllama.a, beside the Zig one and loads every
+# vocabulary, inside libllama-ref.a, beside the Zig one and loads every
 # vocabulary file both ways. See harness/vocab_diff.zig for what is compared
 # and which files are synthesized.
 #
@@ -14,7 +14,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
-for lib in zig-out/lib/libllama.a zig-out/lib/libggml.a; do
+for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
 done
 
@@ -32,7 +32,7 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
 zig build-exe -mcpu baseline -femit-bin="$tmp/vocab_diff" -Ofast -lc \
     --dep staged -Mroot=harness/vocab_diff.zig \
     --dep llama_c -Mstaged=src/llama/staged.zig -Mllama_c="$tmp/llama_c.zig" \
-    zig-out/lib/libllama.a zig-out/lib/libggml.a -lc++ \
+    zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }

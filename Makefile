@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate xcframework xcframework-check perf perf-cpu
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff context-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -126,7 +126,7 @@ dist:
 # Run every check that needs no model or reference build.
 validate:
 	@printf '\n== formatting ==\n'
-	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig src/ggml/cpu/repack/*.zig src/ggml/cpu/repack/arm/*.zig src/ggml/metal/*.zig src/llama/*.zig src/llama/sampler/*.zig src/llama/grammar/*.zig src/llama/vocab/*.zig cli/*.zig
+	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig src/ggml/cpu/repack/*.zig src/ggml/cpu/repack/arm/*.zig src/ggml/metal/*.zig src/llama/*.zig src/llama/api/*.zig src/llama/models/*.zig src/llama/sampler/*.zig src/llama/grammar/*.zig src/llama/vocab/*.zig cli/*.zig
 	@printf '\n== scaffold ==\n'
 	zig build
 	@printf '\n== unit tests ==\n'
@@ -150,6 +150,12 @@ validate:
 	./scripts/arch-diff
 	@printf '\n== llama-model-loader.cpp vs the port ==\n'
 	./scripts/loader-diff
+	@printf '\n== llama-batch.cpp vs the port ==\n'
+	./scripts/batch-diff
+	@printf '\n== llama-chat.cpp vs the port ==\n'
+	./scripts/chat-diff
+	@printf '\n== llama.h at the C boundary vs the port ==\n'
+	./scripts/api-diff
 	@printf '\n== ported symbol coverage ==\n'
 	./scripts/port-coverage
 	@printf '\n== upstream citations ==\n'
@@ -287,6 +293,36 @@ arch-diff:
 loader-diff:
 	zig build reference --release=fast
 	./scripts/loader-diff
+
+# The batch splitter, Zig against the C++ in one process.
+batch-diff:
+	zig build reference --release=fast
+	./scripts/batch-diff
+
+# The built-in chat templates, Zig against the C++ in one process.
+chat-diff:
+	zig build reference --release=fast
+	./scripts/chat-diff
+
+# The context, the memory modules, the graph and Qwen3.5's graph: a decode
+# script run through llama.h and through the port, every graph node, every
+# output's bits and the state API compared; on the GPU, the CPU, a partial
+# offload, a device without the fused Gated Delta Net, and tensor
+# parallelism. ARGS=--quick for the GPU's multi-sequence cases only.
+context-diff:
+	zig build reference --release=fast
+	./scripts/context-diff $(ARGS)
+
+# Every llama.h entry point the context does not own -- model, vocabulary,
+# loading, chat, batch, logging -- at the C boundary, Zig against the C++.
+api-diff:
+	zig build reference --release=fast
+	./scripts/api-diff
+
+# LoRA and control-vector adapters, Zig against the C++ in one process.
+adapter-diff:
+	zig build reference --release=fast
+	./scripts/adapter-diff $(ARGS)
 
 # Diff our CLI's output against the C reference, end to end.
 parity-cli: buildcli

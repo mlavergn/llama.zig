@@ -1,0 +1,46 @@
+#!/bin/bash
+# Compare the port's llama.h entry points in src/llama/api/ -- llama.zig,
+# model.zig, vocab.zig, impl.zig, batch.zig, chat.zig, cparams.zig and
+# model_loader.zig -- with the C++ that defines the same names in
+# libllama-ref.a, in one process.
+#
+# libllama swaps once, at llama.h (PLAN.md, Decision 42), so nothing calls
+# these yet. This calls every one beside its C++ namesake on every
+# vocabulary file upstream ships and every local Qwen3.5 model, and
+# compares what crosses the C boundary: return codes, buffers at every size
+# around the answer, logs, and what terminates. See harness/api_diff.zig.
+#
+# Usage: scripts/api-diff [extra.gguf | corpus.inp ...]
+#   Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+STAGED="${API_DIFF_STAGED:-src/llama/staged.zig}"
+
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+zig build-exe -mcpu baseline -femit-bin="$tmp/api_diff" -Ofast -lc \
+    --dep staged -Mroot=harness/api_diff.zig \
+    --dep llama_c -Mstaged="$STAGED" -Mllama_c="$tmp/llama_c.zig" \
+    zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -60 "$tmp/berr" >&2; exit 1; }
+
+inputs=(llama.cpp/models/ggml-vocab-*.gguf.inp llama.cpp/models/ggml-vocab-*.gguf)
+for m in Qwen3.5-*.gguf; do
+    [ -f "$m" ] && inputs+=("$m")
+done
+
+"$tmp/api_diff" "$tmp" "${inputs[@]}" "$@"

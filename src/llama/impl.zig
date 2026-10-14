@@ -103,6 +103,18 @@ pub fn logDebug(comptime format: [:0]const u8, args: anytype) void {
     @call(.auto, _Z18llama_log_internal14ggml_log_levelPKcz, .{ c.GGML_LOG_LEVEL_DEBUG, format.ptr } ++ args);
 }
 
+/// Ports `LLAMA_LOG_CONT` (llama-impl.h:32 @c1d0e7a00): continues the
+/// previous line.
+///
+/// Parameters:
+/// - `format`: a printf format string.
+/// - `args`: C-compatible arguments for it.
+///
+/// Return: nothing.
+pub fn logCont(comptime format: [:0]const u8, args: anytype) void {
+    @call(.auto, _Z18llama_log_internal14ggml_log_levelPKcz, .{ c.GGML_LOG_LEVEL_CONT, format.ptr } ++ args);
+}
+
 // -----------------------------------------------------------------------------
 // Assertions
 
@@ -175,12 +187,14 @@ pub const Exception = struct {
         runtime_error,
         out_of_range,
         invalid_argument,
+        length_error,
 
         fn name(self: Kind) [:0]const u8 {
             return switch (self) {
                 .runtime_error => "std::runtime_error",
                 .out_of_range => "std::out_of_range",
                 .invalid_argument => "std::invalid_argument",
+                .length_error => "std::length_error",
             };
         }
     };
@@ -210,6 +224,13 @@ pub const Exception = struct {
     /// Return: the message, borrowed from the exception.
     pub fn what(self: *const Exception) []const u8 {
         return self.buf[0..self.len];
+    }
+
+    /// Return: the message, NUL-terminated for a `%s`, borrowed from the
+    /// exception.
+    pub fn whatZ(self: *Exception) [*:0]const u8 {
+        self.buf[self.len] = 0;
+        return @ptrCast(&self.buf);
     }
 
     /// The exception escaping through the C ABI: the process terminates
@@ -269,6 +290,7 @@ pub extern fn powf(x: f32, y: f32) f32;
 pub extern fn sqrtf(x: f32) f32;
 pub extern fn exp(x: f64) f64;
 pub extern fn pow(x: f64, y: f64) f64;
+pub extern fn atoi(s: [*:0]const u8) c_int;
 
 /// libc's `arc4random`, which is what libc++'s `std::random_device` draws
 /// from on Apple platforms.

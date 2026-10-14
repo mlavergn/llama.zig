@@ -13,12 +13,14 @@
 
 #include "llama-model-loader.h"
 #include "llama-model.h"
+#include "ggml-backend-impl.h"
 
 #include <cstddef>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 static void put(const std::string & s, char * buf, size_t n) {
     if (n == 0) {
@@ -163,6 +165,184 @@ const char * ref_hparams_field(size_t i, size_t * offset, size_t * size) {
     *offset = ref_fields[i].offset;
     *size   = ref_fields[i].size;
     return ref_fields[i].name;
+}
+
+// The layer members the port's `Layer` mirrors, by name. A name here that
+// `llama_layer` lacks fails to compile, so the list cannot name a member
+// that does not exist.
+struct ref_layer_field { const char * name; size_t offset; };
+#define F(m) { #m, offsetof(llama_layer, m) },
+static const ref_layer_field ref_layer_fields[] = {
+    F(attn_norm)
+    F(attn_norm_b)
+    F(attn_q_norm)
+    F(attn_k_norm)
+    F(attn_post_norm)
+    F(ssm_norm)
+    F(wq)
+    F(wk)
+    F(wv)
+    F(wo)
+    F(wqkv)
+    F(wqkv_gate)
+    F(wq_b)
+    F(wk_b)
+    F(wv_b)
+    F(wo_b)
+    F(wqkv_b)
+    F(ffn_gate)
+    F(ffn_down)
+    F(ffn_up)
+    F(ffn_gate_inp)
+    F(ffn_gate_exps)
+    F(ffn_down_exps)
+    F(ffn_up_exps)
+    F(ffn_gate_shexp)
+    F(ffn_down_shexp)
+    F(ffn_up_shexp)
+    F(ssm_in)
+    F(ssm_dt)
+    F(ssm_out)
+    F(ssm_conv1d)
+    F(ssm_a)
+    F(ssm_alpha)
+    F(ssm_beta)
+    F(rope_long)
+    F(rope_short)
+    F(rope_freqs)
+    F(wq_s)
+    F(wk_s)
+    F(wv_s)
+    F(wo_s)
+    F(wqkv_s)
+    F(wqkv_gate_s)
+    F(ffn_gate_s)
+    F(ffn_up_s)
+    F(ffn_down_s)
+    F(ffn_gate_shexp_s)
+    F(ffn_up_shexp_s)
+    F(ffn_down_shexp_s)
+    F(ffn_gate_exps_s)
+    F(ffn_down_exps_s)
+    F(ffn_up_exps_s)
+    F(ssm_in_s)
+    F(ssm_out_s)
+    F(ssm_alpha_s)
+    F(ssm_beta_s)
+    F(wq_in_s)
+    F(wk_in_s)
+    F(wv_in_s)
+    F(wo_in_s)
+    F(wqkv_in_s)
+    F(wqkv_gate_in_s)
+    F(ffn_gate_in_s)
+    F(ffn_up_in_s)
+    F(ffn_down_in_s)
+    F(ffn_gate_exps_in_s)
+    F(ffn_down_exps_in_s)
+    F(ffn_up_exps_in_s)
+    F(ffn_gate_shexp_in_s)
+    F(ffn_up_shexp_in_s)
+    F(ffn_down_shexp_in_s)
+    F(ssm_in_in_s)
+    F(ssm_out_in_s)
+    F(ssm_alpha_in_s)
+    F(ssm_beta_in_s)
+    F(nextn.eh_proj)
+    F(nextn.eh_proj_s)
+    F(nextn.eh_proj_in_s)
+    F(nextn.embed_tokens)
+    F(nextn.enorm)
+    F(nextn.hnorm)
+    F(nextn.shared_head_head)
+    F(nextn.shared_head_head_s)
+    F(nextn.shared_head_head_in_s)
+    F(nextn.shared_head_norm)
+};
+#undef F
+
+// The model's tensor named by a `Layer` member, or null; "?" when the
+// member is not in the list above.
+const char * ref_layer_tensor(const llama_model * model, int il, const char * field) {
+    for (const auto & f : ref_layer_fields) {
+        if (strcmp(f.name, field) == 0) {
+            const ggml_tensor * t = *(ggml_tensor * const *) ((const char *) &model->layers[il] + f.offset);
+            return t ? t->name : nullptr;
+        }
+    }
+    return "?";
+}
+
+const char * ref_model_tensor(const llama_model * model, const char * field) {
+    const ggml_tensor * t = nullptr;
+    if      (strcmp(field, "tok_embd")    == 0) t = model->tok_embd;
+    else if (strcmp(field, "output_norm") == 0) t = model->output_norm;
+    else if (strcmp(field, "output")      == 0) t = model->output;
+    else if (strcmp(field, "output_s")    == 0) t = model->output_s;
+    else if (strcmp(field, "output_in_s") == 0) t = model->output_in_s;
+    else return "?";
+    return t ? t->name : nullptr;
+}
+
+size_t ref_n_layers(const llama_model * model) {
+    return model->layers.size();
+}
+
+size_t ref_n_tensors(const llama_model * model) {
+    return model->tensors_by_name.size();
+}
+
+ggml_tensor * ref_tensor_at(const llama_model * model, size_t i, const char ** name) {
+    *name = model->tensors_by_name[i].first.c_str();
+    return model->tensors_by_name[i].second;
+}
+
+size_t ref_n_devices(const llama_model * model) {
+    return model->devices.size();
+}
+
+ggml_backend_dev_t ref_device(const llama_model * model, size_t i) {
+    return model->devices[i].dev;
+}
+
+ggml_backend_dev_t ref_dev_layer(const llama_model * model, int il) {
+    return model->dev_layer(il);
+}
+
+ggml_backend_dev_t ref_dev_output(const llama_model * model) {
+    return model->dev_output();
+}
+
+// memory_breakdown, flattened: the i-th entry's buffer type and size.
+size_t ref_memory_breakdown(const llama_model * model, size_t i, ggml_backend_buffer_type_t * buft) {
+    size_t k = 0;
+    for (const auto & [b, n] : model->memory_breakdown()) {
+        if (k++ == i) {
+            *buft = b;
+            return n;
+        }
+    }
+    *buft = nullptr;
+    return 0;
+}
+
+// FNV-1a over a tensor's data, read through its backend; a buffer that
+// cannot be read through the backend (the CPU repack buffer has no
+// get_tensor) is read in place. Used for both sides' tensors.
+uint64_t ref_hash_tensor(const ggml_tensor * t) {
+    const size_t n = ggml_nbytes(t);
+    std::vector<uint8_t> buf(n);
+    if (t->buffer && t->buffer->iface.get_tensor) {
+        ggml_backend_tensor_get(t, buf.data(), 0, n);
+    } else {
+        memcpy(buf.data(), t->data, n);
+    }
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (uint8_t b : buf) {
+        h ^= b;
+        h *= 0x100000001b3ull;
+    }
+    return h;
 }
 
 }

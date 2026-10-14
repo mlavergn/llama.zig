@@ -158,6 +158,54 @@ int main(void) {
         }
     }
 
+    /* libllama's by-value structs, since it swapped to Zig: every
+     * default-params function *returns* a struct from a Zig callee, the
+     * one-byte llama_sampler_chain_params among them, and the batch
+     * functions return and take llama_batch by value. */
+    {
+        struct llama_sampler_chain_params cp = llama_sampler_chain_default_params();
+        check("chain_default_params().no_perf", cp.no_perf, 1);
+
+        struct llama_model_params mp = llama_model_default_params();
+        check("model_default_params().n_gpu_layers", mp.n_gpu_layers, -1);
+        check("model_default_params().split_mode", mp.split_mode, LLAMA_SPLIT_MODE_LAYER);
+        check("model_default_params().load_mode", mp.load_mode, LLAMA_LOAD_MODE_AUTO);
+        check("model_default_params().use_extra_bufts", mp.use_extra_bufts, 1);
+
+        struct llama_context_params xp = llama_context_default_params();
+        check("context_default_params().n_ctx", xp.n_ctx, 512);
+        check("context_default_params().n_batch", xp.n_batch, 2048);
+        check("context_default_params().n_ubatch", xp.n_ubatch, 512);
+        check("context_default_params().yarn_ext_factor", xp.yarn_ext_factor, -1.0);
+        check("context_default_params().type_k", xp.type_k, GGML_TYPE_F16);
+        check("context_default_params().offload_kqv", xp.offload_kqv, 1);
+        check("context_default_params().n_outputs_max_per_seq", xp.n_outputs_max_per_seq, 1);
+
+        struct llama_model_quantize_params qp = llama_model_quantize_default_params();
+        check("quantize_default_params().ftype", qp.ftype, LLAMA_FTYPE_MOSTLY_Q8_0);
+        check("quantize_default_params().quantize_output_tensor", qp.quantize_output_tensor, 1);
+
+        llama_token toks[3] = { 11, 22, 33 };
+        struct llama_batch one = llama_batch_get_one(toks, 3);
+        check("batch_get_one().n_tokens", one.n_tokens, 3);
+        check("batch_get_one().token[2]", one.token == toks ? one.token[2] : -1, 33);
+
+        struct llama_batch b = llama_batch_init(8, 0, 2);
+        check("batch_init().n_tokens", b.n_tokens, 0);
+        checks++;
+        if (b.token && b.pos && b.n_seq_id && b.seq_id && b.logits && !b.embd && b.seq_id[7] && !b.seq_id[8]) {
+            printf("  %-40s arrays allocated\n", "batch_init(8, 0, 2)");
+            /* by value back into Zig: freeing it must not crash */
+            llama_batch_free(b);
+        } else {
+            printf("  %-40s arrays wrong   WRONG\n", "batch_init(8, 0, 2)");
+            fails++;
+        }
+
+        struct llama_perf_context_data pc = llama_perf_context(NULL);
+        check("perf_context(NULL).n_eval", pc.n_eval, 0);
+    }
+
     printf("\n");
     if (fails == 0) {
         printf("PASS: %d C-ABI entry points carry their arguments\n", checks);

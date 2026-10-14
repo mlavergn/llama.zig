@@ -1,0 +1,90 @@
+#!/bin/bash
+# Compare src/llama/context_opt.zig and src/llama/api/opt.zig with
+# llama.cpp's training entry points, llama_opt_init and llama_opt_epoch, in
+# one process.
+#
+# Training needs F32 weights and Qwen3.5 is the one architecture the port
+# builds graphs for, so the harness writes a four-layer F32 Qwen3.5 with the
+# 2B model's vocabulary, then trains it through the C++ in libllama-ref.a and
+# through the port and compares the two transcripts: the tensors the
+# parameter filter is offered and in what order, the parameter flags, every
+# node of every training graph (forward, backward, optimizer step) with a
+# hash of its data, every epoch callback's result on bits, and every
+# weight's data after every epoch. See harness/opt_llama_diff.zig.
+#
+# Then the cases that abort, each side in its own process, comparing what
+# each printed: training every weight, or one in the first layer (ggml's
+# backward pass meets a cache write -- set_rows into the KV cache, the chunked
+# Gated Delta Net's set_inplace -- and asserts that in-place ops are not
+# supported), training the attention query (its output gate is a sigmoid,
+# which has no backward pass), llama_opt_init twice, an n_ctx_train that
+# n_ubatch does not divide, and an idata_split past the end.
+#
+# Usage: scripts/opt-llama-diff [qwen35.gguf]
+#   Requires: zig build reference --release=fast
+#   The base model defaults to the first Qwen3.5 model in the repository root.
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+model="${1:-}"
+if [ -z "$model" ]; then
+    for m in Qwen3.5-*.gguf; do
+        [ -f "$m" ] && { model="$m"; break; }
+    done
+fi
+[ -n "$model" ] || { echo "no Qwen3.5 model -- run 'make qwen35'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+# ReleaseSafe: the port's integer narrowing and indexing are checked. The
+# float arithmetic is ggml's, in libggml.a, on both sides.
+zig build-exe -mcpu baseline -femit-bin="$tmp/opt_llama_diff" -OReleaseSafe -lc \
+    --dep staged -Mroot=harness/opt_llama_diff.zig \
+    --dep llama_c -Mstaged=src/llama/staged.zig -Mllama_c="$tmp/llama_c.zig" \
+    zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+"$tmp/opt_llama_diff" "$model" "$tmp" || exit 1
+
+# The aborts. `ggml_abort` prints `file:line: message`; the C++ names its
+# source by the path it was compiled from and the port by its basename, so
+# the file is compared by basename.
+norm() {
+    grep -a -E 'GGML_ASSERT|unsupported|error' "$1" | head -3 \
+        | sed -E 's#^[^ :]*/([^/: ]+):([0-9]+):#\1:\2:#'
+}
+n_abort=0
+for case in filter-all ffn0 attn-q init-twice n_ctx_train idata_split; do
+    for side in ref port; do
+        "$tmp/opt_llama_diff" "$model" "$tmp" --abort "$case" "$side" >"$tmp/$side.out" 2>&1
+        echo "rc=$?" >>"$tmp/$side.out"
+    done
+    rr="$(norm "$tmp/ref.out"; tail -1 "$tmp/ref.out")"
+    pr="$(norm "$tmp/port.out"; tail -1 "$tmp/port.out")"
+    if [ "$rr" != "$pr" ]; then
+        echo "FAIL abort $case:"
+        echo "  ref:  $rr"
+        echo "  port: $pr"
+        exit 1
+    fi
+    case "$rr" in
+        *rc=0*) echo "FAIL abort $case: the reference did not abort, so the case tests nothing"; exit 1 ;;
+    esac
+    printf '  abort %-34s ok  %s\n' "$case" "$(echo "$rr" | head -1)"
+    n_abort=$((n_abort + 1))
+done
+echo "opt-llama-diff: $n_abort abort cases identical"

@@ -184,13 +184,20 @@ const ggml_base_sources = [_][]const u8{
 };
 
 const ggml_base_cxx_sources = [_][]const u8{
-    "ggml/src/ggml.cpp",
+    // ggml.cpp is dropped, not ported (PLAN.md, "Order of work"): it only
+    // installs a std::terminate handler that prints a ggml backtrace when a
+    // C++ exception escapes, and no C++ is left in the build to throw one.
+    //
     // ggml-backend.cpp is ported: src/ggml/backend.zig and
     // src/ggml/backend_sched.zig. 102 C-ABI symbols, not the 82 PLAN.md
     // recorded; none of its 141 mangled exports is reached from another
     // object, so the Stage 3 swap applies unchanged.
-    "ggml/src/ggml-backend-meta.cpp",
-    "ggml/src/ggml-opt.cpp",
+    // ggml-backend-meta.cpp is ported: src/ggml/backend_meta.zig, gated by
+    // scripts/meta-diff. The multi-device backend behind
+    // LLAMA_SPLIT_MODE_TENSOR.
+    //
+    // ggml-opt.cpp is ported: src/ggml/opt.zig, gated by scripts/opt-diff.
+    //
     // ggml-threading.cpp is ported: src/ggml/threading.zig. The first C++
     // translation unit to be swapped out.
     //
@@ -237,7 +244,15 @@ const ggml_metal_objc_sources = [_][]const u8{
     "ggml/src/ggml-metal/ggml-metal-context.m",
 };
 
-const llama_sources = [_][]const u8{
+// Every translation unit under `src/` is ported to Zig: libllama swapped
+// once, at `llama.h` (PLAN.md, Decision 42). `libllama.a` is now the Zig
+// alone -- `src/llama/module.zig`, with `exports.zig` exporting the C API.
+//
+// The stock C++ is still compiled, as `libllama-ref.a`, for the in-process
+// harnesses (`scripts/*-diff`), which link it beside the port and compare.
+// It is the whole of upstream's libllama, the sampler and the grammar
+// included, unmodified.
+const llama_ref_sources = [_][]const u8{
     "src/llama.cpp",
     "src/llama-adapter.cpp",
     "src/llama-arch.cpp",
@@ -245,8 +260,7 @@ const llama_sources = [_][]const u8{
     "src/llama-chat.cpp",
     "src/llama-context.cpp",
     "src/llama-cparams.cpp",
-    // llama-grammar.cpp is ported -- src/llama/grammar/, with std::regex in
-    // src/llama/regex.zig. Its only caller was the sampler.
+    "src/llama-grammar.cpp",
     "src/llama-graph.cpp",
     "src/llama-hparams.cpp",
     "src/llama-impl.cpp",
@@ -266,9 +280,7 @@ const llama_sources = [_][]const u8{
     "src/llama-model-saver.cpp",
     "src/llama-model.cpp",
     "src/llama-quant.cpp",
-    // llama-sampler.cpp is ported -- src/llama/sampler/. The first of
-    // libllama, and the one piece that swaps ahead of the rest: its contract
-    // with llama-context.cpp is C (PLAN.md, Decision 42).
+    "src/llama-sampler.cpp",
     "src/llama-vocab.cpp",
     "src/unicode-data.cpp",
     "src/unicode.cpp",
@@ -279,8 +291,11 @@ const llama_sources = [_][]const u8{
 pub const Artifacts = struct {
     /// ggml plus its CPU and Metal backends, as one static archive.
     ggml: *std.Build.Step.Compile,
-    /// libllama, linked against `ggml`.
+    /// libllama, linked against `ggml`: the port, all Zig.
     llama: *std.Build.Step.Compile,
+    /// Upstream's libllama, the stock C++ unmodified, for the in-process
+    /// harnesses that compare the port against it.
+    llama_ref: *std.Build.Step.Compile,
     /// The ggml module, exposed so the ported Zig under `src/ggml/` can be
     /// unit-tested. Tests need the same C sources and frameworks the library
     /// does, because ported code calls back into the parts still in C.
@@ -329,8 +344,9 @@ pub const Options = struct {
 /// Return: the built libraries; propagates errors from reading `src/models/`.
 pub fn add(b: *std.Build, opts: Options) !Artifacts {
     const ggml = try addGgml(b, opts);
-    const llama = try addLlama(b, opts, ggml);
-    return .{ .ggml = ggml, .llama = llama, .ggml_module = ggml.root_module };
+    const llama = addLlama(b, opts, ggml);
+    const llama_ref = try addLlamaRef(b, opts, ggml);
+    return .{ .ggml = ggml, .llama = llama, .llama_ref = llama_ref, .ggml_module = ggml.root_module };
 }
 
 /// Builds ggml with its CPU and Metal backends as a single static archive.
@@ -498,8 +514,8 @@ const ported_test_cxx_sources = [_][]const u8{
     // `ported.zig` stubbed the one backend function the ported code called.
     // ggml-backend.cpp used to be here; it is ported now
     // (src/ggml/backend.zig, src/ggml/backend_sched.zig) and comes from
-    // `ported.zig`. The meta-buffer backend it calls into stays.
-    "ggml/src/ggml-backend-meta.cpp",
+    // `ported.zig`, and so does the meta-buffer backend it calls into
+    // (src/ggml/backend_meta.zig).
     // All that is left under ggml-cpu/ are three translation units that are
     // empty on this target: hbm.cpp needs GGML_USE_CPU_HBM, the two amx
     // files __AMX_INT8__.
@@ -657,24 +673,44 @@ fn portedTestModuleInner(
     return mod;
 }
 
-/// Builds libllama, including every architecture under `src/models/`.
-///
-/// Upstream globs `models/*.cpp`; this reads the directory for the same reason,
-/// rather than carrying a 151-entry list that would go stale on the next sync.
+/// Builds libllama: the port, rooted at `src/llama/module.zig`, whose
+/// `exports.zig` exports every function of `llama.h`. No C or C++ compiles
+/// into it.
 ///
 /// Parameters:
 /// - `b`: the build graph.
-/// - `opts`: target, optimize mode, and macOS SDK path.
-/// - `ggml`: the ggml library to link against.
+/// - `opts`: target, optimize mode, and SDK.
+/// - `ggml`: the ggml archive it links against.
 ///
-/// Return: the llama static library; propagates directory-read and allocation
-/// failures.
-fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.Build.Step.Compile {
+/// Return: the library.
+fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) *std.Build.Step.Compile {
     const mod = b.createModule(.{
-        // Rooted at the ported Zig, so its exports land in the same
-        // `libllama.a` as the C++ that calls them -- the move `addGgml`
-        // makes with `src/ggml/module.zig`.
         .root_source_file = b.path("src/llama/module.zig"),
+        .target = opts.target,
+        .optimize = opts.optimize,
+        .link_libc = true,
+    });
+    mod.addImport("llama_c", llamaCModule(b, opts));
+    addSdkPaths(b, mod, opts.sdk);
+    mod.linkLibrary(ggml);
+
+    const lib = b.addLibrary(.{ .name = "llama", .root_module = mod, .linkage = .static });
+    lib.setLibCFile(opts.libc_file);
+    return lib;
+}
+
+/// Builds upstream's libllama, every translation unit and every
+/// architecture under `src/models/`, as `libllama-ref.a`: the reference the
+/// in-process harnesses link beside the port.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `opts`: target, optimize mode, and SDK.
+/// - `ggml`: the ggml archive it links against.
+///
+/// Return: the library; propagates errors from reading `src/models/`.
+fn addLlamaRef(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.Build.Step.Compile {
+    const mod = b.createModule(.{
         .target = opts.target,
         .optimize = opts.optimize,
         .link_libc = true,
@@ -686,14 +722,13 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.B
         .sanitize_c = .off,
     });
 
-    mod.addImport("llama_c", llamaCModule(b, opts));
     mod.addIncludePath(b.path(root ++ "/include"));
     mod.addIncludePath(b.path(root ++ "/src"));
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
     mod.addIncludePath(b.path(root ++ "/ggml/src"));
 
     var files: std.ArrayList([]const u8) = .empty;
-    try files.appendSlice(b.allocator, &llama_sources);
+    try files.appendSlice(b.allocator, &llama_ref_sources);
 
     // Configure is cached, and this listing is not something Zig can see on
     // its own: a model added or removed upstream must configure again.
@@ -723,7 +758,7 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.B
     addSdkPaths(b, mod, opts.sdk);
     mod.linkLibrary(ggml);
 
-    const lib = b.addLibrary(.{ .name = "llama", .root_module = mod, .linkage = .static });
+    const lib = b.addLibrary(.{ .name = "llama-ref", .root_module = mod, .linkage = .static });
     lib.setLibCFile(opts.libc_file);
     return lib;
 }

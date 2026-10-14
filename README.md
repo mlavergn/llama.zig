@@ -95,9 +95,13 @@ line of Zig `@Vector` arithmetic. The exception, `vdotq_s32`, is integer — so
 the portable form is bit-identical, and no throughput change is measurable
 above the run-to-run noise.
 
-### 4. Convert the C++ files to Zig
+### 4. Convert the C++ files to Zig — *done*
 
-This will be challenging. The reliance on the STL and/or Boost is unknown. C++ does not map cleanly to Zig.
+Every C++ translation unit in ggml and libllama is Zig, apart from the two
+Objective-C files the goal excepts. ggml's C++ swapped file by file — the
+external contract of 20 of its 24 units turned out to be a pure C ABI —
+and libllama swapped once, at `llama.h`, because its C++ is one strongly
+connected component (`PLAN.md`, Decision 42). `NOTES.md` has the record.
 
 ### 5. Validate across platforms
 
@@ -147,32 +151,26 @@ make qwen35xl    # Qwen3.5-2B UD-Q4_K_XL (1.34 GB, dynamic quant, better quality
 
 ## Status
 
-**Stages 1, 2 and 3 complete. Stage 4 is under way: all of
-`ggml/src/ggml-cpu/` is Zig now, along with five of the `ggml/src/*.cpp`.**
+**Stages 1–4 complete.** ggml and libllama are Zig, apart from
+`ggml-metal-device.m` and `ggml-metal-context.m`. `zig build reference`
+produces `libggml.a` and `libllama.a` with no C or C++ compiled into either
+— the three C++ objects still in `libggml.a` (`hbm`, `amx`, `mmq`) are
+empty on this target — and `llama-cli` links no C++ runtime. The stock C++
+is still compiled, as `libllama-ref.a`, for the gates that compare against
+it in one process.
 
-**No C compiles anywhere under `llama.cpp/ggml/src/` any more.** All six
-translation units are Zig — 598 exported symbols, each byte-verified against
-the C it replaces:
+| Component | State |
+|---|---|
+| `ggml/src/*.c` (6 units, 598 symbols) | ported, swapped |
+| `ggml/src/ggml-cpu/` C++ | ported, swapped; three units empty on this target |
+| `ggml/src/*.cpp` | ported, swapped — `ggml-backend-meta.cpp` and `ggml-opt.cpp` last; `ggml.cpp` dropped |
+| `ggml/src/ggml-metal/` C++ | ported, swapped; the two `.m` files stay |
+| libllama | ported, swapped at `llama.h` — 240 / 240 C exports; Qwen3.5 is the one architecture with a graph |
 
-| File | Lines | State |
-|---|---:|---|
-| `ggml-alloc.c` | 1,249 | ported, swapped in |
-| `ggml.c` | 8,067 | ported, swapped in — 381/381 symbols |
-| `ggml-quants.c` | 5,667 | ported, swapped in — 79/79 symbols |
-| `ggml-cpu/ggml-cpu.c` | 3,900 | ported, swapped in — 65/65 symbols |
-| `ggml-cpu/quants.c` | 1,339 | ported, swapped in — 45/45 symbols |
-| `ggml-cpu/arch/arm/quants.c` | 4,319 | ported, swapped in — 28/28 symbols |
-
-Sixteen C++ translation units have followed them, so **nothing under
-`ggml/src/ggml-cpu/` compiles from C or C++ any more** — the op kernels
-(`ops.cpp`, `vec.cpp`, `binary-ops.cpp`, `unary-ops.cpp`), the llamafile
-fast path (`llamafile/sgemm.cpp`), and the vtable cluster that had to move
-as one unit (`traits.cpp`, `ggml-cpu.cpp`, `repack.cpp`,
-`arch/arm/repack.cpp`). Above ggml-cpu, `ggml-threading.cpp`,
-`ggml-backend-reg.cpp`, `gguf.cpp` and `ggml-backend.cpp` are ported too.
-What is left is `ggml-backend-meta.cpp`, `ggml-opt.cpp`, part of the Metal
-host layer — `ggml-metal.cpp`, `-common.cpp` and `-tuning.cpp` are
-ported, leaving `-device.cpp` and `-ops.cpp` — and all of libllama.
+The other 150 architectures under `src/models/` are the next milestone
+(Decision 36). The port loads any of them vocab-only, and the quantizer's
+type rules cover all of them, but only Qwen3.5 can be decoded or quantized
+end to end.
 
 Throughput is unchanged by the port, as far as this machine can tell.
 Generation sits at 222-234 t/s on Qwen3.5-2B Q4_K_M for both `make port` and
@@ -183,8 +181,12 @@ Apple-clang libraries, so a compiler difference is folded in too.
 
 There is also a working CLI. `llama-cli` is our own binary, not upstream's
 relinked: it mimics `llama-cli`'s flag surface for the features we support and
-refuses the rest rather than ignoring them. One-shot completion only —
-interactive conversation is still owed.
+refuses the rest rather than ignoring them. One-shot completion and `-cnv`
+conversation both work.
+
+`make xcframework` packages the port as `llamazig.xcframework` — macOS (M3
+and later), iOS (A14 and later) and the iOS simulator — callable from Swift
+as `import llamazig`. See [`xcfwk/README.md`](xcfwk/README.md).
 
 **How correctness is checked.** Several gates, none of which subsumes the
 others, and each negative-tested by injecting a fault and confirming it fails:
@@ -199,6 +201,11 @@ others, and each negative-tested by injecting a fault and confirming it fails:
 | `make struct-layout` | hand-declared Metal structs vs the real headers, via the C compiler |
 | `make metal-diff` | the Metal buffer-type and device vtables vs the reference's, in one process |
 | `make abi-check` | the port's by-value-struct entry points, called as C calls them |
+| `make context-diff` | everything a decode reaches — context, memory, graph, Qwen3.5 — every node and output bit, and the state API, vs the C++ in one process, on GPU, CPU, partial offload, an unfused-op device and tensor parallelism |
+| `make api-diff` | every other `llama.h` entry point at the C boundary vs the C++ |
+| `make adapter-diff`, `scripts/quant-diff`, `scripts/opt-diff`, `scripts/opt-llama-diff`, `scripts/meta-diff` | LoRA and control vectors; quantizer and saver; ggml's optimizer and libllama's training; the multi-device meta backend |
+| `make sampler-diff` | 40,289 sampler and grammar records, ported vs stock |
+| `make parity-cli` | the CLI binary vs a C driver on the stock libraries, with Zig's safety checks on |
 | `make backend-ops` | 21,093 op configurations, Metal against CPU |
 | `make probe` | proves ported code is on the execution path at all — allocator and CPU dispatch, one run each |
 | `make parity-port` / `parity-port-cpu` | tokens, ported libraries vs stock, one driver — on Metal, or on the CPU alone |

@@ -36,6 +36,16 @@ const hparams_mod = @import("hparams.zig");
 const loader = @import("loader.zig");
 const table = @import("model_table.zig");
 const vm = @import("vocab/module.zig");
+const mmap = @import("mmap.zig");
+const qwen35 = @import("models/qwen35.zig");
+const cparams_mod = @import("cparams.zig");
+const memory_mod = @import("memory.zig");
+const graph_mod = @import("graph.zig");
+const kv_cache = @import("kv_cache.zig");
+const memory_recurrent = @import("memory_recurrent.zig");
+const memory_hybrid = @import("memory_hybrid.zig");
+const adapter = @import("adapter.zig");
+const meta_split = @import("meta_split.zig");
 
 const c = impl.c;
 const allocator = impl.allocator;
@@ -70,8 +80,8 @@ const rope_scaling_types = [_]struct { c_int, [:0]const u8 }{
 
 /// Ports `llama_rope_scaling_type_name` (llama-model.cpp:971 @c1d0e7a00).
 ///
-/// Return: the name, or `error.Thrown` with `std::out_of_range` for a type
-/// the map lacks, as `map::at` throws.
+/// Return: the name, or `error.Thrown` with `std`'s `out_of_range` for a type
+/// the map lacks, as `map`'s `at` throws.
 pub fn ropeScalingTypeName(ty: c_int, exc: *Exception) Thrown![:0]const u8 {
     for (rope_scaling_types) |e| if (e[0] == ty) return e[1];
     return exc.throw(.out_of_range, "map::at:  key not found", .{});
@@ -83,11 +93,167 @@ pub fn ropeScalingTypeFromString(name: []const u8) c_int {
     return c.LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED;
 }
 
-/// The model's parameters that this half of loading reads.
-pub const Params = struct {
-    vocab_only: bool = false,
-    no_alloc: bool = false,
-    split_mode: c.enum_llama_split_mode = c.LLAMA_SPLIT_MODE_LAYER,
+/// Ports `llama_model_default_params` (llama-model.cpp:2627 @c1d0e7a00).
+pub fn defaultParams() Params {
+    return .{
+        .devices = null,
+        .tensor_buft_overrides = null,
+        .n_gpu_layers = -1,
+        .split_mode = c.LLAMA_SPLIT_MODE_LAYER,
+        .load_mode = c.LLAMA_LOAD_MODE_AUTO,
+        .main_gpu = 0,
+        .tensor_split = null,
+        .progress_callback = null,
+        .progress_callback_user_data = null,
+        .kv_overrides = null,
+        .vocab_only = false,
+        .check_tensors = false,
+        .use_extra_bufts = true,
+        .no_host = false,
+        .no_alloc = false,
+        .load_mtp = false,
+    };
+}
+
+/// `llama_model_params`.
+pub const Params = c.llama_model_params;
+
+/// Ports `llama_layer_nextn` (llama-model.h:218 @c1d0e7a00).
+pub const LayerNextn = struct {
+    eh_proj: ?*c.ggml_tensor = null,
+    eh_proj_s: ?*c.ggml_tensor = null,
+    eh_proj_in_s: ?*c.ggml_tensor = null,
+    embed_tokens: ?*c.ggml_tensor = null,
+    enorm: ?*c.ggml_tensor = null,
+    hnorm: ?*c.ggml_tensor = null,
+    shared_head_head: ?*c.ggml_tensor = null,
+    shared_head_head_s: ?*c.ggml_tensor = null,
+    shared_head_head_in_s: ?*c.ggml_tensor = null,
+    shared_head_norm: ?*c.ggml_tensor = null,
+};
+
+/// Mirrors `llama_layer` (llama-model.h:249 @c1d0e7a00): the members the
+/// ported architectures and the shared loading and graph code read. The
+/// C++ struct has one member for every tensor any architecture names; an
+/// architecture ported later adds its own here.
+pub const Layer = struct {
+    attn_norm: ?*c.ggml_tensor = null,
+    attn_norm_b: ?*c.ggml_tensor = null,
+    attn_q_norm: ?*c.ggml_tensor = null,
+    attn_k_norm: ?*c.ggml_tensor = null,
+    attn_post_norm: ?*c.ggml_tensor = null,
+    ssm_norm: ?*c.ggml_tensor = null,
+
+    wq: ?*c.ggml_tensor = null,
+    wk: ?*c.ggml_tensor = null,
+    wv: ?*c.ggml_tensor = null,
+    wo: ?*c.ggml_tensor = null,
+    wqkv: ?*c.ggml_tensor = null,
+    wqkv_gate: ?*c.ggml_tensor = null,
+
+    wq_b: ?*c.ggml_tensor = null,
+    wk_b: ?*c.ggml_tensor = null,
+    wv_b: ?*c.ggml_tensor = null,
+    wo_b: ?*c.ggml_tensor = null,
+    wqkv_b: ?*c.ggml_tensor = null,
+
+    ffn_gate: ?*c.ggml_tensor = null,
+    ffn_down: ?*c.ggml_tensor = null,
+    ffn_up: ?*c.ggml_tensor = null,
+    ffn_gate_inp: ?*c.ggml_tensor = null,
+    ffn_gate_exps: ?*c.ggml_tensor = null,
+    ffn_down_exps: ?*c.ggml_tensor = null,
+    ffn_up_exps: ?*c.ggml_tensor = null,
+    ffn_gate_shexp: ?*c.ggml_tensor = null,
+    ffn_down_shexp: ?*c.ggml_tensor = null,
+    ffn_up_shexp: ?*c.ggml_tensor = null,
+
+    ssm_in: ?*c.ggml_tensor = null,
+    ssm_dt: ?*c.ggml_tensor = null,
+    ssm_out: ?*c.ggml_tensor = null,
+    ssm_conv1d: ?*c.ggml_tensor = null,
+    ssm_a: ?*c.ggml_tensor = null,
+    ssm_alpha: ?*c.ggml_tensor = null,
+    ssm_beta: ?*c.ggml_tensor = null,
+
+    rope_long: ?*c.ggml_tensor = null,
+    rope_short: ?*c.ggml_tensor = null,
+    rope_freqs: ?*c.ggml_tensor = null,
+
+    // Per-tensor weight scales.
+    wq_s: ?*c.ggml_tensor = null,
+    wk_s: ?*c.ggml_tensor = null,
+    wv_s: ?*c.ggml_tensor = null,
+    wo_s: ?*c.ggml_tensor = null,
+    wqkv_s: ?*c.ggml_tensor = null,
+    wqkv_gate_s: ?*c.ggml_tensor = null,
+    ffn_gate_s: ?*c.ggml_tensor = null,
+    ffn_up_s: ?*c.ggml_tensor = null,
+    ffn_down_s: ?*c.ggml_tensor = null,
+    ffn_gate_shexp_s: ?*c.ggml_tensor = null,
+    ffn_up_shexp_s: ?*c.ggml_tensor = null,
+    ffn_down_shexp_s: ?*c.ggml_tensor = null,
+    ffn_gate_exps_s: ?*c.ggml_tensor = null,
+    ffn_down_exps_s: ?*c.ggml_tensor = null,
+    ffn_up_exps_s: ?*c.ggml_tensor = null,
+    ssm_in_s: ?*c.ggml_tensor = null,
+    ssm_out_s: ?*c.ggml_tensor = null,
+    ssm_alpha_s: ?*c.ggml_tensor = null,
+    ssm_beta_s: ?*c.ggml_tensor = null,
+
+    // Input scales.
+    wq_in_s: ?*c.ggml_tensor = null,
+    wk_in_s: ?*c.ggml_tensor = null,
+    wv_in_s: ?*c.ggml_tensor = null,
+    wo_in_s: ?*c.ggml_tensor = null,
+    wqkv_in_s: ?*c.ggml_tensor = null,
+    wqkv_gate_in_s: ?*c.ggml_tensor = null,
+    ffn_gate_in_s: ?*c.ggml_tensor = null,
+    ffn_up_in_s: ?*c.ggml_tensor = null,
+    ffn_down_in_s: ?*c.ggml_tensor = null,
+    ffn_gate_exps_in_s: ?*c.ggml_tensor = null,
+    ffn_down_exps_in_s: ?*c.ggml_tensor = null,
+    ffn_up_exps_in_s: ?*c.ggml_tensor = null,
+    ffn_gate_shexp_in_s: ?*c.ggml_tensor = null,
+    ffn_up_shexp_in_s: ?*c.ggml_tensor = null,
+    ffn_down_shexp_in_s: ?*c.ggml_tensor = null,
+    ssm_in_in_s: ?*c.ggml_tensor = null,
+    ssm_out_in_s: ?*c.ggml_tensor = null,
+    ssm_alpha_in_s: ?*c.ggml_tensor = null,
+    ssm_beta_in_s: ?*c.ggml_tensor = null,
+
+    nextn: LayerNextn = .{},
+};
+
+/// Mirrors `llama_device` (llama-model.h:572 @c1d0e7a00).
+pub const Device = struct {
+    is_meta: bool,
+    dev: c.ggml_backend_dev_t,
+};
+
+/// `llama_model::impl`'s `layer_dev` (llama-model.cpp:1143 @c1d0e7a00): the
+/// device a layer is on and the buffer types it may use.
+pub const LayerDev = struct {
+    dev: c.ggml_backend_dev_t = null,
+    buft_list: ?*loader.BuftList = null,
+};
+
+/// A tensor context and the backend buffers holding its tensors' data.
+pub const CtxBufs = struct {
+    ctx: *c.ggml_context,
+    bufs: std.ArrayList(c.ggml_backend_buffer_t) = .empty,
+};
+
+/// A GPU device's buffer types, `gpu_buft_list`'s entries.
+const GpuBufts = struct {
+    dev: c.ggml_backend_dev_t,
+    list: *loader.BuftList,
+};
+
+/// One entry of `memory_breakdown`, in buffer-type pointer order.
+pub const BuftSize = struct {
+    buft: c.ggml_backend_buffer_type_t,
+    size: usize,
 };
 
 /// `llama_model`, as far as `print_info`.
@@ -98,15 +264,69 @@ pub const Model = struct {
     name: std.ArrayList(u8) = .empty,
     hparams: Hparams = .{},
     vocab: vm.Vocab,
-    classifier_labels: std.ArrayList([]u8) = .empty,
-    /// Every scalar metadata value as text, in `std::unordered_map` order.
-    gguf_kv: libcxx.StringMap([]u8),
+    classifier_labels: std.ArrayList([:0]u8) = .empty,
+    /// Every scalar metadata value as text, in `std`'s `unordered_map` order.
+    gguf_kv: libcxx.StringMap([:0]u8),
 
-    // `llama_model::impl`
+    // `llama_model`'s `impl`
     n_elements: u64 = 0,
     n_bytes: usize = 0,
     desc_str: std.ArrayList(u8) = .empty,
     ftype: c_uint = c.LLAMA_FTYPE_ALL_F32,
+
+    /// The parameters it was loaded with; `tensor_split` points into
+    /// `tensor_split_owned` when one was given.
+    params: Params,
+    tensor_split_owned: [16]f32 = @splat(0),
+    has_tensor_overrides: bool = false,
+
+    devices: std.ArrayList(Device) = .empty,
+
+    tok_embd: ?*c.ggml_tensor = null,
+    output_norm: ?*c.ggml_tensor = null,
+    output: ?*c.ggml_tensor = null,
+    output_s: ?*c.ggml_tensor = null,
+    output_in_s: ?*c.ggml_tensor = null,
+    cls: ?*c.ggml_tensor = null,
+    cls_b: ?*c.ggml_tensor = null,
+    cls_out: ?*c.ggml_tensor = null,
+    cls_out_b: ?*c.ggml_tensor = null,
+    cls_norm: ?*c.ggml_tensor = null,
+    dense_2_out_layers: ?*c.ggml_tensor = null,
+    dense_2_out_layers_b: ?*c.ggml_tensor = null,
+    dense_3_out_layers: ?*c.ggml_tensor = null,
+    layers: []Layer = &.{},
+
+    /// `tensors_by_name`: every weight created, in context order; the name
+    /// is the tensor's own.
+    tensors_by_name: std.ArrayList(*c.ggml_tensor) = .empty,
+
+    t_load_us: i64 = 0,
+    t_start_us: i64 = 0,
+
+    /// The model's memory-mapped files.
+    mappings: std.ArrayList(mmap.Mmap) = .empty,
+    mlock_bufs: std.ArrayList(*mmap.Mlock) = .empty,
+    mlock_mmaps: std.ArrayList(*mmap.Mlock) = .empty,
+    /// The weights' tensor contexts and the buffers holding their data.
+    ctxs_bufs: std.ArrayList(CtxBufs) = .empty,
+
+    cpu_buft_list: *loader.BuftList,
+    gpu_buft_list: std.ArrayList(GpuBufts) = .empty,
+    dev_input: LayerDev = .{},
+    dev_output: LayerDev = .{},
+    dev_layer: std.ArrayList(LayerDev) = .empty,
+
+    /// The loader, while `load_tensors` runs.
+    ml: ?*loader.Loader = null,
+
+    /// What `meta_split.getSplitState` is handed, for
+    /// `LLAMA_SPLIT_MODE_TENSOR`; it points back at this model.
+    get_split_state_ud: meta_split.Userdata = .{},
+
+    /// `loras`: the LoRA adapters loaded against this model, which the
+    /// model frees with itself.
+    loras: std.ArrayList(*adapter.Lora) = .empty,
 
     /// Ports `llama_model_create` (llama-model.cpp:355 @c1d0e7a00), through
     /// its architecture overload (llama-model.cpp:342 @c1d0e7a00).
@@ -119,23 +339,75 @@ pub const Model = struct {
     pub fn create(ml: *const loader.Loader, params: Params, exc: *Exception) Thrown!Model {
         const a = ml.getArch();
         if (a == .unknown) return exc.throw(.runtime_error, "unknown model architecture: '{s}'", .{ml.getArchName()});
+        return createArch(a, params, exc);
+    }
+
+    /// Ports `llama_model_create`'s architecture overload (llama-model.cpp:342
+    /// @c1d0e7a00), which `llama_quant_model_from_metadata` calls directly.
+    ///
+    /// Parameters:
+    /// - `a`: the architecture; not `.unknown`.
+    /// - `params`: the model parameters, copied.
+    /// - `exc`: receives what is thrown.
+    ///
+    /// Return: the model, or `error.Thrown` where the C++ throws.
+    pub fn createArch(a: arch.Arch, params: Params, exc: *Exception) Thrown!Model {
         if (!table.mapped[@intCast(@backingInt(a))]) {
             return exc.throw(.runtime_error, "unsupported model architecture: '{s}'", .{arch.archName(a)});
         }
         if (params.split_mode == c.LLAMA_SPLIT_MODE_TENSOR and !arch.supportsSmTensor(a)) {
             return exc.throw(.runtime_error, "LLAMA_SPLIT_MODE_TENSOR not implemented for architecture '{s}'", .{arch.archName(a)});
         }
+        const cpu_list = allocator.create(loader.BuftList) catch oom();
+        cpu_list.* = .empty;
         var m: Model = .{
             .arch = a,
             .vocab = vm.Vocab.init() catch oom(),
-            .gguf_kv = libcxx.StringMap([]u8).init(allocator) catch oom(),
+            .gguf_kv = libcxx.StringMap([:0]u8).init(allocator) catch oom(),
+            .params = params,
+            .cpu_buft_list = cpu_list,
         };
+        // Ports the constructor of `llama_model` (llama-model.cpp:1157
+        // @c1d0e7a00): `tensor_split` is borrowed by the parameters but
+        // read again later, so it is copied. `params.tensor_split` points
+        // into this value, so a model that moves -- as this return does --
+        // must call `ownTensorSplit` at its final address.
+        if (params.tensor_split != null) {
+            @memcpy(&m.tensor_split_owned, params.tensor_split[0..16]);
+            m.params.tensor_split = &m.tensor_split_owned;
+        }
+        m.has_tensor_overrides = params.tensor_buft_overrides != null and params.tensor_buft_overrides[0].pattern != null;
         m.name.appendSlice(allocator, "n/a") catch oom();
         return m;
     }
 
     /// Return: nothing.
     pub fn deinit(self: *Model) void {
+        // `~llama_model` deletes the LoRA adapters still registered.
+        adapter.freeModelLoras(self);
+        for (self.ctxs_bufs.items) |*cb| {
+            c.ggml_free(cb.ctx);
+            for (cb.bufs.items) |buf| c.ggml_backend_buffer_free(buf);
+            cb.bufs.deinit(allocator);
+        }
+        self.ctxs_bufs.deinit(allocator);
+        for (self.mappings.items) |*m| m.deinit();
+        self.mappings.deinit(allocator);
+        for (self.mlock_bufs.items) |l| allocator.destroy(l);
+        self.mlock_bufs.deinit(allocator);
+        for (self.mlock_mmaps.items) |l| allocator.destroy(l);
+        self.mlock_mmaps.deinit(allocator);
+        self.tensors_by_name.deinit(allocator);
+        allocator.free(self.layers);
+        self.devices.deinit(allocator);
+        for (self.gpu_buft_list.items) |g| {
+            g.list.deinit(allocator);
+            allocator.destroy(g.list);
+        }
+        self.gpu_buft_list.deinit(allocator);
+        self.cpu_buft_list.deinit(allocator);
+        allocator.destroy(self.cpu_buft_list);
+        self.dev_layer.deinit(allocator);
         self.name.deinit(allocator);
         self.vocab.deinit();
         for (self.classifier_labels.items) |l| allocator.free(l);
@@ -144,6 +416,7 @@ pub const Model = struct {
         while (it.next()) |e| allocator.free(e.value.*);
         self.gguf_kv.deinit();
         self.desc_str.deinit(allocator);
+        self.loras.deinit(allocator);
     }
 
     /// Ports `llama_model_base`'s `load_stats` (llama-model.cpp:1173 @c1d0e7a00).
@@ -169,11 +442,11 @@ pub const Model = struct {
             if (c.gguf_get_kv_type(ctx, i) == c.GGUF_TYPE_ARRAY) continue;
             var value: std.ArrayList(u8) = .empty;
             loader.kvToStr(ctx, i, &value);
-            const slot = self.gguf_kv.getOrPut(gguf_meta.cString(c.gguf_get_key(ctx, i)), &.{}) catch oom();
+            const slot = self.gguf_kv.getOrPut(gguf_meta.cString(c.gguf_get_key(ctx, i)), undefined) catch oom();
             if (slot.found) {
                 value.deinit(allocator);
             } else {
-                slot.value.* = value.toOwnedSlice(allocator) catch oom();
+                slot.value.* = value.toOwnedSliceSentinel(allocator, 0) catch oom();
             }
         }
 
@@ -313,7 +586,7 @@ pub const Model = struct {
             defer allocator.free(labels);
             for (self.classifier_labels.items) |l| allocator.free(l);
             self.classifier_labels.clearRetainingCapacity();
-            for (labels) |l| self.classifier_labels.append(allocator, allocator.dupe(u8, l) catch oom()) catch oom();
+            for (labels) |l| self.classifier_labels.append(allocator, allocator.dupeSentinel(u8, l, 0) catch oom()) catch oom();
         }
         if (self.classifier_labels.items.len != 0) hp.n_cls_out = @truncate(self.classifier_labels.items.len);
 
@@ -334,45 +607,9 @@ pub const Model = struct {
     /// The architecture's own `load_arch_hparams`.
     fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) (Thrown || error{Unported})!void {
         switch (self.arch) {
-            .qwen35 => try self.loadArchHparamsQwen35(ml, exc),
+            .qwen35 => try qwen35.loadArchHparams(self, ml, exc),
             else => return error.Unported,
         }
-    }
-
-    /// Ports `llama_model_qwen35`'s `load_arch_hparams` (qwen35.cpp:4 @c1d0e7a00).
-    fn loadArchHparamsQwen35(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
-        const meta = &ml.meta;
-        const hp = &self.hparams;
-        hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
-        _ = try meta.getKeyOrArr(c_int, .rope_dimension_sections, &hp.rope_sections, 4, true, exc);
-
-        // Linear attention (gated delta net).
-        hp.ssm_d_conv = (try meta.getKey(u32, .ssm_conv_kernel, true, exc)).?;
-        hp.ssm_d_inner = (try meta.getKey(u32, .ssm_inner_size, true, exc)).?;
-        hp.ssm_d_state = (try meta.getKey(u32, .ssm_state_size, true, exc)).?;
-        hp.ssm_dt_rank = (try meta.getKey(u32, .ssm_time_step_rank, true, exc)).?;
-        hp.ssm_n_group = (try meta.getKey(u32, .ssm_group_count, true, exc)).?;
-
-        // NextN/MTP: an extra decoder block appended beyond the main stack.
-        if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-        impl.assert(hp.n_layer_nextn < hp.n_layer_all, "qwen35.cpp", 17, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < n_layer_impl\"");
-
-        // Recurrent (linear attention) layers; MTP layers are dense.
-        if (!try meta.getKeyOrArr(u32, .attention_recurrent_layers, &hp.is_recr_impl, hp.n_layer_all, false, exc)) {
-            var full_attn_interval: u32 = 4;
-            if (try meta.getKey(u32, .full_attention_interval, false, exc)) |v| full_attn_interval = v;
-            var i: u32 = 0;
-            while (i < hp.n_layer_all) : (i += 1) {
-                hp.is_recr_impl[i] = @intFromBool(i < hp.nLayer() and remU32(i + 1, full_attn_interval) != 0);
-            }
-        }
-
-        self.type = switch (hp.nLayer()) {
-            24 => if (hp.n_embd == 1024) .@"0_8b" else .@"2b",
-            32 => if (hp.n_embd == 2560) .@"4b" else .@"9b",
-            64 => .@"27b",
-            else => .unknown,
-        };
     }
 
     /// Ports `llama_model`'s `arch_name` (llama-model.cpp:1808 @c1d0e7a00).
@@ -576,12 +813,607 @@ pub const Model = struct {
             impl.logInfo("%s: expert_group_scale    = %.2f\n", .{ f, @as(f64, hp.expert_group_scale) });
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Tensors
+
+    /// Ports `llama_model_base`'s `load_tensors` (llama-model.cpp:1372 @c1d0e7a00).
+    ///
+    /// Return: false when the progress callback cancelled; `error.Thrown`
+    /// where the C++ throws; `error.Unported` for an architecture whose
+    /// `load_arch_tensors` is not ported.
+    pub fn loadTensors(self: *Model, ml: *loader.Loader, exc: *Exception) (Thrown || error{Unported})!bool {
+        const split_mode = self.params.split_mode;
+        const use_mlock = self.params.load_mode == c.LLAMA_LOAD_MODE_MLOCK or self.params.load_mode == c.LLAMA_LOAD_MODE_MMAP_MLOCK;
+        const tensor_split = self.params.tensor_split;
+
+        const n_layer_all: c_int = @intCast(self.hparams.n_layer_all);
+        const n_gpu_layers: c_int = @bitCast(self.nGpuLayers());
+
+        const use_mmap_buffer = true;
+
+        self.ml = ml;
+        defer self.ml = null;
+
+        if (ml.use_mmap and self.params.load_mode == c.LLAMA_LOAD_MODE_AUTO) {
+            for (self.devices.items) |dev| {
+                var props: c.ggml_backend_dev_props = undefined;
+                c.ggml_backend_dev_get_props(dev.dev, &props);
+                if (!props.caps.mmap_support) {
+                    ml.use_mmap = false;
+                    break;
+                }
+            }
+        }
+
+        const load_mode_name = if (self.params.load_mode == c.LLAMA_LOAD_MODE_AUTO)
+            loadModeName(if (ml.use_mmap) c.LLAMA_LOAD_MODE_MMAP else c.LLAMA_LOAD_MODE_NONE)
+        else
+            loadModeName(self.params.load_mode);
+
+        impl.logInfo("%s: loading model tensors, this can take a while... (load_mode = %s)\n", .{ "load_tensors", load_mode_name.ptr });
+
+        // Build a list of buffer types for the CPU and GPU devices.
+        try makeCpuBuftList(self.cpu_buft_list, self.devices.items, self.params.use_extra_bufts, self.params.no_host, exc);
+        for (self.devices.items) |dev| {
+            const list = allocator.create(loader.BuftList) catch oom();
+            list.* = .empty;
+            try makeGpuBuftList(list, dev.dev, split_mode, tensor_split, exc);
+            // CPU buffer types as a fallback.
+            list.appendSlice(allocator, self.cpu_buft_list.items) catch oom();
+            self.gpu_buft_list.append(allocator, .{ .dev = dev.dev, .list = list }) catch oom();
+        }
+
+        const cpu_dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+            return exc.throw(.runtime_error, "load_tensors: no CPU backend found", .{});
+
+        // Calculate the split points.
+        const n_devices = self.devices.items.len;
+        var all_zero = true;
+        if (tensor_split != null) {
+            for (tensor_split[0..n_devices]) |x| if (x != 0.0) {
+                all_zero = false;
+            };
+        }
+        const splits = allocator.alloc(f32, n_devices) catch oom();
+        defer allocator.free(splits);
+        if (all_zero) {
+            // Default split, by free memory.
+            for (self.devices.items, 0..) |d, i| {
+                var total: usize = 0;
+                var free: usize = 0;
+                c.ggml_backend_dev_memory(d.dev, &free, &total);
+                // Devices with nothing to report fall back to host memory.
+                if (free == 0 and total == 0) c.ggml_backend_dev_memory(cpu_dev, &free, &total);
+                splits[i] = @floatFromInt(free);
+            }
+        } else {
+            @memcpy(splits, tensor_split[0..n_devices]);
+        }
+
+        // Sum and normalize the splits to get the split points.
+        var split_sum: f32 = 0.0;
+        for (splits) |*s| {
+            split_sum += s.*;
+            s.* = split_sum;
+        }
+        for (splits) |*s| s.* /= split_sum;
+
+        const i_gpu_start: c_int = @max(n_layer_all + 1 - n_gpu_layers, 0);
+        const act_gpu_layers: c_int = if (n_devices == 0) 0 else @min(n_gpu_layers, n_layer_all + 1);
+
+        // The input layer always stays on the CPU: there is very little
+        // benefit to offloading it.
+        self.dev_input = .{ .dev = cpu_dev, .buft_list = self.cpu_buft_list };
+
+        // The repeating layers go to the devices according to the splits.
+        self.dev_layer.resize(allocator, @intCast(n_layer_all)) catch oom();
+        var il: c_int = 0;
+        while (il < n_layer_all) : (il += 1) {
+            self.dev_layer.items[@intCast(il)] = self.layerBuftList(il, cpu_dev, splits, i_gpu_start, act_gpu_layers);
+        }
+
+        // The output layer.
+        self.dev_output = self.layerBuftList(n_layer_all, cpu_dev, splits, i_gpu_start, act_gpu_layers);
+
+        // Create tensors for the weights.
+        {
+            const n_expert: i64 = self.hparams.n_expert;
+            const n_expert_used: i64 = self.hparams.n_expert_used;
+            if (n_expert > 0 and n_expert_used == 0) {
+                return exc.throw(.runtime_error, "model has expert layers but no expert layers are used", .{});
+            }
+
+            self.layers = allocator.alloc(Layer, @intCast(n_layer_all)) catch oom();
+            @memset(self.layers, .{});
+
+            // The per-model loading function.
+            try self.loadArchTensors(ml, exc);
+
+            // Optional per-tensor and per-expert ".scale" tensors, e.g.
+            // NVFP4's scale2, loaded for every architecture at once.
+            const nr = loader.tensor_not_required;
+            for (self.layers, 0..) |*layer, i_| {
+                const i: i32 = @intCast(i_);
+                const one = [_]i64{1};
+                const nexp = [_]i64{n_expert};
+
+                // Attention weight scales.
+                if (layer.wq_s == null and layer.wq != null) layer.wq_s = try self.createTensor(.{ .tensor = .attn_q, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.wk_s == null and layer.wk != null) layer.wk_s = try self.createTensor(.{ .tensor = .attn_k, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.wv_s == null and layer.wv != null) layer.wv_s = try self.createTensor(.{ .tensor = .attn_v, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.wo_s == null and layer.wo != null) layer.wo_s = try self.createTensor(.{ .tensor = .attn_out, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.wqkv_s == null and layer.wqkv != null) layer.wqkv_s = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.wqkv_gate_s == null and layer.wqkv_gate != null) layer.wqkv_gate_s = try self.createTensor(.{ .tensor = .attn_gate, .suffix = "scale", .bid = i }, &one, nr, exc);
+
+                // Dense FFN weight scales.
+                if (layer.ffn_gate_s == null and layer.ffn_gate != null) layer.ffn_gate_s = try self.createTensor(.{ .tensor = .ffn_gate, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.ffn_down_s == null and layer.ffn_down != null) layer.ffn_down_s = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.ffn_up_s == null and layer.ffn_up != null) layer.ffn_up_s = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.ffn_gate_shexp_s == null and layer.ffn_gate_shexp != null) layer.ffn_gate_shexp_s = try self.createTensor(.{ .tensor = .ffn_gate_shexp, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.ffn_down_shexp_s == null and layer.ffn_down_shexp != null) layer.ffn_down_shexp_s = try self.createTensor(.{ .tensor = .ffn_down_shexp, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.ffn_up_shexp_s == null and layer.ffn_up_shexp != null) layer.ffn_up_shexp_s = try self.createTensor(.{ .tensor = .ffn_up_shexp, .suffix = "scale", .bid = i }, &one, nr, exc);
+
+                // MoE expert weight scales, one per expert.
+                if (layer.ffn_gate_exps_s == null and layer.ffn_gate_exps != null) layer.ffn_gate_exps_s = try self.createTensor(.{ .tensor = .ffn_gate_exps, .suffix = "scale", .bid = i }, &nexp, nr, exc);
+                if (layer.ffn_down_exps_s == null and layer.ffn_down_exps != null) layer.ffn_down_exps_s = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "scale", .bid = i }, &nexp, nr, exc);
+                if (layer.ffn_up_exps_s == null and layer.ffn_up_exps != null) layer.ffn_up_exps_s = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "scale", .bid = i }, &nexp, nr, exc);
+
+                // Recurrent and linear-attention weight scales.
+                if (layer.ssm_in_s == null and layer.ssm_in != null) layer.ssm_in_s = try self.createTensor(.{ .tensor = .ssm_in, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.ssm_out_s == null and layer.ssm_out != null) layer.ssm_out_s = try self.createTensor(.{ .tensor = .ssm_out, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.ssm_alpha_s == null and layer.ssm_alpha != null) layer.ssm_alpha_s = try self.createTensor(.{ .tensor = .ssm_alpha, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.ssm_beta_s == null and layer.ssm_beta != null) layer.ssm_beta_s = try self.createTensor(.{ .tensor = .ssm_beta, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.nextn.eh_proj_s == null and layer.nextn.eh_proj != null) layer.nextn.eh_proj_s = try self.createTensor(.{ .tensor = .nextn_eh_proj, .suffix = "scale", .bid = i }, &one, nr, exc);
+                if (layer.nextn.shared_head_head_s == null and layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s = try self.createTensor(.{ .tensor = .nextn_shared_head_head, .suffix = "scale", .bid = i }, &one, nr, exc);
+
+                // Input scales.
+                if (layer.wq_in_s == null and layer.wq != null) layer.wq_in_s = try self.createTensor(.{ .tensor = .attn_q, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.wk_in_s == null and layer.wk != null) layer.wk_in_s = try self.createTensor(.{ .tensor = .attn_k, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.wv_in_s == null and layer.wv != null) layer.wv_in_s = try self.createTensor(.{ .tensor = .attn_v, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.wo_in_s == null and layer.wo != null) layer.wo_in_s = try self.createTensor(.{ .tensor = .attn_out, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.wqkv_in_s == null and layer.wqkv != null) layer.wqkv_in_s = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.wqkv_gate_in_s == null and layer.wqkv_gate != null) layer.wqkv_gate_in_s = try self.createTensor(.{ .tensor = .attn_gate, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.ffn_gate_in_s == null and layer.ffn_gate != null) layer.ffn_gate_in_s = try self.createTensor(.{ .tensor = .ffn_gate, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.ffn_down_in_s == null and layer.ffn_down != null) layer.ffn_down_in_s = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.ffn_up_in_s == null and layer.ffn_up != null) layer.ffn_up_in_s = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.ffn_gate_exps_in_s == null and layer.ffn_gate_exps != null) layer.ffn_gate_exps_in_s = try self.createTensor(.{ .tensor = .ffn_gate_exps, .suffix = "input_scale", .bid = i }, &nexp, nr, exc);
+                if (layer.ffn_down_exps_in_s == null and layer.ffn_down_exps != null) layer.ffn_down_exps_in_s = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "input_scale", .bid = i }, &nexp, nr, exc);
+                if (layer.ffn_up_exps_in_s == null and layer.ffn_up_exps != null) layer.ffn_up_exps_in_s = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "input_scale", .bid = i }, &nexp, nr, exc);
+                if (layer.ffn_gate_shexp_in_s == null and layer.ffn_gate_shexp != null) layer.ffn_gate_shexp_in_s = try self.createTensor(.{ .tensor = .ffn_gate_shexp, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.ffn_down_shexp_in_s == null and layer.ffn_down_shexp != null) layer.ffn_down_shexp_in_s = try self.createTensor(.{ .tensor = .ffn_down_shexp, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.ffn_up_shexp_in_s == null and layer.ffn_up_shexp != null) layer.ffn_up_shexp_in_s = try self.createTensor(.{ .tensor = .ffn_up_shexp, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.ssm_in_in_s == null and layer.ssm_in != null) layer.ssm_in_in_s = try self.createTensor(.{ .tensor = .ssm_in, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.ssm_out_in_s == null and layer.ssm_out != null) layer.ssm_out_in_s = try self.createTensor(.{ .tensor = .ssm_out, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.ssm_alpha_in_s == null and layer.ssm_alpha != null) layer.ssm_alpha_in_s = try self.createTensor(.{ .tensor = .ssm_alpha, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.ssm_beta_in_s == null and layer.ssm_beta != null) layer.ssm_beta_in_s = try self.createTensor(.{ .tensor = .ssm_beta, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.nextn.eh_proj_in_s == null and layer.nextn.eh_proj != null) layer.nextn.eh_proj_in_s = try self.createTensor(.{ .tensor = .nextn_eh_proj, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+                if (layer.nextn.shared_head_head_in_s == null and layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_in_s = try self.createTensor(.{ .tensor = .nextn_shared_head_head, .suffix = "input_scale", .bid = i }, &one, nr, exc);
+            }
+            // Output scales.
+            if (self.output != null and self.output.?.type == c.GGML_TYPE_NVFP4) {
+                const one = [_]i64{1};
+                if (self.output_s == null) self.output_s = try self.createTensor(.{ .tensor = .output, .suffix = "scale" }, &one, nr, exc);
+                if (self.output_in_s == null) self.output_in_s = try self.createTensor(.{ .tensor = .output, .suffix = "input_scale" }, &one, nr, exc);
+            }
+        }
+        try ml.doneGettingTensors(false, exc);
+
+        // A tied NVFP4 output is valid only without separate LM-head scales.
+        impl.assert(!(self.output != null and self.tok_embd != null and
+            std.mem.eql(u8, gguf_meta.cString(&self.output.?.name), gguf_meta.cString(&self.tok_embd.?.name)) and
+            self.output.?.type == c.GGML_TYPE_NVFP4 and
+            (self.output_s != null or self.output_in_s != null)), "llama-model.cpp", 1652, "!(output && tok_embd && strcmp(output->name, tok_embd->name) == 0 && output->type == GGML_TYPE_NVFP4 && (output_s || output_in_s))");
+
+        // Populate tensors_by_name.
+        for (ml.ctx_map.items) |e| {
+            var t: ?*c.ggml_tensor = c.ggml_get_first_tensor(e.ctx.?);
+            while (t) |cur| : (t = c.ggml_get_next_tensor(e.ctx.?, cur)) {
+                self.tensors_by_name.append(allocator, cur) catch oom();
+            }
+        }
+
+        try ml.initMappings(true, if (use_mlock) &self.mlock_mmaps else null, exc);
+        self.mappings.ensureTotalCapacity(allocator, ml.mappings.items.len) catch oom();
+
+        // Create the backend buffers.
+        var ctx_buf_maps: std.ArrayList(struct { *c.ggml_context, loader.BufMap }) = .empty;
+        defer {
+            for (ctx_buf_maps.items) |*e| e[1].deinit();
+            ctx_buf_maps.deinit(allocator);
+        }
+
+        for (ml.ctx_map.items) |*entry| {
+            const buft = entry.buft;
+            const ctx = entry.ctx.?;
+
+            // Skip contexts without tensors.
+            if (c.ggml_get_first_tensor(ctx) == null) continue;
+
+            var buf_map: loader.BufMap = .{};
+
+            // Check if it is possible to use buffer_from_host_ptr with this buffer type.
+            var dev = c.ggml_backend_buft_get_device(buft);
+            if (dev == null) {
+                // The CPU backend's buffer type has a null device.
+                dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+                    return exc.throw(.runtime_error, "load_tensors: no CPU backend found", .{});
+            }
+            var props: c.ggml_backend_dev_props = undefined;
+            c.ggml_backend_dev_get_props(dev, &props);
+            const buffer_from_host_ptr_supported = props.caps.buffer_from_host_ptr;
+            const is_default_buft = buft == c.ggml_backend_dev_buffer_type(dev);
+
+            var bufs: std.ArrayList(c.ggml_backend_buffer_t) = .empty;
+            if (ml.use_mmap and use_mmap_buffer and buffer_from_host_ptr_supported and is_default_buft) {
+                impl.assert(!ml.no_alloc, "llama-model.cpp", 1701, "!ml.no_alloc");
+                for (0..ml.files.items.len) |idx| {
+                    // Only the mapped region holding the model's tensors is
+                    // mapped to the backend buffer.
+                    var addr: *anyopaque = undefined;
+                    var first: usize = 0;
+                    var last: usize = 0;
+                    ml.getMappingRange(&first, &last, &addr, idx, ctx);
+                    if (first >= last) continue;
+                    const max_size = c.ggml_get_max_tensor_size(ctx);
+                    const buf = c.ggml_backend_dev_buffer_from_host_ptr(dev, @ptrFromInt(@intFromPtr(addr) + first), last - first, max_size) orelse
+                        return exc.throw(.runtime_error, "unable to allocate {s} buffer", .{std.mem.span(c.ggml_backend_buft_name(buft))});
+                    bufs.append(allocator, buf) catch oom();
+                    buf_map.emplace(@intCast(idx), buf);
+                }
+            } else {
+                var buf: c.ggml_backend_buffer_t = undefined;
+                if (ml.no_alloc) {
+                    buf = c.ggml_backend_buft_alloc_buffer(buft, 0); // dummy buffer
+                    var t: ?*c.ggml_tensor = c.ggml_get_first_tensor(ctx);
+                    while (t) |cur| : (t = c.ggml_get_next_tensor(ctx, cur)) cur.buffer = buf;
+                } else {
+                    buf = c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft);
+                }
+                if (buf == null) return exc.throw(.runtime_error, "unable to allocate {s} buffer", .{std.mem.span(c.ggml_backend_buft_name(buft))});
+                if (use_mlock and c.ggml_backend_buffer_is_host(buf)) {
+                    const lock = allocator.create(mmap.Mlock) catch oom();
+                    lock.* = .{};
+                    self.mlock_bufs.append(allocator, lock) catch oom();
+                    lock.init(c.ggml_backend_buffer_get_base(buf).?);
+                    lock.growTo(c.ggml_backend_buffer_get_size(buf));
+                }
+                bufs.append(allocator, buf) catch oom();
+                for (0..ml.files.items.len) |idx| buf_map.emplace(@intCast(idx), buf);
+            }
+
+            // These buffers hold weights; the scheduler prefers the backend
+            // holding an op's weight.
+            for (bufs.items) |buf| c.ggml_backend_buffer_set_usage(buf, c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+
+            self.ctxs_bufs.append(allocator, .{ .ctx = ctx, .bufs = bufs }) catch oom();
+            entry.ctx = null;
+
+            ctx_buf_maps.append(allocator, .{ ctx, buf_map }) catch oom();
+        }
+
+        if (supportsGpuOffload()) {
+            const n_gpu: c_int = @min(n_gpu_layers, n_layer_all);
+            var n_repeating = n_gpu;
+            if (n_repeating > 0) {
+                impl.logInfo("%s: offloading output layer to GPU\n", .{"load_tensors"});
+                n_repeating -= 1;
+            }
+            impl.logInfo("%s: offloading %d repeating layers to GPU\n", .{ "load_tensors", n_repeating });
+
+            const max_backend_supported_layers = n_layer_all + 1;
+            const max_offloadable_layers = n_layer_all + 1;
+
+            impl.logInfo("%s: offloaded %d/%d layers to GPU\n", .{ "load_tensors", @min(n_gpu_layers, max_offloadable_layers), max_backend_supported_layers });
+        }
+
+        // Memory requirements per buffer type.
+        for (self.ctxs_bufs.items) |cb| {
+            for (cb.bufs.items) |buf| {
+                impl.logInfo("%s: %12s model buffer size = %8.2f MiB\n", .{
+                    "load_tensors", c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0,
+                });
+            }
+        }
+
+        if (ml.no_alloc) return true;
+
+        // Load tensor data.
+        for (ctx_buf_maps.items) |*e| {
+            if (!try ml.loadAllData(e[0], &e[1], if (use_mlock) &self.mlock_mmaps else null, self.params.progress_callback, self.params.progress_callback_user_data, exc)) {
+                return false;
+            }
+        }
+
+        if (use_mmap_buffer) {
+            for (ml.mappings.items) |m| self.mappings.append(allocator, m) catch oom();
+            ml.mappings.clearRetainingCapacity();
+        }
+        return true;
+    }
+
+    /// `get_layer_buft_list`, a lambda of `load_tensors` (llama-model.cpp:1372
+    /// @c1d0e7a00): layer `il`'s device and buffer types.
+    fn layerBuftList(self: *Model, il: c_int, cpu_dev: c.ggml_backend_dev_t, splits: []const f32, i_gpu_start: c_int, act_gpu_layers: c_int) LayerDev {
+        const n_layer_all: c_int = @intCast(self.hparams.n_layer_all);
+        const is_swa: c_int = @intFromBool(il < n_layer_all and self.hparams.isSwa(@intCast(il)));
+        if (il < i_gpu_start or (il - i_gpu_start) >= act_gpu_layers) {
+            impl.logDebug("load_tensors: layer %3d assigned to device %s, is_swa = %d\n", .{ il, c.ggml_backend_dev_name(cpu_dev), is_swa });
+            return .{ .dev = cpu_dev, .buft_list = self.cpu_buft_list };
+        }
+        // `std`'s `upper_bound`: the first split point greater than the layer's
+        // fraction.
+        const frac = @as(f32, @floatFromInt(il - i_gpu_start)) / @as(f32, @floatFromInt(act_gpu_layers));
+        var layer_gpu: usize = 0;
+        while (layer_gpu < splits.len and !(frac < splits[layer_gpu])) layer_gpu += 1;
+        const dev = self.devices.items[layer_gpu].dev;
+        impl.logDebug("load_tensors: layer %3d assigned to device %s, is_swa = %d\n", .{ il, c.ggml_backend_dev_name(dev), is_swa });
+        return .{ .dev = dev, .buft_list = self.gpuBuftList(dev).? };
+    }
+
+    fn gpuBuftList(self: *const Model, dev: c.ggml_backend_dev_t) ?*loader.BuftList {
+        for (self.gpu_buft_list.items) |g| if (g.dev == dev) return g.list;
+        return null;
+    }
+
+    /// Ports `llama_model_base`'s `create_tensor` (llama-model.cpp:1801
+    /// @c1d0e7a00), through the loader the model is being loaded from
+    /// (llama-model.cpp:3072 @c1d0e7a00).
+    ///
+    /// Return: the tensor, null when absent and optional or skipped, or
+    /// `error.Thrown`.
+    pub fn createTensor(self: *Model, tn: loader.Tn, ne: []const i64, flags: u32, exc: *Exception) Thrown!?*c.ggml_tensor {
+        impl.assert(self.ml != null, "llama-model.cpp", 3073, "ml != nullptr");
+        const buft_list_layer: ?*const loader.BuftList = if (tn.bid == -1) null else self.dev_layer.items[@intCast(tn.bid)].buft_list.?;
+        return self.ml.?.createTensor(&self.hparams, self.cpu_buft_list, self.dev_input.buft_list.?, self.dev_output.buft_list.?, buft_list_layer, tn, ne, flags, exc);
+    }
+
+    /// Ports `llama_model_base`'s `create_tensor_qkv` (llama-model.cpp:3085
+    /// @c1d0e7a00): a fused QKV projection when the file has one, else the
+    /// three separate ones.
+    pub fn createTensorQkv(self: *Model, layer: *Layer, bid: i32, n_embd_: i64, n_embd_q_: i64, n_embd_k_: i64, n_embd_v_: i64, flags: u32, exc: *Exception) Thrown!void {
+        const n_embd_qkv = n_embd_q_ + n_embd_k_ + n_embd_v_;
+        const nr = loader.tensor_not_required;
+        const siv = loader.tensor_skip_if_virtual;
+
+        if (flags & loader.tensor_skip != 0) {
+            const skip = nr | loader.tensor_skip;
+            _ = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "weight", .bid = bid }, &.{ n_embd_, n_embd_qkv }, skip | siv, exc);
+            _ = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "bias", .bid = bid }, &.{n_embd_qkv}, skip | siv, exc);
+            _ = try self.createTensor(.{ .tensor = .attn_q, .suffix = "weight", .bid = bid }, &.{ n_embd_, n_embd_q_ }, skip, exc);
+            _ = try self.createTensor(.{ .tensor = .attn_k, .suffix = "weight", .bid = bid }, &.{ n_embd_, n_embd_k_ }, skip, exc);
+            _ = try self.createTensor(.{ .tensor = .attn_v, .suffix = "weight", .bid = bid }, &.{ n_embd_, n_embd_v_ }, skip, exc);
+            _ = try self.createTensor(.{ .tensor = .attn_q, .suffix = "bias", .bid = bid }, &.{n_embd_q_}, skip, exc);
+            _ = try self.createTensor(.{ .tensor = .attn_k, .suffix = "bias", .bid = bid }, &.{n_embd_k_}, skip, exc);
+            _ = try self.createTensor(.{ .tensor = .attn_v, .suffix = "bias", .bid = bid }, &.{n_embd_v_}, skip, exc);
+            return;
+        }
+
+        layer.wqkv = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "weight", .bid = bid }, &.{ n_embd_, n_embd_qkv }, nr | siv, exc);
+        if (layer.wqkv != null) {
+            layer.wqkv_b = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "bias", .bid = bid }, &.{n_embd_qkv}, nr | siv, exc);
+        } else {
+            layer.wq = try self.createTensor(.{ .tensor = .attn_q, .suffix = "weight", .bid = bid }, &.{ n_embd_, n_embd_q_ }, flags, exc);
+            layer.wk = try self.createTensor(.{ .tensor = .attn_k, .suffix = "weight", .bid = bid }, &.{ n_embd_, n_embd_k_ }, flags, exc);
+            layer.wv = try self.createTensor(.{ .tensor = .attn_v, .suffix = "weight", .bid = bid }, &.{ n_embd_, n_embd_v_ }, flags, exc);
+            layer.wq_b = try self.createTensor(.{ .tensor = .attn_q, .suffix = "bias", .bid = bid }, &.{n_embd_q_}, nr, exc);
+            layer.wk_b = try self.createTensor(.{ .tensor = .attn_k, .suffix = "bias", .bid = bid }, &.{n_embd_k_}, nr, exc);
+            layer.wv_b = try self.createTensor(.{ .tensor = .attn_v, .suffix = "bias", .bid = bid }, &.{n_embd_v_}, nr, exc);
+        }
+    }
+
+    /// The architecture's own `load_arch_tensors`.
+    fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) (Thrown || error{Unported})!void {
+        switch (self.arch) {
+            .qwen35 => try qwen35.loadArchTensors(self, ml, exc),
+            else => return error.Unported,
+        }
+    }
+
+    /// Ports `llama_model`'s `n_gpu_layers` (llama-model.cpp:1840 @c1d0e7a00):
+    /// plus one for the output layer when all are asked for.
+    pub fn nGpuLayers(self: *const Model) u32 {
+        return if (self.params.n_gpu_layers >= 0) @intCast(self.params.n_gpu_layers) else self.hparams.n_layer_all + 1;
+    }
+
+    /// Ports `llama_model`'s `n_devices` (llama-model.cpp:1832 @c1d0e7a00).
+    pub fn nDevices(self: *const Model) usize {
+        return self.devices.items.len;
+    }
+
+    /// Ports `llama_model`'s `n_tensors` (llama-model.cpp:1828 @c1d0e7a00).
+    pub fn nTensors(self: *const Model) usize {
+        return self.tensors_by_name.items.len;
+    }
+
+    /// Ports `llama_model`'s `dev_layer` (llama-model.cpp:2091 @c1d0e7a00).
+    pub fn devLayer(self: *const Model, il: usize) c.ggml_backend_dev_t {
+        return self.dev_layer.items[il].dev;
+    }
+
+    /// Ports `llama_model`'s `dev_output` (llama-model.cpp:2095 @c1d0e7a00).
+    pub fn devOutput(self: *const Model) c.ggml_backend_dev_t {
+        return self.dev_output.dev;
+    }
+
+    /// Ports `llama_model`'s `select_buft` (llama-model.cpp:2139 @c1d0e7a00),
+    /// through `select_buft` and `buft_supported` (llama-model.cpp:2127,
+    /// 2100 @c1d0e7a00): the first of layer `il`'s buffer types whose
+    /// device can add two `n_embd` vectors held in it.
+    ///
+    /// Return: the buffer type, or `error.Thrown` when none can.
+    pub fn selectBuft(self: *const Model, il: usize, exc: *Exception) Thrown!c.ggml_backend_buffer_type_t {
+        for (self.dev_layer.items[il].buft_list.?.items) |cur| {
+            const ctx = c.ggml_init(.{ .mem_size = c.ggml_tensor_overhead() * 8, .mem_buffer = null, .no_alloc = true }) orelse
+                return exc.throw(.runtime_error, "failed to create ggml context", .{});
+            defer c.ggml_free(ctx);
+            const buf = c.ggml_backend_buft_alloc_buffer(cur.buft, 0);
+            defer c.ggml_backend_buffer_free(buf);
+            const a = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, self.hparams.n_embd);
+            const layer_dir = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, self.hparams.n_embd);
+            const op_tensor = c.ggml_add(ctx, a, layer_dir);
+            for (op_tensor.*.src) |src| {
+                if (src) |s| s.*.buffer = buf;
+            }
+            if (c.ggml_backend_dev_supports_op(cur.dev, op_tensor)) return cur.buft;
+        }
+        return exc.throw(.runtime_error, "no suitable buffer type found", .{});
+    }
+
+    /// Ports `llama_model`'s `has_tensor_overrides` (llama-model.cpp:2149 @c1d0e7a00).
+    /// Points `params.tensor_split` at this model's own copy, after the
+    /// model has moved to where it will stay. Measured: without it the
+    /// pointer was left in `create`'s stack frame, and under
+    /// `LLAMA_SPLIT_MODE_TENSOR` with an uneven split the KV cache was sized
+    /// from whatever had since been written there.
+    ///
+    /// Return: nothing.
+    pub fn ownTensorSplit(self: *Model) void {
+        if (self.params.tensor_split != null) self.params.tensor_split = &self.tensor_split_owned;
+    }
+
+    pub fn hasTensorOverrides(self: *const Model) bool {
+        return self.has_tensor_overrides;
+    }
+
+    /// Ports `llama_model_has_encoder` (llama-model.cpp:3009 @c1d0e7a00).
+    pub fn hasEncoder(self: *const Model) bool {
+        return switch (self.arch) {
+            .t5, .t5encoder, .eagle3, .dflash => true,
+            else => false,
+        };
+    }
+
+    /// Ports `llama_model_has_decoder` (llama-model.cpp:3019 @c1d0e7a00).
+    pub fn hasDecoder(self: *const Model) bool {
+        return self.arch != .t5encoder;
+    }
+
+    /// Ports `llama_model`'s `get_tensor` (llama-model.cpp:2153 @c1d0e7a00).
+    ///
+    /// Return: the first tensor with that name, or null.
+    pub fn getTensor(self: *const Model, name: []const u8) ?*c.ggml_tensor {
+        for (self.tensors_by_name.items) |t| {
+            if (std.mem.eql(u8, gguf_meta.cString(c.ggml_get_name(t)), name)) return t;
+        }
+        return null;
+    }
+
+    /// Ports `llama_model`'s `get_rope_freq_base` (llama-model.cpp:2165 @c1d0e7a00).
+    pub fn getRopeFreqBase(self: *const Model, cparams: *const cparams_mod.Cparams, il: u32) f32 {
+        return if (self.hparams.isSwa(il)) self.hparams.rope_freq_base_train_swa else cparams.rope_freq_base;
+    }
+
+    /// Ports `llama_model`'s `get_rope_freq_scale` (llama-model.cpp:2169 @c1d0e7a00).
+    pub fn getRopeFreqScale(self: *const Model, cparams: *const cparams_mod.Cparams, il: u32) f32 {
+        return if (self.hparams.isSwa(il)) self.hparams.rope_freq_scale_train_swa else cparams.rope_freq_scale;
+    }
+
+    /// Ports `llama_model`'s `get_rope_factors` (llama-model.cpp:2173
+    /// @c1d0e7a00): long or short frequency factors by the context size.
+    pub fn getRopeFactors(self: *const Model, cparams: *const cparams_mod.Cparams, il: u32) ?*c.ggml_tensor {
+        const layer = &self.layers[il];
+        if (layer.rope_freqs != null) return layer.rope_freqs;
+        if (cparams.n_ctx_seq > self.hparams.n_ctx_orig_yarn) return layer.rope_long;
+        return layer.rope_short;
+    }
+
+    /// Ports `llama_model`'s `create_memory` (llama-model.cpp:2188 @c1d0e7a00),
+    /// its default arm: a recurrent memory, a hybrid one, or a KV cache.
+    /// The architectures with their own arms -- the encoders, the SWA, DSA,
+    /// MSA and DeepSeek-V4 caches -- come with those architectures; none of
+    /// them loads in the port.
+    ///
+    /// Return: the memory, or null for a model without one; `error.Thrown`.
+    pub fn createMemory(self: *const Model, params: *const memory_mod.Params, cparams: *const cparams_mod.Cparams, exc: *Exception) Thrown!?memory_mod.Memory {
+        const hp = &self.hparams;
+        const a = self.arch;
+        // Dense MTP heads use a plain attention KV cache.
+        const mtp_on_hybrid_qwen = params.ctx_type == c.LLAMA_CONTEXT_TYPE_MTP and (a == .qwen3next or a == .qwen35 or a == .qwen35moe or a == .bailingmoe3);
+        const mtp_on_hybrid_nemotron = params.ctx_type == c.LLAMA_CONTEXT_TYPE_MTP and a == .nemotron_h_moe;
+        const swa_type: hparams_mod.SwaType = @fromBackingInt(@intCast(hp.swa_type));
+
+        if (arch.isRecurrent(a)) {
+            const m = try memory_recurrent.MemoryRecurrent.create(self, c.GGML_TYPE_F32, c.GGML_TYPE_F32, cparams.offload_kqv, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, .{}, exc);
+            return m.memoryOf();
+        }
+        if (arch.isHybrid(a) and !mtp_on_hybrid_qwen and !mtp_on_hybrid_nemotron) {
+            // Hybrid architectures differ mainly in their layer filters.
+            var filter_attn: memory_mod.LayerFilter = .{};
+            var filter_recr: memory_mod.LayerFilter = .{};
+            if (a == .falcon_h1) {
+                filter_attn = .{ .ctx = hp, .func = filterAll };
+                filter_recr = .{ .ctx = hp, .func = filterAll };
+            } else if (a == .nemotron_h or a == .nemotron_h_moe) {
+                filter_attn = .{ .ctx = hp, .func = filterNemotronAttn };
+                filter_recr = .{ .ctx = hp, .func = filterNemotronRecr };
+            } else if (a == .qwen3next or a == .qwen35 or a == .qwen35moe or a == .minimax_01) {
+                filter_attn = .{ .ctx = hp, .func = filterTrunkAttn };
+                filter_recr = .{ .ctx = hp, .func = filterTrunkRecr };
+            }
+            if (swa_type != .none) impl.abort("llama-model.cpp", 2455, "llama_memory_hybrid_iswa is not ported");
+            const m = try memory_hybrid.MemoryHybrid.create(self, params.type_k, params.type_v, !cparams.flash_attn, cparams.n_ctx_seq, 1, hp.n_swa, swa_type, c.GGML_TYPE_F32, c.GGML_TYPE_F32, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, cparams.offload_kqv, cparams.kv_unified, filter_attn, filter_recr, exc);
+            return m.memoryOf();
+        }
+
+        var filter: memory_mod.LayerFilter = .{};
+        if (mtp_on_hybrid_qwen or mtp_on_hybrid_nemotron) filter = .{ .ctx = hp, .func = filterNextn };
+        if ((a == .step35 or a == .hy_v3 or a == .glm_dsa or a == .mimo2 or a == .deepseek32) and hp.n_layer_nextn > 0) {
+            filter = if (params.ctx_type == c.LLAMA_CONTEXT_TYPE_MTP) .{ .ctx = hp, .func = filterNextn } else .{ .ctx = hp, .func = filterTrunk };
+        }
+        if (swa_type != .none) impl.abort("llama-model.cpp", 2531, "llama_kv_cache_iswa is not ported");
+        impl.assert(!hp.isSwaAny(), "llama-model.cpp", 2578, "!hparams.is_swa_any()");
+        const mem_other: ?*kv_cache.KvCache = null;
+        const m = try kv_cache.KvCache.create(self, hp, params.type_k, params.type_v, !cparams.flash_attn, cparams.offload_kqv, cparams.kv_unified, cparams.n_ctx_seq, cparams.n_seq_max, 1, hp.n_swa, swa_type, mem_other, filter, .{}, .{}, exc);
+        return m.memoryOf();
+    }
+
+    /// Ports `llama_model`'s `build_graph` (llama-model.cpp:2602 @c1d0e7a00):
+    /// the architecture's graph, then pooling, backend sampling and the dense
+    /// projections.
+    ///
+    /// Return: the graph, owned by `params.res`.
+    pub fn buildGraph(self: *const Model, params: *const graph_mod.Params) *c.ggml_cgraph {
+        const b = graph_mod.Builder.init(params);
+        switch (self.arch) {
+            .qwen35 => qwen35.buildArchGraph(self, &b, params),
+            else => impl.abort("llama-model.cpp", 2603, "build_arch_graph: architecture not ported"),
+        }
+        b.buildPooling(self.cls, self.cls_b, self.cls_out, self.cls_out_b, self.cls_norm);
+        b.buildSampling();
+        // Models converted with --sentence-transformers-dense-modules
+        // project the pooled output twice more.
+        b.buildDenseOut(self.dense_2_out_layers, self.dense_2_out_layers_b, self.dense_3_out_layers);
+        b.res.setOutputs(params);
+        return b.res.getGf();
+    }
+
+    /// Ports `llama_model`'s `memory_breakdown` (llama-model.cpp:1849
+    /// @c1d0e7a00): bytes per buffer type, in the `std`'s `map`'s pointer
+    /// order.
+    ///
+    /// Return: the entries, the caller's to free with `impl.allocator`.
+    pub fn memoryBreakdown(self: *const Model) []BuftSize {
+        var ret: std.ArrayList(BuftSize) = .empty;
+        for (self.ctxs_bufs.items) |cb| {
+            if (self.hparams.no_alloc) {
+                impl.assert(cb.bufs.items.len == 1, "llama-model.cpp", 1853, "bufs.size() == 1");
+                const buf = cb.bufs.items[0];
+                impl.assert(c.ggml_backend_buffer_get_base(buf) == null, "llama-model.cpp", 1855, "ggml_backend_buffer_get_base(buf) == nullptr");
+                const buft = c.ggml_backend_buffer_get_type(buf);
+                addBuftSize(&ret, buft, c.ggml_backend_alloc_ctx_tensors_from_buft_size(cb.ctx, buft));
+            } else {
+                for (cb.bufs.items) |buf| addBuftSize(&ret, c.ggml_backend_buffer_get_type(buf), c.ggml_backend_buffer_get_size(buf));
+            }
+        }
+        return ret.toOwnedSlice(allocator) catch oom();
+    }
 };
 
 /// `uint32_t % uint32_t` as aarch64 computes it: `udiv` then `msub`, and
 /// `udiv` by zero gives zero, so `a % 0 == a`. The C++ is undefined there;
 /// this is what the reference binary does.
-fn remU32(a: u32, b: u32) u32 {
+pub fn remU32(a: u32, b: u32) u32 {
     return if (b == 0) a else a % b;
 }
 
@@ -613,6 +1445,307 @@ fn printF(buf: *std.ArrayList(u8), hp: *const Hparams, comptime get: fn (*const 
     }
     buf.append(allocator, 0) catch oom();
     return @ptrCast(buf.items.ptr);
+}
+
+// -----------------------------------------------------------------------------
+// Memory layer filters, the lambdas of `create_memory`
+
+fn hpOf(ctx: ?*const anyopaque) *const Hparams {
+    return @ptrCast(@alignCast(ctx.?));
+}
+fn filterAll(_: ?*const anyopaque, _: i32) bool {
+    return true;
+}
+fn filterNemotronAttn(ctx: ?*const anyopaque, il: i32) bool {
+    const hp = hpOf(ctx);
+    return !hp.isRecr(@intCast(il)) and hp.nFf(@intCast(il)) == 0;
+}
+fn filterNemotronRecr(ctx: ?*const anyopaque, il: i32) bool {
+    const hp = hpOf(ctx);
+    return hp.isRecr(@intCast(il)) and hp.nFf(@intCast(il)) == 0;
+}
+fn filterTrunkAttn(ctx: ?*const anyopaque, il: i32) bool {
+    const hp = hpOf(ctx);
+    return @as(u32, @intCast(il)) < hp.nLayer() and !hp.isRecr(@intCast(il));
+}
+fn filterTrunkRecr(ctx: ?*const anyopaque, il: i32) bool {
+    const hp = hpOf(ctx);
+    return @as(u32, @intCast(il)) < hp.nLayer() and hp.isRecr(@intCast(il));
+}
+fn filterNextn(ctx: ?*const anyopaque, il: i32) bool {
+    return @as(u32, @intCast(il)) >= hpOf(ctx).nLayer();
+}
+fn filterTrunk(ctx: ?*const anyopaque, il: i32) bool {
+    return @as(u32, @intCast(il)) < hpOf(ctx).nLayer();
+}
+
+// -----------------------------------------------------------------------------
+// Devices and buffer types
+
+fn addBuftSize(list: *std.ArrayList(BuftSize), buft: c.ggml_backend_buffer_type_t, size: usize) void {
+    var pos: usize = 0;
+    while (pos < list.items.len) : (pos += 1) {
+        if (list.items[pos].buft == buft) {
+            list.items[pos].size += size;
+            return;
+        }
+        if (@intFromPtr(list.items[pos].buft) > @intFromPtr(buft)) break;
+    }
+    list.insert(allocator, pos, .{ .buft = buft, .size = size }) catch oom();
+}
+
+/// Ports `llama_load_mode_name` (src/llama.cpp:49 @c1d0e7a00).
+pub fn loadModeName(load_mode: c.enum_llama_load_mode) [:0]const u8 {
+    return switch (load_mode) {
+        c.LLAMA_LOAD_MODE_AUTO => "auto",
+        c.LLAMA_LOAD_MODE_NONE => "none",
+        c.LLAMA_LOAD_MODE_MMAP => "mmap",
+        c.LLAMA_LOAD_MODE_MLOCK => "mlock",
+        c.LLAMA_LOAD_MODE_MMAP_MLOCK => "mmap+mlock",
+        c.LLAMA_LOAD_MODE_DIRECT_IO => "dio",
+        else => impl.abort("llama.cpp", 64, "fatal error"),
+    };
+}
+
+/// Ports `llama_supports_rpc` (src/llama.cpp:110 @c1d0e7a00).
+pub fn supportsRpc() bool {
+    if (c.ggml_backend_reg_count() == 0) c.ggml_backend_load_all();
+    return c.ggml_backend_reg_by_name("RPC") != null;
+}
+
+/// Ports `llama_supports_gpu_offload` (src/llama.cpp:101 @c1d0e7a00).
+pub fn supportsGpuOffload() bool {
+    if (c.ggml_backend_reg_count() == 0) c.ggml_backend_load_all();
+    return c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_GPU) != null or
+        c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_IGPU) != null or
+        supportsRpc();
+}
+
+/// Ports `make_cpu_buft_list` (llama-model.cpp:1008 @c1d0e7a00): ACCEL,
+/// then a GPU host buffer, then the CPU's extra buffer types, then the CPU.
+fn makeCpuBuftList(list: *loader.BuftList, devices: []const Device, use_extra_bufts: bool, no_host: bool, exc: *Exception) Thrown!void {
+    // ACCEL buffer types.
+    var i: usize = 0;
+    while (i < c.ggml_backend_dev_count()) : (i += 1) {
+        const dev = c.ggml_backend_dev_get(i);
+        if (c.ggml_backend_dev_type(dev) == c.GGML_BACKEND_DEVICE_TYPE_ACCEL) {
+            const buft = c.ggml_backend_dev_buffer_type(dev);
+            if (buft != c.ggml_backend_cpu_buffer_type()) list.append(allocator, .{ .dev = dev, .buft = buft }) catch oom();
+        }
+    }
+
+    // A host buffer type, from the first device that has one: it cuts
+    // transfer time when large batches are offloaded to a GPU.
+    if (!no_host) {
+        for (devices) |dev| {
+            if (c.ggml_backend_dev_host_buffer_type(dev.dev)) |buft| {
+                list.append(allocator, .{ .dev = dev.dev, .buft = buft }) catch oom();
+                break;
+            }
+        }
+    }
+
+    // Extra buffer types.
+    if (use_extra_bufts) {
+        const cpu_dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+            return exc.throw(.runtime_error, "make_cpu_buft_list: no CPU backend found", .{});
+        const cpu_reg = c.ggml_backend_dev_backend_reg(cpu_dev);
+        const get_extra: ?*const fn (c.ggml_backend_dev_t) callconv(.c) [*c]c.ggml_backend_buffer_type_t =
+            @ptrCast(@alignCast(c.ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_dev_get_extra_bufts")));
+        if (get_extra) |f| {
+            var extra = f(cpu_dev);
+            while (extra != null and extra[0] != null) : (extra += 1) list.append(allocator, .{ .dev = cpu_dev, .buft = extra[0] }) catch oom();
+        }
+    }
+
+    // The CPU buffer type.
+    i = 0;
+    while (i < c.ggml_backend_dev_count()) : (i += 1) {
+        const dev = c.ggml_backend_dev_get(i);
+        if (c.ggml_backend_dev_type(dev) == c.GGML_BACKEND_DEVICE_TYPE_CPU) {
+            list.append(allocator, .{ .dev = dev, .buft = c.ggml_backend_dev_buffer_type(dev) }) catch oom();
+        }
+    }
+}
+
+/// Ports `make_gpu_buft_list` (llama-model.cpp:1070 @c1d0e7a00): the
+/// device's split buffer type when splitting by rows, its default buffer
+/// type, then its extra ones.
+fn makeGpuBuftList(list: *loader.BuftList, dev: c.ggml_backend_dev_t, split_mode: c.enum_llama_split_mode, tensor_split: [*c]const f32, exc: *Exception) Thrown!void {
+    if (split_mode == c.LLAMA_SPLIT_MODE_ROW) {
+        const reg = c.ggml_backend_dev_backend_reg(dev);
+        const split_fn: ?*const fn (c_int, [*c]const f32) callconv(.c) c.ggml_backend_buffer_type_t =
+            @ptrCast(@alignCast(c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_split_buffer_type")));
+        if (split_fn) |f| {
+            var dev_index: usize = 0;
+            while (dev_index < c.ggml_backend_reg_dev_count(reg)) : (dev_index += 1) {
+                if (c.ggml_backend_reg_dev_get(reg, dev_index) == dev) break;
+            } else return exc.throw(.runtime_error, "device {s} not found in its backend reg", .{std.mem.span(c.ggml_backend_dev_name(dev))});
+            if (f(@intCast(dev_index), tensor_split)) |buft| list.append(allocator, .{ .dev = dev, .buft = buft }) catch oom();
+        } else {
+            return exc.throw(.runtime_error, "device {s} does not support split buffers", .{std.mem.span(c.ggml_backend_dev_name(dev))});
+        }
+    }
+
+    // The device's default buffer type.
+    list.append(allocator, .{ .dev = dev, .buft = c.ggml_backend_dev_buffer_type(dev) }) catch oom();
+
+    // The device's extra buffer types, if any.
+    const reg = c.ggml_backend_dev_backend_reg(dev);
+    if (reg != null) {
+        const get_extra: ?*const fn (c.ggml_backend_dev_t) callconv(.c) [*c]c.ggml_backend_buffer_type_t =
+            @ptrCast(@alignCast(c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_dev_get_extra_bufts")));
+        if (get_extra) |f| {
+            var extra = f(dev);
+            while (extra != null and extra[0] != null) : (extra += 1) list.append(allocator, .{ .dev = dev, .buft = extra[0] }) catch oom();
+        }
+    }
+}
+
+/// Ports `llama_prepare_model_devices` (src/llama.cpp:157 @c1d0e7a00): the
+/// devices the model will use, given or chosen.
+///
+/// `LLAMA_SPLIT_MODE_TENSOR` builds one meta device over the given
+/// devices, or over every device with its own memory, which slices each
+/// tensor across them as `meta_split.getSplitState` says. That is the
+/// multi-GPU path; a one-GPU machine reaches it only through a harness.
+///
+/// Return: false on a bad `main_gpu` or no device for tensor parallelism,
+/// as the C++ does.
+pub fn prepareDevices(params: *const Params, model: *Model) bool {
+    const func = "llama_prepare_model_devices";
+
+    if (params.devices) |devs| {
+        if (params.split_mode == c.LLAMA_SPLIT_MODE_TENSOR) {
+            var n_devs: usize = 0;
+            while (devs[n_devs] != null) n_devs += 1;
+            if (n_devs == 0) {
+                impl.logError("%s: LLAMA_SPLIT_MODE_TENSOR needs >= 1 devices\n", .{func});
+                return false;
+            }
+            impl.logInfo("%s: creating a Meta device with %zu devices\n", .{ func, n_devs });
+            for (0..n_devs) |i| impl.logInfo("%s: - device %zu: %s\n", .{ func, i, c.ggml_backend_dev_name(devs[i]) });
+            model.get_split_state_ud = .{ .n_devices = n_devs, .model = model };
+            model.devices.append(allocator, .{
+                .is_meta = true,
+                .dev = c.ggml_backend_meta_device(devs, n_devs, meta_split.getSplitState, &model.get_split_state_ud),
+            }) catch oom();
+        } else {
+            var d = devs;
+            while (d[0] != null) : (d += 1) model.devices.append(allocator, .{ .is_meta = false, .dev = d[0] }) catch oom();
+        }
+    } else {
+        // Default device selection.
+        var gpus: std.ArrayList(Device) = .empty;
+        defer gpus.deinit(allocator);
+        var igpus: std.ArrayList(Device) = .empty;
+        defer igpus.deinit(allocator);
+        var rpc_servers: std.ArrayList(Device) = .empty;
+        defer rpc_servers.deinit(allocator);
+
+        if (params.split_mode == c.LLAMA_SPLIT_MODE_TENSOR) {
+            var devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
+            defer devs.deinit(allocator);
+            devs.ensureTotalCapacity(allocator, c.ggml_backend_dev_count()) catch oom();
+            var i: usize = 0;
+            while (i < c.ggml_backend_dev_count()) : (i += 1) {
+                const dev = c.ggml_backend_dev_get(i);
+                if (c.ggml_backend_dev_buffer_type(dev) == c.ggml_backend_cpu_buffer_type()) {
+                    impl.logInfo("%s: skipping %s (%s) for tensor parallelism\n", .{ func, c.ggml_backend_dev_name(dev), c.ggml_backend_dev_description(dev) });
+                    continue;
+                }
+                devs.append(allocator, dev) catch oom();
+            }
+            if (devs.items.len == 0) {
+                impl.logError("%s: LLAMA_SPLIT_MODE_TENSOR needs >= 1 devices\n", .{func});
+                return false;
+            }
+            impl.logInfo("%s: creating a Meta device for tensor parallelism from %zu devices:\n", .{ func, devs.items.len });
+            for (devs.items, 0..) |dev, k| {
+                impl.logInfo("%s: - device %zu: %s (%s)\n", .{ func, k, c.ggml_backend_dev_name(dev), c.ggml_backend_dev_description(dev) });
+            }
+            model.get_split_state_ud = .{ .n_devices = devs.items.len, .model = model };
+            gpus.append(allocator, .{
+                .is_meta = true,
+                .dev = c.ggml_backend_meta_device(devs.items.ptr, devs.items.len, meta_split.getSplitState, &model.get_split_state_ud),
+            }) catch oom();
+        } else {
+            var i: usize = 0;
+            while (i < c.ggml_backend_dev_count()) : (i += 1) {
+                const dev = c.ggml_backend_dev_get(i);
+                switch (c.ggml_backend_dev_type(dev)) {
+                    // CPU backends are handled separately.
+                    c.GGML_BACKEND_DEVICE_TYPE_CPU, c.GGML_BACKEND_DEVICE_TYPE_ACCEL => {},
+                    c.GGML_BACKEND_DEVICE_TYPE_GPU => {
+                        const reg = c.ggml_backend_dev_backend_reg(dev);
+                        if (std.mem.eql(u8, std.mem.span(c.ggml_backend_reg_name(reg)), "RPC")) {
+                            rpc_servers.append(allocator, .{ .is_meta = false, .dev = dev }) catch oom();
+                        } else {
+                            // Skip a GPU already present under the same device id.
+                            var props: c.ggml_backend_dev_props = undefined;
+                            c.ggml_backend_dev_get_props(dev, &props);
+                            var dup: ?Device = null;
+                            for (gpus.items) |g| {
+                                var d_props: c.ggml_backend_dev_props = undefined;
+                                c.ggml_backend_dev_get_props(g.dev, &d_props);
+                                if (props.device_id != null and d_props.device_id != null and std.mem.orderZ(u8, props.device_id, d_props.device_id) == .eq) {
+                                    dup = g;
+                                    break;
+                                }
+                            }
+                            if (dup) |g| {
+                                impl.logInfo("%s: skipping device %s (%s) with id %s - already using device %s (%s) with the same id\n", .{
+                                    func,                                                                              c.ggml_backend_dev_name(dev),   c.ggml_backend_dev_description(dev),
+                                    @as([*c]const u8, if (props.device_id != null) props.device_id else "unknown id"), c.ggml_backend_dev_name(g.dev), c.ggml_backend_dev_description(g.dev),
+                                });
+                            } else {
+                                gpus.append(allocator, .{ .is_meta = false, .dev = dev }) catch oom();
+                            }
+                        }
+                    },
+                    c.GGML_BACKEND_DEVICE_TYPE_IGPU => {
+                        // Integrated devices seen by several backends are kept
+                        // once, unless they are the same backend's.
+                        if (igpus.items.len == 0 or c.ggml_backend_dev_backend_reg(dev) == c.ggml_backend_dev_backend_reg(igpus.items[igpus.items.len - 1].dev)) {
+                            igpus.append(allocator, .{ .is_meta = false, .dev = dev }) catch oom();
+                        }
+                    },
+                    else => impl.abort("llama.cpp", 269, "fatal error"),
+                }
+            }
+        }
+
+        // RPC servers first, to minimize network transfers.
+        model.devices.insertSlice(allocator, 0, rpc_servers.items) catch oom();
+        model.devices.appendSlice(allocator, gpus.items) catch oom();
+        // Integrated GPUs only if there is no discrete one.
+        if (gpus.items.len == 0) model.devices.appendSlice(allocator, igpus.items) catch oom();
+    }
+
+    // In single-GPU mode, keep only the main GPU.
+    if (params.split_mode == c.LLAMA_SPLIT_MODE_NONE and model.devices.items.len != 0) {
+        if (params.main_gpu < 0) {
+            model.devices.clearRetainingCapacity();
+        } else {
+            if (params.main_gpu >= @as(c_int, @intCast(model.devices.items.len))) {
+                impl.logError("%s: invalid value for main_gpu: %d (available devices: %zu)\n", .{ func, params.main_gpu, model.devices.items.len });
+                return false;
+            }
+            const main_gpu = model.devices.items[@intCast(params.main_gpu)];
+            model.devices.clearRetainingCapacity();
+            model.devices.append(allocator, main_gpu) catch oom();
+        }
+    }
+
+    for (model.devices.items) |dev| {
+        var props: c.ggml_backend_dev_props = undefined;
+        c.ggml_backend_dev_get_props(dev.dev, &props);
+        impl.logInfo("%s: using device %s (%s) (%s) - %zu MiB free\n", .{
+            func,                                                                              c.ggml_backend_dev_name(dev.dev), c.ggml_backend_dev_description(dev.dev),
+            @as([*c]const u8, if (props.device_id != null) props.device_id else "unknown id"), props.memory_free / 1024 / 1024,
+        });
+    }
+    return true;
 }
 
 /// What loading a model's metadata produced.
@@ -650,6 +1783,7 @@ pub fn loadMetadata(
     ml.printInfo();
 
     var model = Model.create(&ml, params, exc) catch return .thrown;
+    model.ownTensorSplit();
 
     model.hparams.vocab_only = params.vocab_only;
     model.hparams.no_alloc = params.no_alloc;
@@ -681,6 +1815,193 @@ pub fn loadMetadata(
     return .{ .model = model };
 }
 
+/// What `llama_model_load` returns: 0 and a model, -1 on an error, -2 when
+/// the progress callback cancelled.
+pub const LoadResult = struct {
+    status: c_int,
+    model: ?*Model = null,
+};
+
+/// Ports `llama_model_load` (src/llama.cpp:315 @c1d0e7a00): everything, the
+/// tensors included, with the C++'s messages for what it catches.
+///
+/// An architecture whose `load_arch_hparams` or `load_arch_tensors` is not
+/// ported fails here as the C++ fails on an unknown architecture, with
+/// `unsupported model architecture` in the error: once libllama swaps, a
+/// model the port cannot run must not load (`PLAN.md`, Decision 36).
+///
+/// Parameters:
+/// - `source`: where the model comes from.
+/// - `splits`: the split paths, as the loader takes them.
+/// - `set_tensor_data`, `set_tensor_data_ud`: how a model built from
+///   metadata gets its data; null otherwise.
+/// - `params`: the model parameters.
+///
+/// Return: the status, and on 0 the model, the caller's to `destroy`.
+pub fn load(
+    source: loader.Loader.Source,
+    splits: *std.ArrayList([:0]const u8),
+    set_tensor_data: c.llama_model_set_tensor_data_t,
+    set_tensor_data_ud: ?*anyopaque,
+    params: *Params,
+) LoadResult {
+    var exc: Exception = .{};
+    if (loadInner(source, splits, set_tensor_data, set_tensor_data_ud, params, &exc)) |r| {
+        return r;
+    } else |e| {
+        if (e == error.Unported) {
+            impl.logError("%s: error loading model: unsupported model architecture: '%s' (not ported)\n", .{ "llama_model_load", arch_name_failed });
+        } else {
+            exc.buf[exc.len] = 0;
+            impl.logError("%s: error loading model: %s\n", .{ "llama_model_load", @as([*:0]const u8, @ptrCast(&exc.buf)) });
+        }
+        return .{ .status = -1 };
+    }
+}
+
+/// The architecture an unported load stopped at, for its message.
+var arch_name_failed: [*:0]const u8 = "";
+
+fn loadInner(
+    source: loader.Loader.Source,
+    splits: *std.ArrayList([:0]const u8),
+    set_tensor_data: c.llama_model_set_tensor_data_t,
+    set_tensor_data_ud: ?*anyopaque,
+    params: *Params,
+    exc: *Exception,
+) (Thrown || error{Unported})!LoadResult {
+    var ml = try loader.Loader.init(source, splits, params.load_mode, params.check_tensors, params.no_alloc, params.load_mtp, params.kv_overrides, exc);
+    defer ml.deinit();
+    ml.set_tensor_data = set_tensor_data;
+    ml.set_tensor_data_ud = set_tensor_data_ud;
+    ml.tensor_buft_overrides = params.tensor_buft_overrides;
+
+    ml.printInfo();
+    const model = allocator.create(Model) catch oom();
+    model.* = Model.create(&ml, params.*, exc) catch |e| {
+        allocator.destroy(model);
+        return e;
+    };
+    model.ownTensorSplit();
+    errdefer destroy(model);
+
+    if (!prepareDevices(params, model)) {
+        destroy(model);
+        return .{ .status = -1 };
+    }
+
+    // Loading time is recalculated after the first eval, to take the page
+    // faults mmap defers into account.
+    model.t_load_us = 0;
+    const tm = impl.TimeMeas.init(&model.t_load_us, false);
+    defer tm.deinit();
+    model.t_start_us = tm.t_start_us;
+
+    model.hparams.vocab_only = params.vocab_only;
+    model.hparams.no_alloc = params.no_alloc;
+
+    model.loadHparams(&ml, exc) catch |e| {
+        if (e == error.Unported) {
+            arch_name_failed = model.archName().ptr;
+            return e;
+        }
+        rewrap(exc, "error loading model hyperparameters: ");
+        return e;
+    };
+    if (model.arch == .clip) return exc.throw(.runtime_error, "CLIP cannot be used as main model, use it with --mmproj instead", .{});
+    model.loadVocab(&ml, exc) catch |e| {
+        rewrap(exc, "error loading model vocabulary: ");
+        return e;
+    };
+
+    model.loadStats(&ml);
+    try model.printInfo(exc);
+
+    if (params.vocab_only) {
+        impl.logInfo("%s: vocab only - skipping tensors\n", .{"llama_model_load"});
+        return .{ .status = 0, .model = model };
+    }
+
+    const ok = model.loadTensors(&ml, exc) catch |e| {
+        if (e == error.Unported) arch_name_failed = model.archName().ptr;
+        return e;
+    };
+    if (!ok) {
+        destroy(model);
+        return .{ .status = -2 };
+    }
+    return .{ .status = 0, .model = model };
+}
+
+/// Frees a model `load` returned.
+///
+/// Return: nothing.
+pub fn destroy(model: *Model) void {
+    model.deinit();
+    allocator.destroy(model);
+}
+
+/// The default progress callback of `llama_model_load_from_file_impl`
+/// (src/llama.cpp:377 @c1d0e7a00): a dot per percent.
+fn defaultProgress(progress: f32, ctx: ?*anyopaque) callconv(.c) bool {
+    const cur_percentage_p: *c_uint = @ptrCast(@alignCast(ctx.?));
+    const percentage: c_uint = @intFromFloat(100 * progress);
+    while (percentage > cur_percentage_p.*) {
+        cur_percentage_p.* = percentage;
+        impl.logCont(".", .{});
+        if (percentage >= 100) impl.logCont("\n", .{});
+    }
+    return true;
+}
+
+/// Ports `llama_model_load_from_file_impl` (src/llama.cpp:377 @c1d0e7a00).
+///
+/// Parameters:
+/// - `source`: exactly one of metadata, a path, or an open file.
+/// - `splits`: the split paths, as the loader takes them.
+/// - `set_tensor_data`, `set_tensor_data_ud`: for a model from metadata.
+/// - `params_`: the model parameters.
+///
+/// Return: the model, the caller's to `destroy`, or null.
+pub fn loadFromFileImpl(
+    source: ?loader.Loader.Source,
+    splits: *std.ArrayList([:0]const u8),
+    set_tensor_data: c.llama_model_set_tensor_data_t,
+    set_tensor_data_ud: ?*anyopaque,
+    params_: Params,
+) ?*Model {
+    var params = params_;
+    const src = source orelse {
+        impl.logError("%s: exactly one out metadata, path_model, and file must be defined\n", .{"llama_model_load_from_file_impl"});
+        return null;
+    };
+    c.ggml_time_init();
+
+    if (!params.vocab_only and c.ggml_backend_reg_count() == 0) {
+        impl.logError("%s: no backends are loaded. hint: use ggml_backend_load() or ggml_backend_load_all() to load a backend before calling this function\n", .{"llama_model_load_from_file_impl"});
+        return null;
+    }
+
+    var cur_percentage: c_uint = 0;
+    if (params.progress_callback == null) {
+        params.progress_callback_user_data = &cur_percentage;
+        params.progress_callback = defaultProgress;
+    }
+
+    const r = load(src, splits, set_tensor_data, set_tensor_data_ud, &params);
+    impl.assert(r.status <= 0, "llama.cpp", 426, "status <= 0");
+    if (r.status < 0) {
+        if (r.status == -1) {
+            impl.logError("%s: failed to load model\n", .{"llama_model_load_from_file_impl"});
+        } else if (r.status == -2) {
+            impl.logInfo("%s: cancelled model load\n", .{"llama_model_load_from_file_impl"});
+        }
+        if (r.model) |m| destroy(m);
+        return null;
+    }
+    return r.model;
+}
+
 /// `throw std::runtime_error(prefix + std::string(e.what()))`.
 fn rewrap(exc: *Exception, comptime prefix: []const u8) void {
     var what: [1024]u8 = undefined;
@@ -694,6 +2015,14 @@ fn rewrap(exc: *Exception, comptime prefix: []const u8) void {
 
 test {
     std.testing.refAllDecls(@This());
+    std.testing.refAllDecls(LayerNextn);
+    std.testing.refAllDecls(Layer);
+    std.testing.refAllDecls(Device);
+    std.testing.refAllDecls(LayerDev);
+    std.testing.refAllDecls(CtxBufs);
+    std.testing.refAllDecls(BuftSize);
+    std.testing.refAllDecls(Model);
+    std.testing.refAllDecls(LoadResult);
 }
 
 test "rope scaling names round-trip and an unknown one is unspecified" {

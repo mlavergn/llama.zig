@@ -1,0 +1,289 @@
+#!/bin/bash
+# Diff the ported meta backend (src/ggml/backend_meta.zig) against the C++ it
+# replaces, ggml-backend-meta.cpp -- the tensor-parallel backend behind
+# LLAMA_SPLIT_MODE_TENSOR.
+#
+# This machine has one GPU, and nothing in the inference path we gate ever
+# builds a meta device, so no other gate reaches a line of this file. Two
+# things make it reachable anyway:
+#
+#   - the meta backend accepts the same device more than once. {MTL0, MTL0}
+#     is two backends, two sets of buffers, two slices of every weight, and
+#     a real all-reduce between them -- on one GPU.
+#   - a reference that can be put beside the port. Here that is done twice:
+#
+# 1. End to end (harness/meta_dump.c). A real model decoded tensor-parallel,
+#    linked once against zig-out/lib/libggml.a as built (the C++ meta object)
+#    and once against a copy with that object deleted and the port linked in
+#    its place; the same libllama.a both times, so libllama's own split-state
+#    callback assigns every weight its split -- the states a real run
+#    produces, Qwen3.5's segmented linear-attention weights included. Both
+#    sides run with GGML_META_DEBUG=1, so every split state the backend
+#    derives is logged, and the logs, every prompt position's logits and
+#    every generated token are diffed. Configs cover 2, 3 and 4 devices,
+#    Metal beside the CPU, uneven and zero tensor_split entries, and a small
+#    ubatch.
+#
+# 2. In process (harness/meta_diff.c). The reference .cpp compiled with its
+#    eight unmangled exports -D-renamed to ref_* -- the rename that NOTES.md
+#    records as unusable for swapping, because it renames internal callers
+#    too, which is exactly what keeps the renamed object self-consistent --
+#    beside the port in one process. Every vtable answer, every transfer
+#    path on every split layout, and graphs built to reach the delayed
+#    all-reduce branches, over 1-4 devices.
+#
+# The port is built twice, ReleaseFast and ReleaseSafe, and both builds go
+# through both halves: the bit-exact comparison is insensitive to Zig's
+# safety checks, and ReleaseSafe is the only build in which an overflow or
+# an out-of-bounds index would show (CLAUDE.md, "A gate's optimization level
+# is part of what it can see").
+#
+# Usage: scripts/meta-diff [--quick | --coverage]
+#   --quick     one e2e config instead of all of them
+#   --coverage  no diff: run the same workloads against a reference compiled
+#               by Apple clang with -fprofile-instr-generate and print which
+#               lines of ggml-backend-meta.cpp they never reach. (Apple's ld
+#               links it; Zig's linker drops the profile sections and the
+#               counts come back empty.)
+#   MODEL=<gguf>   (default Qwen3.5-2B-Q4_K_M.gguf)
+#   META_DIFF_KEEP=<dir>   keep the transcripts there
+#   Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+QUICK=0
+COVERAGE=0
+if [ "${1:-}" = "--quick" ]; then QUICK=1; shift; fi
+if [ "${1:-}" = "--coverage" ]; then COVERAGE=1; shift; fi
+MODEL="${MODEL:-Qwen3.5-2B-Q4_K_M.gguf}"
+
+# META_DIFF_LIB stands in for libggml.a; it exists to rehearse the
+# after-the-swap mode below on an archive built by hand.
+LIB="${META_DIFF_LIB:-zig-out/lib/libggml.a}"
+LLAMA=zig-out/lib/libllama.a
+for f in "$LIB" "$LLAMA"; do
+    [ -f "$f" ] || { echo "missing $f -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+[ -f "$MODEL" ] || { echo "missing $MODEL -- run 'make qwen35'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+if [ -n "${META_DIFF_KEEP:-}" ]; then mkdir -p "$META_DIFF_KEEP"; tmp="$META_DIFF_KEEP"; else trap 'rm -rf "$tmp"' EXIT; fi
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+FW=(-lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+    -F "$SDK/System/Library/Frameworks")
+INC=(-I llama.cpp/include -I llama.cpp/ggml/include -I llama.cpp/ggml/src)
+
+# --- which side is where -----------------------------------------------------
+#
+# Before the swap, zig-out/lib/libggml.a holds the C++ meta object: the
+# reference is that archive as built, and the port side is a copy with the
+# object deleted plus the port compiled here (twice, see MODES).
+#
+# After the swap the port is inside libggml.a, compiled into the same object
+# as the rest of the Zig, and cannot be deleted from it. The port side is
+# then the archive as built, and the end-to-end reference is
+# llama.cpp.zmake's libggml.a -- the stock C and C++ by the same toolchain,
+# pinned to our commit -- beside the same libllama.a.
+nometa() {  # nometa <archive> <out>: a copy without ggml-backend-meta.o
+    cp "$1" "$2"
+    ar d "$2" ggml-backend-meta.o
+    if ar t "$2" | grep -qx ggml-backend-meta.o; then
+        echo "FAIL: could not delete ggml-backend-meta.o from $1" >&2; exit 1
+    fi
+}
+if ar t "$LIB" | grep -qx ggml-backend-meta.o; then
+    SWAPPED=0
+    REF_GGML="$LIB"
+    nometa "$LIB" "$tmp/libggml-nometa.a"
+    PORT_GGML="$tmp/libggml-nometa.a"
+    # The contract: the C++ object's unmangled exports, measured, not listed.
+    rm -f "$tmp/ggml-backend-meta.o"
+    (cd "$tmp" && ar x "$ROOT/$LIB" ggml-backend-meta.o && chmod 644 ggml-backend-meta.o)
+else
+    SWAPPED=1
+    echo "the port is swapped into $LIB: the reference is llama.cpp.zmake's libggml.a"
+    . "$ROOT/scripts/check-reference-pin"
+    REF_GGML=llama.cpp.zmake/zig-out/lib/libggml.a
+    [ -f "$REF_GGML" ] || { echo "missing $REF_GGML -- run 'make -C llama.cpp.zmake lib --release=fast'" >&2; exit 2; }
+    ar t "$REF_GGML" | grep -qx ggml-backend-meta.o || { echo "FAIL: $REF_GGML has no ggml-backend-meta.o" >&2; exit 1; }
+    PORT_GGML="$LIB"
+    nometa "$REF_GGML" "$tmp/libggml-nometa.a"   # coverage only
+    zig c++ -std=c++17 -w -O2 -DNDEBUG "${INC[@]}" -c llama.cpp/ggml/src/ggml-backend-meta.cpp -o "$tmp/ggml-backend-meta.o" \
+        || { echo "FAIL: cannot compile the reference" >&2; exit 1; }
+fi
+nm -gUj "$tmp/ggml-backend-meta.o" | sed 's/^_//' | grep -v '^_Z' | grep -v '__clang_call_terminate' | sort > "$tmp/contract"
+[ -s "$tmp/contract" ] || { echo "FAIL: read no exports from ggml-backend-meta.o" >&2; exit 1; }
+echo "contract: $(wc -l < "$tmp/contract" | tr -d ' ') unmangled exports in ggml-backend-meta.o"
+
+# --- the port, built twice ---------------------------------------------------
+zig translate-c -lc -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
+    src/ggml/c_import.h > "$tmp/ggml_c.zig" 2> "$tmp/terr" \
+    || { echo "FAIL: cannot translate src/ggml/c_import.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+MODES=(ReleaseFast ReleaseSafe)
+for mode in "${MODES[@]}"; do
+    [ $SWAPPED -eq 1 ] && break
+    zig build-obj -O "$mode" -lc --dep ggml_c -Mroot=src/ggml/backend_meta.zig -Mggml_c="$tmp/ggml_c.zig" \
+        -femit-bin="$tmp/meta_$mode.o" 2> "$tmp/berr" \
+        || { echo "FAIL: cannot build src/ggml/backend_meta.zig ($mode)" >&2; head -30 "$tmp/berr" >&2; exit 1; }
+    nm -gUj "$tmp/meta_$mode.o" | sed 's/^_//' | grep -v '^_Z' | sort > "$tmp/exports_$mode"
+    if ! diff -q "$tmp/contract" "$tmp/exports_$mode" > /dev/null; then
+        echo "FAIL: the port's exports ($mode) differ from the contract:" >&2
+        diff "$tmp/contract" "$tmp/exports_$mode" >&2
+        exit 1
+    fi
+done
+if [ $SWAPPED -eq 1 ]; then
+    # The archive's copy is the port; it must define every contract symbol.
+    nm -gUj "$LIB" 2>/dev/null | sed 's/^_//' | sort -u > "$tmp/archive_exports"
+    missing="$(comm -23 "$tmp/contract" "$tmp/archive_exports")"
+    [ -z "$missing" ] || { echo "FAIL: $LIB does not define: $missing" >&2; exit 1; }
+    MODES=(archive)
+    echo "port: inside $LIB, $(wc -l < "$tmp/contract" | tr -d ' ') / $(wc -l < "$tmp/contract" | tr -d ' ') exports"
+else
+    echo "port: $(wc -l < "$tmp/exports_ReleaseFast" | tr -d ' ') / $(wc -l < "$tmp/contract" | tr -d ' ') exports, ReleaseFast and ReleaseSafe"
+fi
+# port_obj <mode>: the port object to link for a mode, or nothing when the
+# archive already carries it.
+port_obj() { [ "$1" = archive ] || echo "$tmp/meta_$1.o"; }
+
+# The end-to-end configs -- devices | opts | port build. Two to four devices,
+# Metal beside the CPU, uneven and zero tensor_split entries, a small ubatch.
+# CPU-only lists are absent because the reference crashes on them: with
+# every simple buffer host-resident, graph_compute's `s_copy_main` FIXME
+# (ggml-backend-meta.cpp:1997) skips views of leaves it should slice.
+# devices | opts | port build
+CONFIGS=(
+    "mm||ReleaseFast"
+    "mc||ReleaseFast"
+    "mmm||ReleaseFast"
+    "mmmm||ReleaseFast"
+    "mcm||ReleaseFast"
+    "mm|split=3:1|ReleaseFast"
+    "mmm|split=1:0:1|ReleaseFast"
+    "mmmm|ubatch=4|ReleaseFast"
+    "mmm||ReleaseSafe"
+    "mm|split=0:1|ReleaseSafe"
+)
+[ $QUICK -eq 1 ] && CONFIGS=("mmm||ReleaseFast")
+if [ $SWAPPED -eq 1 ]; then
+    for i in "${!CONFIGS[@]}"; do CONFIGS[$i]="${CONFIGS[$i]%|*}|archive"; done
+fi
+
+fail=0
+
+# --- coverage of the reference, instead of the diff --------------------------
+if [ $COVERAGE -eq 1 ]; then
+    RT="$(ls "$(dirname "$(xcrun --find clang)")"/../lib/clang/*/lib/darwin/libclang_rt.profile_osx.a | head -1)"
+    [ -f "$RT" ] || { echo "FAIL: no libclang_rt.profile_osx.a in the Xcode toolchain" >&2; exit 2; }
+    COV=(-std=c++17 -O1 -DNDEBUG -fprofile-instr-generate -fcoverage-mapping -I llama.cpp/ggml/include -I llama.cpp/ggml/src)
+    REN=()
+    while read -r s; do REN+=("-D${s}=ref_${s}"); done < "$tmp/contract"
+    xcrun clang++ "${COV[@]}" -c llama.cpp/ggml/src/ggml-backend-meta.cpp -o "$tmp/cov_meta.o" || exit 1
+    xcrun clang++ "${COV[@]}" "${REN[@]}" -c llama.cpp/ggml/src/ggml-backend-meta.cpp -o "$tmp/cov_ref.o" || exit 1
+    xcrun clang -w -O2 "${INC[@]}" -c harness/meta_diff.c -o "$tmp/cov_diff.o" || exit 1
+    xcrun clang -w -O2 "${INC[@]}" -c harness/meta_dump.c -o "$tmp/cov_dump.o" || exit 1
+    APPLE_FW=(-framework Foundation -framework Metal -framework MetalKit -framework Accelerate)
+    xcrun clang++ -fprofile-instr-generate "$tmp/cov_diff.o" "$tmp/cov_ref.o" $(port_obj "${MODES[0]}") "$PORT_GGML" "${APPLE_FW[@]}" -o "$tmp/cov_md" 2>/dev/null || exit 1
+    xcrun clang++ -fprofile-instr-generate "$tmp/cov_dump.o" "$tmp/cov_meta.o" "$LLAMA" "$tmp/libggml-nometa.a" "${APPLE_FW[@]}" -o "$tmp/cov_e2e" 2>/dev/null || exit 1
+    mkdir -p "$tmp/prof"
+    LLVM_PROFILE_FILE="$tmp/prof/inproc.profraw" "$tmp/cov_md" > /dev/null 2>&1 || echo "  (in-process run exited non-zero)"
+    i=0
+    for cfg in "${CONFIGS[@]}"; do
+        IFS='|' read -r devs opts mode <<< "$cfg"
+        i=$((i + 1))
+        GGML_META_DEBUG=1 LLVM_PROFILE_FILE="$tmp/prof/e2e_$i.profraw" "$tmp/cov_e2e" "$MODEL" "$devs" "$opts" > /dev/null 2>&1 \
+            || echo "  (e2e $devs $opts exited non-zero)"
+    done
+    xcrun llvm-profdata merge -o "$tmp/inproc.profdata" "$tmp/prof/inproc.profraw"
+    xcrun llvm-profdata merge -o "$tmp/e2e.profdata" "$tmp"/prof/e2e_*.profraw
+    xcrun llvm-profdata merge -o "$tmp/all.profdata" "$tmp"/prof/*.profraw
+    SRC=llama.cpp/ggml/src/ggml-backend-meta.cpp
+    for which in inproc e2e all; do
+        printf '%-7s ' "$which"
+        xcrun llvm-cov report "$tmp/cov_e2e" -object "$tmp/cov_md" -instr-profile "$tmp/$which.profdata" "$SRC" 2>/dev/null \
+            | awk '/^TOTAL/ { printf "regions %s  functions %s  lines %s (%d of %d missed)  branches %s\n", $4, $7, $10, $9, $8, $13 }'
+    done
+    echo "lines never executed (all workloads):"
+    xcrun llvm-cov show "$tmp/cov_e2e" -object "$tmp/cov_md" -instr-profile "$tmp/all.profdata" "$SRC" -use-color=false \
+        | awk -F'|' '{ c = $2; gsub(/ /, "", c); if (c == "0") print $1 + 0 }' \
+        | awk 'NR == 1 { s = $1; p = $1; next } { if ($1 == p + 1) { p = $1 } else { printf "%s ", (s == p ? s : s "-" p); s = $1; p = $1 } } END { if (NR) print (s == p ? s : s "-" p) }' \
+        | fold -s -w 100 | sed 's/^/  /'
+    exit 0
+fi
+
+# --- 1. in process -----------------------------------------------------------
+DEFS=()
+while read -r s; do DEFS+=("-D${s}=ref_${s}"); done < "$tmp/contract"
+zig c++ -std=c++17 -w -O2 -DNDEBUG "${INC[@]}" "${DEFS[@]}" -c llama.cpp/ggml/src/ggml-backend-meta.cpp \
+    -o "$tmp/ref_meta.o" 2> "$tmp/rerr" \
+    || { echo "FAIL: cannot compile the renamed reference" >&2; head -10 "$tmp/rerr" >&2; exit 1; }
+if nm -gUj "$tmp/ref_meta.o" | sed 's/^_//' | grep -v '^_Z' | grep -v '^ref_' | grep -v __clang_call_terminate | grep -q .; then
+    echo "FAIL: the renamed reference still exports an unrenamed symbol" >&2; exit 1
+fi
+
+echo "in process (reference renamed to ref_*, port beside it):"
+for mode in "${MODES[@]}"; do
+    zig cc -std=gnu11 -O2 -w harness/meta_diff.c "$tmp/ref_meta.o" $(port_obj "$mode") -o "$tmp/meta_diff_$mode" \
+        "${INC[@]}" "$PORT_GGML" "${FW[@]}" 2> "$tmp/herr" \
+        || { echo "FAIL: cannot build harness/meta_diff.c" >&2; head -30 "$tmp/herr" >&2; exit 1; }
+    echo " port $mode:"
+    mkdir -p "$tmp/inproc_$mode"
+    META_DIFF_OUT="$tmp/inproc_$mode" "$tmp/meta_diff_$mode" 2> "$tmp/inproc_$mode.err"
+    rc=$?
+    if [ $rc -ne 0 ]; then
+        fail=1
+        [ $rc -gt 1 ] && { echo "  aborted (rc=$rc):"; tail -5 "$tmp/inproc_$mode.err" | sed 's/^/    /'; }
+    fi
+done
+
+# --- 2. end to end -----------------------------------------------------------
+zig cc -O2 harness/meta_dump.c -o "$tmp/dump_ref" "${INC[@]}" "$LLAMA" "$REF_GGML" "${FW[@]}" 2> "$tmp/derr" \
+    || { echo "FAIL: cannot link harness/meta_dump.c against the reference" >&2; head -10 "$tmp/derr" >&2; exit 1; }
+for mode in "${MODES[@]}"; do
+    zig cc -O2 harness/meta_dump.c $(port_obj "$mode") -o "$tmp/dump_$mode" "${INC[@]}" "$LLAMA" "$PORT_GGML" "${FW[@]}" 2> "$tmp/derr" \
+        || { echo "FAIL: cannot link harness/meta_dump.c against the port" >&2; head -10 "$tmp/derr" >&2; exit 1; }
+    # The C++ object must really be gone: its static functions would show.
+    if nm "$tmp/dump_$mode" | grep -q 'ggml_backend_meta_graph_compute'; then
+        echo "FAIL: the port binary still contains the C++ meta backend" >&2; exit 1
+    fi
+done
+if ! nm "$tmp/dump_ref" | grep -q 'ggml_backend_meta_graph_compute'; then
+    echo "FAIL: the reference binary does not contain the C++ meta backend" >&2; exit 1
+fi
+
+
+echo "end to end ($MODEL, libllama's split states):"
+e2e_lines=0
+for cfg in "${CONFIGS[@]}"; do
+    IFS='|' read -r devs opts mode <<< "$cfg"
+    GGML_META_DEBUG=1 "$tmp/dump_ref"   "$MODEL" "$devs" "$opts" > "$tmp/e2e_ref.txt"  2> "$tmp/e2e_ref.err"; rr=$?
+    GGML_META_DEBUG=1 "$tmp/dump_$mode" "$MODEL" "$devs" "$opts" > "$tmp/e2e_port.txt" 2> "$tmp/e2e_port.err"; rp=$?
+    n=$(wc -l < "$tmp/e2e_ref.txt" | tr -d ' ')
+    ns=$(grep -c SPLIT_STATE "$tmp/e2e_ref.txt")
+    label="$devs${opts:+ $opts} [$mode]"
+    if [ $rr -ne 0 ] || [ $rp -ne 0 ]; then
+        printf '  %-32s FAIL: rc ref=%d port=%d\n' "$label" "$rr" "$rp"
+        tail -3 "$tmp/e2e_port.err" | sed 's/^/    /'
+        fail=1
+    elif [ "$ns" -eq 0 ] || ! grep -q '^step 5 logits' "$tmp/e2e_ref.txt"; then
+        printf '  %-32s FAIL: the reference run logged no split states or did not finish\n' "$label"
+        fail=1
+    elif diff -q "$tmp/e2e_ref.txt" "$tmp/e2e_port.txt" > /dev/null; then
+        printf '  %-32s %5s lines identical (%s SPLIT_STATE, %s logits)\n' "$label" "$n" "$ns" "$(grep -c logits "$tmp/e2e_ref.txt")"
+        e2e_lines=$((e2e_lines + n))
+    else
+        printf '  %-32s DIFFERS; first divergent lines:\n' "$label"
+        diff "$tmp/e2e_ref.txt" "$tmp/e2e_port.txt" | grep '^[<>]' | head -6 | sed 's/^/    /'
+        fail=1
+    fi
+    [ -n "${META_DIFF_KEEP:-}" ] && cp "$tmp/e2e_ref.txt" "$tmp/e2e_ref_${devs}_${opts//[=:]/-}_$mode.txt"
+done
+
+if [ $fail -eq 0 ]; then
+    echo "PASS: the meta backend port matches the reference ($e2e_lines end-to-end lines)"
+    exit 0
+fi
+echo "FAIL: the meta backend port differs from the reference"
+exit 1

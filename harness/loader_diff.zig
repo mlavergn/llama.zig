@@ -55,6 +55,17 @@ extern fn ref_hparams_alignof() usize;
 extern fn ref_hparams_nfields() usize;
 extern fn ref_hparams_field(i: usize, offset: *usize, size: *usize) [*:0]const u8;
 extern "c" fn truncate(path: [*:0]const u8, length: i64) c_int;
+extern fn ref_layer_tensor(model: *const c.llama_model, il: c_int, field: [*:0]const u8) ?[*:0]const u8;
+extern fn ref_model_tensor(model: *const c.llama_model, field: [*:0]const u8) ?[*:0]const u8;
+extern fn ref_n_layers(model: *const c.llama_model) usize;
+extern fn ref_n_tensors(model: *const c.llama_model) usize;
+extern fn ref_tensor_at(model: *const c.llama_model, i: usize, name: *[*:0]const u8) *c.ggml_tensor;
+extern fn ref_n_devices(model: *const c.llama_model) usize;
+extern fn ref_device(model: *const c.llama_model, i: usize) c.ggml_backend_dev_t;
+extern fn ref_dev_layer(model: *const c.llama_model, il: c_int) c.ggml_backend_dev_t;
+extern fn ref_dev_output(model: *const c.llama_model) c.ggml_backend_dev_t;
+extern fn ref_memory_breakdown(model: *const c.llama_model, i: usize, buft: *c.ggml_backend_buffer_type_t) usize;
+extern fn ref_hash_tensor(t: *const c.ggml_tensor) u64;
 
 var checks: usize = 0;
 var failures: usize = 0;
@@ -191,7 +202,9 @@ fn runCase(cs: Case) void {
         for (splits.items) |s| gpa.free(s);
         splits.deinit(gpa);
     }
-    var loaded = M.loadMetadata(.{ .path = cs.path }, &splits, .{ .vocab_only = cs.vocab_only }, ovr_ptr, &exc);
+    var params = M.defaultParams();
+    params.vocab_only = cs.vocab_only;
+    var loaded = M.loadMetadata(.{ .path = cs.path }, &splits, params, ovr_ptr, &exc);
     defer if (loaded == .model) loaded.model.deinit();
     log_target = null;
 
@@ -267,6 +280,280 @@ fn runCase(cs: Case) void {
     };
     std.debug.print("  {s:<44} {s:<8} {d:>8} checks\n", .{ cs.name, outcome, checks - before });
 }
+
+// -----------------------------------------------------------------------------
+// Full loads: the tensor half
+
+const FullCase = struct {
+    name: []const u8,
+    path: [:0]const u8,
+    edit: *const fn (*c.llama_model_params) void,
+};
+
+/// A log line's free-memory figure moves with what the process has
+/// allocated, and the two loads run one after the other.
+fn normalizeLog(log: []const u8) std.ArrayList(u8) {
+    var out: std.ArrayList(u8) = .empty;
+    var lines = std.mem.splitScalar(u8, log, '\n');
+    var first = true;
+    while (lines.next()) |line| {
+        if (!first) out.append(gpa, '\n') catch unreachable;
+        first = false;
+        if (std.mem.startsWith(u8, line, "ggml_metal_log_allocated_size:")) {
+            // `( total / max)`: the process-wide total, which counts the
+            // other side's model too.
+            if (std.mem.findScalar(u8, line, '(')) |open| {
+                out.appendSlice(gpa, line[0..open]) catch unreachable;
+                out.appendSlice(gpa, "(N)") catch unreachable;
+                continue;
+            }
+        }
+        if (std.mem.find(u8, line, " MiB free")) |end| {
+            var start = end;
+            while (start > 0 and std.ascii.isDigit(line[start - 1])) start -= 1;
+            out.appendSlice(gpa, line[0..start]) catch unreachable;
+            out.appendSlice(gpa, "N") catch unreachable;
+            out.appendSlice(gpa, line[end..]) catch unreachable;
+        } else {
+            out.appendSlice(gpa, line) catch unreachable;
+        }
+    }
+    return out;
+}
+
+fn cancelHalfway(progress: f32, _: ?*anyopaque) callconv(.c) bool {
+    return progress < 0.5;
+}
+
+fn devName(dev: c.ggml_backend_dev_t) []const u8 {
+    return if (dev == null) "(null)" else std.mem.span(c.ggml_backend_dev_name(dev));
+}
+
+fn compareTensor(what: []const u8, ref: *const c.ggml_tensor, port: *const c.ggml_tensor, hash: bool) void {
+    expectStr(what, std.mem.sliceTo(&ref.name, 0), std.mem.sliceTo(&port.name, 0));
+    expectInt("type", ref.type, port.type);
+    for (0..4) |d| {
+        expectInt("ne", ref.ne[d], port.ne[d]);
+        expectInt("nb", ref.nb[d], port.nb[d]);
+    }
+    checks += 1;
+    if ((ref.buffer == null) != (port.buffer == null)) {
+        fail("{s}: buffer presence differs", .{std.mem.sliceTo(&ref.name, 0)});
+        return;
+    }
+    if (ref.buffer == null) return;
+    expectStr("buffer", std.mem.span(c.ggml_backend_buffer_name(ref.buffer)), std.mem.span(c.ggml_backend_buffer_name(port.buffer)));
+    expectInt("usage", c.ggml_backend_buffer_get_usage(ref.buffer), c.ggml_backend_buffer_get_usage(port.buffer));
+    const rb = c.ggml_backend_buffer_get_base(ref.buffer);
+    const pb = c.ggml_backend_buffer_get_base(port.buffer);
+    if (rb != null and pb != null and ref.data != null and port.data != null) {
+        expectInt("offset in buffer", @as(i128, @intFromPtr(ref.data)) - @intFromPtr(rb), @as(i128, @intFromPtr(port.data)) - @intFromPtr(pb));
+    }
+    if (hash) expectInt("data hash", ref_hash_tensor(ref), ref_hash_tensor(port));
+}
+
+var warmed_up = false;
+
+fn runFullCase(fc: FullCase) void {
+    case_failures = 0;
+    const before = checks;
+
+    var params = c.llama_model_default_params();
+    fc.edit(&params);
+    var port_params = M.defaultParams();
+    fc.edit(&port_params);
+
+    // The first load in the process initializes the backends, which log.
+    if (!warmed_up) {
+        warmed_up = true;
+        var warm = c.llama_model_default_params();
+        warm.vocab_only = true;
+        if (c.llama_model_load_from_file(fc.path.ptr, warm)) |m| c.llama_model_free(m);
+    }
+
+    var ref_log: std.ArrayList(u8) = .empty;
+    defer ref_log.deinit(gpa);
+    var port_log: std.ArrayList(u8) = .empty;
+    defer port_log.deinit(gpa);
+
+    log_target = &ref_log;
+    const rm = c.llama_model_load_from_file(fc.path.ptr, params);
+    defer if (rm) |m| c.llama_model_free(m);
+
+    log_target = &port_log;
+    var splits: std.ArrayList([:0]const u8) = .empty;
+    defer {
+        for (splits.items) |s| gpa.free(s);
+        splits.deinit(gpa);
+    }
+    const pm = M.loadFromFileImpl(.{ .path = fc.path }, &splits, null, null, port_params);
+    defer if (pm) |m| M.destroy(m);
+    log_target = null;
+
+    var rl = normalizeLog(ref_log.items);
+    defer rl.deinit(gpa);
+    var pl = normalizeLog(port_log.items);
+    defer pl.deinit(gpa);
+    checks += 1;
+    if (rl.items.len == 0) fail("{s}: the C++ logged nothing", .{fc.name});
+    firstDiff(rl.items, pl.items);
+
+    checks += 1;
+    const outcome: []const u8 = if (rm != null and pm != null) "loaded" else if (rm == null and pm == null) "failed" else blk: {
+        fail("{s}: ref {s}, port {s}", .{ fc.name, if (rm != null) "loaded" else "failed", if (pm != null) "loaded" else "failed" });
+        break :blk "differ";
+    };
+
+    if (rm != null and pm != null) {
+        const r = rm.?;
+        const m = pm.?;
+        const hash = !port_params.no_alloc and !port_params.vocab_only;
+
+        expectInt("n_tensors", ref_n_tensors(r), m.tensors_by_name.items.len);
+        for (m.tensors_by_name.items, 0..) |t, i| {
+            if (i >= ref_n_tensors(r)) break;
+            var name: [*:0]const u8 = undefined;
+            const rt = ref_tensor_at(r, i, &name);
+            expectStr("tensors_by_name key", std.mem.span(name), std.mem.sliceTo(&t.name, 0));
+            compareTensor("tensor", rt, t, hash);
+        }
+
+        inline for (.{ "tok_embd", "output_norm", "output", "output_s", "output_in_s" }) |f| {
+            const rt = ref_model_tensor(r, f);
+            const pt = @field(m.*, f);
+            expectStr("model." ++ f, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
+        }
+
+        expectInt("n layers", ref_n_layers(r), m.layers.len);
+        for (m.layers, 0..) |*layer, il| {
+            if (il >= ref_n_layers(r)) break;
+            inline for (@typeInfo(M.Layer).@"struct".field_names) |fname| {
+                if (comptime std.mem.eql(u8, fname, "nextn")) {
+                    inline for (@typeInfo(M.LayerNextn).@"struct".field_names) |gname| {
+                        const rt = ref_layer_tensor(r, @intCast(il), "nextn." ++ gname);
+                        const pt = @field(layer.nextn, gname);
+                        expectStr("layer.nextn." ++ gname, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
+                    }
+                } else {
+                    const rt = ref_layer_tensor(r, @intCast(il), fname);
+                    const pt = @field(layer.*, fname);
+                    expectStr("layer." ++ fname, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
+                }
+            }
+        }
+
+        expectInt("n devices", ref_n_devices(r), m.devices.items.len);
+        for (m.devices.items, 0..) |d, i| {
+            if (i < ref_n_devices(r)) expectStr("device", devName(ref_device(r, i)), devName(d.dev));
+        }
+        if (!port_params.vocab_only) {
+            for (0..m.hparams.n_layer_all) |il| expectStr("dev_layer", devName(ref_dev_layer(r, @intCast(il))), devName(m.devLayer(il)));
+            expectStr("dev_output", devName(ref_dev_output(r)), devName(m.devOutput()));
+        }
+
+        const mb = m.memoryBreakdown();
+        defer gpa.free(mb);
+        for (mb, 0..) |e, i| {
+            var buft: c.ggml_backend_buffer_type_t = null;
+            const size = ref_memory_breakdown(r, i, &buft);
+            expectStr("memory_breakdown buft", if (buft == null) "(none)" else std.mem.span(c.ggml_backend_buft_name(buft)), std.mem.span(c.ggml_backend_buft_name(e.buft)));
+            expectInt("memory_breakdown size", size, e.size);
+        }
+        var extra: c.ggml_backend_buffer_type_t = null;
+        _ = ref_memory_breakdown(r, mb.len, &extra);
+        checks += 1;
+        if (extra != null) fail("memory_breakdown: the C++ has more entries", .{});
+    }
+    std.debug.print("  {s:<44} {s:<8} {d:>8} checks\n", .{ fc.name, outcome, checks - before });
+}
+
+const Edit = struct {
+    fn none(_: *c.llama_model_params) void {}
+    fn cpuOnly(p: *c.llama_model_params) void {
+        p.n_gpu_layers = 0;
+    }
+    fn partial(p: *c.llama_model_params) void {
+        p.n_gpu_layers = 10;
+    }
+    fn noMmap(p: *c.llama_model_params) void {
+        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+    }
+    fn noMmapCpu(p: *c.llama_model_params) void {
+        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+        p.n_gpu_layers = 0;
+    }
+    fn mmapExplicit(p: *c.llama_model_params) void {
+        p.load_mode = c.LLAMA_LOAD_MODE_MMAP;
+    }
+    fn noExtraBufts(p: *c.llama_model_params) void {
+        p.use_extra_bufts = false;
+        p.n_gpu_layers = 0;
+    }
+    fn noHost(p: *c.llama_model_params) void {
+        p.no_host = true;
+        p.n_gpu_layers = 0;
+    }
+    fn checkTensors(p: *c.llama_model_params) void {
+        p.check_tensors = true;
+    }
+    /// `no_alloc` with mmap trips `GGML_ASSERT(!ml.no_alloc)` in the C++
+    /// itself (llama-model.cpp:1701), so it is only ever used without.
+    fn noAlloc(p: *c.llama_model_params) void {
+        p.no_alloc = true;
+        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+    }
+    fn noAllocCpu(p: *c.llama_model_params) void {
+        p.no_alloc = true;
+        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+        p.n_gpu_layers = 0;
+    }
+    fn vocabOnly(p: *c.llama_model_params) void {
+        p.vocab_only = true;
+    }
+    fn loadMtp(p: *c.llama_model_params) void {
+        p.load_mtp = true;
+    }
+    fn splitNoneNoGpu(p: *c.llama_model_params) void {
+        p.split_mode = c.LLAMA_SPLIT_MODE_NONE;
+        p.main_gpu = -1;
+    }
+    fn splitNone(p: *c.llama_model_params) void {
+        p.split_mode = c.LLAMA_SPLIT_MODE_NONE;
+    }
+    fn badMainGpu(p: *c.llama_model_params) void {
+        p.split_mode = c.LLAMA_SPLIT_MODE_NONE;
+        p.main_gpu = 5;
+    }
+    fn tensorSplit(p: *c.llama_model_params) void {
+        const S = struct {
+            var split: [16]f32 = .{ 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        };
+        p.tensor_split = &S.split;
+    }
+    fn cancel(p: *c.llama_model_params) void {
+        p.progress_callback = cancelHalfway;
+    }
+    fn overrideFfnCpu(p: *c.llama_model_params) void {
+        const S = struct {
+            var o: [2]c.llama_model_tensor_buft_override = undefined;
+        };
+        S.o = .{ .{ .pattern = "ffn_(up|down)", .buft = c.ggml_backend_cpu_buffer_type() }, .{ .pattern = null, .buft = null } };
+        p.tensor_buft_overrides = &S.o;
+    }
+    fn overrideBadRegex(p: *c.llama_model_params) void {
+        const S = struct {
+            var o: [2]c.llama_model_tensor_buft_override = undefined;
+        };
+        S.o = .{ .{ .pattern = "blk.(", .buft = c.ggml_backend_cpu_buffer_type() }, .{ .pattern = null, .buft = null } };
+        p.tensor_buft_overrides = &S.o;
+    }
+    fn overrideEmpty(p: *c.llama_model_params) void {
+        const S = struct {
+            var o: [1]c.llama_model_tensor_buft_override = .{.{ .pattern = null, .buft = null }};
+        };
+        p.tensor_buft_overrides = &S.o;
+    }
+};
 
 // -----------------------------------------------------------------------------
 // Synthetic files
@@ -738,6 +1025,45 @@ pub fn main(init: std.process.Init) !void {
         runCase(.{ .name = "override: arch to gptj", .path = meta, .vocab_only = false, .overrides = &.{
             kvStr("general.architecture", "gptj"),
         } });
+    }
+
+    // The tensor half: every Qwen3.5 model whole, and the first under
+    // every parameter that changes where a tensor goes or how it loads.
+    var first_qwen: ?[:0]const u8 = null;
+    for (args[2..]) |a| {
+        const name = std.fs.path.basename(a);
+        if (!std.mem.startsWith(u8, name, "Qwen3.5")) continue;
+        const path = try gpa.dupeSentinel(u8, a, 0);
+        var nb: [128]u8 = undefined;
+        runFullCase(.{ .name = try std.fmt.bufPrint(&nb, "{s} (tensors)", .{name}), .path = path, .edit = Edit.none });
+        if (first_qwen == null) first_qwen = path;
+    }
+    if (first_qwen) |path| {
+        const variants = .{
+            .{ "tensors: cpu only", Edit.cpuOnly },
+            .{ "tensors: 10 layers offloaded", Edit.partial },
+            .{ "tensors: no mmap", Edit.noMmap },
+            .{ "tensors: no mmap, cpu", Edit.noMmapCpu },
+            .{ "tensors: mmap explicit", Edit.mmapExplicit },
+            .{ "tensors: no extra buffer types", Edit.noExtraBufts },
+            .{ "tensors: no host buffer", Edit.noHost },
+            .{ "tensors: check tensors", Edit.checkTensors },
+            .{ "tensors: no alloc", Edit.noAlloc },
+            .{ "tensors: no alloc, cpu", Edit.noAllocCpu },
+            .{ "tensors: vocab only", Edit.vocabOnly },
+            .{ "tensors: load mtp", Edit.loadMtp },
+            .{ "tensors: split none, no gpu", Edit.splitNoneNoGpu },
+            .{ "tensors: split none", Edit.splitNone },
+            .{ "tensors: bad main_gpu", Edit.badMainGpu },
+            .{ "tensors: tensor split", Edit.tensorSplit },
+            .{ "tensors: cancelled", Edit.cancel },
+            .{ "tensors: ffn overridden to CPU", Edit.overrideFfnCpu },
+            .{ "tensors: override, bad regex", Edit.overrideBadRegex },
+            .{ "tensors: override list empty", Edit.overrideEmpty },
+        };
+        inline for (variants) |v| runFullCase(.{ .name = v[0], .path = path, .edit = v[1] });
+        // Metadata alone: the first tensor is missing.
+        runFullCase(.{ .name = "tensors: metadata only", .path = derive(dir, path, "qtensorless", Qwen.asIs), .edit = Edit.none });
     }
 
     std.debug.print("  {d} loaded, {d} threw, {d} unported\n", .{ tally.loaded, tally.thrown, tally.unported });

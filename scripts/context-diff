@@ -1,0 +1,58 @@
+#!/bin/bash
+# Compare src/llama/context.zig, and everything a decode reaches, with
+# llama.cpp's llama-context.cpp and its callees, in one process.
+#
+# libllama swaps once, at llama.h (PLAN.md, Decision 42), so until then
+# nothing downstream can see the ported context, batch splitter, memory
+# modules or graph. This loads one Qwen3.5 model through the C++ in
+# libllama-ref.a and through the port, runs the same decode script through
+# llama.h and through the port's api functions of the same names, and
+# compares the two transcripts: everything logged, every graph node computed
+# (op, shape, strides, op_params, sources and a hash of its data), every
+# return value and every output row's bits. See harness/context_diff.zig.
+#
+# Usage: scripts/context-diff [model.gguf] [--quick] [--case substring]
+#   Requires: zig build reference --release=fast
+#   The model defaults to the first Qwen3.5 model in the repository root.
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+model=""
+if [ $# -gt 0 ] && [ "${1%.gguf}" != "$1" ]; then
+    model="$1"
+    shift
+fi
+if [ -z "$model" ]; then
+    for m in Qwen3.5-*.gguf; do
+        [ -f "$m" ] && { model="$m"; break; }
+    done
+fi
+[ -n "$model" ] || { echo "no Qwen3.5 model -- run 'make qwen35'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+zig cc -mcpu=baseline -c harness/proxy_dev.c -o "$tmp/proxy_dev.o" -O2 \
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src 2>"$tmp/perr" \
+    || { echo "FAIL: cannot compile harness/proxy_dev.c" >&2; head -20 "$tmp/perr" >&2; exit 1; }
+
+zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
+    --dep staged -Mroot=harness/context_diff.zig \
+    --dep llama_c -Mstaged=src/llama/staged.zig -Mllama_c="$tmp/llama_c.zig" \
+    "$tmp/proxy_dev.o" zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+CONTEXT_DIFF_TMP="$tmp" "$tmp/context_diff" "$model" "$@"

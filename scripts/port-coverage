@@ -256,6 +256,14 @@ LANG_=cxx report_unit "ggml-metal-device.cpp" llama.cpp/ggml/src/ggml-metal/ggml
     "$PORTED_DIR/ported.zig"
 LANG_=cxx report_unit "ggml-metal-ops.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-ops.cpp yes \
     "$PORTED_DIR/ported.zig"
+# ggml-opt.cpp: 37 C-ABI symbols, not the 9 PLAN.md's survey recorded.
+# src/ggml/opt.zig, gated by scripts/opt-diff.
+LANG_=cxx report_unit "ggml-opt.cpp" llama.cpp/ggml/src/ggml-opt.cpp yes \
+    "$PORTED_DIR/ported.zig"
+# ggml-backend-meta.cpp: 8 C-ABI symbols. src/ggml/backend_meta.zig, gated by
+# scripts/meta-diff.
+LANG_=cxx report_unit "ggml-backend-meta.cpp" llama.cpp/ggml/src/ggml-backend-meta.cpp yes \
+    "$PORTED_DIR/ported.zig"
 
 # libllama. It swaps once, at llama.h (PLAN.md, Decision 42), except for the
 # sampler and grammar, which swap ahead of the rest.

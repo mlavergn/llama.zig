@@ -5,18 +5,22 @@
 # The loader, the hyperparameters and the model's metadata are ported ahead
 # of libllama's single swap (PLAN.md, Decision 42), so nothing downstream can
 # see them yet. This runs the metadata half of llama_model_load through the
-# C++ in libllama.a (harness/loader_ref.cpp) and through the port, on every
+# C++ in libllama-ref.a (harness/loader_ref.cpp) and through the port, on every
 # vocabulary file upstream ships, the local Qwen3.5 model, and synthesized
 # files. See harness/loader_diff.zig for what is compared.
 #
 # Usage: scripts/loader-diff [extra.gguf...]
 #   Requires: zig build reference --release=fast
-#   Any Qwen3.5 model in the repository root is added automatically.
+#   Every Qwen3.5 model in the repository root is added automatically: its
+#   metadata is loaded as the other files' is, and its tensors are loaded in
+#   full through llama_model_load_from_file and through the port, once each,
+#   and the first one again under every parameter that changes where a
+#   tensor goes or how it is read.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
-for lib in zig-out/lib/libllama.a zig-out/lib/libggml.a; do
+for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
 done
 
@@ -26,7 +30,7 @@ trap 'rm -rf "$tmp"' EXIT
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 
 zig c++ -mcpu=baseline -c harness/loader_ref.cpp -o "$tmp/loader_ref.o" -std=c++17 -O2 -w \
-    -I harness -I llama.cpp/src -I llama.cpp/include -I llama.cpp/ggml/include 2>"$tmp/cerr" \
+    -I harness -I llama.cpp/src -I llama.cpp/include -I llama.cpp/ggml/include -I llama.cpp/ggml/src 2>"$tmp/cerr" \
     || { echo "FAIL: cannot compile harness/loader_ref.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
 
 # Zig 0.17 has no `@cImport`: `impl.zig` imports llama.h and gguf.h as the module
@@ -38,14 +42,14 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
 zig build-exe -mcpu baseline -femit-bin="$tmp/loader_diff" -Ofast -lc \
     --dep staged -Mroot=harness/loader_diff.zig \
     --dep llama_c -Mstaged=src/llama/staged.zig -Mllama_c="$tmp/llama_c.zig" \
-    "$tmp/loader_ref.o" zig-out/lib/libllama.a zig-out/lib/libggml.a -lc++ \
+    "$tmp/loader_ref.o" zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 
 models=(llama.cpp/models/ggml-vocab-*.gguf)
 for m in Qwen3.5-*.gguf; do
-    [ -f "$m" ] && { models+=("$m"); break; }
+    [ -f "$m" ] && models+=("$m")
 done
 
 "$tmp/loader_diff" "$tmp" "${models[@]}" "$@"

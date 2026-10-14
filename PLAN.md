@@ -57,9 +57,9 @@ Settled in review. The plan below assumes all of these.
 | 36 | Definition of complete | **ggml and libllama both ported, `llama-cli` running Qwen3.5 with token parity.** All 151 architectures and cross-platform are named follow-on milestones, not part of this push. |
 | 37 | Licence | **MIT**, matching llama.cpp and `zigjinja`. |
 | 38 | Copyright holder | **`Marc Lavergne`, provisionally.** Taken from the repository's git author config; revisit before any public release. |
-| 40 | Order within Stage 4 | **Gated work first.** `ggml-backend-meta.cpp` and `ggml-opt.cpp` move to the end of Stage 4's ggml half, behind the `ggml-cpu/` C++. Neither is on the inference path, so neither has an end-to-end gate — and meta is **~96% unexecutable on this machine**: `ggml_backend_meta_device` is only built under `LLAMA_SPLIT_MODE_TENSOR`, our CLI never sets `split_mode`, and there is one GPU. The `ggml-cpu/` C++ is the opposite: covered by **`backend-ops`**, which runs CPU against Metal over 21,093 op configurations. Note that is the *only* gate that reaches it — measured, by putting an abort in `ggml_compute_forward_mul` and watching `make port` finish without hitting it. On a Metal machine the CPU op kernels never execute during inference, so `parity-cli` and `make port` cannot see them at all. One real gate still beats meta and opt's zero. Supersedes the ordering in "Order of work" step 1. |
+| 40 | Order within Stage 4 | **Gated work first.** `ggml-backend-meta.cpp` and `ggml-opt.cpp` move to the end of Stage 4's ggml half, behind the `ggml-cpu/` C++. Neither is on the inference path, so neither has an end-to-end gate — and meta is **~96% unexecutable on this machine**: `ggml_backend_meta_device` is only built under `LLAMA_SPLIT_MODE_TENSOR`, our CLI never sets `split_mode`, and there is one GPU. The `ggml-cpu/` C++ is the opposite: covered by **`backend-ops`**, which runs CPU against Metal over 21,093 op configurations. Note that is the *only* gate that reaches it — measured, by putting an abort in `ggml_compute_forward_mul` and watching `make port` finish without hitting it. On a Metal machine the CPU op kernels never execute during inference, so `parity-cli` and `make port` cannot see them at all. One real gate still beats meta and opt's zero. Supersedes the ordering in "Order of work" step 1. **Since done**, both ported and swapped last as decided. The "~96% unexecutable" estimate for meta was wrong: it accepts the same device twice, so `scripts/meta-diff` runs a real all-reduce on {Metal, Metal} and reaches 94.8% of its lines. |
 | 39 | Threading primitives in ported code | **pthreads directly**, not `std.Io.Mutex` / `std.Io.Condition`. Zig 0.16 requires an `Io` on every call and a backend entered through a C ABI has none. `std.Thread.spawn` is still used for the workers. |
-| 42 | libllama's swap unit | **Measured: libllama is one strongly connected component, so it swaps once, at `llama.h` — with one exception that goes first.** 22 of its core translation units plus every `models/*.cpp` reach each other through 367 mangled C++ symbols and 27 C ones; ggml's "the external contract is a pure C ABI" does not carry over. The exception is **`llama-sampler.cpp` + `llama-grammar.cpp`**: inbound, `llama-context.o` reaches them through the C `llama_sampler_i` vtable, three C functions and two mangled ones with plain-pointer signatures, which Zig can `@export`; outbound, every call into `llama_vocab` has a public C equivalent. So that pair is ported and swapped first, and everything else in libllama is developed beside the C++ and gated in-process subsystem by subsystem until the single swap. See "Order of work" step 4. |
+| 42 | libllama's swap unit | **Measured: libllama is one strongly connected component, so it swaps once, at `llama.h` — with one exception that goes first.** 22 of its core translation units plus every `models/*.cpp` reach each other through 367 mangled C++ symbols and 27 C ones; ggml's "the external contract is a pure C ABI" does not carry over. The exception is **`llama-sampler.cpp` + `llama-grammar.cpp`**: inbound, `llama-context.o` reaches them through the C `llama_sampler_i` vtable, three C functions and two mangled ones with plain-pointer signatures, which Zig can `@export`; outbound, every call into `llama_vocab` has a public C equivalent. So that pair is ported and swapped first, and everything else in libllama is developed beside the C++ and gated in-process subsystem by subsystem until the single swap. See "Order of work" step 4. **Done: swapped**, with the C++ kept as `libllama-ref.a` for the in-process gates. |
 
 ---
 
@@ -613,13 +613,25 @@ rule; tables from `scripts/gen-model-tables`). Gated by `make loader-diff`,
 layout-checked mirror. See `NOTES.md`, "The loader and the
 hyperparameters".
 
-**Next: `load_tensors`.** `llama-mmap.cpp` (the rest of `llama_file`,
-`llama_mmap`, `llama_mlock`), the tensor half of `llama-model-loader.cpp`
-(`create_tensor`, `weight_buft_supported`, `select_weight_buft`,
-`load_all_data`), and Qwen3.5's `load_arch_tensors`. Its gate extends
-`loader-diff`: every created tensor's name, shape, type and chosen buffer
-type, then a hash of every loaded tensor's bytes, both sides in one
-process.
+**Done within it: `load_tensors`.** `llama-mmap.cpp` (`mmap.zig`), the
+tensor half of `llama-model-loader.cpp`, the device and buffer-type
+selection, Qwen3.5's `load_arch_tensors`. `loader-diff` grew to every
+created tensor's name, shape, type, buffer and data hash under 21 parameter
+variants: 150,557 checks.
+
+**Done: the rest, and the swap.** Batch (`batch-diff`), chat templates
+(`chat-diff`), the KV cache, the recurrent and hybrid memories, the graph
+builder, Qwen3.5's graph and the delta-net blocks, `llama_context` and its
+state API (`context-diff`, ~2.4M checks over 9 model configurations
+including tensor parallelism and a device without the fused Gated Delta
+Net), `LLAMA_SPLIT_MODE_TENSOR`'s split state (`meta_split.zig`, compared
+tensor by tensor), adapters (`adapter-diff`), the quantizer and saver
+(`quant-diff`), training (`opt-llama-diff`), and every other `llama.h`
+entry point (`api-diff`). Then the single swap: `libllama.a` is the Zig
+alone, `exports.zig` exports 240 symbols equal to the reference's, and the
+C++ survives only as `libllama-ref.a` for the in-process harnesses.
+`parity-cli`, `parity-port`, `parity-port-cpu`, `node-diff` (CPU and GPU)
+and `sampler-diff` pass on it. See `NOTES.md`, "libllama swapped".
 
 **Also done within it: `unicode.cpp` and `unicode-data.cpp`**, with their own
 in-process oracle, `make unicode-diff` (7.07M checks, every pattern set in
@@ -628,11 +640,12 @@ in-process oracle, `make unicode-diff` (7.07M checks, every pattern set in
 both engines. See `NOTES.md`, "`unicode.cpp` -- the vocabulary's first
 piece".
 
-**5. `src/models/qwen35.cpp`** (645) plus its shared scaffolding.
+**5. `src/models/qwen35.cpp`** (645) plus its shared scaffolding. **Done**:
+`src/llama/models/qwen35.zig` and `delta_net.zig`, gated by `context-diff`.
 
 **6. The Zig CLI.** Decision 26 pulled this forward and it is built — see
-`NOTES.md`, "The CLI, built now". By the end of Stage 4 it links a fully ported
-libllama rather than a partly ported one, but it is the same binary.
+`NOTES.md`, "The CLI, built now". It now links the fully ported libllama, and
+no C++ runtime.
 
 ### What the CLI can and cannot support
 
@@ -900,8 +913,9 @@ end to end. What it includes, and one part of it is easy to undercount:
    Worth recording for the files still to come: it contains **no `throw`, no
    `catch`, no `std::string`, no templates and no virtual functions** — the
    difficulty was the five-pass assignment algorithm, not the C++.
-5. ~~`ggml-backend-meta.cpp` and `ggml-opt.cpp`~~ — **deferred to the end of
-   the ggml half by Decision 40.** Measured counts: meta is **8** symbols over
+5. ~~`ggml-backend-meta.cpp` and `ggml-opt.cpp`~~ — **done** (`backend_meta.zig`,
+   `opt.zig`; `meta-diff`, `opt-diff`). They were deferred to the end of
+   the ggml half by Decision 40, and the record below is what was expected then. Measured counts: meta is **8** symbols over
    2,495 lines (not 4), opt is **37** over 1,094 (not 9).
 
    Neither is on the inference path, so neither has an end-to-end gate. Worse,
@@ -919,14 +933,17 @@ end to end. What it includes, and one part of it is easy to undercount:
    unspecified, so libc++ and libstdc++ differ. That is the third instance of
    the category in `CLAUDE.md`, "Where the C's own answer is unspecified", and
    it gets the same treatment: implement MT19937 faithfully, document the
-   shuffle divergence, do not chase it.
+   shuffle divergence, do not chase it. **Superseded in the doing**: the
+   reference is libc++, so `opt.zig` reproduces libc++'s `shuffle` and
+   `uniform_int_distribution` exactly, measured against the real templates
+   by `opt-diff`; the divergence is libstdc++'s, and only off this platform.
 
 **Every symbol count this plan carried for Stage 4's first group was low** —
 gguf 44 vs 61, backend 82 vs 102, meta 4 vs 8, opt 9 vs 37. Measure the
 contract with `port-coverage` before estimating; the original survey figures
 are not usable as estimates.
-6. **`ggml.cpp`** (26 lines, 0 symbols) — dropped rather than ported, once no
-   C++ in the build can throw. See the note under "Order of work" above.
+6. ~~**`ggml.cpp`**~~ (26 lines, 0 symbols) — **dropped**, now that no C++ in
+   the build can throw. See the note under "Order of work" above.
 7. ~~`ggml-cpu/binary-ops.cpp`, `unary-ops.cpp`, `vec.cpp`, `ops.cpp`~~ —
    **done.** 125 symbols between them. `ops.cpp` is the largest translation
    unit in ggml; see "`ops.cpp`: done" above.
@@ -1026,6 +1043,16 @@ Gate: `make ops-diff`, 592 op results identical either side of the fold.
     `make libcxx-diff` 189,684 checks, `make regex-diff` 538,416. The
     vocabulary, the architecture tables and the model's metadata have since
     followed -- see "Order of work" step 4 for where libllama stands.
+
+11. ~~The rest of libllama, and the swap at `llama.h`~~ — **done**. Stage 4
+    is complete: no C or C++ compiles into `libggml.a` or `libllama.a`
+    apart from the two Obj-C files. See `NOTES.md`, "libllama swapped".
+
+**Next, in order:** the other 150 architectures (Decision 36's first
+follow-on milestone — each needs its `load_arch_hparams`, `load_arch_tensors`
+and graph builder, and the iSWA memory and T5 cross-attention arms that
+abort today); Stage 6's CUDA gate question; Stage 5. The xcframework still
+links Zig's libc++ into each slice, which nothing needs since the swap.
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:
 

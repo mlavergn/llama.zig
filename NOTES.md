@@ -4053,3 +4053,212 @@ the requirement; it has not been run on an M2.
 `dotq_s32`'s portable form is 31 instructions where LLVM's `sdot` intrinsic
 is one, measured. Every dotprod kernel pays that on the CPU path, at both
 CPUs. Not changed here.
+
+## libllama swapped: the rest of `src/`, and the single swap at `llama.h`
+
+Everything libllama does at inference time is Zig now: the batch splitter,
+the KV cache, the recurrent and hybrid memories, the graph builder, Qwen3.5's
+graph and its delta-net blocks, `llama_context` with its state API, the
+adapters, the quantizer, the model saver, training, and the whole of
+`llama.h`'s C API. `libllama.a` is one Zig object; `build/llamacpp.zig`
+compiles no C or C++ into it. On the ggml side `ggml-backend-meta.cpp` and
+`ggml-opt.cpp` are ported and `ggml.cpp` is dropped, so `ggml_base_cxx_sources`
+is empty. The CLI links no libc++ (`otool -L` lists frameworks, `libSystem`
+and `libobjc`, nothing else).
+
+### How the swap is wired
+
+- **`src/llama/api/`** holds every `llama.h` function as a `pub fn … callconv(.c)`
+  with the exact translated signature and **no export**. The in-process
+  harnesses call them beside the C++ that defines the same names.
+- **`src/llama/exports.zig`** exports every `llama_*` function in `api/` by
+  name, at comptime, and is imported only by `module.zig`. Six `api/`
+  functions come from `llama-ext.h`, which has C++ linkage; the reference
+  exports none of them unmangled, so neither does the port. The result is
+  checked with `nm`: the port's `llama_*` text symbols equal the reference's,
+  **240 = 240**.
+- **The logger needs no switch.** `impl.zig`'s `logInfo` and friends call the
+  C++'s mangled `_Z18llama_log_internal14ggml_log_levelPKcz`. `exports.zig`
+  exports `log.zig`'s `logInternal` under that name, so in `libllama.a` the
+  call resolves to Zig, and in a harness, which links the C++ instead, it
+  resolves to the C++. Neither side chooses at build time.
+- **`libllama-ref.a`** is upstream's libllama, every translation unit
+  including the sampler and grammar, compiled unmodified. The in-process
+  harnesses link it: `loader`, `vocab`, `arch`, `batch`, `chat`, `api`,
+  `context`, `adapter`, `quant`, `opt-llama`. The end-to-end gates
+  (`parity-cli`, `parity-port`, `node-diff`, `sampler-diff`) and `abi-check`
+  link the port.
+
+### `context-diff`: the gate for everything a decode reaches
+
+`harness/context_diff.zig` loads one model twice in one process, through the
+C++ and through the port, and runs one decode script per case through
+`llama.h` and through `api/` alike. The script covers:
+
+- a prompt, then greedy steps;
+- an all-outputs batch;
+- interleaved sequences whose outputs come back out of order;
+- the memory API;
+- every state path: buffer, file, per-sequence, on-device, truncated, wrong
+  arch, wrong magic, restore-then-decode;
+- the error returns;
+- a second round after a clear, so graph reuse is exercised.
+
+Both transcripts must be identical: every log line, every graph node
+(`cb_eval`: name, op, type, shape, strides, `op_params`, sources, view,
+flags, data hash), every return value, and every output row's bits.
+
+It runs 21 context configurations over 9 model configurations:
+
+- **gpu**, **cpu**, **partial** (10 layers offloaded).
+- **proxy** — `harness/proxy_dev.c`, a CPU device that declines
+  `GGML_OP_GATED_DELTA_NET`.
+- **norm-on-cpu** — a buffer-type override.
+- **tensor** and **tensor-uneven** — `LLAMA_SPLIT_MODE_TENSOR` over Metal
+  and the CPU.
+
+Each model configuration also compares the two load logs. The tensor
+configurations additionally compare `llama_meta_device_get_split_state`
+against the port's for every weight and cache tensor at 2, 3 and 4 devices.
+Before the swap: **2,417,100 checks, 0 failures.**
+
+**Its first runs were not evidence, four times over.** Each escape was a
+hole in the script, not the port:
+
+- **The output reorder escaped.** The interleaved batch named sequence 2
+  with `n_seq_max = 2`, so both sides rejected it with `-1` and the
+  multi-sequence path never decoded.
+- **Halving the delta-net chunk size escaped.** Every device here supports
+  the fused Gated Delta Net, so `resolve_fused_ops` always enables it and
+  `buildDeltaNetChunking`/`Autoregressive` never run. A backend without the
+  op takes them. The proxy device is that backend; with it, 23,027 nodes
+  per case instead of 13,750.
+- **Dropping `graph_get_cb`'s pinning of a layer's norm escaped.** The pin
+  is redundant whenever the norm weight already sits on the layer's device,
+  which it always does. `norm-on-cpu` moves the norm weights to host memory,
+  and the injection then fails at line 105.
+- **An on-device sequence restore that copied the wrong way escaped.**
+  `seq_rm` does not clear tensor data, so a restore that copies nothing
+  restores the right state. The script now overwrites the sequence with
+  another decode between save and restore.
+
+After those: **16/16 injections caught**. They were kq_scale, output reorder,
+reuse count, recurrent `seq_cp`, input reuse, causal mask, chunk size,
+autoregressive decay, norm pin, callback naming, and six in the state code.
+Two more went into `meta_split.zig`: rotation ignored, and Q granularity not
+doubled. Both caught.
+
+### Two real bugs it found
+
+- **`output_resolve_row`'s negative index.** `n_outputs + i` is `uint32_t`
+  arithmetic in the C++, so `-2` with one output wraps to `4294967295`.
+  The "negative index out of range" branch can never fire, and the error is
+  "corrupt output buffer". The port computed it in `i64`.
+- **`Model.params.tensor_split` pointed into a dead stack frame.**
+  `Model.create` returns the model by value after pointing
+  `params.tensor_split` at its own `tensor_split_owned`, so the copy kept a
+  pointer into `create`'s frame. An even split never reads it. Under
+  `LLAMA_SPLIT_MODE_TENSOR` with `tensor_split = {3, 1}`, the KV and
+  recurrent buffers were sized from whatever had since been written there,
+  and the first decode died in a Metal `mul_mat` with `ne00 == ne10`.
+  `loader-diff`'s tensor-split case had passed because the frame had not
+  been overwritten yet during load. `Model.ownTensorSplit` re-points it once
+  the model is at its final address. The split states themselves were right
+  all along, as the direct comparison showed.
+
+### What the C++ itself cannot do
+
+Measured, and so excluded rather than matched:
+
+- **The meta backend cannot compute a graph `cb_eval` has cut at every
+  node** (`GGML_ASSERT(i_start == cgraph->n_nodes)`,
+  ggml-backend-meta.cpp:2207). The tensor configurations therefore record
+  each node's structure when the scheduler asks, and answer no.
+- **`offload_kqv = false` under tensor parallelism asserts on the
+  attention's split axes** (ggml-backend-meta.cpp:826).
+- **`seq_add` asserts for M-RoPE** (llama-kv-cache.cpp:575).
+
+### The other gates, built alongside
+
+| Gate | Covers | Checks | Injections |
+|---|---|---:|---:|
+| `api-diff` | llama.h's model, vocab, loading, chat, batch, logger entry points at the C boundary | 85,848,657 | 19/19 |
+| `adapter-diff` | LoRA, aLoRA, control vectors; libc++ `unordered_map<ptr>` order | 278,212 | 13/13 |
+| `quant-diff` | `llama_model_quantize` on every ftype, the type rules for 146 archs, the saver | 120,329,357 | 17/17 |
+| `opt-diff` | `ggml-opt.cpp`, libc++ `shuffle` and `uniform_int_distribution` | 89,924 | 13/14, 1 provably inert |
+| `opt-llama-diff` | `llama_opt_init`/`_epoch` on a synthesized F32 Qwen3.5 | 50,856 lines + 6 aborts | 8/8 |
+| `meta-diff` | `ggml-backend-meta.cpp` on {Metal,Metal}, {Metal,CPU}, 1–4 devices; 94.8% of its lines | 76,645 + 2×6,528 lines | 14/14 |
+| `batch-diff` | `llama_batch_allocr` and its splits | ~10.2M | 12/12 |
+| `chat-diff` | the built-in chat templates | 952,391 | 11/11 |
+
+Things those gates established that are worth knowing:
+
+- **`opt.zig` reproduces libc++'s `shuffle` exactly**, against PLAN's earlier
+  "document the divergence". It was measured against the real template,
+  including the two-draw path.
+- **Decision 40's "~96% unexecutable" for the meta backend was wrong.**
+  It accepts the same device twice, so {Metal, Metal} gives a real
+  all-reduce on one GPU. What stays unreached here is the `ggml_backend_comm_*`
+  collective (NCCL on CUDA), the non-null host-buffer arms, and a few
+  propagation arms no local model has.
+- **An upstream use-after-free in the meta backend's `graph_compute`.**
+  When `max_nnodes` grows, only the first `n_subgraphs` subgraphs are
+  rebuilt. libllama reserves its largest graph first and never hits it. The
+  port keeps the C++'s behaviour.
+- **Upstream behaviours reproduced rather than fixed:**
+  - the quantizer's `prune_layers` loads a renamed tensor's data under its
+    new name;
+  - the saver aborts on a precompiled charsmap;
+  - saving a CPU_REPACK model segfaults the C++.
+- **Training Qwen3.5 is mostly impossible on both sides.** Any weight
+  upstream of a cache write fails the backward build ("inplace operations
+  are currently not supported", ggml.c:7318), and the attention output
+  gate's `sigmoid` has no backward. `opt-llama-diff` trains what can be
+  trained and compares the six aborts.
+- **Token-embedding LoRA is load-only in the gate.** Qwen3.5-2B ties its
+  head to `token_embd.weight`, and the C++ aborts applying it.
+- **An RWKV `token_to_piece` with a negative length differs on purpose.** The
+  C++ compares against `(size_t)length` and writes past the buffer.
+
+### After the swap
+
+`parity-cli` 6/6, `parity-port` 6/6, `parity-port-cpu` 6/6, `node-diff`
+2,750 nodes identical on CPU and GPU at 1 and 4 threads, and `sampler-diff`
+40,289 records — all on the all-Zig library. `abi-check` grew from 15 to 34
+entry points. Every `*_default_params` now *returns* a struct from a Zig
+callee, one of them the one-byte `llama_sampler_chain_params`, and the
+batch functions return and take `llama_batch` by value. All 34 arrive
+intact.
+
+Then every other gate was re-run against the swapped tree, with every
+in-process harness now linking `libllama-ref.a`. All pass:
+
+| Gate | Result |
+|---|---|
+| `make validate` | OK; it now includes `batch-diff`, `chat-diff`, `api-diff` and the `api/` and `models/` format check |
+| `context-diff` | 2,417,100 checks |
+| `adapter-diff` | 278,212 checks |
+| `quant-diff` | 120,329,357 checks |
+| `opt-diff` | 89,924 checks |
+| `opt-llama-diff` | all cases, plus 6 abort cases |
+| `meta-diff` | 76,645 end-to-end lines |
+| `ops-diff` | 650 results |
+| `repack-diff` | 60 checks |
+| `metal-diff` | 65 answers |
+| `tuning-diff` | 3,528,489 lookups |
+| `struct-layout` | — |
+| `probe` | — |
+| `backend-ops` | 21,093 configurations |
+
+### Left for later
+
+- **Architectures other than Qwen3.5** (Decision 36's follow-on milestone).
+  - The graph builders and `load_arch_hparams` exist for Qwen3.5 only.
+  - The quantizer therefore quantizes end to end only for Qwen3.5, though
+    its type rules are gated for every architecture.
+  - `createMemory`'s iSWA arm aborts.
+  - Encoder–decoder (T5) cross-attention in `encode` aborts.
+- **The xcframework (`xcfwk/`) still links Zig's libc++, libc++abi and
+  compiler_rt** into each slice by `ld -r`. Since the swap nothing in either
+  library needs the C++ runtime, so that step carries dead weight and can go.
+  `xcfwk/` was another session's work and is untouched here.

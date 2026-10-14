@@ -52,6 +52,8 @@ comptime {
     // ggml-backend.cpp, split in two: the vtable dispatch and the scheduler.
     _ = @import("backend.zig");
     _ = @import("backend_sched.zig");
+    _ = @import("backend_meta.zig"); // ggml-backend-meta.cpp
+    _ = @import("opt.zig"); // ggml-opt.cpp
     // ggml-metal/, the host layer. The two .m files stay Objective-C.
     //
     // **Behind `config.use_metal`, like the registry's reference to it.**

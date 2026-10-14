@@ -28,8 +28,9 @@
 | Artifact | Path | What it is |
 |---|---|---|
 | `llama-cli` | `zig-out/bin/llama-cli` | Command-line text-completion binary |
-| `libggml.a` | `zig-out/lib/libggml.a` | ggml, with the ported translation units in place of their C |
-| `libllama.a` | `zig-out/lib/libllama.a` | llama.cpp's model layer, built from pinned upstream sources |
+| `libggml.a` | `zig-out/lib/libggml.a` | ggml, ported; the two Metal Objective-C files and the embedded kernels beside it |
+| `libllama.a` | `zig-out/lib/libllama.a` | llama.cpp's model layer, ported: exports `llama.h` |
+| `libllama-ref.a` | `zig-out/lib/libllama-ref.a` | Upstream's libllama, the pinned C++ unmodified — a test oracle, not a deliverable |
 | `libllamazig.a` | `zig-out/lib/libllamazig.a` | This project's own library scaffold |
 | docs | `zig-out/docs/` | Generated API documentation |
 
@@ -60,7 +61,7 @@ symbol names, same signatures. Callers link against them without change.
 | `ggml/src/ggml-cpu/quants.c` | 1,339 | 45 | `src/ggml/cpu/quants/` |
 | `ggml/src/ggml-cpu/arch/arm/quants.c` | 4,319 | 28 | `src/ggml/cpu/quants/arm/` |
 
-And sixteen C++ translation units:
+And every C++ translation unit:
 
 | Reference source | Lines | Exported symbols | Replaced by |
 |---|---:|---:|---|
@@ -80,6 +81,15 @@ And sixteen C++ translation units:
 | `ggml/src/ggml-metal/ggml-metal-common.cpp` | 457 | 6 | `src/ggml/metal/common.zig` |
 | `ggml/src/ggml-metal/ggml-metal-tuning.cpp` | 1,087 | 7 (mangled) | `src/ggml/metal/{tuning,tuning_table}.zig` |
 | `ggml/src/ggml-metal/ggml-metal.cpp` | 998 | 6 | `src/ggml/metal/backend.zig` |
+| `ggml/src/ggml-metal/ggml-metal-device.cpp` | 2,267 | 73 | `src/ggml/metal/library.zig` |
+| `ggml/src/ggml-metal/ggml-metal-ops.cpp` | 5,369 | 66 | `src/ggml/metal/ops.zig` |
+| `ggml/src/ggml-backend-meta.cpp` | 2,495 | 8 | `src/ggml/backend_meta.zig` |
+| `ggml/src/ggml-opt.cpp` | 1,094 | 37 | `src/ggml/opt.zig` |
+| `src/llama*.cpp`, `src/unicode*.cpp` | 47,215 | 240 (all of `llama.h`) | `src/llama/`, exported by `src/llama/exports.zig` |
+| `src/models/qwen35.cpp` | 645 | — | `src/llama/models/{qwen35,delta_net}.zig` |
+
+`ggml/src/ggml.cpp` is dropped rather than ported: it only installed a
+`std::terminate` handler, and no C++ is left to throw.
 
 `scripts/port-coverage` derives each symbol contract by compiling the source
 and reports the count. For a C++ file the contract is the *unmangled*
@@ -93,17 +103,17 @@ bases `traits.cpp` declares, and `ggml-cpu.cpp` registers the buffer type
 
 ### 3.2 What is not Zig
 
-No C remains under `ggml/src/`, and nothing under `ggml/src/ggml-cpu/`
-compiles from C++ either. What is left is C++ and Objective-C.
+No C or C++ compiles into `libggml.a` or `libllama.a` apart from three
+objects that are empty on this target. `llama-cli` links no C++ runtime.
 
 | Component | Language | Note |
 |---|---|---|
 | `ggml-cpu/hbm.cpp`, `amx/amx.cpp`, `amx/mmq.cpp` | C++ | All three empty on this target: `GGML_USE_CPU_HBM` and `__AMX_INT8__` are off |
-| `ggml-backend-meta.cpp`, `ggml-opt.cpp`, `ggml.cpp` | C++ | Meta buffers, the optimizer API, and a `std::terminate` handler to be dropped rather than ported |
-| `ggml-metal/*.cpp` | C++ | Metal backend host code: `-device.cpp`, `-ops.cpp` |
 | `ggml-metal-device.m`, `ggml-metal-context.m` | Objective-C | Metal object interface; stays Objective-C permanently |
 | `ggml-metal/kernels/*.metal` | MSL | Compiled by the GPU driver at load; never ported |
-| `src/llama*.cpp`, `src/models/*.cpp` | C++ | Model layer and every architecture |
+
+The other 150 architectures under `src/models/` are not ported: the model
+layer loads any of them vocab-only, and decodes Qwen3.5.
 
 ### 3.3 Backends
 
@@ -353,7 +363,7 @@ locatable in this port.
 | `zig build` | The scaffold binary |
 | `zig build lib` | `libllamazig.a` |
 | `zig build cli` | `llama-cli` |
-| `zig build reference` | `libggml.a`, `libllama.a` |
+| `zig build reference` | `libggml.a`, `libllama.a`, and the oracle `libllama-ref.a` |
 | `zig build test` | Unit tests |
 | `zig build test-port` | Ported ggml tests |
 | `zig build smoke` | Load a model and generate, through libllama's C ABI |

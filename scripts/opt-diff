@@ -1,0 +1,86 @@
+#!/bin/bash
+# Diff src/ggml/opt.zig against the reference ggml-opt.cpp, in one process.
+#
+# **The oracle the training API did not have.** ggml-opt is not on the
+# inference path: `make port`, parity and node-diff never call it, and
+# test-backend-ops only exercises the two optimizer-step ops it builds.
+#
+# How both live in one process: the reference ggml-opt.cpp is compiled with
+# every one of its 37 unmangled exports renamed to `ref_*` on the command
+# line -- the same method as scripts/repack-diff. The port is compiled into
+# the harness as a Zig module whose exports the harness root switches off
+# (`pub const ggml_opt_exports = false`), so the binary holds exactly one
+# definition of every name: the port reached through Zig, the reference
+# through `ref_*`, and libggml.a's own ggml-opt.o never pulled in because
+# nothing references its names. Everything else both sides call --
+# graphs, ops, backends, the scheduler -- is the same libggml.a.
+#
+# The harness is built ReleaseSafe: the port's integer narrowing and
+# indexing are checked, which no ReleaseFast gate can see. Neither side's
+# float arithmetic depends on it.
+#
+# Usage: scripts/opt-diff
+#   Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+LIB=zig-out/lib/libggml.a
+[ -f "$LIB" ] || { echo "missing $LIB -- run 'zig build reference --release=fast'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+CXX=(zig c++ -mcpu=baseline -std=c++17 -w -O2
+     -I llama.cpp/ggml/include -I llama.cpp/ggml/src
+     -DNDEBUG -DGGML_USE_CPU -DGGML_USE_METAL)
+
+SRC=llama.cpp/ggml/src/ggml-opt.cpp
+
+# Pass 1: discover what to rename -- every unmangled export, which is also
+# exactly the contract the port defines.
+"${CXX[@]}" -c "$SRC" -o "$tmp/probe.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile the reference $SRC" >&2; head -8 "$tmp/err" >&2; exit 1; }
+nm -gUj "$tmp/probe.o" | sed 's/^_//' | grep -v '^_Z' | grep -v '__clang_call_terminate' | sort -u > "$tmp/syms"
+
+DEFS=()
+while read -r s; do DEFS+=("-D${s}=ref_${s}"); done < "$tmp/syms"
+
+"${CXX[@]}" "${DEFS[@]}" -c "$SRC" -o "$tmp/ref_opt.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile the renamed reference" >&2; head -8 "$tmp/err" >&2; exit 1; }
+# Every export renamed, or the link would hold two definitions of a name.
+if nm -gUj "$tmp/ref_opt.o" | sed 's/^_//' | grep -v '^_Z' | grep -v '__clang_call_terminate' | grep -v '^ref_' | grep .; then
+    echo "FAIL: the reference still exports the names above" >&2
+    exit 1
+fi
+echo "reference: $(wc -l < "$tmp/syms" | tr -d ' ') exports renamed to ref_*"
+
+"${CXX[@]}" -c harness/opt_ref.cpp -o "$tmp/opt_ref.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile harness/opt_ref.cpp" >&2; head -8 "$tmp/err" >&2; exit 1; }
+
+# Zig 0.17 has no `@cImport`: ggml's headers are the module `ggml_c`,
+# translated from src/ggml/c_import.h exactly as build/llamacpp.zig does.
+zig translate-c -lc -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
+    src/ggml/c_import.h >"$tmp/ggml_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate the ggml headers" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+zig build-exe -mcpu baseline -femit-bin="$tmp/opt_diff" -OReleaseSafe -lc \
+    --dep opt --dep ggml_c -Mroot=harness/opt_diff.zig \
+    --dep ggml_c -Mopt=src/ggml/opt.zig \
+    -Mggml_c="$tmp/ggml_c.zig" \
+    "$tmp/ref_opt.o" "$tmp/opt_ref.o" "$LIB" \
+    -lc++ \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+# The port must define no ggml_opt_* symbol of its own in this binary, and
+# the reference ggml-opt.o inside libggml.a must not have been linked:
+# either would mean a call could reach the wrong implementation.
+if nm -gUj "$tmp/opt_diff" | sed 's/^_//' | grep -E '^ggml_opt_(dataset|init$|free$|reset$|fit$|epoch|result|alloc$|eval$|prepare|get_|default|static|inputs|outputs|labels|loss$|pred$|ncorrect$|grad_acc|context|optimizer)'; then
+    echo "FAIL: the harness defines the real ggml_opt names above" >&2
+    exit 1
+fi
+
+"$tmp/opt_diff"
