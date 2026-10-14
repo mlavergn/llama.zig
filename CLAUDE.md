@@ -212,18 +212,23 @@ Correctness has twenty-one gates, and none of them subsumes the others:
   Measured, on the swap: `node-diff` named one node; this named twelve
   kernels and four distinct faults, three of them in shapes
   `ggml_repack_get_optimal_repack_type` cannot select on this target and
-  so dead to every other gate. **Half of these kernels are exported and
-  unreachable here** — the `8x8` and `4x8` shapes need AVX2, AVX-512, SVE
-  or `__ARM_FEATURE_MATMUL_INT8` — the same position as the `_generic` dot
-  products above.
+  so dead to every other gate. **At the baseline, half of these kernels
+  are exported and unreachable** — the `8x8` and `4x8` shapes need AVX2,
+  AVX-512, SVE or `__ARM_FEATURE_MATMUL_INT8` — the same position as the
+  `_generic` dot products above. At `GATE_CPU=apple_m3` five of their gemms
+  have i8mm bodies and the dispatcher chooses them.
 
   It also covers the eleven block converters, which are `static` in the C
   and have no exported name: those run **through the real buffer type**, so
   `ggml_repack_get_optimal_repack_type`, `init_tensor` and `set_tensor` are
   diffed too, and *which instantiation each side chose* is part of the
-  comparison. 44 checks. Negative-tested 4/4 — one live kernel, one
-  generic no other gate can reach, one converter, one wrong dispatch
-  choice.
+  comparison. 60 checks: every gemm runs at 4 rows **and at 20**, because
+  the hand-written aarch64 gemms do sixteen rows a pass and finish in a
+  four-row tail, and at 4 rows only the tail ever ran — the main loop of
+  both `q4_0` asm kernels had no gate before. Negative-tested 4/4 — one
+  live kernel, one generic no other gate can reach, one converter, one
+  wrong dispatch choice — plus 4/4 on the i8mm gemms at apple_m3, one of
+  them in the asm main loop, caught only at 20 rows.
 
 - **`make node-diff`** hashes the output of **every node** of a real model's
   decode — a prompt and one single-token step — and diffs ported against
@@ -674,8 +679,10 @@ For when Stages 3 and 4 begin:
 - **ggml's macro-heavy headers hold real logic in the preprocessor.** `ggml-impl.h`, `ggml-common.h`, and `simd-mappings.h` become `comptime` functions and generics — a rewrite, not a translation.
 - **The Metal kernels under `ggml/src/ggml-metal/kernels/` are never ported.** They are Metal Shading Language compiled by the GPU driver; they travel as embedded data.
 - **Zig has no ACLE intrinsics, and mostly does not need them.** `src/ggml/cpu/quants/arm/neon.zig` reproduces the 82 the NEON kernels use; all but one are a line of `@Vector` arithmetic. Three traps, each measured rather than reasoned about: **NEON integer arithmetic wraps** (so every op there uses `+%`, `*%`); **`vaddvq_f32` is a pairwise reduction**, not the ordered one `@reduce(.Add, ...)` gives; and **`vshlq_u8` shifts *right* on a negative amount**, which `q2_0` depends on.
+- **`vmmlaq_s32` is the one intrinsic that reaches its instruction.** Zig 0.17 calls LLVM intrinsics by name — `extern fn @"llvm.aarch64.neon.smmla.v4i32.v16i8"(...)` compiles to one `smmla` — and `neon.mmlaq_s32` uses that whenever the build has i8mm, with an exact portable form otherwise. The same works for `sdot` (`llvm.aarch64.neon.sdot.v4i32.v16i8`), measured: the portable `dotq_s32` below is 31 instructions with no `sdot`, so **every dotprod kernel in the port pays that on the CPU path**. Not changed yet; the oracles would cover it, since the arithmetic is integer.
 - **`vdotq_s32` has no portable equivalent and does not need one.** It is integer, so the widening-multiply form is bit-identical rather than merely close. Measured cost: none detectable. Generation is 222-234 t/s either side of the port across three runs each, and the prompt figure varies by more than 100 t/s run to run — so the honest claim is "no measurable change", not a number. Metal carries the model; the quantized CPU path is barely on the critical path here.
-- **Only a third of `arch/arm/quants.c` compiles here.** 1,556 of 4,319 lines; the rest is behind `__ARM_FEATURE_SVE` and `__ARM_FEATURE_MATMUL_INT8`. Measure before estimating a file in that directory — `zig cc -E` plus the linemarkers gives the live-line count.
+- **Only a third of `arch/arm/quants.c` compiles at the baseline.** 1,556 of 4,319 lines; the rest is behind `__ARM_FEATURE_SVE` and `__ARM_FEATURE_MATMUL_INT8`. Measure before estimating a file in that directory — `zig cc -E` plus the linemarkers gives the live-line count. The i8mm arms are ported too — `quants/arm/mmla.zig` and `repack/arm/mmla.zig`, chosen at comptime on `builtin.cpu` exactly as the C's `#if` chooses — because the xcframework's macOS slice targets `apple_m3`. SVE is not: no Apple core has it.
+- **A CPU target with i8mm is a different set of kernels, not a faster build of the same ones.** `type_traits_cpu` asks the q4_0, q4_1, q8_0, q4_K and q6_K dot products for **two rows** per call, the repack dispatcher picks the 4x8 and 8x8 shapes, and llamafile's sgemm compiles out (`ggml-cpu.c:45`). Building for apple_m3 before the i8mm arms existed left every second output row unwritten — the `nrc == 1` assertion that would have said so compiles out in ReleaseFast. **Gate i8mm with `GATE_CPU=apple_m3`** on `ops-diff`, `repack-diff`, `node-diff` and `parity-port`; each checks, through `scripts/gate-cpu`, that both libraries really were built for that CPU, because one left over from a baseline build passes by never reaching the arms. That check caught exactly that, once, when a concurrent build rebuilt the zmake reference at the baseline underneath a run.
 
 ## Building the reference tree
 
@@ -690,7 +697,7 @@ rediscover the hard way, so they are recorded here.
 - **Metal is reproducible run-to-run.** Three greedy runs on the same model and prompt produced token-identical output, so the token-parity gate is usable as written.
 - **CMake is not on PATH and `/usr/local` is root-owned.** `make cmake` fetches 4.4.3 into `.tools/`. The Makefile's `CMAKE` variable prefers that over PATH. `ninja` is still absent, which is why the generator is `-G "Unix Makefiles"` — `make` is present.
 - **The parity gate works and passes.** `scripts/parity` diffs the Apple-clang and zig-cc `llama-cli` binaries at `--temp 0` with a fixed seed. 4/4 prompts token-identical. Use it after any change that could affect arithmetic.
-- **`zig cc` and Apple clang do not select the same ARM features.** CMake's probe through `zig cc` reports `HAVE_MATMUL_INT8 - Failed` and `HAVE_SVE - Failed` where Apple clang may not. Output is identical regardless, so this costs throughput rather than correctness — but the two builds are not running the same quant kernels. Revisit when Stage 3 ports `arch/arm/`.
+- **`zig cc` and Apple clang do not select the same ARM features.** CMake's probe through `zig cc` reports `HAVE_MATMUL_INT8 - Failed` and `HAVE_SVE - Failed` where Apple clang may not. Output is identical regardless, so this costs throughput rather than correctness — but the two builds are not running the same quant kernels. Zig's own `-Dcpu` decides it for every build here: `baseline` (M1, no i8mm) unless told otherwise, `apple_m3` for the xcframework's macOS slice.
 
 ## macOS SDK resolution
 

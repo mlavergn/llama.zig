@@ -13,7 +13,7 @@ make -C xcfwk zip      # -> build/llamazig.xcframework.zip + .sha256
 
 | Slice | Platform | Minimum | CPU |
 |---|---|---|---|
-| `macos-arm64` | macOS | 26.0 | Apple M1 and later |
+| `macos-arm64` | macOS | 26.0 | **Apple M3 and later** |
 | `ios-arm64` | iOS | 18.0 | **A14 and later** (iPhone 12+) |
 | `ios-arm64-simulator` | iOS Simulator | 18.0 | Apple silicon Macs |
 
@@ -59,6 +59,15 @@ Same C API and the same headers, minus `mtmd.h`, `mtmd-helper.h` and
 - **Pre-A14 iPhones are unsupported.** iOS 18 still runs on A12/A13 (iPhone
   XS, XR, 11, SE 2); the code is built for A14 and may crash there with an
   illegal instruction. Gate devices in the app.
+- **M1 Macs are unsupported, and M2 is untested.** The macOS slice is built
+  for the M3 and uses i8mm, which the M1 lacks, so on an M1 it dies with an
+  illegal instruction the first time the CPU backend multiplies a quantized
+  matrix. The M2 has i8mm too: Zig's `apple_m3` differs from `apple_m2`
+  only by `hcx`, a hypervisor feature user code never emits, so the slice
+  should run there -- but nothing here has run it on an M2. macOS 26 still
+  runs on M1 and M2: gate on the chip, not the OS version. The simulator
+  slice is unaffected -- it targets the A14 feature set and runs on any
+  Apple silicon Mac.
 - **Memory.** A 2B-parameter model needs the
   `com.apple.developer.kernel.increased-memory-limit` entitlement on iOS.
 - **Use the CPU on the simulator.** The simulator's GPU reports
@@ -88,7 +97,8 @@ bits as the gated port rather than Apple's libm's.
 | Form | Static framework, one `ld -r`-prelinked object | keeps Zig's libc++ and compiler_rt -- the gated runtime -- without an app ever linking or meeting them |
 | Slices | `macos-arm64`, `ios-arm64`, `ios-arm64-simulator` | x86 CPU kernels are not ported |
 | Minimums | iOS 18.0, macOS 26.0 | chosen; Zig targets `aarch64-ios.18.0`, `aarch64-macos.26.0` |
-| iOS CPU | `apple_a14` | the `apple_m1` feature set every gate runs; A12/A13 left out, documented |
+| iOS CPU | `apple_a14` | the `apple_m1` feature set every gate runs at the baseline; A12/A13 left out, documented |
+| macOS CPU | `apple_m3` | i8mm: the two-row `smmla` dot products and five i8mm gemms, ported for it and gated at `GATE_CPU=apple_m3`; M1 left out, M2 untested, documented |
 | Name | `llamazig` throughout | a framework module's name must equal its framework's, so `import llama` was not an option |
 | Headers | upstream's set minus `mtmd*.h`, `ggml-blas.h` | text only |
 | SwiftPM | `Package.swift` here, `binaryTarget(path:)` | local path package; the zip and checksum are a hand-off artifact |
@@ -97,7 +107,7 @@ bits as the gated port rather than Apple's libm's.
 ## How a slice is built
 
 1. `zig build reference -Dtarget=<slice> -Dcpu=<cpu> --release=fast` into
-   `build/<slice>/zig/`. macOS is `aarch64-macos.26.0`, baseline (`apple_m1`);
+   `build/<slice>/zig/`. macOS is `aarch64-macos.26.0`, `apple_m3`;
    iOS and the simulator are `aarch64-ios.18.0[-simulator]`, `apple_a14`, the
    same feature set.
 2. A probe C++ link with `--verbose-link` names the `libc++.a`,
@@ -122,6 +132,16 @@ bits as the gated port rather than Apple's libm's.
 | `port-gates` | the root `make validate ops-diff` | — |
 
 Not automated: running on a device, which needs A14+ hardware.
+
+**The macOS slice's i8mm arms are gated from the root, not here.** `smoke-macos`
+compares the framework against `test/driver.c` on the port's own libraries --
+both built for `MACOS_CPU`, so it proves the framework computes what the port
+computes, not that the port computes what upstream does. That is
+`make -C .. ops-diff repack-diff node-diff GATE_CPU=apple_m3`: the port and
+the stock C both built for the M3, compared on bits. Each of those checks the
+CPU each library was really compiled for (`scripts/gate-cpu`), because a
+library left over from a baseline build passes every i8mm comparison by never
+reaching the arms.
 
 ## Things that were learned the hard way
 

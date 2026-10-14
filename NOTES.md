@@ -3982,3 +3982,74 @@ is compared vocabulary-only, and in full only as far as the port's log is a
 prefix of the C++'s; its base hyperparameters are read but not compared.
 `gguf_kv` is compared in `std::unordered_map` order through
 `libcxx.StringMap`, but nothing in the port reads it yet.
+
+## i8mm for the M3: the two-row dot products and the gemms
+
+The xcframework's macOS slice moved from the baseline (M1) to `apple_m3`.
+That is not a tuning flag. `__ARM_FEATURE_MATMUL_INT8` changes which
+kernels exist: `type_traits_cpu` asks the q4_0, q4_1, q8_0, q4_K and q6_K
+dot products for two rows per call, `ggml_repack_get_optimal_repack_type`
+picks the 4x8 and 8x8 shapes, five gemms compile a NEON body instead of
+calling their `_generic`, and llamafile's sgemm is compiled out
+(`ggml-cpu.c:45`).
+
+### What building for apple_m3 did before anything was ported
+
+`make ops-diff GATE_CPU=apple_m3` with the baseline port: every second
+output row of every two-column `mul_mat` of those five types was
+`0x00000000`. `traits.zig` had already asked for two rows, and each kernel
+computed one: the `nrc == 1` assertion that would have said so is gone in
+ReleaseFast. Nothing else differed, including f16/f32 `mul_mat` without
+llamafile. ops-diff saw it only because 2 columns had just been added to its
+sweep; 1 and 7 are both odd, and `mul_mat` falls back to one row at an odd
+count.
+
+### What was ported
+
+- `quants/arm/mmla.zig`: the five `if (nrc == 2)` arms, called from the
+  existing exports behind `comptime mmla.enabled`.
+- `repack/arm/mmla.zig`: the five i8mm gemm arms, chosen in `fallback.zig`.
+  The `q4_0` 4x8 one is hand-written aarch64, converted by script; the
+  script was checked by converting the 4x4 kernel and diffing it against
+  `q4_0_gemm.zig`, identical over 445 lines. `q4_K` and `q5_K` share one
+  body, which their C says differs only in the weight decode.
+- `neon.mmlaq_s32` calls `llvm.aarch64.neon.smmla.v4i32.v16i8` by name, one
+  instruction; its portable form is kept for baseline builds and a test
+  holds the two together over 100,000 inputs. The portable form was first
+  written as nested `inline for` and exhausted comptime's branch quota in a
+  Debug test build, sixty-four calls into one unrolled gemm; it is
+  shuffles and reductions now.
+
+### The gates, at the CPU that ships
+
+`GATE_CPU` (root Makefile, `scripts/gate-cpu`) builds both libraries for a
+CPU and checks that they were: each side reports `ggml_cpu_has_*`, compared
+with what `zig cc -mcpu=$GATE_CPU -dM` says the C will see. That check
+caught a real case on its first day: a concurrent `make -C metrics libs`
+rebuilt the zmake reference at the baseline between two node-diff runs.
+
+At apple_m3: ops-diff 650 results, repack-diff 60 checks, node-diff 2750
+nodes on Qwen3.5 Q4_K_M, UD-Q4_K_XL (q4_K, q5_K, q6_K, q8_0 weights) and
+IQ4_XS at 1 and 4 threads -- all identical to the stock C on bits.
+
+repack-diff gained a 20-row gemm. The asm gemms do sixteen rows a pass and
+finish in a four-row tail; every gemm had only ever run at 4 rows, so the
+main loop of both `q4_0` asm kernels had no gate at all.
+
+Negative-tested 10/10: dropped `q4_0` bias, `q4_1` mins added before the
+reorder, swapped `q8_0` store columns, an unfused `q4_K` mins subtract and a
+`q6_K` bias of 31 (ops-diff); a shift in the `q4_0` asm main loop (caught
+only at 20 rows), a wrong `q5_K` fifth-bit position, unshifted `q6_K` high
+bits, an unfused `q8_0` accumulate (repack-diff); a row swap in the K-quant
+reorder (node-diff on UD-Q4_K_XL, which proves node-diff reaches the i8mm
+gemms).
+
+### What is still true
+
+The M2 has i8mm too: Zig's `apple_m3` adds only `hcx` over `apple_m2`, a
+hypervisor feature. The slice is documented as M3 and later because that was
+the requirement; it has not been run on an M2.
+
+`dotq_s32`'s portable form is 31 instructions where LLVM's `sdot` intrinsic
+is one, measured. Every dotprod kernel pays that on the CPU path, at both
+CPUs. Not changed here.

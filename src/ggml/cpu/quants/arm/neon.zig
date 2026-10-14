@@ -38,8 +38,17 @@
 //! *integer*: four `i8`x`i8` products summed into an `i32` lane, exact, with no
 //! rounding to preserve. So the widening-multiply-and-shuffle form below gives
 //! bit-identical results and only costs throughput. See `dotq_s32`.
+//!
+//! # `vmmlaq_s32` is the one intrinsic that reaches the instruction
+//!
+//! i8mm's `smmla` exists only on a CPU that has it, and the two-row kernels
+//! that use it compile only there -- so it is called through LLVM's own
+//! intrinsic rather than emulated. The portable form is kept, exact, for a
+//! build without i8mm and for the test that holds the two together. See
+//! `mmlaq_s32`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 // -----------------------------------------------------------------------------
 // Types
@@ -536,6 +545,76 @@ pub inline fn dotq_laneq_s32(acc: i32x4, a: i8x16, b: i8x16, comptime idx: u2) i
     return dotq_s32(acc, a, @bitCast(splat));
 }
 
+/// Whether this build targets a CPU with the i8mm extension: the C's
+/// `__ARM_FEATURE_MATMUL_INT8`.
+pub const has_i8mm = builtin.cpu.arch == .aarch64 and
+    std.Target.aarch64.featureSetHas(builtin.cpu.features, .i8mm);
+
+extern fn @"llvm.aarch64.neon.smmla.v4i32.v16i8"(i32x4, i8x16, i8x16) i32x4;
+
+/// Ports `vmmlaq_s32`: a 2x8 by 8x2 integer matrix multiply, accumulated.
+///
+/// `a` is two rows of eight `i8` -- lanes 0-7 and 8-15 -- and so is `b`, so
+/// the product is `a * transpose(b)`:
+/// `result[2i + j] = acc[2i + j] + sum(a[8i + k] * b[8j + k], k = 0..7)`.
+/// The kernels zip the 64-bit halves of two rows into one vector to feed it,
+/// which is why `zip1q_s64` and `zip2q_s64` sit beside it.
+///
+/// With i8mm this is LLVM's intrinsic for `smmla`, one instruction. Without,
+/// it is the widening form, which is bit-identical -- integer products, no
+/// rounding -- and twenty-eight instructions where the intrinsic is one,
+/// measured at `-mcpu apple_m3`. The kernels that call this compile only
+/// with i8mm, so the portable form serves a baseline `zig build test` and the
+/// test below that holds the two together.
+///
+/// Parameters:
+/// - `acc`: the accumulator, added to lane-wise.
+/// - `a`, `b`: two rows of eight `i8` each.
+///
+/// Return: the four accumulated sums.
+pub inline fn mmlaq_s32(acc: i32x4, a: i8x16, b: i8x16) i32x4 {
+    if (comptime has_i8mm) return @"llvm.aarch64.neon.smmla.v4i32.v16i8"(acc, a, b);
+    return mmlaq_s32_portable(acc, a, b);
+}
+
+/// `mmlaq_s32` without the instruction. See there.
+pub inline fn mmlaq_s32_portable(acc: i32x4, a: i8x16, b: i8x16) i32x4 {
+    // Each row of `a` repeated twice, against both rows of `b` at once.
+    // Written as whole-vector operations rather than nested `inline for`:
+    // the gemms call this sixty-four times in one unrolled body, and the
+    // loop form exhausted comptime's branch quota there.
+    const wa: @Vector(16, i32) = a;
+    const wb: @Vector(16, i32) = b;
+    const row0 = @shuffle(i32, wa, undefined, [16]i32{ 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7 });
+    const row1 = @shuffle(i32, wa, undefined, [16]i32{ 8, 9, 10, 11, 12, 13, 14, 15, 8, 9, 10, 11, 12, 13, 14, 15 });
+    const p0 = row0 *% wb;
+    const p1 = row1 *% wb;
+    const lo = [8]i32{ 0, 1, 2, 3, 4, 5, 6, 7 };
+    const hi = [8]i32{ 8, 9, 10, 11, 12, 13, 14, 15 };
+    // Eight products of two `i8` sum to at most 2^17: no lane can overflow
+    // before the accumulate, which wraps as `smmla` does.
+    const sums: i32x4 = .{
+        @reduce(.Add, @shuffle(i32, p0, undefined, lo)),
+        @reduce(.Add, @shuffle(i32, p0, undefined, hi)),
+        @reduce(.Add, @shuffle(i32, p1, undefined, lo)),
+        @reduce(.Add, @shuffle(i32, p1, undefined, hi)),
+    };
+    return acc +% sums;
+}
+
+/// Ports `vreinterpretq_s8_s64(vzip1q_s64(vreinterpretq_s64_s8(a),
+/// vreinterpretq_s64_s8(b)))`: the low eight bytes of `a`, then the low
+/// eight of `b`.
+pub inline fn zip1q_s64(a: i8x16, b: i8x16) i8x16 {
+    return @shuffle(i8, a, b, [16]i32{ 0, 1, 2, 3, 4, 5, 6, 7, -1, -2, -3, -4, -5, -6, -7, -8 });
+}
+
+/// Ports the `vzip2q_s64` form of `zip1q_s64`: the high eight bytes of `a`,
+/// then the high eight of `b`.
+pub inline fn zip2q_s64(a: i8x16, b: i8x16) i8x16 {
+    return @shuffle(i8, a, b, [16]i32{ 8, 9, 10, 11, 12, 13, 14, 15, -9, -10, -11, -12, -13, -14, -15, -16 });
+}
+
 /// Ports `vpadd_s32`: the **two-lane** pairwise add,
 /// `[a0+a1, b0+b1]`. Not `a + b`.
 pub inline fn padd_s32(a: i32x2, b: i32x2) i32x2 {
@@ -588,6 +667,35 @@ pub inline fn movl_s16(v: i16x4) i32x4 {
 /// negating the multiplier, not applied afterwards.
 pub inline fn mlsq_f32(acc: f32x4, a: f32x4, b: f32x4) f32x4 {
     return @mulAdd(f32x4, -a, b, acc);
+}
+
+/// Ports `vmlaq_f32`: `acc + a * b`, **fused**. `arm_neon.h` defines it as
+/// that one expression, and `-ffp-contract=on` makes it one `fmla` -- the
+/// same as `vmlaq_n_f32` with a vector in place of the scalar.
+pub inline fn mlaq_f32(acc: f32x4, a: f32x4, b: f32x4) f32x4 {
+    return @mulAdd(f32x4, a, b, acc);
+}
+
+/// Ports `vextq_f32(a, b, n)`: lanes `n..3` of `a`, then lanes `0..n-1` of
+/// `b`. With `a == b` it rotates down by `n`.
+pub inline fn extq_f32(a: f32x4, b: f32x4, comptime n: u2) f32x4 {
+    const mask = comptime blk: {
+        var m: [4]i32 = undefined;
+        for (0..4) |i| m[i] = if (i + n < 4) @intCast(i + n) else ~@as(i32, @intCast(i + n - 4));
+        break :blk m;
+    };
+    return @shuffle(f32, a, b, mask);
+}
+
+/// Ports `vzip1q_f32`: `[a0, b0, a1, b1]`.
+pub inline fn zip1q_f32(a: f32x4, b: f32x4) f32x4 {
+    return @shuffle(f32, a, b, [4]i32{ 0, -1, 1, -2 });
+}
+
+/// Ports `vmulq_n_s32`: every lane times one scalar, wrapping.
+pub inline fn mulq_n_s32(v: i32x4, x: i32) i32x4 {
+    const s: i32x4 = @splat(x);
+    return v *% s;
 }
 
 /// Ports `vmlal_s16`: `acc + widen(a) * widen(b)`, a widening
@@ -833,4 +941,71 @@ test "integer ops wrap as NEON does" {
 
     const big: i8x16 = @splat(127);
     try std.testing.expectEqual(@as(i8, 1), mul(big, big)[0]);
+}
+
+test "vmmlaq_s32 is a times b transposed, on every lane" {
+    var aa: [16]i8 = undefined;
+    var ba: [16]i8 = undefined;
+    for (0..16) |i| {
+        aa[i] = @intCast(@as(i32, @intCast(i * 7 % 23)) - 11);
+        ba[i] = @intCast(@as(i32, @intCast(i * 5 % 19)) - 9);
+    }
+    const acc: i32x4 = .{ 1, -2, 3, -4 };
+    const got: [4]i32 = mmlaq_s32_portable(acc, aa, ba);
+    for (0..2) |i| {
+        for (0..2) |j| {
+            var want: i32 = acc[2 * i + j];
+            for (0..8) |k| want += @as(i32, aa[8 * i + k]) * ba[8 * j + k];
+            try std.testing.expectEqual(want, got[2 * i + j]);
+        }
+    }
+}
+
+test "vmmlaq_s32: the instruction and the portable form agree" {
+    // Only a build for a CPU with i8mm -- `zig build test -Dcpu=apple_m3` --
+    // reaches the instruction. Extremes included: -128 * -128 * 8 per lane
+    // is 2^17, so the accumulator's wrap is what the last case exercises.
+    if (!has_i8mm) return error.SkipZigTest;
+    var prng = std.Random.DefaultPrng.init(0x8_1_8_9);
+    const rand = prng.random();
+    for (0..100_000) |round| {
+        var a: [16]i8 = undefined;
+        var b: [16]i8 = undefined;
+        var acc: [4]i32 = undefined;
+        rand.bytes(std.mem.asBytes(&a));
+        rand.bytes(std.mem.asBytes(&b));
+        rand.bytes(std.mem.asBytes(&acc));
+        if (round == 0) {
+            a = @splat(-128);
+            b = @splat(-128);
+            acc = @splat(std.math.maxInt(i32));
+        }
+        try std.testing.expectEqual(mmlaq_s32_portable(acc, a, b), mmlaq_s32(acc, a, b));
+    }
+}
+
+test "the 64-bit zips interleave rows, not bytes" {
+    var aa: [16]i8 = undefined;
+    var ba: [16]i8 = undefined;
+    for (0..16) |i| {
+        aa[i] = @intCast(i);
+        ba[i] = @intCast(i + 16);
+    }
+    const lo: [16]i8 = zip1q_s64(aa, ba);
+    const hi: [16]i8 = zip2q_s64(aa, ba);
+    for (0..8) |i| {
+        try std.testing.expectEqual(aa[i], lo[i]);
+        try std.testing.expectEqual(ba[i], lo[8 + i]);
+        try std.testing.expectEqual(aa[8 + i], hi[i]);
+        try std.testing.expectEqual(ba[8 + i], hi[8 + i]);
+    }
+}
+
+test "vextq_f32 and vzip1q_f32 reorder ABCD to ACBD" {
+    // The two-row kernels' epilogue: `vzip1q_f32(v, vextq_f32(v, v, 2))`.
+    const v: f32x4 = .{ 0, 1, 2, 3 };
+    try std.testing.expectEqual(f32x4{ 2, 3, 0, 1 }, extq_f32(v, v, 2));
+    try std.testing.expectEqual(f32x4{ 0, 2, 1, 3 }, zip1q_f32(v, extq_f32(v, v, 2)));
+    const w: f32x4 = .{ 4, 5, 6, 7 };
+    try std.testing.expectEqual(f32x4{ 1, 2, 3, 4 }, extq_f32(v, w, 1));
 }

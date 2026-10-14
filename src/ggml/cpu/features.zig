@@ -341,9 +341,13 @@ test "sve_cnt stays zero without SVE" {
     try std.testing.expectEqual(@as(c_int, 0), ggml_cpu_get_sve_cnt());
 }
 
-test "llamafile is on, which is what mul_mat's fast path assumes" {
-    try std.testing.expectEqual(@as(c_int, 1), ggml_cpu_has_llamafile());
-    try std.testing.expect(use_llamafile);
+test "llamafile is on unless the CPU has SVE or i8mm, as ggml-cpu.c:45 decides" {
+    // On for the baseline (M1), which is what mul_mat's fast path assumes
+    // there; off for `-Dcpu=apple_m3`, where the C undefines it because
+    // `sgemm.cpp` has no kernels for i8mm.
+    const expect_on = !armHas("sve") and !armHas("i8mm");
+    try std.testing.expectEqual(@as(c_int, @intFromBool(expect_on)), ggml_cpu_has_llamafile());
+    try std.testing.expectEqual(expect_on, use_llamafile);
 }
 
 test "init is idempotent and fills the tables" {

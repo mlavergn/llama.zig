@@ -41,6 +41,7 @@ NPRED="${2:-48}"
 # The reference must be the same upstream commit we port from; this gate
 # compares on bits and would otherwise report a version gap as a port bug.
 . "$ROOT/scripts/check-reference-pin"
+. "$ROOT/scripts/gate-cpu"
 
 REF_LIBS=(llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
 PORT_LIBS=(zig-out/lib/libllama.a zig-out/lib/libggml.a)
@@ -51,6 +52,10 @@ done
 for lib in "${PORT_LIBS[@]}"; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
 done
+
+# Both libraries must be built for GATE_CPU; see scripts/gate-cpu.
+gate_cpu_probe reference llama.cpp.zmake/zig-out/lib/libggml.a || exit 1
+gate_cpu_probe port      zig-out/lib/libggml.a || exit 1
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -118,9 +123,9 @@ FRAMEWORKS=(-lc++
             -F "$SDK/System/Library/Frameworks")
 INCLUDES=(-I llama.cpp/include -I llama.cpp/ggml/include)
 
-zig cc -mcpu=baseline "$tmp/driver.c" -o "$tmp/ref"  -std=c11 "${INCLUDES[@]}" "${REF_LIBS[@]}" "${FRAMEWORKS[@]}" 2>/dev/null \
+zig cc -mcpu="$GATE_CPU" "$tmp/driver.c" -o "$tmp/ref"  -std=c11 "${INCLUDES[@]}" "${REF_LIBS[@]}" "${FRAMEWORKS[@]}" 2>/dev/null \
     || { echo "FAIL: could not link against the reference libraries" >&2; exit 1; }
-zig cc -mcpu=baseline "$tmp/driver.c" -o "$tmp/port" -std=c11 "${INCLUDES[@]}" "${PORT_LIBS[@]}"  "${FRAMEWORKS[@]}" 2>/dev/null \
+zig cc -mcpu="$GATE_CPU" "$tmp/driver.c" -o "$tmp/port" -std=c11 "${INCLUDES[@]}" "${PORT_LIBS[@]}"  "${FRAMEWORKS[@]}" 2>/dev/null \
     || { echo "FAIL: could not link against the ported libraries" >&2; exit 1; }
 
 PROMPTS=(

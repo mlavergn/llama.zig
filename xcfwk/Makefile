@@ -28,10 +28,17 @@ ZIG        ?= zig
 
 IOS_MIN    ?= 18.0
 MACOS_MIN  ?= 26.0
-# A14 is the macOS baseline's feature set (apple_m1): the kernel arms the
-# port's gates run. iOS 18 also runs on A12/A13, which this excludes.
+# iOS: A14 and later. Its feature set is the M1's -- the arms every gate
+# runs at the baseline; iOS 18 also runs on A12/A13, which this excludes.
+# macOS: M3 and later. apple_m3 adds i8mm, so the CPU path takes the
+# two-row `smmla` dot products and the i8mm gemms (src/ggml/cpu/quants/arm/
+# mmla.zig, src/ggml/cpu/repack/arm/mmla.zig) and drops llamafile's sgemm,
+# as upstream does; those arms are gated with `make -C .. ops-diff
+# repack-diff node-diff GATE_CPU=apple_m3`. An M1 cannot run this slice:
+# i8mm is an illegal instruction there. An M2 has i8mm and Zig's apple_m3
+# adds only `hcx` over apple_m2, so it should run there, but is untested.
 IOS_CPU    ?= apple_a14
-MACOS_CPU  ?= baseline
+MACOS_CPU  ?= apple_m3
 BUNDLE_ID  ?= ai.cloneable.llamazig
 VERSION    := $(shell sed -n 's/^ *\.version = "\(.*\)",/\1/p' $(ROOT)/build.zig.zon)
 
@@ -90,7 +97,7 @@ expect_fail = if ( $(1) ) > $(B)/neg/last.log 2>&1; then \
     else echo "  caught: $(2) -- $$(grep -m1 -E 'FAIL|error|differ' $(B)/neg/last.log)"; fi
 
 .PHONY: all xcframework $(SLICES) verify $(addprefix verify-,$(SLICES)) negative \
-        ref-driver smoke-macos smoke-sim pkg-test zip port-gates check clean
+        ref-driver ref-driver-macos ref-driver-sim smoke-macos smoke-sim pkg-test zip port-gates check clean
 
 all: xcframework
 
@@ -223,23 +230,34 @@ negative: xcframework
 # Smoke tests
 
 # The reference: test/driver.c against the port's own libraries, exactly as
-# scripts/parity-port links its port side.
-ref-driver:
-	@printf '\n== reference driver (zig build reference, native) ==\n'
-	cd $(ROOT) && $(ZIG) build reference --release=fast
+# scripts/parity-port links its port side -- one per slice CPU, because the
+# CPU comparison is only exact when both sides compiled the same kernel arms.
+# The macOS slice is apple_m3 (i8mm: the two-row dot products and the i8mm
+# gemms); the simulator slice is apple_a14 (neither). Each is installed to a
+# prefix of its own rather than zig-out/, which the root gates rebuild for
+# whatever CPU they are run at.
+#   ref-driver-macos  -> $(B)/test/driver-macos, MACOS_CPU
+#   ref-driver-sim    -> $(B)/test/driver-sim,   IOS_CPU
+ref-driver: ref-driver-macos ref-driver-sim
+
+ref-driver-macos: DRIVER_CPU = $(MACOS_CPU)
+ref-driver-sim:   DRIVER_CPU = $(IOS_CPU)
+ref-driver-macos ref-driver-sim: ref-driver-%:
+	@printf '\n== reference driver for %s (zig build reference -Dcpu=%s) ==\n' $* $(DRIVER_CPU)
+	cd $(ROOT) && $(ZIG) build reference --release=fast -Dcpu=$(DRIVER_CPU) --prefix $(B)/ref-$(DRIVER_CPU)
 	mkdir -p $(B)/test
-	cd $(ROOT) && $(ZIG) cc -mcpu=baseline $(CURDIR)/test/driver.c -o $(B)/test/driver -std=c11 \
-	    -I llama.cpp/include -I llama.cpp/ggml/include zig-out/lib/libllama.a zig-out/lib/libggml.a \
+	cd $(ROOT) && $(ZIG) cc -mcpu=$(DRIVER_CPU) $(CURDIR)/test/driver.c -o $(B)/test/driver-$* -std=c11 \
+	    -I llama.cpp/include -I llama.cpp/ggml/include $(B)/ref-$(DRIVER_CPU)/lib/libllama.a $(B)/ref-$(DRIVER_CPU)/lib/libggml.a \
 	    -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
 	    -F "$$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks"
 
-smoke-macos: xcframework ref-driver
+smoke-macos: xcframework ref-driver-macos
 	@printf '\n== smoke: macOS ==\n'
 	xcrun --sdk macosx swiftc -O -target $(macos_CLANG) -F $(XCF)/$(macos_XCF_ID) \
 	    -module-cache-path $(B)/test/modules test/smoke.swift -o $(B)/test/smoke-macos
 	! otool -L $(B)/test/smoke-macos | grep 'libc++'
-	./smoke.sh compare macos gpu $(B)/test/out $(MODEL) $(NPRED) $(B)/test/driver $(B)/test/smoke-macos
-	./smoke.sh compare macos cpu $(B)/test/out $(MODEL) $(NPRED) $(B)/test/driver $(B)/test/smoke-macos
+	./smoke.sh compare macos gpu $(B)/test/out $(MODEL) $(NPRED) $(B)/test/driver-macos $(B)/test/smoke-macos
+	./smoke.sh compare macos cpu $(B)/test/out $(MODEL) $(NPRED) $(B)/test/driver-macos $(B)/test/smoke-macos
 	@printf -- '-- negative: one token of the reference altered\n'
 	mkdir -p $(B)/neg
 	sed '1s/./X/' $(B)/test/out/macos-gpu-1.ref.txt > $(B)/neg/altered.txt
@@ -250,7 +268,7 @@ smoke-macos: xcframework ref-driver
 	    test/coexist.cpp -o $(B)/test/coexist
 	$(B)/test/coexist 2>/dev/null
 
-smoke-sim: xcframework ref-driver
+smoke-sim: xcframework ref-driver-sim
 	@printf '\n== smoke: iOS simulator (%s) ==\n' "$(SIM_DEVICE)"
 	xcrun --sdk iphonesimulator swiftc -O -target $(ios-sim_CLANG) -F $(XCF)/$(ios-sim_XCF_ID) \
 	    -module-cache-path $(B)/test/modules test/smoke.swift -o $(B)/test/smoke-sim
@@ -259,7 +277,7 @@ smoke-sim: xcframework ref-driver
 	STATE=$$(xcrun simctl list devices | grep "$$UDID" | sed -E 's/.*\((Booted|Shutdown)\).*/\1/'); \
 	xcrun simctl bootstatus $$UDID -b > /dev/null; \
 	trap '[ "$$STATE" = Booted ] || xcrun simctl shutdown '$$UDID EXIT; \
-	./smoke.sh compare sim cpu $(B)/test/out $(MODEL) $(NPRED) $(B)/test/driver "xcrun simctl spawn $$UDID $(B)/test/smoke-sim"; \
+	./smoke.sh compare sim cpu $(B)/test/out $(MODEL) $(NPRED) $(B)/test/driver-sim "xcrun simctl spawn $$UDID $(B)/test/smoke-sim"; \
 	printf -- '-- Metal on the simulator (reported, not a gate)\n'; \
 	if xcrun simctl spawn $$UDID $(B)/test/smoke-sim $(MODEL) "The capital of France is" $(NPRED) gpu \
 	        > $(B)/test/out/sim-metal.txt 2> $(B)/test/out/sim-metal.log; then \

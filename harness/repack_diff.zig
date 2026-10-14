@@ -335,20 +335,24 @@ fn runCase(
         report("gemv_" ++ name, a, b);
     }
 
-    // gemm: four activation rows.
-    {
-        const y = try alloc.alloc(Y4, @intCast(nb));
+    // gemm: four activation rows, then twenty. The hand-written aarch64
+    // gemms take sixteen rows a pass and finish in a four-row tail loop
+    // (`cmp x10, #0x10; blt 4f`), so four rows reach only the tail and
+    // twenty reach both. The intrinsic gemms loop over rows in fours and
+    // see the extra rows as more of the same.
+    inline for (.{ 4, 20 }) |nr| {
+        const y = try alloc.alloc(Y4, @intCast(nb * nr / 4));
         defer alloc.free(y);
         fillBlocks(Y4, y);
-        const a = try alloc.alloc(f32, @intCast(4 * nc));
+        const a = try alloc.alloc(f32, @intCast(nr * nc));
         defer alloc.free(a);
-        const b = try alloc.alloc(f32, @intCast(4 * nc));
+        const b = try alloc.alloc(f32, @intCast(nr * nc));
         defer alloc.free(b);
         @memset(a, 0);
         @memset(b, 0);
-        gemm_ours(n, a.ptr, @intCast(nc), w.ptr, y.ptr, 4, nc);
-        gemm_ref(n, b.ptr, @intCast(nc), w.ptr, y.ptr, 4, nc);
-        report("gemm_" ++ name, a, b);
+        gemm_ours(n, a.ptr, @intCast(nc), w.ptr, y.ptr, nr, nc);
+        gemm_ref(n, b.ptr, @intCast(nc), w.ptr, y.ptr, nr, nc);
+        report(std.fmt.comptimePrint("gemm_{s} nr={d}", .{ name, nr }), a, b);
     }
 }
 
@@ -402,6 +406,15 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
+    // What the port library was compiled for; `scripts/repack-diff` checks
+    // this first line against GATE_CPU. The reference objects are compiled
+    // by the script itself, for the same CPU.
+    std.debug.print("cpu: dotprod={d} matmul_int8={d} sve={d} llamafile={d}\n", .{
+        c.ggml_cpu_has_dotprod(),
+        c.ggml_cpu_has_matmul_int8(),
+        c.ggml_cpu_has_sve(),
+        c.ggml_cpu_has_llamafile(),
+    });
     std.debug.print("=== repack kernels: ported vs reference, on bits ===\n", .{});
 
     try runCase("q4_0_4x4_q8_0", Q4_0x4, Q8_0, Q8_0x4, 32, 4, ours.ggml_gemv_q4_0_4x4_q8_0, reference.ref_ggml_gemv_q4_0_4x4_q8_0, ours.ggml_gemm_q4_0_4x4_q8_0, reference.ref_ggml_gemm_q4_0_4x4_q8_0, alloc);

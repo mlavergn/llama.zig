@@ -30,12 +30,17 @@ PROMPT="${2:-Explain gravity in one sentence, then give an example from daily li
 # The reference must be the same upstream commit we port from; this gate
 # compares on bits and would otherwise report a version gap as a port bug.
 . "$ROOT/scripts/check-reference-pin"
+. "$ROOT/scripts/gate-cpu"
 
 REF_LIBS=(llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
 PORT_LIBS=(zig-out/lib/libllama.a zig-out/lib/libggml.a)
 for lib in "${REF_LIBS[@]}" "${PORT_LIBS[@]}"; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'make node-diff'" >&2; exit 2; }
 done
+
+# Both libraries must be built for GATE_CPU; see scripts/gate-cpu.
+gate_cpu_probe reference llama.cpp.zmake/zig-out/lib/libggml.a || exit 1
+gate_cpu_probe port      zig-out/lib/libggml.a || exit 1
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -46,9 +51,9 @@ FW=(-lc++
     -F "$SDK/System/Library/Frameworks")
 INC=(-I llama.cpp/include -I llama.cpp/ggml/include)
 
-zig cc -mcpu=baseline harness/node_dump.c -o "$tmp/ref"  -std=c11 -O2 "${INC[@]}" "${REF_LIBS[@]}"  "${FW[@]}" 2>"$tmp/ref.log" \
+zig cc -mcpu="$GATE_CPU" harness/node_dump.c -o "$tmp/ref"  -std=c11 -O2 "${INC[@]}" "${REF_LIBS[@]}"  "${FW[@]}" 2>"$tmp/ref.log" \
     || { echo "FAIL: could not link against the reference libraries" >&2; tail -5 "$tmp/ref.log" >&2; exit 1; }
-zig cc -mcpu=baseline harness/node_dump.c -o "$tmp/port" -std=c11 -O2 "${INC[@]}" "${PORT_LIBS[@]}" "${FW[@]}" 2>"$tmp/port.log" \
+zig cc -mcpu="$GATE_CPU" harness/node_dump.c -o "$tmp/port" -std=c11 -O2 "${INC[@]}" "${PORT_LIBS[@]}" "${FW[@]}" 2>"$tmp/port.log" \
     || { echo "FAIL: could not link against the ported libraries" >&2; tail -5 "$tmp/port.log" >&2; exit 1; }
 
 # Two thread counts, for the same reason ops-diff runs two: one thread makes

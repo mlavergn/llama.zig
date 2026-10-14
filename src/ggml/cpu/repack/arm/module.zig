@@ -5,6 +5,7 @@
 
 pub const fallback = @import("fallback.zig");
 pub const kscales = @import("kscales.zig");
+pub const mmla = @import("mmla.zig");
 pub const nibble4 = @import("nibble4.zig");
 pub const q4_0 = @import("q4_0.zig");
 pub const q4_0_gemm = @import("q4_0_gemm.zig");
@@ -17,6 +18,7 @@ pub const quantize = @import("quantize.zig");
 comptime {
     _ = fallback;
     _ = kscales;
+    _ = mmla;
     _ = nibble4;
     _ = q4_0;
     _ = q4_0_gemm;

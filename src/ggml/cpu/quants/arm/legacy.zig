@@ -33,6 +33,7 @@ const impl = @import("../../../impl.zig");
 const convert = @import("../../convert.zig");
 const blocks = @import("../../../quants/blocks.zig");
 const neon = @import("neon.zig");
+const mmla = @import("mmla.zig");
 const c = impl.c;
 
 const i8x16 = neon.i8x16;
@@ -272,6 +273,10 @@ pub export fn ggml_vec_dot_q4_0_q8_0(
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
+    // With i8mm, `mul_mat` asks for two rows per call; see `mmla.zig`.
+    if (comptime mmla.enabled) {
+        if (nrc == 2) return mmla.q4_0(n, s, bs, vx, bx, vy, by);
+    }
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
@@ -355,6 +360,10 @@ pub export fn ggml_vec_dot_q4_1_q8_1(
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
+    // With i8mm, `mul_mat` asks for two rows per call; see `mmla.zig`.
+    if (comptime mmla.enabled) {
+        if (nrc == 2) return mmla.q4_1(n, s, bs, vx, bx, vy, by);
+    }
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
@@ -797,6 +806,10 @@ pub export fn ggml_vec_dot_q8_0_q8_0(
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
+    // With i8mm, `mul_mat` asks for two rows per call; see `mmla.zig`.
+    if (comptime mmla.enabled) {
+        if (nrc == 2) return mmla.q8_0(n, s, bs, vx, bx, vy, by);
+    }
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 

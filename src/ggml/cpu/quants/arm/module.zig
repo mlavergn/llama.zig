@@ -7,16 +7,19 @@
 //!
 //! # Only a third of that file compiles here
 //!
-//! 1,556 of its 4,319 lines survive the preprocessor on this target. The rest
-//! is behind `__ARM_FEATURE_SVE` and `__ARM_FEATURE_MATMUL_INT8`, neither of
-//! which `zig cc` or Zig enables for Apple Silicon. Only the live arms are
-//! ported, and each site says which arm it took.
+//! 1,556 of its 4,319 lines survive the preprocessor for the baseline (M1)
+//! CPU. The rest is behind `__ARM_FEATURE_SVE`, which no Apple core has, and
+//! `__ARM_FEATURE_MATMUL_INT8`, which M2/A15 and later do. The i8mm arms are
+//! ported too, in `mmla.zig`, and compile only for a CPU that has it --
+//! `-Dcpu=apple_m3`, which the xcframework's macOS slice targets. The SVE
+//! arms are not. Each site says which arm it took.
 //!
 //! - `neon.zig`    — the ACLE intrinsics as Zig vector code
 //! - `rows.zig`    — the `q8_0`, `q8_1` and `q8_K` row quantizers
 //! - `legacy.zig`  — the block-per-32 dot products, plus mxfp4 and nvfp4
 //! - `ternary.zig` — tq1_0 and tq2_0
 //! - `k.zig`       — the K-quant super-block dot products
+//! - `mmla.zig`    — the two-row i8mm arms of five of the above
 //! - `iq.zig`      — the codebook formats
 //! - `golden.zig`  — values captured from the C, generated
 //!
@@ -35,6 +38,7 @@ comptime {
     _ = @import("legacy.zig");
     _ = @import("ternary.zig");
     _ = @import("k.zig");
+    _ = @import("mmla.zig");
     _ = @import("iq.zig");
 }
 
@@ -48,5 +52,6 @@ test {
     _ = @import("legacy.zig");
     _ = @import("ternary.zig");
     _ = @import("k.zig");
+    _ = @import("mmla.zig");
     _ = @import("iq.zig");
 }

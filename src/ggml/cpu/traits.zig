@@ -32,10 +32,14 @@ const VecDot = c.ggml_vec_dot_t;
 /// Ports the `__ARM_FEATURE_MATMUL_INT8` predicate the table branches on.
 ///
 /// With i8mm the `q4_0`, `q4_1`, `q8_0`, `q4_K` and `q6_K` kernels take two
-/// rows per call and `mul_mat` tiles accordingly. This build has no i8mm --
-/// neither does `zig cc`'s, which is what compiles the kernels themselves, so
-/// the two agree. They must: `nrows = 2` against a kernel built without the
-/// instruction would read past the row it was handed.
+/// rows per call and `mul_mat` tiles accordingly. The baseline (M1) has no
+/// i8mm; `-Dcpu=apple_m3` does. Whichever it is, this and the kernels'
+/// two-row arms (`quants/arm/mmla.zig`) read the same `builtin.cpu`, so they
+/// agree. They must: `nrows = 2` against a kernel with no two-row arm
+/// computes the first row and leaves the second unwritten -- measured, every
+/// second output `0x00000000` in `make ops-diff GATE_CPU=apple_m3` before
+/// those arms were ported, with ReleaseFast having compiled out the
+/// `nrc == 1` assertion that would have said so.
 const has_matmul_int8 = std.Target.aarch64.featureSetHas(builtin.cpu.features, .i8mm);
 
 /// The number of rows a `vec_dot` for one of the i8mm-capable types takes per
