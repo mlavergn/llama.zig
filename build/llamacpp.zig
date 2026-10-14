@@ -1,7 +1,8 @@
 //! Build graph for the vendored llama.cpp reference tree.
 //!
 //! Replaces the CMake files under `llama.cpp/` for the macOS arm64
-//! configuration this project targets. The sources are compiled exactly as
+//! configuration this project targets, and for a CPU-only build off Apple
+//! platforms (see `isApple`). The sources are compiled exactly as
 //! upstream ships them — nothing under `llama.cpp/` is modified — so this file
 //! is a translation of the build description, not of the code.
 //!
@@ -29,6 +30,49 @@ const cxx_flags = [_][]const u8{"-std=c++17"} ++ quiet;
 // Upstream's Metal sources use manual reference counting and bridge freely
 // between void* and Obj-C object pointers, so ARC must stay off.
 const objc_flags = [_][]const u8{"-std=c11"} ++ quiet;
+
+/// Whether the target gets the Apple configuration: Metal, its Obj-C host
+/// layer and embedded kernels, and Accelerate. Every Darwin target -- macOS,
+/// iOS, the simulator -- does; anything else builds the CPU backend alone,
+/// as upstream's CMake does when neither `GGML_METAL` nor `GGML_ACCELERATE`
+/// finds its framework.
+///
+/// Parameters:
+/// - `opts`: the build options; only the target is read.
+///
+/// Return: true for a Darwin target.
+fn isApple(opts: Options) bool {
+    return opts.target.result.os.tag.isDarwin();
+}
+
+/// Whether `src/ggml/varargs.c` must define ggml's variadic entry points,
+/// because Zig cannot for this target. Must agree with `impl.zig_varargs`.
+fn needsVarargsShim(opts: Options) bool {
+    const t = opts.target.result;
+    return switch (t.cpu.arch) {
+        .aarch64, .aarch64_be => !(t.os.tag.isDarwin() or t.os.tag == .windows),
+        else => false,
+    };
+}
+
+/// Adds `src/ggml/varargs.c` to a module rooted in `src/ggml/` when the
+/// target needs it; see `needsVarargsShim`.
+fn addVarargsShim(b: *std.Build, mod: *std.Build.Module, opts: Options) void {
+    if (!needsVarargsShim(opts)) return;
+    mod.addCSourceFile(.{ .file = b.path("src/ggml/varargs.c"), .flags = &c_flags });
+}
+
+/// The `-D` flags `GGML_ACCELERATE` adds (ggml/src/ggml-cpu/CMakeLists.txt).
+const accelerate_defines = [_][]const u8{
+    "-DGGML_USE_ACCELERATE",
+    "-DACCELERATE_NEW_LAPACK",
+    "-DACCELERATE_LAPACK_ILP64",
+};
+
+/// Joins the flag lists into one slice owned by the build graph.
+fn flags(b: *std.Build, parts: []const []const []const u8) []const []const u8 {
+    return std.mem.concat(b.allocator, []const u8, parts) catch @panic("OOM");
+}
 
 /// Adds an Apple SDK's framework and library directories as search paths.
 ///
@@ -327,9 +371,10 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     // is the one that needs it: the registry constructor registers Metal
     // behind `#ifdef GGML_USE_METAL`, and the ported test root links no
     // Metal at all.
-    options.addOption(bool, "use_metal", true);
+    options.addOption(bool, "use_metal", isApple(opts));
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
+    addVarargsShim(b, mod, opts);
 
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
     mod.addIncludePath(b.path(root ++ "/ggml/src"));
@@ -337,14 +382,12 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     mod.addIncludePath(b.path(root ++ "/ggml/src/ggml-metal"));
 
     // Backend selection. Upstream sets these from the -D options; this build
-    // targets one configuration, so they are fixed.
-    const defines = [_][]const u8{
+    // targets one configuration per platform, so they are fixed.
+    const apple_defines = [_][]const u8{"-DGGML_USE_METAL"} ++ accelerate_defines ++
+        [_][]const u8{"-DGGML_METAL_EMBED_LIBRARY"};
+    const common_defines = [_][]const u8{
         "-DGGML_USE_CPU",
-        "-DGGML_USE_METAL",
         "-DGGML_SCHED_MAX_COPIES=4",
-        "-DGGML_USE_ACCELERATE",
-        "-DACCELERATE_NEW_LAPACK",
-        "-DACCELERATE_LAPACK_ILP64",
         "-DGGML_USE_LLAMAFILE",
         // Upstream's CMake defaults GGML_CPU_REPACK to ON
         // (ggml/CMakeLists.txt:152). Without it `ggml-cpu.cpp` never
@@ -353,15 +396,15 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
         // into the library unreachable -- 5,692 live lines of dead
         // code. Measured, by panicking on the one entry point.
         "-DGGML_USE_CPU_REPACK",
-        "-DGGML_METAL_EMBED_LIBRARY",
         "-DGGML_VERSION=\"0.3.0\"",
         "-DGGML_COMMIT=\"c1d0e7a00\"",
     };
+    const defines = flags(b, &.{ &common_defines, if (isApple(opts)) &apple_defines else &.{} });
 
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = &ggml_base_sources ++ &ggml_cpu_c_sources,
-        .flags = &(c_flags ++ defines),
+        .flags = flags(b, &.{ &c_flags, defines }),
     });
 
     // ggml.c is ported and swapped out: see src/ggml/{impl,types,context,
@@ -371,23 +414,26 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = &ggml_base_cxx_sources ++ &ggml_cpu_cxx_sources ++ &ggml_metal_cxx_sources,
-        .flags = &(cxx_flags ++ defines),
-    });
-    mod.addCSourceFiles(.{
-        .root = b.path(root),
-        .files = &ggml_metal_objc_sources,
-        .flags = &(objc_flags ++ defines),
+        .flags = flags(b, &.{ &cxx_flags, defines }),
     });
 
-    for (metal_kernels) |kind| {
-        mod.addAssemblyFile(embedMetalKernel(b, kind));
+    if (isApple(opts)) {
+        mod.addCSourceFiles(.{
+            .root = b.path(root),
+            .files = &ggml_metal_objc_sources,
+            .flags = flags(b, &.{ &objc_flags, defines }),
+        });
+
+        for (metal_kernels) |kind| {
+            mod.addAssemblyFile(embedMetalKernel(b, kind));
+        }
+
+        addSdkPaths(b, mod, opts.sdk);
+        mod.linkFramework("Foundation", .{});
+        mod.linkFramework("Metal", .{});
+        mod.linkFramework("MetalKit", .{});
+        mod.linkFramework("Accelerate", .{});
     }
-
-    addSdkPaths(b, mod, opts.sdk);
-    mod.linkFramework("Foundation", .{});
-    mod.linkFramework("Metal", .{});
-    mod.linkFramework("MetalKit", .{});
-    mod.linkFramework("Accelerate", .{});
 
     const lib = b.addLibrary(.{ .name = "ggml", .root_module = mod, .linkage = .static });
     lib.setLibCFile(opts.libc_file);
@@ -491,18 +537,16 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
     options.addOption(bool, "use_metal", false);
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
+    addVarargsShim(b, mod, opts);
 
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
     mod.addIncludePath(b.path(root ++ "/ggml/src"));
     // The CPU sources reach their own headers unqualified.
     mod.addIncludePath(b.path(root ++ "/ggml/src/ggml-cpu"));
 
-    const defines = [_][]const u8{
+    const common_defines = [_][]const u8{
         "-DGGML_USE_CPU",
         "-DGGML_SCHED_MAX_COPIES=4",
-        "-DGGML_USE_ACCELERATE",
-        "-DACCELERATE_NEW_LAPACK",
-        "-DACCELERATE_LAPACK_ILP64",
         "-DGGML_USE_LLAMAFILE",
         // Upstream's CMake defaults GGML_CPU_REPACK to ON
         // (ggml/CMakeLists.txt:152). Without it `ggml-cpu.cpp` never
@@ -514,22 +558,25 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
         "-DGGML_VERSION=\"0.3.0\"",
         "-DGGML_COMMIT=\"c1d0e7a00\"",
     };
+    const defines = flags(b, &.{ &common_defines, if (isApple(opts)) &accelerate_defines else &.{} });
 
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = &ported_test_c_sources,
-        .flags = &(c_flags ++ defines),
+        .flags = flags(b, &.{ &c_flags, defines }),
     });
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = &ported_test_cxx_sources,
-        .flags = &(cxx_flags ++ defines),
+        .flags = flags(b, &.{ &cxx_flags, defines }),
     });
 
-    addSdkPaths(b, mod, opts.sdk);
-    // `-DGGML_USE_ACCELERATE` sends the vector helpers in `ops.cpp` and
-    // `binary-ops.cpp` to vDSP, so the framework has to come with them.
-    mod.linkFramework("Accelerate", .{});
+    if (isApple(opts)) {
+        addSdkPaths(b, mod, opts.sdk);
+        // `-DGGML_USE_ACCELERATE` sends the vector helpers in `ops.cpp` and
+        // `binary-ops.cpp` to vDSP, so the framework has to come with them.
+        mod.linkFramework("Accelerate", .{});
+    }
     const lib = b.addLibrary(.{ .name = "ggml-ported", .root_module = mod, .linkage = .static });
     lib.setLibCFile(opts.libc_file);
     return lib;
@@ -569,18 +616,16 @@ fn portedTestModuleInner(
     options.addOption(bool, "use_metal", false);
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
+    addVarargsShim(b, mod, opts);
 
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
     mod.addIncludePath(b.path(root ++ "/ggml/src"));
     // The CPU sources reach their own headers unqualified.
     mod.addIncludePath(b.path(root ++ "/ggml/src/ggml-cpu"));
 
-    const defines = [_][]const u8{
+    const common_defines = [_][]const u8{
         "-DGGML_USE_CPU",
         "-DGGML_SCHED_MAX_COPIES=4",
-        "-DGGML_USE_ACCELERATE",
-        "-DACCELERATE_NEW_LAPACK",
-        "-DACCELERATE_LAPACK_ILP64",
         "-DGGML_USE_LLAMAFILE",
         // Upstream's CMake defaults GGML_CPU_REPACK to ON
         // (ggml/CMakeLists.txt:152). Without it `ggml-cpu.cpp` never
@@ -592,20 +637,23 @@ fn portedTestModuleInner(
         "-DGGML_VERSION=\"0.3.0\"",
         "-DGGML_COMMIT=\"c1d0e7a00\"",
     };
+    const defines = flags(b, &.{ &common_defines, if (isApple(opts)) &accelerate_defines else &.{} });
 
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = c_sources,
-        .flags = &(c_flags ++ defines),
+        .flags = flags(b, &.{ &c_flags, defines }),
     });
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = &ported_test_cxx_sources,
-        .flags = &(cxx_flags ++ defines),
+        .flags = flags(b, &.{ &cxx_flags, defines }),
     });
 
-    addSdkPaths(b, mod, opts.sdk);
-    mod.linkFramework("Accelerate", .{});
+    if (isApple(opts)) {
+        addSdkPaths(b, mod, opts.sdk);
+        mod.linkFramework("Accelerate", .{});
+    }
     return mod;
 }
 
@@ -659,17 +707,17 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.B
         try files.append(b.allocator, b.fmt("src/models/{s}", .{entry.name}));
     }
 
-    const defines = [_][]const u8{
+    const common_defines = [_][]const u8{
         "-DLLAMA_VERSION=\"0.3.0\"",
         "-DLLAMA_COMMIT=\"c1d0e7a00\"",
         "-DGGML_USE_CPU",
-        "-DGGML_USE_METAL",
     };
+    const apple_defines = [_][]const u8{"-DGGML_USE_METAL"};
 
     mod.addCSourceFiles(.{
         .root = b.path(root),
         .files = files.items,
-        .flags = &(cxx_flags ++ defines),
+        .flags = flags(b, &.{ &cxx_flags, &common_defines, if (isApple(opts)) &apple_defines else &.{} }),
     });
 
     addSdkPaths(b, mod, opts.sdk);

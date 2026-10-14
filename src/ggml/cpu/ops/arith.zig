@@ -251,15 +251,13 @@ fn add1F32(params: *const ComputeParams, dst: *Tensor) void {
         const j2 = @divTrunc(ir - j3 * l.ne2 * l.ne1, l.ne1);
         const j1 = ir - j3 * l.ne2 * l.ne1 - j2 * l.ne1;
 
-        vDSP_vadd(
-            @ptrCast(@alignCast(s0 + @as(usize, @intCast(j3)) * l.nb03 + @as(usize, @intCast(j2)) * l.nb02 + @as(usize, @intCast(j1)) * l.nb01)),
-            1,
-            s1,
-            0,
-            @ptrCast(@alignCast(dd + @as(usize, @intCast(j3)) * l.nb3 + @as(usize, @intCast(j2)) * l.nb2 + @as(usize, @intCast(j1)) * l.nb1)),
-            1,
-            @intCast(l.ne0),
-        );
+        const row_src: [*]const f32 = @ptrCast(@alignCast(s0 + @as(usize, @intCast(j3)) * l.nb03 + @as(usize, @intCast(j2)) * l.nb02 + @as(usize, @intCast(j1)) * l.nb01));
+        const row_dst: [*]f32 = @ptrCast(@alignCast(dd + @as(usize, @intCast(j3)) * l.nb3 + @as(usize, @intCast(j2)) * l.nb2 + @as(usize, @intCast(j1)) * l.nb1));
+        if (comptime impl.use_accelerate) {
+            vDSP_vadd(row_src, 1, s1, 0, row_dst, 1, @intCast(l.ne0));
+        } else {
+            vec.add1_f32(l.ne0, row_dst, row_src, s1[0]);
+        }
     }
 }
 
@@ -519,15 +517,14 @@ fn accF32(params: *const ComputeParams, dst: *Tensor) void {
         const j2 = @divTrunc(ir - j3 * ne12 * ne11, ne11);
         const j1 = ir - j3 * ne12 * ne11 - j2 * ne11;
 
-        vDSP_vadd(
-            @ptrCast(@alignCast(s0 + @as(usize, @intCast(j3)) * nb03 + @as(usize, @intCast(j2)) * nb02 + @as(usize, @intCast(j1)) * nb01 + offset)),
-            1,
-            @ptrCast(@alignCast(s1 + @as(usize, @intCast(j3)) * nb13 + @as(usize, @intCast(j2)) * nb12 + @as(usize, @intCast(j1)) * nb11)),
-            1,
-            @ptrCast(@alignCast(dd + @as(usize, @intCast(j3)) * nb3 + @as(usize, @intCast(j2)) * nb2 + @as(usize, @intCast(j1)) * nb1 + offset)),
-            1,
-            @intCast(nc),
-        );
+        const row_src0: [*]const f32 = @ptrCast(@alignCast(s0 + @as(usize, @intCast(j3)) * nb03 + @as(usize, @intCast(j2)) * nb02 + @as(usize, @intCast(j1)) * nb01 + offset));
+        const row_src1: [*]const f32 = @ptrCast(@alignCast(s1 + @as(usize, @intCast(j3)) * nb13 + @as(usize, @intCast(j2)) * nb12 + @as(usize, @intCast(j1)) * nb11));
+        const row_dst: [*]f32 = @ptrCast(@alignCast(dd + @as(usize, @intCast(j3)) * nb3 + @as(usize, @intCast(j2)) * nb2 + @as(usize, @intCast(j1)) * nb1 + offset));
+        if (comptime impl.use_accelerate) {
+            vDSP_vadd(row_src0, 1, row_src1, 1, row_dst, 1, @intCast(nc));
+        } else {
+            vec.add_f32(nc, row_dst, row_src0, row_src1);
+        }
     }
 }
 

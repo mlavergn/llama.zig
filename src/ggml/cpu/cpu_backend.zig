@@ -319,8 +319,7 @@ comptime {
 ///
 /// The C holds a `std::string` and resizes it around `sysctlbyname`; here it
 /// is a fixed buffer, because the brand string is a short, bounded value and
-/// the C never frees its string either. The Linux and Windows arms are not
-/// ported.
+/// the C never frees its string either. The Windows arm is not ported.
 const DeviceContext = struct {
     description: [256]u8 = undefined,
     description_len: usize = 0,
@@ -331,6 +330,7 @@ const DeviceContext = struct {
         self.description[fallback.len] = 0;
         self.description_len = fallback.len;
 
+        if (comptime builtin.os.tag == .linux) return self.initLinux();
         // The C's `#ifdef __APPLE__`: iOS reads the brand string too.
         if (!builtin.os.tag.isDarwin()) return;
         var len: usize = self.description.len;
@@ -340,14 +340,39 @@ const DeviceContext = struct {
             self.description[self.description_len] = 0;
         }
     }
+
+    /// The C's `#elif defined(__linux__)` arm: the first `model name` line of
+    /// `/proc/cpuinfo`, trimmed of whitespace. On a CPU whose cpuinfo has no
+    /// such line -- most ARM kernels -- the description stays "CPU".
+    fn initLinux(self: *DeviceContext) void {
+        const f = fopen("/proc/cpuinfo", "r") orelse return;
+        defer _ = fclose(f);
+        var buf: [1024]u8 = undefined;
+        while (fgets(&buf, buf.len, f) != null) {
+            const line = std.mem.sliceTo(&buf, 0);
+            if (!std.mem.startsWith(u8, line, "model name")) continue;
+            const colon = std.mem.findScalar(u8, line, ':') orelse continue;
+            // `std::isspace` in the "C" locale.
+            const p = std.mem.trim(u8, line[colon + 1 ..], " \t\n\x0b\x0c\r");
+            const n = @min(p.len, self.description.len - 1);
+            @memmove(self.description[0..n], p[0..n]);
+            self.description[n] = 0;
+            self.description_len = n;
+            break;
+        }
+    }
 };
+
+extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*std.c.FILE;
+extern fn fclose(f: *std.c.FILE) c_int;
+extern fn fgets(buf: [*]u8, n: c_int, f: *std.c.FILE) ?[*]u8;
 
 extern fn sysctlbyname(name: [*:0]const u8, oldp: ?*anyopaque, oldlenp: ?*usize, newp: ?*const anyopaque, newlen: usize) c_int;
 extern fn sysconf(name: c_int) c_long;
 
-/// `_SC_PHYS_PAGES` and `_SC_PAGE_SIZE` on Darwin.
-const sc_phys_pages: c_int = 200;
-const sc_page_size: c_int = 29;
+/// `_SC_PHYS_PAGES` and `_SC_PAGE_SIZE`: Darwin's values, and glibc's.
+const sc_phys_pages: c_int = if (builtin.os.tag.isDarwin()) 200 else 85;
+const sc_page_size: c_int = if (builtin.os.tag.isDarwin()) 29 else 30;
 
 fn deviceGetName(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     _ = dev;

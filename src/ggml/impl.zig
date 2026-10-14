@@ -32,6 +32,26 @@ const std = @import("std");
 /// `@cImport`).
 pub const c = @import("ggml_c");
 
+/// Mirrors `GGML_USE_ACCELERATE`, which `build/llamacpp.zig` defines for every
+/// Darwin target and no other. Ported code that takes the C's Accelerate arm
+/// keys on this, at comptime, so the vDSP `extern`s are not referenced where
+/// nothing provides them.
+pub const use_accelerate = @import("builtin").os.tag.isDarwin();
+
+/// Whether Zig can **define** a C variadic function for this target.
+///
+/// Not a port of anything. Zig 0.17's LLVM backend refuses `std.lang.VaList`
+/// on aarch64 outside Apple and Windows -- `@compileError("disabled due to
+/// miscompilations")` in `std/lang.zig` -- so `ggml_abort`,
+/// `ggml_log_internal` and `ggml_format_name` cannot be written in Zig there.
+/// On those targets `src/ggml/varargs.c` defines the three, formats in C, and
+/// hands the finished string back to Zig. *Calling* a variadic function is
+/// unaffected. `build/llamacpp.zig`'s `needsVarargsShim` must agree.
+pub const zig_varargs = switch (@import("builtin").cpu.arch) {
+    .aarch64, .aarch64_be => @import("builtin").os.tag.isDarwin() or @import("builtin").os.tag == .windows,
+    else => true,
+};
+
 // -----------------------------------------------------------------------------
 // Logging and assertions
 //

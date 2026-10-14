@@ -85,7 +85,9 @@ const Libc = struct {
 
 /// Ports `dl_load_library` (ggml-backend-dl.cpp:34 @c1d0e7a00), the `#else` arm.
 fn dlLoadLibrary(path: [*:0]const u8) ?*anyopaque {
-    return std.c.dlopen(path, .{ .NOW = true, .LOCAL = true });
+    // `RTLD_LOCAL` is zero on Linux, so Zig's flag struct has no field for it.
+    const flags: std.c.RTLD = if (builtin.os.tag == .linux) .{ .NOW = true } else .{ .NOW = true, .LOCAL = true };
+    return std.c.dlopen(path, flags);
 }
 
 /// Ports `dl_get_sym` (ggml-backend-dl.cpp:39 @c1d0e7a00), the `#else` arm.
@@ -534,6 +536,7 @@ extern fn _NSGetExecutablePath(buf: [*]u8, bufsize: *u32) c_int;
 /// C++ grows a `std::vector` until the call succeeds; the fixed buffer here is
 /// `std.Io.Dir.max_path_bytes`, which the call cannot exceed.
 fn getExecutablePath(buf: []u8) ?[:0]const u8 {
+    if (comptime builtin.os.tag == .linux) return getExecutablePathLinux(buf);
     var size: u32 = @intCast(buf.len);
     if (_NSGetExecutablePath(buf.ptr, &size) != 0) return null;
 
@@ -544,6 +547,33 @@ fn getExecutablePath(buf: []u8) ?[:0]const u8 {
     // "remove executable name", keeping the separator: the C++ appends "/" to
     // the truncated string, so a path with no slash at all becomes "/".
     const cut = if (std.mem.findScalarLast(u8, full, '/')) |i| i else 0;
+    if (cut + 2 > buf.len) return null;
+    buf[cut] = '/';
+    buf[cut + 1] = 0;
+    return buf[0 .. cut + 1 :0];
+}
+
+/// Ports `get_executable_path` (src/ggml-backend-reg.cpp:401 @c1d0e7a00), the
+/// `__linux__` arm.
+///
+/// Parameters:
+/// - `buf`: receives the directory, null-terminated, with a trailing `/`.
+///
+/// Return: the slice of `buf` written, or null if it did not fit. A failed
+/// `readlink` gives `./`, as the C++'s `base_path = "."` does; a path that
+/// fills the buffer is the C++'s cue to grow it, and here is a failure, since
+/// `buf` is already `max_path_bytes`.
+fn getExecutablePathLinux(buf: []u8) ?[:0]const u8 {
+    const len = std.c.readlink("/proc/self/exe", buf.ptr, buf.len);
+    var cut: usize = 1;
+    if (len == -1) {
+        buf[0] = '.';
+    } else {
+        const n: usize = @intCast(len);
+        if (n >= buf.len) return null;
+        // "remove executable name"; with no slash the whole path stays.
+        cut = std.mem.findScalarLast(u8, buf[0..n], '/') orelse n;
+    }
     if (cut + 2 > buf.len) return null;
     buf[cut] = '/';
     buf[cut + 1] = 0;
@@ -618,7 +648,8 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
             // DT_REG. `is_regular_file` in the C++; a `DT_UNKNOWN` filesystem
             // would need a stat, which APFS never reports.
             if (ent.type != 8) continue;
-            const entry_name = ent.name[0..ent.namlen];
+            // `d_namlen` is BSD; `d_name` is NUL-terminated everywhere.
+            const entry_name = std.mem.sliceTo(&ent.name, 0);
             if (!std.mem.startsWith(u8, entry_name, file_prefix)) continue;
             if (!std.mem.endsWith(u8, entry_name, backend_filename_extension)) continue;
 

@@ -68,10 +68,11 @@ pub inline fn cpy_f32(n: i64, y: [*]f32, x: [*]const f32) void {
 // Reductions
 //
 // `ggml_vec_sum_f32` and `ggml_vec_max_f32` have an Accelerate arm, and
-// `GGML_USE_ACCELERATE` is defined for this target, so the vDSP call is what
-// compiles and the `#ifndef` scalar loop is dead. The `_ggf` variants have no
-// Accelerate arm at all -- that is the whole reason they exist alongside
-// `ggml_vec_sum_f32`, which on this target cannot accumulate in `double`.
+// `GGML_USE_ACCELERATE` is defined for Darwin targets, so there the vDSP call
+// is what compiles; elsewhere the `#ifndef` scalar loop does. The `_ggf`
+// variants have no Accelerate arm at all -- that is the whole reason they
+// exist alongside `ggml_vec_sum_f32`, which on Darwin cannot accumulate in
+// `double`.
 
 /// Mirrors `vDSP_Length`, the `unsigned long` element count.
 const Length = c_ulong;
@@ -80,14 +81,18 @@ const Stride = isize;
 extern fn vDSP_sve(a: [*]const f32, ia: Stride, s: *f32, n: Length) void;
 extern fn vDSP_maxv(a: [*]const f32, ia: Stride, s: *f32, n: Length) void;
 
-/// Ports `ggml_vec_sum_f32` (vec.h:1495 @c1d0e7a00), the `GGML_USE_ACCELERATE`
-/// arm.
+/// Ports `ggml_vec_sum_f32` (vec.h:1495 @c1d0e7a00), both arms: vDSP under
+/// `GGML_USE_ACCELERATE`, a `double` accumulator rounded once otherwise.
 ///
-/// **Not interchangeable with `sum_f32_ggf`.** This one sums in `f32` through
-/// vDSP; that one sums in `double`. `mean` and `sum_rows` call this, `sum`
-/// calls the other, and swapping them changes the result.
+/// **Not interchangeable with `sum_f32_ggf` on Darwin.** There this one sums
+/// in `f32` through vDSP; that one sums in `double`. `mean` and `sum_rows`
+/// call this, `sum` calls the other, and swapping them changes the result.
 pub inline fn sum_f32(n: i64, s: *f32, x: [*]const f32) void {
-    vDSP_sve(x, 1, s, @intCast(n));
+    if (comptime impl.use_accelerate) return vDSP_sve(x, 1, s, @intCast(n));
+    var sum: f64 = 0.0;
+    var i: usize = 0;
+    while (i < @as(usize, @intCast(n))) : (i += 1) sum += @as(f64, x[i]);
+    s.* = @floatCast(sum);
 }
 
 /// Ports `ggml_vec_sum_f32_ggf` (vec.h:1517 @c1d0e7a00). Accumulates in
@@ -124,10 +129,15 @@ pub inline fn cumsum_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     }
 }
 
-/// Ports `ggml_vec_max_f32` (vec.h:1541 @c1d0e7a00), the
-/// `GGML_USE_ACCELERATE` arm.
+/// Ports `ggml_vec_max_f32` (vec.h:1541 @c1d0e7a00), both arms. The scalar
+/// one is `MAX(max, x[i])`, `max > x[i] ? max : x[i]`, written out because
+/// `@max` treats a NaN differently.
 pub inline fn max_f32(n: i64, s: *f32, x: [*]const f32) void {
-    vDSP_maxv(x, 1, s, @intCast(n));
+    if (comptime impl.use_accelerate) return vDSP_maxv(x, 1, s, @intCast(n));
+    var max: f32 = -std.math.inf(f32);
+    var i: usize = 0;
+    while (i < @as(usize, @intCast(n))) : (i += 1) max = if (max > x[i]) max else x[i];
+    s.* = max;
 }
 
 /// Ports `ggml_vec_argmax_f32` (vec.h:1558 @c1d0e7a00).
@@ -257,16 +267,25 @@ pub inline fn mad_f32_unroll(n: i64, xs: i64, vs: i64, y: [*]f32, xv: [*]const f
 extern fn vDSP_vsmsa(a: [*]const f32, ia: Stride, b: *const f32, cc: *const f32, d: [*]f32, id: Stride, n: Length) void;
 extern fn vDSP_vsmul(a: [*]const f32, ia: Stride, b: *const f32, cc: [*]f32, ic: Stride, n: Length) void;
 
-/// Ports `ggml_vec_mad1_f32` (vec.h:655 @c1d0e7a00), the `GGML_USE_ACCELERATE`
-/// arm: `y = x * s + b` through `vDSP_vsmsa`.
+/// Ports `ggml_vec_mad1_f32` (vec.h:655 @c1d0e7a00): `y = x * s + b`, through
+/// `vDSP_vsmsa` under `GGML_USE_ACCELERATE`. Otherwise the NEON `GGML_SIMD`
+/// arm, whose body is `GGML_F32_VEC_FMA(vb, ay, vs)` -- `vfmaq_f32`, fused --
+/// and whose leftovers `x[i]*s + b` clang contracts to the same `fmadd`, so
+/// every element is one fused multiply-add.
 pub inline fn mad1_f32(n: i64, y: [*]f32, x: [*]const f32, s: f32, b: f32) void {
-    vDSP_vsmsa(x, 1, &s, &b, y, 1, @intCast(n));
+    if (comptime impl.use_accelerate) return vDSP_vsmsa(x, 1, &s, &b, y, 1, @intCast(n));
+    var i: usize = 0;
+    while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = @mulAdd(f32, x[i], s, b);
 }
 
-/// Ports `ggml_vec_scale_f32` (vec.h:703 @c1d0e7a00), the
-/// `GGML_USE_ACCELERATE` arm: `y *= v` through `vDSP_vsmul`.
+/// Ports `ggml_vec_scale_f32` (vec.h:703 @c1d0e7a00): `y *= v`, through
+/// `vDSP_vsmul` under `GGML_USE_ACCELERATE`. Otherwise the NEON `GGML_SIMD`
+/// arm, a vector multiply with a scalar tail -- elementwise and unfused, so a
+/// plain loop gives the same bits.
 pub inline fn scale_f32(n: i64, y: [*]f32, v: f32) void {
-    vDSP_vsmul(y, 1, &v, y, 1, @intCast(n));
+    if (comptime impl.use_accelerate) return vDSP_vsmul(y, 1, &v, y, 1, @intCast(n));
+    var i: usize = 0;
+    while (i < @as(usize, @intCast(n))) : (i += 1) y[i] *= v;
 }
 
 /// Ports `ggml_vec_scale_f16` (vec.h:769 @c1d0e7a00), the `GGML_SIMD` NEON arm

@@ -476,11 +476,20 @@ pub export fn ggml_set_name(tensor: *c.ggml_tensor, name: [*:0]const u8) *c.ggml
 }
 
 /// Ports `ggml_format_name` (ggml.c:1954 @c1d0e7a00).
-pub export fn ggml_format_name(tensor: *c.ggml_tensor, fmt: [*:0]const u8, ...) callconv(.c) *c.ggml_tensor {
+///
+/// Where Zig cannot define a variadic function (`impl.zig_varargs`) this is
+/// `src/ggml/varargs.c`'s, reached through the header's declaration.
+pub const ggml_format_name = if (impl.zig_varargs) formatName else c.ggml_format_name;
+
+fn formatName(tensor: *c.ggml_tensor, fmt: [*:0]const u8, ...) callconv(.c) *c.ggml_tensor {
     var ap = @cVaStart();
     defer @cVaEnd(&ap);
     _ = vsnprintf(@ptrCast(&tensor.name), tensor.name.len, fmt, ap);
     return tensor;
+}
+
+comptime {
+    if (impl.zig_varargs) @export(&formatName, .{ .name = "ggml_format_name" });
 }
 
 // -----------------------------------------------------------------------------

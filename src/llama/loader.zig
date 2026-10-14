@@ -44,7 +44,8 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 
 extern "c" fn strerror(errnum: c_int) [*:0]const u8;
-extern "c" fn __error() *c_int;
+/// `errno`'s location: `__error` on Darwin, `__errno_location` on glibc.
+const errnoPtr = std.c._errno;
 extern "c" fn atoi(s: [*:0]const u8) c_int;
 
 const MiB: usize = 1024 * 1024;
@@ -237,7 +238,7 @@ pub const File = struct {
     /// Return: the file, or `error.Thrown` when it cannot be opened.
     pub fn open(fname: [:0]const u8, exc: *Exception) Thrown!File {
         const fp = c.ggml_fopen(fname.ptr, "rb") orelse {
-            return exc.throw(.runtime_error, "failed to open {s}: {s}", .{ fname, std.mem.span(strerror(__error().*)) });
+            return exc.throw(.runtime_error, "failed to open {s}: {s}", .{ fname, std.mem.span(strerror(errnoPtr().*)) });
         };
         var f: File = .{ .fp = fp, .owns_fp = true, .size = 0 };
         f.size = try f.measure(exc);
@@ -254,11 +255,11 @@ pub const File = struct {
 
     fn measure(self: *File, exc: *Exception) Thrown!usize {
         if (c.fseeko(self.fp, 0, c.SEEK_END) == -1)
-            return exc.throw(.runtime_error, "seek error: {s}", .{std.mem.span(strerror(__error().*))});
+            return exc.throw(.runtime_error, "seek error: {s}", .{std.mem.span(strerror(errnoPtr().*))});
         const size = c.ftello(self.fp);
-        if (size == -1) return exc.throw(.runtime_error, "ftell error: {s}", .{std.mem.span(strerror(__error().*))});
+        if (size == -1) return exc.throw(.runtime_error, "ftell error: {s}", .{std.mem.span(strerror(errnoPtr().*))});
         if (c.fseeko(self.fp, 0, c.SEEK_SET) == -1)
-            return exc.throw(.runtime_error, "seek error: {s}", .{std.mem.span(strerror(__error().*))});
+            return exc.throw(.runtime_error, "seek error: {s}", .{std.mem.span(strerror(errnoPtr().*))});
         return @intCast(size);
     }
 

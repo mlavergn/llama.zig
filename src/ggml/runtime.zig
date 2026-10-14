@@ -13,12 +13,14 @@
 //! - `ggml_abort` and `ggml_log_internal` are variadic and called from C with
 //!   varargs, so they are defined variadic here. Note that a `va_list` must be
 //!   handed to `vsnprintf` **by value**: passing a pointer compiles and links
-//!   but silently formats garbage on aarch64.
-//! - Only the macOS paths are ported. The C file carries Windows, Linux, and
-//!   s390x variants of most of this; those are Stage 5's problem, and the
-//!   places where a second platform will need code are marked.
+//!   but silently formats garbage on aarch64. Where Zig cannot define a
+//!   variadic function (`impl.zig_varargs`), `src/ggml/varargs.c` defines all
+//!   three and calls back into `abortWith` and `logEmit` here.
+//! - The macOS and Linux paths are ported. The C file also carries Windows
+//!   and s390x variants of most of this, which are not.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("impl.zig");
 const c = impl.c;
 
@@ -40,10 +42,18 @@ extern fn clock() c_long;
 extern fn backtrace(buffer: [*]?*anyopaque, size: c_int) c_int;
 extern fn backtrace_symbols_fd(buffer: [*]const ?*anyopaque, size: c_int, fd: c_int) void;
 
-extern var __stdoutp: *anyopaque;
-extern var __stderrp: *anyopaque;
+/// libc's `stdout` and `stderr`, which Darwin names `__stdoutp` and
+/// `__stderrp` behind a macro and glibc exports as themselves.
+fn cStdout() *anyopaque {
+    return @extern(*const *anyopaque, .{ .name = if (builtin.os.tag.isDarwin()) "__stdoutp" else "stdout" }).*;
+}
+fn cStderr() *anyopaque {
+    return @extern(*const *anyopaque, .{ .name = if (builtin.os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
+}
 
-/// `CLOCKS_PER_SEC` on macOS.
+extern fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) c_int;
+
+/// `CLOCKS_PER_SEC` on macOS, and on glibc.
 const clocks_per_sec: i64 = 1_000_000;
 
 /// Mach VM interface, used by `ggml_aligned_malloc` on macOS. The C reaches
@@ -84,7 +94,8 @@ export fn ggml_graph_next_uid() u64 {
 var abort_callback: c.ggml_abort_callback_t = null;
 
 /// Ports `ggml_print_backtrace_symbols` (ggml.c:146 @c1d0e7a00) -- the `__APPLE__`
-/// variant, which is the one this target compiles.
+/// variant, and the `__linux__ && __GLIBC__` one at ggml.c:139, which is the
+/// same body.
 ///
 /// The C file has four variants of this; macOS uses `backtrace` directly
 /// rather than forking a debugger, because libdispatch does not survive a fork
@@ -102,7 +113,73 @@ fn printBacktraceSymbols() void {
 /// documented upstream as crashing Terminal and is opt-in only.
 export fn ggml_print_backtrace() void {
     if (getenv("GGML_NO_BACKTRACE") != null) return;
+    if (comptime builtin.os.tag == .linux) return printBacktraceLinux();
     printBacktraceSymbols();
+}
+
+extern fn getline(line: *?[*]u8, n: *usize, f: *std.c.FILE) isize;
+extern fn fclose(f: *std.c.FILE) c_int;
+extern fn execlp(file: [*:0]const u8, arg0: [*:0]const u8, ...) c_int;
+extern fn prctl(option: c_int, ...) c_int;
+extern fn _Exit(status: c_int) noreturn;
+
+/// `PR_SET_PTRACER` from `<linux/prctl.h>`.
+const pr_set_ptracer: c_int = 0x59616d61;
+
+/// The `__linux__` arm of `ggml_print_backtrace` (ggml.c:157 @c1d0e7a00):
+/// unless a debugger is already attached, fork and have the child attach
+/// `gdb`, then `lldb`, to the parent, falling back to `backtrace` if neither
+/// runs. The pipe holds the child back until the parent has allowed it to
+/// ptrace, which Yama's `ptrace_scope = 1` requires.
+fn printBacktraceLinux() void {
+    const f = fopen("/proc/self/status", "r") orelse return;
+    var size: usize = 0;
+    var line: ?[*]u8 = null;
+    while (true) {
+        const length = getline(&line, &size, f);
+        if (length <= 0) break;
+        const l = line.?[0..@intCast(length)];
+        if (std.mem.startsWith(u8, l, "TracerPid:") and
+            (l.len != "TracerPid:\t0\n".len or l[l.len - 2] != '0'))
+        {
+            // Already being debugged, and the breakpoint is the later abort()
+            std.c.free(line);
+            _ = fclose(f);
+            return;
+        }
+    }
+    std.c.free(line);
+    _ = fclose(f);
+
+    var lock: [2]std.c.fd_t = .{ -1, -1 };
+    _ = std.c.pipe(&lock); // Don't start gdb until after PR_SET_PTRACER
+
+    const parent_pid = std.c.getpid();
+    const child_pid = std.c.fork();
+    if (child_pid < 0) {
+        _ = std.c.close(lock[1]);
+        _ = std.c.close(lock[0]);
+        return;
+    } else if (child_pid == 0) {
+        var attach: [32]u8 = undefined;
+        _ = snprintf(&attach, attach.len, "attach %d", parent_pid);
+        const attach_z: [*:0]const u8 = @ptrCast(&attach);
+        _ = std.c.close(lock[1]);
+        _ = std.c.read(lock[0], @ptrCast(&lock), 1);
+        _ = std.c.close(lock[0]);
+        // try gdb
+        _ = execlp("gdb", "gdb", "--batch", "-ex", "set style enabled on", "-ex", attach_z, "-ex", "bt -frame-info source-and-location", "-ex", "detach", "-ex", "quit", @as(?[*:0]const u8, null));
+        // try lldb
+        _ = execlp("lldb", "lldb", "--batch", "-o", "bt", "-o", "quit", "-p", attach_z + "attach ".len, @as(?[*:0]const u8, null));
+        // gdb failed, fallback to backtrace_symbols
+        printBacktraceSymbols();
+        _Exit(0);
+    } else {
+        _ = prctl(pr_set_ptracer, @as(c_ulong, @intCast(child_pid)));
+        _ = std.c.close(lock[1]);
+        _ = std.c.close(lock[0]);
+        _ = std.c.waitpid(child_pid, null, 0);
+    }
 }
 
 /// Ports `ggml_set_abort_callback` (ggml.c:246 @c1d0e7a00).
@@ -119,8 +196,8 @@ export fn ggml_set_abort_callback(callback: c.ggml_abort_callback_t) c.ggml_abor
 ///
 /// Formats `file:line: ` followed by the message, hands it to the callback if
 /// one is set, and otherwise prints it with a backtrace. Never returns.
-export fn ggml_abort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) callconv(.c) noreturn {
-    _ = fflush(__stdoutp);
+fn ggmlAbort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) callconv(.c) noreturn {
+    _ = fflush(cStdout());
 
     var message: [2048]u8 = undefined;
     const offset = snprintf(&message, message.len, "%s:%d: ", file, line);
@@ -132,10 +209,17 @@ export fn ggml_abort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) 
         _ = vsnprintf(message[used..].ptr, message.len - used, fmt, ap);
     }
 
+    abortWith(&message);
+}
+
+/// The second half of `ggml_abort` (ggml.c:252 @c1d0e7a00), once the message
+/// is formatted: exported as `ggml_zig_abort_message` for `varargs.c` where
+/// that file defines `ggml_abort`.
+fn abortWith(message: [*:0]const u8) callconv(.c) noreturn {
     if (abort_callback) |callback| {
-        callback(&message);
+        callback(message);
     } else {
-        _ = fprintf(__stderrp, "%s\n", &message);
+        _ = fprintf(cStderr(), "%s\n", message);
         ggml_print_backtrace();
     }
 
@@ -183,10 +267,27 @@ fn logInternalV(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ap: std.la
 }
 
 /// Ports `ggml_log_internal` (ggml.c:306 @c1d0e7a00).
-export fn ggml_log_internal(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ...) callconv(.c) void {
+fn ggmlLogInternal(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ...) callconv(.c) void {
     var ap = @cVaStart();
     defer @cVaEnd(&ap);
     logInternalV(level, format, ap);
+}
+
+/// Hands a message `varargs.c` has formatted to the current callback: the last
+/// line of `ggml_log_internal_v` (ggml.c:286 @c1d0e7a00). Exported as
+/// `ggml_zig_log_emit` where that file defines `ggml_log_internal`.
+fn logEmit(level: c.enum_ggml_log_level, text: [*:0]const u8) callconv(.c) void {
+    logger_state.log_callback.?(level, text, logger_state.log_callback_user_data);
+}
+
+comptime {
+    if (impl.zig_varargs) {
+        @export(&ggmlAbort, .{ .name = "ggml_abort" });
+        @export(&ggmlLogInternal, .{ .name = "ggml_log_internal" });
+    } else {
+        @export(&abortWith, .{ .name = "ggml_zig_abort_message" });
+        @export(&logEmit, .{ .name = "ggml_zig_log_emit" });
+    }
 }
 
 /// Ports `ggml_log_callback_default` (ggml.c:313 @c1d0e7a00).
@@ -197,8 +298,8 @@ export fn ggml_log_callback_default(
 ) callconv(.c) void {
     _ = level;
     _ = user_data;
-    _ = fputs(@ptrCast(text), __stderrp);
-    _ = fflush(__stderrp);
+    _ = fputs(@ptrCast(text), cStderr());
+    _ = fflush(cStderr());
 }
 
 /// Ports `ggml_log_get` (ggml.c:8036 @c1d0e7a00).
@@ -223,13 +324,25 @@ export fn ggml_log_set(log_callback: c.ggml_log_callback, user_data: ?*anyopaque
 ///
 /// On macOS this goes to the Mach VM rather than `posix_memalign`, which is
 /// what the C does under `TARGET_OS_OSX`. The alignment argument is unused on
-/// that path because `vm_allocate` always returns page-aligned memory.
+/// that path because `vm_allocate` always returns page-aligned memory. Every
+/// other target -- iOS included, since `TARGET_OS_OSX` is false there -- takes
+/// the C's `#else` arm, `posix_memalign` at 64 bytes.
 ///
 /// Return: the allocation, or null on failure after logging why.
 export fn ggml_aligned_malloc(size: usize) ?*anyopaque {
     if (size == 0) {
         impl.logWarn("Behavior may be unexpected when allocating 0 bytes for ggml_aligned_malloc!\n", .{});
         return null;
+    }
+
+    if (comptime builtin.os.tag != .macos) {
+        var aligned_memory: ?*anyopaque = null;
+        const result = posix_memalign(&aligned_memory, 64, size);
+        if (result != 0) {
+            logAllocFailure(result, size);
+            return null;
+        }
+        return aligned_memory;
     }
 
     var address: usize = 0;
@@ -242,27 +355,36 @@ export fn ggml_aligned_malloc(size: usize) ?*anyopaque {
     };
 
     if (result != 0) {
-        const error_desc: [*:0]const u8 = switch (result) {
-            einval => "invalid alignment value",
-            enomem => "insufficient memory",
-            else => "unknown allocation error",
-        };
-        impl.logError("%s: %s (attempted to allocate %6.2f MB)\n", .{
-            "ggml_aligned_malloc",
-            error_desc,
-            @as(f64, @floatFromInt(size)) / (1024.0 * 1024.0),
-        });
+        logAllocFailure(result, size);
         return null;
     }
 
     return @ptrFromInt(address);
 }
 
+/// The failure branch of `ggml_aligned_malloc` (ggml.c:331 @c1d0e7a00), shared
+/// by both allocation arms. `EINVAL` and `ENOMEM` are 22 and 12 on Darwin and
+/// Linux alike.
+fn logAllocFailure(result: c_int, size: usize) void {
+    const error_desc: [*:0]const u8 = switch (result) {
+        einval => "invalid alignment value",
+        enomem => "insufficient memory",
+        else => "unknown allocation error",
+    };
+    impl.logError("%s: %s (attempted to allocate %6.2f MB)\n", .{
+        "ggml_aligned_malloc",
+        error_desc,
+        @as(f64, @floatFromInt(size)) / (1024.0 * 1024.0),
+    });
+}
+
 /// Ports `ggml_aligned_free` (ggml.c:387 @c1d0e7a00).
 ///
-/// `size` is required, not decorative: `vm_deallocate` needs the length that
-/// was allocated, so this cannot be a plain `free`.
+/// On macOS `size` is required, not decorative: `vm_deallocate` needs the
+/// length that was allocated, so this cannot be a plain `free`. Elsewhere it
+/// is the C's plain `free`, and `size` is unused.
 export fn ggml_aligned_free(ptr: ?*anyopaque, size: usize) void {
+    if (comptime builtin.os.tag != .macos) return std.c.free(ptr);
     const p = ptr orelse return;
     _ = vm_deallocate(mach_task_self_, @intFromPtr(p), size);
 }
@@ -456,10 +578,13 @@ test "threadpool params round-trip and compare" {
     try std.testing.expect(!ggml_threadpool_params_match(&a, &b));
 }
 
-test "aligned malloc returns page-aligned memory and frees it" {
+test "aligned malloc returns aligned memory and frees it" {
     const size = 4096 * 4;
     const p = ggml_aligned_malloc(size) orelse return error.AllocFailed;
-    try std.testing.expectEqual(@as(usize, 0), @intFromPtr(p) % 4096);
+    // `vm_allocate` hands out whole pages; `posix_memalign` promises the 64
+    // bytes asked of it.
+    const alignment: usize = if (builtin.os.tag == .macos) 4096 else 64;
+    try std.testing.expectEqual(@as(usize, 0), @intFromPtr(p) % alignment);
     // Writing proves the pages are actually mapped, not just reserved.
     @memset(@as([*]u8, @ptrCast(p))[0..size], 0xAB);
     ggml_aligned_free(p, size);

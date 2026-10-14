@@ -32,7 +32,10 @@ const blocks = @import("blocks.zig");
 const c = impl.c;
 
 extern fn fprintf(stream: *anyopaque, fmt: [*:0]const u8, ...) c_int;
-extern var __stderrp: *anyopaque;
+/// libc's `stderr`: `__stderrp` behind a macro on Darwin, itself on glibc.
+fn cStderr() *anyopaque {
+    return @extern(*const *anyopaque, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
+}
 
 const types = @import("../types.zig");
 
@@ -40,7 +43,7 @@ const types = @import("../types.zig");
 /// so this does too -- a caller that has redirected ggml logging still wants
 /// to know its model file is corrupt.
 fn warn(comptime fmt: [*:0]const u8, args: anytype) void {
-    _ = @call(.auto, fprintf, .{ __stderrp, fmt } ++ args);
+    _ = @call(.auto, fprintf, .{ cStderr(), fmt } ++ args);
 }
 
 /// Ports `validate_float` (ggml-quants.c:5330 @c1d0e7a00).

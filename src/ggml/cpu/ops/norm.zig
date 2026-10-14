@@ -46,8 +46,9 @@ extern fn fmaxf(x: f32, y: f32) f32;
 /// Byte offset `i*nb`; see `common.byteOff`.
 const at = common.byteOff;
 
-/// Ports `ggml_compute_forward_norm_f32` (ops.cpp:3694 @c1d0e7a00), the
-/// `GGML_USE_ACCELERATE` arm of its contiguous path.
+/// Ports `ggml_compute_forward_norm_f32` (ops.cpp:3694 @c1d0e7a00), both arms
+/// of its contiguous path: vDSP under `GGML_USE_ACCELERATE`, otherwise
+/// `ggml_vec_cvar_f32`, which centres `y` and returns the variance.
 fn normF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -85,9 +86,13 @@ fn normF32(params: *const ComputeParams, dst: *Tensor) void {
                     const yf: [*]f32 = @ptrCast(@alignCast(y));
                     var variance: f32 = 0;
 
-                    mean = -mean;
-                    vDSP_vsadd(xf, 1, &mean, yf, 1, @intCast(l.ne00));
-                    vDSP_measqv(yf, 1, &variance, @intCast(l.ne00));
+                    if (comptime impl.use_accelerate) {
+                        mean = -mean;
+                        vDSP_vsadd(xf, 1, &mean, yf, 1, @intCast(l.ne00));
+                        vDSP_measqv(yf, 1, &variance, @intCast(l.ne00));
+                    } else {
+                        variance = @floatCast(vec.cvar_f32(@intCast(l.ne00), yf, xf, mean));
+                    }
 
                     const scale = 1.0 / @sqrt(variance + eps);
                     vec.scale_f32(l.ne00, yf, scale);
