@@ -331,7 +331,8 @@ const DeviceContext = struct {
         self.description[fallback.len] = 0;
         self.description_len = fallback.len;
 
-        if (builtin.os.tag != .macos) return;
+        // The C's `#ifdef __APPLE__`: iOS reads the brand string too.
+        if (!builtin.os.tag.isDarwin()) return;
         var len: usize = self.description.len;
         if (sysctlbyname("machdep.cpu.brand_string", &self.description, &len, null, 0) == 0 and len > 0) {
             // `len` counts the NUL the call wrote.

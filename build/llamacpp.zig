@@ -30,6 +30,54 @@ const cxx_flags = [_][]const u8{"-std=c++17"} ++ quiet;
 // between void* and Obj-C object pointers, so ARC must stay off.
 const objc_flags = [_][]const u8{"-std=c11"} ++ quiet;
 
+/// Adds an Apple SDK's framework and library directories as search paths.
+///
+/// The SDK root itself is not a framework directory: Zig finds the macOS
+/// frameworks on a native build without help, which hid that until an iOS
+/// build searched `iPhoneOS.sdk/Foundation.framework` and failed. Taken from
+/// `baseModule` in `llama.cpp.zmake/build.zig`.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `mod`: the module to add the paths to.
+/// - `sdk`: the SDK root; null adds nothing.
+pub fn addSdkPaths(b: *std.Build, mod: *std.Build.Module, sdk: ?[]const u8) void {
+    const path = sdk orelse return;
+    mod.addFrameworkPath(b.graph.cwdRelativePath(b.pathJoin(&.{ path, "System/Library/Frameworks" })));
+    mod.addLibraryPath(b.graph.cwdRelativePath(b.pathJoin(&.{ path, "usr/lib" })));
+}
+
+/// Writes a `zig libc` file describing an Apple SDK.
+///
+/// A named `-Dtarget` is a cross-compile to Zig even when it names the host,
+/// and Zig then sets up no SDK include chain: its clang finds no `stdio.h`, and
+/// its own libc++ build -- which sees none of our flags -- dies on `mbstate_t`.
+/// A libc file is the one knob that reaches that internal build. Taken from
+/// `writeAppleLibcFile` in `llama.cpp.zmake/build.zig`, where the same
+/// problem was solved for iOS first.
+///
+/// Zig 0.17 requires `crt_dir` and `darwin_sdk_dir`; they get the values
+/// `zig libc -target aarch64-ios` writes. The keys left empty belong to other
+/// platforms.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `sdk`: the SDK root.
+///
+/// Return: a lazy path to the generated file, valid for the whole build.
+pub fn writeAppleLibcFile(b: *std.Build, sdk: []const u8) std.Build.LazyPath {
+    return b.addWriteFiles().add("apple-libc.txt", b.fmt(
+        \\include_dir={s}/usr/include
+        \\sys_include_dir={s}/usr/include
+        \\cc_dir=
+        \\crt_dir={s}/usr/lib
+        \\msvc_lib_dir=
+        \\kernel32_lib_dir=
+        \\darwin_sdk_dir={s}
+        \\
+    , .{ sdk, sdk, sdk, sdk }));
+}
+
 /// Translates `src/ggml/c_import.h`, the ggml headers `src/ggml/impl.zig` imports.
 ///
 /// Zig 0.17 has no `@cImport`, so the header list that file imported inline is
@@ -199,8 +247,14 @@ pub const Artifacts = struct {
 pub const Options = struct {
     target: std.Build.ResolvedTarget,
     optimize: std.lang.Optimize,
-    /// macOS SDK path, used as the framework search path. Null off macOS.
+    /// Apple SDK root for the target -- macOS, iPhoneOS or iPhoneSimulator.
+    /// Its frameworks and libraries are added as search paths; see
+    /// `addSdkPaths`. Null off Apple platforms.
     sdk: ?[]const u8 = null,
+    /// A `zig libc` file describing `sdk`, for a named `-Dtarget`. Null for a
+    /// native build, where Zig sets up the SDK include chain itself. See
+    /// `writeAppleLibcFile`.
+    libc_file: ?std.Build.LazyPath = null,
     /// Makes ported code abort on a hot path, to prove it is executing.
     ///
     /// Comparing output cannot distinguish code that is correct from code that
@@ -329,13 +383,15 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
         mod.addAssemblyFile(embedMetalKernel(b, kind));
     }
 
-    if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
+    addSdkPaths(b, mod, opts.sdk);
     mod.linkFramework("Foundation", .{});
     mod.linkFramework("Metal", .{});
     mod.linkFramework("MetalKit", .{});
     mod.linkFramework("Accelerate", .{});
 
-    return b.addLibrary(.{ .name = "ggml", .root_module = mod, .linkage = .static });
+    const lib = b.addLibrary(.{ .name = "ggml", .root_module = mod, .linkage = .static });
+    lib.setLibCFile(opts.libc_file);
+    return lib;
 }
 
 /// Flattens one Metal kernel and returns the assembly stub that embeds it.
@@ -470,11 +526,13 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
         .flags = &(cxx_flags ++ defines),
     });
 
-    if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
+    addSdkPaths(b, mod, opts.sdk);
     // `-DGGML_USE_ACCELERATE` sends the vector helpers in `ops.cpp` and
     // `binary-ops.cpp` to vDSP, so the framework has to come with them.
     mod.linkFramework("Accelerate", .{});
-    return b.addLibrary(.{ .name = "ggml-ported", .root_module = mod, .linkage = .static });
+    const lib = b.addLibrary(.{ .name = "ggml-ported", .root_module = mod, .linkage = .static });
+    lib.setLibCFile(opts.libc_file);
+    return lib;
 }
 
 /// Declares a test step for the ported Zig that has not been swapped in yet.
@@ -546,7 +604,7 @@ fn portedTestModuleInner(
         .flags = &(cxx_flags ++ defines),
     });
 
-    if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
+    addSdkPaths(b, mod, opts.sdk);
     mod.linkFramework("Accelerate", .{});
     return mod;
 }
@@ -614,8 +672,10 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*std.B
         .flags = &(cxx_flags ++ defines),
     });
 
-    if (opts.sdk) |sdk| mod.addFrameworkPath(b.graph.cwdRelativePath(sdk));
+    addSdkPaths(b, mod, opts.sdk);
     mod.linkLibrary(ggml);
 
-    return b.addLibrary(.{ .name = "llama", .root_module = mod, .linkage = .static });
+    const lib = b.addLibrary(.{ .name = "llama", .root_module = mod, .linkage = .static });
+    lib.setLibCFile(opts.libc_file);
+    return lib;
 }

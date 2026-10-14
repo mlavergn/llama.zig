@@ -1,0 +1,5 @@
+build/
+.build/
+.swiftpm/
+test/pkg/.build/
+test/pkg/.swiftpm/

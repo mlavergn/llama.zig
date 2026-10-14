@@ -98,10 +98,12 @@ const Op = enum {
     }
 };
 
-/// Mirrors `GGML_USE_ACCELERATE`, which `build/llamacpp.zig` defines for this
-/// target. A `comptime` branch rather than a runtime one, so the `extern`
-/// references are not emitted where nothing provides them.
-const use_accelerate = @import("builtin").os.tag == .macos;
+/// Mirrors `GGML_USE_ACCELERATE`, which `build/llamacpp.zig` defines for every
+/// Apple target -- iOS as well as macOS, so this keys on Darwin and not on
+/// `.macos`, which left iOS on the scalar loop while the C took vDSP. A
+/// `comptime` branch rather than a runtime one, so the `extern` references are
+/// not emitted where nothing provides them.
+const use_accelerate = @import("builtin").os.tag.isDarwin();
 
 // -----------------------------------------------------------------------------
 // Element conversion

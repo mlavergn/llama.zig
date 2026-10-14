@@ -122,10 +122,13 @@ const Xcode = struct {
         };
     }
 
-    /// Resolves the Apple Silicon macOS SDK and populates the handle.
+    /// Resolves the Apple SDK for the build target and populates the handle.
     ///
     /// Runs during the build on macOS so the library and CLI can be given the
     /// framework search path they need to link against system frameworks.
+    /// An Apple target gets its own SDK -- macOS, iPhoneOS or
+    /// iPhoneSimulator, which is what lets `xcfwk/` build the iOS slices.
+    /// Anything else falls back to the Apple Silicon macOS SDK, as before.
     /// Must be called exactly once after `init` and before `target` or `sdk`
     /// are read; on success both fields are valid for the handle's lifetime.
     ///
@@ -138,15 +141,19 @@ const Xcode = struct {
     /// Parameters:
     /// - `self`: the handle to populate; mutated in place.
     /// - `b`: the build graph, which records the SDK as a configure input.
+    /// - `target`: the build target; selects which SDK.
     ///
     /// Return: nothing on success; returns `error.FailedToResolveSDK` when no
     /// SDK can be located, and propagates target-resolution errors.
-    pub fn resolve(self: *Self, b: *std.Build) !void {
+    pub fn resolve(self: *Self, b: *std.Build, target: std.Target) !void {
         const query = std.Target.Query{
             .cpu_arch = .aarch64,
             .os_tag = .macos,
         };
-        self.target = try std.zig.system.resolveTargetQuery(self.io, query);
+        self.target = if (target.os.tag.isDarwin())
+            target
+        else
+            try std.zig.system.resolveTargetQuery(self.io, query);
         self.sdk = std.zig.system.darwin.getSdk(
             self.allocator,
             self.io,
@@ -236,8 +243,8 @@ pub fn build(b: *std.Build) !void {
 
     if (builtin.os.tag == .macos) {
         var xcode = try Xcode.init(b.allocator, b.graph.io);
-        try xcode.resolve(b);
-        lib.root_module.addFrameworkPath(b.graph.cwdRelativePath(xcode.sdk));
+        try xcode.resolve(b, cfg.target.result);
+        llamacpp.addSdkPaths(b, lib.root_module, xcode.sdk);
     }
 
     const lib_install = b.addInstallArtifact(lib, .{});
@@ -253,9 +260,18 @@ pub fn build(b: *std.Build) !void {
 
     const sdk: ?[]const u8 = if (builtin.os.tag == .macos) blk: {
         var xcode = try Xcode.init(b.allocator, b.graph.io);
-        try xcode.resolve(b);
+        try xcode.resolve(b, cfg.target.result);
         break :blk xcode.sdk;
     } else null;
+
+    // A named Apple `-Dtarget` -- every `xcfwk/` slice -- is a cross-compile
+    // to Zig and needs the SDK described to it. A native build does not, and
+    // gets nothing new. See `llamacpp.writeAppleLibcFile`.
+    const libc_file: ?std.Build.LazyPath =
+        if (sdk != null and cfg.target.result.os.tag.isDarwin() and !cfg.target.query.isNative())
+            llamacpp.writeAppleLibcFile(b, sdk.?)
+        else
+            null;
 
     // Proves ported code is on the execution path. See scripts/probe-ported.
     const probe_ported = b.option(bool, "probe-ported", "Abort from ported code on a hot path, to prove it runs") orelse false;
@@ -265,6 +281,7 @@ pub fn build(b: *std.Build) !void {
         .target = cfg.target,
         .optimize = cfg.optimize,
         .sdk = sdk,
+        .libc_file = libc_file,
         .probe_ported = probe_ported,
         .probe_cpu = probe_cpu,
     });
@@ -341,7 +358,7 @@ pub fn build(b: *std.Build) !void {
     smoke_module.addImport("llama_h", llama_h_module);
     smoke_module.linkLibrary(reference.llama);
     smoke_module.linkLibrary(reference.ggml);
-    if (sdk) |path| smoke_module.addFrameworkPath(b.graph.cwdRelativePath(path));
+    llamacpp.addSdkPaths(b, smoke_module, sdk);
 
     const smoke = b.addExecutable(.{ .name = "smoke", .root_module = smoke_module });
 
@@ -384,7 +401,7 @@ pub fn build(b: *std.Build) !void {
     cli_module.addImport("llama_h", llama_h_module);
     cli_module.linkLibrary(reference.llama);
     cli_module.linkLibrary(reference.ggml);
-    if (sdk) |path| cli_module.addFrameworkPath(b.graph.cwdRelativePath(path));
+    llamacpp.addSdkPaths(b, cli_module, sdk);
 
     const cli = b.addExecutable(.{
         .name = cfg.cli_name,
@@ -440,7 +457,7 @@ pub fn build(b: *std.Build) !void {
     cli_tests_module.addImport("llama_h", llama_h_module);
     cli_tests_module.linkLibrary(reference.llama);
     cli_tests_module.linkLibrary(reference.ggml);
-    if (sdk) |path| cli_tests_module.addFrameworkPath(b.graph.cwdRelativePath(path));
+    llamacpp.addSdkPaths(b, cli_tests_module, sdk);
 
     const cli_tests = b.addTest(.{
         .root_module = cli_tests_module,
@@ -491,8 +508,8 @@ pub fn build(b: *std.Build) !void {
 
     if (builtin.os.tag == .macos) {
         var docs_xcode = try Xcode.init(b.allocator, b.graph.io);
-        try docs_xcode.resolve(b);
-        docs_lib.root_module.addFrameworkPath(b.graph.cwdRelativePath(docs_xcode.sdk));
+        try docs_xcode.resolve(b, cfg.target.result);
+        llamacpp.addSdkPaths(b, docs_lib.root_module, docs_xcode.sdk);
     }
 
     const docs = b.addInstallDirectory(.{

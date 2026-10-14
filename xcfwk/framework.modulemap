@@ -1,0 +1,20 @@
+// The framework's module map, copied into each slice as Modules/module.modulemap.
+// Not named module.modulemap here: xcfwk/ is a SwiftPM package root, and clang
+// treats any module.modulemap on a search path as a module -- SwiftPM found this
+// one, resolved `umbrella "Headers"` against xcfwk/, and imported nothing.
+
+framework module llamazig {
+    umbrella "Headers"
+
+    // Swift's importer autolinks only what is named here, not a framework
+    // module's own binary, so `swiftc` without `-framework llamazig` would not
+    // link. No `link "c++"`: Zig's libc++ is prelinked into the binary and
+    // hidden.
+    link framework "llamazig"
+    link framework "Accelerate"
+    link framework "Foundation"
+    link framework "Metal"
+    link framework "MetalKit"
+
+    export *
+}

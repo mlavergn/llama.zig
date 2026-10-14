@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate xcframework xcframework-check
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -50,6 +50,15 @@ clean:
 #
 # Reference builds
 #
+
+# Build the port as llamazig.xcframework (macOS, iOS, iOS simulator) for apps.
+# Everything lives in xcfwk/; see xcfwk/README.md.
+xcframework:
+	$(MAKE) -C xcfwk
+
+# The xcframework plus every gate on it, and `validate ops-diff`.
+xcframework-check:
+	$(MAKE) -C xcfwk check
 
 # Build llama.cpp for iOS with CMake.
 buildios:

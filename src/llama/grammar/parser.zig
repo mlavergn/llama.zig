@@ -23,6 +23,7 @@
 //! read for anything but printing, which this port does not reach.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 
 const c = impl.c;
@@ -588,7 +589,24 @@ pub const Parser = struct {
     /// to stderr, clears the rules, and returns false.
     pub fn parse(self: *Parser, s: [*:0]const u8) bool {
         self.parseAll(s) catch {
-            std.debug.print("{s}: error parsing grammar: {s}\n\n{s}\n", .{ "parse", self.err.items, std.mem.span(s) });
+            if (comptime builtin.os.tag == .ios) {
+                // Zig 0.17 cannot compile `std.debug.print` for iOS: it
+                // reaches `std.Io.Threaded`, whose iOS `NullFile` has no `fd`.
+                // `stderr` is unbuffered, so a `write` per part is the same
+                // bytes as the C's `fprintf`; a failed write is dropped, as
+                // the C ignores `fprintf`'s result.
+                const parts = [_][]const u8{ "parse: error parsing grammar: ", self.err.items, "\n\n", std.mem.span(s), "\n" };
+                write: for (parts) |part| {
+                    var rest = part;
+                    while (rest.len > 0) {
+                        const n = std.c.write(2, rest.ptr, rest.len);
+                        if (n <= 0) break :write;
+                        rest = rest[@intCast(n)..];
+                    }
+                }
+            } else {
+                std.debug.print("{s}: error parsing grammar: {s}\n\n{s}\n", .{ "parse", self.err.items, std.mem.span(s) });
+            }
             self.clearRules();
             return false;
         };
