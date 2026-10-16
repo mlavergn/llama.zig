@@ -145,6 +145,13 @@ fn normalize(log: []const u8) std.ArrayList(u8) {
                 continue;
             }
         }
+        if (std.mem.find(u8, line, "available_memory_kb: ")) |at| {
+            // CUDA on a unified-memory device reads the system's free
+            // memory from /proc/meminfo, which moves between any two reads.
+            out.appendSlice(gpa, line[0 .. at + "available_memory_kb: ".len]) catch unreachable;
+            out.appendSlice(gpa, "N") catch unreachable;
+            continue;
+        }
         if (std.mem.find(u8, line, " MiB free")) |end| {
             // A device's free memory moves with what the process holds.
             var start = end;

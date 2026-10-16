@@ -21,7 +21,8 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
+. scripts/platform-libs
+platform_libs exe
 zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
     "$PORT/c_import.h" >"$tmp/llama_c.zig" 2>"$tmp/terr" \
     || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
@@ -29,8 +30,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/gemma4_assistant_diff" -Ofast -lc 
     --dep harness_root -Mroot=harness/gemma4_assistant_diff.zig \
     --dep llama_c -Mharness_root="$PORT/harness_root.zig" -Mllama_c="$tmp/llama_c.zig" \
     "$LIBS/libllama-ref.a" "$LIBS/libggml.a" -lc++ \
-    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 
 rc=0

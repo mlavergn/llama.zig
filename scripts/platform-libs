@@ -1,0 +1,35 @@
+# Sourced, not run: `platform_libs cc|exe` sets PLATFORM_LIBS, the system
+# libraries an in-process harness needs beside
+# zig-out/lib/{libllama-ref.a,libggml.a}, for a `zig cc`/`zig c++` link or a
+# `zig build-exe` one -- the two spell an rpath differently.
+#
+# macOS: the Metal and Accelerate frameworks from the SDK.
+# Linux: the CUDA runtime, cuBLAS and the driver -- and deliberately *not*
+# the system libstdc++ the cuda-* scripts link. Zig appends its own
+# libc++abi.a after every input, so a libstdc++.so on the line wins the
+# runtime symbols nothing in libc++.a pulls first: the binary then throws
+# with Zig's `__cxa_throw` and unwinds through libstdc++'s
+# `__gxx_personality_v0`, which aborts, and no exception in the reference
+# can be caught (the Gemma 4 assistant's refused context, for one). Zig's
+# libc++ supplies all `cub_shim.o` needs, and libcublas still loads
+# libstdc++ at run time through its own DT_NEEDED.
+platform_libs() {
+    case "$(uname -s)" in
+        Darwin)
+            local sdk
+            sdk="$(xcrun --sdk macosx --show-sdk-path)"
+            PLATFORM_LIBS=(-framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+                           -F "$sdk/System/Library/Frameworks")
+            ;;
+        Linux)
+            local cuda=${CUDA_HOME:-/usr/local/cuda} rpath
+            if [ "$1" = exe ]; then rpath=(-rpath "$cuda/lib64"); else rpath=(-Wl,-rpath,"$cuda/lib64"); fi
+            PLATFORM_LIBS=(-L"$cuda/lib64" "${rpath[@]}" -lcudart -lcublas -lcublasLt -lcuda
+                           -lgcc_s -lm -lpthread)
+            ;;
+        *)
+            echo "platform-libs: no link line for $(uname -s)" >&2
+            exit 2
+            ;;
+    esac
+}

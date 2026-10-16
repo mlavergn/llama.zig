@@ -962,28 +962,23 @@ GB10 failure moves to the CUDA pickup below.
 
 ### CUDA pickup
 
-The reverse list: Mac-side work that should be re-run on the CUDA machine.
+**Done** (`NOTES.md`, "CUDA pickup: the Mac's list, run on the GB10"). The
+four `make cuda-*` targets pass, `zig build test` is green (the banner
+only, as on the Mac), `port-links` passes, and `arch-model-diff` gives 157 /
+159 on CUDA and the CPU, the Mac's result, with `gemma4-assistant-diff`
+identical. Three things needed fixing first: the arch scripts linked Metal
+(now `scripts/platform-libs`); linking `libstdc++.so` beside Zig's libc++
+made every C++ exception in the reference abort; and T5's `q8_0` case
+is a deterministic upstream abort on CUDA rather than Metal's
+nondeterminism, so its skip is Darwin-only. `scripts/port-coverage` is
+Mac-only by construction and was not run.
 
-- **`make cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli`**
-  are new Makefile targets wrapping the four scripts, each building what its
-  script's `Requires:` line names. Written on the Mac, where they refuse to
-  run; run each once.
-- **`zig build test` on the GB10.** The same tests pass on the Mac through
-  the same runner: the stderr-logging tests print the runner's `failed
-  command:` banner here too, but the step is green (426 pass, 2 skip). So
-  the GB10 failure is platform behaviour in Zig 0.17's `--listen=-` runner,
-  not a regression in shared code. What differs there is still to find.
-- **`scripts/port-links` and `scripts/port-coverage` changed** (above), and
-  `make validate` now formats `src/ggml/cuda/*.zig`. Run `make validate`
-  there once.
-- **`make arch-fixtures arch-model-diff` and `make gemma4-assistant-diff`
-  on CUDA.** The 146 architectures were gated on Metal and the CPU only; the
-  harness picks the GPU device generically, so on the GB10 its `gpu` pass is
-  CUDA, and nothing has run their graphs through the CUDA backend yet. The
-  RWKV `hs64` variants exist for Metal's WKV kernels; whether CUDA needs them
-  too is part of the run. `KNOWN_NONDET`'s T5 entry was measured on Metal
-  but is keyed on `gpu`, so it skips that case on CUDA too: run it once
-  without the skip to see whether CUDA needs it.
+**Back to the Mac**: `gen-arch-fixtures`, `arch-model-diff` and
+`gemma4-assistant-diff` now take their link line from
+`scripts/platform-libs`, and `arch-model-diff`'s `abort_of` also reads a
+formatted `ggml_abort`. Run `make arch-fixtures arch-model-diff
+gemma4-assistant-diff` there once; the expected result is unchanged,
+157 / 159 with T5 at `+1nondet` on Metal.
 
 ---
 

@@ -42,7 +42,8 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
+. scripts/platform-libs
+platform_libs cc
 INC=(-I llama.cpp/common -I llama.cpp/src -I llama.cpp/include -I llama.cpp/ggml/include -I llama.cpp/vendor)
 
 zig c++ -mcpu=baseline -c llama.cpp/tests/test-llama-archs.cpp -o "$tmp/archs.o" -std=c++17 -O2 -w "${INC[@]}" 2>"$tmp/cerr" \
@@ -51,8 +52,7 @@ zig c++ -mcpu=baseline -c harness/arch_fixtures_shim.cpp -o "$tmp/shim.o" -std=c
     || { echo "FAIL: cannot compile harness/arch_fixtures_shim.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
 zig c++ -mcpu=baseline -o "$tmp/archs" "$tmp/archs.o" "$tmp/shim.o" \
     zig-out/lib/libllama-ref.a zig-out/lib/libggml.a \
-    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-    -F "$SDK/System/Library/Frameworks" 2>"$tmp/lerr" \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/lerr" \
     || { echo "FAIL: cannot link test-llama-archs" >&2; grep -m10 -i 'error\|undefined' "$tmp/lerr" >&2; exit 1; }
 zig c++ -mcpu=baseline -c harness/arch_fixtures_extra.cpp -o "$tmp/extra.o" -std=c++17 -O2 -w -I llama.cpp/tests "${INC[@]}" 2>"$tmp/cerr" \
     || { echo "FAIL: cannot compile harness/arch_fixtures_extra.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
@@ -60,13 +60,11 @@ zig c++ -mcpu=baseline -c harness/arch_fixtures_draft.cpp -o "$tmp/draft.o" -std
     || { echo "FAIL: cannot compile harness/arch_fixtures_draft.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
 zig c++ -mcpu=baseline -o "$tmp/draft" "$tmp/draft.o" "$tmp/shim.o" \
     zig-out/lib/libllama-ref.a zig-out/lib/libggml.a \
-    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-    -F "$SDK/System/Library/Frameworks" 2>"$tmp/lerr" \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/lerr" \
     || { echo "FAIL: cannot link arch_fixtures_draft" >&2; grep -m10 -i 'error\|undefined' "$tmp/lerr" >&2; exit 1; }
 zig c++ -mcpu=baseline -o "$tmp/extra" "$tmp/extra.o" "$tmp/shim.o" \
     zig-out/lib/libllama-ref.a zig-out/lib/libggml.a \
-    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-    -F "$SDK/System/Library/Frameworks" 2>"$tmp/lerr" \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/lerr" \
     || { echo "FAIL: cannot link arch_fixtures_extra" >&2; grep -m10 -i 'error\|undefined' "$tmp/lerr" >&2; exit 1; }
 
 rm -rf "$OUT"

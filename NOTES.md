@@ -4789,3 +4789,105 @@ The C++ and the port abort identically on each: PLM's flattened `v_states`
 `seq_pos_max` without its range check, and its `n_embd_out = hc * n_embd`
 overrunning the embedding buffer; T5's encoder positions under
 `split_equal`; RWKV6-Qwen2's `time_mix_first` path and its `n_embd_r`.
+
+## CUDA pickup: the Mac's list, run on the GB10
+
+`PLAN.md`'s "CUDA pickup" had four items. All are done; two needed fixes in
+the harnesses, and one turned up a script that cannot run here as written.
+
+### What the gates say
+
+| Gate | Result on the GB10 |
+|---|---|
+| `make cuda-ops-diff` | every supported case bit-identical to the reference CUDA backend |
+| `make cuda-node-diff` | every node and every fused decode identical |
+| `make cuda-backend-diff` | 2,805 + 8,387 vtable answers identical |
+| `make cuda-parity-cli` | 6/6 |
+| `zig build test` | green: 428/430 (2 skipped), 394/394 steps |
+| `make validate`, the parts that run here | formatting (with `src/ggml/cuda/`), the scaffold, all four test suites, `libcxx-diff` (452,904), `port-links` (5,483 citations in 402 files) |
+| `make arch-model-diff` | **157 / 159 pass**, 0 fail, 0 unported; the same 2 `REF-ABORT` as the Mac. 49 abort matches across 12 fixtures, each in a `gpu`/`cpu` pair apart from T5's CUDA case below |
+| `make gemma4-assistant-diff` | dense and MoE, CUDA and CPU: identical |
+
+`zig build test` was not a regression in shared code: it prints the
+runner's `failed command:` banner over the stderr-logging tests, exactly as
+on the Mac, and exits 0.
+
+### The arch scripts linked Metal, and now link per platform
+
+`gen-arch-fixtures`, `arch-model-diff` and `gemma4-assistant-diff` called
+`xcrun` and linked four frameworks. `scripts/platform-libs`, sourced, sets
+the link line for either machine: `platform_libs cc` for a `zig cc`/`zig
+c++` link, `platform_libs exe` for `zig build-exe`. The two spell an rpath
+differently (`-Wl,-rpath,…` against `-rpath …`), and `build-exe` refuses
+the first. The fixtures come out byte-identical to the first Linux batch,
+all 159.
+
+### Two C++ runtimes in one binary, and every exception aborted
+
+The cuda-* scripts link the system `libstdc++.so` for the nvcc objects.
+Doing the same here made **every C++ exception in the reference
+uncatchable**. `llama_context`'s constructor throws by design when a Gemma 4
+assistant has no target, and `llama_init_from_model` catches it; on the
+GB10 the process aborted in `__gxx_personality_v0`.
+
+Zig appends its own `libc++abi.a` *after* every input, so a `libstdc++.so`
+earlier on the line wins every runtime symbol nothing in `libc++.a` has
+already pulled in. Measured with `nm`: `__cxa_throw` came from Zig's archive
+(hidden, `t`), and `__gxx_personality_v0` from libstdc++ (`U`). So the
+binary threw a libc++abi exception and unwound it with libstdc++'s
+personality routine, which cannot handle it.
+
+The fix is to leave `libstdc++.so` off. The only GNU-ABI C++ in the port's
+`libggml.a` is `cub_shim.o`, and Zig's libc++ supplies all of it:
+`std::runtime_error` keeps the GNU mangling in libc++, outside its `__1`
+namespace. libcublas still loads libstdc++ at run time through its own
+`DT_NEEDED`. The `rwkv7`/`arwkv7` lines in `gen-arch-fixtures` changed with
+it, from a bare "aborted" to "the C++ cannot build the model", which is
+upstream's exception now being caught as on the Mac.
+
+**This does not carry to a `-Dcuda-port=false` build.** Upstream's host
+objects need `std::__throw_length_error`, `std::condition_variable::wait`
+and other libstdc++-only symbols, so a harness over that library has to
+link both runtimes and cannot catch an exception. None of the four cuda-*
+gates throws.
+
+### CUDA's free-memory log line
+
+On a unified-memory device, `ggml_backend_cuda_get_available_uma_memory`
+reads `/proc/meminfo` and logs `final available_memory_kb: N` at debug
+level. N moves between any two reads. `context_diff.zig` and
+`gemma4_assistant_diff.zig` now normalize it next to the `MiB free` lines;
+`api_diff`, `adapter_diff` and `loader_diff` have the same `normalize` and
+will need the same line when they first run here.
+
+### T5's `q8_0` case is upstream's abort on CUDA, not nondeterminism
+
+`KNOWN_NONDET`'s T5 entry was keyed on `gpu`, so CUDA skipped it too. Run
+without the skip, the case aborts identically on every run, on both sides:
+`ggml_cuda_cpy: unsupported type combination (q8_0 to q8_0)`.
+Upstream's own host layer (`zig-out/cuda-upstream`) aborts at the same
+node, at `cpy.cu:609`. Its `supports_op` returns `true` for every `CONT`,
+and `ggml_cuda_cpy` has no non-contiguous quantized same-type path, so the
+quantized V transpose is claimed by CUDA and then refused. The port matches
+it.
+
+So the entry is Darwin-only now, and `abort_of` recognizes a formatted
+`ggml_abort`, `<file>:<line>: <message>`, when no assertion is found.
+Without that second change the case read `+1refcrash`: both sides printed
+the same message, and the gate saw none. T5 now reads `gpu:17+4abort`.
+Checked on synthetic logs: an assertion still takes priority, two
+different messages stay different, and an ordinary log line is not taken
+for an abort.
+
+### What cannot run here
+
+- **`scripts/port-coverage`** measures the macOS contract
+  (`-DGGML_USE_METAL -DGGML_USE_ACCELERATE`, `use_metal = true`), and it
+  strips one leading underscore as the Mach-O C prefix. On ELF that turns
+  `_ZN…` into `ZN…`, which slips past the `^_Z` C++ filter. It fails here on
+  `M_PI` in `ggml.c` before measuring anything, and fixing the defines
+  alone would produce wrong counts, not just different ones.
+- **The in-process diffs in `make validate`** (`regex`, `unicode`,
+  `vocab`, `arch`, `loader`, `batch`, `chat`, `api`) still link the Metal
+  frameworks, so `make validate` stops at `regex-diff`. `platform-libs` is
+  what they would use.

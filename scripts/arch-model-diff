@@ -60,7 +60,8 @@ ls "$DIR"/*.gguf > /dev/null 2>&1 || { echo "no fixtures in $DIR -- run scripts/
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
+. scripts/platform-libs
+platform_libs exe
 
 zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
     "$PORT/c_import.h" >"$tmp/llama_c.zig" 2>"$tmp/terr" \
@@ -72,8 +73,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
     --dep harness_root -Mroot=harness/context_diff.zig \
     --dep llama_c -Mharness_root="$PORT/harness_root.zig" -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/proxy_dev.o" "$LIBS/libllama-ref.a" "$LIBS/libggml.a" -lc++ \
-    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 
 # Cases where the C++ itself is nondeterministic, so ref and port cannot
@@ -86,10 +86,14 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
 #   overwritten before it is copied to the GPU, and the decoder's GET_ROWS
 #   on `attn_rel_b` reads whatever is there -- [0, 7] in the encoder,
 #   +-2.1e9 in the decoder, different in every process. The logits agree,
-#   since the cells read are masked.
-KNOWN_NONDET=(
-    "t5-dense gpu q8_0 cache"
-)
+#   since the cells read are masked. Metal only: on CUDA the same case is a
+#   deterministic upstream abort -- `supports_op` claims every CONT and
+#   `ggml_cuda_cpy` has no non-contiguous q8_0-to-q8_0 path -- which the
+#   crash split counts as `+1abort`.
+KNOWN_NONDET=()
+if [ "$(uname -s)" = Darwin ]; then
+    KNOWN_NONDET+=("t5-dense gpu q8_0 cache")
+fi
 
 skip_for() {
     local name=$1 m=$2 k
@@ -104,7 +108,12 @@ skip_for() {
 # The assertion a run aborted on, without the file it was raised in: the
 # C++ and the port name their sources differently.
 abort_of() {
-    grep -m1 -o 'GGML_ASSERT(.*) failed\|GGML_ABORT.*\|error: .*' "$1" | head -1
+    local a
+    a=$(grep -m1 -o 'GGML_ASSERT(.*) failed\|GGML_ABORT.*\|error: .*' "$1" | head -1)
+    # A formatted `ggml_abort` -- CUDA's "unsupported type combination", say
+    # -- prints `<file>:<line>: <message>` and none of the above.
+    [ -n "$a" ] || a=$(grep -m1 -E '^[^ ]+\.(c|cpp|cu|zig|m):[0-9]+: ' "$1" | sed -E 's/^[^ ]+:[0-9]+: //')
+    echo "$a"
 }
 
 # Sets split=ok|refabort|fail, split_ok, split_aborts, split_why.
