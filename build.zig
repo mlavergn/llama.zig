@@ -222,7 +222,11 @@ fn cudaOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Cuda {
     };
     // nvcc compiles host code with the system g++; ask it where its runtime is.
     const libstdcxx = std.mem.trim(u8, b.run(&.{ "g++", "-print-file-name=libstdc++.so" }), " \r\n\t");
-    return .{ .toolkit = toolkit, .arch = arch, .libstdcxx = libstdcxx };
+    // The swap (PLAN.md, Decision 48): the Zig host layer is the CUDA
+    // backend. `-Dcuda-port=false` builds upstream's instead, which only the
+    // gates want -- `scripts/cuda-node-diff` diffs the two.
+    const port = b.option(bool, "cuda-port", "Use the Zig CUDA host layer (default: true; false builds upstream's, for the gates)") orelse true;
+    return .{ .toolkit = toolkit, .arch = arch, .libstdcxx = libstdcxx, .port = port };
 }
 
 pub fn build(b: *std.Build) !void {
@@ -369,6 +373,14 @@ pub fn build(b: *std.Build) !void {
     });
     const ported_lib_step = b.step("ported-lib", "Build a library from the ported Zig alone");
     ported_lib_step.dependOn(&b.addInstallArtifact(ported_lib, .{}).step);
+
+    // Upstream's CUDA backend with its C exports renamed `ref_*`, for the
+    // in-process gates that run it beside the port. See `addCudaRef`.
+    if (cuda) |cu| if (cu.port) {
+        const cuda_ref = try llamacpp.addCudaRef(b, .{ .target = cfg.target, .optimize = cfg.optimize, .cuda = cuda });
+        const cuda_ref_step = b.step("cuda-ref", "Build upstream's CUDA backend with renamed exports");
+        cuda_ref_step.dependOn(&b.addInstallArtifact(cuda_ref, .{}).step);
+    };
 
     const reference_step = b.step("reference", "Build the llama.cpp reference libraries");
     reference_step.dependOn(&ggml_install.step);

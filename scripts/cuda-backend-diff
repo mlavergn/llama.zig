@@ -1,0 +1,67 @@
+#!/bin/bash
+# The CUDA backend's device, buffer-type and registry vtables, port against
+# reference: `metal-diff` for CUDA. See harness/cuda_backend_diff.c for what is
+# asked and why `cuda-ops-diff` cannot see it.
+#
+# Runs twice: on the physical device, and with `GGML_CUDA_DEVICES=3` -- three
+# virtual devices on the one GB10 -- so per-device answers are compared for a
+# device index other than 0.
+#
+# Usage: scripts/cuda-backend-diff
+# Requires: zig build reference cuda-ref --release=fast --prefix zig-out/cuda-port
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+PREFIX=${CUDA_PORT_PREFIX:-zig-out/cuda-port}
+PORT_LIB=$PREFIX/lib/libggml.a
+REF_LIB=${CUDA_REF_LIB:-$PREFIX/lib/libggml-cuda-ref.a}
+for lib in "$PORT_LIB" "$REF_LIB"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference cuda-ref --release=fast --prefix $PREFIX'" >&2; exit 2; }
+done
+if nm -A "$PORT_LIB" 2>/dev/null | grep -q '/ggml-cuda\.o:'; then
+    echo "FAIL: $PORT_LIB contains upstream's ggml-cuda.o -- it is the reference build, not the port" >&2; exit 1
+fi
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+CUDA=/usr/local/cuda
+zig cc -c harness/cuda_backend_diff.c -o "$tmp/h.o" -std=c11 -O2 -I llama.cpp/ggml/include 2>"$tmp/cc.log" \
+    || { echo "FAIL: could not compile the harness" >&2; tail -5 "$tmp/cc.log" >&2; exit 1; }
+zig c++ "$tmp/h.o" -o "$tmp/cuda_backend_diff" "$PORT_LIB" "$REF_LIB" \
+    -L"$CUDA/lib64" -Wl,-rpath,"$CUDA/lib64" -lcudart -lcublas -lcublasLt -lcuda \
+    "$(g++ -print-file-name=libstdc++.so)" -lgcc_s -lm -lpthread -ldl 2>"$tmp/ld.log" \
+    || { echo "FAIL: could not link the harness" >&2; grep -m5 error "$tmp/ld.log" >&2; exit 1; }
+
+fail=0
+for devices in "" 3; do
+    label=${devices:-physical}
+    if [ -n "$devices" ]; then
+        GGML_CUDA_DEVICES=$devices "$tmp/cuda_backend_diff" > "$tmp/out.txt" 2>/dev/null
+    else
+        "$tmp/cuda_backend_diff" > "$tmp/out.txt" 2>/dev/null
+    fi
+    rc=$?
+    [ -n "${CUDA_BACKEND_DIFF_OUT:-}" ] && cp "$tmp/out.txt" "$CUDA_BACKEND_DIFF_OUT.$label"
+    [ "$rc" -eq 0 ] || { echo "FAIL ($label): harness exited $rc"; fail=1; continue; }
+    sed -n 's/^port //p' "$tmp/out.txt" > "$tmp/port.txt"
+    sed -n 's/^ref //p'  "$tmp/out.txt" > "$tmp/ref.txt"
+    n=$(wc -l < "$tmp/ref.txt" | tr -d ' ')
+    [ "$n" -gt 0 ] || { echo "FAIL ($label): no answers"; fail=1; continue; }
+    if diff -q "$tmp/ref.txt" "$tmp/port.txt" >/dev/null; then
+        printf '  %-9s %s answers identical\n' "$label" "$n"
+    else
+        printf '  %-9s DIFFERS (%s of %s answers):\n' "$label" "$(diff "$tmp/ref.txt" "$tmp/port.txt" | grep -c '^<')" "$n"
+        diff "$tmp/ref.txt" "$tmp/port.txt" | grep '^[<>]' | head -8
+        fail=1
+    fi
+done
+
+if [ "$fail" -eq 0 ]; then
+    echo "PASS: the ported CUDA vtables answer as the reference's"
+    exit 0
+fi
+echo "FAIL: the ported CUDA vtables differ from the reference's"
+exit 1

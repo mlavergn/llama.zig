@@ -14,9 +14,19 @@
  * dot-product epilogues as the first divergent MUL_MAT of a CPU-only Qwen3.5
  * decode, which the vec_dot goldens had passed.
  *
- * argv: <model.gguf> <prompt> <n_threads> [gpu]
+ * argv: <model.gguf> <prompt> <n_threads> [gpu|cpu] [fused <n_steps>]
  *   The model is loaded on the CPU device alone unless `gpu` is given: on a
  *   Metal machine the CPU kernels are otherwise never on the path.
+ *
+ * `fused` mode: observing every node costs more than speed. Answering `ask`
+ * with true splits the graph at every node, so a backend can never fuse
+ * nodes or capture a CUDA graph -- on either side, so a broken fusion path
+ * is invisible. Measured on CUDA: switching off the port's RMS_NORM + MUL
+ * fusion left all 2750 nodes identical. With `fused`, no callback is
+ * installed and the graph runs as the real binary runs it; the output is one
+ * line per decode -- the prompt, then `n_steps` greedy single-token steps --
+ * with the FNV-1a of the full logits row. Coarser in *where* (it names the
+ * step, not the op) and exact in *what*.
  *
  * Output: one line per node -- index, op, name, type, the buffer holding the
  * output (which says which backend ran it), shape, FNV-1a of the output
@@ -73,10 +83,12 @@ static bool observe(struct ggml_tensor * t, bool ask, void * user_data) {
 
 int main(int argc, char ** argv) {
     if (argc < 4) {
-        fprintf(stderr, "usage: %s <model.gguf> <prompt> <n_threads> [gpu]\n", argv[0]);
+        fprintf(stderr, "usage: %s <model.gguf> <prompt> <n_threads> [gpu|cpu] [fused <n_steps>]\n", argv[0]);
         return 2;
     }
     const int gpu = argc > 4 && strcmp(argv[4], "gpu") == 0;
+    const int fused = argc > 6 && strcmp(argv[5], "fused") == 0;
+    const int n_steps = fused ? atoi(argv[6]) : 0;
 
     llama_backend_init();
 
@@ -105,8 +117,10 @@ int main(int argc, char ** argv) {
         cp.offload_kqv = false;
         cp.op_offload = false;
     }
-    cp.cb_eval = observe;
-    cp.cb_eval_user_data = NULL;
+    if (!fused) {
+        cp.cb_eval = observe;
+        cp.cb_eval_user_data = NULL;
+    }
 
     struct llama_context * ctx = llama_init_from_model(model, cp);
     if (!ctx) return 1;
@@ -114,9 +128,25 @@ int main(int argc, char ** argv) {
     /* The prompt, then one decode step: the batched path and the single-row
      * path take different kernels (flash attention's split-KV, the
      * recurrent layers' one-token branch). */
-    if (llama_decode(ctx, llama_batch_get_one(toks, n))) return 1;
-    llama_token next = toks[n - 1];
-    if (llama_decode(ctx, llama_batch_get_one(&next, 1))) return 1;
+    if (fused) {
+        const int n_vocab = llama_vocab_n_tokens(vocab);
+        if (llama_decode(ctx, llama_batch_get_one(toks, n))) return 1;
+        for (int step = 0; step <= n_steps; step++) {
+            const float * logits = llama_get_logits_ith(ctx, -1);
+            llama_token best = 0;
+            for (int i = 1; i < n_vocab; i++) {
+                if (logits[i] > logits[best]) best = i;
+            }
+            printf("step %3d logits %016llx next %d\n", step,
+                   (unsigned long long) fnv1a(logits, (size_t) n_vocab * sizeof(float)), best);
+            if (step == n_steps) break;
+            if (llama_decode(ctx, llama_batch_get_one(&best, 1))) return 1;
+        }
+    } else {
+        if (llama_decode(ctx, llama_batch_get_one(toks, n))) return 1;
+        llama_token next = toks[n - 1];
+        if (llama_decode(ctx, llama_batch_get_one(&next, 1))) return 1;
+    }
 
     llama_free(ctx);
     llama_model_free(model);

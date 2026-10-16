@@ -6,7 +6,7 @@ Implementation plan for the llama.cpp -> Zig port described in `README.md`.
 cost, what each gate caught, and the false passes found by injection — is in
 `NOTES.md`. This file says what is decided and what comes next.
 
-Written against `llama.cpp` at tag **v0.3.0** (commit `c1d0e7a00`), Zig **0.16.0**, macOS arm64.
+Written against `llama.cpp` at tag **v0.3.0** (commit `c1d0e7a00`), Zig **0.17.0**. Two machines: macOS arm64 (Apple M5 Max, Metal) and Linux aarch64 (NVIDIA GB10, CUDA) — see Decision 43.
 
 ---
 
@@ -24,7 +24,7 @@ Settled in review. The plan below assumes all of these.
 | 4 | Correctness bar | **Token-identical output** vs. the reference build, fixed seed, `--temp 0`, canonical model `Qwen3.5-2B-Q4_K_M.gguf`. Logit-distance tolerance is the documented fallback if bit-exactness proves unreachable. Reference is `llama.cpp.zmake` — see Decision 17. |
 | 5 | Model architectures | **Qwen3.5 first**, backfill the rest later. |
 | 6 | Metal kernels | **Stay as MSL**, carried verbatim as embedded data. |
-| 6a | CUDA backend | **In scope.** The CUDA *kernels* stay as CUDA, like Decision 6's MSL; Zig takes the host layer. See "Stage 6 — CUDA" for the measurement, the split that is not the Metal split, and the open gate question. |
+| 6a | CUDA backend | **In scope.** The CUDA *kernels* stay as CUDA, like Decision 6's MSL; Zig takes the host layer. See "Stage 6 — CUDA" for the measurement, the split that is not the Metal split, and how the gate question was settled (Decision 43). |
 | 7 | Ported code location | **Under `src/`.** See "Layout" below. |
 | 8 | Timeline | **Not a constraint.** Estimates removed from this plan; ordering and dependencies are what matter. |
 | 9 | Layout | **Mirror upstream's component boundaries under `src/`**, each with its own barrel. See below. |
@@ -59,6 +59,12 @@ Settled in review. The plan below assumes all of these.
 | 38 | Copyright holder | **`Marc Lavergne`, provisionally.** Taken from the repository's git author config; revisit before any public release. |
 | 40 | Order within Stage 4 | **Gated work first.** `ggml-backend-meta.cpp` and `ggml-opt.cpp` move to the end of Stage 4's ggml half, behind the `ggml-cpu/` C++. Neither is on the inference path, so neither has an end-to-end gate — and meta is **~96% unexecutable on this machine**: `ggml_backend_meta_device` is only built under `LLAMA_SPLIT_MODE_TENSOR`, our CLI never sets `split_mode`, and there is one GPU. The `ggml-cpu/` C++ is the opposite: covered by **`backend-ops`**, which runs CPU against Metal over 21,093 op configurations. Note that is the *only* gate that reaches it — measured, by putting an abort in `ggml_compute_forward_mul` and watching `make port` finish without hitting it. On a Metal machine the CPU op kernels never execute during inference, so `parity-cli` and `make port` cannot see them at all. One real gate still beats meta and opt's zero. Supersedes the ordering in "Order of work" step 1. **Since done**, both ported and swapped last as decided. The "~96% unexecutable" estimate for meta was wrong: it accepts the same device twice, so `scripts/meta-diff` runs a real all-reduce on {Metal, Metal} and reaches 94.8% of its lines. |
 | 39 | Threading primitives in ported code | **pthreads directly**, not `std.Io.Mutex` / `std.Io.Condition`. Zig 0.16 requires an `Io` on every call and a backend entered through a C ABI has none. `std.Thread.spawn` is still used for the workers. |
+| 43 | CUDA gate machine | **Option (1), settled by hardware.** A Linux aarch64 machine with an NVIDIA GB10 (compute 12.1, `sm_121a`), CUDA 13.0, driver 580, 20 cores, 121 GB unified memory. CUDA work is done and gated there; Metal work stays on the Mac. Each machine records what it could not run in "Mac pickup" / "CUDA pickup" below rather than skipping it silently. |
+| 44 | How CUDA kernels travel | **As per-translation-unit fatbins, loaded through the driver API.** Every upstream `.cu` is compiled unmodified by `nvcc -fatbin` with the reference's exact flags; the fatbin is embedded in `libggml.a` the way the metallib is, loaded with `cuLibraryLoadData` and each kernel found by its mangled name with `cuLibraryGetKernel`. The upstream host code in those files is parsed by `nvcc` only to instantiate templates; none of it is linked. The Zig host layer launches with `cuLaunchKernelEx`. Measured on the GB10 before deciding: a fatbin built this way loads, launches from Zig and computes correctly. |
+| 45 | Naming a kernel | **By its demangled template spelling, resolved at comptime from a generated table.** A build step reads every fatbin's entry symbols (`cuobjdump -symbols`), demangles them with `cu++filt`, and writes a table from `mul_mat_q<(ggml_type)12, 64, false>` to the mangled name. The Zig dispatch builds the key with `comptimePrint`; a key that upstream's own host code does not instantiate is a **compile error**, not a runtime miss. The table is regenerated from the build output on every build, so it cannot drift from the pin. |
+| 46 | CUDA kernel argument ABI | **Checked on every launch in safe builds.** `cuKernelGetParamInfo` reports each parameter's offset and size; the launch helper asserts each argument's Zig size against it. A wrong integer width is otherwise a silent wrong answer. By-value structs (`uint3` fastdiv triples, `float2`, the `*_args` structs) additionally go through `make cuda-struct-layout`, the CUDA analogue of `struct-layout`, since a size check cannot see field order. |
+| 47 | CUB device-wide algorithms | **One C-ABI `.cu` shim of our own, treated like cuBLAS.** `cumsum.cu` calls `cub::DeviceScan::InclusiveSum` and `argsort.cu` CUB's segmented sort; their host-side dispatch lives in CUB's header templates, version-specific to the toolkit, and is library code rather than ggml's. `src/ggml/cuda/cub_shim.cu` wraps exactly those instantiations behind `extern "C"`. It is the only CUDA host code we write in C++, and it is not a port of anything. |
+| 48 | CUDA swap unit | **Once, at `ggml-cuda.h`** — Decision 42's method, for Decision 42's reason. The host layer is one C++ object graph (`ggml_backend_cuda_context`, its virtual pools, RAII allocations) reached across 60-odd files through mangled names, while its external contract is the eleven C functions of `ggml-cuda.h`. The Zig backend is developed beside upstream's, both registered in one process for the gates, its `supports_op` claiming only ported ops; the swap removes upstream's host objects from `libggml.a`. |
 | 42 | libllama's swap unit | **Measured: libllama is one strongly connected component, so it swaps once, at `llama.h` — with one exception that goes first.** 22 of its core translation units plus every `models/*.cpp` reach each other through 367 mangled C++ symbols and 27 C ones; ggml's "the external contract is a pure C ABI" does not carry over. The exception is **`llama-sampler.cpp` + `llama-grammar.cpp`**: inbound, `llama-context.o` reaches them through the C `llama_sampler_i` vtable, three C functions and two mangled ones with plain-pointer signatures, which Zig can `@export`; outbound, every call into `llama_vocab` has a public C equivalent. So that pair is ported and swapped first, and everything else in libllama is developed beside the C++ and gated in-process subsystem by subsystem until the single swap. See "Order of work" step 4. **Done: swapped**, with the C++ kept as `libllama-ref.a` for the in-process gates. |
 
 ---
@@ -766,57 +772,218 @@ Zig does list `nvptx` and `nvptx64` as targets, so emitting PTX from Zig
 is *conceivable* — but that backend is experimental and this plan does not
 depend on it. Kernels stay CUDA.
 
-### The open question, and it blocks writing code rather than planning it
+### The gate question, settled by hardware (Decision 43)
 
-**No gate in this project can run for CUDA on this machine, and that is
-not a detail.** Measured here: the GPU is an Apple M5 Max, `nvcc` is not
-present, `nvidia-smi` is not present, and macOS has shipped no CUDA
-support since 10.13. All fourteen correctness gates are local bit-exact
-diffs against a reference build — `node-diff`, `ops-diff`, `metal-diff`,
-`backend-ops`, `parity-*`. For CUDA, every one of them is unavailable.
+This section used to say that **no gate in this project could run for
+CUDA**, because the only machine was an Apple M5 Max, and that porting
+~43,900 lines with no oracle would produce exactly the artifact the project
+refuses — green, consistent, unverified. It recommended option (1), a CUDA
+machine. That machine now exists: Linux aarch64, an NVIDIA **GB10**
+(compute 12.1, built for `sm_121a`), CUDA **13.0**, driver 580.
 
-That collides directly with this project's central rule, the one the whole
-`NOTES.md` fault-injection table exists to serve: **a gate proves nothing
-until it has been made to fail.** Porting ~43,900 lines of numerically
-sensitive kernel-dispatch code with *no* oracle would produce exactly the
-class of artifact this project has spent its entire history refusing —
-green, consistent, and unverified. The `library.zig` experience is the
-small version of this: nine of ten probed sites were unreachable by the
-one gate that existed, and nine injected faults were inert rather than
-caught.
+Measured on it before any CUDA code was written:
 
-So before any CUDA code is written, one of these has to be chosen:
+- **The reference CUDA backend builds and runs.** v0.0.23 compiles all of
+  upstream's `ggml-cuda` unmodified with `nvcc` into `libggml.a`. Qwen3.5-2B
+  generates at ~137 t/s on the GPU against ~18 t/s on the CPU device.
+- **CUDA decodes are bit-reproducible run to run.** `harness/node_dump.c`
+  linked against the CUDA build gives the same hash over all **2,750** node
+  outputs in three consecutive runs. So `node-diff` can be an **exact**
+  CUDA oracle, as it is for Metal — not a tolerance check.
+- **The driver API route works from Zig.** A fatbin built from
+  `scale.cu` with the reference's flags loads through `cuLibraryLoadData`, its
+  kernel is found by mangled name, launched by `cuLaunchKernel` from Zig, and
+  computes the right answer; `cuKernelGetParamInfo` reports every parameter's
+  offset and size. That is Decisions 44–46.
+- **`test-backend-ops` compares through one function**,
+  `ggml_backend_compare_graph_backend` (test-backend-ops.cpp:1493), which our
+  Zig ggml exports. Compiling the test with that name `-D`-renamed to a
+  harness function that runs backend 1 against **the reference CUDA
+  backend instead of the CPU** and compares on **bits** turns upstream's
+  ~21,000 op configurations into an exact port-vs-reference oracle. That is
+  `make cuda-ops-diff`, below.
 
-1. **A CUDA machine or CI runner** with an NVIDIA GPU, which `node-diff`,
-   `ops-diff` and `backend-ops` can be pointed at. This is the only option
-   that preserves the project's correctness bar. `scripts/check-reference-pin`
-   already establishes the pattern of a gate refusing to run against a
-   drifted reference; the CUDA gates would refuse to run without hardware.
-2. **Compile-and-link only**, on a machine with the CUDA toolkit but no
-   GPU — catches ABI and signature faults, catches no numerics. Honest if
-   labelled as such; it is `port-coverage`, not `node-diff`.
-3. **Port unverified**, and say so in `CLAUDE.md` at the top of every
-   affected file. Not recommended: it would make "all steps pass" mean
-   something different for CUDA than for everything else in this
-   repository, which is the kind of quiet divergence `ported.zig` and
-   `module.zig` already taught us to avoid.
+### The design
 
-**Recommendation: (1).** It is the only one that keeps one meaning of
-"ported and verified" across the repository. Until it is settled, the
-CUDA work that can proceed without hardware is the measurement above, the
-host/device boundary survey (which `.cuh` declarations are host-reachable),
-and the `build.zig` work to drive `nvcc` — none of which needs a GPU.
+- **Device code** (Decision 44): every `.cu` the reference compiles is also
+  compiled `nvcc -fatbin` with the same flags. The fatbins are embedded in
+  `libggml.a` and loaded lazily, one `CUlibrary` per translation unit.
+- **Kernel names** (Decision 45): a generated `kernels.zig` maps the
+  demangled `name<args>` to the mangled symbol and its fatbin.
+- **Launches** go through one helper, `launch(kernel, grid, block, shmem,
+  stream, args)`, which takes a tuple, checks each element's size against
+  `cuKernelGetParamInfo` in safe builds (Decision 46), and sets the PDL
+  attribute exactly where upstream's `ggml_cuda_kernel_launch` does.
+- **Runtime calls** — streams, events, memory, graphs, cuBLAS, the VMM
+  pool's `cuMem*` — are the plain C APIs, through one `@cImport` of
+  `cuda.h`, `cuda_runtime_api.h` and `cublas_v2.h` in
+  `src/ggml/cuda/c.zig`. None of those headers includes ggml's, so this
+  second `cImport` cannot produce incompatible ggml types.
+- **CUB** (Decision 47): `src/ggml/cuda/cub_shim.cu`.
+- **Layout**: `src/ggml/cuda/`, one Zig file per upstream `.cu` host layer,
+  with `backend.zig` for `ggml-cuda.cu`'s device/buffer/backend/registry
+  and `graph.zig` for its compute loop, fusion and CUDA graphs.
+
+### The gates
+
+| Gate | What it compares | Status |
+|---|---|---|
+| `scripts/cuda-ops-diff` | `test-backend-ops` with every case run on the **ported** CUDA backend and the **reference** CUDA backend in one process, compared on bits; also both backends' `supports_op` answers; plus harness-owned extra cases for paths upstream's list never reaches | **built**; 14,581/14,581 at the swap |
+| `scripts/cuda-node-diff` | `node_dump` linked against `libggml` built with the reference host layer and with the port; every node of a Qwen3.5 decode, exact; then a **fused** pass (no per-node callback, so fusion and CUDA graphs run) over 33 decodes' logits | **built**; identical |
+| `scripts/cuda-backend-diff` | the device, buffer-type and registry vtables' answers (`get_alloc_size` incl. flash attention at several addresses, alignment, memory, props, `offload_op`, `supports_buft`, features), the `metal-diff` of CUDA | **built**; identical |
+| `scripts/cuda-parity-cli` | tokens from the shipped `llama-cli` against the reference driver on upstream's libllama and CUDA host layer | **built**; 6/6 |
+| `cuda-struct-layout` | every by-value kernel argument struct: size, alignment, field offsets, from `nvcc` | **not built** — sizes are checked per launch by Decision 46; offsets are not |
+
+As everywhere else in this repository, **each gate is negative-tested
+before it is trusted.**
+
+### How an op is ported
+
+The pattern `scale.zig` and `binbcast.zig` set; follow it exactly.
+
+- **One Zig file per upstream `.cu`**, `src/ggml/cuda/<name>.zig`, with
+  the provenance header every ported file carries (full path, pin) and a
+  citation on every ported function, `(binbcast.cu:160 @c1d0e7a00)`,
+  pointing at the definition's first line.
+- **Only the host code is ported.** `__global__` and `__device__` code is
+  never translated: the kernels come from the fatbin of the same `.cu`.
+- **A kernel is named `kernels.get("<tu>", "<key>")`.** `<tu>` is the
+  translation unit whose host code launches it (the `.cu` stem, or the
+  `template-instances/` stem for `mmq`, `mmf`, `fattn-*`). `<key>` is
+  `cu++filt`'s spelling minus return type and parameters; build it with
+  `kernels.tmpl`, `typeName`, `constPtr`, `int`, `long`, `ulong`, `boolean`,
+  `ggmlType` rather than by hand. A wrong key is a compile error that
+  names the nearest keys. `kernels.half` and `kernels.bf16` stand for
+  `half` and `nv_bfloat16`.
+- **Launch the way the C launches.** `kernel<<<g, b, smem, stream>>>(…)`
+  is `kernels.launch`; `ggml_cuda_kernel_launch(kernel, params, …)` is
+  `kernels.launchPdl` (programmatic dependent launch). Mixing them up
+  passes every bit-exact gate and changes scheduling, so it is checked by
+  reading, not by the gates. `CUDA_SET_SHARED_MEMORY_LIMIT` is
+  `kernels.setSharedMemoryLimit`.
+- **Pass every argument at the kernel parameter's exact type.** C++
+  converts implicitly at the launch (`size_t` into a `uint32_t`
+  parameter, `int64_t` into `int`); Zig must `@intCast`/`@truncate` to
+  the parameter's width. The first launch of every kernel checks each
+  argument's size against `cuKernelGetParamInfo` and aborts naming the
+  argument, so a width mistake fails loudly. A C++ parameter pack
+  (`src1_ptrs...`) is appended with `kernels.append`.
+- **Mirror the host arithmetic's types.** `dim3` members are `unsigned
+  int`; `std::min<unsigned int>(int64, …)` truncates first; integer
+  division of signed values truncates toward zero (`@divTrunc`).
+  `init_fastdiv_values` is `common.initFastdivValues`. Temporary device
+  memory is `common.PoolAlloc(T)` with `defer x.deinit()` — **release
+  order matters for the VMM pool**, which asserts frees come in reverse
+  order of allocation, exactly as the C++ destructors run.
+- **Wire it in `graph.zig`** — the case in `computeForward` and the same
+  case in `isPorted` — and nothing else: `supports.zig` already holds the
+  C's whole predicate.
+- **Gate it**: rebuild (`zig build reference -Dcuda-port --release=fast
+  --prefix zig-out/cuda-port`), then `scripts/cuda-ops-diff -o <OP>` for
+  every op the file serves. Every case the reference supports must run and
+  be bit-identical. **Then inject a fault** into the new host code — a
+  wrong stride, a wrong launch dimension that changes the result, a
+  swapped kernel variant — and confirm the gate fails, before reverting.
+  An op whose cases are all skipped by `test-backend-ops` is not gated;
+  say so.
+
+### Order of work
+
+Steps 1–7 are **done**; `NOTES.md`, "Stage 6", has what each gate
+measured and caught.
+
+1. **Docs and the gate machine** — this section. Done.
+2. **Infrastructure.** Fatbin build, `kernels.zig` generation, `c.zig`, the
+   launch helper with the ABI check, the reference CUDA objects compiled a
+   second time with `ggml-cuda.h`'s C exports `-D`-renamed to `ref_*` for
+   the in-process gates.
+3. **The gates above**, negative-tested on the reference itself (a
+   `-D`-injected fault in a copied reference object must fail them).
+4. **`ggml-cuda.cu`'s skeleton**: device discovery (`ggml_cuda_init`), the
+   legacy and VMM pools, the device and pinned-host buffer types, the
+   backend and device vtables, the registry, events, and a compute loop
+   with **no fusion and no CUDA graphs**. `supports_op` is the reference's
+   logic AND-ed with "this op's host code is ported".
+5. **Ops, simplest first, by family**, each gated by `cuda-ops-diff` as it
+   lands: elementwise (`scale`, `unary`, `binbcast`, `clamp`, …), copies and
+   indexing (`cpy`, `getrows`, `set-rows`, `concat`), norms, `softmax`,
+   `rope`, then what Qwen3.5 needs (`ssm-conv`, `gated_delta_net`), then
+   matrix multiplication (`mmvq`, `mmvf`, `mmq`, `mmf`, cuBLAS) and flash
+   attention (`fattn-vec`, `-tile`, `-mma`), then the long tail.
+6. **The compute loop's fusion (`ggml_cuda_try_fuse`) and CUDA graphs.**
+   `cuda-ops-diff` has fusion cases; `cuda-node-diff` sees the real ones.
+7. **The swap at `ggml-cuda.h`** when `cuda-ops-diff` shows `supports_op`
+   equal on every case: upstream's host objects leave `libggml.a`, the
+   reference stays only in the gate harnesses. **Done**: `-Dcuda-port`
+   defaults to true and `isPorted` is gone.
+8. **Next on this machine**: `cuda-struct-layout`; Makefile targets for the
+   four CUDA scripts (left to the Mac pickup so `make` is changed where its
+   macOS targets can be re-run); the multi-GPU collectives below if a
+   second GPU appears.
+
+Out of reach on one GB10 and left unported until a machine can run it:
+the multi-GPU paths — peer copies, `ggml_backend_cuda_comm_*` (NCCL and the
+internal all-reduce), `allreduce.cu`. The meta backend can still put the
+same device in twice (`NOTES.md`, "meta-diff"), which reaches more of it
+than it sounds.
 
 ### Ordering
 
-CUDA comes **after** Stage 4 finishes libllama, not before. Two reasons,
-both structural: `ggml-cuda.cu` is a `ggml-backend` implementation, so it
-depends on the backend and scheduler interfaces that Stage 4 has already
-ported and gated; and the Metal group is the worked example for what a
-backend port involves, so finishing it first is what makes the CUDA
-estimate above trustworthy rather than a survey figure — the lesson
-`PLAN.md` already records twice, where gguf was recorded as 44 symbols and
-measured at 61, and backend as 82 and measured at 102.
+CUDA came after Stage 4 finished libllama, as planned: `ggml-cuda.cu` is a
+`ggml-backend` implementation, and the backend and scheduler interfaces it
+plugs into are ported and gated.
+
+### Mac pickup
+
+Work done on the CUDA machine that **only the Mac can finish**. Each item
+says what to run; none needs new code unless a run fails.
+
+- **Re-run the Mac gates over every shared file touched here.** CUDA work
+  touches `build.zig`, `build/llamacpp.zig`, `src/ggml/module.zig`,
+  `src/ggml/backend_reg.zig`, `harness/node_dump.c` and the scripts;
+  nothing under `src/ggml/metal/`. On the Mac: `make validate`, `make
+  node-diff ARGS=--gpu`, `make metal-diff`, `make parity-cli`, `make
+  backend-ops`. The CUDA build options default off on macOS (`-Dcuda` is
+  only defaulted on for Linux with `nvcc` present); `-Dcuda-port` now
+  defaults to true but means nothing without `-Dcuda`.
+- **`harness/node_dump.c` gained an opt-in `fused <steps>` mode.** With the
+  old four arguments its output is unchanged, so `node-diff` should be
+  byte-identical; confirm it. Then consider running the fused mode under
+  `node-diff ARGS=--gpu` too: Metal fuses as well, and the per-node pass
+  splits the graph at every node, so **Metal's fusion has never been
+  compared** by `node-diff`. Measured on CUDA: a broken fusion path passed
+  every node and failed the fused pass (`NOTES.md`, "Stage 6").
+- **`zig build test` reports failure on the GB10 machine, and the test
+  binaries do not.** Run standalone, both test executables pass 395/397
+  with 2 skipped, with or without the runner's `--seed`. Through `zig build
+  test` — the runner's `--listen=-` protocol mode — the step fails with no
+  message other than the tests' stderr. Bisected with `-Dtest-filter`: the
+  failing tests are exactly the ones that make ggml log to stderr
+  (`backend_reg`'s "reports the two backends" and "does not exist", `gguf`'s
+  "malformed buffer"); their silent neighbours pass. It fails with
+  `-Dcuda=false` too, and none of those files was touched by the CUDA work.
+  When it began was not established — that would need git history, and no
+  git command was run on this machine. **On the Mac: does `zig build test`
+  pass there?** If it does, the difference is platform behaviour in Zig
+  0.17's runner; if not, it is a regression to bisect.
+- **Add `src/ggml/cuda/*.zig` to `make validate`'s `zig fmt` list**, and
+  Makefile targets `cuda-ops-diff`, `cuda-node-diff`, `cuda-backend-diff`,
+  `cuda-parity-cli` that call the scripts (Linux only). Run `make
+  validate` after, which runs `port-links` — the CUDA files carry 553
+  citations, checked here only by a script that reads the working tree,
+  because `port-links` shells out to git and no git command was run on
+  this machine.
+- **Scripts made platform-aware here are untested on macOS.** Each one is
+  listed in `NOTES.md`'s CUDA section as it changes; the macOS branch is
+  kept as it was, but run each once on the Mac.
+- **Docs still describing a single machine.** If a section of `NOTES.md`
+  says "this machine" it meant the Mac until Decision 43; new text says
+  which machine.
+
+### CUDA pickup
+
+The reverse list: Mac-side work that should be re-run on the CUDA machine.
+Empty until the Mac adds to it.
 
 ---
 
@@ -1048,10 +1215,12 @@ Gate: `make ops-diff`, 592 op results identical either side of the fold.
     is complete: no C or C++ compiles into `libggml.a` or `libllama.a`
     apart from the two Obj-C files. See `NOTES.md`, "libllama swapped".
 
-**Next, in order:** the other 150 architectures (Decision 36's first
-follow-on milestone — each needs its `load_arch_hparams`, `load_arch_tensors`
-and graph builder, and the iSWA memory and T5 cross-attention arms that
-abort today); Stage 6's CUDA gate question; Stage 5. The xcframework still
+**Stage 6, CUDA, is done and swapped** on the GB10 machine (Decision 43;
+"Stage 6 — CUDA"; `NOTES.md`, "Stage 6"). **Next:** the other 150 architectures (Decision
+36's first follow-on milestone — each needs its `load_arch_hparams`,
+`load_arch_tensors` and graph builder, and the iSWA memory and T5
+cross-attention arms that abort today) and Stage 5 follow. Mac-only
+follow-ups from the CUDA work are collected under "Mac pickup". The xcframework still
 links Zig's libc++ into each slice, which nothing needs since the swap.
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:

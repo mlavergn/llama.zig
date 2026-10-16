@@ -64,6 +64,11 @@ comptime {
     // backend". Importing this unconditionally made `make validate` fail
     // with 39 undefined symbols at that step.
     if (config.use_metal) _ = @import("metal/module.zig");
+    // ggml-cuda/, the host layer; the kernels travel as fatbins (PLAN.md,
+    // Decision 44). Behind `config.cuda_port` until the swap (Decision 48):
+    // until then the default build links upstream's host objects, which
+    // export the same ten `ggml-cuda.h` symbols.
+    if (config.cuda_port) _ = @import("cuda/module.zig");
 }
 
 // -----------------------------------------------------------------------------

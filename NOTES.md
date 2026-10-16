@@ -4313,3 +4313,174 @@ runs. Under `dio` neither side logs the buffered fallback, so the
 `O_DIRECT` path really ran. Under `mlock` both print the Linux hint. This
 needs glibc 2.36 or later: the sampler's `arc4random`, which was already
 there in 0.0.18, is missing from older glibc.
+
+## Stage 6 — the CUDA host layer, ported and swapped (GB10 machine)
+
+Everything in this section ran on the second machine (Decision 43): Linux
+aarch64, NVIDIA GB10 (compute 12.1, `sm_121a`), CUDA 13.0. Nothing here ran
+on the Mac; `PLAN.md`'s "Mac pickup" lists what the Mac has to re-run.
+
+`ggml-cuda.cu`'s host code and every `.cu` file's host half are Zig under
+`src/ggml/cuda/` — 78 files, ~18,800 lines, 553 citations. The kernels
+are upstream's `.cu` files compiled by `nvcc -fatbin` with the reference's
+flags and loaded through the driver API (Decisions 44–46); CUB's device-wide
+algorithms sit behind `src/ggml/cuda/cub_shim.cu` (Decision 47). **The
+swap is done**: `-Dcuda-port` defaults to true, `isPorted` is gone, and
+`supports_op` is the C's predicate alone. `-Dcuda-port=false` still builds
+upstream's host layer, which only the gates use.
+
+### What the gates say at the swap
+
+| Gate | Result |
+|---|---|
+| `scripts/cuda-ops-diff` | **14,581 / 14,581** supported cases bit-identical; `supports_op` asked 188,935 times, 0 claimed beyond the reference, 0 refused that the reference accepts; 10 cases `NONDET` (below) |
+| `scripts/cuda-node-diff` | Qwen3.5-2B: **2,750** nodes identical at 1 and 4 threads; the **fused** pass, 33 decodes' full logits identical at 1 and 4 threads |
+| `scripts/cuda-backend-diff` | **2,805** vtable answers identical on the physical device, **8,387** with `GGML_CUDA_DEVICES=3` |
+| `scripts/cuda-parity-cli` | the shipped `llama-cli` against the reference driver, greedy: **6/6** prompts identical |
+
+Generation runs at ~136 t/s, as the reference build did (~137).
+
+### The ops gate, and three holes found in it
+
+`cuda-ops-diff` is upstream's `test-backend-ops` with
+`ggml_backend_compare_graph_backend` renamed to a harness hook that runs the
+case on the port and on the **reference CUDA backend** (upstream's objects,
+`ggml-cuda.h` exports renamed `ref_*`) and compares every node on bits. Its
+first version had three holes, each found by an injection or a contradiction
+rather than by reading:
+
+- **The reference could never fuse.** `ggml_backend_graph_copy` fills the
+  copy's `nodes[]` directly and builds no use counts (ggml-backend.cpp:2202),
+  so the second backend of every whole-graph comparison runs unfused —
+  harmless upstream, where it is the CPU. Measured: with fusion ported, every
+  fusion family "failed"; with the port's fusion switched off, they all
+  passed — the gate was comparing a correct fused port against an unfused
+  reference. The harness now re-expands the copy node by node into a fresh
+  graph (same nodes, same order — asserted — real use counts). Two details
+  cost a run each: test-backend-ops appends op-`NONE` sentinel nodes, which
+  expanding files as leafs, and an op-`NONE` *parameter* is a node to the
+  expansion already. After the fix, an unfused port fails every family
+  (SILU_MUL 9/14, RMS_NORM_MUL_ADD 2/30, TOPK_MOE 209/320, RMS_NORM_MUL_ROPE
+  63/144, MUL_MAT_VEC_FUSION 180/192, SNAKE_FUSE 6/16).
+- **Shapes upstream does not test.** Three paths had no case at all, each
+  found because an injection escaped. The harness now owns `main`
+  (`test-backend-ops.cpp` is compiled `-Dmain=test_backend_ops_main`) and
+  runs extra cases on fresh backends first:
+  - `MEAN` sends one row longer than 65536 to `cub::DeviceReduce::Sum`;
+    upstream's longest single row is 32769. A `divide_by_count` fault passed
+    7/7 until `MEAN([65537])` and `MEAN([262144])` were added — and
+    `MEAN([65536])` passed under the same fault, which pins the threshold.
+  - No upstream case builds the gated-delta-net snapshot `CPY` that
+    `ggml_cuda_try_gdn_cache_fusion` matches. `slot_stride = 0` passed
+    36/36 until a K = 3 case with a padded cache was added.
+  - Upstream's test-mode `MUL_MAT_ID` batches are 1, 4, 5, 17, 32 and 129;
+    the MMVQ/MMQ boundary is at 8 on this GPU. Moving it by one passed
+    869/869 until batches 8 and 9 were added on q4_0 and q4_K; both 8s fail.
+- **The reference reads out of bounds.** `flash_attn_mask_to_KV_max` reads
+  up to `ncols1 − 1` mask rows past the mask when `Q->ne[1] % ncols1 != 0`.
+  Where the graph copy puts the mask last in its buffer, the reference
+  faults — 62 of 432 such cases, varying with what is mapped past the end.
+  The harness interposes `cudaMalloc` and gives every allocation 1 MiB of
+  slack on both sides; all 432 now run, and all pass. The rows read feed
+  rows nobody keeps, so no result changes.
+
+### Where the reference's own answer is unspecified
+
+`CUDA_DIFF_SELF=1` puts a second reference backend where the port goes. A
+case that differs is re-run that way; if the reference disagrees with
+itself it is `NONDET` and not failed. Two sources, both measured:
+
+- **CUB's float `DeviceScan::InclusiveSum`**, which `CUMSUM` uses on long
+  rows, is nondeterministic run to run even in a standalone program: of 49
+  consecutive pairs, 0 differ at 20,481 elements, 23 at 242,004, 43 at
+  375,960.
+- **The fused MMVQ for `MUL_MAT_ID` with lane scale, `ADD_ID` bias and a
+  gate, on NVFP4.** Unfused (`GGML_CUDA_DISABLE_FUSION=1`) the reference
+  agrees with itself; fused it does not, and where it differs moves between
+  runs. 8 cases. The port's fused output for that configuration is
+  therefore not gated.
+
+### `node-diff` could not see fusion or CUDA graphs
+
+`harness/node_dump.c` hashes every node by answering the scheduler's `ask`
+with true, which splits the graph at **every node**. Neither side can fuse
+or capture a CUDA graph in that pass. Measured: switching off the port's
+RMS_NORM + MUL fusion left all 2,750 nodes identical. `node_dump` gained a
+`fused <steps>` mode with no callback, hashing the full logits of the prompt
+and each greedy step, and `cuda-node-diff` runs it after the per-node pass.
+It is deterministic (three reference runs, identical).
+
+Proving it needed care, because **turning a fusion off is inert on
+Qwen3.5**: the reference's own `GGML_CUDA_DISABLE_FUSION=1` gives identical
+logits, so every fused kernel the model reaches matches its unfused route
+bit for bit. An injection that switches fusion off is therefore not
+evidence. A wrong GLU op in the fused MMVQ gate path is — the per-node
+passes stay identical, the fused pass differs from the first single-token
+step, and `cuda-parity-cli` fails 6/6. A trace of the port's fusion on this
+decode: RMS_NORM+MUL 237, MUL_MAT+bias 60, gate/up+GLU 48, GDN+CPY 54,
+SSM_CONV+SILU 54, SILU+MUL 54, SOFTPLUS+MUL 36, SIGMOID+MUL 18.
+
+### Fault injections
+
+Each built (library timestamp checked), run, reverted, and rebuilt.
+
+| Where | Fault | Caught by |
+|---|---|---|
+| `scale.zig` | bias dropped | ops-diff |
+| `kernels.zig` ABI check | an `i32` passed where the kernel takes `i64` | the launch's size check, before running |
+| `mmvq.zig` | rows per block 4 | ops-diff, 20 BITDIFF |
+| `mmvq.zig` | small-k off; rows per block 1 | **inert** — zero partial sums, over-coverage |
+| `mmvf.zig` | block size 32 | ops-diff |
+| `fusion.zig` | port unfused, reference fused | ops-diff, every fusion family |
+| `fusion.zig` | topk-moe `clamp` dropped | ops-diff, TOPK_MOE 264/320 |
+| `fusion.zig` | GDN cache `slot_stride = 0` | ops-diff **extra case only** |
+| `fusion.zig` | GLU op wrong in the fused MMVQ gate path | node-diff fused pass, parity-cli 6/6 |
+| `sum.zig` | `ne − 1` into `DeviceReduce::Sum` | ops-diff, SUM 0/7, CROSS_ENTROPY_LOSS 0/2 |
+| `mean.zig` | `ncols + 1` into `divide_by_count` | ops-diff **extra cases only** |
+| `mulmat.zig` `mulMatId` | row map without `iex % ne11` | ops-diff, 10 cases |
+| `mulmat.zig` `mulMatId` | MMVQ/MMQ boundary `<=` to `<` | ops-diff **extra cases only** |
+| `lightning_indexer.zig` | `n_kv − 1` | ops-diff, 0/144 |
+| `lightning_indexer.zig` | wrong `K_VECS_PER_BLOCK` | the kernel table: the key does not exist, compile error |
+| data movement (worker C) | `getrows`, `set_rows`, `concat`, `cumsum`, `cpy`, `set`, `argsort`, `top_k`, `cub_shim` — one each | ops-diff, 9/9 (a first `cub_shim` fault, `end_bit = 31`, was inert: test rows never vary the sign bit) |
+| flash attention (worker E) | 10 across `fattn_mma`, `fattn_tile`, `fattn_vec`, `fattn_common`, `fattn` | ops-diff 8/10; two inert — a tile `nbatch_fa + 1` only bounds `parallel_blocks`, and the quantized Ada vec rule has no `nb = 2, kv % 256 == 0` case |
+| `fattn.zig` `getAllocSize` | scratch end + 128 | backend-diff |
+| `fattn.zig` `getAllocSize` | scratch end − 128 | backend-diff — by an assertion abort (the size underflows), not by the comparison |
+| `backend.zig` `offload_op` | `>=` threshold to `>` | backend-diff |
+| `backend.zig` `get_alloc_size` | row padding 256 instead of 512 | backend-diff |
+
+### `cuda-backend-diff`
+
+`harness/cuda_backend_diff.c` asks both registries — port and `ref_*` — the
+same questions in one process: registry name, count, proc addresses and
+features; per device, props, memory total (free memory moves, so it is not
+compared), both buffer types, `supports_buft`; `offload_op` across the
+threshold of 32 for every arm of `get_op_batch_size`; `get_alloc_size` for
+every type around the 512-element row padding, and for 240 flash-attention
+nodes at five data addresses each. 120 of those shapes give a different size
+at a different address, which is why the address varies.
+
+### CUB, and what is C++ in the shipped binary
+
+`cub_shim.cu` is the only host code the port writes in C++: eight
+`extern "C"` wrappers — six sorts, `InclusiveSum<float>`, and
+`DeviceReduce::Sum` (one wrapper serves `sum.cu` and `mean.cu`, whose call
+sites have identical argument types). Measured with `cuobjdump -sass`:
+its kernels are exactly the reference's CUB kernels by mangled name, with
+identical SASS. `llama-cli` contains no upstream host function
+(`nm -C | grep ggml_cuda_op_` is empty) and 136 `cub::` symbols, which are
+the shim's.
+
+### Left unported
+
+- **Multi-GPU collectives**: `allreduce.cu` and the internal all-reduce
+  pipeline. `comm_init` falls back to the butterfly with the C's warning, as
+  upstream does when the pipeline is unavailable. `GGML_CUDA_DEVICES` gives
+  virtual devices on one GPU, which reaches the registry and vtables
+  (`cuda-backend-diff`) but not a meaningful all-reduce.
+- **AMD and MUSA arms**, and the AMD flash-attention config tables.
+- **Arms this GPU cannot reach**: Volta/Turing/Ada-only dispatch, `top_k`'s
+  `cub::DeviceTopK` (needs CCCL ≥ 3.2, not compiled by the reference either).
+- **`cuda-struct-layout`** is not built. The by-value kernel argument
+  structs are covered indirectly: every launch's first call checks each
+  argument's size against `cuKernelGetParamInfo`, and every op gate passes
+  on bits. Field offsets inside a struct are not checked separately.

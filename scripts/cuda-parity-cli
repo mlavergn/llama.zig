@@ -1,0 +1,86 @@
+#!/bin/bash
+# `parity-cli` for the CUDA machine: the actual `llama-cli` binary against a
+# reference driver, both greedy, on the GPU.
+#
+# `scripts/parity-cli` is the Mac's: its reference side is the Apple-clang
+# CMake build with Metal. Here the reference side is
+# `harness/raw_completion.c` -- the same driver -- linked against upstream's
+# libllama (`libllama-ref.a`, every translation unit compiled unmodified) and
+# upstream's CUDA host layer (`zig-out/cuda-upstream`, `-Dcuda-port=false`).
+# The ggml core under both is the Zig port, gated on its own by every
+# Mac-side gate; what this compares is our CUDA host layer, our libllama and
+# everything the CLI does -- argument parsing, the sampler chain, the decode
+# loop -- against upstream's.
+#
+# Usage: scripts/cuda-parity-cli <model.gguf> [n_predict]
+# Requires:
+#   zig build cli --release=fast
+#   zig build reference -Dcuda-port=false --release=fast --prefix zig-out/cuda-upstream
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODEL="${1:?usage: scripts/cuda-parity-cli <model.gguf> [n_predict]}"
+NPRED="${2:-32}"
+
+CLI=zig-out/bin/llama-cli
+REF=zig-out/cuda-upstream/lib
+[ -x "$CLI" ] || { echo "missing $CLI -- run 'zig build cli --release=fast'" >&2; exit 2; }
+for lib in "$REF/libllama-ref.a" "$REF/libggml.a"; do
+    [ -f "$lib" ] || { echo "missing $lib -- see the Requires lines in $0" >&2; exit 2; }
+done
+nm -A "$REF/libggml.a" 2>/dev/null | grep -q '/ggml-cuda\.o:' \
+    || { echo "FAIL: $REF/libggml.a has no upstream ggml-cuda.o -- build it with -Dcuda-port=false" >&2; exit 1; }
+if nm -C "$CLI" | grep -qE 'ggml_cuda_op_|ggml_cuda_mul_mat_id\('; then
+    echo "FAIL: $CLI links upstream's CUDA host code -- it was built with -Dcuda-port=false" >&2; exit 1
+fi
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+CUDA=/usr/local/cuda
+# `libllama-ref.a` is `zig c++` output and wants Zig's libc++; the nvcc
+# objects want the system libstdc++. Link through `zig c++` with both, as
+# `cuda-ops-diff` does.
+zig cc -c harness/raw_completion.c -o "$tmp/ref.o" -std=c11 -O2 -w -I llama.cpp/include -I llama.cpp/ggml/include \
+    || { echo "FAIL: could not compile the reference driver" >&2; exit 1; }
+zig c++ "$tmp/ref.o" -o "$tmp/ref" "$REF/libllama-ref.a" "$REF/libggml.a" \
+    -L"$CUDA/lib64" -Wl,-rpath,"$CUDA/lib64" -lcudart -lcublas -lcublasLt -lcuda \
+    "$(g++ -print-file-name=libstdc++.so)" -lgcc_s -lm -lpthread 2>"$tmp/ref-link.log" \
+    || { echo "FAIL: could not link the reference driver" >&2; grep -m5 error "$tmp/ref-link.log" >&2; exit 1; }
+
+PROMPTS=(
+    "The capital of France is"
+    "Explain gravity in one sentence:"
+    "def fibonacci(n):"
+    "Write a haiku about winter:"
+    "List three prime numbers:"
+    "Translate to French: good morning"
+)
+
+pass=0
+fail=0
+for p in "${PROMPTS[@]}"; do
+    "$tmp/ref" "$MODEL" "$p" "$NPRED" no-prompt,no-timings 0 2>/dev/null > "$tmp/a.txt"; rc_ref=$?
+    "$CLI" -m "$MODEL" -p "$p" -n "$NPRED" --temp 0 --no-display-prompt --no-show-timings \
+        2>/dev/null > "$tmp/b.txt"; rc_cli=$?
+    printf '  %-36s ' "$(echo "$p" | cut -c1-34)"
+    if [ "$rc_ref" -ne 0 ] || [ "$rc_cli" -ne 0 ]; then
+        echo "FAIL (exit: reference=$rc_ref cli=$rc_cli)"; fail=$((fail+1))
+    elif [ ! -s "$tmp/a.txt" ]; then
+        echo "FAIL (reference produced no output)"; fail=$((fail+1))
+    elif diff -q "$tmp/a.txt" "$tmp/b.txt" >/dev/null; then
+        echo "identical"; pass=$((pass+1))
+    else
+        echo "DIFFERS"; diff "$tmp/a.txt" "$tmp/b.txt" | head -6; fail=$((fail+1))
+    fi
+done
+
+echo
+if [ "$fail" -eq 0 ]; then
+    echo "PASS: $pass/$pass prompts identical"
+    exit 0
+fi
+echo "FAIL: $fail of $((pass+fail)) prompts differ"
+exit 1

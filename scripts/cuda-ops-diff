@@ -1,0 +1,98 @@
+#!/bin/bash
+# The CUDA op oracle: every op configuration of upstream's test-backend-ops,
+# run on the ported CUDA backend and on the reference CUDA backend in one
+# process, compared on bits.
+#
+# What it compares
+# ----------------
+# `test-backend-ops` normally runs each case on a GPU backend and on the CPU
+# and accepts an NMSE below a threshold. Here it is compiled with
+# `ggml_backend_compare_graph_backend` and `ggml_backend_supports_op`
+# renamed to the hooks in `harness/cuda_ops_diff.c`: the CPU's place is
+# taken by upstream's own CUDA backend -- every `ggml-cuda` object compiled
+# unmodified, its ten `ggml-cuda.h` exports renamed `ref_*` -- and every
+# node is compared byte for byte before the test's own callback runs. The
+# kernels are the same `.cu` sources on both sides, compiled by the same
+# `nvcc` with the same flags (PLAN.md, Decision 44), so any difference is
+# the host code: a launch configuration, a kernel choice, an argument.
+#
+# The second half is `supports_op`: every question the test asks the
+# ported backend is asked of the reference too, and the port claiming an op
+# the reference refuses fails the gate.
+#
+# What it cannot see
+# ------------------
+# Ops whose host code is not ported yet: the port's `supports_op` refuses
+# them, the test reports "not supported", and the gate counts them rather
+# than failing. `PORTED_ONLY=0` (the default) prints that count; the gate is
+# complete only when it reaches zero. And the multi-device paths, which need
+# a second device.
+#
+# Usage: scripts/cuda-ops-diff [test-backend-ops args, e.g. -o SCALE]
+# Requires: zig build reference cuda-ref --release=fast --prefix zig-out/cuda-port
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+# Both overridable, so a second checkout can test its own port against one
+# reference archive: the renamed reference is upstream's code and does not
+# change with the port.
+PREFIX=${CUDA_PORT_PREFIX:-zig-out/cuda-port}
+PORT_LIB=$PREFIX/lib/libggml.a
+REF_LIB=${CUDA_REF_LIB:-$PREFIX/lib/libggml-cuda-ref.a}
+for lib in "$PORT_LIB" "$REF_LIB"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference cuda-ref --release=fast --prefix $PREFIX'" >&2; exit 2; }
+done
+
+# The ported library must really be the port: it carries the fatbins and no
+# upstream host object. The reference archive must carry the renamed exports.
+nm -g --defined-only "$PORT_LIB" 2>/dev/null | grep -q ' T ggml_backend_cuda_reg$' \
+    || { echo "FAIL: $PORT_LIB exports no ggml_backend_cuda_reg" >&2; exit 1; }
+if nm -A "$PORT_LIB" 2>/dev/null | grep -q '/ggml-cuda\.o:'; then
+    echo "FAIL: $PORT_LIB contains upstream's ggml-cuda.o -- it is the reference build, not the port" >&2; exit 1
+fi
+n=$(nm -g --defined-only "$REF_LIB" 2>/dev/null | grep -c ' T ref_ggml_backend_')
+[ "$n" -eq 10 ] || { echo "FAIL: expected 10 renamed reference exports, got $n" >&2; exit 1; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+CUDA=/usr/local/cuda
+LIBSTDCXX="$(g++ -print-file-name=libstdc++.so)"
+
+zig c++ -c llama.cpp/tests/test-backend-ops.cpp -o "$tmp/tbo.o" -std=c++17 -O2 -w \
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src \
+    -Dggml_backend_compare_graph_backend=cuda_diff_compare_graph_backend \
+    -Dggml_backend_supports_op=cuda_diff_supports_op -Dmain=test_backend_ops_main 2>"$tmp/cc.log" \
+    || { echo "FAIL: could not compile test-backend-ops" >&2; tail -5 "$tmp/cc.log" >&2; exit 1; }
+zig cc -c harness/cuda_ops_diff.c -o "$tmp/hooks.o" -std=c11 -O2 -I llama.cpp/ggml/include 2>"$tmp/cc.log" \
+    || { echo "FAIL: could not compile the hooks" >&2; tail -5 "$tmp/cc.log" >&2; exit 1; }
+zig c++ "$tmp/tbo.o" "$tmp/hooks.o" -o "$tmp/cuda_ops_diff" \
+    "$PORT_LIB" "$REF_LIB" \
+    -L"$CUDA/lib64" -Wl,-rpath,"$CUDA/lib64" -lcudart -lcublas -lcublasLt -lcuda \
+    "$LIBSTDCXX" -lgcc_s -lm -lpthread -ldl 2>"$tmp/ld.log" \
+    || { echo "FAIL: could not link the harness" >&2; grep -m5 error "$tmp/ld.log" >&2; exit 1; }
+
+"$tmp/cuda_ops_diff" test -b CUDA0 "$@" > "$tmp/out.log" 2>&1
+rc=$?
+[ -n "${CUDA_OPS_DIFF_OUT:-}" ] && cp "$tmp/out.log" "$CUDA_OPS_DIFF_OUT"
+
+grep -E '^(BITDIFF|SUPPORTS|NONDET)|EXTRA .*FAIL' "$tmp/out.log" | head -20
+grep -E '^cuda_ops_diff:' "$tmp/out.log"
+passed=$(grep -E '^  [0-9]+/[0-9]+ tests passed' "$tmp/out.log" | tail -1 | sed 's/^ *//')
+ok=$(echo "$passed" | cut -d/ -f1)
+nsupp=$(grep -cE 'not supported' "$tmp/out.log")
+echo "  ${passed:-0/0 tests passed}, bit-identical; $nsupp cases not supported by the port"
+
+# Cases, not lines: a case the reference fails to reproduce against itself
+# prints BITDIFF lines too, and is reported NONDET rather than failed.
+bit=$(sed -nE 's/^cuda_ops_diff: .* differing in ([0-9]+) cases.*/\1/p' "$tmp/out.log")
+bit=${bit:-1}
+sup=$(grep -cE '^SUPPORTS' "$tmp/out.log")
+if [ "$rc" -ne 0 ] || [ "$bit" -ne 0 ] || [ "$sup" -ne 0 ]; then
+    [ "$rc" -ne 0 ] && { echo "test-backend-ops exited $rc"; grep -E 'CUDA kernel|CUDA error|GGML_ASSERT|FAIL|Assert|error' "$tmp/out.log" | head -10; }
+    echo "FAIL: the ported CUDA backend differs from the reference"
+    exit 1
+fi
+[ "${ok:-0}" -gt 0 ] || { echo "FAIL: no case ran -- the gate compared nothing"; exit 1; }
+echo "PASS: every supported case bit-identical to the reference CUDA backend"

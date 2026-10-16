@@ -1,0 +1,101 @@
+#!/bin/bash
+# Diff every graph node of a real model's decode on the CUDA device, ported
+# host layer against upstream's.
+#
+# Two passes, each linked twice against the same Zig ggml and libllama,
+# differing only in the CUDA host layer: once with upstream's `ggml-cuda`
+# objects (`-Dcuda-port=false`) and once with `src/ggml/cuda/` and the
+# fatbins (the default since the swap, PLAN.md Decision 48).
+#
+# - **Per node.** `harness/node_dump.c` hashes every node's output over one
+#   prompt decode and one single-token decode; the first differing line
+#   names the op. Observing every node splits the graph at every node, so
+#   **neither side fuses and neither captures a CUDA graph** in this pass.
+# - **Fused.** No callback: the graph runs as the binary runs it -- fusion,
+#   CUDA graph capture and replay after warmup, concurrent streams -- and the
+#   full logits are hashed for the prompt and `STEPS` (default 32) greedy
+#   steps. Measured: a wrong GLU op in the fused MMVQ gate path passes the
+#   per-node pass and fails this one from the first single-token step.
+#   Switching a fusion *off* is not a test of it here: on Qwen3.5's shapes
+#   the reference's own `GGML_CUDA_DISABLE_FUSION=1` gives identical logits.
+#
+# CUDA hashes are identical across runs on the GB10, both passes, so this is
+# exact, as `node-diff ARGS=--gpu` is for Metal.
+#
+# Usage: scripts/cuda-node-diff <model.gguf> [prompt]
+# Requires:
+#   zig build reference -Dcuda-port=false --release=fast --prefix zig-out/cuda-upstream
+#   zig build reference --release=fast --prefix zig-out/cuda-port
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODEL="${1:?usage: scripts/cuda-node-diff <model.gguf> [prompt]}"
+PROMPT="${2:-Explain gravity in one sentence, then give an example from daily life:}"
+
+REF=zig-out/cuda-upstream/lib
+PORT=zig-out/cuda-port/lib
+for lib in "$REF/libggml.a" "$REF/libllama.a" "$PORT/libggml.a" "$PORT/libllama.a"; do
+    [ -f "$lib" ] || { echo "missing $lib -- see the Requires lines in $0" >&2; exit 2; }
+done
+nm -A "$REF/libggml.a" 2>/dev/null | grep -q '/ggml-cuda\.o:' \
+    || { echo "FAIL: $REF/libggml.a has no upstream ggml-cuda.o -- it was built with the Zig host layer; build it with -Dcuda-port=false" >&2; exit 1; }
+if nm -A "$PORT/libggml.a" 2>/dev/null | grep -q '/ggml-cuda\.o:'; then
+    echo "FAIL: $PORT/libggml.a contains upstream's ggml-cuda.o -- it was built with -Dcuda-port=false" >&2; exit 1
+fi
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+CUDA=/usr/local/cuda
+LIBS=(-L"$CUDA/lib64" -Wl,-rpath,"$CUDA/lib64" -lcudart -lcublas -lcublasLt -lcuda
+      "$(g++ -print-file-name=libstdc++.so)" -lgcc_s -lm -lpthread)
+INC=(-I llama.cpp/include -I llama.cpp/ggml/include)
+
+for side in ref port; do
+    dir=$REF; [ "$side" = port ] && dir=$PORT
+    zig cc harness/node_dump.c -o "$tmp/$side" -std=c11 -O2 "${INC[@]}" \
+        "$dir/libllama.a" "$dir/libggml.a" "${LIBS[@]}" 2>"$tmp/$side.log" \
+        || { echo "FAIL: could not link against $dir" >&2; grep -m5 error "$tmp/$side.log" >&2; exit 1; }
+done
+
+fail=0
+for nt in 1 4; do
+    "$tmp/ref"  "$MODEL" "$PROMPT" "$nt" gpu > "$tmp/ref.txt"  2>/dev/null || { echo "FAIL: reference run aborted (threads=$nt)"; exit 1; }
+    "$tmp/port" "$MODEL" "$PROMPT" "$nt" gpu > "$tmp/port.txt" 2>"$tmp/port.err" || { echo "FAIL: ported run aborted (threads=$nt)"; tail -5 "$tmp/port.err"; exit 1; }
+    nodes=$(wc -l < "$tmp/ref.txt" | tr -d ' ')
+    [ "$nodes" -gt 0 ] || { echo "FAIL: no nodes observed (threads=$nt)"; exit 1; }
+    if diff -q "$tmp/ref.txt" "$tmp/port.txt" > /dev/null; then
+        printf '  cuda threads=%d  %s nodes identical\n' "$nt" "$nodes"
+    else
+        printf '  cuda threads=%d  DIFFERS; first divergent nodes:\n' "$nt"
+        diff "$tmp/ref.txt" "$tmp/port.txt" | grep '^[<>]' | head -6
+        fail=1
+    fi
+done
+
+# Fused: no per-node callback, so fusion and CUDA graphs run as they do in
+# the real binary -- the per-node pass above splits the graph at every node
+# and neither side can fuse (harness/node_dump.c). Full logits, bit for bit,
+# for the prompt and STEPS greedy steps.
+STEPS=${STEPS:-32}
+for nt in 1 4; do
+    "$tmp/ref"  "$MODEL" "$PROMPT" "$nt" gpu fused "$STEPS" > "$tmp/ref.txt"  2>/dev/null || { echo "FAIL: fused reference run aborted (threads=$nt)"; exit 1; }
+    "$tmp/port" "$MODEL" "$PROMPT" "$nt" gpu fused "$STEPS" > "$tmp/port.txt" 2>"$tmp/port.err" || { echo "FAIL: fused ported run aborted (threads=$nt)"; tail -5 "$tmp/port.err"; exit 1; }
+    steps=$(grep -c '^step' "$tmp/ref.txt")
+    [ "$steps" -eq $((STEPS + 1)) ] || { echo "FAIL: fused reference produced $steps steps"; exit 1; }
+    if diff -q "$tmp/ref.txt" "$tmp/port.txt" > /dev/null; then
+        printf '  cuda fused threads=%d  %s decodes, logits identical\n' "$nt" "$steps"
+    else
+        printf '  cuda fused threads=%d  DIFFERS; first divergent decodes:\n' "$nt"
+        diff "$tmp/ref.txt" "$tmp/port.txt" | grep '^[<>]' | head -4
+        fail=1
+    fi
+done
+
+if [ "$fail" -eq 0 ]; then
+    echo "PASS: every node and every fused decode identical, ported CUDA host layer vs upstream's"
+    exit 0
+fi
+echo "FAIL: node outputs differ"
+exit 1
