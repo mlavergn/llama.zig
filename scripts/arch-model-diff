@@ -1,0 +1,220 @@
+#!/bin/bash
+# Every architecture, the port against the C++, on upstream's own fixtures.
+#
+# `scripts/gen-arch-fixtures` writes one small random model per architecture
+# with `llama.cpp/tests/test-llama-archs.cpp`, compiled unmodified. Each is
+# then run through `harness/context_diff.zig` -- the harness behind `make
+# context-diff`, which loads the model through `libllama-ref.a` and through
+# the port in one process and compares everything logged, every graph node
+# (op, shape, strides, `op_params`, sources, data hash), every output row's
+# bits and the state API -- on the GPU and on the CPU.
+#
+# So this is `context-diff` across architectures rather than across context
+# parameters: Qwen3.5 gets the depth, every other architecture the breadth.
+# A fixture has two layers, n_embd 256 and 128 tokens, so a whole graph is
+# cheap; but its weights are random, so what this sees is the graph and its
+# arithmetic, not anything about a trained model's outputs.
+#
+# Each fixture is one of three things:
+#   PASS      every case identical on both devices
+#   FAIL      a case differs, or the port aborted
+#   UNPORTED  the port stopped at an architecture it has no
+#             `load_arch_hparams` or `load_arch_tensors` for
+#   REF-ABORT every case aborts in the C++ itself, and in the port on the
+#             same assertion: upstream cannot run this fixture (PLM at v0.3.0,
+#             which upstream's own test skips as "TODO tensor shapes")
+# A fixture where only some cases abort that way still passes, and its count
+# reads `gpu:20+1abort`: the cases that ran matched, and the C++ and the port
+# refused the others identically (Chameleon's and PLaMo-2's upstream bugs).
+# A case where the C++ crashes with no assertion -- a segfault -- cannot say
+# where the port would stop; it reads `+1refcrash` and is listed, not passed
+# as a match.
+# UNPORTED and REF-ABORT are counted, not failed -- the milestone (PLAN.md,
+# Decision 36's first follow-on) is complete when UNPORTED reaches zero.
+#
+# Usage: scripts/arch-model-diff [fixture-dir] [arch-substring...]
+#   Default fixture-dir zig-out/arch-fixtures; with substrings, only the
+#   fixtures whose file names contain one. ARCH_DIFF_MODELS="gpu cpu" sets
+#   the model configurations; ARCH_DIFF_ARGS is passed to the harness.
+#   ARCH_DIFF_PORT=<dir> gates a copy of src/llama instead of the tree's,
+#   and ARCH_DIFF_LIBS=<dir> takes libllama-ref.a and libggml.a from a
+#   copy of zig-out/lib: with both, several ports can be developed and
+#   gated at once without one half-written file breaking every build.
+# Requires: zig build reference --release=fast, scripts/gen-arch-fixtures
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+DIR="zig-out/arch-fixtures"
+if [ $# -gt 0 ] && [ -d "$1" ]; then DIR="$1"; shift; fi
+MODELS=${ARCH_DIFF_MODELS:-gpu cpu}
+PORT=${ARCH_DIFF_PORT:-src/llama}
+LIBS=${ARCH_DIFF_LIBS:-zig-out/lib}
+[ -f "$PORT/harness_root.zig" ] || { echo "no $PORT/harness_root.zig" >&2; exit 2; }
+
+for lib in "$LIBS/libllama-ref.a" "$LIBS/libggml.a"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+ls "$DIR"/*.gguf > /dev/null 2>&1 || { echo "no fixtures in $DIR -- run scripts/gen-arch-fixtures" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    "$PORT/c_import.h" >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+zig cc -mcpu=baseline -c harness/proxy_dev.c -o "$tmp/proxy_dev.o" -O2 \
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src 2>"$tmp/perr" \
+    || { echo "FAIL: cannot compile harness/proxy_dev.c" >&2; head -20 "$tmp/perr" >&2; exit 1; }
+zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
+    --dep harness_root -Mroot=harness/context_diff.zig \
+    --dep llama_c -Mharness_root="$PORT/harness_root.zig" -Mllama_c="$tmp/llama_c.zig" \
+    "$tmp/proxy_dev.o" "$LIBS/libllama-ref.a" "$LIBS/libggml.a" -lc++ \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+# Cases where the C++ itself is nondeterministic, so ref and port cannot
+# agree on bits however faithful the port: <fixture> <model-config> <case>.
+# Each was shown to be upstream's by running pure upstream (llama.cpp.zmake)
+# alone. Skipped, and counted as `+1nondet` in the result.
+#
+# - T5 with a q8_0 KV cache on Metal: the quantized V transpose falls back
+#   to the CPU, the split it adds lets the host `pos_bucket` input be
+#   overwritten before it is copied to the GPU, and the decoder's GET_ROWS
+#   on `attn_rel_b` reads whatever is there -- [0, 7] in the encoder,
+#   +-2.1e9 in the decoder, different in every process. The logits agree,
+#   since the cells read are masked.
+KNOWN_NONDET=(
+    "t5-dense gpu q8_0 cache"
+)
+
+skip_for() {
+    local name=$1 m=$2 k
+    for k in "${KNOWN_NONDET[@]}"; do
+        if [ "${k%% *}" = "$name" ]; then
+            local rest=${k#* }
+            if [ "${rest%% *}" = "$m" ]; then echo "${rest#* }"; return; fi
+        fi
+    done
+}
+
+# The assertion a run aborted on, without the file it was raised in: the
+# C++ and the port name their sources differently.
+abort_of() {
+    grep -m1 -o 'GGML_ASSERT(.*) failed\|GGML_ABORT.*\|error: .*' "$1" | head -1
+}
+
+# Sets split=ok|refabort|fail, split_ok, split_aborts, split_why.
+crash_split() {
+    local f=$1 m=$2 cs ok=0 aborts=0 total=0 crashes=0
+    split=ok; split_why=""
+    while IFS= read -r cs; do
+        # A case the C++ is nondeterministic in stays out here too.
+        [ -n "${skip:-}" ] && [ "$cs" = "$skip" ] && continue
+        total=$((total + 1))
+        CONTEXT_DIFF_TMP="$tmp/state" "$tmp/context_diff" "$f" --model "$m" --case-exact "$cs" ${ARCH_DIFF_ARGS:-} > "$tmp/one.out" 2>&1
+        local r=$?
+        if [ "$r" -eq 0 ]; then
+            grep -q ' ok ' "$tmp/one.out" && ok=$((ok + 1))
+            continue
+        fi
+        if [ "$r" -lt 128 ]; then
+            split=fail; split_why="$cs: $(grep -m1 '^FAIL' "$tmp/one.out")"; cp "$tmp/one.out" "$tmp/out"; return
+        fi
+        CONTEXT_DIFF_TMP="$tmp/state" CONTEXT_DIFF_SIDE=ref "$tmp/context_diff" "$f" --model "$m" --case-exact "$cs" > "$tmp/ref.out" 2>&1
+        local rr=$?
+        CONTEXT_DIFF_TMP="$tmp/state" CONTEXT_DIFF_SIDE=port "$tmp/context_diff" "$f" --model "$m" --case-exact "$cs" > "$tmp/port.out" 2>&1
+        local rp=$?
+        local ra pa
+        ra=$(abort_of "$tmp/ref.out"); pa=$(abort_of "$tmp/port.out")
+        if [ "$rr" -ge 128 ] && [ "$rp" -ge 128 ] && [ -n "$ra" ] && [ "$ra" = "$pa" ]; then
+            aborts=$((aborts + 1))
+            split_why="$cs: both abort on $(echo "$ra" | cut -c1-90)"
+        elif [ "$rr" -ge 128 ] && [ -z "$ra" ]; then
+            # The C++ crashes without an assertion -- a segfault, say --
+            # so where the port would stop says nothing; counted apart.
+            crashes=$((crashes + 1))
+            split_why="$cs: the C++ crashes (exit $rr) without an assertion"
+        else
+            split=fail; split_why="$cs: ref exit $rr, port exit $rp: ref '$(abort_of "$tmp/ref.out" | cut -c1-60)' port '$(abort_of "$tmp/port.out" | cut -c1-60)'"
+            cp "$tmp/port.out" "$tmp/out"; return
+        fi
+    done < <("$tmp/context_diff" "$f" --list-cases 2>&1)
+    split_ok=$ok; split_aborts=$aborts; split_crashes=$crashes
+    # Every case aborting or crashing in the C++ -- before any can run -- is
+    # a fixture upstream cannot run at all.
+    [ "$ok" -eq 0 ] && [ $((aborts + crashes)) -gt 0 ] && split=refabort
+}
+
+pass=0; fail=0; unported=0; refabort=0
+failed=(); unported_list=(); refabort_list=()
+for f in "$DIR"/*.gguf; do
+    name=$(basename "$f" .gguf)
+    if [ $# -gt 0 ]; then
+        hit=0
+        for s in "$@"; do [ "${name#*"$s"}" != "$name" ] && hit=1; done
+        [ "$hit" -eq 1 ] || continue
+    fi
+    status=PASS
+    detail=""
+    for m in $MODELS; do
+        mkdir -p "$tmp/state"
+        skip=$(skip_for "$name" "$m")
+        if [ -n "$skip" ]; then
+            CONTEXT_DIFF_TMP="$tmp/state" "$tmp/context_diff" "$f" --model "$m" --skip-case "$skip" ${ARCH_DIFF_ARGS:-} > "$tmp/out" 2>&1
+        else
+            CONTEXT_DIFF_TMP="$tmp/state" "$tmp/context_diff" "$f" --model "$m" ${ARCH_DIFF_ARGS:-} > "$tmp/out" 2>&1
+        fi
+        rc=$?
+        if grep -q '(not ported)' "$tmp/out"; then
+            status=UNPORTED
+            break
+        fi
+        if [ "$rc" -ge 128 ]; then
+            # A crash. Run the cases one at a time, and each crashing case
+            # with each side alone: a case where the C++ aborts and the port
+            # aborts on the same assertion matches; anything else fails.
+            crash_split "$f" "$m"
+            case $split in
+                ok) detail="$detail $m:$split_ok+${split_aborts}abort"
+                    [ "$split_crashes" -gt 0 ] && detail="$detail+${split_crashes}refcrash"
+                    [ -n "$skip" ] && detail="$detail+1nondet"
+                    continue ;;
+                refabort) status=REFABORT; detail="$m: $split_why"; break ;;
+                *) status=FAIL; detail="$m: $split_why"; cp "$tmp/out" "$tmp/fail-$name-$m.log"; break ;;
+            esac
+        fi
+        if [ "$rc" -ne 0 ]; then
+            status=FAIL
+            if grep -q '^FAIL' "$tmp/out"; then
+                detail="$m: $(grep -m1 '^FAIL' "$tmp/out")"
+            else
+                detail="$m: harness exited $rc: $(tail -1 "$tmp/out")"
+            fi
+            # The first divergent transcript line follows the FAIL line.
+            cp "$tmp/out" "$tmp/fail-$name-$m.log"
+            break
+        fi
+        cases=$(grep -c ' ok ' "$tmp/out")
+        detail="$detail $m:$cases"
+        [ -n "$skip" ] && detail="$detail+1nondet"
+    done
+    case $status in
+        PASS)     pass=$((pass + 1));         printf '  %-28s PASS %s\n' "$name" "$detail" ;;
+        UNPORTED) unported=$((unported + 1)); unported_list+=("$name") ;;
+        REFABORT) refabort=$((refabort + 1)); refabort_list+=("$name")
+                  printf '  %-28s REF-ABORT %s\n' "$name" "$detail" ;;
+        FAIL)     fail=$((fail + 1));         failed+=("$name")
+                  printf '  %-28s FAIL %s\n' "$name" "$detail"
+                  grep -A2 -m1 '^FAIL' "$tmp/fail-$name-"*.log | tail -2 | sed 's/^/      /' ;;
+    esac
+done
+
+[ "$unported" -gt 0 ] && printf '  unported (%d): %s\n' "$unported" "${unported_list[*]}"
+echo "arch-model-diff: $pass pass, $fail fail, $unported unported, $refabort ref-abort"
+[ "$fail" -eq 0 ] || exit 1
+[ "$pass" -gt 0 ] || { echo "FAIL: no fixture passed -- nothing was compared" >&2; exit 1; }
+exit 0

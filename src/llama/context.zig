@@ -555,7 +555,7 @@ pub const Context = struct {
         self.sampling.token_ids_full_vocab.deinit(allocator);
         allocator.free(self.embd_layer_inp);
         if (self.mem) |m| m.destroy();
-        self.cross.v_embd.deinit(allocator);
+        self.cross.deinit();
         self.loras.deinit();
         allocator.destroy(self.loras);
         self.cvec.deinit();
@@ -1341,7 +1341,7 @@ pub const Context = struct {
         defer ubatch.release();
 
         // Non-causal encoding cannot be micro-batched.
-        impl.assert(self.cparams.n_ubatch >= n_tokens, "llama-context.cpp", 1427, "cparams.n_ubatch >= n_tokens && \"encoder requires n_ubatch >= n_tokens\"");
+        impl.assert(self.cparams.n_ubatch >= n_tokens, "llama-context.cpp", 1426, "cparams.n_ubatch >= n_tokens && \"encoder requires n_ubatch >= n_tokens\"");
 
         // Wait for in-flight copies into embd_seq before freeing it.
         if (self.embd_seq.items.len != 0) self.synchronize();
@@ -1406,14 +1406,41 @@ pub const Context = struct {
         // The nextn embeddings, the hidden state before the output norm.
         if (self.embd_nextn.data != null and t_h_nextn != null and self.cparams.pooling_type == c.LLAMA_POOLING_TYPE_NONE) {
             const backend_h = c.ggml_backend_sched_get_tensor_backend(self.sched, t_h_nextn);
-            impl.assert(backend_h != null, "llama-context.cpp", 1544, "backend_h != nullptr");
+            impl.assert(backend_h != null, "llama-context.cpp", 1547, "backend_h != nullptr");
             const n_embd_out: usize = hparams.nEmbdOut();
-            impl.assert(n_tokens * n_embd_out <= self.embd_nextn.size, "llama-context.cpp", 1547, "n_tokens*n_embd <= (int64_t) embd_nextn.size");
+            impl.assert(n_tokens * n_embd_out <= self.embd_nextn.size, "llama-context.cpp", 1550, "n_tokens*n_embd <= (int64_t) embd_nextn.size");
             c.ggml_backend_tensor_get_async(backend_h, t_h_nextn, self.embd_nextn.data, 0, n_tokens * n_embd_out * @sizeOf(f32));
         }
 
-        // T5 keeps the encoder output for cross-attention.
-        if (self.model.arch == .t5 and t_embd != null) impl.abort("llama-context.cpp", 1552, "T5 cross-attention is not ported");
+        // T5 keeps the encoder output for cross-attention; the C++'s TODO
+        // calls this a hacky solution.
+        if (self.model.arch == .t5) {
+            if (t_embd) |te| {
+                self.synchronize();
+
+                self.cross.n_embd = te.ne[0];
+                self.cross.n_enc = te.ne[1];
+                const n: usize = @intCast(self.cross.n_embd * self.cross.n_enc);
+                self.cross.v_embd.resize(allocator, n) catch oom();
+                @memcpy(std.mem.sliceAsBytes(self.cross.v_embd.items), @as([*]const u8, @ptrCast(self.embd.data.?))[0..c.ggml_nbytes(te)]);
+
+                const b = self.balloc.getBatch();
+
+                // The sequences each encoder token belongs to, for the
+                // decoder's cross-attention.
+                const old = self.cross.seq_ids_enc.items.len;
+                if (n_tokens < old) {
+                    for (self.cross.seq_ids_enc.items[n_tokens..]) |*s| s.deinit(allocator);
+                }
+                self.cross.seq_ids_enc.resize(allocator, n_tokens) catch oom();
+                for (self.cross.seq_ids_enc.items[@min(old, n_tokens)..]) |*s| s.* = .empty;
+                for (0..n_tokens) |i| {
+                    self.cross.seq_ids_enc.items[i].clearRetainingCapacity();
+                    var s: usize = 0;
+                    while (s < b.n_seq_id[i]) : (s += 1) self.cross.insertSeq(i, b.seq_id[i][s]);
+                }
+            }
+        }
 
         return 0;
     }
@@ -1615,7 +1642,7 @@ pub const Context = struct {
                     c.LLAMA_POOLING_TYPE_NONE => {
                         const n_embd_out: usize = hparams.nEmbdOut();
                         const embd_out = self.embd.data.? + n_outputs_prev * n_embd_out;
-                        impl.assert(n_outputs_prev + n_outputs <= n_outputs_all, "llama-context.cpp", 1869, "n_outputs_prev + n_outputs <= n_outputs_all");
+                        impl.assert(n_outputs_prev + n_outputs <= n_outputs_all, "llama-context.cpp", 1871, "n_outputs_prev + n_outputs <= n_outputs_all");
                         impl.assert((n_outputs_prev + n_outputs) * n_embd_out <= self.embd.size, "llama-context.cpp", 1870, "(n_outputs_prev + n_outputs)*n_embd_out <= (int64_t) embd.size");
                         c.ggml_backend_tensor_get_async(backend_embd, t_embd, embd_out, 0, n_outputs * n_embd_out * @sizeOf(f32));
                     },
@@ -1826,7 +1853,7 @@ pub const Context = struct {
         @memset(self.output_ids.items, -1);
         self.n_outputs = 0;
 
-        impl.assert(n_outputs_max <= self.cparams.n_outputs_max, "llama-context.cpp", 2190, "n_outputs_max <= cparams.n_outputs_max");
+        impl.assert(n_outputs_max <= self.cparams.n_outputs_max, "llama-context.cpp", 2189, "n_outputs_max <= cparams.n_outputs_max");
         return @intCast(n_outputs_max);
     }
 
@@ -1972,7 +1999,7 @@ pub const Context = struct {
                 _ = c.ggml_backend_sched_split_graph(self.sched, gf);
             }
         } else if (!c.ggml_backend_sched_reserve(self.sched, gf)) {
-            impl.assert(sizes == null, "llama-context.cpp", 2440, "!sizes");
+            impl.assert(sizes == null, "llama-context.cpp", 2443, "!sizes");
             impl.logError("%s: failed to allocate compute buffers\n", .{func});
             return null;
         }

@@ -46,10 +46,10 @@ pub const qk_fp4_mmq = 2 * qk8_1_mmq;
 /// `sizeof(block_q8_1)`: two halves and `QK8_1` bytes (ggml-common.h:269 @c1d0e7a00).
 pub const sizeof_block_q8_1 = 2 * 2 + c.QK8_1;
 
-/// `sizeof(block_q8_1_mmq)` (mmq.cuh:56 @c1d0e7a00): `QK8_1_MMQ + 4*sizeof(half2)`.
+/// The size of `block_q8_1_mmq` (mmq.cuh:56 @c1d0e7a00): `QK8_1_MMQ + 4*sizeof(half2)`.
 pub const sizeof_block_q8_1_mmq = qk8_1_mmq + 4 * 4;
 
-/// `sizeof(block_fp4_mmq)` (mmq.cuh:58 @c1d0e7a00), equal to `block_q8_1_mmq`'s.
+/// The size of `block_fp4_mmq` (mmq.cuh:58 @c1d0e7a00), equal to `block_q8_1_mmq`'s.
 pub const sizeof_block_fp4_mmq = sizeof_block_q8_1_mmq;
 
 /// Ports `mmq_q8_1_ds_layout` (mmq.cuh:18 @c1d0e7a00).
@@ -104,7 +104,7 @@ pub const Config = struct {
     stream_k: bool,
     fallback: bool,
 
-    /// Ports `ggml_cuda_mmq_config::use_mma_data_layout(cc)` (mmq.cuh:189 @c1d0e7a00).
+    /// Ports `ggml_cuda_mmq_config`'s `use_mma_data_layout` (mmq.cuh:189 @c1d0e7a00).
     fn useMmaDataLayout(self: Config, x: c_int) bool {
         _ = self;
         return common.turingMmaAvailable(x);
@@ -141,7 +141,7 @@ fn getJMax(ty: c.enum_ggml_type, fallback: bool, x: c_int, ne11: i64) c_int {
 const TileXSizes = struct { qs: c_int, dm: c_int, sc: c_int };
 
 /// Ports `mmq_get_dp4a_tile_x_sizes` (mmq.cuh:386 @c1d0e7a00) with the
-/// `MMQ_DP4A_TXS_*` macros (mmq.cuh:375 @c1d0e7a00).
+/// `MMQ_DP4A_TXS_*` macros, from `MMQ_DP4A_TXS_Q4_0` (mmq.cuh:375 @c1d0e7a00).
 fn getDp4aTileXSizes(ty: c.enum_ggml_type, I: c_int) TileXSizes {
     const K = tile_ne_k;
     const q4_0: TileXSizes = .{ .qs = I * K + I, .dm = @divTrunc(I * K, q.QI4_0) + @divTrunc(I, q.QI4_0), .sc = 0 };

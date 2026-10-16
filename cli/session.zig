@@ -71,8 +71,8 @@ pub const Session = struct {
     /// model still runs a CPU split every token (the token-embedding
     /// `GET_ROWS`, whose weights stay in host memory). Measured on a GB10 with
     /// Qwen3.5-2B: decode 7.59 ms/token without a pool, 7.03 with one, 6.75 at
-    /// one thread. Upstream's CLI attaches one in `common_threadpools::init`
-    /// (common/common.cpp:1785). Null if creation failed, which leaves
+    /// one thread. Upstream's CLI attaches one in `common_threadpools`'s `init`
+    /// (common/common.cpp:1785 @c1d0e7a00). Null if creation failed, which leaves
     /// libllama's per-call pools, as upstream does.
     threadpool: ?*c.struct_ggml_threadpool = null,
     /// Borrowed from the caller's `Args`; not owned.

@@ -123,8 +123,8 @@ pub const SlotInfo = struct {
 
     /// Ports `slot_info`'s `head` (llama-kv-cache.h:45 @c1d0e7a00).
     pub fn head(self: *const SlotInfo) u32 {
-        impl.assert(self.idxs.items.len == 1, "llama-kv-cache.h", 48, "idxs.size() == 1");
-        impl.assert(self.idxs.items[0].items.len != 0, "llama-kv-cache.h", 49, "!idxs[0].empty()");
+        impl.assert(self.idxs.items.len == 1, "llama-kv-cache.h", 46, "idxs.size() == 1");
+        impl.assert(self.idxs.items[0].items.len != 0, "llama-kv-cache.h", 47, "!idxs[0].empty()");
         return self.idxs.items[0].items[0];
     }
 
@@ -140,8 +140,8 @@ pub const SlotInfo = struct {
 
     /// Ports `slot_info`'s `size` (llama-kv-cache.h:57 @c1d0e7a00).
     pub fn size(self: *const SlotInfo) usize {
-        impl.assert(self.idxs.items.len == self.strm.items.len, "llama-kv-cache.h", 60, "idxs.size() == strm.size()");
-        impl.assert(self.idxs.items.len != 0, "llama-kv-cache.h", 61, "!idxs.empty()");
+        impl.assert(self.idxs.items.len == self.strm.items.len, "llama-kv-cache.h", 58, "idxs.size() == strm.size()");
+        impl.assert(self.idxs.items.len != 0, "llama-kv-cache.h", 59, "!idxs.empty()");
         return self.idxs.items[0].items.len;
     }
 
@@ -348,7 +348,11 @@ pub const KvCache = struct {
                 const il_share = share.call(@intCast(il));
                 if (il_share >= 0) {
                     const o = self.other.?;
-                    const layer_share = o.layers.items[@intCast(o.map_layer_ids.get(il_share).?)];
+                    // `map_layer_ids[il_share]` is `operator[]`: a layer the
+                    // other cache lacks is inserted as 0, and layer 0 shared.
+                    const slot = o.map_layer_ids.getOrPut(allocator, il_share) catch oom();
+                    if (!slot.found_existing) slot.value_ptr.* = 0;
+                    const layer_share = o.layers.items[@intCast(slot.value_ptr.*)];
                     impl.logWarn("%s: layer %3d: sharing with layer %d. k = %p, v = %p\n", .{ func, il, il_share, layer_share.k.data, if (layer_share.v) |v| v.data else null });
                     self.map_layer_ids.put(allocator, @intCast(il), @intCast(self.layers.items.len)) catch oom();
                     var copy: KvLayer = .{ .il = il, .k = layer_share.k, .v = layer_share.v };
@@ -843,7 +847,7 @@ pub const KvCache = struct {
             self.applyUbatch(&sinfo_new, ubatch);
         }
 
-        impl.assert(states.items.len != 0 or !success, "llama-kv-cache.cpp", 796, "!states.empty() || !success");
+        impl.assert(states.items.len != 0 or !success, "llama-kv-cache.cpp", 793, "!states.empty() || !success");
 
         // Restore the cells, most recent first.
         var i = states.items.len;
@@ -922,7 +926,7 @@ pub const KvCache = struct {
         var n_tokens: u32 = ubatch.n_tokens;
         var n_seqs: u32 = 1;
         if (self.n_stream > 1) {
-            impl.assert(n_tokens % ubatch.n_seqs_unq == 0, "llama-kv-cache.cpp", 966, "n_tokens % ubatch.n_seqs_unq == 0");
+            impl.assert(n_tokens % ubatch.n_seqs_unq == 0, "llama-kv-cache.cpp", 968, "n_tokens % ubatch.n_seqs_unq == 0");
             n_seqs = ubatch.n_seqs_unq;
             n_tokens = n_tokens / n_seqs;
         }
@@ -933,8 +937,8 @@ pub const KvCache = struct {
         for (0..n_seqs) |s| {
             const seq_id = ubatch.seq_id_unq[s];
             if (self.n_stream > 1) {
-                impl.assert(ubatch.n_seq_id[s * n_tokens] == 1, "llama-kv-cache.cpp", 984, "ubatch.n_seq_id[s*n_tokens]    == 1");
-                impl.assert(ubatch.seq_id[s * n_tokens][0] == seq_id, "llama-kv-cache.cpp", 985, "ubatch.seq_id  [s*n_tokens][0] == seq_id");
+                impl.assert(ubatch.n_seq_id[s * n_tokens] == 1, "llama-kv-cache.cpp", 987, "ubatch.n_seq_id[s*n_tokens]    == 1");
+                impl.assert(ubatch.seq_id[s * n_tokens][0] == seq_id, "llama-kv-cache.cpp", 988, "ubatch.seq_id  [s*n_tokens][0] == seq_id");
             }
             const strm = self.seq_to_stream.items[@intCast(seq_id)];
             res.s0 = @min(res.s0, strm);
@@ -1145,6 +1149,17 @@ pub const KvCache = struct {
         return self.layers.items[0].v.?.type;
     }
 
+    /// Ports `llama_kv_cache`'s `get_layer_ids` (llama-kv-cache.cpp:1212
+    /// @c1d0e7a00): the model layers the cache holds, in its order.
+    ///
+    /// Return: the ids, the caller's to free.
+    pub fn getLayerIds(self: *const KvCache) std.ArrayList(u32) {
+        var res: std.ArrayList(u32) = .empty;
+        res.ensureTotalCapacity(allocator, self.layers.items.len) catch oom();
+        for (self.layers.items) |*layer| res.appendAssumeCapacity(layer.il);
+        return res;
+    }
+
     /// Ports `llama_kv_cache`'s `get_k_storage` (llama-kv-cache.cpp:1223 @c1d0e7a00).
     pub fn getKStorage(self: *const KvCache, il: i32) *Tensor {
         return self.layers.items[@intCast(self.map_layer_ids.get(il).?)].k;
@@ -1211,7 +1226,7 @@ pub const KvCache = struct {
         const n_embd_gqa = n_embd_head * n_head;
 
         // Dims 0 and 1 merge.
-        impl.assert(c.ggml_row_size(k_cur_.type, n_embd_head) == k_cur_.nb[1], "llama-kv-cache.cpp", 1316, "ggml_row_size(k_cur->type, n_embd_head) == k_cur->nb[1]");
+        impl.assert(c.ggml_row_size(k_cur_.type, n_embd_head) == k_cur_.nb[1], "llama-kv-cache.cpp", 1318, "ggml_row_size(k_cur->type, n_embd_head) == k_cur->nb[1]");
         const k_cur = c.ggml_view_2d(ctx, k_cur_, n_embd_gqa, n_tokens, k_cur_.nb[2], 0);
 
         const n_stream = k.ne[2];
@@ -1233,7 +1248,7 @@ pub const KvCache = struct {
         const n_tokens = v_cur.ne[2];
         const n_embd_gqa = n_embd_head * n_head;
 
-        impl.assert(c.ggml_row_size(v_cur.type, n_embd_head) == v_cur.nb[1], "llama-kv-cache.cpp", 1351, "ggml_row_size(v_cur->type, n_embd_head) == v_cur->nb[1]");
+        impl.assert(c.ggml_row_size(v_cur.type, n_embd_head) == v_cur.nb[1], "llama-kv-cache.cpp", 1352, "ggml_row_size(v_cur->type, n_embd_head) == v_cur->nb[1]");
 
         const n_stream = v.ne[2];
 
@@ -1526,7 +1541,7 @@ pub const KvCache = struct {
 
             var check: u32 = 0;
             for (cr.data.items) |r| check += r[1] - r[0];
-            impl.assert(cell_count == check, "llama-kv-cache.cpp", 2024, "cell_count == cell_count_check");
+            impl.assert(cell_count == check, "llama-kv-cache.cpp", 2025, "cell_count == cell_count_check");
 
             try w.writeValue(cell_count, exc);
             if (cell_count == 0) continue;
@@ -1705,12 +1720,12 @@ pub const KvCache = struct {
             impl.logDebug("%s: cell_count = %d, dest_seq_id = %d\n", .{ func, cell_count, dest_seq_id });
 
             // Every cell was allocated with the right sequence and position.
-            impl.assert(sinfo.nStream() == 1, "llama-kv-cache.cpp", 2277, "sinfo.n_stream() == 1");
-            impl.assert(sinfo.idxs.items[0].items.len == cell_count, "llama-kv-cache.cpp", 2278, "sinfo.idxs[0].size() == cell_count");
+            impl.assert(sinfo.nStream() == 1, "llama-kv-cache.cpp", 2278, "sinfo.n_stream() == 1");
+            impl.assert(sinfo.idxs.items[0].items.len == cell_count, "llama-kv-cache.cpp", 2279, "sinfo.idxs[0].size() == cell_count");
             for (0..cell_count) |i| {
                 const idx = sinfo.idxs.items[0].items[i];
-                impl.assert(cl.posGet(idx) == ubatch.pos[i], "llama-kv-cache.cpp", 2281, "cells.pos_get(idx) == ubatch.pos[i]");
-                impl.assert(cl.seqHas(idx, dest_seq_id), "llama-kv-cache.cpp", 2282, "cells.seq_has(idx, dest_seq_id)");
+                impl.assert(cl.posGet(idx) == ubatch.pos[i], "llama-kv-cache.cpp", 2282, "cells.pos_get(idx) == ubatch.pos[i]");
+                impl.assert(cl.seqHas(idx, dest_seq_id), "llama-kv-cache.cpp", 2283, "cells.seq_has(idx, dest_seq_id)");
             }
         } else {
             // The whole cache.

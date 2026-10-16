@@ -9,7 +9,7 @@
 //!
 //! # CUB
 //!
-//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:111), so rows
+//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:111 @c1d0e7a00), so rows
 //! too long for the bitonic kernel go to CUB's device-wide sorts. Their
 //! host-side dispatch is CUB's header templates, which Zig cannot
 //! instantiate; `cub_shim.cu` wraps exactly upstream's six calls behind a C

@@ -452,7 +452,7 @@ const ReadDevice = struct {
             for (mbuf_cur.cpy.items, 0..) |cpy, i| c.ggml_backend_tensor_copy(cpy, e.mbuf.org.items[i]);
         }
 
-        impl.assert(self.buf_size == 0, "llama-context.cpp", 2896, "buf_size == 0");
+        impl.assert(self.buf_size == 0, "llama-context.cpp", 2899, "buf_size == 0");
     }
 
     fn read(p: *anyopaque, dst: []u8, exc: *Exception) Thrown!void {
@@ -566,7 +566,7 @@ pub fn stateSeqSetData(ctx: *Context, seq_id: i32, src: [*]const u8, size: usize
         }
         const seq_id_read = pr.readValue(i32, &exc) catch exc.terminate("llama-context.cpp", 3016);
         probe.finish();
-        impl.assert(ctx.mem_storage.contains(seq_id_read), "llama-context.cpp", 3018, "mem_storage.find(seq_id_read) != mem_storage.end()");
+        impl.assert(ctx.mem_storage.contains(seq_id_read), "llama-context.cpp", 3016, "mem_storage.find(seq_id_read) != mem_storage.end()");
 
         var dev: ReadDevice = .{ .ptr = src, .buf_size = size, .mbufs = ctx.mem_storage.at(seq_id_read) };
         defer dev.finish();
@@ -679,8 +679,8 @@ pub fn stateSeqLoadFile(ctx: *Context, seq_id: i32, filepath: [:0]const u8, toke
             impl.logError("%s: failed to restore sequence state\n", .{func});
             return 0;
         }
-        impl.assert(nread <= state_size, "llama-context.cpp", 3146, "nread <= state_size");
-        impl.assert(nread + @sizeOf(u32) * 3 + @sizeOf(c.llama_token) * n_token_count_out.* == try file.tell(exc), "llama-context.cpp", 3147, "nread + sizeof(uint32_t) * 3 + sizeof(llama_token) * *n_token_count_out == file.tell()");
+        impl.assert(nread <= state_size, "llama-context.cpp", 3147, "nread <= state_size");
+        impl.assert(nread + @sizeOf(u32) * 3 + @sizeOf(c.llama_token) * n_token_count_out.* == try file.tell(exc), "llama-context.cpp", 3148, "nread + sizeof(uint32_t) * 3 + sizeof(llama_token) * *n_token_count_out == file.tell()");
     }
     return file.tell(exc);
 }
@@ -701,7 +701,7 @@ pub fn stateSeqSaveFile(ctx: *Context, seq_id: i32, filepath: [:0]const u8, toke
     _ = try stateSeqWriteData(ctx, wf.writer(), seq_id, 0, exc);
 
     const res = try file.tell(exc);
-    impl.assert(res == @sizeOf(u32) * 3 + @sizeOf(c.llama_token) * n_token_count + wf.size_written, "llama-context.cpp", 3170, "res == sizeof(uint32_t) * 3 + sizeof(llama_token) * n_token_count + io.n_bytes()");
+    impl.assert(res == @sizeOf(u32) * 3 + @sizeOf(c.llama_token) * n_token_count + wf.size_written, "llama-context.cpp", 3169, "res == sizeof(uint32_t) * 3 + sizeof(llama_token) * n_token_count + io.n_bytes()");
     return res;
 }
 

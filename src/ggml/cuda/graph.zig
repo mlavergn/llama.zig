@@ -492,7 +492,6 @@ fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_gr
 
 /// The C's "restore original node order within each concurrent region"
 /// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4012 @c1d0e7a00).
-/// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4050 @c1d0e7a00).
 fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     var node_to_idx: std.AutoHashMapUnmanaged(*const Tensor, usize) = .empty;
     defer node_to_idx.deinit(allocator);

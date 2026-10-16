@@ -112,8 +112,9 @@ objects that are empty on this target. `llama-cli` links no C++ runtime.
 | `ggml-metal-device.m`, `ggml-metal-context.m` | Objective-C | Metal object interface; stays Objective-C permanently |
 | `ggml-metal/kernels/*.metal` | MSL | Compiled by the GPU driver at load; never ported |
 
-The other 150 architectures under `src/models/` are not ported: the model
-layer loads any of them vocab-only, and decodes Qwen3.5.
+Every architecture in upstream's `llama_model_mapping` is ported. Qwen3.5 is
+the canonical model of the conformance gates; the others are gated on
+upstream's per-architecture fixtures (`make arch-model-diff`).
 
 ### 3.3 Backends
 

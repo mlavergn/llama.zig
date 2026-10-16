@@ -1614,7 +1614,7 @@ pub const Vocab = struct {
                     warnDoubleBos("tokenize");
                 }
                 if (add_special and self.add_eos) {
-                    impl.assert(self.special_eos_id != token_null, "llama-vocab.cpp", 3533, "special_eos_id != LLAMA_TOKEN_NULL");
+                    impl.assert(self.special_eos_id != token_null, "llama-vocab.cpp", 3532, "special_eos_id != LLAMA_TOKEN_NULL");
                     output.append(allocator, self.special_eos_id) catch oom();
                 }
             },

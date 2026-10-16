@@ -283,8 +283,8 @@ fn launchBinBcastPack(
 }
 
 /// Ports `ggml_cuda_op_bin_bcast` (binbcast.cu:412 @c1d0e7a00) with the
-/// `bin_bcast_cuda<op, n_fuse>` functor it is instantiated with
-/// (binbcast.cu:355 @c1d0e7a00).
+/// functor `bin_bcast_cuda` (binbcast.cu:389 @c1d0e7a00) it is instantiated
+/// with, as `bin_bcast_cuda<op, n_fuse>`.
 fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const Tensor, src1: *const Tensor, dst: *const Tensor, src0_dd: ?*const anyopaque, src1_dd: ?*const anyopaque, dst_dd: ?*anyopaque, stream: cu.cudaStream_t) void {
     impl.assert(src1.type == c.GGML_TYPE_F32 or src1.type == c.GGML_TYPE_F16, "src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16");
 

@@ -165,12 +165,13 @@ it in one process.
 | `ggml/src/ggml-cpu/` C++ | ported, swapped; three units empty on this target |
 | `ggml/src/*.cpp` | ported, swapped — `ggml-backend-meta.cpp` and `ggml-opt.cpp` last; `ggml.cpp` dropped |
 | `ggml/src/ggml-metal/` C++ | ported, swapped; the two `.m` files stay |
-| libllama | ported, swapped at `llama.h` — 240 / 240 C exports; Qwen3.5 is the one architecture with a graph |
+| libllama | ported, swapped at `llama.h` — 240 / 240 C exports; every architecture upstream maps, 146 |
 
-The other 150 architectures under `src/models/` are the next milestone
-(Decision 36). The port loads any of them vocab-only, and the quantizer's
-type rules cover all of them, but only Qwen3.5 can be decoded or quantized
-end to end.
+Every architecture in upstream's `llama_model_mapping` is ported, one file
+per upstream `models/*.cpp` under `src/llama/models/`. Qwen3.5 is gated on
+real models end to end; the rest on upstream's own small random fixtures
+(`make arch-model-diff`), which compare every graph node and output bit
+against the C++ but say nothing about a trained model's outputs.
 
 Throughput is unchanged by the port, as far as this machine can tell.
 Generation sits at 222-234 t/s on Qwen3.5-2B Q4_K_M for both `make port` and

@@ -1231,6 +1231,379 @@ pub fn StringMap(comptime V: type) type {
 }
 
 // -----------------------------------------------------------------------------
+// std::unordered_set<uint32_t>
+
+/// Ports `std::unordered_set<uint32_t>` as libc++ lays it out, for its
+/// iteration order: the same `__hash_table` as `StringMap`, keyed by
+/// `std::hash<unsigned int>`, which is the value itself.
+///
+/// Granite's `load_arch_hparams` walks one to report the first invalid
+/// deepstack index, so which one it reports is this order.
+pub const U32Set = struct {
+    const Self = @This();
+    const none = std.math.maxInt(u32);
+    /// The sentinel, `__first_node_`.
+    const head: u32 = 0;
+
+    const Node = struct {
+        next: u32,
+        value: u32,
+    };
+
+    allocator: std.mem.Allocator,
+    /// Node 0 is the sentinel; its `next` is the first element.
+    nodes: std.ArrayList(Node) = .empty,
+    /// `__bucket_list_`: the node before each bucket's group, or none.
+    buckets: []u32 = &.{},
+    max_load_factor: f32 = 1.0,
+
+    /// Return: an empty set; `allocator` owns its storage.
+    pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!Self {
+        var m: Self = .{ .allocator = allocator };
+        try m.nodes.append(allocator, .{ .next = none, .value = 0 });
+        return m;
+    }
+
+    /// Return: nothing.
+    pub fn deinit(self: *Self) void {
+        self.nodes.deinit(self.allocator);
+        self.allocator.free(self.buckets);
+    }
+
+    const constrain = StringMap(void).constrain;
+    const isHashPow2 = StringMap(void).isHashPow2;
+    const nextHashPow2 = StringMap(void).nextHashPow2;
+
+    /// `size()`.
+    pub fn count(self: *const Self) usize {
+        return self.nodes.items.len - 1;
+    }
+
+    /// `bucket_count()`.
+    pub fn bucketCount(self: *const Self) usize {
+        return self.buckets.len;
+    }
+
+    fn contains(self: *const Self, v: u32) bool {
+        const bc = self.buckets.len;
+        if (bc == 0) return false;
+        const chash = constrain(v, bc);
+        var nd = self.buckets[chash];
+        if (nd == none) return false;
+        nd = self.nodes.items[nd].next;
+        while (nd != none) : (nd = self.nodes.items[nd].next) {
+            const h = self.nodes.items[nd].value;
+            if (!(h == v or constrain(h, bc) == chash)) break;
+            if (h == v) return true;
+        }
+        return false;
+    }
+
+    /// `insert(v)`.
+    ///
+    /// Return: whether `v` was new.
+    pub fn insert(self: *Self, v: u32) error{OutOfMemory}!bool {
+        if (self.contains(v)) return false;
+
+        try self.nodes.append(self.allocator, .{ .next = none, .value = v });
+        const h: u32 = @intCast(self.nodes.items.len - 1);
+        const len = self.count() - 1;
+
+        var bc = self.buckets.len;
+        const size1: f32 = @floatFromInt(len + 1);
+        if (size1 > @as(f32, @floatFromInt(bc)) * self.max_load_factor) {
+            const grow = 2 * bc + @intFromBool(!isHashPow2(bc));
+            const need: usize = @intFromFloat(@ceil(size1 / self.max_load_factor));
+            try self.rehash(@max(grow, need), len);
+            bc = self.buckets.len;
+        }
+        const chash = constrain(v, bc);
+        const nodes = self.nodes.items;
+        const pn = self.buckets[chash];
+        if (pn == none) {
+            nodes[h].next = nodes[head].next;
+            nodes[head].next = h;
+            self.buckets[chash] = head;
+            if (nodes[h].next != none) self.buckets[constrain(nodes[nodes[h].next].value, bc)] = h;
+        } else {
+            nodes[h].next = nodes[pn].next;
+            nodes[pn].next = h;
+        }
+        return true;
+    }
+
+    /// Ports `__hash_table::__rehash<true>`.
+    fn rehash(self: *Self, n_in: usize, len: usize) error{OutOfMemory}!void {
+        var n = n_in;
+        if (n == 1) {
+            n = 2;
+        } else if ((n & (n - 1)) != 0) {
+            n = nextPrime(n);
+        }
+        const bc = self.buckets.len;
+        if (n > bc) {
+            try self.doRehash(n);
+        } else if (n < bc) {
+            const need: usize = @intFromFloat(@ceil(@as(f32, @floatFromInt(len)) / self.max_load_factor));
+            n = @max(n, if (isHashPow2(bc)) nextHashPow2(need) else nextPrime(need));
+            if (n < bc) try self.doRehash(n);
+        }
+    }
+
+    /// Ports `__hash_table::__do_rehash<true>`.
+    fn doRehash(self: *Self, bucket_count: usize) error{OutOfMemory}!void {
+        self.allocator.free(self.buckets);
+        self.buckets = &.{};
+        if (bucket_count == 0) return;
+        self.buckets = try self.allocator.alloc(u32, bucket_count);
+        @memset(self.buckets, none);
+
+        const nodes = self.nodes.items;
+        var pp: u32 = head;
+        var cp = nodes[pp].next;
+        if (cp == none) return;
+
+        var chash = constrain(nodes[cp].value, bucket_count);
+        self.buckets[chash] = pp;
+        var phash = chash;
+        pp = cp;
+        cp = nodes[cp].next;
+        while (cp != none) : (cp = nodes[pp].next) {
+            chash = constrain(nodes[cp].value, bucket_count);
+            if (chash == phash) {
+                pp = cp;
+            } else if (self.buckets[chash] == none) {
+                self.buckets[chash] = pp;
+                pp = cp;
+                phash = chash;
+            } else {
+                const np = cp;
+                nodes[pp].next = nodes[np].next;
+                nodes[np].next = nodes[self.buckets[chash]].next;
+                nodes[self.buckets[chash]].next = cp;
+            }
+        }
+    }
+
+    /// Iterates in libc++'s order: the list from the sentinel.
+    pub const Iterator = struct {
+        set: *const Self,
+        at: u32,
+
+        /// Return: the next element, or null at the end.
+        pub fn next(self: *Iterator) ?u32 {
+            if (self.at == none) return null;
+            const i = self.at;
+            self.at = self.set.nodes.items[i].next;
+            return self.set.nodes.items[i].value;
+        }
+    };
+
+    /// Return: an iterator over every element, valid until the next
+    /// insertion.
+    pub fn iterator(self: *const Self) Iterator {
+        return .{ .set = self, .at = self.nodes.items[head].next };
+    }
+};
+
+/// Ports `std::unordered_map<int32_t, V>` as libc++ lays it out, for its
+/// iteration order: the same `__hash_table` as `U32Set`, keyed by
+/// `std::hash<int>`, which is the value sign-extended to `size_t`.
+///
+/// Granite Switch's `load_arch_tensors` walks one to report the first
+/// substitute token out of range, so which one it reports is this order.
+pub fn I32Map(comptime V: type) type {
+    return struct {
+        const Self = @This();
+        const none = std.math.maxInt(u32);
+        /// The sentinel, `__first_node_`.
+        const head: u32 = 0;
+
+        const Node = struct {
+            next: u32,
+            key: i32,
+            value: V,
+        };
+
+        allocator: std.mem.Allocator,
+        /// Node 0 is the sentinel; its `next` is the first element.
+        nodes: std.ArrayList(Node) = .empty,
+        /// `__bucket_list_`: the node before each bucket's group, or none.
+        buckets: []u32 = &.{},
+        max_load_factor: f32 = 1.0,
+
+        /// Return: an empty map; `allocator` owns its storage.
+        pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!Self {
+            var m: Self = .{ .allocator = allocator };
+            try m.nodes.append(allocator, .{ .next = none, .key = 0, .value = undefined });
+            return m;
+        }
+
+        /// Return: nothing.
+        pub fn deinit(self: *Self) void {
+            self.nodes.deinit(self.allocator);
+            self.allocator.free(self.buckets);
+        }
+
+        const constrain = StringMap(void).constrain;
+        const isHashPow2 = StringMap(void).isHashPow2;
+        const nextHashPow2 = StringMap(void).nextHashPow2;
+
+        /// `std::hash<int>`.
+        fn hashOf(k: i32) u64 {
+            return @bitCast(@as(i64, k));
+        }
+
+        /// `size()`.
+        pub fn count(self: *const Self) usize {
+            return self.nodes.items.len - 1;
+        }
+
+        /// `bucket_count()`.
+        pub fn bucketCount(self: *const Self) usize {
+            return self.buckets.len;
+        }
+
+        fn find(self: *const Self, k: i32) ?u32 {
+            const bc = self.buckets.len;
+            if (bc == 0) return null;
+            const hash = hashOf(k);
+            const chash = constrain(hash, bc);
+            var nd = self.buckets[chash];
+            if (nd == none) return null;
+            nd = self.nodes.items[nd].next;
+            while (nd != none) : (nd = self.nodes.items[nd].next) {
+                const nk = self.nodes.items[nd].key;
+                if (!(nk == k or constrain(hashOf(nk), bc) == chash)) break;
+                if (nk == k) return nd;
+            }
+            return null;
+        }
+
+        /// `find(k)`.
+        ///
+        /// Return: the value, or null when `k` is absent.
+        pub fn get(self: *const Self, k: i32) ?V {
+            const nd = self.find(k) orelse return null;
+            return self.nodes.items[nd].value;
+        }
+
+        /// `operator[](k) = v`: assigns in place when `k` is present, and
+        /// inserts it otherwise.
+        ///
+        /// Return: nothing, or `error.OutOfMemory`.
+        pub fn put(self: *Self, k: i32, v: V) error{OutOfMemory}!void {
+            if (self.find(k)) |nd| {
+                self.nodes.items[nd].value = v;
+                return;
+            }
+
+            try self.nodes.append(self.allocator, .{ .next = none, .key = k, .value = v });
+            const h: u32 = @intCast(self.nodes.items.len - 1);
+            const len = self.count() - 1;
+
+            var bc = self.buckets.len;
+            const size1: f32 = @floatFromInt(len + 1);
+            if (size1 > @as(f32, @floatFromInt(bc)) * self.max_load_factor) {
+                const grow = 2 * bc + @intFromBool(!isHashPow2(bc));
+                const need: usize = @intFromFloat(@ceil(size1 / self.max_load_factor));
+                try self.rehash(@max(grow, need), len);
+                bc = self.buckets.len;
+            }
+            const chash = constrain(hashOf(k), bc);
+            const nodes = self.nodes.items;
+            const pn = self.buckets[chash];
+            if (pn == none) {
+                nodes[h].next = nodes[head].next;
+                nodes[head].next = h;
+                self.buckets[chash] = head;
+                if (nodes[h].next != none) self.buckets[constrain(hashOf(nodes[nodes[h].next].key), bc)] = h;
+            } else {
+                nodes[h].next = nodes[pn].next;
+                nodes[pn].next = h;
+            }
+        }
+
+        /// Ports `__hash_table::__rehash<true>`.
+        fn rehash(self: *Self, n_in: usize, len: usize) error{OutOfMemory}!void {
+            var n = n_in;
+            if (n == 1) {
+                n = 2;
+            } else if ((n & (n - 1)) != 0) {
+                n = nextPrime(n);
+            }
+            const bc = self.buckets.len;
+            if (n > bc) {
+                try self.doRehash(n);
+            } else if (n < bc) {
+                const need: usize = @intFromFloat(@ceil(@as(f32, @floatFromInt(len)) / self.max_load_factor));
+                n = @max(n, if (isHashPow2(bc)) nextHashPow2(need) else nextPrime(need));
+                if (n < bc) try self.doRehash(n);
+            }
+        }
+
+        /// Ports `__hash_table::__do_rehash<true>`.
+        fn doRehash(self: *Self, bucket_count: usize) error{OutOfMemory}!void {
+            self.allocator.free(self.buckets);
+            self.buckets = &.{};
+            if (bucket_count == 0) return;
+            self.buckets = try self.allocator.alloc(u32, bucket_count);
+            @memset(self.buckets, none);
+
+            const nodes = self.nodes.items;
+            var pp: u32 = head;
+            var cp = nodes[pp].next;
+            if (cp == none) return;
+
+            var chash = constrain(hashOf(nodes[cp].key), bucket_count);
+            self.buckets[chash] = pp;
+            var phash = chash;
+            pp = cp;
+            cp = nodes[cp].next;
+            while (cp != none) : (cp = nodes[pp].next) {
+                chash = constrain(hashOf(nodes[cp].key), bucket_count);
+                if (chash == phash) {
+                    pp = cp;
+                } else if (self.buckets[chash] == none) {
+                    self.buckets[chash] = pp;
+                    pp = cp;
+                    phash = chash;
+                } else {
+                    const np = cp;
+                    nodes[pp].next = nodes[np].next;
+                    nodes[np].next = nodes[self.buckets[chash]].next;
+                    nodes[self.buckets[chash]].next = cp;
+                }
+            }
+        }
+
+        /// One element: its key and value.
+        pub const Entry = struct { key: i32, value: V };
+
+        /// Iterates in libc++'s order: the list from the sentinel.
+        pub const Iterator = struct {
+            map: *const Self,
+            at: u32,
+
+            /// Return: the next element, or null at the end.
+            pub fn next(self: *Iterator) ?Entry {
+                if (self.at == none) return null;
+                const i = self.at;
+                self.at = self.map.nodes.items[i].next;
+                const n = self.map.nodes.items[i];
+                return .{ .key = n.key, .value = n.value };
+            }
+        };
+
+        /// Return: an iterator over every element, valid until the next
+        /// insertion.
+        pub fn iterator(self: *const Self) Iterator {
+            return .{ .map = self, .at = self.nodes.items[head].next };
+        }
+    };
+}
+
+// -----------------------------------------------------------------------------
 // Unit Tests
 
 test {
@@ -1286,4 +1659,26 @@ test "std::max and std::min keep the first operand when unordered" {
     try std.testing.expect(std.math.isNan(max(f32, std.math.nan(f32), 1.0)));
     try std.testing.expectEqual(@as(f32, 1.0), max(f32, 1.0, std.math.nan(f32)));
     try std.testing.expectEqual(@as(f32, 2.0), min(f32, 2.0, std.math.nan(f32)));
+}
+
+test "u32 set iterates in libc++'s order" {
+    // Each order and bucket count was printed by a `std::unordered_set<uint32_t>`
+    // compiled with `zig c++` against the libc++ the reference links.
+    const cases = [_]struct { in: []const u32, out: []const u32, bc: usize }{
+        .{ .in = &.{ 5, 1, 3 }, .out = &.{ 3, 1, 5 }, .bc = 5 },
+        .{ .in = &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }, .out = &.{ 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 }, .bc = 11 },
+        .{ .in = &.{ 40, 7, 13, 2, 99, 64, 3 }, .out = &.{ 3, 64, 99, 13, 2, 7, 40 }, .bc = 11 },
+        .{ .in = &.{ 17, 4, 9, 30, 1, 0, 22, 11 }, .out = &.{ 11, 22, 0, 1, 30, 9, 4, 17 }, .bc = 11 },
+    };
+    for (cases) |cs| {
+        var set = try U32Set.init(std.testing.allocator);
+        defer set.deinit();
+        for (cs.in) |v| _ = try set.insert(v);
+        try std.testing.expect(!try set.insert(cs.in[0]));
+        try std.testing.expectEqual(cs.in.len, set.count());
+        try std.testing.expectEqual(cs.bc, set.bucketCount());
+        var it = set.iterator();
+        for (cs.out) |v| try std.testing.expectEqual(v, it.next().?);
+        try std.testing.expectEqual(@as(?u32, null), it.next());
+    }
 }

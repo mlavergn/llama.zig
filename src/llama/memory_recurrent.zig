@@ -477,7 +477,7 @@ pub const MemoryRecurrent = struct {
 
         // Each cell stores a whole sequence's state; a slot is always
         // contiguous, and only equal-length sequences can share a ubatch.
-        impl.assert(ubatch.equalSeqs(), "llama-memory-recurrent.cpp", 507, "ubatch.equal_seqs()");
+        impl.assert(ubatch.equalSeqs(), "llama-memory-recurrent.cpp", 509, "ubatch.equal_seqs()");
 
         var min: i32 = @as(i32, @intCast(size)) - 1;
         var max: i32 = 0;
@@ -731,10 +731,10 @@ pub const MemoryRecurrent = struct {
 
         var check: u32 = 0;
         for (cell_ranges.items) |r| check += r[1] - r[0];
-        impl.assert(cell_count == check, "llama-memory-recurrent.cpp", 808, "cell_count == cell_count_check");
+        impl.assert(cell_count == check, "llama-memory-recurrent.cpp", 810, "cell_count == cell_count_check");
         check = 0;
         for (cell_ranges_data.items) |r| check += r[1] - r[0];
-        impl.assert(cell_count == check, "llama-memory-recurrent.cpp", 814, "cell_count == cell_count_check");
+        impl.assert(cell_count == check, "llama-memory-recurrent.cpp", 816, "cell_count == cell_count_check");
 
         try w.writeValue(cell_count, exc);
         try self.stateWriteMeta(w, cell_ranges.items, seq_id, exc);
@@ -841,11 +841,11 @@ pub const MemoryRecurrent = struct {
             }
 
             // One contiguous block from head, with the right positions.
-            impl.assert(self.head + cell_count <= self.size, "llama-memory-recurrent.cpp", 994, "head + cell_count <= size");
-            impl.assert(self.cells.items[self.head].pos == ubatch.pos[0], "llama-memory-recurrent.cpp", 995, "cells[head].pos == ubatch.pos[0]");
-            impl.assert(self.cells.items[self.head + cell_count - 1].pos == ubatch.pos[cell_count - 1], "llama-memory-recurrent.cpp", 996, "cells[head + cell_count - 1].pos == ubatch.pos[cell_count - 1]");
-            impl.assert(self.cells.items[self.head].hasSeqId(dest_seq_id), "llama-memory-recurrent.cpp", 997, "cells[head].has_seq_id(dest_seq_id)");
-            impl.assert(self.cells.items[self.head + cell_count - 1].hasSeqId(dest_seq_id), "llama-memory-recurrent.cpp", 998, "cells[head + cell_count - 1].has_seq_id(dest_seq_id)");
+            impl.assert(self.head + cell_count <= self.size, "llama-memory-recurrent.cpp", 995, "head + cell_count <= size");
+            impl.assert(self.cells.items[self.head].pos == ubatch.pos[0], "llama-memory-recurrent.cpp", 996, "cells[head].pos == ubatch.pos[0]");
+            impl.assert(self.cells.items[self.head + cell_count - 1].pos == ubatch.pos[cell_count - 1], "llama-memory-recurrent.cpp", 997, "cells[head + cell_count - 1].pos == ubatch.pos[cell_count - 1]");
+            impl.assert(self.cells.items[self.head].hasSeqId(dest_seq_id), "llama-memory-recurrent.cpp", 998, "cells[head].has_seq_id(dest_seq_id)");
+            impl.assert(self.cells.items[self.head + cell_count - 1].hasSeqId(dest_seq_id), "llama-memory-recurrent.cpp", 999, "cells[head + cell_count - 1].has_seq_id(dest_seq_id)");
         } else {
             // The whole cache.
             if (cell_count > self.size) {

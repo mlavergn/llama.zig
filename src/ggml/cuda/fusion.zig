@@ -44,8 +44,9 @@ fn src(t: *const Tensor, i: usize) *Tensor {
     return impl.one(Tensor, t.src[i]);
 }
 
-/// Ports the C++ `ggml_can_fuse_subgraph` overload and the static inline it
-/// calls (ggml-impl.h:724, 755 @c1d0e7a00).
+/// Ports the C++ overload of `ggml_can_fuse_subgraph` (ggml-impl.h:758
+/// @c1d0e7a00) and the static inline `ggml_can_fuse_subgraph` it calls
+/// (ggml-impl.h:724 @c1d0e7a00).
 fn canFuseSubgraph(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, outputs: []const c_int) bool {
     impl.assert(ops.len < 32, "count < 32");
     if (node_idx + @as(c_int, @intCast(ops.len)) > cgraph.n_nodes) return false;

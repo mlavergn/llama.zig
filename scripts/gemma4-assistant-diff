@@ -1,0 +1,42 @@
+#!/bin/bash
+# The Gemma 4 assistant against the C++, over a Gemma 4 target whose KV
+# cache it shares. `scripts/arch-model-diff` cannot reach it: upstream's
+# fixture recipe trips the architecture's own `n_layer_nextn == n_layer_all`
+# assertion, and an assistant context needs a target context the context
+# harness never makes. See the header of harness/gemma4_assistant_diff.zig.
+#
+# Usage: scripts/gemma4-assistant-diff
+#   ARCH_DIFF_PORT / ARCH_DIFF_LIBS as for scripts/arch-model-diff.
+# Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+PORT=${ARCH_DIFF_PORT:-src/llama}
+LIBS=${ARCH_DIFF_LIBS:-zig-out/lib}
+for lib in "$LIBS/libllama-ref.a" "$LIBS/libggml.a"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    "$PORT/c_import.h" >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+zig build-exe -mcpu baseline -femit-bin="$tmp/gemma4_assistant_diff" -Ofast -lc \
+    --dep harness_root -Mroot=harness/gemma4_assistant_diff.zig \
+    --dep llama_c -Mharness_root="$PORT/harness_root.zig" -Mllama_c="$tmp/llama_c.zig" \
+    "$LIBS/libllama-ref.a" "$LIBS/libggml.a" -lc++ \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+rc=0
+for m in gpu cpu; do
+    for variant in "" moe; do
+        ASSISTANT_DIFF_TMP="$tmp" "$tmp/gemma4_assistant_diff" "$m" $variant || rc=1
+    done
+done
+exit $rc

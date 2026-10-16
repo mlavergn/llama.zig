@@ -52,8 +52,8 @@ pub const matrix_row_padding = 512;
 // -----------------------------------------------------------------------------
 // Compute capabilities
 
-/// Ports the `GGML_CUDA_CC_*` constants (common.cuh:51 @c1d0e7a00) this
-/// build's NVIDIA arms compare against.
+/// Ports the `GGML_CUDA_CC_*` constants this build's NVIDIA arms compare
+/// against, from `GGML_CUDA_CC_PASCAL` (common.cuh:50 @c1d0e7a00).
 pub const cc = struct {
     pub const pascal = 600;
     pub const dp4a = 610;
@@ -254,7 +254,7 @@ pub fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 // -----------------------------------------------------------------------------
 // Devices
 
-/// Ports `ggml_cuda_device_info::cuda_device_info` (common.cuh:1141 @c1d0e7a00).
+/// Ports `ggml_cuda_device_info`'s `cuda_device_info` (common.cuh:1141 @c1d0e7a00).
 pub const DeviceInfo = struct {
     /// Compute capability.
     cc: c_int = 0,
@@ -725,7 +725,7 @@ pub const PoolVmm = struct {
     }
 };
 
-/// Ports `ggml_backend_cuda_context::new_pool_for_device`
+/// Ports `ggml_backend_cuda_context`'s `new_pool_for_device`
 /// (ggml-cuda.cu:686 @c1d0e7a00).
 fn newPoolForDevice(device: c_int) *Pool {
     const p = allocator.create(Pool) catch @panic("OOM");
@@ -737,7 +737,7 @@ fn newPoolForDevice(device: c_int) *Pool {
     return p;
 }
 
-/// Ports `ggml_cuda_pool_alloc<T>` (common.cuh:1175 @c1d0e7a00). The C's
+/// Ports `ggml_cuda_pool_alloc` (common.cuh:1175 @c1d0e7a00), for each `T`. The C's
 /// destructor is `deinit`, which the caller `defer`s.
 pub fn PoolAlloc(comptime T: type) type {
     return struct {
@@ -784,7 +784,7 @@ pub fn PoolAlloc(comptime T: type) type {
 // -----------------------------------------------------------------------------
 // CUDA graphs
 
-/// Ports `ggml_cuda_graph::node_properties` (common.cuh:1249 @c1d0e7a00).
+/// Ports `ggml_cuda_graph`'s `node_properties` (common.cuh:1249 @c1d0e7a00).
 pub const NodeProperties = struct {
     node: Tensor,
     node_src_data_ptrs: [c.GGML_MAX_SRC]?*anyopaque,
@@ -813,7 +813,7 @@ pub const Graph = struct {
         self.node_props.deinit(allocator);
     }
 
-    /// Ports `ggml_cuda_graph::is_enabled` (common.cuh:1257 @c1d0e7a00).
+    /// Ports `ggml_cuda_graph`'s `is_enabled` (common.cuh:1257 @c1d0e7a00).
     pub fn isEnabled(self: *const Graph) bool {
         const S = struct {
             var disabled_by_env = false;
@@ -875,7 +875,7 @@ pub const ConcurrentEvent = struct {
         return .{ .start = start, .end = start + @as(i64, @intCast(c.ggml_nbytes(t))) };
     }
 
-    /// Ports `ggml_cuda_concurrent_event::is_valid` (common.cuh:1305 @c1d0e7a00):
+    /// Ports `ggml_cuda_concurrent_event`'s `is_valid` (common.cuh:1305 @c1d0e7a00):
     /// whether the branches write disjoint memory and read only within
     /// their own branch.
     pub fn isValid(self: *const ConcurrentEvent) bool {
@@ -994,7 +994,7 @@ pub const Context = struct {
         return &self.name_buf;
     }
 
-    /// Ports `~ggml_backend_cuda_context` (ggml-cuda.cu:703 @c1d0e7a00).
+    /// Ports the destructor of `ggml_backend_cuda_context` (ggml-cuda.cu:703 @c1d0e7a00).
     pub fn destroy(self: *Context) void {
         lock.waitIdle();
 
@@ -1026,7 +1026,7 @@ pub const Context = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `ggml_backend_cuda_context::cuda_graph` (common.cuh:1434 @c1d0e7a00).
+    /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (common.cuh:1434 @c1d0e7a00).
     pub fn cudaGraph(self: *Context, first_node_ptr: ?*const anyopaque) *Graph {
         const time_now = c.ggml_time_us();
 
@@ -1055,19 +1055,19 @@ pub const Context = struct {
         return gop.value_ptr.*;
     }
 
-    /// Ports `ggml_backend_cuda_context::any_cuda_graph_enabled` (common.cuh:1459 @c1d0e7a00).
+    /// Ports `ggml_backend_cuda_context`'s `any_cuda_graph_enabled` (common.cuh:1459 @c1d0e7a00).
     pub fn anyCudaGraphEnabled(self: *const Context) bool {
         for (self.cuda_graphs.values()) |g| if (g.isEnabled()) return true;
         return false;
     }
 
-    /// Ports `ggml_backend_cuda_context::any_cuda_graph_has_instance` (common.cuh:1469 @c1d0e7a00).
+    /// Ports `ggml_backend_cuda_context`'s `any_cuda_graph_has_instance` (common.cuh:1469 @c1d0e7a00).
     pub fn anyCudaGraphHasInstance(self: *const Context) bool {
         for (self.cuda_graphs.values()) |g| if (g.instance != null) return true;
         return false;
     }
 
-    /// Ports `ggml_backend_cuda_context::stream(int, int)` (common.cuh:1488 @c1d0e7a00).
+    /// Ports `ggml_backend_cuda_context`'s two-argument `stream` (common.cuh:1488 @c1d0e7a00).
     pub fn streamFor(self: *Context, device: c_int, stream_no: c_int) cu.cudaStream_t {
         const s = &self.streams[@intCast(device)][@intCast(stream_no)];
         if (s.* == null) {
@@ -1077,12 +1077,12 @@ pub const Context = struct {
         return s.*;
     }
 
-    /// Ports `ggml_backend_cuda_context::stream()` (common.cuh:1496 @c1d0e7a00).
+    /// Ports `ggml_backend_cuda_context`'s argument-free `stream` (common.cuh:1496 @c1d0e7a00).
     pub fn stream(self: *Context) cu.cudaStream_t {
         return self.streamFor(self.device, self.curr_stream_no);
     }
 
-    /// Ports `ggml_backend_cuda_context::cublas_handle` (common.cuh:1500 @c1d0e7a00).
+    /// Ports `ggml_backend_cuda_context`'s `cublas_handle` (common.cuh:1500 @c1d0e7a00).
     pub fn cublasHandle(self: *Context) cu.cublasHandle_t {
         const d: usize = @intCast(self.device);
         const s: usize = @intCast(self.curr_stream_no);
@@ -1101,14 +1101,14 @@ pub const Context = struct {
         return self.cublas_handles[d][s];
     }
 
-    /// Ports `ggml_backend_cuda_context::pool(int)` (common.cuh:1530 @c1d0e7a00).
+    /// Ports `ggml_backend_cuda_context`'s per-device `pool` (common.cuh:1523 @c1d0e7a00).
     pub fn poolFor(self: *Context, device: c_int) *Pool {
         const p = &self.pools[@intCast(device)][@intCast(self.curr_stream_no)];
         if (p.* == null) p.* = newPoolForDevice(device);
         return p.*.?;
     }
 
-    /// Ports `ggml_backend_cuda_context::pool()` (common.cuh:1531 @c1d0e7a00).
+    /// Ports `ggml_backend_cuda_context`'s argument-free `pool` (common.cuh:1530 @c1d0e7a00).
     pub fn pool(self: *Context) *Pool {
         return self.poolFor(self.device);
     }
@@ -1120,7 +1120,7 @@ pub const Context = struct {
 };
 
 /// Ports `ggml_cuda_lock`, `ggml_cuda_lock_cv` and `ggml_cuda_lock_counter`
-/// (ggml-cuda.cu:699 @c1d0e7a00): destroying a cuBLAS handle while a graph
+/// (ggml-cuda.cu:699, 700, 701 @c1d0e7a00): destroying a cuBLAS handle while a graph
 /// is being captured in another thread can be a CUDA error, so the context
 /// destructor waits until no capture is in progress.
 pub const lock = struct {
@@ -1176,8 +1176,8 @@ pub const MmFusionArgsDevice = extern struct {
 // -----------------------------------------------------------------------------
 // Type traits
 
-/// Ports the `QR*` and `QI*` constants of `ggml-common.h`'s CUDA arm
-/// (ggml-common.h:95 to 172 @c1d0e7a00): values per quantized unit (`qr`) and
+/// Ports the `QR*` and `QI*` constants of `ggml-common.h`'s CUDA arm, from
+/// `QR1_0` (ggml-common.h:97 @c1d0e7a00) to the arm's `#endif`: values per quantized unit (`qr`) and
 /// 32-bit integers per block (`qi`). `ggml_c` is translated with
 /// `GGML_COMMON_DECL_C`, which leaves them out.
 pub const q = struct {

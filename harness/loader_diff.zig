@@ -418,28 +418,24 @@ fn runFullCase(fc: FullCase) void {
             compareTensor("tensor", rt, t, hash);
         }
 
-        inline for (.{ "tok_embd", "output_norm", "output", "output_s", "output_in_s" }) |f| {
-            const rt = ref_model_tensor(r, f);
-            const pt = @field(m.*, f);
-            expectStr("model." ++ f, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
+        // Every model-level tensor, and every member of every layer, the
+        // nested ones by their path: the C++ tables are generated with the
+        // port's structs, so a name the C++ does not know reads "?".
+        {
+            @setEvalBranchQuota(200_000);
+            const minfo = @typeInfo(M.Model).@"struct";
+            inline for (minfo.field_names, minfo.field_types) |f, F| {
+                if (F != ?*c.ggml_tensor) continue;
+                const rt = ref_model_tensor(r, f);
+                const pt = @field(m.*, f);
+                expectStr("model." ++ f, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
+            }
         }
 
         expectInt("n layers", ref_n_layers(r), m.layers.len);
         for (m.layers, 0..) |*layer, il| {
             if (il >= ref_n_layers(r)) break;
-            inline for (@typeInfo(M.Layer).@"struct".field_names) |fname| {
-                if (comptime std.mem.eql(u8, fname, "nextn")) {
-                    inline for (@typeInfo(M.LayerNextn).@"struct".field_names) |gname| {
-                        const rt = ref_layer_tensor(r, @intCast(il), "nextn." ++ gname);
-                        const pt = @field(layer.nextn, gname);
-                        expectStr("layer.nextn." ++ gname, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
-                    }
-                } else {
-                    const rt = ref_layer_tensor(r, @intCast(il), fname);
-                    const pt = @field(layer.*, fname);
-                    expectStr("layer." ++ fname, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
-                }
-            }
+            compareLayer(M.Layer, "", r, @intCast(il), layer);
         }
 
         expectInt("n devices", ref_n_devices(r), m.devices.items.len);
@@ -905,6 +901,22 @@ fn splitSet(dir: []const u8, base: [:0]const u8, name: []const u8, kind: enum { 
 }
 
 // -----------------------------------------------------------------------------
+
+/// One layer's members against the C++'s, recursing into the nested
+/// structs with their path as the prefix.
+fn compareLayer(comptime T: type, comptime prefix: []const u8, r: *const c.llama_model, il: c_int, layer: *const T) void {
+    @setEvalBranchQuota(200_000);
+    const info = @typeInfo(T).@"struct";
+    inline for (info.field_names, info.field_types) |f, F| {
+        if (F == ?*c.ggml_tensor) {
+            const rt = ref_layer_tensor(r, il, prefix ++ f);
+            const pt = @field(layer.*, f);
+            expectStr("layer." ++ prefix ++ f, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
+        } else {
+            compareLayer(F, prefix ++ f ++ ".", r, il, &@field(layer.*, f));
+        }
+    }
+}
 
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());

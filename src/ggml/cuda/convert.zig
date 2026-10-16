@@ -99,7 +99,8 @@ const RowGrid = enum {
     q4,
 };
 
-/// Ports the `dequantize_row_*_cuda` launchers (convert.cu:273 to 376
+/// Ports the `dequantize_row_*_cuda` launchers from `dequantize_row_q2_K_cuda`
+/// (convert.cu:274 @c1d0e7a00) to `dequantize_row_mxfp4_cuda` (convert.cu:372
 /// @c1d0e7a00): one `<<<nb, threads>>>` launch of `dequantize_block_<name>`.
 fn DequantizeRow(comptime name: []const u8, comptime threads: comptime_int, comptime grid: RowGrid, comptime T: type) type {
     return struct {

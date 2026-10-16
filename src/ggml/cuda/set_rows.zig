@@ -138,9 +138,9 @@ fn setRowsCudaLaunch(comptime S: type, comptime I: type, comptime D: type, src0_
     }
 }
 
-/// Ports the per-tensor `set_rows_cuda<src_t, idx_t>` (set-rows.cu:221
-/// @c1d0e7a00) and its two `half` specialisations (set-rows.cu:326, 351
-/// @c1d0e7a00), which accept only an `F16` destination.
+/// Ports the per-tensor `set_rows_cuda` (set-rows.cu:221 @c1d0e7a00), as
+/// `set_rows_cuda<src_t, idx_t>`, and its two `half` specialisations, for
+/// `int32_t` and `int64_t` indices (set-rows.cu:326, 351 @c1d0e7a00), which accept only an `F16` destination.
 fn setRowsCuda(comptime S: type, comptime I: type, ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const src0_d: ?*const anyopaque = src0.data;
     const src1_d: ?*const anyopaque = src1.data;

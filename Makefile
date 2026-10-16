@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff context-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff port ref ref-chat validate xcframework xcframework-check perf perf-cpu
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port ref ref-chat validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -126,7 +126,7 @@ dist:
 # Run every check that needs no model or reference build.
 validate:
 	@printf '\n== formatting ==\n'
-	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig src/ggml/cpu/repack/*.zig src/ggml/cpu/repack/arm/*.zig src/ggml/metal/*.zig src/llama/*.zig src/llama/api/*.zig src/llama/models/*.zig src/llama/sampler/*.zig src/llama/grammar/*.zig src/llama/vocab/*.zig cli/*.zig
+	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig src/ggml/cpu/repack/*.zig src/ggml/cpu/repack/arm/*.zig src/ggml/metal/*.zig src/ggml/cuda/*.zig src/llama/*.zig src/llama/api/*.zig src/llama/models/*.zig src/llama/sampler/*.zig src/llama/grammar/*.zig src/llama/vocab/*.zig cli/*.zig
 	@printf '\n== scaffold ==\n'
 	zig build
 	@printf '\n== unit tests ==\n'
@@ -324,6 +324,26 @@ adapter-diff:
 	zig build reference --release=fast
 	./scripts/adapter-diff $(ARGS)
 
+# One small random model per architecture, written by upstream's own
+# tests/test-llama-archs.cpp, for arch-model-diff. See scripts/gen-arch-fixtures.
+arch-fixtures:
+	zig build reference --release=fast
+	./scripts/gen-arch-fixtures
+
+# Every architecture on its fixture, the port against the C++: context-diff
+# across architectures. Counts the architectures not yet ported rather than
+# failing on them. ARGS=<substring...> narrows it. See scripts/arch-model-diff.
+arch-model-diff:
+	zig build reference --release=fast
+	@[ -d zig-out/arch-fixtures ] || ./scripts/gen-arch-fixtures
+	./scripts/arch-model-diff zig-out/arch-fixtures $(ARGS)
+
+# The Gemma 4 assistant over a Gemma 4 target, which arch-model-diff cannot
+# reach. See scripts/gemma4-assistant-diff.
+gemma4-assistant-diff:
+	zig build reference --release=fast
+	./scripts/gemma4-assistant-diff
+
 # Diff our CLI's output against the C reference, end to end.
 parity-cli: buildcli
 	./scripts/parity-cli $(MODEL) $(PARITY_NPRED)
@@ -354,6 +374,38 @@ parity-port-cpu:
 	cd llama.cpp.zmake && zig build lib --release=fast -Dcpu=$(GATE_CPU)
 	zig build reference --release=fast -Dcpu=$(GATE_CPU)
 	./scripts/parity-port --cpu $(MODEL)
+
+# The CUDA gates (PLAN.md, "Stage 6 -- CUDA"). Linux with nvcc and an NVIDIA
+# GPU only: the Mac has neither, and Metal's gates cannot run on the CUDA
+# machine (Decision 43). Each builds what its script's `Requires:` line names
+# into its own prefix, so the port and upstream's host layer never share an
+# archive; the prefixes are the ones the scripts read. See the header of
+# each script.
+
+cuda-require-linux:
+	@[ "$$(uname -s)" = Linux ] || { echo "the CUDA gates run on the Linux CUDA machine only (PLAN.md, Decision 43)" >&2; exit 2; }
+
+# test-backend-ops on bits, the ported CUDA backend against upstream's.
+cuda-ops-diff: cuda-require-linux
+	zig build reference cuda-ref --release=fast --prefix zig-out/cuda-port
+	./scripts/cuda-ops-diff $(ARGS)
+
+# Every node of a decode, then the fused graph, ported host layer vs upstream's.
+cuda-node-diff: cuda-require-linux
+	zig build reference -Dcuda-port=false --release=fast --prefix zig-out/cuda-upstream
+	zig build reference --release=fast --prefix zig-out/cuda-port
+	./scripts/cuda-node-diff $(MODEL)
+
+# The device, buffer-type and registry vtables: metal-diff for CUDA.
+cuda-backend-diff: cuda-require-linux
+	zig build reference cuda-ref --release=fast --prefix zig-out/cuda-port
+	./scripts/cuda-backend-diff
+
+# parity-cli for the CUDA machine.
+cuda-parity-cli: cuda-require-linux
+	zig build cli --release=fast
+	zig build reference -Dcuda-port=false --release=fast --prefix zig-out/cuda-upstream
+	./scripts/cuda-parity-cli $(MODEL) $(PARITY_NPRED)
 
 #
 # Run

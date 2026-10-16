@@ -19,16 +19,11 @@
 //!
 //! `opt_init` hands every F32 tensor of every layer to the caller's
 //! `param_filter`, walking `llama_layer` as an array of pointers, so the
-//! order of those calls is the order of the C++ struct's members. The
-//! port's `Layer` keeps only the members the ported architectures read, in
-//! its own order; `layer_param_order` below lists them in the C++'s, and a
-//! comptime check fails the build if `Layer` gains a member it does not
-//! list. A member the port lacks is null on every model the port can load,
-//! and the C++ skips a null one before calling the filter.
-//!
-//! The same holds for the model-level tensors: of the fourteen the C++
-//! offers, the port's `Model` has the eight its architectures use, and the
-//! other six are null wherever the port can load a model.
+//! order of those calls is the order of the C++ struct's members, its
+//! nested structs' included. The port's `Layer` is generated from
+//! `llama_layer` in that order (`scripts/gen-layer`), so `setLayerParams`
+//! walks its fields as declared and recurses into the nested ones. The
+//! model-level tensors are offered in the C++'s order too.
 
 const std = @import("std");
 const impl = @import("impl.zig");
@@ -73,40 +68,16 @@ fn setParam(tensor: ?*Tensor, param_filter: c.llama_opt_param_filter, userdata: 
     c.ggml_set_param(t);
 }
 
-/// The port's `Layer` members in the order of `llama_layer`'s
-/// (llama-model.h:249 @c1d0e7a00), `nextn` standing for the nested
-/// `llama_layer_nextn`, walked in its own member order.
-const layer_param_order = [_][]const u8{
-    "attn_norm",          "attn_norm_b",      "attn_q_norm",         "attn_k_norm",       "attn_post_norm",
-    "ssm_norm",           "wq",               "wk",                  "wv",                "wo",
-    "wqkv",               "wq_b",             "wk_b",                "wv_b",              "wqkv_b",
-    "wo_b",               "wqkv_gate",        "ffn_gate",            "ffn_down",          "ffn_up",
-    "ffn_gate_inp",       "ffn_gate_exps",    "ffn_down_exps",       "ffn_up_exps",       "ffn_gate_exps_s",
-    "ffn_down_exps_s",    "ffn_up_exps_s",    "ffn_gate_shexp",      "ffn_down_shexp",    "ffn_up_shexp",
-    "ssm_in",             "ssm_dt",           "ssm_out",             "ssm_conv1d",        "ssm_a",
-    "ssm_alpha",          "rope_long",        "rope_short",          "rope_freqs",        "wq_s",
-    "wk_s",               "wv_s",             "wo_s",                "wqkv_s",            "wqkv_gate_s",
-    "ffn_gate_s",         "ffn_up_s",         "ffn_down_s",          "ffn_gate_shexp_s",  "ffn_up_shexp_s",
-    "ffn_down_shexp_s",   "ssm_in_s",         "ssm_out_s",           "ssm_alpha_s",       "ssm_beta_s",
-    "wq_in_s",            "wk_in_s",          "wv_in_s",             "wo_in_s",           "wqkv_in_s",
-    "wqkv_gate_in_s",     "ffn_gate_in_s",    "ffn_up_in_s",         "ffn_down_in_s",     "ffn_gate_exps_in_s",
-    "ffn_down_exps_in_s", "ffn_up_exps_in_s", "ffn_gate_shexp_in_s", "ffn_up_shexp_in_s", "ffn_down_shexp_in_s",
-    "ssm_in_in_s",        "ssm_out_in_s",     "ssm_alpha_in_s",      "ssm_beta_in_s",     "ssm_beta",
-    "nextn",
-};
-
-comptime {
-    @setEvalBranchQuota(100_000);
-    // Every member of `Layer` is listed exactly once, or a tensor the C++
-    // offers to the filter would be skipped here.
-    const names = @typeInfo(model_mod.Layer).@"struct".field_names;
-    if (names.len != layer_param_order.len) @compileError("layer_param_order does not cover Layer");
-    for (names) |n| {
-        var found = false;
-        for (layer_param_order) |o| {
-            if (std.mem.eql(u8, n, o)) found = true;
+/// The C++'s walk of one `llama_layer` as an array of tensor pointers:
+/// every member in declaration order, a nested struct's members in theirs.
+fn setLayerParams(comptime T: type, layer: *T, param_filter: c.llama_opt_param_filter, userdata: ?*anyopaque) void {
+    const info = @typeInfo(T).@"struct";
+    inline for (info.field_names, info.field_types) |name, F| {
+        if (F == ?*Tensor) {
+            setParam(@field(layer, name), param_filter, userdata);
+        } else {
+            setLayerParams(F, &@field(layer, name), param_filter, userdata);
         }
-        if (!found) @compileError("Layer." ++ n ++ " is missing from layer_param_order");
     }
 }
 
@@ -138,29 +109,23 @@ pub fn optInit(self: *Context, model: *Model, lopt_params: c.struct_llama_opt_pa
     const param_filter = lopt_params.param_filter;
     const param_filter_ud = lopt_params.param_filter_ud;
 
-    // The C++ offers type_embd, pos_embd, tok_norm, tok_norm_b,
-    // output_norm_b, output_b and output_norm_enc too, in this order around
-    // the ones below; no ported architecture creates them.
     //llama_set_param(model->tok_embd,        param_filter, param_filter_ud); // FIXME
+    setParam(model.type_embd, param_filter, param_filter_ud);
+    setParam(model.pos_embd, param_filter, param_filter_ud);
+    setParam(model.tok_norm, param_filter, param_filter_ud);
+    setParam(model.tok_norm_b, param_filter, param_filter_ud);
     setParam(model.output_norm, param_filter, param_filter_ud);
+    setParam(model.output_norm_b, param_filter, param_filter_ud);
     setParam(model.output, param_filter, param_filter_ud);
+    setParam(model.output_b, param_filter, param_filter_ud);
+    setParam(model.output_norm_enc, param_filter, param_filter_ud);
     setParam(model.cls, param_filter, param_filter_ud);
     setParam(model.cls_b, param_filter, param_filter_ud);
     setParam(model.cls_out, param_filter, param_filter_ud);
     setParam(model.cls_out_b, param_filter, param_filter_ud);
     setParam(model.cls_norm, param_filter, param_filter_ud);
 
-    for (model.layers) |*layer| {
-        inline for (layer_param_order) |name| {
-            if (comptime std.mem.eql(u8, name, "nextn")) {
-                inline for (@typeInfo(model_mod.LayerNextn).@"struct".field_names) |n| {
-                    setParam(@field(layer.nextn, n), param_filter, param_filter_ud);
-                }
-            } else {
-                setParam(@field(layer, name), param_filter, param_filter_ud);
-            }
-        }
-    }
+    for (model.layers) |*layer| setLayerParams(model_mod.Layer, layer, param_filter, param_filter_ud);
 }
 
 /// Ports `opt_epoch_iter` (llama-context.cpp:3348 @c1d0e7a00), a method of
@@ -377,10 +342,4 @@ fn oom() noreturn {
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-test "layer_param_order names every Layer member once" {
-    for (layer_param_order, 0..) |a, i| {
-        for (layer_param_order[i + 1 ..]) |b| try std.testing.expect(!std.mem.eql(u8, a, b));
-    }
 }

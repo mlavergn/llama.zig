@@ -43,7 +43,7 @@ test {
     _ = @import("mmap.zig");
     _ = @import("loader.zig");
     _ = @import("model.zig");
-    _ = @import("models/qwen35.zig");
+    _ = @import("models/module.zig");
     _ = @import("chat.zig");
     _ = @import("batch.zig");
     _ = @import("io.zig");
@@ -52,10 +52,11 @@ test {
     _ = @import("adapter.zig");
     _ = @import("kv_cells.zig");
     _ = @import("kv_cache.zig");
+    _ = @import("kv_cache_dsv4.zig");
     _ = @import("memory_recurrent.zig");
     _ = @import("memory_hybrid.zig");
+    _ = @import("memory_hybrid_iswa.zig");
     _ = @import("graph.zig");
-    _ = @import("models/delta_net.zig");
     _ = @import("context.zig");
     _ = @import("context_state.zig");
     _ = @import("meta_split.zig");

@@ -367,7 +367,7 @@ pub const Saver = struct {
         if (c.gguf_find_tensor(self.gguf_ctx, &t.name) >= 0) {
             const name = std.mem.sliceTo(&t.name, 0);
             impl.assert(std.mem.eql(u8, name, "rope_freqs.weight") or std.mem.eql(u8, name, "rope_factors_long.weight") or
-                std.mem.eql(u8, name, "rope_factors_short.weight"), "llama-model-saver.cpp", 142, "tensor_name == \"rope_freqs.weight\" || tensor_name == \"rope_factors_long.weight\" || tensor_name == \"rope_factors_short.weight\"");
+                std.mem.eql(u8, name, "rope_factors_short.weight"), "llama-model-saver.cpp", 144, "tensor_name == \"rope_freqs.weight\" || tensor_name == \"rope_factors_long.weight\" || tensor_name == \"rope_factors_short.weight\"");
             return;
         }
         c.gguf_add_tensor(self.gguf_ctx, t);

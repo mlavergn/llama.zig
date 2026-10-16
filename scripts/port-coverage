@@ -119,7 +119,7 @@ report_unit() {
         # `config` module the build graph supplies; a bare build-obj has to
         # stand one in. Every flag build.zig defines has to appear here, or the
         # compile fails and this script reports nothing at all.
-        printf 'pub const probe_ported = false;\npub const probe_cpu = false;\npub const use_metal = true;\n' > "$d/config.zig"
+        printf 'pub const probe_ported = false;\npub const probe_cpu = false;\npub const use_metal = true;\npub const use_cuda = false;\npub const cuda_port = false;\npub const cuda_arch = "";\n' > "$d/config.zig"
         if ! zig build-obj -mcpu baseline -femit-bin="$d/$base.o" "${INCLUDES[@]}" -lc \
                 --dep config --dep ggml_c --dep llama_c -Mroot="$f" -Mconfig="$d/config.zig" \
                 -Mggml_c="$tmp/ggml_c.zig" -Mllama_c="$tmp/llama_c.zig" 2>"$d/$base.log"; then

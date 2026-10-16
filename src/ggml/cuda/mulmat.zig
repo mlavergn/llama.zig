@@ -33,7 +33,7 @@ fn i32Of(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `batched_mul_mat_traits<T>` (ggml-cuda.cu:1365 @c1d0e7a00).
+/// Ports `batched_mul_mat_traits` (ggml-cuda.cu:1365 @c1d0e7a00), for each `T`.
 const Traits = struct {
     cuda_type_size: usize,
     compute_type: cu.cublasComputeType_t,

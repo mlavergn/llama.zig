@@ -16,6 +16,12 @@
 # CPU kernels are otherwise never reached by inference. `--gpu` runs it on
 # Metal instead, which checks the ported host code around the GPU kernels.
 #
+# Each mode runs two passes: per node, then **fused** -- no callback, the
+# graph as the binary runs it, full logits for the prompt and `STEPS`
+# (default 32) greedy steps. The per-node pass splits the graph at every
+# node, so it can never see a backend's fusion; the fused pass names the
+# step rather than the op.
+#
 # Usage: scripts/node-diff [--gpu] <model.gguf> [prompt]
 #   Requires: make -C llama.cpp.zmake lib --release=fast, zig build reference --release=fast
 set -u
@@ -73,8 +79,30 @@ for nt in 1 4; do
     fi
 done
 
+# Fused: no per-node callback, so the graph runs as the real binary runs it.
+# The pass above answers the scheduler's `ask` with true, which splits the
+# graph at every node -- so Metal's fusion (`ggml_metal_op` folding a
+# RMS_NORM + MUL + ADD, a MUL_MAT + ADD, ...) and its concurrent encoding
+# never run on either side, and a broken fusion path passes every node.
+# Measured on CUDA (NOTES.md, "Stage 6"). Full logits, bit for bit, for the
+# prompt and STEPS greedy steps.
+STEPS=${STEPS:-32}
+for nt in 1 4; do
+    "$tmp/ref"  "$MODEL" "$PROMPT" "$nt" "$MODE" fused "$STEPS" > "$tmp/ref.txt"  2>/dev/null || { echo "FAIL: fused reference run aborted (threads=$nt)"; exit 1; }
+    "$tmp/port" "$MODEL" "$PROMPT" "$nt" "$MODE" fused "$STEPS" > "$tmp/port.txt" 2>/dev/null || { echo "FAIL: fused ported run aborted (threads=$nt)"; exit 1; }
+    steps=$(grep -c '^step' "$tmp/ref.txt")
+    [ "$steps" -eq $((STEPS + 1)) ] || { echo "FAIL: fused reference produced $steps steps"; exit 1; }
+    if diff -q "$tmp/ref.txt" "$tmp/port.txt" > /dev/null; then
+        printf '  %-4s fused threads=%d  %s decodes, logits identical\n' "$MODE" "$nt" "$steps"
+    else
+        printf '  %-4s fused threads=%d  DIFFERS; first divergent decodes:\n' "$MODE" "$nt"
+        diff "$tmp/ref.txt" "$tmp/port.txt" | grep '^[<>]' | head -4
+        fail=1
+    fi
+done
+
 if [ "$fail" -eq 0 ]; then
-    echo "PASS: every node identical, ported vs reference"
+    echo "PASS: every node and every fused decode identical, ported vs reference"
     exit 0
 fi
 echo "FAIL: node outputs differ between ported and reference builds"

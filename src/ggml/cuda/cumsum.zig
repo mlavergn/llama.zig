@@ -8,7 +8,7 @@
 //!
 //! # CUB
 //!
-//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:111). Long
+//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:111 @c1d0e7a00). Long
 //! contiguous rows go to `cub::DeviceScan::InclusiveSum`, whose host-side
 //! dispatch is CUB's header templates; `cub_shim.cu` wraps that one call
 //! behind a C ABI (PLAN.md, Decision 47). Only `float` is instantiated:

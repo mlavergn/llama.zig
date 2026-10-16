@@ -167,97 +167,12 @@ const char * ref_hparams_field(size_t i, size_t * offset, size_t * size) {
     return ref_fields[i].name;
 }
 
-// The layer members the port's `Layer` mirrors, by name. A name here that
-// `llama_layer` lacks fails to compile, so the list cannot name a member
-// that does not exist.
+// Every `llama_layer` member, by its path, generated with the port's
+// `Layer` (scripts/gen-layer). A name `llama_layer` lacks fails to compile.
 struct ref_layer_field { const char * name; size_t offset; };
 #define F(m) { #m, offsetof(llama_layer, m) },
 static const ref_layer_field ref_layer_fields[] = {
-    F(attn_norm)
-    F(attn_norm_b)
-    F(attn_q_norm)
-    F(attn_k_norm)
-    F(attn_post_norm)
-    F(ssm_norm)
-    F(wq)
-    F(wk)
-    F(wv)
-    F(wo)
-    F(wqkv)
-    F(wqkv_gate)
-    F(wq_b)
-    F(wk_b)
-    F(wv_b)
-    F(wo_b)
-    F(wqkv_b)
-    F(ffn_gate)
-    F(ffn_down)
-    F(ffn_up)
-    F(ffn_gate_inp)
-    F(ffn_gate_exps)
-    F(ffn_down_exps)
-    F(ffn_up_exps)
-    F(ffn_gate_shexp)
-    F(ffn_down_shexp)
-    F(ffn_up_shexp)
-    F(ssm_in)
-    F(ssm_dt)
-    F(ssm_out)
-    F(ssm_conv1d)
-    F(ssm_a)
-    F(ssm_alpha)
-    F(ssm_beta)
-    F(rope_long)
-    F(rope_short)
-    F(rope_freqs)
-    F(wq_s)
-    F(wk_s)
-    F(wv_s)
-    F(wo_s)
-    F(wqkv_s)
-    F(wqkv_gate_s)
-    F(ffn_gate_s)
-    F(ffn_up_s)
-    F(ffn_down_s)
-    F(ffn_gate_shexp_s)
-    F(ffn_up_shexp_s)
-    F(ffn_down_shexp_s)
-    F(ffn_gate_exps_s)
-    F(ffn_down_exps_s)
-    F(ffn_up_exps_s)
-    F(ssm_in_s)
-    F(ssm_out_s)
-    F(ssm_alpha_s)
-    F(ssm_beta_s)
-    F(wq_in_s)
-    F(wk_in_s)
-    F(wv_in_s)
-    F(wo_in_s)
-    F(wqkv_in_s)
-    F(wqkv_gate_in_s)
-    F(ffn_gate_in_s)
-    F(ffn_up_in_s)
-    F(ffn_down_in_s)
-    F(ffn_gate_exps_in_s)
-    F(ffn_down_exps_in_s)
-    F(ffn_up_exps_in_s)
-    F(ffn_gate_shexp_in_s)
-    F(ffn_up_shexp_in_s)
-    F(ffn_down_shexp_in_s)
-    F(ssm_in_in_s)
-    F(ssm_out_in_s)
-    F(ssm_alpha_in_s)
-    F(ssm_beta_in_s)
-    F(nextn.eh_proj)
-    F(nextn.eh_proj_s)
-    F(nextn.eh_proj_in_s)
-    F(nextn.embed_tokens)
-    F(nextn.enorm)
-    F(nextn.hnorm)
-    F(nextn.shared_head_head)
-    F(nextn.shared_head_head_s)
-    F(nextn.shared_head_head_in_s)
-    F(nextn.shared_head_norm)
+#include "layer_fields.inc"
 };
 #undef F
 
@@ -274,14 +189,11 @@ const char * ref_layer_tensor(const llama_model * model, int il, const char * fi
 }
 
 const char * ref_model_tensor(const llama_model * model, const char * field) {
-    const ggml_tensor * t = nullptr;
-    if      (strcmp(field, "tok_embd")    == 0) t = model->tok_embd;
-    else if (strcmp(field, "output_norm") == 0) t = model->output_norm;
-    else if (strcmp(field, "output")      == 0) t = model->output;
-    else if (strcmp(field, "output_s")    == 0) t = model->output_s;
-    else if (strcmp(field, "output_in_s") == 0) t = model->output_in_s;
-    else return "?";
-    return t ? t->name : nullptr;
+    // Every `llama_model` tensor, generated with the port's `Model`.
+#define M(m) if (strcmp(field, #m) == 0) return model->m ? model->m->name : nullptr;
+#include "model_fields.inc"
+#undef M
+    return "?";
 }
 
 size_t ref_n_layers(const llama_model * model) {

@@ -4484,3 +4484,308 @@ the shim's.
   structs are covered indirectly: every launch's first call checks each
   argument's size against `cuKernelGetParamInfo`, and every op gate passes
   on bits. Field offsets inside a struct are not checked separately.
+
+## Mac pickup: the Mac gates after Stage 6
+
+The CUDA work was done on the GB10 machine, which cannot run a Metal gate
+and, by choice, ran no git command. `PLAN.md`'s "Mac pickup" listed what
+only the Mac could finish. Everything below ran on the Mac (Apple M5 Max).
+
+### What the gates say
+
+| Gate | Result |
+|---|---|
+| `make validate` | green after the two fixes below; `zig build test` 459/461 (2 skipped) |
+| `make node-diff ARGS=--gpu` | 2,750 nodes identical at 1 and 4 threads, **and** the new fused pass: 33 decodes' full logits identical at 1 and 4 threads |
+| `make metal-diff` | 65 vtable answers identical |
+| `make sched-diff` | 16 assignments identical |
+| `make graph-diff` | 131 nodes identical |
+| `make parity-cli` | 6/6 prompts identical |
+| `make backend-ops` | 21,093 op configurations, 2/2 backends |
+
+`harness/node_dump.c`'s four-argument mode gives the same 2,750 nodes it
+always has, so the per-node pass is unchanged by the `fused` mode beside it.
+
+### Two gates the CUDA machine could not have run, both broken
+
+- **`scripts/port-coverage` compiled nothing.** A bare `zig build-obj`
+  needs a stand-in for the `config` module the build graph supplies, and the
+  script's comment says every option `build.zig` defines has to appear in
+  it. The CUDA build added `use_cuda`, `cuda_port` and `cuda_arch`;
+  `src/ggml/backend_reg.zig` and `src/ggml/module.zig` read two of them, so
+  `ported.zig` stopped compiling and `make validate` stopped there. The
+  stand-in now defines all three, off.
+- **`scripts/port-links` had never resolved a CUDA citation.** It collects
+  reference files by extension and knew `.c`, `.h`, `.cpp` and `.hpp`, so
+  every one of the 589 citations of a `.cu` or `.cuh` read "no such file
+  under llama.cpp (or ambiguous)". The CUDA machine checked its 553
+  citations with a script over the working tree, which is how they passed
+  there. With `.cu` and `.cuh` added, 34 real problems were left:
+  - **20 C++ member names the checker cannot parse**: it takes plain
+    identifiers in backticks, so `ggml_backend_cuda_context::stream(int,
+    int)`, `ggml_cuda_pool_alloc<T>` and `~ggml_backend_cuda_context` named
+    no symbol and were never checked. Rewritten the way libllama's
+    citations already were, ``ggml_backend_cuda_context`'s `stream` ``.
+  - **Seven line numbers pointed at the wrong line**, now right: the
+    `bin_bcast_cuda` functor (cited at a `}`, it is at 389), `pool(int)`
+    (cited at the body of `pool()`), the C++ `ggml_can_fuse_subgraph`
+    overload (cited at a `return` in another function), the `ggml_cuda_lock`
+    trio (three symbols, one number), `MMQ_DP4A_TXS_*` (cited under the
+    function name), `GGML_CUDA_CC_*`, and a citation in `graph.zig` that
+    had been written twice with two numbers.
+  - **Three ranges** (`convert.cu:273 to 376`, `ggml-common.h:95 to 172`)
+    that the checker reads as malformed, and **three citations with no
+    commit**, one in `cli/session.zig`.
+
+  4,381 citations in 249 files pass. Negative-tested: drifting one CUDA
+  citation by two lines fails it.
+
+### Metal's fusion had never been compared, and now is
+
+`node-diff`'s per-node pass answers the scheduler's `ask` with true, which
+splits the graph at every node, so neither side ever fused. The CUDA work
+added a `fused <steps>` mode to `harness/node_dump.c` and ran it from
+`cuda-node-diff`; `scripts/node-diff` now runs it after the per-node pass
+on both devices. Measured on Metal: swapping the two fused-operand buffer
+bindings of the norm encoder (`ops.zig`, slots 2 and 3, which only a fused
+`RMS_NORM + MUL` reads) leaves **all 2,750 per-node comparisons
+identical**, and the fused pass differs from the prompt's logits on. Same
+separation as on CUDA. Reverted by reverse replacement; the gate passes on
+the reverted tree.
+
+One thing this run did not explain: the `libggml.a` built by the first
+`make node-diff` hashed differently from every later build of the same
+tree, while three later builds, one from a `touch`, agree with each other.
+Nothing under `src/ggml/` was edited between the first build and the
+later ones except the injection and its exact revert.
+
+### `zig build test` passes here
+
+On the GB10 it fails through the runner's `--listen=-` mode, and only for
+tests that make ggml log to stderr. Here the same runner prints those
+tests' stderr under a `failed command:` banner -- which reads like a
+failure -- and still reports the step green, 426 pass and 2 skip, with
+`Build Summary: 57/57 steps succeeded`. Shared code is not what differs.
+
+### What else changed
+
+- `make validate` formats `src/ggml/cuda/*.zig`, the one directory of Zig
+  its list missed.
+- `make cuda-ops-diff`, `cuda-node-diff`, `cuda-backend-diff` and
+  `cuda-parity-cli` build what each script's `Requires:` line names and
+  run it; on anything but Linux they refuse.
+- No shared script gained a Linux branch: the CUDA work wrote separate
+  `cuda-*` scripts and left the Mac's alone, so the "run each changed
+  script once on the Mac" item had nothing in it.
+
+## The other architectures (Decision 36's first follow-on)
+
+Qwen3.5 was the only architecture with a graph builder. Upstream has 145
+model classes in `llama_model_mapping` (`clip` and `gptj` have no usable
+implementation, upstream says so, and are left out); this milestone ports
+the rest.
+
+### The gate: upstream's own fixtures, `context-diff` across architectures
+
+There are no real models of 140 architectures on this machine, and there
+did not need to be. `llama.cpp/tests/test-llama-archs.cpp` builds a small
+random model of every architecture from one recipe (`get_gguf_ctx`: n_embd
+256, two layers, a 128-token `no_vocab` vocabulary, every hyperparameter
+key any architecture reads), and its `-o <dir>` mode writes each as a GGUF.
+`scripts/gen-arch-fixtures` compiles that file **unmodified** against
+`libllama-ref.a`, with `harness/arch_fixtures_shim.cpp` standing in for the
+six `common` functions it calls. So a fixture is upstream's definition of a
+model of that architecture: a port that reads a key or a tensor the C++
+does not write fails to load, rather than passing on a fixture written to
+suit it.
+
+`scripts/arch-model-diff` runs each fixture through
+`harness/context_diff.zig` -- the harness behind `make context-diff`,
+unchanged in what it compares: everything logged, every graph node (op,
+shape, strides, `op_params`, sources, data hash), every output row's bits,
+the state API -- on the GPU and the CPU, 22 cases each. `context-diff` is
+Qwen3.5 in depth; this is every architecture in breadth.
+
+What it took to make the fixture set complete:
+
+- **`-o` skips 44 architectures.** `llama_model_saver` cannot rebuild their
+  metadata from a loaded model, or `arch_supported` marks them FIXME, or the
+  loops skip them. `harness/arch_fixtures_extra.cpp` includes
+  `test-llama-archs.cpp` textually with `main` renamed, so its static
+  `get_gguf_ctx` is the recipe here too, builds the model through the C++ on
+  the CPU, and writes the metadata as built plus each tensor once by name --
+  the saver's `add_tensor` rule. One process per architecture: the C++
+  asserts on some, and an abort ends the process.
+- **The BERT family's "TODO vocab" is one missing key.** Their
+  `load_arch_tensors` sizes the token-type embedding from
+  `tokenizer.ggml.token_type_count`, which `llama_vocab::impl::load` reads
+  before its `no_vocab` return; no vocabulary is needed. Found by the worker
+  porting them.
+- **RWKV needs head size 64 on Metal.** The WKV kernels assert `C / H == 64`
+  and the recipe gives 128, so every GPU case aborted in ggml before RWKV's
+  code ran. An `hs64` variant sets it; RWKV6-Qwen2 also needs
+  `token_shift_count` 1 (the C++ asserts `n_embd == n_embd_r()` otherwise)
+  and must not carry the optional `time_mix_first`, which sends upstream
+  down a path that reads `time_mix_ln` it never loads and segfaults.
+  RWKV-7 and ARWKV-7 read four LoRA ranks the recipe never writes -- the
+  whole reason the C++ could not build them; `hs64nogate` is ARWKV-7's
+  gateless form.
+
+- **Granite-Switch, eagle3 and DFlash need more than keys.** Their loaders
+  want adapter token maps, target-layer lists and, through
+  `get_tensor_meta`, tensors the user-data path never shows them.
+  `harness/arch_fixtures_draft.cpp` (from the worker that ported them) adds
+  exactly those, writes the file, and reloads and decodes it through the
+  C++ before it counts: eight fixtures, among them DFlash's iSWA, DSpark
+  and DeepSeek-V4 forms.
+
+159 fixtures. Two architectures have none: deepseek2-ocr, which the C++
+cannot build from the recipe, and the Gemma 4 assistant, which needs a
+target model's context and is gated by `make gemma4-assistant-diff`
+instead -- a target and an assistant built from metadata alone, dense and
+MoE, on both devices.
+
+### What the gates say
+
+| Gate | Result |
+|---|---|
+| `make arch-model-diff` | **157 / 159 fixtures pass**, 0 fail, 0 unported; the other 2 are `REF-ABORT` -- PLM (upstream's bug) and RWKV6-Qwen2's unmodified recipe (the C++ asserts; its `hs64` variant passes 22/22). Cases where the C++ and the port abort on the same assertion: 66, counting each device, across 13 passing fixtures; one documented upstream nondeterminism (T5, q8_0 cache, Metal) |
+| `make gemma4-assistant-diff` | dense and MoE targets, GPU and CPU: identical |
+| `make validate` | green: unit tests 459/461 (2 skipped) and 300/300; 5,483 citations in 402 files; `loader-diff` 253,154 checks; `api-diff` 85.8M |
+| `make context-diff` | 2,417,100 checks, 0 failures (Qwen3.5, every configuration) |
+| `make node-diff`, `ARGS=--gpu` | every node and every fused decode identical, CPU and Metal |
+| `make parity-cli` | 6/6 |
+| `make sampler-diff` | 40,289 records identical |
+| `make adapter-diff` | 278,212 checks, 0 failures |
+| `scripts/quant-diff` | 120,329,357 checks, 0 failures |
+| `scripts/opt-llama-diff` | 50,856 transcript lines and 6 abort cases identical |
+
+### What the gate learned about itself
+
+- **A crash is split case by case.** When a model configuration crashes,
+  each case runs alone, and a crashing case runs again with each side alone
+  (`CONTEXT_DIFF_SIDE`). The C++ and the port aborting on the same assertion
+  is a match (`+1abort`); a C++ segfault, with no assertion to compare, is
+  listed as `+1refcrash` and not counted a match -- the first version
+  compared two empty strings and called them equal. A port-only abort fails;
+  negative-tested. A fixture every case of which the C++ refuses is
+  `REF-ABORT` -- PLM at v0.3.0, which upstream's own test skips as "TODO
+  tensor shapes".
+- **The port-only side must not run the C++.** The harness's warm-up
+  context went through the C++ even for `CONTEXT_DIFF_SIDE=port`, so a
+  fixture the C++ aborts on would have read as the port aborting.
+- **The draft models were compared not at all, by that fix.** eagle3 and
+  DFlash have encoders too, which read the target model's features as
+  embeddings: given the prompt's tokens, both sides segfaulted, and the gate
+  read that as `+refcrash` and PASS while real injections went uncaught.
+  Found by the worker porting them, who drove them as
+  `common/speculative.cpp` does -- an embedding batch of features first,
+  eagle3's g-embeddings beside its tokens, DFlash's K/V injection -- and the
+  harness now does the same.
+- **An encoder-decoder was compared not at all.** The harness drove
+  `llama_decode` only; for T5 the decoder asserts "llama_encode must be
+  called first" on both sides, so T5 "passed" on loading alone -- a decoder
+  ADD turned SUB passed. Each round now encodes first for a model with both
+  halves, as upstream's test does.
+- **Two cases are the C++'s preconditions for a model without memory**
+  (encoders, embedding and diffusion models decode by encoding):
+  `n_ubatch 7` and `n_outputs_max 5`. Skipped for those, and counted.
+- **One case is upstream's nondeterminism.** T5 with a q8_0 KV cache on
+  Metal: the quantized V transpose falls back to the CPU, and the split it
+  adds lets the host `pos_bucket` input be overwritten before it reaches the
+  GPU -- the decoder's GET_ROWS on `attn_rel_b` reads values around ±2.1e9,
+  different in every process. Shown to be upstream's by running pure
+  upstream (llama.cpp.zmake) alone with a probe; the logits agree because
+  the cells read are masked. Listed in the script's `KNOWN_NONDET` and
+  counted as `+1nondet`.
+
+### How the work was done
+
+Eighteen workers, in three waves, each in a private copy of `src/llama` gated
+with `ARCH_DIFF_PORT`/`ARCH_DIFF_LIBS`, so a half-written file never broke
+anyone's build -- the failure the last parallel session recorded. Each
+copied a snapshot; the merge copied new files, merged the registry, and
+applied shared-file changes as diffs against that snapshot. Every
+architecture had a fault injected and caught, or a recorded reason the
+injection was inert.
+
+Two merge faults, both found by checking rather than trusting:
+
+- **Three architectures were ported, gated, and silently left out of the
+  registry.** The merge recognised one-line arms only, and three were
+  multi-line `Entry` literals. Every worker's arms are now checked against
+  the tree's.
+- **Three workers wrote Llama 4's attention-temperature input** and two the
+  same libc++ `unordered_set`. One of each was kept: the temperature input
+  without the fusion one copy named, since no fixture reaches a non-zero
+  logarithm and the project names a fusion only when something can say it
+  is wrong; the set measured against real libc++.
+
+### Assertion lines
+
+A multi-line `GGML_ASSERT` reports the line of its closing parenthesis --
+measured with `zig c++`, through a nested macro too. A checker over every
+`impl.assert`, `impl.abort` and `ggml_abort` in `src/llama` found 8
+multi-line assertions cited at their first or a middle line, and, matching
+each assertion's condition text to the nearest upstream one, **44 cited a
+line or two off** -- most in code ported long before this milestone
+(`kv_cache.zig`, `memory_recurrent.zig`, `context.zig`, the vocabulary). The
+reference's own abort at `llama-context.cpp:2189` confirmed one: the port
+said 2190. These lines appear only in abort messages, and no gate compared
+those death paths. All fixed.
+
+### Two shared structures that silently knew only Qwen3.5
+
+Generating `Layer` with all of `llama_layer`'s members broke two places
+that had listed the old 75 by hand, and neither was reached by the fixture
+gate:
+
+- **Training offered the wrong tensors.** `context_opt.zig` walked a
+  hand-ordered list of `Layer`'s members to hand them to the parameter
+  filter in the C++'s order; a comptime check refused the build once
+  `Layer` grew, which is what it was for. It now walks `Layer`'s fields as
+  declared -- generated in `llama_layer`'s order -- recursing into the
+  nested structs, as the C++ walks the struct as an array of pointers. The
+  model-level half offered eight of the C++'s fourteen tensors, on the
+  grounds that no ported architecture created the other six; GPT-2's
+  position embeddings and BLOOM's token norm now do.
+- **`loader-diff` compared 75 members of each layer.** Its C++ side read
+  them through a hand-written `offsetof` table. `scripts/gen-layer` now
+  writes `harness/layer_fields.inc` and `harness/model_fields.inc` beside
+  the Zig, and the harness walks every member generically: 253,154 checks
+  where there were 13,719, and no architecture left loading vocab-only.
+  Negative-tested by putting a Qwen3.5 tensor in the wrong field.
+
+### What no fixture reaches
+
+Ported as the C++ is, ungated here, from the workers' reports:
+
+- **MTP / NextN heads**, everywhere: the recipe sets no
+  `nextn_predict_layers`, and setting it makes the C++ refuse the two-layer
+  fixtures. That is glm4-moe, hy-v3, bailingmoe2/3, deepseek2/32/4, glm-dsa,
+  mimo2, cohere2moe, step35, qwen35moe, qwen3next and nemotron-h-moe's
+  `graph_mtp`, and their MTP-context arms of `create_memory`.
+- **Deepstack** (qwen3vl, qwen3vlmoe, granite, granite-swa): the recipe's
+  `n_deepstack_layers` is 0.
+- **Llama 4's attention temperature** (llama4, mistral3, deepseek2): every
+  fixture position gives a logarithm of 0, so its arithmetic -- and whether
+  clang fuses it -- is untested.
+- **Gemma 4's non-SWA layers and KV reuse on its fixture**: the recipe's
+  scalar pattern 5 makes every layer SWA. The assistant harness's target
+  covers both.
+- **DeepSeek 4's unfused hyper-connection paths**: every configuration
+  resolves the fused ops, so an injection there passed, inert.
+- **Dense fixtures of hybrid MoE architectures**: jamba's, granite-hybrid's
+  and nemotron-h's MoE branches.
+- Smaller arms each worker listed: qwen3next's legacy `ssm_in`, the
+  Kimi models' `wkv_b` fallback, WavTokenizer's posnet attention, smollm3's
+  no-RoPE layer, deci's attention-free layers.
+
+### Upstream's own bugs, reproduced and matched
+
+The C++ and the port abort identically on each: PLM's flattened `v_states`
+(every case); Chameleon's image-logit write into an empty output; PLaMo-2's
+`kv_head * n_seqs` state offset; DeepSeek 4's `state_write` calling
+`seq_pos_max` without its range check, and its `n_embd_out = hc * n_embd`
+overrunning the embedding buffer; T5's encoder positions under
+`split_equal`; RWKV6-Qwen2's `time_mix_first` path and its `n_embd_r`.

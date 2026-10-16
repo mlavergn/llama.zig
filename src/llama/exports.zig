@@ -17,6 +17,8 @@ const ext_only = [_][]const u8{
     "llama_get_embeddings_layer_inp",
     "llama_get_embeddings_nextn",
     "llama_get_embeddings_nextn_ith",
+    "llama_model_target_layer_ids",
+    "llama_model_target_layer_ids_n",
     "llama_set_embeddings_layer_inp",
     "llama_set_embeddings_nextn",
     "llama_set_nextn_layer_offset",

@@ -23,7 +23,8 @@
 //! errors the C++ reports, and the same again after a clear, so the graph
 //! is reused where the C++ reuses it.
 //!
-//! Usage: context_diff <model.gguf> [--quick]
+//! Usage: context_diff <model.gguf> [--quick] [--model <config>] [--case <substring>]
+//!   [--case-exact <name>] [--skip-case <name>] [--list-cases]
 
 const std = @import("std");
 const harness_root = @import("harness_root");
@@ -190,6 +191,12 @@ const Case = struct {
     /// With the KV cache on the host the meta backend asserts on the
     /// attention's split axes (ggml-backend-meta.cpp:826).
     tensor_ok: bool = true,
+    /// Whether the C++ itself runs it on a model without memory -- an
+    /// encoder, an embedding or a diffusion model -- whose decode is an
+    /// encode: that asserts the batch fits one ubatch
+    /// (llama-context.cpp:1426) and that no output limit is below it
+    /// (llama-context.cpp:2189).
+    memoryless_ok: bool = true,
 };
 
 const prompt_text = "The quick brown fox jumps over the lazy dog. In 1492, Columbus sailed the ocean blue; the capital of France is";
@@ -210,6 +217,68 @@ fn batchAdd(b: *c.llama_batch, tok: i32, pos: i32, seqs: []const i32, logits: bo
     for (seqs, 0..) |s, k| b.seq_id[i][k] = s;
     b.logits[i] = @intFromBool(logits);
     b.n_tokens += 1;
+}
+
+// The speculative drafts, eagle3 and DFlash. `has_encoder` is true for
+// them, but their encoder reads the target model's features as embeddings,
+// not tokens, so the T5 encode below would hand both sides a token batch for
+// an embedding input and crash both -- which compared nothing, and read as
+// matching crashes. They are driven the way `common/speculative.cpp` drives
+// them instead: an embedding batch of n_embd_inp_enc features encoded first;
+// eagle3's decoder batches carry the g embeddings beside the tokens; and a
+// DFlash round ends by injecting fused features into the cache and decoding
+// a token over them.
+var model_path: [:0]const u8 = "";
+const DraftKind = enum { none, eagle3, dflash };
+const Draft = struct { kind: DraftKind = .none, n_enc: usize = 0, n_embd: usize = 0 };
+
+fn metaStr(comptime MA: type, model: ?*c.struct_llama_model, key: [*:0]const u8, buf: []u8) []const u8 {
+    const n = MA.llama_model_meta_val_str(@ptrCast(model), key, buf.ptr, buf.len);
+    if (n < 0) return "";
+    return buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)];
+}
+
+fn draftOf(comptime MA: type, model: ?*c.struct_llama_model) Draft {
+    var buf: [256]u8 = undefined;
+    const arch = metaStr(MA, model, "general.architecture", &buf);
+    const n_embd: usize = @intCast(MA.llama_model_n_embd(@ptrCast(model)));
+    if (std.mem.eql(u8, arch, "eagle3")) {
+        const v = metaStr(MA, model, "eagle3.target_hidden_size", &buf);
+        const h = std.fmt.parseInt(usize, v, 10) catch 0;
+        return .{ .kind = .eagle3, .n_enc = 3 * h, .n_embd = n_embd };
+    }
+    if (std.mem.eql(u8, arch, "dflash")) {
+        // Arrays are not in the model's string metadata, so the target
+        // layer count is read from the file.
+        const g = c.gguf_init_from_file(model_path.ptr, .{ .no_alloc = true, .ctx = null }) orelse return .{};
+        defer c.gguf_free(g);
+        const k = c.gguf_find_key(g, "dflash.target_layers");
+        if (k < 0) return .{};
+        const n: usize = c.gguf_get_arr_n(g, k);
+        return .{ .kind = .dflash, .n_enc = n * n_embd, .n_embd = n_embd };
+    }
+    return .{};
+}
+
+/// Deterministic features: small, varied, the same on both sides.
+fn fillFeatures(dst: []f32, salt: usize) void {
+    for (dst, 0..) |*v, i| {
+        const x: f32 = @floatFromInt((i * 2654435761 + salt * 40503) % 2003);
+        v.* = (x - 1001.0) / 1001.0;
+    }
+}
+
+fn draftBatch(n: usize, width: usize, pos0: i32, logits: bool, salt: usize) c.llama_batch {
+    var eb = c.llama_batch_init(@intCast(n), @intCast(width), 1);
+    eb.n_tokens = @intCast(n);
+    fillFeatures(eb.embd[0 .. n * width], salt);
+    for (0..n) |i| {
+        eb.pos[i] = pos0 + @as(i32, @intCast(i));
+        eb.n_seq_id[i] = 1;
+        eb.seq_id[i][0] = 0;
+        eb.logits[i] = @intFromBool(logits);
+    }
+    return eb;
 }
 
 /// Run the script through `A`, which is `c` (the C++) or `api` (the port).
@@ -240,6 +309,19 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
     var b = c.llama_batch_init(@intCast(@max(n_batch, tokens.len + 8)), 0, 4);
     defer c.llama_batch_free(b);
 
+    const MAd = if (A == c) c else harness_root.api.model;
+    const draft = draftOf(MAd, model);
+    var g_embd: []f32 = &.{};
+    if (draft.kind == .eagle3) {
+        g_embd = gpa.alloc(f32, @as(usize, @intCast(@max(n_batch, tokens.len + 8))) * draft.n_embd) catch unreachable;
+        fillFeatures(g_embd, 7);
+        b.embd = g_embd.ptr;
+    }
+    defer {
+        b.embd = null;
+        if (g_embd.len > 0) gpa.free(g_embd);
+    }
+
     const Out = struct {
         fn row(comptime what: []const u8, p: ?[*]f32, n: usize, i: i32) void {
             if (p) |r| {
@@ -259,8 +341,32 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
 
     const n_seq: i32 = @intCast(A.llama_n_seq_max(ctx));
 
+    // An encoder-decoder model (T5) decodes against what the encoder made
+    // of the prompt, and a decode before any encode asserts "llama_encode
+    // must be called first" on both sides -- which compared nothing of
+    // either graph. So each round encodes the prompt first, as upstream's
+    // own test-llama-archs does, and the decoder then reads it.
+    const MA = if (A == c) c else harness_root.api.model;
+    const enc_dec = draft.kind == .none and MA.llama_model_has_encoder(@ptrCast(model)) and MA.llama_model_has_decoder(@ptrCast(model));
+
     for (0..2) |round| {
         note("round {d}", .{round});
+        // A pooled encode asserts on both sides: the encoder graph has no
+        // t_embd to pool.
+        if (draft.kind != .none and !pooled) {
+            const n_enc_tok = @min(tokens.len, @as(usize, A.llama_n_ubatch(ctx)));
+            const eb = draftBatch(n_enc_tok, draft.n_enc, 0, true, round);
+            defer c.llama_batch_free(eb);
+            note("draft encode {d}x{d}: {d}", .{ n_enc_tok, draft.n_enc, A.llama_encode(ctx, eb) });
+        }
+        if (enc_dec) {
+            b.n_tokens = 0;
+            for (tokens, 0..) |t, i| batchAdd(&b, t, @intCast(i), &.{0}, true);
+            const er = A.llama_encode(ctx, b);
+            note("encode: {d}", .{er});
+            if (er != 0) return;
+            if (A.llama_get_embeddings(ctx)) |e| note("encoder embd: {x}", .{hashBytes(@ptrCast(e), tokens.len * n_embd * @sizeOf(f32))});
+        }
         // The prompt, logits on the last token only (every token when
         // computing embeddings).
         b.n_tokens = 0;
@@ -412,6 +518,19 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         b.n_tokens = 0;
         batchAdd(&b, tokens[0], 1, &.{0}, true);
         note("decode position gap: {d}", .{A.llama_decode(ctx, b)});
+
+        if (draft.kind == .dflash) {
+            const p0: i32 = A.llama_memory_seq_pos_max(mem, 0) + 1;
+            const ib = draftBatch(4, draft.n_embd, p0, false, 11 + round);
+            defer c.llama_batch_free(ib);
+            note("draft inject: {d}", .{A.llama_decode(ctx, ib)});
+            State.positions(mem, n_seq);
+            b.n_tokens = 0;
+            batchAdd(&b, tokens[3], p0 + 4, &.{0}, true);
+            const ret_i = A.llama_decode(ctx, b);
+            note("decode over injected: {d}", .{ret_i});
+            if (ret_i == 0) Out.row("logits", A.llama_get_logits_ith(ctx, 0), n_vocab, 0);
+        }
 
         A.llama_memory_clear(mem, true);
         note("cleared", .{});
@@ -636,7 +755,7 @@ const cases = [_]Case{
     .{ .name = "default", .edit = Edits.none },
     .{ .name = "flash attention off", .edit = Edits.faOff },
     .{ .name = "flash attention on", .edit = Edits.faOn },
-    .{ .name = "n_ubatch 7", .edit = Edits.smallUbatch },
+    .{ .name = "n_ubatch 7", .edit = Edits.smallUbatch, .memoryless_ok = false },
     .{ .name = "two sequences", .edit = Edits.twoSeqs, .multi_seq = true },
     .{ .name = "three sequences, unified", .edit = Edits.threeSeqsUnified, .multi_seq = true },
     .{ .name = "n_rs_seq 4", .edit = Edits.rsSeq, .multi_seq = true },
@@ -651,7 +770,7 @@ const cases = [_]Case{
     .{ .name = "n_ctx 40", .edit = Edits.tinyCtx },
     .{ .name = "rope override, yarn", .edit = Edits.ropeOverride },
     .{ .name = "non-causal", .edit = Edits.nonCausal },
-    .{ .name = "n_outputs_max 5", .edit = Edits.outputsMax },
+    .{ .name = "n_outputs_max 5", .edit = Edits.outputsMax, .memoryless_ok = false },
     .{ .name = "n_batch 0", .edit = Edits.badBatch },
     .{ .name = "n_seq_max 300", .edit = Edits.tooManySeqs },
 };
@@ -781,8 +900,11 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(2);
     }
     const path = try gpa.dupeSentinel(u8, args[1], 0);
+    model_path = path;
     var quick = false;
     var only: ?[]const u8 = null;
+    var only_exact = false;
+    var skip_case: ?[]const u8 = null;
     var only_model: ?[]const u8 = null;
     var i: usize = 2;
     while (i < args.len) : (i += 1) {
@@ -794,6 +916,23 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, args[i], "--case") and i + 1 < args.len) {
             only = args[i + 1];
             i += 1;
+        }
+        // The exact name, for running one case alone.
+        if (std.mem.eql(u8, args[i], "--case-exact") and i + 1 < args.len) {
+            only = args[i + 1];
+            only_exact = true;
+            i += 1;
+        }
+        // One case left out, by exact name: the C++ itself is
+        // nondeterministic there (scripts/arch-model-diff's list says why).
+        if (std.mem.eql(u8, args[i], "--skip-case") and i + 1 < args.len) {
+            skip_case = args[i + 1];
+            i += 1;
+        }
+        // The case names, one a line, for a script that runs them one by one.
+        if (std.mem.eql(u8, args[i], "--list-cases")) {
+            for (cases) |cs| std.debug.print("{s}\n", .{cs.name});
+            std.process.exit(0);
         }
     }
 
@@ -834,7 +973,15 @@ pub fn main(init: std.process.Init) !void {
         }
         rec = &port_load;
         const pm = M.loadFromFileImpl(.{ .path = path }, &splits, null, null, mp) orelse {
+            // The last lines say why: an architecture without a ported
+            // `load_arch_hparams` stops with a message naming it, which is
+            // how `scripts/arch-model-diff` tells unported from broken.
+            var lines = std.mem.splitBackwardsScalar(u8, std.mem.trimEnd(u8, port_load.items, "\n"), '\n');
+            var tail: [3][]const u8 = undefined;
+            var n: usize = 0;
+            while (n < tail.len) : (n += 1) tail[n] = lines.next() orelse break;
             std.debug.print("FAIL: the port cannot load {s}\n", .{path});
+            while (n > 0) : (n -= 1) std.debug.print("    port: {s}\n", .{tail[n - 1]});
             std.process.exit(1);
         };
         defer M.destroy(pm);
@@ -853,27 +1000,58 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.startsWith(u8, mc.name, "tensor")) splitStates(rm, pm);
 
         const vocab = c.llama_model_get_vocab(rm);
+        const n_vocab: usize = @intCast(c.llama_vocab_n_tokens(vocab));
         var tokens: [256]i32 = undefined;
-        const nt = c.llama_tokenize(vocab, prompt_text, prompt_text.len, &tokens, tokens.len, true, false);
+        // `scripts/arch-model-diff`'s fixtures have no tokenizer
+        // (`no_vocab`), so they get a fixed sequence of ids instead, spread
+        // over the whole vocabulary.
+        const nt: c_int = if (c.llama_vocab_type(vocab) == c.LLAMA_VOCAB_TYPE_NONE) blk: {
+            const n = 24;
+            for (0..n) |k| tokens[k] = @intCast((k * 37 + 11) % n_vocab);
+            break :blk n;
+        } else c.llama_tokenize(vocab, prompt_text, prompt_text.len, &tokens, tokens.len, true, false);
         if (nt <= 8) {
             std.debug.print("FAIL: tokenizing the prompt gave {d}\n", .{nt});
             std.process.exit(1);
         }
-        const n_vocab: usize = @intCast(c.llama_vocab_n_tokens(vocab));
         const n_embd: usize = @intCast(c.llama_model_n_embd_out(rm));
 
         // A first context initializes what each backend initializes once
         // per process, which logs.
+        var memoryless = false;
         {
             var p = c.llama_context_default_params();
             p.n_ctx = 256;
-            if (c.llama_init_from_model(rm, p)) |ctx| c.llama_free(ctx);
+            // A port-only run must not run the C++ at all, or a fixture the
+            // C++ aborts on would abort here and read as the port's abort.
+            const port_only = if (std.c.getenv("CONTEXT_DIFF_SIDE")) |one| std.mem.eql(u8, std.mem.span(one), "port") else false;
+            if (port_only) {
+                if (api.llama_init_from_model(@ptrCast(pm), p)) |ctx| {
+                    memoryless = api.llama_get_memory(ctx) == null;
+                    api.llama_free(ctx);
+                }
+            } else if (c.llama_init_from_model(rm, p)) |ctx| {
+                memoryless = c.llama_get_memory(ctx) == null;
+                c.llama_free(ctx);
+            }
         }
+        var skipped: usize = 0;
 
         for (cases) |cs| {
-            if (only) |o| if (std.mem.find(u8, cs.name, o) == null) continue;
+            if (only) |o| {
+                if (only_exact and !std.mem.eql(u8, cs.name, o)) continue;
+                if (!only_exact and std.mem.find(u8, cs.name, o) == null) continue;
+            }
             if (quick and !std.mem.eql(u8, cs.name, "default") and !cs.multi_seq) continue;
             if (!cs.tensor_ok and std.mem.startsWith(u8, mc.name, "tensor")) continue;
+            if (skip_case) |sk| if (std.mem.eql(u8, cs.name, sk)) {
+                skipped += 1;
+                continue;
+            };
+            if (!cs.memoryless_ok and memoryless) {
+                skipped += 1;
+                continue;
+            }
             var ref: std.ArrayList(u8) = .empty;
             defer ref.deinit(gpa);
             var port: std.ArrayList(u8) = .empty;
@@ -945,6 +1123,7 @@ pub fn main(init: std.process.Init) !void {
             const lines = std.mem.count(u8, rn.items, "\n");
             std.debug.print("  {s:<40} {s:<4} {d:>7} lines {d:>7} nodes\n", .{ name, if (failures == before) "ok" else "FAIL", lines, ref_nodes });
         }
+        if (skipped != 0) std.debug.print("  {s}: {d} cases skipped: the C++ asserts on them for a model without memory, or is nondeterministic there\n", .{ mc.name, skipped });
     }
 
     std.debug.print("context-diff: {d} checks, {d} failures\n", .{ checks, failures });

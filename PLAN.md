@@ -65,6 +65,8 @@ Settled in review. The plan below assumes all of these.
 | 46 | CUDA kernel argument ABI | **Checked on every launch in safe builds.** `cuKernelGetParamInfo` reports each parameter's offset and size; the launch helper asserts each argument's Zig size against it. A wrong integer width is otherwise a silent wrong answer. By-value structs (`uint3` fastdiv triples, `float2`, the `*_args` structs) additionally go through `make cuda-struct-layout`, the CUDA analogue of `struct-layout`, since a size check cannot see field order. |
 | 47 | CUB device-wide algorithms | **One C-ABI `.cu` shim of our own, treated like cuBLAS.** `cumsum.cu` calls `cub::DeviceScan::InclusiveSum` and `argsort.cu` CUB's segmented sort; their host-side dispatch lives in CUB's header templates, version-specific to the toolkit, and is library code rather than ggml's. `src/ggml/cuda/cub_shim.cu` wraps exactly those instantiations behind `extern "C"`. It is the only CUDA host code we write in C++, and it is not a port of anything. |
 | 48 | CUDA swap unit | **Once, at `ggml-cuda.h`** — Decision 42's method, for Decision 42's reason. The host layer is one C++ object graph (`ggml_backend_cuda_context`, its virtual pools, RAII allocations) reached across 60-odd files through mangled names, while its external contract is the eleven C functions of `ggml-cuda.h`. The Zig backend is developed beside upstream's, both registered in one process for the gates, its `supports_op` claiming only ported ops; the swap removes upstream's host objects from `libggml.a`. |
+| 49 | How the other architectures are gated | **On upstream's own fixtures, through `context-diff`.** No real model of 140 architectures exists here, and none is needed: `tests/test-llama-archs.cpp` builds a small random model of every architecture from one recipe, and `-o` writes them. Compiled unmodified against `libllama-ref.a`, its output is upstream's definition of a model of each architecture, not ours. `make arch-model-diff` runs each through the context harness on both devices -- every log line, node, output bit and the state API. Where the recipe cannot build an architecture, `harness/arch_fixtures_extra.cpp` and `harness/arch_fixtures_draft.cpp` add only the keys or tensors the C++ demands, from the same `get_gguf_ctx`, and the C++ must accept what they write. A case the C++ itself aborts on matches only when the port aborts on the same assertion. |
+| 50 | Architecture dispatch | **A table, one file per upstream class.** `llama_model_mapping`'s class is a file exporting the three overrides, and `models/module.zig`'s `forArch` is the mapping; a class reusing another's methods is an `Entry` naming them. `llama_layer` and `llama_model`'s tensors are generated (`scripts/gen-layer`), so every architecture finds its members, in upstream's order. |
 | 42 | libllama's swap unit | **Measured: libllama is one strongly connected component, so it swaps once, at `llama.h` — with one exception that goes first.** 22 of its core translation units plus every `models/*.cpp` reach each other through 367 mangled C++ symbols and 27 C ones; ggml's "the external contract is a pure C ABI" does not carry over. The exception is **`llama-sampler.cpp` + `llama-grammar.cpp`**: inbound, `llama-context.o` reaches them through the C `llama_sampler_i` vtable, three C functions and two mangled ones with plain-pointer signatures, which Zig can `@export`; outbound, every call into `llama_vocab` has a public C equivalent. So that pair is ported and swapped first, and everything else in libllama is developed beside the C++ and gated in-process subsystem by subsystem until the single swap. See "Order of work" step 4. **Done: swapped**, with the C++ kept as `libllama-ref.a` for the in-process gates. |
 
 ---
@@ -935,55 +937,53 @@ plugs into are ported and gated.
 
 ### Mac pickup
 
-Work done on the CUDA machine that **only the Mac can finish**. Each item
-says what to run; none needs new code unless a run fails.
+**Done** (`NOTES.md`, "Mac pickup: the Mac gates after Stage 6"). Every
+Mac gate passes over the files the CUDA work touched -- `make validate`,
+`node-diff ARGS=--gpu`, `metal-diff`, `sched-diff`, `graph-diff`,
+`parity-cli`, `backend-ops` -- after two fixes the CUDA machine could not
+have found, because both are in gates it did not run:
 
-- **Re-run the Mac gates over every shared file touched here.** CUDA work
-  touches `build.zig`, `build/llamacpp.zig`, `src/ggml/module.zig`,
-  `src/ggml/backend_reg.zig`, `harness/node_dump.c` and the scripts;
-  nothing under `src/ggml/metal/`. On the Mac: `make validate`, `make
-  node-diff ARGS=--gpu`, `make metal-diff`, `make parity-cli`, `make
-  backend-ops`. The CUDA build options default off on macOS (`-Dcuda` is
-  only defaulted on for Linux with `nvcc` present); `-Dcuda-port` now
-  defaults to true but means nothing without `-Dcuda`.
-- **`harness/node_dump.c` gained an opt-in `fused <steps>` mode.** With the
-  old four arguments its output is unchanged, so `node-diff` should be
-  byte-identical; confirm it. Then consider running the fused mode under
-  `node-diff ARGS=--gpu` too: Metal fuses as well, and the per-node pass
-  splits the graph at every node, so **Metal's fusion has never been
-  compared** by `node-diff`. Measured on CUDA: a broken fusion path passed
-  every node and failed the fused pass (`NOTES.md`, "Stage 6").
-- **`zig build test` reports failure on the GB10 machine, and the test
-  binaries do not.** Run standalone, both test executables pass 395/397
-  with 2 skipped, with or without the runner's `--seed`. Through `zig build
-  test` — the runner's `--listen=-` protocol mode — the step fails with no
-  message other than the tests' stderr. Bisected with `-Dtest-filter`: the
-  failing tests are exactly the ones that make ggml log to stderr
-  (`backend_reg`'s "reports the two backends" and "does not exist", `gguf`'s
-  "malformed buffer"); their silent neighbours pass. It fails with
-  `-Dcuda=false` too, and none of those files was touched by the CUDA work.
-  When it began was not established — that would need git history, and no
-  git command was run on this machine. **On the Mac: does `zig build test`
-  pass there?** If it does, the difference is platform behaviour in Zig
-  0.17's runner; if not, it is a regression to bisect.
-- **Add `src/ggml/cuda/*.zig` to `make validate`'s `zig fmt` list**, and
-  Makefile targets `cuda-ops-diff`, `cuda-node-diff`, `cuda-backend-diff`,
-  `cuda-parity-cli` that call the scripts (Linux only). Run `make
-  validate` after, which runs `port-links` — the CUDA files carry 553
-  citations, checked here only by a script that reads the working tree,
-  because `port-links` shells out to git and no git command was run on
-  this machine.
-- **Scripts made platform-aware here are untested on macOS.** Each one is
-  listed in `NOTES.md`'s CUDA section as it changes; the macOS branch is
-  kept as it was, but run each once on the Mac.
-- **Docs still describing a single machine.** If a section of `NOTES.md`
-  says "this machine" it meant the Mac until Decision 43; new text says
-  which machine.
+- **`scripts/port-coverage` failed to compile anything.** Its stand-in
+  `config` module lacked the three options the CUDA build added; the
+  script's own comment says every option has to appear there.
+- **`scripts/port-links` had never checked a CUDA citation.** It indexed
+  `.c`, `.h`, `.cpp` and `.hpp` only, so all 589 citations of a `.cu` or
+  `.cuh` read "no such file". With the extensions added, 34 real problems
+  were left and are fixed: C++ member names the checker cannot parse
+  (`A::b`, `T<U>`, `~A`) rewritten in the house ``A`'s `b`` form, seven
+  line numbers that pointed at the wrong line, and three citations with no
+  commit. 4,381 citations pass; negative-tested.
+
+`node-diff` now runs the fused pass on both devices, and on Metal it
+separates the way it did on CUDA: a fused `RMS_NORM + MUL` reading the
+wrong buffer passes all 2,750 per-node comparisons and fails the fused one
+from the prompt on. `zig build test` passes here (459/461, 2 skipped); the
+GB10 failure moves to the CUDA pickup below.
 
 ### CUDA pickup
 
 The reverse list: Mac-side work that should be re-run on the CUDA machine.
-Empty until the Mac adds to it.
+
+- **`make cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli`**
+  are new Makefile targets wrapping the four scripts, each building what its
+  script's `Requires:` line names. Written on the Mac, where they refuse to
+  run; run each once.
+- **`zig build test` on the GB10.** The same tests pass on the Mac through
+  the same runner: the stderr-logging tests print the runner's `failed
+  command:` banner here too, but the step is green (426 pass, 2 skip). So
+  the GB10 failure is platform behaviour in Zig 0.17's `--listen=-` runner,
+  not a regression in shared code. What differs there is still to find.
+- **`scripts/port-links` and `scripts/port-coverage` changed** (above), and
+  `make validate` now formats `src/ggml/cuda/*.zig`. Run `make validate`
+  there once.
+- **`make arch-fixtures arch-model-diff` and `make gemma4-assistant-diff`
+  on CUDA.** The 146 architectures were gated on Metal and the CPU only; the
+  harness picks the GPU device generically, so on the GB10 its `gpu` pass is
+  CUDA, and nothing has run their graphs through the CUDA backend yet. The
+  RWKV `hs64` variants exist for Metal's WKV kernels; whether CUDA needs them
+  too is part of the run. `KNOWN_NONDET`'s T5 entry was measured on Metal
+  but is keyed on `gpu`, so it skips that case on CUDA too: run it once
+  without the skip to see whether CUDA needs it.
 
 ---
 
@@ -995,7 +995,7 @@ Zig makes the *build* side nearly free once `build.zig` owns everything — `-Dt
 
 iOS additionally needs the `buildios` flag set and the increased-memory-limit entitlement already noted in the `Makefile`.
 
-Backfilling `src/models/` beyond Qwen3.5 (Decision 5) belongs here or later — it is repetitive graph-building code and parallelizes well once the first architecture proves the pattern.
+Backfilling the architectures beyond Qwen3.5 (Decision 5) is done -- all of `llama_model_mapping`, ahead of this stage (Decisions 49 and 50).
 
 ---
 
@@ -1045,7 +1045,7 @@ end to end. What it includes, and one part of it is easy to undercount:
 
 | Milestone | What it adds |
 |---|---|
-| All architectures | The other 150 files under `src/models/` (~37,900 lines) |
+| All architectures | **Done.** Every entry of `llama_model_mapping`, 146, under `src/llama/models/` (~44,000 lines with the six new memory types); see "What happens next" |
 | Cross-platform | Stage 5: Linux and the x86 SIMD kernels Stage 3 skipped |
 
 ---
@@ -1216,12 +1216,22 @@ Gate: `make ops-diff`, 592 op results identical either side of the fold.
     apart from the two Obj-C files. See `NOTES.md`, "libllama swapped".
 
 **Stage 6, CUDA, is done and swapped** on the GB10 machine (Decision 43;
-"Stage 6 — CUDA"; `NOTES.md`, "Stage 6"). **Next:** the other 150 architectures (Decision
-36's first follow-on milestone — each needs its `load_arch_hparams`,
-`load_arch_tensors` and graph builder, and the iSWA memory and T5
-cross-attention arms that abort today) and Stage 5 follow. Mac-only
-follow-ups from the CUDA work are collected under "Mac pickup". The xcframework still
-links Zig's libc++ into each slice, which nothing needs since the swap.
+"Stage 6 — CUDA"; `NOTES.md`, "Stage 6"). Mac-only follow-ups from the CUDA
+work are collected under "Mac pickup", done. The xcframework still links
+Zig's libc++ into each slice, which nothing needs since the swap.
+
+12. ~~**The other architectures**~~ (Decision 36's first follow-on) --
+    **done.** All 146 entries of `llama_model_mapping`, one file per
+    upstream class, with the memory types they needed: the iSWA KV cache,
+    the hybrid iSWA memory, the MSA, DSA, DSA-iSWA and DSv4 caches, and the
+    graph inputs for no-cache attention, MLA's K-only cache, T5's
+    cross-attention and the hybrid K-only memory. Gated by Decision 49:
+    `make arch-model-diff` over 159 fixtures, and `make
+    gemma4-assistant-diff`. What the fixtures cannot reach -- MTP heads,
+    paths behind keys the recipe never sets -- is listed per architecture in
+    `NOTES.md`, "The other architectures".
+
+**Next:** Stage 5, cross-platform.
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:
 

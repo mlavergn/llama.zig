@@ -1,0 +1,109 @@
+#!/bin/bash
+# Write one small random model per architecture, with upstream's own fixture
+# code, for `scripts/arch-model-diff`.
+#
+# `llama.cpp/tests/test-llama-archs.cpp` builds a GGUF context for every
+# architecture `llama_model_saver` supports -- n_embd 256, two layers, a
+# 128-token `no_vocab` vocabulary, every hyperparameter key any architecture
+# reads -- fills its weights from a seeded `std::normal_distribution`, and
+# with `-o <dir>` saves each as `<arch>-dense.gguf` and/or `<arch>-moe.gguf`.
+# It is compiled here **unmodified** against `libllama-ref.a` -- upstream's
+# libllama, every translation unit -- with `harness/arch_fixtures_shim.cpp`
+# standing in for the six `common` functions it calls.
+#
+# So the fixtures are upstream's definition of "a model of this
+# architecture", not ours: a port that reads a key or a tensor the C++ does
+# not write fails to load rather than passing on a fixture written to suit it.
+#
+# `-o` skips 44 architectures: the saver cannot rebuild their metadata from a
+# loaded model, or `arch_supported` marks them FIXME, or its loops skip them.
+# `harness/arch_fixtures_extra.cpp` writes those from the same
+# `get_gguf_ctx`, included unmodified, keeping its metadata as built rather
+# than rebuilding it. One that the C++ itself cannot build is reported and
+# left without a fixture. `clip` and `gptj` are left out, as upstream leaves
+# them: neither has a usable implementation. Granite-Switch, eagle3 and
+# DFlash need more than the recipe's keys and tensors, and
+# `harness/arch_fixtures_draft.cpp` writes them.
+#
+# Usage: scripts/gen-arch-fixtures [out-dir] [seed]
+#   Default out-dir zig-out/arch-fixtures, seed 42.
+# Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+OUT="${1:-zig-out/arch-fixtures}"
+SEED="${2:-42}"
+
+for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+INC=(-I llama.cpp/common -I llama.cpp/src -I llama.cpp/include -I llama.cpp/ggml/include -I llama.cpp/vendor)
+
+zig c++ -mcpu=baseline -c llama.cpp/tests/test-llama-archs.cpp -o "$tmp/archs.o" -std=c++17 -O2 -w "${INC[@]}" 2>"$tmp/cerr" \
+    || { echo "FAIL: cannot compile test-llama-archs.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
+zig c++ -mcpu=baseline -c harness/arch_fixtures_shim.cpp -o "$tmp/shim.o" -std=c++17 -O2 -w "${INC[@]}" 2>"$tmp/cerr" \
+    || { echo "FAIL: cannot compile harness/arch_fixtures_shim.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
+zig c++ -mcpu=baseline -o "$tmp/archs" "$tmp/archs.o" "$tmp/shim.o" \
+    zig-out/lib/libllama-ref.a zig-out/lib/libggml.a \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/lerr" \
+    || { echo "FAIL: cannot link test-llama-archs" >&2; grep -m10 -i 'error\|undefined' "$tmp/lerr" >&2; exit 1; }
+zig c++ -mcpu=baseline -c harness/arch_fixtures_extra.cpp -o "$tmp/extra.o" -std=c++17 -O2 -w -I llama.cpp/tests "${INC[@]}" 2>"$tmp/cerr" \
+    || { echo "FAIL: cannot compile harness/arch_fixtures_extra.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
+zig c++ -mcpu=baseline -c harness/arch_fixtures_draft.cpp -o "$tmp/draft.o" -std=c++17 -O2 -w -I llama.cpp/tests "${INC[@]}" 2>"$tmp/cerr" \
+    || { echo "FAIL: cannot compile harness/arch_fixtures_draft.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
+zig c++ -mcpu=baseline -o "$tmp/draft" "$tmp/draft.o" "$tmp/shim.o" \
+    zig-out/lib/libllama-ref.a zig-out/lib/libggml.a \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/lerr" \
+    || { echo "FAIL: cannot link arch_fixtures_draft" >&2; grep -m10 -i 'error\|undefined' "$tmp/lerr" >&2; exit 1; }
+zig c++ -mcpu=baseline -o "$tmp/extra" "$tmp/extra.o" "$tmp/shim.o" \
+    zig-out/lib/libllama-ref.a zig-out/lib/libggml.a \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/lerr" \
+    || { echo "FAIL: cannot link arch_fixtures_extra" >&2; grep -m10 -i 'error\|undefined' "$tmp/lerr" >&2; exit 1; }
+
+rm -rf "$OUT"
+mkdir -p "$OUT"
+"$tmp/archs" -s "$SEED" -o "$OUT" > "$tmp/run.log" 2>&1
+rc=$?
+n=$(find "$OUT" -name '*.gguf' | wc -l | tr -d ' ')
+if [ "$rc" -ne 0 ] || [ "$n" -eq 0 ]; then
+    echo "FAIL: test-llama-archs -o exited $rc and wrote $n files" >&2
+    tail -20 "$tmp/run.log" >&2
+    exit 1
+fi
+# The architectures `-o` skipped, and the four its loops skip silently.
+extra=$( { grep 'unsupported, skipping' "$tmp/run.log" | sed 's/^save_models: \([^ ]*\) model.*/\1/'; printf '%s\n' gemma4 gemma4-assistant; } \
+         | grep -v -x -e clip -e gptj -e graniteswitch -e eagle3 -e dflash | sort -u )
+: > "$tmp/extra.log"
+for a in $extra; do
+    # One process each: the C++ asserts on some, and an abort ends the process.
+    "$tmp/extra" "$OUT" "$SEED" "$a" > "$tmp/one.log" 2>&1
+    rc=$?
+    cat "$tmp/one.log" >> "$tmp/extra.log"
+    if [ "$rc" -gt 1 ]; then
+        why=$(grep -m1 -E 'GGML_ASSERT|error|exception' "$tmp/one.log" | sed 's/^.*llama.cpp\/src\///' | cut -c1-120)
+        echo "failed $a: the C++ aborted: $why" >> "$tmp/extra.log"
+    fi
+done
+# The RWKV family again, at a head size Metal's WKV kernels accept.
+for a in rwkv6 rwkv6qwen2 rwkv7 arwkv7; do
+    "$tmp/extra" "$OUT" "$SEED" --variant hs64 "$a" >> "$tmp/extra.log" 2>&1 \
+        || [ "$?" -le 1 ] || echo "failed $a (hs64): the C++ aborted" >> "$tmp/extra.log"
+done
+"$tmp/extra" "$OUT" "$SEED" --variant hs64nogate arwkv7 >> "$tmp/extra.log" 2>&1 \
+    || [ "$?" -le 1 ] || echo "failed arwkv7 (hs64nogate): the C++ aborted" >> "$tmp/extra.log"
+# Granite-Switch, eagle3 and DFlash, which the recipe cannot build at all:
+# see the header of harness/arch_fixtures_draft.cpp.
+"$tmp/draft" "$OUT" "$SEED" >> "$tmp/extra.log" 2>&1 \
+    || echo "failed arch_fixtures_draft: exit $?" >> "$tmp/extra.log"
+grep '^failed' "$tmp/extra.log" | sed 's/^failed /  no fixture: /'
+m=$(grep -c '^wrote' "$tmp/extra.log")
+echo "wrote $n fixtures through test-llama-archs and $m through arch_fixtures_extra to $OUT (seed $SEED)"

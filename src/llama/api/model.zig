@@ -304,6 +304,20 @@ pub fn llama_model_is_diffusion(model: ?*const c.struct_llama_model) callconv(.c
     return arch.isDiffusion(modelOf(model).arch);
 }
 
+/// Ports `llama_model_target_layer_ids` (llama-model.cpp:3117 @c1d0e7a00),
+/// from `llama-ext.h`: the target model's layers an eagle3 or DFlash draft
+/// reads, or null when there are none.
+pub fn llama_model_target_layer_ids(model: ?*const c.struct_llama_model) callconv(.c) [*c]const i32 {
+    const v = modelOf(model).target_layer_ids.items;
+    return if (v.len == 0) null else v.ptr;
+}
+
+/// Ports `llama_model_target_layer_ids_n` (llama-model.cpp:3122 @c1d0e7a00),
+/// from `llama-ext.h`.
+pub fn llama_model_target_layer_ids_n(model: ?*const c.struct_llama_model) callconv(.c) u32 {
+    return @truncate(modelOf(model).target_layer_ids.items.len);
+}
+
 // -----------------------------------------------------------------------------
 // Unit Tests
 

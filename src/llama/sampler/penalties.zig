@@ -462,7 +462,7 @@ fn detokenizeOne(vocab: ?*const c.struct_llama_vocab, token: Token, buf: *std.Ar
         text_len = @intCast(-n_chars);
         buf.resize(impl.allocator, text_len) catch impl.abort(src, 3332, "out of memory");
         n_chars = c.llama_detokenize(vocab, &token, 1, buf.items.ptr, @intCast(text_len), false, true);
-        impl.assert(n_chars <= @as(i32, @intCast(text_len)), "llama-vocab.cpp", 4179, "n_chars <= (int32_t)text.size()");
+        impl.assert(n_chars <= @as(i32, @intCast(text_len)), "llama-vocab.cpp", 4178, "n_chars <= (int32_t)text.size()");
     }
     return buf.items[0..@intCast(n_chars)];
 }
