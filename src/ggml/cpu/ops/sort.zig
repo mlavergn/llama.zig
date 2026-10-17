@@ -30,6 +30,7 @@ const std = @import("std");
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");
+const simd = @import("../simd.zig");
 
 const c = impl.c;
 const Tensor = common.Tensor;
@@ -287,14 +288,14 @@ pub export fn ggml_compute_forward_top_k(params: *const ComputeParams, dst: *Ten
 // -----------------------------------------------------------------------------
 // fwht
 
-/// `GGML_F32_EPR` (simd-mappings.h:338 @c1d0e7a00), the NEON arm.
-const f32_epr: i64 = 4;
+/// `GGML_F32_EPR`; see `simd.F32`.
+const f32_epr = simd.F32.epr;
 
 /// Ports `ggml_compute_forward_fwht_f32` (ops.cpp:11847 @c1d0e7a00), the
 /// `GGML_SIMD` arm without SVE.
 ///
 /// The C runs the butterflies narrower than `GGML_F32_EPR` as scalars and the
-/// rest four lanes at a time. The vector `u - v` is
+/// rest a vector at a time. The vector `u - v` is
 /// `GGML_F32_VEC_FMA(u, v, -1)`, a fused `u + v * -1` — and `v * -1` is exact,
 /// so it is bit-for-bit `u - v`. Both phases are therefore the same
 /// arithmetic, and the split is kept only so the loop reads like the C.

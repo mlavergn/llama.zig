@@ -49,6 +49,7 @@ const common = @import("common.zig");
 const vec = @import("vecinline.zig");
 const threading = @import("../threading.zig");
 const convert = @import("../convert.zig");
+const simd = @import("../simd.zig");
 
 const c = impl.c;
 const Tensor = common.Tensor;
@@ -78,8 +79,8 @@ const q_tile_sz: usize = 64;
 /// tile.
 const kv_tile_sz: usize = 64;
 
-/// `GGML_F32_EPR` (simd-mappings.h:338 @c1d0e7a00), the NEON arm.
-const f32_epr: i64 = 4;
+/// `GGML_F32_EPR`; see `simd.F32`.
+const f32_epr: i64 = simd.F32.epr;
 
 /// `GGML_SOFT_MAX_UNROLL` (vec.h:49 @c1d0e7a00).
 const soft_max_unroll: i64 = 4;

@@ -245,7 +245,7 @@ test "the float dot products match the C on short lengths" {
     // reference vectorizes it into rounded groups of four products and fuses
     // only the last `t % 4`. `nelem_tail`'s seven-element tail cannot tell
     // fused, unfused and split apart -- measured -- so these lengths exist
-    // to. See `vectorizedTail` in `vec.zig`.
+    // to. See `simd.strictDot`.
     ggml_cpu_init();
 
     inline for (golden.short_lens) |n| {

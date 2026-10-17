@@ -5240,3 +5240,67 @@ aarch64 baseline "already implies `DOTPROD` and `FP16_VECTOR_ARITHMETIC` on
 macOS and Linux". On Linux it is `generic`, which has neither ("Stage 5:
 the measurement"). Correcting another repository's prose is outside the
 grant.
+
+## Stage 5 step 5: the SIMD layer
+
+`src/ggml/cpu/simd.zig` is `simd-mappings.h`'s `GGML_SIMD` block. `F32`
+is `GGML_F32_VEC` and `F16` is `GGML_F16_VEC`: `Vec`, `step`, `epr`,
+`arr`, `zero`, `load`, `fma`, `add`, `reduce` and the rest, chosen at
+comptime on `builtin.cpu.arch`. NEON's `F16` is two different things,
+`GGML_F16x8` computing in half precision under
+`__ARM_FEATURE_FP16_VECTOR_ARITHMETIC` and `GGML_F32Cx4` over widened
+halves without it, and `F16.half_precision` says which one this build has.
+The vectorizer's strict-loop shape moved in beside them: `strict_loop`
+from `features.zig`, `vectorizedTail` from `vec.zig` (now `strictDot`),
+and `strictLoopVectorized` and `strictSplit` from `ops/common.zig`. Any
+architecture but aarch64 is a compile error naming step 6.
+
+**The plan undercounted, as plans here tend to.** It named five direct
+`neon.zig` imports. There were six (`vec.zig`, `ops/common.zig`,
+`vecinline.zig`, `recurrent.zig`, `ssm.zig`, `sgemm.zig`), and two more
+files, `attention.zig` and `sort.zig`, had `GGML_F32_EPR` written as a
+literal 4 -- which x86 makes 8 or 16 -- with no import to find them by.
+They were found by grepping for `simd-mappings.h` citations, not imports.
+
+What changed in the kernels:
+
+- `ggml_vec_dot_f32`, `ggml_vec_dot_f16`, `rwkv_wkv7` and `ssm_scan`'s
+  Mamba-2 body are written against `F32`/`F16` the way the C writes them
+  against the macros: `[F32.arr]F32.Vec` accumulators, `F32.step`,
+  `F32.reduce`. `ggml_vec_dot_f16`'s two arms, which step 2 had added as a
+  second function (`dotF16Widened`), are one body again, as they are in
+  `vec.cpp`.
+- `mad_f16` and `scale_f16` ask `simd.F16.half_precision` and
+  `simd.F16.step` rather than `neon.has_fp16_va` and a local 32.
+- The elementwise kernels that collapse body and tail into one fused loop
+  (`mad_f32`, `mad1_f32`, `conv_2d_dw`, `rwkv_wkv6`, `gla`) did not change:
+  they are width-independent as long as `GGML_F32_VEC_FMA` fuses, which it
+  does on NEON and on every x86 level Decision 53 targets (`__FMA__` is in
+  v3).
+- `vec.cpp`'s SiLU, softmax and `ggml_v_expf` arms and `sgemm.cpp`'s
+  `tinyBLAS` are written in NEON intrinsics in the C, not through the
+  macros, so they reach `neon.zig` through `simd.neon` and get their x86
+  arms beside the NEON ones in step 6.
+
+**The gate was the machine code itself.** A refactor meant to be a no-op
+should compile to the same instructions, which is a stronger claim than
+any number of passing diffs. The port's `libggml.a` was built
+`--release=fast` at `baseline`, `apple_m3` and `generic` before and after,
+and every object disassembled and compared. All 26 objects in all three
+builds are identical except two functions: `ggml_vec_dot_f32` at all three
+and `ggml_vec_dot_f16` at `baseline` and `apple_m3`. In each, the vector
+loop's two pointer registers trade names, `x10` and `x11`, with every load,
+`fmla` and reduction step unchanged and in the same order. That comes from
+the new `ax[j]`/`ay[j]` arrays the C has and the old code did not.
+`ggml_vec_dot_f16` at `generic` is byte-identical, though its source
+changed most.
+
+The first rename check was itself wrong: `sed s/x10/.../` also rewrote the
+`x10` inside immediates like `#0x10`, and reported differences that were
+not there. It was redone with word boundaries before the conclusion above
+was drawn.
+
+Also run: `zig build test` at all three CPUs (the new `simd.zig` tests
+included, confirmed by the count moving under a filter) and `make validate`
+(5,518 citations). Negative test: an ordered `@reduce` in `F32.reduce`
+fails `simd.zig`'s own test and both float-dot golden tests.

@@ -28,8 +28,10 @@
 //!   elementwise loop that names each fusion once. Changing the vector width
 //!   could not change a bit.
 //! - `rwkv_wkv7` takes the `GGML_SIMD` non-SVE arm. That one **does** reduce
-//!   across `j` — twice, through four `float32x4_t` accumulators, a halving
-//!   tree and the pairwise `vaddvq_f32` — so it is ported vector for vector.
+//!   across `j` — twice, through `GGML_F32_VEC` accumulators and
+//!   `GGML_F32_VEC_REDUCE`, on NEON four `float32x4_t`, a halving tree and
+//!   the pairwise `vaddvq_f32` — so it is ported vector for vector, against
+//!   `simd.F32`.
 //!
 //! # Loop index names
 //!
@@ -40,7 +42,7 @@ const std = @import("std");
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");
-const neon = @import("../quants/arm/neon.zig");
+const simd = @import("../simd.zig");
 const threading = @import("../threading.zig");
 const defs = @import("../defs.zig");
 
@@ -48,7 +50,7 @@ const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 
-const f32x4 = neon.f32x4;
+const F32 = simd.F32;
 
 extern fn expf(x: f32) f32;
 extern fn sqrtf(x: f32) f32;
@@ -776,26 +778,22 @@ pub export fn ggml_compute_forward_dsv4_hc_post(params: *const ComputeParams, ds
     }
 }
 
-/// The NEON SIMD mapping; see `common.zig`.
-const f32_step = common.f32_step;
-const f32_epr = common.f32_epr;
-const f32VecReduce = common.f32VecReduce;
-const load4 = common.load4;
-
 /// Ports `ggml_compute_forward_rwkv_wkv7_f32` (ops.cpp:11251 @c1d0e7a00), the
-/// `GGML_SIMD` arm without SVE or RVV — the NEON one.
+/// `GGML_SIMD` arm without SVE or RVV.
 ///
 /// Two reductions over `j` per `(t, h, ii)`: `sa = a · state_prev[ii]` and
-/// the output `Σ state_cur * r`. Both accumulate into four `float32x4_t`
-/// with `vfmaq_f32` over steps of 16 and reduce through `f32VecReduce`, so
-/// both are ported vector for vector — an elementwise rewrite would change
-/// the summation order.
+/// the output `Σ state_cur * r`. Both accumulate into `GGML_F32_ARR`
+/// registers with `GGML_F32_VEC_FMA` over steps of `GGML_F32_STEP` and
+/// reduce through `GGML_F32_VEC_REDUCE` -- on NEON four `float32x4_t`,
+/// `vfmaq_f32`, steps of 16 -- so both are ported vector for vector against
+/// `simd.F32`; an elementwise rewrite would change the summation order.
 ///
 /// The state update per lane is `state = kv + state * w` then
 /// `state = state + sa * b`, each fused, `kv = v * k` rounded on its own.
 ///
-/// The step loops run `j` in strides of 16 to *past* `head_size` and load
-/// whole vectors, so the C assumes `head_size % 16 == 0` (RWKV7 uses 64). The
+/// The step loops run `j` in strides of `GGML_F32_STEP` to *past*
+/// `head_size` and load whole vectors, so the C assumes `head_size` is a
+/// multiple of it (RWKV7 uses 64). The
 /// remainder loop after them therefore never runs; it is kept, as in the C,
 /// fused as the vector body is.
 fn rwkvWkv7F32(params: *const ComputeParams, dst: *Tensor) void {
@@ -827,7 +825,6 @@ fn rwkvWkv7F32(params: *const ComputeParams, dst: *Tensor) void {
     const h_stride_2d = head_size * head_size;
 
     const seq_len = @divTrunc(T, n_seqs);
-    const zero: f32x4 = @splat(0.0);
 
     var t: i64 = 0;
     while (t < T) : (t += 1) {
@@ -847,48 +844,50 @@ fn rwkvWkv7F32(params: *const ComputeParams, dst: *Tensor) void {
                 const t_h_i_offset = t_h_offset + @as(usize, @intCast(ii));
                 const h_2d_i_offset: usize = @intCast(h_2d_offset + ii * h_stride);
 
-                const v_vec: f32x4 = @splat(v[t_h_i_offset]);
+                const v_vec = F32.set1(v[t_h_i_offset]);
 
                 var sa: f32 = 0;
                 {
-                    var sum: [4]f32x4 = @splat(zero);
+                    var sum: [F32.arr]F32.Vec = @splat(F32.zero);
+                    var ax: [F32.arr]F32.Vec = undefined;
+                    var ay: [F32.arr]F32.Vec = undefined;
                     var j: usize = 0;
-                    while (j < head_size) : (j += f32_step) {
-                        for (0..4) |kk| {
-                            const ax = load4(a + t_h_offset + j + kk * f32_epr);
-                            const ay = load4(state_prev + h_2d_i_offset + j + kk * f32_epr);
-                            sum[kk] = neon.fma_f32(sum[kk], ax, ay);
+                    while (j < head_size) : (j += F32.step) {
+                        for (0..F32.arr) |kk| {
+                            ax[kk] = F32.load(a + t_h_offset + j + kk * F32.epr);
+                            ay[kk] = F32.load(state_prev + h_2d_i_offset + j + kk * F32.epr);
+                            sum[kk] = F32.fma(sum[kk], ax[kk], ay[kk]);
                         }
                     }
-                    sa = f32VecReduce(&sum);
+                    sa = F32.reduce(&sum);
                 }
 
-                const sa_vec: f32x4 = @splat(sa);
+                const sa_vec = F32.set1(sa);
 
                 var j: usize = 0;
-                var result_vec: [4]f32x4 = @splat(zero);
-                while (j < head_size) : (j += f32_step) {
-                    for (0..4) |kk| {
-                        const t_h_j_offset = t_h_offset + j + kk * f32_epr;
-                        const h_2d_i_j_offset = h_2d_i_offset + j + kk * f32_epr;
+                var result_vec: [F32.arr]F32.Vec = @splat(F32.zero);
+                while (j < head_size) : (j += F32.step) {
+                    for (0..F32.arr) |kk| {
+                        const t_h_j_offset = t_h_offset + j + kk * F32.epr;
+                        const h_2d_i_j_offset = h_2d_i_offset + j + kk * F32.epr;
 
-                        const r_vec = load4(r + t_h_j_offset);
-                        const w_vec = load4(w + t_h_j_offset);
-                        var k_vec = load4(k + t_h_j_offset);
-                        const b_vec = load4(b + t_h_j_offset);
+                        const r_vec = F32.load(r + t_h_j_offset);
+                        const w_vec = F32.load(w + t_h_j_offset);
+                        var k_vec = F32.load(k + t_h_j_offset);
+                        const b_vec = F32.load(b + t_h_j_offset);
 
-                        k_vec = neon.mul_f32(v_vec, k_vec);
+                        k_vec = F32.mul(v_vec, k_vec);
 
-                        var state_vec = load4(state_prev + h_2d_i_j_offset);
+                        var state_vec = F32.load(state_prev + h_2d_i_j_offset);
                         // kv + s * decay + sa * b
-                        state_vec = neon.fma_f32(k_vec, state_vec, w_vec);
-                        state_vec = neon.fma_f32(state_vec, sa_vec, b_vec);
-                        (state_cur + h_2d_i_j_offset)[0..4].* = state_vec;
+                        state_vec = F32.fma(k_vec, state_vec, w_vec);
+                        state_vec = F32.fma(state_vec, sa_vec, b_vec);
+                        F32.store(state_cur + h_2d_i_j_offset, state_vec);
 
-                        result_vec[kk] = neon.fma_f32(result_vec[kk], state_vec, r_vec);
+                        result_vec[kk] = F32.fma(result_vec[kk], state_vec, r_vec);
                     }
                 }
-                dst_data[t_h_i_offset] = f32VecReduce(&result_vec);
+                dst_data[t_h_i_offset] = F32.reduce(&result_vec);
 
                 // There shouldn't be left-overs though.
                 while (j < head_size) : (j += 1) {
@@ -928,11 +927,4 @@ pub export fn ggml_compute_forward_rwkv_wkv7(params: *const ComputeParams, dst: 
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-test "the halving reduce is pairwise at the last step" {
-    // Pairwise: (1e8 + 1) + (-1e8 + 1); each inner sum rounds back to +-1e8,
-    // so the result is 0. An ordered sum would give ((1e8 + 1) - 1e8) + 1 = 1.
-    var x: [4]f32x4 = .{ .{ 1e8, 1, -1e8, 1 }, @splat(0), @splat(0), @splat(0) };
-    try std.testing.expectEqual(@as(f32, 0), f32VecReduce(&x));
 }

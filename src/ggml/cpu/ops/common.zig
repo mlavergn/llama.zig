@@ -20,8 +20,6 @@ const builtin = @import("builtin");
 const impl = @import("../../impl.zig");
 const defs = @import("../defs.zig");
 const threading = @import("../threading.zig");
-const neon = @import("../quants/arm/neon.zig");
-const features = @import("../features.zig");
 
 const c = impl.c;
 
@@ -87,43 +85,6 @@ pub inline fn stdMax(a: f32, b: f32) f32 {
 /// `ggml_barrier(params->threadpool)`, which the C writes directly.
 pub inline fn barrier(params: *const ComputeParams) void {
     threading.ggml_barrier(@ptrCast(@alignCast(params.threadpool.?)));
-}
-
-// -----------------------------------------------------------------------------
-// The NEON SIMD mapping
-//
-// `simd-mappings.h` is macro-only, so these are the NEON arm of those macros
-// written out once. `recurrent.zig` and `ssm.zig` both run the same
-// four-accumulator reduction; it was open-coded in one and named in the other
-// while the port was written in parallel.
-
-pub const f32x4 = neon.f32x4;
-
-/// `GGML_F32_STEP` and `GGML_F32_EPR` (simd-mappings.h:337, 338 @c1d0e7a00),
-/// the NEON arm: four `float32x4_t` per step.
-pub const f32_step: usize = 16;
-pub const f32_epr: usize = 4;
-
-/// Ports the NEON `GGML_F32x4_REDUCE` (simd-mappings.h:349 @c1d0e7a00):
-/// halve, halve, then one **pairwise** `vaddvq_f32`.
-///
-/// The pairwise step is load-bearing. `neon.addvq_f32` reduces as
-/// `(l0+l1)+(l2+l3)`; `@reduce(.Add, ...)` is ordered and differs on 23.5% of
-/// random lane vectors. See `CLAUDE.md`, "Porting notes".
-///
-/// The C widens the result to `ggml_float` and every caller here narrows it
-/// straight back to `float`, which is lossless, so the round trip is left
-/// out.
-pub inline fn f32VecReduce(x: *[4]f32x4) f32 {
-    x[0] = x[0] + x[2];
-    x[1] = x[1] + x[3];
-    x[0] = x[0] + x[1];
-    return neon.addvq_f32(x[0]);
-}
-
-/// A four-lane load, as `GGML_F32x4_LOAD` (simd-mappings.h:343 @c1d0e7a00).
-pub inline fn load4(p: [*]const f32) f32x4 {
-    return p[0..4].*;
 }
 
 /// Ports the `to_f32` half of `type_conversion_table`
@@ -231,53 +192,4 @@ pub inline fn sinCos(x: f32) SinCos {
     var cv: f32 = undefined;
     sincosf(x, &sv, &cv);
     return .{ .sin = sv, .cos = cv };
-}
-
-/// Whether the reference compiler runs the **vectorized** form of a plain C
-/// loop that reduces `acc += a[i] * b[i]` while storing to `store[i]`.
-///
-/// The loop vectorizer turns such a loop into a strict in-order reduction:
-/// groups of four products are rounded (`fmul.4s`) and added one lane at a
-/// time, and only what is left over runs scalar, fused (`fmadd`). But it only
-/// takes that form when two runtime guards pass, read off the LLVM IR of the
-/// same loop compiled by the same toolchain:
-///
-/// - at least `features.strict_loop.group` iterations -- four on an Apple
-///   core, eight at `generic` -- else the scalar loop runs throughout; and
-/// - for every array the loop loads, `(store_row - load_row)` as an
-///   **unsigned** byte difference is at least the vector body's footprint,
-///   64 bytes on an Apple core and 32 at `generic`. A load that starts
-///   closer below the store could be overwritten before it is read, so the
-///   loop falls back to scalar.
-///
-/// When it does vectorize, products are rounded in groups of
-/// `features.strict_loop.group` and the remainder fused; `strictSplit`
-/// gives where that changes.
-///
-/// The second guard is not academic. `ssm_scan` reads the previous state from
-/// the buffer it is writing for every token after the first (`s0 = s`), so
-/// the difference is zero and those tokens take the all-fused scalar loop
-/// while the first one does not.
-///
-/// Parameters:
-/// - `trip`: the loop's iteration count.
-/// - `store`: the first address the loop stores to.
-/// - `loads`: the first address of each array the loop loads.
-///
-/// Return: true when the vectorized form runs.
-pub inline fn strictLoopVectorized(trip: i64, store: *const anyopaque, loads: []const *const anyopaque) bool {
-    if (trip < features.strict_loop.group) return false;
-    const st = @intFromPtr(store);
-    for (loads) |l| {
-        if (st -% @intFromPtr(l) < features.strict_loop.footprint) return false;
-    }
-    return true;
-}
-
-/// Where a vectorized strict loop of `trip` iterations starting at `start`
-/// stops rounding and starts fusing: past whole groups of
-/// `features.strict_loop.group`. See `strictLoopVectorized`.
-pub inline fn strictSplit(start: i64, trip: i64) i64 {
-    const group: i64 = features.strict_loop.group;
-    return start + trip - @rem(trip, group);
 }

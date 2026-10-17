@@ -152,8 +152,8 @@ cli/                 the Zig CLI — stays outside src/, as it is now
 Tracked here so they are not silently lost:
 
 - ~~**`common/jinja/`** (6,349 lines).~~ No longer deferred, and no longer ported: Decision 25 takes `inferise/zigjinja` instead, a pure-Zig Jinja2 implementation. That removes 6,349 lines of C++ from the port entirely, at the cost of one dependency, explicitly excepted from the no-dependency rule by Decision 27.
-- **`src/models/`** beyond `qwen35.cpp` (37,921 lines across 150 files). Decision 5.
-- **Non-arm64 CPU backends** (`arch/x86` and friends). Needed for Stage 5's Linux targets.
+- ~~**`src/models/`** beyond `qwen35.cpp` (37,921 lines across 150 files).~~ No longer deferred: every architecture is ported (Decision 36's first follow-on, "What happens next" item 12).
+- ~~**Non-arm64 CPU backends** (`arch/x86` and friends).~~ No longer deferred: x86_64 is Stage 5 steps 5–6 (Decisions 51–53).
 
 ---
 
@@ -233,13 +233,10 @@ Stage 3's six units: `ggml-alloc.c`, `ggml.c` (381 symbols), `ggml-quants.c`
 `ggml_base_sources` and `ggml_cpu_c_sources` in `build/llamacpp.zig` are both
 empty. `scripts/port-coverage` reports the counts.
 
-**Two Stage 0 items remain**, both cheap and both still open:
-
-- **Pin `llama.cpp/` as a submodule at v0.3.0** (Decision 3). It is an
-  untracked nested clone. `main` has no commits yet, so pinning is free now and
-  expensive later.
-- **`scripts/parity-port` still points at the retired Apple-clang CMake
-  reference** and needs repointing at `llama.cpp.zmake` (Decision 17).
+**Stage 0's two follow-ups are done**: `llama.cpp/` is a submodule pinned at
+`c1d0e7a00` (v0.3.0, Decision 3), and `scripts/parity-port` diffs against
+`llama.cpp.zmake` (Decision 17), with `scripts/check-reference-pin` aborting
+any bit-level gate whose reference checkout has drifted from that pin.
 
 ---
 
@@ -1220,13 +1217,21 @@ small, and it is wrong today -- in its numerics and in its host arms.
    reference and are skipped, with a message, where it is absent; what they
    compare is structure, which the Mac covers. `validate`'s `sched-diff`
    line also no longer swallows a failure.
-5. **The SIMD layer.** Replace the five direct `neon.zig` imports with one
-   `cpu/simd.zig` that is `simd-mappings.h`: the vector types, `STEP`,
-   `EPR`, the reduction and the F16 conversion, chosen at comptime on
-   `builtin.cpu` — and the vectorizer's width for each strict loop, which
-   step 2 will have made a function of the CPU. This is a refactor on
-   ARM — every gate must stay bit-identical at `baseline`, `apple_m3` and
-   `generic` — and it is what makes x86 a matter of adding an arm.
+5. ~~**The SIMD layer.**~~ — **done** (`NOTES.md`, "Stage 5 step 5").
+   `cpu/simd.zig` is `simd-mappings.h`'s `GGML_SIMD` block: `F32` and
+   `F16` (both NEON `F16` arms, `F16.half_precision` telling them apart),
+   chosen at comptime on `builtin.cpu`, plus the vectorizer's strict-loop
+   shape, moved there from `features.zig`, `vec.zig` and `ops/common.zig`.
+   Six files imported `neon.zig` directly, not five, and two more
+   hard-coded `GGML_F32_EPR` as 4; all of them now go through it. The two
+   float dot products, `rwkv_wkv7` and `ssm_scan` are written against
+   `F32`/`F16` as the C writes them, which merged `ggml_vec_dot_f16`'s two
+   arms into one body. Gate: **the machine code did not change** — the
+   port's `libggml.a` at `baseline`, `apple_m3` and `generic` disassembles
+   identically before and after, apart from a register rename in the two
+   float dot products' vector loops — plus `zig build test` at all three
+   and `make validate`. Any other architecture is a compile error naming
+   step 6.
    The x86 reference is ready (Decision 52, `NOTES.md`, "Decision 52:
    `llama.cpp.zmake` builds x86_64"): `make -C llama.cpp.zmake
    linux-x86_64`, AVX2 by default, `X86_CPU=x86_64_v4` for AVX-512, both
@@ -1497,8 +1502,9 @@ Zig's libc++ into each slice, which nothing needs since the swap.
 
 **Next:** Stage 5, cross-platform -- measured; see "Stage 5 — Cross-platform"
 for where each target stands and the order of work. Step 1 found that
-the port was not bit-exact on Linux arm64's baseline CPU; step 2 made it so.
-Next is step 3, the Linux host arms.
+the port was not bit-exact on Linux arm64's baseline CPU; step 2 made it so;
+steps 3 and 4 are written and wait on the GB10 pickup; step 5 put the SIMD
+layer in. Next is step 6, x86_64 on the laptop.
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:
 

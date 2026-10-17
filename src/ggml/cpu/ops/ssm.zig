@@ -9,19 +9,20 @@
 //! # Two different state updates, on purpose
 //!
 //! `ssm_scan`'s Mamba-2 arm runs its `d_state` loop through `GGML_SIMD` for
-//! the first `nc & ~15` elements and a scalar loop for the rest. They do not
-//! compute the same thing:
+//! the first `nc & ~(GGML_F32_STEP - 1)` elements and a scalar loop for the
+//! rest. They do not compute the same thing:
 //!
 //! - the **vector body** is `vmulq`, `vmulq`, `vaddq`, then `vfmaq` into one
-//!   of four accumulators. Separate intrinsics are separate IR instructions;
-//!   `-ffp-contract=on` fuses within one expression only, so the state is
-//!   **two roundings and an add**.
+//!   of `GGML_F32_ARR` accumulators. Separate intrinsics are separate IR
+//!   instructions; `-ffp-contract=on` fuses within one expression only, so
+//!   the state is **two roundings and an add**.
 //! - the **scalar tail** is `(s0[i] * dA) + (B[ig] * x_dt)`, one expression,
 //!   which clang fuses on its left product.
 //!
-//! Both are reproduced as the C has them. The four accumulators are reduced
-//! by the NEON `GGML_F32x4_REDUCE` tree and the pairwise `vaddvq_f32`, and the
-//! tail then adds on to that `sumf`.
+//! Both are reproduced as the C has them, the body against `simd.F32`. The
+//! accumulators are reduced by `GGML_F32_VEC_REDUCE` -- on NEON the halving
+//! tree and the pairwise `vaddvq_f32` -- and the tail then adds on to that
+//! `sumf`.
 //!
 //! # Loop index names
 //!
@@ -32,12 +33,12 @@ const std = @import("std");
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");
-const neon = @import("../quants/arm/neon.zig");
+const simd = @import("../simd.zig");
 
 const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
-const f32x4 = neon.f32x4;
+const F32 = simd.F32;
 
 extern fn expf(x: f32) f32;
 extern fn logf(x: f32) f32;
@@ -62,8 +63,8 @@ inline fn softplus(input: f32) f32 {
 ///
 /// `sumf += s[...] * c[...]` is one expression, but the loop is a
 /// contiguous reduction and the reference compiler vectorizes it: products in
-/// groups of `features.strict_loop.group` are rounded, only the remainder is
-/// fused (`vec.strictDot`).
+/// groups of `simd.strict_loop.group` are rounded, only the remainder is
+/// fused (`simd.strictDot`).
 /// Fusing every step was 1 ULP out on 61 of 160 outputs under `make
 /// ops-diff`. The C says why it does not call `ggml_vec_dot_f32`: that one
 /// sums in `double`.
@@ -112,7 +113,7 @@ fn ssmConvF32(params: *const ComputeParams, dst: *Tensor) void {
             while (j1 < ir) : (j1 += 1) {
                 // rowwise dot product
                 // d_conv
-                const sumf = vec.strictDot(s + @as(usize, @intCast(j1 * ncs)), cw + @as(usize, @intCast(j1 * nc)), 0, @intCast(nc), 0.0);
+                const sumf = simd.strictDot(s + @as(usize, @intCast(j1 * ncs)), cw + @as(usize, @intCast(j1 * nc)), 0, @intCast(nc), 0.0);
                 x[@intCast(j1)] = sumf;
             }
         }
@@ -129,11 +130,6 @@ pub export fn ggml_compute_forward_ssm_conv(params: *const ComputeParams, dst: *
 
 // -----------------------------------------------------------------------------
 // ssm_scan
-
-/// `GGML_F32_STEP` and `GGML_F32_EPR` (simd-mappings.h:337, 338 @c1d0e7a00),
-/// the NEON arm.
-const f32_step: i64 = 16;
-const f32_epr: usize = 4;
 
 /// Ports `ggml_compute_forward_ssm_scan_f32` (ops.cpp:9634 @c1d0e7a00). The
 /// Mamba-2 arm is the `GGML_SIMD` NEON one; the Mamba-1 arm is the
@@ -224,47 +220,51 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
                         const x_dt = x[iiu] * dt_soft_plus;
                         var sumf: f32 = 0.0;
 
-                        const np = nc & ~(f32_step - 1);
+                        const np = nc & ~@as(i64, F32.step - 1);
 
-                        var sum: [4]f32x4 = @splat(@as(f32x4, @splat(0.0)));
+                        var sum: [F32.arr]F32.Vec = @splat(F32.zero);
 
-                        const adA: f32x4 = @splat(dA);
-                        const axdt: f32x4 = @splat(x_dt);
+                        const adA = F32.set1(dA);
+                        const axdt = F32.set1(x_dt);
+
+                        var ax: [F32.arr]F32.Vec = undefined;
+                        var ay: [F32.arr]F32.Vec = undefined;
+                        var az: [F32.arr]F32.Vec = undefined;
 
                         var i: i64 = 0;
-                        while (i < np) : (i += f32_step) {
-                            for (0..4) |j| {
-                                const so: usize = @as(usize, @intCast(i + ii * nc)) + j * f32_epr;
-                                const go: usize = @as(usize, @intCast(i + g * nc)) + j * f32_epr;
-                                var ax: f32x4 = s0[so..][0..4].*;
-                                var ay: f32x4 = B[go..][0..4].*;
-                                const az: f32x4 = C[go..][0..4].*;
+                        while (i < np) : (i += F32.step) {
+                            for (0..F32.arr) |j| {
+                                const so: usize = @as(usize, @intCast(i + ii * nc)) + j * F32.epr;
+                                const go: usize = @as(usize, @intCast(i + g * nc)) + j * F32.epr;
+                                ax[j] = F32.load(s0 + so);
+                                ay[j] = F32.load(B + go);
+                                az[j] = F32.load(C + go);
 
-                                ax = ax * adA;
-                                ay = ay * axdt;
+                                ax[j] = F32.mul(ax[j], adA);
+                                ay[j] = F32.mul(ay[j], axdt);
 
-                                ax = ax + ay;
+                                ax[j] = F32.add(ax[j], ay[j]);
 
-                                sum[j] = neon.fma_f32(sum[j], ax, az);
+                                sum[j] = F32.fma(sum[j], ax[j], az[j]);
 
-                                s[so..][0..4].* = ax;
+                                F32.store(s + so, ax[j]);
                             }
                         }
 
                         // reduce sum0..sum3 to sum0
-                        sumf = common.f32VecReduce(&sum);
+                        sumf = F32.reduce(&sum);
 
                         // d_state
                         //
                         // The compiler vectorizes this tail when its guards
                         // pass, rounding `state * C` in groups of
-                        // `features.strict_loop.group`; see
-                        // `common.strictLoopVectorized`. `state` itself is
+                        // `simd.strict_loop.group`; see
+                        // `simd.strictLoopVectorized`. `state` itself is
                         // elementwise and fused either way.
                         const t0: usize = @intCast(np + ii * nc);
                         const tg: usize = @intCast(np + g * nc);
-                        const split: i64 = if (common.strictLoopVectorized(nc - np, s + t0, &.{ s0 + t0, B + tg, C + tg }))
-                            common.strictSplit(np, nc - np)
+                        const split: i64 = if (simd.strictLoopVectorized(nc - np, s + t0, &.{ s0 + t0, B + tg, C + tg }))
+                            simd.strictSplit(np, nc - np)
                         else
                             np;
                         var j0: i64 = np;
@@ -302,12 +302,12 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
                         // Vectorized by the compiler despite the `expf` --
                         // each lane's call is scalarized -- when its guards
                         // pass: then `state * C` is rounded in groups of
-                        // `features.strict_loop.group` and only the remainder fused. Measured on the
-                        // reference `ops.o`; see `common.strictLoopVectorized`.
+                        // `simd.strict_loop.group` and only the remainder fused. Measured on the
+                        // reference `ops.o`; see `simd.strictLoopVectorized`.
                         const r0: usize = @intCast(ii * nc);
                         const rg: usize = @intCast(g * nc);
-                        const split: i64 = if (common.strictLoopVectorized(nc, s + r0, &.{ s0 + r0, A + @as(usize, @intCast(h * nc)), B + rg, C + rg }))
-                            common.strictSplit(0, nc)
+                        const split: i64 = if (simd.strictLoopVectorized(nc, s + r0, &.{ s0 + r0, A + @as(usize, @intCast(h * nc)), B + rg, C + rg }))
+                            simd.strictSplit(0, nc)
                         else
                             0;
                         var j0: i64 = 0;

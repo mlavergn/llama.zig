@@ -14,6 +14,7 @@
 //! - `traits.zig`    — the per-type kernel table
 //! - `convert.zig`   — float conversions and the lookup tables
 //! - `features.zig`  — what the target CPU can do, and one-time init
+//! - `simd.zig`      — `simd-mappings.h`'s vector layer, chosen per target
 //! - `tensor.zig`    — host reads and writes of single elements
 //! - `mulmat.zig`    — matrix multiplication, plain and expert-routed
 //! - `forward.zig`   — the op dispatch
@@ -71,6 +72,7 @@ test {
     _ = @import("traits.zig");
     _ = @import("convert.zig");
     _ = @import("features.zig");
+    _ = @import("simd.zig");
     _ = @import("tensor.zig");
     _ = @import("mulmat.zig");
     _ = @import("forward.zig");

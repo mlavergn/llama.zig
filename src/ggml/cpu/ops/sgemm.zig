@@ -52,7 +52,7 @@ const common = @import("common.zig");
 const defs = @import("../defs.zig");
 const threading = @import("../threading.zig");
 const convert = @import("../convert.zig");
-const neon = @import("../quants/arm/neon.zig");
+const neon = @import("../simd.zig").neon;
 
 const c = impl.c;
 const ComputeParams = common.ComputeParams;

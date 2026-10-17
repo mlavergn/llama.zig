@@ -16,7 +16,7 @@
 
 const std = @import("std");
 const impl = @import("../../impl.zig");
-const neon = @import("../quants/arm/neon.zig");
+const simd = @import("../simd.zig");
 
 const c = impl.c;
 
@@ -197,9 +197,10 @@ pub inline fn mul_f32(n: i64, z: [*]f32, x: [*]const f32, y: [*]const f32) void 
 // expression at `-ffp-contract=on`, and clang emits `fmadd` for it — so the
 // whole range is one fused multiply-add per element.
 //
-// The `f16` arms are different: with `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`
-// the body computes **in half precision** (`vfmaq_f16`, `vmulq_f16`) and the
-// tail widens to `f32`. That split is real and is reproduced. Without it --
+// The `f16` arms are different where `simd.F16.half_precision` holds: with
+// `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC` the body computes **in half
+// precision** (`vfmaq_f16`, `vmulq_f16`) and the tail widens to `f32`. That
+// split is real and is reproduced, at `simd.F16.step`. Without it --
 // `generic`, Zig's `aarch64-linux` baseline -- `simd-mappings.h` takes its
 // `GGML_F32Cx4` arm (simd-mappings.h:310 @c1d0e7a00): the body widens four halves,
 // computes in `f32` and narrows on store, which is what the tail does, so
@@ -216,12 +217,12 @@ pub inline fn mad_f32(n: i64, y: [*]f32, x: [*]const f32, v: f32) void {
 /// Ports `ggml_vec_mad_f16` (vec.h:439 @c1d0e7a00), the `GGML_SIMD` NEON arm
 /// with `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`.
 ///
-/// Elements below `n & ~31` go through `vfmaq_f16` with `v` rounded to `f16`
-/// first — a fused multiply-add **in half precision**. The rest widen to
-/// `f32`, fuse there, and narrow once.
+/// Elements below `n & ~(GGML_F16_STEP - 1)` go through `vfmaq_f16` with `v`
+/// rounded to `f16` first — a fused multiply-add **in half precision**. The
+/// rest widen to `f32`, fuse there, and narrow once.
 pub inline fn mad_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, v: f32) void {
     const nn: usize = @intCast(n);
-    const np = if (comptime neon.has_fp16_va) nn & ~@as(usize, f16_step - 1) else 0;
+    const np = if (comptime simd.F16.half_precision) nn & ~@as(usize, simd.F16.step - 1) else 0;
     const vx: f16 = @floatCast(v);
 
     var i: usize = 0;
@@ -234,10 +235,6 @@ pub inline fn mad_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, v:
         y[i] = impl.fp32ToFp16(@mulAdd(f32, impl.fp16ToFp32(x[i]), v, impl.fp16ToFp32(y[i])));
     }
 }
-
-/// `GGML_F16_STEP` (simd-mappings.h:264 @c1d0e7a00), the
-/// `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC` arm: four `float16x8_t` per step.
-const f16_step: usize = 32;
 
 /// `GGML_VEC_MAD_UNROLL` (vec.h:51 @c1d0e7a00).
 pub const mad_unroll: usize = 32;
@@ -298,7 +295,7 @@ pub inline fn scale_f32(n: i64, y: [*]f32, v: f32) void {
 /// half precision** by `v` rounded to `f16`, the tail in `f32`.
 pub inline fn scale_f16(n: i64, y: [*]c.ggml_fp16_t, v: f32) void {
     const nn: usize = @intCast(n);
-    const np = if (comptime neon.has_fp16_va) nn & ~@as(usize, f16_step - 1) else 0;
+    const np = if (comptime simd.F16.half_precision) nn & ~@as(usize, simd.F16.step - 1) else 0;
     const vx: f16 = @floatCast(v);
 
     var i: usize = 0;
@@ -560,15 +557,6 @@ pub const cvar_f32 = tables.ggml_vec_cvar_f32;
 pub const soft_max_f32 = tables.ggml_vec_soft_max_f32;
 pub const log_soft_max_f32 = tables.ggml_vec_log_soft_max_f32;
 
-/// A plain C reduction loop `acc += x[i] * y[i]` over contiguous memory, as
-/// the reference compiler emits it: rounded groups of four, then a fused
-/// remainder. See `vectorizedTail` in `cpu/vec.zig` for the measurement.
-///
-/// **Only for loops the compiler actually vectorizes**, which is a cost-model
-/// decision, not something the source states. Each call site is one that
-/// `make ops-diff` showed needs it.
-pub const strictDot = tables.vectorizedTail;
-
 // -----------------------------------------------------------------------------
 // Unit Tests
 //
@@ -669,7 +657,7 @@ test "mad_f16 and scale_f16 compute the first 32 in half precision" {
     // body computes in `f32` too, so element 31 is the tail's value.
     const v: f32 = 1.0 + 0x1.8p-11;
     const tail: f32 = 3.0 + 0x1p-9;
-    const body: f32 = if (neon.has_fp16_va) 3.0 + 0x1p-8 else tail;
+    const body: f32 = if (simd.F16.half_precision) 3.0 + 0x1p-8 else tail;
 
     var y: [33]c.ggml_fp16_t = undefined;
     var x: [33]c.ggml_fp16_t = undefined;
