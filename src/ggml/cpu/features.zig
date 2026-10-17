@@ -62,73 +62,85 @@ pub var disable_fusion = false;
 // -----------------------------------------------------------------------------
 // x86 and friends
 //
-// All constant-false on this target. They are written out rather than folded
-// into one stub because they are separate C symbols and the backend registry
-// calls every one of them by name to build its feature string.
+// Each is the C's `#if defined(__X__) return 1`, asked of Zig's x86 feature
+// set -- the one clang derives `__X__` from -- and constant-false off x86.
+// They are written out rather than folded into one table because they are
+// separate C symbols and the backend registry calls every one of them by
+// name to build its feature string.
+
+/// True when this build targets x86_64 and the named feature is enabled: the
+/// C's `#if defined(__AVX2__)` and friends.
+inline fn x86Has(comptime name: []const u8) bool {
+    if (builtin.cpu.arch != .x86_64) return false;
+    return std.Target.x86.featureSetHas(
+        builtin.cpu.features,
+        @field(std.Target.x86.Feature, name),
+    );
+}
 
 /// Ports `ggml_cpu_has_avx` (ggml-cpu.c:3599 @c1d0e7a00).
 pub export fn ggml_cpu_has_avx() c_int {
-    return 0;
+    return @intFromBool(x86Has("avx"));
 }
 
 /// Ports `ggml_cpu_has_avx_vnni` (ggml-cpu.c:3607 @c1d0e7a00).
 pub export fn ggml_cpu_has_avx_vnni() c_int {
-    return 0;
+    return @intFromBool(x86Has("avxvnni"));
 }
 
 /// Ports `ggml_cpu_has_avx2` (ggml-cpu.c:3615 @c1d0e7a00).
 pub export fn ggml_cpu_has_avx2() c_int {
-    return 0;
+    return @intFromBool(x86Has("avx2"));
 }
 
 /// Ports `ggml_cpu_has_avx512` (ggml-cpu.c:3623 @c1d0e7a00).
 pub export fn ggml_cpu_has_avx512() c_int {
-    return 0;
+    return @intFromBool(x86Has("avx512f"));
 }
 
 /// Ports `ggml_cpu_has_avx512_vbmi` (ggml-cpu.c:3631 @c1d0e7a00).
 pub export fn ggml_cpu_has_avx512_vbmi() c_int {
-    return 0;
+    return @intFromBool(x86Has("avx512vbmi"));
 }
 
 /// Ports `ggml_cpu_has_avx512_vnni` (ggml-cpu.c:3639 @c1d0e7a00).
 pub export fn ggml_cpu_has_avx512_vnni() c_int {
-    return 0;
+    return @intFromBool(x86Has("avx512vnni"));
 }
 
 /// Ports `ggml_cpu_has_avx512_bf16` (ggml-cpu.c:3647 @c1d0e7a00).
 pub export fn ggml_cpu_has_avx512_bf16() c_int {
-    return 0;
+    return @intFromBool(x86Has("avx512bf16"));
 }
 
 /// Ports `ggml_cpu_has_amx_int8` (ggml-cpu.c:3655 @c1d0e7a00).
 pub export fn ggml_cpu_has_amx_int8() c_int {
-    return 0;
+    return @intFromBool(x86Has("amx_int8"));
 }
 
 /// Ports `ggml_cpu_has_bmi2` (ggml-cpu.c:3663 @c1d0e7a00).
 pub export fn ggml_cpu_has_bmi2() c_int {
-    return 0;
+    return @intFromBool(x86Has("bmi2"));
 }
 
 /// Ports `ggml_cpu_has_fma` (ggml-cpu.c:3671 @c1d0e7a00). The x86 `__FMA__`, not ARM's.
 pub export fn ggml_cpu_has_fma() c_int {
-    return 0;
+    return @intFromBool(x86Has("fma"));
 }
 
 /// Ports `ggml_cpu_has_f16c` (ggml-cpu.c:3703 @c1d0e7a00).
 pub export fn ggml_cpu_has_f16c() c_int {
-    return 0;
+    return @intFromBool(x86Has("f16c"));
 }
 
 /// Ports `ggml_cpu_has_sse3` (ggml-cpu.c:3735 @c1d0e7a00).
 pub export fn ggml_cpu_has_sse3() c_int {
-    return 0;
+    return @intFromBool(x86Has("sse3"));
 }
 
 /// Ports `ggml_cpu_has_ssse3` (ggml-cpu.c:3743 @c1d0e7a00).
 pub export fn ggml_cpu_has_ssse3() c_int {
-    return 0;
+    return @intFromBool(x86Has("ssse3"));
 }
 
 /// Ports `ggml_cpu_has_vsx` (ggml-cpu.c:3751 @c1d0e7a00), POWER9.

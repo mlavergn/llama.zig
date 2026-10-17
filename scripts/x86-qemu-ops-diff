@@ -1,0 +1,79 @@
+#!/bin/bash
+# `ops-diff` for x86_64, run under QEMU on this Mac until the x86 laptop is
+# here (PLAN.md, Stage 5 step 6; Decision 51).
+#
+# Cross-builds the reference (`llama.cpp.zmake`) and the port for
+# `x86_64-linux-gnu` at X86_CPU, links `harness/ops_dump.c` against each, and
+# runs scripts/ops-diff's comparison -- the reference writes the quantized
+# blocks, the port replays them, one thread then three -- inside the amd64
+# Debian image of the podman VM, where QEMU's user-mode emulator runs x86
+# binaries. QEMU's IEEE arithmetic is exact and the x86 code uses no
+# approximate instruction, so a difference here is the port's; QEMU has no
+# AVX-512, so X86_CPU=x86_64_v4 cannot run here.
+#
+# Usage: scripts/x86-qemu-ops-diff
+#   X86_CPU=x86_64_v3        the level, the only one QEMU can run
+#   X86_INCOMPLETE=1         build the port with -Dx86-incomplete (development)
+#   X86_OPS_DIFF_OUT=<dir>   keep both outputs and the diff
+# Requires: podman with its machine running and the image
+#   docker.io/library/debian:stable-slim-amd64 (see CLAUDE.md).
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+X86_CPU="${X86_CPU:-x86_64_v3}"
+IMAGE=docker.io/library/debian:stable-slim-amd64
+
+. "$ROOT/scripts/check-reference-pin"
+
+command -v podman >/dev/null || { echo "podman is not installed" >&2; exit 2; }
+podman image exists "$IMAGE" || { echo "missing image $IMAGE -- see CLAUDE.md" >&2; exit 2; }
+podman info >/dev/null 2>&1 || { echo "the podman machine is not running -- podman machine start" >&2; exit 2; }
+
+out="$ROOT/zig-out/x86-qemu/$X86_CPU"
+mkdir -p "$out"
+ref_prefix="$out/ref"
+port_prefix="$out/port"
+
+port_flags=(--release=fast -Dtarget=x86_64-linux-gnu -Dcpu="$X86_CPU")
+[ -n "${X86_INCOMPLETE:-}" ] && port_flags+=(-Dx86-incomplete)
+
+(cd llama.cpp.zmake && zig build lib --release=fast -Dtarget=x86_64-linux-gnu -Dcpu="$X86_CPU" -p "$ref_prefix") \
+    || { echo "FAIL: could not build the x86 reference" >&2; exit 1; }
+zig build reference "${port_flags[@]}" -p "$port_prefix" \
+    || { echo "FAIL: could not build the x86 port (pending kernels are a compile error without X86_INCOMPLETE=1)" >&2; exit 1; }
+
+run="$out/run"
+rm -rf "$run" && mkdir -p "$run"
+LINK=(-std=c11 -w -O2 -I llama.cpp/ggml/include -I llama.cpp/ggml/src -lc++ -lgcc_s -lm -lpthread)
+zig cc -target x86_64-linux-gnu -mcpu="$X86_CPU" harness/ops_dump.c "$ref_prefix/lib/libggml.a" -o "$run/ref" "${LINK[@]}" \
+    || { echo "FAIL: could not link against the x86 reference" >&2; exit 1; }
+zig cc -target x86_64-linux-gnu -mcpu="$X86_CPU" harness/ops_dump.c "$port_prefix/lib/libggml.a" -o "$run/port" "${LINK[@]}" \
+    || { echo "FAIL: could not link against the x86 port" >&2; exit 1; }
+
+cat > "$run/run.sh" <<'EOF'
+#!/bin/bash
+cd /w || exit 2
+for nt in 1 3; do
+    OPS_THREADS=$nt stdbuf -oL ./ref  write-q q.bin > ref.$nt.txt  2>ref.err  || { echo "FAIL: reference run aborted at $nt thread(s)"; tail -3 ref.err; exit 1; }
+    OPS_THREADS=$nt stdbuf -oL ./port read-q  q.bin > port.$nt.txt 2>port.err || { echo "FAIL: ported run aborted at $nt thread(s)"; tail -3 port.err; exit 1; }
+    sed "s/^/[nt=$nt] /" ref.$nt.txt  >> ref.txt
+    sed "s/^/[nt=$nt] /" port.$nt.txt >> port.txt
+done
+EOF
+chmod +x "$run/run.sh"
+podman run --rm --platform linux/amd64 -v "$run":/w:Z "$IMAGE" /w/run.sh || exit 1
+
+if [ -n "${X86_OPS_DIFF_OUT:-}" ]; then
+    mkdir -p "$X86_OPS_DIFF_OUT" && cp "$run/ref.txt" "$run/port.txt" "$X86_OPS_DIFF_OUT/"
+fi
+total=$(grep -c 'hash=' "$run/ref.txt")
+if diff -u "$run/ref.txt" "$run/port.txt" > "$run/diff.txt"; then
+    echo "PASS: $total op results identical at $X86_CPU under QEMU, ported vs reference"
+    exit 0
+fi
+differ=$(grep -c '^-\[' "$run/diff.txt")
+echo "FAIL: $differ of $total op results differ at $X86_CPU under QEMU"
+grep '^-\[' "$run/diff.txt" | sed -E 's/^-\[nt=[0-9]\] //; s/ +amp=.*//' | sort -u | head -20 | sed 's/^/  /'
+[ -n "${X86_INCOMPLETE:-}" ] && echo "  (built with -Dx86-incomplete: each pending kernel's stand-in is expected to differ)"
+exit 1

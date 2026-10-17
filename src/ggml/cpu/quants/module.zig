@@ -27,6 +27,7 @@
 //! are `_generic` fallbacks the NEON file replaces.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 comptime {
     _ = @import("rows.zig");
@@ -34,8 +35,14 @@ comptime {
     _ = @import("k.zig");
     _ = @import("ternary.zig");
     _ = @import("iq.zig");
-    // ggml-cpu/arch/arm/quants.c, split across src/ggml/cpu/quants/arm/:
-    _ = @import("arm/module.zig");
+    // The architecture's own kernels, as the C compiles one `arch/` file:
+    // ggml-cpu/arch/arm/quants.c across quants/arm/, arch/x86/quants.c
+    // across quants/x86/.
+    switch (builtin.cpu.arch) {
+        .aarch64 => _ = @import("arm/module.zig"),
+        .x86_64 => _ = @import("x86/module.zig"),
+        else => @compileError("no quant kernels for " ++ @tagName(builtin.cpu.arch)),
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -48,6 +55,10 @@ test {
     _ = @import("k.zig");
     _ = @import("ternary.zig");
     _ = @import("iq.zig");
-    _ = @import("arm/module.zig");
+    switch (builtin.cpu.arch) {
+        .aarch64 => _ = @import("arm/module.zig"),
+        .x86_64 => _ = @import("x86/module.zig"),
+        else => {},
+    }
     _ = @import("testing.zig");
 }

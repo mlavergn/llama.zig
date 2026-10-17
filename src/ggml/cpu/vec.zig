@@ -59,6 +59,7 @@
 //! `vec_golden.zig` captures a second length that leaves a remainder.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const simd = @import("simd.zig");
 const neon = simd.neon;
@@ -67,51 +68,97 @@ const c = impl.c;
 const F32 = simd.F32;
 const F16 = simd.F16;
 
-const f32x4 = neon.f32x4;
-
 /// Mirrors `ggml_float` (vec.h:15 @c1d0e7a00), the `double` the
 /// reductions accumulate in. Named rather than written as `f64` so the C's
 /// casts stay readable at each site.
 const GgmlFloat = f64;
 
 // -----------------------------------------------------------------------------
-// The NEON intrinsics this file needs beyond `quants/arm/neon.zig`
+// The vector width of `vec.cpp`'s own arms
 //
 // `vec.cpp`'s SiLU and softmax arms and `vec.h`'s `ggml_v_expf` are written
-// in NEON intrinsics directly, not through `simd-mappings.h`, so they use
-// these rather than `simd.F32`. That module is scoped to `arch/arm/quants.c`
-// and says so, so `vec.cpp`'s additions live here rather than widening it.
-// The two whose semantics are subtle -- the pairwise `addvq_f32` and the
-// fused `fma_f32` -- are imported from it rather than duplicated, because
-// getting either wrong is a last-bit bug and it is already documented there.
+// in each architecture's intrinsics directly, not through `simd-mappings.h`:
+// the NEON arm four lanes at a time, the `__AVX2__ && __FMA__` arm eight.
+// The arithmetic is the same lane by lane -- the AVX2 `ggml_v_expf` is the
+// NEON one with every fused term in the same place -- so it is written once
+// here over `VF`, and only the width and the horizontal sum differ.
 
-/// Ports `vdupq_n_f32`.
-inline fn dup_n_f32(x: f32) f32x4 {
+/// Whether this build takes the `__AVX2__ && __FMA__` arms, refusing an
+/// x86 level whose arm is not ported.
+const avx2 = blk: {
+    if (builtin.cpu.arch != .x86_64) break :blk false;
+    const has = std.Target.x86.featureSetHas;
+    if (has(builtin.cpu.features, .avx512f))
+        @compileError("vec.cpp's AVX-512 arms are not ported yet (Decision 53: AVX2 first)");
+    if (!has(builtin.cpu.features, .avx2) or !has(builtin.cpu.features, .fma))
+        @compileError("vec.cpp's x86 arms are ported only for AVX2 with FMA (x86-64-v3)");
+    break :blk true;
+};
+
+/// Lanes per step of the SiLU and softmax arms: `float32x4_t` or `__m256`.
+const lanes = switch (builtin.cpu.arch) {
+    .aarch64 => 4,
+    .x86_64 => if (avx2) 8 else unreachable,
+    else => @compileError("vec.cpp has no vector arm ported for " ++ @tagName(builtin.cpu.arch)),
+};
+
+/// `float32x4_t` or `__m256`.
+const VF = @Vector(lanes, f32);
+const VU = @Vector(lanes, u32);
+
+/// Ports `vdupq_n_f32` and `_mm256_set1_ps`.
+inline fn dup_n_f32(x: f32) VF {
     return @splat(x);
 }
 
-/// Ports `vaddq_f32`.
-inline fn add_f32(a: f32x4, b: f32x4) f32x4 {
+/// Ports `vaddq_f32` and `_mm256_add_ps`.
+inline fn add_f32(a: VF, b: VF) VF {
     return a + b;
 }
 
-/// Ports `vsubq_f32`.
-inline fn sub_f32(a: f32x4, b: f32x4) f32x4 {
+/// Ports `vsubq_f32` and `_mm256_sub_ps`.
+inline fn sub_f32(a: VF, b: VF) VF {
     return a - b;
 }
 
-/// Ports `vdivq_f32`.
-inline fn div_f32(a: f32x4, b: f32x4) f32x4 {
+/// Ports `vmulq_f32` and `_mm256_mul_ps`.
+inline fn mul_f32(a: VF, b: VF) VF {
+    return a * b;
+}
+
+/// Ports `vdivq_f32` and `_mm256_div_ps`.
+inline fn div_f32(a: VF, b: VF) VF {
     return a / b;
 }
 
-/// Ports `vfmsq_f32`: `a - b * cc`, **fused**.
+/// Ports `vfmaq_f32(a, b, cc)` and `_mm256_fmadd_ps(b, cc, a)`: `a + b * cc`,
+/// **fused**.
+inline fn fma_f32(a: VF, b: VF, cc: VF) VF {
+    return @mulAdd(VF, b, cc, a);
+}
+
+/// Ports `vfmsq_f32(a, b, cc)` and `_mm256_fnmadd_ps(b, cc, a)`: `a - b * cc`,
+/// **fused**.
 ///
-/// The negated counterpart of `vfmaq_f32`, and fused the same way — clang
-/// emits `fmls`, one rounding. `@mulAdd` with a negated multiplier is the
-/// same operation.
-inline fn fms_f32(a: f32x4, b: f32x4, cc: f32x4) f32x4 {
-    return @mulAdd(f32x4, -b, cc, a);
+/// The negated counterpart of `vfmaq_f32`, and fused the same way -- clang
+/// emits `fmls` and `vfnmadd`, one rounding. `@mulAdd` with a negated
+/// multiplier is the same operation.
+inline fn fms_f32(a: VF, b: VF, cc: VF) VF {
+    return @mulAdd(VF, -b, cc, a);
+}
+
+/// One step's horizontal sum, as each arm writes it.
+///
+/// NEON: `vaddvq_f32`, pairwise, `(v0+v1)+(v2+v3)`. AVX2: fold the upper
+/// 128 bits onto the lower (`h = hi + lo`), then `_mm_movehl_ps` and
+/// `_mm_movehdup_ps` give `(h0+h2)+(h1+h3)` -- a different pairing, which
+/// is visible in the last bit.
+inline fn hsum(v: VF) f32 {
+    if (comptime lanes == 4) return neon.addvq_f32(v);
+    const lo: @Vector(4, f32) = .{ v[0], v[1], v[2], v[3] };
+    const hi: @Vector(4, f32) = .{ v[4], v[5], v[6], v[7] };
+    const h = hi + lo;
+    return (h[0] + h[2]) + (h[1] + h[3]);
 }
 
 // -----------------------------------------------------------------------------
@@ -186,8 +233,13 @@ pub export fn ggml_vec_dot_f32(
 
 /// Ports `ggml_vec_dot_bf16` (vec.cpp:139 @c1d0e7a00).
 ///
-/// **No SIMD arm compiles here**, so this is the plain scalar loop the C
-/// falls back to, accumulating in `ggml_float` — a `double`, not an `f32`.
+/// On ARM **no SIMD arm compiles**, so this is the plain scalar loop the C
+/// falls back to, accumulating in `ggml_float` -- a `double`, not an `f32`.
+/// On x86-64-v3 the `__AVX2__` arm runs first: four `__m256` accumulators
+/// over steps of 32, each `c = x*y + c` as a separate `_mm256_mul_ps` and
+/// `_mm256_add_ps` -- **unfused**, read off the reference's `vmulps` and
+/// `vaddps` -- reduced `(c1+c3)+(c2+c4)`, then `hsum`, into the same
+/// `double` the scalar tail continues.
 pub export fn ggml_vec_dot_bf16(
     n: c_int,
     s: *f32,
@@ -205,7 +257,31 @@ pub export fn ggml_vec_dot_bf16(
 
     var sumf: GgmlFloat = 0;
     var i: usize = 0;
-    while (i < @as(usize, @intCast(n))) : (i += 1) {
+    const nn: usize = @intCast(n);
+    if (comptime avx2) {
+        const V8 = @Vector(8, f32);
+        // `LOAD`: widen eight `bf16` by a 16-bit shift, exactly.
+        const load = struct {
+            inline fn f(p: [*]c.ggml_bf16_t) V8 {
+                const p16: [*]const u16 = @ptrCast(p);
+                const h: @Vector(8, u16) = p16[0..8].*;
+                return @bitCast(@as(@Vector(8, u32), h) << @splat(16));
+            }
+        }.f;
+        var c1: V8 = @splat(0);
+        var c2: V8 = @splat(0);
+        var c3: V8 = @splat(0);
+        var c4: V8 = @splat(0);
+        while (i + 32 <= nn) : (i += 32) {
+            c1 = load(x + i) * load(y + i) + c1;
+            c2 = load(x + i + 8) * load(y + i + 8) + c2;
+            c3 = load(x + i + 16) * load(y + i + 16) + c3;
+            c4 = load(x + i + 24) * load(y + i + 24) + c4;
+        }
+        c1 = (c1 + c3) + (c2 + c4);
+        sumf += @as(GgmlFloat, hsum(c1));
+    }
+    while (i < nn) : (i += 1) {
         sumf += @as(GgmlFloat, impl.bf16ToFp32(x[i].bits) * impl.bf16ToFp32(y[i].bits));
     }
 
@@ -269,73 +345,81 @@ pub export fn ggml_vec_dot_f16(
 // -----------------------------------------------------------------------------
 // The vectorized exponential
 //
-// Ports `ggml_v_expf` (vec.h:1133 @c1d0e7a00), the `__ARM_NEON &&
-// __aarch64__` arm. `inline static` in the C, so it has no symbol and is
-// private here.
+// Ports `ggml_v_expf`, `ggml_v_expf` (vec.h:1133, 1215 @c1d0e7a00), the `__ARM_NEON &&
+// __aarch64__` arm and the `__AVX2__ && __FMA__` one. `inline static` in the
+// C, so it has no symbol and is private here.
 //
 // This is ARM's optimised `expf` routine, not a generic approximation: the C's
 // own comment upstream records a maximum error of 1.45358 + 0.5 ulp. Every
-// constant is a hex float and every fused site is an explicit `vfmaq_f32` or
-// `vfmsq_f32`, so the port names the same fusions with `@mulAdd` and the
-// result is bit-identical rather than merely close. That is the condition
-// `CLAUDE.md` sets for naming a fusion, and `vec_golden.zig` is the something
-// that can say it is wrong.
+// constant is a hex float and every fused site is an explicit `vfmaq_f32` /
+// `vfmsq_f32` or `_mm256_fmadd_ps` / `_mm256_fnmadd_ps`, so the port names the
+// same fusions with `@mulAdd` and the result is bit-identical rather than
+// merely close. That is the condition `CLAUDE.md` sets for naming a fusion,
+// and `vec_golden.zig` is the something that can say it is wrong.
+//
+// The two arms were read side by side: the AVX2 one computes `z`, `b`, the
+// polynomial `j` and both slow-path selects with the same operands in the
+// same order, so one body over `VF` is both. Only the fast-path test is
+// spelled differently -- `vpaddd_u64` of the mask against `_mm256_movemask_ps`
+// -- and both ask whether any lane is set.
 
-/// Ports `ggml_v_expf` (vec.h:1133 @c1d0e7a00), the NEON arm.
-inline fn vExpf(x: f32x4) f32x4 {
-    const u32x4 = @Vector(4, u32);
-    const u64x2 = @Vector(2, u64);
-
+/// Ports `ggml_v_expf`, `ggml_v_expf` (vec.h:1133, 1215 @c1d0e7a00), the
+/// NEON and AVX2 arms.
+inline fn vExpf(x: VF) VF {
     const r = dup_n_f32(0x1.8p23);
-    const z = neon.fma_f32(r, x, dup_n_f32(0x1.715476p+0));
+    const z = fma_f32(r, x, dup_n_f32(0x1.715476p+0));
     const nn = sub_f32(z, r);
     const b = fms_f32(fms_f32(x, nn, dup_n_f32(0x1.62e4p-1)), nn, dup_n_f32(0x1.7f7d1cp-20));
 
-    const e: u32x4 = @as(u32x4, @bitCast(z)) << @splat(23);
-    const k: f32x4 = @bitCast(e +% @as(u32x4, @bitCast(dup_n_f32(1))));
+    const e: VU = @as(VU, @bitCast(z)) << @splat(23);
+    const k: VF = @bitCast(e +% @as(VU, @bitCast(dup_n_f32(1))));
 
-    // `vcagtq_f32`: |n| > 126, lane-wise, as an all-ones mask.
+    // `vcagtq_f32` / `_mm256_cmp_ps(|n|, 126, _CMP_GT_OQ)`: |n| > 126,
+    // lane-wise, as an all-ones mask.
     const cmask = @abs(nn) > dup_n_f32(126);
-    const cc: u32x4 = @select(u32, cmask, @as(u32x4, @splat(0xFFFFFFFF)), @as(u32x4, @splat(0)));
+    const cc: VU = @select(u32, cmask, @as(VU, @splat(0xFFFFFFFF)), @as(VU, @splat(0)));
 
-    const u = neon.mul_f32(b, b);
-    const j = neon.fma_f32(
-        neon.mul_f32(dup_n_f32(0x1.ffffecp-1), b),
-        neon.fma_f32(
-            neon.fma_f32(dup_n_f32(0x1.fffdb6p-2), dup_n_f32(0x1.555e66p-3), b),
-            neon.fma_f32(dup_n_f32(0x1.573e2ep-5), dup_n_f32(0x1.0e4020p-7), b),
+    const u = mul_f32(b, b);
+    const j = fma_f32(
+        mul_f32(dup_n_f32(0x1.ffffecp-1), b),
+        fma_f32(
+            fma_f32(dup_n_f32(0x1.fffdb6p-2), dup_n_f32(0x1.555e66p-3), b),
+            fma_f32(dup_n_f32(0x1.573e2ep-5), dup_n_f32(0x1.0e4020p-7), b),
             u,
         ),
         u,
     );
 
-    // `vpaddd_u64(vreinterpretq_u64_u32(c))`: zero only when no lane is set,
-    // which is the fast path.
-    const cc64: u64x2 = @bitCast(cc);
-    if (cc64[0] +% cc64[1] == 0) {
-        return neon.fma_f32(k, j, k);
+    // The fast path, when no lane is set: `vpaddd_u64(vreinterpretq_u64_u32(c))`
+    // is zero, or `_mm256_movemask_ps(c)` is.
+    const any_set = if (comptime lanes == 4) blk: {
+        const cc64: @Vector(2, u64) = @bitCast(cc);
+        break :blk cc64[0] +% cc64[1] != 0;
+    } else @reduce(.Or, cmask);
+    if (!any_set) {
+        return fma_f32(k, j, k);
     }
 
-    // `vclezq_f32(n)`: n <= 0, as a mask, then `& 0x82000000`.
+    // `vclezq_f32(n)` / `_CMP_LE_OQ`: n <= 0, as a mask, then `& 0x82000000`.
     const lez = nn <= dup_n_f32(0);
-    const d: u32x4 = @select(u32, lez, @as(u32x4, @splat(0x82000000)), @as(u32x4, @splat(0)));
+    const d: VU = @select(u32, lez, @as(VU, @splat(0x82000000)), @as(VU, @splat(0)));
 
-    const s1: f32x4 = @bitCast(d +% @as(u32x4, @splat(0x7f000000)));
-    const s2: f32x4 = @bitCast(e -% d);
+    const s1: VF = @bitCast(d +% @as(VU, @splat(0x7f000000)));
+    const s2: VF = @bitCast(e -% d);
 
     const big = @abs(nn) > dup_n_f32(192);
     const inner = @select(
         f32,
         cmask,
-        neon.mul_f32(neon.fma_f32(s2, s2, j), s1),
-        neon.fma_f32(k, k, j),
+        mul_f32(fma_f32(s2, s2, j), s1),
+        fma_f32(k, k, j),
     );
-    return @select(f32, big, neon.mul_f32(s1, s1), inner);
+    return @select(f32, big, mul_f32(s1, s1), inner);
 }
 
-/// Ports `ggml_v_silu` (vec.h:1157 @c1d0e7a00), the NEON arm:
-/// `x / (1 + exp(-x))`.
-inline fn vSilu(x: f32x4) f32x4 {
+/// Ports `ggml_v_silu`, `ggml_v_silu` (vec.h:1157, 1255 @c1d0e7a00), the
+/// NEON and AVX2 arms: `x / (1 + exp(-x))`.
+inline fn vSilu(x: VF) VF {
     const one = dup_n_f32(1.0);
     const zero = dup_n_f32(0.0);
     const neg_x = sub_f32(zero, x);
@@ -357,17 +441,22 @@ inline fn siluF32(x: f32) f32 {
 extern fn expf(x: f32) f32;
 extern fn logf(x: f32) f32;
 
+/// `lanes` floats from `p`.
+inline fn loadVF(p: [*]const f32) VF {
+    return p[0..lanes].*;
+}
+
 // -----------------------------------------------------------------------------
 // The SiLU family
 
 /// Ports `ggml_vec_silu_f32` (vec.cpp:380 @c1d0e7a00), the
-/// `__ARM_NEON && __aarch64__` arm.
+/// `__ARM_NEON && __aarch64__` arm and the `__AVX2__ && __FMA__` one.
 pub export fn ggml_vec_silu_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.c) void {
     var i: c_int = 0;
-    while (i + 3 < n) : (i += 4) {
+    while (i + (lanes - 1) < n) : (i += lanes) {
         const off: usize = @intCast(i);
-        const v = vSilu(x[off..][0..4].*);
-        y[off..][0..4].* = v;
+        const v = vSilu(loadVF(x + off));
+        y[off..][0..lanes].* = v;
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
@@ -375,13 +464,14 @@ pub export fn ggml_vec_silu_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.
     }
 }
 
-/// Ports `ggml_vec_swiglu_f32` (vec.cpp:417 @c1d0e7a00), the NEON arm.
+/// Ports `ggml_vec_swiglu_f32` (vec.cpp:417 @c1d0e7a00), the NEON and AVX2
+/// arms.
 pub export fn ggml_vec_swiglu_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]const f32) callconv(.c) void {
     var i: c_int = 0;
-    while (i + 3 < n) : (i += 4) {
+    while (i + (lanes - 1) < n) : (i += lanes) {
         const off: usize = @intCast(i);
-        const v = neon.mul_f32(vSilu(x[off..][0..4].*), g[off..][0..4].*);
-        y[off..][0..4].* = v;
+        const v = mul_f32(vSilu(loadVF(x + off)), loadVF(g + off));
+        y[off..][0..lanes].* = v;
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
@@ -393,23 +483,23 @@ pub export fn ggml_vec_swiglu_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]co
 // Reductions
 //
 // All three accumulate in `ggml_float` (double) and add the vector partials
-// through the **pairwise** `vaddvq_f32`, one group of four at a time — not a
-// single reduction at the end. The order is the C's and is visible in the
-// last bit.
+// one step at a time through `hsum` -- not a single reduction at the end. The
+// order is the C's and is visible in the last bit.
 
-/// Ports `ggml_vec_cvar_f32` (vec.cpp:455 @c1d0e7a00), the NEON arm.
+/// Ports `ggml_vec_cvar_f32` (vec.cpp:455 @c1d0e7a00), the NEON and AVX2
+/// arms.
 ///
 /// Writes `x - mean` into `y` and returns the mean of its squares.
 pub export fn ggml_vec_cvar_f32(n: c_int, y: [*]f32, x: [*]const f32, mean: f32) callconv(.c) GgmlFloat {
     var i: c_int = 0;
     var sum: GgmlFloat = 0;
 
-    while (i + 3 < n) : (i += 4) {
+    while (i + (lanes - 1) < n) : (i += lanes) {
         const off: usize = @intCast(i);
-        var val = sub_f32(x[off..][0..4].*, dup_n_f32(mean));
-        y[off..][0..4].* = val;
-        val = neon.mul_f32(val, val);
-        sum += @as(GgmlFloat, neon.addvq_f32(val));
+        var val = sub_f32(loadVF(x + off), dup_n_f32(mean));
+        y[off..][0..lanes].* = val;
+        val = mul_f32(val, val);
+        sum += @as(GgmlFloat, hsum(val));
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
@@ -422,7 +512,8 @@ pub export fn ggml_vec_cvar_f32(n: c_int, y: [*]f32, x: [*]const f32, mean: f32)
     return sum / @as(GgmlFloat, @floatFromInt(n));
 }
 
-/// Ports `ggml_vec_soft_max_f32` (vec.cpp:531 @c1d0e7a00), the NEON arm.
+/// Ports `ggml_vec_soft_max_f32` (vec.cpp:531 @c1d0e7a00), the NEON and AVX2
+/// arms.
 ///
 /// Writes `exp(x - max)` into `y` and returns the sum. The vector path uses
 /// `vExpf` and the tail uses libm's `expf`; they differ in the last bit and
@@ -431,11 +522,11 @@ pub export fn ggml_vec_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f
     var i: c_int = 0;
     var sum: GgmlFloat = 0;
 
-    while (i + 3 < n) : (i += 4) {
+    while (i + (lanes - 1) < n) : (i += lanes) {
         const off: usize = @intCast(i);
-        const val = vExpf(sub_f32(x[off..][0..4].*, dup_n_f32(max)));
-        y[off..][0..4].* = val;
-        sum += @as(GgmlFloat, neon.addvq_f32(val));
+        const val = vExpf(sub_f32(loadVF(x + off), dup_n_f32(max)));
+        y[off..][0..lanes].* = val;
+        sum += @as(GgmlFloat, hsum(val));
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);

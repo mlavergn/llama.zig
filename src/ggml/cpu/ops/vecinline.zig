@@ -15,6 +15,7 @@
 //! `#if`-arm rule in `CLAUDE.md`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("../../impl.zig");
 const simd = @import("../simd.zig");
 
@@ -215,12 +216,14 @@ pub inline fn mad_f32(n: i64, y: [*]f32, x: [*]const f32, v: f32) void {
 }
 
 /// Ports `ggml_vec_mad_f16` (vec.h:439 @c1d0e7a00), the `GGML_SIMD` NEON arm
-/// with `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`.
+/// with `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`, and on x86 the AVX one
+/// (`madF16Avx`).
 ///
 /// Elements below `n & ~(GGML_F16_STEP - 1)` go through `vfmaq_f16` with `v`
 /// rounded to `f16` first — a fused multiply-add **in half precision**. The
 /// rest widen to `f32`, fuse there, and narrow once.
 pub inline fn mad_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, v: f32) void {
+    if (comptime builtin.cpu.arch == .x86_64) return madF16Avx(n, y, x, v);
     const nn: usize = @intCast(n);
     const np = if (comptime simd.F16.half_precision) nn & ~@as(usize, simd.F16.step - 1) else 0;
     const vx: f16 = @floatCast(v);
@@ -230,6 +233,31 @@ pub inline fn mad_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, v:
         const ay: f16 = @bitCast(y[i]);
         const ax: f16 = @bitCast(x[i]);
         y[i] = @bitCast(@mulAdd(f16, ax, vx, ay));
+    }
+    while (i < nn) : (i += 1) {
+        y[i] = impl.fp32ToFp16(@mulAdd(f32, impl.fp16ToFp32(x[i]), v, impl.fp16ToFp32(y[i])));
+    }
+}
+
+/// `ggml_vec_mad_f16`'s `GGML_SIMD` AVX arm: `GGML_F32Cx8` over steps of 32,
+/// each element widened exactly, fused in `f32` and narrowed by `vcvtps2ph`;
+/// the tail fuses the same way and narrows in software. The two narrowings
+/// agree on every number and differ on a NaN's payload, so the body is kept
+/// rather than folded into the tail.
+fn madF16Avx(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, v: f32) void {
+    const F16 = simd.F16;
+    const nn: usize = @intCast(n);
+    const np = nn & ~@as(usize, F16.step - 1);
+    const vx = F16.set1(v);
+    var i: usize = 0;
+    while (i < np) : (i += F16.step) {
+        for (0..F16.arr) |j| {
+            const off = i + j * F16.epr;
+            const ax = F16.load(x + off);
+            var ay = F16.load(y + off);
+            ay = F16.fma(ay, ax, vx);
+            F16.store(y + off, ay);
+        }
     }
     while (i < nn) : (i += 1) {
         y[i] = impl.fp32ToFp16(@mulAdd(f32, impl.fp16ToFp32(x[i]), v, impl.fp16ToFp32(y[i])));
@@ -292,8 +320,10 @@ pub inline fn scale_f32(n: i64, y: [*]f32, v: f32) void {
 
 /// Ports `ggml_vec_scale_f16` (vec.h:769 @c1d0e7a00), the `GGML_SIMD` NEON arm
 /// with `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`: the body multiplies **in
-/// half precision** by `v` rounded to `f16`, the tail in `f32`.
+/// half precision** by `v` rounded to `f16`, the tail in `f32`. On x86 the
+/// AVX arm, `scaleF16Avx`.
 pub inline fn scale_f16(n: i64, y: [*]c.ggml_fp16_t, v: f32) void {
+    if (comptime builtin.cpu.arch == .x86_64) return scaleF16Avx(n, y, v);
     const nn: usize = @intCast(n);
     const np = if (comptime simd.F16.half_precision) nn & ~@as(usize, simd.F16.step - 1) else 0;
     const vx: f16 = @floatCast(v);
@@ -302,6 +332,23 @@ pub inline fn scale_f16(n: i64, y: [*]c.ggml_fp16_t, v: f32) void {
     while (i < np) : (i += 1) {
         const ay: f16 = @bitCast(y[i]);
         y[i] = @bitCast(ay * vx);
+    }
+    while (i < nn) : (i += 1) y[i] = impl.fp32ToFp16(impl.fp16ToFp32(y[i]) * v);
+}
+
+/// `ggml_vec_scale_f16`'s `GGML_SIMD` AVX arm: as `madF16Avx`, a multiply
+/// instead of the fused multiply-add.
+fn scaleF16Avx(n: i64, y: [*]c.ggml_fp16_t, v: f32) void {
+    const F16 = simd.F16;
+    const nn: usize = @intCast(n);
+    const np = nn & ~@as(usize, F16.step - 1);
+    const vx = F16.set1(v);
+    var i: usize = 0;
+    while (i < np) : (i += F16.step) {
+        for (0..F16.arr) |j| {
+            const off = i + j * F16.epr;
+            F16.store(y + off, F16.mul(F16.load(y + off), vx));
+        }
     }
     while (i < nn) : (i += 1) y[i] = impl.fp32ToFp16(impl.fp16ToFp32(y[i]) * v);
 }

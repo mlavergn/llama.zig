@@ -52,6 +52,24 @@ pub const zig_varargs = switch (@import("builtin").cpu.arch) {
     else => true,
 };
 
+/// A `va_list` as a C function *receives* it, for declaring `vsnprintf` and
+/// friends.
+///
+/// Not a port of anything. On x86_64 the System V ABI makes `va_list` a
+/// one-element array of `__va_list_tag`, which decays to a pointer in a
+/// parameter list, so the callee takes `*VaList`; on AArch64 -- AAPCS64 and
+/// Apple alike -- it is not an array and travels by value. Declaring it by
+/// value everywhere worked until the first x86 build, where `ggml_format_name`
+/// handed `vsnprintf` the struct's bytes as a pointer and it faulted inside
+/// `__vsnprintf`. `cVaList` produces the right one from the caller's list.
+pub const CVaList = if (@import("builtin").cpu.arch == .x86_64) *std.lang.VaList else std.lang.VaList;
+
+/// `ap` as `CVaList` expects it: its address on x86_64, a copy elsewhere.
+/// Either way the callee consumes the list, as in C.
+pub inline fn cVaList(ap: *std.lang.VaList) CVaList {
+    return if (comptime @import("builtin").cpu.arch == .x86_64) ap else ap.*;
+}
+
 // -----------------------------------------------------------------------------
 // Logging and assertions
 //

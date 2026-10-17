@@ -7,17 +7,26 @@
 //! the tables at line 78 and the converters at line 3440. Each declaration
 //! names the C it replaces and the line it began at.
 //!
-//! # No SIMD here
+//! # SIMD only on x86
 //!
 //! The C bodies are mostly `#if defined(__F16C__)` and `#elif
-//! defined(__riscv_zvfh)` blocks over a scalar tail. On this target none of
-//! them are compiled: only the tail survives, so that is all this file
-//! contains. The narrowing is a bit-manipulation routine either way, not a
-//! hardware instruction -- see the note on `cpuFp32ToFp16` below.
+//! defined(__riscv_zvfh)` blocks over a scalar tail. On ARM none of them
+//! compile and only the tail survives. On x86-64-v3 the F16C blocks do, and
+//! they are **not** the tail's arithmetic for every input: `vcvtps2ph` keeps a
+//! NaN's payload where the software narrowing does not, and `vcvtph2ps`
+//! quiets a signalling NaN where the table the tail reads does not. So the
+//! blocks call the instructions -- LLVM's `vcvtps2ph` intrinsic, and the
+//! vector `fpext` that lowers to `vcvtph2ps` -- and the tails stay software.
+//! See the note on `cpuFp32ToFp16` below.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const c = impl.c;
+
+/// Whether this build compiles the C's `#if defined(__F16C__)` blocks.
+const has_f16c = builtin.cpu.arch == .x86_64 and
+    std.Target.x86.featureSetHas(builtin.cpu.features, .f16c);
 
 // -----------------------------------------------------------------------------
 // The precomputed tables
@@ -50,14 +59,18 @@ const ggml_table_gelu_quick_f16 = &vec.ggml_table_gelu_quick_f16;
 // `GGML_CPU_FP32_TO_FP16` differently on this target, and the asymmetry is
 // easy to miss, so each direction is named separately here.
 
-/// Ports `GGML_CPU_FP16_TO_FP32` (simd-mappings.h:44 @c1d0e7a00), the NEON arm.
+/// Ports `GGML_CPU_FP16_TO_FP32` (simd-mappings.h:44 @c1d0e7a00), the NEON
+/// arm, and `ggml_lookup_fp16_to_fp32` (simd-mappings.h:147 @c1d0e7a00),
+/// every other.
 ///
-/// On ARM the C widens through `__fp16`, a hardware conversion, rather than
-/// the bit-manipulation routine in `ggml-impl.h`. Widening is exact in both,
-/// so this is a speed choice rather than a numeric one -- but it is the one
-/// the C makes.
+/// On ARM the C widens through `__fp16`, a hardware conversion; elsewhere it
+/// reads `ggml_table_f32_f16`, which `initTables` fills from the software
+/// routine. Widening is exact both ways for every number. They differ only
+/// on a signalling NaN, which the hardware quiets and the table does not --
+/// so the arm matters, and it is the one the C takes.
 pub inline fn cpuFp16ToFp32(h: c.ggml_fp16_t) f32 {
-    return @floatCast(@as(f16, @bitCast(h)));
+    if (comptime builtin.cpu.arch == .aarch64) return @floatCast(@as(f16, @bitCast(h)));
+    return ggml_table_f32_f16[h];
 }
 
 /// Ports `GGML_CPU_FP32_TO_FP16` (simd-mappings.h:157 @c1d0e7a00).
@@ -89,14 +102,48 @@ pub export fn ggml_cpu_fp32_to_fp32(x: [*c]const f32, y: [*c]f32, n: i64) void {
     @memcpy(y[0..@intCast(n)], x[0..@intCast(n)]);
 }
 
-/// Ports `ggml_cpu_fp32_to_fp16` (ggml-cpu.c:3444 @c1d0e7a00).
+extern fn @"llvm.x86.vcvtps2ph.256"(@Vector(8, f32), i32) @Vector(8, i16);
+extern fn @"llvm.x86.vcvtps2ph.128"(@Vector(4, f32), i32) @Vector(8, i16);
+
+/// `_MM_FROUND_TO_NEAREST_INT`, the rounding immediate the C passes.
+const round_nearest: i32 = 0;
+
+/// Ports `ggml_cpu_fp32_to_fp16` (ggml-cpu.c:3444 @c1d0e7a00): with F16C,
+/// blocks of eight and then four through `vcvtps2ph`, then the software tail.
 pub export fn ggml_cpu_fp32_to_fp16(x: [*c]const f32, y: [*c]c.ggml_fp16_t, n: i64) void {
-    for (0..@intCast(n)) |i| y[i] = cpuFp32ToFp16(x[i]);
+    const nn: usize = @intCast(n);
+    var i: usize = 0;
+    if (comptime has_f16c) {
+        while (i + 7 < nn) : (i += 8) {
+            const v: @Vector(8, f32) = x[i..][0..8].*;
+            y[i..][0..8].* = @bitCast(@"llvm.x86.vcvtps2ph.256"(v, round_nearest));
+        }
+        while (i + 3 < nn) : (i += 4) {
+            const v: @Vector(4, f32) = x[i..][0..4].*;
+            const h: [8]u16 = @bitCast(@"llvm.x86.vcvtps2ph.128"(v, round_nearest));
+            y[i..][0..4].* = h[0..4].*;
+        }
+    }
+    while (i < nn) : (i += 1) y[i] = cpuFp32ToFp16(x[i]);
 }
 
-/// Ports `ggml_cpu_fp16_to_fp32` (ggml-cpu.c:3477 @c1d0e7a00).
+/// Ports `ggml_cpu_fp16_to_fp32` (ggml-cpu.c:3477 @c1d0e7a00): with F16C,
+/// blocks of eight and then four through `vcvtph2ps`, then the tail through
+/// `GGML_CPU_FP16_TO_FP32`.
 pub export fn ggml_cpu_fp16_to_fp32(x: [*c]const c.ggml_fp16_t, y: [*c]f32, n: i64) void {
-    for (0..@intCast(n)) |i| y[i] = cpuFp16ToFp32(x[i]);
+    const nn: usize = @intCast(n);
+    var i: usize = 0;
+    if (comptime has_f16c) {
+        while (i + 7 < nn) : (i += 8) {
+            const h: @Vector(8, f16) = @bitCast(@as(@Vector(8, u16), x[i..][0..8].*));
+            y[i..][0..8].* = @as(@Vector(8, f32), @floatCast(h));
+        }
+        while (i + 3 < nn) : (i += 4) {
+            const h: @Vector(4, f16) = @bitCast(@as(@Vector(4, u16), x[i..][0..4].*));
+            y[i..][0..4].* = @as(@Vector(4, f32), @floatCast(h));
+        }
+    }
+    while (i < nn) : (i += 1) y[i] = cpuFp16ToFp32(x[i]);
 }
 
 /// Ports `ggml_cpu_fp32_to_bf16` (ggml-cpu.c:3531 @c1d0e7a00).
@@ -105,6 +152,10 @@ pub export fn ggml_cpu_fp32_to_bf16(x: [*c]const f32, y: [*c]c.ggml_bf16_t, n: i
 }
 
 /// Ports `ggml_cpu_bf16_to_fp32` (ggml-cpu.c:3545 @c1d0e7a00).
+///
+/// The `__AVX2__` arm widens eight at a time by shifting each `u16` left 16
+/// bits, which is exactly what the scalar `GGML_BF16_TO_FP32` does to one, so
+/// one loop covers both arms.
 pub export fn ggml_cpu_bf16_to_fp32(x: [*c]const c.ggml_bf16_t, y: [*c]f32, n: i64) void {
     for (0..@intCast(n)) |i| y[i] = impl.bf16ToFp32(x[i].bits);
 }

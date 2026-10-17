@@ -24,7 +24,7 @@ const impl = @import("impl.zig");
 const types = @import("types.zig");
 const c = impl.c;
 
-extern fn vsnprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ap: std.lang.VaList) c_int;
+extern fn vsnprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ap: impl.CVaList) c_int;
 extern fn printf(fmt: [*:0]const u8, ...) c_int;
 
 /// True when the C build would leave `NDEBUG` unset. `ggml_new_object` aborts
@@ -484,7 +484,7 @@ pub const ggml_format_name = if (impl.zig_varargs) formatName else c.ggml_format
 fn formatName(tensor: *c.ggml_tensor, fmt: [*:0]const u8, ...) callconv(.c) *c.ggml_tensor {
     var ap = @cVaStart();
     defer @cVaEnd(&ap);
-    _ = vsnprintf(@ptrCast(&tensor.name), tensor.name.len, fmt, ap);
+    _ = vsnprintf(@ptrCast(&tensor.name), tensor.name.len, fmt, impl.cVaList(&ap));
     return tensor;
 }
 

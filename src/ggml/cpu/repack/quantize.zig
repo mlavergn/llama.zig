@@ -151,12 +151,13 @@ pub export fn ggml_quantize_mat_q8_0_4x8_generic(x: [*]const f32, vy: *anyopaque
     quantizeMatQ80(8, x, vy, k);
 }
 
-/// No ARM override exists for the `q8_K` pair, so these two carry the live
-/// name rather than a `_generic` one.
-pub export fn ggml_quantize_mat_q8_K_4x4(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
+/// No ARM override exists for the `q8_K` pair: ARM's `arch-fallback.h` gives
+/// both the live name, and x86's gives it to the `4x4` one. So they are
+/// exported per architecture -- `arm/fallback.zig`, `x86/fallback.zig`.
+pub fn ggml_quantize_mat_q8_K_4x4_generic(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
     quantizeMatQ8K(4, x, vy, k);
 }
 
-pub export fn ggml_quantize_mat_q8_K_4x8(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
+pub fn ggml_quantize_mat_q8_K_4x8_generic(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
     quantizeMatQ8K(8, x, vy, k);
 }

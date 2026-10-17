@@ -30,7 +30,7 @@ const c = impl.c;
 // Declared rather than imported: these come from headers `@cImport` does not
 // see, and the variadic signatures need the by-value `va_list` noted above.
 
-extern fn vsnprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ap: std.lang.VaList) c_int;
+extern fn vsnprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ap: impl.CVaList) c_int;
 extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 extern fn fputs(s: [*:0]const u8, stream: *anyopaque) c_int;
 extern fn fflush(stream: ?*anyopaque) c_int;
@@ -206,7 +206,7 @@ fn ggmlAbort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) callconv
     defer @cVaEnd(&ap);
     if (offset > 0 and @as(usize, @intCast(offset)) < message.len) {
         const used: usize = @intCast(offset);
-        _ = vsnprintf(message[used..].ptr, message.len - used, fmt, ap);
+        _ = vsnprintf(message[used..].ptr, message.len - used, fmt, impl.cVaList(&ap));
     }
 
     // `snprintf` and `vsnprintf` both terminate what they write.
@@ -249,11 +249,12 @@ var logger_state: LoggerState = .{
 fn logInternalV(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ap: std.lang.VaList) void {
     const fmt = format orelse return;
 
+    var ap_first = ap;
     var ap_copy = @cVaCopy(@constCast(&ap));
     defer @cVaEnd(&ap_copy);
 
     var buffer: [128]u8 = undefined;
-    const len = vsnprintf(&buffer, buffer.len, fmt, ap);
+    const len = vsnprintf(&buffer, buffer.len, fmt, impl.cVaList(&ap_first));
     if (len < buffer.len) {
         logger_state.log_callback.?(level, &buffer, logger_state.log_callback_user_data);
         return;
@@ -262,7 +263,7 @@ fn logInternalV(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ap: std.la
     const size: usize = @intCast(len + 1);
     const buffer2: [*]u8 = @ptrCast(std.c.calloc(size, 1) orelse return);
     defer std.c.free(buffer2);
-    _ = vsnprintf(buffer2, size, fmt, ap_copy);
+    _ = vsnprintf(buffer2, size, fmt, impl.cVaList(&ap_copy));
     buffer2[size - 1] = 0;
     logger_state.log_callback.?(level, @ptrCast(buffer2), logger_state.log_callback_user_data);
 }

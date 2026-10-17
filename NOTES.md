@@ -5510,3 +5510,78 @@ Vulkan guard removed (2,750 nodes and 33 fused decodes identical across two
 runs); the guard refuses a reference without the backend.
 `scripts/platform-libs` now adds `-lvulkan` when an archive it is given
 imports `vkGetInstanceProcAddr`, and only then.
+
+## Stage 5 step 6: x86 begins
+
+**QEMU stands in for the laptop at AVX2.** The podman VM registers QEMU
+10.1's user-mode `qemu-x86_64-static` through `binfmt_misc`, so x86 binaries
+run in an amd64 container (`debian:stable-slim-amd64`, pulled for this and
+tagged apart from the arm64 image). The x86-64-v3 reference ran `ops_dump`
+twice there with identical output, 113 s a pass at three threads. QEMU's
+TCG computes IEEE arithmetic in software, exactly, so the one way it could
+disagree with silicon is an instruction whose result is the hardware's own
+approximation -- `rcpps`, `rsqrtps` -- and neither the x86 source nor the
+compiled reference uses one. QEMU does not implement AVX-512, so v4 still
+needs hardware.
+
+**The first x86 build compiled and was wrong.** The ARM kernels are portable
+`@Vector` code and the dotprod guards from step 2 route them to their
+generic bodies, so with `simd.zig`'s arm in place the whole library compiled
+for x86 and computed ARM's arithmetic where the reference runs `arch/x86`.
+It segfaulted under QEMU before printing anything. So the arch dispatch came
+first: `quants/` and `repack/` choose `arm/` or `x86/`, and every x86
+kernel not yet ported is a **compile error** naming itself.
+`-Dx86-incomplete`, for development only, stands its generic port in
+instead -- the gates then run, and every stand-in fails visibly. ARM's eight
+`arch-fallback.h` renames moved from the generic repack files into
+`repack/arm/fallback.zig`, since x86 defines some of the same names itself;
+ARM's 1,223 exports are unchanged.
+
+**The inventory of everything else was measured, not remembered.** Every CPU
+translation unit was preprocessed for `aarch64` and for `x86_64_v3`, split
+into functions, and the bodies diffed with the one spelling that differs
+harmlessly -- `GGML_CPU_FP16_TO_FP32`'s table lookup against NEON's cast --
+normalised. 42 functions differ. Each was read in both forms:
+
+- **Width only, element-wise or through `simd.F32`**: `ops.cpp`'s
+  `conv_2d_dw`, `fwht`, `gla`, `wkv6`, `wkv7`, `ssm_scan`, `simd_gemm`,
+  flash attention's `f32_epr`; `vec.h`'s `add_f32`, `mad_f32`, `mad1_f32`,
+  `scale_f32`, `mad_f32_unroll`. Nothing to change beyond step 5.
+- **A real x86 arm, ported**: the eleven feature predicates; the F16C row
+  conversions; `vec.cpp`'s SiLU, SwiGLU, softmax and `cvar` (8 lanes, and a
+  horizontal sum `(h0+h2)+(h1+h3)` where NEON's is `(v0+v1)+(v2+v3)`) and
+  `dot_bf16` (unfused, its own reduction); `vec.h`'s `mad_f16`/`scale_f16`;
+  `sgemm`'s `tinyBLAS<8, __m256>`, with `VECTOR_REGISTERS == 16`'s tiles.
+  The AVX2 `ggml_v_expf` turned out to be the NEON one term for term, so
+  `vec.zig` writes it once over the arm's width.
+- **NaN payloads.** F16C's `vcvtps2ph` keeps a NaN's payload where ggml's
+  software narrowing does not, and `vcvtph2ps` quiets a signalling NaN where
+  the lookup table does not, so the C's vector bodies and scalar tails
+  disagree on NaNs, and the port calls the instructions -- LLVM's
+  `vcvtps2ph` intrinsic -- where the C's vector code does. (NEON's
+  `GGML_F32Cx4` store at `generic` has the same NaN-only difference from its
+  tail and the port does not reproduce it; recorded, not changed.)
+- **Unused**: `ggml_vec_dot_f16_unroll` has no caller upstream.
+
+**Three toolchain facts, each found by the build failing:**
+
+- **The `getcpu` syscall number is per architecture** (168 on aarch64, 309
+  on x86_64) and the C's old-glibc path hard-codes neither; the port's
+  `std.os.linux.getcpu` was already right.
+- **Zig 0.17 compiles x86_64 Debug with its own backend**, which emits an
+  LLVM intrinsic called by name as an undefined external symbol. The ggml
+  library and its tests now set `use_llvm`.
+- **`va_list` is a pointer on x86_64 SysV.** It is a one-element array of
+  `__va_list_tag` there, so `vsnprintf` takes a pointer; the port declared
+  it by value, which is right on AArch64 and crashed `ggml_format_name` on
+  the first x86 graph. `impl.CVaList` and `impl.cVaList` now give each ABI
+  what it expects. Found with a `SIGSEGV` handler printing `backtrace()`,
+  since the container has no debugger.
+
+**Where it stands**, `ops-diff` under QEMU at x86-64-v3 with
+`-Dx86-incomplete`: **492 of 650 results identical**, and every one of the
+158 that differ is a quantized `mul_mat` or a flash attention over `Q8_0`
+-- the paths the 39 stand-ins feed. None of the non-quantized ones differ.
+`make x86-qemu-ops-diff X86_INCOMPLETE=1` (`scripts/x86-qemu-ops-diff`)
+reproduces the whole run: both cross-builds into `zig-out/x86-qemu/`, the
+container, the comparison.

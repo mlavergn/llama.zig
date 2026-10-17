@@ -85,7 +85,28 @@ pub export fn ggml_gemm_q8_0_4x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const
     ggml_gemm_q8_0_4x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
 }
 
+// -----------------------------------------------------------------------------
+// ARM's `arch-fallback.h` renames
+//
+// `arch-fallback.h:75-83` renames eight `repack.cpp` generics to the bare
+// names on ARM, because `arch/arm/repack.cpp` has no version of them at all.
+// They used to be exported bare from the generic files; x86 defines some of
+// the same names itself, so the renames are made per architecture, here and
+// in `x86/fallback.zig`.
+
+const nibble4 = @import("../nibble4.zig");
+const q2_k = @import("../q2_k.zig");
+const quantize = @import("../quantize.zig");
+
 comptime {
     _ = impl;
     _ = std;
+    @export(&quantize.ggml_quantize_mat_q8_K_4x4_generic, .{ .name = "ggml_quantize_mat_q8_K_4x4" });
+    @export(&quantize.ggml_quantize_mat_q8_K_4x8_generic, .{ .name = "ggml_quantize_mat_q8_K_4x8" });
+    @export(&nibble4.ggml_gemv_iq4_nl_8x8_q8_0_generic, .{ .name = "ggml_gemv_iq4_nl_8x8_q8_0" });
+    @export(&nibble4.ggml_gemv_mxfp4_8x8_q8_0_generic, .{ .name = "ggml_gemv_mxfp4_8x8_q8_0" });
+    @export(&q2_k.ggml_gemv_q2_K_8x8_q8_K_generic, .{ .name = "ggml_gemv_q2_K_8x8_q8_K" });
+    @export(&nibble4.ggml_gemm_iq4_nl_8x8_q8_0_generic, .{ .name = "ggml_gemm_iq4_nl_8x8_q8_0" });
+    @export(&nibble4.ggml_gemm_mxfp4_8x8_q8_0_generic, .{ .name = "ggml_gemm_mxfp4_8x8_q8_0" });
+    @export(&q2_k.ggml_gemm_q2_K_8x8_q8_K_generic, .{ .name = "ggml_gemm_q2_K_8x8_q8_K" });
 }

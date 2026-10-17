@@ -1003,7 +1003,7 @@ at the CPU configuration Linux arm64 actually builds for.
 | iOS, iOS simulator | yes — the xcframework's `ios` and `ios-sim` slices (A14+) | `make -C xcfwk check`: structural gates per slice, `smoke-sim` on the simulator | the increased-memory-limit entitlement is the consuming app's, not ours |
 | Linux arm64 + CUDA | yes, natively on the GB10 | the four `cuda-*` gates, `arch-model-diff`, `gemma4-assistant-diff` | the CPU path's numerics — below |
 | Linux arm64, CPU only | **yes**, cross-built from this Mac against glibc 2.39 | `GATE_CPU=generic` here. Measured failing — `ops-diff` 86 / 632, `repack-diff` 26 / 60, `node-diff` from node 27, `parity-port --cpu` 2 / 6 — and **exact since step 2**: 650 / 650, 60 / 60, 2,750 nodes, 6 / 6 | the host arms (step 3), `make validate` on Linux (step 4), the GB10 pickup |
-| Linux x86_64 | **no** — `src/ggml/cpu/repack/arm/q4_0_gemm.zig:519`, an aarch64 clobber, is the first of every NEON arm compiled unconditionally | nothing can run here | a second SIMD port, gated on the laptop (Decision 51) |
+| Linux x86_64 | **at x86-64-v3 with `-Dx86-incomplete`**; by default a compile error naming the first pending kernel | `ops-diff` under QEMU in the podman VM: 492 / 650, every difference a pending quantized kernel | the 39 kernels and `tinyBLAS_Q0_AVX` (step 6), AVX-512 on hardware |
 
 ### Linux arm64: a different CPU from the one every gate ran on
 
@@ -1239,13 +1239,32 @@ small, and it is wrong today -- in its numerics and in its host arms.
    `llama.cpp.zmake` builds x86_64"): `make -C llama.cpp.zmake
    linux-x86_64`, AVX2 by default, `X86_CPU=x86_64_v4` for AVX-512, both
    cross-built and checked for their instructions.
-6. **x86_64**, on the laptop (Decisions 51–53): `ggml-cpu.c`'s x86
-   arms (`_mm_pause`, F16C conversions, feature queries), `vec.h`'s AVX
-   bodies, then
-   `arch/x86/quants.c` (27 entry points), `arch/x86/repack.cpp` (12), and
-   sgemm's x86 `tinyBLAS` arms — the ARM order, gated the ARM way:
-   goldens captured on the x86 host, `ops-diff`, `repack-diff`,
-   `node-diff`, `parity-port`, per level.
+6. **x86_64** (Decisions 51–53) -- **under way at AVX2; gated under QEMU
+   until the laptop** (`NOTES.md`, "Stage 5 step 6: x86 begins").
+   - **Done, and exact against the x86-64-v3 reference under QEMU**: every
+     shared function with an x86 arm, found by preprocessing each CPU
+     translation unit for both targets and diffing them function by
+     function -- `simd.zig`'s AVX arm, the strict-loop shape (never
+     vectorized at v3), the F16C conversions, the feature predicates,
+     `ggml_thread_cpu_relax`, `vec.cpp`'s AVX2 SiLU/softmax/`cvar` and
+     `dot_bf16`, `vec.h`'s `mad_f16`/`scale_f16`, and `sgemm`'s
+     `tinyBLAS<8, __m256>` for f32, f16 and bf16. `ops-diff` there: **492
+     of 650 identical, and every one of the 158 that differ is a quantized
+     path a stand-in feeds.** `make x86-qemu-ops-diff X86_INCOMPLETE=1`
+     reproduces it.
+   - **Pending, 39 kernels and one class**: `arch/x86/quants.c`'s 27
+     exports (`quants/x86/module.zig`), `arch/x86/repack.cpp`'s 12
+     (`repack/x86/module.zig`) and `tinyBLAS_Q0_AVX` in `sgemm.zig`. Each
+     is a compile error by default; `-Dx86-incomplete` stands its generic
+     port in (or `return false`), so the gates run while the port is
+     partial and their failures are the list of what is left. Next: an
+     `avx2.zig` intrinsic layer, as `neon.zig` is for ARM, then the
+     kernels in Qwen3.5's order -- `q8_0` quantization, `q4_K`, `q6_K`,
+     `q8_0` -- then the rest, then `tinyBLAS_Q0_AVX` and the repack shapes.
+   - **Then**: x86 goldens captured under QEMU (the ARM sets do not apply),
+     `repack-diff`, `node-diff` and `parity-port` -- the latter two need
+     the laptop or more than the container's 2 GB -- and AVX-512 (v4),
+     which QEMU does not emulate, on hardware.
 
 ### GB10 pickup
 
@@ -1619,7 +1638,8 @@ Zig's libc++ into each slice, which nothing needs since the swap.
 for where each target stands and the order of work. Step 1 found that
 the port was not bit-exact on Linux arm64's baseline CPU; step 2 made it so;
 steps 3 and 4 are written and wait on the GB10 pickup; step 5 put the SIMD
-layer in. Next is step 6, x86_64 on the laptop.
+layer in. Step 6, x86_64, is under way, gated under QEMU until the laptop
+arrives: everything but the quantized kernels is exact at AVX2.
 
 **Beside it, Stage 7, Vulkan** (Decisions 54–56; "Stage 7 — Vulkan"): measured
 and the reference build written; next is the GB10's Vulkan pickup -- the

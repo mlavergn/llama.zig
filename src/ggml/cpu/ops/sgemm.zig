@@ -45,8 +45,21 @@
 //!
 //! `hsum` is `vaddvq_f32`, which is **pairwise** — see `CLAUDE.md`,
 //! "Porting notes".
+//!
+//! # x86
+//!
+//! At x86-64-v3 the float rows take `tinyBLAS<8, __m256>` -- f32 × f32,
+//! bf16 × bf16 and, with F16C, f16 × f16, none with a minimum `n` -- through
+//! the same generic `TinyBLAS` with the AVX `load`, `madd` and `hsum`, and
+//! the tile constants of `VECTOR_REGISTERS == 16`. The four quantized rows
+//! take `tinyBLAS_Q0_AVX`, which is not ported yet (`PLAN.md`, Stage 5
+//! step 6): a compile error by default, `return false` under
+//! `-Dx86-incomplete`, which falls back to `mul_mat`'s own path and so fails
+//! `ops-diff` visibly.
 
 const std = @import("std");
+const builtin = @import("builtin");
+const config = @import("config");
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const defs = @import("../defs.zig");
@@ -59,6 +72,17 @@ const ComputeParams = common.ComputeParams;
 const f32x4 = neon.f32x4;
 const f16x8 = neon.f16x8;
 const i8x16 = neon.i8x16;
+
+/// `__m256`.
+const f32x8 = @Vector(8, f32);
+
+/// Whether this build takes the C's x86 arms. `simd.zig` has already refused
+/// an x86 level other than v3.
+const is_x86 = builtin.cpu.arch == .x86_64;
+
+/// Ports `VECTOR_REGISTERS`, `VECTOR_REGISTERS` (sgemm.cpp:67, 69 @c1d0e7a00): 32 with NEON or
+/// AVX-512, 16 otherwise. It sets `tinyBLAS::matmul`'s tile constants.
+const vector_registers = if (is_x86) 16 else 32;
 
 /// Ports `unhalf` (sgemm.cpp:80 @c1d0e7a00).
 ///
@@ -78,6 +102,30 @@ inline fn hsum4(x: f32x4) f32 {
 /// to `f32x4`, add, then the pairwise reduce.
 inline fn hsum8(x: f16x8) f32 {
     return neon.addvq_f32(neon.cvt_f32_f16_half(x, false) + neon.cvt_f32_f16_half(x, true));
+}
+
+/// Ports `hsum`, `hsum` (sgemm.cpp:268, 252 @c1d0e7a00), the `__m256` one and the
+/// `__m128` one it calls: fold the upper 128 bits onto the lower, then
+/// `_mm_movehl_ps` and `_mm_movehdup_ps`, `(h0+h2)+(h1+h3)`.
+inline fn hsumAvx(x: f32x8) f32 {
+    const lo: @Vector(4, f32) = .{ x[0], x[1], x[2], x[3] };
+    const hi: @Vector(4, f32) = .{ x[4], x[5], x[6], x[7] };
+    const h = hi + lo;
+    return (h[0] + h[2]) + (h[1] + h[3]);
+}
+
+/// Ports `load`, `load`, `load` (sgemm.cpp:341, 347, 354 @c1d0e7a00), the
+/// `__m256` ones: `_mm256_loadu_ps`; bf16 widened by a 16-bit shift, exactly;
+/// and with F16C `_mm256_cvtph_ps`, also exact.
+inline fn loadAvx(comptime T: type, p: [*]const T) f32x8 {
+    if (T == f32) return p[0..8].*;
+    if (T == c.ggml_bf16_t) {
+        const p16: [*]const u16 = @ptrCast(p);
+        const h: @Vector(8, u16) = p16[0..8].*;
+        return @bitCast(@as(@Vector(8, u32), h) << @splat(16));
+    }
+    const h: @Vector(8, f16) = @bitCast(@as(@Vector(8, u16), p[0..8].*));
+    return @floatCast(h);
 }
 
 /// Ports `BLOCK_SIZE` (sgemm.cpp:475 @c1d0e7a00).
@@ -115,34 +163,40 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
         /// second reinterprets rather than converts -- `ggml_fp16_t` is a
         /// `u16` after the import; the third widens four halves, exactly.
         inline fn load(comptime T: type, p: [*]const T) V {
+            if (V == f32x8) return loadAvx(T, p);
             if (T == f32) return p[0..4].*;
             if (V == f32x4) return neon.cvt_f32_f16(neon.load_f16x4(p));
             return @bitCast(@as(@Vector(8, u16), p[0..8].*));
         }
 
-        /// Ports `madd`, `madd` (sgemm.cpp:165, 170 @c1d0e7a00): `vfmaq_f32(c, b, a)`
-        /// and `vfmaq_f16(c, b, a)`, both **fused**.
+        /// Ports `madd`, `madd`, `madd` (sgemm.cpp:165, 170, 141 @c1d0e7a00):
+        /// `vfmaq_f32(c, b, a)`, `vfmaq_f16(c, b, a)` and `_mm256_fmadd_ps(a,
+        /// b, c)`, all **fused**, and all the same product.
         inline fn madd(a: V, b: V, acc: V) V {
             return @mulAdd(V, b, a, acc);
         }
 
         inline fn hsum(x: V) f32 {
+            if (V == f32x8) return hsumAvx(x);
             return if (V == f32x4) hsum4(x) else hsum8(x);
         }
 
-        /// Ports `matmul` (sgemm.cpp:494 @c1d0e7a00).
+        /// Ports `matmul` (sgemm.cpp:494 @c1d0e7a00): `RN` 6 and `bn` 12 with
+        /// 32 vector registers, `RN` 3 and `bn` 24 with 16.
         fn matmul(self: *const Self, m: i64, n: i64) bool {
+            const RN = if (vector_registers == 32) 6 else 3;
+            const bn = if (vector_registers == 32) 12 else 24;
             if (@rem(self.k, KN) != 0) return false;
             if (@rem(m, 16) == 0 and @divTrunc(m, 16) >= self.params.nth) {
-                self.mnpack(4, 6, 4, m, n, blockSize(6, n), 12);
+                self.mnpack(4, RN, 4, m, n, blockSize(RN, n), bn);
                 return true;
             }
             if (@rem(m, 8) == 0) {
-                self.mnpack(4, 6, 2, m, n, blockSize(6, n), 12);
+                self.mnpack(4, RN, 2, m, n, blockSize(RN, n), bn);
                 return true;
             }
             if (@rem(m, 4) == 0) {
-                self.mnpack(4, 6, 1, m, n, blockSize(6, n), 12);
+                self.mnpack(4, RN, 1, m, n, blockSize(RN, n), bn);
                 return true;
             }
             return false;
@@ -466,6 +520,8 @@ pub export fn llamafile_sgemm(
     if (n < 2) return false;
     if (Ctype != c.GGML_TYPE_F32) return false;
 
+    if (comptime is_x86) return sgemmAvx(params, m, n, k, A, lda, B, ldb, C, ldc, Atype, Btype);
+
     switch (Atype) {
         c.GGML_TYPE_F32 => {
             if (Btype != c.GGML_TYPE_F32) return false;
@@ -553,6 +609,62 @@ pub export fn llamafile_sgemm(
         // (sgemm.cpp:3893, 4115, 4131 @c1d0e7a00) all reach a
         // `return false` on this target: their arms are behind x86 or SVE
         // feature macros this build does not define.
+        else => return false,
+    }
+}
+
+/// `llamafile_sgemm`'s switch at x86-64-v3: the `__AVX__ || __AVX2__` f32
+/// arm, the `__AVX2__` bf16 arm and the F16C f16 arm -- the `#elif`s at
+/// lines 3838, 3910 and 3966 of `sgemm.cpp` -- then the four
+/// `tinyBLAS_Q0_AVX` rows, which are pending.
+fn sgemmAvx(
+    params: *const ComputeParams,
+    m: i64,
+    n: i64,
+    k: i64,
+    A: ?*const anyopaque,
+    lda: i64,
+    B: ?*const anyopaque,
+    ldb: i64,
+    C: ?*anyopaque,
+    ldc: i64,
+    Atype: c_int,
+    Btype: c_int,
+) bool {
+    const float = struct {
+        fn run(comptime TA: type, comptime TB: type, p: *const ComputeParams, mm: i64, nn: i64, kk: i64, a: ?*const anyopaque, la: i64, b: ?*const anyopaque, lb: i64, cc: ?*anyopaque, lc: i64) bool {
+            const tb = TinyBLAS(8, f32x8, TA, TB){
+                .params = p,
+                .k = kk,
+                .A = @ptrCast(@alignCast(a.?)),
+                .lda = la,
+                .B = @ptrCast(@alignCast(b.?)),
+                .ldb = lb,
+                .C = @ptrCast(@alignCast(cc.?)),
+                .ldc = lc,
+            };
+            return tb.matmul(mm, nn);
+        }
+    }.run;
+    switch (Atype) {
+        c.GGML_TYPE_F32 => {
+            if (Btype != c.GGML_TYPE_F32) return false;
+            return float(f32, f32, params, m, n, k, A, lda, B, ldb, C, ldc);
+        },
+        c.GGML_TYPE_BF16 => {
+            if (Btype != c.GGML_TYPE_BF16) return false;
+            return float(c.ggml_bf16_t, c.ggml_bf16_t, params, m, n, k, A, lda, B, ldb, C, ldc);
+        },
+        c.GGML_TYPE_F16 => {
+            if (Btype != c.GGML_TYPE_F16) return false;
+            return float(c.ggml_fp16_t, c.ggml_fp16_t, params, m, n, k, A, lda, B, ldb, C, ldc);
+        },
+        c.GGML_TYPE_Q8_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q5_0, c.GGML_TYPE_IQ4_NL => {
+            if (comptime !config.x86_incomplete) {
+                @compileError("llamafile_sgemm: tinyBLAS_Q0_AVX is not ported yet (PLAN.md, Stage 5 step 6); -Dx86-incomplete returns false in its place, for development");
+            }
+            return false;
+        },
         else => return false,
     }
 }

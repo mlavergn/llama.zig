@@ -34,7 +34,14 @@ const c = impl.c;
 /// `dispatch.zig` is what makes it true.
 pub const dispatch_implemented = true;
 
-pub const arm = @import("arm/module.zig");
+/// The architecture's own kernels: `arch/arm/repack.cpp` across `arm/`,
+/// `arch/x86/repack.cpp` across `x86/`, each with its `arch-fallback.h`
+/// renames.
+pub const arch = switch (@import("builtin").cpu.arch) {
+    .aarch64 => @import("arm/module.zig"),
+    .x86_64 => @import("x86/module.zig"),
+    else => @compileError("no repack kernels for " ++ @tagName(@import("builtin").cpu.arch)),
+};
 pub const blocks = @import("blocks.zig");
 pub const convert = @import("convert.zig");
 pub const dispatch = @import("dispatch.zig");
@@ -54,7 +61,7 @@ pub const quantize = @import("quantize.zig");
 pub const ggml_backend_cpu_repack_buffer_type = dispatch.ggml_backend_cpu_repack_buffer_type;
 
 comptime {
-    _ = arm;
+    _ = arch;
     _ = blocks;
     _ = convert;
     _ = dispatch;

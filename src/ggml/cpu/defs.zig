@@ -24,6 +24,7 @@
 //! variable can be Zig's rather than `pthread_t`-shaped.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const c = impl.c;
 
@@ -115,13 +116,20 @@ pub const ComputeState = struct {
     ith: c_int,
 };
 
-/// Ports `ggml_thread_cpu_relax` (ggml-cpu.c:520 @c1d0e7a00), the aarch64 arm.
+/// Ports `ggml_thread_cpu_relax`, `ggml_thread_cpu_relax` (ggml-cpu.c:520, 524 @c1d0e7a00): the
+/// aarch64 arm's `yield`, and the x86_64 arm's `_mm_pause()`.
 ///
-/// `std.atomic.spinLoopHint` emits the same instruction, but not the memory
-/// clobber: the C's barrier loop re-reads `n_barrier_passed` every iteration
-/// and must not have that read hoisted out.
+/// `std.atomic.spinLoopHint` emits the same instructions, but not the
+/// aarch64 arm's memory clobber: the C's barrier loop re-reads
+/// `n_barrier_passed` every iteration and must not have that read hoisted
+/// out. `_mm_pause` is a builtin with no clobber, so the x86 arm has none
+/// either.
 pub inline fn cpuRelax() void {
-    asm volatile ("yield" ::: .{ .memory = true });
+    switch (builtin.cpu.arch) {
+        .aarch64 => asm volatile ("yield" ::: .{ .memory = true }),
+        .x86_64 => asm volatile ("pause"),
+        else => @compileError("ggml_thread_cpu_relax has no arm for " ++ @tagName(builtin.cpu.arch)),
+    }
 }
 
 /// The locals `GGML_TENSOR_UNARY_OP_LOCALS` (ggml.h:314 @c1d0e7a00) declares.

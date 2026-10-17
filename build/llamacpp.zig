@@ -330,6 +330,16 @@ pub const Options = struct {
     /// `ggml-cpu.c` while it is being computed, so each needs its own run to
     /// be shown reachable.
     probe_cpu: bool = false,
+    /// Development only, for the x86 port (`PLAN.md`, Stage 5 step 6): an
+    /// x86 quant or repack kernel not yet ported exports its generic port
+    /// under the real name instead of failing to compile.
+    ///
+    /// The generic kernels do not compute what `arch/x86` computes, so every
+    /// one standing in fails `ops-diff` -- which is the point: with this on,
+    /// the gates run under QEMU while the port is partial, and their failures
+    /// are the list of what is left. Off, an unported kernel is a compile
+    /// error, so no build that is not asked for it can ship one.
+    x86_incomplete: bool = false,
     /// Builds upstream's CUDA backend into `libggml.a`; null leaves it out.
     /// See `addCuda`.
     cuda: ?Cuda = null,
@@ -403,6 +413,7 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     const options = b.addOptions();
     options.addOption(bool, "probe_ported", opts.probe_ported);
     options.addOption(bool, "probe_cpu", opts.probe_cpu);
+    options.addOption(bool, "x86_incomplete", opts.x86_incomplete);
     // Mirrors the `-DGGML_USE_METAL` below, for ported Zig that has to make
     // the same choice the C++ preprocessor does. `src/ggml/backend_reg.zig`
     // is the one that needs it: the registry constructor registers Metal
@@ -479,7 +490,12 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
 
     if (opts.cuda) |cuda| try addCuda(b, mod, cuda);
 
-    const lib = b.addLibrary(.{ .name = "ggml", .root_module = mod, .linkage = .static });
+    // LLVM's backend, always. The port calls LLVM intrinsics by name --
+    // `sdot` and `smmla` on ARM, `vcvtps2ph` on x86 -- which only that
+    // backend understands. Zig 0.17's own x86_64 backend, its Debug default,
+    // emits them as undefined external symbols instead. Measured: the x86
+    // Debug link failed on `llvm.x86.vcvtps2ph.256`.
+    const lib = b.addLibrary(.{ .name = "ggml", .root_module = mod, .linkage = .static, .use_llvm = true });
     lib.setLibCFile(opts.libc_file);
     return lib;
 }
@@ -869,6 +885,7 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
     const options = b.addOptions();
     options.addOption(bool, "probe_ported", opts.probe_ported);
     options.addOption(bool, "probe_cpu", opts.probe_cpu);
+    options.addOption(bool, "x86_incomplete", opts.x86_incomplete);
     // No `-DGGML_USE_METAL` in this archive's define list and no Metal in its
     // link, exactly as in the ported test root above. The ported registry
     // must not reference the Metal backend.
@@ -917,7 +934,8 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
         // `binary-ops.cpp` to vDSP, so the framework has to come with them.
         mod.linkFramework("Accelerate", .{});
     }
-    const lib = b.addLibrary(.{ .name = "ggml-ported", .root_module = mod, .linkage = .static });
+    // LLVM's backend, for the intrinsics; see `addGgml`.
+    const lib = b.addLibrary(.{ .name = "ggml-ported", .root_module = mod, .linkage = .static, .use_llvm = true });
     lib.setLibCFile(opts.libc_file);
     return lib;
 }
@@ -951,6 +969,7 @@ fn portedTestModuleInner(
     const options = b.addOptions();
     options.addOption(bool, "probe_ported", false);
     options.addOption(bool, "probe_cpu", false);
+    options.addOption(bool, "x86_incomplete", false);
     // No `-DGGML_USE_METAL` in this root's define list, and no Metal sources
     // in its link. The ported registry must not reference the Metal backend.
     options.addOption(bool, "use_metal", false);

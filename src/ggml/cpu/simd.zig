@@ -43,10 +43,15 @@
 //!
 //! # Arms
 //!
-//! Only NEON's (`__ARM_NEON && __ARM_FEATURE_FMA && __ARM_FP16_FORMAT_IEEE`),
-//! with both of its `F16` variants. SVE's is not ported: no Apple core has
-//! SVE, and Zig's Linux baseline does not enable it. Any other architecture
-//! is a compile error until `PLAN.md`'s Stage 5 step 6 adds AVX2 and AVX-512.
+//! - **NEON** (`__ARM_NEON && __ARM_FEATURE_FMA && __ARM_FP16_FORMAT_IEEE`),
+//!   with both of its `F16` variants. SVE's is not ported: no Apple core has
+//!   SVE, and Zig's Linux baseline does not enable it.
+//! - **AVX** with FMA and F16C -- x86-64-v3, Decision 53's first level.
+//!   AVX-512 takes its own arm ahead of this one in the C, and is a compile
+//!   error here until it is ported; so are AVX without FMA, and SSE, which no
+//!   target this project builds needs.
+//!
+//! Any other architecture is a compile error.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -59,14 +64,32 @@ pub const neon = @import("quants/arm/neon.zig");
 /// `GGML_F32_VEC` and its operations, for this build's target.
 pub const F32 = switch (builtin.cpu.arch) {
     .aarch64 => NeonF32,
-    else => @compileError("no SIMD arm for " ++ @tagName(builtin.cpu.arch) ++ " yet: PLAN.md, Stage 5 step 6"),
+    .x86_64 => x86Arm(AvxF32),
+    else => @compileError("no SIMD arm for " ++ @tagName(builtin.cpu.arch)),
 };
 
 /// `GGML_F16_VEC` and its operations, for this build's target.
 pub const F16 = switch (builtin.cpu.arch) {
     .aarch64 => if (neon.has_fp16_va) NeonF16x8 else NeonF32Cx4,
-    else => @compileError("no SIMD arm for " ++ @tagName(builtin.cpu.arch) ++ " yet: PLAN.md, Stage 5 step 6"),
+    .x86_64 => x86Arm(AvxF32Cx8),
+    else => @compileError("no SIMD arm for " ++ @tagName(builtin.cpu.arch)),
 };
+
+/// Whether this build's x86 CPU has `feature`: the C's `__AVX2__` and
+/// friends, which clang defines from the same feature set.
+fn x86Has(comptime feature: std.Target.x86.Feature) bool {
+    return builtin.cpu.arch == .x86_64 and std.Target.x86.featureSetHas(builtin.cpu.features, feature);
+}
+
+/// The x86 arm `simd-mappings.h` would take, in its order -- `__AVX512F__`
+/// before `__AVX__`, which is before `__SSE3__` -- refusing the ones not
+/// ported rather than falling through to a different one.
+fn x86Arm(comptime Avx: type) type {
+    if (x86Has(.avx512f)) @compileError("the AVX-512 arm of simd-mappings.h is not ported yet (Decision 53: AVX2 first)");
+    if (!x86Has(.avx)) @compileError("the SSE arm of simd-mappings.h is not ported");
+    if (!x86Has(.fma) or !x86Has(.f16c)) @compileError("the AVX arm is ported only with FMA and F16C (x86-64-v3)");
+    return Avx;
+}
 
 /// The halving loops every `GGML_*_REDUCE` opens with: three passes, each
 /// folding the upper half of the registers into the lower, so that `x[0]`
@@ -244,6 +267,146 @@ const NeonF32Cx4 = struct {
 };
 
 // -----------------------------------------------------------------------------
+// AVX
+
+/// `GGML_F32_VEC` on AVX: `GGML_F32x8`, `__m256`.
+const AvxF32 = struct {
+    /// Ports `GGML_F32_STEP`, `GGML_F32_EPR` (simd-mappings.h:587, 588
+    /// @c1d0e7a00): four registers of eight lanes per step.
+    pub const step: usize = 32;
+    pub const epr: usize = 8;
+
+    /// Ports `GGML_F32_ARR` (simd-mappings.h:1313 @c1d0e7a00).
+    pub const arr: usize = step / epr;
+
+    /// `GGML_F32x8`.
+    pub const Vec = @Vector(epr, f32);
+
+    /// Ports `GGML_F32x8_ZERO` (simd-mappings.h:591 @c1d0e7a00).
+    pub const zero: Vec = @splat(0.0);
+
+    /// Ports `GGML_F32x8_SET1` (simd-mappings.h:592 @c1d0e7a00).
+    pub inline fn set1(x: f32) Vec {
+        return @splat(x);
+    }
+
+    /// Ports `GGML_F32x8_LOAD` (simd-mappings.h:593 @c1d0e7a00).
+    pub inline fn load(p: [*]const f32) Vec {
+        return p[0..epr].*;
+    }
+
+    /// Ports `GGML_F32x8_STORE` (simd-mappings.h:594 @c1d0e7a00).
+    pub inline fn store(p: [*]f32, v: Vec) void {
+        p[0..epr].* = v;
+    }
+
+    /// Ports `GGML_F32x8_FMA` (simd-mappings.h:596 @c1d0e7a00), the
+    /// `__FMA__` arm: `_mm256_fmadd_ps(b, c, a)`, so `a + b * c`, fused.
+    pub inline fn fma(a: Vec, b: Vec, cc: Vec) Vec {
+        return @mulAdd(Vec, b, cc, a);
+    }
+
+    /// Ports `GGML_F32x8_ADD` (simd-mappings.h:600 @c1d0e7a00).
+    pub inline fn add(a: Vec, b: Vec) Vec {
+        return a + b;
+    }
+
+    /// Ports `GGML_F32x8_MUL` (simd-mappings.h:601 @c1d0e7a00).
+    pub inline fn mul(a: Vec, b: Vec) Vec {
+        return a * b;
+    }
+
+    /// Ports `GGML_F32x8_REDUCE` (simd-mappings.h:602 @c1d0e7a00): halve,
+    /// halve, then fold the upper 128 bits onto the lower and two
+    /// `_mm_hadd_ps`.
+    ///
+    /// The two horizontal adds are pairwise, like NEON's `vaddvq_f32`: the
+    /// first gives `(l0+l1, l2+l3, …)`, the second their sum, so the result
+    /// is `(l0+l1)+(l2+l3)` of the folded four lanes. Measured on the
+    /// x86-64-v3 reference's `ggml_vec_dot_f32`: `vextractf128`, `vaddps`,
+    /// `vhaddps`, `vhaddps`.
+    pub inline fn reduce(x: *[arr]Vec) f32 {
+        halve(Vec, arr, x);
+        const lo: @Vector(4, f32) = .{ x[0][0], x[0][1], x[0][2], x[0][3] };
+        const hi: @Vector(4, f32) = .{ x[0][4], x[0][5], x[0][6], x[0][7] };
+        const t0 = lo + hi;
+        return (t0[0] + t0[1]) + (t0[2] + t0[3]);
+    }
+};
+
+extern fn @"llvm.x86.vcvtps2ph.256"(@Vector(8, f32), i32) @Vector(8, i16);
+
+/// `GGML_F16_VEC` on AVX: `GGML_F32Cx8`, a `__m256` over eight halves widened
+/// with F16C, so the arithmetic is `f32`'s -- AVX has no half-precision
+/// arithmetic.
+const AvxF32Cx8 = struct {
+    /// Ports `GGML_F16_STEP`, `GGML_F16_EPR` (simd-mappings.h:635, 636
+    /// @c1d0e7a00).
+    pub const step: usize = 32;
+    pub const epr: usize = 8;
+
+    /// Ports `GGML_F16_ARR` (simd-mappings.h:1314 @c1d0e7a00).
+    pub const arr: usize = step / epr;
+
+    /// Whether `Vec`'s arithmetic rounds to half precision. False, as for
+    /// NEON's `GGML_F32Cx4`: a kernel's body and its scalar `f16` tail agree
+    /// element for element.
+    pub const half_precision = false;
+
+    /// `GGML_F32Cx8`.
+    pub const Vec = @Vector(epr, f32);
+
+    /// Ports `GGML_F32Cx8_ZERO` (simd-mappings.h:641 @c1d0e7a00).
+    pub const zero: Vec = @splat(0.0);
+
+    /// Ports `GGML_F32Cx8_SET1` (simd-mappings.h:642 @c1d0e7a00).
+    pub inline fn set1(x: f32) Vec {
+        return @splat(x);
+    }
+
+    /// Ports `GGML_F32Cx8_LOAD` (simd-mappings.h:646 @c1d0e7a00), the
+    /// `__F16C__` arm: `_mm256_cvtph_ps`, an exact widening.
+    pub inline fn load(p: [*]const u16) Vec {
+        const h: @Vector(epr, f16) = @bitCast(@as(@Vector(epr, u16), p[0..epr].*));
+        return @floatCast(h);
+    }
+
+    /// Ports `GGML_F32Cx8_STORE` (simd-mappings.h:647 @c1d0e7a00), the
+    /// `__F16C__` arm: `_mm256_cvtps_ph(y, 0)`, through LLVM's own intrinsic.
+    ///
+    /// **Not** `@floatCast`. The instruction rounds to nearest-even exactly
+    /// as the software narrowing does, but keeps a NaN's payload, which
+    /// ggml's software routine does not; a Zig cast leaves NaN payloads
+    /// unspecified. So the vector body and the scalar tail of a C kernel can
+    /// disagree on a NaN, and the port has to take the same one each does.
+    pub inline fn store(p: [*]u16, v: Vec) void {
+        p[0..epr].* = @bitCast(@"llvm.x86.vcvtps2ph.256"(v, 0));
+    }
+
+    /// Ports `GGML_F32Cx8_FMA` (simd-mappings.h:670 @c1d0e7a00), which is
+    /// `GGML_F32x8_FMA`.
+    pub inline fn fma(a: Vec, b: Vec, cc: Vec) Vec {
+        return AvxF32.fma(a, b, cc);
+    }
+
+    /// Ports `GGML_F32Cx8_ADD` (simd-mappings.h:671 @c1d0e7a00).
+    pub inline fn add(a: Vec, b: Vec) Vec {
+        return a + b;
+    }
+
+    /// Ports `GGML_F32Cx8_MUL` (simd-mappings.h:672 @c1d0e7a00).
+    pub inline fn mul(a: Vec, b: Vec) Vec {
+        return a * b;
+    }
+
+    /// Ports `GGML_F32Cx8_REDUCE` (simd-mappings.h:673 @c1d0e7a00), which is
+    /// `GGML_F32x8_REDUCE`.
+    pub inline fn reduce(x: *[arr]Vec) f32 {
+        return AvxF32.reduce(x);
+    }
+};
+
+// -----------------------------------------------------------------------------
 // The reference compiler's loop vectorizer
 
 /// How clang's loop vectorizer shapes a strict `acc += a[i] * b[i]` loop for
@@ -261,8 +424,9 @@ const NeonF32Cx4 = struct {
 pub const StrictLoop = struct {
     /// Products rounded per group: elements before the last `t % group` of a
     /// `t`-element loop are rounded, the rest fused. Also the fewest
-    /// iterations that take the vector form at all.
-    group: usize,
+    /// iterations that take the vector form at all. Null where the cost
+    /// model never vectorizes such a loop, so every product is fused.
+    group: ?usize,
     /// The vector body's footprint in bytes: a loaded array starting less
     /// than this far below the stored one sends the loop down the scalar,
     /// all-fused path.
@@ -281,6 +445,11 @@ pub const StrictLoop = struct {
 /// - **`generic`** (Zig's `aarch64-linux` baseline; interleave 2): a body of
 ///   two `fmul.4s`, 8 elements, entered at 8, and **no** vectorized
 ///   epilogue. Groups of 8, `t % 8` fused. Footprint 32 bytes.
+/// - **`x86_64_v3`**: **never vectorized.** The reference's
+///   `ggml_vec_dot_f32` tail is a scalar `vfmadd231ss` loop, `ssm_conv` has
+///   no vector instruction at all, and `ssm_scan`'s only `vmulps` are its
+///   `GGML_SIMD` body's -- the x86 cost model does not find an in-order
+///   reduction worth it. Every product fused.
 ///
 /// Any other model is a compile error rather than a guess: these sites are
 /// bit-exact or wrong, and `NOTES.md`, "Stage 5: the measurement", has how
@@ -291,6 +460,8 @@ pub const strict_loop: StrictLoop = blk: {
         break :blk .{ .group = 4, .footprint = 64 };
     if (builtin.cpu.arch == .aarch64 and std.mem.eql(u8, model, "generic"))
         break :blk .{ .group = 8, .footprint = 32 };
+    if (builtin.cpu.arch == .x86_64 and std.mem.eql(u8, model, "x86_64_v3"))
+        break :blk .{ .group = null, .footprint = 0 };
     @compileError("the loop vectorizer's shape is not measured for CPU model '" ++ model ++ "'");
 };
 
@@ -324,7 +495,7 @@ pub const strict_loop: StrictLoop = blk: {
 pub inline fn strictDot(x: [*]const f32, y: [*]const f32, start: usize, end: usize, acc: f32) f32 {
     var sumf = acc;
     const t = end - start;
-    const group = strict_loop.group;
+    const group = strict_loop.group orelse t + 1;
     const split = start + (t - t % group);
     var k = start;
     while (k < split) : (k += 1) sumf += x[k] * y[k];
@@ -361,7 +532,8 @@ pub inline fn strictDot(x: [*]const f32, y: [*]const f32, start: usize, end: usi
 ///
 /// Return: true when the vectorized form runs.
 pub inline fn strictLoopVectorized(trip: i64, store: *const anyopaque, loads: []const *const anyopaque) bool {
-    if (trip < strict_loop.group) return false;
+    const group = strict_loop.group orelse return false;
+    if (trip < group) return false;
     const st = @intFromPtr(store);
     for (loads) |l| {
         if (st -% @intFromPtr(l) < strict_loop.footprint) return false;
@@ -391,7 +563,7 @@ pub const math_errno = !builtin.os.tag.isDarwin();
 /// stops rounding and starts fusing: past whole groups of
 /// `strict_loop.group`. See `strictLoopVectorized`.
 pub inline fn strictSplit(start: i64, trip: i64) i64 {
-    const group: i64 = strict_loop.group;
+    const group: i64 = strict_loop.group orelse return start;
     return start + trip - @rem(trip, group);
 }
 
@@ -425,7 +597,7 @@ test "F16 loads the halves it is given, whichever arm" {
 }
 
 test "strictSplit leaves the remainder of whole groups" {
-    const g: i64 = strict_loop.group;
+    const g: i64 = strict_loop.group orelse return error.SkipZigTest;
     try std.testing.expectEqual(@as(i64, 5 + 2 * g), strictSplit(5, 2 * g + 1));
     try std.testing.expectEqual(@as(i64, 0), strictSplit(0, g - 1));
 }
