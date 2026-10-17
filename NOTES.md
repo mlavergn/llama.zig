@@ -4891,3 +4891,352 @@ for an abort.
   `vocab`, `arch`, `loader`, `batch`, `chat`, `api`) still link the Metal
   frameworks, so `make validate` stops at `regex-diff`. `platform-libs` is
   what they would use.
+
+## Stage 5: the measurement
+
+`PLAN.md`'s Stage 5 section was three sentences. This is how it was
+measured, on the Mac, before any Stage 5 code was written -- and the one
+item the CUDA pickup sent back here.
+
+### The Mac re-run of the arch gates
+
+The CUDA pickup moved `gen-arch-fixtures`, `arch-model-diff` and
+`gemma4-assistant-diff` onto `scripts/platform-libs` and taught `abort_of`
+the formatted `ggml_abort`. Both changes were exercised only on the GB10.
+Here, from no fixtures:
+
+| Gate | Result |
+|---|---|
+| `make arch-fixtures` | 159 fixtures: 109 through `test-llama-archs`, 50 through `arch_fixtures_extra` |
+| `make arch-model-diff` | **157 pass**, 0 fail, 0 unported, 2 `REF-ABORT` (`plm`, `rwkv6qwen2`, both at `n_seq_max 300`); T5 `gpu:17+3abort+1nondet cpu:18+3abort` |
+| `make gemma4-assistant-diff` | dense and MoE, Metal and CPU: identical |
+
+Unchanged from before the CUDA pickup, which is the expected result.
+
+### Cross-builds
+
+`zig build cli -Dcuda=false --release=fast` into a scratch prefix:
+
+- **`aarch64-linux-gnu`** fails to link on one symbol, `arc4random`, from
+  `sampler/core.zig`'s `getRngSeed`. Zig's default glibc for the target is
+  older than 2.36, where `arc4random` arrived; the GB10 builds natively
+  against its own 2.39 and never saw it. `aarch64-linux-gnu.2.39` links.
+  The call is libc++'s Apple arm of `std::random_device` in any case: on
+  Linux libc++ is `_LIBCPP_USING_DEV_RANDOM` (`__config:150`) and reads
+  `/dev/urandom`, after `entropy()`'s `RNDGETENTCNT` ioctl decides whether
+  `get_rng_seed` takes the device or the clock.
+- **`x86_64-linux-gnu.2.39`** fails to compile at
+  `repack/arm/q4_0_gemm.zig:519`, an `nzcv` clobber that does not exist on
+  x86 -- the first of the NEON arms the CPU backend compiles on every
+  target.
+
+### Live lines per target
+
+A script in the scratchpad ran `zig cc -E` / `zig c++ -E` over every CPU
+translation unit with the build's defines, attributed each non-blank output
+line to its source line through the linemarkers, and kept the set per
+upstream file -- the method `CLAUDE.md` names for `arch/arm/quants.c`, as a
+set rather than a count so two targets can be subtracted. Targets:
+`aarch64-macos` at `baseline` and `apple_m3` (together, what is ported),
+`aarch64-linux-gnu` at its baseline, and `x86_64-linux-gnu` at `x86_64`,
+`x86_64_v2`, `_v3` and `_v4`. `PLAN.md` has the table.
+
+What the subtraction cannot see, and why `PLAN.md` says the table
+undercounts: `simd-mappings.h` contributes no live lines of its own -- its
+`#define`s vanish in preprocessing -- so a `GGML_F32_VEC_FMA` line in
+`ops.cpp` counts as already ported on x86 although it expands to AVX.
+
+libllama measured the same way, every `src/llama*.cpp` and `unicode.cpp`
+for `aarch64-macos` against `aarch64-linux-gnu`: Linux adds 32 lines of
+`llama-mmap.cpp` (direct I/O, which `mmap.zig` ports) and one of
+`llama-quant.cpp`. Nothing else.
+
+### `GATE_CPU=generic` is Linux arm64's baseline
+
+`zig cc -dM -E` for `aarch64-linux-gnu -mcpu=baseline` and for
+`aarch64-macos -mcpu=generic` give the same `__ARM_*` set, apart from the
+Apple-only `__ARM_NEON__` and `__ARM64_ARCH_8__` spellings: NEON, FMA,
+`__ARM_FP16_FORMAT_IEEE`, and **no `DOTPROD`, no
+`FP16_VECTOR_ARITHMETIC`**. So the existing `GATE_CPU` mechanism runs the
+GB10's CPU configuration on the Mac, and `scripts/gate-cpu` checked both
+libraries reported `dotprod=0 matmul_int8=0 sve=0 llamafile=1`.
+
+| Gate | `generic` | `baseline`, same tree |
+|---|---|---|
+| `make ops-diff` | **86 of 632 differ** | 650 / 650 |
+| `make repack-diff` | **26 of 60 differ** | -- |
+| `make node-diff` (CPU) | **first divergence node 27, `SSM_CONV`**, threads 1 and 4; fused decodes from step 0 | -- |
+| `make parity-port-cpu` | **2 of 6 prompts differ** (`Explain gravity in one sentence:` and `def fibonacci(n):`) | -- |
+
+Both libraries were rebuilt at `baseline` afterwards; `ops-diff` passing
+there is the check that they were.
+
+Four classes, read from which ops differ and from the C's `#if`s:
+
+- **The F16 arm.** Without `FP16_VECTOR_ARITHMETIC`, `simd-mappings.h:303`
+  widens `f16` to `f32x4` and computes in `f32`, `GGML_F16_STEP` 16. The
+  port has the `float16x8_t` arm only. f16 `mul_mat` and every f16-K/V
+  `flash_attn_ext` case differ.
+- **sgemm's guards.** `tinyBLAS_Q0_ARM` is `#if __ARM_FEATURE_DOTPROD`
+  (sgemm.cpp:1214) and the f16 `tinyBLAS<8>` is behind
+  `FP16_VECTOR_ARITHMETIC`; `generic` gets `tinyBLAS<4, float32x4_t>` over
+  f16 A and f32 B. `sgemm.zig` dispatches as on the Mac. `q4_0` and `q8_0`
+  `mul_mat` differ.
+- **The `dotprod` `#else` arms.** `q4_1`, `q5_0`, `q5_1`, `q1_0` and
+  `q2_0` differ too, which sgemm does not explain. The C's no-`dotprod`
+  arms are integer (`ggml_vdotq_s32`'s fallback, `vmlal_s8` into
+  `int16x8_t`), so the difference is likely in an epilogue; not yet
+  localised. In `repack.cpp` every `dotprod` kernel falls to its
+  `_generic` body at `generic` (`ggml_gemv_q4_K_8x4_q8_K` →
+  repack.cpp:706) where the port runs the NEON one: that is the gross
+  `q4_K`/`q5_K`/`q6_K` class in `repack-diff`. None of those is selected
+  by the dispatcher at `generic`, on either side.
+- **The vectorizer's cost model.** `ssm_conv`, `ssm_scan`,
+  `conv_2d_direct` and `conv_3d_direct` are `f32` and touch no `#if`
+  above. `ops.cpp` compiled at `-O3` for each CPU and disassembled:
+  `ggml_compute_forward_ssm_conv`'s reduction loop has four `fmul.4s` at
+  `apple_m1` and two at `generic`, the same one fused `fmadd` tail. Clang
+  interleaves the strict in-order reduction twice as wide for the M1, so
+  16 elements an iteration against 8, and a different remainder is fused.
+  `strictLoopVectorized` encodes the M1's width.
+
+### What the GB10 gates could not see
+
+`context-diff`, `arch-model-diff` and `gemma4-assistant-diff` put
+`libllama-ref.a` beside the port's libllama in one process **over the
+port's `libggml.a`**: ggml is not a side of the comparison, so they are
+blind to the CPU kernels by construction. The four `cuda-*` gates compare
+CUDA backends. `ops-diff`, `repack-diff`, CPU `node-diff` and
+`parity-port --cpu` never ran there. So the GB10's 157 / 159 said nothing
+about Linux arm64 CPU numerics, and nothing claimed it did -- but nothing
+said it did not either.
+
+### Linux host arms the port does not have
+
+From the live-line subtraction, then read:
+
+- `threading.zig` ports `ggml_thread_apply_affinity` and
+  `ggml_thread_apply_priority` from the `__APPLE__` arm (ggml-cpu.c:2579,
+  2585) with macOS's `SCHED_OTHER = 1`, `SCHED_FIFO = 4` and its 8-byte
+  `sched_param`. The Linux arm (2614, 2643) pins with
+  `pthread_setaffinity_np` and maps `PRIO_LOW` to `SCHED_BATCH`; Linux's
+  `SCHED_OTHER` and `SCHED_FIFO` are 0 and 1.
+- NUMA -- `ggml_numa_init` (636), `set_numa_thread_affinity` (2148) and
+  `g_state`'s `cpuset` -- is ported from the non-Linux `#else`.
+- `ggml.c`'s Linux backtrace and `ggml-cpu.cpp`'s `/proc/cpuinfo`
+  description were already ported.
+
+### An x86 gate machine, looked for
+
+- **Rosetta 2 is not installed.** A Zig-built `x86_64-macos` binary fails
+  with "bad CPU type in executable"; `/Library/Apple/usr/libexec/oah` is
+  empty and no Rosetta package is registered. macOS 27's own binaries have
+  no x86 slice, so `arch -x86_64 /usr/bin/true` proves nothing either way.
+- **Podman is installed**, with a libkrun VM (`podman-machine-default`).
+  That is an aarch64 Linux guest; x86 in it would be QEMU user-mode.
+- **`llama.cpp.zmake` refuses x86** at `build.zig:361` -- "the ggml source
+  list is arm64 only" -- so there is no x86 reference library without
+  either changing that repository or building one from `build/llamacpp.zig`.
+
+Those three are `PLAN.md`'s open questions.
+
+## Stage 5 step 2: the CPU path made exact at `generic`
+
+Four changes, each chosen at comptime on `builtin.cpu` exactly as the C's
+`#if` or the C compiler chooses. `ops-diff` at `GATE_CPU=generic` after
+each: **86 → 54 → 8 → 0** of 632 -- so every class was seen failing before
+it was seen passing, which is the negative test.
+
+| change | where | `ops-diff` at `generic` after |
+|---|---|---|
+| the F16 arm without `fullfp16`, and sgemm's two guards | `vec.zig` (`dotF16Widened`), `ops/vecinline.zig` (`mad_f16`, `scale_f16`), `ops/sgemm.zig` | 54 |
+| `ggml_vdotq_s32`'s own lane grouping | `quants/arm/neon.zig`, and every `ggml_vdotq_s32` site in `legacy.zig`, `k.zig`, `iq.zig` | 8 |
+| the vectorizer's width as a property of the CPU model | `features.strict_loop`, `vec.vectorizedTail`, `ops/common.strictLoopVectorized` / `strictSplit`, `ops/ssm.zig` | 0 |
+| the 19 `dotprod`-guarded repack kernels falling to `_generic` | `repack/arm/{q4_0,q4_0_gemm,nibble4,q4_k,q5_k,q6_k,q8_0}.zig` | -- (`repack-diff` 26 → 0 of 60) |
+
+### Two new feature constants
+
+`neon.has_dotprod` and `neon.has_fp16_va` are `__ARM_FEATURE_DOTPROD` and
+`__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`, beside the existing `has_i8mm`.
+Clang defines the second for `fullfp16`.
+
+### The F16 arm, and sgemm
+
+Without `FP16_VECTOR_ARITHMETIC`, `simd-mappings.h:303` defines the `F16`
+macros over `float32x4_t`: load is `vcvt_f32_f16(vld1_f16)`, store
+`vst1_f16(vcvt_f16_f32)`, FMA `vfmaq_f32`, `GGML_F16_STEP` 16, and the
+reduce is `GGML_F32x4_REDUCE`, whose halving count is `GGML_F32_ARR` --
+also 4. For `mad_f16` and `scale_f16` that makes the vector body and the
+scalar tail the same function of each element (`f16(fma(x, v, y))`,
+`f16(y * v)`), so at `generic` each is one loop. `ggml_vec_dot_f16`
+accumulates in four `f32x4`.
+
+sgemm's `tinyBLAS_Q0_ARM` is `#if __ARM_FEATURE_DOTPROD` (sgemm.cpp:4052,
+4089) and its f16 `tinyBLAS<8>` is behind `FP16_VECTOR_ARITHMETIC`
+(sgemm.cpp:3974); without them q8_0 and q4_0 return false and f16 takes
+`tinyBLAS<4, float32x4_t>` over **f16 A and f32 B** (sgemm.cpp:3984), which
+needs the third `load` specialisation the port had called dead. `TinyBLAS`
+now takes `TA` and `TB` separately.
+
+### `ggml_vdotq_s32` is not `vdotq_s32` without `dotprod`
+
+`ggml-cpu-impl.h:310`: two `vmull_s8` halves, `vpaddlq_s16`, added. Lane
+`k` gets elements `2k, 2k+1, 2k+8, 2k+9`; `sdot` gives `4k..4k+3`. Upstream
+says so in a comment. The integer total is the same, so the K-quant and IQ
+kernels -- which reduce lanes in integer before converting -- were never
+affected; the legacy ones convert each lane to `f32` and multiply by a
+scale first, and all seven differed. The port had one `dotq_s32` for both
+spellings. Now `neon.ggml_vdotq_s32` is the C's macro, and `dotq_s32`
+stays for the sites the C spells `vdotq_s32` inside `#if
+__ARM_FEATURE_DOTPROD` -- `nvfp4`, `tq1_0` and `tq2_0`, whose `#else` arms
+give the same per-lane integers and were never among the failures.
+
+### The loop vectorizer reads the CPU model
+
+The IR of `ggml_compute_forward_ssm_scan` at `-O3`, both CPUs, both
+strict loops: `apple_m1` checks the trip count against 4 and then 16 and
+the store-load distance against 64; `generic` against 8, and 32. The
+disassembly of `ssm_conv` agrees -- four `fmul.4s` and a one-vector
+epilogue for the M1, two and no epilogue at `generic`. LLVM's AArch64
+tuning gives Apple cores an interleave factor of 4 and the generic model 2.
+So the rounded/fused split is `t - t % G` with `G` 4 or 8, and the guard
+is `trip >= G` with a footprint of `16 G` bytes.
+
+`features.strict_loop` holds `{group, footprint}` per CPU model: `apple_*`
+and `generic`. **Any other model is a compile error**, deliberately: these
+sites are bit-exact or wrong, and a build for an unmeasured CPU -- the
+GB10's `-Dcpu=native` would be one -- should say so rather than produce
+bits that differ from the reference. To add a model: emit `ops.cpp`'s IR at
+`-O3` for it, read the `icmp ult` constants in `ssm_scan`, and confirm with
+`ops-diff` and `node-diff` at that `GATE_CPU`.
+
+### Repack
+
+19 exports in `repack/arm/` begin `if (comptime !neon.has_dotprod) return
+…_generic(…)`, the C's trailing call after its `#if`. Unreachable through
+the dispatcher at `generic` -- it selects no repack type without `dotprod`
+-- but exported, and now equal to the reference's.
+
+### The goldens have a `generic` set
+
+The unit tests build at whatever `-Dcpu` says, and at `generic` 11 golden
+tests failed: the goldens are the reference's bits **at the CPU they were
+captured for**, and at `generic` the reference computes different bits.
+`scripts/vecdot-golden` and `scripts/vec-golden` now take `GOLDEN_CPU`
+(default `baseline`, which reproduces the committed files byte for byte);
+`generic` writes `quants/arm/golden_generic.zig` and
+`vec_golden_generic.zig`, 18 and 20 lines different. The contract-off
+goldens of the `_generic` kernels, `quants/golden.zig`, came out identical
+and have no second set. `features.golden_generic` picks the set; the Apple
+cores share the baseline's, and `apple_m3` passes on it.
+
+One test asserted the Apple arm outright -- `mad_f16` and `scale_f16`
+rounding the first 32 elements in half precision -- and now expects the
+`f32` result at `generic`. `zig build test` passes at `generic`,
+`baseline` and `apple_m3`. Negative-tested at `generic`: forcing
+`ggml_vdotq_s32` to `sdot`'s grouping fails the seven legacy kernels;
+setting `generic`'s strict-loop group to 4 fails the float dot products'
+short lengths.
+
+### Still unmeasured off Darwin
+
+`ops/common.sinCos` calls `__sincosf_stret` on Darwin because that is what
+clang folds a `sinf`/`cosf` pair into there, and assumes `sincosf`
+elsewhere. Rope and `timestep_embedding` depend on it. The Mac's
+`GATE_CPU=generic` builds for Darwin, so it cannot see this; the GB10 can.
+It is on the GB10 pickup list.
+
+## Stage 5 step 3: the Linux host arms
+
+Written beside the Apple arms, each chosen at comptime as the C's
+preprocessor chooses. They compile for `aarch64-linux-gnu` at Zig's default
+glibc and at 2.39, and nothing on the Mac runs them, so they are
+**ungated** until the GB10 pickup runs.
+
+- **`threading.zig`.** `ggml_thread_apply_affinity` and
+  `ggml_thread_apply_priority` under `__linux__`: glibc's 1024-bit
+  `cpu_set_t`, `pthread_setaffinity_np`, Linux's `SCHED_OTHER` 0, `FIFO` 1,
+  `BATCH` 3 and its one-`int` `sched_param`. NUMA under `__gnu_linux__`:
+  `ggml_numa_init`'s `/sys` walk, `getcpu` (glibc's wrapper from 2.34, the
+  raw syscall before, as the C selects), the `numa_balancing` warning, and
+  `set_`/`clear_numa_thread_affinity`. `CPU_ALLOC` becomes a full-size
+  stack set sized with `CPU_ALLOC_SIZE`, since `GGML_NUMA_MAX_CPUS` bounds
+  it. `stat` is `statx`, as in `llama/mmap.zig`.
+- **The Apple arm's warning text was wrong**, and is fixed in passing: the
+  port printed `warn: failed to set thread priority %d : %d`, the C prints
+  `%d : %s (%d)` with `strerror`. Both arms print the C's now.
+- **`get_rng_seed`.** libc++ is `_LIBCPP_USING_ARC4_RANDOM` on Apple and
+  the BSDs and `_LIBCPP_USING_DEV_RANDOM` elsewhere. The second opens
+  `/dev/urandom`, takes `entropy()` from the `RNDGETENTCNT` ioctl clamped
+  to 32, and reads four bytes; an `entropy()` of 0 sends `get_rng_seed` to
+  `system_clock`, which libc++ counts in microseconds. The function-local
+  `static` is an atomic tri-state. A failure to open or read terminates,
+  through `ggml_abort`, with libc++'s `std::system_error` text.
+- **The glibc floor.** `arc4random` was the only symbol that kept the
+  default `aarch64-linux-gnu` cross-build from linking. It now links, and
+  the highest version it references is `GLIBC_2.29`.
+
+`port-links` caught six of the new citations, all mine: two at the wrong
+line (`g_state` is ggml-cpu.c:573, `ggml_get_numa_affinity` 622) and four
+naming one symbol against two line numbers. On the Mac, after the change:
+`zig build test`, `ops-diff` 650 / 650, CPU `node-diff`, `parity-cli` 6 / 6.
+
+## Stage 5 step 4: `make validate` off macOS
+
+- **The eight in-process diffs** -- `regex`, `unicode`, `vocab`, `arch`,
+  `loader`, `batch`, `chat`, `api` -- linked the four Metal frameworks and
+  read `xcrun`. They now source `scripts/platform-libs` (`platform_libs
+  exe`), as the arch scripts did after the CUDA pickup. `libcxx-diff`
+  assigned an unused `SDK` from `xcrun`, which on Linux printed an error
+  and carried on; the line is gone.
+- **`platform-libs` linked CUDA unconditionally on Linux**, so a CPU-only
+  Linux machine could not link a harness. The CUDA libraries are now added
+  only where `$CUDA_HOME/lib64/libcudart.so` exists.
+- **`port-coverage --target <triple>`.** The script measured the macOS
+  contract only (NOTES.md, "What cannot run here"): Metal and Accelerate
+  defines, a Mach-O underscore stripped, `use_metal = true`. Read off the
+  target now -- the host's by default -- an ELF target gets the
+  reference's Linux define, `_GNU_SOURCE` (without which `ggml.c` has no
+  `M_PI`), keeps names as written, and reports the Metal units as not part
+  of it. Two things the first Linux run reported missing were not:
+  `DW.ref.__gxx_personality_v0`, ELF's counterpart of the already-filtered
+  `__clang_call_terminate`, and `ggml_abort`, `ggml_log_internal` and
+  `ggml_format_name`, which `src/ggml/varargs.c` defines on aarch64 outside
+  Apple and Windows because Zig 0.17 cannot -- so that object joins the
+  measured side where `needsVarargsShim` would compile it. Cross-compiled
+  from the Mac, `aarch64-linux-gnu` reads 100% on every unit; native is
+  byte-identical to before.
+- **`validate` swallowed a `sched-diff` failure.** Its line was
+  `./scripts/sched-diff || { [ -f <ref> ] || echo skipped; }`: with the
+  reference present and the diff failing, the `[ -f ]` succeeds and the
+  group returns 0. Demonstrated with `false` in the script's place. It is
+  now `if [ -f <ref> ]; then ./scripts/sched-diff; else echo skipped; fi`,
+  `graph-diff`'s form, which exits 1 in the same case. Both diffs keep the
+  Apple-clang CMake reference; on Linux they print that they were skipped.
+
+## Decision 52: `llama.cpp.zmake` builds x86_64
+
+Granted explicitly against Decision 18, and kept to what x86 needs. In
+`llama.cpp.zmake/build.zig`, the two `arch/arm` entries left the shared
+ggml source lists for an `archSources(arch)` pair -- `arch/arm` for
+aarch64, `arch/x86/quants.c` and `arch/x86/repack.cpp` for x86_64, as
+upstream's `ggml-cpu/CMakeLists.txt:240` lists them -- and the arm64-only
+guard now admits x86_64 on Linux and still refuses everything else,
+x86_64-macos included. CMake's `GGML_AVX*` definitions are not added:
+measured, no source reads them but `arch/x86/cpu-feats.cpp`, which only
+`GGML_BACKEND_DL` builds. `-Dcpu` sets the compiler's own `__AVX2__` and
+friends, which are what the kernels test. Its Makefile gained
+`linux-x86_64`, `X86_CPU` defaulting to `x86_64_v3` (Decision 53), and its
+README and CLAUDE.md say so.
+
+Checked by building, since nothing here runs x86: `x86_64-linux-gnu` at
+`x86_64_v3` gives a `libggml.a` with 959 `vpmaddubsw` and no `zmm`
+register, at `x86_64_v4` 1,675 and 9,410 -- the AVX2 and AVX-512 kernels
+are in. `aarch64-linux-gnu` still builds, and on the Mac `ops-diff`
+rebuilt the macOS reference and passed 650 / 650 against it.
+
+Not changed, though it is wrong: zmake's CLAUDE.md and README say Zig's
+aarch64 baseline "already implies `DOTPROD` and `FP16_VECTOR_ARITHMETIC` on
+macOS and Linux". On Linux it is `generic`, which has neither ("Stage 5:
+the measurement"). Correcting another repository's prose is outside the
+grant.

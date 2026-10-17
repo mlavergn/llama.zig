@@ -35,6 +35,13 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# GOLDEN_CPU is the CPU the reference kernels are compiled for. `baseline`
+# writes the committed goldens; any other CPU writes a `_<cpu>` sibling,
+# because a different CPU is a different reference -- see NOTES.md,
+# "Stage 5 step 2". `generic` is Zig's aarch64-linux baseline.
+GOLDEN_CPU="${GOLDEN_CPU:-baseline}"
+sfx=""; [ "$GOLDEN_CPU" = baseline ] || sfx="_$GOLDEN_CPU"
+
 REF_LIBS=(
     cmake-build/apple/ggml/src/libggml.a
     cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
@@ -53,11 +60,11 @@ INC=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-
 DEFS=(-DNDEBUG -DGGML_USE_CPU -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE
       -DGGML_VERSION='"0.3.0"' -DGGML_COMMIT='"c1d0e7a00"')
 
-zig c++ -mcpu=baseline -c llama.cpp/ggml/src/ggml-cpu/vec.cpp -o "$tmp/vec.o" \
+zig c++ -mcpu="$GOLDEN_CPU" -c llama.cpp/ggml/src/ggml-cpu/vec.cpp -o "$tmp/vec.o" \
     -std=c++17 -w -O2 -ffp-contract=on \
     "${INC[@]}" "${DEFS[@]}"
 
-zig cc -mcpu=baseline harness/vec_golden.c "$tmp/vec.o" -o "$tmp/gen" \
+zig cc -mcpu="$GOLDEN_CPU" harness/vec_golden.c "$tmp/vec.o" -o "$tmp/gen" \
     -std=c11 -w -O2 -ffp-contract=on \
     "${INC[@]}" "${DEFS[@]}" \
     "${REF_LIBS[@]}" \
@@ -65,6 +72,7 @@ zig cc -mcpu=baseline harness/vec_golden.c "$tmp/vec.o" -o "$tmp/gen" \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks"
 
-"$tmp/gen" > src/ggml/cpu/vec_golden.zig
-zig fmt src/ggml/cpu/vec_golden.zig >/dev/null
-echo "wrote src/ggml/cpu/vec_golden.zig ($(grep -c '^pub const .* = Dot{' src/ggml/cpu/vec_golden.zig) kernel/length pairs, contract on)"
+out="src/ggml/cpu/vec_golden$sfx.zig"
+"$tmp/gen" > "$out"
+zig fmt "$out" >/dev/null
+echo "wrote $out ($(grep -c '^pub const .* = Dot{' "$out") kernel/length pairs, contract on, $GOLDEN_CPU)"

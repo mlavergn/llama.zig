@@ -24,6 +24,7 @@
 //! `scripts/libcxx-diff`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const libcxx = @import("../libcxx.zig");
 
@@ -439,9 +440,17 @@ pub fn topKImpl(cur_p: *TokenDataArray, k_in: i32) void {
 
 /// Ports `get_rng_seed` (llama-sampler.cpp:340 @c1d0e7a00).
 ///
-/// `LLAMA_DEFAULT_SEED` asks for a random seed. libc++'s
-/// `random_device::entropy()` is non-zero on Apple platforms, so the C++
-/// takes its `std::random_device` branch, which is `arc4random` there.
+/// `LLAMA_DEFAULT_SEED` asks for a random seed. The C++ asks
+/// `std::random_device().entropy()` once, in a function-local `static`; zero
+/// means the device is not a true RNG and the seed comes from
+/// `std::chrono::system_clock` instead. What both of those are depends on the
+/// libc++ the reference links:
+///
+/// - **Apple and the BSDs** are `_LIBCPP_USING_ARC4_RANDOM`: `entropy()` is
+///   always 32, so the device branch is taken, and it is `arc4random`.
+/// - **Everywhere else, Linux included**, is `_LIBCPP_USING_DEV_RANDOM`:
+///   see `RandomDevice`. A kernel or container that refuses the entropy ioctl
+///   makes `entropy()` 0, and the seed is the clock.
 ///
 /// Parameters:
 /// - `seed`: the requested seed.
@@ -449,10 +458,112 @@ pub fn topKImpl(cur_p: *TokenDataArray, k_in: i32) void {
 /// Return: `seed`, or a random one for `LLAMA_DEFAULT_SEED`.
 pub fn getRngSeed(seed: u32) u32 {
     if (seed == c.LLAMA_DEFAULT_SEED) {
-        return impl.arc4random();
+        if (comptime uses_arc4random) return impl.arc4random();
+
+        // use system clock if std::random_device is not a true RNG
+        if (randomDeviceIsPrng()) return @truncate(@as(u64, @bitCast(systemClockCount())));
+
+        var rd = RandomDevice.open();
+        defer rd.close();
+        return rd.next();
     }
     return seed;
 }
+
+/// libc++'s `_LIBCPP_USING_ARC4_RANDOM`: Apple and the BSDs.
+const uses_arc4random = builtin.os.tag.isDarwin() or builtin.os.tag.isBSD();
+
+/// The C++'s `static bool is_rd_prng`, initialised on first use. A C++
+/// function-local static is initialised once, under a guard; this caches the
+/// answer in an atomic, so two threads racing the first call each open the
+/// device once and agree -- the only difference, and not one a caller can
+/// see.
+var rd_prng_state = std.atomic.Value(u8).init(0); // 0 unknown, 1 false, 2 true
+
+fn randomDeviceIsPrng() bool {
+    switch (rd_prng_state.load(.acquire)) {
+        1 => return false,
+        2 => return true,
+        else => {},
+    }
+    var rd = RandomDevice.open();
+    defer rd.close();
+    const is_prng = rd.entropy() == 0;
+    rd_prng_state.store(if (is_prng) 2 else 1, .release);
+    return is_prng;
+}
+
+/// `std::chrono::system_clock::now().time_since_epoch().count()` in libc++
+/// on Linux: `clock_gettime(CLOCK_REALTIME)` in **microseconds**, libc++'s
+/// `system_clock::duration`.
+fn systemClockCount() i64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.REALTIME, &ts);
+    return @as(i64, ts.sec) * 1_000_000 + @divTrunc(@as(i64, ts.nsec), 1000);
+}
+
+/// libc++'s `std::random_device` under `_LIBCPP_USING_DEV_RANDOM`, with the
+/// default token `/dev/urandom`.
+///
+/// The constructor opens the device and throws `std::system_error` if it
+/// cannot; `entropy()` is the kernel's `RNDGETENTCNT` count clamped to
+/// `[0, 32]`, and 0 if the ioctl fails; `operator()` reads four bytes,
+/// retrying on `EINTR` and throwing on any other error or on end of file.
+/// Nothing in `get_rng_seed`'s callers catches, so a throw terminates --
+/// here, through `ggml_abort` with libc++'s message.
+const RandomDevice = struct {
+    fd: c_int,
+
+    /// `RNDGETENTCNT`, `_IOR('R', 0x00, int)`, in the generic ioctl encoding
+    /// aarch64 and x86_64 share.
+    const rnd_get_ent_cnt: c_ulong = 0x80045200;
+
+    const libc = struct {
+        extern "c" fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
+        extern "c" fn ioctl(fd: c_int, request: c_ulong, ...) c_int;
+        extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
+        extern "c" fn close(fd: c_int) c_int;
+        extern "c" fn strerror(err: c_int) [*:0]const u8;
+    };
+
+    fn open() RandomDevice {
+        const fd = libc.open("/dev/urandom", @as(c_int, 0)); // O_RDONLY
+        if (fd < 0) fail("random_device failed to open /dev/urandom");
+        return .{ .fd = fd };
+    }
+
+    fn close(self: *RandomDevice) void {
+        _ = libc.close(self.fd);
+    }
+
+    fn entropy(self: *const RandomDevice) f64 {
+        var ent: c_int = 0;
+        if (libc.ioctl(self.fd, rnd_get_ent_cnt, &ent) < 0) return 0;
+        if (ent < 0) return 0;
+        if (ent > 32) return 32;
+        return @floatFromInt(ent);
+    }
+
+    fn next(self: *const RandomDevice) u32 {
+        var r: u32 = 0;
+        const p: [*]u8 = @ptrCast(&r);
+        var got: usize = 0;
+        while (got < @sizeOf(u32)) {
+            const n = libc.read(self.fd, p + got, @sizeOf(u32) - got);
+            if (n == 0) fail("random_device got EOF");
+            if (n < 0) {
+                if (std.c._errno().* == @backingInt(std.c.E.INTR)) continue;
+                fail("random_device got an unexpected error");
+            }
+            got += @intCast(n);
+        }
+        return r;
+    }
+
+    fn fail(comptime what: [:0]const u8) noreturn {
+        c.ggml_abort("llama-sampler.cpp", 340, "terminating due to uncaught exception of type std::system_error: " ++ what ++ ": %s", libc.strerror(std.c._errno().*));
+    }
+};
 
 // -----------------------------------------------------------------------------
 // The llama_sampler API

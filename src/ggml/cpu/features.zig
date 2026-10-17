@@ -233,6 +233,67 @@ pub export fn ggml_cpu_has_llamafile() c_int {
 pub const use_llamafile = !armHas("sve") and !armHas("i8mm");
 
 // -----------------------------------------------------------------------------
+// The reference compiler's loop vectorizer
+
+/// How clang's loop vectorizer shapes a strict `acc += a[i] * b[i]` loop for
+/// the CPU this binary targets. Not a port of anything in the C: a property
+/// of the compiler that builds the reference, which the C's arithmetic
+/// inherits.
+///
+/// At `-ffp-contract=on` such a loop becomes a strict in-order reduction.
+/// Whole vector groups have their products **rounded** (`fmul.4s`) and added
+/// one lane at a time; only what is left over runs scalar and **fused**
+/// (`fmadd`). Which elements fall in which part depends on the vector body's
+/// width, and that is `VF × interleave`, where the interleave factor comes
+/// from the target CPU's cost model -- so **the CPU model, not its feature
+/// set, decides the reference's bits**. `vec.vectorizedTail` and
+/// `ops/common.strictLoopVectorized` read this.
+pub const StrictLoop = struct {
+    /// Products rounded per group: elements before the last `t % group` of a
+    /// `t`-element loop are rounded, the rest fused. Also the fewest
+    /// iterations that take the vector form at all.
+    group: usize,
+    /// The vector body's footprint in bytes: a loaded array starting less
+    /// than this far below the stored one sends the loop down the scalar,
+    /// all-fused path.
+    footprint: usize,
+};
+
+/// `StrictLoop` for this build's CPU model.
+///
+/// Measured from the reference `ops.o`'s LLVM IR and disassembly at `-O3`,
+/// `ggml_compute_forward_ssm_scan` and `ssm_conv`:
+///
+/// - **Apple cores** (`apple_*`; LLVM's interleave factor 4): a body of four
+///   `fmul.4s`, 16 elements, entered at 16 iterations, then a vectorized
+///   epilogue of one `fmul.4s` entered at 4. So groups of 4 are rounded,
+///   `t % 4` fused, and nothing vectorizes below 4. Footprint 64 bytes.
+/// - **`generic`** (Zig's `aarch64-linux` baseline; interleave 2): a body of
+///   two `fmul.4s`, 8 elements, entered at 8, and **no** vectorized
+///   epilogue. Groups of 8, `t % 8` fused. Footprint 32 bytes.
+///
+/// Any other model is a compile error rather than a guess: these sites are
+/// bit-exact or wrong, and `NOTES.md`, "Stage 5: the measurement", has how
+/// to measure one.
+pub const strict_loop: StrictLoop = blk: {
+    const model = builtin.cpu.model.name;
+    if (builtin.cpu.arch == .aarch64 and std.mem.startsWith(u8, model, "apple_"))
+        break :blk .{ .group = 4, .footprint = 64 };
+    if (builtin.cpu.arch == .aarch64 and std.mem.eql(u8, model, "generic"))
+        break :blk .{ .group = 8, .footprint = 32 };
+    @compileError("the loop vectorizer's shape is not measured for CPU model '" ++ model ++ "'");
+};
+
+/// Whether the unit tests compare against the goldens captured at `generic`
+/// rather than at the baseline: `quants/arm/golden_generic.zig` and
+/// `vec_golden_generic.zig`, written by `GOLDEN_CPU=generic
+/// scripts/vecdot-golden` and `scripts/vec-golden`. The reference computes
+/// different bits there -- the `F16` arm, `ggml_vdotq_s32`'s grouping, the
+/// vectorizer's width -- so it is a different oracle, not a looser one. The
+/// Apple cores share the baseline's.
+pub const golden_generic = std.mem.eql(u8, builtin.cpu.model.name, "generic");
+
+// -----------------------------------------------------------------------------
 // One-time initialisation
 
 /// The C's `static bool is_first_call`, hoisted to file scope because Zig has

@@ -57,6 +57,7 @@
 const std = @import("std");
 const impl = @import("../impl.zig");
 const neon = @import("quants/arm/neon.zig");
+const features = @import("features.zig");
 const c = impl.c;
 
 const f32x4 = neon.f32x4;
@@ -204,6 +205,10 @@ pub export fn ggml_vec_dot_f32(
 /// 3,000 random rows each. Purely fused was 1 ULP out on the conv kernels'
 /// two-element dot products; purely unfused was out at `n = 11`.
 ///
+/// That `4` is the Apple cores' group. At `generic` it is 8 -- the CPU's
+/// cost model halves the interleave and drops the vectorized epilogue -- so
+/// the group is `features.strict_loop.group`, not a constant.
+///
 /// Parameters:
 /// - `x`, `y`: the operands.
 /// - `start`, `end`: the half-open tail range.
@@ -213,7 +218,8 @@ pub export fn ggml_vec_dot_f32(
 pub inline fn vectorizedTail(x: [*]const f32, y: [*]const f32, start: usize, end: usize, acc: f32) f32 {
     var sumf = acc;
     const t = end - start;
-    const split = start + (t - t % 4);
+    const group = features.strict_loop.group;
+    const split = start + (t - t % group);
     var k = start;
     while (k < split) : (k += 1) sumf += x[k] * y[k];
     while (k < end) : (k += 1) sumf = @mulAdd(f32, x[k], y[k], sumf);
@@ -248,12 +254,15 @@ pub export fn ggml_vec_dot_bf16(
     s.* = @floatCast(sumf);
 }
 
-/// Ports `ggml_vec_dot_f16` (vec.cpp:264 @c1d0e7a00), the `GGML_SIMD` NEON arm.
+/// Ports `ggml_vec_dot_f16` (vec.cpp:264 @c1d0e7a00), the `GGML_SIMD` NEON arm,
+/// in both of `simd-mappings.h`'s `F16` variants.
 ///
-/// Four `f16x8` accumulators over a step of 32 — the body really does
-/// accumulate in **half precision** — reduced by a halving tree, then widened
-/// to two `f32x4`, added, and summed pairwise. The remainder accumulates in
-/// `double`, unlike the `f32` kernel's `f32` tail.
+/// With `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC` — every Apple core — four
+/// `f16x8` accumulators over a step of 32: the body really does accumulate
+/// in **half precision**, reduced by a halving tree, then widened to two
+/// `f32x4`, added, and summed pairwise. Without it — `generic`, Zig's
+/// `aarch64-linux` baseline — see `dotF16Widened`. Either way the remainder
+/// accumulates in `double`, unlike the `f32` kernel's `f32` tail.
 pub export fn ggml_vec_dot_f16(
     n: c_int,
     s: *f32,
@@ -268,6 +277,8 @@ pub export fn ggml_vec_dot_f16(
     _ = bs;
     _ = bx;
     _ = by;
+
+    if (comptime !neon.has_fp16_va) return dotF16Widened(n, s, x, y);
 
     var sumf: GgmlFloat = 0.0;
     const np = n & ~@as(c_int, 32 - 1);
@@ -294,6 +305,43 @@ pub export fn ggml_vec_dot_f16(
     const t0 = cvt_f32_f16_half(sum[0], false);
     const t1 = cvt_f32_f16_half(sum[0], true);
     sumf = neon.addvq_f32(add_f32(t0, t1));
+
+    var k: usize = @intCast(np);
+    while (k < @as(usize, @intCast(n))) : (k += 1) {
+        sumf += @as(GgmlFloat, impl.fp16ToFp32(x[k]) * impl.fp16ToFp32(y[k]));
+    }
+
+    s.* = @floatCast(sumf);
+}
+
+/// `ggml_vec_dot_f16`'s body without `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`:
+/// `simd-mappings.h`'s `GGML_F32Cx4` arm (simd-mappings.h:310 @c1d0e7a00).
+///
+/// `GGML_F16_STEP` 16, `GGML_F16_EPR` 4: each load widens four halves to
+/// `f32x4` with `vcvt_f32_f16`, exactly, and `vfmaq_f32` accumulates **in
+/// `f32`**, fused. `GGML_F32Cx4_REDUCE` is `GGML_F32x4_REDUCE` — halve,
+/// halve, one pairwise `vaddvq_f32` — and the leftovers are the same
+/// `double` loop as the other arm.
+fn dotF16Widened(n: c_int, s: *f32, x: [*]c.ggml_fp16_t, y: [*]c.ggml_fp16_t) void {
+    var sumf: GgmlFloat = 0.0;
+    const np = n & ~@as(c_int, 16 - 1);
+
+    var sum: [4]f32x4 = @splat(@as(f32x4, @splat(0.0)));
+
+    var i: c_int = 0;
+    while (i < np) : (i += 16) {
+        for (0..4) |j| {
+            const off: usize = @intCast(i + @as(c_int, @intCast(j)) * 4);
+            const ax = neon.cvt_f32_f16(neon.load_f16x4(x + off));
+            const ay = neon.cvt_f32_f16(neon.load_f16x4(y + off));
+            sum[j] = @mulAdd(f32x4, ax, ay, sum[j]);
+        }
+    }
+
+    sum[0] = sum[0] + sum[2];
+    sum[1] = sum[1] + sum[3];
+    sum[0] = sum[0] + sum[1];
+    sumf = neon.addvq_f32(sum[0]);
 
     var k: usize = @intCast(np);
     while (k < @as(usize, @intCast(n))) : (k += 1) {

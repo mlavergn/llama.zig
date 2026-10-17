@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const impl = @import("../../impl.zig");
+const neon = @import("../quants/arm/neon.zig");
 
 const c = impl.c;
 
@@ -198,7 +199,11 @@ pub inline fn mul_f32(n: i64, z: [*]f32, x: [*]const f32, y: [*]const f32) void 
 //
 // The `f16` arms are different: with `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`
 // the body computes **in half precision** (`vfmaq_f16`, `vmulq_f16`) and the
-// tail widens to `f32`. That split is real and is reproduced.
+// tail widens to `f32`. That split is real and is reproduced. Without it --
+// `generic`, Zig's `aarch64-linux` baseline -- `simd-mappings.h` takes its
+// `GGML_F32Cx4` arm (simd-mappings.h:310 @c1d0e7a00): the body widens four halves,
+// computes in `f32` and narrows on store, which is what the tail does, so
+// there the whole range is one loop again.
 
 /// Ports `ggml_vec_mad_f32` (vec.h:319 @c1d0e7a00), the `GGML_SIMD` NEON arm:
 /// `y += x * v`, fused per element. See the section comment for why body and
@@ -216,7 +221,7 @@ pub inline fn mad_f32(n: i64, y: [*]f32, x: [*]const f32, v: f32) void {
 /// `f32`, fuse there, and narrow once.
 pub inline fn mad_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, v: f32) void {
     const nn: usize = @intCast(n);
-    const np = nn & ~@as(usize, f16_step - 1);
+    const np = if (comptime neon.has_fp16_va) nn & ~@as(usize, f16_step - 1) else 0;
     const vx: f16 = @floatCast(v);
 
     var i: usize = 0;
@@ -293,7 +298,7 @@ pub inline fn scale_f32(n: i64, y: [*]f32, v: f32) void {
 /// half precision** by `v` rounded to `f16`, the tail in `f32`.
 pub inline fn scale_f16(n: i64, y: [*]c.ggml_fp16_t, v: f32) void {
     const nn: usize = @intCast(n);
-    const np = nn & ~@as(usize, f16_step - 1);
+    const np = if (comptime neon.has_fp16_va) nn & ~@as(usize, f16_step - 1) else 0;
     const vx: f16 = @floatCast(v);
 
     var i: usize = 0;
@@ -659,9 +664,12 @@ test "mad_f16 and scale_f16 compute the first 32 in half precision" {
     // is a tie on the f16 grid that goes to even, 3 + 2^-8. In f32, 3v is
     // exact and narrows to 3 + 2^-9. So elements 0..31 and element 32 differ,
     // and that difference is the body/tail split.
+    //
+    // Without `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC` there is no split: the
+    // body computes in `f32` too, so element 31 is the tail's value.
     const v: f32 = 1.0 + 0x1.8p-11;
-    const body: f32 = 3.0 + 0x1p-8;
     const tail: f32 = 3.0 + 0x1p-9;
+    const body: f32 = if (neon.has_fp16_va) 3.0 + 0x1p-8 else tail;
 
     var y: [33]c.ggml_fp16_t = undefined;
     var x: [33]c.ggml_fp16_t = undefined;

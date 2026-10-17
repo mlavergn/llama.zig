@@ -529,6 +529,32 @@ pub inline fn dotq_s32(acc: i32x4, a: i8x16, b: i8x16) i32x4 {
     return acc +% g0 +% g1 +% g2 +% g3;
 }
 
+/// Ports `ggml_vdotq_s32`, `ggml_vdotq_s32` (ggml-cpu-impl.h:310, 319 @c1d0e7a00): `vdotq_s32`
+/// with `__ARM_FEATURE_DOTPROD`, and without it the C's own fallback.
+///
+/// The fallback has the same total and a **different lane grouping** —
+/// upstream's comment says so. `vmull_s8` multiplies each half into eight
+/// `i16`, `vpaddlq_s16` adds adjacent pairs, and the two halves are added
+/// lane-wise, so
+/// `result[k] = acc[k] + a[2k]b[2k] + a[2k+1]b[2k+1] + a[2k+8]b[2k+8] + a[2k+9]b[2k+9]`
+/// where `vdotq_s32` sums `a[4k..4k+3]`. A kernel that converts lanes to
+/// `f32` before reducing them sees the difference; the legacy dot products
+/// do. Call this wherever the C spells `ggml_vdotq_s32`, and `dotq_s32`
+/// where it spells `vdotq_s32` inside an `#if __ARM_FEATURE_DOTPROD`.
+pub inline fn ggml_vdotq_s32(acc: i32x4, a: i8x16, b: i8x16) i32x4 {
+    if (comptime has_dotprod) return dotq_s32(acc, a, b);
+    const wa: @Vector(16, i32) = a;
+    const wb: @Vector(16, i32) = b;
+    const p = wa *% wb;
+
+    const even = @shuffle(i32, p, undefined, [4]i32{ 0, 2, 4, 6 });
+    const odd = @shuffle(i32, p, undefined, [4]i32{ 1, 3, 5, 7 });
+    const even_hi = @shuffle(i32, p, undefined, [4]i32{ 8, 10, 12, 14 });
+    const odd_hi = @shuffle(i32, p, undefined, [4]i32{ 9, 11, 13, 15 });
+
+    return acc +% ((even +% odd) +% (even_hi +% odd_hi));
+}
+
 /// Ports `vdotq_laneq_s32`: `dotq_s32` with one 32-bit lane of `b`
 /// broadcast across all four.
 ///
@@ -549,6 +575,19 @@ pub inline fn dotq_laneq_s32(acc: i32x4, a: i8x16, b: i8x16, comptime idx: u2) i
 /// `__ARM_FEATURE_MATMUL_INT8`.
 pub const has_i8mm = builtin.cpu.arch == .aarch64 and
     std.Target.aarch64.featureSetHas(builtin.cpu.features, .i8mm);
+
+/// Whether this build targets a CPU with the dot-product extension: the C's
+/// `__ARM_FEATURE_DOTPROD`. Every Apple core has it; Zig's `aarch64-linux`
+/// baseline, `generic`, does not.
+pub const has_dotprod = builtin.cpu.arch == .aarch64 and
+    std.Target.aarch64.featureSetHas(builtin.cpu.features, .dotprod);
+
+/// Whether this build targets a CPU with half-precision vector arithmetic:
+/// the C's `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`, which clang defines for
+/// `fullfp16`. Absent at `generic`, where `simd-mappings.h` computes `f16`
+/// in `f32`.
+pub const has_fp16_va = builtin.cpu.arch == .aarch64 and
+    std.Target.aarch64.featureSetHas(builtin.cpu.features, .fullfp16);
 
 extern fn @"llvm.aarch64.neon.smmla.v4i32.v16i8"(i32x4, i8x16, i8x16) i32x4;
 

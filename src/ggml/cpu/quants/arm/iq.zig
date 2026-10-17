@@ -146,13 +146,13 @@ inline fn expandSigns(bits: u32) [2]i8x16 {
 /// `ggml_vdotq_s32(zero, a, b)` reduced to a scalar.
 inline fn dotv(a: i8x16, b: i8x16) i32 {
     const zero: i32x4 = @splat(0);
-    return neon.addvq_s32(neon.dotq_s32(zero, a, b));
+    return neon.addvq_s32(neon.ggml_vdotq_s32(zero, a, b));
 }
 
 /// Two chained dot products reduced to a scalar.
 inline fn dotv2(a0: i8x16, b0: i8x16, a1: i8x16, b1: i8x16) i32 {
     const zero: i32x4 = @splat(0);
-    return neon.addvq_s32(neon.dotq_s32(neon.dotq_s32(zero, a0, b0), a1, b1));
+    return neon.addvq_s32(neon.ggml_vdotq_s32(neon.ggml_vdotq_s32(zero, a0, b0), a1, b1));
 }
 
 /// Ports `ggml_vec_dot_iq2_xxs_q8_K` (arch/arm/quants.c:3631 @c1d0e7a00).
@@ -289,10 +289,10 @@ pub export fn ggml_vec_dot_iq2_xs_q8_K(
             }
 
             const zero: i32x4 = @splat(0);
-            const p1 = neon.dotq_s32(zero, u[0], b[0]);
-            const p2 = neon.dotq_s32(zero, u[1], b[1]);
-            const p3 = neon.dotq_s32(zero, u[2], b[2]);
-            const p4 = neon.dotq_s32(zero, u[3], b[3]);
+            const p1 = neon.ggml_vdotq_s32(zero, u[0], b[0]);
+            const p2 = neon.ggml_vdotq_s32(zero, u[1], b[1]);
+            const p3 = neon.ggml_vdotq_s32(zero, u[2], b[2]);
+            const p4 = neon.ggml_vdotq_s32(zero, u[3], b[3]);
             const p = neon.paddq_s32(neon.paddq_s32(p1, p2), neon.paddq_s32(p3, p4));
 
             sumi = neon.mla_s32(sumi, p, scales32[ib64]);
@@ -690,12 +690,12 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
             q8 += 64;
 
             const p1 = neon.paddq_s32(
-                neon.dotq_s32(mzero, g[0], b[0]),
-                neon.dotq_s32(mzero, g[1], b[1]),
+                neon.ggml_vdotq_s32(mzero, g[0], b[0]),
+                neon.ggml_vdotq_s32(mzero, g[1], b[1]),
             );
             const p2 = neon.paddq_s32(
-                neon.dotq_s32(mzero, g[2], b[2]),
-                neon.dotq_s32(mzero, g[3], b[3]),
+                neon.ggml_vdotq_s32(mzero, g[2], b[2]),
+                neon.ggml_vdotq_s32(mzero, g[3], b[3]),
             );
             const p12 = neon.paddq_s32(p1, p2);
 
@@ -706,12 +706,12 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
             const aux8: [4]u8 = @bitCast(aux32);
 
             const p3 = neon.paddq_s32(
-                neon.dotq_s32(mzero, deltas[aux8[0]], b[0]),
-                neon.dotq_s32(mzero, deltas[aux8[1]], b[1]),
+                neon.ggml_vdotq_s32(mzero, deltas[aux8[0]], b[0]),
+                neon.ggml_vdotq_s32(mzero, deltas[aux8[1]], b[1]),
             );
             const p4 = neon.paddq_s32(
-                neon.dotq_s32(mzero, deltas[aux8[2]], b[2]),
-                neon.dotq_s32(mzero, deltas[aux8[3]], b[3]),
+                neon.ggml_vdotq_s32(mzero, deltas[aux8[2]], b[2]),
+                neon.ggml_vdotq_s32(mzero, deltas[aux8[3]], b[3]),
             );
             const p34 = neon.paddq_s32(p3, p4);
 
@@ -813,7 +813,7 @@ test {
 }
 
 const testing = @import("../testing.zig");
-const golden = @import("golden.zig");
+const golden = if (@import("../../features.zig").golden_generic) @import("golden_generic.zig") else @import("golden.zig");
 
 test "iq2_xxs dot matches the C" {
     try testing.check(ggml_vec_dot_iq2_xxs_q8_K, c.GGML_TYPE_IQ2_XXS, c.GGML_TYPE_Q8_K, golden.iq2_xxs);

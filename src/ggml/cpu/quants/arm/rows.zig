@@ -157,7 +157,7 @@ test {
 }
 
 const testing = @import("../testing.zig");
-const golden = @import("golden.zig");
+const golden = if (@import("../../features.zig").golden_generic) @import("golden_generic.zig") else @import("golden.zig");
 
 test "q8_0 row quantizer matches the C" {
     try testing.checkRow(quantize_row_q8_0, c.GGML_TYPE_Q8_0, golden.row_q8_0);

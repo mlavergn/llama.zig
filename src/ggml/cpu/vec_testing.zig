@@ -58,7 +58,7 @@
 
 const std = @import("std");
 const impl = @import("../impl.zig");
-const golden = @import("vec_golden.zig");
+const golden = if (@import("features.zig").golden_generic) @import("vec_golden_generic.zig") else @import("vec_golden.zig");
 const c = impl.c;
 
 /// The three kernels, by their C names. Resolved at link time from whoever

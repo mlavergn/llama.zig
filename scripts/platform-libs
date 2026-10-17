@@ -4,7 +4,8 @@
 # `zig build-exe` one -- the two spell an rpath differently.
 #
 # macOS: the Metal and Accelerate frameworks from the SDK.
-# Linux: the CUDA runtime, cuBLAS and the driver -- and deliberately *not*
+# Linux: the CUDA runtime, cuBLAS and the driver when the toolkit is
+# installed -- and deliberately *not*
 # the system libstdc++ the cuda-* scripts link. Zig appends its own
 # libc++abi.a after every input, so a libstdc++.so on the line wins the
 # runtime symbols nothing in libc++.a pulls first: the binary then throws
@@ -22,10 +23,16 @@ platform_libs() {
                            -F "$sdk/System/Library/Frameworks")
             ;;
         Linux)
+            # The CUDA libraries only where the toolkit is: a CPU-only Linux
+            # build of libggml.a needs none of them, and a machine without
+            # CUDA has nothing to link.
             local cuda=${CUDA_HOME:-/usr/local/cuda} rpath
-            if [ "$1" = exe ]; then rpath=(-rpath "$cuda/lib64"); else rpath=(-Wl,-rpath,"$cuda/lib64"); fi
-            PLATFORM_LIBS=(-L"$cuda/lib64" "${rpath[@]}" -lcudart -lcublas -lcublasLt -lcuda
-                           -lgcc_s -lm -lpthread)
+            PLATFORM_LIBS=()
+            if [ -e "$cuda/lib64/libcudart.so" ]; then
+                if [ "$1" = exe ]; then rpath=(-rpath "$cuda/lib64"); else rpath=(-Wl,-rpath,"$cuda/lib64"); fi
+                PLATFORM_LIBS=(-L"$cuda/lib64" "${rpath[@]}" -lcudart -lcublas -lcublasLt -lcuda)
+            fi
+            PLATFORM_LIBS+=(-lgcc_s -lm -lpthread)
             ;;
         *)
             echo "platform-libs: no link line for $(uname -s)" >&2

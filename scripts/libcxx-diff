@@ -16,8 +16,6 @@ cd "$ROOT" || exit 2
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
-
 zig c++ -mcpu=baseline -std=c++17 -O2 \
     -c harness/libcxx_ref.cpp -o "$tmp/ref.o" 2>"$tmp/err" \
     || { echo "FAIL: cannot compile the reference" >&2; head -10 "$tmp/err" >&2; exit 1; }

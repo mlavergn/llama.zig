@@ -33,6 +33,12 @@ const impl = @import("../../../impl.zig");
 const blocks = @import("../blocks.zig");
 const neon = @import("../../quants/arm/neon.zig");
 
+// The `_generic` bodies, in `cpu/repack/`, that each export below falls to
+// without `__ARM_FEATURE_DOTPROD` -- the C's trailing call after its `#if`.
+// Zig's `aarch64-linux` baseline, `generic`, takes them; no Apple core does.
+extern fn ggml_gemv_q4_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+extern fn ggml_gemv_q4_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+
 const c = impl.c;
 const f32x4 = neon.f32x4;
 const i32x4 = neon.i32x4;
@@ -58,8 +64,7 @@ inline fn hi4(v: i8x16) i8x16 {
 
 /// Ports `ggml_gemv_q4_0_4x4_q8_0` (arch/arm/repack.cpp:212 @c1d0e7a00).
 pub export fn ggml_gemv_q4_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    _ = bs;
-    _ = nr;
+    if (comptime !neon.has_dotprod) return ggml_gemv_q4_0_4x4_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const qk: c_int = 32;
     const nb = @divTrunc(n, qk);
     const ncols_interleaved: c_int = 4;
@@ -106,8 +111,7 @@ pub export fn ggml_gemv_q4_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 
 /// Ports `ggml_gemv_q4_0_4x8_q8_0` (arch/arm/repack.cpp:273 @c1d0e7a00).
 pub export fn ggml_gemv_q4_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    _ = bs;
-    _ = nr;
+    if (comptime !neon.has_dotprod) return ggml_gemv_q4_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
     const ncols_interleaved: c_int = 4;
 

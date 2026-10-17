@@ -12,18 +12,22 @@
 //! `__AVX512F__` and `__AVX2__`. `PLAN.md` once called this "the awkward
 //! one" on the raw count, which the measurement contradicted.
 //!
-//! **Four instantiations are live**, and nothing else:
+//! **Five instantiations can be live**, chosen by the same feature macros
+//! the C's `#if`s test:
 //!
-//! | A × B | class | entry condition |
-//! |---|---|---|
-//! | f32 × f32 | `tinyBLAS<4, f32x4>` | `n >= 4` |
-//! | f16 × f16 | `tinyBLAS<8, f16x8>` | `n >= 8` |
-//! | q8_0 × q8_0 | `tinyBLAS_Q0_ARM<block_q8_0>` | `n >= 2` |
-//! | q4_0 × q8_0 | `tinyBLAS_Q0_ARM<block_q4_0>` | `n >= 2` |
+//! | A × B | class | entry condition | needs |
+//! |---|---|---|---|
+//! | f32 × f32 | `tinyBLAS<4, f32x4>` | `n >= 4` | NEON |
+//! | f16 × f16 | `tinyBLAS<8, f16x8>` | `n >= 8` | `FP16_VECTOR_ARITHMETIC` |
+//! | f16 × f32 | `tinyBLAS<4, f32x4>` | `n >= 2` | NEON without it |
+//! | q8_0 × q8_0 | `tinyBLAS_Q0_ARM<block_q8_0>` | `n >= 2` | `DOTPROD` |
+//! | q4_0 × q8_0 | `tinyBLAS_Q0_ARM<block_q4_0>` | `n >= 2` | `DOTPROD` |
 //!
-//! `BF16`, `Q5_0` and `IQ4_NL` reach a `return false` on this target. The
-//! third `load` specialisation (`f32x4` from `ggml_fp16_t`) serves an arm
-//! that is dead here, so it is not ported.
+//! Every Apple core takes the f16 × f16 and the two quantized rows; Zig's
+//! `aarch64-linux` baseline, `generic`, has neither feature and takes the
+//! f16 × f32 row instead, through the third `load` specialisation, `f32x4`
+//! from `ggml_fp16_t`. `BF16`, `Q5_0` and `IQ4_NL` reach a `return false`
+//! on ARM.
 //!
 //! # The one symbol
 //!
@@ -89,28 +93,30 @@ inline fn blocPos(ib: i64, ibN: i64, bloc_size: i64) i64 {
 
 /// Ports `tinyBLAS` (sgemm.cpp:485 @c1d0e7a00), the float path.
 ///
-/// `KN` is the element count of one vector load, `V` the vector type and
-/// `T` the scalar it is loaded from. The C's six template parameters
-/// collapse to three because `D == V` and `TA == TB == T` at both live
-/// instantiations, and `TC` is always `f32`.
-fn TinyBLAS(comptime KN: i64, comptime V: type, comptime T: type) type {
+/// `KN` is the element count of one vector load, `V` the vector type, and
+/// `TA` and `TB` the scalars `A` and `B` are loaded from. The C's six
+/// template parameters collapse to four because `D == V` at every live
+/// instantiation and `TC` is always `f32`.
+fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: type) type {
     return struct {
         const Self = @This();
 
         params: *const ComputeParams,
-        A: [*]const T,
-        B: [*]const T,
+        A: [*]const TA,
+        B: [*]const TB,
         C: [*]f32,
         k: i64,
         lda: i64,
         ldb: i64,
         ldc: i64,
 
-        /// Ports `load`, `load` (sgemm.cpp:305, 310 @c1d0e7a00): `vld1q_f32` and
-        /// `vld1q_f16`. The f16 one reinterprets rather than converts --
-        /// `ggml_fp16_t` is a `u16` after the import.
-        inline fn load(p: [*]const T) V {
+        /// Ports `load`, `load`, `load` (sgemm.cpp:305, 310, 313 @c1d0e7a00):
+        /// `vld1q_f32`, `vld1q_f16`, and `vcvt_f32_f16(vld1_f16(p))`. The
+        /// second reinterprets rather than converts -- `ggml_fp16_t` is a
+        /// `u16` after the import; the third widens four halves, exactly.
+        inline fn load(comptime T: type, p: [*]const T) V {
             if (T == f32) return p[0..4].*;
+            if (V == f32x4) return neon.cvt_f32_f16(neon.load_f16x4(p));
             return @bitCast(@as(@Vector(8, u16), p[0..8].*));
         }
 
@@ -179,10 +185,10 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime T: type) type {
                 if (RM <= RN) {
                     var Av: [RM]V = undefined;
                     inline for (0..RM) |i| {
-                        Av[i] = load(self.A + @as(usize, @intCast(self.lda * (ii + @as(i64, i)) + l)));
+                        Av[i] = load(TA, self.A + @as(usize, @intCast(self.lda * (ii + @as(i64, i)) + l)));
                     }
                     inline for (0..RN) |j| {
-                        const Bv = load(self.B + @as(usize, @intCast(self.ldb * (jj + @as(i64, j)) + l)));
+                        const Bv = load(TB, self.B + @as(usize, @intCast(self.ldb * (jj + @as(i64, j)) + l)));
                         inline for (0..RM) |i| {
                             Cv[j][i] = madd(Av[i], Bv, Cv[j][i]);
                         }
@@ -190,10 +196,10 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime T: type) type {
                 } else {
                     var Bv: [RN]V = undefined;
                     inline for (0..RN) |j| {
-                        Bv[j] = load(self.B + @as(usize, @intCast(self.ldb * (jj + @as(i64, j)) + l)));
+                        Bv[j] = load(TB, self.B + @as(usize, @intCast(self.ldb * (jj + @as(i64, j)) + l)));
                     }
                     inline for (0..RM) |i| {
-                        const Av = load(self.A + @as(usize, @intCast(self.lda * (ii + @as(i64, i)) + l)));
+                        const Av = load(TA, self.A + @as(usize, @intCast(self.lda * (ii + @as(i64, i)) + l)));
                         inline for (0..RN) |j| {
                             Cv[j][i] = madd(Av, Bv[j], Cv[j][i]);
                         }
@@ -464,7 +470,7 @@ pub export fn llamafile_sgemm(
         c.GGML_TYPE_F32 => {
             if (Btype != c.GGML_TYPE_F32) return false;
             if (n < 4) return false;
-            const tb = TinyBLAS(4, f32x4, f32){
+            const tb = TinyBLAS(4, f32x4, f32, f32){
                 .params = params,
                 .k = k,
                 .A = @ptrCast(@alignCast(A.?)),
@@ -476,10 +482,25 @@ pub export fn llamafile_sgemm(
             };
             return tb.matmul(m, n);
         },
-        c.GGML_TYPE_F16 => {
+        // The `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC` arm, then the plain
+        // `__ARM_NEON` one (sgemm.cpp:3974, 3984 @c1d0e7a00).
+        c.GGML_TYPE_F16 => if (comptime neon.has_fp16_va) {
             if (n < 8) return false;
             if (Btype != c.GGML_TYPE_F16) return false;
-            const tb = TinyBLAS(8, f16x8, c.ggml_fp16_t){
+            const tb = TinyBLAS(8, f16x8, c.ggml_fp16_t, c.ggml_fp16_t){
+                .params = params,
+                .k = k,
+                .A = @ptrCast(@alignCast(A.?)),
+                .lda = lda,
+                .B = @ptrCast(@alignCast(B.?)),
+                .ldb = ldb,
+                .C = @ptrCast(@alignCast(C.?)),
+                .ldc = ldc,
+            };
+            return tb.matmul(m, n);
+        } else {
+            if (Btype != c.GGML_TYPE_F32) return false;
+            const tb = TinyBLAS(4, f32x4, c.ggml_fp16_t, f32){
                 .params = params,
                 .k = k,
                 .A = @ptrCast(@alignCast(A.?)),
@@ -491,7 +512,11 @@ pub export fn llamafile_sgemm(
             };
             return tb.matmul(m, n);
         },
+        // Both quantized arms run `tinyBLAS_Q0_ARM` only behind
+        // `__ARM_FEATURE_DOTPROD` (sgemm.cpp:4052 @c1d0e7a00); without it
+        // each is the `#else`, which returns false.
         c.GGML_TYPE_Q8_0 => {
+            if (comptime !neon.has_dotprod) return false;
             if (Btype != c.GGML_TYPE_Q8_0) return false;
             const tb = TinyBlasQ0Arm(c.block_q8_0){
                 .k = k,
@@ -508,6 +533,7 @@ pub export fn llamafile_sgemm(
             return true;
         },
         c.GGML_TYPE_Q4_0 => {
+            if (comptime !neon.has_dotprod) return false;
             if (Btype != c.GGML_TYPE_Q8_0) return false;
             const tb = TinyBlasQ0Arm(c.block_q4_0){
                 .k = k,

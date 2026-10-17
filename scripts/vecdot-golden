@@ -17,6 +17,13 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# GOLDEN_CPU is the CPU the reference kernels are compiled for. `baseline`
+# writes the committed goldens; any other CPU writes a `_<cpu>` sibling,
+# because a different CPU is a different reference -- see NOTES.md,
+# "Stage 5 step 2". `generic` is Zig's aarch64-linux baseline.
+GOLDEN_CPU="${GOLDEN_CPU:-baseline}"
+sfx=""; [ "$GOLDEN_CPU" = baseline ] || sfx="_$GOLDEN_CPU"
+
 REF_LIBS=(
     cmake-build/apple/ggml/src/libggml.a
     cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a
@@ -48,7 +55,7 @@ trap 'rm -rf "$tmp"' EXIT
 #    `@mulAdd` and match exactly.
 build() {
     local out="$1"; shift
-    zig cc -mcpu=baseline harness/vecdot_golden.c \
+    zig cc -mcpu="$GOLDEN_CPU" harness/vecdot_golden.c \
         llama.cpp/ggml/src/ggml-cpu/quants.c \
         llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c \
         llama.cpp/ggml/src/ggml-quants.c \
@@ -63,11 +70,13 @@ build() {
 mkdir -p src/ggml/cpu/quants/arm
 
 build "$tmp/gen-off" -ffp-contract=off
-"$tmp/gen-off" generic > src/ggml/cpu/quants/golden.zig
-zig fmt src/ggml/cpu/quants/golden.zig >/dev/null
-echo "wrote src/ggml/cpu/quants/golden.zig ($(grep -c '^pub const .* = Dot{' src/ggml/cpu/quants/golden.zig) kernels, contract off)"
+out="src/ggml/cpu/quants/golden$sfx.zig"
+"$tmp/gen-off" generic > "$out"
+zig fmt "$out" >/dev/null
+echo "wrote $out ($(grep -c '^pub const .* = Dot{' "$out") kernels, contract off, $GOLDEN_CPU)"
 
 build "$tmp/gen-on" -ffp-contract=on
-"$tmp/gen-on" arm > src/ggml/cpu/quants/arm/golden.zig
-zig fmt src/ggml/cpu/quants/arm/golden.zig >/dev/null
-echo "wrote src/ggml/cpu/quants/arm/golden.zig ($(grep -c '^pub const .* = Dot{' src/ggml/cpu/quants/arm/golden.zig) kernels, contract on)"
+out="src/ggml/cpu/quants/arm/golden$sfx.zig"
+"$tmp/gen-on" arm > "$out"
+zig fmt "$out" >/dev/null
+echo "wrote $out ($(grep -c '^pub const .* = Dot{' "$out") kernels, contract on, $GOLDEN_CPU)"

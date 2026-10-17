@@ -28,6 +28,7 @@
 //! and `pending`: under OpenMP the C drops those three fields.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const types = @import("../types.zig");
 const graph = @import("../graph.zig");
@@ -130,57 +131,249 @@ pub export fn ggml_threadpool_chunk_add(tp: *Threadpool, value: c_int) c_int {
 // -----------------------------------------------------------------------------
 // NUMA
 //
-// Linux-only in the C: every other platform takes the `#else` that does
-// nothing. Both functions are still part of the symbol contract, and
-// `ggml_is_numa` is read on the `mul_mat` chunking path, so they are ported
-// rather than dropped.
+// Linux-with-glibc only in the C (`__gnu_linux__`): every other platform takes
+// the `#else` that does nothing. `ggml_is_numa` is read on the `mul_mat`
+// chunking path, so all of it is ported, both arms.
+
+/// `__linux__`, which selects the C's Linux arms of thread affinity and
+/// priority.
+const is_linux = builtin.os.tag == .linux;
+
+/// `__gnu_linux__`, which selects the C's NUMA arm: Linux with glibc. Bionic
+/// cannot set affinity, the C notes, so Android takes the `#else`.
+const is_gnu_linux = is_linux and builtin.abi.isGnu();
+
+/// `GGML_NUMA_MAX_NODES` and `GGML_NUMA_MAX_CPUS` (ggml-cpu.c:544, 545 @c1d0e7a00).
+const numa_max_nodes = 8;
+const numa_max_cpus = 512;
+
+/// glibc's `cpu_set_t`: 1024 bits in `unsigned long` words, and the
+/// `CPU_SET_S` that writes it. Sized with `CPU_ALLOC_SIZE` where the C uses
+/// `CPU_ALLOC`; `numa_max_cpus` bounds every such set, so a fixed array of
+/// the full size stands in for the heap allocation.
+const CpuSet = extern struct {
+    bits: [1024 / @bitSizeOf(c_ulong)]c_ulong = @splat(0),
+
+    fn set(self: *CpuSet, cpu: usize, setsize: usize) void {
+        const word = cpu / @bitSizeOf(c_ulong);
+        if (cpu / 8 < setsize) self.bits[word] |= @as(c_ulong, 1) << @intCast(cpu % @bitSizeOf(c_ulong));
+    }
+
+    /// `CPU_ALLOC_SIZE(count)`: whole words, in bytes.
+    fn allocSize(count: usize) usize {
+        return (count + @bitSizeOf(c_ulong) - 1) / @bitSizeOf(c_ulong) * @sizeOf(c_ulong);
+    }
+};
+
+/// The libc calls only the Linux arms make.
+const linux_c = if (is_linux) struct {
+    extern "c" fn pthread_setaffinity_np(thread: std.c.pthread_t, size: usize, set: *const CpuSet) c_int;
+    extern "c" fn pthread_getaffinity_np(thread: std.c.pthread_t, size: usize, set: *CpuSet) c_int;
+    extern "c" fn getcpu(cpu: *c_uint, node: *c_uint) c_int;
+    extern "c" fn statx(dirfd: c_int, path: [*:0]const u8, flags: c_int, mask: std.os.linux.STATX, buf: *std.os.linux.Statx) c_int;
+    extern "c" fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
+    extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
+    extern "c" fn fgets(buf: [*]u8, size: c_int, f: *anyopaque) ?[*]u8;
+    extern "c" fn fclose(f: *anyopaque) c_int;
+    extern "c" fn strncmp(a: [*]const u8, b: [*:0]const u8, n: usize) c_int;
+} else struct {};
+
+extern fn strerror(err: c_int) [*:0]const u8;
+
+/// Ports `struct ggml_numa_node` (ggml-cpu.c:547 @c1d0e7a00).
+const NumaNode = struct {
+    cpus: [numa_max_cpus]u32 = @splat(0),
+    n_cpus: u32 = 0,
+};
 
 /// Ports `struct ggml_numa_nodes` and the `g_state` that holds it
-/// (ggml-cpu.c:541 and ggml-cpu.c:571), reduced to the one field this platform
-/// can ever set.
-var numa_n_nodes: u32 = 0;
+/// (ggml-cpu.c:552, 573 @c1d0e7a00). Off glibc Linux nothing writes it, and
+/// `n_nodes` stays 0.
+var numa: struct {
+    numa_strategy: c.enum_ggml_numa_strategy = 0,
+    nodes: [numa_max_nodes]NumaNode = @splat(.{}),
+    n_nodes: u32 = 0,
+    total_cpus: u32 = 0,
+    current_node: u32 = 0,
+    cpuset: CpuSet = .{},
+} = .{};
 
-/// Ports `ggml_numa_init` (ggml-cpu.c:636 @c1d0e7a00), the non-Linux arm.
+/// The C's `__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ > 33)`: the
+/// glibc this build links has a `getcpu` wrapper.
+const glibc_has_getcpu = is_gnu_linux and
+    builtin.os.version_range.linux.glibc.order(.{ .major = 2, .minor = 34, .patch = 0 }) != .lt;
+
+/// `stat(path, &st) == 0`, asked through `statx` because Zig 0.17 declares
+/// no `struct stat` for Linux -- the move `llama/mmap.zig` makes too.
+fn pathExists(path: [*:0]const u8) bool {
+    var st: std.os.linux.Statx = undefined;
+    return linux_c.statx(std.os.linux.AT.FDCWD, path, 0, std.os.linux.STATX.BASIC_STATS, &st) == 0;
+}
+
+/// Ports `ggml_get_numa_affinity` (ggml-cpu.c:622 @c1d0e7a00), the
+/// `__gnu_linux__` arm: the calling thread's affinity, which under
+/// `numactl` is the set it was started with.
+fn getNumaAffinity() CpuSet {
+    var cpuset: CpuSet = .{};
+    _ = linux_c.pthread_getaffinity_np(pthread_self(), @sizeOf(CpuSet), &cpuset);
+    return cpuset;
+}
+
+/// Ports `ggml_numa_init` (ggml-cpu.c:636 @c1d0e7a00), both arms.
+///
+/// On glibc Linux: enumerate `/sys/devices/system/node/node*` and
+/// `/sys/devices/system/cpu/cpu*`, find the calling CPU's node with
+/// `getcpu`, list each node's CPUs, and warn if the kernel's automatic NUMA
+/// balancing is on. Anything that fails leaves `n_nodes` at 0, so NUMA stays
+/// off. Elsewhere the C's `#else` is `UNUSED(numa_flag)` and a TODO.
 ///
 /// Parameters:
-/// - `numa_flag`: the strategy the caller asked for, ignored here.
+/// - `numa_flag`: the strategy `set_numa_thread_affinity` will apply.
 pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
-    if (numa_n_nodes > 0) {
+    if (numa.n_nodes > 0) {
         impl.logError("ggml_numa_init: NUMA already initialized\n", .{});
         return;
     }
+    if (comptime !is_gnu_linux) return;
 
-    // The C's Linux arm walks /sys to enumerate nodes and CPUs. Every other
-    // platform takes the `#else`, which is a `UNUSED(numa_flag)` and a TODO.
-    _ = numa_flag;
+    var path: [256]u8 = undefined;
+
+    numa.numa_strategy = numa_flag;
+    numa.cpuset = getNumaAffinity();
+
+    // enumerate nodes
+    while (numa.n_nodes < numa_max_nodes) {
+        const rv = linux_c.snprintf(&path, path.len, "/sys/devices/system/node/node%u", numa.n_nodes);
+        impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
+        if (!pathExists(@ptrCast(&path))) break;
+        numa.n_nodes += 1;
+    }
+
+    // enumerate CPUs
+    while (numa.total_cpus < numa_max_cpus) {
+        const rv = linux_c.snprintf(&path, path.len, "/sys/devices/system/cpu/cpu%u", numa.total_cpus);
+        impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
+        if (!pathExists(@ptrCast(&path))) break;
+        numa.total_cpus += 1;
+    }
+
+    // figure out which node we're on. The C calls glibc's `getcpu` from 2.34
+    // and the raw syscall before it; both fill the same two words.
+    var current_cpu: c_uint = 0;
+    const getcpu_ret: c_int = if (comptime glibc_has_getcpu)
+        linux_c.getcpu(&current_cpu, &numa.current_node)
+    else getcpu: {
+        var cpu: usize = 0;
+        var node: usize = 0;
+        const r = std.os.linux.getcpu(&cpu, &node);
+        current_cpu = @truncate(cpu);
+        numa.current_node = @truncate(node);
+        break :getcpu if (std.os.linux.errno(r) == .SUCCESS) 0 else -1;
+    };
+
+    if (numa.n_nodes < 1 or numa.total_cpus < 1 or getcpu_ret != 0) {
+        numa.n_nodes = 0;
+        return;
+    }
+
+    for (numa.nodes[0..numa.n_nodes], 0..) |*node, n| {
+        node.n_cpus = 0;
+        var cpu: c_uint = 0;
+        while (cpu < numa.total_cpus) : (cpu += 1) {
+            const rv = linux_c.snprintf(&path, path.len, "/sys/devices/system/node/node%u/cpu%u", @as(c_uint, @intCast(n)), cpu);
+            impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
+            if (pathExists(@ptrCast(&path))) {
+                node.cpus[node.n_cpus] = cpu;
+                node.n_cpus += 1;
+            }
+        }
+    }
+
+    if (ggml_is_numa()) {
+        if (linux_c.fopen("/proc/sys/kernel/numa_balancing", "r")) |fptr| {
+            var buf: [42]u8 = undefined;
+            if (linux_c.fgets(&buf, buf.len, fptr) != null and linux_c.strncmp(&buf, "0\n", buf.len) != 0) {
+                impl.logWarn("/proc/sys/kernel/numa_balancing is enabled, this has been observed to impair performance\n", .{});
+            }
+            _ = linux_c.fclose(fptr);
+        }
+    }
 }
 
 /// Ports `ggml_is_numa` (ggml-cpu.c:724 @c1d0e7a00).
 ///
-/// Return: true when more than one NUMA node was found. Always false here,
-/// which is what keeps `mul_mat`'s chunk-by-thread fallback off.
+/// Return: true when more than one NUMA node was found. Always false off
+/// glibc Linux, which is what keeps `mul_mat`'s chunk-by-thread fallback off.
 pub export fn ggml_is_numa() bool {
-    return numa_n_nodes > 1;
+    return numa.n_nodes > 1;
 }
 
-/// Ports `set_numa_thread_affinity` (ggml-cpu.c:2216 @c1d0e7a00), the non-Linux arm.
-inline fn setNumaThreadAffinity(thread_n: c_int) void {
-    _ = thread_n;
+/// Ports `set_numa_thread_affinity`, `set_numa_thread_affinity`
+/// (ggml-cpu.c:2148, 2216 @c1d0e7a00): the `__gnu_linux__` arm and the
+/// `#else` no-op.
+///
+/// Pins worker `thread_n` to the CPUs of one node -- round-robin over the
+/// nodes for DISTRIBUTE, the calling thread's node for ISOLATE -- or, for
+/// NUMACTL, to the set the process was started with.
+fn setNumaThreadAffinity(thread_n: c_int) void {
+    if (comptime !is_gnu_linux) return;
+    if (!ggml_is_numa()) return;
+
+    const setsize = CpuSet.allocSize(numa.total_cpus);
+    const node_num: u32 = switch (numa.numa_strategy) {
+        // run thread on node_num thread_n / (threads per node)
+        c.GGML_NUMA_STRATEGY_DISTRIBUTE => @as(u32, @intCast(thread_n)) % numa.n_nodes,
+        // run thread on current_node
+        c.GGML_NUMA_STRATEGY_ISOLATE => numa.current_node,
+        // use the cpuset that numactl gave us
+        c.GGML_NUMA_STRATEGY_NUMACTL => {
+            const rv = linux_c.pthread_setaffinity_np(pthread_self(), setsize, &numa.cpuset);
+            if (rv != 0) impl.logError("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
+            return;
+        },
+        else => return,
+    };
+
+    const node = &numa.nodes[node_num];
+    var cpus: CpuSet = .{};
+    for (node.cpus[0..node.n_cpus]) |cpu| cpus.set(cpu, setsize);
+
+    const rv = linux_c.pthread_setaffinity_np(pthread_self(), setsize, &cpus);
+    if (rv != 0) impl.logError("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
 }
 
-/// Ports `clear_numa_thread_affinity` (ggml-cpu.c:2217 @c1d0e7a00), the non-Linux arm.
-inline fn clearNumaThreadAffinity() void {}
+/// Ports `clear_numa_thread_affinity`, `clear_numa_thread_affinity`
+/// (ggml-cpu.c:2193, 2217 @c1d0e7a00): the `__gnu_linux__` arm, every CPU
+/// allowed again, and the `#else` no-op.
+fn clearNumaThreadAffinity() void {
+    if (comptime !is_gnu_linux) return;
+    if (!ggml_is_numa()) return;
+
+    const setsize = CpuSet.allocSize(numa.total_cpus);
+    var cpus: CpuSet = .{};
+    var i: usize = 0;
+    while (i < numa.total_cpus) : (i += 1) cpus.set(i, setsize);
+
+    const rv = linux_c.pthread_setaffinity_np(pthread_self(), setsize, &cpus);
+    if (rv != 0) impl.logError("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
+}
 
 // -----------------------------------------------------------------------------
 // Thread placement and priority
 
-const sched_other: c_int = 1;
-const sched_fifo: c_int = 4;
+/// `SCHED_OTHER`, `SCHED_FIFO` and `SCHED_BATCH`, which the two platforms
+/// number differently. macOS has no `SCHED_BATCH`; only the Linux arm uses it.
+const sched_other: c_int = if (is_linux) 0 else 1;
+const sched_fifo: c_int = if (is_linux) 1 else 4;
+const sched_batch: c_int = 3;
 
-/// macOS's `struct sched_param`: one priority plus four opaque bytes.
-const SchedParam = extern struct {
+/// `struct sched_param`: one `int` on glibc, one `int` and four opaque bytes
+/// on macOS.
+const SchedParam = if (is_linux) extern struct {
     sched_priority: c_int,
-    __opaque: [4]u8,
+} else extern struct {
+    sched_priority: c_int,
+    __opaque: [4]u8 = @splat(0),
 };
 
 extern fn pthread_self() std.c.pthread_t;
@@ -192,30 +385,46 @@ extern fn pthread_setschedparam(thread: std.c.pthread_t, policy: c_int, param: *
 extern fn pthread_mutex_init(mutex: *std.c.pthread_mutex_t, attr: ?*const anyopaque) c_int;
 extern fn pthread_cond_init(cond: *std.c.pthread_cond_t, attr: ?*const anyopaque) c_int;
 
-/// Ports `ggml_thread_apply_affinity` (ggml-cpu.c:2579 @c1d0e7a00), the Apple arm.
+/// Ports `ggml_thread_apply_affinity`, `ggml_thread_apply_affinity`
+/// (ggml-cpu.c:2579, 2614 @c1d0e7a00): the Apple and the Linux arms.
 ///
 /// Apple platforms expose no way to pin a thread to a core, so the C's Apple
-/// arm is a no-op that reports success. Kept as a named function so the
-/// call sites read the same as the C's.
+/// arm is a no-op that reports success. The Linux arm pins the calling
+/// thread to every CPU set in `mask`; its warning prints the **address** of
+/// the mask, cast to `unsigned long long`, which is what the C passes.
 fn threadApplyAffinity(mask: []const bool) bool {
-    _ = mask;
+    if (comptime !is_linux) return true;
+
+    var cpuset: CpuSet = .{};
+    for (mask[0..c.GGML_MAX_N_THREADS], 0..) |bit, i| {
+        if (bit) cpuset.set(i, @sizeOf(CpuSet));
+    }
+
+    const err = linux_c.pthread_setaffinity_np(pthread_self(), @sizeOf(CpuSet), &cpuset);
+    if (err != 0) {
+        impl.logError("warn: failed to set affinity mask 0x%llx : %s (%d)\n", .{ @as(c_ulonglong, @intFromPtr(mask.ptr)), strerror(err), err });
+        return false;
+    }
     return true;
 }
 
-/// Ports `ggml_thread_apply_priority` (ggml-cpu.c:2585 @c1d0e7a00), the Apple arm.
+/// Ports `ggml_thread_apply_priority`, `ggml_thread_apply_priority`
+/// (ggml-cpu.c:2585, 2643 @c1d0e7a00): the Apple and the Linux arms. They differ only in `LOW`, which
+/// is `SCHED_BATCH` on Linux and `SCHED_OTHER` on Apple, where the C notes
+/// there is no way to ask for less than normal -- and in the numbering of
+/// the policies.
 ///
 /// Parameters:
 /// - `prio`: one of `GGML_SCHED_PRIO_*`.
 ///
 /// Return: true on success, or when `prio` is NORMAL and nothing is done.
 fn threadApplyPriority(prio: i32) bool {
-    var p: SchedParam = .{ .sched_priority = 0, .__opaque = @splat(0) };
+    var p: SchedParam = .{ .sched_priority = 0 };
     var policy: c_int = sched_other;
 
     switch (prio) {
-        // The C notes there is no way to ask for *lower* than normal here.
         c.GGML_SCHED_PRIO_LOW => {
-            policy = sched_other;
+            policy = if (is_linux) sched_batch else sched_other;
             p.sched_priority = 0;
         },
         c.GGML_SCHED_PRIO_NORMAL => {
@@ -242,7 +451,7 @@ fn threadApplyPriority(prio: i32) bool {
 
     const err = pthread_setschedparam(pthread_self(), policy, &p);
     if (err != 0) {
-        impl.logError("warn: failed to set thread priority %d : %d\n", .{ prio, err });
+        impl.logError("warn: failed to set thread priority %d : %s (%d)\n", .{ prio, strerror(err), err });
         return false;
     }
 

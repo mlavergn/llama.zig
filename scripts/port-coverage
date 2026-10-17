@@ -11,7 +11,13 @@
 # The contract comes from compiling the C file itself, so this needs only the
 # llama.cpp checkout: no CMake build, no reference libraries.
 #
-# Usage: scripts/port-coverage [--list]
+# Usage: scripts/port-coverage [--list] [--target <zig triple>]
+#
+# `--target` measures another platform's contract by cross-compiling both
+# sides, so the Mac can measure Linux's: an ELF target drops the Metal and
+# Accelerate defines the build drops there, keeps every symbol's name as
+# written -- ELF has no C prefix to strip -- and skips the Metal units,
+# which a Linux build does not compile. Native is the default.
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -35,10 +41,63 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
     src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
     || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
 
+LIST=0
+TARGET_ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --list) LIST=1 ;;
+        --target) TARGET_ARGS=(-target "$2"); shift ;;
+        *) echo "usage: scripts/port-coverage [--list] [--target <triple>]" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+# Mach-O prefixes every C symbol with one underscore and builds Metal;
+# ELF does neither. Read off the target, or the host when there is none.
+if [ ${#TARGET_ARGS[@]} -gt 0 ]; then
+    case "${TARGET_ARGS[1]}" in *macos*|*ios*) MACHO=1 ;; *) MACHO=0 ;; esac
+else
+    [ "$(uname -s)" = Darwin ] && MACHO=1 || MACHO=0
+fi
+
 INCLUDES=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu)
-DEFINES=(-DGGML_USE_CPU -DGGML_USE_METAL -DGGML_SCHED_MAX_COPIES=4
-         -DGGML_USE_ACCELERATE -DGGML_USE_LLAMAFILE
+DEFINES=(-DGGML_USE_CPU -DGGML_SCHED_MAX_COPIES=4 -DGGML_USE_LLAMAFILE
          -DGGML_VERSION='"0.3.0"' -DGGML_COMMIT='"c1d0e7a00"')
+if [ "$MACHO" = 1 ]; then
+    DEFINES+=(-DGGML_USE_METAL -DGGML_USE_ACCELERATE)
+    USE_METAL=true
+else
+    # The reference's Linux define, llama.cpp.zmake's `linux_defines` from
+    # upstream's ggml/src/CMakeLists.txt:154. Without it glibc hides `M_PI`
+    # from `-std=c11` and ggml.c does not compile.
+    DEFINES+=(-D_GNU_SOURCE)
+    USE_METAL=false
+fi
+
+# `src/ggml/varargs.c` defines ggml's three C variadics where Zig cannot: on
+# aarch64 outside Apple and Windows. It is the build's `needsVarargsShim`
+# rule, and the object joins the Zig ones on the side being measured.
+if [ ${#TARGET_ARGS[@]} -gt 0 ]; then
+    triple="${TARGET_ARGS[1]}"
+else
+    triple="$(uname -m)-$(uname -s | tr '[:upper:]' '[:lower:]')"
+fi
+case "$triple" in
+    aarch64*macos*|aarch64*ios*|aarch64*windows*|arm64*darwin*) VARARGS_SHIM=0 ;;
+    aarch64*|arm64*) VARARGS_SHIM=1 ;;
+    *) VARARGS_SHIM=0 ;;
+esac
+if [ "$VARARGS_SHIM" = 1 ]; then
+    zig cc ${TARGET_ARGS[@]+"${TARGET_ARGS[@]}"} -mcpu=baseline -c src/ggml/varargs.c -o "$tmp/varargs.o" -std=c11 -w \
+        -I llama.cpp/ggml/include 2>"$tmp/varargs.log" \
+        || { echo "failed to compile src/ggml/varargs.c:" >&2; tail -5 "$tmp/varargs.log" >&2; exit 1; }
+fi
+
+# The C symbol prefix: one leading underscore on Mach-O, none on ELF. A
+# second underscore, before `Z`, marks an Itanium-mangled C++ name.
+strip_prefix() {
+    if [ "$MACHO" = 1 ]; then sed 's/^_//'; else cat; fi
+}
 
 todo_total=0
 
@@ -69,25 +128,27 @@ report_unit() {
     mkdir -p "$d"
 
     if [ "$lang" = "cxx" ]; then
-        if ! zig c++ -mcpu=baseline -c "$src" -o "$d/ref.o" -std=c++17 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
+        if ! zig c++ ${TARGET_ARGS[@]+"${TARGET_ARGS[@]}"} -mcpu=baseline -c "$src" -o "$d/ref.o" -std=c++17 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
             echo "failed to compile $src:" >&2
             tail -5 "$d/cc.log" >&2
             exit 1
         fi
-    elif ! zig cc -mcpu=baseline -c "$src" -o "$d/ref.o" -std=c11 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
+    elif ! zig cc ${TARGET_ARGS[@]+"${TARGET_ARGS[@]}"} -mcpu=baseline -c "$src" -o "$d/ref.o" -std=c11 -w "${INCLUDES[@]}" "${DEFINES[@]}" 2>"$d/cc.log"; then
         echo "failed to compile $src:" >&2
         tail -5 "$d/cc.log" >&2
         exit 1
     fi
-    # One leading underscore is the Mach-O C prefix; a second, before `Z`, marks
-    # an Itanium-mangled C++ name. Strip exactly one, then filter.
-    nm -g --defined-only "$d/ref.o" | awk '{print $3}' | sed 's/^_//' | grep . | sort -u > "$d/want-all.txt"
+    # Strip exactly the C prefix, then filter; see `strip_prefix`.
+    nm -g --defined-only "$d/ref.o" | awk '{print $3}' | strip_prefix | grep . | sort -u > "$d/want-all.txt"
     if [ "$lang" = "cxx" ]; then
         # `__clang_call_terminate` is a compiler-emitted landing-pad helper for
         # the C++ exception path, coalesced across every object that needs one.
         # It belongs to the runtime, not to the translation unit, and no Zig
-        # port produces it.
-        grep -v '^_Z' "$d/want-all.txt" | grep -v '^__clang_call_terminate$' > "$d/want.txt" || :
+        # port produces it. `DW.ref.__gxx_personality_v0` is ELF's
+        # counterpart: the weak reference to the personality routine that
+        # every object with an exception table carries.
+        grep -v '^_Z' "$d/want-all.txt" | grep -v '^__clang_call_terminate$' \
+            | grep -v '^DW\.ref\.__gxx_personality_v0$' > "$d/want.txt" || :
         # `MANGLED_` names the exceptional file whose contract *is* mangled.
         # `ggml-metal-tuning.cpp` has **zero** unmangled exports, so the
         # filter above leaves an empty contract and this script would read
@@ -119,8 +180,8 @@ report_unit() {
         # `config` module the build graph supplies; a bare build-obj has to
         # stand one in. Every flag build.zig defines has to appear here, or the
         # compile fails and this script reports nothing at all.
-        printf 'pub const probe_ported = false;\npub const probe_cpu = false;\npub const use_metal = true;\npub const use_cuda = false;\npub const cuda_port = false;\npub const cuda_arch = "";\n' > "$d/config.zig"
-        if ! zig build-obj -mcpu baseline -femit-bin="$d/$base.o" "${INCLUDES[@]}" -lc \
+        printf 'pub const probe_ported = false;\npub const probe_cpu = false;\npub const use_metal = %s;\npub const use_cuda = false;\npub const cuda_port = false;\npub const cuda_arch = "";\n' "$USE_METAL" > "$d/config.zig"
+        if ! zig build-obj ${TARGET_ARGS[@]+"${TARGET_ARGS[@]}"} -mcpu baseline -femit-bin="$d/$base.o" "${INCLUDES[@]}" -lc \
                 --dep config --dep ggml_c --dep llama_c -Mroot="$f" -Mconfig="$d/config.zig" \
                 -Mggml_c="$tmp/ggml_c.zig" -Mllama_c="$tmp/llama_c.zig" 2>"$d/$base.log"; then
             echo "failed to compile $f:" >&2
@@ -130,9 +191,11 @@ report_unit() {
         echo "$d/$base.o" >> "$d/objs.txt"
     done
 
+    [ "$VARARGS_SHIM" = 1 ] && echo "$tmp/varargs.o" >> "$d/objs.txt"
+
     # shellcheck disable=SC2046
     nm -g --defined-only $(cat "$d/objs.txt") 2>/dev/null \
-        | awk '{print $3}' | sed 's/^_//' | sort -u > "$d/have.txt"
+        | awk '{print $3}' | strip_prefix | sort -u > "$d/have.txt"
 
     comm -12 "$d/have.txt" "$d/want.txt" > "$d/done.txt"
     comm -13 "$d/have.txt" "$d/want.txt" > "$d/todo.txt"
@@ -154,14 +217,12 @@ report_unit() {
             "$label" "$done_n" "$total" "$((done_n * 100 / total))" "$todo_n"
     fi
 
-    if [ "${LIST:-0}" = "1" ] && [ "$todo_n" -gt 0 ]; then
+    if [ "$LIST" = "1" ] && [ "$todo_n" -gt 0 ]; then
         printf '\n  %s remaining:\n' "$label"
         sed 's/^/    /' "$d/todo.txt"
         printf '\n'
     fi
 }
-
-[ "${1:-}" = "--list" ] && LIST=1
 
 # Both units compile through `ported.zig`: it imports every ported file, and a
 # Zig module may not import above its root, so the quants cannot be compiled on
@@ -234,7 +295,8 @@ LANG_=cxx report_unit "repack.cpp" llama.cpp/ggml/src/ggml-cpu/repack.cpp yes \
 LANG_=cxx report_unit "arch/arm/repack.cpp" llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp yes \
     "$PORTED_DIR/ported.zig"
 # The Metal host layer. The two .m files are never ported (Decision 13);
-# the boundary with them is a pure C ABI, measured.
+# the boundary with them is a pure C ABI, measured. Not compiled off Apple.
+if [ "$MACHO" = 1 ]; then
 LANG_=cxx report_unit "ggml-metal-common.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-common.cpp yes \
     "$PORTED_DIR/ported.zig"
 # ggml-metal-tuning.cpp has no unmangled exports at all: its whole contract
@@ -256,6 +318,9 @@ LANG_=cxx report_unit "ggml-metal-device.cpp" llama.cpp/ggml/src/ggml-metal/ggml
     "$PORTED_DIR/ported.zig"
 LANG_=cxx report_unit "ggml-metal-ops.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-ops.cpp yes \
     "$PORTED_DIR/ported.zig"
+else
+    printf '  %-22snot part of this target\n' "ggml-metal/*.cpp"
+fi
 # ggml-opt.cpp: 37 C-ABI symbols, not the 9 PLAN.md's survey recorded.
 # src/ggml/opt.zig, gated by scripts/opt-diff.
 LANG_=cxx report_unit "ggml-opt.cpp" llama.cpp/ggml/src/ggml-opt.cpp yes \

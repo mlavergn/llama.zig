@@ -161,7 +161,7 @@ validate:
 	@printf '\n== upstream citations ==\n'
 	./scripts/port-links
 	@printf '\n== scheduler diff vs reference ==\n'
-	@./scripts/sched-diff || { [ -f cmake-build/apple/ggml/src/libggml.a ] || echo "  skipped: no reference build (run 'make buildmacos')"; }
+	@if [ -f cmake-build/apple/ggml/src/libggml.a ]; then ./scripts/sched-diff; else echo "  skipped: no reference build (run 'make buildmacos')"; fi
 	@printf '\n== graph diff vs reference ==\n'
 	@if [ -f cmake-build/apple/ggml/src/libggml.a ]; then zig build ported-lib --release=fast && ./scripts/graph-diff; else echo "  skipped: no reference build (run 'make buildmacos')"; fi
 	@printf '\nvalidate: OK\n'

@@ -31,6 +31,13 @@ const impl = @import("../../../impl.zig");
 const blocks = @import("../blocks.zig");
 const neon = @import("../../quants/arm/neon.zig");
 
+// The `_generic` bodies, in `cpu/repack/`, that each export below falls to
+// without `__ARM_FEATURE_DOTPROD` -- the C's trailing call after its `#if`.
+// Zig's `aarch64-linux` baseline, `generic`, takes them; no Apple core does.
+extern fn ggml_gemv_q8_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+extern fn ggml_gemv_q8_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+extern fn ggml_gemm_q8_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+
 const c = impl.c;
 const f32x4 = neon.f32x4;
 const i32x4 = neon.i32x4;
@@ -67,8 +74,7 @@ inline fn load4d(p: [*]const i8) [4]i8x8 {
 
 /// Ports `ggml_gemv_q8_0_4x4_q8_0` (arch/arm/repack.cpp:1699 @c1d0e7a00).
 pub export fn ggml_gemv_q8_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    _ = bs;
-    _ = nr;
+    if (comptime !neon.has_dotprod) return ggml_gemv_q8_0_4x4_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
     const ncols_interleaved: c_int = 4;
 
@@ -104,8 +110,7 @@ pub export fn ggml_gemv_q8_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 
 /// Ports `ggml_gemv_q8_0_4x8_q8_0` (arch/arm/repack.cpp:1757 @c1d0e7a00).
 pub export fn ggml_gemv_q8_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    _ = bs;
-    _ = nr;
+    if (comptime !neon.has_dotprod) return ggml_gemv_q8_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
     const ncols_interleaved: c_int = 4;
 
@@ -163,6 +168,7 @@ pub export fn ggml_gemv_q8_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 /// four rows. The per-row scale is `b_d * a_d[m]` with `a_d[m]` broadcast,
 /// and `vmlaq_f32` folds it in **fused**, like its `_n_` sibling.
 pub export fn ggml_gemm_q8_0_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+    if (comptime !neon.has_dotprod) return ggml_gemm_q8_0_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
     const ncols_interleaved: c_int = 4;
 

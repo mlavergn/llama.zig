@@ -33,6 +33,13 @@ const impl = @import("../../../impl.zig");
 const blocks = @import("../blocks.zig");
 const neon = @import("../../quants/arm/neon.zig");
 
+// The `_generic` bodies, in `cpu/repack/`, that each export below falls to
+// without `__ARM_FEATURE_DOTPROD` -- the C's trailing call after its `#if`.
+// Zig's `aarch64-linux` baseline, `generic`, takes them; no Apple core does.
+extern fn ggml_gemv_q6_K_8x4_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+extern fn ggml_gemv_q6_K_8x8_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+extern fn ggml_gemm_q6_K_8x4_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+
 const c = impl.c;
 const f32x4 = neon.f32x4;
 const i32x4 = neon.i32x4;
@@ -59,8 +66,7 @@ const sh4: @Vector(16, u3) = @splat(4);
 
 /// Ports `ggml_gemv_q6_K_8x4_q8_K` (arch/arm/repack.cpp:1309 @c1d0e7a00).
 pub export fn ggml_gemv_q6_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    _ = bs;
-    _ = nr;
+    if (comptime !neon.has_dotprod) return ggml_gemv_q6_K_8x4_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
     const ncols_interleaved: c_int = 8;
     const col_groups: usize = 2;
@@ -193,8 +199,7 @@ pub export fn ggml_gemv_q6_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
 /// The bias is computed four-lane exactly as in 8x4 and then split with
 /// `vget_low/high_s32` to match.
 pub export fn ggml_gemv_q6_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    _ = bs;
-    _ = nr;
+    if (comptime !neon.has_dotprod) return ggml_gemv_q6_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
     const ncols_interleaved: c_int = 8;
     const col_pairs: usize = 4;
@@ -335,6 +340,7 @@ pub export fn ggml_gemv_q6_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
 /// file, which multiply and add separately. The two halves of `q6_K` do
 /// not agree with each other on this, and both are reproduced as written.
 pub export fn ggml_gemm_q6_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+    if (comptime !neon.has_dotprod) return ggml_gemm_q6_K_8x4_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
     const ncols_interleaved: c_int = 8;
     const q8_k_blocklen: usize = 4;

@@ -16,7 +16,10 @@ cd "$ROOT" || exit 2
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
+# The system libraries the harness links beside libggml.a: the Metal
+# frameworks on macOS, the CUDA libraries on Linux. See scripts/platform-libs.
+. scripts/platform-libs
+platform_libs exe
 
 zig c++ -mcpu=baseline -std=c++17 -O2 \
     -c harness/regex_ref.cpp -o "$tmp/ref.o" 2>"$tmp/err" \
@@ -36,8 +39,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/regex_diff" -Ofast -lc \
     --dep regex -Mroot=harness/regex_diff.zig \
     --dep llama_c -Mregex=src/llama/regex.zig -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/ref.o" zig-out/lib/libggml.a -lc++ \
-    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
 
 "$tmp/regex_diff"

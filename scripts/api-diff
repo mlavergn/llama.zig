@@ -23,7 +23,10 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
+# The system libraries the harness links beside libggml.a: the Metal
+# frameworks on macOS, the CUDA libraries on Linux. See scripts/platform-libs.
+. scripts/platform-libs
+platform_libs exe
 HARNESS_ROOT="${API_DIFF_HARNESS_ROOT:-src/llama/harness_root.zig}"
 
 zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
@@ -34,8 +37,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/api_diff" -Ofast -lc \
     --dep harness_root -Mroot=harness/api_diff.zig \
     --dep llama_c -Mharness_root="$HARNESS_ROOT" -Mllama_c="$tmp/llama_c.zig" \
     zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
-    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -60 "$tmp/berr" >&2; exit 1; }
 
 inputs=(llama.cpp/models/ggml-vocab-*.gguf.inp llama.cpp/models/ggml-vocab-*.gguf)

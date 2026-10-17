@@ -21,6 +21,7 @@ const impl = @import("../../impl.zig");
 const defs = @import("../defs.zig");
 const threading = @import("../threading.zig");
 const neon = @import("../quants/arm/neon.zig");
+const features = @import("../features.zig");
 
 const c = impl.c;
 
@@ -241,11 +242,17 @@ pub inline fn sinCos(x: f32) SinCos {
 /// takes that form when two runtime guards pass, read off the LLVM IR of the
 /// same loop compiled by the same toolchain:
 ///
-/// - more than three iterations, else the scalar loop runs throughout; and
+/// - at least `features.strict_loop.group` iterations -- four on an Apple
+///   core, eight at `generic` -- else the scalar loop runs throughout; and
 /// - for every array the loop loads, `(store_row - load_row)` as an
-///   **unsigned** byte difference is at least 64 -- the vector body's
-///   footprint. A load that starts up to 63 bytes below the store could be
-///   overwritten before it is read, so the loop falls back to scalar.
+///   **unsigned** byte difference is at least the vector body's footprint,
+///   64 bytes on an Apple core and 32 at `generic`. A load that starts
+///   closer below the store could be overwritten before it is read, so the
+///   loop falls back to scalar.
+///
+/// When it does vectorize, products are rounded in groups of
+/// `features.strict_loop.group` and the remainder fused; `strictSplit`
+/// gives where that changes.
 ///
 /// The second guard is not academic. `ssm_scan` reads the previous state from
 /// the buffer it is writing for every token after the first (`s0 = s`), so
@@ -259,10 +266,18 @@ pub inline fn sinCos(x: f32) SinCos {
 ///
 /// Return: true when the vectorized form runs.
 pub inline fn strictLoopVectorized(trip: i64, store: *const anyopaque, loads: []const *const anyopaque) bool {
-    if (trip <= 3) return false;
+    if (trip < features.strict_loop.group) return false;
     const st = @intFromPtr(store);
     for (loads) |l| {
-        if (st -% @intFromPtr(l) < 64) return false;
+        if (st -% @intFromPtr(l) < features.strict_loop.footprint) return false;
     }
     return true;
+}
+
+/// Where a vectorized strict loop of `trip` iterations starting at `start`
+/// stops rounding and starts fusing: past whole groups of
+/// `features.strict_loop.group`. See `strictLoopVectorized`.
+pub inline fn strictSplit(start: i64, trip: i64) i64 {
+    const group: i64 = features.strict_loop.group;
+    return start + trip - @rem(trip, group);
 }

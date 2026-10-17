@@ -30,6 +30,14 @@ const impl = @import("../../../impl.zig");
 const blocks = @import("../blocks.zig");
 const neon = @import("../../quants/arm/neon.zig");
 
+// The `_generic` bodies, in `cpu/repack/`, that each export below falls to
+// without `__ARM_FEATURE_DOTPROD` -- the C's trailing call after its `#if`.
+// Zig's `aarch64-linux` baseline, `generic`, takes them; no Apple core does.
+extern fn ggml_gemv_iq4_nl_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+extern fn ggml_gemv_mxfp4_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+extern fn ggml_gemm_iq4_nl_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+extern fn ggml_gemm_mxfp4_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+
 const c = impl.c;
 const f32x4 = neon.f32x4;
 const i32x4 = neon.i32x4;
@@ -168,15 +176,19 @@ fn gemm(comptime fmt: Fmt, comptime BlockX: type, n: c_int, s: [*]f32, bs: usize
 }
 
 pub export fn ggml_gemv_iq4_nl_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+    if (comptime !neon.has_dotprod) return ggml_gemv_iq4_nl_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     gemv(.iq4_nl, blocks.block_iq4_nlx4, n, s, bs, vx, vy, nr, nc);
 }
 pub export fn ggml_gemv_mxfp4_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+    if (comptime !neon.has_dotprod) return ggml_gemv_mxfp4_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     gemv(.mxfp4, blocks.block_mxfp4x4, n, s, bs, vx, vy, nr, nc);
 }
 pub export fn ggml_gemm_iq4_nl_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+    if (comptime !neon.has_dotprod) return ggml_gemm_iq4_nl_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     gemm(.iq4_nl, blocks.block_iq4_nlx4, n, s, bs, vx, vy, nr, nc);
 }
 pub export fn ggml_gemm_mxfp4_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+    if (comptime !neon.has_dotprod) return ggml_gemm_mxfp4_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     gemm(.mxfp4, blocks.block_mxfp4x4, n, s, bs, vx, vy, nr, nc);
 }
 

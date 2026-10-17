@@ -24,7 +24,10 @@ VOCAB=llama.cpp/models/ggml-vocab-qwen35.gguf
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
+# The system libraries the harness links beside libggml.a: the Metal
+# frameworks on macOS, the CUDA libraries on Linux. See scripts/platform-libs.
+. scripts/platform-libs
+platform_libs exe
 
 zig c++ -mcpu=baseline -c harness/batch_ref.cpp -o "$tmp/batch_ref.o" -std=c++17 -O2 -w \
     -I llama.cpp/src -I llama.cpp/include -I llama.cpp/ggml/include -I llama.cpp/ggml/src 2>"$tmp/cerr" \
@@ -42,8 +45,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/batch_diff" -OReleaseSafe -lc \
     --dep harness_root -Mroot=harness/batch_diff.zig \
     --dep llama_c -Mharness_root=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/batch_ref.o" zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
-    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 
 shasum "$tmp/batch_diff" | sed 's/ .*//; s/^/  harness binary sha1 /'

@@ -57,7 +57,7 @@ const s8b: i8x16 = @splat(8);
 /// opens almost every kernel here.
 inline fn dot2(a0: i8x16, b0: i8x16, a1: i8x16, b1: i8x16) i32x4 {
     const zero: i32x4 = @splat(0);
-    return neon.dotq_s32(neon.dotq_s32(zero, a0, b0), a1, b1);
+    return neon.ggml_vdotq_s32(neon.ggml_vdotq_s32(zero, a0, b0), a1, b1);
 }
 
 // -----------------------------------------------------------------------------
@@ -656,12 +656,12 @@ pub export fn ggml_vec_dot_q5_0_q8_0(
         // starts at zero for each half.
         const zero: i32x4 = @splat(0);
         const p_0 = neon.add(
-            neon.dotq_s32(zero, v0_0lf, v1_0l),
-            neon.dotq_s32(zero, v0_0hf, v1_0h),
+            neon.ggml_vdotq_s32(zero, v0_0lf, v1_0l),
+            neon.ggml_vdotq_s32(zero, v0_0hf, v1_0h),
         );
         const p_1 = neon.add(
-            neon.dotq_s32(zero, v0_1lf, v1_1l),
-            neon.dotq_s32(zero, v0_1hf, v1_1h),
+            neon.ggml_vdotq_s32(zero, v0_1lf, v1_1l),
+            neon.ggml_vdotq_s32(zero, v0_1hf, v1_1h),
         );
 
         sumv0 = neon.mla_n_f32(sumv0, neon.cvt_f32_s32(p_0), f(x0.d) * f(y0.d));
@@ -757,12 +757,12 @@ pub export fn ggml_vec_dot_q5_1_q8_1(
 
         const zero: i32x4 = @splat(0);
         const p_0 = neon.add(
-            neon.dotq_s32(zero, v0_0lf, v1_0l),
-            neon.dotq_s32(zero, v0_0hf, v1_0h),
+            neon.ggml_vdotq_s32(zero, v0_0lf, v1_0l),
+            neon.ggml_vdotq_s32(zero, v0_0hf, v1_0h),
         );
         const p_1 = neon.add(
-            neon.dotq_s32(zero, v0_1lf, v1_1l),
-            neon.dotq_s32(zero, v0_1hf, v1_1h),
+            neon.ggml_vdotq_s32(zero, v0_1lf, v1_1l),
+            neon.ggml_vdotq_s32(zero, v0_1hf, v1_1h),
         );
 
         sumv0 = neon.mla_n_f32(sumv0, neon.cvt_f32_s32(p_0), f(x0.d) * f(y0.d));
@@ -838,12 +838,12 @@ pub export fn ggml_vec_dot_q8_0_q8_0(
 
         const zero: i32x4 = @splat(0);
         const p_0 = neon.add(
-            neon.dotq_s32(zero, x0_0, y0_0),
-            neon.dotq_s32(zero, x0_1, y0_1),
+            neon.ggml_vdotq_s32(zero, x0_0, y0_0),
+            neon.ggml_vdotq_s32(zero, x0_1, y0_1),
         );
         const p_1 = neon.add(
-            neon.dotq_s32(zero, x1_0, y1_0),
-            neon.dotq_s32(zero, x1_1, y1_1),
+            neon.ggml_vdotq_s32(zero, x1_0, y1_0),
+            neon.ggml_vdotq_s32(zero, x1_1, y1_1),
         );
 
         sumv0 = neon.mla_n_f32(sumv0, neon.cvt_f32_s32(p_0), f(x0.d) * f(y0.d));
@@ -959,7 +959,7 @@ test {
 }
 
 const testing = @import("../testing.zig");
-const golden = @import("golden.zig");
+const golden = if (@import("../../features.zig").golden_generic) @import("golden_generic.zig") else @import("golden.zig");
 
 test "q1_0 dot matches the C" {
     try testing.check(ggml_vec_dot_q1_0_q8_0, c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q8_0, golden.q1_0);

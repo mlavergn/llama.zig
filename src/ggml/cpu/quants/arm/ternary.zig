@@ -240,7 +240,7 @@ test {
 }
 
 const testing = @import("../testing.zig");
-const golden = @import("golden.zig");
+const golden = if (@import("../../features.zig").golden_generic) @import("golden_generic.zig") else @import("golden.zig");
 
 test "tq1_0 dot matches the C" {
     try testing.check(ggml_vec_dot_tq1_0_q8_K, c.GGML_TYPE_TQ1_0, c.GGML_TYPE_Q8_K, golden.tq1_0);

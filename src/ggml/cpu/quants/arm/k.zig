@@ -63,7 +63,7 @@ inline fn q8At(y: *const blocks.Q8_K, off: usize) [*]const u8 {
 /// dot product these kernels take a hundred times over.
 inline fn dotv(a: i8x16, b: i8x16) i32 {
     const zero: i32x4 = @splat(0);
-    return neon.addvq_s32(neon.dotq_s32(zero, a, b));
+    return neon.addvq_s32(neon.ggml_vdotq_s32(zero, a, b));
 }
 
 /// The widening product of eight `i16` pairs, summed into four `i32` lanes,
@@ -399,7 +399,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
                 const w0: i8x16 = @bitCast(neon.@"and"(q4bits0, m4b));
                 const w1: i8x16 = @bitCast(neon.@"and"(q4bits1, m4b));
                 const zero: i32x4 = @splat(0);
-                const p1 = neon.dotq_s32(neon.dotq_s32(zero, w0, b0), w1, b1);
+                const p1 = neon.ggml_vdotq_s32(neon.ggml_vdotq_s32(zero, w0, b0), w1, b1);
                 sumi1 += neon.addvq_s32(p1) * scales[2 * j + 0];
             }
 
@@ -411,7 +411,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
                 const w0: i8x16 = @bitCast(neon.shrN(q4bits0, 4));
                 const w1: i8x16 = @bitCast(neon.shrN(q4bits1, 4));
                 const zero: i32x4 = @splat(0);
-                const p2 = neon.dotq_s32(neon.dotq_s32(zero, w0, b0), w1, b1);
+                const p2 = neon.ggml_vdotq_s32(neon.ggml_vdotq_s32(zero, w0, b0), w1, b1);
                 sumi2 += neon.addvq_s32(p2) * scales[2 * j + 1];
             }
         }
@@ -505,9 +505,9 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
             const w3: i8x16 = @bitCast(neon.orr(neon.shrN(q5bits1, 4), h3));
 
             const zero: i32x4 = @splat(0);
-            sumi += neon.addvq_s32(neon.dotq_s32(neon.dotq_s32(zero, w0, b[0]), w1, b[1])) * scales[sc];
+            sumi += neon.addvq_s32(neon.ggml_vdotq_s32(neon.ggml_vdotq_s32(zero, w0, b[0]), w1, b[1])) * scales[sc];
             sc += 1;
-            sumi += neon.addvq_s32(neon.dotq_s32(neon.dotq_s32(zero, w2, b[2]), w3, b[3])) * scales[sc];
+            sumi += neon.addvq_s32(neon.ggml_vdotq_s32(neon.ggml_vdotq_s32(zero, w2, b[2]), w3, b[3])) * scales[sc];
             sc += 1;
         }
 
@@ -645,7 +645,7 @@ test {
 }
 
 const testing = @import("../testing.zig");
-const golden = @import("golden.zig");
+const golden = if (@import("../../features.zig").golden_generic) @import("golden_generic.zig") else @import("golden.zig");
 
 test "q2_K dot matches the C" {
     try testing.check(ggml_vec_dot_q2_K_q8_K, c.GGML_TYPE_Q2_K, c.GGML_TYPE_Q8_K, golden.q2_K);

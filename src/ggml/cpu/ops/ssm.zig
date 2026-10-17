@@ -62,7 +62,8 @@ inline fn softplus(input: f32) f32 {
 ///
 /// `sumf += s[...] * c[...]` is one expression, but the loop is a
 /// contiguous reduction and the reference compiler vectorizes it: products in
-/// groups of four are rounded, only the remainder is fused (`vec.strictDot`).
+/// groups of `features.strict_loop.group` are rounded, only the remainder is
+/// fused (`vec.strictDot`).
 /// Fusing every step was 1 ULP out on 61 of 160 outputs under `make
 /// ops-diff`. The C says why it does not call `ggml_vec_dot_f32`: that one
 /// sums in `double`.
@@ -256,13 +257,14 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
                         // d_state
                         //
                         // The compiler vectorizes this tail when its guards
-                        // pass, rounding `state * C` in groups of four; see
+                        // pass, rounding `state * C` in groups of
+                        // `features.strict_loop.group`; see
                         // `common.strictLoopVectorized`. `state` itself is
                         // elementwise and fused either way.
                         const t0: usize = @intCast(np + ii * nc);
                         const tg: usize = @intCast(np + g * nc);
                         const split: i64 = if (common.strictLoopVectorized(nc - np, s + t0, &.{ s0 + t0, B + tg, C + tg }))
-                            np + (nc - np) - @rem(nc - np, 4)
+                            common.strictSplit(np, nc - np)
                         else
                             np;
                         var j0: i64 = np;
@@ -300,12 +302,12 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
                         // Vectorized by the compiler despite the `expf` --
                         // each lane's call is scalarized -- when its guards
                         // pass: then `state * C` is rounded in groups of
-                        // four and only the remainder fused. Measured on the
+                        // `features.strict_loop.group` and only the remainder fused. Measured on the
                         // reference `ops.o`; see `common.strictLoopVectorized`.
                         const r0: usize = @intCast(ii * nc);
                         const rg: usize = @intCast(g * nc);
                         const split: i64 = if (common.strictLoopVectorized(nc, s + r0, &.{ s0 + r0, A + @as(usize, @intCast(h * nc)), B + rg, C + rg }))
-                            nc - @rem(nc, 4)
+                            common.strictSplit(0, nc)
                         else
                             0;
                         var j0: i64 = 0;
