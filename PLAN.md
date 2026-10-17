@@ -71,6 +71,9 @@ Settled in review. The plan below assumes all of these.
 | 51 | x86 gate machine | **A laptop**, the x86 counterpart of Decision 43. x86 work is gated there and recorded in an "x86 pickup" list like the Mac and CUDA ones; Metal and CUDA gates cannot run on it, and x86 gates cannot run anywhere else. Its CPU model, OS and whether it has AVX-512 are recorded when it is set up: without AVX-512, the v4 arms (Decision 53) have no native gate and wait for a machine that has it. |
 | 52 | x86 reference | **`llama.cpp.zmake` gains `arch/x86`**, an explicit grant against Decision 18 as the Zig 0.17 migration was. Its `build.zig` refuses any non-aarch64 target today (build.zig:361); the change adds the x86 sources and their defines and nothing else, so the reference stays upstream compiled unmodified. |
 | 53 | x86 levels | **AVX2 first (x86-64-v3: AVX2, FMA, F16C), then AVX-512 (v4).** A static binary compiles one `GGML_SIMD` arm, and upstream's `GGML_CPU_ALL_VARIANTS` needs `GGML_BACKEND_DL`, which is out of scope. v1 (scalar) and v2 (SSE3) are not targets. |
+| 54 | Vulkan gate machine | **The GB10**, as for CUDA (Decision 43). NVIDIA's driver exposes every extension the shaders probe for -- cooperative matrix 1 and 2, integer dot product, bfloat16 -- so the reference compiles its widest set of arms there. Vulkan gates cannot run on this Mac: it has no Vulkan driver, and MoltenVK would translate to Metal with a reduced extension set. An Arduino UNO Q (Adreno, a mobile Vulkan driver) is available as a later second device; not now. |
+| 55 | Vulkan reference | **`llama.cpp.zmake` gains `-Dvulkan`**, an explicit grant against Decision 18, as Decision 52 was. It builds upstream's own `vulkan-shaders-gen` for the host, runs it once for the header and once per shader file with `glslc`, and asks `glslc` which shader extensions it accepts exactly as `ggml-vulkan/CMakeLists.txt` does. **The toolchain is part of the reference**: which C++ compiles depends on the Vulkan header version and on those `glslc` answers (64 `#if` sites on the seven extension macros, more on `VK_HEADER_VERSION`), and the SPIR-V depends on `glslc`'s optimizer. Both sides of every Vulkan gate are built with the same `glslc` and headers, and the shaders the port embeds are the reference generator's output, identical by construction. |
+| 56 | When Vulkan starts | **Now, as Stage 7, beside Stage 5** -- whose x86 step waits on the laptop. Measured first ("Stage 7 — Vulkan" below), reproducibility before any code, as Stage 6 began. |
 
 ---
 
@@ -1246,27 +1249,139 @@ small, and it is wrong today -- in its numerics and in its host arms.
 
 ### GB10 pickup
 
-Run on the GB10 after steps 2–4:
-
-- **`sinCos` off Darwin.** `ops/common.zig` assumes clang folds a
-  `sinf`/`cosf` pair into glibc's `sincosf`; on Darwin it is
-  `__sincosf_stret`, measured. `GATE_CPU=generic` on the Mac still builds
-  for Darwin and cannot see it. `ops-diff` covers rope and
-  `timestep_embedding`, which depend on it.
+Run on the GB10 after steps 2–4. Everything here is written, and the gate
+scripts now take their link line from `scripts/platform-libs`, so they run
+there unchanged (`NOTES.md`, "Preparing the GB10 pickup"). A Linux arm64
+container on this Mac -- the podman VM, `debian:stable-slim`, glibc 2.41,
+binaries cross-built here -- already ran three of them natively and
+passed: `ops-diff` 650 / 650, `repack-diff` 60 / 60, and every
+host-arms scenario. What is left is the hardware and a model:
 
 - `ops-diff`, `repack-diff`, CPU `node-diff` and `parity-port --cpu` at its
-  baseline — natively, which is what `GATE_CPU=generic` stands in for here.
-- The host arms: a threadpool with `prio = GGML_SCHED_PRIO_LOW` and a CPU
-  mask, compared between `libggml` built from the reference and the port
-  (`sched_getscheduler`, `pthread_getaffinity_np` read back on each worker);
-  `ggml_numa_init` with each strategy, `ggml_is_numa` and the warning text
-  compared the same way; and `llama_sampler_init_dist(LLAMA_DEFAULT_SEED)`
-  drawing a seed at all. Not written yet: the harness is the first task
-  there.
-- `make validate`, now that it can run there: everything but `sched-diff`
-  and `graph-diff`, which report themselves skipped.
+  baseline -- `node-diff` and `parity-port` load a model, which the
+  container's 2 GB VM cannot hold. `ops-diff` there confirms the two things
+  settled from the Linux reference's objects rather than from a Mac:
+  `sinCos` calling `sinf` and `cosf` separately, and `ssm_scan`'s Mamba-1
+  loop staying scalar and fused (`simd.math_errno`).
+- `make host-arms-diff` on real hardware: priority at all five levels, CPU
+  masks loose, strict, paused and invalid, every NUMA strategy and a second
+  init, and the default seed's source. The GB10 has one NUMA node, as the
+  container does, so `set_numa_thread_affinity`'s body stays unreached; it
+  needs a multi-socket machine.
+- `make validate`: everything but `sched-diff` and `graph-diff`, which
+  report themselves skipped.
 
 ---
+
+---
+
+## Stage 7 — Vulkan
+
+Decisions 54–56: gated on the GB10, against `llama.cpp.zmake -Dvulkan`,
+started now beside Stage 5. Nothing is ported yet; this is the measurement,
+taken on this Mac from the pinned source without a Vulkan driver.
+
+### Scope, measured
+
+| | measured | for comparison |
+|---|---|---|
+| host code | `ggml/src/ggml-vulkan/ggml-vulkan.cpp`, **one C++ translation unit, 19,787 lines**: 23 `throw`, 17 `catch`, 19 maps, 27 thread/mutex uses, 107 `#if`; written against `vulkan.hpp`, the C++ binding (497 `vk::` uses) | Metal's ported C++ was ~10,200 lines; CUDA's whole backend ~43,900 |
+| shaders | 147 `.comp` and 26 `.glsl`, ~21,400 lines of GLSL; **1,440 SPIR-V variants with no optional extension, 1,980 with all seven**, plus 86 dispatch tables and the `arr_dmmv_*` arrays | Metal: 20 kernel files, embedded as source |
+| generator | `vulkan-shaders/vulkan-shaders-gen.cpp`, 1,355 lines: a host build tool that drives `glslc`; nothing of it ships | `build/metal_embed.zig` |
+| contract | **9 C exports**: the 8 in `ggml-vulkan.h` and `vk_conv_block_sizes`, an internal table that is missing its `static`. Imports: 32 `ggml_*` functions, all C; 4 loader entry points (`vkGetInstanceProcAddr`, `vkGetDeviceProcAddr`, `vkGetPhysicalDeviceFeatures2`, `vkCmdCopyBuffer`), everything else through `vkGetInstanceProcAddr`; 1,185 shader symbols by name. **No C++-linkage symbol crosses it.** | `ggml-cuda.h`: the same shape |
+| host → shader ABI | 46 push-constant structs, matched by blocks in 50 shader files; 398 pipeline-creation sites | Metal's 65 `kargs` structs, `make struct-layout` |
+
+Measured by compiling `ggml-vulkan.cpp` for `aarch64-linux-gnu` against
+Khronos's headers at SDK 1.4.363 and the generator's own header, and running
+the generator's header pass at both extension extremes. The first pass at
+both numbers was wrong -- zsh passed the seven `-D` flags as one argument --
+and was caught because the zmake build, which passes them properly,
+declared 1,980 variants where the hand measurement said 1,656.
+
+### What decides what compiles
+
+Unlike every backend so far, **the source does not fix the reference**:
+
+- **`glslc`'s answers.** Seven extension probes decide seven macros, which
+  gate 64 `#if` sites in `ggml-vulkan.cpp` and which variants the generator
+  emits (1,440 to 1,980).
+- **The Vulkan header version.** `VK_HEADER_VERSION >= 287` and `>= 301`
+  arms, and `#if defined(VK_NV_cooperative_matrix2)` and friends: an older
+  header compiles cooperative-matrix-2 out entirely.
+- **`glslc`'s optimizer.** Most variants are compiled `-O`, so the SPIR-V
+  bytes depend on the `glslc` build.
+
+So the toolchain is part of the reference, like the upstream pin, and gets
+the same treatment: one `glslc` and one set of headers build both sides of
+every Vulkan gate, recorded with every result (`scripts/vk-repro` prints
+them), and the port embeds the *reference generator's output* rather than
+compiling its own -- identical SPIR-V by construction, as CUDA's fatbins are
+(Decision 44).
+
+### The method, proposed
+
+To be confirmed by the reproducibility measurement, but the shape follows
+from the contract:
+
+- **Shaders travel as data.** Upstream's generator, built unmodified, writes
+  the SPIR-V; the port's build runs the same tool with the same `glslc`.
+- **The host is Zig against Vulkan's C API.** `vulkan.hpp` is a C++
+  wrapper over a plain C API Zig can call directly, through
+  `vkGetInstanceProcAddr` as the C++'s dynamic dispatcher does -- easier
+  than Metal (Objective-C) or CUDA (`<<<>>>`). `vk::SystemError` throws
+  become `VkResult` checks.
+- **Variants by generated table.** 1,440–1,980 names and the dispatch tables,
+  read from the generator's header at build time, as CUDA's kernel table is
+  read from the fatbins (Decision 45).
+- **Push constants checked by the compiler.** The 46 structs are the Metal
+  `kargs` problem again -- one wrong offset silently feeds a shader another
+  number -- so they are generated or checked against the C++'s `offsetof`,
+  `make struct-layout`'s way.
+- **Swap once, at `ggml-vulkan.h`**: 9 symbols, all-or-nothing, as Decisions
+  42 and 48 did for libllama and CUDA.
+
+### Gates, planned
+
+- `make vk-repro` -- **written**: the reference's node hashes, per node and
+  fused, run against themselves. Everything below assumes it passes.
+- `vk-ops-diff`: `harness/ops_dump.c` on the Vulkan device, port against
+  reference, on bits.
+- `vk-node-diff`: `node-diff --gpu` over a Vulkan-only build: per node, then
+  fused.
+- `vk-backend-diff`: the vtables' answers -- `supports_op`, buffer types,
+  `get_alloc_size`, `offload_op` -- as `metal-diff` and `cuda-backend-diff`.
+- `vk-struct-layout`: the push-constant structs.
+- `vk-parity-cli`: tokens through our `llama-cli`.
+
+### Order of work
+
+1. ~~**Measure the source**~~ -- done, above.
+2. ~~**The reference build**~~ -- done: `make -C llama.cpp.zmake lib
+   VULKAN=1` (Decision 55). Checked here with a stand-in `glslc` that writes
+   stub SPIR-V: every probe, both generator passes, all 1,980 variants
+   defined in the archive, `ggml_backend_vk_reg` registered, native and
+   cross-built for `aarch64-linux-gnu`; without `-Dvulkan` the archive is
+   byte-identical to before. Real shaders need the GB10.
+3. **On the GB10** (the pickup below): the toolchain, the real build,
+   `make vk-repro`.
+4. Depending on 3: the gates, then the host port in `src/ggml/vulkan/`,
+   then the swap.
+
+### Vulkan pickup (GB10)
+
+- Install the toolchain and record it: `glslc` (shaderc), the Vulkan and
+  SPIR-V headers, `vulkaninfo` (Ubuntu: `glslc`, `libvulkan-dev`,
+  `spirv-headers`, `vulkan-tools`). Note `VK_HEADER_VERSION`: a distro
+  header older than the cooperative-matrix-2 extension compiles that path
+  out, and NVIDIA's fastest kernels with it. If it is, pin Khronos's
+  header-only `Vulkan-Headers` and `SPIRV-Headers` at one SDK tag instead
+  (`-Dvulkan-include`), and decide `glslc`'s source the same way.
+- `vulkaninfo --summary`: the GB10's device, driver version, and whether
+  it reports `VK_KHR_cooperative_matrix`, `VK_NV_cooperative_matrix2`,
+  `VK_KHR_shader_integer_dot_product`, `VK_KHR_shader_bfloat16`.
+- `make -C llama.cpp.zmake lib VULKAN=1`, noting which of the seven probes
+  passed, then `make vk-repro` with the Qwen3.5 model. Record all of it in
+  `NOTES.md`; it decides the gates.
 
 ---
 
@@ -1505,6 +1620,11 @@ for where each target stands and the order of work. Step 1 found that
 the port was not bit-exact on Linux arm64's baseline CPU; step 2 made it so;
 steps 3 and 4 are written and wait on the GB10 pickup; step 5 put the SIMD
 layer in. Next is step 6, x86_64 on the laptop.
+
+**Beside it, Stage 7, Vulkan** (Decisions 54–56; "Stage 7 — Vulkan"): measured
+and the reference build written; next is the GB10's Vulkan pickup -- the
+toolchain, the real build, and whether the reference reproduces its own
+node hashes.
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:
 

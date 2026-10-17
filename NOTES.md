@@ -5304,3 +5304,209 @@ Also run: `zig build test` at all three CPUs (the new `simd.zig` tests
 included, confirmed by the count moving under a filter) and `make validate`
 (5,518 citations). Negative test: an ordered `@reduce` in `F32.reduce`
 fails `simd.zig`'s own test and both float-dot golden tests.
+
+## Preparing the GB10 pickup
+
+The GB10 list was meant to be run, not developed, on the visit. Getting it
+there found two real Linux differences and one bug on every platform.
+
+**`-fmath-errno` is the Linux difference `GATE_CPU=generic` cannot show.**
+`GATE_CPU=generic` gives the Mac Linux's *CPU features*, but it still
+builds for Darwin, and clang's libm defaults differ by OS: Linux assumes a
+libm call may set `errno`, Darwin does not. The `aarch64-linux-gnu`
+reference, cross-built here and read with `nm` and `objdump`, shows the two
+consequences, and a five-line C file at both settings on both OSes
+confirms the cause:
+
+- **No `sinf`/`cosf` fold.** Linux's `ops.o` imports `sinf` and `cosf` and
+  no `sincosf`; Darwin's imports `__sincosf_stret` and neither. The port
+  had assumed `sincosf` off Darwin. `ops/common.sinCos` now calls the two
+  separately there.
+- **No vectorizing around a libm call.** `ssm_scan`'s Mamba-1 loop calls
+  `expf`. Darwin's `ssm_scan` at `generic` has twelve `expf` call sites,
+  eight of them one per lane of the vectorized loop; Linux's has four, and
+  six fewer `fmul.4s`. So on Linux the loop is scalar and every
+  `sumf += state * C` fused, where the port applied Darwin's rounded groups.
+  `simd.math_errno` now carries both.
+
+The other Linux-only libm imports were checked and move no bit: `sqrtf`
+beside an `fsqrt` for the `errno` path, `lroundf` where Darwin inlines
+`fcvtas`.
+
+Which of the two mattered was measured, natively, in a Linux arm64
+container on this Mac -- the podman VM with the local `debian:stable-slim`,
+glibc 2.41, both sides cross-built here. `ops-diff` passes there, 650 /
+650 at `generic`. With both changes reverted it fails on exactly the four
+Mamba-1 results whose `d_state` reaches the 8-wide group (16 and 10, at one
+thread and three). **The `sinCos` change moved nothing on these inputs**:
+glibc's `sincosf` agrees with its `sinf` and `cosf` here. It is kept
+because it is what the reference calls, but it is a fidelity change, not an
+observed fix.
+
+**The port sent twelve of the C's direct `stderr` writes through ggml's
+logger.** The C writes some warnings with `fprintf(stderr, ...)`, which a
+log callback does not intercept: the NUMA "already initialized" and
+`pthread_setaffinity_np` warnings, the affinity and priority failures,
+`ggml_get_n_tasks`' "op not implemented", `ggml_compute_backward`'s
+unsupported unary op, two of `unary-ops.cpp`'s unsupported types, and
+`binbcast.cu`'s. The port used `impl.logError` for all of them -- the same
+text on `stderr` under the default handler, and on the *callback* under
+`llama_log_set`'s, which every llama.cpp tool installs. `unary_ops.zig`'s
+doc comment even called the substitution equivalent. They now go through
+`impl.fprintfStderr`. Found by building the harness below with a callback
+installed, which is the only way to see it.
+
+**`make host-arms-diff`** is the gate step 3 lacked. `harness/host_arms.c`
+runs a probe op on every worker of a real threadpool and reads back the
+thread's policy, priority and affinity from the OS; eighteen scenarios --
+five priorities, CPU masks loose, strict, strict and paused, with low
+priority, and invalid (CPU 511, loose and strict), every NUMA strategy and
+a second init, and the default seed's source -- each in its own process,
+because the C applies a pool's priority and affinity to the calling thread
+and initializes NUMA once. stdout is compared exactly and stderr sorted,
+since workers warn in whatever order they run; the affinity warning prints
+the *address* of the mask, the C's own oddity, so that one hex value is
+normalised. On macOS 18 / 18, covering the Apple arms. In the container
+18 / 18, covering the Linux ones for real: `SCHED_BATCH` for low priority,
+`EPERM` warnings for `SCHED_FIFO`, per-thread strict masks, `EINVAL` for
+the invalid mask, the `/sys` NUMA walk and `getcpu` finding one node, a
+`random_device` seed. Negative-tested 3/3: the Darwin `HIGH` priority 80 to
+70 on the Mac, and on Linux `SCHED_BATCH` as `SCHED_IDLE` and the priority
+warning back on the logger. The container has one NUMA node, as the GB10
+does, so `set_numa_thread_affinity`'s body is still unreached.
+
+**The gate scripts assumed macOS.** `ops-diff`, `repack-diff`, `node-diff`
+and `parity-port` linked against the SDK's frameworks through `xcrun`, and
+`scripts/gate-cpu` derived the expected CPU features with `-target
+aarch64-macos`, where `baseline` has dotprod -- on the GB10, where
+`baseline` is `generic`, every native run would have failed its CPU check
+before comparing anything. All five take the link line from
+`scripts/platform-libs` now, and `gate-cpu` asks the host. `repack-diff`
+also needed `harness/repack_diff_stub.cpp`: the renamed reference
+`traits.cpp` references the C++-linkage
+`ggml_backend_cpu_get_extra_buffer_types()` from two functions the harness
+never calls, which ld64 dead-strips and lld reports anyway. With it,
+`repack-diff` passed in the container, 60 / 60.
+
+## `sdot`
+
+`neon.dotq_s32` calls LLVM's `llvm.aarch64.neon.sdot.v4i32.v16i8` when the
+build has dotprod, as `mmlaq_s32` already called `smmla`, and keeps the
+widening form as `dotq_s32_portable` for `generic` and for a test that
+holds the two together over 100,000 random inputs and the wrap case. The
+arithmetic is integer, so the swap is bit-identical, and it is everywhere at
+once: 99 call sites in eleven files -- `quants/arm`, `repack/arm` and
+sgemm's `tinyBLAS_Q0_ARM` -- reach it directly, through `ggml_vdotq_s32`
+or through `dotq_laneq_s32`.
+
+In the port's `libggml.a` the `sdot` count went from 337 to 1,234 at
+`baseline` and 177 to 1,074 at `apple_m3` -- LLVM had already recognised
+the widening pattern in some kernels -- and the object lost about 10,600
+instructions at each. `generic` is byte-identical, as it should be. Every
+exact CPU gate passed at `baseline` and `apple_m3`: `ops-diff` 650,
+`repack-diff` 60, `node-diff` 2,750 nodes and 33 fused decodes at 1 and 4
+threads, `parity-port --cpu` 6 / 6. `zig build test` passes at all three
+CPUs, the new test skipping at `generic`.
+
+What it bought, on the CPU device alone -- Qwen3.5 2B `Q4_K_M`, `llama-cli
+-ngl 0`, three runs each, the generated text unchanged:
+
+| threads | prompt t/s | generation t/s |
+|---|---|---|
+| 1, before | 7.0 | 4.9 |
+| 1, after  | 55.5 | 28.1 |
+| 8, before | 40.0 | 26.8 |
+| 8, after  | 224 | 105 |
+
+Against the C, `make perf-cpu` (five alternating rounds a side, 512 greedy
+tokens, the same tokens decoded in every run, `-Dcpu=baseline`) at the
+commit before and the tree after:
+
+| port | pp tok/s, port / C | tg tok/s, port / C |
+|---|---|---|
+| `9fc4cf8`, portable `dotq_s32` | 28.1 / 232.3 = 0.12 | 17.2 / 82.0 = 0.21 |
+| with `sdot` | 217.1 / 234.0 = 0.93 | 77.5 / 82.2 = 0.94 |
+
+The remaining six to seven percent is not attributed yet.
+
+`CLAUDE.md` had called the portable form's cost "none detectable". That was
+measured on Metal, where the CPU kernels do not carry the model; on the CPU
+device it was most of the time -- the port's CPU path ran at a fifth of the
+C's speed, and nothing that checks bits could say so.
+
+## Stage 7: the measurement
+
+Decisions 54–56 put Vulkan on the GB10, against `llama.cpp.zmake -Dvulkan`,
+starting now. Everything below was measured on this Mac from the pinned
+source, with Khronos's header-only `Vulkan-Headers` and `SPIRV-Headers` at
+SDK tag 1.4.363 fetched into scratch -- this Mac has no `glslc`, no Vulkan
+headers and no Vulkan driver. `PLAN.md`, "Stage 7 — Vulkan", has the
+numbers; this is how they were taken and what went wrong on the way.
+
+**The contract** was read the Stage 4 way: `ggml-vulkan.cpp` compiled for
+`aarch64-linux-gnu` (about 40 s, one object of 38 MB) and its symbols sorted.
+Nine C exports -- `ggml-vulkan.h`'s eight and `vk_conv_block_sizes`, an
+internal table missing its `static` -- and no C++-linkage symbol either
+way. It calls only four Vulkan entry points directly; `vulkan.hpp`'s
+dynamic dispatcher reaches the rest through `vkGetInstanceProcAddr`. So
+anything linking it needs `-lvulkan`, and nothing else from the SDK.
+
+**The shader inventory** came from upstream's generator, built natively and
+run in its header pass, which lists every variant without compiling any:
+1,440 with no optional extension, 1,980 with all seven. **The first
+measurement said 1,656 and was wrong.** The seven `-D` flags were in a zsh
+variable, which zsh does not word-split, so the "all" generator was built
+with one malformed define -- and so was the first contract compile. It
+surfaced only because the zmake build, which passes the flags as a list,
+generated 1,980 variants and the counts would not reconcile; a direct loop
+over the shader files, run with the same broken generator, then showed four
+files compiling nothing. Both were redone in bash. The contract did not
+change; the shader-symbol count did, and the one recorded is the second.
+It is not the first time zsh's word splitting has bitten a measurement
+here: Stage 5's did the same with a list of flags.
+
+**What decides what compiles** is new with this backend: the toolchain.
+Seven `glslc` probes set seven macros guarding 64 `#if` sites;
+`VK_HEADER_VERSION` and the header's extension macros guard more; and most
+variants are compiled with `glslc -O`, so the SPIR-V bytes are `glslc`'s.
+Hence Decision 55: one `glslc` and one header set per comparison, and the
+port embedding the reference generator's output rather than its own.
+
+**The zmake build** (`-Dvulkan`, `make … VULKAN=1`) reproduces CMake's
+three parts:
+
+- The probes run at configure time through `sh -c`, because `glslc`
+  reports a refused extension on stderr *and* exits non-zero, and Zig's
+  `runFallible` returns stdout only on success. CMake's rule is kept
+  exactly: supported unless the stderr says `extension not supported:
+  <name>`. Locating `glslc` poisons the configuration cache, so a changed
+  `glslc` is always re-asked.
+- `vulkan-shaders-gen` is built for the host with the probe's macros and run
+  once for the header and once per `.comp`. Each run is a cached step with
+  every `.comp` and `.glsl` as inputs -- `glslc` resolves the includes, so
+  Zig cannot see them otherwise.
+- `ggml-vulkan.cpp` gets the headers with `-idirafter`, not `-I`: the
+  default is `/usr/include`, which must not shadow the glibc headers Zig
+  supplies. `libvulkan` is linked by `llama-cli`, not the archive: Zig
+  resolves a system library even for a static archive, which failed the
+  first attempt here, where there is none.
+
+Checked with a stand-in `glslc` that accepts everything, writes a 20-byte
+SPIR-V header per variant and a dependency file: every probe, both passes,
+all 1,980 variants plus the dispatch tables defined in the archive,
+`ggml_backend_vk_reg` defined and called by `ggml-backend-reg.cpp`,
+natively and cross-built for `aarch64-linux-gnu`. Without `-Dvulkan` the
+default archive is byte-identical to one built before the change. A second
+build with the stand-in made only the seven probe calls, so the per-shader
+steps cache. What the stand-in cannot check -- real SPIR-V, real probe
+answers, a device -- is the GB10's pickup.
+
+**`scripts/vk-repro`** is the first GB10 measurement: `node_dump` linked
+against the Vulkan reference, run per node and fused several times on the
+GPU -- the only GPU device that build registers -- and every run diffed
+against the first, with the `glslc` and header versions printed beside the
+answer. Its loop was exercised here against the Metal reference with the
+Vulkan guard removed (2,750 nodes and 33 fused decodes identical across two
+runs); the guard refuses a reference without the backend.
+`scripts/platform-libs` now adds `-lvulkan` when an archive it is given
+imports `vkGetInstanceProcAddr`, and only then.

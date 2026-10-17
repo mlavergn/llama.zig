@@ -20,6 +20,7 @@ const builtin = @import("builtin");
 const impl = @import("../../impl.zig");
 const defs = @import("../defs.zig");
 const threading = @import("../threading.zig");
+const simd = @import("../simd.zig");
 
 const c = impl.c;
 
@@ -163,7 +164,8 @@ pub const SinCos = struct { sin: f32, cos: f32 };
 const Float2 = extern struct { sin: f32, cos: f32 };
 
 extern fn __sincosf_stret(x: f32) Float2;
-extern fn sincosf(x: f32, s: *f32, cc: *f32) void;
+extern fn sinf(x: f32) f32;
+extern fn cosf(x: f32) f32;
 
 /// `sinf(x)` and `cosf(x)` **as clang emits them when both appear**.
 ///
@@ -176,20 +178,23 @@ extern fn sincosf(x: f32, s: *f32, cc: *f32) void;
 /// produce the same bits. It is what `make ops-diff` caught on every f32 rope
 /// and on `timestep_embedding`.
 ///
-/// Off Darwin clang emits `sincosf` for the same pair, so that is the
-/// fallback; Stage 5 has to re-measure it against glibc rather than assume.
+/// **Off Darwin there is no fold**, and the pair stays two calls. Measured
+/// on the `aarch64-linux-gnu` reference: its `ops.o` imports `sinf` and
+/// `cosf` and no `sincosf` at all. Linux defaults to `-fmath-errno`
+/// (`simd.math_errno`), so the calls may set `errno` and clang will not
+/// combine them; with `-fno-math-errno` the same pair on Linux becomes
+/// `sincosf`, and with `-fmath-errno` on Darwin it stays `sinf` and `cosf`.
+/// An earlier version of this function assumed `sincosf` off Darwin, which
+/// matched nothing the reference calls.
 ///
 /// Parameters:
 /// - `x`: the argument.
 ///
 /// Return: both values, by value.
 pub inline fn sinCos(x: f32) SinCos {
-    if (comptime builtin.os.tag.isDarwin()) {
+    if (comptime !simd.math_errno) {
         const r = __sincosf_stret(x);
         return .{ .sin = r.sin, .cos = r.cos };
     }
-    var sv: f32 = undefined;
-    var cv: f32 = undefined;
-    sincosf(x, &sv, &cv);
-    return .{ .sin = sv, .cos = cv };
+    return .{ .sin = sinf(x), .cos = cosf(x) };
 }

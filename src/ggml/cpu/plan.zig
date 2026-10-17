@@ -148,9 +148,9 @@ pub fn getNTasks(node: *Tensor, n_threads: c_int) c_int {
             // The C prints the op's name before aborting, so an op added
             // upstream and forgotten here says which one it was.
             if (node.op < c.GGML_OP_COUNT) {
-                impl.logError("ggml_get_n_tasks: op not implemented: %s\n", .{types.ggml_op_name(node.op)});
+                impl.fprintfStderr("ggml_get_n_tasks: op not implemented: %s\n", .{types.ggml_op_name(node.op)});
             } else {
-                impl.logError("ggml_get_n_tasks: op not implemented: %d\n", .{node.op});
+                impl.fprintfStderr("ggml_get_n_tasks: op not implemented: %d\n", .{node.op});
             }
             impl.abort("fatal error");
         },

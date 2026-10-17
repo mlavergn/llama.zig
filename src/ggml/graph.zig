@@ -1044,7 +1044,7 @@ fn computeBackward(ctx: *Context, cgraph: *CGraph, i: c_int, grads_needed: [*]co
                     if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, ops.ggml_mul(ctx, grad, ops.unary.sigmoid(ctx, src0.?)));
                 },
                 else => {
-                    impl.logError("%s: unsupported unary op for backward pass: %s\n", .{
+                    impl.fprintfStderr("%s: unsupported unary op for backward pass: %s\n", .{
                         "ggml_compute_backward",
                         types.ggml_unary_op_name(types.ggml_get_unary_op(tensor)),
                     });

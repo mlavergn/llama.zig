@@ -125,6 +125,13 @@ reliable about 0.0.16. But contention slows both sides alike, and a 4.7×
 difference is larger than anything contention did to the Metal pass, so it
 is the first thing to confirm.
 
+*Confirmed and closed, 2026-10-17.* It was real, and it was one function:
+`neon.dotq_s32`, which every dotprod kernel calls, was a 31-instruction
+portable form of `sdot`. On a quiet machine, `make perf-cpu SUDO=`: at
+`9fc4cf8`, llamazig 0.21× in generation (17.2 against 82.0 tok/s) and 0.12×
+in prompt processing; with `sdot`, 0.94× (77.5 against 82.2) and 0.93×
+(217.1 against 234.0), the same tokens in every run. `NOTES.md`, "`sdot`".
+
 **One load stalled.** A single llamazig run took 12.3 s to load against
 0.29 s of CPU — blocked, not computing. Six repeats loaded in 267–300 ms on
 both sides. Probably external; the median absorbs it, and the spread column

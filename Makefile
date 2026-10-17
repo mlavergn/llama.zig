@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port ref ref-chat validate xcframework xcframework-check perf perf-cpu
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-repro libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port ref ref-chat validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -252,6 +252,24 @@ sampler-diff:
 	cd llama.cpp.zmake && zig build lib --release=fast
 	zig build reference --release=fast
 	./scripts/sampler-diff $(MODEL)
+
+# Stage 7's first measurement: is the reference Vulkan backend reproducible
+# run to run, per node and fused? Builds llama.cpp.zmake with its Vulkan
+# backend, so it needs glslc and the Vulkan headers -- the GB10 has them,
+# this Mac does not. See the header of scripts/vk-repro.
+vk-repro:
+	cd llama.cpp.zmake && zig build lib --release=fast -Dvulkan
+	./scripts/vk-repro $(MODEL)
+
+# The CPU backend's host arms -- thread priority, CPU affinity, NUMA, the
+# sampler's default seed -- read back from the OS on every worker, ported
+# against reference, one process per scenario. Needs no model. The gate for
+# the Linux arms on Linux; on macOS it covers the Apple ones. See the header
+# of scripts/host-arms-diff.
+host-arms-diff:
+	cd llama.cpp.zmake && zig build lib --release=fast
+	zig build reference --release=fast
+	./scripts/host-arms-diff
 
 # The libc++ sort, heap, mt19937 and distributions src/llama/libcxx.zig
 # reproduces, against the real templates, in one process. The sampler's tie

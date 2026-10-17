@@ -122,7 +122,9 @@ upstream's per-architecture fixtures (`make arch-model-diff`).
 |---|---|
 | Metal | Enabled. All 20 shader libraries embedded in the binary; no external `.metallib`. |
 | CPU | Enabled. Accelerate on, llamafile SGEMM on, BLAS and OpenMP off. |
-| CUDA, Vulkan, SYCL, HIP | Not built. |
+| CUDA | Enabled on Linux when `nvcc` is found (`-Dcuda`). Host layer in Zig; upstream's `.cu` kernels compiled unmodified to fatbins and embedded. |
+| Vulkan | Not built yet: being ported (`PLAN.md`, Stage 7). The reference builds it with `llama.cpp.zmake -Dvulkan`. |
+| SYCL, HIP | Not built. |
 
 ### 3.4 Data types
 

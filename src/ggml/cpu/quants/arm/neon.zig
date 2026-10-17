@@ -32,20 +32,15 @@
 //!   Unlike the plain `a*b + c` in the quantizers, this is an explicit
 //!   intrinsic call, so the fusion site is known rather than guessed.
 //!
-//! # `vdotq_s32` has no Zig equivalent, and does not need one
+//! # `vdotq_s32` and `vmmlaq_s32` reach their instructions
 //!
-//! The dot-product instruction is not expressible in portable Zig. But it is
-//! *integer*: four `i8`x`i8` products summed into an `i32` lane, exact, with no
-//! rounding to preserve. So the widening-multiply-and-shuffle form below gives
-//! bit-identical results and only costs throughput. See `dotq_s32`.
-//!
-//! # `vmmlaq_s32` is the one intrinsic that reaches the instruction
-//!
-//! i8mm's `smmla` exists only on a CPU that has it, and the two-row kernels
-//! that use it compile only there -- so it is called through LLVM's own
-//! intrinsic rather than emulated. The portable form is kept, exact, for a
-//! build without i8mm and for the test that holds the two together. See
-//! `mmlaq_s32`.
+//! Neither instruction is expressible in portable Zig, and both exist only on
+//! a CPU with the extension: dotprod's `sdot`, i8mm's `smmla`. So each is
+//! called through LLVM's own intrinsic when the build has the extension, and
+//! otherwise through a widening-multiply form that is **bit-identical** --
+//! integer products, exact, no rounding to preserve. The portable forms stay
+//! for the builds without the extension and for the tests that hold each
+//! pair together. See `dotq_s32` and `mmlaq_s32`.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -502,14 +497,18 @@ pub inline fn cvtnq_s32_f32(v: f32x4) i32x4 {
 // -----------------------------------------------------------------------------
 // The dot product
 
+extern fn @"llvm.aarch64.neon.sdot.v4i32.v16i8"(i32x4, i8x16, i8x16) i32x4;
+
 /// Ports `vdotq_s32`: four groups of four `i8` products, accumulated.
 ///
 /// `result[i] = acc[i] + sum(a[4i+k] * b[4i+k], k = 0..3)`.
 ///
-/// There is no portable Zig for the `sdot` instruction, and none is needed:
-/// this is integer arithmetic, so the widening-multiply form below is
-/// **bit-identical**, not merely close. Only throughput is lost, and the
-/// quantized CPU path is not what carries a model when Metal is present.
+/// With dotprod this is LLVM's intrinsic for `sdot`, one instruction. Without,
+/// it is `dotq_s32_portable`, which is bit-identical -- this is integer
+/// arithmetic -- and was 31 instructions where the intrinsic is one. Every
+/// dotprod kernel in the port went through the portable form until the CPU
+/// path's throughput was measured: Qwen3.5 2B `Q4_K_M` on the CPU device of
+/// an M5 Max decoded at 4.9 t/s on one thread with it.
 ///
 /// Parameters:
 /// - `acc`: the accumulator, added to lane-wise.
@@ -517,6 +516,12 @@ pub inline fn cvtnq_s32_f32(v: f32x4) i32x4 {
 ///
 /// Return: the four accumulated sums.
 pub inline fn dotq_s32(acc: i32x4, a: i8x16, b: i8x16) i32x4 {
+    if (comptime has_dotprod) return @"llvm.aarch64.neon.sdot.v4i32.v16i8"(acc, a, b);
+    return dotq_s32_portable(acc, a, b);
+}
+
+/// `dotq_s32` without the instruction. See there.
+pub inline fn dotq_s32_portable(acc: i32x4, a: i8x16, b: i8x16) i32x4 {
     const wa: @Vector(16, i32) = a;
     const wb: @Vector(16, i32) = b;
     const p = wa *% wb;
@@ -799,7 +804,7 @@ test "halves and combine round trip" {
     try std.testing.expectEqual(v, back);
 }
 
-test "vdotq_s32 matches the definition on every lane" {
+test "vdotq_s32 matches the definition on every lane, both forms" {
     var aa: [16]i8 = undefined;
     var ba: [16]i8 = undefined;
     for (0..16) |i| {
@@ -809,15 +814,39 @@ test "vdotq_s32 matches the definition on every lane" {
     const a: i8x16 = aa;
     const b: i8x16 = ba;
     const acc: i32x4 = .{ 100, 200, 300, 400 };
-    const got: [4]i32 = dotq_s32(acc, a, b);
-
     // The definition, spelled out. Arrays, not vectors: a vector index has to
     // be comptime-known.
     const acca: [4]i32 = acc;
-    for (0..4) |g| {
-        var want: i32 = acca[g];
-        for (0..4) |k| want += @as(i32, aa[4 * g + k]) * ba[4 * g + k];
-        try std.testing.expectEqual(want, got[g]);
+    for ([_][4]i32{ dotq_s32(acc, a, b), dotq_s32_portable(acc, a, b) }) |got| {
+        for (0..4) |g| {
+            var want: i32 = acca[g];
+            for (0..4) |k| want += @as(i32, aa[4 * g + k]) * ba[4 * g + k];
+            try std.testing.expectEqual(want, got[g]);
+        }
+    }
+}
+
+test "vdotq_s32: the instruction and the portable form agree" {
+    // Only a build for a CPU with dotprod reaches the instruction -- every
+    // Apple core, so the baseline `zig build test` does; `-Dcpu=generic`
+    // skips. Extremes included: -128 * -128 * 4 per lane is 2^16, so the
+    // accumulator's wrap is what the first case exercises.
+    if (!has_dotprod) return error.SkipZigTest;
+    var prng = std.Random.DefaultPrng.init(0x5d07);
+    const rand = prng.random();
+    for (0..100_000) |round| {
+        var a: [16]i8 = undefined;
+        var b: [16]i8 = undefined;
+        var acc: [4]i32 = undefined;
+        rand.bytes(std.mem.asBytes(&a));
+        rand.bytes(std.mem.asBytes(&b));
+        rand.bytes(std.mem.asBytes(&acc));
+        if (round == 0) {
+            a = @splat(-128);
+            b = @splat(-128);
+            acc = @splat(std.math.maxInt(i32));
+        }
+        try std.testing.expectEqual(dotq_s32_portable(acc, a, b), dotq_s32(acc, a, b));
     }
 }
 
@@ -827,6 +856,7 @@ test "vdotq_s32 wraps rather than trapping, as sdot does" {
     const acc: i32x4 = @splat(std.math.maxInt(i32));
     // Would panic with a checked add; the hardware truncates.
     _ = dotq_s32(acc, a, b);
+    _ = dotq_s32_portable(acc, a, b);
 }
 
 test "the float reduction is pairwise, not sequential" {

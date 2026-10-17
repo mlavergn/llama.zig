@@ -1,4 +1,4 @@
-# Sourced, not run: `platform_libs cc|exe` sets PLATFORM_LIBS, the system
+# Sourced, not run: `platform_libs cc|exe [archive...]` sets PLATFORM_LIBS, the system
 # libraries an in-process harness needs beside
 # zig-out/lib/{libllama-ref.a,libggml.a}, for a `zig cc`/`zig c++` link or a
 # `zig build-exe` one -- the two spell an rpath differently.
@@ -15,6 +15,7 @@
 # libc++ supplies all `cub_shim.o` needs, and libcublas still loads
 # libstdc++ at run time through its own DT_NEEDED.
 platform_libs() {
+    local mode="$1"; shift
     case "$(uname -s)" in
         Darwin)
             local sdk
@@ -29,7 +30,7 @@ platform_libs() {
             local cuda=${CUDA_HOME:-/usr/local/cuda} rpath
             PLATFORM_LIBS=()
             if [ -e "$cuda/lib64/libcudart.so" ]; then
-                if [ "$1" = exe ]; then rpath=(-rpath "$cuda/lib64"); else rpath=(-Wl,-rpath,"$cuda/lib64"); fi
+                if [ "$mode" = exe ]; then rpath=(-rpath "$cuda/lib64"); else rpath=(-Wl,-rpath,"$cuda/lib64"); fi
                 PLATFORM_LIBS=(-L"$cuda/lib64" "${rpath[@]}" -lcudart -lcublas -lcublasLt -lcuda)
             fi
             PLATFORM_LIBS+=(-lgcc_s -lm -lpthread)
@@ -39,4 +40,15 @@ platform_libs() {
             exit 2
             ;;
     esac
+    # The Vulkan loader, for an archive built with ggml's Vulkan backend
+    # (`make -C llama.cpp.zmake lib VULKAN=1`), which calls it directly. Keyed
+    # on the archives named, not on the machine, so a CPU-only link never
+    # gains a DT_NEEDED it does not use.
+    local a
+    for a in "$@"; do
+        if [ -f "$a" ] && nm -u "$a" 2>/dev/null | grep -qE '(^|[ _])vkGetInstanceProcAddr$'; then
+            PLATFORM_LIBS+=(-lvulkan)
+            break
+        fi
+    done
 }

@@ -1,0 +1,81 @@
+#!/bin/bash
+# Whether the reference Vulkan backend is reproducible run to run, node by
+# node -- the measurement Stage 7 begins with (PLAN.md, "Stage 7 — Vulkan").
+#
+# Every exact gate in this project rests on the reference producing the same
+# bits twice. Metal and CUDA were measured to before anything was ported
+# (NOTES.md); a backend that is not would need a different kind of gate, and
+# it is cheaper to learn that before writing one. This runs
+# harness/node_dump.c, linked against llama.cpp.zmake built with
+# `VULKAN=1`, on the GPU -- the only GPU device that build registers is
+# Vulkan's -- several times, per node and fused, and diffs every run against
+# the first.
+#
+# It also prints the toolchain the answer belongs to: `glslc --version`, the
+# Vulkan header version, and the device, because which shaders and which C++
+# arms exist depends on all three (PLAN.md, Decision 55).
+#
+# Usage: scripts/vk-repro <model.gguf> [runs] [prompt]
+#   Requires: make -C llama.cpp.zmake lib VULKAN=1
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODEL="${1:?usage: scripts/vk-repro <model.gguf> [runs] [prompt]}"
+RUNS="${2:-3}"
+PROMPT="${3:-The capital of France is}"
+
+. "$ROOT/scripts/check-reference-pin"
+. "$ROOT/scripts/platform-libs"
+
+REF_LIBS=(llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make -C llama.cpp.zmake lib VULKAN=1'" >&2; exit 2; }
+done
+nm -u llama.cpp.zmake/zig-out/lib/libggml.a 2>/dev/null | grep -qE '(^|[ _])vkGetInstanceProcAddr$' \
+    || { echo "FAIL: the reference libggml.a has no Vulkan backend -- build it with VULKAN=1" >&2; exit 2; }
+platform_libs cc "${REF_LIBS[@]}"
+
+glslc_version="$(glslc --version 2>/dev/null | head -1)"
+header_version="$(printf '#include <vulkan/vulkan_core.h>\nVK_HEADER_VERSION\n' | cc -E -P -x c - 2>/dev/null | tail -1)"
+case "$header_version" in ''|*[!0-9]*) header_version=unknown ;; esac
+echo "glslc:   ${glslc_version:-unknown}"
+echo "headers: VK_HEADER_VERSION $header_version"
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+zig cc harness/node_dump.c -o "$tmp/ref" -std=c11 -O2 -I llama.cpp/include -I llama.cpp/ggml/include \
+    "${REF_LIBS[@]}" -lc++ ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/ref.log" \
+    || { echo "FAIL: could not link against the reference libraries" >&2; tail -5 "$tmp/ref.log" >&2; exit 1; }
+
+fail=0
+for mode in "" fused; do
+    label="${mode:-per-node}"
+    args=("$MODEL" "$PROMPT" 1 gpu)
+    [ -n "$mode" ] && args+=(fused 32)
+    "$tmp/ref" "${args[@]}" > "$tmp/run0.txt" 2>"$tmp/err0" \
+        || { echo "FAIL: $label run 1 aborted" >&2; tail -5 "$tmp/err0" >&2; exit 1; }
+    [ -z "$mode" ] && grep -m1 -i 'vulkan' "$tmp/err0" | sed 's/^/device:  /'
+    lines=$(wc -l < "$tmp/run0.txt" | tr -d ' ')
+    [ "$lines" -gt 0 ] || { echo "FAIL: $label produced nothing" >&2; exit 1; }
+    for r in $(seq 2 "$RUNS"); do
+        "$tmp/ref" "${args[@]}" > "$tmp/run.txt" 2>/dev/null \
+            || { echo "FAIL: $label run $r aborted" >&2; exit 1; }
+        if diff -q "$tmp/run0.txt" "$tmp/run.txt" > /dev/null; then
+            printf '  %-9s run %d: %s lines identical to run 1\n' "$label" "$r" "$lines"
+        else
+            printf '  %-9s run %d: DIFFERS from run 1 on %d lines; first:\n' "$label" "$r" \
+                "$(diff "$tmp/run0.txt" "$tmp/run.txt" | grep -c '^<')"
+            diff "$tmp/run0.txt" "$tmp/run.txt" | grep '^[<>]' | head -6 | sed 's/^/      /'
+            fail=1
+        fi
+    done
+done
+
+if [ "$fail" -eq 0 ]; then
+    echo "PASS: the reference Vulkan backend reproduces its own node hashes over $RUNS runs"
+    exit 0
+fi
+echo "FAIL: the reference Vulkan backend is not reproducible run to run -- see PLAN.md, Stage 7"
+exit 1

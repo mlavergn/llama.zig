@@ -89,7 +89,7 @@ fn ropeYarn(
         // Get n-d magnitude scaling corrected for interpolation
         mscale *= @mulAdd(f32, 0.1, logf(1.0 / freq_scale), 1.0);
     }
-    // `cosf(theta)` and `sinf(theta)`: clang folds the pair into one
+    // `cosf(theta)` and `sinf(theta)`: on Darwin clang folds the pair into one
     // `__sincosf_stret` call, which rounds differently -- see `common.sinCos`.
     const sc = common.sinCos(theta);
     return .{ .cos = sc.cos * mscale, .sin = sc.sin * mscale };

@@ -231,7 +231,7 @@ fn getNumaAffinity() CpuSet {
 /// - `numa_flag`: the strategy `set_numa_thread_affinity` will apply.
 pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
     if (numa.n_nodes > 0) {
-        impl.logError("ggml_numa_init: NUMA already initialized\n", .{});
+        impl.fprintfStderr("ggml_numa_init: NUMA already initialized\n", .{});
         return;
     }
     if (comptime !is_gnu_linux) return;
@@ -328,7 +328,7 @@ fn setNumaThreadAffinity(thread_n: c_int) void {
         // use the cpuset that numactl gave us
         c.GGML_NUMA_STRATEGY_NUMACTL => {
             const rv = linux_c.pthread_setaffinity_np(pthread_self(), setsize, &numa.cpuset);
-            if (rv != 0) impl.logError("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
+            if (rv != 0) impl.fprintfStderr("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
             return;
         },
         else => return,
@@ -339,7 +339,7 @@ fn setNumaThreadAffinity(thread_n: c_int) void {
     for (node.cpus[0..node.n_cpus]) |cpu| cpus.set(cpu, setsize);
 
     const rv = linux_c.pthread_setaffinity_np(pthread_self(), setsize, &cpus);
-    if (rv != 0) impl.logError("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
+    if (rv != 0) impl.fprintfStderr("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
 }
 
 /// Ports `clear_numa_thread_affinity`, `clear_numa_thread_affinity`
@@ -355,7 +355,7 @@ fn clearNumaThreadAffinity() void {
     while (i < numa.total_cpus) : (i += 1) cpus.set(i, setsize);
 
     const rv = linux_c.pthread_setaffinity_np(pthread_self(), setsize, &cpus);
-    if (rv != 0) impl.logError("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
+    if (rv != 0) impl.fprintfStderr("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
 }
 
 // -----------------------------------------------------------------------------
@@ -402,7 +402,7 @@ fn threadApplyAffinity(mask: []const bool) bool {
 
     const err = linux_c.pthread_setaffinity_np(pthread_self(), @sizeOf(CpuSet), &cpuset);
     if (err != 0) {
-        impl.logError("warn: failed to set affinity mask 0x%llx : %s (%d)\n", .{ @as(c_ulonglong, @intFromPtr(mask.ptr)), strerror(err), err });
+        impl.fprintfStderr("warn: failed to set affinity mask 0x%llx : %s (%d)\n", .{ @as(c_ulonglong, @intFromPtr(mask.ptr)), strerror(err), err });
         return false;
     }
     return true;
@@ -451,7 +451,7 @@ fn threadApplyPriority(prio: i32) bool {
 
     const err = pthread_setschedparam(pthread_self(), policy, &p);
     if (err != 0) {
-        impl.logError("warn: failed to set thread priority %d : %s (%d)\n", .{ prio, strerror(err), err });
+        impl.fprintfStderr("warn: failed to set thread priority %d : %s (%d)\n", .{ prio, strerror(err), err });
         return false;
     }
 

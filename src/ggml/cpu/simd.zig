@@ -369,6 +369,24 @@ pub inline fn strictLoopVectorized(trip: i64, store: *const anyopaque, loads: []
     return true;
 }
 
+/// Whether the reference compiler treats libm calls as writing `errno`:
+/// clang's `-fmath-errno`, its default on Linux and off on Darwin. Not a port
+/// of anything; a property of the reference build that changes its bits in
+/// two ways, both measured on the `aarch64-linux-gnu` reference against the
+/// `aarch64-macos` one at the same CPU:
+///
+/// - a `sinf`/`cosf` pair on one argument is **not** folded into one
+///   combined call (`ops/common.sinCos`); and
+/// - a strict loop that calls into libm is **not** vectorized, so it runs
+///   scalar and all fused. `ssm_scan`'s Mamba-1 loop calls `expf`: on Darwin
+///   its `ssm_scan` has twelve `expf` call sites, eight of them one per
+///   lane, and on Linux four.
+///
+/// The other Linux-only libm imports were checked and do not move a bit:
+/// `sqrtf` beside an `fsqrt` for the `errno` path, `lroundf` where Darwin
+/// inlines `fcvtas`.
+pub const math_errno = !builtin.os.tag.isDarwin();
+
 /// Where a vectorized strict loop of `trip` iterations starting at `start`
 /// stops rounding and starts fusing: past whole groups of
 /// `strict_loop.group`. See `strictLoopVectorized`.

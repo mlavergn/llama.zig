@@ -642,8 +642,9 @@ fn timestepEmbeddingF32(params: *const ComputeParams, dst: *Tensor) void {
             // no add, so nothing to fuse.
             const freq = expf(-logf(@floatFromInt(max_period)) * f(j) / f(half));
             const arg = timestep * freq;
-            // clang folds this `cosf`/`sinf` pair into one `__sincosf_stret`
-            // call, which rounds differently -- see `common.sinCos`.
+            // On Darwin clang folds this `cosf`/`sinf` pair into one
+            // `__sincosf_stret` call, which rounds differently -- see
+            // `common.sinCos`.
             const sc = common.sinCos(arg);
             embed_data[@intCast(j)] = sc.cos;
             embed_data[@intCast(j + half)] = sc.sin;

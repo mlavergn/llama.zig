@@ -278,8 +278,8 @@ fn applyUnaryOp(
 /// Ports `unary_op` (unary-ops.cpp:137 @c1d0e7a00).
 ///
 /// Five type pairs, in the C's order. The C prints to `stderr` with `fprintf`
-/// rather than going through `GGML_LOG_ERROR`, then aborts; `impl.logError`
-/// reaches the same stream through ggml's own handler.
+/// rather than going through `GGML_LOG_ERROR`, then aborts, and so does this:
+/// `impl.fprintfStderr`, which a log callback does not intercept.
 fn unaryOp(comptime op: Op, params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -297,7 +297,7 @@ fn unaryOp(comptime op: Op, params: *const ComputeParams, dst: *Tensor) void {
     } else if (src0.type == c.GGML_TYPE_F16 and dst.type == c.GGML_TYPE_F32) {
         applyUnaryOp(op, F16, f32, params, dst);
     } else {
-        impl.logError(
+        impl.fprintfStderr(
             "%s: unsupported types: dst: %s, src0: %s\n",
             .{ "unary_op", c.ggml_type_name(dst.type), c.ggml_type_name(src0.type) },
         );
@@ -378,7 +378,7 @@ fn unaryOpFunctor(params: *const ComputeParams, dst: *Tensor, op: anytype) void 
     } else if (src0.type == c.GGML_TYPE_F16 and dst.type == c.GGML_TYPE_F32) {
         applyUnaryOpFunctor(F16, f32, params, dst, op);
     } else {
-        impl.logError(
+        impl.fprintfStderr(
             "%s: unsupported types: dst: %s, src0: %s\n",
             .{ "unary_op_functor", c.ggml_type_name(dst.type), c.ggml_type_name(src0.type) },
         );

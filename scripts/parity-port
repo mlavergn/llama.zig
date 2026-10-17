@@ -117,10 +117,8 @@ int main(int argc, char **argv) {
 }
 DRIVER
 
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
-FRAMEWORKS=(-lc++
-            -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
-            -F "$SDK/System/Library/Frameworks")
+platform_libs cc   # scripts/platform-libs, through scripts/gate-cpu
+FRAMEWORKS=(-lc++ ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"})
 INCLUDES=(-I llama.cpp/include -I llama.cpp/ggml/include)
 
 zig cc -mcpu="$GATE_CPU" "$tmp/driver.c" -o "$tmp/ref"  -std=c11 "${INCLUDES[@]}" "${REF_LIBS[@]}" "${FRAMEWORKS[@]}" 2>/dev/null \

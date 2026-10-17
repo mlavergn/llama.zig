@@ -51,10 +51,8 @@ gate_cpu_probe port      zig-out/lib/libggml.a || exit 1
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
-FW=(-lc++
-    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
-    -F "$SDK/System/Library/Frameworks")
+platform_libs cc   # scripts/platform-libs, through scripts/gate-cpu
+FW=(-lc++ ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"})
 INC=(-I llama.cpp/include -I llama.cpp/ggml/include)
 
 zig cc -mcpu="$GATE_CPU" harness/node_dump.c -o "$tmp/ref"  -std=c11 -O2 "${INC[@]}" "${REF_LIBS[@]}"  "${FW[@]}" 2>"$tmp/ref.log" \

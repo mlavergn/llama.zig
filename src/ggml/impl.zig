@@ -68,6 +68,30 @@ pub const logError = struct {
     }
 }.f;
 
+extern fn fprintf(stream: *anyopaque, format: [*:0]const u8, ...) c_int;
+
+/// libc's `stderr`, which Darwin names `__stderrp` behind a macro and glibc
+/// exports as itself.
+fn cStderr() *anyopaque {
+    return @extern(*const *anyopaque, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
+}
+
+/// `fprintf(stderr, ...)`, for the places the C writes to `stderr` directly
+/// instead of through `GGML_LOG_*`.
+///
+/// **Not interchangeable with `logError`.** With ggml's default handler both
+/// reach `stderr` and look the same; with a log callback installed --
+/// `llama_log_set` installs one through `ggml_log_set` -- `logError` goes to
+/// the callback and a direct write still goes to `stderr`. The port sent
+/// twelve of the C's direct writes through the logger -- in `cpu/threading`,
+/// `cpu/plan`, `cpu/unary_ops`, `graph` and `cuda/binbcast` -- until the
+/// host-arms harness came to compare them with a callback installed.
+pub const fprintfStderr = struct {
+    pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
+        _ = @call(.auto, fprintf, .{ cStderr(), fmt } ++ args);
+    }
+}.f;
+
 /// Ports the `GGML_LOG_INFO` macro (ggml-impl.h:119 @c1d0e7a00).
 pub const logInfo = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {

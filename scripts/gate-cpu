@@ -22,7 +22,12 @@
 # Usage: . scripts/gate-cpu   then   gate_cpu_check <side> "<cpu: line>"
 GATE_CPU="${GATE_CPU:-baseline}"
 
-_gate_cpu_macros="$(zig cc -target aarch64-macos -mcpu="$GATE_CPU" -dM -E -x c /dev/null 2>&1)" \
+. "$(dirname "${BASH_SOURCE[0]}")/platform-libs"
+
+# The host's own OS, not a fixed one: `baseline` is `apple_m1` on
+# aarch64-macos and `generic` on aarch64-linux, and the libraries are built
+# for the host.
+_gate_cpu_macros="$(zig cc -mcpu="$GATE_CPU" -dM -E -x c /dev/null 2>&1)" \
     || { echo "FAIL: zig cc does not know the CPU '$GATE_CPU'" >&2; echo "$_gate_cpu_macros" | head -3 >&2; exit 2; }
 
 _gate_cpu_has() { grep -q "^#define __ARM_FEATURE_$1 " <<<"$_gate_cpu_macros" && echo 1 || echo 0; }
@@ -62,9 +67,9 @@ int main(void) {
     return 0;
 }
 PROBE
+    platform_libs cc
     if ! zig cc -mcpu="$GATE_CPU" "$dir/probe.c" -o "$dir/probe" -I llama.cpp/ggml/include "$2" -lc++ \
-            -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-            -F "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks" 2>"$dir/err"; then
+            ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$dir/err"; then
         echo "FAIL: cannot link the CPU probe against $2" >&2; head -5 "$dir/err" >&2; rm -rf "$dir"; return 1
     fi
     local line; line="$("$dir/probe")"

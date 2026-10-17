@@ -299,14 +299,19 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
                         var sumf: f32 = 0.0;
                         // d_state
                         //
-                        // Vectorized by the compiler despite the `expf` --
-                        // each lane's call is scalarized -- when its guards
-                        // pass: then `state * C` is rounded in groups of
-                        // `simd.strict_loop.group` and only the remainder fused. Measured on the
-                        // reference `ops.o`; see `simd.strictLoopVectorized`.
+                        // On Darwin, vectorized by the compiler despite the
+                        // `expf` -- each lane's call is scalarized -- when
+                        // its guards pass: then `state * C` is rounded in
+                        // groups of `simd.strict_loop.group` and only the
+                        // remainder fused. Measured on the reference `ops.o`;
+                        // see `simd.strictLoopVectorized`. Under
+                        // `simd.math_errno` the `expf` may write `errno` and
+                        // the loop stays scalar, all fused: the Linux
+                        // reference has no per-lane `expf` calls here.
                         const r0: usize = @intCast(ii * nc);
                         const rg: usize = @intCast(g * nc);
-                        const split: i64 = if (simd.strictLoopVectorized(nc, s + r0, &.{ s0 + r0, A + @as(usize, @intCast(h * nc)), B + rg, C + rg }))
+                        const split: i64 = if (!simd.math_errno and
+                            simd.strictLoopVectorized(nc, s + r0, &.{ s0 + r0, A + @as(usize, @intCast(h * nc)), B + rg, C + rg }))
                             simd.strictSplit(0, nc)
                         else
                             0;

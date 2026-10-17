@@ -299,7 +299,7 @@ fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const Tensor, src1
     } else if (src0.type == F16 and dst.type == F32) {
         launchBinBcastPack(op, half, f32, f32, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
     } else {
-        impl.logError("%s: unsupported types: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_bin_bcast", c.ggml_type_name(dst.type), c.ggml_type_name(src0.type), c.ggml_type_name(src1.type) });
+        impl.fprintfStderr("%s: unsupported types: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_bin_bcast", c.ggml_type_name(dst.type), c.ggml_type_name(src0.type), c.ggml_type_name(src1.type) });
         impl.abort("fatal error");
     }
 }
