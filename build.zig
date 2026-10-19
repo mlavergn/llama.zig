@@ -318,8 +318,6 @@ pub fn build(b: *std.Build) !void {
     // Proves ported code is on the execution path. See scripts/probe-ported.
     const probe_ported = b.option(bool, "probe-ported", "Abort from ported code on a hot path, to prove it runs") orelse false;
     const probe_cpu = b.option(bool, "probe-cpu", "Abort from the ported CPU backend, to prove it runs") orelse false;
-    // Development only, for Stage 5 step 6: see build/llamacpp.zig.
-    const x86_incomplete = b.option(bool, "x86-incomplete", "Development only: an unported x86 quant or repack kernel falls back to its generic port instead of failing to compile") orelse false;
 
     const cuda = cudaOptions(b, cfg.target);
     const reference = try llamacpp.add(b, .{
@@ -329,7 +327,6 @@ pub fn build(b: *std.Build) !void {
         .libc_file = libc_file,
         .probe_ported = probe_ported,
         .probe_cpu = probe_cpu,
-        .x86_incomplete = x86_incomplete,
         .cuda = cuda,
     });
 
@@ -374,7 +371,6 @@ pub fn build(b: *std.Build) !void {
         .sdk = sdk,
         .probe_ported = probe_ported,
         .probe_cpu = probe_cpu,
-        .x86_incomplete = x86_incomplete,
     });
     const ported_lib_step = b.step("ported-lib", "Build a library from the ported Zig alone");
     ported_lib_step.dependOn(&b.addInstallArtifact(ported_lib, .{}).step);

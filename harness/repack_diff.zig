@@ -366,14 +366,45 @@ fn runQuantizeMat(
     comptime f_ref: *const QuantizeMat,
     alloc: std.mem.Allocator,
 ) !void {
+    for ([_][]const u8{ "", " ties", " zero" }) |pattern| {
+        try runQuantizeMatPattern(name, pattern, Out, qk, f_ours, f_ref, alloc);
+    }
+}
+
+/// One input pattern for `runQuantizeMat`.
+///
+/// - `""`: uniform at amplitude 1 and 30, the two the ops-diff harness runs.
+/// - `" ties"`: half-integers with one `±127` per block, so the scale is
+///   exactly 1 and every scaled value is a rounding tie. Random floats never
+///   reach one, and the AVX2 quantizers round ties to even where the generic
+///   ones round them away: without this pattern the generic stood in for the
+///   AVX2 `quantize_mat_q8_0_4x8` and passed.
+/// - `" zero"`: the first block of every row all zero, the `max == 0` arm.
+fn runQuantizeMatPattern(
+    comptime name: []const u8,
+    pattern: []const u8,
+    comptime Out: type,
+    comptime qk: i64,
+    comptime f_ours: *const QuantizeMat,
+    comptime f_ref: *const QuantizeMat,
+    alloc: std.mem.Allocator,
+) !void {
     const nb: i64 = 2;
     const n: i64 = qk * nb;
 
     const x = try alloc.alloc(f32, @intCast(4 * n));
     defer alloc.free(x);
-    // Amplitude 1 and 30, the two the ops-diff harness runs: a cutoff that
-    // only one of them reaches is a fault neither alone would show.
-    for (x, 0..) |*v, i| v.* = (prng.random().float(f32) * 2.0 - 1.0) * (if (i % 2 == 0) @as(f32, 1.0) else 30.0);
+    const r = prng.random();
+    for (x, 0..) |*v, i| v.* = (r.float(f32) * 2.0 - 1.0) * (if (i % 2 == 0) @as(f32, 1.0) else 30.0);
+    if (std.mem.eql(u8, pattern, " ties")) {
+        for (x) |*v| v.* = @as(f32, @floatFromInt(r.intRangeAtMost(i32, -126, 125))) + 0.5;
+        var blk: usize = 0;
+        while (blk < x.len) : (blk += @intCast(qk)) {
+            x[blk + r.uintLessThan(usize, @intCast(qk))] = if (r.boolean()) 127.0 else -127.0;
+        }
+    } else if (std.mem.eql(u8, pattern, " zero")) {
+        for (0..4) |row| @memset(x[row * @as(usize, @intCast(n)) ..][0..@intCast(qk)], 0);
+    }
 
     const a = try alloc.alloc(Out, @intCast(nb));
     defer alloc.free(a);
@@ -394,10 +425,10 @@ fn runQuantizeMat(
         bad += 1;
     };
     if (bad == 0) {
-        std.debug.print("  {s:<30} {d:>4} bytes identical\n", .{ name, ab.len });
+        std.debug.print("  {s:<25}{s:<5} {d:>4} bytes identical\n", .{ name, pattern, ab.len });
     } else {
         failures += 1;
-        std.debug.print("  {s:<30} DIFFERS: {d} of {d} bytes; first at {d}\n", .{ name, bad, ab.len, first });
+        std.debug.print("  {s:<25}{s:<5} DIFFERS: {d} of {d} bytes; first at {d}\n", .{ name, pattern, bad, ab.len, first });
     }
 }
 
@@ -405,6 +436,13 @@ pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
+
+    // The fp16 table `GGML_CPU_FP16_TO_FP32` reads on x86 is filled here.
+    // Without it every scale through the table is zero on both sides, and
+    // a kernel that multiplies by one compares equal by computing nothing:
+    // the generic stood in for the AVX2 `gemv_q4_0_8x8_q8_0` and passed.
+    // On ARM the macro is a cast and the call changes nothing.
+    c.ggml_cpu_init();
 
     // What the port library was compiled for; `scripts/repack-diff` checks
     // this first line against GATE_CPU. The reference objects are compiled

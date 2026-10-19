@@ -1,0 +1,62 @@
+#!/bin/bash
+# `node-diff` for x86_64, on the Windows laptop (PLAN.md, Stage 5 step 6;
+# Decision 57): every node of a real model's CPU decode hashed, ported
+# against llama.cpp.zmake, at 1 and 4 threads, plus the fused pass --
+# scripts/node-diff's comparison, run where the AVX2 kernels are.
+#
+# The model lives on the laptop: `push` carries executables only. X86_MODEL
+# is a path there, taken under `%USERPROFILE%` unless it is absolute. The
+# hash dumps stay on the laptop and `harness/win_lines_diff.c` compares
+# them there.
+#
+# Usage: scripts/x86-node-diff [prompt]
+#   X86_MODEL=<path>             Desktop\Qwen3.5-2B-Q4_K_M.gguf by default
+#   X86_CPU=x86_64_v3            the level; the laptop has no AVX-512
+#   X86_AGENT, INFERISEUPDATER   as scripts/win-run takes them
+#   X86_BUILD_ONLY=1             stop after building the .exe files
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+X86_CPU="${X86_CPU:-x86_64_v3}"
+X86_MODEL="${X86_MODEL:-Desktop\\Qwen3.5-2B-Q4_K_M.gguf}"
+PROMPT="${1:-Explain gravity in one sentence, then give an example from daily life:}"
+STEPS="${STEPS:-4}"
+TARGET=x86_64-windows-gnu
+
+. "$ROOT/scripts/check-reference-pin"
+
+out="$ROOT/zig-out/x86-node/$X86_CPU"
+mkdir -p "$out"
+
+(cd llama.cpp.zmake && zig build lib --release=fast -Dtarget="$TARGET" -Dcpu="$X86_CPU" -p "$out/ref") \
+    || { echo "FAIL: could not build the x86 reference" >&2; exit 1; }
+zig build reference --release=fast -Dtarget="$TARGET" -Dcpu="$X86_CPU" -p "$out/port" \
+    || { echo "FAIL: could not build the x86 port" >&2; exit 1; }
+
+CC=(zig cc -target "$TARGET" -mcpu="$X86_CPU" -std=c11 -w -O2 -I harness -I llama.cpp/include -I llama.cpp/ggml/include)
+"${CC[@]}" harness/win_node_dump.c "$out/ref/lib/llama.lib" "$out/ref/lib/ggml.lib" -o "$out/node_ref.exe" -lc++ -lws2_32 -ladvapi32 \
+    || { echo "FAIL: could not link against the x86 reference" >&2; exit 1; }
+"${CC[@]}" harness/win_node_dump.c "$out/port/lib/llama.lib" "$out/port/lib/ggml.lib" -o "$out/node_port.exe" -lc++ -lws2_32 -ladvapi32 \
+    || { echo "FAIL: could not link against the x86 port" >&2; exit 1; }
+"${CC[@]}" harness/win_lines_diff.c -o "$out/lines_diff.exe" \
+    || { echo "FAIL: could not build harness/win_lines_diff.c" >&2; exit 1; }
+[ -n "${X86_BUILD_ONLY:-}" ] && { echo "built $out/node_ref.exe, node_port.exe, lines_diff.exe"; exit 0; }
+
+RUN="$ROOT/scripts/win-run"
+pairs=()
+for run in "1" "4" "4 fused"; do
+    set -- $run
+    nt=$1; tag="$nt${2:+-$2}"
+    extra=(); [ -n "${2:-}" ] && extra=(fused "$STEPS")
+    for side in ref port; do
+        "$RUN" "$out/node_$side.exe" "llamazig-node-$side" "node_$side.$tag.txt" "$X86_MODEL" "$PROMPT" "$nt" cpu ${extra[@]+"${extra[@]}"} > "$out/$side.$tag.log" || exit 2
+        grep -aq 'node_dump rc=0' "$out/$side.$tag.log" || { echo "FAIL: $side run failed ($tag)"; tail -5 "$out/$side.$tag.log"; exit 1; }
+    done
+    pairs+=("node_ref.$tag.txt" "node_port.$tag.txt")
+done
+"$RUN" "$out/lines_diff.exe" llamazig-lines-diff "${pairs[@]}" | tee "$out/result.txt"
+grep -aq '^PASS: ' "$out/result.txt" && exit 0
+grep -aq '^FAIL: ' "$out/result.txt" && exit 1
+echo "FAIL: no verdict -- see $out/lines_diff.exe.log" >&2
+exit 2

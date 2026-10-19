@@ -52,20 +52,19 @@
 //! bf16 × bf16 and, with F16C, f16 × f16, none with a minimum `n` -- through
 //! the same generic `TinyBLAS` with the AVX `load`, `madd` and `hsum`, and
 //! the tile constants of `VECTOR_REGISTERS == 16`. The four quantized rows
-//! take `tinyBLAS_Q0_AVX`, which is not ported yet (`PLAN.md`, Stage 5
-//! step 6): a compile error by default, `return false` under
-//! `-Dx86-incomplete`, which falls back to `mul_mat`'s own path and so fails
-//! `ops-diff` visibly.
+//! -- q8_0, q4_0, q5_0 and iq4_nl against q8_0 -- take `tinyBLAS_Q0_AVX`,
+//! with its `__AVX2__ && __F16C__` tile kernels.
 
 const std = @import("std");
 const builtin = @import("builtin");
-const config = @import("config");
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const defs = @import("../defs.zig");
 const threading = @import("../threading.zig");
 const convert = @import("../convert.zig");
 const neon = @import("../simd.zig").neon;
+const qblocks = @import("../../quants/blocks.zig");
+const avx = @import("../quants/x86/avx2.zig");
 
 const c = impl.c;
 const ComputeParams = common.ComputeParams;
@@ -489,6 +488,278 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
     };
 }
 
+/// Ports `tinyBLAS_Q0_AVX` (sgemm.cpp:1353 @c1d0e7a00), the x86 quantized
+/// path at x86-64-v3: `__AVX2__` and `__F16C__`, `VECTOR_REGISTERS == 16`.
+/// `TA` is `block_q8_0`, `block_q4_0`, `block_q5_0` or `block_iq4_nl`; `B`
+/// is always `block_q8_0`.
+///
+/// Like `tinyBLAS_Q0_ARM` it splits its work statically, each thread
+/// computing `duty` tiles of disjoint output. Its three tile kernels --
+/// `gemm4xN`, `gemmMx4` and the generic `gemm` -- differ only in what they
+/// hoist out of the inner loop: every output element is `hsum` of one fused
+/// `scale * updot + Cv` per block, with `scale` the two blocks' deltas'
+/// product. The tiling decides which thread computes an element, never its
+/// value.
+fn TinyBlasQ0Avx(comptime TA: type) type {
+    return struct {
+        const Self = @This();
+
+        A: [*]const TA,
+        B: [*]const qblocks.Q8_0,
+        C: [*]f32,
+        k: i64,
+        lda: i64,
+        ldb: i64,
+        ldc: i64,
+        ith: i64,
+        nth: i64,
+
+        /// Ports `denibble` (sgemm.cpp:1766 @c1d0e7a00): sixteen bytes to
+        /// 32 nibbles, low first.
+        inline fn denibble(p: *const [16]u8) avx.m256i {
+            const x = avx.mm_loadu_si128(p);
+            return avx.mm256_and_si256(avx.mm256_set1_epi8(15), avx.mm256_set_m128i(avx.mm_srli_epi16(x, 4), x));
+        }
+
+        /// Ports `bittobyte` (sgemm.cpp:1773 @c1d0e7a00): `q5_0`'s fifth
+        /// bits as `0xF0` where the bit is clear, so OR-ing them in makes the
+        /// nibble minus 16, signed.
+        inline fn bittobyte(p: *const [4]u8) avx.m256i {
+            const x32 = std.mem.readInt(u32, p, .little);
+            const bytes = avx.mm256_cmpeq_epi8(
+                avx.mm256_set1_epi64x(-1),
+                avx.mm256_or_si256(
+                    avx.mm256_set1_epi64x(0x7fbfdfeff7fbfdfe),
+                    avx.mm256_shuffle_epi8(avx.mm256_set1_epi32(@bitCast(x32)), avx.mm256_set_epi64x(0x0303030303030303, 0x0202020202020202, 0x0101010101010101, 0x0000000000000000)),
+                ),
+            );
+            return avx.mm256_andnot_si256(bytes, avx.mm256_set1_epi8(@bitCast(@as(u8, 0xF0))));
+        }
+
+        /// Ports `load`, `load`, `load`, `load` (sgemm.cpp:1684, 1696, 1710, 1740 @c1d0e7a00):
+        /// a block's 32 weights as signed bytes. `iq4_nl`'s is `load1` over
+        /// `load0`, each a `pshufb` through the codebook, which the
+        /// constructor copies into `iq4nlt`.
+        inline fn load(comptime T: type, b: *const T) avx.m256i {
+            if (T == qblocks.Q8_0) return avx.mm256_loadu_si256(&b.qs);
+            if (T == qblocks.Q4_0) return avx.mm256_sub_epi8(denibble(&b.qs), avx.mm256_set1_epi8(8));
+            if (T == qblocks.Q5_0) return avx.mm256_or_si256(denibble(&b.qs), bittobyte(&b.qh));
+            comptime std.debug.assert(T == qblocks.IQ4_NL);
+            const iq4nlt = avx.mm_loadu_si128(&c.kvalues_iq4nl);
+            const x = avx.mm_loadu_si128(&b.qs);
+            const lo = avx.mm_shuffle_epi8(iq4nlt, avx.mm_and_si128(avx.mm_set1_epi8(15), x));
+            const hi = avx.mm_shuffle_epi8(iq4nlt, avx.mm_and_si128(avx.mm_set1_epi8(15), avx.mm_srli_epi16(x, 4)));
+            return avx.mm256_set_m128i(hi, lo);
+        }
+
+        /// Ports `updot` (sgemm.cpp:1754 @c1d0e7a00), the arm without VNNI:
+        /// unsigned by signed bytes, summed in pairs twice, as floats.
+        inline fn updot(u: avx.m256i, s: avx.m256i) avx.m256 {
+            const res = avx.mm256_madd_epi16(avx.mm256_set1_epi16(1), avx.mm256_maddubs_epi16(u, s));
+            return avx.mm256_cvtepi32_ps(res);
+        }
+
+        /// The C's `updot(_mm256_sign_epi8(a, a), _mm256_sign_epi8(b, a))`:
+        /// a signed dot product through the unsigned instruction.
+        inline fn dot(av: avx.m256i, bv: avx.m256i) avx.m256 {
+            return updot(avx.mm256_sign_epi8(av, av), avx.mm256_sign_epi8(bv, av));
+        }
+
+        inline fn aAt(self: *const Self, row: i64, l: i64) *const TA {
+            return &self.A[@intCast(self.lda * row + l)];
+        }
+
+        inline fn bAt(self: *const Self, col: i64, l: i64) *const qblocks.Q8_0 {
+            return &self.B[@intCast(self.ldb * col + l)];
+        }
+
+        /// Ports `matmul` (sgemm.cpp:1371 @c1d0e7a00).
+        fn matmul(self: *const Self, m: i64, n: i64) void {
+            self.mnpack(0, m, 0, n);
+        }
+
+        /// Ports `mnpack` (sgemm.cpp:1376 @c1d0e7a00), the
+        /// `VECTOR_REGISTERS == 16` cases with their `__AVX2__ && __F16C__`
+        /// tile kernels: 4x2 for `0x44`, `0x43` and `0x42`, 2x4 for `0x34`
+        /// and `0x24`, and `0x33` falling through to 3x2.
+        fn mnpack(self: *const Self, m0: i64, m: i64, n0: i64, n: i64) void {
+            const mc: i64, const nc: i64 = blk: {
+                const sel = (@min(m - m0, 4) << 4) | @min(n - n0, 4);
+                switch (sel) {
+                    0x44, 0x43, 0x42 => {
+                        self.gemm4xN(2, m0, m, n0, n);
+                        break :blk .{ 4, 2 };
+                    },
+                    0x34, 0x24 => {
+                        self.gemmMx4(2, m0, m, n0, n);
+                        break :blk .{ 2, 4 };
+                    },
+                    0x33, 0x32 => {
+                        self.gemm(3, 2, m0, m, n0, n);
+                        break :blk .{ 3, 2 };
+                    },
+                    0x23 => {
+                        self.gemm(2, 3, m0, m, n0, n);
+                        break :blk .{ 2, 3 };
+                    },
+                    0x41 => {
+                        self.gemm4xN(1, m0, m, n0, n);
+                        break :blk .{ 4, 1 };
+                    },
+                    0x22 => {
+                        self.gemm(2, 2, m0, m, n0, n);
+                        break :blk .{ 2, 2 };
+                    },
+                    0x14 => {
+                        self.gemmMx4(1, m0, m, n0, n);
+                        break :blk .{ 1, 4 };
+                    },
+                    0x31 => {
+                        self.gemm(3, 1, m0, m, n0, n);
+                        break :blk .{ 3, 1 };
+                    },
+                    0x13 => {
+                        self.gemm(1, 3, m0, m, n0, n);
+                        break :blk .{ 1, 3 };
+                    },
+                    0x21 => {
+                        self.gemm(2, 1, m0, m, n0, n);
+                        break :blk .{ 2, 1 };
+                    },
+                    0x12 => {
+                        self.gemm(1, 2, m0, m, n0, n);
+                        break :blk .{ 1, 2 };
+                    },
+                    0x11 => {
+                        self.gemm(1, 1, m0, m, n0, n);
+                        break :blk .{ 1, 1 };
+                    },
+                    else => return,
+                }
+            };
+            const mp = m0 + @divTrunc(m - m0, mc) * mc;
+            const np = n0 + @divTrunc(n - n0, nc) * nc;
+            self.mnpack(mp, m, n0, np);
+            self.mnpack(m0, m, np, n);
+        }
+
+        /// The static split every tile kernel opens with.
+        inline fn duty(self: *const Self, tiles: i64) struct { i64, i64 } {
+            const d = @divTrunc(tiles + self.nth - 1, self.nth);
+            const start = d * self.ith;
+            var end = start + d;
+            if (end > tiles) end = tiles;
+            return .{ start, end };
+        }
+
+        /// Four halves to floats with F16C, as `_mm_cvtph_ps` over the
+        /// packed `uint64_t` the C builds.
+        inline fn cvtph4(h0: u16, h1: u16, h2: u16, h3: u16) @Vector(4, f32) {
+            const h: @Vector(4, f16) = @bitCast(@Vector(4, u16){ h0, h1, h2, h3 });
+            return @floatCast(h);
+        }
+
+        /// Ports `gemm4xN` (sgemm.cpp:1524 @c1d0e7a00): four rows of `A`,
+        /// their deltas converted together, against `RN` columns.
+        fn gemm4xN(self: *const Self, comptime RN: i64, m0: i64, m: i64, n0: i64, n: i64) void {
+            const ytiles = @divTrunc(m - m0, 4);
+            const xtiles = @divTrunc(n - n0, RN);
+            const start, const end = self.duty(xtiles * ytiles);
+            var job = start;
+            while (job < end) : (job += 1) {
+                const ii = m0 + @divTrunc(job, xtiles) * 4;
+                const jj = n0 + @rem(job, xtiles) * RN;
+                var Cv: [RN][4]avx.m256 = @splat(@splat(avx.mm256_setzero_ps()));
+                var l: i64 = 0;
+                while (l < self.k) : (l += 1) {
+                    // Convert delta values for four blocks to float values
+                    const da = cvtph4(self.aAt(ii + 0, l).d, self.aAt(ii + 1, l).d, self.aAt(ii + 2, l).d, self.aAt(ii + 3, l).d);
+                    var avec: [4]avx.m256i = undefined;
+                    inline for (0..4) |i| avec[i] = load(TA, self.aAt(ii + i, l));
+                    inline for (0..RN) |j| {
+                        const b = self.bAt(jj + j, l);
+                        const db: @Vector(4, f32) = @splat(unhalf(b.d));
+                        // The four delta products, each broadcast across
+                        // the vector by `_mm256_shuffle_ps`
+                        const dvec = da * db;
+                        inline for (0..4) |i| {
+                            Cv[j][i] = avx.mm256_fmadd_ps(@splat(dvec[i]), dot(avec[i], load(qblocks.Q8_0, b)), Cv[j][i]);
+                        }
+                    }
+                }
+                inline for (0..RN) |j| {
+                    inline for (0..4) |i| {
+                        self.C[@intCast(self.ldc * (jj + j) + (ii + i))] = hsumAvx(Cv[j][i]);
+                    }
+                }
+            }
+        }
+
+        /// Ports `gemmMx4` (sgemm.cpp:1578 @c1d0e7a00): `RM` rows against
+        /// four columns of `B`, the columns' deltas converted together.
+        fn gemmMx4(self: *const Self, comptime RM: i64, m0: i64, m: i64, n0: i64, n: i64) void {
+            const ytiles = @divTrunc(m - m0, RM);
+            const xtiles = @divTrunc(n - n0, 4);
+            const start, const end = self.duty(xtiles * ytiles);
+            var job = start;
+            while (job < end) : (job += 1) {
+                const ii = m0 + @divTrunc(job, xtiles) * RM;
+                const jj = n0 + @rem(job, xtiles) * 4;
+                var Cv: [4][RM]avx.m256 = @splat(@splat(avx.mm256_setzero_ps()));
+                var l: i64 = 0;
+                while (l < self.k) : (l += 1) {
+                    // Convert delta values for four blocks to float values
+                    const db = cvtph4(self.bAt(jj + 0, l).d, self.bAt(jj + 1, l).d, self.bAt(jj + 2, l).d, self.bAt(jj + 3, l).d);
+                    var bvec: [4]avx.m256i = undefined;
+                    inline for (0..4) |j| bvec[j] = load(qblocks.Q8_0, self.bAt(jj + j, l));
+                    inline for (0..RM) |i| {
+                        const a = self.aAt(ii + i, l);
+                        const da: @Vector(4, f32) = @splat(unhalf(a.d));
+                        const dvec = da * db;
+                        inline for (0..4) |j| {
+                            Cv[j][i] = avx.mm256_fmadd_ps(@splat(dvec[j]), dot(load(TA, a), bvec[j]), Cv[j][i]);
+                        }
+                    }
+                }
+                inline for (0..4) |j| {
+                    inline for (0..RM) |i| {
+                        self.C[@intCast(self.ldc * (jj + j) + (ii + i))] = hsumAvx(Cv[j][i]);
+                    }
+                }
+            }
+        }
+
+        /// Ports `gemm` (sgemm.cpp:1635 @c1d0e7a00), its `__AVX2__` arm.
+        fn gemm(self: *const Self, comptime RM: i64, comptime RN: i64, m0: i64, m: i64, n0: i64, n: i64) void {
+            const ytiles = @divTrunc(m - m0, RM);
+            const xtiles = @divTrunc(n - n0, RN);
+            const start, const end = self.duty(xtiles * ytiles);
+            var job = start;
+            while (job < end) : (job += 1) {
+                const ii = m0 + @divTrunc(job, xtiles) * RM;
+                const jj = n0 + @rem(job, xtiles) * RN;
+                var Cv: [RN][RM]avx.m256 = @splat(@splat(avx.mm256_setzero_ps()));
+                var l: i64 = 0;
+                while (l < self.k) : (l += 1) {
+                    inline for (0..RN) |j| {
+                        inline for (0..RM) |i| {
+                            const a = self.aAt(ii + i, l);
+                            const b = self.bAt(jj + j, l);
+                            const udTmp = dot(load(TA, a), load(qblocks.Q8_0, b));
+                            Cv[j][i] = avx.mm256_fmadd_ps(@splat(unhalf(a.d) * unhalf(b.d)), udTmp, Cv[j][i]);
+                        }
+                    }
+                }
+                inline for (0..RN) |j| {
+                    inline for (0..RM) |i| {
+                        self.C[@intCast(self.ldc * (jj + j) + (ii + i))] = hsumAvx(Cv[j][i]);
+                    }
+                }
+            }
+        }
+    };
+}
+
 /// Ports `llamafile_sgemm` (sgemm.cpp:3805 @c1d0e7a00).
 ///
 /// Returns **false** when there is no kernel for this shape or type pair,
@@ -613,10 +884,28 @@ pub export fn llamafile_sgemm(
     }
 }
 
+/// One `tinyBLAS_Q0_AVX` row of the switch: `B` must be `q8_0`.
+fn q0(comptime TA: type, params: *const ComputeParams, m: i64, n: i64, k: i64, A: ?*const anyopaque, lda: i64, B: ?*const anyopaque, ldb: i64, C: ?*anyopaque, ldc: i64, Btype: c_int) bool {
+    if (Btype != c.GGML_TYPE_Q8_0) return false;
+    const tb = TinyBlasQ0Avx(TA){
+        .A = @ptrCast(@alignCast(A.?)),
+        .B = @ptrCast(@alignCast(B.?)),
+        .C = @ptrCast(@alignCast(C.?)),
+        .k = k,
+        .lda = lda,
+        .ldb = ldb,
+        .ldc = ldc,
+        .ith = params.ith,
+        .nth = params.nth,
+    };
+    tb.matmul(m, n);
+    return true;
+}
+
 /// `llamafile_sgemm`'s switch at x86-64-v3: the `__AVX__ || __AVX2__` f32
 /// arm, the `__AVX2__` bf16 arm and the F16C f16 arm -- the `#elif`s at
 /// lines 3838, 3910 and 3966 of `sgemm.cpp` -- then the four
-/// `tinyBLAS_Q0_AVX` rows, which are pending.
+/// `tinyBLAS_Q0_AVX` rows.
 fn sgemmAvx(
     params: *const ComputeParams,
     m: i64,
@@ -659,12 +948,12 @@ fn sgemmAvx(
             if (Btype != c.GGML_TYPE_F16) return false;
             return float(c.ggml_fp16_t, c.ggml_fp16_t, params, m, n, k, A, lda, B, ldb, C, ldc);
         },
-        c.GGML_TYPE_Q8_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q5_0, c.GGML_TYPE_IQ4_NL => {
-            if (comptime !config.x86_incomplete) {
-                @compileError("llamafile_sgemm: tinyBLAS_Q0_AVX is not ported yet (PLAN.md, Stage 5 step 6); -Dx86-incomplete returns false in its place, for development");
-            }
-            return false;
-        },
+        // sgemm.cpp:4041, 4078, 4115, 4131 @c1d0e7a00: each `__AVX2__` arm
+        // takes `tinyBLAS_Q0_AVX` against `q8_0`, with no minimum `n`.
+        c.GGML_TYPE_Q8_0 => return q0(qblocks.Q8_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
+        c.GGML_TYPE_Q4_0 => return q0(qblocks.Q4_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
+        c.GGML_TYPE_Q5_0 => return q0(qblocks.Q5_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
+        c.GGML_TYPE_IQ4_NL => return q0(qblocks.IQ4_NL, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
         else => return false,
     }
 }

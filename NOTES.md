@@ -5661,3 +5661,114 @@ through ConPTY, which re-renders the screen and draws blank lines as cursor
 positioning. Text read back that way loses them, which at first looked like
 the CLI dropping `\n\n`. A driver that writes its output to a file avoids
 it.
+
+## Stage 5 step 6: the AVX2 kernels
+
+**Every `arch/x86` kernel is ported, and the CPU path is bit-exact on the
+Windows laptop.** That is `arch/x86/quants.c`'s 27 exports, `arch/x86/repack.cpp`'s
+12 and `sgemm.cpp`'s `tinyBLAS_Q0_AVX`, over `quants/x86/avx2.zig`, an
+intrinsic layer named after Intel's intrinsics. Where an instruction's lanes
+are ordinary, it is `@Vector` arithmetic. Where they are not, it calls LLVM's
+x86 intrinsic by name, under the SysV convention as `cpu/convert.zig`
+explains: `pmaddubsw` saturates, `pshufb` stays inside 128-bit halves,
+`psign` zeroes, `phadd` pairs neighbours, and the packs saturate.
+`-Dx86-incomplete` and its stand-ins are gone, and so is
+`scripts/x86-qemu-ops-diff`: the gates run on the laptop.
+
+**The order came from `node-diff`.** At `-Dx86-incomplete` the first
+divergent node of the Qwen3.5 decode was a `q5_K` `MUL_MAT`, so `q5_K` went
+first, then the other K-quants Q4_K_M reaches, then the rest.
+
+### The gates, all on the laptop
+
+- **`x86-quants-diff`**: 28 kernels, 2,400 random trials each over eight
+  lengths, on bits. The reference translation units are compiled with every
+  export renamed to `ref_*`, the `repack-diff` technique, and linked into one
+  process with the port. **The apparatus was checked before anything was
+  trusted**: all 27 renamed functions disassemble identically to the
+  `quants.o` in zmake's own Windows `ggml.lib`. The `q8` operand runs three
+  modes: the full byte range with -128, the quantizers' [-127, 127], and
+  all-extreme values where saturation would show.
+- **`x86-repack-diff`**: `harness/repack_diff.zig` unchanged in what it
+  calls, reference `repack.cpp` + `arch/x86/repack.cpp` + `traits.cpp`.
+  68 checks.
+- **`x86-ops-diff`**: `ops_dump` through `harness/win_ops_dump.c`, the
+  reference writing quantized blocks and the port replaying them, at 1 and
+  3 threads. 712 results, about 90 s where QEMU took two minutes a pass. It
+  is `tinyBLAS_Q0_AVX`'s oracle.
+- **`x86-node-diff`**: the Qwen3.5 2B `Q4_K_M` CPU decode, which the
+  machine holds on its Desktop. 2,750 nodes at 1 and 4 threads, plus the
+  fused pass, which compares full logits.
+
+The four together take 2m17s (`make x86-gates`). `scripts/win-run` is the
+shared step: push, run, and clean the ConPTY stream. The comparisons happen
+on the laptop through `harness/win_lines_diff.c`, since `push` brings no
+files back. The six `parity-port` prompts are 6 / 6 at 64 tokens, where the
+stand-ins gave 4 / 6.
+
+### What they caught
+
+- **A hole in `repack_diff.zig`**: it never called `ggml_cpu_init`. On ARM
+  `GGML_CPU_FP16_TO_FP32` is a cast; on x86 it is a table, and the table
+  was all zeros. Every scale through it was zero on both sides, and the
+  comparison passed by computing nothing: the generic stood in for the
+  AVX2 `gemv_q4_0_8x8_q8_0` and "passed". Found when the ported gemm
+  returned all zeros, as the stand-in had.
+- **A second hole in the same harness**: its `quantize_mat` inputs never
+  reached a rounding tie. The AVX2 quantizers round ties to even and the
+  generic rounds them away, so the generic `quantize_mat_q8_0_4x8` passed.
+  It now runs a tie pattern and an all-zero block as well: 68 checks, up
+  from 60. Both holes are closed for ARM too, and `make repack-diff` passes
+  there.
+- **The wrong `#if` arm**: `GGML_F32Cx8_LOAD` has an F16C arm,
+  `_mm256_cvtph_ps`, and a table-driven `#else`. The `#else` was ported
+  first. x86-64-v3 has F16C, and it has BMI2 too, which is why `iq1_s` and
+  `iq1_m` take their `_pdep_u64` arms.
+- **A live generic body**: `arch-fallback.h:86` makes `quants.c`'s
+  generic `q2_0` the real x86 kernel. clang ships it with both scalar
+  statements fused, but the shared port is unfused to match goldens
+  captured with contraction off, where the generic is dead. `x86-ops-diff`
+  found it as the one op of 356 still differing. `quants/x86/legacy.zig`
+  now exports a fused copy.
+
+**Faithful oddities kept**: `q3_K`'s AVX2 arm never advances `is`; the
+gemvs store at `y * nr`, not `y * bs`; the `q4_K`/`q2_K` gemvs subtract an
+unpermuted minima accumulator from a permuted one; the `q8_K` quantizer
+keeps the sign of the largest element through a lane mask.
+
+**The fusions were read from the reference's disassembly**: `q5_K`'s
+`summs += dmin * x` is `vfnmadd231ss`, `q4_1`/`q5_1`'s `summs += m * s` and
+every odd-block tail are fused, the ternary kernels' `add(mul())` is not,
+and the `iq1` finals are fused.
+
+### Injected faults
+
+| Fault | Gate | Result |
+|---|---|---|
+| `q5_K` `summs` unfused | x86-quants-diff | 141 / 2400 differ |
+| `q5_K` ordered reduction for `hsum_float_8` | x86-quants-diff | 1161 / 2400 |
+| `quantize_mat_q8_0_4x8` rounding ties away | x86-repack-diff | ties pattern, 32 bytes |
+| LUT gemm: wrong row-scale lane | x86-repack-diff | all three formats' gemms |
+| LUT gemv: column scales in the gemm's order | x86-repack-diff | all three formats' gemvs |
+| `q2_K` gemm: scale masks swapped | x86-repack-diff | gemm at 4 and 20 rows |
+| `q4_K` gemv: wrong bsums lane for the mins | x86-repack-diff | 16 / 16 lanes |
+| `q2_0` unfused | x86-quants-diff | 588 / 2400 |
+| `tinyBLAS_Q0_AVX` `gemm4xN` unfused | x86-ops-diff | 9 results per pass |
+
+### Speed, which the gates cannot see
+
+**Bit-exact was not fast.** With every gate green, our `llama-cli.exe`
+generated at 3.3 t/s against the reference's 14.5. A timing harness on the
+laptop, ours and the reference's kernels in one process, named two causes:
+
+- **Loads written as an array `@bitCast` to a vector** compiled to 32
+  `movzbl`/`vpinsrb` per 32-byte load. The K-quants ran 10-15x slower than
+  the C's. Loading through a vector pointer is one `vmovdqu`.
+- **Shifts by a run-time count** -- `q3_K` and `q5_K` shift by `bit++` --
+  went through a branch and a splatted 4-bit count, 2-3x slower. LLVM's
+  `psrli`/`pslli` take the count as a scalar and apply Intel's rule (past
+  the width is zero) in the one instruction.
+
+After both: generation 14.3 against 14.5 t/s, prompt about 0.9x. Every
+kernel Q4_K_M uses is at the C's speed. `tq1_0` (1.6x), `iq1_m` (1.4x)
+and the generic `q2_0` (1.6x) are still slower, and exact.

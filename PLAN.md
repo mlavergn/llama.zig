@@ -1004,8 +1004,8 @@ at the CPU configuration Linux arm64 actually builds for.
 | iOS, iOS simulator | yes — the xcframework's `ios` and `ios-sim` slices (A14+) | `make -C xcfwk check`: structural gates per slice, `smoke-sim` on the simulator | the increased-memory-limit entitlement is the consuming app's, not ours |
 | Linux arm64 + CUDA | yes, natively on the GB10 | the four `cuda-*` gates, `arch-model-diff`, `gemma4-assistant-diff` | the CPU path's numerics — below |
 | Linux arm64, CPU only | **yes**, cross-built from this Mac against glibc 2.39 | `GATE_CPU=generic` here. Measured failing — `ops-diff` 86 / 632, `repack-diff` 26 / 60, `node-diff` from node 27, `parity-port --cpu` 2 / 6 — and **exact since step 2**: 650 / 650, 60 / 60, 2,750 nodes, 6 / 6 | the host arms (step 3), `make validate` on Linux (step 4), the GB10 pickup |
-| Linux x86_64 | **at x86-64-v3 with `-Dx86-incomplete`**; by default a compile error naming the first pending kernel | `ops-diff` under QEMU in the podman VM: 492 / 650, every difference a pending quantized kernel | the 39 kernels and `tinyBLAS_Q0_AVX` (step 6), AVX-512 on hardware |
-| Windows x86_64 | **yes, cross-built from this Mac** (`x86_64-windows-gnu`, x86-64-v3, `-Dx86-incomplete` as on Linux): libraries, `libllama-ref`, and our `llama-cli.exe`; the reference's `llama-cli.exe` through `make -C llama.cpp.zmake windows-x86_64` | nothing yet -- see "Windows x86_64" below | run it there; every bit-exact gate there; the Windows pickup |
+| Linux x86_64 | **yes, at x86-64-v3**, cross-built; the same kernels as Windows | the x86 gates run on Windows; Linux x86 shares every kernel and differs only in its OS arms | its OS arms on Linux x86 hardware; AVX-512 on hardware |
+| Windows x86_64 | **yes, cross-built from this Mac** (`x86_64-windows-gnu`, x86-64-v3): libraries, `libllama-ref`, and our `llama-cli.exe`; the reference's `llama-cli.exe` through `make -C llama.cpp.zmake windows-x86_64` | **exact on the laptop**: `make x86-gates` -- 28 quant kernels, 68 repack checks, 712 `ops-diff` results, 2,750 decode nodes -- and 6 / 6 parity prompts | the rest of the Windows pickup |
 
 ### Linux arm64: a different CPU from the one every gate ran on
 
@@ -1241,9 +1241,11 @@ small, and it is wrong today -- in its numerics and in its host arms.
    `llama.cpp.zmake` builds x86_64"): `make -C llama.cpp.zmake
    linux-x86_64`, AVX2 by default, `X86_CPU=x86_64_v4` for AVX-512, both
    cross-built and checked for their instructions.
-6. **x86_64** (Decisions 51–53) -- **under way at AVX2; gated under QEMU
-   until the laptop** (`NOTES.md`, "Stage 5 step 6: x86 begins").
-   - **Done, and exact against the x86-64-v3 reference under QEMU**: every
+6. **x86_64** (Decisions 51–53) -- **done at AVX2, and exact on the
+   Windows laptop's Haswell** (`NOTES.md`, "Stage 5 step 6: x86 begins" and
+   "Stage 5 step 6: the AVX2 kernels"). AVX-512 (v4) is next, and needs
+   hardware the laptop is not.
+   - **Done first, exact against the x86-64-v3 reference under QEMU**: every
      shared function with an x86 arm, found by preprocessing each CPU
      translation unit for both targets and diffing them function by
      function -- `simd.zig`'s AVX arm, the strict-loop shape (never
@@ -1252,21 +1254,26 @@ small, and it is wrong today -- in its numerics and in its host arms.
      `dot_bf16`, `vec.h`'s `mad_f16`/`scale_f16`, and `sgemm`'s
      `tinyBLAS<8, __m256>` for f32, f16 and bf16. `ops-diff` there: **492
      of 650 identical, and every one of the 158 that differ is a quantized
-     path a stand-in feeds.** `make x86-qemu-ops-diff X86_INCOMPLETE=1`
-     reproduces it.
-   - **Pending, 39 kernels and one class**: `arch/x86/quants.c`'s 27
-     exports (`quants/x86/module.zig`), `arch/x86/repack.cpp`'s 12
-     (`repack/x86/module.zig`) and `tinyBLAS_Q0_AVX` in `sgemm.zig`. Each
-     is a compile error by default; `-Dx86-incomplete` stands its generic
-     port in (or `return false`), so the gates run while the port is
-     partial and their failures are the list of what is left. Next: an
-     `avx2.zig` intrinsic layer, as `neon.zig` is for ARM, then the
-     kernels in Qwen3.5's order -- `q8_0` quantization, `q4_K`, `q6_K`,
-     `q8_0` -- then the rest, then `tinyBLAS_Q0_AVX` and the repack shapes.
-   - **Then**: x86 goldens captured under QEMU (the ARM sets do not apply),
-     `repack-diff`, `node-diff` and `parity-port` -- the latter two need
-     the laptop or more than the container's 2 GB -- and AVX-512 (v4),
-     which QEMU does not emulate, on hardware.
+     path a stand-in feeds.**
+   - **Then the 39 kernels and one class**: `arch/x86/quants.c`'s 27
+     exports, `arch/x86/repack.cpp`'s 12 and `tinyBLAS_Q0_AVX`, over
+     `quants/x86/avx2.zig`, the intrinsic layer as `neon.zig` is for ARM --
+     plus `q2_0`, whose generic body `arch-fallback.h` makes the live x86
+     kernel and which clang ships fused. `-Dx86-incomplete` and its stand-ins
+     are gone; an x86 build is the real thing.
+   - **Gated on the laptop**, four scripts behind `make x86-gates`, 2m17s:
+     `x86-quants-diff` (28 kernels, 2,400 trials each), `x86-repack-diff`
+     (68 checks), `x86-ops-diff` (712 results at 1 and 3 threads) and
+     `x86-node-diff` (2,750 nodes of the Qwen3.5 2B `Q4_K_M` decode at 1
+     and 4 threads, and the fused pass), all identical; the six
+     `parity-port` prompts, 6 / 6 at 64 tokens. Our `llama-cli.exe`
+     generates at 14.3 t/s against the reference's 14.5 on the same
+     machine. Each of nine injected faults failed its gate.
+   - **Left at AVX2**: three rarely used kernels are slower than the C's,
+     though exact -- `tq1_0` 1.6x, `iq1_m` 1.4x and the generic `q2_0`
+     1.6x -- and prompt processing runs at ~0.9x. The Windows builds of
+     `regex-diff`, `unicode-diff`, `libcxx-diff` and `host-arms-diff` are
+     still on the Windows pickup.
 
 ### Windows x86_64
 
@@ -1324,20 +1331,14 @@ and `unicode-diff` built for Windows answer it.
 Run on the Windows laptop (Decision 57), through `inferiseupdater push` and
 `tty`:
 
-- **Run, at `-Dx86-incomplete`.** Our `llama-cli.exe` loads Qwen3.5 2B
-  `Q4_K_M` and generates. `harness/raw_completion.c` linked against each
-  side gives the same 24 tokens on "The capital of France is". The six
-  `parity-port` prompts at 48 tokens: 4 / 6 identical, 2 diverge partway.
-  `harness/node_dump.c` (CPU, 1 and 4 threads): 2,750 nodes on both sides,
-  the first 13 identical. The first divergent node is node 13, a `q5_K`
-  `MUL_MAT`, and `ggml_vec_dot_q5_K_q8_K` is a pending stand-in. Repeat all
-  three when step 6 lands: they become exact gates once nothing is stood
-  in. The drivers ran through `push --run` with stdout to a file. ConPTY
-  re-renders the console, drawing blank lines as cursor moves, so text read
-  back through `tty` is not byte-faithful.
-- `ops-diff` and `repack-diff` natively, against the zmake reference built
-  for `x86_64-windows-gnu`: what `make x86-qemu-ops-diff` runs under QEMU,
-  on Intel silicon and the Windows CRT's libm.
+- **Done.** `make x86-gates` -- `x86-quants-diff`, `x86-repack-diff`,
+  `x86-ops-diff`, `x86-node-diff` -- all identical, and the six
+  `parity-port` prompts 6 / 6 (`NOTES.md`, "Stage 5 step 6: the AVX2
+  kernels"). Each script cross-builds here and runs through
+  `scripts/win-run`, which pushes the program, runs it, and cleans what
+  ConPTY sends back; the gates compare on the laptop and only the verdict
+  returns. Before the kernels, at `-Dx86-incomplete`: 4 / 6 prompts, and
+  `node-diff` diverging at node 13, a `q5_K` stand-in.
 - `regex-diff`, `unicode-diff`, `libcxx-diff` and `host-arms-diff` built
   for Windows: the `wchar_t` classification question above, the Windows
   priority and affinity arms, and the seed.
@@ -1714,8 +1715,8 @@ Zig's libc++ into each slice, which nothing needs since the swap.
 for where each target stands and the order of work. Step 1 found that
 the port was not bit-exact on Linux arm64's baseline CPU; step 2 made it so;
 steps 3 and 4 are written and wait on the GB10 pickup; step 5 put the SIMD
-layer in. Step 6, x86_64, is under way, gated under QEMU until the laptop
-arrives: everything but the quantized kernels is exact at AVX2.
+layer in. Step 6, x86_64, is done at AVX2 and exact on the Windows laptop;
+AVX-512 needs other hardware.
 
 **Beside it, Stage 7, Vulkan** (Decisions 54–56; "Stage 7 — Vulkan"): measured
 and the reference build written; next is the GB10's Vulkan pickup -- the

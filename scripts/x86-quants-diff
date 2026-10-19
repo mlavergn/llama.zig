@@ -1,0 +1,77 @@
+#!/bin/bash
+# Diff every x86 quant kernel against the reference, on bits, on the
+# Windows laptop (PLAN.md, Stage 5 step 6; Decision 57): the 27 exports of
+# `arch/x86/quants.c` and the generic `q2_0` x86 takes from `quants.c`.
+#
+# The per-kernel oracle for the x86 dot products and row quantizers:
+# `harness/x86_quants_diff.c` calls the port and the reference back to back
+# on random blocks at eight lengths. The reference is `arch/x86/quants.c`
+# compiled here with every unmangled export renamed to `ref_*` -- the `-D`
+# rename `scripts/repack-diff` uses -- with llama.cpp.zmake's Windows
+# defines, so both link into one process against the port's `ggml.lib`.
+# `ops-diff` reaches each kernel through one `mul_mat` per type; this names
+# the kernel.
+#
+# The harness is cross-built here and run on the laptop's Haswell through
+# `inferiseupdater push --run`, so the agent's window must be open there.
+#
+# Usage: scripts/x86-quants-diff [trials [kernel substring]]
+#   X86_CPU=x86_64_v3        the level; the laptop has no AVX-512
+#   X86_AGENT, INFERISEUPDATER   as scripts/win-run takes them
+#   X86_BUILD_ONLY=1         stop after building the .exe
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+X86_CPU="${X86_CPU:-x86_64_v3}"
+TARGET=x86_64-windows-gnu
+
+. "$ROOT/scripts/check-reference-pin"
+
+out="$ROOT/zig-out/x86-quants/$X86_CPU"
+mkdir -p "$out"
+
+port_flags=(--release=fast -Dtarget="$TARGET" -Dcpu="$X86_CPU")
+zig build reference "${port_flags[@]}" -p "$out/port" \
+    || { echo "FAIL: could not build the x86 port" >&2; exit 1; }
+
+# llama.cpp.zmake's flags for a ggml-cpu C source on Windows: its defines,
+# CMake's gnu11 dialect, and ReleaseFast, which `zig cc` spells -O2.
+CC=(zig cc -target "$TARGET" -mcpu="$X86_CPU" -std=gnu11 -w -O2
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu
+    -DGGML_USE_CPU -DGGML_SCHED_MAX_COPIES=4 -DGGML_USE_LLAMAFILE -DGGML_USE_CPU_REPACK
+    -D_CRT_SECURE_NO_WARNINGS)
+# arch/x86/quants.c, and quants.c for `ggml_vec_dot_q2_0_q8_0`, which on
+# x86 is its generic body under the real name.
+SRCS=(llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c llama.cpp/ggml/src/ggml-cpu/quants.c)
+
+# Every defined external symbol of the two, which is exactly the set the
+# port also defines, less MinGW's `.refptr.*` stubs: the compiler emits one
+# per extern table it reads, and they are not names a `-D` can reach.
+: > "$out/syms"
+for src in "${SRCS[@]}"; do
+    "${CC[@]}" -c "$src" -o "$out/probe.o" \
+        || { echo "FAIL: cannot compile the reference $src" >&2; exit 1; }
+    nm -g --defined-only "$out/probe.o" | awk '{print $3}' | grep -v '^\.' >> "$out/syms"
+done
+sort -u "$out/syms" -o "$out/syms"
+DEFS=()
+while read -r s; do DEFS+=("-D${s}=ref_${s}"); done < "$out/syms"
+REF_OBJS=()
+for src in "${SRCS[@]}"; do
+    o="$out/ref_$(basename "$(dirname "$src")")_$(basename "$src" .c).o"
+    "${CC[@]}" "${DEFS[@]}" -c "$src" -o "$o" \
+        || { echo "FAIL: cannot compile the renamed reference $src" >&2; exit 1; }
+    REF_OBJS+=("$o")
+done
+
+exe="$out/x86_quants_diff.exe"
+"${CC[@]}" harness/x86_quants_diff.c "${REF_OBJS[@]}" "$out/port/lib/ggml.lib" -o "$exe" -lc++ \
+    || { echo "FAIL: could not link the harness" >&2; exit 1; }
+[ -n "${X86_BUILD_ONLY:-}" ] && { echo "built $exe"; exit 0; }
+
+"$ROOT/scripts/win-run" "$exe" llamazig-x86-quants-diff "$@" | tee "$out/result.txt"
+grep -aq '^PASS: ' "$out/result.txt" && exit 0
+grep -aq '^FAIL: ' "$out/result.txt" && exit 1
+echo "FAIL: no verdict -- see $exe.log" >&2
+exit 2

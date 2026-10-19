@@ -1,0 +1,86 @@
+#!/bin/bash
+# `repack-diff` for x86: every interleaved repack kernel and converter
+# against the reference C++, on bits, on the Windows laptop (PLAN.md, Stage
+# 5 step 6; Decision 57).
+#
+# `harness/repack_diff.zig` unchanged: it calls all 36 gemv/gemm and
+# quantize_mat names and drives both `CPU_REPACK` buffer types. On x86,
+# `arch/x86/repack.cpp` supplies twelve of those names and x86's
+# `arch-fallback.h` maps the rest to their generic bodies, so the reference
+# here is `repack.cpp`, `arch/x86/repack.cpp` and `traits.cpp`, compiled with
+# every unmangled export renamed to `ref_*` as `scripts/repack-diff` does.
+#
+# The harness is cross-built for `x86_64-windows-gnu` and run on the laptop
+# through `inferiseupdater push --run`; the agent's window must be open.
+#
+# Usage: scripts/x86-repack-diff
+#   X86_CPU=x86_64_v3        the level; the laptop has no AVX-512
+#   X86_AGENT, INFERISEUPDATER   as scripts/win-run takes them
+#   X86_BUILD_ONLY=1         stop after building the .exe
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+X86_CPU="${X86_CPU:-x86_64_v3}"
+TARGET=x86_64-windows-gnu
+
+. "$ROOT/scripts/check-reference-pin"
+
+out="$ROOT/zig-out/x86-repack/$X86_CPU"
+mkdir -p "$out"
+
+port_flags=(--release=fast -Dtarget="$TARGET" -Dcpu="$X86_CPU")
+zig build reference "${port_flags[@]}" -p "$out/port" \
+    || { echo "FAIL: could not build the x86 port" >&2; exit 1; }
+LIB="$out/port/lib/ggml.lib"
+
+# llama.cpp.zmake's flags for a ggml-cpu C++ source on Windows.
+CXX=(zig c++ -target "$TARGET" -mcpu="$X86_CPU" -std=gnu++17 -w -O2
+     -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu
+     -DNDEBUG -DGGML_USE_CPU -DGGML_SCHED_MAX_COPIES=4 -DGGML_USE_LLAMAFILE -DGGML_USE_CPU_REPACK
+     -D_CRT_SECURE_NO_WARNINGS)
+
+# traits.cpp comes along because repack.cpp derives from the two abstract
+# bases it declares.
+FILES=(repack.cpp arch/x86/repack.cpp traits.cpp)
+
+# Every unmangled defined external symbol of the three, less MinGW's
+# `.refptr.*` stubs.
+: > "$out/syms"
+for f in "${FILES[@]}"; do
+    "${CXX[@]}" -c "llama.cpp/ggml/src/ggml-cpu/$f" -o "$out/probe.o" \
+        || { echo "FAIL: cannot compile the reference $f" >&2; exit 1; }
+    nm -g --defined-only "$out/probe.o" | awk '{print $3}' | grep -v '^_Z' | grep -v '^\.' | grep -v '__clang_call_terminate' >> "$out/syms"
+done
+sort -u "$out/syms" -o "$out/syms"
+
+DEFS=()
+while read -r s; do DEFS+=("-D${s}=ref_${s}"); done < "$out/syms"
+
+OBJS=()
+for f in "${FILES[@]}"; do
+    o="$out/ref_$(echo "$f" | tr '/' '_').o"
+    "${CXX[@]}" "${DEFS[@]}" -c "llama.cpp/ggml/src/ggml-cpu/$f" -o "$o" \
+        || { echo "FAIL: cannot compile the renamed reference $f" >&2; exit 1; }
+    OBJS+=("$o")
+done
+echo "reference: $(wc -l < "$out/syms" | tr -d ' ') exports renamed to ref_*"
+
+"${CXX[@]}" -c harness/repack_diff_stub.cpp -o "$out/stub.o" \
+    || { echo "FAIL: cannot compile harness/repack_diff_stub.cpp" >&2; exit 1; }
+OBJS+=("$out/stub.o")
+
+zig translate-c -target "$TARGET" -lc -I llama.cpp/ggml/include harness/repack_diff.h > "$out/ggml_h.zig" \
+    || { echo "FAIL: cannot translate the ggml headers" >&2; exit 1; }
+exe="$out/x86_repack_diff.exe"
+zig build-exe -target "$TARGET" -mcpu "$X86_CPU" -femit-bin="$exe" -Ofast -lc \
+    --dep ggml_h -Mroot=harness/repack_diff.zig -Mggml_h="$out/ggml_h.zig" \
+    "${OBJS[@]}" "$LIB" -lc++ \
+    || { echo "FAIL: could not build the harness" >&2; exit 1; }
+[ -n "${X86_BUILD_ONLY:-}" ] && { echo "built $exe"; exit 0; }
+
+"$ROOT/scripts/win-run" "$exe" llamazig-x86-repack-diff | tee "$out/result.txt"
+grep -aq '^PASS: ' "$out/result.txt" && exit 0
+grep -aq '^FAIL: ' "$out/result.txt" && exit 1
+echo "FAIL: no verdict -- see $exe.log" >&2
+exit 2

@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-repro x86-qemu-ops-diff libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port ref ref-chat validate xcframework xcframework-check perf perf-cpu
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-repro x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port ref ref-chat validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -261,12 +261,27 @@ vk-repro:
 	cd llama.cpp.zmake && zig build lib --release=fast -Dvulkan
 	./scripts/vk-repro $(MODEL)
 
-# ops-diff for x86_64 under QEMU in the podman VM, until the x86 laptop is
-# here: both sides cross-built for X86_CPU (x86_64_v3; QEMU has no AVX-512).
-# X86_INCOMPLETE=1 stands generic ports in for the x86 kernels still pending.
-# See the header of scripts/x86-qemu-ops-diff.
-x86-qemu-ops-diff:
-	./scripts/x86-qemu-ops-diff
+# The x86 gates, run on the Windows laptop (Decision 57) through
+# inferiseupdater's link: each cross-builds both sides for
+# x86_64-windows-gnu at X86_CPU (x86_64_v3), pushes the programs and reads
+# back the verdict. The agent's window must be open there. x86-quants-diff
+# and x86-repack-diff are the per-kernel oracles; x86-ops-diff and
+# x86-node-diff are scripts/ops-diff and scripts/node-diff on Intel silicon,
+# the second with a model on the laptop (X86_MODEL). See the header of each
+# script, and scripts/win-run.
+x86-quants-diff:
+	./scripts/x86-quants-diff
+
+x86-repack-diff:
+	./scripts/x86-repack-diff
+
+x86-ops-diff:
+	./scripts/x86-ops-diff
+
+x86-node-diff:
+	./scripts/x86-node-diff
+
+x86-gates: x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff
 
 # The CPU backend's host arms -- thread priority, CPU affinity, NUMA, the
 # sampler's default seed -- read back from the OS on every worker, ported
