@@ -51,6 +51,7 @@ fn needsVarargsShim(opts: Options) bool {
     const t = opts.target.result;
     return switch (t.cpu.arch) {
         .aarch64, .aarch64_be => !(t.os.tag.isDarwin() or t.os.tag == .windows),
+        .x86_64 => t.os.tag == .windows,
         else => false,
     };
 }

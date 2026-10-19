@@ -55,18 +55,50 @@ pub const SamplerI = c.struct_llama_sampler_i;
 /// allocator instance that only Zig code could reach.
 pub const allocator = std.heap.c_allocator;
 
-/// C's `stdout`: `__stdoutp` on Darwin, `stdout` on glibc. The macro expands
-/// to a different variable on each, so it is read by name.
+/// C's `stdout`: `__stdoutp` on Darwin, `stdout` on glibc, `__acrt_iob_func(1)`
+/// in MinGW's UCRT. The macro expands to a different variable or call on each,
+/// so it is read by name.
 ///
 /// Return: the stream.
 pub fn cStdout() *c.FILE {
+    if (comptime is_windows) return @ptrCast(@alignCast(__acrt_iob_func(1)));
     return @extern(*const *c.FILE, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stdoutp" else "stdout" }).*;
 }
+
+const is_windows = @import("builtin").os.tag == .windows;
+
+/// What the `stdout` and `stderr` macros expand to (MinGW's `stdio.h`, line 124).
+extern "c" fn __acrt_iob_func(index: c_uint) *anyopaque;
+
+/// `std::mutex`, as the libc++ this build links lays it out and drives it:
+/// a `pthread_mutex_t` behind `PTHREAD_MUTEX_INITIALIZER` on POSIX, an
+/// `SRWLOCK` behind `AcquireSRWLockExclusive` on Windows. Not a port of
+/// anything; `src/ggml/impl.zig` has the same type for ggml, which this module
+/// cannot import.
+pub const CxxMutex = extern struct {
+    raw: Raw = .{},
+
+    const win32 = @import("win32.zig");
+    const Raw = if (is_windows) win32.SRWLOCK else std.c.pthread_mutex_t;
+
+    /// `std::mutex::lock`.
+    pub fn lock(self: *CxxMutex) void {
+        if (comptime is_windows) return win32.AcquireSRWLockExclusive(&self.raw);
+        _ = std.c.pthread_mutex_lock(&self.raw);
+    }
+
+    /// `std::mutex::unlock`.
+    pub fn unlock(self: *CxxMutex) void {
+        if (comptime is_windows) return win32.ReleaseSRWLockExclusive(&self.raw);
+        _ = std.c.pthread_mutex_unlock(&self.raw);
+    }
+};
 
 /// C's `stderr`; see `cStdout`.
 ///
 /// Return: the stream.
 pub fn cStderr() *c.FILE {
+    if (comptime is_windows) return @ptrCast(@alignCast(__acrt_iob_func(2)));
     return @extern(*const *c.FILE, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
 }
 

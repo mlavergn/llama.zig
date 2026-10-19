@@ -448,6 +448,8 @@ pub fn topKImpl(cur_p: *TokenDataArray, k_in: i32) void {
 ///
 /// - **Apple and the BSDs** are `_LIBCPP_USING_ARC4_RANDOM`: `entropy()` is
 ///   always 32, so the device branch is taken, and it is `arc4random`.
+/// - **Windows** is `_LIBCPP_USING_WIN32_RANDOM`, whose `entropy()` is
+///   always 0, so the seed is always the clock and `rand_s` is never asked.
 /// - **Everywhere else, Linux included**, is `_LIBCPP_USING_DEV_RANDOM`:
 ///   see `RandomDevice`. A kernel or container that refuses the entropy ioctl
 ///   makes `entropy()` 0, and the seed is the clock.
@@ -459,6 +461,7 @@ pub fn topKImpl(cur_p: *TokenDataArray, k_in: i32) void {
 pub fn getRngSeed(seed: u32) u32 {
     if (seed == c.LLAMA_DEFAULT_SEED) {
         if (comptime uses_arc4random) return impl.arc4random();
+        if (comptime uses_win32_random) return @truncate(@as(u64, @bitCast(systemClockCount())));
 
         // use system clock if std::random_device is not a true RNG
         if (randomDeviceIsPrng()) return @truncate(@as(u64, @bitCast(systemClockCount())));
@@ -472,6 +475,9 @@ pub fn getRngSeed(seed: u32) u32 {
 
 /// libc++'s `_LIBCPP_USING_ARC4_RANDOM`: Apple and the BSDs.
 const uses_arc4random = builtin.os.tag.isDarwin() or builtin.os.tag.isBSD();
+
+/// libc++'s `_LIBCPP_USING_WIN32_RANDOM`: Windows.
+const uses_win32_random = builtin.os.tag == .windows;
 
 /// The C++'s `static bool is_rd_prng`, initialised on first use. A C++
 /// function-local static is initialised once, under a guard; this caches the
@@ -495,8 +501,18 @@ fn randomDeviceIsPrng() bool {
 
 /// `std::chrono::system_clock::now().time_since_epoch().count()` in libc++
 /// on Linux: `clock_gettime(CLOCK_REALTIME)` in **microseconds**, libc++'s
-/// `system_clock::duration`.
+/// `system_clock::duration`. On Windows libc++ reads
+/// `GetSystemTimePreciseAsFileTime`, 100 ns ticks since 1601, and truncates
+/// to microseconds since 1970 (`chrono.cpp`'s `__libcpp_system_clock_now`).
 fn systemClockCount() i64 {
+    if (comptime builtin.os.tag == .windows) {
+        const win32 = @import("../win32.zig");
+        var ft: std.os.windows.FILETIME = undefined;
+        win32.GetSystemTimePreciseAsFileTime(&ft);
+        const ticks: i64 = @bitCast((@as(u64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime);
+        const nt_to_unix_epoch: i64 = 11644473600 * 10_000_000;
+        return @divTrunc(ticks - nt_to_unix_epoch, 10);
+    }
     var ts: std.c.timespec = undefined;
     _ = std.c.clock_gettime(.REALTIME, &ts);
     return @as(i64, ts.sec) * 1_000_000 + @divTrunc(@as(i64, ts.nsec), 1000);

@@ -30,6 +30,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
+const win32 = @import("../win32.zig");
 const defs = @import("defs.zig");
 const extra = @import("extra.zig");
 const repack = @import("repack/module.zig");
@@ -58,12 +59,12 @@ var extra_bufts_n: usize = 0;
 /// `backend_reg.zig` uses for `get_reg`. Every call after the first is a
 /// single acquire load.
 var extra_bufts_ready = std.atomic.Value(bool).init(false);
-var extra_bufts_mutex: std.c.pthread_mutex_t = .{};
+var extra_bufts_mutex: impl.CxxMutex = .{};
 
 fn ensureExtraBufts() void {
     if (extra_bufts_ready.load(.acquire)) return;
-    _ = std.c.pthread_mutex_lock(&extra_bufts_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&extra_bufts_mutex);
+    extra_bufts_mutex.lock();
+    defer extra_bufts_mutex.unlock();
     if (extra_bufts_ready.load(.acquire)) return;
 
     const buft = repack.ggml_backend_cpu_repack_buffer_type();
@@ -315,11 +316,12 @@ comptime {
 // The device
 
 /// Ports `struct ggml_backend_cpu_device_context` (ggml-cpu.cpp:289
-/// @c1d0e7a00), the `__APPLE__` arm of its constructor.
+/// @c1d0e7a00), the `__APPLE__`, `__linux__` and `_WIN32` arms of its
+/// constructor.
 ///
 /// The C holds a `std::string` and resizes it around `sysctlbyname`; here it
 /// is a fixed buffer, because the brand string is a short, bounded value and
-/// the C never frees its string either. The Windows arm is not ported.
+/// the C never frees its string either.
 const DeviceContext = struct {
     description: [256]u8 = undefined,
     description_len: usize = 0,
@@ -331,6 +333,7 @@ const DeviceContext = struct {
         self.description_len = fallback.len;
 
         if (comptime builtin.os.tag == .linux) return self.initLinux();
+        if (comptime builtin.os.tag == .windows) return self.initWindows();
         // The C's `#ifdef __APPLE__`: iOS reads the brand string too.
         if (!builtin.os.tag.isDarwin()) return;
         var len: usize = self.description.len;
@@ -339,6 +342,35 @@ const DeviceContext = struct {
             self.description_len = len - 1;
             self.description[self.description_len] = 0;
         }
+    }
+
+    /// The `_WIN32` arm of `ggml_backend_cpu_device_context`
+    /// (ggml-cpu.cpp:292 @c1d0e7a00): the first processor's
+    /// `ProcessorNameString` from the registry, cut at its first NUL.
+    ///
+    /// The C resizes "CPU" to the size the first query reports before the
+    /// second fills it, so a second query that fails leaves "CPU" padded with
+    /// NULs -- or cut short, for a size under 3 -- which reads the same as
+    /// stopping at the first NUL here.
+    fn initWindows(self: *DeviceContext) void {
+        var key: win32.HKEY = undefined;
+        if (win32.RegOpenKeyExA(win32.HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, win32.KEY_READ, &key) != win32.ERROR_SUCCESS) return;
+        defer _ = win32.RegCloseKey(key);
+
+        var cpu_brand_size: win32.DWORD = 0;
+        if (win32.RegQueryValueExA(key, "ProcessorNameString", null, null, null, &cpu_brand_size) != win32.ERROR_SUCCESS) return;
+
+        // `description.resize(cpu_brand_size)`.
+        const n = @min(cpu_brand_size, self.description.len - 1);
+        if (n < self.description_len) self.description_len = n;
+        @memset(self.description[self.description_len .. n + 1], 0);
+        self.description_len = n;
+
+        var size: win32.DWORD = @intCast(n);
+        if (win32.RegQueryValueExA(key, "ProcessorNameString", null, null, &self.description, &size) == win32.ERROR_SUCCESS) {
+            self.description[n] = 0;
+        }
+        self.description_len = std.mem.sliceTo(&self.description, 0).len;
     }
 
     /// The C's `#elif defined(__linux__)` arm: the first `model name` line of
@@ -388,9 +420,18 @@ fn deviceGetDescription(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
 }
 
 /// Ports `ggml_backend_cpu_device_get_memory` (ggml-cpu.cpp:365 @c1d0e7a00),
-/// the non-Windows arm.
+/// both arms. Windows reports the physical memory available as free; every
+/// other platform reports all of it.
 fn deviceGetMemory(dev: c.ggml_backend_dev_t, free: *usize, total: *usize) callconv(.c) void {
     _ = dev;
+    if (comptime builtin.os.tag == .windows) {
+        var status: win32.MEMORYSTATUSEX = undefined;
+        status.dwLength = @sizeOf(win32.MEMORYSTATUSEX);
+        _ = win32.GlobalMemoryStatusEx(&status);
+        total.* = status.ullTotalPhys;
+        free.* = status.ullAvailPhys;
+        return;
+    }
     const pages = sysconf(sc_phys_pages);
     const page_size = sysconf(sc_page_size);
     total.* = @intCast(pages * page_size);
@@ -561,12 +602,12 @@ fn regGetDeviceCount(reg: c.ggml_backend_reg_t) callconv(.c) usize {
 var device_ctx: DeviceContext = .{};
 var cpu_device: c.struct_ggml_backend_device = undefined;
 var device_ready = std.atomic.Value(bool).init(false);
-var device_mutex: std.c.pthread_mutex_t = .{};
+var device_mutex: impl.CxxMutex = .{};
 
 fn ensureDevice(reg: c.ggml_backend_reg_t) void {
     if (device_ready.load(.acquire)) return;
-    _ = std.c.pthread_mutex_lock(&device_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&device_mutex);
+    device_mutex.lock();
+    defer device_mutex.unlock();
     if (device_ready.load(.acquire)) return;
     device_ctx.init();
     cpu_device = .{ .iface = device_i, .reg = reg, .context = &device_ctx };
@@ -593,7 +634,7 @@ fn regGetDevice(reg: c.ggml_backend_reg_t, index: usize) callconv(.c) c.ggml_bac
 var features: [10]c.ggml_backend_feature = undefined;
 var features_n: usize = 0;
 var features_ready = std.atomic.Value(bool).init(false);
-var features_mutex: std.c.pthread_mutex_t = .{};
+var features_mutex: impl.CxxMutex = .{};
 
 fn pushFeature(name: [*c]const u8, value: [*c]const u8) void {
     features[features_n] = .{ .name = name, .value = value };
@@ -602,8 +643,8 @@ fn pushFeature(name: [*c]const u8, value: [*c]const u8) void {
 
 fn ensureFeatures() void {
     if (features_ready.load(.acquire)) return;
-    _ = std.c.pthread_mutex_lock(&features_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&features_mutex);
+    features_mutex.lock();
+    defer features_mutex.unlock();
     if (features_ready.load(.acquire)) return;
     ggml_cpu_init();
     if (c.ggml_cpu_has_neon() != 0) pushFeature("NEON", "1");

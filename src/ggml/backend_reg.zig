@@ -43,6 +43,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const config = @import("config");
 const impl = @import("impl.zig");
+const win32 = @import("win32.zig");
 const c = impl.c;
 
 /// Mirrors `GGML_USE_METAL`, which `build/llamacpp.zig` defines for the
@@ -83,30 +84,77 @@ const Libc = struct {
 // -----------------------------------------------------------------------------
 // Dynamic library loading
 //
-// Ports the non-Windows arm of `ggml-backend-dl.h`, whose `dl_handle`
-// (ggml-backend-dl.h:30 @c1d0e7a00) is a plain `void` there, together with
-// the bodies in `ggml-backend-dl.cpp`. Kept as
-// file-private helpers rather than exported symbols: the C++ exported them
-// with C++ linkage, which nothing outside `ggml-backend-reg.cpp` ever called.
+// Ports both arms of `ggml-backend-dl.h`, whose `dl_handle`, `dl_handle`
+// (ggml-backend-dl.h:20, 30 @c1d0e7a00) is an `HMODULE`'s pointee on Windows
+// and a plain `void` elsewhere, together with the bodies in
+// `ggml-backend-dl.cpp`. Kept as file-private helpers rather than exported
+// symbols: the C++ exported them with C++ linkage, which nothing outside
+// `ggml-backend-reg.cpp` ever called.
+//
+// Paths stay UTF-8 here on every platform. The C++ holds them as `fs::path`,
+// which on Windows is a wide string made by `fs::u8path` and turned back with
+// `path_str`'s `u8string()` for every log line, so the port widens a path only
+// where it reaches a Win32 call.
 
-/// Ports `dl_load_library` (ggml-backend-dl.cpp:34 @c1d0e7a00), the `#else` arm.
+/// `_WIN32`.
+const is_windows = builtin.os.tag == .windows;
+
+/// `fs::u8path(path).wstring()`: a UTF-8 path as the wide string a Win32 call
+/// takes. Null for a path that is not UTF-8. Owned by the caller; free with
+/// `allocator.free`.
+fn widen(path: []const u8) ?[:0]u16 {
+    return std.unicode.utf8ToUtf16LeAllocZ(allocator, path) catch null;
+}
+
+/// Ports `dl_load_library`, `dl_load_library` (ggml-backend-dl.cpp:5, 34
+/// @c1d0e7a00): the Windows arm, which suppresses the missing-DLL dialog
+/// around `LoadLibraryW`, and the `#else` arm.
 fn dlLoadLibrary(path: [*:0]const u8) ?*anyopaque {
+    if (comptime is_windows) {
+        const wpath = widen(std.mem.sliceTo(path, 0)) orelse return null;
+        defer allocator.free(wpath);
+        // suppress error dialogs for missing DLLs
+        const old_mode = win32.SetErrorMode(win32.SEM_FAILCRITICALERRORS);
+        _ = win32.SetErrorMode(old_mode | win32.SEM_FAILCRITICALERRORS);
+        const handle = win32.LoadLibraryW(wpath.ptr);
+        _ = win32.SetErrorMode(old_mode);
+        return @ptrCast(handle);
+    }
     // `RTLD_LOCAL` is zero on Linux, so Zig's flag struct has no field for it.
     const flags: std.c.RTLD = if (builtin.os.tag == .linux) .{ .NOW = true } else .{ .NOW = true, .LOCAL = true };
     return std.c.dlopen(path, flags);
 }
 
-/// Ports `dl_get_sym` (ggml-backend-dl.cpp:39 @c1d0e7a00), the `#else` arm.
+/// Ports `dl_get_sym`, `dl_get_sym` (ggml-backend-dl.cpp:17, 39 @c1d0e7a00).
 fn dlGetSym(handle: *anyopaque, name: [*:0]const u8) ?*anyopaque {
+    if (comptime is_windows) {
+        const old_mode = win32.SetErrorMode(win32.SEM_FAILCRITICALERRORS);
+        _ = win32.SetErrorMode(old_mode | win32.SEM_FAILCRITICALERRORS);
+        const p = win32.GetProcAddress(@ptrCast(handle), name);
+        _ = win32.SetErrorMode(old_mode);
+        return p;
+    }
     return std.c.dlsym(handle, name);
 }
 
-/// Ports `dl_error` (ggml-backend-dl.cpp:43 @c1d0e7a00), the `#else` arm.
+/// Ports `dl_error`, `dl_error` (ggml-backend-dl.cpp:28, 43 @c1d0e7a00).
 ///
-/// Return: the pending dynamic-linker error, or `""` when there is none.
-/// Borrowed from libc and valid only until the next `dlopen`/`dlsym`.
+/// Return: the pending dynamic-linker error, or `""` when there is none --
+/// always `""` on Windows. Borrowed from libc and valid only until the next
+/// `dlopen`/`dlsym`.
 fn dlError() [*:0]const u8 {
+    if (comptime is_windows) return "";
     return std.c.dlerror() orelse "";
+}
+
+/// Ports `dl_handle_deleter`, `dl_handle_deleter` (ggml-backend-dl.h:22, 32
+/// @c1d0e7a00): its call operator, `FreeLibrary` or `dlclose`.
+fn dlClose(handle: *anyopaque) void {
+    if (comptime is_windows) {
+        _ = win32.FreeLibrary(@ptrCast(handle));
+        return;
+    }
+    _ = std.c.dlclose(handle);
 }
 
 // -----------------------------------------------------------------------------
@@ -233,7 +281,7 @@ const Registry = struct {
         // its deleter closes the library. Ours has to say so.
         var adopted = false;
         defer if (!adopted) {
-            _ = std.c.dlclose(handle);
+            dlClose(handle);
         };
 
         if (dlGetSym(handle, "ggml_backend_score")) |sym| {
@@ -326,7 +374,7 @@ const Registry = struct {
 /// call after the first is lock-free.
 var registry: Registry = .{};
 var registry_ready = std.atomic.Value(bool).init(false);
-var registry_mutex: std.c.pthread_mutex_t = .{};
+var registry_mutex: impl.CxxMutex = .{};
 
 /// Ports `get_reg` (src/ggml-backend-reg.cpp:292 @c1d0e7a00).
 ///
@@ -335,9 +383,9 @@ var registry_mutex: std.c.pthread_mutex_t = .{};
 fn getReg() *Registry {
     if (registry_ready.load(.acquire)) return &registry;
 
-    _ = std.c.pthread_mutex_lock(&registry_mutex);
+    registry_mutex.lock();
     defer {
-        _ = std.c.pthread_mutex_unlock(&registry_mutex);
+        registry_mutex.unlock();
     }
 
     if (!registry_ready.load(.acquire)) {
@@ -548,6 +596,7 @@ extern fn _NSGetExecutablePath(buf: [*]u8, bufsize: *u32) c_int;
 /// `std.Io.Dir.max_path_bytes`, which the call cannot exceed.
 fn getExecutablePath(buf: []u8) ?[:0]const u8 {
     if (comptime builtin.os.tag == .linux) return getExecutablePathLinux(buf);
+    if (comptime is_windows) return getExecutablePathWindows(buf);
     var size: u32 = @intCast(buf.len);
     if (_NSGetExecutablePath(buf.ptr, &size) != 0) return null;
 
@@ -591,11 +640,154 @@ fn getExecutablePathLinux(buf: []u8) ?[:0]const u8 {
     return buf[0 .. cut + 1 :0];
 }
 
-/// Ports `backend_filename_prefix` (src/ggml-backend-reg.cpp:464 @c1d0e7a00) and
-/// `backend_filename_extension` (src/ggml-backend-reg.cpp:472 @c1d0e7a00), the
-/// non-Windows arms of both.
-const backend_filename_prefix = "libggml-";
-const backend_filename_extension = ".so";
+/// Ports `get_executable_path` (src/ggml-backend-reg.cpp:401 @c1d0e7a00), the
+/// `_WIN32` arm.
+///
+/// Parameters:
+/// - `buf`: receives the directory as UTF-8, null-terminated, with a trailing
+///   `\`.
+///
+/// Return: the slice of `buf` written, or null if it did not fit. A failed
+/// `GetModuleFileNameW` gives the C++'s empty `fs::path`, which no search
+/// finds. The C++ asks for `MAX_PATH` characters once and takes what it gets.
+fn getExecutablePathWindows(buf: []u8) ?[:0]const u8 {
+    var wpath: [win32.MAX_PATH]u16 = undefined;
+    const len = win32.GetModuleFileNameW(null, &wpath, wpath.len);
+    if (len == 0) {
+        buf[0] = 0;
+        return buf[0..0 :0];
+    }
+    // "remove executable name"; with no backslash the whole path stays.
+    const full = wpath[0..len];
+    const cut = std.mem.findScalarLast(u16, full, '\\') orelse full.len;
+    const n = std.unicode.utf16LeToUtf8(buf, full[0..cut]) catch return null;
+    if (n + 2 > buf.len) return null;
+    buf[n] = '\\';
+    buf[n + 1] = 0;
+    return buf[0 .. n + 1 :0];
+}
+
+/// `fs::current_path()`, as UTF-8: `getcwd` on POSIX, the wide working
+/// directory narrowed on Windows. Null on failure, which the C++ would throw.
+fn currentPath(buf: []u8) ?[]const u8 {
+    if (comptime is_windows) {
+        var wbuf: [std.Io.Dir.max_path_bytes]u16 = undefined;
+        const len = win32.GetCurrentDirectoryW(wbuf.len, &wbuf);
+        if (len == 0 or len >= wbuf.len) return null;
+        const n = std.unicode.utf16LeToUtf8(buf, wbuf[0..len]) catch return null;
+        return buf[0..n];
+    }
+    const p = std.c.getcwd(buf.ptr, buf.len) orelse return null;
+    return std.mem.sliceTo(p, 0);
+}
+
+/// `fs::path::operator/` for the two joins `ggml_backend_load_best` makes:
+/// `entry.path()`, which a directory iterator builds as `search_path /
+/// name`, and `search_path / filename`. On Windows libc++ inserts the
+/// preferred `\` only when the left side is non-empty and does not already
+/// end in a separator. The POSIX arm keeps the plain `/` this port has always
+/// joined with; `dlopen` and the log treat the two spellings alike.
+fn joinPath(buf: []u8, dir: []const u8, name: []const u8) ?[:0]const u8 {
+    if (comptime is_windows) {
+        const sep: []const u8 = if (dir.len == 0 or dir[dir.len - 1] == '\\' or dir[dir.len - 1] == '/') "" else "\\";
+        return std.mem.printSentinel(buf, "{s}{s}{s}", .{ dir, sep, name }, 0) catch null;
+    }
+    return std.mem.printSentinel(buf, "{s}/{s}", .{ dir, name }, 0) catch null;
+}
+
+/// `fs::exists`. Errors read as "does not exist", which is how the C++'s
+/// `ec` branch ends too: a debug line and the next path.
+fn pathExists(path: [:0]const u8) bool {
+    if (comptime is_windows) {
+        const wpath = widen(path) orelse return false;
+        defer allocator.free(wpath);
+        return win32.GetFileAttributesW(wpath.ptr) != win32.INVALID_FILE_ATTRIBUTES;
+    }
+    return Libc.access(path.ptr, Libc.F_OK) == 0;
+}
+
+/// `fs::directory_iterator` over one search path, filtered to the entries
+/// `is_regular_file` accepts, yielding each one's file name as UTF-8.
+///
+/// POSIX reads `readdir`'s `d_type`. Windows reads `FindFirstFileW`'s
+/// attributes as libc++'s `get_file_type` does, in its `file_descriptor.h`: a
+/// symlink reparse point is a symlink, which `is_regular_file` follows, a
+/// directory is a directory, and anything else is a regular file.
+const DirScan = struct {
+    os: if (is_windows) struct {
+        find: win32.HANDLE,
+        data: win32.WIN32_FIND_DATAW,
+        first: bool,
+        dir: [:0]const u8,
+    } else *std.c.DIR,
+    name_buf: [std.Io.Dir.max_path_bytes]u8 = undefined,
+
+    /// Opens `dir`, or returns null when it cannot be listed -- the C++'s
+    /// `fs::exists` failing, which this scan stands in for.
+    fn open(dir: [:0]const u8) ?DirScan {
+        if (comptime is_windows) {
+            if (!pathExists(dir)) return null;
+            var pattern_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            const pattern = joinPath(&pattern_buf, dir, "*") orelse return null;
+            const wpattern = widen(pattern) orelse return null;
+            defer allocator.free(wpattern);
+            var data: win32.WIN32_FIND_DATAW = undefined;
+            const find = win32.FindFirstFileW(wpattern.ptr, &data);
+            if (find == std.os.windows.INVALID_HANDLE_VALUE) return null;
+            return .{ .os = .{ .find = find, .data = data, .first = true, .dir = dir } };
+        }
+        return .{ .os = std.c.opendir(dir.ptr) orelse return null };
+    }
+
+    fn close(self: *DirScan) void {
+        if (comptime is_windows) {
+            _ = win32.FindClose(self.os.find);
+            return;
+        }
+        _ = std.c.closedir(self.os);
+    }
+
+    /// The next regular file's name, borrowed from `self` until the next call.
+    fn next(self: *DirScan) ?[]const u8 {
+        if (comptime is_windows) {
+            while (true) {
+                if (!self.os.first and win32.FindNextFileW(self.os.find, &self.os.data) == 0) return null;
+                self.os.first = false;
+                const wname = std.mem.sliceTo(&self.os.data.cFileName, 0);
+                const n = std.unicode.utf16LeToUtf8(&self.name_buf, wname) catch continue;
+                const name = self.name_buf[0..n];
+                const attrs = self.os.data.dwFileAttributes;
+                if (attrs & win32.FILE_ATTRIBUTE_REPARSE_POINT != 0 and self.os.data.dwReserved0 == win32.IO_REPARSE_TAG_SYMLINK) {
+                    // `is_regular_file` follows the link.
+                    var full_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+                    const full = joinPath(&full_buf, self.os.dir, name) orelse continue;
+                    const wfull = widen(full) orelse continue;
+                    defer allocator.free(wfull);
+                    const target = win32.GetFileAttributesW(wfull.ptr);
+                    if (target == win32.INVALID_FILE_ATTRIBUTES or target & win32.FILE_ATTRIBUTE_DIRECTORY != 0) continue;
+                    return name;
+                }
+                if (attrs & win32.FILE_ATTRIBUTE_DIRECTORY != 0) continue;
+                return name;
+            }
+        }
+        while (std.c.readdir(self.os)) |ent| {
+            // DT_REG. `is_regular_file` in the C++; a `DT_UNKNOWN` filesystem
+            // would need a stat, which APFS never reports.
+            if (ent.type != 8) continue;
+            // `d_namlen` is BSD; `d_name` is NUL-terminated everywhere.
+            return std.mem.sliceTo(&ent.name, 0);
+        }
+        return null;
+    }
+};
+
+/// Ports `backend_filename_prefix`, `backend_filename_prefix`
+/// (src/ggml-backend-reg.cpp:464 @c1d0e7a00) and `backend_filename_extension`,
+/// `backend_filename_extension` (src/ggml-backend-reg.cpp:472 @c1d0e7a00):
+/// both arms of each.
+const backend_filename_prefix = if (is_windows) "ggml-" else "libggml-";
+const backend_filename_extension = if (is_windows) ".dll" else ".so";
 
 /// Ports `ggml_backend_load_best` (src/ggml-backend-reg.cpp:480 @c1d0e7a00).
 ///
@@ -633,8 +825,8 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
             search_paths[n_paths] = p;
             n_paths += 1;
         }
-        if (std.c.getcwd(&cwd_buf, cwd_buf.len)) |p| {
-            search_paths[n_paths] = std.mem.sliceTo(p, 0);
+        if (currentPath(&cwd_buf)) |p| {
+            search_paths[n_paths] = p;
             n_paths += 1;
         }
     }
@@ -647,25 +839,20 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
         var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const dir_path = std.mem.printSentinel(&dir_buf, "{s}", .{search_path}, 0) catch continue;
 
-        // `fs::exists` then `directory_iterator`; `opendir` failing covers
+        // `fs::exists` then `directory_iterator`; failing to open covers
         // both, including the C++'s `skip_permission_denied`.
-        const dir = std.c.opendir(dir_path.ptr) orelse {
+        var dir = DirScan.open(dir_path) orelse {
             impl.printDebug("%s: search path %s does not exist\n", .{ "load_best", dir_path.ptr });
             continue;
         };
-        defer _ = std.c.closedir(dir);
+        defer dir.close();
 
-        while (std.c.readdir(dir)) |ent| {
-            // DT_REG. `is_regular_file` in the C++; a `DT_UNKNOWN` filesystem
-            // would need a stat, which APFS never reports.
-            if (ent.type != 8) continue;
-            // `d_namlen` is BSD; `d_name` is NUL-terminated everywhere.
-            const entry_name = std.mem.sliceTo(&ent.name, 0);
+        while (dir.next()) |entry_name| {
             if (!std.mem.startsWith(u8, entry_name, file_prefix)) continue;
             if (!std.mem.endsWith(u8, entry_name, backend_filename_extension)) continue;
 
             var cand_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-            const cand = std.mem.printSentinel(&cand_buf, "{s}/{s}", .{ search_path, entry_name }, 0) catch continue;
+            const cand = joinPath(&cand_buf, search_path, entry_name) orelse continue;
 
             const handle = dlLoadLibrary(cand.ptr) orelse {
                 if (!silent) {
@@ -675,7 +862,7 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
             };
             // The C++ lets the `unique_ptr` close it at the end of the
             // iteration: the winner is re-opened by `load_backend` below.
-            defer _ = std.c.dlclose(handle);
+            defer dlClose(handle);
 
             const sym = dlGetSym(handle, "ggml_backend_score") orelse {
                 if (!silent) {
@@ -698,14 +885,15 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
     if (best_score == 0) {
         // "try to load the base backend": `libggml-<name>.so`, unversioned.
         for (search_paths[0..n_paths]) |search_path| {
-            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-            const path = std.mem.printSentinel(
-                &path_buf,
-                "{s}/" ++ backend_filename_prefix ++ "{s}" ++ backend_filename_extension,
-                .{ search_path, name },
-                0,
+            var file_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            const filename = std.mem.print(
+                &file_buf,
+                backend_filename_prefix ++ "{s}" ++ backend_filename_extension,
+                .{name},
             ) catch continue;
-            if (Libc.access(path.ptr, Libc.F_OK) != 0) continue;
+            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            const path = joinPath(&path_buf, search_path, filename) orelse continue;
+            if (!pathExists(path)) continue;
             return getReg().loadBackend(path.ptr, silent);
         }
         return null;

@@ -102,8 +102,12 @@ pub export fn ggml_cpu_fp32_to_fp32(x: [*c]const f32, y: [*c]f32, n: i64) void {
     @memcpy(y[0..@intCast(n)], x[0..@intCast(n)]);
 }
 
-extern fn @"llvm.x86.vcvtps2ph.256"(@Vector(8, f32), i32) @Vector(8, i16);
-extern fn @"llvm.x86.vcvtps2ph.128"(@Vector(4, f32), i32) @Vector(8, i16);
+// `.x86_64_sysv`, not the default `.c`: on Windows x64 the C convention
+// passes a vector by reference, and LLVM rejects an intrinsic whose operand
+// became a pointer. SysV passes it in a register, as the intrinsic takes it,
+// and is what `.c` already means on Linux.
+extern fn @"llvm.x86.vcvtps2ph.256"(@Vector(8, f32), i32) callconv(.{ .x86_64_sysv = .{} }) @Vector(8, i16);
+extern fn @"llvm.x86.vcvtps2ph.128"(@Vector(4, f32), i32) callconv(.{ .x86_64_sysv = .{} }) @Vector(8, i16);
 
 /// `_MM_FROUND_TO_NEAREST_INT`, the rounding immediate the C passes.
 const round_nearest: i32 = 0;

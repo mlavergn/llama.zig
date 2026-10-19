@@ -8,12 +8,15 @@
 //! lifecycle) and 3065 (graph compute). Each declaration names the C it
 //! replaces and the line it began at.
 //!
-//! # What the C builds by hand, Zig has
+//! # The threading defs
 //!
-//! The C carries three pages of `#define ggml_mutex_lock(m)` shims so one body
-//! can drive pthreads on Unix and SRW locks on Windows, plus its own atomic
-//! wrappers for MSVC. None of that survives translation: `std.Thread.Mutex`,
-//! `std.Thread.Condition` and `std.atomic.Value` are the portable layer.
+//! The C carries a page of `#define ggml_mutex_lock(m)` shims so one body can
+//! drive pthreads on Unix and SRW locks on Windows, plus its own atomic
+//! wrappers for MSVC. The shims are ported as the inline functions `lock`,
+//! `lockShared`, `condWait` and the rest, both arms each; `std.atomic.Value`
+//! replaces the atomic wrappers. The `_shared` variants are the same calls as
+//! the plain ones on pthreads, and a reader's hold on Windows -- which is why
+//! they stay distinct here.
 //!
 //! What does survive exactly is the *protocol* -- which counter is bumped with
 //! which ordering, and in what sequence. `ggml_barrier` in particular is
@@ -30,6 +33,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
+const win32 = @import("../win32.zig");
 const types = @import("../types.zig");
 const graph = @import("../graph.zig");
 const context = @import("../context.zig");
@@ -379,20 +383,27 @@ const SchedParam = if (is_linux) extern struct {
 extern fn pthread_self() std.c.pthread_t;
 extern fn pthread_setschedparam(thread: std.c.pthread_t, policy: c_int, param: *const SchedParam) c_int;
 
-/// Ports `ggml_mutex_init` (ggml-cpu.c:452 @c1d0e7a00) and `ggml_cond_init`
-/// (ggml-cpu.c:469 @c1d0e7a00), the pthread arm, which expand to these two calls with a
-/// null attribute.
+/// What `ggml_mutex_init` and `ggml_cond_init` expand to in the pthread arm
+/// (ggml-cpu.c:452, 469 @c1d0e7a00): these two calls with a null attribute.
 extern fn pthread_mutex_init(mutex: *std.c.pthread_mutex_t, attr: ?*const anyopaque) c_int;
 extern fn pthread_cond_init(cond: *std.c.pthread_cond_t, attr: ?*const anyopaque) c_int;
 
-/// Ports `ggml_thread_apply_affinity`, `ggml_thread_apply_affinity`
-/// (ggml-cpu.c:2579, 2614 @c1d0e7a00): the Apple and the Linux arms.
+/// `_WIN32`, which selects the C's SRW-lock threading defs and the Windows
+/// arms of thread affinity and priority.
+const is_windows = builtin.os.tag == .windows;
+
+/// Ports `ggml_thread_apply_affinity`, `ggml_thread_apply_affinity`,
+/// `ggml_thread_apply_affinity` (ggml-cpu.c:2497, 2579, 2614 @c1d0e7a00): the
+/// Windows, Apple and Linux arms.
 ///
 /// Apple platforms expose no way to pin a thread to a core, so the C's Apple
 /// arm is a no-op that reports success. The Linux arm pins the calling
 /// thread to every CPU set in `mask`; its warning prints the **address** of
-/// the mask, cast to `unsigned long long`, which is what the C passes.
+/// the mask, cast to `unsigned long long`, which is what the C passes. The
+/// Windows arm packs the first 64 entries into one affinity mask and warns,
+/// without failing, if any CPU past them is set.
 fn threadApplyAffinity(mask: []const bool) bool {
+    if (comptime is_windows) return threadApplyAffinityWindows(mask);
     if (comptime !is_linux) return true;
 
     var cpuset: CpuSet = .{};
@@ -408,8 +419,75 @@ fn threadApplyAffinity(mask: []const bool) bool {
     return true;
 }
 
+/// The Windows arm of `ggml_thread_apply_affinity` (ggml-cpu.c:2497 @c1d0e7a00).
+fn threadApplyAffinityWindows(mask: []const bool) bool {
+    const h = win32.GetCurrentThread();
+    var bitmask: u64 = 0;
+
+    comptime std.debug.assert(c.GGML_MAX_N_THREADS >= 64);
+
+    var i: u6 = 0;
+    while (true) : (i += 1) {
+        if (mask[i]) bitmask |= @as(u64, 1) << i;
+        if (i == 63) break;
+    }
+
+    for (mask[64..c.GGML_MAX_N_THREADS]) |bit| {
+        if (bit) {
+            impl.fprintfStderr("warn: setting thread-affinity for > 64 CPUs isn't supported on windows!\n", .{});
+            break;
+        }
+    }
+
+    const m = win32.SetThreadAffinityMask(h, bitmask);
+    return m != 0;
+}
+
+/// The Windows arm of `ggml_thread_apply_priority` (ggml-cpu.c:2531 @c1d0e7a00).
+///
+/// Every level but LOW first opts the thread out of power throttling --
+/// Windows 11 otherwise parks cores and crowds the workers onto the first few
+/// -- and NORMAL then keeps the inherited priority.
+fn threadApplyPriorityWindows(prio: i32) bool {
+    const p: c_int = switch (prio) {
+        c.GGML_SCHED_PRIO_LOW => win32.THREAD_PRIORITY_BELOW_NORMAL,
+        c.GGML_SCHED_PRIO_NORMAL => win32.THREAD_PRIORITY_NORMAL,
+        c.GGML_SCHED_PRIO_MEDIUM => win32.THREAD_PRIORITY_ABOVE_NORMAL,
+        c.GGML_SCHED_PRIO_HIGH => win32.THREAD_PRIORITY_HIGHEST,
+        c.GGML_SCHED_PRIO_REALTIME => win32.THREAD_PRIORITY_TIME_CRITICAL,
+        else => win32.THREAD_PRIORITY_NORMAL,
+    };
+
+    if (prio != c.GGML_SCHED_PRIO_LOW) {
+        // `_WIN32_WINNT` is MinGW's default, 0xa00, so the C's `>= 0x0602`
+        // guard is open.
+        var t: win32.THREAD_POWER_THROTTLING_STATE = .{
+            .Version = win32.THREAD_POWER_THROTTLING_CURRENT_VERSION,
+            .ControlMask = win32.THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+            .StateMask = 0,
+        };
+        if (win32.SetThreadInformation(win32.GetCurrentThread(), win32.ThreadPowerThrottling, &t, @sizeOf(win32.THREAD_POWER_THROTTLING_STATE)) == 0) {
+            impl.logDebug("failed to disable thread power throttling %d : (%d)\n", .{ prio, @as(c_int, @bitCast(win32.GetLastError())) });
+            return false;
+        }
+    }
+
+    if (prio == c.GGML_SCHED_PRIO_NORMAL) {
+        // Keep inherited policy/priority
+        return true;
+    }
+
+    if (win32.SetThreadPriority(win32.GetCurrentThread(), p) == 0) {
+        impl.fprintfStderr("warn: failed to set thread priority %d : (%d)\n", .{ prio, @as(c_int, @bitCast(win32.GetLastError())) });
+        return false;
+    }
+
+    return true;
+}
+
 /// Ports `ggml_thread_apply_priority`, `ggml_thread_apply_priority`
-/// (ggml-cpu.c:2585, 2643 @c1d0e7a00): the Apple and the Linux arms. They differ only in `LOW`, which
+/// (ggml-cpu.c:2585, 2643 @c1d0e7a00): the Apple and the Linux arms; Windows
+/// is `threadApplyPriorityWindows`. They differ only in `LOW`, which
 /// is `SCHED_BATCH` on Linux and `SCHED_OTHER` on Apple, where the C notes
 /// there is no way to ask for less than normal -- and in the numbering of
 /// the policies.
@@ -419,6 +497,8 @@ fn threadApplyAffinity(mask: []const bool) bool {
 ///
 /// Return: true on success, or when `prio` is NORMAL and nothing is done.
 fn threadApplyPriority(prio: i32) bool {
+    if (comptime is_windows) return threadApplyPriorityWindows(prio);
+
     var p: SchedParam = .{ .sched_priority = 0 };
     var policy: c_int = sched_other;
 
@@ -506,17 +586,48 @@ fn cpumaskNext(
 // -----------------------------------------------------------------------------
 // Threadpool lifecycle
 
-/// Ports `ggml_mutex_lock` (ggml-cpu.c:454 @c1d0e7a00).
-///
-/// The C also has `ggml_mutex_lock_shared`, which on pthreads is the same
-/// call; both are this.
+/// Ports `ggml_mutex_lock`, `ggml_mutex_lock` (ggml-cpu.c:434, 454 @c1d0e7a00).
 inline fn lock(threadpool: *Threadpool) void {
+    if (comptime is_windows) return win32.AcquireSRWLockExclusive(&threadpool.mutex);
     _ = std.c.pthread_mutex_lock(&threadpool.mutex);
 }
 
-/// Ports `ggml_mutex_unlock` (ggml-cpu.c:455 @c1d0e7a00).
+/// Ports `ggml_mutex_unlock`, `ggml_mutex_unlock` (ggml-cpu.c:435, 455 @c1d0e7a00).
 inline fn unlock(threadpool: *Threadpool) void {
+    if (comptime is_windows) return win32.ReleaseSRWLockExclusive(&threadpool.mutex);
     _ = std.c.pthread_mutex_unlock(&threadpool.mutex);
+}
+
+/// Ports `ggml_mutex_lock_shared`, `ggml_mutex_lock_shared` (ggml-cpu.c:436,
+/// 456 @c1d0e7a00). The same call as `lock` on pthreads; a reader's hold on
+/// the SRW lock on Windows, which is what the C's two waits take.
+inline fn lockShared(threadpool: *Threadpool) void {
+    if (comptime is_windows) return win32.AcquireSRWLockShared(&threadpool.mutex);
+    _ = std.c.pthread_mutex_lock(&threadpool.mutex);
+}
+
+/// Ports `ggml_mutex_unlock_shared`, `ggml_mutex_unlock_shared`
+/// (ggml-cpu.c:437, 457 @c1d0e7a00).
+inline fn unlockShared(threadpool: *Threadpool) void {
+    if (comptime is_windows) return win32.ReleaseSRWLockShared(&threadpool.mutex);
+    _ = std.c.pthread_mutex_unlock(&threadpool.mutex);
+}
+
+/// Ports `ggml_cond_wait`, `ggml_cond_wait` (ggml-cpu.c:441, 471 @c1d0e7a00).
+/// On Windows the wait releases and retakes the lock in shared mode, matching
+/// `lockShared` around it.
+inline fn condWait(threadpool: *Threadpool) void {
+    if (comptime is_windows) {
+        _ = win32.SleepConditionVariableSRW(&threadpool.cond, &threadpool.mutex, win32.INFINITE, win32.CONDITION_VARIABLE_LOCKMODE_SHARED);
+        return;
+    }
+    _ = std.c.pthread_cond_wait(&threadpool.cond, &threadpool.mutex);
+}
+
+/// Ports `ggml_cond_broadcast`, `ggml_cond_broadcast` (ggml-cpu.c:442, 472 @c1d0e7a00).
+inline fn condBroadcast(threadpool: *Threadpool) void {
+    if (comptime is_windows) return win32.WakeAllConditionVariable(&threadpool.cond);
+    _ = std.c.pthread_cond_broadcast(&threadpool.cond);
 }
 
 /// Ports `ggml_threadpool_new_impl` (ggml-cpu.c:3278 @c1d0e7a00).
@@ -569,8 +680,15 @@ fn threadpoolNewImpl(
 
     threadpool.workers = workers;
 
-    _ = pthread_mutex_init(&threadpool.mutex, null);
-    _ = pthread_cond_init(&threadpool.cond, null);
+    // `ggml_mutex_init`, `ggml_cond_init`, `ggml_mutex_init`, `ggml_cond_init`
+    // (ggml-cpu.c:432, 439, 452, 469 @c1d0e7a00): both arms.
+    if (comptime is_windows) {
+        win32.InitializeSRWLock(&threadpool.mutex);
+        win32.InitializeConditionVariable(&threadpool.cond);
+    } else {
+        _ = pthread_mutex_init(&threadpool.mutex, null);
+        _ = pthread_cond_init(&threadpool.cond, null);
+    }
 
     // Spin up the workers and place them. The main thread is placed last, so
     // it lands on the higher-numbered cores.
@@ -620,13 +738,18 @@ pub export fn ggml_threadpool_free(threadpool_opt: ?*Threadpool) void {
     lock(threadpool);
     threadpool.stop.store(true, .monotonic);
     threadpool.pause.store(false, .monotonic);
-    _ = std.c.pthread_cond_broadcast(&threadpool.cond);
+    condBroadcast(threadpool);
     unlock(threadpool);
 
     for (1..n) |j| workers[j].thrd.join();
 
-    _ = std.c.pthread_mutex_destroy(&threadpool.mutex);
-    _ = std.c.pthread_cond_destroy(&threadpool.cond);
+    // `ggml_mutex_destroy`, `ggml_cond_destroy`, `ggml_mutex_destroy`,
+    // `ggml_cond_destroy` (ggml-cpu.c:433, 440, 453, 470 @c1d0e7a00): empty on
+    // Windows.
+    if (comptime !is_windows) {
+        _ = std.c.pthread_mutex_destroy(&threadpool.mutex);
+        _ = std.c.pthread_cond_destroy(&threadpool.cond);
+    }
 
     ggml_aligned_free(workers, @sizeOf(ComputeState) * n);
     ggml_aligned_free(threadpool, @sizeOf(Threadpool));
@@ -638,7 +761,7 @@ pub export fn ggml_threadpool_free(threadpool_opt: ?*Threadpool) void {
 fn pauseLocked(threadpool: *Threadpool) void {
     impl.printDebug("Pausing threadpool\n", .{});
     threadpool.pause.store(true, .monotonic);
-    _ = std.c.pthread_cond_broadcast(&threadpool.cond);
+    condBroadcast(threadpool);
 }
 
 /// Ports `ggml_threadpool_resume_locked` (ggml-cpu.c:2750 @c1d0e7a00).
@@ -647,7 +770,7 @@ fn pauseLocked(threadpool: *Threadpool) void {
 fn resumeLocked(threadpool: *Threadpool) void {
     impl.printDebug("Resuming threadpool\n", .{});
     threadpool.pause.store(false, .monotonic);
-    _ = std.c.pthread_cond_broadcast(&threadpool.cond);
+    condBroadcast(threadpool);
 }
 
 /// Ports `ggml_threadpool_pause` (ggml-cpu.c:2757 @c1d0e7a00).
@@ -836,12 +959,12 @@ fn checkForWork(state: *ComputeState) bool {
         return state.pending;
     }
 
-    lock(threadpool);
+    lockShared(threadpool);
     while (!threadReady(state)) {
         impl.printDebug("thread #%d waiting for work (sleeping)\n", .{state.ith});
-        _ = std.c.pthread_cond_wait(&threadpool.cond, &threadpool.mutex);
+        condWait(threadpool);
     }
-    unlock(threadpool);
+    unlockShared(threadpool);
 
     return state.pending;
 }
@@ -861,12 +984,12 @@ fn secondaryThread(state: *ComputeState) void {
     while (true) {
         while (threadpool.pause.load(.monotonic)) {
             impl.printDebug("thread #%d inside pause loop\n", .{state.ith});
-            lock(threadpool);
+            lockShared(threadpool);
             if (threadpool.pause.load(.monotonic)) {
-                _ = std.c.pthread_cond_wait(&threadpool.cond, &threadpool.mutex);
+                condWait(threadpool);
             }
             impl.printDebug("thread #%d resuming after wait\n", .{state.ith});
-            unlock(threadpool);
+            unlockShared(threadpool);
         }
 
         // Checked after the wait, not before it.
@@ -913,7 +1036,7 @@ fn kickoff(threadpool: *Threadpool, n_threads: c_int) void {
         // `resume` does the broadcast.
         resumeLocked(threadpool);
     } else {
-        _ = std.c.pthread_cond_broadcast(&threadpool.cond);
+        condBroadcast(threadpool);
     }
 
     unlock(threadpool);

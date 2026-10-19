@@ -32,6 +32,37 @@ const std = @import("std");
 /// `@cImport`).
 pub const c = @import("ggml_c");
 
+/// `std::mutex`, as the libc++ this build links lays it out and drives it.
+///
+/// Not a port of anything. The C++ translation units hold `std::mutex`
+/// globals and statics; libc++ builds one on a `pthread_mutex_t` behind
+/// `PTHREAD_MUTEX_INITIALIZER`, or on Windows on an `SRWLOCK` behind
+/// `AcquireSRWLockExclusive` (`__thread/support/windows.h`,
+/// `src/support/win32/thread_win32.cpp`). `.{}` is a static initialisation on
+/// both, with no runtime setup -- the same as libc++'s `constexpr mutex()`.
+/// The pthread arm is Decision 39's; the threadpool's own lock is
+/// `ggml_mutex_t`, in `cpu/defs.zig`, and is not this.
+pub const CxxMutex = extern struct {
+    raw: Raw = .{},
+
+    const is_windows = @import("builtin").os.tag == .windows;
+    const win32 = @import("win32.zig");
+    const Raw = if (is_windows) win32.SRWLOCK else std.c.pthread_mutex_t;
+
+    /// `std::mutex::lock`. Its only documented failures are bugs (deadlock,
+    /// an invalid mutex), which the C++ would turn into `terminate`.
+    pub fn lock(self: *CxxMutex) void {
+        if (comptime is_windows) return win32.AcquireSRWLockExclusive(&self.raw);
+        _ = std.c.pthread_mutex_lock(&self.raw);
+    }
+
+    /// `std::mutex::unlock`.
+    pub fn unlock(self: *CxxMutex) void {
+        if (comptime is_windows) return win32.ReleaseSRWLockExclusive(&self.raw);
+        _ = std.c.pthread_mutex_unlock(&self.raw);
+    }
+};
+
 /// Mirrors `GGML_USE_ACCELERATE`, which `build/llamacpp.zig` defines for every
 /// Darwin target and no other. Ported code that takes the C's Accelerate arm
 /// keys on this, at comptime, so the vDSP `extern`s are not referenced where
@@ -41,14 +72,16 @@ pub const use_accelerate = @import("builtin").os.tag.isDarwin();
 /// Whether Zig can **define** a C variadic function for this target.
 ///
 /// Not a port of anything. Zig 0.17's LLVM backend refuses `std.lang.VaList`
-/// on aarch64 outside Apple and Windows -- `@compileError("disabled due to
-/// miscompilations")` in `std/lang.zig` -- so `ggml_abort`,
-/// `ggml_log_internal` and `ggml_format_name` cannot be written in Zig there.
-/// On those targets `src/ggml/varargs.c` defines the three, formats in C, and
-/// hands the finished string back to Zig. *Calling* a variadic function is
-/// unaffected. `build/llamacpp.zig`'s `needsVarargsShim` must agree.
+/// on aarch64 outside Apple and Windows, and on x86_64 Windows --
+/// `@compileError("disabled due to miscompilations")` in `std/lang.zig` -- so
+/// `ggml_abort`, `ggml_log_internal` and `ggml_format_name` cannot be written
+/// in Zig there. On those targets `src/ggml/varargs.c` defines the three,
+/// formats in C, and hands the finished string back to Zig. *Calling* a
+/// variadic function is unaffected. `build/llamacpp.zig`'s `needsVarargsShim`
+/// must agree.
 pub const zig_varargs = switch (@import("builtin").cpu.arch) {
     .aarch64, .aarch64_be => @import("builtin").os.tag.isDarwin() or @import("builtin").os.tag == .windows,
+    .x86_64 => @import("builtin").os.tag != .windows,
     else => true,
 };
 
@@ -62,12 +95,18 @@ pub const zig_varargs = switch (@import("builtin").cpu.arch) {
 /// value everywhere worked until the first x86 build, where `ggml_format_name`
 /// handed `vsnprintf` the struct's bytes as a pointer and it faulted inside
 /// `__vsnprintf`. `cVaList` produces the right one from the caller's list.
-pub const CVaList = if (@import("builtin").cpu.arch == .x86_64) *std.lang.VaList else std.lang.VaList;
+///
+/// Windows x64 is not System V: its `va_list` is a `char *` and travels by
+/// value, as on AArch64. Zig refuses `VaList` there anyway (`zig_varargs`), so
+/// nothing on Windows reaches these two; the arm only keeps them honest.
+pub const CVaList = if (va_list_is_array) *std.lang.VaList else std.lang.VaList;
 
-/// `ap` as `CVaList` expects it: its address on x86_64, a copy elsewhere.
-/// Either way the callee consumes the list, as in C.
+const va_list_is_array = @import("builtin").cpu.arch == .x86_64 and @import("builtin").os.tag != .windows;
+
+/// `ap` as `CVaList` expects it: its address where `va_list` is an array, a
+/// copy elsewhere. Either way the callee consumes the list, as in C.
 pub inline fn cVaList(ap: *std.lang.VaList) CVaList {
-    return if (comptime @import("builtin").cpu.arch == .x86_64) ap else ap.*;
+    return if (comptime va_list_is_array) ap else ap.*;
 }
 
 // -----------------------------------------------------------------------------
@@ -88,9 +127,11 @@ pub const logError = struct {
 
 extern fn fprintf(stream: *anyopaque, format: [*:0]const u8, ...) c_int;
 
-/// libc's `stderr`, which Darwin names `__stderrp` behind a macro and glibc
-/// exports as itself.
-fn cStderr() *anyopaque {
+/// libc's `stderr`, which Darwin names `__stderrp` behind a macro, glibc
+/// exports as itself, and MinGW's UCRT hands out through `__acrt_iob_func`.
+/// The one copy every ported file that writes to `stderr` directly reads.
+pub fn cStderr() *anyopaque {
+    if (comptime @import("builtin").os.tag == .windows) return @import("win32.zig").__acrt_iob_func(2);
     return @extern(*const *anyopaque, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
 }
 

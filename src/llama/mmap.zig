@@ -4,7 +4,8 @@
 //!
 //! Ported from `llama.cpp/src/llama-mmap.cpp` at v0.3.0 (`c1d0e7a00`):
 //! `llama_file`, `llama_mmap`, `llama_mlock` and `llama_path_max`, the POSIX
-//! arm of each, with its `__linux__` and `__APPLE__` arms.
+//! arm of each, with its `__linux__` and `__APPLE__` arms, and the `_WIN32`
+//! arm of each.
 //!
 //! # What each target compiles
 //!
@@ -25,10 +26,18 @@
 //!   `defined(...)`, so `suggest` is forced false and `getrlimit` is never
 //!   called. On Linux it is printed when `mlock` failed for want of the
 //!   `RLIMIT_MEMLOCK` headroom.
+//! - **Windows is its own arm of all three**, measured with MinGW's headers,
+//!   where `_POSIX_MAPPED_FILES` and `_POSIX_MEMLOCK_RANGE` are undefined.
+//!   `llama_file` keeps the `FILE *` but seeks, tells, reads and writes
+//!   through the Win32 handle behind it, reads in 64 MiB `ReadFile` chunks,
+//!   and reports `has_direct_io` true with an alignment of 1; mapping is
+//!   `CreateFileMappingA` and `MapViewOfFile`, with no fragments to unmap;
+//!   locking is `VirtualLock`, growing the working set once on failure.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const impl = @import("impl.zig");
+const win32 = @import("win32.zig");
 
 const c = impl.c;
 const allocator = impl.allocator;
@@ -50,6 +59,61 @@ extern "c" fn free(ptr: ?*anyopaque) void;
 /// `__linux__`: the arms of `llama-mmap.cpp` only Linux compiles.
 const is_linux = builtin.os.tag == .linux;
 
+/// `_WIN32`: the arms of `llama-mmap.cpp` only Windows compiles.
+const is_windows = builtin.os.tag == .windows;
+
+/// Ports `llama_format_win_err` (llama-mmap.cpp:53 @c1d0e7a00): the system's
+/// text for a Win32 error code, `"FormatMessageA failed"` when there is none.
+///
+/// Return: the text, owned by the caller; free with `allocator.free`.
+fn formatWinErr(err: win32.DWORD) []u8 {
+    var buf: ?[*]u8 = null;
+    const size = win32.FormatMessageA(
+        win32.FORMAT_MESSAGE_ALLOCATE_BUFFER | win32.FORMAT_MESSAGE_FROM_SYSTEM | win32.FORMAT_MESSAGE_IGNORE_INSERTS,
+        null,
+        err,
+        win32.LANG_NEUTRAL_SUBLANG_DEFAULT,
+        &buf,
+        0,
+        null,
+    );
+    const text: []const u8 = if (size == 0) "FormatMessageA failed" else buf.?[0..size];
+    defer if (size != 0) {
+        _ = win32.LocalFree(buf);
+    };
+    return allocator.dupe(u8, text) catch impl.abort("llama-mmap.cpp", 53, "out of memory");
+}
+
+/// Ports `llama_file`'s `impl`'s `GetErrorMessageWin32` (llama-mmap.cpp:71
+/// @c1d0e7a00). Like `formatWinErr` but with its own fallback, and the message
+/// copied up to its terminator rather than by length.
+///
+/// Return: the text, owned by the caller; free with `allocator.free`.
+fn errorMessageWin32(error_code: win32.DWORD) []u8 {
+    var buf: ?[*]u8 = null;
+    const len = win32.FormatMessageA(
+        win32.FORMAT_MESSAGE_ALLOCATE_BUFFER | win32.FORMAT_MESSAGE_FROM_SYSTEM | win32.FORMAT_MESSAGE_IGNORE_INSERTS,
+        null,
+        error_code,
+        win32.LANG_NEUTRAL_SUBLANG_DEFAULT,
+        &buf,
+        0,
+        null,
+    );
+    if (len == 0) {
+        return std.fmt.allocPrint(allocator, "Win32 error code: {x}", .{error_code}) catch impl.abort("llama-mmap.cpp", 77, "out of memory");
+    }
+    defer _ = win32.LocalFree(buf);
+    const text = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(buf.?)), 0);
+    return allocator.dupe(u8, text) catch impl.abort("llama-mmap.cpp", 79, "out of memory");
+}
+
+/// How `fp_win32` (llama-mmap.cpp:91 @c1d0e7a00) is set: `(HANDLE)
+/// _get_osfhandle(_fileno(fp))`.
+fn osHandle(fp: *c.FILE) win32.HANDLE {
+    return @ptrFromInt(@as(usize, @bitCast(win32._get_osfhandle(win32._fileno(fp)))));
+}
+
 /// The libc calls only the `__linux__` arms make. Zig 0.17 declares no
 /// `struct stat` for Linux, so `init_fd`'s `fstat` is asked through `statx`
 /// on the descriptor, which reports the same size and block size without a
@@ -67,8 +131,9 @@ const POSIX_MADV_RANDOM: c_int = 1;
 const POSIX_MADV_WILLNEED: c_int = 3;
 /// Darwin's value, and glibc's.
 const _SC_PAGESIZE: c_int = if (@import("builtin").os.tag.isDarwin()) 29 else 30;
-/// `<limits.h>`'s: Darwin's value, and glibc's.
-const PATH_MAX: usize = if (@import("builtin").os.tag.isDarwin()) 1024 else 4096;
+/// `<limits.h>`'s: Darwin's value, and glibc's. MinGW has none, and the C++
+/// defines `PATH_MAX` (llama-mmap.cpp:34 @c1d0e7a00) as `MAX_PATH`, 260.
+const PATH_MAX: usize = if (is_windows) 260 else if (@import("builtin").os.tag.isDarwin()) 1024 else 4096;
 
 fn errnoText() []const u8 {
     return std.mem.span(strerror(errnoPtr().*));
@@ -77,12 +142,16 @@ fn errnoText() []const u8 {
 // -----------------------------------------------------------------------------
 // llama_file
 
-/// Ports `llama_file` and its POSIX `impl` (llama-mmap.cpp:68 @c1d0e7a00).
+/// Ports `llama_file` and its `impl` (llama-mmap.cpp:68 @c1d0e7a00): the
+/// `_WIN32` arm and the POSIX one.
 ///
 /// A buffered `FILE *` and its size, or on Linux, when direct I/O was asked
 /// for and the open succeeded, an unbuffered descriptor read in aligned
-/// chunks.
+/// chunks. On Windows the `FILE *` only opens and closes the file; every
+/// read, write and seek goes through `fp_win32`, the handle behind it.
 pub const File = struct {
+    /// `fp_win32`: the Win32 handle behind `fp`. Windows only.
+    fp_win32: if (is_windows) win32.HANDLE else void = undefined,
     /// `fp`: null while `fd` is open.
     fp: ?*c.FILE,
     owns_fp: bool,
@@ -110,6 +179,11 @@ pub const File = struct {
     /// with `close`.
     pub fn open(fname: [:0]const u8, mode: [:0]const u8, use_direct_io: bool, exc: *Exception) Thrown!File {
         var f: File = .{ .fp = null, .owns_fp = true, .size = 0 };
+        if (comptime is_windows) {
+            // llama-mmap.cpp:86 @c1d0e7a00: `use_direct_io` is unused.
+            try f.initFp(fname, mode, exc);
+            return f;
+        }
         if (is_linux and use_direct_io and std.mem.eql(u8, mode, "rb")) {
             if (try f.initFd(fname, exc)) return f;
             impl.logWarn("Failed to open file '%s' with error: %s. Falling back to buffered I/O", .{ fname.ptr, strerror(errnoPtr().*) });
@@ -149,6 +223,7 @@ pub const File = struct {
             return exc.throw(.runtime_error, "failed to open {s}: {s}", .{ fname, errnoText() });
         };
         self.fp = fp;
+        if (comptime is_windows) self.fp_win32 = osHandle(fp);
         errdefer {
             _ = c.fclose(fp);
             self.fp = null;
@@ -168,6 +243,7 @@ pub const File = struct {
     /// Return: the file, or `error.Thrown` when it cannot be measured.
     pub fn borrow(fp: *c.FILE, exc: *Exception) Thrown!File {
         var f: File = .{ .fp = fp, .owns_fp = false, .size = 0 };
+        if (comptime is_windows) f.fp_win32 = osHandle(fp);
         try f.seek(0, c.SEEK_END, exc);
         f.size = try f.tell(exc);
         try f.seek(0, c.SEEK_SET, exc);
@@ -178,6 +254,13 @@ pub const File = struct {
     ///
     /// Return: nothing.
     pub fn close(self: *File) void {
+        if (comptime is_windows) {
+            // llama-mmap.cpp:177 @c1d0e7a00.
+            if (self.owns_fp) if (self.fp) |fp| {
+                _ = c.fclose(fp);
+            };
+            return;
+        }
         if (self.fd != -1) {
             _ = std.c.close(self.fd);
         } else if (self.owns_fp) {
@@ -191,6 +274,14 @@ pub const File = struct {
     ///
     /// Return: the position, or `error.Thrown`.
     pub fn tell(self: *const File, exc: *Exception) Thrown!usize {
+        if (comptime is_windows) {
+            // llama-mmap.cpp:105 @c1d0e7a00.
+            var li: i64 = 0;
+            if (win32.SetFilePointerEx(self.fp_win32, 0, &li, win32.FILE_CURRENT) == 0) {
+                return self.throwWin32(exc, "read error: {s}");
+            }
+            return @intCast(li);
+        }
         if (self.fd == -1) {
             const ret = c.ftello(self.fp.?);
             if (ret == -1) return exc.throw(.runtime_error, "ftell error: {s}", .{errnoText()});
@@ -205,6 +296,14 @@ pub const File = struct {
     ///
     /// Return: nothing, or `error.Thrown`.
     pub fn seek(self: *const File, offset: usize, whence: c_int, exc: *Exception) Thrown!void {
+        if (comptime is_windows) {
+            // llama-mmap.cpp:116 @c1d0e7a00: `SEEK_SET`, `SEEK_CUR` and
+            // `SEEK_END` are `FILE_BEGIN`, `FILE_CURRENT` and `FILE_END`.
+            if (win32.SetFilePointerEx(self.fp_win32, @bitCast(offset), null, @intCast(whence)) == 0) {
+                return self.throwWin32(exc, "read error: {s}");
+            }
+            return;
+        }
         const ret: i64 = if (self.fd == -1)
             c.fseeko(self.fp.?, @bitCast(offset), whence)
         else
@@ -222,6 +321,9 @@ pub const File = struct {
     ///
     /// Return: nothing, or `error.Thrown`.
     pub fn readRawUnsafe(self: *File, ptr: *anyopaque, len: usize, exc: *Exception) Thrown!void {
+        // `llama_file::read_raw_unsafe` is `read_raw` on Windows
+        // (llama-mmap.cpp:429 @c1d0e7a00).
+        if (comptime is_windows) return self.readRawWin32(ptr, len, exc);
         if (len == 0) return;
         errnoPtr().* = 0;
         if (self.fd == -1) {
@@ -299,6 +401,7 @@ pub const File = struct {
     ///
     /// Return: nothing, or `error.Thrown`.
     pub fn readRaw(self: *File, ptr: *anyopaque, len: usize, exc: *Exception) Thrown!void {
+        if (comptime is_windows) return self.readRawWin32(ptr, len, exc);
         if (self.hasDirectIo()) return self.readAlignedChunk(ptr, len, exc);
         return self.readRawUnsafe(ptr, len, exc);
     }
@@ -316,6 +419,7 @@ pub const File = struct {
     ///
     /// Return: nothing, or `error.Thrown`.
     pub fn writeRaw(self: *const File, ptr: *const anyopaque, len: usize, exc: *Exception) Thrown!void {
+        if (comptime is_windows) return self.writeRawWin32(ptr, len, exc);
         if (len == 0) return;
         errnoPtr().* = 0;
         if (c.fwrite(ptr, len, 1, self.fp.?) != 1) return exc.throw(.runtime_error, "write error: {s}", .{errnoText()});
@@ -332,14 +436,69 @@ pub const File = struct {
     ///
     /// Return: the direct-I/O descriptor, or the one behind the `FILE *`.
     pub fn fileId(self: *const File) c_int {
+        if (comptime is_windows) return win32._fileno(self.fp.?);
         if (self.fd != -1) return self.fd;
         return fileno(self.fp.?);
     }
 
     /// Ports `llama_file`'s `impl`'s `has_direct_io` (llama-mmap.cpp:372
     /// @c1d0e7a00).
+    ///
+    /// Always true on Windows (llama-mmap.cpp:173 @c1d0e7a00), whose reads
+    /// never go through the aligned path.
     pub fn hasDirectIo(self: *const File) bool {
+        if (comptime is_windows) return true;
         return self.fd != -1 and self.alignment > 1;
+    }
+
+    /// Throws `fmt` with `GetErrorMessageWin32(GetLastError())` as its one
+    /// argument, as each Win32 failure in `llama_file` does.
+    fn throwWin32(self: *const File, exc: *Exception, comptime fmt: []const u8) Thrown {
+        _ = self;
+        const msg = errorMessageWin32(win32.GetLastError());
+        defer allocator.free(msg);
+        return exc.throw(.runtime_error, fmt, .{msg});
+    }
+
+    /// Ports `llama_file`'s `_WIN32` `impl`'s `read_raw` (llama-mmap.cpp:129
+    /// @c1d0e7a00): `ReadFile` in chunks of at most 64 MiB, any short chunk an
+    /// error.
+    ///
+    /// Return: nothing, or `error.Thrown`.
+    fn readRawWin32(self: *File, ptr: *anyopaque, len: usize, exc: *Exception) Thrown!void {
+        const bytes: [*]u8 = @ptrCast(ptr);
+        var bytes_read: usize = 0;
+        while (bytes_read < len) {
+            const chunk_size = @min(len - bytes_read, 64 * 1024 * 1024);
+            var chunk_read: win32.DWORD = 0;
+            if (win32.ReadFile(self.fp_win32, bytes + bytes_read, @intCast(chunk_size), &chunk_read, null) == 0) {
+                return self.throwWin32(exc, "read error: {s}");
+            }
+            if (chunk_read < chunk_size or chunk_read == 0) {
+                return exc.throw(.runtime_error, "unexpectedly reached end of file", .{});
+            }
+            bytes_read += chunk_read;
+        }
+    }
+
+    /// Ports `llama_file`'s `_WIN32` `impl`'s `write_raw` (llama-mmap.cpp:152
+    /// @c1d0e7a00).
+    ///
+    /// Return: nothing, or `error.Thrown`.
+    fn writeRawWin32(self: *const File, ptr: *const anyopaque, len: usize, exc: *Exception) Thrown!void {
+        const bytes: [*]const u8 = @ptrCast(ptr);
+        var bytes_written: usize = 0;
+        while (bytes_written < len) {
+            const chunk_size = @min(len - bytes_written, 64 * 1024 * 1024);
+            var chunk_written: win32.DWORD = 0;
+            if (win32.WriteFile(self.fp_win32, bytes + bytes_written, @intCast(chunk_size), &chunk_written, null) == 0) {
+                return self.throwWin32(exc, "write error: {s}");
+            }
+            if (chunk_written < chunk_size or chunk_written == 0) {
+                return exc.throw(.runtime_error, "unexpectedly failed to write bytes", .{});
+            }
+            bytes_written += chunk_written;
+        }
     }
 
     /// Return: `llama_file`'s `read_alignment`, 1 without direct I/O.
@@ -351,12 +510,15 @@ pub const File = struct {
 // -----------------------------------------------------------------------------
 // llama_mmap
 
-/// Ports `llama_mmap` and its POSIX `impl` (llama-mmap.cpp:441 @c1d0e7a00).
+/// Ports `llama_mmap` and its `impl` (llama-mmap.cpp:441 @c1d0e7a00): the
+/// POSIX arm and the `_WIN32` one.
 pub const Mmap = struct {
     addr: *anyopaque,
     size: usize,
-    /// `mapped_fragments`: the byte ranges still mapped.
+    /// `mapped_fragments`: the byte ranges still mapped. POSIX only.
     fragments: std.ArrayList([2]usize) = .empty,
+    /// `hMapping`: the file-mapping object. Windows only.
+    mapping: if (is_windows) ?win32.HANDLE else void = if (is_windows) null else {},
 
     /// `llama_mmap`'s `SUPPORTED` (llama-mmap.cpp:629 @c1d0e7a00).
     pub const supported = true;
@@ -372,6 +534,7 @@ pub const Mmap = struct {
     ///
     /// Return: the mapping, or `error.Thrown`; free it with `deinit`.
     pub fn init(file: *const File, prefetch_: usize, numa: bool, exc: *Exception) Thrown!Mmap {
+        if (comptime is_windows) return initWin32(file, prefetch_, exc);
         var prefetch = prefetch_;
         const size = file.size;
         const fd = file.fileId();
@@ -402,6 +565,49 @@ pub const Mmap = struct {
         return m;
     }
 
+    /// Ports `llama_mmap`'s `_WIN32` `impl`'s constructor (llama-mmap.cpp:536
+    /// @c1d0e7a00). `numa` is unused there.
+    fn initWin32(file: *const File, prefetch: usize, exc: *Exception) Thrown!Mmap {
+        const size = file.size;
+
+        const h_file: win32.HANDLE = @ptrFromInt(@as(usize, @bitCast(win32._get_osfhandle(file.fileId()))));
+
+        const mapping = win32.CreateFileMappingA(h_file, null, win32.PAGE_READONLY, 0, 0, null) orelse {
+            const msg = formatWinErr(win32.GetLastError());
+            defer allocator.free(msg);
+            return exc.throw(.runtime_error, "CreateFileMappingA failed: {s}", .{msg});
+        };
+
+        const addr = win32.MapViewOfFile(mapping, win32.FILE_MAP_READ, 0, 0, 0);
+        const err = win32.GetLastError();
+
+        if (addr == null) {
+            _ = win32.CloseHandle(mapping);
+            const msg = formatWinErr(err);
+            defer allocator.free(msg);
+            return exc.throw(.runtime_error, "MapViewOfFile failed: {s}", .{msg});
+        }
+
+        if (prefetch > 0) {
+            // `_WIN32_WINNT` is MinGW's default, 0xa00, so the C++'s
+            // `>= 0x602` arm compiles.
+            const kernel32 = win32.GetModuleHandleW(std.unicode.utf8ToUtf16LeStringLiteral("kernel32.dll"));
+            const sym = if (kernel32) |k| win32.GetProcAddress(k, "PrefetchVirtualMemory") else null;
+            if (sym) |p| {
+                const prefetch_virtual_memory: win32.PrefetchVirtualMemoryFn = @ptrCast(p);
+                var range: [1]win32.WIN32_MEMORY_RANGE_ENTRY = .{.{
+                    .VirtualAddress = addr,
+                    .NumberOfBytes = @min(size, prefetch),
+                }};
+                if (prefetch_virtual_memory(win32.GetCurrentProcess(), 1, &range, 0) == 0) {
+                    warnWin32("warning: PrefetchVirtualMemory failed: %s\n");
+                }
+            }
+        }
+
+        return .{ .addr = addr.?, .size = size, .mapping = mapping };
+    }
+
     /// Ports `llama_mmap`'s `impl`'s `align_range` (llama-mmap.cpp:478 @c1d0e7a00).
     fn alignRange(first: *usize, last: *usize, page_size: usize) void {
         const offset_in_page = first.* & (page_size - 1);
@@ -416,6 +622,9 @@ pub const Mmap = struct {
     ///
     /// Return: nothing.
     pub fn unmapFragment(self: *Mmap, first_: usize, last_: usize) void {
+        // `unmap_fragment` (llama-mmap.cpp:580 @c1d0e7a00) is a no-op on
+        // Windows.
+        if (comptime is_windows) return;
         var first = first_;
         var last = last_;
         const page_size: c_int = @intCast(sysconf(_SC_PAGESIZE));
@@ -462,6 +671,7 @@ pub const Mmap = struct {
     ///
     /// Return: nothing.
     pub fn deinit(self: *Mmap) void {
+        if (comptime is_windows) return self.deinitWin32();
         for (self.fragments.items) |frag| {
             if (munmap(@ptrFromInt(@intFromPtr(self.addr) + frag[0]), frag[1] - frag[0]) != 0) {
                 impl.logWarn("warning: munmap failed: %s\n", .{strerror(errnoPtr().*)});
@@ -469,12 +679,35 @@ pub const Mmap = struct {
         }
         self.fragments.deinit(allocator);
     }
+
+    /// Ports `llama_mmap`'s `_WIN32` `impl`'s destructor (llama-mmap.cpp:585
+    /// @c1d0e7a00).
+    fn deinitWin32(self: *Mmap) void {
+        const mapping = self.mapping orelse return;
+        if (win32.UnmapViewOfFile(self.addr) == 0) {
+            warnWin32("warning: UnmapViewOfFile failed: %s\n");
+        }
+        if (win32.CloseHandle(mapping) == 0) {
+            warnWin32("warning: CloseHandle failed: %s\n");
+        }
+    }
 };
+
+/// Logs `fmt` as a warning with `llama_format_win_err(GetLastError())` as its
+/// one argument, as each Win32 failure in `llama_mmap` and `llama_mlock` does.
+fn warnWin32(comptime fmt: [:0]const u8) void {
+    const msg = formatWinErr(win32.GetLastError());
+    defer allocator.free(msg);
+    const z = allocator.dupeSentinel(u8, msg, 0) catch impl.abort("llama-mmap.cpp", 53, "out of memory");
+    defer allocator.free(z);
+    impl.logWarn(fmt, .{z.ptr});
+}
 
 // -----------------------------------------------------------------------------
 // llama_mlock
 
-/// Ports `llama_mlock` and its POSIX `impl` (llama-mmap.cpp:636 @c1d0e7a00).
+/// Ports `llama_mlock` and its `impl` (llama-mmap.cpp:636 @c1d0e7a00): the
+/// POSIX arm and the `_WIN32` one.
 ///
 /// The C++ gives the `impl` no destructor, so a lock is never released
 /// before the process ends; neither is one here.
@@ -488,12 +721,51 @@ pub const Mlock = struct {
 
     /// Ports `llama_mlock`'s `impl`'s `lock_granularity` (llama-mmap.cpp:638 @c1d0e7a00).
     fn lockGranularity() usize {
+        if (comptime is_windows) {
+            // llama-mmap.cpp:683 @c1d0e7a00.
+            var si: win32.SYSTEM_INFO = undefined;
+            win32.GetSystemInfo(&si);
+            return si.dwPageSize;
+        }
         return @intCast(sysconf(_SC_PAGESIZE));
+    }
+
+    /// Ports `llama_mlock`'s `_WIN32` `impl`'s `raw_lock` (llama-mmap.cpp:689
+    /// @c1d0e7a00): on the first failure, grow the working set by the request
+    /// plus 1 MiB and try once more.
+    fn rawLockWin32(self: *const Mlock, ptr: *anyopaque, len: usize) bool {
+        var tries: c_int = 1;
+        while (true) : (tries += 1) {
+            if (win32.VirtualLock(ptr, len) != 0) return true;
+            if (tries == 2) {
+                const msg = formatWinErr(win32.GetLastError());
+                defer allocator.free(msg);
+                const z = allocator.dupeSentinel(u8, msg, 0) catch impl.abort("llama-mmap.cpp", 695, "out of memory");
+                defer allocator.free(z);
+                impl.logWarn("warning: failed to VirtualLock %zu-byte buffer (after previously locking %zu bytes): %s\n", .{ len, self.size, z.ptr });
+                return false;
+            }
+
+            var min_ws_size: usize = undefined;
+            var max_ws_size: usize = undefined;
+            if (win32.GetProcessWorkingSetSize(win32.GetCurrentProcess(), &min_ws_size, &max_ws_size) == 0) {
+                warnWin32("warning: GetProcessWorkingSetSize failed: %s\n");
+                return false;
+            }
+            const increment = len + 1048576;
+            min_ws_size += increment;
+            max_ws_size += increment;
+            if (win32.SetProcessWorkingSetSize(win32.GetCurrentProcess(), min_ws_size, max_ws_size) == 0) {
+                warnWin32("warning: SetProcessWorkingSetSize failed: %s\n");
+                return false;
+            }
+        }
     }
 
     /// Ports `llama_mlock`'s `impl`'s `raw_lock` (llama-mmap.cpp:642 @c1d0e7a00).
     /// The suggestion is never printed on Darwin; see the file header.
     fn rawLock(self: *const Mlock, addr: *const anyopaque, size: usize) bool {
+        if (comptime is_windows) return self.rawLockWin32(@constCast(addr), size);
         if (mlock(addr, size) == 0) return true;
 
         const errmsg = strerror(errnoPtr().*);

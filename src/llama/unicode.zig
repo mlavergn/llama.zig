@@ -222,11 +222,14 @@ pub fn cptsFromUtf8(utf8: []const u8) []u32 {
 // -----------------------------------------------------------------------------
 // Code point properties
 
+/// `wchar_t`'s width: 16 bits on Windows, 32 everywhere else.
+const wchar_bits = if (@import("builtin").os.tag == .windows) 16 else 32;
+
 /// `unicode_cpt_flags_array`'s result, built on first use as the C++'s
 /// function-local `static` is.
 var flags_table: [max_codepoints]CptFlags = undefined;
 var flags_ready: std.atomic.Value(bool) = .init(false);
-var flags_mutex: std.c.pthread_mutex_t = .{};
+var flags_mutex: impl.CxxMutex = .{};
 
 /// Ports `unicode_cpt_flags_array` (src/unicode.cpp:116 @c1d0e7a00): each
 /// range's flags, then the whitespace bit, then the case and NFD bits on
@@ -256,8 +259,8 @@ fn buildFlagsTable() void {
 /// Return: the flags; `UNDEFINED` at and above `max_codepoints`.
 pub fn cptFlagsFromCpt(cpt: u32) CptFlags {
     if (!flags_ready.load(.acquire)) {
-        _ = std.c.pthread_mutex_lock(&flags_mutex);
-        defer _ = std.c.pthread_mutex_unlock(&flags_mutex);
+        flags_mutex.lock();
+        defer flags_mutex.unlock();
         if (!flags_ready.load(.monotonic)) {
             buildFlagsTable();
             flags_ready.store(true, .release);
@@ -1139,13 +1142,23 @@ pub fn regexSplit(text: []const u8, regex_exprs: []const []const u8, byte_encode
                 break :blk splitStl(u8, text_collapsed, collapsed.items, bpe_offsets.items, &tmp);
             } else {
                 // No category: a `std::wregex` over the code points.
+                // `std::wstring(cpts.begin(), cpts.end())` converts each one
+                // to `wchar_t`, which is 16 bits on Windows: there the pattern
+                // and the text both lose everything above U+FFFF, and the
+                // whitespace test reads the narrowed value.
                 const wtext = allocator.dupe(u32, cpts) catch oom();
                 defer allocator.free(wtext);
+                const wexpr = allocator.dupe(u32, cpts_regex) catch oom();
+                defer allocator.free(wexpr);
+                if (comptime wchar_bits == 16) {
+                    for (wtext) |*w| w.* = @as(u16, @truncate(w.*));
+                    for (wexpr) |*w| w.* = @as(u16, @truncate(w.*));
+                }
                 for (wtext) |*w| {
                     if (w.* > 0x7F and cptFlagsFromCpt(w.*).is_whitespace) w.* = 0x0B;
                 }
                 tmp.clearRetainingCapacity();
-                break :blk splitStl(u32, wtext, cpts_regex, bpe_offsets.items, &tmp);
+                break :blk splitStl(u32, wtext, wexpr, bpe_offsets.items, &tmp);
             }
         };
         r catch |err| {

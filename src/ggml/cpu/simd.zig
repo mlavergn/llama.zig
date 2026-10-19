@@ -334,7 +334,9 @@ const AvxF32 = struct {
     }
 };
 
-extern fn @"llvm.x86.vcvtps2ph.256"(@Vector(8, f32), i32) @Vector(8, i16);
+// `.x86_64_sysv` for the reason `cpu/convert.zig` gives: Windows x64 would
+// otherwise pass the vector by reference.
+extern fn @"llvm.x86.vcvtps2ph.256"(@Vector(8, f32), i32) callconv(.{ .x86_64_sysv = .{} }) @Vector(8, i16);
 
 /// `GGML_F16_VEC` on AVX: `GGML_F32Cx8`, a `__m256` over eight halves widened
 /// with F16C, so the arithmetic is `f32`'s -- AVX has no half-precision

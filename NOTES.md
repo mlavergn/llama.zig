@@ -5585,3 +5585,79 @@ normalised. 42 functions differ. Each was read in both forms:
 `make x86-qemu-ops-diff X86_INCOMPLETE=1` (`scripts/x86-qemu-ops-diff`)
 reproduces the whole run: both cross-builds into `zig-out/x86-qemu/`, the
 container, the comparison.
+
+## Stage 5: Windows builds (Decision 57)
+
+**Asked for in so many words.** The x86 plan had been a Linux laptop; the
+machine that turned up was a 2015 MacBook Pro running Windows 11 under Boot
+Camp, and the answer to "can we gate AVX on it" was that Windows was always
+meant to be a target. Its firmware leaves VT-x off on a cold boot, so WSL2
+would not have started anyway.
+
+**The measurement, as Stage 5's.** Every ggml and libllama translation unit
+was preprocessed for `x86_64-linux-gnu` and `x86_64-windows-gnu` at
+x86-64-v3 with each platform's zmake defines, every live line attributed
+through the linemarkers, and the two sets subtracted per upstream file: 400
+Windows-only lines in six files, 578 Linux-only. `PLAN.md`, "Windows
+x86_64", has the table. Everything else in ggml and libllama is
+platform-neutral C and C++ -- which is not the same as meaning the same
+thing, and four places do not: `std::mutex` is an `SRWLOCK`,
+`std::random_device` reports zero entropy, `wchar_t` is 16 bits, and
+`stdout`/`stderr` are function calls. Each was found by reading what the
+line compiles to, and each is ported.
+
+**The order the build failed in**, which is the order the work went:
+
+1. **The reference**: zmake had no Windows platform. Adding one compiled
+   everything but `tools/mtmd/mtmd-audio.cpp`, which lost `M_PI` to
+   MinGW's strict-ANSI guard. CMake passes `-std=gnu11`/`gnu++17` -- it
+   leaves `C_EXTENSIONS` on -- and zmake's strict dialects never showed the
+   difference on Apple or glibc. The Windows platform takes CMake's
+   dialects; the others keep the ones their gates were calibrated against.
+2. **`std.lang.VaList`** is a compile error on x86_64 Windows under LLVM, as
+   on aarch64 Linux; `varargs.c` covers it, and `impl.zig_varargs`,
+   `impl.CVaList` and `needsVarargsShim` learned the target.
+3. **pthreads**: `std.c.pthread_mutex_t` is `void` on Windows. The
+   threadpool's lock is `ggml_mutex_t` and now has both arms -- including
+   `ggml_mutex_lock_shared`, which the port had folded into the plain lock
+   because they are one call on pthreads, and which is a reader's hold on an
+   SRW lock. The seven `std::mutex` translations became `impl.CxxMutex`.
+4. **LLVM aborted**: "Intrinsic has incorrect argument type!" on
+   `llvm.x86.vcvtps2ph.256`. The Win64 C convention passes a 256-bit (and a
+   128-bit) vector by reference, so an intrinsic declared `extern fn` with
+   the default `.c` convention reached LLVM with a pointer. `.x86_64_sysv`
+   passes it in a register, as the intrinsic takes it.
+5. **libllama**: `mmap.zig`'s three `_WIN32` arms, the sampler seed, the
+   unicode lock.
+6. **The link**: `sysconf` and a `stderr` symbol, from the CPU device's
+   memory query and five copies of a `stderr` accessor. The device's
+   registry and `GlobalMemoryStatusEx` arms were ported, and the accessors
+   became one, `impl.cStderr`.
+
+**What it builds.** `zig build reference` and `zig build cli` for
+`x86_64-windows-gnu -Dcpu=x86_64_v3 -Dx86-incomplete`: `ggml.lib`,
+`llama.lib`, `llama-ref.lib` and a 6.7 MB `llama-cli.exe`. macOS, Linux
+arm64 and Linux x86_64 still build. `scripts/port-links` read the MinGW header
+references in `win32.zig` as citations of upstream files; they are written
+as prose now, and every new citation resolves.
+
+**First run on Windows.** Our `llama-cli.exe` ran on the laptop and
+generated from Qwen3.5 2B `Q4_K_M`. That exercised the Win32 arms a decode
+reaches: `CreateFileMapping`/`MapViewOfFile`, the SRW-lock thread pool, the
+QPC timer, the UCRT streams. Model loading and the pool are covered; most
+of the other arms have not been measured. Against the zmake reference, with
+both sides cross-built here and pushed:
+
+- `raw_completion.c`, "The capital of France is", 24 tokens: identical.
+- The six `parity-port` prompts at 48 tokens: 4 / 6 identical.
+- `node_dump.c`, CPU, at 1 and 4 threads: 2,750 nodes on both sides, the
+  first 13 identical. The first divergence is node 13, a `MUL_MAT` over
+  `q5_K` weights. `ggml_vec_dot_q5_K_q8_K` is one of step 6's pending
+  kernels, which `-Dx86-incomplete` stands in with the generic one.
+
+So nothing has diverged that is not a stand-in. These become exact gates
+once step 6 is done. One trap: `push --run` and `tty` stream the console
+through ConPTY, which re-renders the screen and draws blank lines as cursor
+positioning. Text read back that way loses them, which at first looked like
+the CLI dropping `\n\n`. A driver that writes its output to a file avoids
+it.

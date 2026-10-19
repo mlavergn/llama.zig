@@ -2,8 +2,9 @@
 // define a C variadic function.
 //
 // Not a port in the usual sense, and not compiled everywhere. Zig 0.17's LLVM
-// backend refuses `std.lang.VaList` on aarch64 outside Apple and Windows
-// ("disabled due to miscompilations"), so `ggml_abort`, `ggml_log_internal`
+// backend refuses `std.lang.VaList` on aarch64 outside Apple and Windows,
+// and on x86_64 Windows ("disabled due to miscompilations"), so
+// `ggml_abort`, `ggml_log_internal`
 // and `ggml_format_name` -- which the C++ half of the build calls with
 // varargs -- are defined here on those targets and nowhere else. Each does
 // only the `va_list` handling and hands the formatted string back to the Zig

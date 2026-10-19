@@ -923,12 +923,12 @@ const ExtraBuffer = struct {
 /// `std.once`.
 var buft_storage: c.struct_ggml_backend_buffer_type = undefined;
 var buft_ready = std.atomic.Value(bool).init(false);
-var buft_mutex: std.c.pthread_mutex_t = .{};
+var buft_mutex: impl.CxxMutex = .{};
 
 fn bufferType() c.ggml_backend_buffer_type_t {
     if (!buft_ready.load(.acquire)) {
-        _ = std.c.pthread_mutex_lock(&buft_mutex);
-        defer _ = std.c.pthread_mutex_unlock(&buft_mutex);
+        buft_mutex.lock();
+        defer buft_mutex.unlock();
         if (!buft_ready.load(.acquire)) {
             buft_storage = .{
                 .iface = .{

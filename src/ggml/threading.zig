@@ -11,12 +11,13 @@
 //! contract is three symbols, the callers are all already Zig, and it proves
 //! the Stage 3 swap mechanism carries over to a `.cpp` file unchanged.
 //!
-//! # Why pthreads and not `std::mutex`
+//! # Why libc++'s primitive and not a Zig mutex
 //!
 //! The C++ holds a namespace-scope `std::mutex` and calls `.lock()` and
-//! `.unlock()`. On this platform libc++'s `std::mutex` *is* a
-//! `pthread_mutex_t` initialised to `PTHREAD_MUTEX_INITIALIZER`, so calling
-//! pthreads directly is the closer translation rather than a substitution.
+//! `.unlock()`. libc++'s `std::mutex` *is* a `pthread_mutex_t` initialised to
+//! `PTHREAD_MUTEX_INITIALIZER` on POSIX and an `SRWLOCK` on Windows, so
+//! `impl.CxxMutex`, which drives exactly those, is the closer translation
+//! rather than a substitution.
 //!
 //! It is also the only workable one. Decision 39: Zig 0.16's `std.Io.Mutex`
 //! takes an `Io` on every lock, and a function entered through a C ABI has
@@ -40,6 +41,7 @@
 //! upstream, but that backend is not compiled here.
 
 const std = @import("std");
+const impl = @import("impl.zig");
 
 /// Mirrors `ggml_critical_section_mutex` (ggml-threading.cpp:4 @c1d0e7a00).
 ///
@@ -47,10 +49,9 @@ const std = @import("std");
 /// exported too, and `scripts/port-coverage` compares the whole symbol list.
 /// Nothing outside this file references it, in the C++ or here.
 ///
-/// Zig's `pthread_mutex_t` carries `PTHREAD_MUTEX_INITIALIZER`'s field values
-/// as its defaults, so `.{}` is a static initialisation with no runtime setup
-/// — the same as libc++'s `constexpr mutex()`.
-export var ggml_critical_section_mutex: std.c.pthread_mutex_t = .{};
+/// `.{}` is a static initialisation with no runtime setup — the same as
+/// libc++'s `constexpr mutex()`.
+export var ggml_critical_section_mutex: impl.CxxMutex = .{};
 
 /// Ports `ggml_critical_section_start` (ggml-threading.cpp:6 @c1d0e7a00).
 ///
@@ -60,14 +61,14 @@ export fn ggml_critical_section_start() callconv(.c) void {
     // the only documented failures here (deadlock, invalid mutex) are bugs
     // rather than conditions. The C++ would terminate; this returns having not
     // acquired it, which is the same unrecoverable state.
-    _ = std.c.pthread_mutex_lock(&ggml_critical_section_mutex);
+    ggml_critical_section_mutex.lock();
 }
 
 /// Ports `ggml_critical_section_end` (ggml-threading.cpp:10 @c1d0e7a00).
 ///
 /// Return: nothing.
 export fn ggml_critical_section_end() callconv(.c) void {
-    _ = std.c.pthread_mutex_unlock(&ggml_critical_section_mutex);
+    ggml_critical_section_mutex.unlock();
 }
 
 // -----------------------------------------------------------------------------

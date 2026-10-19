@@ -32,10 +32,8 @@ const blocks = @import("blocks.zig");
 const c = impl.c;
 
 extern fn fprintf(stream: *anyopaque, fmt: [*:0]const u8, ...) c_int;
-/// libc's `stderr`: `__stderrp` behind a macro on Darwin, itself on glibc.
-fn cStderr() *anyopaque {
-    return @extern(*const *anyopaque, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
-}
+/// libc's `stderr`; see `impl.cStderr`.
+const cStderr = impl.cStderr;
 
 const types = @import("../types.zig");
 

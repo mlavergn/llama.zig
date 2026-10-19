@@ -74,6 +74,7 @@ Settled in review. The plan below assumes all of these.
 | 54 | Vulkan gate machine | **The GB10**, as for CUDA (Decision 43). NVIDIA's driver exposes every extension the shaders probe for -- cooperative matrix 1 and 2, integer dot product, bfloat16 -- so the reference compiles its widest set of arms there. Vulkan gates cannot run on this Mac: it has no Vulkan driver, and MoltenVK would translate to Metal with a reduced extension set. An Arduino UNO Q (Adreno, a mobile Vulkan driver) is available as a later second device; not now. |
 | 55 | Vulkan reference | **`llama.cpp.zmake` gains `-Dvulkan`**, an explicit grant against Decision 18, as Decision 52 was. It builds upstream's own `vulkan-shaders-gen` for the host, runs it once for the header and once per shader file with `glslc`, and asks `glslc` which shader extensions it accepts exactly as `ggml-vulkan/CMakeLists.txt` does. **The toolchain is part of the reference**: which C++ compiles depends on the Vulkan header version and on those `glslc` answers (64 `#if` sites on the seven extension macros, more on `VK_HEADER_VERSION`), and the SPIR-V depends on `glslc`'s optimizer. Both sides of every Vulkan gate are built with the same `glslc` and headers, and the shaders the port embeds are the reference generator's output, identical by construction. |
 | 56 | When Vulkan starts | **Now, as Stage 7, beside Stage 5** -- whose x86 step waits on the laptop. Measured first ("Stage 7 — Vulkan" below), reproducibility before any code, as Stage 6 began. |
+| 57 | Windows | **A target, and x86 is gated on it natively** (asked for on 2026-10-18: "that was always the plan ... get it building on Windows"). `x86_64-windows-gnu` -- MinGW, the only Windows ABI Zig ships a libc for -- at the same `-Dcpu` levels as Linux. **`llama.cpp.zmake` gains a `windows` platform** under that grant, a third against Decision 18: `_CRT_SECURE_NO_WARNINGS` and `ws2_32` from CMake's `WIN32` arms, and CMake's own `gnu11`/`gnu++17` dialects there only (below). The gate machine is Decision 51's laptop: a MacBookPro11,5 (Core i7-4980HQ, Haswell, x86-64-v3, **no AVX-512**, 16 GB) running Windows 11 Pro 26100 under Boot Camp, reached through `inferiseupdater`'s developer link (`push`, `tty`). Its firmware leaves VT-x off, so WSL2 cannot start there; the gates are Windows binaries. |
 
 ---
 
@@ -988,7 +989,7 @@ CPU -- unchanged, as expected.
 
 ## Stage 5 — Cross-platform
 
-Targets: macOS, iOS, Linux arm64, Linux x86_64.
+Targets: macOS, iOS, Linux arm64, Linux x86_64, Windows x86_64.
 
 This section is the measurement, the same way Stage 4 and Stage 6 began:
 cross-builds from this Mac, `zig cc -E` live-line sets per target and CPU
@@ -1004,6 +1005,7 @@ at the CPU configuration Linux arm64 actually builds for.
 | Linux arm64 + CUDA | yes, natively on the GB10 | the four `cuda-*` gates, `arch-model-diff`, `gemma4-assistant-diff` | the CPU path's numerics — below |
 | Linux arm64, CPU only | **yes**, cross-built from this Mac against glibc 2.39 | `GATE_CPU=generic` here. Measured failing — `ops-diff` 86 / 632, `repack-diff` 26 / 60, `node-diff` from node 27, `parity-port --cpu` 2 / 6 — and **exact since step 2**: 650 / 650, 60 / 60, 2,750 nodes, 6 / 6 | the host arms (step 3), `make validate` on Linux (step 4), the GB10 pickup |
 | Linux x86_64 | **at x86-64-v3 with `-Dx86-incomplete`**; by default a compile error naming the first pending kernel | `ops-diff` under QEMU in the podman VM: 492 / 650, every difference a pending quantized kernel | the 39 kernels and `tinyBLAS_Q0_AVX` (step 6), AVX-512 on hardware |
+| Windows x86_64 | **yes, cross-built from this Mac** (`x86_64-windows-gnu`, x86-64-v3, `-Dx86-incomplete` as on Linux): libraries, `libllama-ref`, and our `llama-cli.exe`; the reference's `llama-cli.exe` through `make -C llama.cpp.zmake windows-x86_64` | nothing yet -- see "Windows x86_64" below | run it there; every bit-exact gate there; the Windows pickup |
 
 ### Linux arm64: a different CPU from the one every gate ran on
 
@@ -1265,6 +1267,80 @@ small, and it is wrong today -- in its numerics and in its host arms.
      `repack-diff`, `node-diff` and `parity-port` -- the latter two need
      the laptop or more than the container's 2 GB -- and AVX-512 (v4),
      which QEMU does not emulate, on hardware.
+
+### Windows x86_64
+
+Measured the way Linux was: every ggml and libllama translation unit
+preprocessed for `x86_64-linux-gnu` and `x86_64-windows-gnu` at x86-64-v3,
+the live lines per upstream file subtracted. **400 lines are Windows-only,
+in six files**, and every one is now ported:
+
+| file | Windows-only | what |
+|---|---:|---|
+| `src/llama-mmap.cpp` | 189 | `llama_file` over the Win32 handle behind its `FILE *` (`ReadFile` in 64 MiB chunks, `has_direct_io` true at alignment 1), `CreateFileMappingA` / `MapViewOfFile` / `PrefetchVirtualMemory`, `VirtualLock` growing the working set once |
+| `ggml-cpu/ggml-cpu.c` | 87 | SRW locks and condition variables -- the `_shared` lock and wait are a reader's hold there, not the plain lock -- affinity through `SetThreadAffinityMask`, priority and power-throttling opt-out |
+| `ggml.c` | 56 | `_aligned_malloc`, the `QueryPerformanceCounter` timer, `ggml_fopen` through `_wfopen`, no backtrace |
+| `ggml-cpu/ggml-cpu.cpp` | 32 | the registry's `ProcessorNameString`, `GlobalMemoryStatusEx` |
+| `ggml-backend-dl.cpp` + `.h` | 23 | `LoadLibraryW` with the error dialog suppressed, `GetProcAddress`, `FreeLibrary` |
+| `ggml-backend-reg.cpp` | 13 | `GetModuleFileNameW`, `ggml-*.dll`; with libc++'s `std::filesystem`, a `FindFirstFileW` scan and `\` joins |
+
+**What a line diff cannot see**, found by reading what the same lines mean
+on Windows, and ported:
+
+- `std::mutex` is an `SRWLOCK` in libc++ there; `impl.CxxMutex` (ggml and
+  libllama each) drives whichever the target's libc++ uses.
+- `std::random_device` is `_LIBCPP_USING_WIN32_RANDOM`, whose `entropy()`
+  is 0, so `get_rng_seed` always takes `system_clock` -- which libc++ reads
+  from `GetSystemTimePreciseAsFileTime`.
+- `wchar_t` is 16 bits, so `unicode_regex_split`'s `std::wregex` fallback
+  narrows every code point above U+FFFF, in the pattern and the text alike.
+- `stdout` and `stderr` are `__acrt_iob_func(1)` and `(2)`, not symbols.
+
+**Three toolchain facts it took**, each a build failure first:
+
+- Zig 0.17 refuses `std.lang.VaList` on x86_64 Windows under LLVM
+  ("disabled due to miscompilations"), as on aarch64 Linux, so
+  `src/ggml/varargs.c` defines ggml's three variadics there too.
+- The Win64 C convention passes a vector by reference, so an `extern fn
+  @"llvm.x86..."` declared with the default `.c` reaches LLVM with a pointer
+  operand and aborts the build ("Intrinsic has incorrect argument type").
+  The x86 intrinsics are declared `.x86_64_sysv`, which is what `.c` means on
+  Linux anyway. **Every intrinsic the AVX2 kernels add must be declared the
+  same way.**
+- MinGW's `<math.h>` hides `M_PI` under `__STRICT_ANSI__`, and
+  `tools/mtmd/mtmd-audio.cpp` defines `_USE_MATH_DEFINES` too late. CMake
+  never sees it because it compiles `-std=gnu11`/`gnu++17` everywhere
+  (`C_EXTENSIONS`/`CXX_EXTENSIONS` default on); zmake's other platforms use
+  the strict dialects they were verified and calibrated with, so only its
+  Windows platform takes CMake's.
+
+**Open, and only a run on Windows can settle it:** libc++'s
+`regex_traits<wchar_t>` classifies through the C library's `iswctype`, and
+the UCRT's "C" locale may not be ASCII-only the way Apple's is. `regex-diff`
+and `unicode-diff` built for Windows answer it.
+
+### Windows pickup
+
+Run on the Windows laptop (Decision 57), through `inferiseupdater push` and
+`tty`:
+
+- **Run, at `-Dx86-incomplete`.** Our `llama-cli.exe` loads Qwen3.5 2B
+  `Q4_K_M` and generates. `harness/raw_completion.c` linked against each
+  side gives the same 24 tokens on "The capital of France is". The six
+  `parity-port` prompts at 48 tokens: 4 / 6 identical, 2 diverge partway.
+  `harness/node_dump.c` (CPU, 1 and 4 threads): 2,750 nodes on both sides,
+  the first 13 identical. The first divergent node is node 13, a `q5_K`
+  `MUL_MAT`, and `ggml_vec_dot_q5_K_q8_K` is a pending stand-in. Repeat all
+  three when step 6 lands: they become exact gates once nothing is stood
+  in. The drivers ran through `push --run` with stdout to a file. ConPTY
+  re-renders the console, drawing blank lines as cursor moves, so text read
+  back through `tty` is not byte-faithful.
+- `ops-diff` and `repack-diff` natively, against the zmake reference built
+  for `x86_64-windows-gnu`: what `make x86-qemu-ops-diff` runs under QEMU,
+  on Intel silicon and the Windows CRT's libm.
+- `regex-diff`, `unicode-diff`, `libcxx-diff` and `host-arms-diff` built
+  for Windows: the `wchar_t` classification question above, the Windows
+  priority and affinity arms, and the seed.
 
 ### GB10 pickup
 

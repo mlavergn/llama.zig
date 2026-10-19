@@ -22,6 +22,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const impl = @import("impl.zig");
+const win32 = @import("win32.zig");
 const c = impl.c;
 
 // -----------------------------------------------------------------------------
@@ -43,13 +44,20 @@ extern fn backtrace(buffer: [*]?*anyopaque, size: c_int) c_int;
 extern fn backtrace_symbols_fd(buffer: [*]const ?*anyopaque, size: c_int, fd: c_int) void;
 
 /// libc's `stdout` and `stderr`, which Darwin names `__stdoutp` and
-/// `__stderrp` behind a macro and glibc exports as themselves.
+/// `__stderrp` behind a macro, glibc exports as themselves, and MinGW's UCRT
+/// hands out through `__acrt_iob_func`.
 fn cStdout() *anyopaque {
+    if (comptime is_windows) return win32.__acrt_iob_func(1);
     return @extern(*const *anyopaque, .{ .name = if (builtin.os.tag.isDarwin()) "__stdoutp" else "stdout" }).*;
 }
 fn cStderr() *anyopaque {
+    if (comptime is_windows) return win32.__acrt_iob_func(2);
     return @extern(*const *anyopaque, .{ .name = if (builtin.os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
 }
+
+/// `_WIN32`, and with this target's toolchain also `__MINGW32__`: the C
+/// tests one or the other, and they coincide here.
+const is_windows = builtin.os.tag == .windows;
 
 extern fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) c_int;
 
@@ -106,12 +114,15 @@ fn printBacktraceSymbols() void {
     backtrace_symbols_fd(&trace, nptrs, std.posix.STDERR_FILENO);
 }
 
-/// Ports `ggml_print_backtrace` (ggml.c:157 @c1d0e7a00).
+/// Ports `ggml_print_backtrace`, `ggml_print_backtrace` (ggml.c:157, 238
+/// @c1d0e7a00): the Unix arm and the `#else` that prints nothing.
 ///
 /// Honours `GGML_NO_BACKTRACE`. The C also honours `GGML_BACKTRACE_LLDB` on
 /// macOS, forking to attach a debugger; that path is not ported, because it is
-/// documented upstream as crashing Terminal and is opt-in only.
+/// documented upstream as crashing Terminal and is opt-in only. Windows takes
+/// the `#else`, which does not read the variable either.
 export fn ggml_print_backtrace() void {
+    if (comptime is_windows) return;
     if (getenv("GGML_NO_BACKTRACE") != null) return;
     if (comptime builtin.os.tag == .linux) return printBacktraceLinux();
     printBacktraceSymbols();
@@ -328,10 +339,14 @@ export fn ggml_log_set(log_callback: c.ggml_log_callback, user_data: ?*anyopaque
 /// what the C does under `TARGET_OS_OSX`. The alignment argument is unused on
 /// that path because `vm_allocate` always returns page-aligned memory. Every
 /// other target -- iOS included, since `TARGET_OS_OSX` is false there -- takes
-/// the C's `#else` arm, `posix_memalign` at 64 bytes.
+/// the C's `#else` arm, `posix_memalign` at 64 bytes. MinGW takes the first
+/// arm, `_aligned_malloc` at 64 bytes, which has neither the zero-size warning
+/// nor the failure log.
 ///
 /// Return: the allocation, or null on failure after logging why.
 export fn ggml_aligned_malloc(size: usize) ?*anyopaque {
+    if (comptime is_windows) return win32._aligned_malloc(size, 64);
+
     if (size == 0) {
         impl.logWarn("Behavior may be unexpected when allocating 0 bytes for ggml_aligned_malloc!\n", .{});
         return null;
@@ -384,8 +399,9 @@ fn logAllocFailure(result: c_int, size: usize) void {
 ///
 /// On macOS `size` is required, not decorative: `vm_deallocate` needs the
 /// length that was allocated, so this cannot be a plain `free`. Elsewhere it
-/// is the C's plain `free`, and `size` is unused.
+/// is the C's plain `free`, or on MinGW `_aligned_free`, and `size` is unused.
 export fn ggml_aligned_free(ptr: ?*anyopaque, size: usize) void {
+    if (comptime is_windows) return win32._aligned_free(ptr);
     if (comptime builtin.os.tag != .macos) return std.c.free(ptr);
     const p = ptr orelse return;
     _ = vm_deallocate(mach_task_self_, @intFromPtr(p), size);
@@ -495,20 +511,57 @@ export fn ggml_fp32_to_bf16_row(x: [*]const f32, y: [*]c.ggml_bf16_t, n: i64) vo
 // -----------------------------------------------------------------------------
 // Timing
 
-/// Ports `ggml_time_init` (ggml.c:560 @c1d0e7a00).
-///
-/// A no-op outside Windows, where the C initialises a performance counter.
-export fn ggml_time_init() void {}
+/// Ports `timer_freq`, `timer_start` (ggml.c:527, 527 @c1d0e7a00): the
+/// performance counter's frequency and its reading at `ggml_time_init`.
+/// Windows only.
+var timer_freq: i64 = 0;
+var timer_start: i64 = 0;
 
-/// Ports `ggml_time_ms` (ggml.c:561 @c1d0e7a00).
+/// Ports `ggml_time_init_once` (ggml.c:528 @c1d0e7a00). Subtracting the start
+/// keeps the `* 1000000` in `ggml_time_us` from overflowing on a long uptime.
+fn timeInitOnce(once: *win32.INIT_ONCE, param: ?*anyopaque, ctx: ?*?*anyopaque) callconv(.winapi) win32.BOOL {
+    _ = once;
+    _ = param;
+    _ = ctx;
+    var t: i64 = undefined;
+    _ = win32.QueryPerformanceFrequency(&t);
+    timer_freq = t;
+    _ = win32.QueryPerformanceCounter(&t);
+    timer_start = t;
+    return 1;
+}
+
+/// Ports `ggml_time_init`, `ggml_time_init` (ggml.c:545, 560 @c1d0e7a00).
+///
+/// A no-op outside Windows, where the C initialises a performance counter
+/// once per process.
+export fn ggml_time_init() void {
+    if (comptime !is_windows) return;
+    const S = struct {
+        var once: win32.INIT_ONCE = std.os.windows.INIT_ONCE_STATIC_INIT;
+    };
+    _ = win32.InitOnceExecuteOnce(&S.once, timeInitOnce, null, null);
+}
+
+/// Ports `ggml_time_ms`, `ggml_time_ms` (ggml.c:549, 561 @c1d0e7a00).
 export fn ggml_time_ms() i64 {
+    if (comptime is_windows) {
+        var t: i64 = undefined;
+        _ = win32.QueryPerformanceCounter(&t);
+        return @divTrunc((t - timer_start) * 1000, timer_freq);
+    }
     var ts: std.c.timespec = undefined;
     if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
     return @as(i64, ts.sec) * 1000 + @divTrunc(@as(i64, ts.nsec), 1_000_000);
 }
 
-/// Ports `ggml_time_us` (ggml.c:567 @c1d0e7a00).
+/// Ports `ggml_time_us`, `ggml_time_us` (ggml.c:554, 567 @c1d0e7a00).
 export fn ggml_time_us() i64 {
+    if (comptime is_windows) {
+        var t: i64 = undefined;
+        _ = win32.QueryPerformanceCounter(&t);
+        return @divTrunc((t - timer_start) * 1000000, timer_freq);
+    }
     var ts: std.c.timespec = undefined;
     if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
     return @as(i64, ts.sec) * 1_000_000 + @divTrunc(@as(i64, ts.nsec), 1_000);
@@ -595,11 +648,41 @@ test "aligned malloc returns aligned memory and frees it" {
 // -----------------------------------------------------------------------------
 // File access
 
-/// Ports `ggml_fopen` (ggml.c:606 @c1d0e7a00).
+/// Ports `ggml_fopen` (ggml.c:606 @c1d0e7a00), both arms.
 ///
-/// A plain `fopen`. The C wraps a `_WIN32` branch that converts both arguments
-/// from UTF-8 to wide characters and calls `_wfopen`; on every other platform
-/// it is the `#else` below, and only that branch is ported.
+/// A plain `fopen`, except on Windows, where both arguments are converted from
+/// UTF-8 to wide characters and the file is opened with `_wfopen`, so a path
+/// outside the ANSI code page still opens.
 pub export fn ggml_fopen(fname: [*:0]const u8, mode: [*:0]const u8) ?*std.c.FILE {
-    return fopen(fname, mode);
+    if (comptime !is_windows) return fopen(fname, mode);
+
+    var file: ?*std.c.FILE = null;
+    if (mbstowcs(fname)) |wfname| {
+        if (mbstowcs(mode)) |wmode| {
+            file = win32._wfopen(wfname, wmode);
+            std.c.free(wmode);
+        }
+        std.c.free(wfname);
+    }
+    return file;
+}
+
+/// Ports `ggml_mbstowcs` (ggml.c:587 @c1d0e7a00): UTF-8 to a `malloc`ed,
+/// NUL-terminated wide string, or null with `errno` set to `EINVAL`.
+fn mbstowcs(mbs: [*:0]const u8) ?[*:0]u16 {
+    var wlen = win32.MultiByteToWideChar(win32.CP_UTF8, 0, mbs, -1, null, 0);
+    if (wlen == 0) {
+        std.c._errno().* = einval;
+        return null;
+    }
+
+    const wbuf: [*]u16 = @ptrCast(@alignCast(impl.ggmlMalloc(@as(usize, @intCast(wlen)) * @sizeOf(u16)).?));
+    wlen = win32.MultiByteToWideChar(win32.CP_UTF8, 0, mbs, -1, wbuf, wlen);
+    if (wlen == 0) {
+        std.c.free(wbuf);
+        std.c._errno().* = einval;
+        return null;
+    }
+
+    return @ptrCast(wbuf);
 }
