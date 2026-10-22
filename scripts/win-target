@@ -1,0 +1,67 @@
+# Sourced, not run: where an in-process gate builds for and runs.
+#
+# By default, the host: `-mcpu=baseline`, `zig-out/lib/libggml.a`, the host's
+# system libraries (scripts/platform-libs), and the harness run in place.
+#
+# With WIN_X86=1, the Windows laptop (PLAN.md, Decision 57; "Windows
+# pickup"): the harness is cross-built for `x86_64-windows-gnu` at X86_CPU
+# against the Windows port `make win-host-diffs` builds, and run there through
+# scripts/win-run -- so the reference half is the C++ compiled for Windows
+# against Zig's libc++ over MinGW's UCRT, which is what the Windows reference
+# links. Each harness compares in one process and prints its own verdict, so
+# only that verdict has to come back.
+#
+# Sets:
+#   GATE_CC      flags for a `zig cc`/`zig c++` compile
+#   GATE_EXE     flags for a `zig build-exe`
+#   GATE_TC      flags for a `zig translate-c` of llama.h
+#   GATE_LIBDIR  the directory holding the port's libggml/libllama
+#   GATE_GGML    the port's ggml archive
+#   GATE_SUFFIX  the executable suffix
+#   PLATFORM_LIBS  the system libraries (empty for Windows: MinGW's come with -lc)
+# and defines `gate_run <exe> <package name> [args...]`.
+#
+#   X86_CPU=x86_64_v3          the Windows level; the laptop has no AVX-512
+#   X86_AGENT, INFERISEUPDATER   as scripts/win-run takes them
+#   X86_BUILD_ONLY=1           build the program and stop
+
+if [ -n "${WIN_X86:-}" ]; then
+    X86_CPU="${X86_CPU:-x86_64_v3}"
+    GATE_CC=(-target x86_64-windows-gnu -mcpu="$X86_CPU")
+    GATE_EXE=(-target x86_64-windows-gnu -mcpu "$X86_CPU")
+    # No -lc: `zig translate-c -target x86_64-windows-gnu -lc` spins at
+    # 100% CPU for minutes and never finishes (Zig 0.17.0), and llama.h needs
+    # nothing beyond the freestanding headers Zig supplies anyway.
+    GATE_TC=(-target x86_64-windows-gnu)
+    GATE_LIBDIR="$ROOT/zig-out/win-host/$X86_CPU/port/lib"
+    GATE_GGML="$GATE_LIBDIR/ggml.lib"
+    GATE_SUFFIX=.exe
+    PLATFORM_LIBS=()
+    # The program is kept under zig-out/win-host/, with the raw stream
+    # scripts/win-run saves beside it; X86_BUILD_ONLY=1 stops there.
+    gate_run() {
+        local src="$1" keep="$ROOT/zig-out/win-host/$X86_CPU/$(basename "$1")" name="$2"
+        shift 2
+        mkdir -p "$(dirname "$keep")" && cp "$src" "$keep" || return 2
+        [ -n "${X86_BUILD_ONLY:-}" ] && { echo "built $keep"; return 0; }
+        "$ROOT/scripts/win-run" "$keep" "$name" "$@" | tee "$keep.result"
+        grep -aq '^PASS: ' "$keep.result" && return 0
+        grep -aq '^FAIL: ' "$keep.result" && return 1
+        echo "FAIL: no verdict from the laptop -- see $keep.log" >&2
+        return 2
+    }
+else
+    GATE_CC=(-mcpu=baseline)
+    GATE_EXE=(-mcpu baseline)
+    GATE_TC=(-lc)
+    GATE_LIBDIR="$ROOT/zig-out/lib"
+    GATE_GGML="$GATE_LIBDIR/libggml.a"
+    GATE_SUFFIX=
+    . "$ROOT/scripts/platform-libs"
+    platform_libs exe
+    gate_run() {
+        local exe="$1"
+        shift 2
+        "$exe" "$@"
+    }
+fi

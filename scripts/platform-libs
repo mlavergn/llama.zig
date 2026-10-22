@@ -52,3 +52,29 @@ platform_libs() {
         fi
     done
 }
+
+# `libm_check <ref binary> <port binary>`: fail unless both sides take their
+# libm functions from the same place.
+#
+# Zig's compiler_rt defines `expf` and `logf`, weakly, and is linked as one
+# object: once anything in a link needs it -- `__divti3`, say -- those two
+# come with it, and a regular object's weak definition beats the C library's
+# shared one. The CUDA build's `@panic("OOM")` did exactly that, through the
+# panic handler's `std.Io.Threaded`, and every `expf`/`logf` the port called
+# moved by an ULP against glibc's while `expm1f` and `tanhf`, which
+# compiler_rt lacks, did not (NOTES.md, "The GB10 pickup"). A bit-exact gate
+# would report that as a kernel fault; this names it.
+libm_check() {
+    local f defs ref port
+    defs() {
+        nm "$1" 2>/dev/null | awk '$2 ~ /^[tTwW]$/ {print $3}' | sed 's/^_//' \
+            | grep -xE 'expf|logf|expm1f|log1pf|tanhf|sinf|cosf|powf|sqrtf|erff|exp|log|pow|sin|cos|tanh' | sort -u
+    }
+    ref="$(defs "$1")"
+    port="$(defs "$2")"
+    if [ "$ref" != "$port" ]; then
+        echo "FAIL: the two sides take libm from different places -- defined in the reference: [${ref//$'\n'/ }], in the port: [${port//$'\n'/ }]" >&2
+        echo "      a linked-in compiler_rt (or another libm) is shadowing the C library's; see scripts/platform-libs" >&2
+        return 1
+    fi
+}

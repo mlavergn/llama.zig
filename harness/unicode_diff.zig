@@ -19,10 +19,16 @@
 //!   over upstream's vocab test strings and random strings, with and
 //!   without the byte encoding.
 //!
-//! Usage: unicode_diff <sets-file> <corpus.inp>...
+//! Its inputs -- the pattern sets and upstream's `.inp` corpus files -- are
+//! compiled in through the `inputs` module the script generates, rather than
+//! read at run time: `scripts/win-host-diffs` runs this on the Windows
+//! laptop, and `inferiseupdater push` carries a program there but no files.
+//!
+//! Usage: unicode_diff
 
 const std = @import("std");
 const unicode = @import("unicode");
+const inputs = @import("inputs");
 
 extern fn ref_uni_flags(cpt: u32) u16;
 extern fn ref_uni_tolower(cpt: u32) u32;
@@ -199,10 +205,9 @@ fn sweepByteMap() void {
 
 const Set = []const []const u8;
 
-/// Reads the sets the script extracted: a `SET` line opens each, and each
+/// Parses the sets the script extracted: a `SET` line opens each, and each
 /// pattern follows as a line of hex.
-fn readSets(path: []const u8) []Set {
-    const text = readFile(path);
+fn parseSets(text: []const u8) []Set {
     var sets: std.ArrayList(Set) = .empty;
     var cur: std.ArrayList([]const u8) = .empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
@@ -218,22 +223,6 @@ fn readSets(path: []const u8) []Set {
     }
     if (cur.items.len != 0) sets.append(gpa, cur.toOwnedSlice(gpa) catch unreachable) catch unreachable;
     return sets.toOwnedSlice(gpa) catch unreachable;
-}
-
-fn readFile(path: []const u8) []u8 {
-    const f = std.c.fopen(@ptrCast(gpa.dupeSentinel(u8, path, 0) catch unreachable), "rb") orelse {
-        std.debug.print("cannot open {s}\n", .{path});
-        std.process.exit(2);
-    };
-    defer _ = std.c.fclose(f);
-    var out: std.ArrayList(u8) = .empty;
-    var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = std.c.fread(&buf, 1, buf.len, f);
-        if (n == 0) break;
-        out.appendSlice(gpa, buf[0..n]) catch unreachable;
-    }
-    return out.toOwnedSlice(gpa) catch unreachable;
 }
 
 /// Patterns no vocabulary uses, for the paths the real sets do not reach:
@@ -352,13 +341,7 @@ fn compareSplit(text: []const u8, set: Set, byte_encode: bool) void {
     }
 }
 
-pub fn main(init: std.process.Init) !void {
-    const args = try init.minimal.args.toSlice(init.arena.allocator());
-    if (args.len < 2) {
-        std.debug.print("usage: unicode_diff <sets-file> <corpus.inp>...\n", .{});
-        std.process.exit(2);
-    }
-
+pub fn main() !void {
     var prng = std.Random.DefaultPrng.init(0x0c0de);
     const r = prng.random();
 
@@ -369,11 +352,10 @@ pub fn main(init: std.process.Init) !void {
     sweepByteMap();
     const c2 = checks;
 
-    const sets = readSets(args[1]);
+    const sets = parseSets(inputs.sets);
     var corpus: std.ArrayList([]const u8) = .empty;
     var seen: std.StringHashMapUnmanaged(void) = .empty;
-    for (args[2..]) |path| {
-        const text = readFile(path);
+    for (inputs.corpus) |text| {
         var it = std.mem.splitSequence(u8, text, "\n__ggml_vocab_test__\n");
         while (it.next()) |s| {
             if ((try seen.getOrPut(gpa, s)).found_existing) continue;

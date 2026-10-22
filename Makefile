@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-repro x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port ref ref-chat validate xcframework xcframework-check perf perf-cpu
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-repro x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -16,6 +16,11 @@ ZIG_CC  = $(CURDIR)/scripts/zigcc
 ZIG_CXX = $(CURDIR)/scripts/zigcxx
 
 MODEL   ?= Qwen3.5-2B-Q4_K_M.gguf
+# `make oneshot` / `make chat` models: the zigtrain base and SFT models
+# `zigtrain export` writes.
+TRAIN_GGUF       ?= $(or $(ZIGTRAIN_BASE_DIR),$(HOME)/.cache/zigtrain)/gguf
+TRAIN_MODEL      ?= $(TRAIN_GGUF)/plain-d6_base_005000.gguf
+TRAIN_CHAT_MODEL ?= $(TRAIN_GGUF)/plain-d6_sft_001499.gguf
 PROMPT  ?= The capital of France is
 NPRED   ?= 512
 TEMP    ?= 0.8
@@ -283,6 +288,17 @@ x86-node-diff:
 
 x86-gates: x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff
 
+# The Windows pickup's host gates (PLAN.md, "Windows pickup"), on the laptop:
+# host-arms-diff (priority, power throttling, affinity, the clock seed),
+# libcxx-diff, regex-diff and unicode-diff, each cross-built by its own
+# script under WIN_X86=1 (scripts/win-target). host-arms-diff goes first: it
+# builds the Windows port the other three link.
+win-host-diffs:
+	WIN_X86=1 ./scripts/host-arms-diff
+	WIN_X86=1 ./scripts/libcxx-diff
+	WIN_X86=1 ./scripts/regex-diff
+	WIN_X86=1 ./scripts/unicode-diff
+
 # The CPU backend's host arms -- thread priority, CPU affinity, NUMA, the
 # sampler's default seed -- read back from the OS on every worker, ported
 # against reference, one process per scenario. Needs no model. The gate for
@@ -343,6 +359,14 @@ batch-diff:
 chat-diff:
 	zig build reference --release=fast
 	./scripts/chat-diff
+
+# The CLI's Jinja chat templates (cli/chat.zig over zigjinja) against
+# upstream's common/jinja, on every template in llama.cpp/models/templates:
+# the text, which side raises, and that ours never trusts a byte upstream
+# marks as input. See the header of scripts/jinja-diff.
+jinja-diff:
+	zig build reference --release=fast
+	./scripts/jinja-diff
 
 # The context, the memory modules, the graph and Qwen3.5's graph: a decode
 # script run through llama.h and through the port, every graph node, every
@@ -459,14 +483,24 @@ smoke:
 # No -n: a reply runs to end-of-generation, as upstream's conversation mode
 # does. NPRED is for the port/ref pair, where 512 tokens keeps a diff short;
 # here it cut replies off mid-answer. ARGS="-n N" still caps it.
+# --jinja renders the model's own chat template, so a template's literal
+# control tokens (a leading <|bos|>) are honoured.
 cli: buildcli
-	@$(PORT_CLI) -m "$(MODEL)" -cnv --temp $(TEMP) -s $(SEED) $(ARGS)
+	@$(PORT_CLI) -m "$(MODEL)" -cnv --jinja --temp $(TEMP) -s $(SEED) $(ARGS)
 
 # Run our CLI on a raw completion.
 port: buildcli
 	@printf '\n$$ %s -m %s -p %s -n %s --temp %s -s %s %s\n' "$(PORT_CLI)" "$(MODEL)" "'$(PROMPT)'" "$(NPRED)" "$(TEMP)" "$(SEED)" "$(ARGS)"
 	@$(PORT_CLI) -m "$(MODEL)" -p "$(PROMPT)" -n $(NPRED) --temp $(TEMP) -s $(SEED) -st $(ARGS)
 	@printf '\n'
+
+# Run `make port` on the zigtrain base model; TRAIN_MODEL picks another.
+oneshot: MODEL = $(TRAIN_MODEL)
+oneshot: port
+
+# Run `make cli` on the zigtrain SFT model; TRAIN_CHAT_MODEL picks another.
+chat: MODEL = $(TRAIN_CHAT_MODEL)
+chat: cli
 
 # Run the same completion loop linked against the stock C libraries.
 #

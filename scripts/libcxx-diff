@@ -9,6 +9,7 @@
 # and compares every result in one process. See harness/libcxx_diff.zig.
 #
 # Usage: scripts/libcxx-diff
+#   WIN_X86=1   build for the Windows laptop and run there (scripts/win-target)
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
@@ -16,13 +17,17 @@ cd "$ROOT" || exit 2
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-zig c++ -mcpu=baseline -std=c++17 -O2 \
+# The target. This harness links no library of ours, so nothing else from
+# scripts/win-target is used.
+. scripts/win-target
+
+zig c++ "${GATE_CC[@]}" -std=c++17 -O2 \
     -c harness/libcxx_ref.cpp -o "$tmp/ref.o" 2>"$tmp/err" \
     || { echo "FAIL: cannot compile the reference" >&2; head -10 "$tmp/err" >&2; exit 1; }
 
-zig build-exe -mcpu baseline -femit-bin="$tmp/libcxx_diff" -Ofast -lc \
+zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/libcxx_diff$GATE_SUFFIX" -Ofast -lc \
     --dep libcxx -Mroot=harness/libcxx_diff.zig -Mlibcxx=src/llama/libcxx.zig \
     "$tmp/ref.o" -lc++ 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
 
-"$tmp/libcxx_diff"
+gate_run "$tmp/libcxx_diff$GATE_SUFFIX" llamazig-libcxx-diff

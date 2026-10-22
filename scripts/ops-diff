@@ -71,6 +71,7 @@ zig cc -mcpu="$GATE_CPU" harness/ops_dump.c -o "$tmp/port" -std=c11 -w -O2 "${IN
     zig-out/lib/libggml.a -lc++ \
     ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/port.log" \
     || { echo "FAIL: could not link against the ported libraries" >&2; tail -20 "$tmp/port.log" >&2; exit 1; }
+libm_check "$tmp/ref" "$tmp/port" || exit 1
 
 # The reference writes its quantized blocks; the port replays them. The two
 # builds' quantizers do not agree (Q6_K differs, Q4_K and Q8_0 match), and that

@@ -289,7 +289,7 @@ fn graphUpdateRequired(cuda_ctx: *Context, cgraph: *impl.CGraph) bool {
         res = true;
         // `resize` value-initialises the new elements.
         const old = graph.node_props.items.len;
-        graph.node_props.resize(allocator, n) catch @panic("OOM");
+        graph.node_props.resize(allocator, n) catch impl.abort("ggml-cuda: out of memory");
         if (n > old) @memset(std.mem.sliceAsBytes(graph.node_props.items[old..]), 0);
     }
 
@@ -433,7 +433,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_gr
                     conc.tryLaunch(ns[i - 1]);
                     if (conc.is_active) {
                         // `stream_mapping[node]` inserts 0 when absent.
-                        const gop = conc.event.?.stream_mapping.getOrPut(allocator, node) catch @panic("OOM");
+                        const gop = conc.event.?.stream_mapping.getOrPut(allocator, node) catch impl.abort("ggml-cuda: out of memory");
                         if (!gop.found_existing) gop.value_ptr.* = 0;
                         cuda_ctx.curr_stream_no = gop.value_ptr.*;
                         impl.logDebug("Setting stream no to %d for node %s\n", .{ cuda_ctx.curr_stream_no, @as([*:0]const u8, @ptrCast(&node.name)) });
@@ -496,7 +496,7 @@ fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     var node_to_idx: std.AutoHashMapUnmanaged(*const Tensor, usize) = .empty;
     defer node_to_idx.deinit(allocator);
     const ns = nodes(cgraph);
-    for (ns, 0..) |node, i| node_to_idx.put(allocator, node, i) catch @panic("OOM");
+    for (ns, 0..) |node, i| node_to_idx.put(allocator, node, i) catch impl.abort("ggml-cuda: out of memory");
 
     for (cuda_ctx.concurrent_stream_context.concurrent_events.values()) |*ev| {
         var positions: std.ArrayList(usize) = .empty;
@@ -505,7 +505,7 @@ fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
         var all_found = true;
         for (ev.original_order.items) |orig| {
             if (node_to_idx.get(orig)) |idx| {
-                positions.append(allocator, idx) catch @panic("OOM");
+                positions.append(allocator, idx) catch impl.abort("ggml-cuda: out of memory");
             } else {
                 all_found = false;
                 break;
@@ -649,12 +649,12 @@ pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgra
 
     const ns = nodes(cgraph);
     for (ns, 0..) |node, node_idx| {
-        node_indices.put(allocator, node, node_idx) catch @panic("OOM");
+        node_indices.put(allocator, node, node_idx) catch impl.abort("ggml-cuda: out of memory");
         if (isNoop(node)) continue;
         for (node.src) |src| {
             //TODO: check why nrows > 1 fails
             if (!isNoop(node) and c.ggml_nrows(node) <= 1) {
-                const gop = fan_out.getOrPut(allocator, src) catch @panic("OOM");
+                const gop = fan_out.getOrPut(allocator, src) catch impl.abort("ggml-cuda: out of memory");
                 if (!gop.found_existing) gop.value_ptr.* = 0;
                 gop.value_ptr.* += 1;
             }
@@ -692,8 +692,8 @@ pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgra
         for (ns[root_node_idx + 1 ..]) |node| {
             if (!isNoop(node) and dependsOn(node, root_node)) {
                 var branch: std.ArrayList(*const Tensor) = .empty;
-                branch.append(allocator, node) catch @panic("OOM");
-                nodes_per_branch.append(allocator, branch) catch @panic("OOM");
+                branch.append(allocator, node) catch impl.abort("ggml-cuda: out of memory");
+                nodes_per_branch.append(allocator, branch) catch impl.abort("ggml-cuda: out of memory");
             }
         }
 
@@ -716,7 +716,7 @@ pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgra
                 if (belongsToBranch(curr_node, b.items)) {
                     //continue accumulating
                     if (std.mem.indexOfScalar(*const Tensor, b.items, curr_node) == null) {
-                        b.append(allocator, curr_node) catch @panic("OOM");
+                        b.append(allocator, curr_node) catch impl.abort("ggml-cuda: out of memory");
                     }
                     found_branch = true;
                 }
@@ -724,7 +724,7 @@ pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgra
 
             if (!found_branch and isNoop(curr_node)) {
                 // we can put it in any branch because it will be ignored
-                nodes_per_branch.items[0].append(allocator, curr_node) catch @panic("OOM");
+                nodes_per_branch.items[0].append(allocator, curr_node) catch impl.abort("ggml-cuda: out of memory");
             }
         }
 
@@ -736,7 +736,7 @@ pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgra
         event.join_node = join;
 
         for (nodes_per_branch.items, 0..) |b, branch_idx| {
-            for (b.items) |n| event.stream_mapping.put(allocator, n, @intCast(branch_idx + 1)) catch @panic("OOM");
+            for (b.items) |n| event.stream_mapping.put(allocator, n, @intCast(branch_idx + 1)) catch impl.abort("ggml-cuda: out of memory");
         }
 
         const fork_node_idx = node_indices.get(root_node).?;
@@ -757,20 +757,20 @@ pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgra
         }
 
         // Save the original order of nodes in this region before interleaving
-        for (ns[fork_node_idx + 1 .. join_node_idx]) |n| event.original_order.append(allocator, n) catch @panic("OOM");
+        for (ns[fork_node_idx + 1 .. join_node_idx]) |n| event.original_order.append(allocator, n) catch impl.abort("ggml-cuda: out of memory");
 
         const concurrent_events = &stream_context.concurrent_events;
         impl.assert(!concurrent_events.contains(root_node), "concurrent_events.find(root_node) == concurrent_events.end()");
-        concurrent_events.put(allocator, root_node, event) catch @panic("OOM");
+        concurrent_events.put(allocator, root_node, event) catch impl.abort("ggml-cuda: out of memory");
         keep = true;
         impl.logDebug("Adding stream at node %s %p\n", .{ @as([*:0]const u8, @ptrCast(&root_node.name)), root_node });
-        concurrent_node_ranges.append(allocator, .{ fork_node_idx, join_node_idx }) catch @panic("OOM");
+        concurrent_node_ranges.append(allocator, .{ fork_node_idx, join_node_idx }) catch impl.abort("ggml-cuda: out of memory");
 
         // interleave tensors to extend lifetimes so that ggml graph doesn't
         // recycle them
         var fronts: std.ArrayList(usize) = .empty;
         defer fronts.deinit(allocator);
-        fronts.appendNTimes(allocator, 0, n_branches) catch @panic("OOM");
+        fronts.appendNTimes(allocator, 0, n_branches) catch impl.abort("ggml-cuda: out of memory");
         while (current_node_idx < join_node_idx) {
             const branch = nodes_per_branch.items[current_branch_idx].items;
             const front = &fronts.items[current_branch_idx];

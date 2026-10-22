@@ -212,7 +212,7 @@ fn bufferTypeAllocBuffer(buft: c.ggml_backend_buffer_type_t, size: usize) callco
         return null;
     }
 
-    const ctx = allocator.create(BufferCtx) catch @panic("OOM");
+    const ctx = allocator.create(BufferCtx) catch impl.abort("ggml-cuda: out of memory");
     ctx.* = .{ .device = device, .dev_ptr = dev_ptr };
     _ = std.fmt.bufPrintSentinel(&ctx.name, common.name ++ "{d}", .{device}, 0) catch unreachable;
 
@@ -362,10 +362,10 @@ fn commInit(backends: [*c]c.ggml_backend_t, n_backends: usize) callconv(.c) ?*an
         if (!isCuda(backends[i])) return null;
     }
 
-    const ret = allocator.create(CommContext) catch @panic("OOM");
+    const ret = allocator.create(CommContext) catch impl.abort("ggml-cuda: out of memory");
     ret.* = .{
-        .backends = allocator.dupe(c.ggml_backend_t, backends[0..n_backends]) catch @panic("OOM"),
-        .dev_ids = allocator.alloc(c_int, n_backends) catch @panic("OOM"),
+        .backends = allocator.dupe(c.ggml_backend_t, backends[0..n_backends]) catch impl.abort("ggml-cuda: out of memory"),
+        .dev_ids = allocator.alloc(c_int, n_backends) catch impl.abort("ggml-cuda: out of memory"),
     };
     for (0..n_backends) |i| ret.dev_ids[i] = backendCtx(backends[i]).device;
 
@@ -890,7 +890,7 @@ fn deviceEventNew(dev: c.ggml_backend_dev_t) callconv(.c) c.ggml_backend_event_t
     common.setDevice(deviceCtx(dev).device);
     var event: cu.cudaEvent_t = null;
     cudaCheck(cu.cudaEventCreateWithFlags(&event, cu.cudaEventDisableTiming), "cudaEventCreateWithFlags(&event, cudaEventDisableTiming)", @src());
-    const e = allocator.create(c.struct_ggml_backend_event) catch @panic("OOM");
+    const e = allocator.create(c.struct_ggml_backend_event) catch impl.abort("ggml-cuda: out of memory");
     e.* = .{ .device = dev, .context = event };
     return e;
 }
@@ -1077,7 +1077,7 @@ pub fn init(device: c_int) callconv(.c) c.ggml_backend_t {
     }
 
     const ctx = common.Context.create(device);
-    const backend = allocator.create(c.struct_ggml_backend) catch @panic("OOM");
+    const backend = allocator.create(c.struct_ggml_backend) catch impl.abort("ggml-cuda: out of memory");
     backend.* = .{
         .guid = &guid,
         .iface = backend_interface,

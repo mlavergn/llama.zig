@@ -728,7 +728,7 @@ pub const PoolVmm = struct {
 /// Ports `ggml_backend_cuda_context`'s `new_pool_for_device`
 /// (ggml-cuda.cu:686 @c1d0e7a00).
 fn newPoolForDevice(device: c_int) *Pool {
-    const p = allocator.create(Pool) catch @panic("OOM");
+    const p = allocator.create(Pool) catch impl.abort("ggml-cuda: out of memory");
     if (info().devices[@intCast(device)].vmm) {
         p.* = .{ .vmm = PoolVmm.initFor(device) };
     } else {
@@ -843,7 +843,7 @@ pub const ConcurrentEvent = struct {
 
     pub fn init(n_streams: c_int) ConcurrentEvent {
         var self: ConcurrentEvent = .{ .n_streams = n_streams };
-        self.join_events.resize(allocator, @intCast(n_streams)) catch @panic("OOM");
+        self.join_events.resize(allocator, @intCast(n_streams)) catch impl.abort("ggml-cuda: out of memory");
         for (self.join_events.items) |*e| {
             cudaCheck(cu.cudaEventCreateWithFlags(e, cu.cudaEventDisableTiming), "cudaEventCreateWithFlags(&join_events[i], cudaEventDisableTiming)", @src());
         }
@@ -879,7 +879,7 @@ pub const ConcurrentEvent = struct {
     /// whether the branches write disjoint memory and read only within
     /// their own branch.
     pub fn isValid(self: *const ConcurrentEvent) bool {
-        var write_ranges = allocator.alloc(std.ArrayList(Range), @intCast(self.n_streams)) catch @panic("OOM");
+        var write_ranges = allocator.alloc(std.ArrayList(Range), @intCast(self.n_streams)) catch impl.abort("ggml-cuda: out of memory");
         defer {
             for (write_ranges) |*w| w.deinit(allocator);
             allocator.free(write_ranges);
@@ -895,7 +895,7 @@ pub const ConcurrentEvent = struct {
             const r = rangeOf(kv.key_ptr.*);
             if ((r.start <= join.start and join.start < r.end) or (join.start <= r.start and r.start < join.end)) continue;
             // concurrent streams begin from 1
-            write_ranges[@intCast(kv.value_ptr.* - 1)].append(allocator, r) catch @panic("OOM");
+            write_ranges[@intCast(kv.value_ptr.* - 1)].append(allocator, r) catch impl.abort("ggml-cuda: out of memory");
         }
 
         for (write_ranges) |w| std.mem.sort(Range, w.items, {}, Range.lessThan);
@@ -984,7 +984,7 @@ pub const Context = struct {
 
     /// The C's constructor: `name(GGML_CUDA_NAME + std::to_string(device))`.
     pub fn create(device: c_int) *Context {
-        const self = allocator.create(Context) catch @panic("OOM");
+        const self = allocator.create(Context) catch impl.abort("ggml-cuda: out of memory");
         self.* = .{ .device = device };
         _ = std.fmt.bufPrintSentinel(&self.name_buf, name ++ "{d}", .{device}, 0) catch unreachable;
         return self;
@@ -1046,9 +1046,9 @@ pub const Context = struct {
             }
         }
 
-        const gop = self.cuda_graphs.getOrPut(allocator, first_node_ptr) catch @panic("OOM");
+        const gop = self.cuda_graphs.getOrPut(allocator, first_node_ptr) catch impl.abort("ggml-cuda: out of memory");
         if (!gop.found_existing) {
-            gop.value_ptr.* = allocator.create(Graph) catch @panic("OOM");
+            gop.value_ptr.* = allocator.create(Graph) catch impl.abort("ggml-cuda: out of memory");
             gop.value_ptr.*.* = .{};
         }
         gop.value_ptr.*.last_used_time = time_now;

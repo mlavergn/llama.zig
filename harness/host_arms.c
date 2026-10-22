@@ -30,6 +30,12 @@
  * The script sorts stderr before comparing, because worker threads print
  * their warnings in whatever order they run.
  *
+ * On Windows there is no scheduling policy to read; what the C sets there is
+ * the thread priority and the power-throttling opt-out, so those are read
+ * back instead (`GetThreadPriority`, `GetThreadInformation`), and the
+ * affinity mask through `SetThreadAffinityMask`, which returns the previous
+ * one. `harness/win_host_arms.c` runs the scenarios there.
+ *
  * Usage: host_arms list | host_arms run <scenario>
  */
 
@@ -41,13 +47,18 @@
 #include "ggml-cpu.h"
 #include "llama.h"
 
-#include <pthread.h>
-#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <pthread.h>
+#include <sched.h>
 #include <sys/time.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // Reading a thread's state back
@@ -64,6 +75,7 @@ struct thread_state {
 
 static struct thread_state workers[MAX_THREADS];
 
+#if !defined(_WIN32)
 static const char * policy_name(int policy) {
     switch (policy) {
         case SCHED_OTHER: return "other";
@@ -78,8 +90,25 @@ static const char * policy_name(int policy) {
         default:          return "unknown";
     }
 }
+#endif
 
-#if defined(__linux__)
+#if defined(_WIN32)
+// "0-3,8,10-11": the affinity mask as ranges.
+static void cpus_string(uint64_t set, char * out, size_t size) {
+    size_t len = 0;
+    out[0] = '\0';
+    for (int i = 0; i < 64; i++) {
+        if (!(set >> i & 1)) continue;
+        int j = i;
+        while (j + 1 < 64 && (set >> (j + 1) & 1)) j++;
+        int n = j == i ? snprintf(out + len, size - len, "%s%d", len ? "," : "", i)
+                       : snprintf(out + len, size - len, "%s%d-%d", len ? "," : "", i, j);
+        if (n < 0 || (size_t) n >= size - len) break;
+        len += (size_t) n;
+        i = j;
+    }
+}
+#elif defined(__linux__)
 // "0-3,8,10-11": the affinity mask as ranges.
 static void cpus_string(const cpu_set_t * set, char * out, size_t size) {
     size_t len = 0;
@@ -97,6 +126,34 @@ static void cpus_string(const cpu_set_t * set, char * out, size_t size) {
 }
 #endif
 
+#if defined(_WIN32)
+// The policy slot holds the power-throttling state: the C opts every thread
+// but a LOW one out of execution-speed throttling, and that is the only
+// other thing it sets. -1 where the query fails.
+static void read_self(struct thread_state * st) {
+    HANDLE h = GetCurrentThread();
+    THREAD_POWER_THROTTLING_STATE t;
+    ZeroMemory(&t, sizeof(t));
+    t.Version = THREAD_POWER_THROTTLING_CURRENT_VERSION;
+    st->policy   = GetThreadInformation(h, ThreadPowerThrottling, &t, sizeof(t)) ? (int) (t.ControlMask << 4 | t.StateMask) : -1;
+    st->priority = GetThreadPriority(h);
+    // No query for a thread's mask: set the process's, which every thread may
+    // have, and put back what that returns.
+    DWORD_PTR proc = 0, sys = 0;
+    DWORD_PTR prev = GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys) ? SetThreadAffinityMask(h, proc) : 0;
+    if (prev != 0) {
+        SetThreadAffinityMask(h, prev);
+        cpus_string((uint64_t) prev, st->cpus, sizeof(st->cpus));
+    } else {
+        snprintf(st->cpus, sizeof(st->cpus), "error");
+    }
+    st->seen = 1;
+}
+
+static void print_state(const char * scenario, const char * who, const struct thread_state * st) {
+    printf("%s %s: throttling=%d priority=%d cpus=%s\n", scenario, who, st->policy, st->priority, st->cpus);
+}
+#else
 static void read_self(struct thread_state * st) {
     struct sched_param sp;
     int policy = -1;
@@ -124,6 +181,7 @@ static void read_self(struct thread_state * st) {
 static void print_state(const char * scenario, const char * who, const struct thread_state * st) {
     printf("%s %s: policy=%s priority=%d cpus=%s\n", scenario, who, policy_name(st->policy), st->priority, st->cpus);
 }
+#endif
 
 // The probe op: every thread of the pool runs it once, `ith` 0 being the
 // calling thread.
@@ -145,7 +203,14 @@ static int allowed[2];
 static void find_allowed_cpus(void) {
     allowed[0] = 0;
     allowed[1] = 1;
-#if defined(__linux__)
+#if defined(_WIN32)
+    DWORD_PTR proc = 0, sys = 0;
+    if (!GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys)) return;
+    int k = 0;
+    for (int i = 0; i < 64 && k < 2; i++) {
+        if ((uint64_t) proc >> i & 1) allowed[k++] = i;
+    }
+#elif defined(__linux__)
     cpu_set_t set;
     CPU_ZERO(&set);
     if (pthread_getaffinity_np(pthread_self(), sizeof(set), &set) != 0) return;
@@ -239,11 +304,23 @@ static int numa_scenario(const char * name, enum ggml_numa_strategy strategy, bo
     return run_pool(name, &tpp);
 }
 
+#if defined(_WIN32)
+// libc++'s `system_clock` on Windows reads `GetSystemTimePreciseAsFileTime`;
+// MinGW's `gettimeofday` ticks far more coarsely, and a seed taken between
+// two coarse readings would fall outside them.
+static uint32_t now_us32(void) {
+    FILETIME ft;
+    GetSystemTimePreciseAsFileTime(&ft);
+    uint64_t t = (uint64_t) ft.dwHighDateTime << 32 | ft.dwLowDateTime;
+    return (uint32_t) ((t - 116444736000000000ull) / 10u);
+}
+#else
 static uint32_t now_us32(void) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (uint32_t) ((uint64_t) tv.tv_sec * 1000000u + (uint64_t) tv.tv_usec);
 }
+#endif
 
 // LLAMA_DEFAULT_SEED draws a seed: from `std::random_device` where libc++
 // says it is a true RNG, from the system clock in microseconds where it says
@@ -288,7 +365,13 @@ int main(int argc, char ** argv) {
         fprintf(stderr, "usage: host_arms list | host_arms run <scenario>\n");
         return 2;
     }
+#if defined(_WIN32)
+    // The UCRT rejects _IOLBF with no buffer, and a worker's log line must
+    // not sit in a buffer while the main thread prints.
+    setvbuf(stdout, NULL, _IONBF, 0);
+#else
     setvbuf(stdout, NULL, _IOLBF, 0);
+#endif
     ggml_log_set(log_to_stdout, NULL);
     llama_log_set(log_to_stdout, NULL);
     find_allowed_cpus();

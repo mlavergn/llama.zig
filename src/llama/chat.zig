@@ -211,10 +211,11 @@ fn trim(s: []const u8) []const u8 {
 }
 
 /// `toupper` applied to a `char`, as `role[0] = toupper(role[0])` and
-/// `std::transform(..., ::toupper)` do: the byte is read as a signed `char`,
-/// widened to `int`, and the result narrowed back to `char`.
+/// `std::transform(..., ::toupper)` do: the byte is read as a plain `char`
+/// -- signed on Darwin, unsigned on aarch64 Linux, as `c_char` is -- widened
+/// to `int`, and the result narrowed back to `char`.
 fn upper(b: u8) u8 {
-    const r = toupper(@as(i8, @bitCast(b)));
+    const r = toupper(@as(c_char, @bitCast(b)));
     return @truncate(@as(u32, @bitCast(r)));
 }
 

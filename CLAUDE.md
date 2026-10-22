@@ -133,7 +133,7 @@ indistinguishable from one that passes.**
 
 **`make validate` is the fast check; parity is the real one.** `validate` runs formatting, the scaffold, the unit tests, the ported tests in both debug and release, `scripts/port-coverage`, `scripts/port-links`, and the graph diff. It proves the port is *consistent*, not *correct*.
 
-Correctness has thirty-three gates, and none of them subsumes the others:
+Correctness has thirty-four gates, and none of them subsumes the others:
 
 - **`make graph-diff`** builds 131 nodes through every constructor family and diffs op, shape, strides, `op_params`, and `src[]` against the C. Needs no model. **The sharpest gate for the port's actual failure mode** — a constructor writing the wrong thing — and the only one that catches a halved softmax scale. It found the real `ggml_permute` bug.
 - **`make backend-ops`** runs upstream's `test-backend-ops` against our library: 21,093 op configurations, Metal against CPU, all passing. The broadest exercise, and the only one that *executes* the constructors at scale. **It cannot catch a consistently-wrong constructor** — both backends read the same `op_params` and agree. It catches crashes, assertion failures, and shapes a backend has no kernel for. `--diff` runs the same binary against the C reference and diffs the two
@@ -282,6 +282,14 @@ Correctness has thirty-three gates, and none of them subsumes the others:
   features, and two empty abort messages compared equal. `NOTES.md`, "The
   other architectures". `make gemma4-assistant-diff` covers the one
   architecture that needs a second model's context to run.
+- **`make jinja-diff`** renders all 68 of upstream's model templates over
+  seven conversations through `cli/chat.zig` and through upstream's
+  `common/jinja`, compiled unmodified: the text, which side raises, and that
+  ours never trusts a byte upstream marks as input. **It fails**, on what
+  it measured -- zigjinja parses 48 of the 68, ignores `trim_blocks`, and
+  `chat.zig`'s trust marking is wrong in both directions (`PLAN.md`,
+  "Questions"). Runs under `TZ=UTC`: `strftime_now` is local time upstream
+  and UTC in zigjinja. Negative-tested by removing the marking.
 - **`make api-diff`** compares every other `llama.h` entry point at the C boundary — model, vocabulary, loading, chat, batch, logger — on every upstream vocabulary file and the local models: buffer sizes, truncation, negative returns, null handling, and the death paths in forked children. 85.8M checks, ~40 s, 19/19 injections.
 - **`make adapter-diff`** (LoRA, aLoRA, control vectors; 278k checks, 13/13), **`scripts/quant-diff`** (the quantizer on every ftype and its type rules for 146 architectures, the saver; 120M checks, 17/17), **`scripts/opt-diff`** and **`scripts/opt-llama-diff`** (ggml's optimizer with libc++'s `shuffle` reproduced; libllama's training on a synthesized F32 Qwen3.5; 21/22, one provably inert), **`scripts/meta-diff`** (the meta backend on {Metal, Metal} and {Metal, CPU} — it accepts a device twice, so a real all-reduce runs on one GPU; 94.8% of its lines reached, 14/14), **`make batch-diff`** and **`make chat-diff`** — each in-process against `libllama-ref.a` or a `-D`-renamed reference object. `NOTES.md` has each one's injection table and what it established.
 
@@ -472,6 +480,20 @@ input. **Nine gates missed it** because the row variant takes a pointer,
 Zig-internal callers never cross the C ABI, and no decode calls the scalar
 form. **Declare such a parameter as an integer of the same size and
 `@bitCast`**, and add the entry point to `harness/abi_structs.c`.
+
+**Zig's `compiler_rt` shadows the C library's `expf` and `logf`.** It is
+linked as one object and defines both, weakly -- which still beats a
+shared library -- so anything that needs it, `__divti3` say, swaps libm
+for it. A `@panic` reachable from the library does exactly that, through
+the panic handler's `std.Io.Threaded`: the CUDA layer's 28 `@panic("OOM")`
+gave every CUDA build Zig's `expf`, one ULP out of glibc's. Abort with
+`impl.abort` (`GGML_ABORT`), never `@panic`, `std.debug.print` or
+`std.log`, in library code. `libm_check` in `scripts/platform-libs` fails
+the bit-exact gates when it recurs.
+
+**A plain `char` is `c_char`, not `i8`.** It is unsigned on aarch64 Linux,
+and `llama_unescape_rwkv_token`'s `c >= 'a'` answers differently there.
+`GATE_CPU=generic` cannot show it: it gives the Mac Linux's CPU, not its ABI.
 
 **Zig reserves every `iN` and `uN` as an integer type name, and the C uses
 half of them as loop indices.** Hit so far: `i0`, `i1`, `i2`, `i3`, `i11`,

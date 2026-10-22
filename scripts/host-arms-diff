@@ -22,14 +22,55 @@
 # prints the *address* of the mask, not the mask, so the hex value is
 # replaced before comparing.
 #
+# On Windows (WIN_X86=1) the C sets a thread's priority and opts it out of
+# power throttling, with affinity through `SetThreadAffinityMask`, and the
+# seed comes from the clock, because libc++'s `random_device` reports no
+# entropy there. Both sides are cross-built for the laptop and run there;
+# `harness/win_host_arms.c` builds the same transcripts this script does, and
+# only `harness/win_lines_diff.c`'s verdict comes back.
+#
 # Usage: scripts/host-arms-diff
 #   Requires: make -C llama.cpp.zmake lib, zig build reference
 #   HOST_ARMS_OUT=<dir> keeps both transcripts.
+#   WIN_X86=1   build both sides for the Windows laptop and run there; it
+#               builds its own libraries, under zig-out/win-host/
+#   X86_CPU, X86_AGENT, INFERISEUPDATER   as scripts/win-target takes them
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
 . "$ROOT/scripts/check-reference-pin"
+
+if [ -n "${WIN_X86:-}" ]; then
+    X86_CPU="${X86_CPU:-x86_64_v3}"
+    TARGET=x86_64-windows-gnu
+    out="$ROOT/zig-out/win-host/$X86_CPU"
+    mkdir -p "$out"
+    (cd llama.cpp.zmake && zig build lib --release=fast -Dtarget="$TARGET" -Dcpu="$X86_CPU" -p "$out/ref") \
+        || { echo "FAIL: could not build the Windows reference" >&2; exit 1; }
+    zig build reference --release=fast -Dtarget="$TARGET" -Dcpu="$X86_CPU" -p "$out/port" \
+        || { echo "FAIL: could not build the Windows port" >&2; exit 1; }
+    CC=(zig cc -target "$TARGET" -mcpu="$X86_CPU" -std=c11 -O2 -I harness -I llama.cpp/include -I llama.cpp/ggml/include)
+    for side in ref port; do
+        "${CC[@]}" harness/win_host_arms.c "$out/$side/lib/llama.lib" "$out/$side/lib/ggml.lib" \
+            -o "$out/host_arms_$side.exe" -lc++ \
+            || { echo "FAIL: could not link against the Windows $side libraries" >&2; exit 1; }
+    done
+    "${CC[@]}" harness/win_lines_diff.c -o "$out/lines_diff.exe" \
+        || { echo "FAIL: could not build harness/win_lines_diff.c" >&2; exit 1; }
+    [ -n "${X86_BUILD_ONLY:-}" ] && { echo "built $out/host_arms_ref.exe, host_arms_port.exe"; exit 0; }
+
+    RUN="$ROOT/scripts/win-run"
+    for side in ref port; do
+        "$RUN" "$out/host_arms_$side.exe" "llamazig-host-arms-$side" all "host_arms.$side.txt" > "$out/$side.log" || exit 2
+        grep -aq '^host_arms: ' "$out/$side.log" || { echo "FAIL: the $side run did not finish"; tail -5 "$out/$side.log"; exit 1; }
+    done
+    "$RUN" "$out/lines_diff.exe" llamazig-lines-diff host_arms.ref.txt host_arms.port.txt | tee "$out/result.txt"
+    grep -aq '^PASS: ' "$out/result.txt" && exit 0
+    grep -aq '^FAIL: ' "$out/result.txt" && exit 1
+    echo "FAIL: no verdict -- see $out/lines_diff.exe.log" >&2
+    exit 2
+fi
 . "$ROOT/scripts/platform-libs"
 platform_libs cc
 

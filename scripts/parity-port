@@ -125,6 +125,7 @@ zig cc -mcpu="$GATE_CPU" "$tmp/driver.c" -o "$tmp/ref"  -std=c11 "${INCLUDES[@]}
     || { echo "FAIL: could not link against the reference libraries" >&2; exit 1; }
 zig cc -mcpu="$GATE_CPU" "$tmp/driver.c" -o "$tmp/port" -std=c11 "${INCLUDES[@]}" "${PORT_LIBS[@]}"  "${FRAMEWORKS[@]}" 2>/dev/null \
     || { echo "FAIL: could not link against the ported libraries" >&2; exit 1; }
+libm_check "$tmp/ref" "$tmp/port" || exit 1
 
 PROMPTS=(
     "The capital of France is"

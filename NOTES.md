@@ -5772,3 +5772,234 @@ laptop, ours and the reference's kernels in one process, named two causes:
 After both: generation 14.3 against 14.5 t/s, prompt about 0.9x. Every
 kernel Q4_K_M uses is at the C's speed. `tq1_0` (1.6x), `iq1_m` (1.4x)
 and the generic `q2_0` (1.6x) are still slower, and exact.
+
+---
+
+---
+
+## The GB10 pickup, run
+
+`PLAN.md`'s "GB10 pickup" ran natively on the GB10 (Ubuntu 24.04, glibc
+2.39), at its baseline CPU -- `generic`: no dotprod, no fullfp16. The
+checkout there is a sibling of `llama.cpp.zmake/`, not its parent, so a
+symlink `llama.cpp.zmake -> ../llama.cpp.zmake` (gitignored) makes the
+scripts' relative paths hold.
+
+| Gate | Result on the GB10 |
+|---|---|
+| `make repack-diff` | 68 / 68 |
+| `make host-arms-diff` | 18 / 18, on real hardware: `SCHED_BATCH`, the `EPERM` warnings, strict masks, the `/sys` NUMA walk, a `random_device` seed |
+| `make node-diff` (CPU) | 2,750 nodes at 1 and 4 threads, and 33 fused decodes at each |
+| `make parity-port-cpu` | 6 / 6 |
+| `make ops-diff` | **failed** on `log`, `sigmoid`, `exp`, `softplus` -- then 650 / 650 after the fix below |
+| `make validate` | **failed** in `vocab-diff`, 780 of 55,010,074 -- then 55,016,050 identical after the fix below. Past it, `loader-diff` (227,244) and `api-diff` (70,224,318) failed only on a log line the harnesses had not normalised, below; then every step passes: the four test suites, `libcxx-diff`, `regex-diff`, `unicode-diff`, `vocab-diff`, `arch-diff` (124,290), `loader-diff`, `batch-diff` (180,654), `chat-diff` (779,803; three locale sweeps skipped, the locales are not installed there), `api-diff`, `port-coverage` (21 units, 100%), `port-links` (5,700 citations). `sched-diff` and `graph-diff` report themselves skipped, as designed |
+| `make cuda-node-diff`, `make cuda-parity-cli` | re-run after the `@panic` fix: 2,750 nodes and 33 fused decodes at 1 and 4 threads; 6 / 6 |
+
+Two real bugs, both invisible to the container that had passed the same
+gates, and both now fixed.
+
+### Zig's `compiler_rt` shadowed glibc's `expf` and `logf` in every CUDA build
+
+`ops-diff` failed by one ULP on a few elements of exactly the ops that call
+`expf` or `logf`; `expm1f` and `tanhf` were fine. `LD_DEBUG=bindings` said
+why: in the port's process `expf` and `logf` never bound to libm. The
+executable defined them itself, as `compiler_rt.exp.expf` and
+`compiler_rt.log.logf`.
+
+The chain, each link measured:
+
+- Zig links `compiler_rt` as **one object**. Whatever a link needs from it
+  brings all of it, and it defines `expf` and `logf` -- weakly, but a
+  regular object's weak definition still beats a shared library's.
+  `compiler_rt` has no `expm1f` or `tanhf`, which is why those agreed.
+- What the link needed from it was `__divti3`, and the only reference was
+  `ggml_zcu.o` -- our own Zig. `objdump` put every call in
+  `std.Io.Threaded`: `sleep`, `batchAwaitConcurrent` and the timestamp
+  setters, dividing `i96` nanoseconds.
+- `std.Io.Threaded` was there because **the CUDA host layer called
+  `@panic("OOM")` at 28 sites**. In ReleaseFast `@panic` still reaches
+  Zig's default panic handler, which writes through the debug `Io`. The
+  CPU-only library has no reachable `@panic`, which is why a `-Dcuda=false`
+  build on the same machine was 650 / 650, and why the container, with no
+  CUDA, never saw it.
+
+So **every CUDA build of the port computed `expf` and `logf` with Zig's
+implementations instead of glibc's**, in the shipped `llama-cli` as much as
+in the gates. Upstream's CUDA build, linked by gcc, calls glibc's. The CUDA
+gates could not see it: their reference (`-Dcuda-port=false`) has no
+`@panic` either, but Qwen3.5's CPU-side ops are multiples of the vector
+width and never reach the scalar tail that calls `expf`.
+
+**The fix is the project's own convention**: `catch impl.abort("ggml-cuda:
+out of memory")`, the port of `GGML_ABORT`, which every other ported file
+already used. `__divti3` is gone from `libggml.a` and `ops-diff` passes
+with CUDA built in.
+
+**And a check, so it cannot pass silently again**: `libm_check` in
+`scripts/platform-libs`, called by `ops-diff`, `node-diff` and
+`parity-port` right after they link, fails unless both sides take their
+libm functions from the same place, and says so in those words rather than
+as a kernel mismatch. Negative-tested with a program defining its own
+`expf`. Any `@panic`, `std.debug.print` or `std.log` call reachable from
+the library would bring it back.
+
+### `char` is unsigned on aarch64 Linux
+
+`vocab-diff` failed on one synthetic vocabulary: RWKV piece 266, same
+length, a different byte. `llama_unescape_rwkv_token` reads a hex digit as
+`(c >= 'a') ? (c - 'a' + 10) : (c - '0')` on a plain `char`, and the
+synthetic token puts a byte above 0x7f after `\x` -- on Darwin and x86 it
+is negative and takes the second arm, on aarch64 Linux it is not. The port
+had written Darwin's answer as `i8`. **Zig's `c_char` carries the target's
+signedness**, so that is the type now, here and in `chat.zig`'s `upper`
+(which gave the same bytes either way, but said otherwise). `isspace` in
+the "C" locale answers the same for either signedness, so `vocab.zig`'s
+`isSpace` stands.
+
+The general lesson is the `-fmath-errno` one again: a Mac configured to
+look like another platform is not that platform. `GATE_CPU=generic` gives
+the Mac Linux's CPU features and nothing of its ABI.
+
+### Two harnesses compared a live memory reading
+
+CUDA on a unified-memory device logs `ggml_backend_cuda_get_available_uma_memory:
+final available_memory_kb: N`, read from `/proc/meminfo` at that moment,
+and the two sides load one after the other. `context_diff.zig` and
+`gemma4_assistant_diff.zig` already masked it; `loader_diff.zig` and
+`api_diff.zig` did not, because they had never run on the GB10. Both mask
+it the same way now. Nothing about the port moved.
+
+---
+
+---
+
+## `jinja-diff`: the chat templates against upstream's engine
+
+`PLAN.md` carried "a `chat-parity` gate" as an open gap: nothing checked
+that zigjinja and upstream's `common/jinja` agree on the templates models
+ship. `scripts/jinja-diff` (`make jinja-diff`) compiles upstream's engine
+unmodified beside `cli/chat.zig` -- `harness/jinja_ref.cpp` renders as
+`common_chat_template` and `common_chat_template_direct_apply_impl` do --
+and renders every template in `llama.cpp/models/templates/`, 68 of them,
+over seven conversations: a lone user turn, a system prompt, four turns,
+no generation prompt, control-token and Jinja text in a message,
+surrounding whitespace and non-ASCII, and two user turns in a row. Both
+sides bind what `chat.zig` binds. It compares the text, which side raises,
+and trust: **no byte upstream marks as input may be trusted by ours**, with
+the one designed exception that `chat.zig` re-trusts an exact
+`bos_token`/`eos_token` segment where upstream marks every bound variable.
+Without that exception every template that opens with `{{ bos_token }}`
+read as a violation at byte 0.
+
+It fails, and what it measured is the point. At the pin, with `TZ=UTC`:
+
+| | renders (of 476) |
+|---|---:|
+| identical | 191 |
+| both raise | 7 |
+| text differs | 83 |
+| a byte upstream marks as input is trusted by ours | 6 |
+| ours raises, upstream renders | 189 |
+
+26 of 68 templates agree on every conversation, among them Qwen2.5, QwQ,
+Qwen3-Coder, Llama 3.1/3.2/3.3, the Granite family, gpt-oss and the R1
+distills.
+
+**zigjinja cannot parse 20 of the 68 templates** (138 renders,
+`SyntaxError`), and raises at render time on 51 more renders
+(`AttributeError` 21, `RuntimeError` 23, `TypeError` 7) -- Gemma 4, Kimi,
+GLM-4.6, the Mistral and Hermes tool-use templates, Nemotron, Cohere among
+them. `chat.zig` folds every engine error into `TemplateFailed`, so the
+harness repeats its steps against zigjinja to name the phase.
+
+**zigjinja ignores `trim_blocks` and `lstrip_blocks`.** The `Environment`
+has both fields and nothing reads them -- the lexer never looks. Upstream's
+lexer defaults both on (lexer.cpp:112), as Hugging Face's
+`apply_chat_template` does, and templates written without `{%-` rely on
+it: SmolLM3, MiniMax-M1/M2, Nemotron-3 and the DeepSeek V3.2/V4 templates
+render with extra newlines. **Setting the two fields in `chat.zig` looked
+like a fix** -- the gate's identical count rose by 25 -- and was not: the
+rise was the local date rolling over to match zigjinja's UTC one (below),
+and a unit test asserting the trimmed output failed. The change was
+reverted. A gate's aggregate moved for a reason that had nothing to do
+with the change, and only the narrow test told them apart.
+
+**`strftime_now` formats local time upstream and UTC in zigjinja**, so a
+template that prints today's date (Llama 3.x's `Today Date:`) agrees only
+while the two dates coincide. The script runs under `TZ=UTC` so its
+verdict does not depend on the hour.
+
+### The trust scheme is wrong in both directions
+
+`chat.zig` marks every expression's output untrusted and leaves template
+literal text trusted, so that a message cannot forge control tokens. The
+gate shows two ways that diverges from where the input really is.
+
+- **Input left trusted.** `mark` leaves a string that already contains a
+  sentinel alone, so a macro's output passing through `{{ }}` a second time
+  is not double-wrapped. Qwen3.5 writes a user turn as
+  `'<|im_start|>' + message.role + '\n' + content + '<|im_end|>'`, where
+  `content` is `render_content(...)`'s output and already marked -- so the
+  whole concatenation passes through, and **`message.role`, which is
+  input, comes out trusted**. That is the six violations, all Qwen3.5. The
+  role comes from our own CLI today, but any input concatenated with a
+  macro's output escapes the same way.
+- **Template control tokens left untrusted.** The same concatenation
+  *without* a macro -- Qwen2.5's `'<|im_start|>' + message['role'] + '\n' +
+  message['content'] + '<|im_end|>' + '\n'`, Llama 3's
+  `'<|start_header_id|>' + message['role'] + ...`, Qwen3, gpt-oss -- is
+  wrapped whole, so `<|im_start|>` is in an untrusted run, and
+  `Session.tokenizeSegments` tokenizes it with `parse_special` off. **For
+  those templates `-cnv --jinja` feeds the model `<|im_start|>` as plain
+  text pieces instead of the control token.** The gate counts it: 192
+  renders across 29 templates have template text upstream takes as the
+  template's that ours leaves untrusted. It is reported, not failed, since
+  ours is coarser by design; what was not known is that the coarseness
+  reaches the control tokens.
+
+Neither is fixable at the output boundary, because `Environment.finalize`
+sees only the finished string. What fixes both is upstream's design --
+provenance carried per string part through every transformation -- which
+`NOTES.md`'s chat-template section measured at ~360 sites in the engine.
+Recorded as a question in `PLAN.md`.
+
+Negative-tested: removing `env.finalize = mark` takes trust violations from
+6 to 198 and identical renders from 191 to 0.
+
+At this pin upstream computes the marking but its CLI path flattens it
+(`parts->as_string().str()`, chat.cpp:984), so upstream's own prompt does
+not use it either; the trust check compares ours with upstream's notion of
+input, not with what its CLI tokenizes.
+
+---
+
+---
+
+## The Windows pickup's host gates, built
+
+`PLAN.md`'s Windows pickup lists `regex-diff`, `unicode-diff`,
+`libcxx-diff` and `host-arms-diff` built for Windows. All four now
+cross-build for `x86_64-windows-gnu` at x86-64-v3 and run through
+`scripts/win-run`: `make win-host-diffs`, or `WIN_X86=1` on any of the four
+scripts. They have not run: the laptop's agent was not up.
+
+- **`scripts/win-target`**, sourced by the three in-process scripts, holds
+  the target, the port archive, the system libraries and how to run the
+  harness -- in place on the host, or kept under `zig-out/win-host/` and
+  pushed under `WIN_X86=1`. The Mac's compile lines are unchanged, and so
+  are its counts: 452,904, 43,537,552, 7,070,454.
+- **`unicode_diff.zig` takes its inputs compiled in**, through an `inputs`
+  module the script generates -- `push` carries a program but no files.
+- **`host_arms.c` has Windows arms**: thread priority from
+  `GetThreadPriority`, the power-throttling state from
+  `GetThreadInformation` in the policy slot (the C opts every thread but a
+  LOW one out of execution-speed throttling), affinity through
+  `SetThreadAffinityMask`, which returns the previous mask, and the seed
+  window from `GetSystemTimePreciseAsFileTime`, which is what libc++'s
+  `system_clock` reads there -- MinGW's `gettimeofday` ticks too coarsely
+  to bracket a seed. `harness/win_host_arms.c` does the script's half on
+  the laptop: one child process per scenario, the same transcript, and
+  `win_lines_diff.c` compares the two sides there.
+- **`zig translate-c -target x86_64-windows-gnu -lc` never finishes**
+  (Zig 0.17.0): it spun at 100% CPU for minutes. Without `-lc` it takes
+  under a second and `llama.h` needs nothing more.

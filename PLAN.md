@@ -1003,7 +1003,7 @@ at the CPU configuration Linux arm64 actually builds for.
 | macOS arm64 | yes | every gate in `CLAUDE.md` | nothing |
 | iOS, iOS simulator | yes — the xcframework's `ios` and `ios-sim` slices (A14+) | `make -C xcfwk check`: structural gates per slice, `smoke-sim` on the simulator | the increased-memory-limit entitlement is the consuming app's, not ours |
 | Linux arm64 + CUDA | yes, natively on the GB10 | the four `cuda-*` gates, `arch-model-diff`, `gemma4-assistant-diff` | the CPU path's numerics — below |
-| Linux arm64, CPU only | **yes**, cross-built from this Mac against glibc 2.39 | `GATE_CPU=generic` here. Measured failing — `ops-diff` 86 / 632, `repack-diff` 26 / 60, `node-diff` from node 27, `parity-port --cpu` 2 / 6 — and **exact since step 2**: 650 / 650, 60 / 60, 2,750 nodes, 6 / 6 | the host arms (step 3), `make validate` on Linux (step 4), the GB10 pickup |
+| Linux arm64, CPU only | **yes**, cross-built from this Mac against glibc 2.39 | `GATE_CPU=generic` here. Measured failing — `ops-diff` 86 / 632, `repack-diff` 26 / 60, `node-diff` from node 27, `parity-port --cpu` 2 / 6 — and **exact since step 2**: 650 / 650, 60 / 60, 2,750 nodes, 6 / 6. **On the GB10 itself** (the pickup, done): `ops-diff` 650 / 650, `repack-diff` 68 / 68, `node-diff` 2,750 nodes, `parity-port --cpu` 6 / 6, `host-arms-diff` 18 / 18, `vocab-diff` -- after two Linux-only fixes (`NOTES.md`, "The GB10 pickup, run") | `set_numa_thread_affinity` needs a multi-socket machine |
 | Linux x86_64 | **yes, at x86-64-v3**, cross-built; the same kernels as Windows | the x86 gates run on Windows; Linux x86 shares every kernel and differs only in its OS arms | its OS arms on Linux x86 hardware; AVX-512 on hardware |
 | Windows x86_64 | **yes, cross-built from this Mac** (`x86_64-windows-gnu`, x86-64-v3): libraries, `libllama-ref`, and our `llama-cli.exe`; the reference's `llama-cli.exe` through `make -C llama.cpp.zmake windows-x86_64` | **exact on the laptop**: `make x86-gates` -- 28 quant kernels, 68 repack checks, 712 `ops-diff` results, 2,750 decode nodes -- and 6 / 6 parity prompts | the rest of the Windows pickup |
 
@@ -1341,9 +1341,20 @@ Run on the Windows laptop (Decision 57), through `inferiseupdater push` and
   `node-diff` diverging at node 13, a `q5_K` stand-in.
 - `regex-diff`, `unicode-diff`, `libcxx-diff` and `host-arms-diff` built
   for Windows: the `wchar_t` classification question above, the Windows
-  priority and affinity arms, and the seed.
+  priority and affinity arms, and the seed. **Built, not yet run**: `make
+  win-host-diffs` cross-builds all four (`WIN_X86=1` on each script,
+  `scripts/win-target`) and needs only the laptop's agent window open
+  (`NOTES.md`, "The Windows pickup's host gates, built").
 
 ### GB10 pickup
+
+**Done** (`NOTES.md`, "The GB10 pickup, run"). It found two bugs the
+container could not: Zig's `compiler_rt` shadowing glibc's `expf` and
+`logf` in every CUDA build -- through the CUDA layer's `@panic("OOM")` --
+and `char` being unsigned on aarch64 Linux in the RWKV unescape. Both
+fixed; `libm_check` now guards the first in every bit-exact gate. The
+checkout there needs a `llama.cpp.zmake -> ../llama.cpp.zmake` symlink. The
+list as it was written:
 
 Run on the GB10 after steps 2–4. Everything here is written, and the gate
 scripts now take their link line from `scripts/platform-libs`, so they run
@@ -1714,8 +1725,8 @@ Zig's libc++ into each slice, which nothing needs since the swap.
 **Next:** Stage 5, cross-platform -- measured; see "Stage 5 — Cross-platform"
 for where each target stands and the order of work. Step 1 found that
 the port was not bit-exact on Linux arm64's baseline CPU; step 2 made it so;
-steps 3 and 4 are written and wait on the GB10 pickup; step 5 put the SIMD
-layer in. Step 6, x86_64, is done at AVX2 and exact on the Windows laptop;
+steps 3 and 4 ran on the GB10 in its pickup, which found and fixed two
+Linux-only bugs; step 5 put the SIMD layer in. Step 6, x86_64, is done at AVX2 and exact on the Windows laptop;
 AVX-512 needs other hardware.
 
 **Beside it, Stage 7, Vulkan** (Decisions 54–56; "Stage 7 — Vulkan"): measured
@@ -1725,10 +1736,15 @@ node hashes.
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:
 
-- **A `chat-parity` gate.** `common/jinja` is seven self-contained `.cpp` files,
-  so upstream's engine can render the same template and the two outputs be
-  diffed. Nothing yet checks that two independent Jinja implementations agree
-  on the templates in the wild, which is an assumption rather than a fact.
+- ~~**A `chat-parity` gate.**~~ **Written, and failing on what it measured**:
+  `make jinja-diff`, 68 upstream templates × 7 conversations against
+  upstream's engine (`NOTES.md`, "`jinja-diff`"). 26 templates agree. zigjinja
+  cannot parse 20, raises at render time on others, ignores `trim_blocks`
+  and `lstrip_blocks`, and formats `strftime_now` in UTC; and `chat.zig`'s
+  trust scheme is wrong in both directions -- it trusts `message.role` in
+  Qwen3.5, and leaves the template's own control tokens untrusted in
+  Qwen2.5, Llama 3, Qwen3 and gpt-oss, so `-cnv --jinja` tokenizes them as
+  text. See "Questions".
 - **No gate covers the conversation loop.** `parity-cli` runs one-shot prompts;
   multi-turn behaviour, KV prefix reuse and the hybrid-cache fallback are
   checked by hand only.
@@ -1737,7 +1753,21 @@ node hashes.
 
 ## Questions
 
-*None open.* Stage 5's three x86 questions are Decisions 51–53.
+- **The chat-template engine** (`NOTES.md`, "`jinja-diff`"). Two things
+  need deciding, and both live in `../zigjinja`, its own repository:
+  - **Trust.** Marking at the output boundary cannot tell a template's
+    `'<|im_start|>' + message.content` apart from input, in either
+    direction. Upstream's answer is provenance carried per string part
+    through every transformation, ~360 sites in the engine by the earlier
+    estimate. The alternatives are that, or accepting that `-cnv --jinja`
+    tokenizes the control tokens of concatenating templates as text.
+  - **Coverage.** 20 of upstream's 68 templates do not parse in zigjinja,
+    `trim_blocks`/`lstrip_blocks` are unimplemented, and `strftime_now` is
+    UTC. Fixing zigjinja against `jinja-diff`, or porting `common/jinja`
+    (6,349 lines, the route Decision 25 declined), are the options;
+    `jinja-diff` is the gate for either.
+
+Stage 5's three x86 questions are Decisions 51–53.
 
 Earlier questions are settled in the decisions table. The question Stage 4
 opened with — how much C++ linkage actually crosses a translation-unit

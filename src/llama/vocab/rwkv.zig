@@ -31,9 +31,11 @@ pub fn unescapeToken(escaped: []const u8, output: *std.ArrayList(u8)) void {
     for (escaped) |ch| {
         // If we're parsing a hex code, interpret the next character
         if (hex_remaining != 0) {
-            // `c >= 'a'` on a signed `char`: a byte above 0x7f is negative.
-            const signed: i8 = @bitCast(ch);
-            const value: u8 = if (signed >= 'a') ch -% 'a' +% 10 else ch -% '0';
+            // `c >= 'a'` on a plain `char`, whose signedness is the target's:
+            // signed on Darwin and x86, where a byte above 0x7f is negative,
+            // unsigned on aarch64 Linux. `c_char` is the same choice.
+            const plain: c_char = @bitCast(ch);
+            const value: u8 = if (plain >= 'a') ch -% 'a' +% 10 else ch -% '0';
             hex_acc = (hex_acc << 4) +% value;
             hex_remaining -= 1;
             if (hex_remaining == 0) {

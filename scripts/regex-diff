@@ -9,6 +9,8 @@
 # harness/regex_diff.zig.
 #
 # Usage: scripts/regex-diff
+#   WIN_X86=1   build for the Windows laptop and run there (scripts/win-target);
+#               `make win-host-diffs` builds the port it links first
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
@@ -16,30 +18,30 @@ cd "$ROOT" || exit 2
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# The system libraries the harness links beside libggml.a: the Metal
-# frameworks on macOS, the CUDA libraries on Linux. See scripts/platform-libs.
-. scripts/platform-libs
-platform_libs exe
+# The target, the port's archive, and the system libraries the harness links
+# beside it: the Metal frameworks on macOS, the CUDA libraries on Linux,
+# nothing extra for Windows. See scripts/win-target.
+. scripts/win-target
 
-zig c++ -mcpu=baseline -std=c++17 -O2 \
+zig c++ "${GATE_CC[@]}" -std=c++17 -O2 \
     -c harness/regex_ref.cpp -o "$tmp/ref.o" 2>"$tmp/err" \
     || { echo "FAIL: cannot compile the reference" >&2; head -10 "$tmp/err" >&2; exit 1; }
 
 # `regex.zig` reaches `ggml_abort` and a C logger through `impl.zig`; the
 # ported ggml supplies the first, and nothing on these paths calls the second.
-[ -f zig-out/lib/libggml.a ] || { echo "missing zig-out/lib/libggml.a -- run 'zig build reference --release=fast'" >&2; exit 2; }
+[ -f "$GATE_GGML" ] || { echo "missing $GATE_GGML -- run 'zig build reference --release=fast'" >&2; exit 2; }
 
 # Zig 0.17 has no `@cImport`: `impl.zig` imports llama.h as the module
 # `llama_c`, translated from `src/llama/c_import.h` as build/llamacpp.zig does.
-zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+zig translate-c "${GATE_TC[@]}" -I llama.cpp/include -I llama.cpp/ggml/include \
     src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
     || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
 
-zig build-exe -mcpu baseline -femit-bin="$tmp/regex_diff" -Ofast -lc \
+zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/regex_diff$GATE_SUFFIX" -Ofast -lc \
     --dep regex -Mroot=harness/regex_diff.zig \
     --dep llama_c -Mregex=src/llama/regex.zig -Mllama_c="$tmp/llama_c.zig" \
-    "$tmp/ref.o" zig-out/lib/libggml.a -lc++ \
-    "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
+    "$tmp/ref.o" "$GATE_GGML" -lc++ \
+    ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
 
-"$tmp/regex_diff"
+gate_run "$tmp/regex_diff$GATE_SUFFIX" llamazig-regex-diff
