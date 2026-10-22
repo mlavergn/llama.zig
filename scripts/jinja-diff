@@ -71,9 +71,16 @@ zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/jinja_diff$GATE_SUFFIX" -Ofast -
     ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
 
-# Upstream's `strftime_now` formats local time and zigjinja's formats UTC,
-# so a template that prints today's date (Llama 3.x) agrees only while the
-# two dates coincide. UTC makes the verdict independent of when it runs; the
-# divergence itself is recorded in NOTES.md, "jinja-diff".
-export TZ=UTC
-gate_run "$tmp/jinja_diff$GATE_SUFFIX" llamazig-jinja-diff "$@"
+# Both sides' `strftime_now` format local time, so run under two zones: one
+# without DST, and Lord Howe, whose DST is half an hour. On Windows zigjinja
+# reads the system zone, not `TZ`, so it runs once, as configured.
+if [ -n "${WIN_X86:-}" ]; then
+    gate_run "$tmp/jinja_diff$GATE_SUFFIX" llamazig-jinja-diff "$@"
+    exit
+fi
+rc=0
+for zone in UTC Australia/Lord_Howe; do
+    echo "-- TZ=$zone"
+    TZ=$zone gate_run "$tmp/jinja_diff$GATE_SUFFIX" llamazig-jinja-diff "$@" || rc=1
+done
+exit $rc

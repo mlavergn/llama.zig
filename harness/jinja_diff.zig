@@ -16,14 +16,19 @@
 //! - **Failure**: a template that raises on one side must raise on the
 //!   other. The messages are not compared; the engines word them
 //!   differently.
-//! - **Trust.** Upstream marks every byte that came from input; ours marks
-//!   every byte an expression produced (`chat.zig`'s header). Ours is
-//!   coarser by design, so the check is one-directional: no byte upstream
-//!   marks as input may be trusted by ours. A trusted byte is tokenized with
-//!   `parse_special` on, so one that came from a message is the injection
-//!   both schemes exist to stop. The one exception is ours by design: a
-//!   segment that is exactly `bos_token` or `eos_token` is re-trusted, where
-//!   upstream marks every bound variable as input, those two included.
+//! - **Trust**, byte for byte, both ways (PLAN.md Decision 17). Upstream
+//!   marks every byte that came from input, and so does ours, by the same
+//!   propagation rules (`chat.zig`'s header). A byte ours trusts and
+//!   upstream marks is the injection both exist to stop; a byte ours
+//!   untrusts and upstream trusts is a template control token tokenized as
+//!   text. The one exception is ours by design: `bos_token` and `eos_token`
+//!   themselves are re-trusted, where upstream marks every bound variable as
+//!   input, those two included.
+//!
+//! Then the clock: `strftime_now` formats local time on both sides, and the
+//! conversations print a date only on some templates and differ only near
+//! midnight, so one template prints the hour, minute, weekday and day of
+//! year directly. `scripts/jinja-diff` runs everything under two zones.
 //!
 //! The templates are compiled in through the `inputs` module the script
 //! generates, as `unicode_diff.zig`'s are.
@@ -131,7 +136,7 @@ fn refRender(source: []const u8, conv: Conversation) !Outcome {
 }
 
 /// Ours, flattened: the text and, per byte, 1 where it is untrusted and 2
-/// where it is a `bos_token`/`eos_token` segment `chat.zig` re-trusts.
+/// where it is `bos_token`/`eos_token` itself, which `chat.zig` re-trusts.
 fn portRender(source: []const u8, conv: Conversation) !Outcome {
     var t = try chat.Template.init(gpa, source);
     defer t.deinit();
@@ -145,8 +150,7 @@ fn portRender(source: []const u8, conv: Conversation) !Outcome {
     var untrusted: std.ArrayList(u8) = .empty;
     for (segs) |seg| {
         try text.appendSlice(gpa, seg.text);
-        const token = seg.trusted and (std.mem.eql(u8, seg.text, bos) or std.mem.eql(u8, seg.text, eos));
-        try untrusted.appendNTimes(gpa, if (token) 2 else @intFromBool(!seg.trusted), seg.text.len);
+        try untrusted.appendNTimes(gpa, if (seg.token) 2 else @intFromBool(!seg.trusted), seg.text.len);
     }
     return .{ .ok = .{ .text = try text.toOwnedSlice(gpa), .input = try untrusted.toOwnedSlice(gpa) } };
 }
@@ -160,7 +164,9 @@ fn diagnose(source: []const u8, conv: Conversation) []const u8 {
     const arena = arena_state.allocator();
     var env = jinja.Environment.init(arena);
     defer env.deinit();
-    const template = env.fromString(source, "chat") catch |e| return phase("parse", e);
+    env.trim_blocks = true;
+    env.lstrip_blocks = true;
+    const template = env.fromString(source, "chat") catch |e| return std.fmt.allocPrint(gpa, "parse: {s} near line {d}", .{ @errorName(e), env.last_syntax_error_line }) catch "parse";
     var list = std.json.Array.init(arena);
     for (conv.messages) |m| {
         var obj: std.json.ObjectMap = .empty;
@@ -181,7 +187,7 @@ fn diagnose(source: []const u8, conv: Conversation) []const u8 {
     defer compiled.deinit();
     const out = compiled.render(&ctx, arena) catch |e| return phase("render", e);
     if (out.len == 0) return "empty render";
-    return "renders without the marking";
+    return "renders without provenance";
 }
 
 fn phase(comptime name: []const u8, e: anyerror) []const u8 {
@@ -216,18 +222,12 @@ pub fn main(init: std.process.Init) !void {
     // A filter names the templates being looked at, so show all of them.
     const show_max: usize = if (filter.len > 0) std.math.maxInt(usize) else 40;
     var reasons: std.StringArrayHashMapUnmanaged(usize) = .empty;
-    // The other direction of the trust check: bytes upstream takes from the
-    // template that ours leaves untrusted. Not a failure -- ours is coarser
-    // by design -- but a control token among them is tokenized as text.
-    var over_renders: usize = 0;
-    var over_templates: usize = 0;
 
     for (inputs.templates) |tmpl| {
         if (std.mem.indexOf(u8, tmpl.name, filter) == null) continue;
         templates += 1;
         var line: [conversations.len]u8 = undefined;
         var all_ok = true;
-        var over_here = false;
         for (conversations, 0..) |conv, k| {
             const ref = try refRender(tmpl.source, conv);
             const port = try portRender(tmpl.source, conv);
@@ -238,30 +238,13 @@ pub fn main(init: std.process.Init) !void {
                 .ok => |r| switch (port) {
                     .failed => verdict = .port_failed,
                     .ok => |p| {
-                        if (std.mem.eql(u8, r.text, p.text)) {
-                            for (r.input, p.input) |ri, pu| {
-                                if (ri == 0 and pu == 1) {
-                                    over_renders += 1;
-                                    over_here = true;
-                                    break;
-                                }
-                            }
-                            // With a filter, the first such span.
-                            if (filter.len > 0) if (std.mem.indexOfScalar(u8, p.input, 1)) |_| {
-                                var at: usize = 0;
-                                while (at < r.input.len and !(r.input[at] == 0 and p.input[at] == 1)) at += 1;
-                                if (at < r.input.len) {
-                                    var end = at;
-                                    while (end < r.input.len and r.input[end] == 0 and p.input[end] == 1) end += 1;
-                                    std.debug.print("  {s} / {s}: untrusted template text @{d}: \"{s}\"\n", .{ tmpl.name, conv.name, at, r.text[at..@min(end, at + 50)] });
-                                }
-                            };
-                        }
                         if (!std.mem.eql(u8, r.text, p.text)) {
                             verdict = .text;
                             detail_at = std.mem.indexOfDiff(u8, r.text, p.text);
                         } else for (r.input, p.input, 0..) |ri, pu, i| {
-                            if (ri == 1 and pu == 0) {
+                            // 2, a re-trusted bos or eos, agrees with upstream's input mark only.
+                            const agrees = if (pu == 2) ri == 1 else ri == pu;
+                            if (!agrees) {
                                 verdict = .trust;
                                 detail_at = i;
                                 break;
@@ -290,11 +273,17 @@ pub fn main(init: std.process.Init) !void {
                     shown += 1;
                     std.debug.print("  {s} / {s}: {s}\n", .{ tmpl.name, conv.name, @tagName(verdict) });
                     switch (verdict) {
-                        .text, .trust => {
-                            const r = ref.ok;
-                            const p = port.ok;
-                            snippet("ref ", r.text, detail_at.?);
-                            snippet("port", p.text, detail_at.?);
+                        .text => {
+                            snippet("ref ", ref.ok.text, detail_at.?);
+                            snippet("port", port.ok.text, detail_at.?);
+                        },
+                        .trust => {
+                            const at = detail_at.?;
+                            std.debug.print("      upstream {s}, ours {s}\n", .{
+                                if (ref.ok.input[at] == 1) "input" else "template",
+                                if (port.ok.input[at] == 1) "untrusted" else "trusted",
+                            });
+                            snippet("at  ", ref.ok.text, at);
                         },
                         .port_failed => std.debug.print("      port: {s}\n", .{port.failed}),
                         .ref_failed => std.debug.print("      ref:  {s}\n", .{ref.failed}),
@@ -304,9 +293,27 @@ pub fn main(init: std.process.Init) !void {
             }
         }
         if (all_ok) templates_ok += 1;
-        if (over_here) over_templates += 1;
         std.debug.print("{s}  {s}\n", .{ line, tmpl.name });
     }
+
+    // The two sides read the clock moments apart, so a minute can tick between
+    // them; a second try rules that out.
+    const clock_ok = if (filter.len > 0) true else blk: {
+        const clock_template = "{{- strftime_now('%Y-%m-%d %H:%M %a %b %j') -}}";
+        for (0..2) |_| {
+            const ref = try refRender(clock_template, conversations[0]);
+            const port = try portRender(clock_template, conversations[0]);
+            if (ref == .ok and port == .ok and std.mem.eql(u8, ref.ok.text, port.ok.text)) {
+                std.debug.print("  clock: {s} on both sides\n", .{ref.ok.text});
+                break :blk true;
+            }
+            std.debug.print("  clock: upstream \"{s}\", ours \"{s}\"\n", .{
+                if (ref == .ok) ref.ok.text else ref.failed,
+                if (port == .ok) port.ok.text else port.failed,
+            });
+        }
+        break :blk false;
+    };
 
     var renders: usize = 0;
     for (std.enums.values(Verdict)) |v| renders += counts.get(v);
@@ -323,16 +330,16 @@ pub fn main(init: std.process.Init) !void {
         counts.get(.port_failed),
         counts.get(.ref_failed),
     });
-    std.debug.print("  ours untrusts template text upstream trusts: {d} renders, {d} templates\n", .{ over_renders, over_templates });
     for (reasons.keys(), reasons.values()) |k, v| std.debug.print("  ours raises: {d:>4}  {s}\n", .{ v, k });
     if (templates == 0) {
         std.debug.print("FAIL: no template matched\n", .{});
         std.process.exit(2);
     }
-    if (templates_ok == templates) {
-        std.debug.print("PASS: {d} templates x {d} conversations agree with upstream's engine\n", .{ templates, conversations.len });
+    if (templates_ok == templates and clock_ok) {
+        std.debug.print("PASS: {d} templates x {d} conversations and the clock agree with upstream's engine\n", .{ templates, conversations.len });
         return;
     }
+    if (!clock_ok) std.debug.print("FAIL: strftime_now disagrees with upstream's local time\n", .{});
     std.debug.print("FAIL: {d} of {d} templates disagree with upstream's engine ({d} of {d} renders)\n", .{
         templates - templates_ok, templates, renders - counts.get(.same) - counts.get(.both_failed), renders,
     });

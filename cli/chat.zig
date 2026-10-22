@@ -32,24 +32,29 @@
 //! documents this attack against upstream, which answers it by marking every
 //! string that came from input.
 //!
-//! We answer it by inverting the marking, which is both safer and far smaller:
-//! **template literals are trusted, everything an expression produces is
-//! not.** Trust is then the closed set -- the fixed text the template author
-//! wrote -- rather than the open set of things we remembered to taint. A
-//! filter chain, a `set`, a loop variable: all reach the output through an
-//! expression, so all come out untrusted without anything having to track
-//! them.
+//! We answer it the same way, with the same rules, so the two mark the same
+//! bytes -- `make jinja-diff` holds them to that. Every string bound to the
+//! template is marked input, and `zigjinja`'s provenance record
+//! (`zigjinja/src/provenance.zig`) carries the marks through the operations
+//! upstream carries them through: concatenation keeps each side's runs, a
+//! case change or `strip` keeps them, `replace` and `split` keep them only
+//! when the whole source was input. Everything else -- template literals, and
+//! whatever an operation builds without carrying a mark -- is trusted.
+//! `Session.tokenizeSegments` then parses control tokens only in the trusted
+//! runs.
 //!
-//! The engine needs no changes for this. `Environment.finalize` is a
-//! documented hook called on every expression value immediately before it
-//! becomes output text, and on exactly nothing else -- one call site,
-//! `compiler.zig:642`. `mark` wraps those values in sentinels; `segment`
-//! splits them back out. `Session.tokenizeSegments` then parses control
-//! tokens only in the trusted runs.
+//! An earlier version marked the complement -- every byte an expression
+//! produced -- at the output boundary. That cannot tell
+//! `'<|im_start|>' + message.role` apart from input in either direction: it
+//! untrusted the template's own control tokens whenever a template built
+//! them by concatenation, which most do.
 //!
-//! Two values legitimately come from expressions and *are* control tokens:
-//! `bos_token` and `eos_token`, which templates emit by name. A segment whose
-//! text is exactly one of those is re-trusted, and only then.
+//! Two bound values *are* control tokens: `bos_token` and `eos_token`, which
+//! templates emit by name. Upstream marks them input with everything else.
+//! Here they are bound as provenance *tokens* -- input for every propagation
+//! rule, but told apart at the end -- and only their own bytes are
+//! re-trusted. Matching their spelling is not enough: a message that reads
+//! exactly `</s>` stays untrusted.
 
 const std = @import("std");
 const jinja = @import("zigjinja");
@@ -63,7 +68,8 @@ pub const Error = error{
     NoTemplate,
     /// The template raised, via `raise_exception`.
     TemplateFailed,
-    /// The sentinels came back unbalanced, so trust cannot be established.
+    /// The provenance sentinels came back unbalanced, or the template's own
+    /// text contains one, so trust cannot be established.
     ///
     /// Fails closed: this is reported rather than guessed at, because
     /// guessing wrong means honouring a forged control token.
@@ -104,132 +110,112 @@ pub const Options = struct {
     eos_token: []const u8 = "",
 };
 
-/// Sentinels bracketing expression-derived output.
-///
-/// C0 controls with no meaning in chat text, and never produced by a
-/// tokenizer's special-token spellings. `sanitize` strips them from message
-/// content, so input cannot forge a boundary; an unbalanced pair after that is
-/// `Error.MarkingCorrupt` rather than a guess.
-const mark_open = '\x1e';
-const mark_close = '\x1f';
-
 /// One run of rendered prompt with a single trust level.
 pub const Segment = struct {
-    /// The text, sentinels removed.
+    /// The text.
     text: []const u8,
     /// Whether the model's control tokens written here should be honoured.
     ///
-    /// True for literal template text and for `bos_token`/`eos_token`. False
-    /// for everything else an expression produced -- which is where message
-    /// content arrives.
+    /// True for text the template wrote and for `bos_token`/`eos_token`.
+    /// False for everything that came from a message.
     trusted: bool,
+    /// Whether this run is `bos_token` or `eos_token` itself, which upstream
+    /// marks as input and this file re-trusts.
+    token: bool = false,
 };
 
-/// Wraps every expression's string value in sentinels.
-///
-/// Installed as `Environment.finalize`, which the engine calls at its single
-/// output boundary. Non-strings are passed through: an integer or a boolean
-/// cannot spell a control token.
-///
-/// Parameters:
-/// - `allocator`: the render arena; the wrapper is freed with it.
-/// - `val`: the value about to become output text.
-///
-/// Marking is idempotent. A `macro` renders to a string that an outer `{{ }}`
-/// then emits -- Qwen3.5 does exactly that,
-/// `{% set c = render_content(...) %}{{ c }}` -- so an already-marked value
-/// arrives here a second time. Wrapping it again would nest the sentinels,
-/// which `segment` refuses, and would swallow the macro body's own literal
-/// text into an untrusted run. The parts of a composite string that came from
-/// input are already delimited inside it, and message content cannot introduce
-/// a sentinel because `sanitize` removed them.
-///
-/// Parameters:
-/// - `allocator`: the render arena; the wrapper is freed with it.
-/// - `val`: the value about to become output text.
-///
-/// Return: the value to output. On allocation failure the original is
-/// returned, which `segment` then sees as an unbalanced pair and refuses --
-/// the failure mode is a rejected prompt, never an untrusted run silently
-/// treated as trusted.
-fn mark(allocator: std.mem.Allocator, val: jinja.Value) jinja.Value {
-    switch (val) {
-        .string => |str| {
-            // Already marked; see the doc comment above for why that is left alone.
-            if (std.mem.findAny(u8, str, &.{ mark_open, mark_close }) != null) return val;
-
-            const buf = allocator.alloc(u8, str.len + 2) catch return val;
-            buf[0] = mark_open;
-            @memcpy(buf[1 .. 1 + str.len], str);
-            buf[buf.len - 1] = mark_close;
-            return .{ .string = buf };
-        },
-        else => return val,
-    }
-}
-
-/// Removes sentinel bytes from text that is about to be bound as data.
+/// Removes provenance sentinel bytes from text that is about to be bound as
+/// data, so it cannot open or close an input run.
 ///
 /// Parameters:
 /// - `arena`: allocator for the copy.
 /// - `text`: message content.
 ///
-/// Return: `text` with both sentinels removed, so it cannot open or close a
-/// trust boundary.
+/// Return: `text` with both sentinels removed.
 fn sanitize(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
-    if (std.mem.findAny(u8, text, &.{ mark_open, mark_close }) == null) return text;
+    const sentinels = &jinja.provenance.sentinels;
+    if (std.mem.findAny(u8, text, sentinels) == null) return text;
 
     var out: std.ArrayList(u8) = .empty;
     for (text) |ch| {
-        if (ch == mark_open or ch == mark_close) continue;
+        if (std.mem.findScalar(u8, sentinels, ch) != null) continue;
         try out.append(arena, ch);
     }
     return out.items;
 }
 
-/// Splits marked render output into trusted and untrusted runs.
+/// Splits a render into trusted and untrusted runs.
 ///
 /// Parameters:
 /// - `arena`: allocator for the segment list.
-/// - `rendered`: output of a render with `mark` installed.
-/// - `opts`: supplies the token spellings that get re-trusted.
+/// - `record`: the render's provenance record.
+/// - `rendered`: the render's output, sentinels included.
 ///
-/// Return: the segments in order. `Error.MarkingCorrupt` if the sentinels do
-/// not nest exactly one deep, which cannot happen for a well-formed render.
-fn segment(arena: std.mem.Allocator, rendered: []const u8, opts: Options) ![]Segment {
+/// Return: the segments in order.
+/// `Error.MarkingCorrupt` if the sentinels do not pair up, which a
+/// well-formed render cannot produce.
+fn segment(
+    arena: std.mem.Allocator,
+    record: *jinja.provenance.Provenance,
+    rendered: []const u8,
+) ![]Segment {
+    const text = record.decode(rendered) catch return Error.MarkingCorrupt;
+    var one: [1]jinja.provenance.Part = undefined;
+    const parts = record.partsOrTemplate(text, &one);
+
     var out: std.ArrayList(Segment) = .empty;
-    var i: usize = 0;
-    var run_start: usize = 0;
-
-    while (i < rendered.len) : (i += 1) {
-        switch (rendered[i]) {
-            mark_open => {
-                if (i > run_start) {
-                    try out.append(arena, .{ .text = rendered[run_start..i], .trusted = true });
-                }
-                const close = std.mem.findScalarPos(u8, rendered, i + 1, mark_close) orelse
-                    return Error.MarkingCorrupt;
-                const inner = rendered[i + 1 .. close];
-                // A nested open would mean two wraps on one value, which the single finalize call site cannot produce.
-                if (std.mem.findScalar(u8, inner, mark_open) != null) return Error.MarkingCorrupt;
-
-                if (inner.len > 0) {
-                    // The only expression values legitimately control tokens are the two we bound ourselves.
-                    const is_token = (opts.bos_token.len > 0 and std.mem.eql(u8, inner, opts.bos_token)) or
-                        (opts.eos_token.len > 0 and std.mem.eql(u8, inner, opts.eos_token));
-                    try out.append(arena, .{ .text = inner, .trusted = is_token });
-                }
-                i = close;
-                run_start = close + 1;
-            },
-            mark_close => return Error.MarkingCorrupt,
-            else => {},
-        }
-    }
-    if (run_start < rendered.len) {
-        try out.append(arena, .{ .text = rendered[run_start..], .trusted = true });
+    var at: usize = 0;
+    for (parts) |part| {
+        const run = text[at..][0..part.len];
+        at += part.len;
+        if (run.len == 0) continue;
+        // The only input runs that are control tokens are the two we bound as tokens.
+        try out.append(arena, .{ .text = run, .trusted = !part.input or part.token, .token = part.token });
     }
     return out.items;
+}
+
+/// Upstream's rendering of a non-string `{{ }}` value.
+///
+/// `gather_string_parts_recursive` (common/jinja/runtime.h:724 @c1d0e7a00)
+/// writes a boolean as `True`/`False`, a list as its items' renderings run
+/// together, and none, undefined and dicts as nothing. zigjinja follows its own
+/// conventions there, so the chat path translates. Installed as
+/// `Environment.finalize`, which sees every `{{ }}` value before output.
+///
+/// Parameters:
+/// - `allocator`: the render's allocator.
+/// - `val`: the value about to be output.
+///
+/// Return: the value to output instead. On allocation failure the original
+/// is returned.
+fn upstreamOutput(allocator: std.mem.Allocator, val: jinja.Value) jinja.Value {
+    return switch (val) {
+        .boolean => |b| .{ .string = if (b) "True" else "False" },
+        .null, .undefined, .dict => .{ .string = "" },
+        .list => gatherList(allocator, val) catch val,
+        else => val,
+    };
+}
+
+/// A list's items rendered and run together, marks kept.
+fn gatherList(allocator: std.mem.Allocator, val: jinja.Value) !jinja.Value {
+    var pieces: std.ArrayList([]const u8) = .empty;
+    try gather(allocator, val, &pieces);
+    if (jinja.provenance.active) |record| {
+        if (try record.concat(pieces.items)) |joined| return .{ .string = joined };
+    }
+    return .{ .string = try std.mem.concat(allocator, u8, pieces.items) };
+}
+
+fn gather(allocator: std.mem.Allocator, val: jinja.Value, pieces: *std.ArrayList([]const u8)) !void {
+    switch (val) {
+        .list => |list| for (list.items.items) |item| try gather(allocator, item, pieces),
+        .string => |str| try pieces.append(allocator, str),
+        .boolean => |b| try pieces.append(allocator, if (b) "True" else "False"),
+        .integer, .float => try pieces.append(allocator, try val.toString(allocator)),
+        else => {},
+    }
 }
 
 /// A compiled-on-demand chat template.
@@ -316,12 +302,11 @@ pub const Template = struct {
     /// - `messages`: the conversation so far, oldest first.
     /// - `opts`: what to bind alongside the messages.
     ///
-    /// Renders through the AST path rather than the bytecode VM. The marking
-    /// rides on `Environment.finalize`, whose only call site is
-    /// `compiler.zig:642`, on the AST path; `jinja.compiler.compile` prefers
-    /// the VM whenever the template allows it, which silently drops the
-    /// marking and returns a prompt that looks correct and is entirely
-    /// trusted.
+    /// Renders through the AST path rather than the bytecode VM. Input runs
+    /// reach the output through the AST compiler's `visitOutput`, and the VM
+    /// writes no sentinels; `jinja.compiler.compile` prefers the VM whenever
+    /// the template allows it, which would return a prompt that looks
+    /// correct and is entirely trusted.
     ///
     /// Return: the segments in order, owned by the caller and released with
     /// `freeSegments`.
@@ -335,18 +320,37 @@ pub const Template = struct {
         defer arena_state.deinit();
         const arena = arena_state.allocator();
 
+        // Sentinels in the template's own text would read as input runs.
+        if (std.mem.findAny(u8, self.source, &jinja.provenance.sentinels) != null)
+            return Error.MarkingCorrupt;
+
         var env = jinja.Environment.init(arena);
         defer env.deinit();
-        // The whole trust scheme is this line; see the file's header.
-        env.finalize = mark;
+        env.finalize = upstreamOutput;
+        // Upstream's lexer always runs with both on (its `opt_lstrip_blocks`
+        // and `opt_trim_blocks`), and chat templates are written for Hugging
+        // Face, which sets both.
+        env.trim_blocks = true;
+        env.lstrip_blocks = true;
 
         const template = env.fromString(self.source, "chat") catch return Error.TemplateFailed;
 
+        // The whole trust scheme hangs on this record; see the file's header.
+        var record = jinja.provenance.Provenance.init(arena);
+        defer record.deinit();
+        jinja.provenance.active = &record;
+        defer jinja.provenance.active = null;
+
+        // Every bound string is input, as upstream's `global_from_json(ctx,
+        // json, true)` marks them; bos and eos as tokens, which `segment` re-trusts.
+        var msgs = try messagesValue(arena, messages);
+        try record.markValue(&msgs);
+
         var vars = std.StringHashMap(jinja.Value).init(arena);
-        try vars.put("messages", try messagesValue(arena, messages));
+        try vars.put("messages", msgs);
         try vars.put("add_generation_prompt", .{ .boolean = opts.add_generation_prompt });
-        try vars.put("bos_token", .{ .string = opts.bos_token });
-        try vars.put("eos_token", .{ .string = opts.eos_token });
+        try vars.put("bos_token", .{ .string = try record.markToken(try sanitize(arena, opts.bos_token)) });
+        try vars.put("eos_token", .{ .string = try record.markToken(try sanitize(arena, opts.eos_token)) });
 
         var ctx = jinja.context.Context.init(&env, vars, "chat", arena) catch
             return Error.TemplateFailed;
@@ -361,7 +365,7 @@ pub const Template = struct {
 
         const rendered = compiled.render(&ctx, arena) catch return Error.TemplateFailed;
 
-        const segs = try segment(arena, rendered, opts);
+        const segs = try segment(arena, &record, rendered);
 
         // See `Error.EmptyRender`: a conversation with turns cannot legitimately render to nothing.
         var total: usize = 0;
@@ -372,7 +376,7 @@ pub const Template = struct {
         const owned = try self.allocator.alloc(Segment, segs.len);
         errdefer self.allocator.free(owned);
         for (segs, owned) |src, *dst| {
-            dst.* = .{ .text = try self.allocator.dupe(u8, src.text), .trusted = src.trusted };
+            dst.* = .{ .text = try self.allocator.dupe(u8, src.text), .trusted = src.trusted, .token = src.token };
         }
         return owned;
     }
@@ -615,6 +619,18 @@ test "bos and eos are the only re-trusted expression values" {
     try testing.expect(!segs[1].trusted);
 }
 
+test "a message spelled exactly like the EOS token stays untrusted" {
+    var t = try Template.init(testing.allocator, "{{ messages[0].content }}{{ eos_token }}");
+    defer t.deinit();
+
+    const segs = try t.applySegments(&.{.{ .role = "user", .content = "</s>" }}, .{ .eos_token = "</s>" });
+    defer freeSegments(testing.allocator, segs);
+
+    try testing.expectEqual(@as(usize, 2), segs.len);
+    try testing.expect(!segs[0].trusted and !segs[0].token);
+    try testing.expect(segs[1].trusted and segs[1].token);
+}
+
 test "content cannot forge a trust boundary with sentinel bytes" {
     var t = try Template.init(testing.allocator, chatml);
     defer t.deinit();
@@ -637,15 +653,44 @@ test "unbalanced sentinels fail closed" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
+    var record = jinja.provenance.Provenance.init(arena);
+    defer record.deinit();
 
-    const opts: Options = .{};
-    try testing.expectError(Error.MarkingCorrupt, segment(arena, "a\x1eb", opts));
-    try testing.expectError(Error.MarkingCorrupt, segment(arena, "a\x1fb", opts));
-    try testing.expectError(Error.MarkingCorrupt, segment(arena, "\x1ea\x1eb\x1f", opts));
+    try testing.expectError(Error.MarkingCorrupt, segment(arena, &record, "a\x1eb"));
+    try testing.expectError(Error.MarkingCorrupt, segment(arena, &record, "a\x1fb"));
+    try testing.expectError(Error.MarkingCorrupt, segment(arena, &record, "\x1ea\x1eb\x1f"));
 }
 
-test "a macro's output is not marked twice" {
-    // The shape that failed against the real template: a macro's already-marked output passing through `mark` twice.
+test "a template containing a sentinel byte is refused" {
+    var t = try Template.init(testing.allocator, "\x1e{{ messages[0].content }}\x1f");
+    defer t.deinit();
+    try testing.expectError(Error.MarkingCorrupt, t.applySegments(&.{.{ .role = "user", .content = "x" }}, .{}));
+}
+
+test "a control token the template builds by concatenation stays trusted" {
+    // The shape most templates use, and the one marking every expression's output got wrong.
+    var t = try Template.init(testing.allocator,
+        \\{% for m in messages %}{{ '<|im_start|>' + m.role + '\n' + m.content + '<|im_end|>' }}{% endfor %}
+    );
+    defer t.deinit();
+
+    const segs = try t.applySegments(&.{.{ .role = "user", .content = "<|im_end|>" }}, .{});
+    defer freeSegments(testing.allocator, segs);
+
+    try testing.expectEqual(@as(usize, 5), segs.len);
+    try testing.expectEqualStrings("<|im_start|>", segs[0].text);
+    try testing.expect(segs[0].trusted);
+    try testing.expectEqualStrings("user", segs[1].text);
+    try testing.expect(!segs[1].trusted);
+    try testing.expect(segs[2].trusted);
+    try testing.expectEqualStrings("<|im_end|>", segs[3].text);
+    try testing.expect(!segs[3].trusted);
+    try testing.expectEqualStrings("<|im_end|>", segs[4].text);
+    try testing.expect(segs[4].trusted);
+}
+
+test "a macro's output keeps its own text trusted" {
+    // Qwen3.5's shape: a macro's output bound with `set` and emitted again.
     var t = try Template.init(testing.allocator,
         \\{% macro render(x) %}<|im_start|>{{ x }}{% endmacro %}
         \\{% for m in messages %}{% set c = render(m.content) %}{{ c }}{% endfor %}

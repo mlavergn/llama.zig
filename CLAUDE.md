@@ -284,12 +284,14 @@ Correctness has thirty-four gates, and none of them subsumes the others:
   architecture that needs a second model's context to run.
 - **`make jinja-diff`** renders all 68 of upstream's model templates over
   seven conversations through `cli/chat.zig` and through upstream's
-  `common/jinja`, compiled unmodified: the text, which side raises, and that
-  ours never trusts a byte upstream marks as input. **It fails**, on what
-  it measured -- zigjinja parses 48 of the 68, ignores `trim_blocks`, and
-  `chat.zig`'s trust marking is wrong in both directions (`PLAN.md`,
-  "Questions"). Runs under `TZ=UTC`: `strftime_now` is local time upstream
-  and UTC in zigjinja. Negative-tested by removing the marking.
+  `common/jinja`, compiled unmodified, and requires **the text, which side
+  raises, and every byte's input mark** to agree -- both directions, the
+  re-trusted `bos_token`/`eos_token` excepted (Decision 58). Then a
+  `strftime_now` clock check; the whole run twice, under `TZ=UTC` and
+  `TZ=Australia/Lord_Howe`. It started at 26 of 68; the fixes are in
+  `../zigjinja` (`NOTES.md`, "zigjinja against `jinja-diff`").
+  Negative-tested 5/5: marks dropped by `strip` and by `~`, `lstrip_blocks`
+  off, template text over-marked, and a UTC-only clock.
 - **`make api-diff`** compares every other `llama.h` entry point at the C boundary — model, vocabulary, loading, chat, batch, logger — on every upstream vocabulary file and the local models: buffer sizes, truncation, negative returns, null handling, and the death paths in forked children. 85.8M checks, ~40 s, 19/19 injections.
 - **`make adapter-diff`** (LoRA, aLoRA, control vectors; 278k checks, 13/13), **`scripts/quant-diff`** (the quantizer on every ftype and its type rules for 146 architectures, the saver; 120M checks, 17/17), **`scripts/opt-diff`** and **`scripts/opt-llama-diff`** (ggml's optimizer with libc++'s `shuffle` reproduced; libllama's training on a synthesized F32 Qwen3.5; 21/22, one provably inert), **`scripts/meta-diff`** (the meta backend on {Metal, Metal} and {Metal, CPU} — it accepts a device twice, so a real all-reduce runs on one GPU; 94.8% of its lines reached, 14/14), **`make batch-diff`** and **`make chat-diff`** — each in-process against `libllama-ref.a` or a `-D`-renamed reference object. `NOTES.md` has each one's injection table and what it established.
 
@@ -573,11 +575,11 @@ Note `build/` holds build *sources*, not build output. CMake's output directory 
 
 - **`cli/`** builds `llama-cli`, our replacement for upstream's binary of that name — same name so an existing command line runs unchanged against it, but it is our Zig binary, not upstream's linked against our library. `args.zig` parses upstream's flag surface, `session.zig` loads a model and generates, `chat.zig` renders chat templates, `main.zig` stays thin. `c.zig` holds the single `@cImport` of `llama.h` — two of them produce two incompatible `*llama_model`, and the error says only that `*cimport.struct_llama_model` will not coerce to `*cimport.struct_llama_model`. `upstream_flags.zig` is a generated inventory of every flag upstream accepts, used only to tell "you typed a real flag we have not got to yet" apart from "you made a typo".
 
-**Chat templates are Jinja, and trust runs the other way from upstream's.** `zigjinja` is the one permitted dependency, wired into `cli/` only. Three things about it are worth knowing before touching `cli/chat.zig`:
+**Chat templates are Jinja, marked as upstream marks them.** `zigjinja` is the one permitted dependency, wired into `cli/` only. Three things about it are worth knowing before touching `cli/chat.zig`:
 
-- **Template literals are trusted; everything an expression emits is not.** Upstream marks strings that came *from* input (`common/jinja/README.md`); we mark the complement, so trust is the closed set the template author wrote rather than the open set we remembered to taint. A filter chain, a `set`, a loop variable — all reach output through an expression and all come out untrusted with nothing tracking them. `Session.tokenizeSegments` then sets `parse_special` per run. Measured: the attack text tokenizes to 7 tokens *including the real `<|im_start|>`* with it on, and 17 harmless ones with it off.
-- **The marking rides on `Environment.finalize`, and the bytecode VM ignores it.** `applyFinalize` has exactly one call site, `compiler.zig:642`, on the AST path. `jinja.compiler.compile` picks the bytecode VM whenever the template allows it, which silently drops the marking and returns a prompt that looks correct and is entirely trusted. `chat.zig` calls `Compiler.compile(template, false)` for that reason. Found by tests failing, not by reading.
-- **Marking is idempotent on purpose.** Qwen3.5 does `{% set c = render_content(...) %}{{ c }}`, so a macro's already-marked output passes through `mark` again; wrapping twice nested the sentinels and swallowed the macro body's own literal text into an untrusted run.
+- **Input is marked, by upstream's rules, and `make jinja-diff` holds the two to the same bytes.** Every bound string is marked input (`global_from_json(..., true)`), and zigjinja's provenance record (`../zigjinja/src/provenance.zig`) carries the marks through what upstream carries them through -- concatenation keeps each side's runs, `strip` and case changes keep them, `replace` and `split` only when the whole source was input; `tojson` and `join` drop them, as upstream's do. `Session.tokenizeSegments` then sets `parse_special` per run. Measured: the attack text tokenizes to 7 tokens *including the real `<|im_start|>`* with it on, and 17 harmless ones with it off. **The earlier scheme marked the complement** -- every byte an expression emitted -- and was wrong both ways: Qwen2.5, Llama 3, Qwen3 and gpt-oss build `'<|im_start|>' + role` in an expression, so their control tokens reached the model as text.
+- **`bos_token` and `eos_token` are bound as provenance *tokens*.** Input for every propagation rule, but `segment` re-trusts exactly their runs. Re-trusting any run *spelled* like one let a message reading `</s>` through.
+- **The marks reach the output only on the AST path.** `visitOutput` writes input runs between sentinel bytes, and the bytecode VM writes none: `jinja.compiler.compile` picks the VM whenever the template allows it, which would return a prompt that looks correct and is entirely trusted. `chat.zig` calls `Compiler.compile(template, false)` for that reason.
 
 **The engine's strict parsing is partial.** `{{ unclosed`, a `for` with no `endfor` and `{{ 1 + }}` are reported as parse errors, but `{% bogusstatement %}` still renders as **empty output and reports success**. `chat.zig` rejects a render that produced nothing from a non-empty conversation; that guard is still the only thing standing between that class of broken template and a silently empty prompt. (Under `vibe-jinja` all five rendered empty and reported success; `zigjinja` v2.0.1 fixed the swallowed syntax errors.)
 

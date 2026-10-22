@@ -75,6 +75,7 @@ Settled in review. The plan below assumes all of these.
 | 55 | Vulkan reference | **`llama.cpp.zmake` gains `-Dvulkan`**, an explicit grant against Decision 18, as Decision 52 was. It builds upstream's own `vulkan-shaders-gen` for the host, runs it once for the header and once per shader file with `glslc`, and asks `glslc` which shader extensions it accepts exactly as `ggml-vulkan/CMakeLists.txt` does. **The toolchain is part of the reference**: which C++ compiles depends on the Vulkan header version and on those `glslc` answers (64 `#if` sites on the seven extension macros, more on `VK_HEADER_VERSION`), and the SPIR-V depends on `glslc`'s optimizer. Both sides of every Vulkan gate are built with the same `glslc` and headers, and the shaders the port embeds are the reference generator's output, identical by construction. |
 | 56 | When Vulkan starts | **Now, as Stage 7, beside Stage 5** -- whose x86 step waits on the laptop. Measured first ("Stage 7 — Vulkan" below), reproducibility before any code, as Stage 6 began. |
 | 57 | Windows | **A target, and x86 is gated on it natively** (asked for on 2026-10-18: "that was always the plan ... get it building on Windows"). `x86_64-windows-gnu` -- MinGW, the only Windows ABI Zig ships a libc for -- at the same `-Dcpu` levels as Linux. **`llama.cpp.zmake` gains a `windows` platform** under that grant, a third against Decision 18: `_CRT_SECURE_NO_WARNINGS` and `ws2_32` from CMake's `WIN32` arms, and CMake's own `gnu11`/`gnu++17` dialects there only (below). The gate machine is Decision 51's laptop: a MacBookPro11,5 (Core i7-4980HQ, Haswell, x86-64-v3, **no AVX-512**, 16 GB) running Windows 11 Pro 26100 under Boot Camp, reached through `inferiseupdater`'s developer link (`push`, `tty`). Its firmware leaves VT-x off, so WSL2 cannot start there; the gates are Windows binaries. |
+| 58 | The chat-template engine | **Fix `zigjinja` until `make jinja-diff` passes** (asked for on 2026-10-22, `MAINTENANCE.md` Decisions 13-18), not port `common/jinja`. "Passes" means upstream's 68 templates over seven conversations agree **byte for byte in text, in which side raises, and in every byte's input mark**, both ways; `bos_token`/`eos_token` are the one exception, bound as provenance tokens and re-trusted. `strftime_now` is local time on both sides and checked under two zones. zigjinja stays its own engine, so `jinja-diff` runs at every upstream sync. **Done, at zigjinja v3.0.0 (`de36d7b`)**: 469 renders identical and 7 where both raise, under `TZ=UTC` and `TZ=Australia/Lord_Howe`; `NOTES.md`, "zigjinja against `jinja-diff`". `build.zig.zon` still takes zigjinja by path, so pinning `de36d7b` is the step left. |
 
 ---
 
@@ -1736,15 +1737,12 @@ node hashes.
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:
 
-- ~~**A `chat-parity` gate.**~~ **Written, and failing on what it measured**:
-  `make jinja-diff`, 68 upstream templates × 7 conversations against
-  upstream's engine (`NOTES.md`, "`jinja-diff`"). 26 templates agree. zigjinja
-  cannot parse 20, raises at render time on others, ignores `trim_blocks`
-  and `lstrip_blocks`, and formats `strftime_now` in UTC; and `chat.zig`'s
-  trust scheme is wrong in both directions -- it trusts `message.role` in
-  Qwen3.5, and leaves the template's own control tokens untrusted in
-  Qwen2.5, Llama 3, Qwen3 and gpt-oss, so `-cnv --jinja` tokenizes them as
-  text. See "Questions".
+- ~~**A `chat-parity` gate.**~~ **Done, and passing** against zigjinja
+  v3.0.0 (`de36d7b`): `make jinja-diff`, 68 upstream templates × 7
+  conversations against upstream's engine, text, raises and input marks
+  identical, plus the clock under two zones (Decision 58). It started at 26 of 68 (`NOTES.md`, "`jinja-diff`"); the
+  zigjinja fixes and the provenance scheme that closed it are in `NOTES.md`,
+  "zigjinja against `jinja-diff`".
 - **No gate covers the conversation loop.** `parity-cli` runs one-shot prompts;
   multi-turn behaviour, KV prefix reuse and the hybrid-cache fallback are
   checked by hand only.
@@ -1752,20 +1750,6 @@ node hashes.
 ---
 
 ## Questions
-
-- **The chat-template engine** (`NOTES.md`, "`jinja-diff`"). Two things
-  need deciding, and both live in `../zigjinja`, its own repository:
-  - **Trust.** Marking at the output boundary cannot tell a template's
-    `'<|im_start|>' + message.content` apart from input, in either
-    direction. Upstream's answer is provenance carried per string part
-    through every transformation, ~360 sites in the engine by the earlier
-    estimate. The alternatives are that, or accepting that `-cnv --jinja`
-    tokenizes the control tokens of concatenating templates as text.
-  - **Coverage.** 20 of upstream's 68 templates do not parse in zigjinja,
-    `trim_blocks`/`lstrip_blocks` are unimplemented, and `strftime_now` is
-    UTC. Fixing zigjinja against `jinja-diff`, or porting `common/jinja`
-    (6,349 lines, the route Decision 25 declined), are the options;
-    `jinja-diff` is the gate for either.
 
 Stage 5's three x86 questions are Decisions 51–53.
 

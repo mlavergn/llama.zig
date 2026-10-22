@@ -6003,3 +6003,96 @@ scripts. They have not run: the laptop's agent was not up.
 - **`zig translate-c -target x86_64-windows-gnu -lc` never finishes**
   (Zig 0.17.0): it spun at 100% CPU for minutes. Without `-lc` it takes
   under a second and `llama.h` needs nothing more.
+
+## zigjinja against `jinja-diff`
+
+Decision 58, carried out on 2026-10-22: `../zigjinja` fixed until upstream's
+68 model templates, over `jinja-diff`'s seven conversations, render
+byte-identically to upstream's `common/jinja` -- the text, which side raises,
+and every byte's input mark, both ways. It started at 26 of 68 and 191 of
+476 renders; it ends at 68 of 68, 469 identical and 7 where both raise, and
+the clock agrees under `TZ=UTC` and `TZ=Australia/Lord_Howe`. zigjinja's
+own suite went from 733 to 763 tests, all passing, and `bench-check` still
+passes against its checked-in Python reference.
+
+**The engine gaps, in the order the gate surfaced them.** Most were
+silent -- a successful render of the wrong text -- which is why a
+differential gate found them and the fixture suite had not:
+
+| gap | measured as |
+|---|---|
+| no dict or tuple literals | 13 templates failed to parse; `{{ {'a': 1} }}` rendered as raw text |
+| `trim_blocks`/`lstrip_blocks` were fields the lexer never read | stray newlines on most templates (`T`) |
+| statement keywords were keywords everywhere | `{% for call in ... %}`, `{% set block = ... %}` failed to parse |
+| `x if c` with no `else` | parse error |
+| `and`/`or` returned booleans, not an operand | `message.get('name') or message['role']` was `true` |
+| no Python methods: `.get`, `.items`, `.append`, `.pop`; `.strip()` and the rest ran Jinja2 filters | `RuntimeError`, and marks lost |
+| **an empty `{% else %}` swallowed the rest of the template** | Cohere2MoE rendered 535 bytes and stopped, successfully |
+| **a statement inside `{% set %}`/`{% filter %}`/`{% with %}` blocks was emitted as text** | firefunction printed `filter trim` into its prompt |
+| the optimizer folded `{% if false %}` past its `elif`s | found while isolating the empty-`else` bug |
+| `default` replaced every falsy value, `true` included | poolside's generation prompt vanished: `add_generation_prompt \| default(false)` |
+| `selectattr` ignored its test | Apriel's system turn never rendered |
+| `dictsort` returned `{key, value}` dicts | `for k, v in d \| dictsort` raised |
+| attributes of strings raised | `content[0].type` on string content |
+| dicts iterated in hash order | -- (fixed with the literals, before it showed) |
+| `-#}` did not trim | GigaChat's prompt began with two newlines |
+| `select`/`map` on none | `none \| selectattr(...) \| list \| length` was 1 |
+| `strftime_now` formatted UTC | the clock check, under Lord Howe |
+
+Where upstream departs from Jinja2 the engine follows Jinja2 unless a
+shipped template depends on the difference: `default` treats none as
+missing, as upstream does; `split()` with no separator splits on
+whitespace runs, as Python does -- upstream's single space is a FIXME in
+its source, and no template it ships calls `split()` without one.
+
+**Trust is now upstream's scheme, carried by address.** `zigjinja`'s
+`Value.string` is a plain slice, and giving every string a parts list would
+have touched ~580 sites. Instead `src/provenance.zig` keeps a marked
+string's bytes in its own arena, never reused during a render, and looks
+its parts up by address; `Value.deepCopy` shares such a slice and
+`Value.deinit` leaves it alone, so a mark survives every variable read.
+An operation that builds a new string is unmarked unless it says
+otherwise -- upstream's default too -- so a missed propagation shows up
+in `jinja-diff` as a trust difference rather than passing silently. In
+rendered text the marks travel in band, between sentinel bytes, and are
+decoded where text becomes a value again (a macro's result, a `set`
+block) and at the end. Three things that follow from matching upstream
+exactly, and are upstream's behaviour as much as ours:
+
+- `tojson` and `join` produce unmarked -- trusted -- strings, so message
+  content passed through either reaches the tokenizer with
+  `parse_special` on. Upstream marks neither.
+- `split` marks only its last piece; `content.split('</think>')[0]` is
+  trusted.
+- A part-wise `capitalize` capitalizes each part: `('a' + content) |
+  capitalize` is `A` + `Content`.
+
+`bos_token` and `eos_token` are bound as provenance *tokens*: input for
+every propagation rule, re-trusted at the end by their own runs. The old
+`chat.zig` re-trusted any run spelled like one, so a message reading
+exactly `</s>` was honoured as EOS; `chat.zig` has a test for that now.
+
+**The VM.** `Runtime.renderString` uses the bytecode VM whenever it can,
+and it had its own `and`/`or`, its own `default` fast path, and compiled a
+method call to a filter. `and`/`or` and `default` were fixed there too;
+method calls and dict literals now send a template to the AST path.
+`chat.zig` was already on the AST path, because only `visitOutput` writes
+the marks.
+
+**Negative tests, 5/5**, each injected into `../zigjinja`, run, and
+reverted:
+
+| injection | `jinja-diff` |
+|---|---|
+| `strip` drops its marks | 23 templates fail |
+| `~` drops its marks | 4 fail |
+| `lstrip_blocks` off | 9 fail |
+| every decoded render marked input (over-marking) | 68 fail, 440 on trust |
+| `strftime_now` offset forced to UTC | passes under `TZ=UTC`, fails the clock and 7 templates under Lord Howe |
+
+**What is not covered.** On Windows zigjinja reads the system zone
+(`GetTimeZoneInformation`) and ignores `TZ`; `jinja-diff` there runs once
+as configured. A `TZ` value is honoured only where zigjinja can reach the
+environment, which is through libc -- every llamazig build links it. The
+VM still writes no marks; a caller who wants them must compile for the AST
+path, as `chat.zig` does.
