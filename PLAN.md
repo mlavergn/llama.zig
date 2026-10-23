@@ -76,6 +76,7 @@ Settled in review. The plan below assumes all of these.
 | 56 | When Vulkan starts | **Now, as Stage 7, beside Stage 5** -- whose x86 step waits on the laptop. Measured first ("Stage 7 — Vulkan" below), reproducibility before any code, as Stage 6 began. |
 | 57 | Windows | **A target, and x86 is gated on it natively** (asked for on 2026-10-18: "that was always the plan ... get it building on Windows"). `x86_64-windows-gnu` -- MinGW, the only Windows ABI Zig ships a libc for -- at the same `-Dcpu` levels as Linux. **`llama.cpp.zmake` gains a `windows` platform** under that grant, a third against Decision 18: `_CRT_SECURE_NO_WARNINGS` and `ws2_32` from CMake's `WIN32` arms, and CMake's own `gnu11`/`gnu++17` dialects there only (below). The gate machine is Decision 51's laptop: a MacBookPro11,5 (Core i7-4980HQ, Haswell, x86-64-v3, **no AVX-512**, 16 GB) running Windows 11 Pro 26100 under Boot Camp, reached through `inferiseupdater`'s developer link (`push`, `tty`). Its firmware leaves VT-x off, so WSL2 cannot start there; the gates are Windows binaries. |
 | 58 | The chat-template engine | **Fix `zigjinja` until `make jinja-diff` passes** (asked for on 2026-10-22, `MAINTENANCE.md` Decisions 13-18), not port `common/jinja`. "Passes" means upstream's 68 templates over seven conversations agree **byte for byte in text, in which side raises, and in every byte's input mark**, both ways; `bos_token`/`eos_token` are the one exception, bound as provenance tokens and re-trusted. `strftime_now` is local time on both sides and checked under two zones. zigjinja stays its own engine, so `jinja-diff` runs at every upstream sync. **Done, at zigjinja v3.0.0 (`de36d7b`)**: 469 renders identical and 7 where both raise, under `TZ=UTC` and `TZ=Australia/Lord_Howe`; `NOTES.md`, "zigjinja against `jinja-diff`". `build.zig.zon` still takes zigjinja by path, so pinning `de36d7b` is the step left. |
+| 59 | The Vulkan toolchain, and who generates the shaders | **Pinned at SDK tag `vulkan-sdk-1.4.363.0` and built from source, never the distro's** -- `scripts/vk-toolchain` into `.tools/vulkan/`: Khronos's `Vulkan-Headers` and `SPIRV-Headers` at that tag, and `glslc` from shaderc v2026.4, whose `DEPS` pin glslang and SPIRV-Tools at exactly that tag's commits. Ubuntu 24.04's `glslc` is shaderc 2023.8, too old for coopmat2 and bfloat16, and there is no root on the GB10. **And one generator run feeds both sides**: measured, `glslc -O` reads uninitialized memory on `tri_f16`, whose bytes follow heap state from run to run (`NOTES.md`, "Stage 7: the GB10 pickup"), so Decision 55's "identical by construction" holds only when the port embeds the reference build's generated files rather than generating its own. |
 
 ---
 
@@ -1432,7 +1433,9 @@ To be confirmed by the reproducibility measurement, but the shape follows
 from the contract:
 
 - **Shaders travel as data.** Upstream's generator, built unmodified, writes
-  the SPIR-V; the port's build runs the same tool with the same `glslc`.
+  the SPIR-V **once**, in the reference build, and the port embeds those
+  files. Running the same tool again with the same `glslc` is not the same
+  reference: `tri_f16` is not reproducible (Decision 59).
 - **The host is Zig against Vulkan's C API.** `vulkan.hpp` is a C++
   wrapper over a plain C API Zig can call directly, through
   `vkGetInstanceProcAddr` as the C++'s dynamic dispatcher does -- easier
@@ -1454,12 +1457,16 @@ from the contract:
   fused, run against themselves. Everything below assumes it passes.
 - `vk-ops-diff`: `harness/ops_dump.c` on the Vulkan device, port against
   reference, on bits.
-- `vk-node-diff`: `node-diff --gpu` over a Vulkan-only build: per node, then
-  fused.
-- `vk-backend-diff`: the vtables' answers -- `supports_op`, buffer types,
-  `get_alloc_size`, `offload_op` -- as `metal-diff` and `cuda-backend-diff`.
-- `vk-struct-layout`: the push-constant structs.
-- `vk-parity-cli`: tokens through our `llama-cli`.
+- `vk-node-diff` -- **written**: `node-diff --gpu` over a Vulkan-only build,
+  per node then fused, on all four arms.
+- `vk-backend-diff` -- **written**: the vtables' answers, one side per
+  process under 13 environments; grows with each layer (buffer types,
+  `get_alloc_size`, `supports_op`).
+- `vk-push-layout` -- **written** (the planned `vk-struct-layout`): the 46
+  generated push-constant structs, 1,266 facts, against the C++.
+- `vk-ops-diff` -- **written**: test-backend-ops with the reference where
+  the CPU goes, on bits, plus extra cases upstream lacks.
+- `vk-parity-cli` -- **written**: tokens through our `llama-cli`.
 
 ### Order of work
 
@@ -1470,26 +1477,42 @@ from the contract:
    defined in the archive, `ggml_backend_vk_reg` registered, native and
    cross-built for `aarch64-linux-gnu`; without `-Dvulkan` the archive is
    byte-identical to before. Real shaders need the GB10.
-3. **On the GB10** (the pickup below): the toolchain, the real build,
-   `make vk-repro`.
-4. Depending on 3: the gates, then the host port in `src/ggml/vulkan/`,
-   then the swap.
+3. ~~**On the GB10**~~ -- done: the toolchain pinned (Decision 59), all
+   seven probes pass, 1,980 variants, and `make vk-repro` passes on all
+   four of the GB10's arms -- coopmat2, KHR coopmat, none, none without
+   integer dot. `NOTES.md`, "Stage 7: the GB10 pickup".
+4. **The gates, then the host port in `src/ggml/vulkan/`, outside in** --
+   under way (`NOTES.md`, "Stage 7 step 4"):
+   - ~~the build~~: `-Dvulkan` here, reference and port modes, `vk-ref`,
+     the shader table from the reference's own generated files.
+   - ~~`vk-node-diff`~~ written, negative-tested; ~~`vk-backend-diff`~~
+     written, negative-tested 3/3.
+   - ~~the registry and the device's descriptive answers~~ -- identical in
+     13 environments.
+   - ~~the logical device, the pipeline walk, the buffers, the backend~~
+     (`NOTES.md`, "Stage 7 step 5").
+   - ~~`vk-ops-diff`~~ (`harness/cuda_ops_diff.c`'s method), ~~every op
+     family~~, ~~the compute loop's fusion~~, ~~`graph_optimize`~~ --
+     every supported case bit-identical, and `vk-node-diff` identical on
+     all four arms (`NOTES.md`, "Stage 7 steps 6 and 7").
+   - ~~`vk-parity-cli`~~ -- our `llama-cli` against `raw_completion.c` over
+     upstream's libllama and Vulkan host layer, 6/6 prompts identical,
+     negative-tested 3/3 (`NOTES.md`, "Stage 7 step 8").
+5. ~~The swap~~ -- done: `-Dvulkan-port` defaults to true, so `-Dvulkan`
+   builds the Zig host layer; `-Dvulkan-port=false` builds upstream's, for
+   the gates. `supports_op` is the C++'s predicate alone, and `vk-ops-diff`
+   fails on a disagreement either way.
 
 ### Vulkan pickup (GB10)
 
-- Install the toolchain and record it: `glslc` (shaderc), the Vulkan and
-  SPIR-V headers, `vulkaninfo` (Ubuntu: `glslc`, `libvulkan-dev`,
-  `spirv-headers`, `vulkan-tools`). Note `VK_HEADER_VERSION`: a distro
-  header older than the cooperative-matrix-2 extension compiles that path
-  out, and NVIDIA's fastest kernels with it. If it is, pin Khronos's
-  header-only `Vulkan-Headers` and `SPIRV-Headers` at one SDK tag instead
-  (`-Dvulkan-include`), and decide `glslc`'s source the same way.
-- `vulkaninfo --summary`: the GB10's device, driver version, and whether
-  it reports `VK_KHR_cooperative_matrix`, `VK_NV_cooperative_matrix2`,
-  `VK_KHR_shader_integer_dot_product`, `VK_KHR_shader_bfloat16`.
-- `make -C llama.cpp.zmake lib VULKAN=1`, noting which of the seven probes
-  passed, then `make vk-repro` with the Qwen3.5 model. Record all of it in
-  `NOTES.md`; it decides the gates.
+~~Done~~ (`NOTES.md`, "Stage 7: the GB10 pickup"). The toolchain is
+`scripts/vk-toolchain` at SDK 1.4.363 (Decision 59); the GB10 reports
+`VK_KHR_cooperative_matrix`, `VK_NV_cooperative_matrix2`,
+`VK_KHR_shader_integer_dot_product` and `VK_KHR_shader_bfloat16`; all seven
+probes pass; `make vk-repro` passes per node and fused on every arm. One
+finding changes the method: `glslc -O` is not reproducible on `tri_f16`, so
+the port embeds the reference's generated SPIR-V rather than regenerating
+it.
 
 ---
 
@@ -1730,10 +1753,16 @@ steps 3 and 4 ran on the GB10 in its pickup, which found and fixed two
 Linux-only bugs; step 5 put the SIMD layer in. Step 6, x86_64, is done at AVX2 and exact on the Windows laptop;
 AVX-512 needs other hardware.
 
-**Beside it, Stage 7, Vulkan** (Decisions 54–56; "Stage 7 — Vulkan"): measured
-and the reference build written; next is the GB10's Vulkan pickup -- the
-toolchain, the real build, and whether the reference reproduces its own
-node hashes.
+**Beside it, Stage 7, Vulkan** (Decisions 54–56, 59; "Stage 7 — Vulkan"):
+measured, the reference built on the GB10 with a pinned toolchain, and
+exact -- `make vk-repro` passes on all four arms. Step 4 is under way: this
+repository builds Vulkan, `vk-node-diff` and `vk-backend-diff` exist, and
+the whole host layer is ported -- every op, the fusions, `graph_optimize`
+-- with `vk-ops-diff` bit-identical, `vk-node-diff` identical per node and
+fused on all four arms, and `vk-parity-cli` 6/6. **The swap is done**:
+`-Dvulkan` builds the Zig host layer. Open: the no-coopmat arm's
+`vk-ops-diff`, and the KHR coopmat arm's last FLASH_ATTN_EXT cases, where
+the reference stalls against itself (`NOTES.md`, "Stage 7 step 8").
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:
 

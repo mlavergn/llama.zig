@@ -1,0 +1,125 @@
+#!/bin/bash
+# Diff every graph node of a real model's decode on the Vulkan device, ported
+# host layer against upstream's -- `cuda-node-diff`'s Vulkan counterpart
+# (PLAN.md, "Stage 7 — Vulkan").
+#
+# Two passes, each linked twice against libggml and libllama built from this
+# repository with `-Dvulkan -Dcuda=false` (so the only GPU device is
+# Vulkan's), differing only in the Vulkan host layer: upstream's
+# `ggml-vulkan.cpp` (`-Dvulkan-port=false`) and `src/ggml/vulkan/`
+# (`-Dvulkan-port`). Both embed the same generation's SPIR-V by
+# construction (Decision 59).
+#
+# - **Per node.** `harness/node_dump.c` hashes every node's output over one
+#   prompt decode and one single-token decode; the first differing line
+#   names the op. Observing every node splits the graph at every node, so
+#   neither side fuses in this pass.
+# - **Fused.** No callback: the graph runs as the binary runs it, fusion
+#   included, and the full logits are hashed for the prompt and `STEPS`
+#   (default 32) greedy steps.
+#
+# Both passes run on every arm the GB10 has (`ARMS`): coopmat2, KHR
+# coopmat, no matrix cores, and no matrix cores without integer dot --
+# each selects different shaders and different host paths.
+# `make vk-repro` measured the reference exact on all four.
+#
+# `VK_REF_DIR` and `VK_PORT_DIR` override the two library directories; the
+# first use was `VK_REF_DIR=llama.cpp.zmake/zig-out/lib` with both sides
+# upstream's host layer, which checks this repository's Vulkan build and the
+# rest of the Zig port under a Vulkan device against the zmake reference.
+#
+# `VK_PORT_ENV` adds environment to the ported side only -- for negative
+# tests: `VK_PORT_ENV=GGML_VK_FORCE_MMVQ=1` changes which kernel a
+# `MUL_MAT` takes, `GGML_VK_DISABLE_FUSION=1` what the fused pass runs, and
+# the gate must fail on each.
+#
+# Usage: scripts/vk-node-diff <model.gguf> [prompt]
+# Requires:
+#   zig build reference --release=fast -Dvulkan -Dcuda=false -Dvulkan-port=false --prefix zig-out/vk-upstream
+#   zig build reference --release=fast -Dvulkan -Dcuda=false --prefix zig-out/vk-port
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODEL="${1:?usage: scripts/vk-node-diff <model.gguf> [prompt]}"
+PROMPT="${2:-Explain gravity in one sentence, then give an example from daily life:}"
+STEPS=${STEPS:-32}
+ARMS=${ARMS:-coopmat2 coopmat none nodot}
+
+REF=${VK_REF_DIR:-zig-out/vk-upstream/lib}
+PORT=${VK_PORT_DIR:-zig-out/vk-port/lib}
+for lib in "$REF/libggml.a" "$REF/libllama.a" "$PORT/libggml.a" "$PORT/libllama.a"; do
+    [ -f "$lib" ] || { echo "missing $lib -- see the Requires lines in $0" >&2; exit 2; }
+done
+for lib in "$REF/libggml.a" "$PORT/libggml.a"; do
+    nm -g --defined-only "$lib" 2>/dev/null | grep -q ' T ggml_backend_vk_reg$' \
+        || { echo "FAIL: $lib has no Vulkan backend -- build it with -Dvulkan" >&2; exit 1; }
+    if nm -g --defined-only "$lib" 2>/dev/null | grep -q ' T ggml_backend_cuda_reg$'; then
+        echo "FAIL: $lib has the CUDA backend too, which would take the GPU slot -- build it with -Dcuda=false" >&2; exit 1
+    fi
+done
+[ -n "${VK_REF_DIR:-}" ] || nm -A "$REF/libggml.a" 2>/dev/null | grep -q '/ggml-vulkan\.o:' \
+    || { echo "FAIL: $REF/libggml.a has no upstream ggml-vulkan.o -- build it with -Dvulkan-port=false" >&2; exit 1; }
+if [ -z "${VK_PORT_DIR:-}" ] && nm -A "$PORT/libggml.a" 2>/dev/null | grep -q '/ggml-vulkan\.o:'; then
+    echo "FAIL: $PORT/libggml.a contains upstream's ggml-vulkan.o -- build it with -Dvulkan-port" >&2; exit 1
+fi
+
+. "$ROOT/scripts/platform-libs"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+INC=(-I llama.cpp/include -I llama.cpp/ggml/include)
+for side in ref port; do
+    dir=$REF; [ "$side" = port ] && dir=$PORT
+    platform_libs cc "$dir/libggml.a"
+    zig cc harness/node_dump.c -o "$tmp/$side" -std=c11 -O2 "${INC[@]}" \
+        "$dir/libllama.a" "$dir/libggml.a" -lc++ ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/$side.log" \
+        || { echo "FAIL: could not link against $dir" >&2; grep -m5 error "$tmp/$side.log" >&2; exit 1; }
+done
+
+arm_env() {
+    case "$1" in
+        coopmat2) echo "" ;;
+        coopmat)  echo "GGML_VK_DISABLE_COOPMAT2=1" ;;
+        none)     echo "GGML_VK_DISABLE_COOPMAT2=1 GGML_VK_DISABLE_COOPMAT=1" ;;
+        nodot)    echo "GGML_VK_DISABLE_COOPMAT2=1 GGML_VK_DISABLE_COOPMAT=1 GGML_VK_DISABLE_INTEGER_DOT_PRODUCT=1" ;;
+        *) echo "unknown arm $1" >&2; exit 2 ;;
+    esac
+}
+
+fail=0
+for arm in $ARMS; do
+    e=$(arm_env "$arm")
+    # Per node, then fused.
+    for mode in node fused; do
+        args=("$MODEL" "$PROMPT" 1 gpu)
+        [ "$mode" = fused ] && args+=(fused "$STEPS")
+        env $e "$tmp/ref"  "${args[@]}" > "$tmp/ref.txt"  2>"$tmp/ref.err" \
+            || { echo "FAIL: reference run aborted ($arm, $mode)"; tail -5 "$tmp/ref.err"; exit 1; }
+        env $e ${VK_PORT_ENV:-} "$tmp/port" "${args[@]}" > "$tmp/port.txt" 2>"$tmp/port.err" \
+            || { echo "FAIL: ported run aborted ($arm, $mode)"; tail -5 "$tmp/port.err"; exit 1; }
+        # Each side must have run on the arm asked for.
+        for side in ref port; do
+            grep -q 'ggml_vulkan: 0 = ' "$tmp/$side.err" \
+                || { echo "FAIL: $side did not run on a Vulkan device ($arm)"; exit 1; }
+        done
+        rdev=$(grep -m1 'ggml_vulkan: 0 = ' "$tmp/ref.err"); pdev=$(grep -m1 'ggml_vulkan: 0 = ' "$tmp/port.err")
+        [ "$rdev" = "$pdev" ] || { echo "FAIL: the two sides describe the device differently ($arm):"; echo "  $rdev"; echo "  $pdev"; fail=1; }
+        lines=$(wc -l < "$tmp/ref.txt" | tr -d ' ')
+        [ "$lines" -gt 0 ] || { echo "FAIL: reference produced nothing ($arm, $mode)"; exit 1; }
+        if diff -q "$tmp/ref.txt" "$tmp/port.txt" > /dev/null; then
+            printf '  %-8s %-5s %s lines identical\n' "$arm" "$mode" "$lines"
+        else
+            printf '  %-8s %-5s DIFFERS; first divergent lines:\n' "$arm" "$mode"
+            diff "$tmp/ref.txt" "$tmp/port.txt" | grep '^[<>]' | head -6
+            fail=1
+        fi
+    done
+done
+
+if [ "$fail" -eq 0 ]; then
+    echo "PASS: every node and every fused decode identical on every arm"
+    exit 0
+fi
+echo "FAIL: node outputs differ"
+exit 1

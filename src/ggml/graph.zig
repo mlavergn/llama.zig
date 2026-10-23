@@ -1367,6 +1367,39 @@ pub fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops_wanted: []const c.enu
     return canFuseExt(cgraph, &idxs, ops_wanted, ops_wanted.len);
 }
 
+/// Ports the C++ overload of `ggml_can_fuse_subgraph` (ggml-impl.h:758
+/// @c1d0e7a00) and the static inline `ggml_can_fuse_subgraph` it calls
+/// (ggml-impl.h:724 @c1d0e7a00). Shared by the CUDA and Vulkan host layers.
+///
+/// Parameters:
+/// - `cgraph`: the graph.
+/// - `node_idx`: index of the first node in the run.
+/// - `ops_wanted`: the op each node in the run must have; fewer than 32.
+/// - `outputs`: the nodes of the run whose results may be used outside it.
+///
+/// Return: true when the run can be computed as one fused subgraph.
+pub fn canFuseSubgraph(cgraph: *const CGraph, node_idx: c_int, ops_wanted: []const c.enum_ggml_op, outputs: []const c_int) bool {
+    impl.assert(ops_wanted.len < 32, "count < 32");
+    if (node_idx + @as(c_int, @intCast(ops_wanted.len)) > cgraph.n_nodes) return false;
+
+    var idxs: [32]c_int = undefined;
+    for (0..ops_wanted.len) |i| idxs[i] = node_idx + @as(c_int, @intCast(i));
+
+    return ggml_can_fuse_subgraph_ext(cgraph, &idxs, @intCast(ops_wanted.len), ops_wanted.ptr, outputs.ptr, @intCast(outputs.len));
+}
+
+/// Ports `ggml_check_edges` (ggml-impl.h:766 @c1d0e7a00): each edge is
+/// `{dst_node, src_idx, src_node}`, relative to `start_idx`.
+///
+/// Return: true when every edge is present.
+pub fn checkEdges(cgraph: *const CGraph, start_idx: c_int, edges: []const [3]c_int) bool {
+    for (edges) |e| {
+        const dst = cgraph.nodes[@intCast(start_idx + e[0])].?;
+        if (dst.src[@intCast(e[1])] != cgraph.nodes[@intCast(start_idx + e[2])]) return false;
+    }
+    return true;
+}
+
 // -----------------------------------------------------------------------------
 // Printing
 

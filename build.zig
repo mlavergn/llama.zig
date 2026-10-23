@@ -229,6 +229,80 @@ fn cudaOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Cuda {
     return .{ .toolkit = toolkit, .arch = arch, .libstdcxx = libstdcxx, .port = port };
 }
 
+/// Resolves the `-Dvulkan` options and asks `glslc` which shader extensions
+/// it accepts, as `ggml-vulkan/CMakeLists.txt:34-57` and `llama.cpp.zmake`'s
+/// `configureVulkan` do.
+///
+/// Off unless `-Dvulkan`. The toolchain defaults to the pinned one in
+/// `.tools/vulkan/` (`scripts/vk-toolchain`, PLAN.md Decision 59) where it
+/// exists, else `glslc` on PATH and `/usr/include`: which `glslc` and which
+/// headers decide which C++ compiles, so the gates pass the same ones to both
+/// sides. A probe counts as supported unless `glslc`'s diagnostics say
+/// `extension not supported: <name>`, CMake's rule, so `glslc` must be shown
+/// to run first -- otherwise a missing one passes every probe (`NOTES.md`,
+/// "Stage 7: the GB10 pickup").
+///
+/// Parameters:
+/// - `b`: the build graph the options are registered on.
+///
+/// Return: the toolchain, or null when Vulkan is off.
+fn vulkanOptions(b: *std.Build) ?llamacpp.Vulkan {
+    const enabled = b.option(bool, "vulkan", "Build ggml's Vulkan backend (needs glslc, the Vulkan headers and libvulkan; `make vk-toolchain`)") orelse false;
+    const glslc_opt = b.option([]const u8, "glslc", "The glslc to compile the Vulkan shaders with (default: .tools/vulkan/bin/glslc, else PATH)");
+    const include_opt = b.option([]const []const u8, "vulkan-include", "Directories holding vulkan/ and spirv/ (default: .tools/vulkan/include, else /usr/include)");
+    const lib_opt = b.option([]const []const u8, "vulkan-lib", "Extra directories to find libvulkan in (default: .tools/vulkan/lib)");
+    // The swap (PLAN.md, "Stage 7 — Vulkan"): the Zig host layer is the
+    // Vulkan backend. `-Dvulkan-port=false` builds upstream's
+    // `ggml-vulkan.cpp` instead, which only the gates want --
+    // `scripts/vk-node-diff` and `scripts/vk-parity-cli` diff the two.
+    const port = b.option(bool, "vulkan-port", "Use the Zig Vulkan host layer (default: true; false builds upstream's, for the gates)") orelse true;
+    if (!enabled) return null;
+
+    const tools = b.root.joinString(b.allocator, ".tools/vulkan") catch @panic("OOM");
+    const have_tools = if (std.Io.Dir.accessAbsolute(b.graph.io, b.pathJoin(&.{ tools, "bin", "glslc" }), .{})) true else |_| false;
+    const glslc = glslc_opt orelse if (have_tools)
+        b.pathJoin(&.{ tools, "bin", "glslc" })
+    else
+        b.findProgram(.{ .names = &.{"glslc"} }) orelse std.debug.panic("-Dvulkan needs glslc: run `make vk-toolchain` or pass -Dglslc=<path>", .{});
+    const include_dirs: []const []const u8 = include_opt orelse if (have_tools)
+        b.allocator.dupe([]const u8, &.{b.pathJoin(&.{ tools, "include" })}) catch @panic("OOM")
+    else
+        &[_][]const u8{"/usr/include"};
+    const lib_dirs: []const []const u8 = lib_opt orelse if (have_tools)
+        b.allocator.dupe([]const u8, &.{b.pathJoin(&.{ tools, "lib" })}) catch @panic("OOM")
+    else
+        &[_][]const u8{};
+
+    var code: u8 = 0;
+    _ = b.runAllowFail(&.{ glslc, "--version" }, &code, .ignore) catch
+        std.debug.panic("-Dvulkan: {s} does not run", .{glslc});
+
+    const probes = [_][3][]const u8{
+        .{ "GL_KHR_cooperative_matrix", "coopmat.comp", "GGML_VULKAN_COOPMAT_GLSLC_SUPPORT" },
+        .{ "GL_NV_cooperative_matrix2", "coopmat2.comp", "GGML_VULKAN_COOPMAT2_GLSLC_SUPPORT" },
+        .{ "GL_NV_cooperative_matrix_decode_vector", "coopmat2_decode_vector.comp", "GGML_VULKAN_COOPMAT2_DECODE_VECTOR_GLSLC_SUPPORT" },
+        .{ "GL_EXT_integer_dot_product", "integer_dot.comp", "GGML_VULKAN_INTEGER_DOT_GLSLC_SUPPORT" },
+        .{ "GL_EXT_bfloat16", "bfloat16.comp", "GGML_VULKAN_BFLOAT16_GLSLC_SUPPORT" },
+        .{ "GL_EXT_float_e2m1", "float_e2m1.comp", "GGML_VULKAN_FLOAT_E2M1_GLSLC_SUPPORT" },
+        .{ "GL_EXT_float_e4m3", "float_e4m3.comp", "GGML_VULKAN_FLOAT_E4M3_GLSLC_SUPPORT" },
+    };
+    var features: std.ArrayList([]const u8) = .empty;
+    for (probes) |probe| {
+        const rel = b.fmt("llama.cpp/ggml/src/ggml-vulkan/vulkan-shaders/feature-tests/{s}", .{probe[1]});
+        // glslc reports a refusal on stderr and exits non-zero, so the shell
+        // folds both into a successful stdout.
+        const out = b.run(&.{
+            "sh",                                                                                       "-c",
+            "\"$0\" -o - -fshader-stage=compute --target-env=vulkan1.3 \"$1\" 2>&1 >/dev/null; exit 0", glslc,
+            b.root.joinString(b.allocator, rel) catch @panic("OOM"),
+        });
+        if (std.mem.indexOf(u8, out, b.fmt("extension not supported: {s}", .{probe[0]})) == null) {
+            features.append(b.allocator, b.fmt("-D{s}", .{probe[2]})) catch @panic("OOM");
+        }
+    }
+    return .{ .glslc = glslc, .include_dirs = include_dirs, .lib_dirs = lib_dirs, .features = features.items, .port = port };
+}
+
 pub fn build(b: *std.Build) !void {
     // Pre-flight: ensure any local dependencies are cloned
     Git.cloneDeps(b);
@@ -320,6 +394,7 @@ pub fn build(b: *std.Build) !void {
     const probe_cpu = b.option(bool, "probe-cpu", "Abort from the ported CPU backend, to prove it runs") orelse false;
 
     const cuda = cudaOptions(b, cfg.target);
+    const vulkan = vulkanOptions(b);
     const reference = try llamacpp.add(b, .{
         .target = cfg.target,
         .optimize = cfg.optimize,
@@ -328,6 +403,7 @@ pub fn build(b: *std.Build) !void {
         .probe_ported = probe_ported,
         .probe_cpu = probe_cpu,
         .cuda = cuda,
+        .vulkan = vulkan,
     });
 
     const ggml_install = b.addInstallArtifact(reference.ggml, .{});
@@ -383,6 +459,19 @@ pub fn build(b: *std.Build) !void {
         cuda_ref_step.dependOn(&b.addInstallArtifact(cuda_ref, .{}).step);
     };
 
+    // Upstream's Vulkan backend with its C exports renamed `ref_*`, for the
+    // in-process gates. See `addVulkanRef`.
+    if (vulkan != null) {
+        const vk_ref = try llamacpp.addVulkanRef(b, .{ .target = cfg.target, .optimize = cfg.optimize, .vulkan = vulkan });
+        const vk_ref_step = b.step("vk-ref", "Build upstream's Vulkan backend with renamed exports");
+        vk_ref_step.dependOn(&b.addInstallArtifact(vk_ref, .{}).step);
+
+        // The push-constant layout check: compiling it is the check.
+        const vk_push = try llamacpp.addVulkanPushLayout(b, .{ .target = cfg.target, .optimize = cfg.optimize, .vulkan = vulkan });
+        const vk_push_step = b.step("vk-push-layout", "Check src/ggml/vulkan/push.zig against ggml-vulkan.cpp's structs");
+        vk_push_step.dependOn(&vk_push.step);
+    }
+
     const reference_step = b.step("reference", "Build the llama.cpp reference libraries");
     reference_step.dependOn(&ggml_install.step);
     reference_step.dependOn(&llama_install.step);
@@ -415,6 +504,7 @@ pub fn build(b: *std.Build) !void {
     smoke_module.linkLibrary(reference.ggml);
     llamacpp.addSdkPaths(b, smoke_module, sdk);
     llamacpp.addCudaLibraries(b, smoke_module, cuda);
+    llamacpp.addVulkanLibraries(b, smoke_module, vulkan);
 
     const smoke = b.addExecutable(.{ .name = "smoke", .root_module = smoke_module });
 
@@ -459,6 +549,7 @@ pub fn build(b: *std.Build) !void {
     cli_module.linkLibrary(reference.ggml);
     llamacpp.addSdkPaths(b, cli_module, sdk);
     llamacpp.addCudaLibraries(b, cli_module, cuda);
+    llamacpp.addVulkanLibraries(b, cli_module, vulkan);
 
     const cli = b.addExecutable(.{
         .name = cfg.cli_name,
@@ -516,6 +607,7 @@ pub fn build(b: *std.Build) !void {
     cli_tests_module.linkLibrary(reference.ggml);
     llamacpp.addSdkPaths(b, cli_tests_module, sdk);
     llamacpp.addCudaLibraries(b, cli_tests_module, cuda);
+    llamacpp.addVulkanLibraries(b, cli_tests_module, vulkan);
 
     const cli_tests = b.addTest(.{
         .root_module = cli_tests_module,
@@ -534,6 +626,8 @@ pub fn build(b: *std.Build) !void {
 
     // Unit tests for the ported ggml. They compile the whole reference tree,
     // because ported code still calls the parts that have not been ported yet.
+    // The ported Vulkan layer's tests link the loader, as an executable does.
+    llamacpp.addVulkanLibraries(b, reference.ggml_module, vulkan);
     const ggml_tests = b.addTest(.{
         .root_module = reference.ggml_module,
         .filters = test_filters,

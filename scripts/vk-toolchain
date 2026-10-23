@@ -1,0 +1,79 @@
+#!/bin/bash
+# Fetches and builds the Vulkan toolchain every Vulkan gate is built with,
+# into .tools/vulkan/ -- PLAN.md, Decision 55: the toolchain is part of the
+# reference, so it is pinned like the upstream source and never taken from
+# whatever the machine happens to have.
+#
+# One SDK tag, 1.4.363.0, for all of it -- the tag Stage 7's measurement was
+# taken at (NOTES.md, "Stage 7: the measurement"):
+#
+#   include/vulkan, include/vk_video   Khronos Vulkan-Headers   vulkan-sdk-1.4.363.0
+#   include/spirv                      Khronos SPIRV-Headers    vulkan-sdk-1.4.363.0
+#   bin/glslc                          google/shaderc v2026.4, whose DEPS pin
+#                                      glslang and SPIRV-Tools at exactly the
+#                                      vulkan-sdk-1.4.363.0 commits; built
+#                                      against those tags and the SDK's
+#                                      SPIRV-Headers
+#   lib/libvulkan.so                   a link to the system loader, for -lvulkan
+#                                      (libvulkan-dev, which carries the
+#                                      unversioned name, is not installed)
+#   bin/vulkaninfo                     the distro's vulkan-tools, unpacked
+#                                      without installing (apt download)
+#
+# The distro's glslc is not used: Ubuntu 24.04's is shaderc 2023.8, older
+# than GL_NV_cooperative_matrix2 and GL_EXT_bfloat16, so the reference would
+# compile NVIDIA's cooperative-matrix-2 path out. Needs git, cmake, python3
+# and a C++ compiler; no root. Idempotent: a finished step is skipped.
+#
+# Usage: scripts/vk-toolchain
+#   Then: make -C llama.cpp.zmake lib VULKAN=1 GLSLC=$PWD/.tools/vulkan/bin/glslc \
+#           VULKAN_INCLUDE=$PWD/.tools/vulkan/include
+#   (make vk-repro passes these itself.)
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SDK=vulkan-sdk-1.4.363.0
+SHADERC=v2026.4
+OUT="$ROOT/.tools/vulkan"
+SRC="$OUT/src"
+mkdir -p "$OUT/bin" "$OUT/include" "$OUT/lib" "$SRC"
+
+fetch() { # repo url, tag, directory
+    [ -d "$SRC/$3/.git" ] || git -c advice.detachedHead=false clone -q --depth 1 --branch "$2" "$1" "$SRC/$3"
+}
+
+fetch https://github.com/KhronosGroup/Vulkan-Headers.git "$SDK" Vulkan-Headers
+fetch https://github.com/KhronosGroup/SPIRV-Headers.git "$SDK" SPIRV-Headers
+fetch https://github.com/KhronosGroup/SPIRV-Tools.git "$SDK" SPIRV-Tools
+fetch https://github.com/KhronosGroup/glslang.git "$SDK" glslang
+fetch https://github.com/google/shaderc.git "$SHADERC" shaderc
+
+rm -rf "$OUT/include/vulkan" "$OUT/include/vk_video" "$OUT/include/spirv"
+cp -r "$SRC/Vulkan-Headers/include/vulkan" "$SRC/Vulkan-Headers/include/vk_video" "$OUT/include/"
+cp -r "$SRC/SPIRV-Headers/include/spirv" "$OUT/include/"
+
+# shaderc finds its dependencies under third_party/, by these names.
+for d in SPIRV-Headers:spirv-headers SPIRV-Tools:spirv-tools glslang:glslang; do
+    ln -sfn "$SRC/${d%%:*}" "$SRC/shaderc/third_party/${d##*:}"
+done
+
+if [ ! -x "$OUT/bin/glslc" ]; then
+    cmake -S "$SRC/shaderc" -B "$SRC/build" -DCMAKE_BUILD_TYPE=Release \
+        -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON -DSHADERC_SKIP_COPYRIGHT_CHECK=ON \
+        -DSPIRV_SKIP_TESTS=ON -DSPIRV_SKIP_EXECUTABLES=ON -DENABLE_GLSLANG_BINARIES=OFF \
+        -DSPIRV_TOOLS_BUILD_STATIC=ON -DBUILD_SHARED_LIBS=OFF > "$SRC/cmake.log"
+    cmake --build "$SRC/build" --target glslc_exe -j"$(nproc)" > "$SRC/build.log"
+    cp "$SRC/build/glslc/glslc" "$OUT/bin/glslc"
+fi
+
+loader="$(ls /usr/lib/*-linux-gnu/libvulkan.so.1 2>/dev/null | head -1 || true)"
+[ -n "$loader" ] || { echo "no libvulkan.so.1 -- install the Vulkan loader (libvulkan1)" >&2; exit 1; }
+ln -sfn "$loader" "$OUT/lib/libvulkan.so"
+
+if [ ! -x "$OUT/bin/vulkaninfo" ]; then
+    (cd "$SRC" && apt-get download -q vulkan-tools >/dev/null && dpkg -x vulkan-tools_*.deb vulkan-tools)
+    cp "$SRC/vulkan-tools/usr/bin/vulkaninfo" "$OUT/bin/vulkaninfo"
+fi
+
+echo "glslc:   $("$OUT/bin/glslc" --version | head -1)"
+echo "headers: VK_HEADER_VERSION $(sed -n 's/^#define VK_HEADER_VERSION \([0-9]*\)$/\1/p' "$OUT/include/vulkan/vulkan_core.h")"
+echo "loader:  $loader"

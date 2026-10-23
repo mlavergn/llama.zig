@@ -1,0 +1,107 @@
+#!/bin/bash
+# `parity-cli` for Vulkan: the actual `llama-cli` binary against a reference
+# driver, both greedy, on the Vulkan device -- `cuda-parity-cli`'s
+# counterpart (PLAN.md, "Stage 7 — Vulkan").
+#
+# The reference side is `harness/raw_completion.c` -- the driver `make ref`
+# and `cuda-parity-cli` use -- linked against upstream's libllama
+# (`libllama-ref.a`, every translation unit compiled unmodified) and
+# upstream's Vulkan host layer (`zig-out/vk-upstream`, `-Dvulkan-port=false`).
+# The ggml core under both is the Zig port, gated on its own; what this
+# compares is our Vulkan host layer, our libllama and everything the CLI
+# does -- argument parsing, the sampler chain, the decode loop -- against
+# upstream's. Both builds are `-Dcuda=false`, so the only GPU device is
+# Vulkan's, and each side must be shown to run there first: a side that
+# fell back to the CPU would compare the wrong thing and could still agree.
+# Our CLI silences libllama's log, so the proof is not a log line but the
+# Vulkan backend's own perf logger (`GGML_VK_PERF_LOGGER`), which writes
+# its timings straight to stderr -- in a separate run, so the compared
+# runs are exactly what the binaries do by default.
+#
+# Usage: scripts/vk-parity-cli <model.gguf> [n_predict]
+# Requires:
+#   zig build cli --release=fast -Dvulkan -Dcuda=false --prefix zig-out/vk-cli
+#   zig build reference --release=fast -Dvulkan -Dcuda=false -Dvulkan-port=false --prefix zig-out/vk-upstream
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODEL="${1:?usage: scripts/vk-parity-cli <model.gguf> [n_predict]}"
+NPRED="${2:-32}"
+
+CLI=${VK_CLI:-zig-out/vk-cli/bin/llama-cli}
+REF=${VK_REF_DIR:-zig-out/vk-upstream/lib}
+[ -x "$CLI" ] || { echo "missing $CLI -- see the Requires lines in $0" >&2; exit 2; }
+for lib in "$REF/libllama-ref.a" "$REF/libggml.a"; do
+    [ -f "$lib" ] || { echo "missing $lib -- see the Requires lines in $0" >&2; exit 2; }
+done
+nm -A "$REF/libggml.a" 2>/dev/null | grep -q '/ggml-vulkan\.o:' \
+    || { echo "FAIL: $REF/libggml.a has no upstream ggml-vulkan.o -- build it with -Dvulkan -Dvulkan-port=false" >&2; exit 1; }
+nm "$CLI" 2>/dev/null | grep -q ' T ggml_backend_vk_reg$' \
+    || { echo "FAIL: $CLI has no Vulkan backend -- build it with -Dvulkan" >&2; exit 1; }
+if nm -C "$CLI" 2>/dev/null | grep -q 'ggml_vk_load_shaders('; then
+    echo "FAIL: $CLI links upstream's Vulkan host code -- it was built with -Dvulkan-port=false" >&2; exit 1
+fi
+for bin in "$CLI" "$REF/libggml.a"; do
+    if nm "$bin" 2>/dev/null | grep -q ' T ggml_backend_cuda_reg$'; then
+        echo "FAIL: $bin has the CUDA backend too, which would take the GPU slot -- build it with -Dcuda=false" >&2; exit 1
+    fi
+done
+
+. "$ROOT/scripts/platform-libs"
+platform_libs cc "$REF/libggml.a"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+zig cc -c harness/raw_completion.c -o "$tmp/ref.o" -std=c11 -O2 -w -I llama.cpp/include -I llama.cpp/ggml/include \
+    || { echo "FAIL: could not compile the reference driver" >&2; exit 1; }
+zig c++ "$tmp/ref.o" -o "$tmp/ref" "$REF/libllama-ref.a" "$REF/libggml.a" \
+    ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/ref-link.log" \
+    || { echo "FAIL: could not link the reference driver" >&2; grep -m5 error "$tmp/ref-link.log" >&2; exit 1; }
+
+PROMPTS=(
+    "The capital of France is"
+    "Explain gravity in one sentence:"
+    "def fibonacci(n):"
+    "Write a haiku about winter:"
+    "List three prime numbers:"
+    "Translate to French: good morning"
+)
+
+# Each side computes on Vulkan: its perf logger prints timings, which only
+# the Vulkan backend's graph compute writes.
+GGML_VK_PERF_LOGGER=1 "$tmp/ref" "$MODEL" "${PROMPTS[0]}" 4 no-prompt,no-timings 0 >/dev/null 2>"$tmp/a.err"
+GGML_VK_PERF_LOGGER=1 "$CLI" -m "$MODEL" -p "${PROMPTS[0]}" -n 4 --temp 0 --no-display-prompt --no-show-timings >/dev/null 2>"$tmp/b.err"
+for side in a b; do
+    grep -q 'Vulkan Timings' "$tmp/$side.err" || {
+        echo "FAIL: the $( [ $side = a ] && echo reference || echo CLI ) printed no Vulkan timings -- it did not compute on the Vulkan device" >&2
+        exit 1
+    }
+done
+
+pass=0
+fail=0
+for p in "${PROMPTS[@]}"; do
+    "$tmp/ref" "$MODEL" "$p" "$NPRED" no-prompt,no-timings 0 2>/dev/null > "$tmp/a.txt"; rc_ref=$?
+    "$CLI" -m "$MODEL" -p "$p" -n "$NPRED" --temp 0 --no-display-prompt --no-show-timings \
+        2>/dev/null > "$tmp/b.txt"; rc_cli=$?
+    printf '  %-36s ' "$(echo "$p" | cut -c1-34)"
+    if [ "$rc_ref" -ne 0 ] || [ "$rc_cli" -ne 0 ]; then
+        echo "FAIL (exit: reference=$rc_ref cli=$rc_cli)"; fail=$((fail+1))
+    elif [ ! -s "$tmp/a.txt" ]; then
+        echo "FAIL (reference produced no output)"; fail=$((fail+1))
+    elif diff -q "$tmp/a.txt" "$tmp/b.txt" >/dev/null; then
+        echo "identical"; pass=$((pass+1))
+    else
+        echo "DIFFERS"; diff "$tmp/a.txt" "$tmp/b.txt" | head -6; fail=$((fail+1))
+    fi
+done
+
+echo
+if [ "$fail" -eq 0 ]; then
+    echo "PASS: $pass/$pass prompts identical"
+    exit 0
+fi
+echo "FAIL: $fail of $((pass+fail)) prompts differ"
+exit 1

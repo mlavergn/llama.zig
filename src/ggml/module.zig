@@ -69,6 +69,11 @@ comptime {
     // until then the default build links upstream's host objects, which
     // export the same ten `ggml-cuda.h` symbols.
     if (config.cuda_port) _ = @import("cuda/module.zig");
+    // ggml-vulkan/, the host layer; the shaders travel as the reference
+    // generator's SPIR-V (PLAN.md, Decisions 55 and 59). Behind
+    // `config.vulkan_port` until the swap: until then the default build
+    // compiles upstream's `ggml-vulkan.cpp`, which exports the same symbols.
+    if (config.vulkan_port) _ = @import("vulkan/module.zig");
 }
 
 // -----------------------------------------------------------------------------

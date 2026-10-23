@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Generate the Vulkan push-constant structs, and their layout check.
+
+`ggml-vulkan.cpp` fills one `vk_*_push_constants` struct per dispatch and
+hands it to a shader with `vkCmdPushConstants` as a block of bytes, which
+the shader reads **by offset** -- the same position as Metal's kargs
+(`scripts/gen-kargs`). A field at the wrong offset feeds a shader a
+different number and nothing in the ported code can notice, so they are
+generated from the C++ rather than typed.
+
+Unlike Metal's, these structs live inside the 19,787-line `.cpp`, not a
+header. The generator computes every struct's size and every field's
+offset itself, and writes the same numbers twice: as comptime assertions
+in the Zig, and as `static_assert`s in `harness/vk_push_layout.cpp`, which
+`#include`s the real `ggml-vulkan.cpp` and so checks them against the
+structs the reference compiles. Both passing means both agree with the
+generator, and so with each other. `make vk-push-layout` builds it.
+
+Writes:
+  src/ggml/vulkan/push.zig        the extern structs
+  harness/vk_push_layout.cpp      static_asserts against ggml-vulkan.cpp
+
+Run after moving the upstream pin.
+"""
+import re
+import sys
+
+SRC = "llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp"
+COMMIT = "c1d0e7a00"
+CONSTS = {"MAX_PARAMETER_COUNT": 12}
+
+SCALAR = {"uint32_t": ("u32", 4), "int32_t": ("i32", 4), "float": ("f32", 4), "uint64_t": ("u64", 8)}
+
+lines = open(SRC).read().split("\n")
+
+
+def zig_name(c):
+    s = c[len("vk_"):-len("_push_constants")]
+    if s.startswith("op_"):
+        s = s[len("op_"):]
+    if s == "op":
+        return "Op"
+    return "".join(p[:1].upper() + p[1:] for p in s.split("_"))
+
+
+structs = {}  # name -> (line, base, fields)
+order = []
+i = 0
+while i < len(lines):
+    m = re.match(r"struct\s+(vk_\w+_push_constants)\s*(?::\s*(\w+))?\s*(\{)?\s*(\};)?\s*$", lines[i])
+    if not m:
+        i += 1
+        continue
+    name, base, brace, closed = m.group(1), m.group(2), m.group(3), m.group(4)
+    start = i + 1
+    fields = []
+    if closed:
+        structs[name] = (start, base, fields)
+        order.append(name)
+        i += 1
+        continue
+    j = i + 1
+    if not brace:
+        if lines[j].strip() != "{":
+            sys.exit(f"gen-vk-push: no opening brace for {name} at {SRC}:{start}")
+        j += 1
+    while not lines[j].startswith("};"):
+        text = re.sub(r"//.*", "", lines[j]).strip()
+        for decl in [d.strip() for d in text.split(";") if d.strip()]:
+            # `uint32_t a, b, c` declares three.
+            tm = re.fullmatch(r"(\w+)\s+(.+)", decl)
+            if not tm:
+                sys.exit(f"gen-vk-push: unparsed field at {SRC}:{j+1}: {lines[j]!r}")
+            for one in [x.strip() for x in tm.group(2).split(",")]:
+                dm = re.fullmatch(r"(\w+)((?:\s*\[\w+\])*)(?:\s*\{\s*\}|\s*=\s*.+)?", one)
+                if not dm:
+                    # A field this script cannot read must stop it (gen-kargs).
+                    sys.exit(f"gen-vk-push: unparsed field at {SRC}:{j+1}: {lines[j]!r}")
+                dims = [int(CONSTS.get(d, d)) for d in re.findall(r"\[(\w+)\]", dm.group(2))]
+                fields.append((tm.group(1), dm.group(1), dims))
+        j += 1
+    structs[name] = (start, base, fields)
+    order.append(name)
+    i = j + 1
+
+# Independent count: every `struct vk_..._push_constants` the file names.
+declared = set(re.findall(r"^struct\s+(vk_\w+_push_constants)\b", "\n".join(lines), re.M))
+if declared != set(order):
+    sys.exit(f"gen-vk-push: parsed {sorted(order)} but the file declares {sorted(declared)}")
+
+
+def layout(name):
+    """(size, align, [(field, zig_type, offset, size)])"""
+    line, base, fields = structs[name]
+    if base:
+        return layout(base)
+    off, align, out = 0, 1, []
+    for ctype, fname, dims in fields:
+        if ctype in SCALAR:
+            zt, sz = SCALAR[ctype]
+            al = sz
+        elif ctype in structs:
+            sz, al, _ = layout(ctype)
+            zt = zig_name(ctype)
+        else:
+            sys.exit(f"gen-vk-push: unmapped type {ctype!r} in {name}")
+        n = 1
+        for dim in reversed(dims):
+            zt = f"[{dim}]{zt}"
+            n *= dim
+        off = (off + al - 1) // al * al
+        out.append((fname, zt, off, sz * n))
+        off += sz * n
+        align = max(align, al)
+    return ((off + align - 1) // align * align, align, out)
+
+
+z = ['''//! The push constants the Vulkan shaders read.
+//!
+//! # Provenance
+//!
+//! Mirrors the `vk_*_push_constants` structs of
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.3.0
+//! (`''' + COMMIT + '''`).
+//!
+//! # Generated, not written
+//!
+//! A shader reads these by offset. This file is produced by
+//! `scripts/gen-vk-push`, which also writes `harness/vk_push_layout.cpp`:
+//! the same sizes and offsets as `static_assert`s against the structs the
+//! reference compiles. Do not edit it by hand; change the generator and
+//! re-run it.
+
+const std = @import("std");
+''']
+
+cpp = ['''// Generated by scripts/gen-vk-push. Do not edit. Not a port: the
+// layout check for src/ggml/vulkan/push.zig against the structs
+// ggml-vulkan.cpp itself compiles. See `make vk-push-layout`.
+#include "../llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp"
+#include <cstddef>
+''']
+
+nfacts = 0
+for name in order:
+    line, base, fields = structs[name]
+    zn = zig_name(name)
+    size, align, lay = layout(name)
+    z.append(f"/// Mirrors `{name}` ({SRC.split('/')[-1]}:{line} @{COMMIT}).")
+    # A derived struct is its own type even with its base's layout: the
+    # C++ overloads on it (`init_pushconst_tensor_offsets` for concat).
+    z.append(f"pub const {zn} = extern struct {{")
+    for fname, zt, off, sz in lay:
+        z.append(f"    {fname}: {zt} = std.mem.zeroes({zt}),")
+    z.append("};")
+    z.append("comptime {")
+    z.append(f"    std.debug.assert(@sizeOf({zn}) == {size});")
+    cpp.append(f"static_assert(sizeof({name}) == {size}, \"{name}\");")
+    nfacts += 1
+    for fname, zt, off, sz in lay:
+        z.append(f"    std.debug.assert(@offsetOf({zn}, \"{fname}\") == {off});")
+        cpp.append(f"static_assert(offsetof({name}, {fname}) == {off}, \"{name}::{fname}\");")
+        cpp.append(f"static_assert(sizeof((({name} *)0)->{fname}) == {sz}, \"{name}::{fname} size\");")
+        nfacts += 2
+    z.append("}")
+    z.append("")
+
+cpp.append("int main() { return 0; }")
+open("src/ggml/vulkan/push.zig", "w").write("\n".join(z))
+open("harness/vk_push_layout.cpp", "w").write("\n".join(cpp) + "\n")
+print(f"{len(order)} push-constant structs, {nfacts} layout facts")

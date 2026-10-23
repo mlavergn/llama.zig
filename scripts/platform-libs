@@ -47,6 +47,11 @@ platform_libs() {
     local a
     for a in "$@"; do
         if [ -f "$a" ] && nm -u "$a" 2>/dev/null | grep -qE '(^|[ _])vkGetInstanceProcAddr$'; then
+            # The pinned toolchain's link to the system loader, where no
+            # libvulkan-dev provides the unversioned name (scripts/vk-toolchain).
+            local vk_lib
+            vk_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.tools/vulkan/lib"
+            [ -e "$vk_lib/libvulkan.so" ] && PLATFORM_LIBS+=(-L"$vk_lib")
             PLATFORM_LIBS+=(-lvulkan)
             break
         fi

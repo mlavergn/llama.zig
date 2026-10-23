@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-repro x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -260,11 +260,51 @@ sampler-diff:
 
 # Stage 7's first measurement: is the reference Vulkan backend reproducible
 # run to run, per node and fused? Builds llama.cpp.zmake with its Vulkan
-# backend, so it needs glslc and the Vulkan headers -- the GB10 has them,
-# this Mac does not. See the header of scripts/vk-repro.
+# backend with the pinned toolchain in .tools/vulkan (`make vk-toolchain`;
+# PLAN.md, Decision 55), so it runs on the GB10 and not on this Mac's
+# Metal. See the header of scripts/vk-repro.
+VK_TOOLS = $(CURDIR)/.tools/vulkan
+VK_FLAGS = -Dvulkan -Dglslc=$(VK_TOOLS)/bin/glslc -Dvulkan-include=$(VK_TOOLS)/include
+
+vk-toolchain:
+	./scripts/vk-toolchain
+
 vk-repro:
-	cd llama.cpp.zmake && zig build lib --release=fast -Dvulkan
+	cd llama.cpp.zmake && zig build lib --release=fast $(VK_FLAGS)
 	./scripts/vk-repro $(MODEL)
+
+# The Vulkan gates (PLAN.md, "Stage 7 — Vulkan"): this repository's libggml
+# with upstream's ggml-vulkan.cpp (vk-upstream) and with the Zig host layer
+# (vk-port), CUDA off so the only GPU device is Vulkan's, and upstream's
+# backend with its exports renamed for the in-process gates. vk-backend-diff
+# asks both registries the same questions; vk-ops-diff runs test-backend-ops
+# with the reference where the CPU goes, on bits; vk-node-diff diffs every
+# node of a decode, per node and fused, on every arm of the GB10;
+# vk-push-layout checks the generated push constants against the C++'s.
+# See each script.
+VK_GATE_FLAGS = --release=fast -Dvulkan -Dcuda=false
+
+vk-builds:
+	zig build reference $(VK_GATE_FLAGS) -Dvulkan-port=false --prefix zig-out/vk-upstream
+	zig build reference vk-ref $(VK_GATE_FLAGS) --prefix zig-out/vk-port
+
+vk-backend-diff: vk-builds
+	./scripts/vk-backend-diff
+
+vk-node-diff: vk-builds
+	./scripts/vk-node-diff $(MODEL)
+
+# Our llama-cli on the Vulkan device against raw_completion.c over
+# upstream's libllama and Vulkan host layer, greedy, six prompts.
+vk-parity-cli: vk-builds
+	zig build cli $(VK_GATE_FLAGS) --prefix zig-out/vk-cli
+	./scripts/vk-parity-cli $(MODEL) $(PARITY_NPRED)
+
+vk-ops-diff: vk-builds
+	./scripts/vk-ops-diff $(ARGS)
+
+vk-push-layout:
+	zig build vk-push-layout $(VK_GATE_FLAGS)
 
 # The x86 gates, run on the Windows laptop (Decision 57) through
 # inferiseupdater's link: each cross-builds both sides for

@@ -1,0 +1,99 @@
+#!/bin/bash
+# The Vulkan op oracle: every op configuration of upstream's test-backend-ops,
+# run on the ported Vulkan backend and on the reference Vulkan backend in one
+# process, compared on bits -- `cuda-ops-diff` for Vulkan (PLAN.md,
+# "Stage 7 — Vulkan").
+#
+# What it compares
+# ----------------
+# `test-backend-ops` normally runs each case on a GPU backend and on the CPU
+# and accepts an NMSE below a threshold. Here it is compiled with
+# `ggml_backend_compare_graph_backend` and `ggml_backend_supports_op`
+# renamed to the hooks in `harness/vk_ops_diff.c`: the CPU's place is taken
+# by upstream's own Vulkan backend -- `ggml-vulkan.cpp` and the generated
+# shaders, its nine `ggml-vulkan.h` exports renamed `ref_*` -- and every
+# node is compared byte for byte. Both sides run the reference generator's
+# SPIR-V, so a difference is the host code.
+#
+# What it cannot see
+# ------------------
+# `graph_optimize`: test-backend-ops computes graphs directly and never
+# reorders them. `vk-backend-diff` compares the reorder and `vk-node-diff`
+# a real decode through it. Shapes upstream's list lacks need extra cases
+# (`harness/vk_ops_diff.c`, `extra_cases`): the misaligned set_rows leaf,
+# split-k and large-tile matmuls, a second fused bias in `src[0]`.
+# `supports_op` must agree both ways; before the swap a refusal was only
+# counted.
+#
+# Usage: scripts/vk-ops-diff [test-backend-ops args, e.g. -o ADD]
+# Requires:
+#   zig build reference vk-ref --release=fast -Dvulkan -Dcuda=false --prefix zig-out/vk-port
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+# Both overridable, so a second checkout can test its own port against one
+# reference archive: the renamed reference is upstream's code and does not
+# change with the port.
+PREFIX=${VK_PORT_PREFIX:-zig-out/vk-port}
+PORT_LIB=$PREFIX/lib/libggml.a
+REF_LIB=${VK_REF_LIB:-$PREFIX/lib/libggml-vulkan-ref.a}
+for lib in "$PORT_LIB" "$REF_LIB"; do
+    [ -f "$lib" ] || { echo "missing $lib -- see the Requires lines in $0" >&2; exit 2; }
+done
+
+# The ported library must really be the port: no upstream Vulkan object.
+# The reference archive must carry the renamed exports.
+if nm -A "$PORT_LIB" 2>/dev/null | grep -q '/ggml-vulkan\.o:'; then
+    echo "FAIL: $PORT_LIB contains upstream's ggml-vulkan.o -- build it with -Dvulkan-port" >&2; exit 1
+fi
+n=$(nm -g --defined-only "$REF_LIB" 2>/dev/null | grep -cE ' [TD] ref_(ggml_backend_|vk_conv_block_sizes)')
+[ "$n" -eq 9 ] || { echo "FAIL: expected 9 renamed reference exports, got $n" >&2; exit 1; }
+
+. "$ROOT/scripts/platform-libs"
+platform_libs cc "$PORT_LIB" "$REF_LIB"
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+zig c++ -c llama.cpp/tests/test-backend-ops.cpp -o "$tmp/tbo.o" -std=c++17 -O2 -w \
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src \
+    -Dggml_backend_compare_graph_backend=vk_diff_compare_graph_backend \
+    -Dggml_backend_supports_op=vk_diff_supports_op -Dmain=test_backend_ops_main 2>"$tmp/cc.log" \
+    || { echo "FAIL: could not compile test-backend-ops" >&2; tail -5 "$tmp/cc.log" >&2; exit 1; }
+zig cc -c harness/vk_ops_diff.c -o "$tmp/hooks.o" -std=c11 -O2 -I llama.cpp/ggml/include 2>"$tmp/cc.log" \
+    || { echo "FAIL: could not compile the hooks" >&2; tail -5 "$tmp/cc.log" >&2; exit 1; }
+zig c++ "$tmp/tbo.o" "$tmp/hooks.o" -o "$tmp/vk_ops_diff" \
+    "$PORT_LIB" "$REF_LIB" ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/ld.log" \
+    || { echo "FAIL: could not link the harness" >&2; grep -m5 error "$tmp/ld.log" >&2; exit 1; }
+
+# VK_OPS_DIFF_BIN=<path> keeps the linked harness, to run it by hand.
+[ -n "${VK_OPS_DIFF_BIN:-}" ] && cp "$tmp/vk_ops_diff" "$VK_OPS_DIFF_BIN"
+
+# A side that aborts must abort the same way; gdb's backtrace would differ.
+export GGML_NO_BACKTRACE=1
+"$tmp/vk_ops_diff" test -b Vulkan0 "$@" > "$tmp/out.log" 2>&1
+rc=$?
+[ -n "${VK_OPS_DIFF_OUT:-}" ] && cp "$tmp/out.log" "$VK_OPS_DIFF_OUT"
+
+grep -E '^(BITDIFF|SUPPORTS|NONDET)|EXTRA .*FAIL' "$tmp/out.log" | head -20
+grep -E '^vk_ops_diff:' "$tmp/out.log"
+passed=$(grep -E '^  [0-9]+/[0-9]+ tests passed' "$tmp/out.log" | tail -1 | sed 's/^ *//')
+ok=$(echo "$passed" | cut -d/ -f1)
+nsupp=$(grep -cE 'not supported' "$tmp/out.log")
+echo "  ${passed:-0/0 tests passed}, bit-identical; $nsupp cases not supported by the port"
+nextra=$(grep -cE '^  EXTRA ' "$tmp/out.log")
+[ "$nextra" -gt 0 ] && echo "  $nextra extra cases run, $(grep -cE '^  EXTRA .*: OK$' "$tmp/out.log") bit-identical"
+
+# Cases, not lines: a case the reference fails to reproduce against itself
+# prints BITDIFF lines too, and is reported NONDET rather than failed.
+bit=$(sed -nE 's/^vk_ops_diff: .* differing in ([0-9]+) cases.*/\1/p' "$tmp/out.log")
+bit=${bit:-1}
+sup=$(grep -cE '^SUPPORTS' "$tmp/out.log")
+if [ "$rc" -ne 0 ] || [ "$bit" -ne 0 ] || [ "$sup" -ne 0 ]; then
+    [ "$rc" -ne 0 ] && { echo "test-backend-ops exited $rc"; grep -E 'GGML_ASSERT|FAIL|Assert|error|not ported' "$tmp/out.log" | head -10; }
+    echo "FAIL: the ported Vulkan backend differs from the reference"
+    exit 1
+fi
+[ "${ok:-0}" -gt 0 ] || { echo "FAIL: no case ran -- the gate compared nothing"; exit 1; }
+echo "PASS: every supported case bit-identical to the reference Vulkan backend"

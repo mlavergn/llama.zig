@@ -334,6 +334,26 @@ pub const Options = struct {
     /// Builds upstream's CUDA backend into `libggml.a`; null leaves it out.
     /// See `addCuda`.
     cuda: ?Cuda = null,
+    /// Builds ggml's Vulkan backend into `libggml.a`; null leaves it out.
+    /// See `addVulkan`.
+    vulkan: ?Vulkan = null,
+};
+
+/// The Vulkan toolchain every Vulkan build uses, resolved by `build.zig`
+/// (PLAN.md, Decisions 55 and 59).
+pub const Vulkan = struct {
+    /// The `glslc` every shader is compiled with.
+    glslc: []const u8,
+    /// Directories holding `vulkan/` and `spirv/`, searched after libc's.
+    include_dirs: []const []const u8,
+    /// Extra directories to find `libvulkan` in.
+    lib_dirs: []const []const u8,
+    /// `-D` flags for the shader extensions `glslc` accepts, from the
+    /// probes `ggml-vulkan/CMakeLists.txt` runs.
+    features: []const []const u8,
+    /// Use the Zig host layer (`src/ggml/vulkan/`) in place of upstream's
+    /// `ggml-vulkan.cpp`. Off until the swap; the gates build both.
+    port: bool = false,
 };
 
 /// Where the CUDA toolkit is and which GPU to compile for.
@@ -415,6 +435,14 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     options.addOption(bool, "cuda_port", if (opts.cuda) |cu| cu.port else false);
     // The fatbins' architecture, for `ggml_cuda_highest_compiled_arch`.
     options.addOption([]const u8, "cuda_arch", if (opts.cuda) |cu| cu.arch else "");
+    // Mirrors `-DGGML_USE_VULKAN`, for `backend_reg.zig`.
+    options.addOption(bool, "use_vulkan", opts.vulkan != null);
+    options.addOption(bool, "vulkan_port", if (opts.vulkan) |vk| vk.port else false);
+    // The shader extensions `glslc` accepted: the C++'s
+    // `GGML_VULKAN_*_GLSLC_SUPPORT` macros, for the ported host layer.
+    for (vulkan_glslc_features) |f| {
+        options.addOption(bool, f.option, if (opts.vulkan) |vk| hasDefine(vk.features, f.define) else false);
+    }
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
     addVarargsShim(b, mod, opts);
@@ -479,6 +507,7 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     }
 
     if (opts.cuda) |cuda| try addCuda(b, mod, cuda);
+    if (opts.vulkan) |vk| try addVulkan(b, mod, vk);
 
     // LLVM's backend, always. The port calls LLVM intrinsics by name --
     // `sdot` and `smmla` on ARM, `vcvtps2ph` on x86 -- which only that
@@ -784,6 +813,300 @@ pub fn addCudaLibraries(b: *std.Build, mod: *std.Build.Module, cuda: ?Cuda) void
     mod.addObjectFile(.{ .cwd_relative = tk.libstdcxx });
 }
 
+/// The `GGML_VULKAN_*_GLSLC_SUPPORT` macros and the `config` options that
+/// carry them to the Zig host layer.
+const vulkan_glslc_features = [_]struct { define: []const u8, option: []const u8 }{
+    .{ .define = "-DGGML_VULKAN_COOPMAT_GLSLC_SUPPORT", .option = "vk_coopmat_glslc" },
+    .{ .define = "-DGGML_VULKAN_COOPMAT2_GLSLC_SUPPORT", .option = "vk_coopmat2_glslc" },
+    .{ .define = "-DGGML_VULKAN_COOPMAT2_DECODE_VECTOR_GLSLC_SUPPORT", .option = "vk_coopmat2_decode_vector_glslc" },
+    .{ .define = "-DGGML_VULKAN_INTEGER_DOT_GLSLC_SUPPORT", .option = "vk_integer_dot_glslc" },
+    .{ .define = "-DGGML_VULKAN_BFLOAT16_GLSLC_SUPPORT", .option = "vk_bfloat16_glslc" },
+    .{ .define = "-DGGML_VULKAN_FLOAT_E2M1_GLSLC_SUPPORT", .option = "vk_float_e2m1_glslc" },
+    .{ .define = "-DGGML_VULKAN_FLOAT_E4M3_GLSLC_SUPPORT", .option = "vk_float_e4m3_glslc" },
+};
+
+fn hasDefine(defines: []const []const u8, define: []const u8) bool {
+    for (defines) |d| if (std.mem.eql(u8, d, define)) return true;
+    return false;
+}
+
+/// The flags `ggml-vulkan.cpp` compiles with in the reference: ggml's own,
+/// `GGML_USE_VULKAN`, and the extension macros. `NDEBUG` is upstream's
+/// release default, as for CUDA.
+fn vulkanCxxFlags(b: *std.Build, vk: Vulkan, extra: []const []const u8) []const []const u8 {
+    var list: std.ArrayList([]const u8) = .empty;
+    list.appendSlice(b.allocator, &cxx_flags) catch @panic("OOM");
+    list.appendSlice(b.allocator, &.{ "-DGGML_USE_VULKAN", "-DGGML_SCHED_MAX_COPIES=4", "-DNDEBUG" }) catch @panic("OOM");
+    list.appendSlice(b.allocator, vk.features) catch @panic("OOM");
+    list.appendSlice(b.allocator, extra) catch @panic("OOM");
+    // `-idirafter`, not `-I`: the header directory may be `/usr/include`,
+    // which must not shadow the libc headers Zig supplies.
+    for (vk.include_dirs) |dir| list.appendSlice(b.allocator, &.{ "-idirafter", dir }) catch @panic("OOM");
+    return list.items;
+}
+
+/// What one generation of the shaders produced.
+const VulkanShaders = struct {
+    /// The directory holding `ggml-vulkan-shaders.hpp`.
+    header_dir: std.Build.LazyPath,
+    /// One generated `.cpp` per shader file, holding its variants' SPIR-V.
+    cpps: []const std.Build.LazyPath,
+};
+
+/// The build's one shader generation, shared by every artifact that needs
+/// it. See `vulkanShaders`.
+var vulkan_shaders_once: ?VulkanShaders = null;
+
+/// Runs upstream's `vulkan-shaders-gen` over every shader file, once per build
+/// graph, and returns its output.
+///
+/// The steps are those of `llama.cpp.zmake`'s `addVulkan`, which replaces
+/// CMake's `ExternalProject` (`ggml-vulkan/CMakeLists.txt:149-259`): the
+/// generator built for the host with the extension macros, run once with no
+/// source for the header and once per `.comp` with `--glslc`. Every `.comp`
+/// and `.glsl` is an input of every run, because `glslc` resolves the
+/// includes and Zig cannot see them.
+///
+/// **Once** is the point (PLAN.md, Decision 59): `glslc -O` is not
+/// reproducible on `tri_f16`, so the reference objects and the port's
+/// embedded table must come from the same run's files. Every caller in one
+/// build graph gets the same `LazyPath`s.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `vk`: the toolchain.
+///
+/// Return: the generated header directory and `.cpp` files; propagates
+/// directory-read failures.
+fn vulkanShaders(b: *std.Build, vk: Vulkan) !VulkanShaders {
+    if (vulkan_shaders_once) |done| return done;
+    const shaders_dir = root ++ "/ggml/src/ggml-vulkan/vulkan-shaders";
+
+    const gen_mod = b.createModule(.{
+        .target = b.graph.host,
+        .optimize = .fast,
+        .link_libc = true,
+        .link_libcpp = true,
+        .sanitize_c = .off,
+    });
+    var gen_flags: std.ArrayList([]const u8) = .empty;
+    try gen_flags.appendSlice(b.allocator, &cxx_flags);
+    try gen_flags.appendSlice(b.allocator, vk.features);
+    gen_mod.addCSourceFile(.{ .file = b.path(shaders_dir ++ "/vulkan-shaders-gen.cpp"), .flags = gen_flags.items });
+    const gen = b.addExecutable(.{ .name = "vulkan-shaders-gen", .root_module = gen_mod });
+
+    var comp: std.ArrayList([]const u8) = .empty;
+    var glsl: std.ArrayList([]const u8) = .empty;
+    {
+        b.dependOnDirectoryMetadata(b.path(shaders_dir));
+        var dir = try b.root.openDir(b.graph.io, shaders_dir, .{ .iterate = true });
+        defer dir.close(b.graph.io);
+        var it = dir.iterate();
+        while (try it.next(b.graph.io)) |entry| {
+            if (entry.kind != .file) continue;
+            const path = b.fmt("{s}/{s}", .{ shaders_dir, entry.name });
+            if (std.mem.endsWith(u8, entry.name, ".comp")) try comp.append(b.allocator, path);
+            if (std.mem.endsWith(u8, entry.name, ".glsl")) try glsl.append(b.allocator, path);
+        }
+    }
+    const lessThan = struct {
+        fn f(_: void, l: []const u8, r: []const u8) bool {
+            return std.mem.lessThan(u8, l, r);
+        }
+    }.f;
+    std.mem.sort([]const u8, comp.items, {}, lessThan);
+    std.mem.sort([]const u8, glsl.items, {}, lessThan);
+
+    // Pass 1: the header, which names every variant.
+    const hdr_run = b.addRunArtifact(gen);
+    hdr_run.addArg("--output-dir");
+    _ = hdr_run.addOutputDirectoryArg("spv");
+    hdr_run.addArg("--target-hpp");
+    const header = hdr_run.addOutputFileArg("ggml-vulkan-shaders.hpp");
+
+    // Pass 2: one run per shader file, each writing that file's SPIR-V.
+    var cpps: std.ArrayList(std.Build.LazyPath) = .empty;
+    for (comp.items) |file| {
+        const run = b.addRunArtifact(gen);
+        run.addArgs(&.{ "--glslc", vk.glslc });
+        run.addArg("--source");
+        run.addFileArg(b.path(file));
+        run.addArg("--output-dir");
+        _ = run.addOutputDirectoryArg("spv");
+        // Only its basename is used, for the generated `#include`.
+        run.addArgs(&.{ "--target-hpp", "ggml-vulkan-shaders.hpp" });
+        run.addArg("--target-cpp");
+        try cpps.append(b.allocator, run.addOutputFileArg(b.fmt("{s}.cpp", .{std.fs.path.basename(file)})));
+        for (comp.items) |f| run.addFileInput(b.path(f));
+        for (glsl.items) |f| run.addFileInput(b.path(f));
+    }
+
+    vulkan_shaders_once = .{ .header_dir = header.dirname(), .cpps = cpps.items };
+    return vulkan_shaders_once.?;
+}
+
+/// Adds ggml's Vulkan backend to the ggml module.
+///
+/// With `vk.port` off this is the reference: upstream's `ggml-vulkan.cpp`
+/// and the generated shader `.cpp` files, compiled unmodified. With it on,
+/// the Zig host layer under `src/ggml/vulkan/` takes their place, and the
+/// same generated files reach it as data through `addVulkanPort`.
+///
+/// `libvulkan` is not linked here: Zig resolves a system library even for a
+/// static archive, and a machine that only builds the archive need not have
+/// the loader. `addVulkanLibraries` links it where an executable is made.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `mod`: the ggml module.
+/// - `vk`: the toolchain.
+///
+/// Return: nothing; propagates directory-read failures.
+fn addVulkan(b: *std.Build, mod: *std.Build.Module, vk: Vulkan) !void {
+    const shaders = try vulkanShaders(b, vk);
+    if (vk.port) {
+        addVulkanPort(b, mod, vk, shaders);
+        return;
+    }
+    mod.addIncludePath(shaders.header_dir);
+    for (shaders.cpps) |cpp| mod.addCSourceFile(.{ .file = cpp, .flags = &cxx_flags });
+    mod.addCSourceFiles(.{
+        .root = b.path(root),
+        .files = &.{"ggml/src/ggml-vulkan/ggml-vulkan.cpp"},
+        .flags = vulkanCxxFlags(b, vk, &.{}),
+    });
+}
+
+/// Adds the Zig Vulkan host layer's inputs to the ggml module: the shader
+/// table `build/vulkan_shaders.zig` makes from the generated `.cpp` files,
+/// and the translated Vulkan C headers.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `mod`: the ggml module.
+/// - `vk`: the toolchain.
+/// - `shaders`: the build's one generation.
+fn addVulkanPort(b: *std.Build, mod: *std.Build.Module, vk: Vulkan, shaders: VulkanShaders) void {
+    const tool = b.addExecutable(.{
+        .name = "vulkan_shaders",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("build/vulkan_shaders.zig"),
+            .target = b.graph.host,
+            // The largest generated file is 129 MB of hex.
+            .optimize = .fast,
+        }),
+    });
+    const run = b.addRunArtifact(tool);
+    const table = run.addOutputFileArg("vulkan_shaders.zig");
+    const blob = run.addOutputFileArg("vulkan_shaders.bin");
+    for (shaders.cpps) |cpp| run.addFileArg(cpp);
+
+    const shaders_mod = b.createModule(.{ .root_source_file = table });
+    shaders_mod.addAnonymousImport("vulkan_shaders_blob", .{ .root_source_file = blob });
+    mod.addImport("vulkan_shaders", shaders_mod);
+
+    const translate = b.addTranslateC(.{
+        .root_source_file = b.path("src/ggml/vulkan/c_import.h"),
+        .target = mod.resolved_target.?,
+        .optimize = mod.optimize.?,
+    });
+    for (vk.include_dirs) |dir| translate.addAfterIncludePath(.{ .cwd_relative = dir });
+    mod.addImport("vulkan_c", translate.createModule());
+}
+
+/// The functions upstream's `ggml-vulkan.o` exports unmangled, measured with
+/// `nm -g --defined-only` (`NOTES.md`, "Stage 7: the measurement"):
+/// `ggml-vulkan.h`'s eight and `vk_conv_block_sizes`, an internal table
+/// missing its `static`.
+pub const vulkan_c_exports = [_][]const u8{
+    "ggml_backend_is_vk",
+    "ggml_backend_vk_buffer_type",
+    "ggml_backend_vk_get_device_count",
+    "ggml_backend_vk_get_device_description",
+    "ggml_backend_vk_get_device_memory",
+    "ggml_backend_vk_host_buffer_type",
+    "ggml_backend_vk_init",
+    "ggml_backend_vk_reg",
+    "vk_conv_block_sizes",
+};
+
+/// Builds upstream's Vulkan backend a second time, with `vulkan_c_exports`
+/// renamed to `ref_*`, as `libggml-vulkan-ref.a`, for the in-process gates
+/// that register it beside the port -- `addCudaRef`'s counterpart.
+///
+/// It carries the shader `.cpp` objects from the build's one generation, so
+/// the reference and the port's table hold the same bytes. Their `*_data`
+/// symbols are the C++'s; the port's table defines no symbol at all, so
+/// nothing collides.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `opts`: target and optimize mode; `opts.vulkan` must be set.
+///
+/// Return: the library; propagates directory errors.
+pub fn addVulkanRef(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
+    const vk = opts.vulkan.?;
+    const shaders = try vulkanShaders(b, vk);
+    const mod = b.createModule(.{
+        .target = opts.target,
+        .optimize = opts.optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+        .sanitize_c = .off,
+    });
+    mod.addIncludePath(b.path(root ++ "/ggml/include"));
+    mod.addIncludePath(b.path(root ++ "/ggml/src"));
+    mod.addIncludePath(shaders.header_dir);
+    var renames: std.ArrayList([]const u8) = .empty;
+    for (vulkan_c_exports) |name| try renames.append(b.allocator, b.fmt("-D{s}=ref_{s}", .{ name, name }));
+    for (shaders.cpps) |cpp| mod.addCSourceFile(.{ .file = cpp, .flags = &cxx_flags });
+    mod.addCSourceFiles(.{
+        .root = b.path(root),
+        .files = &.{"ggml/src/ggml-vulkan/ggml-vulkan.cpp"},
+        .flags = vulkanCxxFlags(b, vk, renames.items),
+    });
+    return b.addLibrary(.{ .name = "ggml-vulkan-ref", .root_module = mod, .linkage = .static });
+}
+
+/// Compiles `harness/vk_push_layout.cpp`, the `static_assert`s
+/// `scripts/gen-vk-push` writes against the push-constant structs of the
+/// real `ggml-vulkan.cpp`, which it includes. Compiling it is the check.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `opts`: target, optimisation and the Vulkan toolchain.
+///
+/// Return: the object; depending on its step runs the check.
+pub fn addVulkanPushLayout(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
+    const vk = opts.vulkan.?;
+    const shaders = try vulkanShaders(b, vk);
+    const mod = b.createModule(.{
+        .target = opts.target,
+        .optimize = opts.optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+        .sanitize_c = .off,
+    });
+    mod.addIncludePath(b.path(root ++ "/ggml/include"));
+    mod.addIncludePath(b.path(root ++ "/ggml/src"));
+    mod.addIncludePath(shaders.header_dir);
+    mod.addCSourceFile(.{ .file = b.path("harness/vk_push_layout.cpp"), .flags = vulkanCxxFlags(b, vk, &.{}) });
+    return b.addObject(.{ .name = "vk_push_layout", .root_module = mod });
+}
+
+/// Adds the Vulkan loader to a module's link: every module that links a
+/// `libggml.a` built with `-Dvulkan` calls this, as `addCudaLibraries`.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `mod`: the module whose link gains the loader.
+/// - `vulkan`: the toolchain; null adds nothing.
+pub fn addVulkanLibraries(_: *std.Build, mod: *std.Build.Module, vulkan: ?Vulkan) void {
+    const vk = vulkan orelse return;
+    for (vk.lib_dirs) |dir| mod.addLibraryPath(.{ .cwd_relative = dir });
+    mod.linkSystemLibrary("vulkan", .{});
+}
+
 /// Flattens one Metal kernel and returns the assembly stub that embeds it.
 ///
 /// Runs `build/metal_embed.zig` as a build-time tool, which stands in for the
@@ -880,6 +1203,8 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
     // must not reference the Metal backend.
     options.addOption(bool, "use_metal", false);
     options.addOption(bool, "use_cuda", false);
+    options.addOption(bool, "use_vulkan", false);
+    options.addOption(bool, "vulkan_port", false);
     options.addOption(bool, "cuda_port", false);
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
@@ -962,6 +1287,8 @@ fn portedTestModuleInner(
     // in its link. The ported registry must not reference the Metal backend.
     options.addOption(bool, "use_metal", false);
     options.addOption(bool, "use_cuda", false);
+    options.addOption(bool, "use_vulkan", false);
+    options.addOption(bool, "vulkan_port", false);
     options.addOption(bool, "cuda_port", false);
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
@@ -1026,6 +1353,10 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) *std.Bu
     mod.addImport("llama_c", llamaCModule(b, opts));
     addSdkPaths(b, mod, opts.sdk);
     mod.linkLibrary(ggml);
+    // Where `libggml` links the Vulkan loader -- its unit tests do -- Zig
+    // resolves it again for every library that links `libggml`, and the
+    // search path does not travel with it.
+    if (opts.vulkan) |vk| for (vk.lib_dirs) |lib_dir| mod.addLibraryPath(.{ .cwd_relative = lib_dir });
     addCudaLibraries(b, mod, opts.cuda);
 
     const lib = b.addLibrary(.{ .name = "llama", .root_module = mod, .linkage = .static });
@@ -1091,6 +1422,10 @@ fn addLlamaRef(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*st
 
     addSdkPaths(b, mod, opts.sdk);
     mod.linkLibrary(ggml);
+    // Where `libggml` links the Vulkan loader -- its unit tests do -- Zig
+    // resolves it again for every library that links `libggml`, and the
+    // search path does not travel with it.
+    if (opts.vulkan) |vk| for (vk.lib_dirs) |lib_dir| mod.addLibraryPath(.{ .cwd_relative = lib_dir });
     addCudaLibraries(b, mod, opts.cuda);
 
     const lib = b.addLibrary(.{ .name = "llama-ref", .root_module = mod, .linkage = .static });

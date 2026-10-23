@@ -44,27 +44,10 @@ fn src(t: *const Tensor, i: usize) *Tensor {
     return impl.one(Tensor, t.src[i]);
 }
 
-/// Ports the C++ overload of `ggml_can_fuse_subgraph` (ggml-impl.h:758
-/// @c1d0e7a00) and the static inline `ggml_can_fuse_subgraph` it calls
-/// (ggml-impl.h:724 @c1d0e7a00).
-fn canFuseSubgraph(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, outputs: []const c_int) bool {
-    impl.assert(ops.len < 32, "count < 32");
-    if (node_idx + @as(c_int, @intCast(ops.len)) > cgraph.n_nodes) return false;
-
-    var idxs: [32]c_int = undefined;
-    for (0..ops.len) |i| idxs[i] = node_idx + @as(c_int, @intCast(i));
-
-    return ggml_graph.ggml_can_fuse_subgraph_ext(cgraph, &idxs, @intCast(ops.len), ops.ptr, outputs.ptr, @intCast(outputs.len));
-}
-
-/// Ports `ggml_check_edges` (ggml-impl.h:766 @c1d0e7a00): each edge is
-/// `{dst_node, src_idx, src_node}`, relative to `start_idx`.
-fn checkEdges(cgraph: *const CGraph, start_idx: c_int, edges: []const [3]c_int) bool {
-    for (edges) |e| {
-        if (node(cgraph, start_idx + e[0]).src[@intCast(e[1])] != node(cgraph, start_idx + e[2])) return false;
-    }
-    return true;
-}
+/// `ggml_can_fuse_subgraph` and `ggml_check_edges` live in `graph.zig`,
+/// which the Vulkan host layer shares.
+const canFuseSubgraph = ggml_graph.canFuseSubgraph;
+const checkEdges = ggml_graph.checkEdges;
 
 /// Ports `ggml_cuda_should_fuse_rope_set_rows` (ggml-cuda.cu:2656 @c1d0e7a00).
 fn shouldFuseRopeSetRows(rope_t: *const Tensor, view: *const Tensor, set_rows: *const Tensor) bool {

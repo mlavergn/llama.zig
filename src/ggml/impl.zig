@@ -165,6 +165,13 @@ pub const logWarn = struct {
     }
 }.f;
 
+/// Ports the `GGML_LOG_CONT` macro (ggml-impl.h:123 @c1d0e7a00).
+pub const logCont = struct {
+    pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
+        @call(.auto, ggml_log_internal, .{ c.GGML_LOG_LEVEL_CONT, fmt } ++ args);
+    }
+}.f;
+
 /// Ports `GGML_DEBUG` (ggml-impl.h:125 @c1d0e7a00).
 ///
 /// Zero upstream, and upstream never changes it: it is a compile-time knob a

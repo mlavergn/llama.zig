@@ -5511,6 +5511,407 @@ runs); the guard refuses a reference without the backend.
 `scripts/platform-libs` now adds `-lvulkan` when an archive it is given
 imports `vkGetInstanceProcAddr`, and only then.
 
+## Stage 7: the GB10 pickup
+
+**The machine had a driver and nothing to build with.** NVIDIA's ICD
+(`libnvidia-gl-580`, 580.173.02) and the loader (`libvulkan1` 1.4.328) were
+installed; `glslc`, the Vulkan and SPIR-V headers and `vulkaninfo` were
+not, and `sudo` asks for a password. Ubuntu 24.04's `glslc` is shaderc
+2023.8, which predates `GL_NV_cooperative_matrix2` and `GL_EXT_bfloat16`,
+so taking it would have compiled NVIDIA's fastest arm out of the reference
+-- the case the pickup warned about. So the toolchain is pinned instead,
+Decision 59: **`scripts/vk-toolchain`** (`make vk-toolchain`) builds it into
+`.tools/vulkan/` with no root, in about 45 s on 20 cores:
+
+| piece | source |
+|---|---|
+| `include/vulkan`, `include/vk_video` | Khronos `Vulkan-Headers`, `vulkan-sdk-1.4.363.0` (`VK_HEADER_VERSION` 363) |
+| `include/spirv` | Khronos `SPIRV-Headers`, `vulkan-sdk-1.4.363.0` |
+| `bin/glslc` | google/shaderc v2026.4, whose `DEPS` pin glslang `e1b562a8` and SPIRV-Tools `ef96ed76` -- exactly the `vulkan-sdk-1.4.363.0` commits -- built against those tags |
+| `lib/libvulkan.so` | a link to the system loader; `libvulkan-dev`, which carries the unversioned name, is not installed |
+| `bin/vulkaninfo` | the distro's `vulkan-tools`, unpacked with `apt-get download` and `dpkg -x` |
+
+1.4.363 is the tag the Mac's measurement was taken at, so the counts above
+and the build here describe the same headers. `make vk-repro` passes the
+toolchain to the zmake build itself; `scripts/platform-libs` adds
+`-L.tools/vulkan/lib` beside `-lvulkan` where the link exists.
+
+**The device**, by `vulkaninfo`: NVIDIA GB10, `deviceID` 0x2e12, API
+1.4.312, integrated, with `VK_KHR_cooperative_matrix`,
+`VK_NV_cooperative_matrix2`, `VK_KHR_shader_integer_dot_product`,
+`VK_KHR_shader_bfloat16` and `VK_NV_cooperative_vector`. Mesa's llvmpipe is
+enumerated too; ggml-vulkan skips CPU-type devices and reports one device.
+ggml's own line: `uma: 1 | fp16: 1 | bf16: 1 | fp4: 0 | warp size: 32 |
+shared memory: 49152 | int dot: 1 | matrix cores: NV_coopmat2`.
+
+**The probes**: all seven passed, and the generator declared 1,980
+variants, the all-extensions count the Mac measured.
+
+**A probe hole, found by a typo.** The first build was given a `-Dglslc`
+path that did not exist (`llama.cpp.zmake` is a symlink to a sibling
+directory, so `$PWD/..` was not this repository). Configuration succeeded
+with all seven probes "passing": the probe counts anything but
+`extension not supported: <name>` as support, as CMake does, and `sh: not
+found` is not a refusal. Only the per-shader compiles failed. The zmake
+build now runs `glslc --version` before probing and refuses one that does
+not run. CMake cannot hit this, because `find_program` fails first.
+
+**`make vk-repro` passes on all four of the GB10's arms**, three runs each,
+2,750 nodes per node and 33 fused decode steps:
+
+| arm | `matrix cores` / `int dot` | per node | fused |
+|---|---|---|---|
+| default | `NV_coopmat2` / 1 | identical | identical |
+| `GGML_VK_DISABLE_COOPMAT2=1` | `KHR_coopmat` / 1 | identical | identical |
+| `+ GGML_VK_DISABLE_COOPMAT=1` | none / 1 | identical | identical |
+| `+ GGML_VK_DISABLE_INTEGER_DOT_PRODUCT=1` | none / 0 | identical | identical |
+
+The compute nodes all ran on `Vulkan0`; only the token embedding's
+`GET_ROWS` reads the host buffer. The hashes are not degenerate: 1,630
+distinct over 2,750 nodes. Negative-tested by making runs after the first
+take `GGML_VK_DISABLE_COOPMAT2=1`: per node, the first divergent node is the
+first `FLASH_ATTN_EXT` (node 216), and all 33 fused lines differ. So Vulkan,
+like Metal and CUDA, is an exact oracle, and each arm is a distinct
+reference that the gates can select by environment.
+
+**`glslc -O` is not reproducible, on one shader.** Four complete
+generations were compared, 1,980 variants each: the `make vk-repro` build,
+and three fresh-cache builds (one plain, two under `MALLOC_PERTURB_`). 1,979
+variants are byte-identical in all four. **`tri_f16` is not**: two bytes,
+one `OpConstant f32` whose value is `0x7f800000` (+inf) in the first build
+and `0x00000000` in the other three. Standalone, the same command gives +inf
+200 times out of 200, and under `MALLOC_PERTURB_` = 0, 1, 85, 170 and 255 it
+gives four different binaries. So `spirv-opt` reads uninitialized memory,
+and its output follows heap state, which argv and environment also move.
+The unoptimized module has the +inf constant. In the optimized one,
+`FConvert` of it is stored by the `else` arm, `data_d[…] = D_TYPE(0)`. So
+**0.0 is right and the +inf build is a miscompile**: that `tri_f16` writes
++inf over every masked element. It is dead code: `ggml_tri` asserts an f32
+source (ggml.c:5309), so no graph built through the API reaches the f16
+pipeline that `supports_op` and `pipeline_tri[dst->type == F16]` offer, and
+upstream's `test-backend-ops` builds `TRI` at f32 only.
+
+What it changes is Decision 55's "identical SPIR-V by construction".
+That holds only if **both sides embed one generation's files**. Two runs of
+the same generator with the same `glslc` are not the same reference, and a
+gate that compared the port's embedded blobs with the reference archive's
+would fail on `tri_f16` for no porting reason. Hence Decision 59's second
+half. Not root-caused further; it is upstream SPIRV-Tools' bug, not ours.
+
+## Stage 7 step 4: the build, the first gates, the registry
+
+**This repository builds Vulkan now**, beside zmake: `-Dvulkan` on
+`zig build`, the toolchain defaulting to `.tools/vulkan` (Decision 59),
+the seven probes run as zmake runs them, and `ggml-backend-reg`'s Vulkan arm
+in `backend_reg.zig`, behind `config.use_vulkan`, with the C++'s
+`GGML_DISABLE_VULKAN` check. Three artifacts:
+
+- **reference mode** (`-Dvulkan`): upstream's `ggml-vulkan.cpp` and the
+  generated shader `.cpp` files compiled into `libggml.a`, under our Zig
+  ggml and libllama.
+- **`vk-ref`**: the same C++ with its nine exports renamed `ref_*`, as
+  `libggml-vulkan-ref.a`, for in-process gates (`addCudaRef`'s method).
+- **port mode** (`-Dvulkan-port`): `src/ggml/vulkan/` instead of the C++.
+  The shaders reach it through `build/vulkan_shaders.zig`, which reads the
+  **same generated `.cpp` files** the reference compiles and writes one
+  51.7 MB blob plus a Zig index under the C names (`abs_f16_data`,
+  `add_data[2][2][2]`, `arr_dmmv_*`): 1,980 variants and every dispatch
+  table, no C++ in the port. `vulkanShaders` memoises the generation per
+  build graph, so a build's reference objects and table are one
+  generation's bytes.
+
+**One generation per build graph, not per checkout.** The generator binary
+built with `-Dcuda` (the Linux default) differs from the one built with
+`-Dcuda=false`, 8,573,240 bytes against 8,592,816, so the two
+configurations generate separately. Here the two generations agreed,
+`tri_f16` included, but they need not. Every gate takes both sides from
+one configuration (the in-process ones from one invocation;
+`vk-node-diff`'s from two `-Dcuda=false` builds), so this does not reach a
+comparison. Why the generator differs is not known yet.
+
+**Our Zig ggml and libllama are exact under a Vulkan device**, measured
+before any host code was ported: `scripts/vk-node-diff` with
+`VK_REF_DIR=llama.cpp.zmake/zig-out/lib` against reference mode, so both
+sides run upstream's `ggml-vulkan.cpp`. All four arms, 2,750 nodes per node
+and 33 fused decodes, identical. Negative-tested through `VK_PORT_ENV`,
+which adds environment to one side only: `GGML_VK_FORCE_MMVQ=1` fails both
+passes, and `GGML_VK_DISABLE_FUSION=1` fails the fused pass alone. That is
+the per-node pass's blindness to fusion, shown rather than assumed.
+
+**The host port starts outside-in**, as CUDA's did:
+
+- `common.zig` holds `vulkan.hpp`'s behaviour without the C++: the
+  dynamic dispatcher as a struct of `PFN_`s loaded through
+  `vkGetInstanceProcAddr`, a thrown `vk::SystemError` as an error union,
+  and the `VK_INCOMPLETE` retry of every `enumerate*`.
+- `instance.zig` holds `ggml_vk_instance_init`: device selection,
+  `GGML_VK_VISIBLE_DEVICES` read as a `stringstream` reads it, the
+  UUID/LUID dedup with its driver priorities, the architecture probe,
+  `print_gpu_info`'s device line, and memory, type and PCI id.
+- `backend.zig` holds the registry, the device vtable's descriptive answers
+  and `offload_op`, and the nine exports, `vk_conv_block_sizes` included.
+
+Everything else aborts naming the C++ it stands in for. `supports_op`
+answers false, so no op reaches an unported path. `translate-c` handles
+`vulkan_core.h` at SDK 363 cleanly, 21k lines. The header has every
+extension the C++ carries fallback structs for, so the port needs none and
+says so at comptime.
+
+**`scripts/vk-backend-diff`** asks one side per process, port or ref,
+because the instance initialises once per process and writes to the log
+and to `stderr` while it does. It runs both sides under 13 environments:
+the visible-device list (the GPU, llvmpipe, both orders, the first index
+past the end, one far past it, a malformed list), the offload minimum, and
+every switch in the device line. It diffs the whole transcript, log lines
+and exit status included. All identical. Negative-tested 3/3, after closing
+one escape: `>` for `>=` in the visible-device range check passed until
+the scenario `GGML_VK_VISIBLE_DEVICES=2` was added. The GB10 has two
+physical devices, and index 7 is out of range under either comparison.
+That is the input-distribution lesson again, now for an environment.
+
+## Stage 7 step 5: the logical device, the pipeline walk, the buffers
+
+**The second layer is in**: `ggml_vk_get_device`, `ggml_vk_load_shaders`,
+`ggml_vk_create_pipeline_func` and its three SPIR-V passes, buffers and
+their memory-type choice, pinned host memory, both buffer types, command
+buffers and submission, and the synchronous transfers. In files:
+
+- `device.zig`: `vk_device_struct` with every pipeline slot,
+  `ggml_vk_get_device` (the extension `else if` chain, both property and
+  feature `pNext` chains, queue families, the coopmat and coopmat2 shape
+  queries, `createDevice`, the per-vendor tile switches, the descriptor set
+  layout), queues and command pools. `std::recursive_mutex` is a small
+  recursive mutex over a plain `pthread_mutex_t`, because its attribute
+  type and constant differ between C libraries.
+- `shaders.zig`: the walk. The C++ pastes shader names together in
+  macros (`NAMELC ## F16ACC ## _cm2_data`); the port pastes the same names
+  at comptime and reads them from the generated table with `@field`, so a
+  misspelt name is a compile error. Runs of macro invocations became row
+  tables walked in the C++'s order. **The order matters**: a slot two calls
+  name is claimed by the first, with that call's arguments.
+- `pipeline.zig`: `vk_pipeline_struct`, the compile with its float-controls
+  patch, the coopmat2 decode-vector strip and the Asahi BK-loop roll (the
+  last two are unreachable here and kept), statistics and register counts.
+- `push.zig`: the 46 push-constant structs, **generated** by
+  `scripts/gen-vk-push` with a layout check. They live inside the `.cpp`,
+  not a header, so the generator computes every size and offset and writes
+  them twice: as comptime assertions in the Zig, and as `static_assert`s in
+  `harness/vk_push_layout.cpp`, which `#include`s the real
+  `ggml-vulkan.cpp`. `zig build vk-push-layout -Dvulkan` builds it, and
+  building it is the check: 1,266 facts. Negative-tested by moving one
+  offset, which the C++ compiler rejected.
+- `buffer.zig` and `submit.zig`: `vk_buffer` as a hand-counted reference
+  (the C++'s `shared_ptr` frees in its destructor), the memory-type
+  fallbacks, the memory logger, pinned memory, the device and host buffer
+  types, `vk_context`, submissions with timeline semaphores, and the 2-D
+  read and write paths.
+
+**`vk-backend-diff` now creates the device on both sides** and asks the
+buffer types and buffers: name, alignment, max size, `alloc_size`,
+`is_host`, `supports_buft` (also ported), and a buffer round-tripped through
+whole, offset and 2-D `set`/`get`, `memset_tensor`, `clear` and
+`cpy_tensor`, every byte hashed; the host buffer type, and a transfer whose
+host side is pinned. Seven more environments for the memory switches
+(`GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM`, with and without sysmem fallback,
+`PREFER_HOST_MEMORY`, the forced maximum buffer and allocation sizes, the
+suballocation block). 20 scenarios, identical. Negative-tested: a pinned
+read with its pitches swapped fails on llvmpipe, and a halved
+suballocation block fails everywhere.
+
+**One injection escaped, and it is a hole in this machine, not the gate.**
+A wrong destination offset in the staging *write* path passed every
+scenario. That path runs only when a device buffer is not host-visible,
+and on the GB10 none is: its device-local-only memory types (0 and 1) take
+no buffers, so even `GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM` lands on a
+mapped type, and llvmpipe's memory is all mapped. The staging *read* path
+is reached, through llvmpipe, which is not UMA. A discrete GPU would close
+it; until one is in reach the write path is ported and ungated.
+
+**Then the backend object.** `context.zig` holds `ggml_backend_vk_context`,
+`ggml_vk_init`, the compute and transfer contexts, `ggml_vk_synchronize`
+with its fence spin, graph cleanup, descriptor-set pools and
+`ggml_vk_dispatch_pipeline`. `iface.zig` holds `ggml_backend_vk_init`, the
+async 2-D transfers and their staging fallback, `cpy_tensor_async`,
+events, and `buffer_from_host_ptr`. `perf.zig` is the
+`GGML_VK_PERF_LOGGER` table. The C++'s weak `vk_context_ref`s become plain
+pointers nulled in graph cleanup, the one place their contexts die.
+`graph_compute` and `graph_optimize` abort, and `supports_op` still answers
+false.
+
+`vk-backend-diff` now builds a backend on both sides and runs async sets
+and gets (whole, offset, 2-D, through malloc'd and through pinned memory),
+`cpy_tensor_async` from a device and from a pinned host tensor, an event
+recorded, waited on and synchronized, and a host pointer imported, aligned
+and misaligned. Five more environments: the transfer queue
+(`GGML_VK_ASYNC_USE_TRANSFER_QUEUE`, on the GPU and llvmpipe), serialized
+submissions, `GGML_VK_DISABLE_ASYNC`, and both loggers. 25 scenarios,
+identical.
+
+**Two findings from it.** The memory logger turned up a missing
+`VK_LOG_MEMORY` in both `ensure_sync_staging_buffer`s; its handle and
+pointer values are masked before the diff, since they move run to run.
+And **the harness escaped once, the familiar way**. Copying a half-size
+pinned tensor into a full-size one trips ggml's own layout assertion, and
+both sides aborted at the same place. The diff read that as agreement, and
+everything after the abort went unasked. The script now fails any
+scenario whose reference exits non-zero. Negative-tested: an async copy
+offset by four bytes fails everywhere. An async 2-D read with its pitches
+swapped escaped until the reads went through pinned memory, the only way
+an async read reaches its pinned branch.
+
+## Stage 7 step 6: graph compute, the first ops, `vk-ops-diff`
+
+**The port computes graphs now.** `graph.zig` holds
+`ggml_backend_vk_graph_compute`: the flop- and node-count batching, the
+almost-ready fence, the perf logger's query pool, and every fusion test in
+the C++'s order -- multi-add, the matmul and matmul_id fusions,
+rms_norm+mul(+rope(+set_rows)), ssm_conv, rope+set_rows, snake, the five
+topk_moe patterns and their trailing scale -- with the overlap check that
+turns a fusion off. `ggml_can_fuse_subgraph` and `ggml_check_edges` moved
+from `cuda/fusion.zig` to `graph.zig`, where both backends use them.
+`nodes.zig` holds `ggml_vk_build_graph`'s synchronisation (a barrier when a
+node overlaps an unsynchronised one), `ggml_vk_compute_forward` and
+`ggml_vk_preallocate_buffers`. `op_pipeline.zig` is
+`ggml_vk_op_get_pipeline` and the copy pipelines; `ops.zig` holds
+`ggml_vk_op_f32` with the per-struct fastdiv and misalignment
+specialisations, and the node switch; `ops_basic.zig` the 40 ops that are
+one `op_f32` call, plus multi-add and the snake fusion; `supports.zig` the
+reference's `supports_op`, which the device answers AND-ed with
+`ops.ported`. `push.zig`'s derived structs became distinct types, because
+`init_pushconst_tensor_offsets` overloads on concat's.
+
+**`vk-ops-diff`** is `cuda-ops-diff` for Vulkan: upstream's
+`test-backend-ops` with the reference Vulkan backend where the CPU goes,
+every node compared on bits, and every `supports_op` question asked of both.
+**2,136 cases bit-identical, none differing**; 15,937 questions refused as not
+ported. `VK_DIFF_SELF=1` passes too. Negative-tested 3/3: a swapped
+broadcast dimension (MUL), clamp's upper bound (CLAMP), roll's packed shifts
+(ROLL).
+
+**Three things the CUDA harness got away with, fixed for this one.**
+
+- Its NONDET retry, and `VK_DIFF_SELF`, run a reference backend on the
+  test's own graph, whose tensors live in the port's buffers. CUDA's port
+  mirrors the reference's buffer-context layout; Vulkan's does not, so the
+  reference read the port's context as its own and died of `SIGBUS`. A
+  stand-in reference now gets its own copy of the graph.
+- `ggml_backend_is_vk` matches on the GUID, which port and reference share,
+  so it cannot say which backend is the port; the harness passes that
+  explicitly.
+- **That copy hid a real difference, once.** A plain
+  `ggml_backend_graph_copy` has no use counts and cannot fuse. With it, the
+  ten `SNAKE_FUSE` cases -- the reference fusing the chain, the port not yet
+  -- re-ran unfused against fused, the reference "disagreed with itself", and
+  all ten were excused as `NONDET`. Re-expanding the copy as backend 2's
+  already was made them fail, which they should have: the port lacked the
+  snake fusion while every one of its five ops was ported. It has it now.
+  **Porting the ops of a fused pattern ports the fusion too**, or the port
+  computes the chain unfused and differs.
+
+## Stage 7 step 7: every op, `graph_optimize`, the decode exact
+
+**Every op `supports_op` answers yes to is ported.** `ops.ported` no longer
+refuses anything: rms_norm and its rope and set_rows fusions, softmax,
+RoPE, the sorts and top-k, the router (`topk_moe`, five patterns), the
+sums and scans, the recurrent and state-space kernels, the optimizer
+steps (`ops_reduce.zig`, `ops_more.zig`); the convolution family
+(`ops_conv.zig`); matrix multiplication -- the pipeline getters, tile and
+split-k choice, the matrix-matrix path with its dequantize, contiguous
+and q8_1 staging, the three vector kernels, FWHT (`ops_matmul.zig`);
+MUL_MAT_ID (`ops_matmul_id.zig`); flash attention with its tuning, split-KV
+reduction, mask prepass and K/V dequantized into scratch
+(`ops_flash_attn.zig`); and `ggml_vk_graph_optimize` (`graph.zig`).
+
+`vk-ops-diff`, coopmat2 arm: every family bit-identical -- among them
+MUL_MAT 1,009 cases, MUL_MAT_ID 872, MUL_MAT_VEC_FUSION 432, FLASH_ATTN_EXT
+5,150, ROPE 466, IM2COL_3D 2,051, CONV_2D 1,962. `vk-node-diff`: all four
+arms, 2,750 nodes per node and the fused decode, identical; negative-tested
+2/2 against the port (fusion off, reorder off, port side only).
+
+**`graph_optimize` had a bug no op-level gate could see, and `vk-node-diff`
+found it.** `test-backend-ops` computes graphs directly and never reorders
+them. The port called `ggml_vk_is_empty`, which counts a zero-element
+tensor as empty; the reorder's own `is_empty` lambda looks at the op alone.
+A single-token decode of Qwen3.5 has a zero-row `GET_ROWS`, which the port
+then moved with the view nodes: the prompt matched and every later step
+diverged, on every arm. With `GGML_VK_DISABLE_GRAPH_OPTIMIZE=1` on both
+sides the whole decode was already exact, which isolated it in one run.
+
+**`vk-backend-diff` now asks `graph_optimize` directly**: both backends
+reorder the same graphs -- two decoder layers with QK-norm, a MoE router
+with expert matmuls, a snake chain, ssm_conv + add + silu, four seeded
+random DAGs -- and the new order is printed as original indices. The
+reorder moves 26 to 84 nodes of each, so agreement is not vacuous. Its
+first version escaped three of six injections, each a shape it lacked: no
+rope sat far from its MUL, so shrinking the search window changed nothing;
+no independent node waited behind a snake chain, so not keeping it whole
+changed nothing; no node read the cache through its own view, so dropping
+the implicit view dependency changed nothing. And it had no zero-element
+node, which is why it passed the bug above. With those four shapes added:
+7/7, the bug included.
+
+**Three of `vk-ops-diff`'s holes, closed with extra cases.**
+
+- **A misaligned set_rows destination.** Upstream's ROPE_SET_ROWS and
+  RMS_NORM_MUL_ROPE write a fresh tensor at offset 0, so the fused
+  dispatch's rounded-down binding and `d_offset` never ran; zeroing
+  `d_offset` passed 144/144. The case that closes it has to use a *leaf*
+  placed off alignment: a VIEW node there overlaps set_rows' output and
+  the overlap check turns the fusion off on both sides. ggml-alloc never
+  places a leaf off alignment, so no model graph reaches this arm.
+- **Matrix-matrix shapes.** Upstream keeps K small and M, N small, so
+  split-k never split and coopmat2's large-tile choice was never made;
+  changing either passed. Cases at K = 4096 and 8192, and 1024 x 1024.
+- **The second fused bias in `src[0]`.** The C++ takes it from whichever
+  operand is not the first ADD; upstream always puts it in `src[1]`.
+
+**A harness that cannot tell a failed build from a passing gate.** Two
+injections in this step did not compile, and the run tested the previous
+library and passed. The injection helper now refuses to test when the
+build fails. One injection (p021's z workgroups) hung the run instead of
+failing it: the run normally takes 1m47 and was killed at 17 minutes.
+
+## Stage 7 step 8: `vk-parity-cli` and the swap
+
+**`vk-parity-cli`** is `cuda-parity-cli` for Vulkan: our `llama-cli` against
+`harness/raw_completion.c` linked to upstream's libllama and upstream's
+Vulkan host layer (`zig-out/vk-upstream`, `-Dvulkan-port=false`), greedy,
+six prompts. **6/6 identical.** Negative-tested 3/3: RoPE rotating half
+its dimensions (1 of 6 prompts changed -- token parity is coarse, as
+`parity-port` measured), flash attention's scale doubled (5 of 6), and a
+CLI built with upstream's host layer, which the script refuses by `nm`.
+
+**Its first version checked the wrong thing for "ran on the GPU".** Each
+side's log had to mention `Vulkan0`, and every prompt failed: our CLI
+installs a quiet log callback (`cli/main.zig`), so libllama's device lines
+never reach stderr. The check is now the Vulkan backend's own perf logger,
+which writes its timings with a direct `fprintf(stderr, ...)` and only from
+the Vulkan graph compute -- in one separate run per side, so the compared
+runs are the binaries' defaults. Without it, a side that fell back to the
+CPU could agree on tokens and pass while comparing nothing.
+
+**The swap**: `-Dvulkan-port` defaults to true, so `-Dvulkan` builds
+`src/ggml/vulkan/`; `-Dvulkan-port=false` builds upstream's
+`ggml-vulkan.cpp` for the gates. `supports_op` is the C++'s predicate
+alone: the `ops.ported` filter went, after checking it was a superset of
+`ggml_vk_build_graph`'s cases (the five view ops beyond them never reach
+dispatch), so no answer changed. `vk-ops-diff` now fails on a refusal the
+reference does not make, where before the swap it only counted one.
+`make vk-builds` names `-Dvulkan-port=false` for the upstream side
+explicitly; every gate's Requires lines say which side they build.
+
+**After the swap, re-run on the default builds**: `vk-backend-diff` 25/25
+environments, `vk-node-diff` identical on all four arms, `vk-ops-diff`
+17,015/17,015 on the coopmat2 arm with `supports_op` agreeing both ways,
+`vk-parity-cli` 6/6. On the KHR coopmat arm every family is bit-identical
+but FLASH_ATTN_EXT, which **stalls -- and the reference stalls on its own**:
+with `VK_DIFF_SELF=1` (reference against reference) the run stops at the
+same case, `hsk=256, kv=16384, type_K=q8_0`, after the same 5,135 OKs (96 s
+in, against the port's 131 s). Each such case run alone finishes in a
+second on both sides, so it is state built up over the family, in
+upstream's host layer or the driver, not a port difference. The KHR arm's
+FA cases before it are bit-identical; the rest are unexamined.
+
 ## Stage 5 step 6: x86 begins
 
 **QEMU stands in for the laptop at AVX2.** The podman VM registers QEMU

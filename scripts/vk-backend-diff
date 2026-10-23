@@ -1,0 +1,116 @@
+#!/bin/bash
+# The Vulkan backend's registry and device answers, port against reference
+# -- `cuda-backend-diff` for Vulkan (PLAN.md, "Stage 7 — Vulkan").
+#
+# `harness/vk_backend_diff.c` is linked once against the ported libggml and
+# upstream's renamed `libggml-vulkan-ref.a`, and asks one side per process:
+# each scenario below runs it twice, `port` and `ref`, and the two
+# transcripts -- answers, log lines and anything written to stderr -- must
+# be identical.
+#
+# The scenarios are environments, because that is where the registry's
+# branches are: device selection by `GGML_VK_VISIBLE_DEVICES` (the GB10's
+# GPU, Mesa's llvmpipe, both orders, the first index past the end -- 2 on
+# the GB10, which has two physical devices; 7 alone let a `>` for `>=`
+# through -- one far past it, and a malformed list), `GGML_OP_OFFLOAD_MIN_BATCH`, and each switch the device line
+# reports (`GGML_VK_DISABLE_COOPMAT2`, `_COOPMAT`, `_INTEGER_DOT_PRODUCT`,
+# `_F16`, `_BFLOAT16`, `GGML_VK_DEBUG_MARKERS`), and the memory switches of
+# `ggml_vk_get_device` and `ggml_vk_create_buffer_device`. The GB10 is UMA
+# and its usual memory type is mapped, so only
+# `GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM` reaches the staging and pinned
+# transfer paths -- its device-local-only types 0 and 1.
+#
+# Usage: scripts/vk-backend-diff
+# Requires:
+#   zig build reference vk-ref --release=fast -Dvulkan -Dcuda=false --prefix zig-out/vk-port
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+PORT_LIB=${VK_PORT_DIR:-zig-out/vk-port/lib}/libggml.a
+REF_LIB=${VK_REF_LIB:-zig-out/vk-port/lib/libggml-vulkan-ref.a}
+for lib in "$PORT_LIB" "$REF_LIB"; do
+    [ -f "$lib" ] || { echo "missing $lib -- see the Requires lines in $0" >&2; exit 2; }
+done
+if nm -A "$PORT_LIB" 2>/dev/null | grep -q '/ggml-vulkan\.o:'; then
+    echo "FAIL: $PORT_LIB contains upstream's ggml-vulkan.o -- build it with -Dvulkan-port" >&2; exit 1
+fi
+n=$(nm -g --defined-only "$REF_LIB" 2>/dev/null | grep -cE ' [TD] ref_(ggml_backend_|vk_conv_block_sizes)')
+[ "$n" -eq 9 ] || { echo "FAIL: expected 9 renamed reference exports, got $n" >&2; exit 1; }
+
+. "$ROOT/scripts/platform-libs"
+platform_libs cc "$PORT_LIB" "$REF_LIB"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+zig c++ harness/vk_backend_diff.c -x none -o "$tmp/vk_backend_diff" -O2 -I llama.cpp/ggml/include -I llama.cpp/ggml/src \
+    "$PORT_LIB" "$REF_LIB" ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/ld.log" \
+    || { echo "FAIL: could not link the harness" >&2; grep -m5 error "$tmp/ld.log" >&2; exit 1; }
+
+scenarios=(
+    ""
+    "GGML_VK_VISIBLE_DEVICES=0"
+    "GGML_VK_VISIBLE_DEVICES=1"
+    "GGML_VK_VISIBLE_DEVICES=0,1"
+    "GGML_VK_VISIBLE_DEVICES=1,0"
+    "GGML_VK_VISIBLE_DEVICES=2"
+    "GGML_VK_VISIBLE_DEVICES=7"
+    "GGML_VK_VISIBLE_DEVICES=1x,0"
+    "GGML_OP_OFFLOAD_MIN_BATCH=1"
+    "GGML_VK_DISABLE_COOPMAT2=1"
+    "GGML_VK_DISABLE_COOPMAT2=1 GGML_VK_DISABLE_COOPMAT=1 GGML_VK_DISABLE_INTEGER_DOT_PRODUCT=1"
+    "GGML_VK_DISABLE_F16=1 GGML_VK_DISABLE_BFLOAT16=1"
+    "GGML_VK_DEBUG_MARKERS=1"
+    "GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM=1"
+    "GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM=1 GGML_VK_ALLOW_SYSMEM_FALLBACK=1"
+    "GGML_VK_PREFER_HOST_MEMORY=1"
+    "GGML_VK_FORCE_MAX_BUFFER_SIZE=40000"
+    "GGML_VK_FORCE_MAX_ALLOCATION_SIZE=100000"
+    "GGML_VK_SUBALLOCATION_BLOCK_SIZE=12345"
+    "GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM=1 GGML_VK_VISIBLE_DEVICES=1"
+    "GGML_VK_ASYNC_USE_TRANSFER_QUEUE=1"
+    "GGML_VK_ASYNC_USE_TRANSFER_QUEUE=1 GGML_VK_VISIBLE_DEVICES=1"
+    "GGML_VK_SERIALIZE_SUBMISSIONS=1"
+    "GGML_VK_DISABLE_ASYNC=1"
+    "GGML_VK_PERF_LOGGER=1 GGML_VK_MEMORY_LOGGER=1"
+)
+
+# A side that aborts must abort the same way on both; gdb's backtrace would
+# differ in every address.
+export GGML_NO_BACKTRACE=1
+
+fail=0
+for env in "${scenarios[@]}"; do
+    label="${env:-(default)}"
+    env $env "$tmp/vk_backend_diff" ref  > "$tmp/ref.txt"  2>&1; rref=$?
+    env $env "$tmp/vk_backend_diff" port > "$tmp/port.txt" 2>&1; rport=$?
+    echo "exit $rref" >> "$tmp/ref.txt"; echo "exit $rport" >> "$tmp/port.txt"
+    # The memory logger prints Vulkan handles and host pointers, which move
+    # run to run.
+    sed -i -E '/^ggml_vulkan memory: /s/0x[0-9a-f]+/0x(addr)/g' "$tmp/ref.txt" "$tmp/port.txt"
+    lines=$(wc -l < "$tmp/ref.txt" | tr -d ' ')
+    # Every scenario is meant to finish. Two sides that abort the same way
+    # agree, and that agreement says nothing: a harness that trips an
+    # assertion in ggml stops asking before the backend is reached.
+    if [ "$rref" -ne 0 ]; then
+        printf '  %-60s FAIL: the reference exited %s\n' "$label" "$rref"
+        grep -m3 -E 'GGML_ASSERT|error|abort' "$tmp/ref.txt" | sed 's/^/      /'
+        fail=1
+        continue
+    fi
+    if diff -q "$tmp/ref.txt" "$tmp/port.txt" > /dev/null; then
+        printf '  %-60s %3s lines identical\n' "$label" "$lines"
+    else
+        printf '  %-60s DIFFERS:\n' "$label"
+        diff "$tmp/ref.txt" "$tmp/port.txt" | grep '^[<>]' | head -8 | sed 's/^/      /'
+        fail=1
+    fi
+    [ -n "${VK_BACKEND_DIFF_OUT:-}" ] && cat "$tmp/ref.txt" >> "$VK_BACKEND_DIFF_OUT"
+done
+
+if [ "$fail" -eq 0 ]; then
+    echo "PASS: the registry and device answers are identical in every scenario"
+    exit 0
+fi
+echo "FAIL: the ported Vulkan registry differs from the reference"
+exit 1
