@@ -34,7 +34,7 @@
 #   HOST_ARMS_OUT=<dir> keeps both transcripts.
 #   WIN_X86=1   build both sides for the Windows laptop and run there; it
 #               builds its own libraries, under zig-out/win-host/
-#   X86_CPU, X86_AGENT, INFERISEUPDATER   as scripts/win-target takes them
+#   X86_CPU, X86_AGENT, ZUPDATER   as scripts/win-target takes them
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2

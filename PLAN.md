@@ -42,8 +42,8 @@ Settled in review. The plan below assumes all of these.
 | 21 | C ABI endgame | **Confirmed:** idiomatic Zig core with a thin `extern "C"` shim on top. |
 | 22 | Unsupported flags | **Reject** with a clear error and a non-zero exit. Never silently ignore. |
 | 23 | Parity mode | **Raw completion.** Greedy, no chat template, prompt passed through verbatim. The gate does not have to hold for chat invocations. |
-| 24 | Refactoring to idiomatic Zig | **Per subsystem**, as each stops being called from C++ — not all at once at the end. |
-| 25 | Chat templates | **Full Jinja, via `inferise/zigjinja`** (a fork of `gremlin-labs/vibe-jinja`) as a single dependency. Supersedes Decision 10; permitted by the exception in Decision 27. |
+| 24 | Refactoring to idiomatic Zig | **Per subsystem**, as each stops being called from C++ — not all at once at the end. **Not started**, and since the swap nothing is called from C++ any more, so it is open for every subsystem (see "What is left"). |
+| 25 | Chat templates | **Full Jinja, via `mlavergn/zigjinja`** (a fork of `gremlin-labs/vibe-jinja`) as a single dependency. Supersedes Decision 10; permitted by the exception in Decision 27. |
 | 26 | CLI timing | **Start building it now**, against the current libllama, rather than after the port completes. |
 | 27 | The dependency rule | **Stands, with one named exception: the Jinja engine, now `zigjinja`.** Not narrowed, not dropped — explicitly excepted. Applied to `cli/`, so `libllamazig` stays dependency-free. |
 | 28 | Order of work | **Finish `ggml.c` first, then the CLI.** The graph machinery is the hard part of what remains; the CLI is built while the first swap is being verified. |
@@ -74,7 +74,7 @@ Settled in review. The plan below assumes all of these.
 | 54 | Vulkan gate machine | **The GB10**, as for CUDA (Decision 43). NVIDIA's driver exposes every extension the shaders probe for -- cooperative matrix 1 and 2, integer dot product, bfloat16 -- so the reference compiles its widest set of arms there. Vulkan gates cannot run on this Mac: it has no Vulkan driver, and MoltenVK would translate to Metal with a reduced extension set. An Arduino UNO Q (Adreno, a mobile Vulkan driver) is available as a later second device; not now. |
 | 55 | Vulkan reference | **`llama.cpp.zmake` gains `-Dvulkan`**, an explicit grant against Decision 18, as Decision 52 was. It builds upstream's own `vulkan-shaders-gen` for the host, runs it once for the header and once per shader file with `glslc`, and asks `glslc` which shader extensions it accepts exactly as `ggml-vulkan/CMakeLists.txt` does. **The toolchain is part of the reference**: which C++ compiles depends on the Vulkan header version and on those `glslc` answers (64 `#if` sites on the seven extension macros, more on `VK_HEADER_VERSION`), and the SPIR-V depends on `glslc`'s optimizer. Both sides of every Vulkan gate are built with the same `glslc` and headers, and the shaders the port embeds are the reference generator's output, identical by construction. |
 | 56 | When Vulkan starts | **Now, as Stage 7, beside Stage 5** -- whose x86 step waits on the laptop. Measured first ("Stage 7 — Vulkan" below), reproducibility before any code, as Stage 6 began. |
-| 57 | Windows | **A target, and x86 is gated on it natively** (asked for on 2026-10-18: "that was always the plan ... get it building on Windows"). `x86_64-windows-gnu` -- MinGW, the only Windows ABI Zig ships a libc for -- at the same `-Dcpu` levels as Linux. **`llama.cpp.zmake` gains a `windows` platform** under that grant, a third against Decision 18: `_CRT_SECURE_NO_WARNINGS` and `ws2_32` from CMake's `WIN32` arms, and CMake's own `gnu11`/`gnu++17` dialects there only (below). The gate machine is Decision 51's laptop: a MacBookPro11,5 (Core i7-4980HQ, Haswell, x86-64-v3, **no AVX-512**, 16 GB) running Windows 11 Pro 26100 under Boot Camp, reached through `inferiseupdater`'s developer link (`push`, `tty`). Its firmware leaves VT-x off, so WSL2 cannot start there; the gates are Windows binaries. |
+| 57 | Windows | **A target, and x86 is gated on it natively** (asked for on 2026-10-18: "that was always the plan ... get it building on Windows"). `x86_64-windows-gnu` -- MinGW, the only Windows ABI Zig ships a libc for -- at the same `-Dcpu` levels as Linux. **`llama.cpp.zmake` gains a `windows` platform** under that grant, a third against Decision 18: `_CRT_SECURE_NO_WARNINGS` and `ws2_32` from CMake's `WIN32` arms, and CMake's own `gnu11`/`gnu++17` dialects there only (below). The gate machine is Decision 51's laptop: a MacBookPro11,5 (Core i7-4980HQ, Haswell, x86-64-v3, **no AVX-512**, 16 GB) running Windows 11 Pro 26100 under Boot Camp, reached through `zigupdater`'s developer link (`push`, `tty`). Its firmware leaves VT-x off, so WSL2 cannot start there; the gates are Windows binaries. |
 | 58 | The chat-template engine | **Fix `zigjinja` until `make jinja-diff` passes** (asked for on 2026-10-22, `MAINTENANCE.md` Decisions 13-18), not port `common/jinja`. "Passes" means upstream's 68 templates over seven conversations agree **byte for byte in text, in which side raises, and in every byte's input mark**, both ways; `bos_token`/`eos_token` are the one exception, bound as provenance tokens and re-trusted. `strftime_now` is local time on both sides and checked under two zones. zigjinja stays its own engine, so `jinja-diff` runs at every upstream sync. **Done, at zigjinja v3.0.0 (`de36d7b`)**: 469 renders identical and 7 where both raise, under `TZ=UTC` and `TZ=Australia/Lord_Howe`; `NOTES.md`, "zigjinja against `jinja-diff`". `build.zig.zon` still takes zigjinja by path, so pinning `de36d7b` is the step left. |
 | 59 | The Vulkan toolchain, and who generates the shaders | **Pinned at SDK tag `vulkan-sdk-1.4.363.0` and built from source, never the distro's** -- `scripts/vk-toolchain` into `.tools/vulkan/`: Khronos's `Vulkan-Headers` and `SPIRV-Headers` at that tag, and `glslc` from shaderc v2026.4, whose `DEPS` pin glslang and SPIRV-Tools at exactly that tag's commits. Ubuntu 24.04's `glslc` is shaderc 2023.8, too old for coopmat2 and bfloat16, and there is no root on the GB10. **And one generator run feeds both sides**: measured, `glslc -O` reads uninitialized memory on `tri_f16`, whose bytes follow heap state from run to run (`NOTES.md`, "Stage 7: the GB10 pickup"), so Decision 55's "identical by construction" holds only when the port embeds the reference build's generated files rather than generating its own. |
 
@@ -157,7 +157,7 @@ cli/                 the Zig CLI — stays outside src/, as it is now
 
 Tracked here so they are not silently lost:
 
-- ~~**`common/jinja/`** (6,349 lines).~~ No longer deferred, and no longer ported: Decision 25 takes `inferise/zigjinja` instead, a pure-Zig Jinja2 implementation. That removes 6,349 lines of C++ from the port entirely, at the cost of one dependency, explicitly excepted from the no-dependency rule by Decision 27.
+- ~~**`common/jinja/`** (6,349 lines).~~ No longer deferred, and no longer ported: Decision 25 takes `mlavergn/zigjinja` instead, a pure-Zig Jinja2 implementation. That removes 6,349 lines of C++ from the port entirely, at the cost of one dependency, explicitly excepted from the no-dependency rule by Decision 27.
 - ~~**`src/models/`** beyond `qwen35.cpp` (37,921 lines across 150 files).~~ No longer deferred: every architecture is ported (Decision 36's first follow-on, "What happens next" item 12).
 - ~~**Non-arm64 CPU backends** (`arch/x86` and friends).~~ No longer deferred: x86_64 is Stage 5 steps 5–6 (Decisions 51–53).
 
@@ -673,7 +673,7 @@ public entry points), GBNF grammars, **LoRA and aLoRA adapters**, session state
 save and restore, and the 174 built-in chat templates.
 
 **In scope via one dependency** — full Jinja chat templates, using
-`inferise/zigjinja` (Decision 25). Built; see `NOTES.md`, "Chat templates".
+`mlavergn/zigjinja` (Decision 25). Built; see `NOTES.md`, "Chat templates".
 
 **Out of scope, because the implementation is in a component we do not build:**
 
@@ -1005,7 +1005,7 @@ at the CPU configuration Linux arm64 actually builds for.
 | macOS arm64 | yes | every gate in `CLAUDE.md` | nothing |
 | iOS, iOS simulator | yes — the xcframework's `ios` and `ios-sim` slices (A14+) | `make -C xcfwk check`: structural gates per slice, `smoke-sim` on the simulator | the increased-memory-limit entitlement is the consuming app's, not ours |
 | Linux arm64 + CUDA | yes, natively on the GB10 | the four `cuda-*` gates, `arch-model-diff`, `gemma4-assistant-diff` | the CPU path's numerics — below |
-| Linux arm64, CPU only | **yes**, cross-built from this Mac against glibc 2.39 | `GATE_CPU=generic` here. Measured failing — `ops-diff` 86 / 632, `repack-diff` 26 / 60, `node-diff` from node 27, `parity-port --cpu` 2 / 6 — and **exact since step 2**: 650 / 650, 60 / 60, 2,750 nodes, 6 / 6. **On the GB10 itself** (the pickup, done): `ops-diff` 650 / 650, `repack-diff` 68 / 68, `node-diff` 2,750 nodes, `parity-port --cpu` 6 / 6, `host-arms-diff` 18 / 18, `vocab-diff` -- after two Linux-only fixes (`NOTES.md`, "The GB10 pickup, run"). **On an Arduino UNO Q** (four Kryo cores, exactly the `generic` baseline, 3.6 GB): our `llama-cli` against `raw_completion.c` over the zmake reference, 7 / 7 on two models at default flags (`NOTES.md`, "The UNO Q, and `--fit`") | `set_numa_thread_affinity` needs a multi-socket machine; Vulkan on the UNO Q's Adreno |
+| Linux arm64, CPU only | **yes**, cross-built from this Mac against glibc 2.39 | `GATE_CPU=generic` here. Measured failing — `ops-diff` 86 / 632, `repack-diff` 26 / 60, `node-diff` from node 27, `parity-port --cpu` 2 / 6 — and **exact since step 2**: 650 / 650, 60 / 60, 2,750 nodes, 6 / 6. **On the GB10 itself** (the pickup, done): `ops-diff` 650 / 650, `repack-diff` 68 / 68, `node-diff` 2,750 nodes, `parity-port --cpu` 6 / 6, `host-arms-diff` 18 / 18, `vocab-diff` -- after two Linux-only fixes (`NOTES.md`, "The GB10 pickup, run"). **On an Arduino UNO Q** (four Kryo cores, exactly the `generic` baseline, 3.6 GB): our `llama-cli` against `raw_completion.c` over the zmake reference, 7 / 7 on two models at default flags (`NOTES.md`, "The UNO Q, and `--fit`") | `set_numa_thread_affinity` needs a multi-socket machine. Vulkan on the UNO Q's Adreno 702 -- **done**: parity 7 / 7 and `vk-node-diff` identical on the board (`NOTES.md`, "Vulkan on the UNO Q's Adreno 702") |
 | Linux x86_64 | **yes, at x86-64-v3**, cross-built; the same kernels as Windows | the x86 gates run on Windows; Linux x86 shares every kernel and differs only in its OS arms | its OS arms on Linux x86 hardware; AVX-512 on hardware |
 | Windows x86_64 | **yes, cross-built from this Mac** (`x86_64-windows-gnu`, x86-64-v3): libraries, `libllama-ref`, and our `llama-cli.exe`; the reference's `llama-cli.exe` through `make -C llama.cpp.zmake windows-x86_64` | **exact on the laptop**: `make x86-gates` -- 28 quant kernels, 68 repack checks, 712 `ops-diff` results, 2,750 decode nodes -- and 6 / 6 parity prompts; the host gates `make win-host-diffs` -- `host-arms-diff`, `libcxx-diff`, `regex-diff`, `unicode-diff` | AVX-512, on other hardware |
 
@@ -1332,7 +1332,7 @@ difference is `\t`, which its table does not mark `_BLANK`, so
 
 ### Windows pickup
 
-Run on the Windows laptop (Decision 57), through `inferiseupdater push` and
+Run on the Windows laptop (Decision 57), through `zupdater push` and
 `tty`:
 
 - **Done.** `make x86-gates` -- `x86-quants-diff`, `x86-repack-diff`,
@@ -1504,6 +1504,18 @@ from the contract:
    the gates. `supports_op` is the C++'s predicate alone, and `vk-ops-diff`
    fails on a disagreement either way.
 
+### The UNO Q's Adreno 702
+
+**Done** (`NOTES.md`, "Vulkan on the UNO Q's Adreno 702"). A fifth arm --
+fp16, no integer dot, no matrix cores, 16 KiB shared memory, unified
+memory -- under Mesa's Turnip, cross-built from this Mac with the pinned
+toolchain (`scripts/vk-toolchain` builds on macOS now) against the board's
+loader, `aarch64-linux-gnu.2.41`. Parity 7 / 7 on plain-d6; `vk-node-diff`
+identical per node on plain-d6 and Qwen3-0.6B and fused on plain-d6, the
+reference reproducible against itself; negative-tested 2/2. Qwen3's fused
+graph at the default submit size trips the kernel's GPU hang check on both
+sides; at `GGML_VK_MAX_NODES_PER_SUBMIT` 16 or 4 it is identical too.
+
 ### Vulkan pickup (GB10)
 
 ~~Done~~ (`NOTES.md`, "Stage 7: the GB10 pickup"). The toolchain is
@@ -1585,8 +1597,10 @@ end to end. What it includes, and one part of it is easy to undercount:
    Twelve unit tests, eight fault injections all caught — three only after the
    tests were strengthened. See `NOTES.md`.
 
-   **Its end-to-end gate is still owed**: `make port` cannot run while this
-   machine cannot link C++ (see `NOTES.md`, "Blocked: every link-time gate").
+   Its end-to-end gate, owed while this machine could not link C++
+   (`NOTES.md`, "Blocked: every link-time gate"), was paid when the link
+   came back: every `make port`, `parity-cli` and `node-diff` run loads its
+   model through `gguf.zig`.
 4. ~~`ggml-backend.cpp`~~ — **done.** `src/ggml/backend.zig` (the vtable
    dispatch) and `src/ggml/backend_sched.zig` (the scheduler), 102 symbols —
    not the 82 recorded here before. Every gate green with it in the path:
@@ -1800,6 +1814,24 @@ compared (`NOTES.md`, "The Vulkan arms, completed").
   and end to end by three `cnv-diff` scenarios, 16/16. On the board it
   picks upstream's 18,176 tokens, once the CLI took upstream's output
   limits (`NOTES.md`, "The UNO Q, and `--fit`").
+
+## What is left
+
+Everything above is done on the machines this project has. The last item
+done was **Vulkan on the UNO Q's Adreno 702**: the pinned toolchain now
+builds on this Mac, the Vulkan CLI and reference cross-build against the
+board's own loader, and on the board parity is 7 / 7 and `vk-node-diff`
+identical per node and fused (`NOTES.md`, "Vulkan on the UNO Q's Adreno
+702"). What remains,
+and what each one is waiting for:
+
+| Item | Waiting for | State |
+|---|---|---|
+| **iOS on a device** | an A14+ device on this Mac | the xcframework's `ios` slice builds and passes `make -C xcfwk verify`; `smoke-sim` runs on the simulator, CPU. Nothing has run on an iPhone or iPad yet. iOS takes the library, not `llama-cli`: an app has no shell to run one in |
+| **AVX-512 (`x86_64_v4`)** | AVX-512 hardware | the build switch exists (`X86_CPU=x86_64_v4`); the Windows laptop is a Haswell |
+| **Linux x86_64's OS arms** | Linux x86 hardware | its kernels are Windows', gated there; only the `__linux__` threading, affinity and NUMA arms are unrun on x86 |
+| **`set_numa_thread_affinity`** | a multi-socket machine | every machine here has one NUMA node |
+| **Decision 24, idiomatic Zig** | a decision to schedule it | not started; open for every subsystem since the swap |
 
 ---
 

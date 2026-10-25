@@ -1,7 +1,7 @@
 // Not a port: `harness/ops_dump.c` as `scripts/x86-ops-diff` runs it on the
 // Windows laptop.
 //
-// `inferiseupdater push --run` starts a pushed program with arguments only:
+// `zupdater push --run` starts a pushed program with arguments only:
 // no environment, no redirection, and no way to bring a file back. So this
 // wrapper takes what `scripts/ops-diff` passes through the shell as
 // arguments -- the thread count `OPS_THREADS` reads, the file stdout goes

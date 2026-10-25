@@ -2,7 +2,7 @@
 # Run a cross-built program on the Windows laptop and print what it printed
 # (PLAN.md, Decision 57).
 #
-# Pushes the .exe through `inferiseupdater push --run`, which starts it with
+# Pushes the .exe through `zupdater push --run`, which starts it with
 # the given arguments and streams its console back through ConPTY. ConPTY
 # re-renders the screen rather than passing bytes through: it draws a blank
 # line as a cursor move and wraps at the console's width. So the stream is
@@ -12,21 +12,21 @@
 #
 # Usage: scripts/win-run <program.exe> <package name> [args...]
 #   X86_AGENT=<name>         the agent to run on (DESKTOP-BR7J5S9)
-#   INFERISEUPDATER=<path>   the updater binary
-#                            (../../inferise/inferiseupdater/zig-out/bin/inferiseupdater)
+#   ZUPDATER=<path>   the updater binary
+#                            (../zigupdater/zig-out/bin/zupdater)
 # The agent's window must be open on the laptop. The raw stream is kept
 # beside the program as <program>.log.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 X86_AGENT="${X86_AGENT:-DESKTOP-BR7J5S9}"
-INFERISEUPDATER="${INFERISEUPDATER:-$ROOT/../../inferise/inferiseupdater/zig-out/bin/inferiseupdater}"
+ZUPDATER="${ZUPDATER:-$ROOT/../zigupdater/zig-out/bin/zupdater}"
 
 exe="${1:?usage: scripts/win-run <program.exe> <package name> [args...]}"
 name="${2:?usage: scripts/win-run <program.exe> <package name> [args...]}"
 shift 2
 
-[ -x "$INFERISEUPDATER" ] || { echo "missing $INFERISEUPDATER -- set INFERISEUPDATER" >&2; exit 2; }
-"$INFERISEUPDATER" push "$X86_AGENT" "$exe" --name "$name" --run -- "$@" > "$exe.log" 2>&1
+[ -x "$ZUPDATER" ] || { echo "missing $ZUPDATER -- set ZUPDATER" >&2; exit 2; }
+"$ZUPDATER" push "$X86_AGENT" "$exe" --name "$name" --run -- "$@" > "$exe.log" 2>&1
 grep -aq '^Running ' "$exe.log" \
     || { echo "win-run: $X86_AGENT did not run $name -- is the agent's window open? See $exe.log" >&2; exit 2; }
 sed -e $'s/\x1b\\[[0-9]*;1H/\\\n/g' -e $'s/\x1b\\][^\x07]*\x07//g' -e $'s/\x1b\\[[0-9;?]*[A-Za-z]//g' -e $'s/\r//g' "$exe.log" \

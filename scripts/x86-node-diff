@@ -12,7 +12,7 @@
 # Usage: scripts/x86-node-diff [prompt]
 #   X86_MODEL=<path>             Desktop\Qwen3.5-2B-Q4_K_M.gguf by default
 #   X86_CPU=x86_64_v3            the level; the laptop has no AVX-512
-#   X86_AGENT, INFERISEUPDATER   as scripts/win-run takes them
+#   X86_AGENT, ZUPDATER   as scripts/win-run takes them
 #   X86_BUILD_ONLY=1             stop after building the .exe files
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

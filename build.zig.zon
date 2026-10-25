@@ -1,7 +1,7 @@
 .{
     .name = .llamazig,
     .description = "Llama.cpp Zig Port",
-    .version = "0.0.36",
+    .version = "0.0.37",
     .fingerprint = 0xb16f7afa8792d6b2,
     .minimum_zig_version = "0.17.0",
     .paths = .{
@@ -10,7 +10,7 @@
     .dependencies = .{
         .zigjinja = .{
             .path = "../zigjinja",
-            .clone = "git@github.com:inferise/zigjinja.git",
+            .clone = "git@github.com:mlavergn/zigjinja.git",
         },
         .zigbuildx = .{
             .url = "git+https://github.com/mlavergn/zigbuildx?ref=v3.6.0#fba04ba852fc06317207bdc7119b58dc13638ac0",

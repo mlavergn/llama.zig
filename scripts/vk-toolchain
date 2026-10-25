@@ -25,6 +25,11 @@
 # compile NVIDIA's cooperative-matrix-2 path out. Needs git, cmake, python3
 # and a C++ compiler; no root. Idempotent: a finished step is skipped.
 #
+# On macOS it builds the same glslc and headers, so this Mac can cross-build
+# the Vulkan backend for a Linux board (the UNO Q's Adreno); there is no
+# Vulkan loader or vulkaninfo to link, so those two steps are skipped, and a
+# cross build takes the target's own libvulkan.so through -Dvulkan-lib.
+#
 # Usage: scripts/vk-toolchain
 #   Then: make -C llama.cpp.zmake lib VULKAN=1 GLSLC=$PWD/.tools/vulkan/bin/glslc \
 #           VULKAN_INCLUDE=$PWD/.tools/vulkan/include
@@ -36,6 +41,9 @@ SHADERC=v2026.4
 OUT="$ROOT/.tools/vulkan"
 SRC="$OUT/src"
 mkdir -p "$OUT/bin" "$OUT/include" "$OUT/lib" "$SRC"
+JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
+CMAKE="$(ls "$ROOT"/.tools/cmake-*/CMake.app/Contents/bin/cmake 2>/dev/null | head -1 || true)"
+CMAKE="${CMAKE:-cmake}"
 
 fetch() { # repo url, tag, directory
     [ -d "$SRC/$3/.git" ] || git -c advice.detachedHead=false clone -q --depth 1 --branch "$2" "$1" "$SRC/$3"
@@ -57,12 +65,18 @@ for d in SPIRV-Headers:spirv-headers SPIRV-Tools:spirv-tools glslang:glslang; do
 done
 
 if [ ! -x "$OUT/bin/glslc" ]; then
-    cmake -S "$SRC/shaderc" -B "$SRC/build" -DCMAKE_BUILD_TYPE=Release \
+    "$CMAKE" -S "$SRC/shaderc" -B "$SRC/build" -DCMAKE_BUILD_TYPE=Release \
         -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON -DSHADERC_SKIP_COPYRIGHT_CHECK=ON \
         -DSPIRV_SKIP_TESTS=ON -DSPIRV_SKIP_EXECUTABLES=ON -DENABLE_GLSLANG_BINARIES=OFF \
         -DSPIRV_TOOLS_BUILD_STATIC=ON -DBUILD_SHARED_LIBS=OFF > "$SRC/cmake.log"
-    cmake --build "$SRC/build" --target glslc_exe -j"$(nproc)" > "$SRC/build.log"
+    "$CMAKE" --build "$SRC/build" --target glslc_exe -j"$JOBS" > "$SRC/build.log"
     cp "$SRC/build/glslc/glslc" "$OUT/bin/glslc"
+fi
+
+if [ "$(uname -s)" = Darwin ]; then
+    echo "glslc:   $("$OUT/bin/glslc" --version | head -1)"
+    echo "headers: VK_HEADER_VERSION $(sed -n 's/^#define VK_HEADER_VERSION \([0-9]*\)$/\1/p' "$OUT/include/vulkan/vulkan_core.h")"
+    exit 0
 fi
 
 loader="$(ls /usr/lib/*-linux-gnu/libvulkan.so.1 2>/dev/null | head -1 || true)"

@@ -3,7 +3,7 @@
 //
 // The script runs every scenario in a fresh process per side and builds a
 // transcript of each: stdout, the exit code, then stderr sorted, with the
-// affinity warning's address normalised. `inferiseupdater push --run`
+// affinity warning's address normalised. `zupdater push --run`
 // starts one program with arguments and no redirection, so this does the
 // script's half on the laptop: `all <out name>` starts itself once per
 // scenario with `run <scenario>`, its stdout and stderr sent to files under

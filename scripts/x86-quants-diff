@@ -13,11 +13,11 @@
 # the kernel.
 #
 # The harness is cross-built here and run on the laptop's Haswell through
-# `inferiseupdater push --run`, so the agent's window must be open there.
+# `zupdater push --run`, so the agent's window must be open there.
 #
 # Usage: scripts/x86-quants-diff [trials [kernel substring]]
 #   X86_CPU=x86_64_v3        the level; the laptop has no AVX-512
-#   X86_AGENT, INFERISEUPDATER   as scripts/win-run takes them
+#   X86_AGENT, ZUPDATER   as scripts/win-run takes them
 #   X86_BUILD_ONLY=1         stop after building the .exe
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

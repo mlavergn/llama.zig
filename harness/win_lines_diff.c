@@ -1,6 +1,6 @@
 // Not a port: compares text outputs on the Windows laptop, line by line.
 //
-// The gates that run there through `inferiseupdater push --run` cannot bring
+// The gates that run there through `zupdater push --run` cannot bring
 // a file back to the Mac, so the comparison happens on the laptop and only
 // its verdict travels: the line counts, the first few differing lines, and a
 // final `PASS:` or `FAIL:` line that `scripts/x86-ops-diff` reads. Lines are

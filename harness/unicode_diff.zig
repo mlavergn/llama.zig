@@ -22,7 +22,7 @@
 //! Its inputs -- the pattern sets and upstream's `.inp` corpus files -- are
 //! compiled in through the `inputs` module the script generates, rather than
 //! read at run time: `scripts/win-host-diffs` runs this on the Windows
-//! laptop, and `inferiseupdater push` carries a program there but no files.
+//! laptop, and `zupdater push` carries a program there but no files.
 //!
 //! Usage: unicode_diff
 

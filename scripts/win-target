@@ -22,7 +22,7 @@
 # and defines `gate_run <exe> <package name> [args...]`.
 #
 #   X86_CPU=x86_64_v3          the Windows level; the laptop has no AVX-512
-#   X86_AGENT, INFERISEUPDATER   as scripts/win-run takes them
+#   X86_AGENT, ZUPDATER   as scripts/win-run takes them
 #   X86_BUILD_ONLY=1           build the program and stop
 
 if [ -n "${WIN_X86:-}" ]; then

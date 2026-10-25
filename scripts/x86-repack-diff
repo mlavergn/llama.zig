@@ -11,11 +11,11 @@
 # every unmangled export renamed to `ref_*` as `scripts/repack-diff` does.
 #
 # The harness is cross-built for `x86_64-windows-gnu` and run on the laptop
-# through `inferiseupdater push --run`; the agent's window must be open.
+# through `zupdater push --run`; the agent's window must be open.
 #
 # Usage: scripts/x86-repack-diff
 #   X86_CPU=x86_64_v3        the level; the laptop has no AVX-512
-#   X86_AGENT, INFERISEUPDATER   as scripts/win-run takes them
+#   X86_AGENT, ZUPDATER   as scripts/win-run takes them
 #   X86_BUILD_ONLY=1         stop after building the .exe
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

@@ -23,8 +23,8 @@ No x86_64: neither Intel Macs nor the Intel simulator.
 
 **Xcode.** Add `llamazig.xcframework` to the target and set it to **Do Not
 Embed**. It is static: there is nothing to embed or sign. The module map links
-Metal, MetalKit, Accelerate and Foundation itself. Do **not** add `-lc++`; the
-framework carries its own C++ runtime, hidden.
+Metal, MetalKit, Accelerate and Foundation itself. It needs no C++ runtime,
+so there is no `-lc++` to add.
 
 **SwiftPM.** A local path package:
 
@@ -153,8 +153,9 @@ reaching the arms.
   libm. Without compiler_rt in the prelink, 3 of 6 CPU prompts diverged from
   the port while Metal stayed 6/6. `verify.sh symbols` requires the five.
 - **Zig 0.17 cannot compile `std.debug.print` for iOS** (`std.Io.Threaded`'s
-  iOS `NullFile` has no `fd`). `grammar/parser.zig`, the one site in
-  `libllama.a`, writes to fd 2 inline on iOS only.
+  iOS `NullFile` has no `fd`). Library code writes to C's `stderr` through
+  `impl.writeStderr` on every target instead; the grammar parser and
+  `unicode_regex_split` are its two callers.
 - **Zig 0.17's linker misreads the simulator SDK version** from
   `MinimalDisplayName` (`"Simulator - 27.0"`). Only linking hits it; the
   probe links against a shim SDK whose `SDKSettings.json` fixes the key.

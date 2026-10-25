@@ -1097,9 +1097,9 @@ nothing.
 `llama.cpp/` -- its own repository, untracked here, taken as a path dependency.
 662 of its own tests pass under 0.16.
 
-### The dependency is now `inferise/zigjinja`, at `../zigjinja`
+### The dependency is now `mlavergn/zigjinja`, at `../zigjinja`
 
-That migrated checkout became a fork in its own right: `inferise/zigjinja`,
+That migrated checkout became a fork in its own right: `mlavergn/zigjinja`,
 still MIT and carrying both copyrights, checked out *beside* this repository
 rather than nested inside it. The dependency is `.{ .path = "../zigjinja" }`
 and the module is imported as `zigjinja`. The exported API is identical --
@@ -6622,7 +6622,7 @@ cases the fixes address; the Mac's run is unchanged at 43,537,552.
 
 **Getting there**: the laptop's agent did not reach this Mac for an hour,
 then did after a restart, then stopped again while an interactive
-`inferiseupdater` console was running on the Mac. Each agent appears to
+`zupdater` console was running on the Mac. Each agent appears to
 attach to one host process at a time -- a GB10 `tty` also waited while a
 Windows push held the link -- and the console was one. A push that waits
 on an absent agent waits forever; `win-run` cannot tell that from a slow
@@ -6848,3 +6848,63 @@ extraction regex expected `{"-x", "--y"}` and upstream also writes
 `{ "-fit", "--fit" }`: `-fa`, `--flash-attn`, the whole `--fit` family and
 eight more were refused as typos rather than as flags not yet supported.
 Regenerated with the spaces allowed: 541 spellings, not 525.
+
+## Vulkan on the UNO Q's Adreno 702
+
+**The GPU.** The UNO Q's QCM2290 carries an Adreno 702, driven by Mesa's
+Turnip (`unoqimg-mesa-vulkan-turnip` 26.1.6, Vulkan 1.4.354) through the
+board's Khronos loader 1.4.309; the user is in `render`. Upstream's backend
+describes it as `Turnip Adreno (TM) 702 | uma: 1 | fp16: 1 | bf16: 0 | fp4:
+0 | warp size: 32 | shared memory: 16384 | int dot: 0 | matrix cores:
+none` -- **a fifth arm**, beside the GB10's four: fp16 arithmetic, no
+integer dot, no matrix cores, 16 KiB of shared memory, unified memory.
+`GGML_VK_DISABLE_INTEGER_DOT_PRODUCT` changes nothing here, so the GB10's
+`none` and `nodot` arms collapse into one.
+
+**Building for it from this Mac.** The pinned toolchain (Decision 59) had
+only ever been built on the GB10; `scripts/vk-toolchain` now builds the
+same shaderc v2026.4 and SDK 1.4.363 headers on macOS (the loader and
+`vulkaninfo` steps are Linux-only and skipped), which is all the SPIR-V
+generation needs. Linking takes the **board's own** `libvulkan.so.1`,
+pulled into `.tools/unoq/lib/` and passed as `-Dvulkan-lib`. That loader
+imports `__isoc23_sscanf@GLIBC_2.38` and `dlopen@GLIBC_2.34`, and lld will
+not link against a shared library whose symbols the target glibc lacks, so
+the target is `aarch64-linux-gnu.2.41`, the board's glibc. libc itself is
+not optional here: the loader `dlopen`s Turnip, a C shared object, which a
+static binary cannot. Four builds, each `--release=fast -Dvulkan
+-Dcuda=false`: `zig build cli` (our `llama-cli`), `zig build reference
+-Dvulkan-port=false` (upstream's `ggml-vulkan.cpp` and `libllama-ref.a`,
+for `raw_completion.c`), `zig build reference vk-ref` (the port, plus the
+renamed reference for `vk-ops-diff`), and `harness/node_dump.c` linked
+against each side. Strip what is pushed: unstripped, the reference driver
+is 121 MB and the push takes minutes.
+
+**What ran, on the board:**
+
+| Check | Model | Result |
+|---|---|---|
+| parity, our `llama-cli` vs `raw_completion.c` over upstream's libllama and Vulkan host layer, greedy, 48 tokens | plain-d6 | **7 / 7 identical**; each side first shown on Vulkan by `GGML_VK_PERF_LOGGER` |
+| `vk-node-diff` per node | plain-d6 | **384 lines identical**, reference reproducible against itself |
+| `vk-node-diff` fused, 32 steps | plain-d6 | **33 lines identical**, reference reproducible |
+| `vk-node-diff` per node | Qwen3-0.6B Q8_0 | **1,972 lines identical**, reference reproducible -- the quantized `MUL_MAT` paths plain-d6 (all f32) never reaches |
+| `vk-node-diff` fused | Qwen3-0.6B Q8_0 | both sides `VK_ERROR_DEVICE_LOST` at the default submit size; **9 lines identical** (prompt and 8 steps) at `GGML_VK_MAX_NODES_PER_SUBMIT` 16 and 4 -- below |
+
+Negative-tested on this GPU, port side only: `GGML_VK_DISABLE_FUSION=1`
+fails the fused pass from step 2, and `GGML_VK_DISABLE_F16=1` makes the
+port take the f32 matmul, which aborts on "Shared memory size too small"
+-- 16 KiB is below what that shader needs. A third, `LLAMA_ARG_FLASH_ATTN`,
+is inert: `node_dump` never reads it, so it is not evidence either way.
+
+**Qwen3's long submissions are killed by the kernel, on both sides.**
+At the default submit size the fused graph loses the device in upstream's
+host layer and ours alike (`vk::Device::waitForFences: ErrorDeviceLost`),
+and `dmesg` says why: the msm driver's `hangcheck_handler` times the
+submission out and `recover_worker` resets the GPU, naming the process.
+With `GGML_VK_MAX_NODES_PER_SUBMIT=16` or `4` on both sides no submission
+is long enough, and the fused pass is identical. The per-node pass splits
+the graph at every node, so it never hit the limit. The same timeout is why
+upstream's own reference, at the default, prints text like
+`ynosakespeareakespeareegrate` at 0.3 t/s: work lost to resets. plain-d6
+decodes at 8 t/s prompt and 5.4 generation on the Adreno against 230 and
+80 on the CPU, so on this board the CPU is the device to use; `--fit` and
+the CPU path, gated above, are what make Qwen3 usable there.

@@ -311,7 +311,7 @@ vk-push-layout:
 	zig build vk-push-layout $(VK_GATE_FLAGS)
 
 # The x86 gates, run on the Windows laptop (Decision 57) through
-# inferiseupdater's link: each cross-builds both sides for
+# zigupdater's link: each cross-builds both sides for
 # x86_64-windows-gnu at X86_CPU (x86_64_v3), pushes the programs and reads
 # back the verdict. The agent's window must be open there. x86-quants-diff
 # and x86-repack-diff are the per-kernel oracles; x86-ops-diff and
