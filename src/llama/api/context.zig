@@ -375,6 +375,23 @@ pub fn llama_perf_context_reset(ctx: ?*c.struct_llama_context) callconv(.c) void
     ctxOf(ctx).perfReset();
 }
 
+/// Ports `llama_get_memory_breakdown` (llama-context.cpp:4209 @c1d0e7a00),
+/// from `llama-ext.h`. The C++ returns a `std::map` keyed by buffer type,
+/// so this has no C signature and is never exported; `cli/fit.zig`, the
+/// port of its one caller, calls it as Zig.
+///
+/// Parameters:
+/// - `ctx`: the context.
+/// - `gpa`: allocates the returned entries.
+///
+/// Return: one entry per buffer type, in the map's buffer-type pointer
+/// order; the caller frees it with `gpa`.
+pub fn llama_get_memory_breakdown(ctx: ?*const c.struct_llama_context, gpa: std.mem.Allocator) ![]context.MemoryBreakdownEntry {
+    const mb = ctxOf(ctx).memoryBreakdown();
+    defer impl.allocator.free(mb);
+    return gpa.dupe(context.MemoryBreakdownEntry, mb);
+}
+
 // -----------------------------------------------------------------------------
 // Unit Tests
 

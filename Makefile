@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -163,6 +163,10 @@ validate:
 	./scripts/api-diff
 	@printf '\n== ported symbol coverage ==\n'
 	./scripts/port-coverage
+	@printf '\n== the libraries for iOS (no std.debug.print or @panic in library code) ==\n'
+	@# Zig 0.17 cannot compile std.Io.Threaded for iOS, which std.debug.print
+	@# reaches; nothing else would notice until the xcframework next builds.
+	zig build reference -Dtarget=aarch64-ios.18.0 -Dcpu=apple_a14 --release=fast --prefix zig-out/ios-check
 	@printf '\n== upstream citations ==\n'
 	./scripts/port-links
 	@printf '\n== scheduler diff vs reference ==\n'
@@ -452,6 +456,20 @@ gemma4-assistant-diff:
 parity-cli: buildcli
 	./scripts/parity-cli $(MODEL) $(PARITY_NPRED)
 
+# Our CLI's conversation mode (-cnv) against a reference conversation over
+# upstream's Jinja engine and libllama: replies, stderr and the cache each
+# turn kept. Needs both models: make qwen35 qwen3. See scripts/cnv-diff.
+cnv-diff:
+	zig build cli --release=fast
+	./scripts/cnv-diff $(ARGS)
+
+# cli/fit.zig -- what --fit decides from free memory -- against upstream's
+# common/fit.cpp, on fake GPUs with chosen memory, the CPU alone and Metal.
+# Needs make qwen35 qwen3 and make arch-fixtures. See scripts/fit-diff.
+fit-diff:
+	zig build reference --release=fast
+	./scripts/fit-diff $(ARGS)
+
 # Run upstream's test-backend-ops against the ported ggml.
 backend-ops:
 	zig build reference --release=fast
@@ -571,6 +589,11 @@ ref-chat:
 # Download Qwen3.5-2B Q4_K_M; standard (1.28GB).
 qwen35:
 	curl -L -o Qwen3.5-2B-Q4_K_M.gguf https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf
+
+# Download Qwen3-0.6B Q8_0 (0.64GB): a plain KV cache, for cnv-diff's
+# seq_rm path, which Qwen3.5's hybrid memory refuses.
+qwen3:
+	curl -L -o Qwen3-0.6B-Q8_0.gguf https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
 
 # Download Qwen3.5-2B IQ4_XS; smaller (1.17GB).
 qwen35xs:

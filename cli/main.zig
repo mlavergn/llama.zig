@@ -58,7 +58,8 @@ pub fn main(init: std.process.Init) !void {
                 );
                 try err.flush();
             }
-            run(init.gpa, init.io, settings, err, out) catch |e| {
+            const trace = init.environ_map.get("LLAMAZIG_CNV_TRACE") != null;
+            run(init.gpa, init.io, settings, trace, err, out) catch |e| {
                 try err.print("error: {s}\n", .{describe(e)});
                 try err.flush();
                 std.process.exit(1);
@@ -75,6 +76,9 @@ pub fn main(init: std.process.Init) !void {
 /// - `gpa`: allocator for the prompt and token buffers.
 /// - `io`: for reading a template or system prompt from a file.
 /// - `settings`: parsed command line.
+/// - `trace`: whether `LLAMAZIG_CNV_TRACE` is set, sending the context size
+///   and GPU layers `--fit` left, and each turn's cache report
+///   (`Session.turn_trace`), to `err`.
 /// - `err`: where the loading notice goes.
 /// - `out`: destination for the completion.
 ///
@@ -83,6 +87,7 @@ fn run(
     gpa: std.mem.Allocator,
     io: std.Io,
     settings: cli.Args,
+    trace: bool,
     err: *std.Io.Writer,
     out: *std.Io.Writer,
 ) !void {
@@ -108,8 +113,14 @@ fn run(
     try err.print("loading {s} ...\n", .{settings.model});
     try err.flush();
 
-    var session = try cli.Session.init(gpa, settings);
+    var session = try cli.Session.init(gpa, settings, err);
     defer session.deinit();
+    if (trace) {
+        session.turn_trace = err;
+        // What `--fit` left, as libllama took it.
+        try err.print("[ctx: {d}, gpu layers: {d}]\n", .{ cli.session.c.llama_n_ctx(session.ctx), session.gpu_layers });
+        try err.flush();
+    }
 
     if (settings.interactive) {
         try runInteractive(gpa, io, settings, prompt, &session, err, out);

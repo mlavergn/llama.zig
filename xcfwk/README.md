@@ -80,8 +80,9 @@ Same C API and the same headers, minus `mtmd.h`, `mtmd-helper.h` and
 ## What is inside
 
 One object per slice: `libggml.a` and `libllama.a` from `zig build reference`,
-plus Zig's own libc++, libc++abi and compiler_rt, prelinked with `ld -r` so
-that only `llama_*`, `ggml_*` and `gguf_*` symbols are exported. The bundled
+plus Zig's own compiler_rt, prelinked with `ld -r` so that only `llama_*`,
+`ggml_*` and `gguf_*` symbols are exported. No C++ runtime is inside or
+needed: neither library references one. The bundled
 compiler_rt matters: it supplies `expf`, `logf`, `sinf`, `cosf` and `exp2f`
 exactly as every bit-exact gate links them, so the CPU path computes the same
 bits as the gated port rather than Apple's libm's.
@@ -94,7 +95,7 @@ bits as the gated port rather than Apple's libm's.
 
 | | Decision | Why |
 |---|---|---|
-| Form | Static framework, one `ld -r`-prelinked object | keeps Zig's libc++ and compiler_rt -- the gated runtime -- without an app ever linking or meeting them |
+| Form | Static framework, one `ld -r`-prelinked object | keeps Zig's compiler_rt -- the gated math -- without an app ever linking or meeting it |
 | Slices | `macos-arm64`, `ios-arm64`, `ios-arm64-simulator` | x86 CPU kernels are not ported |
 | Minimums | iOS 18.0, macOS 26.0 | chosen; Zig targets `aarch64-ios.18.0`, `aarch64-macos.26.0` |
 | iOS CPU | `apple_a14` | the `apple_m1` feature set every gate runs at the baseline; A12/A13 left out, documented |
@@ -110,12 +111,13 @@ bits as the gated port rather than Apple's libm's.
    `build/<slice>/zig/`. macOS is `aarch64-macos.26.0`, `apple_m3`;
    iOS and the simulator are `aarch64-ios.18.0[-simulator]`, `apple_a14`, the
    same feature set.
-2. A probe C++ link with `--verbose-link` names the `libc++.a`,
-   `libc++abi.a` and `libcompiler_rt.a` Zig built for that target; they are
-   copied to `build/<slice>/cxx/`. The build API does not expose them.
+2. A probe C link with `--verbose-link` names the `libcompiler_rt.a` Zig
+   built for that target; it is copied to `build/<slice>/rt/`. The build API
+   does not expose it. (Until libllama swapped, a C++ probe fetched libc++
+   and libc++abi too; prelinked now they change no byte of the object.)
 3. `xcrun ld -r` with `-exported_symbols_list exports.txt` prelinks the two
-   archives and the three runtime archives into `llamazig.o`; everything
-   not listed becomes local. `strip -S`, `libtool -static`.
+   archives and compiler_rt into `llamazig.o`; everything not listed becomes
+   local. `strip -S`, `libtool -static`.
 4. The bundle: flat for iOS, `Versions/A` for macOS; headers copied from
    `llama.cpp/`, `framework.modulemap` as `Modules/module.modulemap`,
    `Info.plist.in` filled in. `xcodebuild -create-xcframework` joins them.
@@ -124,8 +126,8 @@ bits as the gated port rather than Apple's libm's.
 
 | Target | What it proves | Negative test |
 |---|---|---|
-| `verify` | every object in every archive and the prelinked object has the slice's platform and minos; 1,438 exports, all `llama_`/`ggml_`/`gguf_`; 0 private externs; 0 `std::__1`; compiler_rt math inside; `Info.plist` lints; `test/stub.m` links per slice, device included, with no `-lc++` and no frameworks named; exactly the three slices | `make negative`: wrong platform, wrong minos, no exports list, `-keep_private_externs`, no compiler_rt, no libc++abi, module map without `link`, malformed plist, two-slice xcframework |
-| `smoke-macos` | `test/smoke.swift` through the framework is byte-identical to `test/driver.c` on the port's own libraries, six prompts, GPU and CPU; `test/coexist.cpp` runs app C++ beside the hidden libc++ | one reference token altered |
+| `verify` | every object in every archive and the prelinked object has the slice's platform and minos; 1,438 exports, all `llama_`/`ggml_`/`gguf_`; 0 private externs; 0 `std::__1`; compiler_rt math inside; `Info.plist` lints; `test/stub.m` links per slice, device included, with no `-lc++` and no frameworks named; exactly the three slices | `make negative`: wrong platform, wrong minos, no exports list, `-keep_private_externs`, no compiler_rt, module map without `link`, malformed plist, two-slice xcframework |
+| `smoke-macos` | `test/smoke.swift` through the framework is byte-identical to `test/driver.c` on the port's own libraries, six prompts, GPU and CPU; `test/coexist.cpp` runs app C++ beside the framework | one reference token altered |
 | `smoke-sim` | the same on the iOS simulator, CPU | — |
 | `pkg-test` | `Package.swift` builds and runs on macOS, builds for the simulator | no xcframework: the error names it |
 | `zip` | `.zip` and its SwiftPM checksum | — |

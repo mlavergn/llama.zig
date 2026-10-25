@@ -27,7 +27,7 @@
 
 | Artifact | Path | What it is |
 |---|---|---|
-| `llama-cli` | `zig-out/bin/llama-cli` | Command-line text-completion binary |
+| `llama-cli` | `zig-out/bin/llama-cli` | Command-line completion and conversation binary |
 | `libggml.a` | `zig-out/lib/libggml.a` | ggml, ported; the two Metal Objective-C files and the embedded kernels beside it |
 | `libllama.a` | `zig-out/lib/libllama.a` | llama.cpp's model layer, ported: exports `llama.h` |
 | `libllama-ref.a` | `zig-out/lib/libllama-ref.a` | Upstream's libllama, the pinned C++ unmodified — a test oracle, not a deliverable |
@@ -38,8 +38,9 @@ Our `llama-cli` is a distinct binary that shares upstream's name, not upstream's
 
 ## 2. Scope
 
-**In.** ggml (tensor core, allocator, quantization, CPU backend), the Metal
-backend, libllama, and a `llama-cli`-compatible completion binary.
+**In.** ggml (tensor core, allocator, quantization, the CPU backend's ARM
+and x86 kernels), the Metal, CUDA and Vulkan backends' host layers,
+libllama, and a `llama-cli`-compatible completion and conversation binary.
 
 **Out.** `common/`, `tools/server/`, upstream's `llama-cli`, training, model
 conversion, and quantizing model files. llamazig reads GGUF; it never writes
@@ -60,6 +61,7 @@ symbol names, same signatures. Callers link against them without change.
 | `ggml/src/ggml-cpu/ggml-cpu.c` | 3,900 | 65 | `src/ggml/cpu/` |
 | `ggml/src/ggml-cpu/quants.c` | 1,339 | 45 | `src/ggml/cpu/quants/` |
 | `ggml/src/ggml-cpu/arch/arm/quants.c` | 4,319 | 28 | `src/ggml/cpu/quants/arm/` |
+| `ggml/src/ggml-cpu/arch/x86/quants.c` | 4,108 | 27 | `src/ggml/cpu/quants/x86/` (AVX2 arms) |
 
 And every C++ translation unit:
 
@@ -78,6 +80,7 @@ And every C++ translation unit:
 | `ggml/src/ggml-cpu/ggml-cpu.cpp` | 712 | 7 | `src/ggml/cpu/cpu_backend.zig` |
 | `ggml/src/ggml-cpu/repack.cpp` | 4,836 | 36 | `src/ggml/cpu/repack/` |
 | `ggml/src/ggml-cpu/arch/arm/repack.cpp` | 5,156 | 28 | `src/ggml/cpu/repack/arm/` |
+| `ggml/src/ggml-cpu/arch/x86/repack.cpp` | 6,407 | 12 | `src/ggml/cpu/repack/x86/` (AVX2 arms) |
 | `ggml/src/ggml-metal/ggml-metal-common.cpp` | 457 | 6 | `src/ggml/metal/common.zig` |
 | `ggml/src/ggml-metal/ggml-metal-tuning.cpp` | 1,087 | 7 (mangled) | `src/ggml/metal/{tuning,tuning_table}.zig` |
 | `ggml/src/ggml-metal/ggml-metal.cpp` | 998 | 6 | `src/ggml/metal/backend.zig` |
@@ -85,6 +88,8 @@ And every C++ translation unit:
 | `ggml/src/ggml-metal/ggml-metal-ops.cpp` | 5,369 | 66 | `src/ggml/metal/ops.zig` |
 | `ggml/src/ggml-backend-meta.cpp` | 2,495 | 8 | `src/ggml/backend_meta.zig` |
 | `ggml/src/ggml-opt.cpp` | 1,094 | 37 | `src/ggml/opt.zig` |
+| `ggml/src/ggml-cuda/*.cu` host code | ~43,900 (with kernels) | — | `src/ggml/cuda/` |
+| `ggml/src/ggml-vulkan/ggml-vulkan.cpp` | 19,787 | 9 | `src/ggml/vulkan/` |
 | `src/llama*.cpp`, `src/unicode*.cpp` | 47,215 | 240 (all of `llama.h`) | `src/llama/`, exported by `src/llama/exports.zig` |
 | `src/models/qwen35.cpp` | 645 | — | `src/llama/models/{qwen35,delta_net}.zig` |
 
@@ -111,6 +116,9 @@ objects that are empty on this target. `llama-cli` links no C++ runtime.
 | `ggml-cpu/hbm.cpp`, `amx/amx.cpp`, `amx/mmq.cpp` | C++ | All three empty on this target: `GGML_USE_CPU_HBM` and `__AMX_INT8__` are off |
 | `ggml-metal-device.m`, `ggml-metal-context.m` | Objective-C | Metal object interface; stays Objective-C permanently |
 | `ggml-metal/kernels/*.metal` | MSL | Compiled by the GPU driver at load; never ported |
+| `ggml-cuda/*.cu` kernels | CUDA | Compiled unmodified to fatbins by `nvcc`, embedded, loaded through the driver API |
+| `src/ggml/cuda/cub_shim.cu` | CUDA C++ | CUB's device-wide algorithms behind a C ABI; the only host code the port writes in C++ |
+| `ggml-vulkan/vulkan-shaders/*` | GLSL | The reference build's generated SPIR-V, embedded; never regenerated |
 
 Every architecture in upstream's `llama_model_mapping` is ported. Qwen3.5 is
 the canonical model of the conformance gates; the others are gated on
@@ -123,7 +131,7 @@ upstream's per-architecture fixtures (`make arch-model-diff`).
 | Metal | Enabled. All 20 shader libraries embedded in the binary; no external `.metallib`. |
 | CPU | Enabled. Accelerate on, llamafile SGEMM on, BLAS and OpenMP off. |
 | CUDA | Enabled on Linux when `nvcc` is found (`-Dcuda`). Host layer in Zig; upstream's `.cu` kernels compiled unmodified to fatbins and embedded. |
-| Vulkan | Not built yet: being ported (`PLAN.md`, Stage 7). The reference builds it with `llama.cpp.zmake -Dvulkan`. |
+| Vulkan | Enabled with `-Dvulkan` (Linux, pinned toolchain in `.tools/vulkan/`). Host layer in Zig; the reference generator's SPIR-V embedded. |
 | SYCL, HIP | Not built. |
 
 ### 3.4 Data types
@@ -148,7 +156,7 @@ llamazig -m PATH [options]
 ```
 
 `-m` is required. The binary reads a GGUF model, tokenizes a prompt, generates,
-and exits. It is not interactive.
+and exits; under `-cnv` it holds a conversation on stdin instead (§5.3).
 
 ### 4.2 Options
 
@@ -162,9 +170,12 @@ A command line written for upstream runs unchanged for the options below.
 | `-m`, `--model` | `PATH` | *(required)* | Model file |
 | `-p`, `--prompt` | `TEXT` | `""` | Prompt to complete |
 | `-n`, `--predict`, `--n-predict` | `N` | `-1` | Tokens to generate; `-1` = until stop |
-| `-c`, `--ctx-size` | `N` | `0` | Context size; `0` = the model's own |
+| `-c`, `--ctx-size` | `N` | `0` | Context size; `0` = the model's own, which `--fit` may shrink — unless `-c 0` is given explicitly |
 | `-b`, `--batch-size` | `N` | `2048` | Logical batch size |
 | `-ngl`, `--gpu-layers`, `--n-gpu-layers` | `N` | `-1` | Layers to offload; `-1` = auto |
+| `-fit`, `--fit` | `on`\|`off` | `on` | Fit the parameters left unset to free memory before loading (§4.5) |
+| `-fitt`, `--fit-target` | `MiB0,MiB1,...` | `1024` | Memory `--fit` leaves free per device; one value applies to every device |
+| `-fitc`, `--fit-ctx` | `N` | `4096` | The least context `--fit` shrinks to |
 | `-t`, `--threads` | `N` | `0` | Threads; `0` = chosen by libllama |
 | `-s`, `--seed` | `N` | `0xFFFFFFFF` | RNG seed; default requests a random one |
 | `--temp`, `--temperature` | `F` | `0.80` | Temperature; `<= 0` samples greedily |
@@ -203,7 +214,7 @@ Both are refused with a non-zero exit; neither is ignored.
 | A flag upstream does not accept | `error: unknown flag <flag>` |
 | No `-m` | `error: no model given` |
 
-The 525 upstream flag spellings are enumerated so the two cases are
+The 541 upstream flag spellings are enumerated so the two cases are
 distinguishable.
 
 ### 4.4 Streams and exit codes
@@ -211,7 +222,7 @@ distinguishable.
 | Stream | Carries |
 |---|---|
 | stdout | The prompt echo (unless suppressed), the completion, a trailing newline, and the timings line |
-| stderr | The `loading <model> ...` notice, the one-shot warning, libllama warnings and errors, and all failure messages |
+| stderr | The `loading <model> ...` notice, the one-shot warning, libllama warnings and errors, `--fit`'s error line, and all failure messages |
 
 libllama's INFO and DEBUG logging is suppressed. A redirected stdout contains
 the completion and nothing else, except the timings line when enabled.
@@ -220,6 +231,28 @@ the completion and nothing else, except the timings line when enabled.
 |---|---|
 | `0` | Generation completed, or `-h` / `--version` |
 | `1` | Argument error, model load failure, or decode failure |
+
+### 4.5 Fitting to memory
+
+Before loading, with `--fit on` (the default), the parameters left at their
+defaults are fitted to free memory, as upstream's `common_init_result` does
+through `common_fit_params`. The model and a context are loaded with
+`no_alloc` to measure what each device and the host would hold.
+
+- **Context.** Where `-c` is unset and the projected use leaves less than the
+  margin (`-fitt`, 1 GiB) free, the context is shrunk by linear interpolation
+  between the trained context and `-fitc` (4096), rounded down to a multiple
+  of 256 per stream. On the CPU alone the margin is measured against total
+  system memory. An explicit `-c 0` forbids shrinking.
+- **Layers and tensors**, on a GPU and only with `-ngl` unset: layers are
+  assigned back to front, the false-position method choosing how many fit on
+  each device; a MoE model's expert tensors go to system memory first, and
+  partial layers overflow by tensor fraction. The result is written as
+  `n_gpu_layers`, a `tensor_split` across devices, and buffer-type overrides.
+
+What the fit reports goes to upstream's log at `llama-cli`'s verbosity, so only
+its error line — a model that cannot be measured — reaches stderr. Its status
+is not consulted: loading goes ahead with the parameters as far as it got.
 
 ## 5. Generation semantics
 
@@ -266,6 +299,7 @@ tokens it spells.
 | `/clear` | Discards the history and re-adds the system prompt. |
 | `/regen` | Drops the last reply and answers the previous turn again. |
 | Any other `/word` | Sent to the model as text, as upstream does. |
+| `LLAMAZIG_CNV_TRACE` | When set, each turn writes `[turn: kept K, decoding S]` to stderr after the marker: the tokens of cache kept and the tokens decoded. |
 
 ### 5.4 Sampler chain
 
@@ -324,6 +358,8 @@ These must hold. Each is a runnable gate.
 | C10 | Every CPU op kernel computes the same **bits** as the stock C on ~300 fixed cases, at 1 and 3 threads | `make ops-diff` |
 | C11 | Every node of a real model's prompt decode and one single-token decode computes the same bits as the stock C, CPU and Metal | `make node-diff` |
 | C6b | C6 with the model on the CPU device alone, so the ported CPU kernels carry the whole forward pass | `make parity-port-cpu` |
+| C12 | `llama-cli -cnv` writes the same replies, stderr and per-turn cache report as a reference conversation over upstream's chat-template engine and libllama, on a hybrid and a plain-KV model | `make cnv-diff` |
+| C13 | `--fit` leaves the same parameters and logs the same trace as upstream's `common_fit_params`, on fake GPUs with chosen memory, the CPU alone and Metal, with every arm of `fit.cpp` reached | `make fit-diff` |
 
 `make validate` runs everything checkable without a model: formatting, the
 scaffold, the unit tests, the ported tests in debug and release, C1, C9 and C2.
@@ -350,11 +386,11 @@ locatable in this port.
 
 | Requirement | Value |
 |---|---|
-| Build tool | Zig **0.16.0**, no CMake, no Ninja |
-| Host and target | macOS on Apple Silicon (arm64) |
+| Build tool | Zig **0.17.0**, no CMake, no Ninja |
+| Targets | macOS arm64; iOS and the iOS simulator (the xcframework); Linux arm64, with CUDA and Vulkan; Linux x86_64 and Windows x86_64 (`x86_64-windows-gnu`) at x86-64-v3 |
 | Library dependencies | **None.** `libllamazig` links nothing outside the standard library and the system frameworks. |
 | CLI dependencies | One, granted by exception: `inferise/zigjinja` (a fork of `gremlin-labs/vibe-jinja`), pinned to an exact commit, confined to `cli/`. |
-| System frameworks | Foundation, Metal, MetalKit, Accelerate |
+| System libraries | macOS: Foundation, Metal, MetalKit, Accelerate. Linux: libc, and the CUDA runtime, cuBLAS and driver, or the Vulkan loader, when those backends are built |
 | Reference pin | llama.cpp tag `v0.3.0`, commit `c1d0e7a00` |
 
 `zig build` alone produces every artifact.
@@ -383,6 +419,8 @@ locatable in this port.
 | `make ops-diff` | C10 |
 | `make node-diff` | C11 (`ARGS=--gpu` for Metal) |
 | `make parity-cli` | C7 |
+| `make cnv-diff` | C12 |
+| `make fit-diff` | C13 |
 
 `make port` and `make ref` share `MODEL`, `PROMPT`, `NPRED`, `TEMP`, `SEED` and
 `ARGS`. `SEED` is fixed at 42 so the two are comparable.
@@ -391,7 +429,6 @@ locatable in this port.
 
 | Item | State |
 |---|---|
-| Interactive conversation mode | Not built. One-shot only. |
 | Multi-line input (`-mli`) and `-if` | Not built; the flags are refused. A turn is one line. |
 | Slash commands beyond `/exit`, `/clear` and `/regen` | Not built; `/image`, `/audio` and `/video` need multimodal input. |
 | Grammar and JSON-schema constrained sampling | Not built. |
@@ -400,5 +437,5 @@ locatable in this port.
 | LoRA, control vectors, speculative decoding | Not built; the flags are refused. |
 | Multimodal input | Not built. |
 | Writing or converting model files | Out of scope. |
-| Linux and iOS targets | Not built. |
-| Non-Apple GPU backends | Not built. |
+| AVX-512 (x86-64-v4) kernels | Not built: an x86 build above x86-64-v3 is a compile error until they are ported and gated on AVX-512 hardware. |
+| SYCL, HIP and other GPU backends | Not built. |

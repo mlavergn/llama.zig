@@ -15,6 +15,7 @@ const std = @import("std");
 pub const c = @import("c.zig");
 pub const args = @import("args.zig");
 pub const chat = @import("chat.zig");
+pub const fit = @import("fit.zig");
 pub const session = @import("session.zig");
 pub const upstream_flags = @import("upstream_flags.zig");
 
@@ -22,6 +23,13 @@ pub const Args = args.Args;
 pub const Template = chat.Template;
 pub const Message = chat.Message;
 pub const Session = session.Session;
+
+comptime {
+    // libllama, compiled into the CLI and its tests (see `build.zig`):
+    // referencing its root runs the block that exports `llama.h`, which
+    // every call through `c.zig` resolves to.
+    _ = @import("llama");
+}
 
 // -----------------------------------------------------------------------------
 // Unit Tests

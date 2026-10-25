@@ -1162,8 +1162,8 @@ pub fn regexSplit(text: []const u8, regex_exprs: []const []const u8, byte_encode
             }
         };
         r catch |err| {
-            std.debug.print("Failed to process regex: '{s}'\n", .{regex_expr});
-            std.debug.print("Regex error: {s}\n", .{regex.errorText(err)});
+            impl.writeStderr(&.{ "Failed to process regex: '", regex_expr, "'\n" });
+            impl.writeStderr(&.{ "Regex error: ", regex.errorText(err), "\n" });
             return error.RegexFailed;
         };
         std.mem.swap(std.ArrayList(usize), &bpe_offsets, &tmp);

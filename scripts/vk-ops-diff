@@ -26,6 +26,7 @@
 # counted.
 #
 # Usage: scripts/vk-ops-diff [test-backend-ops args, e.g. -o ADD]
+#   With no arguments: every op, FLASH_ATTN_EXT split by head size (below).
 # Requires:
 #   zig build reference vk-ref --release=fast -Dvulkan -Dcuda=false --prefix zig-out/vk-port
 set -u
@@ -72,28 +73,134 @@ zig c++ "$tmp/tbo.o" "$tmp/hooks.o" -o "$tmp/vk_ops_diff" \
 
 # A side that aborts must abort the same way; gdb's backtrace would differ.
 export GGML_NO_BACKTRACE=1
-"$tmp/vk_ops_diff" test -b Vulkan0 "$@" > "$tmp/out.log" 2>&1
-rc=$?
-[ -n "${VK_OPS_DIFF_OUT:-}" ] && cp "$tmp/out.log" "$VK_OPS_DIFF_OUT"
 
-grep -E '^(BITDIFF|SUPPORTS|NONDET)|EXTRA .*FAIL' "$tmp/out.log" | head -20
-grep -E '^vk_ops_diff:' "$tmp/out.log"
-passed=$(grep -E '^  [0-9]+/[0-9]+ tests passed' "$tmp/out.log" | tail -1 | sed 's/^ *//')
-ok=$(echo "$passed" | cut -d/ -f1)
-nsupp=$(grep -cE 'not supported' "$tmp/out.log")
-echo "  ${passed:-0/0 tests passed}, bit-identical; $nsupp cases not supported by the port"
-nextra=$(grep -cE '^  EXTRA ' "$tmp/out.log")
-[ "$nextra" -gt 0 ] && echo "  $nextra extra cases run, $(grep -cE '^  EXTRA .*: OK$' "$tmp/out.log") bit-identical"
+# One run of the harness over `args`; adds its verdict to the totals.
+# A run that outlives VK_OPS_DIFF_TIMEOUT seconds (5400) is killed; with
+# `fallback` set, the cases it had not finished then run one per process
+# (`run_rest`), and otherwise the part fails. `quiet` prints failures only.
+total_ok=0
+total_fail=0
+total_hung=0
+[ -n "${VK_OPS_DIFF_OUT:-}" ] && : > "$VK_OPS_DIFF_OUT"
+run_part() {
+    local label="$1" limit="$2" mode="$3"; shift 3
+    local log="$tmp/out.$label.log"
+    timeout "$limit" "$tmp/vk_ops_diff" test -b Vulkan0 "$@" > "$log" 2>&1
+    local rc=$?
+    [ -n "${VK_OPS_DIFF_OUT:-}" ] && cat "$log" >> "$VK_OPS_DIFF_OUT"
 
-# Cases, not lines: a case the reference fails to reproduce against itself
-# prints BITDIFF lines too, and is reported NONDET rather than failed.
-bit=$(sed -nE 's/^vk_ops_diff: .* differing in ([0-9]+) cases.*/\1/p' "$tmp/out.log")
-bit=${bit:-1}
-sup=$(grep -cE '^SUPPORTS' "$tmp/out.log")
-if [ "$rc" -ne 0 ] || [ "$bit" -ne 0 ] || [ "$sup" -ne 0 ]; then
-    [ "$rc" -ne 0 ] && { echo "test-backend-ops exited $rc"; grep -E 'GGML_ASSERT|FAIL|Assert|error|not ported' "$tmp/out.log" | head -10; }
-    echo "FAIL: the ported Vulkan backend differs from the reference"
+    if [ "$rc" -eq 124 ] && [ "$mode" = fallback ]; then
+        run_rest "$label" "$log" "$@"
+        return
+    fi
+    judge "$label" "$log" "$rc" "$limit" "$mode"
+}
+
+# The verdict on one run's log, added to the totals.
+judge() {
+    local label="$1" log="$2" rc="$3" limit="$4" mode="$5"
+    grep -E '^(BITDIFF|SUPPORTS|NONDET)|EXTRA .*FAIL' "$log" | head -20
+    local passed ok nsupp bit sup
+    passed=$(grep -E '^  [0-9]+/[0-9]+ tests passed' "$log" | tail -1 | sed 's/^ *//')
+    ok=$(echo "$passed" | cut -d/ -f1)
+    nsupp=$(grep -cE 'not supported' "$log")
+    # Cases, not lines: a case the reference fails to reproduce against
+    # itself prints BITDIFF lines too, and is reported NONDET rather than
+    # failed.
+    bit=$(sed -nE 's/^vk_ops_diff: .* differing in ([0-9]+) cases.*/\1/p' "$log")
+    bit=${bit:-1}
+    sup=$(grep -cE '^SUPPORTS' "$log")
+    [ "$mode" = quiet ] || echo "  $label: ${passed:-0/0 tests passed}, bit-identical; $nsupp cases not supported by the port"
+    if [ "$rc" -ne 0 ] || [ "$bit" -ne 0 ] || [ "$sup" -ne 0 ]; then
+        [ "$mode" = quiet ] && echo "  $label: ${passed:-0/0 tests passed}"
+        [ "$rc" -eq 124 ] && echo "  $label: killed after $limit s"
+        [ "$rc" -ne 0 ] && { echo "  $label: test-backend-ops exited $rc"; grep -E 'GGML_ASSERT|FAIL|Assert|error|not ported' "$log" | head -10; }
+        total_fail=$((total_fail + 1))
+    fi
+    total_ok=$((total_ok + ${ok:-0}))
+}
+
+# The rest of a part whose run stalled: what it finished is counted from its
+# log, and every case from the one it stalled on runs in its own process.
+# `support` mode lists the part's cases without computing them, and `-o`
+# takes a whole case string as an exact name.
+run_rest() {
+    local label="$1" log="$2"; shift 2
+    local clean="$tmp/rest.$label.log" cases="$tmp/rest.$label.cases"
+    sed $'s/\x1b\\[[0-9;]*m//g' "$log" > "$clean"
+    grep -E '^(BITDIFF|SUPPORTS|NONDET)' "$clean" | head -20
+    local early_bad early_ok stalled
+    early_bad=$(grep -cE '^(BITDIFF|SUPPORTS)' "$clean")
+    early_ok=$(grep -cE '^  [A-Z_0-9]+\(.*\): OK$' "$clean")
+    stalled=$(grep -E '^  [A-Z_0-9]+\(' "$clean" | tail -1 | sed -E 's/^  //; s/: *$//')
+    "$tmp/vk_ops_diff" support -b Vulkan0 "$@" 2>/dev/null | sed $'s/\x1b\\[[0-9;]*m//g' \
+        | grep -E '^  [A-Z_0-9]+\(' | sed -E 's/^  //; s/: [A-Z ]+$//' > "$cases"
+    local rest
+    rest=$(awk -v s="$stalled" '$0 == s { f = 1 } f' "$cases")
+    if [ -z "$rest" ]; then
+        echo "  $label: stalled on a case support mode does not list -- $stalled"
+        total_fail=$((total_fail + 1))
+        return
+    fi
+    total_ok=$((total_ok + early_ok))
+    [ "$early_bad" -ne 0 ] && total_fail=$((total_fail + 1))
+    local n=0 before=$total_fail before_ok=$total_ok hung=0
+    while IFS= read -r c; do
+        n=$((n + 1))
+        # A case that hangs alone is run again with the reference in the
+        # port's place: if the reference hangs against itself too, the case
+        # cannot be compared and is reported, not failed -- the counterpart
+        # of NONDET. Measured on the KHR arm: the two MLA decode cases
+        # (`hsk=576, hsv=512, nh=1, nr23=[20,1]`, q8_0, nb=1) hang on their
+        # own in the reference, with the GPU idle.
+        local one="$tmp/out.$label.$n.log" rc self
+        timeout 120 "$tmp/vk_ops_diff" test -b Vulkan0 -o "$c" > "$one" 2>&1
+        rc=$?
+        [ -n "${VK_OPS_DIFF_OUT:-}" ] && cat "$one" >> "$VK_OPS_DIFF_OUT"
+        if [ "$rc" -eq 124 ]; then
+            VK_DIFF_SELF=1 timeout 120 "$tmp/vk_ops_diff" test -b Vulkan0 -o "$c" > /dev/null 2>&1
+            self=$?
+            if [ "$self" -eq 124 ]; then
+                echo "REFHANG $c"
+                hung=$((hung + 1))
+                total_hung=$((total_hung + 1))
+                continue
+            fi
+            echo "  $label.$n: the port hangs where the reference does not -- $c"
+        fi
+        judge "$label.$n" "$one" "$rc" 120 quiet
+    done <<< "$rest"
+    echo "  $label: stalled after $early_ok cases; the other $n ran one per process," \
+         "$((total_ok - before_ok)) bit-identical, $hung hung in the reference alone$([ "$total_fail" -ne "$before" ] && echo ", SOME DIFFER")"
+}
+
+if [ $# -gt 0 ]; then
+    run_part run "${VK_OPS_DIFF_TIMEOUT:-5400}" plain "$@"
+else
+    # FLASH_ATTN_EXT runs in its own processes, one per head size. In one
+    # process with the rest, the KHR-coopmat and no-coopmat arms stall at
+    # `hsk=256, kv=16384, q8_0` with the GPU idle and a fence that never
+    # signals -- and the reference stalls there against itself -- while each
+    # case alone finishes in a second (NOTES.md, "The Vulkan arms,
+    # completed"). A head size can still stall on its own (KHR, hsk=576), so
+    # a part that outlives VK_OPS_DIFF_FA_TIMEOUT (600 s) finishes one case
+    # per process. The head sizes are test-backend-ops' own list; every
+    # FLASH_ATTN_EXT case it makes uses one of them.
+    ops=$("$tmp/vk_ops_diff" --list-ops 2>/dev/null | grep -E '^  [A-Z][A-Z0-9_]*$' | tr -d ' ' | grep -vx FLASH_ATTN_EXT | paste -sd, -)
+    [ -n "$ops" ] || { echo "FAIL: could not list the ops"; exit 1; }
+    run_part ops "${VK_OPS_DIFF_TIMEOUT:-5400}" plain -o "$ops"
+    for hsk in 40 64 72 80 96 128 192 256 320 512 576; do
+        run_part "fa-hsk$hsk" "${VK_OPS_DIFF_FA_TIMEOUT:-600}" fallback -o FLASH_ATTN_EXT -p "hsk=$hsk,"
+    done
+fi
+# Every run repeats the extra cases; count each once.
+nextra=$(cat "$tmp"/out.*.log | grep -E '^  EXTRA ' | sed 's/: [A-Z]*$//' | sort -u | grep -c '')
+[ "$nextra" -gt 0 ] && echo "  $nextra extra cases run in each part; $(cat "$tmp"/out.*.log | grep -cE '^  EXTRA .*: OK$') of $(cat "$tmp"/out.*.log | grep -cE '^  EXTRA ') runs bit-identical"
+
+if [ "$total_fail" -ne 0 ]; then
+    echo "FAIL: the ported Vulkan backend differs from the reference ($total_fail runs)"
     exit 1
 fi
-[ "${ok:-0}" -gt 0 ] || { echo "FAIL: no case ran -- the gate compared nothing"; exit 1; }
-echo "PASS: every supported case bit-identical to the reference Vulkan backend"
+[ "$total_ok" -gt 0 ] || { echo "FAIL: no case ran -- the gate compared nothing"; exit 1; }
+[ "$total_hung" -gt 0 ] && echo "  $total_hung cases not compared: the reference hangs on them against itself (REFHANG above)"
+echo "PASS: every supported case bit-identical to the reference Vulkan backend ($total_ok cases)"

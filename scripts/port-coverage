@@ -180,7 +180,13 @@ report_unit() {
         # `config` module the build graph supplies; a bare build-obj has to
         # stand one in. Every flag build.zig defines has to appear here, or the
         # compile fails and this script reports nothing at all.
-        printf 'pub const probe_ported = false;\npub const probe_cpu = false;\npub const use_metal = %s;\npub const use_cuda = false;\npub const cuda_port = false;\npub const cuda_arch = "";\n' "$USE_METAL" > "$d/config.zig"
+        # The Vulkan shader-extension flags are read from build/llamacpp.zig's
+        # own table, so adding one there cannot break this silently again.
+        {
+            printf 'pub const probe_ported = false;\npub const probe_cpu = false;\npub const use_metal = %s;\npub const use_cuda = false;\npub const cuda_port = false;\npub const cuda_arch = "";\n' "$USE_METAL"
+            printf 'pub const use_vulkan = false;\npub const vulkan_port = false;\n'
+            grep -oE '\.option = "vk_[a-z0-9_]+"' build/llamacpp.zig | sed -E 's/.*"(vk_[a-z0-9_]+)"/pub const \1 = false;/'
+        } > "$d/config.zig"
         if ! zig build-obj ${TARGET_ARGS[@]+"${TARGET_ARGS[@]}"} -mcpu baseline -femit-bin="$d/$base.o" "${INCLUDES[@]}" -lc \
                 --dep config --dep ggml_c --dep llama_c -Mroot="$f" -Mconfig="$d/config.zig" \
                 -Mggml_c="$tmp/ggml_c.zig" -Mllama_c="$tmp/llama_c.zig" 2>"$d/$base.log"; then

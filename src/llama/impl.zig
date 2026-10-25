@@ -102,6 +102,25 @@ pub fn cStderr() *c.FILE {
     return @extern(*const *c.FILE, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
 }
 
+/// Writes `parts` to C's `stderr` in order -- the bytes and the stream of
+/// the C's `fprintf(stderr, ...)` at the two sites that print directly, the
+/// grammar parser's error and `unicode_regex_split`'s.
+///
+/// Library code never uses `std.debug.print`: it reaches `std.Io.Threaded`,
+/// which Zig 0.17 cannot compile for iOS (its `NullFile` has no `fd`; found
+/// when the xcframework's iOS slice failed to build), and whose dependency
+/// on compiler_rt brings in compiler_rt's `expf` and `logf` (`CLAUDE.md`).
+/// A failed write is dropped, as the C ignores `fprintf`'s result.
+///
+/// Parameters:
+/// - `parts`: the text, in pieces.
+///
+/// Return: nothing.
+pub fn writeStderr(parts: []const []const u8) void {
+    const f = cStderr();
+    for (parts) |part| _ = c.fwrite(part.ptr, 1, part.len, f);
+}
+
 // -----------------------------------------------------------------------------
 // Logging
 

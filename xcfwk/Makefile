@@ -13,9 +13,11 @@
 #   make check        all of the above, in that order
 #
 # Each slice is `zig build reference` for its target, then `ld -r` of libggml,
-# libllama and Zig's own libc++, libc++abi and compiler_rt into one object that
-# exports only llama_/ggml_/gguf_ -- so an app links no libc++, never meets
-# ours, and the CPU path computes with the same math the gated port does.
+# libllama and Zig's own compiler_rt into one object that exports only
+# llama_/ggml_/gguf_ -- so the CPU path computes with the same math the gated
+# port does. No C++ runtime goes in: since libllama swapped, neither library
+# references one, and prelinking libc++ and libc++abi beside them produced a
+# byte-identical object.
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eo pipefail -c
@@ -107,10 +109,10 @@ all: xcframework
 $(SLICES): %:
 	@printf '\n== %s: zig build reference -Dtarget=%s -Dcpu=%s ==\n' $* $($*_TARGET) $($*_CPU)
 	cd $(ROOT) && $(ZIG) build reference -Dtarget=$($*_TARGET) -Dcpu=$($*_CPU) --release=fast --prefix $(B)/$*/zig
-	@printf '\n== %s: Zig libc++ for %s ==\n' $* $($*_TARGET)
-	@# A probe link with --verbose-link names the libc++.a, libc++abi.a and
-	@# libcompiler_rt.a Zig built for this target; the build API does not
-	@# expose them. compiler_rt is not optional: a `zig cc` link -- every
+	@printf '\n== %s: Zig compiler_rt for %s ==\n' $* $($*_TARGET)
+	@# A probe link with --verbose-link names the libcompiler_rt.a Zig built
+	@# for this target; the build API does not expose it. It is not
+	@# optional: a `zig cc` link -- every
 	@# bit-exact gate, and `make port` -- takes expf, logf, sinf, cosf, exp2f
 	@# from it rather than libSystem, and with Apple's libm instead 3 of 6 CPU
 	@# prompts diverged from the port. A fresh cache dir forces the link to
@@ -120,23 +122,23 @@ $(SLICES): %:
 	@# MinimalDisplayName, which the simulator SDK sets to "Simulator - 27.0"
 	@# and the link fails. The probe links against a shim: the SDK's entries
 	@# symlinked, and SDKSettings.json with MinimalDisplayName set to Version.
-	rm -rf $(B)/$*/cxx && mkdir -p $(B)/$*/cxx/sdk
+	rm -rf $(B)/$*/rt && mkdir -p $(B)/$*/rt/sdk
 	SDK=$$(xcrun --sdk $($*_SDK) --show-sdk-path); \
-	for e in "$$SDK"/*; do [ "$${e##*/}" = SDKSettings.json ] || ln -s "$$e" $(B)/$*/cxx/sdk/; done; \
-	cp "$$SDK/SDKSettings.json" $(B)/$*/cxx/sdk/; \
-	plutil -replace MinimalDisplayName -string "$$(plutil -extract Version raw "$$SDK/SDKSettings.json")" -- $(B)/$*/cxx/sdk/SDKSettings.json; \
-	plutil -convert json $(B)/$*/cxx/sdk/SDKSettings.json; \
-	$(ZIG) libc -target $($*_TARGET) | sed "s#$$SDK#$(B)/$*/cxx/sdk#" > $(B)/$*/cxx/libc.txt
-	printf '#include <string>\nint main() { return (int)std::string("x").size(); }\n' > $(B)/$*/cxx/probe.cpp
-	cd $(B)/$*/cxx && $(ZIG) build-exe probe.cpp -lc++ -target $($*_TARGET) -mcpu $($*_CPU) -OReleaseFast \
-	    --libc libc.txt --cache-dir cache --verbose-link 2>&1 | tr ' ' '\n' | grep -E '/(libc\+\+|libc\+\+abi|libcompiler_rt)\.a$$' > paths.txt
-	test "$$(wc -l < $(B)/$*/cxx/paths.txt)" -eq 3 || { echo "FAIL: probe found: $$(cat $(B)/$*/cxx/paths.txt)"; exit 1; }
-	cp $$(cat $(B)/$*/cxx/paths.txt) $(B)/$*/cxx/
+	for e in "$$SDK"/*; do [ "$${e##*/}" = SDKSettings.json ] || ln -s "$$e" $(B)/$*/rt/sdk/; done; \
+	cp "$$SDK/SDKSettings.json" $(B)/$*/rt/sdk/; \
+	plutil -replace MinimalDisplayName -string "$$(plutil -extract Version raw "$$SDK/SDKSettings.json")" -- $(B)/$*/rt/sdk/SDKSettings.json; \
+	plutil -convert json $(B)/$*/rt/sdk/SDKSettings.json; \
+	$(ZIG) libc -target $($*_TARGET) | sed "s#$$SDK#$(B)/$*/rt/sdk#" > $(B)/$*/rt/libc.txt
+	printf 'int main(void) { return 0; }\n' > $(B)/$*/rt/probe.c
+	cd $(B)/$*/rt && $(ZIG) build-exe probe.c -lc -target $($*_TARGET) -mcpu $($*_CPU) -OReleaseFast \
+	    --libc libc.txt --cache-dir cache --verbose-link 2>&1 | tr ' ' '\n' | grep -E '/libcompiler_rt\.a$$' > paths.txt
+	test "$$(wc -l < $(B)/$*/rt/paths.txt)" -eq 1 || { echo "FAIL: probe found: $$(cat $(B)/$*/rt/paths.txt)"; exit 1; }
+	cp $$(cat $(B)/$*/rt/paths.txt) $(B)/$*/rt/
 	@printf '\n== %s: prelink ==\n' $*
 	xcrun ld -r -arch arm64 -platform_version $($*_LD) $($*_MIN) $$(xcrun --sdk $($*_SDK) --show-sdk-version) \
 	    -exported_symbols_list exports.txt \
 	    -force_load $(B)/$*/zig/lib/libggml.a -force_load $(B)/$*/zig/lib/libllama.a \
-	    $(B)/$*/cxx/libc++.a $(B)/$*/cxx/libc++abi.a $(B)/$*/cxx/libcompiler_rt.a -o $(B)/$*/$(NAME).o
+	    $(B)/$*/rt/libcompiler_rt.a -o $(B)/$*/$(NAME).o
 	xcrun strip -S $(B)/$*/$(NAME).o
 	rm -f $(B)/$*/$(NAME).a && xcrun libtool -static -o $(B)/$*/$(NAME).a $(B)/$*/$(NAME).o
 	@printf '\n== %s: framework ==\n' $*
@@ -173,7 +175,7 @@ verify: xcframework
 $(addprefix verify-,$(SLICES)): verify-%:
 	@printf -- '-- %s\n' $*
 	./verify.sh platform $($*_PLAT) $($*_MIN) $(B)/$*/zig/lib/libggml.a $(B)/$*/zig/lib/libllama.a \
-	    $(B)/$*/cxx/libc++.a $(B)/$*/cxx/libc++abi.a $(B)/$*/cxx/libcompiler_rt.a $(B)/$*/$(NAME).o
+	    $(B)/$*/rt/libcompiler_rt.a $(B)/$*/$(NAME).o
 	./verify.sh symbols $(B)/$*/$(NAME).o
 	./verify.sh plist $(XCF)/$($*_XCF_ID)/$(NAME).framework/$($*_PLIST)
 	./verify.sh link $($*_SDK) $($*_CLANG) $(XCF)/$($*_XCF_ID) $(B)/test/stub-$*
@@ -186,32 +188,23 @@ negative: xcframework
 	@$(call expect_fail,./verify.sh platform $(ios_PLAT) $(ios_MIN) $(B)/ios-sim/$(NAME).o,simulator object passed as iOS device)
 	@# Fault: wrong minimum OS.
 	@$(call expect_fail,./verify.sh platform $(macos_PLAT) 15.0 $(B)/macos/$(NAME).o,macOS $(MACOS_MIN) object passed as minos 15.0)
-	@# Fault: no exports list, so libc++ and every internal symbol stay global.
+	@# Fault: no exports list, so every internal symbol stays global.
 	xcrun ld -r -arch arm64 -platform_version macos $(MACOS_MIN) $$(xcrun --sdk macosx --show-sdk-version) \
 	    -force_load $(B)/macos/zig/lib/libggml.a -force_load $(B)/macos/zig/lib/libllama.a \
-	    $(B)/macos/cxx/libc++.a $(B)/macos/cxx/libc++abi.a $(B)/macos/cxx/libcompiler_rt.a -o $(B)/neg/noexports.o
+	    $(B)/macos/rt/libcompiler_rt.a -o $(B)/neg/noexports.o
 	@$(call expect_fail,./verify.sh symbols $(B)/neg/noexports.o,prelink without -exported_symbols_list)
 	@# Fault: -keep_private_externs, so nothing is localized.
 	xcrun ld -r -arch arm64 -platform_version macos $(MACOS_MIN) $$(xcrun --sdk macosx --show-sdk-version) \
 	    -keep_private_externs -exported_symbols_list exports.txt \
 	    -force_load $(B)/macos/zig/lib/libggml.a -force_load $(B)/macos/zig/lib/libllama.a \
-	    $(B)/macos/cxx/libc++.a $(B)/macos/cxx/libc++abi.a $(B)/macos/cxx/libcompiler_rt.a -o $(B)/neg/private.o
+	    $(B)/macos/rt/libcompiler_rt.a -o $(B)/neg/private.o
 	@$(call expect_fail,./verify.sh symbols $(B)/neg/private.o,prelink with -keep_private_externs)
 	@# Fault: compiler_rt left out, so expf and friends come from Apple's libm.
 	xcrun ld -r -arch arm64 -platform_version macos $(MACOS_MIN) $$(xcrun --sdk macosx --show-sdk-version) \
 	    -exported_symbols_list exports.txt \
 	    -force_load $(B)/macos/zig/lib/libggml.a -force_load $(B)/macos/zig/lib/libllama.a \
-	    $(B)/macos/cxx/libc++.a $(B)/macos/cxx/libc++abi.a -o $(B)/neg/nocrt.o
+	    -o $(B)/neg/nocrt.o
 	@$(call expect_fail,./verify.sh symbols $(B)/neg/nocrt.o,prelink without compiler_rt)
-	@# Fault: libc++abi left out of the prelink.
-	xcrun ld -r -arch arm64 -platform_version macos $(MACOS_MIN) $$(xcrun --sdk macosx --show-sdk-version) \
-	    -exported_symbols_list exports.txt \
-	    -force_load $(B)/macos/zig/lib/libggml.a -force_load $(B)/macos/zig/lib/libllama.a \
-	    $(B)/macos/cxx/libc++.a $(B)/macos/cxx/libcompiler_rt.a -o $(B)/neg/noabi.o
-	mkdir -p $(B)/neg/noabi && cp -R $(B)/macos/fw/$(NAME).framework $(B)/neg/noabi/
-	rm -f $(B)/neg/noabi.a && xcrun libtool -static -o $(B)/neg/noabi.a $(B)/neg/noabi.o
-	cp $(B)/neg/noabi.a $(B)/neg/noabi/$(NAME).framework/Versions/A/$(NAME)
-	@$(call expect_fail,./verify.sh link macosx $(macos_CLANG) $(B)/neg/noabi $(B)/neg/stub-noabi,libc++abi missing from the prelink)
 	@# Fault: the module map's autolinking removed.
 	mkdir -p $(B)/neg/nolink && cp -R $(B)/macos/fw/$(NAME).framework $(B)/neg/nolink/
 	rm $(B)/neg/nolink/$(NAME).framework/Versions/A/Modules/module.modulemap

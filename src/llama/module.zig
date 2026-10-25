@@ -21,6 +21,13 @@
 
 const std = @import("std");
 
+/// What the CLI reaches as Zig: `cli/fit.zig` ports `common/fit.cpp`,
+/// which calls libllama through its internal `llama-ext.h` as well as
+/// `llama.h`. Declaring these exports nothing.
+pub const api = @import("api/module.zig");
+pub const impl = @import("impl.zig");
+pub const context = @import("context.zig");
+
 comptime {
     // llama-sampler.cpp, split across src/llama/sampler/; it reaches
     // llama-grammar.cpp (src/llama/grammar/) and std::regex (regex.zig).

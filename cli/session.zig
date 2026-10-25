@@ -20,6 +20,7 @@
 const std = @import("std");
 const args_mod = @import("args.zig");
 const chat = @import("chat.zig");
+const fit = @import("fit.zig");
 
 /// libllama's C ABI. Re-exported so callers can reach it as
 /// `cli.session.c`; the import itself lives in `c.zig`, because two
@@ -85,42 +86,90 @@ pub const Session = struct {
     decoded: std.ArrayList(c.llama_token) = .empty,
     /// Why the most recent `generate`, `generateChat` or `generateTurn` ended.
     last_stop: Stop = .eog,
+    /// Where `generateTurn` reports how much of the cache each turn kept;
+    /// null, the default, reports nothing.
+    ///
+    /// Set from `LLAMAZIG_CNV_TRACE` by `main.zig`. Prefix reuse rarely
+    /// shows in what a greedy decode says -- measured, a turn decoded from
+    /// scratch picks the same tokens in four of `scripts/cnv-diff`'s six
+    /// Qwen3-0.6B scenarios -- so this line is how that gate tells a
+    /// conversation that keeps its prefix from one that silently re-decodes
+    /// everything.
+    turn_trace: ?*std.Io.Writer = null,
+    /// The `n_gpu_layers` the model was loaded with, after `--fit`: what
+    /// `main.zig` reports under `LLAMAZIG_CNV_TRACE` beside the context size,
+    /// so `scripts/cnv-diff` sees what the fit decided reach libllama.
+    gpu_layers: i32,
+    /// What `llama_model_params` points into while the model loads, kept for
+    /// the model's lifetime since libllama keeps the parameters. Heap
+    /// allocated: the session is returned by value.
+    load: *LoadBuffers,
 
-    /// Loads a model and builds the context and sampler chain.
+    /// The buffers upstream's `common_params` lends `llama_model_params`,
+    /// which `--fit` writes a layer assignment into.
+    const LoadBuffers = struct {
+        /// `common_params::tensor_split`, 128 zeros until `--fit` writes it.
+        tensor_split: [128]f32 = @splat(0),
+        /// `common_params::tensor_buft_overrides`, padded with empty entries
+        /// to `llama_max_tensor_buft_overrides` (common/arg.cpp:946
+        /// @c1d0e7a00).
+        tensor_buft_overrides: []c.llama_model_tensor_buft_override,
+        /// The regexes the overrides point at.
+        patterns: fit.Patterns,
+    };
+
+    /// Loads a model and builds the context and sampler chain, first
+    /// fitting the parameters left unset to free memory unless `--fit off`,
+    /// as upstream's `common_init_result` does.
     ///
     /// Parameters:
     /// - `allocator`: allocator for token buffers this session makes.
     /// - `settings`: parsed command line. Borrowed, and must outlive the
     ///   session, since `model` points into it.
+    /// - `err`: where `--fit` reports an error, as upstream's log does at
+    ///   `llama-cli`'s verbosity; null drops it.
     ///
     /// Return: an initialized session the caller releases with `deinit`.
     /// Surfaces the stage that failed as a distinct error.
-    pub fn init(allocator: std.mem.Allocator, settings: args_mod.Args) !Self {
+    pub fn init(allocator: std.mem.Allocator, settings: args_mod.Args, err: ?*std.Io.Writer) !Self {
+        const load = try allocator.create(LoadBuffers);
+        errdefer allocator.destroy(load);
+        load.* = .{
+            .tensor_buft_overrides = try allocator.alloc(c.llama_model_tensor_buft_override, c.llama_max_tensor_buft_overrides()),
+            .patterns = try .init(allocator),
+        };
+        errdefer allocator.free(load.tensor_buft_overrides);
+        errdefer load.patterns.deinit();
+        @memset(load.tensor_buft_overrides, .{ .pattern = null, .buft = null });
+
+        // `common_model_params_to_llama` (common/common.cpp:1680 @c1d0e7a00).
         var model_params = c.llama_model_default_params();
-        if (settings.n_gpu_layers >= 0) model_params.n_gpu_layers = settings.n_gpu_layers;
+        model_params.n_gpu_layers = settings.n_gpu_layers;
+        model_params.tensor_split = &load.tensor_split;
+        model_params.tensor_buft_overrides = load.tensor_buft_overrides.ptr;
 
         const model_path = try allocator.dupeSentinel(u8, settings.model, 0);
         defer allocator.free(model_path);
-
-        const model = c.llama_model_load_from_file(model_path.ptr, model_params) orelse
-            return Error.ModelLoadFailed;
-        errdefer c.llama_model_free(model);
-
-        const vocab = c.llama_model_get_vocab(model) orelse return Error.NoVocab;
 
         var ctx_params = c.llama_context_default_params();
         // 0 is passed through, not skipped: libllama reads it as "the
         // context the model was trained with", which is what `-c 0` means
         // upstream and what `Args` documents. Skipping it left libllama's own
         // default of 512 tokens, and a conversation's history and reply had
-        // to fit in that -- replies were cut off mid-answer.
-        //
-        // Upstream additionally shrinks an unset context to fit device memory
-        // (`common_fit_params`, in `common/`, which this project does not
-        // build). Where it would have shrunk it, this fails to create the
-        // context instead; `-c` sets it by hand.
+        // to fit in that -- replies were cut off mid-answer. `--fit` below
+        // then shrinks it where that would not fit in memory.
         if (settings.n_ctx >= 0) ctx_params.n_ctx = @intCast(settings.n_ctx);
         if (settings.n_batch > 0) ctx_params.n_batch = @intCast(settings.n_batch);
+        // `server_output_limits` (tools/server/server-context.cpp:40
+        // @c1d0e7a00), which upstream's `llama-cli` reaches through the
+        // server it drives: one sequence and no draft model, so one output
+        // in a batch and one per sequence -- all this binary ever reads.
+        // libllama's default of 0 sizes the output buffer for the whole
+        // batch: 1.2 GB of logits for Qwen3's 151,936-token vocabulary at
+        // `-b 2048`, which `--fit` then measured and shrank the context for
+        // -- measured on the UNO Q, 15,616 tokens against upstream's 18,176.
+        ctx_params.n_outputs_max = 1;
+        ctx_params.n_outputs_max_per_seq = 1;
         if (settings.n_threads > 0) {
             ctx_params.n_threads = settings.n_threads;
             ctx_params.n_threads_batch = settings.n_threads;
@@ -131,6 +180,31 @@ pub const Session = struct {
         // (`--show-timings`); we do not take `--perf`, so the one flag drives
         // both -- there is no reason to pay for counters we will not print.
         ctx_params.no_perf = !settings.show_timings;
+
+        if (settings.fit) {
+            // The status is not consulted, as upstream does not: a failed fit
+            // leaves the parameters as far as it got, and loading goes ahead.
+            _ = try fit.fitParams(
+                allocator,
+                &load.patterns,
+                .{ .verbosity = fit.Log.level_error, .out = err },
+                model_path.ptr,
+                @ptrCast(&model_params),
+                @ptrCast(&ctx_params),
+                &load.tensor_split,
+                @ptrCast(load.tensor_buft_overrides.ptr),
+                &settings.fit_target,
+                settings.fit_min_ctx,
+                null,
+                c.GGML_LOG_LEVEL_ERROR,
+            );
+        }
+
+        const model = c.llama_model_load_from_file(model_path.ptr, model_params) orelse
+            return Error.ModelLoadFailed;
+        errdefer c.llama_model_free(model);
+
+        const vocab = c.llama_model_get_vocab(model) orelse return Error.NoVocab;
 
         const ctx = c.llama_init_from_model(model, ctx_params) orelse return Error.ContextFailed;
         errdefer c.llama_free(ctx);
@@ -158,6 +232,8 @@ pub const Session = struct {
             .sampler = sampler,
             .threadpool = threadpool,
             .settings = settings,
+            .gpu_layers = model_params.n_gpu_layers,
+            .load = load,
         };
     }
 
@@ -175,6 +251,9 @@ pub const Session = struct {
         // After the context: it holds the pool until it is freed.
         if (self.threadpool) |tp| c.ggml_threadpool_free(tp);
         c.llama_model_free(self.model);
+        self.load.patterns.deinit();
+        self.allocator.free(self.load.tensor_buft_overrides);
+        self.allocator.destroy(self.load);
     }
 
     /// Tokenizes the prompt.
@@ -439,6 +518,10 @@ pub const Session = struct {
         }
 
         const suffix = tokens[self.decoded.items.len..];
+        if (self.turn_trace) |t| {
+            try t.print("[turn: kept {d}, decoding {d}]\n", .{ self.decoded.items.len, suffix.len });
+            try t.flush();
+        }
         try self.decoded.appendSlice(self.allocator, suffix);
 
         var id: c.llama_token = undefined;

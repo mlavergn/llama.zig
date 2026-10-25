@@ -1005,9 +1005,9 @@ at the CPU configuration Linux arm64 actually builds for.
 | macOS arm64 | yes | every gate in `CLAUDE.md` | nothing |
 | iOS, iOS simulator | yes — the xcframework's `ios` and `ios-sim` slices (A14+) | `make -C xcfwk check`: structural gates per slice, `smoke-sim` on the simulator | the increased-memory-limit entitlement is the consuming app's, not ours |
 | Linux arm64 + CUDA | yes, natively on the GB10 | the four `cuda-*` gates, `arch-model-diff`, `gemma4-assistant-diff` | the CPU path's numerics — below |
-| Linux arm64, CPU only | **yes**, cross-built from this Mac against glibc 2.39 | `GATE_CPU=generic` here. Measured failing — `ops-diff` 86 / 632, `repack-diff` 26 / 60, `node-diff` from node 27, `parity-port --cpu` 2 / 6 — and **exact since step 2**: 650 / 650, 60 / 60, 2,750 nodes, 6 / 6. **On the GB10 itself** (the pickup, done): `ops-diff` 650 / 650, `repack-diff` 68 / 68, `node-diff` 2,750 nodes, `parity-port --cpu` 6 / 6, `host-arms-diff` 18 / 18, `vocab-diff` -- after two Linux-only fixes (`NOTES.md`, "The GB10 pickup, run") | `set_numa_thread_affinity` needs a multi-socket machine |
+| Linux arm64, CPU only | **yes**, cross-built from this Mac against glibc 2.39 | `GATE_CPU=generic` here. Measured failing — `ops-diff` 86 / 632, `repack-diff` 26 / 60, `node-diff` from node 27, `parity-port --cpu` 2 / 6 — and **exact since step 2**: 650 / 650, 60 / 60, 2,750 nodes, 6 / 6. **On the GB10 itself** (the pickup, done): `ops-diff` 650 / 650, `repack-diff` 68 / 68, `node-diff` 2,750 nodes, `parity-port --cpu` 6 / 6, `host-arms-diff` 18 / 18, `vocab-diff` -- after two Linux-only fixes (`NOTES.md`, "The GB10 pickup, run"). **On an Arduino UNO Q** (four Kryo cores, exactly the `generic` baseline, 3.6 GB): our `llama-cli` against `raw_completion.c` over the zmake reference, 7 / 7 on two models at default flags (`NOTES.md`, "The UNO Q, and `--fit`") | `set_numa_thread_affinity` needs a multi-socket machine; Vulkan on the UNO Q's Adreno |
 | Linux x86_64 | **yes, at x86-64-v3**, cross-built; the same kernels as Windows | the x86 gates run on Windows; Linux x86 shares every kernel and differs only in its OS arms | its OS arms on Linux x86 hardware; AVX-512 on hardware |
-| Windows x86_64 | **yes, cross-built from this Mac** (`x86_64-windows-gnu`, x86-64-v3): libraries, `libllama-ref`, and our `llama-cli.exe`; the reference's `llama-cli.exe` through `make -C llama.cpp.zmake windows-x86_64` | **exact on the laptop**: `make x86-gates` -- 28 quant kernels, 68 repack checks, 712 `ops-diff` results, 2,750 decode nodes -- and 6 / 6 parity prompts | the rest of the Windows pickup |
+| Windows x86_64 | **yes, cross-built from this Mac** (`x86_64-windows-gnu`, x86-64-v3): libraries, `libllama-ref`, and our `llama-cli.exe`; the reference's `llama-cli.exe` through `make -C llama.cpp.zmake windows-x86_64` | **exact on the laptop**: `make x86-gates` -- 28 quant kernels, 68 repack checks, 712 `ops-diff` results, 2,750 decode nodes -- and 6 / 6 parity prompts; the host gates `make win-host-diffs` -- `host-arms-diff`, `libcxx-diff`, `regex-diff`, `unicode-diff` | AVX-512, on other hardware |
 
 ### Linux arm64: a different CPU from the one every gate ran on
 
@@ -1274,8 +1274,9 @@ small, and it is wrong today -- in its numerics and in its host arms.
    - **Left at AVX2**: three rarely used kernels are slower than the C's,
      though exact -- `tq1_0` 1.6x, `iq1_m` 1.4x and the generic `q2_0`
      1.6x -- and prompt processing runs at ~0.9x. The Windows builds of
-     `regex-diff`, `unicode-diff`, `libcxx-diff` and `host-arms-diff` are
-     still on the Windows pickup.
+     `regex-diff`, `unicode-diff`, `libcxx-diff` and `host-arms-diff` have
+     since run there and pass (`NOTES.md`, "The Windows pickup's host
+     gates, run").
 
 ### Windows x86_64
 
@@ -1323,10 +1324,11 @@ on Windows, and ported:
   the strict dialects they were verified and calibrated with, so only its
   Windows platform takes CMake's.
 
-**Open, and only a run on Windows can settle it:** libc++'s
-`regex_traits<wchar_t>` classifies through the C library's `iswctype`, and
-the UCRT's "C" locale may not be ASCII-only the way Apple's is. `regex-diff`
-and `unicode-diff` built for Windows answer it.
+**Settled by a run on Windows** (`NOTES.md`, "The Windows pickup's host
+gates, run"): the UCRT's "C" locale is ASCII-only, as Apple's is. The one
+difference is `\t`, which its table does not mark `_BLANK`, so
+`[[:blank:]]` misses a tab in `std::regex` and `std::wregex` alike;
+`regex.zig` has the arm.
 
 ### Windows pickup
 
@@ -1341,12 +1343,11 @@ Run on the Windows laptop (Decision 57), through `inferiseupdater push` and
   ConPTY sends back; the gates compare on the laptop and only the verdict
   returns. Before the kernels, at `-Dx86-incomplete`: 4 / 6 prompts, and
   `node-diff` diverging at node 13, a `q5_K` stand-in.
-- `regex-diff`, `unicode-diff`, `libcxx-diff` and `host-arms-diff` built
-  for Windows: the `wchar_t` classification question above, the Windows
-  priority and affinity arms, and the seed. **Built, not yet run**: `make
-  win-host-diffs` cross-builds all four (`WIN_X86=1` on each script,
-  `scripts/win-target`) and needs only the laptop's agent window open
-  (`NOTES.md`, "The Windows pickup's host gates, built").
+- ~~`regex-diff`, `unicode-diff`, `libcxx-diff` and `host-arms-diff` built
+  for Windows~~ -- **done**: `make win-host-diffs`, all four identical --
+  168 host-arms lines, 452,904, 43,537,552 and 7,070,454 checks -- after
+  the `\t`-is-not-blank arm in `regex.zig` and a narrowing fix in the
+  regex harness (`NOTES.md`, "The Windows pickup's host gates, run").
 
 ### GB10 pickup
 
@@ -1732,8 +1733,12 @@ Gate: `make ops-diff`, 592 op results identical either side of the fold.
 
 **Stage 6, CUDA, is done and swapped** on the GB10 machine (Decision 43;
 "Stage 6 — CUDA"; `NOTES.md`, "Stage 6"). Mac-only follow-ups from the CUDA
-work are collected under "Mac pickup", done. The xcframework still links
-Zig's libc++ into each slice, which nothing needs since the swap.
+work are collected under "Mac pickup", done. The xcframework no longer
+links Zig's libc++ into each slice -- nothing needed it since the swap, and
+the prelinked object is byte-identical without it -- and rebuilding it
+found the iOS slices broken by a `std.debug.print` in library code, now
+fixed and guarded by `make validate` (`NOTES.md`, "The xcframework after
+the swap").
 
 12. ~~**The other architectures**~~ (Decision 36's first follow-on) --
     **done.** All 146 entries of `llama_model_mapping`, one file per
@@ -1760,9 +1765,13 @@ repository builds Vulkan, `vk-node-diff` and `vk-backend-diff` exist, and
 the whole host layer is ported -- every op, the fusions, `graph_optimize`
 -- with `vk-ops-diff` bit-identical, `vk-node-diff` identical per node and
 fused on all four arms, and `vk-parity-cli` 6/6. **The swap is done**:
-`-Dvulkan` builds the Zig host layer. Open: the no-coopmat arm's
-`vk-ops-diff`, and the KHR coopmat arm's last FLASH_ATTN_EXT cases, where
-the reference stalls against itself (`NOTES.md`, "Stage 7 step 8").
+`-Dvulkan` builds the Zig host layer. **`vk-ops-diff` is bit-identical on
+all four arms** wherever the reference can compute: the no-coopmat arms in
+full, and the KHR arm's FLASH_ATTN_EXT cases past the point where the
+reference stalls against itself, which the gate now reaches by running
+that family per head size and finishing a stalled part one case per
+process. Two KHR cases hang in the reference alone and are reported, not
+compared (`NOTES.md`, "The Vulkan arms, completed").
 
 **Two gaps in the chat-template work**, carried from `NOTES.md`:
 
@@ -1772,9 +1781,25 @@ the reference stalls against itself (`NOTES.md`, "Stage 7 step 8").
   identical, plus the clock under two zones (Decision 58). It started at 26 of 68 (`NOTES.md`, "`jinja-diff`"); the
   zigjinja fixes and the provenance scheme that closed it are in `NOTES.md`,
   "zigjinja against `jinja-diff`".
-- **No gate covers the conversation loop.** `parity-cli` runs one-shot prompts;
-  multi-turn behaviour, KV prefix reuse and the hybrid-cache fallback are
-  checked by hand only.
+- ~~**No gate covers the conversation loop.**~~ **Done**: `make cnv-diff`,
+  our `llama-cli -cnv` against a reference conversation over upstream's
+  Jinja engine and libllama, on a hybrid and a plain-KV model, with the
+  cache kept each turn compared through `LLAMAZIG_CNV_TRACE`. 13/13,
+  negative-tested 7/7 (`NOTES.md`, "`cnv-diff`").
+
+**One gap the UNO Q found**:
+
+- ~~**The CLI did not fit to memory.**~~ **Done**: upstream's `llama-cli`
+  shrinks an unset context, and on GPUs moves layers and tensors to system
+  memory, before it loads (`common_fit_params`); ours asked a 3.6 GB board
+  for a 4.6 GB KV cache and was OOM-killed. `cli/fit.zig` ports
+  `common/fit.cpp` whole, calling libllama's `llama-ext.h` functions as Zig
+  (the CLI now compiles libllama's module into itself); `-fit`, `-fitt`,
+  `-fitc`. Gated by `make fit-diff` -- 68 cases on fake GPUs with chosen
+  memory, the CPU alone and Metal, every arm reached, 12/12 injections --
+  and end to end by three `cnv-diff` scenarios, 16/16. On the board it
+  picks upstream's 18,176 tokens, once the CLI took upstream's output
+  limits (`NOTES.md`, "The UNO Q, and `--fit`").
 
 ---
 

@@ -48,12 +48,27 @@ pub const Args = struct {
     prompt: []const u8 = "",
     /// `-n, --predict, --n-predict`. -1 means "until EOG or context is full".
     n_predict: i32 = -1,
-    /// `-c, --ctx-size`. 0 means "whatever the model was trained with".
+    /// `-c, --ctx-size`. 0 means "whatever the model was trained with",
+    /// which `--fit` may then shrink to fit free memory -- unless `-c 0` was
+    /// given explicitly; see `fit_min_ctx`.
     n_ctx: i32 = 0,
     /// `-b, --batch-size`.
     n_batch: i32 = 2048,
     /// `-ngl, --gpu-layers, --n-gpu-layers`. -1 is auto.
     n_gpu_layers: i32 = -1,
+    /// `-fit, --fit [on|off]`. Fit the context size and, on a GPU, the
+    /// layers and tensors given to it to free memory before loading
+    /// (`fit.zig`), as upstream does by default.
+    fit: bool = true,
+    /// `-fitt, --fit-target MiB0,MiB1,...`, in bytes: what `--fit` leaves
+    /// free on each device. One value applies to every device; upstream's
+    /// default is 1 GiB.
+    fit_target: [max_devices]usize = @splat(1024 * 1024 * 1024),
+    /// `-fitc, --fit-ctx N`: the least context `--fit` shrinks to. An
+    /// explicit `-c 0` sets it to `maxInt(u32)`, which forbids shrinking:
+    /// upstream's `-c` handler sets `fit_params_min_ctx` so
+    /// (common/arg.cpp:1642 @c1d0e7a00). The later of the two flags wins.
+    fit_min_ctx: u32 = 4096,
     /// `-t, --threads`. 0 lets llama.cpp pick.
     n_threads: i32 = 0,
     /// `-s, --seed`. `LLAMA_DEFAULT_SEED` asks for a random one.
@@ -228,6 +243,9 @@ const specs = [_]Spec{
     .{ .names = &.{ "-c", "--ctx-size" }, .value = "N", .help = "context size (0 = from model)" },
     .{ .names = &.{ "-b", "--batch-size" }, .value = "N", .help = "logical batch size" },
     .{ .names = &.{ "-ngl", "--gpu-layers", "--n-gpu-layers" }, .value = "N", .help = "layers to offload (-1 = auto)" },
+    .{ .names = &.{ "-fit", "--fit" }, .value = "on|off", .help = "fit unset context and layers to free memory (default: on)" },
+    .{ .names = &.{ "-fitt", "--fit-target" }, .value = "MiB0,MiB1,...", .help = "memory --fit leaves free per device (default: 1024)" },
+    .{ .names = &.{ "-fitc", "--fit-ctx" }, .value = "N", .help = "least context --fit shrinks to (default: 4096)" },
     .{ .names = &.{ "-t", "--threads" }, .value = "N", .help = "threads to use" },
     .{ .names = &.{ "-s", "--seed" }, .value = "N", .help = "RNG seed" },
     .{ .names = &.{ "--temp", "--temperature" }, .value = "F", .help = "temperature (<= 0 = greedy)" },
@@ -355,6 +373,20 @@ pub fn parse(argv: []const []const u8, w: *std.Io.Writer) !Result {
             args.n_predict = parseI32(value(argv, &i) orelse return missing(a)) catch return bad(a);
         } else if (eq(a, &.{ "-c", "--ctx-size" })) {
             args.n_ctx = parseI32(value(argv, &i) orelse return missing(a)) catch return bad(a);
+            // The full context, asked for explicitly: `--fit` must not shrink it.
+            if (args.n_ctx == 0) args.fit_min_ctx = std.math.maxInt(u32);
+        } else if (eq(a, &.{ "-fit", "--fit" })) {
+            const v = value(argv, &i) orelse return missing(a);
+            if (isTruthy(v)) {
+                args.fit = true;
+            } else if (isFalsey(v)) {
+                args.fit = false;
+            } else return bad(v);
+        } else if (eq(a, &.{ "-fitt", "--fit-target" })) {
+            const v = value(argv, &i) orelse return missing(a);
+            parseFitTarget(v, &args.fit_target) catch return bad(v);
+        } else if (eq(a, &.{ "-fitc", "--fit-ctx" })) {
+            args.fit_min_ctx = @bitCast(parseI32(value(argv, &i) orelse return missing(a)) catch return bad(a));
         } else if (eq(a, &.{ "-b", "--batch-size" })) {
             args.n_batch = parseI32(value(argv, &i) orelse return missing(a)) catch return bad(a);
         } else if (eq(a, &.{ "-ngl", "--gpu-layers", "--n-gpu-layers" })) {
@@ -441,6 +473,77 @@ fn missing(arg: []const u8) Result {
 
 fn bad(arg: []const u8) Result {
     return .{ .fail = .{ .err = error.BadNumber, .arg = arg } };
+}
+
+/// `llama_max_devices` (src/llama.cpp:85 @c1d0e7a00), which sizes upstream's
+/// `fit_params_target`.
+pub const max_devices = 16;
+
+/// Ports `is_truthy` (arg.cpp:1331 @c1d0e7a00), in `common_arg_utils`.
+fn isTruthy(v: []const u8) bool {
+    return eq(v, &.{ "on", "enabled", "true", "1" });
+}
+
+/// Ports `is_falsey` (arg.cpp:1335 @c1d0e7a00), in `common_arg_utils`.
+fn isFalsey(v: []const u8) bool {
+    return eq(v, &.{ "off", "disabled", "false", "0" });
+}
+
+/// Parses `-fitt`'s value as upstream's handler for it in `common/arg.cpp`
+/// does: split on runs of `,` and `/`, as `std::sregex_token_iterator`
+/// over `[,/]+` does -- a leading separator gives an empty first value, a
+/// trailing one none -- each value read by `std::stoull` and taken as MiB.
+/// One value applies to every device; more set the first devices.
+///
+/// Parameters:
+/// - `v`: the flag's value.
+/// - `target`: updated in place.
+///
+/// Return: `error.BadNumber` for a value `std::stoull` rejects, or for
+/// `max_devices` values or more.
+fn parseFitTarget(v: []const u8, target: *[max_devices]usize) !void {
+    // With no separator at all the iterator yields the whole value once,
+    // empty or not; `std::stoull("")` then throws.
+    if (v.len == 0) return error.BadNumber;
+    var parts: [max_devices]u64 = undefined;
+    var n: usize = 0;
+    var rest = v;
+    while (rest.len > 0) {
+        const end = std.mem.indexOfAny(u8, rest, ",/") orelse rest.len;
+        if (n == max_devices) return error.BadNumber;
+        parts[n] = try stoull(rest[0..end]);
+        n += 1;
+        rest = rest[end..];
+        while (rest.len > 0 and (rest[0] == ',' or rest[0] == '/')) rest = rest[1..];
+    }
+    if (n >= max_devices) return error.BadNumber;
+    const mib = 1024 * 1024;
+    if (n == 1) {
+        target.* = @splat(parts[0] *% mib);
+        return;
+    }
+    for (parts[0..n], 0..) |p, k| target[k] = p *% mib;
+}
+
+/// `std::stoull(s)` in base 10: leading white space, an optional sign (a
+/// minus negates modulo 2^64), at least one digit, and whatever follows the
+/// digits ignored.
+fn stoull(s: []const u8) !u64 {
+    var k: usize = 0;
+    while (k < s.len and std.ascii.isWhitespace(s[k])) k += 1;
+    var negative = false;
+    if (k < s.len and (s[k] == '+' or s[k] == '-')) {
+        negative = s[k] == '-';
+        k += 1;
+    }
+    const start = k;
+    var r: u64 = 0;
+    while (k < s.len and std.ascii.isDigit(s[k])) : (k += 1) {
+        r = std.math.mul(u64, r, 10) catch return error.BadNumber;
+        r = std.math.add(u64, r, s[k] - '0') catch return error.BadNumber;
+    }
+    if (k == start) return error.BadNumber;
+    return if (negative) 0 -% r else r;
 }
 
 fn parseI32(s: []const u8) !i32 {
@@ -548,6 +651,58 @@ test "a minimal command line yields upstream's defaults" {
     try testing.expect(a.escape);
     try testing.expect(a.display_prompt);
     try testing.expect(a.show_timings);
+    try testing.expect(a.fit);
+    try testing.expectEqual(@as(u32, 4096), a.fit_min_ctx);
+    try testing.expectEqual(@as(usize, 1024 * 1024 * 1024), a.fit_target[max_devices - 1]);
+}
+
+test "max_devices is libllama's" {
+    try testing.expectEqual(@as(usize, max_devices), @import("c.zig").api.llama_max_devices());
+}
+
+test "--fit takes upstream's truthy and falsey words and nothing else" {
+    for ([_][]const u8{ "on", "enabled", "true", "1" }) |v| {
+        const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fit", "off", "--fit", v });
+        try testing.expect(r.ok.fit);
+    }
+    for ([_][]const u8{ "off", "disabled", "false", "0" }) |v| {
+        const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fit", v });
+        try testing.expect(!r.ok.fit);
+    }
+    const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fit", "yes" });
+    try testing.expectEqual(error.BadNumber, r.fail.err);
+}
+
+test "an explicit -c 0 forbids --fit from shrinking, and the later flag wins" {
+    var r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-c", "0" });
+    try testing.expectEqual(@as(u32, std.math.maxInt(u32)), r.ok.fit_min_ctx);
+    r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-c", "0", "-fitc", "2048" });
+    try testing.expectEqual(@as(u32, 2048), r.ok.fit_min_ctx);
+    r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--fit-ctx", "2048", "-c", "0" });
+    try testing.expectEqual(@as(u32, std.math.maxInt(u32)), r.ok.fit_min_ctx);
+    r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-c", "512" });
+    try testing.expectEqual(@as(u32, 4096), r.ok.fit_min_ctx);
+    r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fitc", "-1" });
+    try testing.expectEqual(@as(u32, std.math.maxInt(u32)), r.ok.fit_min_ctx);
+}
+
+test "--fit-target splits as upstream's regex does and reads values as std::stoull" {
+    const mib: usize = 1024 * 1024;
+    var r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fitt", "512" });
+    for (r.ok.fit_target) |t| try testing.expectEqual(512 * mib, t);
+    r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--fit-target", " +256,,/128x," });
+    try testing.expectEqual(256 * mib, r.ok.fit_target[0]);
+    try testing.expectEqual(128 * mib, r.ok.fit_target[1]);
+    try testing.expectEqual(1024 * mib, r.ok.fit_target[2]);
+    r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fitt", "-1" });
+    try testing.expectEqual(@as(usize, 0) -% mib, r.ok.fit_target[0]);
+    for ([_][]const u8{ "", ",512", "x", "512,y", "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16", "99999999999999999999" }) |v| {
+        r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fitt", v });
+        try testing.expectEqual(error.BadNumber, r.fail.err);
+    }
+    r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fitt", "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15" });
+    try testing.expectEqual(15 * mib, r.ok.fit_target[14]);
+    try testing.expectEqual(1024 * mib, r.ok.fit_target[15]);
 }
 
 test "every alias of a flag reaches the same field" {

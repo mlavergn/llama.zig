@@ -80,8 +80,8 @@ gate_symbols() {
 }
 
 # `test/stub.m` links against the framework with nothing else named: the
-# module map has to autolink the system frameworks and the binary has to carry
-# its own libc++. The result must not depend on libc++.dylib.
+# module map has to autolink the system frameworks, and nothing may need a
+# C++ runtime. The result must not depend on libc++.dylib.
 gate_link() {
     local sdk="$1" target="$2" fwdir="$3" out="$4"
     mkdir -p "$(dirname "$out")"

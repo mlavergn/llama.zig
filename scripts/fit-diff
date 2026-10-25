@@ -1,0 +1,75 @@
+#!/bin/bash
+# Compare cli/fit.zig with upstream's common/fit.cpp, in one process.
+#
+# `llama-cli` fits its unset parameters to free memory before it loads a
+# model -- the context size, and on a GPU the layers and tensors given to
+# it -- and what it decides depends on what each device reports free. This
+# compiles common/fit.cpp and common/log.cpp unmodified over libllama-ref.a
+# and runs every case through them and through fit.zig on the port, against
+# fake GPUs with chosen memory (harness/fit_dev.c), the CPU alone and Metal:
+# the parameters it leaves, every line it logs, and every libllama message
+# its log filter passes on must be identical. See harness/fit_diff.zig.
+#
+# Usage: scripts/fit-diff [--case substring]
+#   Requires: zig build reference --release=fast, `make qwen35`, `make qwen3`,
+#   and the architecture fixtures (scripts/gen-arch-fixtures).
+#   FIT_DIFF_OUT=<dir> keeps both transcripts of every case.
+#   FIT_DIFF_KEEP=<path> keeps the harness binary; FIT_DIFF_O=ReleaseSafe
+#   builds it with safety checks.
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+QWEN35=Qwen3.5-2B-Q4_K_M.gguf
+QWEN3=Qwen3-0.6B-Q8_0.gguf
+FIXTURES=zig-out/arch-fixtures
+MOE=$FIXTURES/qwen3moe-moe.gguf
+DENSE=$FIXTURES/qwen3-dense.gguf
+[ -f "$QWEN35" ] || { echo "missing $QWEN35 -- run 'make qwen35'" >&2; exit 2; }
+[ -f "$QWEN3" ] || { echo "missing $QWEN3 -- run 'make qwen3'" >&2; exit 2; }
+for f in "$MOE" "$DENSE"; do
+    [ -f "$f" ] || { echo "missing $f -- run 'scripts/gen-arch-fixtures'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+INC=(-I llama.cpp/common -I llama.cpp/include -I llama.cpp/ggml/include -I llama.cpp/src)
+
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+zig cc -mcpu=baseline -c harness/fit_dev.c -o "$tmp/fit_dev.o" -O2 \
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src 2>"$tmp/cerr" \
+    || { echo "FAIL: cannot compile harness/fit_dev.c" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
+for src in llama.cpp/common/fit.cpp llama.cpp/common/log.cpp harness/fit_ref.cpp; do
+    obj="$tmp/$(basename "${src%.cpp}").o"
+    zig c++ -mcpu=baseline -c "$src" -o "$obj" -std=c++17 -O2 -w "${INC[@]}" 2>"$tmp/cerr" \
+        || { echo "FAIL: cannot compile $src" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
+done
+
+zig build-exe -mcpu baseline -femit-bin="$tmp/fit_diff" -O"${FIT_DIFF_O:-fast}" -lc \
+    --dep harness_root=llama --dep fit -Mroot=harness/fit_diff.zig \
+    --dep llama -Mfit=cli/fit.zig \
+    --dep llama_c -Mllama=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
+    "$tmp/fit_dev.o" "$tmp/fit.o" "$tmp/log.o" "$tmp/fit_ref.o" \
+    zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+# FIT_DIFF_KEEP=<path> keeps the harness binary, to run under a debugger.
+[ -n "${FIT_DIFF_KEEP:-}" ] && cp "$tmp/fit_diff" "$FIT_DIFF_KEEP"
+
+# common_log echoes every line to stderr as well as to its file; the harness
+# reports on stderr too, so the echo is filtered out by its level prefix.
+FIT_DIFF_TMP="$tmp" "$tmp/fit_diff" "$QWEN35" "$QWEN3" "$MOE" "$DENSE" "$@" 2>"$tmp/stderr"
+rc=$?
+grep -v -E '^(I|W|E|D) ' "$tmp/stderr"
+exit $rc

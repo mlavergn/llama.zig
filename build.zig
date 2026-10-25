@@ -545,8 +545,12 @@ pub fn build(b: *std.Build) !void {
     // and 27.
     cli_module.addImport("zigjinja", jinja_module);
     cli_module.addImport("llama_h", llama_h_module);
-    cli_module.linkLibrary(reference.llama);
-    cli_module.linkLibrary(reference.ggml);
+    // libllama's own module, compiled into the CLI rather than linked as
+    // `libllama.a`: `cli/fit.zig` ports `common/fit.cpp`, which reads
+    // libllama's internal `llama-ext.h`, and calls `api/` as Zig. One
+    // compilation, so the `llama.h` calls and the Zig ones reach the same
+    // code; the module links `libggml` itself.
+    cli_module.addImport("llama", reference.llama.root_module);
     llamacpp.addSdkPaths(b, cli_module, sdk);
     llamacpp.addCudaLibraries(b, cli_module, cuda);
     llamacpp.addVulkanLibraries(b, cli_module, vulkan);
@@ -603,8 +607,7 @@ pub fn build(b: *std.Build) !void {
     // `session.zig` imports llama.h, so even the argument-parsing tests need
     // the header and the library behind it.
     cli_tests_module.addImport("llama_h", llama_h_module);
-    cli_tests_module.linkLibrary(reference.llama);
-    cli_tests_module.linkLibrary(reference.ggml);
+    cli_tests_module.addImport("llama", reference.llama.root_module);
     llamacpp.addSdkPaths(b, cli_tests_module, sdk);
     llamacpp.addCudaLibraries(b, cli_tests_module, cuda);
     llamacpp.addVulkanLibraries(b, cli_tests_module, vulkan);

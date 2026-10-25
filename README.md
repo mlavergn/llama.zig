@@ -207,6 +207,8 @@ others, and each negative-tested by injecting a fault and confirming it fails:
 | `make adapter-diff`, `scripts/quant-diff`, `scripts/opt-diff`, `scripts/opt-llama-diff`, `scripts/meta-diff` | LoRA and control vectors; quantizer and saver; ggml's optimizer and libllama's training; the multi-device meta backend |
 | `make sampler-diff` | 40,289 sampler and grammar records, ported vs stock |
 | `make parity-cli` | the CLI binary vs a C driver on the stock libraries, with Zig's safety checks on |
+| `make cnv-diff` | `llama-cli -cnv` vs a reference conversation over upstream's Jinja engine and libllama: replies, stderr and the cache kept each turn, on a hybrid and a plain-KV model |
+| `make fit-diff` | `--fit` vs upstream's `common_fit_params`: the context, layers, split and overrides it leaves and every line it logs, on fake GPUs with chosen memory, the CPU alone and Metal, every arm reached |
 | `make backend-ops` | 21,093 op configurations, Metal against CPU |
 | `make probe` | proves ported code is on the execution path at all — allocator and CPU dispatch, one run each |
 | `make parity-port` / `parity-port-cpu` | tokens, ported libraries vs stock, one driver — on Metal, or on the CPU alone |

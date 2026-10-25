@@ -26,6 +26,14 @@ extern fn ref_wcompile_sweep(pre: [*]const u32, prelen: usize, post: [*]const u3
 
 const max_groups = 32;
 
+/// What a `wchar_t` holds: the reference stores each code point with a
+/// `(wchar_t)` cast, which keeps 16 bits on Windows. `unicode.zig` narrows
+/// the same way before it calls `regex.WRegex` there (its `wchar_bits`), so
+/// the port's engine never sees more; the harness's side must not either.
+fn wchar(c: u32) u32 {
+    return if (@import("builtin").os.tag == .windows) c & 0xFFFF else c;
+}
+
 var checks: usize = 0;
 var failures: usize = 0;
 
@@ -164,7 +172,11 @@ fn compare2(comptime CharT: type, pat: []const CharT, in: []const CharT, nosubs:
 /// punctuation, plus the code points where `wchar_t` can go wrong -- the
 /// two separators `.` rejects, U+0130 (low byte `'0'`), U+0161 (low byte
 /// `'a'`), NEL, NBSP, Latin-1, CJK, a fullwidth digit and one past the BMP.
-const wide_alphabet = [_]u32{ 'a', 'b', '_', ' ', '\n', '\r', '1', '\'', 0x0B, 0xE9, 0x85, 0xA0, 0x130, 0x161, 0x2028, 0x2029, 0x4E00, 0x9FA5, 0xFF11, 0x1F600 };
+const wide_alphabet = blk: {
+    var a = [_]u32{ 'a', 'b', '_', ' ', '\n', '\r', '1', '\'', 0x0B, 0xE9, 0x85, 0xA0, 0x130, 0x161, 0x2028, 0x2029, 0x4E00, 0x9FA5, 0xFF11, 0x1F600 };
+    for (&a) |*c| c.* = wchar(c.*);
+    break :blk a;
+};
 
 fn Gen(comptime CharT: type) type {
     return struct {
@@ -377,7 +389,7 @@ fn wideSweep() void {
         var bad: usize = 0;
         var c: u32 = 0;
         while (c < n) : (c += 1) {
-            one[0] = c;
+            one[0] = wchar(c);
             const z: u8 = @intFromBool(re.match(&one, &m));
             if (z != ref[c]) {
                 bad += 1;
@@ -421,7 +433,7 @@ fn wideCompileSweep() void {
         var c: u32 = 0;
         while (c < cs.n) : (c += 1) {
             @memcpy(pat[0..pre.len], pre);
-            pat[pre.len] = c;
+            pat[pre.len] = wchar(c);
             @memcpy(pat[pre.len + 1 ..][0..post.len], post);
             const p = pat[0 .. pre.len + 1 + post.len];
             const z: u8 = if (regex.WRegex.compile(p)) |re_c| blk: {

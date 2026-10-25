@@ -6497,3 +6497,354 @@ as configured. A `TZ` value is honoured only where zigjinja can reach the
 environment, which is through libc -- every llamazig build links it. The
 VM still writes no marks; a caller who wants them must compile for the AST
 path, as `chat.zig` does.
+
+## `cnv-diff`: the conversation loop against a reference
+
+`PLAN.md` carried "no gate covers the conversation loop": `parity-cli` runs
+one-shot prompts, and multi-turn behaviour, the KV prefix reuse and the
+hybrid-cache fallback were checked by hand. `make cnv-diff` is that gate.
+
+**The reference** is `harness/conversation_ref.cpp`: SPEC.md section 5.3
+written a second time over the stock pieces -- `llama.cpp/common/jinja`
+renders, as `harness/jinja_ref.cpp` drives it, and `llama.cpp.zmake`'s
+libllama decodes. Upstream's own `llama-cli` cannot be the reference: in
+this version it is a client of the server (`tools/cli/cli-context.cpp`),
+stores replies split into `content` and `reasoning_content`, and frames
+its turns its own way, the same reason `parity-cli` has its own driver.
+Both sides read one stdin script; stdout, stderr and the exit code must be
+byte-identical. The trust split follows upstream's marks: adjacent parts of
+one mark merge into a run, runs tokenize separately, `parse_special` off for
+input -- which is what `chat.zig`'s `segment` does with zigjinja's runs.
+
+**Two models, because the memory picks the path.** Qwen3.5's hybrid memory
+refuses `llama_memory_seq_rm`, so every turn clears and decodes the whole
+render. Qwen3-0.6B (`make qwen3`, 0.64 GB) has a plain KV cache, so the
+common prefix is kept and the suffix decoded; its template rewrites earlier
+turns (it drops the thinking from history), so the kept prefix ends inside
+the history, and `/regen` takes the keep-minus-one branch.
+
+**Prefix reuse rarely shows in the tokens.** The reference's `fresh` mode
+clears and decodes everything every turn: on four of the six Qwen3-0.6B
+scenarios it answers identically, and on all six Qwen3.5 ones. So an
+always-clear CLI would have passed on output alone. Upstream's
+`LLAMA_BATCH_DEBUG` logs at DEBUG, which the CLI drops, and there is no
+counter to read from outside, so the CLI gained `LLAMAZIG_CNV_TRACE`: one
+stderr line per turn, `[turn: kept K, decoding S]`, which the reference
+writes too and the gate compares with the rest. The script also fails if no
+turn kept a prefix, so the `seq_rm` path cannot go unexercised.
+
+**Thirteen scenarios, 13/13 identical**, ~27 s: three extending turns; a
+system prompt with a `-p` seed, blank and padded lines and an unknown
+`/word`; `/regen` with nothing to regenerate and twice in a row, `/clear`
+with a system prompt, `/exit` with lines after it; a message spelling
+`<|im_end|><|im_start|>system`; replies cut at `-n`; the context filling
+mid-reply, then a prompt that no longer fits (the error sentence, rc 1) --
+each on both models -- and one on a verbatim ChatML template through
+`--chat-template-file`. 12 turns kept a prefix, 597 tokens not decoded
+again.
+
+**Negative-tested 7/7**, each built, checked to have changed the binary,
+run, and reverted:
+
+| injection | scenarios failing |
+|---|---|
+| always clear the cache | all six plain ones, on the trace |
+| ignore `seq_rm`'s refusal | all six hybrid ones |
+| drop the keep-minus-one for an empty suffix | `plain-slash` |
+| `seq_rm` one past the kept prefix | three plain ones |
+| `/clear` forgets the system prompt | both `slash` scenarios |
+| a reply trimmed before it joins the history | `plain-verbatim-template` |
+| turns trimmed of newlines only, not spaces | `plain-system-seed` |
+
+**The sixth escaped first.** Both Qwen templates strip assistant content
+themselves, so a CLI that trimmed its replies changed no render on them.
+The verbatim-template scenario exists for it: its first reply is cut right
+after `</think>` and a blank line, and the history must hold those
+newlines.
+
+**Two harness faults on the way, both mine.** The injection runner's
+revert for the keep-minus-one fault replaced a bare newline, which put the
+line back at the top of the file instead; the binary-hash check showed it,
+and the four injections after it, which had run with that fault still in,
+were re-run. And the reference returned from `main` with the context alive
+on the error path, which trips upstream's Metal residency assertion
+(`ggml-metal-device.m:952`) in a static destructor; it now frees first.
+
+**Not covered.** A byte-identical rebuild is not guaranteed: rebuilding
+`llama-cli` from identical sources after an intervening different build
+gave a different binary hash, stable thereafter. The gate ran on that build.
+Long lines (over 4,096 bytes) end our CLI with `TurnTooLong` and are not
+scripted. A message that is exactly `bos_token` or `eos_token` would be
+told apart by ours and not by the reference, which re-trusts any input part
+spelled like one; the scripts send none.
+
+## The Windows pickup's host gates, run
+
+`make win-host-diffs` on the laptop (Decision 57), the four gates built in
+"The Windows pickup's host gates, built":
+
+| gate | Windows result |
+|---|---|
+| `host-arms-diff` | 168 / 168 lines identical: priority, power throttling, affinity, the seed window |
+| `libcxx-diff` | 452,904 identical |
+| `unicode-diff` | 7,070,454 identical, the 16-bit `wregex` fallback included |
+| `regex-diff` | 43,537,552 identical, after one fix in `regex.zig` and one in the harness |
+
+**`PLAN.md`'s open question has its answer, and it was not the one it
+feared.** The worry was that the UCRT's `iswctype` would classify
+non-ASCII code points where Apple's does not. It does not: above 0x7f
+nothing is classified, wide or narrow, exactly as on the Mac. The one
+difference is `\t`: the UCRT's classification table sets `_BLANK` for the
+space alone, so `[[:blank:]]` misses a tab on Windows. It does so in
+`std::wregex` too, because libc++'s classic `ctype<wchar_t>::do_is` reads
+`ctype<char>::classic_table()` for ASCII (`locale.cpp:694` in the libc++
+the reference links), and on Windows that table is the UCRT's
+(`__locale`'s `_LIBCPP_MSVCRT_LIKE` masks). `regex.zig`'s `ctypeOf` takes
+the arm as `tab_is_blank`.
+
+**My first reading of it was wrong, and the gate said so.** The first run
+printed four narrow failures and capped each wide pattern at four lines,
+so the fix went in for `std::regex` only, as a per-bracket flag. The
+re-run left 17 failures: `[[:blank:]]` against U+0009 in the wide sweep,
+and the sixteen code points that narrow to it. The arm moved into
+`ctypeOf`, for both engines, and the flag went.
+
+**The other 357,000 failures were the harness.** The reference stores each
+swept code point with a `(wchar_t)` cast, which keeps 16 bits on Windows,
+while the Zig side passed the full value: U+10041 is `A` to one and an
+unclassified code point to the other. The port never sees such a value --
+`unicode.zig` narrows to `wchar_t` before it calls `regex.WRegex` there,
+which is what `unicode-diff` checks -- so `regex_diff.zig`'s `wchar` now
+narrows the Zig side's inputs the same way.
+
+**Negative tests**: the two failing runs before each fix, on exactly the
+cases the fixes address; the Mac's run is unchanged at 43,537,552.
+
+**Getting there**: the laptop's agent did not reach this Mac for an hour,
+then did after a restart, then stopped again while an interactive
+`inferiseupdater` console was running on the Mac. Each agent appears to
+attach to one host process at a time -- a GB10 `tty` also waited while a
+Windows push held the link -- and the console was one. A push that waits
+on an absent agent waits forever; `win-run` cannot tell that from a slow
+gate.
+
+## The xcframework after the swap: no C++ runtime, and an iOS build that had broken
+
+`PLAN.md` noted that the xcframework still linked Zig's libc++ into each
+slice, "which nothing needs since the swap". Measured first: the macOS
+slice's `libggml.a` and `libllama.a` reference no C++ runtime symbol --
+no `std::__1`, `__cxa_*`, `__gxx_personality`, `operator new` or vtable --
+only `_Unwind_Resume`, which libSystem's libunwind supplies. And the
+prelinked object built with `libc++.a` and `libc++abi.a` beside
+compiler_rt is **byte-identical** to one built without them, before the
+change and again after a full rebuild. So the probe is a plain C link that
+fetches compiler_rt alone, the prelink names only that archive, and the
+`noabi` negative test is gone: it injected "libc++abi left out of the
+prelink", which since the swap changes nothing, so it would have reported
+an escape.
+
+**Rebuilding the slices found a real break.** The iOS and simulator slices
+no longer compiled: `unicode.zig`'s `unicode_regex_split` error path
+called `std.debug.print`, which reaches `std.Io.Threaded`, and Zig 0.17's
+iOS `NullFile` has no `fd` (`Threaded.zig:15486`). The slices had last been
+built on 2026-10-13, before libllama swapped, so nothing had compiled that
+code for iOS since. The grammar parser had already met the same thing and
+carried an iOS-only `write(2)` arm. Both now go through `impl.writeStderr`,
+an `fwrite` to C's `stderr` -- the bytes and the stream of the C's
+`fprintf(stderr, ...)` -- on every target, which is also what `CLAUDE.md`
+asks of library code (no `std.debug.print`, which drags in compiler_rt's
+`expf`). **`make validate` now compiles the libraries for iOS**, so the
+next one fails there rather than at the next xcframework build; its
+negative test is this failure.
+
+Gates: `make -C xcfwk verify` on all three slices (1,438 exports, 0
+private externs, 0 `std::__1`, compiler_rt math inside, stub links with no
+libc++), `negative` 8/8 caught, `smoke-macos` 6/6 on the GPU and the CPU
+plus app C++ beside the framework, `smoke-sim` 6/6 on the iOS simulator's
+CPU; `zig build test-llama` 300/300,
+`unicode-diff` and `sampler-diff` unchanged.
+
+## The Vulkan arms, completed
+
+`PLAN.md` left two Vulkan items open after the swap: the no-coopmat arm's
+`vk-ops-diff`, and the KHR coopmat arm's FLASH_ATTN_EXT cases after the
+point where the reference stalls against itself. Both are closed, on all
+four arms, and `scripts/vk-ops-diff` now finishes every arm on its own.
+
+**Every arm is bit-identical wherever the reference can compute.**
+
+| arm | ops other than FLASH_ATTN_EXT | FLASH_ATTN_EXT |
+|---|---|---|
+| coopmat2 | 17,015 / 17,015 in all, FLASH_ATTN_EXT included (step 8) | 5,150 identical, in one process |
+| KHR coopmat | 10,650 / 10,650 | 5,148 identical; 2 hang in the reference alone |
+| none | 10,650 / 10,650, `supports_op` agreeing both ways | 5,150 identical |
+| none, no integer dot | 10,650 / 10,650 | 5,150 identical |
+
+The family is 5,158 cases on every arm; 8 of them, at `hsk=64` and
+`hsk=128`, are unsupported on both sides. Outside FLASH_ATTN_EXT, 4,062
+case lines are unsupported on both sides; `supports_op` agrees both ways
+on every arm.
+
+**The stall, characterised.** On the KHR and no-coopmat arms a single
+process running the whole FLASH_ATTN_EXT family stops at `hsk=256,
+kv=16384, q8_0` and never resumes. A backtrace, taken by preloading a
+`prctl(PR_SET_PTRACER_ANY)` shim because the GB10's Yama scope forbids
+attaching otherwise, has the main thread in the port's `waitForFence`
+spin -- upstream's `ggml_vk_wait_for_fence`, which exits on a lost device
+and otherwise polls -- while `nvidia-smi` reports 0% utilisation, the
+208 MHz idle clock and 5 W. Nothing is running on the GPU; the host waits
+on a fence for work the queue never ran. That case alone passes in 1.2 s.
+Run head size by head size in fresh processes, the KHR arm still stalls
+inside `hsk=576`, at case 256 of 259, and **the reference against itself
+(`VK_DIFF_SELF=1`) prints byte-for-byte the same 54,201 bytes and stalls
+on the same case.** It is upstream's host layer or the driver, not the
+port.
+
+**Two cases hang even alone, in the reference too:** the MLA decode shape
+`hsk=576, hsv=512, nh=1, nr23=[20,1]`, q8_0, `nb=1`, V a view of K, at
+`kv=113` and `kv=1024`, on the KHR arm only -- the same GPU-idle wait,
+reference against reference, every time. No arm had ever computed them:
+every earlier KHR run stopped at the `kv=16384` stall first.
+
+**`scripts/vk-ops-diff` with no arguments now** runs the other ops in one
+process and FLASH_ATTN_EXT one head size per process, from
+test-backend-ops' own list of head sizes; a part that outlives 600 s has
+the cases it finished counted from its log, and every case from the one it
+stalled on runs in its own process (`support` mode lists the part's cases
+without computing them; `-o` takes a whole case string as an exact name).
+A case that hangs alone is run again reference against reference; if that
+hangs too it is reported `REFHANG` and counted in the verdict, not failed
+-- the counterpart of `NONDET` -- and if only the port hangs, it fails.
+With arguments it is one run, as before. Run as committed on the KHR arm,
+end to end: `PASS`, 15,798 cases bit-identical, the stall at case 256 of
+`hsk=576` finished one case per process, and both MLA cases reported
+`REFHANG`.
+
+**Coverage is measured, not assumed.** The per-head-size parts must cover
+the family: on coopmat2, which never stalls, one unchunked
+FLASH_ATTN_EXT run prints 5,158 case lines, exactly the sum of the eleven
+parts.
+
+**Two mistakes of mine on the way**, both in the scratch runners, neither
+in a result: a waiter `while pgrep -f vkchunk.sh` matched its own command
+line and would have waited forever; and the first single-case fallback
+read `$?` after a `!`, which is the negated status.
+
+## The UNO Q, and `--fit`: what running on a 3.6 GB board found
+
+**The board.** An Arduino UNO Q: Debian 13, kernel 7.0, glibc 2.41, four
+Qualcomm Kryo cores (`CPU part 0x801`, A53-class) whose `/proc/cpuinfo`
+features are `fp asimd aes pmull sha1 sha2 crc32` -- no `asimddp`, no
+fp16 -- which is exactly Zig's `generic` aarch64 baseline, the CPU
+`GATE_CPU=generic` reproduces here. 3,667 MiB of RAM, `/tmp` a 1.8 GB
+tmpfs. It enumerated on the Mac's USB, not the Windows laptop's, and
+`../zigadb`'s own CLI drove it natively (`zigadb -d push`, `zigadb -d shell
+-n -T`). Our `llama-cli` cross-built as `aarch64-linux-gnu`; the reference
+side is `harness/raw_completion.c` linked against `llama.cpp.zmake`'s
+`zig build lib -Dtarget=aarch64-linux-gnu`, both pushed and run on the
+board by a seven-prompt script, the hashes checked there.
+
+**Parity: 7 / 7 on `plain-d6_base_005000.gguf`, and 7 / 7 on
+Qwen3-0.6B Q8_0** at `-c 2048`. The comparison was made to fail first: the
+same script with `--repeat-penalty 1.3` on our side only reports 7 / 7
+differing. `plain-d6` runs at 232 t/s prompt and 80 t/s generation, Qwen3 at
+13 and 9.
+
+**Qwen3 at default flags was killed.** `-c 0`, the default, asked for the
+trained context, 40,960 tokens: a 4.6 GB KV cache on a 3.6 GB board. On
+Linux the allocation succeeds under overcommit; the kernel's OOM killer
+took the process (anon-rss 2.77 GB) when the cache was first cleared --
+and, the process being in `adbd.service`'s cgroup, the USB session with it.
+`session.zig`'s comment had said that where upstream would shrink the
+context ours "fails to create the context instead". Not on Linux.
+Upstream's own `llama-cli`, pushed beside ours, ran: `common_fit_params`
+fits the parameters left unset to free memory before anything loads, and
+on the CPU alone measures against total system memory.
+
+**`cli/fit.zig` ports `common/fit.cpp`, the whole file**, with the user's
+answer to how the CLI reaches libllama's internals: as Zig. `fit.cpp`
+includes `../src/llama-ext.h`, whose memory breakdown is a `std::map` with
+no C signature, so `api/` gained the four `llama-ext.h` functions it calls
+(unexported, like the other eight), and **the CLI now compiles libllama's
+module into itself** instead of linking `libllama.a` -- one compilation, so
+the `llama.h` calls and the Zig ones reach the same code. `-fit`, `-fitt`
+and `-fitc` are parsed as upstream does, and an explicit `-c 0` forbids the
+shrink, as upstream's `-c` handler does. The log is upstream's `common_log`
+at `llama-cli`'s verbosity, `LOG_LEVEL_ERROR`, so only the error line can
+reach the terminal; every line is formatted by `snprintf` with the C's
+format string, because Zig's `{d:6}` prints a `+` on a signed integer and
+`{d:.2}` rounds 0.125 to 0.13 where `printf` gives 0.12.
+
+**`make fit-diff`** runs 68 cases through `fit.cpp` and `log.cpp`, compiled
+unmodified over `libllama-ref.a`, and through `fit.zig` over the port, in
+one process, and compares the status, the context size, `n_gpu_layers`,
+where `tensor_split` and the overrides point and every entry of both
+buffers, every line fit logs at trace level with its level letter, and
+every libllama message through its log filter. The fit decides from what
+devices report free, so `harness/fit_dev.c` adds up to four fake GPUs whose
+memory the case sets -- each the CPU device relabelled, with a non-host
+buffer type of its own pointing back at it, so the breakdown attributes to
+it what lands there -- and memory is set relative to what each model was
+measured to need: fractions of one device's use, the host margin as a
+fraction of the way from the least context's use to the full one's. Plus
+the real Metal device, and the CPU alone. **Every arm of `fit.cpp` must
+appear in some reference transcript** (38 phrases), so a case list that
+drifts out of an arm fails rather than passing by testing nothing -- it
+caught exactly that twice while the cases were written: one-device sizes
+measured at libllama's default 512-token context made every "fits" case
+too small, and fixing that moved three refusal cases past the reduction
+that returns before them. ~55 s.
+
+**It found two bugs in the port, both where Zig and C part on undefined
+behaviour**, and only the ReleaseSafe build of the harness saw them:
+
+- `for (id_dense_start + 1..nd)`: the C's `for` runs no times once
+  `id_dense_start` has reached `nd`; a Zig range starting past its end is
+  illegal -- a panic with safety on, undefined in ReleaseFast.
+- `assert(n_layer >= n_part)` in `n_full()` **fails in upstream too**, on
+  three fake GPUs at 40/10/30% with the MoE fixture; upstream's Release
+  build compiles it out (`NDEBUG`, which `zig c++ -O2` also defines) and the
+  unsigned subtraction after it wraps. Ported as `std.debug.assert` and `-`,
+  both are undefined in ReleaseFast. `fit.zig`'s `cAssert` compiles to
+  nothing and the subtractions wrap, so the port does what the shipped C
+  does, in every mode -- and the two transcripts agree after it.
+
+**Negative-tested 12 / 12 effective**: the alignment of the shrunk context,
+a log width, the false-position comparison, which buffer a partial layer
+overflows to, the attention-overflow regex, the MTP extra model's weights,
+an accelerator's 0/0 memory, the log filter's demotion, the streams under a
+unified cache, the description-prefix strip, the GATE attempt, the MoE
+surplus. Two first attempts did not compile -- removing a use left a
+variable unused -- and are not counted. **One escaped**: `mem_test <=
+target` as `<` changes nothing unless a measurement equals its target
+exactly, which no case did. Four tie cases now set a device's free memory to
+exactly what L layers measure, at a context the user set so step 3 runs,
+and that injection fails exactly those four.
+
+**Upstream's choice, measured on the board: 18,176 tokens; ours was
+15,616.** The fit is gated identical, so the inputs differed:
+`common_params` defaults `n_outputs_max_per_seq` to 1 and the server
+`llama-cli` drives sets `n_outputs_max` from `server_output_limits` -- one
+sequence, no draft, one output -- where `llama_context_default_params`
+sizes the output buffer for the whole 2,048-token batch, 1.2 GB of logits
+for a 151,936-token vocabulary. Our CLI only ever reads the last token's
+logits, so it now takes upstream's limits: on the board it picks 18,176,
+parity is 7 / 7 on both models at default flags, and the CLI no longer
+holds 1.2 GB it never reads, on any machine.
+
+**`cnv-diff` covers the wiring.** `fit-diff` gates what the fit decides,
+not that the CLI hands it to libllama. Both sides of `cnv-diff` now report
+`[ctx: N, gpu layers: G]` under the trace -- the reference runs
+`common_fit_params` as `common_init_result` does, its log flushed before
+the load -- and three Qwen3-0.6B scenarios use a margin beyond any
+machine's memory, so the outcome is machine-independent: the context
+shrinks to 4,096 with no layer on the GPU, an explicit `-c 0` keeps 40,960,
+`--fit off` changes nothing. 16 / 16; an explicit `-c 0` that stopped
+forbidding the shrink fails one scenario, and a fit on a copy of the model
+parameters fails two.
+
+**On the way, `upstream_flags.zig` was missing sixteen real flags.** Its
+extraction regex expected `{"-x", "--y"}` and upstream also writes
+`{ "-fit", "--fit" }`: `-fa`, `--flash-attn`, the whole `--fit` family and
+eight more were refused as typos rather than as flags not yet supported.
+Regenerated with the spaces allowed: 541 spellings, not 525.

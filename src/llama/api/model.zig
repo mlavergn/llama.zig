@@ -304,6 +304,27 @@ pub fn llama_model_is_diffusion(model: ?*const c.struct_llama_model) callconv(.c
     return arch.isDiffusion(modelOf(model).arch);
 }
 
+/// Ports `llama_model_n_expert` (llama-model.cpp:3046 @c1d0e7a00), from
+/// `llama-ext.h`.
+pub fn llama_model_n_expert(model: ?*const c.struct_llama_model) callconv(.c) i32 {
+    return @bitCast(modelOf(model).hparams.n_expert);
+}
+
+/// Ports `llama_model_n_devices` (llama-model.cpp:3050 @c1d0e7a00), from
+/// `llama-ext.h`.
+pub fn llama_model_n_devices(model: ?*const c.struct_llama_model) callconv(.c) i32 {
+    return @intCast(modelOf(model).devices.items.len);
+}
+
+/// Ports `llama_model_get_device` (llama-model.cpp:3054 @c1d0e7a00), from
+/// `llama-ext.h`: the `i`-th device the model's layers may go to, or null
+/// when `i` is out of range.
+pub fn llama_model_get_device(model: ?*const c.struct_llama_model, i: c_int) callconv(.c) c.ggml_backend_dev_t {
+    const devices = modelOf(model).devices.items;
+    if (i < 0 or i >= @as(c_int, @intCast(devices.len))) return null;
+    return devices[@intCast(i)].dev;
+}
+
 /// Ports `llama_model_target_layer_ids` (llama-model.cpp:3117 @c1d0e7a00),
 /// from `llama-ext.h`: the target model's layers an eagle3 or DFlash draft
 /// reads, or null when there are none.

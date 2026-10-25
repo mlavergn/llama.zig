@@ -64,15 +64,26 @@ const m_regex_word: Mask = 1 << 10;
 const m_alnum: Mask = m_alpha | m_digit;
 const m_graph: Mask = m_alnum | m_punct;
 
+/// Whether `\t` is `blank` in the `"C"` locale's table. libc++'s classic
+/// `ctype<char>` table is the C library's, and its classic
+/// `ctype<wchar_t>::do_is` reads that same table for ASCII (line 694 of
+/// `src/locale.cpp` in the libc++ the reference links -- libc++'s, not a
+/// citation of upstream). On Windows the table is the UCRT's,
+/// whose `_BLANK` marks the space alone -- measured by `scripts/regex-diff`
+/// built for Windows, which answered `PLAN.md`'s open question: `[[:blank:]]`
+/// misses `\t` there in `std::regex` and `std::wregex` alike, and no other
+/// byte, code point or class differs.
+const tab_is_blank = @import("builtin").os.tag != .windows;
+
 /// The `"C"` locale's `ctype` classification of a character. Apple's
 /// `ctype<char>::is` answers false for every byte above 0x7f, and
 /// `ctype<wchar_t>::is` for every code point above it -- measured over all
-/// 0x110000 by `scripts/regex-diff`.
+/// 0x110000 by `scripts/regex-diff`, on Windows too.
 fn ctypeOf(ch: u32) Mask {
     if (ch >= 0x80) return 0;
     var m: Mask = 0;
     if (ch == ' ' or (ch >= '\t' and ch <= '\r')) m |= m_space;
-    if (ch == ' ' or ch == '\t') m |= m_blank;
+    if (ch == ' ' or (tab_is_blank and ch == '\t')) m |= m_blank;
     if (ch < 0x20 or ch == 0x7f) m |= m_cntrl;
     if (ch >= 0x20 and ch < 0x7f) m |= m_print;
     if (ch >= 'A' and ch <= 'Z') m |= m_upper | m_alpha;
