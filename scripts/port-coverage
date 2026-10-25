@@ -184,7 +184,7 @@ report_unit() {
         # own table, so adding one there cannot break this silently again.
         {
             printf 'pub const probe_ported = false;\npub const probe_cpu = false;\npub const use_metal = %s;\npub const use_cuda = false;\npub const cuda_port = false;\npub const cuda_arch = "";\n' "$USE_METAL"
-            printf 'pub const use_vulkan = false;\npub const vulkan_port = false;\n'
+            printf 'pub const use_vulkan = false;\npub const vulkan_port = false;\npub const use_blas = false;\npub const blas_port = false;\n'
             grep -oE '\.option = "vk_[a-z0-9_]+"' build/llamacpp.zig | sed -E 's/.*"(vk_[a-z0-9_]+)"/pub const \1 = false;/'
         } > "$d/config.zig"
         if ! zig build-obj ${TARGET_ARGS[@]+"${TARGET_ARGS[@]}"} -mcpu baseline -femit-bin="$d/$base.o" "${INCLUDES[@]}" -lc \

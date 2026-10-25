@@ -7005,3 +7005,75 @@ where the C's null attributes take the platform's default. Replacing it with
 the C's `pthread_create` and `CreateThread` removed those allocations and
 **did not move the footprint** -- 7.2 MB a cycle with and without -- so it
 was reverted: it fixes nothing, and the port keeps `std.Thread`.
+
+## BLAS over Accelerate
+
+**What was asked, and what it came to.** zDNN, ZenDNN and BLAS, "not
+external libs". Measured, each is a thin backend around a vendor library:
+BLAS 530 lines around `cblas_sgemm`, zDNN 924 around IBM's `libzdnn`
+(s390x with NNPA, z16 or later), ZenDNN 838 around AMD's C++ `zendnnl.hpp`,
+which upstream's CMake downloads and builds with oneDNN, libxsmm and AOCL.
+Without the library there is nothing left to port, so zDNN and ZenDNN are
+not built. BLAS on Apple is the exception: the port already links Accelerate
+on every Darwin target and calls its vDSP from the CPU backend, so a BLAS
+backend over it adds nothing (PLAN.md, Decision 60).
+
+**The port.** `src/ggml/blas.zig`, the C++ line for line with the arms this
+target compiles: Accelerate's description, no vendor thread-count call, no
+OpenMP -- so the dequantization runs on the `std::async` arm, one thread per
+task and one split per plane, joined after the last plane. Its contract is
+four C exports, the same four the reference object has (the rest of that
+object is libc++ template code). `ACCELERATE_NEW_LAPACK` and
+`ACCELERATE_LAPACK_ILP64`, which upstream defines for Accelerate, bind
+`cblas_sgemm` to `cblas_sgemm$NEWLAPACK$ILP64` with 64-bit integers, read
+off the reference object with `nm`; the port calls that symbol by name.
+`-Dblas` builds it, Apple only, off by default -- the reference configuration
+has BLAS off, and on by default it would change which device computes every
+large CPU `MUL_MAT` in every gate. The registry registers it where the C++
+does, after Vulkan and before the CPU.
+
+**`make blas-diff`**: upstream's translation unit compiled with its four
+exports renamed `ref_*`, linked beside a `-Dblas` libggml, both asked the same
+questions in one process. Every vtable answer; `supports_op` over every type
+at `ne0`, `ne1` and `ne10` straddling 32, F32 and F16 `src1`, contiguous and
+not, the Hadamard hint, `OUT_PROD`'s types, ranks and `src1` layouts, the
+view ops and ops it must refuse (333 true, 1,641 false); and 87 computations
+on bits -- every type with a `to_float`, broadcast in both batch dimensions,
+at one thread and four, plus a row count four threads do not divide and a
+`k` wide enough to give each thread one row, and `OUT_PROD` with a plain and
+a transposed `src1`. A case counts only if the reference overwrote a
+sentinel in every output and lands near the CPU backend by normalized mean
+squared error, so a graph neither side computed cannot pass by agreeing.
+2,547 checks.
+
+Negative-tested on twelve faults: eleven caught, one provably inert (the
+thread count, which only changes how rows split -- each row converts the same
+way). One escaped at first: dropping `ggml_is_matrix(src1)` from `OUT_PROD`,
+because the sweep's 3-d case made both operands 3-d and `src0`'s own check
+refused it first. `ggml_out_prod` broadcasts a matrix `src0` over a 3-d
+`src1`; with that case and a 4-d one added it is caught. The `lda` fault was
+caught by Accelerate itself: "Parameter number 9 passed to cblas_sgemm had
+an invalid value".
+
+**`make blas-node-diff`**, and why its first two attempts compared nothing.
+`node_dump` over upstream's BLAS and over ours, every node of a decode. On
+Qwen3.5 every node was identical -- and identical to a build without BLAS
+too: its quantized weights sit in the CPU's repack buffers, which are not
+host buffers, and BLAS's `supports_buft` takes host buffers only, so the
+scheduler kept every multiply on the CPU. On the f32 `plain-d6` the same
+again, for a different reason: `node_dump`'s `cpu` mode names the CPU as the
+model's device, so libllama's backend list is CPU, BLAS, CPU, and the
+scheduler gives a weight's op to the first backend that takes it. Upstream's
+own libllama does exactly the same in both cases -- measured by linking
+`libllama-ref.a` -- so neither is a port difference; they are why a gate
+must prove the backend ran. `node_dump` gained a `host` mode, as `-ngl 0
+--no-kv-offload --no-op-offload` loads: default devices, BLAS ahead of the
+CPU. There, on `plain-d6`, 384 nodes identical at one and four threads and
+32 fused steps identical, and **366 of the 384 differ from the build without
+BLAS**, which the script requires. A perturbed `alpha` in the port fails it
+at the first `MUL_MAT`.
+
+**One false check fixed on the way.** The scripts first matched the archive
+member as `'/ggml-blas\.o:'`; `nm -A` on macOS prints `libggml.a:ggml-blas.o:`,
+so "the port contains no upstream object" passed for any library. With
+`[:/]` it refuses the upstream build, shown by pointing `blas-diff` at it.

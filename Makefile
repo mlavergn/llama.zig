@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
+.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -310,6 +310,22 @@ vk-ops-diff: vk-builds
 vk-push-layout:
 	zig build vk-push-layout $(VK_GATE_FLAGS)
 
+# The BLAS backend (PLAN.md, Decision 60): Apple only, over Accelerate.
+# blas-diff runs upstream's ggml-blas.cpp, its exports renamed, beside the
+# port in one process -- the vtables, supports_op swept, every type's
+# computation on bits; blas-node-diff diffs a decode node by node with BLAS
+# in the scheduler. See each script.
+blas-builds:
+	zig build reference --release=fast -Dblas -Dblas-port=false --prefix zig-out/blas-upstream
+	zig build reference --release=fast -Dblas --prefix zig-out/blas-port
+	zig build reference --release=fast --prefix zig-out/noblas
+
+blas-diff: blas-builds
+	./scripts/blas-diff
+
+blas-node-diff: blas-builds
+	./scripts/blas-node-diff
+
 # The x86 gates, run on the Windows laptop (Decision 57) through
 # zigupdater's link: each cross-builds both sides for
 # x86_64-windows-gnu at X86_CPU (x86_64_v3), pushes the programs and reads
@@ -602,3 +618,23 @@ qwen35xs:
 # Download Qwen3.5-2B UD-Q4_K_XL; dynamic quant for better quality (1.34GB).
 qwen35xl:
 	curl -L -o Qwen3.5-2B-UD-Q4_K_XL.gguf https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-UD-Q4_K_XL.gguf
+
+# ---------------------------------------------
+# Package
+# ---------------------------------------------
+
+.PHONY: pkg
+
+# zigpkg's `zpkg` (../zigpkg) packages, signs, notarizes and publishes the CLI
+# as package.zon says; signing needs the gitignored signing.zon naming the store.
+ZPKG ?= zpkg
+
+# What the package installs (package.zon's .pkg.root).
+PKG_ROOT := zig-out/pkg/root
+
+# Build the CLI into zig-out/pkg/root, then the package with zpkg.
+pkg:
+	@command -v $(ZPKG) >/dev/null || { echo "❌ $(ZPKG) not found: build ../zigpkg, or set ZPKG"; exit 1; }
+	rm -rf $(PKG_ROOT)
+	zig build cli --release=fast --prefix $(PKG_ROOT)
+	$(ZPKG) --package

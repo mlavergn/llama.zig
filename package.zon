@@ -1,0 +1,7 @@
+.{
+    .name = "llamazig",
+    .pkg = .{
+        .root = "zig-out",
+        .sign = .{"llama-cli"},
+    },
+}

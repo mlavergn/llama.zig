@@ -209,6 +209,8 @@ others, and each negative-tested by injecting a fault and confirming it fails:
 | `make parity-cli` | the CLI binary vs a C driver on the stock libraries, with Zig's safety checks on |
 | `make cnv-diff` | `llama-cli -cnv` vs a reference conversation over upstream's Jinja engine and libllama: replies, stderr and the cache kept each turn, on a hybrid and a plain-KV model |
 | `make fit-diff` | `--fit` vs upstream's `common_fit_params`: the context, layers, split and overrides it leaves and every line it logs, on fake GPUs with chosen memory, the CPU alone and Metal, every arm reached |
+| `make blas-diff` | The BLAS backend (Apple, over Accelerate) vs upstream's `ggml-blas.cpp` in one process: every vtable answer, `supports_op` swept, every type's multiply on bits |
+| `make blas-node-diff` | A decode with BLAS in the scheduler, node by node and fused, ported vs upstream BLAS; a build without BLAS must differ, or BLAS never ran |
 | `make backend-ops` | 21,093 op configurations, Metal against CPU |
 | `make probe` | proves ported code is on the execution path at all — allocator and CPU dispatch, one run each |
 | `make parity-port` / `parity-port-cpu` | tokens, ported libraries vs stock, one driver — on Metal, or on the CPU alone |

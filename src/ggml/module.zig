@@ -74,6 +74,11 @@ comptime {
     // `config.vulkan_port` until the swap: until then the default build
     // compiles upstream's `ggml-vulkan.cpp`, which exports the same symbols.
     if (config.vulkan_port) _ = @import("vulkan/module.zig");
+    // ggml-blas/, over Accelerate only (PLAN.md, Decision 60). Behind
+    // `config.blas_port`: `-Dblas-port=false` compiles upstream's
+    // `ggml-blas.cpp` instead, for the gates, which exports the same four
+    // symbols.
+    if (config.blas_port) _ = @import("blas.zig");
 }
 
 // -----------------------------------------------------------------------------

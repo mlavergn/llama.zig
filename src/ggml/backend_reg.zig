@@ -64,6 +64,10 @@ const use_cuda = config.use_cuda;
 /// with `-Dvulkan`. Comptime for the same reason as `use_metal`.
 const use_vulkan = config.use_vulkan;
 
+/// Mirrors `GGML_USE_BLAS`, which `build/llamacpp.zig` defines when built
+/// with `-Dblas`. Comptime for the same reason as `use_metal`.
+const use_blas = config.use_blas;
+
 /// True when the C++ build would leave `NDEBUG` unset, which gates the
 /// registry's per-backend debug logging and the `silent` flag in
 /// `ggml_backend_load_all_from_path`.
@@ -186,6 +190,10 @@ extern fn ggml_backend_cuda_reg() c.ggml_backend_reg_t;
 /// as `ggml_backend_metal_reg` is.
 extern fn ggml_backend_vk_reg() c.ggml_backend_reg_t;
 
+/// `ggml_backend_blas_reg`, from `ggml-blas.h`. Declared rather than
+/// imported, as `ggml_backend_metal_reg` is.
+extern fn ggml_backend_blas_reg() c.ggml_backend_reg_t;
+
 const Entry = struct {
     reg: c.ggml_backend_reg_t,
     handle: ?*anyopaque,
@@ -199,9 +207,9 @@ const Registry = struct {
     /// Ports `ggml_backend_registry`'s constructor
     /// (src/ggml-backend-reg.cpp:119 @c1d0e7a00).
     ///
-    /// Only the `GGML_USE_CUDA`, `GGML_USE_METAL`, `GGML_USE_VULKAN` and
-    /// `GGML_USE_CPU` arms are compiled here, in the C++'s order: CUDA first,
-    /// CPU last.
+    /// Only the `GGML_USE_CUDA`, `GGML_USE_METAL`, `GGML_USE_VULKAN`,
+    /// `GGML_USE_BLAS` and `GGML_USE_CPU` arms are compiled here, in the
+    /// C++'s order: CUDA first, CPU last.
     ///
     /// Return: nothing. Registration failures are not reportable through the
     /// C++ constructor either.
@@ -217,6 +225,7 @@ const Registry = struct {
                 impl.logDebug("Vulkan backend disabled by GGML_DISABLE_VULKAN environment variable\n", .{});
             }
         }
+        if (use_blas) self.registerBackend(ggml_backend_blas_reg(), null);
         self.registerBackend(c.ggml_backend_cpu_reg(), null);
     }
 
@@ -978,7 +987,7 @@ test "the registry reports the two backends this build compiles" {
     // and what `ggml_backend_init_best` depends on. The ported test root
     // compiles without Metal, so it sees one.
     const gpu_regs: usize = @as(usize, @intFromBool(use_metal)) + @intFromBool(use_cuda) +
-        @intFromBool(use_vulkan and std.c.getenv("GGML_DISABLE_VULKAN") == null);
+        @intFromBool(use_vulkan and std.c.getenv("GGML_DISABLE_VULKAN") == null) + @intFromBool(use_blas);
     try std.testing.expectEqual(gpu_regs + 1, ggml_backend_reg_count());
 
     if (use_cuda) {

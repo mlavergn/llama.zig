@@ -1,0 +1,91 @@
+#!/bin/bash
+# Diff every node of a decode with ggml's BLAS backend in the scheduler,
+# ported against upstream's `ggml-blas.cpp` (PLAN.md, Decision 60).
+#
+# `harness/node_dump.c` is linked against two `-Dblas` builds of this
+# repository that differ only in the BLAS backend -- upstream's translation
+# unit (`-Dblas-port=false`) and `src/ggml/blas.zig` -- and runs in `host`
+# mode, as `-ngl 0 --no-kv-offload --no-op-offload` would: the scheduler
+# then gives BLAS every large `MUL_MAT` whose weight is in a host buffer. Per
+# node at 1 and 4 threads, then fused over `STEPS` greedy steps.
+#
+# **A weight must be f32 or f16 for BLAS to see it.** Quantized weights go to
+# the CPU's repack buffers, which are not host buffers, so the scheduler keeps
+# their multiplies on the CPU -- on both sides alike, so a quantized model
+# would compare nothing. The default model is the f32 `plain-d6`, and the
+# gate requires a third build, without BLAS, to differ on some node: if it
+# does not, BLAS never ran and agreement would mean nothing.
+#
+# `harness/node_dump.c`'s `cpu` mode cannot be used: naming the CPU as the
+# model's device puts a CPU backend first in the scheduler's list, ahead of
+# BLAS, and it takes every op.
+#
+# Usage: scripts/blas-node-diff [model.gguf] [prompt]
+# Requires:
+#   zig build reference --release=fast -Dblas -Dblas-port=false --prefix zig-out/blas-upstream
+#   zig build reference --release=fast -Dblas --prefix zig-out/blas-port
+#   zig build reference --release=fast --prefix zig-out/noblas
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODEL="${1:-$HOME/.cache/zigtrain/gguf/plain-d6_base_005000.gguf}"
+PROMPT="${2:-The history of the printing press begins in the fifteenth century, when Johannes Gutenberg combined movable metal type, oil-based inks and a wooden press to produce books far faster}"
+STEPS=${STEPS:-32}
+[ -f "$MODEL" ] || { echo "missing $MODEL" >&2; exit 2; }
+
+for side in blas-upstream blas-port noblas; do
+    [ -f "zig-out/$side/lib/libggml.a" ] || { echo "missing zig-out/$side/lib/libggml.a -- see the Requires lines in $0" >&2; exit 2; }
+done
+nm -A zig-out/blas-upstream/lib/libggml.a 2>/dev/null | grep -q '[:/]ggml-blas\.o:' \
+    || { echo "FAIL: zig-out/blas-upstream has no upstream ggml-blas.o -- build it with -Dblas -Dblas-port=false" >&2; exit 1; }
+if nm -A zig-out/blas-port/lib/libggml.a 2>/dev/null | grep -q '[:/]ggml-blas\.o:'; then
+    echo "FAIL: zig-out/blas-port contains upstream's ggml-blas.o -- build it with -Dblas" >&2; exit 1
+fi
+nm -gU zig-out/blas-port/lib/libggml.a 2>/dev/null | grep -q ' T _ggml_backend_blas_reg$' \
+    || { echo "FAIL: zig-out/blas-port has no BLAS backend -- build it with -Dblas" >&2; exit 1; }
+if nm -gU zig-out/noblas/lib/libggml.a 2>/dev/null | grep -q ' T _ggml_backend_blas_reg$'; then
+    echo "FAIL: zig-out/noblas has a BLAS backend -- build it without -Dblas" >&2; exit 1
+fi
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+for side in blas-upstream blas-port noblas; do
+    d=zig-out/$side/lib
+    zig cc harness/node_dump.c -o "$tmp/$side" -std=c11 -O2 -I llama.cpp/include -I llama.cpp/ggml/include \
+        "$d/libllama.a" "$d/libggml.a" -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+        -F "$SDK/System/Library/Frameworks" 2>"$tmp/$side.log" \
+        || { echo "FAIL: could not link against $d" >&2; grep -m5 error "$tmp/$side.log" >&2; exit 1; }
+done
+
+fail=0
+for t in 1 4; do
+    for side in blas-upstream blas-port noblas; do
+        "$tmp/$side" "$MODEL" "$PROMPT" "$t" host > "$tmp/$side.$t.txt" 2>"$tmp/$side.$t.err" \
+            || { echo "FAIL: the $side run aborted"; tail -3 "$tmp/$side.$t.err"; exit 1; }
+    done
+    n=$(wc -l < "$tmp/blas-upstream.$t.txt" | tr -d ' ')
+    used=$(diff "$tmp/blas-upstream.$t.txt" "$tmp/noblas.$t.txt" | grep -c '^<')
+    [ "$used" -gt 0 ] || { echo "FAIL: no node differs from the build without BLAS at $t threads -- BLAS never ran"; exit 1; }
+    if cmp -s "$tmp/blas-upstream.$t.txt" "$tmp/blas-port.$t.txt"; then
+        echo "  per node, $t thread(s): $n nodes identical ($used of them computed differently without BLAS)"
+    else
+        echo "  per node, $t thread(s): DIFFERS; first divergent lines:"
+        diff "$tmp/blas-upstream.$t.txt" "$tmp/blas-port.$t.txt" | grep '^[<>]' | head -4
+        fail=1
+    fi
+done
+for side in blas-upstream blas-port; do
+    "$tmp/$side" "$MODEL" "$PROMPT" 4 host fused "$STEPS" > "$tmp/$side.fused.txt" 2>/dev/null \
+        || { echo "FAIL: the fused $side run aborted"; exit 1; }
+done
+if cmp -s "$tmp/blas-upstream.fused.txt" "$tmp/blas-port.fused.txt"; then
+    echo "  fused, $STEPS steps: identical"
+else
+    echo "  fused: DIFFERS"; diff "$tmp/blas-upstream.fused.txt" "$tmp/blas-port.fused.txt" | head -4; fail=1
+fi
+
+[ "$fail" -eq 0 ] && { echo "PASS: every node and every fused step identical with the ported BLAS backend"; exit 0; }
+echo "FAIL: the ported BLAS backend changes a decode"
+exit 1

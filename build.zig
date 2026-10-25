@@ -229,6 +229,29 @@ fn cudaOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Cuda {
     return .{ .toolkit = toolkit, .arch = arch, .libstdcxx = libstdcxx, .port = port };
 }
 
+/// Resolves `-Dblas`: ggml's BLAS backend over Apple's Accelerate.
+///
+/// Off unless `-Dblas`, and Apple only (PLAN.md, Decision 60): every other
+/// BLAS is a vendor library the library may not gain, while Accelerate is
+/// already linked on every Darwin target. The port is the default;
+/// `-Dblas-port=false` builds upstream's `ggml-blas.cpp` instead, for the
+/// gates.
+///
+/// Parameters:
+/// - `b`: the build graph, which owns the options.
+/// - `target`: the target being built, which must be Darwin.
+///
+/// Return: the selection, or null when BLAS is off.
+fn blasOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Blas {
+    const enabled = b.option(bool, "blas", "Build ggml's BLAS backend over Apple's Accelerate (Apple targets only)") orelse false;
+    const port = b.option(bool, "blas-port", "Use the Zig BLAS backend (default: true; false builds upstream's, for the gates)") orelse true;
+    if (!enabled) return null;
+    if (!target.result.os.tag.isDarwin()) {
+        std.debug.panic("-Dblas: the BLAS backend is built over Apple's Accelerate only; any other BLAS is an external library (PLAN.md, Decision 60)", .{});
+    }
+    return .{ .port = port };
+}
+
 /// Resolves the `-Dvulkan` options and asks `glslc` which shader extensions
 /// it accepts, as `ggml-vulkan/CMakeLists.txt:34-57` and `llama.cpp.zmake`'s
 /// `configureVulkan` do.
@@ -395,6 +418,7 @@ pub fn build(b: *std.Build) !void {
 
     const cuda = cudaOptions(b, cfg.target);
     const vulkan = vulkanOptions(b);
+    const blas = blasOptions(b, cfg.target);
     const reference = try llamacpp.add(b, .{
         .target = cfg.target,
         .optimize = cfg.optimize,
@@ -404,6 +428,7 @@ pub fn build(b: *std.Build) !void {
         .probe_cpu = probe_cpu,
         .cuda = cuda,
         .vulkan = vulkan,
+        .blas = blas,
     });
 
     const ggml_install = b.addInstallArtifact(reference.ggml, .{});

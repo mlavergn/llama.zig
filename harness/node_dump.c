@@ -14,9 +14,14 @@
  * dot-product epilogues as the first divergent MUL_MAT of a CPU-only Qwen3.5
  * decode, which the vec_dot goldens had passed.
  *
- * argv: <model.gguf> <prompt> <n_threads> [gpu|cpu] [fused <n_steps>]
+ * argv: <model.gguf> <prompt> <n_threads> [gpu|cpu|host] [fused <n_steps>]
  *   The model is loaded on the CPU device alone unless `gpu` is given: on a
  *   Metal machine the CPU kernels are otherwise never on the path.
+ *   `host` loads it as `-ngl 0 --no-kv-offload --no-op-offload` does: the
+ *   default devices, no layer offloaded. `cpu` names the CPU as the model's
+ *   device, which puts a CPU backend first in the scheduler's list, ahead of
+ *   any ACCEL device; `host` leaves BLAS ahead of the CPU, where a CPU run
+ *   uses it.
  *
  * `fused` mode: observing every node costs more than speed. Answering `ask`
  * with true splits the graph at every node, so a backend can never fuse
@@ -83,10 +88,11 @@ static bool observe(struct ggml_tensor * t, bool ask, void * user_data) {
 
 int main(int argc, char ** argv) {
     if (argc < 4) {
-        fprintf(stderr, "usage: %s <model.gguf> <prompt> <n_threads> [gpu|cpu] [fused <n_steps>]\n", argv[0]);
+        fprintf(stderr, "usage: %s <model.gguf> <prompt> <n_threads> [gpu|cpu|host] [fused <n_steps>]\n", argv[0]);
         return 2;
     }
     const int gpu = argc > 4 && strcmp(argv[4], "gpu") == 0;
+    const int host = argc > 4 && strcmp(argv[4], "host") == 0;
     const int fused = argc > 6 && strcmp(argv[5], "fused") == 0;
     const int n_steps = fused ? atoi(argv[6]) : 0;
 
@@ -96,6 +102,8 @@ int main(int argc, char ** argv) {
     ggml_backend_dev_t cpu_only[2] = { NULL, NULL };
     if (gpu) {
         mp.n_gpu_layers = 99;
+    } else if (host) {
+        mp.n_gpu_layers = 0;
     } else {
         cpu_only[0] = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
         mp.devices = cpu_only;

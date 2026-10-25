@@ -337,6 +337,17 @@ pub const Options = struct {
     /// Builds ggml's Vulkan backend into `libggml.a`; null leaves it out.
     /// See `addVulkan`.
     vulkan: ?Vulkan = null,
+    /// Builds ggml's BLAS backend, over Accelerate, into `libggml.a`; null
+    /// leaves it out. Apple only (PLAN.md, Decision 60). See `addBlas`.
+    blas: ?Blas = null,
+};
+
+/// ggml's BLAS backend, which this build compiles over Apple's Accelerate
+/// alone (PLAN.md, Decision 60).
+pub const Blas = struct {
+    /// Use the Zig port (`src/ggml/blas.zig`) in place of upstream's
+    /// `ggml-blas.cpp`. `build.zig` defaults it on; the gates build both.
+    port: bool = true,
 };
 
 /// The Vulkan toolchain every Vulkan build uses, resolved by `build.zig`
@@ -438,6 +449,9 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     // Mirrors `-DGGML_USE_VULKAN`, for `backend_reg.zig`.
     options.addOption(bool, "use_vulkan", opts.vulkan != null);
     options.addOption(bool, "vulkan_port", if (opts.vulkan) |vk| vk.port else false);
+    // Mirrors `-DGGML_USE_BLAS`, for `backend_reg.zig`.
+    options.addOption(bool, "use_blas", opts.blas != null);
+    options.addOption(bool, "blas_port", if (opts.blas) |bl| bl.port else false);
     // The shader extensions `glslc` accepted: the C++'s
     // `GGML_VULKAN_*_GLSLC_SUPPORT` macros, for the ported host layer.
     for (vulkan_glslc_features) |f| {
@@ -508,6 +522,7 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
 
     if (opts.cuda) |cuda| try addCuda(b, mod, cuda);
     if (opts.vulkan) |vk| try addVulkan(b, mod, vk);
+    if (opts.blas) |bl| addBlas(b, mod, bl, defines);
 
     // LLVM's backend, always. The port calls LLVM intrinsics by name --
     // `sdot` and `smmla` on ARM, `vcvtps2ph` on x86 -- which only that
@@ -945,6 +960,37 @@ fn vulkanShaders(b: *std.Build, vk: Vulkan) !VulkanShaders {
     return vulkan_shaders_once.?;
 }
 
+/// The `-D` flags `ggml-blas/CMakeLists.txt` adds for `GGML_BLAS_VENDOR`
+/// Apple.
+const blas_accelerate_defines = [_][]const u8{
+    "-DACCELERATE_NEW_LAPACK",
+    "-DACCELERATE_LAPACK_ILP64",
+    "-DGGML_BLAS_USE_ACCELERATE",
+};
+
+/// Adds ggml's BLAS backend to the ggml module.
+///
+/// With `bl.port` off this is the reference: upstream's `ggml-blas.cpp`,
+/// compiled unmodified with the Accelerate vendor's flags. With it on,
+/// `src/ggml/blas.zig` takes its place through the module barrel, and nothing
+/// is added here. Accelerate is already linked on every Darwin target.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `mod`: the ggml module.
+/// - `bl`: which side to build.
+/// - `defines`: ggml's own `-D` flags for this target.
+///
+/// Return: nothing.
+fn addBlas(b: *std.Build, mod: *std.Build.Module, bl: Blas, defines: []const []const u8) void {
+    if (bl.port) return;
+    mod.addCSourceFiles(.{
+        .root = b.path(root),
+        .files = &.{"ggml/src/ggml-blas/ggml-blas.cpp"},
+        .flags = flags(b, &.{ &cxx_flags, defines, &blas_accelerate_defines }),
+    });
+}
+
 /// Adds ggml's Vulkan backend to the ggml module.
 ///
 /// With `vk.port` off this is the reference: upstream's `ggml-vulkan.cpp`
@@ -1205,6 +1251,8 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
     options.addOption(bool, "use_cuda", false);
     options.addOption(bool, "use_vulkan", false);
     options.addOption(bool, "vulkan_port", false);
+    options.addOption(bool, "use_blas", false);
+    options.addOption(bool, "blas_port", false);
     options.addOption(bool, "cuda_port", false);
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
@@ -1289,6 +1337,8 @@ fn portedTestModuleInner(
     options.addOption(bool, "use_cuda", false);
     options.addOption(bool, "use_vulkan", false);
     options.addOption(bool, "vulkan_port", false);
+    options.addOption(bool, "use_blas", false);
+    options.addOption(bool, "blas_port", false);
     options.addOption(bool, "cuda_port", false);
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));

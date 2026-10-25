@@ -1,0 +1,48 @@
+#!/bin/bash
+# The ported BLAS backend against upstream's `ggml-blas.cpp`, in one process
+# (PLAN.md, Decision 60) -- see the header of harness/blas_diff.c.
+#
+# Upstream's translation unit is compiled here, unmodified, with the
+# Accelerate vendor's flags and its four exports renamed `ref_*` -- the
+# `-D` rename `NOTES.md` records as unusable for swapping a file, because it
+# renames internal callers too, which is what is wanted here. It links beside
+# a `-Dblas` libggml, whose registry holds the port.
+#
+# Usage: scripts/blas-diff
+#   Requires: zig build reference --release=fast -Dblas --prefix zig-out/blas-port
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+PORT=${BLAS_PORT_DIR:-zig-out/blas-port/lib}
+[ -f "$PORT/libggml.a" ] || { echo "missing $PORT/libggml.a -- see the Requires line in $0" >&2; exit 2; }
+if nm -A "$PORT/libggml.a" 2>/dev/null | grep -q '[:/]ggml-blas\.o:'; then
+    echo "FAIL: $PORT/libggml.a contains upstream's ggml-blas.o -- build it with -Dblas (the port is the default)" >&2; exit 1
+fi
+nm -gU "$PORT/libggml.a" 2>/dev/null | grep -q ' T _ggml_backend_blas_reg$' \
+    || { echo "FAIL: $PORT/libggml.a has no BLAS backend -- build it with -Dblas" >&2; exit 1; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+INC=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src)
+RENAME=()
+for s in ggml_backend_blas_init ggml_backend_is_blas ggml_backend_blas_set_n_threads ggml_backend_blas_reg; do
+    RENAME+=("-D$s=ref_$s")
+done
+
+zig c++ -c llama.cpp/ggml/src/ggml-blas/ggml-blas.cpp -o "$tmp/ref.o" -std=c++17 -O2 "${INC[@]}" \
+    -DGGML_USE_CPU -DACCELERATE_NEW_LAPACK -DACCELERATE_LAPACK_ILP64 -DGGML_BLAS_USE_ACCELERATE "${RENAME[@]}" \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/cc.log" \
+    || { echo "FAIL: could not compile the reference" >&2; tail -5 "$tmp/cc.log" >&2; exit 1; }
+n=$(nm -gU "$tmp/ref.o" | grep -cE ' T _ref_ggml_backend_(blas_init|is_blas|blas_set_n_threads|blas_reg)$')
+[ "$n" -eq 4 ] || { echo "FAIL: expected 4 renamed reference exports, got $n" >&2; exit 1; }
+zig cc -c harness/blas_diff.c -o "$tmp/harness.o" -std=c11 -O2 "${INC[@]}" 2>"$tmp/cc.log" \
+    || { echo "FAIL: could not compile the harness" >&2; tail -5 "$tmp/cc.log" >&2; exit 1; }
+zig c++ "$tmp/harness.o" "$tmp/ref.o" "$PORT/libggml.a" -o "$tmp/blas_diff" \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/ld.log" \
+    || { echo "FAIL: could not link the harness" >&2; grep -m5 error "$tmp/ld.log" >&2; exit 1; }
+
+"$tmp/blas_diff"

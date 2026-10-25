@@ -132,6 +132,8 @@ upstream's per-architecture fixtures (`make arch-model-diff`).
 | CPU | Enabled. Accelerate on, llamafile SGEMM on, BLAS and OpenMP off. |
 | CUDA | Enabled on Linux when `nvcc` is found (`-Dcuda`). Host layer in Zig; upstream's `.cu` kernels compiled unmodified to fatbins and embedded. |
 | Vulkan | Enabled with `-Dvulkan` (Linux, pinned toolchain in `.tools/vulkan/`). Host layer in Zig; the reference generator's SPIR-V embedded. |
+| BLAS | Apple only, enabled with `-Dblas`: the backend in Zig, over the Accelerate the CPU backend already links. Off by default, as in the reference configuration. No other BLAS: each is an external library (PLAN.md, Decision 60). |
+| zDNN, ZenDNN | Not built: each exists to call a vendor library (Decision 60). |
 | SYCL, HIP | Not built. |
 
 ### 3.4 Data types
@@ -360,6 +362,7 @@ These must hold. Each is a runnable gate.
 | C6b | C6 with the model on the CPU device alone, so the ported CPU kernels carry the whole forward pass | `make parity-port-cpu` |
 | C12 | `llama-cli -cnv` writes the same replies, stderr and per-turn cache report as a reference conversation over upstream's chat-template engine and libllama, on a hybrid and a plain-KV model | `make cnv-diff` |
 | C13 | `--fit` leaves the same parameters and logs the same trace as upstream's `common_fit_params`, on fake GPUs with chosen memory, the CPU alone and Metal, with every arm of `fit.cpp` reached | `make fit-diff` |
+| C14 | The BLAS backend answers every vtable question as upstream's `ggml-blas.cpp` does and computes the same **bits** for every type, and a decode with BLAS in the scheduler is identical node by node | `make blas-diff`, `make blas-node-diff` |
 
 `make validate` runs everything checkable without a model: formatting, the
 scaffold, the unit tests, the ported tests in debug and release, C1, C9 and C2.
@@ -421,6 +424,7 @@ locatable in this port.
 | `make parity-cli` | C7 |
 | `make cnv-diff` | C12 |
 | `make fit-diff` | C13 |
+| `make blas-diff`, `make blas-node-diff` | C14 |
 
 `make port` and `make ref` share `MODEL`, `PROMPT`, `NPRED`, `TEMP`, `SEED` and
 `ARGS`. `SEED` is fixed at 42 so the two are comparable.
