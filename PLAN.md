@@ -1003,7 +1003,7 @@ at the CPU configuration Linux arm64 actually builds for.
 | Target | Builds | Gated | What is left |
 |---|---|---|---|
 | macOS arm64 | yes | every gate in `CLAUDE.md` | nothing |
-| iOS, iOS simulator | yes — the xcframework's `ios` and `ios-sim` slices (A14+) | `make -C xcfwk check`: structural gates per slice, `smoke-sim` on the simulator | the increased-memory-limit entitlement is the consuming app's, not ours |
+| iOS, iOS simulator | yes — the xcframework's `ios` and `ios-sim` slices (A14+) | `make -C xcfwk check`: structural gates per slice, `smoke-sim` on the simulator; `make -C xcfwk smoke-device` on an iPhone 15, 12 / 12 byte-identical, CPU and Metal | the increased-memory-limit entitlement is the consuming app's, not ours |
 | Linux arm64 + CUDA | yes, natively on the GB10 | the four `cuda-*` gates, `arch-model-diff`, `gemma4-assistant-diff` | the CPU path's numerics — below |
 | Linux arm64, CPU only | **yes**, cross-built from this Mac against glibc 2.39 | `GATE_CPU=generic` here. Measured failing — `ops-diff` 86 / 632, `repack-diff` 26 / 60, `node-diff` from node 27, `parity-port --cpu` 2 / 6 — and **exact since step 2**: 650 / 650, 60 / 60, 2,750 nodes, 6 / 6. **On the GB10 itself** (the pickup, done): `ops-diff` 650 / 650, `repack-diff` 68 / 68, `node-diff` 2,750 nodes, `parity-port --cpu` 6 / 6, `host-arms-diff` 18 / 18, `vocab-diff` -- after two Linux-only fixes (`NOTES.md`, "The GB10 pickup, run"). **On an Arduino UNO Q** (four Kryo cores, exactly the `generic` baseline, 3.6 GB): our `llama-cli` against `raw_completion.c` over the zmake reference, 7 / 7 on two models at default flags (`NOTES.md`, "The UNO Q, and `--fit`") | `set_numa_thread_affinity` needs a multi-socket machine. Vulkan on the UNO Q's Adreno 702 -- **done**: parity 7 / 7 and `vk-node-diff` identical on the board (`NOTES.md`, "Vulkan on the UNO Q's Adreno 702") |
 | Linux x86_64 | **yes, at x86-64-v3**, cross-built; the same kernels as Windows | the x86 gates run on Windows; Linux x86 shares every kernel and differs only in its OS arms | its OS arms on Linux x86 hardware; AVX-512 on hardware |
@@ -1822,12 +1822,16 @@ done was **Vulkan on the UNO Q's Adreno 702**: the pinned toolchain now
 builds on this Mac, the Vulkan CLI and reference cross-build against the
 board's own loader, and on the board parity is 7 / 7 and `vk-node-diff`
 identical per node and fused (`NOTES.md`, "Vulkan on the UNO Q's Adreno
-702"). What remains,
+702"). And **iOS on a device**: `make -C xcfwk smoke-device` runs the
+framework on an iPhone 15 and is byte-identical to the port on this Mac,
+six prompts on the CPU and six on Metal (`NOTES.md`, "llamazig on an
+iPhone") -- which also found the port's footprint growing ~7 MB with every
+model loaded and freed, now flat: `token_to_id`'s storage and `text_buf`
+are sized before they are filled (`NOTES.md`, "The reload footprint"). What remains,
 and what each one is waiting for:
 
 | Item | Waiting for | State |
 |---|---|---|
-| **iOS on a device** | an A14+ device on this Mac | the xcframework's `ios` slice builds and passes `make -C xcfwk verify`; `smoke-sim` runs on the simulator, CPU. Nothing has run on an iPhone or iPad yet. iOS takes the library, not `llama-cli`: an app has no shell to run one in |
 | **AVX-512 (`x86_64_v4`)** | AVX-512 hardware | the build switch exists (`X86_CPU=x86_64_v4`); the Windows laptop is a Haswell |
 | **Linux x86_64's OS arms** | Linux x86 hardware | its kernels are Windows', gated there; only the `__linux__` threading, affinity and NUMA arms are unrun on x86 |
 | **`set_numa_thread_affinity`** | a multi-socket machine | every machine here has one NUMA node |

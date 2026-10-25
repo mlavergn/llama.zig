@@ -129,11 +129,16 @@ bits as the gated port rather than Apple's libm's.
 | `verify` | every object in every archive and the prelinked object has the slice's platform and minos; 1,438 exports, all `llama_`/`ggml_`/`gguf_`; 0 private externs; 0 `std::__1`; compiler_rt math inside; `Info.plist` lints; `test/stub.m` links per slice, device included, with no `-lc++` and no frameworks named; exactly the three slices | `make negative`: wrong platform, wrong minos, no exports list, `-keep_private_externs`, no compiler_rt, module map without `link`, malformed plist, two-slice xcframework |
 | `smoke-macos` | `test/smoke.swift` through the framework is byte-identical to `test/driver.c` on the port's own libraries, six prompts, GPU and CPU; `test/coexist.cpp` runs app C++ beside the framework | one reference token altered |
 | `smoke-sim` | the same on the iOS simulator, CPU | — |
+| `smoke-device` | the same on a physical iPhone (`DEVICE_ID`, signed for `TEAM`), CPU **and Metal**: `test/device`, an iOS app running the loop, against `test/driver.c` on the port's `apple_a14` libraries here. Not in `check`, which needs no phone | one device token altered |
 | `pkg-test` | `Package.swift` builds and runs on macOS, builds for the simulator | no xcframework: the error names it |
 | `zip` | `.zip` and its SwiftPM checksum | — |
 | `port-gates` | the root `make validate ops-diff` | — |
 
-Not automated: running on a device, which needs A14+ hardware.
+**On an iPhone 15** (A16, iOS 27.0.1), `smoke-device` passes 12 / 12:
+the six prompts on the CPU and on Metal are byte-identical to the port on
+this Mac -- Metal too, because the Mac's GPU computes the same bits as the
+phone's for this model. It is not in `check` because it needs a phone
+registered in the signing team.
 
 **The macOS slice's i8mm arms are gated from the root, not here.** `smoke-macos`
 compares the framework against `test/driver.c` on the port's own libraries --
@@ -167,6 +172,19 @@ reaching the arms.
   nothing.
 - **No `| grep -q` under `pipefail`** in the gates: its early exit SIGPIPEs
   the writer and the pipeline reads as a miss. It failed a real gate once.
+- **An app that works before it finishes launching is killed at 20 s.**
+  The first device app ran the prompts in `main()` and died with SIGKILL
+  partway through, at a different prompt each time, which read as memory
+  pressure and is not: the report says `0x8BADF00D`, "process-launch
+  watchdog transgression". The work runs on a thread started after launch.
+  Read the termination reason (`xcrun devicectl device info files
+  --domain-type systemCrashLogs`) before guessing from a signal 9.
+- **A 2B model on the CPU needs the increased-memory-limit entitlement**:
+  its repacked weights hold the footprint at ~1.3 GiB, and without it the
+  app was jetsammed on the first prompt.
+- **The first launch after an install can return none of the app's console
+  output** though the app ran to completion; `smoke-device` launches again
+  when no `SMOKE-DEVICE` line came back.
 - **`nm -m` prints `non-external (was a private external)`** for a symbol
   `ld -r` *did* localize. Grep for `private external` alone and you count
   12,620 false alarms.

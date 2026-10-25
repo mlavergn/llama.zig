@@ -7,6 +7,8 @@
 #   make smoke-macos  Swift through the framework vs the port's own libraries,
 #                     six prompts, GPU and CPU; plus app C++ beside it
 #   make smoke-sim    the same on the iOS simulator, CPU; one Metal run reported
+#   make smoke-device the same on a physical iPhone (DEVICE_ID), CPU and Metal,
+#                     signed for TEAM; not part of `check`, which needs no phone
 #   make pkg-test     Package.swift consumed by a package, macOS and simulator
 #   make zip          build/llamazig.xcframework.zip and its SwiftPM checksum
 #   make port-gates   the root `make validate ops-diff`, for the port changes
@@ -47,6 +49,12 @@ VERSION    := $(shell sed -n 's/^ *\.version = "\(.*\)",/\1/p' $(ROOT)/build.zig
 MODEL      ?= $(ROOT)/Qwen3.5-2B-Q4_K_M.gguf
 NPRED      ?= 32
 SIM_DEVICE ?= iPhone 17 Pro
+# smoke-device: the phone (a UDID from `xcrun devicectl list devices`) and the
+# development team its app is signed for. The phone must be registered in
+# that team; `-allowProvisioningDeviceRegistration` would register it.
+DEVICE_ID  ?= 00008120-00112894262A601E
+TEAM       ?= Q6H2FB9YW2
+DEVICE_APP := com.mlavergn.llamazig.devicesmoke
 
 SLICES := macos ios ios-sim
 
@@ -99,7 +107,7 @@ expect_fail = if ( $(1) ) > $(B)/neg/last.log 2>&1; then \
     else echo "  caught: $(2) -- $$(grep -m1 -E 'FAIL|error|differ' $(B)/neg/last.log)"; fi
 
 .PHONY: all xcframework $(SLICES) verify $(addprefix verify-,$(SLICES)) negative \
-        ref-driver ref-driver-macos ref-driver-sim smoke-macos smoke-sim pkg-test zip port-gates check clean
+        ref-driver ref-driver-macos ref-driver-sim smoke-macos smoke-sim smoke-device pkg-test zip port-gates check clean
 
 all: xcframework
 
@@ -278,6 +286,39 @@ smoke-sim: xcframework ref-driver-sim
 	    if cmp -s $(B)/test/out/sim-metal.txt $(B)/test/out/macos-gpu-1.ref.txt; then echo "  identical to macOS Metal"; \
 	    else echo "  differs from macOS Metal"; fi; \
 	else echo "  exited $$? -- $$(grep -m3 -iE 'error|fail|abort' $(B)/test/out/sim-metal.log | tr '\n' ' ')"; fi
+
+# On a phone: `test/device`, an iOS app running `smoke.swift`'s loop over the
+# six prompts on the CPU and on Metal, staged into build/device with the model
+# linked into its bundle and the framework beside it, built and signed by
+# xcodebuild, installed and run by devicectl. The app's output comes back on
+# the console and is compared with test/driver.c on the port's own apple_a14
+# libraries here -- CPU and Metal both, since the Mac's Metal computes the
+# same bits as the phone's (measured on an iPhone 15). The app carries the
+# increased-memory-limit entitlement a 2B model needs (README, "Memory").
+smoke-device: xcframework ref-driver-sim
+	@printf '\n== smoke: iOS device (%s) ==\n' "$(DEVICE_ID)"
+	rm -rf $(B)/device && mkdir -p $(B)/device
+	cp -R test/device/DeviceSmoke.xcodeproj test/device/App test/device/DeviceSmoke.entitlements $(B)/device/
+	ln $(MODEL) $(B)/device/App/model.gguf 2>/dev/null || cp $(MODEL) $(B)/device/App/model.gguf
+	cp -R $(XCF) $(B)/device/
+	cd $(B)/device && xcodebuild build -quiet -project DeviceSmoke.xcodeproj -scheme DeviceSmoke -configuration Release \
+	    -destination 'platform=iOS,id=$(DEVICE_ID)' -derivedDataPath $(B)/device-dd -allowProvisioningUpdates \
+	    DEVELOPMENT_TEAM=$(TEAM) > $(B)/device-build.log 2>&1 \
+	    || { grep -m5 'error:' $(B)/device-build.log; exit 1; }
+	xcrun devicectl device install app --device $(DEVICE_ID) $(B)/device-dd/Build/Products/Release-iphoneos/DeviceSmoke.app > /dev/null
+	@# The first launch after an install has come back with none of the
+	@# app's output on the console while the app ran to completion; one more
+	@# launch, if so.
+	for attempt in 1 2; do \
+	    xcrun devicectl device process launch --device $(DEVICE_ID) --console --terminate-existing $(DEVICE_APP) \
+	        > $(B)/device-run.log 2>&1 || true; \
+	    grep -q '^SMOKE-DEVICE' $(B)/device-run.log && break; \
+	done
+	./smoke.sh device device $(B)/test/out $(MODEL) $(B)/test/driver-sim $(B)/device-run.log
+	@printf -- '-- negative: one token of the device output altered\n'
+	mkdir -p $(B)/neg
+	sed '1s/./X/' $(B)/test/out/device-gpu-1.test.txt > $(B)/neg/device-altered.txt
+	@$(call expect_fail,cmp $(B)/test/out/device-gpu-1.ref.txt $(B)/neg/device-altered.txt,altered device token)
 
 # -----------------------------------------------------------------------------
 # Distribution

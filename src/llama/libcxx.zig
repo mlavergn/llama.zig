@@ -1056,6 +1056,22 @@ pub fn StringMap(comptime V: type) type {
             return m;
         }
 
+        /// Makes room for `n` more entries whose keys total `key_bytes`, so
+        /// filling the map allocates its node and key storage once. Storage
+        /// only: libc++ allocates a node per insertion, and the buckets --
+        /// which decide the iteration order -- still grow and rehash exactly
+        /// as `__rehash` does.
+        ///
+        /// Parameters:
+        /// - `n`: the number of entries about to be inserted.
+        /// - `key_bytes`: the total length of their keys.
+        ///
+        /// Return: nothing, or `OutOfMemory`.
+        pub fn reserveStorage(self: *Self, n: usize, key_bytes: usize) error{OutOfMemory}!void {
+            try self.nodes.ensureTotalCapacityPrecise(self.allocator, self.nodes.items.len + n);
+            try self.keys.ensureTotalCapacityPrecise(self.allocator, self.keys.items.len + key_bytes);
+        }
+
         /// Return: nothing.
         pub fn deinit(self: *Self) void {
             self.nodes.deinit(self.allocator);
@@ -1681,4 +1697,39 @@ test "u32 set iterates in libc++'s order" {
         for (cs.out) |v| try std.testing.expectEqual(v, it.next().?);
         try std.testing.expectEqual(@as(?u32, null), it.next());
     }
+}
+
+test "a string map filled after reserveStorage iterates as one filled without" {
+    // Storage is not layout: the bucket count, the iteration order and every
+    // value must not depend on whether the nodes and keys were reserved.
+    // 5000 keys take the map through many rehashes, with a duplicate every
+    // seventh insertion, so `reserveStorage` over-reserves as `readTokens`'s
+    // can.
+    var plain = try StringMap(u32).init(std.testing.allocator);
+    defer plain.deinit();
+    var reserved = try StringMap(u32).init(std.testing.allocator);
+    defer reserved.deinit();
+    try reserved.reserveStorage(5000, 5000 * 8);
+    const nodes_cap = reserved.nodes.capacity;
+    const keys_cap = reserved.keys.capacity;
+
+    var buf: [16]u8 = undefined;
+    for (0..5000) |i| {
+        const key = try std.fmt.bufPrint(&buf, "k{d}", .{if (i % 7 == 6) i - 1 else i});
+        (try plain.getOrPut(key, @intCast(i))).value.* = @intCast(i);
+        (try reserved.getOrPut(key, @intCast(i))).value.* = @intCast(i);
+    }
+    // One allocation each: filling the reserved map never grew its storage.
+    try std.testing.expectEqual(nodes_cap, reserved.nodes.capacity);
+    try std.testing.expectEqual(keys_cap, reserved.keys.capacity);
+
+    try std.testing.expectEqual(plain.bucketCount(), reserved.bucketCount());
+    var a = plain.iterator();
+    var b = reserved.iterator();
+    while (a.next()) |x| {
+        const y = b.next().?;
+        try std.testing.expectEqualStrings(x.key, y.key);
+        try std.testing.expectEqual(x.value.*, y.value.*);
+    }
+    try std.testing.expect(b.next() == null);
 }

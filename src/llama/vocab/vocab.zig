@@ -986,6 +986,22 @@ pub const Vocab = struct {
 
         self.id_to_token.ensureTotalCapacity(allocator, n_tokens) catch oom();
 
+        // The texts' total length first, so `text_buf` and `token_to_id`'s
+        // node and key storage are each one allocation, the same size on
+        // every load. Grown by appending, each went through a chain of ever
+        // larger blocks -- `token_to_id`'s nodes to 7.5 MB on Qwen3.5 -- and
+        // on macOS each load's final block landed in a fresh region while
+        // the previous load's stayed resident: the footprint grew ~7 MB with
+        // every model loaded and freed. Upstream allocates a `std::string`
+        // and a map node per token and never grows one buffer.
+        var text_len: usize = 0;
+        for (0..n_tokens) |k| {
+            const w = gguf_meta.cString(c.gguf_get_arr_str(ctx, token_idx, k));
+            text_len += if (w.len == 0) std.fmt.count("[EMPTY_{d}]", .{k}) else w.len;
+        }
+        self.text_buf.ensureTotalCapacityPrecise(allocator, self.text_buf.items.len + text_len + n_tokens) catch oom();
+        self.token_to_id.reserveStorage(n_tokens, text_len) catch oom();
+
         var i: u32 = 0;
         while (i < n_tokens) : (i += 1) {
             var word = gguf_meta.cString(c.gguf_get_arr_str(ctx, token_idx, i));

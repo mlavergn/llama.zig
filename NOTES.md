@@ -6908,3 +6908,100 @@ upstream's own reference, at the default, prints text like
 decodes at 8 t/s prompt and 5.4 generation on the Adreno against 230 and
 80 on the CPU, so on this board the CPU is the device to use; `--fit` and
 the CPU path, gated above, are what make Qwen3 usable there.
+
+## llamazig on an iPhone
+
+**The device.** An iPhone 15 (`iPhone15,4`, A16, iOS 27.0.1) on this
+Mac's USB, registered in the `Q6H2FB9YW2` development team by `xcodebuild
+-allowProvisioningDeviceRegistration` -- it was in no team before. The A16
+runs the xcframework's `ios` slice, built for `apple_a14`.
+
+**How it runs.** iOS has no shell, so the device side is an app:
+`xcfwk/test/device`, a two-file Xcode project -- `objectVersion` 77, whose
+file-system-synchronized `App/` folder makes the project file short --
+running `test/smoke.swift`'s loop over parity-port's six prompts on the CPU
+and on Metal, and printing each output as a `SMOKE <mode> <n> <base64>`
+line. `make -C xcfwk smoke-device` stages it into `build/device` with the
+model linked into the bundle and the framework beside it, builds and signs
+it with `xcodebuild`, installs and runs it with `xcrun devicectl device
+process launch --console`, and `smoke.sh device` compares each output with
+`test/driver.c` on the port's own `apple_a14` libraries here. A SwiftPM
+test target would have been shorter and cannot run there: "Tool-hosted
+testing is unavailable on device destinations".
+
+**12 / 12 byte-identical**, CPU and Metal. The CPU half is expected to be:
+the same kernels, compiled for the same CPU, linking the same
+`compiler_rt` math. Metal was measured, not assumed: the phone's GPU gives
+the same bytes as this Mac's on all six prompts. Negative-tested by
+altering one byte of the device's output.
+
+**Three kills, and only the first was memory:**
+
+- **Jetsam, at the first CPU prompt**, without the increased-memory-limit
+  entitlement -- the jetsam report lists the app as the largest process, at
+  1.3 GiB. The CPU path holds the repacked weights in anonymous memory; the
+  app now prints its footprint after each prompt (`SMOKE-MEM`), 1,338 MiB on
+  the CPU and 128 MiB on Metal.
+- **The launch watchdog, everywhere else.** With the entitlement the app
+  still died with SIGKILL partway through -- at Metal prompt 3, 4 or 5 from
+  one run to the next -- and the footprint said 126 MiB used, 3,969 MiB
+  available. The termination report (`devicectl device info files
+  --domain-type systemCrashLogs`) said `0x8BADF00D`, "process-launch
+  watchdog transgression ... exhausted real (wall clock) time allowance of
+  20.00 seconds": the work ran in `main()`, so the app never finished
+  launching. Two fixes made on the memory theory first -- an autorelease
+  pool per prompt, and one model load per device instead of per prompt --
+  were not what fixed it. The work now runs on a thread started after
+  launch. **Read the termination reason before reasoning from a signal 9.**
+- The first launch after an install twice returned none of the app's output
+  on the console though it ran to completion; the target launches again.
+
+**One thing measured on the way**: the port's footprint grew with every
+model loaded and freed in one process, where upstream's does not. Found and
+fixed next, in "The reload footprint".
+
+## The reload footprint
+
+**What it was.** Loading Qwen3.5 2B on Metal, decoding once and freeing
+it, twenty times in one process: the port's footprint grew a steady ~7.2 MB
+a cycle (248 MB to 377), upstream's from `llama.cpp.zmake` levelled off at
+226 MB. `leaks --atExit` found 0 leaks on both sides, and a `malloc`
+interposer found none of our large blocks live after the frees. `vmmap`
+put the growth in `Malloc Large (empty)` -- 71 MB over ten cycles, against
+upstream's 9: freed large blocks malloc keeps resident.
+
+**Finding it.** Not by size or count -- both sides allocate about the same
+-- but by address. Logging every block of 64 KiB and over across six
+cycles, nearly every size comes back at the same one or two addresses each
+cycle; a chain of four in `Vocab.load`, 2.2, 3.3, 5.0 and 7.5 MB, came back
+at six distinct addresses in six cycles, each final block in a fresh 8 MB
+region. That is an `ArrayList` growing by half, and `atos -i` against a
+`dsymutil` dSYM named it through the inlining: `libcxx.StringMap`'s node
+array, appended to once per token as `readTokens` fills `token_to_id`. A
+second, `text_buf`, the one buffer holding every token's text, grew the same
+way. libc++ allocates a node and a `std::string` per token, small blocks
+that are always reused; the port's two growing buffers are its own storage
+choice, and on macOS their final blocks did not land where the last load's
+had been freed.
+
+**The fix.** `readTokens` measures the texts first and sizes both before
+filling them: `text_buf` with `ensureTotalCapacityPrecise`, and
+`token_to_id` with a new `StringMap.reserveStorage`, which reserves node and
+key storage only -- the buckets, which decide iteration order, still grow
+and rehash as `__rehash` does, and a unit test holds a reserved map's
+bucket count, order and values to an unreserved one's over 5,000 keys and
+proves the reserved storage never grows. Measured after: **0.0 MB a cycle**,
+flat at 243-247 MB over twenty cycles; `text_buf` alone took it to 5.7.
+Sizing `buildPieceCache`'s `piece_buf` too was tried and changed nothing,
+so it was left as it was.
+
+**A suspect that was not it.** The interposer's first find was
+`std.Thread`: the CPU pool spawns its workers with `std.Thread.spawn`, whose
+entry point attaches a thread-local 256 KiB signal stack
+(`Thread.maybeAttachSignalStack`; three instances make the binary's
+`__thread_bss` 0xC0010 bytes), so on macOS dyld `calloc`s and frees 768 KiB
+for every worker of every pool, and each worker gets Zig's 16 MiB stack
+where the C's null attributes take the platform's default. Replacing it with
+the C's `pthread_create` and `CreateThread` removed those allocations and
+**did not move the footprint** -- 7.2 MB a cycle with and without -- so it
+was reverted: it fixes nothing, and the port keeps `std.Thread`.
