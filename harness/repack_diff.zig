@@ -313,46 +313,51 @@ fn runCase(
 ) !void {
     const nb: i64 = 2;
     const n: c_int = @intCast(qk * nb);
-    const nc: c_int = 16;
 
-    const w = try alloc.alloc(W, @intCast(@divExact(nc, cols) * nb));
-    defer alloc.free(w);
-    fillBlocks(W, w);
+    // Sixteen columns, then twenty-four. The x86 AVX-512 gemms take sixteen
+    // columns a pass and hand what is left to their AVX2 loop, which then
+    // starts again from the first row (`if (anc != nc) { xstart = anc/8;
+    // y = 0; }`); sixteen reaches only the first, twenty-four both.
+    inline for (.{ 16, 24 }) |nc| {
+        const w = try alloc.alloc(W, @intCast(@divExact(nc, cols) * nb));
+        defer alloc.free(w);
+        fillBlocks(W, w);
 
-    // gemv: a single activation row.
-    {
-        const y = try alloc.alloc(Y, @intCast(nb));
-        defer alloc.free(y);
-        fillBlocks(Y, y);
-        const a = try alloc.alloc(f32, @intCast(nc));
-        defer alloc.free(a);
-        const b = try alloc.alloc(f32, @intCast(nc));
-        defer alloc.free(b);
-        @memset(a, 0);
-        @memset(b, 0);
-        gemv_ours(n, a.ptr, @intCast(nc), w.ptr, y.ptr, 1, nc);
-        gemv_ref(n, b.ptr, @intCast(nc), w.ptr, y.ptr, 1, nc);
-        report("gemv_" ++ name, a, b);
-    }
+        // gemv: a single activation row.
+        {
+            const y = try alloc.alloc(Y, @intCast(nb));
+            defer alloc.free(y);
+            fillBlocks(Y, y);
+            const a = try alloc.alloc(f32, @intCast(nc));
+            defer alloc.free(a);
+            const b = try alloc.alloc(f32, @intCast(nc));
+            defer alloc.free(b);
+            @memset(a, 0);
+            @memset(b, 0);
+            gemv_ours(n, a.ptr, @intCast(nc), w.ptr, y.ptr, 1, nc);
+            gemv_ref(n, b.ptr, @intCast(nc), w.ptr, y.ptr, 1, nc);
+            report(std.fmt.comptimePrint("gemv_{s} nc={d}", .{ name, nc }), a, b);
+        }
 
-    // gemm: four activation rows, then twenty. The hand-written aarch64
-    // gemms take sixteen rows a pass and finish in a four-row tail loop
-    // (`cmp x10, #0x10; blt 4f`), so four rows reach only the tail and
-    // twenty reach both. The intrinsic gemms loop over rows in fours and
-    // see the extra rows as more of the same.
-    inline for (.{ 4, 20 }) |nr| {
-        const y = try alloc.alloc(Y4, @intCast(nb * nr / 4));
-        defer alloc.free(y);
-        fillBlocks(Y4, y);
-        const a = try alloc.alloc(f32, @intCast(nr * nc));
-        defer alloc.free(a);
-        const b = try alloc.alloc(f32, @intCast(nr * nc));
-        defer alloc.free(b);
-        @memset(a, 0);
-        @memset(b, 0);
-        gemm_ours(n, a.ptr, @intCast(nc), w.ptr, y.ptr, nr, nc);
-        gemm_ref(n, b.ptr, @intCast(nc), w.ptr, y.ptr, nr, nc);
-        report(std.fmt.comptimePrint("gemm_{s} nr={d}", .{ name, nr }), a, b);
+        // gemm: four activation rows, then twenty. The hand-written aarch64
+        // gemms take sixteen rows a pass and finish in a four-row tail loop
+        // (`cmp x10, #0x10; blt 4f`), so four rows reach only the tail and
+        // twenty reach both. The intrinsic gemms loop over rows in fours and
+        // see the extra rows as more of the same.
+        inline for (.{ 4, 20 }) |nr| {
+            const y = try alloc.alloc(Y4, @intCast(nb * nr / 4));
+            defer alloc.free(y);
+            fillBlocks(Y4, y);
+            const a = try alloc.alloc(f32, @intCast(nr * nc));
+            defer alloc.free(a);
+            const b = try alloc.alloc(f32, @intCast(nr * nc));
+            defer alloc.free(b);
+            @memset(a, 0);
+            @memset(b, 0);
+            gemm_ours(n, a.ptr, @intCast(nc), w.ptr, y.ptr, nr, nc);
+            gemm_ref(n, b.ptr, @intCast(nc), w.ptr, y.ptr, nr, nc);
+            report(std.fmt.comptimePrint("gemm_{s} nc={d} nr={d}", .{ name, nc, nr }), a, b);
+        }
     }
 }
 

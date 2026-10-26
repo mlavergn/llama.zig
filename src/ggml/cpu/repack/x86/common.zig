@@ -7,7 +7,7 @@
 //! Each names the C++ it replaces and the line it began at. x86-64-v3 has
 //! F16C, so the `GGML_F32Cx8` loads are the `_mm256_cvtph_ps` macros, not the
 //! table-driven `__avx_f32cx8_load` family below them, which it does not
-//! compile; and it has no VNNI.
+//! compile; and it has no VNNI, which `tigerlake` adds.
 
 const std = @import("std");
 const impl = @import("../../../impl.zig");
@@ -57,9 +57,12 @@ pub inline fn sum_i16_pairs_acc_int32x8(acc: m256i, x: m256i) m256i {
     return avx.mm256_add_epi32(acc, avx.mm256_madd_epi16(ones, x));
 }
 
-/// Ports `mul_sum_us8_pairs_acc_int32x8` (arch/x86/repack.cpp:151 @c1d0e7a00),
-/// the plain arm: no VNNI at x86-64-v3.
+/// Ports `mul_sum_us8_pairs_acc_int32x8` (arch/x86/repack.cpp:151 @c1d0e7a00):
+/// the `__AVX512VNNI__ && __AVX512VL__` arm where the target has it, the
+/// plain arm otherwise -- no VNNI at x86-64-v3 or v4.
 pub inline fn mul_sum_us8_pairs_acc_int32x8(acc: m256i, ax: m256i, sy: m256i) m256i {
+    if (comptime avx.has_avx512vnni_vl) return avx.mm256_dpbusd_epi32(acc, ax, sy);
+    if (comptime avx.has_avxvnni_only) @compileError("the __AVXVNNI__ arm of mul_sum_us8_pairs_acc_int32x8 is not ported");
     const dot = avx.mm256_maddubs_epi16(ax, sy);
     return sum_i16_pairs_acc_int32x8(acc, dot);
 }
@@ -67,6 +70,7 @@ pub inline fn mul_sum_us8_pairs_acc_int32x8(acc: m256i, ax: m256i, sy: m256i) m2
 /// Ports `mul_sum_i8_pairs_acc_int32x8` (arch/x86/repack.cpp:165 @c1d0e7a00),
 /// the arm without `__AVXVNNIINT8__`.
 pub inline fn mul_sum_i8_pairs_acc_int32x8(acc: m256i, x: m256i, y: m256i) m256i {
+    if (comptime avx.has_avxvnniint8) @compileError("the __AVXVNNIINT8__ arm of mul_sum_i8_pairs_acc_int32x8 is not ported");
     const ax = avx.mm256_sign_epi8(x, x);
     const sy = avx.mm256_sign_epi8(y, x);
     return mul_sum_us8_pairs_acc_int32x8(acc, ax, sy);

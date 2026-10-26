@@ -108,16 +108,28 @@ pub export fn ggml_cpu_fp32_to_fp32(x: [*c]const f32, y: [*c]f32, n: i64) void {
 // and is what `.c` already means on Linux.
 extern fn @"llvm.x86.vcvtps2ph.256"(@Vector(8, f32), i32) callconv(.{ .x86_64_sysv = .{} }) @Vector(8, i16);
 extern fn @"llvm.x86.vcvtps2ph.128"(@Vector(4, f32), i32) callconv(.{ .x86_64_sysv = .{} }) @Vector(8, i16);
+extern fn @"llvm.x86.avx512.mask.vcvtps2ph.512"(@Vector(16, f32), i32, @Vector(16, i16), u16) callconv(.{ .x86_64_sysv = .{} }) @Vector(16, i16);
+
+/// The C's `__AVX512F__`, which adds a block of sixteen ahead of the F16C
+/// blocks of eight.
+const has_avx512f = builtin.cpu.arch == .x86_64 and std.Target.x86.featureSetHas(builtin.cpu.features, .avx512f);
 
 /// `_MM_FROUND_TO_NEAREST_INT`, the rounding immediate the C passes.
 const round_nearest: i32 = 0;
 
 /// Ports `ggml_cpu_fp32_to_fp16` (ggml-cpu.c:3444 @c1d0e7a00): with F16C,
-/// blocks of eight and then four through `vcvtps2ph`, then the software tail.
+/// blocks of sixteen under `__AVX512F__`, then eight and four, through
+/// `vcvtps2ph`, then the software tail.
 pub export fn ggml_cpu_fp32_to_fp16(x: [*c]const f32, y: [*c]c.ggml_fp16_t, n: i64) void {
     const nn: usize = @intCast(n);
     var i: usize = 0;
     if (comptime has_f16c) {
+        if (comptime has_avx512f) {
+            while (i + 15 < nn) : (i += 16) {
+                const v: @Vector(16, f32) = x[i..][0..16].*;
+                y[i..][0..16].* = @bitCast(@"llvm.x86.avx512.mask.vcvtps2ph.512"(v, round_nearest, @splat(0), 0xffff));
+            }
+        }
         while (i + 7 < nn) : (i += 8) {
             const v: @Vector(8, f32) = x[i..][0..8].*;
             y[i..][0..8].* = @bitCast(@"llvm.x86.vcvtps2ph.256"(v, round_nearest));
@@ -132,12 +144,18 @@ pub export fn ggml_cpu_fp32_to_fp16(x: [*c]const f32, y: [*c]c.ggml_fp16_t, n: i
 }
 
 /// Ports `ggml_cpu_fp16_to_fp32` (ggml-cpu.c:3477 @c1d0e7a00): with F16C,
-/// blocks of eight and then four through `vcvtph2ps`, then the tail through
-/// `GGML_CPU_FP16_TO_FP32`.
+/// blocks of sixteen under `__AVX512F__`, then eight and four, through
+/// `vcvtph2ps`, then the tail through `GGML_CPU_FP16_TO_FP32`.
 pub export fn ggml_cpu_fp16_to_fp32(x: [*c]const c.ggml_fp16_t, y: [*c]f32, n: i64) void {
     const nn: usize = @intCast(n);
     var i: usize = 0;
     if (comptime has_f16c) {
+        if (comptime has_avx512f) {
+            while (i + 15 < nn) : (i += 16) {
+                const h: @Vector(16, f16) = @bitCast(@as(@Vector(16, u16), x[i..][0..16].*));
+                y[i..][0..16].* = @as(@Vector(16, f32), @floatCast(h));
+            }
+        }
         while (i + 7 < nn) : (i += 8) {
             const h: @Vector(8, f16) = @bitCast(@as(@Vector(8, u16), x[i..][0..8].*));
             y[i..][0..8].* = @as(@Vector(8, f32), @floatCast(h));
@@ -158,8 +176,8 @@ pub export fn ggml_cpu_fp32_to_bf16(x: [*c]const f32, y: [*c]c.ggml_bf16_t, n: i
 /// Ports `ggml_cpu_bf16_to_fp32` (ggml-cpu.c:3545 @c1d0e7a00).
 ///
 /// The `__AVX2__` arm widens eight at a time by shifting each `u16` left 16
-/// bits, which is exactly what the scalar `GGML_BF16_TO_FP32` does to one, so
-/// one loop covers both arms.
+/// bits, and its `__AVX512F__` block sixteen, which is exactly what the
+/// scalar `GGML_BF16_TO_FP32` does to one, so one loop covers every arm.
 pub export fn ggml_cpu_bf16_to_fp32(x: [*c]const c.ggml_bf16_t, y: [*c]f32, n: i64) void {
     for (0..@intCast(n)) |i| y[i] = impl.bf16ToFp32(x[i].bits);
 }

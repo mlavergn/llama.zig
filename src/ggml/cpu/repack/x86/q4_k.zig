@@ -4,8 +4,8 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.3.0
 //! (`c1d0e7a00`): `ggml_gemv_q4_K_8x8_q8_K` and `ggml_gemm_q4_K_8x8_q8_K`,
-//! their `__AVX2__` arms. The gemm's `__AVX512BW__ && __AVX512DQ__` arm is
-//! not compiled at x86-64-v3 and not ported.
+//! their `__AVX2__` arms, and the gemm's `__AVX512BW__ && __AVX512DQ__` arm,
+//! which is the same body at 512 bits over two blocks (`wide.zig`).
 //!
 //! # The weights are unsigned; the minima come in through `bsums`
 //!
@@ -29,6 +29,7 @@ const blocks = @import("../blocks.zig");
 const avx = @import("../../quants/x86/avx2.zig");
 const qcommon = @import("../../quants/x86/common.zig");
 const common = @import("common.zig");
+const wide = @import("wide.zig");
 
 const c = impl.c;
 const m256i = avx.m256i;
@@ -188,132 +189,242 @@ pub export fn ggml_gemv_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
 }
 
 /// One super-block's sub-block pair for the gemm: eight columns' nibbles in
-/// both shuffle patterns, their scales and mins.
-const Rhs = struct {
-    /// `[s][k]`: sub-block `s` of the pair, weights `8k..8k+7`.
-    m0145_sp1: [2][4]m256i,
-    m2367_sp1: [2][4]m256i,
-    m0145_sp2: [2][4]m256i,
-    m2367_sp2: [2][4]m256i,
-    scale_0145: [2]m256i,
-    scale_2367: [2]m256i,
+/// both shuffle patterns, their scales and mins -- at 512 bits, two blocks'
+/// sixteen columns, the second block in the high half.
+fn Rhs(comptime L: type) type {
+    return struct {
+        /// `[s][k]`: sub-block `s` of the pair, weights `8k..8k+7`.
+        m0145_sp1: [2][4]L.I,
+        m2367_sp1: [2][4]L.I,
+        m0145_sp2: [2][4]L.I,
+        m2367_sp2: [2][4]L.I,
+        scale_0145: [2]L.I,
+        scale_2367: [2]L.I,
+        mins_01: L.I,
+    };
+}
+
+/// One block's 256-bit inputs to the gemm's per-`sb` column preparation:
+/// the raw nibbles in the formats `B0B1B4B5` and `B2B3B6B7`, and the two
+/// sub-blocks' scales and mins widened to sixteen bits.
+const RawRhs = struct {
+    raw0145: [4]m256i,
+    raw2367: [4]m256i,
+    scales_0: m256i,
+    scales_1: m256i,
     mins_01: m256i,
 };
 
-/// The gemm's per-`sb` column preparation (arch/x86/repack.cpp:2853 @c1d0e7a00).
-fn prepareRhs(b: *const blocks.block_q4_Kx8, sb: usize) Rhs {
+fn rawRhs(b: *const blocks.block_q4_Kx8, sb: usize) RawRhs {
     // Permute mask used for easier vector processing at later stages
     const requiredOrder = avx.mm256_set_epi32(.{ 3, 2, 1, 0, 7, 6, 5, 4 });
 
     const qs = b.qs[sb * 256 ..].ptr;
-    var r: Rhs = undefined;
+    var r: RawRhs = undefined;
     inline for (0..4) |k| {
         const raw0123 = avx.mm256_loadu_si256(qs + 64 * k);
         const raw4567 = avx.mm256_loadu_si256(qs + 64 * k + 32);
         // In the formats B0B1B4B5, B2B3B6B7
-        const raw0145 = avx.mm256_blend_epi32(raw0123, avx.mm256_permutevar8x32_epi32(raw4567, requiredOrder), 240);
-        const raw2367 = avx.mm256_blend_epi32(avx.mm256_permutevar8x32_epi32(raw0123, requiredOrder), raw4567, 240);
-        inline for (0..2) |sub| {
-            const m0145 = nibbles(raw0145, sub == 1);
-            const m2367 = nibbles(raw2367, sub == 1);
-            r.m0145_sp1[sub][k] = avx.mm256_shuffle_epi32(m0145, 136);
-            r.m2367_sp1[sub][k] = avx.mm256_shuffle_epi32(m2367, 136);
-            r.m0145_sp2[sub][k] = avx.mm256_shuffle_epi32(m0145, 221);
-            r.m2367_sp2[sub][k] = avx.mm256_shuffle_epi32(m2367, 221);
-        }
+        r.raw0145[k] = avx.mm256_blend_epi32(raw0123, avx.mm256_permutevar8x32_epi32(raw4567, requiredOrder), 240);
+        r.raw2367[k] = avx.mm256_blend_epi32(avx.mm256_permutevar8x32_epi32(raw0123, requiredOrder), raw4567, 240);
     }
 
     const mins_and_scales_0 = minsAndScales(&b.scales, 24 * sb);
     const mins_and_scales_1 = minsAndScales(&b.scales, 12 + sb * 24);
 
-    const scales_0 = avx.mm256_cvtepu8_epi16(avx.mm_unpacklo_epi8(mins_and_scales_0, mins_and_scales_0));
-    const scales_1 = avx.mm256_cvtepu8_epi16(avx.mm_unpacklo_epi8(mins_and_scales_1, mins_and_scales_1));
+    r.scales_0 = avx.mm256_cvtepu8_epi16(avx.mm_unpacklo_epi8(mins_and_scales_0, mins_and_scales_0));
+    r.scales_1 = avx.mm256_cvtepu8_epi16(avx.mm_unpacklo_epi8(mins_and_scales_1, mins_and_scales_1));
 
     r.mins_01 = avx.mm256_cvtepu8_epi16(avx.mm_unpacklo_epi8(avx.mm_shuffle_epi32(mins_and_scales_0, 78), avx.mm_shuffle_epi32(mins_and_scales_1, 78)));
+    return r;
+}
 
-    r.scale_0145 = .{ avx.mm256_shuffle_epi32(scales_0, 68), avx.mm256_shuffle_epi32(scales_1, 68) };
-    r.scale_2367 = .{ avx.mm256_shuffle_epi32(scales_0, 238), avx.mm256_shuffle_epi32(scales_1, 238) };
+/// The low or high nibbles of a register at `L`'s width.
+inline fn nibblesWide(comptime L: type, raw: L.I, comptime hi: bool) L.I {
+    const m4b = L.set1_epi8(0x0F);
+    return L.and_si(if (hi) L.srli_epi16(raw, 4) else raw, m4b);
+}
+
+/// The gemm's per-`sb` column preparation (arch/x86/repack.cpp:2853
+/// @c1d0e7a00) -- the 512-bit arm's opens at line 2117 -- for `b0` and, at
+/// 512 bits, `b1` in the high half.
+///
+/// The 512-bit arm builds its scales as `_mm512_cvtepu8_epi16` of one
+/// `_mm256_unpacklo_epi8` over both blocks' `utmp` and its mins from
+/// `_mm256_shuffle_epi32(.., 78)` of each: per 128-bit lane, each block's
+/// AVX2 value. So both are `join`s of `rawRhs`.
+fn prepareRhs(comptime L: type, b0: *const blocks.block_q4_Kx8, b1: *const blocks.block_q4_Kx8, sb: usize) Rhs(L) {
+    const r0 = rawRhs(b0, sb);
+    const r1 = if (L.width == 512) rawRhs(b1, sb) else r0;
+    var r: Rhs(L) = undefined;
+    inline for (0..4) |k| {
+        const raw0145 = L.join(r0.raw0145[k], r1.raw0145[k]);
+        const raw2367 = L.join(r0.raw2367[k], r1.raw2367[k]);
+        inline for (0..2) |sub| {
+            const m0145 = nibblesWide(L, raw0145, sub == 1);
+            const m2367 = nibblesWide(L, raw2367, sub == 1);
+            r.m0145_sp1[sub][k] = L.shuffle_epi32(m0145, 136);
+            r.m2367_sp1[sub][k] = L.shuffle_epi32(m2367, 136);
+            r.m0145_sp2[sub][k] = L.shuffle_epi32(m0145, 221);
+            r.m2367_sp2[sub][k] = L.shuffle_epi32(m2367, 221);
+        }
+    }
+
+    const scales_0 = L.join(r0.scales_0, r1.scales_0);
+    const scales_1 = L.join(r0.scales_1, r1.scales_1);
+
+    r.mins_01 = L.join(r0.mins_01, r1.mins_01);
+
+    r.scale_0145 = .{ L.shuffle_epi32(scales_0, 68), L.shuffle_epi32(scales_1, 68) };
+    r.scale_2367 = .{ L.shuffle_epi32(scales_0, 238), L.shuffle_epi32(scales_1, 238) };
     return r;
 }
 
 /// Four `maddubs`, columns unsigned first, summed in sixteen bits from the
 /// fourth weight group down, as the C nests them.
-fn dot4(rhs: [4]m256i, lhs: [4]m256i) m256i {
-    return avx.mm256_add_epi16(
-        avx.mm256_add_epi16(
-            avx.mm256_add_epi16(avx.mm256_maddubs_epi16(rhs[3], lhs[3]), avx.mm256_maddubs_epi16(rhs[2], lhs[2])),
-            avx.mm256_maddubs_epi16(rhs[1], lhs[1]),
+fn dot4(comptime L: type, rhs: [4]L.I, lhs: [4]L.I) L.I {
+    return L.add_epi16(
+        L.add_epi16(
+            L.add_epi16(L.maddubs_epi16(rhs[3], lhs[3]), L.maddubs_epi16(rhs[2], lhs[2])),
+            L.maddubs_epi16(rhs[1], lhs[1]),
         ),
-        avx.mm256_maddubs_epi16(rhs[0], lhs[0]),
+        L.maddubs_epi16(rhs[0], lhs[0]),
     );
 }
 
 /// Two 2x2 blocks of row-by-column sums straightened into four rows.
-inline fn rows(m00: m256i, m01: m256i, m10: m256i, m11: m256i) [4]m256i {
+inline fn rows(comptime L: type, m00: L.I, m01: L.I, m10: L.I, m11: L.I) [4]L.I {
     return .{
-        avx.mm256_blend_epi32(m00, avx.mm256_shuffle_epi32(m01, 78), 204),
-        avx.mm256_blend_epi32(avx.mm256_shuffle_epi32(m00, 78), m01, 204),
-        avx.mm256_blend_epi32(m10, avx.mm256_shuffle_epi32(m11, 78), 204),
-        avx.mm256_blend_epi32(avx.mm256_shuffle_epi32(m10, 78), m11, 204),
+        L.blend_epi32(m00, L.shuffle_epi32(m01, 78), 204),
+        L.blend_epi32(L.shuffle_epi32(m00, 78), m01, 204),
+        L.blend_epi32(m10, L.shuffle_epi32(m11, 78), 204),
+        L.blend_epi32(L.shuffle_epi32(m10, 78), m11, 204),
     };
 }
 
 /// The per-group body of `ggml_gemm_q4_K_8x8_q8_K` (arch/x86/repack.cpp:2042
-/// @c1d0e7a00): one interleaved block of four activation rows against one
-/// prepared sub-block pair, into four row accumulators and four minima
-/// accumulators.
-fn accumulate4(acc: *[4]m256, acc_min: *[4]m256, rhs: *const Rhs, col_scale_f32: m256, col_dmin_f32: m256, a: *const blocks.block_q8_Kx4, sb: usize) void {
+/// @c1d0e7a00), either arm: one interleaved block of four activation rows
+/// against one prepared sub-block pair, into four row accumulators and four
+/// minima accumulators.
+fn accumulate4(comptime L: type, acc: *[4]L.F, acc_min: *[4]L.F, rhs: *const Rhs(L), col_scale_f32: L.F, col_dmin_f32: L.F, a: *const blocks.block_q8_Kx4, sb: usize) void {
     const qs = a.qs[256 * sb ..].ptr;
     // `[sub][k]`, the activations of sub-block `sub`, weights `8k..8k+7`
-    var lhs_01_sp1: [2][4]m256i = undefined;
-    var lhs_23_sp1: [2][4]m256i = undefined;
-    var lhs_01_sp2: [2][4]m256i = undefined;
-    var lhs_23_sp2: [2][4]m256i = undefined;
+    var lhs_01_sp1: [2][4]L.I = undefined;
+    var lhs_23_sp1: [2][4]L.I = undefined;
+    var lhs_01_sp2: [2][4]L.I = undefined;
+    var lhs_23_sp2: [2][4]L.I = undefined;
     inline for (0..2) |sub| {
         inline for (0..4) |k| {
             const lhs_mat_0123 = avx.mm256_loadu_si256(qs + 128 * sub + 32 * k);
-            const lhs_mat_01 = avx.mm256_permute2f128_si256(lhs_mat_0123, lhs_mat_0123, 0);
-            const lhs_mat_23 = avx.mm256_permute2f128_si256(lhs_mat_0123, lhs_mat_0123, 17);
-            lhs_01_sp1[sub][k] = avx.mm256_shuffle_epi32(lhs_mat_01, 160);
-            lhs_23_sp1[sub][k] = avx.mm256_shuffle_epi32(lhs_mat_23, 160);
-            lhs_01_sp2[sub][k] = avx.mm256_shuffle_epi32(lhs_mat_01, 245);
-            lhs_23_sp2[sub][k] = avx.mm256_shuffle_epi32(lhs_mat_23, 245);
+            const lhs_mat_01 = L.rep(avx.mm256_permute2f128_si256(lhs_mat_0123, lhs_mat_0123, 0));
+            const lhs_mat_23 = L.rep(avx.mm256_permute2f128_si256(lhs_mat_0123, lhs_mat_0123, 17));
+            lhs_01_sp1[sub][k] = L.shuffle_epi32(lhs_mat_01, 160);
+            lhs_23_sp1[sub][k] = L.shuffle_epi32(lhs_mat_23, 160);
+            lhs_01_sp2[sub][k] = L.shuffle_epi32(lhs_mat_01, 245);
+            lhs_23_sp2[sub][k] = L.shuffle_epi32(lhs_mat_23, 245);
         }
     }
 
     // The four rows' bsums for this sub-block pair, summed pairwise
     const lhs_bsums_0123_01 = avx.mm256_loadu_si256(a.bsums[16 * sb ..].ptr);
-    const lhs_bsums_hsum_0123_01 = common.repeat128(avx.mm_hadd_epi16(avx.mm256_castsi256_si128(lhs_bsums_0123_01), avx.mm256_extractf128_si256(lhs_bsums_0123_01, 1)));
+    const lhs_bsums_hsum_0123_01 = L.rep(common.repeat128(avx.mm_hadd_epi16(avx.mm256_castsi256_si128(lhs_bsums_0123_01), avx.mm256_extractf128_si256(lhs_bsums_0123_01, 1))));
 
-    var iacc_row: [4]m256i = undefined;
+    var iacc_row: [4]L.I = undefined;
     inline for (0..2) |sub| {
         // Both shuffle patterns summed in sixteen bits, then the scales
-        const iacc_mat_00 = avx.mm256_madd_epi16(avx.mm256_add_epi16(dot4(rhs.m0145_sp1[sub], lhs_01_sp1[sub]), dot4(rhs.m0145_sp2[sub], lhs_01_sp2[sub])), rhs.scale_0145[sub]);
-        const iacc_mat_01 = avx.mm256_madd_epi16(avx.mm256_add_epi16(dot4(rhs.m2367_sp1[sub], lhs_01_sp1[sub]), dot4(rhs.m2367_sp2[sub], lhs_01_sp2[sub])), rhs.scale_2367[sub]);
-        const iacc_mat_10 = avx.mm256_madd_epi16(avx.mm256_add_epi16(dot4(rhs.m0145_sp1[sub], lhs_23_sp1[sub]), dot4(rhs.m0145_sp2[sub], lhs_23_sp2[sub])), rhs.scale_0145[sub]);
-        const iacc_mat_11 = avx.mm256_madd_epi16(avx.mm256_add_epi16(dot4(rhs.m2367_sp1[sub], lhs_23_sp1[sub]), dot4(rhs.m2367_sp2[sub], lhs_23_sp2[sub])), rhs.scale_2367[sub]);
-        const r = rows(iacc_mat_00, iacc_mat_01, iacc_mat_10, iacc_mat_11);
-        inline for (0..4) |i| iacc_row[i] = if (sub == 0) r[i] else avx.mm256_add_epi32(iacc_row[i], r[i]);
+        const iacc_mat_00 = L.madd_epi16(L.add_epi16(dot4(L, rhs.m0145_sp1[sub], lhs_01_sp1[sub]), dot4(L, rhs.m0145_sp2[sub], lhs_01_sp2[sub])), rhs.scale_0145[sub]);
+        const iacc_mat_01 = L.madd_epi16(L.add_epi16(dot4(L, rhs.m2367_sp1[sub], lhs_01_sp1[sub]), dot4(L, rhs.m2367_sp2[sub], lhs_01_sp2[sub])), rhs.scale_2367[sub]);
+        const iacc_mat_10 = L.madd_epi16(L.add_epi16(dot4(L, rhs.m0145_sp1[sub], lhs_23_sp1[sub]), dot4(L, rhs.m0145_sp2[sub], lhs_23_sp2[sub])), rhs.scale_0145[sub]);
+        const iacc_mat_11 = L.madd_epi16(L.add_epi16(dot4(L, rhs.m2367_sp1[sub], lhs_23_sp1[sub]), dot4(L, rhs.m2367_sp2[sub], lhs_23_sp2[sub])), rhs.scale_2367[sub]);
+        const r = rows(L, iacc_mat_00, iacc_mat_01, iacc_mat_10, iacc_mat_11);
+        inline for (0..4) |i| iacc_row[i] = if (sub == 0) r[i] else L.add_epi32(iacc_row[i], r[i]);
     }
 
-    // The four rows' f32 scales, repeated in both halves
+    // The four rows' f32 scales, repeated in every half
     const row_scale_f32_sse = avx.mm_load_ps(&a.d);
-    const row_scale_f32 = avx.mm256_set_m128(row_scale_f32_sse, row_scale_f32_sse);
+    const row_scale_f32 = L.repF(avx.mm256_set_m128(row_scale_f32_sse, row_scale_f32_sse));
 
     const lanes = [4]u8{ 0, 85, 170, 255 };
     inline for (0..4) |i| {
-        const rs = avx.mm256_shuffle_ps(row_scale_f32, row_scale_f32, lanes[i]);
-        acc[i] = avx.mm256_fmadd_ps(avx.mm256_cvtepi32_ps(iacc_row[i]), avx.mm256_mul_ps(col_scale_f32, rs), acc[i]);
+        const rs = L.shuffle_ps(row_scale_f32, lanes[i]);
+        acc[i] = L.fmadd_ps(L.cvtepi32_ps(iacc_row[i]), L.mul_ps(col_scale_f32, rs), acc[i]);
     }
     inline for (0..4) |i| {
-        const iacc_row_min = avx.mm256_madd_epi16(avx.mm256_shuffle_epi32(lhs_bsums_hsum_0123_01, lanes[i]), rhs.mins_01);
-        const rs = avx.mm256_shuffle_ps(row_scale_f32, row_scale_f32, lanes[i]);
-        acc_min[i] = avx.mm256_fmadd_ps(avx.mm256_cvtepi32_ps(iacc_row_min), avx.mm256_mul_ps(col_dmin_f32, rs), acc_min[i]);
+        const iacc_row_min = L.madd_epi16(L.shuffle_epi32(lhs_bsums_hsum_0123_01, lanes[i]), rhs.mins_01);
+        const rs = L.shuffle_ps(row_scale_f32, lanes[i]);
+        acc_min[i] = L.fmadd_ps(L.cvtepi32_ps(iacc_row_min), L.mul_ps(col_dmin_f32, rs), acc_min[i]);
     }
 }
 
-/// Ports `ggml_gemm_q4_K_8x8_q8_K` (arch/x86/repack.cpp:2042 @c1d0e7a00), the
-/// arm without `__AVX512BW__ && __AVX512DQ__`.
+/// A column block's `d` or `dmin` as floats: `GGML_F32Cx8_LOAD`, or
+/// `GGML_F32Cx8x2_LOAD` over two blocks at 512 bits.
+inline fn colLoad(comptime L: type, d0: *const [8]c.ggml_half, d1: *const [8]c.ggml_half) L.F {
+    if (L.width == 256) return common.f32cx8Load(d0);
+    return L.joinF(common.f32cx8Load(d0), common.f32cx8Load(d1));
+}
+
+/// Both row loops of `ggml_gemm_q4_K_8x8_q8_K` at `L`'s width, over the
+/// eight-column blocks `x_begin..x_end`: sixteen rows a pass, then four.
+fn rowLoops(comptime L: type, y: *usize, x_begin: usize, x_end: usize, nb: usize, b_nb: usize, nr_u: usize, s: [*]f32, bs: usize, b_ptr_start: [*]const blocks.block_q4_Kx8, a_ptr_start: [*]const blocks.block_q8_Kx4) void {
+    const anr = nr_u - nr_u % 16; // Used to align nr with boundary of 16
+    const xstep = L.cols / 8;
+
+    while (y.* < anr / 4) : (y.* += 4) {
+        var a_ptrs: [4][*]const blocks.block_q8_Kx4 = undefined;
+
+        a_ptrs[0] = a_ptr_start + (y.* * nb);
+        for (0..3) |i| a_ptrs[i + 1] = a_ptrs[i] + nb;
+
+        var x = x_begin;
+        while (x < x_end) : (x += xstep) {
+            const b_ptr_0 = b_ptr_start + (x * b_nb);
+            const b_ptr_1 = b_ptr_start + ((x + xstep - 1) * b_nb);
+
+            var acc_rows: [16]L.F = @splat(L.setzero_ps());
+            var acc_min_rows: [16]L.F = @splat(L.setzero_ps());
+
+            for (0..nb) |b| {
+                const col_scale_f32 = colLoad(L, &b_ptr_0[b].d, &b_ptr_1[b].d);
+                const col_dmin_f32 = colLoad(L, &b_ptr_0[b].dmin, &b_ptr_1[b].dmin);
+
+                for (0..QK_K / 64) |sb| {
+                    const rhs = prepareRhs(L, &b_ptr_0[b], &b_ptr_1[b], sb);
+                    for (0..4) |rp| accumulate4(L, acc_rows[rp * 4 ..][0..4], acc_min_rows[rp * 4 ..][0..4], &rhs, col_scale_f32, col_dmin_f32, &a_ptrs[rp][b], sb);
+                }
+            }
+            for (0..16) |i| L.storeu_ps(s + ((y.* * 4 + i) * bs + x * 8), L.sub_ps(acc_rows[i], acc_min_rows[i]));
+        }
+    }
+    while (y.* < nr_u / 4) : (y.* += 1) {
+        const a_ptr = a_ptr_start + (y.* * nb);
+
+        var x = x_begin;
+        while (x < x_end) : (x += xstep) {
+            const b_ptr_0 = b_ptr_start + (x * b_nb);
+            const b_ptr_1 = b_ptr_start + ((x + xstep - 1) * b_nb);
+
+            var acc_rows: [4]L.F = @splat(L.setzero_ps());
+            var acc_min_rows: [4]L.F = @splat(L.setzero_ps());
+
+            for (0..nb) |b| {
+                const col_scale_f32 = colLoad(L, &b_ptr_0[b].d, &b_ptr_1[b].d);
+                const col_dmin_f32 = colLoad(L, &b_ptr_0[b].dmin, &b_ptr_1[b].dmin);
+
+                for (0..QK_K / 64) |sb| {
+                    const rhs = prepareRhs(L, &b_ptr_0[b], &b_ptr_1[b], sb);
+                    accumulate4(L, &acc_rows, &acc_min_rows, &rhs, col_scale_f32, col_dmin_f32, &a_ptr[b], sb);
+                }
+            }
+            for (0..4) |i| L.storeu_ps(s + ((y.* * 4 + i) * bs + x * 8), L.sub_ps(acc_rows[i], acc_min_rows[i]));
+        }
+    }
+}
+
+/// Ports `ggml_gemm_q4_K_8x8_q8_K` (arch/x86/repack.cpp:2042 @c1d0e7a00).
+///
+/// With `__AVX512BW__ && __AVX512DQ__` the 512-bit arm, from line 2077,
+/// runs first over the columns up to the last multiple of
+/// sixteen; the AVX2 loops then take any left, from the first row again.
 pub export fn ggml_gemm_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     const qk = QK_K;
     const nb: usize = @intCast(@divTrunc(n, qk));
@@ -327,56 +438,20 @@ pub export fn ggml_gemm_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     const b_nb: usize = @intCast(@divTrunc(n, QK_K));
     var y: usize = 0;
 
-    const xstart: usize = 0;
+    var xstart: usize = 0;
     const nr_u: usize = @intCast(nr);
-    const anr = nr_u - nr_u % 16; // Used to align nr with boundary of 16
-    const ncb: usize = @intCast(@divTrunc(nc, 8));
+    const nc_u: usize = @intCast(nc);
 
-    while (y < anr / 4) : (y += 4) {
-        var a_ptrs: [4][*]const blocks.block_q8_Kx4 = undefined;
-
-        a_ptrs[0] = a_ptr_start + (y * nb);
-        for (0..3) |i| a_ptrs[i + 1] = a_ptrs[i] + nb;
-
-        for (xstart..ncb) |x| {
-            const b_ptr = b_ptr_start + (x * b_nb);
-
-            var acc_rows: [16]m256 = @splat(avx.mm256_setzero_ps());
-            var acc_min_rows: [16]m256 = @splat(avx.mm256_setzero_ps());
-
-            for (0..nb) |b| {
-                const col_scale_f32 = common.f32cx8Load(&b_ptr[b].d);
-                const col_dmin_f32 = common.f32cx8Load(&b_ptr[b].dmin);
-
-                for (0..QK_K / 64) |sb| {
-                    const rhs = prepareRhs(&b_ptr[b], sb);
-                    for (0..4) |rp| accumulate4(acc_rows[rp * 4 ..][0..4], acc_min_rows[rp * 4 ..][0..4], &rhs, col_scale_f32, col_dmin_f32, &a_ptrs[rp][b], sb);
-                }
-            }
-            for (0..16) |i| avx.mm256_storeu_ps(s + ((y * 4 + i) * bs + x * 8), avx.mm256_sub_ps(acc_rows[i], acc_min_rows[i]));
+    if (comptime wide.has_avx512bw_dq) {
+        const anc = nc_u - nc_u % 16; // Used to align nc with boundary of 16
+        rowLoops(wide.Wide(512), &y, 0, anc / 8, nb, b_nb, nr_u, s, bs, b_ptr_start, a_ptr_start);
+        if (anc != nc_u) {
+            xstart = anc / 8;
+            y = 0;
         }
     }
-    while (y < nr_u / 4) : (y += 1) {
-        const a_ptr = a_ptr_start + (y * nb);
 
-        for (xstart..ncb) |x| {
-            const b_ptr = b_ptr_start + (x * b_nb);
-
-            var acc_rows: [4]m256 = @splat(avx.mm256_setzero_ps());
-            var acc_min_rows: [4]m256 = @splat(avx.mm256_setzero_ps());
-
-            for (0..nb) |b| {
-                const col_scale_f32 = common.f32cx8Load(&b_ptr[b].d);
-                const col_dmin_f32 = common.f32cx8Load(&b_ptr[b].dmin);
-
-                for (0..QK_K / 64) |sb| {
-                    const rhs = prepareRhs(&b_ptr[b], sb);
-                    accumulate4(&acc_rows, &acc_min_rows, &rhs, col_scale_f32, col_dmin_f32, &a_ptr[b], sb);
-                }
-            }
-            for (0..4) |i| avx.mm256_storeu_ps(s + ((y * 4 + i) * bs + x * 8), avx.mm256_sub_ps(acc_rows[i], acc_min_rows[i]));
-        }
-    }
+    rowLoops(wide.Wide(256), &y, xstart, nc_u / 8, nb, b_nb, nr_u, s, bs, b_ptr_start, a_ptr_start);
 }
 
 // -----------------------------------------------------------------------------

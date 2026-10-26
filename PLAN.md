@@ -70,7 +70,7 @@ Settled in review. The plan below assumes all of these.
 | 42 | libllama's swap unit | **Measured: libllama is one strongly connected component, so it swaps once, at `llama.h` — with one exception that goes first.** 22 of its core translation units plus every `models/*.cpp` reach each other through 367 mangled C++ symbols and 27 C ones; ggml's "the external contract is a pure C ABI" does not carry over. The exception is **`llama-sampler.cpp` + `llama-grammar.cpp`**: inbound, `llama-context.o` reaches them through the C `llama_sampler_i` vtable, three C functions and two mangled ones with plain-pointer signatures, which Zig can `@export`; outbound, every call into `llama_vocab` has a public C equivalent. So that pair is ported and swapped first, and everything else in libllama is developed beside the C++ and gated in-process subsystem by subsystem until the single swap. See "Order of work" step 4. **Done: swapped**, with the C++ kept as `libllama-ref.a` for the in-process gates. |
 | 51 | x86 gate machine | **A laptop**, the x86 counterpart of Decision 43. x86 work is gated there and recorded in an "x86 pickup" list like the Mac and CUDA ones; Metal and CUDA gates cannot run on it, and x86 gates cannot run anywhere else. Its CPU model, OS and whether it has AVX-512 are recorded when it is set up: without AVX-512, the v4 arms (Decision 53) have no native gate and wait for a machine that has it. |
 | 52 | x86 reference | **`llama.cpp.zmake` gains `arch/x86`**, an explicit grant against Decision 18 as the Zig 0.17 migration was. Its `build.zig` refuses any non-aarch64 target today (build.zig:361); the change adds the x86 sources and their defines and nothing else, so the reference stays upstream compiled unmodified. |
-| 53 | x86 levels | **AVX2 first (x86-64-v3: AVX2, FMA, F16C), then AVX-512 (v4).** A static binary compiles one `GGML_SIMD` arm, and upstream's `GGML_CPU_ALL_VARIANTS` needs `GGML_BACKEND_DL`, which is out of scope. v1 (scalar) and v2 (SSE3) are not targets. |
+| 53 | x86 levels | **AVX2 first (x86-64-v3: AVX2, FMA, F16C), then AVX-512 (v4).** A static binary compiles one `GGML_SIMD` arm, and upstream's `GGML_CPU_ALL_VARIANTS` needs `GGML_BACKEND_DL`, which is out of scope. v1 (scalar) and v2 (SSE3) are not targets. **Both done**: AVX2 exact on the Haswell laptop, AVX-512 exact at `x86_64_v4` and `tigerlake` (VNNI) on `JWHLPTOP`, a Tiger Lake (`NOTES.md`, "Stage 5 step 6: AVX-512"). |
 | 54 | Vulkan gate machine | **The GB10**, as for CUDA (Decision 43). NVIDIA's driver exposes every extension the shaders probe for -- cooperative matrix 1 and 2, integer dot product, bfloat16 -- so the reference compiles its widest set of arms there. Vulkan gates cannot run on this Mac: it has no Vulkan driver, and MoltenVK would translate to Metal with a reduced extension set. An Arduino UNO Q (Adreno, a mobile Vulkan driver) is available as a later second device; not now. |
 | 55 | Vulkan reference | **`llama.cpp.zmake` gains `-Dvulkan`**, an explicit grant against Decision 18, as Decision 52 was. It builds upstream's own `vulkan-shaders-gen` for the host, runs it once for the header and once per shader file with `glslc`, and asks `glslc` which shader extensions it accepts exactly as `ggml-vulkan/CMakeLists.txt` does. **The toolchain is part of the reference**: which C++ compiles depends on the Vulkan header version and on those `glslc` answers (64 `#if` sites on the seven extension macros, more on `VK_HEADER_VERSION`), and the SPIR-V depends on `glslc`'s optimizer. Both sides of every Vulkan gate are built with the same `glslc` and headers, and the shaders the port embeds are the reference generator's output, identical by construction. |
 | 56 | When Vulkan starts | **Now, as Stage 7, beside Stage 5** -- whose x86 step waits on the laptop. Measured first ("Stage 7 — Vulkan" below), reproducibility before any code, as Stage 6 began. |
@@ -1007,8 +1007,8 @@ at the CPU configuration Linux arm64 actually builds for.
 | iOS, iOS simulator | yes — the xcframework's `ios` and `ios-sim` slices (A14+) | `make -C xcfwk check`: structural gates per slice, `smoke-sim` on the simulator; `make -C xcfwk smoke-device` on an iPhone 15, 12 / 12 byte-identical, CPU and Metal | the increased-memory-limit entitlement is the consuming app's, not ours |
 | Linux arm64 + CUDA | yes, natively on the GB10 | the four `cuda-*` gates, `arch-model-diff`, `gemma4-assistant-diff` | the CPU path's numerics — below |
 | Linux arm64, CPU only | **yes**, cross-built from this Mac against glibc 2.39 | `GATE_CPU=generic` here. Measured failing — `ops-diff` 86 / 632, `repack-diff` 26 / 60, `node-diff` from node 27, `parity-port --cpu` 2 / 6 — and **exact since step 2**: 650 / 650, 60 / 60, 2,750 nodes, 6 / 6. **On the GB10 itself** (the pickup, done): `ops-diff` 650 / 650, `repack-diff` 68 / 68, `node-diff` 2,750 nodes, `parity-port --cpu` 6 / 6, `host-arms-diff` 18 / 18, `vocab-diff` -- after two Linux-only fixes (`NOTES.md`, "The GB10 pickup, run"). **On an Arduino UNO Q** (four Kryo cores, exactly the `generic` baseline, 3.6 GB): our `llama-cli` against `raw_completion.c` over the zmake reference, 7 / 7 on two models at default flags (`NOTES.md`, "The UNO Q, and `--fit`") | `set_numa_thread_affinity` needs a multi-socket machine. Vulkan on the UNO Q's Adreno 702 -- **done**: parity 7 / 7 and `vk-node-diff` identical on the board (`NOTES.md`, "Vulkan on the UNO Q's Adreno 702") |
-| Linux x86_64 | **yes, at x86-64-v3**, cross-built; the same kernels as Windows | the x86 gates run on Windows; Linux x86 shares every kernel and differs only in its OS arms | its OS arms on Linux x86 hardware; AVX-512 on hardware |
-| Windows x86_64 | **yes, cross-built from this Mac** (`x86_64-windows-gnu`, x86-64-v3): libraries, `libllama-ref`, and our `llama-cli.exe`; the reference's `llama-cli.exe` through `make -C llama.cpp.zmake windows-x86_64` | **exact on the laptop**: `make x86-gates` -- 28 quant kernels, 68 repack checks, 712 `ops-diff` results, 2,750 decode nodes -- and 6 / 6 parity prompts; the host gates `make win-host-diffs` -- `host-arms-diff`, `libcxx-diff`, `regex-diff`, `unicode-diff` | AVX-512, on other hardware |
+| Linux x86_64 | **yes, at x86-64-v3**, cross-built; the same kernels as Windows | the x86 gates run on Windows; Linux x86 shares every kernel and differs only in its OS arms | its OS arms on Linux x86 hardware |
+| Windows x86_64 | **yes, cross-built from this Mac** (`x86_64-windows-gnu`, x86-64-v3): libraries, `libllama-ref`, and our `llama-cli.exe`; the reference's `llama-cli.exe` through `make -C llama.cpp.zmake windows-x86_64` | **exact on the laptop**: `make x86-gates` -- 28 quant kernels, 68 repack checks, 712 `ops-diff` results, 2,750 decode nodes -- and 6 / 6 parity prompts; the host gates `make win-host-diffs` -- `host-arms-diff`, `libcxx-diff`, `regex-diff`, `unicode-diff`; at AVX-512 (`x86_64_v4`, `tigerlake`), the four `x86-*` gates exact on `JWHLPTOP` | the AVX512-BF16 and -FP16 arms, on hardware with them |
 
 ### Linux arm64: a different CPU from the one every gate ran on
 
@@ -1246,8 +1246,9 @@ small, and it is wrong today -- in its numerics and in its host arms.
    cross-built and checked for their instructions.
 6. **x86_64** (Decisions 51–53) -- **done at AVX2, and exact on the
    Windows laptop's Haswell** (`NOTES.md`, "Stage 5 step 6: x86 begins" and
-   "Stage 5 step 6: the AVX2 kernels"). AVX-512 (v4) is next, and needs
-   hardware the laptop is not.
+   "Stage 5 step 6: the AVX2 kernels"). **AVX-512 is done too**, at
+   `x86_64_v4` and `tigerlake`, exact on `JWHLPTOP` (`NOTES.md`, "Stage 5
+   step 6: AVX-512").
    - **Done first, exact against the x86-64-v3 reference under QEMU**: every
      shared function with an x86 arm, found by preprocessing each CPU
      translation unit for both targets and diffing them function by
@@ -1770,8 +1771,8 @@ the swap").
 for where each target stands and the order of work. Step 1 found that
 the port was not bit-exact on Linux arm64's baseline CPU; step 2 made it so;
 steps 3 and 4 ran on the GB10 in its pickup, which found and fixed two
-Linux-only bugs; step 5 put the SIMD layer in. Step 6, x86_64, is done at AVX2 and exact on the Windows laptop;
-AVX-512 needs other hardware.
+Linux-only bugs; step 5 put the SIMD layer in. Step 6, x86_64, is done at AVX2 and exact on the Windows laptop,
+and at AVX-512 (`x86_64_v4`, `tigerlake`) on a Tiger Lake.
 
 **Beside it, Stage 7, Vulkan** (Decisions 54–56, 59; "Stage 7 — Vulkan"):
 measured, the reference built on the GB10 with a pinned toolchain, and
@@ -1830,12 +1831,14 @@ iPhone") -- which also found the port's footprint growing ~7 MB with every
 model loaded and freed, now flat: `token_to_id`'s storage and `text_buf`
 are sized before they are filled (`NOTES.md`, "The reload footprint"). And
 **ggml's BLAS backend on Apple, over Accelerate** (Decision 60), with zDNN,
-ZenDNN and every other BLAS left out as vendor libraries. What remains,
+ZenDNN and every other BLAS left out as vendor libraries. And **AVX-512**
+(Decision 53): `x86_64_v4` and `tigerlake` exact on `JWHLPTOP`, a second
+Windows machine (`NOTES.md`, "Stage 5 step 6: AVX-512"). What remains,
 and what each one is waiting for:
 
 | Item | Waiting for | State |
 |---|---|---|
-| **AVX-512 (`x86_64_v4`)** | AVX-512 hardware | the build switch exists (`X86_CPU=x86_64_v4`); the Windows laptop is a Haswell |
+| **AVX512-BF16 and AVX512-FP16 arms** | a Sapphire Rapids or newer CPU | a compile error until then; Tiger Lake has neither |
 | **Linux x86_64's OS arms** | Linux x86 hardware | its kernels are Windows', gated there; only the `__linux__` threading, affinity and NUMA arms are unrun on x86 |
 | **`set_numa_thread_affinity`** | a multi-socket machine | every machine here has one NUMA node |
 | **Decision 24, idiomatic Zig** | a decision to schedule it | not started; open for every subsystem since the swap |

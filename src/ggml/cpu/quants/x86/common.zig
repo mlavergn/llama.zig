@@ -5,9 +5,10 @@
 //! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.3.0,
 //! `c1d0e7a00`): the `__AVX2__` arms of the helpers at the top of the file
 //! and the scale shuffles before the dot products. Each names the C it
-//! replaces and the line it began at. At x86-64-v3 neither AVX-VNNI nor
-//! AVX512-VNNI is defined, so `mul_sum_us8_pairs_float` and
-//! `mul_sum_i8_pairs_float` take their plain `maddubs` arms.
+//! replaces and the line it began at. At x86-64-v3 and v4 neither AVX-VNNI
+//! nor AVX512-VNNI is defined, so `mul_sum_us8_pairs_float` and
+//! `mul_sum_i8_pairs_float` take their plain `maddubs` arms; `tigerlake` has
+//! AVX512-VNNI, and the first takes its `vpdpbusd` arm.
 
 const std = @import("std");
 const convert = @import("../../convert.zig");
@@ -122,9 +123,16 @@ pub inline fn sum_i16_pairs_float(x: m256i) m256 {
     return avx.mm256_cvtepi32_ps(summed_pairs);
 }
 
-/// Ports `mul_sum_us8_pairs_float` (arch/x86/quants.c:105 @c1d0e7a00), the
-/// plain arm: neither VNNI is in x86-64-v3.
+/// Ports `mul_sum_us8_pairs_float` (arch/x86/quants.c:105 @c1d0e7a00): the
+/// `__AVX512VNNI__ && __AVX512VL__` arm where the target has it, the plain
+/// arm otherwise -- neither VNNI is in x86-64-v3 or v4.
 pub inline fn mul_sum_us8_pairs_float(ax: m256i, sy: m256i) m256 {
+    if (comptime avx.has_avx512vnni_vl) {
+        const zero = avx.mm256_setzero_si256();
+        const summed_pairs = avx.mm256_dpbusd_epi32(zero, ax, sy);
+        return avx.mm256_cvtepi32_ps(summed_pairs);
+    }
+    if (comptime avx.has_avxvnni_only) @compileError("the __AVXVNNI__ arm of mul_sum_us8_pairs_float is not ported");
     const dot = avx.mm256_maddubs_epi16(ax, sy);
     return sum_i16_pairs_float(dot);
 }
@@ -132,6 +140,7 @@ pub inline fn mul_sum_us8_pairs_float(ax: m256i, sy: m256i) m256 {
 /// Ports `mul_sum_i8_pairs_float` (arch/x86/quants.c:122 @c1d0e7a00), the
 /// arm without `__AVXVNNIINT8__`.
 pub inline fn mul_sum_i8_pairs_float(x: m256i, y: m256i) m256 {
+    if (comptime avx.has_avxvnniint8) @compileError("the __AVXVNNIINT8__ arm of mul_sum_i8_pairs_float is not ported");
     const ax = avx.mm256_sign_epi8(x, x);
     const sy = avx.mm256_sign_epi8(y, x);
     return mul_sum_us8_pairs_float(ax, sy);

@@ -441,5 +441,5 @@ locatable in this port.
 | LoRA, control vectors, speculative decoding | Not built; the flags are refused. |
 | Multimodal input | Not built. |
 | Writing or converting model files | Out of scope. |
-| AVX-512 (x86-64-v4) kernels | Not built: an x86 build above x86-64-v3 is a compile error until they are ported and gated on AVX-512 hardware. |
+| AVX512-BF16 and AVX512-FP16 kernels | Not built: a CPU with either is a compile error until they are gated on hardware that has them. AVX-512 itself -- `x86_64_v4`, and `tigerlake`'s VNNI -- is built and gated. |
 | SYCL, HIP and other GPU backends | Not built. |

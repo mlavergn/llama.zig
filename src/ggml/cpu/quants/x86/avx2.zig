@@ -132,6 +132,35 @@ extern fn @"llvm.x86.sse2.pslli.w"(i16x8, i32) callconv(sysv) i16x8;
 extern fn @"llvm.x86.avx2.permps"(m256, i32x8) callconv(sysv) m256;
 extern fn @"llvm.x86.sse3.hadd.ps"(m128, m128) callconv(sysv) m128;
 extern fn @"llvm.x86.avx.hadd.ps.256"(m256, m256) callconv(sysv) m256;
+extern fn @"llvm.x86.avx512.vpdpbusd.256"(i32x8, i8x32, i8x32) callconv(sysv) i32x8;
+
+// -----------------------------------------------------------------------------
+// VNNI
+//
+// The C's `__AVX512VNNI__ && __AVX512VL__` arms replace `maddubs` then
+// `madd` with one `vpdpbusd`. AVX-VNNI's `_mm256_dpbusd_avx_epi32` is the
+// same instruction under another encoding, and no CPU this project gates on
+// has it without AVX512-VNNI, so its arms are refused rather than ported.
+
+fn x86Has(comptime f: std.Target.x86.Feature) bool {
+    return @import("builtin").cpu.arch == .x86_64 and std.Target.x86.featureSetHas(@import("builtin").cpu.features, f);
+}
+
+/// `__AVX512VNNI__ && __AVX512VL__`: the 256-bit `vpdpbusd`.
+pub const has_avx512vnni_vl = x86Has(.avx512vnni) and x86Has(.avx512vl);
+
+/// `__AVXVNNI__` without AVX512-VNNI: an arm no ported kernel takes.
+pub const has_avxvnni_only = x86Has(.avxvnni) and !has_avx512vnni_vl;
+
+/// `__AVXVNNIINT8__`, whose `_mm256_dpbssd_epi32` arms are not ported.
+pub const has_avxvnniint8 = x86Has(.avxvnniint8);
+
+/// `_mm256_dpbusd_epi32`: in each 32-bit lane, `src` plus the four products
+/// of an unsigned byte of `a` and the signed byte of `b` beside it, all in
+/// 32 bits -- **no** saturation, where `maddubs` saturates each pair to 16.
+pub inline fn mm256_dpbusd_epi32(src: m256i, a: m256i, b: m256i) m256i {
+    return as(m256i, @"llvm.x86.avx512.vpdpbusd.256"(as(i32x8, src), as(i8x32, a), as(i8x32, b)));
+}
 
 // -----------------------------------------------------------------------------
 // Construction, loads and stores

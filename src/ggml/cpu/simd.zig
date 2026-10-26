@@ -46,10 +46,12 @@
 //! - **NEON** (`__ARM_NEON && __ARM_FEATURE_FMA && __ARM_FP16_FORMAT_IEEE`),
 //!   with both of its `F16` variants. SVE's is not ported: no Apple core has
 //!   SVE, and Zig's Linux baseline does not enable it.
-//! - **AVX** with FMA and F16C -- x86-64-v3, Decision 53's first level.
-//!   AVX-512 takes its own arm ahead of this one in the C, and is a compile
-//!   error here until it is ported; so are AVX without FMA, and SSE, which no
-//!   target this project builds needs.
+//! - **AVX-512** (`__AVX512F__`) -- x86-64-v4, Decision 53's second level,
+//!   with its `GGML_F32Cx16` fallback for `F16`. The `__AVX512FP16__` arm is
+//!   a compile error: no CPU this project gates on has it.
+//! - **AVX** with FMA and F16C -- x86-64-v3, Decision 53's first level. AVX
+//!   without FMA, and SSE, are compile errors: no target this project builds
+//!   needs them.
 //!
 //! Any other architecture is a compile error.
 
@@ -64,14 +66,14 @@ pub const neon = @import("quants/arm/neon.zig");
 /// `GGML_F32_VEC` and its operations, for this build's target.
 pub const F32 = switch (builtin.cpu.arch) {
     .aarch64 => NeonF32,
-    .x86_64 => x86Arm(AvxF32),
+    .x86_64 => x86Arm(Avx512F32, AvxF32),
     else => @compileError("no SIMD arm for " ++ @tagName(builtin.cpu.arch)),
 };
 
 /// `GGML_F16_VEC` and its operations, for this build's target.
 pub const F16 = switch (builtin.cpu.arch) {
     .aarch64 => if (neon.has_fp16_va) NeonF16x8 else NeonF32Cx4,
-    .x86_64 => x86Arm(AvxF32Cx8),
+    .x86_64 => x86Arm(Avx512F32Cx16, AvxF32Cx8),
     else => @compileError("no SIMD arm for " ++ @tagName(builtin.cpu.arch)),
 };
 
@@ -84,8 +86,11 @@ fn x86Has(comptime feature: std.Target.x86.Feature) bool {
 /// The x86 arm `simd-mappings.h` would take, in its order -- `__AVX512F__`
 /// before `__AVX__`, which is before `__SSE3__` -- refusing the ones not
 /// ported rather than falling through to a different one.
-fn x86Arm(comptime Avx: type) type {
-    if (x86Has(.avx512f)) @compileError("the AVX-512 arm of simd-mappings.h is not ported yet (Decision 53: AVX2 first)");
+fn x86Arm(comptime Avx512: type, comptime Avx: type) type {
+    if (x86Has(.avx512f)) {
+        if (x86Has(.avx512fp16)) @compileError("the __AVX512FP16__ arm of simd-mappings.h is not ported");
+        return Avx512;
+    }
     if (!x86Has(.avx)) @compileError("the SSE arm of simd-mappings.h is not ported");
     if (!x86Has(.fma) or !x86Has(.f16c)) @compileError("the AVX arm is ported only with FMA and F16C (x86-64-v3)");
     return Avx;
@@ -409,6 +414,146 @@ const AvxF32Cx8 = struct {
 };
 
 // -----------------------------------------------------------------------------
+// AVX-512
+
+/// The tree `_mm512_reduce_add_ps` reduces in. clang lowers it to a
+/// reassociable `llvm.vector.reduce.fadd`, whose order is the backend's;
+/// measured on the x86-64-v4 reference at `-O2`: fold the upper 256 bits onto
+/// the lower, then the upper 128, then `vshufpd` (lanes 2 and 3 onto 0 and 1),
+/// then `vmovshdup` (lane 1 onto 0).
+pub inline fn reduceAdd512(v: @Vector(16, f32)) f32 {
+    var t8: @Vector(8, f32) = undefined;
+    inline for (0..8) |i| t8[i] = v[i] + v[i + 8];
+    var t4: @Vector(4, f32) = undefined;
+    inline for (0..4) |i| t4[i] = t8[i] + t8[i + 4];
+    const t2: @Vector(2, f32) = .{ t4[0] + t4[2], t4[1] + t4[3] };
+    return t2[0] + t2[1];
+}
+
+// `.x86_64_sysv` for the reason `cpu/convert.zig` gives. This is the
+// intrinsic `_mm512_cvtps_ph` compiles to: the masked form, unmasked.
+extern fn @"llvm.x86.avx512.mask.vcvtps2ph.512"(@Vector(16, f32), i32, @Vector(16, i16), u16) callconv(.{ .x86_64_sysv = .{} }) @Vector(16, i16);
+
+/// `GGML_F32_VEC` on AVX-512: `GGML_F32x16`, `__m512`.
+const Avx512F32 = struct {
+    /// Ports `GGML_F32_STEP`, `GGML_F32_EPR` (simd-mappings.h:452, 453
+    /// @c1d0e7a00): four registers of sixteen lanes per step.
+    pub const step: usize = 64;
+    pub const epr: usize = 16;
+
+    /// Ports `GGML_F32_ARR` (simd-mappings.h:1313 @c1d0e7a00).
+    pub const arr: usize = step / epr;
+
+    /// `GGML_F32x16`.
+    pub const Vec = @Vector(epr, f32);
+
+    /// Ports `GGML_F32x16_ZERO` (simd-mappings.h:456 @c1d0e7a00).
+    pub const zero: Vec = @splat(0.0);
+
+    /// Ports `GGML_F32x16_SET1` (simd-mappings.h:457 @c1d0e7a00).
+    pub inline fn set1(x: f32) Vec {
+        return @splat(x);
+    }
+
+    /// Ports `GGML_F32x16_LOAD` (simd-mappings.h:458 @c1d0e7a00).
+    pub inline fn load(p: [*]const f32) Vec {
+        return p[0..epr].*;
+    }
+
+    /// Ports `GGML_F32x16_STORE` (simd-mappings.h:459 @c1d0e7a00).
+    pub inline fn store(p: [*]f32, v: Vec) void {
+        p[0..epr].* = v;
+    }
+
+    /// Ports `GGML_F32x16_FMA` (simd-mappings.h:461 @c1d0e7a00):
+    /// `_mm512_fmadd_ps(b, c, a)`, so `a + b * c`, fused.
+    pub inline fn fma(a: Vec, b: Vec, cc: Vec) Vec {
+        return @mulAdd(Vec, b, cc, a);
+    }
+
+    /// Ports `GGML_F32x16_ADD` (simd-mappings.h:462 @c1d0e7a00).
+    pub inline fn add(a: Vec, b: Vec) Vec {
+        return a + b;
+    }
+
+    /// Ports `GGML_F32x16_MUL` (simd-mappings.h:463 @c1d0e7a00).
+    pub inline fn mul(a: Vec, b: Vec) Vec {
+        return a * b;
+    }
+
+    /// Ports `GGML_F32x16_REDUCE` (simd-mappings.h:464 @c1d0e7a00): halve,
+    /// halve, then `_mm512_reduce_add_ps`, in `reduceAdd512`'s tree.
+    pub inline fn reduce(x: *[arr]Vec) f32 {
+        halve(Vec, arr, x);
+        return reduceAdd512(x[0]);
+    }
+};
+
+/// `GGML_F16_VEC` on AVX-512 without `__AVX512FP16__`: `GGML_F32Cx16`, a
+/// `__m512` over sixteen widened halves, so the arithmetic is `f32`'s.
+const Avx512F32Cx16 = struct {
+    /// Ports `GGML_F16_STEP`, `GGML_F16_EPR` (simd-mappings.h:537, 538
+    /// @c1d0e7a00), the arm without `__AVX512FP16__`.
+    pub const step: usize = 64;
+    pub const epr: usize = 16;
+
+    /// Ports `GGML_F16_ARR` (simd-mappings.h:1314 @c1d0e7a00).
+    pub const arr: usize = step / epr;
+
+    /// Whether `Vec`'s arithmetic rounds to half precision. False, as for
+    /// AVX's `GGML_F32Cx8`.
+    pub const half_precision = false;
+
+    /// `GGML_F32Cx16`.
+    pub const Vec = @Vector(epr, f32);
+
+    /// Ports `GGML_F32Cx16_ZERO` (simd-mappings.h:541 @c1d0e7a00).
+    pub const zero: Vec = @splat(0.0);
+
+    /// Ports `GGML_F32Cx16_SET1` (simd-mappings.h:542 @c1d0e7a00).
+    pub inline fn set1(x: f32) Vec {
+        return @splat(x);
+    }
+
+    /// Ports `GGML_F32Cx16_LOAD` (simd-mappings.h:546 @c1d0e7a00):
+    /// `_mm512_cvtph_ps`, an exact widening -- an `fpext` in the
+    /// reference's IR.
+    pub inline fn load(p: [*]const u16) Vec {
+        const h: @Vector(epr, f16) = @bitCast(@as(@Vector(epr, u16), p[0..epr].*));
+        return @floatCast(h);
+    }
+
+    /// Ports `GGML_F32Cx16_STORE` (simd-mappings.h:547 @c1d0e7a00):
+    /// `_mm512_cvtps_ph(y, 0)`, through LLVM's own intrinsic, for the NaN
+    /// payloads `AvxF32Cx8.store` explains.
+    pub inline fn store(p: [*]u16, v: Vec) void {
+        p[0..epr].* = @bitCast(@"llvm.x86.avx512.mask.vcvtps2ph.512"(v, 0, @splat(0), 0xffff));
+    }
+
+    /// Ports `GGML_F32Cx16_FMA` (simd-mappings.h:549 @c1d0e7a00).
+    pub inline fn fma(a: Vec, b: Vec, cc: Vec) Vec {
+        return Avx512F32.fma(a, b, cc);
+    }
+
+    /// Ports `GGML_F32Cx16_ADD` (simd-mappings.h:550 @c1d0e7a00).
+    pub inline fn add(a: Vec, b: Vec) Vec {
+        return a + b;
+    }
+
+    /// Ports `GGML_F32Cx16_MUL` (simd-mappings.h:551 @c1d0e7a00).
+    pub inline fn mul(a: Vec, b: Vec) Vec {
+        return a * b;
+    }
+
+    /// Ports `GGML_F32Cx16_REDUCE` (simd-mappings.h:552 @c1d0e7a00), which
+    /// halves over `GGML_F32_ARR` -- the same count here -- and ends in
+    /// `_mm512_reduce_add_ps`.
+    pub inline fn reduce(x: *[arr]Vec) f32 {
+        return Avx512F32.reduce(x);
+    }
+};
+
+// -----------------------------------------------------------------------------
 // The reference compiler's loop vectorizer
 
 /// How clang's loop vectorizer shapes a strict `acc += a[i] * b[i]` loop for
@@ -452,6 +597,10 @@ pub const StrictLoop = struct {
 ///   no vector instruction at all, and `ssm_scan`'s only `vmulps` are its
 ///   `GGML_SIMD` body's -- the x86 cost model does not find an in-order
 ///   reduction worth it. Every product fused.
+/// - **`x86_64_v4`**: the same, measured the same way on the v4 reference:
+///   `ggml_vec_dot_f32`'s tail is scalar `vfmadd231ss`, `ssm_conv` has no
+///   vector instruction, and `ssm_scan`'s eight `vmulps` are its `GGML_SIMD`
+///   body's, on `zmm`. **`tigerlake`** likewise, measured on its reference.
 ///
 /// Any other model is a compile error rather than a guess: these sites are
 /// bit-exact or wrong, and `NOTES.md`, "Stage 5: the measurement", has how
@@ -462,7 +611,7 @@ pub const strict_loop: StrictLoop = blk: {
         break :blk .{ .group = 4, .footprint = 64 };
     if (builtin.cpu.arch == .aarch64 and std.mem.eql(u8, model, "generic"))
         break :blk .{ .group = 8, .footprint = 32 };
-    if (builtin.cpu.arch == .x86_64 and std.mem.eql(u8, model, "x86_64_v3"))
+    if (builtin.cpu.arch == .x86_64 and (std.mem.eql(u8, model, "x86_64_v3") or std.mem.eql(u8, model, "x86_64_v4") or std.mem.eql(u8, model, "tigerlake")))
         break :blk .{ .group = null, .footprint = 0 };
     @compileError("the loop vectorizer's shape is not measured for CPU model '" ++ model ++ "'");
 };

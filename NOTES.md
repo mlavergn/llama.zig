@@ -7077,3 +7077,111 @@ at the first `MUL_MAT`.
 member as `'/ggml-blas\.o:'`; `nm -A` on macOS prints `libggml.a:ggml-blas.o:`,
 so "the port contains no upstream object" passed for any library. With
 `[:/]` it refuses the upstream build, shown by pointing `blas-diff` at it.
+
+## Stage 5 step 6: AVX-512
+
+Decision 53's second level, `x86_64_v4`, and `tigerlake` above it, gated
+on a second Windows machine, `JWHLPTOP` -- an Intel i5-1135G7 (Tiger Lake:
+AVX-512 F, BW, DQ, VL, VNNI, VBMI; no BF16, no FP16), reached through
+`zupdater` like the Haswell laptop, with `X86_AGENT=JWHLPTOP`.
+
+### The measurement
+
+Every CPU translation unit preprocessed at `x86_64_v3`, `x86_64_v4` and
+`tigerlake`, live lines compared by linemarker: **+2,123 lines at v4**,
+1,954 of them the three AVX-512 gemm arms in `arch/x86/repack.cpp`. The rest
+is small and enumerable -- `vec.cpp` and `vec.h` (the `__m512` `ggml_v_expf`,
+SiLU, softmax, `cvar`, the bf16 dot), `ggml-cpu.c` (16-wide f16 conversion
+blocks), `sgemm.cpp` (`tinyBLAS<16, __m512>`, `VECTOR_REGISTERS == 32`),
+`simd-gemm.h` (block sizes) and a dead `packNibbles` arm in `quants.c` (no
+caller at this pin). `tigerlake` over v4 is **five sites**, all VNNI:
+`quants.c:107`, `repack.cpp:125` and `153`, `sgemm.cpp:1757`, and two
+feature reports. `simd-mappings.h` shows no line difference because it is
+macros -- its `__AVX512F__` arm changes every `GGML_F32_VEC` loop through
+`simd.F32` and `simd.F16`.
+
+### What was ported
+
+- **`simd.zig`**: `GGML_F32x16` and the `GGML_F32Cx16` fallback for `F16`.
+  `_mm512_reduce_add_ps` lowers to a reassociable
+  `llvm.vector.reduce.fadd`, so its order is the backend's; read off the v4
+  reference's `ggml_vec_dot_f32`: fold 256, fold 128, `vshufpd`,
+  `vmovshdup` (`simd.reduceAdd512`). `strict_loop` for both new models was
+  measured the same way as v3's: never vectorized.
+- **`vec.zig`**: the AVX-512 `ggml_v_expf` is **not** the AVX2 routine at
+  sixteen lanes -- it ends in `_mm512_scalef_ps` (LLVM's
+  `avx512.mask.scalef.ps.512`, rounding 4), its polynomial's last term is
+  `fma(c, b, 1)` rather than a product, and its slow path only separates
+  `|n| > 192`. Read against the reference's IR.
+- **`convert.zig`**: the 16-wide `vcvtps2ph` block, through LLVM's own
+  intrinsic for the NaN payloads, as the 8-wide one.
+- **`sgemm.zig`**: `tinyBLAS<16, __m512>` for f32, bf16 and f16, and
+  `tinyBLAS_Q0_AVX`'s 32-register `mnpack` cases (4x4, 4x3, 3x4, 3x3) --
+  a schedule, not a result: every tile computes each element alike.
+- **The repack gemms, by a new layer, `repack/x86/wide.zig`.** Each AVX-512
+  arm is its AVX2 arm on two interleaved blocks at once: the same
+  intrinsics in the same order (`q2_K`: 328 `shuffle_epi32`, 256
+  `maddubs_epi16`, 192 `add_epi16`, 96 `madd_epi16` in *each* arm), every
+  one confined to a 128-bit lane or its own element. Only how a register is
+  filled differs: columns, scales and mins as
+  `_mm512_inserti32x8(cast(block x), block x + 1, 1)`, activation rows and
+  their scales repeated. So `q4_b32.zig`, `q4_k.zig` and `q2_k.zig` now run
+  one body generic over `Wide(256)` and `Wide(512)`, with `join`/`rep` at
+  the inputs, and each AVX-512 lane is computed exactly as the AVX2 arm
+  computes that column. The 512-bit sign trick (`abs` and a masked
+  `0 - y`) differs from `sign_epi8` only where `x == 0`, whose product is
+  zero either way.
+- **VNNI** (`tigerlake`): `vpdpbusd` in `mul_sum_us8_pairs_float`, both
+  `mul_sum_us8_pairs_acc` widths and `sgemm`'s `updot`. `__AVXVNNI__`
+  alone, `__AVXVNNIINT8__`, `__AVX512BF16__` and `__AVX512FP16__` are
+  compile errors: no CPU here has them.
+
+### Two things the gates would not have said
+
+- **The v4 build compiled before any of the repack work.** The three gemm
+  files said in prose that their AVX-512 arms were not ported, with no
+  guard, so a v4 build took the AVX2 arm where the C takes the 512-bit one.
+  It was also bit-identical -- the lane argument above -- so every gate
+  passed it. Bit-exactness was never in question; 512-bit code was, and
+  the disassembly is what shows it now (`zmm` in all three gemms,
+  `vscalefps` in softmax).
+- **`repack-diff` ran every gemm at sixteen columns only**, which reaches
+  the AVX-512 loop and never its hand-off: `if (anc != nc) { xstart =
+  anc/8; y = 0; }` sends the leftover columns to the AVX2 loop **from the
+  first row again**. Twenty-four columns now run beside sixteen (60 checks
+  to 116), and the injection that drops `y = 0` fails 2 of them.
+
+### The gates
+
+All on `JWHLPTOP`, both sides built for the level:
+
+| gate | `x86_64_v4` | `tigerlake` |
+|---|---|---|
+| `x86-quants-diff` | 28 / 28 | 28 / 28 |
+| `x86-repack-diff` | 116 / 116 | 116 / 116 |
+| `x86-ops-diff` | 712 / 712 | 712 / 712 |
+| `x86-node-diff` (Qwen3.5 2B `Q4_K_M`, 1 and 4 threads, fused) | 5,505 | 5,505 |
+
+and on the Haswell laptop at v3 after the refactor, `x86-repack-diff`
+116 / 116 and `x86-ops-diff` 712 / 712. The model is at
+`%USERPROFILE%\llamazig\` there: `X86_MODEL='llamazig\Qwen3.5-2B-Q4_K_M.gguf'`.
+
+### Injected faults
+
+| fault | level | gate | result |
+|---|---|---|---|
+| the two blocks' column scales swapped (`q4_b32`) | v4 | repack | 12 / 116 |
+| `y = 0` dropped after the 512-bit loop (`q4_K`) | v4 | repack | 2 / 116 |
+| block x's mins in both halves (`q2_K`) | v4 | repack | 4 / 116 |
+| `reduceAdd512` pairs `(0+1),(2+3)` | v4 | ops | 60 / 712 |
+| `vExpf512`'s `fma(c, b, 1)` unfused | v4 | ops | 20 / 712 |
+| `sgemm`'s 512-bit `hsum` ordered | v4 | ops | 12 / 712 |
+| `vec_dot_bf16`'s two reductions merged | v4 | ops | 2 / 712 |
+| `vpdpbusd` operands swapped, `quants` | tigerlake | quants | 5 / 28 |
+| the same, 512-bit repack | tigerlake | repack | 12 / 116 |
+| the same, `sgemm`'s `updot` | tigerlake | ops | 18 / 712 |
+
+10 / 10. The VNNI ones matter because a VNNI arm and the `maddubs` arm it
+replaces agree on every input these kernels see -- `|x| <= 128` against a
+signed byte never saturates a pair -- so a pass alone could not show the
+arm was reached.
