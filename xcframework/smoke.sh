@@ -95,8 +95,12 @@ device() {
 }
 
 sim_udid() {
+    # The name is matched literally: "Apple TV 4K (3rd generation)" holds
+    # parentheses, and its "(at 1080p)" sibling must not match.
+    local esc
+    esc="$(printf '%s' "$1" | sed 's/[][\.*^$()+?{}|/]/\\&/g')"
     xcrun simctl list devices available \
-        | grep -E "^ +$1 \([0-9A-F-]+\)" | head -1 | sed -E 's/.*\(([0-9A-F-]+)\).*/\1/'
+        | grep -E "^ +$esc \([0-9A-F-]{36}\)" | head -1 | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/'
 }
 
 cmd="${1:?usage: smoke.sh compare|device|sim-udid ...}"; shift

@@ -65,10 +65,11 @@ clean:
 # Reference builds
 #
 
-# Build the port as llamazig.xcframework (macOS, iOS, iOS simulator) for apps.
-# Everything lives in xcfwk/; see xcfwk/README.md.
+# Build the port as llama.xcframework, a drop-in for the one upstream's
+# build-xcframework.sh produces: macOS, iOS, tvOS and visionOS, devices and
+# simulators. Everything lives in xcframework/; see xcframework/README.md.
 xcframework:
-	$(MAKE) -C xcfwk
+	$(MAKE) -C xcframework
 
 # Performance of the stock C against the port; see metrics/README.md.
 perf:
@@ -80,7 +81,7 @@ perf-cpu:
 
 # The xcframework plus every gate on it, and `validate ops-diff`.
 xcframework-check:
-	$(MAKE) -C xcfwk check
+	$(MAKE) -C xcframework check
 
 # Build llama.cpp for iOS with CMake.
 buildios:
@@ -171,7 +172,9 @@ validate:
 	@printf '\n== the libraries for iOS (no std.debug.print or @panic in library code) ==\n'
 	@# Zig 0.17 cannot compile std.Io.Threaded for iOS, which std.debug.print
 	@# reaches; nothing else would notice until the xcframework next builds.
-	zig build reference -Dtarget=aarch64-ios.18.0 -Dcpu=apple_a14 --release=fast --prefix zig-out/ios-check
+	@# The xcframework's iOS device slice: libggml with BLAS, libmtmd with
+	@# libllama inside, for the A7 upstream's framework is built for.
+	zig build xcframework -Dblas -Dtarget=aarch64-ios.16.4 -Dcpu=apple_a7 --release=fast --prefix zig-out/ios-check
 	@printf '\n== upstream citations ==\n'
 	./scripts/port-links
 	@printf '\n== scheduler diff vs reference ==\n'

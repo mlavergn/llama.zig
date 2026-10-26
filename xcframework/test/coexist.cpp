@@ -1,13 +1,12 @@
-// An app's own C++, on the system libc++, beside the framework's hidden copy.
+// An app's own C++, on the system libc++, beside the framework.
 //
-// The framework carries Zig's libc++ and libc++abi, localized by `ld -r`, so
-// the process holds two of each. This proves they do not meet: the app's
-// containers and exceptions run on the system's, and a C++ exception thrown
-// and caught *inside* the framework -- `llama_model_load_from_file` on a
-// missing file -- unwinds through its own personality routine and comes back
-// as a null return.
+// The framework needs no C++ runtime of its own -- libllama is Zig -- while
+// upstream's module map autolinks libc++ for the app. This proves the two
+// sit together: the app's containers and exceptions run on the system's, and
+// the framework's failure path -- `llama_model_load_from_file` on a missing
+// file -- comes back as a null return.
 
-#include <llamazig/llama.h>
+#include <llama/llama.h>
 
 #include <algorithm>
 #include <cstdio>

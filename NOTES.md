@@ -7634,3 +7634,137 @@ Recorded, reproduced where defined, never fixed:
   them logs nothing upstream does not.
 - `mtmd_get_cap_from_file` catches the loader's exception and logs it; an
   earlier draft of `clip.getCap` aborted instead.
+
+## llama.xcframework
+
+Decision 63: `make xcframework` builds a drop-in for the `llama.xcframework`
+upstream's `build-xcframework.sh` writes, in place of the static
+`llamazig.xcframework`. `xcfwk/` is `xcframework/` now, after the Makefile
+target. The reference is upstream's own: `make -C xcframework upstream`
+runs its script, with CMake from `.tools/`, over a `git archive` of the pin,
+so nothing is written under `llama.cpp/`. Built here it took four minutes.
+
+**What upstream's is, measured from that build.** Seven libraries --
+`ios-arm64`, `ios-arm64_x86_64-simulator`, `macos-arm64_x86_64`,
+`tvos-arm64`, `tvos-arm64_x86_64-simulator`, `xros-arm64`,
+`xros-arm64_x86_64-simulator` -- each a dynamic framework, install name
+`@rpath/llama.framework/llama` (`.../Versions/Current/llama` on macOS),
+with a dSYM; minimums iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0, the
+device binaries re-marked by `vtool` so their SDK field equals their
+minimum; eleven headers, `mtmd.h`, `mtmd-helper.h` and `ggml-blas.h` among
+them; a module map that links `c++`, Accelerate, Metal and Foundation and
+not the framework itself; 4,710 exported symbols, 993 of them functions the
+headers declare. The binary is libllama, libggml with the BLAS backend
+(`GGML_BLAS_DEFAULT` is on for Apple) and libmtmd, linked against
+Foundation, Metal, Accelerate and libc++.
+
+**Ours.** `bundle.sh` transcribes upstream's `setup_framework_structure`,
+so headers, module map and `Info.plist` are upstream's bytes. Each slice
+architecture is `zig build xcframework -Dblas`, a new step: `libggml.a`
+and `libmtmd.a`, the mtmd module's own library, which carries libllama
+because the module imports it -- `libllama.a` beside it would define every
+`llama_*` twice. Those and Zig's compiler_rt are prelinked with `ld -r` to
+`exports.txt`'s prefixes, linked `-dynamiclib` with upstream's install
+name, `lipo`-joined, `vtool`-marked on devices, `dsymutil`-ed and stripped,
+exactly the order upstream's script uses. The toolchain is `../zig17`,
+which finds every Apple SDK and links for the simulators; with it the
+shim SDK the static build needed for the simulator is gone.
+
+**Which CPU each slice is for** was the decision that mattered. Upstream's
+CMake names none (`GGML_NATIVE` is off), so Apple clang picks its default
+per target, measured with `clang -###`: `apple-m1` for macOS and every
+arm64 simulator, `apple-a7` for iOS and tvOS devices, `apple-a12` for
+visionOS, `penryn`/`core2` for x86_64. A slice built for a newer CPU
+than upstream's would not run everywhere upstream's does -- the static
+framework's `apple_a14` and `apple_m3` excluded the iPhone 8 through 11
+and every M1 -- so ours takes the same arm64 CPUs. x86_64 is
+`x86_64_v3`, the port's x86 floor; every Intel Mac macOS 13.3 supports has
+AVX2.
+
+**Upstream's universal slices compile ggml-cpu generic.** Its macOS and
+simulator builds set `CMAKE_OSX_ARCHITECTURES="arm64;x86_64"`, and
+`ggml_get_system_arch` (`ggml/cmake/common.cmake:28`) recognises only
+`arm64` or `x86_64` exactly: both builds log `GGML_SYSTEM_ARCH: UNKNOWN`
+and "Unknown CPU architecture", and define `GGML_CPU_GENERIC`, so
+`arch-fallback.h` renames every `_generic` kernel to the real name. The
+device builds log `ARM detected`. Ours does not reproduce that: our macOS
+and simulator slices run the port's NEON kernels at `apple_m1`, the
+baseline every gate runs. So on the macOS CPU path upstream's framework
+and ours differ -- 2 of 6 prompts, which `dropin-macos` reports and does
+not gate -- and on Metal they are identical.
+
+**Gating `apple_a7` found the port wrong there.** The A7 has neither
+`fullfp16` nor `dotprod`, so its kernel arms are `generic`'s, which Stage 5
+step 2 made exact -- but `ops-diff` at `GATE_CPU=apple_a7` failed on
+`conv_3d_direct`, `ssm_conv` and a Mamba-1 `ssm_scan`, and `node-diff` and
+`parity-port --cpu` failed after them, while `repack-diff` passed; the same
+at `apple_a12`. Those are the `simd.strict_loop` sites, which took every
+`apple_*` model to have the A14's vectorizer shape. The reference's `ops.o`
+at `apple_a7` and at `apple_a12` disagrees: two `fmul.4s` per body, an
+8-iteration guard and a 32-byte overlap guard -- `generic`'s shape. LLVM
+gives every Apple core the same cost model and sets
+`FeatureMaxInterleaveFactor4` only on the A14, A15, A16, A17, M4 and M5
+tunes (`AArch64Processors.td`); the M1, M2 and M3 alias the A14, A15 and
+A16. `strict_loop` now keys Apple cores on that feature, and
+`features.golden_generic` keys on `fullfp16`, `dotprod` and it rather than
+on the model's name, so the unit tests at `apple_a7` read the `generic`
+goldens and pass. After: `ops-diff`, `node-diff` and `parity-port --cpu`
+pass at both CPUs.
+
+**One link failure Zig owns.** The x86_64 simulator slices failed on
+`_readdir$INODE64`: Zig 0.17's `std.c.readdir` binds the `$INODE64` name
+for every x86_64 Darwin target, and only macOS's libSystem has it -- the
+simulator SDKs are 64-bit-inode only (`__DARWIN_ONLY_64_BIT_INO_T` in
+their `sys/cdefs.h`) and export plain `_readdir`. `backend_reg.zig` binds
+`readdir` itself there.
+
+**Exports.** Every header-declared function upstream's binary exports is
+exported by ours, per slice and architecture. Upstream's also exports 203
+C symbols no shipped header declares; the 98 of them from
+`ggml-quants.c` -- `quantize_*`, `dequantize_*`, `iq2xs_*`, `iq3xs_*` --
+are the port's too and are exported, and the rest (`stbi_*`, `XXH*`,
+`sha256_*`, `unicode_*`) are C and C++ internals the port implements in
+Zig under other names. Upstream's module map does not link the framework,
+so a `swiftc` command line names `-framework llama`, as Xcode does when
+the framework is in the target.
+
+**The gates, run.** `make -C xcframework verify`: 7 slices, 11
+architectures, each prelinked object 1,625 exports, all in `exports.txt`,
+compiler_rt's math inside, no libc++ anywhere; `stub.m` links on every
+target with `-framework llama` alone; dSYM UUIDs match. `compat` against
+`make upstream`'s build: every slice's bundle tree identical, 91 files
+byte-identical, every binary's architectures, type, install name,
+platform, minimum OS and SDK identical, no dependency upstream's lacks,
+and 993 header-declared exports present in each of the 11 slice
+architectures. `negative`: 13 of 13 injected faults caught -- the nine
+structural ones and four for `compat`: a header edited, the module
+renamed, `mtmd_*` unexported on one architecture, a device binary not
+re-marked by `vtool`. `smoke-macos` 6 / 6 on Metal and 6 / 6 on the CPU
+against the port's `apple_m1` libraries, with app C++ beside it;
+`smoke-sim` 6 / 6 on the iOS, tvOS and visionOS simulators each.
+**`dropin-macos`**: one Swift binary linked against upstream's framework
+runs on ours with no relink -- Metal 6 / 6 identical to upstream's own
+framework and to the port, the CPU 6 / 6 identical to the port and 4 / 6
+to upstream's generic kernels. **On the iPhone 15** (`smoke-device`): 12 /
+12 byte-identical, CPU and Metal, against the port's `apple_a7` libraries.
+**`swiftui`**: upstream's `examples/llama.swiftui`, untouched, builds
+against ours for the simulator and the device, embeds and signs our
+binary (the same UUID), and is running on the phone 8 s after launch --
+checked to see a process that is there and miss one that is not.
+`pkg-test` passes on macOS and the simulator.
+
+**Two things the dynamic form needed that the static one did not.** The
+test app's project had no `@executable_path/Frameworks` runpath, which
+every Xcode template sets, so its first run died in dyld: `Library not
+loaded: @rpath/llama.framework/llama`. And embedding signs the copy, so
+"is our binary embedded" compares UUIDs, not bytes.
+
+**The A7 CPU path holds no repacked weights.** On the phone the CPU
+footprint is 118-127 MiB, where the `apple_a14` slice held 1,338 MiB:
+every NEON arm of `ggml_repack_get_optimal_repack_type` asks
+`ggml_cpu_has_dotprod()` (repack.cpp:4584 on), which the A7 lacks, so the
+weights stay in the mapped file. Upstream's `ios-arm64` slice does the
+same.
+
+**Not run**: the x86_64 slices -- this Mac has no Rosetta and there is no
+Intel Mac -- and the tvOS and visionOS devices. `PLAN.md`, "What is left".

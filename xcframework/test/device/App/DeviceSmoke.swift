@@ -10,7 +10,7 @@
 import Foundation
 import SwiftUI
 import os
-import llamazig
+import llama
 
 // parity-port's six prompts, as `smoke.sh` has them.
 let prompts = [
@@ -145,6 +145,6 @@ struct DeviceSmoke: App {
     }
 
     var body: some Scene {
-        WindowGroup { Text("llamazig device smoke") }
+        WindowGroup { Text("llama.xcframework device smoke") }
     }
 }

@@ -3,8 +3,8 @@
 // The driver `scripts/parity-port` writes inline, kept here as a file: greedy
 // decoding through `llama.h`, `cpu` restricting the model to the CPU device.
 // The Makefile links it against the port's own libraries (`zig build
-// reference --release=fast`), and `smoke.swift` runs the identical loop
-// through `llamazig.framework` -- so any difference in output is the
+// reference --release=fast -Dblas`), and `smoke.swift` runs the identical
+// loop through `llama.framework` -- so any difference in output is the
 // packaging, not the port.
 //
 // Usage: driver <model.gguf> <prompt> <n_predict> [cpu|gpu]

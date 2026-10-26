@@ -128,8 +128,9 @@ const Xcode = struct {
     ///
     /// Runs during the build on macOS so the library and CLI can be given the
     /// framework search path they need to link against system frameworks.
-    /// An Apple target gets its own SDK -- macOS, iPhoneOS or
-    /// iPhoneSimulator, which is what lets `xcfwk/` build the iOS slices.
+    /// An Apple target gets its own SDK -- macOS, or the iOS, tvOS or visionOS
+    /// device or simulator SDK -- which is what lets `xcframework/` build its
+    /// slices.
     /// Anything else falls back to the Apple Silicon macOS SDK, as before.
     /// Must be called exactly once after `init` and before `target` or `sdk`
     /// are read; on success both fields are valid for the handle's lifetime.
@@ -405,7 +406,7 @@ pub fn build(b: *std.Build) !void {
         break :blk xcode.sdk;
     } else null;
 
-    // A named Apple `-Dtarget` -- every `xcfwk/` slice -- is a cross-compile
+    // A named Apple `-Dtarget` -- every `xcframework/` slice -- is a cross-compile
     // to Zig and needs the SDK described to it. A native build does not, and
     // gets nothing new. See `llamacpp.writeAppleLibcFile`.
     const libc_file: ?std.Build.LazyPath =
@@ -623,12 +624,25 @@ pub fn build(b: *std.Build) !void {
         .mtmd_ref = mtmd_ref,
     });
 
-    _ = mtmd_build.add(b, .{
+    const mtmd_module = mtmd_build.add(b, .{
         .target = cfg.target,
         .optimize = cfg.optimize,
         .sdk = sdk,
         .reference = reference,
     }, mtmd_ref);
+
+    // One slice of `xcframework/`'s `llama.framework`, the drop-in for
+    // upstream's `build-xcframework.sh`: `libggml.a` with the BLAS backend
+    // upstream's Apple build turns on, and `libmtmd.a` -- libmtmd's port,
+    // which imports libllama's module and so carries libllama, `llama.h`'s
+    // exports included. The two are the whole framework; `libllama.a` beside
+    // them would define every `llama_*` twice.
+    const mtmd_lib = b.addLibrary(.{ .name = "mtmd", .root_module = mtmd_module, .linkage = .static });
+    mtmd_lib.setLibCFile(libc_file);
+    const xcframework_step = b.step("xcframework", "Build one slice of xcframework/'s llama.framework (libggml, libmtmd) for -Dtarget; needs -Dblas");
+    if (blas == null) xcframework_step.dependOn(&b.addFail("xcframework: upstream's Apple framework has the BLAS backend; pass -Dblas").step);
+    xcframework_step.dependOn(&ggml_install.step);
+    xcframework_step.dependOn(&b.addInstallArtifact(mtmd_lib, .{}).step);
 
     // -------------------------------------------------------------------------
     // Tests

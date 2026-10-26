@@ -196,9 +196,13 @@ relinked: it mimics `llama-cli`'s flag surface for the features we support and
 refuses the rest rather than ignoring them. One-shot completion and `-cnv`
 conversation both work.
 
-`make xcframework` packages the port as `llamazig.xcframework` — macOS (M3
-and later), iOS (A14 and later) and the iOS simulator — callable from Swift
-as `import llamazig`. See [`xcfwk/README.md`](xcfwk/README.md).
+`make xcframework` packages the port as `llama.xcframework`, a drop-in for
+the one upstream's `build-xcframework.sh` builds: the same seven slices
+(macOS, iOS, tvOS and visionOS, devices and simulators, arm64 and x86_64),
+minimums, headers, module and install names, so an app written against
+upstream's builds against it unchanged -- `import llama` -- and an app
+linked against upstream's runs on it. See
+[`xcframework/README.md`](xcframework/README.md).
 
 **How correctness is checked.** Several gates, none of which subsumes the
 others, and each negative-tested by injecting a fault and confirming it fails:

@@ -1,4 +1,4 @@
-import llamazig
+import llama
 
 /// Returns llama.cpp's system-info line, through the binary target.
 public func systemInfo() -> String {

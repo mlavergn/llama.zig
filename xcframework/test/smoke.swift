@@ -1,13 +1,14 @@
-// `test/driver.c`'s loop, line for line, in Swift through `import llamazig`.
+// `test/driver.c`'s loop, line for line, in Swift through `import llama`.
 //
 // Proves the framework is usable from Swift -- module map, autolinked system
-// frameworks, no `-lc++` -- and, diffed against the driver linked to the
-// port's own libraries, that packaging changed no output.
+// frameworks -- and, diffed against the driver linked to the port's own
+// libraries, that packaging changed no output. `make dropin-macos` also
+// links it against upstream's framework and runs it on ours.
 //
 // Usage: smoke <model.gguf> <prompt> <n_predict> [cpu|gpu]
 
 import Foundation
-import llamazig
+import llama
 
 let args = CommandLine.arguments
 guard args.count >= 4, let nPredict = Int(args[3]) else {

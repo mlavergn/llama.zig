@@ -734,6 +734,18 @@ fn pathExists(path: [:0]const u8) bool {
     return Libc.access(path.ptr, Libc.F_OK) == 0;
 }
 
+/// libc's `readdir`. Zig 0.17's `std.c.readdir` binds `readdir$INODE64` on
+/// every x86_64 Darwin target, and only macOS's libSystem defines it: the
+/// iOS, tvOS and visionOS simulators are 64-bit-inode only
+/// (`__DARWIN_ONLY_64_BIT_INO_T` in their `sys/cdefs.h`) and export plain
+/// `readdir`, so the xcframework's x86_64 simulator slices failed to link.
+const readdir = if (builtin.cpu.arch == .x86_64 and builtin.os.tag.isDarwin() and builtin.os.tag != .macos)
+    struct {
+        extern "c" fn readdir(dir: *std.c.DIR) ?*std.c.dirent;
+    }.readdir
+else
+    std.c.readdir;
+
 /// `fs::directory_iterator` over one search path, filtered to the entries
 /// `is_regular_file` accepts, yielding each one's file name as UTF-8.
 ///
@@ -799,7 +811,7 @@ const DirScan = struct {
                 return name;
             }
         }
-        while (std.c.readdir(self.os)) |ent| {
+        while (readdir(self.os)) |ent| {
             // DT_REG. `is_regular_file` in the C++; a `DT_UNKNOWN` filesystem
             // would need a stat, which APFS never reports.
             if (ent.type != 8) continue;

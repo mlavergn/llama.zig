@@ -406,7 +406,7 @@ locatable in this port.
 | Requirement | Value |
 |---|---|
 | Build tool | Zig **0.17.0**, no CMake, no Ninja |
-| Targets | macOS arm64; iOS and the iOS simulator (the xcframework); Linux arm64, with CUDA and Vulkan; Linux x86_64 and Windows x86_64 (`x86_64-windows-gnu`) at x86-64-v3 |
+| Targets | macOS arm64; iOS, tvOS and visionOS, devices and simulators, through `llama.xcframework`, a drop-in for upstream's `build-xcframework.sh` output (Decision 63); Linux arm64, with CUDA and Vulkan; Linux x86_64 and Windows x86_64 (`x86_64-windows-gnu`) at x86-64-v3 |
 | Library dependencies | **None.** `libllamazig` links nothing outside the standard library and the system frameworks. |
 | CLI dependencies | One, granted by exception: `mlavergn/zigjinja` (a fork of `gremlin-labs/vibe-jinja`), pinned to an exact commit, confined to `cli/`. |
 | System libraries | macOS: Foundation, Metal, MetalKit, Accelerate. Linux: libc, and the CUDA runtime, cuBLAS and driver, or the Vulkan loader, when those backends are built |

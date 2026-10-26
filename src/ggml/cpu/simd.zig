@@ -585,13 +585,22 @@ pub const StrictLoop = struct {
 /// Measured from the reference `ops.o`'s LLVM IR and disassembly at `-O3`,
 /// `ggml_compute_forward_ssm_scan` and `ssm_conv`:
 ///
-/// - **Apple cores** (`apple_*`; LLVM's interleave factor 4): a body of four
-///   `fmul.4s`, 16 elements, entered at 16 iterations, then a vectorized
+/// - **Apple A14 and later** (`apple_a14`-`a19`, `apple_m1`-`m5`; LLVM's
+///   interleave factor 4, its `max_interleave_factor_4` feature): a body of
+///   four `fmul.4s`, 16 elements, entered at 16 iterations, then a vectorized
 ///   epilogue of one `fmul.4s` entered at 4. So groups of 4 are rounded,
 ///   `t % 4` fused, and nothing vectorizes below 4. Footprint 64 bytes.
 /// - **`generic`** (Zig's `aarch64-linux` baseline; interleave 2): a body of
 ///   two `fmul.4s`, 8 elements, entered at 8, and **no** vectorized
 ///   epilogue. Groups of 8, `t % 8` fused. Footprint 32 bytes.
+/// - **Apple A7 to A13** (`apple_a7`-`a13`; interleave 2, the feature
+///   absent): `generic`'s shape exactly, measured on the `apple_a7` and
+///   `apple_a12` references -- two `fmul.4s`, an 8-iteration guard, a
+///   32-byte overlap guard. The CPU model is not what decides: LLVM gives
+///   every Apple core the same cost model and only the A14 and later the
+///   wider interleave. Keying this on an `apple_` prefix failed `ops-diff`
+///   at `apple_a7` on `ssm_conv`, `ssm_scan` and `conv_3d`, which the
+///   xcframework's device slices build for.
 /// - **`x86_64_v3`**: **never vectorized.** The reference's
 ///   `ggml_vec_dot_f32` tail is a scalar `vfmadd231ss` loop, `ssm_conv` has
 ///   no vector instruction at all, and `ssm_scan`'s only `vmulps` are its
@@ -608,7 +617,10 @@ pub const StrictLoop = struct {
 pub const strict_loop: StrictLoop = blk: {
     const model = builtin.cpu.model.name;
     if (builtin.cpu.arch == .aarch64 and std.mem.startsWith(u8, model, "apple_"))
-        break :blk .{ .group = 4, .footprint = 64 };
+        break :blk if (std.Target.aarch64.featureSetHas(builtin.cpu.features, .max_interleave_factor_4))
+            .{ .group = 4, .footprint = 64 }
+        else
+            .{ .group = 8, .footprint = 32 };
     if (builtin.cpu.arch == .aarch64 and std.mem.eql(u8, model, "generic"))
         break :blk .{ .group = 8, .footprint = 32 };
     if (builtin.cpu.arch == .x86_64 and (std.mem.eql(u8, model, "x86_64_v3") or std.mem.eql(u8, model, "x86_64_v4") or std.mem.eql(u8, model, "tigerlake")))
@@ -660,8 +672,9 @@ pub inline fn strictDot(x: [*]const f32, y: [*]const f32, start: usize, end: usi
 /// It only takes that form when two runtime guards pass, read off the LLVM
 /// IR of the same loop compiled by the same toolchain:
 ///
-/// - at least `strict_loop.group` iterations -- four on an Apple core, eight
-///   at `generic` -- else the scalar loop runs throughout; and
+/// - at least `strict_loop.group` iterations -- four on an Apple A14 or
+///   later, eight at `generic` and on earlier Apple cores -- else the scalar
+///   loop runs throughout; and
 /// - for every array the loop loads, `(store_row - load_row)` as an
 ///   **unsigned** byte difference is at least `strict_loop.footprint`. A
 ///   load that starts closer below the store could be overwritten before it

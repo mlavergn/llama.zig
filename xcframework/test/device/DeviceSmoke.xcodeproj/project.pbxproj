@@ -7,11 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A10000000000000000000001 /* llamazig.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* llamazig.xcframework */; };
+		A10000000000000000000001 /* llama.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* llama.xcframework */; };
+		A10000000000000000000010 /* llama.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* llama.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		A10000000000000000000011 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				A10000000000000000000010 /* llama.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
-		A10000000000000000000002 /* llamazig.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = llamazig.xcframework; sourceTree = "<group>"; };
+		A10000000000000000000002 /* llama.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = llama.xcframework; sourceTree = "<group>"; };
 		A10000000000000000000003 /* DeviceSmoke.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DeviceSmoke.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -24,7 +39,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000000000000000000001 /* llamazig.xcframework in Frameworks */,
+				A10000000000000000000001 /* llama.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -35,7 +50,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000004 /* App */,
-				A10000000000000000000002 /* llamazig.xcframework */,
+				A10000000000000000000002 /* llama.xcframework */,
 				A10000000000000000000007 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -58,6 +73,7 @@
 				A10000000000000000000009 /* Sources */,
 				A10000000000000000000005 /* Frameworks */,
 				A1000000000000000000000A /* Resources */,
+				A10000000000000000000011 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -124,7 +140,7 @@
 		A1000000000000000000000E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
@@ -137,6 +153,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "$(SMOKE_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SMOKE_BUNDLE_ID = com.mlavergn.llamazig.devicesmoke;
