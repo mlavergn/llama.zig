@@ -1,0 +1,30 @@
+# llama-cvector-generator against upstream's: scripts/tools-diff cvector-generator.
+# The PCA seeds its engine from time(0); the clock is pinned for both sides,
+# so both PCA and mean compare on bits, the written control vector included.
+# The arch fixtures have no tokenizer, so the cases that tokenize run on
+# real vocabularies: $PLAIN, Qwen3-0.6B (`make qwen3`), Qwen3.5-2B.
+# Not cases, both undefined upstream: no prompt pairs -- files of blank
+# lines, or of different lengths, whose error prepare_entries' caller
+# ignores -- leave a zero-row diff that print_debug_tensor reads past
+# a malloc(0); and a model
+# that fails to load (a null model dereferenced, before the async logger
+# has written what it was given).
+!mask s/^[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} /T /
+!mask /^ggml_metal_/d
+!mask /^[0-9]+ +[A-Za-z_.-]+ +0x[0-9a-f]+ /d
+!mask s/^llama\.cpp\/([a-z-]+\/)*//
+!preload $DATA/fixed_time.so
+
+--help
+-m $PLAIN --positive-file $DATA/pos.txt --negative-file $DATA/neg.txt --method mean
+-m $PLAIN --positive-file $DATA/pos.txt --negative-file $DATA/neg.txt --method mean -o mean.gguf -ngl 0
+-m $PLAIN --positive-file $DATA/pos.txt --negative-file $DATA/neg.txt --pca-iter 40 --pca-batch 20 -o pca.gguf
+-m $PLAIN --positive-file $DATA/pos2.txt --negative-file $DATA/neg2.txt --pca-iter 30 --pca-batch 10 -t 3 -o pca2.gguf
+-m $ROOT/Qwen3-0.6B-Q8_0.gguf --positive-file $DATA/pos2.txt --negative-file $DATA/neg2.txt --method mean -o qwen3.gguf
+-m $ROOT/Qwen3-0.6B-Q8_0.gguf --positive-file $DATA/pos.txt --negative-file $DATA/neg.txt --pca-iter 20 --pca-batch 5 -o qwen3-pca.gguf
+-m $ROOT/Qwen3.5-2B-Q4_K_M.gguf --positive-file $DATA/pos.txt --negative-file $DATA/neg.txt --method mean -o qwen35.gguf
+-m $PLAIN --positive-file $DATA/nonexistent.txt --negative-file $DATA/neg.txt -o x.gguf
+-m $PLAIN --positive-file $DATA/pos.txt --negative-file $DATA/neg.txt --pca-iter 25 --pca-batch 10
+-m $PLAIN --method bogus
+--pca-batch x
+-m $FIX/qwen3-dense.gguf --positive-file $DATA/pos.txt --negative-file $DATA/neg.txt --method mean -o fix.gguf

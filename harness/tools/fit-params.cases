@@ -1,0 +1,20 @@
+# llama-fit-params against upstream's: scripts/tools-diff fit-params.
+# The fitting is cli/fit.zig, gated by make fit-diff on fake devices; free
+# memory on a real GPU moves between runs, so these cases use models that fit
+# whole, and the memory estimate, which free memory does not change.
+!mask s/^[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} /T /
+!mask /^ggml_metal_/d
+
+--help
+$FIX/qwen3-dense.gguf
+-m $FIX/qwen3-dense.gguf
+-m $FIX/llama-dense.gguf -c 512
+-m $FIX/llama-dense.gguf -c 512 -ngl 3
+-m $FIX/qwen3moe-moe.gguf -ngl all -ts 1
+-m $FIX/qwen3-dense.gguf -fitp on
+-m $FIX/gemma3-dense.gguf --fit-print on -c 2048 -ctk q8_0 -ctv q8_0 -fa on
+-m $ROOT/Qwen3-0.6B-Q8_0.gguf -fitp on
+-m $ROOT/Qwen3-0.6B-Q8_0.gguf -fitp on -np 4 -kvu
+-m $FIX/qwen3-dense.gguf -fitp maybe
+-m /nonexistent/model.gguf
+-m /nonexistent/model.gguf -fitp on

@@ -31,4 +31,4 @@ SHA="$(git -C llama.cpp rev-parse HEAD 2>/dev/null)" || {
     exit 2
 }
 
-exec zig run harness/port_links.zig -- src cli -- llama.cpp "$SHA"
+exec zig run harness/port_links.zig -- src cli tools -- llama.cpp "$SHA"

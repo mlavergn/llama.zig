@@ -95,7 +95,7 @@ const Reference = struct {
 /// the CUDA host layer's sources (`src/ggml/cuda/`); without them every one
 /// of its citations read "no such file".
 fn isSource(name: []const u8) bool {
-    for ([_][]const u8{ ".c", ".h", ".cpp", ".hpp", ".cu", ".cuh" }) |ext| {
+    for ([_][]const u8{ ".c", ".h", ".cpp", ".hpp", ".cu", ".cuh", ".cpp.in" }) |ext| {
         if (std.mem.endsWith(u8, name, ext)) return true;
     }
     return false;

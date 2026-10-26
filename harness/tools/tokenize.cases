@@ -1,0 +1,54 @@
+# llama-tokenize against upstream's: scripts/tools-diff tokenize.
+# --help prints the whole of common_params_parse's table for this example,
+# so it holds every ported option's spelling, hint, help text and section.
+# common_init turns on log timestamps, which differ run to run.
+!mask s/^[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} /T /
+!mask /^ggml_metal_/d
+
+--help
+--usage
+-h
+--version
+--list-devices
+
+# The parser's errors
+--bogus
+-p hello
+-m
+-m $VOCAB/ggml-vocab-llama-spm.gguf -c
+-m $VOCAB/ggml-vocab-llama-spm.gguf -c abc -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf -c 99999999999 -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf -fa maybe -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --temp x -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --repeat-penalty 0 -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --repeat-last-n -3 -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf -ctk q9 -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --rope-scaling sideways -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf -lm wrong -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --numa wrong -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf -dev nosuchdevice -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf -ot "x=nosuchbuft" -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --override-kv broken -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --lora-scaled a.gguf -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --control-vector-layer-range 1 -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf -l 15043x1 -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --cpu-range 9999- -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --cpu-mask 0xZZ -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --prio 9 -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --fit sometimes -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf -f /nonexistent/prompt.txt
+-m $VOCAB/ggml-vocab-llama-spm.gguf
+-m /nonexistent/model.gguf -p x
+
+# Tokenizing
+-m $VOCAB/ggml-vocab-llama-spm.gguf -p "Hello world"
+-m $VOCAB/ggml-vocab-llama-spm.gguf -p "Hello world" --ids
+-m $VOCAB/ggml-vocab-llama-spm.gguf -p "Hello world" --ids --show-count --no-bos
+-m $VOCAB/ggml-vocab-llama-bpe.gguf -p "<|begin_of_text|>Hello<|eot_id|>" --ids
+-m $VOCAB/ggml-vocab-llama-bpe.gguf -p "<|begin_of_text|>Hello<|eot_id|>" --ids --no-parse-special
+-m $VOCAB/ggml-vocab-qwen2.gguf -p "a\nb\tc \x41\x4g \\ end" --ids
+-m $VOCAB/ggml-vocab-qwen2.gguf -p "a\nb" --no-escape --ids
+-m $VOCAB/ggml-vocab-gpt-2.gguf -f $ROOT/llama.cpp/tools/cvector-generator/positive.txt --show-count
+-m $VOCAB/ggml-vocab-gpt-2.gguf --stdin --show-count
+-m $VOCAB/ggml-vocab-falcon.gguf -p "Ünïcödé 字 🙂" -p "second wins"
+-m $VOCAB/ggml-vocab-deepseek-coder.gguf -p "def f(x):\n    return x" -lv 4 -t 3 -c 64 -b 32 -ub 16 --seed 7 --temp 0.3 --top-k 5 --samplers "top_k;Temp;nucleus;bogus" --sampler-seq kxq

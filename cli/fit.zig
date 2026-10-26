@@ -70,6 +70,10 @@ pub const Log = struct {
     /// `common_log_set_prefix`: a level letter before each message, which
     /// the harness turns on so the level is part of what it compares.
     prefix: bool = false,
+    /// Where messages go instead of `out`, with the verbosity they were
+    /// logged at: the tools hand them to their own `common_log`, which keeps
+    /// its threshold, prefix and timestamps.
+    sink: ?*const fn (verbosity: i32, text: [*:0]const u8) void = null,
 
     /// `LOG_TRC` (log.h:115 @c1d0e7a00).
     fn trc(self: Log, format: [*:0]const u8, args: anytype) void {
@@ -91,7 +95,7 @@ pub const Log = struct {
     /// C's `fprintf` result is.
     fn emit(self: Log, verbosity: i32, letter: []const u8, format: [*:0]const u8, args: anytype) void {
         if (verbosity > self.verbosity) return;
-        const out = self.out orelse return;
+        if (self.out == null and self.sink == null) return;
         var stack: [1024]u8 = undefined;
         const n: usize = @intCast(@call(.auto, snprintf, .{ &stack, stack.len, format } ++ args));
         var heap: ?[]u8 = null;
@@ -102,6 +106,13 @@ pub const Log = struct {
             _ = @call(.auto, snprintf, .{ h.ptr, n + 1, format } ++ args);
             break :blk h[0..n];
         };
+        if (self.sink) |sink| {
+            const z = std.heap.c_allocator.dupeSentinel(u8, text, 0) catch return;
+            defer std.heap.c_allocator.free(z);
+            sink(verbosity, z.ptr);
+            return;
+        }
+        const out = self.out.?;
         if (self.prefix) out.writeAll(letter) catch return;
         out.writeAll(text) catch return;
         out.flush() catch return;
@@ -1329,6 +1340,10 @@ pub fn memoryBreakdownPrint(gpa: std.mem.Allocator, log: Log, ctx: ?*const c.str
 ///
 /// Return: nothing; write errors, and `error.Runtime` where the C would
 /// throw out of the measurement.
+/// `e.what()` of the exception `fitPrint` last threw, which upstream lets
+/// escape `main`: `llama-fit-params` prints it as libc++ does.
+pub var print_what: [256:0]u8 = @splat(0);
+
 pub fn fitPrint(
     gpa: std.mem.Allocator,
     log: Log,
@@ -1350,7 +1365,13 @@ pub fn fitPrint(
     var f: Fitter = .{ .arena = arena_state.allocator(), .patterns = &patterns, .log = log };
     var arena_devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
     const dmd = deviceMemoryDataImpl(&f, path_model, mparams, cparams, &arena_devs, &hp_ngl, &hp_nct, &hp_nex, c.GGML_LOG_LEVEL_ERROR) catch |e| switch (e) {
-        error.Fit, error.Runtime => return error.Runtime,
+        error.Fit, error.Runtime => {
+            const w = std.mem.span(f.what.ptr);
+            const n = @min(w.len, print_what.len - 1);
+            @memcpy(print_what[0..n], w[0..n]);
+            print_what[n] = 0;
+            return error.Runtime;
+        },
         error.OutOfMemory => return error.OutOfMemory,
     };
     try devs.appendSlice(gpa, arena_devs.items);

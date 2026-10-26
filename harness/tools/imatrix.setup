@@ -1,0 +1,17 @@
+#!/bin/bash
+# Writes imatrix's inputs into $DATA: a text to collect over, and an MoE
+# arch fixture given a tokenizer by harness/tools/add_vocab.c, since no
+# local model with a vocabulary has experts. Run by scripts/tools-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+bin="$DATA/add_vocab"
+zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/add_vocab.c" \
+    "$ROOT/zig-out/lib/libggml.a" -lc++ -lobjc -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -o "$bin" 2>/dev/null || \
+zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/add_vocab.c" "$ROOT/zig-out/lib/libggml.a" -lc++ -lm -lpthread -o "$bin"
+"$bin" "$ROOT/zig-out/arch-fixtures/qwen3moe-moe.gguf" "$DATA/moe.gguf"
+"$bin" "$ROOT/zig-out/arch-fixtures/llama-dense.gguf" "$DATA/dense.gguf"
+cat "$ROOT/llama.cpp/README.md" "$ROOT/llama.cpp/docs/build.md" > "$DATA/text.txt"
+# the fixtures' vocabulary has a byte token for the newline only
+LC_ALL=C tr -cd '\12\40-\176' < "$DATA/text.txt" > "$DATA/ascii.txt"
+head -c 300 "$ROOT/llama.cpp/README.md" > "$DATA/short.txt"

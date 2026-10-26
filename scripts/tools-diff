@@ -1,0 +1,109 @@
+#!/bin/bash
+# Run a ported upstream tool and upstream's own on the same command lines and
+# require the same stdout, stderr, exit code and files (PLAN.md, Decision 61).
+#
+# Each case in harness/tools/<tool>.cases is one command line, read as bash
+# words with $FIX (the arch fixtures), $VOCAB (upstream's vocab files),
+# $PLAIN (an f32 model) and $DATA (what harness/tools/<tool>.setup wrote)
+# available. Both sides run every case in order, each
+# in a scratch directory of its own, as `llama-<tool>` -- argv[0] reaches the
+# usage text -- so a later case sees the files an earlier one wrote, and
+# after every case each directory's files are hashed and compared. A line
+# `!mask <sed expression>` masks what legitimately differs run to run --
+# a timing -- in both sides' stdout and stderr before they are compared.
+# `!preload <path>` preloads a library into both sides from there on
+# (DYLD_INSERT_LIBRARIES or LD_PRELOAD); $DATA expands in it.
+# A case written `~ <args>` compares stderr's lines in any order: upstream's
+# LOG_* messages are printed by a worker thread, so a direct fprintf(stderr)
+# can overtake them and upstream itself differs run to run there.
+#
+# Usage: scripts/tools-diff <tool>
+#   TOOLS_O=fast|safe       the build mode, ReleaseFast by default
+#   TOOLS_DIFF_OUT=<dir>    keep both sides' transcripts there
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+tool="${1:?usage: scripts/tools-diff <tool>}"
+cases="harness/tools/$tool.cases"
+[ -f "$cases" ] || { echo "FAIL: no $cases" >&2; exit 2; }
+
+FIX="$ROOT/zig-out/arch-fixtures"
+VOCAB="$ROOT/llama.cpp/models"
+PLAIN="${PLAIN:-$HOME/.cache/zigtrain/gguf/plain-d6_base_005000.gguf}"
+export FIX VOCAB PLAIN
+
+zig build tools tools-ref --release="${TOOLS_O:-fast}" >/dev/null 2>&1 \
+    || { echo "FAIL: could not build the tools (zig build tools tools-ref)" >&2; exit 2; }
+
+port="$ROOT/zig-out/bin/llama-$tool"
+ref="$ROOT/zig-out/tools-ref/bin/llama-$tool"
+for b in "$port" "$ref"; do [ -x "$b" ] || { echo "FAIL: missing $b" >&2; exit 2; }; done
+
+work="${TOOLS_DIFF_OUT:-$(mktemp -d)}"
+mkdir -p "$work/ref/files" "$work/port/files"
+
+# A tool whose cases need input files writes them with harness/tools/<tool>.setup,
+# into $DATA, once, outside both sides' directories.
+DATA="$work/data"
+export DATA
+if [ -x "harness/tools/$tool.setup" ]; then
+    mkdir -p "$DATA"
+    "harness/tools/$tool.setup" || { echo "FAIL: harness/tools/$tool.setup failed" >&2; exit 2; }
+fi
+
+# One side, one case: run it in that side's directory and record what it did.
+run_side() { # side bin n args...
+    local side=$1 bin=$2 n=$3; shift 3
+    ( cd "$work/$side/files" && exec -a "llama-$tool" "$bin" "$@" ) \
+        > "$work/$side/$n.out" 2> "$work/$side/$n.err" < /dev/null
+    echo $? > "$work/$side/$n.rc"
+    ( cd "$work/$side/files" && find . -type f | sort | while read -r f; do
+        printf '%s %s\n' "$(shasum -a 256 < "$f" | cut -c1-16)" "$f"; done ) > "$work/$side/$n.files"
+}
+
+masks=()
+mask() { # file: apply every mask in place
+    local f=$1 m
+    for m in "${masks[@]+"${masks[@]}"}"; do sed -E -i '' "$m" "$f" 2>/dev/null || sed -E -i "$m" "$f"; done
+}
+
+n=0 fails=0
+while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+        ''|'#'*) continue ;;
+        '!mask '*) masks+=("${line#!mask }"); continue ;;
+        '!preload '*)
+            eval "lib=${line#!preload }"
+            if [ "$(uname)" = Darwin ]; then export DYLD_INSERT_LIBRARIES="$lib"; else export LD_PRELOAD="$lib"; fi
+            continue ;;
+    esac
+    n=$((n + 1))
+    unordered=0
+    case "$line" in '~ '*) unordered=1; line="${line#\~ }" ;; esac
+    eval "args=($line)"
+    run_side ref "$ref" "$n" "${args[@]}"
+    run_side port "$port" "$n" "${args[@]}"
+    for side in ref port; do mask "$work/$side/$n.out"; mask "$work/$side/$n.err"; done
+    if [ "$unordered" = 1 ]; then
+        for side in ref port; do sort -o "$work/$side/$n.err" "$work/$side/$n.err"; done
+    fi
+    bad=""
+    for k in out err rc files; do
+        cmp -s "$work/ref/$n.$k" "$work/port/$n.$k" || bad="$bad $k"
+    done
+    rc=$(cat "$work/ref/$n.rc")
+    if [ -n "$bad" ]; then
+        fails=$((fails + 1))
+        echo "FAIL  #$n rc=$rc differ:$bad  $line"
+        for k in $bad; do diff "$work/ref/$n.$k" "$work/port/$n.$k" | head -6 | sed 's/^/        /'; done
+    else
+        printf 'ok    #%-3d rc=%-3s %s\n' "$n" "$rc" "$line"
+    fi
+done < "$cases"
+
+[ -n "${TOOLS_DIFF_OUT:-}" ] || rm -rf "$work"
+if [ "$fails" -ne 0 ]; then
+    echo "FAIL: $fails of $n $tool cases differ from upstream's"
+    exit 1
+fi
+echo "PASS: $n $tool cases identical to upstream's (stdout, stderr, exit code, files)"

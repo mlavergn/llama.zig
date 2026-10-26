@@ -1,0 +1,58 @@
+#!/bin/bash
+# Writes perplexity's inputs into $DATA: a text, HellaSwag tasks (six lines
+# each), a Winogrande CSV with malformed rows among 105 good ones, and a
+# multiple-choice file in its binary layout. Run by scripts/tools-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cat "$ROOT/llama.cpp/README.md" "$ROOT/llama.cpp/docs/build.md" > "$DATA/text.txt"
+head -c 400 "$ROOT/llama.cpp/README.md" > "$DATA/short.txt"
+LC_ALL=C grep -E '^[A-Za-z][A-Za-z ,.]{30,}$' "$ROOT/llama.cpp/docs/build.md" "$ROOT/llama.cpp/README.md" -h > "$DATA/sentences.txt" || true
+
+perl -e '
+    open(my $in, "<", $ARGV[0]) or die; my @s = map { chomp; $_ } <$in>; close $in;
+    my $n = @s;
+    # HellaSwag: context, gold index, four endings
+    open(my $hs, ">", "$ARGV[1]/hs.txt") or die;
+    for my $t (0..11) {
+        my $ctx = $s[($t*5) % $n];
+        print $hs "Task $t: $ctx\n", ($t % 4), "\n";
+        for my $e (0..3) { print $hs "ending $e of task $t: ", $s[($t*5 + $e + 1) % $n], "\n"; }
+    }
+    close $hs;
+    open($hs, ">", "$ARGV[1]/hs_bad.txt") or die; print $hs "one\ntwo\nthree\n"; close $hs;
+    # Winogrande: index,sentence,choice1,choice2,answer
+    open(my $wg, ">", "$ARGV[1]/wg.csv") or die;
+    for my $t (0..104) {
+        my @w = split / /, $s[$t % $n]; my $k = int(@w/2);
+        my ($c1, $c2) = ($w[$k], $w[($k+1) % @w]); $w[$k] = "_";
+        (my $sent = join(" ", @w)) =~ s/,//g;
+        $c1 =~ s/,//g; $c2 =~ s/,//g;
+        $sent = "\"$sent, quoted\"" if $t % 7 == 0;
+        print $wg "$t,$sent,$c1,$c2,", 1 + ($t % 2), "\n";
+    }
+    # the blank near the end: three trailing tokens or fewer take
+    # the other arm of skip_choice
+    my @tail = ("_.", "_ now.", "_ right now.", "_ is right now.", "_ is right here now.");
+    for my $t (0..9) { print $wg 150 + $t, ",The answer to this one is ", $tail[$t % 5], ",red,blue,", 1 + ($t % 2), "\n"; }
+    print $wg "200,no blank here,a,b,1\n";
+    print $wg "201,bad _ answer,a,b,3\n";
+    print $wg "202,too few commas\n";
+    print $wg "203,the last _ line,x,y,2";
+    close $wg;
+    # multiple choice: n, positions, then question, mc1, mc2 per task
+    my @tasks;
+    for my $t (0..5) {
+        my $q = "Question $t: $s[($t*3) % $n]";
+        my $na = 2 + ($t % 3);
+        my @ans = map { "answer $_: " . $s[($t*3 + $_ + 1) % $n] } 0..$na-1;
+        my @lab = map { $_ == ($t % $na) ? 1 : 0 } 0..$na-1;
+        my $mc = pack("V", $na) . join("", map { pack("V", length $_) . $_ } @ans) . pack("l<*", @lab);
+        push @tasks, pack("V", length $q) . $q . $mc . pack("V", 0);
+    }
+    my $hdr = 4 + 4 * @tasks; my @pos; my $p = $hdr;
+    for (@tasks) { push @pos, $p; $p += length $_; }
+    open(my $mcf, ">:raw", "$ARGV[1]/mc.bin") or die;
+    print $mcf pack("V", scalar @tasks), pack("V*", @pos), @tasks;
+    close $mcf;
+' "$DATA/sentences.txt" "$DATA"
+printf 'not a logits file' > "$DATA/bogus.kld"

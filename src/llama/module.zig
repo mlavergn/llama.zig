@@ -27,6 +27,9 @@ const std = @import("std");
 pub const api = @import("api/module.zig");
 pub const impl = @import("impl.zig");
 pub const context = @import("context.zig");
+/// libc++'s containers and algorithms as the reference links them, for the
+/// tools under `tools/` that port code reading their order.
+pub const libcxx = @import("libcxx.zig");
 
 comptime {
     // llama-sampler.cpp, split across src/llama/sampler/; it reaches

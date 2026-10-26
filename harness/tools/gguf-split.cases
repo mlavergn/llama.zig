@@ -1,0 +1,44 @@
+# llama-gguf-split against upstream's: scripts/tools-diff gguf-split.
+# Cases run in order in one directory per side; later ones merge what earlier
+# ones split.
+
+# The command line. `--split-max-size xM` is left out: sscanf converts
+# nothing and the C reads an uninitialised `n`, so upstream's answer is
+# whatever was on its stack.
+--help
+--version
+-h
+--foo in out
+--split --merge in out
+--split-max-tensors
+--split-max-size 4K in out
+--split-max-size 0M in out
+--split-max-tensors 3 --split-max-size 1M in out
+--merge --split in out
+one-arg-only
+/nonexistent/in.gguf out
+
+# Split by tensor count, with the default and with a small limit
+$FIX/qwen3-dense.gguf qd
+--split-max-tensors 5 $FIX/llama-dense.gguf ld
+--split_max_tensors 7 --no-tensor-first-split $FIX/gemma3-dense.gguf gd
+--dry-run --split-max-tensors 4 $FIX/qwen3moe-moe.gguf dry
+--split-max-tensors 1000 $FIX/mamba-dense.gguf md
+
+# Split by size; a limit below one tensor leaves a split empty
+--split-max-size 100M $PLAIN pd
+--split-max-size 2M $FIX/qwen3moe-moe.gguf qm
+--split-max-size 1M $PLAIN tiny
+
+# No tensors at all
+$VOCAB/ggml-vocab-llama-spm.gguf vs
+
+# Merge
+--merge ld-00001-of-00013.gguf ld-merged.gguf
+--merge ld-00001-of-00013.gguf ld-merged.gguf
+--merge gd-00001-of-00010.gguf gd-merged.gguf
+--merge --dry-run pd-00001-of-00002.gguf pd-dry.gguf
+--merge --delete-splits pd-00001-of-00002.gguf pd-merged.gguf
+--merge $FIX/qwen3-dense.gguf notsplit.gguf
+--merge ld-merged.gguf again.gguf
+--merge /nonexistent-00001-of-00002.gguf x.gguf

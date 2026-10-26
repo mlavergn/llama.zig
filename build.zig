@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 
 const zon = @import("build.zig.zon");
 const llamacpp = @import("build/llamacpp.zig");
+const tools_build = @import("build/tools.zig");
 
 const Git = struct {
     const Self = @This();
@@ -603,6 +604,19 @@ pub fn build(b: *std.Build) !void {
 
     const run_step = b.step("run", "Run the CLI app");
     run_step.dependOn(&cli_run.step);
+
+    // -------------------------------------------------------------------------
+    // Upstream's other tools (PLAN.md, Decision 61): our ports, `zig build
+    // tools`, and upstream's own over libllama-ref, `zig build tools-ref`.
+
+    try tools_build.add(b, .{
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+        .sdk = sdk,
+        .config = options,
+        .reference = reference,
+        .cuda = cuda != null,
+    });
 
     // -------------------------------------------------------------------------
     // Tests

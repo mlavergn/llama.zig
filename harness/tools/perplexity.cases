@@ -1,0 +1,48 @@
+# llama-perplexity against upstream's: scripts/tools-diff perplexity.
+# Perplexity and its strided form, the KL divergence of $PLAIN's
+# fine-tuned sibling against the base logits $PLAIN saves, HellaSwag,
+# Winogrande and multiple choice on files harness/tools/perplexity.setup
+# writes.
+!mask s/^[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} /T /
+!mask /^(T . )?ggml_metal_/d
+!mask /^[0-9]+ +[A-Za-z_.-]+ +0x[0-9a-f]+ /d
+!mask s/^llama\.cpp\/([a-z-]+\/)*//
+!mask s/tokenization took [0-9.e+-]+ ms/tokenization took X ms/
+!mask s/[0-9]+\.[0-9]+ seconds per pass - ETA /X seconds per pass - ETA /
+!mask s/^([0-9]+ hours )?[0-9]+\.[0-9]+ minutes$/X minutes/
+!mask s/[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} ([IWED]) /T \1 /g
+!mask s/^(T I )?(llama_perf_context_print: +[a-z ]+ = ).*/\1\2X/
+!mask s/reserve took [0-9.]+ ms/reserve took X ms/
+!mask s/^[A-Za-z0-9_.\/-]+:[0-9]+: terminating due to uncaught/libc++abi: terminating due to uncaught/
+
+--help
+-m $PLAIN -f $DATA/text.txt -c 64 --chunks 4
+-m $PLAIN -f $DATA/text.txt -c 64 -b 128 --chunks 4
+-m $PLAIN -f $DATA/text.txt -c 64 -b 32 --chunks 3
+-m $PLAIN -f $DATA/text.txt -c 64 --chunks 3 --ppl-output-type 1
+-m $PLAIN -f $DATA/text.txt -c 64 --chunks 3 --ppl-stride 32
+-m $PLAIN -f $DATA/text.txt -c 64 --chunks 3 --ppl-stride 16 --ppl-output-type 1 -b 32
+-m $PLAIN -f $DATA/text.txt -c 64 --chunks 4 --kl-divergence-base base.kld
+-m $PLAIN -f $DATA/text.txt -c 64 -b 128 --chunks 4 --kl-divergence-base base2.kld
+-m $HOME/.cache/zigtrain/gguf/plain-d6_sft_001499.gguf -c 64 --kl-divergence --kl-divergence-base base.kld
+-m $HOME/.cache/zigtrain/gguf/plain-d6_sft_001499.gguf -c 64 -b 128 --kl-divergence --kl-divergence-base base2.kld
+-m $PLAIN -c 64 --kl-divergence --kl-divergence-base base.kld
+-m $HOME/.cache/zigtrain/gguf/plain-d6_sft_001499.gguf -c 32 --kl-divergence --kl-divergence-base base.kld
+-m $PLAIN -c 64 --kl-divergence
+-m $PLAIN -c 64 --kl-divergence --kl-divergence-base $DATA/bogus.kld
+-m $PLAIN -c 64 --kl-divergence --kl-divergence-base /nonexistent.kld
+-m $PLAIN -f $DATA/hs.txt -c 256 --hellaswag
+-m $PLAIN -f $DATA/hs.txt -c 256 --hellaswag --hellaswag-tasks 5
+-m $PLAIN -f $DATA/hs.txt -c 64 --hellaswag
+-m $PLAIN -f $DATA/hs_bad.txt -c 256 --hellaswag
+-m $PLAIN -f $DATA/wg.csv -c 256 --winogrande
+-m $PLAIN -f $DATA/wg.csv -c 256 --winogrande --winogrande-tasks 7
+-m $PLAIN -f $DATA/mc.bin -c 512 --multiple-choice
+-m $PLAIN -f $DATA/mc.bin -c 512 --multiple-choice --multiple-choice-tasks 3
+-m $PLAIN -f $DATA/mc.bin -c 512 --multiple-choice -np 2
+-m $PLAIN -f $DATA/short.txt -c 64 --multiple-choice
+-m $PLAIN -f $DATA/short.txt -c 512
+-m $PLAIN -f $DATA/text.txt -c 0
+-m $ROOT/Qwen3-0.6B-Q8_0.gguf -f $DATA/text.txt -c 128 --chunks 2
+-m $ROOT/Qwen3-0.6B-Q8_0.gguf -f $DATA/hs.txt -c 512 --hellaswag --hellaswag-tasks 4
+~ -m /nonexistent.gguf -f $DATA/text.txt

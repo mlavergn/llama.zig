@@ -1,0 +1,51 @@
+# llama-quantize against upstream's: scripts/tools-diff quantize.
+# The quantizer is libllama's, gated by scripts/quant-diff; these hold the
+# command line, the file naming and the messages to upstream's.
+# Metal's device log is libggml's, the same library on both sides, and
+# carries pointers and compile times.
+!mask /^ggml_metal_/d
+!mask s/(quantize time|total time) = +[0-9.]+ ms/\1 = X ms/
+
+# The command line
+--help
+x
+--frobnicate in.gguf Q4_0
+--output-tensor-type
+--output-tensor-type q9_9 in.gguf Q4_0
+--token-embedding-type nonsense in.gguf Q4_0
+--tensor-type attn_q in.gguf Q4_0
+--tensor-type =q8_0 in.gguf Q4_0
+--tensor-type attn_q= in.gguf Q4_0
+--tensor-type attn_q=q9 in.gguf Q4_0
+--tensor-type-file /nonexistent/types.txt in.gguf Q4_0
+--prune-layers 1,x in.gguf Q4_0
+--prune-layers 1,-2 in.gguf Q4_0
+--override-kv nokey in.gguf Q4_0
+--override-kv a=bool:maybe in.gguf Q4_0
+--override-kv a=weird:1 in.gguf Q4_0
+--include-weights a --exclude-weights b in.gguf Q4_0
+--imatrix
+--pure in.gguf
+$FIX/qwen3-dense.gguf out.gguf
+$FIX/qwen3-dense.gguf out.gguf Q9_X
+$FIX/qwen3-dense.gguf Q4_0 notanumber
+$FIX/qwen3-dense.gguf Q4_0 99999999999
+/nonexistent/model.gguf Q4_0
+
+# Quantize, by name, by number, with the output named or derived
+$FIX/qwen3-dense.gguf q4k.gguf Q4_K_M
+$FIX/qwen3-dense.gguf q8.gguf q8_0 2
+$FIX/llama-dense.gguf l15.gguf 15
+$FIX/llama-dense.gguf l0.gguf 0
+$FIX/llama-dense.gguf copy.gguf COPY
+--pure --leave-output-tensor $FIX/qwen3-dense.gguf pure.gguf Q5_K_S
+--output-tensor-type q8_0 --token-embedding-type q4_0 $FIX/qwen3-dense.gguf ot.gguf Q4_K_S
+--tensor-type attn_q=q8_0 --tensor-type FFN_DOWN=q5_0 $FIX/qwen3-dense.gguf tt.gguf Q4_0
+--prune-layers 1,1,0 $FIX/llama-dense.gguf pruned.gguf Q8_0
+--override-kv general.name=str:renamed --override-kv tokenizer.ggml.bos_token_id=int:3 $FIX/qwen3-dense.gguf kv.gguf Q4_0
+--dry-run $FIX/gemma3-dense.gguf Q4_K_M
+--keep-split $FIX/qwen3-dense.gguf ks.gguf Q4_0
+--allow-requantize q4k.gguf req.gguf Q4_0
+q4k.gguf req2.gguf Q4_0
+$FIX/qwen3-dense.gguf IQ2_XXS
+q8.gguf q8.gguf Q4_0

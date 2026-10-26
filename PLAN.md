@@ -78,6 +78,7 @@ Settled in review. The plan below assumes all of these.
 | 58 | The chat-template engine | **Fix `zigjinja` until `make jinja-diff` passes** (asked for on 2026-10-22, `MAINTENANCE.md` Decisions 13-18), not port `common/jinja`. "Passes" means upstream's 68 templates over seven conversations agree **byte for byte in text, in which side raises, and in every byte's input mark**, both ways; `bos_token`/`eos_token` are the one exception, bound as provenance tokens and re-trusted. `strftime_now` is local time on both sides and checked under two zones. zigjinja stays its own engine, so `jinja-diff` runs at every upstream sync. **Done, at zigjinja v3.0.0 (`de36d7b`)**: 469 renders identical and 7 where both raise, under `TZ=UTC` and `TZ=Australia/Lord_Howe`; `NOTES.md`, "zigjinja against `jinja-diff`". `build.zig.zon` still takes zigjinja by path, so pinning `de36d7b` is the step left. |
 | 59 | The Vulkan toolchain, and who generates the shaders | **Pinned at SDK tag `vulkan-sdk-1.4.363.0` and built from source, never the distro's** -- `scripts/vk-toolchain` into `.tools/vulkan/`: Khronos's `Vulkan-Headers` and `SPIRV-Headers` at that tag, and `glslc` from shaderc v2026.4, whose `DEPS` pin glslang and SPIRV-Tools at exactly that tag's commits. Ubuntu 24.04's `glslc` is shaderc 2023.8, too old for coopmat2 and bfloat16, and there is no root on the GB10. **And one generator run feeds both sides**: measured, `glslc -O` reads uninitialized memory on `tri_f16`, whose bytes follow heap state from run to run (`NOTES.md`, "Stage 7: the GB10 pickup"), so Decision 55's "identical by construction" holds only when the port embeds the reference build's generated files rather than generating its own. |
 | 60 | zDNN, ZenDNN and BLAS | **BLAS on Apple, over Accelerate; zDNN and ZenDNN not ported** (asked on 2026-10-24: "not external libs"). Each of the three is a thin ggml backend whose whole job is to call a vendor library -- measured, BLAS 530 lines around `cblas_sgemm`, zDNN 924 around IBM's `libzdnn` on s390x NNPA, ZenDNN 838 around AMD's C++ `zendnnl.hpp`, which upstream downloads and builds with oneDNN, libxsmm and AOCL. Without the library nothing is left to port, and the library-gains-no-dependencies rule stands, so zDNN and ZenDNN stay out. BLAS is the exception on Apple only: the port **already links Accelerate** on every Darwin target and calls its vDSP from the CPU backend (`GGML_USE_ACCELERATE`), so a BLAS backend over it adds nothing. Off Apple it would need OpenBLAS or another vendor library, so it is not built there. **Opt-in, `-Dblas`**: the reference configuration has BLAS off, and on by default it would change which device computes every large CPU `MUL_MAT` in every gate. Gated as each backend before it: upstream's `ggml-blas.cpp` with its exports renamed beside the port, in one process, on bits. **Done** (`NOTES.md`, "BLAS over Accelerate"): `src/ggml/blas.zig`, swapped in under `-Dblas`, `make blas-diff` and `make blas-node-diff` identical. |
+| 61 | Upstream's other tools | **Ported, each as its own Zig binary under `tools/`** (asked on 2026-10-25: "do them all please"): `gguf-split`, `quantize`, `tokenize`, `fit-params`, `export-lora`, `batched-bench`, `cvector-generator`, `imatrix`, `perplexity`, `llama-bench`. This reverses SPEC §2's "never writes one" for these binaries -- `quantize`, `gguf-split`, `export-lora`, `imatrix` and `cvector-generator` write GGUF -- while the library and `llama-cli` stay as they were. They share `tools/common/`, the ported parts of upstream's `common/`: `common_params_parse`'s option table for these examples (161 options, help text exact), `common_log`, `common_init`, the imatrix loader. Each is gated by `scripts/tools-diff <tool>` against upstream's own binary, built unmodified over `libllama-ref` (`zig build tools-ref`): stdout, stderr, exit code and every file written. `tts` is held: it links `mtmd`, the 26,700-line multimodal library, a separate decision. The downloader (`-hf`, `-mu`, `-dr`) and the INI config files are refused: the first would be an external dependency. `NOTES.md`, "Upstream's other tools". |
 
 ---
 
@@ -987,6 +988,20 @@ their link line from `scripts/platform-libs`, and `arch-model-diff`'s
 written, `arch-model-diff` 157 / 159 with the same two `REF-ABORT` and T5 at
 `gpu:17+3abort+1nondet`, `gemma4-assistant-diff` identical on Metal and the
 CPU -- unchanged, as expected.
+
+### Tools pickup
+
+Decision 61's ten tools are gated on this Mac only. **For the GB10**: run
+`make tools-diff` there. The Linux paths are untested: `io.zig`'s glibc
+`stdout`, `harness/tools/fixed_time.c` through `LD_PRELOAD`, and the
+reference built with `-fmath-errno` (the perplexity's `logf`/`expf` sites).
+On a CUDA build `cvector-generator`'s PCA runs on CUDA on both sides
+(`GGML_USE_CUDA` reaches the reference's tool sources, `backends.cuda` the
+port's), a path no case has run. **For Windows**: the tools are not yet
+built for `x86_64-windows-gnu`; `io.zig`'s `__acrt_iob_func` arm and
+`init.zig`'s `SetPriorityClass` arm are written and unrun, and the clock pin
+has no Windows interposer, so the PCA cases need another way to fix `time`
+there.
 
 ---
 

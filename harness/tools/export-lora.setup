@@ -1,0 +1,14 @@
+#!/bin/bash
+# Writes LoRA adapters for export-lora's cases into $DATA: harness/tools/make_lora.c
+# over two arch fixtures. Run by scripts/tools-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+bin="$DATA/make_lora"
+zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/make_lora.c" \
+    "$ROOT/zig-out/lib/libggml.a" -lc++ -lobjc -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -o "$bin" 2>/dev/null || \
+zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/make_lora.c" "$ROOT/zig-out/lib/libggml.a" -lc++ -lm -lpthread -o "$bin"
+for m in qwen3-dense llama-dense; do
+    mkdir -p "$DATA/$m"
+    "$bin" "$ROOT/zig-out/arch-fixtures/$m.gguf" "$DATA/$m" >/dev/null
+done

@@ -7185,3 +7185,173 @@ and on the Haswell laptop at v3 after the refactor, `x86-repack-diff`
 replaces agree on every input these kernels see -- `|x| <= 128` against a
 signed byte never saturates a pair -- so a pass alone could not show the
 arm was reached.
+
+## Upstream's other tools
+
+Decision 61. Each tool is a Zig binary under `tools/`, `zig build tools`,
+named as upstream names it; upstream's own build over `libllama-ref` and our
+`libggml` is `zig build tools-ref` (`build/tools.zig`), so between a port and
+its reference only the tool's code differs. `scripts/tools-diff <tool>` runs
+both on every line of `harness/tools/<tool>.cases`, each side in its own
+scratch directory and as `llama-<tool>` (argv[0] reaches the usage text),
+and requires stdout, stderr, the exit code and the hash of every file in the
+directory to be the same after every case. `!mask` lines drop what moves run
+to run -- timings, Metal's pointer addresses, `common_log`'s timestamps; a
+`~` case compares stderr's lines in any order, for the one place upstream is
+not deterministic (below); `harness/tools/<tool>.setup` writes input files.
+
+### `tools/common/`
+
+What the tools share, ported from upstream's `common/`: `common_params_parse`
+with its option table (`arg.zig`, `arg_options.zig`, `arg_options2.zig`) --
+the 161 options the ported examples admit, out of 349, each with its
+spellings, hints, help text built from the tool's defaults, examples and
+environment variable; `common_log` (`log.zig`); `common_init`, the token and
+batch helpers and the params converters (`common.zig`); the imatrix loader;
+`common_cpu_get_num_math` (`cpu.zig`); `string_parse_kv_override`.
+
+Three things about it were found by the gate, not by reading:
+
+- **`set_env` appends `(env: NAME)` to the help text.** Every option with
+  an environment variable shows it in `--help`; the first port left it out.
+- **`llama_supports_rpc()` has a side effect.** `--rpc` is added only when an
+  RPC backend exists, which it never does here, so the port first skipped
+  the question. But asking initialises the backend registry: upstream's
+  Metal device logs happen while the table is built, at the verbosity in
+  force *before* the command line is read, and are filtered out; the port's
+  happened later and printed at `-lv 4`.
+- **`common_log` starts its clock in `common_init`**, so the first message
+  already has a non-zero timestamp; started at the first message, the port
+  printed none on it.
+
+`common_log` writes on a worker thread upstream, so a `LOG_ERR` and a direct
+`fprintf(stderr, ...)` after it reach stderr in either order -- upstream
+differs from itself there. The port writes synchronously, in the order the
+C issues the calls.
+
+Refused, with a message: the model downloader and cache (`-hf`, `-mu`,
+`-dr`, `-cl`), the INI config files, `--completion-bash`, JSON-schema
+grammars (`-j`, `-jf`). Their help text is ported, so `--help` is upstream's.
+
+### Results
+
+| tool | cases | injected faults caught |
+|---|---:|---|
+| `gguf-split` | 29 | 2/2 -- a padding byte, the merge's metadata rewrite |
+| `quantize` | 40 | 3/3 -- ftype by number, `--tensor-type` case, derived name |
+| `tokenize` | 43 | 4/4 -- help wrapping, a `stoi` message, log verbosity, a section |
+| `fit-params` | 13 | (the fitting is `fit-diff`'s) |
+| `export-lora` | 18 | 2/2 -- `std::map` order, the LoRA scale |
+| `batched-bench` | 11 | 1/1 -- the shared-prompt KV size |
+| `cvector-generator` | 13 | 2/3 -- `minstd_rand0`'s multiplier, the mean's row count; the escape is below |
+| `imatrix` | 35 | 4/4 -- the accumulation unfused, the legacy `ncall` floored, the statistics' tie-break, a per-expert count |
+| `perplexity` | 31 | 4/5 -- the 16-bit log-prob offset, `uniform_int_distribution`'s bit count, Winogrande's trailing threshold, one output too many; the fifth is below the printed precision |
+| `llama-bench` | 42 | 4/4 -- `\|` read as `+` in a range, a column width, `>> bool` on a non-number, the tensor-split precision |
+
+`gguf-split` has one case left out: `--split-max-size xM` makes `sscanf`
+convert nothing, and the C then reads an uninitialised `n`.
+
+**`cvector-generator`'s PCA starts from `std::time(0)`**, through
+`std::default_random_engine` -- libc++'s `minstd_rand`, multiplier 48271 --
+and `uniform_real_distribution<float>`, which is `generate_canonical<float,
+24>` over one draw divided by 2^31. Ported exactly, it would still differ
+from upstream whenever a second boundary fell between the two runs, so
+`harness/tools/fixed_time.c` pins `time` for both sides (a `__DATA,__interpose`
+entry on macOS, a plain definition under `LD_PRELOAD` elsewhere) and
+`tools-diff` preloads it on a `!preload` line. PCA then compares on bits,
+the written vector included. It needs `common_init_from_params`
+(`tools/common/init.zig`), the sampler chain's construction among it.
+
+- **Every `GGML_ASSERT` in the tool is kept in ReleaseFast.** The first port
+  wrote them as `std.debug.assert`, which compiles out: on Qwen3.5 upstream
+  aborts on `diff_filtered.size() == n_layers - 1` -- a hybrid model's
+  recurrent layers do not all name an `l_out` -- and the port carried on and
+  wrote a file.
+- **The arch fixtures have no tokenizer**, so the cases run on `$PLAIN`,
+  Qwen3-0.6B and Qwen3.5-2B; one fixture case checks both sides abort alike.
+- **Two cases are undefined upstream and left out.** With no prompt pairs
+  -- files of blank lines, or files of different lengths, whose error
+  `prepare_entries`'s caller ignores -- the diff has zero rows and
+  `print_debug_tensor` reads past a `malloc(0)`. And a model that fails to
+  load is dereferenced as null, which kills the process before the async
+  logger writes what it was given.
+- **The escape**: `filter_nonzero_rows` counts a row as zero unless an
+  element is *greater than* 1e-6, so a row of negatives is dropped; testing
+  `|x|` instead passes. It differs only on a hidden-state row with no
+  element above 1e-6 and one below -1e-6. Rows from a shared prompt prefix
+  diff to exactly zero, and real rows mix signs, so no real model input
+  reaches it. Not provably inert, so it is recorded as an escape.
+
+**`imatrix` walks a `std::unordered_map`** -- `m_stats` -- in both writers
+and in `--show-statistics`, which pushes the per-tensor rows in its order and
+then sorts them unstably. It is `libcxx.StringMap` and `libcxx.sort`, which
+is why `src/llama/module.zig` now exports `libcxx`. What else the gate
+found or needed:
+
+- **No local model with a vocabulary has experts**, and the arch fixtures
+  are `no_vocab`, so `MUL_MAT_ID`'s per-expert counts had no text to run
+  on. `harness/tools/add_vocab.c` rewrites a fixture's 128 tokens as an SPM
+  vocabulary -- printable ASCII, a newline byte token -- and the MoE cases
+  read an ASCII-only text; one case keeps a non-ASCII text, where both
+  sides throw from the vocabulary's byte fallback.
+- **An empty `std::vector`'s `data()` is null**, and libllama logs the
+  adapter pointer at `-lv 5`: `common_set_adapter_lora` passed `0x0`
+  upstream and an empty slice's dangling `0x8` in the port.
+- **An exception escaping libllama is reported differently, library-wide.**
+  `impl.zig`'s `Exception.terminate` goes through `ggml_abort` -- a
+  `llama-vocab.cpp:4418:` prefix and a backtrace -- where libc++abi prints
+  `libc++abi: terminating due to uncaught exception of type ...` and no
+  backtrace. The case masks the prefix; changing the convention is a
+  decision about every gate that compares an abort, not about this tool.
+- **`std::inner_product` over floats is the strict-loop shape** of
+  `simd.zig` -- rounded products in whole groups, the rest fused -- in
+  `compute_statistics` and `compute_cossim`.
+- **The perplexity's partial sums add in scheduling order upstream**
+  (`process_logits`); the port adds them in thread order, below the four
+  decimals printed. A `--model` is required even to merge files, and a
+  repeated `--in-file` keeps only the last: the merge cases use
+  comma-separated lists.
+
+**`perplexity` draws HellaSwag's tasks with
+`std::uniform_int_distribution<size_t>` over `std::mt19937(1)`**, so the
+port carries libc++'s algorithm for it -- `__independent_bits_engine`
+drawing `w` bits and rejecting past the range, read from the bundled
+`<__random/uniform_int_distribution.h>` -- as `uniformIndex`. Dropping the
+bit count's round-up changed which tasks ran. Its other three modes read
+files in formats of their own, which `harness/tools/perplexity.setup`
+writes: six-line HellaSwag tasks, a Winogrande CSV with malformed rows and
+a last line without its newline (which upstream drops), and the
+multiple-choice binary layout. The KL divergence runs `$PLAIN`'s fine-tuned
+sibling against the base logits `$PLAIN` saved, enough tokens for the
+statistics block.
+
+- **Winogrande's `skip_choice` threshold escaped at first**: every row had
+  many tokens after the blank, so `> 3` and `> 2` agreed. Rows with the
+  blank one to four words from the end take the other arm, and the
+  injection fails.
+- **The escape**: computing the KLD `percentile` interpolation unfused
+  instead of fused moves a float by an ULP, printed to six decimals. The
+  gate compares what the tool prints, so a difference below that is
+  invisible to it by construction.
+- **Every contraction is named**: `fma` where clang fuses a same-type
+  `a*b + c` (`scale*q + min`, the Wilson interval, `sum2/n - f*f`, the
+  uncertainties' `a*a + b*b - 2*cov`), none where a `float` product meets a
+  `double` sum.
+
+**`llama-bench` has a command line of its own**, not `common_params_parse`,
+and three of its parsers are standard-library behaviour more than code.
+`parse_int_range` is a backtracking `std::regex`, matched here by hand: each
+attempt takes the longest form followed by `,` or the end, and the operator
+class `[\+|\*]` admits `|`, which the loop then rejects as an invalid range
+format. Booleans go through `string_split<bool>`, `std::istringstream >>
+bool` without `boolalpha`: a `long`, where 0 is false and every other number
+is true -- and so is anything that is no number at all, which the C++ reads
+as 0 and so as false. `-ts` splits with `std::sregex_token_iterator` over
+`[;/]+`. Its `-ot` loop breaks out of the group loop only, so an invalid
+override lets the argument loop go on and the error names the last argument
+read. What it measures is time, so the masks keep each row's parameters
+and drop the speeds, the test time and the samples, in all five formats; it
+decodes random tokens, so the arch fixtures run without a vocabulary. `-hf`
+is not a case: upstream downloads, and on the reference build fails on its
+missing HTTPS; no downloader is ported, and the port prints only the final
+error.

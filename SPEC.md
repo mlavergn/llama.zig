@@ -42,9 +42,15 @@ Our `llama-cli` is a distinct binary that shares upstream's name, not upstream's
 and x86 kernels), the Metal, CUDA and Vulkan backends' host layers,
 libllama, and a `llama-cli`-compatible completion and conversation binary.
 
-**Out.** `common/`, `tools/server/`, upstream's `llama-cli`, training, model
-conversion, and quantizing model files. llamazig reads GGUF; it never writes
-one.
+**Out.** `common/` beyond what the tools below use, `tools/server/`,
+upstream's `llama-cli`, training, and model conversion. The library reads
+GGUF and `llama-cli` never writes one.
+
+**Also in, as separate binaries (`PLAN.md`, Decision 61).** Upstream's
+`gguf-split`, `quantize`, `tokenize`, `fit-params`, `export-lora`,
+`batched-bench`, `cvector-generator`, `imatrix`, `perplexity` and
+`llama-bench`, each a Zig port named as upstream names it, with upstream's
+command line and output. Five of them write GGUF.
 
 ## 3. Library: ggml
 

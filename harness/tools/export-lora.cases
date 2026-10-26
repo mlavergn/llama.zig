@@ -1,0 +1,25 @@
+# llama-export-lora against upstream's: scripts/tools-diff export-lora.
+# harness/tools/export-lora.setup writes the adapters (harness/tools/make_lora.c)
+# for two arch fixtures into $DATA. The merge's arithmetic is libggml's, the
+# same library on both sides; these hold the tool's file, order and messages.
+!mask s/^[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} /T /
+!mask /^ggml_metal_/d
+
+--help
+-m $FIX/qwen3-dense.gguf
+-m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/good.gguf
+-m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/good.gguf -o merged.gguf -t 2
+-m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/good-f16.gguf -o merged-f16.gguf -lv 1
+-m $FIX/qwen3-dense.gguf --lora-scaled $DATA/qwen3-dense/good.gguf:0.5,$DATA/qwen3-dense/good-f16.gguf:2 -o two.gguf
+-m $FIX/llama-dense.gguf --lora $DATA/llama-dense/good.gguf -o llama.gguf
+-m $FIX/qwen3-dense.gguf -o copy-only.gguf
+-m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/good.gguf,$DATA/qwen3-dense/subset.gguf -o subset-out.gguf
+-m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/not-adapter.gguf -o e1.gguf
+-m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/not-lora.gguf -o e2.gguf
+-m $FIX/qwen3-dense.gguf --lora $DATA/llama-dense/good.gguf -o e3.gguf
+-m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/missing-b.gguf -o e4.gguf
+-m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/quant.gguf -o e5.gguf
+-m $FIX/qwen3-dense.gguf --lora /nonexistent/lora.gguf -o e6.gguf
+-m /nonexistent/model.gguf --lora $DATA/qwen3-dense/good.gguf -o e7.gguf
+-m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/good.gguf -o /nonexistent/dir/out.gguf
+-m $FIX/qwen3-dense.gguf --lora-scaled $DATA/qwen3-dense/good.gguf -o e8.gguf

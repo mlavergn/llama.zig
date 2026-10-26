@@ -1,0 +1,19 @@
+# llama-batched-bench against upstream's: scripts/tools-diff batched-bench.
+# What it measures is time; the masks keep the shape of every row -- which
+# (PP, TG, B) ran, the KV size, the header -- and drop the seconds and speeds.
+!mask s/^[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} /T /
+!mask /^ggml_metal_/d
+!mask s/^(\| *[0-9]+ \| *[0-9]+ \| *[0-9]+ \| *[0-9]+ \|).*/\1 X/
+!mask s/"(t_pp|speed_pp|t_tg|speed_tg|t|speed)": [-0-9.infa]+/"\1": X/g
+
+--help
+-m $FIX/qwen3-dense.gguf
+-m $FIX/qwen3-dense.gguf -npp 8,16 -ntg 4 -npl 1,2
+-m $FIX/qwen3-dense.gguf -c 256 -npp 16 -ntg 8 -npl 1,2,4 -pps
+-m $FIX/qwen3-dense.gguf -c 256 -npp 16 -ntg 8 -npl 1,2,4 -pps -kvu
+-m $FIX/qwen3-dense.gguf -c 256 -npp 16 -ntg 4 -npl 2,3 -tgs
+-m $FIX/llama-dense.gguf -c 128 -b 8 -ub 4 -npp 12,100 -ntg 6 -npl 1,8 --output-format jsonl
+-m $FIX/llama-dense.gguf -c 128 -npp 12 -ntg 6 -npl 1 --output-format csv
+-m $FIX/mamba-dense.gguf -c 256 -npp 8 -ntg 4 -npl 1,2 -t 2
+-m $FIX/qwen3moe-moe.gguf -c 256 -npp 8 -ntg 4 -npl 2 -ngl 0 -fa off
+~ -m /nonexistent/model.gguf -npp 8 -ntg 4 -npl 1

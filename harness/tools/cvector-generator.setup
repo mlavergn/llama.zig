@@ -1,0 +1,18 @@
+#!/bin/bash
+# Writes cvector-generator's prompt files and the clock pin into $DATA.
+# Run by scripts/tools-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+if [ "$(uname)" = Darwin ]; then
+    zig cc -O2 -dynamiclib "$ROOT/harness/tools/fixed_time.c" -o "$DATA/fixed_time.so"
+else
+    zig cc -O2 -shared -fPIC "$ROOT/harness/tools/fixed_time.c" -o "$DATA/fixed_time.so"
+fi
+cp "$ROOT/llama.cpp/tools/cvector-generator/positive.txt" "$DATA/pos.txt"
+cp "$ROOT/llama.cpp/tools/cvector-generator/negative.txt" "$DATA/neg.txt"
+# blank lines are skipped; escapes are processed; no final newline
+printf 'I love this\n\nWhat a wonderful \\x41 day\\n\nGreat' > "$DATA/pos2.txt"
+printf 'I hate this\n\nWhat a terrible day\n\nAwful' > "$DATA/neg2.txt"
+printf 'one\ntwo\n' > "$DATA/two.txt"
+printf 'one\n' > "$DATA/one.txt"
+printf '\n\n' > "$DATA/blank.txt"
