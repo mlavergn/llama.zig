@@ -339,6 +339,41 @@ pub fn llama_model_target_layer_ids_n(model: ?*const c.struct_llama_model) callc
     return @truncate(modelOf(model).target_layer_ids.items.len);
 }
 
+/// Ports `llama_model_get_tok_embd` (llama-model.cpp:3126 @c1d0e7a00),
+/// from `llama-ext.h`: the token embedding matrix as F32, or with `out`
+/// null its element count.
+pub fn llama_model_get_tok_embd(model: ?*const c.struct_llama_model, out: ?[*]f32) callconv(.c) u32 {
+    const m = modelOf(model);
+    if (m.vocab.nTokens() == 0 or m.tok_embd == null) return 0;
+
+    const tensor = m.tok_embd.?;
+    const nelements: usize = @intCast(c.ggml_nelements(tensor));
+    if (nelements > std.math.maxInt(u32)) _ = c.ggml_abort("llama-model.cpp", 3133, "GGML_ASSERT(%s) failed", "nelements <= UINT32_MAX"); // for the return type
+
+    const dst = out orelse return @intCast(nelements);
+
+    if (tensor.type == c.GGML_TYPE_F32) {
+        c.ggml_backend_tensor_get(tensor, dst, 0, nelements * @sizeOf(f32));
+        return @intCast(nelements);
+    }
+
+    const buf = impl.allocator.alloc(u8, c.ggml_nbytes(tensor)) catch impl.abort("llama-model.cpp", 3144, "out of memory");
+    defer impl.allocator.free(buf);
+    c.ggml_backend_tensor_get(tensor, buf.ptr, 0, buf.len);
+
+    const traits = c.ggml_get_type_traits(tensor.type);
+    if (tensor.type == c.GGML_TYPE_F16) {
+        c.ggml_fp16_to_fp32_row(@ptrCast(@alignCast(buf.ptr)), dst, @intCast(nelements));
+    } else if (tensor.type == c.GGML_TYPE_BF16) {
+        c.ggml_bf16_to_fp32_row(@ptrCast(@alignCast(buf.ptr)), dst, @intCast(nelements));
+    } else if (c.ggml_is_quantized(tensor.type) and traits.*.to_float != null) {
+        traits.*.to_float.?(buf.ptr, dst, @intCast(nelements));
+    } else {
+        _ = c.ggml_abort("llama-model.cpp", 3155, "unsupported tensor type for dequantization: %s", c.ggml_type_name(tensor.type));
+    }
+    return @intCast(nelements);
+}
+
 // -----------------------------------------------------------------------------
 // Unit Tests
 

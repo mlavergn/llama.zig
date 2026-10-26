@@ -231,10 +231,9 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 
                 if (params.batched_bench_output_jsonl) {
                     log.out("{\"n_kv_max\": %d, \"n_batch\": %d, \"n_ubatch\": %d, \"flash_attn\": %d, \"is_pp_shared\": %d, \"n_gpu_layers\": %d, \"n_threads\": %u, \"n_threads_batch\": %u, \"pp\": %d, \"tg\": %d, \"pl\": %d, \"n_kv\": %d, \"t_pp\": %f, \"speed_pp\": %f, \"t_tg\": %f, \"speed_tg\": %f, \"t\": %f, \"speed\": %f}\n", .{
-                        n_kv_max,  params.n_batch, params.n_ubatch, @as(c_int, @intCast(params.flash_attn_type)), @as(c_int, @intFromBool(params.is_pp_shared)), params.n_gpu_layers, ctx_params.n_threads, ctx_params.n_threads_batch,
-                        pp,        tg,             pl,              n_kv,
-                        @as(f64, t_pp), @as(f64, speed_pp), @as(f64, t_tg), @as(f64, speed_tg),
-                        @as(f64, t),    @as(f64, speed),
+                        n_kv_max,    params.n_batch,  params.n_ubatch, @as(c_int, @intCast(params.flash_attn_type)), @as(c_int, @intFromBool(params.is_pp_shared)), params.n_gpu_layers, ctx_params.n_threads, ctx_params.n_threads_batch,
+                        pp,          tg,              pl,              n_kv,                                         @as(f64, t_pp),                                @as(f64, speed_pp),  @as(f64, t_tg),       @as(f64, speed_tg),
+                        @as(f64, t), @as(f64, speed),
                     });
                 } else {
                     log.out("|%6d | %6d | %4d | %6d | %8.3f | %8.2f | %8.3f | %8.2f | %8.3f | %8.2f |\n", .{

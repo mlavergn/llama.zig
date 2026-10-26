@@ -1,0 +1,31 @@
+#!/bin/bash
+# Writes llama-mtmd-cli's inputs into $DATA: two WAV files (16 kHz and 44.1
+# kHz stereo, so miniaudio's resampler and mixdown run), and the scripted
+# conversations the REPL cases read on stdin. Run by scripts/tools-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+python3 -I - "$DATA" <<'PY'
+import math, struct, sys, os
+out = sys.argv[1]
+def wav(path, rate, ch, secs, f0):
+    n = int(rate * secs)
+    frames = bytearray()
+    for i in range(n):
+        for c in range(ch):
+            v = 0.4 * math.sin(2 * math.pi * (f0 + 40 * c) * i / rate) + 0.1 * math.sin(2 * math.pi * 3.1 * f0 * i / rate)
+            frames += struct.pack('<h', int(max(-1, min(1, v)) * 32767))
+    hdr = b'RIFF' + struct.pack('<I', 36 + len(frames)) + b'WAVE'
+    hdr += b'fmt ' + struct.pack('<IHHIIHH', 16, 1, ch, rate, rate * ch * 2, ch * 2, 16)
+    hdr += b'data' + struct.pack('<I', len(frames))
+    open(os.path.join(out, path), 'wb').write(hdr + frames)
+wav('tone16k.wav', 16000, 1, 2.5, 220)
+wav('tone44k.wav', 44100, 2, 1.2, 330)
+PY
+IMG="$ROOT/llama.cpp/tools/mtmd/test-1.jpeg"
+printf '/image %s\ndescribe it\n/clear\nhello\n/quit\n' "$IMG" > "$DATA/repl-image.txt"
+printf '/audio %s\nwhat is this\n/quit\n' "$DATA/tone16k.wav" > "$DATA/repl-audio.txt"
+printf '/image\n/image /nonexistent/x.png\n/video %s\n   \nhi\n/exit\n' "$IMG" > "$DATA/repl-errors.txt"
+printf '/image %s\ndescribe it\nand then?\n/quit\n' "$IMG" > "$DATA/repl-two.txt"
+# line editing: backspace, cursor left and insert, home/end, delete, a
+# history recall, then the result is sent
+printf 'abd\177c\033[Dx\033[H>\033[F<\033[3~\nsecond\n\033[A\033[A\033[B\n/quit\n' > "$DATA/repl-edit.txt"

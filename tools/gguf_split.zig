@@ -360,7 +360,7 @@ const Strategy = struct {
             // split by number of tensors per file
             .tensor => i_tensor > 0 and i_tensor < self.n_tensors and @rem(i_tensor, self.params.n_split_tensors) == 0,
             // should never happen
-            .none => c.ggml_abort("gguf-split.cpp", 297, "invalid mode"),
+            .none => c.ggml_abort("gguf-split.cpp", 296, "invalid mode"),
         };
     }
 

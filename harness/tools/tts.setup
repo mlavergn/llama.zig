@@ -1,0 +1,7 @@
+#!/bin/bash
+# Writes llama-tts's speaker reference into $DATA: a WAV at 16 kHz mono and
+# one at 44.1 kHz stereo, which miniaudio resamples and mixes down to what
+# the speaker encoder takes. Run by scripts/tools-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+"$ROOT/harness/tools/mtmd-cli.setup"

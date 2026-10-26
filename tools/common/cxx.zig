@@ -36,7 +36,7 @@ pub fn stoi(s: [:0]const u8) Stoi {
     std.c._errno().* = 0;
     const v = strtol(s.ptr, &end, 10);
     if (end == s.ptr) return .no_conversion;
-    if (std.c._errno().* == @intFromEnum(std.c.E.RANGE) or v < std.math.minInt(c_int) or v > std.math.maxInt(c_int)) return .out_of_range;
+    if (std.c._errno().* == @backingInt(std.c.E.RANGE) or v < std.math.minInt(c_int) or v > std.math.maxInt(c_int)) return .out_of_range;
     return .{ .ok = @intCast(v) };
 }
 

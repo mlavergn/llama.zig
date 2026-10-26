@@ -289,7 +289,7 @@ pub const KvCache = struct {
             }
         }
 
-        impl.assert(kv_size % n_pad == 0, "llama-kv-cache.cpp", 94, "kv_size % n_pad == 0");
+        impl.assert(kv_size % n_pad == 0, "llama-kv-cache.cpp", 98, "kv_size % n_pad == 0");
 
         const n_layer = hparams.n_layer_all;
         const n_stream = self.n_stream;
@@ -304,7 +304,7 @@ pub const KvCache = struct {
             ctx_map.deinit(allocator);
         }
 
-        impl.assert(n_stream == 1 or n_stream == n_seq_max, "llama-kv-cache.cpp", 125, "n_stream == 1 || n_stream == n_seq_max");
+        impl.assert(n_stream == 1 or n_stream == n_seq_max, "llama-kv-cache.cpp", 133, "n_stream == 1 || n_stream == n_seq_max");
 
         self.v_heads.appendNTimes(allocator, 0, n_stream) catch oom();
 
@@ -426,7 +426,7 @@ pub const KvCache = struct {
                     impl.logDebug("%s: - layer %3d: filtered\n", .{ func, il });
                     continue;
                 }
-                impl.assert(self.map_layer_ids.contains(il_reuse), "llama-kv-cache.cpp", 262, "map_layer_ids.find(il_reuse) != map_layer_ids.end()");
+                impl.assert(self.map_layer_ids.contains(il_reuse), "llama-kv-cache.cpp", 266, "map_layer_ids.find(il_reuse) != map_layer_ids.end()");
                 self.map_layer_ids.put(allocator, @intCast(il), self.map_layer_ids.get(il_reuse).?) catch oom();
                 impl.logDebug("%s: - layer %3d: reuse layer %d, is_swa = %d\n", .{ func, il, il_reuse, @as(c_int, @intFromBool(hparams.isSwa(il))) });
             }
@@ -893,7 +893,7 @@ pub const KvCache = struct {
         }
 
         if (do_shift) {
-            if (!self.getCanShift()) impl.abort("llama-kv-cache.cpp", 853, "The current KV cache / model configuration does not support K-shift");
+            if (!self.getCanShift()) impl.abort("llama-kv-cache.cpp", 857, "The current KV cache / model configuration does not support K-shift");
             impl.logDebug("%s: applying K-shift\n", .{"update"});
 
             if (self.hparams.rope_type != c.LLAMA_ROPE_TYPE_NONE) {
@@ -1099,7 +1099,7 @@ pub const KvCache = struct {
         // purge positions below the ones overwritten.
         for (0..max_seq) |s| {
             if (seq_pos_max_rm[s] == -1) continue;
-            impl.assert(s < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 1158, "s < seq_to_stream.size()");
+            impl.assert(s < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 1153, "s < seq_to_stream.size()");
             const cl = &self.cells()[self.seq_to_stream.items[s]];
             if (cl.seqPosMin(@intCast(s)) <= seq_pos_max_rm[s]) {
                 impl.logDebug("%s: purging positions [%d, %d] of sequence %d from KV cache\n", .{ "apply_ubatch", cl.seqPosMin(@intCast(s)), seq_pos_max_rm[s], @as(c_int, @intCast(s)) });

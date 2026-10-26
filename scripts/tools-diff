@@ -13,6 +13,13 @@
 # a timing -- in both sides' stdout and stderr before they are compared.
 # `!preload <path>` preloads a library into both sides from there on
 # (DYLD_INSERT_LIBRARIES or LD_PRELOAD); $DATA expands in it.
+# `!stdin <path>` feeds that file to both sides' stdin from there on, and
+# `!stdin` alone goes back to /dev/null; $DATA expands in it. $MM is the
+# mmproj fixtures (scripts/gen-mmproj-fixtures). `!tty on` runs both sides
+# under script(1), so /dev/tty opens -- a terminal UI writes there, not to
+# the stdout being compared -- and `!tty off` stops it: upstream's console
+# echoes typed input straight to its terminal while its log reaches stdout
+# from a worker thread, so with no terminal the two interleave by a race.
 # A case written `~ <args>` compares stderr's lines in any order: upstream's
 # LOG_* messages are printed by a worker thread, so a direct fprintf(stderr)
 # can overtake them and upstream itself differs run to run there.
@@ -30,7 +37,8 @@ cases="harness/tools/$tool.cases"
 FIX="$ROOT/zig-out/arch-fixtures"
 VOCAB="$ROOT/llama.cpp/models"
 PLAIN="${PLAIN:-$HOME/.cache/zigtrain/gguf/plain-d6_base_005000.gguf}"
-export FIX VOCAB PLAIN
+MM="$ROOT/zig-out/mmproj-fixtures"
+export FIX VOCAB PLAIN MM
 
 zig build tools tools-ref --release="${TOOLS_O:-fast}" >/dev/null 2>&1 \
     || { echo "FAIL: could not build the tools (zig build tools tools-ref)" >&2; exit 2; }
@@ -54,8 +62,19 @@ fi
 # One side, one case: run it in that side's directory and record what it did.
 run_side() { # side bin n args...
     local side=$1 bin=$2 n=$3; shift 3
-    ( cd "$work/$side/files" && exec -a "llama-$tool" "$bin" "$@" ) \
-        > "$work/$side/$n.out" 2> "$work/$side/$n.err" < /dev/null
+    if [ "$tty_mode" = on ]; then
+        local inner='cd "$1" && b=$2 && shift 2 && exec -a "llama-$TOOL" "$b" "$@" > "$OUT" 2> "$ERR" < "$IN"'
+        if [ "$(uname)" = Darwin ]; then
+            TOOL=$tool OUT="$work/$side/$n.out" ERR="$work/$side/$n.err" IN="$stdin_file" \
+                script -q /dev/null bash -c "$inner" _ "$work/$side/files" "$bin" "$@" > /dev/null < /dev/null
+        else
+            TOOL=$tool OUT="$work/$side/$n.out" ERR="$work/$side/$n.err" IN="$stdin_file" \
+                script -qec "$(printf '%q ' bash -c "$inner" _ "$work/$side/files" "$bin" "$@")" /dev/null > /dev/null < /dev/null
+        fi
+    else
+        ( cd "$work/$side/files" && exec -a "llama-$tool" "$bin" "$@" ) \
+            > "$work/$side/$n.out" 2> "$work/$side/$n.err" < "$stdin_file"
+    fi
     echo $? > "$work/$side/$n.rc"
     ( cd "$work/$side/files" && find . -type f | sort | while read -r f; do
         printf '%s %s\n' "$(shasum -a 256 < "$f" | cut -c1-16)" "$f"; done ) > "$work/$side/$n.files"
@@ -68,10 +87,15 @@ mask() { # file: apply every mask in place
 }
 
 n=0 fails=0
+stdin_file=/dev/null
+tty_mode=off
 while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
         ''|'#'*) continue ;;
         '!mask '*) masks+=("${line#!mask }"); continue ;;
+        '!stdin') stdin_file=/dev/null; continue ;;
+        '!tty '*) tty_mode="${line#!tty }"; continue ;;
+        '!stdin '*) eval "stdin_file=${line#!stdin }"; continue ;;
         '!preload '*)
             eval "lib=${line#!preload }"
             if [ "$(uname)" = Darwin ]; then export DYLD_INSERT_LIBRARIES="$lib"; else export LD_PRELOAD="$lib"; fi

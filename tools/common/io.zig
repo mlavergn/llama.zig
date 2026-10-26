@@ -22,6 +22,11 @@ fn stream(comptime index: c_uint, comptime name: []const u8) *anyopaque {
     return @extern(*const *anyopaque, .{ .name = if (builtin.os.tag.isDarwin()) "__" ++ name ++ "p" else name }).*;
 }
 
+/// libc's `stdin`.
+pub fn cStdin() *anyopaque {
+    return stream(0, "stdin");
+}
+
 /// libc's `stdout`.
 pub fn cStdout() *anyopaque {
     return stream(1, "stdout");

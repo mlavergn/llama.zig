@@ -33,7 +33,7 @@ fn verbosityOf(level: c.ggml_log_level) c_int {
 /// Ports `common_log_default_callback` (log.cpp:454 @c1d0e7a00): libllama's
 /// messages through `common_log`, at `common_get_verbosity`'s level.
 pub fn defaultLogCallback(level: c.ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
-    if (verbosityOf(level) <= log.verbosity_thold) log.add(@enumFromInt(level), "%s", .{text});
+    if (verbosityOf(level) <= log.verbosity_thold) log.add(@fromBackingInt(@intCast(level)), "%s", .{text});
 }
 
 /// Ports `common_init` (common/common.cpp:385 @c1d0e7a00).
@@ -83,6 +83,22 @@ pub fn tokenToPiece(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, token: c
     }
     piece[@intCast(n_chars)] = 0;
     return piece[0..@intCast(n_chars) :0];
+}
+
+/// Ports `common_detokenize` (common/common.cpp:1920 @c1d0e7a00): the first try
+/// fits libc++'s short-string buffer, 22 bytes, or the token count.
+///
+/// Return: the text, the allocator's.
+pub fn detokenize(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, tokens: []const c.llama_token, special: bool) ![]u8 {
+    var text = try a.alloc(u8, @max(22, tokens.len));
+    var n_chars = c.llama_detokenize(vocab, tokens.ptr, @intCast(tokens.len), text.ptr, @intCast(text.len), false, special);
+    if (n_chars < 0) {
+        text = try a.realloc(text, @intCast(-n_chars));
+        n_chars = c.llama_detokenize(vocab, tokens.ptr, @intCast(tokens.len), text.ptr, @intCast(text.len), false, special);
+        // whitespace trimming is performed after per-token detokenization
+        if (n_chars > @as(i32, @intCast(text.len))) _ = c.ggml_abort("common.cpp", 1927, "GGML_ASSERT(%s) failed", "n_chars <= (int32_t)text.size()");
+    }
+    return text[0..@intCast(n_chars)];
 }
 
 /// Ports `common_model_params_to_llama` (common/common.cpp:1680 @c1d0e7a00).

@@ -1,0 +1,157 @@
+#!/bin/bash
+# src/mtmd/vendor/ -- stb_image and miniaudio's decoder, as mtmd-helper
+# reaches them -- against upstream's vendored stb_image.h and miniaudio.h,
+# compiled unmodified beside them, in one process, on bits
+# (harness/mtmd_decode_diff.zig).
+#
+# The inputs: what the harness synthesizes (every WAV format tag, PNG colour
+# type and depth, BMP, TGA, PNM, HDR, PSD, PIC and GIF variant); the media
+# in the tree; and a corpus made here with the system's encoders -- sips
+# and ImageIO for JPEG (baseline, progressive, grey, CMYK, every quality),
+# PNG (16-bit, interlaced), GIF, BMP, TGA, PSD and an unsupported TIFF;
+# afconvert for WAV at every PCM, float and law format, and FLAC at 16 and
+# 24 bits, mono to eight channels, at rates that resample; the harness adds
+# its own FLAC encoder's output -- every subframe type and channel
+# assignment, 4- to 32-bit samples, odd block sizes, Ogg-FLAC and ID3.
+# Every input is also truncated and corrupted.
+#
+# Usage: scripts/mtmd-decode-diff [--quick] [--verbose] [--only=<substring>]
+#   MTMD_DECODE_O=fast|safe  the build mode, ReleaseFast by default
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+CORPUS="$ROOT/zig-out/mtmd-decode-corpus"
+
+make_corpus() {
+    local out="$1" tmp
+    tmp="$(mktemp -d)"
+    mkdir -p "$tmp/img" "$tmp/aud"
+    local imgs=(llama.cpp/media/llama1-logo.png llama.cpp/tools/mtmd/tests/test-1-positive.png llama.cpp/media/matmul.png)
+    local i=0
+    for src in "${imgs[@]}"; do
+        [ -f "$src" ] || continue
+        i=$((i + 1))
+        sips -z 53 37 "$src" --out "$tmp/img/s$i-small.png" >/dev/null 2>&1
+        for base in "$src" "$tmp/img/s$i-small.png"; do
+            b="$(basename "$base" .png)"
+            for q in 5 30 75 95 100; do
+                sips -s format jpeg -s formatOptions "$q" "$base" --out "$tmp/img/$b-q$q.jpg" >/dev/null 2>&1
+            done
+            for f in bmp gif tga psd tiff; do
+                sips -s format "$f" "$base" --out "$tmp/img/$b.$f" >/dev/null 2>&1
+            done
+        done
+    done
+    swift - "$tmp/img" "${imgs[@]}" >/dev/null 2>&1 <<'SWIFT'
+import Foundation
+import ImageIO
+import CoreGraphics
+let out = CommandLine.arguments[1]
+var n = 0
+func write(_ img: CGImage, _ type: String, _ name: String, _ props: [CFString: Any]) {
+    let url = URL(fileURLWithPath: out + "/" + name) as CFURL
+    guard let d = CGImageDestinationCreateWithURL(url, type as CFString, 1, nil) else { return }
+    CGImageDestinationAddImage(d, img, props as CFDictionary)
+    CGImageDestinationFinalize(d)
+}
+func redraw(_ img: CGImage, _ space: CGColorSpace, _ bits: Int, _ info: UInt32, _ w: Int, _ h: Int) -> CGImage? {
+    guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: bits, bytesPerRow: 0, space: space, bitmapInfo: info) else { return nil }
+    ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+    return ctx.makeImage()
+}
+for path in CommandLine.arguments.dropFirst(2) {
+    guard let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+          let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { continue }
+    n += 1
+    for (w, h) in [(img.width, img.height), (61, 43), (16, 16), (9, 7)] {
+        let tag = "i\(n)-\(w)x\(h)"
+        guard let rgb = redraw(img, CGColorSpaceCreateDeviceRGB(), 8, CGImageAlphaInfo.noneSkipLast.rawValue, w, h) else { continue }
+        for q in [0.2, 0.6, 0.95] {
+            write(rgb, "public.jpeg", "\(tag)-prog-q\(q).jpg", [kCGImageDestinationLossyCompressionQuality: q, kCGImagePropertyJFIFDictionary: [kCGImagePropertyJFIFIsProgressive: true]])
+        }
+        if let grey = redraw(img, CGColorSpaceCreateDeviceGray(), 8, CGImageAlphaInfo.none.rawValue, w, h) {
+            write(grey, "public.jpeg", "\(tag)-grey.jpg", [kCGImageDestinationLossyCompressionQuality: 0.8])
+            write(grey, "public.jpeg", "\(tag)-grey-prog.jpg", [kCGImageDestinationLossyCompressionQuality: 0.8, kCGImagePropertyJFIFDictionary: [kCGImagePropertyJFIFIsProgressive: true]])
+            write(grey, "public.png", "\(tag)-grey.png", [:])
+        }
+        if let cmyk = redraw(img, CGColorSpaceCreateDeviceCMYK(), 8, CGImageAlphaInfo.none.rawValue, w, h) {
+            write(cmyk, "public.jpeg", "\(tag)-cmyk.jpg", [kCGImageDestinationLossyCompressionQuality: 0.8])
+        }
+        if let rgba = redraw(img, CGColorSpaceCreateDeviceRGB(), 8, CGImageAlphaInfo.premultipliedLast.rawValue, w, h) {
+            write(rgba, "public.png", "\(tag)-rgba.png", [:])
+            write(rgba, "public.png", "\(tag)-rgba-interlaced.png", [kCGImagePropertyPNGDictionary: [kCGImagePropertyPNGInterlaceType: 1]])
+        }
+        if let deep = redraw(img, CGColorSpaceCreateDeviceRGB(), 16, CGImageAlphaInfo.premultipliedLast.rawValue, w, h) {
+            write(deep, "public.png", "\(tag)-rgba16.png", [:])
+        }
+        write(rgb, "public.png", "\(tag)-rgb.png", [:])
+        write(rgb, "com.microsoft.bmp", "\(tag).bmp", [:])
+        write(rgb, "com.compuserve.gif", "\(tag).gif", [:])
+    }
+}
+SWIFT
+    local snd=(/System/Library/Sounds/Basso.aiff /System/Library/Sounds/Glass.aiff /System/Library/Sounds/Ping.aiff)
+    i=0
+    for src in "${snd[@]}"; do
+        [ -f "$src" ] || continue
+        i=$((i + 1))
+        for fmt in UI8 LEI16 LEI24 LEI32 LEF32 LEF64 ulaw alaw; do
+            for rate in 16000 44100 22050; do
+                afconvert -f WAVE -d "$fmt@$rate" "$src" "$tmp/aud/s$i-$fmt-$rate.wav" >/dev/null 2>&1
+            done
+            afconvert -f WAVE -d "$fmt@11025" -c 1 "$src" "$tmp/aud/s$i-$fmt-11025-mono.wav" >/dev/null 2>&1
+        done
+        for rate in 16000 44100 48000 8000; do
+            afconvert -f flac -d "flac@$rate" "$src" "$tmp/aud/s$i-$rate.flac" >/dev/null 2>&1
+        done
+        afconvert -f flac -d "flac@24000" -c 1 "$src" "$tmp/aud/s$i-24000-mono.flac" >/dev/null 2>&1
+        # 24-bit FLAC: afconvert keeps the source's depth
+        afconvert -f WAVE -d "LEI24@48000" "$src" "$tmp/src24.wav" >/dev/null 2>&1
+        afconvert -f flac -d flac "$tmp/src24.wav" "$tmp/aud/s$i-24bit-48000.flac" >/dev/null 2>&1
+        afconvert -f WAVE -d "LEI24@22050" -c 1 "$src" "$tmp/src24m.wav" >/dev/null 2>&1
+        afconvert -f flac -d flac "$tmp/src24m.wav" "$tmp/aud/s$i-24bit-22050-mono.flac" >/dev/null 2>&1
+        rm -f "$tmp/src24.wav" "$tmp/src24m.wav"
+    done
+    # multichannel FLAC: afconvert will not upmix, so it encodes a
+    # multichannel WAV written here
+    python3 -I - "$tmp" <<'PY' >/dev/null 2>&1
+import math, struct, sys
+out = sys.argv[1]
+for ch, bits, rate in [(3, 16, 32000), (6, 24, 48000), (8, 16, 44100)]:
+    n, bpf = 30000, ch * bits // 8
+    data = bytearray()
+    for i in range(n):
+        for c in range(ch):
+            v = int(math.sin(i * 0.01 * (c + 1)) * (2 ** (bits - 2)))
+            data += v.to_bytes(bits // 8, 'little', signed=True)
+    hdr = b'RIFF' + struct.pack('<I', 36 + len(data)) + b'WAVE' + b'fmt ' + struct.pack('<IHHIIHH', 16, 1, ch, rate, rate * bpf, bpf, bits) + b'data' + struct.pack('<I', len(data))
+    open('%s/m%d.wav' % (out, ch), 'wb').write(hdr + data)
+PY
+    for c in 3 6 8; do
+        [ -f "$tmp/m$c.wav" ] && afconvert -f flac -d flac "$tmp/m$c.wav" "$tmp/aud/multi-${c}ch.flac" >/dev/null 2>&1
+        rm -f "$tmp/m$c.wav"
+    done
+    for f in /System/Library/PrivateFrameworks/PersonalAudio.framework/Versions/A/Resources/Enrollment_1.mp3; do
+        [ -f "$f" ] && cp "$f" "$tmp/aud/"
+    done
+    find "$tmp" -type f -size 0 -delete
+    rm -rf "$out"
+    mkdir -p "$(dirname "$out")"
+    mv "$tmp" "$out"
+}
+
+if [ ! -d "$CORPUS" ] || [ "${MTMD_DECODE_REGEN:-0}" = 1 ]; then
+    make_corpus "$CORPUS" || { echo "FAIL: could not build the corpus" >&2; exit 2; }
+fi
+nimg=$(find "$CORPUS/img" -type f | wc -l | tr -d ' ')
+naud=$(find "$CORPUS/aud" -type f | wc -l | tr -d ' ')
+nflac=$(find "$CORPUS/aud" -name "*.flac" | wc -l | tr -d ' ')
+if [ "$nimg" -lt 20 ] || [ "$naud" -lt 20 ] || [ "$nflac" -lt 20 ]; then
+    echo "FAIL: corpus too small ($nimg images, $naud audio files, $nflac FLAC): an encoder is missing" >&2
+    exit 2
+fi
+
+zig build mtmd-decode-diff-build --release="${MTMD_DECODE_O:-fast}" >/dev/null 2>&1 \
+    || { echo "FAIL: could not build mtmd-decode-diff (zig build mtmd-decode-diff-build)" >&2; exit 2; }
+exec zig-out/bin/mtmd-decode-diff "$@" "$CORPUS" llama.cpp/media llama.cpp/tools/mtmd/test-2.mp3 llama.cpp/tools/mtmd/tests \
+    llama.cpp/docs/android/imported-into-android-studio.jpg llama.cpp/tools/ui/tests/stories/fixtures/assets/1.jpg

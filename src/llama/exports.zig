@@ -19,6 +19,7 @@ const ext_only = [_][]const u8{
     "llama_get_embeddings_nextn_ith",
     "llama_get_memory_breakdown",
     "llama_model_get_device",
+    "llama_model_get_tok_embd",
     "llama_model_n_devices",
     "llama_model_n_expert",
     "llama_model_target_layer_ids",

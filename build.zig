@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const zon = @import("build.zig.zon");
 const llamacpp = @import("build/llamacpp.zig");
 const tools_build = @import("build/tools.zig");
+const mtmd_build = @import("build/mtmd.zig");
 
 const Git = struct {
     const Self = @This();
@@ -609,6 +610,9 @@ pub fn build(b: *std.Build) !void {
     // Upstream's other tools (PLAN.md, Decision 61): our ports, `zig build
     // tools`, and upstream's own over libllama-ref, `zig build tools-ref`.
 
+    // Upstream's libmtmd, the reference for every Stage 8 gate.
+    const mtmd_ref = tools_build.addMtmdRef(b, .{ .target = cfg.target, .optimize = cfg.optimize, .sdk = sdk });
+
     try tools_build.add(b, .{
         .target = cfg.target,
         .optimize = cfg.optimize,
@@ -616,7 +620,15 @@ pub fn build(b: *std.Build) !void {
         .config = options,
         .reference = reference,
         .cuda = cuda != null,
+        .mtmd_ref = mtmd_ref,
     });
+
+    _ = mtmd_build.add(b, .{
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+        .sdk = sdk,
+        .reference = reference,
+    }, mtmd_ref);
 
     // -------------------------------------------------------------------------
     // Tests

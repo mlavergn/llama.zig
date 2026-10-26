@@ -68,7 +68,7 @@ fn writeUtf8ToStdout(a: std.mem.Allocator, str: [:0]const u8, invalid_utf8: *boo
                 io.printf(">", .{});
                 return;
             }
-            _ = c.ggml_abort("tokenize.cpp", 80, "MultiByteToWideChar() failed in an unexpected way.");
+            _ = c.ggml_abort("tokenize.cpp", 78, "MultiByteToWideChar() failed in an unexpected way.");
         }
         const wstr = try a.alloc(u16, @intCast(n + 1));
         _ = win.MultiByteToWideChar(CP_UTF8, 0, str.ptr, @intCast(str.len), wstr.ptr, n);

@@ -32,6 +32,24 @@ const throw = arg.throw;
 const throwStr = arg.throwStr;
 const S = [:0]const u8;
 
+/// Ports `list_builtin_chat_templates` (arg.cpp:1319 @c1d0e7a00): libllama's
+/// built-in template names, comma-separated.
+fn listBuiltinChatTemplates(a: std.mem.Allocator) ![:0]const u8 {
+    const n = c.llama_chat_builtin_templates(null, 0);
+    const names = try a.alloc([*c]const u8, @intCast(n));
+    _ = c.llama_chat_builtin_templates(names.ptr, names.len);
+    var msg: std.ArrayList(u8) = .empty;
+    for (names, 0..) |t, i| {
+        try msg.appendSlice(a, std.mem.span(@as([*:0]const u8, @ptrCast(t))));
+        if (i + 1 != names.len) try msg.appendSlice(a, ", ");
+    }
+    return msg.toOwnedSliceSentinel(a, 0);
+}
+
+/// `mmproj_examples` (arg.cpp:60 @c1d0e7a00): the examples that load an
+/// mmproj.
+const mmproj_examples = [_]params_mod.Example{ .mtmd, .server, .cli, .tts };
+
 extern fn exit(code: c_int) noreturn;
 
 fn tf(b: bool) [*:0]const u8 {
@@ -40,8 +58,8 @@ fn tf(b: bool) [*:0]const u8 {
 
 /// Ports `kv_cache_types` (arg.cpp:304 @c1d0e7a00).
 const kv_cache_types = [_]c.ggml_type{
-    c.GGML_TYPE_F32,  c.GGML_TYPE_F16,    c.GGML_TYPE_BF16,
-    c.GGML_TYPE_Q8_0, c.GGML_TYPE_Q4_0,   c.GGML_TYPE_Q4_1,
+    c.GGML_TYPE_F32,    c.GGML_TYPE_F16,  c.GGML_TYPE_BF16,
+    c.GGML_TYPE_Q8_0,   c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1,
     c.GGML_TYPE_IQ4_NL, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1,
 };
 
@@ -374,6 +392,71 @@ pub fn add(ctx: *Context) !void {
             }
         }.f } }).setEnv("LLAMA_ARG_N_PARALLEL"));
     }
+    // arg.cpp:2566
+    try ctx.add((Arg{ .args = &.{ "-mm", "--mmproj" }, .value_hint = "FILE", .help = "path to a multimodal projector file. see tools/mtmd/README.md\nnote: if -hf is used, this argument can be omitted", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            q.mmproj.path = try arg.dupe(q, value);
+        }
+    }.f } }).setExamples(&mmproj_examples).setEnv("LLAMA_ARG_MMPROJ"));
+    // arg.cpp:2574
+    try ctx.add((Arg{ .args = &.{ "-mmu", "--mmproj-url" }, .value_hint = "URL", .help = "URL to a multimodal projector file. see tools/mtmd/README.md", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            q.mmproj.url = try arg.dupe(q, value);
+        }
+    }.f } }).setExamples(&mmproj_examples).setEnv("LLAMA_ARG_MMPROJ_URL"));
+    // arg.cpp:2581
+    try ctx.add((Arg{ .args = &.{"--mmproj-auto"}, .args_neg = &.{ "--no-mmproj", "--no-mmproj-auto" }, .help = try ctx.fmt("whether to use multimodal projector file (if available), useful when using -hf (default: %s)", .{@as([*:0]const u8, if (p.no_mmproj) "disabled" else "enabled")}), .handler = .{ .bool_ = struct {
+        fn f(q: *Params, value: bool) !void {
+            q.no_mmproj = !value;
+        }
+    }.f } }).setExamples(&.{ .mtmd, .server, .cli, .download }).setEnv("LLAMA_ARG_MMPROJ_AUTO"));
+    // arg.cpp:2589
+    try ctx.add((Arg{ .args = &.{"--mmproj-offload"}, .args_neg = &.{"--no-mmproj-offload"}, .help = try ctx.fmt("whether to enable GPU offloading for multimodal projector (default: %s)", .{@as([*:0]const u8, if (p.mmproj_use_gpu) "enabled" else "disabled")}), .handler = .{ .bool_ = struct {
+        fn f(q: *Params, value: bool) !void {
+            q.mmproj_use_gpu = value;
+        }
+    }.f } }).setExamples(&mmproj_examples).setEnv("LLAMA_ARG_MMPROJ_OFFLOAD"));
+    // arg.cpp:2597
+    try ctx.add((Arg{
+        .args = &.{ "-mmdev", "--mmproj-device" },
+        .value_hint = "DEVICE",
+        .help = "device to use for multimodal projector (none = don't offload, default: auto)\nuse --list-devices to see a list of available devices",
+        .handler = .{
+            .string = struct {
+                fn f(q: *Params, value: S) !void {
+                    if (std.mem.eql(u8, value, "none")) {
+                        q.mmproj_use_gpu = false;
+                        q.mmproj_device = null;
+                        return;
+                    }
+                    const devices = try parseDeviceList(q, value);
+                    // parse_device_list pushes nullptr at back so devices is length 2 for single device.
+                    if (devices.items.len > 2) return throwStr("only one device may be specified for mmproj");
+                    q.mmproj_use_gpu = true;
+                    q.mmproj_device = devices.items[0];
+                }
+            }.f,
+        },
+    }).setExamples(&mmproj_examples).setEnv("MTMD_BACKEND_DEVICE")); // no LLAMA_ARG_ prefix for backward compatibility reason
+    // arg.cpp:2617
+    try ctx.add((Arg{ .args = &.{ "--image", "--audio", "--video" }, .value_hint = "FILE", .help = "path to an image, audio, or video file. use with multimodal models, use comma-separated values for multiple files\n", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            const items = try options1.parseCsvRow(q.arena, value);
+            for (items.items) |item| try q.image.append(q.arena, item);
+        }
+    }.f } }).setExamples(&.{ .mtmd, .cli }));
+    // arg.cpp:2626
+    try ctx.add((Arg{ .args = &.{"--image-min-tokens"}, .value_hint = "N", .help = "minimum number of tokens each image can take, only used by vision models with dynamic resolution (default: read from model)", .handler = .{ .int = struct {
+        fn f(q: *Params, value: c_int) !void {
+            q.image_min_tokens = value;
+        }
+    }.f } }).setExamples(&mmproj_examples).setEnv("LLAMA_ARG_IMAGE_MIN_TOKENS"));
+    // arg.cpp:2633
+    try ctx.add((Arg{ .args = &.{"--image-max-tokens"}, .value_hint = "N", .help = "maximum number of tokens each image can take, only used by vision models with dynamic resolution (default: read from model)", .handler = .{ .int = struct {
+        fn f(q: *Params, value: c_int) !void {
+            q.image_max_tokens = value;
+        }
+    }.f } }).setExamples(&mmproj_examples).setEnv("LLAMA_ARG_IMAGE_MAX_TOKENS"));
     // arg.cpp:2647: `--rpc` is added only with an RPC backend, which this
     // build never has -- but the C asks, and asking initialises the backend
     // registry, so every device's start-up log happens here, at the
@@ -404,8 +487,8 @@ pub fn add(ctx: *Context) !void {
     try ctx.add((Arg{ .args = &.{ "-lm", "--load-mode" }, .value_hint = "MODE", .help = "model loading mode (default: auto)\n- auto: mmap, unless a device does not support it\n- none: no special loading mode\n- mmap: memory-map model (if mmap disabled, slower load but may reduce pageouts if not using mlock)\n- mlock: force system to keep model in RAM rather than swapping or compressing\n- mmap+mlock: mmap + force system to keep model in RAM rather than swapping or compressing\n- dio: use DirectIO if available\n", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             const modes = [_]struct { []const u8, c.llama_load_mode }{
-                .{ "auto", c.LLAMA_LOAD_MODE_AUTO },         .{ "none", c.LLAMA_LOAD_MODE_NONE },
-                .{ "mmap", c.LLAMA_LOAD_MODE_MMAP },         .{ "mlock", c.LLAMA_LOAD_MODE_MLOCK },
+                .{ "auto", c.LLAMA_LOAD_MODE_AUTO },             .{ "none", c.LLAMA_LOAD_MODE_NONE },
+                .{ "mmap", c.LLAMA_LOAD_MODE_MMAP },             .{ "mlock", c.LLAMA_LOAD_MODE_MLOCK },
                 .{ "mmap+mlock", c.LLAMA_LOAD_MODE_MMAP_MLOCK }, .{ "dio", c.LLAMA_LOAD_MODE_DIRECT_IO },
             };
             for (modes) |m| if (std.mem.eql(u8, value, m[0])) {
@@ -447,24 +530,37 @@ pub fn add(ctx: *Context) !void {
         }
     }.f } }).setEnv("LLAMA_ARG_OVERRIDE_TENSOR"));
     // arg.cpp:2739
-    try ctx.add((Arg{ .args = &.{ "-cmoe", "--cpu-moe" }, .help = "keep all Mixture of Experts (MoE) weights in the CPU", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
-            // `llm_ffn_exps_cpu_override` (common/common.h:1120 @c1d0e7a00)
-            try q.tensor_buft_overrides.append(q.arena, .{ .pattern = llm_ffn_exps_regex, .buft = c.ggml_backend_cpu_buffer_type() });
-        }
-    }.f } }).setEnv("LLAMA_ARG_CPU_MOE"));
+    try ctx.add((Arg{
+        .args = &.{ "-cmoe", "--cpu-moe" },
+        .help = "keep all Mixture of Experts (MoE) weights in the CPU",
+        .handler = .{
+            .void_ = struct {
+                fn f(q: *Params) !void {
+                    // `llm_ffn_exps_cpu_override` (common/common.h:1120 @c1d0e7a00)
+                    try q.tensor_buft_overrides.append(q.arena, .{ .pattern = llm_ffn_exps_regex, .buft = c.ggml_backend_cpu_buffer_type() });
+                }
+            }.f,
+        },
+    }).setEnv("LLAMA_ARG_CPU_MOE"));
     // arg.cpp:2746
-    try ctx.add((Arg{ .args = &.{ "-ncmoe", "--n-cpu-moe" }, .value_hint = "N", .help = "keep the Mixture of Experts (MoE) weights of the first N layers in the CPU", .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
-            if (value < 0) return throwStr("invalid value");
-            var i: c_int = 0;
-            while (i < value) : (i += 1) {
-                // `llm_ffn_exps_block_regex` (common/common.h:1116 @c1d0e7a00)
-                const re = try std.fmt.allocPrintSentinel(q.arena, "blk\\.{d}{s}", .{ i, llm_ffn_exps_regex }, 0);
-                try q.tensor_buft_overrides.append(q.arena, .{ .pattern = re.ptr, .buft = c.ggml_backend_cpu_buffer_type() });
-            }
-        }
-    }.f } }).setEnv("LLAMA_ARG_N_CPU_MOE"));
+    try ctx.add((Arg{
+        .args = &.{ "-ncmoe", "--n-cpu-moe" },
+        .value_hint = "N",
+        .help = "keep the Mixture of Experts (MoE) weights of the first N layers in the CPU",
+        .handler = .{
+            .int = struct {
+                fn f(q: *Params, value: c_int) !void {
+                    if (value < 0) return throwStr("invalid value");
+                    var i: c_int = 0;
+                    while (i < value) : (i += 1) {
+                        // `llm_ffn_exps_block_regex` (common/common.h:1116 @c1d0e7a00)
+                        const re = try std.fmt.allocPrintSentinel(q.arena, "blk\\.{d}{s}", .{ i, llm_ffn_exps_regex }, 0);
+                        try q.tensor_buft_overrides.append(q.arena, .{ .pattern = re.ptr, .buft = c.ggml_backend_cpu_buffer_type() });
+                    }
+                }
+            }.f,
+        },
+    }).setEnv("LLAMA_ARG_N_CPU_MOE"));
     // arg.cpp:2762
     std.debug.assert(p.n_gpu_layers < 0); // string_format would need to be extended for a default >= 0
     try ctx.add((Arg{ .args = &.{ "-ngl", "--gpu-layers", "--n-gpu-layers" }, .value_hint = "N", .help = try ctx.fmt("max. number of layers to store in VRAM, either an exact number, 'auto', or 'all' (default: %s)", .{@as([*:0]const u8, if (p.n_gpu_layers == -1) "auto" else "all")}), .handler = .{ .string = struct {
@@ -501,21 +597,28 @@ pub fn add(ctx: *Context) !void {
         }
     }.f } }).setEnv("LLAMA_ARG_SPLIT_MODE"));
     // arg.cpp:2804
-    try ctx.add((Arg{ .args = &.{ "-ts", "--tensor-split" }, .value_hint = "N0,N1,N2,...", .help = "fraction of the model to offload to each GPU, comma-separated list of proportions, e.g. 3,1", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            // split string by , and /
-            const split_arg = try splitCommaSlash(q.arena, value);
-            const max = c.llama_max_devices();
-            if (split_arg.items.len >= max) return throw("got %zu input configs, but system only has %zu devices", .{ split_arg.items.len, max });
-            var i: usize = 0;
-            while (i < max) : (i += 1) {
-                q.tensor_split[i] = if (i < split_arg.items.len) try arg.stof(split_arg.items[i]) else 0.0;
-            }
-            if (!c.llama_supports_gpu_offload()) {
-                io.eprintf("warning: llama.cpp was compiled without support for GPU offload. Setting a tensor split has no effect.\n", .{});
-            }
-        }
-    }.f } }).setEnv("LLAMA_ARG_TENSOR_SPLIT"));
+    try ctx.add((Arg{
+        .args = &.{ "-ts", "--tensor-split" },
+        .value_hint = "N0,N1,N2,...",
+        .help = "fraction of the model to offload to each GPU, comma-separated list of proportions, e.g. 3,1",
+        .handler = .{
+            .string = struct {
+                fn f(q: *Params, value: S) !void {
+                    // split string by , and /
+                    const split_arg = try splitCommaSlash(q.arena, value);
+                    const max = c.llama_max_devices();
+                    if (split_arg.items.len >= max) return throw("got %zu input configs, but system only has %zu devices", .{ split_arg.items.len, max });
+                    var i: usize = 0;
+                    while (i < max) : (i += 1) {
+                        q.tensor_split[i] = if (i < split_arg.items.len) try arg.stof(split_arg.items[i]) else 0.0;
+                    }
+                    if (!c.llama_supports_gpu_offload()) {
+                        io.eprintf("warning: llama.cpp was compiled without support for GPU offload. Setting a tensor split has no effect.\n", .{});
+                    }
+                }
+            }.f,
+        },
+    }).setEnv("LLAMA_ARG_TENSOR_SPLIT"));
     // arg.cpp:2831
     try ctx.add((Arg{ .args = &.{ "-mg", "--main-gpu" }, .value_hint = "INDEX", .help = try ctx.fmt("the GPU to use for the model (with split-mode = none), or for intermediate results and KV (with split-mode = row) (default: %d)", .{p.main_gpu}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
@@ -546,20 +649,27 @@ pub fn add(ctx: *Context) !void {
         }
     }.f } }).setExamples(&.{.fit_params}).setEnv("LLAMA_ARG_FIT_ESTIMATE"));
     // arg.cpp:2869
-    try ctx.add((Arg{ .args = &.{ "-fitt", "--fit-target" }, .value_hint = "MiB0,MiB1,MiB2,...", .help = try ctx.fmt("target margin per device for --fit, comma-separated list of values, single value is broadcast across all devices, default: %zu", .{p.fit_params_target.items[0] / (1024 * 1024)}), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            // split string by , and /
-            const split_arg = try splitCommaSlash(q.arena, value);
-            const max = c.llama_max_devices();
-            if (split_arg.items.len >= max) return throw("got %zu input configs, but system only has %zu devices", .{ split_arg.items.len, max });
-            if (split_arg.items.len == 1) {
-                const v = (try stoull(split_arg.items[0])) *% 1024 *% 1024;
-                for (q.fit_params_target.items) |*t| t.* = v;
-                return;
-            }
-            for (split_arg.items, 0..) |s, i| q.fit_params_target.items[i] = (try stoull(s)) *% 1024 *% 1024;
-        }
-    }.f } }).setEnv("LLAMA_ARG_FIT_TARGET"));
+    try ctx.add((Arg{
+        .args = &.{ "-fitt", "--fit-target" },
+        .value_hint = "MiB0,MiB1,MiB2,...",
+        .help = try ctx.fmt("target margin per device for --fit, comma-separated list of values, single value is broadcast across all devices, default: %zu", .{p.fit_params_target.items[0] / (1024 * 1024)}),
+        .handler = .{
+            .string = struct {
+                fn f(q: *Params, value: S) !void {
+                    // split string by , and /
+                    const split_arg = try splitCommaSlash(q.arena, value);
+                    const max = c.llama_max_devices();
+                    if (split_arg.items.len >= max) return throw("got %zu input configs, but system only has %zu devices", .{ split_arg.items.len, max });
+                    if (split_arg.items.len == 1) {
+                        const v = (try stoull(split_arg.items[0])) *% 1024 *% 1024;
+                        for (q.fit_params_target.items) |*t| t.* = v;
+                        return;
+                    }
+                    for (split_arg.items, 0..) |s, i| q.fit_params_target.items[i] = (try stoull(s)) *% 1024 *% 1024;
+                }
+            }.f,
+        },
+    }).setEnv("LLAMA_ARG_FIT_TARGET"));
     // arg.cpp:2894
     try ctx.add((Arg{ .args = &.{ "-fitc", "--fit-ctx" }, .value_hint = "N", .help = try ctx.fmt("minimum ctx size that can be set by --fit option, default: %u", .{@as(c_uint, @bitCast(p.fit_params_min_ctx))}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
@@ -792,6 +902,18 @@ pub fn add(ctx: *Context) !void {
             try q.n_pl.appendSlice(q.arena, v.items);
         }
     }.f } }).setExamples(&.{.bench}));
+    // arg.cpp:3631
+    try ctx.add((Arg{ .args = &.{"--jinja"}, .args_neg = &.{"--no-jinja"}, .help = try ctx.fmt("whether to use jinja template engine for chat (default: %s)", .{@as([*:0]const u8, if (p.use_jinja) "enabled" else "disabled")}), .handler = .{ .bool_ = struct {
+        fn f(q: *Params, value: bool) !void {
+            q.use_jinja = value;
+        }
+    }.f } }).setExamples(&.{ .server, .completion, .cli, .mtmd }).setEnv("LLAMA_ARG_JINJA"));
+    // arg.cpp:3709
+    try ctx.add((Arg{ .args = &.{"--chat-template"}, .value_hint = "JINJA_TEMPLATE", .help = try ctx.fmt("set custom jinja chat template (default: template taken from model's metadata)\nif suffix/prefix are specified, template will be disabled\nonly commonly used templates are accepted (unless --jinja is set before this flag):\nlist of built-in templates:\n%s", .{(try listBuiltinChatTemplates(p.arena)).ptr}), .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            q.chat_template = try arg.dupe(q, value);
+        }
+    }.f } }).setExamples(&.{ .completion, .cli, .server, .mtmd }).setEnv("LLAMA_ARG_CHAT_TEMPLATE"));
     // arg.cpp:3786
     const pos_z = try p.arena.dupeSentinel(u8, p.cvector_positive_file, 0);
     try ctx.add((Arg{ .args = &.{"--positive-file"}, .value_hint = "FNAME", .help = try ctx.fmt("positive prompts file, one prompt per line (default: '%s')", .{pos_z.ptr}), .handler = .{ .string = struct {
@@ -906,6 +1028,18 @@ pub fn add(ctx: *Context) !void {
             q.spec_draft_cache_type_v = try kvCacheTypeFromStr(value);
         }
     }.f } }).setEnv("LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_V"));
+    // arg.cpp:4350
+    try ctx.add((Arg{ .args = &.{"--tts-lang"}, .value_hint = "FNAME", .help = "language (ISO 639-1) for audio generation\nsee tts/README.md for per-model usage notes", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            q.tts_lang = try arg.dupe(q, value);
+        }
+    }.f } }).setExamples(&.{.tts}));
+    // arg.cpp:4358
+    try ctx.add((Arg{ .args = &.{"--tts-speaker-file"}, .value_hint = "FNAME", .help = "speaker file path for audio generation", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            q.tts_speaker_file = try arg.dupe(q, value);
+        }
+    }.f } }).setExamples(&.{.tts}));
     // arg.cpp:4452
     try ctx.add((Arg{ .args = &.{"--check"}, .help = try ctx.fmt("check rather than generate results (default: %s)", .{tf(p.check)}), .handler = .{ .void_ = struct {
         fn f(q: *Params) !void {
@@ -919,7 +1053,7 @@ fn stoull(s: [:0]const u8) !u64 {
     var end: ?[*:0]const u8 = null;
     std.c._errno().* = 0;
     const v = strtoull(s.ptr, &end, 10);
-    if (std.c._errno().* == @intFromEnum(std.c.E.RANGE)) return throwStr("stoull: out of range");
+    if (std.c._errno().* == @backingInt(std.c.E.RANGE)) return throwStr("stoull: out of range");
     if (end == s.ptr) return throwStr("stoull: no conversion");
     return v;
 }

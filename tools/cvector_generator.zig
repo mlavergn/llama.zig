@@ -751,7 +751,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         cb_data.n_tokens = @intCast(t.max_seq_len);
 
         io.printf("Evaluating prompt[%d/%d]: \"%s\" - \"%s\" (%d tokens)\n", .{
-            @as(c_int, @intCast(i + 1)),                      @as(c_int, @intCast(ctx_train.positive_entries.items.len)),
+            @as(c_int, @intCast(i + 1)),                   @as(c_int, @intCast(ctx_train.positive_entries.items.len)),
             (try tokensToStr(a, vocab, t.tokens_pos)).ptr, (try tokensToStr(a, vocab, t.tokens_neg)).ptr,
             @as(c_int, @intCast(t.max_seq_len)),
         });

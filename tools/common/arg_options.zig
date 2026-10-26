@@ -119,7 +119,7 @@ fn stoull(a: std.mem.Allocator, s: []const u8) !u64 {
     var end: ?[*:0]const u8 = null;
     std.c._errno().* = 0;
     const v = strtoull(z.ptr, &end, 10);
-    if (std.c._errno().* == @intFromEnum(std.c.E.RANGE)) return throwStr("stoull: out of range");
+    if (std.c._errno().* == @backingInt(std.c.E.RANGE)) return throwStr("stoull: out of range");
     if (end == z.ptr) return throwStr("stoull: no conversion");
     return v;
 }
@@ -203,17 +203,19 @@ fn samplerTypesFromNames(p: *Params, names: []const []const u8) !std.ArrayList(S
     const Entry = struct { []const u8, SamplerType };
     const map = [_]Entry{
         // canonical
-        .{ "dry", .dry },             .{ "top_k", .top_k },               .{ "top_p", .top_p },
-        .{ "top_n_sigma", .top_n_sigma }, .{ "typ_p", .typical_p },      .{ "min_p", .min_p },
-        .{ "temperature", .temperature }, .{ "xtc", .xtc },              .{ "infill", .infill },
-        .{ "penalties", .penalties }, .{ "adaptive_p", .adaptive_p },
+        .{ "dry", .dry },                 .{ "top_k", .top_k },           .{ "top_p", .top_p },
+        .{ "top_n_sigma", .top_n_sigma }, .{ "typ_p", .typical_p },       .{ "min_p", .min_p },
+        .{ "temperature", .temperature }, .{ "xtc", .xtc },               .{ "infill", .infill },
+        .{ "penalties", .penalties },     .{ "adaptive_p", .adaptive_p },
         // kebab-case and no-dash aliases of the names with an underscore
-        .{ "top-k", .top_k },         .{ "topk", .top_k },                .{ "top-p", .top_p },
-        .{ "topp", .top_p },          .{ "top-n-sigma", .top_n_sigma },   .{ "topnsigma", .top_n_sigma },
-        .{ "typ-p", .typical_p },     .{ "typp", .typical_p },            .{ "min-p", .min_p },
-        .{ "minp", .min_p },          .{ "adaptive-p", .adaptive_p },     .{ "adaptivep", .adaptive_p },
+        .{ "top-k", .top_k },
+        .{ "topk", .top_k },              .{ "top-p", .top_p },           .{ "topp", .top_p },
+        .{ "top-n-sigma", .top_n_sigma }, .{ "topnsigma", .top_n_sigma }, .{ "typ-p", .typical_p },
+        .{ "typp", .typical_p },          .{ "min-p", .min_p },           .{ "minp", .min_p },
+        .{ "adaptive-p", .adaptive_p },   .{ "adaptivep", .adaptive_p },
         // misc. aliases
-        .{ "nucleus", .top_p },       .{ "temp", .temperature },          .{ "typ", .typical_p },
+         .{ "nucleus", .top_p },
+        .{ "temp", .temperature },        .{ "typ", .typical_p },
     };
 
     var samplers: std.ArrayList(SamplerType) = .empty;
@@ -393,13 +395,20 @@ fn addPart1(ctx: *Context) !void {
         }
     }.f } });
     // arg.cpp:1635
-    try ctx.add((Arg{ .args = &.{ "-c", "--ctx-size" }, .value_hint = "N", .help = try ctx.fmt("size of the prompt context (default: %d, 0 = loaded from model)", .{p.n_ctx}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
-            q.n_ctx = value;
-            // disable context reduction in llama_params_fit if the user explicitly requests the full context size:
-            if (value == 0) q.fit_params_min_ctx = @bitCast(@as(u32, std.math.maxInt(u32)));
-        }
-    }.f } }).setEnv("LLAMA_ARG_CTX_SIZE"));
+    try ctx.add((Arg{
+        .args = &.{ "-c", "--ctx-size" },
+        .value_hint = "N",
+        .help = try ctx.fmt("size of the prompt context (default: %d, 0 = loaded from model)", .{p.n_ctx}),
+        .handler = .{
+            .int = struct {
+                fn f(q: *Params, value: c_int) !void {
+                    q.n_ctx = value;
+                    // disable context reduction in llama_params_fit if the user explicitly requests the full context size:
+                    if (value == 0) q.fit_params_min_ctx = @bitCast(@as(u32, std.math.maxInt(u32)));
+                }
+            }.f,
+        },
+    }).setEnv("LLAMA_ARG_CTX_SIZE"));
     // arg.cpp:1646
     try ctx.add((Arg{ .args = &.{ "-n", "--predict", "--n-predict" }, .value_hint = "N", .help = if (ex == .completion)
         try ctx.fmt("number of tokens to predict (default: %d, -1 = infinity, -2 = until context filled)", .{p.n_predict})
@@ -471,6 +480,12 @@ fn addPart1(ctx: *Context) !void {
             q.prompt = try arg.dupe(q, value);
         }
     }.f } }).setExcludes(&.{.server}));
+    // arg.cpp:1765
+    try ctx.add((Arg{ .args = &.{ "-sys", "--system-prompt" }, .value_hint = "PROMPT", .help = "system prompt to use with model (if applicable, depending on chat template)", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            q.system_prompt = try arg.dupe(q, value);
+        }
+    }.f } }).setExamples(&.{ .completion, .cli, .diffusion, .mtmd }));
     // arg.cpp:1772
     try ctx.add((Arg{ .args = &.{"--perf"}, .args_neg = &.{"--no-perf"}, .help = try ctx.fmt("whether to enable internal libllama performance timings (default: %s)", .{tf(p.no_perf)}), .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {
@@ -479,15 +494,22 @@ fn addPart1(ctx: *Context) !void {
         }
     }.f } }).setEnv("LLAMA_ARG_PERF"));
     // arg.cpp:1789
-    try ctx.add((Arg{ .args = &.{ "-f", "--file" }, .value_hint = "FNAME", .help = "a file containing the prompt (default: none)", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            var prompt = try readFile(q, value);
-            // store the external file name in params
-            q.prompt_file = try arg.dupe(q, value);
-            if (prompt.len != 0 and prompt[prompt.len - 1] == '\n') prompt = prompt[0 .. prompt.len - 1];
-            q.prompt = prompt;
-        }
-    }.f } }).setExcludes(&.{.server}));
+    try ctx.add((Arg{
+        .args = &.{ "-f", "--file" },
+        .value_hint = "FNAME",
+        .help = "a file containing the prompt (default: none)",
+        .handler = .{
+            .string = struct {
+                fn f(q: *Params, value: S) !void {
+                    var prompt = try readFile(q, value);
+                    // store the external file name in params
+                    q.prompt_file = try arg.dupe(q, value);
+                    if (prompt.len != 0 and prompt[prompt.len - 1] == '\n') prompt = prompt[0 .. prompt.len - 1];
+                    q.prompt = prompt;
+                }
+            }.f,
+        },
+    }).setExcludes(&.{.server}));
     // arg.cpp:1811
     try ctx.add((Arg{ .args = &.{"--in-file"}, .value_hint = "FNAME", .help = "an input file (use comma-separated values to specify multiple files)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -500,16 +522,23 @@ fn addPart1(ctx: *Context) !void {
         }
     }.f } }).setExamples(&.{.imatrix}));
     // arg.cpp:1824
-    try ctx.add((Arg{ .args = &.{ "-bf", "--binary-file" }, .value_hint = "FNAME", .help = "binary file containing the prompt (default: none)", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            const file = std.c.fopen(value.ptr, "rb") orelse return throw("error: failed to open file '%s'\n", .{value.ptr});
-            _ = std.c.fclose(file);
-            // store the external file name in params
-            q.prompt_file = try arg.dupe(q, value);
-            q.prompt = try readFile(q, value);
-            io.eprintf("Read %zu bytes from binary file %s\n", .{ q.prompt.len, value.ptr });
-        }
-    }.f } }).setExcludes(&.{.server}));
+    try ctx.add((Arg{
+        .args = &.{ "-bf", "--binary-file" },
+        .value_hint = "FNAME",
+        .help = "binary file containing the prompt (default: none)",
+        .handler = .{
+            .string = struct {
+                fn f(q: *Params, value: S) !void {
+                    const file = std.c.fopen(value.ptr, "rb") orelse return throw("error: failed to open file '%s'\n", .{value.ptr});
+                    _ = std.c.fclose(file);
+                    // store the external file name in params
+                    q.prompt_file = try arg.dupe(q, value);
+                    q.prompt = try readFile(q, value);
+                    io.eprintf("Read %zu bytes from binary file %s\n", .{ q.prompt.len, value.ptr });
+                }
+            }.f,
+        },
+    }).setExcludes(&.{.server}));
     // arg.cpp:1840
     try ctx.add(.{ .args = &.{ "-e", "--escape" }, .args_neg = &.{"--no-escape"}, .help = try ctx.fmt("whether to process escapes sequences (\\n, \\r, \\t, \\', \\\", \\\\) (default: %s)", .{tf(p.escape)}), .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {

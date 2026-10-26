@@ -1,0 +1,14 @@
+#!/bin/bash
+# Diff every image preprocessor of src/mtmd/image.zig against upstream's
+# llama.cpp/tools/mtmd/mtmd-image.cpp, compiled unmodified beside it, in one
+# process: every output float's bits, the grid, the overview, the anyres
+# info and every log line (harness/mtmd_image_diff.zig).
+#
+# Usage: scripts/mtmd-image-diff [kind-substring] [-v]
+#   MTMD_IMAGE_O=fast|safe   build mode, ReleaseFast by default; run it as
+#                            safe too, where Zig checks for undefined
+#                            behaviour the fast build cannot see
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+exec zig build mtmd-image-diff --release="${MTMD_IMAGE_O:-fast}" -- "$@"

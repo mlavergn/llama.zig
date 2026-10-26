@@ -1,0 +1,82 @@
+# llama-mtmd-cli against upstream's: scripts/tools-diff mtmd-cli.
+# Text models and mmprojs are scripts/gen-mmproj-fixtures's random pairs;
+# they carry no chat template, so every run names one (the legacy,
+# non-Jinja path this tool defaults to). Single turns at --temp 0, then the
+# REPL on scripted stdin -- each script ends in /quit, because upstream's
+# REPL spins on an empty line at end of input. Timings and log timestamps
+# differ run to run.
+!mask s/^[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} /T /
+!mask s/[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} ([IWED]) /T \1 /g
+!mask /^(T . )?ggml_metal_/d
+!mask s/ in [0-9]+ ms/ in X ms/
+!mask s/reserve took [0-9.]+ ms/reserve took X ms/
+!mask s/took [0-9.]+ seconds/took X seconds/
+!mask s/= +[0-9.]+ ms/= X ms/
+!mask s/\( *[0-9.]+ ms per token, +[0-9.inf]+ tokens per second\)/(X)/
+!mask s/^[A-Za-z0-9_.\/-]+:[0-9]+: terminating due to uncaught/libc++abi: terminating due to uncaught/
+!mask /^[0-9]+ +[A-Za-z_.-]+ +0x[0-9a-f]+ /d
+!mask s/^llama\.cpp\/([a-z-]+\/)*//
+
+--help
+--version
+--bogus
+--image
+-sys
+
+# what main refuses
+-m $MM/text-qwen3.gguf
+-m $MM/text-qwen3.gguf -mm /nonexistent/mmproj.gguf --chat-template chatml -p x --image x.png
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p x --image $DATA/tone16k.wav
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf --chat-template chatml -p x --image x.png
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image /nonexistent.png --chat-template chatml -n 4 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $DATA/tone16k.wav --chat-template chatml -n 4 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/qwen3a.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "x" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template nosuchtemplate -n 4 --temp 0
+
+# one turn, one image, across preprocessors: fixed size, llava-uhd slices
+# with their tokens, idefics3's row/col template, lfm2 tiles, M-RoPE
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/mlp.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/idefics3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/lfm2.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0 -c 8192
+-m $MM/text-qwen3.gguf -mm $MM/internvl.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/pixtral.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0 -c 2048
+-m $MM/text-qwen2vl.gguf -mm $MM/qwen2vl_merger.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0 -c 2048
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "<__media__> first, then <__media__> second" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg,$MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 8 --temp 0
+
+# sampling and templates: the default temperature 0.2 with a seed, a
+# system prompt, vicuna's antiprompt, other built-in families
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 16 --seed 3
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -sys "be brief" -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template vicuna -n 24 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template deepseek -n 24 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template llama3 -n 12 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template "<|im_start|>{{ messages }}" -n 12 --temp 0
+
+# the prompt itself, through the debug log (`formatted_chat.prompt`), and
+# the token counts --perf reports: the random fixtures answer much the same
+# whatever they are asked, so output alone cannot see a misformatted turn
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -sys "be brief" -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0 --perf -lv 5
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template vicuna -n 24 --temp 0 --perf -lv 5
+
+# one turn of audio: whisper, qwen3a, and a model with both
+-m $MM/text-qwen3.gguf -mm $MM/qwen2a.gguf -p "transcribe" --audio $DATA/tone16k.wav --chat-template chatml -n 12 --temp 0 -c 2048
+-m $MM/text-qwen3.gguf -mm $MM/qwen3a.gguf -p "transcribe" --audio $DATA/tone44k.wav --chat-template chatml -n 12 --temp 0
+-m $MM/text-qwen2vl.gguf -mm $MM/qwen2.5o.gguf -p "<__media__> and <__media__>" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --audio $DATA/tone16k.wav --chat-template chatml -n 12 --temp 0 -c 8192
+
+# the conversation, with a terminal for the console to echo to
+!tty on
+!stdin $DATA/repl-image.txt
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf --chat-template chatml -n 10 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf --chat-template chatml -sys "system text" -n 10 --temp 0
+!stdin $DATA/repl-two.txt
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf --chat-template chatml -n 10 --temp 0 --perf -lv 5
+!stdin $DATA/repl-audio.txt
+-m $MM/text-qwen3.gguf -mm $MM/qwen2a.gguf --chat-template chatml -n 10 --temp 0 -c 2048
+!stdin $DATA/repl-errors.txt
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf --chat-template chatml -n 6 --temp 0
+!stdin $DATA/repl-edit.txt
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf --chat-template chatml -n 6 --temp 0 --perf -lv 5
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf --chat-template chatml -n 6 --temp 0 --simple-io
+!stdin
+!tty off

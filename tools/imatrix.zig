@@ -1096,8 +1096,14 @@ fn showStatistics(a: std.mem.Allocator, params: *const Params) !bool {
 
     log.inf("\nComputing statistics for %s (%d tensors)\n", .{ in0.ptr, @as(c_int, @intCast(ts.items.len)) });
     log.inf("\n%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", .{
-        " Layer",   "       Tensor", "          Σ(Act²)", "  Min",      "            Max", "           μ", "   σ",
-        " % Active", "N",            "   Entropy",       "E (norm)", "ZD",             "  CosSim",
+        " Layer",     "       Tensor",
+        "          Σ(Act²)",
+        "  Min",      "            Max",
+        "           μ",
+        "   σ",
+        " % Active",  "N",
+        "   Entropy", "E (norm)",
+        "ZD",         "  CosSim",
     });
     log.inf("=============================================================================================================" ++
         "============================================================\n", .{});
@@ -1117,13 +1123,13 @@ fn showStatistics(a: std.mem.Allocator, params: *const Params) !bool {
             0.0;
 
         log.inf("%5.*s\t%-20.*s\t%10.2f\t%8.4f\t%11.4f\t%6.2f\t%6.2f\t%8.2f%%\t%6d\t%10.4f\t%6.2f%%\t%10.2f%%\t%8.4f\n", .{
-            @as(c_int, @intCast(layer.len)),  layer.ptr,
-            @as(c_int, @intCast(name.len)),   name.ptr,
-            @as(f64, tstat.total_sqract),     @as(f64, tstat.min_sqract),
-            @as(f64, tstat.max_sqract),       @as(f64, tstat.mean_sqract),
-            @as(f64, tstat.stddev),           @as(f64, tstat.active * 100.0),
-            tstat.elements,                   @as(f64, tstat.entropy),
-            @as(f64, entropy_norm),           @as(f64, 100.0 * tstat.zd),
+            @as(c_int, @intCast(layer.len)), layer.ptr,
+            @as(c_int, @intCast(name.len)),  name.ptr,
+            @as(f64, tstat.total_sqract),    @as(f64, tstat.min_sqract),
+            @as(f64, tstat.max_sqract),      @as(f64, tstat.mean_sqract),
+            @as(f64, tstat.stddev),          @as(f64, tstat.active * 100.0),
+            tstat.elements,                  @as(f64, tstat.entropy),
+            @as(f64, entropy_norm),          @as(f64, 100.0 * tstat.zd),
             @as(f64, tstat.cossim),
         });
 

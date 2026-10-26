@@ -52,6 +52,16 @@ GGUF and `llama-cli` never writes one.
 `llama-bench`, each a Zig port named as upstream names it, with upstream's
 command line and output. Five of them write GGUF.
 
+**Also in: libmtmd, `llama-tts` and `llama-mtmd-cli` (`PLAN.md`, Decision
+62).** Upstream's multimodal library, `tools/mtmd/`, every projector type
+-- the vision and audio encoders, the image and audio preprocessors, the
+image and audio decoders it compiles in, and the text-to-speech pipelines
+-- ported to Zig as the `mtmd` module, whose C contract is `mtmd.h` and
+`mtmd-helper.h` (82 functions, `src/mtmd/exports.zig`). `llama-tts` and
+`llama-mtmd-cli` are Zig ports over it with upstream's command line and
+output. Video input is not built, as the reference builds none
+(`MTMD_VIDEO`); `llama-cli` itself takes no media.
+
 ## 3. Library: ggml
 
 ### 3.1 What is Zig
@@ -445,7 +455,7 @@ locatable in this port.
 | Mirostat, typical-p, XTC, DRY, dynatemp | Not built; the flags are refused. |
 | Frequency and presence penalties | Fixed at 0.0; the flags are refused. |
 | LoRA, control vectors, speculative decoding | Not built; the flags are refused. |
-| Multimodal input | Not built. |
+| Multimodal input in `llama-cli` | Not built: `llama-cli` takes no media. libmtmd and `llama-mtmd-cli` are ported (§2), video input excepted. |
 | Writing or converting model files | Out of scope. |
 | AVX512-BF16 and AVX512-FP16 kernels | Not built: a CPU with either is a compile error until they are gated on hardware that has them. AVX-512 itself -- `x86_64_v4`, and `tigerlake`'s VNNI -- is built and gated. |
 | SYCL, HIP and other GPU backends | Not built. |

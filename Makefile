@@ -131,7 +131,7 @@ dist:
 # Run every check that needs no model or reference build.
 validate:
 	@printf '\n== formatting ==\n'
-	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig src/ggml/cpu/repack/*.zig src/ggml/cpu/repack/arm/*.zig src/ggml/metal/*.zig src/ggml/cuda/*.zig src/llama/*.zig src/llama/api/*.zig src/llama/models/*.zig src/llama/sampler/*.zig src/llama/grammar/*.zig src/llama/vocab/*.zig cli/*.zig
+	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig src/ggml/cpu/repack/*.zig src/ggml/cpu/repack/arm/*.zig src/ggml/metal/*.zig src/ggml/cuda/*.zig src/llama/*.zig src/llama/api/*.zig src/llama/models/*.zig src/llama/sampler/*.zig src/llama/grammar/*.zig src/llama/vocab/*.zig src/mtmd/*.zig src/mtmd/models/*.zig src/mtmd/vendor/*.zig cli/*.zig tools/*.zig tools/common/*.zig
 	@printf '\n== scaffold ==\n'
 	zig build
 	@printf '\n== unit tests ==\n'
@@ -142,6 +142,8 @@ validate:
 	zig build test-port --release=fast --summary all
 	@printf '\n== ported libllama (debug) ==\n'
 	zig build test-llama --summary all
+	@printf '\n== ported libmtmd (debug) ==\n'
+	zig build test-mtmd --summary all
 	@printf '\n== libc++ algorithms vs the SDK templates ==\n'
 	./scripts/libcxx-diff
 	@printf '\n== std::regex vs libc++ ==\n'
@@ -163,6 +165,9 @@ validate:
 	./scripts/api-diff
 	@printf '\n== ported symbol coverage ==\n'
 	./scripts/port-coverage
+	@printf '\n== libmtmd exports ==\n'
+	zig build mtmd-ref --release=fast
+	./scripts/mtmd-exports
 	@printf '\n== the libraries for iOS (no std.debug.print or @panic in library code) ==\n'
 	@# Zig 0.17 cannot compile std.Io.Threaded for iOS, which std.debug.print
 	@# reaches; nothing else would notice until the xcframework next builds.
@@ -487,12 +492,42 @@ fit-diff:
 	zig build reference --release=fast
 	./scripts/fit-diff $(ARGS)
 
-# Upstream's other tools (PLAN.md, Decision 61): each of our ten ports run
+# Upstream's other tools (PLAN.md, Decisions 61 and 62): each of our twelve ports run
 # beside upstream's own binary on harness/tools/<tool>.cases, stdout,
 # stderr, exit code and every file written compared. TOOL=<name> runs one.
-TOOLS ?= gguf-split quantize tokenize fit-params export-lora batched-bench cvector-generator imatrix perplexity bench
+TOOLS ?= gguf-split quantize tokenize fit-params export-lora batched-bench cvector-generator imatrix perplexity bench tts mtmd-cli
 tools-diff:
 	@set -e; for t in $(if $(TOOL),$(TOOL),$(TOOLS)); do ./scripts/tools-diff $$t; done
+
+# libmtmd (Stage 8, PLAN.md Decision 62). mmproj-fixtures writes one small
+# random mmproj per projector type and checks each through upstream's
+# libmtmd; the gates compare the port against it.
+.PHONY: mmproj-fixtures mtmd-diff mtmd-exports mtmd-image-diff mtmd-audio-diff mtmd-decode-diff mtmd-gates
+mmproj-fixtures:
+	./scripts/gen-mmproj-fixtures $(ARGS)
+
+# libmtmd through mtmd.h and mtmd-helper.h, port against upstream, on every
+# fixture: logs, every encoder node, chunks, embeddings and logits on bits,
+# TTS output. DEVS=cpu|gpu|both, FILTER=<projector substring>.
+mtmd-diff:
+	zig build reference mtmd-ref --release=fast
+	./scripts/mtmd-diff $(if $(DEVS),$(DEVS),both) $(FILTER)
+
+# The 82 mtmd_* exports, equal to the reference's.
+mtmd-exports:
+	zig build mtmd-ref --release=fast
+	./scripts/mtmd-exports
+
+# The image and audio preprocessors and the vendored decoders, each against
+# upstream's translation unit compiled unmodified, in one process.
+mtmd-image-diff:
+	./scripts/mtmd-image-diff $(ARGS)
+mtmd-audio-diff:
+	./scripts/mtmd-audio-diff $(ARGS)
+mtmd-decode-diff:
+	./scripts/mtmd-decode-diff $(ARGS)
+
+mtmd-gates: mtmd-exports mtmd-image-diff mtmd-audio-diff mtmd-decode-diff mtmd-diff
 
 # Run upstream's test-backend-ops against the ported ggml.
 backend-ops:

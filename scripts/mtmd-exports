@@ -1,0 +1,44 @@
+#!/bin/bash
+# libmtmd's C contract: the port's exports must be exactly the reference's
+# `mtmd_*` exports -- mtmd.h and mtmd-helper.h, 82 functions.
+#
+# The port is compiled at its library root, src/mtmd/module.zig (which
+# imports exports.zig), with its `llama` import pointed at
+# src/llama/harness_root.zig, so libllama's own exports stay out of the
+# object and only libmtmd's are listed. The reference archive also exports
+# the vendored stb_image, xxHash and SHA-256 entry points and two logger
+# globals; no caller of libmtmd links against them, and they are not part
+# of the contract.
+#
+# Usage: scripts/mtmd-exports
+#   Requires: zig build mtmd-ref --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+REF=zig-out/lib/libmtmd-ref.a
+[ -f "$REF" ] || { echo "missing $REF -- run 'zig build mtmd-ref --release=fast'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+zig build-obj -mcpu baseline -femit-bin="$tmp/mtmd.o" -OReleaseFast -lc \
+    --dep llama=harness_root -Mroot=src/mtmd/module.zig \
+    --dep llama_c -Mharness_root=src/llama/harness_root.zig \
+    -Mllama_c="$tmp/llama_c.zig" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the port" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+syms() { nm -gU "$1" 2>/dev/null | awk '$2 ~ /^[TD]$/ {print $3}' | sed 's/^_//' | grep '^mtmd_' | sort -u; }
+syms "$REF" >"$tmp/ref"
+syms "$tmp/mtmd.o" >"$tmp/port"
+n_ref=$(wc -l <"$tmp/ref" | tr -d ' ')
+n_port=$(wc -l <"$tmp/port" | tr -d ' ')
+if cmp -s "$tmp/ref" "$tmp/port"; then
+    echo "mtmd-exports: $n_port / $n_ref mtmd_* symbols, identical"
+else
+    echo "mtmd-exports: FAIL ($n_port port, $n_ref reference)"
+    echo "only in the reference:"; comm -23 "$tmp/ref" "$tmp/port" | sed 's/^/  /'
+    echo "only in the port:"; comm -13 "$tmp/ref" "$tmp/port" | sed 's/^/  /'
+    exit 1
+fi

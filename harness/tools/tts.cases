@@ -1,0 +1,51 @@
+# llama-tts against upstream's: scripts/tools-diff tts.
+# The backbones and mmprojs are scripts/gen-mmproj-fixtures's: random
+# Qwen3-TTS and pocket-tts pipelines; every run writes a WAV, whose hash is
+# compared. --help holds the whole of common_params_parse's table for this
+# example. Timings and log timestamps differ run to run.
+!mask s/^[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} /T /
+!mask s/[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} ([IWED]) /T \1 /g
+!mask /^(T . )?ggml_metal_/d
+!mask /frames generated: [0-9]+, speed/d
+!mask s/(prompt eval|generation|vocoder|total) [0-9.]+s/\1 Xs/g
+!mask s/audio time = [0-9.]+x process time/audio time = Xx process time/
+!mask s/reserve took [0-9.]+ ms/reserve took X ms/
+!mask s/took [0-9.]+ seconds/took X seconds/
+!mask s/^[A-Za-z0-9_.\/-]+:[0-9]+: terminating due to uncaught/libc++abi: terminating due to uncaught/
+
+--help
+--usage
+--version
+--bogus
+--tts-lang
+--tts-speaker-file
+
+# what main refuses before loading anything
+-m $MM/text-qwen3tts.gguf
+-m $MM/text-qwen3tts.gguf -p "hello"
+-m $MM/text-qwen3tts.gguf -mm /nonexistent/mmproj.gguf -p "hello"
+-m $MM/text-qwen3tts.gguf -mm $MM/gemma3.gguf -p "hello"
+
+# Qwen3-TTS: languages, seeds, lengths, an output name, a speaker
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "hello world" -n 8 --seed 42
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "hello world" -n 8 --seed 43 -o other.wav
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "bonjour tout le monde" -n 20 --seed 1 --tts-lang fr
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "x" -n 4 --seed 1 --tts-lang klingon
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "a longer prompt that runs for a while" -n 90 --seed 5 --top-k 5 --top-p 0.9
+# a strong repeat penalty, so the sampler's accepted history decides tokens
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "penalised" -n 40 --seed 4 --repeat-penalty 4 --repeat-last-n 64 --temp 1.5 -o penalised.wav
+# no -n: the tool's own cap of 512 frames, unless end-of-speech comes first
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "uncapped" --seed 9 -o uncapped.wav -c 1024
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file $DATA/tone16k.wav
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file $DATA/tone44k.wav
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file /nonexistent.wav
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "cpu" -n 6 --seed 3 --no-mmproj-offload
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "cpu" -n 6 --seed 3 -ngl 0
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "unwritable" -n 2 --seed 3 -o /nonexistent/dir/out.wav
+
+# pocket-tts: chunking, the end-of-speech head, the pack settings fallback
+-m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "hello there, how are you" -n 12 --seed 7
+-m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "hello there, how are you" -n 12 --seed 7 --no-mmproj-offload -ngl 0
+-m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "one two. three four five; six seven eight nine ten eleven twelve thirteen fourteen fifteen. sixteen seventeen eighteen nineteen twenty, twenty one twenty two twenty three twenty four twenty five twenty six. end" -n 60 --seed 11
+-m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "voice" -n 6 --seed 2 --tts-speaker-file $DATA/tone16k.wav
+-m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "   " -n 6 --seed 2

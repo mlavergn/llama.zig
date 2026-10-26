@@ -1,0 +1,43 @@
+#!/bin/bash
+# Write one small random mmproj per mtmd projector type, the text models
+# they load against, and check every one through upstream's libmtmd.
+#
+# No mmproj exists on this machine and upstream ships no generator, so
+# `harness/mmproj_fixtures.cpp` writes each from the keys and tensor shapes
+# `llama.cpp/tools/mtmd/clip.cpp` reads for that type (`load_hparams`,
+# `load_tensors`, `clip_n_mmproj_embd`) and its graph under `models/`. The
+# text models are `scripts/gen-arch-fixtures`' models with an SPM vocabulary
+# written in, so prompts tokenize and every token mtmd looks up resolves.
+#
+# `check` loads each manifest line through `libmtmd-ref` + `libllama-ref`
+# in a child process, encodes every image size (non-square and sliced ones
+# included) and audio clip it lists -- or, for the two TTS types, runs the
+# gen-audio pipeline a few steps -- and requires output that is finite and
+# not all zero, on the CPU and on the GPU. An upstream abort is a result,
+# not the end of the run. It is the precondition for the mtmd gates: a
+# fixture the reference itself cannot run proves nothing about the port.
+#
+# Output: zig-out/mmproj-fixtures/<projector>.gguf, text-<arch>.gguf, and
+# manifest.txt, one fixture per line, tab-separated:
+#   projector  mmproj-path  text-model-path  modality  inputs
+#
+# Usage: scripts/gen-mmproj-fixtures [cpu|gpu|both] [type-filter]
+#   Default both. A filter regenerates and checks only matching types (and
+#   writes a manifest of just those).
+# Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+DEVS="${1:-both}"
+FILTER="${2:-}"
+ARCH=zig-out/arch-fixtures
+OUT=zig-out/mmproj-fixtures
+
+if [ ! -f "$ARCH/qwen3-dense.gguf" ]; then
+    scripts/gen-arch-fixtures "$ARCH" || exit 2
+fi
+zig build mmproj-fixtures --release=fast || { echo "build failed" >&2; exit 2; }
+mkdir -p "$OUT"
+zig-out/bin/mmproj-fixtures gen "$ARCH" "$OUT" $FILTER || exit 2
+zig-out/bin/mmproj-fixtures check "$OUT/manifest.txt" "$DEVS" $FILTER

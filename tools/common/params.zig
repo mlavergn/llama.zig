@@ -183,6 +183,7 @@ pub const Sampling = struct {
     samplers: std.ArrayList(SamplerType) = .empty,
     grammar_type: GrammarType = .none,
     grammar: []const u8 = "",
+    grammar_lazy: bool = false,
     logit_bias: std.ArrayList(c.llama_logit_bias) = .empty,
     backend_sampling: bool = false,
 };
@@ -311,6 +312,16 @@ pub const Params = struct {
     mmproj_device: c.ggml_backend_dev_t = null, // GPU device to use for multimodal model
     image_min_tokens: c_int = -1,
     image_max_tokens: c_int = -1,
+    no_mmproj: bool = false, // explicitly disable multimodal model
+    image: std.ArrayList([]const u8) = .empty, // path to image file(s)
+
+    system_prompt: []const u8 = "",
+    simple_io: bool = false, // improves compatibility with subprocesses and limited consoles
+    chat_template: []const u8 = "",
+    use_jinja: bool = true,
+
+    tts_lang: []const u8 = "",
+    tts_speaker_file: []const u8 = "",
 
     embedding: bool = false, // get only sentence embedding
 
@@ -355,8 +366,8 @@ pub const Params = struct {
         var p: Params = .{ .arena = arena };
         try p.sampling.dry_sequence_breakers.appendSlice(arena, &.{ "\n", ":", "\"", "*" });
         try p.sampling.samplers.appendSlice(arena, &.{
-            .penalties, .dry,         .top_n_sigma, .top_k, .typical_p,
-            .top_p,     .min_p,       .xtc,         .temperature,
+            .penalties, .dry,   .top_n_sigma, .top_k,       .typical_p,
+            .top_p,     .min_p, .xtc,         .temperature,
         });
         try p.fit_params_target.appendNTimes(arena, 1024 * 1024 * 1024, c.llama_max_devices());
         return p;

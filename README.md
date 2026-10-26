@@ -120,6 +120,16 @@ repository is a bit-exact diff against a locally-built reference, and none
 of them can run on the Apple Silicon machine this port is developed on.
 `PLAN.md` "Stage 6 — CUDA" has the measurement and the options.
 
+### 8. libmtmd and text-to-speech — *done*
+
+Upstream's multimodal library, `tools/mtmd/` — vision and audio encoders for
+all 60 projector types, the image and audio preprocessors, the decoders it
+compiles in, and the text-to-speech pipelines — as Zig in `src/mtmd/`, with
+`llama-tts` and `llama-mtmd-cli` over it. No mmproj file was at hand, so
+every projector type is gated on a small random fixture through the C API,
+every encoder node and output bit against upstream's library
+(`PLAN.md`, Decision 62).
+
 ## Getting started
 
 Requires **Zig 0.17.0**.
@@ -166,6 +176,7 @@ it in one process.
 | `ggml/src/*.cpp` | ported, swapped — `ggml-backend-meta.cpp` and `ggml-opt.cpp` last; `ggml.cpp` dropped |
 | `ggml/src/ggml-metal/` C++ | ported, swapped; the two `.m` files stay |
 | libllama | ported, swapped at `llama.h` — 240 / 240 C exports; every architecture upstream maps, 146 |
+| libmtmd (`tools/mtmd/`) | ported — 82 / 82 C exports, all 60 projector types; `llama-tts` and `llama-mtmd-cli` over it |
 
 Every architecture in upstream's `llama_model_mapping` is ported, one file
 per upstream `models/*.cpp` under `src/llama/models/`. Qwen3.5 is gated on
@@ -211,6 +222,7 @@ others, and each negative-tested by injecting a fault and confirming it fails:
 | `make fit-diff` | `--fit` vs upstream's `common_fit_params`: the context, layers, split and overrides it leaves and every line it logs, on fake GPUs with chosen memory, the CPU alone and Metal, every arm reached |
 | `make blas-diff` | The BLAS backend (Apple, over Accelerate) vs upstream's `ggml-blas.cpp` in one process: every vtable answer, `supports_op` swept, every type's multiply on bits |
 | `make blas-node-diff` | A decode with BLAS in the scheduler, node by node and fused, ported vs upstream BLAS; a build without BLAS must differ, or BLAS never ran |
+| `make mtmd-diff` | libmtmd through `mtmd.h` vs upstream's on a fixture per projector type: every log line, encoder node, chunk and embedding on bits, CPU and Metal, per node and fused; with `mtmd-image-diff`, `mtmd-audio-diff`, `mtmd-decode-diff` and `mtmd-exports` beside it |
 | `make backend-ops` | 21,093 op configurations, Metal against CPU |
 | `make probe` | proves ported code is on the execution path at all — allocator and CPU dispatch, one run each |
 | `make parity-port` / `parity-port-cpu` | tokens, ported libraries vs stock, one driver — on Metal, or on the CPU alone |

@@ -447,7 +447,7 @@ const ReadDevice = struct {
             // entry, which terminates.
             const mbuf_cur = self.mbufs.find(e.buft) orelse impl.abort("llama-context.cpp", 2885, "map::at:  key not found");
             if (mbuf_cur.buf == null or mbuf_cur.n_tensors != e.mbuf.n_tensors or mbuf_cur.total_size != e.mbuf.total_size) {
-                c.ggml_abort("llama-context.cpp", 2888, "%s: memory buffer mismatch\n", "~llama_io_read_device");
+                c.ggml_abort("llama-context.cpp", 2891, "%s: memory buffer mismatch\n", "~llama_io_read_device");
             }
             for (mbuf_cur.cpy.items, 0..) |cpy, i| c.ggml_backend_tensor_copy(cpy, e.mbuf.org.items[i]);
         }

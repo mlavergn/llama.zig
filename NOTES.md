@@ -7355,3 +7355,282 @@ decodes random tokens, so the arch fixtures run without a vocabulary. `-hf`
 is not a case: upstream downloads, and on the reference build fails on its
 missing HTTPS; no downloader is ported, and the port prints only the final
 error.
+
+## Stage 8: libmtmd and `llama-tts`
+
+`tools/mtmd/` is upstream's multimodal library: the CLIP-style vision and
+audio encoders (`clip.cpp` and 43 graph files under `models/`), the image
+and audio preprocessors, the public `mtmd.h` API that turns a prompt with
+media markers into text and embedding chunks, and the helpers -- loading a
+bitmap from a file, evaluating chunks into a llama context, and the two
+text-to-speech pipelines `llama-tts` drives. 17,399 lines of C++ outside
+the graphs and 8,292 in them, plus the stb_image, miniaudio and SHA-256 code
+`mtmd-helper.cpp` compiles in. The port is `src/mtmd/`: 16,262 lines, 8,847
+of them graphs, and 6,085 in `vendor/`. `PLAN.md`, Decision 62.
+
+### How it was split
+
+`clip.cpp` is one 6,000-line file built around four `switch`es over the 60
+projector types -- `load_hparams`, `load_tensors`, `clip_encode`'s inputs
+and `clip_n_output_tokens` -- and a class hierarchy of graph builders. The
+core (`clip.zig`: the context, the loader, encode) was written first with
+each switch behind a stub of fixed signature, so the four switches
+(`arms_hparams.zig`, `arms_tensors.zig`, `arms_inputs.zig`) and three
+groups of graphs could be ported in parallel without touching one file
+twice. The hierarchy flattens: `graph.Graph` is the `clip_graph` base, each
+model file exposes `build(g, params)`, a virtual `build_mm` override is a
+function pointer (`mm_hook`), and `support_batch` is a table.
+`std::function` arguments are a function pointer and a context. A throw is
+`clip.throwErr`, which records `what()` and returns `error.Runtime`; the C
+API's `catch` blocks log it exactly as upstream does.
+
+`mtmd.zig`, `helper.zig` and `helper_gen.zig` hold every `mtmd_*` and
+`mtmd_helper_*` function as a `pub fn ... callconv(.c)` with no export;
+`exports.zig` exports all 82, and `harness_root.zig` re-exports the port
+without them -- libllama's pattern. libmtmd reaches libllama through the
+port's `api`, never the C symbols, so the same code runs beside upstream's
+libmtmd and `libllama-ref.a` in one process. `mtmd.h`'s structs are declared
+by hand (a second import of `llama.h` would give a second `*llama_model`),
+and `mtmd-diff` checks each against the C at compile time, field by field.
+
+`llama_model_get_tok_embd` was missing from libllama's port: it is in
+`llama-ext.h`, C++ linkage, so the 240-symbol `nm` comparison could not see
+it, and nothing called it before `mtmd-helper-gen.cpp`. It is now in
+`api/model.zig`, unexported like the other eleven `llama-ext.h` entries.
+
+### The vendored decoders
+
+stb_image and miniaudio are single-header C libraries upstream compiles
+into `mtmd-helper.cpp`. Linking them as C would put C back into the
+binary; they are ported to Zig in `src/mtmd/vendor/`, as far as
+`mtmd-helper.cpp` reaches them -- `stbi_load_from_memory` with every default
+format, and `ma_decoder` over WAV, MP3 and FLAC with its mono mixdown,
+linear resampler and filter -- and gated by `make mtmd-decode-diff`, which
+compiles the headers unmodified, as C++17 with the helper's defines, and
+diffs on bits over synthesized, encoder-made (`sips`, ImageIO, `afconvert`),
+truncated and corrupted media. The SHA-256 bitmap id is `std.crypto`'s,
+checked against `vendor/hash` by `mtmd-diff`'s bitmap ids.
+
+Four things shaped it:
+
+- **miniaudio tries each backend twice.** `ma_decoder_init_memory` runs
+  every decoder over its own memory stream, whose out-of-range seek fails,
+  and when all fail retries them through the decoder's callbacks, whose
+  seek clamps -- a file one rejects the other can accept. `audio_io.zig` is
+  one stream type with both modes, and the read loops are ported as loops:
+  MS-ADPCM yields more frames on a second call.
+- **dr_mp3 on aarch64 is NEON**, and `vmlaq_f32` fuses where
+  `vaddq(vmulq)` does not; the decoder struct mirrors the C's layout,
+  because the Huffman reader over-reads into it.
+- **The whole-file diff could only say which sample differed.** A
+  frame-by-frame diff of the decoder state found the one real bug, a
+  `u1 + u1` overflow in the MP3 scalefactor partition lookup that changed
+  decoded samples.
+- **Two injections escaped until sweeps were added** -- an unfused term in
+  the MP3 synthesis and `<` for `<=` in the resampled length -- and a
+  synthesis-rounding sweep and a resampled-length sweep now catch both.
+  9 of 10 caught; the tenth, 24-bit WAV scaling done in `f32`, cannot change
+  a value.
+
+The vendored code's own undefined behaviour is recorded, not reproduced:
+a truncated PIC makes stb pass a null buffer to `stbi__convert_format`,
+and at the helper's `req_comp` of 3 **upstream crashes** -- the harness runs
+those in a forked child and the port returns a failure; stb leaves
+uninitialized memory a corrupt file can expose (JPEG component planes, TGA
+rows, BMP palette entries past the parsed size, the HDR flat loop's pixel on
+a short read), where the reference is built over `calloc` and the port
+zeroes, and those cases compare outcome and size but not pixels; dr_mp3 can
+read past its main-data buffer and its Xing/LAME parse past the input; and a
+WAV claiming an enormous frame count makes upstream's `vector::resize`
+throw, where the port returns false. With FLAC, 999 files and their
+damaged copies: 131,726 image checks and 542,841 audio checks, 0 differing,
+ReleaseFast and ReleaseSafe; 772 inputs crash the reference (run in a forked
+child) and 482 are unspecified (compared on outcome and size).
+
+**FLAC came last, native and Ogg.** Ogg-FLAC is reachable from the helper
+although its sniff looks for `fLaC`: the sniff also accepts an ID3 prefix,
+dr_wav refuses the file, and dr_flac skips the tag and accepts `OggS`. The
+gate's FLAC corpus is `afconvert`'s (16- and 24-bit, mono to eight
+channels, at rates that resample) and a FLAC/Ogg encoder in the harness that
+writes every subframe type, LPC to order 32, both rice codings, escapes,
+wasted bits, all four stereo assignments, 4- to 32-bit samples, odd and
+variable block sizes, every sample-rate code, seek tables, and on the Ogg
+side random page splits, a foreign stream and a bad-CRC page: 21,564 checks,
+15,557 decoded on both sides. dr_flac's NEON residual decoder is
+integer-equal to the scalar one, but its stereo converters are not: at 24
+bits or fewer they convert at a 24-bit scale times 2^-23, and the port
+follows `bitsPerSample` as the C does. 14 injections, 12 caught, two
+provably inert -- a logical for an arithmetic `>> 1` before a left shift, and
+the mid-side tail for its body, where mid's low bit is side's. The 32/64-bit
+prediction-threshold fault escaped twice: it needs full-scale coefficients
+and a nonzero shift, or the 64-bit sum truncates to exactly the wrapped
+32-bit one. A failed subframe decode is ignored upstream, so a frame whose
+CRC matches by chance plays stale buffer contents; the reference is built
+over `calloc` and the port zeroes. `u32 << 32` in the converters above 24
+bits is unspecified and not compared.
+
+### `llama-tts` and `llama-mtmd-cli`
+
+Zig binaries under `tools/` over libmtmd's port, gated by `scripts/tools-diff`
+against upstream's own, built unmodified over `libmtmd-ref` and
+`libllama-ref`: stdout, stderr, the exit code and every file written. `tts`,
+28 cases: Qwen3-TTS and pocket-tts, speaker WAVs at 16 and 44.1 kHz, CPU
+and GPU, the error paths, a strong repeat penalty and the uncapped
+512-frame run, the WAV hashed. `mtmd-cli`, 39: eight vision projectors,
+M-RoPE among them, two audio ones and one with both, five legacy chat
+templates, and the conversation loop with line editing. `tools/common/`
+gained the full `common_sampler` (`sampling.zig`), the console's line
+reader (`console.zig`, POSIX; Windows falls back to plain lines) and the
+non-Jinja chat templates (`chat.zig`); `--jinja` and `MTMD_DEBUG_GRAPH` are
+refused.
+
+**The fixture models answer much the same whatever they are asked**, so
+output alone could not see a misformatted prompt: four injected faults
+escaped until cases logged the formatted prompt (`-lv 5`) and token counts
+(`--perf`). **The REPL is gated under `!tty`**: upstream echoes typed input
+to its terminal while its log reaches stdout from a worker thread, so where
+the echo lands in stdout is upstream's own race; the echo is not compared,
+and editing is checked through the prompt it produces. 15 injections, 12
+caught; the escape is vicuna's antiprompt, which a random model never
+produces, and two cannot change any output. Its one fix outside the tools
+was in libllama: a `GGML_ASSERT`'s line, `llama-context.cpp:1706` for
+1711, which made six abort cases differ.
+
+**That line was not alone.** A sweep matching every hand-written
+`file, line` of an assertion or abort under `src/` and `tools/` against the
+upstream line holding the same expression found 79 wrong -- most a few
+lines off, a run of `context.zig`'s 21 lines off and `memory_recurrent.zig`'s
+14, one in `clip-impl.h` pointing at a `#define` -- and corrected them. An
+abort's message names that line, and a gate compares it only when the
+abort fires, so each was waiting for the case that reached it.
+
+### The fixtures
+
+No mmproj file exists here and upstream ships no generator.
+`harness/mmproj_fixtures.cpp` writes one small random mmproj per projector
+type from the keys and shapes `clip.cpp` reads, and pairs each with an arch
+fixture whose `no_vocab` tokenizer is rewritten as SPM with the special
+tokens `mtmd.cpp` and `mtmd-helper-gen.cpp` look up. `make mmproj-fixtures`
+checks every one through upstream's libmtmd on the CPU and Metal: 59
+fixtures cover all 60 types, 118/118 runs, and `gemma3na` -- declared, never
+loadable -- is checked to fail. Seven types needed a workaround for an
+inconsistency in upstream itself (voxtral's stack factor, step3vl's
+hard-coded 504-pixel crops, hunyuanvl's M-RoPE assertion, gemma3nv's square
+projection, the SAM block count deepseekocr ignores, cogvlm's null fused
+qkv, lfm2a's position table); each is in the harness's comments. The check
+is a precondition, not a gate: it proves the reference runs a fixture, not
+that the port matches it.
+
+### `make mtmd-diff`
+
+One process per side, `ref` or `port`, each linking both libraries and
+calling one through a table of C function pointers of identical type, so
+both run the same script. The transcript is everything that crosses the C
+boundary: every log line of libmtmd, its helpers, libllama and ggml; with
+`nodes`, every encoder graph node (`cb_eval`: name, op, type, shape, a hash
+of its data); the capability getters; every chunk `mtmd_tokenize` makes --
+type, tokens, counts, ids, every decoder position, the serialized bytes,
+the load of a truncated buffer; every embedding on bits through
+`mtmd_encode_chunk`, a copy, a placeholder and the batch API; the logits
+after `mtmd_helper_eval_chunks`; a real JPEG (`tools/mtmd/test-1.jpeg`)
+and a stereo 22,050 Hz WAV through `mtmd_helper_bitmap_init_from_file`; and
+for the two TTS fixtures, the generation helper's hidden state at every
+step and the output WAV. Every fixture runs on the CPU and the GPU, with
+nodes hashed and without -- `cb_eval` splits the graph at every node, so
+only the second pass sees the scheduler fuse. An abort counts as a match
+when both sides abort with the same message; the backtrace, whose threads
+interleave differently run to run, is dropped.
+
+**236 of 236 identical** (59 fixtures, CPU and Metal, per node and fused),
+and **118 of 118 with the harness built ReleaseSafe** on the CPU, so the
+port's code runs with Zig's safety checks on. Two of the 236 are an abort on
+both sides: upstream's gemma4v CPU path fails
+`GGML_ASSERT(i01 >= 0 && i01 < ne01)` in a `GET_ROWS` on the JPEG's
+304x224 slice, reading past its position table. Metal does not check the
+index. Before the two counted as a match, the first full run read 234 of
+236: the abort's backtrace interleaves its threads differently run to run.
+
+**Its first version read the wrong library.** Two lines of the harness
+called `c.llama_model_n_embd_inp` -- the C symbol, `libllama-ref`'s -- on the
+port's model, so the port side hashed embeddings over a garbage length and
+every encode differed in its last float while every graph node matched.
+The function table covers libllama now, and a node-level match with an
+output mismatch is the signature to look for.
+
+Injected faults, 10 of 12 caught; the two escapes changed no hash:
+
+| Fault | Fixture | Caught |
+|---|---|---|
+| mrope decoder `x` taken from the row | qwen2vl | yes |
+| `image_idx` serialized after `n_temporal_merge` | mlp | yes |
+| an audio chunk one token long | ultravox | yes |
+| a row-end token after every row | idefics3 | yes |
+| `img_beg` tokenized without special tokens | gemma3 | yes, after the fixture change below |
+| helper M-RoPE 2-d positions with `x` and `y` swapped | qwen2vl | yes |
+| helper positions `pos_0 + 2i` | pockettts | yes |
+| qwen3tts without the `tts_pad` overlay | qwen3tts | yes |
+| attention scale from `d_head + 1` | gemma3 (Metal) | yes |
+| `gelu` as `gelu_quick` | gemma3 (Metal) | yes |
+| helper positions `pos_0 + i + 1` | pockettts | no: a uniform shift changes no hash |
+| `clip_encode` running one thread | mlp | no: no hash on that fixture depends on the CPU's thread count |
+
+**The marker injection escaped at first, and that was the fixtures.** Their
+128-token vocabularies -- the size is the arch fixtures', tied to the
+embedding tensors -- had no room for the begin and end markers `mtmd.cpp`
+wraps media in, so `<start_of_image>` tokenized as characters with special
+parsing on or off. The two free slots now hold gemma3's markers: one
+fixture where the marker is a token, as it is in a real model, and the
+injection fails it. Every other marker still tokenizes as characters.
+
+**The injection runner once left a fault in the tree.** It restored by
+finding the replacement text, which had to be unique; `ggml_gelu_quick(ctx0,
+cur)` also occurs in the genuine `gelu_quick` arm, the restore refused, and
+`gelu` stayed `gelu_quick` through four later injections and two full runs
+-- which therefore failed, and three of those injections read as caught
+because of it. It restores by byte offset now and checks every site
+afterwards, and the results above are from a clean baseline of 236/236.
+
+**`make mtmd-exports`**: the port's library root compiled with its `llama`
+import pointed at libllama's harness root, so only libmtmd's own exports
+are listed, against `libmtmd-ref.a`'s `mtmd_*`: 82/82. Hiding one fails it.
+
+### The preprocessor gates
+
+`make mtmd-image-diff` and `make mtmd-audio-diff` compile `mtmd-image.cpp`
+and `mtmd-audio.cpp` unmodified beside a stand-in for `clip_ctx`, so the
+preprocessors run without a model, and compare every output float on bits
+and every log line. Images: 2,536 cases, 8 of 9 injections caught -- the
+escape, replacing libc++'s `std::sort` of the target ratios with a stable
+sort, needs an aspect exactly midway between two equal-area tilings in a
+set of 30 or more, which none is. lfm2's `nearbyint` is round-half-to-even
+and only sizes sitting on its tiling threshold see it. Audio: 3,309 cases,
+260M checks, 11 of 13 caught; the zero-frame tail branch is dead code, and
+the variance loop's fusion reaches a float only through a square root and a
+division, so it is held to the reference's disassembly instead: products
+rounded in groups of four, the last `t % 4` fused. On the Mac the release
+reference folds the sine table into `__sincosf_stret` and `pow(10, x)` into
+`__exp10`; the port keys both on Darwin, unmeasured on Linux.
+
+### Upstream's own defects, found on the way
+
+Recorded, reproduced where defined, never fixed:
+
+- granite4_vision's hparams error passes two `size_t` to `"%s ... %d %d"`
+  with no `__func__`; mimo_audio's missing-tensor error has one `%s` more
+  than its arguments.
+- gemma4a, lfm2a, parakeet and granite_speech index `model.layers[il]`
+  relying on a shared loop to have sized it.
+- Both MiniCPM-V input arms write `int[1024]` bucket arrays with no bounds
+  check.
+- `select_best_resolution` returns an uninitialized size when no candidate
+  is taken; the port returns 0x0.
+- The conformer asserts below two hops of audio; qwen3tts's speaker
+  preprocessor reads before its buffer below its pad; gemma4a trims `n_len`
+  and keeps the old row stride (replicated); whisper asserts unless a hop is
+  a hundredth of a second.
+- `mtmd_context`'s constructor leaves `pos_type` indeterminate without a
+  text model, and a throw from it leaks the clip contexts: its destructor
+  never runs and the pointers are raw. The port leaks them too, so freeing
+  them logs nothing upstream does not.
+- `mtmd_get_cap_from_file` catches the loader's exception and logs it; an
+  earlier draft of `clip.getCap` aborted instead.

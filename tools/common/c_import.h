@@ -13,3 +13,6 @@
 #include "gguf.h"
 #include "ggml-cpu.h"
 #include "ggml-backend.h"
+/* libmtmd, for llama-tts and llama-mtmd-cli; the port exports both headers. */
+#include "mtmd.h"
+#include "mtmd-helper.h"

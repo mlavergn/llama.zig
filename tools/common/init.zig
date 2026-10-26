@@ -27,6 +27,7 @@ const log = @import("log.zig");
 const common = @import("common.zig");
 const arg = @import("arg.zig");
 const fit = @import("cli_fit");
+const sampling = @import("sampling.zig");
 
 const Params = params_mod.Params;
 
@@ -56,18 +57,28 @@ pub const InitResult = struct {
     model: ?*c.llama_model = null,
     context: ?*c.llama_context = null,
     lora: std.ArrayList(*c.llama_adapter_lora) = .empty,
-    samplers: std.ArrayList(*c.llama_sampler) = .empty,
+    samplers: std.ArrayList(*sampling.Sampler) = .empty,
     threadpool: ?*c.ggml_threadpool = null,
     threadpool_batch: ?*c.ggml_threadpool = null,
 
     /// Ports `reset_samplers` (common/common.cpp:1426 @c1d0e7a00), a member of `common_init_result`.
     fn resetSamplers(self: *InitResult) void {
-        for (self.samplers.items) |s| c.llama_sampler_reset(s);
+        for (self.samplers.items) |s| c.llama_sampler_reset(s.get());
+    }
+
+    /// Ports `sampler` (common/common.cpp:1419 @c1d0e7a00), a member of
+    /// `common_init_result`.
+    ///
+    /// Return: the sampler for `seq_id`, or null past the last; owned by
+    /// the result.
+    pub fn sampler(self: *const InitResult, seq_id: c.llama_seq_id) ?*sampling.Sampler {
+        if (seq_id < 0 or seq_id >= @as(c_int, @intCast(self.samplers.items.len))) return null;
+        return self.samplers.items[@intCast(seq_id)];
     }
 
     /// The C++ destructor's order: context, model, adapters, samplers, pools.
     pub fn deinit(self: *InitResult) void {
-        for (self.samplers.items) |s| c.llama_sampler_free(s);
+        for (self.samplers.items) |s| s.destroy();
         if (self.context) |ctx| c.llama_free(ctx);
         if (self.model) |m| c.llama_model_free(m);
         if (self.threadpool) |t| c.ggml_threadpool_free(t);
@@ -136,7 +147,9 @@ pub const SamplerError = error{ InvalidArgument, Runtime };
 
 /// Ports `common_sampler_init` (sampling.cpp:187 @c1d0e7a00), the chain
 /// and its grammar; see the file header for the arms left out.
-fn samplerInit(p: *Params, model: ?*const c.llama_model) !*c.llama_sampler {
+///
+/// Return: the sampler, which the caller owns (`Sampler.destroy`).
+pub fn samplerInit(p: *Params, model: ?*const c.llama_model) !*sampling.Sampler {
     const sp = &p.sampling;
     if (!std.math.isFinite(sp.penalty_repeat) or sp.penalty_repeat <= 0.0 or !std.math.isFinite(1.0 / sp.penalty_repeat)) {
         _ = arg.throwStr("penalty_repeat must be finite and greater than 0") catch {};
@@ -159,7 +172,7 @@ fn samplerInit(p: *Params, model: ?*const c.llama_model) !*c.llama_sampler {
 
     const grammar_str = sp.grammar;
     if (std.mem.startsWith(u8, grammar_str, "%llguidance")) {
-        _ = c.ggml_abort("sampling.cpp", 216, "llguidance (cmake -DLLAMA_LLGUIDANCE=ON) is not enabled");
+        _ = c.ggml_abort("sampling.cpp", 217, "llguidance (cmake -DLLAMA_LLGUIDANCE=ON) is not enabled");
     } else if (grammar_str.len != 0) {
         const g = try p.arena.dupeSentinel(u8, grammar_str, 0);
         grmr = c.llama_sampler_init_grammar(vocab, g.ptr, "root");
@@ -228,7 +241,7 @@ fn samplerInit(p: *Params, model: ?*const c.llama_model) !*c.llama_sampler {
         try samplers.append(p.arena, c.llama_sampler_init_temp(sp.temp).?);
         try samplers.append(p.arena, c.llama_sampler_init_mirostat_v2(sp.seed, sp.mirostat_tau, sp.mirostat_eta).?);
     } else {
-        _ = c.ggml_abort("sampling.cpp", 409, "GGML_ASSERT(%s) failed", "false && \"unknown mirostat version\"");
+        _ = c.ggml_abort("sampling.cpp", 408, "GGML_ASSERT(%s) failed", "false && \"unknown mirostat version\"");
     }
 
     for (samplers.items) |smpl| c.llama_sampler_chain_add(chain, smpl);
@@ -237,9 +250,7 @@ fn samplerInit(p: *Params, model: ?*const c.llama_model) !*c.llama_sampler {
         log.wrn("%s: backend sampling is not compatible with grammar, disabling\n", .{"common_sampler_init"});
         sp.backend_sampling = false;
     }
-    if (grmr) |g| c.llama_sampler_free(g);
-
-    return chain.?;
+    return sampling.Sampler.create(std.heap.c_allocator, chain.?, grmr, sp.n_prev, sp.grammar_lazy);
 }
 
 /// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1761 @c1d0e7a00).
@@ -537,7 +548,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
             else => |other| return other,
         };
         try res.samplers.append(a, s);
-        try seq_config.append(a, .{ .seq_id = @intCast(k), .sampler = s });
+        try seq_config.append(a, .{ .seq_id = @intCast(k), .sampler = s.get() });
     }
 
     if (p.sampling.backend_sampling) {

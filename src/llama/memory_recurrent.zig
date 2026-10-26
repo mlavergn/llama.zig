@@ -525,13 +525,13 @@ pub const MemoryRecurrent = struct {
             var has_cell = false;
             if (seq_meta.tail >= 0) {
                 const cell = &cells[@intCast(seq_meta.tail)];
-                impl.assert(cell.hasSeqId(seq_id), "llama-memory-recurrent.cpp", 571, "cell.has_seq_id(seq_id)");
+                impl.assert(cell.hasSeqId(seq_id), "llama-memory-recurrent.cpp", 585, "cell.has_seq_id(seq_id)");
                 // Does this sequence own the cell?
                 if (cell.seq_id.count() == 1) has_cell = true;
             }
             if (!has_cell) {
                 const empty_cell = &cells[next_empty_cell];
-                impl.assert(empty_cell.isEmpty(), "llama-memory-recurrent.cpp", 577, "empty_cell.is_empty()");
+                impl.assert(empty_cell.isEmpty(), "llama-memory-recurrent.cpp", 591, "empty_cell.is_empty()");
                 // Copy the old tail into the empty cell.
                 if (seq_meta.tail >= 0) {
                     const orig_cell = &cells[@intCast(seq_meta.tail)];
@@ -539,7 +539,7 @@ pub const MemoryRecurrent = struct {
                     empty_cell.src = orig_cell.src;
                     orig_cell.seq_id.unset(@intCast(seq_id));
                     empty_cell.seq_id.set(@intCast(seq_id)); // overwritten below
-                    impl.assert(!orig_cell.isEmpty(), "llama-memory-recurrent.cpp", 585, "!orig_cell.is_empty()");
+                    impl.assert(!orig_cell.isEmpty(), "llama-memory-recurrent.cpp", 599, "!orig_cell.is_empty()");
                 }
                 seq_meta.tail = @intCast(next_empty_cell);
                 // The next empty cell.
@@ -617,7 +617,7 @@ pub const MemoryRecurrent = struct {
             while (i <= max) : (i += 1) {
                 const cl = &cells[@intCast(i)];
                 if (cl.src < 0) {
-                    impl.assert(self.rs_z >= 0, "llama-memory-recurrent.cpp", 689, "rs_z >= 0");
+                    impl.assert(self.rs_z >= 0, "llama-memory-recurrent.cpp", 684, "rs_z >= 0");
                     cl.src0 = self.rs_z;
                 } else {
                     // Stage the sources, so seq_* still behave and the
@@ -726,7 +726,7 @@ pub const MemoryRecurrent = struct {
         if (cell_range_begin != size) cell_ranges.append(allocator, .{ cell_range_begin, size }) catch oom();
 
         if (flags & c.LLAMA_STATE_SEQ_FLAGS_ON_DEVICE != 0 and cell_ranges.items.len > 1) {
-            impl.abort("llama-memory-recurrent.cpp", 800, "cannot save/load multiple ranges of cells to/from device memory\n");
+            impl.abort("llama-memory-recurrent.cpp", 802, "cannot save/load multiple ranges of cells to/from device memory\n");
         }
 
         var check: u32 = 0;

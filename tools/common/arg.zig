@@ -76,7 +76,7 @@ extern fn strtof(s: [*:0]const u8, end: *?[*:0]const u8) f32;
 extern fn getenv(name: [*:0]const u8) ?[*:0]const u8;
 
 fn errnoRange() bool {
-    return std.c._errno().* == @intFromEnum(std.c.E.RANGE);
+    return std.c._errno().* == @backingInt(std.c.E.RANGE);
 }
 
 /// `std::stoi`, as libc++ throws (string.cpp's `as_integer_helper`).
@@ -392,6 +392,15 @@ pub fn parserInit(params: *Params, ex: Example, print_usage: ?*const fn ([]const
     // per-example default params
     switch (ex) {
         .tokenize => params.parse_special = true, // parse special tokens by default, like the old tokenize tool
+        .mtmd => {
+            params.use_jinja = false; // disable jinja by default
+            params.sampling.temp = 0.2; // lower temp by default for better quality
+        },
+        .tts => {
+            params.out_file = "output.wav";
+            params.sampling.penalty_repeat = 1.05;
+            params.sampling.penalty_last_n = -1;
+        },
         else => {},
     }
 
@@ -615,6 +624,25 @@ fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
     while (params.tensor_buft_overrides.items.len < ntbo) {
         try params.tensor_buft_overrides.append(a, .{ .pattern = null, .buft = null });
     }
+
+    if (params.chat_template.len != 0 and !try verifyChatTemplate(a, params.chat_template, params.use_jinja)) {
+        const tmpl = try a.dupeSentinel(u8, params.chat_template, 0);
+        const note: [*:0]const u8 = if (params.use_jinja) "" else "\nnote: llama.cpp was started without --jinja, we only support commonly used templates";
+        setWhat("error: the supplied chat template is not supported: %s%s\n", .{ tmpl.ptr, note });
+        return error.Other;
+    }
+}
+
+/// Ports `common_chat_verify_template` (chat.cpp:627 @c1d0e7a00), its
+/// legacy arm: whether libllama recognises the template's family. The Jinja
+/// arm, which parses and renders the source, is not ported (see
+/// `chat.zig`); there every template passes here.
+fn verifyChatTemplate(a: std.mem.Allocator, tmpl: []const u8, use_jinja: bool) !bool {
+    if (use_jinja) return true;
+    const chat = [_]c.llama_chat_message{.{ .role = "user", .content = "test" }};
+    const t = try a.dupeSentinel(u8, tmpl, 0);
+    const res = c.llama_chat_apply_template(t.ptr, &chat, 1, true, null, 0);
+    return res >= 0;
 }
 
 /// Ports `string_process_escapes` (common/common.cpp:645 @c1d0e7a00).

@@ -518,7 +518,7 @@ pub fn main(init: std.process.Init) !void {
     // surface and sampler chain are modelled on upstream's and the references
     // have to be as accurate as the port's.
     var ref_paths: std.ArrayList([]const u8) = .empty;
-    for ([_][]const u8{ "/ggml/include", "/ggml/src", "/include", "/src", "/common", "/tools" }) |sub| {
+    for ([_][]const u8{ "/ggml/include", "/ggml/src", "/include", "/src", "/common", "/tools", "/vendor" }) |sub| {
         const p = try arena.print("{s}{s}", .{ ref_root, sub });
         try collect(arena, io, &ref_paths, p, false);
     }

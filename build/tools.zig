@@ -11,6 +11,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const llamacpp = @import("llamacpp.zig");
+const mtmd_build = @import("mtmd.zig");
 
 const root = "llama.cpp";
 
@@ -42,6 +43,24 @@ const tools = [_]Tool{
     .{ .name = "imatrix", .port = "tools/imatrix.zig", .ref = &.{"tools/imatrix/imatrix.cpp"} },
     .{ .name = "perplexity", .port = "tools/perplexity.zig", .ref = &.{ "tools/perplexity/perplexity.cpp", "tools/perplexity/main.cpp" } },
     .{ .name = "bench", .port = "tools/llama_bench.zig", .ref = &.{ "tools/llama-bench/llama-bench.cpp", "tools/llama-bench/main.cpp" } },
+};
+
+/// The tools over mtmd (Stage 8): ported, and linking the port of libmtmd
+/// (`build/mtmd.zig`'s module) as their references link upstream's.
+const mtmd_tools = [_]Tool{
+    .{ .name = "tts", .port = "tools/tts.zig", .ref = &.{"tools/tts/tts.cpp"} },
+    .{ .name = "mtmd-cli", .port = "tools/mtmd_cli.zig", .ref = &.{"tools/mtmd/mtmd-cli.cpp"} },
+};
+
+/// `llama.cpp.zmake`'s `mtmd_sources`; the per-architecture files under
+/// `models/` are listed by `addMtmdRef`, as zmake globs them.
+const mtmd_sources = [_][]const u8{
+    "tools/mtmd/mtmd.cpp",
+    "tools/mtmd/mtmd-audio.cpp",
+    "tools/mtmd/mtmd-image.cpp",
+    "tools/mtmd/mtmd-helper.cpp",
+    "tools/mtmd/mtmd-helper-gen.cpp",
+    "tools/mtmd/clip.cpp",
 };
 
 /// `llama.cpp.zmake`'s `common_sources`: upstream's `llama-common`.
@@ -85,6 +104,9 @@ pub const Options = struct {
     /// `GGML_USE_CUDA` a public definition of `ggml`, so its tools compile
     /// with it, and `pca.hpp` picks its backend on it.
     cuda: bool = false,
+    /// Upstream's libmtmd (`addMtmdRef`), built once and shared with
+    /// `build/mtmd.zig`.
+    mtmd_ref: *std.Build.Step.Compile,
 };
 
 /// The target triple `--version` prints, as `llama.cpp.zmake` formats it.
@@ -102,6 +124,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
     });
     tools_h.addIncludePath(b.path(root ++ "/include"));
     tools_h.addIncludePath(b.path(root ++ "/ggml/include"));
+    tools_h.addIncludePath(b.path(root ++ "/tools/mtmd"));
     const tools_h_module = tools_h.createModule();
 
     const build_info = b.addOptions();
@@ -130,7 +153,15 @@ pub fn add(b: *std.Build, opts: Options) !void {
     common_module.addImport("cli_fit", fit_module);
 
     const tools_step = b.step("tools", "Build the ported upstream tools");
-    for (tools) |t| {
+    // libmtmd's port, for the mtmd tools: its `exports.zig` gives them the
+    // `mtmd.h` and `mtmd-helper.h` symbols they call through `tools_h`.
+    const mtmd_module = mtmd_build.module(b, .{
+        .target = opts.target,
+        .optimize = opts.optimize,
+        .sdk = opts.sdk,
+        .reference = opts.reference,
+    });
+    for (tools ++ mtmd_tools, 0..) |t, ti| {
         const mod = b.createModule(.{
             .root_source_file = b.path(t.port),
             .target = opts.target,
@@ -148,6 +179,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
         // libllama's module, compiled in as the CLI does: referencing it
         // exports `llama.h`, and it links `libggml` itself.
         mod.addImport("llama", opts.reference.llama.root_module);
+        if (ti >= tools.len) mod.addImport("mtmd", mtmd_module);
         llamacpp.addSdkPaths(b, mod, opts.sdk);
         const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod });
         tools_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
@@ -155,6 +187,23 @@ pub fn add(b: *std.Build, opts: Options) !void {
 
     const ref_step = b.step("tools-ref", "Build upstream's tools over libllama-ref, the tool gates' references");
     const common_ref = addCommonRef(b, opts);
+    // Upstream's mtmd, and the two tools over it: the multimodal CLI and TTS.
+    const mtmd_ref = opts.mtmd_ref;
+    const mtmd_ref_step = b.step("mtmd-ref", "Build upstream's libmtmd over libllama-ref, the mtmd gates' reference");
+    mtmd_ref_step.dependOn(&b.addInstallArtifact(mtmd_ref, .{}).step);
+    for (mtmd_tools) |t| {
+        const mod = refModule(b, opts);
+        mod.addCSourceFiles(.{ .root = b.path(root), .files = t.ref, .flags = &cxx_flags });
+        mod.linkLibrary(common_ref);
+        mod.linkLibrary(mtmd_ref);
+        mod.linkLibrary(opts.reference.llama_ref);
+        mod.linkLibrary(opts.reference.ggml);
+        llamacpp.addSdkPaths(b, mod, opts.sdk);
+        const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod });
+        const install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = "tools-ref/bin" } } });
+        ref_step.dependOn(&install.step);
+        mtmd_ref_step.dependOn(&install.step);
+    }
     for (tools) |t| {
         const mod = refModule(b, opts);
         mod.addCSourceFiles(.{ .root = b.path(root), .files = t.ref, .flags = if (opts.cuda) &(cxx_flags ++ .{"-DGGML_USE_CUDA"}) else &cxx_flags });
@@ -168,7 +217,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
     }
 }
 
-fn refModule(b: *std.Build, opts: Options) *std.Build.Module {
+fn refModule(b: *std.Build, opts: anytype) *std.Build.Module {
     const mod = b.createModule(.{
         .target = opts.target,
         .optimize = opts.optimize,
@@ -230,4 +279,33 @@ fn addCommonRef(b: *std.Build, opts: Options) *std.Build.Step.Compile {
     });
     if (opts.target.result.os.tag == .windows) mod.linkSystemLibrary("ws2_32", .{});
     return b.addLibrary(.{ .name = "llama-common-ref", .root_module = mod, .linkage = .static });
+}
+
+/// Upstream's `mtmd` with `vendor::hash`, as `llama.cpp.zmake` builds them
+/// (its `addCli`): stb_image and miniaudio are header-only and compiled into
+/// `mtmd-helper.cpp`; no `MTMD_VIDEO`, as zmake defines none.
+pub fn addMtmdRef(b: *std.Build, opts: anytype) *std.Build.Step.Compile {
+    const mod = refModule(b, opts);
+    mod.addIncludePath(b.path(root ++ "/vendor/hash"));
+    mod.addCSourceFiles(.{ .root = b.path(root), .files = &mtmd_sources, .flags = &cxx_flags });
+    var models: std.ArrayList([]const u8) = .empty;
+    var dir = std.Io.Dir.cwd().openDir(b.graph.io, root ++ "/tools/mtmd/models", .{ .iterate = true }) catch @panic("cannot open tools/mtmd/models");
+    defer dir.close(b.graph.io);
+    var it = dir.iterate();
+    while (it.next(b.graph.io) catch null) |e| {
+        if (std.mem.endsWith(u8, e.name, ".cpp")) models.append(b.allocator, b.fmt("tools/mtmd/models/{s}", .{e.name})) catch @panic("OOM");
+    }
+    std.mem.sort([]const u8, models.items, {}, struct {
+        fn lt(_: void, x: []const u8, y: []const u8) bool {
+            return std.mem.order(u8, x, y) == .lt;
+        }
+    }.lt);
+    mod.addCSourceFiles(.{ .root = b.path(root), .files = models.items, .flags = &cxx_flags });
+    // vendor::hash (vendor/hash/CMakeLists.txt): sha1.c is C++ despite its
+    // extension, as zmake records.
+    mod.addCSourceFiles(.{ .root = b.path(root), .files = &.{"vendor/hash/hash.cpp"}, .flags = &cxx_flags });
+    mod.addCSourceFiles(.{ .root = b.path(root), .files = &.{"vendor/hash/sha1/sha1.c"}, .flags = &cxx_flags, .language = .cpp });
+    mod.addCSourceFiles(.{ .root = b.path(root), .files = &.{ "vendor/hash/xxhash/xxhash.c", "vendor/hash/sha256/sha256.c" }, .flags = &.{ "-std=c11", "-w" } });
+    llamacpp.addSdkPaths(b, mod, opts.sdk);
+    return b.addLibrary(.{ .name = "mtmd-ref", .root_module = mod, .linkage = .static });
 }

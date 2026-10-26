@@ -1379,18 +1379,18 @@ pub const Context = struct {
         // The logits.
         if (self.logits.data != null and t_logits != null) {
             const backend_res = c.ggml_backend_sched_get_tensor_backend(self.sched, t_logits);
-            impl.assert(backend_res != null, "llama-context.cpp", 1479, "backend_res != nullptr");
+            impl.assert(backend_res != null, "llama-context.cpp", 1483, "backend_res != nullptr");
             c.ggml_backend_tensor_get_async(backend_res, t_logits, self.logits.data, 0, n_tokens * n_vocab * @sizeOf(f32));
         }
 
         // The embeddings.
         if (self.embd.data != null and t_embd != null) {
             const backend_embd = c.ggml_backend_sched_get_tensor_backend(self.sched, t_embd);
-            impl.assert(backend_embd != null, "llama-context.cpp", 1488, "backend_embd != nullptr");
+            impl.assert(backend_embd != null, "llama-context.cpp", 1492, "backend_embd != nullptr");
             switch (self.cparams.pooling_type) {
                 c.LLAMA_POOLING_TYPE_NONE => {
                     const n_embd_out: usize = hparams.nEmbdOut();
-                    impl.assert(n_tokens * n_embd_out <= self.embd.size, "llama-context.cpp", 1497, "n_tokens*n_embd_out <= (int64_t) embd.size");
+                    impl.assert(n_tokens * n_embd_out <= self.embd.size, "llama-context.cpp", 1501, "n_tokens*n_embd_out <= (int64_t) embd.size");
                     c.ggml_backend_tensor_get_async(backend_embd, t_embd, self.embd.data, 0, n_tokens * n_embd_out * @sizeOf(f32));
                 },
                 c.LLAMA_POOLING_TYPE_MEAN, c.LLAMA_POOLING_TYPE_CLS, c.LLAMA_POOLING_TYPE_LAST => {
@@ -1399,7 +1399,7 @@ pub const Context = struct {
                     self.extractSeqEmbeddings(&ubatch, backend_embd, t_embd.?, hparams.nEmbdOut());
                 },
                 c.LLAMA_POOLING_TYPE_RANK => self.extractSeqEmbeddings(&ubatch, backend_embd, t_embd.?, hparams.n_cls_out),
-                else => impl.abort("llama-context.cpp", 1536, "unknown pooling type"),
+                else => impl.abort("llama-context.cpp", 1539, "unknown pooling type"),
             }
         }
 
@@ -1450,7 +1450,7 @@ pub const Context = struct {
             c.GGML_STATUS_ABORTED => 2,
             c.GGML_STATUS_ALLOC_FAILED => -2,
             c.GGML_STATUS_FAILED => -3,
-            c.GGML_STATUS_SUCCESS => impl.abort("llama-context.cpp", 1470, "should not happen"),
+            c.GGML_STATUS_SUCCESS => impl.abort("llama-context.cpp", 1472, "should not happen"),
             else => impl.abort("llama-context.cpp", 1470, "unknown status"),
         };
     }
@@ -1518,8 +1518,8 @@ pub const Context = struct {
             return -1;
         }
 
-        impl.assert(n_tokens_all <= self.cparams.n_batch, "llama-context.cpp", 1706, "n_tokens_all <= cparams.n_batch");
-        impl.assert(self.cparams.causal_attn or self.cparams.n_ubatch >= n_tokens_all, "llama-context.cpp", 1708, "(cparams.causal_attn || cparams.n_ubatch >= n_tokens_all) && \"non-causal attention requires n_ubatch >= n_tokens\"");
+        impl.assert(n_tokens_all <= self.cparams.n_batch, "llama-context.cpp", 1711, "n_tokens_all <= cparams.n_batch");
+        impl.assert(self.cparams.causal_attn or self.cparams.n_ubatch >= n_tokens_all, "llama-context.cpp", 1713, "(cparams.causal_attn || cparams.n_ubatch >= n_tokens_all) && \"non-causal attention requires n_ubatch >= n_tokens\"");
 
         // Wait for in-flight copies into embd_seq before freeing it.
         if (self.embd_seq.items.len != 0) self.synchronize();
@@ -1624,12 +1624,12 @@ pub const Context = struct {
             // The logits.
             if (self.logits.data != null and t_logits != null and n_outputs > 0 and needsRawLogits(ubatch, &self.sampling.samplers)) {
                 const backend_res = c.ggml_backend_sched_get_tensor_backend(self.sched, t_logits);
-                impl.assert(backend_res != null, "llama-context.cpp", 1844, "backend_res != nullptr");
-                impl.assert(self.logits.data != null, "llama-context.cpp", 1845, "logits.data != nullptr");
+                impl.assert(backend_res != null, "llama-context.cpp", 1865, "backend_res != nullptr");
+                impl.assert(self.logits.data != null, "llama-context.cpp", 1866, "logits.data != nullptr");
                 const logits_out = self.logits.data.? + n_outputs_prev * n_vocab;
                 if (n_outputs != 0) {
-                    impl.assert(n_outputs_prev + n_outputs <= n_outputs_all, "llama-context.cpp", 1850, "n_outputs_prev + n_outputs <= n_outputs_all");
-                    impl.assert((n_outputs_prev + n_outputs) * n_vocab <= self.logits.size, "llama-context.cpp", 1851, "(n_outputs_prev + n_outputs)*n_vocab <= (int64_t) logits.size");
+                    impl.assert(n_outputs_prev + n_outputs <= n_outputs_all, "llama-context.cpp", 1871, "n_outputs_prev + n_outputs <= n_outputs_all");
+                    impl.assert((n_outputs_prev + n_outputs) * n_vocab <= self.logits.size, "llama-context.cpp", 1872, "(n_outputs_prev + n_outputs)*n_vocab <= (int64_t) logits.size");
                     c.ggml_backend_tensor_get_async(backend_res, t_logits, logits_out, 0, n_outputs * n_vocab * @sizeOf(f32));
                 }
             }
@@ -1637,18 +1637,18 @@ pub const Context = struct {
             // The embeddings.
             if (self.embd.data != null and t_embd != null and n_outputs > 0) {
                 const backend_embd = c.ggml_backend_sched_get_tensor_backend(self.sched, t_embd);
-                impl.assert(backend_embd != null, "llama-context.cpp", 1859, "backend_embd != nullptr");
+                impl.assert(backend_embd != null, "llama-context.cpp", 1880, "backend_embd != nullptr");
                 switch (self.cparams.pooling_type) {
                     c.LLAMA_POOLING_TYPE_NONE => {
                         const n_embd_out: usize = hparams.nEmbdOut();
                         const embd_out = self.embd.data.? + n_outputs_prev * n_embd_out;
                         impl.assert(n_outputs_prev + n_outputs <= n_outputs_all, "llama-context.cpp", 1871, "n_outputs_prev + n_outputs <= n_outputs_all");
-                        impl.assert((n_outputs_prev + n_outputs) * n_embd_out <= self.embd.size, "llama-context.cpp", 1870, "(n_outputs_prev + n_outputs)*n_embd_out <= (int64_t) embd.size");
+                        impl.assert((n_outputs_prev + n_outputs) * n_embd_out <= self.embd.size, "llama-context.cpp", 1892, "(n_outputs_prev + n_outputs)*n_embd_out <= (int64_t) embd.size");
                         c.ggml_backend_tensor_get_async(backend_embd, t_embd, embd_out, 0, n_outputs * n_embd_out * @sizeOf(f32));
                     },
                     c.LLAMA_POOLING_TYPE_MEAN, c.LLAMA_POOLING_TYPE_CLS, c.LLAMA_POOLING_TYPE_LAST => self.extractSeqEmbeddings(ubatch, backend_embd, t_embd.?, hparams.nEmbdOut()),
                     c.LLAMA_POOLING_TYPE_RANK => self.extractSeqEmbeddings(ubatch, backend_embd, t_embd.?, hparams.n_cls_out),
-                    else => impl.abort("llama-context.cpp", 1911, "unknown pooling type"),
+                    else => impl.abort("llama-context.cpp", 1932, "unknown pooling type"),
                 }
             }
 
@@ -1661,10 +1661,10 @@ pub const Context = struct {
                 const offset: usize = if (masked) n_outputs_prev else n_tokens_prev;
                 if (self.embd_nextn.data != null and t_h_nextn != null and n_rows > 0 and self.cparams.pooling_type == c.LLAMA_POOLING_TYPE_NONE) {
                     const backend_h = c.ggml_backend_sched_get_tensor_backend(self.sched, t_h_nextn);
-                    impl.assert(backend_h != null, "llama-context.cpp", 1927, "backend_h != nullptr");
+                    impl.assert(backend_h != null, "llama-context.cpp", 1948, "backend_h != nullptr");
                     const n_embd_out: usize = hparams.nEmbdOut();
                     const embd_nextn_out = self.embd_nextn.data.? + offset * n_embd_out;
-                    impl.assert((offset + n_rows) * n_embd_out <= self.embd_nextn.size, "llama-context.cpp", 1932, "(offset + n_rows)*n_embd <= (int64_t) embd_nextn.size");
+                    impl.assert((offset + n_rows) * n_embd_out <= self.embd_nextn.size, "llama-context.cpp", 1953, "(offset + n_rows)*n_embd <= (int64_t) embd_nextn.size");
                     c.ggml_backend_tensor_get_async(backend_h, t_h_nextn, embd_nextn_out, 0, n_rows * n_embd_out * @sizeOf(f32));
                 }
             }
@@ -1691,7 +1691,7 @@ pub const Context = struct {
         if (self.n_outputs > 0) {
             var sorted_output = true;
             const out_ids = self.balloc.getOutIds();
-            impl.assert(out_ids.items.len == self.n_outputs, "llama-context.cpp", 1971, "out_ids.size() == (size_t) n_outputs");
+            impl.assert(out_ids.items.len == self.n_outputs, "llama-context.cpp", 1981, "out_ids.size() == (size_t) n_outputs");
 
             for (0..self.n_outputs) |i| {
                 const out_id = out_ids.items[i];
@@ -1702,7 +1702,7 @@ pub const Context = struct {
             // The outputs in the order of the caller's batch; this matters
             // mostly for recurrent models.
             if (!sorted_output and self.n_outputs > 1) {
-                impl.assert(self.n_outputs == out_ids.items.len, "llama-context.cpp", 1984, "(size_t) n_outputs == out_ids.size()");
+                impl.assert(self.n_outputs == out_ids.items.len, "llama-context.cpp", 1994, "(size_t) n_outputs == out_ids.size()");
                 // A selection sort, which minimizes swaps.
                 var i: u32 = 0;
                 while (i < self.n_outputs - 1) : (i += 1) {

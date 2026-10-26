@@ -2557,7 +2557,7 @@ pub const Builder = struct {
                     self.cb(cur, "ffn_swiglu_oai", il);
                     type_gate = .seq;
                 } else {
-                    impl.abort("llama-graph.cpp", 1849, "LLM_FFN_SWIGLU_OAI_MOE requires a parallel gate");
+                    impl.abort("llama-graph.cpp", 1850, "LLM_FFN_SWIGLU_OAI_MOE requires a parallel gate");
                 }
             },
             .geglu => {
@@ -4194,7 +4194,7 @@ pub const Builder = struct {
                 // The Qwen3 reranker's softmax.
                 if (self.arch == .qwen3 or self.arch == .qwen3vl) cur = c.ggml_soft_max(ctx, cur);
             },
-            else => impl.abort("llama-graph.cpp", 3703, "unknown pooling type"),
+            else => impl.abort("llama-graph.cpp", 3701, "unknown pooling type"),
         }
 
         self.cb(cur, "result_embd_pooled", -1);

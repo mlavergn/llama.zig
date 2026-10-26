@@ -1,0 +1,14 @@
+#!/bin/bash
+# src/mtmd/audio.zig against upstream's tools/mtmd/mtmd-audio.cpp, compiled
+# unmodified beside it, in one process: every preprocessor and the streaming
+# inverse STFT, compared on bits (harness/mtmd_audio_diff.zig).
+#
+# Usage: scripts/mtmd-audio-diff [--quick] [config-name-substring]
+#   MTMD_AUDIO_O=fast|safe   the build mode, ReleaseFast by default; the bits
+#                            are calibrated there, ReleaseSafe looks for UB
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+zig build mtmd-audio-diff --release="${MTMD_AUDIO_O:-fast}" >/dev/null 2>&1 \
+    || { echo "FAIL: could not build mtmd-audio-diff (zig build mtmd-audio-diff)" >&2; exit 2; }
+exec zig-out/bin/mtmd-audio-diff "$@"

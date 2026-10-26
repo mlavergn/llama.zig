@@ -28,6 +28,9 @@ pub const arg_options2 = @import("arg_options2.zig");
 pub const common = @import("common.zig");
 pub const cpu = @import("cpu.zig");
 pub const init = @import("init.zig");
+pub const sampling = @import("sampling.zig");
+pub const console = @import("console.zig");
+pub const chat = @import("chat.zig");
 
 /// `LLM_KV_SPLIT_NO`, `LLM_KV_SPLIT_COUNT`, `LLM_KV_SPLIT_TENSORS_COUNT`
 /// (common/common.h:1104, 1105, 1106 @c1d0e7a00).
