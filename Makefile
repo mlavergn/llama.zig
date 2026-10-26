@@ -4,9 +4,28 @@
 #
 ###############################################
 
+# Optional include to extend the makefile targets
+-include ../styleguide/Makefile.in
+
+# The include's validate is `clean format lint build test`; `test` below is
+# this project's part of it. These are the directories format and lint walk.
+ZIG_DIRS := src cli tools harness build
+
+# Lint covers only what is clean so far: build.zig, build/, cli/ and tools/,
+# less the files below. src/ and harness/ are not linted yet -- the exported
+# C names alone are 1,805 case-convention hits. Shrink the list as files are
+# cleaned; a new file in a linted directory is linted from the start.
+LINT_DIRS := build cli tools
+LINT_EXCLUDE := build/llamacpp.zig build/vulkan_shaders.zig \
+	cli/chat.zig cli/fit.zig cli/main.zig cli/session.zig \
+	tools/common/arg_options.zig tools/common/arg.zig tools/common/console.zig \
+	tools/common/init.zig tools/cvector_generator.zig tools/fit_params.zig \
+	tools/llama_bench.zig tools/quantize.zig
+LINT_FILES := $(filter-out $(LINT_EXCLUDE),build.zig $(shell find $(LINT_DIRS) -name '*.zig' | sort))
+
 .DEFAULT_GOAL := build
 
-.PHONY: build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
+.PHONY: test distclean build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -57,9 +76,14 @@ clone:
 	git clone https://github.com/ggerganov/llama.cpp.git
 	cd llama.cpp; git checkout v0.3.0
 
-# Delete all build output.
+# Delete the Zig build output. validate runs this first, so it leaves the
+# CMake reference alone: without cmake-build/ sched-diff and graph-diff skip.
 clean:
-	rm -rf cmake-build zig-out .zig-cache
+	rm -rf zig-out .zig-cache
+
+# Delete all build output, the CMake reference builds included.
+distclean: clean
+	rm -rf cmake-build
 
 #
 # Reference builds
@@ -129,12 +153,19 @@ dist:
 # Checks
 #
 
-# Run every check that needs no model or reference build.
+# Without the styleguide checkout (the gate machines have none), validate is
+# the format check, the scaffold and the checks below.
+ifeq ($(wildcard ../styleguide/Makefile.in),)
 validate:
 	@printf '\n== formatting ==\n'
-	zig fmt --check build.zig build/*.zig harness/*.zig src/*.zig src/ggml/*.zig src/ggml/quants/*.zig src/ggml/cpu/*.zig src/ggml/cpu/ops/*.zig src/ggml/cpu/quants/*.zig src/ggml/cpu/quants/arm/*.zig src/ggml/cpu/repack/*.zig src/ggml/cpu/repack/arm/*.zig src/ggml/metal/*.zig src/ggml/cuda/*.zig src/llama/*.zig src/llama/api/*.zig src/llama/models/*.zig src/llama/sampler/*.zig src/llama/grammar/*.zig src/llama/vocab/*.zig src/mtmd/*.zig src/mtmd/models/*.zig src/mtmd/vendor/*.zig cli/*.zig tools/*.zig tools/common/*.zig
+	zig fmt --check build.zig $(ZIG_DIRS)
 	@printf '\n== scaffold ==\n'
-	zig build
+	@$(MAKE) --no-print-directory build test
+	@printf '\nvalidate: OK\n'
+endif
+
+# Run every check that needs no model or reference build.
+test:
 	@printf '\n== unit tests ==\n'
 	zig build test --summary all
 	@printf '\n== ported ggml (debug) ==\n'
@@ -181,7 +212,7 @@ validate:
 	@if [ -f cmake-build/apple/ggml/src/libggml.a ]; then ./scripts/sched-diff; else echo "  skipped: no reference build (run 'make buildmacos')"; fi
 	@printf '\n== graph diff vs reference ==\n'
 	@if [ -f cmake-build/apple/ggml/src/libggml.a ]; then zig build ported-lib --release=fast && ./scripts/graph-diff; else echo "  skipped: no reference build (run 'make buildmacos')"; fi
-	@printf '\nvalidate: OK\n'
+	@printf '\ntest: OK\n'
 
 # Diff the token streams of the Apple-clang and zig cc builds.
 parity:
