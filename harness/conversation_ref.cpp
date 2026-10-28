@@ -11,7 +11,7 @@
 //
 // This is that loop written a second time, from SPEC.md, against the stock
 // pieces: `llama.cpp/common/jinja` renders, as in `harness/jinja_ref.cpp`
-// (chat.h:58, chat.cpp:931 @c1d0e7a00), and `llama.cpp.zmake`'s libllama
+// (chat.h:58, chat.cpp:931 @5266f24da), and `llama.cpp.zmake`'s libllama
 // decodes. Deliberately not our CLI recompiled -- that would compare the CLI
 // against itself.
 //
@@ -27,7 +27,7 @@
 //   - the cache report our CLI writes under `LLAMAZIG_CNV_TRACE` -- tokens
 //     kept and tokens decoded, per turn -- the one place prefix reuse shows;
 //   - `--fit`, as upstream's `common_init_result` runs it before loading:
-//     `common_fit_params` (common/fit.cpp:878 @c1d0e7a00) over the buffers
+//     `common_fit_params` (common/fit.cpp:878 @5266f24da) over the buffers
 //     `common_params` lends the model parameters, at `llama-cli`'s log
 //     verbosity, its error line flushed to stderr before the load; and the
 //     context size and GPU layers it left, which the trace reports once;
@@ -231,7 +231,7 @@ int main(int argc, char ** argv) {
     fprintf(stderr, "loading %s ...\n", model_path);
 
     // The buffers `common_params` lends the model parameters
-    // (common/common.cpp:1680 @c1d0e7a00), padded as common/arg.cpp:946 pads
+    // (common/common.cpp:1680 @5266f24da), padded as common/arg.cpp:946 @5266f24da pads
     // the overrides.
     std::vector<float> tensor_split(128, 0.0f);
     std::vector<llama_model_tensor_buft_override> tbo(llama_max_tensor_buft_overrides(), { nullptr, nullptr });
@@ -243,7 +243,7 @@ int main(int argc, char ** argv) {
     cp.n_ctx   = n_ctx_set ? (uint32_t) n_ctx_arg : 0;
     cp.n_batch = 2048;
     cp.no_perf = true;
-    // server_output_limits (tools/server/server-context.cpp:40 @c1d0e7a00):
+    // server_output_limits (tools/server/server-context.cpp:41 @5266f24da):
     // one sequence, no draft.
     cp.n_outputs_max         = 1;
     cp.n_outputs_max_per_seq = 1;
@@ -253,7 +253,7 @@ int main(int argc, char ** argv) {
         const char *        target_env = getenv("CNV_REF_FIT_TARGET_MIB");
         const size_t        target_mib = target_env ? strtoull(target_env, nullptr, 10) : 1024;
         std::vector<size_t> margins(llama_max_devices(), target_mib * 1024 * 1024);
-        common_log_set_verbosity_thold(LOG_LEVEL_ERROR); // tools/cli/cli.cpp:36 @c1d0e7a00
+        common_log_set_verbosity_thold(LOG_LEVEL_ERROR); // tools/cli/cli.cpp:36 @5266f24da
         common_fit_params(model_path, &mp, &cp, tensor_split.data(), tbo.data(), margins.data(),
             n_ctx_set && n_ctx_arg == 0 ? UINT32_MAX : 4096, nullptr, GGML_LOG_LEVEL_ERROR);
         common_log_flush(common_log_main());

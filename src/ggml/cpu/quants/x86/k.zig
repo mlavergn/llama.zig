@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.3.0,
-//! `c1d0e7a00`), the `__AVX2__` arms of the K-quant dot products. Each
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.4.0,
+//! `5266f24da`), the `__AVX2__` arms of the K-quant dot products. Each
 //! function names the C it replaces and the line it began at; the `__AVX__`
 //! and scalar arms below each are not compiled at x86-64-v3.
 //!
@@ -26,7 +26,7 @@ const c = impl.c;
 const f = common.f;
 const as = common.as;
 
-/// Ports `ggml_vec_dot_q2_K_q8_K` (arch/x86/quants.c:1574 @c1d0e7a00), the
+/// Ports `ggml_vec_dot_q2_K_q8_K` (arch/x86/quants.c:1574 @5266f24da), the
 /// `__AVX2__` arm.
 ///
 /// The mins go straight into the float accumulator, eight lanes fused with
@@ -118,7 +118,7 @@ pub export fn ggml_vec_dot_q2_K_q8_K(
     s[0] = common.hsum_float_8(acc);
 }
 
-/// Ports `ggml_vec_dot_q3_K_q8_K` (arch/x86/quants.c:1766 @c1d0e7a00), the
+/// Ports `ggml_vec_dot_q3_K_q8_K` (arch/x86/quants.c:1766 @5266f24da), the
 /// `__AVX2__` arm.
 ///
 /// Two low bits from `qs` and the third from `hmask`, inverted: the high
@@ -253,7 +253,7 @@ pub export fn ggml_vec_dot_q3_K_q8_K(
     s[0] = common.hsum_float_8(acc);
 }
 
-/// Ports `ggml_vec_dot_q4_K_q8_K` (arch/x86/quants.c:2038 @c1d0e7a00), the
+/// Ports `ggml_vec_dot_q4_K_q8_K` (arch/x86/quants.c:2038 @5266f24da), the
 /// `__AVX2__` arm.
 ///
 /// `q5_K` without the fifth bit, and with the mins kept as four lanes,
@@ -342,7 +342,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
     s[0] = common.hsum_float_8(acc) + avx.mm_cvtss_f32(acc_m);
 }
 
-/// Ports `ggml_vec_dot_q5_K_q8_K` (arch/x86/quants.c:2216 @c1d0e7a00), the
+/// Ports `ggml_vec_dot_q5_K_q8_K` (arch/x86/quants.c:2216 @5266f24da), the
 /// `__AVX2__` arm.
 ///
 /// The mins are applied first, against `q8_K`'s `bsums`, through two
@@ -451,7 +451,7 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
     s[0] = common.hsum_float_8(acc) + summs;
 }
 
-/// Ports `ggml_vec_dot_q6_K_q8_K` (arch/x86/quants.c:2426 @c1d0e7a00), the
+/// Ports `ggml_vec_dot_q6_K_q8_K` (arch/x86/quants.c:2426 @5266f24da), the
 /// `__AVX2__` arm.
 ///
 /// Six-bit weights, four in `ql` and two in `qh`, with signed `int8`

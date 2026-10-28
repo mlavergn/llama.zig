@@ -72,9 +72,12 @@ cmake:
 	$(CMAKE) --version
 
 # Clone the pinned llama.cpp reference checkout.
+# The release the port is synced to, from build/upstream.zig (UPSTREAM.md).
+UPSTREAM_TAG := $(shell sed -n 's/^pub const tag = "\(.*\)";$$/\1/p' build/upstream.zig)
+
 clone:
-	git clone https://github.com/ggerganov/llama.cpp.git
-	cd llama.cpp; git checkout v0.3.0
+	git clone https://github.com/ggml-org/llama.cpp.git
+	cd llama.cpp; git checkout $(UPSTREAM_TAG)
 
 # Delete the Zig build output. validate runs this first, so it leaves the
 # CMake reference alone: without cmake-build/ sched-diff and graph-diff skip.
@@ -547,7 +550,7 @@ mtmd-diff:
 	zig build reference mtmd-ref --release=fast
 	./scripts/mtmd-diff $(if $(DEVS),$(DEVS),both) $(FILTER)
 
-# The 82 mtmd_* exports, equal to the reference's.
+# The 84 mtmd_* exports, equal to the reference's.
 mtmd-exports:
 	zig build mtmd-ref --release=fast
 	./scripts/mtmd-exports
@@ -700,19 +703,6 @@ qwen35xl:
 # Package
 # ---------------------------------------------
 
-.PHONY: pkg
-
-# zigpkg's `zpkg` (../zigpkg) packages the CLI as its recipe in zigpkg's store
-# says (the name and version come from build.zig.zon), then signs, notarizes
-# and publishes it as the recipe says.
-ZPKG ?= zpkg
-
-# What the package installs (the recipe's .pkg root).
-PKG_ROOT := zig-out/pkg/root
-
-# Build the CLI into zig-out/pkg/root, then the package with zpkg.
-pkg:
-	@command -v $(ZPKG) >/dev/null || { echo "❌ $(ZPKG) not found: build ../zigpkg, or set ZPKG"; exit 1; }
-	rm -rf $(PKG_ROOT)
-	zig build cli --release=fast --prefix $(PKG_ROOT)
-	$(ZPKG) --package
+# `make pkg` (DRY_RUN=1 stops before Apple and R2) and `make pkginstall` come
+# from ../styleguide/Makefile.in: the CLI as a .pkg, built by zigpkg's zpkg
+# from this project's recipe in zigpkg's store.

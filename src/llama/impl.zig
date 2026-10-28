@@ -8,7 +8,7 @@
 //! - `llama.cpp/src/llama-impl.cpp` — `time_meas`'s bodies
 //! - `llama.cpp/ggml/include/ggml.h` — `GGML_ASSERT` and `GGML_ABORT`
 //!
-//! All at v0.3.0 (`c1d0e7a00`). Each declaration below names the source file
+//! All at v0.4.0 (`5266f24da`). Each declaration below names the source file
 //! and line it came from.
 //!
 //! # The C ABI import
@@ -126,7 +126,7 @@ pub fn writeStderr(parts: []const []const u8) void {
 
 const log = @import("log.zig");
 
-/// Ports `LLAMA_LOG_WARN` (llama-impl.h:29 @c1d0e7a00).
+/// Ports `LLAMA_LOG_WARN` (llama-impl.h:29 @5266f24da).
 ///
 /// Parameters:
 /// - `format`: a printf format string.
@@ -137,7 +137,7 @@ pub fn logWarn(comptime format: [:0]const u8, args: anytype) void {
     log.logInternal(c.GGML_LOG_LEVEL_WARN, format, args);
 }
 
-/// Ports `LLAMA_LOG_ERROR` (llama-impl.h:30 @c1d0e7a00).
+/// Ports `LLAMA_LOG_ERROR` (llama-impl.h:30 @5266f24da).
 ///
 /// Parameters:
 /// - `format`: a printf format string.
@@ -148,7 +148,7 @@ pub fn logError(comptime format: [:0]const u8, args: anytype) void {
     log.logInternal(c.GGML_LOG_LEVEL_ERROR, format, args);
 }
 
-/// Ports `LLAMA_LOG_INFO` (llama-impl.h:28 @c1d0e7a00).
+/// Ports `LLAMA_LOG_INFO` (llama-impl.h:28 @5266f24da).
 ///
 /// Parameters:
 /// - `format`: a printf format string.
@@ -159,7 +159,7 @@ pub fn logInfo(comptime format: [:0]const u8, args: anytype) void {
     log.logInternal(c.GGML_LOG_LEVEL_INFO, format, args);
 }
 
-/// Ports `LLAMA_LOG_DEBUG` (llama-impl.h:31 @c1d0e7a00).
+/// Ports `LLAMA_LOG_DEBUG` (llama-impl.h:31 @5266f24da).
 ///
 /// Parameters:
 /// - `format`: a printf format string.
@@ -170,7 +170,7 @@ pub fn logDebug(comptime format: [:0]const u8, args: anytype) void {
     log.logInternal(c.GGML_LOG_LEVEL_DEBUG, format, args);
 }
 
-/// Ports `LLAMA_LOG_CONT` (llama-impl.h:32 @c1d0e7a00): continues the
+/// Ports `LLAMA_LOG_CONT` (llama-impl.h:32 @5266f24da): continues the
 /// previous line.
 ///
 /// Parameters:
@@ -185,7 +185,7 @@ pub fn logCont(comptime format: [:0]const u8, args: anytype) void {
 // -----------------------------------------------------------------------------
 // Assertions
 
-/// Mirrors `GGML_ABORT` (ggml.h:287 @c1d0e7a00), through ggml's own
+/// Mirrors `GGML_ABORT` (ggml.h:287 @5266f24da), through ggml's own
 /// `ggml_abort`, so the message and backtrace are the C++'s.
 ///
 /// Parameters:
@@ -198,7 +198,7 @@ pub fn abort(comptime file: [:0]const u8, comptime line: c_int, comptime msg: [:
     c.ggml_abort(file.ptr, line, "%s", msg.ptr);
 }
 
-/// Mirrors `GGML_ASSERT` (ggml.h:288 @c1d0e7a00).
+/// Mirrors `GGML_ASSERT` (ggml.h:288 @5266f24da).
 ///
 /// Parameters:
 /// - `ok`: the condition.
@@ -313,7 +313,7 @@ pub const Exception = struct {
 // -----------------------------------------------------------------------------
 // Timing
 
-/// Ports `time_meas` (llama-impl.h:77 @c1d0e7a00).
+/// Ports `time_meas` (llama-impl.h:77 @5266f24da).
 ///
 /// The C++ adds the elapsed time to its accumulator in the destructor; here
 /// `deinit` does, called through `defer`.
@@ -321,7 +321,7 @@ pub const TimeMeas = struct {
     t_start_us: i64,
     t_acc: *i64,
 
-    /// Ports the constructor of `time_meas` (llama-impl.cpp:20 @c1d0e7a00).
+    /// Ports the constructor of `time_meas` (llama-impl.cpp:20 @5266f24da).
     ///
     /// Parameters:
     /// - `t_acc`: the accumulator; borrowed until `deinit`.
@@ -332,7 +332,7 @@ pub const TimeMeas = struct {
         return .{ .t_start_us = if (disable) -1 else c.ggml_time_us(), .t_acc = t_acc };
     }
 
-    /// Ports the destructor of `time_meas` (llama-impl.cpp:22 @c1d0e7a00).
+    /// Ports the destructor of `time_meas` (llama-impl.cpp:22 @5266f24da).
     ///
     /// Return: nothing.
     pub fn deinit(self: TimeMeas) void {

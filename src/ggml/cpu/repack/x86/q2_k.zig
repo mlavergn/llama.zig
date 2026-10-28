@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.3.0
-//! (`c1d0e7a00`): `ggml_gemv_q2_K_8x8_q8_K` and `ggml_gemm_q2_K_8x8_q8_K`,
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.4.0
+//! (`5266f24da`): `ggml_gemv_q2_K_8x8_q8_K` and `ggml_gemm_q2_K_8x8_q8_K`,
 //! their `__AVX2__` arms, and the gemm's `__AVX512BW__ && __AVX512DQ__` arm,
 //! 1,480 lines of C that are the same body at 512 bits over two blocks
 //! (`wide.zig`).
@@ -59,7 +59,7 @@ inline fn scalesMins(b: *const blocks.block_q2_Kx8, sb: usize) ScalesMins {
     return r;
 }
 
-/// Ports `ggml_gemv_q2_K_8x8_q8_K` (arch/x86/repack.cpp:1713 @c1d0e7a00), the
+/// Ports `ggml_gemv_q2_K_8x8_q8_K` (arch/x86/repack.cpp:1713 @5266f24da), the
 /// `__AVX2__` arm.
 ///
 /// As `q4_K`'s gemv, the row is stored as `permute(acc_row) - acc_min_rows`
@@ -217,7 +217,7 @@ inline fn planeWide(comptime L: type, raw: [4]L.I, comptime j: usize, comptime k
 }
 
 /// The per-sb column preparation of `ggml_gemm_q2_K_8x8_q8_K`
-/// (arch/x86/repack.cpp:3526 @c1d0e7a00), for `b0` and, at 512 bits, `b1`
+/// (arch/x86/repack.cpp:3526 @5266f24da), for `b0` and, at 512 bits, `b1`
 /// in the high half.
 ///
 /// The 512-bit arm loads both blocks' scale bytes into one `__m256i` per
@@ -264,7 +264,7 @@ inline fn dot2(comptime L: type, rhs: [2]L.I, lhs: [2]L.I) L.I {
 }
 
 /// The per-group body of `ggml_gemm_q2_K_8x8_q8_K` (arch/x86/repack.cpp:3526
-/// @c1d0e7a00), either arm: one interleaved block of four activation rows
+/// @5266f24da), either arm: one interleaved block of four activation rows
 /// against one prepared sb, into four row accumulators and four minima
 /// accumulators.
 fn accumulate4(comptime L: type, acc: *[4]L.F, acc_min: *[4]L.F, rhs: *const Rhs(L), col_scale_f32: L.F, col_dmin_f32: L.F, a: *const blocks.block_q8_Kx4, sb: usize) void {
@@ -406,7 +406,7 @@ fn rowLoops(comptime L: type, y: *usize, x_begin: usize, x_end: usize, nb: usize
     }
 }
 
-/// Ports `ggml_gemm_q2_K_8x8_q8_K` (arch/x86/repack.cpp:3526 @c1d0e7a00).
+/// Ports `ggml_gemm_q2_K_8x8_q8_K` (arch/x86/repack.cpp:3526 @5266f24da).
 ///
 /// With `__AVX512BW__ && __AVX512DQ__` the 512-bit arm, from line 3570,
 /// runs first over the columns up to the last multiple of

@@ -6,12 +6,14 @@
 //! # Provenance
 //!
 //! Ported from the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/fattn-common.cuh` at v0.3.0 (`c1d0e7a00`),
+//! `llama.cpp/ggml/src/ggml-cuda/fattn-common.cuh` at v0.4.0 (`5266f24da`),
 //! plus `amd_mfma_available` and `amd_wmma_available` from
 //! `llama.cpp/ggml/src/ggml-cuda/common.cuh`. The kernels --
 //! `flash_attn_mask_to_KV_max`, `flash_attn_stream_k_fixup_uniform`,
 //! `flash_attn_stream_k_fixup_general` and `flash_attn_combine_results` --
-//! stay CUDA.
+//! stay CUDA. The sparse K/V path v0.4.0 added (`use_sparse`) reuses the
+//! `KV_max` buffer for the indices `fattn.compactMask` writes, which is
+//! `fattn.cu`'s and launches from that translation unit.
 //!
 //! # Which translation unit
 //!
@@ -26,6 +28,7 @@ const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
 const convert = @import("convert.zig");
+const fattn = @import("fattn.zig");
 
 const c = impl.c;
 const cu = common.cu;
@@ -35,7 +38,7 @@ extern fn powf(x: f32, y: f32) f32;
 extern fn log2f(x: f32) f32;
 extern fn floorf(x: f32) f32;
 
-/// Ports `FATTN_KQ_STRIDE` (fattn-common.cuh:9 @c1d0e7a00).
+/// Ports `FATTN_KQ_STRIDE` (fattn-common.cuh:9 @5266f24da).
 pub const kq_stride = 256;
 
 /// `sizeof(half)`.
@@ -51,25 +54,25 @@ const Float2 = extern struct { x: f32, y: f32 };
 // -----------------------------------------------------------------------------
 // AMD predicates
 
-/// `GGML_CUDA_CC_CDNA1` (common.cuh:71 @c1d0e7a00).
+/// `GGML_CUDA_CC_CDNA1` (common.cuh:72 @5266f24da).
 const cc_cdna1 = common.cc.offset_amd + 0x908;
-/// `GGML_CUDA_CC_RDNA1` (common.cuh:77 @c1d0e7a00).
+/// `GGML_CUDA_CC_RDNA1` (common.cuh:78 @5266f24da).
 const cc_rdna1 = common.cc.offset_amd + 0x1010;
-/// `GGML_CUDA_CC_RDNA3` (common.cuh:79 @c1d0e7a00).
+/// `GGML_CUDA_CC_RDNA3` (common.cuh:80 @5266f24da).
 const cc_rdna3 = common.cc.offset_amd + 0x1100;
-/// `GGML_CUDA_CC_RDNA3_5` (common.cuh:80 @c1d0e7a00).
+/// `GGML_CUDA_CC_RDNA3_5` (common.cuh:81 @5266f24da).
 const cc_rdna3_5 = common.cc.offset_amd + 0x1150;
-/// `GGML_CUDA_CC_RDNA4` (common.cuh:81 @c1d0e7a00).
+/// `GGML_CUDA_CC_RDNA4` (common.cuh:82 @5266f24da).
 const cc_rdna4 = common.cc.offset_amd + 0x1200;
 
-/// Ports `amd_mfma_available` (common.cuh:332 @c1d0e7a00), the
+/// Ports `amd_mfma_available` (common.cuh:333 @5266f24da), the
 /// `!GGML_HIP_NO_MMQ_MFMA` arm: `GGML_CUDA_CC_IS_CDNA(cc)`. False for every
 /// CUDA compute capability.
 pub fn amdMfmaAvailable(x: c_int) bool {
     return x >= cc_cdna1 and x < cc_rdna1;
 }
 
-/// Ports `amd_wmma_available` (common.cuh:340 @c1d0e7a00):
+/// Ports `amd_wmma_available` (common.cuh:341 @5266f24da):
 /// `GGML_CUDA_CC_IS_RDNA4(cc) || GGML_CUDA_CC_IS_RDNA3(cc)`. False for every
 /// CUDA compute capability.
 pub fn amdWmmaAvailable(x: c_int) bool {
@@ -109,14 +112,14 @@ fn u32Of(x: anytype) u32 {
 // -----------------------------------------------------------------------------
 // F16 scratch
 
-/// Ports `ggml_cuda_flash_attn_ext_f16_extra_data` (fattn-common.cuh:47 @c1d0e7a00).
+/// Ports `ggml_cuda_flash_attn_ext_f16_extra_data` (fattn-common.cuh:47 @5266f24da).
 pub const F16ExtraData = struct {
     K: usize = 0,
     V: usize = 0,
     end: usize = 0,
 };
 
-/// Ports `ggml_cuda_flash_attn_ext_get_f16_extra_data` (fattn-common.cuh:53 @c1d0e7a00):
+/// Ports `ggml_cuda_flash_attn_ext_get_f16_extra_data` (fattn-common.cuh:53 @5266f24da):
 /// where in `dst`'s allocation, past `dst`'s own bytes, the F16 copies of K
 /// and V go. Computed from `dst->data`, so the buffer type's size (asked
 /// with whatever `data` the tensor has then) and the launch agree only
@@ -197,10 +200,14 @@ pub const LaunchArgs = struct {
     need_f16_K: bool,
     need_f16_V: bool,
     stream_k: bool,
+    /// Gather K/V through the sparse indices `fattn.compactMask` writes
+    /// from the mask's finite entries, `ggml_flash_attn_ext_set_n_kv_max`'s
+    /// op_params slot 4 of them per mask row; no default, as the C has none.
+    use_sparse: bool,
     warp_size: c_int = common.warp_size,
 };
 
-/// Ports `launch_fattn` (fattn-common.cuh:973 @c1d0e7a00).
+/// Ports `launch_fattn` (fattn-common.cuh:976 @5266f24da).
 ///
 /// Parameters:
 /// - `library`: the translation unit the calling case is instantiated in;
@@ -333,10 +340,21 @@ pub fn launchFattn(
     const ntiles_z_gqa: c_int = @divTrunc(gqa_ratio + ncols2 - 1, ncols2);
     const ntiles_dst: c_int = i32Of(@as(i64, ntiles_x * ntiles_z_gqa) * K.ne[2] * Q.ne[3]);
 
+    const n_kv_max: i32 = if (a.use_sparse) impl.getOpParamsI32(KQV, 4) else 0;
+    if (a.use_sparse) {
+        impl.assert(mask != null, "mask != nullptr");
+        impl.assert(n_kv_max > 0, "n_kv_max > 0");
+        const m = mask.?;
+        const mask_rows: usize = @as(usize, @bitCast(m.ne[1])) *% @as(usize, @bitCast(m.ne[3]));
+
+        _ = KV_max.alloc(@as(usize, @intCast(n_kv_max)) *% mask_rows);
+        fattn.compactMask(m, KV_max.ptr, n_kv_max, main_stream);
+    }
+
     // Optional optimization where the mask is scanned to determine whether part of the calculation can be skipped.
     // Only worth the overhead if there is at lease one FATTN_KQ_STRIDE x FATTN_KQ_STRIDE square to be skipped or
     //     multiple sequences of possibly different lengths.
-    if (mask != null and @rem(K.ne[1], kq_stride) == 0 and (Q.ne[1] >= 1024 or Q.ne[3] > 1)) {
+    if (!a.use_sparse and mask != null and @rem(K.ne[1], kq_stride) == 0 and (Q.ne[1] >= 1024 or Q.ne[3] > 1)) {
         const m = mask.?;
         const s31 = i64Of(m.nb[1] / sizeof_half2);
         const s33 = i64Of(m.nb[3] / sizeof_half2);
@@ -362,7 +380,8 @@ pub fn launchFattn(
     impl.assert(max_blocks_per_sm > 0, "max_blocks_per_sm > 0");
     var parallel_blocks: c_int = max_blocks_per_sm;
 
-    const ntiles_KV: c_int = i32Of(@divTrunc(K.ne[1] + a.nbatch_fa - 1, a.nbatch_fa)); // Max. number of parallel blocks limited by KV cache length.
+    const n_kv: i64 = if (a.use_sparse) n_kv_max else K.ne[1];
+    const ntiles_KV: c_int = i32Of(@divTrunc(n_kv + a.nbatch_fa - 1, a.nbatch_fa)); // Max. number of parallel blocks limited by KV cache length.
 
     var blocks_num: kernels.Dim3 = .{};
     if (a.stream_k) {
@@ -483,7 +502,7 @@ pub fn launchFattn(
         i32Of(Q.nb[2]),
         i32Of(Q.nb[3]),
         i32Of(K.ne[0]),
-        i32Of(K.ne[1]),
+        i32Of(n_kv),
         i32Of(K.ne[2]),
         i32Of(K.ne[3]),
         i32Of(nb11),

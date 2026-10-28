@@ -29,6 +29,12 @@
 -m $PLAIN -p 16 -n 2 -r 1 -ngl 99 -fa 1,0 -ctk q8_0 -ctv q8_0
 -m $PLAIN -p 16 -n 2 -r 1 -embd 1 -nopo 1 --no-host 1 -nkvo 1
 -m $PLAIN -p 16 -n 0 -r 1 -lm none,mmap
+-m $PLAIN -p 16 -n 0 -r 1 -lzm on,off
+-m $PLAIN -p 16 -n 0 -r 1 -lzm auto -o csv
+-m $PLAIN -p 16 -n 0 -r 1 --lazy-mode off -o json
+-m $PLAIN -p 16 -n 0 -r 1 -lzm off -lm none -o sql
+-m $PLAIN -p 16 -n 0 -r 1 -lzm on,bogus
+-m $PLAIN -p 16 -n 0 -r 1 -lzm
 -m $PLAIN -p 16 -n 0 -r 1 -mmp 0,1
 -m $PLAIN -p 16 -n 0 -r 1 -ts 1/0 -sm none -mg 0
 -m $PLAIN -p 16 -n 0 -r 1 -ot token_embd=CPU,

@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-threading.cpp` (v0.3.0, `c1d0e7a00`),
+//! Ported from `llama.cpp/ggml/src/ggml-threading.cpp` (v0.4.0, `5266f24da`),
 //! 12 lines of C++. Each declaration below names the C++ it replaces and the
 //! line it began at. This file exports the same C symbols with the same
 //! signatures, so the C and C++ that call into it link unchanged.
@@ -43,7 +43,7 @@
 const std = @import("std");
 const impl = @import("impl.zig");
 
-/// Mirrors `ggml_critical_section_mutex` (ggml-threading.cpp:4 @c1d0e7a00).
+/// Mirrors `ggml_critical_section_mutex` (ggml-threading.cpp:4 @5266f24da).
 ///
 /// Exported rather than file-private because the C++ global it replaces is
 /// exported too, and `scripts/port-coverage` compares the whole symbol list.
@@ -53,7 +53,7 @@ const impl = @import("impl.zig");
 /// libc++'s `constexpr mutex()`.
 export var ggml_critical_section_mutex: impl.CxxMutex = .{};
 
-/// Ports `ggml_critical_section_start` (ggml-threading.cpp:6 @c1d0e7a00).
+/// Ports `ggml_critical_section_start` (ggml-threading.cpp:6 @5266f24da).
 ///
 /// Return: nothing. Blocks until the lock is held.
 export fn ggml_critical_section_start() callconv(.c) void {
@@ -64,7 +64,7 @@ export fn ggml_critical_section_start() callconv(.c) void {
     ggml_critical_section_mutex.lock();
 }
 
-/// Ports `ggml_critical_section_end` (ggml-threading.cpp:10 @c1d0e7a00).
+/// Ports `ggml_critical_section_end` (ggml-threading.cpp:10 @5266f24da).
 ///
 /// Return: nothing.
 export fn ggml_critical_section_end() callconv(.c) void {

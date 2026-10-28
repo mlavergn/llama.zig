@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/nemotron-v2-vl.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/nemotron-v2-vl.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -11,7 +11,7 @@ const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const c = impl.c;
 
-/// Ports `build` (nemotron-v2-vl.cpp:3 @c1d0e7a00), a member of `clip_graph_nemotron_v2_vl`.
+/// Ports `build` (nemotron-v2-vl.cpp:3 @5266f24da), a member of `clip_graph_nemotron_v2_vl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

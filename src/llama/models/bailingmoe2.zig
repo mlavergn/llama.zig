@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/bailingmoe2.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_bailingmoe2`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/bailingmoe2.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_bailingmoe2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -21,22 +21,19 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_bailingmoe2`'s `load_arch_hparams` (models/bailingmoe2.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_bailingmoe2`'s `load_arch_hparams` (models/bailingmoe2.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     if (try meta.getKey(u32, .leading_dense_block_count, false, exc)) |v| hp.n_layer_dense_lead = v;
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
     hp.n_expert_shared = (try meta.getKey(u32, .expert_shared_count, true, exc)).?;
     if (try meta.getKey(f32, .expert_weights_scale, false, exc)) |v| hp.expert_weights_scale = v;
     if (try meta.getKey(bool, .expert_weights_norm, false, exc)) |v| hp.expert_weights_norm = v;
     hp.expert_gating_func = (try meta.getKey(u32, .expert_gating_func, true, exc)).?;
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-
-    impl.assert(hp.n_layer_nextn < hp.n_layer_all, "models/bailingmoe2.cpp", 14, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < n_layer_impl\"");
 
     self.type = switch (hp.nLayer()) {
         20 => .@"16b_a1b",
@@ -45,12 +42,12 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_bailingmoe2`'s `load_arch_tensors` (models/bailingmoe2.cpp:23 @c1d0e7a00).
+/// Ports `llama_model_bailingmoe2`'s `load_arch_tensors` (models/bailingmoe2.cpp:20 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const n_expert_shared: i64 = hp.n_expert_shared;
-    const n_ff_exp: i64 = hp.n_ff_exp;
+    const n_ff_exp: i64 = hp.nFfExp(0);
     const nr = loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
@@ -59,8 +56,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.output_norm = try self.createTensor(.{ .tensor = .output_norm, .suffix = "weight" }, &.{l.n_embd}, 0, exc);
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
-    impl.assert(l.n_expert > 0, "models/bailingmoe2.cpp", 35, "n_expert > 0 && \"n_expert must be > 0 for bailingmoe2\"");
-    impl.assert(l.n_expert_used > 0, "models/bailingmoe2.cpp", 36, "n_expert_used > 0 && \"n_expert_used must be > 0 for bailingmoe2\"");
+    impl.assert(l.n_expert > 0, "models/bailingmoe2.cpp", 32, "n_expert > 0 && \"n_expert must be > 0 for bailingmoe2\"");
+    impl.assert(l.n_expert_used > 0, "models/bailingmoe2.cpp", 33, "n_expert_used > 0 && \"n_expert_used must be > 0 for bailingmoe2\"");
 
     var i: i32 = 0;
     while (i < l.n_layer_all) : (i += 1) {
@@ -81,7 +78,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
         if (@as(u32, @intCast(i)) >= hp.n_layer_dense_lead) {
             // The mixture-of-experts layers.
-            const n_ff_shexp: i64 = @as(i64, if (hp.n_ff_shexp != 0) hp.n_ff_shexp else hp.n_ff_exp) * n_expert_shared;
+            const n_ff_shexp: i64 = @as(i64, if (hp.n_ff_shexp != 0) hp.n_ff_shexp else hp.nFfExp(0)) * n_expert_shared;
 
             layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_expert }, flags, exc);
             layer.ffn_exp_probs_b = try self.createTensor(.{ .tensor = .ffn_exp_probs_b, .suffix = "bias", .bid = i }, &.{l.n_expert}, nr | flags, exc);
@@ -114,19 +111,19 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_bailingmoe2`'s `build_arch_graph` (models/bailingmoe2.cpp:89 @c1d0e7a00).
+/// Ports `llama_model_bailingmoe2`'s `build_arch_graph` (models/bailingmoe2.cpp:86 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_bailingmoe2`'s `graph`
-/// (models/bailingmoe2.cpp:93 @c1d0e7a00).
+/// (models/bailingmoe2.cpp:90 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/bailingmoe2.cpp", 97, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/bailingmoe2.cpp", 94, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 

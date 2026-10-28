@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/llama4.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/llama4.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -12,7 +12,7 @@ const graph = @import("../graph.zig");
 const kimivl = @import("kimivl.zig");
 const c = impl.c;
 
-/// Ports `build` (mtmd/models/llama4.cpp:3 @c1d0e7a00), a member of `clip_graph_llama4`.
+/// Ports `build` (mtmd/models/llama4.cpp:3 @5266f24da), a member of `clip_graph_llama4`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

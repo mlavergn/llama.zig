@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.3.0
-//! (`c1d0e7a00`). The C++ holds pipelines in `std::shared_ptr`s that live
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
+//! (`5266f24da`). The C++ holds pipelines in `std::shared_ptr`s that live
 //! until their device is destroyed; here they are heap records owned by
 //! their device, never freed before it.
 
@@ -19,11 +19,11 @@ const d = &common.dispatch;
 const allocator = common.allocator;
 const Device = m.device.Device;
 
-/// Ports `MAX_PARAMETER_COUNT` and `MAX_FUSED_ADDS` (ggml-vulkan.cpp:216, 218 @c1d0e7a00).
+/// Ports `MAX_PARAMETER_COUNT` and `MAX_FUSED_ADDS` (ggml-vulkan.cpp:216, 218 @5266f24da).
 pub const max_parameter_count = 12;
 pub const max_fused_adds = max_parameter_count - 3;
 
-/// Ports `vk_pipeline_struct` (ggml-vulkan.cpp:222 @c1d0e7a00).
+/// Ports `vk_pipeline_struct` (ggml-vulkan.cpp:222 @5266f24da).
 ///
 /// `initialized`, `compile_pending`, `all_pipelines` membership and the
 /// `next` link are guarded by the device's `compile_mutex`; `compiled` is
@@ -57,7 +57,7 @@ pub const Pipeline = struct {
     }
 };
 
-/// Ports `vk_matmul_pipeline_struct` (ggml-vulkan.cpp:253 @c1d0e7a00): the
+/// Ports `vk_matmul_pipeline_struct` (ggml-vulkan.cpp:253 @5266f24da): the
 /// three tile sizes, each unaligned and aligned.
 pub const MatmulPipeline = struct {
     l: ?*Pipeline = null,
@@ -67,7 +67,7 @@ pub const MatmulPipeline = struct {
     a_m: ?*Pipeline = null,
     a_s: ?*Pipeline = null,
 
-    /// Ports `vk_matmul_pipeline_struct`'s `is_empty` (ggml-vulkan.cpp:259 @c1d0e7a00):
+    /// Ports `vk_matmul_pipeline_struct`'s `is_empty` (ggml-vulkan.cpp:259 @5266f24da):
     /// true when all unaligned pipelines are null.
     pub fn isEmpty(self: *const MatmulPipeline) bool {
         return self.l == null and self.m == null and self.s == null;
@@ -81,7 +81,7 @@ pub const MatmulPipeline = struct {
     }
 };
 
-/// Ports `vk_matmul_pipeline2` (ggml-vulkan.cpp:265 @c1d0e7a00): one matmul
+/// Ports `vk_matmul_pipeline2` (ggml-vulkan.cpp:265 @5266f24da): one matmul
 /// pipeline per accumulator precision, both always allocated.
 pub const MatmulPipeline2 = struct {
     f32acc: *MatmulPipeline,
@@ -100,7 +100,7 @@ const word_count_shift: u5 = spv.SpvWordCountShift;
 
 /// Ports `kSpvOpCooperativeMatrixLoadTensorNV`,
 /// `kSpvCapabilityCooperativeMatrixDecodeVectorNV` and
-/// `kSpvTensorAddressingDecodeVectorFuncBit` (ggml-vulkan.cpp:2634, 2635, 2636 @c1d0e7a00).
+/// `kSpvTensorAddressingDecodeVectorFuncBit` (ggml-vulkan.cpp:2709, 2710, 2711 @5266f24da).
 const op_cooperative_matrix_load_tensor_nv: u32 = 5367;
 const capability_cooperative_matrix_decode_vector_nv: u32 = 5447;
 const tensor_addressing_decode_vector_func_bit: u32 = 0x4;
@@ -121,7 +121,7 @@ fn literalEq(words: []const u32, s: []const u8) bool {
     return std.mem.eql(u8, bytes[0..len], s);
 }
 
-/// Ports `ggml_vk_strip_decode_vector` (ggml-vulkan.cpp:2644 @c1d0e7a00):
+/// Ports `ggml_vk_strip_decode_vector` (ggml-vulkan.cpp:2719 @5266f24da):
 /// removes `SPV_NV_cooperative_matrix_decode_vector` from a module so a
 /// driver with only `SPV_NV_cooperative_matrix2` can load it.
 ///
@@ -213,7 +213,7 @@ fn stripDecodeVector(code: []const u32) ?[]u32 {
     return out.toOwnedSlice(allocator) catch impl.abort("ggml_vulkan: out of memory");
 }
 
-/// Ports `ggml_vk_roll_bk_loop` (ggml-vulkan.cpp:2772 @c1d0e7a00): swaps the
+/// Ports `ggml_vk_roll_bk_loop` (ggml-vulkan.cpp:2847 @5266f24da): swaps the
 /// unroll hint of `mul_mm.comp`'s BK loop for `DontUnroll`.
 ///
 /// Return: the patched copy, owned by the caller, or null when no BK loop
@@ -329,7 +329,7 @@ fn patchFloatControls(device: *const Device, spv_words: []const u32) []u32 {
 }
 
 /// What `ggml_vk_load_shaders` hands to the compile: `CompileTask`
-/// (ggml-vulkan.cpp:4151 @c1d0e7a00) without the pipeline.
+/// (ggml-vulkan.cpp:4231 @5266f24da) without the pipeline.
 pub const CompileArgs = struct {
     spv: []const u8,
     entrypoint: [:0]const u8,
@@ -341,7 +341,7 @@ pub const CompileArgs = struct {
     required_subgroup_size: u32,
 };
 
-/// Ports `ggml_vk_create_pipeline_func` (ggml-vulkan.cpp:2843 @c1d0e7a00):
+/// Ports `ggml_vk_create_pipeline_func` (ggml-vulkan.cpp:2918 @5266f24da):
 /// creates the shader module, layout and compute pipeline for `pipeline`,
 /// records it in the device's pipeline list and marks it compiled.
 ///
@@ -521,7 +521,7 @@ fn readStatistics(device: *Device, pipeline: *Pipeline) void {
     }
 }
 
-/// Ports `ggml_vk_destroy_pipeline` (ggml-vulkan.cpp:3096 @c1d0e7a00).
+/// Ports `ggml_vk_destroy_pipeline` (ggml-vulkan.cpp:3171 @5266f24da).
 pub fn destroyPipeline(device: vk.VkDevice, pipeline: *Pipeline) void {
     d.vkDestroyPipelineLayout.?(device, pipeline.layout, null);
     d.vkDestroyShaderModule.?(device, pipeline.shader_module, null);

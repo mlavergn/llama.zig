@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/pad.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/pad.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/pad.cuh` at v0.4.0 (`5266f24da`). The
 //! kernel, `pad_f32`, stays CUDA.
 
 const std = @import("std");
@@ -16,10 +16,10 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_PAD_BLOCK_SIZE` (pad.cuh:3 @c1d0e7a00).
+/// Ports `CUDA_PAD_BLOCK_SIZE` (pad.cuh:3 @5266f24da).
 const block_size = 256;
 
-/// Ports `pad_f32_cuda` (pad.cu:64 @c1d0e7a00), which launches with
+/// Ports `pad_f32_cuda` (pad.cu:64 @5266f24da), which launches with
 /// `<<<>>>`.
 fn padF32Cuda(
     src: ?*const anyopaque,
@@ -53,7 +53,7 @@ fn padF32Cuda(
     });
 }
 
-/// Ports `ggml_cuda_op_pad` (pad.cu:76 @c1d0e7a00).
+/// Ports `ggml_cuda_op_pad` (pad.cu:76 @5266f24da).
 pub fn opPad(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;

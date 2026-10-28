@@ -18,6 +18,7 @@ const ext_only = [_][]const u8{
     "llama_get_embeddings_nextn",
     "llama_get_embeddings_nextn_ith",
     "llama_get_memory_breakdown",
+    "llama_model_dflash_selector_top_k",
     "llama_model_get_device",
     "llama_model_get_tok_embd",
     "llama_model_n_devices",

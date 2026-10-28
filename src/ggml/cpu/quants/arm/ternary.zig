@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.3.0,
-//! `c1d0e7a00`), the `__ARM_NEON` arms of the dot products at lines 1397 and
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.4.0,
+//! `5266f24da`), the `__ARM_NEON` arms of the dot products at lines 1397 and
 //! 1574. Each function names the C it replaces and the line it began at.
 //!
 //! # Numerically the simplest pair in the file
@@ -85,14 +85,14 @@ inline fn epilogue(sumi0_in: i32x4, sumi1: i32x4, y: *const blocks.Q8_K, d: f32,
     return @mulAdd(f32, d, @as(f32, @floatFromInt(neon.addvq_s32(sumi0))), sumf);
 }
 
-/// Ports `k_shift` (arch/arm/quants.c:3952 @c1d0e7a00).
+/// Ports `k_shift` (arch/arm/quants.c:3952 @5266f24da).
 ///
 /// Four lanes each of 1, 3, 9 and 27: the `qh` tail holds four digits per
 /// byte, and one broadcast `u32` times these powers puts a different digit in
 /// each lane's high bits.
 const k_shift: u8x16 = .{ 1, 1, 1, 1, 3, 3, 3, 3, 9, 9, 9, 9, 27, 27, 27, 27 };
 
-/// Ports `ggml_vec_dot_tq1_0_q8_K` (arch/arm/quants.c:1397 @c1d0e7a00).
+/// Ports `ggml_vec_dot_tq1_0_q8_K` (arch/arm/quants.c:1397 @5266f24da).
 ///
 /// Five digits per byte across `qs`, then four per byte in the `qh` tail. The
 /// two blocks in the C are two braced scopes; they are two loops' worth of
@@ -177,7 +177,7 @@ inline fn x_qy(y: [*]const blocks.Q8_K, i: usize, off: usize) [*]const u8 {
     return @as([*]const u8, @ptrCast(&y[i].qs)) + off;
 }
 
-/// Ports `ggml_vec_dot_tq2_0_q8_K` (arch/arm/quants.c:1574 @c1d0e7a00).
+/// Ports `ggml_vec_dot_tq2_0_q8_K` (arch/arm/quants.c:1574 @5266f24da).
 ///
 /// Four two-bit digits per byte, extracted with a shift and a mask rather than
 /// the base-three trick `tq1_0` needs.

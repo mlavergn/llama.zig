@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/sumrows.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/sumrows.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/sumrows.cuh` at v0.4.0 (`5266f24da`). The
 //! kernel, `reduce_rows_f32<false>` from `reduce_rows.cuh`, stays CUDA.
 //!
 //! The block size depends on the device's SM count: 512 threads when there
@@ -20,7 +20,7 @@ const Tensor = c.ggml_tensor;
 
 const kernel = kernels.get("sumrows", "reduce_rows_f32<(bool)0>");
 
-/// Ports `sum_rows_f32_cuda` (sumrows.cu:4 @c1d0e7a00).
+/// Ports `sum_rows_f32_cuda` (sumrows.cu:4 @5266f24da).
 pub fn sumRowsF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, stream: cu.cudaStream_t) void {
     const id = common.getDevice();
     const nsm = common.info().devices[@intCast(id)].nsm;
@@ -34,7 +34,7 @@ pub fn sumRowsF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrow
     }
 }
 
-/// Ports `ggml_cuda_op_sum_rows` (sumrows.cu:19 @c1d0e7a00).
+/// Ports `ggml_cuda_op_sum_rows` (sumrows.cu:19 @5266f24da).
 pub fn opSumRows(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;

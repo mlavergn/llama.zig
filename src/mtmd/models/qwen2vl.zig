@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/qwen2vl.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/qwen2vl.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -12,7 +12,7 @@ const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
 
-/// Ports `build_inp_with_temporal_merge` (mtmd/models/qwen2vl.cpp:3 @c1d0e7a00), a
+/// Ports `build_inp_with_temporal_merge` (mtmd/models/qwen2vl.cpp:3 @5266f24da), a
 /// member of `clip_graph_qwen2vl`: Conv3D as two Conv2D, one per frame.
 pub fn buildInpWithTemporalMerge(g: *graph.Graph) graph.T {
     const ctx0 = g.ctx0;
@@ -53,7 +53,7 @@ pub fn spatialMerge(g: *graph.Graph, inp_in: graph.T, batch_size: c_int) graph.T
     return inp;
 }
 
-/// Ports `build` (mtmd/models/qwen2vl.cpp:32 @c1d0e7a00), a member of `clip_graph_qwen2vl`.
+/// Ports `build` (mtmd/models/qwen2vl.cpp:32 @5266f24da), a member of `clip_graph_qwen2vl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

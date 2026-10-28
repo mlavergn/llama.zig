@@ -37,6 +37,9 @@
 # no -n: the tool's own cap of 512 frames, unless end-of-speech comes first
 -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "uncapped" --seed 9 -o uncapped.wav -c 1024
 -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file $DATA/tone16k.wav
+# a code predictor that shares the talker's hidden size has no proj_in (v0.4.0)
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts_shared.gguf -p "shared width" -n 8 --seed 6 -o shared.wav
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts_shared.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file $DATA/tone16k.wav -o shared-spk.wav
 -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file $DATA/tone44k.wav
 -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file /nonexistent.wav
 -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "cpu" -n 6 --seed 3 --no-mmproj-offload

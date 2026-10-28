@@ -110,7 +110,12 @@ int main() {
     const int64_t ne01s[] = { 1, 2, 3, 4, 5, 6, 16 };
     const int families[] = { 0, 7, 8, 9, 10 };
 
-    for (int dev = 0; dev <= GGML_METAL_DEVICE_M5_ULTRA; dev++) {
+    // Every id the key's int8_t can hold from 0, not up to a named last
+    // enumerator: the sweep stopped at M5_ULTRA when v0.4.0 added A18_PRO
+    // and its 234 rows, and passed 3.5M lookups without asking about them.
+    // Ids past the enum's end must miss the table on both sides.
+    static_assert(GGML_METAL_DEVICE_A18_PRO < 64, "a device id beyond the sweep");
+    for (int dev = 0; dev < 64; dev++) {
         for (int fam : families) {
             for (int ty : types) {
                 for (int dk : { 32, 64, 96, 128, 192, 256, 320, 512, 576 }) {

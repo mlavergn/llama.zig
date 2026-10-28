@@ -10,8 +10,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/glm-dsa.cpp` at v0.3.0
-//! (`c1d0e7a00`): `GLM_5_2_DEFAULT_INDEXER_TYPES`, `llama_model_glm_dsa`'s
+//! Ported from `llama.cpp/src/models/glm-dsa.cpp` at v0.4.0
+//! (`5266f24da`): `GLM_5_2_DEFAULT_INDEXER_TYPES`, `llama_model_glm_dsa`'s
 //! `load_arch_hparams`, `load_arch_tensors` and `build_arch_graph`, and its
 //! `graph` and `graph_mtp`.
 
@@ -28,7 +28,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Mirrors `GLM_5_2_DEFAULT_INDEXER_TYPES` (models/glm-dsa.cpp:6 @c1d0e7a00):
+/// Mirrors `GLM_5_2_DEFAULT_INDEXER_TYPES` (models/glm-dsa.cpp:6 @5266f24da):
 /// GLM-5.2's indexer types, a full indexer every fourth layer after the
 /// first two
 /// (https://huggingface.co/zai-org/GLM-5.2/blob/main/config.json#L26).
@@ -41,12 +41,12 @@ const glm_5_2_default_indexer_types: [hparams_mod.max_layers]u32 = blk: {
     break :blk t;
 };
 
-/// Ports `llama_model_glm_dsa`'s `load_arch_hparams` (models/glm-dsa.cpp:29 @c1d0e7a00).
+/// Ports `llama_model_glm_dsa`'s `load_arch_hparams` (models/glm-dsa.cpp:29 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     _ = try meta.getKeyOrArr(c_int, .rope_dimension_sections, &hp.rope_sections, 4, false, exc);
 
@@ -61,7 +61,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.n_lora_kv = (try meta.getKey(u32, .attention_kv_lora_rank, true, exc)).?;
     if (try meta.getKey(u32, .attention_key_length_mla, false, exc)) |v| hp.n_embd_head_k_mla_impl = v;
     if (try meta.getKey(u32, .attention_value_length_mla, false, exc)) |v| hp.n_embd_head_v_mla_impl = v;
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     hp.n_expert_shared = (try meta.getKey(u32, .expert_shared_count, true, exc)).?;
 
     // DSA.
@@ -75,10 +75,6 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         hp.expert_gating_func = @backingInt(hparams_mod.ExpertGatingFunc.sigmoid);
     }
 
-    // NextN/MTP.
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-    impl.assert(hp.n_layer_nextn < hp.n_layer_all, "models/glm-dsa.cpp", 61, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < n_layer_all\"");
-
     // Backwards compatibility for GLM 5 and 5.1, whose indexers are all
     // full and which have no `indexer_types`.
     const is_pre_5_2 = hp.n_ctx_train < 1048576;
@@ -90,14 +86,12 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     _ = try meta.getKeyOrArr(u32, .attention_indexer_types, &hp.is_indexer_full_impl, hp.nLayer(), false, exc);
 
     self.type = switch (hp.nLayer()) {
-        // 78: a GGUF with NextN/MTP metadata, whose `n_layer()` leaves the
-        // nextn layer out.
-        78, 79 => .@"744b_a40b",
+        78 => .@"744b_a40b",
         else => .unknown,
     };
 }
 
-/// Ports `llama_model_glm_dsa`'s `load_arch_tensors` (models/glm-dsa.cpp:80 @c1d0e7a00).
+/// Ports `llama_model_glm_dsa`'s `load_arch_tensors` (models/glm-dsa.cpp:74 @5266f24da).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -134,7 +128,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     const q_lora_rank: i64 = hp.n_lora_q;
     const kv_lora_rank: i64 = hp.n_lora_kv;
 
-    const n_ff_exp: i64 = hp.n_ff_exp;
+    const n_ff_exp: i64 = hp.nFfExp(0);
 
     const indexer_head_size: i64 = hp.indexer_head_size;
     const indexer_n_head: i64 = hp.indexer_n_head;
@@ -231,18 +225,18 @@ const variant: deepseek32.Variant = .{
     .name = "GLM_DSA",
     .indexer_rope_type = c.LLAMA_ROPE_TYPE_NORM,
     .shared_indexers = true,
-    .line_is_mla = 205,
-    .line_n_rot = 220,
-    .line_ext_factor = 229,
-    .line_prev_top_k = 370,
-    .line_mtp = 547,
-    .line_mtp_inp = 579,
-    .line_mtp_head_norm = 758,
-    .line_mtp_head = 769,
+    .line_is_mla = 199,
+    .line_n_rot = 214,
+    .line_ext_factor = 223,
+    .line_prev_top_k = 364,
+    .line_mtp = 541,
+    .line_mtp_inp = 573,
+    .line_mtp_head_norm = 752,
+    .line_mtp_head = 763,
 };
 
-/// Ports `llama_model_glm_dsa`'s `build_arch_graph` (models/glm-dsa.cpp:195
-/// @c1d0e7a00): the MTP draft head for that graph type, the main model
+/// Ports `llama_model_glm_dsa`'s `build_arch_graph` (models/glm-dsa.cpp:189
+/// @5266f24da): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -250,7 +244,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_glm_dsa`'s `graph`
-/// (models/glm-dsa.cpp:202 @c1d0e7a00): DeepSeek V3.2's, with the indexer
+/// (models/glm-dsa.cpp:196 @5266f24da): DeepSeek V3.2's, with the indexer
 /// roped in the normal layout and the shared indexer layers reusing the
 /// previous full layer's top-k.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
@@ -258,7 +252,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_glm_dsa`'s `graph_mtp`
-/// (models/glm-dsa.cpp:545 @c1d0e7a00): DeepSeek V3.2's, whose DSA indexer
+/// (models/glm-dsa.cpp:539 @5266f24da): DeepSeek V3.2's, whose DSA indexer
 /// does not run either.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     deepseek32.buildGraphMtp(variant, model, b);

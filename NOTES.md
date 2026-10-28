@@ -7768,3 +7768,134 @@ same.
 
 **Not run**: the x86_64 slices -- this Mac has no Rosetta and there is no
 Intel Mac -- and the tvOS and visionOS devices. `PLAN.md`, "What is left".
+
+## Upstream sync v0.3.0 → v0.4.0
+
+The first sync (`SYNC.md`, `UPSTREAM.md`). The pin moved from `v0.3.0`
+(`c1d0e7a00`, `b10621`) to `v0.4.0` (`5266f24da`, `b10809`), ggml from
+0.22.0 to 0.23.0, and the port's version with it: `0.4.0`.
+
+### What moved
+
+`scripts/upstream-map` mapped the diff onto the citations: **456 touched**
+(each re-read at v0.4.0 and re-cited), **217 hunks no citation covered**
+(new code, each read and ported or ruled out of scope), **29 changed files
+with no citation at all**, and **7,601 untouched citations repinned**
+mechanically. `scripts/upstream-relines` moved **529** `__LINE__` literals,
+the abort-message line numbers no citation carries. Every citation in
+`src/`, `cli/` and `tools/` is now at `@5266f24da`; `port-links` reads
+them all at that one commit.
+
+The upstream changes ported, by area:
+
+- **ggml**: `GGML_GLU_OP_SWIGLU_CLAMP`; sparse flash attention
+  (`ggml_flash_attn_ext_set_n_kv_max`, op_params slot 4);
+  `ggml_backend_graph_optimize_params` and the scheduler's `add_alloc_dep`;
+  `ggml_op_alloc_size_may_expand`; the meta backend's `set_usage`; a
+  batched `conv_transpose_2d`; `SET_ROWS` admitted by the backward build's
+  in-place assert.
+- **CPU**: `iqp.cpp`'s IQ panel GEMM (x86 AVX2 at run time; compiled and
+  `port-coverage`d everywhere).
+- **Metal**: the new pipelines (SSD scan, radix top-k, sparse FA vec),
+  2,630 new tuning rows and the `A18_PRO` device id.
+- **CUDA and Vulkan**: their host-layer changes, gated on the GB10
+  (pickup).
+- **libllama**: lazy tensor loading (`llama_lazy_mode`, a context map keyed
+  on buffer type and laziness); per-layer `n_expert_used` and `n_ff_exp`;
+  the PLE fields; `non_causal_type`; `llama_memory_hybrid_idx`; the
+  `qwen4exp` architecture (147 entries now); session format versions 10
+  and 3; `max_buf_size` for the quantizer.
+- **libmtmd**: the `deepseek4v` projector (61 types); two new exports (84).
+- **Tools**: ten new upstream flags in `cli/upstream_flags.zig`; `-lzm` and
+  `-ncffn` deferred (`UPSTREAM.md`).
+
+The version headers are now generated as upstream generates them:
+`ggml-version.h`, `llama-version.h` and `build-info.cpp` come from the
+`.in` templates through `addConfigHeader`, in both `build.zig`s, instead
+of `-DGGML_VERSION` defines that had to be edited by hand.
+
+### The tooling, and what it got wrong first
+
+A sync needs tools no stage did, and each one was wrong on first use.
+
+- **`upstream-map --repin`** replaced numbers in sequence, so a line
+  citing 545 and 546 became 546 and 547; it rewrote the `@sha` of a second
+  citation sharing a line; it cut a definition's extent at the `;` inside
+  a `for (` header; and it skipped the second citation on a line. All four
+  fixed by rewriting by position and tracking parentheses. A repinned
+  citation must also have **identical text** at both commits, and an
+  extent that looks wrong is reported as `SUSPECT EXTENT`; the text check
+  was negative-tested.
+- **`upstream-relines`** first matched only `"<file>", <N>`, and left
+  every line number handed to a helper (`outOfBounds(248, ...)` and kin)
+  at v0.3.0. Its `HELPERS` table now names each such helper. It is not
+  idempotent: run it once per sync.
+- **The generators hard-coded the pin.** Each carried `c1d0e7a00`, so
+  regenerating after the move would have cited new lines at the old
+  commit. They read `build/upstream.zig` now, through
+  `scripts/upstream_pin.py` and, for the bash golden scripts,
+  `scripts/upstream_pin.sh`.
+- **`gen-hparams` dropped every member after a one-line member function**
+  in `llama_hparams`, silently; v0.4.0 added one mid-struct. It skips
+  them now; 174 members. `gen-kargs` emitted a pre-0.17 std call.
+- **`tuning-diff` stopped sweeping at `M5_ULTRA`**, so `A18_PRO`, new at
+  v0.4.0, was never compared. It sweeps 64 ids now, behind a
+  `static_assert`; negative-tested. `tuning_table.zig` is generated
+  (`gen-tuning-table`), reproducing the v0.3.0 table exactly before it
+  took the new rows.
+- **Metal's `graph_optimize` signature was hidden behind an `@ptrCast`**,
+  so upstream's new third parameter compiled without complaint. It is
+  typed now.
+- **`make validate` runs `clean`** (the styleguide's `validate: clean
+  format lint build test`), which deletes `zig-out/` and with it the arch
+  and mmproj fixtures. The first full gate run generated them first and
+  lost them; `SYNC.md`, Step 7, runs `validate` first.
+
+### The gates
+
+The Mac set, run in full: 54 of 58 passed first time. The four:
+
+- **`api-diff`** (and `validate`, which runs it) compared
+  `llama_model_default_params` as raw bytes. v0.4.0's `lazy_mode` field
+  opened four bytes of padding after `main_gpu`, which the C++'s
+  aggregate initialiser happens to zero and a Zig struct literal does
+  not. The dump now copies the fields into a zeroed struct
+  (`fieldsOnly`); an injected `main_gpu = 1` still fails it.
+- **`quant-diff`** died in the C++: since v0.4.0 **upstream aborts saving
+  any vocab-only model** -- `add_kv_from_model` asks `hparams.n_ff_exp()`,
+  now an accessor bounded by `n_layer_all`, which `load_hparams` never
+  reads for vocab-only (llama-hparams.cpp:79). The port aborts on the
+  same line. Vocab-only saves now go through `sameDeath` in forked
+  children, as charsmap saves did; the tokenizer keys the saver writes
+  are covered by the full models alone.
+- **`adapter-diff`**, gpu configuration only: no combination of the
+  port's six candidate copies per adapter reproduced the C++'s
+  `unordered_map` order, which is keyed on heap addresses. Rerun
+  unchanged, it passed, 278,152 checks. Allocator luck, not the sync;
+  left as is.
+- **`validate`** stopped at `api-diff`; rerun after it.
+
+**One upstream behaviour change shows only in an abort message.** At
+v0.3.0 several of `opt-llama-diff`'s weights stopped at the backward
+build's "inplace operations are currently not supported", reached through
+the KV cache's `ggml_set_rows`. v0.4.0 admits `SET_ROWS` there, and all
+three now abort on the attention gate's `sigmoid` instead -- on both
+sides.
+
+**Every golden reproduced at v0.4.0** (`vecdot-golden`, `vec-golden`,
+`quants-golden`, at the baseline and `generic`, and `iq-grids`): only the
+provenance line changed, apart from the `IQ4_NL` `zeros` entry, which
+reads uninitialized memory in the C and is skipped by its test. The
+CMake reference those scripts link (`make buildmacos`) was rebuilt at
+v0.4.0 first: it is not moved by `zig build reference`, and its libraries
+dated from before the sync. `SYNC.md`'s list of what a sync rebuilds now
+names it.
+
+`arch-model-diff` 160 pass, the two `REF-ABORT`s known at v0.3.0 (PLM,
+`rwkv6qwen2`); `context-diff` 2,256,287 checks; `mtmd` gates 260M checks;
+`tools-diff`, `cnv-diff`, `fit-diff`, `jinja-diff`, `ops-diff`,
+`repack-diff`, `node-diff` and `parity-port` at the baseline, `apple_m3`,
+`generic`, `apple_a7` and `apple_a12`; `struct-layout`, `tuning-diff`
+(11.3M lookups), `metal-diff`, `meta-diff`, `blas-diff`. The GB10 and
+both Windows machines are pickups (`PLAN.md`, "Pickup for the v0.4.0
+sync"), and must clear before v0.4.1 starts.

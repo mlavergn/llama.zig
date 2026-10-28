@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmid.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/mmid.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/mmid.cuh` at v0.4.0 (`5266f24da`). The
 //! kernel, `mm_ids_helper`, stays CUDA.
 
 const std = @import("std");
@@ -14,7 +14,7 @@ const kernels = @import("kernels.zig");
 
 const cu = common.cu;
 
-/// Ports `launch_mm_ids_helper` (mmid.cu:124 @c1d0e7a00).
+/// Ports `launch_mm_ids_helper` (mmid.cu:132 @5266f24da).
 fn launchMmIdsHelper(
     comptime n_expert_used_template: comptime_int,
     ids: ?*const i32,
@@ -50,7 +50,7 @@ fn launchMmIdsHelper(
     }, .{ ids, ids_src1, ids_dst, expert_bounds, n_tokens, n_expert_used_var, nchannels_y, si1, sis1, write_inverse });
 }
 
-/// Ports `ggml_cuda_launch_mm_ids_helper` (mmid.cu:143 @c1d0e7a00).
+/// Ports `ggml_cuda_launch_mm_ids_helper` (mmid.cu:151 @5266f24da).
 pub fn launchMmIdsHelperDispatch(
     ids: ?*const i32,
     ids_src1: ?*i32,
@@ -66,7 +66,7 @@ pub fn launchMmIdsHelperDispatch(
     stream: cu.cudaStream_t,
 ) void {
     switch (n_expert_used) {
-        inline 2, 4, 6, 8, 16, 32 => |n| launchMmIdsHelper(n, ids, ids_src1, ids_dst, expert_bounds, n_experts, n_tokens, n_expert_used, nchannels_y, si1, sis1, write_inverse, stream),
+        inline 2, 4, 6, 8, 10, 16, 32 => |n| launchMmIdsHelper(n, ids, ids_src1, ids_dst, expert_bounds, n_experts, n_tokens, n_expert_used, nchannels_y, si1, sis1, write_inverse, stream),
         else => launchMmIdsHelper(0, ids, ids_src1, ids_dst, expert_bounds, n_experts, n_tokens, n_expert_used, nchannels_y, si1, sis1, write_inverse, stream),
     }
 }

@@ -1,16 +1,16 @@
-// Not a port. The six `common` symbols `llama.cpp/tests/test-llama-archs.cpp`
+// Not a port. The nine `common` symbols `llama.cpp/tests/test-llama-archs.cpp`
 // reaches, so that file can be compiled unmodified against `libllama-ref.a`
 // alone, without upstream's `common` library -- which llama.cpp.zmake builds
 // as an intermediate and does not install, and which drags in httplib, the
-// chat parsers and jinja for six functions.
+// chat parsers and jinja for nine functions.
 //
 // `scripts/gen-arch-fixtures` builds the test with this beside it and runs
 // its `-o <dir>` mode: upstream's own fixture code writes one small random
 // model per architecture through `llama_model_saver`, and those files are
 // what `scripts/arch-model-diff` loads through the C++ and the port.
 //
-// `common_batch_add` is copied from `llama.cpp/common/common.cpp` at v0.3.0
-// (`c1d0e7a00`); the logging is reduced to stderr, which is all the test
+// `common_batch_add` is copied from `llama.cpp/common/common.cpp` at v0.4.0
+// (`5266f24da`); the logging is reduced to stderr, which is all the test
 // needs: it only ever logs progress and errors.
 
 #include "common.h"
@@ -19,10 +19,32 @@
 #include <cstdarg>
 #include <cstdio>
 
-// The test only compares this against a log level; LOG_DEFAULT_LLAMA is
-// common/log.cpp's initial value.
+// The threshold the LOG_* macros compare against, as `common/log.cpp` keeps
+// it (log.cpp:29, 31, 35 @5266f24da): since v0.4.0 the test raises it to
+// LOG_LEVEL_DEBUG at start-up and filters libllama's log by
+// `common_log_get_verbosity` itself.
+int common_log_verbosity_thold = LOG_DEFAULT_LLAMA;
+
 int common_log_get_verbosity_thold(void) {
-    return LOG_DEFAULT_LLAMA;
+    return common_log_verbosity_thold;
+}
+
+void common_log_set_verbosity_thold(int verbosity) {
+    common_log_verbosity_thold = verbosity;
+}
+
+// Copied from `common/log.cpp` (log.cpp:441 @5266f24da).
+int common_log_get_verbosity(enum ggml_log_level level) {
+    switch (level) {
+        case GGML_LOG_LEVEL_DEBUG: return LOG_LEVEL_DEBUG;
+        case GGML_LOG_LEVEL_INFO:  return LOG_LEVEL_TRACE;
+        case GGML_LOG_LEVEL_WARN:  return LOG_LEVEL_WARN;
+        case GGML_LOG_LEVEL_ERROR: return LOG_LEVEL_ERROR;
+        case GGML_LOG_LEVEL_CONT:  return LOG_LEVEL_TRACE;
+        case GGML_LOG_LEVEL_NONE:
+        default:
+            return LOG_LEVEL_OUTPUT;
+    }
 }
 
 struct common_log * common_log_main() {

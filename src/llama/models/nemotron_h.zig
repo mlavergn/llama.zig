@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nemotron-h.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_nemotron_h`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/nemotron-h.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_nemotron_h`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_attention_layer` and `build_ffn_layer`, which Nemotron-H MoE
 //! shares.
@@ -32,7 +32,7 @@ fn divI64(a: i64, b: i64) i64 {
 }
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_hparams`
-/// (models/nemotron-h.cpp:3 @c1d0e7a00).
+/// (models/nemotron-h.cpp:5 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -41,10 +41,6 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.ssm_d_state = (try meta.getKey(u32, .ssm_state_size, true, exc)).?;
     hp.ssm_dt_rank = (try meta.getKey(u32, .ssm_time_step_rank, true, exc)).?;
     hp.ssm_n_group = (try meta.getKey(u32, .ssm_group_count, true, exc)).?;
-
-    // NextN/MTP: an optional draft head appended as extra trailing blocks.
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-    impl.assert(hp.n_layer_nextn < hp.n_layer_all, "models/nemotron-h.cpp", 12, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < n_layer_all\"");
 
     // A layer is recurrent if and only if its n_head_kv and its n_ff are
     // both 0. The appended MTP blocks are dense, not recurrent.
@@ -56,7 +52,8 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     hp.f_norm_eps = (try meta.getKey(f32, .attention_layernorm_eps, true, exc)).?; // the MTP head's final_layernorm
 
-    if (try meta.getKey(u32, .expert_feed_forward_length, false, exc)) |v| hp.n_ff_exp = v;
+    // The Puzzle models set a different expert FFN size per layer.
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, false, exc);
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
     if (try meta.getKey(u32, .expert_shared_count, false, exc)) |v| hp.n_expert_shared = v;
     if (try meta.getKey(bool, .expert_weights_norm, false, exc)) |v| hp.expert_weights_norm = v;
@@ -66,13 +63,23 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = switch (hp.nLayer()) {
         52 => .@"31b_a3_5b", // Nemotron-H MoE 31B
         56 => .@"9b",
-        88 => .@"120b_a12b",
+        88 => blk: {
+            // Nemotron 3 Super (uniform MoE) and Nemotron 3 Puzzle (a
+            // different MoE per layer) both have 88 layers; the per-layer
+            // top-k array tells them apart.
+            var heterogeneous = false;
+            var j: u32 = 1;
+            while (j < hp.nLayer()) : (j += 1) {
+                heterogeneous = heterogeneous or hp.n_expert_used_arr[j] != hp.n_expert_used_arr[0];
+            }
+            break :blk if (heterogeneous) .@"75b_a9b" else .@"120b_a12b";
+        },
         else => .unknown,
     };
 }
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_tensors`
-/// (models/nemotron-h.cpp:38 @c1d0e7a00).
+/// (models/nemotron-h.cpp:47 @5266f24da).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -140,7 +147,9 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
             layer.wo_b = try self.createTensor(.{ .tensor = .attn_out, .suffix = "bias", .bid = i }, &.{l.n_embd}, nr, exc);
         } else {
             if (l.n_expert != 0) {
-                const n_ff_exp: i64 = if (hp.n_ff_exp != 0) hp.n_ff_exp else divI64(l.n_ff, l.n_expert_used);
+                // The per-layer n_ff_exp, or n_ff / n_expert_used where the
+                // file has none (the older GGUFs).
+                const n_ff_exp_i: i64 = if (hp.nFfExp(iu) != 0) hp.nFfExp(iu) else divI64(hp.nFf(iu), hp.nExpertUsed(iu));
                 const n_ff_shexp: i64 = hp.n_ff_shexp;
 
                 layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_expert }, trunk_flags, exc);
@@ -150,8 +159,8 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
                 layer.ffn_latent_down = try self.createTensor(.{ .tensor = .ffn_latent_down, .suffix = "weight", .bid = i }, &.{ l.n_embd, moe_n_embd }, nr, exc);
                 layer.ffn_latent_up = try self.createTensor(.{ .tensor = .ffn_latent_up, .suffix = "weight", .bid = i }, &.{ moe_n_embd, l.n_embd }, nr, exc);
 
-                layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ n_ff_exp, moe_n_embd, l.n_expert }, trunk_flags, exc);
-                layer.ffn_up_exps = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "weight", .bid = i }, &.{ moe_n_embd, n_ff_exp, l.n_expert }, trunk_flags, exc);
+                layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ n_ff_exp_i, moe_n_embd, l.n_expert }, trunk_flags, exc);
+                layer.ffn_up_exps = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "weight", .bid = i }, &.{ moe_n_embd, n_ff_exp_i, l.n_expert }, trunk_flags, exc);
 
                 // The shared expert branch.
                 layer.ffn_down_shexp = try self.createTensor(.{ .tensor = .ffn_down_shexp, .suffix = "weight", .bid = i }, &.{ n_ff_shexp, l.n_embd }, trunk_flags, exc);
@@ -176,7 +185,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         const n_head_i: i64 = hp.nHead(iu);
         const n_embd_k_gqa_i: i64 = hp.nEmbdKGqa(iu);
         const n_embd_v_gqa_i: i64 = hp.nEmbdVGqa(iu);
-        const n_ff_exp: i64 = if (hp.n_ff_exp != 0) hp.n_ff_exp else divI64(l.n_ff, l.n_expert_used);
+        const n_ff_exp: i64 = if (hp.nFfExp(iu) != 0) hp.nFfExp(iu) else divI64(l.n_ff, hp.nExpertUsed(iu));
         const n_ff_shexp: i64 = hp.n_ff_shexp;
 
         // The NextN input-fusion tensors.
@@ -203,19 +212,19 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `llama_model_nemotron_h`'s `build_arch_graph`
-/// (models/nemotron-h.cpp:162 @c1d0e7a00).
+/// (models/nemotron-h.cpp:174 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_nemotron_h`'s `graph`
-/// (models/nemotron-h.cpp:166 @c1d0e7a00).
+/// (models/nemotron-h.cpp:178 @5266f24da).
 pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const cp = b.cparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h.cpp", 169, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h.cpp", 181, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
     c.ggml_build_forward_expand(b.gf, inpL);
@@ -292,7 +301,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_attention_layer`
-/// (models/nemotron-h.cpp:244 @c1d0e7a00): attention without RoPE.
+/// (models/nemotron-h.cpp:256 @5266f24da): attention without RoPE.
 fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_attn: *graph.InpAttnKv, n_embd_head: i64, il: c_int) *Tensor {
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -305,7 +314,7 @@ fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tens
 }
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_ffn_layer`
-/// (models/nemotron-h.cpp:260 @c1d0e7a00): a squared-ReLU FFN, or the
+/// (models/nemotron-h.cpp:272 @5266f24da): a squared-ReLU FFN, or the
 /// mixture of experts beside a shared expert.
 fn buildFfnLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -334,7 +343,7 @@ fn buildFfnLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il
             .down_exps = layer.ffn_down_exps.?,
             .exp_probs_b = layer.ffn_exp_probs_b,
             .n_expert = b.n_expert,
-            .n_expert_used = b.n_expert_used,
+            .n_expert_used = hp.nExpertUsed(@intCast(il)),
             .type_op = .relu_sqr,
             .norm_w = hp.expert_weights_norm,
             .w_scale = hp.expert_weights_scale,

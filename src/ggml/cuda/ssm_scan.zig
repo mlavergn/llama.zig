@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cuh` at v0.4.0 (`5266f24da`). The
 //! kernels -- `ssm_scan_f32`, `ssm_scan_f32_group` and the four
 //! `ssm_ssd_*` kernels -- stay CUDA. The SSD arm is the C's
 //! `!defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)` one, which this
@@ -28,15 +28,15 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `SSM_SSD_MIN_TOKENS` (ssm-scan.cu:15 @c1d0e7a00).
+/// Ports `SSM_SSD_MIN_TOKENS` (ssm-scan.cu:15 @5266f24da).
 const ssd_min_tokens = 128;
-/// Ports `SSM_SSD_DT_BLOCK` (ssm-scan.cu:18 @c1d0e7a00).
+/// Ports `SSM_SSD_DT_BLOCK` (ssm-scan.cu:18 @5266f24da).
 const ssd_dt_block = 256;
-/// Ports `SSM_SSD_DT_MAX_ITEMS` (ssm-scan.cu:19 @c1d0e7a00).
+/// Ports `SSM_SSD_DT_MAX_ITEMS` (ssm-scan.cu:19 @5266f24da).
 const ssd_dt_max_items = 32;
-/// Ports `SSM_SSD_MAX_TOKENS` (ssm-scan.cu:22 @c1d0e7a00).
+/// Ports `SSM_SSD_MAX_TOKENS` (ssm-scan.cu:22 @5266f24da).
 const ssd_max_tokens = ssd_dt_block * ssd_dt_max_items;
-/// Ports `SSM_SSD_CHUNK_SIZE` (ssm-scan.cu:25 @c1d0e7a00).
+/// Ports `SSM_SSD_CHUNK_SIZE` (ssm-scan.cu:25 @5266f24da).
 const ssd_chunk_size = 256;
 
 const int_max: usize = std.math.maxInt(c_int);
@@ -62,7 +62,7 @@ fn at(p: anytype, off: i64) @TypeOf(p) {
     return if (off >= 0) p + @as(usize, @intCast(off)) else p - @as(usize, @intCast(-off));
 }
 
-/// Ports `ssm_scan_f32_cuda` (ssm-scan.cu:239 @c1d0e7a00).
+/// Ports `ssm_scan_f32_cuda` (ssm-scan.cu:239 @5266f24da).
 fn ssmScanF32Cuda(
     src0: ?*const anyopaque,
     src1: ?*const anyopaque,
@@ -148,7 +148,7 @@ fn scanKernel(comptime threads: comptime_int, comptime l: comptime_int) kernels.
     return kernels.get("ssm-scan", kernels.tmpl("ssm_scan_f32", &.{ kernels.ulong(threads), kernels.ulong(16), kernels.ulong(l) }));
 }
 
-/// Ports `ssm_scan_ssd_f32_cuda` (ssm-scan.cu:576 @c1d0e7a00): the SSD
+/// Ports `ssm_scan_ssd_f32_cuda` (ssm-scan.cu:576 @5266f24da): the SSD
 /// dispatch for Mamba-2 prefill. All strides are in elements, not bytes.
 fn ssmScanSsdF32Cuda(
     ctx: *common.Context,
@@ -364,7 +364,7 @@ fn ssmScanSsdF32Cuda(
     }
 }
 
-/// Ports `ggml_cuda_op_ssm_scan` (ssm-scan.cu:767 @c1d0e7a00).
+/// Ports `ggml_cuda_op_ssm_scan` (ssm-scan.cu:767 @5266f24da).
 pub fn opSsmScan(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]); // s
     const src1 = impl.one(Tensor, dst.src[1]); // x

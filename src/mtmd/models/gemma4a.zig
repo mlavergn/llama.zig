@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/gemma4a.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/gemma4a.cpp` at v0.4.0 (`5266f24da`).
 //! Each declaration names what it ports and the line it began at.
 //!
 //! Upstream overrides the virtual `build_mm`; here `build` installs
@@ -24,7 +24,7 @@ extern fn sqrtf(x: f32) f32;
 extern fn logf(x: f32) f32;
 extern fn expf(x: f32) f32;
 
-/// The `extract_blocks` lambda (gemma4a.cpp:122 @c1d0e7a00) of `build`:
+/// The `extract_blocks` lambda (gemma4a.cpp:122 @5266f24da) of `build`:
 /// K/V block context through an overlapping view. Pad to S*B elements,
 /// roll right by P to create left-padding, then view with stride C in the
 /// block dimension.
@@ -43,7 +43,7 @@ fn extractBlocks(g: *const graph.Graph, t_in: T, S: i64, B: i64, P: i64, C: i64,
     return t;
 }
 
-/// Ports `build` (gemma4a.cpp:11 @c1d0e7a00), a member of
+/// Ports `build` (gemma4a.cpp:11 @5266f24da), a member of
 /// `clip_graph_gemma4a`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
@@ -293,7 +293,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     return g.gf;
 }
 
-/// Ports `build_mm` (gemma4a.cpp:279 @c1d0e7a00), a member of
+/// Ports `build_mm` (gemma4a.cpp:279 @5266f24da), a member of
 /// `clip_graph_gemma4a`: a Gemma4ClippableLinear clamps its input and
 /// output to the bounds the model file records for that weight.
 ///

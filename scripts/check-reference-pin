@@ -64,4 +64,29 @@ if [ "$_ours" != "$_theirs" ]; then
     echo "      porting bug. Check out ${_ours} in llama.cpp.zmake/llama.cpp." >&2
     exit 2
 fi
-unset _ours _theirs _ours_repack _theirs_repack
+# The pin is also written down as values: build/upstream.zig (what our build
+# configures the version headers with), llama.cpp.zmake/build.zig (the
+# reference's), and the two literals the port returns from ggml_version and
+# llama_version. A sync that moved the checkout and missed one of them would
+# compare a reference reporting one version against a port reporting another.
+_field() { sed -n "s/^pub const $2 = \"\{0,1\}\([^\";]*\)\"\{0,1\};$/\1/p" "$1"; }
+_zfield() { sed -n "s/^const $2 = \"\{0,1\}\([^\";]*\)\"\{0,1\};$/\1/p" "$1"; }
+_up=build/upstream.zig
+_short="$(git -C llama.cpp rev-parse --short=9 HEAD)"
+_tag_commit="$(git -C llama.cpp rev-parse "$(_field $_up tag)^{commit}" 2>/dev/null)"
+_bad=""
+[ "$(_field $_up commit)" = "$_short" ] || _bad="$_bad build/upstream.zig:commit=$(_field $_up commit)"
+[ "$_tag_commit" = "$_ours" ] || _bad="$_bad build/upstream.zig:tag=$(_field $_up tag)"
+[ "$(_field $_up version)" = "$(_field $_up tag | sed 's/^v//')" ] || _bad="$_bad build/upstream.zig:version"
+for _k in version ggml_version commit build_number; do
+    [ "$(_zfield llama.cpp.zmake/build.zig $_k)" = "$(_field $_up $_k)" ] || _bad="$_bad llama.cpp.zmake/build.zig:$_k"
+done
+grep -q "^const build_version: \[\*:0\]const u8 = \"$(_field $_up ggml_version)\";" src/ggml/runtime.zig || _bad="$_bad src/ggml/runtime.zig:build_version"
+grep -q "^const build_commit: \[\*:0\]const u8 = \"$_short\";" src/ggml/runtime.zig || _bad="$_bad src/ggml/runtime.zig:build_commit"
+grep -q "^pub const version = \"$(_field $_up version)\";" src/llama/api/llama.zig || _bad="$_bad src/llama/api/llama.zig:version"
+if [ -n "$_bad" ]; then
+    echo "FAIL: the pin's recorded values disagree with llama.cpp at ${_short}:" >&2
+    for _b in $_bad; do echo "        $_b" >&2; done
+    exit 2
+fi
+unset _ours _theirs _ours_repack _theirs_repack _up _short _tag_commit _bad _k

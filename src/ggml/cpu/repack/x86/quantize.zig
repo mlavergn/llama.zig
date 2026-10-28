@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.3.0
-//! (`c1d0e7a00`), the `__AVX2__` arms. Each declaration names the C++ it
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.4.0
+//! (`5266f24da`), the `__AVX2__` arms. Each declaration names the C++ it
 //! replaces and the line it began at.
 //!
 //! # The same arithmetic as the row quantizers
@@ -25,7 +25,7 @@ const QK_K = 256;
 
 /// The rounding, the packs and the permute both
 /// `ggml_quantize_mat_q8_0_4x8` and `ggml_quantize_mat_q8_K_4x8` end on
-/// (arch/x86/repack.cpp:178, 290 @c1d0e7a00): four registers of 32-bit
+/// (arch/x86/repack.cpp:178, 290 @5266f24da): four registers of 32-bit
 /// integers to 32 bytes in order.
 inline fn packBytes(v0: avx.m256, v1: avx.m256, v2: avx.m256, v3: avx.m256) avx.m256i {
     // Round to nearest integer, then convert. The C's `i0`..`i3`, renamed
@@ -63,7 +63,7 @@ inline fn reduceMax(maxAbs: avx.m256) f32 {
     return avx.mm_cvtss_f32(max4);
 }
 
-/// Ports `ggml_quantize_mat_q8_0_4x8` (arch/x86/repack.cpp:178 @c1d0e7a00),
+/// Ports `ggml_quantize_mat_q8_0_4x8` (arch/x86/repack.cpp:178 @5266f24da),
 /// the `__AVX2__ || __AVX__` arm with its `__AVX2__` pack.
 pub export fn ggml_quantize_mat_q8_0_4x8(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
     std.debug.assert(@rem(k, QK8_0) == 0);
@@ -112,7 +112,7 @@ pub export fn ggml_quantize_mat_q8_0_4x8(x: [*]const f32, vy: *anyopaque, k: i64
     }
 }
 
-/// Ports `ggml_quantize_mat_q8_K_4x8` (arch/x86/repack.cpp:290 @c1d0e7a00),
+/// Ports `ggml_quantize_mat_q8_K_4x8` (arch/x86/repack.cpp:290 @5266f24da),
 /// the `__AVX2__` arm.
 ///
 /// The scale's sign follows the element of largest magnitude: `maskAbs`
@@ -271,7 +271,7 @@ pub export fn ggml_quantize_mat_q8_K_4x8(x: [*]const f32, vy: *anyopaque, k: i64
 }
 
 /// The `bsums` step of `ggml_quantize_mat_q8_K_4x8` (arch/x86/repack.cpp:290
-/// @c1d0e7a00): two values from each of four sub-blocks into one register,
+/// @5266f24da): two values from each of four sub-blocks into one register,
 /// the first as is and the other three shuffled into the second, third and
 /// fourth sixteen-bit lane of each group and blended in.
 inline fn blend4(a: avx.m256i, b: avx.m256i, c: avx.m256i, d: avx.m256i, sb2: avx.m256i, sb3: avx.m256i, sb4: avx.m256i) avx.m256i {

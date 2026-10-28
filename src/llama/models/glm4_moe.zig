@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/glm4-moe.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/glm4-moe.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_glm4_moe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
@@ -22,12 +22,12 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_glm4_moe`'s `load_arch_hparams` (models/glm4-moe.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_glm4_moe`'s `load_arch_hparams` (models/glm4-moe.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     _ = try meta.getKeyOrArr(c_int, .rope_dimension_sections, &hp.rope_sections, 4, false, exc);
 
@@ -43,10 +43,6 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         hp.expert_gating_func = @backingInt(hparams_mod.ExpertGatingFunc.sigmoid);
     }
 
-    // The NextN/MTP parameters.
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-    impl.assert(hp.n_layer_nextn < hp.n_layer_all, "models/glm4-moe.cpp", 22, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < n_layer_impl\"");
-
     self.type = switch (hp.nLayer()) {
         46 => .@"106b_a12b", // GLM-4.5-Air
         48 => .@"102b_a12b", // Solar Open
@@ -55,7 +51,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_glm4_moe`'s `load_arch_tensors` (models/glm4-moe.cpp:32 @c1d0e7a00).
+/// Ports `llama_model_glm4_moe`'s `load_arch_tensors` (models/glm4-moe.cpp:28 @5266f24da).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -71,8 +67,8 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 
     if (!ml.load_mtp) mtp_flags |= loader.tensor_skip;
 
-    impl.assert(hp.n_expert > 0, "models/glm4-moe.cpp", 46, "hparams.n_expert > 0 && \"n_expert must be > 0 for GLM4_MOE MoE layers\"");
-    impl.assert(hp.n_expert_used > 0, "models/glm4-moe.cpp", 47, "hparams.n_expert_used > 0 && \"n_expert_used must be > 0 for GLM4_MOE MoE layers\"");
+    impl.assert(hp.n_expert > 0, "models/glm4-moe.cpp", 42, "hparams.n_expert > 0 && \"n_expert must be > 0 for GLM4_MOE MoE layers\"");
+    impl.assert(hp.nExpertUsed(0) > 0, "models/glm4-moe.cpp", 43, "hparams.n_expert_used() > 0 && \"n_expert_used must be > 0 for GLM4_MOE MoE layers\"");
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -112,7 +108,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
             layer.ffn_exp_probs_b = try self.createTensor(.{ .tensor = .ffn_exp_probs_b, .suffix = "bias", .bid = i }, &.{l.n_expert}, flags, exc);
 
             // The routed experts.
-            const n_ff_exp: i64 = if (hp.n_ff_exp != 0) hp.n_ff_exp else @divTrunc(l.n_ff, l.n_expert_used);
+            const n_ff_exp: i64 = if (hp.nFfExp(0) != 0) hp.nFfExp(0) else @divTrunc(l.n_ff, l.n_expert_used);
 
             layer.ffn_gate_exps = try self.createTensor(.{ .tensor = .ffn_gate_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ff_exp, l.n_expert }, flags, exc);
             layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ n_ff_exp, l.n_embd, l.n_expert }, flags, exc);
@@ -149,8 +145,8 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_glm4_moe`'s `build_arch_graph` (models/glm4-moe.cpp:129
-/// @c1d0e7a00): the MTP draft head for that graph type, the main model
+/// Ports `llama_model_glm4_moe`'s `build_arch_graph` (models/glm4-moe.cpp:125
+/// @5266f24da): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -158,27 +154,27 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_glm4_moe`'s `graph_mtp`
-/// (models/glm4-moe.cpp:136 @c1d0e7a00).
+/// (models/glm4-moe.cpp:132 @5266f24da).
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn > 0, "models/glm4-moe.cpp", 138, "hparams.n_layer_nextn > 0 && \"GLM4_MOE MTP requires n_layer_nextn > 0\"");
-    impl.assert(hp.n_layer_nextn == 1, "models/glm4-moe.cpp", 139, "hparams.n_layer_nextn == 1 && \"GLM4_MOE MTP currently only supports a single MTP block\"");
+    impl.assert(hp.n_layer_nextn > 0, "models/glm4-moe.cpp", 134, "hparams.n_layer_nextn > 0 && \"GLM4_MOE MTP requires n_layer_nextn > 0\"");
+    impl.assert(hp.n_layer_nextn == 1, "models/glm4-moe.cpp", 135, "hparams.n_layer_nextn == 1 && \"GLM4_MOE MTP currently only supports a single MTP block\"");
 
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 142, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 138, "n_embd_head == hparams.n_embd_head_k()");
 
     const il: c_int = @as(c_int, @intCast(hp.nLayer())) + b.cparams.nextn_layer_offset;
-    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/glm4-moe.cpp", 147, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
+    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/glm4-moe.cpp", 143, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
 
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, "models/glm4-moe.cpp", 151, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/glm4-moe.cpp", 152, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/glm4-moe.cpp", 153, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
-    impl.assert(layer.ffn_gate_inp != null, "models/glm4-moe.cpp", 154, "layer.ffn_gate_inp  && \"MTP block missing ffn_gate_inp\"");
+    impl.assert(layer.nextn.eh_proj != null, "models/glm4-moe.cpp", 147, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, "models/glm4-moe.cpp", 148, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, "models/glm4-moe.cpp", 149, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
+    impl.assert(layer.ffn_gate_inp != null, "models/glm4-moe.cpp", 150, "layer.ffn_gate_inp  && \"MTP block missing ffn_gate_inp\"");
 
-    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/glm4-moe.cpp", 156, "out of memory");
+    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/glm4-moe.cpp", 152, "out of memory");
     inp.* = .{ .n_embd = hp.n_embd };
 
     inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
@@ -281,7 +277,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_post_ffn", il);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/glm4-moe.cpp", 269, "head_norm_w && \"GLM4_MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
+    impl.assert(head_norm_w != null, "models/glm4-moe.cpp", 265, "head_norm_w && \"GLM4_MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
 
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
     b.cb(cur, "h_nextn", -1);
@@ -292,7 +288,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "models/glm4-moe.cpp", 286, "head_w && \"GLM4_MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    impl.assert(head_w != null, "models/glm4-moe.cpp", 282, "head_w && \"GLM4_MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
 
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
@@ -302,13 +298,13 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_glm4_moe`'s `graph`
-/// (models/glm4-moe.cpp:295 @c1d0e7a00).
+/// (models/glm4-moe.cpp:291 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 298, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 294, "n_embd_head == hparams.n_embd_head_k()");
 
     var sections: [4]c_int = undefined;
     @memcpy(&sections, hp.rope_sections[0..4]);
@@ -318,7 +314,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const use_mrope = hp.useMrope();
     if (b.ubatch.embd != null and !use_mrope) {
         // Stopped here rather than give wrong results.
-        impl.abort("models/glm4-moe.cpp", 311, "This GGUF does not support multimodal. Please reconvert it.");
+        impl.abort("models/glm4-moe.cpp", 307, "This GGUF does not support multimodal. Please reconvert it.");
     }
 
     // The positions.

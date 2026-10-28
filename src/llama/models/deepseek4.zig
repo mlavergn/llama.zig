@@ -8,8 +8,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek4.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_deepseek4`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek4.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_deepseek4`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` with the
 //! hyper-connection, compressor and attention builders, and `graph_mtp`.
 //! The memory these graphs read is `kv_cache_dsv4.zig`'s, and the MTP
@@ -32,33 +32,31 @@ const Tensor = c.ggml_tensor;
 
 const src = "models/deepseek4.cpp";
 
-/// Ports `dsv4_rope_attn_factor` (models/deepseek4.cpp:11 @c1d0e7a00): the
+/// Ports `dsv4_rope_attn_factor` (models/deepseek4.cpp:11 @5266f24da): the
 /// YaRN magnitude correction, or none without extrapolation.
 fn ropeAttnFactor(freq_scale: f32, ext_factor: f32) f32 {
     if (ext_factor == 0.0) return 1.0;
     return 1.0 / (1.0 + 0.1 * impl.logf(1.0 / freq_scale));
 }
 
-/// Ports `llama_model_deepseek4`'s `load_arch_hparams` (models/deepseek4.cpp:19 @c1d0e7a00).
+/// Ports `llama_model_deepseek4`'s `load_arch_hparams` (models/deepseek4.cpp:19 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-    if (hp.n_layer_nextn > 0 and hp.n_layer_nextn < hp.n_layer_all) {
+    if (hp.n_layer_nextn > 0) {
         // A file whose MTP block was stripped declares it all the same.
         const n_layer_main = hp.n_layer_all - hp.n_layer_nextn;
         var probe_buf: [64]u8 = undefined;
         const mtp_probe = std.fmt.bufPrint(&probe_buf, "blk.{d}.nextn.eh_proj.weight", .{n_layer_main}) catch unreachable;
         if (ml.getWeight(mtp_probe) == null) hp.n_layer_nextn = 0;
     }
-    impl.assert(hp.n_layer_nextn < hp.n_layer_all, src, 28, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < block_count\"");
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     hp.n_lora_q = (try meta.getKey(u32, .attention_q_lora_rank, true, exc)).?;
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
 
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     hp.n_expert_shared = (try meta.getKey(u32, .expert_shared_count, true, exc)).?;
     hp.expert_weights_scale = (try meta.getKey(f32, .expert_weights_scale, true, exc)).?;
     hp.expert_weights_norm = (try meta.getKey(bool, .expert_weights_norm, true, exc)).?;
@@ -87,7 +85,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (n_compress_ratios < hp.n_layer_all) {
         return exc.throw(.runtime_error, "DeepSeek-V4 compress_ratios is shorter than block_count", .{});
     }
-    impl.assert(n_compress_ratios <= hparams_mod.max_layers, src, 62, "n_compress_ratios <= LLAMA_MAX_LAYERS");
+    impl.assert(n_compress_ratios <= hparams_mod.max_layers, src, 60, "n_compress_ratios <= LLAMA_MAX_LAYERS");
     _ = try meta.getArr(u32, .attention_compress_ratios, &hp.dsv4_compress_ratios, true, exc);
 
     hp.expert_gating_func = (try meta.getKey(u32, .expert_gating_func, true, exc)).?;
@@ -98,6 +96,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     // block.
     hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
     hp.setSwaPattern(0, false);
+    // The tokens of an image span attend bidirectionally to the whole span;
+    // the window applies only to older tokens (`get_window_topk_idxs_visible`
+    // in the reference implementation).
+    hp.non_causal_type = 2; // LLAMA_NON_CAUSAL_TYPE_SWA_FULL
     var il: u32 = hp.nLayer();
     while (il < hp.n_layer_all) : (il += 1) hp.is_swa_impl[il] = 1;
 
@@ -107,14 +109,14 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deepseek4`'s `load_arch_tensors` (models/deepseek4.cpp:81 @c1d0e7a00).
+/// Ports `llama_model_deepseek4`'s `load_arch_tensors` (models/deepseek4.cpp:82 @5266f24da).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
 
     const q_lora_rank: i64 = hp.n_lora_q;
-    const n_ff_exp: i64 = hp.n_ff_exp;
+    const n_ff_exp: i64 = hp.nFfExp(0);
     const n_expert_shared: i64 = hp.n_expert_shared;
 
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
@@ -192,6 +194,8 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         } else {
             layer.ffn_exp_probs_b = try self.createTensor(.{ .tensor = .ffn_exp_probs_b, .suffix = "bias", .bid = i }, &.{l.n_expert}, flags, exc);
         }
+        // The vision variant only: the routing bias for image tokens.
+        layer.ffn_exp_probs_b_vl = try self.createTensor(.{ .tensor = .ffn_exp_probs_b_vl, .suffix = "bias", .bid = i }, &.{l.n_expert}, flags | loader.tensor_not_required, exc);
         layer.ffn_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, flags, exc);
 
         layer.ffn_gate_exps = try self.createTensor(.{ .tensor = .ffn_gate_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ff_exp, l.n_expert }, flags, exc);
@@ -213,8 +217,8 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_deepseek4`'s `build_arch_graph` (models/deepseek4.cpp:182
-/// @c1d0e7a00): the MTP draft head for that graph type, the main model
+/// Ports `llama_model_deepseek4`'s `build_arch_graph` (models/deepseek4.cpp:185
+/// @5266f24da): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -224,24 +228,24 @@ pub fn buildArchGraph(model: *const Model, b: *const Builder, params: *const gra
 // -----------------------------------------------------------------------------
 // Views and the compressor state
 
-/// Ports `dsv4_elem_offset` (models/deepseek4.cpp:189 @c1d0e7a00).
+/// Ports `dsv4_elem_offset` (models/deepseek4.cpp:192 @5266f24da).
 fn elemOffset(t: *const Tensor, i: i64) usize {
     return c.ggml_row_size(t.type, i);
 }
 
-/// Ports `dsv4_view_1d` (models/deepseek4.cpp:193 @c1d0e7a00): `ne0`
+/// Ports `dsv4_view_1d` (models/deepseek4.cpp:196 @5266f24da): `ne0`
 /// elements from element `j0`.
 fn view1d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, j0: i64) *Tensor {
     return c.ggml_view_1d(ctx, t, ne0, elemOffset(t, j0));
 }
 
-/// Ports `dsv4_view_2d` (models/deepseek4.cpp:197 @c1d0e7a00): `ne0` by
+/// Ports `dsv4_view_2d` (models/deepseek4.cpp:200 @5266f24da): `ne0` by
 /// `ne1` from element `j0` of each row.
 fn view2d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, ne1: i64, j0: i64) *Tensor {
     return c.ggml_view_2d(ctx, t, ne0, ne1, t.nb[1], elemOffset(t, j0));
 }
 
-/// Ports `dsv4_append_zero_row` (models/deepseek4.cpp:206 @c1d0e7a00): one
+/// Ports `dsv4_append_zero_row` (models/deepseek4.cpp:209 @5266f24da): one
 /// more row, zero or -inf, built from the first row so it stays in the
 /// graph.
 fn appendZeroRow(ctx: *c.ggml_context, t: *Tensor, neg_inf: bool) *Tensor {
@@ -252,13 +256,13 @@ fn appendZeroRow(ctx: *c.ggml_context, t: *Tensor, neg_inf: bool) *Tensor {
     return c.ggml_concat(ctx, t, row, 1);
 }
 
-/// Mirrors `dsv4_state_tensors` (models/deepseek4.cpp:214 @c1d0e7a00).
+/// Mirrors `dsv4_state_tensors` (models/deepseek4.cpp:217 @5266f24da).
 const StateTensors = struct {
     kv: ?*Tensor = null,
     score: ?*Tensor = null,
 };
 
-/// Ports `dsv4_build_state_restore` (models/deepseek4.cpp:219 @c1d0e7a00):
+/// Ports `dsv4_build_state_restore` (models/deepseek4.cpp:222 @5266f24da):
 /// a compressor's state, with a pending rollback's snapshot rows copied
 /// back over the current plane first.
 fn buildStateRestore(ctx: *c.ggml_context, inp: *const graph.InpDsv4Comp, state: *const kv_cache_dsv4.CompState, il: c_int) StateTensors {
@@ -279,7 +283,7 @@ fn buildStateRestore(ctx: *c.ggml_context, inp: *const graph.InpDsv4Comp, state:
     return restored;
 }
 
-/// Ports `dsv4_build_state_snapshot` (models/deepseek4.cpp:242 @c1d0e7a00):
+/// Ports `dsv4_build_state_snapshot` (models/deepseek4.cpp:245 @5266f24da):
 /// the rollback planes, from the graph-local `[state | current]` rows.
 fn buildStateSnapshot(ctx: *c.ggml_context, inp: *const graph.InpDsv4Comp, state: *const kv_cache_dsv4.CompState, source_kv: ?*Tensor, source_score: ?*Tensor, il: c_int) StateTensors {
     const snap_src = inp.state_snapshot_src_idxs orelse return .{};
@@ -295,12 +299,12 @@ fn buildStateSnapshot(ctx: *c.ggml_context, inp: *const graph.InpDsv4Comp, state
     return .{ .kv = kv, .score = score };
 }
 
-/// `DSV4_CSA_RATIO` (models/deepseek4.cpp:263 @c1d0e7a00).
+/// `DSV4_CSA_RATIO` (models/deepseek4.cpp:266 @5266f24da).
 const csa_ratio: i64 = 4;
-/// `DSV4_HCA_RATIO` (models/deepseek4.cpp:264 @c1d0e7a00).
+/// `DSV4_HCA_RATIO` (models/deepseek4.cpp:267 @5266f24da).
 const hca_ratio: i64 = 128;
 
-/// Ports `dsv4_hc_mean` (models/deepseek4.cpp:267 @c1d0e7a00): the mean over
+/// Ports `dsv4_hc_mean` (models/deepseek4.cpp:270 @5266f24da): the mean over
 /// the hyper-connection streams, `[n_embd, hc, n_tokens]` to `[n_embd,
 /// n_tokens]`.
 fn hcMean(ctx: *c.ggml_context, x: *Tensor) *Tensor {
@@ -314,7 +318,7 @@ fn hcMean(ctx: *c.ggml_context, x: *Tensor) *Tensor {
     return c.ggml_scale(ctx, acc, 1.0 / @as(f32, @floatFromInt(hc)));
 }
 
-/// Ports `dsv4_hc_affine` (models/deepseek4.cpp:277 @c1d0e7a00).
+/// Ports `dsv4_hc_affine` (models/deepseek4.cpp:280 @5266f24da).
 fn hcAffine(ctx: *c.ggml_context, x_: *Tensor, scale: *Tensor, base: *Tensor) *Tensor {
     var x: *Tensor = c.ggml_mul(ctx, x_, scale);
     x = c.ggml_add(ctx, x, base);
@@ -325,12 +329,12 @@ fn hcAffine(ctx: *c.ggml_context, x_: *Tensor, scale: *Tensor, base: *Tensor) *T
 // Hyper-connections
 
 /// Ports the overload of `llama_model_deepseek4`'s graph's `build_hc_pre`
-/// that takes the weights (models/deepseek4.cpp:287 @c1d0e7a00): the
+/// that takes the weights (models/deepseek4.cpp:290 @5266f24da): the
 /// streams' weighted sum, `[n_embd, hc, n_tokens]` by `[hc, n_tokens]`.
 pub fn buildHcPreWeighted(b: *const Builder, x: *Tensor, weights: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
-    impl.assert(x.ne[0] == b.n_embd, src, 291, "x->ne[0] == n_embd");
-    impl.assert(x.ne[1] == b.hparams.dsv4_hc_mult, src, 292, "x->ne[1] == hparams.dsv4_hc_mult");
+    impl.assert(x.ne[0] == b.n_embd, src, 294, "x->ne[0] == n_embd");
+    impl.assert(x.ne[1] == b.hparams.dsv4_hc_mult, src, 295, "x->ne[1] == hparams.dsv4_hc_mult");
 
     const hc: i64 = b.hparams.dsv4_hc_mult;
     const nt = x.ne[2];
@@ -354,7 +358,7 @@ pub fn buildHcPreWeighted(b: *const Builder, x: *Tensor, weights: *Tensor, il: c
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hc_sinkhorn`
-/// (models/deepseek4.cpp:314 @c1d0e7a00). `comb` is `[dst_hc, src_hc,
+/// (models/deepseek4.cpp:317 @5266f24da). `comb` is `[dst_hc, src_hc,
 /// n_tokens]`, and Sinkhorn follows the reference: a row softmax over dst,
 /// one column normalization, then repeated row and column normalization.
 pub fn buildHcSinkhorn(b: *const Builder, comb_: *Tensor, il: c_int) *Tensor {
@@ -395,7 +399,7 @@ pub fn buildHcSinkhorn(b: *const Builder, comb_: *Tensor, il: c_int) *Tensor {
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hc_pre`
-/// (models/deepseek4.cpp:351 @c1d0e7a00): a hyper-connection's mixes --
+/// (models/deepseek4.cpp:354 @5266f24da): a hyper-connection's mixes --
 /// the pre weights it reduces the streams with, here; the post weights and
 /// the stream combination, into `post` and `comb`, for `build_hc_post`.
 pub fn buildHcPre(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, hc_base: *Tensor, post: *?*Tensor, comb: *?*Tensor, il: c_int) *Tensor {
@@ -406,8 +410,8 @@ pub fn buildHcPre(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tens
     const hc_mix_dim = (2 + hc) * hc;
     const nt = x.ne[2];
 
-    impl.assert(hc == 4, src, 364, "hc == 4");
-    impl.assert(hc_fn.ne[1] == hc_mix_dim, src, 365, "hc_fn->ne[1] == hc_mix_dim");
+    impl.assert(hc == 4, src, 367, "hc == 4");
+    impl.assert(hc_fn.ne[1] == hc_mix_dim, src, 368, "hc_fn->ne[1] == hc_mix_dim");
 
     const flat: *Tensor = c.ggml_reshape_2d(ctx, x, hc_dim, nt);
     const flat_norm: *Tensor = c.ggml_rms_norm(ctx, flat, b.norm_rms_eps);
@@ -454,12 +458,12 @@ pub fn buildHcPre(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tens
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hc_post`
-/// (models/deepseek4.cpp:409 @c1d0e7a00): the block's output spread over
+/// (models/deepseek4.cpp:412 @5266f24da): the block's output spread over
 /// the streams by `post`, plus the residual streams mixed by `comb`.
 pub fn buildHcPost(b: *const Builder, x: *Tensor, residual: *Tensor, post: *Tensor, comb: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
-    impl.assert(x.ne[0] == b.n_embd, src, 415, "x->ne[0] == n_embd");
-    impl.assert(residual.ne[1] == b.hparams.dsv4_hc_mult, src, 416, "residual->ne[1] == hparams.dsv4_hc_mult");
+    impl.assert(x.ne[0] == b.n_embd, src, 418, "x->ne[0] == n_embd");
+    impl.assert(residual.ne[1] == b.hparams.dsv4_hc_mult, src, 419, "residual->ne[1] == hparams.dsv4_hc_mult");
 
     if (b.cparams.fused_dsv4_hc_post) {
         const result: *Tensor = c.ggml_dsv4_hc_post(ctx, x, residual, post, comb);
@@ -493,7 +497,7 @@ pub fn buildHcPost(b: *const Builder, x: *Tensor, residual: *Tensor, post: *Tens
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hc_head`
-/// (models/deepseek4.cpp:446 @c1d0e7a00): the streams reduced to one for
+/// (models/deepseek4.cpp:449 @5266f24da): the streams reduced to one for
 /// the output head.
 pub fn buildHcHead(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, hc_base: *Tensor) *Tensor {
     const ctx = b.ctx0;
@@ -518,7 +522,7 @@ pub fn buildHcHead(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Ten
 // Compressors
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hca_compressed_kv_from_state`
-/// (models/deepseek4.cpp:468 @c1d0e7a00): each completed block's 128 state
+/// (models/deepseek4.cpp:471 @5266f24da): each completed block's 128 state
 /// rows, softmax-weighted by their scores into one row, normalized and
 /// rotated at the block's first position.
 pub fn buildHcaCompressedKvFromState(b: *const Builder, kv_state: *Tensor, score_state: *Tensor, state_read_idxs: ?*Tensor, comp_pos: ?*Tensor, norm: ?*Tensor, n_embd_head: i64, name: [*:0]const u8, il: c_int) *Tensor {
@@ -528,10 +532,10 @@ pub fn buildHcaCompressedKvFromState(b: *const Builder, kv_state: *Tensor, score
     const n_embd_head_nope = n_embd_head - n_embd_head_rope;
     const n_blocks: i64 = if (comp_pos) |p| p.ne[0] else 0;
 
-    impl.assert(n_blocks > 0, src, 481, "n_blocks > 0");
-    impl.assert(state_read_idxs != null, src, 482, "state_read_idxs");
-    impl.assert(state_read_idxs.?.ne[0] == hca_ratio * n_blocks, src, 483, "state_read_idxs->ne[0] == DSV4_HCA_RATIO*n_blocks");
-    impl.assert(n_embd_head >= n_embd_head_rope, src, 484, "n_embd_head >= n_embd_head_rope");
+    impl.assert(n_blocks > 0, src, 484, "n_blocks > 0");
+    impl.assert(state_read_idxs != null, src, 485, "state_read_idxs");
+    impl.assert(state_read_idxs.?.ne[0] == hca_ratio * n_blocks, src, 486, "state_read_idxs->ne[0] == DSV4_HCA_RATIO*n_blocks");
+    impl.assert(n_embd_head >= n_embd_head_rope, src, 487, "n_embd_head >= n_embd_head_rope");
 
     var kv: *Tensor = c.ggml_get_rows(ctx, kv_state, state_read_idxs);
     kv = c.ggml_reshape_3d(ctx, kv, n_embd_head, hca_ratio, n_blocks);
@@ -561,7 +565,7 @@ pub fn buildHcaCompressedKvFromState(b: *const Builder, kv_state: *Tensor, score
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_overlap_compressed_kv_from_state`
-/// (models/deepseek4.cpp:515 @c1d0e7a00): CSA's and the indexer's
+/// (models/deepseek4.cpp:518 @5266f24da): CSA's and the indexer's
 /// overlapping compression -- each block weighs its previous window's
 /// first half of the state with its own window's second half.
 pub fn buildOverlapCompressedKvFromState(b: *const Builder, kv_state_: *Tensor, score_state_: *Tensor, state_read_idxs: ?*Tensor, comp_pos: ?*Tensor, norm: ?*Tensor, ratio: i64, n_embd_head: i64, name: [*:0]const u8, il: c_int) *Tensor {
@@ -571,12 +575,12 @@ pub fn buildOverlapCompressedKvFromState(b: *const Builder, kv_state_: *Tensor, 
     const n_embd_head_nope = n_embd_head - n_embd_head_rope;
     const n_blocks: i64 = if (comp_pos) |p| p.ne[0] else 0;
 
-    impl.assert(n_blocks > 0, src, 529, "n_blocks > 0");
-    impl.assert(state_read_idxs != null, src, 530, "state_read_idxs");
-    impl.assert(state_read_idxs.?.ne[0] == 2 * ratio * n_blocks, src, 531, "state_read_idxs->ne[0] == 2*ratio*n_blocks");
-    impl.assert(kv_state_.ne[0] == 2 * n_embd_head, src, 532, "kv_state->ne[0] == 2*n_embd_head");
-    impl.assert(score_state_.ne[0] == 2 * n_embd_head, src, 533, "score_state->ne[0] == 2*n_embd_head");
-    impl.assert(n_embd_head >= n_embd_head_rope, src, 534, "n_embd_head >= n_embd_head_rope");
+    impl.assert(n_blocks > 0, src, 532, "n_blocks > 0");
+    impl.assert(state_read_idxs != null, src, 533, "state_read_idxs");
+    impl.assert(state_read_idxs.?.ne[0] == 2 * ratio * n_blocks, src, 534, "state_read_idxs->ne[0] == 2*ratio*n_blocks");
+    impl.assert(kv_state_.ne[0] == 2 * n_embd_head, src, 535, "kv_state->ne[0] == 2*n_embd_head");
+    impl.assert(score_state_.ne[0] == 2 * n_embd_head, src, 536, "score_state->ne[0] == 2*n_embd_head");
+    impl.assert(n_embd_head >= n_embd_head_rope, src, 537, "n_embd_head >= n_embd_head_rope");
 
     const kv_state = appendZeroRow(ctx, kv_state_, false);
     const score_state = appendZeroRow(ctx, score_state_, true);
@@ -627,7 +631,7 @@ pub fn buildOverlapCompressedKvFromState(b: *const Builder, kv_state_: *Tensor, 
 // Attention
 
 /// Ports `llama_model_deepseek4`'s graph's `build_lid_top_k`
-/// (models/deepseek4.cpp:588 @c1d0e7a00): the lightning indexer's score of
+/// (models/deepseek4.cpp:591 @5266f24da): the lightning indexer's score of
 /// every compressed row for each query, and the top-k rows.
 pub fn buildLidTopK(b: *const Builder, model: *const Model, inp_dsv4: *const graph.InpDsv4, qr: *Tensor, cur: *Tensor, inp_pos: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -640,9 +644,9 @@ pub fn buildLidTopK(b: *const Builder, model: *const Model, inp_dsv4: *const gra
     const n_indexer_head: i64 = hp.indexer_n_head;
     const nt = cur.ne[1];
 
-    impl.assert(inp_lid.kq_mask != null, src, 603, "inp_lid.kq_mask");
-    impl.assert(inp_lid.k_rot != null, src, 604, "inp_lid.k_rot");
-    impl.assert(n_embd_indexer_head >= n_embd_indexer_head_rope, src, 605, "n_embd_indexer_head >= n_embd_indexer_head_rope");
+    impl.assert(inp_lid.kq_mask != null, src, 606, "inp_lid.kq_mask");
+    impl.assert(inp_lid.k_rot != null, src, 607, "inp_lid.k_rot");
+    impl.assert(n_embd_indexer_head >= n_embd_indexer_head_rope, src, 608, "n_embd_indexer_head >= n_embd_indexer_head_rope");
 
     var indexer_q = b.buildLoraMm(layer.indexer_attn_q_b.?, qr, null);
     indexer_q = c.ggml_reshape_3d(ctx, indexer_q, n_embd_indexer_head, n_indexer_head, nt);
@@ -662,8 +666,8 @@ pub fn buildLidTopK(b: *const Builder, model: *const Model, inp_dsv4: *const gra
     var indexer_k = inp_dsv4.mctx.getLid().getK(ctx, il);
     const kq_mask = inp_lid.kq_mask.?;
     const n_lid = kq_mask.ne[0];
-    impl.assert(n_lid > 0, src, 626, "n_lid > 0");
-    impl.assert(n_lid <= indexer_k.ne[2], src, 627, "n_lid <= indexer_k->ne[2]");
+    impl.assert(n_lid > 0, src, 629, "n_lid > 0");
+    impl.assert(n_lid <= indexer_k.ne[2], src, 630, "n_lid <= indexer_k->ne[2]");
 
     indexer_k = c.ggml_view_4d(ctx, indexer_k, indexer_k.ne[0], indexer_k.ne[1], n_lid, indexer_k.ne[3], indexer_k.nb[1], indexer_k.nb[2], indexer_k.nb[3], 0);
     b.cb(indexer_k, "lid_k", il);
@@ -708,7 +712,7 @@ pub fn buildLidTopK(b: *const Builder, model: *const Model, inp_dsv4: *const gra
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_top_k_mask`
-/// (models/deepseek4.cpp:676 @c1d0e7a00): the compressed mask with
+/// (models/deepseek4.cpp:679 @5266f24da): the compressed mask with
 /// everything outside each query's top-k rows masked too.
 pub fn buildTopKMask(b: *const Builder, kq_mask: *Tensor, top_k: *Tensor, name: [*:0]const u8, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -731,14 +735,14 @@ pub fn buildTopKMask(b: *const Builder, kq_mask: *Tensor, top_k: *Tensor, name: 
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_csa_lid_attention`
-/// (models/deepseek4.cpp:705 @c1d0e7a00): attention over the raw window
+/// (models/deepseek4.cpp:708 @5266f24da): attention over the raw window
 /// and the indexer's top-k CSA rows, as one K.
 pub fn buildCsaLidAttention(b: *const Builder, model: *const Model, inp_dsv4: *const graph.InpDsv4, inp_attn: *const graph.InpDsv4Raw, q_: *Tensor, kv_: *Tensor, qr: *Tensor, cur: *Tensor, inp_pos: *Tensor, sinks: ?*Tensor, kq_scale: f32, il: c_int) *Tensor {
     const ctx = b.ctx0;
     var q = q_;
     var kv = kv_;
     const inp_csa = inp_dsv4.getCsa();
-    impl.assert(inp_csa.kq_mask != null, src, 718, "inp_csa.kq_mask");
+    impl.assert(inp_csa.kq_mask != null, src, 721, "inp_csa.kq_mask");
 
     const top_k = buildLidTopK(b, model, inp_dsv4, qr, cur, inp_pos, il);
 
@@ -760,8 +764,8 @@ pub fn buildCsaLidAttention(b: *const Builder, model: *const Model, inp_dsv4: *c
 
     var csa_k = inp_dsv4.mctx.getCsa().getK(ctx, il);
     const n_csa = inp_csa.kq_mask.?.ne[0];
-    impl.assert(n_csa > 0, src, 740, "n_csa > 0");
-    impl.assert(n_csa <= csa_k.ne[2], src, 741, "n_csa <= csa_k->ne[2]");
+    impl.assert(n_csa > 0, src, 743, "n_csa > 0");
+    impl.assert(n_csa <= csa_k.ne[2], src, 744, "n_csa <= csa_k->ne[2]");
 
     csa_k = c.ggml_view_4d(ctx, csa_k, csa_k.ne[0], csa_k.ne[1], n_csa, csa_k.ne[3], csa_k.nb[1], csa_k.nb[2], csa_k.nb[3], 0);
     b.cb(csa_k, "csa_comp_k", il);
@@ -775,7 +779,8 @@ pub fn buildCsaLidAttention(b: *const Builder, model: *const Model, inp_dsv4: *c
     const kq_mask: *Tensor = c.ggml_concat(ctx, raw_mask, csa_mask, 0);
     b.cb(kq_mask, "csa_lid_kq_mask", il);
 
-    var out = b.buildAttnMha(q, k_all, k_all, null, kq_mask, sinks, null, kq_scale, il);
+    const n_kv_max: i64 = @as(i64, @min(raw_mask.?.ne[0], @as(i64, b.hparams.n_swa))) + top_k.ne[0];
+    var out = b.buildAttnMha(q, k_all, k_all, null, kq_mask, sinks, null, n_kv_max, kq_scale, il);
     if (k_rot) |r| out = graph.mulMatHadamard(ctx, out, r);
     b.cb(out, "attn_csa_lid", il);
 
@@ -783,14 +788,14 @@ pub fn buildCsaLidAttention(b: *const Builder, model: *const Model, inp_dsv4: *c
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hca_attention`
-/// (models/deepseek4.cpp:766 @c1d0e7a00): attention over the raw window
+/// (models/deepseek4.cpp:770 @5266f24da): attention over the raw window
 /// and every visible HCA row, as one K.
 pub fn buildHcaAttention(b: *const Builder, inp_dsv4: *const graph.InpDsv4, inp_attn: *const graph.InpDsv4Raw, q_: *Tensor, kv_: *Tensor, sinks: ?*Tensor, kq_scale: f32, il: c_int) *Tensor {
     const ctx = b.ctx0;
     var q = q_;
     var kv = kv_;
     const inp_hca = inp_dsv4.getHca();
-    impl.assert(inp_hca.kq_mask != null, src, 775, "inp_hca.kq_mask");
+    impl.assert(inp_hca.kq_mask != null, src, 779, "inp_hca.kq_mask");
 
     const k_rot = inp_attn.self_k_rot;
     if (k_rot) |r| {
@@ -810,8 +815,8 @@ pub fn buildHcaAttention(b: *const Builder, inp_dsv4: *const graph.InpDsv4, inp_
 
     var hca_k = inp_dsv4.mctx.getHca().getK(ctx, il);
     const n_hca = inp_hca.kq_mask.?.ne[0];
-    impl.assert(n_hca > 0, src, 795, "n_hca > 0");
-    impl.assert(n_hca <= hca_k.ne[2], src, 796, "n_hca <= hca_k->ne[2]");
+    impl.assert(n_hca > 0, src, 799, "n_hca > 0");
+    impl.assert(n_hca <= hca_k.ne[2], src, 800, "n_hca <= hca_k->ne[2]");
 
     hca_k = c.ggml_view_4d(ctx, hca_k, hca_k.ne[0], hca_k.ne[1], n_hca, hca_k.ne[3], hca_k.nb[1], hca_k.nb[2], hca_k.nb[3], 0);
     b.cb(hca_k, "hca_comp_k", il);
@@ -825,7 +830,7 @@ pub fn buildHcaAttention(b: *const Builder, inp_dsv4: *const graph.InpDsv4, inp_
     const kq_mask: *Tensor = c.ggml_concat(ctx, raw_mask, hca_mask, 0);
     b.cb(kq_mask, "hca_kq_mask", il);
 
-    var out = b.buildAttnMha(q, k_all, k_all, null, kq_mask, sinks, null, kq_scale, il);
+    var out = b.buildAttnMha(q, k_all, k_all, null, kq_mask, sinks, null, 0, kq_scale, il);
     if (k_rot) |r| out = graph.mulMatHadamard(ctx, out, r);
     b.cb(out, "attn_hca", il);
 
@@ -833,13 +838,13 @@ pub fn buildHcaAttention(b: *const Builder, inp_dsv4: *const graph.InpDsv4, inp_
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_raw_attention`
-/// (models/deepseek4.cpp:821 @c1d0e7a00): attention over the raw window
+/// (models/deepseek4.cpp:825 @5266f24da): attention over the raw window
 /// alone.
 pub fn buildRawAttention(b: *const Builder, inp_attn: *const graph.InpDsv4Raw, q_: *Tensor, kv_: *Tensor, sinks: ?*Tensor, kq_scale: f32, il: c_int) *Tensor {
     const ctx = b.ctx0;
     var q = q_;
     var kv = kv_;
-    impl.assert(b.hparams.isSwa(@intCast(il)), src, 828, "hparams.is_swa(il)");
+    impl.assert(b.hparams.isSwa(@intCast(il)), src, 832, "hparams.is_swa(il)");
 
     const k_rot = inp_attn.self_k_rot;
 
@@ -859,7 +864,7 @@ pub fn buildRawAttention(b: *const Builder, inp_attn: *const graph.InpDsv4Raw, q
 
     const k = mctx_cur.getK(ctx, il);
 
-    var out = b.buildAttnMha(q, k, k, null, kq_mask, sinks, null, kq_scale, il);
+    var out = b.buildAttnMha(q, k, k, null, kq_mask, sinks, null, 0, kq_scale, il);
     if (k_rot) |r| out = graph.mulMatHadamard(ctx, out, r);
     b.cb(out, "attn_raw", il);
 
@@ -874,9 +879,9 @@ pub const AttnInput = union(enum) {
 };
 
 /// Ports `llama_model_deepseek4`'s graph's `build_attention`, both overloads
-/// (models/deepseek4.cpp:857, 866 @c1d0e7a00), and the
-/// `build_attention_impl` they forward to (models/deepseek4.cpp:875
-/// @c1d0e7a00): one shared K/V head, RoPE'd on its tail, with the layer's
+/// (models/deepseek4.cpp:861, 870 @5266f24da), and the
+/// `build_attention_impl` they forward to (models/deepseek4.cpp:879
+/// @5266f24da): one shared K/V head, RoPE'd on its tail, with the layer's
 /// compressor states updated and its compressed rows committed before
 /// attention; then the output de-rotated and projected through the grouped
 /// low-rank `wo_a` and `wo_b`.
@@ -891,7 +896,7 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
         .dsv4 => null,
         .mtp => |p| p,
     };
-    impl.assert((inp_dsv4 == null) != (inp_mtp == null), src, 882, "(inp_dsv4 == nullptr) != (inp_mtp == nullptr)");
+    impl.assert((inp_dsv4 == null) != (inp_mtp == null), src, 886, "(inp_dsv4 == nullptr) != (inp_mtp == nullptr)");
 
     const layer = &model.layers[@intCast(il)];
     const inp_attn: ?*const graph.InpDsv4Raw = if (inp_dsv4) |d| d.getRaw() else null;
@@ -905,8 +910,8 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
     const o_group_dim = n_heads_group * n_embd_head;
     const nt = cur.ne[1];
 
-    impl.assert(n_embd_head == b.n_embd_head_v, src, 896, "n_embd_head == n_embd_head_v");
-    impl.assert(@rem(b.n_head, n_groups) == 0, src, 897, "n_head % n_groups == 0");
+    impl.assert(n_embd_head == b.n_embd_head_v, src, 900, "n_embd_head == n_embd_head_v");
+    impl.assert(@rem(b.n_head, n_groups) == 0, src, 901, "n_head % n_groups == 0");
 
     // A compressed layer rotates as the compressor's rows do.
     const use_compress_rope = hp.dsv4_compress_ratios[@intCast(il)] != 0;
@@ -943,7 +948,7 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
     b.cb(kv, "kv", il);
 
     const ratio: i64 = hp.dsv4_compress_ratios[@intCast(il)];
-    impl.assert(inp_dsv4 != null or ratio == 0, src, 935, "inp_dsv4 || ratio == 0");
+    impl.assert(inp_dsv4 != null or ratio == 0, src, 939, "inp_dsv4 || ratio == 0");
 
     var hca_state_kv: ?*Tensor = null;
     var hca_state_score: ?*Tensor = null;
@@ -981,7 +986,7 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
         csa_state_score = c.ggml_add(ctx, csa_state_score, csa_ape_rows);
         b.cb(csa_state_score, "csa_state_score_ape", il);
 
-        impl.assert(inp_csa.state_write_idxs != null, src, 969, "inp_dsv4->get_csa().state_write_idxs");
+        impl.assert(inp_csa.state_write_idxs != null, src, 973, "inp_dsv4->get_csa().state_write_idxs");
 
         const csa_state = d.mctx.getCsaState();
         const csa_restored = buildStateRestore(ctx, inp_csa, csa_state, il);
@@ -1028,7 +1033,7 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
         lid_state_score = c.ggml_add(ctx, lid_state_score, lid_ape_rows);
         b.cb(lid_state_score, "lid_state_score_ape", il);
 
-        impl.assert(inp_lid.state_write_idxs != null, src, 1038, "inp_dsv4->get_lid().state_write_idxs");
+        impl.assert(inp_lid.state_write_idxs != null, src, 1042, "inp_dsv4->get_lid().state_write_idxs");
 
         const lid_state = d.mctx.getLidState();
         const lid_restored = buildStateRestore(ctx, inp_lid, lid_state, il);
@@ -1069,8 +1074,8 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
     if (ratio == hca_ratio and inp_dsv4.?.getHca().state_write_idxs != null) {
         const d = inp_dsv4.?;
         const inp_hca = d.getHca();
-        impl.assert(hca_state_kv != null, src, 1099, "hca_state_kv");
-        impl.assert(hca_state_score != null, src, 1100, "hca_state_score");
+        impl.assert(hca_state_kv != null, src, 1103, "hca_state_kv");
+        impl.assert(hca_state_score != null, src, 1104, "hca_state_score");
 
         const st = d.mctx.getHcaState();
         hca_state = st;
@@ -1094,8 +1099,8 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
     if (ratio == hca_ratio and inp_dsv4.?.getHca().state_pos != null) {
         const d = inp_dsv4.?;
         const inp_hca = d.getHca();
-        impl.assert(hca_state_kv != null, src, 1132, "hca_state_kv");
-        impl.assert(hca_state_score != null, src, 1133, "hca_state_score");
+        impl.assert(hca_state_kv != null, src, 1136, "hca_state_kv");
+        impl.assert(hca_state_score != null, src, 1137, "hca_state_score");
 
         if (hca_state == null) hca_state = d.mctx.getHcaState();
         const st = hca_state.?;
@@ -1165,7 +1170,7 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
 // The graphs
 
 /// Ports the constructor of `llama_model_deepseek4`'s `graph`
-/// (models/deepseek4.cpp:1219 @c1d0e7a00).
+/// (models/deepseek4.cpp:1223 @5266f24da).
 pub fn buildGraph(model: *const Model, b: *const Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -1224,7 +1229,12 @@ pub fn buildGraph(model: *const Model, b: *const Builder) void {
 
         var selected_experts: ?*Tensor = null;
         var exp_probs_b = layer.ffn_exp_probs_b;
-        if (@as(u32, @intCast(il)) < hp.dsv4_hash_layer_count) {
+
+        // Input from mtmd may route by the image-token bias.
+        const is_media = b.ubatch.embd != null;
+        if (is_media) {
+            if (layer.ffn_exp_probs_b_vl) |vl| exp_probs_b = vl;
+        } else if (@as(u32, @intCast(il)) < hp.dsv4_hash_layer_count) {
             // The leading layers route each token by a fixed table.
             selected_experts = c.ggml_get_rows(ctx, layer.ffn_gate_tid2eid, b.res.t_inp_tokens);
             exp_probs_b = null;
@@ -1237,7 +1247,7 @@ pub fn buildGraph(model: *const Model, b: *const Builder) void {
             .down_exps = layer.ffn_down_exps.?,
             .exp_probs_b = exp_probs_b,
             .n_expert = b.n_expert,
-            .n_expert_used = hp.n_expert_used,
+            .n_expert_used = hp.nExpertUsed(0),
             .type_op = .silu,
             .norm_w = hp.expert_weights_norm,
             .w_scale = hp.expert_weights_scale,
@@ -1291,29 +1301,29 @@ pub fn buildGraph(model: *const Model, b: *const Builder) void {
 }
 
 /// Ports the constructor of `llama_model_deepseek4`'s `graph_mtp`
-/// (models/deepseek4.cpp:1352 @c1d0e7a00): the MTP block over the trunk's
+/// (models/deepseek4.cpp:1363 @5266f24da): the MTP block over the trunk's
 /// hidden streams and the next token's embedding, through the same
 /// hyper-connections, then the shared head.
 pub fn buildGraphMtp(model: *const Model, b: *const Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const cp = b.cparams;
-    impl.assert(hp.n_layer_nextn > 0, src, 1354, "hparams.n_layer_nextn > 0 && \"DEEPSEEK4 MTP requires n_layer_nextn > 0\"");
-    impl.assert(hp.n_layer_nextn == 1, src, 1355, "hparams.n_layer_nextn == 1 && \"DEEPSEEK4 MTP currently only supports a single MTP block\"");
-    impl.assert(cp.nextn_layer_offset >= 0 and cp.nextn_layer_offset < @as(i32, @intCast(hp.n_layer_nextn)), src, 1356, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
-    impl.assert(b.ubatch.token != null, src, 1359, "ubatch.token && \"DEEPSEEK4 MTP requires token input\"");
+    impl.assert(hp.n_layer_nextn > 0, src, 1365, "hparams.n_layer_nextn > 0 && \"DEEPSEEK4 MTP requires n_layer_nextn > 0\"");
+    impl.assert(hp.n_layer_nextn == 1, src, 1366, "hparams.n_layer_nextn == 1 && \"DEEPSEEK4 MTP currently only supports a single MTP block\"");
+    impl.assert(cp.nextn_layer_offset >= 0 and cp.nextn_layer_offset < @as(i32, @intCast(hp.n_layer_nextn)), src, 1367, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
+    impl.assert(b.ubatch.token != null, src, 1370, "ubatch.token && \"DEEPSEEK4 MTP requires token input\"");
 
     const hc: i64 = hp.dsv4_hc_mult;
-    impl.assert(hp.nEmbdOut() == @as(u32, @truncate(@as(u64, @bitCast(b.n_embd * hc)))), src, 1362, "hparams.n_embd_out() == (uint32_t) (n_embd*hc) && \"DEEPSEEK4 MTP hidden width mismatch\"");
+    impl.assert(hp.nEmbdOut() == @as(u32, @truncate(@as(u64, @bitCast(b.n_embd * hc)))), src, 1373, "hparams.n_embd_out() == (uint32_t) (n_embd*hc) && \"DEEPSEEK4 MTP hidden width mismatch\"");
 
     const il: c_int = @intCast(@as(i64, hp.nLayer()) + cp.nextn_layer_offset);
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, src, 1367, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, src, 1368, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, src, 1369, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
+    impl.assert(layer.nextn.eh_proj != null, src, 1378, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, src, 1379, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, src, 1380, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
 
-    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort(src, 1371, "out of memory");
+    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort(src, 1382, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdOut() };
 
     inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
@@ -1375,7 +1385,7 @@ pub fn buildGraphMtp(model: *const Model, b: *const Builder) void {
     cur = b.buildNorm(cur, layer.ffn_norm, null, .rms, il);
     b.cb(cur, "mtp_ffn_norm", il);
 
-    impl.assert(@as(u32, @intCast(il)) >= hp.dsv4_hash_layer_count, src, 1440, "(uint32_t) il >= hparams.dsv4_hash_layer_count && \"DEEPSEEK4 MTP does not support hash-routed MTP blocks\"");
+    impl.assert(@as(u32, @intCast(il)) >= hp.dsv4_hash_layer_count, src, 1451, "(uint32_t) il >= hparams.dsv4_hash_layer_count && \"DEEPSEEK4 MTP does not support hash-routed MTP blocks\"");
     const moe_out = b.buildMoeFfn(cur, .{
         .gate_inp = layer.ffn_gate_inp,
         .up_exps = layer.ffn_up_exps,
@@ -1383,7 +1393,7 @@ pub fn buildGraphMtp(model: *const Model, b: *const Builder) void {
         .down_exps = layer.ffn_down_exps.?,
         .exp_probs_b = layer.ffn_exp_probs_b,
         .n_expert = b.n_expert,
-        .n_expert_used = hp.n_expert_used,
+        .n_expert_used = hp.nExpertUsed(0),
         .type_op = .silu,
         .norm_w = hp.expert_weights_norm,
         .w_scale = hp.expert_weights_scale,
@@ -1412,13 +1422,13 @@ pub fn buildGraphMtp(model: *const Model, b: *const Builder) void {
     b.cb(cur, "mtp_hc_head", -1);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, src, 1479, "head_norm_w && \"DEEPSEEK4 MTP missing shared head norm\"");
+    impl.assert(head_norm_w != null, src, 1490, "head_norm_w && \"DEEPSEEK4 MTP missing shared head norm\"");
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
     b.cb(cur, "mtp_shared_head_norm", -1);
     b.res.t_embd = cur;
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
-    impl.assert(head_w != null, src, 1485, "head_w && \"DEEPSEEK4 MTP missing LM head\"");
+    impl.assert(head_w != null, src, 1496, "head_w && \"DEEPSEEK4 MTP missing LM head\"");
     cur = c.ggml_mul_mat(ctx, head_w, cur);
     b.cb(cur, "result_output", -1);
 

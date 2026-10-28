@@ -25,6 +25,10 @@
 -m $VOCAB/ggml-vocab-llama-spm.gguf -ctk q9 -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf --rope-scaling sideways -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf -lm wrong -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf -lzm wrong -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --lazy-mode on -lzm off -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf -ncffn -1 -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --n-cpu-ffn x -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf --numa wrong -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf -dev nosuchdevice -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf -ot "x=nosuchbuft" -p x

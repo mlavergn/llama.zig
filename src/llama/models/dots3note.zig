@@ -11,8 +11,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/dots3note.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_dots3note`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/dots3note.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_dots3note`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`. The C++
 //! notes it was adapted from `deepseek32.cpp` (the DSA indexer and absorbed
 //! MLA) and `step35.cpp` (the head-wise output gate).
@@ -31,7 +31,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_dots3note`'s `load_arch_hparams` (src/models/dots3note.cpp:8 @c1d0e7a00).
+/// Ports `llama_model_dots3note`'s `load_arch_hparams` (src/models/dots3note.cpp:8 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -40,13 +40,9 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     // The eps of the indexer's k_norm layer norm.
     hp.f_norm_eps = 1e-6;
 
-    // The C++'s TODO: use the MTP layer.
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-    impl.assert(hp.n_layer_nextn < hp.n_layer_all, "models/dots3note.cpp", 14, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < n_layer_all\"");
-
     // MoE.
     hp.n_expert_shared = (try meta.getKey(u32, .expert_shared_count, true, exc)).?;
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     hp.n_layer_dense_lead = (try meta.getKey(u32, .leading_dense_block_count, true, exc)).?;
     if (try meta.getKey(f32, .expert_weights_scale, false, exc)) |v| hp.expert_weights_scale = v;
     if (try meta.getKey(bool, .expert_weights_norm, false, exc)) |v| hp.expert_weights_norm = v;
@@ -80,7 +76,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_dots3note`'s `load_arch_tensors` (src/models/dots3note.cpp:52 @c1d0e7a00).
+/// Ports `llama_model_dots3note`'s `load_arch_tensors` (src/models/dots3note.cpp:48 @5266f24da).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     _ = ml;
     const l = self.loadLocals();
@@ -94,7 +90,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     const n_embd_head_qk_rope: i64 = hp.nRot(0);
 
     const q_lora_rank: i64 = hp.n_lora_q;
-    const n_ff_exp: i64 = hp.n_ff_exp;
+    const n_ff_exp: i64 = hp.nFfExp(0);
     const n_expert_shared: i64 = hp.n_expert_shared;
 
     const indexer_head_size: i64 = hp.indexer_head_size;
@@ -191,18 +187,18 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_dots3note`'s `build_arch_graph` (src/models/dots3note.cpp:152 @c1d0e7a00).
+/// Ports `llama_model_dots3note`'s `build_arch_graph` (src/models/dots3note.cpp:148 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     _ = params;
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_dots3note`'s `graph`
-/// (src/models/dots3note.cpp:156 @c1d0e7a00).
+/// (src/models/dots3note.cpp:152 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.isMla(), "models/dots3note.cpp", 158, "hparams.is_mla()");
+    impl.assert(hp.isMla(), "models/dots3note.cpp", 154, "hparams.is_mla()");
 
     const n_embd_head_qk_rope: i64 = hp.nRot(0);
 
@@ -211,7 +207,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_indexer_top_k: u32 = hp.indexer_top_k;
 
     // The indexer head's layout is `[rope | nope]`.
-    impl.assert(hp.nRot(0) <= n_embd_indexer_head, "models/dots3note.cpp", 167, "hparams.n_rot() <= n_embd_indexer_head");
+    impl.assert(hp.nRot(0) <= n_embd_indexer_head, "models/dots3note.cpp", 163, "hparams.n_rot() <= n_embd_indexer_head");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 

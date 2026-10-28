@@ -1,6 +1,6 @@
 //! The per-model encoder graphs (`llama.cpp/tools/mtmd/models/`), and
-//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.3.0,
-//! `c1d0e7a00`), which picks one by projector type.
+//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.4.0,
+//! `5266f24da`), which picks one by projector type.
 //!
 //! Each file here ports the `models/*.cpp` of the same name (hyphens become
 //! underscores) and exposes `build(g, params)`: the class's `build()`, run
@@ -18,6 +18,7 @@ const c = impl.c;
 
 pub const cogvlm = @import("cogvlm.zig");
 pub const conformer = @import("conformer.zig");
+pub const deepseek4v = @import("deepseek4v.zig");
 pub const deepseekocr = @import("deepseekocr.zig");
 pub const deepseekocr2 = @import("deepseekocr2.zig");
 pub const dots3note = @import("dots3note.zig");
@@ -75,7 +76,7 @@ pub const Built = struct {
     }
 };
 
-/// The `support_batch()` override of each builder (models.h @c1d0e7a00),
+/// The `support_batch()` override of each builder (models.h @5266f24da),
 /// or null for a projector `clip_get_graph_builder` has no builder for.
 pub fn supportBatch(t: names.ProjectorType) ?bool {
     return switch (t) {
@@ -102,6 +103,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .kimivl => false,
         .paddleocr => false,
         .kimik25 => false,
+        .deepseek4v => false,
         .cogvlm => false,
         .hunyuanvl => false,
         .mlp, .mlp_norm, .ldp, .ldpv2, .glm_edge => false,
@@ -126,7 +128,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
     };
 }
 
-/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:930 @c1d0e7a00) and the
+/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:930 @5266f24da) and the
 /// builder's `build()`.
 pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*const clip.EncodeParams) clip.Error!Built {
     const img = &imgs.entries.items[0];
@@ -158,6 +160,7 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .kimivl => try kimivl.build(&g, params),
         .paddleocr => try paddleocr.build(&g, params),
         .kimik25 => try kimik25.build(&g, params),
+        .deepseek4v => try deepseek4v.build(&g, params),
         .cogvlm => try cogvlm.build(&g, params),
         .hunyuanvl => try hunyuanvl.build(&g, params),
         .mlp, .mlp_norm, .ldp, .ldpv2, .glm_edge => try llava.build(&g, params),
@@ -178,12 +181,12 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .yasa2 => try yasa2.build(&g, params),
         .parakeet => try parakeet.build(&g, params),
         .granite4_vision => try granite4_vision.build(&g, params),
-        else => impl.abort("clip.cpp", 1139, "missing cgraph builder"),
+        else => impl.abort("clip.cpp", 1143, "missing cgraph builder"),
     };
     return .{ .gf = gf, .support_batch = supportBatch(ctx.projType()).?, .ctx0 = g.ctx0 };
 }
 
-/// Ports `c2w_state_slot` (models/qwen3tts-gen.cpp @c1d0e7a00): a persisted
+/// Ports `c2w_state_slot` (models/qwen3tts-gen.cpp @5266f24da): a persisted
 /// state slot of a gen-audio decoder.
 pub const StateSlot = struct {
     name: [:0]const u8,
@@ -191,7 +194,7 @@ pub const StateSlot = struct {
     ne1: i64,
 };
 
-/// Ports `list_gen_state_slots` (mtmd/clip.cpp:4361 @c1d0e7a00). The caller
+/// Ports `list_gen_state_slots` (mtmd/clip.cpp:4408 @5266f24da). The caller
 /// frees the slice with `freeSlots`.
 pub fn genStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod.Model) clip.Error![]StateSlot {
     return switch (model.proj_type) {

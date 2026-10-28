@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.4.0 (`5266f24da`).
 //!
 //! Scores are summed in `double`, as there -- "to make tokenization results
 //! exactly the same as in the HF tokenizer". Nothing is multiplied, so no
@@ -25,7 +25,7 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `llm_tokenizer_ugm` (llama-vocab.cpp:887 @c1d0e7a00).
+/// Ports `llm_tokenizer_ugm` (llama-vocab.cpp:887 @5266f24da).
 pub const Tokenizer = struct {
     /// U+2581, the escaped space.
     pub const escaped_space = "\xE2\x96\x81";
@@ -92,7 +92,7 @@ pub const Tokenizer = struct {
     }
 };
 
-/// Ports `xcda_array_view` (llama-vocab.cpp:1117 @c1d0e7a00).
+/// Ports `xcda_array_view` (llama-vocab.cpp:1117 @5266f24da).
 const XcdaView = struct {
     xcda: []const u8,
 
@@ -137,7 +137,7 @@ const NormalizationResult = struct {
 };
 
 /// Ports `llm_tokenizer_ugm_session`'s `tokenize` (llama-vocab.cpp:967
-/// @c1d0e7a00).
+/// @5266f24da).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary.
@@ -240,7 +240,7 @@ pub fn tokenize(vocab: *const Vocab, tokenizer: *const Tokenizer, text: []const 
 }
 
 /// Ports `llm_tokenizer_ugm_session`'s `normalize` (llama-vocab.cpp:1062
-/// @c1d0e7a00).
+/// @5266f24da).
 fn normalize(vocab: *const Vocab, tokenizer: *const Tokenizer, input: []const u8, normalized: *std.ArrayList(u8), exc: *impl.Exception) impl.Thrown!void {
     normalized.clearRetainingCapacity();
     normalized.ensureTotalCapacity(allocator, input.len * 3) catch oom();
@@ -279,7 +279,7 @@ fn normalize(vocab: *const Vocab, tokenizer: *const Tokenizer, input: []const u8
 }
 
 /// Ports `llm_tokenizer_ugm_session`'s `normalize_prefix` (llama-vocab.cpp:1155
-/// @c1d0e7a00): a user-defined token passes through whole; else the
+/// @5266f24da): a user-defined token passes through whole; else the
 /// longest XCDA match is replaced; else one code point passes through, or
 /// an invalid byte becomes U+FFFD.
 fn normalizePrefix(tokenizer: *const Tokenizer, input: []const u8, input_offset: usize, exc: *impl.Exception) impl.Thrown!NormalizationResult {

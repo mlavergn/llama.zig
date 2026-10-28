@@ -26,7 +26,7 @@ import re
 import sys
 
 SRC = "llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp"
-COMMIT = "c1d0e7a00"
+from upstream_pin import COMMIT, TAG
 CONSTS = {"MAX_PARAMETER_COUNT": 12}
 
 SCALAR = {"uint32_t": ("u32", 4), "int32_t": ("i32", 4), "float": ("f32", 4), "uint64_t": ("u64", 8)}
@@ -120,7 +120,7 @@ z = ['''//! The push constants the Vulkan shaders read.
 //! # Provenance
 //!
 //! Mirrors the `vk_*_push_constants` structs of
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.3.0
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at ''' + TAG + '''
 //! (`''' + COMMIT + '''`).
 //!
 //! # Generated, not written

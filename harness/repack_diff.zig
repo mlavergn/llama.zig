@@ -168,7 +168,7 @@ const QK4_NL = 32;
 const QK_MXFP4 = 32;
 const half = u16;
 
-/// Mirrors `block<K, N>` (ggml-cpu/repack.h:23 @c1d0e7a00).
+/// Mirrors `block<K, N>` (ggml-cpu/repack.h:23 @5266f24da).
 fn Block(comptime K: comptime_int, comptime N: comptime_int) type {
     return extern struct {
         d: [N]half,
@@ -180,29 +180,29 @@ const Q4_0x4 = Block(4, 4);
 const Q4_0x8 = Block(4, 8);
 const Q8_0x4 = Block(8, 4);
 
-/// Mirrors `block_q4_Kx8` (ggml-cpu/repack.h:43 @c1d0e7a00).
+/// Mirrors `block_q4_Kx8` (ggml-cpu/repack.h:43 @5266f24da).
 const Q4_Kx8 = extern struct { d: [8]half, dmin: [8]half, scales: [96]u8, qs: [1024]u8 };
-/// Mirrors `block_q2_Kx8` (ggml-cpu/repack.h:59 @c1d0e7a00).
+/// Mirrors `block_q2_Kx8` (ggml-cpu/repack.h:59 @5266f24da).
 const Q2_Kx8 = extern struct { d: [8]half, dmin: [8]half, scales: [128]u8, qs: [512]u8 };
-/// Mirrors `block_q5_Kx8` (ggml-cpu/repack.h:75 @c1d0e7a00).
+/// Mirrors `block_q5_Kx8` (ggml-cpu/repack.h:75 @5266f24da).
 const Q5_Kx8 = extern struct { d: [8]half, dmin: [8]half, scales: [96]u8, qh: [QK_K * 8 / 8]u8, qs: [QK_K * 8 / 2]u8 };
-/// Mirrors `block_q6_Kx8` (ggml-cpu/repack.h:86 @c1d0e7a00).
+/// Mirrors `block_q6_Kx8` (ggml-cpu/repack.h:86 @5266f24da).
 const Q6_Kx8 = extern struct { d: [8]half, scales: [QK_K / 16 * 8]i8, ql: [QK_K / 2 * 8]u8, qh: [QK_K / 4 * 8]u8 };
-/// Mirrors `block_q8_Kx4` (ggml-cpu/repack.h:96 @c1d0e7a00).
+/// Mirrors `block_q8_Kx4` (ggml-cpu/repack.h:96 @5266f24da).
 const Q8Kx4 = extern struct { d: [4]f32, qs: [QK_K * 4]i8, bsums: [QK_K / 4]i16 };
-/// Mirrors `block_iq4_nlx4` (ggml-cpu/repack.h:104 @c1d0e7a00).
+/// Mirrors `block_iq4_nlx4` (ggml-cpu/repack.h:104 @5266f24da).
 const IQ4_NLx4 = extern struct { d: [4]half, qs: [QK4_NL * 2]u8 };
-/// Mirrors `block_iq4_nlx8` (ggml-cpu/repack.h:111 @c1d0e7a00).
+/// Mirrors `block_iq4_nlx8` (ggml-cpu/repack.h:111 @5266f24da).
 const IQ4_NLx8 = extern struct { d: [8]half, qs: [QK4_NL * 4]u8 };
-/// Mirrors `block_mxfp4x4` (ggml-cpu/repack.h:124 @c1d0e7a00).
+/// Mirrors `block_mxfp4x4` (ggml-cpu/repack.h:124 @5266f24da).
 const MXFP4x4 = extern struct { e: [4]u8, qs: [QK_MXFP4 * 2]u8 };
-/// Mirrors `block_mxfp4x8` (ggml-cpu/repack.h:130 @c1d0e7a00).
+/// Mirrors `block_mxfp4x8` (ggml-cpu/repack.h:130 @5266f24da).
 const MXFP4x8 = extern struct { e: [8]u8, qs: [QK_MXFP4 * 4]u8 };
 
-/// Mirrors `block_q8_0` (ggml-common.h:239 @c1d0e7a00): the Q8_0
+/// Mirrors `block_q8_0` (ggml-common.h:239 @5266f24da): the Q8_0
 /// activation row a gemv reads.
 const Q8_0 = extern struct { d: half, qs: [QK8_0]i8 };
-/// Mirrors `block_q8_K` (ggml-common.h:371 @c1d0e7a00): the Q8_K one.
+/// Mirrors `block_q8_K` (ggml-common.h:371 @5266f24da): the Q8_K one.
 const Q8K = extern struct { d: f32, qs: [QK_K]i8, bsums: [QK_K / 16]i16 };
 
 comptime {

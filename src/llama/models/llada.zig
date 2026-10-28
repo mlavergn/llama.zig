@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/llada.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/llada.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_llada`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -19,7 +19,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_llada`'s `load_arch_hparams` (models/llada.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_llada`'s `load_arch_hparams` (models/llada.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -34,7 +34,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.causal_attn = false;
 }
 
-/// Ports `llama_model_llada`'s `load_arch_tensors` (models/llada.cpp:19 @c1d0e7a00).
+/// Ports `llama_model_llada`'s `load_arch_tensors` (models/llada.cpp:19 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -80,13 +80,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_llada`'s `build_arch_graph` (models/llada.cpp:67 @c1d0e7a00).
+/// Ports `llama_model_llada`'s `build_arch_graph` (models/llada.cpp:67 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_llada`'s `graph`
-/// (models/llada.cpp:71 @c1d0e7a00). LLaDA is Llama with non-causal
+/// (models/llada.cpp:71 @5266f24da). LLaDA is Llama with non-causal
 /// attention, for diffusion.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;

@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmvf.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/mmvf.cuh` at v0.3.0 (`c1d0e7a00`), the host
+//! `llama.cpp/ggml/src/ggml-cuda/mmvf.cuh` at v0.4.0 (`5266f24da`), the host
 //! half. The kernel, `mul_mat_vec_f`, stays CUDA.
 //!
 //! `ggml_cuda_op_mul_mat_vec_f`, the row-split entry point, is not ported:
@@ -20,7 +20,7 @@ const Tensor = c.ggml_tensor;
 const half = kernels.half;
 const bf16 = kernels.bf16;
 
-/// Ports `MMVF_MAX_BATCH_SIZE` (mmvf.cuh:3 @c1d0e7a00).
+/// Ports `MMVF_MAX_BATCH_SIZE` (mmvf.cuh:3 @5266f24da).
 pub const max_batch_size = 8;
 
 fn i32Of(x: i64) c_int {
@@ -60,7 +60,7 @@ fn mmvfKernel(comptime T: type, comptime A: type, comptime ncols_dst: comptime_i
     return kernels.get("mmvf", kernels.tmpl("mul_mat_vec_f", &.{ kernels.typeName(T), kernels.typeName(A), kernels.int(ncols_dst), kernels.int(block_size), kernels.boolean(has_fusion), kernels.boolean(is_multi_token_id) }));
 }
 
-/// Ports `mul_mat_vec_f_switch_fusion` (mmvf.cu:382 @c1d0e7a00).
+/// Ports `mul_mat_vec_f_switch_fusion` (mmvf.cu:387 @5266f24da).
 fn switchFusion(comptime T: type, comptime A: type, comptime ncols_dst: comptime_int, comptime block_size: comptime_int, comptime is_multi_token_id: bool, a: *const Args, block_dims: kernels.Dim3, block_nums: kernels.Dim3, nbytes_shared: c_int, stream: cu.cudaStream_t) void {
     const p: kernels.LaunchParams = .{ .grid = block_nums, .block = block_dims, .shmem = @intCast(nbytes_shared), .stream = stream };
 
@@ -84,7 +84,7 @@ fn switchFusion(comptime T: type, comptime A: type, comptime ncols_dst: comptime
     kernels.launchPdl(comptime mmvfKernel(T, A, ncols_dst, block_size, false, is_multi_token_id), p, args);
 }
 
-/// Ports `launch_mul_mat_vec_f_cuda` (mmvf.cu:413 @c1d0e7a00).
+/// Ports `launch_mul_mat_vec_f_cuda` (mmvf.cu:418 @5266f24da).
 fn launchMulMatVecF(
     comptime T: type,
     comptime A: type,
@@ -178,7 +178,7 @@ fn launchMulMatVecF(
     }
 }
 
-/// Ports `mul_mat_vec_f_cuda_switch_ncols_dst` (mmvf.cu:508 @c1d0e7a00).
+/// Ports `mul_mat_vec_f_cuda_switch_ncols_dst` (mmvf.cu:513 @5266f24da).
 fn switchNcolsDst(comptime T: type, comptime A: type, x: ?*const anyopaque, y: ?*const f32, ids: ?*const i32, fusion: common.MmFusionArgsDevice, dst: ?*f32, ncols: i64, nrows: i64, ncols_dst: i64, stride_row: i64, stride_col_y: i64, stride_col_dst: i64, nchannels_x: i64, nchannels_y: i64, nchannels_dst: i64, stride_channel_x: i64, stride_channel_y: i64, stride_channel_dst: i64, nsamples_x: i64, nsamples_dst: i64, stride_sample_x: i64, stride_sample_y: i64, stride_sample_dst: i64, ids_stride: i64, stream: cu.cudaStream_t) void {
     const has_ids = ids != null;
 
@@ -200,7 +200,7 @@ fn switchNcolsDst(comptime T: type, comptime A: type, x: ?*const anyopaque, y: ?
     }
 }
 
-/// Ports `mul_mat_vec_f_cuda` (mmvf.cu:605 @c1d0e7a00). Note its
+/// Ports `mul_mat_vec_f_cuda` (mmvf.cu:610 @5266f24da). Note its
 /// `stride_col_dst` parameter is `int`, unlike its neighbours.
 fn mulMatVecFCuda(comptime T: type, x: ?*const anyopaque, y: ?*const f32, ids: ?*const i32, fusion: common.MmFusionArgsDevice, dst: ?*f32, ncols: i64, nrows: i64, ncols_dst: i64, stride_row: i64, stride_col_y: i64, stride_col_dst: c_int, nchannels_x: i64, nchannels_y: i64, nchannels_dst: i64, stride_channel_x: i64, stride_channel_y: i64, stride_channel_dst: i64, nsamples_x: i64, nsamples_dst: i64, stride_sample_x: i64, stride_sample_y: i64, stride_sample_dst: i64, ids_stride: i64, prec: c.enum_ggml_prec, stream: cu.cudaStream_t) void {
     if (T == half) {
@@ -212,7 +212,7 @@ fn mulMatVecFCuda(comptime T: type, x: ?*const anyopaque, y: ?*const f32, ids: ?
     switchNcolsDst(T, f32, x, y, ids, fusion, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst, nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
 }
 
-/// Ports `ggml_cuda_mul_mat_vec_f` (mmvf.cu:629 @c1d0e7a00).
+/// Ports `ggml_cuda_mul_mat_vec_f` (mmvf.cu:634 @5266f24da).
 pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor, fusion: ?*const common.MmFusionArgsHost) void {
     impl.assert(src1.type == c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
     impl.assert(ids == null or ids.?.type == c.GGML_TYPE_I32, "!ids ||  ids->type == GGML_TYPE_I32");
@@ -270,6 +270,7 @@ pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
             fusion_local.gate_bias = b.data;
         }
         fusion_local.glu_op = f.glu_op;
+        fusion_local.glu_limit = f.glu_limit;
     }
 
     const s01: i64 = @intCast(src0.nb[1] / ts_src0);
@@ -306,7 +307,7 @@ pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
     }
 }
 
-/// Ports `ggml_cuda_should_use_mmvf` (mmvf.cu:786 @c1d0e7a00), NVIDIA arms.
+/// Ports `ggml_cuda_should_use_mmvf` (mmvf.cu:792 @5266f24da), NVIDIA arms.
 pub fn shouldUseMmvf(ty: c.enum_ggml_type, x: c_int, src0_ne: *const [4]i64, src0_nb: *const [4]usize, ne11: i64) bool {
     if (@rem(src0_ne[0], 2) != 0) return false;
 

@@ -20,7 +20,7 @@ Settled in review. The plan below assumes all of these.
 |---|---|---|
 | 1 | Target binary | **Port ggml + libllama only; write our own Zig CLI on top.** Decisions 16 and 20 refine this: the CLI is ours, but flag-compatible with upstream's. |
 | 2 | `nlohmann::json` | **Moot** — Decision 1 removes it from the target set entirely. |
-| 3 | Upstream tracking | **Freeze at v0.3.0.** Any future sync is a separate, explicitly-scoped project. |
+| 3 | Upstream tracking | **Follow upstream's releases, one at a time** (revised 2026-10-27; `MAINTENANCE.md`, Decisions 1–20). The port froze at v0.3.0 through Stages 1–8. Each sync now pulls the next ggml-org release tag, ports what changed, and commits as that version, following `SYNC.md`. `UPSTREAM.md` records where the port stands. |
 | 4 | Correctness bar | **Token-identical output** vs. the reference build, fixed seed, `--temp 0`, canonical model `Qwen3.5-2B-Q4_K_M.gguf`. Logit-distance tolerance is the documented fallback if bit-exactness proves unreachable. Reference is `llama.cpp.zmake` — see Decision 17. |
 | 5 | Model architectures | **Qwen3.5 first**, backfill the rest later. |
 | 6 | Metal kernels | **Stay as MSL**, carried verbatim as embedded data. |
@@ -1560,6 +1560,70 @@ probes pass; `make vk-repro` passes per node and fused on every arm. One
 finding changes the method: `glslc -O` is not reproducible on `tri_f16`, so
 the port embeds the reference's generated SPIR-V rather than regenerating
 it.
+
+## Upstream syncs
+
+`SYNC.md` is the procedure, and `UPSTREAM.md` is the record. A sync's Mac
+gates block it. The other machines' runs go on the lists below, and they
+must clear before the **next** sync starts (MAINTENANCE.md, Decision 7).
+
+### Pickup for the v0.4.0 sync
+
+**GB10 (`spark-dbff`, `~/src/llama.zig`)**
+
+1. **CUDA:** a real `zig build -Dcuda`, which rebuilds the fatbins and the
+   kernel table. It must resolve every new key:
+   - `moe_weighted_reduction_f32` and `swiglu_clamp_kernel<float|__half>`;
+   - `flash_attn_mask_to_sparse_indices`, and `flash_attn_ext_f16<…>` with
+     `use_sparse` as the 7th bool;
+   - `mul_mat_vec_q_moe<T, 2, has_fusion>` and `mm_ids_helper<10>`.
+
+   Each new kernel's first launch also checks its argument sizes, including
+   the 48-byte fusion struct passed by value.
+2. **CUDA gates.**
+   - `cuda-ops-diff`: covers `test_swiglu_clamp`, `test_moe_weighted_reduction`,
+     and sparse flash attention, which needs KV ≥ 4096 at head size 512 or 576.
+   - `cuda-node-diff`, per node and fused: the only gate that drives
+     `graph_optimize`'s `add_alloc_dep`.
+   - `cuda-backend-diff` and `cuda-parity-cli`.
+   - Re-run `gen-mmq-config` and `gen-fattn-config` there; the output must
+     not change.
+3. **Vulkan:** rebuild both sides at SDK 1.4.363 (the toolchain didn't move),
+   then on all four arms:
+   - `vk-push-layout` and `vk-repro`.
+   - `vk-ops-diff`: watch cross-entropy loss and its backward pass (including
+     the wg512 variant above 1024 classes), `LIGHTNING_INDEXER` for every K
+     type, `SWIGLU_CLAMP`, radix `TOP_K` at large K, and `MUL_MAT_ID` row-id
+     hoisting and coopmat2 K padding.
+   - `vk-node-diff`, per node and fused. The new `is_src_of` changes
+     `graph_optimize`'s node order.
+   - `vk-backend-diff`, whose harness now passes `graph_optimize` its
+     params, and `vk-parity-cli`.
+   - TOPK_QSA fusion: covered only by a fused `vk-node-diff` on the
+     `qwen4exp` fixture.
+4. **Linux arm64 CPU set:** `ops-diff`, `repack-diff`, `node-diff`,
+   `parity-port --cpu`, `host-arms-diff` and `quant-diff`. Quantize now maps
+   the file on Linux.
+
+**DESKTOP-BR7J5S9 (x86_64_v3)**
+
+5. `make x86-gates`. Only `x86-ops-diff` reaches the IQ panel GEMM
+   (`iqp.cpp`, live only under AVX2); look at its `iqp …` lines. Also run
+   `x86-node-diff` on `Qwen3.5-2B-IQ4_XS.gguf` if the model is on the
+   laptop.
+6. **Reachability:** one port-side run with `GGML_NO_IQ_PANEL` set must make
+   those lines differ, proving the panel ran rather than `vec_dot` on both
+   sides. This needs a `_putenv_s` in the wrapper.
+7. `quant-diff`, which now maps the file on Windows, and `win-host-diffs`.
+
+**JWHLPTOP (AVX-512)**
+
+8. `X86_CPU=x86_64_v4 X86_AGENT=JWHLPTOP make x86-gates`.
+9. `X86_CPU=tigerlake X86_AGENT=JWHLPTOP make x86-gates`: the GFNI,
+   AVX-512 VNNI and `GGML_IQP_USE_BIAS` arms.
+
+No machine has the AVX-VNNI-only or AVX-VNNI-INT8 arms of `iqp`. Both are
+compile-checked only.
 
 ---
 

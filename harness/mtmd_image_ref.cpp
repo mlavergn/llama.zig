@@ -62,6 +62,8 @@ struct ref_hparams {
     uint8_t image_pad_color_ov[4];
     float   image_mean[3];
     float   image_std[3];
+    int32_t dsv4_max_n_token;
+    int32_t dsv4_max_wh_ratio;
 };
 
 typedef void (*ref_log_fn)(int level, const char * text, void * user_data);
@@ -130,6 +132,8 @@ int ref_preprocess(int kind, int proj_type, const ref_hparams * hp, const uint8_
     h.image_resize_algo_ov = (resize_algo) hp->image_resize_algo_ov;
     h.image_pad_rf         = (pad_style) hp->image_pad_rf;
     h.image_pad_ov         = (pad_style) hp->image_pad_ov;
+    h.dsv4_max_n_token     = hp->dsv4_max_n_token;
+    h.dsv4_max_wh_ratio    = hp->dsv4_max_wh_ratio;
 
     std::unique_ptr<mtmd_image_preprocessor> pp;
     switch (kind) {
@@ -146,6 +150,7 @@ int ref_preprocess(int kind, int proj_type, const ref_hparams * hp, const uint8_
         case 10: pp = std::make_unique<mtmd_image_preprocessor_youtuvl>(&ctx); break;
         case 11: pp = std::make_unique<mtmd_image_preprocessor_granite>(&ctx); break;
         case 12: pp = std::make_unique<mtmd_image_preprocessor_muse_glimmer>(&ctx); break;
+        case 13: pp = std::make_unique<mtmd_image_preprocessor_deepseek4v>(&ctx); break;
         default: return 1;
     }
 

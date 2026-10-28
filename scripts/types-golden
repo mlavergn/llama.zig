@@ -1,0 +1,17 @@
+#!/bin/bash
+# Print the name-table checksums src/ggml/types.zig compares against, from the
+# stock C ggml llama.cpp.zmake builds -- never from the port, whose own
+# ggml_op_name would answer for itself. Rerun at every sync and paste the
+# lines that changed. (golden_traits has its own generator path.)
+#
+# Usage: scripts/types-golden
+set -eu
+cd "$(dirname "$0")/.."
+. scripts/check-reference-pin
+make -C llama.cpp.zmake lib >/dev/null
+OUT="$(mktemp -d)"
+zig cc -O0 harness/types_golden.c -Illama.cpp.zmake/llama.cpp/ggml/include \
+    llama.cpp.zmake/zig-out/lib/libggml.a -lc++ \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -o "$OUT/types_golden"
+"$OUT/types_golden"

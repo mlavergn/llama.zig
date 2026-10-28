@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! **Not a port by itself.** It gathers the port of
-//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.3.0
-//! (`c1d0e7a00`), the x86 counterpart of `repack/arm/`, and x86's
+//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.4.0
+//! (`5266f24da`), the x86 counterpart of `repack/arm/`, and x86's
 //! `arch-fallback.h` renames (`fallback.zig`): the file's 12 exports at the
 //! `__AVX2__` arms x86-64-v3 compiles, and the gemms' `__AVX512BW__ &&
 //! __AVX512DQ__` arms x86-64-v4 adds.

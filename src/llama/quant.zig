@@ -13,7 +13,7 @@
 //! - `llama.cpp/src/llama-ext.h` -- `llama_quant_model_desc`
 //! - `llama.cpp/src/llama-impl.cpp` -- `llama_format_tensor_shape`
 //!
-//! All at v0.3.0 (`c1d0e7a00`). The C entry points are `api/quant.zig`'s.
+//! All at v0.4.0 (`5266f24da`). The C entry points are `api/quant.zig`'s.
 //!
 //! # The contract
 //!
@@ -27,18 +27,17 @@
 //!
 //! # What the C++ leaves to its platform
 //!
-//! - **The load mode is `LLAMA_LOAD_MODE_NONE`** on this target, the
-//!   `#else` arm of `llama_model_quantize_impl`: tensors are read into a
-//!   buffer, never mapped.
-//! - **Data is loaded by the tensor's current name**, through a lookup
-//!   keyed by the names the loader read. After `prune_layers` renames a
-//!   block, that lookup finds the *original* tensor of the new name, as
-//!   the C++'s `weights_map` does -- so a pruned model takes the data of
-//!   the block whose number it inherited. Reproduced, not fixed.
+//! - **The load mode is `LLAMA_LOAD_MODE_MMAP` on Linux and Windows and
+//!   `LLAMA_LOAD_MODE_NONE` elsewhere**, the two arms of
+//!   `llama_model_quantize_impl`'s `#if`: tensors are read from the mapping
+//!   or into a buffer, a slab of at most `max_buf_size` bytes at a time.
+//! - **Data is loaded through the weight itself**, `load_data_range`, so a
+//!   block `prune_layers` renames keeps its own data.
 //! - **Threads only split the work.** Every row is converted on its own,
 //!   so the bytes do not depend on how many threads there are.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("impl.zig");
 const arch = @import("arch.zig");
 const libcxx = @import("libcxx.zig");
@@ -55,6 +54,10 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 const GgmlType = c.enum_ggml_type;
 const Ftype = c.enum_llama_ftype;
+
+/// Ports `LLAMA_QUANT_MAX_BUF_SIZE` (llama-quant.cpp:42 @5266f24da): the
+/// most tensor data kept in memory while quantizing one tensor.
+pub const max_buf_size_default: usize = 8 * 1024 * 1024 * 1024;
 
 fn oom() noreturn {
     impl.abort("llama-quant.cpp", 0, "out of memory");
@@ -92,7 +95,7 @@ const KeyZ = struct {
 // -----------------------------------------------------------------------------
 // Tensor categories
 
-/// Mirrors `tensor_category` (llama-quant.cpp:26 @c1d0e7a00).
+/// Mirrors `tensor_category` (llama-quant.cpp:26 @5266f24da).
 pub const Category = enum {
     token_embd,
     attention_q,
@@ -108,17 +111,17 @@ pub const Category = enum {
     other,
 };
 
-/// Ports `tensor_name_match_token_embd` (llama-quant.cpp:101 @c1d0e7a00).
+/// Ports `tensor_name_match_token_embd` (llama-quant.cpp:104 @5266f24da).
 fn nameMatchTokenEmbd(name: []const u8) bool {
     return std.mem.eql(u8, name, "token_embd.weight") or std.mem.eql(u8, name, "per_layer_token_embd.weight");
 }
 
-/// Ports `tensor_name_match_output_weight` (llama-quant.cpp:106 @c1d0e7a00).
+/// Ports `tensor_name_match_output_weight` (llama-quant.cpp:109 @5266f24da).
 fn nameMatchOutputWeight(name: []const u8) bool {
     return std.mem.eql(u8, name, "output.weight");
 }
 
-/// Ports `tensor_get_category` (llama-quant.cpp:116 @c1d0e7a00).
+/// Ports `tensor_get_category` (llama-quant.cpp:119 @5266f24da).
 ///
 /// Parameters:
 /// - `name`: the tensor's name.
@@ -139,7 +142,7 @@ pub fn getCategory(name: []const u8) Category {
     return .other;
 }
 
-/// Ports `category_is_attn_v` (llama-quant.cpp:154 @c1d0e7a00).
+/// Ports `category_is_attn_v` (llama-quant.cpp:157 @5266f24da).
 fn categoryIsAttnV(cat: Category) bool {
     return cat == .attention_v or cat == .attention_qkv or cat == .attention_kv_b;
 }
@@ -153,7 +156,7 @@ const Pattern = struct {
     type: GgmlType,
 };
 
-/// Ports `quantize_state_impl` (llama-quant.cpp:164 @c1d0e7a00).
+/// Ports `quantize_state_impl` (llama-quant.cpp:167 @5266f24da).
 pub const State = struct {
     model: *const Model,
     params: *const c.llama_model_quantize_params,
@@ -177,8 +180,8 @@ pub const State = struct {
     /// The tensor-type overrides, compiled once.
     tensor_type_patterns: std.ArrayList(Pattern) = .empty,
 
-    /// Ports the constructor of `quantize_state_impl` (llama-quant.cpp:187
-    /// @c1d0e7a00): every override pattern is compiled, in order, and the
+    /// Ports the constructor of `quantize_state_impl` (llama-quant.cpp:190
+    /// @5266f24da): every override pattern is compiled, in order, and the
     /// first that fails throws its `regex_error`.
     ///
     /// Parameters:
@@ -208,7 +211,7 @@ pub const State = struct {
     }
 };
 
-/// Mirrors `tensor_metadata` (llama-quant.cpp:200 @c1d0e7a00).
+/// Mirrors `tensor_metadata` (llama-quant.cpp:203 @5266f24da).
 const Metadata = struct {
     name: [:0]u8 = undefined,
     target_type: GgmlType = 0,
@@ -266,7 +269,7 @@ const LayerMap = struct {
     }
 };
 
-/// Ports `remap_layer` (llama-quant.cpp:48 @c1d0e7a00).
+/// Ports `remap_layer` (llama-quant.cpp:51 @5266f24da).
 ///
 /// Return: the new name, owned by the caller: empty when the block is
 /// pruned, `orig_name` when nothing moves.
@@ -300,7 +303,7 @@ fn remapLayer(re: *const regex.Regex, orig_name: []const u8, prune: []const c_in
     return allocator.dupe(u8, orig_name) catch oom();
 }
 
-/// Ports `remap_imatrix` (llama-quant.cpp:76 @c1d0e7a00).
+/// Ports `remap_imatrix` (llama-quant.cpp:79 @5266f24da).
 ///
 /// Return: the name the imatrix knows the tensor by, owned by the caller.
 fn remapImatrix(re: *const regex.Regex, orig_name: [:0]const u8, mapped: *const LayerMap, exc: *Exception) Thrown![]u8 {
@@ -318,7 +321,7 @@ fn remapImatrix(re: *const regex.Regex, orig_name: [:0]const u8, mapped: *const 
                 return std.fmt.allocPrint(allocator, "{s}{d}{s}", .{ orig_name[0..pos], k, orig_name[pos + len ..] }) catch oom();
             }
         }
-        c.ggml_abort("llama-quant.cpp", 91, "\n%s: imatrix mapping error for %s\n", "remap_imatrix", orig_name.ptr);
+        c.ggml_abort("llama-quant.cpp", 94, "\n%s: imatrix mapping error for %s\n", "remap_imatrix", orig_name.ptr);
     }
 
     return allocator.dupe(u8, orig_name) catch oom();
@@ -327,33 +330,31 @@ fn remapImatrix(re: *const regex.Regex, orig_name: [:0]const u8, mapped: *const 
 // -----------------------------------------------------------------------------
 // Dequantization
 
-/// Ports `llama_tensor_dequantize_impl` (llama-quant.cpp:213 @c1d0e7a00):
-/// `tensor`'s data as f32 in `output`, split across `nthread` threads.
-fn dequantize(tensor: *Tensor, output: *std.ArrayList(f32), nelements: usize, nthread: c_int, exc: *Exception) Thrown!void {
-    if (output.items.len < nelements) output.resize(allocator, nelements) catch oom();
-    const f32_output = output.items.ptr;
-
-    const qtype = c.ggml_get_type_traits(tensor.type);
-    if (c.ggml_is_quantized(tensor.type)) {
+/// Ports `llama_tensor_dequantize_impl` (llama-quant.cpp:216 @5266f24da):
+/// `nelements` of `type` at `data` as f32 in `f32_output`, split across
+/// `nthread` threads.
+fn dequantize(ty: GgmlType, data: *const anyopaque, f32_output: [*]f32, nelements: usize, nthread: c_int, exc: *Exception) Thrown!void {
+    const qtype = c.ggml_get_type_traits(ty);
+    if (c.ggml_is_quantized(ty)) {
         if (qtype.*.to_float == null) {
-            return exc.throw(.runtime_error, "type {s} unsupported for integer quantization: no dequantization available", .{typeName(tensor.type)});
+            return exc.throw(.runtime_error, "type {s} unsupported for integer quantization: no dequantization available", .{typeName(ty)});
         }
-    } else if (tensor.type != c.GGML_TYPE_F16 and tensor.type != c.GGML_TYPE_BF16) {
-        return exc.throw(.runtime_error, "cannot dequantize/convert tensor type {s}", .{typeName(tensor.type)});
+    } else if (ty != c.GGML_TYPE_F16 and ty != c.GGML_TYPE_BF16) {
+        return exc.throw(.runtime_error, "cannot dequantize/convert tensor type {s}", .{typeName(ty)});
     }
 
     if (nthread < 2) {
-        convertRun(tensor.type, qtype.*.to_float, @ptrCast(tensor.data), f32_output, @intCast(nelements));
+        convertRun(ty, qtype.*.to_float, @ptrCast(data), f32_output, @intCast(nelements));
         return;
     }
 
-    const block_size: usize = if (tensor.type == c.GGML_TYPE_F16 or tensor.type == c.GGML_TYPE_BF16)
+    const block_size: usize = if (ty == c.GGML_TYPE_F16 or ty == c.GGML_TYPE_BF16)
         1
     else
-        @intCast(c.ggml_blck_size(tensor.type));
-    const block_size_bytes = c.ggml_type_size(tensor.type);
+        @intCast(c.ggml_blck_size(ty));
+    const block_size_bytes = c.ggml_type_size(ty);
 
-    impl.assert(nelements % block_size == 0, "llama-quant.cpp", 255, "nelements % block_size == 0");
+    impl.assert(nelements % block_size == 0, "llama-quant.cpp", 253, "nelements % block_size == 0");
     const nt: usize = @intCast(nthread);
     const nblocks = nelements / block_size;
     const blocks_per_thread = nblocks / nt;
@@ -364,13 +365,13 @@ fn dequantize(tensor: *Tensor, output: *std.ArrayList(f32), nelements: usize, nt
 
     const workers = allocator.alloc(std.Thread, nt) catch oom();
     defer allocator.free(workers);
-    const base: [*]u8 = @ptrCast(tensor.data);
+    const base: [*]const u8 = @ptrCast(data);
     for (0..nt) |tnum| {
         const thr_blocks = blocks_per_thread + (if (tnum == nt - 1) spare_blocks else 0);
         const thr_elems = thr_blocks * block_size;
         const thr_block_bytes = thr_blocks * block_size_bytes;
         workers[tnum] = std.Thread.spawn(.{}, convertRun, .{
-            tensor.type, qtype.*.to_float, base + in_buff_offs, f32_output + out_buff_offs, @as(i64, @intCast(thr_elems)),
+            ty, qtype.*.to_float, base + in_buff_offs, f32_output + out_buff_offs, @as(i64, @intCast(thr_elems)),
         }) catch oom();
         in_buff_offs += thr_block_bytes;
         out_buff_offs += thr_elems;
@@ -379,8 +380,8 @@ fn dequantize(tensor: *Tensor, output: *std.ArrayList(f32), nelements: usize, nt
 }
 
 /// The `compute` lambda of `llama_tensor_dequantize_impl`
-/// (llama-quant.cpp:213 @c1d0e7a00).
-fn convertRun(ty: GgmlType, to_float: c.ggml_to_float_t, inbuf: [*]u8, outbuf: [*]f32, nels: i64) void {
+/// (llama-quant.cpp:216 @5266f24da).
+fn convertRun(ty: GgmlType, to_float: c.ggml_to_float_t, inbuf: [*]const u8, outbuf: [*]f32, nels: i64) void {
     if (ty == c.GGML_TYPE_F16) {
         c.ggml_fp16_to_fp32_row(@ptrCast(@alignCast(inbuf)), outbuf, nels);
     } else if (ty == c.GGML_TYPE_BF16) {
@@ -393,7 +394,7 @@ fn convertRun(ty: GgmlType, to_float: c.ggml_to_float_t, inbuf: [*]u8, outbuf: [
 // -----------------------------------------------------------------------------
 // Which tensors are quantized
 
-/// Ports `tensor_allows_quantization` (llama-quant.cpp:289 @c1d0e7a00).
+/// Ports `tensor_allows_quantization` (llama-quant.cpp:287 @5266f24da).
 ///
 /// Parameters:
 /// - `params`: the quantization parameters.
@@ -456,8 +457,9 @@ pub fn tensorAllowsQuantization(params: *const c.llama_model_quantize_params, a:
 // -----------------------------------------------------------------------------
 // Type selection
 
-/// Ports `tensor_type_fallback` (llama-quant.cpp:374 @c1d0e7a00): a type
-/// whose block the tensor's rows can hold.
+/// Ports `tensor_type_fallback` (llama-quant.cpp:372 @5266f24da): a type
+/// whose block the tensor's rows can hold. A 32-block target with no
+/// fallback of its own goes straight to the F16 check.
 fn typeFallback(qs: *State, t: *const Tensor, target_type: GgmlType, exc: *Exception) Thrown!GgmlType {
     var return_type = target_type;
 
@@ -490,7 +492,13 @@ fn typeFallback(qs: *State, t: *const Tensor, target_type: GgmlType, exc: *Excep
             c.GGML_TYPE_Q4_K => c.GGML_TYPE_Q5_0,
             c.GGML_TYPE_Q5_K => c.GGML_TYPE_Q5_1,
             c.GGML_TYPE_Q6_K => c.GGML_TYPE_Q8_0,
-            else => return exc.throw(.runtime_error, "no tensor type fallback is defined for type {s}", .{typeName(target_type)}),
+            // The target is already a 32-block type, so there is no
+            // smaller block to demote to; the check below turns it into
+            // F16, as a 256-block type does when its fallback does not fit.
+            else => if (qk_k <= 32)
+                target_type
+            else
+                return exc.throw(.runtime_error, "no tensor type fallback is defined for type {s}", .{typeName(target_type)}),
         };
         if (@rem(ncols, c.ggml_blck_size(return_type)) != 0) {
             // Most likely the first dimension is not divisible by 32.
@@ -503,14 +511,14 @@ fn typeFallback(qs: *State, t: *const Tensor, target_type: GgmlType, exc: *Excep
 }
 
 /// The `use_more_bits` lambda of `llama_tensor_get_type_impl`
-/// (llama-quant.cpp:424 @c1d0e7a00), with C's truncating division.
+/// (llama-quant.cpp:428 @5266f24da), with C's truncating division.
 fn useMoreBits(i_layer: c_int, n_layers: c_int) bool {
     return i_layer < @divTrunc(n_layers, 8) or i_layer >= @divTrunc(7 * n_layers, 8) or
         @rem(i_layer - @divTrunc(n_layers, 8), 3) == 2;
 }
 
 /// The `layer_info` lambda of `llama_tensor_get_type_impl`
-/// (llama-quant.cpp:424 @c1d0e7a00): with experts, the layer is read from
+/// (llama-quant.cpp:428 @5266f24da): with experts, the layer is read from
 /// the name.
 fn layerInfo(n_expert: c_int, i_layer_in: c_int, n_layer: c_int, name: [:0]const u8, exc: *Exception) Thrown![2]c_int {
     var i_layer = i_layer_in;
@@ -525,7 +533,7 @@ fn layerInfo(n_expert: c_int, i_layer_in: c_int, n_layer: c_int, name: [:0]const
     return .{ i_layer, n_layer };
 }
 
-/// Ports `llama_tensor_get_type_impl` (llama-quant.cpp:424 @c1d0e7a00): the
+/// Ports `llama_tensor_get_type_impl` (llama-quant.cpp:428 @5266f24da): the
 /// standard mixture for a file type, by category, layer and architecture.
 fn getTypeImpl(qs: *State, new_type_in: GgmlType, tensor: *const Tensor, ftype: Ftype, category: Category, exc: *Exception) Thrown!GgmlType {
     var new_type = new_type_in;
@@ -771,12 +779,30 @@ fn getTypeImpl(qs: *State, new_type_in: GgmlType, tensor: *const Tensor, ftype: 
     return new_type;
 }
 
-/// Ports `llama_tensor_get_type` (llama-quant.cpp:679 @c1d0e7a00): the type
+/// Ports `llama_tensor_get_type` (llama-quant.cpp:683 @5266f24da): the type
 /// a tensor is written as -- the user's overrides, else the mixture, then
 /// the fallback for its shape.
 fn getType(qs: *State, params: *const c.llama_model_quantize_params, tensor: *const Tensor, default_type: GgmlType, category: Category, exc: *Exception) Thrown!GgmlType {
     if (!tensorAllowsQuantization(params, qs.model.arch, tensor)) return tensor.type;
-    if (params.token_embedding_type < c.GGML_TYPE_COUNT and category == .token_embd) return params.token_embedding_type;
+    if (params.token_embedding_type < c.GGML_TYPE_COUNT and category == .token_embd) {
+        // `per_layer_token_embd` follows `--token-embedding-type` by default,
+        // but it is a large separate table, so an explicit `--tensor-type`
+        // may name it.
+        var named = false;
+        if (std.mem.eql(u8, nameOf(tensor), "per_layer_token_embd.weight")) {
+            const tensor_name = nameOf(tensor);
+            for (qs.tensor_type_patterns.items) |*p| {
+                var m = regex.Match.init();
+                defer m.deinit();
+                const hit = p.re.trySearch(tensor_name, &m) catch |e| return exc.throw(.runtime_error, "{s}", .{regex.errorText(e)});
+                if (hit) {
+                    named = true;
+                    break;
+                }
+            }
+        }
+        if (!named) return params.token_embedding_type;
+    }
     if (params.output_tensor_type < c.GGML_TYPE_COUNT and category == .output) return params.output_tensor_type;
 
     var new_type = default_type;
@@ -825,28 +851,49 @@ const QuantizeJob = struct {
     f32_data: [*]const f32,
     new_data: [*]u8,
     chunk_size: i64,
+    first_row: i64,
     nrows: i64,
+    nrows_per_expert: i64,
     n_per_row: i64,
+    row_size: usize,
     imatrix: ?[*]const f32,
 
+    /// The `imatrix_for_row` lambda of `llama_tensor_quantize_impl`
+    /// (llama-quant.cpp:747 @5266f24da): each expert has its own slice.
+    fn imatrixForRow(imatrix: ?[*]const f32, row_global: i64, nrows_per_expert: i64, n_per_row: i64) ?[*]const f32 {
+        const im = imatrix orelse return null;
+        return im + @as(usize, @intCast(@divTrunc(row_global, nrows_per_expert) * n_per_row));
+    }
+
     /// The `compute` lambda of `llama_tensor_quantize_impl`
-    /// (llama-quant.cpp:727 @c1d0e7a00). The C++ takes its rows and adds
-    /// its total under a mutex; an atomic add is the same exchange.
+    /// (llama-quant.cpp:747 @5266f24da). The C++ takes its rows -- up to a
+    /// chunk, never past an expert boundary -- and adds its total under a
+    /// mutex; a compare-and-swap on the counter and an atomic add are the
+    /// same exchange.
     fn run(job: *QuantizeJob) void {
         const nrows_per_chunk = @divTrunc(job.chunk_size, job.n_per_row);
         var local_size: usize = 0;
         while (true) {
-            const first_row = job.counter.fetchAdd(nrows_per_chunk, .seq_cst);
-            if (first_row >= job.nrows) {
+            var row = job.counter.load(.seq_cst);
+            var this_nrow: i64 = undefined;
+            while (true) {
+                if (row >= job.nrows) break;
+                const row_global = job.first_row + row;
+                // Stop at the expert boundary.
+                this_nrow = @min(@min(job.nrows - row, nrows_per_chunk), job.nrows_per_expert - @rem(row_global, job.nrows_per_expert));
+                row = job.counter.cmpxchgWeak(row, row + this_nrow, .seq_cst, .seq_cst) orelse break;
+            }
+            if (row >= job.nrows) {
                 if (local_size > 0) _ = job.new_size.fetchAdd(local_size, .seq_cst);
                 break;
             }
-            const this_nrow = @min(job.nrows - first_row, nrows_per_chunk);
-            const this_size = c.ggml_quantize_chunk(job.new_type, job.f32_data, job.new_data, first_row * job.n_per_row, this_nrow, job.n_per_row, job.imatrix);
+            const row_global = job.first_row + row;
+
+            const this_data = job.new_data + @as(usize, @intCast(row)) * job.row_size;
+            const this_size = c.ggml_quantize_chunk(job.new_type, job.f32_data + @as(usize, @intCast(row * job.n_per_row)), this_data, 0, this_nrow, job.n_per_row, imatrixForRow(job.imatrix, row_global, job.nrows_per_expert, job.n_per_row));
             local_size += this_size;
 
-            const row_size = c.ggml_row_size(job.new_type, job.n_per_row);
-            const this_data = job.new_data + @as(usize, @intCast(first_row)) * row_size;
+            // Validate the quantized data.
             if (!c.ggml_validate_row_data(job.new_type, this_data, this_size)) {
                 job.valid.store(false, .seq_cst);
                 break;
@@ -855,16 +902,34 @@ const QuantizeJob = struct {
     }
 };
 
-/// Ports `llama_tensor_quantize_impl` (llama-quant.cpp:727 @c1d0e7a00):
-/// `nrows` rows of `f32_data` as `new_type`, chunk by chunk on `nthread`
-/// threads.
+/// Ports `llama_tensor_quantize_impl` (llama-quant.cpp:747 @5266f24da):
+/// rows `[first_row, first_row + nrows)`, indexed across every expert's
+/// matrix, of `f32_data` as `new_type`, chunk by chunk on `nthread`
+/// threads. A chunk never crosses an expert boundary, since each expert has
+/// its own imatrix slice.
+///
+/// Parameters:
+/// - `f32_data`: the slab's rows, its first at `first_row`.
+/// - `new_data`: receives the slab's quantized rows.
+/// - `nrows_per_expert`: the rows of one expert's matrix, `ne[1]`.
 ///
 /// Return: the size written, or `error.Thrown` when validation fails.
-fn quantizeRows(new_type: GgmlType, f32_data: [*]const f32, new_data: [*]u8, chunk_size: i64, nrows: i64, n_per_row: i64, imatrix: ?[*]const f32, nthread: i64, exc: *Exception) Thrown!usize {
+fn quantizeRows(new_type: GgmlType, f32_data: [*]const f32, new_data: [*]u8, chunk_size: i64, first_row: i64, nrows: i64, nrows_per_expert: i64, n_per_row: i64, imatrix: ?[*]const f32, nthread: i64, exc: *Exception) Thrown!usize {
+    const row_size = c.ggml_row_size(new_type, n_per_row);
+
     if (nthread < 2) {
-        const new_size = c.ggml_quantize_chunk(new_type, f32_data, new_data, 0, nrows, n_per_row, imatrix);
-        if (!c.ggml_validate_row_data(new_type, new_data, new_size)) {
-            return exc.throw(.runtime_error, "quantized data validation failed", .{});
+        var new_size: usize = 0;
+        var row: i64 = 0;
+        while (row < nrows) {
+            const row_global = first_row + row;
+            const this_nrow = @min(nrows - row, nrows_per_expert - @rem(row_global, nrows_per_expert));
+            const this_data = new_data + @as(usize, @intCast(row)) * row_size;
+            const this_size = c.ggml_quantize_chunk(new_type, f32_data + @as(usize, @intCast(row * n_per_row)), this_data, 0, this_nrow, n_per_row, QuantizeJob.imatrixForRow(imatrix, row_global, nrows_per_expert, n_per_row));
+            if (!c.ggml_validate_row_data(new_type, this_data, this_size)) {
+                return exc.throw(.runtime_error, "quantized data validation failed", .{});
+            }
+            new_size += this_size;
+            row += this_nrow;
         }
         return new_size;
     }
@@ -874,8 +939,11 @@ fn quantizeRows(new_type: GgmlType, f32_data: [*]const f32, new_data: [*]u8, chu
         .f32_data = f32_data,
         .new_data = new_data,
         .chunk_size = chunk_size,
+        .first_row = first_row,
         .nrows = nrows,
+        .nrows_per_expert = nrows_per_expert,
         .n_per_row = n_per_row,
+        .row_size = row_size,
         .imatrix = imatrix,
     };
     const workers = allocator.alloc(std.Thread, @intCast(nthread - 1)) catch oom();
@@ -889,7 +957,7 @@ fn quantizeRows(new_type: GgmlType, f32_data: [*]const f32, new_data: [*]u8, chu
     return job.new_size.load(.seq_cst);
 }
 
-/// Ports `tensor_requires_imatrix` (llama-quant.cpp:785 @c1d0e7a00).
+/// Ports `tensor_requires_imatrix` (llama-quant.cpp:822 @5266f24da).
 fn requiresImatrix(tensor_name: []const u8, dst_type: GgmlType, ftype: Ftype) bool {
     if (nameMatchTokenEmbd(tensor_name) or nameMatchOutputWeight(tensor_name)) return false;
     return switch (dst_type) {
@@ -906,7 +974,7 @@ fn requiresImatrix(tensor_name: []const u8, dst_type: GgmlType, ftype: Ftype) bo
     };
 }
 
-/// Ports `llama_ftype_get_default_type` (llama-quant.cpp:810 @c1d0e7a00).
+/// Ports `llama_ftype_get_default_type` (llama-quant.cpp:847 @5266f24da).
 ///
 /// Parameters:
 /// - `ftype`: the file type.
@@ -951,7 +1019,7 @@ pub fn ftypeGetDefaultType(ftype: Ftype) GgmlType {
     };
 }
 
-/// Ports `init_quantize_state_counters` (llama-quant.cpp:856 @c1d0e7a00).
+/// Ports `init_quantize_state_counters` (llama-quant.cpp:893 @5266f24da).
 fn initCounters(qs: *State, names: []const []const u8, categories: []Category) void {
     for (names, categories) |name, *cat_out| {
         const cat = getCategory(name);
@@ -965,7 +1033,7 @@ fn initCounters(qs: *State, names: []const []const u8, categories: []Category) v
     qs.n_ffn_up = n;
 }
 
-/// Ports `llama_format_tensor_shape` for a tensor (llama-impl.cpp:110 @c1d0e7a00).
+/// Ports `llama_format_tensor_shape` for a tensor (llama-impl.cpp:110 @5266f24da).
 fn formatTensorShape(t: *const Tensor, buf: *[256]u8) [*:0]const u8 {
     var len: usize = @intCast(c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, t.ne[0])));
     var i: usize = 1;
@@ -998,7 +1066,7 @@ const OutFile = struct {
         if (n != 0) _ = c.fwrite(data, 1, n, self.fp);
     }
 
-    /// Ports `zeros` (llama-quant.cpp:41 @c1d0e7a00).
+    /// Ports `zeros` (llama-quant.cpp:44 @5266f24da).
     fn zeros(self: *OutFile, n: usize) void {
         const z: [4096]u8 = @splat(0);
         var left = n;
@@ -1022,29 +1090,21 @@ const OutFile = struct {
 // -----------------------------------------------------------------------------
 // The driver
 
-/// A tensor's data loaded by the name it now has, looked up among the names
-/// the loader read, as `load_data_for` does (llama-model-loader.cpp:1403
-/// @c1d0e7a00) in the `LLAMA_LOAD_MODE_NONE` arm: read from the file into
-/// `cur.data`.
-fn loadDataFor(ml: *const loader.Loader, by_name: *const std.StringHashMapUnmanaged(*loader.Weight), cur: *Tensor, exc: *Exception) Thrown!void {
-    const name = nameOf(cur);
-    const w = by_name.get(name) orelse
-        return exc.throw(.runtime_error, "{s}: tensor '{s}' not found", .{ "require_weight", name });
-    impl.assert(cur.data != null, "llama-model-loader.cpp", 1414, "cur->data != nullptr");
-    impl.assert(w.idx < ml.files.items.len, "llama-model-loader.cpp", 1415, "w.idx < files.size()");
-    const file = &ml.files.items[w.idx];
-    try file.seek(w.offs, c.SEEK_SET, exc);
-    try file.readRaw(cur.data.?, c.ggml_nbytes(cur), exc);
-    if (ml.check_tensors and !c.ggml_validate_row_data(cur.type, cur.data, c.ggml_nbytes(cur))) {
-        return exc.throw(.runtime_error, "tensor '{s}' has invalid data", .{name});
-    }
+/// The `load_range` lambda of `llama_model_quantize_impl`
+/// (llama-quant.cpp:913 @5266f24da): a byte range of the current tensor,
+/// read into `read_data` without mmap.
+fn loadRange(ml: *const loader.Loader, weight: *const loader.Weight, read_data: *std.ArrayList(u8), offs: usize, size: usize, exc: *Exception) Thrown!?*const anyopaque {
+    if (!ml.use_mmap and read_data.items.len < size) read_data.resize(allocator, size) catch oom();
+    // `std::vector::data()` of an empty vector is null.
+    const buf: ?*anyopaque = if (read_data.capacity == 0) null else @ptrCast(read_data.items.ptr);
+    return ml.loadDataRange(weight, offs, size, buf, exc);
 }
 
 fn mib(n: usize) f64 {
     return @as(f64, @floatFromInt(n)) / 1024.0 / 1024.0;
 }
 
-/// Ports `llama_model_quantize_impl` (llama-quant.cpp:876 @c1d0e7a00).
+/// Ports `llama_model_quantize_impl` (llama-quant.cpp:913 @5266f24da).
 ///
 /// Parameters:
 /// - `fname_inp`: the model to read.
@@ -1065,8 +1125,9 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
         return exc.throw(.runtime_error, "invalid output file type {d}\n", .{@as(c_int, @bitCast(ftype))});
     }
 
-    // `#else` arm: mmap is not used on this target.
-    const load_mode = c.LLAMA_LOAD_MODE_NONE;
+    // mmap consistently increases speed on Linux, and also on Windows with a
+    // hot cache; it may cause a slowdown on macOS.
+    const load_mode = if (builtin.os.tag == .linux or builtin.os.tag == .windows) c.LLAMA_LOAD_MODE_MMAP else c.LLAMA_LOAD_MODE_NONE;
 
     var splits: std.ArrayList([:0]const u8) = .empty;
     defer {
@@ -1162,17 +1223,6 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     var mapped: LayerMap = .{};
     defer mapped.deinit();
     var blk_id: c_int = 0;
-
-    // `weights_map` keyed by the names the loader read, before any rename.
-    var by_name: std.StringHashMapUnmanaged(*loader.Weight) = .empty;
-    defer {
-        var kit = by_name.keyIterator();
-        while (kit.next()) |k| allocator.free(k.*);
-        by_name.deinit(allocator);
-    }
-    for (ml.weights.items) |*w| {
-        by_name.put(allocator, allocator.dupe(u8, nameOf(w.tensor)) catch oom(), w) catch oom();
-    }
 
     // The list of weights.
     var tensors: std.ArrayList(*loader.Weight) = .empty;
@@ -1300,6 +1350,8 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     var f32_conv_buf: std.ArrayList(f32) = .empty;
     defer f32_conv_buf.deinit(allocator);
 
+    const max_buf_size: usize = if (params.max_buf_size != 0) params.max_buf_size else max_buf_size_default;
+
     var cur_split: c_int = -1;
     var fout: OutFile = .{};
     defer fout.close();
@@ -1321,7 +1373,7 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
         /// The `new_ofstream` lambda.
         fn open(f: *OutFile, ctxs: []?*c.gguf_context, cur: *c_int, index: c_int, out: [:0]const u8, keep_split: bool, n: u16, exc_: *Exception) Thrown!void {
             cur.* = index;
-            impl.assert(ctxs[@intCast(index)] != null, "llama-quant.cpp", 1110, "ctx_outs[cur_split] && \"Find uninitialized gguf_context\"");
+            impl.assert(ctxs[@intCast(index)] != null, "llama-quant.cpp", 1149, "ctx_outs[cur_split] && \"Find uninitialized gguf_context\"");
             var path_buf: ?[]u8 = null;
             defer if (path_buf) |b| allocator.free(b);
             var fname: [*:0]const u8 = out.ptr;
@@ -1353,12 +1405,6 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
 
         const tensor_size = c.ggml_nbytes(tensor);
 
-        if (!params.dry_run) {
-            if (read_data.items.len < tensor_size) read_data.resize(allocator, tensor_size) catch oom();
-            tensor.data = read_data.items.ptr;
-            try loadDataFor(&ml, &by_name, tensor, exc);
-        }
-
         idx += 1;
         var shape: [256]u8 = undefined;
         impl.logInfo("[%4d/%4d] %-36s - [%s], type = %6s, ", .{
@@ -1371,7 +1417,6 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
         // Already the type chosen: nothing to do.
         const do_quantize = cur_type != new_type;
 
-        var new_data: [*]u8 = undefined;
         var new_size: usize = undefined;
 
         if (params.dry_run) {
@@ -1390,12 +1435,19 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
         }
 
         if (!do_quantize) {
-            new_data = @ptrCast(tensor.data);
             new_size = tensor_size;
             impl.logInfo("size = %8.3f MiB\n", .{mib(tensor_size)});
-        } else {
-            const nelements: usize = @intCast(c.ggml_nelements(tensor));
 
+            // Copy in slabs of whole rows, so that each slab can be validated.
+            const row_size = c.ggml_row_size(tensor.type, tensor.ne[0]);
+            const slab_size = @max(row_size, (max_buf_size / row_size) * row_size);
+
+            var offs: usize = 0;
+            while (offs < tensor_size) : (offs += slab_size) {
+                const size = @min(slab_size, tensor_size - offs);
+                fout.write(@ptrCast((try loadRange(&ml, weight, &read_data, offs, size, exc)).?), size);
+            }
+        } else {
             var imatrix: ?[*]const f32 = null;
             if (have_imatrix) {
                 if (i_data.get(tm.remapped_imatrix_name)) |entry| {
@@ -1426,41 +1478,56 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
                 return exc.throw(.runtime_error, "Missing importance matrix for tensor {s} in a very low-bit quantization", .{nameOf(tensor)});
             }
 
-            var f32_data: [*]f32 = undefined;
-            if (tensor.type == c.GGML_TYPE_F32) {
-                f32_data = @ptrCast(@alignCast(tensor.data));
-            } else if (c.ggml_is_quantized(tensor.type) and !params.allow_requantize) {
+            if (c.ggml_is_quantized(tensor.type) and !params.allow_requantize) {
                 return exc.throw(.runtime_error, "requantizing from type {s} is disabled", .{typeName(tensor.type)});
-            } else {
-                try dequantize(tensor, &f32_conv_buf, nelements, nthread, exc);
-                f32_data = f32_conv_buf.items.ptr;
             }
 
             impl.logInfo("converting to %s .. ", .{typeName(new_type)});
             _ = c.fflush(impl.cStdout());
 
-            if (work.items.len < nelements * 4) work.resize(allocator, nelements * 4) catch oom();
-            new_data = work.items.ptr;
-
             const n_per_row = tensor.ne[0];
-            const nrows = tensor.ne[1];
+            const nrows_per_expert = tensor.ne[1];
+            const nrows_total = tensor.ne[1] * tensor.ne[2];
+
+            const row_size_src = c.ggml_row_size(tensor.type, n_per_row);
+            const row_size_dst = c.ggml_row_size(new_type, n_per_row);
+
+            // The rows go in slabs, so that the buffers stay below
+            // `max_buf_size`.
+            const bytes_per_row = row_size_src + row_size_dst + (if (tensor.type == c.GGML_TYPE_F32) 0 else @as(usize, @intCast(n_per_row)) * @sizeOf(f32));
+            const nrows_slab: i64 = @max(1, @min(nrows_total, @as(i64, @bitCast(max_buf_size / bytes_per_row))));
 
             const min_chunk_size: i64 = 32 * 512;
             const chunk_size: i64 = if (n_per_row >= min_chunk_size) n_per_row else n_per_row * @divTrunc(min_chunk_size + n_per_row - 1, n_per_row);
 
-            const nelements_matrix = tensor.ne[0] * tensor.ne[1];
-            const nchunk = @divTrunc(nelements_matrix + chunk_size - 1, chunk_size);
-            const nthread_use: i64 = if (nthread > 1) @max(1, @min(@as(i64, nthread), nchunk)) else 1;
-
-            // Each expert separately: each has its own importance matrix.
+            // Rows across all experts in one pass, to keep every thread busy.
             new_size = 0;
-            var j03: i64 = 0;
-            while (j03 < tensor.ne[2]) : (j03 += 1) {
-                const f32_data_03 = f32_data + @as(usize, @intCast(j03 * nelements_matrix));
-                const new_data_03 = new_data + c.ggml_row_size(new_type, n_per_row) * @as(usize, @intCast(j03)) * @as(usize, @intCast(nrows));
-                const imatrix_03: ?[*]const f32 = if (imatrix) |im| im + @as(usize, @intCast(j03 * n_per_row)) else null;
+            var ir: i64 = 0;
+            while (ir < nrows_total) : (ir += nrows_slab) {
+                const nrows_cur = @min(nrows_slab, nrows_total - ir);
+                const nelements_cur = nrows_cur * n_per_row;
+                const nrows_cur_u: usize = @intCast(nrows_cur);
 
-                new_size += try quantizeRows(new_type, f32_data_03, new_data_03, chunk_size, nrows, n_per_row, imatrix_03, nthread_use, exc);
+                const src = try loadRange(&ml, weight, &read_data, @as(usize, @intCast(ir)) * row_size_src, nrows_cur_u * row_size_src, exc);
+
+                var f32_data: [*]const f32 = undefined;
+                if (tensor.type == c.GGML_TYPE_F32) {
+                    f32_data = @ptrCast(@alignCast(src));
+                } else {
+                    if (f32_conv_buf.items.len < @as(usize, @intCast(nelements_cur))) f32_conv_buf.resize(allocator, @intCast(nelements_cur)) catch oom();
+                    try dequantize(tensor.type, src.?, f32_conv_buf.items.ptr, @intCast(nelements_cur), nthread, exc);
+                    f32_data = f32_conv_buf.items.ptr;
+                }
+
+                if (work.items.len < nrows_cur_u * row_size_dst) work.resize(allocator, nrows_cur_u * row_size_dst) catch oom();
+
+                const nchunk = @divTrunc(nelements_cur + chunk_size - 1, chunk_size);
+                const nthread_use: i64 = if (nthread > 1) @max(1, @min(@as(i64, nthread), nchunk)) else 1;
+
+                const size_cur = try quantizeRows(new_type, f32_data, work.items.ptr, chunk_size, ir, nrows_cur, nrows_per_expert, n_per_row, imatrix, nthread_use, exc);
+
+                fout.write(work.items.ptr, size_cur);
+                new_size += size_cur;
             }
             impl.logInfo("size = %8.2f MiB -> %8.2f MiB\n", .{ mib(tensor_size), mib(new_size) });
         }
@@ -1470,12 +1537,13 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
         // The metadata, as we go.
         const ctx = ctx_outs[@intCast(cur_split)];
         c.gguf_set_tensor_type(ctx, tm.name.ptr, new_type);
-        impl.assert(c.gguf_get_tensor_size(ctx, c.gguf_find_tensor(ctx, tm.name.ptr)) == new_size, "llama-quant.cpp", 1275, "gguf_get_tensor_size(ctx_outs[cur_split].get(), gguf_find_tensor(ctx_outs[cur_split].get(), metadata[i].name.c_str())) == new_size");
-        c.gguf_set_tensor_data(ctx, tm.name.ptr, new_data);
+        impl.assert(c.gguf_get_tensor_size(ctx, c.gguf_find_tensor(ctx, tm.name.ptr)) == new_size, "llama-quant.cpp", 1331, "gguf_get_tensor_size(ctx_outs[cur_split].get(), gguf_find_tensor(ctx_outs[cur_split].get(), metadata[i].name.c_str())) == new_size");
 
-        // The data and its padding.
-        fout.write(new_data, new_size);
+        // The data is already written; add the padding.
         fout.zeros(std.mem.alignForward(usize, new_size, alignment) - new_size);
+
+        // Unmap the tensor to free memory.
+        if (ml.use_mmap) ml.unmapWeight(weight);
     }
 
     if (!params.dry_run) Files.close(&fout, ctx_outs, cur_split);
@@ -1493,7 +1561,7 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     }
 }
 
-/// Ports `llama_model_quantize_default_params` (llama-quant.cpp:1311 @c1d0e7a00).
+/// Ports `llama_model_quantize_default_params` (llama-quant.cpp:1365 @5266f24da).
 ///
 /// Return: the default parameters.
 pub fn defaultParams() c.llama_model_quantize_params {
@@ -1512,13 +1580,14 @@ pub fn defaultParams() c.llama_model_quantize_params {
         .kv_overrides = null,
         .tt_overrides = null,
         .prune_layers = null,
+        .max_buf_size = max_buf_size_default,
     };
 }
 
 // -----------------------------------------------------------------------------
 // The type-selection helpers of llama-ext.h
 
-/// Mirrors `llama_quant_model_desc` (llama-ext.h:31 @c1d0e7a00).
+/// Mirrors `llama_quant_model_desc` (llama-ext.h:31 @5266f24da).
 pub const ModelDesc = extern struct {
     architecture: [*:0]const u8,
     n_embd: u32,
@@ -1531,7 +1600,7 @@ pub const ModelDesc = extern struct {
     n_embd_head_v: u32,
 };
 
-/// Ports `llama_quant_init` (llama-quant.cpp:1350 @c1d0e7a00).
+/// Ports `llama_quant_init` (llama-quant.cpp:1405 @5266f24da).
 ///
 /// Parameters:
 /// - `model`: the model; borrowed for the state's life.
@@ -1546,7 +1615,7 @@ pub fn quantInit(model: *const Model, params: *const c.llama_model_quantize_para
     return qs;
 }
 
-/// Ports `llama_quant_free` (llama-quant.cpp:1356 @c1d0e7a00).
+/// Ports `llama_quant_free` (llama-quant.cpp:1411 @5266f24da).
 ///
 /// Return: nothing.
 pub fn quantFree(qs: *State) void {
@@ -1554,7 +1623,7 @@ pub fn quantFree(qs: *State) void {
     allocator.destroy(qs);
 }
 
-/// Ports `llama_quant_model_from_metadata` (llama-quant.cpp:1360 @c1d0e7a00):
+/// Ports `llama_quant_model_from_metadata` (llama-quant.cpp:1415 @5266f24da):
 /// a model with only what type selection reads.
 ///
 /// Parameters:
@@ -1578,7 +1647,7 @@ pub fn modelFromMetadata(desc: *const ModelDesc, exc: *Exception) Thrown!*Model 
     hp.n_embd_head_k_full = desc.n_embd_head_k;
     hp.n_embd_head_v_full = desc.n_embd_head_v;
     hp.n_layer_all = desc.n_layer;
-    impl.assert(desc.n_layer > 0 and desc.n_layer <= 512, "llama-quant.cpp", 1375, "desc->n_layer > 0 && desc->n_layer <= LLAMA_MAX_LAYERS");
+    impl.assert(desc.n_layer > 0 and desc.n_layer <= 512, "llama-quant.cpp", 1430, "desc->n_layer > 0 && desc->n_layer <= LLAMA_MAX_LAYERS");
     hp.n_expert = desc.n_expert;
 
     for (0..desc.n_layer) |i| {
@@ -1589,15 +1658,15 @@ pub fn modelFromMetadata(desc: *const ModelDesc, exc: *Exception) Thrown!*Model 
     return m;
 }
 
-/// Ports `llama_quant_tensor_allows_quantization` (llama-quant.cpp:1387
-/// @c1d0e7a00).
+/// Ports `llama_quant_tensor_allows_quantization` (llama-quant.cpp:1442
+/// @5266f24da).
 ///
 /// Return: whether `tensor` may be quantized under `qs`'s parameters.
 pub fn quantTensorAllowsQuantization(qs: *const State, tensor: *const Tensor) bool {
     return tensorAllowsQuantization(qs.params, qs.model.arch, tensor);
 }
 
-/// Ports `llama_quant_compute_types` (llama-quant.cpp:1393 @c1d0e7a00): the
+/// Ports `llama_quant_compute_types` (llama-quant.cpp:1448 @5266f24da): the
 /// type each tensor would get, with the state reset first.
 ///
 /// Parameters:

@@ -60,9 +60,18 @@ else
     [ "$(uname -s)" = Darwin ] && MACHO=1 || MACHO=0
 fi
 
-INCLUDES=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu)
-DEFINES=(-DGGML_USE_CPU -DGGML_SCHED_MAX_COPIES=4 -DGGML_USE_LLAMAFILE
-         -DGGML_VERSION='"0.3.0"' -DGGML_COMMIT='"c1d0e7a00"')
+# Since v0.4.0 the version strings come from `ggml-version.h` and
+# `llama-version.h`, which CMake configures from their `.in` templates; both
+# are configured here from build/upstream.zig, as the build does.
+VERSION_DIR="$(mktemp -d)"
+_pin() { sed -n "s/^pub const $1 = \"\{0,1\}\([^\";]*\)\"\{0,1\};$/\1/p" build/upstream.zig; }
+sed -e "s/@GGML_VERSION@/$(_pin ggml_version)/" -e "s/@GGML_BUILD_COMMIT@/$(_pin commit)/" \
+    llama.cpp/ggml/src/ggml-version.h.in > "$VERSION_DIR/ggml-version.h"
+sed -e "s/@LLAMA_VERSION@/$(_pin version)/" -e "s/@LLAMA_BUILD_COMMIT@/$(_pin commit)/" \
+    llama.cpp/src/llama-version.h.in > "$VERSION_DIR/llama-version.h"
+
+INCLUDES=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu -I "$VERSION_DIR")
+DEFINES=(-DGGML_USE_CPU -DGGML_SCHED_MAX_COPIES=4 -DGGML_USE_LLAMAFILE)
 if [ "$MACHO" = 1 ]; then
     DEFINES+=(-DGGML_USE_METAL -DGGML_USE_ACCELERATE)
     USE_METAL=true
@@ -284,6 +293,10 @@ LANG_=cxx report_unit "vec.cpp" llama.cpp/ggml/src/ggml-cpu/vec.cpp yes \
 # `make ops-diff`, which backend-ops and parity cannot stand in for.
 LANG_=cxx report_unit "ops.cpp" llama.cpp/ggml/src/ggml-cpu/ops.cpp yes \
     "$PORTED_DIR/ported.zig"
+# The IQ panel GEMM (v0.4.0): live only where `ggml_cpu_has_avx2()`, so on
+# ARM its six exports are compiled and never reached; x86-ops-diff gates them.
+LANG_=cxx report_unit "iqp.cpp" llama.cpp/ggml/src/ggml-cpu/iqp.cpp yes \
+    "$PORTED_DIR/ported.zig"
 LANG_=cxx report_unit "llamafile/sgemm.cpp" llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp yes \
     "$PORTED_DIR/ported.zig"
 # The vtable cluster. These four move as one unit -- repack.cpp derives
@@ -338,7 +351,7 @@ LANG_=cxx report_unit "ggml-backend-meta.cpp" llama.cpp/ggml/src/ggml-backend-me
 
 # libllama. It swaps once, at llama.h (PLAN.md, Decision 42), except for the
 # sampler and grammar, which swap ahead of the rest.
-INCLUDES=(-I llama.cpp/include -I llama.cpp/src -I llama.cpp/ggml/include -I llama.cpp/ggml/src)
+INCLUDES=(-I llama.cpp/include -I llama.cpp/src -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I "$VERSION_DIR")
 EXTRA_MANGLED_="_Z27llama_sampler_backend_beginP13llama_sampler
 _Z29llama_sampler_backend_n_nodesPK13llama_sampler" \
 LANG_=cxx report_unit "llama-sampler.cpp" llama.cpp/src/llama-sampler.cpp yes src/llama/module.zig

@@ -1,0 +1,35 @@
+#!/bin/bash
+# Map an upstream diff A..B onto the port's citations (MAINTENANCE.md, Phase 3).
+#
+# Prints the citations whose definitions the diff touched (re-read them at B),
+# the hunks no citation covers (new or uncited code), the changed files with
+# no citation at all, and how many untouched citations can move to B. With
+# --repin, rewrites those untouched citations to B in place; port-links then
+# checks every one of them.
+#
+# Usage: scripts/upstream-map [--repin] <A> <B>
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+REPIN=()
+if [ "${1:-}" = "--repin" ]; then REPIN=(--repin); shift; fi
+[ $# -eq 2 ] || { echo "usage: scripts/upstream-map [--repin] <A> <B>" >&2; exit 2; }
+
+# Upstream's ported scope: what the port cites, plus the backends and tools it
+# ports. Out-of-scope backends (Hexagon, OpenCL, SYCL, ...) are left out so
+# they do not swamp the uncited-file list.
+SCOPE=(
+  ggml/include include src common
+  ggml/src/ggml.c ggml/src/ggml-alloc.c ggml/src/ggml-quants.c ggml/src/ggml-quants.h
+  ggml/src/ggml-impl.h ggml/src/ggml-common.h ggml/src/gguf.cpp
+  ggml/src/ggml-backend.cpp ggml/src/ggml-backend-impl.h ggml/src/ggml-backend-meta.cpp
+  ggml/src/ggml-backend-reg.cpp ggml/src/ggml-opt.cpp ggml/src/ggml-threading.cpp
+  ggml/src/ggml-threading.h ggml/src/ggml.cpp
+  ggml/src/ggml-cpu ggml/src/ggml-metal ggml/src/ggml-cuda ggml/src/ggml-vulkan
+  ggml/src/ggml-blas
+  tools/mtmd tools/tts tools/quantize tools/gguf-split tools/tokenize
+  tools/export-lora tools/batched-bench tools/cvector-generator tools/imatrix
+  tools/perplexity tools/llama-bench tools/fit-params tools/cli
+)
+exec zig run harness/upstream_map.zig -- ${REPIN[@]+"${REPIN[@]}"} "$1" "$2" src cli tools -- llama.cpp "${SCOPE[@]}"

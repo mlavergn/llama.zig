@@ -146,7 +146,7 @@ zig build docs   # generate docs into zig-out/docs/
 To work with the reference implementation:
 
 ```sh
-make clone       # clone llama.cpp and check out v0.3.0
+make clone       # clone llama.cpp and check out the pinned release
 make buildmacos  # reference CMake build for arm64 macOS (the Stage 1 flag set above)
 make buildios    # reference CMake build for iOS
 ```
@@ -239,7 +239,7 @@ never reaches the CPU kernels at all, so only `ops-diff`, `node-diff`,
 but `repack-diff` can reach, because the dispatch cannot select them on this
 CPU at all. `NOTES.md` carries the measurements.
 
-The reference implementation is pinned at llama.cpp **v0.3.0**.
+The reference implementation is pinned at llama.cpp **v0.4.0** (`5266f24da`), and follows upstream one release at a time: `SYNC.md` is the procedure, `UPSTREAM.md` the record.
 
 ## Repo layout
 
@@ -252,7 +252,7 @@ The reference implementation is pinned at llama.cpp **v0.3.0**.
 | `harness/` | `smoke.zig` — loads a model through libllama's C ABI and generates, proving the reference build actually infers. The other files here are gate drivers. |
 | `scripts/` | `zigcc` / `zigcxx` wrappers so CMake can drive the Zig toolchain, and `parity` to diff two builds' token streams. |
 | `.tools/` | Locally installed CMake. Not tracked; `make cmake` fetches it. |
-| `llama.cpp/` | The upstream reference clone at v0.3.0. Source material for the port, not our code. |
+| `llama.cpp/` | The upstream reference clone at the pinned release (`UPSTREAM.md`). Source material for the port, not our code. |
 | `SPEC.md` | The specification: what llamazig is and does. |
 
 ## Licence

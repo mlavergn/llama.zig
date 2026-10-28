@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/minimax-01.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_minimax_01`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/minimax-01.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_minimax_01`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph`, and the
 //! `llm_graph_input_la` input that file defines for the decays.
 
@@ -27,7 +27,7 @@ const Hparams = hparams_mod.Hparams;
 const Ubatch = batch.Ubatch;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_minimax_01`'s `load_arch_hparams` (models/minimax-01.cpp:4 @c1d0e7a00).
+/// Ports `llama_model_minimax_01`'s `load_arch_hparams` (models/minimax-01.cpp:4 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -53,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_minimax_01`'s `load_arch_tensors` (models/minimax-01.cpp:26 @c1d0e7a00).
+/// Ports `llama_model_minimax_01`'s `load_arch_tensors` (models/minimax-01.cpp:26 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -94,17 +94,19 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_minimax_01`'s `build_arch_graph` (models/minimax-01.cpp:63 @c1d0e7a00).
+/// Ports `llama_model_minimax_01`'s `build_arch_graph` (models/minimax-01.cpp:63 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports `llm_graph_input_la` (models/minimax-01.cpp:67 @c1d0e7a00): the
-/// lightning attention's per-head slopes and, for a batch of more than one
-/// token per sequence, its decays relative to each sequence's first
-/// position.
+/// Ports `llm_graph_input_la` (models/minimax-01.cpp:67 @5266f24da): the
+/// lightning attention's per-head slopes and its decays relative to each
+/// sequence's first position -- since v0.4.0 for every batch, one token
+/// per sequence included, which no longer takes a path of its own.
 pub const InpLa = struct {
-    hparams: *const Hparams,
+    /// A copy, as the C++ holds it since v0.4.0: the input may outlive the
+    /// graph that built it.
+    hparams: Hparams,
 
     /// F32 `[n_head]`.
     inp_slopes: ?*Tensor = null,
@@ -116,7 +118,7 @@ pub const InpLa = struct {
     inp_diag_decay: ?*Tensor = null,
 
     /// Ports `llm_graph_input_la`'s `set_input` (models/minimax-01.cpp:71
-    /// @c1d0e7a00). It assumes an equal ubatch split.
+    /// @5266f24da). It assumes an equal ubatch split.
     pub fn setInput(self: *InpLa, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const n_head: i64 = self.hparams.nHead(0);
@@ -235,39 +237,36 @@ pub const InpLa = struct {
     }
 
     /// Ports `llm_graph_input_la`'s `can_reuse` (models/minimax-01.cpp:174
-    /// @c1d0e7a00): only the decays' token counts are checked, and only
-    /// when the new ubatch needs them.
+    /// @5266f24da): the decays' token counts are checked.
     pub fn canReuse(self: *InpLa, params: *const graph.Params) bool {
         var res = true;
 
         const n_seq_tokens: i64 = params.ubatch.n_seq_tokens;
-        if (n_seq_tokens > 1) {
-            res = res and (self.inp_q_decay != null and self.inp_q_decay.?.ne[2] == n_seq_tokens);
-            res = res and (self.inp_k_decay != null and self.inp_k_decay.?.ne[2] == n_seq_tokens);
-            res = res and (self.inp_diag_decay != null and self.inp_diag_decay.?.ne[1] == n_seq_tokens);
-        }
+        res = res and (self.inp_q_decay != null and self.inp_q_decay.?.ne[2] == n_seq_tokens);
+        res = res and (self.inp_k_decay != null and self.inp_k_decay.?.ne[2] == n_seq_tokens);
+        res = res and (self.inp_diag_decay != null and self.inp_diag_decay.?.ne[1] == n_seq_tokens);
 
         return res;
     }
 };
 
 /// Ports the constructor of `llama_model_minimax_01`'s `graph`
-/// (models/minimax-01.cpp:194 @c1d0e7a00).
+/// (models/minimax-01.cpp:192 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/minimax-01.cpp", 197, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/minimax-01.cpp", 195, "n_embd_head == hparams.n_embd_head_k()");
     // The C++ does not assert n_embd_head == n_rot: MiniMax's head_dim is
     // 128 and n_rot 64.
 
     const n_seqs: i64 = b.ubatch.n_seqs;
     const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
 
-    impl.assert(n_seqs != 0, "models/minimax-01.cpp", 203, "n_seqs != 0");
-    impl.assert(b.ubatch.equalSeqs(), "models/minimax-01.cpp", 204, "ubatch.equal_seqs()");
-    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/minimax-01.cpp", 205, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(n_seqs != 0, "models/minimax-01.cpp", 201, "n_seqs != 0");
+    impl.assert(b.ubatch.equalSeqs(), "models/minimax-01.cpp", 202, "ubatch.equal_seqs()");
+    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/minimax-01.cpp", 203, "ubatch.n_tokens == n_seq_tokens * n_seqs");
 
     const n_head = b.n_head;
 
@@ -279,26 +278,24 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_pos = b.buildInpPos();
     const inp_out_ids = b.buildInpOutIds();
 
-    const inp = allocator.create(InpLa) catch impl.abort("models/minimax-01.cpp", 220, "out of memory");
-    inp.* = .{ .hparams = hp };
+    const inp = allocator.create(InpLa) catch impl.abort("models/minimax-01.cpp", 218, "out of memory");
+    inp.* = .{ .hparams = hp.* };
 
     inp.inp_slopes = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, n_head);
     c.ggml_set_input(inp.inp_slopes);
     b.cb(inp.inp_slopes.?, "slopes", -1);
 
-    if (n_seq_tokens != 1) {
-        inp.inp_q_decay = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, 1, n_head, n_seq_tokens, n_seqs);
-        c.ggml_set_input(inp.inp_q_decay);
-        b.cb(inp.inp_q_decay.?, "q_decay_exp", -1);
+    inp.inp_q_decay = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, 1, n_head, n_seq_tokens, n_seqs);
+    c.ggml_set_input(inp.inp_q_decay);
+    b.cb(inp.inp_q_decay.?, "q_decay_exp", -1);
 
-        inp.inp_k_decay = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, 1, n_head, n_seq_tokens, n_seqs);
-        c.ggml_set_input(inp.inp_k_decay);
-        b.cb(inp.inp_k_decay.?, "k_decay_exp", -1);
+    inp.inp_k_decay = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, 1, n_head, n_seq_tokens, n_seqs);
+    c.ggml_set_input(inp.inp_k_decay);
+    b.cb(inp.inp_k_decay.?, "k_decay_exp", -1);
 
-        inp.inp_diag_decay = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, n_seq_tokens, n_seq_tokens, n_head, n_seqs);
-        c.ggml_set_input(inp.inp_diag_decay);
-        b.cb(inp.inp_diag_decay.?, "diag_decay_exp", -1);
-    }
+    inp.inp_diag_decay = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, n_seq_tokens, n_seq_tokens, n_head, n_seqs);
+    c.ggml_set_input(inp.inp_diag_decay);
+    b.cb(inp.inp_diag_decay.?, "diag_decay_exp", -1);
 
     const la = b.res.addInput(InpLa, inp);
 
@@ -380,40 +377,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var qkv: ?*Tensor = null;
             var kv_new: ?*Tensor = null;
 
-            if (n_seq_tokens == 1) {
-                // Lightning attention, the single-token case for generation.
-                const slopes_neg: *Tensor = c.ggml_scale(ctx, slope_rate, -1.0);
-                b.cb(slopes_neg, "slopes_neg", il);
-
-                const ratio: *Tensor = c.ggml_exp(ctx, slopes_neg);
-                b.cb(ratio, "ratio", il);
-
-                const ratio_3d: *Tensor = c.ggml_reshape_3d(ctx, ratio, 1, 1, n_head);
-                b.cb(ratio_3d, "ratio3d", il);
-
-                const v_trans: *Tensor = c.ggml_cont(ctx, c.ggml_permute(ctx, Vcur, 1, 2, 0, 3));
-                b.cb(v_trans, "v_trans", il);
-
-                const k_trans: *Tensor = c.ggml_cont(ctx, c.ggml_permute(ctx, Kcur, 1, 2, 0, 3));
-                b.cb(k_trans, "k_trans", il);
-
-                const kv_cur: *Tensor = c.ggml_mul_mat(ctx, k_trans, v_trans);
-                b.cb(kv_cur, "kv_cur", il);
-
-                const kv_old_s: *Tensor = c.ggml_mul(ctx, kv_old, ratio_3d);
-                b.cb(kv_old_s, "kv_old_s", il);
-
-                kv_new = c.ggml_add(ctx, kv_old_s, kv_cur);
-                b.cb(kv_new.?, "kv_new", il);
-
-                const q_trans: *Tensor = c.ggml_permute(ctx, Qcur, 0, 2, 1, 3);
-                b.cb(q_trans, "q_trans", il);
-
-                qkv = c.ggml_mul_mat(ctx, kv_new, q_trans);
-                b.cb(qkv.?, "qkv", il);
-            } else if (n_seq_tokens > 1) {
-                // Lightning attention, the general multi-token case for
-                // prompt processing.
+            {
+                // Lightning attention.
                 const q_decay_exp = la.inp_q_decay;
                 const k_decay_exp = la.inp_k_decay;
                 const diag_decay_exp = la.inp_diag_decay;

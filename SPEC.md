@@ -410,7 +410,7 @@ locatable in this port.
 | Library dependencies | **None.** `libllamazig` links nothing outside the standard library and the system frameworks. |
 | CLI dependencies | One, granted by exception: `mlavergn/zigjinja` (a fork of `gremlin-labs/vibe-jinja`), pinned to an exact commit, confined to `cli/`. |
 | System libraries | macOS: Foundation, Metal, MetalKit, Accelerate. Linux: libc, and the CUDA runtime, cuBLAS and driver, or the Vulkan loader, when those backends are built |
-| Reference pin | llama.cpp tag `v0.3.0`, commit `c1d0e7a00` |
+| Reference pin | llama.cpp tag `v0.4.0`, commit `5266f24da`; moved one release at a time by `SYNC.md`, recorded in `UPSTREAM.md` |
 
 `zig build` alone produces every artifact.
 

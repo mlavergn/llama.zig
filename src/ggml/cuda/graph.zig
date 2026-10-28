@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.3.0
-//! (`c1d0e7a00`): `ggml_cuda_compute_forward`, the `USE_CUDA_GRAPH` helpers,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.4.0
+//! (`5266f24da`): `ggml_cuda_compute_forward`, the `USE_CUDA_GRAPH` helpers,
 //! `ggml_cuda_graph_evaluate_and_capture`, `ggml_backend_cuda_graph_compute`
 //! and `ggml_backend_cuda_graph_optimize`.
 //!
@@ -90,7 +90,7 @@ const cudaCheck = common.cudaCheck;
 // -----------------------------------------------------------------------------
 // Dispatch
 
-/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2060 @c1d0e7a00).
+/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2062 @5266f24da).
 fn computeForward(ctx: *Context, dst: *Tensor) bool {
     switch (dst.op) {
         c.GGML_OP_REPEAT => binbcast.opRepeat(ctx, dst),
@@ -143,6 +143,7 @@ fn computeForward(ctx: *Context, dst: *Tensor) bool {
             c.GGML_GLU_OP_SWIGLU_OAI => unary.opSwigluOai(ctx, dst),
             c.GGML_GLU_OP_GEGLU_ERF => unary.opGated(.gelu_erf, ctx, dst),
             c.GGML_GLU_OP_GEGLU_QUICK => unary.opGated(.gelu_quick, ctx, dst),
+            c.GGML_GLU_OP_SWIGLU_CLAMP => unary.opSwigluClamp(ctx, dst),
             else => return false,
         },
         c.GGML_OP_UPSCALE => upscale.opUpscale(ctx, dst),
@@ -233,7 +234,7 @@ const mulMatIdNeedsSync = mulmat.mulMatIdNeedsSync;
 // -----------------------------------------------------------------------------
 // CUDA graphs
 
-/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2542 @c1d0e7a00).
+/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2547 @5266f24da).
 fn isViewOrNoop(t: *const Tensor) bool {
     return c.ggml_is_empty(t) or t.op == c.GGML_OP_RESHAPE or t.op == c.GGML_OP_TRANSPOSE or
         t.op == c.GGML_OP_VIEW or t.op == c.GGML_OP_PERMUTE or t.op == c.GGML_OP_NONE;
@@ -243,7 +244,7 @@ fn nodes(cgraph: *impl.CGraph) []*Tensor {
     return @ptrCast(cgraph.nodes[0..@intCast(cgraph.n_nodes)]);
 }
 
-/// Ports `ggml_cuda_graph_check_compability` (ggml-cuda.cu:2548 @c1d0e7a00).
+/// Ports `ggml_cuda_graph_check_compability` (ggml-cuda.cu:2553 @5266f24da).
 fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
     var use_cuda_graph = true;
     for (nodes(cgraph)) |node| {
@@ -264,12 +265,12 @@ fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
     return use_cuda_graph;
 }
 
-/// Ports `ggml_cuda_graph_get_key` (ggml-cuda.cu:2581 @c1d0e7a00).
+/// Ports `ggml_cuda_graph_get_key` (ggml-cuda.cu:2586 @5266f24da).
 fn graphGetKey(cgraph: *impl.CGraph) ?*const anyopaque {
     return cgraph.nodes[0];
 }
 
-/// Ports `ggml_cuda_graph_update_required` (ggml-cuda.cu:2585 @c1d0e7a00).
+/// Ports `ggml_cuda_graph_update_required` (ggml-cuda.cu:2590 @5266f24da).
 fn graphUpdateRequired(cuda_ctx: *Context, cgraph: *impl.CGraph) bool {
     var res = false;
 
@@ -314,7 +315,7 @@ fn graphUpdateRequired(cuda_ctx: *Context, cgraph: *impl.CGraph) bool {
     return res;
 }
 
-/// Ports `ggml_cuda_graph_update_executable` (ggml-cuda.cu:2627 @c1d0e7a00),
+/// Ports `ggml_cuda_graph_update_executable` (ggml-cuda.cu:2632 @5266f24da),
 /// the CUDA 12 arm.
 fn graphUpdateExecutable(cuda_ctx: *Context, graph_key: ?*const anyopaque) void {
     const graph = cuda_ctx.cudaGraph(graph_key);
@@ -334,7 +335,7 @@ fn graphUpdateExecutable(cuda_ctx: *Context, graph_key: ?*const anyopaque) void 
     }
 }
 
-/// Ports `ggml_cuda_graph_set_enabled` (ggml-cuda.cu:4231 @c1d0e7a00).
+/// Ports `ggml_cuda_graph_set_enabled` (ggml-cuda.cu:4399 @5266f24da).
 fn graphSetEnabled(cuda_ctx: *Context, graph_key: ?*const anyopaque) bool {
     const graph = cuda_ctx.cudaGraph(graph_key);
 
@@ -379,7 +380,7 @@ const Concurrency = struct {
     }
 };
 
-/// Ports `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4012 @c1d0e7a00).
+/// Ports `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4180 @5266f24da).
 fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_graph: bool, cuda_graph_update_required: bool, graph_key: ?*const anyopaque) void {
     var graph_evaluated_or_captured = false;
 
@@ -491,7 +492,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_gr
 }
 
 /// The C's "restore original node order within each concurrent region"
-/// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4012 @c1d0e7a00).
+/// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4180 @5266f24da).
 fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     var node_to_idx: std.AutoHashMapUnmanaged(*const Tensor, usize) = .empty;
     defer node_to_idx.deinit(allocator);
@@ -529,7 +530,7 @@ fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     }
 }
 
-/// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:4247 @c1d0e7a00).
+/// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:4415 @5266f24da).
 pub fn graphCompute(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgraph) callconv(.c) c.enum_ggml_status {
     const cuda_ctx = backend.backendCtx(backend_c);
     const cgraph: *impl.CGraph = @ptrCast(@alignCast(cgraph_c));
@@ -616,7 +617,13 @@ const GraphOpt = struct {
     const once = common.Once(init);
 };
 
-/// Ports `ggml_backend_cuda_graph_optimize` (ggml-cuda.cu:4331 @c1d0e7a00).
+/// Ports `ggml_backend_cuda_graph_optimize` (ggml-cuda.cu:4499 @5266f24da).
+///
+/// Its first pass runs whether or not CUDA graphs are on: every
+/// MoE weighted reduction `fusion.zig` would fuse reads its experts, router
+/// weights and expert scale at the chain's last node, after the scheduler
+/// thinks they are dead, so each is kept allocated until then through
+/// `params.add_alloc_dep`.
 ///
 /// The C walks `fan_out`, a `std::unordered_map`, to pick fork nodes, and
 /// handles the first qualifying one in each range; which is "first" is
@@ -625,9 +632,29 @@ const GraphOpt = struct {
 /// order affects only which region a skipped overlap would have kept --
 /// and overlapping ranges cannot occur, since each fork's range ends at its
 /// own join.
-pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgraph) callconv(.c) void {
+pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgraph, params_c: ?*c.struct_ggml_backend_graph_optimize_params) callconv(.c) void {
     const cuda_ctx = backend.backendCtx(backend_c);
     const cgraph: *impl.CGraph = @ptrCast(@alignCast(cgraph_c));
+
+    fusion.DisableFusion.once.call();
+    if (!fusion.DisableFusion.value) {
+        var i: c_int = 0;
+        while (i < cgraph.n_nodes) : (i += 1) {
+            if (cgraph.nodes[@intCast(i)].?.op != c.GGML_OP_MUL) continue;
+
+            var match: fusion.MoeWeightedReductionMatch = .{};
+            if (!fusion.matchMoeWeightedReduction(cgraph, i, &match)) continue;
+
+            const params = impl.one(c.struct_ggml_backend_graph_optimize_params, params_c);
+            const add_alloc_dep = params.add_alloc_dep.?;
+            add_alloc_dep(params.user_data, @constCast(match.experts.?), match.dst.?);
+            add_alloc_dep(params.user_data, @constCast(match.weights.?), match.dst.?);
+            if (match.expert_scale) |expert_scale| {
+                add_alloc_dep(params.user_data, @constCast(expert_scale), match.dst.?);
+            }
+            i += match.node_count - 1;
+        }
+    }
 
     const graph_key = graphGetKey(cgraph);
     const use_cuda_graph = graphSetEnabled(cuda_ctx, graph_key);
@@ -638,7 +665,9 @@ pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgra
     const stream_context = &cuda_ctx.concurrent_stream_context;
     stream_context.reset();
 
-    if (!use_cuda_graph or backend.getDeviceCount() != 1) return;
+    if (!use_cuda_graph) return;
+
+    common.setDevice(cuda_ctx.device);
 
     // number of out-degrees for a particular node
     var fan_out: std.AutoArrayHashMapUnmanaged(?*const Tensor, c_int) = .empty;

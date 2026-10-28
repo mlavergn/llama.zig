@@ -20,7 +20,8 @@ cd "$ROOT"
 SRC=llama.cpp/ggml/src/ggml-quants.c
 [ -f "$SRC" ] || { echo "missing $SRC -- run 'make clone'" >&2; exit 2; }
 
-python3 - "$SRC" > src/ggml/quants/grids.zig <<'PY'
+source scripts/upstream_pin.sh
+python3 - "$SRC" "$UPSTREAM_TAG" "$UPSTREAM_COMMIT" > src/ggml/quants/grids.zig <<'PY'
 import re, sys
 
 src = open(sys.argv[1]).read()
@@ -35,12 +36,13 @@ for m in pattern.finditer(src):
     values = [int(v) for v in re.findall(r"-?\d+", body)]
     tables.append((name, size, values))
 
+tag, commit = sys.argv[2], sys.argv[3]
 print('''//! The i-quant codebook tables.
 //!
 //! # Provenance
 //!
 //! **Not a port, and not hand-written.** Extracted from
-//! `llama.cpp/ggml/src/ggml-quants.c` (v0.3.0, `c1d0e7a00`) by
+//! `llama.cpp/ggml/src/ggml-quants.c` (%s, `%s`) by
 //! `scripts/iq-grids`.
 //!
 //! # Why these are not imported
@@ -52,7 +54,7 @@ print('''//! The i-quant codebook tables.
 //!
 //! They are the codebooks the i-quant search matches against. A single wrong
 //! digit produces a quantizer that runs without complaint and decodes to
-//! noise, which is why they are copied by a script rather than by a person.''')
+//! noise, which is why they are copied by a script rather than by a person.''' % (tag, commit))
 print()
 total = 0
 for name, size, values in tables:

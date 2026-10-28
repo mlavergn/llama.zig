@@ -9,7 +9,7 @@
 //!   its `mem_cell`, and `llama_memory_recurrent_context`
 //! - `llama.cpp/src/llama-memory-recurrent.cpp` -- their bodies
 //!
-//! All at v0.3.0 (`c1d0e7a00`).
+//! All at v0.4.0 (`5266f24da`).
 //!
 //! # A cell's sequences
 //!
@@ -46,7 +46,7 @@ fn oom() noreturn {
 
 const SeqSet = std.bit_set.StaticBitSet(cparams_mod.max_seq);
 
-/// Mirrors `llama_memory_recurrent`'s `mem_cell` (llama-memory-recurrent.h:88 @c1d0e7a00).
+/// Mirrors `llama_memory_recurrent`'s `mem_cell` (llama-memory-recurrent.h:88 @5266f24da).
 pub const MemCell = struct {
     pos: i32 = -1,
     /// Where the state is copied from.
@@ -65,7 +65,7 @@ pub const MemCell = struct {
     }
 };
 
-/// Ports `llama_memory_recurrent` (llama-memory-recurrent.h:17 @c1d0e7a00).
+/// Ports `llama_memory_recurrent` (llama-memory-recurrent.h:17 @5266f24da).
 pub const MemoryRecurrent = struct {
     /// Where the batch will be placed in the cache.
     head: u32 = 0,
@@ -81,13 +81,16 @@ pub const MemoryRecurrent = struct {
     cells: std.ArrayList(MemCell) = .empty,
     r_l: std.ArrayList(?*Tensor) = .empty,
     s_l: std.ArrayList(?*Tensor) = .empty,
+    /// A second conv history, PLE's, which must stay replicated across
+    /// devices and so cannot share the r row.
+    p_l: std.ArrayList(?*Tensor) = .empty,
 
     hparams: *const Hparams,
     n_seq_max: u32 = 1,
     ctxs_bufs: std.ArrayList(struct { ctx: *c.ggml_context, buf: c.ggml_backend_buffer_t }) = .empty,
 
     /// Ports the constructor of `llama_memory_recurrent`
-    /// (llama-memory-recurrent.cpp:20 @c1d0e7a00).
+    /// (llama-memory-recurrent.cpp:20 @5266f24da).
     ///
     /// Return: the memory, the caller's to `destroy`, or `error.Thrown`.
     pub fn create(
@@ -125,6 +128,7 @@ pub const MemoryRecurrent = struct {
 
         self.r_l.appendNTimes(allocator, null, @intCast(n_layer)) catch oom();
         self.s_l.appendNTimes(allocator, null, @intCast(n_layer)) catch oom();
+        self.p_l.appendNTimes(allocator, null, @intCast(n_layer)) catch oom();
 
         var i: i32 = 0;
         while (i < n_layer) : (i += 1) {
@@ -141,7 +145,7 @@ pub const MemoryRecurrent = struct {
             }
             impl.logDebug("%s, layer %3d: dev = %s\n", .{ func, i, dev_name });
 
-            const ctx = ctxForBuft(&ctx_map, buft, n_layer) orelse
+            const ctx = ctxForBuft(&ctx_map, buft, n_layer, hparams.pleConvState() > 0) orelse
                 return exc.throw(.runtime_error, "failed to create ggml context for rs cache", .{});
 
             const n_rows: i64 = @as(i64, mem_size) * (1 + n_rs_seq);
@@ -151,6 +155,14 @@ pub const MemoryRecurrent = struct {
             _ = c.ggml_format_name(s, "cache_s_l%d", i);
             self.r_l.items[@intCast(i)] = r;
             self.s_l.items[@intCast(i)] = s;
+
+            // The PLE history needs its own row: the meta backend must
+            // mirror it while the delta-net conv state beside it is split.
+            if (hparams.pleConvState() > 0 and hparams.isPle(@intCast(i))) {
+                const p = c.ggml_new_tensor_2d(ctx, type_r, hparams.pleConvState(), n_rows);
+                _ = c.ggml_format_name(p, "cache_ple_r_l%d", i);
+                self.p_l.items[@intCast(i)] = p;
+            }
         }
 
         // Allocate the tensors and clear the buffers, so the padding holds
@@ -167,9 +179,10 @@ pub const MemoryRecurrent = struct {
         {
             const memory_size_r = self.sizeRBytes();
             const memory_size_s = self.sizeSBytes();
-            impl.logInfo("%s: size = %7.2f MiB (%6u cells, %3d layers, %2u seqs %2u rs_seq), R (%s): %7.2f MiB, S (%s): %7.2f MiB\n", .{
+            const memory_size_p = self.sizePBytes();
+            impl.logInfo("%s: size = %7.2f MiB (%6u cells, %3d layers, %2u seqs %2u rs_seq), R (%s): %7.2f MiB, S (%s): %7.2f MiB, P (%s): %7.2f MiB\n", .{
                 func,
-                @as(f64, @as(f32, @floatFromInt(memory_size_r + memory_size_s)) / (1024.0 * 1024.0)),
+                @as(f64, @as(f32, @floatFromInt(memory_size_r + memory_size_s + memory_size_p)) / (1024.0 * 1024.0)),
                 mem_size,
                 n_layer,
                 n_seq_max,
@@ -178,12 +191,16 @@ pub const MemoryRecurrent = struct {
                 @as(f64, @as(f32, @floatFromInt(memory_size_r)) / (1024.0 * 1024.0)),
                 c.ggml_type_name(type_s),
                 @as(f64, @as(f32, @floatFromInt(memory_size_s)) / (1024.0 * 1024.0)),
+                c.ggml_type_name(type_r),
+                @as(f64, @as(f32, @floatFromInt(memory_size_p)) / (1024.0 * 1024.0)),
             });
         }
         return self;
     }
 
-    fn ctxForBuft(map: anytype, buft: c.ggml_backend_buffer_type_t, n_layer: i32) ?*c.ggml_context {
+    /// `ctx_for_buft`: r and s per layer, plus the separate PLE conv row
+    /// where the model has one.
+    fn ctxForBuft(map: anytype, buft: c.ggml_backend_buffer_type_t, n_layer: i32, has_ple: bool) ?*c.ggml_context {
         const name = std.mem.span(c.ggml_backend_buft_name(buft));
         var pos: usize = 0;
         while (pos < map.items.len) : (pos += 1) {
@@ -191,7 +208,8 @@ pub const MemoryRecurrent = struct {
             if (order == .eq) return map.items[pos].ctx;
             if (order == .gt) break;
         }
-        const ctx = c.ggml_init(.{ .mem_size = 2 * @as(usize, @intCast(n_layer)) * c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = true }) orelse return null;
+        const n_per_layer: usize = if (has_ple) 3 else 2;
+        const ctx = c.ggml_init(.{ .mem_size = n_per_layer * @as(usize, @intCast(n_layer)) * c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = true }) orelse return null;
         map.insert(allocator, pos, .{ .buft = buft, .ctx = ctx }) catch oom();
         return ctx;
     }
@@ -207,10 +225,11 @@ pub const MemoryRecurrent = struct {
         self.cells.deinit(allocator);
         self.r_l.deinit(allocator);
         self.s_l.deinit(allocator);
+        self.p_l.deinit(allocator);
         allocator.destroy(self);
     }
 
-    /// Ports `llama_memory_recurrent`'s `clear` (llama-memory-recurrent.cpp:130 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `clear` (llama-memory-recurrent.cpp:141 @5266f24da).
     pub fn clear(self: *MemoryRecurrent, data: bool) void {
         for (self.cells.items[0..self.size]) |*cell| {
             cell.pos = -1;
@@ -226,7 +245,7 @@ pub const MemoryRecurrent = struct {
         @memset(self.rs_idx.items, 0);
     }
 
-    /// Ports `llama_memory_recurrent`'s `seq_rm` (llama-memory-recurrent.cpp:150 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `seq_rm` (llama-memory-recurrent.cpp:161 @5266f24da).
     pub fn seqRm(self: *MemoryRecurrent, seq_id: i32, p0_: i32, p1_: i32) bool {
         var new_head = self.size;
         const p0 = if (p0_ < 0) 0 else p0_;
@@ -290,7 +309,7 @@ pub const MemoryRecurrent = struct {
         return true;
     }
 
-    /// Ports `llama_memory_recurrent`'s `seq_cp` (llama-memory-recurrent.cpp:238 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `seq_cp` (llama-memory-recurrent.cpp:249 @5266f24da).
     pub fn seqCp(self: *MemoryRecurrent, seq_id_src: i32, seq_id_dst: i32, p0: i32, p1: i32) void {
         _ = p0;
         _ = p1;
@@ -317,7 +336,7 @@ pub const MemoryRecurrent = struct {
         }
     }
 
-    /// Ports `llama_memory_recurrent`'s `seq_keep` (llama-memory-recurrent.cpp:275 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `seq_keep` (llama-memory-recurrent.cpp:286 @5266f24da).
     pub fn seqKeep(self: *MemoryRecurrent, seq_id: i32) void {
         var new_head = self.size;
         for (self.cells.items[0..self.size], 0..) |*cell, i| {
@@ -336,8 +355,8 @@ pub const MemoryRecurrent = struct {
         if (new_head != self.size and new_head < self.head) self.head = new_head;
     }
 
-    /// Ports `llama_memory_recurrent`'s `seq_add` (llama-memory-recurrent.cpp:307
-    /// @c1d0e7a00): only the position moves.
+    /// Ports `llama_memory_recurrent`'s `seq_add` (llama-memory-recurrent.cpp:318
+    /// @5266f24da): only the position moves.
     pub fn seqAdd(self: *MemoryRecurrent, seq_id: i32, p0_: i32, p1_: i32, shift: i32) void {
         if (shift == 0) return;
         const p0 = if (p0_ < 0) 0 else p0_;
@@ -352,7 +371,7 @@ pub const MemoryRecurrent = struct {
         }
     }
 
-    /// Ports `llama_memory_recurrent`'s `seq_div` (llama-memory-recurrent.cpp:337 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `seq_div` (llama-memory-recurrent.cpp:348 @5266f24da).
     pub fn seqDiv(self: *MemoryRecurrent, seq_id: i32, p0_: i32, p1_: i32, d: c_int) void {
         if (d == 1) return;
         const p0 = if (p0_ < 0) 0 else p0_;
@@ -367,7 +386,7 @@ pub const MemoryRecurrent = struct {
         }
     }
 
-    /// Ports `llama_memory_recurrent`'s `seq_pos_min` (llama-memory-recurrent.cpp:367 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `seq_pos_min` (llama-memory-recurrent.cpp:378 @5266f24da).
     pub fn seqPosMin(self: *const MemoryRecurrent, seq_id: i32) i32 {
         var result: i32 = std.math.maxInt(i32);
         for (self.cells.items[0..self.size]) |*cell| {
@@ -377,7 +396,7 @@ pub const MemoryRecurrent = struct {
         return result;
     }
 
-    /// Ports `llama_memory_recurrent`'s `seq_pos_max` (llama-memory-recurrent.cpp:383 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `seq_pos_max` (llama-memory-recurrent.cpp:394 @5266f24da).
     pub fn seqPosMax(self: *const MemoryRecurrent, seq_id: i32) i32 {
         var result: i32 = -1;
         for (self.cells.items[0..self.size]) |*cell| {
@@ -386,24 +405,24 @@ pub const MemoryRecurrent = struct {
         return result;
     }
 
-    /// Ports `llama_memory_recurrent`'s `set_rs_idx` (llama-memory-recurrent.cpp:395 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `set_rs_idx` (llama-memory-recurrent.cpp:406 @5266f24da).
     pub fn setRsIdx(self: *MemoryRecurrent, seq_id: i32, idx: u32) void {
         if (seq_id < 0) {
             @memset(self.rs_idx.items, 0);
             return;
         }
         std.debug.assert(self.n_seq_max == self.rs_idx.items.len);
-        impl.assert(@as(u32, @bitCast(seq_id)) < self.n_seq_max, "llama-memory-recurrent.cpp", 403, "(uint32_t) seq_id < n_seq_max");
-        impl.assert(idx <= self.n_rs_seq, "llama-memory-recurrent.cpp", 404, "idx <= n_rs_seq");
+        impl.assert(@as(u32, @bitCast(seq_id)) < self.n_seq_max, "llama-memory-recurrent.cpp", 414, "(uint32_t) seq_id < n_seq_max");
+        impl.assert(idx <= self.n_rs_seq, "llama-memory-recurrent.cpp", 415, "idx <= n_rs_seq");
         self.rs_idx.items[@intCast(seq_id)] = idx;
     }
 
-    /// Ports `llama_memory_recurrent`'s `memory_breakdown` (llama-memory-recurrent.cpp:409 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `memory_breakdown` (llama-memory-recurrent.cpp:420 @5266f24da).
     pub fn memoryBreakdown(self: *const MemoryRecurrent, out: *std.ArrayList(memory.BuftSize)) void {
         for (self.ctxs_bufs.items) |e| memory.addBuftSize(out, c.ggml_backend_buffer_get_type(e.buf), c.ggml_backend_buffer_get_size(e.buf));
     }
 
-    /// Ports `llama_memory_recurrent`'s `init_batch` (llama-memory-recurrent.cpp:417 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `init_batch` (llama-memory-recurrent.cpp:428 @5266f24da).
     pub fn initBatch(self: *MemoryRecurrent, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *RecurrentContext {
         blk: {
             balloc.splitReset();
@@ -429,13 +448,13 @@ pub const MemoryRecurrent = struct {
         return RecurrentContext.createStatus(.failed_prepare);
     }
 
-    /// Ports `llama_memory_recurrent`'s `init_full` (llama-memory-recurrent.cpp:459 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `init_full` (llama-memory-recurrent.cpp:470 @5266f24da).
     pub fn initFull(self: *MemoryRecurrent) *RecurrentContext {
         return RecurrentContext.createFull(self);
     }
 
-    /// Ports `llama_memory_recurrent`'s `init_update` (llama-memory-recurrent.cpp:463
-    /// @c1d0e7a00): a recurrent memory never updates.
+    /// Ports `llama_memory_recurrent`'s `init_update` (llama-memory-recurrent.cpp:474
+    /// @5266f24da): a recurrent memory never updates.
     pub fn initUpdate(self: *MemoryRecurrent, lctx: *anyopaque, optimize: bool) *RecurrentContext {
         _ = self;
         _ = lctx;
@@ -443,8 +462,8 @@ pub const MemoryRecurrent = struct {
         return RecurrentContext.createStatus(.no_update);
     }
 
-    /// Ports `llama_memory_recurrent`'s `prepare` (llama-memory-recurrent.cpp:470
-    /// @c1d0e7a00): try every ubatch on a copy of the state, then restore it.
+    /// Ports `llama_memory_recurrent`'s `prepare` (llama-memory-recurrent.cpp:481
+    /// @5266f24da): try every ubatch on a copy of the state, then restore it.
     pub fn prepare(self: *MemoryRecurrent, ubatches: []const Ubatch) bool {
         const org_cells = allocator.dupe(MemCell, self.cells.items) catch oom();
         defer allocator.free(org_cells);
@@ -463,8 +482,8 @@ pub const MemoryRecurrent = struct {
         return success;
     }
 
-    /// Ports `llama_memory_recurrent`'s `find_slot` (llama-memory-recurrent.cpp:494
-    /// @c1d0e7a00): every sequence gets a cell of its own, contiguous for
+    /// Ports `llama_memory_recurrent`'s `find_slot` (llama-memory-recurrent.cpp:505
+    /// @5266f24da): every sequence gets a cell of its own, contiguous for
     /// the ubatch, and each cell records where its state comes from.
     pub fn findSlot(self: *MemoryRecurrent, ubatch: *const Ubatch) bool {
         const n_seq_tokens = ubatch.n_seq_tokens;
@@ -477,7 +496,7 @@ pub const MemoryRecurrent = struct {
 
         // Each cell stores a whole sequence's state; a slot is always
         // contiguous, and only equal-length sequences can share a ubatch.
-        impl.assert(ubatch.equalSeqs(), "llama-memory-recurrent.cpp", 509, "ubatch.equal_seqs()");
+        impl.assert(ubatch.equalSeqs(), "llama-memory-recurrent.cpp", 520, "ubatch.equal_seqs()");
 
         var min: i32 = @as(i32, @intCast(size)) - 1;
         var max: i32 = 0;
@@ -525,13 +544,13 @@ pub const MemoryRecurrent = struct {
             var has_cell = false;
             if (seq_meta.tail >= 0) {
                 const cell = &cells[@intCast(seq_meta.tail)];
-                impl.assert(cell.hasSeqId(seq_id), "llama-memory-recurrent.cpp", 585, "cell.has_seq_id(seq_id)");
+                impl.assert(cell.hasSeqId(seq_id), "llama-memory-recurrent.cpp", 596, "cell.has_seq_id(seq_id)");
                 // Does this sequence own the cell?
                 if (cell.seq_id.count() == 1) has_cell = true;
             }
             if (!has_cell) {
                 const empty_cell = &cells[next_empty_cell];
-                impl.assert(empty_cell.isEmpty(), "llama-memory-recurrent.cpp", 591, "empty_cell.is_empty()");
+                impl.assert(empty_cell.isEmpty(), "llama-memory-recurrent.cpp", 602, "empty_cell.is_empty()");
                 // Copy the old tail into the empty cell.
                 if (seq_meta.tail >= 0) {
                     const orig_cell = &cells[@intCast(seq_meta.tail)];
@@ -539,7 +558,7 @@ pub const MemoryRecurrent = struct {
                     empty_cell.src = orig_cell.src;
                     orig_cell.seq_id.unset(@intCast(seq_id));
                     empty_cell.seq_id.set(@intCast(seq_id)); // overwritten below
-                    impl.assert(!orig_cell.isEmpty(), "llama-memory-recurrent.cpp", 599, "!orig_cell.is_empty()");
+                    impl.assert(!orig_cell.isEmpty(), "llama-memory-recurrent.cpp", 610, "!orig_cell.is_empty()");
                 }
                 seq_meta.tail = @intCast(next_empty_cell);
                 // The next empty cell.
@@ -617,7 +636,7 @@ pub const MemoryRecurrent = struct {
             while (i <= max) : (i += 1) {
                 const cl = &cells[@intCast(i)];
                 if (cl.src < 0) {
-                    impl.assert(self.rs_z >= 0, "llama-memory-recurrent.cpp", 684, "rs_z >= 0");
+                    impl.assert(self.rs_z >= 0, "llama-memory-recurrent.cpp", 695, "rs_z >= 0");
                     cl.src0 = self.rs_z;
                 } else {
                     // Stage the sources, so seq_* still behave and the
@@ -642,20 +661,20 @@ pub const MemoryRecurrent = struct {
         return self.n >= n_seqs;
     }
 
-    /// Ports `llama_memory_recurrent`'s `get_can_shift` (llama-memory-recurrent.cpp:705
-    /// @c1d0e7a00): shifting a position is trivial here.
+    /// Ports `llama_memory_recurrent`'s `get_can_shift` (llama-memory-recurrent.cpp:716
+    /// @5266f24da): shifting a position is trivial here.
     pub fn getCanShift(_: *const MemoryRecurrent) bool {
         return true;
     }
 
-    /// Ports `llama_memory_recurrent`'s `total_size` (llama-memory-recurrent.cpp:710 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `total_size` (llama-memory-recurrent.cpp:721 @5266f24da).
     pub fn totalSize(self: *const MemoryRecurrent) usize {
         var size: usize = 0;
         for (self.ctxs_bufs.items) |e| size += c.ggml_backend_buffer_get_size(e.buf);
         return size;
     }
 
-    /// Ports `llama_memory_recurrent`'s `size_r_bytes` (llama-memory-recurrent.cpp:719 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `size_r_bytes` (llama-memory-recurrent.cpp:730 @5266f24da).
     fn sizeRBytes(self: *const MemoryRecurrent) usize {
         var size: usize = 0;
         for (self.r_l.items) |r| if (r) |t| {
@@ -664,7 +683,7 @@ pub const MemoryRecurrent = struct {
         return size;
     }
 
-    /// Ports `llama_memory_recurrent`'s `size_s_bytes` (llama-memory-recurrent.cpp:731 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `size_s_bytes` (llama-memory-recurrent.cpp:742 @5266f24da).
     fn sizeSBytes(self: *const MemoryRecurrent) usize {
         var size: usize = 0;
         for (self.s_l.items) |s| if (s) |t| {
@@ -673,7 +692,16 @@ pub const MemoryRecurrent = struct {
         return size;
     }
 
-    /// Ports `llama_memory_recurrent`'s `state_write` (llama-memory-recurrent.cpp:743 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `size_p_bytes` (llama-memory-recurrent.cpp:754 @5266f24da).
+    fn sizePBytes(self: *const MemoryRecurrent) usize {
+        var size: usize = 0;
+        for (self.p_l.items) |p| if (p) |t| {
+            size += c.ggml_nbytes(t);
+        };
+        return size;
+    }
+
+    /// Ports `llama_memory_recurrent`'s `state_write` (llama-memory-recurrent.cpp:766 @5266f24da).
     pub fn stateWrite(self: *const MemoryRecurrent, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         var cell_ranges: std.ArrayList([2]u32) = .empty;
         defer cell_ranges.deinit(allocator);
@@ -692,19 +720,19 @@ pub const MemoryRecurrent = struct {
                 var rs_idx_cur: u32 = 0;
                 if (self.n_rs_seq != 0) {
                     if (seq_id != -1) {
-                        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.rs_idx.items.len, "llama-memory-recurrent.cpp", 762, "seq_id >= 0 && (size_t) seq_id < rs_idx.size()");
+                        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.rs_idx.items.len, "llama-memory-recurrent.cpp", 785, "seq_id >= 0 && (size_t) seq_id < rs_idx.size()");
                         rs_idx_cur = self.rs_idx.items[@intCast(seq_id)];
                     } else {
                         var has_rs_idx = false;
                         var it = cell.seq_id.iterator(.{});
                         while (it.next()) |cell_seq_id| {
-                            impl.assert(cell_seq_id < self.rs_idx.items.len, "llama-memory-recurrent.cpp", 767, "cell_seq_id >= 0 && (size_t) cell_seq_id < rs_idx.size()");
+                            impl.assert(cell_seq_id < self.rs_idx.items.len, "llama-memory-recurrent.cpp", 790, "cell_seq_id >= 0 && (size_t) cell_seq_id < rs_idx.size()");
                             const seq_rs_idx = self.rs_idx.items[cell_seq_id];
                             if (!has_rs_idx) {
                                 rs_idx_cur = seq_rs_idx;
                                 has_rs_idx = true;
                             } else if (rs_idx_cur != seq_rs_idx) {
-                                impl.abort("llama-memory-recurrent.cpp", 774, "cannot write shared recurrent state with different rollback indices");
+                                impl.abort("llama-memory-recurrent.cpp", 797, "cannot write shared recurrent state with different rollback indices");
                             }
                         }
                     }
@@ -726,22 +754,22 @@ pub const MemoryRecurrent = struct {
         if (cell_range_begin != size) cell_ranges.append(allocator, .{ cell_range_begin, size }) catch oom();
 
         if (flags & c.LLAMA_STATE_SEQ_FLAGS_ON_DEVICE != 0 and cell_ranges.items.len > 1) {
-            impl.abort("llama-memory-recurrent.cpp", 802, "cannot save/load multiple ranges of cells to/from device memory\n");
+            impl.abort("llama-memory-recurrent.cpp", 825, "cannot save/load multiple ranges of cells to/from device memory\n");
         }
 
         var check: u32 = 0;
         for (cell_ranges.items) |r| check += r[1] - r[0];
-        impl.assert(cell_count == check, "llama-memory-recurrent.cpp", 810, "cell_count == cell_count_check");
+        impl.assert(cell_count == check, "llama-memory-recurrent.cpp", 833, "cell_count == cell_count_check");
         check = 0;
         for (cell_ranges_data.items) |r| check += r[1] - r[0];
-        impl.assert(cell_count == check, "llama-memory-recurrent.cpp", 816, "cell_count == cell_count_check");
+        impl.assert(cell_count == check, "llama-memory-recurrent.cpp", 839, "cell_count == cell_count_check");
 
         try w.writeValue(cell_count, exc);
         try self.stateWriteMeta(w, cell_ranges.items, seq_id, exc);
         try self.stateWriteData(w, cell_ranges_data.items, exc);
     }
 
-    /// Ports `llama_memory_recurrent`'s `state_read` (llama-memory-recurrent.cpp:824 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `state_read` (llama-memory-recurrent.cpp:847 @5266f24da).
     pub fn stateRead(self: *MemoryRecurrent, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         _ = flags;
         const cell_count = try r.readValue(u32, exc);
@@ -758,7 +786,7 @@ pub const MemoryRecurrent = struct {
         if (self.n_rs_seq != 0) self.setRsIdx(seq_id, 0);
     }
 
-    /// Ports `llama_memory_recurrent`'s `state_write_meta` (llama-memory-recurrent.cpp:855 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `state_write_meta` (llama-memory-recurrent.cpp:878 @5266f24da).
     fn stateWriteMeta(self: *const MemoryRecurrent, w: io.Writer, cell_ranges: []const [2]u32, seq_id: i32, exc: *Exception) Thrown!void {
         for (cell_ranges) |range| {
             var i = range[0];
@@ -775,9 +803,10 @@ pub const MemoryRecurrent = struct {
         }
     }
 
-    /// Ports `llama_memory_recurrent`'s `state_write_data` (llama-memory-recurrent.cpp:874
-    /// @c1d0e7a00). The S tensor is never transposed, so that arm of the
-    /// C++ is unreachable and not here.
+    /// Ports `llama_memory_recurrent`'s `state_write_data` (llama-memory-recurrent.cpp:897
+    /// @5266f24da). The S tensor is never transposed, so that arm of the
+    /// C++ is unreachable and not here. A layer's PLE conv history, a
+    /// second recurrent row, travels right after its R rows.
     fn stateWriteData(self: *const MemoryRecurrent, w: io.Writer, cell_ranges: []const [2]u32, exc: *Exception) Thrown!void {
         const s_trans: u32 = 0;
         const n_layer: u32 = self.hparams.nLayer();
@@ -785,7 +814,7 @@ pub const MemoryRecurrent = struct {
         try w.writeValue(n_layer, exc);
 
         // All the R tensors first, a row per cell.
-        for (self.r_l.items[0..n_layer]) |rl| {
+        for (self.r_l.items[0..n_layer], self.p_l.items[0..n_layer]) |rl, pl| {
             const r = rl orelse continue;
             const r_type_i: i32 = @intCast(r.type);
             try w.writeValue(r_type_i, exc);
@@ -794,6 +823,15 @@ pub const MemoryRecurrent = struct {
             for (cell_ranges) |range| {
                 const range_size: usize = range[1] - range[0];
                 try w.writeTensor(r, range[0] * r_size_row, range_size * r_size_row, exc);
+            }
+
+            if (pl) |p| {
+                const p_size_row: u64 = c.ggml_row_size(p.type, self.hparams.pleConvState());
+                try w.writeValue(p_size_row, exc);
+                for (cell_ranges) |range| {
+                    const range_size: usize = range[1] - range[0];
+                    try w.writeTensor(p, range[0] * p_size_row, range_size * p_size_row, exc);
+                }
             }
         }
         for (self.s_l.items[0..n_layer]) |sl| {
@@ -809,7 +847,7 @@ pub const MemoryRecurrent = struct {
         }
     }
 
-    /// Ports `llama_memory_recurrent`'s `state_read_meta` (llama-memory-recurrent.cpp:958 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `state_read_meta` (llama-memory-recurrent.cpp:992 @5266f24da).
     fn stateReadMeta(self: *MemoryRecurrent, r: io.Reader, cell_count: u32, dest_seq_id_: i32, exc: *Exception) Thrown!bool {
         const func = "state_read_meta";
         var dest_seq_id = dest_seq_id_;
@@ -841,11 +879,11 @@ pub const MemoryRecurrent = struct {
             }
 
             // One contiguous block from head, with the right positions.
-            impl.assert(self.head + cell_count <= self.size, "llama-memory-recurrent.cpp", 995, "head + cell_count <= size");
-            impl.assert(self.cells.items[self.head].pos == ubatch.pos[0], "llama-memory-recurrent.cpp", 996, "cells[head].pos == ubatch.pos[0]");
-            impl.assert(self.cells.items[self.head + cell_count - 1].pos == ubatch.pos[cell_count - 1], "llama-memory-recurrent.cpp", 997, "cells[head + cell_count - 1].pos == ubatch.pos[cell_count - 1]");
-            impl.assert(self.cells.items[self.head].hasSeqId(dest_seq_id), "llama-memory-recurrent.cpp", 998, "cells[head].has_seq_id(dest_seq_id)");
-            impl.assert(self.cells.items[self.head + cell_count - 1].hasSeqId(dest_seq_id), "llama-memory-recurrent.cpp", 999, "cells[head + cell_count - 1].has_seq_id(dest_seq_id)");
+            impl.assert(self.head + cell_count <= self.size, "llama-memory-recurrent.cpp", 1029, "head + cell_count <= size");
+            impl.assert(self.cells.items[self.head].pos == ubatch.pos[0], "llama-memory-recurrent.cpp", 1030, "cells[head].pos == ubatch.pos[0]");
+            impl.assert(self.cells.items[self.head + cell_count - 1].pos == ubatch.pos[cell_count - 1], "llama-memory-recurrent.cpp", 1031, "cells[head + cell_count - 1].pos == ubatch.pos[cell_count - 1]");
+            impl.assert(self.cells.items[self.head].hasSeqId(dest_seq_id), "llama-memory-recurrent.cpp", 1032, "cells[head].has_seq_id(dest_seq_id)");
+            impl.assert(self.cells.items[self.head + cell_count - 1].hasSeqId(dest_seq_id), "llama-memory-recurrent.cpp", 1033, "cells[head + cell_count - 1].has_seq_id(dest_seq_id)");
         } else {
             // The whole cache.
             if (cell_count > self.size) {
@@ -885,7 +923,7 @@ pub const MemoryRecurrent = struct {
         return true;
     }
 
-    /// Ports `llama_memory_recurrent`'s `state_read_data` (llama-memory-recurrent.cpp:1054 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent`'s `state_read_data` (llama-memory-recurrent.cpp:1088 @5266f24da).
     fn stateReadData(self: *MemoryRecurrent, r: io.Reader, cell_count: u32, exc: *Exception) Thrown!bool {
         const func = "state_read_data";
         const s_trans = try r.readValue(u32, exc);
@@ -905,7 +943,7 @@ pub const MemoryRecurrent = struct {
         }
 
         // Each layer's R rows, one contiguous block.
-        for (self.r_l.items[0..n_layer], 0..) |rl, il| {
+        for (self.r_l.items[0..n_layer], self.p_l.items[0..n_layer], 0..) |rl, pl, il| {
             const t = rl orelse continue;
             const r_type_i_ref = try r.readValue(i32, exc);
             const r_type_i: i32 = @intCast(t.type);
@@ -920,6 +958,16 @@ pub const MemoryRecurrent = struct {
                 return false;
             }
             if (cell_count != 0) try r.readTensor(t, self.head * r_size_row, cell_count * r_size_row, exc);
+
+            if (pl) |p| {
+                const p_size_row_ref = try r.readValue(u64, exc);
+                const p_size_row = c.ggml_row_size(p.type, self.hparams.pleConvState());
+                if (p_size_row != p_size_row_ref) {
+                    impl.logError("%s: mismatched ple row size (%zu != %zu, layer %d)\n", .{ func, p_size_row, @as(usize, @intCast(p_size_row_ref)), @as(c_int, @intCast(il)) });
+                    return false;
+                }
+                if (cell_count != 0) try r.readTensor(p, self.head * p_size_row, cell_count * p_size_row, exc);
+            }
         }
 
         for (self.s_l.items[0..n_layer], 0..) |sl, il| {
@@ -1036,7 +1084,7 @@ pub const MemoryRecurrent = struct {
     }
 };
 
-/// Ports `llama_memory_recurrent_context` (llama-memory-recurrent.h:136 @c1d0e7a00).
+/// Ports `llama_memory_recurrent_context` (llama-memory-recurrent.h:139 @5266f24da).
 pub const RecurrentContext = struct {
     status: memory.Status,
     mem: ?*MemoryRecurrent = null,
@@ -1044,21 +1092,21 @@ pub const RecurrentContext = struct {
     ubatches: std.ArrayList(Ubatch) = .empty,
     is_full: bool = false,
 
-    /// Ports the status constructor of `llama_memory_recurrent_context` (llama-memory-recurrent.cpp:1182 @c1d0e7a00).
+    /// Ports the status constructor of `llama_memory_recurrent_context` (llama-memory-recurrent.cpp:1230 @5266f24da).
     pub fn createStatus(status: memory.Status) *RecurrentContext {
         const self = allocator.create(RecurrentContext) catch oom();
         self.* = .{ .status = status };
         return self;
     }
 
-    /// Ports the full-memory constructor of `llama_memory_recurrent_context` (llama-memory-recurrent.cpp:1184 @c1d0e7a00).
+    /// Ports the full-memory constructor of `llama_memory_recurrent_context` (llama-memory-recurrent.cpp:1232 @5266f24da).
     pub fn createFull(mem: *MemoryRecurrent) *RecurrentContext {
         const self = allocator.create(RecurrentContext) catch oom();
         self.* = .{ .status = .success, .mem = mem, .is_full = true };
         return self;
     }
 
-    /// Ports the batch constructor of `llama_memory_recurrent_context` (llama-memory-recurrent.cpp:1188 @c1d0e7a00).
+    /// Ports the batch constructor of `llama_memory_recurrent_context` (llama-memory-recurrent.cpp:1236 @5266f24da).
     pub fn createBatch(mem: *MemoryRecurrent, ubatches: std.ArrayList(Ubatch)) *RecurrentContext {
         const self = allocator.create(RecurrentContext) catch oom();
         self.* = .{ .status = .success, .mem = mem, .ubatches = ubatches };
@@ -1072,14 +1120,14 @@ pub const RecurrentContext = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_memory_recurrent_context`'s `next` (llama-memory-recurrent.cpp:1194 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent_context`'s `next` (llama-memory-recurrent.cpp:1242 @5266f24da).
     pub fn next(self: *RecurrentContext) bool {
         std.debug.assert(self.status == .success);
         self.i_next += 1;
         return self.i_next < self.ubatches.items.len;
     }
 
-    /// Ports `llama_memory_recurrent_context`'s `apply` (llama-memory-recurrent.cpp:1204 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent_context`'s `apply` (llama-memory-recurrent.cpp:1252 @5266f24da).
     pub fn apply(self: *RecurrentContext) bool {
         std.debug.assert(!memory.statusIsFail(self.status));
         // No ubatches: an update, which a recurrent memory never performs.
@@ -1091,49 +1139,55 @@ pub const RecurrentContext = struct {
         return true;
     }
 
-    /// Ports `llama_memory_recurrent_context`'s `get_status` (llama-memory-recurrent.cpp:1220 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent_context`'s `get_status` (llama-memory-recurrent.cpp:1268 @5266f24da).
     pub fn getStatus(self: *const RecurrentContext) memory.Status {
         return self.status;
     }
 
-    /// Ports `llama_memory_recurrent_context`'s `get_ubatch` (llama-memory-recurrent.cpp:1224 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent_context`'s `get_ubatch` (llama-memory-recurrent.cpp:1272 @5266f24da).
     pub fn getUbatch(self: *const RecurrentContext) *const Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
 
-    /// Ports `llama_memory_recurrent_context`'s `get_n_rs` (llama-memory-recurrent.cpp:1230 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent_context`'s `get_n_rs` (llama-memory-recurrent.cpp:1278 @5266f24da).
     pub fn getNRs(self: *const RecurrentContext) u32 {
         return if (self.is_full) self.mem.?.size else self.mem.?.n;
     }
 
-    /// Ports `llama_memory_recurrent_context`'s `get_head` (llama-memory-recurrent.cpp:1234 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent_context`'s `get_head` (llama-memory-recurrent.cpp:1282 @5266f24da).
     pub fn getHead(self: *const RecurrentContext) u32 {
         return if (self.is_full) 0 else self.mem.?.head;
     }
 
-    /// Ports `llama_memory_recurrent_context`'s `get_rs_z` (llama-memory-recurrent.cpp:1238 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent_context`'s `get_rs_z` (llama-memory-recurrent.cpp:1286 @5266f24da).
     pub fn getRsZ(self: *const RecurrentContext) i32 {
         return if (self.is_full) 0 else self.mem.?.rs_z;
     }
 
-    /// Ports `llama_memory_recurrent_context`'s `get_size` (llama-memory-recurrent.cpp:1242 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent_context`'s `get_size` (llama-memory-recurrent.cpp:1290 @5266f24da).
     pub fn getSize(self: *const RecurrentContext) u32 {
         return self.mem.?.size;
     }
 
-    /// Ports `llama_memory_recurrent_context`'s `get_r_l` (llama-memory-recurrent.cpp:1246 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent_context`'s `get_r_l` (llama-memory-recurrent.cpp:1294 @5266f24da).
     pub fn getRL(self: *const RecurrentContext, il: i32) *Tensor {
         return self.mem.?.r_l.items[@intCast(il)].?;
     }
 
-    /// Ports `llama_memory_recurrent_context`'s `get_s_l` (llama-memory-recurrent.cpp:1250 @c1d0e7a00).
+    /// Ports `llama_memory_recurrent_context`'s `get_s_l` (llama-memory-recurrent.cpp:1298 @5266f24da).
     pub fn getSL(self: *const RecurrentContext, il: i32) *Tensor {
         return self.mem.?.s_l.items[@intCast(il)].?;
     }
 
-    /// Ports `llama_memory_recurrent_context`'s `s_copy` (llama-memory-recurrent.cpp:1254
-    /// @c1d0e7a00): where cell `i` of the range copies its state from. A
+    /// Ports `llama_memory_recurrent_context`'s `get_p_l` (llama-memory-recurrent.cpp:1302
+    /// @5266f24da): the layer's PLE conv history row, null where it has none.
+    pub fn getPL(self: *const RecurrentContext, il: i32) ?*Tensor {
+        return self.mem.?.p_l.items[@intCast(il)];
+    }
+
+    /// Ports `llama_memory_recurrent_context`'s `s_copy` (llama-memory-recurrent.cpp:1306
+    /// @5266f24da): where cell `i` of the range copies its state from. A
     /// pending rollback is consumed here, so the C++'s `const` method writes.
     pub fn sCopy(self: *const RecurrentContext, i: c_int) i32 {
         const mem = self.mem.?;

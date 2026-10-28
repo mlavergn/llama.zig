@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.3.0, `c1d0e7a00`), roughly
+//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.4.0, `5266f24da`), roughly
 //! lines 631-1605. Each function names the C function it replaces and the line
 //! it began at.
 //!
@@ -101,9 +101,10 @@ const unary_op_name = [_][*:0]const u8{
     "ROUND",       "TRUNC",
 };
 
+/// Ports `GGML_GLU_OP_NAME` (ggml.c:1250 @5266f24da).
 const glu_op_name = [_][*:0]const u8{
-    "REGLU",     "GEGLU",       "SWIGLU", "SWIGLU_OAI",
-    "GEGLU_ERF", "GEGLU_QUICK",
+    "REGLU",     "GEGLU",       "SWIGLU",       "SWIGLU_OAI",
+    "GEGLU_ERF", "GEGLU_QUICK", "SWIGLU_CLAMP",
 };
 
 const type_traits = blk: {
@@ -423,25 +424,25 @@ const type_traits = blk: {
 // -----------------------------------------------------------------------------
 // Table accessors
 
-/// Ports `ggml_get_type_traits` (ggml.c:947 @c1d0e7a00).
+/// Ports `ggml_get_type_traits` (ggml.c:948 @5266f24da).
 pub export fn ggml_get_type_traits(t: c.enum_ggml_type) *const c.ggml_type_traits {
     std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
     return &type_traits[@intCast(t)];
 }
 
-/// Ports `ggml_blck_size` (ggml.c:1326 @c1d0e7a00).
+/// Ports `ggml_blck_size` (ggml.c:1327 @5266f24da).
 pub export fn ggml_blck_size(t: c.enum_ggml_type) i64 {
     std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
     return type_traits[@intCast(t)].blck_size;
 }
 
-/// Ports `ggml_type_size` (ggml.c:1332 @c1d0e7a00).
+/// Ports `ggml_type_size` (ggml.c:1333 @5266f24da).
 pub export fn ggml_type_size(t: c.enum_ggml_type) usize {
     std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
     return type_traits[@intCast(t)].type_size;
 }
 
-/// Ports `ggml_row_size` (ggml.c:1338 @c1d0e7a00).
+/// Ports `ggml_row_size` (ggml.c:1339 @5266f24da).
 ///
 /// A row's size is not `ne * type_size`: for a quantized type, `type_size` is
 /// the size of a whole block, so the element count divides by the block size.
@@ -451,7 +452,7 @@ pub export fn ggml_row_size(t: c.enum_ggml_type, ne: i64) usize {
     return ggml_type_size(t) * @as(usize, @intCast(ne)) / @as(usize, @intCast(ggml_blck_size(t)));
 }
 
-/// Ports `ggml_type_sizef` (ggml.c:1345 @c1d0e7a00).
+/// Ports `ggml_type_sizef` (ggml.c:1346 @5266f24da).
 ///
 /// Bytes per element as a fraction, which is how quantized formats are usually
 /// quoted (a 4-bit type reports 0.5 and change).
@@ -461,39 +462,39 @@ export fn ggml_type_sizef(t: c.enum_ggml_type) f64 {
     return @as(f64, @floatFromInt(traits.type_size)) / @as(f64, @floatFromInt(traits.blck_size));
 }
 
-/// Ports `ggml_type_name` (ggml.c:1351 @c1d0e7a00).
+/// Ports `ggml_type_name` (ggml.c:1352 @5266f24da).
 pub export fn ggml_type_name(t: c.enum_ggml_type) [*:0]const u8 {
     std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
     return @ptrCast(type_traits[@intCast(t)].type_name);
 }
 
-/// Ports `ggml_is_quantized` (ggml.c:1357 @c1d0e7a00).
+/// Ports `ggml_is_quantized` (ggml.c:1358 @5266f24da).
 pub export fn ggml_is_quantized(t: c.enum_ggml_type) bool {
     std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
     return type_traits[@intCast(t)].is_quantized;
 }
 
-/// Ports `ggml_op_name` (ggml.c:1363 @c1d0e7a00).
+/// Ports `ggml_op_name` (ggml.c:1364 @5266f24da).
 pub export fn ggml_op_name(op: c.enum_ggml_op) [*:0]const u8 {
     return op_name[@intCast(op)];
 }
 
-/// Ports `ggml_op_symbol` (ggml.c:1367 @c1d0e7a00).
+/// Ports `ggml_op_symbol` (ggml.c:1368 @5266f24da).
 pub export fn ggml_op_symbol(op: c.enum_ggml_op) [*:0]const u8 {
     return op_symbol[@intCast(op)];
 }
 
-/// Ports `ggml_unary_op_name` (ggml.c:1371 @c1d0e7a00).
+/// Ports `ggml_unary_op_name` (ggml.c:1372 @5266f24da).
 pub export fn ggml_unary_op_name(op: c.enum_ggml_unary_op) [*:0]const u8 {
     return unary_op_name[@intCast(op)];
 }
 
-/// Ports `ggml_glu_op_name` (ggml.c:1375 @c1d0e7a00).
+/// Ports `ggml_glu_op_name` (ggml.c:1376 @5266f24da).
 pub export fn ggml_glu_op_name(op: c.enum_ggml_glu_op) [*:0]const u8 {
     return glu_op_name[@intCast(op)];
 }
 
-/// Ports `ggml_op_desc` (ggml.c:1379 @c1d0e7a00).
+/// Ports `ggml_op_desc` (ggml.c:1380 @5266f24da).
 ///
 /// Unary and GLU ops all share one `ggml_op`, so a useful description has to
 /// reach into `op_params` for the real operation.
@@ -503,19 +504,19 @@ pub export fn ggml_op_desc(t: *const c.ggml_tensor) [*:0]const u8 {
     return ggml_op_name(t.op);
 }
 
-/// Ports `ggml_get_unary_op` (ggml.c:1931 @c1d0e7a00).
+/// Ports `ggml_get_unary_op` (ggml.c:1932 @5266f24da).
 pub export fn ggml_get_unary_op(t: *const c.ggml_tensor) c.enum_ggml_unary_op {
     impl.assert(t.op == c.GGML_OP_UNARY, "tensor->op == GGML_OP_UNARY");
     return @intCast(t.op_params[0]);
 }
 
-/// Ports `ggml_get_glu_op` (ggml.c:1936 @c1d0e7a00).
+/// Ports `ggml_get_glu_op` (ggml.c:1937 @5266f24da).
 pub export fn ggml_get_glu_op(t: *const c.ggml_tensor) c.enum_ggml_glu_op {
     impl.assert(t.op == c.GGML_OP_GLU, "tensor->op == GGML_OP_GLU");
     return @intCast(t.op_params[0]);
 }
 
-/// Ports `ggml_ftype_to_ggml_type` (ggml.c:1426 @c1d0e7a00).
+/// Ports `ggml_ftype_to_ggml_type` (ggml.c:1427 @5266f24da).
 ///
 /// A file type names the format most tensors in a model use; this maps it to
 /// the tensor type that implies. Aborts on an unknown or mixed file type,
@@ -559,19 +560,19 @@ export fn ggml_ftype_to_ggml_type(ftype: c.enum_ggml_ftype) c.enum_ggml_type {
 // -----------------------------------------------------------------------------
 // Element counts and sizes
 
-/// Ports `ggml_nelements` (ggml.c:1285 @c1d0e7a00).
+/// Ports `ggml_nelements` (ggml.c:1286 @5266f24da).
 pub export fn ggml_nelements(tensor: *const c.ggml_tensor) i64 {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return tensor.ne[0] * tensor.ne[1] * tensor.ne[2] * tensor.ne[3];
 }
 
-/// Ports `ggml_nrows` (ggml.c:1291 @c1d0e7a00).
+/// Ports `ggml_nrows` (ggml.c:1292 @5266f24da).
 pub export fn ggml_nrows(tensor: *const c.ggml_tensor) i64 {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return tensor.ne[1] * tensor.ne[2] * tensor.ne[3];
 }
 
-/// Ports `ggml_nbytes` (ggml.c:1297 @c1d0e7a00).
+/// Ports `ggml_nbytes` (ggml.c:1298 @5266f24da).
 ///
 /// Computed from strides rather than from the element count, so a view of a
 /// larger tensor reports the span it actually occupies.
@@ -596,17 +597,17 @@ pub export fn ggml_nbytes(tensor: *const c.ggml_tensor) usize {
     return nbytes;
 }
 
-/// Ports `ggml_nbytes_pad` (ggml.c:1322 @c1d0e7a00).
+/// Ports `ggml_nbytes_pad` (ggml.c:1323 @5266f24da).
 pub export fn ggml_nbytes_pad(tensor: *const c.ggml_tensor) usize {
     return impl.pad(ggml_nbytes(tensor), c.GGML_MEM_ALIGN);
 }
 
-/// Ports `ggml_element_size` (ggml.c:1391 @c1d0e7a00).
+/// Ports `ggml_element_size` (ggml.c:1392 @5266f24da).
 pub export fn ggml_element_size(tensor: *const c.ggml_tensor) usize {
     return ggml_type_size(tensor.type);
 }
 
-/// Ports `ggml_tensor_overhead` (ggml.c:1465 @c1d0e7a00).
+/// Ports `ggml_tensor_overhead` (ggml.c:1466 @5266f24da).
 ///
 /// What a tensor costs a context beyond its data: the object header plus the
 /// tensor struct.
@@ -614,34 +615,34 @@ pub export fn ggml_tensor_overhead() usize {
     return object_size + c.GGML_TENSOR_SIZE;
 }
 
-/// Ports `GGML_OBJECT_SIZE` (ggml.c:968 @c1d0e7a00).
+/// Ports `GGML_OBJECT_SIZE` (ggml.c:969 @5266f24da).
 pub const object_size: usize = @sizeOf(impl.Object);
 
 // -----------------------------------------------------------------------------
 // Shape predicates
 
-/// Ports `ggml_is_scalar` (ggml.c:1395 @c1d0e7a00).
+/// Ports `ggml_is_scalar` (ggml.c:1396 @5266f24da).
 pub export fn ggml_is_scalar(tensor: *const c.ggml_tensor) bool {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return tensor.ne[0] == 1 and tensor.ne[1] == 1 and tensor.ne[2] == 1 and tensor.ne[3] == 1;
 }
 
-/// Ports `ggml_is_vector` (ggml.c:1401 @c1d0e7a00).
+/// Ports `ggml_is_vector` (ggml.c:1402 @5266f24da).
 pub export fn ggml_is_vector(tensor: *const c.ggml_tensor) bool {
     return tensor.ne[1] == 1 and tensor.ne[2] == 1 and tensor.ne[3] == 1;
 }
 
-/// Ports `ggml_is_matrix` (ggml.c:1407 @c1d0e7a00).
+/// Ports `ggml_is_matrix` (ggml.c:1408 @5266f24da).
 pub export fn ggml_is_matrix(tensor: *const c.ggml_tensor) bool {
     return tensor.ne[2] == 1 and tensor.ne[3] == 1;
 }
 
-/// Ports `ggml_is_3d` (ggml.c:1413 @c1d0e7a00).
+/// Ports `ggml_is_3d` (ggml.c:1414 @5266f24da).
 pub export fn ggml_is_3d(tensor: *const c.ggml_tensor) bool {
     return tensor.ne[3] == 1;
 }
 
-/// Ports `ggml_n_dims` (ggml.c:1417 @c1d0e7a00).
+/// Ports `ggml_n_dims` (ggml.c:1418 @5266f24da).
 ///
 /// Return: the index of the highest non-unit dimension, plus one. Always at
 /// least 1, so a scalar reports one dimension rather than none.
@@ -653,7 +654,7 @@ pub export fn ggml_n_dims(tensor: *const c.ggml_tensor) c_int {
     return 1;
 }
 
-/// Ports `ggml_is_empty` (ggml.c:1553 @c1d0e7a00).
+/// Ports `ggml_is_empty` (ggml.c:1554 @5266f24da).
 pub export fn ggml_is_empty(tensor: *const c.ggml_tensor) bool {
     for (0..c.GGML_MAX_DIMS) |i| {
         if (tensor.ne[i] == 0) return true;
@@ -661,26 +662,26 @@ pub export fn ggml_is_empty(tensor: *const c.ggml_tensor) bool {
     return false;
 }
 
-/// Ports `ggml_are_same_shape` (ggml.c:1563 @c1d0e7a00).
+/// Ports `ggml_are_same_shape` (ggml.c:1564 @5266f24da).
 pub export fn ggml_are_same_shape(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return t0.ne[0] == t1.ne[0] and t0.ne[1] == t1.ne[1] and
         t0.ne[2] == t1.ne[2] and t0.ne[3] == t1.ne[3];
 }
 
-/// Ports `ggml_are_same_stride` (ggml.c:1573 @c1d0e7a00).
+/// Ports `ggml_are_same_stride` (ggml.c:1574 @5266f24da).
 pub export fn ggml_are_same_stride(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return t0.nb[0] == t1.nb[0] and t0.nb[1] == t1.nb[1] and
         t0.nb[2] == t1.nb[2] and t0.nb[3] == t1.nb[3];
 }
 
-/// Ports `ggml_is_view` (ggml.c:1583 @c1d0e7a00).
+/// Ports `ggml_is_view` (ggml.c:1584 @5266f24da).
 pub export fn ggml_is_view(t: *const c.ggml_tensor) bool {
     return impl.isView(t);
 }
 
-/// Ports `ggml_can_repeat` (ggml.c:1588 @c1d0e7a00).
+/// Ports `ggml_can_repeat` (ggml.c:1589 @5266f24da).
 ///
 /// Return: whether `t1`'s shape is a whole-number tiling of `t0`'s, which is
 /// what broadcasting requires. Two empty tensors count as compatible.
@@ -693,7 +694,7 @@ pub export fn ggml_can_repeat(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor
         @rem(t1.ne[3], t0.ne[3]) == 0;
 }
 
-/// Ports `ggml_can_repeat_rows` (ggml.c:1598 @c1d0e7a00).
+/// Ports `ggml_can_repeat_rows` (ggml.c:1599 @5266f24da).
 pub fn canRepeatRows(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
     return t0.ne[0] == t1.ne[0] and ggml_can_repeat(t0, t1);
 }
@@ -701,12 +702,12 @@ pub fn canRepeatRows(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
 // -----------------------------------------------------------------------------
 // Layout predicates
 
-/// Ports `ggml_is_transposed` (ggml.c:1469 @c1d0e7a00).
+/// Ports `ggml_is_transposed` (ggml.c:1470 @5266f24da).
 pub export fn ggml_is_transposed(tensor: *const c.ggml_tensor) bool {
     return tensor.nb[0] > tensor.nb[1];
 }
 
-/// Ports `ggml_is_contiguous_m_n` (ggml.c:1473 @c1d0e7a00).
+/// Ports `ggml_is_contiguous_m_n` (ggml.c:1474 @5266f24da).
 ///
 /// Walks the strides checking each equals the running product of the lower
 /// dimensions. Dimensions at or below `m` are exempt, which is how the
@@ -738,42 +739,42 @@ fn isContiguousMN(tensor: *const c.ggml_tensor, m: usize, n: usize) bool {
     return true;
 }
 
-/// Ports `ggml_is_contiguous` (ggml.c:1493 @c1d0e7a00).
+/// Ports `ggml_is_contiguous` (ggml.c:1494 @5266f24da).
 pub export fn ggml_is_contiguous(tensor: *const c.ggml_tensor) bool {
     return ggml_is_contiguous_0(tensor);
 }
 
-/// Ports `ggml_is_contiguous_0` (ggml.c:1497 @c1d0e7a00).
+/// Ports `ggml_is_contiguous_0` (ggml.c:1498 @5266f24da).
 export fn ggml_is_contiguous_0(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 0, c.GGML_MAX_DIMS);
 }
 
-/// Ports `ggml_is_contiguous_1` (ggml.c:1501 @c1d0e7a00).
+/// Ports `ggml_is_contiguous_1` (ggml.c:1502 @5266f24da).
 pub export fn ggml_is_contiguous_1(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 1, c.GGML_MAX_DIMS);
 }
 
-/// Ports `ggml_is_contiguous_2` (ggml.c:1505 @c1d0e7a00).
+/// Ports `ggml_is_contiguous_2` (ggml.c:1506 @5266f24da).
 pub export fn ggml_is_contiguous_2(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 2, c.GGML_MAX_DIMS);
 }
 
-/// Ports `ggml_is_contiguous_to_1` (ggml.c:1509 @c1d0e7a00).
+/// Ports `ggml_is_contiguous_to_1` (ggml.c:1510 @5266f24da).
 export fn ggml_is_contiguous_to_1(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 0, 1);
 }
 
-/// Ports `ggml_is_contiguous_to_2` (ggml.c:1513 @c1d0e7a00).
+/// Ports `ggml_is_contiguous_to_2` (ggml.c:1514 @5266f24da).
 export fn ggml_is_contiguous_to_2(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 0, 2);
 }
 
-/// Ports `ggml_is_contiguous_to_3` (ggml.c:1517 @c1d0e7a00).
+/// Ports `ggml_is_contiguous_to_3` (ggml.c:1518 @5266f24da).
 export fn ggml_is_contiguous_to_3(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 0, 3);
 }
 
-/// Ports `ggml_is_contiguously_allocated` (ggml.c:1521 @c1d0e7a00).
+/// Ports `ggml_is_contiguously_allocated` (ggml.c:1522 @5266f24da).
 ///
 /// Stronger than `ggml_is_contiguous`: the span the tensor occupies must equal
 /// what its elements need, so there is no trailing slack either.
@@ -782,26 +783,26 @@ pub export fn ggml_is_contiguously_allocated(tensor: *const c.ggml_tensor) bool 
         ggml_type_size(tensor.type) / @as(usize, @intCast(ggml_blck_size(tensor.type)));
 }
 
-/// Ports `ggml_is_permuted` (ggml.c:1525 @c1d0e7a00).
+/// Ports `ggml_is_permuted` (ggml.c:1526 @5266f24da).
 pub export fn ggml_is_permuted(tensor: *const c.ggml_tensor) bool {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return tensor.nb[0] > tensor.nb[1] or tensor.nb[1] > tensor.nb[2] or tensor.nb[2] > tensor.nb[3];
 }
 
-/// Ports `ggml_is_contiguous_channels` (ggml.c:1531 @c1d0e7a00).
+/// Ports `ggml_is_contiguous_channels` (ggml.c:1532 @5266f24da).
 pub export fn ggml_is_contiguous_channels(tensor: *const c.ggml_tensor) bool {
     return tensor.nb[0] > tensor.nb[2] and
         tensor.nb[1] > tensor.nb[0] and
         tensor.nb[2] == ggml_type_size(tensor.type);
 }
 
-/// Ports `ggml_is_contiguous_rows` (ggml.c:1538 @c1d0e7a00).
+/// Ports `ggml_is_contiguous_rows` (ggml.c:1539 @5266f24da).
 pub export fn ggml_is_contiguous_rows(tensor: *const c.ggml_tensor) bool {
     return tensor.ne[0] == ggml_blck_size(tensor.type) or
         tensor.nb[0] == ggml_type_size(tensor.type);
 }
 
-/// Ports `ggml_is_padded_1d` (ggml.c:1544 @c1d0e7a00).
+/// Ports `ggml_is_padded_1d` (ggml.c:1545 @5266f24da).
 pub fn isPadded1d(tensor: *const c.ggml_tensor) bool {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return tensor.nb[0] == ggml_type_size(tensor.type) and
@@ -821,13 +822,14 @@ pub fn isPadded1d(tensor: *const c.ggml_tensor) bool {
 // became. That is not hypothetical -- it happened, and corrupting a block size
 // left the comparison green.
 //
-// Regenerate only from a C build. The procedure is in the commit that
-// introduced them.
+// Regenerate only from a C build: `scripts/types-golden` prints the four name
+// checksums from the stock ggml `llama.cpp.zmake` builds (v0.4.0 added
+// SWIGLU_CLAMP, which moved `golden_glu_name` alone).
 const golden_traits: u64 = 0x2e2b1f729ea5e5af;
 const golden_op_name: u64 = 0xa418b62a7aae6cae;
 const golden_op_symbol: u64 = 0xce807e1fc06f73a5;
 const golden_unary_name: u64 = 0x78d971e2f43bd703;
-const golden_glu_name: u64 = 0xaeb0ccaaac8fbf98;
+const golden_glu_name: u64 = 0xbcc1426328c349eb;
 
 fn mix(h: u64, v: u64) u64 {
     return h ^ (v +% 0x9e3779b97f4a7c15 +% (h << 6) +% (h >> 2));

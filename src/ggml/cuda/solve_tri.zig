@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/solve_tri.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/solve_tri.cuh` at v0.3.0 (`c1d0e7a00`).
+//! `llama.cpp/ggml/src/ggml-cuda/solve_tri.cuh` at v0.4.0 (`5266f24da`).
 //! The kernels, `get_batch_pointers` and `solve_tri_f32_fast`, stay CUDA.
 //!
 //! `ggml_cuda_op_solve_tri` calls `ggml_is_contiguous` on both sources and
@@ -19,9 +19,9 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `MAX_N_FAST` (solve_tri.cu:5 @c1d0e7a00).
+/// Ports `MAX_N_FAST` (solve_tri.cu:5 @5266f24da).
 const max_n_fast = 64;
-/// Ports `MAX_K_FAST` (solve_tri.cu:6 @c1d0e7a00).
+/// Ports `MAX_K_FAST` (solve_tri.cu:6 @5266f24da).
 const max_k_fast = 32;
 
 /// An `int64_t` into a `dim3` member, which is `unsigned int`.
@@ -29,7 +29,7 @@ fn dim(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `solve_tri_f32_cublas` (solve_tri.cu:30 @c1d0e7a00).
+/// Ports `solve_tri_f32_cublas` (solve_tri.cu:30 @5266f24da).
 fn solveTriF32Cublas(
     ctx: *common.Context,
     A: ?*const anyopaque,
@@ -90,7 +90,7 @@ fn fastKernel(comptime n: comptime_int, comptime k: comptime_int) kernels.Kernel
     return kernels.get("solve_tri", kernels.tmpl("solve_tri_f32_fast", &.{ kernels.int(n), kernels.int(k) }));
 }
 
-/// Ports `solve_tri_f32_cuda` (solve_tri.cu:181 @c1d0e7a00).
+/// Ports `solve_tri_f32_cuda` (solve_tri.cu:181 @5266f24da).
 fn solveTriF32Cuda(
     A: ?*const anyopaque,
     B: ?*const anyopaque,
@@ -124,7 +124,7 @@ fn solveTriF32Cuda(
     }
 }
 
-/// Ports `ggml_cuda_op_solve_tri` (solve_tri.cu:250 @c1d0e7a00).
+/// Ports `ggml_cuda_op_solve_tri` (solve_tri.cu:250 @5266f24da).
 pub fn opSolveTri(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]); // A (n×n, lower triangular)
     const src1 = impl.one(Tensor, dst.src[1]); // B (n×k)

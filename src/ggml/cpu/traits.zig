@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.3.0, `c1d0e7a00`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.0, `5266f24da`),
 //! the section beginning at line 214. Each declaration names the C it replaces
 //! and the line it began at.
 //!
@@ -49,7 +49,7 @@ const mmla_rows: i64 = if (has_matmul_int8) 2 else 1;
 // -----------------------------------------------------------------------------
 // The still-C kernels
 //
-// `quants.c` and `arch/arm/quants.c` at v0.3.0. Signatures come from
+// `quants.c` and `arch/arm/quants.c` at v0.4.0. Signatures come from
 // `ggml-cpu/quants.h`.
 
 const quants = struct {
@@ -142,7 +142,7 @@ fn entry(
     };
 }
 
-/// Ports `type_traits_cpu` (ggml-cpu.c:214 @c1d0e7a00).
+/// Ports `type_traits_cpu` (ggml-cpu.c:215 @5266f24da).
 ///
 /// Read directly by `mul_mat`, `mul_mat_id` and `ggml_graph_plan` as well as
 /// through `ggml_get_type_traits_cpu`, so it is `pub` rather than file-local.
@@ -203,7 +203,7 @@ pub const table: [c.GGML_TYPE_COUNT]Traits = blk: {
     break :blk t;
 };
 
-/// Ports `ggml_get_type_traits_cpu` (ggml-cpu.c:417 @c1d0e7a00).
+/// Ports `ggml_get_type_traits_cpu` (ggml-cpu.c:418 @5266f24da).
 ///
 /// Parameters:
 /// - `@"type"`: the tensor type to look up.

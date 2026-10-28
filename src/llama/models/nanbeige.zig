@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nanbeige.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/nanbeige.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_nanbeige`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. The class's own members are
 //! `Model.nanbeige`.
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_nanbeige`'s `load_arch_hparams` (models/nanbeige.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_nanbeige`'s `load_arch_hparams` (models/nanbeige.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -66,7 +66,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_nanbeige`'s `load_arch_tensors` (models/nanbeige.cpp:37 @c1d0e7a00).
+/// Ports `llama_model_nanbeige`'s `load_arch_tensors` (models/nanbeige.cpp:37 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nb = &self.nanbeige;
@@ -114,8 +114,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_nanbeige`'s `build_arch_graph` (models/nanbeige.cpp:76
-/// @c1d0e7a00) and the constructor of its `graph` (models/nanbeige.cpp:80
-/// @c1d0e7a00).
+/// @5266f24da) and the constructor of its `graph` (models/nanbeige.cpp:80
+/// @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -140,6 +140,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
+        b.res.t_layer_inp[@intCast(il)] = inpL;
         var inpSA = inpL;
 
         var cur = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);

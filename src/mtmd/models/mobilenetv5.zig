@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/mobilenetv5.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/mobilenetv5.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -22,7 +22,7 @@ fn neInt(t: T, i: usize) c_int {
     return @intCast(graph.ne(t, i));
 }
 
-/// Ports `rms_norm_2d` (mobilenetv5.cpp:5 @c1d0e7a00), a member of
+/// Ports `rms_norm_2d` (mobilenetv5.cpp:5 @5266f24da), a member of
 /// `clip_graph_mobilenetv5`: normalizes over channels for each spatial
 /// position of a [W, H, C, B] tensor. `eps` defaults to 1e-6 in the C++.
 pub fn rmsNorm2d(g: *graph.Graph, inp: T, weight: T, eps: f32) T {
@@ -39,7 +39,7 @@ pub fn rmsNorm2d(g: *graph.Graph, inp: T, weight: T, eps: f32) T {
     return cur;
 }
 
-/// Ports `pad_same_2d` (mobilenetv5.cpp:23 @c1d0e7a00), a member of
+/// Ports `pad_same_2d` (mobilenetv5.cpp:23 @5266f24da), a member of
 /// `clip_graph_mobilenetv5`: Conv2dSame's asymmetric SAME padding.
 /// Dilations default to 1 in the C++.
 pub fn padSame2d(g: *graph.Graph, inp_in: T, kernel_h: c_int, kernel_w: c_int, stride_h: c_int, stride_w: c_int, dilation_h: c_int, dilation_w: c_int) T {
@@ -69,7 +69,7 @@ pub fn padSame2d(g: *graph.Graph, inp_in: T, kernel_h: c_int, kernel_w: c_int, s
     return inp;
 }
 
-/// Ports `build_edge_residual` (mobilenetv5.cpp:57 @c1d0e7a00), a member
+/// Ports `build_edge_residual` (mobilenetv5.cpp:57 @5266f24da), a member
 /// of `clip_graph_mobilenetv5`: the stage-0 block.
 pub fn buildEdgeResidual(g: *graph.Graph, inp: T, block: *const Block, stride: c_int) T {
     const ctx0 = g.ctx0;
@@ -101,7 +101,7 @@ pub fn buildEdgeResidual(g: *graph.Graph, inp: T, block: *const Block, stride: c
     return cur;
 }
 
-/// Ports `build_inverted_residual` (mobilenetv5.cpp:91 @c1d0e7a00), a
+/// Ports `build_inverted_residual` (mobilenetv5.cpp:91 @5266f24da), a
 /// member of `clip_graph_mobilenetv5`: the universal inverted-residual
 /// block of stage 1 onward.
 pub fn buildInvertedResidual(g: *graph.Graph, inp: T, block: *const Block, stride: c_int) T {
@@ -158,7 +158,7 @@ pub fn buildInvertedResidual(g: *graph.Graph, inp: T, block: *const Block, strid
     return cur;
 }
 
-/// Ports `build_mobilenet_attn` (mobilenetv5.cpp:152 @c1d0e7a00), a member
+/// Ports `build_mobilenet_attn` (mobilenetv5.cpp:152 @5266f24da), a member
 /// of `clip_graph_mobilenetv5`: multi-query attention with downsampled K
 /// and V.
 pub fn buildMobilenetAttn(g: *graph.Graph, inp: T, block: *const Block) T {
@@ -250,7 +250,7 @@ pub fn buildMobilenetAttn(g: *graph.Graph, inp: T, block: *const Block) T {
     return cur;
 }
 
-/// The `is_stage_start` lambda (mobilenetv5.cpp:266 @c1d0e7a00).
+/// The `is_stage_start` lambda (mobilenetv5.cpp:266 @5266f24da).
 fn isStageStart(model: *const model_mod.Model, i: c_int) bool {
     if (i == 0) return true;
     for (model.mobilenet_stage_ends.items) |end_idx| {
@@ -259,7 +259,7 @@ fn isStageStart(model: *const model_mod.Model, i: c_int) bool {
     return false;
 }
 
-/// The `is_fusion_point` lambda (mobilenetv5.cpp:274 @c1d0e7a00).
+/// The `is_fusion_point` lambda (mobilenetv5.cpp:274 @5266f24da).
 fn isFusionPoint(model: *const model_mod.Model, i: c_int, total_blocks: c_int) bool {
     const ends = model.mobilenet_stage_ends.items;
     if (ends.len >= 4) {
@@ -271,7 +271,7 @@ fn isFusionPoint(model: *const model_mod.Model, i: c_int, total_blocks: c_int) b
     return false;
 }
 
-/// Ports `build` (mobilenetv5.cpp:248 @c1d0e7a00), a member of `clip_graph_mobilenetv5`.
+/// Ports `build` (mobilenetv5.cpp:248 @5266f24da), a member of `clip_graph_mobilenetv5`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

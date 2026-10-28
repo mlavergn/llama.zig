@@ -8,13 +8,13 @@
 //! - `llama.cpp/src/llama-model.cpp` -- the switches of `llm_type_name`
 //!   and `llama_model_rope_type`
 //!
-//! Both at v0.3.0 (`c1d0e7a00`). **Do not edit**: regenerate after moving the
+//! Both at v0.4.0 (`5266f24da`). **Do not edit**: regenerate after moving the
 //! pin. The rope rules marked `.conditional` read the hyperparameters and are
 //! ported by hand in `model.zig`.
 
 const c = @import("impl.zig").c;
 
-/// Mirrors `llm_type` (llama-model.h:22 @c1d0e7a00).
+/// Mirrors `llm_type` (llama-model.h:22 @5266f24da).
 pub const Type = enum(c_int) {
     unknown,
     @"14m",
@@ -124,7 +124,9 @@ pub const Type = enum(c_int) {
     @"31b_a3_5b",
     @"35b_a3b",
     @"48b_a3b",
+    @"75b_a9b",
     @"80b_a3b",
+    a3b,
     @"100b_a6b",
     @"102b_a12b",
     @"106b_a12b",
@@ -148,7 +150,7 @@ pub const Type = enum(c_int) {
     e4b,
 };
 
-/// Ports `llm_type_name` (llama-model.cpp:820 @c1d0e7a00), by `Type` ordinal; the
+/// Ports `llm_type_name` (llama-model.cpp:837 @5266f24da), by `Type` ordinal; the
 /// switch's default where it names none.
 pub const type_names = [_][:0]const u8{
     "?B",
@@ -259,7 +261,9 @@ pub const type_names = [_][:0]const u8{
     "31B.A3.5B",
     "35B.A3B",
     "48B.A3B",
+    "75B.A9B",
     "80B.A3B",
+    "A3B",
     "100B.A6B",
     "102B.A12B",
     "106B.A12B",
@@ -292,7 +296,7 @@ pub const RopeRule = union(enum) {
     abort,
 };
 
-/// Ports the switch of `llama_model_rope_type` (llama-model.cpp:2736 @c1d0e7a00), by
+/// Ports the switch of `llama_model_rope_type` (llama-model.cpp:2812 @5266f24da), by
 /// `arch.Arch` ordinal. An architecture the switch does not name falls out of
 /// it to `LLAMA_ROPE_TYPE_NONE`.
 pub const rope_rules = [_]RopeRule{
@@ -330,6 +334,7 @@ pub const rope_rules = [_]RopeRule{
     .{ .fixed = c.LLAMA_ROPE_TYPE_IMROPE }, // LLM_ARCH_QWEN3VLMOE
     .{ .fixed = c.LLAMA_ROPE_TYPE_IMROPE }, // LLM_ARCH_QWEN35
     .{ .fixed = c.LLAMA_ROPE_TYPE_IMROPE }, // LLM_ARCH_QWEN35MOE
+    .{ .fixed = c.LLAMA_ROPE_TYPE_IMROPE }, // LLM_ARCH_QWEN4EXP
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_PHI2
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_PHI3
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_PHIMOE
@@ -446,7 +451,7 @@ pub const rope_rules = [_]RopeRule{
     .abort, // LLM_ARCH_UNKNOWN
 };
 
-/// Ports the cases of `llama_model_mapping` (llama-model.cpp:42 @c1d0e7a00), by
+/// Ports the cases of `llama_model_mapping` (llama-model.cpp:43 @5266f24da), by
 /// `arch.Arch` ordinal: whether the architecture has a model class. One that
 /// does not is `unsupported model architecture`.
 pub const mapped = [_]bool{
@@ -484,6 +489,7 @@ pub const mapped = [_]bool{
     true, // LLM_ARCH_QWEN3VLMOE
     true, // LLM_ARCH_QWEN35
     true, // LLM_ARCH_QWEN35MOE
+    true, // LLM_ARCH_QWEN4EXP
     true, // LLM_ARCH_PHI2
     true, // LLM_ARCH_PHI3
     true, // LLM_ARCH_PHIMOE

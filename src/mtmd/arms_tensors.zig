@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports the model-specific switch of `clip_model_loader::load_tensors`
-//! and `clip_n_mmproj_embd` from `llama.cpp/tools/mtmd/clip.cpp` at v0.3.0
-//! (`c1d0e7a00`). Each declaration names what it ports and the line it
+//! and `clip_n_mmproj_embd` from `llama.cpp/tools/mtmd/clip.cpp` at v0.4.0
+//! (`5266f24da`). Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # Order is part of the contract
@@ -91,8 +91,8 @@ fn loadClampInfo(tl: *TensorLoader) Error!void {
     }
 }
 
-/// Ports the model-specific switch of `load_tensors` (mtmd/clip.cpp:2071
-/// @c1d0e7a00), the `switch (model.proj_type)` at its line 2307.
+/// Ports the model-specific switch of `load_tensors` (mtmd/clip.cpp:2099
+/// @5266f24da), the `switch (model.proj_type)` at its line 2335.
 pub fn load(tl: *TensorLoader) Error!void {
     const func = "load_tensors";
     const model = &tl.ctx_clip.model;
@@ -272,7 +272,7 @@ pub fn load(tl: *TensorLoader) Error!void {
         .yasa2 => {
             // reuse tensors already loaded by the common section
             // (TN_PATCH_EMBD and TN_PATCH_BIAS have the same tensor names)
-            impl.ggmlAssert(model.patch_embeddings_0 != null, "clip.cpp", 2500, "model.patch_embeddings_0 && \"yasa2 requires v.patch_embd.weight\"");
+            impl.ggmlAssert(model.patch_embeddings_0 != null, "clip.cpp", 2528, "model.patch_embeddings_0 && \"yasa2 requires v.patch_embd.weight\"");
             model.yasa_patch_w = model.patch_embeddings_0;
             model.yasa_patch_b = model.patch_bias;
             model.yasa_patch_ln_w = try tl.getTensor(names.TN_YASA_PATCH_LN_W, false);
@@ -465,6 +465,17 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.mm_1_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), B }, true);
             model.mm_2_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), W }, true);
             model.mm_2_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), B }, true);
+        },
+        .deepseek4v => {
+            model.mm_1_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), W }, true);
+            model.mm_1_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), B }, true);
+            model.mm_2_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), W }, true);
+            model.mm_2_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), B }, true);
+            // sentinel token embeddings written into the output block
+            model.image_newline = try tl.getTensor(names.TN_IMAGE_NEWLINE, true);
+            model.token_embd_img_start = try tl.getTensor(names.TN_TOK_IMG_START, true);
+            model.token_embd_img_end = try tl.getTensor(names.TN_TOK_IMG_END, true);
+            model.token_embd_img_pad = try tl.getTensor(names.TN_TOK_IMG_PAD, true);
         },
         .pixtral => {
             model.mm_1_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), W }, true);
@@ -720,8 +731,8 @@ pub fn load(tl: *TensorLoader) Error!void {
         },
         .qwen3tts_gen => {
             // code_predictor
-            model.gen_code_proj_in_w = try get(tl, names.TN_A_GEN_CODE_PROJ_IN, .{W}, true);
-            model.gen_code_proj_in_b = try get(tl, names.TN_A_GEN_CODE_PROJ_IN, .{B}, true);
+            model.gen_code_proj_in_w = try get(tl, names.TN_A_GEN_CODE_PROJ_IN, .{W}, false);
+            model.gen_code_proj_in_b = try get(tl, names.TN_A_GEN_CODE_PROJ_IN, .{B}, false);
             model.gen_code_embd_w = try get(tl, names.TN_A_GEN_CODE_EMBD, .{W}, true);
             model.gen_code_head_w = try get(tl, names.TN_A_GEN_CODE_HEAD, .{W}, true);
             model.gen_code_out_embd_w = try get(tl, names.TN_A_GEN_CODE_OUT_EMBD, .{W}, true);
@@ -882,8 +893,8 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.mm_model_proj_b = try get(tl, names.TN_MM_PROJECTOR, .{B}, true);
             model.mm_pre_norm_w = try get(tl, names.TN_MM_PRE_NORM, .{W}, true);
             model.mm_post_norm_w = try get(tl, names.TN_MM_POST_NORM, .{W}, true);
-            model.mm_img_begin = try tl.getTensor(names.TN_TOK_IMG_BEGIN, true);
-            model.mm_img_end = try tl.getTensor(names.TN_TOK_IMG_END, true);
+            model.mm_img_begin = try tl.getTensor(names.TN_MM_IMG_BEGIN, true);
+            model.mm_img_end = try tl.getTensor(names.TN_MM_IMG_END, true);
             model.image_newline = try tl.getTensor(names.TN_IMAGE_NEWLINE, true);
             model.view_seperator = try tl.getTensor(names.TN_IMAGE_SEPERATOR, false);
         },
@@ -1180,7 +1191,7 @@ pub fn load(tl: *TensorLoader) Error!void {
                 try loadQfLayer(tl, &b.qf_proj_layers.items[0], prefix, bid);
             }
         },
-        else => impl.ggmlAssert(false, "clip.cpp", 3541, "false && \"unknown projector type\""),
+        else => impl.ggmlAssert(false, "clip.cpp", 3581, "false && \"unknown projector type\""),
     }
 }
 
@@ -1222,7 +1233,7 @@ inline fn neI(t: T, i: usize) c_int {
     return @truncate(graph.ne(t, i));
 }
 
-/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:5799 @c1d0e7a00): the embedding
+/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:5911 @5266f24da): the embedding
 /// size of the projector's output, which must be the text model's.
 pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
     const m = &ctx.model;
@@ -1250,7 +1261,7 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .llama4 => neI(m.mm_model_proj, 1),
         .qwen2a => neI(m.mm_fc_w, 1),
         .qwen3a => neI(m.mm_2_w, 1),
-        .glma, .lfm2, .kimivl, .paddleocr, .kimik25, .yasa2 => neI(m.mm_2_w, 1),
+        .glma, .lfm2, .kimivl, .paddleocr, .kimik25, .yasa2, .deepseek4v => neI(m.mm_2_w, 1),
         .hunyuanvl => neI(m.mm_model_proj, 1),
         .cogvlm => neI(m.mm_4h_to_h_w, 1),
         .deepseekocr, .deepseekocr2 => neI(m.mm_fc_w, 1),
@@ -1265,7 +1276,7 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .pockettts_spkenc => neI(m.spk_proj_w, 1),
         .pockettts_gen => neI(m.gen_input_lin_w, 1),
         .parakeet => neI(m.mm_1_w, 1),
-        else => impl.abort("clip.cpp", 5898, "Unknown projector type"),
+        else => impl.abort("clip.cpp", 6011, "Unknown projector type"),
     };
 }
 

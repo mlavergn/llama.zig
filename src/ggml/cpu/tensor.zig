@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.3.0, `c1d0e7a00`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.0, `5266f24da`),
 //! the section beginning at line 748. Each function names the C it replaces
 //! and the line it began at.
 //!
@@ -53,7 +53,7 @@ inline fn store(comptime T: type, p: [*]u8, v: T) void {
     @as(*align(1) T, @ptrCast(p)).* = v;
 }
 
-/// Ports the `ggml_vec_set_i8` family (vec.h:80 @c1d0e7a00), all six at once.
+/// Ports the `ggml_vec_set_i8` family (vec.h:80 @5266f24da), all six at once.
 ///
 /// The C has one `inline static` per element type, each a scalar loop. Zig's
 /// `@memset` covers the lot.
@@ -75,7 +75,7 @@ inline fn offsetOf(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c_int, d3: c
 // -----------------------------------------------------------------------------
 // Constructors
 
-/// Ports `ggml_new_i32` (ggml-cpu.c:748 @c1d0e7a00).
+/// Ports `ggml_new_i32` (ggml-cpu.c:749 @5266f24da).
 ///
 /// Parameters:
 /// - `ctx`: context to allocate in; must not be in no-alloc mode, since the
@@ -91,7 +91,7 @@ pub export fn ggml_new_i32(ctx: *Context, value: i32) *Tensor {
     return result;
 }
 
-/// Ports `ggml_new_f32` (ggml-cpu.c:758 @c1d0e7a00).
+/// Ports `ggml_new_f32` (ggml-cpu.c:759 @5266f24da).
 ///
 /// Parameters:
 /// - `ctx`: context to allocate in; must not be in no-alloc mode.
@@ -109,7 +109,7 @@ pub export fn ggml_new_f32(ctx: *Context, value: f32) *Tensor {
 // -----------------------------------------------------------------------------
 // Filling a whole tensor
 
-/// Ports `ggml_set_i32` (ggml-cpu.c:768 @c1d0e7a00).
+/// Ports `ggml_set_i32` (ggml-cpu.c:769 @5266f24da).
 ///
 /// Fills every element with `value`, row by row, so a tensor with row padding
 /// keeps its padding untouched.
@@ -162,7 +162,7 @@ pub export fn ggml_set_i32(tensor: *Tensor, value: i32) *Tensor {
     return tensor;
 }
 
-/// Ports `ggml_set_f32` (ggml-cpu.c:827 @c1d0e7a00).
+/// Ports `ggml_set_f32` (ggml-cpu.c:828 @5266f24da).
 ///
 /// Parameters:
 /// - `tensor`: the tensor to fill; must be one of the six scalar types.
@@ -218,7 +218,7 @@ pub export fn ggml_set_f32(tensor: *Tensor, value: f32) *Tensor {
 // opens by unravelling the index and handing off to the `nd` form when it is
 // not.
 
-/// Ports `ggml_get_i32_1d` (ggml-cpu.c:886 @c1d0e7a00).
+/// Ports `ggml_get_i32_1d` (ggml-cpu.c:887 @5266f24da).
 ///
 /// Parameters:
 /// - `tensor`: the tensor to read.
@@ -264,7 +264,7 @@ pub export fn ggml_get_i32_1d(tensor: *const Tensor, i: c_int) i32 {
     };
 }
 
-/// Ports `ggml_set_i32_1d` (ggml-cpu.c:930 @c1d0e7a00).
+/// Ports `ggml_set_i32_1d` (ggml-cpu.c:931 @5266f24da).
 ///
 /// Parameters:
 /// - `tensor`: the tensor to write.
@@ -310,7 +310,7 @@ pub export fn ggml_set_i32_1d(tensor: *const Tensor, i: c_int, value: i32) void 
     }
 }
 
-/// Ports `ggml_get_f32_1d` (ggml-cpu.c:1029 @c1d0e7a00).
+/// Ports `ggml_get_f32_1d` (ggml-cpu.c:1030 @5266f24da).
 ///
 /// Parameters:
 /// - `tensor`: the tensor to read.
@@ -339,7 +339,7 @@ pub export fn ggml_get_f32_1d(tensor: *const Tensor, i: c_int) f32 {
     };
 }
 
-/// Ports `ggml_set_f32_1d` (ggml-cpu.c:1067 @c1d0e7a00).
+/// Ports `ggml_set_f32_1d` (ggml-cpu.c:1068 @5266f24da).
 ///
 /// Parameters:
 /// - `tensor`: the tensor to write.
@@ -370,7 +370,7 @@ pub export fn ggml_set_f32_1d(tensor: *const Tensor, i: c_int, value: f32) void 
 // -----------------------------------------------------------------------------
 // Single elements, by coordinate
 
-/// Ports `ggml_get_i32_nd` (ggml-cpu.c:975 @c1d0e7a00).
+/// Ports `ggml_get_i32_nd` (ggml-cpu.c:976 @5266f24da).
 ///
 /// Parameters:
 /// - `tensor`: the tensor to read.
@@ -391,7 +391,7 @@ pub export fn ggml_get_i32_nd(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c
     };
 }
 
-/// Ports `ggml_set_i32_nd` (ggml-cpu.c:995 @c1d0e7a00).
+/// Ports `ggml_set_i32_nd` (ggml-cpu.c:996 @5266f24da).
 ///
 /// Parameters:
 /// - `tensor`: the tensor to write.
@@ -411,7 +411,7 @@ pub export fn ggml_set_i32_nd(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c
     }
 }
 
-/// Ports `ggml_get_f32_nd` (ggml-cpu.c:1106 @c1d0e7a00).
+/// Ports `ggml_get_f32_nd` (ggml-cpu.c:1107 @5266f24da).
 ///
 /// Parameters:
 /// - `tensor`: the tensor to read.
@@ -432,7 +432,7 @@ pub export fn ggml_get_f32_nd(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c
     };
 }
 
-/// Ports `ggml_set_f32_nd` (ggml-cpu.c:1126 @c1d0e7a00).
+/// Ports `ggml_set_f32_nd` (ggml-cpu.c:1127 @5266f24da).
 ///
 /// Parameters:
 /// - `tensor`: the tensor to write.

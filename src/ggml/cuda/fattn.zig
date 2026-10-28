@@ -4,7 +4,9 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/fattn.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/fattn.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/fattn.cuh` at v0.4.0 (`5266f24da`); the
+//! sparse K/V path (`compactMask`, `mmaF16ShallUseSparse`) is new at v0.4.0
+//! (`5266f24da`). The
 //! families are in `fattn_mma.zig` (tensor cores), `fattn_tile.zig`
 //! (generic) and `fattn_vec.zig` (one or two query columns); the launcher
 //! they share is `fattn_common.zig`.
@@ -30,6 +32,7 @@ const fattn_common = @import("fattn_common.zig");
 const fattn_mma = @import("fattn_mma.zig");
 const fattn_tile = @import("fattn_tile.zig");
 const fattn_vec = @import("fattn_vec.zig");
+const kernels = @import("kernels.zig");
 
 const c = impl.c;
 const Tensor = c.ggml_tensor;
@@ -39,10 +42,65 @@ const fa_all_quants = true;
 
 const kq_stride = fattn_common.kq_stride;
 
-/// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1` (fattn.cu:9 @c1d0e7a00).
+/// `sizeof(half)`.
+const sizeof_half = 2;
+
+/// Ports `ggml_cuda_flash_attn_ext_compact_mask` (fattn.cu:92 @5266f24da),
+/// the non-HIP, non-MUSA arm: for every mask row, the indices of its finite
+/// entries, at most `n_kv_max` of them, padded with -1. The kernel,
+/// `flash_attn_mask_to_sparse_indices` (fattn.cu:10 @5266f24da), stays
+/// CUDA; it is in this translation unit whichever instance file's
+/// `launch_fattn` asks for it, since the C's function is not a template.
+pub fn compactMask(mask: *const Tensor, indices: ?[*]i32, n_kv_max: i32, stream: common.cu.cudaStream_t) void {
+    const s31: i64 = @bitCast(mask.nb[1] / sizeof_half);
+    const s33: i64 = @bitCast(mask.nb[3] / sizeof_half);
+    // `dim3`'s members are `unsigned int`.
+    const blocks_num: kernels.Dim3 = .{
+        .x = @truncate(@as(u64, @bitCast(mask.ne[1]))),
+        .y = @truncate(@as(u64, @bitCast(mask.ne[3]))),
+        .z = 1,
+    };
+    const block_dim: kernels.Dim3 = .{ .x = 256, .y = 1, .z = 1 };
+    kernels.launchPdl(comptime kernels.get("fattn", "flash_attn_mask_to_sparse_indices"), .{
+        .grid = blocks_num,
+        .block = block_dim,
+        .shmem = 0,
+        .stream = stream,
+    }, .{ @as(?*const anyopaque, mask.data), indices, @as(c_int, @truncate(mask.ne[0])), n_kv_max, s31, s33 });
+    common.cudaCheck(common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+}
+
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16_shall_use_sparse` (fattn.cu:109 @5266f24da),
+/// the non-HIP, non-MUSA arm: whether a node takes the sparse-gather
+/// kernel, given an instantiation that has one (`fattn_mma.mayUseSparse`).
+pub fn mmaF16ShallUseSparse(ctx: *common.Context, dst: *const Tensor) bool {
+    const Q = impl.one(Tensor, dst.src[0]);
+    const K = impl.one(Tensor, dst.src[1]);
+    const mask_opt: ?*const Tensor = dst.src[3];
+    const cc = common.info().devices[@intCast(ctx.device)].cc;
+
+    const max_bias = impl.getOpParamsF32(dst, 1);
+    const logit_softcap = impl.getOpParamsF32(dst, 2);
+
+    const n_kv_max = impl.getOpParamsI32(dst, 4);
+    const mask = mask_opt orelse return false;
+    return common.cc.isNvidia(cc) and common.turingMmaAvailable(cc) and
+        n_kv_max > 0 and max_bias == 0.0 and logit_softcap == 0.0 and
+        mask.ne[0] == K.ne[1] and mask.ne[1] >= Q.ne[1] and mask.ne[2] == 1 and
+        K.ne[1] >= @max(@as(i64, 4096), 2 * @as(i64, n_kv_max));
+}
+
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1` (fattn.cu:133 @5266f24da).
 fn mmaF16SwitchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, ctx: *common.Context, dst: *Tensor) void {
     const cc = common.info().devices[@intCast(common.getDevice())].cc;
     const Q = impl.one(Tensor, dst.src[0]);
+
+    if (comptime fattn_mma.mayUseSparse(DKQ, DV, 1, ncols2)) {
+        if (mmaF16ShallUseSparse(ctx, dst)) {
+            fattn_mma.mmaF16Case(DKQ, DV, 1, ncols2, ctx, dst);
+            return;
+        }
+    }
 
     if (ncols2 <= 8) {
         if (common.turingMmaAvailable(cc) and Q.ne[1] <= 8 / ncols2) {
@@ -89,7 +147,7 @@ fn gqaOpt(base: bool, Q: *const Tensor, K: *const Tensor, V: *const Tensor, mask
     return use_gqa_opt;
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2` (fattn.cu:37 @c1d0e7a00).
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2` (fattn.cu:170 @5266f24da).
 fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *common.Context, dst: *Tensor) void {
     const cc = common.info().devices[@intCast(common.getDevice())].cc;
     const KQV = dst;
@@ -154,7 +212,7 @@ fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx
     }
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_mma_f16` (fattn.cu:113 @c1d0e7a00).
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16` (fattn.cu:246 @5266f24da).
 fn mmaF16(ctx: *common.Context, dst: *Tensor) void {
     const cc = common.info().devices[@intCast(common.getDevice())].cc;
     const KQV = dst;
@@ -294,8 +352,8 @@ const vec_types = [_]c.enum_ggml_type{
     c.GGML_TYPE_BF16,
 };
 
-/// Ports `ggml_cuda_flash_attn_ext_vec` (fattn.cu:259 @c1d0e7a00), with
-/// `FATTN_VEC_CASE` (fattn.cu:244 @c1d0e7a00) unrolled over the
+/// Ports `ggml_cuda_flash_attn_ext_vec` (fattn.cu:392 @5266f24da), with
+/// `FATTN_VEC_CASE` (fattn.cu:377 @5266f24da) unrolled over the
 /// `GGML_CUDA_FA_ALL_QUANTS` list and `FATTN_VEC_CASES_ALL_D`'s head sizes.
 fn vec(ctx: *common.Context, dst: *Tensor) void {
     comptime std.debug.assert(fa_all_quants);
@@ -319,7 +377,7 @@ fn vec(ctx: *common.Context, dst: *Tensor) void {
     impl.abort("fatal error");
 }
 
-/// Ports `best_fattn_kernel` (fattn.cu:331 @c1d0e7a00): the best
+/// Ports `best_fattn_kernel` (fattn.cu:464 @5266f24da): the best
 /// FlashAttention kernel for a specific GPU.
 const BestKernel = enum(c_int) {
     none = 0,
@@ -328,7 +386,7 @@ const BestKernel = enum(c_int) {
     mma_f16 = 400,
 };
 
-/// Ports `ggml_cuda_fattn_kv_type_supported` (fattn.cu:338 @c1d0e7a00).
+/// Ports `ggml_cuda_fattn_kv_type_supported` (fattn.cu:471 @5266f24da).
 fn kvTypeSupported(t: c.enum_ggml_type) bool {
     return switch (t) {
         c.GGML_TYPE_F32, c.GGML_TYPE_F16 => true,
@@ -338,7 +396,7 @@ fn kvTypeSupported(t: c.enum_ggml_type) bool {
     };
 }
 
-/// Ports `ggml_cuda_get_best_fattn_kernel` (fattn.cu:358 @c1d0e7a00).
+/// Ports `ggml_cuda_get_best_fattn_kernel` (fattn.cu:491 @5266f24da).
 fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
     const KQV = dst;
     const Q = impl.one(Tensor, dst.src[0]);
@@ -492,7 +550,7 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
     return .tile;
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_get_alloc_size` (fattn.cu:536 @c1d0e7a00):
+/// Ports `ggml_cuda_flash_attn_ext_get_alloc_size` (fattn.cu:669 @5266f24da):
 /// `dst`'s bytes plus room for the F16 copies of K and V the chosen kernel
 /// needs.
 ///
@@ -532,7 +590,7 @@ pub fn getAllocSize(device: c_int, dst: *const Tensor) usize {
     return f16_extra.end -% @intFromPtr(dst.data);
 }
 
-/// Ports `ggml_cuda_flash_attn_ext` (fattn.cu:570 @c1d0e7a00).
+/// Ports `ggml_cuda_flash_attn_ext` (fattn.cu:703 @5266f24da).
 pub fn flashAttnExt(ctx: *common.Context, dst: *Tensor) void {
     common.setDevice(ctx.device);
     switch (getBestKernel(common.getDevice(), dst)) {
@@ -543,7 +601,7 @@ pub fn flashAttnExt(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_supported` (fattn.cu:587 @c1d0e7a00).
+/// Ports `ggml_cuda_flash_attn_ext_supported` (fattn.cu:720 @5266f24da).
 pub fn supported(device: c_int, dst: *const Tensor) bool {
     return getBestKernel(device, dst) != .none;
 }

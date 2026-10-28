@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/olmo.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/olmo.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_olmo`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -19,7 +19,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_olmo`'s `load_arch_hparams` (models/olmo.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_olmo`'s `load_arch_hparams` (models/olmo.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -34,7 +34,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_olmo`'s `load_arch_tensors` (models/olmo.cpp:15 @c1d0e7a00).
+/// Ports `llama_model_olmo`'s `load_arch_tensors` (models/olmo.cpp:15 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -62,8 +62,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_olmo`'s `build_arch_graph` (models/olmo.cpp:39 @c1d0e7a00)
-/// and the constructor of its `graph` (models/olmo.cpp:43 @c1d0e7a00).
+/// Ports `llama_model_olmo`'s `build_arch_graph` (models/olmo.cpp:39 @5266f24da)
+/// and the constructor of its `graph` (models/olmo.cpp:43 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

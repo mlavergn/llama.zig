@@ -60,7 +60,11 @@ commit, then start on the next tag. Read `CLAUDE.md`, `MAINTENANCE.md` and
    newest one. The `bNNNNN` entries are per-commit prereleases, so skip them.
    List the releases after the basis in `sort -V` order, patch releases
    included; the next tag is the first one on that list. Check that the
-   fetched tag is the commit GitHub's release points at. If the list is
+   fetched tag resolves to the commit
+   `gh api repos/ggml-org/llama.cpp/commits/<tag> --jq .sha` gives. A
+   release's `target_commitish` is the branch head when the release was cut,
+   later than the tag (`v0.4.0`: tag `5266f24da`, target `427291b5b`), so
+   don't use it. If the list is
    empty, report that the port is current and stop.
 4. **Pickups from the previous sync must be clear before this one starts**
    (M7). If `UPSTREAM.md`'s last history row shows a pickup open, run it now
@@ -138,11 +142,27 @@ in `UPSTREAM.md`, or out of scope according to the scope map.
 
 Never hand-edit generated files.
 
-- **Scripts:** `gen-arch`, `gen-kargs` (then `make struct-layout`),
-  `gen-hparams`, `gen-model-tables`, `gen-unicode-data`, `gen-mtmd-names`,
-  `gen-vk-push`, `iq-grids` and `upstream_flags.zig`.
+- **Scripts:** `gen-arch`, `gen-kargs` (then `zig fmt` and `make
+  struct-layout`), `gen-hparams`, `gen-model-tables`, `gen-layer`,
+  `gen-unicode-data`, `gen-mtmd-names`, `gen-vk-push`, `gen-tuning-table`
+  (then `make tuning-diff`), `gen-upstream-flags` and `iq-grids`. Each stamps
+  the pin from `build/upstream.zig` (`scripts/upstream_pin.py`); move
+  `build/upstream.zig` in Step 3 *before* running any of them.
+- **When a generator stops on new C++**, extend the generator, never the
+  output. At v0.4.0, `gen-hparams` silently dropped every member after the
+  first member function declared mid-struct, and `gen-model-tables` stopped
+  on an `if` in a conditional RoPE arm.
+- **Hand-kept lists the generators feed:** `impl_c.zig`'s `count` and
+  `harness/struct_layout.cpp`'s constant list.
 - **Goldens:** `vecdot-golden`, `vec-golden` and `quants-golden`, each with
-  its `GOLDEN_CPU=generic` sibling.
+  its `GOLDEN_CPU=generic` sibling (`scripts/upstream_pin.sh` stamps
+  them). They link upstream's CMake build, which nothing else moves: run
+  `make buildmacos` first, or the kernels are linked against the previous
+  release's `libggml-base`. The `GOLDEN_CPU=generic` run of `vecdot-golden`
+  also writes `src/ggml/cpu/quants/golden_generic.zig`, which nothing
+  imports and the tree does not track; delete it. `quants-golden`'s
+  `IQ4_NL` `zeros` entry reads uninitialized memory and differs every
+  capture: restore the committed line.
 - **Fixtures:** `arch-fixtures` and `mmproj-fixtures`.
 - **GB10 only:** `gen-fattn-config` and `gen-mmq-config`, the CUDA fatbins
   and their kernel table, and the Vulkan SPIR-V that is embedded from the
@@ -184,13 +204,38 @@ files and its own scratch directory. They must not register a file in a
 `module.zig` until `zig build test-llama` passes with it (memory:
 parallel-agents-shared-tree).
 
-Then run `scripts/upstream-repin A B` for everything left unchanged. After
-that, `port-links --basis B` and `port-audit` must both be clean, apart from
-the deferrals listed in `UPSTREAM.md` (M2).
+Then do the two mechanical moves, **before** hand-porting anything:
+
+- `scripts/upstream-map --repin A B` moves every citation whose definition
+  is unchanged. It refuses one whose text at B differs from A.
+- `scripts/upstream-relines --write A B` moves the `"<file>.cpp", <LINE>`
+  literals the port passes to `impl.assert` and `impl.abort`. Those are the
+  C's `__LINE__`, and gates compare abort messages. Its "changed at B" list
+  is hand work.
+  - **Run it exactly once.** It is not idempotent: a second `--write`
+    shifts the moved literals again.
+  - Pass `--keep <zig>:<file>:<N>` for any literal already set to B by hand,
+    and `--skip <prefix>` for files another agent is editing.
+
+After the port, `port-links` (and, once they exist, `port-links --basis B`
+and `port-audit`) must be clean, apart from the deferrals listed in
+`UPSTREAM.md` (M2). `git grep '@<A>' src cli tools` must be empty too.
+
+Also update the version files: `build/upstream.zig` (tag, `LLAMA_VERSION`,
+ggml's own `GGML_VERSION` from `ggml/CMakeLists.txt`, the commit, the build
+number from `git describe --tags --match 'b*'`), `llama.cpp.zmake/build.zig`'s
+copies, and the two literals in `src/ggml/runtime.zig` and
+`src/llama/api/llama.zig`. `scripts/check-reference-pin` fails until they
+agree. Then move every file header's "at vX (`sha`)" provenance line.
 
 ### Step 7: Mac gates (these block; M7)
 
-1. `make validate` and `make probe` (both runs).
+1. `make validate` **first**, then `make probe` (both runs). On a machine
+   with `../styleguide/Makefile.in`, `validate` is the styleguide's: it runs
+   `clean`, which deletes `zig-out/` and `.zig-cache/`, and `zig fmt`, which
+   may rewrite sources. Fixtures generated before it (`make arch-fixtures`,
+   `make mmproj-fixtures`) are lost, and the gates that read them then run
+   without them. Generate them after it.
 2. The bit-exact CPU set: `ops-diff`, `repack-diff`, `node-diff`,
    `parity-port` and `parity-port-cpu`. Run it at the default `GATE_CPU`,
    then at `apple_m3` and at `generic`, plus `apple_a7` and `apple_a12`

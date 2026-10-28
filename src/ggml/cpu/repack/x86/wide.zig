@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! **Not a port of a file.** Each function reproduces one Intel intrinsic
-//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` (v0.3.0, `c1d0e7a00`)
+//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` (v0.4.0, `5266f24da`)
 //! calls, at both widths -- `_mm256_maddubs_epi16` and
 //! `_mm512_maddubs_epi16` are `Wide(256).maddubs_epi16` and
 //! `Wide(512).maddubs_epi16` -- plus `join`, which names how the AVX-512
@@ -222,10 +222,10 @@ pub fn Wide(comptime bits: u16) type {
         }
 
         /// `mul_sum_i8_pairs_acc_int32x8` (arch/x86/repack.cpp:165
-        /// @c1d0e7a00) and `mul_sum_i8_pairs_acc_int32x16`
-        /// (arch/x86/repack.cpp:134 @c1d0e7a00), the latter with
+        /// @5266f24da) and `mul_sum_i8_pairs_acc_int32x16`
+        /// (arch/x86/repack.cpp:134 @5266f24da), the latter with
         /// `mul_sum_us8_pairs_acc_int32x16` and `sum_i16_pairs_acc_int32x16`
-        /// (arch/x86/repack.cpp:123, 118 @c1d0e7a00) inlined: `vpdpbusd` with
+        /// (arch/x86/repack.cpp:123, 118 @5266f24da) inlined: `vpdpbusd` with
         /// `__AVX512VNNI__`, `maddubs` then `madd` without.
         pub inline fn mul_sum_i8_pairs_acc(acc: I, x: I, y: I) I {
             if (bits == 256) return common.mul_sum_i8_pairs_acc_int32x8(acc, x, y);

@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/yasa2.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/yasa2.cpp` at v0.4.0 (`5266f24da`).
 //! Each declaration names the C++ it replaces and the line it began at.
 
 const std = @import("std");
@@ -15,21 +15,21 @@ const c = impl.c;
 const T = graph.T;
 const ne = graph.ne;
 
-/// Ports `add_channel_bias` (yasa2.cpp:6 @c1d0e7a00).
+/// Ports `add_channel_bias` (yasa2.cpp:6 @5266f24da).
 fn addChannelBias(ctx0: ?*c.ggml_context, x_whcb: T, b_c: T) T {
     if (b_c == null) return x_whcb;
     const b4 = c.ggml_reshape_4d(ctx0, b_c, 1, 1, ne(b_c, 0), 1);
     return c.ggml_add(ctx0, x_whcb, b4);
 }
 
-/// Ports `mul_channel_weight` (yasa2.cpp:17 @c1d0e7a00).
+/// Ports `mul_channel_weight` (yasa2.cpp:17 @5266f24da).
 fn mulChannelWeight(ctx0: ?*c.ggml_context, x_whcb: T, w_c: T) T {
     if (w_c == null) return x_whcb;
     const w4 = c.ggml_reshape_4d(ctx0, w_c, 1, 1, ne(w_c, 0), 1);
     return c.ggml_mul(ctx0, x_whcb, w4);
 }
 
-/// Ports `layer_norm_channels` (yasa2.cpp:28 @c1d0e7a00), a member of
+/// Ports `layer_norm_channels` (yasa2.cpp:28 @5266f24da), a member of
 /// `clip_graph_yasa2`: HF's `ConvNextLayerNorm(channels_first)`.
 fn layerNormChannels(g: *const graph.Graph, inp: T, w: T, b: T, eps: f32) T {
     const ctx0 = g.ctx0;
@@ -54,7 +54,7 @@ fn layerNormChannels(g: *const graph.Graph, inp: T, w: T, b: T, eps: f32) T {
     return xhat;
 }
 
-/// Ports `convnext_grn` (yasa2.cpp:51 @c1d0e7a00), a member of
+/// Ports `convnext_grn` (yasa2.cpp:51 @5266f24da), a member of
 /// `clip_graph_yasa2`: ConvNeXt-V2's global response normalization.
 fn convnextGrn(g: *const graph.Graph, inp: T, w: T, b: T) T {
     const ctx0 = g.ctx0;
@@ -86,7 +86,7 @@ fn convnextGrn(g: *const graph.Graph, inp: T, w: T, b: T) T {
     return c.ggml_add(ctx0, inp, xnx);
 }
 
-/// Ports `build` (yasa2.cpp:81 @c1d0e7a00), a member of `clip_graph_yasa2`.
+/// Ports `build` (yasa2.cpp:81 @5266f24da), a member of `clip_graph_yasa2`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

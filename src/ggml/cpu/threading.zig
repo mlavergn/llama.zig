@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.3.0, `c1d0e7a00`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.0, `5266f24da`),
 //! the sections at lines 418 (threading defs), 540 (NUMA), 2711 (threadpool
 //! lifecycle) and 3065 (graph compute). Each declaration names the C it
 //! replaces and the line it began at.
@@ -69,7 +69,7 @@ extern fn ggml_compute_forward_rms_norm_mul_fused(
 // Every node boundary passes through here, so this is the hottest
 // synchronisation in the backend.
 
-/// Ports `ggml_barrier` (ggml-cpu.c:575 @c1d0e7a00).
+/// Ports `ggml_barrier` (ggml-cpu.c:576 @5266f24da).
 ///
 /// A sense-reversing barrier built from two counters. Threads bump
 /// `n_barrier`; the last one in resets it and bumps `n_barrier_passed`, which
@@ -111,7 +111,7 @@ pub export fn ggml_barrier(tp: *Threadpool) void {
     _ = tp.n_barrier_passed.fetchAdd(0, .seq_cst);
 }
 
-/// Ports `ggml_threadpool_chunk_set` (ggml-cpu.c:613 @c1d0e7a00).
+/// Ports `ggml_threadpool_chunk_set` (ggml-cpu.c:614 @5266f24da).
 ///
 /// Parameters:
 /// - `tp`: the threadpool.
@@ -120,7 +120,7 @@ pub export fn ggml_threadpool_chunk_set(tp: *Threadpool, value: c_int) void {
     tp.current_chunk.store(value, .monotonic);
 }
 
-/// Ports `ggml_threadpool_chunk_add` (ggml-cpu.c:617 @c1d0e7a00).
+/// Ports `ggml_threadpool_chunk_add` (ggml-cpu.c:618 @5266f24da).
 ///
 /// Parameters:
 /// - `tp`: the threadpool.
@@ -147,7 +147,7 @@ const is_linux = builtin.os.tag == .linux;
 /// cannot set affinity, the C notes, so Android takes the `#else`.
 const is_gnu_linux = is_linux and builtin.abi.isGnu();
 
-/// `GGML_NUMA_MAX_NODES` and `GGML_NUMA_MAX_CPUS` (ggml-cpu.c:544, 545 @c1d0e7a00).
+/// `GGML_NUMA_MAX_NODES` and `GGML_NUMA_MAX_CPUS` (ggml-cpu.c:545, 546 @5266f24da).
 const numa_max_nodes = 8;
 const numa_max_cpus = 512;
 
@@ -184,14 +184,14 @@ const linux_c = if (is_linux) struct {
 
 extern fn strerror(err: c_int) [*:0]const u8;
 
-/// Ports `struct ggml_numa_node` (ggml-cpu.c:547 @c1d0e7a00).
+/// Ports `struct ggml_numa_node` (ggml-cpu.c:548 @5266f24da).
 const NumaNode = struct {
     cpus: [numa_max_cpus]u32 = @splat(0),
     n_cpus: u32 = 0,
 };
 
 /// Ports `struct ggml_numa_nodes` and the `g_state` that holds it
-/// (ggml-cpu.c:552, 573 @c1d0e7a00). Off glibc Linux nothing writes it, and
+/// (ggml-cpu.c:553, 574 @5266f24da). Off glibc Linux nothing writes it, and
 /// `n_nodes` stays 0.
 var numa: struct {
     numa_strategy: c.enum_ggml_numa_strategy = 0,
@@ -214,7 +214,7 @@ fn pathExists(path: [*:0]const u8) bool {
     return linux_c.statx(std.os.linux.AT.FDCWD, path, 0, std.os.linux.STATX.BASIC_STATS, &st) == 0;
 }
 
-/// Ports `ggml_get_numa_affinity` (ggml-cpu.c:622 @c1d0e7a00), the
+/// Ports `ggml_get_numa_affinity` (ggml-cpu.c:623 @5266f24da), the
 /// `__gnu_linux__` arm: the calling thread's affinity, which under
 /// `numactl` is the set it was started with.
 fn getNumaAffinity() CpuSet {
@@ -223,7 +223,7 @@ fn getNumaAffinity() CpuSet {
     return cpuset;
 }
 
-/// Ports `ggml_numa_init` (ggml-cpu.c:636 @c1d0e7a00), both arms.
+/// Ports `ggml_numa_init` (ggml-cpu.c:637 @5266f24da), both arms.
 ///
 /// On glibc Linux: enumerate `/sys/devices/system/node/node*` and
 /// `/sys/devices/system/cpu/cpu*`, find the calling CPU's node with
@@ -304,7 +304,7 @@ pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
     }
 }
 
-/// Ports `ggml_is_numa` (ggml-cpu.c:724 @c1d0e7a00).
+/// Ports `ggml_is_numa` (ggml-cpu.c:725 @5266f24da).
 ///
 /// Return: true when more than one NUMA node was found. Always false off
 /// glibc Linux, which is what keeps `mul_mat`'s chunk-by-thread fallback off.
@@ -313,7 +313,7 @@ pub export fn ggml_is_numa() bool {
 }
 
 /// Ports `set_numa_thread_affinity`, `set_numa_thread_affinity`
-/// (ggml-cpu.c:2148, 2216 @c1d0e7a00): the `__gnu_linux__` arm and the
+/// (ggml-cpu.c:2173, 2241 @5266f24da): the `__gnu_linux__` arm and the
 /// `#else` no-op.
 ///
 /// Pins worker `thread_n` to the CPUs of one node -- round-robin over the
@@ -347,7 +347,7 @@ fn setNumaThreadAffinity(thread_n: c_int) void {
 }
 
 /// Ports `clear_numa_thread_affinity`, `clear_numa_thread_affinity`
-/// (ggml-cpu.c:2193, 2217 @c1d0e7a00): the `__gnu_linux__` arm, every CPU
+/// (ggml-cpu.c:2218, 2242 @5266f24da): the `__gnu_linux__` arm, every CPU
 /// allowed again, and the `#else` no-op.
 fn clearNumaThreadAffinity() void {
     if (comptime !is_gnu_linux) return;
@@ -384,7 +384,7 @@ extern fn pthread_self() std.c.pthread_t;
 extern fn pthread_setschedparam(thread: std.c.pthread_t, policy: c_int, param: *const SchedParam) c_int;
 
 /// What `ggml_mutex_init` and `ggml_cond_init` expand to in the pthread arm
-/// (ggml-cpu.c:452, 469 @c1d0e7a00): these two calls with a null attribute.
+/// (ggml-cpu.c:453, 470 @5266f24da): these two calls with a null attribute.
 extern fn pthread_mutex_init(mutex: *std.c.pthread_mutex_t, attr: ?*const anyopaque) c_int;
 extern fn pthread_cond_init(cond: *std.c.pthread_cond_t, attr: ?*const anyopaque) c_int;
 
@@ -393,7 +393,7 @@ extern fn pthread_cond_init(cond: *std.c.pthread_cond_t, attr: ?*const anyopaque
 const is_windows = builtin.os.tag == .windows;
 
 /// Ports `ggml_thread_apply_affinity`, `ggml_thread_apply_affinity`,
-/// `ggml_thread_apply_affinity` (ggml-cpu.c:2497, 2579, 2614 @c1d0e7a00): the
+/// `ggml_thread_apply_affinity` (ggml-cpu.c:2523, 2605, 2640 @5266f24da): the
 /// Windows, Apple and Linux arms.
 ///
 /// Apple platforms expose no way to pin a thread to a core, so the C's Apple
@@ -419,7 +419,7 @@ fn threadApplyAffinity(mask: []const bool) bool {
     return true;
 }
 
-/// The Windows arm of `ggml_thread_apply_affinity` (ggml-cpu.c:2497 @c1d0e7a00).
+/// The Windows arm of `ggml_thread_apply_affinity` (ggml-cpu.c:2523 @5266f24da).
 fn threadApplyAffinityWindows(mask: []const bool) bool {
     const h = win32.GetCurrentThread();
     var bitmask: u64 = 0;
@@ -443,7 +443,7 @@ fn threadApplyAffinityWindows(mask: []const bool) bool {
     return m != 0;
 }
 
-/// The Windows arm of `ggml_thread_apply_priority` (ggml-cpu.c:2531 @c1d0e7a00).
+/// The Windows arm of `ggml_thread_apply_priority` (ggml-cpu.c:2557 @5266f24da).
 ///
 /// Every level but LOW first opts the thread out of power throttling --
 /// Windows 11 otherwise parks cores and crowds the workers onto the first few
@@ -486,7 +486,7 @@ fn threadApplyPriorityWindows(prio: i32) bool {
 }
 
 /// Ports `ggml_thread_apply_priority`, `ggml_thread_apply_priority`
-/// (ggml-cpu.c:2585, 2643 @c1d0e7a00): the Apple and the Linux arms; Windows
+/// (ggml-cpu.c:2611, 2669 @5266f24da): the Apple and the Linux arms; Windows
 /// is `threadApplyPriorityWindows`. They differ only in `LOW`, which
 /// is `SCHED_BATCH` on Linux and `SCHED_OTHER` on Apple, where the C notes
 /// there is no way to ask for less than normal -- and in the numbering of
@@ -538,7 +538,7 @@ fn threadApplyPriority(prio: i32) bool {
     return true;
 }
 
-/// Ports `ggml_thread_cpumask_is_valid` (ggml-cpu.c:2682 @c1d0e7a00).
+/// Ports `ggml_thread_cpumask_is_valid` (ggml-cpu.c:2708 @5266f24da).
 fn cpumaskIsValid(mask: []const bool) bool {
     for (mask) |bit| {
         if (bit) return true;
@@ -546,7 +546,7 @@ fn cpumaskIsValid(mask: []const bool) bool {
     return false;
 }
 
-/// Ports `ggml_thread_cpumask_next` (ggml-cpu.c:2689 @c1d0e7a00).
+/// Ports `ggml_thread_cpumask_next` (ggml-cpu.c:2715 @5266f24da).
 ///
 /// Hands each worker its own core when `strict` is set, walking the global
 /// mask from where the last worker stopped. Otherwise every worker gets the
@@ -586,20 +586,20 @@ fn cpumaskNext(
 // -----------------------------------------------------------------------------
 // Threadpool lifecycle
 
-/// Ports `ggml_mutex_lock`, `ggml_mutex_lock` (ggml-cpu.c:434, 454 @c1d0e7a00).
+/// Ports `ggml_mutex_lock`, `ggml_mutex_lock` (ggml-cpu.c:435, 455 @5266f24da).
 inline fn lock(threadpool: *Threadpool) void {
     if (comptime is_windows) return win32.AcquireSRWLockExclusive(&threadpool.mutex);
     _ = std.c.pthread_mutex_lock(&threadpool.mutex);
 }
 
-/// Ports `ggml_mutex_unlock`, `ggml_mutex_unlock` (ggml-cpu.c:435, 455 @c1d0e7a00).
+/// Ports `ggml_mutex_unlock`, `ggml_mutex_unlock` (ggml-cpu.c:436, 456 @5266f24da).
 inline fn unlock(threadpool: *Threadpool) void {
     if (comptime is_windows) return win32.ReleaseSRWLockExclusive(&threadpool.mutex);
     _ = std.c.pthread_mutex_unlock(&threadpool.mutex);
 }
 
-/// Ports `ggml_mutex_lock_shared`, `ggml_mutex_lock_shared` (ggml-cpu.c:436,
-/// 456 @c1d0e7a00). The same call as `lock` on pthreads; a reader's hold on
+/// Ports `ggml_mutex_lock_shared`, `ggml_mutex_lock_shared` (ggml-cpu.c:437,
+/// 457 @5266f24da). The same call as `lock` on pthreads; a reader's hold on
 /// the SRW lock on Windows, which is what the C's two waits take.
 inline fn lockShared(threadpool: *Threadpool) void {
     if (comptime is_windows) return win32.AcquireSRWLockShared(&threadpool.mutex);
@@ -607,13 +607,13 @@ inline fn lockShared(threadpool: *Threadpool) void {
 }
 
 /// Ports `ggml_mutex_unlock_shared`, `ggml_mutex_unlock_shared`
-/// (ggml-cpu.c:437, 457 @c1d0e7a00).
+/// (ggml-cpu.c:438, 458 @5266f24da).
 inline fn unlockShared(threadpool: *Threadpool) void {
     if (comptime is_windows) return win32.ReleaseSRWLockShared(&threadpool.mutex);
     _ = std.c.pthread_mutex_unlock(&threadpool.mutex);
 }
 
-/// Ports `ggml_cond_wait`, `ggml_cond_wait` (ggml-cpu.c:441, 471 @c1d0e7a00).
+/// Ports `ggml_cond_wait`, `ggml_cond_wait` (ggml-cpu.c:442, 472 @5266f24da).
 /// On Windows the wait releases and retakes the lock in shared mode, matching
 /// `lockShared` around it.
 inline fn condWait(threadpool: *Threadpool) void {
@@ -624,13 +624,13 @@ inline fn condWait(threadpool: *Threadpool) void {
     _ = std.c.pthread_cond_wait(&threadpool.cond, &threadpool.mutex);
 }
 
-/// Ports `ggml_cond_broadcast`, `ggml_cond_broadcast` (ggml-cpu.c:442, 472 @c1d0e7a00).
+/// Ports `ggml_cond_broadcast`, `ggml_cond_broadcast` (ggml-cpu.c:443, 473 @5266f24da).
 inline fn condBroadcast(threadpool: *Threadpool) void {
     if (comptime is_windows) return win32.WakeAllConditionVariable(&threadpool.cond);
     _ = std.c.pthread_cond_broadcast(&threadpool.cond);
 }
 
-/// Ports `ggml_threadpool_new_impl` (ggml-cpu.c:3278 @c1d0e7a00).
+/// Ports `ggml_threadpool_new_impl` (ggml-cpu.c:3314 @5266f24da).
 ///
 /// Parameters:
 /// - `tpp`: thread count, placement, priority, polling level, paused state.
@@ -681,7 +681,7 @@ fn threadpoolNewImpl(
     threadpool.workers = workers;
 
     // `ggml_mutex_init`, `ggml_cond_init`, `ggml_mutex_init`, `ggml_cond_init`
-    // (ggml-cpu.c:432, 439, 452, 469 @c1d0e7a00): both arms.
+    // (ggml-cpu.c:433, 440, 453, 470 @5266f24da): both arms.
     if (comptime is_windows) {
         win32.InitializeSRWLock(&threadpool.mutex);
         win32.InitializeConditionVariable(&threadpool.cond);
@@ -713,7 +713,7 @@ fn threadpoolNewImpl(
     return threadpool;
 }
 
-/// Ports `ggml_threadpool_new` (ggml-cpu.c:3351 @c1d0e7a00).
+/// Ports `ggml_threadpool_new` (ggml-cpu.c:3387 @5266f24da).
 ///
 /// Parameters:
 /// - `tpp`: the pool's configuration.
@@ -723,7 +723,7 @@ pub export fn ggml_threadpool_new(tpp: *c.struct_ggml_threadpool_params) *Thread
     return threadpoolNewImpl(tpp, null, null);
 }
 
-/// Ports `ggml_threadpool_free` (ggml-cpu.c:2711 @c1d0e7a00).
+/// Ports `ggml_threadpool_free` (ggml-cpu.c:2737 @5266f24da).
 ///
 /// Stops the workers, joins them, and releases both allocations.
 ///
@@ -744,7 +744,7 @@ pub export fn ggml_threadpool_free(threadpool_opt: ?*Threadpool) void {
     for (1..n) |j| workers[j].thrd.join();
 
     // `ggml_mutex_destroy`, `ggml_cond_destroy`, `ggml_mutex_destroy`,
-    // `ggml_cond_destroy` (ggml-cpu.c:433, 440, 453, 470 @c1d0e7a00): empty on
+    // `ggml_cond_destroy` (ggml-cpu.c:434, 441, 454, 471 @5266f24da): empty on
     // Windows.
     if (comptime !is_windows) {
         _ = std.c.pthread_mutex_destroy(&threadpool.mutex);
@@ -755,7 +755,7 @@ pub export fn ggml_threadpool_free(threadpool_opt: ?*Threadpool) void {
     ggml_aligned_free(threadpool, @sizeOf(Threadpool));
 }
 
-/// Ports `ggml_threadpool_pause_locked` (ggml-cpu.c:2744 @c1d0e7a00).
+/// Ports `ggml_threadpool_pause_locked` (ggml-cpu.c:2770 @5266f24da).
 ///
 /// The caller must hold `threadpool.mutex`.
 fn pauseLocked(threadpool: *Threadpool) void {
@@ -764,7 +764,7 @@ fn pauseLocked(threadpool: *Threadpool) void {
     condBroadcast(threadpool);
 }
 
-/// Ports `ggml_threadpool_resume_locked` (ggml-cpu.c:2750 @c1d0e7a00).
+/// Ports `ggml_threadpool_resume_locked` (ggml-cpu.c:2776 @5266f24da).
 ///
 /// The caller must hold `threadpool.mutex`.
 fn resumeLocked(threadpool: *Threadpool) void {
@@ -773,7 +773,7 @@ fn resumeLocked(threadpool: *Threadpool) void {
     condBroadcast(threadpool);
 }
 
-/// Ports `ggml_threadpool_pause` (ggml-cpu.c:2757 @c1d0e7a00).
+/// Ports `ggml_threadpool_pause` (ggml-cpu.c:2783 @5266f24da).
 pub export fn ggml_threadpool_pause(threadpool: *Threadpool) void {
     lock(threadpool);
     defer unlock(threadpool);
@@ -781,7 +781,7 @@ pub export fn ggml_threadpool_pause(threadpool: *Threadpool) void {
     if (!threadpool.pause.load(.monotonic)) pauseLocked(threadpool);
 }
 
-/// Ports `ggml_threadpool_resume` (ggml-cpu.c:2769 @c1d0e7a00).
+/// Ports `ggml_threadpool_resume` (ggml-cpu.c:2795 @5266f24da).
 pub export fn ggml_threadpool_resume(threadpool: *Threadpool) void {
     lock(threadpool);
     defer unlock(threadpool);
@@ -792,7 +792,7 @@ pub export fn ggml_threadpool_resume(threadpool: *Threadpool) void {
 // -----------------------------------------------------------------------------
 // Running a graph
 
-/// Ports `ggml_cpu_try_fuse_ops` (ggml-cpu.c:3031 @c1d0e7a00).
+/// Ports `ggml_cpu_try_fuse_ops` (ggml-cpu.c:3067 @5266f24da).
 ///
 /// Parameters:
 /// - `cgraph`: the graph being computed.
@@ -838,7 +838,7 @@ fn tryFuseOps(
     return 0;
 }
 
-/// Ports `ggml_graph_compute_thread` (ggml-cpu.c:3065 @c1d0e7a00).
+/// Ports `ggml_graph_compute_thread` (ggml-cpu.c:3101 @5266f24da).
 ///
 /// The body every thread runs for one graph, main thread included. Walks the
 /// nodes in order, computing this thread's share of each and rendezvousing at
@@ -894,7 +894,7 @@ fn graphComputeThread(state: *ComputeState) void {
     ggml_barrier(tp);
 }
 
-/// Ports `ggml_graph_compute_thread_ready` (ggml-cpu.c:3144 @c1d0e7a00).
+/// Ports `ggml_graph_compute_thread_ready` (ggml-cpu.c:3180 @5266f24da).
 ///
 /// Return: true when the polling or sleeping loop should exit; `state.pending`
 /// says whether that is because there is work.
@@ -918,7 +918,7 @@ fn threadReady(state: *ComputeState) bool {
     return false;
 }
 
-/// Ports `ggml_graph_compute_thread_sync` (ggml-cpu.c:3162 @c1d0e7a00).
+/// Ports `ggml_graph_compute_thread_sync` (ggml-cpu.c:3198 @5266f24da).
 ///
 /// The fence that pairs with the kickoff's sequentially-consistent store, for
 /// a thread that saw the new graph by polling rather than by waking.
@@ -929,7 +929,7 @@ fn threadSync(state: *ComputeState) void {
     _ = state.threadpool.n_graph.fetchAdd(0, .seq_cst);
 }
 
-/// Ports `ggml_graph_compute_poll_for_work` (ggml-cpu.c:3172 @c1d0e7a00).
+/// Ports `ggml_graph_compute_poll_for_work` (ggml-cpu.c:3208 @5266f24da).
 ///
 /// Return: whether work arrived before the polling budget ran out.
 fn pollForWork(state: *ComputeState) bool {
@@ -947,7 +947,7 @@ fn pollForWork(state: *ComputeState) bool {
     return state.pending;
 }
 
-/// Ports `ggml_graph_compute_check_for_work` (ggml-cpu.c:3187 @c1d0e7a00).
+/// Ports `ggml_graph_compute_check_for_work` (ggml-cpu.c:3223 @5266f24da).
 ///
 /// Polls first, then sleeps on the condition variable. The hybrid is why the
 /// kickoff always takes the mutex.
@@ -969,7 +969,7 @@ fn checkForWork(state: *ComputeState) bool {
     return state.pending;
 }
 
-/// Ports `ggml_graph_compute_secondary_thread` (ggml-cpu.c:3206 @c1d0e7a00).
+/// Ports `ggml_graph_compute_secondary_thread` (ggml-cpu.c:3242 @5266f24da).
 ///
 /// The worker loop: sleep while paused, exit on stop, otherwise wait for a
 /// graph and run this thread's share of it.
@@ -1004,7 +1004,7 @@ fn secondaryThread(state: *ComputeState) void {
     }
 }
 
-/// Ports `ggml_graph_compute_kickoff` (ggml-cpu.c:3244 @c1d0e7a00).
+/// Ports `ggml_graph_compute_kickoff` (ggml-cpu.c:3280 @5266f24da).
 ///
 /// Publishes a new graph to the workers. The mutex is taken unconditionally
 /// because the workers are doing a hybrid poll-then-wait and either half might
@@ -1042,7 +1042,7 @@ fn kickoff(threadpool: *Threadpool, n_threads: c_int) void {
     unlock(threadpool);
 }
 
-/// Ports `ggml_graph_compute` (ggml-cpu.c:3355 @c1d0e7a00).
+/// Ports `ggml_graph_compute` (ggml-cpu.c:3391 @5266f24da).
 ///
 /// Parameters:
 /// - `cgraph`: the graph to evaluate.
@@ -1101,7 +1101,7 @@ pub export fn ggml_graph_compute(cgraph: *const CGraph, cplan: *c.ggml_cplan) c.
     return ret;
 }
 
-/// Ports `ggml_graph_compute_with_ctx` (ggml-cpu.c:3432 @c1d0e7a00).
+/// Ports `ggml_graph_compute_with_ctx` (ggml-cpu.c:3468 @5266f24da).
 ///
 /// Plans the graph, takes the work buffer out of `ctx`, and runs it.
 ///

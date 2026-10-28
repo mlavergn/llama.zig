@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmf.cu` and the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/mmf.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/mmf.cuh` at v0.4.0 (`5266f24da`). The
 //! kernels, `mul_mat_f` and `mul_mat_f_ids`, stay CUDA, one set per column
 //! count in `template-instances/mmf-instance-ncols_<n>.cu`.
 
@@ -18,31 +18,31 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `MMF_ROWS_PER_BLOCK` (mmf.cuh:9 @c1d0e7a00).
+/// Ports `MMF_ROWS_PER_BLOCK` (mmf.cuh:9 @5266f24da).
 const rows_per_block_default = 32;
 
-/// Ports `MMF_ROWS_PER_BLOCK_CDNA` (mmf.cuh:10 @c1d0e7a00).
+/// Ports `MMF_ROWS_PER_BLOCK_CDNA` (mmf.cuh:10 @5266f24da).
 const rows_per_block_cdna = 64;
 
-/// Ports `mmf_get_max_block_size` (mmf.cuh:12 @c1d0e7a00), NVIDIA arm.
+/// Ports `mmf_get_max_block_size` (mmf.cuh:12 @5266f24da), NVIDIA arm.
 fn getMaxBlockSize(x: c_int) i64 {
     _ = x;
     return 256;
 }
 
-/// Ports `mmf_get_padding` (mmf.cuh:20 @c1d0e7a00), NVIDIA arm.
+/// Ports `mmf_get_padding` (mmf.cuh:20 @5266f24da), NVIDIA arm.
 fn getPadding(x: c_int) c_int {
     _ = x;
     return 4;
 }
 
-/// Ports `mmf_get_rows_per_block` (mmf.cu:5 @c1d0e7a00), NVIDIA arm.
+/// Ports `mmf_get_rows_per_block` (mmf.cu:5 @5266f24da), NVIDIA arm.
 fn getRowsPerBlock(x: c_int) c_int {
     _ = x;
     return rows_per_block_default;
 }
 
-/// Ports `mmf_ids_data` (mmf.cuh:36 @c1d0e7a00).
+/// Ports `mmf_ids_data` (mmf.cuh:36 @5266f24da).
 const IdsData = struct {
     ids_src_compact: ?*const i32 = null,
     ids_dst_compact: ?*const i32 = null,
@@ -88,7 +88,7 @@ const Args = struct {
     stride_sample_dst: i64,
 };
 
-/// Ports `mul_mat_f_switch_ids` (mmf.cuh:573 @c1d0e7a00).
+/// Ports `mul_mat_f_switch_ids` (mmf.cuh:573 @5266f24da).
 fn switchIds(comptime T: type, comptime rpb: comptime_int, comptime cpb: comptime_int, comptime nwarps: comptime_int, a: *const Args, block_nums: kernels.Dim3, block_dims: kernels.Dim3, nbytes_shared_total: c_int, stream: cu.cudaStream_t, ids_data: ?*const IdsData) void {
     const has_ids_data = ids_data != null and ids_data.?.ids_src_compact != null;
     const tu = comptime instanceTu(cpb);
@@ -152,7 +152,7 @@ fn switchIds(comptime T: type, comptime rpb: comptime_int, comptime cpb: comptim
     }
 }
 
-/// Ports `mul_mat_f_cuda` (mmf.cuh:620 @c1d0e7a00).
+/// Ports `mul_mat_f_cuda` (mmf.cuh:620 @5266f24da).
 fn mulMatFCuda(
     comptime T: type,
     comptime rpb: comptime_int,
@@ -254,8 +254,8 @@ fn mulMatFCuda(
     }
 }
 
-/// Ports `mul_mat_f_switch_cols_per_block` (mmf.cuh:734 @c1d0e7a00) and
-/// `mul_mat_f_switch_rows_per_block` (mmf.cuh:836 @c1d0e7a00). Only
+/// Ports `mul_mat_f_switch_cols_per_block` (mmf.cuh:734 @5266f24da) and
+/// `mul_mat_f_switch_rows_per_block` (mmf.cuh:836 @5266f24da). Only
 /// `MMF_ROWS_PER_BLOCK` is reachable on an NVIDIA device.
 fn switchColsPerBlock(comptime T: type, rows_per_block: c_int, x: ?*const anyopaque, y: ?*const f32, ids: ?*const i32, dst: ?*f32, ncols_x: i64, nrows_x: i64, ncols_dst: i64, stride_row: i64, stride_col_y: i64, stride_col_dst: i64, stride_col_id: i64, stride_row_id: c_int, nchannels_x: i64, nchannels_y: i64, nchannels_dst: i64, stride_channel_x: i64, stride_channel_y: i64, stride_channel_dst: i64, nsamples_x: i64, nsamples_dst: i64, stride_sample_x: i64, stride_sample_y: i64, stride_sample_dst: i64, stream: cu.cudaStream_t, ids_data: ?*const IdsData) void {
     if (rows_per_block != rows_per_block_default) {
@@ -273,7 +273,7 @@ fn switchColsPerBlock(comptime T: type, rows_per_block: c_int, x: ?*const anyopa
     }
 }
 
-/// Ports `ggml_cuda_mul_mat_f` (mmf.cu:13 @c1d0e7a00).
+/// Ports `ggml_cuda_mul_mat_f` (mmf.cu:13 @5266f24da).
 pub fn mulMatF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor) void {
     impl.assert(src1.type == c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
     impl.assert(ids == null or ids.?.type == c.GGML_TYPE_I32, "!ids ||  ids->type == GGML_TYPE_I32");
@@ -396,7 +396,7 @@ pub fn mulMatF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
     }
 }
 
-/// Ports `ggml_cuda_should_use_mmf` (mmf.cu:133 @c1d0e7a00), NVIDIA arms.
+/// Ports `ggml_cuda_should_use_mmf` (mmf.cu:133 @5266f24da), NVIDIA arms.
 pub fn shouldUseMmf(ty: c.enum_ggml_type, x: c_int, warp_size: c_int, src0_ne: *const [4]i64, src0_nb: *const [4]usize, src1_ncols: c_int, mul_mat_id: bool) bool {
     if (c.ggml_is_quantized(ty)) return false;
 

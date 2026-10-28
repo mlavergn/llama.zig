@@ -461,6 +461,55 @@ int main(int argc, char ** argv) {
         }
     }
 
+    puts("=== matmul, the IQ panel path ===");
+    {
+        /* iqp.cpp: the grid-based IQ types' batched mul_mat, which x86 takes
+         * from AVX2 on (ggml_cpu_iqp_supports_mul_mat) once src0 has a
+         * multiple of 8 rows and src1 at least 8 columns -- a shape the sweep
+         * above, at 1, 2 and 7 columns, never reaches. Elsewhere the same
+         * shapes run through vec_dot.
+         *
+         * 8 columns are two whole gemm tiles; 11 add a three-row gemv tail;
+         * [9, 2] batches src1 over ne12; 64 rows give three threads more
+         * row groups than chunks. For MUL_MAT_ID, ids drawn as
+         * (i * 7919) % 4 route 2 x 15 rows to the four experts as 8, 7, 7, 8
+         * -- two on the panel path, two below its threshold of 8, in one
+         * node -- and 2 x 19 as 10, 9, 9, 10, which ends each panel expert
+         * on a short tile; that one once with src1 per expert slot and once
+         * broadcast (ne11 = 1). */
+        static const enum ggml_type iqtypes[] = {
+            GGML_TYPE_IQ2_XXS, GGML_TYPE_IQ2_XS, GGML_TYPE_IQ2_S, GGML_TYPE_IQ3_XXS,
+            GGML_TYPE_IQ3_S, GGML_TYPE_IQ1_S, GGML_TYPE_IQ1_M, GGML_TYPE_IQ4_XS,
+        };
+        for (size_t qi = 0; qi < sizeof iqtypes / sizeof iqtypes[0]; qi++) {
+            const enum ggml_type t = iqtypes[qi];
+            const char * tn = ggml_type_name(t);
+            char label[96];
+
+            static const int ncols[] = { 8, 11 };
+            for (size_t ci = 0; ci < sizeof ncols / sizeof ncols[0]; ci++) {
+                snprintf(label, sizeof label, "iqp mul_mat %s [512 x 16] x %d", tn, ncols[ci]);
+                run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, t, 512, 16),
+                                                 ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, ncols[ci])), 0, 1.0f);
+            }
+            snprintf(label, sizeof label, "iqp mul_mat %s [512 x 64] x 9", tn);
+            run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, t, 512, 64),
+                                             ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, 9)), 0, 1.0f);
+            snprintf(label, sizeof label, "iqp mul_mat %s [512 x 16] x [9, 2]", tn);
+            run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, t, 512, 16),
+                                             ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 512, 9, 2)), 0, 1.0f);
+
+            static const int ntok[] = { 15, 19, 19 };
+            static const int nb11[] = { 2, 2, 1 };
+            for (size_t k = 0; k < sizeof ntok / sizeof ntok[0]; k++) {
+                snprintf(label, sizeof label, "iqp mul_mat_id %s [512 x 16 x 4] b=[%d, %d]", tn, nb11[k], ntok[k]);
+                run_amp(label, ggml_mul_mat_id(ctx, ggml_new_tensor_3d(ctx, t, 512, 16, 4),
+                                                    ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 512, nb11[k], ntok[k]),
+                                                    ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 2, ntok[k])), 4, 1.0f);
+            }
+        }
+    }
+
     puts("=== layout ===");
     R(ggml_cont(ctx, a2));
     R(ggml_cont(ctx, ggml_transpose(ctx, a2)));

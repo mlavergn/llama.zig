@@ -25,6 +25,10 @@ x
 --override-kv a=weird:1 in.gguf Q4_0
 --include-weights a --exclude-weights b in.gguf Q4_0
 --imatrix
+--max-buffer-size
+--max-buffer-size 0 in.gguf Q4_0
+--max-buffer-size -3 in.gguf Q4_0
+--max-buffer-size abc in.gguf Q4_0
 --pure in.gguf
 $FIX/qwen3-dense.gguf out.gguf
 $FIX/qwen3-dense.gguf out.gguf Q9_X
@@ -45,6 +49,8 @@ $FIX/llama-dense.gguf copy.gguf COPY
 --override-kv general.name=str:renamed --override-kv tokenizer.ggml.bos_token_id=int:3 $FIX/qwen3-dense.gguf kv.gguf Q4_0
 --dry-run $FIX/gemma3-dense.gguf Q4_K_M
 --keep-split $FIX/qwen3-dense.gguf ks.gguf Q4_0
+--max-buffer-size 1 $FIX/qwen3-dense.gguf mbs.gguf Q4_K_M
+--max-buffer-size 8192 --pure $FIX/llama-dense.gguf mbs2.gguf Q8_0
 --allow-requantize q4k.gguf req.gguf Q4_0
 q4k.gguf req2.gguf Q4_0
 $FIX/qwen3-dense.gguf IQ2_XXS

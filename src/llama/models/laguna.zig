@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/laguna.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/laguna.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_laguna`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -24,14 +24,14 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_laguna`'s `load_arch_hparams` (models/laguna.cpp:9 @c1d0e7a00).
+/// Ports `llama_model_laguna`'s `load_arch_hparams` (models/laguna.cpp:9 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     hp.n_layer_dense_lead = (try meta.getKey(u32, .leading_dense_block_count, true, exc)).?;
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     if (try meta.getKey(u32, .expert_gating_func, false, exc)) |v| hp.expert_gating_func = v;
     if (try meta.getKey(f32, .expert_weights_scale, false, exc)) |v| hp.expert_weights_scale = v;
     if (try meta.getKey(bool, .expert_weights_norm, false, exc)) |v| hp.expert_weights_norm = v;
@@ -46,7 +46,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         // Weightless fixtures (test-llama-archs) omit the key; a nonzero
         // size keeps the shared expert built. Real GGUFs carry the exact
         // value.
-        hp.n_ff_shexp = hp.n_ff_exp * hp.n_expert_shared;
+        hp.n_ff_shexp = hp.nFfExp(0) * hp.n_expert_shared;
     }
 
     // Sliding-window attention is optional. XS.2 is hybrid (full, then
@@ -85,7 +85,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_laguna`'s `load_arch_tensors` (models/laguna.cpp:67 @c1d0e7a00).
+/// Ports `llama_model_laguna`'s `load_arch_tensors` (models/laguna.cpp:67 @5266f24da).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -100,7 +100,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
     }
 
-    const n_ff_exp: i64 = hp.n_ff_exp;
+    const n_ff_exp: i64 = hp.nFfExp(0);
     const n_ff_shexp: i64 = hp.n_ff_shexp;
 
     var i: i32 = 0;
@@ -169,7 +169,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_laguna`'s `build_arch_graph` (models/laguna.cpp:150 @c1d0e7a00).
+/// Ports `llama_model_laguna`'s `build_arch_graph` (models/laguna.cpp:150 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     // XS.2 is hybrid SWA and takes the interleaved-SWA KV input; M.1 is
     // all full attention and takes the plain one. The C++ picks the input,
@@ -179,7 +179,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_laguna`'s `graph`
-/// (models/laguna.cpp:154 @c1d0e7a00).
+/// (models/laguna.cpp:154 @5266f24da).
 fn buildGraph(comptime has_swa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

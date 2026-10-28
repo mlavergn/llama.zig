@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/exaone4.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/exaone4.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_exaone4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>`.
 
@@ -22,13 +22,10 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_exaone4`'s `load_arch_hparams` (models/exaone4.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_exaone4`'s `load_arch_hparams` (models/exaone4.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
-
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-    impl.assert(hp.n_layer_nextn < hp.n_layer_all, "models/exaone4.cpp", 5, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < n_layer\"");
 
     if (hp.nLayer() == 64) { // 32B
         hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
@@ -52,7 +49,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_exaone4`'s `load_arch_tensors` (models/exaone4.cpp:29 @c1d0e7a00).
+/// Ports `llama_model_exaone4`'s `load_arch_tensors` (models/exaone4.cpp:26 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -105,7 +102,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_exaone4`'s `build_arch_graph` (models/exaone4.cpp:78 @c1d0e7a00).
+/// Ports `llama_model_exaone4`'s `build_arch_graph` (models/exaone4.cpp:75 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (b.hparams.swa_type == @backingInt(hparams_mod.SwaType.standard)) {
         buildGraph(true, model, b);
@@ -115,14 +112,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_exaone4`'s `graph<iswa>`
-/// (models/exaone4.cpp:87 @c1d0e7a00).
+/// (models/exaone4.cpp:84 @5266f24da).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/exaone4.cpp", 91, "n_embd_head == hparams.n_embd_head_v()");
-    impl.assert(n_embd_head == b.n_rot, "models/exaone4.cpp", 92, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/exaone4.cpp", 88, "n_embd_head == hparams.n_embd_head_v()");
+    impl.assert(n_embd_head == b.n_rot, "models/exaone4.cpp", 89, "n_embd_head == n_rot");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 

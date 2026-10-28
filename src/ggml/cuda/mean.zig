@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/mean.cu` at v0.3.0
-//! (`c1d0e7a00`). The kernel, `reduce_rows_f32<true>` from
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/mean.cu` at v0.4.0
+//! (`5266f24da`). The kernel, `reduce_rows_f32<true>` from
 //! `reduce_rows.cuh`, stays CUDA.
 //!
 //! A single long row (`nrows == 1` and more than 65536 columns, or more than
@@ -25,7 +25,7 @@ const sum = @import("sum.zig");
 const kernel = kernels.get("mean", "reduce_rows_f32<(bool)1>");
 const divide_by_count = kernels.get("mean", "divide_by_count<float>");
 
-/// Ports `ggml_cuda_op_mean` (mean.cu:13 @c1d0e7a00), the
+/// Ports `ggml_cuda_op_mean` (mean.cu:13 @5266f24da), the
 /// `GGML_CUDA_USE_CUB` and `USE_CUDA_GRAPH` arms.
 pub fn opMean(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);

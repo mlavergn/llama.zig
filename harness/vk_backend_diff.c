@@ -302,11 +302,20 @@ static void ask_offload(ggml_backend_dev_t dev, struct ggml_context * ctx) {
  * as original indices. No allocation: the reorder reads ops, sources and
  * view sources, never data. */
 
+/* The scheduler's allocation-dependency callback (ggml-backend.cpp, since
+ * v0.4.0). Vulkan ignores it on both sides; printing each call makes a side
+ * that starts using it differ from one that does not. */
+static void record_alloc_dep(void * user_data, struct ggml_tensor * tensor, struct ggml_tensor * until) {
+    (void) user_data;
+    printf("add_alloc_dep %s until %s\n", tensor->name, until->name);
+}
+
 static void print_order(size_t i, const char * name, struct ggml_cgraph * g, ggml_backend_t be) {
     const int n = ggml_graph_n_nodes(g);
     struct ggml_tensor ** orig = (struct ggml_tensor **) malloc(sizeof(*orig) * (size_t) n);
     for (int k = 0; k < n; k++) orig[k] = ggml_graph_node(g, k);
-    be->iface.graph_optimize(be, g);
+    struct ggml_backend_graph_optimize_params params = { record_alloc_dep, NULL };
+    be->iface.graph_optimize(be, g, &params);
     printf("dev %zu graph_optimize %s (%d nodes):", i, name, n);
     for (int k = 0; k < n; k++) {
         int at = -1;

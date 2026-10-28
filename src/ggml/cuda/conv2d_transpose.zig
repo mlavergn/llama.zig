@@ -4,8 +4,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/conv2d-transpose.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/conv2d-transpose.cuh` at v0.3.0
-//! (`c1d0e7a00`). The kernel, `conv2d_transpose_kernel`, stays CUDA.
+//! `llama.cpp/ggml/src/ggml-cuda/conv2d-transpose.cuh` at v0.4.0
+//! (`5266f24da`). The kernel, `conv2d_transpose_kernel`, stays CUDA.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -15,11 +15,11 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_CONV2D_TRANSPOSE_BLOCK_SIZE` (conv2d-transpose.cuh:3 @c1d0e7a00).
+/// Ports `CUDA_CONV2D_TRANSPOSE_BLOCK_SIZE` (conv2d-transpose.cuh:3 @5266f24da).
 const block_size = 256;
 
 /// Ports `ggml_cuda_conv_2d_transpose_p0` (conv2d-transpose.cu:71
-/// @c1d0e7a00). Input is (W, H, C_in, N), kernel is (W, H, C_out, C_in).
+/// @5266f24da). Input is (W, H, C_in, N), kernel is (W, H, C_out, C_in).
 pub fn conv2dTransposeP0(ctx: *common.Context, dst: *Tensor) void {
     const kernel = impl.one(Tensor, dst.src[0]);
     const input = impl.one(Tensor, dst.src[1]);

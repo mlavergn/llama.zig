@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.3.0,
-//! `c1d0e7a00`). Each function names the C it replaces and the line it
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.4.0,
+//! `5266f24da`). Each function names the C it replaces and the line it
 //! began at.
 
 const std = @import("std");
@@ -16,7 +16,7 @@ const common = @import("common.zig");
 const c = impl.c;
 
 /// The shared body of `quantize_row_q8_0` and `quantize_row_q8_1`
-/// (arch/x86/quants.c:302, 400 @c1d0e7a00), parameterised on the block
+/// (arch/x86/quants.c:302, 400 @5266f24da), parameterised on the block
 /// type: the second also stores the sum.
 ///
 /// The amax is reduced with `maxps`, whose answer on equal or NaN lanes is
@@ -98,13 +98,13 @@ inline fn quantizeQ8(comptime Block: type, x_in: [*c]const f32, vy: ?*anyopaque,
     }
 }
 
-/// Ports `quantize_row_q8_0` (arch/x86/quants.c:302 @c1d0e7a00), the
+/// Ports `quantize_row_q8_0` (arch/x86/quants.c:302 @5266f24da), the
 /// `__AVX2__ || __AVX__` arm with its `__AVX2__` pack.
 pub export fn quantize_row_q8_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
     quantizeQ8(blocks.Q8_0, x, vy, k);
 }
 
-/// Ports `quantize_row_q8_1` (arch/x86/quants.c:400 @c1d0e7a00), the
+/// Ports `quantize_row_q8_1` (arch/x86/quants.c:400 @5266f24da), the
 /// `__AVX2__ || __AVX__` arm with its `__AVX2__` pack and sum.
 pub export fn quantize_row_q8_1(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
     quantizeQ8(blocks.Q8_1, x, vy, k);
@@ -114,7 +114,7 @@ const ref = struct {
     extern fn quantize_row_q8_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
 };
 
-/// Ports `quantize_row_q8_K` (arch/x86/quants.c:505 @c1d0e7a00): on x86 it
+/// Ports `quantize_row_q8_K` (arch/x86/quants.c:505 @5266f24da): on x86 it
 /// has no vector arm, and calls `ggml-quants.c`'s reference quantizer as it
 /// stands.
 pub export fn quantize_row_q8_K(x: [*c]const f32, y: ?*anyopaque, k: i64) void {

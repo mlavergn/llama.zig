@@ -29,7 +29,7 @@ import sys
 
 HDR = "llama.cpp/src/llama-arch.h"
 SRC = "llama.cpp/src/llama-arch.cpp"
-COMMIT = "c1d0e7a00"
+from upstream_pin import COMMIT, TAG
 OUT = "src/llama/arch_table.zig"
 
 ZIG_KEYWORDS = {
@@ -142,7 +142,7 @@ def main():
     w("//! - `llama.cpp/src/llama-arch.h` -- the four enums")
     w("//! - `llama.cpp/src/llama-arch.cpp` -- the four `std::map` initializers")
     w("//!")
-    w("//! Both at v0.3.0 (`%s`). **Do not edit**: regenerate after moving the" % COMMIT)
+    w("//! Both at %s (`%s`). **Do not edit**: regenerate after moving the" % (TAG, COMMIT))
     w("//! pin, and `make arch-diff` compares every lookup against the C++.")
     w("//!")
     w("//! Each table is indexed by its enum's ordinal, which is the `std::map`'s")

@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.3.0
-//! (`c1d0e7a00`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
+//! (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -25,17 +25,17 @@ fn f32Param(t: *const Tensor, i: usize) f32 {
     return @bitCast(t.op_params[i]);
 }
 
-/// Ports `ggml_vk_get_rows` (ggml-vulkan.cpp:12390 @c1d0e7a00).
+/// Ports `ggml_vk_get_rows` (ggml-vulkan.cpp:12543 @5266f24da).
 pub fn getRows(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_GET_ROWS, ops.binaryPc(u32Of(c.ggml_nelements(src0)), src0, src1, dst, 0, 0, 0));
 }
 
-/// Ports `ggml_vk_get_rows_back` (ggml-vulkan.cpp:12405 @c1d0e7a00).
+/// Ports `ggml_vk_get_rows_back` (ggml-vulkan.cpp:12558 @5266f24da).
 pub fn getRowsBack(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_GET_ROWS_BACK, ops.binaryPc(u32Of(c.ggml_nelements(src0)), src0, src1, dst, 0, 0, 0));
 }
 
-/// Ports `ggml_vk_acc` (ggml-vulkan.cpp:12420 @c1d0e7a00): ACC and SET, with
+/// Ports `ggml_vk_acc` (ggml-vulkan.cpp:12573 @5266f24da): ACC and SET, with
 /// the destination view's strides and offset from the op's parameters.
 pub fn acc(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const ts0 = typeSize(src0);
@@ -56,7 +56,7 @@ pub fn acc(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, dst.op, pc);
 }
 
-/// Ports `ggml_vk_multi_add` (ggml-vulkan.cpp:12440 @c1d0e7a00): a run of
+/// Ports `ggml_vk_multi_add` (ggml-vulkan.cpp:12593 @5266f24da): a run of
 /// ADDs as one dispatch over every operand, each bound separately.
 pub fn multiAdd(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_idx: c_int) void {
     const nodeAt = struct {
@@ -134,23 +134,23 @@ pub fn multiAdd(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_
     m.context.dispatch(ctx, subctx, pipeline, &subs, &pc, ops.split512(u32Of(c.ggml_nelements(dst))));
 }
 
-/// Ports `ggml_vk_add` (ggml-vulkan.cpp:12547 @c1d0e7a00).
+/// Ports `ggml_vk_add` (ggml-vulkan.cpp:12700 @5266f24da).
 pub fn add(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_ADD, ops.binaryPc(u32Of(c.ggml_nelements(src0)), src0, src1, dst, 0, 0, @intFromBool(ctx.do_add_rms_partials)));
 }
 
-/// Ports `ggml_vk_out_prod` (ggml-vulkan.cpp:12562 @c1d0e7a00).
+/// Ports `ggml_vk_out_prod` (ggml-vulkan.cpp:12715 @5266f24da).
 pub fn outProd(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_OUT_PROD, ops.binaryPc(u32Of(c.ggml_nelements(dst)), src0, src1, dst, 0, 0, 0));
 }
 
 /// Ports `ggml_vk_sub`, `ggml_vk_mul`, `ggml_vk_div` and `ggml_vk_add1`
-/// (ggml-vulkan.cpp:12580, 12595, 12610, 13025 @c1d0e7a00).
+/// (ggml-vulkan.cpp:12733, 12748, 12763, 13227 @5266f24da).
 pub fn binary(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor, op: c.enum_ggml_op) void {
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, op, ops.binaryPc(u32Of(c.ggml_nelements(src0)), src0, src1, dst, 0, 0, 0));
 }
 
-/// Ports `ggml_vk_add_id` (ggml-vulkan.cpp:12625 @c1d0e7a00).
+/// Ports `ggml_vk_add_id` (ggml-vulkan.cpp:12778 @5266f24da).
 pub fn addId(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, src2: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, src1, src2, null, dst, c.GGML_OP_ADD_ID, push.AddId{
         .ne0 = u32Of(dst.ne[0]),
@@ -162,7 +162,7 @@ pub fn addId(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *con
     });
 }
 
-/// Ports `ggml_vk_concat` (ggml-vulkan.cpp:12955 @c1d0e7a00): dimension 0
+/// Ports `ggml_vk_concat` (ggml-vulkan.cpp:13157 @5266f24da): dimension 0
 /// addressed in copy units, so a quantized row moves whole blocks.
 pub fn concat(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const unit_size = m.op_pipeline.concatUnitSize(dst.type);
@@ -212,7 +212,7 @@ pub fn concat(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *co
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_CONCAT, pc);
 }
 
-/// Ports `ggml_vk_upscale` (ggml-vulkan.cpp:12982 @c1d0e7a00).
+/// Ports `ggml_vk_upscale` (ggml-vulkan.cpp:13184 @5266f24da).
 pub fn upscale(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     const ts0 = typeSize(src0);
     const mode: u32 = @bitCast(dst.op_params[0]);
@@ -258,13 +258,13 @@ pub fn upscale(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Te
 /// The unary-push-constant ops with no parameters, SQR, SQRT, SIN, COS,
 /// LOG and every plain UNARY: ports `ggml_vk_sqr`, `ggml_vk_sqrt`, `ggml_vk_sin`,
 /// `ggml_vk_cos`, `ggml_vk_log` and `ggml_vk_unary`
-/// (ggml-vulkan.cpp:13017, 13021, 13084, 13088, 13092, 13412 @c1d0e7a00).
+/// (ggml-vulkan.cpp:13219, 13223, 13286, 13290, 13294, 13614 @5266f24da).
 pub fn unaryPlain(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor, op: c.enum_ggml_op) void {
     ops.opF32(ctx, subctx, src0, null, null, null, dst, op, ops.unaryPushConstantsInit(src0, dst, 0));
 }
 
-/// Ports `ggml_vk_scale` (ggml-vulkan.cpp:13009 @c1d0e7a00) and
-/// `ggml_vk_clamp` (ggml-vulkan.cpp:13109 @c1d0e7a00): two float params.
+/// Ports `ggml_vk_scale` (ggml-vulkan.cpp:13211 @5266f24da) and
+/// `ggml_vk_clamp` (ggml-vulkan.cpp:13311 @5266f24da): two float params.
 pub fn unary2(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor, op: c.enum_ggml_op) void {
     var p = ops.unaryPushConstantsInit(src0, dst, 0);
     p.param1 = f32Param(dst, 0);
@@ -272,8 +272,8 @@ pub fn unary2(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Ten
     ops.opF32(ctx, subctx, src0, null, null, null, dst, op, p);
 }
 
-/// Ports `ggml_vk_arange` (ggml-vulkan.cpp:13040 @c1d0e7a00) and
-/// `ggml_vk_fill` (ggml-vulkan.cpp:13062 @c1d0e7a00): a destination-only
+/// Ports `ggml_vk_arange` (ggml-vulkan.cpp:13242 @5266f24da) and
+/// `ggml_vk_fill` (ggml-vulkan.cpp:13264 @5266f24da): a destination-only
 /// dispatch.
 pub fn fillLike(ctx: *BackendCtx, subctx: *Context, dst: *Tensor, op: c.enum_ggml_op) void {
     const pc: push.Op = .{
@@ -290,7 +290,7 @@ pub fn fillLike(ctx: *BackendCtx, subctx: *Context, dst: *Tensor, op: c.enum_ggm
     m.context.dispatch(ctx, subctx, pipeline, &.{dst_buf}, &pc, .{ u32Of(c.ggml_nelements(dst)), 1, 1 });
 }
 
-/// Ports `ggml_vk_tri` (ggml-vulkan.cpp:13096 @c1d0e7a00).
+/// Ports `ggml_vk_tri` (ggml-vulkan.cpp:13298 @5266f24da).
 pub fn tri(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     var p = ops.unaryPushConstantsInit(src0, dst, 0);
     p.param1 = f32Param(dst, 0);
@@ -298,18 +298,18 @@ pub fn tri(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor
 }
 
 /// Ports `ggml_vk_diag`, `ggml_vk_repeat` and `ggml_vk_repeat_back`
-/// (ggml-vulkan.cpp:13103, 13148, 13153 @c1d0e7a00): the destination's
+/// (ggml-vulkan.cpp:13305, 13350, 13355 @5266f24da): the destination's
 /// element count.
 pub fn unaryDstCount(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor, op: c.enum_ggml_op) void {
     ops.opF32(ctx, subctx, src0, null, null, null, dst, op, ops.unaryPushConstantsInit(src0, dst, c.ggml_nelements(dst)));
 }
 
-/// Ports `ggml_vk_pad` (ggml-vulkan.cpp:13117 @c1d0e7a00).
+/// Ports `ggml_vk_pad` (ggml-vulkan.cpp:13319 @5266f24da).
 pub fn pad(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_PAD, ops.padPushConstantsInit(src0, dst));
 }
 
-/// Ports `ggml_vk_pad_reflect_1d` (ggml-vulkan.cpp:13122 @c1d0e7a00): the
+/// Ports `ggml_vk_pad_reflect_1d` (ggml-vulkan.cpp:13324 @5266f24da): the
 /// pads travel as float bits.
 pub fn padReflect1d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     var p = ops.unaryPushConstantsInit(src0, dst, c.ggml_nelements(dst));
@@ -318,7 +318,7 @@ pub fn padReflect1d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst
     ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_PAD_REFLECT_1D, p);
 }
 
-/// Ports `ggml_vk_roll` (ggml-vulkan.cpp:13133 @c1d0e7a00): the four shifts
+/// Ports `ggml_vk_roll` (ggml-vulkan.cpp:13335 @5266f24da): the four shifts
 /// biased by 0x8000 and packed in pairs as float bits.
 pub fn roll(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     const s = dst.op_params;
@@ -330,7 +330,7 @@ pub fn roll(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tenso
     ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_ROLL, p);
 }
 
-/// Ports `ggml_vk_cpy` (ggml-vulkan.cpp:13158 @c1d0e7a00): a quantized-to-
+/// Ports `ggml_vk_cpy` (ggml-vulkan.cpp:13360 @5266f24da): a quantized-to-
 /// quantized copy counts in 2- or 4-byte units.
 pub fn cpy(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     var ne = u32Of(c.ggml_nelements(src0));
@@ -342,27 +342,27 @@ pub fn cpy(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor
     ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_CPY, ops.unaryPushConstantsInit(src0, dst, ne));
 }
 
-/// Ports `ggml_vk_set_rows` (ggml-vulkan.cpp:13174 @c1d0e7a00).
+/// Ports `ggml_vk_set_rows` (ggml-vulkan.cpp:13376 @5266f24da).
 pub fn setRows(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     // set_rows can have a nonempty dst with empty srcs.
     if (c.ggml_is_empty(src0) or c.ggml_is_empty(src1)) return;
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_SET_ROWS, ops.binaryPc(u32Of(c.ggml_nelements(src0)), src0, src1, dst, 0, 0, 0));
 }
 
-/// Ports `ggml_vk_silu_back` (ggml-vulkan.cpp:13196 @c1d0e7a00).
+/// Ports `ggml_vk_silu_back` (ggml-vulkan.cpp:13398 @5266f24da).
 pub fn siluBack(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_SILU_BACK, push.Op{ .KX = u32Of(c.ggml_nelements(src0)), .KY = 0, .param1 = 0, .param2 = 0, .param3 = 0, .param4 = 0 });
 }
 
-/// Ports `ggml_vk_norm` (ggml-vulkan.cpp:13200 @c1d0e7a00) and
-/// `ggml_vk_l2_norm` (ggml-vulkan.cpp:13405 @c1d0e7a00): epsilon in param1.
+/// Ports `ggml_vk_norm` (ggml-vulkan.cpp:13402 @5266f24da) and
+/// `ggml_vk_l2_norm` (ggml-vulkan.cpp:13607 @5266f24da): epsilon in param1.
 pub fn normEps(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor, op: c.enum_ggml_op) void {
     var p = ops.unaryPushConstantsInit(src0, dst, 0);
     p.param1 = f32Param(dst, 0);
     ops.opF32(ctx, subctx, src0, null, null, null, dst, op, p);
 }
 
-/// Ports `ggml_vk_group_norm` (ggml-vulkan.cpp:13208 @c1d0e7a00).
+/// Ports `ggml_vk_group_norm` (ggml-vulkan.cpp:13410 @5266f24da).
 pub fn groupNorm(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     const num_groups: u32 = @bitCast(dst.op_params[0]);
     const eps = f32Param(dst, 1);
@@ -372,12 +372,12 @@ pub fn groupNorm(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *
     ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_GROUP_NORM, push.Op{ .KX = group_size, .KY = 0, .param1 = eps, .param2 = 0, .param3 = 0, .param4 = 0 });
 }
 
-/// Ports `ggml_vk_rms_norm_back` (ggml-vulkan.cpp:13400 @c1d0e7a00).
+/// Ports `ggml_vk_rms_norm_back` (ggml-vulkan.cpp:13602 @5266f24da).
 pub fn rmsNormBack(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_RMS_NORM_BACK, push.Op{ .KX = u32Of(src0.ne[0]), .KY = u32Of(src0.ne[1]), .param1 = f32Param(dst, 0), .param2 = 0, .param3 = 0, .param4 = 0 });
 }
 
-/// Ports `ggml_vk_xielu` (ggml-vulkan.cpp:13416 @c1d0e7a00).
+/// Ports `ggml_vk_xielu` (ggml-vulkan.cpp:13618 @5266f24da).
 pub fn xielu(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     var p = ops.unaryPushConstantsInit(src0, dst, 0);
     p.param1 = f32Param(dst, 1);
@@ -387,7 +387,7 @@ pub fn xielu(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tens
     ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_UNARY, p);
 }
 
-/// Ports `ggml_vk_glu` (ggml-vulkan.cpp:13426 @c1d0e7a00): single (halves of
+/// Ports `ggml_vk_glu` (ggml-vulkan.cpp:13628 @5266f24da): single (halves of
 /// one row, possibly swapped) or split (two tensors).
 pub fn glu(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: ?*const Tensor, dst: *Tensor) void {
     const swapped = dst.op_params[1] != 0;
@@ -433,12 +433,12 @@ pub fn glu(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: ?*cons
     });
 }
 
-/// Ports `ggml_vk_diag_mask_inf` (ggml-vulkan.cpp:13474 @c1d0e7a00).
+/// Ports `ggml_vk_diag_mask_inf` (ggml-vulkan.cpp:13676 @5266f24da).
 pub fn diagMaskInf(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_DIAG_MASK_INF, push.DiagMask{ .ncols = u32Of(src0.ne[0]), .rows_per_channel = u32Of(src0.ne[1]), .n_past = dst.op_params[0] });
 }
 
-/// Ports `ggml_vk_snake_dispatch_fused` (ggml-vulkan.cpp:14145 @c1d0e7a00):
+/// Ports `ggml_vk_snake_dispatch_fused` (ggml-vulkan.cpp:14518 @5266f24da):
 /// the five-node snake chain, y = x + sin(a*x)^2 * inv_b, as one dispatch.
 pub fn snakeFused(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_idx: c_int) void {
     const at = struct {

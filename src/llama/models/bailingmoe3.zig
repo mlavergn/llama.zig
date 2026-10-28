@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/bailingmoe3.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_bailingmoe3`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/bailingmoe3.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_bailingmoe3`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`,
 //! `bailingmoe3_causal_conv1d`, and its `graph` and `graph_mtp`.
 
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_bailingmoe3`'s `load_arch_hparams` (models/bailingmoe3.cpp:6 @c1d0e7a00).
+/// Ports `llama_model_bailingmoe3`'s `load_arch_hparams` (models/bailingmoe3.cpp:6 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -42,23 +42,22 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         hp.kda_safe_gate = true;
     }
     hp.kda_gate_lower_bound = (try meta.getKey(f32, .kda_gate_lower_bound, true, exc)).?;
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
     hp.n_expert_shared = (try meta.getKey(u32, .expert_shared_count, true, exc)).?;
     hp.n_layer_dense_lead = (try meta.getKey(u32, .leading_dense_block_count, true, exc)).?;
     if (try meta.getKey(f32, .expert_weights_scale, false, exc)) |v| hp.expert_weights_scale = v;
     if (try meta.getKey(bool, .expert_weights_norm, false, exc)) |v| hp.expert_weights_norm = v;
     hp.expert_gating_func = (try meta.getKey(u32, .expert_gating_func, true, exc)).?;
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
     _ = try meta.getKeyOrArr(f32, .swiglu_clamp_exp, &hp.swiglu_clamp_exp, hp.n_layer_all, false, exc);
     _ = try meta.getKeyOrArr(f32, .swiglu_clamp_shexp, &hp.swiglu_clamp_shexp, hp.n_layer_all, false, exc);
 
     if (hp.n_ff_shexp == 0) {
-        hp.n_ff_shexp = hp.n_ff_exp *% @max(1, hp.n_expert_shared);
+        hp.n_ff_shexp = hp.nFfExp(0) *% @max(1, hp.n_expert_shared);
     }
 
-    impl.assert(hp.kda_safe_gate, "models/bailingmoe3.cpp", 33, "hparams.kda_safe_gate");
-    impl.assert(hp.kda_gate_lower_bound < 0.0, "models/bailingmoe3.cpp", 34, "hparams.kda_gate_lower_bound < 0.0f");
+    impl.assert(hp.kda_safe_gate, "models/bailingmoe3.cpp", 32, "hparams.kda_safe_gate");
+    impl.assert(hp.kda_gate_lower_bound < 0.0, "models/bailingmoe3.cpp", 33, "hparams.kda_gate_lower_bound < 0.0f");
 
     var il: u32 = 0;
     while (il < hp.nLayer()) : (il += 1) {
@@ -72,7 +71,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_bailingmoe3`'s `load_arch_tensors` (models/bailingmoe3.cpp:47 @c1d0e7a00).
+/// Ports `llama_model_bailingmoe3`'s `load_arch_tensors` (models/bailingmoe3.cpp:46 @5266f24da).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -97,7 +96,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     const qk_rope_head_dim: i64 = hp.nRot(0);
     const qk_head_dim: i64 = hp.nEmbdHeadKMla();
     const v_head_dim: i64 = hp.nEmbdHeadVMla();
-    const n_ff_exp: i64 = hp.n_ff_exp;
+    const n_ff_exp: i64 = hp.nFfExp(0);
     const n_ff_shexp: i64 = hp.n_ff_shexp;
 
     const mtp_only = hp.n_layer_nextn > 0 and ml.getWeight("blk.0.attn_norm.weight") == null;
@@ -123,7 +122,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
             try self.createTensorQkv(layer, il, n_embd, d_inner, d_inner, d_inner, trunk_flags, exc);
             layer.ssm_f_a = try self.createTensor(.{ .tensor = .ssm_f_a, .suffix = "weight", .bid = il }, &.{ n_embd, d_inner }, trunk_flags, exc);
             layer.ssm_beta = try self.createTensor(.{ .tensor = .ssm_beta, .suffix = "weight", .bid = il }, &.{ n_embd, n_head }, trunk_flags, exc);
-            layer.ssm_a = try self.createTensor(.{ .tensor = .ssm_a, .bid = il }, &.{ 1, n_head }, trunk_flags, exc);
+            layer.ssm_a = try self.createTensor(.{ .tensor = .ssm_a_noscan, .bid = il }, &.{ 1, n_head }, trunk_flags, exc);
             layer.ssm_dt_b = try self.createTensor(.{ .tensor = .ssm_dt, .suffix = "bias", .bid = il }, &.{d_inner}, trunk_flags, exc);
             layer.ssm_g_a = try self.createTensor(.{ .tensor = .ssm_g_a, .suffix = "weight", .bid = il }, &.{ n_embd, d_inner }, trunk_flags, exc);
             layer.ssm_o_norm = try self.createTensor(.{ .tensor = .ssm_norm, .suffix = "weight", .bid = il }, &.{head_dim}, trunk_flags, exc);
@@ -158,8 +157,8 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// The MLA tensors, which `load_arch_tensors` (models/bailingmoe3.cpp:47
-/// @c1d0e7a00) loads alike for the trunk's attention layers and the MTP
+/// The MLA tensors, which `load_arch_tensors` (models/bailingmoe3.cpp:46
+/// @5266f24da) loads alike for the trunk's attention layers and the MTP
 /// block.
 fn loadMla(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i64, n_head: i64, q_lora_rank: i64, kv_lora_rank: i64, qk_rope_head_dim: i64, qk_head_dim: i64, v_head_dim: i64, exc: *Exception) Thrown!void {
     if (q_lora_rank > 0) {
@@ -178,7 +177,7 @@ fn loadMla(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i
 }
 
 /// The MoE tensors, routed and shared, which `load_arch_tensors`
-/// (models/bailingmoe3.cpp:47 @c1d0e7a00) loads alike for the trunk's MoE
+/// (models/bailingmoe3.cpp:46 @5266f24da) loads alike for the trunk's MoE
 /// layers and the MTP block.
 fn loadMoe(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i64, n_expert: i64, n_ff_exp: i64, n_ff_shexp: i64, exc: *Exception) Thrown!void {
     layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = il }, &.{ n_embd, n_expert }, flags, exc);
@@ -194,16 +193,16 @@ fn loadMoe(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_bailingmoe3`'s `build_arch_graph` (models/bailingmoe3.cpp:162
-/// @c1d0e7a00): the MTP draft head for that graph type, the main model
+/// Ports `llama_model_bailingmoe3`'s `build_arch_graph` (models/bailingmoe3.cpp:161
+/// @5266f24da): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
     return buildGraph(model, b);
 }
 
-/// Ports `bailingmoe3_causal_conv1d` (models/bailingmoe3.cpp:169
-/// @c1d0e7a00): the short convolution of one of Q (`qkv` 0), K (1) or V
+/// Ports `bailingmoe3_causal_conv1d` (models/bailingmoe3.cpp:168
+/// @5266f24da): the short convolution of one of Q (`qkv` 0), K (1) or V
 /// (2), its projection in front, its slice of the conv state in front of
 /// the input, and the last `d_conv - 1` columns written back -- one
 /// snapshot per rollback slot when `n_rs_seq` keeps any.
@@ -261,8 +260,8 @@ const MlaDims = struct {
 };
 
 /// The gated MLA attention of a trunk attention layer in `graph`
-/// (models/bailingmoe3.cpp:219 @c1d0e7a00) and of the MTP block in
-/// `graph_mtp` (models/bailingmoe3.cpp:413 @c1d0e7a00), the same lines:
+/// (models/bailingmoe3.cpp:218 @5266f24da) and of the MTP block in
+/// `graph_mtp` (models/bailingmoe3.cpp:412 @5266f24da), the same lines:
 /// Q through the optional low-rank pair, the latent and its RoPE key, Q
 /// absorbing `wk_b`, MQA over the K-only cache with `wv_b` decompressing
 /// its output, then the per-head sigmoid gate and the output projection.
@@ -313,8 +312,8 @@ fn buildMlaAttn(b: *const graph.Builder, layer: *const model_mod.Layer, inp_attn
 }
 
 /// The routed experts plus the shared experts, of the trunk's MoE layers in
-/// `graph` (models/bailingmoe3.cpp:219 @c1d0e7a00) and of the MTP block in
-/// `graph_mtp` (models/bailingmoe3.cpp:413 @c1d0e7a00).
+/// `graph` (models/bailingmoe3.cpp:218 @5266f24da) and of the MTP block in
+/// `graph_mtp` (models/bailingmoe3.cpp:412 @5266f24da).
 fn buildMoe(b: *const graph.Builder, layer: *const model_mod.Layer, cur: *Tensor, il: c_int) *Tensor {
     const hp = b.hparams;
     const moe = b.buildMoeFfn(cur, .{
@@ -334,7 +333,7 @@ fn buildMoe(b: *const graph.Builder, layer: *const model_mod.Layer, cur: *Tensor
     return c.ggml_add(b.ctx0, moe, shared);
 }
 
-/// Ports the constructor of `llama_model_bailingmoe3`'s `graph` (models/bailingmoe3.cpp:219 @c1d0e7a00).
+/// Ports the constructor of `llama_model_bailingmoe3`'s `graph` (models/bailingmoe3.cpp:218 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -358,9 +357,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
     const n_tokens = b.n_tokens;
 
-    impl.assert(n_seqs > 0, "models/bailingmoe3.cpp", 244, "n_seqs > 0");
-    impl.assert(b.ubatch.equalSeqs(), "models/bailingmoe3.cpp", 245, "ubatch.equal_seqs()");
-    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/bailingmoe3.cpp", 246, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(n_seqs > 0, "models/bailingmoe3.cpp", 243, "n_seqs > 0");
+    impl.assert(b.ubatch.equalSeqs(), "models/bailingmoe3.cpp", 244, "ubatch.equal_seqs()");
+    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/bailingmoe3.cpp", 245, "ubatch.n_tokens == n_seq_tokens * n_seqs");
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
@@ -450,24 +449,24 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_bailingmoe3`'s `graph_mtp`
-/// (models/bailingmoe3.cpp:413 @c1d0e7a00): the NextN draft head.
+/// (models/bailingmoe3.cpp:412 @5266f24da): the NextN draft head.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn == 1, "models/bailingmoe3.cpp", 415, "hparams.n_layer_nextn == 1 && \"BailingMoE3 MTP requires one NextN layer\"");
+    impl.assert(hp.n_layer_nextn == 1, "models/bailingmoe3.cpp", 414, "hparams.n_layer_nextn == 1 && \"BailingMoE3 MTP requires one NextN layer\"");
 
     const il: c_int = @as(c_int, @intCast(hp.nLayer())) + b.cparams.nextn_layer_offset;
-    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/bailingmoe3.cpp", 420, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range\"");
+    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/bailingmoe3.cpp", 419, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range\"");
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, "models/bailingmoe3.cpp", 423, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/bailingmoe3.cpp", 424, "layer.nextn.enorm && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/bailingmoe3.cpp", 425, "layer.nextn.hnorm && \"MTP block missing nextn.hnorm\"");
-    impl.assert(layer.nextn.shared_head_norm != null, "models/bailingmoe3.cpp", 426, "layer.nextn.shared_head_norm && \"MTP block missing final norm\"");
+    impl.assert(layer.nextn.eh_proj != null, "models/bailingmoe3.cpp", 422, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, "models/bailingmoe3.cpp", 423, "layer.nextn.enorm && \"MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, "models/bailingmoe3.cpp", 424, "layer.nextn.hnorm && \"MTP block missing nextn.hnorm\"");
+    impl.assert(layer.nextn.shared_head_norm != null, "models/bailingmoe3.cpp", 425, "layer.nextn.shared_head_norm && \"MTP block missing final norm\"");
 
     const d = MlaDims.of(hp);
 
-    const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/bailingmoe3.cpp", 436, "out of memory");
+    const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/bailingmoe3.cpp", 435, "out of memory");
     inp.* = .{ .n_embd = hp.n_embd };
     inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
     c.ggml_set_input(inp.tokens);

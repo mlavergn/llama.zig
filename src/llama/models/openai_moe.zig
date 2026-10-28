@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/openai-moe.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/openai-moe.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_openai_moe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -21,13 +21,13 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_openai_moe`'s `load_arch_hparams` (models/openai-moe.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_openai_moe`'s `load_arch_hparams` (models/openai-moe.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
 
     hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
@@ -46,10 +46,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_openai_moe`'s `load_arch_tensors` (models/openai-moe.cpp:24 @c1d0e7a00).
+/// Ports `llama_model_openai_moe`'s `load_arch_tensors` (models/openai-moe.cpp:24 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
-    const n_ff_exp: i64 = self.hparams.n_ff_exp;
+    const n_ff_exp: i64 = self.hparams.nFfExp(0);
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -83,13 +83,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_openai_moe`'s `build_arch_graph` (models/openai-moe.cpp:60 @c1d0e7a00).
+/// Ports `llama_model_openai_moe`'s `build_arch_graph` (models/openai-moe.cpp:60 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_openai_moe`'s `graph`
-/// (models/openai-moe.cpp:64 @c1d0e7a00).
+/// (models/openai-moe.cpp:64 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

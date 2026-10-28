@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/tri.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/tri.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/tri.cuh` at v0.4.0 (`5266f24da`). The
 //! kernel, `tri_kernel<T, prefix_keep, add_to_split>`, stays CUDA.
 
 const std = @import("std");
@@ -16,7 +16,7 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_TRI_BLOCK_SIZE` (tri.cuh:3 @c1d0e7a00).
+/// Ports `CUDA_TRI_BLOCK_SIZE` (tri.cuh:3 @5266f24da).
 const block_size = 256;
 
 fn triKernel(comptime T: type, comptime prefix_keep: bool, comptime add_to_split: comptime_int) kernels.Kernel {
@@ -33,7 +33,7 @@ fn div(x: i64, d: usize) i64 {
     return @bitCast(@as(u64, @bitCast(x)) / d);
 }
 
-/// Ports `tri_cuda` (tri.cu:44 @c1d0e7a00), which launches with `<<<>>>`.
+/// Ports `tri_cuda` (tri.cu:44 @5266f24da), which launches with `<<<>>>`.
 fn triCuda(
     comptime T: type,
     src: ?*const anyopaque,
@@ -86,7 +86,7 @@ fn triCuda(
     }
 }
 
-/// Ports `ggml_cuda_op_tri` (tri.cu:94 @c1d0e7a00).
+/// Ports `ggml_cuda_op_tri` (tri.cu:94 @5266f24da).
 pub fn opTri(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const stream = ctx.stream();

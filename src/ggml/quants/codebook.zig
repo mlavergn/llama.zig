@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.3.0, `c1d0e7a00`):
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.4.0, `5266f24da`):
 //! `iq2_data_index` (2833), `iq2_grid_size` (2841), `iq2_compare_func`,
 //! `iq2xs_init_impl` (2838), `iq2xs_free_impl`, and the `iq3` equivalents at
 //! 3679-3900. The tables they embed are in `grids.zig`, extracted separately.
@@ -44,20 +44,20 @@ const impl = @import("../impl.zig");
 const grids = @import("grids.zig");
 const c = impl.c;
 
-/// Ports `NGRID_IQ1S` (ggml-common.h:1131 @c1d0e7a00).
+/// Ports `NGRID_IQ1S` (ggml-common.h:1131 @5266f24da).
 const ngrid_iq1s = 2048;
 
-/// Ports `iq2_entry_t` (ggml-quants.c:2824 @c1d0e7a00).
+/// Ports `iq2_entry_t` (ggml-quants.c:2824 @5266f24da).
 const Iq2Entry = struct {
     grid: ?[*]u64 = null,
     map: ?[*]i32 = null,
     neighbours: ?[*]u16 = null,
 };
 
-/// Ports `iq2_data` (ggml-quants.c:2826 @c1d0e7a00). Four slots: xxs, xs, 1-bit, s.
+/// Ports `iq2_data` (ggml-quants.c:2826 @5266f24da). Four slots: xxs, xs, 1-bit, s.
 var iq2_data: [4]Iq2Entry = @splat(.{});
 
-/// Ports `iq2_data_index` (ggml-quants.c:2833 @c1d0e7a00).
+/// Ports `iq2_data_index` (ggml-quants.c:2833 @5266f24da).
 ///
 /// `iq1_s` and `iq1_m` share slot 2: they index the same 2048-entry codebook.
 fn iq2DataIndex(t: c.enum_ggml_type) usize {
@@ -70,7 +70,7 @@ fn iq2DataIndex(t: c.enum_ggml_type) usize {
     };
 }
 
-/// Ports `iq2_grid_size` (ggml-quants.c:2840 @c1d0e7a00).
+/// Ports `iq2_grid_size` (ggml-quants.c:2840 @5266f24da).
 fn iq2GridSize(t: c.enum_ggml_type) usize {
     return switch (t) {
         c.GGML_TYPE_IQ2_XXS => 256,
@@ -91,7 +91,7 @@ const Dist = struct {
     d2: i32,
     index: i32,
 
-    /// Ports `iq2_compare_func` (ggml-quants.c:2847 @c1d0e7a00).
+    /// Ports `iq2_compare_func` (ggml-quants.c:2847 @5266f24da).
     fn lessThan(_: void, a: Dist, b: Dist) bool {
         if (a.d2 != b.d2) return a.d2 < b.d2;
         return a.index < b.index;
@@ -110,7 +110,7 @@ inline fn unpackPositions(bits: u16, pos: *[8]i8) void {
     }
 }
 
-/// Ports `iq2xs_init_impl` (ggml-quants.c:2853 @c1d0e7a00).
+/// Ports `iq2xs_init_impl` (ggml-quants.c:2853 @5266f24da).
 ///
 /// Idempotent: returns immediately if this type's codebook is already built.
 pub export fn iq2xs_init_impl(t: c.enum_ggml_type) void {
@@ -269,7 +269,7 @@ fn fillNeighbours(pattern: usize, grid: [*]u64, grid_size: usize, dists: [*]Dist
     return n;
 }
 
-/// Ports `iq2xs_free_impl` (ggml-quants.c:3260 @c1d0e7a00).
+/// Ports `iq2xs_free_impl` (ggml-quants.c:3260 @5266f24da).
 pub export fn iq2xs_free_impl(t: c.enum_ggml_type) void {
     const gindex = iq2DataIndex(t);
     if (iq2_data[gindex].grid) |g| {
@@ -307,17 +307,17 @@ pub fn iq2Neighbours(t: c.enum_ggml_type) [*]const u16 {
 // entry width, and the resulting code would be harder to check against either
 // original than two straightforward copies are.
 
-/// Ports `iq3_entry_t` (ggml-quants.c:3684 @c1d0e7a00).
+/// Ports `iq3_entry_t` (ggml-quants.c:3684 @5266f24da).
 const Iq3Entry = struct {
     grid: ?[*]u32 = null,
     map: ?[*]i32 = null,
     neighbours: ?[*]u16 = null,
 };
 
-/// Ports `iq3_data` (ggml-quants.c:3686 @c1d0e7a00). Two slots: grid size 256 and 512.
+/// Ports `iq3_data` (ggml-quants.c:3686 @5266f24da). Two slots: grid size 256 and 512.
 var iq3_data: [2]Iq3Entry = @splat(.{});
 
-/// Ports `iq3_data_index` (ggml-quants.c:3691 @c1d0e7a00).
+/// Ports `iq3_data_index` (ggml-quants.c:3691 @5266f24da).
 fn iq3DataIndex(grid_size: c_int) usize {
     impl.assert(grid_size == 256 or grid_size == 512, "grid_size == 256 || grid_size == 512");
     return if (grid_size == 256) 0 else 1;
@@ -332,7 +332,7 @@ inline fn unpackPositions3(bits: u16, pos: *[4]i8) void {
     }
 }
 
-/// Ports `iq3xs_init_impl` (ggml-quants.c:3703 @c1d0e7a00).
+/// Ports `iq3xs_init_impl` (ggml-quants.c:3703 @5266f24da).
 pub export fn iq3xs_init_impl(grid_size_in: c_int) void {
     const gindex = iq3DataIndex(grid_size_in);
     if (iq3_data[gindex].grid != null) return;
@@ -454,7 +454,7 @@ fn walkNeighbours(dists: [*]Dist, grid_size: usize, nwant: i32, out: ?[*]u16, lo
     return n;
 }
 
-/// Ports `iq3xs_free_impl` (ggml-quants.c:3904 @c1d0e7a00).
+/// Ports `iq3xs_free_impl` (ggml-quants.c:3904 @5266f24da).
 pub export fn iq3xs_free_impl(grid_size: c_int) void {
     const gindex = iq3DataIndex(grid_size);
     if (iq3_data[gindex].grid) |g| {

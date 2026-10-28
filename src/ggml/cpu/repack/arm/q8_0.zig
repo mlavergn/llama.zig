@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.3.0
-//! (`c1d0e7a00`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.4.0
+//! (`5266f24da`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # The two shapes take different routes to the same sum
@@ -72,7 +72,7 @@ inline fn load4d(p: [*]const i8) [4]i8x8 {
     };
 }
 
-/// Ports `ggml_gemv_q8_0_4x4_q8_0` (arch/arm/repack.cpp:1699 @c1d0e7a00).
+/// Ports `ggml_gemv_q8_0_4x4_q8_0` (arch/arm/repack.cpp:1699 @5266f24da).
 pub export fn ggml_gemv_q8_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q8_0_4x4_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
@@ -108,7 +108,7 @@ pub export fn ggml_gemv_q8_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
     }
 }
 
-/// Ports `ggml_gemv_q8_0_4x8_q8_0` (arch/arm/repack.cpp:1757 @c1d0e7a00).
+/// Ports `ggml_gemv_q8_0_4x8_q8_0` (arch/arm/repack.cpp:1757 @5266f24da).
 pub export fn ggml_gemv_q8_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q8_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
@@ -161,7 +161,7 @@ pub export fn ggml_gemv_q8_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
     }
 }
 
-/// Ports `ggml_gemm_q8_0_4x4_q8_0` (arch/arm/repack.cpp:4938 @c1d0e7a00).
+/// Ports `ggml_gemm_q8_0_4x4_q8_0` (arch/arm/repack.cpp:4938 @5266f24da).
 ///
 /// Four row accumulators, each fed by `vdotq_laneq_s32` on a different
 /// 32-bit lane of the activation — so one pass over the weights serves all

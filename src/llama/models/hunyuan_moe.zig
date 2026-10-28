@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/hunyuan-moe.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_hunyuan_moe`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/hunyuan-moe.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_hunyuan_moe`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -20,13 +20,13 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_hunyuan_moe`'s `load_arch_hparams` (models/hunyuan-moe.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_hunyuan_moe`'s `load_arch_hparams` (models/hunyuan-moe.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
 
     self.type = switch (hp.nLayer()) {
@@ -35,7 +35,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_hunyuan_moe`'s `load_arch_tensors` (models/hunyuan-moe.cpp:14 @c1d0e7a00).
+/// Ports `llama_model_hunyuan_moe`'s `load_arch_tensors` (models/hunyuan-moe.cpp:14 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -78,13 +78,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_hunyuan_moe`'s `build_arch_graph` (models/hunyuan-moe.cpp:52 @c1d0e7a00).
+/// Ports `llama_model_hunyuan_moe`'s `build_arch_graph` (models/hunyuan-moe.cpp:52 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_hunyuan_moe`'s `graph`
-/// (models/hunyuan-moe.cpp:56 @c1d0e7a00).
+/// (models/hunyuan-moe.cpp:56 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

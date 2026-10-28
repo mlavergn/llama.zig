@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.4.0 (`5266f24da`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # `assert` versus `GGML_ASSERT`
@@ -43,7 +43,7 @@ const RowKind = enum { q, f16, bf16, f32 };
 
 /// Ports `ggml_compute_forward_get_rows_q`, `ggml_compute_forward_get_rows_f16`,
 /// `ggml_compute_forward_get_rows_bf16` and `ggml_compute_forward_get_rows_f32`
-/// (ops.cpp:4846, 4890, 4931, 4972 @c1d0e7a00).
+/// (ops.cpp:4979, 5023, 5064, 5105 @5266f24da).
 ///
 /// The four are the same loop with a different row conversion, so they are
 /// one function over a comptime kind. The `f32` variant also serves `I32`
@@ -100,7 +100,7 @@ fn getRows(comptime kind: RowKind, params: *const ComputeParams, dst: *Tensor) v
     }
 }
 
-/// Ports `ggml_compute_forward_get_rows` (ops.cpp:5013 @c1d0e7a00).
+/// Ports `ggml_compute_forward_get_rows` (ops.cpp:5146 @5266f24da).
 pub export fn ggml_compute_forward_get_rows(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -142,7 +142,7 @@ pub export fn ggml_compute_forward_get_rows(params: *const ComputeParams, dst: *
 // -----------------------------------------------------------------------------
 // set_rows
 
-/// Ports `ggml_compute_forward_set_rows_impl` (ops.cpp:5088 @c1d0e7a00).
+/// Ports `ggml_compute_forward_set_rows_impl` (ops.cpp:5221 @5266f24da).
 ///
 /// Parameters:
 /// - `SrcT`: `f32` or `ggml_fp16_t`, the source row type.
@@ -213,7 +213,7 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ComputeP
     }
 }
 
-/// Ports `ggml_compute_forward_set_rows` (ops.cpp:5158 @c1d0e7a00).
+/// Ports `ggml_compute_forward_set_rows` (ops.cpp:5291 @5266f24da).
 pub export fn ggml_compute_forward_set_rows(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -244,7 +244,7 @@ pub export fn ggml_compute_forward_set_rows(params: *const ComputeParams, dst: *
 // -----------------------------------------------------------------------------
 // get_rows_back
 
-/// Ports `ggml_compute_forward_get_rows_back_f32_f16` (ops.cpp:5195 @c1d0e7a00).
+/// Ports `ggml_compute_forward_get_rows_back_f32_f16` (ops.cpp:5328 @5266f24da).
 fn getRowsBackF32F16(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -279,7 +279,7 @@ fn getRowsBackF32F16(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_get_rows_back_f32` (ops.cpp:5228 @c1d0e7a00).
+/// Ports `ggml_compute_forward_get_rows_back_f32` (ops.cpp:5361 @5266f24da).
 fn getRowsBackF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -309,7 +309,7 @@ fn getRowsBackF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_get_rows_back` (ops.cpp:5261 @c1d0e7a00).
+/// Ports `ggml_compute_forward_get_rows_back` (ops.cpp:5394 @5266f24da).
 pub export fn ggml_compute_forward_get_rows_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -323,7 +323,7 @@ pub export fn ggml_compute_forward_get_rows_back(params: *const ComputeParams, d
 // -----------------------------------------------------------------------------
 // diag
 
-/// Ports `ggml_compute_forward_diag_f32` (ops.cpp:5303 @c1d0e7a00).
+/// Ports `ggml_compute_forward_diag_f32` (ops.cpp:5436 @5266f24da).
 fn diagF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -361,7 +361,7 @@ fn diagF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_diag` (ops.cpp:5343 @c1d0e7a00).
+/// Ports `ggml_compute_forward_diag` (ops.cpp:5476 @5266f24da).
 pub export fn ggml_compute_forward_diag(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -374,7 +374,7 @@ pub export fn ggml_compute_forward_diag(params: *const ComputeParams, dst: *Tens
 // -----------------------------------------------------------------------------
 // diag_mask
 
-/// Ports `ggml_compute_forward_diag_mask_f32` (ops.cpp:5363 @c1d0e7a00).
+/// Ports `ggml_compute_forward_diag_mask_f32` (ops.cpp:5496 @5266f24da).
 ///
 /// Parameters:
 /// - `value`: what the masked entries are set to — `-inf` or `0`.
@@ -425,7 +425,7 @@ fn diagMaskF32(params: *const ComputeParams, dst: *Tensor, value: f32) void {
     }
 }
 
-/// Ports `ggml_compute_forward_diag_mask_inf` (ops.cpp:5413 @c1d0e7a00).
+/// Ports `ggml_compute_forward_diag_mask_inf` (ops.cpp:5546 @5266f24da).
 pub export fn ggml_compute_forward_diag_mask_inf(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -435,7 +435,7 @@ pub export fn ggml_compute_forward_diag_mask_inf(params: *const ComputeParams, d
     }
 }
 
-/// Ports `ggml_compute_forward_diag_mask_zero` (ops.cpp:5431 @c1d0e7a00).
+/// Ports `ggml_compute_forward_diag_mask_zero` (ops.cpp:5564 @5266f24da).
 pub export fn ggml_compute_forward_diag_mask_zero(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

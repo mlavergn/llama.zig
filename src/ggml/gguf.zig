@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/gguf.cpp` (v0.3.0, `c1d0e7a00`), 1,706
+//! Ported from `llama.cpp/ggml/src/gguf.cpp` (v0.4.0, `5266f24da`), 1,706
 //! lines of C++. Each declaration below names the C++ it replaces and the line
 //! it began at. This file exports the same C symbols with the same signatures,
 //! so the C++ that calls into it links unchanged.
@@ -35,8 +35,8 @@
 //!
 //! Every `throw` in the C++ is caught inside the C++. On a short `fputc` or
 //! `fwrite` the file writer raises `std::runtime_error` from either of its two
-//! overrides, `write` and `write` (gguf.cpp:1585, 1594 @c1d0e7a00), and
-//! `gguf_write_to_file_ptr` (gguf.cpp:1665 @c1d0e7a00) catches it, turning it
+//! overrides, `write` and `write` (gguf.cpp:1585, 1594 @5266f24da), and
+//! `gguf_write_to_file_ptr` (gguf.cpp:1665 @5266f24da) catches it, turning it
 //! into `false` plus a log line. Three more sites catch `std::length_error` and
 //! `std::bad_alloc` around vector growth while reading a malformed file.
 //! None of that crosses the translation-unit boundary, so the port needs no
@@ -52,20 +52,20 @@
 //! # Deliberate differences
 //!
 //! - **`gguf_tensor_info.t` is zero-initialised.** The C++ declares its
-//!   `gguf_tensor_info` without an initialiser (gguf.cpp:632 @c1d0e7a00) and
+//!   `gguf_tensor_info` without an initialiser (gguf.cpp:632 @5266f24da) and
 //!   fills in only `name`, `ne`, `nb`, `type` and `offset`, leaving `op`,
 //!   `src`, `buffer`, `data`, `view_src`, `extra`, `flags` and `op_params`
 //!   indeterminate before `push_back` copies the whole struct. Nothing on the
 //!   read path reads them, but both writers branch on `info.t.buffer` inside
-//!   `write_tensor_data` (gguf.cpp:1557 @c1d0e7a00) and again in the file
-//!   writer's `write_tensor_data` (gguf.cpp:1602 @c1d0e7a00), so a context read
+//!   `write_tensor_data` (gguf.cpp:1557 @5266f24da) and again in the file
+//!   writer's `write_tensor_data` (gguf.cpp:1602 @5266f24da), so a context read
 //!   from a file and then written out would branch on a garbage pointer.
 //!   Zeroing costs nothing and makes the output depend only on the input, which
 //!   is the same call this project made for `quantize_row_iq4_nl_ref`.
 //! - **The writer's virtual dispatch becomes a comptime generic.** The C++
 //!   comments its own vtable with "we bet on devirtualization", just above the
-//!   pure-virtual `write` (gguf.cpp:1439 @c1d0e7a00), and `gguf_write_out`
-//!   (gguf.cpp:1622 @c1d0e7a00) is already a template over the writer type.
+//!   pure-virtual `write` (gguf.cpp:1439 @5266f24da), and `gguf_write_out`
+//!   (gguf.cpp:1622 @5266f24da) is already a template over the writer type.
 //!   `Writer(Impl)` below is that template with the bet settled at compile
 //!   time.
 //! - **Byte buffers are `u8`, not `int8_t`.** `gguf_kv::data` is
@@ -83,10 +83,10 @@ const c = impl.c;
 /// uses, and the same choice `backend_reg.zig` makes.
 const allocator = std.heap.c_allocator;
 
-/// Ports `GGUF_MAX_STRING_LENGTH` (gguf.cpp:18 @c1d0e7a00).
+/// Ports `GGUF_MAX_STRING_LENGTH` (gguf.cpp:18 @5266f24da).
 const max_string_length: u64 = 1024 * 1024 * 1024;
 
-/// Ports `GGUF_MAX_ARRAY_ELEMENTS` (gguf.cpp:19 @c1d0e7a00).
+/// Ports `GGUF_MAX_ARRAY_ELEMENTS` (gguf.cpp:19 @5266f24da).
 const max_array_elements: u64 = 1024 * 1024 * 1024;
 
 /// Aborts on a failed allocation, standing in for the `std::bad_alloc` the C++
@@ -105,15 +105,15 @@ fn oom() noreturn {
 
 comptime {
     // Ports the `static_assert` that follows each of the two tables. Both
-    // name `GGUF_TYPE_COUNT`, `GGUF_TYPE_COUNT` (gguf.cpp:107, 124 @c1d0e7a00).
+    // name `GGUF_TYPE_COUNT`, `GGUF_TYPE_COUNT` (gguf.cpp:107, 124 @5266f24da).
     std.debug.assert(c.GGUF_TYPE_COUNT == 13);
 }
 
-/// Ports `type_to_gguf_type` (gguf.cpp:30 @c1d0e7a00), the twelve explicit
+/// Ports `type_to_gguf_type` (gguf.cpp:30 @5266f24da), the twelve explicit
 /// specialisations collapsed into one comptime switch.
 ///
 /// `Str` stands for the `std::string` arm of `type_to_gguf_type`
-/// (gguf.cpp:73 @c1d0e7a00).
+/// (gguf.cpp:73 @5266f24da).
 fn typeToGgufType(comptime T: type) c_uint {
     return switch (T) {
         u8 => c.GGUF_TYPE_UINT8,
@@ -141,8 +141,8 @@ fn typeToGgufType(comptime T: type) c_uint {
 /// `length()`, not the first NUL, is what gets written back out.
 const Str = [:0]u8;
 
-/// Ports `GGUF_TYPE_SIZE` (gguf.cpp:92 @c1d0e7a00) together with the
-/// `gguf_type_size` lookup that reads it (gguf.cpp:126 @c1d0e7a00).
+/// Ports `GGUF_TYPE_SIZE` (gguf.cpp:92 @5266f24da) together with the
+/// `gguf_type_size` lookup that reads it (gguf.cpp:126 @5266f24da).
 ///
 /// Not exported: the C++ declares `gguf_type_size` in `ggml-impl.h` inside
 /// `#ifdef __cplusplus`, so its symbol is mangled and belongs to no C ABI. See
@@ -167,7 +167,7 @@ fn typeSize(t: c_uint) usize {
     };
 }
 
-/// Ports `GGUF_TYPE_NAME` (gguf.cpp:109 @c1d0e7a00).
+/// Ports `GGUF_TYPE_NAME` (gguf.cpp:109 @5266f24da).
 ///
 /// Return: the short type name, or null for a value outside the enum — the
 /// `it == end` arm of `gguf_type_name`.
@@ -207,7 +207,7 @@ fn allocStr(n: usize) Str {
 // -----------------------------------------------------------------------------
 // Key/value pairs
 
-/// Ports `struct gguf_kv` (gguf.cpp:131 @c1d0e7a00).
+/// Ports `struct gguf_kv` (gguf.cpp:131 @5266f24da).
 ///
 /// Both payload fields exist on every value, as in the C++: `data` carries the
 /// raw bytes of a numeric or boolean value, `data_string` the elements of a
@@ -219,7 +219,7 @@ const Kv = struct {
     data: std.ArrayList(u8) = .empty,
     data_string: std.ArrayList(Str) = .empty,
 
-    /// Ports the scalar `gguf_kv` constructor (gguf.cpp:141 @c1d0e7a00).
+    /// Ports the scalar `gguf_kv` constructor (gguf.cpp:141 @5266f24da).
     fn initScalar(key: []const u8, comptime T: type, value: T) Kv {
         impl.assert(key.len != 0, "!key.empty()");
         var kv: Kv = .{ .key = dupeStr(key), .is_array = false, .type = typeToGgufType(T) };
@@ -228,7 +228,7 @@ const Kv = struct {
         return kv;
     }
 
-    /// Ports the `std::vector<T>` `gguf_kv` constructor (gguf.cpp:149 @c1d0e7a00).
+    /// Ports the `std::vector<T>` `gguf_kv` constructor (gguf.cpp:149 @5266f24da).
     fn initArray(key: []const u8, comptime T: type, values: []const T) Kv {
         impl.assert(key.len != 0, "!key.empty()");
         var kv: Kv = .{ .key = dupeStr(key), .is_array = true, .type = typeToGgufType(T) };
@@ -240,7 +240,7 @@ const Kv = struct {
         return kv;
     }
 
-    /// Ports the `std::string` `gguf_kv` constructor (gguf.cpp:159 @c1d0e7a00).
+    /// Ports the `std::string` `gguf_kv` constructor (gguf.cpp:159 @5266f24da).
     fn initStr(key: []const u8, value: []const u8) Kv {
         impl.assert(key.len != 0, "!key.empty()");
         var kv: Kv = .{ .key = dupeStr(key), .is_array = false, .type = c.GGUF_TYPE_STRING };
@@ -248,7 +248,7 @@ const Kv = struct {
         return kv;
     }
 
-    /// Ports the string-array `gguf_kv` constructor (gguf.cpp:165 @c1d0e7a00).
+    /// Ports the string-array `gguf_kv` constructor (gguf.cpp:165 @5266f24da).
     ///
     /// Takes ownership of `values` and of every string in it; the C++ copies,
     /// because `std::vector` assignment does.
@@ -270,17 +270,17 @@ const Kv = struct {
         self.data_string.deinit(allocator);
     }
 
-    /// Ports `gguf_kv`'s `get_key` (gguf.cpp:171 @c1d0e7a00).
+    /// Ports `gguf_kv`'s `get_key` (gguf.cpp:171 @5266f24da).
     fn getKey(self: *const Kv) Str {
         return self.key;
     }
 
-    /// Ports `gguf_kv`'s `get_type` (gguf.cpp:175 @c1d0e7a00).
+    /// Ports `gguf_kv`'s `get_type` (gguf.cpp:175 @5266f24da).
     fn getType(self: *const Kv) c_uint {
         return self.type;
     }
 
-    /// Ports `gguf_kv`'s `get_ne` (gguf.cpp:179 @c1d0e7a00).
+    /// Ports `gguf_kv`'s `get_ne` (gguf.cpp:179 @5266f24da).
     ///
     /// Return: the number of elements this value holds.
     fn getNe(self: *const Kv) usize {
@@ -296,7 +296,7 @@ const Kv = struct {
         return ne;
     }
 
-    /// Ports `gguf_kv`'s `get_val` (gguf.cpp:193 @c1d0e7a00), the non-string arm.
+    /// Ports `gguf_kv`'s `get_val` (gguf.cpp:193 @5266f24da), the non-string arm.
     fn getVal(self: *const Kv, comptime T: type, i: usize) T {
         impl.assert(typeToGgufType(T) == self.type, "type_to_gguf_type<T>::value == type");
         const type_size = typeSize(self.type);
@@ -307,7 +307,7 @@ const Kv = struct {
         return out;
     }
 
-    /// Ports `gguf_kv`'s `get_val` (gguf.cpp:193 @c1d0e7a00), the
+    /// Ports `gguf_kv`'s `get_val` (gguf.cpp:193 @5266f24da), the
     /// `std::string` `if constexpr` arm.
     fn getValStr(self: *const Kv, i: usize) Str {
         impl.assert(c.GGUF_TYPE_STRING == self.type, "type_to_gguf_type<T>::value == type");
@@ -315,7 +315,7 @@ const Kv = struct {
         return self.data_string.items[i];
     }
 
-    /// Ports `gguf_kv`'s `cast` (gguf.cpp:205 @c1d0e7a00).
+    /// Ports `gguf_kv`'s `cast` (gguf.cpp:205 @5266f24da).
     ///
     /// Reinterprets the bytes already stored as a different element type. Only
     /// `gguf_set_arr_data` uses it, to stamp the caller's type onto a buffer
@@ -330,7 +330,7 @@ const Kv = struct {
 // -----------------------------------------------------------------------------
 // Tensors and the context
 
-/// Ports `struct gguf_tensor_info` (gguf.cpp:212 @c1d0e7a00).
+/// Ports `struct gguf_tensor_info` (gguf.cpp:212 @5266f24da).
 const TensorInfo = struct {
     /// `struct ggml_tensor t` — held for the shape, type and name it carries,
     /// not as a live tensor. Zero-initialised; see the file header.
@@ -339,7 +339,7 @@ const TensorInfo = struct {
     offset: u64,
 };
 
-/// Ports `struct gguf_context` (gguf.cpp:217 @c1d0e7a00).
+/// Ports `struct gguf_context` (gguf.cpp:217 @5266f24da).
 ///
 /// The C++ gives every field a default member initialiser and relies on `new
 /// gguf_context` to apply them; the defaults here are the same values.
@@ -387,7 +387,7 @@ inline fn ctxOfConst(p: ?*const c.struct_gguf_context) *const Context {
 // -----------------------------------------------------------------------------
 // Reading
 //
-// Ports `struct gguf_reader` (gguf.cpp:230 @c1d0e7a00). The C++ passes it as a
+// Ports `struct gguf_reader` (gguf.cpp:230 @5266f24da). The C++ passes it as a
 // `const &` and marks `data_offset` and `nbytes_remain` `mutable`; this takes a
 // `*Reader` instead, which says the same thing without the qualifier dance.
 //
@@ -397,10 +397,10 @@ inline fn ctxOfConst(p: ?*const c.struct_gguf_context) *const Context {
 // on. Every one writes straight into the destination, including on a short
 // read, because callers depend on that: `gguf_init_from_reader` assigns
 // `info.t.ne[j] = 1` before reading over it and then range-checks whatever
-// survived -- the `ne` assignment at (gguf.cpp:677 @c1d0e7a00).
+// survived -- the `ne` assignment at (gguf.cpp:677 @5266f24da).
 
 /// Ports the `#else` arm of the `gguf_ftell` and `gguf_fseek` macros
-/// (gguf.cpp:25, 26 @c1d0e7a00). The `_WIN32` arm names `_ftelli64` and
+/// (gguf.cpp:25, 26 @5266f24da). The `_WIN32` arm names `_ftelli64` and
 /// `_fseeki64`; this target compiles the other one.
 const Libc = struct {
     extern fn ftello(stream: *c.FILE) i64;
@@ -421,7 +421,7 @@ const Reader = struct {
     data_offset: u64 = 0,
     nbytes_remain: u64 = 0,
 
-    /// Ports the `gguf_reader` constructor (gguf.cpp:231 @c1d0e7a00).
+    /// Ports the `gguf_reader` constructor (gguf.cpp:231 @5266f24da).
     fn init(
         callback: c.gguf_reader_callback_t,
         userdata: ?*anyopaque,
@@ -439,7 +439,7 @@ const Reader = struct {
         };
     }
 
-    /// Ports `gguf_reader`'s `file_remain` (gguf.cpp:246 @c1d0e7a00).
+    /// Ports `gguf_reader`'s `file_remain` (gguf.cpp:246 @5266f24da).
     ///
     /// Return: bytes from the current position to end of file, or 0 if any of
     /// the three seeks fails — in which case the original position is restored
@@ -460,14 +460,14 @@ const Reader = struct {
         return @intCast(end - cur);
     }
 
-    /// Ports `gguf_reader`'s `read` (gguf.cpp:267 @c1d0e7a00), the `T &` overload.
+    /// Ports `gguf_reader`'s `read` (gguf.cpp:267 @5266f24da), the `T &` overload.
     fn readInto(self: *Reader, comptime T: type, dst: *T) bool {
         const size = @sizeOf(T);
         if (size > self.nbytes_remain) return false;
         return self.readRaw(std.mem.asBytes(dst)) == size;
     }
 
-    /// Ports `gguf_reader`'s `read` (gguf.cpp:313 @c1d0e7a00), the `bool &` overload.
+    /// Ports `gguf_reader`'s `read` (gguf.cpp:313 @5266f24da), the `bool &` overload.
     fn readBool(self: *Reader, dst: *bool) bool {
         var tmp: i8 = -1;
         if (!self.readInto(i8, &tmp)) return false;
@@ -476,7 +476,7 @@ const Reader = struct {
     }
 
     /// Ports `gguf_reader`'s two enum overloads of `read`, `read`
-    /// (gguf.cpp:322, 331 @c1d0e7a00). They differ only in the enum they cast
+    /// (gguf.cpp:322, 331 @5266f24da). They differ only in the enum they cast
     /// to and are one function here, because both are `c_uint` after the
     /// import.
     fn readEnum(self: *Reader, dst: *c_uint) bool {
@@ -486,7 +486,7 @@ const Reader = struct {
         return true;
     }
 
-    /// Ports `gguf_reader`'s `read` (gguf.cpp:340 @c1d0e7a00), the
+    /// Ports `gguf_reader`'s `read` (gguf.cpp:340 @5266f24da), the
     /// `std::string &` overload.
     ///
     /// Treats `dst` as uninitialised and **always leaves it owning a valid
@@ -494,7 +494,7 @@ const Reader = struct {
     /// gets that for free: `dst` is a live `std::string` on entry and
     /// `resize` keeps it live whatever happens next. Callers depend on it —
     /// `gguf_init_from_reader` calls `ggml_set_name` with the tensor name even
-    /// when the read failed (gguf.cpp:651 @c1d0e7a00), and every caller frees
+    /// when the read failed (gguf.cpp:651 @5266f24da), and every caller frees
     /// `dst`.
     fn readStr(self: *Reader, dst: *Str) bool {
         dst.* = allocStr(0);
@@ -522,7 +522,7 @@ const Reader = struct {
     }
 
     /// Ports the length guards of `gguf_reader`'s vector `read`
-    /// (gguf.cpp:276 @c1d0e7a00), shared by the two element kinds below.
+    /// (gguf.cpp:276 @5266f24da), shared by the two element kinds below.
     ///
     /// `stride` is `sizeof(T)`, except for strings, where the C++ uses
     /// `sizeof(uint64_t)` because each element is length-prefixed.
@@ -533,7 +533,7 @@ const Reader = struct {
         return true;
     }
 
-    /// Ports `gguf_reader`'s vector `read` (gguf.cpp:276 @c1d0e7a00), the
+    /// Ports `gguf_reader`'s vector `read` (gguf.cpp:276 @5266f24da), the
     /// non-string arm, including its `bool` special case.
     fn readVec(self: *Reader, comptime T: type, dst: *std.ArrayList(T), n: u64) bool {
         if (!self.vecGuard(n, @sizeOf(T))) return false;
@@ -554,7 +554,7 @@ const Reader = struct {
         return true;
     }
 
-    /// Ports `gguf_reader`'s vector `read` (gguf.cpp:276 @c1d0e7a00), the
+    /// Ports `gguf_reader`'s vector `read` (gguf.cpp:276 @5266f24da), the
     /// `std::is_same<T, std::string>` arm.
     ///
     /// Every element is allocated, so a failure part-way leaves the prefix
@@ -573,19 +573,19 @@ const Reader = struct {
         return true;
     }
 
-    /// Ports `gguf_reader`'s raw `read` (gguf.cpp:357 @c1d0e7a00), the
+    /// Ports `gguf_reader`'s raw `read` (gguf.cpp:357 @5266f24da), the
     /// `void *` overload.
     fn readBytes(self: *Reader, dst: []u8) bool {
         if (dst.len > self.nbytes_remain) return false;
         return self.readRaw(dst) == dst.len;
     }
 
-    /// Ports `gguf_reader`'s `tell` (gguf.cpp:364 @c1d0e7a00).
+    /// Ports `gguf_reader`'s `tell` (gguf.cpp:364 @5266f24da).
     fn tell(self: *const Reader) u64 {
         return self.data_offset;
     }
 
-    /// Ports `gguf_reader`'s `seek` (gguf.cpp:368 @c1d0e7a00).
+    /// Ports `gguf_reader`'s `seek` (gguf.cpp:368 @5266f24da).
     ///
     /// Return: false if `absolute_offset` is past the end of what remains, in
     /// which case nothing moves.
@@ -597,7 +597,7 @@ const Reader = struct {
         return true;
     }
 
-    /// Ports `gguf_reader`'s `read_raw` (gguf.cpp:381 @c1d0e7a00).
+    /// Ports `gguf_reader`'s `read_raw` (gguf.cpp:381 @5266f24da).
     ///
     /// Return: the number of bytes actually read. A short read latches
     /// `nbytes_remain` to zero, so every later read fails its guard rather than
@@ -639,7 +639,7 @@ const Reader = struct {
 // -----------------------------------------------------------------------------
 // Construction
 
-/// Ports `gguf_init_empty` (gguf.cpp:421 @c1d0e7a00).
+/// Ports `gguf_init_empty` (gguf.cpp:421 @5266f24da).
 ///
 /// Return: a context with no keys and no tensors, owned by the caller and
 /// released with `gguf_free`.
@@ -647,7 +647,7 @@ export fn gguf_init_empty() callconv(.c) ?*c.struct_gguf_context {
     return @ptrCast(Context.create());
 }
 
-/// Ports `gguf_read_emplace_helper` (gguf.cpp:426 @c1d0e7a00), the non-string
+/// Ports `gguf_read_emplace_helper` (gguf.cpp:426 @5266f24da), the non-string
 /// instantiations.
 ///
 /// The C++ wraps the array read in `catch (std::length_error &)` and
@@ -675,11 +675,11 @@ fn readEmplaceHelper(
     return true;
 }
 
-/// Ports `gguf_read_emplace_helper` (gguf.cpp:426 @c1d0e7a00), the `bool`
+/// Ports `gguf_read_emplace_helper` (gguf.cpp:426 @5266f24da), the `bool`
 /// instantiation.
 ///
 /// Separate from `readEmplaceHelper` because the scalar arm goes through the
-/// `bool &` overload of `read` (gguf.cpp:313 @c1d0e7a00) rather than the
+/// `bool &` overload of `read` (gguf.cpp:313 @5266f24da) rather than the
 /// byte-sized template, and reads an `int8_t` it then compares against zero.
 fn readEmplaceHelperBool(
     gr: *Reader,
@@ -701,7 +701,7 @@ fn readEmplaceHelperBool(
     return true;
 }
 
-/// Ports `gguf_read_emplace_helper` (gguf.cpp:426 @c1d0e7a00), the
+/// Ports `gguf_read_emplace_helper` (gguf.cpp:426 @5266f24da), the
 /// `std::string` instantiation.
 fn readEmplaceHelperStr(
     gr: *Reader,
@@ -731,7 +731,7 @@ fn readEmplaceHelperStr(
     return true;
 }
 
-/// Ports `gguf_init_from_reader` (gguf.cpp:451 @c1d0e7a00).
+/// Ports `gguf_init_from_reader` (gguf.cpp:451 @5266f24da).
 ///
 /// Parameters:
 /// - `gr`: the reader, positioned at the start of the GGUF header.
@@ -1268,7 +1268,7 @@ fn initFromReader(gr: *Reader, params: c.gguf_init_params) ?*Context {
     return ctx;
 }
 
-/// Ports `gguf_init_from_callback` (gguf.cpp:909 @c1d0e7a00).
+/// Ports `gguf_init_from_callback` (gguf.cpp:909 @5266f24da).
 ///
 /// Parameters:
 /// - `callback`: fills a buffer from an arbitrary source; null returns null.
@@ -1297,13 +1297,13 @@ export fn gguf_init_from_callback(
     return @ptrCast(initFromReader(&gr, params));
 }
 
-/// Ports `struct gguf_file_reader` (gguf.cpp:918 @c1d0e7a00).
+/// Ports `struct gguf_file_reader` (gguf.cpp:918 @5266f24da).
 const FileReader = struct {
     file: *c.FILE,
     offset: u64,
 };
 
-/// Ports `gguf_file_reader_callback` (gguf.cpp:923 @c1d0e7a00).
+/// Ports `gguf_file_reader_callback` (gguf.cpp:923 @5266f24da).
 ///
 /// Seeks only when the requested offset is not where the file already sits,
 /// which keeps a sequential parse to one `fread` per call.
@@ -1327,7 +1327,7 @@ fn fileReaderCallback(userdata: ?*anyopaque, output: ?*anyopaque, offset: u64, l
     return nread;
 }
 
-/// Ports `gguf_init_from_file_ptr` (gguf.cpp:941 @c1d0e7a00).
+/// Ports `gguf_init_from_file_ptr` (gguf.cpp:941 @5266f24da).
 ///
 /// Parameters:
 /// - `file`: an open, seekable stream positioned at the start of the GGUF data.
@@ -1352,13 +1352,13 @@ export fn gguf_init_from_file_ptr(file: ?*c.FILE, params: c.gguf_init_params) ca
     return @ptrCast(initFromReader(&gr, params));
 }
 
-/// Ports `struct gguf_buffer_reader` (gguf.cpp:959 @c1d0e7a00).
+/// Ports `struct gguf_buffer_reader` (gguf.cpp:959 @5266f24da).
 const BufferReader = struct {
     data: [*]const u8,
     size: usize,
 };
 
-/// Ports `gguf_buffer_reader_callback` (gguf.cpp:964 @c1d0e7a00).
+/// Ports `gguf_buffer_reader_callback` (gguf.cpp:964 @5266f24da).
 fn bufferReaderCallback(userdata: ?*anyopaque, output: ?*anyopaque, offset: u64, len: usize) callconv(.c) usize {
     impl.assert(len > 0, "len > 0");
 
@@ -1372,7 +1372,7 @@ fn bufferReaderCallback(userdata: ?*anyopaque, output: ?*anyopaque, offset: u64,
     return nread;
 }
 
-/// Ports `gguf_init_from_buffer` (gguf.cpp:979 @c1d0e7a00).
+/// Ports `gguf_init_from_buffer` (gguf.cpp:979 @5266f24da).
 ///
 /// Parameters:
 /// - `data`: the GGUF bytes; null or a zero `size` returns null.
@@ -1388,7 +1388,7 @@ export fn gguf_init_from_buffer(data: ?*const anyopaque, size: usize, params: c.
     return @ptrCast(initFromReader(&gr, params));
 }
 
-/// Ports `gguf_init_from_file` (gguf.cpp:992 @c1d0e7a00).
+/// Ports `gguf_init_from_file` (gguf.cpp:992 @5266f24da).
 ///
 /// Parameters:
 /// - `fname`: path to the GGUF file.
@@ -1410,7 +1410,7 @@ export fn gguf_init_from_file(fname: [*:0]const u8, params: c.gguf_init_params) 
     return result;
 }
 
-/// Ports `gguf_free` (gguf.cpp:1005 @c1d0e7a00).
+/// Ports `gguf_free` (gguf.cpp:1005 @5266f24da).
 ///
 /// Return: nothing. Null is accepted and ignored, as the C++'s `delete` is.
 export fn gguf_free(ctx: ?*c.struct_gguf_context) callconv(.c) void {
@@ -1418,7 +1418,7 @@ export fn gguf_free(ctx: ?*c.struct_gguf_context) callconv(.c) void {
     ctxOf(ctx).destroy();
 }
 
-/// Ports `gguf_type_name` (gguf.cpp:1012 @c1d0e7a00).
+/// Ports `gguf_type_name` (gguf.cpp:1012 @5266f24da).
 ///
 /// Return: a static name, or null for a value outside `enum gguf_type`.
 export fn gguf_type_name(t: c_uint) callconv(.c) ?[*:0]const u8 {
@@ -1432,27 +1432,27 @@ export fn gguf_type_name(t: c_uint) callconv(.c) ?[*:0]const u8 {
 // the C++ does; the header documents them as aborting on a wrong type rather
 // than reporting.
 
-/// Ports `gguf_get_version` (gguf.cpp:1017 @c1d0e7a00).
+/// Ports `gguf_get_version` (gguf.cpp:1017 @5266f24da).
 export fn gguf_get_version(ctx: ?*const c.struct_gguf_context) callconv(.c) u32 {
     return ctxOfConst(ctx).version;
 }
 
-/// Ports `gguf_get_alignment` (gguf.cpp:1021 @c1d0e7a00).
+/// Ports `gguf_get_alignment` (gguf.cpp:1021 @5266f24da).
 export fn gguf_get_alignment(ctx: ?*const c.struct_gguf_context) callconv(.c) usize {
     return ctxOfConst(ctx).alignment;
 }
 
-/// Ports `gguf_get_data_offset` (gguf.cpp:1025 @c1d0e7a00).
+/// Ports `gguf_get_data_offset` (gguf.cpp:1025 @5266f24da).
 export fn gguf_get_data_offset(ctx: ?*const c.struct_gguf_context) callconv(.c) usize {
     return ctxOfConst(ctx).offset;
 }
 
-/// Ports `gguf_get_n_kv` (gguf.cpp:1029 @c1d0e7a00).
+/// Ports `gguf_get_n_kv` (gguf.cpp:1029 @5266f24da).
 export fn gguf_get_n_kv(ctx: ?*const c.struct_gguf_context) callconv(.c) i64 {
     return @intCast(ctxOfConst(ctx).kv.items.len);
 }
 
-/// Ports `gguf_find_key` (gguf.cpp:1033 @c1d0e7a00).
+/// Ports `gguf_find_key` (gguf.cpp:1033 @5266f24da).
 ///
 /// Return: the key's index, or -1 if absent. Matching is `strcmp`, so it stops
 /// at the first NUL in either string — unlike the duplicate-key check in
@@ -1473,7 +1473,7 @@ export fn gguf_find_key(ctx: ?*const c.struct_gguf_context, key: [*:0]const u8) 
     return keyfound;
 }
 
-/// Ports `gguf_get_key` (gguf.cpp:1049 @c1d0e7a00).
+/// Ports `gguf_get_key` (gguf.cpp:1049 @5266f24da).
 ///
 /// Return: the key, borrowed from the context and valid until it is freed or
 /// the key is removed.
@@ -1482,7 +1482,7 @@ export fn gguf_get_key(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv
     return ctxOfConst(ctx).kv.items[@intCast(key_id)].getKey().ptr;
 }
 
-/// Ports `gguf_get_kv_type` (gguf.cpp:1054 @c1d0e7a00).
+/// Ports `gguf_get_kv_type` (gguf.cpp:1054 @5266f24da).
 ///
 /// Return: `GGUF_TYPE_ARRAY` for any array-valued key, whatever its elements
 /// are; `gguf_get_arr_type` reports the element type.
@@ -1492,7 +1492,7 @@ export fn gguf_get_kv_type(ctx: ?*const c.struct_gguf_context, key_id: i64) call
     return if (kv.is_array) c.GGUF_TYPE_ARRAY else kv.getType();
 }
 
-/// Ports `gguf_get_arr_type` (gguf.cpp:1059 @c1d0e7a00).
+/// Ports `gguf_get_arr_type` (gguf.cpp:1059 @5266f24da).
 export fn gguf_get_arr_type(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) c_uint {
     impl.assert(key_id >= 0 and key_id < gguf_get_n_kv(ctx), "key_id >= 0 && key_id < gguf_get_n_kv(ctx)");
     const kv = &ctxOfConst(ctx).kv.items[@intCast(key_id)];
@@ -1500,7 +1500,7 @@ export fn gguf_get_arr_type(ctx: ?*const c.struct_gguf_context, key_id: i64) cal
     return kv.getType();
 }
 
-/// Ports `gguf_get_arr_data` (gguf.cpp:1065 @c1d0e7a00).
+/// Ports `gguf_get_arr_data` (gguf.cpp:1065 @5266f24da).
 ///
 /// Return: the first element of the array, borrowed. Bool arrays are stored
 /// one byte per element, as the header notes.
@@ -1511,7 +1511,7 @@ export fn gguf_get_arr_data(ctx: ?*const c.struct_gguf_context, key_id: i64) cal
     return @ptrCast(kv.data.items.ptr);
 }
 
-/// Ports `gguf_get_arr_str` (gguf.cpp:1071 @c1d0e7a00).
+/// Ports `gguf_get_arr_str` (gguf.cpp:1071 @5266f24da).
 ///
 /// Return: the `i`th string, borrowed from the context.
 export fn gguf_get_arr_str(ctx: ?*const c.struct_gguf_context, key_id: i64, i: usize) callconv(.c) [*:0]const u8 {
@@ -1521,7 +1521,7 @@ export fn gguf_get_arr_str(ctx: ?*const c.struct_gguf_context, key_id: i64, i: u
     return kv.data_string.items[i].ptr;
 }
 
-/// Ports `gguf_get_arr_n` (gguf.cpp:1077 @c1d0e7a00).
+/// Ports `gguf_get_arr_n` (gguf.cpp:1077 @5266f24da).
 ///
 /// Return: the element count. Computed from the byte length rather than by
 /// calling `get_ne`, so it does not assert the non-array single-element rule.
@@ -1540,7 +1540,7 @@ export fn gguf_get_arr_n(ctx: ?*const c.struct_gguf_context, key_id: i64) callco
 
 /// Shared body of the twelve `gguf_get_val_*` accessors, each the same three
 /// lines over a different type. The family begins at `gguf_get_val_u8`
-/// (gguf.cpp:1089 @c1d0e7a00) and ends at `gguf_get_val_data`.
+/// (gguf.cpp:1089 @5266f24da) and ends at `gguf_get_val_data`.
 inline fn getVal(comptime T: type, ctx: ?*const c.struct_gguf_context, key_id: i64) T {
     impl.assert(key_id >= 0 and key_id < gguf_get_n_kv(ctx), "key_id >= 0 && key_id < gguf_get_n_kv(ctx)");
     const kv = &ctxOfConst(ctx).kv.items[@intCast(key_id)];
@@ -1548,62 +1548,62 @@ inline fn getVal(comptime T: type, ctx: ?*const c.struct_gguf_context, key_id: i
     return kv.getVal(T, 0);
 }
 
-/// Ports `gguf_get_val_u8` (gguf.cpp:1089 @c1d0e7a00).
+/// Ports `gguf_get_val_u8` (gguf.cpp:1089 @5266f24da).
 export fn gguf_get_val_u8(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) u8 {
     return getVal(u8, ctx, key_id);
 }
 
-/// Ports `gguf_get_val_i8` (gguf.cpp:1095 @c1d0e7a00).
+/// Ports `gguf_get_val_i8` (gguf.cpp:1095 @5266f24da).
 export fn gguf_get_val_i8(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) i8 {
     return getVal(i8, ctx, key_id);
 }
 
-/// Ports `gguf_get_val_u16` (gguf.cpp:1101 @c1d0e7a00).
+/// Ports `gguf_get_val_u16` (gguf.cpp:1101 @5266f24da).
 export fn gguf_get_val_u16(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) u16 {
     return getVal(u16, ctx, key_id);
 }
 
-/// Ports `gguf_get_val_i16` (gguf.cpp:1107 @c1d0e7a00).
+/// Ports `gguf_get_val_i16` (gguf.cpp:1107 @5266f24da).
 export fn gguf_get_val_i16(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) i16 {
     return getVal(i16, ctx, key_id);
 }
 
-/// Ports `gguf_get_val_u32` (gguf.cpp:1113 @c1d0e7a00).
+/// Ports `gguf_get_val_u32` (gguf.cpp:1113 @5266f24da).
 export fn gguf_get_val_u32(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) u32 {
     return getVal(u32, ctx, key_id);
 }
 
-/// Ports `gguf_get_val_i32` (gguf.cpp:1119 @c1d0e7a00).
+/// Ports `gguf_get_val_i32` (gguf.cpp:1119 @5266f24da).
 export fn gguf_get_val_i32(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) i32 {
     return getVal(i32, ctx, key_id);
 }
 
-/// Ports `gguf_get_val_f32` (gguf.cpp:1125 @c1d0e7a00).
+/// Ports `gguf_get_val_f32` (gguf.cpp:1125 @5266f24da).
 export fn gguf_get_val_f32(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) f32 {
     return getVal(f32, ctx, key_id);
 }
 
-/// Ports `gguf_get_val_u64` (gguf.cpp:1131 @c1d0e7a00).
+/// Ports `gguf_get_val_u64` (gguf.cpp:1131 @5266f24da).
 export fn gguf_get_val_u64(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) u64 {
     return getVal(u64, ctx, key_id);
 }
 
-/// Ports `gguf_get_val_i64` (gguf.cpp:1137 @c1d0e7a00).
+/// Ports `gguf_get_val_i64` (gguf.cpp:1137 @5266f24da).
 export fn gguf_get_val_i64(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) i64 {
     return getVal(i64, ctx, key_id);
 }
 
-/// Ports `gguf_get_val_f64` (gguf.cpp:1143 @c1d0e7a00).
+/// Ports `gguf_get_val_f64` (gguf.cpp:1143 @5266f24da).
 export fn gguf_get_val_f64(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) f64 {
     return getVal(f64, ctx, key_id);
 }
 
-/// Ports `gguf_get_val_bool` (gguf.cpp:1149 @c1d0e7a00).
+/// Ports `gguf_get_val_bool` (gguf.cpp:1149 @5266f24da).
 export fn gguf_get_val_bool(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) bool {
     return getVal(bool, ctx, key_id);
 }
 
-/// Ports `gguf_get_val_str` (gguf.cpp:1155 @c1d0e7a00).
+/// Ports `gguf_get_val_str` (gguf.cpp:1155 @5266f24da).
 ///
 /// Return: the value, borrowed from the context.
 export fn gguf_get_val_str(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) [*:0]const u8 {
@@ -1613,7 +1613,7 @@ export fn gguf_get_val_str(ctx: ?*const c.struct_gguf_context, key_id: i64) call
     return kv.getValStr(0).ptr;
 }
 
-/// Ports `gguf_get_val_data` (gguf.cpp:1161 @c1d0e7a00).
+/// Ports `gguf_get_val_data` (gguf.cpp:1161 @5266f24da).
 ///
 /// Return: the raw bytes of a single non-string value, borrowed.
 export fn gguf_get_val_data(ctx: ?*const c.struct_gguf_context, key_id: i64) callconv(.c) ?*const anyopaque {
@@ -1624,12 +1624,12 @@ export fn gguf_get_val_data(ctx: ?*const c.struct_gguf_context, key_id: i64) cal
     return @ptrCast(kv.data.items.ptr);
 }
 
-/// Ports `gguf_get_n_tensors` (gguf.cpp:1168 @c1d0e7a00).
+/// Ports `gguf_get_n_tensors` (gguf.cpp:1168 @5266f24da).
 export fn gguf_get_n_tensors(ctx: ?*const c.struct_gguf_context) callconv(.c) i64 {
     return @intCast(ctxOfConst(ctx).info.items.len);
 }
 
-/// Ports `gguf_find_tensor` (gguf.cpp:1172 @c1d0e7a00).
+/// Ports `gguf_find_tensor` (gguf.cpp:1172 @5266f24da).
 ///
 /// Return: the tensor's index, or -1 if absent.
 export fn gguf_find_tensor(ctx: ?*const c.struct_gguf_context, name: [*:0]const u8) callconv(.c) i64 {
@@ -1648,13 +1648,13 @@ export fn gguf_find_tensor(ctx: ?*const c.struct_gguf_context, name: [*:0]const 
     return tensor_id;
 }
 
-/// Ports `gguf_get_tensor_offset` (gguf.cpp:1188 @c1d0e7a00).
+/// Ports `gguf_get_tensor_offset` (gguf.cpp:1188 @5266f24da).
 export fn gguf_get_tensor_offset(ctx: ?*const c.struct_gguf_context, tensor_id: i64) callconv(.c) usize {
     impl.assert(tensor_id >= 0 and tensor_id < gguf_get_n_tensors(ctx), "tensor_id >= 0 && tensor_id < gguf_get_n_tensors(ctx)");
     return @intCast(ctxOfConst(ctx).info.items[@intCast(tensor_id)].offset);
 }
 
-/// Ports `gguf_get_tensor_name` (gguf.cpp:1193 @c1d0e7a00).
+/// Ports `gguf_get_tensor_name` (gguf.cpp:1193 @5266f24da).
 ///
 /// Return: the name, borrowed from the context.
 export fn gguf_get_tensor_name(ctx: ?*const c.struct_gguf_context, tensor_id: i64) callconv(.c) [*:0]const u8 {
@@ -1662,7 +1662,7 @@ export fn gguf_get_tensor_name(ctx: ?*const c.struct_gguf_context, tensor_id: i6
     return @ptrCast(&ctxOfConst(ctx).info.items[@intCast(tensor_id)].t.name);
 }
 
-/// Ports `gguf_get_tensor_ne` (gguf.cpp:1198 @c1d0e7a00).
+/// Ports `gguf_get_tensor_ne` (gguf.cpp:1198 @5266f24da).
 ///
 /// Return: `GGML_MAX_DIMS` extents, borrowed; entries past the tensor's rank
 /// are 1.
@@ -1671,13 +1671,13 @@ export fn gguf_get_tensor_ne(ctx: ?*const c.struct_gguf_context, tensor_id: i64)
     return &ctxOfConst(ctx).info.items[@intCast(tensor_id)].t.ne;
 }
 
-/// Ports `gguf_get_tensor_type` (gguf.cpp:1203 @c1d0e7a00).
+/// Ports `gguf_get_tensor_type` (gguf.cpp:1203 @5266f24da).
 export fn gguf_get_tensor_type(ctx: ?*const c.struct_gguf_context, tensor_id: i64) callconv(.c) c_uint {
     impl.assert(tensor_id >= 0 and tensor_id < gguf_get_n_tensors(ctx), "tensor_id >= 0 && tensor_id < gguf_get_n_tensors(ctx)");
     return ctxOfConst(ctx).info.items[@intCast(tensor_id)].t.type;
 }
 
-/// Ports `gguf_get_tensor_size` (gguf.cpp:1208 @c1d0e7a00).
+/// Ports `gguf_get_tensor_size` (gguf.cpp:1208 @5266f24da).
 export fn gguf_get_tensor_size(ctx: ?*const c.struct_gguf_context, tensor_id: i64) callconv(.c) usize {
     impl.assert(tensor_id >= 0 and tensor_id < gguf_get_n_tensors(ctx), "tensor_id >= 0 && tensor_id < gguf_get_n_tensors(ctx)");
     return c.ggml_nbytes(&ctxOfConst(ctx).info.items[@intCast(tensor_id)].t);
@@ -1686,7 +1686,7 @@ export fn gguf_get_tensor_size(ctx: ?*const c.struct_gguf_context, tensor_id: i6
 // -----------------------------------------------------------------------------
 // Mutation
 
-/// Ports `gguf_remove_key` (gguf.cpp:1213 @c1d0e7a00).
+/// Ports `gguf_remove_key` (gguf.cpp:1213 @5266f24da).
 ///
 /// Return: the index the key held before removal, or -1 if it was absent.
 /// Later keys shift down, which is what `std::vector::erase` does.
@@ -1700,7 +1700,7 @@ export fn gguf_remove_key(ctx: ?*c.struct_gguf_context, key: [*:0]const u8) call
     return key_id;
 }
 
-/// Ports `gguf_check_reserved_keys` (gguf.cpp:1222 @c1d0e7a00).
+/// Ports `gguf_check_reserved_keys` (gguf.cpp:1222 @5266f24da).
 ///
 /// Only `general.alignment` is reserved: it must be a `u32` power of two,
 /// because `gguf_init_from_reader` pads the data section by it.
@@ -1718,7 +1718,7 @@ fn checkReservedKeys(comptime T: type, key: [*:0]const u8, val: T) void {
 }
 
 /// Shared body of the eleven scalar `gguf_set_val_*` entry points, beginning at
-/// `gguf_set_val_u8` (gguf.cpp:1233 @c1d0e7a00). Each removes any existing key
+/// `gguf_set_val_u8` (gguf.cpp:1233 @5266f24da). Each removes any existing key
 /// of that name and appends the new pair at the back, so a set is also a
 /// move-to-end.
 inline fn setVal(comptime T: type, ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: T) void {
@@ -1727,62 +1727,62 @@ inline fn setVal(comptime T: type, ctx: ?*c.struct_gguf_context, key: [*:0]const
     ctxOf(ctx).kv.append(allocator, Kv.initScalar(std.mem.span(key), T, val)) catch oom();
 }
 
-/// Ports `gguf_set_val_u8` (gguf.cpp:1233 @c1d0e7a00).
+/// Ports `gguf_set_val_u8` (gguf.cpp:1233 @5266f24da).
 export fn gguf_set_val_u8(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: u8) callconv(.c) void {
     setVal(u8, ctx, key, val);
 }
 
-/// Ports `gguf_set_val_i8` (gguf.cpp:1239 @c1d0e7a00).
+/// Ports `gguf_set_val_i8` (gguf.cpp:1239 @5266f24da).
 export fn gguf_set_val_i8(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: i8) callconv(.c) void {
     setVal(i8, ctx, key, val);
 }
 
-/// Ports `gguf_set_val_u16` (gguf.cpp:1245 @c1d0e7a00).
+/// Ports `gguf_set_val_u16` (gguf.cpp:1245 @5266f24da).
 export fn gguf_set_val_u16(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: u16) callconv(.c) void {
     setVal(u16, ctx, key, val);
 }
 
-/// Ports `gguf_set_val_i16` (gguf.cpp:1251 @c1d0e7a00).
+/// Ports `gguf_set_val_i16` (gguf.cpp:1251 @5266f24da).
 export fn gguf_set_val_i16(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: i16) callconv(.c) void {
     setVal(i16, ctx, key, val);
 }
 
-/// Ports `gguf_set_val_u32` (gguf.cpp:1257 @c1d0e7a00).
+/// Ports `gguf_set_val_u32` (gguf.cpp:1257 @5266f24da).
 export fn gguf_set_val_u32(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: u32) callconv(.c) void {
     setVal(u32, ctx, key, val);
 }
 
-/// Ports `gguf_set_val_i32` (gguf.cpp:1263 @c1d0e7a00).
+/// Ports `gguf_set_val_i32` (gguf.cpp:1263 @5266f24da).
 export fn gguf_set_val_i32(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: i32) callconv(.c) void {
     setVal(i32, ctx, key, val);
 }
 
-/// Ports `gguf_set_val_f32` (gguf.cpp:1269 @c1d0e7a00).
+/// Ports `gguf_set_val_f32` (gguf.cpp:1269 @5266f24da).
 export fn gguf_set_val_f32(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: f32) callconv(.c) void {
     setVal(f32, ctx, key, val);
 }
 
-/// Ports `gguf_set_val_u64` (gguf.cpp:1275 @c1d0e7a00).
+/// Ports `gguf_set_val_u64` (gguf.cpp:1275 @5266f24da).
 export fn gguf_set_val_u64(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: u64) callconv(.c) void {
     setVal(u64, ctx, key, val);
 }
 
-/// Ports `gguf_set_val_i64` (gguf.cpp:1281 @c1d0e7a00).
+/// Ports `gguf_set_val_i64` (gguf.cpp:1281 @5266f24da).
 export fn gguf_set_val_i64(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: i64) callconv(.c) void {
     setVal(i64, ctx, key, val);
 }
 
-/// Ports `gguf_set_val_f64` (gguf.cpp:1287 @c1d0e7a00).
+/// Ports `gguf_set_val_f64` (gguf.cpp:1287 @5266f24da).
 export fn gguf_set_val_f64(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: f64) callconv(.c) void {
     setVal(f64, ctx, key, val);
 }
 
-/// Ports `gguf_set_val_bool` (gguf.cpp:1293 @c1d0e7a00).
+/// Ports `gguf_set_val_bool` (gguf.cpp:1293 @5266f24da).
 export fn gguf_set_val_bool(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: bool) callconv(.c) void {
     setVal(bool, ctx, key, val);
 }
 
-/// Ports `gguf_set_val_str` (gguf.cpp:1299 @c1d0e7a00).
+/// Ports `gguf_set_val_str` (gguf.cpp:1299 @5266f24da).
 ///
 /// `val` is copied; the caller keeps ownership of what it passed.
 export fn gguf_set_val_str(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val: [*:0]const u8) callconv(.c) void {
@@ -1791,7 +1791,7 @@ export fn gguf_set_val_str(ctx: ?*c.struct_gguf_context, key: [*:0]const u8, val
     ctxOf(ctx).kv.append(allocator, Kv.initStr(std.mem.span(key), std.mem.span(val))) catch oom();
 }
 
-/// Ports `gguf_set_arr_data` (gguf.cpp:1305 @c1d0e7a00).
+/// Ports `gguf_set_arr_data` (gguf.cpp:1305 @5266f24da).
 ///
 /// Parameters:
 /// - `key`: overwritten if present.
@@ -1822,7 +1822,7 @@ export fn gguf_set_arr_data(
     ctxOf(ctx).kv.items[ctxOf(ctx).kv.items.len - 1].cast(t);
 }
 
-/// Ports `gguf_set_arr_str` (gguf.cpp:1318 @c1d0e7a00).
+/// Ports `gguf_set_arr_str` (gguf.cpp:1318 @5266f24da).
 ///
 /// Parameters:
 /// - `key`: overwritten if present.
@@ -1843,7 +1843,7 @@ export fn gguf_set_arr_str(
     ctxOf(ctx).kv.append(allocator, Kv.initStrArrayOwned(std.mem.span(key), tmp)) catch oom();
 }
 
-/// Ports `gguf_set_kv` (gguf.cpp:1330 @c1d0e7a00).
+/// Ports `gguf_set_kv` (gguf.cpp:1330 @5266f24da).
 ///
 /// Copies every key from `src` into `ctx`, overwriting same-named keys.
 export fn gguf_set_kv(ctx: ?*c.struct_gguf_context, src: ?*const c.struct_gguf_context) callconv(.c) void {
@@ -1898,7 +1898,7 @@ export fn gguf_set_kv(ctx: ?*c.struct_gguf_context, src: ?*const c.struct_gguf_c
     }
 }
 
-/// Ports `gguf_add_tensor` (gguf.cpp:1384 @c1d0e7a00).
+/// Ports `gguf_add_tensor` (gguf.cpp:1384 @5266f24da).
 ///
 /// The tensor struct is copied by value; only its shape, type, name and data
 /// pointer are used. Aborts on a duplicate name, as the C++ does.
@@ -1917,7 +1917,7 @@ export fn gguf_add_tensor(ctx: ?*c.struct_gguf_context, tensor: ?*const c.ggml_t
     self.info.append(allocator, ti) catch oom();
 }
 
-/// Ports `gguf_set_tensor_type` (gguf.cpp:1399 @c1d0e7a00).
+/// Ports `gguf_set_tensor_type` (gguf.cpp:1399 @5266f24da).
 ///
 /// Recomputes this tensor's strides and then every later tensor's offset, so
 /// the data section stays one contiguous block.
@@ -1949,7 +1949,7 @@ export fn gguf_set_tensor_type(ctx: ?*c.struct_gguf_context, name: [*:0]const u8
     }
 }
 
-/// Ports `gguf_set_tensor_data` (gguf.cpp:1424 @c1d0e7a00).
+/// Ports `gguf_set_tensor_data` (gguf.cpp:1424 @5266f24da).
 ///
 /// Records where the tensor's bytes live; the context does not take ownership
 /// and does not copy.
@@ -1966,10 +1966,10 @@ export fn gguf_set_tensor_data(ctx: ?*c.struct_gguf_context, name: [*:0]const u8
 // -----------------------------------------------------------------------------
 // Writing
 //
-// Ports `struct gguf_writer_base` (gguf.cpp:1433 @c1d0e7a00) and its two
+// Ports `struct gguf_writer_base` (gguf.cpp:1433 @5266f24da) and its two
 // `final` subclasses. The C++ declares three pure-virtual methods and comments
 // them "we bet on devirtualization" just above the first, `write`
-// (gguf.cpp:1439 @c1d0e7a00). `gguf_write_out` (gguf.cpp:1622 @c1d0e7a00) is
+// (gguf.cpp:1439 @5266f24da). `gguf_write_out` (gguf.cpp:1622 @5266f24da) is
 // already a template over the writer type, so every call is monomorphic at the
 // one place it matters. `Writer(Impl)` settles that bet at compile time:
 // `Impl` supplies the three, `Writer` supplies everything built on them.
@@ -1985,11 +1985,11 @@ fn Writer(comptime Impl: type) type {
         const Self = @This();
 
         impl_: Impl,
-        /// Ports `gguf_writer_base`'s `written_bytes` (gguf.cpp:1434 @c1d0e7a00).
+        /// Ports `gguf_writer_base`'s `written_bytes` (gguf.cpp:1434 @5266f24da).
         written_bytes: usize = 0,
 
         /// Ports `gguf_writer_base`'s pure-virtual `write` (gguf.cpp:1439
-        /// @c1d0e7a00), the `int8_t` overload, dispatched to the concrete
+        /// @5266f24da), the `int8_t` overload, dispatched to the concrete
         /// writer.
         fn writeByte(self: *Self, val: u8) WriteError!void {
             try self.impl_.writeByte(val);
@@ -1997,14 +1997,14 @@ fn Writer(comptime Impl: type) type {
         }
 
         /// Ports `gguf_writer_base`'s pure-virtual `write` (gguf.cpp:1440
-        /// @c1d0e7a00), the `std::vector<int8_t>` overload, dispatched to the
+        /// @5266f24da), the `std::vector<int8_t>` overload, dispatched to the
         /// concrete writer.
         fn writeBytes(self: *Self, val: []const u8) WriteError!void {
             try self.impl_.writeBytes(val);
             self.written_bytes += val.len;
         }
 
-        /// Ports `gguf_writer_base`'s templated `write` (gguf.cpp:1444 @c1d0e7a00).
+        /// Ports `gguf_writer_base`'s templated `write` (gguf.cpp:1444 @5266f24da).
         ///
         /// Byte at a time, as the C++ does. That matters for the file writer:
         /// the C++ throws on the first `fputc` that disagrees, so a short write
@@ -2014,14 +2014,14 @@ fn Writer(comptime Impl: type) type {
             for (bytes) |b| try self.writeByte(b);
         }
 
-        /// Ports `gguf_writer_base`'s `bool` `write` (gguf.cpp:1450 @c1d0e7a00).
+        /// Ports `gguf_writer_base`'s `bool` `write` (gguf.cpp:1450 @5266f24da).
         fn writeBool(self: *Self, val: bool) WriteError!void {
             const val8: u8 = if (val) 1 else 0;
             try self.writeByte(val8);
         }
 
         /// Ports `gguf_writer_base`'s `std::string` `write`
-        /// (gguf.cpp:1455 @c1d0e7a00): a `u64` length then the bytes, with no
+        /// (gguf.cpp:1455 @5266f24da): a `u64` length then the bytes, with no
         /// terminator.
         fn writeStr(self: *Self, val: []const u8) WriteError!void {
             {
@@ -2032,13 +2032,13 @@ fn Writer(comptime Impl: type) type {
         }
 
         /// Ports `gguf_writer_base`'s two enum overloads of `write`, `write`
-        /// (gguf.cpp:1469, 1473 @c1d0e7a00). Both widen to `int32_t`.
+        /// (gguf.cpp:1469, 1473 @5266f24da). Both widen to `int32_t`.
         fn writeEnum(self: *Self, val: c_uint) WriteError!void {
             try self.write(@as(i32, @bitCast(val)));
         }
 
         /// Ports `gguf_writer_base`'s `gguf_kv` overload of `write`
-        /// (gguf.cpp:1477 @c1d0e7a00).
+        /// (gguf.cpp:1477 @5266f24da).
         fn writeKv(self: *Self, kv: *const Kv) WriteError!void {
             const ne: u64 = kv.getNe();
 
@@ -2075,7 +2075,7 @@ fn Writer(comptime Impl: type) type {
         }
 
         /// Ports `gguf_writer_base`'s `write_tensor_meta`
-        /// (gguf.cpp:1518 @c1d0e7a00).
+        /// (gguf.cpp:1518 @5266f24da).
         ///
         /// Writes `n_dims` as `ggml_n_dims` reports it — the trailing extents
         /// that are 1 are not written, and the reader fills them back in.
@@ -2093,7 +2093,7 @@ fn Writer(comptime Impl: type) type {
             try self.write(info.offset);
         }
 
-        /// Ports `gguf_writer_base`'s `pad` (gguf.cpp:1531 @c1d0e7a00).
+        /// Ports `gguf_writer_base`'s `pad` (gguf.cpp:1531 @5266f24da).
         fn pad(self: *Self, alignment: usize) WriteError!void {
             while (self.written_bytes % alignment != 0) {
                 const zero: u8 = 0;
@@ -2102,7 +2102,7 @@ fn Writer(comptime Impl: type) type {
         }
 
         /// Ports the `write_tensor_data`, `write_tensor_data` overrides of the
-        /// buffer and file writers (gguf.cpp:1557, 1602 @c1d0e7a00).
+        /// buffer and file writers (gguf.cpp:1557, 1602 @5266f24da).
         fn writeTensorData(self: *Self, info: *const TensorInfo, offset_data: usize, alignment: usize) WriteError!void {
             try self.impl_.writeTensorData(self, info, offset_data, alignment);
             try self.pad(alignment);
@@ -2110,7 +2110,7 @@ fn Writer(comptime Impl: type) type {
     };
 }
 
-/// Ports `struct gguf_writer_buf` (gguf.cpp:1540 @c1d0e7a00).
+/// Ports `struct gguf_writer_buf` (gguf.cpp:1540 @5266f24da).
 ///
 /// Cannot fail: the C++'s `push_back` and `insert` only throw `std::bad_alloc`,
 /// which this port turns into an abort. Its methods still carry `WriteError` so
@@ -2118,18 +2118,18 @@ fn Writer(comptime Impl: type) type {
 const BufWriter = struct {
     buf: *std.ArrayList(u8),
 
-    /// Ports `gguf_writer_buf`'s `int8_t` `write` (gguf.cpp:1547 @c1d0e7a00).
+    /// Ports `gguf_writer_buf`'s `int8_t` `write` (gguf.cpp:1547 @5266f24da).
     fn writeByte(self: *BufWriter, val: u8) WriteError!void {
         self.buf.append(allocator, val) catch oom();
     }
 
     /// Ports `gguf_writer_buf`'s `std::vector<int8_t>` `write`
-    /// (gguf.cpp:1552 @c1d0e7a00).
+    /// (gguf.cpp:1552 @5266f24da).
     fn writeBytes(self: *BufWriter, val: []const u8) WriteError!void {
         self.buf.appendSlice(allocator, val) catch oom();
     }
 
-    /// Ports `gguf_writer_buf`'s `write_tensor_data` (gguf.cpp:1557 @c1d0e7a00).
+    /// Ports `gguf_writer_buf`'s `write_tensor_data` (gguf.cpp:1557 @5266f24da).
     ///
     /// The `pad` the C++ does at the end lives in the generic caller, so it is
     /// not repeated here.
@@ -2158,11 +2158,11 @@ const BufWriter = struct {
     }
 };
 
-/// Ports `struct gguf_writer_file` (gguf.cpp:1578 @c1d0e7a00).
+/// Ports `struct gguf_writer_file` (gguf.cpp:1578 @5266f24da).
 const FileWriter = struct {
     file: *c.FILE,
 
-    /// Ports `gguf_writer_file`'s `int8_t` `write` (gguf.cpp:1585 @c1d0e7a00).
+    /// Ports `gguf_writer_file`'s `int8_t` `write` (gguf.cpp:1585 @5266f24da).
     ///
     /// The C++ throws `std::runtime_error` when `fputc` does not echo the byte
     /// back; the log line that `gguf_write_to_file_ptr` would print from
@@ -2180,7 +2180,7 @@ const FileWriter = struct {
     }
 
     /// Ports `gguf_writer_file`'s `std::vector<int8_t>` `write`
-    /// (gguf.cpp:1594 @c1d0e7a00).
+    /// (gguf.cpp:1594 @5266f24da).
     fn writeBytes(self: *FileWriter, val: []const u8) WriteError!void {
         if (val.len == 0) return;
         const ret = Libc.fwrite(@ptrCast(val.ptr), 1, val.len, self.file);
@@ -2193,7 +2193,7 @@ const FileWriter = struct {
         }
     }
 
-    /// Ports `gguf_writer_file`'s `write_tensor_data` (gguf.cpp:1602 @c1d0e7a00).
+    /// Ports `gguf_writer_file`'s `write_tensor_data` (gguf.cpp:1602 @5266f24da).
     fn writeTensorData(
         self: *FileWriter,
         w: *Writer(FileWriter),
@@ -2221,7 +2221,7 @@ const FileWriter = struct {
     }
 };
 
-/// Ports `gguf_write_out` (gguf.cpp:1622 @c1d0e7a00).
+/// Ports `gguf_write_out` (gguf.cpp:1622 @5266f24da).
 ///
 /// Parameters:
 /// - `ctx`: the context to serialise.
@@ -2263,7 +2263,7 @@ fn writeOut(ctx: *const Context, gw: anytype, only_meta: bool) WriteError!void {
     }
 }
 
-/// Ports `gguf_write_to_buf` (gguf.cpp:1660 @c1d0e7a00).
+/// Ports `gguf_write_to_buf` (gguf.cpp:1660 @5266f24da).
 ///
 /// Not exported: the C++ declares it in `ggml-impl.h` inside `#ifdef
 /// __cplusplus` with a `std::vector<int8_t> &` parameter, so its symbol is
@@ -2275,7 +2275,7 @@ fn writeToBuf(ctx: *const Context, buf: *std.ArrayList(u8), only_meta: bool) voi
     writeOut(ctx, &gw, only_meta) catch unreachable;
 }
 
-/// Ports `gguf_write_to_file_ptr` (gguf.cpp:1665 @c1d0e7a00).
+/// Ports `gguf_write_to_file_ptr` (gguf.cpp:1665 @5266f24da).
 ///
 /// Return: true on success. The C++'s `catch (const std::runtime_error &)` is
 /// this `catch`; the message it logged is emitted at the failing write.
@@ -2288,7 +2288,7 @@ export fn gguf_write_to_file_ptr(ctx: ?*const c.struct_gguf_context, file: ?*c.F
     return true;
 }
 
-/// Ports `gguf_write_to_file` (gguf.cpp:1678 @c1d0e7a00).
+/// Ports `gguf_write_to_file` (gguf.cpp:1678 @5266f24da).
 ///
 /// Return: true on success. The file is closed either way.
 export fn gguf_write_to_file(ctx: ?*const c.struct_gguf_context, fname: [*:0]const u8, only_meta: bool) callconv(.c) bool {
@@ -2309,7 +2309,7 @@ export fn gguf_write_to_file(ctx: ?*const c.struct_gguf_context, fname: [*:0]con
     return success;
 }
 
-/// Ports `gguf_get_meta_size` (gguf.cpp:1695 @c1d0e7a00).
+/// Ports `gguf_get_meta_size` (gguf.cpp:1695 @5266f24da).
 ///
 /// Return: the byte length of the metadata section, padding included. Computed
 /// by serialising it and measuring, as the C++ does.
@@ -2321,7 +2321,7 @@ export fn gguf_get_meta_size(ctx: ?*const c.struct_gguf_context) callconv(.c) us
     return buf.items.len;
 }
 
-/// Ports `gguf_get_meta_data` (gguf.cpp:1702 @c1d0e7a00).
+/// Ports `gguf_get_meta_data` (gguf.cpp:1702 @5266f24da).
 ///
 /// Parameters:
 /// - `data`: at least `gguf_get_meta_size` bytes, written in full.

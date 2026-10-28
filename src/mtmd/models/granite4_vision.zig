@@ -7,7 +7,7 @@
 //!
 //! Ports `llama.cpp/tools/mtmd/models/granite4-vision.cpp` and the
 //! `clip_graph_granite4_vision` declaration in
-//! `llama.cpp/tools/mtmd/models/models.h`, at v0.3.0 (`c1d0e7a00`). Each
+//! `llama.cpp/tools/mtmd/models/models.h`, at v0.4.0 (`5266f24da`). Each
 //! declaration names the C++ it replaces and the line it began at.
 
 const std = @import("std");
@@ -20,7 +20,7 @@ const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// Ports `clip_graph_granite4_vision` (tools/mtmd/models/models.h:407 @c1d0e7a00): the
+/// Ports `clip_graph_granite4_vision` (tools/mtmd/models/models.h:412 @5266f24da): the
 /// members the derived graph adds to `clip_graph`.
 const Granite4Vision = struct {
     g: *graph.Graph,
@@ -29,7 +29,7 @@ const Granite4Vision = struct {
     n_tiles: c_int,
     tile_side: c_int, // patches per tile side
 
-    /// Ports `build_tile_inp` (granite4-vision.cpp:25 @c1d0e7a00): split
+    /// Ports `build_tile_inp` (granite4-vision.cpp:25 @5266f24da): split
     /// the stacked tiles into the batch axis, then run the usual patch
     /// embedding.
     fn buildTileInp(self: *const Granite4Vision) T {
@@ -51,7 +51,7 @@ const Granite4Vision = struct {
         return inp;
     }
 
-    /// Ports `gather` (granite4-vision.cpp:44 @c1d0e7a00).
+    /// Ports `gather` (granite4-vision.cpp:44 @5266f24da).
     fn gather(self: *const Granite4Vision, src: T, name: [*:0]const u8, idx_len: c_int) T {
         const ctx0 = self.g.ctx0;
         // one index row per tile, all rows hold the same permutation
@@ -61,7 +61,7 @@ const Granite4Vision = struct {
         return c.ggml_get_rows(ctx0, src, idx);
     }
 
-    /// Ports `interp_down` (granite4-vision.cpp:55 @c1d0e7a00).
+    /// Ports `interp_down` (granite4-vision.cpp:55 @5266f24da).
     fn interpDown(self: *const Granite4Vision, src: T, side: c_int, new_side: c_int) T {
         const ctx0 = self.g.ctx0;
         const n_embd: c_int = @truncate(ne(src, 0));
@@ -76,14 +76,14 @@ const Granite4Vision = struct {
         return c.ggml_reshape_3d(ctx0, t, n_embd, new_side * new_side, self.n_tiles);
     }
 
-    /// The `cbx` lambda (granite4-vision.cpp:94 @c1d0e7a00) of `build_block`.
+    /// The `cbx` lambda (granite4-vision.cpp:94 @5266f24da) of `build_block`.
     fn cbx(t: T, bid: c_int, step: []const u8) void {
         var buf: [256]u8 = undefined;
         const name = std.fmt.bufPrintSentinel(&buf, "g4v_blk{d}_{s}", .{ bid, step }, 0) catch unreachable;
         _ = c.ggml_set_name(t, name.ptr);
     }
 
-    /// The `linear` lambda (granite4-vision.cpp:145 @c1d0e7a00) of
+    /// The `linear` lambda (granite4-vision.cpp:145 @5266f24da) of
     /// `build_block`: a projection with the windows batched.
     fn linear(self: *const Granite4Vision, x: T, w: T, b: T) T {
         const ctx0 = self.g.ctx0;
@@ -93,7 +93,7 @@ const Granite4Vision = struct {
         return t;
     }
 
-    /// Ports `build_block` (granite4-vision.cpp:75 @c1d0e7a00): one
+    /// Ports `build_block` (granite4-vision.cpp:75 @5266f24da): one
     /// WindowQFormer block.
     fn buildBlock(self: *const Granite4Vision, blk: *const model_mod.QfBlock, h: T, bid: c_int, spatial_offset: c_int, image_side: c_int, window_side: c_int, query_side: c_int, qformer_eps: f32) T {
         const g = self.g;
@@ -232,7 +232,7 @@ const Granite4Vision = struct {
         return out;
     }
 
-    /// Ports `build_newline_row` (granite4-vision.cpp:247 @c1d0e7a00): the
+    /// Ports `build_newline_row` (granite4-vision.cpp:247 @5266f24da): the
     /// K-tiled newline row, shape (n_mmproj_embd, 1).
     fn buildNewlineRow(self: *const Granite4Vision, ctx0: ?*c.ggml_context) T {
         const g = self.g;
@@ -260,7 +260,7 @@ const Granite4Vision = struct {
         return c.ggml_reshape_2d(ctx0, nl_row_2d, g.n_mmproj_embd, 1);
     }
 
-    /// Ports `build_anyres_assembly` (granite4-vision.cpp:275 @c1d0e7a00):
+    /// Ports `build_anyres_assembly` (granite4-vision.cpp:275 @5266f24da):
     /// the overview tokens first, then the tile grid in raster order with
     /// one newline per row.
     fn buildAnyresAssembly(self: *const Granite4Vision, cur: T, out_side: c_int) T {
@@ -300,13 +300,13 @@ const Granite4Vision = struct {
     }
 };
 
-/// Ports `build` (granite4-vision.cpp:310 @c1d0e7a00), a member of `clip_graph_granite4_vision`.
+/// Ports `build` (granite4-vision.cpp:310 @5266f24da), a member of `clip_graph_granite4_vision`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
     const hparams = g.hparams;
-    // the member initializers of `clip_graph_granite4_vision` (tools/mtmd/models/models.h:408 @c1d0e7a00)
+    // the member initializers of `clip_graph_granite4_vision` (tools/mtmd/models/models.h:413 @5266f24da)
     const self: Granite4Vision = .{
         .g = g,
         .anyres = g.img.anyres,

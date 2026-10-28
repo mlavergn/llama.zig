@@ -223,10 +223,20 @@ int main(int argc, char ** argv) {
     // dflash: two target layers of the draft's own width. The recipe's
     // scalar sliding-window pattern is not the array dflash reads, so the
     // dense fixture drops the window and the iSWA one gives a pattern.
+    //
+    // Since v0.4.0 the recipe writes rope sections for every architecture,
+    // and DFlash takes M-RoPE whenever it has them (llama_model_rope_type).
+    // Every DFlash fixture drops them. With M-RoPE an embedding batch must
+    // carry four positions per token, and the feature injection the harness
+    // decodes carries one: the C++ batch allocator then reads past the
+    // positions it was given (llama-batch.cpp:786), and the two sides hash
+    // whatever lies there. DSV4 could not keep them anyway: DeepSeek-V4's
+    // graph ropes with ggml_rope_ext, and the C++ aborts on an M-RoPE type.
     const llm_arch df = LLM_ARCH_DFLASH;
     auto df_meta = [&](gguf_context * m) {
         const int32_t tl[2] = {1, 2};
         gguf_set_arr_data(m, kv(df, "target_layers").c_str(), GGUF_TYPE_INT32, tl, 2);
+        gguf_remove_key(m, kv(df, "rope.dimension_sections").c_str());
     };
     run([&] {
         return write_fixture(df, "dflash-dense", seed, dir, [&](gguf_context * m) {
@@ -241,9 +251,41 @@ int main(int argc, char ** argv) {
             gguf_set_arr_data(m, kv(df, "attention.sliding_window_pattern").c_str(), GGUF_TYPE_UINT32, pat, 2);
         }, none_tensors);
     });
+    // DFlash2: the dynamic convolution around every attention and FFN block,
+    // the target's logit transforms, and the selector lattice -- kernel 3
+    // over groups of 64 channels, a rank-16 selector over the top 4
+    // candidates, blocks of 4. The conv and selector tensors are extra
+    // tensors: load_arch_tensors creates them only when the file already has
+    // `selector_hidden.weight`.
+    run([&] {
+        return write_fixture(df, "dflash2", seed, dir, [&](gguf_context * m) {
+            df_meta(m);
+            gguf_remove_key(m, kv(df, "attention.sliding_window").c_str());
+            gguf_set_val_u32(m, kv(df, "block_size").c_str(), 4);
+            gguf_set_val_u32(m, kv(df, "conv_kernel_size").c_str(), 3);
+            gguf_set_val_u32(m, kv(df, "conv_group_size").c_str(), 64);
+            gguf_set_val_u32(m, kv(df, "selector_rank").c_str(), 16);
+            gguf_set_val_u32(m, kv(df, "selector_top_k").c_str(), 4);
+            gguf_set_val_f32(m, kv(df, "logit_scale").c_str(), 0.5f);
+            gguf_set_val_f32(m, kv(df, "final_logit_softcapping").c_str(), 30.0f);
+        }, [&](Extra & x, llama_model * model) {
+            x.f32("selector_predecessor.weight", {16, 128}, seed);
+            x.f32("selector_successor.weight",   {16, 128}, seed);
+            x.f32("selector_hidden.weight",      {256, 16}, seed);
+            const int n_layer = llama_model_n_layer(model);
+            for (int il = 0; il < n_layer; il++) {
+                const std::string blk = "blk." + std::to_string(il) + ".";
+                x.f32((blk + "attn_conv_base").c_str(),        {256, 3, 2}, seed);
+                x.f32((blk + "attn_conv_proj.weight").c_str(), {256, 24},   seed);
+                x.f32((blk + "ffn_conv_base").c_str(),         {256, 3, 2}, seed);
+                x.f32((blk + "ffn_conv_proj.weight").c_str(),  {256, 24},   seed);
+            }
+        });
+    });
     // DSpark: the Markov and confidence heads over a 64-token draft
     // vocabulary, blocks of 8, a bonus anchor slot.
-    auto dspark = [&](const char * name, bool anchor_key) {
+    // Since v0.4.0 the confidence head is optional; one fixture leaves it out.
+    auto dspark = [&](const char * name, bool anchor_key, bool with_conf = true) {
         return write_fixture(df, name, seed, dir, [&](gguf_context * m) {
             df_meta(m);
             gguf_remove_key(m, kv(df, "attention.sliding_window").c_str());
@@ -258,8 +300,10 @@ int main(int argc, char ** argv) {
             x.tensors.push_back(d2t);
             x.f32("markov_w1.weight", {16, 128}, seed);
             x.f32("markov_w2.weight", {16, 64}, seed);
-            x.f32("conf_proj.weight", {256 + 16, 1}, seed);
-            x.f32("conf_proj.bias", {1}, seed);
+            if (with_conf) {
+                x.f32("conf_proj.weight", {256 + 16, 1}, seed);
+                x.f32("conf_proj.bias", {1}, seed);
+            }
         });
     };
     // DFlash's DeepSeek-V4 DSpark backbone: the MoE recipe, with what
@@ -288,6 +332,7 @@ int main(int argc, char ** argv) {
     });
     run([&] { return dspark("dflash-dspark-bonus", true); });
     run([&] { return dspark("dflash-dspark", false); });
+    run([&] { return dspark("dflash-dspark-noconf", false, false); });
 
     llama_backend_free();
     return failed == 0 ? 0 : 1;

@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/quantize/quantize.cpp` at v0.3.0
-//! (`c1d0e7a00`). Each declaration names the C++ it replaces and the line it
+//! Ported from `llama.cpp/tools/quantize/quantize.cpp` at v0.4.0
+//! (`5266f24da`). Each declaration names the C++ it replaces and the line it
 //! began at. The quantizing itself is libllama's `llama_model_quantize`,
 //! ported and gated by `scripts/quant-diff`; this is the command line
 //! around it.
@@ -27,20 +27,20 @@ comptime {
     _ = @import("llama");
 }
 
-/// Mirrors `tensor_type_option` (quantize.cpp:23 @c1d0e7a00).
+/// Mirrors `tensor_type_option` (quantize.cpp:23 @5266f24da).
 const TensorTypeOption = struct {
     name: [:0]u8,
     type: c.ggml_type = c.GGML_TYPE_COUNT,
 };
 
-/// Mirrors `quant_option` (quantize.cpp:28 @c1d0e7a00).
+/// Mirrors `quant_option` (quantize.cpp:28 @5266f24da).
 const QuantOption = struct {
     name: []const u8,
     ftype: c.llama_ftype,
     desc: [*:0]const u8,
 };
 
-/// Ports `QUANT_OPTIONS` (quantize.cpp:34 @c1d0e7a00).
+/// Ports `QUANT_OPTIONS` (quantize.cpp:34 @5266f24da).
 const quant_options = [_]QuantOption{
     .{ .name = "Q1_0", .ftype = c.LLAMA_FTYPE_MOSTLY_Q1_0, .desc = " 1.125 bpw quantization" },
     .{ .name = "Q2_0", .ftype = c.LLAMA_FTYPE_MOSTLY_Q2_0, .desc = " 2.25 bpw quantization (group 64)" },
@@ -90,18 +90,18 @@ const type_line = "%-7.*s : %s\n";
 
 /// `LLM_KV_QUANTIZE_IMATRIX_FILE`, `LLM_KV_QUANTIZE_IMATRIX_DATASET`,
 /// `LLM_KV_QUANTIZE_IMATRIX_N_ENTRIES`, `LLM_KV_QUANTIZE_IMATRIX_N_CHUNKS`
-/// (quantize.cpp:77, 78, 79, 80 @c1d0e7a00).
+/// (quantize.cpp:77, 78, 79, 80 @5266f24da).
 const kv_imatrix_file = "quantize.imatrix.file";
 const kv_imatrix_dataset = "quantize.imatrix.dataset";
 const kv_imatrix_n_entries = "quantize.imatrix.entries_count";
 const kv_imatrix_n_chunks = "quantize.imatrix.chunks_count";
 
-/// Ports `striequals` (quantize.cpp:82 @c1d0e7a00).
+/// Ports `striequals` (quantize.cpp:82 @5266f24da).
 fn striequals(a: []const u8, b: []const u8) bool {
     return std.ascii.eqlIgnoreCase(a, b);
 }
 
-/// Ports `try_parse_ftype` (quantize.cpp:92 @c1d0e7a00): a name, case
+/// Ports `try_parse_ftype` (quantize.cpp:92 @5266f24da): a name, case
 /// folded, or the ftype's number, the first option with it.
 fn tryParseFtype(arena: std.mem.Allocator, ftype_str_in: [:0]const u8, ftype: *c.llama_ftype, ftype_str_out: *[]const u8) !bool {
     const ftype_str = try arena.dupeSentinel(u8, ftype_str_in, 0);
@@ -127,11 +127,11 @@ fn tryParseFtype(arena: std.mem.Allocator, ftype_str_in: [:0]const u8, ftype: *c
     return false;
 }
 
-/// Ports `usage` (quantize.cpp:122 @c1d0e7a00).
+/// Ports `usage` (quantize.cpp:122 @5266f24da).
 fn usage(executable: [*:0]const u8) noreturn {
     io.printf("usage: %s [--help] [--allow-requantize] [--leave-output-tensor] [--pure] [--imatrix] [--include-weights]\n", .{executable});
     io.printf("       [--exclude-weights] [--output-tensor-type] [--token-embedding-type] [--tensor-type] [--tensor-type-file]\n", .{});
-    io.printf("       [--prune-layers] [--keep-split] [--override-kv] [--dry-run]\n", .{});
+    io.printf("       [--prune-layers] [--keep-split] [--override-kv] [--dry-run] [--max-buffer-size]\n", .{});
     io.printf("       model-f32.gguf [model-quant.gguf] type [nthreads]\n\n", .{});
     io.printf("  --allow-requantize\n", .{});
     io.printf("                                      allow requantizing tensors that have already been quantized\n", .{});
@@ -170,7 +170,10 @@ fn usage(executable: [*:0]const u8) noreturn {
     io.printf("                                      WARNING: this is an advanced option, use with care.\n", .{});
     io.printf("  --dry-run\n", .{});
     io.printf("                                      calculate and show the final quantization size without performing quantization\n", .{});
-    io.printf("                                      example: llama-quantize --dry-run model-f32.gguf Q4_K\n\n", .{});
+    io.printf("                                      example: llama-quantize --dry-run model-f32.gguf Q4_K\n", .{});
+    io.printf("  --max-buffer-size MiB\n", .{});
+    io.printf("                                      max amount of tensor rows kept in memory while quantizing one tensor (default: 8192)\n", .{});
+    io.printf("                                      lower it to quantize models with very large tensors on a machine with little RAM\n\n", .{});
     io.printf("note: --include-weights and --exclude-weights cannot be used together\n\n", .{});
     io.printf("-----------------------------------------------------------------------------\n", .{});
     io.printf(" allowed quantization types\n", .{});
@@ -189,7 +192,7 @@ fn usage(executable: [*:0]const u8) noreturn {
 /// `imatrix_data`: name to the values handed to libllama.
 const ImatrixData = std.StringArrayHashMapUnmanaged([]f32);
 
-/// Ports `load_imatrix` (quantize.cpp:180 @c1d0e7a00).
+/// Ports `load_imatrix` (quantize.cpp:183 @5266f24da).
 fn loadImatrix(a: std.mem.Allocator, imatrix_file: [:0]const u8, imatrix_datasets: *std.ArrayList([]const u8), imatrix_data: *ImatrixData) !c_int {
     const func = "load_imatrix";
     var loaded = try common.imatrix_loader.Imatrix.init(a);
@@ -272,7 +275,7 @@ fn loadImatrix(a: std.mem.Allocator, imatrix_file: [:0]const u8, imatrix_dataset
     return loaded.chunk_count;
 }
 
-/// Ports `prepare_imatrix` (quantize.cpp:260 @c1d0e7a00).
+/// Ports `prepare_imatrix` (quantize.cpp:263 @5266f24da).
 fn prepareImatrix(a: std.mem.Allocator, imatrix_file: [:0]const u8, imatrix_dataset: *std.ArrayList([]const u8), included_weights: []const [:0]const u8, excluded_weights: []const [:0]const u8, imatrix_data: *ImatrixData) !c_int {
     var m_last_call: c_int = -1;
     if (imatrix_file.len != 0) m_last_call = try loadImatrix(a, imatrix_file, imatrix_dataset, imatrix_data);
@@ -306,7 +309,7 @@ fn prepareImatrix(a: std.mem.Allocator, imatrix_file: [:0]const u8, imatrix_data
     return m_last_call;
 }
 
-/// Ports `parse_ggml_type` (quantize.cpp:302 @c1d0e7a00).
+/// Ports `parse_ggml_type` (quantize.cpp:305 @5266f24da).
 fn parseGgmlType(arg: [*:0]const u8) c.ggml_type {
     var i: c_int = 0;
     while (i < c.GGML_TYPE_COUNT) : (i += 1) {
@@ -318,7 +321,7 @@ fn parseGgmlType(arg: [*:0]const u8) c.ggml_type {
     return c.GGML_TYPE_COUNT;
 }
 
-/// Ports `parse_tensor_type` (quantize.cpp:314 @c1d0e7a00).
+/// Ports `parse_tensor_type` (quantize.cpp:317 @5266f24da).
 fn parseTensorType(a: std.mem.Allocator, data: [:0]const u8, tensor_type: *std.ArrayList(TensorTypeOption)) !bool {
     const func = "parse_tensor_type";
     const sep_idx = std.mem.indexOfScalar(u8, data, '=') orelse {
@@ -353,8 +356,9 @@ extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
 extern fn fclose(f: *anyopaque) c_int;
 extern fn fgetc(f: *anyopaque) c_int;
 extern fn strerror(errnum: c_int) [*:0]const u8;
+extern fn atoi(s: [*:0]const u8) c_int;
 
-/// Ports `parse_tensor_type_file` (quantize.cpp:346 @c1d0e7a00): each
+/// Ports `parse_tensor_type_file` (quantize.cpp:349 @5266f24da): each
 /// white-space-separated word of the file, as `file >> arg` reads them.
 fn parseTensorTypeFile(a: std.mem.Allocator, filename: [:0]const u8, tensor_type: *std.ArrayList(TensorTypeOption)) !bool {
     const f = fopen(filename.ptr, "r") orelse {
@@ -383,7 +387,7 @@ fn parseTensorTypeFile(a: std.mem.Allocator, filename: [:0]const u8, tensor_type
     return true;
 }
 
-/// Ports `parse_layer_prune` (quantize.cpp:363 @c1d0e7a00).
+/// Ports `parse_layer_prune` (quantize.cpp:366 @5266f24da).
 fn parseLayerPrune(a: std.mem.Allocator, data: [:0]const u8, prune_layers: *std.ArrayList(i32)) !bool {
     const func = "parse_layer_prune";
     var block_ids = try common.strings.split(a, data, ',');
@@ -440,7 +444,7 @@ fn copyStr128(dst: *[128]u8, src: []const u8) void {
     @memcpy(dst[0..n], src[0..n]);
 }
 
-/// Ports `llama_quantize` (quantize.cpp:392 @c1d0e7a00).
+/// Ports `llama_quantize` (quantize.cpp:395 @5266f24da).
 fn quantize(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "llama_quantize";
     const exe = argv[0].ptr;
@@ -507,6 +511,15 @@ fn quantize(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
             try excluded_weights.append(a, argv[arg_idx]);
         } else if (std.mem.eql(u8, arg, "--keep-split")) {
             params.keep_split = true;
+        } else if (std.mem.eql(u8, arg, "--max-buffer-size")) {
+            if (last) usage(exe);
+            arg_idx += 1;
+            const mib = atoi(argv[arg_idx].ptr);
+            if (mib <= 0) {
+                io.eprintf("%s: invalid --max-buffer-size '%s'\n", .{ func, argv[arg_idx].ptr });
+                return 1;
+            }
+            params.max_buf_size = @as(usize, @intCast(mib)) * 1024 * 1024;
         } else {
             usage(exe);
         }
@@ -635,7 +648,7 @@ fn quantize(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
         }
     }
 
-    common.build_info.print(c.llama_version());
+    common.build_info.print(c.llama_version(), common.io.cStderr());
 
     if (params.dry_run) {
         io.eprintf("%s: calculating quantization size for '%s' as %s", .{ func, fname_inp.ptr, ftype_z.ptr });
@@ -676,7 +689,7 @@ fn quantize(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     return 0;
 }
 
-/// Ports `main` (tools/quantize/main.cpp:3 @c1d0e7a00).
+/// Ports `main` (tools/quantize/main.cpp:3 @5266f24da).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

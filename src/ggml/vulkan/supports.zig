@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.3.0
-//! (`c1d0e7a00`): `ggml_backend_vk_device_supports_op`. The device vtable
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
+//! (`5266f24da`): `ggml_backend_vk_device_supports_op`. The device vtable
 //! answers this AND-ed with `ops.ported`, so the scheduler sends nothing to
 //! host code the port does not have yet.
 
@@ -38,7 +38,7 @@ const quant_types = [_]c.ggml_type{
 /// The types a CPY converts f32 to and from.
 const cpy_types = [_]c.ggml_type{ c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0, c.GGML_TYPE_IQ4_NL };
 
-/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:18051 @c1d0e7a00).
+/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:18561 @5266f24da).
 pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
     const device = m.device.getDevice(dev_idx);
 
@@ -85,7 +85,7 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
             else => return false,
         },
         c.GGML_OP_GLU => switch (c.ggml_get_glu_op(op)) {
-            c.GGML_GLU_OP_GEGLU, c.GGML_GLU_OP_REGLU, c.GGML_GLU_OP_SWIGLU, c.GGML_GLU_OP_SWIGLU_OAI, c.GGML_GLU_OP_GEGLU_ERF, c.GGML_GLU_OP_GEGLU_QUICK => {
+            c.GGML_GLU_OP_GEGLU, c.GGML_GLU_OP_REGLU, c.GGML_GLU_OP_SWIGLU, c.GGML_GLU_OP_SWIGLU_OAI, c.GGML_GLU_OP_GEGLU_ERF, c.GGML_GLU_OP_GEGLU_QUICK, c.GGML_GLU_OP_SWIGLU_CLAMP => {
                 return (s(op, 0).type == F32 or s(op, 0).type == F16) and (op.type == F32 or op.type == F16) and
                     s(op, 0).type == op.type and (op.src[1] == null or s(op, 1).type == s(op, 0).type);
             },
@@ -166,9 +166,9 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
         },
         c.GGML_OP_TOP_K => {
             if (!c.ggml_is_contiguous(op) or !c.ggml_is_contiguous(s(op, 0))) return false;
-            const min_pipeline: u32 = @as(u32, @intFromFloat(log2f(@floatFromInt(op.ne[0])))) + 1;
-            if (min_pipeline >= m.device.num_topk_pipelines or device.pipeline_topk_f32[min_pipeline] == null) return false;
-            return true;
+            // large k falls back to radix-select
+            if (m.ops_reduce.topkTournamentFits(device, m.ops.u32Of(op.ne[0]))) return true;
+            return device.pipeline_topk_radix_f32 != null;
         },
         c.GGML_OP_UPSCALE => {
             if (op.op_params[0] & c.GGML_SCALE_FLAG_ANTIALIAS != 0) {
@@ -206,6 +206,16 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
             return batch_N != 0;
         },
         c.GGML_OP_ARGMAX => return c.ggml_is_contiguous(s(op, 0)) and s(op, 0).type == F32,
+        c.GGML_OP_CROSS_ENTROPY_LOSS => return c.ggml_is_contiguous(s(op, 0)) and s(op, 0).type == F32 and
+            c.ggml_is_contiguous(s(op, 1)) and s(op, 1).type == F32 and
+            c.ggml_are_same_shape(s(op, 0), s(op, 1)) and
+            c.ggml_is_contiguous(op) and c.ggml_is_scalar(op) and op.type == F32,
+        c.GGML_OP_CROSS_ENTROPY_LOSS_BACK => return c.ggml_is_contiguous(s(op, 0)) and s(op, 0).type == F32 and c.ggml_is_scalar(s(op, 0)) and
+            c.ggml_is_contiguous(s(op, 1)) and s(op, 1).type == F32 and
+            c.ggml_is_contiguous(s(op, 2)) and s(op, 2).type == F32 and
+            c.ggml_are_same_shape(s(op, 1), s(op, 2)) and
+            c.ggml_are_same_shape(s(op, 1), op) and
+            c.ggml_is_contiguous(op) and op.type == F32,
         c.GGML_OP_COUNT_EQUAL => return c.ggml_is_contiguous(s(op, 0)) and s(op, 0).type == I32 and c.ggml_is_contiguous(s(op, 1)) and s(op, 1).type == I32,
         c.GGML_OP_IM2COL => return c.ggml_is_contiguous(s(op, 1)) and s(op, 1).type == F32 and (op.type == F32 or op.type == F16),
         c.GGML_OP_IM2COL_3D => return s(op, 1).type == F32 and (op.type == F32 or op.type == F16),
@@ -216,6 +226,35 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
         c.GGML_OP_RWKV_WKV6, c.GGML_OP_RWKV_WKV7 => return true,
         // the shader block size is hardcoded to head_size 64
         c.GGML_OP_GATED_LINEAR_ATTN => return s(op, 0).type == F32 and op.type == F32 and s(op, 0).ne[0] == 64,
+        c.GGML_OP_LIGHTNING_INDEXER => {
+            const q = s(op, 0);
+            const k = s(op, 1);
+            const w = s(op, 2);
+            const mk = s(op, 3);
+
+            // the q/w/m types and the shape relationships between q, k, w, m and dst
+            // are already asserted in ggml_lightning_indexer()
+            if (!m.device.lightningIndexerKTypeSupported(k.type) or !device.fp16) return false;
+
+            // the shader block size is hardcoded to head size 128
+            if (q.ne[0] != 128) return false;
+
+            // the shader indexes the buffers by element stride, and is dispatched
+            // without allow_misalign
+            for ([_]*const Tensor{ q, k, w, mk, op }) |t| {
+                const ts = c.ggml_type_size(t.type);
+                if (t.nb[0] != ts or
+                    (m.buffer.tensorOffset(t) + t.view_offs) % device.properties.limits.minStorageBufferOffsetAlignment != 0)
+                {
+                    return false;
+                }
+                // the strides get scaled down from bytes, so the division must be exact
+                for (1..c.GGML_MAX_DIMS) |i| {
+                    if (t.nb[i] % ts != 0) return false;
+                }
+            }
+            return true;
+        },
         c.GGML_OP_GATED_DELTA_NET => {
             const S_v = m.ops.u32Of(s(op, 2).ne[0]);
             if (S_v != 16 and S_v != 32 and S_v != 64 and S_v != 128) return false;

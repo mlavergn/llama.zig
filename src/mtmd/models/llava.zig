@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/llava.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/llava.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -15,7 +15,7 @@ const c = impl.c;
 const T = graph.T;
 const ne = graph.ne;
 
-/// Ports `build` (llava.cpp:5 @c1d0e7a00), a member of `clip_graph_llava`.
+/// Ports `build` (llava.cpp:5 @5266f24da), a member of `clip_graph_llava`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

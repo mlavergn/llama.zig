@@ -11,6 +11,11 @@ $FIX/qwen3-dense.gguf
 -m $FIX/llama-dense.gguf -c 512
 -m $FIX/llama-dense.gguf -c 512 -ngl 3
 -m $FIX/qwen3moe-moe.gguf -ngl all -ts 1
+-m $FIX/llama-dense.gguf -c 512 -ncffn 2 -fitp on
+-m $FIX/llama-dense.gguf -c 512 -ncffn 99 -fitp on
+-m $FIX/qwen3moe-moe.gguf -c 512 -ncmoe 1 -ncffn 1 -fitp on
+-m $FIX/llama-dense.gguf -c 512 -lzm on -fitp on
+-m $FIX/llama-dense.gguf -c 512 -lzm off
 -m $FIX/qwen3-dense.gguf -fitp on
 -m $FIX/gemma3-dense.gguf --fit-print on -c 2048 -ctk q8_0 -ctv q8_0 -fa on
 -m $ROOT/Qwen3-0.6B-Q8_0.gguf -fitp on

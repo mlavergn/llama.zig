@@ -5,7 +5,7 @@
 //!
 //! Ports `llama.cpp/tools/mtmd/mtmd.cpp`, the C types of
 //! `llama.cpp/tools/mtmd/mtmd.h` and `mtmd_input_part` of
-//! `llama.cpp/tools/mtmd/mtmd-internal.h`, at v0.3.0 (`c1d0e7a00`). Each
+//! `llama.cpp/tools/mtmd/mtmd-internal.h`, at v0.4.0 (`5266f24da`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # The C ABI
@@ -42,17 +42,17 @@ const token_null: Token = -1; // LLAMA_TOKEN_NULL
 extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 extern fn free(p: ?*anyopaque) void;
 
-/// `MTMD_SERIALIZATION_VERSION` (mtmd.cpp:30 @c1d0e7a00).
-const serialization_version: u64 = 1;
+/// `MTMD_SERIALIZATION_VERSION` (mtmd.cpp:30 @5266f24da).
+const serialization_version: u64 = 2;
 
 // -----------------------------------------------------------------------------
 // mtmd.h
 
-/// Ports `mtmd_input_chunk_type` (mtmd.h:54 @c1d0e7a00).
+/// Ports `mtmd_input_chunk_type` (mtmd.h:54 @5266f24da).
 pub const ChunkType = enum(c_int) { text, image, audio, _ };
 const chunk_type_count: u32 = 3;
 
-/// Ports `mtmd_input_text` (mtmd.h:69 @c1d0e7a00).
+/// Ports `mtmd_input_text` (mtmd.h:69 @5266f24da).
 pub const InputText = extern struct {
     text: ?[*]const u8,
     text_len: usize,
@@ -60,9 +60,16 @@ pub const InputText = extern struct {
     parse_special: bool,
 };
 
+/// Ports `mtmd_input_part` (mtmd.h:76 @5266f24da).
+pub const InputPart = extern struct {
+    // only text or bitmap can be set, not both
+    text: ?*const InputText,
+    bitmap: ?*const Bitmap,
+};
+
 pub const ProgressCallback = ?*const fn (f32, ?*anyopaque) callconv(.c) bool;
 
-/// Ports `mtmd_context_params` (mtmd.h:90 @c1d0e7a00).
+/// Ports `mtmd_context_params` (mtmd.h:97 @5266f24da).
 pub const ContextParams = extern struct {
     use_gpu: bool,
     device: c.ggml_backend_dev_t,
@@ -81,29 +88,29 @@ pub const ContextParams = extern struct {
     progress_callback_user_data: ?*anyopaque,
 };
 
-/// Ports `mtmd_bitmap_lazy_callback` (mtmd.h:201 @c1d0e7a00).
+/// Ports `mtmd_bitmap_lazy_callback` (mtmd.h:208 @5266f24da).
 pub const LazyCallback = ?*const fn (usize, ?*anyopaque, *?*Bitmap, *?[*:0]u8) callconv(.c) c_int;
 
-/// Ports `mtmd_decoder_pos` (mtmd.h:267 @c1d0e7a00).
+/// Ports `mtmd_decoder_pos` (mtmd.h:274 @5266f24da).
 pub const DecoderPos = extern struct { t: u32, x: u32, y: u32, z: u32 };
 
-/// Ports `mtmd_caps` (mtmd.h:341 @c1d0e7a00).
+/// Ports `mtmd_caps` (mtmd.h:360 @5266f24da).
 pub const Caps = extern struct { inp_vision: bool, inp_audio: bool };
 
-/// Ports `mtmd_gen_audio_type` (mtmd.h:351 @c1d0e7a00).
+/// Ports `mtmd_gen_audio_type` (mtmd.h:370 @5266f24da).
 pub const GenAudioType = enum(c_int) { none, qwen3tts, pockettts };
 
-/// Ports `mtmd_gen_audio_info` (mtmd.h:357 @c1d0e7a00).
+/// Ports `mtmd_gen_audio_info` (mtmd.h:376 @5266f24da).
 pub const GenAudioInfo = extern struct {
     type: GenAudioType,
     sample_rate: i32,
     model_variant: ?[*:0]const u8,
 };
 
-/// Ports `mtmd_gen_process_type` (mtmd.h:366 @c1d0e7a00).
+/// Ports `mtmd_gen_process_type` (mtmd.h:385 @5266f24da).
 pub const GenProcessType = enum(c_int) { gen_code, gen_wav, _ };
 
-/// Ports `mtmd_gen_inp` (mtmd.h:373 @c1d0e7a00).
+/// Ports `mtmd_gen_inp` (mtmd.h:392 @5266f24da).
 pub const GenInp = extern struct {
     type: GenProcessType,
     code0: i32,
@@ -120,7 +127,7 @@ pub const GenInp = extern struct {
     state_size: usize,
 };
 
-/// Ports `mtmd_gen_out` (mtmd.h:394 @c1d0e7a00).
+/// Ports `mtmd_gen_out` (mtmd.h:413 @5266f24da).
 pub const GenOut = extern struct {
     codes: ?[*]const i32,
     n_codes: usize,
@@ -196,7 +203,7 @@ fn addInt(a: usize, b: c_int) usize {
 // -----------------------------------------------------------------------------
 // serialization
 
-/// Ports `mtmd_serialization` (mtmd.cpp:32 @c1d0e7a00): a byte buffer
+/// Ports `mtmd_serialization` (mtmd.cpp:32 @5266f24da): a byte buffer
 /// written and read in native byte order.
 const Ser = struct {
     version: u64 = serialization_version,
@@ -256,32 +263,34 @@ const Ser = struct {
     }
 };
 
-/// Ports `serialize` (mtmd.cpp:103 @c1d0e7a00), a member of `clip_image_f32`. `buf` is
+/// Ports `serialize` (mtmd.cpp:103 @5266f24da), a member of `clip_image_f32`. `buf` is
 /// intentionally not serialized: a loaded image is always a placeholder.
 fn serializeImage(img: *const impl.ImageF32, ser: *Ser) !void {
     try ser.write(bool, img.add_viewsep);
     try ser.write(bool, img.add_newline);
+    try ser.write(i32, img.lead_pad);
     try ser.write(i32, img.nx_);
     try ser.write(i32, img.ny_);
 }
 
-/// Ports `deserialize` (mtmd.cpp:111 @c1d0e7a00), a member of `clip_image_f32`.
+/// Ports `deserialize` (mtmd.cpp:112 @5266f24da), a member of `clip_image_f32`.
 fn deserializeImage(img: *impl.ImageF32, ser: *Ser) Error!void {
     img.add_viewsep = try ser.read(bool);
     img.add_newline = try ser.read(bool);
+    img.lead_pad = try ser.read(i32);
     img.nx_ = try ser.read(i32);
     img.ny_ = try ser.read(i32);
     img.buf.clearRetainingCapacity(); // always a placeholder after loading
 }
 
-/// Ports `serialize` (mtmd.cpp:119 @c1d0e7a00), a member of `clip_image_f32_batch`.
+/// Ports `serialize` (mtmd.cpp:121 @5266f24da), a member of `clip_image_f32_batch`.
 fn serializeBatch(b: *const impl.ImageF32Batch, ser: *Ser) !void {
     try ser.write(bool, b.is_audio);
     try ser.write(u64, b.entries.items.len);
     for (b.entries.items) |*e| try serializeImage(e, ser);
 }
 
-/// Ports `deserialize` (mtmd.cpp:127 @c1d0e7a00), a member of `clip_image_f32_batch`.
+/// Ports `deserialize` (mtmd.cpp:129 @5266f24da), a member of `clip_image_f32_batch`.
 fn deserializeBatch(b: *impl.ImageF32Batch, ser: *Ser) Error!void {
     b.is_audio = try ser.read(bool);
     const n = try ser.read(u64);
@@ -301,7 +310,7 @@ fn deserializeBatch(b: *impl.ImageF32Batch, ser: *Ser) Error!void {
 // -----------------------------------------------------------------------------
 // bitmaps, tokens and chunks
 
-/// Ports `mtmd_bitmap` (mtmd.cpp:148 @c1d0e7a00). An image is RGB
+/// Ports `mtmd_bitmap` (mtmd.cpp:150 @5266f24da). An image is RGB
 /// interleaved, `nx * ny * 3` bytes; audio is `nx` F32 samples and `ny = 1`.
 /// No data marks a placeholder.
 pub const Bitmap = struct {
@@ -317,7 +326,7 @@ pub const Bitmap = struct {
 
     data: std.ArrayList(u8) = .empty,
 
-    /// The image constructor `mtmd_bitmap` (mtmd.cpp:159 @c1d0e7a00).
+    /// The image constructor `mtmd_bitmap` (mtmd.cpp:161 @5266f24da).
     fn createImage(data: ?[*]const u8, nx: u32, ny: u32) !*Bitmap {
         const self = try gpa.create(Bitmap);
         self.* = .{ .nx = nx, .ny = ny, .is_audio = false };
@@ -325,7 +334,7 @@ pub const Bitmap = struct {
         return self;
     }
 
-    /// The audio constructor `mtmd_bitmap` (mtmd.cpp:168 @c1d0e7a00).
+    /// The audio constructor `mtmd_bitmap` (mtmd.cpp:170 @5266f24da).
     fn createAudio(data: ?[*]const u8, n_samples: u32) !*Bitmap {
         const self = try gpa.create(Bitmap);
         self.* = .{ .nx = n_samples, .ny = 1, .is_audio = true };
@@ -343,7 +352,7 @@ pub const Bitmap = struct {
         return self.data.items.len == 0;
     }
 
-    /// `can_merge_with` (mtmd.cpp:189 @c1d0e7a00): [QWEN_VIDEO] can
+    /// `can_merge_with` (mtmd.cpp:191 @5266f24da): [QWEN_VIDEO] can
     /// (temporal) merge if both are images with same size.
     fn canMergeWith(self: *const Bitmap, other: *const Bitmap) bool {
         return self.mergeable and other.mergeable and
@@ -352,7 +361,7 @@ pub const Bitmap = struct {
     }
 };
 
-/// Ports `mtmd_pos_type` (mtmd.cpp:201 @c1d0e7a00): position indexing for
+/// Ports `mtmd_pos_type` (mtmd.cpp:203 @5266f24da): position indexing for
 /// the decoder model.
 pub const PosType = enum(u32) {
     normal, // number of positions equals to number of tokens
@@ -362,7 +371,7 @@ pub const PosType = enum(u32) {
 };
 const pos_type_count: u32 = 3;
 
-/// Ports `mtmd_image_tokens` (mtmd.cpp:208 @c1d0e7a00).
+/// Ports `mtmd_image_tokens` (mtmd.cpp:210 @5266f24da).
 pub const ImageTokens = struct {
     nx: u32 = 0, // number of tokens in x direction
     ny: u32 = 0, // number of tokens in y direction
@@ -378,7 +387,7 @@ pub const ImageTokens = struct {
         gpa.destroy(self);
     }
 
-    /// `n_tokens` (mtmd.cpp:214 @c1d0e7a00).
+    /// `n_tokens` (mtmd.cpp:216 @5266f24da).
     pub fn nTokens(self: *const ImageTokens) u32 {
         if (self.pos == .hunyuanvl) {
             // [BOI] [row0 tokens + newline] ... [row(ny-1) tokens + newline] [EOI]
@@ -420,7 +429,7 @@ pub const ImageTokens = struct {
         return out;
     }
 
-    /// `serialize` (mtmd.cpp:260 @c1d0e7a00).
+    /// `serialize` (mtmd.cpp:262 @5266f24da).
     fn serialize(self: *const ImageTokens, ser: *Ser) !void {
         try ser.write(u32, self.nx);
         try ser.write(u32, self.ny);
@@ -431,7 +440,7 @@ pub const ImageTokens = struct {
         try serializeBatch(&self.batch_f32, ser);
     }
 
-    /// `deserialize` (mtmd.cpp:270 @c1d0e7a00).
+    /// `deserialize` (mtmd.cpp:272 @5266f24da).
     fn deserialize(self: *ImageTokens, ser: *Ser) Error!void {
         self.nx = try ser.read(u32);
         self.ny = try ser.read(u32);
@@ -445,7 +454,7 @@ pub const ImageTokens = struct {
     }
 };
 
-/// Ports `mtmd_audio_tokens` (mtmd.cpp:286 @c1d0e7a00).
+/// Ports `mtmd_audio_tokens` (mtmd.cpp:288 @5266f24da).
 pub const AudioTokens = struct {
     n_tokens: u32 = 0, // number of tokens
     batch_f32: impl.ImageF32Batch = .{}, // preprocessed image patches
@@ -471,14 +480,14 @@ pub const AudioTokens = struct {
         return out;
     }
 
-    /// `serialize` (mtmd.cpp:309 @c1d0e7a00).
+    /// `serialize` (mtmd.cpp:311 @5266f24da).
     fn serialize(self: *const AudioTokens, ser: *Ser) !void {
         try ser.write(u32, self.n_tokens);
         try ser.writeString(self.id.slice());
         try serializeBatch(&self.batch_f32, ser);
     }
 
-    /// `deserialize` (mtmd.cpp:315 @c1d0e7a00).
+    /// `deserialize` (mtmd.cpp:317 @5266f24da).
     fn deserialize(self: *AudioTokens, ser: *Ser) Error!void {
         self.n_tokens = try ser.read(u32);
         try ser.readString(&self.id);
@@ -486,7 +495,7 @@ pub const AudioTokens = struct {
     }
 };
 
-/// Ports `mtmd_input_chunk` (mtmd.cpp:323 @c1d0e7a00).
+/// Ports `mtmd_input_chunk` (mtmd.cpp:325 @5266f24da).
 pub const InputChunk = struct {
     type: ChunkType = .text,
     tokens_text: std.ArrayList(Token) = .empty,
@@ -500,7 +509,7 @@ pub const InputChunk = struct {
         self.* = .{};
     }
 
-    /// `can_batch_with` (mtmd.cpp:329 @c1d0e7a00).
+    /// `can_batch_with` (mtmd.cpp:331 @5266f24da).
     fn canBatchWith(self: *const InputChunk, other: *const InputChunk) bool {
         if (self.type != other.type) return false;
         if (self.tokens_image != null and other.tokens_image != null) {
@@ -510,7 +519,7 @@ pub const InputChunk = struct {
         return false;
     }
 
-    /// `is_placeholder` (mtmd.cpp:343 @c1d0e7a00).
+    /// `is_placeholder` (mtmd.cpp:345 @5266f24da).
     fn isPlaceholder(self: *const InputChunk) bool {
         if (self.type == .image) {
             return self.tokens_image != null and self.tokens_image.?.isPlaceholder();
@@ -520,7 +529,7 @@ pub const InputChunk = struct {
         return false;
     }
 
-    /// `serialize` (mtmd.cpp:352 @c1d0e7a00).
+    /// `serialize` (mtmd.cpp:354 @5266f24da).
     fn serialize(self: *const InputChunk, ser: *Ser) !void {
         try ser.write(u32, @bitCast(@backingInt(self.type)));
 
@@ -534,7 +543,7 @@ pub const InputChunk = struct {
         if (self.tokens_audio) |t| try t.serialize(ser);
     }
 
-    /// `deserialize` (mtmd.cpp:371 @c1d0e7a00).
+    /// `deserialize` (mtmd.cpp:373 @5266f24da).
     fn deserialize(self: *InputChunk, ser: *Ser) Error!void {
         const type_raw = try ser.read(u32);
         if (type_raw >= chunk_type_count) return clip.throwStr("invalid chunk type");
@@ -575,7 +584,7 @@ pub const InputChunk = struct {
     }
 };
 
-/// Ports `mtmd_input_chunks` (mtmd.cpp:413 @c1d0e7a00).
+/// Ports `mtmd_input_chunks` (mtmd.cpp:415 @5266f24da).
 pub const InputChunks = struct {
     entries: std.ArrayList(InputChunk) = .empty,
 
@@ -590,7 +599,7 @@ pub const InputChunks = struct {
     }
 };
 
-/// Ports `mtmd_batch` (mtmd.cpp:417 @c1d0e7a00).
+/// Ports `mtmd_batch` (mtmd.cpp:419 @5266f24da).
 pub const Batch = struct {
     ctx: *Context,
     entries: std.ArrayList(*const InputChunk) = .empty,
@@ -605,16 +614,16 @@ pub const Batch = struct {
     }
 };
 
-/// Ports `mtmd_slice_tmpl` (mtmd.cpp:433 @c1d0e7a00): where some llava-uhd
+/// Ports `mtmd_slice_tmpl` (mtmd.cpp:435 @5266f24da): where some llava-uhd
 /// models put special tokens around image embeddings.
 const SliceTmpl = enum { none, minicpmv_2_5, minicpmv_2_6, llama4, idefics3, lfm2, step3vl };
 
-/// Ports `mtmd_default_marker` (mtmd.cpp:443 @c1d0e7a00).
+/// Ports `mtmd_default_marker` (mtmd.cpp:445 @5266f24da).
 pub fn mtmd_default_marker() callconv(.c) [*:0]const u8 {
     return "<__media__>";
 }
 
-/// Ports `mtmd_get_clip_flash_attn_type` (mtmd.cpp:447 @c1d0e7a00).
+/// Ports `mtmd_get_clip_flash_attn_type` (mtmd.cpp:449 @5266f24da).
 fn clipFlashAttnType(t: c.enum_llama_flash_attn_type) impl.FlashAttnType {
     return switch (t) {
         c.LLAMA_FLASH_ATTN_TYPE_AUTO => .auto,
@@ -624,7 +633,7 @@ fn clipFlashAttnType(t: c.enum_llama_flash_attn_type) impl.FlashAttnType {
     };
 }
 
-/// Ports `mtmd_context_params_default` (mtmd.cpp:456 @c1d0e7a00).
+/// Ports `mtmd_context_params_default` (mtmd.cpp:458 @5266f24da).
 pub fn mtmd_context_params_default() callconv(.c) ContextParams {
     return .{
         .use_gpu = true,
@@ -648,7 +657,7 @@ pub fn mtmd_context_params_default() callconv(.c) ContextParams {
 // -----------------------------------------------------------------------------
 // the context
 
-/// Ports `mtmd_context` (mtmd.cpp:477 @c1d0e7a00).
+/// Ports `mtmd_context` (mtmd.cpp:479 @5266f24da).
 pub const Context = struct {
     ctx_v: ?*clip.Ctx = null, // vision
     ctx_a: ?*clip.Ctx = null, // audio
@@ -700,7 +709,7 @@ pub const Context = struct {
     // batching
     batch_max_tokens: i32 = 0,
 
-    /// The constructor `mtmd_context` (mtmd.cpp:528 @c1d0e7a00). A throw leaks the clip
+    /// The constructor `mtmd_context` (mtmd.cpp:530 @5266f24da). A throw leaks the clip
     /// contexts as the C++'s does -- its destructor never runs for an
     /// object whose constructor threw, and the pointers are raw -- so that
     /// freeing them logs nothing upstream does not.
@@ -790,9 +799,9 @@ pub const Context = struct {
         try list.appendSlice(gpa, toks);
     }
 
-    /// Ports `init_vision` (mtmd.cpp:625 @c1d0e7a00).
+    /// Ports `init_vision` (mtmd.cpp:627 @5266f24da).
     fn initVision(self: *Context) Error!void {
-        impl.ggmlAssert(self.ctx_v != null, "mtmd.cpp", 626, "ctx_v != nullptr");
+        impl.ggmlAssert(self.ctx_v != null, "mtmd.cpp", 628, "ctx_v != nullptr");
         self.image_preproc = null;
 
         const ctx_v = self.ctx_v.?;
@@ -873,7 +882,7 @@ pub const Context = struct {
             .yasa2 => {
                 self.img_beg = "<image>";
                 self.img_end = "</image>";
-                // Currently only supports single-tile preprocessing (see mtmd.cpp:726).
+                // Currently only supports single-tile preprocessing (see mtmd.cpp:728).
                 kind = .fixed_size;
             },
             .gemma3, .gemma3nv => {
@@ -952,6 +961,10 @@ pub const Context = struct {
                 self.img_end = "<|im_end|>";
                 kind = .longest_edge;
             },
+            .deepseek4v => {
+                // no vocab tokens are added; the start/end/newline markers are learned embeddings emitted by the encoder
+                kind = .deepseek4v;
+            },
             .dots_ocr, .dots3note_v => {
                 // <|img|> ... (image embeddings) ... <|endofimg|>
                 self.img_beg = "<|img|>";
@@ -1021,9 +1034,9 @@ pub const Context = struct {
         self.image_preproc = image.Preprocessor.init(kind, hparams, proj);
     }
 
-    /// Ports `init_audio` (mtmd.cpp:913 @c1d0e7a00).
+    /// Ports `init_audio` (mtmd.cpp:920 @5266f24da).
     fn initAudio(self: *Context) Error!void {
-        impl.ggmlAssert(self.ctx_a != null, "mtmd.cpp", 914, "ctx_a != nullptr");
+        impl.ggmlAssert(self.ctx_a != null, "mtmd.cpp", 921, "ctx_a != nullptr");
         if (self.audio_preproc) |*p| p.deinit();
         self.audio_preproc = null;
 
@@ -1090,12 +1103,12 @@ pub const Context = struct {
         try self.audio_preproc.?.initialize();
     }
 
-    /// Ports `get_clip_ctx` (mtmd.cpp:1011 @c1d0e7a00): the clip context
+    /// Ports `get_clip_ctx` (mtmd.cpp:1018 @5266f24da): the clip context
     /// for a chunk's type.
     fn getClipCtx(self: *const Context, chunk: *const InputChunk) ?*clip.Ctx {
         if (chunk.type == .image) return self.ctx_v;
         if (chunk.type == .audio) return self.ctx_a;
-        impl.abort("mtmd.cpp", 1017, "unknown chunk type");
+        impl.abort("mtmd.cpp", 1024, "unknown chunk type");
     }
 
     fn projTypeV(self: *const Context) names.ProjectorType {
@@ -1106,14 +1119,14 @@ pub const Context = struct {
         return if (self.ctx_a) |a| clip.getProjectorType(a) else .unknown;
     }
 
-    /// Ports `n_embd_out` (mtmd.cpp:1028 @c1d0e7a00).
+    /// Ports `n_embd_out` (mtmd.cpp:1035 @5266f24da).
     fn nEmbdOut(self: *const Context) Error!i64 {
         if (self.ctx_v) |v| return clip.nMmprojEmbd(v);
         if (self.ctx_a) |a| return clip.nMmprojEmbd(a);
         return clip.throwStr("no CLIP model loaded");
     }
 
-    /// Ports `mtmd_context` (mtmd.cpp:1038 @c1d0e7a00), its destructor.
+    /// Ports `mtmd_context` (mtmd.cpp:1045 @5266f24da), its destructor.
     fn destroy(self: *Context) void {
         clip.free(self.ctx_a);
         clip.free(self.ctx_v);
@@ -1136,7 +1149,7 @@ pub const Context = struct {
         }
     }
 
-    /// Ports `lookup_token` (mtmd.cpp:1045 @c1d0e7a00): the first token
+    /// Ports `lookup_token` (mtmd.cpp:1052 @5266f24da): the first token
     /// whose special piece is `token_text`.
     fn lookupToken(self: *const Context, token_text: []const u8) Token {
         // TODO @ngxson : this case is currently hit by mtmd_get_memory_usage
@@ -1152,7 +1165,7 @@ pub const Context = struct {
         return token_null;
     }
 
-    /// Ports `token_to_piece` (mtmd.cpp:1060 @c1d0e7a00). The first try
+    /// Ports `token_to_piece` (mtmd.cpp:1067 @5266f24da). The first try
     /// uses libc++'s short-string capacity, 22 bytes.
     fn tokenToPiece(vocab: *const c.struct_llama_vocab, token: Token, special: bool, piece: *std.ArrayList(u8)) !void {
         try resizeZero(u8, piece, 22); // using string internal cache
@@ -1160,14 +1173,14 @@ pub const Context = struct {
         if (n_chars < 0) {
             try resizeZero(u8, piece, @intCast(-n_chars));
             const check = lapi.vocab.llama_token_to_piece(vocab, token, piece.items.ptr, @intCast(piece.items.len), 0, special);
-            impl.ggmlAssert(check == -n_chars, "mtmd.cpp", 1070, "check == -n_chars");
+            impl.ggmlAssert(check == -n_chars, "mtmd.cpp", 1077, "check == -n_chars");
         } else {
             piece.shrinkRetainingCapacity(@intCast(n_chars));
         }
     }
 };
 
-/// Ports `mtmd_init_from_file` (mtmd.cpp:1078 @c1d0e7a00).
+/// Ports `mtmd_init_from_file` (mtmd.cpp:1085 @5266f24da).
 pub fn mtmd_init_from_file(mmproj_fname: [*:0]const u8, text_model: ?*const c.struct_llama_model, ctx_params: ContextParams) callconv(.c) ?*Context {
     return Context.create(mmproj_fname, text_model, &ctx_params, false) catch |e| {
         impl.logErr("%s: error: %s\n", .{ "mtmd_init_from_file", whatOf(e) });
@@ -1175,7 +1188,7 @@ pub fn mtmd_init_from_file(mmproj_fname: [*:0]const u8, text_model: ?*const c.st
     };
 }
 
-/// Ports `mtmd_free` (mtmd.cpp:1089 @c1d0e7a00).
+/// Ports `mtmd_free` (mtmd.cpp:1096 @5266f24da).
 pub fn mtmd_free(ctx: ?*Context) callconv(.c) void {
     if (ctx) |x| x.destroy();
 }
@@ -1183,17 +1196,19 @@ pub fn mtmd_free(ctx: ?*Context) callconv(.c) void {
 // -----------------------------------------------------------------------------
 // tokenizer
 
-/// Ports `mtmd_input_part` (mtmd-internal.h:13 @c1d0e7a00): a bitmap, or
+/// Ports `mtmd_internal_part` (mtmd-internal.h:13 @5266f24da): a bitmap, or
 /// text when it is null.
-pub const InputPart = struct {
+pub const InternalPart = struct {
     text: []const u8,
     bitmap: ?*const Bitmap,
+    // only used for text parts
+    parse_special: bool = false,
 };
 
-/// Ports `mtmd_group_mergeable_bitmaps` (mtmd.cpp:1093 @c1d0e7a00):
+/// Ports `mtmd_group_mergeable_bitmaps` (mtmd.cpp:1100 @5266f24da):
 /// [QWEN_VIDEO] merged parts are erased from `parts`, so one group always
 /// maps to one part. The caller owns the groups.
-pub fn groupMergeableBitmaps(parts: *std.ArrayList(InputPart), n_merge: c_int) !std.ArrayList(std.ArrayList(*const Bitmap)) {
+pub fn groupMergeableBitmaps(parts: *std.ArrayList(InternalPart), n_merge: c_int) !std.ArrayList(std.ArrayList(*const Bitmap)) {
     var output: std.ArrayList(std.ArrayList(*const Bitmap)) = .empty;
     errdefer freeGroups(&output);
     var i: usize = 0;
@@ -1221,16 +1236,16 @@ pub fn freeGroups(groups: *std.ArrayList(std.ArrayList(*const Bitmap))) void {
     groups.deinit(gpa);
 }
 
-/// Ports `mtmd_tokenizer` (mtmd.cpp:1112 @c1d0e7a00).
+/// Ports `mtmd_tokenizer` (mtmd.cpp:1119 @5266f24da).
 const Tokenizer = struct {
-    ctx: *Context,
+    ctx: *const Context,
 
     input_text: []const u8, // note: can contain null bytes
     add_special: bool,
     parse_special: bool,
     vocab: ?*const c.struct_llama_vocab,
 
-    parts: std.ArrayList(InputPart) = .empty,
+    parts: std.ArrayList(InternalPart) = .empty,
     // these will be freed when the tokenizer finishes
     bm_from_lazy: std.ArrayList(*Bitmap) = .empty,
     text_from_lazy: std.ArrayList([*:0]u8) = .empty,
@@ -1238,8 +1253,9 @@ const Tokenizer = struct {
     cur: InputChunks = .{},
     n_images_added: u32 = 0, // 0-based index assigned to the next image chunk
 
-    /// The constructor `mtmd_tokenizer` (mtmd.cpp:1136 @c1d0e7a00).
-    fn init(self: *Tokenizer, ctx: *Context, text: *const InputText, bmps: []const *const Bitmap) Error!void {
+    /// The constructor `mtmd_tokenizer` (mtmd.cpp:1143 @5266f24da) from a
+    /// marked prompt.
+    fn init(self: *Tokenizer, ctx: *const Context, text: *const InputText, bmps: []const *const Bitmap) Error!void {
         self.* = .{
             .ctx = ctx,
             .add_special = text.add_special,
@@ -1255,7 +1271,7 @@ const Tokenizer = struct {
             const input = self.input_text;
             var start: usize = 0;
             while (std.mem.indexOfPos(u8, input, start, marker)) |pos| {
-                if (pos > start) try self.parts.append(gpa, .{ .text = input[start..pos], .bitmap = null });
+                if (pos > start) try self.parts.append(gpa, .{ .text = input[start..pos], .bitmap = null, .parse_special = self.parse_special });
                 if (i_bm >= bmps.len) {
                     return clip.throwErr("number of media markers in text (%zu) exceeds number of bitmaps (%zu)", .{ i_bm + 1, bmps.len });
                 }
@@ -1263,7 +1279,7 @@ const Tokenizer = struct {
                 i_bm += 1;
                 start = pos + marker.len;
             }
-            if (start < input.len) try self.parts.append(gpa, .{ .text = input[start..], .bitmap = null });
+            if (start < input.len) try self.parts.append(gpa, .{ .text = input[start..], .bitmap = null, .parse_special = self.parse_special });
         }
 
         var n_markers: usize = 0;
@@ -1277,7 +1293,31 @@ const Tokenizer = struct {
         try self.expandLazyBitmaps();
     }
 
-    /// The destructor of `mtmd_tokenizer` (mtmd.cpp:1129 @c1d0e7a00).
+    /// The constructor `mtmd_tokenizer` (mtmd.cpp:1180 @5266f24da) from a
+    /// list of parts. Each part has exactly one of text and bitmap set,
+    /// which `mtmd_tokenize_from_parts` has checked.
+    fn initParts(self: *Tokenizer, ctx: *const Context, input_parts: []const *const InputPart, add_special: bool) Error!void {
+        self.* = .{
+            .ctx = ctx,
+            .add_special = add_special,
+            .parse_special = true, // only used for text returned by lazy bitmaps
+            .vocab = ctx.vocab,
+            .input_text = "",
+        };
+
+        for (input_parts) |p| {
+            if (p.text) |t| {
+                const txt: []const u8 = if (t.text_len == 0) "" else t.text.?[0..t.text_len];
+                try self.parts.append(gpa, .{ .text = txt, .bitmap = null, .parse_special = t.parse_special });
+            } else {
+                try self.parts.append(gpa, .{ .text = "", .bitmap = p.bitmap });
+            }
+        }
+
+        try self.expandLazyBitmaps();
+    }
+
+    /// The destructor of `mtmd_tokenizer` (mtmd.cpp:1136 @5266f24da).
     fn deinit(self: *Tokenizer) void {
         for (self.bm_from_lazy.items) |b| b.destroy();
         self.bm_from_lazy.deinit(gpa);
@@ -1287,9 +1327,9 @@ const Tokenizer = struct {
         self.cur.deinit();
     }
 
-    /// Ports `expand_lazy_bitmaps` (mtmd.cpp:1173 @c1d0e7a00).
+    /// Ports `expand_lazy_bitmaps` (mtmd.cpp:1200 @5266f24da).
     fn expandLazyBitmaps(self: *Tokenizer) Error!void {
-        var expanded: std.ArrayList(InputPart) = .empty;
+        var expanded: std.ArrayList(InternalPart) = .empty;
         errdefer expanded.deinit(gpa);
         try expanded.ensureTotalCapacity(gpa, self.parts.items.len);
         for (self.parts.items) |p| {
@@ -1312,7 +1352,7 @@ const Tokenizer = struct {
                             impl.logDbg("%s: lazy callback returned bitmap with dimensions %d x %d\n", .{ "expand_lazy_bitmaps", ob.nx, ob.ny });
                         } else if (out_str) |os| {
                             try self.text_from_lazy.append(gpa, os); // remember to free it later
-                            try expanded.append(gpa, .{ .text = std.mem.span(os), .bitmap = null });
+                            try expanded.append(gpa, .{ .text = std.mem.span(os), .bitmap = null, .parse_special = self.parse_special });
                             impl.logDbg("%s: lazy callback returned text: %s\n", .{ "expand_lazy_bitmaps", os });
                         }
                     } else if (res == -1) {
@@ -1331,7 +1371,7 @@ const Tokenizer = struct {
         self.parts = expanded;
     }
 
-    /// Ports `tokenize` (mtmd.cpp:1215 @c1d0e7a00).
+    /// Ports `tokenize` (mtmd.cpp:1242 @5266f24da).
     fn tokenize(self: *Tokenizer, output: *InputChunks) Error!i32 {
         self.cur.clear();
 
@@ -1339,7 +1379,7 @@ const Tokenizer = struct {
         var n_merge_frames: c_int = 1;
         if (self.ctx.ctx_v) |v| {
             n_merge_frames = clip.modelNTemporalMerge(v);
-            impl.ggmlAssert(n_merge_frames <= 2, "mtmd.cpp", 1222, "n_merge_frames <= 2 && \"we only support merging maximum 2 images for now; open an issue if this model supports merging more\"");
+            impl.ggmlAssert(n_merge_frames <= 2, "mtmd.cpp", 1249, "n_merge_frames <= 2 && \"we only support merging maximum 2 images for now; open an issue if this model supports merging more\"");
         }
 
         var merged_bitmaps = try groupMergeableBitmaps(&self.parts, n_merge_frames);
@@ -1357,7 +1397,7 @@ const Tokenizer = struct {
                 const res = try self.addMedia(bmps);
                 if (res != 0) return res;
             } else {
-                try self.addTextStr(p.text, self.parse_special);
+                try self.addTextStr(p.text, p.parse_special);
             }
         }
 
@@ -1392,7 +1432,7 @@ const Tokenizer = struct {
         return 0;
     }
 
-    /// Ports `add_text` (mtmd.cpp:1281 @c1d0e7a00), the string overload.
+    /// Ports `add_text` (mtmd.cpp:1308 @5266f24da), the string overload.
     fn addTextStr(self: *Tokenizer, txt: []const u8, parse_special: bool) Error!void {
         const vocab = self.vocab orelse return clip.throwStr("llama_vocab is not provided");
         impl.logDbg("%s: %.*s\n", .{ "add_text", @as(c_int, @intCast(txt.len)), txt.ptr });
@@ -1401,7 +1441,7 @@ const Tokenizer = struct {
         try self.addTextTokens(tokens.items);
     }
 
-    /// Ports `add_text` (mtmd.cpp:1290 @c1d0e7a00), the tokens overload.
+    /// Ports `add_text` (mtmd.cpp:1317 @5266f24da), the tokens overload.
     fn addTextTokens(self: *Tokenizer, tokens: []const Token) !void {
         if (tokens.len == 0) return;
         // if last entry is also a text chunk, add tokens to it instead of creating new chunk
@@ -1422,9 +1462,9 @@ const Tokenizer = struct {
         try self.cur.entries.append(gpa, ch);
     }
 
-    /// Ports `add_media` (mtmd.cpp:1311 @c1d0e7a00).
+    /// Ports `add_media` (mtmd.cpp:1338 @5266f24da).
     fn addMedia(self: *Tokenizer, bitmaps: []const *const Bitmap) Error!i32 {
-        impl.ggmlAssert(bitmaps.len != 0, "mtmd.cpp", 1312, "!bitmaps.empty()");
+        impl.ggmlAssert(bitmaps.len != 0, "mtmd.cpp", 1339, "!bitmaps.empty()");
         const ctx = self.ctx;
 
         // note: only one type of media is supported per call, caller should enforce this
@@ -1444,8 +1484,8 @@ const Tokenizer = struct {
 
             for (bitmaps) |bmp| {
                 // sanity check
-                impl.ggmlAssert(!bmp.is_audio, "mtmd.cpp", 1335, "!bmp->is_audio");
-                impl.ggmlAssert(ctx.image_preproc != null, "mtmd.cpp", 1336, "ctx->image_preproc != nullptr");
+                impl.ggmlAssert(!bmp.is_audio, "mtmd.cpp", 1362, "!bmp->is_audio");
+                impl.ggmlAssert(ctx.image_preproc != null, "mtmd.cpp", 1363, "ctx->image_preproc != nullptr");
                 if (bmp.nx <= 0 or bmp.ny <= 0) {
                     impl.logErr("%s: error: invalid bitmap dimensions: nx = %d, ny = %d\n", .{ "add_media", bmp.nx, bmp.ny });
                     return 2;
@@ -1467,7 +1507,7 @@ const Tokenizer = struct {
 
                 // for llava-uhd style, we need to handle grid too
                 if ((tmp_preproc_out.grid_x > 0 and tmp_preproc_out.grid_y > 0) or tmp_preproc_out.hasOverview()) {
-                    impl.ggmlAssert(bitmaps.len == 1, "mtmd.cpp", 1362, "bitmaps.size() == 1");
+                    impl.ggmlAssert(bitmaps.len == 1, "mtmd.cpp", 1389, "bitmaps.size() == 1");
                     preproc_out.grid_x = tmp_preproc_out.grid_x;
                     preproc_out.grid_y = tmp_preproc_out.grid_y;
                     preproc_out.overview.deinit();
@@ -1487,7 +1527,7 @@ const Tokenizer = struct {
 
             if (has_tiling_grid) {
                 // [QWEN_VIDEO] we do not support "frame merging" for llama-uhd style, so no batching for now
-                impl.ggmlAssert(bitmaps.len == 1, "mtmd.cpp", 1380, "bitmaps.size() == 1");
+                impl.ggmlAssert(bitmaps.len == 1, "mtmd.cpp", 1407, "bitmaps.size() == 1");
 
                 const n_col = preproc_out.grid_x;
                 const n_row = preproc_out.grid_y;
@@ -1498,7 +1538,7 @@ const Tokenizer = struct {
                     for (chunks.items) |*ch| ch.deinit();
                     chunks.deinit(gpa);
                 }
-                impl.ggmlAssert(chunks.items.len > 0, "mtmd.cpp", 1387, "chunks.size() > 0");
+                impl.ggmlAssert(chunks.items.len > 0, "mtmd.cpp", 1414, "chunks.size() > 0");
 
                 // split_batch_to_chunk must always put the overview image first
                 var ov_chunk = chunks.orderedRemove(0);
@@ -1515,7 +1555,7 @@ const Tokenizer = struct {
                 // add slices (or tiles)
                 if (chunks.items.len != 0) {
                     impl.logDbg("%s: adding %d slices (%d rows x %d cols)\n", .{ "add_media", @as(c_int, @intCast(chunks.items.len)), n_row, n_col });
-                    impl.ggmlAssert(@as(c_int, @intCast(chunks.items.len)) == n_row * n_col, "mtmd.cpp", 1405, "(int)chunks.size() == n_row * n_col");
+                    impl.ggmlAssert(@as(c_int, @intCast(chunks.items.len)) == n_row * n_col, "mtmd.cpp", 1432, "(int)chunks.size() == n_row * n_col");
                     try self.addTextTokens(ctx.tok_slices_start.items);
                     var y: c_int = 0;
                     while (y < n_row) : (y += 1) {
@@ -1564,6 +1604,15 @@ const Tokenizer = struct {
                     return 2;
                 }
 
+                if (ctx.projTypeV() == .deepseek4v) {
+                    // the text model perceives input in blocks of N tokens (N = COMPRESS_PAD_TO = 4, same as the CSA compress ratio)
+                    // image need to be aligned to block size, while adding IMAGE_PAD embeddings to the beginning
+                    const alignment: i32 = 4;
+                    var n_past: usize = 0;
+                    for (self.cur.entries.items) |*e| n_past +%= mtmd_input_chunk_get_n_tokens(e);
+                    preproc_out.entries.items[0].lead_pad = alignment - 1 - @as(i32, @intCast(n_past % alignment));
+                }
+
                 var n_tokens: usize = 0;
                 for (preproc_out.entries.items) |*e| {
                     n_tokens = addInt(n_tokens, clip.nOutputTokens(ctx_v, e));
@@ -1595,7 +1644,7 @@ const Tokenizer = struct {
                 if (ctx.projTypeV() == .hunyuanvl) {
                     image_tokens.pos = .hunyuanvl;
                     image_tokens.image_idx = self.n_images_added;
-                    impl.ggmlAssert(n_tokens == @as(usize, image_tokens.nTokens()), "mtmd.cpp", 1484, "n_tokens == (size_t)image_tokens->n_tokens()");
+                    impl.ggmlAssert(n_tokens == @as(usize, image_tokens.nTokens()), "mtmd.cpp", 1523, "n_tokens == (size_t)image_tokens->n_tokens()");
                 }
 
                 image_tokens.batch_f32.is_audio = false;
@@ -1619,7 +1668,7 @@ const Tokenizer = struct {
         } else {
             // handle audio
 
-            impl.ggmlAssert(bitmaps.len == 1, "mtmd.cpp", 1518, "bitmaps.size() == 1"); // no batching support for now
+            impl.ggmlAssert(bitmaps.len == 1, "mtmd.cpp", 1557, "bitmaps.size() == 1"); // no batching support for now
             const bitmap = bitmaps[0];
 
             const ctx_a = ctx.ctx_a orelse {
@@ -1635,7 +1684,7 @@ const Tokenizer = struct {
             if (ctx.aud_beg.len != 0) try self.addTextStr(ctx.aud_beg, true); // add audio begin token
 
             // sanity check
-            impl.ggmlAssert(ctx.audio_preproc != null, "mtmd.cpp", 1536, "ctx->audio_preproc != nullptr");
+            impl.ggmlAssert(ctx.audio_preproc != null, "mtmd.cpp", 1575, "ctx->audio_preproc != nullptr");
 
             // preprocess audio
             var mel_spec_chunks: std.ArrayList(audio.Mel) = .empty;
@@ -1649,13 +1698,13 @@ const Tokenizer = struct {
                 var samples: []const f32 = &.{};
                 if (bitmap.isPlaceholder()) {
                     // TODO @ngxson : skip underlay processing if bitmap is placeholder
-                    impl.ggmlAssert(bitmap.ny == 1, "mtmd.cpp", 1546, "bitmap->ny == 1");
+                    impl.ggmlAssert(bitmap.ny == 1, "mtmd.cpp", 1585, "bitmap->ny == 1");
                     try resizeZero(f32, &dummy, bitmap.nx);
                     samples = dummy.items;
                 } else {
                     const buf = bitmap.data.items;
-                    impl.ggmlAssert(buf.len > @sizeOf(f32), "mtmd.cpp", 1553, "buf.size() > sizeof(float)");
-                    impl.ggmlAssert(buf.len % @sizeOf(f32) == 0, "mtmd.cpp", 1554, "buf.size() % sizeof(float) == 0");
+                    impl.ggmlAssert(buf.len > @sizeOf(f32), "mtmd.cpp", 1592, "buf.size() > sizeof(float)");
+                    impl.ggmlAssert(buf.len % @sizeOf(f32) == 0, "mtmd.cpp", 1593, "buf.size() % sizeof(float) == 0");
                     samples = @as([*]const f32, @ptrCast(@alignCast(buf.ptr)))[0 .. buf.len / @sizeOf(f32)];
                 }
                 const ok = try ctx.audio_preproc.?.preprocess(samples, &mel_spec_chunks);
@@ -1670,8 +1719,8 @@ const Tokenizer = struct {
                 const is_placeholder = mel_spec.data.items.len == 0;
 
                 // Validate dimensions fit in clip_image_size (int)
-                impl.ggmlAssert(mel_spec.n_len <= std.math.maxInt(i32) and mel_spec.n_len >= 0, "mtmd.cpp", 1572, "mel_spec.n_len <= INT32_MAX && mel_spec.n_len >= 0");
-                impl.ggmlAssert(mel_spec.n_mel <= std.math.maxInt(i32) and mel_spec.n_mel >= 0, "mtmd.cpp", 1573, "mel_spec.n_mel <= INT32_MAX && mel_spec.n_mel >= 0");
+                impl.ggmlAssert(mel_spec.n_len <= std.math.maxInt(i32) and mel_spec.n_len >= 0, "mtmd.cpp", 1611, "mel_spec.n_len <= INT32_MAX && mel_spec.n_len >= 0");
+                impl.ggmlAssert(mel_spec.n_mel <= std.math.maxInt(i32) and mel_spec.n_mel >= 0, "mtmd.cpp", 1612, "mel_spec.n_mel <= INT32_MAX && mel_spec.n_mel >= 0");
                 var mel_f32: impl.ImageF32 = .{};
                 errdefer mel_f32.deinit();
                 try mel_f32.setSize(.{ .width = @intCast(mel_spec.n_len), .height = @intCast(mel_spec.n_mel) }, is_placeholder, true);
@@ -1698,7 +1747,7 @@ const Tokenizer = struct {
         return 0;
     }
 
-    /// Ports `split_batch_to_chunk` (mtmd.cpp:1610 @c1d0e7a00): the
+    /// Ports `split_batch_to_chunk` (mtmd.cpp:1649 @5266f24da): the
     /// overview, then each slice, as image chunks of one image each.
     /// `preproc_out`'s images are moved out.
     fn splitBatchToChunk(self: *Tokenizer, preproc_out: *image.PreprocOut, id: *const Str) Error!std.ArrayList(InputChunk) {
@@ -1726,8 +1775,8 @@ const Tokenizer = struct {
         return chunks;
     }
 
-    /// `split_batch_to_chunk`'s `process_chunk` lambda (mtmd.cpp:1613
-    /// @c1d0e7a00). `img` is moved out.
+    /// `split_batch_to_chunk`'s `process_chunk` lambda (mtmd.cpp:1652
+    /// @5266f24da). `img` is moved out.
     fn processChunk(self: *Tokenizer, chunks: *std.ArrayList(InputChunk), img: *impl.ImageF32, id: *const Str) Error!void {
         const image_tokens = try gpa.create(ImageTokens);
         image_tokens.* = .{};
@@ -1738,12 +1787,12 @@ const Tokenizer = struct {
         img.* = .{};
         try image_tokens.id.set(id.slice());
 
-        impl.ggmlAssert(image_tokens.nx > 0, "mtmd.cpp", 1620, "image_tokens->nx > 0");
+        impl.ggmlAssert(image_tokens.nx > 0, "mtmd.cpp", 1659, "image_tokens->nx > 0");
 
         try chunks.append(gpa, .{ .type = .image, .tokens_image = image_tokens });
     }
 
-    /// Ports `mtmd_tokenize_text_internal` (mtmd.cpp:1671 @c1d0e7a00),
+    /// Ports `mtmd_tokenize_text_internal` (mtmd.cpp:1710 @5266f24da),
     /// copied upstream from `common_tokenize`. The caller owns the tokens.
     fn tokenizeTextInternal(vocab: *const c.struct_llama_vocab, text: []const u8, add_special: bool, parse_special: bool) Error!std.ArrayList(Token) {
         // upper limit for the number of tokens
@@ -1758,7 +1807,7 @@ const Tokenizer = struct {
         if (n_tokens < 0) {
             try resizeZero(Token, &result, @intCast(-n_tokens));
             const check = lapi.vocab.llama_tokenize(vocab, text.ptr, @truncate(@as(isize, @intCast(text.len))), result.items.ptr, @intCast(result.items.len), add_special, parse_special);
-            impl.ggmlAssert(check == -n_tokens, "mtmd.cpp", 1689, "check == -n_tokens");
+            impl.ggmlAssert(check == -n_tokens, "mtmd.cpp", 1728, "check == -n_tokens");
         } else {
             result.shrinkRetainingCapacity(@intCast(n_tokens));
         }
@@ -1766,8 +1815,8 @@ const Tokenizer = struct {
     }
 };
 
-/// Ports `mtmd_tokenize` (mtmd.cpp:1697 @c1d0e7a00).
-pub fn mtmd_tokenize(ctx: *Context, output: *InputChunks, text: *const InputText, bitmaps: ?[*]const *const Bitmap, n_bitmaps: usize) callconv(.c) i32 {
+/// Ports `mtmd_tokenize` (mtmd.cpp:1736 @5266f24da).
+pub fn mtmd_tokenize(ctx: *const Context, output: *InputChunks, text: *const InputText, bitmaps: ?[*]const *const Bitmap, n_bitmaps: usize) callconv(.c) i32 {
     var tokenizer: Tokenizer = undefined;
     const bmps: []const *const Bitmap = if (n_bitmaps == 0) &.{} else bitmaps.?[0..n_bitmaps];
     tokenizer.init(ctx, text, bmps) catch |e| {
@@ -1782,10 +1831,39 @@ pub fn mtmd_tokenize(ctx: *Context, output: *InputChunks, text: *const InputText
     };
 }
 
+/// Ports `mtmd_tokenize_from_parts` (mtmd.cpp:1750 @5266f24da): as
+/// `mtmd_tokenize`, from a list of text and media parts in place of a
+/// marked prompt. Returns 1 when a part has both or neither of text and
+/// bitmap set.
+pub fn mtmd_tokenize_from_parts(ctx: *const Context, output: *InputChunks, parts: ?[*]const *const InputPart, n_parts: usize, add_special: bool) callconv(.c) i32 {
+    const ps: []const *const InputPart = if (n_parts == 0) &.{} else parts.?[0..n_parts];
+    for (ps, 0..) |p, i| {
+        if ((p.text == null) == (p.bitmap == null)) {
+            impl.logErr("%s: part %zu must have either text or bitmap set, not both\n", .{ "mtmd_tokenize_from_parts", i });
+            return 1;
+        }
+        if (p.text != null and p.text.?.text == null) {
+            impl.logErr("%s: part %zu has null text pointer\n", .{ "mtmd_tokenize_from_parts", i });
+            return 1;
+        }
+    }
+    var tokenizer: Tokenizer = undefined;
+    tokenizer.initParts(ctx, ps, add_special) catch |e| {
+        tokenizer.deinit();
+        impl.logErr("%s: error: %s\n", .{ "mtmd_tokenize_from_parts", whatOf(e) });
+        return 2;
+    };
+    defer tokenizer.deinit();
+    return tokenizer.tokenize(output) catch |e| {
+        impl.logErr("%s: error: %s\n", .{ "mtmd_tokenize_from_parts", whatOf(e) });
+        return 2;
+    };
+}
+
 // -----------------------------------------------------------------------------
 // encoding
 
-/// Ports `mtmd_encode_impl` (mtmd.cpp:1711 @c1d0e7a00).
+/// Ports `mtmd_encode_impl` (mtmd.cpp:1774 @5266f24da).
 fn encodeImpl(ctx: *Context, image_tokens: *const ImageTokens, out_embd: *std.ArrayList(f32)) Error!i32 {
     const ctx_clip = ctx.ctx_v orelse {
         impl.logErr("%s: this API does not support non-vision input, please use mtmd_encode_chunk instead\n", .{"mtmd_encode_impl"});
@@ -1805,7 +1883,7 @@ fn encodeImpl(ctx: *Context, image_tokens: *const ImageTokens, out_embd: *std.Ar
     return if (ok) 0 else 1;
 }
 
-/// Ports `mtmd_encode_chunk_impl` (mtmd.cpp:1736 @c1d0e7a00).
+/// Ports `mtmd_encode_chunk_impl` (mtmd.cpp:1799 @5266f24da).
 fn encodeChunkImpl(ctx: *Context, chunk: *const InputChunk, out_embd: *std.ArrayList(f32)) Error!i32 {
     if (chunk.type == .text) {
         impl.logWrn("mtmd_encode_chunk has no effect for text chunks\n", .{});
@@ -1847,7 +1925,7 @@ fn encodeChunkImpl(ctx: *Context, chunk: *const InputChunk, out_embd: *std.Array
     return 1;
 }
 
-/// Ports `mtmd_encode_chunk` (mtmd.cpp:1781 @c1d0e7a00): the non-batching
+/// Ports `mtmd_encode_chunk` (mtmd.cpp:1844 @5266f24da): the non-batching
 /// version.
 pub fn mtmd_encode_chunk(ctx: *Context, chunk: *const InputChunk) callconv(.c) i32 {
     return encodeChunkImpl(ctx, chunk, &ctx.out_embd) catch |e| {
@@ -1856,7 +1934,7 @@ pub fn mtmd_encode_chunk(ctx: *Context, chunk: *const InputChunk) callconv(.c) i
     };
 }
 
-/// Ports `mtmd_encode` (mtmd.cpp:1791 @c1d0e7a00).
+/// Ports `mtmd_encode` (mtmd.cpp:1854 @5266f24da).
 pub fn mtmd_encode(ctx: *Context, image_tokens: *const ImageTokens) callconv(.c) i32 {
     return encodeImpl(ctx, image_tokens, &ctx.out_embd) catch |e| {
         impl.logErr("%s: error: %s\n", .{ "mtmd_encode", whatOf(e) });
@@ -1864,7 +1942,7 @@ pub fn mtmd_encode(ctx: *Context, image_tokens: *const ImageTokens) callconv(.c)
     };
 }
 
-/// Ports `mtmd_get_output_embd` (mtmd.cpp:1800 @c1d0e7a00).
+/// Ports `mtmd_get_output_embd` (mtmd.cpp:1863 @5266f24da).
 pub fn mtmd_get_output_embd(ctx: *Context) callconv(.c) ?[*]f32 {
     return dataPtr(f32, &ctx.out_embd);
 }
@@ -1872,7 +1950,7 @@ pub fn mtmd_get_output_embd(ctx: *Context) callconv(.c) ?[*]f32 {
 // -----------------------------------------------------------------------------
 // audio generation
 
-/// Ports `mtmd_gen_audio_get_info` (mtmd.cpp:1808 @c1d0e7a00).
+/// Ports `mtmd_gen_audio_get_info` (mtmd.cpp:1871 @5266f24da).
 pub fn mtmd_gen_audio_get_info(ctx: *const Context) callconv(.c) GenAudioInfo {
     var info: GenAudioInfo = .{ .type = .none, .sample_rate = 0, .model_variant = "" };
     const g = ctx.ctx_gen_a orelse {
@@ -1895,7 +1973,7 @@ pub fn mtmd_gen_audio_get_info(ctx: *const Context) callconv(.c) GenAudioInfo {
     return info;
 }
 
-/// Ports `mtmd_gen_inp_default` (mtmd.cpp:1832 @c1d0e7a00).
+/// Ports `mtmd_gen_inp_default` (mtmd.cpp:1895 @5266f24da).
 pub fn mtmd_gen_inp_default(ctx: *const Context) callconv(.c) GenInp {
     var inp = std.mem.zeroes(GenInp);
     inp.type = .gen_code;
@@ -1927,7 +2005,7 @@ fn moveList(comptime T: type, dst: *std.ArrayList(T), src: *std.ArrayList(T)) vo
     src.* = .empty;
 }
 
-/// Ports `mtmd_gen_audio_process_impl` (mtmd.cpp:1859 @c1d0e7a00).
+/// Ports `mtmd_gen_audio_process_impl` (mtmd.cpp:1922 @5266f24da).
 fn genAudioProcessImpl(ctx: *Context, inp: *const GenInp, out: *GenOut) Error!i32 {
     const ctx_clip = ctx.ctx_gen_a orelse {
         impl.logErr("%s: model does not support audio generation\n", .{"mtmd_gen_audio_process_impl"});
@@ -2048,7 +2126,7 @@ fn genAudioProcessImpl(ctx: *Context, inp: *const GenInp, out: *GenOut) Error!i3
     return 0;
 }
 
-/// Ports `mtmd_gen_audio_process` (mtmd.cpp:1970 @c1d0e7a00).
+/// Ports `mtmd_gen_audio_process` (mtmd.cpp:2033 @5266f24da).
 pub fn mtmd_gen_audio_process(ctx: *Context, inp: *const GenInp, out: *GenOut) callconv(.c) i32 {
     return genAudioProcessImpl(ctx, inp, out) catch |e| {
         impl.logErr("%s: error: %s\n", .{ "mtmd_gen_audio_process", whatOf(e) });
@@ -2059,14 +2137,14 @@ pub fn mtmd_gen_audio_process(ctx: *Context, inp: *const GenInp, out: *GenOut) c
 // -----------------------------------------------------------------------------
 // batches
 
-/// Ports `mtmd_batch_init` (mtmd.cpp:1979 @c1d0e7a00).
+/// Ports `mtmd_batch_init` (mtmd.cpp:2042 @5266f24da).
 pub fn mtmd_batch_init(ctx: *Context) callconv(.c) ?*Batch {
     const b = gpa.create(Batch) catch impl.abortUncaught("std::bad_alloc", "std::bad_alloc");
     b.* = .{ .ctx = ctx };
     return b;
 }
 
-/// Ports `mtmd_batch_free` (mtmd.cpp:1983 @c1d0e7a00).
+/// Ports `mtmd_batch_free` (mtmd.cpp:2046 @5266f24da).
 pub fn mtmd_batch_free(batch: ?*Batch) callconv(.c) void {
     if (batch) |b| {
         b.entries.deinit(gpa);
@@ -2075,7 +2153,7 @@ pub fn mtmd_batch_free(batch: ?*Batch) callconv(.c) void {
     }
 }
 
-/// Ports `mtmd_batch_add_chunk` (mtmd.cpp:1989 @c1d0e7a00).
+/// Ports `mtmd_batch_add_chunk` (mtmd.cpp:2052 @5266f24da).
 pub fn mtmd_batch_add_chunk(batch: *Batch, chunk: *const InputChunk) callconv(.c) i32 {
     if (chunk.type == .text) {
         impl.logErr("%s: text chunk is not supported in batch\n", .{"mtmd_batch_add_chunk"});
@@ -2112,7 +2190,7 @@ pub fn mtmd_batch_add_chunk(batch: *Batch, chunk: *const InputChunk) callconv(.c
     return 3; // "cannot batch" error code
 }
 
-/// Ports `mtmd_batch_encode_impl` (mtmd.cpp:2026 @c1d0e7a00).
+/// Ports `mtmd_batch_encode_impl` (mtmd.cpp:2089 @5266f24da).
 fn batchEncodeImpl(batch: *Batch) Error!i32 {
     if (batch.entries.items.len == 0) {
         impl.logErr("%s: batch is empty\n", .{"mtmd_batch_encode_impl"});
@@ -2136,7 +2214,7 @@ fn batchEncodeImpl(batch: *Batch) Error!i32 {
         // copy all entries from other chunks into the first chunk's batch_f32
         // note: skip first entry because it's already in batch_chunk
         for (batch.entries.items[1..]) |chunk| {
-            impl.ggmlAssert(chunk.tokens_image != null, "mtmd.cpp", 2046, "chunk->tokens_image");
+            impl.ggmlAssert(chunk.tokens_image != null, "mtmd.cpp", 2109, "chunk->tokens_image");
             var b1_f32 = try chunk.tokens_image.?.batch_f32.clone();
             defer b1_f32.entries.deinit(gpa);
             try b0_f32.entries.appendSlice(gpa, b1_f32.entries.items);
@@ -2144,7 +2222,7 @@ fn batchEncodeImpl(batch: *Batch) Error!i32 {
     } else if (batch_chunk.tokens_audio) |ta| {
         const b0_f32 = &ta.batch_f32;
         for (batch.entries.items[1..]) |chunk| {
-            impl.ggmlAssert(chunk.tokens_audio != null, "mtmd.cpp", 2058, "chunk->tokens_audio");
+            impl.ggmlAssert(chunk.tokens_audio != null, "mtmd.cpp", 2121, "chunk->tokens_audio");
             var b1_f32 = try chunk.tokens_audio.?.batch_f32.clone();
             defer b1_f32.entries.deinit(gpa);
             try b0_f32.entries.appendSlice(gpa, b1_f32.entries.items);
@@ -2158,7 +2236,7 @@ fn batchEncodeImpl(batch: *Batch) Error!i32 {
     return encodeChunkImpl(batch.ctx, batch_chunk, &batch.output_embd);
 }
 
-/// Ports `mtmd_batch_encode` (mtmd.cpp:2078 @c1d0e7a00).
+/// Ports `mtmd_batch_encode` (mtmd.cpp:2141 @5266f24da).
 pub fn mtmd_batch_encode(batch: *Batch) callconv(.c) i32 {
     return batchEncodeImpl(batch) catch |e| {
         impl.logErr("%s: error: %s\n", .{ "mtmd_batch_encode", whatOf(e) });
@@ -2166,7 +2244,7 @@ pub fn mtmd_batch_encode(batch: *Batch) callconv(.c) i32 {
     };
 }
 
-/// Ports `mtmd_batch_get_output_embd` (mtmd.cpp:2087 @c1d0e7a00).
+/// Ports `mtmd_batch_get_output_embd` (mtmd.cpp:2150 @5266f24da).
 pub fn mtmd_batch_get_output_embd(batch: *Batch, chunk: ?*const InputChunk) callconv(.c) ?[*]f32 {
     if (batch.output_embd.items.len == 0) {
         impl.logErr("%s: batch has not been encoded yet\n", .{"mtmd_batch_get_output_embd"});
@@ -2178,45 +2256,47 @@ pub fn mtmd_batch_get_output_embd(batch: *Batch, chunk: ?*const InputChunk) call
         const offset_prev = offset;
         const n_tokens = mtmd_input_chunk_get_n_tokens(cc);
         offset +%= n_tokens *% n_embd;
-        impl.ggmlAssert(offset_prev < batch.output_embd.items.len, "mtmd.cpp", 2098, "offset_prev <  batch->output_embd.size()");
-        impl.ggmlAssert(offset <= batch.output_embd.items.len, "mtmd.cpp", 2099, "offset      <= batch->output_embd.size()");
+        impl.ggmlAssert(offset_prev < batch.output_embd.items.len, "mtmd.cpp", 2161, "offset_prev <  batch->output_embd.size()");
+        impl.ggmlAssert(offset <= batch.output_embd.items.len, "mtmd.cpp", 2162, "offset      <= batch->output_embd.size()");
         if (cc == chunk) return batch.output_embd.items.ptr + offset_prev;
     }
     return null; // not found
 }
 
-/// Ports `mtmd_decode_use_non_causal` (mtmd.cpp:2107 @c1d0e7a00).
+/// Ports `mtmd_decode_use_non_causal` (mtmd.cpp:2170 @5266f24da).
 pub fn mtmd_decode_use_non_causal(ctx: *const Context, chunk: ?*const InputChunk) callconv(.c) bool {
     var proj_type = ctx.projTypeV();
     if (chunk != null and chunk.?.type == .audio) proj_type = ctx.projTypeA();
     return switch (proj_type) {
-        .gemma3, .gemma4v, .gemma4uv => true,
+        // E2B (n_embd = 1536) and E4B (n_embd = 2560) always use causal
+        .gemma4v => ctx.n_embd_text != 1536 and ctx.n_embd_text != 2560,
+        .gemma4uv, .gemma3, .deepseek4v => true,
         else => false,
     };
 }
 
-/// Ports `mtmd_decode_use_mrope` (mtmd.cpp:2122 @c1d0e7a00).
+/// Ports `mtmd_decode_use_mrope` (mtmd.cpp:2188 @5266f24da).
 pub fn mtmd_decode_use_mrope(ctx: *const Context) callconv(.c) bool {
     return ctx.pos_type == .mrope;
 }
 
-/// Ports `mtmd_support_vision` (mtmd.cpp:2126 @c1d0e7a00).
+/// Ports `mtmd_support_vision` (mtmd.cpp:2192 @5266f24da).
 pub fn mtmd_support_vision(ctx: *const Context) callconv(.c) bool {
     return ctx.ctx_v != null;
 }
 
-/// Ports `mtmd_support_audio` (mtmd.cpp:2130 @c1d0e7a00).
+/// Ports `mtmd_support_audio` (mtmd.cpp:2196 @5266f24da).
 pub fn mtmd_support_audio(ctx: *const Context) callconv(.c) bool {
     return ctx.ctx_a != null;
 }
 
-/// Ports `mtmd_get_audio_sample_rate` (mtmd.cpp:2134 @c1d0e7a00).
+/// Ports `mtmd_get_audio_sample_rate` (mtmd.cpp:2200 @5266f24da).
 pub fn mtmd_get_audio_sample_rate(ctx: *const Context) callconv(.c) c_int {
     const a = ctx.ctx_a orelse return -1;
     return clip.getHparams(a).audio_sample_rate;
 }
 
-/// Ports `mtmd_get_marker` (mtmd.cpp:2141 @c1d0e7a00).
+/// Ports `mtmd_get_marker` (mtmd.cpp:2207 @5266f24da).
 pub fn mtmd_get_marker(ctx: *const Context) callconv(.c) [*:0]const u8 {
     return ctx.media_marker.cStr();
 }
@@ -2228,67 +2308,67 @@ fn oom() noreturn {
     impl.abortUncaught("std::bad_alloc", "std::bad_alloc");
 }
 
-/// Ports `mtmd_bitmap_init` (mtmd.cpp:2151 @c1d0e7a00).
+/// Ports `mtmd_bitmap_init` (mtmd.cpp:2217 @5266f24da).
 pub fn mtmd_bitmap_init(nx: u32, ny: u32, data: ?[*]const u8) callconv(.c) *Bitmap {
     return Bitmap.createImage(data, nx, ny) catch oom();
 }
 
-/// Ports `mtmd_bitmap_init_from_audio` (mtmd.cpp:2158 @c1d0e7a00). The
+/// Ports `mtmd_bitmap_init_from_audio` (mtmd.cpp:2224 @5266f24da). The
 /// count is truncated to the bitmap's `uint32_t` as the C++'s constructor
 /// truncates it.
 pub fn mtmd_bitmap_init_from_audio(n_samples: usize, data: ?[*]const f32) callconv(.c) *Bitmap {
     const bitmap = Bitmap.createAudio(@ptrCast(data), @truncate(n_samples)) catch oom();
-    impl.ggmlAssert(bitmap.is_audio, "mtmd.cpp", 2161, "bitmap->is_audio");
+    impl.ggmlAssert(bitmap.is_audio, "mtmd.cpp", 2227, "bitmap->is_audio");
     if (!bitmap.isPlaceholder()) {
-        impl.ggmlAssert(bitmap.data.items.len == n_samples *% @sizeOf(f32), "mtmd.cpp", 2163, "bitmap->get_ro_buf().size() == n_samples * sizeof(float)");
+        impl.ggmlAssert(bitmap.data.items.len == n_samples *% @sizeOf(f32), "mtmd.cpp", 2229, "bitmap->get_ro_buf().size() == n_samples * sizeof(float)");
     }
     return bitmap;
 }
 
-/// Ports `mtmd_bitmap_get_nx` (mtmd.cpp:2168 @c1d0e7a00).
+/// Ports `mtmd_bitmap_get_nx` (mtmd.cpp:2234 @5266f24da).
 pub fn mtmd_bitmap_get_nx(bitmap: *const Bitmap) callconv(.c) u32 {
     return bitmap.nx;
 }
 
-/// Ports `mtmd_bitmap_get_ny` (mtmd.cpp:2172 @c1d0e7a00).
+/// Ports `mtmd_bitmap_get_ny` (mtmd.cpp:2238 @5266f24da).
 pub fn mtmd_bitmap_get_ny(bitmap: *const Bitmap) callconv(.c) u32 {
     return bitmap.ny;
 }
 
-/// Ports `mtmd_bitmap_get_data` (mtmd.cpp:2176 @c1d0e7a00).
+/// Ports `mtmd_bitmap_get_data` (mtmd.cpp:2242 @5266f24da).
 pub fn mtmd_bitmap_get_data(bitmap: *const Bitmap) callconv(.c) ?[*]const u8 {
     if (bitmap.isPlaceholder()) return null;
     return bitmap.data.items.ptr;
 }
 
-/// Ports `mtmd_bitmap_get_n_bytes` (mtmd.cpp:2183 @c1d0e7a00).
+/// Ports `mtmd_bitmap_get_n_bytes` (mtmd.cpp:2249 @5266f24da).
 pub fn mtmd_bitmap_get_n_bytes(bitmap: *const Bitmap) callconv(.c) usize {
     if (bitmap.isPlaceholder()) return 0;
     return bitmap.data.items.len;
 }
 
-/// Ports `mtmd_bitmap_is_audio` (mtmd.cpp:2190 @c1d0e7a00).
+/// Ports `mtmd_bitmap_is_audio` (mtmd.cpp:2256 @5266f24da).
 pub fn mtmd_bitmap_is_audio(bitmap: *const Bitmap) callconv(.c) bool {
     return bitmap.is_audio;
 }
 
-/// Ports `mtmd_bitmap_get_id` (mtmd.cpp:2194 @c1d0e7a00).
+/// Ports `mtmd_bitmap_get_id` (mtmd.cpp:2260 @5266f24da).
 pub fn mtmd_bitmap_get_id(bitmap: *const Bitmap) callconv(.c) [*:0]const u8 {
     return bitmap.id.cStr();
 }
 
-/// Ports `mtmd_bitmap_set_id` (mtmd.cpp:2198 @c1d0e7a00).
+/// Ports `mtmd_bitmap_set_id` (mtmd.cpp:2264 @5266f24da).
 pub fn mtmd_bitmap_set_id(bitmap: *Bitmap, id: ?[*:0]const u8) callconv(.c) void {
     bitmap.id.set(if (id) |s| std.mem.span(s) else "") catch oom();
 }
 
-/// Ports `mtmd_bitmap_set_mergeable` (mtmd.cpp:2206 @c1d0e7a00).
+/// Ports `mtmd_bitmap_set_mergeable` (mtmd.cpp:2272 @5266f24da).
 pub fn mtmd_bitmap_set_mergeable(bitmap: *Bitmap, mergeable: bool) callconv(.c) void {
     bitmap.mergeable = mergeable;
 }
 
-/// Ports `mtmd_bitmap_init_lazy` (mtmd.cpp:2210 @c1d0e7a00).
-pub fn mtmd_bitmap_init_lazy(ctx: ?*Context, id: ?[*:0]const u8, user_data: ?*anyopaque, callback: LazyCallback) callconv(.c) *Bitmap {
+/// Ports `mtmd_bitmap_init_lazy` (mtmd.cpp:2276 @5266f24da).
+pub fn mtmd_bitmap_init_lazy(ctx: ?*const Context, id: ?[*:0]const u8, user_data: ?*anyopaque, callback: LazyCallback) callconv(.c) *Bitmap {
     _ = ctx; // reserved for future use
     const bitmap = Bitmap.createImage(null, 0, 0) catch oom();
     bitmap.lazy_callback = callback;
@@ -2297,7 +2377,7 @@ pub fn mtmd_bitmap_init_lazy(ctx: ?*Context, id: ?[*:0]const u8, user_data: ?*an
     return bitmap;
 }
 
-/// Ports `mtmd_bitmap_free` (mtmd.cpp:2222 @c1d0e7a00).
+/// Ports `mtmd_bitmap_free` (mtmd.cpp:2288 @5266f24da).
 pub fn mtmd_bitmap_free(bitmap: ?*Bitmap) callconv(.c) void {
     if (bitmap) |b| b.destroy();
 }
@@ -2305,25 +2385,25 @@ pub fn mtmd_bitmap_free(bitmap: ?*Bitmap) callconv(.c) void {
 // -----------------------------------------------------------------------------
 // mtmd_input_chunks
 
-/// Ports `mtmd_input_chunks_init` (mtmd.cpp:2230 @c1d0e7a00).
+/// Ports `mtmd_input_chunks_init` (mtmd.cpp:2296 @5266f24da).
 pub fn mtmd_input_chunks_init() callconv(.c) *InputChunks {
     const chunks = gpa.create(InputChunks) catch oom();
     chunks.* = .{};
     return chunks;
 }
 
-/// Ports `mtmd_input_chunks_size` (mtmd.cpp:2234 @c1d0e7a00).
+/// Ports `mtmd_input_chunks_size` (mtmd.cpp:2300 @5266f24da).
 pub fn mtmd_input_chunks_size(chunks: *const InputChunks) callconv(.c) usize {
     return chunks.entries.items.len;
 }
 
-/// Ports `mtmd_input_chunks_get` (mtmd.cpp:2238 @c1d0e7a00).
+/// Ports `mtmd_input_chunks_get` (mtmd.cpp:2304 @5266f24da).
 pub fn mtmd_input_chunks_get(chunks: *const InputChunks, idx: usize) callconv(.c) ?*const InputChunk {
     if (idx >= chunks.entries.items.len) return null;
     return &chunks.entries.items[idx];
 }
 
-/// Ports `mtmd_input_chunks_free` (mtmd.cpp:2245 @c1d0e7a00).
+/// Ports `mtmd_input_chunks_free` (mtmd.cpp:2311 @5266f24da).
 pub fn mtmd_input_chunks_free(chunks: ?*InputChunks) callconv(.c) void {
     if (chunks) |ch| {
         ch.deinit();
@@ -2334,12 +2414,12 @@ pub fn mtmd_input_chunks_free(chunks: ?*InputChunks) callconv(.c) void {
 // -----------------------------------------------------------------------------
 // mtmd_input_chunk
 
-/// Ports `mtmd_input_chunk_get_type` (mtmd.cpp:2253 @c1d0e7a00).
+/// Ports `mtmd_input_chunk_get_type` (mtmd.cpp:2319 @5266f24da).
 pub fn mtmd_input_chunk_get_type(chunk: *const InputChunk) callconv(.c) ChunkType {
     return chunk.type;
 }
 
-/// Ports `mtmd_input_chunk_get_tokens_text` (mtmd.cpp:2257 @c1d0e7a00).
+/// Ports `mtmd_input_chunk_get_tokens_text` (mtmd.cpp:2323 @5266f24da).
 pub fn mtmd_input_chunk_get_tokens_text(chunk: *const InputChunk, n_tokens_output: *usize) callconv(.c) ?[*]const Token {
     if (chunk.type == .text) {
         n_tokens_output.* = chunk.tokens_text.items.len;
@@ -2349,33 +2429,33 @@ pub fn mtmd_input_chunk_get_tokens_text(chunk: *const InputChunk, n_tokens_outpu
     return null;
 }
 
-/// Ports `mtmd_input_chunk_get_tokens_image` (mtmd.cpp:2266 @c1d0e7a00).
+/// Ports `mtmd_input_chunk_get_tokens_image` (mtmd.cpp:2332 @5266f24da).
 pub fn mtmd_input_chunk_get_tokens_image(chunk: *const InputChunk) callconv(.c) ?*const ImageTokens {
     if (chunk.type == .image) return chunk.tokens_image;
     return null;
 }
 
-/// Ports `mtmd_input_chunk_get_n_tokens` (mtmd.cpp:2273 @c1d0e7a00).
+/// Ports `mtmd_input_chunk_get_n_tokens` (mtmd.cpp:2339 @5266f24da).
 pub fn mtmd_input_chunk_get_n_tokens(chunk: *const InputChunk) callconv(.c) usize {
     return switch (chunk.type) {
         .text => chunk.tokens_text.items.len,
         .image => mtmd_image_tokens_get_n_tokens(chunk.tokens_image.?),
         .audio => chunk.tokens_audio.?.n_tokens,
-        _ => impl.abort("mtmd.cpp", 2281, "invalid chunk type"),
+        _ => impl.abort("mtmd.cpp", 2347, "invalid chunk type"),
     };
 }
 
-/// Ports `mtmd_input_chunk_get_n_pos` (mtmd.cpp:2285 @c1d0e7a00).
+/// Ports `mtmd_input_chunk_get_n_pos` (mtmd.cpp:2351 @5266f24da).
 pub fn mtmd_input_chunk_get_n_pos(chunk: *const InputChunk) callconv(.c) c.llama_pos {
     return switch (chunk.type) {
         .text => @truncate(@as(isize, @intCast(chunk.tokens_text.items.len))),
         .image => mtmd_image_tokens_get_n_pos(chunk.tokens_image.?),
         .audio => @bitCast(chunk.tokens_audio.?.n_tokens),
-        _ => impl.abort("mtmd.cpp", 2293, "invalid chunk type"),
+        _ => impl.abort("mtmd.cpp", 2359, "invalid chunk type"),
     };
 }
 
-/// Ports `mtmd_input_chunk_get_id` (mtmd.cpp:2297 @c1d0e7a00).
+/// Ports `mtmd_input_chunk_get_id` (mtmd.cpp:2363 @5266f24da).
 pub fn mtmd_input_chunk_get_id(chunk: *const InputChunk) callconv(.c) ?[*:0]const u8 {
     if (chunk.type == .image) return chunk.tokens_image.?.id.cStr();
     if (chunk.type == .audio) return chunk.tokens_audio.?.id.cStr();
@@ -2397,12 +2477,12 @@ fn copyChunk(chunk: *const InputChunk) !*InputChunk {
     return copy;
 }
 
-/// Ports `mtmd_input_chunk_copy` (mtmd.cpp:2306 @c1d0e7a00).
+/// Ports `mtmd_input_chunk_copy` (mtmd.cpp:2372 @5266f24da).
 pub fn mtmd_input_chunk_copy(chunk: *const InputChunk) callconv(.c) *InputChunk {
     return copyChunk(chunk) catch oom();
 }
 
-/// Ports `mtmd_input_chunk_free` (mtmd.cpp:2326 @c1d0e7a00).
+/// Ports `mtmd_input_chunk_free` (mtmd.cpp:2392 @5266f24da).
 pub fn mtmd_input_chunk_free(chunk: ?*InputChunk) callconv(.c) void {
     if (chunk) |ch| {
         ch.deinit();
@@ -2410,7 +2490,7 @@ pub fn mtmd_input_chunk_free(chunk: ?*InputChunk) callconv(.c) void {
     }
 }
 
-/// Ports `mtmd_input_chunk_save_impl` (mtmd.cpp:2333 @c1d0e7a00): 0 on
+/// Ports `mtmd_input_chunk_save_impl` (mtmd.cpp:2399 @5266f24da): 0 on
 /// success. The caller owns `out_buf`.
 fn chunkSaveImpl(chunk: *const InputChunk, out_buf: *std.ArrayList(u8)) i32 {
     var ser = Ser.initWrite(serialization_version) catch |e| {
@@ -2426,7 +2506,7 @@ fn chunkSaveImpl(chunk: *const InputChunk, out_buf: *std.ArrayList(u8)) i32 {
     return 0;
 }
 
-/// Ports `mtmd_input_chunk_get_placeholder` (mtmd.cpp:2345 @c1d0e7a00):
+/// Ports `mtmd_input_chunk_get_placeholder` (mtmd.cpp:2411 @5266f24da):
 /// the chunk without its image or audio data.
 pub fn mtmd_input_chunk_get_placeholder(chunk: *const InputChunk) callconv(.c) ?*InputChunk {
     // this is hacky, but still faster than copy the whole batch data
@@ -2436,7 +2516,7 @@ pub fn mtmd_input_chunk_get_placeholder(chunk: *const InputChunk) callconv(.c) ?
     return mtmd_input_chunk_load(buf.items.ptr, buf.items.len);
 }
 
-/// Ports `mtmd_input_chunk_save` (mtmd.cpp:2354 @c1d0e7a00).
+/// Ports `mtmd_input_chunk_save` (mtmd.cpp:2420 @5266f24da).
 pub fn mtmd_input_chunk_save(chunk: *const InputChunk, out_buf: ?[*]u8, out_len: usize, expected_out_len: ?*usize) callconv(.c) i32 {
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
@@ -2452,7 +2532,7 @@ pub fn mtmd_input_chunk_save(chunk: *const InputChunk, out_buf: ?[*]u8, out_len:
     return 0;
 }
 
-/// Ports `mtmd_input_chunk_load` (mtmd.cpp:2374 @c1d0e7a00).
+/// Ports `mtmd_input_chunk_load` (mtmd.cpp:2440 @5266f24da).
 pub fn mtmd_input_chunk_load(buf: ?[*]const u8, len: usize) callconv(.c) ?*InputChunk {
     return chunkLoad(if (len == 0) &.{} else buf.?[0..len]) catch |e| {
         impl.logErr("%s: %s\n", .{ "mtmd_input_chunk_load", whatOf(e) });
@@ -2476,22 +2556,22 @@ fn chunkLoad(buf: []const u8) Error!*InputChunk {
 // -----------------------------------------------------------------------------
 // mtmd_image_tokens
 
-/// Ports `mtmd_image_tokens_get_n_tokens` (mtmd.cpp:2388 @c1d0e7a00).
+/// Ports `mtmd_image_tokens_get_n_tokens` (mtmd.cpp:2454 @5266f24da).
 pub fn mtmd_image_tokens_get_n_tokens(image_tokens: *const ImageTokens) callconv(.c) usize {
     return image_tokens.nTokens();
 }
 
-/// Ports `mtmd_image_tokens_get_nx` (mtmd.cpp:2392 @c1d0e7a00).
+/// Ports `mtmd_image_tokens_get_nx` (mtmd.cpp:2458 @5266f24da).
 pub fn mtmd_image_tokens_get_nx(image_tokens: *const ImageTokens) callconv(.c) usize {
     return image_tokens.nx;
 }
 
-/// Ports `mtmd_image_tokens_get_ny` (mtmd.cpp:2396 @c1d0e7a00).
+/// Ports `mtmd_image_tokens_get_ny` (mtmd.cpp:2462 @5266f24da).
 pub fn mtmd_image_tokens_get_ny(image_tokens: *const ImageTokens) callconv(.c) usize {
     return image_tokens.ny;
 }
 
-/// Ports `mtmd_image_tokens_get_decoder_pos` (mtmd.cpp:2400 @c1d0e7a00).
+/// Ports `mtmd_image_tokens_get_decoder_pos` (mtmd.cpp:2466 @5266f24da).
 /// The arithmetic is the C++'s: `llama_pos + size_t` in `size_t`,
 /// truncated into each `uint32_t`.
 pub fn mtmd_image_tokens_get_decoder_pos(image_tokens: *const ImageTokens, pos_0: c.llama_pos, i: usize) callconv(.c) DecoderPos {
@@ -2535,17 +2615,17 @@ pub fn mtmd_image_tokens_get_decoder_pos(image_tokens: *const ImageTokens, pos_0
                 pos.z = image_tokens.image_idx;
             }
         },
-        _ => impl.abort("mtmd.cpp", 2450, "invalid position type"),
+        _ => impl.abort("mtmd.cpp", 2516, "invalid position type"),
     }
     return pos;
 }
 
-/// Ports `mtmd_image_tokens_get_id` (mtmd.cpp:2455 @c1d0e7a00).
+/// Ports `mtmd_image_tokens_get_id` (mtmd.cpp:2521 @5266f24da).
 pub fn mtmd_image_tokens_get_id(image_tokens: *const ImageTokens) callconv(.c) [*:0]const u8 {
     return image_tokens.id.cStr();
 }
 
-/// Ports `mtmd_image_tokens_get_n_pos` (mtmd.cpp:2459 @c1d0e7a00).
+/// Ports `mtmd_image_tokens_get_n_pos` (mtmd.cpp:2525 @5266f24da).
 pub fn mtmd_image_tokens_get_n_pos(image_tokens: *const ImageTokens) callconv(.c) c.llama_pos {
     return switch (image_tokens.pos) {
         .mrope => @bitCast(@max(image_tokens.nx, image_tokens.ny)),
@@ -2553,14 +2633,14 @@ pub fn mtmd_image_tokens_get_n_pos(image_tokens: *const ImageTokens) callconv(.c
         // HunyuanVL: the sequential (dim-0) position advances by the full token count
         // (includes BOI/EOI and row newline tokens), not by max(nx, ny)
         .hunyuanvl => @bitCast(image_tokens.nTokens()),
-        _ => impl.abort("mtmd.cpp", 2470, "invalid position type"),
+        _ => impl.abort("mtmd.cpp", 2536, "invalid position type"),
     };
 }
 
 // -----------------------------------------------------------------------------
 // test function
 
-/// Ports `mtmd_test_create_input_chunks` (mtmd.cpp:2476 @c1d0e7a00).
+/// Ports `mtmd_test_create_input_chunks` (mtmd.cpp:2542 @5266f24da).
 pub fn mtmd_test_create_input_chunks() callconv(.c) ?*InputChunks {
     const chunks = mtmd_input_chunks_init();
 
@@ -2579,13 +2659,13 @@ pub fn mtmd_test_create_input_chunks() callconv(.c) ?*InputChunks {
     return chunks;
 }
 
-/// Ports `mtmd_log_set` (mtmd.cpp:2509 @c1d0e7a00).
+/// Ports `mtmd_log_set` (mtmd.cpp:2575 @5266f24da).
 pub fn mtmd_log_set(log_callback: c.ggml_log_callback, user_data: ?*anyopaque) callconv(.c) void {
     impl.g_logger_state.log_callback = log_callback orelse impl.logCallbackDefault;
     impl.g_logger_state.log_callback_user_data = user_data;
 }
 
-/// Ports `mtmd_get_cap_from_file` (mtmd.cpp:2514 @c1d0e7a00).
+/// Ports `mtmd_get_cap_from_file` (mtmd.cpp:2580 @5266f24da).
 pub fn mtmd_get_cap_from_file(fname: [*:0]const u8) callconv(.c) Caps {
     const tmp = clip.getCap(std.mem.span(fname)) catch |e| {
         impl.logErr("%s: failed to get capabilities from file '%s': %s\n", .{ "mtmd_get_cap_from_file", fname, whatOf(e) });
@@ -2601,7 +2681,7 @@ fn stubLogCallback(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: 
     // do nothing
 }
 
-/// Ports `mtmd_get_memory_usage` (mtmd.cpp:2637 @c1d0e7a00): weights and
+/// Ports `mtmd_get_memory_usage` (mtmd.cpp:2703 @5266f24da): weights and
 /// compute per device, measured without allocating. The C++ returns a
 /// `std::map` and has C++ linkage, so this is for Zig callers only; the
 /// caller owns the map, empty on failure.

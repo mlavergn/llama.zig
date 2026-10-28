@@ -6,7 +6,7 @@
 // Decisions 25 and 27). This compiles the unmodified engine and renders a
 // template the way `common_chat_template` and
 // `common_chat_template_direct_apply_impl` do (chat.h:58, chat.cpp:931
-// @c1d0e7a00): `lexer::tokenize`, `parse_from_tokens`, a `context` over the
+// @5266f24da): `lexer::tokenize`, `parse_from_tokens`, a `context` over the
 // lexer's source, `global_from_json` with input marking on, `runtime::execute`
 // and `gather_string_parts`.
 //

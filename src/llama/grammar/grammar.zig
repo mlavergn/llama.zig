@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/src/llama-grammar.cpp` and `llama-grammar.h`
-//! (v0.3.0, `c1d0e7a00`). Each declaration below names the C++ it replaces
+//! (v0.4.0, `5266f24da`). Each declaration below names the C++ it replaces
 //! and the line it began at.
 //!
 //! # Contract
@@ -49,19 +49,19 @@ pub const GreType = parser.GreType;
 const ElemPtr = [*]const Element;
 const Token = c.llama_token;
 
-/// Ports `llama_grammar_stack` (llama-grammar.h:65 @c1d0e7a00).
+/// Ports `llama_grammar_stack` (llama-grammar.h:65 @5266f24da).
 pub const Stack = std.ArrayList(ElemPtr);
-/// Ports `llama_grammar_stacks` (llama-grammar.h:68 @c1d0e7a00).
+/// Ports `llama_grammar_stacks` (llama-grammar.h:68 @5266f24da).
 pub const Stacks = std.ArrayList(Stack);
 
-/// Ports `llama_partial_utf8` (llama-grammar.h:52 @c1d0e7a00).
+/// Ports `llama_partial_utf8` (llama-grammar.h:52 @5266f24da).
 pub const PartialUtf8 = struct {
     value: u32 = 0,
     /// Bytes still to come; -1 marks an invalid sequence.
     n_remain: c_int = 0,
 };
 
-/// Ports `llama_grammar_candidate` (llama-grammar.h:57 @c1d0e7a00).
+/// Ports `llama_grammar_candidate` (llama-grammar.h:57 @5266f24da).
 const Candidate = struct {
     index: usize,
     code_points: [*]const u32,
@@ -92,12 +92,12 @@ fn containsStack(stacks: []const Stack, s: []const ElemPtr) bool {
     return false;
 }
 
-/// Ports `llama_grammar_trigger_pattern` (llama-grammar.h:119 @c1d0e7a00).
+/// Ports `llama_grammar_trigger_pattern` (llama-grammar.h:119 @5266f24da).
 pub const TriggerPattern = struct {
     pattern: []u8,
     re: regex.Regex,
 
-    /// Ports `llama_grammar_trigger_pattern`'s `find` (llama-grammar.cpp:378 @c1d0e7a00).
+    /// Ports `llama_grammar_trigger_pattern`'s `find` (llama-grammar.cpp:378 @5266f24da).
     ///
     /// A pattern that starts with `^` and ends with `$` is first tried as a
     /// whole-input match; otherwise, or when that fails, it is searched for.
@@ -146,14 +146,14 @@ pub const TriggerPattern = struct {
     }
 };
 
-/// Ports `llama_grammar`'s `token_pos` (llama-grammar.h:128 @c1d0e7a00).
+/// Ports `llama_grammar`'s `token_pos` (llama-grammar.h:128 @5266f24da).
 const TokenPos = struct {
     token: Token,
     start: usize,
     end: usize,
 };
 
-/// Ports `llama_grammar` (llama-grammar.h:126 @c1d0e7a00).
+/// Ports `llama_grammar` (llama-grammar.h:126 @5266f24da).
 pub const Grammar = struct {
     vocab: ?*const c.struct_llama_vocab,
 
@@ -177,7 +177,7 @@ fn freeRules(rules: [][]Element) void {
     impl.allocator.free(rules);
 }
 
-/// Ports the `std::string` overload of `decode_utf8` (llama-grammar.cpp:34 @c1d0e7a00).
+/// Ports the `std::string` overload of `decode_utf8` (llama-grammar.cpp:34 @5266f24da).
 ///
 /// Decodes `src_bytes` -- up to its first NUL, as the C++ reads it through
 /// `c_str()` -- continuing any sequence `partial_start` left open.
@@ -247,7 +247,7 @@ fn decodeUtf8(src_bytes: []const u8, partial_start: PartialUtf8, out: *std.Array
     return .{ .value = value, .n_remain = n_remain };
 }
 
-/// Ports `llama_grammar_is_end_of_sequence` (llama-grammar.cpp:751 @c1d0e7a00).
+/// Ports `llama_grammar_is_end_of_sequence` (llama-grammar.cpp:751 @5266f24da).
 fn isEndOfSequence(pos: ElemPtr) bool {
     return switch (pos[0].type) {
         .end, .alt => true,
@@ -255,7 +255,7 @@ fn isEndOfSequence(pos: ElemPtr) bool {
     };
 }
 
-/// Ports `llama_grammar_match_char` (llama-grammar.cpp:761 @c1d0e7a00).
+/// Ports `llama_grammar_match_char` (llama-grammar.cpp:761 @5266f24da).
 ///
 /// Return: whether `chr` satisfies the char range at `pos_in`, and the
 /// element after the range.
@@ -283,7 +283,7 @@ fn matchChar(pos_in: ElemPtr, chr: u32) struct { bool, ElemPtr } {
     return .{ found == is_positive_char, pos };
 }
 
-/// Ports `llama_grammar_match_partial_char` (llama-grammar.cpp:791 @c1d0e7a00).
+/// Ports `llama_grammar_match_partial_char` (llama-grammar.cpp:791 @5266f24da).
 ///
 /// Return: whether some completion of `partial_utf8` could satisfy the range.
 fn matchPartialChar(pos_in: ElemPtr, partial_utf8: PartialUtf8) bool {
@@ -324,7 +324,7 @@ fn matchPartialChar(pos_in: ElemPtr, partial_utf8: PartialUtf8) bool {
     return !is_positive_char;
 }
 
-/// Ports `llama_grammar_match_token` (llama-grammar.cpp:841 @c1d0e7a00).
+/// Ports `llama_grammar_match_token` (llama-grammar.cpp:841 @5266f24da).
 fn matchToken(pos: ElemPtr, token: Token) bool {
     impl.assert(pos[0].type == .token or pos[0].type == .token_not, src, 844, "pos->type == LLAMA_GRETYPE_TOKEN || pos->type == LLAMA_GRETYPE_TOKEN_NOT");
     if (pos[0].type == .token) return pos[0].value == @as(u32, @bitCast(token));
@@ -342,7 +342,7 @@ const StackSetCtx = struct {
     }
 };
 
-/// Ports `llama_grammar_advance_stack` (llama-grammar.cpp:856 @c1d0e7a00).
+/// Ports `llama_grammar_advance_stack` (llama-grammar.cpp:856 @5266f24da).
 ///
 /// Expands `stack` through rule references until every resulting stack is
 /// empty or has a terminal on top, appending the new ones to `new_stacks`.
@@ -416,7 +416,7 @@ fn advanceStack(rules: []const []Element, stack: []const ElemPtr, new_stacks: *S
     }
 }
 
-/// Ports `llama_grammar_reject_candidates` (llama-grammar.cpp:939 @c1d0e7a00).
+/// Ports `llama_grammar_reject_candidates` (llama-grammar.cpp:939 @5266f24da).
 ///
 /// Return: the candidates no stack accepts; owned by the caller.
 fn rejectCandidates(rules: []const []Element, stacks: []const Stack, candidates: []const Candidate) std.ArrayList(Candidate) {
@@ -435,7 +435,7 @@ fn rejectCandidates(rules: []const []Element, stacks: []const Stack, candidates:
     return rejects;
 }
 
-/// Ports `llama_grammar_detect_left_recursion` (llama-grammar.cpp:958 @c1d0e7a00).
+/// Ports `llama_grammar_detect_left_recursion` (llama-grammar.cpp:958 @5266f24da).
 fn detectLeftRecursion(rules: []const []Element, rule_index: usize, rules_visited: []bool, rules_in_progress: []bool, rules_may_be_empty: []bool) bool {
     if (rules_in_progress[rule_index]) return true;
 
@@ -481,7 +481,7 @@ fn detectLeftRecursion(rules: []const []Element, rule_index: usize, rules_visite
     return false;
 }
 
-/// Ports `llama_grammar_accept_chr` (llama-grammar.cpp:1019 @c1d0e7a00).
+/// Ports `llama_grammar_accept_chr` (llama-grammar.cpp:1019 @5266f24da).
 fn acceptChr(g: *Grammar, stack: []const ElemPtr, chr: u32, new_stacks: *Stacks) void {
     if (stack.len == 0) return;
 
@@ -501,7 +501,7 @@ fn acceptChr(g: *Grammar, stack: []const ElemPtr, chr: u32, new_stacks: *Stacks)
     }
 }
 
-/// Ports `llama_grammar_reject_candidates_for_stack` (llama-grammar.cpp:1056 @c1d0e7a00).
+/// Ports `llama_grammar_reject_candidates_for_stack` (llama-grammar.cpp:1056 @5266f24da).
 ///
 /// Return: the candidates this stack rejects; owned by the caller.
 fn rejectCandidatesForStack(rules: []const []Element, stack: []const ElemPtr, candidates: []const Candidate) std.ArrayList(Candidate) {
@@ -570,7 +570,7 @@ fn rejectCandidatesForStack(rules: []const []Element, stack: []const ElemPtr, ca
 }
 
 /// Ports the grammar-text overload of `llama_grammar_init_impl`
-/// (llama-grammar.cpp:1210 @c1d0e7a00).
+/// (llama-grammar.cpp:1210 @5266f24da).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary; borrowed for the grammar's lifetime.
@@ -676,7 +676,7 @@ pub fn initImpl(
     return g;
 }
 
-/// Ports `llama_grammar_free_impl` (llama-grammar.cpp:1316 @c1d0e7a00).
+/// Ports `llama_grammar_free_impl` (llama-grammar.cpp:1316 @5266f24da).
 ///
 /// Parameters:
 /// - `g`: the grammar, or null.
@@ -694,7 +694,7 @@ pub fn freeImpl(g: ?*Grammar) void {
     impl.allocator.destroy(grammar);
 }
 
-/// Ports `llama_grammar_clone_impl` (llama-grammar.cpp:1324 @c1d0e7a00).
+/// Ports `llama_grammar_clone_impl` (llama-grammar.cpp:1324 @5266f24da).
 ///
 /// Copies everything, then repoints each stack element from the source's
 /// rules to the copy's.
@@ -753,7 +753,7 @@ fn tokenToPiece(vocab: ?*const c.struct_llama_vocab, token: Token, buf: *std.Arr
     return buf.items[0..@intCast(n)];
 }
 
-/// Ports `llama_grammar_apply_impl` (llama-grammar.cpp:1354 @c1d0e7a00).
+/// Ports `llama_grammar_apply_impl` (llama-grammar.cpp:1354 @5266f24da).
 ///
 /// Sets every candidate the grammar cannot continue with to -inf. EOG is
 /// allowed only when some stack is complete.
@@ -820,7 +820,7 @@ pub fn applyImpl(grammar: *const Grammar, cur_p: *c.llama_token_data_array) void
     }
 }
 
-/// Ports `llama_grammar_accept_impl` (llama-grammar.cpp:1397 @c1d0e7a00).
+/// Ports `llama_grammar_accept_impl` (llama-grammar.cpp:1397 @5266f24da).
 ///
 /// While a lazy grammar waits, tokens are buffered; a trigger token, or a
 /// trigger pattern matching the buffer, starts it, replaying the buffered
@@ -892,7 +892,7 @@ pub fn acceptImpl(grammar: *Grammar, token: Token) void {
     acceptToken(grammar, token, piece);
 }
 
-/// Ports `llama_grammar_accept_token` (llama-grammar.cpp:1471 @c1d0e7a00).
+/// Ports `llama_grammar_accept_token` (llama-grammar.cpp:1471 @5266f24da).
 ///
 /// Advances every stack over `piece` (or over the token itself, for a token
 /// rule on top) and keeps the distinct survivors.

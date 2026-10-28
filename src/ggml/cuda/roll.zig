@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/roll.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/roll.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/roll.cuh` at v0.4.0 (`5266f24da`). The
 //! kernel, `roll_f32_cuda` (a `__global__`, despite the name), stays CUDA.
 
 const std = @import("std");
@@ -14,10 +14,10 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_ROLL_BLOCK_SIZE` (roll.cuh:3 @c1d0e7a00).
+/// Ports `CUDA_ROLL_BLOCK_SIZE` (roll.cuh:3 @5266f24da).
 const block_size = 256;
 
-/// Ports `ggml_cuda_op_roll` (roll.cu:45 @c1d0e7a00), which launches with
+/// Ports `ggml_cuda_op_roll` (roll.cu:45 @5266f24da), which launches with
 /// `<<<>>>`.
 pub fn opRoll(ctx: *common.Context, dst: *Tensor) void {
     const s0: c_int = dst.op_params[0];

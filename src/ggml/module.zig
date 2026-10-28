@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Everything under `src/ggml/` is a port of C sources in the pinned reference
-//! checkout, v0.3.0 (`c1d0e7a00`).
+//! checkout, v0.4.0 (`5266f24da`).
 //!
 //! **Every ported file states its source as a full path from the repository
 //! root, with extension** — `llama.cpp/ggml/src/ggml-alloc.c`, not

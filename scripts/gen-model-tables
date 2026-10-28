@@ -22,7 +22,7 @@ import sys
 HDR = "llama.cpp/src/llama-model.h"
 SRC = "llama.cpp/src/llama-model.cpp"
 ARCH_HDR = "llama.cpp/src/llama-arch.h"
-COMMIT = "c1d0e7a00"
+from upstream_pin import COMMIT, TAG
 OUT = "src/llama/model_table.zig"
 
 # Case groups whose return reads the model; model.zig ports these.
@@ -93,13 +93,27 @@ switch = body[body.index("switch (model->arch) {"):]
 rules = {}
 pending = []
 conditional_seen = set()
+# Inside a CONDITIONAL architecture's statements, which model.zig ports by
+# hand: skipped to the next `case`, since their shape is free-form (v0.4.0's
+# DFLASH tests the rope sections in an `if` before its ternary return).
+in_conditional = False
 for raw in switch.split("\n"):
     code = raw.split("//", 1)[0].strip()
     if not code:
         continue
     m = re.fullmatch(r"case\s+(LLM_ARCH_\w+)\s*:", code)
     if m:
+        in_conditional = False
         pending.append(m.group(1))
+        continue
+    if in_conditional:
+        continue
+    if pending and code.startswith("if ") and all(a in CONDITIONAL for a in pending):
+        for a in pending:
+            rules[a] = "conditional"
+            conditional_seen.add(a)
+        pending = []
+        in_conditional = True
         continue
     m = re.fullmatch(r"return\s+(LLAMA_ROPE_TYPE_\w+)\s*;", code)
     if m and pending:
@@ -170,7 +184,7 @@ w("//! - `llama.cpp/src/llama-model.h` -- `llm_type`")
 w("//! - `llama.cpp/src/llama-model.cpp` -- the switches of `llm_type_name`")
 w("//!   and `llama_model_rope_type`")
 w("//!")
-w(f"//! Both at v0.3.0 (`{COMMIT}`). **Do not edit**: regenerate after moving the")
+w(f"//! Both at {TAG} (`{COMMIT}`). **Do not edit**: regenerate after moving the")
 w("//! pin. The rope rules marked `.conditional` read the hyperparameters and are")
 w("//! ported by hand in `model.zig`.")
 w("")

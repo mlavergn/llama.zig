@@ -3,8 +3,8 @@
 //!
 //! **Not a port.** Upstream gives each architecture a class deriving from
 //! `llama_model_base` and overriding three virtuals -- `load_arch_hparams`,
-//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:731, 732, 733
-//! @c1d0e7a00) -- and `llama_model_mapping` (llama-model.cpp:42 @c1d0e7a00) picks the
+//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:764, 765, 766
+//! @5266f24da) -- and `llama_model_mapping` (llama-model.cpp:43 @5266f24da) picks the
 //! class. Here a class is a file exporting those three functions, and
 //! `forArch` is the mapping. An architecture with no entry is one the port
 //! has not reached: loading it stops at `error.Unported`, which
@@ -150,6 +150,7 @@ pub const qwen3moe = @import("qwen3moe.zig");
 pub const qwen3next = @import("qwen3next.zig");
 pub const qwen3vl = @import("qwen3vl.zig");
 pub const qwen3vlmoe = @import("qwen3vlmoe.zig");
+pub const qwen4exp = @import("qwen4exp.zig");
 pub const refact = @import("refact.zig");
 pub const rnd1 = @import("rnd1.zig");
 pub const rwkv6 = @import("rwkv6.zig");
@@ -322,6 +323,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .qwen3tts => entryOf(qwen3vl),
         .qwen3vl => entryOf(qwen3vl),
         .qwen3vlmoe => entryOf(qwen3vlmoe),
+        .qwen4exp => entryOf(qwen4exp),
         .refact => entryOf(refact),
         .rnd1 => entryOf(rnd1),
         .rwkv6 => entryOf(rwkv6),

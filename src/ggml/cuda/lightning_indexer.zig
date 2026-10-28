@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/lightning-indexer.cu` at v0.3.0
-//! (`c1d0e7a00`), the host half. The kernels,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/lightning-indexer.cu` at v0.4.0
+//! (`5266f24da`), the host half. The kernels,
 //! `lightning_indexer_kernel_wmma` and `lightning_indexer_kernel_vec`, stay
 //! CUDA. The HIP/MUSA arm, which always takes the vector kernel, is not
 //! compiled here.
@@ -66,7 +66,7 @@ fn shapeCase(comptime n_head: i64, use_wmma: bool, k_type: c.enum_ggml_type, n_k
     }
 }
 
-/// Ports `ggml_cuda_lightning_indexer` (lightning-indexer.cu:400 @c1d0e7a00).
+/// Ports `ggml_cuda_lightning_indexer` (lightning-indexer.cu:400 @5266f24da).
 pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
     const q = impl.one(Tensor, dst.src[0]);
     const k = impl.one(Tensor, dst.src[1]);
@@ -126,7 +126,7 @@ pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_cuda_lightning_indexer_supported` (lightning-indexer.cu:536 @c1d0e7a00).
+/// Ports `ggml_cuda_lightning_indexer_supported` (lightning-indexer.cu:536 @5266f24da).
 pub fn supported(device: c_int, dst: *const Tensor) bool {
     _ = device;
     const q = impl.one(Tensor, dst.src[0]);

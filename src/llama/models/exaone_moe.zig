@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/exaone-moe.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_exaone_moe`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/exaone-moe.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_exaone_moe`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_exaone_moe`'s `load_arch_hparams` (models/exaone-moe.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_exaone_moe`'s `load_arch_hparams` (models/exaone-moe.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -39,15 +39,12 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     if (try meta.getKey(u32, .expert_shared_count, false, exc)) |v| hp.n_expert_shared = v;
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
     hp.expert_gating_func = (try meta.getKey(u32, .expert_gating_func, true, exc)).?;
     if (try meta.getKey(f32, .expert_weights_scale, false, exc)) |v| hp.expert_weights_scale = v;
     if (try meta.getKey(bool, .expert_weights_norm, false, exc)) |v| hp.expert_weights_norm = v;
     if (try meta.getKey(u32, .leading_dense_block_count, false, exc)) |v| hp.n_layer_dense_lead = v;
-
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-    impl.assert(hp.n_layer_nextn < hp.n_layer_all, "models/exaone-moe.cpp", 24, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < n_layer_impl\"");
 
     self.type = switch (hp.nLayer()) {
         32 => .@"30b_a3b",
@@ -56,14 +53,14 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_exaone_moe`'s `load_arch_tensors` (models/exaone-moe.cpp:33 @c1d0e7a00).
+/// Ports `llama_model_exaone_moe`'s `load_arch_tensors` (models/exaone-moe.cpp:30 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
     const dup = loader.tensor_duplicated;
 
-    const n_ff_exp: i64 = hp.n_ff_exp;
+    const n_ff_exp: i64 = hp.nFfExp(0);
     const n_ff_shexp: i64 = if (hp.n_ff_shexp > 0) hp.n_ff_shexp else n_ff_exp;
     const head_dim: i64 = hp.nEmbdHeadK(0);
     const n_qo_dim = l.n_head * head_dim;
@@ -140,20 +137,20 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_exaone_moe`'s `build_arch_graph` (models/exaone-moe.cpp:109 @c1d0e7a00).
+/// Ports `llama_model_exaone_moe`'s `build_arch_graph` (models/exaone-moe.cpp:106 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_exaone_moe`'s `graph`
-/// (models/exaone-moe.cpp:113 @c1d0e7a00).
+/// (models/exaone-moe.cpp:110 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/exaone-moe.cpp", 117, "n_embd_head == hparams.n_embd_head_v()");
-    impl.assert(n_embd_head == b.n_rot, "models/exaone-moe.cpp", 118, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/exaone-moe.cpp", 114, "n_embd_head == hparams.n_embd_head_v()");
+    impl.assert(n_embd_head == b.n_rot, "models/exaone-moe.cpp", 115, "n_embd_head == n_rot");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 

@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_modern_bert`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_modern_bert`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`; and from
 //! `llama.cpp/src/llama-model.cpp`, `llm_ffn_op_type_from_string`, which
 //! only this architecture calls.
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:989 @c1d0e7a00):
+/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1008 @5266f24da):
 /// the GGUF `<arch>.hidden_activation` strings that map cleanly to a gated
 /// feed-forward op.
 const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
@@ -37,7 +37,7 @@ const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
     .{ "reglu", .reglu },
 };
 
-/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:999 @c1d0e7a00).
+/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:1018 @5266f24da).
 ///
 /// Parameters:
 /// - `name`: the activation's name.
@@ -49,7 +49,7 @@ fn ffnOpTypeFromString(name: []const u8, fallback: graph.FfnOp) graph.FfnOp {
     return fallback;
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -83,7 +83,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:36 @c1d0e7a00).
+/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:36 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -119,13 +119,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.cls_norm = try self.createTensor(.{ .tensor = .cls_norm, .suffix = "weight" }, &.{l.n_embd}, nr, exc);
 }
 
-/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:70 @c1d0e7a00).
+/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:70 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_modern_bert`'s `graph`
-/// (models/modern-bert.cpp:74 @c1d0e7a00).
+/// (models/modern-bert.cpp:74 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

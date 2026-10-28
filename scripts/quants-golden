@@ -30,7 +30,8 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-zig cc -mcpu=baseline harness/quants_golden.c llama.cpp/ggml/src/ggml-quants.c -o "$tmp/gen" -std=c11 -w -O2 -ffp-contract=off \
+source scripts/upstream_pin.sh
+zig cc -mcpu=baseline harness/quants_golden.c llama.cpp/ggml/src/ggml-quants.c -o "$tmp/gen" -std=c11 -w -O2 -ffp-contract=off "${PIN_DEFS[@]}" \
     -I llama.cpp/ggml/include -I llama.cpp/ggml/src \
     "${REF_LIBS[@]}" \
     -lc++ \

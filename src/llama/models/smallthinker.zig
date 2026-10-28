@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/smallthinker.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_smallthinker`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/smallthinker.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_smallthinker`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph<iswa>`.
 
 const std = @import("std");
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_smallthinker`'s `load_arch_hparams` (models/smallthinker.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_smallthinker`'s `load_arch_hparams` (models/smallthinker.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -48,7 +48,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         hp.n_no_rope_layer_step = hp.nLayer();
     }
 
-    if (try meta.getKey(u32, .expert_feed_forward_length, false, exc)) |v| hp.n_ff_exp = v;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, false, exc);
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     if (try meta.getKey(u32, .expert_gating_func, false, exc)) |v| hp.expert_gating_func = v;
 
@@ -59,7 +59,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_smallthinker`'s `load_arch_tensors` (models/smallthinker.cpp:32 @c1d0e7a00).
+/// Ports `llama_model_smallthinker`'s `load_arch_tensors` (models/smallthinker.cpp:32 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -91,7 +91,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         impl.assert(l.n_expert_used > 0, "models/smallthinker.cpp", 57, "n_expert_used > 0 && \"n_expert_used must be > 0 for SMALLTHINKER\"");
 
         // The mixture of experts.
-        const n_ff_exp: i64 = self.hparams.n_ff_exp;
+        const n_ff_exp: i64 = self.hparams.nFfExp(0);
         layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_expert }, 0, exc);
         layer.ffn_gate_exps = try self.createTensor(.{ .tensor = .ffn_gate_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ff_exp, l.n_expert }, 0, exc);
         layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ n_ff_exp, l.n_embd, l.n_expert }, 0, exc);
@@ -99,7 +99,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_smallthinker`'s `build_arch_graph` (models/smallthinker.cpp:68 @c1d0e7a00).
+/// Ports `llama_model_smallthinker`'s `build_arch_graph` (models/smallthinker.cpp:68 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (@as(hparams_mod.SwaType, @fromBackingInt(@intCast(model.hparams.swa_type))) == .standard) {
         buildGraph(true, model, b);
@@ -109,7 +109,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_smallthinker`'s `graph<iswa>`
-/// (models/smallthinker.cpp:77 @c1d0e7a00).
+/// (models/smallthinker.cpp:77 @5266f24da).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

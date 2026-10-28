@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-impl.cpp` (v0.3.0, `c1d0e7a00`):
+//! Ported from `llama.cpp/src/llama-impl.cpp` (v0.4.0, `5266f24da`):
 //! `llama_log_get` and `llama_log_set`, its two unmangled exports. The
 //! logger they configure is `log.zig`.
 //!
@@ -16,13 +16,13 @@ const log = @import("../log.zig");
 
 const c = impl.c;
 
-/// Ports `llama_log_get` (llama-impl.cpp:28 @c1d0e7a00): what ggml's logger
+/// Ports `llama_log_get` (llama-impl.cpp:28 @5266f24da): what ggml's logger
 /// holds, which `llama_log_set` keeps equal to libllama's own.
 pub fn llama_log_get(log_callback: [*c]c.ggml_log_callback, user_data: [*c]?*anyopaque) callconv(.c) void {
     c.ggml_log_get(log_callback, user_data);
 }
 
-/// Ports `llama_log_set` (llama-impl.cpp:32 @c1d0e7a00): ggml's logger and
+/// Ports `llama_log_set` (llama-impl.cpp:32 @5266f24da): ggml's logger and
 /// libllama's both, a null callback restoring the default.
 pub fn llama_log_set(log_callback: c.ggml_log_callback, user_data: ?*anyopaque) callconv(.c) void {
     c.ggml_log_set(log_callback, user_data);

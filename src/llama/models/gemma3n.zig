@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma3n.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/gemma3n.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_gemma3n`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and the graph's helpers.
 
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma3n`'s `load_arch_hparams` (models/gemma3n.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_gemma3n`'s `load_arch_hparams` (models/gemma3n.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -48,7 +48,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_gemma3n`'s `load_arch_tensors` (models/gemma3n.cpp:23 @c1d0e7a00).
+/// Ports `llama_model_gemma3n`'s `load_arch_tensors` (models/gemma3n.cpp:23 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -108,7 +108,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma3n`'s `build_arch_graph` (models/gemma3n.cpp:80 @c1d0e7a00).
+/// Ports `llama_model_gemma3n`'s `build_arch_graph` (models/gemma3n.cpp:80 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const g: Graph = .{
         .model = model,
@@ -121,14 +121,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     g.build();
 }
 
-/// Ports `ggml_view_2d_slice` (models/gemma3n.cpp:85 @c1d0e7a00): the 2D
+/// Ports `ggml_view_2d_slice` (models/gemma3n.cpp:85 @5266f24da): the 2D
 /// slice of a 3D tensor at `idx` along its third dimension.
 fn view2dSlice(ctx: *c.ggml_context, x: *Tensor, idx: c_int) *Tensor {
     impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma3n.cpp", 86, "idx < (int) x->ne[2]");
     return c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], c.ggml_row_size(x.type, x.ne[0]), @intCast(idx * x.ne[0] * x.ne[1] * @as(i64, @intCast(c.ggml_element_size(x)))));
 }
 
-/// Ports `llama_model_gemma3n`'s `graph` (src/models/models.h:826 @c1d0e7a00): the
+/// Ports `llama_model_gemma3n`'s `graph` (src/models/models.h:829 @5266f24da): the
 /// builder and the constants its helpers share.
 const Graph = struct {
     model: *const Model,
@@ -144,7 +144,7 @@ const Graph = struct {
     f_sparsity_std_mul: f32 = 1.6448533535003662,
 
     /// Ports the constructor of `llama_model_gemma3n`'s `graph`
-    /// (models/gemma3n.cpp:91 @c1d0e7a00).
+    /// (models/gemma3n.cpp:91 @5266f24da).
     fn build(self: *const Graph) void {
         const model = self.model;
         const b = self.b;
@@ -360,14 +360,14 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `calc_magnitude`
-    /// (models/gemma3n.cpp:313 @c1d0e7a00).
+    /// (models/gemma3n.cpp:313 @5266f24da).
     fn calcMagnitude(self: *const Graph, x: *Tensor) *Tensor {
         const ctx = self.b.ctx0;
         return c.ggml_sqrt(ctx, c.ggml_sum_rows(ctx, c.ggml_sqr(ctx, x)));
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `build_inp_per_layer`
-    /// (models/gemma3n.cpp:319 @c1d0e7a00): equivalent to the Python code's
+    /// (models/gemma3n.cpp:319 @5266f24da): equivalent to the Python code's
     /// `get_per_layer_inputs()`.
     ///
     /// Return: `[n_embd_altup, n_layer, n_tokens]`.
@@ -408,7 +408,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `project_per_layer_inputs`
-    /// (models/gemma3n.cpp:352 @c1d0e7a00): equivalent to the Python code's
+    /// (models/gemma3n.cpp:352 @5266f24da): equivalent to the Python code's
     /// `project_per_layer_inputs()`, the per-layer inputs with `n_layer` as
     /// the last dimension.
     ///
@@ -436,7 +436,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `laurel` (models/gemma3n.cpp:375
-    /// @c1d0e7a00).
+    /// @5266f24da).
     fn laurel(self: *const Graph, cur: *Tensor, il: c_int) *Tensor {
         const b = self.b;
         const layer = &self.model.layers[@intCast(il)];
@@ -450,7 +450,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `gaussian_topk`
-    /// (models/gemma3n.cpp:387 @c1d0e7a00).
+    /// (models/gemma3n.cpp:387 @5266f24da).
     ///
     /// Return: `[n_embd, n_tokens]`, as `x`.
     fn gaussianTopk(self: *const Graph, x: *Tensor) *Tensor {
@@ -464,7 +464,7 @@ const Graph = struct {
     // AltUp.
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `altup_compute_router_modalities`
-    /// (models/gemma3n.cpp:402 @c1d0e7a00): equivalent to the Python code's
+    /// (models/gemma3n.cpp:402 @5266f24da): equivalent to the Python code's
     /// `compute_router_modalities()`.
     ///
     /// Return: `[n_altup, n_tokens]`, from `x` `[n_embd, n_tokens]`.
@@ -482,7 +482,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `altup_predict`
-    /// (models/gemma3n.cpp:414 @c1d0e7a00).
+    /// (models/gemma3n.cpp:414 @5266f24da).
     ///
     /// Return: `[n_embd, n_tokens, n_altup]`, as `cur`.
     fn altupPredict(self: *const Graph, cur: *Tensor, il: c_int) *Tensor {
@@ -513,7 +513,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `altup_correct`
-    /// (models/gemma3n.cpp:439 @c1d0e7a00).
+    /// (models/gemma3n.cpp:439 @5266f24da).
     ///
     /// Return: `[n_embd, n_tokens, n_altup]`, from `predictions`
     /// `[n_embd, n_tokens, n_altup]` and `activated` `[n_embd, n_tokens]`.

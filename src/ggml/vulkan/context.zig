@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.3.0
-//! (`c1d0e7a00`). The C++'s `vk_context_ref`s -- weak pointers to contexts
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
+//! (`5266f24da`). The C++'s `vk_context_ref`s -- weak pointers to contexts
 //! the garbage list owns -- are plain pointers here, nulled where the list
 //! is cleared (`graphCleanup`), the only place those contexts die.
 
@@ -30,11 +30,11 @@ fn oom() noreturn {
     impl.abort("ggml_vulkan: out of memory");
 }
 
-/// Ports `topk_moe_mode` (ggml-vulkan.cpp:749 @c1d0e7a00).
+/// Ports `topk_moe_mode` (ggml-vulkan.cpp:764 @5266f24da).
 /// `count` is `TOPK_MOE_COUNT`, which the C++ uses for "no topk_moe fusion".
 pub const TopkMoeMode = enum(u32) { early_softmax, early_softmax_norm, late_softmax, sigmoid_norm_bias, sqrt_softplus_norm_bias, count };
 
-/// Ports `ggml_vk_garbage_collector` (ggml-vulkan.cpp:2063 @c1d0e7a00).
+/// Ports `ggml_vk_garbage_collector` (ggml-vulkan.cpp:2137 @5266f24da).
 /// Semaphores are handed out by pointer and must not move, so each is its
 /// own allocation.
 pub const GarbageCollector = struct {
@@ -44,7 +44,7 @@ pub const GarbageCollector = struct {
     contexts: std.ArrayList(*Context) = .empty,
 };
 
-/// Ports `ggml_backend_vk_context` (ggml-vulkan.cpp:2336 @c1d0e7a00).
+/// Ports `ggml_backend_vk_context` (ggml-vulkan.cpp:2410 @5266f24da).
 pub const BackendCtx = struct {
     name: [:0]const u8 = "",
     device: *Device = undefined,
@@ -76,8 +76,8 @@ pub const BackendCtx = struct {
     // Cache most recent tensor that was converted into prealloc_y, and what pipeline it used to convert.
     prealloc_y_last_pipeline_used: ?*Pipeline = null,
     prealloc_y_last_tensor_used: ?*const c.ggml_tensor = null,
-    // True when prealloc_y holds the padded fp16 layout used by the coopmat2 B decode-vector callback.
-    prealloc_y_last_decode_vector_staging: bool = false,
+    // True when the K dimension in prealloc_y is padded.
+    prealloc_y_last_k_padded: bool = false,
 
     // Track which nodes have been used since the last sync, and whether they were written to
     unsynced_nodes_written: std.ArrayList(*const c.ggml_tensor) = .empty,
@@ -109,6 +109,8 @@ pub const BackendCtx = struct {
     fused_ops_write_mask: c_int = 0,
     fused_topk_moe_mode: TopkMoeMode = .early_softmax,
     fused_topk_moe_scale: bool = false,
+    // QSA indexer gather+add+top_k fused into one radix-select
+    fused_topk_qsa: bool = false,
 
     // for GGML_VK_PERF_LOGGER
     perf_logger: ?*m.perf.PerfLogger = null,
@@ -121,7 +123,7 @@ pub const BackendCtx = struct {
     query_idx: i32 = 0,
 };
 
-/// Ports `ggml_vk_init` (ggml-vulkan.cpp:7602 @c1d0e7a00).
+/// Ports `ggml_vk_init` (ggml-vulkan.cpp:7718 @5266f24da).
 pub fn init(ctx: *BackendCtx, idx: usize) void {
     m.instance.instanceInitOrAbort();
     impl.assert(idx < m.instance.instance.device_indices.items.len, "idx < vk_instance.device_indices.size()");
@@ -162,7 +164,7 @@ fn createSemaphore(device: *Device, ty: vk.VkSemaphoreType) vk.VkSemaphore {
     return s;
 }
 
-/// Ports `ggml_vk_create_context` (ggml-vulkan.cpp:3327 @c1d0e7a00): a
+/// Ports `ggml_vk_create_context` (ggml-vulkan.cpp:3402 @5266f24da): a
 /// context the garbage list owns until the next graph cleanup.
 pub fn createContext(ctx: *BackendCtx, p: *CommandPool) *Context {
     const result = m.submit.createTemporaryContext(p);
@@ -170,7 +172,7 @@ pub fn createContext(ctx: *BackendCtx, p: *CommandPool) *Context {
     return result;
 }
 
-/// Ports `ggml_vk_create_binary_semaphore` (ggml-vulkan.cpp:3342 @c1d0e7a00).
+/// Ports `ggml_vk_create_binary_semaphore` (ggml-vulkan.cpp:3417 @5266f24da).
 pub fn createBinarySemaphore(ctx: *BackendCtx) *Semaphore {
     const s = allocator.create(Semaphore) catch oom();
     s.* = .{ .s = createSemaphore(ctx.device, vk.VK_SEMAPHORE_TYPE_BINARY), .value = 0 };
@@ -178,7 +180,7 @@ pub fn createBinarySemaphore(ctx: *BackendCtx) *Semaphore {
     return s;
 }
 
-/// Ports `ggml_vk_create_timeline_semaphore` (ggml-vulkan.cpp:3352 @c1d0e7a00).
+/// Ports `ggml_vk_create_timeline_semaphore` (ggml-vulkan.cpp:3427 @5266f24da).
 pub fn createTimelineSemaphore(ctx: *BackendCtx) *Semaphore {
     if (ctx.semaphore_idx >= ctx.gc.tl_semaphores.items.len) {
         const s = allocator.create(Semaphore) catch oom();
@@ -189,7 +191,7 @@ pub fn createTimelineSemaphore(ctx: *BackendCtx) *Semaphore {
     return ctx.gc.tl_semaphores.items[ctx.semaphore_idx];
 }
 
-/// Ports `ggml_vk_create_event` (ggml-vulkan.cpp:3364 @c1d0e7a00).
+/// Ports `ggml_vk_create_event` (ggml-vulkan.cpp:3439 @5266f24da).
 pub fn createEvent(ctx: *BackendCtx) vk.VkEvent {
     if (ctx.event_idx >= ctx.gc.events.items.len) {
         var ci = common.structure(vk.VkEventCreateInfo, vk.VK_STRUCTURE_TYPE_EVENT_CREATE_INFO);
@@ -201,7 +203,7 @@ pub fn createEvent(ctx: *BackendCtx) vk.VkEvent {
     return ctx.gc.events.items[ctx.event_idx];
 }
 
-/// Ports `ggml_vk_sync_buffers` (ggml-vulkan.cpp:3633 @c1d0e7a00): a full
+/// Ports `ggml_vk_sync_buffers` (ggml-vulkan.cpp:3708 @5266f24da): a full
 /// memory barrier, after which no preallocated buffer has a read pending.
 pub fn syncBuffers(ctx: ?*BackendCtx, subctx: *Context) void {
     if (ctx) |cx| {
@@ -212,22 +214,22 @@ pub fn syncBuffers(ctx: ?*BackendCtx, subctx: *Context) void {
     m.submit.syncBuffersBarrier(subctx);
 }
 
-/// Ports `ggml_vk_get_max_buffer_range` (ggml-vulkan.cpp:2585 @c1d0e7a00).
+/// Ports `ggml_vk_get_max_buffer_range` (ggml-vulkan.cpp:2660 @5266f24da).
 pub fn getMaxBufferRange(ctx: *const BackendCtx, buf: *const Buffer, offset: u64) u64 {
     return @min(buf.size - offset, ctx.device.properties.limits.maxStorageBufferRange);
 }
 
-/// Ports `ggml_vk_subbuffer` (ggml-vulkan.cpp:3629 @c1d0e7a00).
+/// Ports `ggml_vk_subbuffer` (ggml-vulkan.cpp:3704 @5266f24da).
 pub fn subbuffer(ctx: *const BackendCtx, buf: *Buffer, offset: u64) m.buffer.Subbuffer {
     return .{ .buffer = buf, .offset = offset, .size = getMaxBufferRange(ctx, buf, offset) };
 }
 
-/// Ports `get_misalign_bytes` (ggml-vulkan.cpp:2416 @c1d0e7a00).
+/// Ports `get_misalign_bytes` (ggml-vulkan.cpp:2491 @5266f24da).
 pub fn getMisalignBytes(ctx: *const BackendCtx, t: *const c.ggml_tensor) u32 {
     return @truncate((m.buffer.tensorOffset(t) + t.view_offs) & (ctx.device.properties.limits.minStorageBufferOffsetAlignment - 1));
 }
 
-/// Ports `ggml_vk_tensor_subbuffer` (ggml-vulkan.cpp:8081 @c1d0e7a00): the
+/// Ports `ggml_vk_tensor_subbuffer` (ggml-vulkan.cpp:8197 @5266f24da): the
 /// buffer range holding a tensor, its offset rounded down to the storage
 /// alignment and its size grown to match.
 pub fn tensorSubbuffer(ctx: *const BackendCtx, tensor: *const c.ggml_tensor, allow_misalign: bool) m.buffer.Subbuffer {
@@ -250,7 +252,7 @@ pub fn tensorSubbuffer(ctx: *const BackendCtx, tensor: *const c.ggml_tensor, all
 }
 
 /// Ports `ggml_vk_ensure_sync_staging_buffer` for a backend context
-/// (ggml-vulkan.cpp:8295 @c1d0e7a00).
+/// (ggml-vulkan.cpp:8411 @5266f24da).
 pub fn ensureSyncStagingBuffer(ctx: *BackendCtx, size: usize) void {
     if (ctx.sync_staging == null or ctx.sync_staging.?.size < size) {
         m.buffer.logMemory("ggml_vk_ensure_sync_staging_buffer(%zu)", .{size});
@@ -259,7 +261,7 @@ pub fn ensureSyncStagingBuffer(ctx: *BackendCtx, size: usize) void {
     }
 }
 
-/// Ports `ggml_vk_get_compute_ctx` (ggml-vulkan.cpp:8208 @c1d0e7a00): the
+/// Ports `ggml_vk_get_compute_ctx` (ggml-vulkan.cpp:8324 @5266f24da): the
 /// context compute is recorded into, begun on first use; it waits for any
 /// transfer submitted since.
 pub fn getComputeCtx(ctx: *BackendCtx) *Context {
@@ -276,7 +278,7 @@ pub fn getComputeCtx(ctx: *BackendCtx) *Context {
     return result;
 }
 
-/// Ports `ggml_vk_get_transfer_ctx` (ggml-vulkan.cpp:8227 @c1d0e7a00).
+/// Ports `ggml_vk_get_transfer_ctx` (ggml-vulkan.cpp:8343 @5266f24da).
 pub fn getTransferCtx(ctx: *BackendCtx) *Context {
     if (ctx.transfer_ctx) |r| return r;
     const r = createContext(ctx, &ctx.transfer_cmd_pool);
@@ -285,7 +287,7 @@ pub fn getTransferCtx(ctx: *BackendCtx) *Context {
     return r;
 }
 
-/// Ports `ggml_vk_submit_transfer_ctx` (ggml-vulkan.cpp:8244 @c1d0e7a00):
+/// Ports `ggml_vk_submit_transfer_ctx` (ggml-vulkan.cpp:8360 @5266f24da):
 /// submits pending transfer-queue work, signalling the semaphore the next
 /// compute context waits on.
 ///
@@ -305,7 +307,7 @@ pub fn submitTransferCtx(ctx: *BackendCtx) bool {
     return true;
 }
 
-/// Ports `ggml_vk_wait_for_fence` (ggml-vulkan.cpp:2592 @c1d0e7a00): waits
+/// Ports `ggml_vk_wait_for_fence` (ggml-vulkan.cpp:2667 @5266f24da): waits
 /// on the almost-ready fence, then spins on the graph's fence.
 pub fn waitForFence(ctx: *BackendCtx) void {
     const dev = ctx.device;
@@ -335,7 +337,7 @@ pub fn waitForFence(ctx: *BackendCtx) void {
     common.checkOrAbort(d.vkResetFences.?(dev.device, 1, &ctx.fence), "vk::Device::resetFences");
 }
 
-/// Ports `ggml_vk_synchronize` (ggml-vulkan.cpp:16440 @c1d0e7a00): submits
+/// Ports `ggml_vk_synchronize` (ggml-vulkan.cpp:16831 @5266f24da): submits
 /// the recorded compute context and any transfer, waits for both, and runs
 /// the deferred host copies.
 pub fn synchronize(ctx: *BackendCtx) void {
@@ -394,12 +396,12 @@ pub fn synchronize(ctx: *BackendCtx) void {
     }
 }
 
-/// Ports `ggml_vk_graph_cleanup` (ggml-vulkan.cpp:15878 @c1d0e7a00): frees
+/// Ports `ggml_vk_graph_cleanup` (ggml-vulkan.cpp:16269 @5266f24da): frees
 /// what one graph's recording made, and resets the per-graph state.
 pub fn graphCleanup(ctx: *BackendCtx) void {
     ctx.prealloc_y_last_pipeline_used = null;
     ctx.prealloc_y_last_tensor_used = null;
-    ctx.prealloc_y_last_decode_vector_staging = false;
+    ctx.prealloc_y_last_k_padded = false;
 
     ctx.unsynced_nodes_written.clearRetainingCapacity();
     ctx.unsynced_nodes_read.clearRetainingCapacity();
@@ -439,7 +441,7 @@ pub fn graphCleanup(ctx: *BackendCtx) void {
     ctx.descriptor_set_idx = 0;
 }
 
-/// Ports `ggml_vk_cleanup` (ggml-vulkan.cpp:15917 @c1d0e7a00): everything
+/// Ports `ggml_vk_cleanup` (ggml-vulkan.cpp:16308 @5266f24da): everything
 /// the backend owns, on free.
 pub fn cleanup(ctx: *BackendCtx) void {
     // discard any unsubmitted command buffers
@@ -457,7 +459,7 @@ pub fn cleanup(ctx: *BackendCtx) void {
 
     ctx.prealloc_y_last_pipeline_used = null;
     ctx.prealloc_y_last_tensor_used = null;
-    ctx.prealloc_y_last_decode_vector_staging = false;
+    ctx.prealloc_y_last_k_padded = false;
 
     ctx.prealloc_size_x = 0;
     ctx.prealloc_size_y = 0;
@@ -481,7 +483,7 @@ pub fn cleanup(ctx: *BackendCtx) void {
     if (m.instance.loggers.perf_logger_enabled) ctx.perf_logger.?.printTimings(true);
 }
 
-/// Ports `ggml_pipeline_request_descriptor_sets` (ggml-vulkan.cpp:3105 @c1d0e7a00):
+/// Ports `ggml_pipeline_request_descriptor_sets` (ggml-vulkan.cpp:3180 @5266f24da):
 /// reserves `n` descriptor sets for a pipeline's dispatches, compiling the
 /// pipeline on first use.
 pub fn requestDescriptorSets(ctx: *BackendCtx, pipeline: *Pipeline, n: u32) void {
@@ -490,7 +492,7 @@ pub fn requestDescriptorSets(ctx: *BackendCtx, pipeline: *Pipeline, n: u32) void
     allocateDescriptorSets(ctx);
 }
 
-/// Ports `ggml_pipeline_allocate_descriptor_sets` (ggml-vulkan.cpp:3114 @c1d0e7a00).
+/// Ports `ggml_pipeline_allocate_descriptor_sets` (ggml-vulkan.cpp:3189 @5266f24da).
 pub fn allocateDescriptorSets(ctx: *BackendCtx) void {
     if (ctx.descriptor_sets.items.len >= ctx.pipeline_descriptor_set_requirements) return;
 
@@ -533,7 +535,7 @@ pub fn allocateDescriptorSets(ctx: *BackendCtx) void {
     }
 }
 
-/// Ports `ggml_vk_dispatch_pipeline` (ggml-vulkan.cpp:8157 @c1d0e7a00):
+/// Ports `ggml_vk_dispatch_pipeline` (ggml-vulkan.cpp:8273 @5266f24da):
 /// binds the buffers, pushes the constants and records the dispatch,
 /// rounding each extent up to whole workgroups.
 pub fn dispatchPipeline(ctx: *BackendCtx, subctx: *Context, pipeline: *Pipeline, descriptor_buffer_infos: []const m.buffer.Subbuffer, push_constants: []const u8, elements: [3]u32) void {

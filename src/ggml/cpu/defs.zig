@@ -11,7 +11,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/ops.h`           — `CACHE_LINE_SIZE`
 //! - `llama.cpp/ggml/include/ggml.h`               — the tensor-locals macros
 //!
-//! all at v0.3.0 (`c1d0e7a00`). Each declaration names the C it came from and
+//! all at v0.4.0 (`5266f24da`). Each declaration names the C it came from and
 //! the line it began at, using the bare filename.
 //!
 //! # Why these are hand-written
@@ -32,24 +32,24 @@ const c = impl.c;
 pub const Tensor = c.ggml_tensor;
 pub const CGraph = impl.CGraph;
 
-/// Ports `CACHE_LINE_SIZE` (ops.h:17 @c1d0e7a00), the non-POWER, non-s390x arm.
+/// Ports `CACHE_LINE_SIZE` (ops.h:17 @5266f24da), the non-POWER, non-s390x arm.
 pub const cache_line_size = 64;
 
-/// Ports `CACHE_LINE_SIZE_F32` (ops.h:21 @c1d0e7a00).
+/// Ports `CACHE_LINE_SIZE_F32` (ops.h:21 @5266f24da).
 pub const cache_line_size_f32 = cache_line_size / @sizeOf(f32);
 
-/// Ports `GGML_CACHE_LINE` (ggml-cpu.c:60 @c1d0e7a00). The C hardcodes 64 with a note
+/// Ports `GGML_CACHE_LINE` (ggml-cpu.c:61 @5266f24da). The C hardcodes 64 with a note
 /// that it wants `std::hardware_destructive_interference_size`; `ops.h` picks
 /// the same number for this architecture, so the two agree here.
 pub const cache_align = 64;
 
-/// Ports `GGML_THREADPOOL_N_THREADS_MASK` (ggml-cpu.c:205 @c1d0e7a00).
+/// Ports `GGML_THREADPOOL_N_THREADS_MASK` (ggml-cpu.c:206 @5266f24da).
 pub const n_threads_mask: c_int = 0xffff;
 
-/// Ports `GGML_THREADPOOL_N_THREADS_BITS` (ggml-cpu.c:206 @c1d0e7a00).
+/// Ports `GGML_THREADPOOL_N_THREADS_BITS` (ggml-cpu.c:207 @5266f24da).
 pub const n_threads_bits = 16;
 
-/// Ports `struct ggml_compute_params` (ggml-cpu-impl.h:18 @c1d0e7a00).
+/// Ports `struct ggml_compute_params` (ggml-cpu-impl.h:18 @5266f24da).
 ///
 /// Passed by pointer to every `ggml_compute_forward_*` in the still-C++
 /// `ops.cpp`, so this layout is a hard ABI contract, not an internal choice.
@@ -66,10 +66,10 @@ pub const ComputeParams = extern struct {
     use_ref: bool,
 };
 
-/// Ports `struct ggml_threadpool` (ggml-cpu.c:480 @c1d0e7a00).
+/// Ports `struct ggml_threadpool` (ggml-cpu.c:481 @5266f24da).
 ///
 /// Ports `ggml_cond_t`, `ggml_mutex_t`, `ggml_cond_t`, `ggml_mutex_t`
-/// (ggml-cpu.c:429, 430, 449, 450 @c1d0e7a00): a condition variable and an SRW
+/// (ggml-cpu.c:430, 431, 450, 451 @5266f24da): a condition variable and an SRW
 /// lock on Windows, pthreads everywhere else. `threading.zig` holds the macros that drive them.
 pub const Mutex = if (builtin.os.tag == .windows) win32.SRWLOCK else std.c.pthread_mutex_t;
 pub const Cond = if (builtin.os.tag == .windows) win32.CONDITION_VARIABLE else std.c.pthread_cond_t;
@@ -111,7 +111,7 @@ pub const Threadpool = struct {
     ec: c.enum_ggml_status,
 };
 
-/// Ports `struct ggml_compute_state` (ggml-cpu.c:507 @c1d0e7a00), the per-thread half of
+/// Ports `struct ggml_compute_state` (ggml-cpu.c:508 @5266f24da), the per-thread half of
 /// the threadpool.
 pub const ComputeState = struct {
     thrd: std.Thread,
@@ -123,7 +123,7 @@ pub const ComputeState = struct {
     ith: c_int,
 };
 
-/// Ports `ggml_thread_cpu_relax`, `ggml_thread_cpu_relax` (ggml-cpu.c:520, 524 @c1d0e7a00): the
+/// Ports `ggml_thread_cpu_relax`, `ggml_thread_cpu_relax` (ggml-cpu.c:521, 525 @5266f24da): the
 /// aarch64 arm's `yield`, and the x86_64 arm's `_mm_pause()`.
 ///
 /// `std.atomic.spinLoopHint` emits the same instructions, but not the
@@ -139,7 +139,7 @@ pub inline fn cpuRelax() void {
     }
 }
 
-/// The locals `GGML_TENSOR_UNARY_OP_LOCALS` (ggml.h:314 @c1d0e7a00) declares.
+/// The locals `GGML_TENSOR_UNARY_OP_LOCALS` (ggml.h:314 @5266f24da) declares.
 ///
 /// The one-input counterpart of `BinaryLocals`: sixteen names rather than
 /// twenty-four. `ops.cpp` opens most of its kernels with this macro.
@@ -190,7 +190,7 @@ pub const UnaryLocals = struct {
     }
 };
 
-/// The locals `GGML_TENSOR_TERNARY_OP_LOCALS` (ggml.h:328 @c1d0e7a00)
+/// The locals `GGML_TENSOR_TERNARY_OP_LOCALS` (ggml.h:328 @5266f24da)
 /// declares: thirty-two names, for three inputs and a result.
 pub const TernaryLocals = struct {
     ne00: i64,
@@ -275,7 +275,7 @@ pub const TernaryLocals = struct {
     }
 };
 
-/// The locals `GGML_TENSOR_BINARY_OP_LOCALS` (ggml.h:320 @c1d0e7a00) declares.
+/// The locals `GGML_TENSOR_BINARY_OP_LOCALS` (ggml.h:320 @5266f24da) declares.
 ///
 /// The macro drops twenty-four names into the enclosing scope. Zig has no
 /// equivalent, and spelling them out at each of the four call sites invites a

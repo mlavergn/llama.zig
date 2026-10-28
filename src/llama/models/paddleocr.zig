@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/paddleocr.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_paddleocr`'s `build_arch_graph` and its
+//! Ported from `llama.cpp/src/models/paddleocr.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_paddleocr`'s `build_arch_graph` and its
 //! `graph`. Its loading is `llama_model_ernie4_5`'s, in `ernie4_5.zig`.
 
 const std = @import("std");
@@ -17,13 +17,13 @@ const c = impl.c;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_paddleocr`'s `build_arch_graph` (src/models/paddleocr.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_paddleocr`'s `build_arch_graph` (src/models/paddleocr.cpp:3 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_paddleocr`'s `graph`
-/// (src/models/paddleocr.cpp:7 @c1d0e7a00).
+/// (src/models/paddleocr.cpp:7 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

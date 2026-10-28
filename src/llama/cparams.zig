@@ -7,22 +7,22 @@
 //! - `llama.cpp/src/llama-cparams.h` -- `LLAMA_MAX_SEQ` and `llama_cparams`
 //! - `llama.cpp/src/llama-cparams.cpp` -- `llama_max_parallel_sequences`
 //!
-//! All at v0.3.0 (`c1d0e7a00`).
+//! All at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("impl.zig");
 
 const c = impl.c;
 
-/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @c1d0e7a00).
+/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @5266f24da).
 pub const max_seq: u32 = 256;
 
-/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @c1d0e7a00).
+/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @5266f24da).
 pub fn maxParallelSequences() usize {
     return max_seq;
 }
 
-/// Mirrors `llama_cparams` (llama-cparams.h:10 @c1d0e7a00).
+/// Mirrors `llama_cparams` (llama-cparams.h:10 @5266f24da).
 pub const Cparams = struct {
     /// Context size used during inference.
     n_ctx: u32 = 0,
@@ -84,6 +84,9 @@ pub const Cparams = struct {
     embeddings_layer_inp: []const bool = &.{},
 
     ctx_type: c.enum_llama_context_type = 0,
+    /// The RoPE scaling the context resolved: the parameter, or the
+    /// model's trained one when unspecified.
+    rope_scaling_type: c.enum_llama_rope_scaling_type = 0,
     pooling_type: c.enum_llama_pooling_type = 0,
 
     cb_eval: c.ggml_backend_sched_eval_callback = null,

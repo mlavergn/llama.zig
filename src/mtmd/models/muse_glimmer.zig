@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/muse-glimmer.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/muse-glimmer.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -13,7 +13,7 @@ const graph = @import("../graph.zig");
 const kimivl = @import("kimivl.zig");
 const c = impl.c;
 
-/// The `inp_i32` lambda (mtmd/models/muse-glimmer.cpp:21 @c1d0e7a00): a named I32 input.
+/// The `inp_i32` lambda (mtmd/models/muse-glimmer.cpp:21 @5266f24da): a named I32 input.
 fn inpI32(g: *graph.Graph, name: [*:0]const u8, n: i64) graph.T {
     const t = c.ggml_new_tensor_1d(g.ctx0, c.GGML_TYPE_I32, n);
     _ = c.ggml_set_name(t, name);
@@ -21,7 +21,7 @@ fn inpI32(g: *graph.Graph, name: [*:0]const u8, n: i64) graph.T {
     return t;
 }
 
-/// Ports `build` (mtmd/models/muse-glimmer.cpp:14 @c1d0e7a00), a member of `clip_graph_muse_glimmer`.
+/// Ports `build` (mtmd/models/muse-glimmer.cpp:14 @5266f24da), a member of `clip_graph_muse_glimmer`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

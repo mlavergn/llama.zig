@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen3vlmoe.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/qwen3vlmoe.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_qwen3vlmoe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,14 +20,14 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_qwen3vlmoe`'s `load_arch_hparams` (models/qwen3vlmoe.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_qwen3vlmoe`'s `load_arch_hparams` (models/qwen3vlmoe.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     if (try meta.getKey(u32, .num_deepstack_layers, false, exc)) |v| hp.n_deepstack_layers = v;
     _ = try meta.getKeyOrArr(c_int, .rope_dimension_sections, &hp.rope_sections, 4, true, exc);
-    if (try meta.getKey(u32, .expert_feed_forward_length, false, exc)) |v| hp.n_ff_exp = v;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, false, exc);
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
 
     self.type = switch (hp.nLayer()) {
@@ -37,7 +37,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen3vlmoe`'s `load_arch_tensors` (models/qwen3vlmoe.cpp:16 @c1d0e7a00).
+/// Ports `llama_model_qwen3vlmoe`'s `load_arch_tensors` (models/qwen3vlmoe.cpp:16 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -78,7 +78,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         }
 
         // The experts.
-        const n_ff_exp: i64 = if (hp.n_ff_exp != 0) hp.n_ff_exp else @divTrunc(l.n_ff, l.n_expert_used);
+        const n_ff_exp: i64 = if (hp.nFfExp(0) != 0) hp.nFfExp(0) else @divTrunc(l.n_ff, l.n_expert_used);
 
         layer.ffn_gate_exps = try self.createTensor(.{ .tensor = .ffn_gate_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ff_exp, l.n_expert }, 0, exc);
         layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ n_ff_exp, l.n_embd, l.n_expert }, 0, exc);
@@ -86,13 +86,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_qwen3vlmoe`'s `build_arch_graph` (models/qwen3vlmoe.cpp:60 @c1d0e7a00).
+/// Ports `llama_model_qwen3vlmoe`'s `build_arch_graph` (models/qwen3vlmoe.cpp:60 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_qwen3vlmoe`'s `graph`
-/// (models/qwen3vlmoe.cpp:64 @c1d0e7a00).
+/// (models/qwen3vlmoe.cpp:64 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

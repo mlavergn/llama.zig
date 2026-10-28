@@ -4,7 +4,7 @@
 //!
 //! Ports `common_arg`, `common_params_parse_ex`, `common_params_print_usage`,
 //! `common_params_parse` and their helpers from `llama.cpp/common/arg.cpp`
-//! (v0.3.0, `c1d0e7a00`). The option table itself is `arg_options.zig`.
+//! (v0.4.0, `5266f24da`). The option table itself is `arg_options.zig`.
 //! Each declaration names what it ports and the line it began at.
 //!
 //! # Exceptions
@@ -120,7 +120,7 @@ pub fn dupe(p: *Params, s: []const u8) ![:0]const u8 {
 
 /// The five handler signatures, `handler_void`, `handler_string`,
 /// `handler_str_str`, `handler_int` and `handler_bool`
-/// (arg.h:34, 35, 36, 37, 38 @c1d0e7a00).
+/// (arg.h:34, 35, 36, 37, 38 @5266f24da).
 pub const Handler = union(enum) {
     void_: *const fn (*Params) anyerror!void,
     string: *const fn (*Params, [:0]const u8) anyerror!void,
@@ -129,7 +129,7 @@ pub const Handler = union(enum) {
     bool_: *const fn (*Params, bool) anyerror!void,
 };
 
-/// Ports `common_arg` (arg.h:22 @c1d0e7a00).
+/// Ports `common_arg` (arg.h:22 @5266f24da).
 pub const Arg = struct {
     examples: ExampleSet = ExampleSet.initOne(.common),
     excludes: ExampleSet = ExampleSet.empty,
@@ -144,7 +144,7 @@ pub const Arg = struct {
     is_preset_only: bool = false, // is current arg preset-only (not treated as CLI arg)
     handler: Handler,
 
-    /// Ports `set_examples` (arg.cpp:86 @c1d0e7a00), a member of `common_arg`.
+    /// Ports `set_examples` (arg.cpp:86 @5266f24da), a member of `common_arg`.
     pub fn setExamples(self: Arg, examples: []const Example) Arg {
         var r = self;
         r.examples = ExampleSet.empty;
@@ -152,7 +152,7 @@ pub const Arg = struct {
         return r;
     }
 
-    /// Ports `set_excludes` (arg.cpp:91 @c1d0e7a00), a member of `common_arg`.
+    /// Ports `set_excludes` (arg.cpp:91 @5266f24da), a member of `common_arg`.
     pub fn setExcludes(self: Arg, excludes: []const Example) Arg {
         var r = self;
         r.excludes = ExampleSet.empty;
@@ -160,7 +160,7 @@ pub const Arg = struct {
         return r;
     }
 
-    /// Ports `set_env` (arg.cpp:96 @c1d0e7a00), a member of `common_arg`. The C appends
+    /// Ports `set_env` (arg.cpp:96 @5266f24da), a member of `common_arg`. The C appends
     /// `\n(env: NAME)` to the help here; `toString` does.
     pub fn setEnv(self: Arg, env: [:0]const u8) Arg {
         var r = self;
@@ -168,45 +168,45 @@ pub const Arg = struct {
         return r;
     }
 
-    /// Ports `set_sampling` (arg.cpp:102 @c1d0e7a00), a member of `common_arg`.
+    /// Ports `set_sampling` (arg.cpp:102 @5266f24da), a member of `common_arg`.
     pub fn setSampling(self: Arg) Arg {
         var r = self;
         r.is_sampling = true;
         return r;
     }
 
-    /// Ports `set_spec` (arg.cpp:107 @c1d0e7a00), a member of `common_arg`.
+    /// Ports `set_spec` (arg.cpp:107 @5266f24da), a member of `common_arg`.
     pub fn setSpec(self: Arg) Arg {
         var r = self;
         r.is_spec = true;
         return r;
     }
 
-    /// Ports `set_preset_only` (arg.cpp:112 @c1d0e7a00), a member of `common_arg`.
+    /// Ports `set_preset_only` (arg.cpp:112 @5266f24da), a member of `common_arg`.
     pub fn setPresetOnly(self: Arg) Arg {
         var r = self;
         r.is_preset_only = true;
         return r;
     }
 
-    /// Ports `in_example` (arg.cpp:117 @c1d0e7a00), a member of `common_arg`.
+    /// Ports `in_example` (arg.cpp:117 @5266f24da), a member of `common_arg`.
     pub fn inExample(self: *const Arg, ex: Example) bool {
         return self.examples.contains(ex);
     }
 
-    /// Ports `is_exclude` (arg.cpp:121 @c1d0e7a00), a member of `common_arg`.
+    /// Ports `is_exclude` (arg.cpp:121 @5266f24da), a member of `common_arg`.
     pub fn isExclude(self: *const Arg, ex: Example) bool {
         return self.excludes.contains(ex);
     }
 
-    /// The `LLAMA_ARG_NO_` spelling of `env` (arg.cpp:129 @c1d0e7a00).
+    /// The `LLAMA_ARG_NO_` spelling of `env` (arg.cpp:129 @5266f24da).
     fn negEnv(self: *const Arg, buf: []u8) ?[:0]const u8 {
         const env = self.env orelse return null;
         if (!std.mem.startsWith(u8, env, "LLAMA_ARG_")) return std.fmt.bufPrintSentinel(buf, "{s}", .{env}, 0) catch null;
         return std.fmt.bufPrintSentinel(buf, "LLAMA_ARG_NO_{s}", .{env["LLAMA_ARG_".len..]}, 0) catch null;
     }
 
-    /// Ports `get_value_from_env` (arg.cpp:125 @c1d0e7a00), a member of `common_arg`.
+    /// Ports `get_value_from_env` (arg.cpp:125 @5266f24da), a member of `common_arg`.
     pub fn getValueFromEnv(self: *const Arg) ?[:0]const u8 {
         const env = self.env orelse return null;
         if (self.args_neg.len != 0) {
@@ -220,7 +220,7 @@ pub const Arg = struct {
         return null;
     }
 
-    /// Ports `has_value_from_env` (arg.cpp:145 @c1d0e7a00), a member of `common_arg`.
+    /// Ports `has_value_from_env` (arg.cpp:145 @5266f24da), a member of `common_arg`.
     pub fn hasValueFromEnv(self: *const Arg) bool {
         const env = self.env orelse return false;
         if (self.args_neg.len != 0) {
@@ -232,7 +232,7 @@ pub const Arg = struct {
         return getenv(env.ptr) != null;
     }
 
-    /// Ports `to_string` (arg.cpp:184 @c1d0e7a00), a member of `common_arg`: the option
+    /// Ports `to_string` (arg.cpp:184 @5266f24da), a member of `common_arg`: the option
     /// as `--help` lists it.
     pub fn toString(self: *const Arg, a: std.mem.Allocator) ![]u8 {
         // params for printing to console
@@ -281,7 +281,7 @@ pub const Arg = struct {
             try ss.appendNTimes(a, ' ', n_leading_spaces - ss.items.len);
         }
         // `set_env` appended this to the help when it was called
-        // (arg.cpp:96 @c1d0e7a00); nothing changes the help after it.
+        // (arg.cpp:96 @5266f24da); nothing changes the help after it.
         const help = if (self.env) |env| try std.mem.concat(a, u8, &.{ self.help, "\n(env: ", env, ")" }) else self.help;
         const help_lines = try breakStrIntoLines(a, help, n_char_per_line_help);
         for (help_lines.items, 0..) |line, i| {
@@ -293,7 +293,7 @@ pub const Arg = struct {
     }
 };
 
-/// Ports `break_str_into_lines` (arg.cpp:157 @c1d0e7a00): each line of
+/// Ports `break_str_into_lines` (arg.cpp:157 @5266f24da): each line of
 /// `input` as `std::getline` reads them; one longer than the limit is
 /// re-flowed word by word, words as `operator>>` reads them.
 fn breakStrIntoLines(a: std.mem.Allocator, input: []const u8, max_char_per_line: usize) !std.ArrayList([]const u8) {
@@ -326,17 +326,17 @@ fn breakStrIntoLines(a: std.mem.Allocator, input: []const u8, max_char_per_line:
     return result;
 }
 
-/// Ports `is_truthy` (arg.cpp:1331 @c1d0e7a00), a member of `common_arg_utils`.
+/// Ports `is_truthy` (arg.cpp:1336 @5266f24da), a member of `common_arg_utils`.
 pub fn isTruthy(value: []const u8) bool {
     return eqlAny(value, &.{ "on", "enabled", "true", "1" });
 }
 
-/// Ports `is_falsey` (arg.cpp:1335 @c1d0e7a00), a member of `common_arg_utils`.
+/// Ports `is_falsey` (arg.cpp:1340 @5266f24da), a member of `common_arg_utils`.
 pub fn isFalsey(value: []const u8) bool {
     return eqlAny(value, &.{ "off", "disabled", "false", "0" });
 }
 
-/// Ports `is_autoy` (arg.cpp:1339 @c1d0e7a00), a member of `common_arg_utils`.
+/// Ports `is_autoy` (arg.cpp:1344 @5266f24da), a member of `common_arg_utils`.
 pub fn isAutoy(value: []const u8) bool {
     return eqlAny(value, &.{ "auto", "-1" });
 }
@@ -346,7 +346,7 @@ fn eqlAny(v: []const u8, list: []const []const u8) bool {
     return false;
 }
 
-/// Ports `parse_bool_value` (arg.cpp:333 @c1d0e7a00).
+/// Ports `parse_bool_value` (arg.cpp:333 @5266f24da).
 fn parseBoolValue(value: []const u8) error{Throw}!bool {
     if (isTruthy(value)) return true;
     if (isFalsey(value)) return false;
@@ -358,14 +358,14 @@ fn parseBoolValue(value: []const u8) error{Throw}!bool {
 // -----------------------------------------------------------------------------
 // common_params_context
 
-/// Ports `common_params_context` (arg.h:115 @c1d0e7a00).
+/// Ports `common_params_context` (arg.h:115 @5266f24da).
 pub const Context = struct {
     ex: Example,
     params: *Params,
     options: std.ArrayList(Arg) = .empty,
     print_usage: ?*const fn (argv: []const [:0]const u8) void = null,
 
-    /// The `add_opt` lambda (arg.cpp:1432 @c1d0e7a00): keep an option when
+    /// The `add_opt` lambda (arg.cpp:1437 @5266f24da): keep an option when
     /// it belongs to this example, or to all of them and this is not
     /// `download`, unless this example is excluded.
     pub fn add(self: *Context, arg: Arg) !void {
@@ -386,7 +386,7 @@ pub const Context = struct {
     }
 };
 
-/// Ports `common_params_parser_init` (arg.cpp:1391 @c1d0e7a00): the
+/// Ports `common_params_parser_init` (arg.cpp:1396 @5266f24da): the
 /// per-example defaults, then the table.
 pub fn parserInit(params: *Params, ex: Example, print_usage: ?*const fn ([]const [:0]const u8) void) !Context {
     // per-example default params
@@ -415,7 +415,7 @@ pub fn parserInit(params: *Params, ex: Example, print_usage: ?*const fn ([]const
 // Parsing
 
 /// The config files `common_params_apply_system_config` reads
-/// (arg.cpp:719 @c1d0e7a00). None may exist: their INI presets are not
+/// (arg.cpp:719 @5266f24da). None may exist: their INI presets are not
 /// ported.
 fn refuseSystemConfig(a: std.mem.Allocator) !void {
     var paths: std.ArrayList([:0]const u8) = .empty;
@@ -444,7 +444,7 @@ fn exitC(code: c_int) noreturn {
     exit(code);
 }
 
-/// Ports `postprocess_cpu_params` (common/common.cpp:288 @c1d0e7a00).
+/// Ports `postprocess_cpu_params` (common/common.cpp:288 @5266f24da).
 pub fn postprocessCpuParams(cpuparams: *params_mod.CpuParams, role_model: ?*const params_mod.CpuParams) void {
     var n_set: i32 = 0;
 
@@ -471,7 +471,7 @@ pub fn postprocessCpuParams(cpuparams: *params_mod.CpuParams, role_model: ?*cons
 /// argument, which returns false, and anything else, which exits 1.
 const ParseError = error{ InvalidArgument, Other };
 
-/// Ports `common_params_parse_ex` (arg.cpp:762 @c1d0e7a00).
+/// Ports `common_params_parse_ex` (arg.cpp:762 @5266f24da).
 fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
     const params = ctx.params;
     const a = params.arena;
@@ -631,9 +631,14 @@ fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
         setWhat("error: the supplied chat template is not supported: %s%s\n", .{ tmpl.ptr, note });
         return error.Other;
     }
+
+    // if the preserve_reasoning kwarg was not specified explicitly, the C
+    // enables it by default -- in `default_template_kwargs`, which `Params`
+    // does not carry: no option these tools take sets it, and the legacy
+    // template path, the only one `chat.zig` ports, never reads it.
 }
 
-/// Ports `common_chat_verify_template` (chat.cpp:627 @c1d0e7a00), its
+/// Ports `common_chat_verify_template` (chat.cpp:627 @5266f24da), its
 /// legacy arm: whether libllama recognises the template's family. The Jinja
 /// arm, which parses and renders the source, is not ported (see
 /// `chat.zig`); there every template passes here.
@@ -645,7 +650,7 @@ fn verifyChatTemplate(a: std.mem.Allocator, tmpl: []const u8, use_jinja: bool) !
     return res >= 0;
 }
 
-/// Ports `string_process_escapes` (common/common.cpp:645 @c1d0e7a00).
+/// Ports `string_process_escapes` (common/common.cpp:645 @5266f24da).
 pub fn processEscapes(a: std.mem.Allocator, input: []const u8) ![]const u8 {
     const out = try a.alloc(u8, input.len);
     const input_len = input.len;
@@ -713,7 +718,7 @@ pub fn processEscapes(a: std.mem.Allocator, input: []const u8) ![]const u8 {
     return out[0..output_idx];
 }
 
-/// Ports `common_params_print_usage` (arg.cpp:966 @c1d0e7a00).
+/// Ports `common_params_print_usage` (arg.cpp:971 @5266f24da).
 fn printUsage(ctx: *Context) !void {
     const a = ctx.params.arena;
     var common_options: std.ArrayList(*Arg) = .empty;
@@ -750,7 +755,7 @@ fn printUsage(ctx: *Context) !void {
     }
 }
 
-/// Ports `common_params_parse` (arg.cpp:1277 @c1d0e7a00).
+/// Ports `common_params_parse` (arg.cpp:1282 @5266f24da).
 ///
 /// Parameters:
 /// - `argv`: the command line, `argv[0]` included.

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/kimik25.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/kimik25.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -12,7 +12,7 @@ const graph = @import("../graph.zig");
 const kimivl = @import("kimivl.zig");
 const c = impl.c;
 
-/// Ports `resize_position_embeddings_3d` (kimik25.cpp:8 @c1d0e7a00), a
+/// Ports `resize_position_embeddings_3d` (kimik25.cpp:8 @5266f24da), a
 /// member of `clip_graph_kimik25`: `resize_position_embeddings` with w and
 /// h stored in ne[1] and ne[2].
 pub fn resizePositionEmbeddings3d(g: *graph.Graph, interpolation_mode: u32) graph.T {
@@ -43,7 +43,7 @@ pub fn resizePositionEmbeddings3d(g: *graph.Graph, interpolation_mode: u32) grap
     return pos_embd;
 }
 
-/// Ports `build` (kimik25.cpp:34 @c1d0e7a00), a member of `clip_graph_kimik25`.
+/// Ports `build` (kimik25.cpp:34 @5266f24da), a member of `clip_graph_kimik25`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

@@ -9,7 +9,7 @@
 //!   `llm_chat_apply_template` and `llama_chat_builtin_templates`
 //! - `llama.cpp/src/llama-chat.h` -- `llm_chat_template`
 //!
-//! Both at v0.3.0 (`c1d0e7a00`). Each declaration below names the line it
+//! Both at v0.4.0 (`5266f24da`). Each declaration below names the line it
 //! came from.
 //!
 //! # Not a Jinja engine
@@ -49,7 +49,7 @@ extern "c" fn toupper(ch: c_int) c_int;
 /// a `std::string` from each.
 pub const Message = c.llama_chat_message;
 
-/// Ports `llm_chat_template` (llama-chat.h:7 @c1d0e7a00).
+/// Ports `llm_chat_template` (llama-chat.h:7 @5266f24da).
 ///
 /// The ordinals are the C++'s: `unknown` is the last, and `dots1` is the one
 /// template `detectTemplate` can return that has no name in
@@ -118,7 +118,7 @@ const Entry = struct {
     tmpl: Template,
 };
 
-/// Ports `LLM_CHAT_TEMPLATES` (llama-chat.cpp:28 @c1d0e7a00), in its
+/// Ports `LLM_CHAT_TEMPLATES` (llama-chat.cpp:28 @5266f24da), in its
 /// declaration order. `templates` below is the order the C++ actually
 /// iterates in.
 const declared = [_]Entry{
@@ -198,7 +198,7 @@ const templates: [declared.len]Entry = blk: {
     break :blk sorted;
 };
 
-/// Ports `trim` (llama-chat.cpp:16 @c1d0e7a00): drops leading and trailing
+/// Ports `trim` (llama-chat.cpp:16 @5266f24da): drops leading and trailing
 /// bytes `isspace` accepts, each passed as an `unsigned char`.
 ///
 /// Return: a sub-slice of `s`.
@@ -219,7 +219,7 @@ fn upper(b: u8) u8 {
     return @truncate(@as(u32, @bitCast(r)));
 }
 
-/// Ports `llm_chat_template_from_str` (llama-chat.cpp:85 @c1d0e7a00).
+/// Ports `llm_chat_template_from_str` (llama-chat.cpp:85 @5266f24da).
 ///
 /// The C++ is `LLM_CHAT_TEMPLATES.at(name)`, which throws
 /// `std::out_of_range` for a name not in the table; its one caller,
@@ -241,7 +241,7 @@ fn has(tmpl: []const u8, needle: []const u8) bool {
     return std.mem.find(u8, tmpl, needle) != null;
 }
 
-/// Ports `llm_chat_detect_template` (llama-chat.cpp:89 @c1d0e7a00).
+/// Ports `llm_chat_detect_template` (llama-chat.cpp:89 @5266f24da).
 ///
 /// A built-in name first, then a cascade of substring tests on the
 /// template's source. The order of the tests is the contract: many
@@ -413,7 +413,7 @@ fn eql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
 
-/// Ports `llm_chat_apply_template` (llama-chat.cpp:244 @c1d0e7a00).
+/// Ports `llm_chat_apply_template` (llama-chat.cpp:244 @5266f24da).
 ///
 /// Formats `chat` for `tmpl` into `out`, replacing what it held. Every
 /// template but `.unknown` is supported; for `.unknown` the C++ returns -1
@@ -992,7 +992,7 @@ fn putRoleUpper(ss: Stream, role: []const u8) error{OutOfMemory}!void {
     for (role) |b| try ss.put(&[1]u8{upper(b)});
 }
 
-/// Ports `llama_chat_builtin_templates` (llama-chat.cpp:950 @c1d0e7a00).
+/// Ports `llama_chat_builtin_templates` (llama-chat.cpp:950 @5266f24da).
 ///
 /// Parameters:
 /// - `output`: receives up to `len` names, in `std::map` key order; each

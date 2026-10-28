@@ -238,6 +238,16 @@ const tt_bad = [_]c.struct_llama_model_tensor_override{
     .{ .pattern = "attn_(", .type = c.GGML_TYPE_Q8_0 },
     .{ .pattern = null, .type = 0 },
 };
+// `per_layer_token_embd` follows `token_embedding_type` unless a pattern
+// names it; `^token_embd` names only the other embedding.
+const tt_ple = [_]c.struct_llama_model_tensor_override{
+    .{ .pattern = "per_layer_token_embd", .type = c.GGML_TYPE_Q8_0 },
+    .{ .pattern = null, .type = 0 },
+};
+const tt_embd = [_]c.struct_llama_model_tensor_override{
+    .{ .pattern = "^token_embd", .type = c.GGML_TYPE_Q6_K },
+    .{ .pattern = null, .type = 0 },
+};
 const tt_same = [_]c.struct_llama_model_tensor_override{
     .{ .pattern = "ffn_up", .type = c.GGML_TYPE_Q4_K },
     .{ .pattern = "nothing-matches-this", .type = c.GGML_TYPE_Q2_K },
@@ -272,6 +282,14 @@ const Edits = struct {
         p.tt_overrides = &tt_same;
         p.pure = true;
     }
+    fn embTtPle(p: *c.llama_model_quantize_params) void {
+        p.token_embedding_type = c.GGML_TYPE_Q4_K;
+        p.tt_overrides = &tt_ple;
+    }
+    fn embTtEmbd(p: *c.llama_model_quantize_params) void {
+        p.token_embedding_type = c.GGML_TYPE_Q4_K;
+        p.tt_overrides = &tt_embd;
+    }
 };
 
 const param_sets = [_]ParamSet{
@@ -284,6 +302,8 @@ const param_sets = [_]ParamSet{
     .{ .name = "onlyCopy", .edit = Edits.onlyCopy },
     .{ .name = "ttBad", .edit = Edits.ttBad },
     .{ .name = "ttSame", .edit = Edits.ttSame },
+    .{ .name = "emb+ttPle", .edit = Edits.embTtPle },
+    .{ .name = "emb+ttEmbd", .edit = Edits.embTtEmbd },
 };
 
 var type_calls: usize = 0;
@@ -967,6 +987,19 @@ fn fileRuns(dir: []const u8, quick: bool) void {
         fn allThreads(p: *c.llama_model_quantize_params) void {
             p.nthread = 0;
         }
+        // `max_buf_size` small enough that every tensor goes in several
+        // slabs, at a size no row size divides; and at one byte, which
+        // leaves one row a slab.
+        fn maxBuf(p: *c.llama_model_quantize_params) void {
+            p.max_buf_size = 4099;
+        }
+        fn maxBuf1(p: *c.llama_model_quantize_params) void {
+            p.max_buf_size = 1;
+        }
+        // Zero is the default, 8 GiB.
+        fn maxBuf0(p: *c.llama_model_quantize_params) void {
+            p.max_buf_size = 0;
+        }
     };
     const cases = [_]Case{
         .{ .name = "pure", .edit = E.pure },
@@ -984,6 +1017,15 @@ fn fileRuns(dir: []const u8, quick: bool) void {
         .{ .name = "noRequant", .edit = E.noRequant },
         .{ .name = "oneThread", .edit = E.oneThread },
         .{ .name = "allThreads", .edit = E.allThreads },
+        .{ .name = "maxBuf", .edit = E.maxBuf },
+        .{ .name = "maxBuf1", .edit = E.maxBuf1 },
+        .{ .name = "maxBuf0", .edit = E.maxBuf0 },
+        .{ .name = "maxBuf-onlyCopy", .edit = struct {
+            fn f(p: *c.llama_model_quantize_params) void {
+                p.max_buf_size = 4099;
+                p.only_copy = true;
+            }
+        }.f },
     };
     const case_ftypes = [_]c_int{ 15, 10, 23, 2, 38, 1 };
     for (cases) |cs| {
@@ -999,6 +1041,28 @@ fn fileRuns(dir: []const u8, quick: bool) void {
                 if (cs.imatrix) params.imatrix = im.entries.items.ptr;
                 cs.edit(&params);
                 runQuant(dir, std.fmt.bufPrint(&nb, "{s} {s} ftype {d}", .{ specs[fi].name, cs.name, ft }) catch unreachable, paths[fi], &params, null);
+            }
+        }
+    }
+
+    // Slabs across the experts: a slab that crosses an expert boundary must
+    // still quantize each expert's rows with that expert's importance
+    // data, one thread and three.
+    {
+        var im = Imatrix.fromFile(paths[1], null);
+        defer im.deinit();
+        for ([_]usize{ 4099, 1, 65536 }) |mb| {
+            for ([_]c_int{ 1, 3 }) |nt| {
+                for ([_]c_int{ 15, 19, 7 }) |ft| {
+                    if (quick and ft != 15) continue;
+                    var params = c.llama_model_quantize_default_params();
+                    params.ftype = @intCast(ft);
+                    params.nthread = nt;
+                    params.allow_requantize = true;
+                    params.imatrix = im.entries.items.ptr;
+                    params.max_buf_size = mb;
+                    runQuant(dir, std.fmt.bufPrint(&nb, "{s} maxBuf {d} threads {d} ftype {d}", .{ specs[1].name, mb, nt, ft }) catch unreachable, paths[1], &params, null);
+                }
             }
         }
     }
@@ -1218,9 +1282,11 @@ fn portSaveJob(p: *const anyopaque) void {
 fn saverRuns(dir: []const u8, models: []const [:0]const u8, vocab_files: []const [:0]const u8) void {
     for (models) |m| saveBoth(dir, m, -1, false);
     for (models) |m| saveBoth(dir, m, 0, false);
-    // Every upstream vocabulary, vocab-only: no tensors and default
-    // hyperparameters, but each tokenizer's tokens, scores, types, merges
-    // and special ids.
+    // Every upstream vocabulary, vocab-only. Through v0.3.0 this compared
+    // each tokenizer's tokens, scores, types, merges and special ids as
+    // saved; since v0.4.0 upstream aborts saving any vocab-only model
+    // (saveBoth), so it compares the abort, and the tokenizer keys are
+    // covered by the full models above alone.
     for (vocab_files) |m| saveBoth(dir, m, 0, true);
 }
 
@@ -1262,11 +1328,16 @@ fn saveBoth(dir: []const u8, m: [:0]const u8, ngl: i32, vocab_only: bool) void {
         defer ref.deinit(gpa);
         var port: std.ArrayList(u8) = .empty;
         defer port.deinit(gpa);
-        if (hasCharsmap(m)) {
+        if (vocab_only or hasCharsmap(m)) {
             // `std::vector<char>` matches no branch of add_kv: both abort.
+            // And since v0.4.0 a vocab-only save aborts in upstream on any
+            // file: `add_kv_from_model` asks `hparams.n_ff_exp()`, now an
+            // accessor bounded by `n_layer_all`, which `load_hparams` never
+            // reads for vocab-only (llama-hparams.cpp:79 @5266f24da).
             var nb0: [256]u8 = undefined;
             const job: SaveJob = .{ .rm = rm, .pm = pm, .out = ref_out };
-            sameDeath(std.fmt.bufPrint(&nb0, "save {s} (charsmap)", .{m}) catch unreachable, refSaveJob, portSaveJob, &job);
+            const why = if (hasCharsmap(m)) "charsmap" else "vocab-only";
+            sameDeath(std.fmt.bufPrint(&nb0, "save {s} ({s})", .{ m, why }) catch unreachable, refSaveJob, portSaveJob, &job);
             removePath(ref_out);
             return;
         }

@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/tools/mtmd/mtmd-audio.cpp` and
-//! `llama.cpp/tools/mtmd/mtmd-audio.h` at v0.3.0 (`c1d0e7a00`). Each
+//! `llama.cpp/tools/mtmd/mtmd-audio.h` at v0.4.0 (`5266f24da`). Each
 //! declaration names the C++ it replaces and the line it began at. The C++'s
 //! class hierarchy -- an abstract `mtmd_audio_preprocessor` and eleven
 //! subclasses -- is one `Preprocessor` here, switched on `Kind`.
@@ -79,7 +79,7 @@ fn maxF64(a: f64, b: f64) f64 {
     return if (a < b) b else a;
 }
 
-/// Ports `mtmd_audio_mel` (mtmd-audio.h:12 @c1d0e7a00): `n_mel` rows of
+/// Ports `mtmd_audio_mel` (mtmd-audio.h:12 @5266f24da): `n_mel` rows of
 /// `n_len` frames, row-major.
 pub const Mel = struct {
     n_len: i64 = 0,
@@ -92,14 +92,14 @@ pub const Mel = struct {
     }
 };
 
-/// Ports `mtmd_audio_mel_filters` (mtmd-audio.h:20 @c1d0e7a00).
+/// Ports `mtmd_audio_mel_filters` (mtmd-audio.h:20 @5266f24da).
 pub const MelFilters = struct {
     n_mel: i64 = 0,
     n_fft: i64 = 0,
     data: std.ArrayList(f32) = .empty,
 };
 
-/// Ports `mtmd_audio_cache` (mtmd-audio.h:28 @c1d0e7a00): the sine and cosine
+/// Ports `mtmd_audio_cache` (mtmd-audio.h:28 @5266f24da): the sine and cosine
 /// tables, the window and the filterbank one preprocessor owns.
 pub const Cache = struct {
     sin_vals: std.ArrayList(f32) = .empty,
@@ -114,7 +114,7 @@ pub const Cache = struct {
         self.filters.data.deinit(gpa);
     }
 
-    /// Ports `fill_sin_cos_table` (mtmd-audio.cpp:17 @c1d0e7a00), a member of `mtmd_audio_cache`.
+    /// Ports `fill_sin_cos_table` (mtmd-audio.cpp:17 @5266f24da), a member of `mtmd_audio_cache`.
     pub fn fillSinCosTable(self: *Cache, n: u32) !void {
         try self.sin_vals.resize(gpa, n);
         try self.cos_vals.resize(gpa, n);
@@ -127,7 +127,7 @@ pub const Cache = struct {
         }
     }
 
-    /// Ports `fill_hann_window` (mtmd-audio.cpp:27 @c1d0e7a00), a member of `mtmd_audio_cache`.
+    /// Ports `fill_hann_window` (mtmd-audio.cpp:27 @5266f24da), a member of `mtmd_audio_cache`.
     /// `length + offset` is unsigned arithmetic in the C++.
     pub fn fillHannWindow(self: *Cache, length: u32, periodic: bool) !void {
         try self.hann_window.resize(gpa, length);
@@ -140,7 +140,7 @@ pub const Cache = struct {
         }
     }
 
-    /// Ports `fill_mel_filterbank_matrix` (mtmd-audio.cpp:35 @c1d0e7a00), a member of `mtmd_audio_cache`:
+    /// Ports `fill_mel_filterbank_matrix` (mtmd-audio.cpp:35 @5266f24da), a member of `mtmd_audio_cache`:
     /// an `n_mel` by `n_fft / 2 + 1` filterbank, Slaney or HTK scale.
     pub fn fillMelFilterbankMatrix(
         self: *Cache,
@@ -229,7 +229,7 @@ pub const Cache = struct {
     }
 };
 
-/// Ports `dft_impl` (mtmd-audio.cpp:139 @c1d0e7a00): the DFT, or the inverse
+/// Ports `dft_impl` (mtmd-audio.cpp:139 @5266f24da): the DFT, or the inverse
 /// DFT scaled by `1/N`, over real or interleaved complex input.
 fn dftImpl(comptime inverse: bool, comptime real_input: bool, cache: *const Cache, in: [*]const f32, N: c_int, out: [*]f32) void {
     const n_sin_cos_vals: c_int = @intCast(cache.sin_vals.items.len);
@@ -269,7 +269,7 @@ fn dftImpl(comptime inverse: bool, comptime real_input: bool, cache: *const Cach
     }
 }
 
-/// Ports `fft_impl` (mtmd-audio.cpp:183 @c1d0e7a00): recursive radix-2
+/// Ports `fft_impl` (mtmd-audio.cpp:183 @5266f24da): recursive radix-2
 /// Cooley-Tukey, falling back to the DFT at an odd length. `in` is scratch
 /// past the input and `out` past the `2N` results, as in the C++.
 fn fftImpl(comptime inverse: bool, comptime real_input: bool, cache: *const Cache, in: [*]f32, N: c_int, out: [*]f32) void {
@@ -349,17 +349,17 @@ fn fftImpl(comptime inverse: bool, comptime real_input: bool, cache: *const Cach
     }
 }
 
-/// Ports `fft` (mtmd-audio.cpp:264 @c1d0e7a00): forward, real input.
+/// Ports `fft` (mtmd-audio.cpp:264 @5266f24da): forward, real input.
 fn fft(cache: *const Cache, in: [*]f32, N: c_int, out: [*]f32) void {
     fftImpl(false, true, cache, in, N, out);
 }
 
-/// Ports `ifft` (mtmd-audio.cpp:269 @c1d0e7a00): inverse, complex input.
+/// Ports `ifft` (mtmd-audio.cpp:269 @5266f24da): inverse, complex input.
 fn ifft(cache: *const Cache, in: [*]f32, N: c_int, out: [*]f32) void {
     fftImpl(true, false, cache, in, N, out);
 }
 
-/// Ports `filter_params` (mtmd-audio.cpp:273 @c1d0e7a00).
+/// Ports `filter_params` (mtmd-audio.cpp:273 @5266f24da).
 const FilterParams = struct {
     n_mel: i64 = 0,
     n_fft_bins: i64 = 0,
@@ -435,7 +435,7 @@ const MelJob = struct {
     out: *Mel,
 };
 
-/// Ports `log_mel_spectrogram_worker_thread` (mtmd-audio.cpp:288 @c1d0e7a00):
+/// Ports `log_mel_spectrogram_worker_thread` (mtmd-audio.cpp:288 @5266f24da):
 /// every `n_threads`-th frame from `ith`. Frames are disjoint, so the result
 /// is the same whatever the scheduling.
 fn melWorker(ith: c_int, job: *const MelJob, fft_in: []f32, fft_out: []f32) void {
@@ -525,7 +525,7 @@ fn runWorkers(comptime Job: type, comptime worker: fn (c_int, *const Job, []f32,
     }
 }
 
-/// Ports `log_mel_spectrogram` (mtmd-audio.cpp:368 @c1d0e7a00), after
+/// Ports `log_mel_spectrogram` (mtmd-audio.cpp:368 @5266f24da), after
 /// openai/whisper's `audio.py`.
 fn logMelSpectrogram(samples_in: []const f32, params: *const FilterParams, cache: *const Cache, out: *Mel) !bool {
     out.n_len_org = @intCast(samples_in.len);
@@ -657,7 +657,7 @@ fn logMelSpectrogram(samples_in: []const f32, params: *const FilterParams, cache
 }
 
 /// The eleven subclasses of `mtmd_audio_preprocessor`
-/// (mtmd-audio.h:53 @c1d0e7a00), in the header's order.
+/// (mtmd-audio.h:53 @5266f24da), in the header's order.
 pub const Kind = enum {
     whisper,
     conformer,
@@ -672,7 +672,7 @@ pub const Kind = enum {
     parakeet,
 };
 
-/// Ports `mtmd_audio_preprocessor` (mtmd-audio.h:53 @c1d0e7a00) and its
+/// Ports `mtmd_audio_preprocessor` (mtmd-audio.h:53 @5266f24da) and its
 /// subclasses: hparams it borrows from the clip context, and the cache the
 /// subclass owns.
 pub const Preprocessor = struct {
@@ -693,16 +693,16 @@ pub const Preprocessor = struct {
     /// Ports each subclass's `initialize`, not thread-safe. The C++'s
     /// per-class bodies, in its order:
     ///
-    /// - `initialize` of whisper (mtmd-audio.cpp:544 @c1d0e7a00)
-    /// - `initialize` of qwen3a (mtmd-audio.cpp:632 @c1d0e7a00)
-    /// - `initialize` of dots3note (mtmd-audio.cpp:734 @c1d0e7a00)
-    /// - `initialize` of mimo-audio (mtmd-audio.cpp:828 @c1d0e7a00)
-    /// - `initialize` of qwen3tts-spk (mtmd-audio.cpp:893 @c1d0e7a00)
-    /// - `initialize` of the conformer (mtmd-audio.cpp:950 @c1d0e7a00)
-    /// - `initialize` of granite-speech (mtmd-audio.cpp:996 @c1d0e7a00)
-    /// - `initialize` of gemma4a (mtmd-audio.cpp:1099 @c1d0e7a00)
-    /// - `initialize` of parakeet (mtmd-audio.cpp:1253 @c1d0e7a00)
-    /// - `initialize` of gemma4ua (mtmd-audio.cpp:1383 @c1d0e7a00)
+    /// - `initialize` of whisper (mtmd-audio.cpp:544 @5266f24da)
+    /// - `initialize` of qwen3a (mtmd-audio.cpp:632 @5266f24da)
+    /// - `initialize` of dots3note (mtmd-audio.cpp:734 @5266f24da)
+    /// - `initialize` of mimo-audio (mtmd-audio.cpp:828 @5266f24da)
+    /// - `initialize` of qwen3tts-spk (mtmd-audio.cpp:893 @5266f24da)
+    /// - `initialize` of the conformer (mtmd-audio.cpp:950 @5266f24da)
+    /// - `initialize` of granite-speech (mtmd-audio.cpp:996 @5266f24da)
+    /// - `initialize` of gemma4a (mtmd-audio.cpp:1099 @5266f24da)
+    /// - `initialize` of parakeet (mtmd-audio.cpp:1253 @5266f24da)
+    /// - `initialize` of gemma4ua (mtmd-audio.cpp:1383 @5266f24da)
     pub fn initialize(self: *Preprocessor) !void {
         const hp = self.hparams;
         const n_fft: u32 = @bitCast(hp.audio_n_fft);
@@ -760,7 +760,7 @@ pub const Preprocessor = struct {
     /// `output`, which the caller owns.
     ///
     /// Return: whether it succeeded, as the C++ returns it.
-    pub fn preprocess(self: *Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
+    pub fn preprocess(self: *const Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
         return switch (self.kind) {
             .whisper => self.whisper(samples, output),
             .qwen3a => self.qwen3a(samples, output),
@@ -815,8 +815,8 @@ pub const Preprocessor = struct {
         return padded;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:550 @c1d0e7a00), a member of `mtmd_audio_preprocessor_whisper`.
-    fn whisper(self: *Preprocessor, samples_in: []const f32, output: *std.ArrayList(Mel)) !bool {
+    /// Ports `preprocess` (mtmd-audio.cpp:550 @5266f24da), a member of `mtmd_audio_preprocessor_whisper`.
+    fn whisper(self: *const Preprocessor, samples_in: []const f32, output: *std.ArrayList(Mel)) !bool {
         const hp = self.hparams;
         if (samples_in.len == 0) return false; // empty audio
 
@@ -866,9 +866,9 @@ pub const Preprocessor = struct {
         return true;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:638 @c1d0e7a00), a member of `mtmd_audio_preprocessor_qwen3a`:
+    /// Ports `preprocess` (mtmd-audio.cpp:638 @5266f24da), a member of `mtmd_audio_preprocessor_qwen3a`:
     /// the WhisperFeatureExtractor with `truncation=False`.
-    fn qwen3a(self: *Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
+    fn qwen3a(self: *const Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
         const hp = self.hparams;
         if (samples.len == 0) return false;
         self.assertCache(645);
@@ -925,9 +925,9 @@ pub const Preprocessor = struct {
         return true;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:740 @c1d0e7a00), a member of `mtmd_audio_preprocessor_dots3note`:
+    /// Ports `preprocess` (mtmd-audio.cpp:740 @5266f24da), a member of `mtmd_audio_preprocessor_dots3note`:
     /// whisper-style log-mel per 60 s chunk, only the valid frames kept.
-    fn dots3note(self: *Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
+    fn dots3note(self: *const Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
         const hp = self.hparams;
         if (samples.len == 0) return false;
         self.assertCache(747);
@@ -984,9 +984,9 @@ pub const Preprocessor = struct {
         return output.items.len != 0;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:840 @c1d0e7a00), a member of `mtmd_audio_preprocessor_mimo_audio`:
+    /// Ports `preprocess` (mtmd-audio.cpp:840 @5266f24da), a member of `mtmd_audio_preprocessor_mimo_audio`:
     /// torchaudio's `MelSpectrogram(power=1.0, center=True)` then `log(clip(spec, 1e-7))`.
-    fn mimoAudio(self: *Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
+    fn mimoAudio(self: *const Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
         const hp = self.hparams;
         if (samples.len == 0) return false;
         self.assertCache(847);
@@ -1011,9 +1011,9 @@ pub const Preprocessor = struct {
         return true;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:899 @c1d0e7a00), a member of `mtmd_audio_preprocessor_qwen3tts_spk`:
+    /// Ports `preprocess` (mtmd-audio.cpp:899 @5266f24da), a member of `mtmd_audio_preprocessor_qwen3tts_spk`:
     /// `mel_spectrogram()` of `modeling_qwen3_tts.py`, the whole clip at once.
-    fn qwen3ttsSpk(self: *Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
+    fn qwen3ttsSpk(self: *const Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
         const hp = self.hparams;
         if (samples.len == 0) return false;
         self.assertCache(906);
@@ -1046,8 +1046,8 @@ pub const Preprocessor = struct {
         return true;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:956 @c1d0e7a00), a member of `mtmd_audio_preprocessor_conformer`.
-    fn conformer(self: *Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
+    /// Ports `preprocess` (mtmd-audio.cpp:956 @5266f24da), a member of `mtmd_audio_preprocessor_conformer`.
+    fn conformer(self: *const Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
         const hp = self.hparams;
         // empty audio
         if (samples.len == 0) return false;
@@ -1070,9 +1070,9 @@ pub const Preprocessor = struct {
         return true;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:1004 @c1d0e7a00), a member of `mtmd_audio_preprocessor_granite_speech`:
+    /// Ports `preprocess` (mtmd-audio.cpp:1004 @5266f24da), a member of `mtmd_audio_preprocessor_granite_speech`:
     /// HTK log10 mel, whisper normalization, consecutive frames stacked in pairs.
-    fn graniteSpeech(self: *Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
+    fn graniteSpeech(self: *const Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
         const hp = self.hparams;
         if (samples.len == 0) return false;
         self.assertCache(1011);
@@ -1147,11 +1147,11 @@ pub const Preprocessor = struct {
         return true;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:1118 @c1d0e7a00), a member of `mtmd_audio_preprocessor_gemma4a`:
+    /// Ports `preprocess` (mtmd-audio.cpp:1118 @5266f24da), a member of `mtmd_audio_preprocessor_gemma4a`:
     /// 30 s chunks, semicausal padding, trimmed to PyTorch's frame count. The
     /// trim lowers `n_len` and leaves the data at its original stride, as
     /// the C++ does.
-    fn gemma4a(self: *Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
+    fn gemma4a(self: *const Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
         const hp = self.hparams;
         if (samples.len == 0) return false;
         self.assertCache(1125);
@@ -1202,8 +1202,8 @@ pub const Preprocessor = struct {
         return true;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:1267 @c1d0e7a00), a member of `mtmd_audio_preprocessor_parakeet`.
-    fn parakeet(self: *Preprocessor, samples_in: []const f32, output: *std.ArrayList(Mel)) !bool {
+    /// Ports `preprocess` (mtmd-audio.cpp:1267 @5266f24da), a member of `mtmd_audio_preprocessor_parakeet`.
+    fn parakeet(self: *const Preprocessor, samples_in: []const f32, output: *std.ArrayList(Mel)) !bool {
         const hp = self.hparams;
         if (samples_in.len == 0) return false;
 
@@ -1288,9 +1288,9 @@ pub const Preprocessor = struct {
         return true;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:1387 @c1d0e7a00), a member of `mtmd_audio_preprocessor_gemma4ua`:
+    /// Ports `preprocess` (mtmd-audio.cpp:1387 @5266f24da), a member of `mtmd_audio_preprocessor_gemma4ua`:
     /// the raw waveform in 640-sample tokens, mel-major.
-    fn gemma4ua(self: *Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
+    fn gemma4ua(self: *const Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
         const hp = self.hparams;
         if (samples.len == 0) return false;
 
@@ -1315,10 +1315,10 @@ pub const Preprocessor = struct {
         return true;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:1528 @c1d0e7a00), a member of `mtmd_audio_preprocessor_pockettts`:
+    /// Ports `preprocess` (mtmd-audio.cpp:1528 @5266f24da), a member of `mtmd_audio_preprocessor_pockettts`:
     /// mimi convolves the raw 24 kHz waveform, so this only pads it to whole
     /// frames, as one single-row "mel".
-    fn pockettts(self: *Preprocessor, samples_in: []const f32, output: *std.ArrayList(Mel)) !bool {
+    fn pockettts(self: *const Preprocessor, samples_in: []const f32, output: *std.ArrayList(Mel)) !bool {
         const hp = self.hparams;
         // the encoder needs whole frames, see pad_for_conv1d() in the reference
         const frame_size: i64 = @as(i64, hp.mimi_downsample) * 120;
@@ -1361,7 +1361,7 @@ const ParakeetJob = struct {
     mel: *Mel,
 };
 
-/// Ports `worker_thread` (mtmd-audio.cpp:1180 @c1d0e7a00), a member of `mtmd_audio_preprocessor_parakeet`.
+/// Ports `worker_thread` (mtmd-audio.cpp:1180 @5266f24da), a member of `mtmd_audio_preprocessor_parakeet`.
 fn parakeetWorker(ith: c_int, job: *const ParakeetJob, fft_in: []f32, fft_out: []f32) void {
     const n_fb = job.n_fft_bins;
     var i: c_int = ith;
@@ -1417,7 +1417,7 @@ fn parakeetWorker(ith: c_int, job: *const ParakeetJob, fft_in: []f32, fft_out: [
     }
 }
 
-/// Ports `mtmd_audio_streaming_istft` (mtmd-audio.h:166 @c1d0e7a00): STFT
+/// Ports `mtmd_audio_streaming_istft` (mtmd-audio.h:166 @5266f24da): STFT
 /// frames back to audio, one frame at a time, overlap-added.
 pub const StreamingIstft = struct {
     n_fft: c_int,
@@ -1436,7 +1436,7 @@ pub const StreamingIstft = struct {
     ifft_in: []f32,
     ifft_out: []f32,
 
-    /// Ports `mtmd_audio_streaming_istft` (mtmd-audio.cpp:1421 @c1d0e7a00), a member of `mtmd_audio_streaming_istft`.
+    /// Ports `mtmd_audio_streaming_istft` (mtmd-audio.cpp:1421 @5266f24da), a member of `mtmd_audio_streaming_istft`.
     pub fn init(n_fft: c_int, hop_length: c_int) !StreamingIstft {
         const nu: usize = @intCast(n_fft);
         var self: StreamingIstft = .{
@@ -1467,7 +1467,7 @@ pub const StreamingIstft = struct {
         gpa.free(self.ifft_out);
     }
 
-    /// Ports `reset` (mtmd-audio.cpp:1435 @c1d0e7a00), a member of `mtmd_audio_streaming_istft`.
+    /// Ports `reset` (mtmd-audio.cpp:1435 @5266f24da), a member of `mtmd_audio_streaming_istft`.
     pub fn reset(self: *StreamingIstft) void {
         @memset(self.overlap_buffer, 0.0);
         @memset(self.window_sum_buffer, 0.0);
@@ -1488,7 +1488,7 @@ pub const StreamingIstft = struct {
         @memset(self.window_sum_buffer[len - n ..], 0.0);
     }
 
-    /// Ports `process_frame` (mtmd-audio.cpp:1441 @c1d0e7a00), a member of `mtmd_audio_streaming_istft`:
+    /// Ports `process_frame` (mtmd-audio.cpp:1441 @5266f24da), a member of `mtmd_audio_streaming_istft`:
     /// one frame, `n_fft_bins` interleaved real/imaginary pairs.
     ///
     /// Return: up to `hop_length` samples; the caller owns them.
@@ -1535,7 +1535,7 @@ pub const StreamingIstft = struct {
         return output;
     }
 
-    /// Ports `flush` (mtmd-audio.cpp:1489 @c1d0e7a00), a member of `mtmd_audio_streaming_istft`:
+    /// Ports `flush` (mtmd-audio.cpp:1489 @5266f24da), a member of `mtmd_audio_streaming_istft`:
     /// what is left in the overlap buffer at the end of the stream.
     ///
     /// Return: the remaining samples; the caller owns them.

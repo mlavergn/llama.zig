@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/tokenize/tokenize.cpp` at v0.3.0
-//! (`c1d0e7a00`). Each declaration names the C++ it replaces and the line it
+//! Ported from `llama.cpp/tools/tokenize/tokenize.cpp` at v0.4.0
+//! (`5266f24da`). Each declaration names the C++ it replaces and the line it
 //! began at.
 
 const std = @import("std");
@@ -19,7 +19,7 @@ comptime {
     _ = @import("llama");
 }
 
-/// Ports `print_usage` (tokenize.cpp:20 @c1d0e7a00).
+/// Ports `print_usage` (tokenize.cpp:20 @5266f24da).
 fn printUsage(argv: []const [:0]const u8) void {
     log.out("\nexample usage:\n", .{});
     log.out("\n  %s -m your_model.gguf -p \"Hello world\"\n", .{argv[0].ptr});
@@ -36,7 +36,7 @@ const win = struct {
     extern "kernel32" fn GetLastError() callconv(.winapi) u32;
 };
 
-/// Ports `write_utf8_cstr_to_stdout` (tokenize.cpp:41 @c1d0e7a00): `printf`,
+/// Ports `write_utf8_cstr_to_stdout` (tokenize.cpp:41 @5266f24da): `printf`,
 /// or on a Windows console the UTF-16 it needs, with invalid UTF-8 written
 /// as its bytes in hex.
 fn writeUtf8ToStdout(a: std.mem.Allocator, str: [:0]const u8, invalid_utf8: *bool) !void {
@@ -98,7 +98,7 @@ extern fn fclose(f: *anyopaque) c_int;
 extern fn fdopen(fd: c_int, mode: [*:0]const u8) ?*anyopaque;
 extern fn _fdopen(fd: c_int, mode: [*:0]const u8) ?*anyopaque;
 
-/// Ports `main` (tokenize.cpp:95 @c1d0e7a00).
+/// Ports `main` (tokenize.cpp:95 @5266f24da).
 fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     var params = try tc.params.Params.init(a);
 

@@ -10,8 +10,10 @@ so a transcription error would make the host launch a kernel with a
 configuration it was not compiled for -- a wrong grid or shared-memory size,
 silently. So the tables are generated from the headers, not typed.
 
-Only the NVIDIA families are emitted: pascal, ampere and blackwell
-(`ggml_cuda_mmq_get_config` reaches the AMD ones only for AMD devices).
+Only the NVIDIA families are emitted: pascal_older, pascal_dp4a, ampere
+and blackwell (`ggml_cuda_mmq_get_config` reaches the AMD ones only for AMD
+devices). A family's file is its name with `_` spelled `-`:
+`ggml_cuda_mmq_get_config_pascal_dp4a` is in `mmq-config-pascal-dp4a.cuh`.
 
 Writes:
   src/ggml/cuda/mmq_config_table.zig
@@ -21,8 +23,8 @@ Run after moving the upstream pin.
 import re
 
 DIR = "llama.cpp/ggml/src/ggml-cuda"
-COMMIT = "c1d0e7a00"
-FAMILIES = ["pascal", "ampere", "blackwell"]
+from upstream_pin import COMMIT, TAG
+FAMILIES = ["pascal_older", "pascal_dp4a", "ampere", "blackwell"]
 OUT = "src/ggml/cuda/mmq_config_table.zig"
 
 K_VRAM = {"MMQ_ITER_K": 256, "MMQ_ITER_K_FP4": 512}
@@ -42,8 +44,12 @@ def entry(m):
     return f".{{ .type = c.{t}, .nthreads = {nthreads}, .occupancy = {occ}, .I = {I}, .J = {J}, .sram_layout = .{layout}, .K_vram = {kv(k)}, .stream_k = {sk}, .fallback = {fb} }}"
 
 
+def stem(family):
+    return "mmq-config-" + family.replace("_", "-")
+
+
 def parse(family):
-    path = f"{DIR}/mmq-config-{family}.cuh"
+    path = f"{DIR}/{stem(family)}.cuh"
     lines = open(path).read().split("\n")
     first = next(i for i, l in enumerate(lines) if "ggml_cuda_mmq_get_config_" + family + "(" in l) + 1
     cases, default, fallthrough = [], None, None
@@ -67,9 +73,9 @@ out = [
 ]
 parsed = {f: parse(f) for f in FAMILIES}
 for f in FAMILIES:
-    out.append(f"//! `llama.cpp/ggml/src/ggml-cuda/mmq-config-{f}.cuh`,")
+    out.append(f"//! `llama.cpp/ggml/src/ggml-cuda/{stem(f)}.cuh`,")
 out += [
-    f"//! at v0.3.0 (`{COMMIT}`). Each table is a function's `CASE` lines in",
+    f"//! at {TAG} (`{COMMIT}`). Each table is a function's `CASE` lines in",
     "//! order; the first entry matching (type, J, fallback) wins, else the",
     "//! function's last line: a default entry, or another family's table.",
     "",
@@ -89,7 +95,7 @@ out += [
 ]
 for f in FAMILIES:
     first, cases, default, fallthrough = parsed[f]
-    out.append(f"/// Ports `ggml_cuda_mmq_get_config_{f}` (mmq-config-{f}.cuh:{first} @{COMMIT}).")
+    out.append(f"/// Ports `ggml_cuda_mmq_get_config_{f}` ({stem(f)}.cuh:{first} @{COMMIT}).")
     out.append(f"pub const {f}: Table = .{{")
     out.append("    .cases = &.{")
     for e in cases:

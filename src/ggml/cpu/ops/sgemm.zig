@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp` at v0.3.0
-//! (`c1d0e7a00`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp` at v0.4.0
+//! (`5266f24da`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # Only a tenth of the file compiles here
@@ -40,7 +40,7 @@
 //! Every accumulation here is an explicit FMA intrinsic in the C:
 //! `vfmaq_f32`, `vfmaq_f16`, `vmlaq_n_f32`. They are named with `@mulAdd`
 //! rather than written as `a*b + c`, which would round twice. The generic
-//! `madd` (sgemm.cpp:134 @c1d0e7a00) *is* two roundings, but both live element types
+//! `madd` (sgemm.cpp:134 @5266f24da) *is* two roundings, but both live element types
 //! have an FMA specialisation, so it is never instantiated here.
 //!
 //! `hsum` is `vaddvq_f32`, which is **pairwise** — see `CLAUDE.md`,
@@ -85,7 +85,7 @@ const is_x86 = builtin.cpu.arch == .x86_64;
 /// `tinyBLAS<16, __m512>` and `VECTOR_REGISTERS` is 32.
 const is_avx512 = is_x86 and std.Target.x86.featureSetHas(builtin.cpu.features, .avx512f);
 
-/// Ports `VECTOR_REGISTERS`, `VECTOR_REGISTERS` (sgemm.cpp:67, 69 @c1d0e7a00): 32 with NEON or
+/// Ports `VECTOR_REGISTERS`, `VECTOR_REGISTERS` (sgemm.cpp:67, 69 @5266f24da): 32 with NEON or
 /// AVX-512, 16 otherwise. It sets `tinyBLAS::matmul`'s tile constants and
 /// `tinyBLAS_Q0_AVX::mnpack`'s cases.
 const vector_registers = if (is_x86 and !is_avx512) 16 else 32;
@@ -93,7 +93,7 @@ const vector_registers = if (is_x86 and !is_avx512) 16 else 32;
 /// `__m512`.
 const f32x16 = @Vector(16, f32);
 
-/// Ports `unhalf` (sgemm.cpp:80 @c1d0e7a00).
+/// Ports `unhalf` (sgemm.cpp:80 @5266f24da).
 ///
 /// `GGML_CPU_FP16_TO_FP32`, which on NEON is the hardware conversion the
 /// other ported ARM kernels reach through `convert.cpuFp16ToFp32`.
@@ -101,19 +101,19 @@ inline fn unhalf(d: c.ggml_fp16_t) f32 {
     return convert.cpuFp16ToFp32(d);
 }
 
-/// Ports `hsum` (sgemm.cpp:232 @c1d0e7a00): `vaddvq_f32`, a
+/// Ports `hsum` (sgemm.cpp:232 @5266f24da): `vaddvq_f32`, a
 /// **pairwise** reduce, not the ordered one `@reduce(.Add, ...)` gives.
 inline fn hsum4(x: f32x4) f32 {
     return neon.addvq_f32(x);
 }
 
-/// Ports `hsum` (sgemm.cpp:238 @c1d0e7a00): widen both halves
+/// Ports `hsum` (sgemm.cpp:238 @5266f24da): widen both halves
 /// to `f32x4`, add, then the pairwise reduce.
 inline fn hsum8(x: f16x8) f32 {
     return neon.addvq_f32(neon.cvt_f32_f16_half(x, false) + neon.cvt_f32_f16_half(x, true));
 }
 
-/// Ports `hsum`, `hsum` (sgemm.cpp:268, 252 @c1d0e7a00), the `__m256` one and the
+/// Ports `hsum`, `hsum` (sgemm.cpp:268, 252 @5266f24da), the `__m256` one and the
 /// `__m128` one it calls: fold the upper 128 bits onto the lower, then
 /// `_mm_movehl_ps` and `_mm_movehdup_ps`, `(h0+h2)+(h1+h3)`.
 inline fn hsumAvx(x: f32x8) f32 {
@@ -123,13 +123,13 @@ inline fn hsumAvx(x: f32x8) f32 {
     return (h[0] + h[2]) + (h[1] + h[3]);
 }
 
-/// Ports `hsum` (sgemm.cpp:275 @c1d0e7a00), the `__m512` one:
+/// Ports `hsum` (sgemm.cpp:275 @5266f24da), the `__m512` one:
 /// `_mm512_reduce_add_ps`, in `simd.reduceAdd512`'s tree.
 inline fn hsumAvx512(x: f32x16) f32 {
     return simd.reduceAdd512(x);
 }
 
-/// Ports `load`, `load`, `load` (sgemm.cpp:360, 363, 366 @c1d0e7a00), the
+/// Ports `load`, `load`, `load` (sgemm.cpp:360, 363, 366 @5266f24da), the
 /// `__m512` ones: `_mm512_loadu_ps`; with `_mm512_cvtph_ps`, exact; and bf16
 /// widened by a 16-bit shift, exactly.
 inline fn loadAvx512(comptime T: type, p: [*]const T) f32x16 {
@@ -143,7 +143,7 @@ inline fn loadAvx512(comptime T: type, p: [*]const T) f32x16 {
     return @floatCast(h);
 }
 
-/// Ports `load`, `load`, `load` (sgemm.cpp:341, 347, 354 @c1d0e7a00), the
+/// Ports `load`, `load`, `load` (sgemm.cpp:341, 347, 354 @5266f24da), the
 /// `__m256` ones: `_mm256_loadu_ps`; bf16 widened by a 16-bit shift, exactly;
 /// and with F16C `_mm256_cvtph_ps`, also exact.
 inline fn loadAvx(comptime T: type, p: [*]const T) f32x8 {
@@ -157,18 +157,18 @@ inline fn loadAvx(comptime T: type, p: [*]const T) f32x8 {
     return @floatCast(h);
 }
 
-/// Ports `BLOCK_SIZE` (sgemm.cpp:475 @c1d0e7a00).
+/// Ports `BLOCK_SIZE` (sgemm.cpp:475 @5266f24da).
 inline fn blockSize(comptime M: i64, m: i64) i64 {
     const nb_bloc_m = @divTrunc(m + M - 1, M);
     return if (@rem(m, nb_bloc_m) == 0) @divTrunc(m, nb_bloc_m) else @divTrunc(m, nb_bloc_m) + 1;
 }
 
-/// Ports `BLOC_POS` (sgemm.cpp:480 @c1d0e7a00).
+/// Ports `BLOC_POS` (sgemm.cpp:480 @5266f24da).
 inline fn blocPos(ib: i64, ibN: i64, bloc_size: i64) i64 {
     return if (ib < ibN) ib * bloc_size else ibN * bloc_size + (ib - ibN) * (bloc_size - 1);
 }
 
-/// Ports `tinyBLAS` (sgemm.cpp:485 @c1d0e7a00), the float path.
+/// Ports `tinyBLAS` (sgemm.cpp:485 @5266f24da), the float path.
 ///
 /// `KN` is the element count of one vector load, `V` the vector type, and
 /// `TA` and `TB` the scalars `A` and `B` are loaded from. The C's six
@@ -187,7 +187,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
         ldb: i64,
         ldc: i64,
 
-        /// Ports `load`, `load`, `load` (sgemm.cpp:305, 310, 313 @c1d0e7a00):
+        /// Ports `load`, `load`, `load` (sgemm.cpp:305, 310, 313 @5266f24da):
         /// `vld1q_f32`, `vld1q_f16`, and `vcvt_f32_f16(vld1_f16(p))`. The
         /// second reinterprets rather than converts -- `ggml_fp16_t` is a
         /// `u16` after the import; the third widens four halves, exactly.
@@ -200,7 +200,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
         }
 
         /// Ports `madd`, `madd`, `madd`, `madd` (sgemm.cpp:165, 170, 141, 147
-        /// @c1d0e7a00): `vfmaq_f32(c, b, a)`, `vfmaq_f16(c, b, a)`,
+        /// @5266f24da): `vfmaq_f32(c, b, a)`, `vfmaq_f16(c, b, a)`,
         /// `_mm256_fmadd_ps(a, b, c)` and `_mm512_fmadd_ps(a, b, c)`, all
         /// **fused**, and all the same product.
         inline fn madd(a: V, b: V, acc: V) V {
@@ -213,7 +213,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
             return if (V == f32x4) hsum4(x) else hsum8(x);
         }
 
-        /// Ports `matmul` (sgemm.cpp:494 @c1d0e7a00): `RN` 6 and `bn` 12 with
+        /// Ports `matmul` (sgemm.cpp:494 @5266f24da): `RN` 6 and `bn` 12 with
         /// 32 vector registers, `RN` 3 and `bn` 24 with 16.
         fn matmul(self: *const Self, m: i64, n: i64) bool {
             const RN = if (vector_registers == 32) 6 else 3;
@@ -234,7 +234,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
             return false;
         }
 
-        /// Ports `mnpack` (sgemm.cpp:536 @c1d0e7a00).
+        /// Ports `mnpack` (sgemm.cpp:536 @5266f24da).
         ///
         /// The C recurses on the template parameter `RN` down to 1, picking
         /// the arm where `RN == SIZE_N`. Here the recursion is an `inline
@@ -258,7 +258,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
             impl.abort("false");
         }
 
-        /// Ports `gemm_bloc` (sgemm.cpp:549 @c1d0e7a00).
+        /// Ports `gemm_bloc` (sgemm.cpp:549 @5266f24da).
         ///
         /// The `if constexpr (RM <= RN)` arms differ in which operand is
         /// held in registers; both are reproduced because the multiply
@@ -299,7 +299,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
             }
         }
 
-        /// Ports `gemm` (sgemm.cpp:583 @c1d0e7a00).
+        /// Ports `gemm` (sgemm.cpp:583 @5266f24da).
         ///
         /// The work is handed out through the threadpool's chunk counter,
         /// not a static split, so the row range a thread gets depends on how
@@ -359,7 +359,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
     };
 }
 
-/// Ports `tinyBLAS_Q0_ARM` (sgemm.cpp:1216 @c1d0e7a00), the quantized
+/// Ports `tinyBLAS_Q0_ARM` (sgemm.cpp:1216 @5266f24da), the quantized
 /// path. `TA` is `block_q8_0` or `block_q4_0`; `B` is always `block_q8_0`.
 ///
 /// Unlike `tinyBLAS` this one splits its work statically and takes no
@@ -379,7 +379,7 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
         nth: i64,
 
         /// For `block_q8_0`, ports `load_lo` and `load_hi`
-        /// (sgemm.cpp:1320, 1324 @c1d0e7a00): the two halves of a 32-byte
+        /// (sgemm.cpp:1320, 1324 @5266f24da): the two halves of a 32-byte
         /// `qs`, loaded as-is.
         inline fn loadLoQ8(b: *const c.block_q8_0) i8x16 {
             return @bitCast(@as(@Vector(16, i8), b.qs[0..16].*));
@@ -389,7 +389,7 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
         }
 
         /// For `block_q4_0`, ports `load_lo` and `load_hi`
-        /// (sgemm.cpp:1328, 1334 @c1d0e7a00): one 16-byte load, masked low
+        /// (sgemm.cpp:1328, 1334 @5266f24da): one 16-byte load, masked low
         /// or shifted high, then the `-8` bias both nibbles carry.
         ///
         /// **NEON integer arithmetic wraps**, so the subtraction is `-%`.
@@ -411,12 +411,12 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
             return if (TA == c.block_q8_0) loadHiQ8(b) else loadHiQ4(b);
         }
 
-        /// Ports `matmul` (sgemm.cpp:1226 @c1d0e7a00).
+        /// Ports `matmul` (sgemm.cpp:1226 @5266f24da).
         fn matmul(self: *const Self, m: i64, n: i64) void {
             self.mnpack(0, m, 0, n);
         }
 
-        /// Ports `mnpack` (sgemm.cpp:1231 @c1d0e7a00).
+        /// Ports `mnpack` (sgemm.cpp:1231 @5266f24da).
         ///
         /// The C switches on `min(m-m0,3) << 4 | min(n-n0,3)` to pick a tile
         /// shape, then recurses over the two leftover strips. The switch is
@@ -471,7 +471,7 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
             self.mnpack(m0, m, np, n);
         }
 
-        /// Ports `gemm` (sgemm.cpp:1289 @c1d0e7a00).
+        /// Ports `gemm` (sgemm.cpp:1289 @5266f24da).
         ///
         /// The accumulation is `vmlaq_n_f32`, which is **fused**: one
         /// rounding of `Cv + scale * dot`, not a separate multiply and add.
@@ -521,7 +521,7 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
     };
 }
 
-/// Ports `tinyBLAS_Q0_AVX` (sgemm.cpp:1353 @c1d0e7a00), the x86 quantized
+/// Ports `tinyBLAS_Q0_AVX` (sgemm.cpp:1353 @5266f24da), the x86 quantized
 /// path: `__AVX2__` and `__F16C__`, with `VECTOR_REGISTERS` 16 at x86-64-v3
 /// and 32 at v4.
 /// `TA` is `block_q8_0`, `block_q4_0`, `block_q5_0` or `block_iq4_nl`; `B`
@@ -548,14 +548,14 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
         ith: i64,
         nth: i64,
 
-        /// Ports `denibble` (sgemm.cpp:1766 @c1d0e7a00): sixteen bytes to
+        /// Ports `denibble` (sgemm.cpp:1766 @5266f24da): sixteen bytes to
         /// 32 nibbles, low first.
         inline fn denibble(p: *const [16]u8) avx.m256i {
             const x = avx.mm_loadu_si128(p);
             return avx.mm256_and_si256(avx.mm256_set1_epi8(15), avx.mm256_set_m128i(avx.mm_srli_epi16(x, 4), x));
         }
 
-        /// Ports `bittobyte` (sgemm.cpp:1773 @c1d0e7a00): `q5_0`'s fifth
+        /// Ports `bittobyte` (sgemm.cpp:1773 @5266f24da): `q5_0`'s fifth
         /// bits as `0xF0` where the bit is clear, so OR-ing them in makes the
         /// nibble minus 16, signed.
         inline fn bittobyte(p: *const [4]u8) avx.m256i {
@@ -570,7 +570,7 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
             return avx.mm256_andnot_si256(bytes, avx.mm256_set1_epi8(@bitCast(@as(u8, 0xF0))));
         }
 
-        /// Ports `load`, `load`, `load`, `load` (sgemm.cpp:1684, 1696, 1710, 1740 @c1d0e7a00):
+        /// Ports `load`, `load`, `load`, `load` (sgemm.cpp:1684, 1696, 1710, 1740 @5266f24da):
         /// a block's 32 weights as signed bytes. `iq4_nl`'s is `load1` over
         /// `load0`, each a `pshufb` through the codebook, which the
         /// constructor copies into `iq4nlt`.
@@ -586,7 +586,7 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
             return avx.mm256_set_m128i(hi, lo);
         }
 
-        /// Ports `updot` (sgemm.cpp:1754 @c1d0e7a00): unsigned by signed
+        /// Ports `updot` (sgemm.cpp:1754 @5266f24da): unsigned by signed
         /// bytes, summed in fours, as floats -- `vpdpbusd` with
         /// `__AVX512VNNI__ && __AVX512VL__`, otherwise summed in pairs
         /// twice.
@@ -611,12 +611,12 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
             return &self.B[@intCast(self.ldb * col + l)];
         }
 
-        /// Ports `matmul` (sgemm.cpp:1371 @c1d0e7a00).
+        /// Ports `matmul` (sgemm.cpp:1371 @5266f24da).
         fn matmul(self: *const Self, m: i64, n: i64) void {
             self.mnpack(0, m, 0, n);
         }
 
-        /// Ports `mnpack` (sgemm.cpp:1376 @c1d0e7a00) with its `__AVX2__ &&
+        /// Ports `mnpack` (sgemm.cpp:1376 @5266f24da) with its `__AVX2__ &&
         /// __F16C__` tile kernels. With `VECTOR_REGISTERS == 32` (AVX-512)
         /// `0x44`, `0x43` and `0x42` are 4x4, 4x3 and 4x2, `0x34` and `0x24`
         /// 3x4 and 2x4, and `0x33` is 3x3; with 16, the first three are 4x2,
@@ -725,7 +725,7 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
             return @floatCast(h);
         }
 
-        /// Ports `gemm4xN` (sgemm.cpp:1524 @c1d0e7a00): four rows of `A`,
+        /// Ports `gemm4xN` (sgemm.cpp:1524 @5266f24da): four rows of `A`,
         /// their deltas converted together, against `RN` columns.
         fn gemm4xN(self: *const Self, comptime RN: i64, m0: i64, m: i64, n0: i64, n: i64) void {
             const ytiles = @divTrunc(m - m0, 4);
@@ -761,7 +761,7 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
             }
         }
 
-        /// Ports `gemmMx4` (sgemm.cpp:1578 @c1d0e7a00): `RM` rows against
+        /// Ports `gemmMx4` (sgemm.cpp:1578 @5266f24da): `RM` rows against
         /// four columns of `B`, the columns' deltas converted together.
         fn gemmMx4(self: *const Self, comptime RM: i64, m0: i64, m: i64, n0: i64, n: i64) void {
             const ytiles = @divTrunc(m - m0, RM);
@@ -795,7 +795,7 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
             }
         }
 
-        /// Ports `gemm` (sgemm.cpp:1635 @c1d0e7a00), its `__AVX2__` arm.
+        /// Ports `gemm` (sgemm.cpp:1635 @5266f24da), its `__AVX2__` arm.
         fn gemm(self: *const Self, comptime RM: i64, comptime RN: i64, m0: i64, m: i64, n0: i64, n: i64) void {
             const ytiles = @divTrunc(m - m0, RM);
             const xtiles = @divTrunc(n - n0, RN);
@@ -826,7 +826,7 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
     };
 }
 
-/// Ports `llamafile_sgemm` (sgemm.cpp:3805 @c1d0e7a00).
+/// Ports `llamafile_sgemm` (sgemm.cpp:3805 @5266f24da).
 ///
 /// Returns **false** when there is no kernel for this shape or type pair,
 /// and `cpu/mulmat.zig` then computes the product itself. On this target
@@ -876,7 +876,7 @@ pub export fn llamafile_sgemm(
             return tb.matmul(m, n);
         },
         // The `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC` arm, then the plain
-        // `__ARM_NEON` one (sgemm.cpp:3974, 3984 @c1d0e7a00).
+        // `__ARM_NEON` one (sgemm.cpp:3974, 3984 @5266f24da).
         c.GGML_TYPE_F16 => if (comptime neon.has_fp16_va) {
             if (n < 8) return false;
             if (Btype != c.GGML_TYPE_F16) return false;
@@ -906,7 +906,7 @@ pub export fn llamafile_sgemm(
             return tb.matmul(m, n);
         },
         // Both quantized arms run `tinyBLAS_Q0_ARM` only behind
-        // `__ARM_FEATURE_DOTPROD` (sgemm.cpp:4052 @c1d0e7a00); without it
+        // `__ARM_FEATURE_DOTPROD` (sgemm.cpp:4052 @5266f24da); without it
         // each is the `#else`, which returns false.
         c.GGML_TYPE_Q8_0 => {
             if (comptime !neon.has_dotprod) return false;
@@ -943,7 +943,7 @@ pub export fn llamafile_sgemm(
             return true;
         },
         // The `GGML_TYPE_BF16`, `GGML_TYPE_Q5_0` and `GGML_TYPE_IQ4_NL` arms
-        // (sgemm.cpp:3893, 4115, 4131 @c1d0e7a00) all reach a
+        // (sgemm.cpp:3893, 4115, 4131 @5266f24da) all reach a
         // `return false` on this target: their arms are behind x86 or SVE
         // feature macros this build does not define.
         else => return false,
@@ -1023,7 +1023,7 @@ fn sgemmAvx(
             if (Btype != c.GGML_TYPE_F16) return false;
             return float(c.ggml_fp16_t, c.ggml_fp16_t, params, m, n, k, A, lda, B, ldb, C, ldc);
         },
-        // sgemm.cpp:4041, 4078, 4115, 4131 @c1d0e7a00: each `__AVX2__` arm
+        // sgemm.cpp:4041, 4078, 4115, 4131 @5266f24da: each `__AVX2__` arm
         // takes `tinyBLAS_Q0_AVX` against `q8_0`, with no minimum `n`.
         c.GGML_TYPE_Q8_0 => return q0(qblocks.Q8_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
         c.GGML_TYPE_Q4_0 => return q0(qblocks.Q4_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),

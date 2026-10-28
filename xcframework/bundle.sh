@@ -1,7 +1,9 @@
 #!/bin/bash
 # One slice's llama.framework bundle, laid out exactly as upstream's
 # build-xcframework.sh lays it out: its `setup_framework_structure`
-# (llama.cpp/build-xcframework.sh:126 @c1d0e7a00), transcribed. The headers
+# (llama.cpp/build-xcframework.sh:126 @5266f24da), transcribed -- less the
+# `.metallib` copy v0.4.0 added, which runs only when
+# GGML_METAL_EMBED_LIBRARY=OFF, a build this project never makes. The headers
 # come from the pinned llama.cpp/, the module map and Info.plist are
 # upstream's text, so `verify.sh compat` can require every file but the
 # binary to be byte-identical to upstream's own xcframework.

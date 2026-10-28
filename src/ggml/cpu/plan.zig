@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.3.0, `c1d0e7a00`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.0, `5266f24da`),
 //! `ggml_get_n_tasks` at line 2220 and `ggml_graph_plan` at line 2781. Each
 //! function names the C it replaces and the line it began at.
 //!
@@ -23,6 +23,7 @@ const types = @import("../types.zig");
 const defs = @import("defs.zig");
 const traits = @import("traits.zig");
 const mulmat = @import("mulmat.zig");
+const iqp = @import("iqp.zig");
 const c = impl.c;
 
 const Tensor = defs.Tensor;
@@ -34,20 +35,20 @@ const CGraph = defs.CGraph;
 /// op, in which case its answer replaces the whole switch below.
 extern fn ggml_cpu_extra_work_size(n_threads: c_int, op: *const Tensor, size: *usize) bool;
 
-/// Ports `GGML_IM2COL_WORK_SIZE` (ops.h:24 @c1d0e7a00).
+/// Ports `GGML_IM2COL_WORK_SIZE` (ops.h:24 @5266f24da).
 const im2col_work_size: usize = 16 * 1024 * 1024;
 
-/// Ports `GGML_FA_TILE_Q` and `GGML_FA_TILE_KV` (ggml-cpu/common.h:10 @c1d0e7a00).
+/// Ports `GGML_FA_TILE_Q` and `GGML_FA_TILE_KV` (ggml-cpu/common.h:10 @5266f24da).
 const fa_tile_q: i64 = 64;
 const fa_tile_kv: i64 = 64;
 
-/// Ports `GGML_SOFT_MAX_UNROLL` (vec.h:49 @c1d0e7a00).
+/// Ports `GGML_SOFT_MAX_UNROLL` (vec.h:49 @5266f24da).
 const soft_max_unroll: i64 = 4;
 
-/// Ports `GGML_N_TASKS_MAX` (ggml.h:2663 @c1d0e7a00).
+/// Ports `GGML_N_TASKS_MAX` (ggml.h:2676 @5266f24da).
 const n_tasks_max: c_int = -1;
 
-/// Ports `ggml_up` (ggml-impl.h:68 @c1d0e7a00).
+/// Ports `ggml_up` (ggml-impl.h:68 @5266f24da).
 inline fn up(n: i64, m: i64) i64 {
     impl.assert(m & (m - 1) == 0, "(m & (m - 1)) == 0");
     return (n + m - 1) & ~(m - 1);
@@ -57,7 +58,7 @@ inline fn min(a: i64, b: i64) i64 {
     return if (a < b) a else b;
 }
 
-/// Ports `ggml_get_n_tasks` (ggml-cpu.c:2220 @c1d0e7a00).
+/// Ports `ggml_get_n_tasks` (ggml-cpu.c:2245 @5266f24da).
 ///
 /// Parameters:
 /// - `node`: the graph node to plan for.
@@ -116,6 +117,7 @@ pub fn getNTasks(node: *Tensor, n_threads: c_int) c_int {
             c.GGML_GLU_OP_SWIGLU_OAI,
             c.GGML_GLU_OP_GEGLU_ERF,
             c.GGML_GLU_OP_GEGLU_QUICK,
+            c.GGML_GLU_OP_SWIGLU_CLAMP,
             => n_threads,
 
             else => impl.abort("fatal error"),
@@ -160,7 +162,7 @@ pub fn getNTasks(node: *Tensor, n_threads: c_int) c_int {
     return n_tasks;
 }
 
-/// Ports `ggml_graph_plan` (ggml-cpu.c:2781 @c1d0e7a00).
+/// Ports `ggml_graph_plan` (ggml-cpu.c:2807 @5266f24da).
 ///
 /// Parameters:
 /// - `cgraph`: the graph to plan.
@@ -273,10 +275,18 @@ fn nodeWorkSize(node: *const Tensor, n_tasks: i64) usize {
         c.GGML_OP_MUL_MAT => {
             const src1 = impl.one(Tensor, node.src[1]);
             const vec_dot_type = traits.table[@intCast(impl.one(Tensor, node.src[0]).type)].vec_dot_type;
+
+            var cur: usize = 0;
             if (src1.type != vec_dot_type) {
-                return types.ggml_row_size(vec_dot_type, types.ggml_nelements(src1));
+                cur = types.ggml_row_size(vec_dot_type, types.ggml_nelements(src1));
             }
-            return 0;
+
+            // The IQ panel path needs one scratch panel per thread past the
+            // q8_K rows.
+            if (iqp.ggml_cpu_iqp_supports_mul_mat(node)) {
+                cur = impl.pad(cur, 64) + @as(usize, @intCast(n_tasks)) * iqp.ggml_cpu_iqp_scratch_size(node);
+            }
+            return cur;
         },
 
         c.GGML_OP_MUL_MAT_ID => {
@@ -303,6 +313,11 @@ fn nodeWorkSize(node: *const Tensor, n_tasks: i64) usize {
                 @sizeOf(mulmat.RowMapping) + @sizeOf(i64);
             // atomic_current_chunk
             cur += defs.cache_line_size * n_as + defs.cache_line_size;
+            // The IQ panel path needs one scratch panel per thread on top
+            // of that.
+            if (iqp.ggml_cpu_iqp_supports_mul_mat_id(node)) {
+                cur += @as(usize, @intCast(n_tasks)) * iqp.ggml_cpu_iqp_scratch_size(node) + 64;
+            }
 
             return cur;
         },
@@ -365,6 +380,7 @@ fn nodeWorkSize(node: *const Tensor, n_tasks: i64) usize {
             const ne10 = src1.ne[0]; // W
             const ne11 = src1.ne[1]; // H
             const ne12 = src1.ne[2]; // Channels in
+            const ne13 = src1.ne[3]; // Batch
 
             impl.assert(
                 src0.type == c.GGML_TYPE_F16 or src0.type == c.GGML_TYPE_F32,
@@ -373,7 +389,7 @@ fn nodeWorkSize(node: *const Tensor, n_tasks: i64) usize {
             impl.assert(src1.type == c.GGML_TYPE_F32, "node->src[1]->type == GGML_TYPE_F32");
 
             return types.ggml_type_size(src0.type) *
-                @as(usize, @intCast(ne00 * ne01 * ne02 * ne03 + ne10 * ne11 * ne12));
+                @as(usize, @intCast(ne00 * ne01 * ne02 * ne03 + ne10 * ne11 * ne12 * ne13));
         },
 
         c.GGML_OP_TOP_K => {

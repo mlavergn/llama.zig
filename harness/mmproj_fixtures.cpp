@@ -8,7 +8,7 @@
 // each projector type's keys and tensor shapes here are read off
 // `llama.cpp/tools/mtmd/clip.cpp` (`load_hparams`, `load_tensors`,
 // `clip_n_mmproj_embd`) and the graph builders under `models/`, at
-// v0.3.0 (`c1d0e7a00`). Weights are small and random (fixed seed per
+// v0.4.0 (`5266f24da`). Weights are small and random (fixed seed per
 // type), so a fixture checks plumbing and numerics, not output quality.
 //
 // Every projector targets n_embd 256, the arch fixtures' width. The text
@@ -753,8 +753,8 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_MM_PROJECTOR, "weight"), C2, N_TEXT);
         g.bias(fmt(TN_MM_PROJECTOR, "bias"), N_TEXT);
         g.norm(fmt(TN_MM_POST_NORM, "weight"), N_TEXT);
-        g.t(TN_TOK_IMG_BEGIN, {N_TEXT}, 0.1f);
-        g.t(TN_TOK_IMG_END, {N_TEXT}, 0.1f);
+        g.t(TN_MM_IMG_BEGIN, {N_TEXT}, 0.1f);
+        g.t(TN_MM_IMG_END, {N_TEXT}, 0.1f);
     }});
     f.push_back({"minimax_m3", "qwen3", "vision", "img:64x64,96x48", [](G & g) {
         // 3-axis rope needs d_head >= 3 * axd: d_head 16
@@ -1546,7 +1546,9 @@ static std::vector<Fixture> fixtures() {
     }});
 
     // --- TTS: qwen3-tts (speaker encoder + code predictor / code2wav)
-    f.push_back({"qwen3tts", "qwen3tts", "tts-qwen3", "tts:3", [](G & g) {
+    // `shared`: the talker and the code predictor share a hidden size, so
+    // the predictor has no proj_in (load_tensors reads it as optional)
+    auto qwen3tts = [](G & g, bool shared) {
         // speaker encoder (audio modality, models/qwen3tts-spkenc.cpp)
         g.b(KEY_HAS_AUDIO_ENC, true);
         g.b(KEY_HAS_GEN_AUDIO_ENC, true);
@@ -1582,7 +1584,7 @@ static std::vector<Fixture> fixtures() {
         g.bias(fmt(TN_MM_AUDIO_FC, "bias"), N_TEXT);
 
         // code predictor (gen modality, prefix "a.gen.code", models/qwen3tts-gen.cpp)
-        const int E = 64, H = 2, Hkv = 1, dh = 32, F = 128, V0 = 3968, Vh = 64, NA = 15;
+        const int E = shared ? N_TEXT : 64, H = 2, Hkv = 1, dh = 32, F = 128, V0 = 3968, Vh = 64, NA = 15;
         hp(g, "gen.audio", E, F, H, 2, N_TEXT);
         g.u32(fmt(KEY_N_HEAD_KV, "gen.audio"), Hkv);
         for (int il = 0; il < 2; il++) {
@@ -1599,8 +1601,10 @@ static std::vector<Fixture> fixtures() {
             g.w(fmt(TN_FFN_UP, p, il, "weight"), E, F);
             g.w(fmt(TN_FFN_DOWN, p, il, "weight"), F, E);
         }
-        g.w(fmt(TN_A_GEN_CODE_PROJ_IN, "weight"), N_TEXT, E);
-        g.bias(fmt(TN_A_GEN_CODE_PROJ_IN, "bias"), E);
+        if (!shared) {
+            g.w(fmt(TN_A_GEN_CODE_PROJ_IN, "weight"), N_TEXT, E);
+            g.bias(fmt(TN_A_GEN_CODE_PROJ_IN, "bias"), E);
+        }
         g.t(fmt(TN_A_GEN_CODE_EMBD, "weight"), {N_TEXT, Vh, NA}, 0.05f);
         g.t(fmt(TN_A_GEN_CODE_HEAD, "weight"), {E, Vh, NA}, 0.3f);
         g.t(fmt(TN_A_GEN_CODE_OUT_EMBD, "weight"), {N_TEXT, V0}, 0.05f);
@@ -1674,7 +1678,8 @@ static std::vector<Fixture> fixtures() {
         g.t(fmt(TN_A_GEN_WAV_DAC_POST_SNAKE, "beta"), {Cd[4]}, 0.1f, 1.0f);
         g.t(fmt(TN_A_GEN_WAV_DAC_POST_CONV, "weight"), {7, Cd[4], 1}, 0.2f);
         g.bias(fmt(TN_A_GEN_WAV_DAC_POST_CONV, "bias"), 1);
-    }});
+    };
+    f.push_back({"qwen3tts", "qwen3tts", "tts-qwen3", "tts:3", [qwen3tts](G & g) { qwen3tts(g, false); }});
 
     // --- TTS: pocket-tts (mimi speaker encoder + flow decoder / mimi decoder)
     f.push_back({"pockettts", "pockettts", "tts-pocket", "tts:3", [](G & g) {
@@ -1783,6 +1788,37 @@ static std::vector<Fixture> fixtures() {
     }});
 
     (void) IMG;
+    // --- added at v0.4.0; last, so every earlier fixture keeps its seed
+    // deepseek4v: an RMS-norm SwiGLU ViT with 2D M-RoPE, a 3x3 unfold
+    // aligner, and the four sentinel embeddings get_rows lays out. The
+    // sizes cover the min-pixel upscale (16x16), padding to the merge
+    // (100x60), the extreme-aspect stretch (400x40) and the resize solver
+    // (480x480, whose 20x20 aligner grid is over the 384-token cap).
+    f.push_back({"deepseek4v", "qwen3", "vision", "img:64x64,100x60,16x16,400x40,480x480", [](G & g) {
+        const int E = 32, P = 8, M = 3, H = 64;
+        vision(g, "deepseek4v", 64, P, false);
+        g.b(KEY_USE_SILU, true);
+        hp(g, "vision", E, 64, 2, 2, N_TEXT);
+        g.u32(KEY_PROJ_SCALE_FACTOR, M);
+        g.u32(KEY_IMAGE_MIN_PIXELS, P * P * M * M * 4);
+        patch_embd(g, P, E, 0, false);
+        VitOpts o;
+        o.ln_bias = false;
+        o.gated = true;
+        o.attn_bias = false;
+        o.ffn_bias = false;
+        vit_layers(g, "v", 2, E, 64, 2, o);
+        g.w(fmt(TN_LLAVA_PROJ, 1, "weight"), E * M * M, H);
+        g.bias(fmt(TN_LLAVA_PROJ, 1, "bias"), H);
+        g.w(fmt(TN_LLAVA_PROJ, 2, "weight"), H, N_TEXT);
+        g.bias(fmt(TN_LLAVA_PROJ, 2, "bias"), N_TEXT);
+        g.t(TN_IMAGE_NEWLINE, {N_TEXT}, 0.1f);
+        g.t(TN_TOK_IMG_START, {N_TEXT}, 0.1f);
+        g.t(TN_TOK_IMG_END, {N_TEXT}, 0.1f);
+        g.t(TN_TOK_IMG_PAD, {N_TEXT}, 0.1f);
+    }});
+    f.push_back({"qwen3tts_shared", "qwen3tts", "tts-qwen3", "tts:3", [qwen3tts](G & g) { qwen3tts(g, true); }});
+
     return f;
 }
 

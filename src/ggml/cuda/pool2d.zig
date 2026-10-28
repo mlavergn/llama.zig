@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/pool2d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/pool2d.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/pool2d.cuh` at v0.4.0 (`5266f24da`). The
 //! kernel, `pool2d_nchw_kernel`, stays CUDA.
 
 const std = @import("std");
@@ -15,7 +15,7 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_POOL2D_BLOCK_SIZE` (pool2d.cuh:3 @c1d0e7a00).
+/// Ports `CUDA_POOL2D_BLOCK_SIZE` (pool2d.cuh:3 @5266f24da).
 const block_size = 256;
 
 /// An `int64_t` into an `int` parameter.
@@ -23,7 +23,7 @@ fn int(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `pool2d_nchw_kernel_f32_f32_cuda` (pool2d.cu:53 @c1d0e7a00).
+/// Ports `pool2d_nchw_kernel_f32_f32_cuda` (pool2d.cu:53 @5266f24da).
 fn pool2dNchwKernelF32F32Cuda(ih: c_int, iw: c_int, oh: c_int, ow: c_int, kh: c_int, kw: c_int, sh: c_int, sw: c_int, ph: c_int, pw: c_int, parallel_elements: c_int, src: ?*const anyopaque, dst: ?*anyopaque, op: c.enum_ggml_op_pool, stream: cu.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(parallel_elements +% (block_size - 1), block_size);
     kernels.launch(kernels.get("pool2d", "pool2d_nchw_kernel<float, float>"), .{
@@ -34,7 +34,7 @@ fn pool2dNchwKernelF32F32Cuda(ih: c_int, iw: c_int, oh: c_int, ow: c_int, kh: c_
     }, .{ ih, iw, oh, ow, kh, kw, sh, sw, ph, pw, parallel_elements, src, dst, op });
 }
 
-/// Ports `ggml_cuda_op_pool2d` (pool2d.cu:65 @c1d0e7a00).
+/// Ports `ggml_cuda_op_pool2d` (pool2d.cu:65 @5266f24da).
 pub fn opPool2d(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;

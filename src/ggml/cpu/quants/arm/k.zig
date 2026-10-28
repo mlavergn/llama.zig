@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.3.0,
-//! `c1d0e7a00`), the `__ARM_NEON` arms of the dot products at lines 1685,
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.4.0,
+//! `5266f24da`), the `__ARM_NEON` arms of the dot products at lines 1685,
 //! 2018, 2334, 2864 and 2964. Each function names the C it replaces and the
 //! line it began at.
 //!
@@ -67,7 +67,7 @@ inline fn dotv(a: i8x16, b: i8x16) i32 {
 }
 
 /// The widening product of eight `i16` pairs, summed into four `i32` lanes,
-/// as `vmull_s16` is used throughout the NEON arm (arch/arm/quants.c:1968 @c1d0e7a00).
+/// as `vmull_s16` is used throughout the NEON arm (arch/arm/quants.c:1968 @5266f24da).
 ///
 /// `vmull_s16` on each half and `vaddq_s32` between them. The widening is what
 /// keeps a `mins * bsums` product from overflowing sixteen bits.
@@ -78,7 +78,7 @@ inline fn mullSum(a: i16x8, b: i16x8) i32x4 {
     );
 }
 
-/// Ports `ggml_vec_dot_q2_K_q8_K` (arch/arm/quants.c:1685 @c1d0e7a00).
+/// Ports `ggml_vec_dot_q2_K_q8_K` (arch/arm/quants.c:1685 @5266f24da).
 ///
 /// Two-bit weights with a four-bit scale and four-bit minimum per group of
 /// sixteen, both packed into the same byte -- `scales & 0xF` and
@@ -162,7 +162,7 @@ pub export fn ggml_vec_dot_q2_K_q8_K(
     s[0] = sum;
 }
 
-/// Ports `ggml_vec_dot_q3_K_q8_K` (arch/arm/quants.c:2018 @c1d0e7a00).
+/// Ports `ggml_vec_dot_q3_K_q8_K` (arch/arm/quants.c:2018 @5266f24da).
 ///
 /// Three-bit weights: two bits in `qs` and an **inverted** high bit in
 /// `hmask`. The inversion is why the kernel uses `vbicq_u8(mask, qhbits)` --
@@ -314,7 +314,7 @@ inline fn unpackQ5K(packed_scales: *const [12]u8) [4]u32 {
     return utmp;
 }
 
-/// Ports `ggml_vec_dot_q4_K_q8_K` (arch/arm/quants.c:2334 @c1d0e7a00), the `__ARM_NEON`
+/// Ports `ggml_vec_dot_q4_K_q8_K` (arch/arm/quants.c:2334 @5266f24da), the `__ARM_NEON`
 /// arm.
 ///
 /// Note `sumf -= dmin * mins` **before** the weight loop and `sumf += d * ...`
@@ -422,7 +422,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_q5_K_q8_K` (arch/arm/quants.c:2864 @c1d0e7a00).
+/// Ports `ggml_vec_dot_q5_K_q8_K` (arch/arm/quants.c:2864 @5266f24da).
 ///
 /// Five-bit weights: four in `qs` and the fifth taken from `qh` two bits at a
 /// time, the mask vectors being shifted down by two after each group.
@@ -522,7 +522,7 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_q6_K_q8_K` (arch/arm/quants.c:2964 @c1d0e7a00), the `__ARM_NEON`
+/// Ports `ggml_vec_dot_q6_K_q8_K` (arch/arm/quants.c:2964 @5266f24da), the `__ARM_NEON`
 /// arm.
 ///
 /// Six-bit weights, four in `ql` and two in `qh`, with signed scales that need

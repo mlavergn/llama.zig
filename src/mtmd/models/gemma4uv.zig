@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/gemma4uv.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/gemma4uv.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -12,7 +12,7 @@ const graph = @import("../graph.zig");
 const gemma4v = @import("gemma4v.zig");
 const c = impl.c;
 
-/// Ports `build` (gemma4uv.cpp:4 @c1d0e7a00), a member of `clip_graph_gemma4uv`.
+/// Ports `build` (gemma4uv.cpp:4 @5266f24da), a member of `clip_graph_gemma4uv`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

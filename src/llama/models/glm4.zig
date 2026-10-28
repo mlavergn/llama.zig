@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/glm4.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/glm4.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_glm4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -22,17 +22,13 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_glm4`'s `load_arch_hparams` (models/glm4.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_glm4`'s `load_arch_hparams` (models/glm4.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     _ = try meta.getKeyOrArr(c_int, .rope_dimension_sections, &hp.rope_sections, 4, false, exc);
-
-    // The NextN/MTP parameters (GLM-OCR).
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-    impl.assert(hp.n_layer_nextn < hp.n_layer_all, "models/glm4.cpp", 9, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < n_layer_impl\"");
 
     self.type = switch (hp.nLayer()) {
         17 => .@"1b", // GLM-OCR
@@ -42,7 +38,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_glm4`'s `load_arch_tensors` (models/glm4.cpp:19 @c1d0e7a00).
+/// Ports `llama_model_glm4`'s `load_arch_tensors` (models/glm4.cpp:15 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -95,19 +91,19 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_glm4`'s `build_arch_graph` (models/glm4.cpp:68 @c1d0e7a00).
+/// Ports `llama_model_glm4`'s `build_arch_graph` (models/glm4.cpp:64 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_glm4`'s `graph` (models/glm4.cpp:72
-/// @c1d0e7a00).
+/// Ports the constructor of `llama_model_glm4`'s `graph` (models/glm4.cpp:68
+/// @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4.cpp", 75, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4.cpp", 71, "n_embd_head == hparams.n_embd_head_k()");
 
     var sections: [4]c_int = undefined;
     @memcpy(&sections, hp.rope_sections[0..4]);
@@ -117,7 +113,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const use_mrope = hp.useMrope();
     if (b.ubatch.embd != null and !use_mrope) {
         // Stopped here, rather than give wrong results.
-        impl.abort("models/glm4.cpp", 88, "This GGUF does not support multimodal. Please reconvert it.");
+        impl.abort("models/glm4.cpp", 84, "This GGUF does not support multimodal. Please reconvert it.");
     }
 
     // The positions.

@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.3.0
-//! (`c1d0e7a00`). The C++ spells each family of pipelines as a macro
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
+//! (`5266f24da`). The C++ spells each family of pipelines as a macro
 //! pasting the shader's variable name together (`NAMELC ## F16ACC ##
 //! _cm2_data`); the port pastes the same name at comptime and looks it up
 //! in the generated shader table with `@field`, so a misspelt name is a
@@ -72,7 +72,7 @@ pub const Tile = struct {
     }
 };
 
-/// Ports `ggml_vk_matmul_shmem_support` (ggml-vulkan.cpp:3930 @c1d0e7a00):
+/// Ports `ggml_vk_matmul_shmem_support` (ggml-vulkan.cpp:4010 @5266f24da):
 /// whether a float matmul tile fits in shared memory.
 pub fn matmulShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: bool, src0_type: c.ggml_type) bool {
     const lut_size: u32 = switch (src0_type) {
@@ -105,7 +105,7 @@ pub fn matmulShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: boo
     return total_size <= device.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `ggml_vk_matmul_int_shmem_support` (ggml-vulkan.cpp:3994 @c1d0e7a00):
+/// Ports `ggml_vk_matmul_int_shmem_support` (ggml-vulkan.cpp:4074 @5266f24da):
 /// the same question for the q8_1 integer-dot matmul's layout.
 pub fn matmulIntShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: bool, src0_type: c.ggml_type) bool {
     // FLOAT_TYPE in the shader is float16_t with fp16 support, otherwise float.
@@ -160,14 +160,16 @@ pub fn matmulIntShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: 
     return total_size <= device.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `get_fa_spec_constants` (ggml-vulkan.cpp:3905 @c1d0e7a00).
+/// Ports `fa_block_bytes` (ggml-vulkan.cpp:3982 @5266f24da): bytes per
+/// buffer block for the FaBlockBytesK/V spec constants. F32 is fed as a
+/// vec4 "block" of 4 floats, everything else uses its ggml block size.
+fn faBlockBytes(t: c.ggml_type) u32 {
+    if (t == c.GGML_TYPE_F32) return 16;
+    return @intCast(c.ggml_type_size(t));
+}
+
+/// Ports `get_fa_spec_constants` (ggml-vulkan.cpp:3989 @5266f24da).
 pub fn faSpecConstants(state: m.device.FaPipelineState) Tile {
-    const blockBytes = struct {
-        fn f(t: c.ggml_type) u32 {
-            if (t == c.GGML_TYPE_F32) return 16;
-            return @intCast(c.ggml_type_size(t));
-        }
-    }.f;
     return Tile.of(.{
         state.workgroup_size, // 0 WorkGroupSize
         state.Br, // 1 Br
@@ -183,17 +185,17 @@ pub fn faSpecConstants(state: m.device.FaPipelineState) Tile {
         state.limit_occupancy_shmem, // 11 LIMIT_OCCUPANCY_SHMEM
         @as(u32, @intCast(state.k_type)), // 12 FaTypeK
         @as(u32, @intCast(state.v_type)), // 13 FaTypeV
-        blockBytes(state.k_type), // 14 FaBlockBytesK
-        blockBytes(state.v_type), // 15 FaBlockBytesV
+        faBlockBytes(state.k_type), // 14 FaBlockBytesK
+        faBlockBytes(state.v_type), // 15 FaBlockBytesV
     });
 }
 
-/// Ports `ggml_vk_fa_type_needs_shmem` (ggml-vulkan.cpp:4123 @c1d0e7a00).
+/// Ports `ggml_vk_fa_type_needs_shmem` (ggml-vulkan.cpp:4203 @5266f24da).
 fn faTypeNeedsShmem(t: c.ggml_type) bool {
     return t == c.GGML_TYPE_IQ4_NL;
 }
 
-/// Ports `ggml_vk_fa_scalar_uses_mmq` (ggml-vulkan.cpp:4132 @c1d0e7a00):
+/// Ports `ggml_vk_fa_scalar_uses_mmq` (ggml-vulkan.cpp:4212 @5266f24da):
 /// whether scalar flash attention takes the integer-dot path.
 pub fn faScalarUsesMmq(device: *const Device, k_type: c.ggml_type, v_type: c.ggml_type) bool {
     if (comptime !glslc.integer_dot) return false;
@@ -225,7 +227,7 @@ const Walk = struct {
     wait_pipeline: ?*Pipeline = null,
     claimed: ?struct { pipeline: *Pipeline, args: m.pipeline.CompileArgs } = null,
 
-    /// The `ggml_vk_create_pipeline` lambda (ggml-vulkan.cpp:4391 @c1d0e7a00):
+    /// The `ggml_vk_create_pipeline` lambda (ggml-vulkan.cpp:4477 @5266f24da):
     /// records the pipeline's description on first sight, and claims it for
     /// compilation if it is the one requested and nobody has yet.
     fn create(w: *Walk, base: *?*Pipeline, name: []const u8, a: Args) void {
@@ -338,7 +340,7 @@ const sizes = [_]struct { size: []const u8, slot: []const u8, aligned: bool }{
     .{ .size = "s", .slot = "a_s", .aligned = true },
 };
 
-/// `ggml_vk_mul_mm_spec` (ggml-vulkan.cpp:4589 @c1d0e7a00): the matmul spec
+/// `ggml_vk_mul_mm_spec` (ggml-vulkan.cpp:4675 @5266f24da): the matmul spec
 /// constants with ALIGNED, and the Intel Windows shared-memory switches.
 fn mulMmSpec(device: *const Device, spec_in: Tile, aligned: bool) Tile {
     var spec = spec_in;
@@ -352,7 +354,7 @@ fn mulMmSpec(device: *const Device, spec_in: Tile, aligned: bool) Tile {
     return spec;
 }
 
-/// `ggml_vk_mul_mm_cm2_spec` (ggml-vulkan.cpp:4603 @c1d0e7a00).
+/// `ggml_vk_mul_mm_cm2_spec` (ggml-vulkan.cpp:4689 @5266f24da).
 fn mulMmCm2Spec(spec_in: Tile, aligned: bool, mul_mat_id: bool) Tile {
     var spec = spec_in;
     if (mul_mat_id and spec.n > 5) {
@@ -516,7 +518,7 @@ fn ocp(device: *const Device) bool {
     return glslc.float_e2m1 and glslc.float_e4m3 and device.ocp_fp4;
 }
 
-/// Ports `ggml_vk_load_shaders` (ggml-vulkan.cpp:4164 @c1d0e7a00).
+/// Ports `ggml_vk_load_shaders` (ggml-vulkan.cpp:4244 @5266f24da).
 ///
 /// Parameters:
 /// - `device`: the device whose pipeline slots are walked.
@@ -527,10 +529,16 @@ pub fn loadShaders(device: *Device, requested: ?*Pipeline) void {
     const subgroup_size_16 = @max(device.subgroup_size, 16);
     const subgroup_size_32 = @max(device.subgroup_size, 32);
 
+    // clamp WARP for l_/m_ warptiles so WM <= BM (breaks on subgroupSize > 64)
+    const mm_warp_8 = @min(subgroup_size_8, 64);
+    const mm_warp_16 = @min(subgroup_size_16, 64);
+
     const mul_mat_subgroup_size = if (device.vendor_id == common.vendor_id.intel and device.subgroup_size_control) device.subgroup_min_size else device.subgroup_size;
     const mul_mat_subgroup_size_8 = @max(mul_mat_subgroup_size, 8);
     const mul_mat_subgroup_size_16 = @max(mul_mat_subgroup_size, 16);
     const mul_mat_subgroup_size_32 = @max(mul_mat_subgroup_size, 32);
+    const mul_mat_mm_warp_8 = @min(mul_mat_subgroup_size_8, 64);
+    const mul_mat_mm_warp_16 = @min(mul_mat_subgroup_size_16, 64);
 
     const subgroup_min_size_16 = (!device.subgroup_size_control and device.subgroup_size >= 16) or
         (device.subgroup_size_control and device.subgroup_max_size >= 16);
@@ -594,38 +602,38 @@ pub fn loadShaders(device: *Device, requested: ?*Pipeline) void {
 
         const s_warptile_wm: u32 = if (device.subgroup_size == 8) 8 else 32;
 
-        t.l_warptile = .of(.{ 128, 128, 128, 16, subgroup_size_8 * 2, 64, 2, tm_l, tn_l, tk_l, subgroup_size_8 });
-        t.m_warptile = .of(.{ 128, 64, 64, 16, subgroup_size_8, 32, 2, tm_m, tn_m, tk_m, subgroup_size_8 });
+        t.l_warptile = .of(.{ 128, 128, 128, 16, mm_warp_8 * 2, 64, 2, tm_l, tn_l, tk_l, mm_warp_8 });
+        t.m_warptile = .of(.{ 128, 64, 64, 16, mm_warp_8, 32, 2, tm_m, tn_m, tk_m, mm_warp_8 });
         t.s_warptile = .of(.{ subgroup_size_32, 32, 32, 16, s_warptile_wm, 32, 2, tm_s, tn_s, tk_s, subgroup_size_8 });
 
-        t.l_warptile_mmq = .of(.{ 128, 128, 128, 32, subgroup_size_8 * 2, 64, 2, tm_l, tn_l, tk_l, subgroup_size_8 });
-        t.m_warptile_mmq = .of(.{ 128, 64, 64, 32, subgroup_size_8, 32, 2, tm_m, tn_m, tk_m, subgroup_size_8 });
+        t.l_warptile_mmq = .of(.{ 128, 128, 128, 32, mm_warp_8 * 2, 64, 2, tm_l, tn_l, tk_l, mm_warp_8 });
+        t.m_warptile_mmq = .of(.{ 128, 64, 64, 32, mm_warp_8, 32, 2, tm_m, tn_m, tk_m, mm_warp_8 });
         t.s_warptile_mmq = .of(.{ subgroup_size_32, 32, 32, 32, s_warptile_wm, 32, 2, tm_s, tn_s, tk_s, subgroup_size_8 });
 
         // Integer MMQ has a smaller shared memory profile, but heavier register use
-        t.l_warptile_mmq_int = .of(.{ 128, 128, 128, 32, subgroup_size_8 * 2, 64, 2, 4, 4, 1, subgroup_size_8 });
-        t.m_warptile_mmq_int = .of(.{ 128, 64, 64, 32, subgroup_size_8, 32, 2, 2, 2, 1, subgroup_size_8 });
+        t.l_warptile_mmq_int = .of(.{ 128, 128, 128, 32, mm_warp_8 * 2, 64, 2, 4, 4, 1, mm_warp_8 });
+        t.m_warptile_mmq_int = .of(.{ 128, 64, 64, 32, mm_warp_8, 32, 2, 2, 2, 1, mm_warp_8 });
         t.s_warptile_mmq_int = .of(.{ subgroup_size_32, 32, 32, 32, s_warptile_wm, 32, 2, 2, 1, 1, subgroup_size_8 });
 
         // K-quants use even more registers, mitigate by setting WMITER to 1
-        t.l_warptile_mmq_int_k = .of(.{ 128, 128, 128, 32, subgroup_size_8 * 2, 64, 1, 4, 4, 1, subgroup_size_8 });
-        t.m_warptile_mmq_int_k = .of(.{ 128, 64, 64, 32, subgroup_size_8, 32, 1, 2, 2, 1, subgroup_size_8 });
+        t.l_warptile_mmq_int_k = .of(.{ 128, 128, 128, 32, mm_warp_8 * 2, 64, 1, 4, 4, 1, mm_warp_8 });
+        t.m_warptile_mmq_int_k = .of(.{ 128, 64, 64, 32, mm_warp_8, 32, 1, 2, 2, 1, mm_warp_8 });
         t.s_warptile_mmq_int_k = .of(.{ subgroup_size_32, 32, 32, 32, s_warptile_wm, 32, 1, 2, 1, 1, subgroup_size_8 });
 
-        t.l_warptile_id = .of(.{ 128, 128, 128, 16, mul_mat_subgroup_size_16 * 2, 64, 2, tm_l, tn_l, tk_l, mul_mat_subgroup_size_16 });
-        t.m_warptile_id = .of(.{ 128, 64, 64, 16, mul_mat_subgroup_size_16, 32, 2, tm_m, tn_m, tk_m, mul_mat_subgroup_size_16 });
+        t.l_warptile_id = .of(.{ 128, 128, 128, 16, mul_mat_mm_warp_16 * 2, 64, 2, tm_l, tn_l, tk_l, mul_mat_mm_warp_16 });
+        t.m_warptile_id = .of(.{ 128, 64, 64, 16, mul_mat_mm_warp_16, 32, 2, tm_m, tn_m, tk_m, mul_mat_mm_warp_16 });
         t.s_warptile_id = .of(.{ mul_mat_subgroup_size_16, 32, 32, 16, s_warptile_wm, 32, 2, tm_s, tn_s, tk_s, mul_mat_subgroup_size_16 });
 
-        t.l_warptile_mmqid = .of(.{ 128, 128, 128, 32, mul_mat_subgroup_size_8 * 2, 64, 2, tm_l, tn_l, tk_l, mul_mat_subgroup_size_8 });
-        t.m_warptile_mmqid = .of(.{ 128, 64, 64, 32, mul_mat_subgroup_size_8, 32, 2, tm_m, tn_m, tk_m, mul_mat_subgroup_size_8 });
+        t.l_warptile_mmqid = .of(.{ 128, 128, 128, 32, mul_mat_mm_warp_8 * 2, 64, 2, tm_l, tn_l, tk_l, mul_mat_mm_warp_8 });
+        t.m_warptile_mmqid = .of(.{ 128, 64, 64, 32, mul_mat_mm_warp_8, 32, 2, tm_m, tn_m, tk_m, mul_mat_mm_warp_8 });
         t.s_warptile_mmqid = .of(.{ mul_mat_subgroup_size_32, 32, 32, 32, s_warptile_wm, 32, 2, tm_s, tn_s, tk_s, mul_mat_subgroup_size_8 });
 
-        t.l_warptile_mmqid_int = .of(.{ 128, 128, 128, 32, mul_mat_subgroup_size_8 * 2, 64, 2, 4, 4, 1, mul_mat_subgroup_size_8 });
-        t.m_warptile_mmqid_int = .of(.{ 128, 64, 64, 32, mul_mat_subgroup_size_8, 32, 2, 2, 2, 1, mul_mat_subgroup_size_8 });
+        t.l_warptile_mmqid_int = .of(.{ 128, 128, 128, 32, mul_mat_mm_warp_8 * 2, 64, 2, 4, 4, 1, mul_mat_mm_warp_8 });
+        t.m_warptile_mmqid_int = .of(.{ 128, 64, 64, 32, mul_mat_mm_warp_8, 32, 2, 2, 2, 1, mul_mat_mm_warp_8 });
         t.s_warptile_mmqid_int = .of(.{ mul_mat_subgroup_size_32, 32, 32, 32, s_warptile_wm, 32, 2, 2, 1, 1, mul_mat_subgroup_size_8 });
 
-        t.l_warptile_mmqid_int_k = .of(.{ 128, 128, 128, 32, mul_mat_subgroup_size_16 * 2, 64, 1, 4, 4, 1, mul_mat_subgroup_size_16 });
-        t.m_warptile_mmqid_int_k = .of(.{ 128, 64, 64, 32, mul_mat_subgroup_size_16, 32, 1, 2, 2, 1, mul_mat_subgroup_size_16 });
+        t.l_warptile_mmqid_int_k = .of(.{ 128, 128, 128, 32, mul_mat_mm_warp_16 * 2, 64, 1, 4, 4, 1, mul_mat_mm_warp_16 });
+        t.m_warptile_mmqid_int_k = .of(.{ 128, 64, 64, 32, mul_mat_mm_warp_16, 32, 1, 2, 2, 1, mul_mat_mm_warp_16 });
         t.s_warptile_mmqid_int_k = .of(.{ mul_mat_subgroup_size_32, 32, 32, 32, s_warptile_wm, 32, 1, 2, 1, 1, mul_mat_subgroup_size_16 });
 
         // chip specific tuning
@@ -636,14 +644,14 @@ pub fn loadShaders(device: *Device, requested: ?*Pipeline) void {
             t.m_warptile_mmqid_int = t.m_warptile_mmqid;
         } else if (device.vendor_id == common.vendor_id.amd and device.coopmat_support and device.driver_id != vk.VK_DRIVER_ID_AMD_PROPRIETARY) {
             // This is intentionally using tx_m values, slight performance increase
-            t.l_warptile = .of(.{ 256, 128, 128, 16, subgroup_size_8, 64, 2, tm_m, tn_m, tk_m, subgroup_size_8 });
-            t.l_warptile_mmq = .of(.{ 256, 128, 128, 32, subgroup_size_8, 64, 2, tm_m, tn_m, tk_m, subgroup_size_8 });
+            t.l_warptile = .of(.{ 256, 128, 128, 16, mm_warp_8, 64, 2, tm_m, tn_m, tk_m, mm_warp_8 });
+            t.l_warptile_mmq = .of(.{ 256, 128, 128, 32, mm_warp_8, 64, 2, tm_m, tn_m, tk_m, mm_warp_8 });
             t.l_warptile_mmq_int = t.l_warptile_mmq;
-            t.l_warptile_mmq_int_k = .of(.{ 256, 128, 128, 32, subgroup_size_16, 64, 1, 4, 2, 1, subgroup_size_16 });
+            t.l_warptile_mmq_int_k = .of(.{ 256, 128, 128, 32, mm_warp_16, 64, 1, 4, 2, 1, mm_warp_16 });
         } else if (device.vendor_id == common.vendor_id.intel and device.coopmat_support) {
             // Xe2/Xe3 with coopmat enabled - warptile performance tuning
-            t.l_warptile = .of(.{ 512, 128, 128, 16, subgroup_size_8, 32, 2, tm_m, tn_m, tk_m, subgroup_size_8 });
-            t.l_warptile_mmq = .of(.{ 512, 128, 128, 32, subgroup_size_8, 32, 2, tm_m, tn_m, tk_m, subgroup_size_8 });
+            t.l_warptile = .of(.{ 512, 128, 128, 16, mm_warp_8, 32, 2, tm_m, tn_m, tk_m, mm_warp_8 });
+            t.l_warptile_mmq = .of(.{ 512, 128, 128, 32, mm_warp_8, 32, 2, tm_m, tn_m, tk_m, mm_warp_8 });
         }
 
         t.l_wg_denoms = .{ 128, 128, 1 };
@@ -723,7 +731,7 @@ pub fn loadShaders(device: *Device, requested: ?*Pipeline) void {
     if (device.pipeline_matmul_id_bf16 == null) device.pipeline_matmul_id_bf16 = MatmulPipeline.create();
 
     walkFlashAttention(&w);
-    walkMatmul(&w, &t, subgroup_min_size_16, mul_mat_subgroup_size, mul_mat_subgroup_size_16, subgroup_size_8, subgroup_size_32);
+    walkMatmul(&w, &t, subgroup_min_size_16, mul_mat_subgroup_size, mul_mat_subgroup_size_16, subgroup_size_8, subgroup_size_32, mm_warp_8);
     walkMulMatVec(&w, subgroup_min_size_16);
     walkRest(&w, subgroup_min_size_16, subgroup_size_16, subgroup_size_32);
 
@@ -854,7 +862,7 @@ fn mmQuantRows(w: *Walk, t: *const Tiles, comptime kind: MmKind, pipes: *[c.GGML
 
 /// The matmul and matmul_id pipelines of whichever path the device takes:
 /// coopmat2, coopmat1, fp16 scalar or fp32 scalar; then the bf16 fallback.
-fn walkMatmul(w: *Walk, t: *Tiles, subgroup_min_size_16: bool, mul_mat_subgroup_size: u32, mul_mat_subgroup_size_16: u32, subgroup_size_8: u32, subgroup_size_32: u32) void {
+fn walkMatmul(w: *Walk, t: *Tiles, subgroup_min_size_16: bool, mul_mat_subgroup_size: u32, mul_mat_subgroup_size_16: u32, subgroup_size_8: u32, subgroup_size_32: u32, mm_warp_8: u32) void {
     const device = w.device;
     const pc: u32 = @sizeOf(push.MatMat);
     const pcid: u32 = @sizeOf(push.MatMatId);
@@ -966,8 +974,8 @@ fn walkMatmul(w: *Walk, t: *Tiles, subgroup_min_size_16: bool, mul_mat_subgroup_
         const s_warptile_wm: u32 = if (device.subgroup_size == 8) 8 else 32;
 
         // use scalar tile sizes
-        t.l_warptile = .of(.{ 128, 128, 128, 16, subgroup_size_8 * 2, 64, 2, 4, 4, 1, subgroup_size_8 });
-        t.m_warptile = .of(.{ 128, 64, 64, 16, subgroup_size_8, 32, 2, 4, 2, 1, subgroup_size_8 });
+        t.l_warptile = .of(.{ 128, 128, 128, 16, mm_warp_8 * 2, 64, 2, 4, 4, 1, mm_warp_8 });
+        t.m_warptile = .of(.{ 128, 64, 64, 16, mm_warp_8, 32, 2, 4, 2, 1, mm_warp_8 });
         t.s_warptile = .of(.{ subgroup_size_32, 32, 32, 16, s_warptile_wm, 32, 2, 2, 2, 1, subgroup_size_8 });
 
         t.l_wg_denoms = .{ 128, 128, 1 };
@@ -1000,7 +1008,7 @@ fn walkMatmulIdFp32(w: *Walk, t: *const Tiles, subgroup_min_size_16: bool, mul_m
     }
 }
 
-/// Ports `shader_reduction_mode` (ggml-vulkan.cpp:618 @c1d0e7a00), the
+/// Ports `shader_reduction_mode` (ggml-vulkan.cpp:618 @5266f24da), the
 /// index into a dmmv shader's three variants.
 const ReductionMode = enum(usize) { shmem, hybrid, subgroup };
 
@@ -1104,6 +1112,19 @@ fn walkMulMatVec(w: *Walk, subgroup_min_size_16: bool) void {
         rm_stdq = 2;
         rm_stdq_int = 2;
     }
+    // RDNA3: above four columns, static 4 rows for all types bench faster than the default
+    const is_rdna3 = device.vendor_id == common.vendor_id.amd and device.architecture == .amd_rdna3;
+    const rm_int_n = struct {
+        fn f(rdna3: bool, rows: u32, i: usize) u32 {
+            return if (rdna3 and i >= 4) 4 else rows;
+        }
+    }.f;
+    // RDNA3: Static 4 rows for all types bench faster than the default
+    const rm_id = struct {
+        fn f(rdna3: bool, rows: u32) u32 {
+            return if (rdna3) 4 else rows;
+        }
+    }.f;
     const rm_iq = 2 * rm_kq;
 
     const use_subgroups = device.subgroup_arithmetic;
@@ -1168,10 +1189,10 @@ fn walkMulMatVec(w: *Walk, subgroup_min_size_16: bool) void {
                     const wg_size_subgroup_int = if (is_sub) subgroup_size_int else subgroup_size_int * 4;
                     inline for (dmmv_int_rows) |row| {
                         const rows: u32 = switch (row.rm) {
-                            .kq2 => 2 * rm_kq_int,
-                            .stdq1 => 1 * rm_stdq_int,
-                            .stdq2 => 2 * rm_stdq_int,
-                            .kq1 => 1 * rm_kq_int,
+                            .kq2 => rm_int_n(is_rdna3, 2 * rm_kq_int, i),
+                            .stdq1 => rm_int_n(is_rdna3, 1 * rm_stdq_int, i),
+                            .stdq2 => rm_int_n(is_rdna3, 2 * rm_stdq_int, i),
+                            .kq1 => rm_int_n(is_rdna3, 1 * rm_kq_int, i),
                             .iq => 1 * rmIqInt(@intCast(i)),
                         };
                         const spec = [_]u32{ wg_size_subgroup_int, rows, cols };
@@ -1212,10 +1233,10 @@ fn walkMulMatVec(w: *Walk, subgroup_min_size_16: bool) void {
                 const wg_size_subgroup_int = if (is_sub) subgroup_size_int else subgroup_size_int * 4;
                 inline for (dmmv_int_rows) |row| {
                     const rows: u32 = switch (row.rm) {
-                        .kq2 => 2 * rm_kq_int,
-                        .stdq1 => 1 * rm_stdq_int,
-                        .stdq2 => 2 * rm_stdq_int,
-                        .kq1 => 1 * rm_kq_int,
+                        .kq2 => rm_id(is_rdna3, 2 * rm_kq_int),
+                        .stdq1 => rm_id(is_rdna3, 1 * rm_stdq_int),
+                        .stdq2 => rm_id(is_rdna3, 2 * rm_stdq_int),
+                        .kq1 => rm_id(is_rdna3, 1 * rm_kq_int),
                         .iq => 1 * rmIqInt(0),
                     };
                     const spec = [_]u32{ wg_size_subgroup_int, rows };
@@ -1472,7 +1493,7 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
     cp(w, &device.pipeline_fill_f16, "fill_f16", S.fill_f16_data, 1, pco, .{ 512, 1, 1 }, &.{}, 1, false);
 
     // CREATE_GLU(name)
-    inline for (.{ "geglu", "reglu", "swiglu", "swiglu_oai", "geglu_erf", "geglu_quick" }) |op| {
+    inline for (.{ "geglu", "reglu", "swiglu", "swiglu_oai", "swiglu_clamp", "geglu_erf", "geglu_quick" }) |op| {
         cp(w, &@field(device, "pipeline_" ++ op)[0], op ++ "_f32", @field(S, op ++ "_f32_data"), 3, @sizeOf(push.Glu), .{ 512, 1, 1 }, &.{}, 1, true);
         cp(w, &@field(device, "pipeline_" ++ op)[1], op ++ "_f16", @field(S, op ++ "_f16_data"), 3, @sizeOf(push.Glu), .{ 512, 1, 1 }, &.{}, 1, true);
     }
@@ -1536,9 +1557,22 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
         }
     }
 
+    // large-k fallback: one workgroup per row, radix-select instead of a full sort. The QSA
+    // variant (spec constant 1) additionally gathers the qwen4 indexer input on the fly.
+    {
+        const radix_block_size: u32 = @as(u32, 1) << @intCast(@min(10, device.max_workgroup_size_log2));
+        const pctr = @sizeOf(push.TopkRadix);
+        cp(w, &device.pipeline_topk_radix_f32, "topk_radix_f32", S.topk_radix_select_f32_data, 5, pctr, .{ radix_block_size, 1, 1 }, &.{ radix_block_size, 0 }, 1, true);
+        cp(w, &device.pipeline_topk_radix_qsa, "topk_radix_qsa", S.topk_radix_select_f32_data, 5, pctr, .{ radix_block_size, 1, 1 }, &.{ radix_block_size, 1 }, 1, true);
+    }
+
     cp(w, &device.pipeline_argmax_f32, "argmax_f32", S.argmax_f32_data, 2, pco, .{ 1, 1, 1 }, &.{sg}, 1, false);
 
     cp(w, &device.pipeline_sum_rows_f32, "sum_rows_f32", S.sum_rows_f32_data, 2, @sizeOf(push.SumRows), .{ 1, 1, 1 }, &.{sg}, 1, false);
+    cp(w, &device.pipeline_cross_entropy_loss_f32, "cross_entropy_loss_f32", S.cross_entropy_loss_f32_data, 3, pco, .{ 1, 1, 1 }, &.{sg}, 1, false);
+    cp(w, &device.pipeline_cross_entropy_loss_f32_wg512, "cross_entropy_loss_f32_wg512", S.cross_entropy_loss_f32_data, 3, pco, .{ 1, 1, 1 }, &.{512}, 1, false);
+    cp(w, &device.pipeline_cross_entropy_loss_back_f32, "cross_entropy_loss_back_f32", S.cross_entropy_loss_back_f32_data, 4, pco, .{ 1, 1, 1 }, &.{sg}, 1, false);
+    cp(w, &device.pipeline_cross_entropy_loss_back_f32_wg512, "cross_entropy_loss_back_f32_wg512", S.cross_entropy_loss_back_f32_data, 4, pco, .{ 1, 1, 1 }, &.{512}, 1, false);
     // Intel Windows driver in range [32.0.101.8509, 32.0.101.8860) will
     // crash when using fwht kernels so we gate that here
     const can_use_fwht = device.driver_id != vk.VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS or
@@ -1566,7 +1600,11 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
 
     cp(w, &device.pipeline_count_equal_i32, "count_equal_i32", S.count_equal_i32_data, 3, pco, .{ 512, 1, 1 }, &.{sg}, 1, false);
 
-    cp(w, &device.pipeline_count_experts, "count_experts", S.count_experts_data, 2, @sizeOf(push.CountExperts), .{ 1, 1, 1 }, &.{}, 1, true);
+    if (device.subgroup_arithmetic and device.subgroup_require_full_support) {
+        w.create(&device.pipeline_count_experts, "count_experts", .{ .spv = S.count_experts_subgroup_data, .parameter_count = 2, .push_constant_size = @sizeOf(push.CountExperts), .wg_denoms = .{ 1, 1, 1 }, .spec = &.{}, .disable_robustness = true, .require_full_subgroups = true });
+    } else {
+        cp(w, &device.pipeline_count_experts, "count_experts", S.count_experts_data, 2, @sizeOf(push.CountExperts), .{ 1, 1, 1 }, &.{}, 1, true);
+    }
 
     var sit = device.pipeline_solve_tri_f32.iterator();
     while (sit.next()) |s| {
@@ -1605,6 +1643,16 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
     cp(w, &device.pipeline_rwkv_wkv6_f32, "rwkv_wkv6_f32", S.rwkv_wkv6_f32_data, 7, @sizeOf(push.RwkvWkv6), .{ 1, 1, 1 }, &.{sg}, 1, false);
     cp(w, &device.pipeline_rwkv_wkv7_f32, "rwkv_wkv7_f32", S.rwkv_wkv7_f32_data, 8, @sizeOf(push.RwkvWkv7), .{ 1, 1, 1 }, &.{sg}, 1, false);
     cp(w, &device.pipeline_gated_linear_attn_f32, "gated_linear_attn_f32", S.gated_linear_attn_f32_data, 6, @sizeOf(push.GatedLinearAttn), .{ 1, 1, 1 }, &.{}, 1, false);
+
+    {
+        const li_subgroup = device.subgroup_arithmetic and device.subgroup_require_full_support;
+        const li_data = if (li_subgroup) S.lightning_indexer_subgroup_f32_data else S.lightning_indexer_f32_data;
+
+        for (m.device.lightning_indexer_k_types) |k_type| {
+            const spec = [_]u32{ @intCast(k_type), faBlockBytes(k_type), sg };
+            w.createFmt(&device.pipeline_lightning_indexer_f32[@intCast(k_type)], "lightning_indexer_{s}_k_f32", .{std.mem.span(c.ggml_type_name(k_type))}, .{ .spv = li_data, .parameter_count = 5, .push_constant_size = @sizeOf(push.LightningIndexer), .wg_denoms = .{ 1, 1, 1 }, .spec = &spec, .disable_robustness = true, .require_full_subgroups = li_subgroup });
+        }
+    }
 
     walkGatedDeltaNet(w);
 
@@ -1673,7 +1721,7 @@ fn walkGatedDeltaNet(w: *Walk) void {
     }
 }
 
-/// Ports `ggml_vk_intel_windows_driver_in_range` (ggml-vulkan.cpp:19000 @c1d0e7a00):
+/// Ports `ggml_vk_intel_windows_driver_in_range` (ggml-vulkan.cpp:19556 @5266f24da):
 /// whether `lower <= driver_version < upper`, each bound `xxx.yyyy`;
 /// always true off Windows.
 pub fn intelWindowsDriverInRange(driver_version: u32, lower_major: u32, lower_minor: u32, upper_major: u32, upper_minor: u32) bool {

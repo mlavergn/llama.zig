@@ -10,7 +10,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/common.h`      — `type_conversion_table`
 //!                                                 and `get_thread_range`
 //!
-//! Both at v0.3.0 (`c1d0e7a00`). Each declaration below names the C++ it
+//! Both at v0.4.0 (`5266f24da`). Each declaration below names the C++ it
 //! replaces and the line it began at. This file exports the same 23 C symbols
 //! with the same signatures.
 //!
@@ -74,7 +74,7 @@ extern fn fmaxf(x: f32, y: f32) f32;
 // -----------------------------------------------------------------------------
 // The scalar operations
 //
-// Ports `op_abs` through `op_trunc` (unary-ops.cpp:3 to :96 @c1d0e7a00). The
+// Ports `op_abs` through `op_trunc` (unary-ops.cpp:3 to :96 @5266f24da). The
 // C++ passes each as a function-pointer template argument; an enum selects
 // them at comptime here, as in `binary_ops.zig`.
 
@@ -83,7 +83,7 @@ extern fn fmaxf(x: f32, y: f32) f32;
 /// `op_sqr`, `op_sqrt`, `op_sin`, `op_cos`, `op_log`, `op_expm1`,
 /// `op_softplus`, `op_floor`, `op_ceil`, `op_round` and `op_trunc`
 /// (unary-ops.cpp:3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47, 51, 64, 68,
-/// 72, 76, 80, 84, 88, 92, 96 @c1d0e7a00); names and numbers pair up in order.
+/// 72, 76, 80, 84, 88, 92, 96 @5266f24da); names and numbers pair up in order.
 const Op = enum {
     abs,
     sgn,
@@ -138,7 +138,7 @@ const Op = enum {
     }
 };
 
-/// Ports `op_xielu` (unary-ops.cpp:55 @c1d0e7a00).
+/// Ports `op_xielu` (unary-ops.cpp:55 @5266f24da).
 ///
 /// The four parameters are the C++ lambda's captures, read from `op_params`
 /// by `ggml_compute_forward_xielu`.
@@ -177,7 +177,7 @@ const Xielu = struct {
 // provenance and the C has them in a header both include.
 
 /// Ports the `to_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:48 @c1d0e7a00).
+/// (ggml-cpu/common.h:48 @5266f24da).
 inline fn toF32(comptime T: type, v: T) f32 {
     return switch (T) {
         f32 => v,
@@ -188,7 +188,7 @@ inline fn toF32(comptime T: type, v: T) f32 {
 }
 
 /// Ports the `from_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:48 @c1d0e7a00).
+/// (ggml-cpu/common.h:48 @5266f24da).
 inline fn fromF32(comptime T: type, v: f32) T {
     return switch (T) {
         f32 => v,
@@ -198,7 +198,7 @@ inline fn fromF32(comptime T: type, v: f32) T {
     };
 }
 
-/// Ports `get_thread_range` (ggml-cpu/common.h:74 @c1d0e7a00).
+/// Ports `get_thread_range` (ggml-cpu/common.h:74 @5266f24da).
 fn threadRange(params: *const ComputeParams, src0: *const Tensor) struct { i64, i64 } {
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -220,7 +220,7 @@ fn threadRange(params: *const ComputeParams, src0: *const Tensor) struct { i64, 
 // parses `iNN` as an integer type name. Renamed digit for digit, as
 // `cpu/mulmat.zig` and `cpu/binary_ops.zig` do.
 
-/// Ports `vec_unary_op` (unary-ops.cpp:101 @c1d0e7a00).
+/// Ports `vec_unary_op` (unary-ops.cpp:101 @5266f24da).
 inline fn vecUnaryOp(
     comptime op: Op,
     comptime Src0: type,
@@ -235,7 +235,7 @@ inline fn vecUnaryOp(
     }
 }
 
-/// Ports `apply_unary_op` (unary-ops.cpp:111 @c1d0e7a00).
+/// Ports `apply_unary_op` (unary-ops.cpp:111 @5266f24da).
 ///
 /// Asserts **`ggml_is_contiguous_rows`** on both tensors; the functor variant
 /// below asserts only `ggml_is_contiguous_1`.
@@ -275,7 +275,7 @@ fn applyUnaryOp(
     }
 }
 
-/// Ports `unary_op` (unary-ops.cpp:137 @c1d0e7a00).
+/// Ports `unary_op` (unary-ops.cpp:137 @5266f24da).
 ///
 /// Five type pairs, in the C's order. The C prints to `stderr` with `fprintf`
 /// rather than going through `GGML_LOG_ERROR`, then aborts, and so does this:
@@ -305,7 +305,7 @@ fn unaryOp(comptime op: Op, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `vec_unary_op_functor` (unary-ops.cpp:180 @c1d0e7a00).
+/// Ports `vec_unary_op_functor` (unary-ops.cpp:180 @5266f24da).
 inline fn vecUnaryOpFunctor(
     comptime Src0: type,
     comptime Dst: type,
@@ -320,7 +320,7 @@ inline fn vecUnaryOpFunctor(
     }
 }
 
-/// Ports `apply_unary_op_functor` (unary-ops.cpp:191 @c1d0e7a00).
+/// Ports `apply_unary_op_functor` (unary-ops.cpp:191 @5266f24da).
 ///
 /// Asserts **`ggml_is_contiguous_1`**, a weaker condition than the plain
 /// path's `ggml_is_contiguous_rows`. That difference is the C's and is kept.
@@ -360,7 +360,7 @@ fn applyUnaryOpFunctor(
     }
 }
 
-/// Ports `unary_op_functor` (unary-ops.cpp:217 @c1d0e7a00).
+/// Ports `unary_op_functor` (unary-ops.cpp:217 @5266f24da).
 fn unaryOpFunctor(params: *const ComputeParams, dst: *Tensor, op: anytype) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -390,7 +390,7 @@ fn unaryOpFunctor(params: *const ComputeParams, dst: *Tensor, op: anytype) void 
 // The exported entry points
 //
 // Ports `ggml_compute_forward_abs` through `ggml_compute_forward_trunc`
-// (unary-ops.cpp:237 to :321 @c1d0e7a00), each a one-line call into `unaryOp`.
+// (unary-ops.cpp:237 to :321 @5266f24da), each a one-line call into `unaryOp`.
 // Generated from the enum so the list cannot drift out of step with it; the
 // C writes all twenty-two out by hand.
 
@@ -406,7 +406,7 @@ comptime {
     }
 }
 
-/// Ports `ggml_compute_forward_xielu` (unary-ops.cpp:325 @c1d0e7a00).
+/// Ports `ggml_compute_forward_xielu` (unary-ops.cpp:325 @5266f24da).
 ///
 /// The only entry point that reads `op_params`, and the only one that goes
 /// through the functor family. Note the C reads indices **1 to 4**, not 0 to 3.

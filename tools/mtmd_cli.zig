@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/mtmd/mtmd-cli.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ported from `llama.cpp/tools/mtmd/mtmd-cli.cpp` at v0.4.0 (`5266f24da`).
 //! Each declaration names the C++ it replaces and the line it began at.
 //!
 //! # What differs
@@ -39,7 +39,7 @@ extern fn _exit(code: c_int) noreturn;
 const lc_numeric: c_int = if (builtin.os.tag.isDarwin()) 4 else if (builtin.os.tag == .windows) 4 else 1;
 
 // Ports `g_is_generating`, `g_is_interrupted` (mtmd-cli.cpp:31, 32
-// @c1d0e7a00): volatile, because of signal being an interrupt
+// @5266f24da): volatile, because of signal being an interrupt
 var g_is_generating_: bool = false;
 var g_is_interrupted_: bool = false;
 
@@ -53,7 +53,7 @@ fn isInterrupted() bool {
     return @as(*volatile bool, &g_is_interrupted_).*;
 }
 
-/// Ports `show_additional_info` (mtmd-cli.cpp:40 @c1d0e7a00).
+/// Ports `show_additional_info` (mtmd-cli.cpp:40 @5266f24da).
 fn showAdditionalInfo(argv: []const [:0]const u8) void {
     log.out("Experimental CLI for multimodal\n\n" ++
         "Usage: %s [options] -m <model> --mmproj <mmproj> --image <image> --audio <audio> -p <prompt>\n\n" ++
@@ -63,7 +63,7 @@ fn showAdditionalInfo(argv: []const [:0]const u8) void {
         "  to disable using GPU for mmproj model, add --no-mmproj-offload\n", .{argv[0].ptr});
 }
 
-/// Ports `sigint_handler` (mtmd-cli.cpp:53 @c1d0e7a00).
+/// Ports `sigint_handler` (mtmd-cli.cpp:53 @5266f24da).
 fn sigintHandler(signo: std.posix.SIG) callconv(.c) void {
     if (signo == std.posix.SIG.INT) {
         if (isGenerating()) {
@@ -76,13 +76,13 @@ fn sigintHandler(signo: std.posix.SIG) callconv(.c) void {
     }
 }
 
-/// Ports `inject_test_response_marker` (mtmd-cli.cpp:69 @c1d0e7a00): only
+/// Ports `inject_test_response_marker` (mtmd-cli.cpp:69 @5266f24da): only
 /// used by upstream's tests.sh to capture the response.
 fn injectTestResponseMarker() void {
     if (getenv("MTMD_TEST_RESPONSE_MARKER")) |env| log.out("%s\n", .{env});
 }
 
-/// Ports `mtmd_cli_context` (mtmd-cli.cpp:76 @c1d0e7a00).
+/// Ports `mtmd_cli_context` (mtmd-cli.cpp:76 @5266f24da).
 const CliContext = struct {
     a: std.mem.Allocator,
     ctx_vision: ?*c.mtmd_context = null,
@@ -97,6 +97,9 @@ const CliContext = struct {
 
     bitmaps: std.ArrayList(*c.mtmd_bitmap) = .empty,
 
+    init_opt: c.mtmd_helper_init_opt = undefined, // mtmd_helper_init_opt_default(), set in `init`
+    video_ffmpeg_bin_dir: [:0]const u8 = "",
+
     mbatch: ?*c.mtmd_batch = null,
 
     // chat template
@@ -110,11 +113,12 @@ const CliContext = struct {
     n_threads: c_int = 1,
     n_past: c.llama_pos = 0,
 
-    /// Ports the constructor `mtmd_cli_context` (mtmd-cli.cpp:106 @c1d0e7a00). Every failure is the
+    /// Ports the constructor `mtmd_cli_context` (mtmd-cli.cpp:109 @5266f24da). Every failure is the
     /// C++'s `exit(1)`, which runs no destructor.
     fn init(self: *CliContext, gpa: std.mem.Allocator, a: std.mem.Allocator, params: *tc.params.Params) !void {
         const llama_init = try tc.init.initFromParams(gpa, params, false);
         const model = llama_init.model;
+        if (model == null or llama_init.context == null) tc.cExit(1);
         self.* = .{
             .a = a,
             .llama_init = llama_init,
@@ -124,11 +128,10 @@ const CliContext = struct {
             .smpl = samplerOrTerminate(params, model),
             .batch = undefined,
             .n_batch = params.n_batch,
+            .init_opt = c.mtmd_helper_init_opt_default(),
         };
         self.n_threads = params.cpuparams.n_threads;
         self.batch = c.llama_batch_init(1, 0, 1); // batch for next token generation
-
-        if (self.model == null or self.lctx == null) tc.cExit(1);
 
         self.initVisionContext(params);
 
@@ -169,7 +172,7 @@ const CliContext = struct {
         };
     }
 
-    /// Ports the destructor of `mtmd_cli_context` (mtmd-cli.cpp:148 @c1d0e7a00), then the members in
+    /// Ports the destructor of `mtmd_cli_context` (mtmd-cli.cpp:150 @5266f24da), then the members in
     /// reverse order of declaration.
     fn deinit(self: *CliContext) void {
         c.llama_batch_free(self.batch);
@@ -180,7 +183,7 @@ const CliContext = struct {
         if (self.ctx_vision) |v| c.mtmd_free(v);
     }
 
-    /// Ports `init_vision_context` (mtmd-cli.cpp:153 @c1d0e7a00).
+    /// Ports `init_vision_context` (mtmd-cli.cpp:155 @5266f24da).
     fn initVisionContext(self: *CliContext, params: *tc.params.Params) void {
         const clip_path = self.a.dupeSentinel(u8, params.mmproj.path, 0) catch tc.cExit(1);
         var mparams = c.mtmd_context_params_default();
@@ -201,25 +204,30 @@ const CliContext = struct {
             log.err("Failed to load vision model from %s\n", .{clip_path.ptr});
             tc.cExit(1);
         }
+
+        self.video_ffmpeg_bin_dir = self.a.dupeSentinel(u8, params.video_ffmpeg_bin_dir, 0) catch tc.cExit(1);
+        self.init_opt.video_params.fps_target = params.video_fps;
+        self.init_opt.video_params.timestamp_interval_ms = params.video_timestamp_interval_ms;
+        self.init_opt.video_params.ffmpeg_bin_dir = if (self.video_ffmpeg_bin_dir.len == 0) null else self.video_ffmpeg_bin_dir.ptr;
     }
 
-    /// Ports `check_antiprompt` (mtmd-cli.cpp:175 @c1d0e7a00).
+    /// Ports `check_antiprompt` (mtmd-cli.cpp:183 @5266f24da).
     fn checkAntiprompt(self: *const CliContext, generated_tokens: []const c.llama_token) bool {
         if (self.antiprompt_tokens.len == 0 or generated_tokens.len < self.antiprompt_tokens.len) return false;
         return std.mem.eql(c.llama_token, generated_tokens[generated_tokens.len - self.antiprompt_tokens.len ..], self.antiprompt_tokens);
     }
 
-    /// Ports `load_media` (mtmd-cli.cpp:186 @c1d0e7a00).
+    /// Ports `load_media` (mtmd-cli.cpp:194 @5266f24da).
     fn loadMedia(self: *CliContext, fname: []const u8) !bool {
         const f = try self.a.dupeSentinel(u8, fname, 0);
-        const res = c.mtmd_helper_bitmap_init_from_file(self.ctx_vision, f.ptr, false);
+        const res = c.mtmd_helper_bitmap_init_from_file(self.ctx_vision, f.ptr, false, self.init_opt);
         const bm = res.bitmap orelse return false;
         try self.bitmaps.append(self.a, bm);
         return true;
     }
 };
 
-/// Ports `generate_response` (mtmd-cli.cpp:199 @c1d0e7a00).
+/// Ports `generate_response` (mtmd-cli.cpp:207 @5266f24da).
 fn generateResponse(ctx: *CliContext, n_predict: c_int) !c_int {
     const a = ctx.a;
     var generated_tokens: std.ArrayList(c.llama_token) = .empty;
@@ -263,7 +271,7 @@ fn generateResponse(ctx: *CliContext, n_predict: c_int) !c_int {
     return 0;
 }
 
-/// Ports `chat_add_and_format` (mtmd-cli.cpp:242 @c1d0e7a00).
+/// Ports `chat_add_and_format` (mtmd-cli.cpp:250 @5266f24da).
 fn chatAddAndFormat(ctx: *CliContext, new_msg: chat.Msg) ![]const u8 {
     const a = ctx.a;
     log.dbg("chat_add_and_format: new_msg.role='%s', new_msg.content='%s'\n", .{ (try a.dupeSentinel(u8, new_msg.role, 0)).ptr, (try a.dupeSentinel(u8, new_msg.content, 0)).ptr });
@@ -272,7 +280,7 @@ fn chatAddAndFormat(ctx: *CliContext, new_msg: chat.Msg) ![]const u8 {
     return formatted;
 }
 
-/// Ports `eval_message` (mtmd-cli.cpp:252 @c1d0e7a00).
+/// Ports `eval_message` (mtmd-cli.cpp:260 @5266f24da).
 fn evalMessage(ctx: *CliContext, msg: chat.Msg) !c_int {
     const a = ctx.a;
     injectTestResponseMarker();
@@ -282,18 +290,43 @@ fn evalMessage(ctx: *CliContext, msg: chat.Msg) !c_int {
     const fmt_prompt = "formatted_chat" ++ ".prompt: %s\n";
     log.dbg(fmt_prompt, .{(try a.dupeSentinel(u8, formatted_chat, 0)).ptr});
 
-    const text: c.mtmd_input_text = .{
-        .text = formatted_chat.ptr,
-        .text_len = formatted_chat.len,
-        .add_special = add_bos,
-        .parse_special = true,
-    };
-
     if (isInterrupted()) return 0;
+
+    // note: we replace the marker here instead of letting mtmd_tokenize() to do that
+    //       because we want to demonstrate how to use mtmd_tokenize_from_parts()
+
+    // split the formatted chat on the media marker to get text segments
+    const marker = std.mem.span(c.mtmd_default_marker());
+    var segments: std.ArrayList([]const u8) = .empty;
+    var start: usize = 0;
+    while (std.mem.indexOfPos(u8, formatted_chat, start, marker)) |pos| {
+        try segments.append(a, formatted_chat[start..pos]);
+        start = pos + marker.len;
+    }
+    try segments.append(a, formatted_chat[start..]);
+
+    const bitmaps_c_ptr = ctx.bitmaps.items;
+    if (segments.items.len - 1 != bitmaps_c_ptr.len) {
+        log.err("Number of media markers (%zu) does not match number of loaded media (%zu)\n", .{ segments.items.len - 1, bitmaps_c_ptr.len });
+        return 1;
+    }
+
+    // interleave text and media parts
+    const texts = try a.alloc(c.mtmd_input_text, segments.items.len);
+    var parts: std.ArrayList(c.mtmd_input_part) = .empty;
+    for (segments.items, 0..) |seg, k| {
+        texts[k] = .{ .text = seg.ptr, .text_len = seg.len, .add_special = false, .parse_special = true };
+        try parts.append(a, .{ .text = &texts[k], .bitmap = null });
+        if (k < bitmaps_c_ptr.len) {
+            try parts.append(a, .{ .text = null, .bitmap = bitmaps_c_ptr[k] });
+        }
+    }
+    var parts_ptr: std.ArrayList([*c]const c.mtmd_input_part) = .empty;
+    for (parts.items) |*p| try parts_ptr.append(a, p);
 
     const chunks = c.mtmd_input_chunks_init();
     defer c.mtmd_input_chunks_free(chunks);
-    var res = c.mtmd_tokenize(ctx.ctx_vision, chunks, &text, @ptrCast(ctx.bitmaps.items.ptr), ctx.bitmaps.items.len);
+    var res = c.mtmd_tokenize_from_parts(ctx.ctx_vision, chunks, parts_ptr.items.ptr, parts_ptr.items.len, add_bos);
     if (res != 0) {
         log.err("Unable to tokenize prompt, res = %d\n", .{res});
         return 1;
@@ -335,7 +368,7 @@ fn evalMessage(ctx: *CliContext, msg: chat.Msg) !c_int {
                 if (ctx.mbatch) |mb| c.mtmd_batch_free(mb);
                 ctx.mbatch = c.mtmd_batch_init(ctx.ctx_vision);
                 res = c.mtmd_batch_add_chunk(ctx.mbatch, chunk);
-                if (res != 0) _ = c.ggml_abort("mtmd-cli.cpp", 321, "GGML_ASSERT(%s) failed", "res == 0"); // first chunk must always succeed
+                if (res != 0) _ = c.ggml_abort("mtmd-cli.cpp", 358, "GGML_ASSERT(%s) failed", "res == 0"); // first chunk must always succeed
 
                 var n_added: c_int = 1;
                 // add as many subsequent media chunks as possible
@@ -361,7 +394,7 @@ fn evalMessage(ctx: *CliContext, msg: chat.Msg) !c_int {
                 embd = c.mtmd_batch_get_output_embd(ctx.mbatch, chunk);
             }
 
-            if (embd == null) _ = c.ggml_abort("mtmd-cli.cpp", 350, "GGML_ASSERT(%s) failed", "embd != nullptr");
+            if (embd == null) _ = c.ggml_abort("mtmd-cli.cpp", 387, "GGML_ASSERT(%s) failed", "embd != nullptr");
 
             var new_n_past = ctx.n_past;
             res = c.mtmd_helper_decode_image_chunk(ctx.ctx_vision, ctx.lctx, chunk, embd, ctx.n_past, 0, ctx.n_batch, &new_n_past, null, null);
@@ -435,8 +468,8 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     if (isInterrupted()) return 130;
 
     const System = struct {
-        /// The `eval_system_prompt_if_present` lambda (mtmd-cli.cpp:428
-        /// @c1d0e7a00).
+        /// The `eval_system_prompt_if_present` lambda (mtmd-cli.cpp:465
+        /// @5266f24da).
         fn evalIfPresent(cx: *CliContext, p: *const tc.params.Params) !c_int {
             if (p.system_prompt.len == 0) return 0;
             return evalMessage(cx, .{ .role = "system", .content = p.system_prompt });
@@ -537,7 +570,7 @@ const win32 = struct {
 };
 
 /// The Windows arm of the Ctrl+C handling, `console_ctrl_handler`
-/// (mtmd-cli.cpp:419 @c1d0e7a00).
+/// (mtmd-cli.cpp:456 @5266f24da).
 fn consoleCtrlHandler(ctrl_type: u32) callconv(.winapi) c_int {
     const ctrl_c_event: u32 = 0;
     if (ctrl_type == ctrl_c_event) {
@@ -547,7 +580,7 @@ fn consoleCtrlHandler(ctrl_type: u32) callconv(.winapi) c_int {
     return 0;
 }
 
-/// Ports `main` (mtmd-cli.cpp:377 @c1d0e7a00).
+/// Ports `main` (mtmd-cli.cpp:414 @5266f24da).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

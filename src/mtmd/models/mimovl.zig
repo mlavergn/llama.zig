@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/mimovl.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/mimovl.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -14,7 +14,7 @@ const c = impl.c;
 
 extern fn sqrtf(x: f32) f32;
 
-/// Ports `build_mm` (mimovl.cpp:3 @c1d0e7a00), a member of
+/// Ports `build_mm` (mimovl.cpp:3 @5266f24da), a member of
 /// `clip_graph_mimovl`: every matmul at F32 precision.
 pub fn buildMm(g: *const graph.Graph, w: graph.T, x: graph.T) graph.T {
     const cur = c.ggml_mul_mat(g.ctx0, w, x);
@@ -22,7 +22,7 @@ pub fn buildMm(g: *const graph.Graph, w: graph.T, x: graph.T) graph.T {
     return cur;
 }
 
-/// The `reorder` lambda (mimovl.cpp:100 @c1d0e7a00): permutes patches at
+/// The `reorder` lambda (mimovl.cpp:100 @5266f24da): permutes patches at
 /// merge-unit granularity, keeping each group's (h, w) order.
 fn reorder(g: *graph.Graph, x: graph.T, idx: graph.T, merge_unit: c_int, n_units: c_int, n_pos: c_int, batch_size: c_int) graph.T {
     var y = c.ggml_reshape_2d(g.ctx0, x, g.n_embd * merge_unit, n_units);
@@ -30,7 +30,7 @@ fn reorder(g: *graph.Graph, x: graph.T, idx: graph.T, merge_unit: c_int, n_units
     return c.ggml_reshape_3d(g.ctx0, y, g.n_embd, n_pos, batch_size);
 }
 
-/// Ports `build` (mimovl.cpp:22 @c1d0e7a00), a member of `clip_graph_mimovl`.
+/// Ports `build` (mimovl.cpp:22 @5266f24da), a member of `clip_graph_mimovl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     g.mm_hook = buildMm;

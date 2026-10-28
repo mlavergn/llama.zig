@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.4.0 (`5266f24da`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! `solve_tri` sits between `gla` and `gated_delta_net` in the C; it belongs to
@@ -76,7 +76,7 @@ fn headRange(params: *const ComputeParams, heads: i64) struct { i64, i64 } {
     return .{ h_start, h_end };
 }
 
-/// Ports `ggml_compute_forward_rwkv_wkv6_f32` (ops.cpp:10270 @c1d0e7a00), the
+/// Ports `ggml_compute_forward_rwkv_wkv6_f32` (ops.cpp:10413 @5266f24da), the
 /// `__ARM_NEON && __aarch64__` arm (`WKV_VECTOR_SIZE` 4).
 ///
 /// Per element, with `kv = v * k` rounded on its own (`vmulq_f32`):
@@ -164,7 +164,7 @@ fn rwkvWkv6F32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_rwkv_wkv6` (ops.cpp:10462 @c1d0e7a00).
+/// Ports `ggml_compute_forward_rwkv_wkv6` (ops.cpp:10605 @5266f24da).
 pub export fn ggml_compute_forward_rwkv_wkv6(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -174,7 +174,7 @@ pub export fn ggml_compute_forward_rwkv_wkv6(params: *const ComputeParams, dst: 
     }
 }
 
-/// Ports `ggml_compute_forward_gla_f32` (ops.cpp:10482 @c1d0e7a00), the
+/// Ports `ggml_compute_forward_gla_f32` (ops.cpp:10625 @5266f24da), the
 /// `__ARM_NEON && __aarch64__` arm (`GLA_VECTOR_SIZE` 4).
 ///
 /// Per element: `kv = v * k` on its own, `temp = kv + prev_state * g` fused,
@@ -254,7 +254,7 @@ fn glaF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_gla` (ops.cpp:10663 @c1d0e7a00).
+/// Ports `ggml_compute_forward_gla` (ops.cpp:10806 @5266f24da).
 pub export fn ggml_compute_forward_gla(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -265,7 +265,7 @@ pub export fn ggml_compute_forward_gla(params: *const ComputeParams, dst: *Tenso
 }
 
 /// Ports `ggml_compute_forward_gated_delta_net_one_chunk`
-/// (ops.cpp:10752 @c1d0e7a00).
+/// (ops.cpp:10895 @5266f24da).
 ///
 /// Rows `[ir0, ir1)` are (head, sequence) pairs. The state is stored
 /// transposed — `s_out[j*S_v + i] = S[i][j]` — so every per-token step below
@@ -436,7 +436,7 @@ fn gatedDeltaNetOneChunk(params: *const ComputeParams, dst: *Tensor, ir0: i64, i
     }
 }
 
-/// Ports `ggml_compute_forward_gated_delta_net_f32` (ops.cpp:10906 @c1d0e7a00).
+/// Ports `ggml_compute_forward_gated_delta_net_f32` (ops.cpp:11049 @5266f24da).
 ///
 /// Chunked work-stealing over the (head, sequence) rows, four chunks per
 /// thread, through the threadpool's shared chunk counter — the same scheme
@@ -481,7 +481,7 @@ fn gatedDeltaNetF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_gated_delta_net` (ops.cpp:10947 @c1d0e7a00).
+/// Ports `ggml_compute_forward_gated_delta_net` (ops.cpp:11090 @5266f24da).
 pub export fn ggml_compute_forward_gated_delta_net(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -495,7 +495,7 @@ pub export fn ggml_compute_forward_gated_delta_net(params: *const ComputeParams,
 /// `constexpr int64_t hc = 4`.
 const hc_width: usize = 4;
 
-/// Ports `ggml_dsv4_hc_comb_norm_cols` (ops.cpp:10967 @c1d0e7a00).
+/// Ports `ggml_dsv4_hc_comb_norm_cols` (ops.cpp:11110 @5266f24da).
 fn dsv4HcCombNormCols(comb: *[hc_width * hc_width]f32, eps: f32) void {
     const hc = hc_width;
 
@@ -508,7 +508,7 @@ fn dsv4HcCombNormCols(comb: *[hc_width * hc_width]f32, eps: f32) void {
     }
 }
 
-/// Ports `ggml_dsv4_hc_comb_norm_rows` (ops.cpp:10983 @c1d0e7a00).
+/// Ports `ggml_dsv4_hc_comb_norm_rows` (ops.cpp:11126 @5266f24da).
 fn dsv4HcCombNormRows(comb: *[hc_width * hc_width]f32, eps: f32) void {
     const hc = hc_width;
 
@@ -521,7 +521,7 @@ fn dsv4HcCombNormRows(comb: *[hc_width * hc_width]f32, eps: f32) void {
     }
 }
 
-/// Ports `ggml_compute_forward_dsv4_hc_comb_f32` (ops.cpp:10999 @c1d0e7a00).
+/// Ports `ggml_compute_forward_dsv4_hc_comb_f32` (ops.cpp:11142 @5266f24da).
 ///
 /// Two fusions: `xv * scale_comb + bv` and `comb * inv_sum + eps`, each one
 /// expression in the C.
@@ -620,7 +620,7 @@ fn dsv4HcCombF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_dsv4_hc_comb` (ops.cpp:11086 @c1d0e7a00).
+/// Ports `ggml_compute_forward_dsv4_hc_comb` (ops.cpp:11229 @5266f24da).
 pub export fn ggml_compute_forward_dsv4_hc_comb(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -630,7 +630,7 @@ pub export fn ggml_compute_forward_dsv4_hc_comb(params: *const ComputeParams, ds
     }
 }
 
-/// Ports `ggml_compute_forward_dsv4_hc_pre_f32` (ops.cpp:11105 @c1d0e7a00).
+/// Ports `ggml_compute_forward_dsv4_hc_pre_f32` (ops.cpp:11248 @5266f24da).
 ///
 /// `sum += xv * wv` is fused, one rounding per step.
 fn dsv4HcPreF32(params: *const ComputeParams, dst: *Tensor) void {
@@ -684,7 +684,7 @@ fn dsv4HcPreF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_dsv4_hc_pre` (ops.cpp:11151 @c1d0e7a00).
+/// Ports `ggml_compute_forward_dsv4_hc_pre` (ops.cpp:11294 @5266f24da).
 pub export fn ggml_compute_forward_dsv4_hc_pre(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -694,7 +694,7 @@ pub export fn ggml_compute_forward_dsv4_hc_pre(params: *const ComputeParams, dst
     }
 }
 
-/// Ports `ggml_compute_forward_dsv4_hc_post_f32` (ops.cpp:11170 @c1d0e7a00).
+/// Ports `ggml_compute_forward_dsv4_hc_post_f32` (ops.cpp:11313 @5266f24da).
 ///
 /// `sum = xv * pv` rounds on its own; each `sum += rv * cv` is fused.
 fn dsv4HcPostF32(params: *const ComputeParams, dst: *Tensor) void {
@@ -768,7 +768,7 @@ fn dsv4HcPostF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_dsv4_hc_post` (ops.cpp:11232 @c1d0e7a00).
+/// Ports `ggml_compute_forward_dsv4_hc_post` (ops.cpp:11375 @5266f24da).
 pub export fn ggml_compute_forward_dsv4_hc_post(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -778,7 +778,7 @@ pub export fn ggml_compute_forward_dsv4_hc_post(params: *const ComputeParams, ds
     }
 }
 
-/// Ports `ggml_compute_forward_rwkv_wkv7_f32` (ops.cpp:11251 @c1d0e7a00), the
+/// Ports `ggml_compute_forward_rwkv_wkv7_f32` (ops.cpp:11394 @5266f24da), the
 /// `GGML_SIMD` arm without SVE or RVV.
 ///
 /// Two reductions over `j` per `(t, h, ii)`: `sa = a · state_prev[ii]` and
@@ -912,7 +912,7 @@ fn rwkvWkv7F32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_rwkv_wkv7` (ops.cpp:11448 @c1d0e7a00).
+/// Ports `ggml_compute_forward_rwkv_wkv7` (ops.cpp:11591 @5266f24da).
 pub export fn ggml_compute_forward_rwkv_wkv7(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

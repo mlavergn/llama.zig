@@ -19,7 +19,7 @@ import re
 import sys
 
 HDR = "llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h"
-COMMIT = "c1d0e7a00"
+from upstream_pin import COMMIT, TAG
 
 ZIG_TYPE = {
     "int32_t": "i32", "uint64_t": "u64", "int64_t": "i64", "float": "f32",
@@ -85,7 +85,7 @@ z = ['''//! The argument blocks the Metal kernels read.
 //! # Provenance
 //!
 //! Mirrors the `ggml_metal_kargs_*` structs of
-//! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at v0.3.0
+//! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at ''' + TAG + '''
 //! (`''' + COMMIT + '''`).
 //!
 //! # Generated, not written
@@ -141,7 +141,7 @@ export fn zz_kargs_count() usize {
 export fn zz_kargs_name(i: usize) ?[*:0]const u8 {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
-        if (k == i) return @typeName(T)[(comptime std.mem.lastIndexOfScalar(u8, @typeName(T), '.').? + 1)..].ptr;
+        if (k == i) return @typeName(T)[(comptime std.mem.findScalarLast(u8, @typeName(T), '.').? + 1)..].ptr;
     }
     return null;
 }

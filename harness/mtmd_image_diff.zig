@@ -40,6 +40,8 @@ const RefHparams = extern struct {
     image_pad_color_ov: [4]u8 = .{ 0, 0, 0, 0 },
     image_mean: [3]f32 = .{ 0.5, 0.5, 0.5 },
     image_std: [3]f32 = .{ 0.5, 0.5, 0.5 },
+    dsv4_max_n_token: i32 = 0,
+    dsv4_max_wh_ratio: i32 = 0,
 };
 
 extern fn ref_preprocess(kind: c_int, proj_type: c_int, hp: *const RefHparams, rgb: ?[*]const u8, nx: c_int, ny: c_int, out: *?[*]u8, out_len: *usize) c_int;
@@ -88,6 +90,8 @@ fn toHparams(rh: *const RefHparams) !model.Hparams {
     h.image_resize_algo_ov = @fromBackingInt(@intCast(rh.image_resize_algo_ov));
     h.image_pad_rf = @fromBackingInt(@intCast(rh.image_pad_rf));
     h.image_pad_ov = @fromBackingInt(@intCast(rh.image_pad_ov));
+    h.dsv4_max_n_token = rh.dsv4_max_n_token;
+    h.dsv4_max_wh_ratio = rh.dsv4_max_wh_ratio;
     return h;
 }
 
@@ -390,6 +394,24 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_max_pixels = mt * ps * ps * merge * merge;
                 h.image_resize_algo = 1;
                 try out.append(gpa, .{ h, .muse_glimmer, "muse" });
+            };
+        },
+        .deepseek4v => {
+            // the token caps load_hparams sets: the default, a custom one at
+            // its floor of 16, and one between; min pixels as the gguf sets
+            // them, lowered to the max, and absent; the wh-ratio cap on and off
+            for ([_]i32{ 384, 16, 100 }) |mt| for ([_]i32{ 4, 64, 0 }) |mn| for ([_]i32{ 8, 0 }) |wh| for ([_]i32{ 1, 2 }) |algo| {
+                var h = base;
+                h.patch_size = 16;
+                h.n_merge = 3;
+                h.dsv4_max_n_token = mt;
+                h.dsv4_max_wh_ratio = wh;
+                const area = h.patch_size * h.patch_size * h.n_merge * h.n_merge;
+                h.image_max_pixels = mt * area;
+                h.image_min_pixels = if (mn == 0) 0 else @min(mn * area, h.image_max_pixels);
+                h.image_resize_algo = algo;
+                h.image_pad_color = .{ 127, 127, 127, 0 };
+                try out.append(gpa, .{ h, .deepseek4v, "deepseek4v" });
             };
         },
     }

@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/vec.h` at v0.3.0 (`c1d0e7a00`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/vec.h` at v0.4.0 (`5266f24da`).
 //!
 //! **These are `inline static` in the C, so they have no symbols** and
 //! `cpu/vec.zig` — which ports `vec.cpp`'s *exported* contract — does not
@@ -21,14 +21,14 @@ const simd = @import("../simd.zig");
 
 const c = impl.c;
 
-/// Ports `ggml_vec_add_f32` (vec.h:89 @c1d0e7a00), the scalar fallthrough —
+/// Ports `ggml_vec_add_f32` (vec.h:89 @5266f24da), the scalar fallthrough —
 /// its only other arm is `__AVX2__`, which this target does not compile.
 pub inline fn add_f32(n: i64, z: [*]f32, x: [*]const f32, y: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) z[i] = x[i] + y[i];
 }
 
-/// Ports `ggml_vec_add_f16` (vec.h:104 @c1d0e7a00).
+/// Ports `ggml_vec_add_f16` (vec.h:104 @5266f24da).
 pub inline fn add_f16(n: i64, z: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, y: [*]const c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
@@ -36,31 +36,31 @@ pub inline fn add_f16(n: i64, z: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, y:
     }
 }
 
-/// Ports `ggml_vec_add1_f32` (vec.h:109 @c1d0e7a00).
+/// Ports `ggml_vec_add1_f32` (vec.h:109 @5266f24da).
 pub inline fn add1_f32(n: i64, z: [*]f32, x: [*]const f32, v: f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) z[i] = x[i] + v;
 }
 
-/// Ports `ggml_vec_acc_f32` (vec.h:110 @c1d0e7a00).
+/// Ports `ggml_vec_acc_f32` (vec.h:110 @5266f24da).
 pub inline fn acc_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] += x[i];
 }
 
-/// Ports `ggml_vec_acc1_f32` (vec.h:111 @c1d0e7a00).
+/// Ports `ggml_vec_acc1_f32` (vec.h:111 @5266f24da).
 pub inline fn acc1_f32(n: i64, y: [*]f32, v: f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] += v;
 }
 
-/// Ports `ggml_vec_set_f32` (vec.h:118 @c1d0e7a00).
+/// Ports `ggml_vec_set_f32` (vec.h:118 @5266f24da).
 pub inline fn set_f32(n: i64, x: [*]f32, v: f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) x[i] = v;
 }
 
-/// Ports `ggml_vec_cpy_f32` (vec.h:119 @c1d0e7a00).
+/// Ports `ggml_vec_cpy_f32` (vec.h:119 @5266f24da).
 pub inline fn cpy_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = x[i];
@@ -83,7 +83,7 @@ const Stride = isize;
 extern fn vDSP_sve(a: [*]const f32, ia: Stride, s: *f32, n: Length) void;
 extern fn vDSP_maxv(a: [*]const f32, ia: Stride, s: *f32, n: Length) void;
 
-/// Ports `ggml_vec_sum_f32` (vec.h:1495 @c1d0e7a00), both arms: vDSP under
+/// Ports `ggml_vec_sum_f32` (vec.h:1495 @5266f24da), both arms: vDSP under
 /// `GGML_USE_ACCELERATE`, a `double` accumulator rounded once otherwise.
 ///
 /// **Not interchangeable with `sum_f32_ggf` on Darwin.** There this one sums
@@ -97,7 +97,7 @@ pub inline fn sum_f32(n: i64, s: *f32, x: [*]const f32) void {
     s.* = @floatCast(sum);
 }
 
-/// Ports `ggml_vec_sum_f32_ggf` (vec.h:1517 @c1d0e7a00). Accumulates in
+/// Ports `ggml_vec_sum_f32_ggf` (vec.h:1517 @5266f24da). Accumulates in
 /// `ggml_float`, a `double`.
 pub inline fn sum_f32_ggf(n: i64, s: *f64, x: [*]const f32) void {
     var sum: f64 = 0.0;
@@ -106,7 +106,7 @@ pub inline fn sum_f32_ggf(n: i64, s: *f64, x: [*]const f32) void {
     s.* = sum;
 }
 
-/// Ports `ggml_vec_sum_f16_ggf` (vec.h:1525 @c1d0e7a00). Despite the `_ggf`,
+/// Ports `ggml_vec_sum_f16_ggf` (vec.h:1525 @5266f24da). Despite the `_ggf`,
 /// this one accumulates in `f32`; only the `f32` variant above widens.
 pub inline fn sum_f16_ggf(n: i64, s: *f32, x: [*]const c.ggml_fp16_t) void {
     var sum: f32 = 0.0;
@@ -115,7 +115,7 @@ pub inline fn sum_f16_ggf(n: i64, s: *f32, x: [*]const c.ggml_fp16_t) void {
     s.* = sum;
 }
 
-/// Ports `ggml_vec_sum_bf16_ggf` (vec.h:1533 @c1d0e7a00).
+/// Ports `ggml_vec_sum_bf16_ggf` (vec.h:1533 @5266f24da).
 pub inline fn sum_bf16_ggf(n: i64, s: *f32, x: [*]const c.ggml_bf16_t) void {
     var sum: f32 = 0.0;
     var i: usize = 0;
@@ -123,7 +123,7 @@ pub inline fn sum_bf16_ggf(n: i64, s: *f32, x: [*]const c.ggml_bf16_t) void {
     s.* = sum;
 }
 
-/// Ports `ggml_vec_cumsum_f32` (vec.h:1507 @c1d0e7a00).
+/// Ports `ggml_vec_cumsum_f32` (vec.h:1507 @5266f24da).
 pub inline fn cumsum_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
@@ -131,7 +131,7 @@ pub inline fn cumsum_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     }
 }
 
-/// Ports `ggml_vec_max_f32` (vec.h:1541 @c1d0e7a00), both arms. The scalar
+/// Ports `ggml_vec_max_f32` (vec.h:1541 @5266f24da), both arms. The scalar
 /// one is `MAX(max, x[i])`, `max > x[i] ? max : x[i]`, written out because
 /// `@max` treats a NaN differently.
 pub inline fn max_f32(n: i64, s: *f32, x: [*]const f32) void {
@@ -142,7 +142,7 @@ pub inline fn max_f32(n: i64, s: *f32, x: [*]const f32) void {
     s.* = max;
 }
 
-/// Ports `ggml_vec_argmax_f32` (vec.h:1558 @c1d0e7a00).
+/// Ports `ggml_vec_argmax_f32` (vec.h:1558 @5266f24da).
 ///
 /// Note the C's tie-breaking: it reassigns `max` first and then compares
 /// `max == x[i]`, so the **last** index attaining the maximum wins, not the
@@ -161,25 +161,25 @@ pub inline fn argmax_f32(n: i64, s: *i32, x: [*]const f32) void {
 // -----------------------------------------------------------------------------
 // Elementwise arithmetic
 
-/// Ports `ggml_vec_cpy_i32` (vec.h:84 @c1d0e7a00).
+/// Ports `ggml_vec_cpy_i32` (vec.h:84 @5266f24da).
 pub inline fn cpy_i32(n: i64, y: [*]i32, x: [*]const i32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = x[i];
 }
 
-/// Ports `ggml_vec_set_f16` (vec.h:86 @c1d0e7a00).
+/// Ports `ggml_vec_set_f16` (vec.h:86 @5266f24da).
 pub inline fn set_f16(n: i64, x: [*]c.ggml_fp16_t, v: c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) x[i] = v;
 }
 
-/// Ports `ggml_vec_sub_f32` (vec.h:112 @c1d0e7a00).
+/// Ports `ggml_vec_sub_f32` (vec.h:112 @5266f24da).
 pub inline fn sub_f32(n: i64, z: [*]f32, x: [*]const f32, y: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) z[i] = x[i] - y[i];
 }
 
-/// Ports `ggml_vec_mul_f32` (vec.h:127 @c1d0e7a00).
+/// Ports `ggml_vec_mul_f32` (vec.h:127 @5266f24da).
 pub inline fn mul_f32(n: i64, z: [*]f32, x: [*]const f32, y: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) z[i] = x[i] * y[i];
@@ -203,11 +203,11 @@ pub inline fn mul_f32(n: i64, z: [*]f32, x: [*]const f32, y: [*]const f32) void 
 // precision** (`vfmaq_f16`, `vmulq_f16`) and the tail widens to `f32`. That
 // split is real and is reproduced, at `simd.F16.step`. Without it --
 // `generic`, Zig's `aarch64-linux` baseline -- `simd-mappings.h` takes its
-// `GGML_F32Cx4` arm (simd-mappings.h:310 @c1d0e7a00): the body widens four halves,
+// `GGML_F32Cx4` arm (simd-mappings.h:310 @5266f24da): the body widens four halves,
 // computes in `f32` and narrows on store, which is what the tail does, so
 // there the whole range is one loop again.
 
-/// Ports `ggml_vec_mad_f32` (vec.h:319 @c1d0e7a00), the `GGML_SIMD` NEON arm:
+/// Ports `ggml_vec_mad_f32` (vec.h:319 @5266f24da), the `GGML_SIMD` NEON arm:
 /// `y += x * v`, fused per element. See the section comment for why body and
 /// tail are one loop here.
 pub inline fn mad_f32(n: i64, y: [*]f32, x: [*]const f32, v: f32) void {
@@ -215,7 +215,7 @@ pub inline fn mad_f32(n: i64, y: [*]f32, x: [*]const f32, v: f32) void {
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = @mulAdd(f32, x[i], v, y[i]);
 }
 
-/// Ports `ggml_vec_mad_f16` (vec.h:439 @c1d0e7a00), the `GGML_SIMD` NEON arm
+/// Ports `ggml_vec_mad_f16` (vec.h:439 @5266f24da), the `GGML_SIMD` NEON arm
 /// with `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`, and on x86 the AVX one
 /// (`madF16Avx`).
 ///
@@ -264,10 +264,10 @@ fn madF16Avx(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, v: f32) voi
     }
 }
 
-/// `GGML_VEC_MAD_UNROLL` (vec.h:51 @c1d0e7a00).
+/// `GGML_VEC_MAD_UNROLL` (vec.h:51 @5266f24da).
 pub const mad_unroll: usize = 32;
 
-/// Ports `ggml_vec_mad_f32_unroll` (vec.h:585 @c1d0e7a00), the `GGML_SIMD`
+/// Ports `ggml_vec_mad_f32_unroll` (vec.h:585 @5266f24da), the `GGML_SIMD`
 /// NEON arm.
 ///
 /// The body loads `y` once and folds all 32 `x[k] * v[k]` into it with
@@ -297,7 +297,7 @@ pub inline fn mad_f32_unroll(n: i64, xs: i64, vs: i64, y: [*]f32, xv: [*]const f
 extern fn vDSP_vsmsa(a: [*]const f32, ia: Stride, b: *const f32, cc: *const f32, d: [*]f32, id: Stride, n: Length) void;
 extern fn vDSP_vsmul(a: [*]const f32, ia: Stride, b: *const f32, cc: [*]f32, ic: Stride, n: Length) void;
 
-/// Ports `ggml_vec_mad1_f32` (vec.h:655 @c1d0e7a00): `y = x * s + b`, through
+/// Ports `ggml_vec_mad1_f32` (vec.h:655 @5266f24da): `y = x * s + b`, through
 /// `vDSP_vsmsa` under `GGML_USE_ACCELERATE`. Otherwise the NEON `GGML_SIMD`
 /// arm, whose body is `GGML_F32_VEC_FMA(vb, ay, vs)` -- `vfmaq_f32`, fused --
 /// and whose leftovers `x[i]*s + b` clang contracts to the same `fmadd`, so
@@ -308,7 +308,7 @@ pub inline fn mad1_f32(n: i64, y: [*]f32, x: [*]const f32, s: f32, b: f32) void 
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = @mulAdd(f32, x[i], s, b);
 }
 
-/// Ports `ggml_vec_scale_f32` (vec.h:703 @c1d0e7a00): `y *= v`, through
+/// Ports `ggml_vec_scale_f32` (vec.h:703 @5266f24da): `y *= v`, through
 /// `vDSP_vsmul` under `GGML_USE_ACCELERATE`. Otherwise the NEON `GGML_SIMD`
 /// arm, a vector multiply with a scalar tail -- elementwise and unfused, so a
 /// plain loop gives the same bits.
@@ -318,7 +318,7 @@ pub inline fn scale_f32(n: i64, y: [*]f32, v: f32) void {
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] *= v;
 }
 
-/// Ports `ggml_vec_scale_f16` (vec.h:769 @c1d0e7a00), the `GGML_SIMD` NEON arm
+/// Ports `ggml_vec_scale_f16` (vec.h:769 @5266f24da), the `GGML_SIMD` NEON arm
 /// with `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`: the body multiplies **in
 /// half precision** by `v` rounded to `f16`, the tail in `f32`. On x86 the
 /// AVX arm, `scaleF16Avx`.
@@ -366,16 +366,16 @@ extern fn tanhf(x: f32) f32;
 extern fn expf(x: f32) f32;
 extern fn erff(x: f32) f32;
 
-/// `SQRT_2_INV` (vec.h:966 @c1d0e7a00).
+/// `SQRT_2_INV` (vec.h:966 @5266f24da).
 const sqrt_2_inv: f32 = 0.70710678118654752440084436210484;
 
-/// Ports `ggml_vec_tanh_f32` (vec.h:909 @c1d0e7a00).
+/// Ports `ggml_vec_tanh_f32` (vec.h:909 @5266f24da).
 pub inline fn tanh_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = tanhf(x[i]);
 }
 
-/// Ports `ggml_vec_leaky_relu_f32` (vec.h:929 @c1d0e7a00).
+/// Ports `ggml_vec_leaky_relu_f32` (vec.h:929 @5266f24da).
 ///
 /// `pos + ns * neg` is one expression and clang fuses it. Named here to read
 /// as the C compiles, though it cannot change a bit: one of `pos` and `neg`
@@ -389,7 +389,7 @@ pub inline fn leaky_relu_f32(n: i64, y: [*]f32, x: [*]const f32, ns: f32) void {
     }
 }
 
-/// Ports `ggml_vec_leaky_relu_f16` (vec.h:930 @c1d0e7a00).
+/// Ports `ggml_vec_leaky_relu_f16` (vec.h:930 @5266f24da).
 pub inline fn leaky_relu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, ns: f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
@@ -400,13 +400,13 @@ pub inline fn leaky_relu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp1
     }
 }
 
-/// Ports `ggml_vec_gelu_f16` (vec.h:972 @c1d0e7a00): a straight table lookup.
+/// Ports `ggml_vec_gelu_f16` (vec.h:972 @5266f24da): a straight table lookup.
 pub inline fn gelu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = tables.ggml_table_gelu_f16[x[i]];
 }
 
-/// Ports `ggml_vec_gelu_erf_f16` (vec.h:979 @c1d0e7a00).
+/// Ports `ggml_vec_gelu_erf_f16` (vec.h:979 @5266f24da).
 pub inline fn gelu_erf_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
@@ -416,7 +416,7 @@ pub inline fn gelu_erf_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_
     }
 }
 
-/// Ports `ggml_vec_gelu_f32` (vec.h:988 @c1d0e7a00), the `GGML_GELU_FP16`
+/// Ports `ggml_vec_gelu_f32` (vec.h:988 @5266f24da), the `GGML_GELU_FP16`
 /// arm: clamp outside `[-10, 10]`, otherwise look up the `f16` table.
 pub inline fn gelu_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     var i: usize = 0;
@@ -432,7 +432,7 @@ pub inline fn gelu_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     }
 }
 
-/// Ports `ggml_vec_gelu_erf_f32` (vec.h:1010 @c1d0e7a00).
+/// Ports `ggml_vec_gelu_erf_f32` (vec.h:1010 @5266f24da).
 pub inline fn gelu_erf_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
@@ -441,13 +441,13 @@ pub inline fn gelu_erf_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     }
 }
 
-/// Ports `ggml_vec_gelu_quick_f16` (vec.h:1021 @c1d0e7a00).
+/// Ports `ggml_vec_gelu_quick_f16` (vec.h:1021 @5266f24da).
 pub inline fn gelu_quick_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = tables.ggml_table_gelu_quick_f16[x[i]];
 }
 
-/// Ports `ggml_vec_gelu_quick_f32` (vec.h:1029 @c1d0e7a00), the
+/// Ports `ggml_vec_gelu_quick_f32` (vec.h:1029 @5266f24da), the
 /// `GGML_GELU_QUICK_FP16` arm. Unlike `gelu_f32` it has no clamp.
 pub inline fn gelu_quick_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     var i: usize = 0;
@@ -457,19 +457,19 @@ pub inline fn gelu_quick_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     }
 }
 
-/// Ports `ggml_silu_f16` (vec.h:1049 @c1d0e7a00).
+/// Ports `ggml_silu_f16` (vec.h:1049 @5266f24da).
 inline fn siluF16(x: c.ggml_fp16_t) c.ggml_fp16_t {
     const v = impl.fp16ToFp32(x);
     return impl.fp32ToFp16(v / (1.0 + expf(-v)));
 }
 
-/// Ports `ggml_vec_silu_f16` (vec.h:1372 @c1d0e7a00).
+/// Ports `ggml_vec_silu_f16` (vec.h:1372 @5266f24da).
 pub inline fn silu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = siluF16(x[i]);
 }
 
-/// Ports `ggml_silu_backward_f32` (vec.h:1378 @c1d0e7a00).
+/// Ports `ggml_silu_backward_f32` (vec.h:1378 @5266f24da).
 ///
 /// `1.0f + x*(1.0f - s)` is one expression and clang fuses it into
 /// `fma(x, 1 - s, 1)`; the outer products are not adds and stay plain.
@@ -478,7 +478,7 @@ inline fn siluBackwardF32(x: f32, dy: f32) f32 {
     return dy * s * @mulAdd(f32, x, 1.0 - s, 1.0);
 }
 
-/// Ports `ggml_silu_backward_f16` (vec.h:1383 @c1d0e7a00), fused as
+/// Ports `ggml_silu_backward_f16` (vec.h:1383 @5266f24da), fused as
 /// `siluBackwardF32` is.
 inline fn siluBackwardF16(x: c.ggml_fp16_t, dy: c.ggml_fp16_t) c.ggml_fp16_t {
     const v = impl.fp16ToFp32(x);
@@ -486,13 +486,13 @@ inline fn siluBackwardF16(x: c.ggml_fp16_t, dy: c.ggml_fp16_t) c.ggml_fp16_t {
     return impl.fp32ToFp16(impl.fp16ToFp32(dy) * s * @mulAdd(f32, v, 1.0 - s, 1.0));
 }
 
-/// Ports `ggml_vec_silu_backward_f32` (vec.h:1389 @c1d0e7a00).
+/// Ports `ggml_vec_silu_backward_f32` (vec.h:1389 @5266f24da).
 pub inline fn silu_backward_f32(n: i64, dx: [*]f32, x: [*]const f32, dy: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) dx[i] = siluBackwardF32(x[i], dy[i]);
 }
 
-/// Ports `ggml_vec_silu_backward_f16` (vec.h:1395 @c1d0e7a00).
+/// Ports `ggml_vec_silu_backward_f16` (vec.h:1395 @5266f24da).
 pub inline fn silu_backward_f16(n: i64, dx: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, dy: [*]const c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) dx[i] = siluBackwardF16(x[i], dy[i]);
@@ -501,13 +501,13 @@ pub inline fn silu_backward_f16(n: i64, dx: [*]c.ggml_fp16_t, x: [*]const c.ggml
 // -----------------------------------------------------------------------------
 // Gated linear units
 
-/// Ports `ggml_vec_reglu_f32` (vec.h:1401 @c1d0e7a00).
+/// Ports `ggml_vec_reglu_f32` (vec.h:1401 @5266f24da).
 pub inline fn reglu_f32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = if (x[i] > 0.0) x[i] * g[i] else 0.0;
 }
 
-/// Ports `ggml_vec_reglu_f16` (vec.h:1407 @c1d0e7a00).
+/// Ports `ggml_vec_reglu_f16` (vec.h:1407 @5266f24da).
 pub inline fn reglu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, g: [*]const c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
@@ -516,7 +516,7 @@ pub inline fn reglu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, 
     }
 }
 
-/// Ports `ggml_vec_geglu_f32` (vec.h:1415 @c1d0e7a00), the `GGML_GELU_FP16`
+/// Ports `ggml_vec_geglu_f32` (vec.h:1415 @5266f24da), the `GGML_GELU_FP16`
 /// arm.
 pub inline fn geglu_f32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32) void {
     var i: usize = 0;
@@ -532,7 +532,7 @@ pub inline fn geglu_f32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32) voi
     }
 }
 
-/// Ports `ggml_vec_geglu_f16` (vec.h:1437 @c1d0e7a00).
+/// Ports `ggml_vec_geglu_f16` (vec.h:1437 @5266f24da).
 pub inline fn geglu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, g: [*]const c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
@@ -541,7 +541,7 @@ pub inline fn geglu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, 
     }
 }
 
-/// Ports `ggml_vec_swiglu_f16` (vec.h:1447 @c1d0e7a00).
+/// Ports `ggml_vec_swiglu_f16` (vec.h:1447 @5266f24da).
 pub inline fn swiglu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, g: [*]const c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
@@ -551,7 +551,7 @@ pub inline fn swiglu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t,
     }
 }
 
-/// Ports `ggml_vec_geglu_erf_f32` (vec.h:1455 @c1d0e7a00).
+/// Ports `ggml_vec_geglu_erf_f32` (vec.h:1455 @5266f24da).
 pub inline fn geglu_erf_f32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
@@ -560,7 +560,7 @@ pub inline fn geglu_erf_f32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32)
     }
 }
 
-/// Ports `ggml_vec_geglu_erf_f16` (vec.h:1462 @c1d0e7a00).
+/// Ports `ggml_vec_geglu_erf_f16` (vec.h:1462 @5266f24da).
 pub inline fn geglu_erf_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, g: [*]const c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
@@ -570,7 +570,7 @@ pub inline fn geglu_erf_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16
     }
 }
 
-/// Ports `ggml_vec_geglu_quick_f32` (vec.h:1471 @c1d0e7a00), the
+/// Ports `ggml_vec_geglu_quick_f32` (vec.h:1471 @5266f24da), the
 /// `GGML_GELU_QUICK_FP16` arm.
 pub inline fn geglu_quick_f32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32) void {
     var i: usize = 0;
@@ -580,7 +580,7 @@ pub inline fn geglu_quick_f32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f3
     }
 }
 
-/// Ports `ggml_vec_geglu_quick_f16` (vec.h:1487 @c1d0e7a00).
+/// Ports `ggml_vec_geglu_quick_f16` (vec.h:1487 @5266f24da).
 pub inline fn geglu_quick_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, g: [*]const c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {

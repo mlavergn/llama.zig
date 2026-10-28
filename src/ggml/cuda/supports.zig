@@ -2,10 +2,11 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.3.0
-//! (`c1d0e7a00`): `ggml_backend_cuda_device_supports_op`, the CUDA arms
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.4.0
+//! (`5266f24da`): `ggml_backend_cuda_device_supports_op`, the CUDA arms
 //! (the `GGML_USE_MUSA` exclusions compile out; `GGML_CUDA_USE_CUB` is
-//! defined, so `TOP_K` and `ARGSORT` are unconditional).
+//! defined, so `TOP_K` and `ARGSORT` are unconditional; `TOP_K` gained its
+//! own `#if` at v0.4.0, whose `GGML_CUDA_USE_CUB` arm is still `true`).
 //!
 //! `cuda-ops-diff` asks this and the reference the same question for every
 //! case it builds.
@@ -31,7 +32,7 @@ fn src(op: *const Tensor, i: usize) *const Tensor {
 
 /// `ggml_cuda_lightning_indexer_supported`; see `lightning_indexer.zig`.
 const lightningIndexerSupported = lightning_indexer.supported;
-/// Ports `ggml_backend_cuda_device_supports_op` (ggml-cuda.cu:4867 @c1d0e7a00).
+/// Ports `ggml_backend_cuda_device_supports_op` (ggml-cuda.cu:5059 @5266f24da).
 pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
     const dev_ctx = backend.deviceCtx(dev);
 
@@ -79,6 +80,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
             c.GGML_GLU_OP_SWIGLU_OAI,
             c.GGML_GLU_OP_GEGLU_ERF,
             c.GGML_GLU_OP_GEGLU_QUICK,
+            c.GGML_GLU_OP_SWIGLU_CLAMP,
             => return c.ggml_is_contiguous_1(src(op, 0)),
             else => return false,
         },

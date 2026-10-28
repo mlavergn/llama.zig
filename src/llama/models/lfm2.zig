@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/lfm2.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/lfm2.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_lfm2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>` with the lambdas inside it.
 //! LFM2-MoE (`lfm2moe.zig`) builds the same graph.
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_lfm2`'s `load_arch_hparams` (models/lfm2.cpp:7 @c1d0e7a00).
+/// Ports `llama_model_lfm2`'s `load_arch_hparams` (models/lfm2.cpp:7 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -61,7 +61,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_lfm2`'s `load_arch_tensors` (models/lfm2.cpp:34
-/// @c1d0e7a00); LFM2-MoE's (models/lfm2moe.cpp:23 @c1d0e7a00) is the same
+/// @5266f24da); LFM2-MoE's (models/lfm2moe.cpp:23 @5266f24da) is the same
 /// body.
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     try loadTensors(self, "models/lfm2.cpp", 54, 72, exc);
@@ -94,9 +94,9 @@ pub fn loadTensors(self: *Model, comptime file: [:0]const u8, comptime line_moe:
         if (is_moe_layer) {
             impl.assert(l.n_expert != 0 and l.n_expert_used != 0, file, line_moe, "n_expert && n_expert_used");
             layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_expert }, 0, exc);
-            layer.ffn_gate_exps = try self.createTensor(.{ .tensor = .ffn_gate_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, hp.n_ff_exp, l.n_expert }, 0, exc);
-            layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ hp.n_ff_exp, l.n_embd, l.n_expert }, 0, exc);
-            layer.ffn_up_exps = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, hp.n_ff_exp, l.n_expert }, 0, exc);
+            layer.ffn_gate_exps = try self.createTensor(.{ .tensor = .ffn_gate_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, hp.nFfExp(0), l.n_expert }, 0, exc);
+            layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ hp.nFfExp(0), l.n_embd, l.n_expert }, 0, exc);
+            layer.ffn_up_exps = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, hp.nFfExp(0), l.n_expert }, 0, exc);
             layer.ffn_exp_probs_b = try self.createTensor(.{ .tensor = .ffn_exp_probs_b, .suffix = "bias", .bid = i }, &.{l.n_expert}, 0, exc);
         } else {
             // Dense.
@@ -129,7 +129,7 @@ pub fn loadTensors(self: *Model, comptime file: [:0]const u8, comptime line_moe:
 }
 
 /// Ports `llama_model_lfm2`'s `build_arch_graph` (models/lfm2.cpp:89
-/// @c1d0e7a00); LFM2-MoE's (models/lfm2moe.cpp:78 @c1d0e7a00) is the same.
+/// @5266f24da); LFM2-MoE's (models/lfm2moe.cpp:78 @5266f24da) is the same.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const swa_type: hparams_mod.SwaType = @fromBackingInt(@intCast(model.hparams.swa_type));
     if (swa_type == .standard) {
@@ -140,7 +140,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// The constructor's `build_dense_feed_forward` lambda (models/lfm2.cpp:105
-/// @c1d0e7a00).
+/// @5266f24da).
 fn buildDenseFeedForward(model: *const Model, b: *const graph.Builder, cur: *Tensor, il: c_int) *Tensor {
     const layer = &model.layers[@intCast(il)];
     impl.assert(layer.ffn_up_b == null, "models/lfm2.cpp", 106, "!model.layers[il].ffn_up_b");
@@ -150,7 +150,7 @@ fn buildDenseFeedForward(model: *const Model, b: *const graph.Builder, cur: *Ten
 }
 
 /// The constructor's `build_moe_feed_forward` lambda (models/lfm2.cpp:115
-/// @c1d0e7a00).
+/// @5266f24da).
 fn buildMoeFeedForward(model: *const Model, b: *const graph.Builder, cur: *Tensor, il: c_int) *Tensor {
     const layer = &model.layers[@intCast(il)];
     const hp = b.hparams;
@@ -170,7 +170,7 @@ fn buildMoeFeedForward(model: *const Model, b: *const graph.Builder, cur: *Tenso
 }
 
 /// The constructor's `build_attn_block` lambda (models/lfm2.cpp:128
-/// @c1d0e7a00): Q/K norms, RoPE and attention.
+/// @5266f24da): Q/K norms, RoPE and attention.
 fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_pos: *Tensor, inp_attn: anytype, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -202,7 +202,7 @@ fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, i
 }
 
 /// The constructor's `build_shortconv_block` lambda (models/lfm2.cpp:159
-/// @c1d0e7a00): a gated depthwise convolution over the last
+/// @5266f24da): a gated depthwise convolution over the last
 /// `n_shortconv_l_cache` tokens, whose state is the recurrent memory.
 fn buildShortconvBlock(comptime iswa: bool, model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_recr: *const graph.InpRs, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -281,7 +281,7 @@ fn buildShortconvBlock(comptime iswa: bool, model: *const Model, b: *const graph
 }
 
 /// Ports the constructor of `llama_model_lfm2`'s `graph<iswa>`
-/// (models/lfm2.cpp:98 @c1d0e7a00).
+/// (models/lfm2.cpp:98 @5266f24da).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

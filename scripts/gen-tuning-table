@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Regenerate the generated parts of `src/ggml/metal/tuning_table.zig`.
+
+**Not a port.** The table is upstream's `fa_vec_tuned_table`, which its own
+comment calls generated ("do not hand-edit"); v0.4.0 added 2,630 rows to
+the 936 v0.3.0 had, which is past the point where copying by hand is
+honest work. This splices four things into the existing file and leaves
+its prose alone:
+
+- `DeviceId`, from `enum ggml_metal_device_id` in `ggml-metal-device.h`,
+  in the enum's order -- the table indexes it by ordinal;
+- the rows of `fa_vec_tuned_table`, every `{ { ... }, { ... } },` line
+  between the array's opening and closing lines, none skipped;
+- the row-count assertion, so a dropped row fails to compile;
+- the commit each citation and the provenance line name.
+
+The count is cross-checked against an independent count of the C's rows
+(the same lesson as `gen-kargs`: a generator must not check itself with
+its own parse). `make tuning-diff` then proves the transcription by
+comparing every lookup against the reference's.
+
+Usage: scripts/gen-tuning-table
+"""
+import os
+import re
+import sys
+
+from upstream_pin import COMMIT, TAG
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+TUNING = os.path.join(ROOT, "llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.cpp")
+DEVICE_H = os.path.join(ROOT, "llama.cpp/ggml/src/ggml-metal/ggml-metal-device.h")
+OUT = os.path.join(ROOT, "src/ggml/metal/tuning_table.zig")
+
+# ---------------------------------------------------------------- the enum
+dev = open(DEVICE_H).read().split("\n")
+enum_line = next(i for i, l in enumerate(dev, 1) if l.startswith("enum ggml_metal_device_id"))
+names = []
+for l in dev[enum_line:]:
+    if l.strip().startswith("};"):
+        break
+    m = re.match(r"\s*GGML_METAL_DEVICE_(\w+)", l)
+    if m:
+        names.append(m.group(1).lower())
+if names[0] != "generic":
+    sys.exit("gen-tuning-table: the device enum no longer starts at GENERIC")
+
+# ---------------------------------------------------------------- the rows
+src = open(TUNING).read().split("\n")
+table_line = next(i for i, l in enumerate(src, 1) if "fa_vec_tuned_table[]" in l)
+row_re = re.compile(
+    r"^\s*\{\s*\{\s*GGML_METAL_DEVICE_(\w+)\s*,\s*GGML_TYPE_(\w+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,"
+    r"\s*(-?\d+)\s*,\s*(-?\d+)\s*\}\s*,\s*\{\s*(-?\d+)\s*,\s*(-?\d+)\s*\}\s*\}\s*,\s*$")
+rows = []
+for l in src[table_line:]:
+    if l.strip().startswith("};"):
+        break
+    m = row_re.match(l)
+    if m:
+        rows.append(m.groups())
+    elif "{" in l:
+        sys.exit("gen-tuning-table: a table line did not parse: %r" % l)
+
+# An independent count: every line in the array that opens a row.
+end = next(i for i in range(table_line, len(src)) if src[i].strip().startswith("};"))
+independent = sum(1 for l in src[table_line:end] if l.strip().startswith("{ {"))
+if independent != len(rows):
+    sys.exit("gen-tuning-table: parsed %d rows, the array holds %d" % (len(rows), independent))
+for r in rows:
+    if r[0].lower() not in names:
+        sys.exit("gen-tuning-table: row names unknown device %s" % r[0])
+
+# ---------------------------------------------------------------- splice
+z = open(OUT).read()
+
+def splice(text, start_pat, end_pat, body, what):
+    m = re.search(start_pat, text, re.M)
+    if not m:
+        sys.exit("gen-tuning-table: cannot find the start of " + what)
+    e = text.find(end_pat, m.end())
+    if e < 0:
+        sys.exit("gen-tuning-table: cannot find the end of " + what)
+    return text[: m.end()] + body + text[e:]
+
+z = splice(z, r"^pub const DeviceId = enum\(c_uint\) \{\n", "};",
+           "".join("    %s%s,\n" % (n, " = 0" if i == 0 else "") for i, n in enumerate(names)), "DeviceId")
+z = re.sub(r"/// Mirrors `enum ggml_metal_device_id` \(ggml-metal-device\.h:\d+ @\w+\)",
+           "/// Mirrors `enum ggml_metal_device_id` (ggml-metal-device.h:%d @%s)" % (enum_line, COMMIT), z)
+z = re.sub(r"/// Mirrors `fa_vec_tuned_table` \(ggml-metal-tuning\.cpp:\d+ @\w+\)",
+           "/// Mirrors `fa_vec_tuned_table` (ggml-metal-tuning.cpp:%d @%s)" % (table_line, COMMIT), z)
+z = splice(z, r"^pub const fa_vec_tuned_table = \[_\]Entry\{\n", "};",
+           "".join("    .{ .key = .{ .device_id = @backingInt(DeviceId.%s), .dtype = c.GGML_TYPE_%s, .dk = %s, .dv = %s,"
+                   " .ne11_b = %s, .ne01_b = %s }, .cfg = .{ .Q = %s, .NE = %s } },\n"
+                   % (d.lower(), t, dk, dv, a, b, q, ne) for d, t, dk, dv, a, b, q, ne in rows), "the table")
+z = re.sub(r"std\.debug\.assert\(fa_vec_tuned_table\.len == \d+\);",
+           "std.debug.assert(fa_vec_tuned_table.len == %d);" % len(rows), z)
+z = re.sub(r"//! all at v[\d.]+ \(`\w+`\)\.", "//! all at %s (`%s`)." % (TAG, COMMIT), z)
+open(OUT, "w").write(z)
+skus = sorted({r[0].lower() for r in rows}, key=names.index)
+print("%d device ids, %d rows over %d SKUs: %s" % (len(names), len(rows), len(skus), ", ".join(skus)))

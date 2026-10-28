@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen35moe.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/qwen35moe.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_qwen35moe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
@@ -29,11 +29,11 @@ fn divI64(a: i64, b: i64) i64 {
     return if (b == 0) 0 else @divTrunc(a, b);
 }
 
-/// Ports `llama_model_qwen35moe`'s `load_arch_hparams` (models/qwen35moe.cpp:4 @c1d0e7a00).
+/// Ports `llama_model_qwen35moe`'s `load_arch_hparams` (models/qwen35moe.cpp:4 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
-    if (try meta.getKey(u32, .expert_feed_forward_length, false, exc)) |v| hp.n_ff_exp = v;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, false, exc);
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     _ = try meta.getKeyOrArr(c_int, .rope_dimension_sections, &hp.rope_sections, 4, true, exc);
@@ -44,10 +44,6 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.ssm_d_state = (try meta.getKey(u32, .ssm_state_size, true, exc)).?;
     hp.ssm_dt_rank = (try meta.getKey(u32, .ssm_time_step_rank, true, exc)).?;
     hp.ssm_n_group = (try meta.getKey(u32, .ssm_group_count, true, exc)).?;
-
-    // NextN/MTP: an extra decoder block appended beyond the main stack.
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-    impl.assert(hp.n_layer_nextn < hp.n_layer_all, "models/qwen35moe.cpp", 20, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < n_layer_impl\"");
 
     // Recurrent (linear attention) layers; MTP layers are dense.
     if (!try meta.getKeyOrArr(u32, .attention_recurrent_layers, &hp.is_recr_impl, hp.n_layer_all, false, exc)) {
@@ -67,7 +63,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen35moe`'s `load_arch_tensors` (models/qwen35moe.cpp:40 @c1d0e7a00).
+/// Ports `llama_model_qwen35moe`'s `load_arch_tensors` (models/qwen35moe.cpp:36 @5266f24da).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const n_layer: i32 = @intCast(hp.nLayer());
@@ -80,7 +76,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     const n_ff: i64 = hp.nFf(0);
     const n_vocab: i64 = self.vocab.nTokens();
     const n_expert: i64 = hp.n_expert;
-    const n_expert_used: i64 = hp.n_expert_used;
+    const n_expert_used: i64 = hp.nExpertUsed(0);
 
     const nr = loader.tensor_not_required;
     const mtp_only = hp.n_layer_nextn > 0 and ml.getWeight("blk.0.attn_norm.weight") == null;
@@ -104,14 +100,14 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     while (i < n_layer_all) : (i += 1) try loadBlockMtp(self, i, mtp_flags, n_embd, n_head, n_embd_head_k, n_embd_k_gqa, n_embd_v_gqa, n_ff, n_expert, n_expert_used, n_vocab, exc);
 }
 
-/// `load_block_trunk`, a lambda of `load_arch_tensors` (models/qwen35moe.cpp:40
-/// @c1d0e7a00).
+/// `load_block_trunk`, a lambda of `load_arch_tensors` (models/qwen35moe.cpp:36
+/// @5266f24da).
 fn loadBlockTrunk(self: *Model, il: i32, flags: u32, n_embd: i64, n_head: i64, n_embd_head_k: i64, n_embd_k_gqa: i64, n_embd_v_gqa: i64, n_ff: i64, n_expert: i64, n_expert_used: i64, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(il)];
     const nr = loader.tensor_not_required;
 
-    const n_ff_exp: i64 = if (hp.n_ff_exp != 0) hp.n_ff_exp else divI64(n_ff, n_expert_used);
+    const n_ff_exp: i64 = if (hp.nFfExp(0) != 0) hp.nFfExp(0) else divI64(n_ff, n_expert_used);
     const n_ff_shexp: i64 = if (hp.n_ff_shexp != 0) hp.n_ff_shexp else n_ff;
 
     // Dimensions from the hyperparameters.
@@ -159,15 +155,15 @@ fn loadBlockTrunk(self: *Model, il: i32, flags: u32, n_embd: i64, n_head: i64, n
     layer.ffn_down_shexp = try self.createTensor(.{ .tensor = .ffn_down_shexp, .suffix = "weight", .bid = il }, &.{ n_ff_shexp, n_embd }, flags, exc);
 }
 
-/// `load_block_mtp`, a lambda of `load_arch_tensors` (models/qwen35moe.cpp:40
-/// @c1d0e7a00): the MTP block looks like a full-attention decoder block
+/// `load_block_mtp`, a lambda of `load_arch_tensors` (models/qwen35moe.cpp:36
+/// @5266f24da): the MTP block looks like a full-attention decoder block
 /// with an MoE FFN.
 fn loadBlockMtp(self: *Model, il: i32, mtp_flags: u32, n_embd: i64, n_head: i64, n_embd_head_k: i64, n_embd_k_gqa: i64, n_embd_v_gqa: i64, n_ff: i64, n_expert: i64, n_expert_used: i64, n_vocab: i64, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(il)];
     const nr = loader.tensor_not_required;
 
-    const n_ff_exp: i64 = if (hp.n_ff_exp != 0) hp.n_ff_exp else divI64(n_ff, n_expert_used);
+    const n_ff_exp: i64 = if (hp.nFfExp(0) != 0) hp.nFfExp(0) else divI64(n_ff, n_expert_used);
     const n_ff_shexp: i64 = if (hp.n_ff_shexp != 0) hp.n_ff_shexp else n_ff;
 
     layer.attn_norm = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "weight", .bid = il }, &.{n_embd}, mtp_flags, exc);
@@ -201,19 +197,19 @@ fn loadBlockMtp(self: *Model, il: i32, mtp_flags: u32, n_embd: i64, n_head: i64,
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_qwen35moe`'s `build_arch_graph` (models/qwen35moe.cpp:153 @c1d0e7a00):
+/// Ports `llama_model_qwen35moe`'s `build_arch_graph` (models/qwen35moe.cpp:149 @5266f24da):
 /// the MTP draft head for that graph type, the main model otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
     return buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_qwen35moe`'s `graph` (models/qwen35moe.cpp:160 @c1d0e7a00).
+/// Ports the constructor of `llama_model_qwen35moe`'s `graph` (models/qwen35moe.cpp:156 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/qwen35moe.cpp", 164, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/qwen35moe.cpp", 160, "n_embd_head == hparams.n_embd_head_k()");
 
     var sections: [4]c_int = undefined;
     @memcpy(&sections, hp.rope_sections[0..4]);
@@ -297,7 +293,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     c.ggml_build_forward_expand(b.gf, cur);
 }
 
-/// Ports `llama_model_qwen35moe::graph`'s `build_qkvz` (models/qwen35moe.cpp:255 @c1d0e7a00).
+/// Ports `llama_model_qwen35moe::graph`'s `build_qkvz` (models/qwen35moe.cpp:251 @5266f24da).
 fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c_int) struct { *Tensor, *Tensor } {
     const layer = &model.layers[@intCast(il)];
     const n_seqs: i64 = b.ubatch.n_seqs;
@@ -313,22 +309,22 @@ fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c
     return .{ qkv_mixed, z };
 }
 
-/// Ports `llama_model_qwen35moe::graph`'s `build_norm_gated` (models/qwen35moe.cpp:271 @c1d0e7a00).
+/// Ports `llama_model_qwen35moe::graph`'s `build_norm_gated` (models/qwen35moe.cpp:267 @5266f24da).
 fn buildNormGated(b: *const graph.Builder, input: *Tensor, weights: ?*Tensor, gate: *Tensor, layer: c_int) *Tensor {
     const normalized = b.buildNorm(input, weights, null, .rms, layer);
     const gated_silu = c.ggml_silu(b.ctx0, gate);
     return c.ggml_mul(b.ctx0, normalized, gated_silu);
 }
 
-/// Ports `llama_model_qwen35moe::graph`'s `build_layer_attn` (models/qwen35moe.cpp:282
-/// @c1d0e7a00): a joint Q and gate projection, Q and K norms, M-RoPE,
+/// Ports `llama_model_qwen35moe::graph`'s `build_layer_attn` (models/qwen35moe.cpp:278
+/// @5266f24da): a joint Q and gate projection, Q and K norms, M-RoPE,
 /// attention, and the sigmoid gate.
 fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpAttnKv, cur_: *Tensor, inp_pos: *Tensor, sections: *[4]c_int, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/qwen35moe.cpp", 289, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/qwen35moe.cpp", 285, "n_embd_head == hparams.n_embd_head_k()");
     const n_head = b.n_head;
     const n_head_kv = b.n_head_kv;
     const n_tokens = b.n_tokens;
@@ -386,8 +382,8 @@ fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpA
     return cur;
 }
 
-/// Ports `llama_model_qwen35moe::graph`'s `build_layer_attn_linear` (models/qwen35moe.cpp:363
-/// @c1d0e7a00): the gated delta net layer.
+/// Ports `llama_model_qwen35moe::graph`'s `build_layer_attn_linear` (models/qwen35moe.cpp:359
+/// @5266f24da): the gated delta net layer.
 fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *graph.InpRs, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
@@ -402,9 +398,9 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
     const head_v_dim: i64 = @divTrunc(d_inner, num_v_heads);
     const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
 
-    impl.assert(n_seqs != 0, "models/qwen35moe.cpp", 377, "n_seqs != 0");
-    impl.assert(b.ubatch.equalSeqs(), "models/qwen35moe.cpp", 378, "ubatch.equal_seqs()");
-    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/qwen35moe.cpp", 379, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(n_seqs != 0, "models/qwen35moe.cpp", 373, "n_seqs != 0");
+    impl.assert(b.ubatch.equalSeqs(), "models/qwen35moe.cpp", 374, "ubatch.equal_seqs()");
+    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/qwen35moe.cpp", 375, "ubatch.n_tokens == n_seq_tokens * n_seqs");
 
     // The input projections.
     const qkv_mixed, const z = buildQkvz(model, b, cur_, il);
@@ -472,7 +468,7 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
     // Differing key and value head counts repeat to match, unless the
     // fused delta net handles the broadcast.
     if (num_k_heads != num_v_heads and (!b.cparams.fused_gdn_ar or !b.cparams.fused_gdn_ch)) {
-        impl.assert(@rem(num_v_heads, num_k_heads) == 0, "models/qwen35moe.cpp", 466, "num_v_heads % num_k_heads == 0");
+        impl.assert(@rem(num_v_heads, num_k_heads) == 0, "models/qwen35moe.cpp", 462, "num_v_heads % num_k_heads == 0");
         q_conv = c.ggml_repeat_4d(ctx, q_conv, head_k_dim, num_v_heads, n_seq_tokens, n_seqs);
         k_conv = c.ggml_repeat_4d(ctx, k_conv, head_k_dim, num_v_heads, n_seq_tokens, n_seqs);
     }
@@ -502,13 +498,13 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
     return cur;
 }
 
-/// Ports `llama_model_qwen35moe::graph`'s `build_layer_ffn` (models/qwen35moe.cpp:497
-/// @c1d0e7a00): the routed experts, plus the shared expert behind its
+/// Ports `llama_model_qwen35moe::graph`'s `build_layer_ffn` (models/qwen35moe.cpp:493
+/// @5266f24da): the routed experts, plus the shared expert behind its
 /// sigmoid gate when there is one.
 fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
-    impl.assert(layer.ffn_gate_inp != null, "models/qwen35moe.cpp", 499, "model.layers[il].ffn_gate_inp != nullptr");
+    impl.assert(layer.ffn_gate_inp != null, "models/qwen35moe.cpp", 495, "model.layers[il].ffn_gate_inp != nullptr");
 
     const moe_out = b.buildMoeFfn(cur_, .{
         .gate_inp = layer.ffn_gate_inp,
@@ -550,25 +546,25 @@ fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il
     return cur;
 }
 
-/// Ports the constructor of `llama_model_qwen35moe`'s `graph_mtp` (models/qwen35moe.cpp:554
-/// @c1d0e7a00): the MoE series' MTP draft head.
+/// Ports the constructor of `llama_model_qwen35moe`'s `graph_mtp` (models/qwen35moe.cpp:550
+/// @5266f24da): the MoE series' MTP draft head.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn > 0, "models/qwen35moe.cpp", 556, "hparams.n_layer_nextn > 0 && \"QWEN35MOE MTP requires n_layer_nextn > 0\"");
-    impl.assert(hp.n_layer_nextn == 1, "models/qwen35moe.cpp", 557, "hparams.n_layer_nextn == 1 && \"QWEN35MOE MTP currently only supports a single MTP block\"");
+    impl.assert(hp.n_layer_nextn > 0, "models/qwen35moe.cpp", 552, "hparams.n_layer_nextn > 0 && \"QWEN35MOE MTP requires n_layer_nextn > 0\"");
+    impl.assert(hp.n_layer_nextn == 1, "models/qwen35moe.cpp", 553, "hparams.n_layer_nextn == 1 && \"QWEN35MOE MTP currently only supports a single MTP block\"");
 
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/qwen35moe.cpp", 560, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/qwen35moe.cpp", 556, "n_embd_head == hparams.n_embd_head_k()");
 
     // The MTP layer is stored right after the main layers.
     const il: c_int = @intCast(hp.nLayer());
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, "models/qwen35moe.cpp", 565, "layer.nextn.eh_proj    && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/qwen35moe.cpp", 566, "layer.nextn.enorm      && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/qwen35moe.cpp", 567, "layer.nextn.hnorm      && \"MTP block missing nextn.hnorm\"");
-    impl.assert(layer.ffn_gate_inp != null, "models/qwen35moe.cpp", 568, "layer.ffn_gate_inp     && \"MTP block missing ffn_gate_inp\"");
+    impl.assert(layer.nextn.eh_proj != null, "models/qwen35moe.cpp", 561, "layer.nextn.eh_proj    && \"MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, "models/qwen35moe.cpp", 562, "layer.nextn.enorm      && \"MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, "models/qwen35moe.cpp", 563, "layer.nextn.hnorm      && \"MTP block missing nextn.hnorm\"");
+    impl.assert(layer.ffn_gate_inp != null, "models/qwen35moe.cpp", 564, "layer.ffn_gate_inp     && \"MTP block missing ffn_gate_inp\"");
 
     var sections: [4]c_int = undefined;
     @memcpy(&sections, hp.rope_sections[0..4]);
@@ -704,7 +700,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_post_ffn", il);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/qwen35moe.cpp", 725, "head_norm_w && \"QWEN35MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
+    impl.assert(head_norm_w != null, "models/qwen35moe.cpp", 721, "head_norm_w && \"QWEN35MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
 
     b.cb(cur, "h_nextn", -1);
@@ -715,7 +711,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "models/qwen35moe.cpp", 736, "head_w && \"QWEN35MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    impl.assert(head_w != null, "models/qwen35moe.cpp", 732, "head_w && \"QWEN35MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
 

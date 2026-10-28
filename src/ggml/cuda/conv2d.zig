@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/conv2d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/conv2d.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/conv2d.cuh` at v0.4.0 (`5266f24da`). The
 //! kernel, `conv2d_kernel`, stays CUDA.
 
 const std = @import("std");
@@ -16,10 +16,10 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `CUDA_CONV2D_BLOCK_SIZE` (conv2d.cuh:4 @c1d0e7a00).
+/// Ports `CUDA_CONV2D_BLOCK_SIZE` (conv2d.cuh:4 @5266f24da).
 const block_size = 256;
 
-/// Ports `conv_params` (conv2d.cu:4 @c1d0e7a00), passed to the kernel by
+/// Ports `conv_params` (conv2d.cu:4 @5266f24da), passed to the kernel by
 /// value.
 const ConvParams = extern struct {
     IW: i64,
@@ -40,8 +40,8 @@ const ConvParams = extern struct {
     TOTAL: i64,
 };
 
-/// Ports `conv2d_cuda` (conv2d.cu:109 @c1d0e7a00), reached through
-/// `conv2d_cuda_f16` and `conv2d_cuda_f32` (conv2d.cu:114, 118 @c1d0e7a00).
+/// Ports `conv2d_cuda` (conv2d.cu:109 @5266f24da), reached through
+/// `conv2d_cuda_f16` and `conv2d_cuda_f32` (conv2d.cu:114, 118 @5266f24da).
 fn conv2dCuda(comptime T: type, X_D: ?*const anyopaque, K_D: ?*const anyopaque, Y_D: ?*anyopaque, P: ConvParams, st: cu.cudaStream_t) void {
     const blocks: c_int = @truncate(@divTrunc(P.TOTAL + block_size - 1, block_size));
     kernels.launch(kernels.get("conv2d", kernels.tmpl("conv2d_kernel", &.{ kernels.typeName(T), "whcn_layout" })), .{
@@ -52,7 +52,7 @@ fn conv2dCuda(comptime T: type, X_D: ?*const anyopaque, K_D: ?*const anyopaque, 
     }, .{ X_D, K_D, Y_D, P });
 }
 
-/// Ports `ggml_cuda_op_conv2d` (conv2d.cu:122 @c1d0e7a00).
+/// Ports `ggml_cuda_op_conv2d` (conv2d.cu:122 @5266f24da).
 pub fn opConv2d(ctx: *common.Context, dst: *Tensor) void {
     const kernel = impl.one(Tensor, dst.src[0]);
     const input = impl.one(Tensor, dst.src[1]);

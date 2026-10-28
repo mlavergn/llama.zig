@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.3.0,
-//! `c1d0e7a00`), the `__ARM_NEON` arms of the dot products at lines 3631,
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.4.0,
+//! `5266f24da`), the `__ARM_NEON` arms of the dot products at lines 3631,
 //! 3693, 3767, 3864, 3926, 4036, 4102 and 4256. Each function names the C it
 //! replaces and the line it began at.
 //!
@@ -85,7 +85,7 @@ inline fn grid4x4(grid: [*]const u32, g0: usize, g1: usize, g2: usize, g3: usize
     return @bitCast(v);
 }
 
-/// Ports `keven_signs_q2xs` (arch/arm/quants.c:3595 @c1d0e7a00), read as `uint64_t *`.
+/// Ports `keven_signs_q2xs` (arch/arm/quants.c:3595 @5266f24da), read as `uint64_t *`.
 ///
 /// Entry `i` has `-1` in byte `j` where bit `j` of `i` is set, for `j` in
 /// 0..6, and byte 7 set so the eight bytes multiply to `+1`.
@@ -113,8 +113,8 @@ inline fn signs16(a: usize, b: usize) i8x16 {
     );
 }
 
-/// Ports `k_mask1` (arch/arm/quants.c:3782 @c1d0e7a00) and `k_mask2`
-/// (arch/arm/quants.c:3786 @c1d0e7a00), shared by `iq2_s`
+/// Ports `k_mask1` (arch/arm/quants.c:3782 @5266f24da) and `k_mask2`
+/// (arch/arm/quants.c:3786 @5266f24da), shared by `iq2_s`
 /// and `iq3_s`.
 ///
 /// `mask1` broadcasts each of four sign bytes across eight lanes; `mask2`
@@ -155,7 +155,7 @@ inline fn dotv2(a0: i8x16, b0: i8x16, a1: i8x16, b1: i8x16) i32 {
     return neon.addvq_s32(neon.ggml_vdotq_s32(neon.ggml_vdotq_s32(zero, a0, b0), a1, b1));
 }
 
-/// Ports `ggml_vec_dot_iq2_xxs_q8_K` (arch/arm/quants.c:3631 @c1d0e7a00).
+/// Ports `ggml_vec_dot_iq2_xxs_q8_K` (arch/arm/quants.c:3631 @5266f24da).
 pub export fn ggml_vec_dot_iq2_xxs_q8_K(
     n: c_int,
     s: [*c]f32,
@@ -220,7 +220,7 @@ pub export fn ggml_vec_dot_iq2_xxs_q8_K(
     s[0] = 0.25 * sumf;
 }
 
-/// Ports `ggml_vec_dot_iq2_xs_q8_K` (arch/arm/quants.c:3693 @c1d0e7a00).
+/// Ports `ggml_vec_dot_iq2_xs_q8_K` (arch/arm/quants.c:3693 @5266f24da).
 ///
 /// Unlike `iq2_xxs`, the scales are integers, so the whole super-block
 /// accumulates in `i32` lanes with `vmlaq_s32` and only the epilogue is float.
@@ -305,7 +305,7 @@ pub export fn ggml_vec_dot_iq2_xs_q8_K(
     s[0] = 0.125 * sumf;
 }
 
-/// Ports `ggml_vec_dot_iq2_s_q8_K` (arch/arm/quants.c:3767 @c1d0e7a00).
+/// Ports `ggml_vec_dot_iq2_s_q8_K` (arch/arm/quants.c:3767 @5266f24da).
 ///
 /// Ten-bit grid indices -- eight in `qs`, two more shifted out of `qh` -- and
 /// signs from a bit field rather than the parity table.
@@ -389,7 +389,7 @@ pub export fn ggml_vec_dot_iq2_s_q8_K(
     s[0] = 0.125 * sumf;
 }
 
-/// Ports `ggml_vec_dot_iq3_xxs_q8_K` (arch/arm/quants.c:3864 @c1d0e7a00).
+/// Ports `ggml_vec_dot_iq3_xxs_q8_K` (arch/arm/quants.c:3864 @5266f24da).
 ///
 /// The grid is 32-bit here, so four entries fill one vector -- see `grid4x4`.
 pub export fn ggml_vec_dot_iq3_xxs_q8_K(
@@ -462,13 +462,13 @@ pub export fn ggml_vec_dot_iq3_xxs_q8_K(
     s[0] = 0.5 * sumf;
 }
 
-/// Ports `k_shift` (arch/arm/quants.c:3952 @c1d0e7a00), `iq3_s`'s index builder.
+/// Ports `k_shift` (arch/arm/quants.c:3952 @5266f24da), `iq3_s`'s index builder.
 ///
 /// Eight *descending* shifts, so `qh`'s bit `j` lands at position 8 for lane
 /// `j` -- which the `& 256` then keeps.
 const k_shift_iq3s: i16x8 = .{ 8, 7, 6, 5, 4, 3, 2, 1 };
 
-/// Ports `ggml_vec_dot_iq3_s_q8_K` (arch/arm/quants.c:3926 @c1d0e7a00).
+/// Ports `ggml_vec_dot_iq3_s_q8_K` (arch/arm/quants.c:3926 @5266f24da).
 pub export fn ggml_vec_dot_iq3_s_q8_K(
     n: c_int,
     s: [*c]f32,
@@ -552,7 +552,7 @@ pub export fn ggml_vec_dot_iq3_s_q8_K(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_iq1_s_q8_K` (arch/arm/quants.c:4036 @c1d0e7a00).
+/// Ports `ggml_vec_dot_iq1_s_q8_K` (arch/arm/quants.c:4036 @5266f24da).
 ///
 /// The grid values are already signed, so there is no sign field. Instead a
 /// per-group `delta` of `+/-1` weights the right operand's group sums --
@@ -627,7 +627,7 @@ pub export fn ggml_vec_dot_iq1_s_q8_K(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_iq1_m_q8_K` (arch/arm/quants.c:4102 @c1d0e7a00).
+/// Ports `ggml_vec_dot_iq1_m_q8_K` (arch/arm/quants.c:4102 @5266f24da).
 ///
 /// Like `iq1_s`, but the delta is per *quarter*-group and comes from a table of
 /// four sign patterns indexed by two bits of `qh`. The scale is scattered
@@ -738,7 +738,7 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_iq4_xs_q8_K` (arch/arm/quants.c:4256 @c1d0e7a00).
+/// Ports `ggml_vec_dot_iq4_xs_q8_K` (arch/arm/quants.c:4256 @5266f24da).
 ///
 /// Four-bit indices into `kvalues_iq4nl`, with six-bit scales biased by 32 and
 /// split between `scales_l` and `scales_h`. Note the two halves of a pair take

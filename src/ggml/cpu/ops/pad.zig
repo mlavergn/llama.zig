@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.4.0 (`5266f24da`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Contraction is named, site by site
@@ -76,7 +76,7 @@ inline fn trunc64(x: f32) i64 {
 // upscale
 
 /// Ports the `triangle_filter` lambda in `ggml_compute_forward_upscale_f32`
-/// (ops.cpp:7839 @c1d0e7a00): `std::max(1.0f - fabsf(x), 0.0f)`.
+/// (ops.cpp:7978 @5266f24da): `std::max(1.0f - fabsf(x), 0.0f)`.
 inline fn triangleFilter(x: f32) f32 {
     return stdMax(1.0 - @abs(x), 0.0);
 }
@@ -86,7 +86,7 @@ inline fn triangleFilter(x: f32) f32 {
 const bicubic_a: f32 = -0.75;
 
 /// Ports the `weight1` lambda in `ggml_compute_forward_upscale_f32`
-/// (ops.cpp:7839 @c1d0e7a00): `((a + 2) * x - (a + 3)) * x * x + 1`.
+/// (ops.cpp:7978 @5266f24da): `((a + 2) * x - (a + 3)) * x * x + 1`.
 ///
 /// Two fusions. The inner `(a + 2) * x - (a + 3)` has its product on the
 /// left; the outer `... * x * x + 1` fuses its last multiply, leaving
@@ -97,7 +97,7 @@ inline fn weight1(x: f32) f32 {
 }
 
 /// Ports the `weight2` lambda in `ggml_compute_forward_upscale_f32`
-/// (ops.cpp:7839 @c1d0e7a00): `((a * x - 5 * a) * x + 8 * a) * x - 4 * a`.
+/// (ops.cpp:7978 @5266f24da): `((a * x - 5 * a) * x + 8 * a) * x - 4 * a`.
 ///
 /// Three fusions, each taking the left product, which is always the one with
 /// `x` in it. `5 * a`, `8 * a` and `4 * a` are exact.
@@ -109,7 +109,7 @@ inline fn weight2(x: f32) f32 {
 }
 
 /// Ports the `bicubic` lambda in `ggml_compute_forward_upscale_f32`
-/// (ops.cpp:7839 @c1d0e7a00): `p0*w0 + p1*w1 + p2*w2 + p3*w3`.
+/// (ops.cpp:7978 @5266f24da): `p0*w0 + p1*w1 + p2*w2 + p3*w3`.
 ///
 /// Left to right: the first `+` fuses its left product `p0*w0` over a plain
 /// `p1*w1`; the next two have a fused call on the left and so fuse their
@@ -124,7 +124,7 @@ inline fn bicubic(p0: f32, p1: f32, p2: f32, p3: f32, x: f32) f32 {
     return @mulAdd(f32, p3, w3, s012);
 }
 
-/// Ports `ggml_compute_forward_upscale_f32` (ops.cpp:7839 @c1d0e7a00).
+/// Ports `ggml_compute_forward_upscale_f32` (ops.cpp:7978 @5266f24da).
 fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -342,7 +342,7 @@ fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports the `p` lambda in `ggml_compute_forward_upscale_f32`
-/// (ops.cpp:7839 @c1d0e7a00): one source pixel, clamped to the edge.
+/// (ops.cpp:7978 @5266f24da): one source pixel, clamped to the edge.
 ///
 /// The lambda captures by copy; this struct is that capture.
 const BicubicTap = struct {
@@ -363,7 +363,7 @@ const BicubicTap = struct {
     }
 };
 
-/// Ports `ggml_compute_forward_upscale` (ops.cpp:8035 @c1d0e7a00).
+/// Ports `ggml_compute_forward_upscale` (ops.cpp:8174 @5266f24da).
 pub export fn ggml_compute_forward_upscale(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -376,7 +376,7 @@ pub export fn ggml_compute_forward_upscale(params: *const ComputeParams, dst: *T
 // -----------------------------------------------------------------------------
 // pad
 
-/// Ports `ggml_wrap_around` (ops.cpp:6872 @c1d0e7a00).
+/// Ports `ggml_wrap_around` (ops.cpp:7005 @5266f24da).
 ///
 /// `static inline` in the conv section of `ops.cpp`, which the pad kernel
 /// calls from further down. A private copy: the conv kernels are another
@@ -385,7 +385,7 @@ inline fn wrapAround(coord: i64, size: i64) i64 {
     return @rem(coord + size, size); // adding size avoids negative number weirdness
 }
 
-/// Ports `ggml_compute_forward_pad_f32` (ops.cpp:8057 @c1d0e7a00).
+/// Ports `ggml_compute_forward_pad_f32` (ops.cpp:8196 @5266f24da).
 ///
 /// `template<bool circular_t>` in the C; a comptime `bool` here, so the
 /// `if constexpr` folds the same way.
@@ -456,7 +456,7 @@ fn padF32(comptime circular: bool, params: *const ComputeParams, dst: *Tensor) v
     }
 }
 
-/// Ports `ggml_compute_forward_pad` (ops.cpp:8122 @c1d0e7a00).
+/// Ports `ggml_compute_forward_pad` (ops.cpp:8261 @5266f24da).
 pub export fn ggml_compute_forward_pad(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const circular = impl.getOpParamsI32(dst, 8) != 0;
@@ -469,7 +469,7 @@ pub export fn ggml_compute_forward_pad(params: *const ComputeParams, dst: *Tenso
 // -----------------------------------------------------------------------------
 // pad_reflect_1d
 
-/// Ports `ggml_compute_forward_pad_reflect_1d` (ops.cpp:8145 @c1d0e7a00).
+/// Ports `ggml_compute_forward_pad_reflect_1d` (ops.cpp:8284 @5266f24da).
 pub export fn ggml_compute_forward_pad_reflect_1d(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -516,7 +516,7 @@ pub export fn ggml_compute_forward_pad_reflect_1d(params: *const ComputeParams, 
 // -----------------------------------------------------------------------------
 // roll
 
-/// Ports `ggml_wrap_index` (ops.cpp:8180 @c1d0e7a00).
+/// Ports `ggml_wrap_index` (ops.cpp:8319 @5266f24da).
 fn wrapIndex(i: i64, ne: i64) i64 {
     if (i < 0) {
         return i + ne;
@@ -526,7 +526,7 @@ fn wrapIndex(i: i64, ne: i64) i64 {
     return i;
 }
 
-/// Ports `ggml_compute_forward_roll_f32` (ops.cpp:8189 @c1d0e7a00).
+/// Ports `ggml_compute_forward_roll_f32` (ops.cpp:8328 @5266f24da).
 fn rollF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src_data: [*]const f32 = @ptrCast(@alignCast(src0.data.?));
@@ -565,7 +565,7 @@ fn rollF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_roll` (ops.cpp:8227 @c1d0e7a00).
+/// Ports `ggml_compute_forward_roll` (ops.cpp:8366 @5266f24da).
 pub export fn ggml_compute_forward_roll(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -578,7 +578,7 @@ pub export fn ggml_compute_forward_roll(params: *const ComputeParams, dst: *Tens
 // -----------------------------------------------------------------------------
 // arange
 
-/// Ports `ggml_compute_forward_arange_f32` (ops.cpp:8247 @c1d0e7a00).
+/// Ports `ggml_compute_forward_arange_f32` (ops.cpp:8386 @5266f24da).
 fn arangeF32(params: *const ComputeParams, dst: *Tensor) void {
     impl.assert(dst.nb[0] == @sizeOf(f32), "dst->nb[0] == sizeof(float)");
 
@@ -603,7 +603,7 @@ fn arangeF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_arange` (ops.cpp:8270 @c1d0e7a00).
+/// Ports `ggml_compute_forward_arange` (ops.cpp:8409 @5266f24da).
 pub export fn ggml_compute_forward_arange(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     switch (dst.type) {
         c.GGML_TYPE_F32 => arangeF32(params, dst),
@@ -614,7 +614,7 @@ pub export fn ggml_compute_forward_arange(params: *const ComputeParams, dst: *Te
 // -----------------------------------------------------------------------------
 // timestep_embedding
 
-/// Ports `ggml_compute_forward_timestep_embedding_f32` (ops.cpp:8285 @c1d0e7a00).
+/// Ports `ggml_compute_forward_timestep_embedding_f32` (ops.cpp:8424 @5266f24da).
 fn timestepEmbeddingF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -655,7 +655,7 @@ fn timestepEmbeddingF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_timestep_embedding` (ops.cpp:8318 @c1d0e7a00).
+/// Ports `ggml_compute_forward_timestep_embedding` (ops.cpp:8457 @5266f24da).
 pub export fn ggml_compute_forward_timestep_embedding(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

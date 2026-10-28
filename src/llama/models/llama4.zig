@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/llama4.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/llama4.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_llama4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>`.
 
@@ -22,13 +22,13 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_llama4`'s `load_arch_hparams` (src/models/llama4.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_llama4`'s `load_arch_hparams` (src/models/llama4.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     hp.n_moe_layer_step = (try meta.getKey(u32, .interleave_moe_layer_step, true, exc)).?;
 
     var found_swa = false;
@@ -71,7 +71,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.use_kq_norm = self.type != .@"17b_128e";
 }
 
-/// Ports `llama_model_llama4`'s `load_arch_tensors` (src/models/llama4.cpp:46 @c1d0e7a00).
+/// Ports `llama_model_llama4`'s `load_arch_tensors` (src/models/llama4.cpp:46 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -109,7 +109,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         layer.rope_freqs = try self.createTensor(.{ .tensor = .rope_freqs, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
 
         if (is_moe_layer) {
-            const n_ff_exp: i64 = hp.n_ff_exp;
+            const n_ff_exp: i64 = hp.nFfExp(0);
 
             layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_expert }, 0, exc);
             layer.ffn_gate_exps = try self.createTensor(.{ .tensor = .ffn_gate_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ff_exp, l.n_expert }, 0, exc);
@@ -129,7 +129,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_llama4`'s `build_arch_graph` (src/models/llama4.cpp:98 @c1d0e7a00).
+/// Ports `llama_model_llama4`'s `build_arch_graph` (src/models/llama4.cpp:98 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (@as(hparams_mod.SwaType, @fromBackingInt(@intCast(model.hparams.swa_type))) == .none) {
         buildGraph(false, model, b);
@@ -139,7 +139,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_llama4`'s `graph<iswa>`
-/// (src/models/llama4.cpp:107 @c1d0e7a00).
+/// (src/models/llama4.cpp:107 @5266f24da).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

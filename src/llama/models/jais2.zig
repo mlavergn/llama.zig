@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/jais2.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/jais2.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_jais2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_jais2`'s `load_arch_hparams` (models/jais2.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_jais2`'s `load_arch_hparams` (models/jais2.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
@@ -32,7 +32,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_jais2`'s `load_arch_tensors` (models/jais2.cpp:13 @c1d0e7a00).
+/// Ports `llama_model_jais2`'s `load_arch_tensors` (models/jais2.cpp:13 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -76,13 +76,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_jais2`'s `build_arch_graph` (models/jais2.cpp:54 @c1d0e7a00).
+/// Ports `llama_model_jais2`'s `build_arch_graph` (models/jais2.cpp:54 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_jais2`'s `graph` (models/jais2.cpp:60
-/// @c1d0e7a00): LayerNorm rather than RMSNorm, the squared-ReLU activation,
+/// @5266f24da): LayerNorm rather than RMSNorm, the squared-ReLU activation,
 /// separate Q, K and V, and RoPE.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;

@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.4.0 (`5266f24da`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Single-threaded, and `std::max` is not `@max`
@@ -42,7 +42,7 @@ inline fn loadF32(is_f32: bool, row: [*]const u8, j: i64) f32 {
     return impl.fp16ToFp32(@as([*]const fp16, @ptrCast(@alignCast(row)))[i]);
 }
 
-/// Ports `ggml_compute_forward_pool_1d_ksp` (ops.cpp:7544 @c1d0e7a00).
+/// Ports `ggml_compute_forward_pool_1d_ksp` (ops.cpp:7683 @5266f24da).
 ///
 /// Parameters:
 /// - `op`: `GGML_OP_POOL_AVG` or `GGML_OP_POOL_MAX`.
@@ -110,7 +110,7 @@ fn pool1dKsp(params: *const ComputeParams, op: c.enum_ggml_op_pool, k: i32, s: i
     }
 }
 
-/// Ports `ggml_compute_forward_pool_1d` (ops.cpp:7615 @c1d0e7a00).
+/// Ports `ggml_compute_forward_pool_1d` (ops.cpp:7754 @5266f24da).
 pub export fn ggml_compute_forward_pool_1d(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const opts = dst.op_params;
     const op: c.enum_ggml_op_pool = @bitCast(opts[0]);
@@ -121,7 +121,7 @@ pub export fn ggml_compute_forward_pool_1d(params: *const ComputeParams, dst: *T
     pool1dKsp(params, op, k0, s0, p0, dst);
 }
 
-/// Ports `ggml_compute_forward_pool_2d` (ops.cpp:7630 @c1d0e7a00).
+/// Ports `ggml_compute_forward_pool_2d` (ops.cpp:7769 @5266f24da).
 ///
 /// Walks `src` one `nb[2]` plane at a time until its bytes run out, so the
 /// third and fourth dimensions are flattened together.
@@ -210,7 +210,7 @@ pub export fn ggml_compute_forward_pool_2d(params: *const ComputeParams, dst: *T
     }
 }
 
-/// Ports `ggml_compute_forward_pool_2d_back` (ops.cpp:7717 @c1d0e7a00).
+/// Ports `ggml_compute_forward_pool_2d_back` (ops.cpp:7856 @5266f24da).
 ///
 /// `src` is the gradient of the pooled output and `src[1]` the forward input.
 /// Note the forward tensor is read through `dst`'s type and row stride, as in

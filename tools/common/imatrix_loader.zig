@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/imatrix-loader.cpp` and the struct and keys of
-//! `common/imatrix-loader.h` (v0.3.0, `c1d0e7a00`). Each declaration names
+//! `common/imatrix-loader.h` (v0.4.0, `5266f24da`). Each declaration names
 //! what it ports and the line it began at.
 //!
 //! # `std::map` order
@@ -19,18 +19,18 @@ const log = @import("log.zig");
 const strings = @import("strings.zig");
 
 /// `LLM_KV_IMATRIX_DATASETS`, `LLM_KV_IMATRIX_CHUNK_COUNT`, `LLM_KV_IMATRIX_CHUNK_SIZE`
-/// (imatrix-loader.h:8, 9, 10 @c1d0e7a00).
+/// (imatrix-loader.h:8, 9, 10 @5266f24da).
 pub const kv_datasets = "imatrix.datasets";
 pub const kv_chunk_count = "imatrix.chunk_count";
 pub const kv_chunk_size = "imatrix.chunk_size";
 
-/// Ports `common_imatrix_entry` (imatrix-loader.h:12 @c1d0e7a00).
+/// Ports `common_imatrix_entry` (imatrix-loader.h:12 @5266f24da).
 pub const Entry = struct {
     sums: std.ArrayList(f32) = .empty,
     counts: std.ArrayList(i64) = .empty,
 };
 
-/// Ports `common_imatrix` (imatrix-loader.h:17 @c1d0e7a00).
+/// Ports `common_imatrix` (imatrix-loader.h:17 @5266f24da).
 pub const Imatrix = struct {
     allocator: std.mem.Allocator,
     /// `entries`, by name.
@@ -117,7 +117,7 @@ const In = struct {
     }
 };
 
-/// Ports `common_imatrix_load_legacy` (imatrix-loader.cpp:10 @c1d0e7a00).
+/// Ports `common_imatrix_load_legacy` (imatrix-loader.cpp:10 @5266f24da).
 fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     const func = "common_imatrix_load_legacy";
     const f = fopen(fname.ptr, "rb") orelse {
@@ -192,7 +192,7 @@ fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     return true;
 }
 
-/// Ports `common_imatrix_load` (imatrix-loader.cpp:82 @c1d0e7a00).
+/// Ports `common_imatrix_load` (imatrix-loader.cpp:82 @5266f24da).
 ///
 /// Parameters:
 /// - `fname`: a GGUF imatrix, or the legacy format if it does not parse as one.

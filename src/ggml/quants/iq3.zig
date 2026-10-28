@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.3.0, `c1d0e7a00`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.4.0, `5266f24da`), lines
 //! 3914-4170 for `iq3_xxs`. Each function names the C function it replaces and
 //! the line it began at.
 //!
@@ -35,7 +35,7 @@ const c = impl.c;
 const fp16 = impl.fp32ToFp16;
 const QK_K = c.QK_K;
 
-/// Ports `iq3_find_best_neighbour` (ggml-quants.c:3914 @c1d0e7a00).
+/// Ports `iq3_find_best_neighbour` (ggml-quants.c:3914 @5266f24da).
 ///
 /// Picks the weighted-closest entry from a precomputed neighbour list, and
 /// writes its digits back into `l_out`.
@@ -72,7 +72,7 @@ fn findBestNeighbour(
     return grid_index;
 }
 
-/// Ports `quantize_row_iq3_xxs_impl` (ggml-quants.c:3938 @c1d0e7a00).
+/// Ports `quantize_row_iq3_xxs_impl` (ggml-quants.c:3938 @5266f24da).
 ///
 /// Handles both `iq3_xxs` (grid 256) and the grid-512 shape, which is why it
 /// takes the block stride rather than a block type: the two write different
@@ -295,7 +295,7 @@ fn iq3XxsImpl(grid_size: c_int, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_
     }
 }
 
-/// Ports `quantize_iq3_xxs` (ggml-quants.c:4152 @c1d0e7a00).
+/// Ports `quantize_iq3_xxs` (ggml-quants.c:4152 @5266f24da).
 pub export fn quantize_iq3_xxs(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
     const nblock: usize = @intCast(@divExact(n_per_row, QK_K));
@@ -309,7 +309,7 @@ pub export fn quantize_iq3_xxs(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, 
     return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ3_XXS);
 }
 
-/// Ports `quantize_row_iq3_xxs_ref` (ggml-quants.c:4164 @c1d0e7a00).
+/// Ports `quantize_row_iq3_xxs_ref` (ggml-quants.c:4164 @5266f24da).
 pub export fn quantize_row_iq3_xxs_ref(x: [*c]const f32, y: [*c]blocks.IQ3_XXS, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     iq3XxsImpl(256, x, @ptrCast(y), k, null);
@@ -323,10 +323,10 @@ pub export fn quantize_row_iq3_xxs_ref(x: [*c]const f32, y: [*c]blocks.IQ3_XXS, 
 // get a byte each here rather than being packed seven-to-a-word, and the scale
 // is stored per pair of sub-blocks.
 
-/// Ports `IQ3S_BLOCK_SIZE` (ggml-quants.c:4352 @c1d0e7a00).
+/// Ports `IQ3S_BLOCK_SIZE` (ggml-quants.c:4352 @5266f24da).
 const iq3s_block_size = 32;
 
-/// Ports `quantize_row_iq3_s_impl` (ggml-quants.c:4169 @c1d0e7a00).
+/// Ports `quantize_row_iq3_s_impl` (ggml-quants.c:4169 @5266f24da).
 ///
 /// Two differences from `iq3XxsImpl` worth naming, because both look like
 /// mistakes and are not:
@@ -520,7 +520,7 @@ fn iq3SImpl(block_size: usize, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_w
     }
 }
 
-/// Ports `quantize_iq3_s` (ggml-quants.c:4353 @c1d0e7a00).
+/// Ports `quantize_iq3_s` (ggml-quants.c:4353 @5266f24da).
 pub export fn quantize_iq3_s(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
     const nblock: usize = @intCast(@divExact(n_per_row, QK_K));
@@ -534,7 +534,7 @@ pub export fn quantize_iq3_s(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_
     return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ3_S);
 }
 
-/// Ports `quantize_row_iq3_s_ref` (ggml-quants.c:4375 @c1d0e7a00).
+/// Ports `quantize_row_iq3_s_ref` (ggml-quants.c:4375 @5266f24da).
 pub export fn quantize_row_iq3_s_ref(x: [*c]const f32, y: [*c]blocks.IQ3_S, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     _ = quantize_iq3_s(x, @ptrCast(y), 1, k, null);

@@ -44,6 +44,19 @@
 -m $MM/text-qwen2vl.gguf -mm $MM/qwen2vl_merger.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0 -c 2048
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "<__media__> first, then <__media__> second" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg,$MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 8 --temp 0
 
+# deepseek4v (v0.4.0): learned start/end/newline/pad embeddings and the
+# lead pads that align the image to the text model's 4-token blocks, which
+# depend on where the image falls; a custom token cap feeds the resize
+# solver; the media markers are split into parts for
+# mtmd_tokenize_from_parts, and a count that does not match the media fails.
+# Its image decodes non-causally, so the whole block is one batch
+-m $MM/text-qwen3.gguf -mm $MM/deepseek4v.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 8 --temp 0 --perf -lv 5 -c 2048 -b 1024 -ub 1024
+-m $MM/text-qwen3.gguf -mm $MM/deepseek4v.gguf -p "a <__media__> b" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 8 --temp 0 --image-max-tokens 40 --perf -c 2048 -b 1024 -ub 1024
+-m $MM/text-qwen3.gguf -mm $MM/deepseek4v.gguf -p "x <__media__> then <__media__>" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg,$MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 8 --temp 0 --perf -c 2048 -b 1024 -ub 1024
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "<__media__> and <__media__>" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 8 --temp 0
+# the video options reach mtmd_helper_init_opt; without MTMD_VIDEO they change nothing
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 --video-fps 2 --video-timestamp-interval 0 --video-ffmpeg-dir /nonexistent
+
 # sampling and templates: the default temperature 0.2 with a seed, a
 # system prompt, vicuna's antiprompt, other built-in families
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 16 --seed 3

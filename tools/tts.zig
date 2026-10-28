@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/tts/tts.cpp` at v0.3.0 (`c1d0e7a00`). Each
+//! Ported from `llama.cpp/tools/tts/tts.cpp` at v0.4.0 (`5266f24da`). Each
 //! declaration names the C++ it replaces and the line it began at.
 //!
 //! The C++ holds the mtmd context, the speaker bitmap and the generation
@@ -26,7 +26,7 @@ extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*c.FILE;
 extern fn fwrite(p: ?*const anyopaque, size: usize, n: usize, f: ?*c.FILE) usize;
 extern fn fclose(f: ?*c.FILE) c_int;
 
-/// Ports `tts_timings` (tts.cpp:19 @c1d0e7a00): a progress line every two
+/// Ports `tts_timings` (tts.cpp:19 @5266f24da): a progress line every two
 /// seconds.
 const Timings = struct {
     t_start_us: i64,
@@ -37,7 +37,7 @@ const Timings = struct {
         return .{ .t_start_us = t, .t_last_us = t };
     }
 
-    /// `report` (tts.cpp:23 @c1d0e7a00), a member of `tts_timings`.
+    /// `report` (tts.cpp:23 @5266f24da), a member of `tts_timings`.
     fn report(self: *Timings, n_frames: c_int) void {
         const t_now_us = c.ggml_time_us();
         if (t_now_us - self.t_last_us < 2000000) return;
@@ -48,7 +48,7 @@ const Timings = struct {
     }
 };
 
-/// Ports `print_usage` (tts.cpp:35 @c1d0e7a00).
+/// Ports `print_usage` (tts.cpp:35 @5266f24da).
 fn printUsage(argv: []const [:0]const u8) void {
     log.out("\nexample usage:\n", .{});
     log.out("\n    %s -m backbone.gguf -mm mmproj.gguf -p \"text to speak\" -o output.wav", .{argv[0].ptr});
@@ -122,7 +122,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     defer if (speaker_bitmap) |bm| c.mtmd_bitmap_free(bm);
     if (params.tts_speaker_file.len != 0) {
         const speaker_file = try a.dupeSentinel(u8, params.tts_speaker_file, 0);
-        const wrapper = c.mtmd_helper_bitmap_init_from_file(mctx, speaker_file.ptr, false);
+        const wrapper = c.mtmd_helper_bitmap_init_from_file(mctx, speaker_file.ptr, false, c.mtmd_helper_init_opt_default());
         if (wrapper.bitmap == null) {
             log.err("failed to load speaker file %s\n", .{speaker_file.ptr});
             return 1;
@@ -232,7 +232,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     return 0;
 }
 
-/// Ports `main` (tts.cpp:45 @c1d0e7a00).
+/// Ports `main` (tts.cpp:45 @5266f24da).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

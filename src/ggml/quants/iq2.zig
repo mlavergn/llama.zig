@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.3.0, `c1d0e7a00`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.4.0, `5266f24da`), lines
 //! 3270-3678. Each function names the C function it replaces and the line it
 //! began at.
 //!
@@ -28,7 +28,7 @@ const c = impl.c;
 const fp16 = impl.fp32ToFp16;
 const QK_K = c.QK_K;
 
-/// Ports `iq2_find_best_neighbour` (ggml-quants.c:3270 @c1d0e7a00).
+/// Ports `iq2_find_best_neighbour` (ggml-quants.c:3270 @5266f24da).
 ///
 /// `iq3.zig`'s twin, over 8-element entries.
 fn findBestNeighbour(
@@ -99,7 +99,7 @@ fn splitSigns(xb: [*]const f32, weight: *const [32]f32, xval: *[32]f32, block_si
     }
 }
 
-/// Ports `quantize_row_iq2_xxs_impl` (ggml-quants.c:3294 @c1d0e7a00).
+/// Ports `quantize_row_iq2_xxs_impl` (ggml-quants.c:3294 @5266f24da).
 fn iq2XxsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f32) void {
     const t = c.GGML_TYPE_IQ2_XXS;
     const kgrid = codebook.iq2Grid(t);
@@ -251,7 +251,7 @@ fn iq2XxsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const 
     }
 }
 
-/// Ports `quantize_iq2_xxs` (ggml-quants.c:3652 @c1d0e7a00).
+/// Ports `quantize_iq2_xxs` (ggml-quants.c:3652 @5266f24da).
 pub export fn quantize_iq2_xxs(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
     impl.assert(quant_weights != null, "missing quantization weights");
@@ -266,7 +266,7 @@ pub export fn quantize_iq2_xxs(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, 
     return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ2_XXS);
 }
 
-/// Ports `quantize_row_iq2_xs_impl` (ggml-quants.c:3472 @c1d0e7a00).
+/// Ports `quantize_row_iq2_xs_impl` (ggml-quants.c:3472 @5266f24da).
 ///
 /// Half the group size of `iq2_xxs` -- 16 weights per scale rather than 32 --
 /// so the scales are finer and stored in their own array rather than packed
@@ -459,7 +459,7 @@ fn iq2XsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f
     }
 }
 
-/// Ports `quantize_iq2_xs` (ggml-quants.c:3664 @c1d0e7a00).
+/// Ports `quantize_iq2_xs` (ggml-quants.c:3664 @5266f24da).
 pub export fn quantize_iq2_xs(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
     impl.assert(quant_weights != null, "missing quantization weights");
@@ -474,7 +474,7 @@ pub export fn quantize_iq2_xs(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n
     return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ2_XS);
 }
 
-/// Ports `quantize_row_iq2_s_impl` (ggml-quants.c:5142 @c1d0e7a00).
+/// Ports `quantize_row_iq2_s_impl` (ggml-quants.c:5142 @5266f24da).
 ///
 /// The 1024-entry codebook, so ten bits of index: eight in `qs` and two in
 /// `qh`. Signs get a whole byte each, stored in the tail of `qs`, so the
@@ -653,7 +653,7 @@ fn iq2SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f
     }
 }
 
-/// Ports `quantize_iq2_s` (ggml-quants.c:5311 @c1d0e7a00).
+/// Ports `quantize_iq2_s` (ggml-quants.c:5311 @5266f24da).
 pub export fn quantize_iq2_s(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
     const nblock: usize = @intCast(@divExact(n_per_row, QK_K));
@@ -667,7 +667,7 @@ pub export fn quantize_iq2_s(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_
     return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ2_S);
 }
 
-/// Ports `quantize_row_iq2_s_ref` (ggml-quants.c:5323 @c1d0e7a00).
+/// Ports `quantize_row_iq2_s_ref` (ggml-quants.c:5323 @5266f24da).
 pub export fn quantize_row_iq2_s_ref(x: [*c]const f32, y: [*c]blocks.IQ2_S, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     _ = quantize_iq2_s(x, @ptrCast(y), 1, k, null);

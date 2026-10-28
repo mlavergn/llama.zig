@@ -15,7 +15,9 @@
 #   metadata is loaded as the other files' is, and its tensors are loaded in
 #   full through llama_model_load_from_file and through the port, once each,
 #   and the first one again under every parameter that changes where a
-#   tensor goes or how it is read.
+#   tensor goes or how it is read. The gemma4 and qwen4exp fixtures, when
+#   scripts/gen-arch-fixtures has written them, are loaded under every lazy
+#   mode.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
@@ -51,6 +53,11 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/loader_diff" -Ofast -lc \
 
 models=(llama.cpp/models/ggml-vocab-*.gguf)
 for m in Qwen3.5-*.gguf; do
+    [ -f "$m" ] && models+=("$m")
+done
+# The architectures that mark a tensor `TENSOR_READ_LAZY`, from
+# scripts/gen-arch-fixtures: their tensors are loaded under every lazy mode.
+for m in zig-out/arch-fixtures/gemma4-dense*.gguf zig-out/arch-fixtures/gemma4-moe*.gguf zig-out/arch-fixtures/qwen4exp-*.gguf; do
     [ -f "$m" ] && models+=("$m")
 done
 

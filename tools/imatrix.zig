@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/imatrix/imatrix.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ported from `llama.cpp/tools/imatrix/imatrix.cpp` at v0.4.0 (`5266f24da`).
 //! Each declaration names the C++ it replaces and the line it began at.
 //!
 //! # Orders that come from libc++
@@ -55,7 +55,7 @@ fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void
     if (!ok) _ = c.ggml_abort("imatrix.cpp", line, "GGML_ASSERT(%s) failed", expr);
 }
 
-/// Ports `print_usage` (imatrix.cpp:28 @c1d0e7a00).
+/// Ports `print_usage` (imatrix.cpp:28 @5266f24da).
 fn printUsage(argv: []const [:0]const u8) void {
     log.out("\nexample usage:\n", .{});
     log.out("\n    %s \\\n" ++
@@ -66,13 +66,13 @@ fn printUsage(argv: []const [:0]const u8) void {
     log.out("\n", .{});
 }
 
-/// Ports `Stats` (imatrix.cpp:38 @c1d0e7a00).
+/// Ports `Stats` (imatrix.cpp:38 @5266f24da).
 const Stats = struct {
     values: std.ArrayList(f32) = .empty,
     counts: std.ArrayList(i64) = .empty,
 };
 
-/// Ports `tensor_statistics` (imatrix.cpp:43 @c1d0e7a00).
+/// Ports `tensor_statistics` (imatrix.cpp:43 @5266f24da).
 const TensorStatistics = struct {
     tensor: []const u8,
     stats: *const Stats,
@@ -136,7 +136,7 @@ const CollectorParams = struct {
     }
 };
 
-/// Ports `IMatrixCollector` (imatrix.cpp:58 @c1d0e7a00). The C++ locks a
+/// Ports `IMatrixCollector` (imatrix.cpp:58 @5266f24da). The C++ locks a
 /// mutex in `collect_imatrix`; the scheduler calls it from the thread
 /// computing the graph, one node at a time, so there is nothing to lock.
 const Collector = struct {
@@ -161,7 +161,7 @@ const Collector = struct {
         }
     }
 
-    /// Ports `collect_imatrix` (imatrix.cpp:234 @c1d0e7a00), a member of `IMatrixCollector`.
+    /// Ports `collect_imatrix` (imatrix.cpp:234 @5266f24da), a member of `IMatrixCollector`.
     fn collect(self: *Collector, t: *c.ggml_tensor, ask: bool) !bool {
         const func = "collect_imatrix";
         const src0: *c.ggml_tensor = t.src[0];
@@ -332,7 +332,7 @@ const Collector = struct {
         return true;
     }
 
-    /// Ports `save_imatrix_legacy` (imatrix.cpp:426 @c1d0e7a00), a member of `IMatrixCollector`.
+    /// Ports `save_imatrix_legacy` (imatrix.cpp:426 @5266f24da), a member of `IMatrixCollector`.
     fn saveLegacy(self: *const Collector, ncall_in: i32) !void {
         const func = "save_imatrix_legacy";
         var fname: std.ArrayList(u8) = .empty;
@@ -445,7 +445,7 @@ const Collector = struct {
         log.tmpl(.debug, 1, "%s: stored collected data after %d chunks in %s\n", .{ func, self.last_chunk, fname.items.ptr });
     }
 
-    /// Ports `save_imatrix` (imatrix.cpp:532 @c1d0e7a00), a member of `IMatrixCollector`.
+    /// Ports `save_imatrix` (imatrix.cpp:532 @5266f24da), a member of `IMatrixCollector`.
     fn save(self: *const Collector, n_chunk: i32) !void {
         const func = "save_imatrix";
         const use_legacy_format = self.params.imat_dat;
@@ -546,7 +546,7 @@ const Collector = struct {
         c.ggml_free(ctx);
     }
 
-    /// Ports `load_imatrix` (imatrix.cpp:642 @c1d0e7a00), a member of `IMatrixCollector`.
+    /// Ports `load_imatrix` (imatrix.cpp:642 @5266f24da), a member of `IMatrixCollector`.
     fn load(self: *Collector, a: std.mem.Allocator, file_name: [:0]const u8) !bool {
         const func = "load_imatrix";
         var loaded = try tc.imatrix_loader.Imatrix.init(a);
@@ -618,7 +618,7 @@ fn lessThan(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.order(u8, a, b) == .lt;
 }
 
-/// Ports `filter_tensor_name` (imatrix.cpp:79 @c1d0e7a00): remove any prefix
+/// Ports `filter_tensor_name` (imatrix.cpp:79 @5266f24da): remove any prefix
 /// and suffix, `CUDA0#blk.0.attn_k.weight#0` => `blk.0.attn_k.weight`.
 fn filterTensorName(name: []const u8) []const u8 {
     const p = std.mem.indexOfScalar(u8, name, '#') orelse return name;
@@ -627,7 +627,7 @@ fn filterTensorName(name: []const u8) []const u8 {
     return rest[0..q];
 }
 
-/// Ports `process_tensor_name` (imatrix.cpp:96 @c1d0e7a00). `layer` is kept
+/// Ports `process_tensor_name` (imatrix.cpp:96 @5266f24da). `layer` is kept
 /// across calls, as the comparator's shared string is.
 fn processTensorName(input: []const u8, layer: *[]const u8, tensor: *[]const u8) void {
     var parts: [64][]const u8 = undefined;
@@ -657,7 +657,7 @@ fn processTensorName(input: []const u8, layer: *[]const u8, tensor: *[]const u8)
     if (layer.len == 0) layer.* = "-";
 }
 
-/// Ports `compute_statistics` (imatrix.cpp:125 @c1d0e7a00).
+/// Ports `compute_statistics` (imatrix.cpp:125 @5266f24da).
 fn computeStatistics(a: std.mem.Allocator, tstats: *std.ArrayList(TensorStatistics), name: []const u8, e: *const Stats) !void {
     const func = "compute_statistics";
     // `%` by an empty `counts` is a division by zero; aarch64's `udiv` gives
@@ -763,7 +763,7 @@ fn findBlk(s: []const u8) ?struct { pos: usize, len: usize } {
     return null;
 }
 
-/// Ports `compute_cossim` (imatrix.cpp:200 @c1d0e7a00).
+/// Ports `compute_cossim` (imatrix.cpp:200 @5266f24da).
 fn computeCossim(a: std.mem.Allocator, tstats: []TensorStatistics) !void {
     for (tstats) |*ts| {
         if (findBlk(ts.tensor)) |m| {
@@ -802,12 +802,12 @@ fn allFinite(v: []const f32) bool {
 
 var g_collector: Collector = undefined;
 
-/// Ports `ik_collect_imatrix` (imatrix.cpp:715 @c1d0e7a00).
+/// Ports `ik_collect_imatrix` (imatrix.cpp:715 @5266f24da).
 fn ikCollectImatrix(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
     return g_collector.collect(t, ask) catch false;
 }
 
-/// Ports `results_log_softmax` and `log_softmax` (imatrix.cpp:719, 745 @c1d0e7a00).
+/// Ports `results_log_softmax` and `log_softmax` (imatrix.cpp:719, 745 @5266f24da).
 const LogSoftmax = struct { log_softmax: f64, logit: f32, prob: f32 };
 
 fn logSoftmax(n_vocab: usize, logits: [*]const f32, tok: usize) LogSoftmax {
@@ -849,7 +849,7 @@ const LogitsWork = struct {
     }
 };
 
-/// Ports `process_logits` (imatrix.cpp:757 @c1d0e7a00).
+/// Ports `process_logits` (imatrix.cpp:757 @5266f24da).
 fn processLogits(n_vocab: usize, logits: [*]const f32, tokens: [*]const c.llama_token, n_token: usize, n_workers: usize, nll: *f64, nll2: *f64, logit_history: [*]f32, prob_history: [*]f32) !void {
     var work: LogitsWork = .{ .n_vocab = n_vocab, .logits = logits, .tokens = tokens, .n_token = n_token, .logit_history = logit_history, .prob_history = prob_history };
     const sums = try gpa.alloc([2]f64, n_workers + 1);
@@ -871,7 +871,7 @@ fn nowNs() i128 {
     return @as(i128, ts.sec) * 1_000_000_000 + ts.nsec;
 }
 
-/// Ports `compute_imatrix` (imatrix.cpp:791 @c1d0e7a00).
+/// Ports `compute_imatrix` (imatrix.cpp:791 @5266f24da).
 fn computeImatrix(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Params, n_ctx: i32) !bool {
     const func = "compute_imatrix";
     const model = c.llama_get_model(ctx);
@@ -1047,7 +1047,7 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
     return true;
 }
 
-/// Mirrors `show_statistics`'s `weighted_stats` (imatrix.cpp:1000 @c1d0e7a00).
+/// Mirrors `show_statistics`'s `weighted_stats` (imatrix.cpp:1000 @5266f24da).
 const WeightedStats = struct {
     weighted_bias: f32 = 0.0,
     weighted_zd: f32 = 0.0,
@@ -1055,7 +1055,7 @@ const WeightedStats = struct {
     total_elements: c_int = 0,
 };
 
-/// `tensor_comparer` (imatrix.cpp:989 @c1d0e7a00).
+/// `tensor_comparer` (imatrix.cpp:989 @5266f24da).
 fn tensorLess(_: void, a: TensorStatistics, b: TensorStatistics) bool {
     var layer: []const u8 = "";
     var name_a: []const u8 = "";
@@ -1066,7 +1066,7 @@ fn tensorLess(_: void, a: TensorStatistics, b: TensorStatistics) bool {
     return o == .lt or (o == .eq and a.total_sqract > b.total_sqract);
 }
 
-/// Ports `show_statistics` (imatrix.cpp:968 @c1d0e7a00).
+/// Ports `show_statistics` (imatrix.cpp:968 @5266f24da).
 fn showStatistics(a: std.mem.Allocator, params: *const Params) !bool {
     var ts: std.ArrayList(TensorStatistics) = .empty;
     if (params.in_files.items.len != 1) {
@@ -1174,7 +1174,7 @@ fn showStatistics(a: std.mem.Allocator, params: *const Params) !bool {
     return true;
 }
 
-/// Ports `common_params_get_system_info` (common/common.cpp:421 @c1d0e7a00).
+/// Ports `common_params_get_system_info` (common/common.cpp:421 @5266f24da).
 fn systemInfo(a: std.mem.Allocator, params: *const Params) ![:0]u8 {
     var os: std.ArrayList(u8) = .empty;
     try os.print(a, "system_info: n_threads = {d}", .{params.cpuparams.n_threads});
@@ -1183,7 +1183,7 @@ fn systemInfo(a: std.mem.Allocator, params: *const Params) ![:0]u8 {
     return a.dupeSentinel(u8, os.items, 0);
 }
 
-/// Ports `main` (imatrix.cpp:1077 @c1d0e7a00).
+/// Ports `main` (imatrix.cpp:1077 @5266f24da).
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "main";
     var params = try Params.init(a);

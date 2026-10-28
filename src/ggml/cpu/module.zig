@@ -7,7 +7,7 @@
 //! directory up.
 //!
 //! Everything it gathers is a port of
-//! `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` at v0.3.0 (`c1d0e7a00`), split
+//! `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` at v0.4.0 (`5266f24da`), split
 //! seven ways:
 //!
 //! - `defs.zig`      — the structs and constants the rest share
@@ -20,6 +20,9 @@
 //! - `forward.zig`   — the op dispatch
 //! - `plan.zig`      — thread counts and work-buffer sizing
 //! - `threading.zig` — the threadpool and the graph loop
+//!
+//! `iqp.zig` and `iqp_x86.zig` are `ggml-cpu/iqp.cpp`, the IQ panel
+//! `mul_mat` that `mulmat.zig` dispatches to.
 //!
 //! `quants/` is a second translation unit, `ggml-cpu/quants.c`, gathered here
 //! because it is part of the same backend.
@@ -51,6 +54,7 @@ comptime {
     _ = @import("binary_ops.zig"); // ggml-cpu/binary-ops.cpp
     _ = @import("unary_ops.zig"); // ggml-cpu/unary-ops.cpp
     _ = @import("vec.zig"); // ggml-cpu/vec.cpp
+    _ = @import("iqp.zig"); // ggml-cpu/iqp.cpp
     // ggml-cpu/ops.cpp, split by op family across src/ggml/cpu/ops/:
     _ = @import("ops/module.zig");
     // The vtable cluster, which moves as one unit -- ggml-cpu/traits.cpp,
@@ -81,6 +85,7 @@ test {
     _ = @import("binary_ops.zig");
     _ = @import("unary_ops.zig");
     _ = @import("vec.zig");
+    _ = @import("iqp.zig");
     _ = @import("ops/module.zig");
     _ = @import("vec_testing.zig");
 }

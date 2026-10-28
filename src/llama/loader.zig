@@ -8,13 +8,13 @@
 //!   `llama_ftype_name`, `llama_get_list_splits`, `weight_buft_supported`,
 //!   `select_weight_buft`, and every member of `llama_model_loader`
 //! - `llama.cpp/src/llama-model-loader.h` -- `llama_fver`,
-//!   `llama_tensor_weight`, `weight_name_comparer`, the `TENSOR_*` flags and
-//!   `buft_list_t`
+//!   `llama_tensor_weight`, `weight_name_comparer`, the `TENSOR_*` flags,
+//!   `lazy_read`, `ctx_key` and its comparator, and `buft_list_t`
 //! - `llama.cpp/src/llama-arch.h` -- `LLM_TN_IMPL`
 //! - `llama.cpp/src/llama-impl.cpp` -- `replace_all`, `gguf_data_to_str`
 //!   and `gguf_kv_to_str`
 //!
-//! All at v0.3.0 (`c1d0e7a00`). The typed getters the constructor and the
+//! All at v0.4.0 (`5266f24da`). The typed getters the constructor and the
 //! model use are `gguf_meta.zig`'s.
 //!
 //! # Scope
@@ -55,7 +55,7 @@ extern "c" fn atoi(s: [*:0]const u8) c_int;
 const MiB: usize = 1024 * 1024;
 const GiB: usize = 1024 * MiB;
 
-/// Mirrors `llama_fver` (llama-model-loader.h:23 @c1d0e7a00).
+/// Mirrors `llama_fver` (llama-model-loader.h:24 @5266f24da).
 pub const FileVersion = enum(u32) {
     v1 = 1,
     v2 = 2,
@@ -63,7 +63,7 @@ pub const FileVersion = enum(u32) {
     _,
 };
 
-/// Ports `llama_file_version_name` (llama-model-loader.cpp:21 @c1d0e7a00).
+/// Ports `llama_file_version_name` (llama-model-loader.cpp:21 @5266f24da).
 pub fn fileVersionName(version: FileVersion) [:0]const u8 {
     return switch (version) {
         .v1 => "GGUF V1 (support until nov 2023)",
@@ -73,7 +73,7 @@ pub fn fileVersionName(version: FileVersion) [:0]const u8 {
     };
 }
 
-/// Ports `llama_ftype_name` (llama-model-loader.cpp:33 @c1d0e7a00): the
+/// Ports `llama_ftype_name` (llama-model-loader.cpp:33 @5266f24da): the
 /// name, with `(guessed) ` in front when `LLAMA_FTYPE_GUESSED` is set.
 pub fn ftypeName(ftype: c_uint) [:0]const u8 {
     const prefixed: [:0]const u8 = switch (ftype & ~@as(c_uint, c.LLAMA_FTYPE_GUESSED)) {
@@ -122,7 +122,7 @@ pub fn ftypeName(ftype: c_uint) [:0]const u8 {
 // -----------------------------------------------------------------------------
 // Metadata as text
 
-/// Ports `replace_all` (llama-impl.cpp:69 @c1d0e7a00).
+/// Ports `replace_all` (llama-impl.cpp:69 @5266f24da).
 ///
 /// Parameters:
 /// - `s`: the string, rewritten in place.
@@ -161,7 +161,7 @@ fn appendC(out: *std.ArrayList(u8), comptime fmt: [:0]const u8, args: anytype) v
     out.appendSlice(allocator, buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]) catch oom();
 }
 
-/// Ports `gguf_data_to_str` (llama-impl.cpp:119 @c1d0e7a00): one element
+/// Ports `gguf_data_to_str` (llama-impl.cpp:119 @5266f24da): one element
 /// as `std`'s `to_string` writes it, so a float has six decimals.
 fn dataToStr(out: *std.ArrayList(u8), ty: c.enum_gguf_type, data: ?*const anyopaque, i: usize) void {
     const p: [*]const u8 = @ptrCast(data.?);
@@ -181,7 +181,7 @@ fn dataToStr(out: *std.ArrayList(u8), ty: c.enum_gguf_type, data: ?*const anyopa
     }
 }
 
-/// Ports `gguf_kv_to_str` (llama-impl.cpp:136 @c1d0e7a00).
+/// Ports `gguf_kv_to_str` (llama-impl.cpp:136 @5266f24da).
 ///
 /// Parameters:
 /// - `ctx`: the metadata.
@@ -226,7 +226,7 @@ pub fn kvToStr(ctx: *const c.gguf_context, i: i64, out: *std.ArrayList(u8)) void
 // -----------------------------------------------------------------------------
 // Weights
 
-/// Ports `llama_tensor_weight` (llama-model-loader.h:33 @c1d0e7a00).
+/// Ports `llama_tensor_weight` (llama-model-loader.h:34 @5266f24da).
 pub const Weight = struct {
     /// Which file the data is in.
     idx: u16,
@@ -236,8 +236,8 @@ pub const Weight = struct {
     /// `sscanf(name, "blk.%d.", &layer)`, -1 where it reads nothing.
     layer: c_int,
 
-    /// Ports the constructor of `llama_tensor_weight` (llama-model-loader.h:39
-    /// @c1d0e7a00): the tensor's offset, checked against the file's size.
+    /// Ports the constructor of `llama_tensor_weight` (llama-model-loader.h:40
+    /// @5266f24da): the tensor's offset, checked against the file's size.
     fn init(file: *const File, idx: u16, gguf_ctx: *const c.gguf_context, tensor: *c.ggml_tensor, exc: *Exception) Thrown!Weight {
         const tname = gguf_meta.cString(c.ggml_get_name(tensor));
         const tensor_idx = c.gguf_find_tensor(gguf_ctx, c.ggml_get_name(tensor));
@@ -254,7 +254,7 @@ pub const Weight = struct {
         return gguf_meta.cString(c.ggml_get_name(self.tensor));
     }
 
-    /// Ports `weight_name_comparer` (llama-model-loader.h:53 @c1d0e7a00).
+    /// Ports `weight_name_comparer` (llama-model-loader.h:54 @5266f24da).
     fn lessThan(_: void, a: Weight, b: Weight) bool {
         if (a.layer != b.layer) return a.layer < b.layer;
         return std.mem.order(u8, a.name(), b.name()) == .lt;
@@ -268,9 +268,125 @@ fn blockOf(name: [*c]const u8) c_int {
 }
 
 // -----------------------------------------------------------------------------
+// Lazy reads
+
+/// Ports `lazy_read` (llama-model-loader.h:89 @5266f24da): the tensors
+/// flagged `TENSOR_READ_LAZY` that are read row by row on demand rather than
+/// loaded whole -- per-layer embeddings, say, kept on disk. It needs mmap.
+pub const LazyRead = struct {
+    /// Set by the caller before the `createTensor` calls.
+    mode: c.enum_llama_lazy_mode = c.LLAMA_LAZY_MODE_OFF,
+
+    /// `ranges`, a `std::map` by file index: each file's lazy byte ranges,
+    /// in the order they were added.
+    ranges: std.ArrayList(FileRanges) = .empty,
+    /// `tensors`: the lazy tensors' names, owned.
+    tensors: std.StringHashMapUnmanaged(void) = .empty,
+
+    const FileRanges = struct { idx: u32, ranges: mmap.Ranges };
+
+    /// Below this a tensor is not read lazily under `LLAMA_LAZY_MODE_AUTO`:
+    /// a lazy read has a cost that only a large tensor repays.
+    const auto_min_size: usize = 4 * 1024 * 1024 * 1024;
+
+    /// Ports `lazy_read`'s `add` (llama-model-loader.cpp:1081 @5266f24da):
+    /// whether this tensor is read lazily.
+    ///
+    /// Parameters:
+    /// - `name`: the tensor's name.
+    /// - `t`: the tensor's metadata.
+    /// - `w`: its weight, to record it as well; null only to ask.
+    ///
+    /// Return: whether the tensor is lazy.
+    pub fn add(self: *LazyRead, name: []const u8, t: *const c.ggml_tensor, w: ?*const Weight) bool {
+        if (self.mode == c.LLAMA_LAZY_MODE_OFF) return false;
+
+        // Do not lazy-read small tensors: it has significant overhead and is
+        // not worth it.
+        const nbytes = c.ggml_nbytes(t);
+        if (self.mode != c.LLAMA_LAZY_MODE_ON and nbytes <= auto_min_size) return false;
+
+        if (!mmap.Mmap.supported) {
+            impl.logWarn("%s: mmap is not available, so tensor %.*s (size = %zu MiB) is loaded into RAM in full\n", .{
+                "add", @as(c_int, @intCast(name.len)), name.ptr, nbytes / 1024 / 1024,
+            });
+            return false;
+        }
+
+        if (w) |weight| {
+            self.rangesFor(weight.idx).append(allocator, .{ weight.offs, weight.offs +% nbytes }) catch oom();
+            if (!self.tensors.contains(name)) {
+                self.tensors.put(allocator, allocator.dupe(u8, name) catch oom(), {}) catch oom();
+            }
+
+            impl.logInfo("%s: tensor %.*s (size = %zu MiB) lazy read enabled\n", .{
+                "add", @as(c_int, @intCast(name.len)), name.ptr, nbytes / 1024 / 1024,
+            });
+        }
+
+        return true;
+    }
+
+    /// `ranges[idx]`: the list for file `idx`, created empty, in key order.
+    fn rangesFor(self: *LazyRead, idx: u32) *mmap.Ranges {
+        var pos: usize = 0;
+        while (pos < self.ranges.items.len) : (pos += 1) {
+            if (self.ranges.items[pos].idx == idx) return &self.ranges.items[pos].ranges;
+            if (self.ranges.items[pos].idx > idx) break;
+        }
+        self.ranges.insert(allocator, pos, .{ .idx = idx, .ranges = .empty }) catch oom();
+        return &self.ranges.items[pos].ranges;
+    }
+
+    /// Ports `lazy_read`'s `any` (llama-model-loader.h:97 @5266f24da).
+    ///
+    /// Return: whether any tensor was recorded lazy.
+    pub fn any(self: *const LazyRead) bool {
+        return self.ranges.items.len != 0;
+    }
+
+    /// Ports `lazy_read`'s `has` (llama-model-loader.h:101 @5266f24da).
+    ///
+    /// Return: whether `t`, by name, was recorded lazy.
+    pub fn has(self: *const LazyRead, t: *const c.ggml_tensor) bool {
+        return self.tensors.contains(gguf_meta.cString(c.ggml_get_name(t)));
+    }
+
+    /// Ports `lazy_read`'s `for_file` (llama-model-loader.h:105 @5266f24da).
+    ///
+    /// Return: file `idx`'s lazy ranges, empty when it has none; borrowed
+    /// until the next `add` or `deinit`.
+    pub fn forFile(self: *const LazyRead, idx: u32) []const [2]usize {
+        for (self.ranges.items) |e| if (e.idx == idx) return e.ranges.items;
+        return &.{};
+    }
+
+    /// Ports `lazy_read`'s `buft` (llama-model-loader.cpp:1073 @5266f24da):
+    /// lazy tensors are gathered on the host, so no offload setting applies
+    /// to them.
+    ///
+    /// Return: the CPU device's buffer type, or `error.Thrown` when there is
+    /// no CPU device.
+    pub fn buft(exc: *Exception) Thrown!c.ggml_backend_buffer_type_t {
+        const cpu_dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+            return exc.throw(.runtime_error, "no CPU backend found", .{});
+        return c.ggml_backend_dev_buffer_type(cpu_dev);
+    }
+
+    /// Return: nothing.
+    pub fn deinit(self: *LazyRead) void {
+        for (self.ranges.items) |*e| e.ranges.deinit(allocator);
+        self.ranges.deinit(allocator);
+        var it = self.tensors.keyIterator();
+        while (it.next()) |k| allocator.free(k.*);
+        self.tensors.deinit(allocator);
+    }
+};
+
+// -----------------------------------------------------------------------------
 // The loader
 
-/// Ports `llama_model_loader` (llama-model-loader.h:31 @c1d0e7a00).
+/// Ports `llama_model_loader` (llama-model-loader.h:32 @5266f24da).
 pub const Loader = struct {
     n_kv: c_int = 0,
     n_tensors: c_int = 0,
@@ -283,6 +399,10 @@ pub const Loader = struct {
     check_tensors: bool = false,
     no_alloc: bool = false,
     load_mtp: bool = false,
+
+    /// `lazy`: which tensors are read on demand. The caller sets
+    /// `lazy.mode` before the `createTensor` calls.
+    lazy: LazyRead = .{},
 
     files: std.ArrayList(File) = .empty,
     ftype: c_uint = 0,
@@ -321,8 +441,9 @@ pub const Loader = struct {
     /// `mmaps_used`: the byte range of each mapping that tensors use.
     mmaps_used: std.ArrayList([2]usize) = .empty,
 
-    /// `ctx_map`: one tensor context per buffer type, kept in the order of
-    /// the buffer types' names, as the C++'s comparator orders them.
+    /// `ctx_map`: one tensor context per buffer type and laziness, kept in
+    /// `ctx_key_comparator`'s order -- every non-lazy context before every
+    /// lazy one, each group by buffer-type name.
     ctx_map: std.ArrayList(CtxEntry) = .empty,
 
     n_tensors_moved: usize = 0,
@@ -331,10 +452,25 @@ pub const Loader = struct {
     first_moved_from_buft: c.ggml_backend_buffer_type_t = null,
     first_moved_to_buft: c.ggml_backend_buffer_type_t = null,
 
+    /// Mirrors `ctx_key` (llama-model-loader.h:151 @5266f24da): lazy
+    /// tensors need a context of their own.
+    pub const CtxKey = struct {
+        buft: c.ggml_backend_buffer_type_t,
+        lazy: bool,
+
+        /// Ports `ctx_key_comparator` (llama-model-loader.h:156 @5266f24da):
+        /// not lazy before lazy, then by buffer-type name, so two buffer
+        /// types with one name are one key.
+        pub fn order(lhs: CtxKey, rhs: CtxKey) std.math.Order {
+            if (lhs.lazy != rhs.lazy) return if (!lhs.lazy) .lt else .gt;
+            return std.mem.order(u8, std.mem.span(c.ggml_backend_buft_name(lhs.buft)), std.mem.span(c.ggml_backend_buft_name(rhs.buft)));
+        }
+    };
+
     /// An entry of `ctx_map`. The model takes `ctx` when it allocates the
     /// buffers, and nulls it here.
     pub const CtxEntry = struct {
-        buft: c.ggml_backend_buffer_type_t,
+        key: CtxKey,
         ctx: ?*c.ggml_context,
     };
 
@@ -345,8 +481,8 @@ pub const Loader = struct {
         file: *c.FILE,
     };
 
-    /// Ports the constructor of `llama_model_loader` (llama-model-loader.cpp:527
-    /// @c1d0e7a00), up to `print_info`.
+    /// Ports the constructor of `llama_model_loader` (llama-model-loader.cpp:532
+    /// @5266f24da), up to `print_info`.
     ///
     /// Parameters:
     /// - `source`: the metadata, a path, or an open file.
@@ -429,7 +565,11 @@ pub const Loader = struct {
         try self.guessFtype(trace, exc);
         self.dumpMetadata();
 
-        // `llama_mmap`'s `SUPPORTED` holds on every target this builds for.
+        if (self.use_mmap and !mmap.Mmap.supported) {
+            impl.logWarn("%s: mmap is not supported on this platform\n", .{"llama_model_loader"});
+            self.use_mmap = false;
+        }
+
         self.check_tensors = check_tensors;
         self.no_alloc = no_alloc;
         self.load_mtp = load_mtp;
@@ -512,7 +652,7 @@ pub const Loader = struct {
     }
 
     /// The file-type guess and its override, from the constructor of
-    /// `llama_model_loader` (llama-model-loader.cpp:527 @c1d0e7a00).
+    /// `llama_model_loader` (llama-model-loader.cpp:532 @5266f24da).
     fn guessFtype(self: *Loader, trace: c_int, exc: *Exception) Thrown!void {
         var n_type: [c.GGML_TYPE_COUNT]u32 = @splat(0);
         var n_type_max: u32 = 0;
@@ -578,7 +718,7 @@ pub const Loader = struct {
     }
 
     /// The metadata dump and the type counts, from the constructor of
-    /// `llama_model_loader` (llama-model-loader.cpp:527 @c1d0e7a00).
+    /// `llama_model_loader` (llama-model-loader.cpp:532 @5266f24da).
     fn dumpMetadata(self: *Loader) void {
         const ctx = self.meta.ctx;
         impl.logInfo("%s: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\n", .{"llama_model_loader"});
@@ -620,6 +760,7 @@ pub const Loader = struct {
         for (self.mappings.items) |*m| m.deinit();
         self.mappings.deinit(allocator);
         self.mmaps_used.deinit(allocator);
+        self.lazy.deinit();
         for (self.ctx_map.items) |e| if (e.ctx) |ctx| c.ggml_free(ctx);
         self.ctx_map.deinit(allocator);
         self.first_tensor_moved_name.deinit(allocator);
@@ -634,26 +775,26 @@ pub const Loader = struct {
         self.arch_name.deinit(allocator);
     }
 
-    /// Ports `llama_model_loader`'s `get_arch_name` (llama-model-loader.cpp:827
-    /// @c1d0e7a00).
+    /// Ports `llama_model_loader`'s `get_arch_name` (llama-model-loader.cpp:832
+    /// @5266f24da).
     pub fn getArchName(self: *const Loader) []const u8 {
         return self.arch_name.items;
     }
 
-    /// Ports `llama_model_loader`'s `get_arch` (llama-model-loader.cpp:831
-    /// @c1d0e7a00).
+    /// Ports `llama_model_loader`'s `get_arch` (llama-model-loader.cpp:836
+    /// @5266f24da).
     pub fn getArch(self: *const Loader) arch.Arch {
         return self.meta.arch;
     }
 
-    /// Ports `llama_model_loader`'s `ftype_name` (llama-model-loader.cpp:1710
-    /// @c1d0e7a00).
+    /// Ports `llama_model_loader`'s `ftype_name` (llama-model-loader.cpp:1792
+    /// @5266f24da).
     pub fn ftypeNameOf(self: *const Loader) [:0]const u8 {
         return ftypeName(self.ftype);
     }
 
-    /// Ports `llama_model_loader`'s `print_info` (llama-model-loader.cpp:1714
-    /// @c1d0e7a00).
+    /// Ports `llama_model_loader`'s `print_info` (llama-model-loader.cpp:1796
+    /// @5266f24da).
     pub fn printInfo(self: *const Loader) void {
         impl.logInfo("%s: file format = %s\n", .{ "print_info", fileVersionName(self.fver).ptr });
         impl.logInfo("%s: file type   = %s\n", .{ "print_info", ftypeName(self.ftype).ptr });
@@ -669,8 +810,8 @@ pub const Loader = struct {
     // -------------------------------------------------------------------------
     // The tensor half
 
-    /// Ports `llama_model_loader`'s `get_weight` (llama-model-loader.cpp:835
-    /// @c1d0e7a00).
+    /// Ports `llama_model_loader`'s `get_weight` (llama-model-loader.cpp:840
+    /// @5266f24da).
     ///
     /// Return: the weight, borrowed from the loader, or null.
     pub fn getWeight(self: *const Loader, name: []const u8) ?*Weight {
@@ -678,21 +819,21 @@ pub const Loader = struct {
         return &self.weights.items[i];
     }
 
-    /// Ports `llama_model_loader`'s `require_weight` (llama-model-loader.cpp:844
-    /// @c1d0e7a00).
+    /// Ports `llama_model_loader`'s `require_weight` (llama-model-loader.cpp:849
+    /// @5266f24da).
     pub fn requireWeight(self: *const Loader, name: []const u8, exc: *Exception) Thrown!*Weight {
         return self.getWeight(name) orelse exc.throw(.runtime_error, "require_weight: tensor '{s}' not found", .{name});
     }
 
-    /// Ports `llama_model_loader`'s `get_tensor_meta` (llama-model-loader.cpp:852
-    /// @c1d0e7a00).
+    /// Ports `llama_model_loader`'s `get_tensor_meta` (llama-model-loader.cpp:857
+    /// @5266f24da).
     pub fn getTensorMeta(self: *const Loader, name: []const u8) ?*c.ggml_tensor {
         const w = self.getWeight(name) orelse return null;
         return w.tensor;
     }
 
-    /// Ports `llama_model_loader`'s `check_tensor_dims` (llama-model-loader.cpp:868
-    /// @c1d0e7a00).
+    /// Ports `llama_model_loader`'s `check_tensor_dims` (llama-model-loader.cpp:873
+    /// @5266f24da).
     ///
     /// Return: the tensor's metadata; null when it is absent and not
     /// required; `error.Thrown` when it is absent and required, or its
@@ -728,9 +869,11 @@ pub const Loader = struct {
         return cur;
     }
 
-    /// Ports `llama_model_loader`'s `create_tensor` (llama-model-loader.cpp:1068
-    /// @c1d0e7a00): the tensor's metadata in the context of the buffer type
-    /// it will live in, with that buffer type chosen here.
+    /// Ports `llama_model_loader`'s `create_tensor` (llama-model-loader.cpp:1109
+    /// @5266f24da): the tensor's metadata in the context of the buffer type
+    /// it will live in, with that buffer type chosen here. A tensor flagged
+    /// `tensor_read_lazy` that `lazy` takes goes in the CPU buffer type, in
+    /// a context of its own.
     ///
     /// Parameters:
     /// - `hparams`: the model's hyperparameters, for the op probes.
@@ -774,7 +917,7 @@ pub const Loader = struct {
             t_meta.type = ty;
             for (0..c.GGML_MAX_DIMS) |dim| {
                 t_meta.ne[dim] = if (dim < ne.len) ne[dim] else 1;
-                impl.assert(t_meta.ne[dim] >= 1, "llama-model-loader.cpp", 1259, "t_meta.ne[dim] >= 1");
+                impl.assert(t_meta.ne[dim] >= 1, "llama-model-loader.cpp", 1309, "t_meta.ne[dim] >= 1");
                 if (dim == 0) {
                     t_meta.nb[dim] = c.ggml_type_size(ty);
                 } else if (dim == 1) {
@@ -782,12 +925,14 @@ pub const Loader = struct {
                 } else {
                     t_meta.nb[dim] = t_meta.nb[dim - 1] *% @as(usize, @bitCast(t_meta.ne[dim - 1]));
                 }
-                impl.assert(t_meta.nb[dim] >= 1, "llama-model-loader.cpp", 1267, "t_meta.nb[dim] >= 1");
+                impl.assert(t_meta.nb[dim] >= 1, "llama-model-loader.cpp", 1317, "t_meta.nb[dim] >= 1");
             }
             _ = c.ggml_set_name(&t_meta, nm);
 
-            const buft = (try self.buftForTensor(hparams, buft_list_cpu, buft_list_input, buft_list_output, buft_list_layer, tn, &t_meta, flags, exc)).?;
-            const ctx = try self.ctxForBuft(hparams, buft, exc);
+            // `is_lazy` is never set on this path.
+            const buft = try self.buftForTensor(hparams, buft_list_cpu, buft_list_input, buft_list_output, buft_list_layer, tn, &t_meta, flags, false, exc);
+            impl.assert(buft != null, "llama-model-loader.cpp", 1322, "buft != nullptr");
+            const ctx = try self.ctxForBuft(hparams, buft, false, exc);
             const ret = c.ggml_dup_tensor(ctx, &t_meta);
             _ = c.ggml_set_name(ret, nm);
             return ret;
@@ -795,6 +940,14 @@ pub const Loader = struct {
 
         impl.logDebug("%s: loading tensor %.*s\n", .{ "create_tensor", @as(c_int, @intCast(name.len)), &name.buf });
         const cur = (try self.checkTensorDims(name.slice(), ne, flags & tensor_not_required == 0, flags & tensor_allow_reshape != 0, exc)) orelse return null;
+
+        var is_lazy = false;
+        if (flags & tensor_read_lazy != 0) {
+            // The decision must not depend on the load mode, or the
+            // memory-fit pass (no_alloc, no mmap) would decide differently.
+            const w: ?*const Weight = if (self.no_alloc) null else try self.requireWeight(name.slice(), exc);
+            is_lazy = self.lazy.add(name.slice(), cur, w);
+        }
 
         var t_meta: c.ggml_tensor = cur.*;
         if (flags & tensor_allow_reshape != 0) {
@@ -810,10 +963,10 @@ pub const Loader = struct {
             }
         }
 
-        impl.assert(c.ggml_nbytes(&t_meta) == c.ggml_nbytes(cur), "llama-model-loader.cpp", 1299, "ggml_nbytes(&t_meta) == ggml_nbytes(cur)");
+        impl.assert(c.ggml_nbytes(&t_meta) == c.ggml_nbytes(cur), "llama-model-loader.cpp", 1354, "ggml_nbytes(&t_meta) == ggml_nbytes(cur)");
 
-        const buft = (try self.buftForTensor(hparams, buft_list_cpu, buft_list_input, buft_list_output, buft_list_layer, tn, &t_meta, flags, exc)) orelse return null;
-        const ctx = try self.ctxForBuft(hparams, buft, exc);
+        const buft = (try self.buftForTensor(hparams, buft_list_cpu, buft_list_input, buft_list_output, buft_list_layer, tn, &t_meta, flags, is_lazy, exc)) orelse return null;
+        const ctx = try self.ctxForBuft(hparams, buft, is_lazy, exc);
 
         // If duplicated, check if the original tensor was allocated in the
         // same buffer type context and avoid creating a new one.
@@ -836,13 +989,13 @@ pub const Loader = struct {
     }
 
     /// `ctx_for_buft`, the first lambda of `create_tensor`
-    /// (llama-model-loader.cpp:1068 @c1d0e7a00): one context per buffer
-    /// type, created on first use.
-    fn ctxForBuft(self: *Loader, hparams: *const Hparams, buft: c.ggml_backend_buffer_type_t, exc: *Exception) Thrown!*c.ggml_context {
-        const name = std.mem.span(c.ggml_backend_buft_name(buft));
+    /// (llama-model-loader.cpp:1109 @5266f24da): one context per buffer
+    /// type and laziness, created on first use.
+    fn ctxForBuft(self: *Loader, hparams: *const Hparams, buft: c.ggml_backend_buffer_type_t, is_lazy: bool, exc: *Exception) Thrown!*c.ggml_context {
+        const key: CtxKey = .{ .buft = buft, .lazy = is_lazy };
         var pos: usize = 0;
         while (pos < self.ctx_map.items.len) : (pos += 1) {
-            const order = std.mem.order(u8, std.mem.span(c.ggml_backend_buft_name(self.ctx_map.items[pos].buft)), name);
+            const order = CtxKey.order(self.ctx_map.items[pos].key, key);
             if (order == .eq) return self.ctx_map.items[pos].ctx.?;
             if (order == .gt) break;
         }
@@ -856,13 +1009,13 @@ pub const Loader = struct {
         const ctx_size = c.ggml_tensor_overhead() *% @as(usize, @intCast(max_n_tensors));
         const ctx = c.ggml_init(.{ .mem_size = ctx_size, .mem_buffer = null, .no_alloc = true }) orelse
             return exc.throw(.runtime_error, "failed to create ggml context", .{});
-        self.ctx_map.insert(allocator, pos, .{ .buft = buft, .ctx = ctx }) catch oom();
+        self.ctx_map.insert(allocator, pos, .{ .key = key, .ctx = ctx }) catch oom();
         return ctx;
     }
 
     /// `buft_for_tensor`, the second lambda of `create_tensor`
-    /// (llama-model-loader.cpp:1068 @c1d0e7a00): which buffer type a
-    /// tensor goes in.
+    /// (llama-model-loader.cpp:1109 @5266f24da): which buffer type a
+    /// tensor goes in; a lazy one, past the checks, goes in the CPU's.
     fn buftForTensor(
         self: *Loader,
         hparams: *const Hparams,
@@ -873,6 +1026,7 @@ pub const Loader = struct {
         tn: Tn,
         t_meta_: ?*c.ggml_tensor,
         flags: u32,
+        is_lazy: bool,
         exc: *Exception,
     ) Thrown!c.ggml_backend_buffer_type_t {
         const name = tn.str();
@@ -914,17 +1068,19 @@ pub const Loader = struct {
 
         // Sanity checks.
         if (info.layer == .input or info.layer == .output) {
-            if (tn.bid != -1) c.ggml_abort("llama-model-loader.cpp", 1150, "input/output layer tensor %.*s used with a layer number", @as(c_int, @intCast(name.len)), &name.buf);
+            if (tn.bid != -1) c.ggml_abort("llama-model-loader.cpp", 1196, "input/output layer tensor %.*s used with a layer number", @as(c_int, @intCast(name.len)), &name.buf);
         } else {
-            if (tn.bid == -1) c.ggml_abort("llama-model-loader.cpp", 1154, "repeating layer tensor %.*s used without a layer number", @as(c_int, @intCast(name.len)), &name.buf);
+            if (tn.bid == -1) c.ggml_abort("llama-model-loader.cpp", 1200, "repeating layer tensor %.*s used without a layer number", @as(c_int, @intCast(name.len)), &name.buf);
         }
+
+        if (is_lazy) return try LazyRead.buft(exc);
 
         // Select the buffer type for this tensor.
         const buft_list: *const BuftList = switch (info.layer) {
             .input => buft_list_input,
             .output => buft_list_output,
             .repeating => blk: {
-                impl.assert(buft_list_layer != null, "llama-model-loader.cpp", 1168, "buft_list_layer != nullptr");
+                impl.assert(buft_list_layer != null, "llama-model-loader.cpp", 1218, "buft_list_layer != nullptr");
                 break :blk buft_list_layer.?;
             },
         };
@@ -988,7 +1144,7 @@ pub const Loader = struct {
     }
 
     /// Ports `llama_model_loader`'s `done_getting_tensors`
-    /// (llama-model-loader.cpp:1330 @c1d0e7a00).
+    /// (llama-model-loader.cpp:1385 @5266f24da).
     ///
     /// Return: nothing, or `error.Thrown` when the count is wrong.
     pub fn doneGettingTensors(self: *const Loader, partial: bool, exc: *Exception) Thrown!void {
@@ -1016,8 +1172,10 @@ pub const Loader = struct {
         }
     }
 
-    /// Ports `llama_model_loader`'s `init_mappings` (llama-model-loader.cpp:1348
-    /// @c1d0e7a00).
+    /// Ports `llama_model_loader`'s `init_mappings` (llama-model-loader.cpp:1403
+    /// @5266f24da). Lazy tensors need the mappings too, so the files are
+    /// mapped whenever any tensor is lazy, mmap or not -- but prefetched only
+    /// with mmap, and never over the lazy ranges.
     ///
     /// Parameters:
     /// - `prefetch`: advise the kernel the whole file will be needed.
@@ -1026,10 +1184,12 @@ pub const Loader = struct {
     ///
     /// Return: nothing, or `error.Thrown` when a file cannot be mapped.
     pub fn initMappings(self: *Loader, prefetch: bool, mlock_mmaps: ?*std.ArrayList(*mmap.Mlock), exc: *Exception) Thrown!void {
-        if (self.use_mmap) {
+        // Lazy reads need mmap too; this maps the files for them whatever
+        // the load mode.
+        if (self.use_mmap or self.lazy.any()) {
             self.mappings.ensureTotalCapacity(allocator, self.files.items.len) catch oom();
             self.mmaps_used.ensureTotalCapacity(allocator, self.files.items.len) catch oom();
-            for (self.files.items) |*file| {
+            for (self.files.items, 0..) |*file, idx| {
                 var is_numa = false;
                 if (c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU)) |dev| {
                     const reg = c.ggml_backend_dev_backend_reg(dev);
@@ -1037,7 +1197,9 @@ pub const Loader = struct {
                     if (is_numa_fn) |f| is_numa = f();
                 }
 
-                const mapping = try mmap.Mmap.init(file, if (prefetch) std.math.maxInt(usize) else 0, is_numa, exc);
+                const prefetch_size: usize = if (prefetch and self.use_mmap) std.math.maxInt(usize) else 0;
+
+                const mapping = try mmap.Mmap.init(file, prefetch_size, is_numa, self.lazy.forFile(@intCast(idx)), exc);
                 self.mmaps_used.append(allocator, .{ mapping.size, 0 }) catch oom();
                 if (mlock_mmaps) |locks| {
                     const lock = allocator.create(mmap.Mlock) catch oom();
@@ -1053,10 +1215,10 @@ pub const Loader = struct {
         for (self.weights.items) |*w| self.size_data +%= c.ggml_nbytes(w.tensor);
     }
 
-    /// Ports `llama_model_loader`'s `get_mapping_range` (llama-model-loader.cpp:1381
-    /// @c1d0e7a00): the byte range of mapping `idx` that `ctx`'s tensors use.
+    /// Ports `llama_model_loader`'s `get_mapping_range` (llama-model-loader.cpp:1442
+    /// @5266f24da): the byte range of mapping `idx` that `ctx`'s tensors use.
     pub fn getMappingRange(self: *const Loader, first: *usize, last: *usize, addr: **anyopaque, idx: usize, ctx: *c.ggml_context) void {
-        impl.assert(self.mappings.items.len != 0, "llama-model-loader.cpp", 1382, "!mappings.empty()");
+        impl.assert(self.mappings.items.len != 0, "llama-model-loader.cpp", 1443, "!mappings.empty()");
         const mapping = &self.mappings.items[idx];
         first.* = mapping.size;
         last.* = 0;
@@ -1070,40 +1232,54 @@ pub const Loader = struct {
         }
     }
 
-    /// Ports `llama_model_loader`'s `unmap_weight` (llama-model-loader.cpp:1398
-    /// @c1d0e7a00).
+    /// Ports `llama_model_loader`'s `unmap_weight` (llama-model-loader.cpp:1459
+    /// @5266f24da).
     pub fn unmapWeight(self: *Loader, w: *const Weight) void {
         if (!self.use_mmap) return;
         self.mappings.items[w.idx].unmapFragment(w.offs, w.offs +% c.ggml_nbytes(w.tensor));
     }
 
-    /// Ports `llama_model_loader`'s `load_data_for` (llama-model-loader.cpp:1403
-    /// @c1d0e7a00), which does not go through a backend.
-    pub fn loadDataFor(self: *const Loader, cur: *c.ggml_tensor, exc: *Exception) Thrown!void {
-        const w = try self.requireWeight(gguf_meta.cString(c.ggml_get_name(cur)), exc);
+    /// Ports `llama_model_loader`'s `load_data_range` (llama-model-loader.cpp:1464
+    /// @5266f24da): a byte range of a weight's data, which does not go
+    /// through a backend.
+    ///
+    /// Parameters:
+    /// - `w`: the weight.
+    /// - `offs`, `size`: the range, within the weight's data.
+    /// - `buf`: where to read it without mmap, at least `size` bytes;
+    ///   unused with mmap.
+    /// - `exc`: receives what is thrown.
+    ///
+    /// Return: with mmap, a pointer into the mapping, valid while it is
+    /// mapped; otherwise `buf`. `error.Thrown` when reading fails or the
+    /// data is invalid.
+    pub fn loadDataRange(self: *const Loader, w: *const Weight, offs: usize, size: usize, buf: ?*anyopaque, exc: *Exception) Thrown!?*const anyopaque {
+        impl.assert(offs +% size <= c.ggml_nbytes(w.tensor), "llama-model-loader.cpp", 1465, "offs + size <= ggml_nbytes(w.tensor)");
+
+        var data: ?*const anyopaque = buf;
+
         if (self.use_mmap) {
-            const mapping = &self.mappings.items[w.idx];
-            const src: [*]u8 = @ptrFromInt(@intFromPtr(mapping.addr) + w.offs);
-            if (cur.data == null) {
-                cur.data = src;
-            } else {
-                @memcpy(@as([*]u8, @ptrCast(cur.data.?))[0..c.ggml_nbytes(cur)], src[0..c.ggml_nbytes(cur)]);
-            }
+            data = @ptrFromInt(@intFromPtr(self.mappings.items[w.idx].addr) + w.offs + offs);
         } else {
-            impl.assert(cur.data != null, "llama-model-loader.cpp", 1414, "cur->data != nullptr");
-            impl.assert(w.idx < self.files.items.len, "llama-model-loader.cpp", 1415, "w.idx < files.size()");
+            impl.assert(buf != null, "llama-model-loader.cpp", 1472, "buf != nullptr");
+            impl.assert(w.idx < self.files.items.len, "llama-model-loader.cpp", 1473, "w.idx < files.size()");
             const file = &self.files.items[w.idx];
-            try file.seek(w.offs, c.SEEK_SET, exc);
-            try file.readRaw(cur.data.?, c.ggml_nbytes(cur), exc);
+            try file.seek(w.offs + offs, c.SEEK_SET, exc);
+            try file.readRaw(buf.?, size, exc);
         }
-        if (self.check_tensors and !c.ggml_validate_row_data(cur.type, cur.data, c.ggml_nbytes(cur))) {
-            return exc.throw(.runtime_error, "tensor '{s}' has invalid data", .{gguf_meta.cString(c.ggml_get_name(cur))});
+
+        if (self.check_tensors and !c.ggml_validate_row_data(w.tensor.type, data, size)) {
+            return exc.throw(.runtime_error, "tensor '{s}' has invalid data", .{gguf_meta.cString(c.ggml_get_name(w.tensor))});
         }
+
+        return data;
     }
 
-    /// Ports `llama_model_loader`'s `load_all_data` (llama-model-loader.cpp:1426
-    /// @c1d0e7a00): every tensor of `ctx` gets its data, from the mapping or
-    /// the file.
+    /// Ports `llama_model_loader`'s `load_all_data` (llama-model-loader.cpp:1486
+    /// @5266f24da): every tensor of `ctx` gets its data, from the mapping --
+    /// with mmap, or for a lazy tensor -- or from the file. Without mmap the
+    /// staged tensors go first, biggest first, so the largest staging buffer
+    /// is allocated while the fewest weights are resident.
     ///
     /// The C++ validates tensors on `std`'s `async` threads and reports them in
     /// launch order after loading; here they are validated in that order
@@ -1133,10 +1309,8 @@ pub const Loader = struct {
             while (t) |tensor| : (t = c.ggml_get_next_tensor(ctx, tensor)) self.set_tensor_data.?(tensor, self.set_tensor_data_ud);
             return true;
         }
-        impl.assert(self.size_data != 0, "llama-model-loader.cpp", 1438, "size_data != 0 && \"call init_mappings() first\"");
+        impl.assert(self.size_data != 0, "llama-model-loader.cpp", 1498, "size_data != 0 && \"call init_mappings() first\"");
 
-        var read_buf: std.ArrayList(u8) = .empty;
-        defer read_buf.deinit(allocator);
         var validation: std.ArrayList(Validation) = .empty;
         defer validation.deinit(allocator);
 
@@ -1166,8 +1340,16 @@ pub const Loader = struct {
             });
         }
 
+        var tensors: std.ArrayList(*c.ggml_tensor) = .empty;
+        defer tensors.deinit(allocator);
         var t: ?*c.ggml_tensor = c.ggml_get_first_tensor(ctx);
-        while (t) |cur| : (t = c.ggml_get_next_tensor(ctx, cur)) {
+        while (t) |cur| : (t = c.ggml_get_next_tensor(ctx, cur)) tensors.append(allocator, cur) catch oom();
+
+        // Without mmap, tensors in non-host buffers are staged through a
+        // temporary buffer sized like the tensor: `std::stable_sort`.
+        if (!self.use_mmap) std.sort.block(*c.ggml_tensor, tensors.items, {}, stagedBiggestFirst);
+
+        for (tensors.items) |cur| {
             // This can happen with split experts models.
             const weight = self.getWeight(gguf_meta.cString(c.ggml_get_name(cur))) orelse continue;
 
@@ -1180,17 +1362,21 @@ pub const Loader = struct {
 
             const n_size = c.ggml_nbytes(cur);
 
-            if (self.use_mmap) {
+            const from_mapping = self.use_mmap or self.lazy.has(cur);
+
+            if (from_mapping) {
                 const mapping = &self.mappings.items[weight.idx];
                 const buf_mmap = bufs.at(weight.idx);
                 const data: [*]u8 = @ptrFromInt(@intFromPtr(mapping.addr) + weight.offs);
 
                 if (self.check_tensors) validation.append(allocator, .{ .tensor = cur, .data = data, .size = n_size }) catch oom();
 
-                impl.assert(buf_mmap != null or cur.data != null, "llama-model-loader.cpp", 1570, "buf_mmap || cur->data");
+                impl.assert(buf_mmap != null or cur.data != null, "llama-model-loader.cpp", 1649, "buf_mmap || cur->data");
                 if (buf_mmap != null and cur.data == null) {
                     _ = c.ggml_backend_tensor_alloc(buf_mmap, cur, data);
-                    if (lmlocks) |locks| locks.items[weight.idx].growTo(weight.offs + n_size);
+                    // Locking a lazy tensor would fault all of it in, which
+                    // is what lazy avoids.
+                    if (lmlocks) |locks| if (!self.lazy.has(cur)) locks.items[weight.idx].growTo(weight.offs + n_size);
 
                     const used = &self.mmaps_used.items[weight.idx];
                     used[0] = @min(used[0], weight.offs);
@@ -1245,11 +1431,14 @@ pub const Loader = struct {
                         buffer_idx %= n_buffers;
                     }
                 } else {
-                    read_buf.resize(allocator, n_size) catch oom();
+                    // Scoped to one tensor, so only one staging buffer is
+                    // alive at a time.
+                    const read_buf = allocator.alloc(u8, n_size) catch oom();
+                    defer allocator.free(read_buf);
                     try file.seek(weight.offs, c.SEEK_SET, exc);
-                    try file.readRaw(read_buf.items.ptr, n_size, exc);
-                    c.ggml_backend_tensor_set(cur, read_buf.items.ptr, 0, n_size);
-                    if (self.check_tensors and !c.ggml_validate_row_data(cur.type, read_buf.items.ptr, n_size)) {
+                    try file.readRaw(read_buf.ptr, n_size, exc);
+                    c.ggml_backend_tensor_set(cur, read_buf.ptr, 0, n_size);
+                    if (self.check_tensors and !c.ggml_validate_row_data(cur.type, read_buf.ptr, n_size)) {
                         return exc.throw(.runtime_error, "tensor '{s}' has invalid data", .{gguf_meta.cString(c.ggml_get_name(cur))});
                     }
                 }
@@ -1292,8 +1481,18 @@ pub const Loader = struct {
 
     const Validation = struct { tensor: *c.ggml_tensor, data: *const anyopaque, size: usize };
 
+    /// The `std::stable_sort` comparator of `load_all_data`
+    /// (llama-model-loader.cpp:1486 @5266f24da): staged tensors -- in a
+    /// non-host buffer -- before the rest, and among them the bigger first.
+    fn stagedBiggestFirst(_: void, a: *c.ggml_tensor, b: *c.ggml_tensor) bool {
+        const staged_a = a.buffer != null and !c.ggml_backend_buffer_is_host(a.buffer);
+        const staged_b = b.buffer != null and !c.ggml_backend_buffer_is_host(b.buffer);
+        if (staged_a != staged_b) return staged_a;
+        return staged_a and c.ggml_nbytes(a) > c.ggml_nbytes(b);
+    }
+
     /// The `upload_backend` lambda of `load_all_data`
-    /// (llama-model-loader.cpp:1426 @c1d0e7a00): a backend for async
+    /// (llama-model-loader.cpp:1486 @5266f24da): a backend for async
     /// uploads from pinned memory, when nothing is mapped and the device
     /// supports it; else null.
     fn uploadBackend(
@@ -1365,18 +1564,21 @@ pub const Loader = struct {
 // -----------------------------------------------------------------------------
 // Creating tensors
 
-/// `llama_model_loader`'s `TENSOR_NOT_REQUIRED` (llama-model-loader.h:66 @c1d0e7a00).
+/// `llama_model_loader`'s `TENSOR_NOT_REQUIRED` (llama-model-loader.h:67 @5266f24da).
 pub const tensor_not_required: u32 = 1 << 0;
-/// `llama_model_loader`'s `TENSOR_DUPLICATED` (llama-model-loader.h:67 @c1d0e7a00).
+/// `llama_model_loader`'s `TENSOR_DUPLICATED` (llama-model-loader.h:68 @5266f24da).
 pub const tensor_duplicated: u32 = 1 << 1;
-/// `llama_model_loader`'s `TENSOR_SKIP` (llama-model-loader.h:68 @c1d0e7a00).
+/// `llama_model_loader`'s `TENSOR_SKIP` (llama-model-loader.h:69 @5266f24da).
 pub const tensor_skip: u32 = 1 << 2;
-/// `llama_model_loader`'s `TENSOR_SKIP_IF_VIRTUAL` (llama-model-loader.h:69 @c1d0e7a00).
+/// `llama_model_loader`'s `TENSOR_SKIP_IF_VIRTUAL` (llama-model-loader.h:70 @5266f24da).
 pub const tensor_skip_if_virtual: u32 = 1 << 3;
-/// `llama_model_loader`'s `TENSOR_ALLOW_RESHAPE` (llama-model-loader.h:70 @c1d0e7a00).
+/// `llama_model_loader`'s `TENSOR_ALLOW_RESHAPE` (llama-model-loader.h:71 @5266f24da).
 pub const tensor_allow_reshape: u32 = 1 << 4;
+/// `llama_model_loader`'s `TENSOR_READ_LAZY` (llama-model-loader.h:72 @5266f24da):
+/// read rows on demand instead of loading the whole tensor; needs mmap.
+pub const tensor_read_lazy: u32 = 1 << 5;
 
-/// Mirrors `LLM_TN_IMPL` (llama-arch.h:689 @c1d0e7a00): a tensor's name
+/// Mirrors `LLM_TN_IMPL` (llama-arch.h:731 @5266f24da): a tensor's name
 /// before it is formatted.
 pub const Tn = struct {
     tensor: arch.Tensor,
@@ -1390,7 +1592,7 @@ pub const Tn = struct {
     }
 };
 
-/// One entry of `buft_list_t` (llama-model-loader.h:21 @c1d0e7a00): a device and a
+/// One entry of `buft_list_t` (llama-model-loader.h:22 @5266f24da): a device and a
 /// buffer type on it.
 pub const BuftEntry = struct {
     dev: c.ggml_backend_dev_t,
@@ -1432,7 +1634,7 @@ fn zeroTerminate(buf: []u8, s: []const u8) [*:0]const u8 {
     return @ptrCast(buf.ptr);
 }
 
-/// Ports `weight_buft_supported` (llama-model-loader.cpp:915 @c1d0e7a00):
+/// Ports `weight_buft_supported` (llama-model-loader.cpp:920 @5266f24da):
 /// whether `dev` can run `op` on the weight `w` held in `buft`, asked with
 /// a representative op node.
 ///
@@ -1455,8 +1657,8 @@ pub fn weightBuftSupported(hparams: *const Hparams, w: *c.ggml_tensor, op: c.enu
         },
         c.GGML_OP_MUL_MAT_ID => blk: {
             // Used for either MoE expert routing or embedded adapter routing.
-            const n_ids_used: c_int = if (hparams.router_layer >= 0) 1 else @bitCast(hparams.n_expert_used);
-            impl.assert(n_ids_used > 0, "llama-model-loader.cpp", 950, "n_ids_used > 0");
+            const n_ids_used: c_int = if (hparams.router_layer >= 0) 1 else @bitCast(hparams.nExpertUsedMax());
+            impl.assert(n_ids_used > 0, "llama-model-loader.cpp", 955, "n_ids_used > 0");
             const b = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, w.ne[0], n_ids_used, 512);
             const ids = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_I32, n_ids_used, 512);
             break :blk c.ggml_mul_mat_id(ctx, w, b, ids);
@@ -1466,8 +1668,8 @@ pub fn weightBuftSupported(hparams: *const Hparams, w: *c.ggml_tensor, op: c.enu
             break :blk c.ggml_add(ctx, a, w);
         },
         c.GGML_OP_ADD_ID => blk: {
-            const n_expert_used: c_int = @bitCast(hparams.n_expert_used);
-            impl.assert(n_expert_used > 0, "llama-model-loader.cpp", 963, "n_expert_used > 0");
+            const n_expert_used: c_int = @bitCast(hparams.nExpertUsedMax());
+            impl.assert(n_expert_used > 0, "llama-model-loader.cpp", 968, "n_expert_used > 0");
             const a = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, w.ne[0], n_expert_used, 512);
             const cc = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_I32, n_expert_used, 512);
             break :blk c.ggml_add_id(ctx, a, w, cc);
@@ -1527,12 +1729,12 @@ pub fn weightBuftSupported(hparams: *const Hparams, w: *c.ggml_tensor, op: c.enu
             break :blk c.ggml_im2col(ctx, w, b, 1, 0, 0, 0, 1, 0, false, c.GGML_TYPE_F16);
         },
         c.GGML_OP_SCALE => c.ggml_scale(ctx, w, 1.0),
-        else => c.ggml_abort("llama-model-loader.cpp", 1041, "%s: missing test for op %s for tensor %s", "weight_buft_supported", c.ggml_op_name(op), &w.name),
+        else => c.ggml_abort("llama-model-loader.cpp", 1046, "%s: missing test for op %s for tensor %s", "weight_buft_supported", c.ggml_op_name(op), &w.name),
     };
 
     // A temporary dummy buffer for the weight, so that supports_op can
     // check the buffer type.
-    impl.assert(w.buffer == null, "llama-model-loader.cpp", 1045, "w->buffer == nullptr");
+    impl.assert(w.buffer == null, "llama-model-loader.cpp", 1050, "w->buffer == nullptr");
     w.buffer = c.ggml_backend_buft_alloc_buffer(buft, 0);
     const op_supported = c.ggml_backend_dev_supports_op(dev, op_tensor);
     c.ggml_backend_buffer_free(w.buffer);
@@ -1540,19 +1742,19 @@ pub fn weightBuftSupported(hparams: *const Hparams, w: *c.ggml_tensor, op: c.enu
     return op_supported;
 }
 
-/// Ports `select_weight_buft` (llama-model-loader.cpp:1055 @c1d0e7a00): the
+/// Ports `select_weight_buft` (llama-model-loader.cpp:1060 @5266f24da): the
 /// first buffer type in the list that can use the tensor.
 ///
 /// Return: the buffer type, null when none can, or `error.Thrown`.
 pub fn selectWeightBuft(hparams: *const Hparams, tensor: *c.ggml_tensor, op: c.enum_ggml_op, buft_list: *const BuftList, exc: *Exception) Thrown!c.ggml_backend_buffer_type_t {
-    impl.assert(buft_list.items.len != 0, "llama-model-loader.cpp", 1056, "!buft_list->empty()");
+    impl.assert(buft_list.items.len != 0, "llama-model-loader.cpp", 1061, "!buft_list->empty()");
     for (buft_list.items) |cur| {
         if (try weightBuftSupported(hparams, tensor, op, cur.buft, cur.dev, exc)) return cur.buft;
     }
     return null;
 }
 
-/// Ports `llama_format_tensor_shape` for a shape (llama-impl.cpp:101 @c1d0e7a00).
+/// Ports `llama_format_tensor_shape` for a shape (llama-impl.cpp:101 @5266f24da).
 fn formatShape(ne: []const i64, buf: *[256]u8) []const u8 {
     var len: usize = @intCast(c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, ne[0])));
     for (ne[1..]) |n| {
@@ -1561,7 +1763,7 @@ fn formatShape(ne: []const i64, buf: *[256]u8) []const u8 {
     return buf[0..len];
 }
 
-/// Ports `llama_get_list_splits` (llama-model-loader.cpp:82 @c1d0e7a00),
+/// Ports `llama_get_list_splits` (llama-model-loader.cpp:82 @5266f24da),
 /// through the public `llama_split_prefix` and `llama_split_path`.
 fn listSplits(path: [:0]const u8, idx: u16, n_split: u16, out: *std.ArrayList([:0]const u8), exc: *Exception) Thrown!void {
     var buf: [std.c.PATH_MAX]u8 = std.mem.zeroes([std.c.PATH_MAX]u8);
@@ -1578,7 +1780,7 @@ fn listSplits(path: [:0]const u8, idx: u16, n_split: u16, out: *std.ArrayList([:
     }
 }
 
-/// Ports `llama_format_tensor_shape` for a tensor (llama-impl.cpp:110 @c1d0e7a00).
+/// Ports `llama_format_tensor_shape` for a tensor (llama-impl.cpp:110 @5266f24da).
 fn formatTensorShape(t: *const c.ggml_tensor, buf: *[256]u8) [*:0]const u8 {
     var len: usize = @intCast(c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, t.ne[0])));
     var i: usize = 1;
@@ -1621,4 +1823,29 @@ test "the block index is sscanf's" {
     try std.testing.expectEqual(@as(c_int, 12), blockOf("blk.12.attn_q.weight"));
     try std.testing.expectEqual(@as(c_int, -1), blockOf("output.weight"));
     try std.testing.expectEqual(@as(c_int, -3), blockOf("blk.-3.x"));
+}
+
+test "lazy_read decides by mode and size, and records only with a weight" {
+    const ctx = c.ggml_init(.{ .mem_size = c.ggml_tensor_overhead() * 4, .mem_buffer = null, .no_alloc = true }).?;
+    defer c.ggml_free(ctx);
+    const t = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 64, 16);
+    _ = c.ggml_set_name(t, "per_layer_token_embd.weight");
+    const w: Weight = .{ .idx = 1, .offs = 4096, .tensor = t, .layer = -1 };
+
+    var lazy: LazyRead = .{};
+    defer lazy.deinit();
+    try std.testing.expect(!lazy.add("per_layer_token_embd.weight", t, &w));
+    lazy.mode = c.LLAMA_LAZY_MODE_AUTO;
+    // 4 KiB is far below the 4 GiB AUTO wants.
+    try std.testing.expect(!lazy.add("per_layer_token_embd.weight", t, &w));
+    lazy.mode = c.LLAMA_LAZY_MODE_ON;
+    // Asked without a weight: lazy, but nothing recorded.
+    try std.testing.expect(lazy.add("per_layer_token_embd.weight", t, null));
+    try std.testing.expect(!lazy.any());
+    try std.testing.expect(!lazy.has(t));
+    try std.testing.expect(lazy.add("per_layer_token_embd.weight", t, &w));
+    try std.testing.expect(lazy.any());
+    try std.testing.expect(lazy.has(t));
+    try std.testing.expectEqualSlices([2]usize, &.{.{ 4096, 4096 + 64 * 16 * 4 }}, lazy.forFile(1));
+    try std.testing.expectEqual(@as(usize, 0), lazy.forFile(0).len);
 }

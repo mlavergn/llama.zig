@@ -1,6 +1,6 @@
 #!/bin/bash
 # libmtmd's C contract: the port's exports must be exactly the reference's
-# `mtmd_*` exports -- mtmd.h and mtmd-helper.h, 82 functions.
+# `mtmd_*` exports -- mtmd.h and mtmd-helper.h, 84 functions at v0.4.0.
 #
 # The port is compiled at its library root, src/mtmd/module.zig (which
 # imports exports.zig), with its `llama` import pointed at

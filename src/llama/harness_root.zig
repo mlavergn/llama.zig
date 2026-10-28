@@ -34,6 +34,7 @@ pub const kv_cells = @import("kv_cells.zig");
 pub const kv_cache = @import("kv_cache.zig");
 pub const memory_recurrent = @import("memory_recurrent.zig");
 pub const memory_hybrid = @import("memory_hybrid.zig");
+pub const memory_hybrid_idx = @import("memory_hybrid_idx.zig");
 pub const graph = @import("graph.zig");
 pub const context = @import("context.zig");
 pub const context_state = @import("context_state.zig");

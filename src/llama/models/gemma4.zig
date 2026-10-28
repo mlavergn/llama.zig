@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma4.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/gemma4.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_gemma4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and the graph's helpers.
 
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma4`'s `load_arch_hparams` (models/gemma4.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_gemma4`'s `load_arch_hparams` (models/gemma4.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -40,13 +40,18 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.f_attention_scale = 1.0; // Gemma4 uses self.scaling = 1.0 (no pre-attn scaling)
 
     if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
-    if (try meta.getKey(u32, .expert_feed_forward_length, false, exc)) |v| hp.n_ff_exp = v;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, false, exc);
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     hp.n_embd_per_layer = (try meta.getKey(u32, .embedding_length_per_layer, true, exc)).?;
     hp.n_embd_head_k_swa = (try meta.getKey(u32, .attention_key_length_swa, true, exc)).?;
     hp.n_embd_head_v_swa = (try meta.getKey(u32, .attention_value_length_swa, true, exc)).?;
     if (try meta.getKey(f32, .final_logit_softcapping, false, exc)) |v| hp.f_final_logit_softcapping = v;
+
+    // With causal attention off, only the SWA layers attend bidirectionally
+    // and the dense layers stay causal (HF's `use_bidirectional_attention ==
+    // "vision"`); E2B and E4B are always causal, bypassing this.
+    hp.non_causal_type = 1; // LLAMA_NON_CAUSAL_TYPE_SWA_ONLY
 
     self.type = switch (hp.nLayer()) {
         30 => .@"26b_a4b",
@@ -57,14 +62,14 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_gemma4`'s `load_arch_tensors` (models/gemma4.cpp:31 @c1d0e7a00).
+/// Ports `llama_model_gemma4`'s `load_arch_tensors` (models/gemma4.cpp:36 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
 
     const n_embd_per_layer: i64 = hp.n_embd_per_layer;
-    const n_ff_exp: i64 = hp.n_ff_exp;
+    const n_ff_exp: i64 = hp.nFfExp(0);
 
     if (l.n_embd_head_k != l.n_embd_head_v) {
         return exc.throw(.runtime_error, "Gemma 4 requires n_embd_head_k == n_embd_head_v", .{});
@@ -82,7 +87,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
     if (n_embd_per_layer > 0) {
-        self.per_layer_tok_embd = try self.createTensor(.{ .tensor = .per_layer_token_embd, .suffix = "weight" }, &.{ n_embd_per_layer * l.n_layer, l.n_vocab }, 0, exc);
+        self.per_layer_tok_embd = try self.createTensor(.{ .tensor = .per_layer_token_embd, .suffix = "weight" }, &.{ n_embd_per_layer * l.n_layer, l.n_vocab }, loader.tensor_read_lazy, exc);
         self.per_layer_model_proj = try self.createTensor(.{ .tensor = .per_layer_model_proj, .suffix = "weight", .bid = 0 }, &.{ l.n_embd, n_embd_per_layer * l.n_layer }, 0, exc);
         self.per_layer_proj_norm = try self.createTensor(.{ .tensor = .per_layer_proj_norm, .suffix = "weight", .bid = 0 }, &.{n_embd_per_layer}, 0, exc);
     }
@@ -168,27 +173,27 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma4`'s `build_arch_graph` (models/gemma4.cpp:134 @c1d0e7a00).
+/// Ports `llama_model_gemma4`'s `build_arch_graph` (models/gemma4.cpp:139 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const g: Graph = .{ .model = model, .b = b, .n_embd_per_layer = b.hparams.n_embd_per_layer };
     g.build();
 }
 
-/// Ports `ggml_view_2d_slice` (models/gemma4.cpp:139 @c1d0e7a00): the 2D
+/// Ports `ggml_view_2d_slice` (models/gemma4.cpp:144 @5266f24da): the 2D
 /// slice of a 3D tensor at `idx` along its third dimension.
 fn view2dSlice(ctx: *c.ggml_context, x: *Tensor, idx: c_int) *Tensor {
-    impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma4.cpp", 140, "idx < (int) x->ne[2]");
+    impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma4.cpp", 145, "idx < (int) x->ne[2]");
     return c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], c.ggml_row_size(x.type, x.ne[0]), @intCast(idx * x.ne[0] * x.ne[1] * @as(i64, @intCast(c.ggml_element_size(x)))));
 }
 
-/// Ports `llama_model_gemma4`'s `graph` (src/models/models.h:859 @c1d0e7a00).
+/// Ports `llama_model_gemma4`'s `graph` (src/models/models.h:862 @5266f24da).
 const Graph = struct {
     model: *const Model,
     b: *const graph.Builder,
     n_embd_per_layer: i64,
 
     /// Ports the constructor of `llama_model_gemma4`'s `graph`
-    /// (models/gemma4.cpp:145 @c1d0e7a00).
+    /// (models/gemma4.cpp:150 @5266f24da).
     fn build(self: *const Graph) void {
         const model = self.model;
         const b = self.b;
@@ -225,7 +230,7 @@ const Graph = struct {
             const layer = &model.layers[@intCast(il)];
             const ilu: u32 = @intCast(il);
             const n_embd_head: i64 = hp.nEmbdHeadK(ilu);
-            impl.assert(n_embd_head == hp.nEmbdHeadV(ilu), "models/gemma4.cpp", 177, "n_embd_head == hparams.n_embd_head_v(il)");
+            impl.assert(n_embd_head == hp.nEmbdHeadV(ilu), "models/gemma4.cpp", 182, "n_embd_head == hparams.n_embd_head_v(il)");
 
             const n_head: i64 = hp.nHead(ilu);
             const n_head_kv: i64 = hp.nHeadKv(ilu);
@@ -433,7 +438,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma4`'s `graph`'s `build_inp_per_layer`
-    /// (models/gemma4.cpp:413 @c1d0e7a00): equivalent to the Python code's
+    /// (models/gemma4.cpp:418 @5266f24da): equivalent to the Python code's
     /// `get_per_layer_inputs()`.
     ///
     /// Return: `[n_embd_per_layer, n_layer, n_tokens]`.
@@ -445,7 +450,7 @@ const Graph = struct {
         var inp_per_layer: *Tensor = undefined;
         const tok_embd_scale = impl.sqrtf(@floatFromInt(self.n_embd_per_layer));
         if (b.ubatch.token != null) {
-            const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma4.cpp", 414, "out of memory");
+            const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma4.cpp", 419, "out of memory");
             inp.* = .{ .n_embd = b.n_embd };
             inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.ubatch.n_tokens);
             c.ggml_set_input(inp.tokens);
@@ -477,7 +482,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma4`'s `graph`'s `project_per_layer_inputs`
-    /// (models/gemma4.cpp:451 @c1d0e7a00): equivalent to the Python code's
+    /// (models/gemma4.cpp:456 @5266f24da): equivalent to the Python code's
     /// `project_per_layer_inputs()`, the per-layer inputs with `n_layer` as
     /// the last dimension, from `inp_batch` `[n_embd, n_tokens]` and
     /// `build_inp_per_layer`'s `[n_embd_per_layer, n_layer, n_tokens]`.

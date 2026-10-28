@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/hy-v3.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/hy-v3.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_hy_v3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
@@ -23,13 +23,13 @@ const Model = model_mod.Model;
 const Layer = model_mod.Layer;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_hy_v3`'s `load_arch_hparams` (models/hy-v3.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_hy_v3`'s `load_arch_hparams` (models/hy-v3.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
     if (try meta.getKey(u32, .expert_gating_func, false, exc)) |v| hp.expert_gating_func = v;
     if (try meta.getKey(f32, .expert_weights_scale, false, exc)) |v| hp.expert_weights_scale = v;
@@ -40,17 +40,13 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         hp.expert_gating_func = @backingInt(hparams_mod.ExpertGatingFunc.sigmoid);
     }
 
-    // NextN/MTP: extra decoder blocks appended beyond the main stack.
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-    impl.assert(hp.n_layer_nextn < hp.n_layer_all, "models/hy-v3.cpp", 18, "hparams.n_layer_nextn < hparams.n_layer_all && \"n_layer_nextn must be < n_layer_all\"");
-
     self.type = switch (hp.nLayer()) {
         48 => .@"30b_a3b",
         else => .unknown,
     };
 }
 
-/// Ports `llama_model_hy_v3`'s `load_arch_tensors` (models/hy-v3.cpp:26 @c1d0e7a00).
+/// Ports `llama_model_hy_v3`'s `load_arch_tensors` (models/hy-v3.cpp:22 @5266f24da).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -98,13 +94,13 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// `load_block`, a lambda of `load_arch_tensors` (models/hy-v3.cpp:26
-/// @c1d0e7a00).
+/// `load_block`, a lambda of `load_arch_tensors` (models/hy-v3.cpp:22
+/// @5266f24da).
 fn loadBlock(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(i)];
     const nr = loader.tensor_not_required;
-    const n_ff_exp: i64 = if (hp.n_ff_exp != 0) hp.n_ff_exp else @divTrunc(l.n_ff, if (l.n_expert_used > 0) l.n_expert_used else 1);
+    const n_ff_exp: i64 = if (hp.nFfExp(0) != 0) hp.nFfExp(0) else @divTrunc(l.n_ff, if (l.n_expert_used > 0) l.n_expert_used else 1);
     const n_ff_shexp: i64 = if (hp.n_ff_shexp != 0) hp.n_ff_shexp else n_ff_exp;
 
     layer.attn_norm = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, flags, exc);
@@ -137,8 +133,8 @@ fn loadBlock(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exc
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_hy_v3`'s `build_arch_graph` (models/hy-v3.cpp:103
-/// @c1d0e7a00): the MTP draft head for that graph type, the main model
+/// Ports `llama_model_hy_v3`'s `build_arch_graph` (models/hy-v3.cpp:99
+/// @5266f24da): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -188,14 +184,14 @@ fn buildFfnBlock(b: *const graph.Builder, layer: *const Layer, cur_: *Tensor, co
 }
 
 /// Ports the constructor of `llama_model_hy_v3`'s `graph`
-/// (models/hy-v3.cpp:110 @c1d0e7a00).
+/// (models/hy-v3.cpp:106 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/hy-v3.cpp", 113, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/hy-v3.cpp", 114, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/hy-v3.cpp", 109, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/hy-v3.cpp", 110, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
     const inp_pos = b.buildInpPos();
@@ -275,7 +271,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_hy_v3`'s `graph_mtp`
-/// (models/hy-v3.cpp:243 @c1d0e7a00): the MoE draft head. As vLLM's
+/// (models/hy-v3.cpp:239 @5266f24da): the MoE draft head. As vLLM's
 /// HYV3MultiTokenPredictorLayer: enorm(embed) and hnorm(prev_hidden),
 /// concatenated, through eh_proj, a hy_v3 decoder block, the final
 /// layernorm (stored as `nextn.shared_head_norm`), and the main model's LM
@@ -283,21 +279,21 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn > 0, "models/hy-v3.cpp", 245, "hparams.n_layer_nextn > 0 && \"HY_V3 MTP requires n_layer_nextn > 0\"");
+    impl.assert(hp.n_layer_nextn > 0, "models/hy-v3.cpp", 241, "hparams.n_layer_nextn > 0 && \"HY_V3 MTP requires n_layer_nextn > 0\"");
 
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/hy-v3.cpp", 248, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/hy-v3.cpp", 249, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/hy-v3.cpp", 244, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/hy-v3.cpp", 245, "n_embd_head == n_rot");
 
     const il: c_int = @as(c_int, @intCast(hp.nLayer())) + b.cparams.nextn_layer_offset;
-    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/hy-v3.cpp", 254, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
+    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/hy-v3.cpp", 250, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, "models/hy-v3.cpp", 257, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/hy-v3.cpp", 258, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/hy-v3.cpp", 259, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
+    impl.assert(layer.nextn.eh_proj != null, "models/hy-v3.cpp", 253, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, "models/hy-v3.cpp", 254, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, "models/hy-v3.cpp", 255, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
 
-    const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/hy-v3.cpp", 261, "out of memory");
+    const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/hy-v3.cpp", 257, "out of memory");
     inp.* = .{ .n_embd = hp.n_embd };
 
     inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
@@ -372,7 +368,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     // head. The normed hidden state seeds the next MTP step, as in vLLM,
     // where HYV3MultiTokenPredictorLayer returns final_layernorm(h).
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/hy-v3.cpp", 377, "head_norm_w && \"HY_V3 MTP: missing both nextn.shared_head_norm and output_norm\"");
+    impl.assert(head_norm_w != null, "models/hy-v3.cpp", 373, "head_norm_w && \"HY_V3 MTP: missing both nextn.shared_head_norm and output_norm\"");
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
 
     b.cb(cur, "h_nextn", -1);
@@ -383,7 +379,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "models/hy-v3.cpp", 388, "head_w && \"HY_V3 MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    impl.assert(head_w != null, "models/hy-v3.cpp", 384, "head_w && \"HY_V3 MTP: missing LM head (nextn.shared_head_head or model.output)\"");
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
 

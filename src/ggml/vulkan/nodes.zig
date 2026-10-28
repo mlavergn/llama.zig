@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.3.0
-//! (`c1d0e7a00`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
+//! (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -28,7 +28,7 @@ fn nodeAt(cgraph: *const CGraph, i: c_int) *c.ggml_tensor {
     return cgraph.nodes[@intCast(i)].?;
 }
 
-/// Ports `ggml_vk_preallocate_buffers` (ggml-vulkan.cpp:15152 @c1d0e7a00):
+/// Ports `ggml_vk_preallocate_buffers` (ggml-vulkan.cpp:15525 @5266f24da):
 /// grows the scratch buffers to the sizes the recorded ops asked for,
 /// first submitting and waiting for whatever already uses them.
 pub fn preallocateBuffers(ctx: *BackendCtx, subctx: ?*Context) void {
@@ -54,7 +54,7 @@ pub fn preallocateBuffers(ctx: *BackendCtx, subctx: ?*Context) void {
         ctx.prealloc_y = createOrAbort(ctx, ctx.prealloc_size_y);
         ctx.prealloc_y_last_pipeline_used = null;
         ctx.prealloc_y_last_tensor_used = null;
-        ctx.prealloc_y_last_decode_vector_staging = false;
+        ctx.prealloc_y_last_k_padded = false;
     }
     if (ctx.prealloc_split_k == null or (ctx.prealloc_size_split_k > 0 and ctx.prealloc_split_k.?.size < ctx.prealloc_size_split_k)) {
         m.buffer.logMemory("ggml_vk_preallocate_buffers(split_k_size: %zu)", .{ctx.prealloc_size_split_k});
@@ -90,7 +90,7 @@ fn overlapsUnsynced(node: *const c.ggml_tensor, unsynced: []const *const c.ggml_
     return false;
 }
 
-/// Ports `ggml_vk_build_graph` (ggml-vulkan.cpp:15294 @c1d0e7a00): records
+/// Ports `ggml_vk_build_graph` (ggml-vulkan.cpp:15667 @5266f24da): records
 /// one node (or fused run) into the compute context, after a barrier if it
 /// depends on unsynchronised work; submits the batch if asked.
 ///
@@ -199,7 +199,7 @@ fn syncLogNodes(ctx: *BackendCtx, cgraph: *const CGraph, node_idx: c_int) void {
     }
 }
 
-/// Ports `ggml_vk_compute_forward` (ggml-vulkan.cpp:15827 @c1d0e7a00):
+/// Ports `ggml_vk_compute_forward` (ggml-vulkan.cpp:16218 @5266f24da):
 /// submits the context node `tensor_idx` was recorded into, unless it was
 /// already, and runs the host copies of a finished one.
 pub fn computeForward(ctx: *BackendCtx, cgraph: *const CGraph, tensor_idx: c_int, almost_ready: bool) void {

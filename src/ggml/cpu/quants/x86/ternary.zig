@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.3.0,
-//! `c1d0e7a00`), the `__AVX2__` arms at lines 1376 and 1508. Each function
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.4.0,
+//! `5266f24da`), the `__AVX2__` arms at lines 1376 and 1508. Each function
 //! names the C it replaces and the line it began at.
 //!
 //! # Unfused, unlike the rest of the file
@@ -29,7 +29,7 @@ const f = common.f;
 const as = common.as;
 
 /// The base-3 digit extraction `ggml_vec_dot_tq1_0_q8_K` applies to each
-/// register (arch/x86/quants.c:1376 @c1d0e7a00): cancel the +1 that the
+/// register (arch/x86/quants.c:1376 @5266f24da): cancel the +1 that the
 /// average adds so it acts as a halving add, multiply by 3 through two
 /// averages, and keep the top two bits.
 inline fn topTrit(q: avx.m256i) avx.m256i {
@@ -39,7 +39,7 @@ inline fn topTrit(q: avx.m256i) avx.m256i {
 }
 
 /// Times nine on bytes, as `ggml_vec_dot_tq1_0_q8_K` writes it
-/// (arch/x86/quants.c:1376 @c1d0e7a00): a shift by three masked to the
+/// (arch/x86/quants.c:1376 @5266f24da): a shift by three masked to the
 /// byte, plus the value.
 inline fn times9(q: avx.m256i) avx.m256i {
     return avx.mm256_add_epi8(avx.mm256_and_si256(avx.mm256_slli_epi16(q, 3), avx.mm256_set1_epi8(-8)), q);
@@ -49,7 +49,7 @@ inline fn times9_128(q: avx.m128i) avx.m128i {
     return avx.mm_add_epi8(avx.mm_and_si128(avx.mm_slli_epi16(q, 3), avx.mm_set1_epi8(-8)), q);
 }
 
-/// Ports `ggml_vec_dot_tq1_0_q8_K` (arch/x86/quants.c:1376 @c1d0e7a00), the
+/// Ports `ggml_vec_dot_tq1_0_q8_K` (arch/x86/quants.c:1376 @5266f24da), the
 /// `__AVX2__` arm.
 ///
 /// Five trits a byte, extracted by multiplying by powers of three and taking
@@ -164,7 +164,7 @@ pub export fn ggml_vec_dot_tq1_0_q8_K(
     s[0] = common.hsum_float_8(sumf);
 }
 
-/// Ports `ggml_vec_dot_tq2_0_q8_K` (arch/x86/quants.c:1508 @c1d0e7a00), the
+/// Ports `ggml_vec_dot_tq2_0_q8_K` (arch/x86/quants.c:1508 @5266f24da), the
 /// `__AVX2__` arm.
 ///
 /// Four two-bit weights a byte, each plane against its own 32 `q8_K`

@@ -233,8 +233,9 @@ fn batchAdd(b: *c.llama_batch, tok: i32, pos: i32, seqs: []const i32, logits: bo
 // matching crashes. They are driven the way `common/speculative.cpp` drives
 // them instead: an embedding batch of n_embd_inp_enc features encoded first;
 // eagle3's decoder batches carry the g embeddings beside the tokens; and a
-// DFlash round ends by injecting fused features into the cache and decoding
-// a token over them.
+// DFlash round ends by injecting target features into the cache -- since
+// v0.4.0 the raw n_embd_inp_enc-wide ones, which the decoder fuses -- and
+// decoding a token over them.
 var model_path: [:0]const u8 = "";
 const DraftKind = enum { none, eagle3, dflash };
 const Draft = struct { kind: DraftKind = .none, n_enc: usize = 0, n_embd: usize = 0 };
@@ -528,7 +529,10 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
 
         if (draft.kind == .dflash) {
             const p0: i32 = A.llama_memory_seq_pos_max(mem, 0) + 1;
-            const ib = draftBatch(4, draft.n_embd, p0, false, 11 + round);
+            // Since v0.4.0 the injection carries the raw target features,
+            // n_embd_inp_enc wide, and the decoder fuses them itself
+            // (common/speculative.cpp, `batch_inject`).
+            const ib = draftBatch(4, draft.n_enc, p0, false, 11 + round);
             defer c.llama_batch_free(ib);
             note("draft inject: {d}", .{A.llama_decode(ctx, ib)});
             State.positions(mem, n_seq);

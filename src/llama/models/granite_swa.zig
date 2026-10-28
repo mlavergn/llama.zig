@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/granite-swa.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_granite_swa`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/granite-swa.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_granite_swa`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_attention_layer` and `build_layer_ffn`.
 
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_granite_swa`'s `load_arch_hparams` (models/granite-swa.cpp:5 @c1d0e7a00).
+/// Ports `llama_model_granite_swa`'s `load_arch_hparams` (models/granite-swa.cpp:5 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -38,7 +38,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
     // The mixture of experts.
     if (try meta.getKey(u32, .expert_count, false, exc)) |v| hp.n_expert = v;
-    if (try meta.getKey(u32, .expert_used_count, false, exc)) |v| hp.n_expert_used = v;
+    _ = try meta.getKeyOrArr(u32, .expert_used_count, &hp.n_expert_used_arr, hp.n_layer_all, false, exc);
 
     // Interleaved sliding-window attention.
     _ = try meta.getArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, true, exc);
@@ -84,7 +84,7 @@ fn oom() noreturn {
     impl.abort("models/granite-swa.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_granite_swa`'s `load_arch_tensors` (models/granite-swa.cpp:56 @c1d0e7a00).
+/// Ports `llama_model_granite_swa`'s `load_arch_tensors` (models/granite-swa.cpp:56 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -151,13 +151,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_granite_swa`'s `build_arch_graph` (models/granite-swa.cpp:117 @c1d0e7a00).
+/// Ports `llama_model_granite_swa`'s `build_arch_graph` (models/granite-swa.cpp:117 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_granite_swa`'s `graph`
-/// (models/granite-swa.cpp:121 @c1d0e7a00).
+/// (models/granite-swa.cpp:121 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -225,7 +225,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_granite_swa`'s `graph`'s `build_attention_layer`
-/// (models/granite-swa.cpp:200 @c1d0e7a00).
+/// (models/granite-swa.cpp:200 @5266f24da).
 fn buildAttentionLayer(
     b: *const graph.Builder,
     cur_: *Tensor,
@@ -264,7 +264,7 @@ fn buildAttentionLayer(
 }
 
 /// Ports `llama_model_granite_swa`'s `graph`'s `build_layer_ffn`
-/// (models/granite-swa.cpp:241 @c1d0e7a00).
+/// (models/granite-swa.cpp:241 @5266f24da).
 fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;

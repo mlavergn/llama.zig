@@ -10,12 +10,12 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/minimax-m3.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_minimax_m3`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/minimax-m3.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_minimax_m3`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` with
 //! `build_attn_msa_fa`, and `llm_graph_input_msa`, which upstream defines
-//! in the model's own file. `msa_params` (src/models/models.h:2134
-//! @c1d0e7a00) is not kept on the model: its three fields are the
+//! in the model's own file. `msa_params` (src/models/models.h:2137
+//! @5266f24da) is not kept on the model: its three fields are the
 //! hyperparameters they are loaded from, read where the graph needs them.
 
 const std = @import("std");
@@ -33,14 +33,14 @@ const Tensor = c.ggml_tensor;
 const Ubatch = @import("../batch.zig").Ubatch;
 const MsaContext = kv_cache_msa.MsaContext;
 
-/// Ports `llama_model_minimax_m3`'s `load_arch_hparams` (src/models/minimax-m3.cpp:13 @c1d0e7a00).
+/// Ports `llama_model_minimax_m3`'s `load_arch_hparams` (src/models/minimax-m3.cpp:13 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     if (try meta.getKey(u32, .leading_dense_block_count, false, exc)) |v| hp.n_layer_dense_lead = v;
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     hp.n_expert_shared = (try meta.getKey(u32, .expert_shared_count, true, exc)).?;
     if (try meta.getKey(f32, .expert_weights_scale, false, exc)) |v| hp.expert_weights_scale = v;
     if (try meta.getKey(bool, .expert_weights_norm, false, exc)) |v| hp.expert_weights_norm = v;
@@ -60,12 +60,12 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_minimax_m3`'s `load_arch_tensors` (src/models/minimax-m3.cpp:36 @c1d0e7a00).
+/// Ports `llama_model_minimax_m3`'s `load_arch_tensors` (src/models/minimax-m3.cpp:36 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const n_expert_shared: i64 = hp.n_expert_shared;
-    const n_ff_exp: i64 = hp.n_ff_exp;
+    const n_ff_exp: i64 = hp.nFfExp(0);
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -114,18 +114,18 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_minimax_m3`'s `build_arch_graph` (src/models/minimax-m3.cpp:87 @c1d0e7a00).
+/// Ports `llama_model_minimax_m3`'s `build_arch_graph` (src/models/minimax-m3.cpp:87 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// `GGML_PAD` (ggml.h:267 @c1d0e7a00) over `int64_t`: a mask, so for a
+/// `GGML_PAD` (ggml.h:267 @5266f24da) over `int64_t`: a mask, so for a
 /// block size that is not a power of two it is not a round-up, as in the C.
 fn padI64(x: i64, n: i64) i64 {
     return (x +% n -% 1) & ~(n -% 1);
 }
 
-/// Ports `llm_graph_input_msa` (src/models/minimax-m3.cpp:91 @c1d0e7a00): the
+/// Ports `llm_graph_input_msa` (src/models/minimax-m3.cpp:91 @5266f24da): the
 /// per-ubatch maps between positions and cells that MSA's block selection
 /// reads, and the bias that forces the local blocks.
 const InpMsa = struct {
@@ -145,7 +145,7 @@ const InpMsa = struct {
     blk: c_int,
     local: c_int,
 
-    /// Ports `llm_graph_input_msa`'s `set_input` (src/models/minimax-m3.cpp:96 @c1d0e7a00).
+    /// Ports `llm_graph_input_msa`'s `set_input` (src/models/minimax-m3.cpp:96 @5266f24da).
     pub fn setInput(self: *InpMsa, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         if (self.pos_slot_i) |t| self.mctx.setInputPosSlot(t, ubatch);
@@ -176,7 +176,7 @@ const InpMsa = struct {
     }
 
     /// Ports `llm_graph_input_msa`'s `can_reuse` (src/models/minimax-m3.cpp:121
-    /// @c1d0e7a00): valid while the tensors' dimensions still match the new
+    /// @5266f24da): valid while the tensors' dimensions still match the new
     /// ubatch and cache window, and the ubatch is in the same regime --
     /// decode graphs have `pos_slot_f`, batch graphs `cell_blk`.
     pub fn canReuse(self: *InpMsa, params: *const graph.Params) bool {
@@ -221,7 +221,7 @@ const InpMsa = struct {
 };
 
 /// Ports `llama_model_minimax_m3`'s `graph`'s `build_attn_msa_fa`
-/// (src/models/minimax-m3.cpp:171 @c1d0e7a00): one flash-attention call for
+/// (src/models/minimax-m3.cpp:171 @5266f24da): one flash-attention call for
 /// every GQA group -- and at a multi-stream decode, every stream -- by
 /// mapping them onto its sequence dimension, `ne[3]`.
 ///
@@ -267,7 +267,7 @@ var warned_no_fa = false;
 var warned_unified = false;
 
 /// Ports the constructor of `llama_model_minimax_m3`'s `graph`
-/// (src/models/minimax-m3.cpp:205 @c1d0e7a00). Partial rotary: the head size
+/// (src/models/minimax-m3.cpp:205 @5266f24da). Partial rotary: the head size
 /// is not `n_rot`, so that is not asserted.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;

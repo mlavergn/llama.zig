@@ -51,6 +51,7 @@ fn checkLayout(comptime Port: type, comptime C: type) void {
 
 comptime {
     checkLayout(M.InputText, mtmd_c.struct_mtmd_input_text);
+    checkLayout(M.InputPart, mtmd_c.struct_mtmd_input_part);
     checkLayout(M.ContextParams, mtmd_c.struct_mtmd_context_params);
     checkLayout(M.DecoderPos, mtmd_c.struct_mtmd_decoder_pos);
     checkLayout(M.Caps, mtmd_c.struct_mtmd_caps);
@@ -60,6 +61,7 @@ comptime {
     checkLayout(H.BitmapWrapper, mtmd_c.struct_mtmd_helper_bitmap_wrapper);
     checkLayout(H.VideoInfo, mtmd_c.struct_mtmd_helper_video_info);
     checkLayout(H.VideoInitParams, mtmd_c.struct_mtmd_helper_video_init_params);
+    checkLayout(H.InitOpt, mtmd_c.struct_mtmd_helper_init_opt);
     checkLayout(G.Inp, mtmd_c.struct_mtmd_helper_gen_audio_inp);
 }
 
@@ -97,6 +99,7 @@ const Api = struct {
     mtmd_input_chunks_size: *const fn (P) callconv(.c) usize,
     mtmd_input_chunks_get: *const fn (P, usize) callconv(.c) OptP,
     mtmd_tokenize: *const fn (P, P, *const M.InputText, ?[*]const P, usize) callconv(.c) i32,
+    mtmd_tokenize_from_parts: *const fn (P, P, ?[*]const *const M.InputPart, usize, bool) callconv(.c) i32,
     mtmd_input_chunk_get_type: *const fn (P) callconv(.c) c_int,
     mtmd_input_chunk_get_tokens_text: *const fn (P, *usize) callconv(.c) ?[*]const c.llama_token,
     mtmd_input_chunk_get_tokens_image: *const fn (P) callconv(.c) OptP,
@@ -124,8 +127,9 @@ const Api = struct {
     mtmd_get_cap_from_file: *const fn ([*:0]const u8) callconv(.c) M.Caps,
     mtmd_test_create_input_chunks: *const fn () callconv(.c) OptP,
     mtmd_helper_log_set: *const fn (c.ggml_log_callback, OptP) callconv(.c) void,
-    mtmd_helper_bitmap_init_from_file: *const fn (P, [*:0]const u8, bool) callconv(.c) H.BitmapWrapper,
-    mtmd_helper_bitmap_init_from_buf: *const fn (P, ?[*]const u8, usize, bool) callconv(.c) H.BitmapWrapper,
+    mtmd_helper_init_opt_default: *const fn () callconv(.c) H.InitOpt,
+    mtmd_helper_bitmap_init_from_file: *const fn (P, [*:0]const u8, bool, H.InitOpt) callconv(.c) H.BitmapWrapper,
+    mtmd_helper_bitmap_init_from_buf: *const fn (P, ?[*]const u8, usize, bool, H.InitOpt) callconv(.c) H.BitmapWrapper,
     mtmd_helper_get_n_tokens: *const fn (P) callconv(.c) usize,
     mtmd_helper_get_n_pos: *const fn (P) callconv(.c) c.llama_pos,
     mtmd_helper_eval_chunks: *const fn (P, OptP, P, c.llama_pos, c.llama_seq_id, i32, bool, *c.llama_pos) callconv(.c) i32,
@@ -459,8 +463,10 @@ fn runMedia(x: *const Ctx, tmp: []const u8, inputs: []const u8, vision: bool, au
     }
 
     // through the helpers: a real JPEG, a WAV that needs mixing down and resampling
+    const opt = api.mtmd_helper_init_opt_default();
+    print("init_opt fps {d} bin_dir_null {} ts {d}\n", .{ opt.video_params.fps_target, opt.video_params.ffmpeg_bin_dir == null, opt.video_params.timestamp_interval_ms });
     if (vision) {
-        const wr = api.mtmd_helper_bitmap_init_from_file(x.mctx, "llama.cpp/tools/mtmd/test-1.jpeg", false);
+        const wr = api.mtmd_helper_bitmap_init_from_file(x.mctx, "llama.cpp/tools/mtmd/test-1.jpeg", false, opt);
         if (wr.bitmap) |b| {
             print("file jpeg {d}x{d} id {s}\n", .{ api.mtmd_bitmap_get_nx(b), api.mtmd_bitmap_get_ny(b), std.mem.span(api.mtmd_bitmap_get_id(b)) });
             try bitmaps.append(x.a, b);
@@ -470,18 +476,20 @@ fn runMedia(x: *const Ctx, tmp: []const u8, inputs: []const u8, vision: bool, au
         const path = try std.fmt.allocPrintSentinel(x.a, "{s}/in.wav", .{tmp}, 0);
         defer x.a.free(path);
         try writeWav(x.a, path, 30000);
-        const wr = api.mtmd_helper_bitmap_init_from_file(x.mctx, path.ptr, false);
+        const wr = api.mtmd_helper_bitmap_init_from_file(x.mctx, path.ptr, false, opt);
         if (wr.bitmap) |b| {
             print("file wav n {d} bytes {d} id {s}\n", .{ api.mtmd_bitmap_get_nx(b), api.mtmd_bitmap_get_n_bytes(b), std.mem.span(api.mtmd_bitmap_get_id(b)) });
             try bitmaps.append(x.a, b);
         } else print("file wav null\n", .{});
     }
     // a buffer neither decoder reads
-    const bad = api.mtmd_helper_bitmap_init_from_buf(x.mctx, "not an image or audio file", 26, false);
+    const bad = api.mtmd_helper_bitmap_init_from_buf(x.mctx, "not an image or audio file", 26, false, opt);
     print("buf bad {}\n", .{bad.bitmap == null});
 
     try tokenizeAndRun(x, bitmaps.items, true);
     try tokenizeAndRun(x, placeholders.items, false);
+    try tokenizeParts(x, placeholders.items, true);
+    try tokenizeParts(x, placeholders.items, false);
 
     // more markers than bitmaps, and fewer
     if (bitmaps.items.len != 0) {
@@ -493,7 +501,58 @@ fn runMedia(x: *const Ctx, tmp: []const u8, inputs: []const u8, vision: bool, au
         const t2 = "no marker here";
         const it2: M.InputText = .{ .text = t2, .text_len = t2.len, .add_special = true, .parse_special = true };
         print("tokenize-mismatch {d}\n", .{api.mtmd_tokenize(x.mctx, ch, &it2, bitmaps.items.ptr, 1)});
+
+        // parts with both, neither, and a null text pointer
+        const both: M.InputPart = .{ .text = &it1, .bitmap = @ptrCast(@alignCast(bitmaps.items[0])) };
+        const neither: M.InputPart = .{ .text = null, .bitmap = null };
+        const null_txt: M.InputText = .{ .text = null, .text_len = 0, .add_special = false, .parse_special = true };
+        const null_part: M.InputPart = .{ .text = &null_txt, .bitmap = null };
+        for ([_]*const M.InputPart{ &both, &neither, &null_part }) |bp| {
+            const one = [_]*const M.InputPart{bp};
+            print("tokenize-parts-bad {d}\n", .{api.mtmd_tokenize_from_parts(x.mctx, ch, &one, one.len, true)});
+        }
     }
+}
+
+/// `mtmd_tokenize_from_parts` over the same text and media `tokenizeAndRun`
+/// marks up, the marker text left in a part as plain text, and the middle
+/// text part with `parse_special` off.
+fn tokenizeParts(x: *const Ctx, bitmaps: []const P, add_special: bool) !void {
+    const api = x.api;
+    if (bitmaps.len == 0) return;
+    var texts: std.ArrayList(M.InputText) = .empty;
+    defer texts.deinit(x.a);
+    var strs: std.ArrayList([]u8) = .empty;
+    defer {
+        for (strs.items) |t| x.a.free(t);
+        strs.deinit(x.a);
+    }
+    try texts.ensureTotalCapacity(x.a, bitmaps.len + 1);
+    var parts: std.ArrayList(M.InputPart) = .empty;
+    defer parts.deinit(x.a);
+    for (0..bitmaps.len + 1) |i| {
+        const t = if (i == 0)
+            try x.a.dupe(u8, "Look: <__media__> <|im_start|>")
+        else if (i == bitmaps.len)
+            try x.a.dupe(u8, "describe them.")
+        else
+            try std.fmt.allocPrint(x.a, " item {d} <|im_end|>\n", .{i});
+        try strs.append(x.a, t);
+        texts.appendAssumeCapacity(.{ .text = t.ptr, .text_len = t.len, .add_special = true, .parse_special = i != 1 });
+        try parts.append(x.a, .{ .text = &texts.items[i], .bitmap = null });
+        if (i < bitmaps.len) try parts.append(x.a, .{ .text = null, .bitmap = @ptrCast(@alignCast(bitmaps[i])) });
+    }
+    var ptrs: std.ArrayList(*const M.InputPart) = .empty;
+    defer ptrs.deinit(x.a);
+    for (parts.items) |*p| try ptrs.append(x.a, p);
+    const chunks = api.mtmd_input_chunks_init();
+    defer api.mtmd_input_chunks_free(chunks);
+    const rc = api.mtmd_tokenize_from_parts(x.mctx, chunks, ptrs.items.ptr, ptrs.items.len, add_special);
+    print("tokenize-parts add_special {} rc {d}\n", .{ add_special, rc });
+    flush();
+    if (rc != 0) return;
+    dumpChunks(x, chunks);
+    flush();
 }
 
 fn tokenizeAndRun(x: *const Ctx, bitmaps: []const P, run: bool) !void {

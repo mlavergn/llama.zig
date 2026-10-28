@@ -1,11 +1,12 @@
 //! Row-wise ops: softmax and its back pass, the fused topk_moe router,
-//! RoPE, the sorts and top-k, sums and scans, argmax and count_equal,
-//! the triangular solve.
+//! RoPE, the sorts and top-k (with the fused QSA indexer top-k), sums and
+//! scans, cross-entropy loss and its back pass, argmax and count_equal, the
+//! triangular solve.
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.3.0
-//! (`c1d0e7a00`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
+//! (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -44,7 +45,7 @@ fn prealloc(buf: ?*m.buffer.Buffer, offset: u64, size: u64) Subbuffer {
     return .{ .buffer = buf, .offset = offset, .size = size };
 }
 
-/// Ports `ggml_vk_soft_max` (ggml-vulkan.cpp:13479 @c1d0e7a00): one pass up
+/// Ports `ggml_vk_soft_max` (ggml-vulkan.cpp:13681 @5266f24da): one pass up
 /// to 16384 columns, three over preallocated scratch beyond.
 pub fn softMax(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: ?*const Tensor, src2: ?*const Tensor, dst: *Tensor) void {
     const scale = f32Param(dst, 0);
@@ -134,12 +135,12 @@ pub fn softMax(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: ?*
     ctx.prealloc_y_need_sync = true;
 }
 
-/// Ports `ggml_vk_soft_max_back` (ggml-vulkan.cpp:13563 @c1d0e7a00).
+/// Ports `ggml_vk_soft_max_back` (ggml-vulkan.cpp:13765 @5266f24da).
 pub fn softMaxBack(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_SOFT_MAX_BACK, opPc(u32Of(src0.ne[0]), u32Of(c.ggml_nrows(src0)), f32Param(dst, 0), f32Param(dst, 1)));
 }
 
-/// Ports `ggml_vk_topk_moe` (ggml-vulkan.cpp:13568 @c1d0e7a00): the expert
+/// Ports `ggml_vk_topk_moe` (ggml-vulkan.cpp:13770 @5266f24da): the expert
 /// router -- gating, top-k selection, weights and optional normalisation
 /// -- in one dispatch, whichever of the five patterns matched.
 pub fn topkMoe(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_idx: c_int) void {
@@ -221,7 +222,7 @@ pub fn topkMoe(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_i
     }, &pc, .{ ops.ceilDiv(@as(u32, @bitCast(n_rows)), rows_per_block), 1, 1 });
 }
 
-/// Ports `ggml_vk_rope` (ggml-vulkan.cpp:13654 @c1d0e7a00), forward and
+/// Ports `ggml_vk_rope` (ggml-vulkan.cpp:13856 @5266f24da), forward and
 /// back; fused with VIEW and SET_ROWS it writes the cache rows directly.
 pub fn rope(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_idx: c_int, backprop: bool) void {
     var dst = at(cgraph, node_idx);
@@ -242,7 +243,7 @@ pub fn rope(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_idx:
     ops.opF32(ctx, subctx, src0, src1, src2, src3, dst, c.GGML_OP_ROPE, m.ops_more.makeRopeConstants(at(cgraph, node_idx), src0, src2 != null, backprop, set_rows_stride));
 }
 
-/// Ports `ggml_vk_argsort` (ggml-vulkan.cpp:13688 @c1d0e7a00): a bitonic
+/// Ports `ggml_vk_argsort` (ggml-vulkan.cpp:13890 @5266f24da): a bitonic
 /// sort, one workgroup when the row fits, otherwise passes over a padded
 /// scratch row with a barrier between each.
 pub fn argsort(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
@@ -318,14 +319,44 @@ pub fn argsort(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Te
     }
 }
 
-/// Ports `ggml_vk_topk` (ggml-vulkan.cpp:13774 @c1d0e7a00): passes that each
+/// Whether the tournament top-k has a pipeline for `k`: the smallest it
+/// can use, `max(log2(k) + 1, log2(subgroup))`, exists. The C++ writes
+/// this test out in `ggml_vk_topk`, `ggml_vk_can_fuse_topk_qsa` and
+/// `supports_op`; past it, top-k falls back to radix-select.
+pub fn topkTournamentFits(dev: *const m.device.Device, k: u32) bool {
+    const k_min_pipeline = @max(@as(u32, @intFromFloat(log2f(@floatFromInt(k)))) + 1, dev.subgroup_size_log2);
+    return k_min_pipeline < m.device.num_topk_pipelines and dev.pipeline_topk_f32[k_min_pipeline] != null;
+}
+
+/// Ports `ggml_vk_topk` (ggml-vulkan.cpp:13976 @5266f24da): passes that each
 /// reduce every workgroup's elements to its K largest, double-buffered in
-/// scratch, until K remain.
+/// scratch, until K remain -- or, past the tournament's K limit, one
+/// radix-select per row.
 pub fn topk(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     const ncols = u32Of(src0.ne[0]);
     const nrows = u32Of(c.ggml_nrows(src0));
     const k = u32Of(dst.ne[0]);
     const dev = ctx.device;
+
+    // tournament path is faster where it fits; use radix-select only past its k limit
+    if (!topkTournamentFits(dev, k)) {
+        const pipeline = dev.pipeline_topk_radix_f32 orelse impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
+
+        if (ctx.prealloc_x_need_sync) m.context.syncBuffers(ctx, subctx);
+
+        const rpc: push.TopkRadix = .{ .ncols = ncols, .k = k, .nrows = nrows, .n_tps = 0, .n_blocks = 0, .n_stream = 0 };
+        const elements = [3]u32{
+            pipeline.wg_denoms[0],
+            @min(nrows, dev.properties.limits.maxComputeWorkGroupCount[1]),
+            1,
+        };
+        // the non-QSA path only uses bindings 0/1; bind valid buffers for the unused QSA slots
+        const src0_buf = m.context.tensorSubbuffer(ctx, src0, false);
+        const dst_buf = m.context.tensorSubbuffer(ctx, dst, false);
+        m.context.requestDescriptorSets(ctx, pipeline, 1);
+        m.context.dispatch(ctx, subctx, pipeline, &.{ src0_buf, dst_buf, src0_buf, src0_buf, src0_buf }, &rpc, elements);
+        return;
+    }
 
     const pc: push.Topk = .{ .orig_ncols = ncols, .ncols_input = ncols, .ncols_output = ncols, .k = k, .nrows = nrows, .first_pass = 0, .last_pass = 0 };
 
@@ -417,15 +448,69 @@ pub fn topk(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tenso
     ctx.prealloc_x_need_sync = true;
 }
 
+/// Ports `ggml_vk_topk_qsa` (ggml-vulkan.cpp:14109 @5266f24da): the qwen4
+/// QSA indexer's GET_ROWS, PERMUTE, CONT, CPY, RESHAPE, ADD and TOP_K as one
+/// radix-select that gathers each block's score to its cells and adds the
+/// raw f16 mask on the fly.
+pub fn topkQsa(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_idx: c_int) void {
+    const get_rows = at(cgraph, node_idx + 0);
+    const add = at(cgraph, node_idx + ctx.num_additional_fused_ops - 1);
+    const top_k = at(cgraph, node_idx + ctx.num_additional_fused_ops);
+
+    const scores: *const Tensor = get_rows.src[0]; // [n_tps, n_blocks, n_stream]
+    const cell_blk: *const Tensor = get_rows.src[1]; // [n_kv, n_stream]
+
+    // raw f16 mask: follow the reshape/cpy chain back to the materialized input
+    var mask: *const Tensor = add.src[1];
+    while (mask.op == c.GGML_OP_RESHAPE or mask.op == c.GGML_OP_CPY) {
+        mask = mask.src[0];
+    }
+
+    const n_tps = u32Of(scores.ne[0]);
+    const n_blocks = u32Of(scores.ne[1]);
+    const n_stream = u32Of(scores.ne[2]);
+    const n_kv = u32Of(cell_blk.ne[0]);
+    const width = u32Of(top_k.ne[0]);
+    const nrows = n_tps *% n_stream;
+
+    const dev = ctx.device;
+    const pipeline = dev.pipeline_topk_radix_qsa orelse impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
+
+    // scratch holds the gathered+masked input, materialized once and reused across passes
+    const scratch_size: usize = @as(usize, n_kv) * nrows * @sizeOf(f32);
+    if (ctx.prealloc_size_x < scratch_size) {
+        ctx.prealloc_size_x = scratch_size;
+        m.nodes.preallocateBuffers(ctx, subctx);
+    }
+    if (ctx.prealloc_x_need_sync) m.context.syncBuffers(ctx, subctx);
+
+    const pc: push.TopkRadix = .{ .ncols = n_kv, .k = width, .nrows = nrows, .n_tps = n_tps, .n_blocks = n_blocks, .n_stream = n_stream };
+    const elements = [3]u32{
+        pipeline.wg_denoms[0],
+        @min(nrows, dev.properties.limits.maxComputeWorkGroupCount[1]),
+        1,
+    };
+    const scratch_buf = prealloc(ctx.prealloc_x, 0, ctx.prealloc_x.?.size);
+    m.context.requestDescriptorSets(ctx, pipeline, 1);
+    m.context.dispatch(ctx, subctx, pipeline, &.{
+        m.context.tensorSubbuffer(ctx, scores, false),
+        m.context.tensorSubbuffer(ctx, top_k, false),
+        m.context.tensorSubbuffer(ctx, cell_blk, false),
+        m.context.tensorSubbuffer(ctx, mask, false),
+        scratch_buf,
+    }, &pc, elements);
+    ctx.prealloc_x_need_sync = true;
+}
+
 /// Ports `ggml_vk_sum`, `ggml_vk_sum_rows` and `ggml_vk_mean`
-/// (ggml-vulkan.cpp:13882, 13887, 13892 @c1d0e7a00).
+/// (ggml-vulkan.cpp:14158, 14163, 14168 @5266f24da).
 pub fn sumRows(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor, op: c.enum_ggml_op) void {
     var p = ops.sumRowsPushConstantsInit(src0, dst, if (op == c.GGML_OP_SUM) c.ggml_nelements(src0) else src0.ne[0]);
     if (op == c.GGML_OP_MEAN) p.weight = 1.0 / @as(f32, @floatFromInt(src0.ne[0]));
     ops.opF32(ctx, subctx, src0, null, null, null, dst, op, p);
 }
 
-/// Ports `ggml_vk_cumsum` (ggml-vulkan.cpp:13898 @c1d0e7a00): one pass for
+/// Ports `ggml_vk_cumsum` (ggml-vulkan.cpp:14174 @5266f24da): one pass for
 /// short rows or many rows, otherwise block partials and a second pass.
 pub fn cumsum(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     const pc = ops.sumRowsPushConstantsInit(src0, dst, src0.ne[0]);
@@ -460,17 +545,113 @@ pub fn cumsum(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Ten
     ctx.prealloc_split_k_need_sync = true;
 }
 
-/// Ports `ggml_vk_argmax` (ggml-vulkan.cpp:13945 @c1d0e7a00).
+/// Ports `ggml_vk_nrows_elements` (ggml-vulkan.cpp:14221 @5266f24da): the
+/// dispatch size for one workgroup per row, folded into y and z past the
+/// x limit.
+fn nrowsElements(nr: u32) [3]u32 {
+    if (nr > 262144) return .{ 512, 512, ops.ceilDiv(nr, 262144) };
+    if (nr > 512) return .{ 512, ops.ceilDiv(nr, 512), 1 };
+    return .{ nr, 1, 1 };
+}
+
+/// Ports `ggml_vk_cross_entropy_loss` (ggml-vulkan.cpp:14231 @5266f24da):
+/// one loss per row into scratch, then `sum_rows` over them into the scalar.
+pub fn crossEntropyLoss(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
+    const src0: *const Tensor = dst.src[0];
+    const src1: *const Tensor = dst.src[1];
+
+    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    impl.assert(src1.type == c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    impl.assert(dst.type == c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
+    impl.assert(c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    impl.assert(c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
+    impl.assert(c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    impl.assert(c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, src1)");
+    impl.assert(c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
+
+    const nclasses: u32 = @truncate(@as(u64, @bitCast(src0.ne[0])));
+    const nrows: u32 = @truncate(@as(u64, @bitCast(c.ggml_nrows(src0))));
+
+    const dev = ctx.device;
+    const pipeline = m.op_pipeline.getPipeline(ctx, src0, src1, null, dst, c.GGML_OP_CROSS_ENTROPY_LOSS) orelse impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
+
+    m.context.requestDescriptorSets(ctx, pipeline, 1);
+    m.context.requestDescriptorSets(ctx, dev.pipeline_sum_rows_f32.?, 1);
+
+    const src0_buf = m.context.tensorSubbuffer(ctx, src0, false);
+    const src1_buf = m.context.tensorSubbuffer(ctx, src1, false);
+    const dst_buf = m.context.tensorSubbuffer(ctx, dst, true);
+
+    const pc = opPc(nclasses, nrows, 0.0, 0.0);
+
+    const tmp_size: usize = @as(usize, nrows) * @sizeOf(f32);
+    if (ctx.prealloc_size_x < tmp_size) {
+        ctx.prealloc_size_x = tmp_size;
+        m.nodes.preallocateBuffers(ctx, subctx);
+    }
+    if (ctx.prealloc_x_need_sync) m.context.syncBuffers(ctx, subctx);
+
+    const tmp_buf = prealloc(ctx.prealloc_x, 0, tmp_size);
+    m.context.dispatch(ctx, subctx, pipeline, &.{ src0_buf, src1_buf, tmp_buf }, &pc, nrowsElements(nrows));
+    m.context.syncBuffers(ctx, subctx);
+
+    var sp: push.SumRows = .{};
+    sp.n_cols = nrows;
+    sp.ne01 = 1;
+    sp.ne02 = 1;
+    sp.weight = 1.0;
+    ops.initPushconstFastdiv(&sp);
+    sp.misalign_offsets = @truncate(m.context.getMisalignBytes(ctx, dst) / c.ggml_type_size(dst.type));
+
+    m.context.dispatch(ctx, subctx, dev.pipeline_sum_rows_f32.?, &.{ tmp_buf, dst_buf }, &sp, .{ 1, 1, 1 });
+    ctx.prealloc_x_need_sync = true;
+}
+
+/// Ports `ggml_vk_cross_entropy_loss_back` (ggml-vulkan.cpp:14284 @5266f24da).
+pub fn crossEntropyLossBack(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
+    const grad: *const Tensor = dst.src[0];
+    const logits: *const Tensor = dst.src[1];
+    const labels: *const Tensor = dst.src[2];
+
+    impl.assert(grad.type == c.GGML_TYPE_F32, "grad->type   == GGML_TYPE_F32");
+    impl.assert(logits.type == c.GGML_TYPE_F32, "logits->type == GGML_TYPE_F32");
+    impl.assert(labels.type == c.GGML_TYPE_F32, "labels->type == GGML_TYPE_F32");
+    impl.assert(dst.type == c.GGML_TYPE_F32, "dst->type    == GGML_TYPE_F32");
+    impl.assert(c.ggml_is_scalar(grad), "ggml_is_scalar(grad)");
+    impl.assert(c.ggml_is_contiguous(grad), "ggml_is_contiguous(grad)");
+    impl.assert(c.ggml_is_contiguous(logits), "ggml_is_contiguous(logits)");
+    impl.assert(c.ggml_is_contiguous(labels), "ggml_is_contiguous(labels)");
+    impl.assert(c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    impl.assert(c.ggml_are_same_shape(logits, labels), "ggml_are_same_shape(logits, labels)");
+    impl.assert(c.ggml_are_same_shape(logits, dst), "ggml_are_same_shape(logits, dst)");
+
+    const nclasses: u32 = @truncate(@as(u64, @bitCast(logits.ne[0])));
+    const nrows: u32 = @truncate(@as(u64, @bitCast(c.ggml_nrows(logits))));
+
+    const pipeline = m.op_pipeline.getPipeline(ctx, grad, logits, labels, dst, c.GGML_OP_CROSS_ENTROPY_LOSS_BACK) orelse impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
+
+    m.context.requestDescriptorSets(ctx, pipeline, 1);
+
+    const grad_buf = m.context.tensorSubbuffer(ctx, grad, false);
+    const logits_buf = m.context.tensorSubbuffer(ctx, logits, false);
+    const labels_buf = m.context.tensorSubbuffer(ctx, labels, false);
+    const dst_buf = m.context.tensorSubbuffer(ctx, dst, false);
+
+    const pc = opPc(nclasses, nrows, 0.0, 0.0);
+    m.context.dispatch(ctx, subctx, pipeline, &.{ grad_buf, logits_buf, labels_buf, dst_buf }, &pc, nrowsElements(nrows));
+}
+
+/// Ports `ggml_vk_argmax` (ggml-vulkan.cpp:14318 @5266f24da).
 pub fn argmax(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_ARGMAX, opPc(u32Of(src0.ne[0]), u32Of(src0.ne[1]), 0, 0));
 }
 
-/// Ports `ggml_vk_count_equal` (ggml-vulkan.cpp:13949 @c1d0e7a00).
+/// Ports `ggml_vk_count_equal` (ggml-vulkan.cpp:14322 @5266f24da).
 pub fn countEqual(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_COUNT_EQUAL, opPc(u32Of(c.ggml_nelements(src0)), 0, 0, 0));
 }
 
-/// Ports `ggml_vk_solve_tri` (ggml-vulkan.cpp:13953 @c1d0e7a00).
+/// Ports `ggml_vk_solve_tri` (ggml-vulkan.cpp:14326 @5266f24da).
 pub fn solveTri(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_SOLVE_TRI, ops.binaryPc(u32Of(c.ggml_nelements(src0)), src0, src1, dst, 0, 0, 0));
 }

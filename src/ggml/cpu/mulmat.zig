@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.3.0, `c1d0e7a00`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.0, `5266f24da`),
 //! the section beginning at line 1162. Each function names the C it replaces
 //! and the line it began at.
 //!
@@ -39,6 +39,7 @@ const defs = @import("defs.zig");
 const traits = @import("traits.zig");
 const features = @import("features.zig");
 const threading = @import("threading.zig");
+const iqp = @import("iqp.zig");
 const c = impl.c;
 
 const Tensor = defs.Tensor;
@@ -74,7 +75,7 @@ inline fn min(a: i64, b: i64) i64 {
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_mul_mat
 
-/// Ports `ggml_compute_forward_mul_mat_one_chunk` (ggml-cpu.c:1164 @c1d0e7a00).
+/// Ports `ggml_compute_forward_mul_mat_one_chunk` (ggml-cpu.c:1165 @5266f24da).
 ///
 /// Computes the rectangle `[ir0_start, ir0_end) x [ir1_start, ir1_end)` of the
 /// result, tiling 16x16 so a tile of `dst` stays in cache across the inner
@@ -194,7 +195,7 @@ fn oneChunk(
     }
 }
 
-/// Ports `ggml_compute_forward_mul_mat` (ggml-cpu.c:1254 @c1d0e7a00).
+/// Ports `ggml_compute_forward_mul_mat` (ggml-cpu.c:1255 @5266f24da).
 ///
 /// Parameters:
 /// - `params`: this thread's index, count, and work buffer.
@@ -312,6 +313,13 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
 
     threading.ggml_barrier(params.threadpool.?);
 
+    // The IQ panel gemm (`iqp.zig`). It has to come after the barrier: it
+    // consumes src1's q8_K rows from the work buffer.
+    if (iqp.ggml_cpu_iqp_supports_mul_mat(dst) and !params.use_ref) {
+        iqp.ggml_compute_forward_mul_mat_iqp(params, dst);
+        return;
+    }
+
     // Second llamafile attempt, now that src1 has been staged into `wdata` in
     // the kernel's own type.
     if (features.use_llamafile and src1.type != vec_dot_type) {
@@ -406,7 +414,7 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_mul_mat_id
 
-/// Ports `struct mmid_row_mapping` (ggml-cpu.c:1458 @c1d0e7a00).
+/// Ports `struct mmid_row_mapping` (ggml-cpu.c:1466 @5266f24da).
 pub const RowMapping = extern struct {
     /// The selected expert's index within the row.
     i1: i32,
@@ -414,12 +422,12 @@ pub const RowMapping = extern struct {
     i2: i32,
 };
 
-/// Ports the `MMID_MATRIX_ROW` macro (ggml-cpu.c:1456 @c1d0e7a00).
+/// Ports the `MMID_MATRIX_ROW` macro (ggml-cpu.c:1464 @5266f24da).
 inline fn matrixRow(matrix_rows: [*]RowMapping, ids: *const Tensor, row_id: i64, idx1: i64) *RowMapping {
     return &matrix_rows[@intCast(row_id * ids.ne[0] * ids.ne[1] + idx1)];
 }
 
-/// Ports `incr_ptr_aligned` (ggml-cpu.c:1526 @c1d0e7a00).
+/// Ports `incr_ptr_aligned` (ggml-cpu.c:1534 @5266f24da).
 ///
 /// Carves a sub-allocation out of the work buffer and advances the cursor.
 /// Distinct from the identically named helper in `ggml.c`, which the graph
@@ -437,7 +445,7 @@ fn incrPtrAligned(p: *[*]u8, size: usize, alignment: usize) [*]u8 {
     return ptr;
 }
 
-/// Ports `ggml_compute_forward_mul_mat_id_one_chunk` (ggml-cpu.c:1463 @c1d0e7a00).
+/// Ports `ggml_compute_forward_mul_mat_id_one_chunk` (ggml-cpu.c:1471 @5266f24da).
 ///
 /// The mul_mat_id counterpart of `oneChunk`. It takes more arguments because
 /// the expert grouping is computed once by thread zero and shared, rather than
@@ -524,7 +532,7 @@ fn idOneChunk(
     }
 }
 
-/// Ports `ggml_compute_forward_mul_mat_id` (ggml-cpu.c:1534 @c1d0e7a00).
+/// Ports `ggml_compute_forward_mul_mat_id` (ggml-cpu.c:1542 @5266f24da).
 ///
 /// A mixture-of-experts product: `src[2]` names, per row of `src1`, which
 /// matrix in `src0`'s third dimension that row should be multiplied by.
@@ -565,8 +573,9 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
 
     // The work buffer holds four things back to back: the staged src1, a
     // per-expert row count, the routing table, and one cache line per expert
-    // for its chunk counter. `ggml_graph_plan` sizes it to match, so the
-    // layout here and the arithmetic there have to stay in step.
+    // for its chunk counter -- and a fifth when the IQ panel path is on, one
+    // panel per thread. `ggml_graph_plan` sizes it to match, so the layout
+    // here and the arithmetic there have to stay in step.
     var wdata_cur: [*]u8 = @ptrCast(params.wdata.?);
 
     if (src1.type != vec_dot_type) {
@@ -594,6 +603,17 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
         defs.cache_line_size * @as(usize, @intCast(n_as)),
         defs.cache_line_size,
     );
+
+    // The IQ panel gemm (`iqp.zig`). Each expert's eligibility is decided
+    // below, but the panels are reserved for the whole node: `ggml_graph_plan`
+    // sizes them without `params`, and `use_ref` only skips the dispatch.
+    const use_iqp = iqp.ggml_cpu_iqp_supports_mul_mat_id(dst) and !params.use_ref;
+
+    var iqp_panels: ?[*]u8 = null;
+
+    if (use_iqp) {
+        iqp_panels = incrPtrAligned(&wdata_cur, @as(usize, @intCast(nth)) * iqp.ggml_cpu_iqp_scratch_size(dst), 64);
+    }
 
     impl.assert(
         params.wsize >= @intFromPtr(wdata_cur) - @intFromPtr(params.wdata.?),
@@ -667,6 +687,19 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
     while (cur_a < n_as) : (cur_a += 1) {
         const cne1 = matrix_row_counts[@intCast(cur_a)];
         if (cne1 == 0) continue;
+
+        if (use_iqp and iqp.ggml_cpu_iqp_mul_mat_id_min_batch(cne1)) {
+            iqp.ggml_compute_forward_mul_mat_id_iqp(
+                params,
+                dst,
+                cur_a,
+                cne1,
+                @ptrCast(matrixRow(matrix_rows, ids, cur_a, 0)),
+                iqp_panels,
+            );
+
+            continue;
+        }
 
         const src0_cur: [*]const u8 = @as([*]const u8, @ptrCast(src0.data.?)) +
             @as(usize, @intCast(cur_a)) * l.nb02;

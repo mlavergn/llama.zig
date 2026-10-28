@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.3.0, `c1d0e7a00`), the
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.4.0, `5266f24da`), the
 //! `quantize_*` functions scattered through the file, plus the
 //! `quantize_row_*_impl` helpers they call. Each names the C function it
 //! replaces and the line it began at.
@@ -110,7 +110,7 @@ fn forwardingChunk(
     }.f;
 }
 
-// Ports `quantize_q8_0` (ggml-quants.c:2295 @c1d0e7a00), `quantize_mxfp4`,
+// Ports `quantize_q8_0` (ggml-quants.c:2295 @5266f24da), `quantize_mxfp4`,
 // `quantize_nvfp4`, `quantize_tq1_0` (2420) and `quantize_tq2_0`.
 //
 // `q1_0` and `q2_0` are *not* here: their C versions take the imatrix
@@ -124,7 +124,7 @@ comptime {
     @export(&forwardingChunk(blocks.TQ2_0, QK_K, ternary.quantize_row_tq2_0_ref), .{ .name = "quantize_tq2_0" });
 }
 
-/// Ports `quantize_q1_0` (ggml-quants.c:2098 @c1d0e7a00).
+/// Ports `quantize_q1_0` (ggml-quants.c:2098 @5266f24da).
 ///
 /// Takes the imatrix and ignores it, but still loops per row rather than
 /// quantizing the whole buffer at once. The two are equivalent here; the shape
@@ -141,7 +141,7 @@ pub export fn quantize_q1_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_p
     }.f);
 }
 
-/// Ports `quantize_q2_0` (ggml-quants.c:2113 @c1d0e7a00).
+/// Ports `quantize_q2_0` (ggml-quants.c:2113 @5266f24da).
 pub export fn quantize_q2_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     if (quant_weights == null) {
         legacy.quantize_row_q2_0_ref(src, @ptrCast(@alignCast(dst)), nrow * n_per_row);
@@ -157,7 +157,7 @@ pub export fn quantize_q2_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_p
 // -----------------------------------------------------------------------------
 // The legacy formats with an imatrix-aware fit
 
-/// Ports `quantize_row_q4_0_impl` (ggml-quants.c:2070 @c1d0e7a00).
+/// Ports `quantize_row_q4_0_impl` (ggml-quants.c:2070 @5266f24da).
 fn q4_0Impl(x: [*]const f32, y: [*]blocks.Q4_0, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const qw_all = quant_weights orelse {
         legacy.quantize_row_q4_0_ref(x, y, n_per_row);
@@ -183,7 +183,7 @@ fn q4_0Impl(x: [*]const f32, y: [*]blocks.Q4_0, n_per_row: i64, quant_weights: ?
     }
 }
 
-/// Ports `quantize_row_q4_1_impl` (ggml-quants.c:2143 @c1d0e7a00).
+/// Ports `quantize_row_q4_1_impl` (ggml-quants.c:2143 @5266f24da).
 fn q4_1Impl(x: [*]const f32, y: [*]blocks.Q4_1, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const qw_all = quant_weights orelse {
         legacy.quantize_row_q4_1_ref(x, y, n_per_row);
@@ -210,7 +210,7 @@ fn q4_1Impl(x: [*]const f32, y: [*]blocks.Q4_1, n_per_row: i64, quant_weights: ?
     }
 }
 
-/// Ports `quantize_row_q5_0_impl` (ggml-quants.c:2188 @c1d0e7a00).
+/// Ports `quantize_row_q5_0_impl` (ggml-quants.c:2188 @5266f24da).
 fn q5_0Impl(x: [*]const f32, y: [*]blocks.Q5_0, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const qw_all = quant_weights orelse {
         legacy.quantize_row_q5_0_ref(x, y, n_per_row);
@@ -243,7 +243,7 @@ fn q5_0Impl(x: [*]const f32, y: [*]blocks.Q5_0, n_per_row: i64, quant_weights: ?
     }
 }
 
-/// Ports `quantize_row_q5_1_impl` (ggml-quants.c:2242 @c1d0e7a00).
+/// Ports `quantize_row_q5_1_impl` (ggml-quants.c:2242 @5266f24da).
 fn q5_1Impl(x: [*]const f32, y: [*]blocks.Q5_1, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const qw_all = quant_weights orelse {
         legacy.quantize_row_q5_1_ref(x, y, n_per_row);
@@ -315,7 +315,7 @@ comptime {
 // weight sum, where the reference divides by the block maximum. So these are
 // genuinely different code, not the reference with a weight argument.
 
-/// Ports `quantize_row_q2_K_impl` (ggml-quants.c:1149 @c1d0e7a00).
+/// Ports `quantize_row_q2_K_impl` (ggml-quants.c:1149 @5266f24da).
 fn q2_KImpl(x_in: [*]const f32, y: [*]blocks.Q2_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const qw_all = quant_weights.?; // the C asserts this
     const nb: usize = @intCast(@divExact(n_per_row, QK_K));
@@ -381,7 +381,7 @@ fn q2_KImpl(x_in: [*]const f32, y: [*]blocks.Q2_K, n_per_row: i64, quant_weights
     }
 }
 
-/// Ports `quantize_row_q3_K_impl` (ggml-quants.c:1355 @c1d0e7a00).
+/// Ports `quantize_row_q3_K_impl` (ggml-quants.c:1355 @5266f24da).
 ///
 /// Unlike `q2_K`'s, this one tolerates a null imatrix -- it falls back to
 /// `x*x` weighting rather than forwarding to the reference.
@@ -473,7 +473,7 @@ fn q3_KImpl(x_in: [*]const f32, y: [*]blocks.Q3_K, n_per_row: i64, quant_weights
 }
 
 /// The scale fitting `quantize_row_q4_K_impl` and `quantize_row_q5_K_impl`
-/// share (ggml-quants.c:1553, 1758 @c1d0e7a00).
+/// share (ggml-quants.c:1553, 1758 @5266f24da).
 ///
 /// Without an imatrix the weighting is `sqrt(sigma2) + |x|`, matching the
 /// reference; with one it is the usual `qw * sqrt(sigma2 + x*x)`.
@@ -508,7 +508,7 @@ fn fitScalesKImpl(
     }
 }
 
-/// Ports `quantize_row_q4_K_impl` (ggml-quants.c:1553 @c1d0e7a00).
+/// Ports `quantize_row_q4_K_impl` (ggml-quants.c:1553 @5266f24da).
 fn q4_KImpl(x_in: [*]const f32, y: [*]blocks.Q4_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const nb: usize = @intCast(@divExact(n_per_row, QK_K));
     var x = x_in;
@@ -548,7 +548,7 @@ fn q4_KImpl(x_in: [*]const f32, y: [*]blocks.Q4_K, n_per_row: i64, quant_weights
     }
 }
 
-/// Ports `quantize_row_q5_K_impl` (ggml-quants.c:1758 @c1d0e7a00).
+/// Ports `quantize_row_q5_K_impl` (ggml-quants.c:1758 @5266f24da).
 fn q5_KImpl(x_in: [*]const f32, y: [*]blocks.Q5_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const nb: usize = @intCast(@divExact(n_per_row, QK_K));
     var x = x_in;
@@ -636,7 +636,7 @@ inline fn requantizeK(comptime nmax: i32, x: [*]const f32, scales: [*]const u8, 
     }
 }
 
-/// Ports `quantize_row_q6_K_impl` (ggml-quants.c:1970 @c1d0e7a00).
+/// Ports `quantize_row_q6_K_impl` (ggml-quants.c:1970 @5266f24da).
 ///
 /// Note it passes the raw importance matrix straight to `makeQxQuants` as the
 /// weighting, rather than the `qw * sqrt(sigma2 + x*x)` the others build. The

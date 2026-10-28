@@ -74,7 +74,7 @@
 const std = @import("std");
 
 /// One `Ports X (file:line)` reference, as found in our source.
-const Reference = struct {
+pub const Reference = struct {
     /// The file it was found in, for the error message.
     from: []const u8,
     /// The line it was found on, for the error message.
@@ -94,7 +94,7 @@ const Reference = struct {
 /// Extensions that can hold a definition worth citing. `.cu` and `.cuh` are
 /// the CUDA host layer's sources (`src/ggml/cuda/`); without them every one
 /// of its citations read "no such file".
-fn isSource(name: []const u8) bool {
+pub fn isSource(name: []const u8) bool {
     for ([_][]const u8{ ".c", ".h", ".cpp", ".hpp", ".cu", ".cuh", ".cpp.in" }) |ext| {
         if (std.mem.endsWith(u8, name, ext)) return true;
     }
@@ -116,7 +116,7 @@ fn isSource(name: []const u8) bool {
 /// - `want`: the reference as written.
 ///
 /// Return: the resolved path, or null when nothing or more than one matches.
-fn resolve(paths: []const []const u8, want: []const u8) ?[]const u8 {
+pub fn resolve(paths: []const []const u8, want: []const u8) ?[]const u8 {
     var found: ?[]const u8 = null;
     for (paths) |p| {
         if (p.len <= want.len) continue;
@@ -269,7 +269,7 @@ fn logicalLine(
 /// in order. The symbols are taken from the citation's own line where it has
 /// enough of them, and otherwise from the doc comment block it closes -- which
 /// is how a citation wrapped across two lines still finds its names.
-fn scanFile(
+pub fn scanFile(
     arena: std.mem.Allocator,
     out: *std.ArrayList(Reference),
     path: []const u8,
@@ -350,7 +350,7 @@ fn scanFile(
 }
 
 /// Collects every source file under `root`, recursively.
-fn collect(
+pub fn collect(
     arena: std.mem.Allocator,
     io: std.Io,
     out: *std.ArrayList([]const u8),
@@ -388,7 +388,7 @@ fn collect(
 ///
 /// Return: the file's bytes at that commit, or null when git cannot produce
 /// them -- an unknown commit, or a path that did not exist yet.
-fn blobAt(
+pub fn blobAt(
     arena: std.mem.Allocator,
     io: std.Io,
     ref_root: []const u8,
@@ -407,13 +407,13 @@ fn blobAt(
     return res.stdout;
 }
 
-fn readAll(arena: std.mem.Allocator, io: std.Io, path: []const u8) ![]u8 {
+pub fn readAll(arena: std.mem.Allocator, io: std.Io, path: []const u8) ![]u8 {
     const limit: std.Io.Limit = .limited(64 << 20);
     return try std.Io.Dir.cwd().readFileAlloc(io, path, arena, limit);
 }
 
 /// The `n`th line of `text`, 1-indexed, or null when past the end.
-fn nthLine(text: []const u8, n: usize) ?[]const u8 {
+pub fn nthLine(text: []const u8, n: usize) ?[]const u8 {
     if (n == 0) return null;
     var i: usize = 1;
     var it = std.mem.splitScalar(u8, text, '\n');
@@ -435,7 +435,7 @@ fn nthLine(text: []const u8, n: usize) ?[]const u8 {
 /// - `symbol`: the name to find.
 ///
 /// Return: whether the citation holds.
-fn definesAt(text: []const u8, n: usize, symbol: []const u8) bool {
+pub fn definesAt(text: []const u8, n: usize, symbol: []const u8) bool {
     const first = nthLine(text, n) orelse return false;
     if (hasWord(first, symbol)) return true;
     if (std.mem.findScalar(u8, first, '{') == null) return false;
@@ -459,7 +459,7 @@ fn definesAt(text: []const u8, n: usize, symbol: []const u8) bool {
 
 /// Whether `haystack` contains `needle` bounded by non-identifier characters,
 /// so `d` does not match inside `dmin`.
-fn hasWord(haystack: []const u8, needle: []const u8) bool {
+pub fn hasWord(haystack: []const u8, needle: []const u8) bool {
     if (needle.len == 0) return false;
     var from: usize = 0;
     while (std.mem.findPos(u8, haystack, from, needle)) |at| {

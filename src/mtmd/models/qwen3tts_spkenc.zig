@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/qwen3tts-spkenc.cpp` at v0.3.0
-//! (`c1d0e7a00`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/qwen3tts-spkenc.cpp` at v0.4.0
+//! (`5266f24da`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -20,12 +20,12 @@ const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// `SPK_RES2NET_SCALE` (qwen3tts-spkenc.cpp:3 @c1d0e7a00): enc_res2net_scale.
+/// `SPK_RES2NET_SCALE` (qwen3tts-spkenc.cpp:3 @5266f24da): enc_res2net_scale.
 const spk_res2net_scale: c_int = 8;
-/// `SPK_DILATIONS` (qwen3tts-spkenc.cpp:4 @c1d0e7a00): enc_dilations[1..3].
+/// `SPK_DILATIONS` (qwen3tts-spkenc.cpp:4 @5266f24da): enc_dilations[1..3].
 const spk_dilations = [3]c_int{ 2, 3, 4 };
 
-/// Ports `conv1d_same` (qwen3tts-spkenc.cpp:8 @c1d0e7a00), a member of
+/// Ports `conv1d_same` (qwen3tts-spkenc.cpp:8 @5266f24da), a member of
 /// `clip_graph_qwen3tts_spkenc`: kernel K, "same" padding (reflect),
 /// dilation d; x `[C, T]` to `[out_c, T]`.
 fn conv1dSame(g: *const graph.Graph, x: T, w: T, b: T, dilation: c_int) T {
@@ -58,7 +58,7 @@ fn conv1dSame(g: *const graph.Graph, x: T, w: T, b: T, dilation: c_int) T {
     return y;
 }
 
-/// Ports `res2net` (qwen3tts-spkenc.cpp:39 @c1d0e7a00), a member of
+/// Ports `res2net` (qwen3tts-spkenc.cpp:39 @5266f24da), a member of
 /// `clip_graph_qwen3tts_spkenc`: split the channel axis into `scale` chunks
 /// and chain dilated conv1d branches; x `[C, T]` to `[C, T]`.
 fn res2net(g: *const graph.Graph, x: T, layer: *const model_mod.Layer, dilation: c_int, scale: c_int) T {
@@ -95,7 +95,7 @@ fn res2net(g: *const graph.Graph, x: T, layer: *const model_mod.Layer, dilation:
     return acc;
 }
 
-/// Ports `se_block` (qwen3tts-spkenc.cpp:73 @c1d0e7a00), a member of
+/// Ports `se_block` (qwen3tts-spkenc.cpp:73 @5266f24da), a member of
 /// `clip_graph_qwen3tts_spkenc`: squeeze-and-excitation gate; x `[C, T]` to
 /// `[C, T]`.
 fn seBlock(g: *const graph.Graph, x: T, layer: *const model_mod.Layer) T {
@@ -113,7 +113,7 @@ fn seBlock(g: *const graph.Graph, x: T, layer: *const model_mod.Layer) T {
     return c.ggml_mul(ctx0, x, h); // broadcast gate over T
 }
 
-/// Ports `se_res2net_block` (qwen3tts-spkenc.cpp:88 @c1d0e7a00), a member
+/// Ports `se_res2net_block` (qwen3tts-spkenc.cpp:88 @5266f24da), a member
 /// of `clip_graph_qwen3tts_spkenc`: tdnn1, res2net, tdnn2, se, plus the
 /// residual; x `[C, T]` to `[C, T]`.
 fn seRes2netBlock(g: *const graph.Graph, x: T, layer: *const model_mod.Layer, dilation: c_int, scale: c_int) T {
@@ -128,7 +128,7 @@ fn seRes2netBlock(g: *const graph.Graph, x: T, layer: *const model_mod.Layer, di
     return c.ggml_add(ctx0, h, residual);
 }
 
-/// Ports `attentive_stats_pool` (qwen3tts-spkenc.cpp:100 @c1d0e7a00), a
+/// Ports `attentive_stats_pool` (qwen3tts-spkenc.cpp:100 @5266f24da), a
 /// member of `clip_graph_qwen3tts_spkenc`: x `[C, T]` to `[2*C, 1]`.
 fn attentiveStatsPool(g: *const graph.Graph, x: T) T {
     const ctx0 = g.ctx0;
@@ -186,7 +186,7 @@ fn attentiveStatsPool(g: *const graph.Graph, x: T) T {
     return c.ggml_concat(ctx0, w_mean, w_std, 0); // [2C, 1]
 }
 
-/// Ports `build` (qwen3tts-spkenc.cpp:154 @c1d0e7a00), a member of
+/// Ports `build` (qwen3tts-spkenc.cpp:154 @5266f24da), a member of
 /// `clip_graph_qwen3tts_spkenc`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

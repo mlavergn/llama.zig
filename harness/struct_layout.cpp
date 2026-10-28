@@ -301,6 +301,9 @@ int main() {
             { "OP_UNARY_NUM_XIELU", (long) OP_UNARY_NUM_XIELU },
             { "OP_SUM_ROWS_NUM_SUM_ROWS", (long) OP_SUM_ROWS_NUM_SUM_ROWS },
             { "OP_SUM_ROWS_NUM_MEAN", (long) OP_SUM_ROWS_NUM_MEAN },
+            { "OP_SSM_SCAN_SSD_CS", (long) OP_SSM_SCAN_SSD_CS },
+            { "OP_SSM_SCAN_SSD_HD", (long) OP_SSM_SCAN_SSD_HD },
+            { "OP_SSM_SCAN_SSD_NSG", (long) OP_SSM_SCAN_SSD_NSG },
             { "N_MM_NK_TOTAL", (long) N_MM_NK_TOTAL }
         };
         const size_t wn = sizeof(want) / sizeof(*want);

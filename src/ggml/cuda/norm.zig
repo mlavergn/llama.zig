@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/norm.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/norm.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/norm.cuh` at v0.4.0 (`5266f24da`). The
 //! kernels -- `norm_f32`, `group_norm_f32`, `rms_norm_f32`,
 //! `rms_norm_back_f32`, `l2_norm_f32` -- stay CUDA.
 //!
@@ -54,7 +54,7 @@ fn int(v: i64) c_int {
     return @truncate(v);
 }
 
-/// Ports `norm_f32_cuda` (norm.cu:280 @c1d0e7a00).
+/// Ports `norm_f32_cuda` (norm.cu:280 @5266f24da).
 fn normF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: cu.cudaStream_t) void {
     const blocks_num: kernels.Dim3 = .{ .x = uint(nrows), .y = uint(nchannels), .z = uint(nsamples) };
     if (ncols < 1024) {
@@ -76,7 +76,7 @@ fn normF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, 
     }
 }
 
-/// Ports `group_norm_f32_cuda` (norm.cu:293 @c1d0e7a00).
+/// Ports `group_norm_f32_cuda` (norm.cu:293 @5266f24da).
 fn groupNormF32Cuda(x: CPtr, dst: Ptr, num_groups: c_int, eps: f32, group_size: c_int, ne_elements: c_int, stream: cu.cudaStream_t) void {
     if (group_size < 1024) {
         const block_dims: kernels.Dim3 = .{ .x = warp_size };
@@ -102,7 +102,7 @@ fn rmsNormKernel(comptime block_size: comptime_int, comptime do_multiply: bool, 
     return kernels.get("norm", kernels.tmpl("rms_norm_f32", &.{ kernels.int(block_size), kernels.boolean(do_multiply), kernels.boolean(do_add) }));
 }
 
-/// Ports `rms_norm_f32_cuda` (norm.cu:304 @c1d0e7a00).
+/// Ports `rms_norm_f32_cuda` (norm.cu:304 @5266f24da).
 fn rmsNormF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: cu.cudaStream_t) void {
     const blocks_num: kernels.Dim3 = .{ .x = uint(nrows), .y = uint(nchannels), .z = uint(nsamples) };
     // underlying cudaLaunchKernelEx does not support default params
@@ -129,7 +129,7 @@ fn rmsNormF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_in
     }
 }
 
-/// Ports `rms_norm_mul_f32_cuda` (norm.cu:326 @c1d0e7a00).
+/// Ports `rms_norm_mul_f32_cuda` (norm.cu:326 @5266f24da).
 fn rmsNormMulF32Cuda(
     x: CPtr,
     mul: CPtr,
@@ -228,7 +228,7 @@ fn rmsNormMulF32Cuda(
     }
 }
 
-/// Ports `rms_norm_back_f32_cuda` (norm.cu:410 @c1d0e7a00).
+/// Ports `rms_norm_back_f32_cuda` (norm.cu:410 @5266f24da).
 fn rmsNormBackF32Cuda(grad: CPtr, xf: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, eps: f32, stream: cu.cudaStream_t) void {
     if (ncols < 1024) {
         const block_dims: kernels.Dim3 = .{ .x = warp_size };
@@ -249,7 +249,7 @@ fn rmsNormBackF32Cuda(grad: CPtr, xf: CPtr, dst: Ptr, ncols: c_int, nrows: c_int
     }
 }
 
-/// Ports `l2_norm_f32_cuda` (norm.cu:420 @c1d0e7a00).
+/// Ports `l2_norm_f32_cuda` (norm.cu:420 @5266f24da).
 fn l2NormF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: cu.cudaStream_t) void {
     const blocks_num: kernels.Dim3 = .{ .x = uint(nrows), .y = uint(nchannels), .z = uint(nsamples) };
     if (ncols < 1024) {
@@ -305,7 +305,7 @@ fn rowArgs(dst: *const Tensor) RowArgs {
     };
 }
 
-/// Ports `ggml_cuda_op_norm` (norm.cu:435 @c1d0e7a00).
+/// Ports `ggml_cuda_op_norm` (norm.cu:435 @5266f24da).
 pub fn opNorm(ctx: *common.Context, dst: *Tensor) void {
     const stream = ctx.stream();
     const a = rowArgs(dst);
@@ -313,7 +313,7 @@ pub fn opNorm(ctx: *common.Context, dst: *Tensor) void {
     normF32Cuda(a.src0.data, dst.data, int(ne[0]), int(ne[1]), int(ne[2]), int(ne[3]), a.s01, a.s02, a.s03, a.eps, stream);
 }
 
-/// Ports `ggml_cuda_op_group_norm` (norm.cu:459 @c1d0e7a00).
+/// Ports `ggml_cuda_op_group_norm` (norm.cu:459 @5266f24da).
 pub fn opGroupNorm(ctx: *common.Context, dst: *Tensor) void {
     const src0 = srcOf(dst, 0);
     const stream = ctx.stream();
@@ -330,7 +330,7 @@ pub fn opGroupNorm(ctx: *common.Context, dst: *Tensor) void {
     groupNormF32Cuda(src0.data, dst.data, int(num_groups * src0.ne[3]), eps, group_size, int(c.ggml_nelements(src0)), stream);
 }
 
-/// Ports `ggml_cuda_op_rms_norm` (norm.cu:478 @c1d0e7a00).
+/// Ports `ggml_cuda_op_rms_norm` (norm.cu:478 @5266f24da).
 pub fn opRmsNorm(ctx: *common.Context, dst: *Tensor) void {
     const stream = ctx.stream();
     const a = rowArgs(dst);
@@ -374,7 +374,7 @@ fn bcastOf(t: *const Tensor, comptime which: []const u8) Bcast {
     };
 }
 
-/// Ports `ggml_cuda_op_rms_norm_fused` (norm.cu:502 @c1d0e7a00): `RMS_NORM`
+/// Ports `ggml_cuda_op_rms_norm_fused` (norm.cu:502 @5266f24da): `RMS_NORM`
 /// followed by a `MUL` with `dst` as one operand.
 pub fn opRmsNormFused(ctx: *common.Context, dst: *Tensor, mul_tensor: *Tensor) void {
     const rms_norm_src = srcOf(dst, 0);
@@ -432,7 +432,7 @@ pub fn opRmsNormFused(ctx: *common.Context, dst: *Tensor, mul_tensor: *Tensor) v
     );
 }
 
-/// Ports `ggml_cuda_op_rms_norm_fused_add` (norm.cu:562 @c1d0e7a00):
+/// Ports `ggml_cuda_op_rms_norm_fused_add` (norm.cu:562 @5266f24da):
 /// `RMS_NORM`, then `MUL`, then `ADD`.
 pub fn opRmsNormFusedAdd(ctx: *common.Context, dst: *Tensor, mul_tensor: *Tensor, add_tensor: *Tensor) void {
     const rms_norm_src = srcOf(dst, 0);
@@ -494,7 +494,7 @@ pub fn opRmsNormFusedAdd(ctx: *common.Context, dst: *Tensor, mul_tensor: *Tensor
     );
 }
 
-/// Ports `ggml_cuda_op_rms_norm_back` (norm.cu:650 @c1d0e7a00).
+/// Ports `ggml_cuda_op_rms_norm_back` (norm.cu:650 @5266f24da).
 pub fn opRmsNormBack(ctx: *common.Context, dst: *Tensor) void {
     const grad = srcOf(dst, 0); // gradients
     const src0f = srcOf(dst, 1); // src0 from forward pass
@@ -516,7 +516,7 @@ pub fn opRmsNormBack(ctx: *common.Context, dst: *Tensor) void {
     rmsNormBackF32Cuda(grad.data, src0f.data, dst.data, int(ne00), int(nrows), eps, stream);
 }
 
-/// Ports `ggml_cuda_op_l2_norm` (norm.cu:676 @c1d0e7a00).
+/// Ports `ggml_cuda_op_l2_norm` (norm.cu:676 @5266f24da).
 pub fn opL2Norm(ctx: *common.Context, dst: *Tensor) void {
     const stream = ctx.stream();
     const a = rowArgs(dst);

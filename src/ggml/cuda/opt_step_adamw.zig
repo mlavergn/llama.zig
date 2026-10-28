@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/opt-step-adamw.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/opt-step-adamw.cuh` at v0.3.0
-//! (`c1d0e7a00`). The kernel, `opt_step_adamw_f32`, stays CUDA.
+//! `llama.cpp/ggml/src/ggml-cuda/opt-step-adamw.cuh` at v0.4.0
+//! (`5266f24da`). The kernel, `opt_step_adamw_f32`, stays CUDA.
 
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
@@ -14,10 +14,10 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_OPT_STEP_ADAMW_BLOCK_SIZE` (opt-step-adamw.cuh:3 @c1d0e7a00).
+/// Ports `CUDA_OPT_STEP_ADAMW_BLOCK_SIZE` (opt-step-adamw.cuh:3 @5266f24da).
 const block_size = 256;
 
-/// Ports `opt_step_adamw_f32_cuda` (opt-step-adamw.cu:37 @c1d0e7a00).
+/// Ports `opt_step_adamw_f32_cuda` (opt-step-adamw.cu:37 @5266f24da).
 fn optStepAdamwF32Cuda(x: ?*anyopaque, g: ?*const anyopaque, g_m: ?*anyopaque, g_v: ?*anyopaque, pars: ?*const anyopaque, k: i64, stream: cu.cudaStream_t) void {
     const block_dims: kernels.Dim3 = .{ .x = block_size };
     const block_nums: kernels.Dim3 = .{ .x = @truncate(@as(u64, @bitCast(@divTrunc(k + block_size - 1, block_size)))) };
@@ -29,7 +29,7 @@ fn optStepAdamwF32Cuda(x: ?*anyopaque, g: ?*const anyopaque, g_m: ?*anyopaque, g
     }, .{ x, g, g_m, g_v, pars, k });
 }
 
-/// Ports `ggml_cuda_opt_step_adamw` (opt-step-adamw.cu:45 @c1d0e7a00).
+/// Ports `ggml_cuda_opt_step_adamw` (opt-step-adamw.cu:45 @5266f24da).
 pub fn opOptStepAdamw(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_grad = impl.one(Tensor, dst.src[1]);

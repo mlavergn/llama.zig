@@ -8,7 +8,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/common.h`       — `type_conversion_table`
 //!                                                  and `get_thread_range`
 //!
-//! Both at v0.3.0 (`c1d0e7a00`). Each declaration below names the C++ it
+//! Both at v0.4.0 (`5266f24da`). Each declaration below names the C++ it
 //! replaces and the line it began at. This file exports the same four C
 //! symbols with the same signatures, so `ops.cpp` and the ported `ggml-cpu.c`
 //! dispatch into it unchanged.
@@ -65,7 +65,7 @@ extern fn vDSP_vdiv(a: [*]const f32, ia: Stride, b: [*]const f32, ib: Stride, ds
 // The scalar operations
 
 /// Ports `op_add`, `op_sub`, `op_mul` and `op_div`
-/// (binary-ops.cpp:9, 13, 17, 21 @c1d0e7a00).
+/// (binary-ops.cpp:9, 13, 17, 21 @5266f24da).
 ///
 /// The C++ passes these as function-pointer template arguments, which is how
 /// it both selects the arithmetic and, under Accelerate, identifies which vDSP
@@ -108,7 +108,7 @@ const use_accelerate = @import("builtin").os.tag.isDarwin();
 // -----------------------------------------------------------------------------
 // Element conversion
 
-/// Ports `type_conversion_table` (ggml-cpu/common.h:48 @c1d0e7a00), the four
+/// Ports `type_conversion_table` (ggml-cpu/common.h:48 @5266f24da), the four
 /// specialisations collapsed into two comptime functions.
 ///
 /// Note **`vDSP_vsub`'s operand order is reversed** relative to the scalar
@@ -124,7 +124,7 @@ inline fn toF32(comptime T: type, v: T) f32 {
 }
 
 /// Ports the `from_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:48 @c1d0e7a00).
+/// (ggml-cpu/common.h:48 @5266f24da).
 inline fn fromF32(comptime T: type, v: f32) T {
     return switch (T) {
         f32 => v,
@@ -138,7 +138,7 @@ inline fn fromF32(comptime T: type, v: f32) T {
 // -----------------------------------------------------------------------------
 // The kernels
 
-/// Ports `get_thread_range` (ggml-cpu/common.h:74 @c1d0e7a00).
+/// Ports `get_thread_range` (ggml-cpu/common.h:74 @5266f24da).
 ///
 /// Return: `.{ ir0, ir1 }`, the half-open row range this thread owns. The
 /// last thread gets a short range rather than the division being exact.
@@ -158,7 +158,7 @@ fn threadRange(params: *const ComputeParams, src0: *const Tensor) struct { i64, 
     return .{ ir0, ir1 };
 }
 
-/// Ports `vec_binary_op_contiguous` (binary-ops.cpp:26 @c1d0e7a00).
+/// Ports `vec_binary_op_contiguous` (binary-ops.cpp:26 @5266f24da).
 inline fn vecBinaryOpContiguous(
     comptime op: Op,
     comptime Src0: type,
@@ -175,7 +175,7 @@ inline fn vecBinaryOpContiguous(
     }
 }
 
-/// Ports `vec_binary_op_non_contiguous` (binary-ops.cpp:37 @c1d0e7a00).
+/// Ports `vec_binary_op_non_contiguous` (binary-ops.cpp:37 @5266f24da).
 ///
 /// `y` is indexed modulo `ne10` and by byte stride `nb10`, which is how a row
 /// of `src1` broadcasts across a longer row of `src0`.
@@ -204,7 +204,7 @@ inline fn vecBinaryOpNonContiguous(
     }
 }
 
-/// Ports `apply_binary_op` (binary-ops.cpp:50 @c1d0e7a00).
+/// Ports `apply_binary_op` (binary-ops.cpp:50 @5266f24da).
 ///
 /// Walks this thread's rows of `src0`, broadcasting `src1` across the trailing
 /// dimensions by modulo.
@@ -288,7 +288,7 @@ fn applyBinaryOp(
     }
 }
 
-/// Ports `binary_op` (binary-ops.cpp:116 @c1d0e7a00).
+/// Ports `binary_op` (binary-ops.cpp:116 @5266f24da).
 ///
 /// The seven supported type triples, in the C's order. Anything else aborts,
 /// as the C does — the TODO above it in the C++ about using the traits table
@@ -323,22 +323,22 @@ fn binaryOp(comptime op: Op, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_add_non_quantized` (binary-ops.cpp:140 @c1d0e7a00).
+/// Ports `ggml_compute_forward_add_non_quantized` (binary-ops.cpp:140 @5266f24da).
 pub export fn ggml_compute_forward_add_non_quantized(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     binaryOp(.add, params, dst);
 }
 
-/// Ports `ggml_compute_forward_sub` (binary-ops.cpp:144 @c1d0e7a00).
+/// Ports `ggml_compute_forward_sub` (binary-ops.cpp:144 @5266f24da).
 pub export fn ggml_compute_forward_sub(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     binaryOp(.sub, params, dst);
 }
 
-/// Ports `ggml_compute_forward_mul` (binary-ops.cpp:148 @c1d0e7a00).
+/// Ports `ggml_compute_forward_mul` (binary-ops.cpp:148 @5266f24da).
 pub export fn ggml_compute_forward_mul(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     binaryOp(.mul, params, dst);
 }
 
-/// Ports `ggml_compute_forward_div` (binary-ops.cpp:152 @c1d0e7a00).
+/// Ports `ggml_compute_forward_div` (binary-ops.cpp:152 @5266f24da).
 pub export fn ggml_compute_forward_div(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     binaryOp(.div, params, dst);
 }

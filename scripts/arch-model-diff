@@ -21,7 +21,7 @@
 #   UNPORTED  the port stopped at an architecture it has no
 #             `load_arch_hparams` or `load_arch_tensors` for
 #   REF-ABORT every case aborts in the C++ itself, and in the port on the
-#             same assertion: upstream cannot run this fixture (PLM at v0.3.0,
+#             same assertion: upstream cannot run this fixture (PLM since v0.3.0,
 #             which upstream's own test skips as "TODO tensor shapes")
 # A fixture where only some cases abort that way still passes, and its count
 # reads `gpu:20+1abort`: the cases that ran matched, and the C++ and the port

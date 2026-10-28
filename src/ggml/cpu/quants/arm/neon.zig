@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port of a file.** Each function here reproduces one ACLE intrinsic
-//! that `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.3.0, `c1d0e7a00`)
+//! that `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.4.0, `5266f24da`)
 //! calls, and is named after it. The semantics come from the ARM C Language
 //! Extensions; where Zig's obvious equivalent differs, the difference is
 //! documented and the ARM behaviour is what is implemented.
@@ -534,7 +534,7 @@ pub inline fn dotq_s32_portable(acc: i32x4, a: i8x16, b: i8x16) i32x4 {
     return acc +% g0 +% g1 +% g2 +% g3;
 }
 
-/// Ports `ggml_vdotq_s32`, `ggml_vdotq_s32` (ggml-cpu-impl.h:310, 319 @c1d0e7a00): `vdotq_s32`
+/// Ports `ggml_vdotq_s32`, `ggml_vdotq_s32` (ggml-cpu-impl.h:310, 319 @5266f24da): `vdotq_s32`
 /// with `__ARM_FEATURE_DOTPROD`, and without it the C's own fallback.
 ///
 /// The fallback has the same total and a **different lane grouping** —

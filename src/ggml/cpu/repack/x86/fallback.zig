@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! **Not a port of a function.** It reproduces
-//! `llama.cpp/ggml/src/ggml-cpu/arch-fallback.h` at v0.3.0 (`c1d0e7a00`),
+//! `llama.cpp/ggml/src/ggml-cpu/arch-fallback.h` at v0.4.0 (`5266f24da`),
 //! lines 88-111, the `__x86_64__` block, which `#define`s each generic to
 //! the bare name before `repack.cpp` compiles. The bodies are the generic
 //! ports in `cpu/repack/`; this exports each under the name the C gives it.

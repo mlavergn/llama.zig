@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma4-assistant.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llama_model_gemma4_assistant`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/gemma4-assistant.cpp` at v0.4.0
+//! (`5266f24da`): `llama_model_gemma4_assistant`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -25,7 +25,7 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llama_model_gemma4_assistant`'s `load_arch_hparams`
-/// (models/gemma4-assistant.cpp:3 @c1d0e7a00).
+/// (models/gemma4-assistant.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -33,15 +33,12 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.n_embd_inp_impl = hp.nEmbdOut();
 
     hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
-    _ = try meta.getKeyOrArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, hp.nLayer(), true, exc);
+    _ = try meta.getKeyOrArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, hp.n_layer_all, true, exc);
 
     // Read and, as in the C++, not used.
     _ = try meta.getKey(u32, .attention_shared_kv_layers, false, exc);
 
     hp.f_attention_scale = 1.0;
-
-    if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
-    impl.assert(hp.n_layer_nextn == hp.n_layer_all, "models/gemma4-assistant.cpp", 15, "hparams.n_layer_nextn == hparams.n_layer_all && \"n_layer_nextn must be == n_layer_impl\"");
 
     if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
@@ -51,7 +48,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_gemma4_assistant`'s `load_arch_tensors`
-/// (models/gemma4-assistant.cpp:24 @c1d0e7a00).
+/// (models/gemma4-assistant.cpp:21 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -116,13 +113,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_gemma4_assistant`'s `build_arch_graph`
-/// (models/gemma4-assistant.cpp:83 @c1d0e7a00).
+/// (models/gemma4-assistant.cpp:80 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma4_assistant`'s `graph`
-/// (models/gemma4-assistant.cpp:87 @c1d0e7a00).
+/// (models/gemma4-assistant.cpp:84 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -132,7 +129,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     var inp_tokens: *Tensor = undefined;
     var inp_h: *Tensor = undefined;
     {
-        const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma4-assistant.cpp", 94, "out of memory");
+        const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma4-assistant.cpp", 91, "out of memory");
         inp.* = .{ .n_embd = n_embd_backbone };
 
         inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.ubatch.n_tokens);
@@ -150,7 +147,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         _ = b.res.addInput(graph.InpEmbd, inp);
     }
 
-    impl.assert(cp.ctx_other != null, "models/gemma4-assistant.cpp", 111, "cparams.ctx_other != nullptr");
+    impl.assert(cp.ctx_other != null, "models/gemma4-assistant.cpp", 108, "cparams.ctx_other != nullptr");
     const ctx_other: *const context_mod.Context = @ptrCast(@alignCast(cp.ctx_other.?));
     const model_other = ctx_other.getModel();
 

@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -21,7 +21,7 @@ fn oom() noreturn {
 }
 
 /// Ports `llm_tokenizer_wpm_session`'s `tokenize` (llama-vocab.cpp:771
-/// @c1d0e7a00).
+/// @5266f24da).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary.
@@ -80,7 +80,7 @@ pub fn tokenize(vocab: *const Vocab, text: []const u8, output: *std.ArrayList(To
 }
 
 /// Ports `llm_tokenizer_wpm_session`'s `preprocess` (llama-vocab.cpp:818
-/// @c1d0e7a00): NFD and accent stripping if asked, lowercasing if asked,
+/// @5266f24da): NFD and accent stripping if asked, lowercasing if asked,
 /// whitespace dropped, controls dropped, and punctuation, ASCII symbols and
 /// Chinese characters each a word of their own.
 ///
@@ -140,7 +140,7 @@ fn last(words: *std.ArrayList(std.ArrayList(u8))) *std.ArrayList(u8) {
 }
 
 /// Ports `llm_tokenizer_wpm_session`'s `is_chinese_char` (llama-vocab.cpp:863
-/// @c1d0e7a00). Extension E starts at 0x2B920 here, as in the HF Rust code
+/// @5266f24da). Extension E starts at 0x2B920 here, as in the HF Rust code
 /// it follows, not at 0x2B820.
 pub fn isChineseChar(cpt: u32) bool {
     return (cpt >= 0x04E00 and cpt <= 0x09FFF) or

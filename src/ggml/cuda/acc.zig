@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/acc.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/acc.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/acc.cuh` at v0.4.0 (`5266f24da`). The
 //! kernel, `acc_f32`, stays CUDA.
 //!
 //! The view's strides and offset come from `op_params`, which are
@@ -20,10 +20,10 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_ACC_BLOCK_SIZE` (acc.cuh:3 @c1d0e7a00).
+/// Ports `CUDA_ACC_BLOCK_SIZE` (acc.cuh:3 @5266f24da).
 const block_size = 256;
 
-/// Ports `acc_f32_cuda` (acc.cu:30 @c1d0e7a00), which launches with
+/// Ports `acc_f32_cuda` (acc.cu:30 @5266f24da), which launches with
 /// `<<<>>>`.
 fn accF32Cuda(x: ?*const anyopaque, y: ?*const anyopaque, dst: ?*anyopaque, n_elements: i64, ne10: i64, ne11: i64, ne12: i64, ne13: i64, s1: i64, s2: i64, s3: i64, off: i64, stream: cu.cudaStream_t) void {
     const num_blocks: c_int = @truncate(@divTrunc(n_elements + block_size - 1, block_size));
@@ -39,7 +39,7 @@ fn floats(p: i32) i64 {
     return @bitCast(@as(u64, @bitCast(@as(i64, p))) / @sizeOf(f32));
 }
 
-/// Ports `ggml_cuda_op_acc` (acc.cu:37 @c1d0e7a00).
+/// Ports `ggml_cuda_op_acc` (acc.cu:37 @5266f24da).
 pub fn opAcc(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

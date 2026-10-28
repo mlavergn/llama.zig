@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/granite.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/granite.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_granite`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` with `build_attention_layer` and
 //! `build_layer_ffn`. `llama_model_granite_moe` and `llama_model_minicpm`
@@ -28,7 +28,7 @@ fn oom() noreturn {
     impl.abort("models/granite.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_granite`'s `load_arch_hparams` (models/granite.cpp:5 @c1d0e7a00).
+/// Ports `llama_model_granite`'s `load_arch_hparams` (models/granite.cpp:5 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -78,7 +78,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
 }
 
-/// Ports `llama_model_granite`'s `load_arch_tensors` (models/granite.cpp:50 @c1d0e7a00).
+/// Ports `llama_model_granite`'s `load_arch_tensors` (models/granite.cpp:50 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -143,13 +143,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_granite`'s `build_arch_graph` (models/granite.cpp:110 @c1d0e7a00).
+/// Ports `llama_model_granite`'s `build_arch_graph` (models/granite.cpp:110 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_granite`'s `graph`
-/// (models/granite.cpp:114 @c1d0e7a00), which Granite MoE and MiniCPM
+/// (models/granite.cpp:114 @5266f24da), which Granite MoE and MiniCPM
 /// build with too.
 ///
 /// Parameters:
@@ -227,7 +227,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_granite`'s `graph`'s `build_attention_layer`
-/// (models/granite.cpp:196 @c1d0e7a00).
+/// (models/granite.cpp:196 @5266f24da).
 fn buildAttentionLayer(
     b: *const graph.Builder,
     cur_: *Tensor,
@@ -264,7 +264,7 @@ fn buildAttentionLayer(
 }
 
 /// Ports `llama_model_granite`'s `graph`'s `build_layer_ffn`
-/// (models/granite.cpp:234 @c1d0e7a00).
+/// (models/granite.cpp:234 @5266f24da).
 fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;

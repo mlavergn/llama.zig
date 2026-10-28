@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Move the port's `__FILE__`/`__LINE__` literals from upstream commit A to B.
+
+**Not a port.** The port reproduces the C's abort messages, which carry the
+line of the `GGML_ASSERT` or `GGML_ABORT` that fired, so ported code passes
+them as literals: `impl.assert(..., "llama-model.cpp", 1235, ...)`. Gates
+compare those messages (`arch-model-diff` counts a case where both sides
+abort on the same message as a match), so after a sync a literal at the old
+line is a wrong message, and it is not a citation: `upstream-map --repin`
+never sees it. There were 1,133 of them at v0.3.0.
+
+For each literal `"<file>", <N>` in `src/`, `cli/` and `tools/`, and each
+bare line handed to a helper in `HELPERS`:
+
+- the file resolves as a citation does, by unique path suffix at A; a bare
+  name that several directories share (`qwen35.cpp`) is narrowed by where the
+  Zig lives (`src/mtmd/` -> `tools/mtmd/`, `src/llama/` -> `src/`, ...);
+- line N at A must look like the source of a message (an assert, abort,
+  throw or log), or the literal is reported, not moved;
+- when no hunk of `git diff -U0 A B` touches line N, it moves by the shift of
+  the hunks above it, and the line's text at B must equal its text at A;
+- otherwise it is listed for a reading by hand.
+
+A literal ported at B by hand before the run is named with `--keep
+<zig-file>:<upstream-name>:<N>`, so it is not read as a line at A.
+
+`--skip <prefix>` leaves files under a path alone (one another agent is
+editing, say).
+
+Usage: scripts/upstream-relines [--write] [--skip <prefix>]... [--keep <zig>:<name>:<N>]... <A> <B>
+"""
+import os
+import re
+import subprocess
+import sys
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+REF = os.path.join(ROOT, "llama.cpp")
+LIT = re.compile(r'"([A-Za-z0-9_./-]+\.(?:cpp|c|h|cu|cuh|m))",(\s*)(\d+)\b')
+MESSAGE = re.compile(r"GGML_ASSERT|GGML_ABORT|GGML_LOG|LLAMA_LOG|LOG_|assert|abort|throw|fprintf|printf|format\(")
+
+# Where each port area's upstream sources live, to break ties between names
+# several directories share.
+# Helpers that take a bare `__LINE__` for one fixed upstream file -- the
+# file is the helper's, so the literal has no file name beside it. Found at
+# v0.4.0, after `hparams.zig`'s `outOfBounds(248, ...)` and its kin were left
+# at v0.3.0 lines by the first version of this script, which matched only
+# `"<file>", <N>`. A new helper of this shape goes here.
+HELPERS = [
+    ("src/ggml/backend_meta.zig", r"abortFmt\((\d+)", "ggml/src/ggml-backend-meta.cpp"),
+    ("src/llama/hparams.zig", r"outOfBounds\((\d+)", "src/llama-hparams.cpp"),
+    ("src/llama/vocab/vocab.zig", r"assertNotNone\((\d+)", "src/llama-vocab.cpp"),
+    ("src/llama/kv_cache.zig", r"setInputRot\([^,()]+, (\d+)", "src/llama-kv-cache.cpp"),
+    ("src/llama/models/delta_net.zig", r"checkShapes\((?:[^,()]+, ){6}(\d+)", "src/models/delta-net-base.cpp"),
+    ("src/mtmd/audio.zig", r"ggmlAssert\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/mtmd/mtmd-audio.cpp"),
+    ("src/mtmd/audio.zig", r"assertCache\((\d+)", "tools/mtmd/mtmd-audio.cpp"),
+    ("src/mtmd/image.zig", r"assert_\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/mtmd/mtmd-image.cpp"),
+    ("tools/llama_bench.zig", r"ggmlAssert\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/llama-bench/llama-bench.cpp"),
+    ("tools/imatrix.zig", r"ggmlAssert\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/imatrix/imatrix.cpp"),
+    ("tools/perplexity.zig", r"ggmlAssert\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/perplexity/perplexity.cpp"),
+]
+
+AREA = [
+    ("src/mtmd/", "tools/mtmd/"),
+    ("src/llama/models/", "src/models/"),
+    ("src/llama/", "src/"),
+    ("src/ggml/", "ggml/"),
+    ("tools/", "tools/"),
+    ("cli/", "common/"),
+]
+
+
+def git(*args):
+    return subprocess.run(["git", "-C", REF] + list(args), capture_output=True, text=True, check=True).stdout
+
+
+def main():
+    argv = sys.argv[1:]
+    write = "--write" in argv
+    argv = [a for a in argv if a != "--write"]
+    skip = []
+    while "--skip" in argv:
+        i = argv.index("--skip")
+        skip.append(argv[i + 1])
+        del argv[i:i + 2]
+    keep = set()
+    while "--keep" in argv:
+        i = argv.index("--keep")
+        keep.add(argv[i + 1])
+        del argv[i:i + 2]
+    if len(argv) != 2:
+        sys.exit("usage: scripts/upstream-relines [--write] <A> <B>")
+    a = git("rev-parse", argv[0] + "^{commit}").strip()
+    b = git("rev-parse", argv[1] + "^{commit}").strip()
+    paths = [p for p in git("ls-tree", "-r", "--name-only", a).split("\n") if p]
+
+    def resolve(name, zig_path):
+        cands = [p for p in paths if p == name or p.endswith("/" + name)]
+        if len(cands) > 1:
+            for zig_prefix, up_prefix in AREA:
+                if zig_path.startswith(zig_prefix):
+                    narrowed = [p for p in cands if p.startswith(up_prefix)]
+                    if narrowed:
+                        cands = narrowed
+                    break
+            # `llama.cpp` from src/llama/ is src/llama.cpp, not src/models/llama.cpp
+            direct = [p for p in cands if os.path.dirname(p) == os.path.dirname(cands[0]).split("/")[0] or p.count("/") == min(q.count("/") for q in cands)]
+            if len(direct) == 1:
+                cands = direct
+        return cands[0] if len(cands) == 1 else None
+
+    files = {}
+
+    def text_at(rev, path):
+        key = (rev, path)
+        if key not in files:
+            try:
+                files[key] = git("show", "%s:%s" % (rev, path)).split("\n")
+            except subprocess.CalledProcessError:
+                files[key] = None
+        return files[key]
+
+    hunks_cache = {}
+
+    def hunks(path):
+        if path not in hunks_cache:
+            out = []
+            for line in git("diff", "-U0", a, b, "--", path).split("\n"):
+                m = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
+                if m:
+                    out.append((int(m.group(1)), int(m.group(2) or 1), int(m.group(3)), int(m.group(4) or 1)))
+            hunks_cache[path] = out
+        return hunks_cache[path]
+
+    moved = kept = manual = 0
+    report = []
+    notes = []
+    touched = []
+    for top in ("src", "cli", "tools"):
+        for dirpath, _, names in os.walk(os.path.join(ROOT, top)):
+            for fn in names:
+                if not fn.endswith(".zig"):
+                    continue
+                zpath = os.path.relpath(os.path.join(dirpath, fn), ROOT)
+                if any(zpath.startswith(x) for x in skip):
+                    continue
+                src = open(os.path.join(ROOT, zpath)).read()
+                out = []
+                pos = 0
+                changed = False
+                found = [(m.group(1), int(m.group(3)), m.start(3), m.end(3), None) for m in LIT.finditer(src)]
+                for hz, hpat, hup in HELPERS:
+                    if zpath == hz:
+                        found += [(hup, int(m.group(1)), m.start(1), m.end(1), hup) for m in re.finditer(hpat, src)]
+                found.sort(key=lambda f: f[2])
+                for name, n, num_start, num_end, fixed in found:
+                    zline = src.count("\n", 0, num_start) + 1
+                    up = fixed or resolve(name, zpath)
+                    new_n = n
+                    if n == 0 or "%s:%s:%d" % (zpath, name, n) in keep:
+                        # 0 is a placeholder, not a line; a kept literal is already at B
+                        kept += 1
+                    elif up is None:
+                        report.append("%s:%d: %s:%d: no unique upstream file" % (zpath, zline, name, n))
+                        manual += 1
+                    else:
+                        la = text_at(a, up)
+                        # clang's __LINE__ in a macro spanning lines is its last
+                        # line, so the message may begin a few lines above
+                        if la is None or n > len(la):
+                            report.append("%s:%d: %s:%d: past the end of the file at A" % (zpath, zline, up, n))
+                            manual += 1
+                        else:
+                            if not any(MESSAGE.search(l) for l in la[max(0, n - 9):n]):
+                                # an exception's origin, say; still a line reference
+                                notes.append("%s:%d: %s:%d: not a message line: %r" % (zpath, zline, up, n, la[n - 1].strip()))
+                            delta = 0
+                            hit = False
+                            for os_, oc, ns, nc in hunks(up):
+                                last = os_ if oc == 0 else os_ + oc - 1
+                                if oc > 0 and os_ <= n <= last:
+                                    hit = True
+                                    break
+                                if last < n:
+                                    delta += nc - oc
+                            lb = text_at(b, up)
+                            if hit or lb is None or not (0 < n + delta <= len(lb)) or lb[n + delta - 1] != la[n - 1]:
+                                report.append("%s:%d: %s:%d: changed at B; read by hand: %r" % (zpath, zline, up, n, la[n - 1].strip()))
+                                manual += 1
+                            else:
+                                new_n = n + delta
+                                if new_n != n:
+                                    moved += 1
+                                else:
+                                    kept += 1
+                    if new_n != n:
+                        out.append(src[pos:num_start])
+                        out.append(str(new_n))
+                        pos = num_end
+                        changed = True
+                if changed:
+                    touched.append(zpath)
+                if changed and write:
+                    out.append(src[pos:])
+                    open(os.path.join(ROOT, zpath), "w").write("".join(out))
+    for r in report:
+        print(r)
+    for r in notes:
+        print("note: " + r)
+    for t in touched:
+        print("file: " + t)
+    print("upstream-relines %s -> %s: %d moved, %d unchanged, %d to read by hand%s"
+          % (a[:9], b[:9], moved, kept, manual, "" if write else " (dry run; --write applies)"))
+
+
+main()

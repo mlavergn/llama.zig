@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/youtuvl.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/youtuvl.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -14,7 +14,7 @@ const model_mod = @import("../model.zig");
 const c = impl.c;
 const T = graph.T;
 
-/// Ports `build` (youtuvl.cpp:3 @c1d0e7a00), a member of `clip_graph_youtuvl`.
+/// Ports `build` (youtuvl.cpp:3 @5266f24da), a member of `clip_graph_youtuvl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

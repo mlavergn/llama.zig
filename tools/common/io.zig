@@ -13,7 +13,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-extern fn fprintf(stream: *anyopaque, format: [*:0]const u8, ...) c_int;
+const fprintfC = @extern(*const fn (stream: *anyopaque, format: [*:0]const u8, ...) callconv(.c) c_int, .{ .name = "fprintf" });
 extern fn fflush(stream: ?*anyopaque) c_int;
 extern fn __acrt_iob_func(index: c_uint) callconv(.c) *anyopaque;
 
@@ -39,12 +39,17 @@ pub fn cStderr() *anyopaque {
 
 /// `printf(fmt, ...)`.
 pub fn printf(comptime fmt: [*:0]const u8, args: anytype) void {
-    _ = @call(.auto, fprintf, .{ cStdout(), fmt } ++ args);
+    _ = @call(.auto, fprintfC, .{ cStdout(), fmt } ++ args);
+}
+
+/// `fprintf(stream, fmt, ...)`.
+pub fn fprintf(stream_: *anyopaque, comptime fmt: [*:0]const u8, args: anytype) void {
+    _ = @call(.auto, fprintfC, .{ stream_, fmt } ++ args);
 }
 
 /// `fprintf(stderr, fmt, ...)`.
 pub fn eprintf(comptime fmt: [*:0]const u8, args: anytype) void {
-    _ = @call(.auto, fprintf, .{ cStderr(), fmt } ++ args);
+    _ = @call(.auto, fprintfC, .{ cStderr(), fmt } ++ args);
 }
 
 /// `fflush(stdout)`.

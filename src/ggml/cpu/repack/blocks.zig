@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Mirrors `llama.cpp/ggml/src/ggml-cpu/repack.h` at v0.3.0 (`c1d0e7a00`).
+//! Mirrors `llama.cpp/ggml/src/ggml-cpu/repack.h` at v0.4.0 (`5266f24da`).
 //!
 //! These are `extern struct` because the layout is the on-disk-equivalent
 //! contract the gemm kernels read; each carries a `comptime` size assertion
@@ -22,7 +22,7 @@ const K_SCALE_SIZE = 12;
 const QK4_NL = 32;
 const QK_MXFP4 = 32;
 
-/// Mirrors `block` (ggml-cpu/repack.h:23 @c1d0e7a00), the C's `template <int K, int N>`:
+/// Mirrors `block` (ggml-cpu/repack.h:23 @5266f24da), the C's `template <int K, int N>`:
 /// `N` interleaved `qK_0` blocks.
 pub fn Block(comptime K: comptime_int, comptime N: comptime_int) type {
     const qk = switch (K) {
@@ -45,7 +45,7 @@ pub const block_q8_0x4 = Block(8, 4);
 pub const block_q8_0x8 = Block(8, 8);
 pub const block_q8_0x16 = Block(8, 16);
 
-/// Mirrors `block_q4_Kx8` (ggml-cpu/repack.h:43 @c1d0e7a00).
+/// Mirrors `block_q4_Kx8` (ggml-cpu/repack.h:43 @5266f24da).
 pub const block_q4_Kx8 = extern struct {
     d: [8]half,
     dmin: [8]half,
@@ -53,7 +53,7 @@ pub const block_q4_Kx8 = extern struct {
     qs: [1024]u8,
 };
 
-/// Mirrors `block_q4_Kx16` (ggml-cpu/repack.h:51 @c1d0e7a00).
+/// Mirrors `block_q4_Kx16` (ggml-cpu/repack.h:51 @5266f24da).
 pub const block_q4_Kx16 = extern struct {
     d: [16]half,
     dmin: [16]half,
@@ -61,7 +61,7 @@ pub const block_q4_Kx16 = extern struct {
     qs: [2048]u8,
 };
 
-/// Mirrors `block_q2_Kx8` (ggml-cpu/repack.h:59 @c1d0e7a00).
+/// Mirrors `block_q2_Kx8` (ggml-cpu/repack.h:59 @5266f24da).
 pub const block_q2_Kx8 = extern struct {
     d: [8]half,
     dmin: [8]half,
@@ -69,7 +69,7 @@ pub const block_q2_Kx8 = extern struct {
     qs: [512]u8,
 };
 
-/// Mirrors `block_q2_Kx16` (ggml-cpu/repack.h:67 @c1d0e7a00).
+/// Mirrors `block_q2_Kx16` (ggml-cpu/repack.h:67 @5266f24da).
 pub const block_q2_Kx16 = extern struct {
     d: [16]half,
     dmin: [16]half,
@@ -77,7 +77,7 @@ pub const block_q2_Kx16 = extern struct {
     qs: [1024]u8,
 };
 
-/// Mirrors `block_q5_Kx8` (ggml-cpu/repack.h:75 @c1d0e7a00).
+/// Mirrors `block_q5_Kx8` (ggml-cpu/repack.h:75 @5266f24da).
 pub const block_q5_Kx8 = extern struct {
     d: [8]half,
     dmin: [8]half,
@@ -86,7 +86,7 @@ pub const block_q5_Kx8 = extern struct {
     qs: [QK_K * 8 / 2]u8,
 };
 
-/// Mirrors `block_q6_Kx8` (ggml-cpu/repack.h:86 @c1d0e7a00).
+/// Mirrors `block_q6_Kx8` (ggml-cpu/repack.h:86 @5266f24da).
 pub const block_q6_Kx8 = extern struct {
     d: [8]half,
     scales: [QK_K / 16 * 8]i8,
@@ -94,38 +94,38 @@ pub const block_q6_Kx8 = extern struct {
     qh: [QK_K / 4 * 8]u8,
 };
 
-/// Mirrors `block_q8_Kx4` (ggml-cpu/repack.h:96 @c1d0e7a00).
+/// Mirrors `block_q8_Kx4` (ggml-cpu/repack.h:96 @5266f24da).
 pub const block_q8_Kx4 = extern struct {
     d: [4]f32,
     qs: [QK_K * 4]i8,
     bsums: [QK_K / 4]i16,
 };
 
-/// Mirrors `block_iq4_nlx4` (ggml-cpu/repack.h:104 @c1d0e7a00).
+/// Mirrors `block_iq4_nlx4` (ggml-cpu/repack.h:104 @5266f24da).
 pub const block_iq4_nlx4 = extern struct {
     d: [4]half,
     qs: [QK4_NL * 2]u8,
 };
 
-/// Mirrors `block_iq4_nlx8` (ggml-cpu/repack.h:111 @c1d0e7a00).
+/// Mirrors `block_iq4_nlx8` (ggml-cpu/repack.h:111 @5266f24da).
 pub const block_iq4_nlx8 = extern struct {
     d: [8]half,
     qs: [QK4_NL * 4]u8,
 };
 
-/// Mirrors `block_iq4_nlx16` (ggml-cpu/repack.h:118 @c1d0e7a00).
+/// Mirrors `block_iq4_nlx16` (ggml-cpu/repack.h:118 @5266f24da).
 pub const block_iq4_nlx16 = extern struct {
     d: [16]half,
     qs: [QK4_NL * 8]u8,
 };
 
-/// Mirrors `block_mxfp4x4` (ggml-cpu/repack.h:124 @c1d0e7a00).
+/// Mirrors `block_mxfp4x4` (ggml-cpu/repack.h:124 @5266f24da).
 pub const block_mxfp4x4 = extern struct {
     e: [4]u8,
     qs: [QK_MXFP4 * 2]u8,
 };
 
-/// Mirrors `block_mxfp4x8` (ggml-cpu/repack.h:130 @c1d0e7a00).
+/// Mirrors `block_mxfp4x8` (ggml-cpu/repack.h:130 @5266f24da).
 pub const block_mxfp4x8 = extern struct {
     e: [8]u8,
     qs: [QK_MXFP4 * 4]u8,

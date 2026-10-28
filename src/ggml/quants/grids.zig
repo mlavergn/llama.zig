@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port, and not hand-written.** Extracted from
-//! `llama.cpp/ggml/src/ggml-quants.c` (v0.3.0, `c1d0e7a00`) by
+//! `llama.cpp/ggml/src/ggml-quants.c` (v0.4.0, `5266f24da`) by
 //! `scripts/iq-grids`.
 //!
 //! # Why these are not imported

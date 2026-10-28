@@ -11,7 +11,7 @@
 //!   and `llama_memory_hybrid_iswa_context`
 //! - `llama.cpp/src/llama-memory-hybrid-iswa.cpp` -- their bodies
 //!
-//! All at v0.3.0 (`c1d0e7a00`). The shape follows `memory_hybrid.zig`,
+//! All at v0.4.0 (`5266f24da`). The shape follows `memory_hybrid.zig`,
 //! with `kv_cache_iswa.zig` in place of the single KV cache.
 
 const std = @import("std");
@@ -46,14 +46,14 @@ fn isNotRecr(ctx: ?*const anyopaque, il: i32) bool {
     return !isRecr(ctx, il);
 }
 
-/// Ports `llama_memory_hybrid_iswa` (llama-memory-hybrid-iswa.h:19 @c1d0e7a00).
+/// Ports `llama_memory_hybrid_iswa` (llama-memory-hybrid-iswa.h:19 @5266f24da).
 pub const MemoryHybridIswa = struct {
     hparams: *const Hparams,
     mem_attn: *kv_cache_iswa.KvCacheIswa,
     mem_recr: *memory_recurrent.MemoryRecurrent,
 
     /// Ports the constructor of `llama_memory_hybrid_iswa`
-    /// (llama-memory-hybrid-iswa.cpp:11 @c1d0e7a00). An empty filter selects
+    /// (llama-memory-hybrid-iswa.cpp:11 @5266f24da). An empty filter selects
     /// the layers by `is_recr`; the iSWA cache then splits the attention
     /// layers by `is_swa`.
     ///
@@ -99,7 +99,7 @@ pub const MemoryHybridIswa = struct {
     }
 
     /// Ports `llama_memory_hybrid_iswa`'s `init_batch`
-    /// (llama-memory-hybrid-iswa.cpp:66 @c1d0e7a00): split as the recurrent
+    /// (llama-memory-hybrid-iswa.cpp:66 @5266f24da): split as the recurrent
     /// memory needs, then prepare the recurrent memory and both halves of
     /// the iSWA cache.
     pub fn initBatch(self: *MemoryHybridIswa, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *HybridIswaContext {
@@ -169,77 +169,77 @@ pub const MemoryHybridIswa = struct {
         return HybridIswaContext.createStatus(.failed_prepare);
     }
 
-    /// Ports `llama_memory_hybrid_iswa`'s `init_full` (llama-memory-hybrid-iswa.cpp:130 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa`'s `init_full` (llama-memory-hybrid-iswa.cpp:130 @5266f24da).
     pub fn initFull(self: *MemoryHybridIswa) *HybridIswaContext {
         return HybridIswaContext.createFull(self);
     }
 
-    /// Ports `llama_memory_hybrid_iswa`'s `init_update` (llama-memory-hybrid-iswa.cpp:134 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa`'s `init_update` (llama-memory-hybrid-iswa.cpp:134 @5266f24da).
     pub fn initUpdate(self: *MemoryHybridIswa, lctx: *anyopaque, optimize: bool) *HybridIswaContext {
         return HybridIswaContext.createUpdate(self, lctx, optimize);
     }
 
     /// Ports `llama_memory_hybrid_iswa`'s `get_can_shift`
-    /// (llama-memory-hybrid-iswa.cpp:138 @c1d0e7a00): shifting is trivial
+    /// (llama-memory-hybrid-iswa.cpp:138 @5266f24da): shifting is trivial
     /// for the recurrent half.
     pub fn getCanShift(self: *const MemoryHybridIswa) bool {
         return self.mem_attn.getCanShift();
     }
 
-    /// Ports `llama_memory_hybrid_iswa`'s `clear` (llama-memory-hybrid-iswa.cpp:143 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa`'s `clear` (llama-memory-hybrid-iswa.cpp:143 @5266f24da).
     pub fn clear(self: *MemoryHybridIswa, data: bool) void {
         self.mem_attn.clear(data);
         self.mem_recr.clear(data);
     }
 
     /// Ports `llama_memory_hybrid_iswa`'s `seq_rm` (llama-memory-hybrid-iswa.cpp:148
-    /// @c1d0e7a00): the recurrent half first, since it may refuse without
+    /// @5266f24da): the recurrent half first, since it may refuse without
     /// changing anything.
     pub fn seqRm(self: *MemoryHybridIswa, seq_id: i32, p0: i32, p1: i32) bool {
         if (!self.mem_recr.seqRm(seq_id, p0, p1)) return false;
         return self.mem_attn.seqRm(seq_id, p0, p1);
     }
 
-    /// Ports `llama_memory_hybrid_iswa`'s `seq_cp` (llama-memory-hybrid-iswa.cpp:157 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa`'s `seq_cp` (llama-memory-hybrid-iswa.cpp:157 @5266f24da).
     pub fn seqCp(self: *MemoryHybridIswa, a: i32, b: i32, p0: i32, p1: i32) void {
         self.mem_attn.seqCp(a, b, p0, p1);
         self.mem_recr.seqCp(a, b, p0, p1);
     }
 
-    /// Ports `llama_memory_hybrid_iswa`'s `seq_keep` (llama-memory-hybrid-iswa.cpp:162 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa`'s `seq_keep` (llama-memory-hybrid-iswa.cpp:162 @5266f24da).
     pub fn seqKeep(self: *MemoryHybridIswa, seq_id: i32) void {
         self.mem_attn.seqKeep(seq_id);
         self.mem_recr.seqKeep(seq_id);
     }
 
-    /// Ports `llama_memory_hybrid_iswa`'s `seq_add` (llama-memory-hybrid-iswa.cpp:167 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa`'s `seq_add` (llama-memory-hybrid-iswa.cpp:167 @5266f24da).
     pub fn seqAdd(self: *MemoryHybridIswa, seq_id: i32, p0: i32, p1: i32, shift: i32) void {
         self.mem_attn.seqAdd(seq_id, p0, p1, shift);
         self.mem_recr.seqAdd(seq_id, p0, p1, shift);
     }
 
-    /// Ports `llama_memory_hybrid_iswa`'s `seq_div` (llama-memory-hybrid-iswa.cpp:172 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa`'s `seq_div` (llama-memory-hybrid-iswa.cpp:172 @5266f24da).
     pub fn seqDiv(self: *MemoryHybridIswa, seq_id: i32, p0: i32, p1: i32, d: c_int) void {
         self.mem_attn.seqDiv(seq_id, p0, p1, d);
         self.mem_recr.seqDiv(seq_id, p0, p1, d);
     }
 
     /// Ports `llama_memory_hybrid_iswa`'s `seq_pos_min`
-    /// (llama-memory-hybrid-iswa.cpp:177 @c1d0e7a00): the larger of the two
+    /// (llama-memory-hybrid-iswa.cpp:177 @5266f24da): the larger of the two
     /// minimums.
     pub fn seqPosMin(self: *const MemoryHybridIswa, seq_id: i32) i32 {
         return @max(self.mem_attn.seqPosMin(seq_id), self.mem_recr.seqPosMin(seq_id));
     }
 
     /// Ports `llama_memory_hybrid_iswa`'s `seq_pos_max`
-    /// (llama-memory-hybrid-iswa.cpp:182 @c1d0e7a00): the smaller of the two
+    /// (llama-memory-hybrid-iswa.cpp:182 @5266f24da): the smaller of the two
     /// maximums.
     pub fn seqPosMax(self: *const MemoryHybridIswa, seq_id: i32) i32 {
         return @min(self.mem_attn.seqPosMax(seq_id), self.mem_recr.seqPosMax(seq_id));
     }
 
     /// Ports `llama_memory_hybrid_iswa`'s `memory_breakdown`
-    /// (llama-memory-hybrid-iswa.cpp:187 @c1d0e7a00): the attention half's
+    /// (llama-memory-hybrid-iswa.cpp:187 @5266f24da): the attention half's
     /// sizes, with the recurrent half's added per buffer type.
     pub fn memoryBreakdown(self: *const MemoryHybridIswa, out: *std.ArrayList(memory.BuftSize)) void {
         self.mem_attn.memoryBreakdown(out);
@@ -247,25 +247,25 @@ pub const MemoryHybridIswa = struct {
     }
 
     /// Ports `llama_memory_hybrid_iswa`'s `state_write`
-    /// (llama-memory-hybrid-iswa.cpp:195 @c1d0e7a00). The iSWA cache applies
+    /// (llama-memory-hybrid-iswa.cpp:195 @5266f24da). The iSWA cache applies
     /// the partial-only flag itself.
     pub fn stateWrite(self: *const MemoryHybridIswa, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         try self.mem_attn.stateWrite(w, seq_id, flags, exc);
         try self.mem_recr.stateWrite(w, seq_id, flags, exc);
     }
 
-    /// Ports `llama_memory_hybrid_iswa`'s `state_read` (llama-memory-hybrid-iswa.cpp:200 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa`'s `state_read` (llama-memory-hybrid-iswa.cpp:200 @5266f24da).
     pub fn stateRead(self: *MemoryHybridIswa, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         try self.mem_attn.stateRead(r, seq_id, flags, exc);
         try self.mem_recr.stateRead(r, seq_id, flags, exc);
     }
 
-    /// Ports `llama_memory_hybrid_iswa`'s `get_mem_attn` (llama-memory-hybrid-iswa.cpp:205 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa`'s `get_mem_attn` (llama-memory-hybrid-iswa.cpp:205 @5266f24da).
     pub fn getMemAttn(self: *const MemoryHybridIswa) *kv_cache_iswa.KvCacheIswa {
         return self.mem_attn;
     }
 
-    /// Ports `llama_memory_hybrid_iswa`'s `get_mem_recr` (llama-memory-hybrid-iswa.cpp:209 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa`'s `get_mem_recr` (llama-memory-hybrid-iswa.cpp:209 @5266f24da).
     pub fn getMemRecr(self: *const MemoryHybridIswa) *memory_recurrent.MemoryRecurrent {
         return self.mem_recr;
     }
@@ -385,7 +385,7 @@ fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
     return out;
 }
 
-/// Ports `llama_memory_hybrid_iswa_context` (llama-memory-hybrid-iswa.h:93 @c1d0e7a00).
+/// Ports `llama_memory_hybrid_iswa_context` (llama-memory-hybrid-iswa.h:93 @5266f24da).
 pub const HybridIswaContext = struct {
     i_next: usize = 0,
     ubatches: std.ArrayList(Ubatch) = .empty,
@@ -394,7 +394,7 @@ pub const HybridIswaContext = struct {
     status: memory.Status,
 
     /// Ports the status constructor of `llama_memory_hybrid_iswa_context`
-    /// (llama-memory-hybrid-iswa.cpp:217 @c1d0e7a00).
+    /// (llama-memory-hybrid-iswa.cpp:217 @5266f24da).
     pub fn createStatus(status: memory.Status) *HybridIswaContext {
         const self = allocator.create(HybridIswaContext) catch oom();
         self.* = .{ .status = status };
@@ -402,7 +402,7 @@ pub const HybridIswaContext = struct {
     }
 
     /// Ports the full-memory constructor of `llama_memory_hybrid_iswa_context`
-    /// (llama-memory-hybrid-iswa.cpp:219 @c1d0e7a00).
+    /// (llama-memory-hybrid-iswa.cpp:219 @5266f24da).
     pub fn createFull(mem: *MemoryHybridIswa) *HybridIswaContext {
         const self = allocator.create(HybridIswaContext) catch oom();
         const a = mem.getMemAttn().initFull();
@@ -412,7 +412,7 @@ pub const HybridIswaContext = struct {
     }
 
     /// Ports the update constructor of `llama_memory_hybrid_iswa_context`
-    /// (llama-memory-hybrid-iswa.cpp:225 @c1d0e7a00).
+    /// (llama-memory-hybrid-iswa.cpp:225 @5266f24da).
     pub fn createUpdate(mem: *MemoryHybridIswa, lctx: *anyopaque, optimize: bool) *HybridIswaContext {
         const self = allocator.create(HybridIswaContext) catch oom();
         const a = mem.getMemAttn().initUpdate(lctx, optimize);
@@ -422,7 +422,7 @@ pub const HybridIswaContext = struct {
     }
 
     /// Ports the batch constructor of `llama_memory_hybrid_iswa_context`
-    /// (llama-memory-hybrid-iswa.cpp:234 @c1d0e7a00): each half gets its own
+    /// (llama-memory-hybrid-iswa.cpp:234 @5266f24da): each half gets its own
     /// copy of the ubatches, as the C++ copies them.
     pub fn createBatch(mem: *MemoryHybridIswa, sinfos_base: std.ArrayList(SlotInfo), sinfos_swa: std.ArrayList(SlotInfo), ubatches: std.ArrayList(Ubatch)) *HybridIswaContext {
         const self = allocator.create(HybridIswaContext) catch oom();
@@ -440,7 +440,7 @@ pub const HybridIswaContext = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_memory_hybrid_iswa_context`'s `next` (llama-memory-hybrid-iswa.cpp:246 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa_context`'s `next` (llama-memory-hybrid-iswa.cpp:246 @5266f24da).
     pub fn next(self: *HybridIswaContext) bool {
         std.debug.assert(self.status == .success);
         _ = self.ctx_attn.?.next();
@@ -450,7 +450,7 @@ pub const HybridIswaContext = struct {
     }
 
     /// Ports `llama_memory_hybrid_iswa_context`'s `apply`
-    /// (llama-memory-hybrid-iswa.cpp:259 @c1d0e7a00): `&`, not `&&`, so both
+    /// (llama-memory-hybrid-iswa.cpp:259 @5266f24da): `&`, not `&&`, so both
     /// halves apply.
     pub fn apply(self: *HybridIswaContext) bool {
         std.debug.assert(!memory.statusIsFail(self.status));
@@ -460,23 +460,23 @@ pub const HybridIswaContext = struct {
         return res;
     }
 
-    /// Ports `llama_memory_hybrid_iswa_context`'s `get_status` (llama-memory-hybrid-iswa.cpp:270 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa_context`'s `get_status` (llama-memory-hybrid-iswa.cpp:270 @5266f24da).
     pub fn getStatus(self: *const HybridIswaContext) memory.Status {
         return self.status;
     }
 
-    /// Ports `llama_memory_hybrid_iswa_context`'s `get_ubatch` (llama-memory-hybrid-iswa.cpp:274 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa_context`'s `get_ubatch` (llama-memory-hybrid-iswa.cpp:274 @5266f24da).
     pub fn getUbatch(self: *const HybridIswaContext) *const Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
 
-    /// Ports `llama_memory_hybrid_iswa_context`'s `get_attn` (llama-memory-hybrid-iswa.cpp:279 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa_context`'s `get_attn` (llama-memory-hybrid-iswa.cpp:279 @5266f24da).
     pub fn getAttn(self: *const HybridIswaContext) *const kv_cache_iswa.IswaContext {
         return self.ctx_attn.?;
     }
 
-    /// Ports `llama_memory_hybrid_iswa_context`'s `get_recr` (llama-memory-hybrid-iswa.cpp:283 @c1d0e7a00).
+    /// Ports `llama_memory_hybrid_iswa_context`'s `get_recr` (llama-memory-hybrid-iswa.cpp:283 @5266f24da).
     pub fn getRecr(self: *const HybridIswaContext) *const memory_recurrent.RecurrentContext {
         return self.ctx_recr.?;
     }

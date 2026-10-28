@@ -106,6 +106,16 @@ fn w(out: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype) void {
     out.print(gpa, fmt ++ "\n", args) catch unreachable;
 }
 
+/// `v`'s fields copied into a zeroed struct, so its bytes hold no padding.
+/// The C++'s aggregate initialiser happens to zero padding and Zig's struct
+/// literal does not; neither is defined. `llama_model_params` gained four
+/// bytes of it after `main_gpu` at v0.4.0, when `lazy_mode` was added.
+fn fieldsOnly(v: anytype) @TypeOf(v) {
+    var z = std.mem.zeroes(@TypeOf(v));
+    inline for (@typeInfo(@TypeOf(v)).@"struct".field_names) |name| @field(z, name) = @field(v, name);
+    return z;
+}
+
 fn str(p: [*c]const u8) []const u8 {
     if (p == null) return "(null)";
     return std.mem.span(@as([*:0]const u8, @ptrCast(p)));
@@ -271,7 +281,7 @@ fn staticScript(comptime s: Side, out: *std.ArrayList(u8)) void {
 
     // Constants and capabilities.
     w(out, "chain_default no_perf {}", .{F(s, "llama_sampler_chain_default_params")().no_perf});
-    const mp = F(s, "llama_model_default_params")();
+    const mp = fieldsOnly(F(s, "llama_model_default_params")());
     w(out, "model_default_params {x}", .{std.mem.asBytes(&mp)});
     w(out, "max_devices {d} max_buft_overrides {d} max_parallel {d}", .{ F(s, "llama_max_devices")(), F(s, "llama_max_tensor_buft_overrides")(), F(s, "llama_max_parallel_sequences")() });
     w(out, "supports mmap {} mlock {} gpu {} rpc {}", .{ F(s, "llama_supports_mmap")(), F(s, "llama_supports_mlock")(), F(s, "llama_supports_gpu_offload")(), F(s, "llama_supports_rpc")() });

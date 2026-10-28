@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.3.0, `c1d0e7a00`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.4.0, `5266f24da`),
 //! the `_generic` dot products at lines 565-905. Each function names the C it
 //! replaces and the line it began at.
 //!
@@ -63,7 +63,7 @@ fn unpackScalesMins(packed_scales: *const [12]u8) [4]u32 {
     return utmp;
 }
 
-/// Ports `ggml_vec_dot_q2_K_q8_K_generic` (ggml-cpu/quants.c:565 @c1d0e7a00).
+/// Ports `ggml_vec_dot_q2_K_q8_K_generic` (ggml-cpu/quants.c:565 @5266f24da).
 ///
 /// Two-bit weights with a four-bit scale and a four-bit minimum per group of
 /// sixteen. The minima are handled in one pass up front against `q8_K`'s
@@ -176,7 +176,7 @@ const Scratch = struct {
     }
 };
 
-/// Ports `ggml_vec_dot_q3_K_q8_K_generic` (ggml-cpu/quants.c:617 @c1d0e7a00).
+/// Ports `ggml_vec_dot_q3_K_q8_K_generic` (ggml-cpu/quants.c:617 @5266f24da).
 ///
 /// Three-bit weights: two bits in `qs` and an inverted high bit in `hmask`,
 /// so a clear mask bit subtracts 4. Scales are six-bit, biased by 32, packed
@@ -334,7 +334,7 @@ inline fn dotQ4Q5K(
     s[0] = sc.total(sumf);
 }
 
-/// Ports `ggml_vec_dot_q4_K_q8_K_generic` (ggml-cpu/quants.c:696 @c1d0e7a00).
+/// Ports `ggml_vec_dot_q4_K_q8_K_generic` (ggml-cpu/quants.c:696 @5266f24da).
 pub export fn ggml_vec_dot_q4_K_q8_K_generic(
     n: c_int,
     s: [*c]f32,
@@ -352,7 +352,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K_generic(
     dotQ4Q5K(blocks.Q4_K, n, s, vx, vy);
 }
 
-/// Ports `ggml_vec_dot_q5_K_q8_K_generic` (ggml-cpu/quants.c:771 @c1d0e7a00).
+/// Ports `ggml_vec_dot_q5_K_q8_K_generic` (ggml-cpu/quants.c:771 @5266f24da).
 pub export fn ggml_vec_dot_q5_K_q8_K_generic(
     n: c_int,
     s: [*c]f32,
@@ -370,7 +370,7 @@ pub export fn ggml_vec_dot_q5_K_q8_K_generic(
     dotQ4Q5K(blocks.Q5_K, n, s, vx, vy);
 }
 
-/// Ports `ggml_vec_dot_q6_K_q8_K_generic` (ggml-cpu/quants.c:851 @c1d0e7a00).
+/// Ports `ggml_vec_dot_q6_K_q8_K_generic` (ggml-cpu/quants.c:851 @5266f24da).
 ///
 /// Six-bit weights biased by 32: four bits in `ql` and two in `qh`. The scales
 /// are already signed bytes, so there is no unpacking and no minimum.

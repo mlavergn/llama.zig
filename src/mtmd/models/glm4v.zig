@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/glm4v.cpp` at v0.3.0 (`c1d0e7a00`).
+//! Ports `llama.cpp/tools/mtmd/models/glm4v.cpp` at v0.4.0 (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -20,14 +20,14 @@ const PosCtx = struct {
     mrope_sections: [4]c_int,
 };
 
-/// The `add_pos` lambda (glm4v.cpp:64 @c1d0e7a00) of `build`.
+/// The `add_pos` lambda (glm4v.cpp:64 @5266f24da) of `build`.
 fn addPos(ctx: ?*anyopaque, g: *graph.Graph, cur: T, layer: *const model_mod.Layer) T {
     _ = layer;
     const p: *PosCtx = @ptrCast(@alignCast(ctx.?));
     return c.ggml_rope_multi(g.ctx0, cur, p.positions, null, @divTrunc(g.d_head, 2), &p.mrope_sections, c.GGML_ROPE_TYPE_VISION, 32768, g.hparams.rope_theta, 1, 0, 1, 32, 1);
 }
 
-/// Ports `build` (glm4v.cpp:3 @c1d0e7a00), a member of `clip_graph_glm4v`.
+/// Ports `build` (glm4v.cpp:3 @5266f24da), a member of `clip_graph_glm4v`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.3.0
-//! (`c1d0e7a00`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
+//! (`5266f24da`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -42,19 +42,19 @@ fn blck(t: c.ggml_type) u64 {
     return @intCast(c.ggml_blck_size(t));
 }
 
-/// `make_y_staged_dst`: src1's shape with the f16 type and the padded row
-/// layout B is staged into for the decode-vector shader.
-fn yStagedDst(src1: *const Tensor, f16_type: c.ggml_type, row_stride: u32, padded_n: u32) Tensor {
+/// `make_y_staged_dst`: src1's shape with the f16 type and the K-padded
+/// row layout B is staged into.
+fn yStagedDst(src1: *const Tensor, f16_type: c.ggml_type, row_stride: u32, ne11: u64) Tensor {
     var t = src1.*;
     t.type = f16_type;
     t.nb[0] = c.ggml_type_size(f16_type);
     t.nb[1] = t.nb[0] * row_stride;
-    t.nb[2] = t.nb[1] * padded_n;
+    t.nb[2] = t.nb[1] * ne11;
     t.nb[3] = t.nb[2] * @as(usize, @intCast(t.ne[2]));
     return t;
 }
 
-/// Ports `ggml_vk_mul_mat_id_q_f16` (ggml-vulkan.cpp:10070 @c1d0e7a00).
+/// Ports `ggml_vk_mul_mat_id_q_f16` (ggml-vulkan.cpp:10186 @5266f24da).
 pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, ids: *const Tensor, dst: *Tensor) void {
     const dim01 = m.op_pipeline.dim01Contiguous;
     impl.assert(dim01(src1) or src1.type == c.GGML_TYPE_F32 or src1.type == c.GGML_TYPE_F16, "ggml_vk_dim01_contiguous(src1) || src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16");
@@ -77,6 +77,11 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     const ne20: u64 = @intCast(dst.ne[0]);
     const ne21: u64 = @intCast(dst.ne[1]);
     const n_as = ne02;
+    // n_as counts, n_as offsets, one total, then one packed row id per (expert, token).
+    // Hoisting requires 16-bit indices for the packing and a table that fits one binding.
+    const hoisted_row_id_words: u64 = 2 *% n_as +% 1 +% nei0 *% nei1;
+    const hoist_row_ids = n_as <= 256 and nei0 <= 0xffff and nei1 <= 0xffff and
+        hoisted_row_id_words *% @sizeOf(u32) <= limits.maxStorageBufferRange;
     const prec: c.ggml_prec = @intCast(dst.op_params[0]);
 
     var qx = mm.Source.pinned(ctx, src0);
@@ -109,7 +114,6 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
         (src0.type == c.GGML_TYPE_BF16 and src1.type != c.GGML_TYPE_BF16) or
         !dim01(src1);
 
-    const y_staged_row_stride: u32 = if (y_decode_vector_staging) @truncate(alignSize(ne10, 4)) else @truncate(ne10);
     const y_f32_kernel = src1.type == c.GGML_TYPE_F32 and !y_non_contig;
 
     var quantize_y = dev.integer_dot_product and src1.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous(src1) and !y_non_contig and (ne11 *% ne10) % 4 == 0;
@@ -123,7 +127,7 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     }
 
     const qx_needs_dequant = mmp == null or x_non_contig;
-    const qy_needs_dequant = !quantize_y and ((src1.type != f16_type and !y_f32_kernel) or y_non_contig);
+    var qy_needs_dequant = !quantize_y and ((src1.type != f16_type and !y_f32_kernel) or y_non_contig);
 
     if (qx_needs_dequant) {
         // Fall back to dequant + f16 mulmat
@@ -131,22 +135,26 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     }
     const mp = mmp.?;
 
-    // Not implemented
-    impl.assert(y_non_contig or !qy_needs_dequant, "y_non_contig || !qy_needs_dequant");
-
     const effective_src1_type: c.ggml_type = if (quantize_y) c.GGML_TYPE_Q8_1 else if (y_f32_kernel) c.GGML_TYPE_F32 else src1.type;
     const x_type = if (qx_needs_dequant) f16_type else src0.type;
 
     const kpad: u32 = if (quantize_y) 0 else @truncate(alignSize(ne10, mm.guessMatmulIdPipelineAlign(ctx, mp, @truncate(ne01), @truncate(nei1), x_type, effective_src1_type)));
+    // Coopmat2 MUL_MAT_ID BK specialization constants in ggml_vk_load_shaders are at most 64.
+    const y_staged_row_stride: u32 = if (dev.coopmat2 and !quantize_y) @truncate(alignSize(ne10, 64)) else @truncate(ne10);
+    const y_needs_k_padding = ne10 != y_staged_row_stride;
+    const y_needs_reformat = y_non_contig or y_needs_k_padding;
+    qy_needs_dequant = qy_needs_dequant or y_needs_k_padding;
+
+    // Not implemented
+    impl.assert(y_needs_reformat or !qy_needs_dequant, "y_needs_reformat || !qy_needs_dequant");
+
     const aligned = !quantize_y and ne10 == kpad and ne01 > 8 and nei1 > 8;
 
     var pipeline = mm.guessMatmulIdPipeline(ctx, mp, @truncate(ne01), @truncate(nei1), aligned, x_type, effective_src1_type);
     if (c.ggml_nbytes(src0) > limits.maxStorageBufferRange) pipeline = mm.get64bIndexingPipeline(pipeline);
 
-    // Reserve extra storage in the N dimension for the Y matrix, so we can avoid bounds-checking
-    const padded_n: u32 = if (qy_needs_dequant) @truncate(mm.roundupPow2(@as(u32, @truncate(ne11)), pipeline.wg_denoms[1])) else @truncate(ne11);
     const x_ne: u64 = @intCast(c.ggml_nelements(src0));
-    const y_ne: u64 = @as(u64, y_staged_row_stride) *% padded_n *% ne12 *% ne13;
+    const y_ne: u64 = @as(u64, y_staged_row_stride) *% ne11 *% ne12 *% ne13;
     const d_ne: u64 = @intCast(c.ggml_nelements(dst));
 
     const qx_sz = typeSizeOf(src0.type) * x_ne / blck(src0.type);
@@ -160,11 +168,11 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
 
     const to_fp16_vk_0 = if (x_non_contig) m.op_pipeline.getCpyPipeline(ctx, src0, null, f16_type) else mm.getToFp16(ctx, src0.type);
     var to_fp16_vk_1: ?*Pipeline = undefined;
-    if (y_non_contig) {
+    if (y_needs_reformat) {
         var staged: Tensor = undefined;
         var staged_ptr: ?*const Tensor = null;
-        if (y_decode_vector_staging) {
-            staged = yStagedDst(src1, f16_type, y_staged_row_stride, padded_n);
+        if (y_needs_k_padding) {
+            staged = yStagedDst(src1, f16_type, y_staged_row_stride, ne11);
             staged_ptr = &staged;
         }
         to_fp16_vk_1 = m.op_pipeline.getCpyPipeline(ctx, src1, staged_ptr, f16_type);
@@ -176,7 +184,7 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     const to_q8_1: ?*Pipeline = if (quantize_y) mm.getQuantizePipeline(ctx, c.GGML_TYPE_Q8_1) else null;
 
     const count_experts = dev.pipeline_count_experts.?;
-    const expert_count_size: u32 = @truncate(@sizeOf(u32) * n_as);
+    const expert_data_size: u64 = @sizeOf(u32) *% (if (hoist_row_ids) hoisted_row_id_words else n_as);
 
     {
         if ((qx_needs_dequant and x_sz > limits.maxStorageBufferRange) or
@@ -192,8 +200,8 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
             ctx.prealloc_size_y = y_sz;
             m.nodes.preallocateBuffers(ctx, subctx);
         }
-        if (ctx.prealloc_size_split_k < expert_count_size) {
-            ctx.prealloc_size_split_k = expert_count_size;
+        if (ctx.prealloc_size_split_k < expert_data_size) {
+            ctx.prealloc_size_split_k = expert_data_size;
             m.nodes.preallocateBuffers(ctx, subctx);
         }
 
@@ -240,18 +248,23 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     }
 
     // Count how many times each expert is used
-    const expert_count_buf = m.context.subbuffer(ctx, ctx.prealloc_split_k.?, 0);
+    const expert_count_buf = sub(ctx.prealloc_split_k, 0, expert_data_size);
     if (ctx.prealloc_split_k_need_sync) m.context.syncBuffers(ctx, subctx);
     {
         const its = typeSizeOf(ids.type);
-        const pc = [5]u32{
-            @truncate(nei0),
-            @truncate(nei1),
-            @truncate(nbi0 / its),
-            @truncate(nbi1 / its),
-            @truncate(m.context.getMisalignBytes(ctx, ids) / its),
+        var pc: push.CountExperts = .{
+            .ne00 = @truncate(nei0),
+            .ne01 = @truncate(nei1),
+            .nb00 = @truncate(nbi0 / its),
+            .nb01 = @truncate(nbi1 / its),
+            .a_offset = @truncate(m.context.getMisalignBytes(ctx, ids) / its),
+            .n_experts = @truncate(n_as),
+            .hoist_row_ids = @intFromBool(hoist_row_ids),
+            .ne00mp = 0,
+            .ne00L = 0,
         };
-        m.context.dispatch(ctx, subctx, count_experts, &.{ sub(qi.buf, qi.offset, ids_sz), expert_count_buf }, &pc, .{ @truncate(n_as), 1, 1 });
+        ops.initPushconstFastdiv(&pc);
+        m.context.dispatch(ctx, subctx, count_experts, &.{ sub(qi.buf, qi.offset, ids_sz), expert_count_buf }, &pc, .{ if (hoist_row_ids) 1 else @as(u32, @truncate(n_as)), 1, 1 });
     }
 
     if (x_non_contig) {
@@ -260,14 +273,18 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
         const pc = [5]u32{ @truncate(ne01), @truncate(ne10), @truncate(ne10), @truncate(ne10), ops.u32Of(c.ggml_nelements(src0)) };
         m.context.dispatch(ctx, subctx, to_fp16_vk_0.?, &.{ sub(qx.buf, qx.offset, qx_sz), sub(d_X, 0, x_sz) }, &pc, .{ @truncate(x_ne), 1, 1 });
     }
-    if (y_non_contig) {
+    if (y_needs_reformat) {
         if (ctx.prealloc_y_last_pipeline_used != to_fp16_vk_1 or
             ctx.prealloc_y_last_tensor_used != src1 or
-            ctx.prealloc_y_last_decode_vector_staging != y_decode_vector_staging)
+            ctx.prealloc_y_last_k_padded != y_needs_k_padding)
         {
             if (ctx.prealloc_y_need_sync) m.context.syncBuffers(ctx, subctx);
-            if (y_decode_vector_staging) {
-                const staged = yStagedDst(src1, f16_type, y_staged_row_stride, padded_n);
+            if (y_needs_k_padding) {
+                impl.assert(y_sz % 4 == 0, "y_sz % 4 == 0");
+                // Zero B padding because clamping only A can produce 0 * Inf or NaN.
+                m.common.dispatch.vkCmdFillBuffer.?(subctx.cmd(), d_Y.buffer, 0, y_sz, 0);
+                m.context.syncBuffers(ctx, subctx);
+                const staged = yStagedDst(src1, f16_type, y_staged_row_stride, ne11);
                 const ts = c.ggml_type_size(staged.type);
                 mm.cpyToStrided(ctx, subctx, to_fp16_vk_1.?, src1, m.context.subbuffer(ctx, qy.buf.?, qy.offset), m.context.subbuffer(ctx, d_Y, 0), @truncate(staged.nb[0] / ts), @truncate(staged.nb[1] / ts), @truncate(staged.nb[2] / ts), @truncate(staged.nb[3] / ts));
             } else {
@@ -275,26 +292,26 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
             }
             ctx.prealloc_y_last_pipeline_used = to_fp16_vk_1;
             ctx.prealloc_y_last_tensor_used = src1;
-            ctx.prealloc_y_last_decode_vector_staging = y_decode_vector_staging;
+            ctx.prealloc_y_last_k_padded = y_needs_k_padding;
         }
     }
     if (quantize_y) {
         if (ctx.prealloc_y_last_pipeline_used != to_q8_1 or
             ctx.prealloc_y_last_tensor_used != src1 or
-            ctx.prealloc_y_last_decode_vector_staging)
+            ctx.prealloc_y_last_k_padded)
         {
             if (ctx.prealloc_y_need_sync) m.context.syncBuffers(ctx, subctx);
             mm.quantizeQ81(ctx, subctx, m.context.subbuffer(ctx, qy.buf.?, qy.offset), m.context.subbuffer(ctx, d_Y, 0), @truncate(y_ne));
             ctx.prealloc_y_last_pipeline_used = to_q8_1;
             ctx.prealloc_y_last_tensor_used = src1;
-            ctx.prealloc_y_last_decode_vector_staging = false;
+            ctx.prealloc_y_last_k_padded = false;
         }
     }
     m.context.syncBuffers(ctx, subctx);
 
     var stride_batch_x: u32 = @truncate(ne00 *% ne01);
-    const stride_b_y: u32 = if (y_decode_vector_staging) y_staged_row_stride else @truncate(ne10);
-    var stride_batch_y: u32 = if (y_decode_vector_staging) y_staged_row_stride *% padded_n else @truncate(ne10 *% ne11);
+    const stride_b_y: u32 = if (y_needs_k_padding) y_staged_row_stride else @truncate(ne10);
+    var stride_batch_y: u32 = if (y_needs_k_padding) y_staged_row_stride *% @as(u32, @truncate(ne11)) else @truncate(ne10 *% ne11);
     if (!dim01(src0) and !qx_needs_dequant) stride_batch_x = @truncate(src0.nb[0] / typeSizeOf(src0.type));
     if (!dim01(src1) and !qy_needs_dequant and !quantize_y) stride_batch_y = @truncate(src1.nb[0] / typeSizeOf(src1.type));
 
@@ -322,15 +339,15 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
         @truncate(nei1),
         @truncate(nbi1 / typeSizeOf(ids.type)),
         @truncate(ne11),
-        padded_n,
+        hoist_row_ids,
     );
 
     if (x_non_contig or qx_needs_dequant) ctx.prealloc_x_need_sync = true;
-    if (y_non_contig or quantize_y) ctx.prealloc_y_need_sync = true;
+    if (y_needs_reformat or quantize_y) ctx.prealloc_y_need_sync = true;
     ctx.prealloc_split_k_need_sync = true;
 }
 
-/// Ports `ggml_vk_mul_mat_vec_id_q_f16` (ggml-vulkan.cpp:10416 @c1d0e7a00):
+/// Ports `ggml_vk_mul_mat_vec_id_q_f16` (ggml-vulkan.cpp:10550 @5266f24da):
 /// one matrix-vector dispatch per token row, the expert read from `ids`,
 /// with a fused ADD_ID bias or MUL scale and a second scale.
 pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
@@ -434,25 +451,25 @@ pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.C
         impl.assert(y_sz == typeSizeOf(src1.type) * y_ne, "y_sz == ggml_type_size(src1->type) * y_ne");
         if (ctx.prealloc_y_last_pipeline_used != to_fp16_vk_1 or
             ctx.prealloc_y_last_tensor_used != src1 or
-            ctx.prealloc_y_last_decode_vector_staging)
+            ctx.prealloc_y_last_k_padded)
         {
             if (ctx.prealloc_y_need_sync) m.context.syncBuffers(ctx, subctx);
             mm.cpyToContiguous(ctx, subctx, to_fp16_vk_1.?, src1, d_Qy, d_Y);
             ctx.prealloc_y_last_pipeline_used = to_fp16_vk_1;
             ctx.prealloc_y_last_tensor_used = src1;
-            ctx.prealloc_y_last_decode_vector_staging = false;
+            ctx.prealloc_y_last_k_padded = false;
         }
     }
     if (quantize_y) {
         if (ctx.prealloc_y_last_pipeline_used != to_q8_1 or
             ctx.prealloc_y_last_tensor_used != src1 or
-            ctx.prealloc_y_last_decode_vector_staging)
+            ctx.prealloc_y_last_k_padded)
         {
             if (ctx.prealloc_y_need_sync) m.context.syncBuffers(ctx, subctx);
             mm.quantizeQ81(ctx, subctx, d_Qy, d_Y, @truncate(y_ne));
             ctx.prealloc_y_last_pipeline_used = to_q8_1;
             ctx.prealloc_y_last_tensor_used = src1;
-            ctx.prealloc_y_last_decode_vector_staging = false;
+            ctx.prealloc_y_last_k_padded = false;
         }
     }
 
@@ -509,7 +526,7 @@ pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.C
     if (y_non_contig or quantize_y) ctx.prealloc_y_need_sync = true;
 }
 
-/// Ports `ggml_vk_mul_mat_id` (ggml-vulkan.cpp:10659 @c1d0e7a00).
+/// Ports `ggml_vk_mul_mat_id` (ggml-vulkan.cpp:10793 @5266f24da).
 pub fn mulMatId(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
     const dst = at(cgraph, node_idx);
     if (ops.useMulMatVecId(cgraph, node_idx)) {

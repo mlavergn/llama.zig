@@ -11,14 +11,15 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const llamacpp = @import("llamacpp.zig");
+const upstream = @import("upstream.zig");
 const mtmd_build = @import("mtmd.zig");
 
 const root = "llama.cpp";
 
-/// `llama.cpp.zmake`'s build number and commit (its `build.zig`), so a tool's
-/// `--version` reads the same from both sides of a gate.
-pub const build_number = 10621;
-pub const commit = "c1d0e7a00";
+/// The pin's build number and commit, as `llama.cpp.zmake`'s `build.zig`
+/// has them, so a tool's `--version` reads the same from both sides of a gate.
+pub const build_number = upstream.build_number;
+pub const commit = upstream.commit;
 
 /// One upstream tool.
 const Tool = struct {
@@ -240,33 +241,17 @@ fn refModule(b: *std.Build, opts: anytype) *std.Build.Module {
 /// Upstream's `llama-common` with its `build-info.cpp` and `cpp-httplib`, as
 /// `llama.cpp.zmake` builds them.
 fn addCommonRef(b: *std.Build, opts: Options) *std.Build.Step.Compile {
-    const build_info = b.addWriteFiles().add("build-info.cpp", b.fmt(
-        \\#include "build-info.h"
-        \\
-        \\#include <cstdio>
-        \\#include <string>
-        \\
-        \\int LLAMA_BUILD_NUMBER = {d};
-        \\char const * LLAMA_COMMIT = "{s}";
-        \\char const * LLAMA_COMPILER = "Zig {s} clang";
-        \\char const * LLAMA_BUILD_TARGET = "{s}";
-        \\
-        \\int llama_build_number(void) {{ return LLAMA_BUILD_NUMBER; }}
-        \\const char * llama_commit(void) {{ return LLAMA_COMMIT; }}
-        \\const char * llama_compiler(void) {{ return LLAMA_COMPILER; }}
-        \\const char * llama_build_target(void) {{ return LLAMA_BUILD_TARGET; }}
-        \\
-        \\const char * llama_build_info(void) {{
-        \\    static std::string s = "b" + std::to_string(LLAMA_BUILD_NUMBER) + "-" + LLAMA_COMMIT;
-        \\    return s.c_str();
-        \\}}
-        \\
-        \\void llama_print_build_info(const char * llama_version) {{
-        \\    fprintf(stderr, "version: %s (build %d, commit %s)\n", llama_version, llama_build_number(), llama_commit());
-        \\    fprintf(stderr, "built with %s for %s\n", LLAMA_COMPILER, LLAMA_BUILD_TARGET);
-        \\}}
-        \\
-    , .{ build_number, commit, builtin.zig_version_string, buildTarget(b, opts.target) }));
+    // Configured from upstream's build-info.cpp.in, as common/CMakeLists.txt
+    // does, so a change to the template cannot leave this behind.
+    const build_info = b.addConfigHeader(.{
+        .style = .{ .cmake = b.path(root ++ "/common/build-info.cpp.in") },
+        .include_path = "build-info.cpp",
+    }, .{
+        .LLAMA_BUILD_NUMBER = build_number,
+        .LLAMA_BUILD_COMMIT = commit,
+        .BUILD_COMPILER = "Zig " ++ builtin.zig_version_string ++ " clang",
+        .BUILD_TARGET = buildTarget(b, opts.target),
+    }).getOutputFile();
 
     const mod = refModule(b, opts);
     mod.addCSourceFile(.{ .file = build_info, .flags = &cxx_flags });

@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/qwen3tts-gen.cpp` at v0.3.0
-//! (`c1d0e7a00`), and the `PROJECTOR_TYPE_QWEN3TTS_GEN` arm of
+//! Ports `llama.cpp/tools/mtmd/models/qwen3tts-gen.cpp` at v0.4.0
+//! (`5266f24da`), and the `PROJECTOR_TYPE_QWEN3TTS_GEN` arm of
 //! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`). Each
 //! declaration names what it ports and the line it began at.
 //!
@@ -42,7 +42,7 @@ fn mapAt(m: *const std.StringHashMapUnmanaged(T), key: []const u8) T {
     return m.get(key) orelse impl.abortUncaught("std::out_of_range", "map::at:  key not found");
 }
 
-/// Ports `code_gen` (mtmd/models/models.h:256 @c1d0e7a00), nested in
+/// Ports `code_gen` (mtmd/models/models.h:261 @5266f24da), nested in
 /// `clip_graph_qwen3tts_gen`: the
 /// MTP-style code predictor, one token per codebook.
 const CodeGen = struct {
@@ -50,7 +50,7 @@ const CodeGen = struct {
     top_k: c_int,
     top_p: f32,
 
-    /// Ports `do_sampling` (qwen3tts-gen.cpp:6 @c1d0e7a00), a member of
+    /// Ports `do_sampling` (qwen3tts-gen.cpp:6 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code_gen`: top-k, top-p, then a random draw,
     /// all on the device.
     fn doSampling(self: *const CodeGen, logits_in: T, inp_rand: T) T {
@@ -119,7 +119,7 @@ const CodeGen = struct {
         return c.ggml_reshape_1d(ctx0, c.ggml_get_rows(ctx0, a2d, idx), ne(idx, 0));
     }
 
-    /// Ports `cache_set` (qwen3tts-gen.cpp:71 @c1d0e7a00), a member of
+    /// Ports `cache_set` (qwen3tts-gen.cpp:71 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code_gen`: a new cache with row `row_idx`
     /// set to `value`.
     fn cacheSet(self: *const CodeGen, cache: T, row_idx: c_int, value: T) T {
@@ -148,7 +148,7 @@ const CodeGen = struct {
         return result;
     }
 
-    /// Ports `const_i32` (qwen3tts-gen.cpp:98 @c1d0e7a00), a member of
+    /// Ports `const_i32` (qwen3tts-gen.cpp:98 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code_gen`: a constant with no host upload.
     fn constI32(self: *const CodeGen, anchor: T, value: f32) T {
         const ctx0 = self.g.ctx0;
@@ -157,7 +157,7 @@ const CodeGen = struct {
         return c.ggml_cast(ctx0, c.ggml_scale_bias(ctx0, v, 0.0, value), c.GGML_TYPE_I32);
     }
 
-    /// Ports `causal_mask_row` (qwen3tts-gen.cpp:107 @c1d0e7a00), a member of
+    /// Ports `causal_mask_row` (qwen3tts-gen.cpp:107 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code_gen`.
     fn causalMaskRow(self: *const CodeGen, n_kv_pad: i64, pos: c_int) T {
         const ctx0 = self.g.ctx0;
@@ -168,7 +168,7 @@ const CodeGen = struct {
         return c.ggml_reshape_4d(ctx0, mask, n_kv_pad, 1, 1, 1);
     }
 
-    /// Ports `project_in` (qwen3tts-gen.cpp:116 @c1d0e7a00), a member of
+    /// Ports `project_in` (qwen3tts-gen.cpp:116 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code_gen`: talker hidden size to predictor
     /// hidden size.
     fn projectIn(self: *const CodeGen, cur_in: T) T {
@@ -179,7 +179,7 @@ const CodeGen = struct {
         return cur;
     }
 
-    /// Ports `layer_forward` (qwen3tts-gen.cpp:128 @c1d0e7a00), a member of
+    /// Ports `layer_forward` (qwen3tts-gen.cpp:128 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code_gen`: one layer at position `pos`,
     /// writing k/v into the caches at row `pos`.
     fn layerForward(self: *const CodeGen, cur_in: T, layer: *const model_mod.Layer, inp_pos: T, kq_mask: T, k_cache_layer: *T, v_cache_layer: *T, n_kv_pad: i64, pos: c_int, il: c_int) T {
@@ -235,7 +235,7 @@ const CodeGen = struct {
         return cur;
     }
 
-    /// Ports `prefill` (qwen3tts-gen.cpp:191 @c1d0e7a00), a member of
+    /// Ports `prefill` (qwen3tts-gen.cpp:191 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code_gen`: position 0 seeds the cache from
     /// the hidden state; position 1 embeds code0 and samples codebook 1.
     fn prefill(self: *const CodeGen, k_cache: []T, v_cache: []T, out_code_cache: *T, h_state: T, code0_embd: T, inp_rand: T) void {
@@ -274,7 +274,7 @@ const CodeGen = struct {
         }
     }
 
-    /// Ports `step` (qwen3tts-gen.cpp:236 @c1d0e7a00), a member of
+    /// Ports `step` (qwen3tts-gen.cpp:236 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code_gen`: one decode step of the code
     /// predictor, `step_idx` in [1, n_acoustic - 1].
     fn step(self: *const CodeGen, k_cache: []T, v_cache: []T, out_code_cache: T, inp_rand: T, step_idx: c_int) T {
@@ -328,10 +328,10 @@ const CodeGen = struct {
 /// One `state_out` entry: a slot name and the tensor holding its new state.
 const StateOut = struct { name: [:0]const u8, t: T };
 
-/// `DAC_DILATIONS` (qwen3tts-gen.cpp:581 @c1d0e7a00).
+/// `DAC_DILATIONS` (qwen3tts-gen.cpp:581 @5266f24da).
 const dac_dilations = [3]c_int{ 1, 3, 9 };
 
-/// Ports `code2wav` (mtmd/models/models.h:301 @c1d0e7a00), nested in
+/// Ports `code2wav` (mtmd/models/models.h:306 @5266f24da), nested in
 /// `clip_graph_qwen3tts_gen`: RVQ
 /// codes to raw PCM (quantizer, pre_conv, pre_transformer, upsample, DAC).
 const Code2Wav = struct {
@@ -345,7 +345,7 @@ const Code2Wav = struct {
         self.state_out.append(self.arena, .{ .name = name, .t = t }) catch impl.abort("qwen3tts-gen.cpp", 0, "out of memory");
     }
 
-    /// Ports `causal_conv1d` (qwen3tts-gen.cpp:289 @c1d0e7a00), a member of
+    /// Ports `causal_conv1d` (qwen3tts-gen.cpp:289 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code2wav`: stride 1, prepending the
     /// persisted left context instead of zero padding.
     fn causalConv1d(self: *Code2Wav, x: T, w: T, b: T, dilation: c_int, state_name: [:0]const u8) T {
@@ -368,7 +368,7 @@ const Code2Wav = struct {
         return y;
     }
 
-    /// Ports `causal_conv1d_dw` (qwen3tts-gen.cpp:313 @c1d0e7a00), a member
+    /// Ports `causal_conv1d_dw` (qwen3tts-gen.cpp:313 @5266f24da), a member
     /// of `clip_graph_qwen3tts_gen::code2wav`.
     fn causalConv1dDw(self: *Code2Wav, x: T, w: T, b: T, state_name: [:0]const u8) T {
         const ctx0 = self.g.ctx0;
@@ -390,7 +390,7 @@ const Code2Wav = struct {
         return y;
     }
 
-    /// Ports `causal_conv_transpose1d` (qwen3tts-gen.cpp:337 @c1d0e7a00), a
+    /// Ports `causal_conv_transpose1d` (qwen3tts-gen.cpp:337 @5266f24da), a
     /// member of `clip_graph_qwen3tts_gen::code2wav`: the (kernel - stride)
     /// overlap tail is kept as state for the next call.
     fn causalConvTranspose1d(self: *Code2Wav, x: T, w: T, b: T, stride: c_int, state_name: [:0]const u8) T {
@@ -424,7 +424,7 @@ const Code2Wav = struct {
         return out;
     }
 
-    /// Ports `snake` (qwen3tts-gen.cpp:371 @c1d0e7a00), a member of
+    /// Ports `snake` (qwen3tts-gen.cpp:371 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code2wav`: SnakeBeta, `x + sin(alpha*x)^2 *
     /// inv_beta`.
     fn snake(self: *const Code2Wav, x: T, alpha: T, beta: T) T {
@@ -442,7 +442,7 @@ const Code2Wav = struct {
         return c.ggml_add(ctx0, x, s);
     }
 
-    /// Ports `quant_decode` (qwen3tts-gen.cpp:387 @c1d0e7a00), a member of
+    /// Ports `quant_decode` (qwen3tts-gen.cpp:387 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code2wav`: T frames of 16 codes to
     /// `[512, T]`.
     fn quantDecode(self: *const Code2Wav, inp_codes: T) T {
@@ -475,7 +475,7 @@ const Code2Wav = struct {
         return c.ggml_view_1d(ctx0, inp_codes, Tn, @as(usize, @intCast(g)) * nb(inp_codes, 1));
     }
 
-    /// Ports `tfm_layer_forward` (qwen3tts-gen.cpp:417 @c1d0e7a00), a member
+    /// Ports `tfm_layer_forward` (qwen3tts-gen.cpp:417 @5266f24da), a member
     /// of `clip_graph_qwen3tts_gen::code2wav`: one pre_transformer layer over
     /// a batch of N = sliding_window new frames, attending over the (W-1)
     /// frames kept from the last batch.
@@ -565,7 +565,7 @@ const Code2Wav = struct {
         return cur;
     }
 
-    /// Ports `convnext_block` (qwen3tts-gen.cpp:511 @c1d0e7a00), a member of
+    /// Ports `convnext_block` (qwen3tts-gen.cpp:511 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code2wav`: dwconv, LayerNorm, pwconv1, GELU,
     /// pwconv2, layer scale, residual.
     fn convnextBlock(self: *Code2Wav, x: T, blk: *const model_mod.Code2Wav.UpsampleBlock, state_prefix: [:0]const u8) T {
@@ -590,7 +590,7 @@ const Code2Wav = struct {
         return c.ggml_add(ctx0, residual, g_t);
     }
 
-    /// Ports `dac_res_unit` (qwen3tts-gen.cpp:534 @c1d0e7a00), a member of
+    /// Ports `dac_res_unit` (qwen3tts-gen.cpp:534 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code2wav`.
     fn dacResUnit(self: *Code2Wav, x: T, res: *const model_mod.Code2Wav.DacRes, dilation: c_int, state_name: [:0]const u8) T {
         const residual = x;
@@ -601,7 +601,7 @@ const Code2Wav = struct {
         return c.ggml_add(self.g.ctx0, residual, h);
     }
 
-    /// Ports `decode` (qwen3tts-gen.cpp:544 @c1d0e7a00), a member of
+    /// Ports `decode` (qwen3tts-gen.cpp:544 @5266f24da), a member of
     /// `clip_graph_qwen3tts_gen::code2wav`: a batch of N = sliding_window
     /// frames of codes to PCM.
     fn decode(self: *Code2Wav, inp_codes: T) T {
@@ -666,7 +666,7 @@ const Code2Wav = struct {
     }
 };
 
-/// Ports `list_c2w_state_slots` (qwen3tts-gen.cpp:609 @c1d0e7a00): the
+/// Ports `list_c2w_state_slots` (qwen3tts-gen.cpp:609 @5266f24da): the
 /// position counter, K/V per pre_transformer layer, and the left context or
 /// tail of each stateful conv. The caller frees the slice with
 /// `module.freeSlots`.
@@ -713,10 +713,10 @@ pub fn listStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod
     return slots.toOwnedSlice(gpa);
 }
 
-/// Ports `build` (qwen3tts-gen.cpp:657 @c1d0e7a00), a member of
+/// Ports `build` (qwen3tts-gen.cpp:657 @5266f24da), a member of
 /// `clip_graph_qwen3tts_gen`, with the builder's parameters derived as
 /// clip_get_graph_builder's `PROJECTOR_TYPE_QWEN3TTS_GEN` arm does
-/// (mtmd/clip.cpp:1115 @c1d0e7a00). Both sub-graphs are always built, so the
+/// (mtmd/clip.cpp:1119 @5266f24da). Both sub-graphs are always built, so the
 /// topology stays constant; `ggml_build_forward_select` picks the one that
 /// runs.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {

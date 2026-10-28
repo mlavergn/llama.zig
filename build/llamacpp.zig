@@ -11,6 +11,7 @@
 //! BLAS and OpenMP off, no curl.
 
 const std = @import("std");
+const upstream = @import("upstream.zig");
 
 /// Where the reference tree lives, relative to the build root.
 pub const root = "llama.cpp";
@@ -275,6 +276,7 @@ const llama_ref_sources = [_][]const u8{
     "src/llama-memory.cpp",
     "src/llama-memory-hybrid.cpp",
     "src/llama-memory-hybrid-iswa.cpp",
+    "src/llama-memory-hybrid-idx.cpp",
     "src/llama-memory-recurrent.cpp",
     "src/llama-mmap.cpp",
     "src/llama-model-loader.cpp",
@@ -481,8 +483,6 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
         // into the library unreachable -- 5,692 live lines of dead
         // code. Measured, by panicking on the one entry point.
         "-DGGML_USE_CPU_REPACK",
-        "-DGGML_VERSION=\"0.3.0\"",
-        "-DGGML_COMMIT=\"c1d0e7a00\"",
     };
     const defines = flags(b, &.{ &common_defines, if (isApple(opts)) &apple_defines else &.{} });
 
@@ -536,13 +536,11 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
 
 /// The `-D` flags upstream's CMake gives every `ggml-cuda` translation unit
 /// for the configuration this build selects: `GGML_CUDA_FA_ALL_QUANTS` and
-/// `GGML_CUDA_GRAPHS` on, NCCL off (one GPU), the peer batch size at its
-/// default. Taken from the `flags.make` a stock CMake build of the pinned
-/// tree writes, minus the `GGML_BACKEND_SHARED`/`GGML_SHARED` pair, which
+/// `GGML_CUDA_GRAPHS` on, NCCL off (one GPU). Taken from the `flags.make` a
+/// stock CMake build of the pinned tree writes, minus the `GGML_BACKEND_SHARED`/`GGML_SHARED` pair, which
 /// only exist to export symbols from a `.so`.
 const cuda_defines = [_][]const u8{
     "-DGGML_CUDA_FA_ALL_QUANTS",
-    "-DGGML_CUDA_PEER_MAX_BATCH_SIZE=128",
     "-DGGML_CUDA_USE_GRAPHS",
     "-DGGML_SCHED_MAX_COPIES=4",
     "-D_GNU_SOURCE",
@@ -1274,8 +1272,6 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
         // into the library unreachable -- 5,692 live lines of dead
         // code. Measured, by panicking on the one entry point.
         "-DGGML_USE_CPU_REPACK",
-        "-DGGML_VERSION=\"0.3.0\"",
-        "-DGGML_COMMIT=\"c1d0e7a00\"",
     };
     const defines = flags(b, &.{ &common_defines, if (isApple(opts)) &accelerate_defines else &.{} });
 
@@ -1360,8 +1356,6 @@ fn portedTestModuleInner(
         // into the library unreachable -- 5,692 live lines of dead
         // code. Measured, by panicking on the one entry point.
         "-DGGML_USE_CPU_REPACK",
-        "-DGGML_VERSION=\"0.3.0\"",
-        "-DGGML_COMMIT=\"c1d0e7a00\"",
     };
     const defines = flags(b, &.{ &common_defines, if (isApple(opts)) &accelerate_defines else &.{} });
 
@@ -1457,11 +1451,13 @@ fn addLlamaRef(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) !*st
         try files.append(b.allocator, b.fmt("src/models/{s}", .{entry.name}));
     }
 
-    const common_defines = [_][]const u8{
-        "-DLLAMA_VERSION=\"0.3.0\"",
-        "-DLLAMA_COMMIT=\"c1d0e7a00\"",
-        "-DGGML_USE_CPU",
-    };
+    // src/CMakeLists.txt:55, configure_file(llama-version.h.in).
+    mod.addConfigHeader(b.addConfigHeader(.{
+        .style = .{ .cmake = b.path(root ++ "/src/llama-version.h.in") },
+        .include_path = "llama-version.h",
+    }, .{ .LLAMA_VERSION = upstream.version, .LLAMA_BUILD_COMMIT = upstream.commit }));
+
+    const common_defines = [_][]const u8{"-DGGML_USE_CPU"};
     const apple_defines = [_][]const u8{"-DGGML_USE_METAL"};
 
     mod.addCSourceFiles(.{

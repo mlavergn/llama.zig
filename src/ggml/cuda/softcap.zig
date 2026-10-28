@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/softcap.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/softcap.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/softcap.cuh` at v0.4.0 (`5266f24da`). The
 //! kernel, `softcap_f32`, stays CUDA.
 
 const std = @import("std");
@@ -16,10 +16,10 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_SOFTCAP_BLOCK_SIZE` (softcap.cuh:3 @c1d0e7a00).
+/// Ports `CUDA_SOFTCAP_BLOCK_SIZE` (softcap.cuh:3 @5266f24da).
 const block_size = 256;
 
-/// Ports `softcap_f32_cuda` (softcap.cu:15 @c1d0e7a00).
+/// Ports `softcap_f32_cuda` (softcap.cu:15 @5266f24da).
 fn softcapF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, scale: f32, softcap: f32, k: c_int, stream: cu.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(k + block_size - 1, block_size);
     kernels.launchPdl(kernels.get("softcap", "softcap_f32"), .{
@@ -29,7 +29,7 @@ fn softcapF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, scale: f32, softcap: f
     }, .{ x, dst, scale, softcap, k });
 }
 
-/// Ports `ggml_cuda_op_softcap` (softcap.cu:22 @c1d0e7a00): `src` is the
+/// Ports `ggml_cuda_op_softcap` (softcap.cu:22 @5266f24da): `src` is the
 /// first `SCALE`, `dst` the last.
 pub fn opSoftcap(ctx: *common.Context, dst: *Tensor, src: *Tensor) void {
     const src0 = impl.one(Tensor, src.src[0]);

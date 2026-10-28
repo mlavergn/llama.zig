@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/grovemoe.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/grovemoe.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_grovemoe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,12 +20,12 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_grovemoe`'s `load_arch_hparams` (models/grovemoe.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_grovemoe`'s `load_arch_hparams` (models/grovemoe.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
-    hp.n_ff_exp = (try meta.getKey(u32, .expert_feed_forward_length, true, exc)).?;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     if (try meta.getKey(u32, .expert_chunk_feed_forward_length, false, exc)) |v| hp.n_ff_chexp = v;
     hp.expert_group_scale = (try meta.getKey(f32, .expert_group_scale, true, exc)).?;
     hp.n_group_experts = (try meta.getKey(u32, .experts_per_group, true, exc)).?;
@@ -37,7 +37,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_grovemoe`'s `load_arch_tensors` (models/grovemoe.cpp:16 @c1d0e7a00).
+/// Ports `llama_model_grovemoe`'s `load_arch_tensors` (models/grovemoe.cpp:16 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -74,7 +74,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_expert }, 0, exc);
 
         // The mixture of experts.
-        const n_ff_exp: i64 = if (hp.n_ff_exp != 0) hp.n_ff_exp else @divTrunc(l.n_ff, l.n_expert_used);
+        const n_ff_exp: i64 = if (hp.nFfExp(0) != 0) hp.nFfExp(0) else @divTrunc(l.n_ff, l.n_expert_used);
         const n_ff_chexp: i64 = if (hp.n_ff_chexp != 0) hp.n_ff_chexp else l.n_embd_head_k;
         const n_chunk_expert: i64 = @divTrunc(l.n_expert, hp.n_group_experts);
 
@@ -88,13 +88,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_grovemoe`'s `build_arch_graph` (models/grovemoe.cpp:63 @c1d0e7a00).
+/// Ports `llama_model_grovemoe`'s `build_arch_graph` (models/grovemoe.cpp:63 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_grovemoe`'s `graph`
-/// (models/grovemoe.cpp:67 @c1d0e7a00).
+/// (models/grovemoe.cpp:67 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

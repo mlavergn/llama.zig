@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/grok.cpp` at v0.3.0 (`c1d0e7a00`):
+//! Ported from `llama.cpp/src/models/grok.cpp` at v0.4.0 (`5266f24da`):
 //! `llama_model_grok`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_grok`'s `load_arch_hparams` (models/grok.cpp:3 @c1d0e7a00).
+/// Ports `llama_model_grok`'s `load_arch_hparams` (models/grok.cpp:3 @5266f24da).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -37,7 +37,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.f_final_logit_softcapping = 0.0;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
-    if (try meta.getKey(u32, .expert_feed_forward_length, false, exc)) |v| hp.n_ff_exp = v;
+    _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, false, exc);
     if (try meta.getKey(f32, .logit_scale, false, exc)) |v| hp.f_logit_scale = v;
     if (try meta.getKey(f32, .embedding_scale, false, exc)) |v| hp.f_embedding_scale = v;
     if (try meta.getKey(f32, .attention_output_scale, false, exc)) |v| hp.f_attn_out_scale = v;
@@ -57,7 +57,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_grok`'s `load_arch_tensors` (models/grok.cpp:35 @c1d0e7a00).
+/// Ports `llama_model_grok`'s `load_arch_tensors` (models/grok.cpp:35 @5266f24da).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -80,7 +80,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 
     // Grok-1's n_ff_exp is n_ff (the C++ leaves `/ n_expert_used` commented out).
-    const n_ff_exp: i64 = if (hp.n_ff_exp != 0) hp.n_ff_exp else l.n_ff;
+    const n_ff_exp: i64 = if (hp.nFfExp(0) != 0) hp.nFfExp(0) else l.n_ff;
     var i: i32 = 0;
     while (i < l.n_layer) : (i += 1) {
         const layer = &self.layers[@intCast(i)];
@@ -110,13 +110,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_grok`'s `build_arch_graph` (models/grok.cpp:82 @c1d0e7a00).
+/// Ports `llama_model_grok`'s `build_arch_graph` (models/grok.cpp:82 @5266f24da).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_grok`'s `graph`
-/// (models/grok.cpp:86 @c1d0e7a00).
+/// (models/grok.cpp:86 @5266f24da).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

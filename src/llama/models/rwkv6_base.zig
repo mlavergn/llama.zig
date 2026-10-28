@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/rwkv6-base.cpp` at v0.3.0
-//! (`c1d0e7a00`): `llm_build_rwkv6_base`'s `build_rwkv6_channel_mix` and
+//! Ported from `llama.cpp/src/models/rwkv6-base.cpp` at v0.4.0
+//! (`5266f24da`): `llm_build_rwkv6_base`'s `build_rwkv6_channel_mix` and
 //! `build_rwkv6_time_mix`. Its constructor only stores the model, which the
 //! port passes to each function instead.
 
@@ -23,7 +23,7 @@ const Layer = model_mod.Layer;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llm_build_rwkv6_base`'s `build_rwkv6_channel_mix`
-/// (models/rwkv6-base.cpp:9 @c1d0e7a00): the squared-ReLU feed-forward,
+/// (models/rwkv6-base.cpp:9 @5266f24da): the squared-ReLU feed-forward,
 /// gated by the receptance.
 pub fn buildRwkv6ChannelMix(b: *const graph.Builder, layer: *const Layer, cur_: *Tensor, x_prev: *Tensor, arch: arch_mod.Arch) *Tensor {
     const ctx = b.ctx0;
@@ -44,7 +44,7 @@ pub fn buildRwkv6ChannelMix(b: *const graph.Builder, layer: *const Layer, cur_: 
 }
 
 /// Ports `llm_build_rwkv6_base`'s `build_rwkv6_time_mix`
-/// (models/rwkv6-base.cpp:31 @c1d0e7a00): the WKV-6 recurrence, or for a
+/// (models/rwkv6-base.cpp:31 @5266f24da): the WKV-6 recurrence, or for a
 /// QRWKV model (one without `time_mix_first`) gated linear attention.
 pub fn buildRwkv6TimeMix(model: *const Model, b: *const graph.Builder, inp: *const graph.InpRs, cur_: *Tensor, x_prev: *Tensor, ubatch: *const batch.Ubatch, il: c_int) *Tensor {
     const ctx = b.ctx0;

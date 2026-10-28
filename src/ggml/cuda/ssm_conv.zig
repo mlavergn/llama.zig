@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/ssm-conv.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/ssm-conv.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/ssm-conv.cuh` at v0.4.0 (`5266f24da`). The
 //! kernels, `ssm_conv_f32` and `ssm_conv_long_token_f32`, stay CUDA.
 //!
 //! The short-sequence kernel goes through `ggml_cuda_kernel_launch` (PDL);
@@ -30,7 +30,7 @@ fn dim(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `ssm_conv_f32_cuda` (ssm-conv.cu:127 @c1d0e7a00).
+/// Ports `ssm_conv_f32_cuda` (ssm-conv.cu:127 @5266f24da).
 fn ssmConvF32Cuda(
     comptime apply_silu: bool,
     src0: ?*const anyopaque,
@@ -105,7 +105,7 @@ fn ssmConvF32Cuda(
     }
 }
 
-/// Ports `ggml_cuda_op_ssm_conv` (ssm-conv.cu:160 @c1d0e7a00).
+/// Ports `ggml_cuda_op_ssm_conv` (ssm-conv.cu:160 @5266f24da).
 ///
 /// Parameters:
 /// - `bias_add_node`: the fused `ADD` whose other operand is the bias, or

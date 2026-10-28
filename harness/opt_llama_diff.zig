@@ -254,13 +254,14 @@ const Filter = enum {
     /// and its norm, and in the last layer the feed-forward block, its
     /// norm, the attention output and the query norm -- the query norm's
     /// gradient runs back through the attention, the softmax and M-RoPE.
-    /// Measured, one weight at a time: every other weight either reaches a
-    /// cache write -- `ggml_set_rows` into the KV cache, or the chunked
-    /// Gated Delta Net's `ggml_set_inplace` -- and `ggml_build_backward_expand`
-    /// asserts "inplace operations are currently not supported"
-    /// (ggml.c:7318 @c1d0e7a00), or reaches the attention output gate's
-    /// `ggml_sigmoid`, a unary op with no backward pass, and aborts with
-    /// "fatal error" after "unsupported unary op for backward pass" (ggml.c:7093 @c1d0e7a00).
+    /// Measured, one weight at a time: every other weight reaches the
+    /// attention output gate's `ggml_sigmoid`, a unary op with no backward
+    /// pass, and aborts with "fatal error" after "unsupported unary op for
+    /// backward pass" (ggml.c:7114 @5266f24da). Through v0.3.0 the KV
+    /// cache's `ggml_set_rows` stopped several of them first, at
+    /// `ggml_build_backward_expand`'s "inplace operations are currently not
+    /// supported"; v0.4.0 admits `GGML_OP_SET_ROWS` there
+    /// (ggml.c:7339 @5266f24da), so all three now end at the sigmoid.
     head,
     /// One weight per abort, below.
     attn_q,

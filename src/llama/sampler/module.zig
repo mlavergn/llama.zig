@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** It gathers the files that together replace
-//! `llama.cpp/src/llama-sampler.cpp` (v0.3.0, `c1d0e7a00`):
+//! `llama.cpp/src/llama-sampler.cpp` (v0.4.0, `5266f24da`):
 //!
 //! - `core.zig`       — the dispatchers, the shared sort and softmax, the
 //!                      empty placeholder, the backend-sampling base

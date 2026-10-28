@@ -4,7 +4,7 @@
 //!
 //! **Not a port of a file.** Each function here reproduces one Intel
 //! intrinsic that `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` or
-//! `arch/x86/repack.cpp` (v0.3.0, `c1d0e7a00`) calls, and is named after it
+//! `arch/x86/repack.cpp` (v0.4.0, `5266f24da`) calls, and is named after it
 //! with the leading underscore dropped: `_mm256_maddubs_epi16` is
 //! `mm256_maddubs_epi16`. The semantics are Intel's.
 //!
@@ -430,7 +430,7 @@ pub inline fn mm256_castsi256_si128(a: m256i) m128i {
     return .{ a[0], a[1] };
 }
 
-/// `MM256_SET_M128I` (arch/x86/quants.c:26 @c1d0e7a00) and
+/// `MM256_SET_M128I` (arch/x86/quants.c:26 @5266f24da) and
 /// `_mm256_set_m128i`: the first operand high, the second low.
 pub inline fn mm256_set_m128i(hi: m128i, lo: m128i) m256i {
     return .{ lo[0], lo[1], hi[0], hi[1] };
@@ -923,6 +923,102 @@ pub inline fn mm_movehl_ps(a: m128, b: m128) m128 {
 /// `_mm_movehdup_ps`: the odd lanes, each twice.
 pub inline fn mm_movehdup_ps(a: m128) m128 {
     return .{ a[1], a[1], a[3], a[3] };
+}
+
+// -----------------------------------------------------------------------------
+// For `ggml-cpu/iqp.cpp`
+//
+// What `llama.cpp/ggml/src/ggml-cpu/iqp.cpp` (v0.4.0, `5266f24da`) calls that
+// nothing above did: the 256-bit unpacks and `vperm2i128` of its 8x8
+// transpose, `vpmulld`, the `vpmovsxbd` scale load, GFNI's affine transform,
+// and the AVX-VNNI and AVX-VNNI-INT8 dot products.
+//
+// Unlike `arch/x86/quants.c`'s, `iqp.cpp`'s `__AVXVNNI__` and
+// `__AVXVNNIINT8__` arms are ported (`cpu/iqp_x86.zig`). No machine this
+// project gates on has either, so they are checked by compiling and
+// disassembling only.
+
+extern fn @"llvm.x86.vgf2p8affineqb.256"(i8x32, i8x32, i8) callconv(sysv) i8x32;
+extern fn @"llvm.x86.avx2.vpdpbssd.256"(i32x8, i8x32, i8x32) callconv(sysv) i32x8;
+
+/// `__GFNI__`: `tigerlake` has it, x86-64-v3 and v4 do not.
+pub const has_gfni = x86Has(.gfni);
+
+/// `__AVXVNNI__`, whether or not AVX512-VNNI is there too.
+pub const has_avxvnni = x86Has(.avxvnni);
+
+/// `_mm256_unpacklo_epi32(a, b)`: within each 128-bit half, the low two
+/// `i32` of `a` and `b`, interleaved.
+pub inline fn mm256_unpacklo_epi32(a: m256i, b: m256i) m256i {
+    return as(m256i, @shuffle(i32, as(i32x8, a), as(i32x8, b), [8]i32{ 0, ~@as(i32, 0), 1, ~@as(i32, 1), 4, ~@as(i32, 4), 5, ~@as(i32, 5) }));
+}
+
+/// `_mm256_unpackhi_epi32(a, b)`: within each 128-bit half, the high two
+/// `i32` of `a` and `b`, interleaved.
+pub inline fn mm256_unpackhi_epi32(a: m256i, b: m256i) m256i {
+    return as(m256i, @shuffle(i32, as(i32x8, a), as(i32x8, b), [8]i32{ 2, ~@as(i32, 2), 3, ~@as(i32, 3), 6, ~@as(i32, 6), 7, ~@as(i32, 7) }));
+}
+
+/// `_mm256_unpacklo_epi64(a, b)`: within each 128-bit half, `a`'s low
+/// `i64` then `b`'s.
+pub inline fn mm256_unpacklo_epi64(a: m256i, b: m256i) m256i {
+    return @shuffle(i64, a, b, [4]i32{ 0, ~@as(i32, 0), 2, ~@as(i32, 2) });
+}
+
+/// `_mm256_unpackhi_epi64(a, b)`: within each 128-bit half, `a`'s high
+/// `i64` then `b`'s.
+pub inline fn mm256_unpackhi_epi64(a: m256i, b: m256i) m256i {
+    return @shuffle(i64, a, b, [4]i32{ 1, ~@as(i32, 1), 3, ~@as(i32, 3) });
+}
+
+/// `_mm256_permute2x128_si256(a, b, imm)`: AVX2's `vperm2i128`, which
+/// selects exactly what `vperm2f128` does.
+pub const mm256_permute2x128_si256 = mm256_permute2f128_si256;
+
+/// `_mm256_mullo_epi32`: `vpmulld`, the low 32 bits of each product.
+pub inline fn mm256_mullo_epi32(a: m256i, b: m256i) m256i {
+    return as(m256i, as(i32x8, a) *% as(i32x8, b));
+}
+
+/// `_mm_loadl_epi64`: eight bytes into the low half, the high half zeroed.
+/// Through a pointer, as `mm_loadu_si128`.
+pub inline fn mm_loadl_epi64(p: *const anyopaque) m128i {
+    var rp = p;
+    _ = &rp;
+    const v: *align(1) const i64 = @ptrCast(rp);
+    return .{ v.*, 0 };
+}
+
+/// `_mm256_cvtepi8_epi32`: the low eight bytes sign-extended.
+pub inline fn mm256_cvtepi8_epi32(a: m128i) m256i {
+    const b = as(i8x16, a);
+    const lo: @Vector(8, i8) = .{ b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7] };
+    return as(m256i, @as(i32x8, lo));
+}
+
+/// `_mm256_broadcastsi128_si256`: the 128 bits in both halves.
+pub inline fn mm256_broadcastsi128_si256(a: m128i) m256i {
+    return .{ a[0], a[1], a[0], a[1] };
+}
+
+/// `_mm256_gf2p8affine_epi64_epi8(x, a, imm)`: each byte of `x` times the
+/// 8x8 bit matrix in the matching 64-bit lane of `a`, over GF(2), then
+/// XORed with `imm`. Through LLVM, `vgf2p8affineqb`.
+pub inline fn mm256_gf2p8affine_epi64_epi8(x: m256i, a: m256i, comptime imm: i8) m256i {
+    return as(m256i, @"llvm.x86.vgf2p8affineqb.256"(as(i8x32, x), as(i8x32, a), imm));
+}
+
+/// `_mm256_dpbusd_avx_epi32`: AVX-VNNI's VEX encoding of `vpdpbusd`. Clang
+/// lowers it to the same builtin as `_mm256_dpbusd_epi32`, and so does this.
+pub inline fn mm256_dpbusd_avx_epi32(src: m256i, a: m256i, b: m256i) m256i {
+    return mm256_dpbusd_epi32(src, a, b);
+}
+
+/// `_mm256_dpbssd_epi32`: AVX-VNNI-INT8's `vpdpbssd`, `src` plus the four
+/// products of the signed bytes of `a` and `b` in each 32-bit lane, no
+/// saturation.
+pub inline fn mm256_dpbssd_epi32(src: m256i, a: m256i, b: m256i) m256i {
+    return as(m256i, @"llvm.x86.avx2.vpdpbssd.256"(as(i32x8, src), as(i8x32, a), as(i8x32, b)));
 }
 
 // -----------------------------------------------------------------------------

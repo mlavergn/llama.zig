@@ -551,6 +551,46 @@ const Edit = struct {
         S.o = .{ .{ .pattern = "blk.(", .buft = c.ggml_backend_cpu_buffer_type() }, .{ .pattern = null, .buft = null } };
         p.tensor_buft_overrides = &S.o;
     }
+    // `TENSOR_READ_LAZY`: the architectures that mark a tensor lazy are
+    // gemma4 and qwen4exp. A fixture's tensors are far below the 4 GiB
+    // `LLAMA_LAZY_MODE_AUTO` wants, so only `ON` reaches the lazy path.
+    fn lazyOn(p: *c.llama_model_params) void {
+        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+    }
+    fn lazyOff(p: *c.llama_model_params) void {
+        p.lazy_mode = c.LLAMA_LAZY_MODE_OFF;
+    }
+    fn lazyOnCpu(p: *c.llama_model_params) void {
+        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+        p.n_gpu_layers = 0;
+    }
+    /// Lazy without mmap: the files are mapped for the lazy tensors alone,
+    /// not prefetched, and the rest are read biggest-staged-first.
+    fn lazyOnNoMmap(p: *c.llama_model_params) void {
+        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+    }
+    fn lazyOnNoMmapCpu(p: *c.llama_model_params) void {
+        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+        p.n_gpu_layers = 0;
+    }
+    /// `no_alloc` asks without recording: the tensor still goes in the lazy
+    /// context, and nothing is mapped for it.
+    fn lazyOnNoAlloc(p: *c.llama_model_params) void {
+        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+        p.no_alloc = true;
+        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+    }
+    /// mlock skips the lazy tensors.
+    fn lazyOnMlock(p: *c.llama_model_params) void {
+        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = c.LLAMA_LOAD_MODE_MMAP_MLOCK;
+    }
+    fn lazyOnCheck(p: *c.llama_model_params) void {
+        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+        p.check_tensors = true;
+    }
     fn overrideEmpty(p: *c.llama_model_params) void {
         const S = struct {
             var o: [1]c.llama_model_tensor_buft_override = .{.{ .pattern = null, .buft = null }};
@@ -1086,6 +1126,33 @@ pub fn main(init: std.process.Init) !void {
         // Metadata alone: the first tensor is missing.
         runFullCase(.{ .name = "tensors: metadata only", .path = derive(dir, path, "qtensorless", Qwen.asIs), .edit = Edit.none });
     }
+
+    // Lazy reads, on the architectures that mark a tensor lazy: every lazy
+    // mode, with and without mmap, offloaded and not.
+    var n_lazy: usize = 0;
+    for (args[2..]) |a| {
+        const name = std.fs.path.basename(a);
+        if (!std.mem.startsWith(u8, name, "gemma4-dense") and !std.mem.startsWith(u8, name, "gemma4-moe") and
+            !std.mem.startsWith(u8, name, "qwen4exp-")) continue;
+        n_lazy += 1;
+        const path = try gpa.dupeSentinel(u8, a, 0);
+        const variants = .{
+            .{ "lazy: default (auto)", Edit.none },
+            .{ "lazy: off", Edit.lazyOff },
+            .{ "lazy: on", Edit.lazyOn },
+            .{ "lazy: on, cpu", Edit.lazyOnCpu },
+            .{ "lazy: on, no mmap", Edit.lazyOnNoMmap },
+            .{ "lazy: on, no mmap, cpu", Edit.lazyOnNoMmapCpu },
+            .{ "lazy: on, no alloc", Edit.lazyOnNoAlloc },
+            .{ "lazy: on, mlock", Edit.lazyOnMlock },
+            .{ "lazy: on, check tensors", Edit.lazyOnCheck },
+        };
+        inline for (variants) |v| {
+            var nb: [160]u8 = undefined;
+            runFullCase(.{ .name = try std.fmt.bufPrint(&nb, "{s} {s}", .{ name, v[0] }), .path = path, .edit = v[1] });
+        }
+    }
+    if (n_lazy == 0) std.debug.print("  lazy reads: no gemma4 or qwen4exp fixture given -- run scripts/gen-arch-fixtures\n", .{});
 
     std.debug.print("  {d} loaded, {d} threw, {d} unported\n", .{ tally.loaded, tally.thrown, tally.unported });
     if (failures != 0) {

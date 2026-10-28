@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/tsembd.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/tsembd.cuh` at v0.3.0 (`c1d0e7a00`). The
+//! `llama.cpp/ggml/src/ggml-cuda/tsembd.cuh` at v0.4.0 (`5266f24da`). The
 //! kernel, `timestep_embedding_f32`, stays CUDA.
 
 const std = @import("std");
@@ -16,10 +16,10 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_TIMESTEP_EMBEDDING_BLOCK_SIZE` (tsembd.cuh:3 @c1d0e7a00).
+/// Ports `CUDA_TIMESTEP_EMBEDDING_BLOCK_SIZE` (tsembd.cuh:3 @5266f24da).
 const block_size = 256;
 
-/// Ports `timestep_embedding_f32_cuda` (tsembd.cu:26 @c1d0e7a00), which
+/// Ports `timestep_embedding_f32_cuda` (tsembd.cu:26 @5266f24da), which
 /// launches with `<<<>>>`.
 fn timestepEmbeddingF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ne00: c_int, nb1: c_int, dim: c_int, max_period: c_int, stream: cu.cudaStream_t) void {
     const half_ceil: c_int = @divTrunc(dim + 1, 2);
@@ -28,7 +28,7 @@ fn timestepEmbeddingF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ne00: c_int,
     kernels.launch(kernels.get("tsembd", "timestep_embedding_f32"), .{ .grid = grid, .block = .{ .x = block_size }, .stream = stream }, .{ x, dst, nb1, dim, max_period });
 }
 
-/// Ports `ggml_cuda_op_timestep_embedding` (tsembd.cu:34 @c1d0e7a00).
+/// Ports `ggml_cuda_op_timestep_embedding` (tsembd.cu:34 @5266f24da).
 pub fn opTimestepEmbedding(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
