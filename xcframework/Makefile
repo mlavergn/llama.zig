@@ -63,8 +63,10 @@ XR_DEVICE  ?= Apple Vision Pro
 # devices`) and the development team its apps are signed for. The phone must
 # be registered in that team.
 DEVICE_ID  ?= 00008120-00112894262A601E
-DEVICE_APP := com.marclavergne.llamazig.devicesmoke
-SWIFTUI_APP := com.marclavergne.llamazig.swiftui
+# The apps' bundle IDs, under a prefix the team can register.
+BUNDLE_PREFIX ?= com.example
+DEVICE_APP := $(BUNDLE_PREFIX).llamazig.devicesmoke
+SWIFTUI_APP := $(BUNDLE_PREFIX).llamazig.swiftui
 
 # upstream's build order (build-xcframework.sh:55)
 BUILDS := ios-sim ios-device macos visionos visionos-sim tvos-sim tvos-device
@@ -444,7 +446,7 @@ smoke-device: xcframework $(B)/test/driver-apple_a7
 	cp -R $(XCF) $(B)/device/
 	cd $(B)/device && xcrun xcodebuild build -quiet -project DeviceSmoke.xcodeproj -scheme DeviceSmoke -configuration Release \
 	    -destination 'platform=iOS,id=$(DEVICE_ID)' -derivedDataPath $(B)/device-dd -allowProvisioningUpdates \
-	    DEVELOPMENT_TEAM=$(TEAM) > $(B)/device-build.log 2>&1 \
+	    DEVELOPMENT_TEAM=$(TEAM) SMOKE_BUNDLE_ID=$(DEVICE_APP) > $(B)/device-build.log 2>&1 \
 	    || { grep -m5 'error:' $(B)/device-build.log; exit 1; }
 	@# Embedding signs the copy, so its bytes are not ours; its UUID is.
 	test "$$(xcrun dwarfdump --uuid $(B)/device-dd/Build/Products/Release-iphoneos/DeviceSmoke.app/Frameworks/llama.framework/llama | cut -d' ' -f2)" = \
