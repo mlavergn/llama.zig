@@ -702,11 +702,12 @@ qwen35xl:
 
 .PHONY: pkg
 
-# zigpkg's `zpkg` (../zigpkg) packages, signs, notarizes and publishes the CLI
-# as package.zon says; signing needs the gitignored signing.zon naming the store.
+# zigpkg's `zpkg` (../zigpkg) packages the CLI as its recipe in zigpkg's store
+# says (the name and version come from build.zig.zon), then signs, notarizes
+# and publishes it as the recipe says.
 ZPKG ?= zpkg
 
-# What the package installs (package.zon's .pkg.root).
+# What the package installs (the recipe's .pkg root).
 PKG_ROOT := zig-out/pkg/root
 
 # Build the CLI into zig-out/pkg/root, then the package with zpkg.

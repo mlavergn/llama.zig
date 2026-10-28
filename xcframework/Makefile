@@ -63,9 +63,8 @@ XR_DEVICE  ?= Apple Vision Pro
 # devices`) and the development team its apps are signed for. The phone must
 # be registered in that team.
 DEVICE_ID  ?= 00008120-00112894262A601E
-TEAM       ?= Q6H2FB9YW2
-DEVICE_APP := com.mlavergn.llamazig.devicesmoke
-SWIFTUI_APP := com.mlavergn.llamazig.swiftui
+DEVICE_APP := com.marclavergne.llamazig.devicesmoke
+SWIFTUI_APP := com.marclavergne.llamazig.swiftui
 
 # upstream's build order (build-xcframework.sh:55)
 BUILDS := ios-sim ios-device macos visionos visionos-sim tvos-sim tvos-device

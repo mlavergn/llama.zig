@@ -159,7 +159,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "$(SMOKE_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SMOKE_BUNDLE_ID = com.mlavergn.llamazig.devicesmoke;
+				SMOKE_BUNDLE_ID = com.marclavergne.llamazig.devicesmoke;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				CODE_SIGN_ENTITLEMENTS = DeviceSmoke.entitlements;
 			};

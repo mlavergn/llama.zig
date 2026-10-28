@@ -6912,7 +6912,7 @@ the CPU path, gated above, are what make Qwen3 usable there.
 ## llamazig on an iPhone
 
 **The device.** An iPhone 15 (`iPhone15,4`, A16, iOS 27.0.1) on this
-Mac's USB, registered in the `Q6H2FB9YW2` development team by `xcodebuild
+Mac's USB, registered in a development team by `xcodebuild
 -allowProvisioningDeviceRegistration` -- it was in no team before. The A16
 runs the xcframework's `ios` slice, built for `apple_a14`.
 
