@@ -284,8 +284,9 @@ gate itself is what is wrong. In that case, say so in `NOTES.md`.
 These must clear before the next sync (M7), so drive them now. The commit
 from Step 10 has to reach GitHub first.
 
-- **GB10** (`spark-dbff`, checkout `~/src/llama.zig`, through `zupdater
-  tty`; memory: driving-agents-tty):
+- **GB10** (`spark-dbff`, checkout `~/src/mlavergn/llama.zig`, through
+  `zupdater tty`; memory: driving-agents-tty). Move `llama.cpp/` and the
+  zmake checkout to the new commit before anything else:
   - the Step 5 regenerations, with the results committed back from the Mac;
   - `cuda-ops-diff`, `cuda-node-diff` (per node and fused),
     `cuda-backend-diff` and `cuda-parity-cli`;
@@ -294,7 +295,12 @@ from Step 10 has to reach GitHub first.
     `vk-push-layout` and `vk-parity-cli`, on all four arms;
   - the Linux arm64 CPU set and `host-arms-diff`.
 - **DESKTOP-BR7J5S9:** `make x86-gates` at `x86_64_v3`, plus
-  `win-host-diffs`.
+  `win-host-diffs`. `[The Agent could not open a terminal]` is usually the
+  laptop's Application Control refusing that build of the program; run it
+  in a `tty` to see.
+- **Every machine:** where the pickup names cases, find each in the gate's
+  output. A total does not say which cases ran (`vk-ops-diff` passed
+  16,417 at v0.4.1 with no fused case among them).
 - **JWHLPTOP:** `make x86-gates` with `X86_CPU=x86_64_v4` and again with
   `tigerlake`. Confirm the 512-bit code by disassembly.
 

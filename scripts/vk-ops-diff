@@ -186,9 +186,12 @@ else
     # a part that outlives VK_OPS_DIFF_FA_TIMEOUT (600 s) finishes one case
     # per process. The head sizes are test-backend-ops' own list; every
     # FLASH_ATTN_EXT case it makes uses one of them.
-    ops=$("$tmp/vk_ops_diff" --list-ops 2>/dev/null | grep -E '^  [A-Z][A-Z0-9_]*$' | tr -d ' ' | grep -vx FLASH_ATTN_EXT | paste -sd, -)
-    [ -n "$ops" ] || { echo "FAIL: could not list the ops"; exit 1; }
-    run_part ops "${VK_OPS_DIFF_TIMEOUT:-5400}" plain -o "$ops"
+    # The rest is every case whose vars are not test_flash_attn_ext's, which
+    # alone begin `hsk=N,hsv=`. Not `-o` over a list of names: a fused case
+    # is named for its fusion (ROPE_SET_ROWS, RMS_NORM_MUL_ADD, GELU_MUL),
+    # which `--list-ops` does not print and `support` mode drops, so that ran
+    # none of them (NOTES.md, "The v0.4.1 pickup").
+    run_part ops "${VK_OPS_DIFF_TIMEOUT:-5400}" plain -p '^(?!hsk=[0-9]+,hsv=)'
     for hsk in 40 64 72 80 96 128 192 256 320 512 576; do
         run_part "fa-hsk$hsk" "${VK_OPS_DIFF_FA_TIMEOUT:-600}" fallback -o FLASH_ATTN_EXT -p "hsk=$hsk,"
     done

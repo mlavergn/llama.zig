@@ -26,7 +26,7 @@ The `basis:` line is the machine-readable one: tag, full commit, build tag.
 |---|---|---|---|---|---|---|
 | — | `v0.3.0` (`c1d0e7a00`, `b10621`) | 2026-10-27 | `0.3.0` | `bd498fc` | the port as built through Stages 1–8 | — |
 | `v0.3.0` | `v0.4.0` (`5266f24da`, `b10809`) | 2026-10-28 | `0.4.0` | `a67ea88` | 456 touched citations, 217 unmapped hunks, 29 uncited files; 7,601 citations repinned; 529 line literals moved; Mac gates all pass (`NOTES.md`, "Upstream sync v0.3.0 → v0.4.0") | GB10: clear (`7c9cbc1`; `lint` not run, no `zlint` there) · DESKTOP-BR7J5S9: clear (`7c9cbc1`; `quant-diff` has no Windows mode) · JWHLPTOP: **open**, unreachable 2026-10-28 |
-| `v0.4.0` | `v0.4.1` (`b29c606e2`, `b10964`) | 2026-10-29 | `0.4.1` | `v0.4.1 sync upstream v0.4.1` (hash recorded by the next commit) | 197 touched citations, 168 unmapped hunks, 43 uncited files; 7,231 citation sites repinned; 316 line literals moved; three architectures (hy_v4, maple, spark2_5), the Metal fusion table, the Vulkan matmul refactor; Mac gates (`NOTES.md`, "Upstream sync v0.4.0 → v0.4.1") | GB10: open · DESKTOP-BR7J5S9: open · JWHLPTOP: open (with v0.4.0's AVX-512 items) |
+| `v0.4.0` | `v0.4.1` (`b29c606e2`, `b10964`) | 2026-10-29 | `0.4.1` | `d4f0a16` | 197 touched citations, 168 unmapped hunks, 43 uncited files; 7,231 citation sites repinned; 316 line literals moved; three architectures (hy_v4, maple, spark2_5), the Metal fusion table, the Vulkan matmul refactor; Mac gates (`NOTES.md`, "Upstream sync v0.4.0 → v0.4.1") | GB10: clear (`0.4.1+1`; three gate fixes, `diag_f16` found) · DESKTOP-BR7J5S9: clear (`0.4.1+1`) · JWHLPTOP: **open** (with v0.4.0's AVX-512 items), unreachable 2026-10-29 |
 
 ## Deferred
 

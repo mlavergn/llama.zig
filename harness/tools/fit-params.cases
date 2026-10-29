@@ -22,4 +22,8 @@ $FIX/qwen3-dense.gguf
 -m $ROOT/Qwen3-0.6B-Q8_0.gguf -fitp on -np 4 -kvu
 -m $FIX/qwen3-dense.gguf -fitp maybe
 -m /nonexistent/model.gguf
+# Upstream throws through main here, and std::terminate races common_log's
+# worker: on the GB10 its three load errors were lost in 8 runs of 20. The
+# abort itself is still compared.
+!mask /(failed to open GGUF file|error loading model|failed to load model)/d
 -m /nonexistent/model.gguf -fitp on

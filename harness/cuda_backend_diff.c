@@ -105,25 +105,31 @@ static void ask_alloc_fattn(ggml_backend_buffer_type_t buft, struct ggml_context
     static const struct { int64_t dk, dv; } heads[] = { { 64, 64 }, { 128, 128 }, { 256, 256 }, { 576, 512 }, { 40, 40 } };
     static const int64_t n_qs[] = { 1, 4, 32, 129 };
     static const int64_t n_kvs[] = { 256, 1024 };
-    static const enum ggml_type k_types[] = { GGML_TYPE_F16, GGML_TYPE_Q8_0, GGML_TYPE_Q4_0 };
+    /* The last three pairs are outside upstream's default FA quants, so a
+     * `-Dcuda-fa-quants` build without them takes the vec kernel's
+     * f16_fallback; with only matched compiled pairs it was never asked. */
+    static const struct { enum ggml_type k, v; } kv_types[] = {
+        { GGML_TYPE_F16, GGML_TYPE_F16 }, { GGML_TYPE_Q8_0, GGML_TYPE_Q8_0 }, { GGML_TYPE_Q4_0, GGML_TYPE_Q4_0 },
+        { GGML_TYPE_Q5_1, GGML_TYPE_Q5_1 }, { GGML_TYPE_Q8_0, GGML_TYPE_Q4_0 }, { GGML_TYPE_F16, GGML_TYPE_Q8_0 },
+    };
     static const uintptr_t bases[] = { 0x10000000, 0x10000040, 0x10000080, 0x100000c4, 0x10000f00 };
     for (size_t h = 0; h < sizeof(heads) / sizeof(heads[0]); h++) {
         for (size_t iq = 0; iq < sizeof(n_qs) / sizeof(n_qs[0]); iq++) {
             for (size_t ik = 0; ik < sizeof(n_kvs) / sizeof(n_kvs[0]); ik++) {
-                for (size_t it = 0; it < sizeof(k_types) / sizeof(k_types[0]); it++) {
+                for (size_t it = 0; it < sizeof(kv_types) / sizeof(kv_types[0]); it++) {
                     for (int gqa = 1; gqa <= 4; gqa *= 4) {
                         const int64_t H = 8 * gqa, Hkv = 8, B = 1;
                         const int64_t n_q = n_qs[iq], n_kv = n_kvs[ik];
                         struct ggml_tensor * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, heads[h].dk, n_q, H, B);
-                        struct ggml_tensor * k = ggml_new_tensor_4d(ctx, k_types[it], heads[h].dk, n_kv, Hkv, B);
-                        struct ggml_tensor * v = ggml_new_tensor_4d(ctx, k_types[it], heads[h].dv, n_kv, Hkv, B);
+                        struct ggml_tensor * k = ggml_new_tensor_4d(ctx, kv_types[it].k, heads[h].dk, n_kv, Hkv, B);
+                        struct ggml_tensor * v = ggml_new_tensor_4d(ctx, kv_types[it].v, heads[h].dv, n_kv, Hkv, B);
                         struct ggml_tensor * m = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, n_kv, n_q, 1, 1);
                         struct ggml_tensor * fa = ggml_flash_attn_ext(ctx, q, k, v, m, 0.125f, 0.0f, 0.0f);
                         for (size_t b = 0; b < sizeof(bases) / sizeof(bases[0]); b++) {
                             fa->data = (void *) bases[b];
-                            SAY("alloc fattn dk=%lld dv=%lld n_q=%lld n_kv=%lld k=%s gqa=%d data=%#lx = %zu",
+                            SAY("alloc fattn dk=%lld dv=%lld n_q=%lld n_kv=%lld k=%s v=%s gqa=%d data=%#lx = %zu",
                                 (long long) heads[h].dk, (long long) heads[h].dv, (long long) n_q, (long long) n_kv,
-                                ggml_type_name(k_types[it]), gqa, (unsigned long) bases[b],
+                                ggml_type_name(kv_types[it].k), ggml_type_name(kv_types[it].v), gqa, (unsigned long) bases[b],
                                 ggml_backend_buft_get_alloc_size(buft, fa));
                         }
                         fa->data = NULL;

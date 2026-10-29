@@ -8376,3 +8376,123 @@ compiled on any machine: this Mac has no toolkit, and that is the GB10's
 first item. The Vulkan host layer compiled here against a stub
 `libvulkan.dylib` with every glslc feature on, so every comptime arm
 type-checked, but none of it has run.
+
+## The v0.4.1 pickup
+
+### DESKTOP-BR7J5S9: item 6
+
+Run from the Mac. Every count is v0.4.0's, or grew with upstream:
+
+| gate | result |
+|---|---|
+| `x86-quants-diff` | 28 kernels identical |
+| `x86-repack-diff` | 116 checks identical |
+| `x86-ops-diff` | 826 lines identical, 1 and 3 threads |
+| `x86-node-diff` | 5,649 lines identical (5,505 at v0.4.0) |
+| `win-host-diffs` | `host-arms-diff` 168 lines, `libcxx-diff` 452,904, `regex-diff` 43,537,552, `unicode-diff` 7,073,554 |
+
+**The laptop's Application Control blocks some of our executables, and
+`push` reports it as a terminal failure.** `x86-repack-diff`,
+`libcxx-diff` and the `x86-ops-diff` comparer each failed with `[The
+Agent could not open a terminal]`; the first two passed on a rerun, the
+comparer never did. Run by hand in a `tty`, PowerShell said why:
+`Program 'llamazig-lines-diff.exe' failed to run: An Application Control
+policy has blocked this file`. The verdict is per binary, not per
+program: `x86-ops-diff` and `x86-node-diff` each build
+`harness/win_lines_diff.c` into their own directory, the two builds
+differ in their bytes, and the one built for `x86-node-diff` ran. That
+one compared the `x86-ops-diff` dumps, still on the laptop: 826 lines
+identical. A gate that reports no verdict there is not a port failure
+until it has been run by hand.
+
+### GB10: items 1-5
+
+Both checkouts moved to `b29c606e2` first, as the v0.4.0 pickup learned
+to. The checkout is `~/src/mlavergn/llama.zig` now.
+
+| gate | result |
+|---|---|
+| CUDA build (item 1) | the ported host layer's first compile, clean; `cli` too |
+| `gen-mmq-config`, `gen-fattn-config` | output unchanged |
+| `cuda-ops-diff` | 16,093 / 16,093 bit-identical (15,757 at v0.4.0), 14 `NONDET`, as before |
+| `cuda-node-diff` | 2,822 nodes and 33 fused decodes identical, 1 and 4 threads |
+| `cuda-backend-diff` | 4,005 + 11,987 answers identical, with the probe below |
+| `cuda-parity-cli` | 6 / 6 |
+| fallback FA quants (item 3): `cuda-ops-diff`, `cuda-backend-diff` | 16,093 / 16,093; identical |
+| `ops-diff` | 762 identical |
+| `repack-diff` | 116 identical |
+| `node-diff` | identical, 1 and 4 threads, per node and fused |
+| `parity-port --cpu` | 6 / 6 |
+| `host-arms-diff` | 18 / 18 |
+| `quant-diff` | 142,215,094 checks, 0 failures |
+| `tools-diff` | 304 of 305 identical; with the mask below, `fit-params` 18 / 18 in three reruns |
+| `vk-push-layout` | pass |
+| `vk-repro` | reproducible on all four arms: 2,822 nodes and 33 fused decodes |
+| `vk-backend-diff` | every scenario identical |
+| `vk-node-diff` | 2,822 nodes and 33 fused decodes identical on all four arms |
+| `vk-parity-cli` | 6 / 6 |
+| `vk-ops-diff` | 18,759 bit-identical on each of the four arms, with the fix below (16,417 without it); no `NONDET`, no `REFHANG` -- the two KHR MLA cases that hung at v0.4.0 finished |
+
+Item 1's command for the upstream side was wrong: `cuda-ref` exists only
+when the port is on, so `-Dcuda-port=false` with it is `no such step`.
+`PLAN.md` is corrected; the Makefile's targets never asked for it.
+
+**`cuda-backend-diff` never asked about the f16 fallback.** Item 3's
+injection, `need_f16_K` without `f16_fallback`, failed `cuda-ops-diff`
+(a sentinel mismatch on the q5_1 `FLASH_ATTN_EXT` cases, whose vec
+instance the fallback build lacks) and passed `cuda-backend-diff`, though
+the injected line is in the `get_alloc_size` it compares. Its
+flash-attention probe gave K and V one type of F16, Q8_0 or Q4_0, every
+one a pair upstream's default FA quants compile, so `f16_fallback` was
+never true. It now adds q5_1/q5_1, q8_0/q4_0 and f16/q8_0: injected, it
+fails; clean, it passes, at both the fallback quants and `all`.
+
+**`fit-params`' last case races in upstream.** `-m /nonexistent/model.gguf
+-fitp on` throws through `main`, and `std::terminate` races `common_log`'s
+worker: upstream's binary lost its three load errors in 8 runs of 20 on
+the GB10, the port in none. The Mac's runs had all landed. The case masks
+those three lines; the abort is still compared.
+
+**`glslc -O` is not reproducible on `diag_f16` either.** Item 4 asked
+whether any shader besides `tri_f16` was. Two fresh generations of all
+151 shader files, one plain and one under `MALLOC_PERTURB_=85`, against
+the build's own: the plain one is byte-identical to the build's, and the
+perturbed one differs in `tri_f16` and in `diag_f16`, in one byte, an
+`OpConstant f32` that is `0x00000000` in the build and `0x80000000` under
+the perturbation -- the `D_TYPE(0)` written off the diagonal, +0.0 or
+-0.0 in f16. The build's is right. `diag.comp` did not change in
+v0.4.1, so the Stage 7 measurement's four generations missed it rather
+than v0.4.1 adding it. Unlike `tri_f16` it is live -- `ggml_diag` takes
+any type and Vulkan's `supports_op` accepts f16 -- but no gate reaches it
+(`test-backend-ops` builds `DIAG` at f32 only), and both sides embed one
+generation (Decision 59), so the gates are unaffected.
+
+**`vk-ops-diff` had run no fused case since v0.0.36.** Its main part
+passed `-o` the names `--list-ops` prints, and `--list-ops` prints ggml's
+op, unary and GLU names; `matches_filter` compares a case's `op_desc`,
+and a multi-op case names itself for its fusion -- `ROPE_SET_ROWS`,
+`RMS_NORM_MUL_ADD`, `RMS_NORM_MUL_ROPE`, `ADD_RMS_NORM`, `TOPK_MOE`,
+`MUL_MAT_VEC_FUSION`, the unary `_MUL`s and the rest. Every one was
+filtered out before it ran: not failed, not counted, not reported. Only
+`DSV4_HC_*` and `TOPK_QSA` got through, being op names too. Item 4 asked
+for six of the excluded ones by name, which is how it showed: the
+coopmat2 arm passed 16,417 cases and none of them was among them. The
+first fix took the names from `support` mode and added nine cases:
+`support` mode drops every case whose `run_whole_graph()` is true
+(test-backend-ops.cpp:11727 @b29c606e2), which is every fusion case. So
+the main part now takes no `-o` at all and excludes flash attention by
+its vars instead, `-p '^(?!hsk=[0-9]+,hsv=)'` -- `test_flash_attn_ext`'s
+alone begin that way; `test_lightning_indexer`'s begin `hsk=N,nh=`.
+Checked on the three that decide it: `ROPE_SET_ROWS` 61 cases with the
+filter, `FLASH_ATTN_EXT` none, `LIGHTNING_INDEXER` 156. The same holds
+for `run_rest`, which lists a stalled part's cases through `support`
+mode and so can never resume into a fusion case. `cuda-ops-diff` passes
+no `-o` and was never affected.
+
+With it, each arm ran 18,759 cases, every fused case the pickup named
+among them and all bit-identical: `MUL_MAT_VEC_FUSION` 1,265, `TOPK_MOE`
+416, `RMS_NORM_MUL_ROPE` 222 (4 with mul or rope off), `ROPE_SET_ROWS`
+61 (13 under IMROPE), `RMS_NORM_MUL_ADD` 36, `ADD_RMS_NORM` 25,
+`MUL_MAT_ID_FUSION` 13, and `GELU_MUL`, `SILU_MUL`, `SIGMOID_MUL` and
+`SOFTPLUS_MUL` 26 each. **Read a pickup's named cases off the gate's
+output, not its total**: 16,417 passing cases read like coverage.
