@@ -25,7 +25,7 @@ LINT_FILES := $(filter-out $(LINT_EXCLUDE),build.zig $(shell find $(LINT_DIRS) -
 
 .DEFAULT_GOAL := build
 
-.PHONY: test distclean build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
+.PHONY: test distclean build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff json-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -184,6 +184,8 @@ test:
 	@printf '\n== std::regex vs libc++ ==\n'
 	zig build reference --release=fast
 	./scripts/regex-diff
+	@printf '\n== common_json vs the port ==\n'
+	./scripts/json-diff
 	@printf '\n== unicode.cpp vs the port ==\n'
 	./scripts/unicode-diff
 	@printf '\n== llama-vocab.cpp vs the port ==\n'
@@ -423,6 +425,12 @@ libcxx-diff:
 regex-diff:
 	zig build reference --release=fast
 	./scripts/regex-diff
+
+# cli/json/ against upstream's common/json.cpp over the vendored nlohmann, in
+# one process: parse, every accessor, dump at every indent, the error text.
+# See the header of scripts/json-diff.
+json-diff:
+	./scripts/json-diff
 
 # src/llama/unicode.zig against the unmodified unicode.cpp, in one process:
 # every code point, UTF-8 decoding, the byte map, and every pre-tokenizer

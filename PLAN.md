@@ -81,6 +81,7 @@ Settled in review. The plan below assumes all of these.
 | 61 | Upstream's other tools | **Ported, each as its own Zig binary under `tools/`** (asked on 2026-10-25: "do them all please"): `gguf-split`, `quantize`, `tokenize`, `fit-params`, `export-lora`, `batched-bench`, `cvector-generator`, `imatrix`, `perplexity`, `llama-bench`. This reverses SPEC §2's "never writes one" for these binaries -- `quantize`, `gguf-split`, `export-lora`, `imatrix` and `cvector-generator` write GGUF -- while the library and `llama-cli` stay as they were. They share `tools/common/`, the ported parts of upstream's `common/`: `common_params_parse`'s option table for these examples (161 options, help text exact), `common_log`, `common_init`, the imatrix loader. Each is gated by `scripts/tools-diff <tool>` against upstream's own binary, built unmodified over `libllama-ref` (`zig build tools-ref`): stdout, stderr, exit code and every file written. `tts` was held: it links `mtmd`, the 26,700-line multimodal library -- Decision 62. The downloader (`-hf`, `-mu`, `-dr`) and the INI config files are refused: the first would be an external dependency. `NOTES.md`, "Upstream's other tools". |
 | 62 | libmtmd and `llama-tts` | **Ported, with `llama-mtmd-cli`** (asked on 2026-10-26: "port mtmd and tts, don't stop until they are completed"). Upstream's multimodal library, `tools/mtmd/` -- 17,399 lines of C++ plus 8,292 in 43 graph files, 60 projector types -- is `src/mtmd/`, every translation unit, and its C contract is the 82 `mtmd_*`/`mtmd_helper_*` functions of `mtmd.h` and `mtmd-helper.h`, exported by `src/mtmd/exports.zig` and equal to the reference's by `nm` (`make mtmd-exports`). It is pure Zig like the rest: the stb_image and miniaudio decoders upstream compiles into `mtmd-helper.cpp` are ported to Zig as far as it reaches them (`src/mtmd/vendor/`), and the SHA-256 bitmap id is `std.crypto`'s. No `MTMD_VIDEO`, as the reference builds none: the video helpers are their `#else` arms. The debugging entry points (`mtmd_debug_*`, C++ linkage, `std::vector` arguments) are not ported; `mtmd_get_memory_usage`, C++ linkage and a `std::map`, is Zig-only. No mmproj file exists here, so `make mmproj-fixtures` writes one small random mmproj per projector type, checked through upstream's libmtmd. Gated by `make mtmd-diff` (libmtmd through its C API, port against upstream, every fixture, CPU and Metal, per node and fused), `make mtmd-image-diff`, `make mtmd-audio-diff`, `make mtmd-decode-diff` and `make mtmd-exports`; the two binaries by `make tools-diff TOOL=tts|mtmd-cli` against upstream's own (28 and 39 cases). `llama-mtmd-cli` formats prompts through upstream's legacy (non-Jinja) chat templates, ported in `tools/common/chat.zig`; `--jinja` is refused, as is `MTMD_DEBUG_GRAPH` (upstream's graph dumper is not ported), and the console's Windows arm falls back to plain line reading. `NOTES.md`, "Stage 8: libmtmd and `llama-tts`". |
 | 63 | The xcframework | **A drop-in for upstream's `build-xcframework.sh` output** (asked on 2026-10-26: "Our make xcframework target needs to produce an xcframework that is drop in compatible with it"), replacing the static `llamazig.xcframework`. `xcframework/` (renamed from `xcfwk/`) builds `llama.xcframework`: upstream's seven slices (macOS, iOS, tvOS and visionOS, devices and simulators, arm64 and x86_64 as upstream has them), its minimums (iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0), dynamic frameworks with its install names and dSYMs, and its headers, module map and `Info.plist` byte for byte -- `mtmd.h`, `mtmd-helper.h` and `ggml-blas.h` included, since libmtmd (Decision 62) and the BLAS backend (Decision 60) are ported. Each slice architecture is `zig build xcframework`: `libggml.a` with BLAS and `libmtmd.a`, libllama compiled into it. **The arm64 CPUs are Apple clang's defaults for each target** (`apple_m1` for macOS and the simulators, `apple_a7` for iOS and tvOS devices, `apple_a12` for visionOS), so it runs wherever upstream's does; x86_64 is `x86_64_v3`, the port's floor. Built with `../zig17`, Zig 0.17.0 patched for Apple's mobile SDKs. Gated by `make -C xcframework compat` against upstream's own, built by its script from a `git archive` of the pin; a binary built against upstream's framework runs on ours unrelinked (`dropin-macos`); upstream's `examples/llama.swiftui` builds against it untouched and runs on an iPhone 15 (`swiftui`). Gating `apple_a7` found the port's vectorizer model wrong for every Apple core before the A14. `NOTES.md`, "llama.xcframework". |
+| 64 | Chat parsing, and tool calling | **Port `common/`'s chat parsing stack to Zig, in `cli/`, before tool execution** (asked on 2026-10-29: "we should add tool calling, can we do that prior to calling 0.4.1 done"; answered "parsing stack first", and "commit 0.4.1+1 now, tools next"). Upstream's `llama-cli` has no tool calling at v0.4.1 -- `--tools` is a server flag -- but it does run the chat parser, through its embedded server, to separate reasoning from content. So the stage ports `common_chat_templates_apply_jinja` and `common_chat_parse` with everything under them: the PEG parser, the auto-parser and diff analyzer, the per-model parsers, `json-schema.cpp` and `json-schema-to-grammar.cpp`, over a port of nlohmann's `ordered_json`. `--json-schema` comes with it. Running tools is a later decision. "Stage 9 — Chat parsing". |
 
 ---
 
@@ -1560,6 +1561,63 @@ probes pass; `make vk-repro` passes per node and fused on every arm. One
 finding changes the method: `glslc -O` is not reproducible on `tri_f16`, so
 the port embeds the reference's generated SPIR-V rather than regenerating
 it.
+
+## Stage 9 — Chat parsing
+
+Decision 64. Measured at v0.4.1 (`b29c606e2`): 12,295 lines of `common/`.
+
+| Unit | Lines | What it is |
+|---|---|---|
+| `chat.cpp`, `chat.h` | 1,523 + 391 | `common_chat_templates_apply_jinja` (tools, schema and reasoning into the template; grammar, triggers, preserved tokens), `common_chat_parse` |
+| `chat-diff-analyzer.cpp` | 1,635 | renders a template over probe conversations and reads its format off the differences |
+| `chat-auto-parser-*.cpp`, `.h` | 478 + 363 + 453 + 74 | builds a parser from that analysis |
+| `chat-peg-parser.cpp`, `.h` | 1,232 + 220 | the chat-specific PEG builders and AST mappers |
+| `peg-parser.cpp` | 2,098 | the PEG engine: combinators, partial parsing, GBNF export |
+| `parsers/*.cpp` | 2,262 | 14 hand-written per-model parsers (gemma4, gpt-oss, deepseek, qwen3-coder, ...) |
+| `json-schema-to-grammar.cpp` | 1,027 | a JSON schema to GBNF |
+| `json-schema.cpp` | 514 | schema normalisation |
+
+What it stands on, and what the port already has:
+
+- **nlohmann `ordered_json`** throughout. `cli/json.zig` has its string
+  escaping; parse, the value type, and `dump`'s number formatting are new.
+- **`common/jinja`**, called directly 13 times, for capability probes and
+  the diff analyzer's renders. `cli/chat.zig` renders with `zigjinja`,
+  which `jinja-diff` holds to upstream's output, but only over seven
+  conversations, none with tools, tool calls or `reasoning_content`.
+  The analyzer renders exactly those.
+- **`std::regex`** in `peg-parser` and `json-schema-to-grammar`:
+  `src/llama/regex.zig` reproduces libc++'s.
+- **`trie.h`, `unicode.h`**: small; `src/llama/unicode.zig` has the latter.
+
+Steps, each gated before the next:
+
+1. **`ordered_json`**: parse, the value, `dump` at every indent with
+   `ensure_ascii` both ways. `json-diff` against nlohmann compiled
+   unmodified: random documents, the number edge cases (int64, uint64,
+   doubles that print shortest), the error messages.
+2. **`json-schema.cpp` and `json-schema-to-grammar.cpp`**, then
+   `--json-schema` and `--json-schema-file` in `llama-cli`. `schema-diff`:
+   upstream's own `tests/test-json-schema-to-grammar.cpp` cases and random
+   schemas, comparing the grammar text or the exception.
+3. **`peg-parser.cpp`, `chat-peg-parser.cpp`**. `peg-diff`: parsers built
+   through both APIs, run over complete and truncated inputs, comparing
+   the parse result, the partial state and the exported GBNF.
+4. **`parsers/`, the auto-parser, the diff analyzer and `chat.cpp`**.
+   `chat-parse-diff`: every template in `models/templates/` through
+   `common_chat_templates_apply` with and without tools, a schema and each
+   reasoning setting -- prompt, grammar, triggers, preserved tokens, the
+   parser -- then `common_chat_parse` over upstream's `tests/test-chat.cpp`
+   outputs, comparing the message as JSON. `jinja-diff` gains the probe
+   conversations first.
+5. **The CLI**: what upstream's CLI does with the parse -- reasoning shown
+   apart from the answer, `--reasoning-format`, `--reasoning`,
+   `--skip-chat-parsing` -- and `cnv-diff` scenarios on a reasoning model.
+
+**Tool calls reach the parser, not the user.** Upstream's `llama-cli`
+takes no tool declarations, so after step 5 a model in our CLI is never
+offered a tool. Offering tools and running them -- the server's built-in
+tools, MCP, an agent loop -- is the decision Decision 64 leaves open.
 
 ## Upstream syncs
 

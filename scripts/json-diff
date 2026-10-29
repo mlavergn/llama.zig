@@ -1,0 +1,41 @@
+#!/bin/bash
+# Compare cli/json/ with upstream's common_json over nlohmann.
+#
+# common/json.cpp is compiled unmodified against vendor/nlohmann/json.hpp and
+# linked beside harness/json_ref.cpp, which runs a bytecode of common_json
+# calls; harness/json_diff.zig runs the same bytecode through the Zig port
+# and requires every record -- each dump, query, get<T>(), and the what() of
+# every exception -- to be identical. See harness/json_diff.zig.
+#
+# Usage: scripts/json-diff
+#   WIN_X86=1   build for the Windows laptop and run there (scripts/win-target)
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# The target. This harness links no library of ours, so nothing else from
+# scripts/win-target is used.
+. scripts/win-target
+
+INC=(-I llama.cpp/common -I llama.cpp/vendor -I llama.cpp/ggml/include)
+
+zig c++ "${GATE_CC[@]}" -std=c++17 -O2 -DNDEBUG "${INC[@]}" \
+    -c llama.cpp/common/json.cpp -o "$tmp/json.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile common/json.cpp" >&2; head -10 "$tmp/err" >&2; exit 1; }
+zig c++ "${GATE_CC[@]}" -std=c++17 -O2 -DNDEBUG "${INC[@]}" \
+    -c harness/json_ref.cpp -o "$tmp/ref.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile the reference" >&2; head -10 "$tmp/err" >&2; exit 1; }
+
+zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/json_diff$GATE_SUFFIX" -OReleaseSafe -lc \
+    --dep json -Mroot=harness/json_diff.zig -Mjson=cli/json/module.zig \
+    "$tmp/ref.o" "$tmp/json.o" -lc++ 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
+
+start=$SECONDS
+gate_run "$tmp/json_diff$GATE_SUFFIX" llamazig-json-diff
+rc=$?
+echo "json-diff: $((SECONDS - start)) s"
+exit $rc

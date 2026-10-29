@@ -8496,3 +8496,102 @@ among them and all bit-identical: `MUL_MAT_VEC_FUSION` 1,265, `TOPK_MOE`
 `MUL_MAT_ID_FUSION` 13, and `GELU_MUL`, `SILU_MUL`, `SIGMOID_MUL` and
 `SOFTPLUS_MUL` 26 each. **Read a pickup's named cases off the gate's
 output, not its total**: 16,417 passing cases read like coverage.
+
+## Stage 9: chat parsing
+
+### Step 1: `common_json`
+
+`cli/json/` ports `common/json.h` and `common/json.cpp`, and the parts of the
+vendored nlohmann 3.12.0 that `common_json` reaches: `module.zig` (the
+barrel), `value.zig` (the value, `ordered_map`, every accessor in `json.h`,
+`get<T>()`, `operator==`), `parser.zig` (the lexer, the parser, the DOM
+SAX), `serializer.zig` (`dump`, `dump_escaped` with `ensure_ascii` and all
+three error handlers), `dtoa.zig` (Grisu2, `to_chars`), `errors.zig` (the
+`what()` text) and `writer.zig` (the old `cli/json.zig`'s `Object` and
+`writeEscaped` for `--log-jsonl`, now over `serializer.zig`). `Value` is a
+tagged union with unmanaged containers; a call that fails returns
+`error.JsonError` and leaves upstream's `what()` in a per-thread buffer,
+`json.what()`, because a Zig error carries no text and the consumers
+(`json-schema-to-grammar.cpp`, `chat.cpp`) print it.
+
+**`make json-diff`** compiles `common/json.cpp` unmodified over
+`vendor/nlohmann/json.hpp` beside `harness/json_ref.cpp`, which runs a
+bytecode of `common_json` calls over eight registers. `harness/json_diff.zig`
+runs the same bytecode through the port, and every record (`ok`, a dump, a
+query, a `get<T>()`, or `E:` and the `what()`) must be identical. It covers
+80 handwritten texts, 12,000 random documents (half of them mangled),
+40,000 random number texts plus 69 edge spellings each written four ways,
+2,000,000 doubles and floats by their bits, and 20,000
+random accessor programs, with invalid UTF-8 in strings and keys:
+**9,526,339 checks, of which 1,695,170 are errors and 4,137,751 dumps, in
+26 s.** `JSON_DIFF_STATS=1` lists every distinct error message the
+reference produced. Float-to-integer `get<T>()` out of range is undefined
+behaviour; the port does what AArch64's `fcvtz*` does, which is compared on
+AArch64 and skipped elsewhere (0 skips here).
+
+Two of nlohmann's habits were found by the gate, not by reading:
+
+- **Past column 512 the indent is spaces, whatever `indent_char` is.**
+  The serializer starts with `std::string(512, indent_char)` and grows it
+  with `resize(size() * 2, ' ')`. A 300-deep document dumped with `'\t'`
+  at indent 2 switches to spaces halfway down.
+- **`what()` ends at the first NUL byte.** Every exception is built
+  through `w.c_str()` into a `std::runtime_error`, so `at("k\0z")` reports
+  `key 'k`. `errors.fail` truncates there too.
+
+The others were read from the source, and each is held by a case in the
+gate:
+
+- **`last read:` is everything since the last string or number.** The
+  lexer clears its token string only in `scan_string` and `scan_number`, so
+  `[1, tru]` reports `last read: '1, tru]'`.
+- **A NUL byte outside a string ends the input**: `1\0garbage` parses.
+- **`get<T>()` takes `true` as 1 unless `T` is `int64_t`, `uint64_t` or
+  `double`**, which is two different `from_json` overloads. Which C++
+  types those are depends on the platform: `long long` is `int64_t` on
+  Darwin and `long` is on Linux, so `get<long>()` takes a boolean on the
+  Mac and refuses it on Linux. `value.isExactNumber` keys on the target.
+- **`insert()` of anything but an array inserts nothing.** It reads two
+  default `array_iterator`s, an empty range, not an error.
+- **A signed and an unsigned integer compare by bits**:
+  `18446744073709551615 == -1` is true.
+- **Grisu2 is not shortest**, and its round-half test is reachable:
+  making `grisu2_round` move a tie down changed 1,525 of the 2,000,000
+  dumped doubles.
+
+Not identical, by design: `front()`/`back()` on an empty container is
+`JSON_ASSERT`, which `json.cpp` defines as `GGML_ASSERT`. The port aborts
+too, but with its own message, and the gate skips those calls (4,273
+skips). `get<std::unordered_map<...>>()` returns the object's order, since
+the C++ map's order is its hash table's and no caller may depend on it.
+The comment-skipping half of the lexer is not ported: `common_json` never
+enables it. The gate has run on the Mac only. `WIN_X86=1` is wired through
+`scripts/win-target`, as in the other in-process diffs, but has not been
+run.
+
+Negative-tested: 12 injections, 11 caught and one provably inert, each
+restored by byte comparison against the original file:
+
+| Injection | Result |
+|---|---|
+| `grisu2_round`'s `rest + ten_k < dist` made `<=` | inert: at equality the second clause is already true |
+| `grisu2_round` never rounds | 637,964 differ |
+| `grisu2_round` rounds a tie down (`>` made `>=`) | 1,525 differ |
+| `-0.0` dumped as `0.0` (`value < 0` for `signbit`) | 21,599 differ |
+| a `uint64` above `INT64_MAX` read as a double | 31,370 differ |
+| a duplicate key moves to the end | 12,888 differ |
+| `while parsing` made `when parsing` | 4,744 differ |
+| `ensure_ascii`'s high surrogate from `0xD800` instead of `0xD7C0` | 39,498 differ |
+| `last read` cleared at every token | 1,185 differ |
+| indent past 512 keeps `indent_char` | 76 differ |
+| `what()` not cut at NUL | 342 differ |
+| `get<long long>()` takes a boolean on Darwin | 15,652 differ |
+
+Checked again by hand: `make json-diff` passed (9,526,339 checks, 27 s), and an
+injected `\/` escape in the serializer failed it. `--log-jsonl` now writes
+through `cli/json/writer.zig`. Of 15 runs of the `tokenize` cases, and two of
+the whole of `make tools-diff`, one failed, on `--log-jsonl -m
+/nonexistent/model.gguf -p hi` (stdout differed). It did not come back: that
+case's masked stdout was identical on both sides in 40 runs each, and the next
+14 runs all passed. The diff was not captured. If it recurs, keep the work
+directory.

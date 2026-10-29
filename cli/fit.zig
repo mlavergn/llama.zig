@@ -43,7 +43,7 @@ const std = @import("std");
 const llama = @import("llama");
 
 /// `common_json::dump_safe`'s text, for `LOG_JSON`; the tools reach it here.
-pub const json = @import("json.zig");
+pub const json = @import("json/module.zig");
 
 const api = llama.api;
 const c = llama.impl.c;
