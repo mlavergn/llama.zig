@@ -1623,7 +1623,9 @@ Still open on the GB10:
 
 - **`lint`**: no `zlint` here that takes the styleguide's `-c`.
 
-**Mac, after the GB10 pickup**
+**Mac, after the GB10 pickup** -- **done** (`NOTES.md`, "The v0.4.0
+Mac re-checks"): `make validate` clean, and `tools-diff` identical for all
+twelve tools, `export-lora` and `imatrix` included.
 
 - `tools-diff export-lora` and `tools-diff imatrix`: their setups link
   through `platform-libs` now, which carries no `-lobjc` where the old
@@ -1647,7 +1649,10 @@ its harness and its model and vocab inputs are host-only.
    sides. This needs a `_putenv_s` in the wrapper.
 7. `quant-diff`, which now maps the file on Windows, and `win-host-diffs`.
 
-**JWHLPTOP (AVX-512)**
+**JWHLPTOP (AVX-512)** -- **open**: the agent did not connect on
+2026-10-28 (nor did the GB10's or DESKTOP's, after their items ran). Marc
+directed v0.4.1 to start over this one open pickup; it carries into the
+v0.4.1 pickup list.
 
 8. `X86_CPU=x86_64_v4 X86_AGENT=JWHLPTOP make x86-gates`.
 9. `X86_CPU=tigerlake X86_AGENT=JWHLPTOP make x86-gates`: the GFNI,

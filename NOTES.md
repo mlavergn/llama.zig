@@ -8121,3 +8121,28 @@ After both, two runs clean, 70,224,784 checks. The iOS library build
 cannot run on Linux (no SDK); the Mac covers it.
 
 Not run here: `lint`.
+
+## The v0.4.0 Mac re-checks
+
+The Mac's half of the v0.4.0 pickup (`PLAN.md`, "Mac, after the GB10
+pickup"), after `7c9cbc1` changed the tools' link lines and every
+`tools-diff` case's environment.
+
+- `make validate`, the styleguide's: clean. 8,295 citations at
+  `5266f24da`, 131 graph nodes, 16 scheduler assignments, every
+  in-process diff identical.
+- `tools-diff`, all twelve tools: identical. `gguf-split` 29,
+  `quantize` 46, `tokenize` 47, `fit-params` 18, `export-lora` 18,
+  `batched-bench` 11, `cvector-generator` 13, `imatrix` 35, `perplexity`
+  31, `bench` 48, `tts` 30, `mtmd-cli` 44.
+
+The first `tools-diff` pass ran straight after `validate` and four tools
+failed -- `export-lora` and `imatrix` in their setups, `batched-bench` and
+`cvector-generator` on 9 cases -- every one on a missing
+`zig-out/arch-fixtures/*.gguf`: the styleguide's `validate` runs `clean`.
+After `scripts/gen-arch-fixtures` all four passed. `SYNC.md`'s Step 7
+already says so for the gates; it holds for `tools-diff` too.
+
+**JWHLPTOP stays open.** Its agent, and the GB10's and DESKTOP's, sat at
+"waiting for …" on 2026-10-28. Marc directed the v0.4.1 sync to start
+over that one open pickup; the AVX-512 items carry into v0.4.1's list.
