@@ -11,7 +11,10 @@
 --version
 --list-devices
 
-# The parser's errors
+# The parser's errors. `~`: the parser logs these through common_log's
+# worker thread before printing its usage with a direct fprintf, and which
+# reaches stderr first is the scheduler's choice -- the log first on the
+# Mac, last on the GB10, every time on each.
 --bogus
 -p hello
 -m
@@ -32,12 +35,12 @@
 -m $VOCAB/ggml-vocab-llama-spm.gguf --numa wrong -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf -dev nosuchdevice -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf -ot "x=nosuchbuft" -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --override-kv broken -p x
+~ -m $VOCAB/ggml-vocab-llama-spm.gguf --override-kv broken -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf --lora-scaled a.gguf -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf --control-vector-layer-range 1 -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf -l 15043x1 -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --cpu-range 9999- -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --cpu-mask 0xZZ -p x
+~ -m $VOCAB/ggml-vocab-llama-spm.gguf --cpu-range 9999- -p x
+~ -m $VOCAB/ggml-vocab-llama-spm.gguf --cpu-mask 0xZZ -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf --prio 9 -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf --fit sometimes -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf -f /nonexistent/prompt.txt

@@ -34,6 +34,10 @@ tool="${1:?usage: scripts/tools-diff <tool>}"
 cases="harness/tools/$tool.cases"
 [ -f "$cases" ] || { echo "FAIL: no $cases" >&2; exit 2; }
 
+# An abort's backtrace -- gdb attached by ggml_print_backtrace on Linux --
+# is thread ids and addresses, different every run; both sides honour this.
+export GGML_NO_BACKTRACE=1
+
 FIX="$ROOT/zig-out/arch-fixtures"
 VOCAB="$ROOT/llama.cpp/models"
 PLAIN="${PLAIN:-$HOME/.cache/zigtrain/gguf/plain-d6_base_005000.gguf}"
@@ -80,7 +84,21 @@ run_side() { # side bin n args...
         printf '%s %s\n' "$(shasum -a 256 < "$f" | cut -c1-16)" "$f"; done ) > "$work/$side/$n.files"
 }
 
-masks=()
+# A device's free memory is the system's, at that moment, and differs between
+# the two sides' runs -- on CUDA, which reads unified memory from
+# /proc/meminfo, by a few MiB every time. Masked for every tool, as
+# harness/api_diff.zig's `normalize` masks it; a case file's own masks follow.
+# The same figure reaches --fit's log: the breakdown row's free and
+# unaccounted columns (`| total = free + (self = ...) + unaccounted |`) and
+# the two lines that quote it. What fit decides is still compared.
+masks=(
+    's/, [0-9]+ MiB free\)/, N MiB free)/g'
+    's/ - [0-9]+ MiB free$/ - N MiB free/'
+    's/available_memory_kb: [0-9]+/available_memory_kb: N/'
+    's/(common_memory_breakdown_print: .*\| +[0-9]+ = )[0-9]+( \+ \(.*\) \+ +)[0-9]+ \|/\1N\2N |/'
+    's/vs\. [0-9]+ MiB of free device memory/vs. N MiB of free device memory/'
+    's/will leave [0-9]+ >= /will leave N >= /'
+)
 mask() { # file: apply every mask in place
     local f=$1 m
     for m in "${masks[@]+"${masks[@]}"}"; do sed -E -i '' "$m" "$f" 2>/dev/null || sed -E -i "$m" "$f"; done

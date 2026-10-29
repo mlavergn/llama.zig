@@ -12,6 +12,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 extern fn sysctlbyname(name: [*:0]const u8, oldp: ?*anyopaque, oldlenp: ?*usize, newp: ?*anyopaque, newlen: usize) c_int;
+// `std.c` declares no `fgets`.
+extern fn fgets(s: [*]u8, n: c_int, stream: *std.c.FILE) ?[*]u8;
 
 /// `std::thread::hardware_concurrency()`.
 fn hardwareConcurrency() u32 {
@@ -33,8 +35,8 @@ pub fn numPhysicalCores() i32 {
             const f = std.c.fopen(path.ptr, "r") orelse break; // no more cpus
             defer _ = std.c.fclose(f);
             var line: [256]u8 = undefined;
-            const got = std.c.fgets(&line, line.len, f) orelse continue;
-            var s = std.mem.span(@as([*:0]u8, @ptrCast(got)));
+            const got = fgets(&line, line.len, f) orelse continue;
+            var s: []u8 = std.mem.span(@as([*:0]u8, @ptrCast(got)));
             if (s.len > 0 and s[s.len - 1] == '\n') s = s[0 .. s.len - 1];
             var dup = false;
             for (seen[0..n_seen]) |x| {

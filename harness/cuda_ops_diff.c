@@ -21,14 +21,23 @@
  * Two departures from a straight `ggml_backend_compare_graph_backend`:
  *
  * - **Whole-graph cases give the reference a graph it can fuse.**
- *   `ggml_backend_graph_copy` fills the copy's `nodes[]` directly and never
- *   builds its use counts (ggml-backend.cpp:2202), so the second backend of a
- *   comparison can never fuse -- harmless upstream, where that backend is the
- *   CPU, and fatal here, where it would compare the port's fused kernels
- *   against the reference's unfused ones. Measured: every fusion case
+ *   `ggml_backend_graph_copy` (ggml-backend.cpp:2214 @5266f24da) fills the
+ *   copy's `nodes[]` directly and never builds its use counts, so the second
+ *   backend of a comparison can never fuse -- harmless upstream, where that
+ *   backend is the CPU, and fatal here, where it would compare the port's
+ *   fused kernels against the reference's unfused ones. Measured: every fusion case
  *   "failed" until the port's fusion was switched off. So for a case with
  *   test nodes the copy is re-expanded node by node, in the original order,
  *   into a fresh graph: same nodes, same order, real use counts.
+ * - **The copy keeps `ggml_cast`'s self-reference.** `ggml_cast` builds a
+ *   `CPY` whose `src[1]` is the node itself, and `graph_copy_dup_tensor`
+ *   (ggml-backend.cpp:2153 @5266f24da) records a node's copy only after
+ *   copying its sources, so the self-reference comes back as
+ *   the still-empty slot: the copy's `src[1]` is NULL. Upstream's CPU never
+ *   reads it; the reference CUDA backend dispatches `CPY` as
+ *   `ggml_cuda_cpy(ctx, src[0], src[1])` and faults. Measured on v0.4.0's
+ *   `test_topk_qsa`, the first whole-graph case with a cast. The copy's
+ *   self-references are restored before it runs.
  * - **A difference the reference makes against itself is not the port's.**
  *   A case that differs is re-run reference against reference; if the
  *   reference disagrees with itself the case is reported `NONDET` and not
@@ -198,6 +207,16 @@ static bool compare_whole_graph(ggml_backend_t backend1, ggml_backend_t backend2
         return false;
     }
     const int n = ggml_graph_n_nodes(graph);
+    // Restore the self-references the copy dropped; see the file comment.
+    for (int i = 0; i < n; i++) {
+        struct ggml_tensor * orig = ggml_graph_node(graph, i);
+        struct ggml_tensor * dup = ggml_graph_node(copy.graph, i);
+        for (int j = 0; j < GGML_MAX_SRC; j++) {
+            if (orig->src[j] == orig && dup->src[j] == NULL) {
+                dup->src[j] = dup;
+            }
+        }
+    }
     struct ggml_init_params params = { ggml_graph_overhead_custom(ggml_graph_size(graph), false) + 1024, NULL, true };
     struct ggml_context * ctx = ggml_init(params);
     struct ggml_cgraph * g2 = ggml_new_graph_custom(ctx, ggml_graph_size(graph), false);

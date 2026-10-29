@@ -7899,3 +7899,225 @@ names it.
 (11.3M lookups), `metal-diff`, `meta-diff`, `blas-diff`. The GB10 and
 both Windows machines are pickups (`PLAN.md`, "Pickup for the v0.4.0
 sync"), and must clear before v0.4.1 starts.
+
+## The v0.4.0 GB10 pickup: CUDA and Vulkan
+
+Items 1-3 of `PLAN.md`'s "Pickup for the v0.4.0 sync", run on the GB10.
+**The port needed no change.** Every CUDA and Vulkan gate passed on the
+committed Zig; the two fixes are in harnesses.
+
+**The checkout had not moved.** `llama.cpp/` and
+`llama.cpp.zmake/llama.cpp` were both still at `c1d0e7a00`, and
+`zig-out/lib` at v0.3.0: `make cli` failed on the seven v0.4.0 names
+the old headers lack, and `gen-arch-fixtures` failed to link against
+the old `libllama-ref.a`. Pulling the sync commit moves the pin, not the
+checkouts; `git submodule update llama.cpp`, the zmake checkout to the
+same commit, and `zig build reference --release=fast` before anything
+else.
+
+| gate | result |
+|---|---|
+| `cuda-backend-diff` | 2,805 + 8,387 answers identical |
+| `cuda-parity-cli` | 6 / 6 |
+| `cuda-node-diff` | 2,750 nodes and 33 fused decodes identical, 1 and 4 threads |
+| `cuda-ops-diff` | 15,757 / 15,757 bit-identical, 14 `NONDET`, after the fix below |
+| `gen-mmq-config`, `gen-fattn-config` | output unchanged |
+| `vk-push-layout` | pass |
+| `vk-repro` | reproducible on all four arms, per node and fused |
+| `vk-backend-diff` | every scenario identical |
+| `vk-parity-cli` | 6 / 6 |
+| `vk-node-diff` | identical on all four arms, per node and fused |
+| `vk-ops-diff` | with the harness fix below: coopmat2 and nodot 16,205; KHR and none 16,204 + 2 `REFHANG`; no `NONDET` on any arm |
+| `vk-node-diff`, `vk-parity-cli` | rerun after the `platform-libs` change below: identical on every arm; 6 / 6 |
+
+The 14 `NONDET` (10 before the sync) are the two sources measured in
+Stage 6, CUB's `CUMSUM` and the fused MMVQ `MUL_MAT_ID`; v0.4.0 added
+cases of both.
+
+**`cuda-ops-diff` segfaulted in the reference.** v0.4.0's
+`test_topk_qsa` is the first whole-graph case with a `ggml_cast`, a
+`CPY` whose `src[1]` is the node itself. `graph_copy_dup_tensor`
+(ggml-backend.cpp:2153 @5266f24da) stores a node's copy only after
+copying its sources, so
+the self-reference finds the hash entry already present and returns the
+still-NULL slot. Upstream's CPU, the copied side in upstream's
+`test-backend-ops`, never reads `src[1]`; the reference CUDA backend,
+the copied side here, calls `ggml_cuda_cpy(ctx, src[0], src[1])` and
+faults. The port's `ggml_backend_graph_copy` reproduces the C, as it
+must. `harness/cuda_ops_diff.c` restores the self-references after the
+copy. The unfixed harness segfaults on the four `TOPK_QSA` cases alone;
+the fixed one passes them bit-identical.
+
+The crash was misplaced twice on the way, and both are worth knowing.
+Under `make`, stdout goes to a file and is fully buffered, so the last
+case printed was `TOP_K`, not the case that crashed: rerun with `stdbuf
+-o0` before believing the last line. And the reference objects carry no
+debug information, so the symbol in a backtrace is the nearest export;
+here it was right, which the disassembly confirmed.
+
+**The MLA cases now hang on the no-coopmat arm too.** `hsk=576,
+hsv=512, nh=1, nr23=[20,1]`, q8_0, V a view of K, at `kv=113` and
+`kv=1024` -- `REFHANG` on KHR, as before, and now on `none` as well. On
+`nodot` both compute, bit-identical. And the KHR arm's
+`hsk=256, kv=16384` stall is gone: that part finished 135 / 135 in one
+process. Both are upstream's host layer or the driver, against itself.
+
+**The `qwen4exp` fixture cannot reach the TOPK_QSA fusion.** Vulkan
+fuses it only in the radix regime, `log2(width) + 1 >= 11`, so a width
+of 1,024 or more; `test-llama-archs.cpp:289` writes `indexer_top_k = 8`
+and a compress ratio of 4, so the width is at most 11 at any context.
+The pickup item assumed otherwise. The fusion is reached only by
+`vk-ops-diff`'s `TOPK_QSA` cases at widths 1,500 and 2,000.
+
+`harness/node_dump.c` now takes a prompt spelled `tokens:<id>,...` as
+token ids, never tokenized: the fixtures carry a `no_vocab` vocabulary,
+whose tokenizer aborts. `vk-node-diff` on `qwen4exp-moe` with 34 ids:
+1,140 nodes and 33 fused decodes identical on all four arms. Negative
+test: the port side alone with coopmat off fails both passes.
+`cuda-node-diff` on Qwen3.5 is unchanged with the new harness.
+
+**The fused TOPK_QSA had never been compared.** `vk-ops-diff` read
+4 / 4 bit-identical on `TOPK_QSA`, and `GGML_VK_PERF_LOGGER` showed what
+that meant: the port ran each wide case fused (one `TOPK_QSA GET_ROWS`
+dispatch), the reference unfused (`ADD`, `CONT`, `CPY`, `GET_ROWS`,
+`TOP_K`), the two differed, and the reference's unfused radix `TOP_K`,
+re-run against itself, differed too -- so every one was excused as
+`NONDET`. The reference could not fuse for the same reason
+`cuda-ops-diff` crashed: `ggml_vk_can_fuse_topk_qsa` wants a use count
+of 2 on the `CPY`, its own `src[1]` included, and the copy had dropped
+it. `harness/vk_ops_diff.c` restores the self-reference in both of its
+copies. Then both sides fused, and still disagreed, run to run: the
+fused radix top-k orders its output differently every time, the
+reference against itself included. Upstream compares a top-k as a set of
+indices (`test_topk_qsa::err`), and its inputs are built to have no
+ties, so the harness now does the same where the bits differ: a `TOP_K`
+whose rows hold the same indices in another order prints `TOPKSET` and
+passes, and one with any other index fails. Negative-tested: the port's
+fused dispatch given `.k = width - 1` fails all three wide cases.
+
+### Item 4: the Linux arm64 CPU set
+
+| gate | result |
+|---|---|
+| `ops-diff` | 762 identical |
+| `repack-diff` | 116 identical |
+| `node-diff` | 2,750 nodes and 33 fused decodes identical, 1 and 4 threads, after the fix below |
+| `parity-port --cpu` | 6 / 6 |
+| `host-arms-diff` | 18 / 18 |
+| `quant-diff` | 142,162,171 checks, 0 failures -- its first run on Linux |
+
+**`node-diff` stopped in `libm_check`**, before comparing anything: the
+reference binary defined `expf`, `logf`, `cosf` and the rest itself,
+from Zig's `compiler_rt`. v0.4.0's `ggml_backend_load_best` calls
+`fs::current_path(ec)` and iterates a `directory_iterator` with an
+`error_code`, which pulls libc++'s `operations.o`, which needs
+`__divti3`. Zig drops `-lgcc_s` and searches `compiler_rt` last; its
+single object came in for `__divti3`, and its math functions with it,
+on the reference side only. `ld.lld --why-extract` named the chain.
+`scripts/platform-libs` now puts gcc's `libgcc.a` ahead of it on Linux,
+which supplies `__divti3` alone; the port's binary is symbol for symbol
+unchanged. `quant-diff` called `xcrun` and was Mac-only; it links through
+`platform-libs` now.
+
+### Upstream's tools on Linux
+
+None of the twelve had been built on Linux. The port's needed two fixes,
+both on paths no Mac build compiles: `tools/common/cpu.zig` called
+`std.c.fgets`, which `std.c` does not declare, and then sliced a `[:0]u8`
+into itself; `tools/quantize.zig`'s `equivalent` used `std.c.Stat`, which
+is `void` on Linux, and takes `statx`'s device and inode there now.
+Upstream's tools, the libmtmd gate programs and the setup helpers linked
+`libggml.a` without the CUDA libraries' path: `build/tools.zig` and
+`build/mtmd*.zig` receive the toolkit now, and call
+`llamacpp.addCudaRuntime` -- `addCudaLibraries` without libstdc++. The
+first attempt used `addCudaLibraries` itself, and every argument error
+in upstream's tools then aborted: Zig's libc++abi threw, libstdc++'s
+`__gxx_personality_v0` unwound, and no exception could be caught
+(`scripts/platform-libs` describes the same trap). The two setups that
+build helpers link through `platform-libs` now.
+
+What differed between the sides was the machine, and each is masked or
+switched off for both:
+
+- **Free memory** moves by a few MiB between the two runs on CUDA, which
+  reads unified memory from `/proc/meminfo`. `scripts/tools-diff` masks
+  it for every tool, as `api_diff.zig`'s `normalize` does: the device
+  list, the loader's line, `available_memory_kb`, and `--fit`'s
+  breakdown row and the two lines that quote it.
+- **An abort's backtrace**: ggml attaches gdb on Linux, which prints
+  thread ids and addresses. `GGML_NO_BACKTRACE=1`, which both sides
+  honour.
+- **`common_log`'s worker thread** prints a parser error after the usage
+  text on the GB10, every time, and before it on the Mac; three
+  `tokenize` cases compare stderr unordered (`~`), as the script provides.
+- **A timestamp after the loader's progress dots**, on CUDA only: one more
+  `imatrix` mask.
+
+**Every tool passes, all twelve.** 104 cases across five tools load
+`$PLAIN` (`plain-d6_base_005000.gguf`, zigtrain's f32 base model), which
+the GB10 did not have at first; without it they ran with both sides
+failing to open the file -- passing having compared nothing, apart from
+`cvector-generator`, which upstream segfaults on where the port reports
+it. With the model copied to the repository root and passed as
+`PLAIN=$PWD/plain-d6_base_005000.gguf`, all five pass: `gguf-split` 29,
+`cvector-generator` 13, `imatrix` 35, `perplexity` 31, `bench` 48, and
+75 of the 104 `$PLAIN` cases exit 0 on both sides -- the rest are the
+cases' deliberate errors. `make qwen3` fetched the other model six cases
+use.
+
+### DESKTOP-BR7J5S9: the x86_64_v3 items, from the GB10
+
+Items 5 and 6 of the pickup, and half of 7, run from the GB10 for the
+first time: the gates cross-build the same way from either host, and
+`zigupdater` (the binary is no longer called `zupdater`; `ZUPDATER` names
+it) links the GB10 to the laptop as it linked the Mac.
+
+| gate | result |
+|---|---|
+| `x86-quants-diff` | 28 kernels identical |
+| `x86-repack-diff` | 116 checks identical |
+| `x86-ops-diff` | 826 lines identical, 1 and 3 threads, the `iqp` cases among them |
+| `x86-node-diff` | 5,505 lines identical: 2,750 nodes at 1 and 4 threads, and the fused decode |
+| `x86-node-diff`, `IQ4_XS` | 5,505 lines identical, the model loaded as `IQ4_XS - 4.25 bpw` in every run |
+| `win-host-diffs` | `host-arms-diff` 168 lines, `libcxx-diff` 452,904, `regex-diff` 43,537,552, `unicode-diff` 7,070,454 |
+
+**The x86 per-kernel gates needed `nm` to read COFF, and on the GB10 it
+cannot.** `x86-quants-diff` and `x86-repack-diff` rename every symbol the
+reference object defines, taking the list from `nm` on the Windows
+object; GNU binutils on Linux arm64 know no PE/COFF target, printed
+nothing, and the unrenamed reference collided with the port at link time.
+`scripts/coff-defined` reads the COFF symbol table, both the plain and the
+`/bigobj` header, and the two scripts use it where `nm` cannot read the
+object -- the Mac's LLVM `nm` still lists them there. Checked against
+`nm` on the same sources built as ELF: 27 and 45 symbols, identical.
+
+**The IQ panel runs on both sides** (item 6). `harness/win_ops_dump.c`
+takes an optional `NAME=VALUE` it sets with `_putenv` -- `push` carries no
+environment -- and `X86_PORT_ENV` passes one to the port side only. With
+`GGML_NO_IQ_PANEL=1` there, 56 lines differ at each thread count, every
+one an `iqp mul_mat` case: the panel, not `vec_dot`, is what the 826
+identical lines compared.
+
+**`quant-diff` has no Windows mode.** Its harness is host-only, and its
+inputs -- upstream's vocab files and the local models -- would have to be
+on the laptop, which `push` cannot put there. The pickup asked for it
+because quantize now maps its input on Windows (quant.zig's
+`llama_model_quantize_impl`); that needs a Windows harness first.
+
+The first `x86-ops-diff` and `x86-node-diff` runs failed to start: a
+second `zigupdater` process, a `tty` probe, held the GB10's host lock.
+The link allows one host per machine.
+
+### `make validate`
+
+`validate` stopped at `lint`: there is no `zlint` on the path, and the
+local `../zlint` build takes no `-c`, so the styleguide's rules cannot be
+applied here. `make build test` ran in its place, as the Makefile's
+no-styleguide `validate` does, and failed in `api-diff`, on two harness
+faults the Mac's heap had hidden: the chat-template section read each
+model's template after the model was freed, and the `file_ptr` load
+compared its log without `normalize`, so CUDA's free memory differed.
+After both, two runs clean, 70,224,784 checks. The iOS library build
+cannot run on Linux (no SDK); the Mac covers it.
+
+Not run here: `lint`.

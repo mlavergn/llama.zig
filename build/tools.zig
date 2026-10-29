@@ -101,10 +101,12 @@ pub const Options = struct {
     sdk: ?[]const u8,
     config: *std.Build.Step.Options,
     reference: llamacpp.Artifacts,
-    /// Whether ggml has a CUDA backend: upstream's CMake makes
+    /// The CUDA toolkit when ggml has a CUDA backend: upstream's CMake makes
     /// `GGML_USE_CUDA` a public definition of `ggml`, so its tools compile
-    /// with it, and `pca.hpp` picks its backend on it.
-    cuda: bool = false,
+    /// with it, and `pca.hpp` picks its backend on it. Upstream's tools link
+    /// its libraries through `llamacpp.addCudaLibraries`, as every
+    /// executable over a CUDA `libggml.a` must.
+    cuda: ?llamacpp.Cuda = null,
     /// Upstream's libmtmd (`addMtmdRef`), built once and shared with
     /// `build/mtmd.zig`.
     mtmd_ref: *std.Build.Step.Compile,
@@ -175,7 +177,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
         mod.addImport("cli_fit", fit_module);
         mod.addOptions("config", opts.config);
         const backends = b.addOptions();
-        backends.addOption(bool, "cuda", opts.cuda);
+        backends.addOption(bool, "cuda", opts.cuda != null);
         mod.addOptions("backends", backends);
         // libllama's module, compiled in as the CLI does: referencing it
         // exports `llama.h`, and it links `libggml` itself.
@@ -200,6 +202,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
         mod.linkLibrary(opts.reference.llama_ref);
         mod.linkLibrary(opts.reference.ggml);
         llamacpp.addSdkPaths(b, mod, opts.sdk);
+        llamacpp.addCudaRuntime(b, mod, opts.cuda);
         const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod });
         const install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = "tools-ref/bin" } } });
         ref_step.dependOn(&install.step);
@@ -207,12 +210,13 @@ pub fn add(b: *std.Build, opts: Options) !void {
     }
     for (tools) |t| {
         const mod = refModule(b, opts);
-        mod.addCSourceFiles(.{ .root = b.path(root), .files = t.ref, .flags = if (opts.cuda) &(cxx_flags ++ .{"-DGGML_USE_CUDA"}) else &cxx_flags });
-        if (opts.cuda) mod.addIncludePath(b.path("llama.cpp/ggml/include"));
+        mod.addCSourceFiles(.{ .root = b.path(root), .files = t.ref, .flags = if (opts.cuda != null) &(cxx_flags ++ .{"-DGGML_USE_CUDA"}) else &cxx_flags });
+        if (opts.cuda != null) mod.addIncludePath(b.path("llama.cpp/ggml/include"));
         mod.linkLibrary(common_ref);
         mod.linkLibrary(opts.reference.llama_ref);
         mod.linkLibrary(opts.reference.ggml);
         llamacpp.addSdkPaths(b, mod, opts.sdk);
+        llamacpp.addCudaRuntime(b, mod, opts.cuda);
         const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod });
         ref_step.dependOn(&b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = "tools-ref/bin" } } }).step);
     }

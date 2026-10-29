@@ -817,13 +817,31 @@ pub fn addCudaRef(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
 /// - `cuda`: the toolkit root; null adds nothing.
 pub fn addCudaLibraries(b: *std.Build, mod: *std.Build.Module, cuda: ?Cuda) void {
     const tk = cuda orelse return;
+    addCudaRuntime(b, mod, tk);
+    mod.addObjectFile(.{ .cwd_relative = tk.libstdcxx });
+}
+
+/// `addCudaLibraries` without libstdc++, for an executable of C++ that
+/// throws: upstream's tools and the libmtmd gates. Zig's libc++abi supplies
+/// `__cxa_throw` while a libstdc++ on the line supplies
+/// `__gxx_personality_v0`, and that personality aborts on Zig's exceptions,
+/// so no exception can be caught -- upstream's argument parser reports every
+/// bad flag by throwing. Zig's libc++ supplies all the CUB shim needs
+/// (`scripts/platform-libs`), and libcublas loads libstdc++ itself at run
+/// time.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `mod`: the module whose link gains the libraries.
+/// - `cuda`: the toolkit root; null adds nothing.
+pub fn addCudaRuntime(b: *std.Build, mod: *std.Build.Module, cuda: ?Cuda) void {
+    const tk = cuda orelse return;
     const lib64 = b.pathJoin(&.{ tk.toolkit, "lib64" });
     mod.addLibraryPath(.{ .cwd_relative = lib64 });
     mod.addRPath(.{ .cwd_relative = lib64 });
     for ([_][]const u8{ "cudart", "cublas", "cublasLt", "cuda" }) |name| {
         mod.linkSystemLibrary(name, .{});
     }
-    mod.addObjectFile(.{ .cwd_relative = tk.libstdcxx });
 }
 
 /// The `GGML_VULKAN_*_GLSLC_SUPPORT` macros and the `config` options that

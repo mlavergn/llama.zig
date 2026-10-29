@@ -26,9 +26,16 @@
  * the host code -- a pipeline choice, a specialization constant, a push
  * constant, a dispatch size, a binding.
  *
- * As in `vk_ops_diff.c`, whole-graph cases give the reference a
+ * As in `cuda_ops_diff.c`, whole-graph cases give the reference a
  * re-expanded copy it can fuse, and a case the reference cannot reproduce
- * against itself is reported `NONDET` rather than failed. `VK_DIFF_SELF=1`
+ * against itself is reported `NONDET` rather than failed. Every copy gets
+ * `ggml_cast`'s self-reference back, as there: the copy drops it, and
+ * TOPK_QSA's fusion counts it -- `ggml_vk_can_fuse_topk_qsa` wants a use
+ * count of 2 on the `CPY` -- so without it the reference never fused the
+ * case, the port did, and the reference's unfused radix `TOP_K`, which
+ * disagrees with itself there, excused the difference as `NONDET`.
+ * Measured on v0.4.0's `test_topk_qsa`, through `GGML_VK_PERF_LOGGER`.
+ * `VK_DIFF_SELF=1`
  * puts a second reference backend where the port goes: that run must pass.
  *
  * At exit it prints the totals; scripts/vk-ops-diff turns them into the
@@ -56,6 +63,7 @@ static long n_supports_missing; /* reference yes, port no: a bug */
 static long n_supports_asked;
 static long n_nondet_cases;
 static long n_fallback_graphs;
+static long n_topk_set_nodes;   /* TOP_K rows equal as sets, order and ties aside */
 static _Thread_local bool last_fell_back;
 
 static _Thread_local ggml_backend_t ref_backends[16];
@@ -116,6 +124,85 @@ struct wrapped {
     bool differs;
 };
 
+static int cmp_i32(const void * x, const void * y) {
+    const int32_t a = *(const int32_t *) x, b = *(const int32_t *) y;
+    return (a > b) - (a < b);
+}
+
+/* A TOP_K's output order is unspecified -- upstream's own checks compare its
+ * indices as a set -- and the radix path, fused into TOPK_QSA among others,
+ * orders them differently from run to run, the reference against itself
+ * included. Bits first; where they differ, each row is compared again as a
+ * sorted set, so the elements chosen are still held to the reference while
+ * their order alone is not reported as a difference, and not excused as
+ * NONDET. Sorts both buffers in place. */
+static bool topk_same_set(const struct ggml_tensor * t, unsigned char * a, unsigned char * b) {
+    if (t->op != GGML_OP_TOP_K || t->type != GGML_TYPE_I32 || !ggml_is_contiguous(t)) {
+        return false;
+    }
+    const int64_t k = t->ne[0];
+    const int64_t rows = ggml_nrows(t);
+    for (int64_t r = 0; r < rows; r++) {
+        qsort((int32_t *) a + r * k, (size_t) k, sizeof(int32_t), cmp_i32);
+        qsort((int32_t *) b + r * k, (size_t) k, sizeof(int32_t), cmp_i32);
+    }
+    return memcmp(a, b, ggml_nbytes(t)) == 0;
+}
+
+static int cmp_f32(const void * x, const void * y) {
+    const float a = *(const float *) x, b = *(const float *) y;
+    return (a > b) - (a < b);
+}
+
+/* With ties the elements chosen are unspecified too -- which of several
+ * equal values makes the cut changes run to run on either side -- so where
+ * the index sets differ the values they select are compared, per row, as
+ * upstream's own `test_top_k` does for its `ties` cases. Only where the
+ * input is a leaf each side holds: a fused TOPK_QSA never materializes its
+ * top-k's input, and is built without ties. `a` and `b` are the two sides'
+ * outputs; `t1` and `t2` their nodes. */
+static bool topk_same_values(const struct ggml_tensor * t1, const struct ggml_tensor * t2,
+                             const int32_t * a, const int32_t * b) {
+    const struct ggml_tensor * s1 = t1->src[0];
+    const struct ggml_tensor * s2 = t2->src[0];
+    if (t1->op != GGML_OP_TOP_K || !s1 || !s2 || s1->op != GGML_OP_NONE || s1->type != GGML_TYPE_F32 ||
+        !ggml_is_contiguous(s1) || !ggml_is_contiguous(s2) || ggml_nbytes(s1) != ggml_nbytes(s2) ||
+        ggml_nrows(s1) != ggml_nrows(t1)) {
+        return false;
+    }
+    const int64_t k = t1->ne[0];
+    const int64_t ncols = s1->ne[0];
+    const int64_t rows = ggml_nrows(t1);
+    float * x1 = (float *) malloc(ggml_nbytes(s1));
+    float * x2 = (float *) malloc(ggml_nbytes(s2));
+    float * v1 = (float *) malloc((size_t) k * sizeof(float));
+    float * v2 = (float *) malloc((size_t) k * sizeof(float));
+    ggml_backend_tensor_get(s1, x1, 0, ggml_nbytes(s1));
+    ggml_backend_tensor_get(s2, x2, 0, ggml_nbytes(s2));
+    bool same = true;
+    for (int64_t r = 0; same && r < rows; r++) {
+        for (int64_t j = 0; j < k; j++) {
+            const int32_t ia = a[r * k + j], ib = b[r * k + j];
+            if (ia < 0 || ia >= ncols || ib < 0 || ib >= ncols) {
+                same = false;
+                break;
+            }
+            v1[j] = x1[r * ncols + ia];
+            v2[j] = x2[r * ncols + ib];
+        }
+        if (same) {
+            qsort(v1, (size_t) k, sizeof(float), cmp_f32);
+            qsort(v2, (size_t) k, sizeof(float), cmp_f32);
+            same = memcmp(v1, v2, (size_t) k * sizeof(float)) == 0;
+        }
+    }
+    free(x1);
+    free(x2);
+    free(v1);
+    free(v2);
+    return same;
+}
+
 static bool bit_compare(int node_index, struct ggml_tensor * t1, struct ggml_tensor * t2, void * user_data) {
     struct wrapped * w = (struct wrapped *) user_data;
     const size_t n = ggml_nbytes(t1);
@@ -125,7 +212,16 @@ static bool bit_compare(int node_index, struct ggml_tensor * t1, struct ggml_ten
         ggml_backend_tensor_get(t1, a, 0, n);
         ggml_backend_tensor_get(t2, b, 0, n);
         n_compared_nodes++;
-        if (memcmp(a, b, n) != 0) {
+        const bool differ = memcmp(a, b, n) != 0;
+        if (differ && topk_same_set(t1, a, b)) {
+            printf("TOPKSET: node %d %s (%s), %zu bytes, the same indices per row in a different order\n",
+                   node_index, ggml_op_desc(t1), t1->name, n);
+            n_topk_set_nodes++;
+        } else if (differ && topk_same_values(t1, t2, (const int32_t *) a, (const int32_t *) b)) {
+            printf("TOPKSET: node %d %s (%s), %zu bytes, the same values per row from tied indices\n",
+                   node_index, ggml_op_desc(t1), t1->name, n);
+            n_topk_set_nodes++;
+        } else if (differ) {
             size_t first = 0;
             while (a[first] == b[first]) {
                 first++;
@@ -150,6 +246,22 @@ static bool no_callback(int i, struct ggml_tensor * t1, struct ggml_tensor * t2,
     return true;
 }
 
+/* `graph_copy_dup_tensor` (ggml-backend.cpp:2153 @5266f24da) records a
+ * node's copy only after copying its sources, so `ggml_cast`'s `src[1]`,
+ * the node itself, comes back NULL in the copy. Put it back; see the file
+ * comment. */
+static void restore_self_refs(struct ggml_cgraph * graph, struct ggml_cgraph * copy) {
+    for (int i = 0; i < ggml_graph_n_nodes(graph); i++) {
+        struct ggml_tensor * orig = ggml_graph_node(graph, i);
+        struct ggml_tensor * dup = ggml_graph_node(copy, i);
+        for (int j = 0; j < GGML_MAX_SRC; j++) {
+            if (orig->src[j] == orig && dup->src[j] == NULL) {
+                dup->src[j] = dup;
+            }
+        }
+    }
+}
+
 /* `ggml_backend_compare_graph_backend`'s whole-graph arm, with backend 2's
  * copy re-expanded so it carries use counts; see the file comment. */
 static bool compare_whole_graph(ggml_backend_t backend1, ggml_backend_t backend2, struct ggml_cgraph * graph,
@@ -159,6 +271,7 @@ static bool compare_whole_graph(ggml_backend_t backend1, ggml_backend_t backend2
     if (copy.buffer == NULL) {
         return false;
     }
+    restore_self_refs(graph, copy.graph);
     const int n = ggml_graph_n_nodes(graph);
     struct ggml_init_params params = { ggml_graph_overhead_custom(ggml_graph_size(graph), false) + 1024, NULL, true };
     struct ggml_context * ctx = ggml_init(params);
@@ -235,6 +348,7 @@ static bool compare(ggml_backend_t b1, bool b1_is_port, ggml_backend_t b2, struc
     if (copy.buffer == NULL) {
         return false;
     }
+    restore_self_refs(graph, copy.graph);
     struct ggml_tensor const * mapped[64];
     if (num_test_nodes > sizeof(mapped) / sizeof(mapped[0])) {
         fprintf(stderr, "vk_ops_diff: too many test nodes\n");
@@ -525,6 +639,7 @@ static void report(void) {
     printf("vk_ops_diff: %ld nodes compared on bits, %ld differing in %ld cases, %ld reference-nondeterministic cases\n",
            n_compared_nodes, n_bitdiff_nodes, n_bitdiff_cases, n_nondet_cases);
     printf("vk_ops_diff: %ld whole-graph cases compared on the plain copy\n", n_fallback_graphs);
+    printf("vk_ops_diff: %ld TOP_K nodes equal as index or value sets, order and ties aside\n", n_topk_set_nodes);
     printf("vk_ops_diff: supports_op asked %ld times: %ld claimed beyond the reference, %ld refused that it accepts\n",
            n_supports_asked, n_supports_extra, n_supports_missing);
 }

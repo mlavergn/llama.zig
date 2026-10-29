@@ -18,6 +18,9 @@
 #                                an AVX-512 agent, X86_AGENT=JWHLPTOP
 #   X86_AGENT, ZUPDATER   as scripts/win-run takes them
 #   X86_BUILD_ONLY=1             stop after building the three .exe files
+#   X86_PORT_ENV=NAME=VALUE      set in the ported side's environment only,
+#                                for negative tests: GGML_NO_IQ_PANEL=1 must
+#                                make the `iqp` lines differ
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
@@ -48,7 +51,7 @@ RUN="$ROOT/scripts/win-run"
 for nt in 1 3; do
     "$RUN" "$out/ops_ref.exe" llamazig-ops-ref "$nt" "ops_ref.$nt.txt" write-q "q.$nt.bin" > "$out/ref.$nt.log" || exit 2
     grep -aq 'ops_dump rc=0' "$out/ref.$nt.log" || { echo "FAIL: reference run failed at $nt thread(s)"; tail -5 "$out/ref.$nt.log"; exit 1; }
-    "$RUN" "$out/ops_port.exe" llamazig-ops-port "$nt" "ops_port.$nt.txt" read-q "q.$nt.bin" > "$out/port.$nt.log" || exit 2
+    "$RUN" "$out/ops_port.exe" llamazig-ops-port "$nt" "ops_port.$nt.txt" read-q "q.$nt.bin" ${X86_PORT_ENV:+"$X86_PORT_ENV"} > "$out/port.$nt.log" || exit 2
     grep -aq 'ops_dump rc=0' "$out/port.$nt.log" || { echo "FAIL: ported run failed at $nt thread(s)"; tail -5 "$out/port.$nt.log"; exit 1; }
 done
 "$RUN" "$out/lines_diff.exe" llamazig-lines-diff ops_ref.1.txt ops_port.1.txt ops_ref.3.txt ops_port.3.txt | tee "$out/result.txt"

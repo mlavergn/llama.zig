@@ -939,7 +939,11 @@ fn checkLoadVariants(path: [:0]const u8) void {
         rec = null;
         checks += 1;
         if ((rm == null) != (pm == null)) fail("load_from_file_ptr: C++ {} port {}", .{ rm != null, pm != null });
-        sameTranscript("load_from_file_ptr", la.items, lb.items);
+        var na = normalize(la.items);
+        defer na.deinit(gpa);
+        var nb = normalize(lb.items);
+        defer nb.deinit(gpa);
+        sameTranscript("load_from_file_ptr", na.items, nb.items);
         if (rm != null and pm != null) compareModels("file_ptr load", rm.?, pm.?);
         freeBoth(.{ .rm = rm, .pm = pm });
     }
@@ -1105,8 +1109,10 @@ pub fn main(init: std.process.Init) !void {
         if (variants_on == null and is_model) variants_on = path;
         compareModels(name, rm, pm);
         checkVocab(name, c.llama_model_get_vocab(rm), F(.port, "llama_model_get_vocab")(pm), corpus.items);
-        // The model's own template, as raw text.
-        if (c.llama_model_chat_template(rm, null)) |t| try tmpls.append(gpa, std.mem.span(@as([*:0]const u8, @ptrCast(t))));
+        // The model's own template, as raw text. Copied: the string lives in
+        // the model's metadata, and the model is freed at the end of this
+        // iteration, long before `chatScript` reads it.
+        if (c.llama_model_chat_template(rm, null)) |t| try tmpls.append(gpa, try gpa.dupeSentinel(u8, std.mem.span(@as([*:0]const u8, @ptrCast(t))), 0));
         death_rv = c.llama_model_get_vocab(rm);
         death_pv = F(.port, "llama_model_get_vocab")(pm);
         checkVocabDeaths(name, c.llama_vocab_n_tokens(death_rv));

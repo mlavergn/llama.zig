@@ -31,6 +31,7 @@ pub fn add(b: *std.Build, opts: mtmd.GateOptions) void {
     mod.addIncludePath(b.path("llama.cpp/vendor"));
     mod.addCSourceFile(.{ .file = b.path("harness/mtmd_decode_ref.cpp"), .flags = &.{ "-std=c++17", "-w" } });
     llamacpp.addSdkPaths(b, mod, opts.sdk);
+    llamacpp.addCudaRuntime(b, mod, opts.cuda);
 
     const exe = b.addExecutable(.{ .name = "mtmd-decode-diff", .root_module = mod });
     const install = b.addInstallArtifact(exe, .{});

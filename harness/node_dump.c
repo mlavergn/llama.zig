@@ -15,6 +15,11 @@
  * decode, which the vec_dot goldens had passed.
  *
  * argv: <model.gguf> <prompt> <n_threads> [gpu|cpu|host] [fused <n_steps>]
+ *   A prompt spelled `tokens:<id>,<id>,...` is taken as token ids and never
+ *   reaches the tokenizer: the per-architecture fixtures
+ *   (scripts/gen-arch-fixtures) carry a `no_vocab` vocabulary, whose
+ *   tokenizer aborts. That is how the fused pass reaches a graph only such a
+ *   fixture has, qwen4exp's TOPK_QSA fusion among them.
  *   The model is loaded on the CPU device alone unless `gpu` is given: on a
  *   Metal machine the CPU kernels are otherwise never on the path.
  *   `host` loads it as `-ngl 0 --no-kv-offload --no-op-offload` does: the
@@ -86,6 +91,22 @@ static bool observe(struct ggml_tensor * t, bool ask, void * user_data) {
     return true;
 }
 
+/* `tokens:<id>,<id>,...` -> toks. Returns the count, or -1 on a malformed
+ * list, an empty one, or more than `cap` ids. */
+static int parse_token_ids(const char * s, llama_token * toks, int cap) {
+    int n = 0;
+    while (*s) {
+        char * end;
+        const long v = strtol(s, &end, 10);
+        if (end == s || v < 0 || v > INT32_MAX || n == cap) return -1;
+        toks[n++] = (llama_token) v;
+        if (*end == ',') end++;
+        else if (*end != '\0') return -1;
+        s = end;
+    }
+    return n > 0 ? n : -1;
+}
+
 int main(int argc, char ** argv) {
     if (argc < 4) {
         fprintf(stderr, "usage: %s <model.gguf> <prompt> <n_threads> [gpu|cpu|host] [fused <n_steps>]\n", argv[0]);
@@ -114,8 +135,13 @@ int main(int argc, char ** argv) {
 
     const struct llama_vocab * vocab = llama_model_get_vocab(model);
     llama_token toks[512];
-    const int n = llama_tokenize(vocab, argv[2], (int) strlen(argv[2]), toks, 512, true, true);
-    if (n < 0) return 1;
+    const int n = strncmp(argv[2], "tokens:", 7) == 0
+        ? parse_token_ids(argv[2] + 7, toks, 512)
+        : llama_tokenize(vocab, argv[2], (int) strlen(argv[2]), toks, 512, true, true);
+    if (n <= 0) {
+        fprintf(stderr, "%s: no tokens from the prompt\n", argv[0]);
+        return 1;
+    }
 
     struct llama_context_params cp = llama_context_default_params();
     cp.n_ctx = 512;

@@ -32,6 +32,7 @@ pub fn add(b: *std.Build, opts: mtmd.GateOptions) void {
     mod.linkLibrary(opts.reference.llama_ref);
     mod.linkLibrary(opts.reference.ggml);
     llamacpp.addSdkPaths(b, mod, opts.sdk);
+    llamacpp.addCudaRuntime(b, mod, opts.cuda);
     const exe = b.addExecutable(.{ .name = "mmproj-fixtures", .root_module = mod });
     const step = b.step("mmproj-fixtures", "Build the mmproj fixture generator and validator (harness/mmproj_fixtures.cpp)");
     step.dependOn(&b.addInstallArtifact(exe, .{}).step);

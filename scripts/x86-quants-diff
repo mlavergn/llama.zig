@@ -49,11 +49,18 @@ SRCS=(llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c llama.cpp/ggml/src/ggml-cpu/
 # Every defined external symbol of the two, which is exactly the set the
 # port also defines, less MinGW's `.refptr.*` stubs: the compiler emits one
 # per extern table it reads, and they are not names a `-D` can reach.
+# The defined external symbols of a Windows object: nm where it reads COFF
+# (LLVM's, on the Mac), scripts/coff-defined where it does not (GNU
+# binutils on a Linux arm64 host, which would list nothing at all).
+defined_syms() {
+    if nm "$1" >/dev/null 2>&1; then nm -g --defined-only "$1" | awk '{print $3}'
+    else "$ROOT/scripts/coff-defined" "$1"; fi
+}
 : > "$out/syms"
 for src in "${SRCS[@]}"; do
     "${CC[@]}" -c "$src" -o "$out/probe.o" \
         || { echo "FAIL: cannot compile the reference $src" >&2; exit 1; }
-    nm -g --defined-only "$out/probe.o" | awk '{print $3}' | grep -v '^\.' >> "$out/syms"
+    defined_syms "$out/probe.o" | grep -v '^\.' >> "$out/syms"
 done
 sort -u "$out/syms" -o "$out/syms"
 DEFS=()

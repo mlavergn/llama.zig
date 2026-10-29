@@ -33,6 +33,7 @@ pub fn add(b: *std.Build, opts: mtmd.GateOptions) void {
     mod.addCSourceFile(.{ .file = b.path("harness/mtmd_image_ref.cpp"), .flags = flags });
     mod.linkLibrary(opts.reference.ggml);
     llamacpp.addSdkPaths(b, mod, opts.sdk);
+    llamacpp.addCudaRuntime(b, mod, opts.cuda);
 
     const exe = b.addExecutable(.{ .name = "mtmd-image-diff", .root_module = mod });
     const install = b.addInstallArtifact(exe, .{});

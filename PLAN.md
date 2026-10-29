@@ -1571,6 +1571,15 @@ must clear before the **next** sync starts (MAINTENANCE.md, Decision 7).
 
 **GB10 (`spark-dbff`, `~/src/llama.zig`)**
 
+Items 1-4 **done** (`NOTES.md`, "The v0.4.0 GB10 pickup: CUDA and
+Vulkan"): the library port unchanged, every gate passing after harness
+fixes -- `ggml_cast`'s self-reference in both ops harnesses, which had
+crashed `cuda-ops-diff` and kept the fused TOPK_QSA from ever being
+compared, and libgcc ahead of `compiler_rt` for `node-diff`'s reference.
+Upstream's tools built and ran on Linux for the first time, after two
+fixes in the port's tools and CUDA link paths; `tools-diff` passes all
+twelve, the `$PLAIN` cases included. What stays open is below the list.
+
 1. **CUDA:** a real `zig build -Dcuda`, which rebuilds the fatbins and the
    kernel table. It must resolve every new key:
    - `moe_weighted_reduction_f32` and `swiglu_clamp_kernel<float|__half>`;
@@ -1599,13 +1608,35 @@ must clear before the **next** sync starts (MAINTENANCE.md, Decision 7).
      `graph_optimize`'s node order.
    - `vk-backend-diff`, whose harness now passes `graph_optimize` its
      params, and `vk-parity-cli`.
-   - TOPK_QSA fusion: covered only by a fused `vk-node-diff` on the
-     `qwen4exp` fixture.
+   - TOPK_QSA fusion: ~~covered only by a fused `vk-node-diff` on the
+     `qwen4exp` fixture~~. The fixture cannot reach it: its
+     `indexer_top_k` of 8 keeps the width under the radix regime's 1,024.
+     Only `vk-ops-diff`'s wide `TOPK_QSA` cases do -- and until the
+     harness fix they were never compared, the reference never fusing.
+     `vk-node-diff` on the fixture, through `node_dump`'s new `tokens:`
+     prompt, is identical on all four arms.
 4. **Linux arm64 CPU set:** `ops-diff`, `repack-diff`, `node-diff`,
    `parity-port --cpu`, `host-arms-diff` and `quant-diff`. Quantize now maps
    the file on Linux.
 
+Still open on the GB10:
+
+- **`lint`**: no `zlint` here that takes the styleguide's `-c`.
+
+**Mac, after the GB10 pickup**
+
+- `tools-diff export-lora` and `tools-diff imatrix`: their setups link
+  through `platform-libs` now, which carries no `-lobjc` where the old
+  Mac line had one.
+- `tools-diff` for every tool: the free-memory masks and
+  `GGML_NO_BACKTRACE` are now set for every case.
+
 **DESKTOP-BR7J5S9 (x86_64_v3)**
+
+Items 5 and 6 **done**, and `win-host-diffs` from 7, run from the GB10
+(`NOTES.md`, "DESKTOP-BR7J5S9: the x86_64_v3 items, from the GB10").
+`x86-node-diff` passes on Qwen3.5-2B `Q4_K_M` and `IQ4_XS` alike. **Open: `quant-diff` on Windows**, which has no Windows mode --
+its harness and its model and vocab inputs are host-only.
 
 5. `make x86-gates`. Only `x86-ops-diff` reaches the IQ panel GEMM
    (`iqp.cpp`, live only under AVX2); look at its `iqp …` lines. Also run

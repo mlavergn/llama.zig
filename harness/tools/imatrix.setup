@@ -5,10 +5,11 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 bin="$DATA/add_vocab"
+# The system libraries beside libggml.a: Metal on macOS, CUDA on Linux.
+. "$ROOT/scripts/platform-libs"
+platform_libs cc "$ROOT/zig-out/lib/libggml.a"
 zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/add_vocab.c" \
-    "$ROOT/zig-out/lib/libggml.a" -lc++ -lobjc -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-    -o "$bin" 2>/dev/null || \
-zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/add_vocab.c" "$ROOT/zig-out/lib/libggml.a" -lc++ -lm -lpthread -o "$bin"
+    "$ROOT/zig-out/lib/libggml.a" -lc++ "${PLATFORM_LIBS[@]}" -o "$bin"
 "$bin" "$ROOT/zig-out/arch-fixtures/qwen3moe-moe.gguf" "$DATA/moe.gguf"
 "$bin" "$ROOT/zig-out/arch-fixtures/llama-dense.gguf" "$DATA/dense.gguf"
 cat "$ROOT/llama.cpp/README.md" "$ROOT/llama.cpp/docs/build.md" > "$DATA/text.txt"

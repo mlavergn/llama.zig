@@ -46,6 +46,7 @@ pub fn add(b: *std.Build, opts: mtmd.GateOptions) void {
     mod.addCSourceFiles(.{ .files = &.{"harness/mtmd_audio_ref.cpp"}, .flags = &cxx_flags });
     mod.linkLibrary(opts.reference.ggml);
     llamacpp.addSdkPaths(b, mod, opts.sdk);
+    llamacpp.addCudaRuntime(b, mod, opts.cuda);
 
     const exe = b.addExecutable(.{ .name = "mtmd-audio-diff", .root_module = mod });
     const install = b.addInstallArtifact(exe, .{});

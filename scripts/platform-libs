@@ -34,6 +34,19 @@ platform_libs() {
                 PLATFORM_LIBS=(-L"$cuda/lib64" "${rpath[@]}" -lcudart -lcublas -lcublasLt -lcuda)
             fi
             PLATFORM_LIBS+=(-lgcc_s -lm -lpthread)
+            # gcc's static libgcc, ahead of Zig's compiler_rt, which is
+            # searched last and drops -lgcc_s. Since v0.4.0 the reference's
+            # ggml-backend-reg.o calls `fs::current_path(ec)`, whose libc++
+            # object needs `__divti3`; from compiler_rt it brings that
+            # archive's single object, and with it compiler_rt's `expf` and
+            # `logf` in place of glibc's -- on the reference side only, which
+            # libm_check below then refuses. libgcc.a supplies `__divti3`
+            # alone, as it would in upstream's own gcc or clang build. A link
+            # that needs nothing from it takes nothing from it.
+            local libgcc
+            if libgcc="$(gcc -print-libgcc-file-name 2>/dev/null)" && [ -f "$libgcc" ]; then
+                PLATFORM_LIBS+=("$libgcc")
+            fi
             ;;
         *)
             echo "platform-libs: no link line for $(uname -s)" >&2

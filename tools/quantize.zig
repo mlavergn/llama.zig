@@ -429,6 +429,17 @@ fn equivalent(a: [:0]const u8, b: [:0]const u8) bool {
         if (fopen(b.ptr, "rb") == null) return false;
         return std.ascii.eqlIgnoreCase(std.mem.sliceTo(&ra, 0), std.mem.sliceTo(&rb, 0));
     }
+    if (comptime builtin.os.tag == .linux) {
+        // `std.c.Stat` is void on Linux; `statx` gives the same device and
+        // inode, following symlinks as `stat` does.
+        const linux = std.os.linux;
+        var sa: linux.Statx = undefined;
+        var sb: linux.Statx = undefined;
+        const mask: linux.STATX = .{ .INO = true };
+        if (linux.errno(linux.statx(linux.AT.FDCWD, a.ptr, 0, mask, &sa)) != .SUCCESS or
+            linux.errno(linux.statx(linux.AT.FDCWD, b.ptr, 0, mask, &sb)) != .SUCCESS) return false;
+        return sa.dev_major == sb.dev_major and sa.dev_minor == sb.dev_minor and sa.ino == sb.ino;
+    }
     var sa: std.c.Stat = undefined;
     var sb: std.c.Stat = undefined;
     if (std.c.stat(a.ptr, &sa) != 0 or std.c.stat(b.ptr, &sb) != 0) return false;

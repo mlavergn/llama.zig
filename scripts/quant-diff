@@ -24,7 +24,10 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
+# The system libraries the harness links beside libggml.a: the Metal
+# frameworks on macOS, the CUDA libraries on Linux. See scripts/platform-libs.
+. scripts/platform-libs
+platform_libs exe
 
 # model_saver.zig's layer walk, one offsetof per entry, for quant_ref.cpp.
 sed -n '/BEGIN layer_fields/,/END layer_fields/p' src/llama/model_saver.zig \
@@ -57,8 +60,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/quant_diff" -Ofast -lc \
     --dep harness_root -Mroot=harness/quant_diff.zig \
     --dep llama_c -Mharness_root=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/quant_ref.o" zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
-    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-    -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 
 models=(llama.cpp/models/ggml-vocab-*.gguf)

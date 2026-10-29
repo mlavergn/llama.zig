@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""Print the external symbols a COFF object defines, one per line.
+
+`nm -g --defined-only` for a Windows object where `nm` cannot read one: the
+x86 gates cross-build their reference for `x86_64-windows-gnu` and take the
+names to rename from the object itself, and the GNU binutils of a Linux
+arm64 host know no PE/COFF target (the Mac's nm is LLVM's, which does). The
+two must agree, so this reads exactly what `nm` lists there: storage class
+EXTERNAL with a real section number -- defined, not undefined or absolute.
+
+Handles the plain header and `/bigobj`'s, whose symbols are 20 bytes with a
+32-bit section number; a C++ object with many COMDAT sections takes the
+second.
+
+**Not a port.**
+
+Usage: scripts/coff-defined <object.o>
+"""
+import struct
+import sys
+
+BIGOBJ_CLASSID = bytes.fromhex("c7a1bad1eebaa94baf20faf66aa4dcb8")
+IMAGE_SYM_CLASS_EXTERNAL = 2
+
+
+def defined(path):
+    data = open(path, "rb").read()
+    sig1, sig2 = struct.unpack_from("<HH", data, 0)
+    if sig1 == 0 and sig2 == 0xFFFF and data[12:28] == BIGOBJ_CLASSID:
+        symptr, nsym = struct.unpack_from("<II", data, 48)
+        size, secfmt = 20, "<i"
+    else:
+        symptr, nsym = struct.unpack_from("<II", data, 8)
+        size, secfmt = 18, "<h"
+    strtab = symptr + nsym * size
+    names = []
+    i = 0
+    while i < nsym:
+        rec = symptr + i * size
+        raw = data[rec:rec + 8]
+        (section,) = struct.unpack_from(secfmt, data, rec + 12)
+        sec_end = rec + 12 + struct.calcsize(secfmt)
+        storage, naux = data[sec_end + 2], data[sec_end + 3]
+        if storage == IMAGE_SYM_CLASS_EXTERNAL and section > 0:
+            if raw[:4] == b"\0\0\0\0":
+                (off,) = struct.unpack_from("<I", raw, 4)
+                end = data.index(b"\0", strtab + off)
+                names.append(data[strtab + off:end].decode())
+            else:
+                names.append(raw.rstrip(b"\0").decode())
+        i += 1 + naux
+    return names
+
+
+if __name__ == "__main__":
+    for name in defined(sys.argv[1]):
+        print(name)

@@ -620,7 +620,7 @@ pub fn build(b: *std.Build) !void {
         .sdk = sdk,
         .config = options,
         .reference = reference,
-        .cuda = cuda != null,
+        .cuda = cuda,
         .mtmd_ref = mtmd_ref,
     });
 
@@ -629,6 +629,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = cfg.optimize,
         .sdk = sdk,
         .reference = reference,
+        .cuda = cuda,
     }, mtmd_ref);
 
     // One slice of `xcframework/`'s `llama.framework`, the drop-in for

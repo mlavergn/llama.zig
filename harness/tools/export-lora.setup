@@ -4,10 +4,11 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 bin="$DATA/make_lora"
+# The system libraries beside libggml.a: Metal on macOS, CUDA on Linux.
+. "$ROOT/scripts/platform-libs"
+platform_libs cc "$ROOT/zig-out/lib/libggml.a"
 zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/make_lora.c" \
-    "$ROOT/zig-out/lib/libggml.a" -lc++ -lobjc -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
-    -o "$bin" 2>/dev/null || \
-zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/make_lora.c" "$ROOT/zig-out/lib/libggml.a" -lc++ -lm -lpthread -o "$bin"
+    "$ROOT/zig-out/lib/libggml.a" -lc++ "${PLATFORM_LIBS[@]}" -o "$bin"
 for m in qwen3-dense llama-dense; do
     mkdir -p "$DATA/$m"
     "$bin" "$ROOT/zig-out/arch-fixtures/$m.gguf" "$DATA/$m" >/dev/null

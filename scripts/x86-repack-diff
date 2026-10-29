@@ -47,11 +47,18 @@ FILES=(repack.cpp arch/x86/repack.cpp traits.cpp)
 
 # Every unmangled defined external symbol of the three, less MinGW's
 # `.refptr.*` stubs.
+# The defined external symbols of a Windows object: nm where it reads COFF
+# (LLVM's, on the Mac), scripts/coff-defined where it does not (GNU
+# binutils on a Linux arm64 host, which would list nothing at all).
+defined_syms() {
+    if nm "$1" >/dev/null 2>&1; then nm -g --defined-only "$1" | awk '{print $3}'
+    else "$ROOT/scripts/coff-defined" "$1"; fi
+}
 : > "$out/syms"
 for f in "${FILES[@]}"; do
     "${CXX[@]}" -c "llama.cpp/ggml/src/ggml-cpu/$f" -o "$out/probe.o" \
         || { echo "FAIL: cannot compile the reference $f" >&2; exit 1; }
-    nm -g --defined-only "$out/probe.o" | awk '{print $3}' | grep -v '^_Z' | grep -v '^\.' | grep -v '__clang_call_terminate' >> "$out/syms"
+    defined_syms "$out/probe.o" | grep -v '^_Z' | grep -v '^\.' | grep -v '__clang_call_terminate' >> "$out/syms"
 done
 sort -u "$out/syms" -o "$out/syms"
 
