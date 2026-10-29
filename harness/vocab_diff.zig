@@ -669,6 +669,16 @@ const edits = struct {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "no-such-tokenizer");
     }
 
+    /// The v0.4.1 pre-tokenizers on the GPT-2 vocabulary: their names,
+    /// `clean_spaces` and their split patterns.
+    fn preHyV4(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "hy_v4");
+    }
+
+    fn preSpark25(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "spark2_5");
+    }
+
     fn badPre(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "no-such-pre");
     }
@@ -754,6 +764,8 @@ pub fn main(init: std.process.Init) !void {
         .{ .name = "synthetic-spm-flags", .path = derive(dir, spm, "spm-flags", edits.spmFlags) },
         .{ .name = "synthetic-ugm-flags", .path = derive(dir, ugm, "ugm-flags", edits.ugmFlags) },
         .{ .name = "synthetic-bad-special", .path = derive(dir, gpt2, "bad-special", edits.badSpecial) },
+        .{ .name = "synthetic-pre-hy-v4", .path = derive(dir, gpt2, "pre-hy-v4", edits.preHyV4) },
+        .{ .name = "synthetic-pre-spark2-5", .path = derive(dir, gpt2, "pre-spark2-5", edits.preSpark25) },
         .{ .name = "error-model", .path = derive(dir, gpt2, "bad-model", edits.badModel) },
         .{ .name = "error-pre", .path = derive(dir, gpt2, "bad-pre", edits.badPre) },
         .{ .name = "error-merges", .path = derive(dir, gpt2, "no-merges", edits.noMerges) },

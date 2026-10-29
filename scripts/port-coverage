@@ -337,6 +337,10 @@ LANG_=cxx report_unit "ggml-metal-device.cpp" llama.cpp/ggml/src/ggml-metal/ggml
     "$PORTED_DIR/ported.zig"
 LANG_=cxx report_unit "ggml-metal-ops.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-ops.cpp yes \
     "$PORTED_DIR/ported.zig"
+# ggml-metal-fusion.cpp (v0.4.1): 17 C-ABI symbols, two of whose callers
+# are the .m files. src/ggml/metal/fusion.zig, gated by scripts/metal-diff.
+LANG_=cxx report_unit "ggml-metal-fusion.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-fusion.cpp yes \
+    "$PORTED_DIR/ported.zig"
 else
     printf '  %-22snot part of this target\n' "ggml-metal/*.cpp"
 fi

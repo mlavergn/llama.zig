@@ -257,11 +257,11 @@ const Filter = enum {
     /// Measured, one weight at a time: every other weight reaches the
     /// attention output gate's `ggml_sigmoid`, a unary op with no backward
     /// pass, and aborts with "fatal error" after "unsupported unary op for
-    /// backward pass" (ggml.c:7114 @5266f24da). Through v0.3.0 the KV
+    /// backward pass" (ggml.c:7165 @b29c606e2). Through v0.3.0 the KV
     /// cache's `ggml_set_rows` stopped several of them first, at
     /// `ggml_build_backward_expand`'s "inplace operations are currently not
     /// supported"; v0.4.0 admits `GGML_OP_SET_ROWS` there
-    /// (ggml.c:7339 @5266f24da), so all three now end at the sigmoid.
+    /// (ggml.c:7390 @b29c606e2), so all three now end at the sigmoid.
     head,
     /// One weight per abort, below.
     attn_q,

@@ -8146,3 +8146,233 @@ already says so for the gates; it holds for `tools-diff` too.
 **JWHLPTOP stays open.** Its agent, and the GB10's and DESKTOP's, sat at
 "waiting for …" on 2026-10-28. Marc directed the v0.4.1 sync to start
 over that one open pickup; the AVX-512 items carry into v0.4.1's list.
+
+## Upstream sync v0.4.0 → v0.4.1
+
+The second sync. The pin moved from `v0.4.0` (`5266f24da`, `b10809`) to
+`v0.4.1` (`b29c606e2`, `b10964`), ggml from 0.23.0 to 0.24.0, and the
+port's version with it: `0.4.1`. It started over one open pickup, v0.4.0's
+JWHLPTOP items, at Marc's direction; they carry into this sync's list.
+
+### What moved
+
+`scripts/upstream-map` gave **197 touched citations**, **168 hunks no
+citation covered**, and **43 changed files with no citation**. The repin
+moved **7,231 citation sites** in 533 files. `upstream-relines` moved
+**316** abort-message line numbers and left none for hand work. Upstream
+added three files to the build: `ggml-metal-fusion.cpp`,
+`common/json-schema.cpp` and `common/parsers/*.cpp`. Both `build.zig`s now
+list them.
+
+The work was split across six agents, each with its own set of files: ggml
+core with CPU and Metal, CUDA, Vulkan, the libllama core with the existing
+models, the three new architectures, and tools with the CLI and libmtmd.
+Before they started, the lead moved the reference, ran the generators and
+both mechanical moves, and ported `ggml_prec_set_acc` and
+`ggml_prec_set_src`, which libllama and libmtmd now call instead of the
+deprecated `ggml_mul_mat_set_prec` and `ggml_flash_attn_ext_set_prec`.
+
+**What was ported, by area:**
+
+- **ggml**: `ggml_prec_set_acc` and `ggml_prec_set_src`, writing op_params
+  slot 0 (or 3 for flash attention) and slot 3 for src 1. Since
+  `MUL_MAT_ID` now takes an accumulator precision too, `graph-diff` gained
+  144 dumps covering every op arm and refusal. In the scheduler, the two
+  grow functions log at DEBUG, the "too many inputs" split check is gone,
+  and `compute_splits` skips an empty ids tensor.
+- **CPU**: repack dispatch gains the VXE arm, which is always 0 off s390x.
+  `CACHE_LINE_SIZE` needs nothing: the port always used 64. The
+  `arch-fallback.h` removals are all in the s390x block.
+- **Metal**:
+  - `ggml-metal-fusion.cpp` → `src/ggml/metal/fusion.zig`, 17 C-ABI
+    exports. The table both `graph_optimize` and the encoders consult is the
+    single source of truth. The `ggml_metal_fusion_info` debug and stats
+    object is called by the `.m` files.
+  - The encoders consume the table: `op_bin` (snake and the ADD chain),
+    `op_norm`, and `op_gated_delta_net`, which gains the new GDN_CACHE
+    fusion (`nb_out` and a `state_out` binding).
+  - The IQ mat-vec kernels have new `_SPLIT` shapes (seven `N_R0_*_SPLIT`
+    constants in `impl_c.zig`).
+  - There are 319 new tuning rows and five new proc-address entries.
+- **CUDA**:
+  - `GGML_CUDA_FA_QUANTS` replaces `GGML_CUDA_FA_ALL_QUANTS`, and the build
+    takes `-Dcuda-fa-quants` (see below).
+  - Flash attention: the f16 fallback for a K/V pair with no compiled
+    instance, stream-k at Ada and newer, and K≠V accepted.
+  - The cuBLAS BF16 arm. mmq sizes its tiles from the new `ncols_opt`.
+  - The mmvq Q4_K/Q5_K retune for Ada and Blackwell.
+  - The device-only changes need no host change.
+- **Vulkan**:
+  - Upstream's matmul refactor: one quant shader with an A-type spec
+    constant, and pipelines keyed by a map.
+  - TQ1_0 throughout; the three DeepSeek-V4 hyper-connection ops.
+  - Fusions: RMS_NORM `MUL_ADD`, `MUL_ADD_MUL` and `VIEW_SET_ROWS`, and
+    UNARY+MUL.
+  - `graph_optimize` now calls the scheduler's `add_alloc_dep`.
+  - Misaligned descriptors, a 2-D FILL, and the swapped-input mat-vec.
+  - NVIDIA's submit mutex, which is live on the GB10.
+  - Out of scope: the `GGML_VULKAN_RUN_TESTS` and `CHECK_RESULTS` hunks, and
+    a 32-bit Vulkan-Hpp logging operator.
+- **libllama**:
+  - Three architectures (150 entries): `hy_v4` (independent
+    hyper-connections scaled by the new `hc_magnitude`, and a DSA lightning
+    indexer whose shared layers reuse the last full layer's top-k),
+    `maple` and `spark2_5`.
+  - The shared helpers `build_gdn_l2_norm` (models.h) and a `build_qkv`
+    overload with per-q/k/v head shapes and `reshape`.
+  - Pre-tokenizers `hy_v4` and `spark2_5`.
+  - The grammar's repetition threshold changed from `>=` to `>`.
+  - The lazy-mode fallback when a device lacks mmap.
+  - `create_memory`'s HY_V4 arm, with a generalised nextn filter.
+  - `llama_sampler_chain_n` now returns `int32_t`.
+  - Twenty-odd existing models moved to the new helpers.
+- **Tools and the CLI**:
+  - `--log-jsonl`/`--no-log-jsonl`, with `common_log`'s JSONL mode and
+    `fit_memory_breakdown` record. These need `cli/json.zig`, which ports
+    nlohmann's escaping and was compared on 200,000 random strings.
+  - `--mlock`, `--mmap` and `--direct-io` (and llama-bench's `-mmp`/`-dio`)
+    are removed upstream, and new cases check that they are now rejected.
+  - The mmproj device now follows `--device`.
+  - `--log-jsonl` is deferred for our `llama-cli` (`UPSTREAM.md`).
+- **libmtmd**: `ggml_prec_set_acc` replaces the old setter. The
+  `mtmd-helper.cpp` hunks are all under `MTMD_VIDEO`, which the reference
+  does not define.
+- **Not ported, by the scope map**:
+  - `common/chat.cpp`'s 2,534-line move of its format-specific parsers
+    into `common/parsers/`, together with tool-call parsing, json-schema and
+    the PEG parser;
+  - the s390x repack;
+  - `mmq-config-gcn.cuh`, which is AMD.
+
+### Decisions taken in this sync
+
+- **`-Dcuda-fa-quants` defaults to `all`, not upstream's four pairs.** This
+  keeps the compiled kernel set, and so the gates' coverage, as it was at
+  v0.4.0. Upstream's default only matters for gating the new f16 fallback,
+  which is a separate GB10 pickup item at that list.
+
+### What the tooling and the generators got right and wrong
+
+- **The repin cannot see a wrapped citation in two CUDA files**:
+  `convert.zig:104` and `cpy.zig:163` stayed at `@5266f24da`. The CUDA
+  agent re-cited them by hand. They are the same class as the wrapped
+  citations `port-links` once skipped.
+- **`upstream-map` does not cover `harness/`**: its citations stayed at A -- 31 in all, the agents
+  repinning those in their own harnesses. The rest, on lines such as
+  `repack_diff.zig`'s `Mirrors …` and `libcxx_ref.cpp`'s comparator notes,
+  stayed at A. The lead mapped each one through the A..B diff and
+  repinned only lines in unchanged regions whose text is identical at both
+  commits. Five line numbers moved, and none needed hand work.
+- **`impl_c.zig` is hand-kept**: the seven `_SPLIT` constants had to be added
+  to it and to `struct_layout.cpp` by hand, as `SYNC.md` says.
+- **`bpe.zig` calls its pattern table generated, but no generator exists.**
+  `spark2_5`'s patterns were converted byte for byte, and `vocab-diff`
+  confirms them (an injected missing pattern failed 492 checks).
+- **A stopgap that compiled was not a stopgap that worked.** To keep the
+  tree linking before the Metal port, the lead compiled upstream's
+  `ggml-metal-fusion.cpp` as C++. Everything linked. But the v0.4.1 `.m`
+  calls `ggml_metal_op_init` with a new argument list (`finfo` in place of
+  `use_fusion` … `debug_fusion`), and the v0.4.0 Zig still took the old
+  one. Every argument after the graph was shifted:
+  - `gen-mmproj-fixtures` failed 38 of 122 checks on the GPU, with a
+    `ggml-alloc` assert and all-zero chunks;
+  - the new-architecture agent saw the same assert in `arch-model-diff` on
+    the reference side;
+  - nothing at link time noticed, because the `.m` declares the function
+    from a header the Zig does not import.
+
+  The Metal port fixed it.
+- **`validate`'s lint caught a `catch unreachable`** in `cli/json.zig`; the
+  escape is now written digit by digit, and its test covers it.
+
+### The gates
+
+`make validate` passed once the lint finding above was fixed. Then the Mac
+set ran in full, from fixtures regenerated after validate's clean. Every
+gate passed but one, and that one was the apparatus. A second hole showed
+in the fixture count, not in any verdict:
+
+- **`xcframework-check`'s macOS CPU smoke differed on 4 of 6 prompts**
+  against a reference driver built on Oct 26 at v0.4.0. The rule for
+  `driver-<cpu>` depended only on `test/driver.c`, so the pin move never
+  rebuilt it, and the smoke was comparing two releases. The driver now
+  depends on `build/upstream.zig` as well. With it rebuilt, the
+  run reached `compat`, which failed the same way: `build/upstream`,
+  upstream's own `build-xcframework.sh` output, also dated from v0.4.0,
+  and its headers differ by the sync. `make upstream` now records the
+  commit it built at, and `compat` refuses a build at any other one.
+  **Both had accepted whatever an earlier run left behind**, the same
+  hole `check-reference-pin` closes for the bit-exact gates.
+- **`arch-fixtures` wrote 164 fixtures, where v0.4.0 wrote 162 and three
+  architectures were added.** Gemma 4 had lost its fixture: since v0.4.1
+  `load_arch_hparams` reads the SWA pattern with `get_arr`
+  (gemma4.cpp:5), which rejects the scalar `get_gguf_ctx` writes.
+  Upstream's own loop skips Gemma 4, so nothing upstream noticed. A
+  "no fixture" line is not a failure, so nothing here noticed either. The
+  libllama agent reported it; the lead nearly passed it over. The
+  `get_arr` port and the fused-QKV path had only `gemma4-assistant-diff`,
+  whose target is a Gemma 4 it builds itself. `arch_fixtures_extra.cpp`
+  now writes the pattern as a bool array, every fifth layer full attention
+  as the recipe's comment says, and `gemma4-dense` passes gpu:22 cpu:22.
+  With layer 4 marked SWA in the port it fails, the port's load
+  stopping on a tensor count. `arch-fixtures` now writes 165.
+
+| Gate | Result |
+|---|---|
+| `make probe` | both runs |
+| `ops-diff`, `repack-diff`, `node-diff`, `parity-port`, `parity-port-cpu` | identical at `baseline`, `apple_m3`, `generic`, `apple_a7` and `apple_a12`: 762 op results, 116 repack checks, 6/6 and 6/6 |
+| `node-diff --gpu` | every node and every fused decode identical |
+| `backend-ops` | 22,687 op configurations, both backends; `--diff` 26,869 lines identical |
+| `metal-diff` | 2,200 answers |
+| `tuning-diff` | 11,290,089 lookups |
+| `struct-layout` | 318 layout facts, and the 3,177 of `kargs` |
+| `abi-check` | 34 entry points |
+| `sampler-diff` | 40,308 records, 19 of them the new `edge2000` grammar |
+| `context-diff` | 2,313,167 checks |
+| `arch-model-diff` | 162 pass, 0 fail, the two `REF-ABORT`s known since v0.3.0 (PLM, `rwkv6qwen2`); Gemma 4, run alone once its fixture was restored, passes |
+| `gemma4-assistant-diff` | dense and MoE, Metal and CPU |
+| `jinja-diff` | 69 templates × 7 conversations, both time zones |
+| `cnv-diff` | 16 scenarios |
+| `fit-diff` | 68 cases, ReleaseFast and ReleaseSafe |
+| `tools-diff` | every tool's cases, `llama-tts` 30 and `llama-mtmd-cli` 46 included |
+| `blas-diff`, `blas-node-diff` | identical; 366 of 384 nodes computed differently without BLAS |
+| `mtmd-gates` | `mtmd-diff` 244 identical (4 aborting alike), the image, audio and decode diffs, 84 exports |
+| `adapter-diff` | 283,372 checks |
+| `quant-diff` | 143,981,322 checks |
+| `opt-diff`, `opt-llama-diff` | 89,924 checks; 6 abort cases alike |
+| `meta-diff` | 78,015 end-to-end lines |
+| `host-arms-diff` | 18 scenarios |
+| `parity-cli` | 6/6 |
+| `xcframework-check` | every slice's smoke 6/6, the negative tests, the port gates, `compat` (91 files byte-identical, 10,989 exports) and `dropin-macos`; upstream's generic-CPU macOS slice against ours, reported and not a gate, differs on 3 of 6 prompts where v0.4.0 differed on 2 |
+
+### Injections
+
+Each new gate case and changed function was made to fail once:
+
+- **Metal** (`metal-diff`), 4/4: an ADD pattern dropped from the fusion
+  table; GDN's `n_written` with `@max` for `@min`; the snake closure check
+  neutralised; the ADD-chain buffer check moved from full mode to structural.
+  **`node-diff --gpu` cannot see a dropped fusion pattern**: fused and
+  unfused Qwen3.5 decodes give bit-identical logits, which is why the table
+  check lives in `metal-diff`.
+- **`graph-diff`**: removing `prec_set_src`'s `idx != 1` refusal makes 116
+  lines differ.
+- **libllama**: `build_gdn_l2_norm` with `eps` in place of `eps/n`
+  (`arch-model-diff` fails on qwen35 and kimi-linear); spark2_5's fourth
+  BPE pattern dropped (`vocab-diff`, 492 checks); the grammar threshold back
+  to `>=` (`sampler-diff`'s new `edge2000` case).
+- **New architectures** (`arch-model-diff`, CPU): hy_v4's `hc_magnitude`
+  scale set to 1.0; maple's Q normed with the K norm; spark2_5's gate
+  `sigmoid` as `silu`.
+- **Tools**: the fit breakdown's device row writing `context` as `compute`
+  (`tools-diff perplexity`); the mmproj device forced to the GPU
+  (`tools-diff mtmd-cli`, the `-dev none` case); a citation drifted by one
+  line (`port-links`).
+
+### Pickups
+
+`PLAN.md`, "Pickup for the v0.4.1 sync". The CUDA host layer has not
+compiled on any machine: this Mac has no toolkit, and that is the GB10's
+first item. The Vulkan host layer compiled here against a stub
+`libvulkan.dylib` with every glslc feature on, so every comptime arm
+type-checked, but none of it has run.

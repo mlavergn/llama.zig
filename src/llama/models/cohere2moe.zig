@@ -7,8 +7,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/cohere2moe.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_cohere2moe`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/cohere2moe.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_cohere2moe`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` and its
 //! `graph_mtp`.
 
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_cohere2moe`'s `load_arch_hparams` (models/cohere2moe.cpp:3 @5266f24da).
+/// Ports `llama_model_cohere2moe`'s `load_arch_hparams` (models/cohere2moe.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -78,7 +78,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_cohere2moe`'s `load_arch_tensors` (models/cohere2moe.cpp:45 @5266f24da).
+/// Ports `llama_model_cohere2moe`'s `load_arch_tensors` (models/cohere2moe.cpp:45 @b29c606e2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -128,7 +128,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `load_arch_tensors`'s `load_block_trunk` lambda
-/// (models/cohere2moe.cpp:79 @5266f24da).
+/// (models/cohere2moe.cpp:79 @b29c606e2).
 fn loadBlockTrunk(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(i)];
@@ -159,7 +159,7 @@ fn loadBlockTrunk(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc:
 }
 
 /// Ports `load_arch_tensors`'s `load_block_mtp` lambda
-/// (models/cohere2moe.cpp:107 @5266f24da).
+/// (models/cohere2moe.cpp:107 @b29c606e2).
 fn loadBlockMtp(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
@@ -198,7 +198,7 @@ fn loadBlockMtp(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *
 }
 
 /// Ports `llama_model_cohere2moe`'s `build_arch_graph` (models/cohere2moe.cpp:150
-/// @5266f24da): the MTP draft head for that graph type, the main model
+/// @b29c606e2): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -206,7 +206,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_cohere2moe`'s `graph`
-/// (models/cohere2moe.cpp:157 @5266f24da).
+/// (models/cohere2moe.cpp:157 @b29c606e2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -336,7 +336,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_cohere2moe`'s `graph_mtp`
-/// (models/cohere2moe.cpp:296 @5266f24da).
+/// (models/cohere2moe.cpp:296 @b29c606e2).
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/conv-transpose-1d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/conv-transpose-1d.cuh` at v0.4.0
-//! (`5266f24da`). The kernel, `conv_transpose_1d_kernel`, stays CUDA.
+//! `llama.cpp/ggml/src/ggml-cuda/conv-transpose-1d.cuh` at v0.4.1
+//! (`b29c606e2`). The kernel, `conv_transpose_1d_kernel`, stays CUDA.
 //!
 //! Only the stride is read from `op_params`; padding and dilation are the
 //! C's hard-coded 0 and 1.
@@ -18,7 +18,7 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_CONV_TRANPOSE_1D_BLOCK_SIZE` (conv-transpose-1d.cuh:3 @5266f24da).
+/// Ports `CUDA_CONV_TRANPOSE_1D_BLOCK_SIZE` (conv-transpose-1d.cuh:3 @b29c606e2).
 const block_size = 256;
 
 /// An `int64_t` into an `int` parameter.
@@ -26,7 +26,7 @@ fn int(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `conv_transpose_1d_f32_f32_cuda` (conv-transpose-1d.cu:42 @5266f24da).
+/// Ports `conv_transpose_1d_f32_f32_cuda` (conv-transpose-1d.cu:42 @b29c606e2).
 fn convTranspose1dF32F32Cuda(
     s0: c_int,
     p0: c_int,
@@ -64,7 +64,7 @@ fn convTranspose1dF32F32Cuda(
     });
 }
 
-/// Ports `ggml_cuda_op_conv_transpose_1d` (conv-transpose-1d.cu:59 @5266f24da).
+/// Ports `ggml_cuda_op_conv_transpose_1d` (conv-transpose-1d.cu:59 @b29c606e2).
 pub fn opConvTranspose1d(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;

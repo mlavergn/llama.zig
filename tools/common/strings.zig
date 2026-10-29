@@ -4,7 +4,7 @@
 //!
 //! Ports `string_remove_suffix`, `string_parse_kv_override` and the
 //! `std::string` specialisation of `string_split` from
-//! `llama.cpp/common/common.cpp` and `common/common.h` (v0.4.0, `5266f24da`).
+//! `llama.cpp/common/common.cpp` and `common/common.h` (v0.4.1, `b29c606e2`).
 //! Each declaration names what it ports and the line it began at.
 
 const std = @import("std");
@@ -14,14 +14,14 @@ const log = @import("log.zig");
 extern fn atol(s: [*:0]const u8) c_long;
 extern fn atof(s: [*:0]const u8) f64;
 
-/// Ports `string_remove_suffix` (common/common.h:850 @5266f24da), returning the
+/// Ports `string_remove_suffix` (common/common.h:850 @b29c606e2), returning the
 /// shortened string where the C shortens in place and returns true.
 pub fn removeSuffix(str: []const u8, suffix: []const u8) ?[]const u8 {
     if (!std.mem.endsWith(u8, str, suffix)) return null;
     return str[0 .. str.len - suffix.len];
 }
 
-/// Ports `string_split` (common/common.h:818 @5266f24da): the parts
+/// Ports `string_split` (common/common.h:818 @b29c606e2): the parts
 /// between each `delim`, including empty ones and the last. The parts
 /// borrow `str`; the caller frees the list.
 pub fn split(allocator: std.mem.Allocator, str: []const u8, delim: u8) !std.ArrayList([]const u8) {
@@ -32,7 +32,7 @@ pub fn split(allocator: std.mem.Allocator, str: []const u8, delim: u8) !std.Arra
     return parts;
 }
 
-/// Ports `string_parse_kv_override` (common/common.cpp:682 @5266f24da).
+/// Ports `string_parse_kv_override` (common/common.cpp:682 @b29c606e2).
 ///
 /// Return: false, having logged why, for a malformed override.
 pub fn parseKvOverride(data: [:0]const u8, overrides: *std.ArrayList(c.llama_model_kv_override), allocator: std.mem.Allocator) !bool {

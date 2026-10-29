@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.4.0
-//! (`5266f24da`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.4.1
+//! (`b29c606e2`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # Not shaped like its K-quant siblings
@@ -64,7 +64,7 @@ const mask_hi: u8x16 = @splat(0x30);
 const sh2: @Vector(16, u3) = @splat(2);
 const sh4: @Vector(16, u3) = @splat(4);
 
-/// Ports `ggml_gemv_q6_K_8x4_q8_K` (arch/arm/repack.cpp:1309 @5266f24da).
+/// Ports `ggml_gemv_q6_K_8x4_q8_K` (arch/arm/repack.cpp:1309 @b29c606e2).
 pub export fn ggml_gemv_q6_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q6_K_8x4_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
@@ -188,7 +188,7 @@ pub export fn ggml_gemv_q6_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     }
 }
 
-/// Ports `ggml_gemv_q6_K_8x8_q8_K` (arch/arm/repack.cpp:1498 @5266f24da).
+/// Ports `ggml_gemv_q6_K_8x8_q8_K` (arch/arm/repack.cpp:1498 @b29c606e2).
 ///
 /// The 8x4 kernel's arithmetic with a **third** accumulator shape: four
 /// two-lane accumulators, one per column pair, where 8x4 uses two
@@ -328,7 +328,7 @@ pub export fn ggml_gemv_q6_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     }
 }
 
-/// Ports `ggml_gemm_q6_K_8x4_q8_K` (arch/arm/repack.cpp:4519 @5266f24da).
+/// Ports `ggml_gemm_q6_K_8x4_q8_K` (arch/arm/repack.cpp:4519 @b29c606e2).
 ///
 /// **The zero point moves.** The gemv kernels fold the `-32` into an
 /// integer bias and subtract it from the accumulator at the end; this one

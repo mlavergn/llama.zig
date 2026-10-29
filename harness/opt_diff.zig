@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** This is our own code. Its scenarios are taken from
-//! `llama.cpp/tests/test-opt.cpp` (v0.4.0, `5266f24da`) — the dataset,
+//! `llama.cpp/tests/test-opt.cpp` (v0.4.1, `b29c606e2`) — the dataset,
 //! gradient, forward/backward, epoch-versus-fit, idata-split,
 //! gradient-accumulation and regression tests — and widened with the paths
 //! that file never takes: cross-entropy with predictions and accuracy, a

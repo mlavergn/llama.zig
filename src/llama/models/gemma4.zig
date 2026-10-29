@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma4.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/gemma4.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_gemma4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and the graph's helpers.
 
@@ -24,13 +24,13 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma4`'s `load_arch_hparams` (models/gemma4.cpp:3 @5266f24da).
+/// Ports `llama_model_gemma4`'s `load_arch_hparams` (models/gemma4.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
-    _ = try meta.getKeyOrArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, hp.nLayer(), true, exc);
+    _ = try meta.getArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, true, exc);
 
     var n_kv_shared_layers: u32 = 0;
     if (try meta.getKey(u32, .attention_shared_kv_layers, false, exc)) |v| n_kv_shared_layers = v;
@@ -62,7 +62,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_gemma4`'s `load_arch_tensors` (models/gemma4.cpp:36 @5266f24da).
+/// Ports `llama_model_gemma4`'s `load_arch_tensors` (models/gemma4.cpp:36 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -110,9 +110,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
         // use_alternative_attention: v_proj is optional, and k_proj is used
         // in its absence.
-        layer.wq = try self.createTensor(.{ .tensor = .attn_q, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_embd_head * n_head }, 0, exc);
-        layer.wk = try self.createTensor(.{ .tensor = .attn_k, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_embd_k }, kv_flags, exc);
-        layer.wv = try self.createTensor(.{ .tensor = .attn_v, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_embd_v }, nr, exc);
+        layer.wqkv = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_embd_head * n_head + n_embd_k + n_embd_v }, nr | loader.tensor_skip_if_virtual, exc);
+        if (layer.wqkv == null) {
+            layer.wq = try self.createTensor(.{ .tensor = .attn_q, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_embd_head * n_head }, 0, exc);
+            layer.wk = try self.createTensor(.{ .tensor = .attn_k, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_embd_k }, kv_flags, exc);
+            layer.wv = try self.createTensor(.{ .tensor = .attn_v, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_embd_v }, nr, exc);
+        }
         layer.wo = try self.createTensor(.{ .tensor = .attn_out, .suffix = "weight", .bid = i }, &.{ n_embd_head * n_head, l.n_embd }, 0, exc);
 
         layer.attn_q_norm = try self.createTensor(.{ .tensor = .attn_q_norm, .suffix = "weight", .bid = i }, &.{n_embd_head}, 0, exc);
@@ -173,27 +176,27 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma4`'s `build_arch_graph` (models/gemma4.cpp:139 @5266f24da).
+/// Ports `llama_model_gemma4`'s `build_arch_graph` (models/gemma4.cpp:143 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const g: Graph = .{ .model = model, .b = b, .n_embd_per_layer = b.hparams.n_embd_per_layer };
     g.build();
 }
 
-/// Ports `ggml_view_2d_slice` (models/gemma4.cpp:144 @5266f24da): the 2D
+/// Ports `gemma4_view_2d_slice` (models/gemma4.cpp:148 @b29c606e2): the 2D
 /// slice of a 3D tensor at `idx` along its third dimension.
 fn view2dSlice(ctx: *c.ggml_context, x: *Tensor, idx: c_int) *Tensor {
-    impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma4.cpp", 145, "idx < (int) x->ne[2]");
+    impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma4.cpp", 149, "idx < (int) x->ne[2]");
     return c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], c.ggml_row_size(x.type, x.ne[0]), @intCast(idx * x.ne[0] * x.ne[1] * @as(i64, @intCast(c.ggml_element_size(x)))));
 }
 
-/// Ports `llama_model_gemma4`'s `graph` (src/models/models.h:862 @5266f24da).
+/// Ports `llama_model_gemma4`'s `graph` (src/models/models.h:869 @b29c606e2).
 const Graph = struct {
     model: *const Model,
     b: *const graph.Builder,
     n_embd_per_layer: i64,
 
     /// Ports the constructor of `llama_model_gemma4`'s `graph`
-    /// (models/gemma4.cpp:150 @5266f24da).
+    /// (models/gemma4.cpp:154 @b29c606e2).
     fn build(self: *const Graph) void {
         const model = self.model;
         const b = self.b;
@@ -230,7 +233,7 @@ const Graph = struct {
             const layer = &model.layers[@intCast(il)];
             const ilu: u32 = @intCast(il);
             const n_embd_head: i64 = hp.nEmbdHeadK(ilu);
-            impl.assert(n_embd_head == hp.nEmbdHeadV(ilu), "models/gemma4.cpp", 182, "n_embd_head == hparams.n_embd_head_v(il)");
+            impl.assert(n_embd_head == hp.nEmbdHeadV(ilu), "models/gemma4.cpp", 186, "n_embd_head == hparams.n_embd_head_v(il)");
 
             const n_head: i64 = hp.nHead(ilu);
             const n_head_kv: i64 = hp.nHeadKv(ilu);
@@ -253,9 +256,18 @@ const Graph = struct {
 
             // The Q projection, shared by the KV and the non-KV layers, to
             // mirror Gemma4Attention in the PyTorch code.
+            var qkv_fused: ?*Tensor = null;
             var Qcur: *Tensor = undefined;
-            {
+            if (layer.wqkv) |wqkv| {
+                const f = b.buildLoraMm(wqkv, cur, layer.wqkv_s);
+                qkv_fused = f;
+                b.cb(f, "wqkv", il);
+                const q_dim = n_embd_head * n_head;
+                Qcur = c.ggml_cont(ctx, c.ggml_view_2d(ctx, f, q_dim, n_tokens, f.nb[1], 0));
+            } else {
                 Qcur = b.buildLoraMm(layer.wq.?, cur, layer.wq_s);
+            }
+            {
                 b.cb(Qcur, "Qcur", il);
 
                 Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, n_tokens);
@@ -269,11 +281,21 @@ const Graph = struct {
 
             // Self-attention.
             if (hp.hasKv(ilu)) {
-                var Kcur: *Tensor = b.buildLoraMm(layer.wk.?, cur, layer.wk_s);
+                var Kcur: *Tensor = undefined;
+                var Vcur: *Tensor = undefined;
+                if (qkv_fused) |f| {
+                    const q_dim = n_embd_head * n_head;
+                    const k_dim = n_embd_head * n_head_kv;
+                    const v_dim = n_embd_head * n_head_kv;
+                    const esize = c.ggml_element_size(f);
+                    Kcur = c.ggml_cont(ctx, c.ggml_view_2d(ctx, f, k_dim, n_tokens, f.nb[1], @as(usize, @intCast(q_dim)) * esize));
+                    Vcur = c.ggml_cont(ctx, c.ggml_view_2d(ctx, f, v_dim, n_tokens, f.nb[1], @as(usize, @intCast(q_dim + k_dim)) * esize));
+                } else {
+                    Kcur = b.buildLoraMm(layer.wk.?, cur, layer.wk_s);
+                    // Without a v_proj, Kcur is Vcur.
+                    Vcur = if (layer.wv) |wv| b.buildLoraMm(wv, cur, layer.wv_s) else Kcur;
+                }
                 b.cb(Kcur, "Kcur", il);
-
-                // Without a v_proj, Kcur is Vcur.
-                var Vcur: *Tensor = if (layer.wv) |wv| b.buildLoraMm(wv, cur, layer.wv_s) else Kcur;
                 b.cb(Vcur, "Vcur", il);
 
                 Kcur = c.ggml_reshape_3d(ctx, Kcur, n_embd_head, n_head_kv, n_tokens);
@@ -438,7 +460,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma4`'s `graph`'s `build_inp_per_layer`
-    /// (models/gemma4.cpp:418 @5266f24da): equivalent to the Python code's
+    /// (models/gemma4.cpp:440 @b29c606e2): equivalent to the Python code's
     /// `get_per_layer_inputs()`.
     ///
     /// Return: `[n_embd_per_layer, n_layer, n_tokens]`.
@@ -450,7 +472,7 @@ const Graph = struct {
         var inp_per_layer: *Tensor = undefined;
         const tok_embd_scale = impl.sqrtf(@floatFromInt(self.n_embd_per_layer));
         if (b.ubatch.token != null) {
-            const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma4.cpp", 419, "out of memory");
+            const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma4.cpp", 441, "out of memory");
             inp.* = .{ .n_embd = b.n_embd };
             inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.ubatch.n_tokens);
             c.ggml_set_input(inp.tokens);
@@ -482,7 +504,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma4`'s `graph`'s `project_per_layer_inputs`
-    /// (models/gemma4.cpp:456 @5266f24da): equivalent to the Python code's
+    /// (models/gemma4.cpp:478 @b29c606e2): equivalent to the Python code's
     /// `project_per_layer_inputs()`, the per-layer inputs with `n_layer` as
     /// the last dimension, from `inp_batch` `[n_embd, n_tokens]` and
     /// `build_inp_per_layer`'s `[n_embd_per_layer, n_layer, n_tokens]`.

@@ -59,3 +59,9 @@
 -m $VOCAB/ggml-vocab-gpt-2.gguf --stdin --show-count
 -m $VOCAB/ggml-vocab-falcon.gguf -p "Ünïcödé 字 🙂" -p "second wins"
 -m $VOCAB/ggml-vocab-deepseek-coder.gguf -p "def f(x):\n    return x" -lv 4 -t 3 -c 64 -b 32 -ub 16 --seed 7 --temp 0.3 --top-k 5 --samplers "top_k;Temp;nucleus;bogus" --sampler-seq kxq
+# the options v0.4.1 removed in favour of --load-mode, and --log-jsonl
+-m $VOCAB/ggml-vocab-gpt-2.gguf -p hi --mlock
+-m $VOCAB/ggml-vocab-gpt-2.gguf -p hi --no-mmap
+-m $VOCAB/ggml-vocab-gpt-2.gguf -p hi -dio
+!mask s/"time":[0-9]+/"time":T/g
+--log-jsonl -m /nonexistent/model.gguf -p hi

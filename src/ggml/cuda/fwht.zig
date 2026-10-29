@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/fwht.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/fwht.cuh` at v0.4.0 (`5266f24da`). The
+//! `llama.cpp/ggml/src/ggml-cuda/fwht.cuh` at v0.4.1 (`b29c606e2`). The
 //! kernel, `fwht_cuda`, stays CUDA.
 
 const std = @import("std");
@@ -17,7 +17,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `ggml_cuda_op_fwht` (fwht.cu:61 @5266f24da).
+/// Ports `ggml_cuda_op_fwht` (fwht.cu:61 @b29c606e2).
 ///
 /// Return: whether the transform could be used -- false for a
 /// non-contiguous operand or a row length other than 64, 128, 256 or 512,

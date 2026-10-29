@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/tools/llama-bench/llama-bench.cpp` and
-//! `tools/llama-bench/main.cpp` at v0.4.0 (`5266f24da`). Each declaration
+//! `tools/llama-bench/main.cpp` at v0.4.1 (`b29c606e2`). Each declaration
 //! names the C++ it replaces and the line it began at.
 //!
 //! # Its own command line
@@ -54,14 +54,14 @@ fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void
     if (!ok) _ = c.ggml_abort("llama-bench.cpp", line, "GGML_ASSERT(%s) failed", expr);
 }
 
-/// Ports `get_time_ns` (llama-bench.cpp:40 @5266f24da).
+/// Ports `get_time_ns` (llama-bench.cpp:40 @b29c606e2).
 fn getTimeNs() u64 {
     var ts: std.c.timespec = undefined;
     _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts);
     return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
 }
 
-/// Ports `tensor_buft_override_equal` (llama-bench.cpp:45 @5266f24da).
+/// Ports `tensor_buft_override_equal` (llama-bench.cpp:45 @b29c606e2).
 fn overrideEqual(a: Override, b: Override) bool {
     if (a.pattern != b.pattern) {
         // cString comparison that may be null
@@ -71,7 +71,7 @@ fn overrideEqual(a: Override, b: Override) bool {
     return a.buft == b.buft;
 }
 
-/// Ports `vec_tensor_buft_override_equal` (llama-bench.cpp:61 @5266f24da).
+/// Ports `vec_tensor_buft_override_equal` (llama-bench.cpp:61 @b29c606e2).
 fn overridesEqual(a: []const Override, b: []const Override) bool {
     if (a.len != b.len) return false;
     for (a, b) |x, y| {
@@ -80,7 +80,7 @@ fn overridesEqual(a: []const Override, b: []const Override) bool {
     return true;
 }
 
-/// Ports `vec_vec_tensor_buft_override_equal` (llama-bench.cpp:73 @5266f24da).
+/// Ports `vec_vec_tensor_buft_override_equal` (llama-bench.cpp:73 @b29c606e2).
 fn overrideListsEqual(a: []const []const Override, b: []const []const Override) bool {
     if (a.len != b.len) return false;
     for (a, b) |x, y| {
@@ -89,7 +89,7 @@ fn overrideListsEqual(a: []const []const Override, b: []const []const Override) 
     return true;
 }
 
-/// `join` (llama-bench.cpp:85 @5266f24da): each value as
+/// `join` (llama-bench.cpp:85 @b29c606e2): each value as
 /// `std::ostream <<` writes it -- a `double` as `%g`, a `bool` as `0` or `1`.
 fn join(a: std.mem.Allocator, comptime T: type, values: []const T, delim: []const u8) ![:0]u8 {
     var out: std.ArrayList(u8) = .empty;
@@ -112,7 +112,7 @@ fn join(a: std.mem.Allocator, comptime T: type, values: []const T, delim: []cons
 
 extern fn snprintf(buf: [*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
-/// Ports `avg` (llama-bench.cpp:102 @5266f24da).
+/// Ports `avg` (llama-bench.cpp:102 @b29c606e2).
 fn avgU64(v: []const u64) u64 {
     if (v.len == 0) return 0;
     var sum: u64 = 0;
@@ -127,7 +127,7 @@ fn avgF64(v: []const f64) f64 {
     return sum / @as(f64, @floatFromInt(v.len));
 }
 
-/// Ports `stdev` (llama-bench.cpp:110 @5266f24da), over `uint64_t`:
+/// Ports `stdev` (llama-bench.cpp:110 @b29c606e2), over `uint64_t`:
 /// integer arithmetic throughout, as the template instantiates it.
 fn stdevU64(v: []const u64) u64 {
     if (v.len <= 1) return 0;
@@ -148,7 +148,7 @@ fn stdevF64(v: []const f64) f64 {
     return @sqrt(sq_sum / (n - 1) - mean * mean * n / (n - 1));
 }
 
-/// Ports `get_cpu_info` and `get_gpu_info` (llama-bench.cpp:120, 132 @5266f24da).
+/// Ports `get_cpu_info` and `get_gpu_info` (llama-bench.cpp:120, 132 @b29c606e2).
 fn devInfo(a: std.mem.Allocator, gpu: bool) ![:0]u8 {
     var list: std.ArrayList([*:0]const u8) = .empty;
     var i: usize = 0;
@@ -164,7 +164,7 @@ fn devInfo(a: std.mem.Allocator, gpu: bool) ![:0]u8 {
     return join(a, [*:0]const u8, list.items, ", ");
 }
 
-/// Ports `string_strip` (common/common.cpp:458 @5266f24da).
+/// Ports `string_strip` (common/common.cpp:458 @b29c606e2).
 fn strip(s: []const u8) []const u8 {
     var start: usize = 0;
     var end = s.len;
@@ -180,7 +180,7 @@ fn isspace(ch: u8) bool {
 /// What a thrown `std::invalid_argument` carries out of a parser here.
 const Thrown = error{Throw};
 
-/// Ports `parse_devices_arg` (llama-bench.cpp:144 @5266f24da).
+/// Ports `parse_devices_arg` (llama-bench.cpp:144 @b29c606e2).
 fn parseDevicesArg(a: std.mem.Allocator, value: []const u8) !std.ArrayList(c.ggml_backend_dev_t) {
     var devices: std.ArrayList(c.ggml_backend_dev_t) = .empty;
     const trimmed = strip(value);
@@ -208,7 +208,7 @@ fn parseDevicesArg(a: std.mem.Allocator, value: []const u8) !std.ArrayList(c.ggm
     return devices;
 }
 
-/// Ports `devices_to_string` (llama-bench.cpp:198 @5266f24da).
+/// Ports `devices_to_string` (llama-bench.cpp:198 @b29c606e2).
 fn devicesToString(a: std.mem.Allocator, devices: []const c.ggml_backend_dev_t) ![:0]const u8 {
     if (devices.len == 0) return "auto";
     if (devices.len == 1 and devices[0] == null) return "none";
@@ -220,10 +220,10 @@ fn devicesToString(a: std.mem.Allocator, devices: []const c.ggml_backend_dev_t) 
     return join(a, [*:0]const u8, names.items, "/");
 }
 
-/// Ports `output_formats` (llama-bench.cpp:219 @5266f24da).
+/// Ports `output_formats` (llama-bench.cpp:219 @b29c606e2).
 const OutputFormat = enum { none, csv, json, jsonl, markdown, sql };
 
-/// Ports `output_format_str` (llama-bench.cpp:221 @5266f24da).
+/// Ports `output_format_str` (llama-bench.cpp:221 @b29c606e2).
 fn outputFormatStr(f: OutputFormat) [*:0]const u8 {
     return switch (f) {
         .none => "none",
@@ -235,7 +235,7 @@ fn outputFormatStr(f: OutputFormat) [*:0]const u8 {
     };
 }
 
-/// Ports `output_format_from_str` (llama-bench.cpp:240 @5266f24da).
+/// Ports `output_format_from_str` (llama-bench.cpp:240 @b29c606e2).
 fn outputFormatFromStr(s: []const u8) ?OutputFormat {
     const map = [_]struct { []const u8, OutputFormat }{ .{ "none", .none }, .{ "csv", .csv }, .{ "json", .json }, .{ "jsonl", .jsonl }, .{ "md", .markdown }, .{ "sql", .sql } };
     for (map) |m| {
@@ -244,7 +244,7 @@ fn outputFormatFromStr(s: []const u8) ?OutputFormat {
     return null;
 }
 
-/// Ports `split_mode_str` (llama-bench.cpp:259 @5266f24da).
+/// Ports `split_mode_str` (llama-bench.cpp:259 @b29c606e2).
 fn splitModeStr(mode: c.llama_split_mode) [*:0]const u8 {
     return switch (mode) {
         c.LLAMA_SPLIT_MODE_NONE => "none",
@@ -258,7 +258,7 @@ fn splitModeStr(mode: c.llama_split_mode) [*:0]const u8 {
     };
 }
 
-/// Ports `lazy_mode_str` (llama-bench.cpp:274 @5266f24da).
+/// Ports `lazy_mode_str` (llama-bench.cpp:274 @b29c606e2).
 fn lazyModeStr(mode: c.llama_lazy_mode) [*:0]const u8 {
     return switch (mode) {
         c.LLAMA_LAZY_MODE_OFF => "off",
@@ -277,7 +277,7 @@ fn stoiDigits(a: std.mem.Allocator, s: []const u8) !c_int {
     return arg.stoi(try a.dupeSentinel(u8, s, 0));
 }
 
-/// Ports `parse_int_range` (llama-bench.cpp:293 @5266f24da): repeated
+/// Ports `parse_int_range` (llama-bench.cpp:293 @b29c606e2): repeated
 /// `regex_search` of `^(-?\d+)(?:-(\d+)(?:([\+|\*])(\d+))?)?(?:,|$)` from
 /// where the last match ended. Each attempt takes the longest form whose
 /// end is followed by `,` or the end, as the backtracking regex does; the
@@ -363,7 +363,7 @@ fn parseIntRange(a: std.mem.Allocator, s: []const u8, allow_negative: bool) !std
     return result;
 }
 
-/// `string_split` (common/common.h:803 @5266f24da): each token through
+/// `string_split` (common/common.h:803 @b29c606e2): each token through
 /// `std::istringstream >> bool` without `boolalpha` -- a `long`, where 0 is
 /// false, 1 is true, any other number true, and no number at all false.
 fn splitBool(a: std.mem.Allocator, s: []const u8) !std.ArrayList(bool) {
@@ -422,7 +422,7 @@ fn splitSemiSlash(a: std.mem.Allocator, s: []const u8) !std.ArrayList([]const u8
     return out;
 }
 
-/// Ports `cmd_params` (llama-bench.cpp:335 @5266f24da).
+/// Ports `cmd_params` (llama-bench.cpp:335 @b29c606e2).
 const CmdParams = struct {
     model: std.ArrayList([]const u8) = .empty,
     hf_repo: std.ArrayList([]const u8) = .empty,
@@ -468,7 +468,7 @@ const CmdParams = struct {
     output_format_stderr: OutputFormat = .none,
 };
 
-/// Ports `cmd_params_defaults` (llama-bench.cpp:380 @5266f24da).
+/// Ports `cmd_params_defaults` (llama-bench.cpp:380 @b29c606e2).
 const Defaults = struct {
     model: []const []const u8,
     n_prompt: []const c_int,
@@ -558,7 +558,7 @@ fn typeNames(a: std.mem.Allocator, types: []const c.ggml_type) ![:0]u8 {
     return join(a, [*:0]const u8, names.items, ",");
 }
 
-/// Ports `print_usage` (llama-bench.cpp:425 @5266f24da).
+/// Ports `print_usage` (llama-bench.cpp:425 @b29c606e2).
 fn printUsage(a: std.mem.Allocator, argv0: [*:0]const u8) !void {
     const d = &defaults;
     io.printf("usage: %s [options]\n", .{argv0});
@@ -614,8 +614,6 @@ fn printUsage(a: std.mem.Allocator, argv0: [*:0]const u8) !void {
     io.printf("  -dev, --device <dev0/dev1/...>                    (default: auto)\n", .{});
     io.printf("  -lm, --load-mode <auto|none|mmap|mlock|mmap+mlock|dio> (default: %s)\n", .{c.llama_load_mode_name(d.load_mode[0])});
     io.printf("  -lzm, --lazy-mode <on|auto|off>                   (default: %s)\n", .{lazyModeStr(d.lazy_mode[0])});
-    io.printf("  -mmp, --mmap <0|1>                                (DEPRECATED IN FAVOUR OF --load-mode)\n", .{});
-    io.printf("  -dio, --direct-io <0|1>                           (DEPRECATED IN FAVOUR OF --load-mode)\n", .{});
     io.printf("  -embd, --embeddings <0|1>                         (default: %s)\n", .{(try join(a, bool, d.embeddings, ",")).ptr});
     io.printf("  -ts, --tensor-split <ts0/ts1/..>                  (default: 0)\n", .{});
     io.printf("  -ot --override-tensor <tensor name pattern>=<buffer type>;...\n", .{});
@@ -628,7 +626,7 @@ fn printUsage(a: std.mem.Allocator, argv0: [*:0]const u8) !void {
         "'first-last' or 'first-last+step' or 'first-last*mult'.\n", .{});
 }
 
-/// Ports `ggml_type_from_name` (llama-bench.cpp:494 @5266f24da).
+/// Ports `ggml_type_from_name` (llama-bench.cpp:492 @b29c606e2).
 fn typeFromName(s: []const u8) ?c.ggml_type {
     const map = [_]struct { []const u8, c.ggml_type }{
         .{ "f16", c.GGML_TYPE_F16 },   .{ "bf16", c.GGML_TYPE_BF16 },     .{ "q8_0", c.GGML_TYPE_Q8_0 },
@@ -664,7 +662,7 @@ const NextVal = struct {
     }
 };
 
-/// One option of `parse_cmd_params` (llama-bench.cpp:523 @5266f24da):
+/// One option of `parse_cmd_params` (llama-bench.cpp:521 @b29c606e2):
 /// `error.Invalid` where upstream sets `invalid_param` and breaks, and
 /// `error.Throw` where a parse throws into the loop's `catch`.
 fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []const u8, params: *CmdParams, invalid_param: *bool) !void {
@@ -829,17 +827,6 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
             try types.append(a, ty);
         }
         try params.flash_attn.appendSlice(a, types.items);
-    } else if (eql(cur, &.{ "-mmp", "--mmap", "-dio", "--direct-io" })) {
-        const v = NextVal.get(argv, i) orelse return error.Invalid;
-        const dio = std.mem.eql(u8, cur, "-dio") or std.mem.eql(u8, cur, "--direct-io");
-        if (dio) {
-            log.wrn("DEPRECATED: -dio and --direct-io are deprecated in favour of --load-mode. Please use --load-mode dio instead.\n", .{});
-        } else {
-            log.wrn("DEPRECATED: -mmp and --mmap are deprecated in favour of --load-mode. Please use --load-mode mmap instead.\n", .{});
-        }
-        for ((try splitBool(a, v)).items) |m| {
-            try params.load_mode.append(a, if (m) (if (dio) c.LLAMA_LOAD_MODE_DIRECT_IO else c.LLAMA_LOAD_MODE_MMAP) else c.LLAMA_LOAD_MODE_NONE);
-        }
     } else if (eql(cur, &.{ "-embd", "--embeddings" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         try params.embeddings.appendSlice(a, (try splitBool(a, v)).items);
@@ -854,7 +841,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         for ((try tc.strings.split(a, v, split_delim)).items) |ts| {
             // split string by ; and /
             const split_arg = try splitSemiSlash(a, ts);
-            ggmlAssert(split_arg.items.len <= c.llama_max_devices(), 955, "split_arg.size() <= llama_max_devices()");
+            ggmlAssert(split_arg.items.len <= c.llama_max_devices(), 915, "split_arg.size() <= llama_max_devices()");
 
             const tensor_split = try a.alloc(f32, c.llama_max_devices());
             for (tensor_split, 0..) |*t, k| {
@@ -910,7 +897,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
     }
 }
 
-/// Ports `parse_cmd_params` (llama-bench.cpp:523 @5266f24da).
+/// Ports `parse_cmd_params` (llama-bench.cpp:521 @b29c606e2).
 fn parseCmdParams(a: std.mem.Allocator, argv: []const [:0]const u8) !CmdParams {
     var params: CmdParams = .{};
     var argbuf: []const u8 = "";
@@ -964,7 +951,7 @@ fn parseCmdParams(a: std.mem.Allocator, argv: []const [:0]const u8) !CmdParams {
     return params;
 }
 
-/// The `-ot` branch of `parse_cmd_params` (llama-bench.cpp:523 @5266f24da).
+/// The `-ot` branch of `parse_cmd_params` (llama-bench.cpp:521 @b29c606e2).
 ///
 /// Return: whether the value was invalid.
 fn parseOverrides(a: std.mem.Allocator, value_in: []const u8, params: *CmdParams) !bool {
@@ -1054,7 +1041,7 @@ fn parseOverrides(a: std.mem.Allocator, value_in: []const u8, params: *CmdParams
     return false;
 }
 
-/// Ports `cmd_params_instance` (llama-bench.cpp:1234 @5266f24da).
+/// Ports `cmd_params_instance` (llama-bench.cpp:1194 @b29c606e2).
 const Instance = struct {
     model: []const u8,
     n_prompt: c_int,
@@ -1089,7 +1076,7 @@ const Instance = struct {
     var merged: std.ArrayList(Override) = .empty;
     var patterns: std.ArrayList([:0]u8) = .empty;
 
-    /// Ports `to_llama_mparams` (llama-bench.cpp:1264 @5266f24da), a member of `cmd_params_instance`.
+    /// Ports `to_llama_mparams` (llama-bench.cpp:1224 @b29c606e2), a member of `cmd_params_instance`.
     fn toLlamaMparams(self: *const Instance) !c.llama_model_params {
         var mparams = c.llama_model_default_params();
 
@@ -1106,7 +1093,7 @@ const Instance = struct {
             if (self.tensor_buft_overrides.len == 0) {
                 mparams.tensor_buft_overrides = null;
             } else {
-                ggmlAssert(self.tensor_buft_overrides[self.tensor_buft_overrides.len - 1].pattern == null, 1282, "tensor_buft_overrides.back().pattern == nullptr && \"Tensor buffer overrides not terminated with empty pattern\"");
+                ggmlAssert(self.tensor_buft_overrides[self.tensor_buft_overrides.len - 1].pattern == null, 1242, "tensor_buft_overrides.back().pattern == nullptr && \"Tensor buffer overrides not terminated with empty pattern\"");
                 mparams.tensor_buft_overrides = self.tensor_buft_overrides.ptr;
             }
         } else {
@@ -1119,7 +1106,7 @@ const Instance = struct {
 
             var i: c_int = 0;
             while (i < self.n_cpu_moe) : (i += 1) {
-                // `llm_ffn_block_regex` over `LLM_FFN_EXPS_REGEX` (common/common.h:1135, 1131 @5266f24da)
+                // `llm_ffn_block_regex` over `LLM_FFN_EXPS_REGEX` (common/common.h:1135, 1131 @b29c606e2)
                 const pat = try std.fmt.allocPrintSentinel(gpa, "blk\\.{d}{s}", .{ i, "\\.ffn_(up|down|gate|gate_up)_(ch|)exps" }, 0);
                 try patterns.append(gpa, pat);
                 try merged.append(gpa, .{ .pattern = pat.ptr, .buft = c.ggml_backend_cpu_buffer_type() });
@@ -1133,7 +1120,7 @@ const Instance = struct {
         return mparams;
     }
 
-    /// Ports `equal_mparams` (llama-bench.cpp:1317 @5266f24da), a member of `cmd_params_instance`.
+    /// Ports `equal_mparams` (llama-bench.cpp:1277 @b29c606e2), a member of `cmd_params_instance`.
     fn equalMparams(self: *const Instance, other: *const Instance) bool {
         return std.mem.eql(u8, self.model, other.model) and self.n_gpu_layers == other.n_gpu_layers and self.n_cpu_moe == other.n_cpu_moe and
             self.split_mode == other.split_mode and
@@ -1143,7 +1130,7 @@ const Instance = struct {
             overridesEqual(self.tensor_buft_overrides, other.tensor_buft_overrides);
     }
 
-    /// Ports `to_llama_cparams` (llama-bench.cpp:1326 @5266f24da), a member of `cmd_params_instance`.
+    /// Ports `to_llama_cparams` (llama-bench.cpp:1286 @b29c606e2), a member of `cmd_params_instance`.
     fn toLlamaCparams(self: *const Instance) c.llama_context_params {
         var cparams = c.llama_context_default_params();
 
@@ -1162,7 +1149,7 @@ const Instance = struct {
     }
 };
 
-/// Ports `get_cmd_params_instances` (llama-bench.cpp:1344 @5266f24da):
+/// Ports `get_cmd_params_instances` (llama-bench.cpp:1304 @b29c606e2):
 /// ordered to minimize the number of times each model is reloaded.
 fn getInstances(a: std.mem.Allocator, p: *const CmdParams) !std.ArrayList(Instance) {
     var instances: std.ArrayList(Instance) = .empty;
@@ -1228,7 +1215,7 @@ fn getInstances(a: std.mem.Allocator, p: *const CmdParams) !std.ArrayList(Instan
     return instances;
 }
 
-/// Ports `test` (llama-bench.cpp:1491 @5266f24da).
+/// Ports `test` (llama-bench.cpp:1451 @b29c606e2).
 const Test = struct {
     cpu_info: [:0]const u8,
     gpu_info: [:0]const u8,
@@ -1265,7 +1252,7 @@ const Test = struct {
         return stdevU64(self.samples_ns.items);
     }
 
-    /// Ports `get_ts` (llama-bench.cpp:1579 @5266f24da), a member of `test`.
+    /// Ports `get_ts` (llama-bench.cpp:1539 @b29c606e2), a member of `test`.
     fn getTs(self: *const Test, a: std.mem.Allocator) ![]f64 {
         const n_tokens: f64 = @floatFromInt(self.inst.n_prompt + self.inst.n_gen);
         const ts = try a.alloc(f64, self.samples_ns.items.len);
@@ -1281,7 +1268,7 @@ const Test = struct {
         return stdevF64(try self.getTs(a));
     }
 
-    /// Ports `get_backend` (llama-bench.cpp:1591 @5266f24da), a member of `test`.
+    /// Ports `get_backend` (llama-bench.cpp:1551 @b29c606e2), a member of `test`.
     fn getBackend(a: std.mem.Allocator) ![:0]const u8 {
         var backends: std.ArrayList([*:0]const u8) = .empty;
         var rpc_used = false;
@@ -1299,7 +1286,7 @@ const Test = struct {
         return if (backends.items.len == 0) "CPU" else join(a, [*:0]const u8, backends.items, ",");
     }
 
-    /// Ports `get_fields` (llama-bench.cpp:1613 @5266f24da), a member of `test`.
+    /// Ports `get_fields` (llama-bench.cpp:1573 @b29c606e2), a member of `test`.
     const fields = [_][]const u8{
         "build_commit",          "build_number",  "cpu_info",     "gpu_info",       "backends",
         "model_filename",        "model_type",    "model_size",   "model_n_params", "n_batch",
@@ -1314,7 +1301,7 @@ const Test = struct {
 
     const FieldType = enum { string, boolean, int, float };
 
-    /// Ports `get_field_type` (llama-bench.cpp:1631 @5266f24da), a member of `test`;
+    /// Ports `get_field_type` (llama-bench.cpp:1591 @b29c606e2), a member of `test`;
     /// `load_mode` and `lazy_mode` fall to its last `STRING` like any other.
     fn getFieldType(field: []const u8) FieldType {
         const ints = [_][]const u8{ "build_number", "n_batch", "n_ubatch", "n_threads", "poll", "model_size", "model_n_params", "n_gpu_layers", "main_gpu", "n_prompt", "n_gen", "n_depth", "avg_ns", "stddev_ns", "no_op_offload", "n_cpu_moe", "fit_target", "fit_min_ctx", "flash_attn" };
@@ -1329,7 +1316,7 @@ const Test = struct {
         return .string;
     }
 
-    /// Ports `get_values` (llama-bench.cpp:1652 @5266f24da), a member of `test`.
+    /// Ports `get_values` (llama-bench.cpp:1612 @b29c606e2), a member of `test`.
     fn getValues(self: *const Test, a: std.mem.Allocator) ![]const []const u8 {
         const in = &self.inst;
         var tensor_split_str: std.ArrayList(u8) = .empty;
@@ -1348,7 +1335,7 @@ const Test = struct {
         if (ots.len == 1) {
             // Last element of tensor_buft_overrides is always a null pattern
             // so if it is only one element long, it must be a null pattern.
-            ggmlAssert(ots[0].pattern == null, 1672, "tensor_buft_overrides[0].pattern == nullptr");
+            ggmlAssert(ots[0].pattern == null, 1632, "tensor_buft_overrides[0].pattern == nullptr");
             try tensor_buft_overrides_str.appendSlice(a, "none");
         } else {
             for (0..ots.len -% 1) |i| {
@@ -1424,7 +1411,7 @@ const Test = struct {
         return values;
     }
 
-    /// `get_map` (llama-bench.cpp:1733 @5266f24da), a member of `test`, as a lookup.
+    /// `get_map` (llama-bench.cpp:1693 @b29c606e2), a member of `test`, as a lookup.
     fn valueOf(values: []const []const u8, field: []const u8) ?[]const u8 {
         for (fields, 0..) |f, i| {
             if (std.mem.eql(u8, f, field)) return values[i];
@@ -1433,7 +1420,7 @@ const Test = struct {
     }
 };
 
-/// Ports `escape_json` (llama-bench.cpp:1784 @5266f24da). `char` is signed
+/// Ports `escape_json` (llama-bench.cpp:1744 @b29c606e2). `char` is signed
 /// on the targets built here but aarch64 Linux, so a byte past 0x7f is
 /// `<= 0x1f` there and prints sign-extended, cut to the buffer.
 fn escapeJson(a: std.mem.Allocator, value: []const u8) ![]const u8 {
@@ -1455,7 +1442,7 @@ fn escapeJson(a: std.mem.Allocator, value: []const u8) ![]const u8 {
     return escaped.items;
 }
 
-/// Ports `format_json_value` (llama-bench.cpp:1802 @5266f24da).
+/// Ports `format_json_value` (llama-bench.cpp:1762 @b29c606e2).
 fn formatJsonValue(a: std.mem.Allocator, field: []const u8, value: []const u8) ![]const u8 {
     return switch (Test.getFieldType(field)) {
         .string => std.mem.concat(a, u8, &.{ "\"", try escapeJson(a, value), "\"" }),
@@ -1464,7 +1451,7 @@ fn formatJsonValue(a: std.mem.Allocator, field: []const u8, value: []const u8) !
     };
 }
 
-/// Ports `get_field_width` (llama-bench.cpp:1867 @5266f24da), a member of `markdown_printer`.
+/// Ports `get_field_width` (llama-bench.cpp:1827 @b29c606e2), a member of `markdown_printer`.
 fn fieldWidth(field: []const u8) c_int {
     const widths = [_]struct { []const u8, c_int }{
         .{ "model", -30 },       .{ "t/s", 20 },       .{ "size", 10 },      .{ "params", 10 },   .{ "n_gpu_layers", 3 },
@@ -1480,7 +1467,7 @@ fn fieldWidth(field: []const u8) c_int {
     return width;
 }
 
-/// Ports `get_field_display_name` (llama-bench.cpp:1922 @5266f24da), a member of `markdown_printer`.
+/// Ports `get_field_display_name` (llama-bench.cpp:1882 @b29c606e2), a member of `markdown_printer`.
 fn fieldDisplayName(field: []const u8) []const u8 {
     const names = [_]struct { []const u8, []const u8 }{
         .{ "n_gpu_layers", "ngl" }, .{ "split_mode", "sm" },    .{ "n_threads", "threads" }, .{ "no_kv_offload", "nkvo" },
@@ -1494,7 +1481,7 @@ fn fieldDisplayName(field: []const u8) []const u8 {
     return field;
 }
 
-/// Ports `printer` (llama-bench.cpp:1746 @5266f24da) and its five subclasses.
+/// Ports `printer` (llama-bench.cpp:1706 @b29c606e2) and its five subclasses.
 const Printer = struct {
     format: OutputFormat,
     fout: *anyopaque,
@@ -1529,7 +1516,7 @@ const Printer = struct {
         }
     }
 
-    /// Ports `print_header` (llama-bench.cpp:1968 @5266f24da), a member of `markdown_printer`.
+    /// Ports `print_header` (llama-bench.cpp:1928 @b29c606e2), a member of `markdown_printer`.
     fn markdownHeader(self: *Printer, params: *const CmdParams) !void {
         const a = self.a;
         const d = &defaults;
@@ -1615,7 +1602,7 @@ const Printer = struct {
                 const values = try t.getValues(a);
                 var escaped = try a.alloc([]const u8, values.len);
                 for (values, 0..) |v, i| {
-                    // `escape_csv` (llama-bench.cpp:1759 @5266f24da), a member of `csv_printer`
+                    // `escape_csv` (llama-bench.cpp:1719 @b29c606e2), a member of `csv_printer`
                     var e: std.ArrayList(u8) = .empty;
                     try e.append(a, '"');
                     for (v) |ch| {
@@ -1666,7 +1653,7 @@ const Printer = struct {
         }
     }
 
-    /// Ports `print_test` (llama-bench.cpp:2065 @5266f24da), a member of `markdown_printer`.
+    /// Ports `print_test` (llama-bench.cpp:2025 @b29c606e2), a member of `markdown_printer`.
     fn markdownTest(self: *Printer, t: *const Test) !void {
         const a = self.a;
         const f = self.fout;
@@ -1732,13 +1719,13 @@ const Printer = struct {
     }
 };
 
-/// Ports `ctx_state` (llama-bench.cpp:2167 @5266f24da).
+/// Ports `ctx_state` (llama-bench.cpp:2127 @b29c606e2).
 const CtxState = struct {
     depth: c_int = 0, // in tokens
     buf: std.ArrayList(u8) = .empty, // the llama_context state buffer
 };
 
-/// Ports `test_prompt` (llama-bench.cpp:2173 @5266f24da).
+/// Ports `test_prompt` (llama-bench.cpp:2133 @b29c606e2).
 fn testPrompt(ctx: ?*c.llama_context, n_prompt: c_int, n_batch: c_int, n_threads: c_int) !bool {
     c.llama_set_n_threads(ctx, n_threads, n_threads);
 
@@ -1769,7 +1756,7 @@ fn testPrompt(ctx: ?*c.llama_context, n_prompt: c_int, n_batch: c_int, n_threads
     return true;
 }
 
-/// Ports `test_gen` (llama-bench.cpp:2202 @5266f24da).
+/// Ports `test_gen` (llama-bench.cpp:2162 @b29c606e2).
 fn testGen(ctx: ?*c.llama_context, n_gen: c_int, n_threads: c_int) bool {
     c.llama_set_n_threads(ctx, n_threads, n_threads);
 
@@ -1792,7 +1779,7 @@ fn testGen(ctx: ?*c.llama_context, n_gen: c_int, n_threads: c_int) bool {
     return true;
 }
 
-/// Ports `llama_null_log_callback` (llama-bench.cpp:2223 @5266f24da).
+/// Ports `llama_null_log_callback` (llama-bench.cpp:2183 @b29c606e2).
 fn nullLogCallback(_: c.ggml_log_level, _: [*c]const u8, _: ?*anyopaque) callconv(.c) void {}
 
 /// The cleanup every failed test step does before `exit(1)`.
@@ -1803,7 +1790,7 @@ fn failTest(comptime msg: [*:0]const u8, ctx: ?*c.llama_context, lmodel: ?*c.lla
     exitWith(1);
 }
 
-/// Ports `llama_bench` (llama-bench.cpp:2250 @5266f24da).
+/// Ports `llama_bench` (llama-bench.cpp:2210 @b29c606e2).
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "llama_bench";
     _ = setlocale(4, "C"); // LC_NUMERIC
@@ -1895,7 +1882,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
             _ = try fit.fitParams(
                 init.gpa,
                 &patterns,
-                .{ .verbosity = std.math.maxInt(i32), .sink = tc.common.fitLogSink },
+                .{ .verbosity = std.math.maxInt(i32), .sink = tc.common.fitLogSink, .json = tc.common.fitLogJson },
                 model_z.ptr,
                 @ptrCast(&mparams),
                 @ptrCast(&cparams),
@@ -2036,7 +2023,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     return 0;
 }
 
-/// Ports `main` (tools/llama-bench/main.cpp:3 @5266f24da).
+/// Ports `main` (tools/llama-bench/main.cpp:3 @b29c606e2).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

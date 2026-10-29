@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-alloc.c` (v0.4.0, `5266f24da`),
+//! Ported from `llama.cpp/ggml/src/ggml-alloc.c` (v0.4.1, `b29c606e2`),
 //! 1,249 lines of C. Each function below names the C function it replaces and
 //! the line it began at, so behaviour can be cross-referenced against the
 //! original. This file exports the same C symbols with the same signatures, so
@@ -53,14 +53,14 @@ inline fn probe() void {
     if (probe_ported) @panic(probe_marker);
 }
 
-/// Ports `MAX_FREE_BLOCKS` (ggml-alloc.c:14 @5266f24da).
+/// Ports `MAX_FREE_BLOCKS` (ggml-alloc.c:14 @b29c606e2).
 const max_free_blocks = 256;
 
-/// Ports `GGML_VBUFFER_MAX_CHUNKS` (ggml-alloc.c:96 @5266f24da).
+/// Ports `GGML_VBUFFER_MAX_CHUNKS` (ggml-alloc.c:96 @b29c606e2).
 const max_chunks = 16;
 
 /// Debug tracing in the original, compiled out by default: `AT_PRINTF`
-/// (ggml-alloc.c:19 @5266f24da).
+/// (ggml-alloc.c:19 @b29c606e2).
 /// Kept as a flag so the trace points stay visible in the ported code.
 const allocator_debug = false;
 
@@ -70,7 +70,7 @@ const debug_logging = builtin.mode == .debug;
 // -----------------------------------------------------------------------------
 // Op predicates
 
-/// Ports `ggml_op_can_inplace` (ggml-alloc.c:22 @5266f24da).
+/// Ports `ggml_op_can_inplace` (ggml-alloc.c:22 @b29c606e2).
 ///
 /// Ops listed here may write their output over an input's memory. Backends
 /// implementing them must not use `restrict` pointers.
@@ -108,7 +108,7 @@ export fn ggml_op_can_inplace(op: c.enum_ggml_op) bool {
     };
 }
 
-/// Ports `aligned_offset` (ggml-alloc.c:53 @5266f24da).
+/// Ports `aligned_offset` (ggml-alloc.c:53 @b29c606e2).
 ///
 /// Parameters:
 /// - `buffer`: base address the offset is relative to; null when aligning a
@@ -127,7 +127,7 @@ fn alignedOffset(buffer: ?*const anyopaque, offset: usize, alignment: usize) usi
 // -----------------------------------------------------------------------------
 // tallocr -- bump allocation within a single backend buffer
 
-/// Ports `ggml_tallocr_new` (ggml-alloc.c:61 @5266f24da).
+/// Ports `ggml_tallocr_new` (ggml-alloc.c:61 @b29c606e2).
 export fn ggml_tallocr_new(buffer: c.ggml_backend_buffer_t) c.struct_ggml_tallocr {
     const base = c.ggml_backend_buffer_get_base(buffer);
     const alignment = c.ggml_backend_buffer_get_alignment(buffer);
@@ -142,7 +142,7 @@ export fn ggml_tallocr_new(buffer: c.ggml_backend_buffer_t) c.struct_ggml_talloc
     };
 }
 
-/// Ports `ggml_tallocr_alloc` (ggml-alloc.c:76 @5266f24da).
+/// Ports `ggml_tallocr_alloc` (ggml-alloc.c:76 @b29c606e2).
 ///
 /// Aborts rather than returning an error when the buffer is exhausted, as the
 /// C version does; callers are not written to recover from it.
@@ -177,7 +177,7 @@ export fn ggml_tallocr_alloc(
 // -----------------------------------------------------------------------------
 // dynamic tensor allocator
 
-/// Ports `struct buffer_address` (ggml-alloc.c:99 @5266f24da).
+/// Ports `struct buffer_address` (ggml-alloc.c:99 @b29c606e2).
 ///
 /// A memory address relative to an allocation that may be split across several
 /// backend buffers, identified by chunk index plus offset within it.
@@ -185,10 +185,10 @@ const BufferAddress = extern struct {
     chunk: c_int,
     offset: usize,
 
-    /// Ports `GGML_BUFFER_ADDRESS_INVALID` (ggml-alloc.c:104 @5266f24da).
+    /// Ports `GGML_BUFFER_ADDRESS_INVALID` (ggml-alloc.c:104 @b29c606e2).
     const invalid: BufferAddress = .{ .chunk = -1, .offset = std.math.maxInt(usize) };
 
-    /// Ports `ggml_buffer_address_less` (ggml-alloc.c:106 @5266f24da).
+    /// Ports `ggml_buffer_address_less` (ggml-alloc.c:106 @b29c606e2).
     ///
     /// Only reachable from the compiled-out debug tracing in the original.
     fn less(a: BufferAddress, b: BufferAddress) bool {
@@ -196,19 +196,19 @@ const BufferAddress = extern struct {
     }
 };
 
-/// Ports `struct free_block` (ggml-alloc.c:110 @5266f24da).
+/// Ports `struct free_block` (ggml-alloc.c:110 @b29c606e2).
 const FreeBlock = extern struct {
     offset: usize,
     size: usize,
 };
 
-/// Ports `struct tallocr_chunk` (ggml-alloc.c:115 @5266f24da).
+/// Ports `struct tallocr_chunk` (ggml-alloc.c:115 @b29c606e2).
 const TallocrChunk = extern struct {
     free_blocks: [max_free_blocks]FreeBlock,
     n_free_blocks: c_int,
     max_size: usize,
 
-    /// Ports `ggml_dyn_tallocr_insert_block` (ggml-alloc.c:135 @5266f24da).
+    /// Ports `ggml_dyn_tallocr_insert_block` (ggml-alloc.c:135 @b29c606e2).
     ///
     /// Keeps `free_blocks` sorted by offset, which is what makes merging
     /// adjacent blocks in `freeBytes` a local check rather than a search.
@@ -229,7 +229,7 @@ const TallocrChunk = extern struct {
         chunk.n_free_blocks += 1;
     }
 
-    /// Ports `ggml_dyn_tallocr_remove_block` (ggml-alloc.c:152 @5266f24da).
+    /// Ports `ggml_dyn_tallocr_remove_block` (ggml-alloc.c:152 @b29c606e2).
     fn removeBlock(chunk: *TallocrChunk, idx: usize) void {
         var i = idx;
         while (i + 1 < @as(usize, @intCast(chunk.n_free_blocks))) : (i += 1) {
@@ -239,7 +239,7 @@ const TallocrChunk = extern struct {
     }
 };
 
-/// Ports `struct ggml_dyn_tallocr` (ggml-alloc.c:121 @5266f24da).
+/// Ports `struct ggml_dyn_tallocr` (ggml-alloc.c:121 @b29c606e2).
 ///
 /// Plans allocations without owning memory: it decides offsets, and a
 /// `VBuffer` later turns those into real backend buffers.
@@ -249,7 +249,7 @@ const DynTallocr = extern struct {
     chunks: [max_chunks]?*TallocrChunk,
     n_chunks: c_int,
 
-    /// Ports `ggml_dyn_tallocr_new` (ggml-alloc.c:366 @5266f24da).
+    /// Ports `ggml_dyn_tallocr_new` (ggml-alloc.c:366 @b29c606e2).
     fn create(alignment: usize, max_buffer_size: usize) *DynTallocr {
         const alloc: *DynTallocr = @ptrCast(@alignCast(std.c.malloc(@sizeOf(DynTallocr)).?));
         alloc.* = .{
@@ -264,13 +264,13 @@ const DynTallocr = extern struct {
         return alloc;
     }
 
-    /// Ports `ggml_dyn_tallocr_free` (ggml-alloc.c:384 @5266f24da).
+    /// Ports `ggml_dyn_tallocr_free` (ggml-alloc.c:384 @b29c606e2).
     fn destroy(alloc: *DynTallocr) void {
         for (0..@intCast(alloc.n_chunks)) |i| std.c.free(alloc.chunks[i]);
         std.c.free(alloc);
     }
 
-    /// Ports `ggml_dyn_tallocr_reset` (ggml-alloc.c:352 @5266f24da).
+    /// Ports `ggml_dyn_tallocr_reset` (ggml-alloc.c:352 @b29c606e2).
     ///
     /// Frees every chunk slot, not just the live ones, matching the C loop.
     fn reset(alloc: *DynTallocr) void {
@@ -281,7 +281,7 @@ const DynTallocr = extern struct {
         alloc.n_chunks = 0;
     }
 
-    /// Ports `ggml_dyn_tallocr_new_chunk` (ggml-alloc.c:160 @5266f24da).
+    /// Ports `ggml_dyn_tallocr_new_chunk` (ggml-alloc.c:160 @b29c606e2).
     ///
     /// Return: the new chunk's index, or -1 when no slots remain.
     fn newChunk(alloc: *DynTallocr, min_size: usize) c_int {
@@ -303,7 +303,7 @@ const DynTallocr = extern struct {
         return alloc.n_chunks - 1;
     }
 
-    /// Ports `ggml_dyn_tallocr_alloc` (ggml-alloc.c:202 @5266f24da).
+    /// Ports `ggml_dyn_tallocr_alloc` (ggml-alloc.c:202 @b29c606e2).
     ///
     /// Best-fit across every chunk, falling back to the last block of a chunk
     /// (which may grow it), then to a new chunk.
@@ -400,7 +400,7 @@ const DynTallocr = extern struct {
         return addr;
     }
 
-    /// Ports `ggml_dyn_tallocr_free_bytes` (ggml-alloc.c:312 @5266f24da).
+    /// Ports `ggml_dyn_tallocr_free_bytes` (ggml-alloc.c:312 @b29c606e2).
     ///
     /// Naive by design: the free-block count stays small enough that a linear
     /// scan with adjacent-block merging is the cheapest thing that works.
@@ -442,7 +442,7 @@ const DynTallocr = extern struct {
         chunk.insertBlock(addr.offset, size);
     }
 
-    /// Ports `ggml_dyn_tallocr_max_size` (ggml-alloc.c:391 @5266f24da).
+    /// Ports `ggml_dyn_tallocr_max_size` (ggml-alloc.c:391 @b29c606e2).
     fn maxSize(alloc: *const DynTallocr, chunk: c_int) usize {
         return if (chunk < alloc.n_chunks) alloc.chunks[@intCast(chunk)].?.max_size else 0;
     }
@@ -451,11 +451,11 @@ const DynTallocr = extern struct {
 // -----------------------------------------------------------------------------
 // vbuffer -- a contiguous logical range split across backend buffers
 
-/// Ports `struct vbuffer` (ggml-alloc.c:398 @5266f24da).
+/// Ports `struct vbuffer` (ggml-alloc.c:398 @b29c606e2).
 const VBuffer = extern struct {
     chunks: [max_chunks]c.ggml_backend_buffer_t,
 
-    /// Ports `ggml_vbuffer_alloc` (ggml-alloc.c:424 @5266f24da).
+    /// Ports `ggml_vbuffer_alloc` (ggml-alloc.c:424 @b29c606e2).
     ///
     /// Return: the buffer, or null if any chunk failed to allocate. On failure
     /// every chunk allocated so far is released.
@@ -478,20 +478,20 @@ const VBuffer = extern struct {
         return buf;
     }
 
-    /// Ports `ggml_vbuffer_free` (ggml-alloc.c:402 @5266f24da).
+    /// Ports `ggml_vbuffer_free` (ggml-alloc.c:402 @b29c606e2).
     fn destroy(buf: ?*VBuffer) void {
         const b = buf orelse return;
         for (0..max_chunks) |i| c.ggml_backend_buffer_free(b.chunks[i]);
         std.c.free(b);
     }
 
-    /// Ports `ggml_vbuffer_chunk_size` (ggml-alloc.c:412 @5266f24da).
+    /// Ports `ggml_vbuffer_chunk_size` (ggml-alloc.c:412 @b29c606e2).
     fn chunkSize(buf: *VBuffer, chunk: c_int) usize {
         const b = buf.chunks[@intCast(chunk)];
         return if (b != null) c.ggml_backend_buffer_get_size(b) else 0;
     }
 
-    /// Ports `ggml_vbuffer_size` (ggml-alloc.c:416 @5266f24da).
+    /// Ports `ggml_vbuffer_size` (ggml-alloc.c:416 @b29c606e2).
     fn totalSize(buf: *VBuffer) usize {
         var size: usize = 0;
         for (0..max_chunks) |i| {
@@ -501,14 +501,14 @@ const VBuffer = extern struct {
         return size;
     }
 
-    /// Ports `ggml_vbuffer_tensor_alloc` (ggml-alloc.c:442 @5266f24da).
+    /// Ports `ggml_vbuffer_tensor_alloc` (ggml-alloc.c:442 @b29c606e2).
     fn tensorAlloc(buf: *VBuffer, tensor: *c.ggml_tensor, buf_addr: BufferAddress) void {
         const chunk = buf.chunks[@intCast(buf_addr.chunk)];
         const base: [*]u8 = @ptrCast(c.ggml_backend_buffer_get_base(chunk));
         _ = c.ggml_backend_tensor_alloc(chunk, tensor, base + buf_addr.offset);
     }
 
-    /// Ports `ggml_vbuffer_reset` (ggml-alloc.c:448 @5266f24da).
+    /// Ports `ggml_vbuffer_reset` (ggml-alloc.c:448 @b29c606e2).
     fn reset(buf: *VBuffer) void {
         for (0..max_chunks) |i| {
             if (buf.chunks[i] == null) break;
@@ -520,7 +520,7 @@ const VBuffer = extern struct {
 // -----------------------------------------------------------------------------
 // graph allocator
 
-/// Ports `struct hash_node` (ggml-alloc.c:459 @5266f24da).
+/// Ports `struct hash_node` (ggml-alloc.c:459 @b29c606e2).
 ///
 /// Per-tensor bookkeeping for one graph: how many consumers remain, so the
 /// allocator knows when a tensor's memory can be reused.
@@ -532,7 +532,7 @@ const HashNode = extern struct {
     allocated: bool,
 };
 
-/// Ports `struct tensor_alloc` (ggml-alloc.c:467 @5266f24da).
+/// Ports `struct tensor_alloc` (ggml-alloc.c:467 @b29c606e2).
 const TensorAlloc = extern struct {
     buffer_id: c_int,
     addr: BufferAddress,
@@ -540,18 +540,18 @@ const TensorAlloc = extern struct {
     size_max: usize,
 };
 
-/// Ports `struct leaf_alloc` (ggml-alloc.c:473 @5266f24da).
+/// Ports `struct leaf_alloc` (ggml-alloc.c:473 @b29c606e2).
 const LeafAlloc = extern struct {
     leaf: TensorAlloc,
 };
 
-/// Ports `struct node_alloc` (ggml-alloc.c:477 @5266f24da).
+/// Ports `struct node_alloc` (ggml-alloc.c:477 @b29c606e2).
 const NodeAlloc = extern struct {
     dst: TensorAlloc,
     src: [c.GGML_MAX_SRC]TensorAlloc,
 };
 
-/// Ports `struct ggml_gallocr` (ggml-alloc.c:482 @5266f24da).
+/// Ports `struct ggml_gallocr` (ggml-alloc.c:482 @b29c606e2).
 ///
 /// Opaque to callers: only a pointer to it crosses the ABI, so the layout is
 /// this file's business alone.
@@ -570,25 +570,25 @@ const Gallocr = extern struct {
     leaf_allocs: [*c]LeafAlloc,
     n_leafs: c_int,
 
-    /// Ports `ggml_gallocr_hash_get` (ggml-alloc.c:584 @5266f24da).
+    /// Ports `ggml_gallocr_hash_get` (ggml-alloc.c:584 @b29c606e2).
     fn hashGet(galloc: *Gallocr, t: *c.ggml_tensor) *HashNode {
         const i = impl.hashFindOrInsert(&galloc.hash_set, t);
         return &impl.many(HashNode, galloc.hash_values)[i];
     }
 
-    /// Ports `ggml_gallocr_is_own` (ggml-alloc.c:589 @5266f24da).
+    /// Ports `ggml_gallocr_is_own` (ggml-alloc.c:589 @b29c606e2).
     fn isOwn(galloc: *Gallocr, t: *c.ggml_tensor) bool {
         return galloc.hashGet(t).allocated;
     }
 
-    /// Ports `ggml_gallocr_is_allocated` (ggml-alloc.c:593 @5266f24da).
+    /// Ports `ggml_gallocr_is_allocated` (ggml-alloc.c:593 @b29c606e2).
     fn isAllocated(galloc: *Gallocr, t: *c.ggml_tensor) bool {
         return t.data != null // set externally
         or t.buffer != null // on an external buffer, not yet allocated
         or galloc.isOwn(t); // this allocator will place it
     }
 
-    /// Ports `ggml_gallocr_free_extra_space` (ggml-alloc.c:600 @5266f24da).
+    /// Ports `ggml_gallocr_free_extra_space` (ggml-alloc.c:600 @b29c606e2).
     ///
     /// When a node reuses a parent's memory and needs less of it, the tail is
     /// returned to the allocator rather than left stranded.
@@ -614,7 +614,7 @@ const Gallocr = extern struct {
         }
     }
 
-    /// Ports `ggml_gallocr_allocate_node` (ggml-alloc.c:623 @5266f24da).
+    /// Ports `ggml_gallocr_allocate_node` (ggml-alloc.c:623 @b29c606e2).
     ///
     /// Prefers writing over a parent whose last consumer this node is, which is
     /// where most of the memory saving in a graph comes from.
@@ -681,7 +681,7 @@ const Gallocr = extern struct {
         hn.addr = alloc.allocate(size, node);
     }
 
-    /// Ports `ggml_gallocr_free_node` (ggml-alloc.c:691 @5266f24da).
+    /// Ports `ggml_gallocr_free_node` (ggml-alloc.c:691 @b29c606e2).
     fn freeNode(galloc: *Gallocr, node: *c.ggml_tensor) void {
         // Graph outputs outlive the graph and are never freed.
         if ((node.flags & c.GGML_TENSOR_FLAG_OUTPUT) != 0) return;
@@ -697,12 +697,12 @@ const Gallocr = extern struct {
     }
 };
 
-/// Ports `get_node_buffer_id` (ggml-alloc.c:714 @5266f24da).
+/// Ports `get_node_buffer_id` (ggml-alloc.c:714 @b29c606e2).
 fn getNodeBufferId(node_buffer_ids: [*c]const c_int, i: usize) c_int {
     return if (node_buffer_ids != null) node_buffer_ids[i] else 0;
 }
 
-/// Ports `ggml_gallocr_new_n` (ggml-alloc.c:498 @5266f24da).
+/// Ports `ggml_gallocr_new_n` (ggml-alloc.c:498 @b29c606e2).
 export fn ggml_gallocr_new_n(bufts: [*c]c.ggml_backend_buffer_type_t, n_bufs: c_int) ?*Gallocr {
     const galloc: *Gallocr = @ptrCast(@alignCast(std.c.calloc(1, @sizeOf(Gallocr)) orelse
         impl.abort("galloc != NULL")));
@@ -739,13 +739,13 @@ export fn ggml_gallocr_new_n(bufts: [*c]c.ggml_backend_buffer_type_t, n_bufs: c_
     return galloc;
 }
 
-/// Ports `ggml_gallocr_new` (ggml-alloc.c:534 @5266f24da).
+/// Ports `ggml_gallocr_new` (ggml-alloc.c:534 @b29c606e2).
 export fn ggml_gallocr_new(buft: c.ggml_backend_buffer_type_t) ?*Gallocr {
     var one = buft;
     return ggml_gallocr_new_n(&one, 1);
 }
 
-/// Ports `ggml_gallocr_free` (ggml-alloc.c:538 @5266f24da).
+/// Ports `ggml_gallocr_free` (ggml-alloc.c:538 @b29c606e2).
 ///
 /// Buffers and allocators may be shared between slots when a buffer type
 /// repeats, so each is freed only at its first occurrence.
@@ -787,7 +787,7 @@ export fn ggml_gallocr_free(galloc_opt: ?*Gallocr) void {
     std.c.free(galloc);
 }
 
-/// Ports `ggml_gallocr_alloc_graph_impl` (ggml-alloc.c:718 @5266f24da).
+/// Ports `ggml_gallocr_alloc_graph_impl` (ggml-alloc.c:718 @b29c606e2).
 ///
 /// Walks the graph twice: once to count each tensor's consumers, then once to
 /// place tensors and free them as their last consumer is reached.
@@ -867,7 +867,7 @@ fn allocGraphImpl(
     }
 }
 
-/// Ports `ggml_gallocr_reserve_n_impl` (ggml-alloc.c:825 @5266f24da).
+/// Ports `ggml_gallocr_reserve_n_impl` (ggml-alloc.c:825 @b29c606e2).
 ///
 /// Plans the graph's memory and, unless `no_alloc`, materialises the buffers.
 ///
@@ -1005,7 +1005,7 @@ fn tensorAllocFor(galloc: *Gallocr, t: *c.ggml_tensor) TensorAlloc {
     };
 }
 
-/// Ports `ggml_gallocr_reserve_n_size` (ggml-alloc.c:951 @5266f24da).
+/// Ports `ggml_gallocr_reserve_n_size` (ggml-alloc.c:951 @b29c606e2).
 export fn ggml_gallocr_reserve_n_size(
     galloc: *Gallocr,
     graph: *impl.CGraph,
@@ -1026,7 +1026,7 @@ export fn ggml_gallocr_reserve_n_size(
     }
 }
 
-/// Ports `ggml_gallocr_reserve_n` (ggml-alloc.c:962 @5266f24da).
+/// Ports `ggml_gallocr_reserve_n` (ggml-alloc.c:962 @b29c606e2).
 export fn ggml_gallocr_reserve_n(
     galloc: *Gallocr,
     graph: *impl.CGraph,
@@ -1036,12 +1036,12 @@ export fn ggml_gallocr_reserve_n(
     return reserveNImpl(galloc, graph, node_buffer_ids, leaf_buffer_ids, false);
 }
 
-/// Ports `ggml_gallocr_reserve` (ggml-alloc.c:966 @5266f24da).
+/// Ports `ggml_gallocr_reserve` (ggml-alloc.c:966 @b29c606e2).
 export fn ggml_gallocr_reserve(galloc: *Gallocr, graph: *impl.CGraph) bool {
     return ggml_gallocr_reserve_n(galloc, graph, null, null);
 }
 
-/// Ports `ggml_gallocr_init_tensor` (ggml-alloc.c:970 @5266f24da).
+/// Ports `ggml_gallocr_init_tensor` (ggml-alloc.c:970 @b29c606e2).
 ///
 /// Turns a planned placement into a real one, now that buffers exist.
 fn initTensor(galloc: *Gallocr, tensor: *c.ggml_tensor, tensor_alloc: *const TensorAlloc) void {
@@ -1067,7 +1067,7 @@ fn initTensor(galloc: *Gallocr, tensor: *c.ggml_tensor, tensor_alloc: *const Ten
     // allocated outside ggml-backend and is left alone.
 }
 
-/// Ports `ggml_gallocr_node_needs_realloc` (ggml-alloc.c:997 @5266f24da).
+/// Ports `ggml_gallocr_node_needs_realloc` (ggml-alloc.c:997 @b29c606e2).
 ///
 /// Note the sense: this returns true when the existing placement is still
 /// usable, despite the name. Kept as-is so the call sites read like the C.
@@ -1081,7 +1081,7 @@ fn nodeNeedsRealloc(galloc: *Gallocr, node: *c.ggml_tensor, talloc: *const Tenso
     return talloc.size_max >= node_size;
 }
 
-/// Ports `ggml_gallocr_needs_realloc` (ggml-alloc.c:1009 @5266f24da).
+/// Ports `ggml_gallocr_needs_realloc` (ggml-alloc.c:1009 @b29c606e2).
 fn needsRealloc(galloc: *Gallocr, graph: *impl.CGraph) bool {
     if (galloc.n_nodes != graph.n_nodes) {
         if (debug_logging) impl.logDebug("%s: graph has different number of nodes\n", .{"ggml_gallocr_needs_realloc"});
@@ -1113,7 +1113,7 @@ fn needsRealloc(galloc: *Gallocr, graph: *impl.CGraph) bool {
     return false;
 }
 
-/// Ports `ggml_gallocr_alloc_graph` (ggml-alloc.c:1052 @5266f24da).
+/// Ports `ggml_gallocr_alloc_graph` (ggml-alloc.c:1052 @b29c606e2).
 export fn ggml_gallocr_alloc_graph(galloc: *Gallocr, graph: *impl.CGraph) bool {
     // Called for every graph evaluation, so a run that never trips this never
     // reached our allocator at all.
@@ -1148,7 +1148,7 @@ export fn ggml_gallocr_alloc_graph(galloc: *Gallocr, graph: *impl.CGraph) bool {
     return true;
 }
 
-/// Ports `ggml_gallocr_get_buffer_size` (ggml-alloc.c:1100 @5266f24da).
+/// Ports `ggml_gallocr_get_buffer_size` (ggml-alloc.c:1100 @b29c606e2).
 ///
 /// Returns 0 for a buffer shared with an earlier slot, so summing across
 /// buffers does not double count.
@@ -1170,13 +1170,13 @@ export fn ggml_gallocr_get_buffer_size(galloc: *Gallocr, buffer_id: c_int) usize
 // -----------------------------------------------------------------------------
 // utils
 
-/// Ports `free_buffers` (ggml-alloc.c:1120 @5266f24da).
+/// Ports `free_buffers` (ggml-alloc.c:1120 @b29c606e2).
 fn freeBuffers(buffers: *[*c]c.ggml_backend_buffer_t, n_buffers: *const usize) void {
     for (0..n_buffers.*) |i| c.ggml_backend_buffer_free(buffers.*[i]);
     std.c.free(@ptrCast(buffers.*));
 }
 
-/// Ports `alloc_tensor_range` (ggml-alloc.c:1127 @5266f24da).
+/// Ports `alloc_tensor_range` (ggml-alloc.c:1127 @b29c606e2).
 ///
 /// Allocates one buffer and places every tensor in `[first, last)` into it.
 ///
@@ -1233,7 +1233,7 @@ fn allocTensorRange(
     return true;
 }
 
-/// Ports `ggml_backend_alloc_ctx_tensors_from_buft_impl` (ggml-alloc.c:1168 @5266f24da).
+/// Ports `ggml_backend_alloc_ctx_tensors_from_buft_impl` (ggml-alloc.c:1168 @b29c606e2).
 ///
 /// Splits a context's tensors across as many buffers as the backend's maximum
 /// buffer size requires.
@@ -1298,7 +1298,7 @@ fn allocCtxTensorsFromBuftImpl(
     return buffer;
 }
 
-/// Ports `ggml_backend_alloc_ctx_tensors_from_buft_size` (ggml-alloc.c:1232 @5266f24da).
+/// Ports `ggml_backend_alloc_ctx_tensors_from_buft_size` (ggml-alloc.c:1232 @b29c606e2).
 export fn ggml_backend_alloc_ctx_tensors_from_buft_size(
     ctx: *c.ggml_context,
     buft: c.ggml_backend_buffer_type_t,
@@ -1309,7 +1309,7 @@ export fn ggml_backend_alloc_ctx_tensors_from_buft_size(
     return nbytes_total;
 }
 
-/// Ports `ggml_backend_alloc_ctx_tensors_from_buft` (ggml-alloc.c:1239 @5266f24da).
+/// Ports `ggml_backend_alloc_ctx_tensors_from_buft` (ggml-alloc.c:1239 @b29c606e2).
 export fn ggml_backend_alloc_ctx_tensors_from_buft(
     ctx: *c.ggml_context,
     buft: c.ggml_backend_buffer_type_t,
@@ -1321,7 +1321,7 @@ export fn ggml_backend_alloc_ctx_tensors_from_buft(
     return allocCtxTensorsFromBuftImpl(ctx, buft, &nbytes_total, false);
 }
 
-/// Ports `ggml_backend_alloc_ctx_tensors` (ggml-alloc.c:1247 @5266f24da).
+/// Ports `ggml_backend_alloc_ctx_tensors` (ggml-alloc.c:1247 @b29c606e2).
 export fn ggml_backend_alloc_ctx_tensors(
     ctx: *c.ggml_context,
     backend: c.ggml_backend_t,

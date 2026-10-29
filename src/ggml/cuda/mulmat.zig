@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.4.0
-//! (`5266f24da`): `batched_mul_mat_traits`, `ggml_cuda_mul_mat_cublas_impl`,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.4.1
+//! (`b29c606e2`): `batched_mul_mat_traits`, `ggml_cuda_mul_mat_cublas_impl`,
 //! `ggml_cuda_mul_mat_cublas`, `ggml_cuda_should_fuse_mul_mat`,
 //! `ggml_cuda_should_fuse_mul_mat_vec_{f,q}`, `ggml_cuda_mul_mat`,
 //! `ggml_cuda_mul_mat_id_needs_sync` and `ggml_cuda_mul_mat_id`. The kernel
@@ -33,7 +33,7 @@ fn i32Of(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `batched_mul_mat_traits` (ggml-cuda.cu:1367 @5266f24da), for each `T`.
+/// Ports `batched_mul_mat_traits` (ggml-cuda.cu:1364 @b29c606e2), for each `T`.
 const Traits = struct {
     cuda_type_size: usize,
     compute_type: cu.cublasComputeType_t,
@@ -60,7 +60,7 @@ fn traitsOf(comptime t: c.enum_ggml_type) Traits {
     };
 }
 
-/// Ports `ggml_cuda_mul_mat_cublas_impl` (ggml-cuda.cu:1412 @5266f24da).
+/// Ports `ggml_cuda_mul_mat_cublas_impl` (ggml-cuda.cu:1409 @b29c606e2).
 fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const traits = comptime traitsOf(compute_type);
     const ts_cuda = traits.cuda_type_size;
@@ -256,7 +256,7 @@ fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Contex
     }
 }
 
-/// Ports `ggml_cuda_mul_mat_cublas` (ggml-cuda.cu:1625 @5266f24da).
+/// Ports `ggml_cuda_mul_mat_cublas` (ggml-cuda.cu:1622 @b29c606e2).
 pub fn mulMatCublas(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const x = common.info().devices[@intCast(ctx.device)].cc;
     var compute_type = src0.type;
@@ -264,6 +264,13 @@ pub fn mulMatCublas(ctx: *common.Context, src0: *const Tensor, src1: *const Tens
         compute_type = if (common.fastFp16HardwareAvailable(x)) c.GGML_TYPE_F16 else c.GGML_TYPE_F32;
     } else if (compute_type == c.GGML_TYPE_F16 and !common.fastFp16HardwareAvailable(x)) {
         compute_type = c.GGML_TYPE_F32;
+    } else if (compute_type == c.GGML_TYPE_BF16 and !common.fastBf16HardwareAvailable(x)) {
+        if (common.cc.isAmd(x) and src1.ne[1] > 32) {
+            compute_type = c.GGML_TYPE_F32;
+        }
+        if (common.cc.isNvidia(x) and src1.ne[1] > @as(i64, if (x >= common.cc.volta) 8 else 128)) {
+            compute_type = c.GGML_TYPE_F32;
+        }
     }
     if (dst.op_params[0] == c.GGML_PREC_F32) {
         compute_type = c.GGML_TYPE_F32;
@@ -297,7 +304,7 @@ pub fn mulMatCublas(ctx: *common.Context, src0: *const Tensor, src1: *const Tens
     }
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat` (ggml-cuda.cu:1668 @5266f24da).
+/// Ports `ggml_cuda_should_fuse_mul_mat` (ggml-cuda.cu:1673 @b29c606e2).
 pub fn shouldFuseMulMat(ffn_up: *const Tensor, ffn_gate: *const Tensor, glu: *const Tensor, ffn_up_bias: ?*const Tensor, ffn_gate_bias: ?*const Tensor, ffn_up_scale: ?*const Tensor, ffn_gate_scale: ?*const Tensor) bool {
     const has_bias = ffn_up_bias != null or ffn_gate_bias != null;
     const has_scale = ffn_up_scale != null or ffn_gate_scale != null;
@@ -360,7 +367,7 @@ pub fn shouldFuseMulMat(ffn_up: *const Tensor, ffn_gate: *const Tensor, glu: *co
     return true;
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat_vec_f` (ggml-cuda.cu:1762 @5266f24da).
+/// Ports `ggml_cuda_should_fuse_mul_mat_vec_f` (ggml-cuda.cu:1767 @b29c606e2).
 pub fn shouldFuseMulMatVecF(tensor: *const Tensor) bool {
     const src0 = impl.one(Tensor, tensor.src[0]);
     const src1 = impl.one(Tensor, tensor.src[1]);
@@ -381,7 +388,7 @@ pub fn shouldFuseMulMatVecF(tensor: *const Tensor) bool {
     return use_mul_mat_vec_f;
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat_vec_q` (ggml-cuda.cu:1789 @5266f24da).
+/// Ports `ggml_cuda_should_fuse_mul_mat_vec_q` (ggml-cuda.cu:1794 @b29c606e2).
 pub fn shouldFuseMulMatVecQ(tensor: *const Tensor) bool {
     const src0 = impl.one(Tensor, tensor.src[0]);
     const src1 = impl.one(Tensor, tensor.src[1]);
@@ -403,7 +410,7 @@ pub fn shouldFuseMulMatVecQ(tensor: *const Tensor) bool {
     return use_mul_mat_vec_q;
 }
 
-/// Ports `ggml_cuda_mul_mat` (ggml-cuda.cu:1818 @5266f24da).
+/// Ports `ggml_cuda_mul_mat` (ggml-cuda.cu:1823 @b29c606e2).
 pub fn mulMat(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const ne01 = src0.ne[1];
     const ne11 = src1.ne[1];
@@ -462,7 +469,7 @@ pub fn mulMat(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ds
     mulMatCublas(ctx, src0, src1, dst);
 }
 
-/// Ports `ggml_cuda_mul_mat_id_needs_sync` (ggml-cuda.cu:1876 @5266f24da).
+/// Ports `ggml_cuda_mul_mat_id_needs_sync` (ggml-cuda.cu:1881 @b29c606e2).
 pub fn mulMatIdNeedsSync(dst: *const Tensor, x: c_int) bool {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -484,7 +491,7 @@ pub fn mulMatIdNeedsSync(dst: *const Tensor, x: c_int) bool {
     return true;
 }
 
-/// Ports `ggml_cuda_mul_mat_id` (ggml-cuda.cu:1905 @5266f24da).
+/// Ports `ggml_cuda_mul_mat_id` (ggml-cuda.cu:1910 @b29c606e2).
 pub fn mulMatId(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

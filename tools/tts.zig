@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/tts/tts.cpp` at v0.4.0 (`5266f24da`). Each
+//! Ported from `llama.cpp/tools/tts/tts.cpp` at v0.4.1 (`b29c606e2`). Each
 //! declaration names the C++ it replaces and the line it began at.
 //!
 //! The C++ holds the mtmd context, the speaker bitmap and the generation
@@ -26,7 +26,7 @@ extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*c.FILE;
 extern fn fwrite(p: ?*const anyopaque, size: usize, n: usize, f: ?*c.FILE) usize;
 extern fn fclose(f: ?*c.FILE) c_int;
 
-/// Ports `tts_timings` (tts.cpp:19 @5266f24da): a progress line every two
+/// Ports `tts_timings` (tts.cpp:19 @b29c606e2): a progress line every two
 /// seconds.
 const Timings = struct {
     t_start_us: i64,
@@ -37,7 +37,7 @@ const Timings = struct {
         return .{ .t_start_us = t, .t_last_us = t };
     }
 
-    /// `report` (tts.cpp:23 @5266f24da), a member of `tts_timings`.
+    /// `report` (tts.cpp:23 @b29c606e2), a member of `tts_timings`.
     fn report(self: *Timings, n_frames: c_int) void {
         const t_now_us = c.ggml_time_us();
         if (t_now_us - self.t_last_us < 2000000) return;
@@ -48,7 +48,7 @@ const Timings = struct {
     }
 };
 
-/// Ports `print_usage` (tts.cpp:35 @5266f24da).
+/// Ports `print_usage` (tts.cpp:35 @b29c606e2).
 fn printUsage(argv: []const [:0]const u8) void {
     log.out("\nexample usage:\n", .{});
     log.out("\n    %s -m backbone.gguf -mm mmproj.gguf -p \"text to speak\" -o output.wav", .{argv[0].ptr});
@@ -232,7 +232,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     return 0;
 }
 
-/// Ports `main` (tts.cpp:45 @5266f24da).
+/// Ports `main` (tts.cpp:45 @b29c606e2).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.0, `5266f24da`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.1, `b29c606e2`),
 //! `ggml_get_n_tasks` at line 2220 and `ggml_graph_plan` at line 2781. Each
 //! function names the C it replaces and the line it began at.
 //!
@@ -35,20 +35,20 @@ const CGraph = defs.CGraph;
 /// op, in which case its answer replaces the whole switch below.
 extern fn ggml_cpu_extra_work_size(n_threads: c_int, op: *const Tensor, size: *usize) bool;
 
-/// Ports `GGML_IM2COL_WORK_SIZE` (ops.h:24 @5266f24da).
+/// Ports `GGML_IM2COL_WORK_SIZE` (ops.h:23 @b29c606e2).
 const im2col_work_size: usize = 16 * 1024 * 1024;
 
-/// Ports `GGML_FA_TILE_Q` and `GGML_FA_TILE_KV` (ggml-cpu/common.h:10 @5266f24da).
+/// Ports `GGML_FA_TILE_Q` and `GGML_FA_TILE_KV` (ggml-cpu/common.h:10 @b29c606e2).
 const fa_tile_q: i64 = 64;
 const fa_tile_kv: i64 = 64;
 
-/// Ports `GGML_SOFT_MAX_UNROLL` (vec.h:49 @5266f24da).
+/// Ports `GGML_SOFT_MAX_UNROLL` (vec.h:49 @b29c606e2).
 const soft_max_unroll: i64 = 4;
 
-/// Ports `GGML_N_TASKS_MAX` (ggml.h:2676 @5266f24da).
+/// Ports `GGML_N_TASKS_MAX` (ggml.h:2725 @b29c606e2).
 const n_tasks_max: c_int = -1;
 
-/// Ports `ggml_up` (ggml-impl.h:68 @5266f24da).
+/// Ports `ggml_up` (ggml-impl.h:68 @b29c606e2).
 inline fn up(n: i64, m: i64) i64 {
     impl.assert(m & (m - 1) == 0, "(m & (m - 1)) == 0");
     return (n + m - 1) & ~(m - 1);
@@ -58,7 +58,7 @@ inline fn min(a: i64, b: i64) i64 {
     return if (a < b) a else b;
 }
 
-/// Ports `ggml_get_n_tasks` (ggml-cpu.c:2245 @5266f24da).
+/// Ports `ggml_get_n_tasks` (ggml-cpu.c:2245 @b29c606e2).
 ///
 /// Parameters:
 /// - `node`: the graph node to plan for.
@@ -162,7 +162,7 @@ pub fn getNTasks(node: *Tensor, n_threads: c_int) c_int {
     return n_tasks;
 }
 
-/// Ports `ggml_graph_plan` (ggml-cpu.c:2807 @5266f24da).
+/// Ports `ggml_graph_plan` (ggml-cpu.c:2807 @b29c606e2).
 ///
 /// Parameters:
 /// - `cgraph`: the graph to plan.

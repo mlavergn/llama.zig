@@ -4,8 +4,8 @@
 //!
 //! Ports `common_init`, `common_tokenize` and `common_token_to_piece` from
 //! `llama.cpp/common/common.cpp`, and `common_log_get_verbosity` and
-//! `common_log_default_callback` from `common/log.cpp` (v0.4.0,
-//! `5266f24da`). Each declaration names what it ports and the line it began
+//! `common_log_default_callback` from `common/log.cpp` (v0.4.1,
+//! `b29c606e2`). Each declaration names what it ports and the line it began
 //! at.
 
 const std = @import("std");
@@ -18,7 +18,7 @@ const Params = @import("params.zig").Params;
 extern fn SetConsoleOutputCP(cp: c_uint) callconv(.winapi) c_int;
 extern fn SetConsoleCP(cp: c_uint) callconv(.winapi) c_int;
 
-/// Ports `common_log_get_verbosity` (log.cpp:441 @5266f24da), which v0.4.0
+/// Ports `common_log_get_verbosity` (log.cpp:529 @b29c606e2), which v0.4.0
 /// exports from `log.h`: the `common_log` verbosity a ggml log level maps to.
 pub fn logGetVerbosity(level: c.ggml_log_level) c_int {
     return switch (level) {
@@ -31,13 +31,13 @@ pub fn logGetVerbosity(level: c.ggml_log_level) c_int {
     };
 }
 
-/// Ports `common_log_default_callback` (log.cpp:454 @5266f24da): libllama's
+/// Ports `common_log_default_callback` (log.cpp:542 @b29c606e2): libllama's
 /// messages through `common_log`, at `common_log_get_verbosity`'s level.
 pub fn defaultLogCallback(level: c.ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     if (logGetVerbosity(level) <= log.verbosity_thold) log.add(@fromBackingInt(@intCast(level)), "%s", .{text});
 }
 
-/// Ports `common_init` (common/common.cpp:385 @5266f24da).
+/// Ports `common_init` (common/common.cpp:385 @b29c606e2).
 pub fn init() void {
     if (comptime builtin.os.tag == .windows) {
         _ = SetConsoleOutputCP(65001);
@@ -50,7 +50,7 @@ pub fn init() void {
     c.llama_log_set(defaultLogCallback, null);
 }
 
-/// Ports `common_tokenize` (common/common.cpp:1871 @5266f24da).
+/// Ports `common_tokenize` (common/common.cpp:1870 @b29c606e2).
 ///
 /// Return: the tokens, the allocator's.
 pub fn tokenize(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, text: []const u8, add_special: bool, parse_special: bool) ![]c.llama_token {
@@ -70,7 +70,7 @@ pub fn tokenize(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, text: []cons
     return result[0..@intCast(n_tokens)];
 }
 
-/// Ports `common_token_to_piece` (common/common.cpp:1899 @5266f24da): the first
+/// Ports `common_token_to_piece` (common/common.cpp:1898 @b29c606e2): the first
 /// try fits libc++'s short-string buffer, 22 bytes.
 pub fn tokenToPiece(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, token: c.llama_token, special: bool) ![:0]u8 {
     var piece = try a.alloc(u8, 22 + 1);
@@ -86,7 +86,7 @@ pub fn tokenToPiece(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, token: c
     return piece[0..@intCast(n_chars) :0];
 }
 
-/// Ports `common_detokenize` (common/common.cpp:1921 @5266f24da): the first try
+/// Ports `common_detokenize` (common/common.cpp:1920 @b29c606e2): the first try
 /// fits libc++'s short-string buffer, 22 bytes, or the token count.
 ///
 /// Return: the text, the allocator's.
@@ -97,12 +97,12 @@ pub fn detokenize(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, tokens: []
         text = try a.realloc(text, @intCast(-n_chars));
         n_chars = c.llama_detokenize(vocab, tokens.ptr, @intCast(tokens.len), text.ptr, @intCast(text.len), false, special);
         // whitespace trimming is performed after per-token detokenization
-        if (n_chars > @as(i32, @intCast(text.len))) _ = c.ggml_abort("common.cpp", 1928, "GGML_ASSERT(%s) failed", "n_chars <= (int32_t)text.size()");
+        if (n_chars > @as(i32, @intCast(text.len))) _ = c.ggml_abort("common.cpp", 1927, "GGML_ASSERT(%s) failed", "n_chars <= (int32_t)text.size()");
     }
     return text[0..@intCast(n_chars)];
 }
 
-/// Ports `common_model_params_to_llama` (common/common.cpp:1680 @5266f24da).
+/// Ports `common_model_params_to_llama` (common/common.cpp:1679 @b29c606e2).
 pub fn modelParamsToLlama(p: *Params) c.llama_model_params {
     var mparams = c.llama_model_default_params();
 
@@ -141,7 +141,7 @@ pub fn modelParamsToLlama(p: *Params) c.llama_model_params {
     return mparams;
 }
 
-/// Ports `common_context_params_to_llama` (common/common.cpp:1719 @5266f24da).
+/// Ports `common_context_params_to_llama` (common/common.cpp:1718 @b29c606e2).
 pub fn contextParamsToLlama(p: *const Params) c.llama_context_params {
     var cparams = c.llama_context_default_params();
 
@@ -180,15 +180,15 @@ pub fn contextParamsToLlama(p: *const Params) c.llama_context_params {
     return cparams;
 }
 
-/// Ports `common_batch_clear` (common/common.cpp:1834 @5266f24da).
+/// Ports `common_batch_clear` (common/common.cpp:1833 @b29c606e2).
 pub fn batchClear(batch: *c.llama_batch) void {
     batch.n_tokens = 0;
 }
 
-/// Ports `common_batch_add` (common/common.cpp:1838 @5266f24da).
+/// Ports `common_batch_add` (common/common.cpp:1837 @b29c606e2).
 pub fn batchAdd(batch: *c.llama_batch, id: c.llama_token, pos: c.llama_pos, seq_ids: []const c.llama_seq_id, logits: bool) void {
     const n: usize = @intCast(batch.n_tokens);
-    if (batch.seq_id[n] == null) _ = c.ggml_abort("common.cpp", 1844, "GGML_ASSERT(%s) failed", "batch.seq_id[batch.n_tokens] && \"llama_batch size exceeded\"");
+    if (batch.seq_id[n] == null) _ = c.ggml_abort("common.cpp", 1843, "GGML_ASSERT(%s) failed", "batch.seq_id[batch.n_tokens] && \"llama_batch size exceeded\"");
 
     batch.token[n] = id;
     batch.pos[n] = pos;
@@ -208,6 +208,12 @@ pub fn fitLogSink(verbosity: i32, text: [*:0]const u8) void {
         else => .info,
     };
     if (verbosity <= log.verbosity_thold) log.add(level, "%s", .{text});
+}
+
+/// `fit.Log.json` for the tools: `LOG_JSON` (log.h:141 @b29c606e2), a
+/// structured record through `common_log`, written only under `--log-jsonl`.
+pub fn fitLogJson(kind: [*:0]const u8, data: []const u8) void {
+    log.addJson(kind, data);
 }
 
 // -----------------------------------------------------------------------------

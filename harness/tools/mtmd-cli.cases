@@ -57,6 +57,11 @@
 # the video options reach mtmd_helper_init_opt; without MTMD_VIDEO they change nothing
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 --video-fps 2 --video-timestamp-interval 0 --video-ffmpeg-dir /nonexistent
 
+# v0.4.1: without -mmdev the projector follows --device, so -dev none
+# keeps it off the GPU too
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 -dev none -lv 5
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 -dev none -mmdev MTL0 -lv 5
+
 # sampling and templates: the default temperature 0.2 with a seed, a
 # system prompt, vicuna's antiprompt, other built-in families
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 16 --seed 3

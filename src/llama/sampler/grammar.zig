@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.4.0, `5266f24da`).
+//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.4.1, `b29c606e2`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //! The grammar itself is `src/llama/grammar/`.
 
@@ -18,7 +18,7 @@ const TokenDataArray = core.TokenDataArray;
 const Token = core.Token;
 const src = core.src;
 
-/// Ports `llama_sampler_grammar` (llama-sampler.cpp:2660 @5266f24da).
+/// Ports `llama_sampler_grammar` (llama-sampler.cpp:2660 @b29c606e2).
 const Gram = struct {
     vocab: ?*const c.struct_llama_vocab,
 
@@ -33,25 +33,25 @@ fn emptyZ() [:0]u8 {
     return impl.allocator.dupeSentinel(u8, "", 0) catch impl.abort(src, 0, "out of memory");
 }
 
-/// Ports `llama_sampler_grammar_name` (llama-sampler.cpp:2669 @5266f24da).
+/// Ports `llama_sampler_grammar_name` (llama-sampler.cpp:2669 @b29c606e2).
 fn grammarName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "grammar";
 }
 
-/// Ports `llama_sampler_grammar_accept_impl` (llama-sampler.cpp:2673 @5266f24da).
+/// Ports `llama_sampler_grammar_accept_impl` (llama-sampler.cpp:2673 @b29c606e2).
 fn grammarAccept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
     const ctx = core.ctxOf(Gram, smpl);
     if (ctx.grammar) |g| grammar.acceptImpl(g, token);
 }
 
-/// Ports `llama_sampler_grammar_apply` (llama-sampler.cpp:2680 @5266f24da).
+/// Ports `llama_sampler_grammar_apply` (llama-sampler.cpp:2680 @b29c606e2).
 fn grammarApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
     const ctx = core.ctxOf(Gram, smpl);
     if (ctx.grammar) |g| grammar.applyImpl(g, cur_p);
 }
 
-/// Ports `llama_sampler_grammar_reset` (llama-sampler.cpp:2700 @5266f24da).
+/// Ports `llama_sampler_grammar_reset` (llama-sampler.cpp:2700 @b29c606e2).
 ///
 /// Rebuilds the grammar from its text, keeping its trigger configuration.
 fn grammarReset(smpl: [*c]Sampler) callconv(.c) void {
@@ -77,7 +77,7 @@ fn grammarReset(smpl: [*c]Sampler) callconv(.c) void {
     ctx.grammar = grammar_new;
 }
 
-/// Ports `llama_sampler_grammar_clone` (llama-sampler.cpp:2720 @5266f24da).
+/// Ports `llama_sampler_grammar_clone` (llama-sampler.cpp:2720 @b29c606e2).
 fn grammarClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     const ctx = core.ctxOf(Gram, smpl);
 
@@ -97,7 +97,7 @@ fn grammarClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     return result;
 }
 
-/// Ports `llama_sampler_grammar_free` (llama-sampler.cpp:2741 @5266f24da).
+/// Ports `llama_sampler_grammar_free` (llama-sampler.cpp:2741 @b29c606e2).
 fn grammarFree(smpl: [*c]Sampler) callconv(.c) void {
     const ctx = core.ctxOf(Gram, smpl);
 
@@ -108,7 +108,7 @@ fn grammarFree(smpl: [*c]Sampler) callconv(.c) void {
     core.destroy(Gram, ctx);
 }
 
-/// Ports `llama_sampler_grammar_i` (llama-sampler.cpp:2751 @5266f24da).
+/// Ports `llama_sampler_grammar_i` (llama-sampler.cpp:2751 @b29c606e2).
 var grammar_iface: SamplerI = .{
     .name = grammarName,
     .accept = grammarAccept,
@@ -118,14 +118,14 @@ var grammar_iface: SamplerI = .{
     .free = grammarFree,
 };
 
-/// The characters `special_chars` (llama-sampler.cpp:2787 @5266f24da), in
+/// The characters `special_chars` (llama-sampler.cpp:2787 @b29c606e2), in
 /// `llama_sampler_init_grammar_impl`, matches: `[.^$|()*+?\[\]{}\\]`; `regex_replace` with `"\\$0"` prefixes
 /// each with a backslash.
 fn isRegexSpecial(ch: u8) bool {
     return std.mem.findScalar(u8, ".^$|()*+?[]{}\\", ch) != null;
 }
 
-/// Ports `llama_sampler_init_grammar_impl` (llama-sampler.cpp:2766 @5266f24da).
+/// Ports `llama_sampler_init_grammar_impl` (llama-sampler.cpp:2766 @b29c606e2).
 ///
 /// An empty or null grammar text gives a sampler with no grammar, which
 /// constrains nothing. Trigger words, the deprecated form, become one
@@ -185,7 +185,7 @@ fn cSlice(comptime T: type, ptr: [*c]const T, n: usize) []const T {
     return ptr[0..n];
 }
 
-/// Ports `llama_sampler_init_grammar` (llama-sampler.cpp:2825 @5266f24da).
+/// Ports `llama_sampler_init_grammar` (llama-sampler.cpp:2825 @b29c606e2).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary; borrowed for the sampler's lifetime.
@@ -197,7 +197,7 @@ pub export fn llama_sampler_init_grammar(vocab: ?*const c.struct_llama_vocab, gr
     return initGrammarImpl(vocab, @ptrCast(grammar_str), @ptrCast(grammar_root), false, &.{}, &.{}, &.{});
 }
 
-/// Ports `llama_sampler_init_grammar_lazy` (llama-sampler.cpp:2832 @5266f24da).
+/// Ports `llama_sampler_init_grammar_lazy` (llama-sampler.cpp:2832 @b29c606e2).
 ///
 /// Deprecated upstream in favour of the patterns form.
 ///
@@ -222,7 +222,7 @@ pub export fn llama_sampler_init_grammar_lazy(
     );
 }
 
-/// Ports `llama_sampler_init_grammar_lazy_patterns` (llama-sampler.cpp:2843 @5266f24da).
+/// Ports `llama_sampler_init_grammar_lazy_patterns` (llama-sampler.cpp:2843 @b29c606e2).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary; borrowed for the sampler's lifetime.

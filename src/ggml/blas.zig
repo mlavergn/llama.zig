@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-blas/ggml-blas.cpp` at v0.4.0
-//! (`5266f24da`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-blas/ggml-blas.cpp` at v0.4.1
+//! (`b29c606e2`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # Accelerate only
@@ -66,7 +66,7 @@ const cblas_sgemm = @extern(*const fn (
     ldc: c_long,
 ) callconv(.c) void, .{ .name = "cblas_sgemm$NEWLAPACK$ILP64" });
 
-/// Ports `struct ggml_backend_blas_context` (ggml-blas.cpp:22 @5266f24da).
+/// Ports `struct ggml_backend_blas_context` (ggml-blas.cpp:22 @b29c606e2).
 ///
 /// `tasks` is not kept here: the C++ empties its vector after every
 /// multiply, so the port holds the spawned threads for the length of one
@@ -86,7 +86,7 @@ fn convertRows(to_float: c.ggml_to_float_t, x: [*]const u8, nb01: usize, wplane:
     }
 }
 
-/// Ports `ggml_backend_blas_mul_mat` (ggml-blas.cpp:31 @5266f24da).
+/// Ports `ggml_backend_blas_mul_mat` (ggml-blas.cpp:31 @b29c606e2).
 fn mulMat(ctx: *Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -207,7 +207,7 @@ fn mulMat(ctx: *Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_backend_blas_out_prod` (ggml-blas.cpp:151 @5266f24da).
+/// Ports `ggml_backend_blas_out_prod` (ggml-blas.cpp:151 @b29c606e2).
 fn outProd(ctx: *Context, dst: *Tensor) void {
     _ = ctx;
     const src0 = impl.one(Tensor, dst.src[0]);
@@ -254,13 +254,13 @@ fn outProd(ctx: *Context, dst: *Tensor) void {
 // -----------------------------------------------------------------------------
 // The backend
 
-/// Ports `ggml_backend_blas_get_name` (ggml-blas.cpp:214 @5266f24da).
+/// Ports `ggml_backend_blas_get_name` (ggml-blas.cpp:214 @b29c606e2).
 fn getName(backend: c.ggml_backend_t) callconv(.c) [*c]const u8 {
     _ = backend;
     return "BLAS";
 }
 
-/// Ports `ggml_backend_blas_free` (ggml-blas.cpp:220 @5266f24da).
+/// Ports `ggml_backend_blas_free` (ggml-blas.cpp:220 @b29c606e2).
 fn backendFree(backend: c.ggml_backend_t) callconv(.c) void {
     const b = impl.one(c.struct_ggml_backend, backend);
     const ctx: *Context = @ptrCast(@alignCast(b.context.?));
@@ -269,7 +269,7 @@ fn backendFree(backend: c.ggml_backend_t) callconv(.c) void {
     allocator.destroy(b);
 }
 
-/// Ports `ggml_backend_blas_graph_compute` (ggml-blas.cpp:226 @5266f24da).
+/// Ports `ggml_backend_blas_graph_compute` (ggml-blas.cpp:226 @b29c606e2).
 fn graphCompute(backend: c.ggml_backend_t, cgraph: *impl.CGraph) callconv(.c) c.enum_ggml_status {
     const ctx: *Context = @ptrCast(@alignCast(impl.one(c.struct_ggml_backend, backend).context.?));
 
@@ -290,7 +290,7 @@ fn graphCompute(backend: c.ggml_backend_t, cgraph: *impl.CGraph) callconv(.c) c.
     return c.GGML_STATUS_SUCCESS;
 }
 
-/// Ports `blas_backend_i` (ggml-blas.cpp:262 @5266f24da).
+/// Ports `blas_backend_i` (ggml-blas.cpp:262 @b29c606e2).
 const backend_i = c.struct_ggml_backend_i{
     .get_name = getName,
     .free = backendFree,
@@ -310,14 +310,14 @@ const backend_i = c.struct_ggml_backend_i{
     .graph_optimize = null,
 };
 
-/// Ports `ggml_backend_blas_guid` (ggml-blas.cpp:281 @5266f24da).
+/// Ports `ggml_backend_blas_guid` (ggml-blas.cpp:281 @b29c606e2).
 var blas_guid: c.ggml_guid = .{ 0x12, 0xa8, 0xae, 0xf4, 0xc0, 0x1e, 0x61, 0x97, 0x8f, 0xeb, 0x33, 0x04, 0xa1, 0x33, 0x51, 0x2d };
 
 fn guid() c.ggml_guid_t {
     return &blas_guid;
 }
 
-/// Ports `ggml_backend_blas_init` (ggml-blas.cpp:286 @5266f24da).
+/// Ports `ggml_backend_blas_init` (ggml-blas.cpp:286 @b29c606e2).
 ///
 /// Return: a new BLAS backend, owned by the caller and freed with
 /// `ggml_backend_free`; null if allocation failed, where the C++'s `new`
@@ -339,12 +339,12 @@ pub export fn ggml_backend_blas_init() callconv(.c) c.ggml_backend_t {
     return backend;
 }
 
-/// Ports `ggml_backend_is_blas` (ggml-blas.cpp:309 @5266f24da).
+/// Ports `ggml_backend_is_blas` (ggml-blas.cpp:309 @b29c606e2).
 pub export fn ggml_backend_is_blas(backend: c.ggml_backend_t) callconv(.c) bool {
     return backend != null and c.ggml_guid_matches(impl.one(c.struct_ggml_backend, backend).guid, guid());
 }
 
-/// Ports `ggml_backend_blas_set_n_threads` (ggml-blas.cpp:313 @5266f24da).
+/// Ports `ggml_backend_blas_set_n_threads` (ggml-blas.cpp:313 @b29c606e2).
 pub export fn ggml_backend_blas_set_n_threads(backend_blas: c.ggml_backend_t, n_threads: c_int) callconv(.c) void {
     impl.assert(ggml_backend_is_blas(backend_blas), "ggml_backend_is_blas(backend_blas)");
 
@@ -355,20 +355,20 @@ pub export fn ggml_backend_blas_set_n_threads(backend_blas: c.ggml_backend_t, n_
 // -----------------------------------------------------------------------------
 // The device
 
-/// Ports `ggml_backend_blas_device_get_name` (ggml-blas.cpp:322 @5266f24da).
+/// Ports `ggml_backend_blas_device_get_name` (ggml-blas.cpp:322 @b29c606e2).
 fn deviceGetName(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     _ = dev;
     return "BLAS";
 }
 
 /// Ports `ggml_backend_blas_device_get_description` (ggml-blas.cpp:328
-/// @5266f24da): the `GGML_BLAS_USE_ACCELERATE` arm.
+/// @b29c606e2): the `GGML_BLAS_USE_ACCELERATE` arm.
 fn deviceGetDescription(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     _ = dev;
     return "Accelerate";
 }
 
-/// Ports `ggml_backend_blas_device_get_memory` (ggml-blas.cpp:346 @5266f24da).
+/// Ports `ggml_backend_blas_device_get_memory` (ggml-blas.cpp:346 @b29c606e2).
 fn deviceGetMemory(dev: c.ggml_backend_dev_t, free: *usize, total: *usize) callconv(.c) void {
     _ = dev;
     // no memory to report
@@ -376,13 +376,13 @@ fn deviceGetMemory(dev: c.ggml_backend_dev_t, free: *usize, total: *usize) callc
     total.* = 0;
 }
 
-/// Ports `ggml_backend_blas_device_get_type` (ggml-blas.cpp:354 @5266f24da).
+/// Ports `ggml_backend_blas_device_get_type` (ggml-blas.cpp:354 @b29c606e2).
 fn deviceGetType(dev: c.ggml_backend_dev_t) callconv(.c) c.enum_ggml_backend_dev_type {
     _ = dev;
     return c.GGML_BACKEND_DEVICE_TYPE_ACCEL;
 }
 
-/// Ports `ggml_backend_blas_device_get_props` (ggml-blas.cpp:360 @5266f24da).
+/// Ports `ggml_backend_blas_device_get_props` (ggml-blas.cpp:360 @b29c606e2).
 fn deviceGetProps(dev: c.ggml_backend_dev_t, props: *c.struct_ggml_backend_dev_props) callconv(.c) void {
     props.name = deviceGetName(dev);
     props.description = deviceGetDescription(dev);
@@ -398,7 +398,7 @@ fn deviceGetProps(dev: c.ggml_backend_dev_t, props: *c.struct_ggml_backend_dev_p
 }
 
 /// Ports `ggml_backend_blas_device_init_backend` (ggml-blas.cpp:374
-/// @5266f24da).
+/// @b29c606e2).
 fn deviceInitBackend(dev: c.ggml_backend_dev_t, params: [*c]const u8) callconv(.c) c.ggml_backend_t {
     _ = dev;
     _ = params;
@@ -406,14 +406,14 @@ fn deviceInitBackend(dev: c.ggml_backend_dev_t, params: [*c]const u8) callconv(.
 }
 
 /// Ports `ggml_backend_blas_device_get_buffer_type` (ggml-blas.cpp:381
-/// @5266f24da).
+/// @b29c606e2).
 fn deviceGetBufferType(dev: c.ggml_backend_dev_t) callconv(.c) c.ggml_backend_buffer_type_t {
     _ = dev;
     return c.ggml_backend_cpu_buffer_type();
 }
 
 /// Ports `ggml_backend_blas_device_buffer_from_host_ptr` (ggml-blas.cpp:387
-/// @5266f24da).
+/// @b29c606e2).
 fn deviceBufferFromHostPtr(dev: c.ggml_backend_dev_t, ptr: ?*anyopaque, size: usize, max_tensor_size: usize) callconv(.c) c.ggml_backend_buffer_t {
     _ = dev;
     _ = max_tensor_size;
@@ -421,7 +421,7 @@ fn deviceBufferFromHostPtr(dev: c.ggml_backend_dev_t, ptr: ?*anyopaque, size: us
 }
 
 /// Ports `ggml_backend_blas_device_supports_op` (ggml-blas.cpp:394
-/// @5266f24da).
+/// @b29c606e2).
 fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) callconv(.c) bool {
     _ = dev;
     switch (op.op) {
@@ -475,13 +475,13 @@ fn opParamI32(op: *const Tensor, i: usize) i32 {
 }
 
 /// Ports `ggml_backend_blas_device_supports_buft` (ggml-blas.cpp:450
-/// @5266f24da).
+/// @b29c606e2).
 fn deviceSupportsBuft(dev: c.ggml_backend_dev_t, buft: c.ggml_backend_buffer_type_t) callconv(.c) bool {
     _ = dev;
     return c.ggml_backend_buft_is_host(buft);
 }
 
-/// Ports `ggml_backend_blas_device_i` (ggml-blas.cpp:456 @5266f24da).
+/// Ports `ggml_backend_blas_device_i` (ggml-blas.cpp:456 @b29c606e2).
 const device_i = c.struct_ggml_backend_device_i{
     .get_name = deviceGetName,
     .get_description = deviceGetDescription,
@@ -503,14 +503,14 @@ const device_i = c.struct_ggml_backend_device_i{
 // -----------------------------------------------------------------------------
 // The registration
 
-/// Ports `ggml_backend_blas_reg_get_name` (ggml-blas.cpp:476 @5266f24da).
+/// Ports `ggml_backend_blas_reg_get_name` (ggml-blas.cpp:476 @b29c606e2).
 fn regGetName(reg: c.ggml_backend_reg_t) callconv(.c) [*c]const u8 {
     _ = reg;
     return "BLAS";
 }
 
 /// Ports `ggml_backend_blas_reg_get_device_count` (ggml-blas.cpp:482
-/// @5266f24da).
+/// @b29c606e2).
 fn regGetDeviceCount(reg: c.ggml_backend_reg_t) callconv(.c) usize {
     _ = reg;
     return 1;
@@ -521,14 +521,14 @@ fn regGetDeviceCount(reg: c.ggml_backend_reg_t) callconv(.c) usize {
 /// one -- so it is initialised statically here.
 var blas_device: c.struct_ggml_backend_device = .{ .iface = device_i, .reg = &blas_reg, .context = null };
 
-/// Ports `ggml_backend_blas_reg_get_device` (ggml-blas.cpp:488 @5266f24da).
+/// Ports `ggml_backend_blas_reg_get_device` (ggml-blas.cpp:488 @b29c606e2).
 fn regGetDevice(reg: c.ggml_backend_reg_t, index: usize) callconv(.c) c.ggml_backend_dev_t {
     _ = reg;
     impl.assert(index == 0, "index == 0");
     return &blas_device;
 }
 
-/// Ports `ggml_backend_blas_get_proc_address` (ggml-blas.cpp:503 @5266f24da).
+/// Ports `ggml_backend_blas_get_proc_address` (ggml-blas.cpp:503 @b29c606e2).
 fn regGetProcAddress(reg: c.ggml_backend_reg_t, name: [*c]const u8) callconv(.c) ?*anyopaque {
     _ = reg;
     if (std.mem.eql(u8, std.mem.span(@as([*:0]const u8, @ptrCast(name))), "ggml_backend_set_n_threads")) {
@@ -537,7 +537,7 @@ fn regGetProcAddress(reg: c.ggml_backend_reg_t, name: [*c]const u8) callconv(.c)
     return null;
 }
 
-/// Ports `ggml_backend_blas_reg_i` (ggml-blas.cpp:513 @5266f24da).
+/// Ports `ggml_backend_blas_reg_i` (ggml-blas.cpp:513 @b29c606e2).
 const reg_i = c.struct_ggml_backend_reg_i{
     .get_name = regGetName,
     .get_device_count = regGetDeviceCount,
@@ -551,7 +551,7 @@ var blas_reg = c.struct_ggml_backend_reg{
     .context = null,
 };
 
-/// Ports `ggml_backend_blas_reg` (ggml-blas.cpp:520 @5266f24da).
+/// Ports `ggml_backend_blas_reg` (ggml-blas.cpp:520 @b29c606e2).
 ///
 /// Return: the BLAS registration, a process-lifetime singleton.
 pub export fn ggml_backend_blas_reg() callconv(.c) c.ggml_backend_reg_t {

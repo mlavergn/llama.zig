@@ -7,7 +7,7 @@
 //! `common_chat_format_single`, `common_chat_format_example` and
 //! `common_chat_templates_apply_legacy` from `llama.cpp/common/chat.cpp`,
 //! and the source normalization of `jinja::lexer::tokenize` from
-//! `llama.cpp/common/jinja/lexer.cpp`, at v0.4.0 (`5266f24da`). Each
+//! `llama.cpp/common/jinja/lexer.cpp`, at v0.4.1 (`b29c606e2`). Each
 //! declaration names the C++ it replaces and the line it began at.
 //!
 //! # The Jinja path
@@ -27,7 +27,7 @@ const log = @import("log.zig");
 const common = @import("common.zig");
 const io = @import("io.zig");
 
-/// `CHATML_TEMPLATE_SRC` (chat.cpp:704 @5266f24da).
+/// `CHATML_TEMPLATE_SRC` (chat.cpp:715 @b29c606e2).
 const chatml_template_src =
     "{%- for message in messages -%}\n" ++
     "  {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' -}}\n" ++
@@ -36,7 +36,7 @@ const chatml_template_src =
     "  {{- '<|im_start|>assistant\n' -}}\n" ++
     "{%- endif -%}";
 
-/// Ports `common_chat_msg` (chat.h:80 @5266f24da) as far as these paths read
+/// Ports `common_chat_msg` (chat.h:80 @b29c606e2) as far as these paths read
 /// it: a role and its text.
 pub const Msg = struct {
     role: []const u8,
@@ -50,7 +50,7 @@ fn terminate(what: [*:0]const u8) noreturn {
     std.process.abort();
 }
 
-/// Ports the normalization of `tokenize` (lexer.cpp:32 @5266f24da), a
+/// Ports the normalization of `tokenize` (lexer.cpp:32 @b29c606e2), a
 /// member of `jinja::lexer`:
 /// `\r\n` and `\r` become `\n`, and one trailing newline of the original is
 /// dropped. The caller owns the result.
@@ -71,7 +71,7 @@ fn lexerSource(a: std.mem.Allocator, source: []const u8) ![]u8 {
     return src.toOwnedSlice(a);
 }
 
-/// Ports `common_chat_templates` (chat.cpp:336 @5266f24da).
+/// Ports `common_chat_templates` (chat.cpp:337 @b29c606e2).
 pub const Templates = struct {
     add_bos: bool,
     add_eos: bool,
@@ -83,7 +83,7 @@ pub const Templates = struct {
     bos_tok: []const u8,
     eos_tok: []const u8,
 
-    /// Ports `common_chat_templates_init` (chat.cpp:753 @5266f24da).
+    /// Ports `common_chat_templates_init` (chat.cpp:757 @b29c606e2).
     ///
     /// Return: the templates, every string `a`'s.
     pub fn init(a: std.mem.Allocator, model: ?*const c.llama_model, chat_template_override: []const u8) !Templates {
@@ -92,7 +92,7 @@ pub const Templates = struct {
 
         var has_explicit_template = chat_template_override.len != 0;
         if (chat_template_override.len == 0) {
-            if (model == null) _ = c.ggml_abort("chat.cpp", 762, "GGML_ASSERT(%s) failed", "model != nullptr");
+            if (model == null) _ = c.ggml_abort("chat.cpp", 766, "GGML_ASSERT(%s) failed", "model != nullptr");
             if (c.llama_model_chat_template(model, null)) |str| {
                 default_template_src = std.mem.span(str);
                 has_explicit_template = true;
@@ -153,8 +153,8 @@ pub const Templates = struct {
         };
     }
 
-    /// The lambda of `common_chat_templates_init` named `get_token` (chat.cpp:813
-    /// @5266f24da).
+    /// The lambda of `common_chat_templates_init` named `get_token` (chat.cpp:817
+    /// @b29c606e2).
     fn getToken(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, token: c.llama_token, comptime name: [*:0]const u8, jinja_variable_name: []const u8, default_src: []const u8, tool_use_src: []const u8) ![]const u8 {
         if (token == c.LLAMA_TOKEN_NULL) {
             if (std.mem.indexOf(u8, default_src, jinja_variable_name) != null or
@@ -168,7 +168,7 @@ pub const Templates = struct {
         return common.tokenToPiece(a, vocab, token, true);
     }
 
-    /// Ports `common_chat_templates_apply_legacy` (chat.cpp:3751 @5266f24da):
+    /// Ports `common_chat_templates_apply_legacy` (chat.cpp:1359 @b29c606e2):
     /// the conversation through `llama_chat_apply_template`.
     ///
     /// Return: the prompt, `a`'s.
@@ -210,13 +210,13 @@ pub const Templates = struct {
         return buf[0..@intCast(res)];
     }
 
-    /// Ports `common_chat_templates_apply` (chat.cpp:3816 @5266f24da).
+    /// Ports `common_chat_templates_apply` (chat.cpp:1424 @b29c606e2).
     fn apply(self: *const Templates, a: std.mem.Allocator, messages: []const Msg, add_generation_prompt: bool, use_jinja: bool) ![]const u8 {
         if (use_jinja) terminate("--jinja is not supported by this port of llama-mtmd-cli");
         return self.applyLegacy(a, messages, add_generation_prompt);
     }
 
-    /// Ports `common_chat_format_single` (chat.cpp:653 @5266f24da): the text
+    /// Ports `common_chat_format_single` (chat.cpp:664 @b29c606e2): the text
     /// `new_msg` adds to the rendered history.
     ///
     /// Return: the new text, `a`'s.
@@ -240,7 +240,7 @@ pub const Templates = struct {
         return ss.toOwnedSlice(a);
     }
 
-    /// Ports `common_chat_format_example` (chat.cpp:683 @5266f24da): a short
+    /// Ports `common_chat_format_example` (chat.cpp:694 @b29c606e2): a short
     /// conversation rendered, to show the template.
     pub fn formatExample(self: *const Templates, a: std.mem.Allocator, use_jinja: bool) ![]const u8 {
         const msgs = [_]Msg{
@@ -263,7 +263,7 @@ fn substr(s: []const u8, pos: usize, count: usize) []const u8 {
     return s[pos..][0..@min(count, s.len - pos)];
 }
 
-/// Ports `string_replace_all` (common/common.cpp:507 @5266f24da): every `search`
+/// Ports `string_replace_all` (common/common.cpp:507 @b29c606e2): every `search`
 /// replaced. The caller owns the result.
 fn replaceAll(a: std.mem.Allocator, s: []const u8, search: []const u8, replace: []const u8) ![]const u8 {
     if (search.len == 0) return s;

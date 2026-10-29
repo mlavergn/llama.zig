@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/diagmask.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/diagmask.cuh` at v0.4.0 (`5266f24da`). The
+//! `llama.cpp/ggml/src/ggml-cuda/diagmask.cuh` at v0.4.1 (`b29c606e2`). The
 //! kernel, `diag_mask_inf_f32`, stays CUDA.
 //!
 //! The block is `(1, 32, 1)` and the grid `(nrows, ceil(ncols / 32), 1)`:
@@ -19,10 +19,10 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_DIAG_MASK_INF_BLOCK_SIZE` (diagmask.cuh:3 @5266f24da).
+/// Ports `CUDA_DIAG_MASK_INF_BLOCK_SIZE` (diagmask.cuh:3 @b29c606e2).
 const block_size = 32;
 
-/// Ports `diag_mask_inf_f32_cuda` (diagmask.cu:17 @5266f24da), which
+/// Ports `diag_mask_inf_f32_cuda` (diagmask.cu:17 @b29c606e2), which
 /// launches with `<<<>>>`.
 fn diagMaskInfF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ncols_x: c_int, nrows_x: c_int, rows_per_channel: c_int, n_past: c_int, stream: cu.cudaStream_t) void {
     const block_dims: kernels.Dim3 = .{ .x = 1, .y = block_size, .z = 1 };
@@ -31,7 +31,7 @@ fn diagMaskInfF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ncols_x: c_int, nr
     kernels.launch(kernels.get("diagmask", "diag_mask_inf_f32"), .{ .grid = block_nums, .block = block_dims, .stream = stream }, .{ x, dst, ncols_x, rows_per_channel, n_past });
 }
 
-/// Ports `ggml_cuda_op_diag_mask_inf` (diagmask.cu:24 @5266f24da).
+/// Ports `ggml_cuda_op_diag_mask_inf` (diagmask.cu:24 @b29c606e2).
 pub fn opDiagMaskInf(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;

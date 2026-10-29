@@ -16,6 +16,7 @@ pub const c = @import("c.zig");
 pub const args = @import("args.zig");
 pub const chat = @import("chat.zig");
 pub const fit = @import("fit.zig");
+pub const json = @import("json.zig");
 pub const session = @import("session.zig");
 pub const upstream_flags = @import("upstream_flags.zig");
 
@@ -39,5 +40,6 @@ test {
     _ = @import("c.zig");
     _ = @import("args.zig");
     _ = @import("chat.zig");
+    _ = @import("json.zig");
     _ = @import("session.zig");
 }

@@ -5,7 +5,7 @@
 //!
 //! Ports `ma_dr_mp3` and its `ma_dr_mp3dec` core from
 //! `llama.cpp/vendor/miniaudio/miniaudio.h` (miniaudio v0.11.25, dr_mp3
-//! embedded) at v0.4.0 (`5266f24da`). Each declaration names the function it
+//! embedded) at v0.4.1 (`b29c606e2`). Each declaration names the function it
 //! ports and the line it began at.
 //!
 //! # As `mtmd-helper.cpp` compiles it
@@ -58,7 +58,7 @@ const max_samples_per_frame = max_pcm_frames_per_mp3_frame * 2;
 const min_data_chunk_size = 16384;
 const data_chunk_size = min_data_chunk_size * 4;
 
-// header accessors, from `MA_DR_MP3_HDR_IS_MONO` (miniaudio.h:92733 @5266f24da)
+// header accessors, from `MA_DR_MP3_HDR_IS_MONO` (miniaudio.h:92733 @b29c606e2)
 fn hdrIsMono(h: [*]const u8) bool {
     return (h[3] & 0xC0) == 0xC0;
 }
@@ -181,14 +181,14 @@ const L12ScaleInfo = struct {
 /// `ma_dr_mp3_L12_subband_alloc`.
 const L12SubbandAlloc = struct { tab_offset: u8, code_tab_width: u8, band_count: u8 };
 
-/// Ports `ma_dr_mp3_bs_init` (miniaudio.h:92901 @5266f24da).
+/// Ports `ma_dr_mp3_bs_init` (miniaudio.h:92901 @b29c606e2).
 fn bsInit(bs: *Bs, data: [*]const u8, bytes: c_int) void {
     bs.buf = data;
     bs.pos = 0;
     bs.limit = bytes *% 8;
 }
 
-/// Ports `ma_dr_mp3_bs_get_bits` (miniaudio.h:92907 @5266f24da).
+/// Ports `ma_dr_mp3_bs_get_bits` (miniaudio.h:92907 @b29c606e2).
 fn bsGetBits(bs: *Bs, n: c_int) u32 {
     var cache: u32 = 0;
     const s: u32 = @as(u32, @bitCast(bs.pos)) & 7;
@@ -208,7 +208,7 @@ fn bsGetBits(bs: *Bs, n: c_int) u32 {
     return cache | (next >> @intCast(-sh));
 }
 
-/// Ports `ma_dr_mp3_hdr_valid` (miniaudio.h:92922 @5266f24da).
+/// Ports `ma_dr_mp3_hdr_valid` (miniaudio.h:92922 @b29c606e2).
 fn hdrValid(h: [*]const u8) bool {
     return h[0] == 0xff and
         ((h[1] & 0xF0) == 0xf0 or (h[1] & 0xFE) == 0xe2) and
@@ -217,7 +217,7 @@ fn hdrValid(h: [*]const u8) bool {
         hdrGetSampleRate(h) != 3;
 }
 
-/// Ports `ma_dr_mp3_hdr_compare` (miniaudio.h:92930 @5266f24da).
+/// Ports `ma_dr_mp3_hdr_compare` (miniaudio.h:92930 @b29c606e2).
 fn hdrCompare(h1: [*]const u8, h2: [*]const u8) bool {
     return hdrValid(h2) and
         ((h1[1] ^ h2[1]) & 0xFE) == 0 and
@@ -225,7 +225,7 @@ fn hdrCompare(h1: [*]const u8, h2: [*]const u8) bool {
         hdrIsFreeFormat(h1) == hdrIsFreeFormat(h2);
 }
 
-/// Ports `ma_dr_mp3_hdr_bitrate_kbps` (miniaudio.h:92937 @5266f24da).
+/// Ports `ma_dr_mp3_hdr_bitrate_kbps` (miniaudio.h:92937 @b29c606e2).
 fn hdrBitrateKbps(h: [*]const u8) u32 {
     const mpeg1: usize = @intFromBool(hdrTestMpeg1(h));
     const layer: usize = @intCast(hdrGetLayer(h) - 1);
@@ -233,29 +233,29 @@ fn hdrBitrateKbps(h: [*]const u8) u32 {
     return 2 * @as(u32, halfrate[mpeg1 * 45 + layer * 15 + br]);
 }
 
-/// Ports `ma_dr_mp3_hdr_sample_rate_hz` (miniaudio.h:92945 @5266f24da).
+/// Ports `ma_dr_mp3_hdr_sample_rate_hz` (miniaudio.h:92945 @b29c606e2).
 fn hdrSampleRateHz(h: [*]const u8) u32 {
     return g_hz[@intCast(hdrGetSampleRate(h))] >> @intFromBool(!hdrTestMpeg1(h)) >> @intFromBool(!hdrTestNotMpeg25(h));
 }
 
-/// Ports `ma_dr_mp3_hdr_frame_samples` (miniaudio.h:92950 @5266f24da).
+/// Ports `ma_dr_mp3_hdr_frame_samples` (miniaudio.h:92950 @b29c606e2).
 fn hdrFrameSamples(h: [*]const u8) u32 {
     return if (hdrIsLayer1(h)) 384 else (@as(u32, 1152) >> @intFromBool(hdrIsFrame576(h)));
 }
 
-/// Ports `ma_dr_mp3_hdr_frame_bytes` (miniaudio.h:92954 @5266f24da).
+/// Ports `ma_dr_mp3_hdr_frame_bytes` (miniaudio.h:92954 @b29c606e2).
 fn hdrFrameBytes(h: [*]const u8, free_format_size: c_int) c_int {
     var frame_bytes: c_int = @bitCast(hdrFrameSamples(h) *% hdrBitrateKbps(h) *% 125 / hdrSampleRateHz(h));
     if (hdrIsLayer1(h)) frame_bytes &= ~@as(c_int, 3);
     return if (frame_bytes != 0) frame_bytes else free_format_size;
 }
 
-/// Ports `ma_dr_mp3_hdr_padding` (miniaudio.h:92963 @5266f24da).
+/// Ports `ma_dr_mp3_hdr_padding` (miniaudio.h:92963 @b29c606e2).
 fn hdrPadding(h: [*]const u8) c_int {
     return if (hdrTestPadding(h)) (if (hdrIsLayer1(h)) 4 else 1) else 0;
 }
 
-/// Ports `ma_dr_mp3_L12_subband_alloc_table` (miniaudio.h:92968 @5266f24da).
+/// Ports `ma_dr_mp3_L12_subband_alloc_table` (miniaudio.h:92968 @b29c606e2).
 fn l12SubbandAllocTable(hdr: [*]const u8, sci: *L12ScaleInfo) []const L12SubbandAlloc {
     const g_alloc_L1 = [_]L12SubbandAlloc{.{ .tab_offset = 76, .code_tab_width = 4, .band_count = 32 }};
     const g_alloc_L2M2 = [_]L12SubbandAlloc{ .{ .tab_offset = 60, .code_tab_width = 4, .band_count = 4 }, .{ .tab_offset = 44, .code_tab_width = 3, .band_count = 7 }, .{ .tab_offset = 44, .code_tab_width = 2, .band_count = 19 } };
@@ -289,7 +289,7 @@ fn l12SubbandAllocTable(hdr: [*]const u8, sci: *L12ScaleInfo) []const L12Subband
     return alloc;
 }
 
-/// `g_deq_L12` (miniaudio.h:93010 @5266f24da): computed in `float` at
+/// `g_deq_L12` (miniaudio.h:93010 @b29c606e2): computed in `float` at
 /// compile time, as the C's initializer is.
 const g_deq_L12: [54]f32 = blk: {
     const divs = [18]f32{ 3, 7, 15, 31, 63, 127, 255, 511, 1023, 2047, 4095, 8191, 16383, 32767, 65535, 3, 5, 9 };
@@ -302,7 +302,7 @@ const g_deq_L12: [54]f32 = blk: {
     break :blk t;
 };
 
-/// Ports `ma_dr_mp3_L12_read_scalefactors` (miniaudio.h:93008 @5266f24da).
+/// Ports `ma_dr_mp3_L12_read_scalefactors` (miniaudio.h:93008 @b29c606e2).
 fn l12ReadScalefactors(bs: *Bs, pba: []const u8, scfcod: []const u8, bands: usize, scf: []f32) void {
     var o: usize = 0;
     for (0..bands) |i| {
@@ -321,7 +321,7 @@ fn l12ReadScalefactors(bs: *Bs, pba: []const u8, scfcod: []const u8, bands: usiz
     }
 }
 
-/// Ports `ma_dr_mp3_L12_read_scale_info` (miniaudio.h:93031 @5266f24da).
+/// Ports `ma_dr_mp3_L12_read_scale_info` (miniaudio.h:93031 @b29c606e2).
 fn l12ReadScaleInfo(hdr: [*]const u8, bs: *Bs, sci: *L12ScaleInfo) void {
     const subband_alloc = l12SubbandAllocTable(hdr, sci);
     var sa: usize = 0;
@@ -348,7 +348,7 @@ fn l12ReadScaleInfo(hdr: [*]const u8, bs: *Bs, sci: *L12ScaleInfo) void {
     while (i < sci.total_bands) : (i += 1) sci.bitalloc[2 * i + 1] = 0;
 }
 
-/// Ports `ma_dr_mp3_L12_dequantize_granule` (miniaudio.h:93073 @5266f24da).
+/// Ports `ma_dr_mp3_L12_dequantize_granule` (miniaudio.h:93073 @b29c606e2).
 fn l12DequantizeGranule(grbuf: [*]f32, bs: *Bs, sci: *L12ScaleInfo, group_size: c_int) c_int {
     var choff: c_int = 576;
     const gs: usize = @intCast(group_size);
@@ -376,7 +376,7 @@ fn l12DequantizeGranule(grbuf: [*]f32, bs: *Bs, sci: *L12ScaleInfo, group_size: 
     return group_size * 4;
 }
 
-/// Ports `ma_dr_mp3_L12_apply_scf_384` (miniaudio.h:93107 @5266f24da).
+/// Ports `ma_dr_mp3_L12_apply_scf_384` (miniaudio.h:93107 @b29c606e2).
 fn l12ApplyScf384(sci: *L12ScaleInfo, scf_in: [*]const f32, dst_in: [*]f32) void {
     const sb: usize = sci.stereo_bands;
     const n = (@as(usize, sci.total_bands) - sb) * 18;
@@ -393,7 +393,7 @@ fn l12ApplyScf384(sci: *L12ScaleInfo, scf_in: [*]const f32, dst_in: [*]f32) void
     }
 }
 
-/// Ports `ma_dr_mp3_L3_read_side_info` (miniaudio.h:93121 @5266f24da).
+/// Ports `ma_dr_mp3_L3_read_side_info` (miniaudio.h:93121 @b29c606e2).
 fn l3ReadSideInfo(bs: *Bs, gr_in: [*]GrInfo, hdr: [*]const u8) c_int {
     var gr = gr_in;
     var tables: u32 = undefined;
@@ -470,7 +470,7 @@ fn l3ReadSideInfo(bs: *Bs, gr_in: [*]GrInfo, hdr: [*]const u8) c_int {
     return main_data_begin;
 }
 
-/// Ports `ma_dr_mp3_L3_read_scalefactors` (miniaudio.h:93240 @5266f24da).
+/// Ports `ma_dr_mp3_L3_read_scalefactors` (miniaudio.h:93240 @b29c606e2).
 fn l3ReadScalefactors(scf_in: [*]u8, ist_pos_in: [*]u8, scf_size: *const [4]u8, scf_count: [*]const u8, bitbuf: *Bs, scfsi_in: c_int) void {
     var scf = scf_in;
     var ist_pos = ist_pos_in;
@@ -505,7 +505,7 @@ fn l3ReadScalefactors(scf_in: [*]u8, ist_pos_in: [*]u8, scf_size: *const [4]u8, 
     scf[2] = 0;
 }
 
-/// Ports `ma_dr_mp3_L3_ldexp_q2` (miniaudio.h:93272 @5266f24da).
+/// Ports `ma_dr_mp3_L3_ldexp_q2` (miniaudio.h:93272 @b29c606e2).
 fn l3LdexpQ2(y_in: f32, exp_q2_in: c_int) f32 {
     var y = y_in;
     var exp_q2 = exp_q2_in;
@@ -518,7 +518,7 @@ fn l3LdexpQ2(y_in: f32, exp_q2_in: c_int) f32 {
     return y;
 }
 
-/// Ports `ma_dr_mp3_L3_decode_scalefactors` (miniaudio.h:93287 @5266f24da).
+/// Ports `ma_dr_mp3_L3_decode_scalefactors` (miniaudio.h:93287 @b29c606e2).
 fn l3DecodeScalefactors(hdr: [*]const u8, ist_pos: [*]u8, bs: *Bs, gr: *const GrInfo, scf: [*]f32, ch: c_int) void {
     var scf_partition: [*]const u8 = g_scf_partitions[(@as(usize, @intFromBool(gr.n_short_sfb != 0)) + @intFromBool(gr.n_long_sfb == 0)) * 28 ..].ptr;
     var scf_size: [4]u8 = undefined;
@@ -571,7 +571,7 @@ fn l3DecodeScalefactors(hdr: [*]const u8, ist_pos: [*]u8, bs: *Bs, gr: *const Gr
     }
 }
 
-/// Ports `ma_dr_mp3_L3_pow_43` (miniaudio.h:93352 @5266f24da): the
+/// Ports `ma_dr_mp3_L3_pow_43` (miniaudio.h:93352 @b29c606e2): the
 /// polynomial's two `a + b*c` contract.
 fn l3Pow43(x_in: c_int) f32 {
     var x = x_in;
@@ -598,7 +598,7 @@ fn mainByte(d: *Dec, p: [*]const u8) u8 {
     return 0;
 }
 
-/// Ports `ma_dr_mp3_L3_huffman` (miniaudio.h:93369 @5266f24da).
+/// Ports `ma_dr_mp3_L3_huffman` (miniaudio.h:93369 @b29c606e2).
 fn l3Huffman(d: *Dec, dst_in: [*]f32, bs: *Bs, gr_info: *const GrInfo, scf_in: [*]const f32, layer3gr_limit: c_int) void {
     var dst = dst_in;
     var scf = scf_in;
@@ -721,7 +721,7 @@ fn shl(x: u32, n: c_int) u32 {
     return if (n >= 32) 0 else x << @intCast(n);
 }
 
-/// Ports `ma_dr_mp3_L3_midside_stereo` (miniaudio.h:93498 @5266f24da):
+/// Ports `ma_dr_mp3_L3_midside_stereo` (miniaudio.h:93498 @b29c606e2):
 /// adds and subtractions only, so the vector body and the tail agree.
 fn l3MidsideStereo(left: [*]f32, n: usize) void {
     const right = left + 576;
@@ -733,7 +733,7 @@ fn l3MidsideStereo(left: [*]f32, n: usize) void {
     }
 }
 
-/// Ports `ma_dr_mp3_L3_intensity_stereo_band` (miniaudio.h:93526 @5266f24da).
+/// Ports `ma_dr_mp3_L3_intensity_stereo_band` (miniaudio.h:93526 @b29c606e2).
 fn l3IntensityStereoBand(left: [*]f32, n: usize, kl: f32, kr: f32) void {
     for (0..n) |i| {
         left[i + 576] = left[i] * kr;
@@ -741,7 +741,7 @@ fn l3IntensityStereoBand(left: [*]f32, n: usize, kl: f32, kr: f32) void {
     }
 }
 
-/// Ports `ma_dr_mp3_L3_stereo_top_band` (miniaudio.h:93535 @5266f24da).
+/// Ports `ma_dr_mp3_L3_stereo_top_band` (miniaudio.h:93535 @b29c606e2).
 fn l3StereoTopBand(right_in: [*]const f32, sfb: [*]const u8, nbands: usize, max_band: *[3]c_int) void {
     var right = right_in;
     max_band.* = .{ -1, -1, -1 };
@@ -757,7 +757,7 @@ fn l3StereoTopBand(right_in: [*]const f32, sfb: [*]const u8, nbands: usize, max_
     }
 }
 
-/// Ports `ma_dr_mp3_L3_stereo_process` (miniaudio.h:93552 @5266f24da).
+/// Ports `ma_dr_mp3_L3_stereo_process` (miniaudio.h:93552 @b29c606e2).
 fn l3StereoProcess(left_in: [*]f32, ist_pos: [*]const u8, sfb: [*]const u8, hdr: [*]const u8, max_band: *const [3]c_int, mpeg2_sh: c_int) void {
     var left = left_in;
     const max_pos: u32 = if (hdrTestMpeg1(hdr)) 7 else 64;
@@ -787,7 +787,7 @@ fn l3StereoProcess(left_in: [*]f32, ist_pos: [*]const u8, sfb: [*]const u8, hdr:
     }
 }
 
-/// Ports `ma_dr_mp3_L3_intensity_stereo` (miniaudio.h:93584 @5266f24da).
+/// Ports `ma_dr_mp3_L3_intensity_stereo` (miniaudio.h:93584 @b29c606e2).
 fn l3IntensityStereo(left: [*]f32, ist_pos: [*]u8, gr: [*]const GrInfo, hdr: [*]const u8) void {
     var max_band: [3]c_int = undefined;
     const n_sfb: c_int = @as(c_int, gr[0].n_long_sfb) + gr[0].n_short_sfb;
@@ -807,7 +807,7 @@ fn l3IntensityStereo(left: [*]f32, ist_pos: [*]u8, gr: [*]const GrInfo, hdr: [*]
     l3StereoProcess(left, ist_pos, gr[0].sfbtab, hdr, &max_band, gr[1].scalefac_compress & 1);
 }
 
-/// Ports `ma_dr_mp3_L3_reorder` (miniaudio.h:93602 @5266f24da).
+/// Ports `ma_dr_mp3_L3_reorder` (miniaudio.h:93602 @b29c606e2).
 fn l3Reorder(grbuf: [*]f32, scratch: [*]f32, sfb_in: [*]const u8) void {
     var sfb = sfb_in;
     var src = grbuf;
@@ -827,7 +827,7 @@ fn l3Reorder(grbuf: [*]f32, scratch: [*]f32, sfb_in: [*]const u8) void {
     @memcpy(grbuf[0..dst], scratch[0..dst]);
 }
 
-/// Ports `ma_dr_mp3_L3_antialias` (miniaudio.h:93617 @5266f24da): the
+/// Ports `ma_dr_mp3_L3_antialias` (miniaudio.h:93617 @b29c606e2): the
 /// vector body covers all eight, with no contraction.
 fn l3Antialias(grbuf_in: [*]f32, nbands_in: c_int) void {
     var grbuf = grbuf_in;
@@ -849,7 +849,7 @@ fn l3Antialias(grbuf_in: [*]f32, nbands_in: c_int) void {
     }
 }
 
-/// Ports `ma_dr_mp3_L3_dct3_9` (miniaudio.h:93650 @5266f24da), scalar and
+/// Ports `ma_dr_mp3_L3_dct3_9` (miniaudio.h:93650 @b29c606e2), scalar and
 /// contracted where the C has `a + b*c`.
 fn l3Dct39(y: *[9]f32) void {
     var s0 = y[0];
@@ -890,7 +890,7 @@ fn l3Dct39(y: *[9]f32) void {
     y[8] = s4 + s7;
 }
 
-/// Ports `ma_dr_mp3_L3_imdct36` (miniaudio.h:93683 @5266f24da): lanes 0-7
+/// Ports `ma_dr_mp3_L3_imdct36` (miniaudio.h:93683 @b29c606e2): lanes 0-7
 /// through the vector body, unfused; lane 8 through the scalar tail,
 /// contracted.
 fn l3Imdct36(grbuf_in: [*]f32, overlap_in: [*]f32, window: [*]const f32, nbands: c_int) void {
@@ -934,7 +934,7 @@ fn l3Imdct36(grbuf_in: [*]f32, overlap_in: [*]f32, window: [*]const f32, nbands:
     }
 }
 
-/// Ports `ma_dr_mp3_L3_idct3` (miniaudio.h:93735 @5266f24da).
+/// Ports `ma_dr_mp3_L3_idct3` (miniaudio.h:93735 @b29c606e2).
 fn l3Idct3(x0: f32, x1: f32, x2: f32, dst: *[3]f32) void {
     const m1 = x1 * 0.86602540;
     const a1 = @mulAdd(f32, -x2, 0.5, x0);
@@ -943,7 +943,7 @@ fn l3Idct3(x0: f32, x1: f32, x2: f32, dst: *[3]f32) void {
     dst[2] = a1 - m1;
 }
 
-/// Ports `ma_dr_mp3_L3_imdct12` (miniaudio.h:93743 @5266f24da).
+/// Ports `ma_dr_mp3_L3_imdct12` (miniaudio.h:93743 @b29c606e2).
 fn l3Imdct12(x: [*]const f32, dst: [*]f32, overlap: [*]f32) void {
     var co: [3]f32 = undefined;
     var si: [3]f32 = undefined;
@@ -959,7 +959,7 @@ fn l3Imdct12(x: [*]const f32, dst: [*]f32, overlap: [*]f32) void {
     }
 }
 
-/// Ports `ma_dr_mp3_L3_imdct_short` (miniaudio.h:93760 @5266f24da).
+/// Ports `ma_dr_mp3_L3_imdct_short` (miniaudio.h:93760 @b29c606e2).
 fn l3ImdctShort(grbuf_in: [*]f32, overlap_in: [*]f32, nbands_in: c_int) void {
     var grbuf = grbuf_in;
     var overlap = overlap_in;
@@ -978,7 +978,7 @@ fn l3ImdctShort(grbuf_in: [*]f32, overlap_in: [*]f32, nbands_in: c_int) void {
     }
 }
 
-/// Ports `ma_dr_mp3_L3_change_sign` (miniaudio.h:93772 @5266f24da).
+/// Ports `ma_dr_mp3_L3_change_sign` (miniaudio.h:93772 @b29c606e2).
 fn l3ChangeSign(grbuf_in: [*]f32) void {
     var grbuf = grbuf_in + 18;
     var b: usize = 0;
@@ -991,7 +991,7 @@ fn l3ChangeSign(grbuf_in: [*]f32) void {
     }
 }
 
-/// Ports `ma_dr_mp3_L3_imdct_gr` (miniaudio.h:93779 @5266f24da).
+/// Ports `ma_dr_mp3_L3_imdct_gr` (miniaudio.h:93779 @b29c606e2).
 fn l3ImdctGr(grbuf_in: [*]f32, overlap_in: [*]f32, block_type: u32, n_long_bands: u32) void {
     var grbuf = grbuf_in;
     var overlap = overlap_in;
@@ -1007,7 +1007,7 @@ fn l3ImdctGr(grbuf_in: [*]f32, overlap_in: [*]f32, block_type: u32, n_long_bands
     }
 }
 
-/// Ports `ma_dr_mp3_L3_save_reservoir` (miniaudio.h:93796 @5266f24da).
+/// Ports `ma_dr_mp3_L3_save_reservoir` (miniaudio.h:93796 @b29c606e2).
 fn l3SaveReservoir(h: *Dec, s: *Scratch) void {
     var pos: c_int = @intCast(@divTrunc(@as(u32, @bitCast(s.bs.pos)) +% 7, 8));
     var remains: c_int = @bitCast(@as(u32, @bitCast(s.bs.limit)) / 8 -% @as(u32, @bitCast(pos)));
@@ -1022,7 +1022,7 @@ fn l3SaveReservoir(h: *Dec, s: *Scratch) void {
     h.reserv = remains;
 }
 
-/// Ports `ma_dr_mp3_L3_restore_reservoir` (miniaudio.h:93811 @5266f24da).
+/// Ports `ma_dr_mp3_L3_restore_reservoir` (miniaudio.h:93811 @b29c606e2).
 fn l3RestoreReservoir(h: *Dec, bs: *Bs, s: *Scratch, main_data_begin: c_int) bool {
     const frame_bytes: usize = @intCast(@divTrunc(bs.limit - bs.pos, 8));
     const bytes_have: usize = @intCast(@min(h.reserv, main_data_begin));
@@ -1032,7 +1032,7 @@ fn l3RestoreReservoir(h: *Dec, bs: *Bs, s: *Scratch, main_data_begin: c_int) boo
     return h.reserv >= main_data_begin;
 }
 
-/// Ports `ma_dr_mp3_L3_decode` (miniaudio.h:93820 @5266f24da).
+/// Ports `ma_dr_mp3_L3_decode` (miniaudio.h:93820 @b29c606e2).
 fn l3Decode(h: *Dec, s: *Scratch, gr_info_in: [*]GrInfo, nch: usize) void {
     for (0..nch) |ch| {
         const layer3gr_limit = s.bs.pos + gr_info_in[ch].part_23_length;
@@ -1059,7 +1059,7 @@ fn l3Decode(h: *Dec, s: *Scratch, gr_info_in: [*]GrInfo, nch: usize) void {
     }
 }
 
-/// Ports `ma_dr_mp3d_DCT_II` (miniaudio.h:93850 @5266f24da), the vector
+/// Ports `ma_dr_mp3d_DCT_II` (miniaudio.h:93850 @b29c606e2), the vector
 /// body: every lane is one `k`, with no contraction, and the stores sum
 /// `t[2][i] + (t[3][i] + t[3][i + 1])` where the scalar fallback would
 /// not. A 2-lane store at the last block writes only `k` and `k + 1`.
@@ -1141,7 +1141,7 @@ fn dct2(grbuf: [*]f32, n: usize) void {
     }
 }
 
-/// Ports `ma_dr_mp3d_scale_pcm` (miniaudio.h:94002 @5266f24da), the
+/// Ports `ma_dr_mp3d_scale_pcm` (miniaudio.h:94002 @b29c606e2), the
 /// non-ARMv6 arm.
 fn scalePcm(sample: f32) i16 {
     if (sample >= 32766.5) return 32767;
@@ -1168,7 +1168,7 @@ fn simdToS16(a: f32) i16 {
     return @intCast(std.math.clamp(q, -32768, 32767));
 }
 
-/// Ports `ma_dr_mp3d_synth_pair` (miniaudio.h:94024 @5266f24da): every
+/// Ports `ma_dr_mp3d_synth_pair` (miniaudio.h:94024 @b29c606e2): every
 /// `a += x * c` contracts.
 fn synthPair(pcm: [*]i16, nch: usize, z_in: [*]const f32) void {
     var z = z_in;
@@ -1193,7 +1193,7 @@ fn synthPair(pcm: [*]i16, nch: usize, z_in: [*]const f32) void {
     pcm[16 * nch] = scalePcm(a);
 }
 
-/// Ports `ma_dr_mp3d_synth` (miniaudio.h:94047 @5266f24da), the vector
+/// Ports `ma_dr_mp3d_synth` (miniaudio.h:94047 @b29c606e2), the vector
 /// body: four lanes, unfused.
 fn synth(xl: [*]const f32, dstl: [*]i16, nch: usize, lins: [*]f32) void {
     const xr = xl + 576 * (nch - 1);
@@ -1261,7 +1261,7 @@ fn synth(xl: [*]const f32, dstl: [*]i16, nch: usize, lins: [*]f32) void {
     }
 }
 
-/// Ports `ma_dr_mp3d_synth_granule` (miniaudio.h:94191 @5266f24da).
+/// Ports `ma_dr_mp3d_synth_granule` (miniaudio.h:94191 @b29c606e2).
 fn synthGranule(qmf_state: [*]f32, grbuf: [*]f32, nbands: usize, nch: usize, pcm: [*]i16, lins: [*]f32) void {
     for (0..nch) |i| dct2(grbuf + 576 * i, nbands);
     @memcpy(lins[0 .. 15 * 64], qmf_state[0 .. 15 * 64]);
@@ -1275,7 +1275,7 @@ fn synthGranule(qmf_state: [*]f32, grbuf: [*]f32, nbands: usize, nch: usize, pcm
     }
 }
 
-/// Ports `ma_dr_mp3d_match_frame` (miniaudio.h:94216 @5266f24da).
+/// Ports `ma_dr_mp3d_match_frame` (miniaudio.h:94216 @b29c606e2).
 fn matchFrame(hdr: [*]const u8, mp3_bytes: c_int, frame_bytes: c_int) bool {
     var i: c_int = 0;
     var nmatch: c_int = 0;
@@ -1287,7 +1287,7 @@ fn matchFrame(hdr: [*]const u8, mp3_bytes: c_int, frame_bytes: c_int) bool {
     return true;
 }
 
-/// Ports `ma_dr_mp3d_find_frame` (miniaudio.h:94229 @5266f24da).
+/// Ports `ma_dr_mp3d_find_frame` (miniaudio.h:94229 @b29c606e2).
 fn findFrame(mp3_in: [*]const u8, mp3_bytes: c_int, free_format_bytes: *c_int, ptr_frame_bytes: *c_int) c_int {
     var mp3 = mp3_in;
     var i: c_int = 0;
@@ -1323,7 +1323,7 @@ fn findFrame(mp3_in: [*]const u8, mp3_bytes: c_int, free_format_bytes: *c_int, p
     return mp3_bytes;
 }
 
-/// Ports `ma_dr_mp3dec_decode_frame` (miniaudio.h:94268 @5266f24da).
+/// Ports `ma_dr_mp3dec_decode_frame` (miniaudio.h:94268 @b29c606e2).
 fn decodeFrame(dec: *Dec, mp3: [*]const u8, mp3_bytes: c_int, pcm_in: ?[*]i16, info: *FrameInfo) c_int {
     var i: c_int = 0;
     var frame_size: c_int = 0;
@@ -1446,8 +1446,8 @@ pub const Mp3 = struct {
     data_consumed: usize = 0,
     at_end: bool = false,
 
-    /// Ports `ma_dr_mp3_init_memory_with_metadata` (miniaudio.h:95037 @5266f24da)
-    /// for a `dr_mp3` stream, and `ma_dr_mp3_init` (miniaudio.h:94980 @5266f24da)
+    /// Ports `ma_dr_mp3_init_memory_with_metadata` (miniaudio.h:95037 @b29c606e2)
+    /// for a `dr_mp3` stream, and `ma_dr_mp3_init` (miniaudio.h:94980 @b29c606e2)
     /// over the decoder's callbacks for a `decoder` one.
     ///
     /// Return: the decoder, owned by the caller (`deinit`), or null where
@@ -1470,7 +1470,7 @@ pub const Mp3 = struct {
         m.gpa.destroy(m);
     }
 
-    /// Ports `ma_dr_mp3_init_internal` (miniaudio.h:94741 @5266f24da), with
+    /// Ports `ma_dr_mp3_init_internal` (miniaudio.h:94741 @b29c606e2), with
     /// no metadata callback.
     fn initInternal(m: *Mp3) bool {
         m.dec.header[0] = 0;
@@ -1573,7 +1573,7 @@ pub const Mp3 = struct {
 
     /// Ports `ma_dr_mp3_decode_next_frame_ex` and its two arms,
     /// `ma_dr_mp3_decode_next_frame_ex__memory` and
-    /// `ma_dr_mp3_decode_next_frame_ex__callbacks` (miniaudio.h:94713, 94678, 94592 @5266f24da).
+    /// `ma_dr_mp3_decode_next_frame_ex__callbacks` (miniaudio.h:94713, 94678, 94592 @b29c606e2).
     fn decodeNextFrameEx(m: *Mp3, pcm: ?[*]i16, frame_info: ?*FrameInfo, frame_ref: ?*FrameRef) u32 {
         if (m.memory_mode) return m.decodeNextFrameMemory(pcm, frame_info, frame_ref);
         return m.decodeNextFrameCallbacks(pcm, frame_info, frame_ref);
@@ -1589,7 +1589,7 @@ pub const Mp3 = struct {
         return n;
     }
 
-    /// Ports `ma_dr_mp3_decode_next_frame_ex__memory` (miniaudio.h:94678 @5266f24da).
+    /// Ports `ma_dr_mp3_decode_next_frame_ex__memory` (miniaudio.h:94678 @b29c606e2).
     fn decodeNextFrameMemory(m: *Mp3, pcm: ?[*]i16, frame_info: ?*FrameInfo, frame_ref: ?*FrameRef) u32 {
         if (m.at_end) return 0;
         var info: FrameInfo = .{};
@@ -1612,7 +1612,7 @@ pub const Mp3 = struct {
     }
 
     /// Ports `ma_dr_mp3__on_read` and `ma_dr_mp3__on_read_clamped`
-    /// (miniaudio.h:94516, 94528 @5266f24da).
+    /// (miniaudio.h:94516, 94528 @b29c606e2).
     fn readClamped(m: *Mp3, buf: []u8) usize {
         var want = buf.len;
         if (m.stream_length != std.math.maxInt(u64)) {
@@ -1634,7 +1634,7 @@ pub const Mp3 = struct {
         return true;
     }
 
-    /// Ports `ma_dr_mp3_decode_next_frame_ex__callbacks` (miniaudio.h:94592 @5266f24da).
+    /// Ports `ma_dr_mp3_decode_next_frame_ex__callbacks` (miniaudio.h:94592 @b29c606e2).
     fn decodeNextFrameCallbacks(m: *Mp3, pcm: ?[*]i16, frame_info: ?*FrameInfo, frame_ref: ?*FrameRef) u32 {
         if (m.at_end) return 0;
         while (true) {
@@ -1682,7 +1682,7 @@ pub const Mp3 = struct {
         }
     }
 
-    /// Ports `ma_dr_mp3_read_pcm_frames_raw` (miniaudio.h:95208 @5266f24da)
+    /// Ports `ma_dr_mp3_read_pcm_frames_raw` (miniaudio.h:95208 @b29c606e2)
     /// at `int16`.
     fn readPcmFramesRaw(m: *Mp3, frames_in: u64, out: ?[]i16) u64 {
         var frames = frames_in;
@@ -1719,7 +1719,7 @@ pub const Mp3 = struct {
         return total;
     }
 
-    /// Ports `ma_dr_mp3_read_pcm_frames_f32` (miniaudio.h:95265 @5266f24da)
+    /// Ports `ma_dr_mp3_read_pcm_frames_f32` (miniaudio.h:95265 @b29c606e2)
     /// without `MA_DR_MP3_FLOAT_OUTPUT`: `int16` samples times 2^-15.
     pub fn readPcmFramesF32(m: *Mp3, frames: u64, out: []f32) u64 {
         var temp: [8192]i16 = undefined;
@@ -1740,7 +1740,7 @@ pub const Mp3 = struct {
     }
 
     /// Ports `ma_dr_mp3_reset` and `ma_dr_mp3_seek_to_start_of_stream`
-    /// (miniaudio.h:95323, 95333 @5266f24da).
+    /// (miniaudio.h:95323, 95333 @b29c606e2).
     fn seekToStartOfStream(m: *Mp3) bool {
         // `ma_dr_mp3__on_seek_64`: the cursor follows each step
         if (!m.io.seekFromStart(m.stream_start_offset)) return false;
@@ -1754,7 +1754,7 @@ pub const Mp3 = struct {
         return true;
     }
 
-    /// Ports `ma_dr_mp3_seek_to_pcm_frame` (miniaudio.h:95423 @5266f24da)
+    /// Ports `ma_dr_mp3_seek_to_pcm_frame` (miniaudio.h:95423 @b29c606e2)
     /// with no seek table, which `ma_mp3` never binds: brute force.
     fn seekToPcmFrame(m: *Mp3, frame_index: u64) bool {
         if (frame_index == 0) return m.seekToStartOfStream();
@@ -1767,7 +1767,7 @@ pub const Mp3 = struct {
     }
 
     /// Ports `ma_dr_mp3_get_pcm_frame_count` and
-    /// `ma_dr_mp3_get_mp3_and_pcm_frame_count` (miniaudio.h:95477, 95437 @5266f24da).
+    /// `ma_dr_mp3_get_mp3_and_pcm_frame_count` (miniaudio.h:95477, 95437 @b29c606e2).
     pub fn getPcmFrameCount(m: *Mp3) u64 {
         if (m.total_pcm_frame_count != std.math.maxInt(u64)) {
             var total = m.total_pcm_frame_count;
@@ -1846,7 +1846,7 @@ pub const kernels = struct {
 // -----------------------------------------------------------------------------
 // tables
 
-/// `halfrate` (miniaudio/miniaudio.h:92939 @5266f24da).
+/// `halfrate` (miniaudio/miniaudio.h:92939 @b29c606e2).
 const halfrate = [90]u8{
     0,  4,  8,   12,  16,  20,  24,  28,  32,  40,  48,  56,  64,  72, 80, 0,
     4,  8,  12,  16,  20,  24,  28,  32,  40,  48,  56,  64,  72,  80, 0,  16,
@@ -1856,7 +1856,7 @@ const halfrate = [90]u8{
     80, 96, 112, 128, 144, 160, 176, 192, 208, 224,
 };
 
-/// `g_bitalloc_code_tab` (miniaudio/miniaudio.h:93033 @5266f24da).
+/// `g_bitalloc_code_tab` (miniaudio/miniaudio.h:93033 @b29c606e2).
 const g_bitalloc_code_tab = [92]u8{
     0,  17, 3,  4, 5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16,
     0,  17, 18, 3, 19, 4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 16,
@@ -1866,7 +1866,7 @@ const g_bitalloc_code_tab = [92]u8{
     5,  6,  7,  8, 9,  10, 11, 12, 13, 14, 15, 16,
 };
 
-/// `g_scf_long` (miniaudio/miniaudio.h:93123 @5266f24da).
+/// `g_scf_long` (miniaudio/miniaudio.h:93123 @b29c606e2).
 const g_scf_long = [184]u8{
     6,  6,  6,  6,  6,  6,   8,  10, 12,  14, 16, 20, 24, 28, 32, 38,
     46, 52, 60, 68, 58, 54,  0,  12, 12,  12, 12, 12, 12, 16, 20, 24,
@@ -1882,7 +1882,7 @@ const g_scf_long = [184]u8{
     38, 46, 56, 68, 84, 102, 26, 0,
 };
 
-/// `g_scf_short` (miniaudio/miniaudio.h:93133 @5266f24da).
+/// `g_scf_short` (miniaudio/miniaudio.h:93133 @b29c606e2).
 const g_scf_short = [320]u8{
     4,  4,  4,  4,  4,  4,  4,  4,  4,  6,  6,  6,  8,  8,  8,  10,
     10, 10, 12, 12, 12, 14, 14, 14, 18, 18, 18, 24, 24, 24, 30, 30,
@@ -1906,7 +1906,7 @@ const g_scf_short = [320]u8{
     20, 20, 20, 26, 26, 26, 34, 34, 34, 42, 42, 42, 12, 12, 12, 0,
 };
 
-/// `g_scf_mixed` (miniaudio/miniaudio.h:93143 @5266f24da).
+/// `g_scf_mixed` (miniaudio/miniaudio.h:93143 @b29c606e2).
 const g_scf_mixed = [320]u8{
     6,  6,  6,  6,  6,  6,  6,  6,  6,  8,  8,  8,  10, 10, 10, 12,
     12, 12, 14, 14, 14, 18, 18, 18, 24, 24, 24, 30, 30, 30, 40, 40,
@@ -1930,7 +1930,7 @@ const g_scf_mixed = [320]u8{
     20, 20, 26, 26, 26, 34, 34, 34, 42, 42, 42, 12, 12, 12, 0,  0,
 };
 
-/// `g_scf_partitions` (miniaudio/miniaudio.h:93289 @5266f24da).
+/// `g_scf_partitions` (miniaudio/miniaudio.h:93289 @b29c606e2).
 const g_scf_partitions = [84]u8{
     6,  5,  5,  5, 6,  5,  5,  5, 6,  5,  7,  3,  11, 10, 0,  0,
     7,  7,  7,  0, 6,  6,  6,  3, 8,  8,  5,  0,  8,  9,  6,  12,
@@ -1940,28 +1940,28 @@ const g_scf_partitions = [84]u8{
     15, 12, 9,  0,
 };
 
-/// `g_scfc_decode` (miniaudio/miniaudio.h:93300 @5266f24da).
+/// `g_scfc_decode` (miniaudio/miniaudio.h:93300 @b29c606e2).
 const g_scfc_decode = [16]u8{
     0, 1, 2, 3, 12, 5, 6, 7, 9, 10, 11, 13, 14, 15, 18, 19,
 };
 
-/// `g_mod` (miniaudio/miniaudio.h:93306 @5266f24da).
+/// `g_mod` (miniaudio/miniaudio.h:93306 @b29c606e2).
 const g_mod = [24]u8{
     5, 5, 4, 4, 5, 5, 4, 1, 4, 3, 1, 1, 5, 6, 6, 1,
     4, 4, 4, 1, 4, 3, 1, 1,
 };
 
-/// `g_preamp` (miniaudio/miniaudio.h:93332 @5266f24da).
+/// `g_preamp` (miniaudio/miniaudio.h:93332 @b29c606e2).
 const g_preamp = [10]u8{
     1, 1, 1, 1, 2, 2, 3, 3, 3, 2,
 };
 
-/// `g_expfrac` (miniaudio/miniaudio.h:93274 @5266f24da).
+/// `g_expfrac` (miniaudio/miniaudio.h:93274 @b29c606e2).
 const g_expfrac = [4]f32{
     9.31322575e-10, 7.83145814e-10, 6.58544508e-10, 5.53767716e-10,
 };
 
-/// `ma_dr_mp3_g_pow43` (miniaudio/miniaudio.h:93348 @5266f24da).
+/// `ma_dr_mp3_g_pow43` (miniaudio/miniaudio.h:93348 @b29c606e2).
 const g_pow43 = [145]f32{
     0.0,        -1.0,       -2.519842,  -4.326749,  -6.349604,  -8.549880,  -10.902724, -13.390518, -16.000000, -18.720754, -21.544347, -24.463781, -27.473142, -30.567351, -33.741992, -36.993181,
     0.0,        1.0,        2.519842,   4.326749,   6.349604,   8.549880,   10.902724,  13.390518,  16.000000,  18.720754,  21.544347,  24.463781,  27.473142,  30.567351,  33.741992,  36.993181,
@@ -1975,7 +1975,7 @@ const g_pow43 = [145]f32{
     645.079578,
 };
 
-/// `tabs` (miniaudio/miniaudio.h:93371 @5266f24da).
+/// `tabs` (miniaudio/miniaudio.h:93371 @b29c606e2).
 const tabs = [2164]i16{
     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
@@ -2115,64 +2115,64 @@ const tabs = [2164]i16{
     290,   290,   288,   258,
 };
 
-/// `tab32` (miniaudio/miniaudio.h:93387 @5266f24da).
+/// `tab32` (miniaudio/miniaudio.h:93387 @b29c606e2).
 const tab32 = [28]u8{
     130, 162, 193, 209, 44,  28, 76,  140, 9,   9,  9,   9,   9, 9, 9, 9,
     190, 254, 222, 238, 126, 94, 157, 157, 109, 61, 173, 205,
 };
 
-/// `tab33` (miniaudio/miniaudio.h:93388 @5266f24da).
+/// `tab33` (miniaudio/miniaudio.h:93388 @b29c606e2).
 const tab33 = [16]u8{
     252, 236, 220, 204, 188, 172, 156, 140, 124, 108, 92, 76, 60, 44, 28, 12,
 };
 
-/// `tabindex` (miniaudio/miniaudio.h:93389 @5266f24da).
+/// `tabindex` (miniaudio/miniaudio.h:93389 @b29c606e2).
 const tabindex = [32]i16{
     0,    32,   64,   98,   0,    132,  180,  218,  292,  364,  426,  538,  648,  746,  0,    1126,
     1460, 1460, 1460, 1460, 1460, 1460, 1460, 1460, 1842, 1842, 1842, 1842, 1842, 1842, 1842, 1842,
 };
 
-/// `g_linbits` (miniaudio/miniaudio.h:93390 @5266f24da).
+/// `g_linbits` (miniaudio/miniaudio.h:93390 @b29c606e2).
 const g_linbits = [32]u8{
     0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0,  0,
     1, 2, 3, 4, 6, 8, 10, 13, 4, 5, 6, 7, 8, 9, 11, 13,
 };
 
-/// `g_pan` (miniaudio/miniaudio.h:93554 @5266f24da).
+/// `g_pan` (miniaudio/miniaudio.h:93554 @b29c606e2).
 const g_pan = [14]f32{
     0.0, 1.0, 0.21132487, 0.78867513, 0.36602540, 0.63397460, 0.5, 0.5, 0.63397460, 0.36602540, 0.78867513, 0.21132487, 1.0, 0.0,
 };
 
-/// `g_aa` (miniaudio/miniaudio.h:93619 @5266f24da).
+/// `g_aa` (miniaudio/miniaudio.h:93619 @b29c606e2).
 const g_aa = [16]f32{
     0.85749293, 0.88174200, 0.94962865, 0.98331459, 0.99551782, 0.99916056, 0.99989920, 0.99999316, 0.51449576, 0.47173197, 0.31337745, 0.18191320, 0.09457419, 0.04096558, 0.01419856, 0.00369997,
 };
 
-/// `g_twid9` (miniaudio/miniaudio.h:93686 @5266f24da).
+/// `g_twid9` (miniaudio/miniaudio.h:93686 @b29c606e2).
 const g_twid9 = [18]f32{
     0.73727734, 0.79335334, 0.84339145, 0.88701083, 0.92387953, 0.95371695, 0.97629601, 0.99144486, 0.99904822, 0.67559021, 0.60876143, 0.53729961, 0.46174861, 0.38268343, 0.30070580, 0.21643961,
     0.13052619, 0.04361938,
 };
 
-/// `g_twid3` (miniaudio/miniaudio.h:93745 @5266f24da).
+/// `g_twid3` (miniaudio/miniaudio.h:93745 @b29c606e2).
 const g_twid3 = [6]f32{
     0.79335334, 0.92387953, 0.99144486, 0.60876143, 0.38268343, 0.13052619,
 };
 
-/// `g_mdct_window` (miniaudio/miniaudio.h:93781 @5266f24da).
+/// `g_mdct_window` (miniaudio/miniaudio.h:93781 @b29c606e2).
 const g_mdct_window = [36]f32{
     0.99904822, 0.99144486, 0.97629601, 0.95371695, 0.92387953, 0.88701083, 0.84339145, 0.79335334, 0.73727734, 0.04361938, 0.13052619, 0.21643961, 0.30070580, 0.38268343, 0.46174861, 0.53729961,
     0.60876143, 0.67559021, 1.0,        1.0,        1.0,        1.0,        1.0,        1.0,        0.99144486, 0.92387953, 0.79335334, 0.0,        0.0,        0.0,        0.0,        0.0,
     0.0,        0.13052619, 0.38268343, 0.60876143,
 };
 
-/// `g_sec` (miniaudio/miniaudio.h:93852 @5266f24da).
+/// `g_sec` (miniaudio/miniaudio.h:93852 @b29c606e2).
 const g_sec = [24]f32{
     10.19000816, 0.50060302, 0.50241929, 3.40760851, 0.50547093, 0.52249861, 2.05778098, 0.51544732, 0.56694406, 1.48416460, 0.53104258, 0.64682180, 1.16943991, 0.55310392, 0.78815460, 0.97256821,
     0.58293498,  1.06067765, 0.83934963, 0.62250412, 1.72244716, 0.74453628, 0.67480832, 5.10114861,
 };
 
-/// `g_win` (miniaudio/miniaudio.h:94052 @5266f24da).
+/// `g_win` (miniaudio/miniaudio.h:94052 @b29c606e2).
 const g_win = [240]f32{
     -1.0, 26.0, -31.0, 208.0, 218.0, 401.0,  -519.0,  2063.0, 2000.0, 4788.0, -5517.0, 7134.0, 5959.0,  35640.0, -39336.0, 74992.0,
     -1.0, 24.0, -35.0, 202.0, 222.0, 347.0,  -581.0,  2080.0, 1952.0, 4425.0, -5879.0, 7640.0, 5288.0,  33791.0, -41176.0, 74856.0,
@@ -2191,7 +2191,7 @@ const g_win = [240]f32{
     -5.0, 6.0,  -97.0, 111.0, 163.0, -127.0, -1498.0, 1634.0, 185.0,  288.0,  -9585.0, 9838.0, -8540.0, 11455.0, -62684.0, 65290.0,
 };
 
-/// `g_hz` (miniaudio/miniaudio.h:92947 @5266f24da).
+/// `g_hz` (miniaudio/miniaudio.h:92947 @b29c606e2).
 const g_hz = [3]u32{
     44100, 48000, 32000,
 };

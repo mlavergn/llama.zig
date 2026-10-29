@@ -8,8 +8,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek32.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_deepseek32`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek32.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_deepseek32`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` and
 //! `graph_mtp`.
 
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_deepseek32`'s `load_arch_hparams` (models/deepseek32.cpp:6 @5266f24da).
+/// Ports `llama_model_deepseek32`'s `load_arch_hparams` (models/deepseek32.cpp:6 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -71,7 +71,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deepseek32`'s `load_arch_tensors` (models/deepseek32.cpp:46 @5266f24da).
+/// Ports `llama_model_deepseek32`'s `load_arch_tensors` (models/deepseek32.cpp:46 @b29c606e2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -191,7 +191,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // The graph
 
 /// Ports `llama_model_deepseek32`'s `build_arch_graph` (models/deepseek32.cpp:155
-/// @5266f24da): the MTP draft head for that graph type, the main model
+/// @b29c606e2): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(variant, model, b);
@@ -248,7 +248,7 @@ fn mlaKqScale(b: *const graph.Builder, n_embd_head_k: i64) f32 {
 }
 
 /// Ports the constructor of `llama_model_deepseek32`'s `graph`
-/// (models/deepseek32.cpp:162 @5266f24da), and with `v` GLM-DSA's.
+/// (models/deepseek32.cpp:162 @b29c606e2), and with `v` GLM-DSA's.
 pub fn buildGraph(comptime v: Variant, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -597,7 +597,7 @@ pub fn buildMoe(b: *const graph.Builder, layer: *const model_mod.Layer, cur: *Te
 }
 
 /// Ports the constructor of `llama_model_deepseek32`'s `graph_mtp`
-/// (models/deepseek32.cpp:495 @5266f24da): the `LLM_GRAPH_TYPE_DECODER_MTP`
+/// (models/deepseek32.cpp:495 @b29c606e2): the `LLM_GRAPH_TYPE_DECODER_MTP`
 /// draft head, the DeepSeek family's NextN/MTP layer -- `enorm(embed) +
 /// hnorm(prev_hidden)`, concatenated, through `eh_proj`, then a whole
 /// decoder block of dense MLA and the sigmoid-gated MoE with its shared

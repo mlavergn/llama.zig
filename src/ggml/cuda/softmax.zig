@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/softmax.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/softmax.cuh` at v0.4.0 (`5266f24da`). The
+//! `llama.cpp/ggml/src/ggml-cuda/softmax.cuh` at v0.4.1 (`b29c606e2`). The
 //! kernels -- `soft_max_f32`, `soft_max_f32_parallelize_cols`,
 //! `soft_max_back_f32` -- stay CUDA.
 //!
@@ -37,10 +37,10 @@ extern fn powf(x: f32, y: f32) f32;
 extern fn log2f(x: f32) f32;
 extern fn floorf(x: f32) f32;
 
-/// Ports `CUDA_SOFT_MAX_BLOCK_SIZE` (softmax.cuh:3 @5266f24da).
+/// Ports `CUDA_SOFT_MAX_BLOCK_SIZE` (softmax.cuh:3 @b29c606e2).
 const block_size = 1024;
 
-/// Ports `soft_max_params` (softmax.cu:25 @5266f24da). Passed to the
+/// Ports `soft_max_params` (softmax.cu:25 @b29c606e2). Passed to the
 /// kernels by value, so the layout is the C's.
 const Params = extern struct {
     nheads: i64,
@@ -73,7 +73,7 @@ fn softMaxKernel(comptime use_shared: bool, comptime ncols: comptime_int, compti
     return kernels.get("softmax", kernels.tmpl("soft_max_f32", &.{ kernels.boolean(use_shared), kernels.int(ncols), kernels.int(block), kernels.typeName(T) }));
 }
 
-/// Ports `launch_soft_max_kernels` (softmax.cu:279 @5266f24da),
+/// Ports `launch_soft_max_kernels` (softmax.cu:279 @b29c606e2),
 /// instantiated with `<32, 64, 128, 256, 512, 1024, 2048, 4096>`.
 fn launchSoftMaxKernels(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaque, sinks: ?*const anyopaque, dst: ?*anyopaque, p: *const Params, stream: cu.cudaStream_t, block_dims: kernels.Dim3, block_nums: kernels.Dim3, nbytes_shared: usize) void {
     const id = common.getDevice();
@@ -96,7 +96,7 @@ fn launchSoftMaxKernels(comptime T: type, x: ?*const anyopaque, mask: ?*const an
     kernels.launch(k, .{ .grid = block_nums, .block = block_dims, .shmem = nbytes_shared, .stream = stream }, .{ x, mask, sinks, dst, p.* });
 }
 
-/// Ports `soft_max_f32_cuda` (softmax.cu:328 @5266f24da).
+/// Ports `soft_max_f32_cuda` (softmax.cu:328 @b29c606e2).
 fn softMaxF32Cuda(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaque, sinks: ?*const anyopaque, dst: ?*anyopaque, params: *const Params, stream: cu.cudaStream_t, ctx: *common.Context) void {
     var nth: c_int = warp_size;
     const ncols_x = params.ncols;
@@ -150,7 +150,7 @@ fn softMaxF32Cuda(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaqu
     }
 }
 
-/// Ports `soft_max_back_f32_cuda` (softmax.cu:374 @5266f24da).
+/// Ports `soft_max_back_f32_cuda` (softmax.cu:374 @b29c606e2).
 fn softMaxBackF32Cuda(grad: ?*const anyopaque, dstf: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, scale: f32, stream: cu.cudaStream_t) void {
     const block_dims: kernels.Dim3 = .{ .x = warp_size };
     const block_nums: kernels.Dim3 = .{ .x = @bitCast(nrows) };
@@ -163,7 +163,7 @@ fn softMaxBackF32Cuda(grad: ?*const anyopaque, dstf: ?*const anyopaque, dst: ?*a
     }, .{ grad, dstf, dst, ncols, scale });
 }
 
-/// Ports `ggml_cuda_op_soft_max` (softmax.cu:383 @5266f24da).
+/// Ports `ggml_cuda_op_soft_max` (softmax.cu:383 @b29c606e2).
 pub fn opSoftMax(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1: ?*const Tensor = dst.src[1];
@@ -229,7 +229,7 @@ pub fn opSoftMax(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_cuda_op_soft_max_back` (softmax.cu:454 @5266f24da).
+/// Ports `ggml_cuda_op_soft_max_back` (softmax.cu:454 @b29c606e2).
 pub fn opSoftMaxBack(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]); // grad
     const src1 = impl.one(Tensor, dst.src[1]); // forward pass output

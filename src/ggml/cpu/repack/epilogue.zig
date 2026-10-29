@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.4.0
-//! (`5266f24da`). Not a single function there — twenty copies of one
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.4.1
+//! (`b29c606e2`). Not a single function there — twenty copies of one
 //! statement, written out in each generic gemv and gemm:
 //!
 //! ```c

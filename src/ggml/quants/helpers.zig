@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.4.0, `5266f24da`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.4.1, `b29c606e2`), lines
 //! 619-889. Each function names the C function it replaces and the line it
 //! began at.
 //!
@@ -62,7 +62,7 @@ const std = @import("std");
 const impl = @import("../impl.zig");
 const c = impl.c;
 
-/// Ports the `GROUP_MAX_EPS` family (ggml-quants.c:20 @5266f24da).
+/// Ports the `GROUP_MAX_EPS` family (ggml-quants.c:20 @b29c606e2).
 ///
 /// The four members are consecutive: the plain one plus the `IQ3_XXS`,
 /// `IQ2_S` and `IQ1_M` variants.
@@ -81,7 +81,7 @@ pub const group_max_eps_iq2_s: f32 = 1e-8;
 pub const group_max_eps_iq1_m: f32 = 1e-7;
 pub const group_max_eps_iq1_s: f32 = 1e-12;
 
-/// Ports `nearest_int` (ggml-quants.c:621 @5266f24da).
+/// Ports `nearest_int` (ggml-quants.c:621 @b29c606e2).
 ///
 /// Round half to even, via the classic add-and-mask trick: adding
 /// `12582912.0` (1.5 * 2^23) forces the value's mantissa into a fixed position,
@@ -103,7 +103,7 @@ pub inline fn nearestInt(fval: f32) i32 {
     return (i & 0x007fffff) - 0x00400000;
 }
 
-/// Ports `make_qx_quants` (ggml-quants.c:628 @5266f24da).
+/// Ports `make_qx_quants` (ggml-quants.c:628 @b29c606e2).
 ///
 /// Fits a symmetric scale for `n` weights quantized to `[-nmax, nmax-1]`,
 /// searching 19 candidate scales around the naive one and keeping whichever
@@ -214,7 +214,7 @@ inline fn weightFor(xi: f32, rmse_type: i32, qw: ?[*]const f32, i: usize) f32 {
     };
 }
 
-/// Ports `make_q3_quants` (ggml-quants.c:697 @5266f24da).
+/// Ports `make_q3_quants` (ggml-quants.c:697 @b29c606e2).
 ///
 /// `q3_K`'s fit. Where `make_qx_quants` searches over scales, this holds the
 /// scale and iterates the *levels*: five passes over the block, each trying to
@@ -284,7 +284,7 @@ pub fn makeQ3Quants(n: usize, nmax: i32, x: [*]const f32, l_out: [*]i8, do_rmse:
     return 1 / iscale;
 }
 
-/// Ports `make_qkx2_quants` (ggml-quants.c:799 @5266f24da).
+/// Ports `make_qkx2_quants` (ggml-quants.c:799 @b29c606e2).
 ///
 /// The asymmetric fit, for the formats storing both a scale and a min. It tries
 /// `nstep + 1` candidate scales and, for each, solves the weighted least
@@ -400,7 +400,7 @@ pub fn makeQkx2Quants(
     return scale;
 }
 
-/// Ports `make_qkx3_quants` (ggml-quants.c:993 @5266f24da).
+/// Ports `make_qkx3_quants` (ggml-quants.c:993 @b29c606e2).
 ///
 /// `makeQkx2Quants`'s sibling, with two differences that matter:
 ///
@@ -507,7 +507,7 @@ pub fn makeQkx3Quants(
     return scale;
 }
 
-/// Ports `make_qp_quants` (ggml-quants.c:1076 @5266f24da).
+/// Ports `make_qp_quants` (ggml-quants.c:1076 @b29c606e2).
 ///
 /// Fits a scale for values that are all **non-negative** -- the sub-block
 /// scales and mins the K-quants have already produced. Hence `qp`: no sign to
@@ -608,7 +608,7 @@ pub fn makeQpQuants(n: usize, nmax: i32, x: [*]const f32, l_out: [*]u8, quant_we
     return if (suml2 > 0.0) sumlx / suml2 else 0.0;
 }
 
-/// Ports `get_scale_min_k4` (ggml-quants.c:880 @5266f24da).
+/// Ports `get_scale_min_k4` (ggml-quants.c:880 @b29c606e2).
 ///
 /// Unpacks one sub-block's 6-bit scale and 6-bit min from `q4_K`/`q5_K`'s
 /// 12-byte `scales` array. The first four sub-blocks are stored plainly in the

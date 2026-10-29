@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.4.0 (`5266f24da`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.4.1 (`b29c606e2`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # What lives here and what does not
@@ -95,12 +95,12 @@ fn swigluF32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32) void {
 // gelu, gelu_erf, gelu_quick, silu
 
 /// Ports `ggml_compute_forward_gelu_f32` and `ggml_compute_forward_gelu_f16`
-/// (ops.cpp:2111, 2158 @5266f24da), and with them
+/// (ops.cpp:2111, 2158 @b29c606e2), and with them
 /// `ggml_compute_forward_gelu_erf_f32`, `ggml_compute_forward_gelu_erf_f16`,
 /// `ggml_compute_forward_gelu_quick_f32`,
 /// `ggml_compute_forward_gelu_quick_f16`, `ggml_compute_forward_silu_f32`
 /// and `ggml_compute_forward_silu_f16`
-/// (ops.cpp:2341, 2388, 2460, 2507, 2579, 2626 @5266f24da), which are the
+/// (ops.cpp:2341, 2388, 2460, 2507, 2579, 2626 @b29c606e2), which are the
 /// same body over a different `ggml_vec_*`.
 ///
 /// Rows are split across threads; within a row the kernel runs over `nc`
@@ -160,22 +160,22 @@ fn unaryByType(
     }
 }
 
-/// Ports `ggml_compute_forward_gelu` (ops.cpp:2206 @5266f24da).
+/// Ports `ggml_compute_forward_gelu` (ops.cpp:2206 @b29c606e2).
 fn gelu(params: *const ComputeParams, dst: *Tensor) void {
     unaryByType(vec.gelu_f32, vec.gelu_f16, params, dst);
 }
 
-/// Ports `ggml_compute_forward_gelu_erf` (ops.cpp:2436 @5266f24da).
+/// Ports `ggml_compute_forward_gelu_erf` (ops.cpp:2436 @b29c606e2).
 fn geluErf(params: *const ComputeParams, dst: *Tensor) void {
     unaryByType(vec.gelu_erf_f32, vec.gelu_erf_f16, params, dst);
 }
 
-/// Ports `ggml_compute_forward_gelu_quick` (ops.cpp:2555 @5266f24da).
+/// Ports `ggml_compute_forward_gelu_quick` (ops.cpp:2555 @b29c606e2).
 fn geluQuick(params: *const ComputeParams, dst: *Tensor) void {
     unaryByType(vec.gelu_quick_f32, vec.gelu_quick_f16, params, dst);
 }
 
-/// Ports `ggml_compute_forward_silu` (ops.cpp:2674 @5266f24da).
+/// Ports `ggml_compute_forward_silu` (ops.cpp:2674 @b29c606e2).
 ///
 /// The `f32` arm reaches `ggml_vec_silu_f32`, exported by `cpu/vec.zig` with
 /// its NEON polynomial `exp`; the `f16` arm is the scalar `vec.h` inline with
@@ -188,7 +188,7 @@ fn silu(params: *const ComputeParams, dst: *Tensor) void {
 // leaky_relu
 
 /// Ports `ggml_compute_forward_leaky_relu_f32` and
-/// `ggml_compute_forward_leaky_relu_f16` (ops.cpp:2697, 2727 @5266f24da).
+/// `ggml_compute_forward_leaky_relu_f16` (ops.cpp:2697, 2727 @b29c606e2).
 ///
 /// Single-threaded: every thread but the first returns at once. Rows are
 /// addressed by `nb[1]` alone, the C assuming (in an `assert` compiled out
@@ -214,7 +214,7 @@ fn leakyReluRows(comptime T: type, params: *const ComputeParams, dst: *Tensor) v
     }
 }
 
-/// Ports `ggml_compute_forward_leaky_relu` (ops.cpp:2757 @5266f24da).
+/// Ports `ggml_compute_forward_leaky_relu` (ops.cpp:2757 @b29c606e2).
 pub export fn ggml_compute_forward_leaky_relu(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -229,7 +229,7 @@ pub export fn ggml_compute_forward_leaky_relu(params: *const ComputeParams, dst:
 // silu_back
 
 /// Ports `ggml_compute_forward_silu_back_f32` and
-/// `ggml_compute_forward_silu_back_f16` (ops.cpp:2781, 2824 @5266f24da).
+/// `ggml_compute_forward_silu_back_f16` (ops.cpp:2781, 2824 @b29c606e2).
 ///
 /// Note the operand order: `src[0]` is the incoming gradient and `src[1]` the
 /// forward input, and the row count comes from `src[1]`.
@@ -264,7 +264,7 @@ fn siluBackRows(comptime T: type, params: *const ComputeParams, dst: *Tensor) vo
     }
 }
 
-/// Ports `ggml_compute_forward_silu_back` (ops.cpp:2868 @5266f24da).
+/// Ports `ggml_compute_forward_silu_back` (ops.cpp:2868 @b29c606e2).
 pub export fn ggml_compute_forward_silu_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -358,14 +358,14 @@ const GluRows = struct {
 };
 
 /// Ports `ggml_compute_forward_reglu_f32` and `ggml_compute_forward_reglu_f16`
-/// (ops.cpp:2892, 2951 @5266f24da), and with them
+/// (ops.cpp:2892, 2951 @b29c606e2), and with them
 /// `ggml_compute_forward_geglu_f32`, `ggml_compute_forward_geglu_f16`,
 /// `ggml_compute_forward_swiglu_f32`, `ggml_compute_forward_swiglu_f16`,
 /// `ggml_compute_forward_geglu_erf_f32`,
 /// `ggml_compute_forward_geglu_erf_f16`,
 /// `ggml_compute_forward_geglu_quick_f32` and
 /// `ggml_compute_forward_geglu_quick_f16`
-/// (ops.cpp:3035, 3094, 3178, 3237, 3541, 3600, 3684, 3743 @5266f24da),
+/// (ops.cpp:3035, 3094, 3178, 3237, 3541, 3600, 3684, 3743 @b29c606e2),
 /// which differ from it only in the `ggml_vec_*` called.
 fn gluRows(
     comptime T: type,
@@ -399,27 +399,27 @@ fn gluByType(
     }
 }
 
-/// Ports `ggml_compute_forward_reglu` (ops.cpp:3011 @5266f24da).
+/// Ports `ggml_compute_forward_reglu` (ops.cpp:3011 @b29c606e2).
 fn reglu(params: *const ComputeParams, dst: *Tensor) void {
     gluByType(vec.reglu_f32, vec.reglu_f16, params, dst);
 }
 
-/// Ports `ggml_compute_forward_geglu` (ops.cpp:3154 @5266f24da).
+/// Ports `ggml_compute_forward_geglu` (ops.cpp:3154 @b29c606e2).
 fn geglu(params: *const ComputeParams, dst: *Tensor) void {
     gluByType(vec.geglu_f32, vec.geglu_f16, params, dst);
 }
 
-/// Ports `ggml_compute_forward_swiglu` (ops.cpp:3297 @5266f24da).
+/// Ports `ggml_compute_forward_swiglu` (ops.cpp:3297 @b29c606e2).
 fn swiglu(params: *const ComputeParams, dst: *Tensor) void {
     gluByType(swigluF32, vec.swiglu_f16, params, dst);
 }
 
-/// Ports `ggml_compute_forward_geglu_erf` (ops.cpp:3660 @5266f24da).
+/// Ports `ggml_compute_forward_geglu_erf` (ops.cpp:3660 @b29c606e2).
 fn gegluErf(params: *const ComputeParams, dst: *Tensor) void {
     gluByType(vec.geglu_erf_f32, vec.geglu_erf_f16, params, dst);
 }
 
-/// Ports `ggml_compute_forward_geglu_quick` (ops.cpp:3803 @5266f24da).
+/// Ports `ggml_compute_forward_geglu_quick` (ops.cpp:3803 @b29c606e2).
 fn gegluQuick(params: *const ComputeParams, dst: *Tensor) void {
     gluByType(vec.geglu_quick_f32, vec.geglu_quick_f16, params, dst);
 }
@@ -433,7 +433,7 @@ inline fn stdClamp(v: f32, lo: f32, hi: f32) f32 {
     return if (v < lo) lo else if (hi < v) hi else v;
 }
 
-/// Ports `ggml_compute_forward_swiglu_oai_f32` (ops.cpp:3321 @5266f24da).
+/// Ports `ggml_compute_forward_swiglu_oai_f32` (ops.cpp:3321 @b29c606e2).
 ///
 /// The clamped SwiGLU of gpt-oss: the value is capped at `limit` from above
 /// only, the gate on both sides, and the sigmoid is scaled by `alpha`. No
@@ -461,7 +461,7 @@ fn swigluOaiF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_swiglu_oai` (ops.cpp:3388 @5266f24da).
+/// Ports `ggml_compute_forward_swiglu_oai` (ops.cpp:3388 @b29c606e2).
 fn swigluOai(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -472,7 +472,7 @@ fn swigluOai(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_swiglu_clamp_f32` and
-/// `ggml_compute_forward_swiglu_clamp_f16` (ops.cpp:3408, 3467 @5266f24da).
+/// `ggml_compute_forward_swiglu_clamp_f16` (ops.cpp:3408, 3467 @b29c606e2).
 ///
 /// SwiGLU with the gate capped at `limit` from above and the value clamped
 /// on both sides; unlike `swiglu_oai` the sigmoid is unscaled and the value
@@ -505,7 +505,7 @@ fn swigluClampRows(comptime T: type, params: *const ComputeParams, dst: *Tensor)
     }
 }
 
-/// Ports `ggml_compute_forward_swiglu_clamp` (ops.cpp:3526 @5266f24da).
+/// Ports `ggml_compute_forward_swiglu_clamp` (ops.cpp:3526 @b29c606e2).
 fn swigluClamp(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -519,7 +519,7 @@ fn swigluClamp(params: *const ComputeParams, dst: *Tensor) void {
 // -----------------------------------------------------------------------------
 // The dispatchers
 
-/// Ports `ggml_compute_forward_unary` (ops.cpp:10137 @5266f24da).
+/// Ports `ggml_compute_forward_unary` (ops.cpp:10137 @b29c606e2).
 pub export fn ggml_compute_forward_unary(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const op = c.ggml_get_unary_op(dst);
 
@@ -550,7 +550,7 @@ pub export fn ggml_compute_forward_unary(params: *const ComputeParams, dst: *Ten
     }
 }
 
-/// Ports `ggml_compute_forward_glu` (ops.cpp:10241 @5266f24da).
+/// Ports `ggml_compute_forward_glu` (ops.cpp:10241 @b29c606e2).
 pub export fn ggml_compute_forward_glu(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const op = c.ggml_get_glu_op(dst);
 

@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/kimi-k3.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/kimi-k3.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_kimi_k3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, `kimi_k3_situ`, `kimi_k3_conv1d`, and its `graph`
 //! with `res_push`, `res_mix`, `build_kda_layer`, `build_mla_layer` and
@@ -27,7 +27,7 @@ const Model = model_mod.Model;
 const Layer = model_mod.Layer;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_kimi_k3`'s `load_arch_hparams` (models/kimi-k3.cpp:14 @5266f24da).
+/// Ports `llama_model_kimi_k3`'s `load_arch_hparams` (models/kimi-k3.cpp:16 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -68,7 +68,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_kimi_k3`'s `load_arch_tensors` (models/kimi-k3.cpp:51 @5266f24da).
+/// Ports `llama_model_kimi_k3`'s `load_arch_tensors` (models/kimi-k3.cpp:53 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -186,20 +186,20 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// `conv`, a lambda of `load_arch_tensors` (models/kimi-k3.cpp:51
-/// @5266f24da): a conv1d weight, 4D or else 3D.
+/// `conv`, a lambda of `load_arch_tensors` (models/kimi-k3.cpp:53
+/// @b29c606e2): a conv1d weight, 4D or else 3D.
 fn loadConv(self: *Model, tid: arch.Tensor, il: i32, d_conv: i64, d_inner: i64, exc: *Exception) Thrown!?*Tensor {
     const t = try self.createTensor(.{ .tensor = tid, .suffix = "weight", .bid = il }, &.{ d_conv, 1, d_inner, 1 }, loader.tensor_not_required, exc);
     return t orelse try self.createTensor(.{ .tensor = tid, .suffix = "weight", .bid = il }, &.{ d_conv, 1, d_inner }, 0, exc);
 }
 
-/// Ports `llama_model_kimi_k3`'s `build_arch_graph` (models/kimi-k3.cpp:167 @5266f24da).
+/// Ports `llama_model_kimi_k3`'s `build_arch_graph` (models/kimi-k3.cpp:169 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     var g: Graph = .{ .model = model, .b = b };
     g.build();
 }
 
-/// Ports `kimi_k3_situ` (models/kimi-k3.cpp:173 @5266f24da):
+/// Ports `kimi_k3_situ` (models/kimi-k3.cpp:175 @b29c606e2):
 /// situ(gate, up) = beta*tanh(gate/beta)*sigmoid(gate) *
 /// linear_beta*tanh(up/linear_beta); a linear_beta <= 0 leaves the up
 /// branch as it is.
@@ -214,9 +214,11 @@ fn situ(ctx: *c.ggml_context, gate: *Tensor, up_: *Tensor, beta: f32, linear_bet
     return c.ggml_mul(ctx, a, up);
 }
 
-/// Ports `kimi_k3_conv1d` (models/kimi-k3.cpp:356 @5266f24da): the causal
+/// Ports `kimi_k3_conv1d` (models/kimi-k3.cpp:358 @b29c606e2): the causal
 /// conv1d over one of Q, K or V; `qkv` picks which third of the conv state.
-fn conv1d(gf: *c.ggml_cgraph, ctx: *c.ggml_context, conv_states_all: *Tensor, conv_state_all: *Tensor, qkv: i64, x: *Tensor, proj_w: ?*Tensor, conv_w: ?*Tensor, d_conv: i64, head_dim: i64, n_head: i64, n_seq_tokens: i64, n_seqs: i64, n_tokens: i64, kv_head: i64) *Tensor {
+/// It writes `K_rs` conv windows back, group `s` the window `s` tokens back,
+/// so a rollback of up to `n_rs_seq` tokens can restore one.
+fn conv1d(gf: *c.ggml_cgraph, ctx: *c.ggml_context, conv_states_all: *Tensor, conv_state_all: *Tensor, qkv: i64, x: *Tensor, proj_w: ?*Tensor, conv_w: ?*Tensor, d_conv: i64, head_dim: i64, n_head: i64, n_seq_tokens: i64, n_seqs: i64, n_tokens: i64, kv_head: i64, mem_size: i64, K_rs: i64) *Tensor {
     const d_inner = head_dim * n_head;
     const conv_state_size = (d_conv - 1) * d_inner;
     const n_embd_r_total = 3 * conv_state_size;
@@ -228,9 +230,15 @@ fn conv1d(gf: *c.ggml_cgraph, ctx: *c.ggml_context, conv_states_all: *Tensor, co
     const x_3d = c.ggml_reshape_3d(ctx, x_proj, d_inner, n_seq_tokens, n_seqs);
     const conv_x: *Tensor = c.ggml_concat(ctx, conv_state_x, c.ggml_transpose(ctx, x_3d), 0);
 
-    const last_conv_x = c.ggml_view_3d(ctx, conv_x, d_conv - 1, d_inner, n_seqs, conv_x.nb[1], conv_x.nb[2], @as(usize, @intCast(n_seq_tokens)) * conv_x.nb[0]);
+    // [TAG_RECURRENT_ROLLBACK_SPLITS]: the last K_rs tokens must share one
+    // ubatch.
     const es_all: usize = c.ggml_element_size(conv_states_all);
-    c.ggml_build_forward_expand(gf, c.ggml_cpy(ctx, last_conv_x, c.ggml_view_3d(ctx, conv_states_all, d_conv - 1, d_inner, n_seqs, @as(usize, @intCast(d_conv - 1)) * es_all, @as(usize, @intCast(n_embd_r_total)) * es_all, @as(usize, @intCast(kv_head * n_embd_r_total + qkv * conv_state_size)) * es_all)));
+    var s: i64 = 0;
+    while (s < K_rs) : (s += 1) {
+        const s_idx: i64 = @max(0, n_seq_tokens - s);
+        const conv_x_s = c.ggml_view_3d(ctx, conv_x, d_conv - 1, d_inner, n_seqs, conv_x.nb[1], conv_x.nb[2], @as(usize, @intCast(s_idx)) * conv_x.nb[0]);
+        c.ggml_build_forward_expand(gf, c.ggml_cpy(ctx, conv_x_s, c.ggml_view_3d(ctx, conv_states_all, d_conv - 1, d_inner, n_seqs, @as(usize, @intCast(d_conv - 1)) * es_all, @as(usize, @intCast(n_embd_r_total)) * es_all, @as(usize, @intCast((s * mem_size + kv_head) * n_embd_r_total + qkv * conv_state_size)) * es_all)));
+    }
 
     const conv_weight = c.ggml_reshape_2d(ctx, conv_w, d_conv, d_inner);
     var Xcur = c.ggml_ssm_conv(ctx, conv_x, conv_weight);
@@ -248,8 +256,8 @@ const Graph = struct {
     /// The banked checkpoints, `[n_embd, n_ckpt, n_tokens]`.
     resi_stack: ?*Tensor = null,
 
-    /// Ports `llama_model_kimi_k3::graph`'s `res_push` (models/kimi-k3.cpp:190
-    /// @5266f24da): append the new checkpoint without refolding the chain.
+    /// Ports `llama_model_kimi_k3::graph`'s `res_push` (models/kimi-k3.cpp:192
+    /// @b29c606e2): append the new checkpoint without refolding the chain.
     /// The layout is `[n_embd, n_ckpt, n_tokens]`: rms_norm reduces over
     /// ne0, dsv4_hc_pre over ne1.
     fn resPush(self: *Graph, cur: *Tensor, n_embd: i64, n_tokens: i64) void {
@@ -259,8 +267,8 @@ const Graph = struct {
         self.resi_stack = if (self.resi_stack) |s| c.ggml_concat(ctx, s, ckpt, 1) else ckpt;
     }
 
-    /// Ports `llama_model_kimi_k3::graph`'s `res_mix` (models/kimi-k3.cpp:196
-    /// @5266f24da): a softmax over the banked checkpoints and the current
+    /// Ports `llama_model_kimi_k3::graph`'s `res_mix` (models/kimi-k3.cpp:198
+    /// @b29c606e2): a softmax over the banked checkpoints and the current
     /// stream, scored by `score_w`, and their weighted sum.
     fn resMix(self: *const Graph, cur: *Tensor, score_w: ?*Tensor, n_tokens: i64, il: c_int) *Tensor {
         const ctx = self.b.ctx0;
@@ -298,7 +306,7 @@ const Graph = struct {
     }
 
     /// Ports the constructor of `llama_model_kimi_k3`'s `graph`
-    /// (models/kimi-k3.cpp:234 @5266f24da).
+    /// (models/kimi-k3.cpp:236 @b29c606e2).
     fn build(self: *Graph) void {
         const model = self.model;
         const b = self.b;
@@ -328,9 +336,9 @@ const Graph = struct {
         const n_seqs: i64 = b.ubatch.n_seqs;
         const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
 
-        impl.assert(n_seqs != 0, "models/kimi-k3.cpp", 260, "n_seqs != 0");
-        impl.assert(b.ubatch.equalSeqs(), "models/kimi-k3.cpp", 261, "ubatch.equal_seqs()");
-        impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/kimi-k3.cpp", 262, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+        impl.assert(n_seqs != 0, "models/kimi-k3.cpp", 262, "n_seqs != 0");
+        impl.assert(b.ubatch.equalSeqs(), "models/kimi-k3.cpp", 263, "ubatch.equal_seqs()");
+        impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/kimi-k3.cpp", 264, "ubatch.n_tokens == n_seq_tokens * n_seqs");
 
         const mla: Mla = .{
             .n_embd_head_k_mla = hp.nEmbdHeadKMla(),
@@ -416,7 +424,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_kimi_k3::graph`'s `build_kda_layer`
-    /// (models/kimi-k3.cpp:391 @5266f24da).
+    /// (models/kimi-k3.cpp:399 @b29c606e2).
     fn buildKdaLayer(self: *const Graph, cur_: *Tensor, layer: *const Layer, inp_rs: *graph.InpRs, d_conv: i64, head_dim: i64, n_head_kda: i64, d_inner: i64, n_seq_tokens: i64, n_seqs: i64, il: c_int) *Tensor {
         const b = self.b;
         const ctx = b.ctx0;
@@ -430,9 +438,12 @@ const Graph = struct {
         const conv_states_all = mctx_cur.getRL(il);
         const conv_state_all = b.buildRs(inp_rs, conv_states_all, @intCast(hp.nEmbdR()), @intCast(n_seqs), null);
 
-        var Qcur = conv1d(b.gf, ctx, conv_states_all, conv_state_all, 0, cur, layer.wq, layer.ssm_q_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs, n_tokens, kv_head);
-        var Kcur = conv1d(b.gf, ctx, conv_states_all, conv_state_all, 1, cur, layer.wk, layer.ssm_k_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs, n_tokens, kv_head);
-        const Vcur = conv1d(b.gf, ctx, conv_states_all, conv_state_all, 2, cur, layer.wv, layer.ssm_v_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs, n_tokens, kv_head);
+        const mem_size: i64 = mctx_cur.getSize();
+        const K_rs: i64 = @as(i64, b.cparams.n_rs_seq) + 1;
+
+        var Qcur = conv1d(b.gf, ctx, conv_states_all, conv_state_all, 0, cur, layer.wq, layer.ssm_q_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs, n_tokens, kv_head, mem_size, K_rs);
+        var Kcur = conv1d(b.gf, ctx, conv_states_all, conv_state_all, 1, cur, layer.wk, layer.ssm_k_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs, n_tokens, kv_head, mem_size, K_rs);
+        const Vcur = conv1d(b.gf, ctx, conv_states_all, conv_state_all, 2, cur, layer.wv, layer.ssm_v_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs, n_tokens, kv_head, mem_size, K_rs);
         b.cb(Qcur, "kda_q_conv", il);
         b.cb(Kcur, "kda_k_conv", il);
         b.cb(Vcur, "kda_v_conv", il);
@@ -473,18 +484,13 @@ const Graph = struct {
         var state = b.buildRs(inp_rs, ssm_states_all, @intCast(hp.nEmbdS()), @intCast(n_seqs), null);
         state = c.ggml_reshape_4d(ctx, state, head_dim, head_dim, n_head_kda, n_seqs);
 
-        const eps = hp.f_norm_rms_eps;
-        Qcur = c.ggml_l2_norm(ctx, Qcur, eps);
-        Kcur = c.ggml_l2_norm(ctx, Kcur, eps);
+        const eps_norm = hp.f_norm_rms_eps;
+        Qcur = delta_net.buildGdnL2Norm(ctx, Qcur, eps_norm);
+        Kcur = delta_net.buildGdnL2Norm(ctx, Kcur, eps_norm);
 
-        const attn_out = delta_net.buildDeltaNet(b, Qcur, Kcur, Vcur, g1, beta, state, il);
-
-        const output = c.ggml_cont(ctx, attn_out.out);
+        var output = delta_net.buildRecurrentAttn(b, inp_rs, ssm_states_all, Qcur, Kcur, Vcur, g1, beta, state, il);
+        output = c.ggml_cont(ctx, output);
         b.cb(output, "kda_scan_out", il);
-        const new_state = attn_out.state;
-
-        const n_embd_s: i64 = hp.nEmbdS();
-        c.ggml_build_forward_expand(b.gf, c.ggml_cpy(ctx, new_state, c.ggml_view_1d(ctx, ssm_states_all, n_embd_s * n_seqs, @as(usize, @intCast(kv_head * n_embd_s)) * c.ggml_element_size(ssm_states_all))));
 
         // K3's single full-rank gate; Kimi Linear factors it as g_b(g_a(x)).
         const cur_2d = c.ggml_reshape_2d(ctx, cur_3d, cur_3d.ne[0], n_seq_tokens * n_seqs);
@@ -515,7 +521,7 @@ const Graph = struct {
     };
 
     /// Ports `llama_model_kimi_k3::graph`'s `build_mla_layer`
-    /// (models/kimi-k3.cpp:481 @5266f24da): nope-only MLA, with K3's
+    /// (models/kimi-k3.cpp:485 @b29c606e2): nope-only MLA, with K3's
     /// sigmoid output gate.
     fn buildMlaLayer(self: *const Graph, cur: *Tensor, layer: *const Layer, inp_attn_k: ?*graph.InpAttnK, inp_attn_kv: ?*graph.InpAttnKv, d: *const Mla, il: c_int) *Tensor {
         const b = self.b;
@@ -586,7 +592,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_kimi_k3::graph`'s `build_latent_moe`
-    /// (models/kimi-k3.cpp:566 @5266f24da): down-project, run the routed
+    /// (models/kimi-k3.cpp:570 @b29c606e2): down-project, run the routed
     /// experts in the latent space, norm, up-project; the shared experts
     /// stay at n_embd and read the input as it came.
     fn buildLatentMoe(self: *const Graph, cur: *Tensor, layer: *const Layer, n_embd_latent: i64, il: c_int) *Tensor {

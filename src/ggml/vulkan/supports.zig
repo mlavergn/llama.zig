@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
-//! (`5266f24da`): `ggml_backend_vk_device_supports_op`. The device vtable
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
+//! (`b29c606e2`): `ggml_backend_vk_device_supports_op`. The device vtable
 //! answers this AND-ed with `ops.ported`, so the scheduler sends nothing to
 //! host code the port does not have yet.
 
@@ -32,13 +32,13 @@ const quant_types = [_]c.ggml_type{
     c.GGML_TYPE_Q1_0,    c.GGML_TYPE_Q2_0,   c.GGML_TYPE_Q4_0,  c.GGML_TYPE_Q4_1,    c.GGML_TYPE_Q5_0,  c.GGML_TYPE_Q5_1,   c.GGML_TYPE_Q8_0,
     c.GGML_TYPE_Q2_K,    c.GGML_TYPE_Q3_K,   c.GGML_TYPE_Q4_K,  c.GGML_TYPE_Q5_K,    c.GGML_TYPE_Q6_K,  c.GGML_TYPE_IQ1_S,  c.GGML_TYPE_IQ1_M,
     c.GGML_TYPE_IQ2_XXS, c.GGML_TYPE_IQ2_XS, c.GGML_TYPE_IQ2_S, c.GGML_TYPE_IQ3_XXS, c.GGML_TYPE_IQ3_S, c.GGML_TYPE_IQ4_XS, c.GGML_TYPE_IQ4_NL,
-    c.GGML_TYPE_MXFP4,   c.GGML_TYPE_NVFP4,  c.GGML_TYPE_TQ2_0,
+    c.GGML_TYPE_MXFP4,   c.GGML_TYPE_NVFP4,  c.GGML_TYPE_TQ1_0, c.GGML_TYPE_TQ2_0,
 };
 
 /// The types a CPY converts f32 to and from.
 const cpy_types = [_]c.ggml_type{ c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0, c.GGML_TYPE_IQ4_NL };
 
-/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:18561 @5266f24da).
+/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:19142 @b29c606e2).
 pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
     const device = m.device.getDevice(dev_idx);
 
@@ -195,6 +195,18 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
         c.GGML_OP_CUMSUM => {
             if (device.subgroup_arithmetic and device.subgroup_require_full_support) return s(op, 0).type == F32 and c.ggml_is_contiguous_rows(s(op, 0));
             return false;
+        },
+        c.GGML_OP_DSV4_HC_COMB, c.GGML_OP_DSV4_HC_PRE, c.GGML_OP_DSV4_HC_POST => {
+            if (op.type != F32) return false;
+            for (0..c.GGML_MAX_SRC) |i| {
+                if (op.src[i]) |src| if (src.*.type != F32) return false;
+            }
+            // hc is hardcoded to 4 in the shaders. ggml only constrains it
+            // to 4 for COMB, so PRE/POST have to be checked here.
+            if (op.op == c.GGML_OP_DSV4_HC_PRE and s(op, 0).ne[1] != 4) return false;
+            if (op.op == c.GGML_OP_DSV4_HC_POST and s(op, 1).ne[1] != 4) return false;
+            if (op.op == c.GGML_OP_DSV4_HC_COMB) return device.pipeline_dsv4_hc_comb_f32 != null;
+            return true;
         },
         c.GGML_OP_SOLVE_TRI => {
             if (op.type != F32 or s(op, 0).type != F32) return false;

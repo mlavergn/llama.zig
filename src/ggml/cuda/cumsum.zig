@@ -3,12 +3,12 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/cumsum.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/cumsum.cuh` at v0.4.0 (`5266f24da`). The
+//! `llama.cpp/ggml/src/ggml-cuda/cumsum.cuh` at v0.4.1 (`b29c606e2`). The
 //! kernels, `cumsum_cub_kernel` and `cumsum_kernel`, stay CUDA.
 //!
 //! # CUB
 //!
-//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:112 @5266f24da). Long
+//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:115 @b29c606e2). Long
 //! contiguous rows go to `cub::DeviceScan::InclusiveSum`, whose host-side
 //! dispatch is CUB's header templates; `cub_shim.cu` wraps that one call
 //! behind a C ABI (PLAN.md, Decision 47). Only `float` is instantiated:
@@ -23,7 +23,7 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_CUMSUM_BLOCK_SIZE` (cumsum.cuh:3 @5266f24da).
+/// Ports `CUDA_CUMSUM_BLOCK_SIZE` (cumsum.cuh:3 @b29c606e2).
 const block_size = 256;
 
 /// `cub_shim.cu`'s wrapper of `cumsum_cub<float>`'s `InclusiveSum`.
@@ -40,7 +40,7 @@ fn strideOf(nb: i64, ts: usize) i64 {
     return @bitCast(@as(u64, @bitCast(nb)) / ts);
 }
 
-/// Ports `cumsum_cub` (cumsum.cu:190 @5266f24da) for `T = float`. Upstream
+/// Ports `cumsum_cub` (cumsum.cu:190 @b29c606e2) for `T = float`. Upstream
 /// checks neither call's result, and neither does this.
 fn cumsumCub(pool: *common.Pool, src: [*]const f32, dst: [*]f32, ne: i64, stream: cu.cudaStream_t) void {
     var tmp_size: usize = 0;
@@ -55,7 +55,7 @@ fn cumsumCub(pool: *common.Pool, src: [*]const f32, dst: [*]f32, ne: i64, stream
     _ = ggml_cuda_cub_inclusive_sum_f32(tmp_alloc.get(), &tmp_size, src, dst, ne, stream);
 }
 
-/// Ports `cumsum_cuda` (cumsum.cu:214 @5266f24da) for `T = float`.
+/// Ports `cumsum_cuda` (cumsum.cu:214 @b29c606e2) for `T = float`.
 fn cumsumCuda(
     ctx: *common.Context,
     src: [*]const f32,
@@ -137,7 +137,7 @@ fn cumsumCuda(
     }
 }
 
-/// Ports `ggml_cuda_op_cumsum` (cumsum.cu:267 @5266f24da).
+/// Ports `ggml_cuda_op_cumsum` (cumsum.cu:267 @b29c606e2).
 pub fn opCumsum(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const stream = ctx.stream();

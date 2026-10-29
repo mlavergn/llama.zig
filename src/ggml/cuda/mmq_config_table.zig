@@ -7,7 +7,7 @@
 //! `llama.cpp/ggml/src/ggml-cuda/mmq-config-pascal-dp4a.cuh`,
 //! `llama.cpp/ggml/src/ggml-cuda/mmq-config-ampere.cuh`,
 //! `llama.cpp/ggml/src/ggml-cuda/mmq-config-blackwell.cuh`,
-//! at v0.4.0 (`5266f24da`). Each table is a function's `CASE` lines in
+//! at v0.4.1 (`b29c606e2`). Each table is a function's `CASE` lines in
 //! order; the first entry matching (type, J, fallback) wins, else the
 //! function's last line: a default entry, or another family's table.
 
@@ -24,7 +24,7 @@ pub const Table = struct {
     fallthrough: ?*const Table,
 };
 
-/// Ports `ggml_cuda_mmq_get_config_pascal_older` (mmq-config-pascal-older.cuh:1 @5266f24da).
+/// Ports `ggml_cuda_mmq_get_config_pascal_older` (mmq-config-pascal-older.cuh:1 @b29c606e2).
 pub const pascal_older: Table = .{
     .cases = &.{
         .{ .type = c.GGML_TYPE_Q1_0, .nthreads = 256, .occupancy = 2, .I = 64, .J = 8, .sram_layout = .q8_0, .K_vram = 256, .stream_k = false, .fallback = true },
@@ -274,7 +274,7 @@ pub const pascal_older: Table = .{
     .fallthrough = null,
 };
 
-/// Ports `ggml_cuda_mmq_get_config_pascal_dp4a` (mmq-config-pascal-dp4a.cuh:1 @5266f24da).
+/// Ports `ggml_cuda_mmq_get_config_pascal_dp4a` (mmq-config-pascal-dp4a.cuh:1 @b29c606e2).
 pub const pascal_dp4a: Table = .{
     .cases = &.{
         .{ .type = c.GGML_TYPE_Q1_0, .nthreads = 256, .occupancy = 2, .I = 64, .J = 8, .sram_layout = .q8_0, .K_vram = 256, .stream_k = false, .fallback = true },
@@ -524,7 +524,7 @@ pub const pascal_dp4a: Table = .{
     .fallthrough = null,
 };
 
-/// Ports `ggml_cuda_mmq_get_config_ampere` (mmq-config-ampere.cuh:1 @5266f24da).
+/// Ports `ggml_cuda_mmq_get_config_ampere` (mmq-config-ampere.cuh:1 @b29c606e2).
 pub const ampere: Table = .{
     .cases = &.{
         .{ .type = c.GGML_TYPE_Q1_0, .nthreads = 256, .occupancy = 1, .I = 128, .J = 8, .sram_layout = .q8_0, .K_vram = 256, .stream_k = true, .fallback = true },
@@ -884,7 +884,7 @@ pub const ampere: Table = .{
     .fallthrough = null,
 };
 
-/// Ports `ggml_cuda_mmq_get_config_blackwell` (mmq-config-blackwell.cuh:1 @5266f24da).
+/// Ports `ggml_cuda_mmq_get_config_blackwell` (mmq-config-blackwell.cuh:1 @b29c606e2).
 pub const blackwell: Table = .{
     .cases = &.{
         .{ .type = c.GGML_TYPE_MXFP4, .nthreads = 256, .occupancy = 1, .I = 128, .J = 8, .sram_layout = .fp4, .K_vram = 512, .stream_k = true, .fallback = true },

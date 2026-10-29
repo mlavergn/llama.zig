@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.4.0
-//! (`5266f24da`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.4.1
+//! (`b29c606e2`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # Four quants per byte, four scales per step
@@ -42,7 +42,7 @@ const c = impl.c;
 const QK_K = 256;
 
 /// Ports `ggml_gemv_q2_K_8x8_q8_K_generic`
-/// (ggml-cpu/repack.cpp:1029 @5266f24da).
+/// (ggml-cpu/repack.cpp:1029 @b29c606e2).
 fn gemv(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     _ = bs;
     _ = nr;
@@ -112,7 +112,7 @@ fn gemv(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaq
 }
 
 /// Ports `ggml_gemm_q2_K_8x8_q8_K_generic`
-/// (ggml-cpu/repack.cpp:1986 @5266f24da).
+/// (ggml-cpu/repack.cpp:1986 @b29c606e2).
 fn gemm(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     const qk: i32 = QK_K;
     const nb: i32 = @divTrunc(n, qk);

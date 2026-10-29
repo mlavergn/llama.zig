@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/pockettts-gen.cpp` at v0.4.0
-//! (`5266f24da`), and the `PROJECTOR_TYPE_POCKETTTS_GEN` arm of
+//! Ports `llama.cpp/tools/mtmd/models/pockettts-gen.cpp` at v0.4.1
+//! (`b29c606e2`), and the `PROJECTOR_TYPE_POCKETTTS_GEN` arm of
 //! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`). Each
 //! declaration names what it ports and the line it began at.
 
@@ -25,7 +25,7 @@ const ne = graph.ne;
 const nb = graph.nb;
 
 /// Ports `clip_graph_pockettts_gen` (mtmd/models/models.h:369
-/// @5266f24da): the builder's
+/// @b29c606e2): the builder's
 /// parameters beside the parent graph.
 const Gen = struct {
     g: *graph.Graph,
@@ -33,7 +33,7 @@ const Gen = struct {
     n_step: c_int, // lsd_decode steps, fixed at graph-build time
     n_frames: c_int, // GEN_WAV only: number of latents to decode
 
-    /// Ports `modulate` (pockettts-gen.cpp:12 @5266f24da), a member of
+    /// Ports `modulate` (pockettts-gen.cpp:12 @b29c606e2), a member of
     /// `clip_graph_pockettts_gen`: AdaLN modulation, `x * (1 + scale) +
     /// shift`.
     fn modulate(self: *const Gen, x: T, shift: T, scale: T) T {
@@ -42,7 +42,7 @@ const Gen = struct {
         return c.ggml_add(ctx0, cur, shift);
     }
 
-    /// Ports `time_embed` (pockettts-gen.cpp:18 @5266f24da), a member of
+    /// Ports `time_embed` (pockettts-gen.cpp:18 @b29c606e2), a member of
     /// `clip_graph_pockettts_gen`: TimestepEmbedder in the reference.
     fn timeEmbed(self: *const Gen, te: *const model_mod.FlowNet.TimeEmbd, t: f32) T {
         const ctx0 = self.g.ctx0;
@@ -71,7 +71,7 @@ const Gen = struct {
         return cur;
     }
 
-    /// Ports `flow_forward` (pockettts-gen.cpp:45 @5266f24da), a member of
+    /// Ports `flow_forward` (pockettts-gen.cpp:45 @b29c606e2), a member of
     /// `clip_graph_pockettts_gen`: one velocity evaluation, `v(cond, s, t,
     /// x)`.
     fn flowForward(self: *const Gen, cond: T, x: T, s: f32, t: f32) T {
@@ -130,7 +130,7 @@ const Gen = struct {
     }
 };
 
-/// Ports `list_pockettts_state_slots` (pockettts-gen.cpp:102 @5266f24da):
+/// Ports `list_pockettts_state_slots` (pockettts-gen.cpp:102 @b29c606e2):
 /// the state carried between GEN_WAV calls -- rope offset, per-layer KV
 /// window, conv left context and the transposed-conv overlap tails. The
 /// caller frees the slice with `module.freeSlots`.
@@ -176,10 +176,10 @@ pub fn listStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod
     return slots.toOwnedSlice(gpa);
 }
 
-/// Ports `build` (pockettts-gen.cpp:139 @5266f24da), a member of
+/// Ports `build` (pockettts-gen.cpp:139 @b29c606e2), a member of
 /// `clip_graph_pockettts_gen`, with the builder's parameters derived as
 /// clip_get_graph_builder's `PROJECTOR_TYPE_POCKETTTS_GEN` arm does
-/// (mtmd/clip.cpp:1104 @5266f24da).
+/// (mtmd/clip.cpp:1104 @b29c606e2).
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     const model = g.model;
     const hparams = g.hparams;

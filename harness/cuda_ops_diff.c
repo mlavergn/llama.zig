@@ -21,7 +21,7 @@
  * Two departures from a straight `ggml_backend_compare_graph_backend`:
  *
  * - **Whole-graph cases give the reference a graph it can fuse.**
- *   `ggml_backend_graph_copy` (ggml-backend.cpp:2214 @5266f24da) fills the
+ *   `ggml_backend_graph_copy` (ggml-backend.cpp:2207 @b29c606e2) fills the
  *   copy's `nodes[]` directly and never builds its use counts, so the second
  *   backend of a comparison can never fuse -- harmless upstream, where that
  *   backend is the CPU, and fatal here, where it would compare the port's
@@ -31,7 +31,7 @@
  *   into a fresh graph: same nodes, same order, real use counts.
  * - **The copy keeps `ggml_cast`'s self-reference.** `ggml_cast` builds a
  *   `CPY` whose `src[1]` is the node itself, and `graph_copy_dup_tensor`
- *   (ggml-backend.cpp:2153 @5266f24da) records a node's copy only after
+ *   (ggml-backend.cpp:2146 @b29c606e2) records a node's copy only after
  *   copying its sources, so the self-reference comes back as
  *   the still-empty slot: the copy's `src[1]` is NULL. Upstream's CPU never
  *   reads it; the reference CUDA backend dispatches `CPY` as

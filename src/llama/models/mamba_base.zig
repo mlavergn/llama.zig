@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mamba-base.cpp` at v0.4.0
-//! (`5266f24da`): every member of `llm_build_mamba_base`.
+//! Ported from `llama.cpp/src/models/mamba-base.cpp` at v0.4.1
+//! (`b29c606e2`): every member of `llm_build_mamba_base`.
 //!
 //! The C++ makes these members of a subclass of `llm_graph_context`; here
 //! they are functions over the builder.
@@ -56,7 +56,7 @@ pub const SsmRows = struct {
 };
 
 /// Ports `llm_build_mamba_base`'s `build_mamba_layer` (models/mamba-base.cpp:9
-/// @5266f24da): a Mamba-1 block over the recurrent states.
+/// @b29c606e2): a Mamba-1 block over the recurrent states.
 ///
 /// Return: `{n_embd, n_tokens}`.
 pub fn buildMambaLayer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {
@@ -173,7 +173,7 @@ pub fn buildMambaLayer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tensor
 }
 
 /// Ports `llm_build_mamba_base`'s `build_mamba2_layer` (models/mamba-base.cpp:151
-/// @5266f24da): a Mamba-2 block over the recurrent states, with rollback
+/// @b29c606e2): a Mamba-2 block over the recurrent states, with rollback
 /// snapshots when the context keeps them.
 ///
 /// Return: `{n_embd, n_tokens}`.

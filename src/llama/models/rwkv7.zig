@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/rwkv7.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/rwkv7.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_rwkv7`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. The shared blocks are in
 //! `rwkv7_base.zig`.
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_rwkv7`'s `load_arch_hparams` (models/rwkv7.cpp:3 @5266f24da).
+/// Ports `llama_model_rwkv7`'s `load_arch_hparams` (models/rwkv7.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     try loadHparams(self, ml, exc);
 }
@@ -69,7 +69,7 @@ pub fn loadHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thro
     };
 }
 
-/// Ports `llama_model_rwkv7`'s `load_arch_tensors` (models/rwkv7.cpp:46 @5266f24da).
+/// Ports `llama_model_rwkv7`'s `load_arch_tensors` (models/rwkv7.cpp:46 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -124,8 +124,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
 /// The decay, in-context learning rate and value-residual tensors, from
 /// `time_mix_w0` on, which RWKV-7 and ARWKV-7 load alike
-/// (models/rwkv7.cpp:76 @5266f24da, and `time_mix_w0` in
-/// models/arwkv7.cpp:66 @5266f24da). The first layer's value-residual
+/// (models/rwkv7.cpp:76 @b29c606e2, and `time_mix_w0` in
+/// models/arwkv7.cpp:66 @b29c606e2). The first layer's value-residual
 /// tensors are loaded at the ICLR rank and never used.
 pub fn createTimeMixLora(self: *Model, layer: *model_mod.Layer, i: i32, n_embd: i64, n_lora_decay: i64, n_lora_iclr: i64, n_lora_value_res_mix: i64, exc: *Exception) Thrown!void {
     layer.time_mix_w0 = try self.createTensor(.{ .tensor = .time_mix_w0, .suffix = "weight", .bid = i }, &.{n_embd}, 0, exc);
@@ -150,8 +150,8 @@ pub fn createTimeMixLora(self: *Model, layer: *model_mod.Layer, i: i32, n_embd: 
 
 /// The key/receptance mixing vectors and the key, value and receptance
 /// projections, from `time_mix_k_k` on, which RWKV-7 and ARWKV-7 load
-/// alike (models/rwkv7.cpp:100 @5266f24da, and `time_mix_k_k` in
-/// models/arwkv7.cpp:95 @5266f24da).
+/// alike (models/rwkv7.cpp:100 @b29c606e2, and `time_mix_k_k` in
+/// models/arwkv7.cpp:95 @b29c606e2).
 pub fn createTimeMixKr(self: *Model, layer: *model_mod.Layer, i: i32, n_embd: i64, attn_hidden_size: i64, exc: *Exception) Thrown!void {
     layer.time_mix_k_k = try self.createTensor(.{ .tensor = .time_mix_k_k, .suffix = "weight", .bid = i }, &.{attn_hidden_size}, 0, exc);
     layer.time_mix_k_a = try self.createTensor(.{ .tensor = .time_mix_k_a, .suffix = "weight", .bid = i }, &.{attn_hidden_size}, 0, exc);
@@ -162,12 +162,12 @@ pub fn createTimeMixKr(self: *Model, layer: *model_mod.Layer, i: i32, n_embd: i6
     layer.time_mix_receptance = try self.createTensor(.{ .tensor = .time_mix_receptance, .suffix = "weight", .bid = i }, &.{ attn_hidden_size, n_embd }, 0, exc);
 }
 
-/// Ports `llama_model_rwkv7`'s `build_arch_graph` (models/rwkv7.cpp:120 @5266f24da).
+/// Ports `llama_model_rwkv7`'s `build_arch_graph` (models/rwkv7.cpp:120 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_rwkv7`'s `graph` (models/rwkv7.cpp:124 @5266f24da).
+/// Ports the constructor of `llama_model_rwkv7`'s `graph` (models/rwkv7.cpp:124 @b29c606e2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

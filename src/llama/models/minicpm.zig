@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/minicpm.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/minicpm.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_minicpm`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, which builds `llama_model_granite`'s `graph`
 //! (`granite.zig`).
@@ -20,7 +20,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_minicpm`'s `load_arch_hparams` (models/minicpm.cpp:3 @5266f24da).
+/// Ports `llama_model_minicpm`'s `load_arch_hparams` (models/minicpm.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -48,7 +48,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_minicpm`'s `load_arch_tensors` (models/minicpm.cpp:26 @5266f24da).
+/// Ports `llama_model_minicpm`'s `load_arch_tensors` (models/minicpm.cpp:26 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -114,7 +114,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_minicpm`'s `build_arch_graph` (models/minicpm.cpp:86
-/// @5266f24da): Granite's `graph`.
+/// @b29c606e2): Granite's `graph`.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     granite.buildGraph(model, b);
 }

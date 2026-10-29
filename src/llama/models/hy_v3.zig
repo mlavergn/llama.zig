@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/hy-v3.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/hy-v3.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_hy_v3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
@@ -23,7 +23,7 @@ const Model = model_mod.Model;
 const Layer = model_mod.Layer;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_hy_v3`'s `load_arch_hparams` (models/hy-v3.cpp:3 @5266f24da).
+/// Ports `llama_model_hy_v3`'s `load_arch_hparams` (models/hy-v3.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -46,7 +46,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_hy_v3`'s `load_arch_tensors` (models/hy-v3.cpp:22 @5266f24da).
+/// Ports `llama_model_hy_v3`'s `load_arch_tensors` (models/hy-v3.cpp:22 @b29c606e2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -95,7 +95,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// `load_block`, a lambda of `load_arch_tensors` (models/hy-v3.cpp:22
-/// @5266f24da).
+/// @b29c606e2).
 fn loadBlock(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(i)];
@@ -134,7 +134,7 @@ fn loadBlock(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exc
 // The graph
 
 /// Ports `llama_model_hy_v3`'s `build_arch_graph` (models/hy-v3.cpp:99
-/// @5266f24da): the MTP draft head for that graph type, the main model
+/// @b29c606e2): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -184,7 +184,7 @@ fn buildFfnBlock(b: *const graph.Builder, layer: *const Layer, cur_: *Tensor, co
 }
 
 /// Ports the constructor of `llama_model_hy_v3`'s `graph`
-/// (models/hy-v3.cpp:106 @5266f24da).
+/// (models/hy-v3.cpp:106 @b29c606e2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -271,7 +271,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_hy_v3`'s `graph_mtp`
-/// (models/hy-v3.cpp:239 @5266f24da): the MoE draft head. As vLLM's
+/// (models/hy-v3.cpp:239 @b29c606e2): the MoE draft head. As vLLM's
 /// HYV3MultiTokenPredictorLayer: enorm(embed) and hnorm(prev_hidden),
 /// concatenated, through eh_proj, a hy_v3 decoder block, the final
 /// layernorm (stored as `nextn.shared_head_norm`), and the main model's LM

@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.0, `5266f24da`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.1, `b29c606e2`),
 //! the section beginning at line 1162. Each function names the C it replaces
 //! and the line it began at.
 //!
@@ -75,7 +75,7 @@ inline fn min(a: i64, b: i64) i64 {
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_mul_mat
 
-/// Ports `ggml_compute_forward_mul_mat_one_chunk` (ggml-cpu.c:1165 @5266f24da).
+/// Ports `ggml_compute_forward_mul_mat_one_chunk` (ggml-cpu.c:1165 @b29c606e2).
 ///
 /// Computes the rectangle `[ir0_start, ir0_end) x [ir1_start, ir1_end)` of the
 /// result, tiling 16x16 so a tile of `dst` stays in cache across the inner
@@ -195,7 +195,7 @@ fn oneChunk(
     }
 }
 
-/// Ports `ggml_compute_forward_mul_mat` (ggml-cpu.c:1255 @5266f24da).
+/// Ports `ggml_compute_forward_mul_mat` (ggml-cpu.c:1255 @b29c606e2).
 ///
 /// Parameters:
 /// - `params`: this thread's index, count, and work buffer.
@@ -414,7 +414,7 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_mul_mat_id
 
-/// Ports `struct mmid_row_mapping` (ggml-cpu.c:1466 @5266f24da).
+/// Ports `struct mmid_row_mapping` (ggml-cpu.c:1466 @b29c606e2).
 pub const RowMapping = extern struct {
     /// The selected expert's index within the row.
     i1: i32,
@@ -422,12 +422,12 @@ pub const RowMapping = extern struct {
     i2: i32,
 };
 
-/// Ports the `MMID_MATRIX_ROW` macro (ggml-cpu.c:1464 @5266f24da).
+/// Ports the `MMID_MATRIX_ROW` macro (ggml-cpu.c:1464 @b29c606e2).
 inline fn matrixRow(matrix_rows: [*]RowMapping, ids: *const Tensor, row_id: i64, idx1: i64) *RowMapping {
     return &matrix_rows[@intCast(row_id * ids.ne[0] * ids.ne[1] + idx1)];
 }
 
-/// Ports `incr_ptr_aligned` (ggml-cpu.c:1534 @5266f24da).
+/// Ports `incr_ptr_aligned` (ggml-cpu.c:1534 @b29c606e2).
 ///
 /// Carves a sub-allocation out of the work buffer and advances the cursor.
 /// Distinct from the identically named helper in `ggml.c`, which the graph
@@ -445,7 +445,7 @@ fn incrPtrAligned(p: *[*]u8, size: usize, alignment: usize) [*]u8 {
     return ptr;
 }
 
-/// Ports `ggml_compute_forward_mul_mat_id_one_chunk` (ggml-cpu.c:1471 @5266f24da).
+/// Ports `ggml_compute_forward_mul_mat_id_one_chunk` (ggml-cpu.c:1471 @b29c606e2).
 ///
 /// The mul_mat_id counterpart of `oneChunk`. It takes more arguments because
 /// the expert grouping is computed once by thread zero and shared, rather than
@@ -532,7 +532,7 @@ fn idOneChunk(
     }
 }
 
-/// Ports `ggml_compute_forward_mul_mat_id` (ggml-cpu.c:1542 @5266f24da).
+/// Ports `ggml_compute_forward_mul_mat_id` (ggml-cpu.c:1542 @b29c606e2).
 ///
 /// A mixture-of-experts product: `src[2]` names, per row of `src1`, which
 /// matrix in `src0`'s third dimension that row should be multiplied by.

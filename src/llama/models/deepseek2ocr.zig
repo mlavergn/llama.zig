@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek2ocr.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_deepseek2ocr`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek2ocr.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_deepseek2ocr`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`. Its graph is
 //! `llama_model_deepseek2`'s, which takes the OCR attention when the
 //! architecture is this one; `deepseek2.zig` holds it.
@@ -23,7 +23,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_deepseek2ocr`'s `load_arch_hparams` (models/deepseek2ocr.cpp:3 @5266f24da).
+/// Ports `llama_model_deepseek2ocr`'s `load_arch_hparams` (models/deepseek2ocr.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -47,7 +47,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deepseek2ocr`'s `load_arch_tensors` (models/deepseek2ocr.cpp:23 @5266f24da).
+/// Ports `llama_model_deepseek2ocr`'s `load_arch_tensors` (models/deepseek2ocr.cpp:23 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -71,9 +71,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     while (i < l.n_layer) : (i += 1) {
         const layer = &self.layers[@intCast(i)];
 
-        layer.wq = try self.createTensor(.{ .tensor = .attn_q, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd }, 0, exc);
-        layer.wk = try self.createTensor(.{ .tensor = .attn_k, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd }, 0, exc);
-        layer.wv = try self.createTensor(.{ .tensor = .attn_v, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd }, 0, exc);
+        try self.createTensorQkv(layer, i, l.n_embd, l.n_embd, l.n_embd, l.n_embd, 0, exc);
         layer.wo = try self.createTensor(.{ .tensor = .attn_out, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd }, 0, exc);
 
         // Norms.
@@ -107,8 +105,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_deepseek2ocr`'s `build_arch_graph` (models/deepseek2ocr.cpp:79
-/// @5266f24da): DeepSeek-V2's main graph, whatever the graph type.
+/// Ports `llama_model_deepseek2ocr`'s `build_arch_graph` (models/deepseek2ocr.cpp:77
+/// @b29c606e2): DeepSeek-V2's main graph, whatever the graph type.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     deepseek2.buildGraph(model, b);
 }

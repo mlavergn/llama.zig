@@ -9,7 +9,7 @@
 //! - `llama.cpp/src/llama-memory.cpp` -- `llama_memory_status_combine` and
 //!   `llama_memory_status_is_fail`
 //!
-//! All at v0.4.0 (`5266f24da`).
+//! All at v0.4.1 (`b29c606e2`).
 //!
 //! # Interfaces, not classes
 //!
@@ -28,7 +28,7 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 
-/// Mirrors `llama_memory_params` (llama-memory.h:17 @5266f24da).
+/// Mirrors `llama_memory_params` (llama-memory.h:17 @b29c606e2).
 pub const Params = struct {
     type_k: c.enum_ggml_type,
     type_v: c.enum_ggml_type,
@@ -38,7 +38,7 @@ pub const Params = struct {
     mem_other: ?Memory,
 };
 
-/// Mirrors `llama_memory_status` (llama-memory.h:30 @5266f24da).
+/// Mirrors `llama_memory_status` (llama-memory.h:30 @b29c606e2).
 pub const Status = enum(c_int) {
     success = 0,
     no_update,
@@ -46,7 +46,7 @@ pub const Status = enum(c_int) {
     failed_compute,
 };
 
-/// Ports `llama_memory_status_combine` (llama-memory.cpp:3 @5266f24da): a
+/// Ports `llama_memory_status_combine` (llama-memory.cpp:3 @b29c606e2): a
 /// failure wins, else an update in either is an update.
 pub fn statusCombine(s0: Status, s1: Status) Status {
     var has_update = false;
@@ -63,7 +63,7 @@ pub fn statusCombine(s0: Status, s1: Status) Status {
     return if (has_update) .success else .no_update;
 }
 
-/// Ports `llama_memory_status_is_fail` (llama-memory.cpp:44 @5266f24da).
+/// Ports `llama_memory_status_is_fail` (llama-memory.cpp:44 @b29c606e2).
 pub fn statusIsFail(status: Status) bool {
     return switch (status) {
         .success, .no_update => false,
@@ -94,7 +94,7 @@ pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: c.ggml_backend_buffer_t
     list.insert(impl.allocator, pos, .{ .buft = buft, .size = size }) catch impl.abort("llama-memory.h", 119, "out of memory");
 }
 
-/// Mirrors `llama_memory_context_i` (llama-memory.h:51 @5266f24da): the
+/// Mirrors `llama_memory_context_i` (llama-memory.h:51 @b29c606e2): the
 /// memory's view for one batch -- its ubatches, in order, and the state
 /// each needs.
 pub const Context = struct {
@@ -144,7 +144,7 @@ pub const Context = struct {
     }
 };
 
-/// Mirrors `llama_memory_i` (llama-memory.h:73 @5266f24da).
+/// Mirrors `llama_memory_i` (llama-memory.h:73 @b29c606e2).
 pub const Memory = struct {
     ptr: *anyopaque,
     vtable: *const VTable,

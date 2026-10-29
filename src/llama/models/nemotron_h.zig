@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nemotron-h.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_nemotron_h`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/nemotron-h.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_nemotron_h`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_attention_layer` and `build_ffn_layer`, which Nemotron-H MoE
 //! shares.
@@ -32,7 +32,7 @@ fn divI64(a: i64, b: i64) i64 {
 }
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_hparams`
-/// (models/nemotron-h.cpp:5 @5266f24da).
+/// (models/nemotron-h.cpp:5 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -79,7 +79,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_tensors`
-/// (models/nemotron-h.cpp:47 @5266f24da).
+/// (models/nemotron-h.cpp:47 @b29c606e2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -185,7 +185,12 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         const n_head_i: i64 = hp.nHead(iu);
         const n_embd_k_gqa_i: i64 = hp.nEmbdKGqa(iu);
         const n_embd_v_gqa_i: i64 = hp.nEmbdVGqa(iu);
-        const n_ff_exp: i64 = if (hp.nFfExp(iu) != 0) hp.nFfExp(iu) else divI64(l.n_ff, hp.nExpertUsed(iu));
+        const n_expert_used_i: i64 = hp.nExpertUsed(iu);
+        const n_ff_exp_i: i64 = hp.nFfExp(iu);
+        if (n_ff_exp_i == 0 and n_expert_used_i == 0) {
+            return exc.throw(.runtime_error, "load_arch_tensors: layer {d} declares neither expert_feed_forward_length nor expert_used_count, cannot determine the expert FFN size", .{i});
+        }
+        const n_ff_exp: i64 = if (n_ff_exp_i != 0) n_ff_exp_i else @divTrunc(l.n_ff, n_expert_used_i);
         const n_ff_shexp: i64 = hp.n_ff_shexp;
 
         // The NextN input-fusion tensors.
@@ -212,19 +217,19 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `llama_model_nemotron_h`'s `build_arch_graph`
-/// (models/nemotron-h.cpp:174 @5266f24da).
+/// (models/nemotron-h.cpp:180 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_nemotron_h`'s `graph`
-/// (models/nemotron-h.cpp:178 @5266f24da).
+/// (models/nemotron-h.cpp:184 @b29c606e2).
 pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const cp = b.cparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h.cpp", 181, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h.cpp", 187, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
     c.ggml_build_forward_expand(b.gf, inpL);
@@ -301,7 +306,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_attention_layer`
-/// (models/nemotron-h.cpp:256 @5266f24da): attention without RoPE.
+/// (models/nemotron-h.cpp:262 @b29c606e2): attention without RoPE.
 fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_attn: *graph.InpAttnKv, n_embd_head: i64, il: c_int) *Tensor {
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -314,7 +319,7 @@ fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tens
 }
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_ffn_layer`
-/// (models/nemotron-h.cpp:272 @5266f24da): a squared-ReLU FFN, or the
+/// (models/nemotron-h.cpp:278 @b29c606e2): a squared-ReLU FFN, or the
 /// mixture of experts beside a shared expert.
 fn buildFfnLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;

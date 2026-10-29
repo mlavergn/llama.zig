@@ -21,7 +21,7 @@
 //! - `llama.cpp/src/llama-kv-cache-dsv4.cpp` -- their bodies and the static
 //!   planners
 //!
-//! All at v0.4.0 (`5266f24da`).
+//! All at v0.4.1 (`b29c606e2`).
 
 const std = @import("std");
 const impl = @import("impl.zig");
@@ -54,36 +54,36 @@ fn oom() noreturn {
     impl.abort(file, 0, "out of memory");
 }
 
-/// `DSV4_CSA_RATIO` (llama-kv-cache-dsv4.cpp:18 @5266f24da).
+/// `DSV4_CSA_RATIO` (llama-kv-cache-dsv4.cpp:18 @b29c606e2).
 pub const csa_ratio: u32 = 4;
-/// `DSV4_HCA_RATIO` (llama-kv-cache-dsv4.cpp:19 @5266f24da).
+/// `DSV4_HCA_RATIO` (llama-kv-cache-dsv4.cpp:19 @b29c606e2).
 pub const hca_ratio: u32 = 128;
 
-/// `DSV4_STATE_MAGIC` (llama-kv-cache-dsv4.cpp:21 @5266f24da): "DSV4".
+/// `DSV4_STATE_MAGIC` (llama-kv-cache-dsv4.cpp:21 @b29c606e2): "DSV4".
 const state_magic: u32 = 0x34565344;
-/// `DSV4_STATE_VERSION` (llama-kv-cache-dsv4.cpp:22 @5266f24da).
+/// `DSV4_STATE_VERSION` (llama-kv-cache-dsv4.cpp:22 @b29c606e2).
 const state_version: u32 = 1;
-/// `DSV4_STATE_MODE_FULL` (llama-kv-cache-dsv4.cpp:23 @5266f24da).
+/// `DSV4_STATE_MODE_FULL` (llama-kv-cache-dsv4.cpp:23 @b29c606e2).
 const state_mode_full: u32 = 0;
-/// `DSV4_STATE_MODE_PARTIAL` (llama-kv-cache-dsv4.cpp:24 @5266f24da).
+/// `DSV4_STATE_MODE_PARTIAL` (llama-kv-cache-dsv4.cpp:24 @b29c606e2).
 const state_mode_partial: u32 = 1;
-/// `DSV4_K_CACHE_STATE_VER` (llama-kv-cache-dsv4.cpp:25 @5266f24da).
+/// `DSV4_K_CACHE_STATE_VER` (llama-kv-cache-dsv4.cpp:25 @b29c606e2).
 const k_cache_state_ver: u32 = 2;
-/// `DSV4_COMP_STATE_VER` (llama-kv-cache-dsv4.cpp:26 @5266f24da).
+/// `DSV4_COMP_STATE_VER` (llama-kv-cache-dsv4.cpp:26 @b29c606e2).
 const comp_state_ver: u32 = 1;
 
-/// Ports `dsv4_comp_size` (llama-kv-cache-dsv4.cpp:28 @5266f24da): the
+/// Ports `dsv4_comp_size` (llama-kv-cache-dsv4.cpp:28 @b29c606e2): the
 /// compressed rows `kv_size` tokens make, at least one.
 fn compSize(kv_size: u32, ratio: u32) u32 {
     return @max(1, (kv_size +% ratio -% 1) / ratio);
 }
 
-/// `GGML_PAD` (ggml.h:267 @5266f24da) for a power-of-two `n`.
+/// `GGML_PAD` (ggml.h:267 @b29c606e2) for a power-of-two `n`.
 fn padTo(x: u32, comptime n: u32) u32 {
     return (x +% (n - 1)) & ~@as(u32, n - 1);
 }
 
-/// Ports `dsv4_clear_tensor_stream` (llama-kv-cache-dsv4.cpp:32 @5266f24da):
+/// Ports `dsv4_clear_tensor_stream` (llama-kv-cache-dsv4.cpp:32 @b29c606e2):
 /// zero one stream's plane of a contiguous 3-D tensor.
 fn clearTensorStream(tensor: *Tensor, stream: u32) void {
     impl.assert(c.ggml_is_contiguous(tensor), file, 33, "ggml_is_contiguous(tensor)");
@@ -94,7 +94,7 @@ fn clearTensorStream(tensor: *Tensor, stream: u32) void {
     c.ggml_backend_tensor_memset(tensor, 0, stream * stream_size, stream_size);
 }
 
-/// Ports `dsv4_state_n_used_k_rows` (llama-kv-cache-dsv4.cpp:41 @5266f24da):
+/// Ports `dsv4_state_n_used_k_rows` (llama-kv-cache-dsv4.cpp:41 @b29c606e2):
 /// the compressed rows a sequence ending at `pos_max` has completed.
 fn stateNUsedKRows(pos_max: i32, ratio: u32, kv_size: u32) u32 {
     if (pos_max < 0) return 0;
@@ -102,7 +102,7 @@ fn stateNUsedKRows(pos_max: i32, ratio: u32, kv_size: u32) u32 {
     return @intCast(@min(@as(u64, kv_size), n_rows));
 }
 
-/// Ports `dsv4_stream_offset` (llama-kv-cache-dsv4.cpp:51 @5266f24da): where
+/// Ports `dsv4_stream_offset` (llama-kv-cache-dsv4.cpp:51 @b29c606e2): where
 /// a sequence's stream starts, in rows of `size`. Its only callers plan a
 /// batch, where the C++'s exception escapes `llama_decode` uncaught.
 fn streamOffset(n_stream: u32, seq_id: i32, size: u32) i64 {
@@ -113,7 +113,7 @@ fn streamOffset(n_stream: u32, seq_id: i32, size: u32) i64 {
     return @as(i64, seq_id) * size;
 }
 
-/// Ports `dsv4_ubatch_has_coupled` (llama-kv-cache-dsv4.cpp:62 @5266f24da):
+/// Ports `dsv4_ubatch_has_coupled` (llama-kv-cache-dsv4.cpp:62 @b29c606e2):
 /// whether a token belongs to several sequences at once.
 fn ubatchHasCoupled(ubatch: *const Ubatch) bool {
     for (0..ubatch.n_tokens) |i| {
@@ -122,7 +122,7 @@ fn ubatchHasCoupled(ubatch: *const Ubatch) bool {
     return false;
 }
 
-/// Ports `dsv4_token_has_seq` (llama-kv-cache-dsv4.cpp:72 @5266f24da).
+/// Ports `dsv4_token_has_seq` (llama-kv-cache-dsv4.cpp:72 @b29c606e2).
 fn tokenHasSeq(ubatch: *const Ubatch, i: usize, seq_id: i32) bool {
     var s: usize = 0;
     while (s < @as(usize, @intCast(ubatch.n_seq_id[i]))) : (s += 1) {
@@ -132,7 +132,7 @@ fn tokenHasSeq(ubatch: *const Ubatch, i: usize, seq_id: i32) bool {
 }
 
 /// Ports `dsv4_build_raw_write_ubatch` (llama-kv-cache-dsv4.cpp:82
-/// @5266f24da): a coupled ubatch, with tokens shared between sequences,
+/// @b29c606e2): a coupled ubatch, with tokens shared between sequences,
 /// unrolled into one copy of each token per sequence, so the raw cache
 /// writes each sequence's stream separately.
 ///
@@ -220,7 +220,7 @@ fn buildRawWriteUbatch(ubatch: *const Ubatch) Ubatch {
     };
 }
 
-/// Ports `dsv4_build_raw_write_ubatches` (llama-kv-cache-dsv4.cpp:173 @5266f24da).
+/// Ports `dsv4_build_raw_write_ubatches` (llama-kv-cache-dsv4.cpp:173 @b29c606e2).
 ///
 /// Return: one raw-write ubatch per ubatch, the caller's to release.
 fn buildRawWriteUbatches(ubatches: []const Ubatch) std.ArrayList(Ubatch) {
@@ -230,7 +230,7 @@ fn buildRawWriteUbatches(ubatches: []const Ubatch) std.ArrayList(Ubatch) {
     return res;
 }
 
-/// Ports `dsv4_batch_has_coupled` (llama-kv-cache-dsv4.cpp:182 @5266f24da).
+/// Ports `dsv4_batch_has_coupled` (llama-kv-cache-dsv4.cpp:182 @b29c606e2).
 fn batchHasCoupled(b: *const c.llama_batch) bool {
     if (b.n_seq_id == null) return false;
     var i: i32 = 0;
@@ -240,7 +240,7 @@ fn batchHasCoupled(b: *const c.llama_batch) bool {
     return false;
 }
 
-/// Ports `dsv4_comp_graph_n_stream` (llama-kv-cache-dsv4.cpp:196 @5266f24da):
+/// Ports `dsv4_comp_graph_n_stream` (llama-kv-cache-dsv4.cpp:196 @b29c606e2):
 /// coupled sequence sets must stay in one graph stream because their
 /// compressed state is shared; independent per-sequence state can fan out.
 fn compGraphNStream(ubatch: *const Ubatch, n_stream: u32) i64 {
@@ -249,7 +249,7 @@ fn compGraphNStream(ubatch: *const Ubatch, n_stream: u32) i64 {
 }
 
 /// Ports `dsv4_state_src_stream_range` (llama-kv-cache-dsv4.cpp:206
-/// @5266f24da): the streams a state write saves.
+/// @b29c606e2): the streams a state write saves.
 fn stateSrcStreamRange(n_stream: u32, seq_id: i32, s0: *u32, ns: *u32, exc: *Exception) Thrown!void {
     if (seq_id >= 0 and n_stream > 1) {
         if (@as(u32, @bitCast(seq_id)) >= n_stream) {
@@ -264,7 +264,7 @@ fn stateSrcStreamRange(n_stream: u32, seq_id: i32, s0: *u32, ns: *u32, exc: *Exc
 }
 
 /// Ports `dsv4_state_dst_stream_range` (llama-kv-cache-dsv4.cpp:225
-/// @5266f24da): the first stream a state read restores into.
+/// @b29c606e2): the first stream a state read restores into.
 fn stateDstStreamRange(n_stream: u32, seq_id: i32, ns: u32, s0: *u32, exc: *Exception) Thrown!void {
     if (seq_id >= 0) {
         if (ns != 1) return exc.throw(.runtime_error, "DSV4 sequence state stream count mismatch", .{});
@@ -279,7 +279,7 @@ fn stateDstStreamRange(n_stream: u32, seq_id: i32, ns: u32, s0: *u32, exc: *Exce
 }
 
 /// Ports `dsv4_state_write_tensor_streams` (llama-kv-cache-dsv4.cpp:249
-/// @5266f24da): a tensor's metadata, then the first `n_rows` rows of each
+/// @b29c606e2): a tensor's metadata, then the first `n_rows` rows of each
 /// stream -- `stream_ids`' streams when given, else `ns` from `s0`.
 fn stateWriteTensorStreams(w: io.Writer, tensor: *Tensor, tensor_rows: u32, n_rows: u32, s0: u32, ns: u32, stream_ids: ?[]const u32, exc: *Exception) Thrown!void {
     const type_i: i32 = @intCast(tensor.type);
@@ -310,7 +310,7 @@ fn stateWriteTensorStreams(w: io.Writer, tensor: *Tensor, tensor_rows: u32, n_ro
     }
 }
 
-/// Ports `dsv4_state_read_tensor_streams` (llama-kv-cache-dsv4.cpp:291 @5266f24da).
+/// Ports `dsv4_state_read_tensor_streams` (llama-kv-cache-dsv4.cpp:291 @b29c606e2).
 fn stateReadTensorStreams(r: io.Reader, tensor: *Tensor, tensor_rows: u32, n_rows: u32, s0: u32, ns: u32, exc: *Exception) Thrown!void {
     const type_i_ref = try r.readValue(i32, exc);
     const ne0_ref = try r.readValue(u64, exc);
@@ -338,7 +338,7 @@ fn stateReadTensorStreams(r: io.Reader, tensor: *Tensor, tensor_rows: u32, n_row
 }
 
 /// Ports `dsv4_state_write_k_cache` (llama-kv-cache-dsv4.cpp:332
-/// @5266f24da): a compressed cache's first `n_rows` rows, layer by layer.
+/// @b29c606e2): a compressed cache's first `n_rows` rows, layer by layer.
 fn stateWriteKCache(w: io.Writer, kv: *const KvCache, seq_id: i32, flags: u32, n_rows: u32, exc: *Exception) Thrown!void {
     _ = flags;
 
@@ -365,7 +365,7 @@ fn stateWriteKCache(w: io.Writer, kv: *const KvCache, seq_id: i32, flags: u32, n
     }
 }
 
-/// Ports `dsv4_state_read_k_cache` (llama-kv-cache-dsv4.cpp:364 @5266f24da).
+/// Ports `dsv4_state_read_k_cache` (llama-kv-cache-dsv4.cpp:364 @b29c606e2).
 fn stateReadKCache(r: io.Reader, kv: *KvCache, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
     _ = flags;
 
@@ -400,7 +400,7 @@ fn stateReadKCache(r: io.Reader, kv: *KvCache, seq_id: i32, flags: u32, exc: *Ex
     }
 }
 
-/// Ports `dsv4_plan_positions` (llama-kv-cache-dsv4.cpp:414 @5266f24da):
+/// Ports `dsv4_plan_positions` (llama-kv-cache-dsv4.cpp:414 @b29c606e2):
 /// `[a, b, c]`, for the debug log.
 ///
 /// Return: the text, NUL-terminated, the caller's to free.
@@ -416,14 +416,14 @@ pub fn planPositions(values: []const i32) [:0]u8 {
 }
 
 /// `LLAMA_DSV4_COMPRESS_DEBUG`, read into `dsv4_build_comp_plan`'s static
-/// `debug` (llama-kv-cache-dsv4.cpp:718 @5266f24da).
+/// `debug` (llama-kv-cache-dsv4.cpp:718 @b29c606e2).
 pub fn compressDebug() bool {
     const env = std.c.getenv("LLAMA_DSV4_COMPRESS_DEBUG") orelse return false;
     return impl.atoi(env) > 0;
 }
 
 /// Mirrors `llama_kv_cache_dsv4_context`'s `comp_plan` (llama-kv-cache-dsv4.h:273
-/// @5266f24da): the per-ubatch recipe for updating a compressor state,
+/// @b29c606e2): the per-ubatch recipe for updating a compressor state,
 /// committing completed compressed rows, and masking the compressed
 /// attention source.
 pub const CompPlan = struct {
@@ -491,7 +491,7 @@ fn push(comptime T: type, list: *std.ArrayList(T), v: T) void {
 }
 
 /// The planner's `state_source_idx` lambda (llama-kv-cache-dsv4.cpp:473
-/// @5266f24da): a state source's row in the graph-local `[persistent_state
+/// @b29c606e2): a state source's row in the graph-local `[persistent_state
 /// | current_ubatch_scratch | zero]` tensor.
 const SourceIdx = struct {
     const Key = struct { seq: i32, pos: i32 };
@@ -517,7 +517,7 @@ const SourceIdx = struct {
     }
 };
 
-/// Ports `dsv4_build_comp_plan` (llama-kv-cache-dsv4.cpp:427 @5266f24da).
+/// Ports `dsv4_build_comp_plan` (llama-kv-cache-dsv4.cpp:427 @b29c606e2).
 ///
 /// `n_stream` is the persistent cache and state layout; `plan.n_stream` is
 /// the graph's view for this ubatch, which can be a subset of those
@@ -633,7 +633,7 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, state_size: u
             n_stream: u32,
             kv_size: u32,
 
-            /// The planner's `append_dummy_block` lambda (llama-kv-cache-dsv4.cpp:551 @5266f24da).
+            /// The planner's `append_dummy_block` lambda (llama-kv-cache-dsv4.cpp:551 @b29c606e2).
             fn append(d: @This(), seq_id: i32, i: usize) void {
                 const cache_off = streamOffset(d.n_stream, seq_id, d.kv_size);
                 const source_idx = d.src.at(seq_id, d.ubatch.pos[i]);
@@ -812,12 +812,12 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, state_size: u
     return plan;
 }
 
-/// `GGML_PAD` (ggml.h:267 @5266f24da) on a non-negative `int64_t`.
+/// `GGML_PAD` (ggml.h:267 @b29c606e2) on a non-negative `int64_t`.
 fn padI64(x: i64, comptime n: i64) i64 {
     return (x + (n - 1)) & ~@as(i64, n - 1);
 }
 
-/// Ports `dsv4_build_comp_plans` (llama-kv-cache-dsv4.cpp:739 @5266f24da):
+/// Ports `dsv4_build_comp_plans` (llama-kv-cache-dsv4.cpp:739 @b29c606e2):
 /// one plan per ubatch; the first ubatch touching a sequence consumes its
 /// rollback restore.
 ///
@@ -844,7 +844,7 @@ fn freePlans(list: *std.ArrayList(CompPlan)) void {
     list.deinit(allocator);
 }
 
-/// Ports `dsv4_build_comp_sinfos` (llama-kv-cache-dsv4.cpp:767 @5266f24da):
+/// Ports `dsv4_build_comp_sinfos` (llama-kv-cache-dsv4.cpp:767 @b29c606e2):
 /// a compressed cache's view per ubatch -- its streams, with a dummy index,
 /// since compressed rows are graph outputs, not token writes.
 ///
@@ -884,7 +884,7 @@ fn buildCompSinfos(ubatches: []const Ubatch, n_stream: u32) std.ArrayList(SlotIn
 }
 
 /// Ports `dsv4_build_raw_read_sinfos` (llama-kv-cache-dsv4.cpp:804
-/// @5266f24da): the raw cache's read view per ubatch -- the write slots,
+/// @b29c606e2): the raw cache's read view per ubatch -- the write slots,
 /// except that a coupled ubatch reads its first sequence's stream alone.
 ///
 /// Return: the slots, the caller's to free.
@@ -921,7 +921,7 @@ fn buildRawReadSinfos(sinfos_write: []const SlotInfo, ubatches: []const Ubatch) 
 }
 
 /// Ports `dsv4_build_reserve_comp_plan` (llama-kv-cache-dsv4.cpp:842
-/// @5266f24da): the worst-case plan a reserve graph is sized by, its
+/// @b29c606e2): the worst-case plan a reserve graph is sized by, its
 /// indices all zero.
 ///
 /// Return: the plan, the caller's to `deinit`.
@@ -957,7 +957,7 @@ fn buildReserveCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, state_
     return plan;
 }
 
-/// Ports `dsv4_make_k_only` (llama-kv-cache-dsv4.cpp:883 @5266f24da):
+/// Ports `dsv4_make_k_only` (llama-kv-cache-dsv4.cpp:883 @b29c606e2):
 /// `llama_kv_cache` allocates K-only storage when `is_mla()`.
 fn makeKOnly(hparams: *Hparams) void {
     hparams.n_embd_head_k_mla_impl = hparams.nEmbdHeadK(0);
@@ -967,7 +967,7 @@ fn makeKOnly(hparams: *Hparams) void {
 // -----------------------------------------------------------------------------
 // llama_dsv4_comp_state
 
-/// `llama_dsv4_comp_state`'s `layer` (llama-kv-cache-dsv4.h:53 @5266f24da).
+/// `llama_dsv4_comp_state`'s `layer` (llama-kv-cache-dsv4.h:53 @b29c606e2).
 const CompLayer = struct {
     il: u32,
     kv: *Tensor,
@@ -976,7 +976,7 @@ const CompLayer = struct {
     score_stream: std.ArrayList(*Tensor) = .empty,
 };
 
-/// Ports `llama_dsv4_comp_state` (llama-kv-cache-dsv4.h:11 @5266f24da): a
+/// Ports `llama_dsv4_comp_state` (llama-kv-cache-dsv4.h:11 @b29c606e2): a
 /// compressor's running state per layer -- `state_size` rows of the
 /// pending window's projected K and gate scores, per stream, with
 /// `n_rs_seq` rollback snapshot planes after the current one.
@@ -998,7 +998,7 @@ pub const CompState = struct {
     map_layer_ids: std.AutoHashMapUnmanaged(i32, i32) = .empty,
 
     /// Ports the constructor of `llama_dsv4_comp_state`
-    /// (llama-kv-cache-dsv4.cpp:893 @5266f24da).
+    /// (llama-kv-cache-dsv4.cpp:893 @b29c606e2).
     ///
     /// Parameters mirror the C++'s; `name` names the state in its tensors
     /// and logs, and `filter` selects its layers.
@@ -1125,7 +1125,7 @@ pub const CompState = struct {
     }
 
     /// Ports `llama_dsv4_comp_state`'s `clear` (llama-kv-cache-dsv4.cpp:1002
-    /// @5266f24da): one sequence's planes, or every buffer.
+    /// @b29c606e2): one sequence's planes, or every buffer.
     pub fn clear(self: *CompState, seq_id: i32, data: bool) void {
         if (!data) return;
 
@@ -1147,7 +1147,7 @@ pub const CompState = struct {
     }
 
     /// Ports `llama_dsv4_comp_state`'s `seq_cp` (llama-kv-cache-dsv4.cpp:1025
-    /// @5266f24da): clear the destination now and queue the stream copy for
+    /// @b29c606e2): clear the destination now and queue the stream copy for
     /// the next update.
     pub fn seqCp(self: *CompState, seq_id_src: i32, seq_id_dst: i32) void {
         impl.assert(seq_id_src >= 0 and @as(u32, @bitCast(seq_id_src)) < self.n_stream, file, 1026, "seq_id_src >= 0 && (uint32_t) seq_id_src < n_stream");
@@ -1161,7 +1161,7 @@ pub const CompState = struct {
         self.sc_info.sdst.append(allocator, @bitCast(seq_id_dst)) catch oom();
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `apply_copies` (llama-kv-cache-dsv4.cpp:1039 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `apply_copies` (llama-kv-cache-dsv4.cpp:1039 @b29c606e2).
     pub fn applyCopies(self: *const CompState, sc_info: *const StreamCopyInfo) void {
         for (sc_info.ssrc.items, sc_info.sdst.items) |ssrc, sdst| {
             for (self.layers.items) |*layer| {
@@ -1171,33 +1171,33 @@ pub const CompState = struct {
         }
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `get_ratio` (llama-kv-cache-dsv4.cpp:1051 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `get_ratio` (llama-kv-cache-dsv4.cpp:1051 @b29c606e2).
     pub fn getRatio(self: *const CompState) u32 {
         return self.ratio;
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `get_state_size` (llama-kv-cache-dsv4.cpp:1055 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `get_state_size` (llama-kv-cache-dsv4.cpp:1055 @b29c606e2).
     pub fn getStateSize(self: *const CompState) u32 {
         return self.state_size;
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `get_n_stream` (llama-kv-cache-dsv4.cpp:1059 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `get_n_stream` (llama-kv-cache-dsv4.cpp:1059 @b29c606e2).
     pub fn getNStream(self: *const CompState) u32 {
         return self.n_stream;
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `get_n_rs_seq` (llama-kv-cache-dsv4.cpp:1063 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `get_n_rs_seq` (llama-kv-cache-dsv4.cpp:1063 @b29c606e2).
     pub fn getNRsSeq(self: *const CompState) u32 {
         return self.n_rs_seq;
     }
 
     /// Ports `llama_dsv4_comp_state`'s `get_n_rows` (llama-kv-cache-dsv4.cpp:1067
-    /// @5266f24da): the current plane's rows across every stream.
+    /// @b29c606e2): the current plane's rows across every stream.
     pub fn getNRows(self: *const CompState) u32 {
         return self.state_size *% self.n_stream;
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `memory_breakdown` (llama-kv-cache-dsv4.cpp:1071 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `memory_breakdown` (llama-kv-cache-dsv4.cpp:1071 @b29c606e2).
     pub fn memoryBreakdown(self: *const CompState, out: *std.ArrayList(memory.BuftSize)) void {
         for (self.ctxs_bufs.items) |e| {
             memory.addBuftSize(out, c.ggml_backend_buffer_get_type(e.buf), c.ggml_backend_buffer_get_size(e.buf));
@@ -1205,7 +1205,7 @@ pub const CompState = struct {
     }
 
     /// Ports `llama_dsv4_comp_state`'s `state_write` (llama-kv-cache-dsv4.cpp:1080
-    /// @5266f24da): each saved stream's plane is the one its pending
+    /// @b29c606e2): each saved stream's plane is the one its pending
     /// rollback, if any, points at.
     pub fn stateWrite(self: *const CompState, w: io.Writer, seq_id: i32, flags: u32, rs_idx: []const u32, exc: *Exception) Thrown!void {
         _ = flags;
@@ -1242,7 +1242,7 @@ pub const CompState = struct {
         }
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `state_read` (llama-kv-cache-dsv4.cpp:1118 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `state_read` (llama-kv-cache-dsv4.cpp:1118 @b29c606e2).
     pub fn stateRead(self: *CompState, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         _ = flags;
 
@@ -1277,44 +1277,44 @@ pub const CompState = struct {
     }
 
     /// Ports `llama_dsv4_comp_state`'s `get_kv_all` (llama-kv-cache-dsv4.cpp:1160
-    /// @5266f24da): every plane of every stream, as rows.
+    /// @b29c606e2): every plane of every stream, as rows.
     pub fn getKvAll(self: *const CompState, ctx: *c.ggml_context, il: i32) *Tensor {
         const state = self.layerAt(il).kv;
         return c.ggml_view_2d(ctx, state, state.ne[0], @as(i64, self.getNRows()) * (1 + self.n_rs_seq), state.nb[1], 0);
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `get_score_all` (llama-kv-cache-dsv4.cpp:1167 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `get_score_all` (llama-kv-cache-dsv4.cpp:1167 @b29c606e2).
     pub fn getScoreAll(self: *const CompState, ctx: *c.ggml_context, il: i32) *Tensor {
         const state = self.layerAt(il).score;
         return c.ggml_view_2d(ctx, state, state.ne[0], @as(i64, self.getNRows()) * (1 + self.n_rs_seq), state.nb[1], 0);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `get_kv` (llama-kv-cache-dsv4.cpp:1174
-    /// @5266f24da): the current plane alone.
+    /// @b29c606e2): the current plane alone.
     pub fn getKv(self: *const CompState, ctx: *c.ggml_context, il: i32) *Tensor {
         const state: *Tensor = self.getKvAll(ctx, il);
         const row_size = c.ggml_row_size(state.type, state.ne[0]);
         return c.ggml_view_2d(ctx, state, state.ne[0], self.getNRows(), state.nb[1], 0 * row_size);
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `get_score` (llama-kv-cache-dsv4.cpp:1181 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `get_score` (llama-kv-cache-dsv4.cpp:1181 @b29c606e2).
     pub fn getScore(self: *const CompState, ctx: *c.ggml_context, il: i32) *Tensor {
         const state: *Tensor = self.getScoreAll(ctx, il);
         const row_size = c.ggml_row_size(state.type, state.ne[0]);
         return c.ggml_view_2d(ctx, state, state.ne[0], self.getNRows(), state.nb[1], 0 * row_size);
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `cpy_kv` (llama-kv-cache-dsv4.cpp:1188 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `cpy_kv` (llama-kv-cache-dsv4.cpp:1188 @b29c606e2).
     pub fn cpyKv(self: *const CompState, ctx: *c.ggml_context, cur: *Tensor, idxs: *Tensor, il: i32) *Tensor {
         return c.ggml_set_rows(ctx, self.getKvAll(ctx, il), cur, idxs);
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `cpy_score` (llama-kv-cache-dsv4.cpp:1192 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `cpy_score` (llama-kv-cache-dsv4.cpp:1192 @b29c606e2).
     pub fn cpyScore(self: *const CompState, ctx: *c.ggml_context, cur: *Tensor, idxs: *Tensor, il: i32) *Tensor {
         return c.ggml_set_rows(ctx, self.getScoreAll(ctx, il), cur, idxs);
     }
 
-    /// Ports `llama_dsv4_comp_state`'s `total_size` (llama-kv-cache-dsv4.cpp:1196 @5266f24da).
+    /// Ports `llama_dsv4_comp_state`'s `total_size` (llama-kv-cache-dsv4.cpp:1196 @b29c606e2).
     pub fn totalSize(self: *const CompState) usize {
         var size: usize = 0;
         for (self.ctxs_bufs.items) |e| size += c.ggml_backend_buffer_get_size(e.buf);
@@ -1326,7 +1326,7 @@ pub const CompState = struct {
 // llama_kv_cache_dsv4
 
 /// The constructor's `filter_raw` lambda (llama-kv-cache-dsv4.cpp:1233
-/// @5266f24da): the caller's filter alone. It lives on the constructor's
+/// @b29c606e2): the caller's filter alone. It lives on the constructor's
 /// stack, as the C++'s by-reference captures do; the caches read their
 /// filters only while they are built.
 const FilterRaw = struct {
@@ -1344,7 +1344,7 @@ const FilterRaw = struct {
 };
 
 /// The constructor's `filter_csa` and `filter_hca` lambdas
-/// (llama-kv-cache-dsv4.cpp:1271, 1279 @5266f24da): the caller's filter,
+/// (llama-kv-cache-dsv4.cpp:1271, 1279 @b29c606e2): the caller's filter,
 /// then the layer's compression ratio.
 const FilterRatio = struct {
     outer: memory.LayerFilter,
@@ -1362,7 +1362,7 @@ const FilterRatio = struct {
     }
 };
 
-/// Ports `llama_kv_cache_dsv4` (llama-kv-cache-dsv4.h:88 @5266f24da): the
+/// Ports `llama_kv_cache_dsv4` (llama-kv-cache-dsv4.h:88 @b29c606e2): the
 /// raw iSWA token cache, the three compressed K-only caches and their
 /// compressor states, driven as one memory.
 ///
@@ -1389,7 +1389,7 @@ pub const KvCacheDsv4 = struct {
     lid_state: ?*CompState = null,
 
     /// Ports the constructor of `llama_kv_cache_dsv4`
-    /// (llama-kv-cache-dsv4.cpp:1210 @5266f24da).
+    /// (llama-kv-cache-dsv4.cpp:1210 @b29c606e2).
     ///
     /// Parameters mirror the C++'s; `filter` and `reuse` may be empty.
     ///
@@ -1508,7 +1508,7 @@ pub const KvCacheDsv4 = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `init_batch` (llama-kv-cache-dsv4.cpp:1338
-    /// @5266f24da): the iSWA cache's simple split when neither the raw nor
+    /// @b29c606e2): the iSWA cache's simple split when neither the raw nor
     /// the compressed state needs a per-sequence layout, then an equal split
     /// -- or a sequence split, for coupled sequence sets, which serialize
     /// until DSV4 has explicit shared-state handling for compressed streams.
@@ -1567,7 +1567,7 @@ pub const KvCacheDsv4 = struct {
     }
 
     /// `init_batch`'s `make_context` lambda (llama-kv-cache-dsv4.cpp:1348
-    /// @5266f24da): place the raw writes in both halves of the raw cache.
+    /// @b29c606e2): place the raw writes in both halves of the raw cache.
     /// Takes `ubatches`, and releases them when they do not fit.
     fn makeContext(self: *KvCacheDsv4, ubatches_: std.ArrayList(Ubatch)) ?*Dsv4Context {
         var ubatches = ubatches_;
@@ -1605,13 +1605,13 @@ pub const KvCacheDsv4 = struct {
         return Dsv4Context.createBatch(self, sinfos_base, sinfos_swa, sinfos_swa_read, ubatches, ubatches_raw);
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `init_full` (llama-kv-cache-dsv4.cpp:1434 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `init_full` (llama-kv-cache-dsv4.cpp:1434 @b29c606e2).
     pub fn initFull(self: *KvCacheDsv4) *Dsv4Context {
         return Dsv4Context.createFull(self);
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `init_update` (llama-kv-cache-dsv4.cpp:1438
-    /// @5266f24da): the context takes the compressor states' queued copies.
+    /// @b29c606e2): the context takes the compressor states' queued copies.
     pub fn initUpdate(self: *KvCacheDsv4, lctx: *anyopaque, optimize: bool) *Dsv4Context {
         const sc_csa = self.getCsaState().sc_info;
         self.getCsaState().sc_info = .{};
@@ -1623,7 +1623,7 @@ pub const KvCacheDsv4 = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `get_can_shift` (llama-kv-cache-dsv4.cpp:1448
-    /// @5266f24da): compressed rows carry block-derived positions, so
+    /// @b29c606e2): compressed rows carry block-derived positions, so
     /// shifting stays off until DSV4's compressed-cache shift semantics are
     /// wired.
     pub fn getCanShift(self: *const KvCacheDsv4) bool {
@@ -1632,7 +1632,7 @@ pub const KvCacheDsv4 = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `clear` (llama-kv-cache-dsv4.cpp:1454
-    /// @5266f24da): the compressed buffers are cleared with their data
+    /// @b29c606e2): the compressed buffers are cleared with their data
     /// always, so they never expose stale or uninitialized rows.
     pub fn clear(self: *KvCacheDsv4, data: bool) void {
         self.getRaw().clear(data);
@@ -1640,7 +1640,7 @@ pub const KvCacheDsv4 = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `seq_rm` (llama-kv-cache-dsv4.cpp:1459
-    /// @5266f24da): only a tail can go. Past a sequence's end every cache
+    /// @b29c606e2): only a tail can go. Past a sequence's end every cache
     /// drops it; within the last `n_rs_seq` positions the compressor states
     /// roll back to a snapshot on the next ubatch; from the start the whole
     /// sequence goes.
@@ -1689,7 +1689,7 @@ pub const KvCacheDsv4 = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `seq_cp` (llama-kv-cache-dsv4.cpp:1512
-    /// @5266f24da): whole sequences only.
+    /// @b29c606e2): whole sequences only.
     pub fn seqCp(self: *KvCacheDsv4, seq_id_src: i32, seq_id_dst: i32, p0: i32, p1: i32) void {
         impl.assert(p0 <= 0 and p1 < 0, file, 1513, "p0 <= 0 && p1 < 0 && \"DSV4 only supports full sequence copies\"");
 
@@ -1705,7 +1705,7 @@ pub const KvCacheDsv4 = struct {
         if (seq_id_src != seq_id_dst) self.rs_idx.items[@intCast(seq_id_dst)] = 0;
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `seq_keep` (llama-kv-cache-dsv4.cpp:1529 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `seq_keep` (llama-kv-cache-dsv4.cpp:1529 @b29c606e2).
     pub fn seqKeep(self: *KvCacheDsv4, seq_id: i32) void {
         impl.assert(seq_id >= 0 and @as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1530, "seq_id >= 0 && (uint32_t) seq_id < n_seq_max");
 
@@ -1720,18 +1720,18 @@ pub const KvCacheDsv4 = struct {
         }
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `seq_add` (llama-kv-cache-dsv4.cpp:1544 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `seq_add` (llama-kv-cache-dsv4.cpp:1544 @b29c606e2).
     pub fn seqAdd(self: *KvCacheDsv4, seq_id: i32, p0: i32, p1: i32, shift: i32) void {
         self.getRaw().seqAdd(seq_id, p0, p1, shift);
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `seq_div` (llama-kv-cache-dsv4.cpp:1548 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `seq_div` (llama-kv-cache-dsv4.cpp:1548 @b29c606e2).
     pub fn seqDiv(self: *KvCacheDsv4, seq_id: i32, p0: i32, p1: i32, d: c_int) void {
         self.getRaw().seqDiv(seq_id, p0, p1, d);
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `seq_pos_min` (llama-kv-cache-dsv4.cpp:1552
-    /// @5266f24da): the raw SWA cache may hold a wider window, but the
+    /// @b29c606e2): the raw SWA cache may hold a wider window, but the
     /// compressed state cannot roll back within it, so only the current
     /// boundary is reported, and the server uses checkpoints for rollback.
     pub fn seqPosMin(self: *const KvCacheDsv4, seq_id: i32) i32 {
@@ -1739,13 +1739,13 @@ pub const KvCacheDsv4 = struct {
         return self.getRaw().seqPosMax(seq_id);
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `seq_pos_max` (llama-kv-cache-dsv4.cpp:1563 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `seq_pos_max` (llama-kv-cache-dsv4.cpp:1563 @b29c606e2).
     pub fn seqPosMax(self: *const KvCacheDsv4, seq_id: i32) i32 {
         if (seq_id < 0 or @as(u32, @bitCast(seq_id)) >= self.n_seq_max) return -1;
         return self.getRaw().seqPosMax(seq_id);
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `memory_breakdown` (llama-kv-cache-dsv4.cpp:1571 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `memory_breakdown` (llama-kv-cache-dsv4.cpp:1571 @b29c606e2).
     pub fn memoryBreakdown(self: *const KvCacheDsv4, out: *std.ArrayList(memory.BuftSize)) void {
         self.getRaw().memoryBreakdown(out);
         self.getCsa().memoryBreakdown(out);
@@ -1757,7 +1757,7 @@ pub const KvCacheDsv4 = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `state_write` (llama-kv-cache-dsv4.cpp:1594
-    /// @5266f24da): a header, the raw cache, the used rows of the compressed
+    /// @b29c606e2): a header, the raw cache, the used rows of the compressed
     /// caches unless partial, then the compressor states.
     pub fn stateWrite(self: *const KvCacheDsv4, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         const partial_only = flags & c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY != 0;
@@ -1792,7 +1792,7 @@ pub const KvCacheDsv4 = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `state_read` (llama-kv-cache-dsv4.cpp:1628
-    /// @5266f24da): a restored sequence has no rollback pending.
+    /// @b29c606e2): a restored sequence has no rollback pending.
     pub fn stateRead(self: *KvCacheDsv4, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         const magic = try r.readValue(u32, exc);
         const version = try r.readValue(u32, exc);
@@ -1830,53 +1830,53 @@ pub const KvCacheDsv4 = struct {
         }
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `get_raw` (llama-kv-cache-dsv4.cpp:1675 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `get_raw` (llama-kv-cache-dsv4.cpp:1675 @b29c606e2).
     pub fn getRaw(self: *const KvCacheDsv4) *KvCacheIswa {
         return self.kv_raw.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `get_csa` (llama-kv-cache-dsv4.cpp:1679 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `get_csa` (llama-kv-cache-dsv4.cpp:1679 @b29c606e2).
     pub fn getCsa(self: *const KvCacheDsv4) *KvCache {
         return self.kv_csa.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `get_hca` (llama-kv-cache-dsv4.cpp:1683 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `get_hca` (llama-kv-cache-dsv4.cpp:1683 @b29c606e2).
     pub fn getHca(self: *const KvCacheDsv4) *KvCache {
         return self.kv_hca.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `get_lid` (llama-kv-cache-dsv4.cpp:1687 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `get_lid` (llama-kv-cache-dsv4.cpp:1687 @b29c606e2).
     pub fn getLid(self: *const KvCacheDsv4) *KvCache {
         return self.kv_lid.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `get_csa_state` (llama-kv-cache-dsv4.cpp:1691 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `get_csa_state` (llama-kv-cache-dsv4.cpp:1691 @b29c606e2).
     pub fn getCsaState(self: *const KvCacheDsv4) *CompState {
         return self.csa_state.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `get_hca_state` (llama-kv-cache-dsv4.cpp:1695 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `get_hca_state` (llama-kv-cache-dsv4.cpp:1695 @b29c606e2).
     pub fn getHcaState(self: *const KvCacheDsv4) *CompState {
         return self.hca_state.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `get_lid_state` (llama-kv-cache-dsv4.cpp:1699 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `get_lid_state` (llama-kv-cache-dsv4.cpp:1699 @b29c606e2).
     pub fn getLidState(self: *const KvCacheDsv4) *CompState {
         return self.lid_state.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `get_n_rs_seq` (llama-kv-cache-dsv4.cpp:1703 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `get_n_rs_seq` (llama-kv-cache-dsv4.cpp:1703 @b29c606e2).
     pub fn getNRsSeq(self: *const KvCacheDsv4) u32 {
         return self.n_rs_seq;
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `get_rs_idx` (llama-kv-cache-dsv4.cpp:1707 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4`'s `get_rs_idx` (llama-kv-cache-dsv4.cpp:1707 @b29c606e2).
     pub fn getRsIdx(self: *const KvCacheDsv4) []const u32 {
         return self.rs_idx.items;
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `reset_rs_idx_for_ubatches`
-    /// (llama-kv-cache-dsv4.cpp:1711 @5266f24da): a ubatch that touches a
+    /// (llama-kv-cache-dsv4.cpp:1711 @b29c606e2): a ubatch that touches a
     /// sequence consumes its pending rollback.
     pub fn resetRsIdxForUbatches(self: *KvCacheDsv4, ubatches: []const Ubatch) void {
         if (self.n_rs_seq == 0) return;
@@ -1893,7 +1893,7 @@ pub const KvCacheDsv4 = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `clear_compressed` (llama-kv-cache-dsv4.cpp:1728
-    /// @5266f24da): every compressed cache and state, or one sequence's.
+    /// @b29c606e2): every compressed cache and state, or one sequence's.
     fn clearCompressed(self: *KvCacheDsv4, seq_id: i32, data: bool) void {
         if (seq_id < 0) {
             self.getCsa().clear(data);
@@ -2045,7 +2045,7 @@ fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
 // -----------------------------------------------------------------------------
 // llama_kv_cache_dsv4_raw_context
 
-/// Ports `dsv4_build_full_sinfo` (llama-kv-cache-dsv4.cpp:1767 @5266f24da):
+/// Ports `dsv4_build_full_sinfo` (llama-kv-cache-dsv4.cpp:1767 @b29c606e2):
 /// every stream, with a dummy index.
 fn buildFullSinfo(kv: *const KvCache) SlotInfo {
     const n_stream = kv.getNStream();
@@ -2062,7 +2062,7 @@ fn buildFullSinfo(kv: *const KvCache) SlotInfo {
 }
 
 /// Ports `llama_kv_cache_dsv4_raw_context` (llama-kv-cache-dsv4.h:179
-/// @5266f24da): DSV4's raw attention uses only the SWA half of the raw
+/// @b29c606e2): DSV4's raw attention uses only the SWA half of the raw
 /// cache. The base half is kept for the iSWA cache's bookkeeping, but has
 /// no DSV4 layers to expose.
 pub const RawContext = struct {
@@ -2083,7 +2083,7 @@ pub const RawContext = struct {
     status: memory.Status,
 
     /// Ports the full-cache constructor of `llama_kv_cache_dsv4_raw_context`
-    /// (llama-kv-cache-dsv4.cpp:1782 @5266f24da).
+    /// (llama-kv-cache-dsv4.cpp:1782 @b29c606e2).
     pub fn createFull(kv: *KvCacheIswa) *RawContext {
         const self = allocator.create(RawContext) catch oom();
         self.* = .{ .kv_swa = kv.getSwa(), .status = .success };
@@ -2094,7 +2094,7 @@ pub const RawContext = struct {
     }
 
     /// Ports the update constructor of `llama_kv_cache_dsv4_raw_context`
-    /// (llama-kv-cache-dsv4.cpp:1792 @5266f24da).
+    /// (llama-kv-cache-dsv4.cpp:1792 @b29c606e2).
     pub fn createUpdate(kv: *KvCacheIswa, lctx: *anyopaque, optimize: bool) *RawContext {
         const self = allocator.create(RawContext) catch oom();
         const b = kv.getBase().initUpdate(lctx, optimize);
@@ -2105,7 +2105,7 @@ pub const RawContext = struct {
     }
 
     /// Ports the batch constructor of `llama_kv_cache_dsv4_raw_context`
-    /// (llama-kv-cache-dsv4.cpp:1803 @5266f24da): the base half places the
+    /// (llama-kv-cache-dsv4.cpp:1803 @b29c606e2): the base half places the
     /// raw writes through an ordinary KV cache context; the SWA half's are
     /// applied here, so its reads can differ from its writes.
     pub fn createBatch(
@@ -2141,7 +2141,7 @@ pub const RawContext = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `next` (llama-kv-cache-dsv4.cpp:1822 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `next` (llama-kv-cache-dsv4.cpp:1822 @b29c606e2).
     pub fn next(self: *RawContext) bool {
         if (self.ubatches.items.len == 0) return true;
 
@@ -2151,7 +2151,7 @@ pub const RawContext = struct {
         return self.i_next < self.ubatches.items.len;
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `apply` (llama-kv-cache-dsv4.cpp:1838 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `apply` (llama-kv-cache-dsv4.cpp:1838 @b29c606e2).
     pub fn apply(self: *RawContext) bool {
         var res = true;
 
@@ -2171,36 +2171,36 @@ pub const RawContext = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_status` (llama-kv-cache-dsv4.cpp:1855 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_status` (llama-kv-cache-dsv4.cpp:1855 @b29c606e2).
     pub fn getStatus(self: *const RawContext) memory.Status {
         return self.status;
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_ubatch` (llama-kv-cache-dsv4.cpp:1859 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_ubatch` (llama-kv-cache-dsv4.cpp:1859 @b29c606e2).
     pub fn getUbatch(self: *const RawContext) *const Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_n_kv` (llama-kv-cache-dsv4.cpp:1865 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_n_kv` (llama-kv-cache-dsv4.cpp:1865 @b29c606e2).
     pub fn getNKv(self: *const RawContext) u32 {
         return self.n_kv;
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_n_write` (llama-kv-cache-dsv4.cpp:1869
-    /// @5266f24da): the current ubatch's raw writes.
+    /// @b29c606e2): the current ubatch's raw writes.
     pub fn getNWrite(self: *const RawContext) u32 {
         if (self.ubatches_write.items.len == 0) return 0;
         return self.ubatches_write.items[self.i_next].n_tokens;
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_k` (llama-kv-cache-dsv4.cpp:1877 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_k` (llama-kv-cache-dsv4.cpp:1877 @b29c606e2).
     pub fn getK(self: *const RawContext, ctx: *c.ggml_context, il: i32) *Tensor {
         return self.kv_swa.getK(ctx, il, self.n_kv, &self.sinfos_read.items[self.i_next]);
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `cpy_k` (llama-kv-cache-dsv4.cpp:1881
-    /// @5266f24da): `k_idxs` may be expanded to one block per stream while
+    /// @b29c606e2): `k_idxs` may be expanded to one block per stream while
     /// `k_cur` is the token block alone; each copy then gets a zero
     /// dependency on the others, so every write executes.
     pub fn cpyK(self: *const RawContext, ctx: *c.ggml_context, k_cur: *Tensor, k_idxs: *Tensor, il: i32) *Tensor {
@@ -2228,7 +2228,7 @@ pub const RawContext = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `build_input_k_idxs`
-    /// (llama-kv-cache-dsv4.cpp:1910 @5266f24da): one index per raw write.
+    /// (llama-kv-cache-dsv4.cpp:1910 @b29c606e2): one index per raw write.
     pub fn buildInputKIdxs(self: *const RawContext, ctx: *c.ggml_context, ubatch: *const Ubatch) *Tensor {
         const n_tokens: u32 = if (self.ubatches_write.items.len == 0) ubatch.n_tokens else self.ubatches_write.items[self.i_next].n_tokens;
 
@@ -2237,22 +2237,22 @@ pub const RawContext = struct {
         return k_idxs;
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `build_input_k_rot` (llama-kv-cache-dsv4.cpp:1919 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `build_input_k_rot` (llama-kv-cache-dsv4.cpp:1919 @b29c606e2).
     pub fn buildInputKRot(self: *const RawContext, ctx: *c.ggml_context) ?*Tensor {
         return self.kv_swa.buildInputKRot(ctx);
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_k_idxs` (llama-kv-cache-dsv4.cpp:1923 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_k_idxs` (llama-kv-cache-dsv4.cpp:1923 @b29c606e2).
     pub fn setInputKIdxs(self: *const RawContext, dst: *Tensor) void {
         self.kv_swa.setInputKIdxs(dst, &self.ubatches_write.items[self.i_next], &self.sinfos_write.items[self.i_next]);
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_kq_mask` (llama-kv-cache-dsv4.cpp:1927 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_kq_mask` (llama-kv-cache-dsv4.cpp:1927 @b29c606e2).
     pub fn setInputKqMask(self: *const RawContext, dst: *Tensor, ubatch: *const Ubatch, causal_attn: bool) void {
         self.kv_swa.setInputKqMask(dst, ubatch, causal_attn);
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_k_rot` (llama-kv-cache-dsv4.cpp:1931 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_k_rot` (llama-kv-cache-dsv4.cpp:1931 @b29c606e2).
     pub fn setInputKRot(self: *const RawContext, dst: *Tensor) void {
         self.kv_swa.setInputKRot(dst);
     }
@@ -2262,7 +2262,7 @@ pub const RawContext = struct {
 // llama_kv_cache_dsv4_comp_context
 
 /// Ports `llama_kv_cache_dsv4_comp_context` (llama-kv-cache-dsv4.h:237
-/// @5266f24da): compressed rows are graph outputs, not token writes, so
+/// @b29c606e2): compressed rows are graph outputs, not token writes, so
 /// this exposes a compressed cache's K without `apply` semantics.
 pub const CompContext = struct {
     kv: *KvCache,
@@ -2272,7 +2272,7 @@ pub const CompContext = struct {
     n_kv: u32,
 
     /// Ports the full-cache constructor of `llama_kv_cache_dsv4_comp_context`
-    /// (llama-kv-cache-dsv4.cpp:1939 @5266f24da).
+    /// (llama-kv-cache-dsv4.cpp:1939 @b29c606e2).
     pub fn createFull(kv: *KvCache) *CompContext {
         const self = allocator.create(CompContext) catch oom();
         self.* = .{ .kv = kv, .n_kv = kv.getSize() };
@@ -2290,7 +2290,7 @@ pub const CompContext = struct {
     }
 
     /// Ports the batch constructor of `llama_kv_cache_dsv4_comp_context`
-    /// (llama-kv-cache-dsv4.cpp:1952 @5266f24da): takes both lists.
+    /// (llama-kv-cache-dsv4.cpp:1952 @b29c606e2): takes both lists.
     pub fn createBatch(kv: *KvCache, sinfos: std.ArrayList(SlotInfo), ubatches: std.ArrayList(Ubatch)) *CompContext {
         const self = allocator.create(CompContext) catch oom();
         self.* = .{ .kv = kv, .sinfos = sinfos, .ubatches = ubatches, .n_kv = kv.getSize() };
@@ -2304,34 +2304,34 @@ pub const CompContext = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache_dsv4_comp_context`'s `next` (llama-kv-cache-dsv4.cpp:1962 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_comp_context`'s `next` (llama-kv-cache-dsv4.cpp:1962 @b29c606e2).
     pub fn next(self: *CompContext) bool {
         if (self.ubatches.items.len == 0) return true;
         self.i_cur += 1;
         return self.i_cur < self.ubatches.items.len;
     }
 
-    /// Ports `llama_kv_cache_dsv4_comp_context`'s `get_n_kv` (llama-kv-cache-dsv4.cpp:1974 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_comp_context`'s `get_n_kv` (llama-kv-cache-dsv4.cpp:1974 @b29c606e2).
     pub fn getNKv(self: *const CompContext) u32 {
         return self.n_kv;
     }
 
-    /// Ports `llama_kv_cache_dsv4_comp_context`'s `get_k` (llama-kv-cache-dsv4.cpp:1978 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_comp_context`'s `get_k` (llama-kv-cache-dsv4.cpp:1978 @b29c606e2).
     pub fn getK(self: *const CompContext, ctx: *c.ggml_context, il: i32) *Tensor {
         return self.kv.getK(ctx, il, self.n_kv, &self.sinfos.items[self.i_cur]);
     }
 
-    /// Ports `llama_kv_cache_dsv4_comp_context`'s `cpy_k` (llama-kv-cache-dsv4.cpp:1982 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_comp_context`'s `cpy_k` (llama-kv-cache-dsv4.cpp:1982 @b29c606e2).
     pub fn cpyK(self: *const CompContext, ctx: *c.ggml_context, k_cur: *Tensor, k_idxs: *Tensor, il: i32) *Tensor {
         return self.kv.cpyK(ctx, k_cur, k_idxs, il, &self.sinfos.items[self.i_cur]);
     }
 
-    /// Ports `llama_kv_cache_dsv4_comp_context`'s `build_input_k_rot` (llama-kv-cache-dsv4.cpp:1986 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_comp_context`'s `build_input_k_rot` (llama-kv-cache-dsv4.cpp:1986 @b29c606e2).
     pub fn buildInputKRot(self: *const CompContext, ctx: *c.ggml_context) ?*Tensor {
         return self.kv.buildInputKRot(ctx);
     }
 
-    /// Ports `llama_kv_cache_dsv4_comp_context`'s `set_input_k_rot` (llama-kv-cache-dsv4.cpp:1990 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_comp_context`'s `set_input_k_rot` (llama-kv-cache-dsv4.cpp:1990 @b29c606e2).
     pub fn setInputKRot(self: *const CompContext, dst: *Tensor) void {
         self.kv.setInputKRot(dst);
     }
@@ -2343,7 +2343,7 @@ pub const CompContext = struct {
 /// The empty plan `get_csa_plan` and its siblings return without ubatches.
 const empty_plan: CompPlan = .{};
 
-/// Ports `llama_kv_cache_dsv4_context` (llama-kv-cache-dsv4.h:268 @5266f24da):
+/// Ports `llama_kv_cache_dsv4_context` (llama-kv-cache-dsv4.h:268 @b29c606e2):
 /// the DSV4 memory's view for one batch -- the raw context, a view of each
 /// compressed cache, the compressor states, and a plan per ubatch for each.
 pub const Dsv4Context = struct {
@@ -2382,7 +2382,7 @@ pub const Dsv4Context = struct {
     status: memory.Status,
 
     /// Ports the status constructor of `llama_kv_cache_dsv4_context`
-    /// (llama-kv-cache-dsv4.cpp:1998 @5266f24da).
+    /// (llama-kv-cache-dsv4.cpp:1998 @b29c606e2).
     pub fn createStatus(status: memory.Status) *Dsv4Context {
         const self = allocator.create(Dsv4Context) catch oom();
         self.* = .{ .status = status };
@@ -2390,7 +2390,7 @@ pub const Dsv4Context = struct {
     }
 
     /// Ports the full-cache constructor of `llama_kv_cache_dsv4_context`
-    /// (llama-kv-cache-dsv4.cpp:2000 @5266f24da): the reserve graph's view,
+    /// (llama-kv-cache-dsv4.cpp:2000 @b29c606e2): the reserve graph's view,
     /// with worst-case plans.
     pub fn createFull(kv: *KvCacheDsv4) *Dsv4Context {
         const self = allocator.create(Dsv4Context) catch oom();
@@ -2416,7 +2416,7 @@ pub const Dsv4Context = struct {
     }
 
     /// Ports the update constructor of `llama_kv_cache_dsv4_context`
-    /// (llama-kv-cache-dsv4.cpp:2018 @5266f24da): an update when any of the
+    /// (llama-kv-cache-dsv4.cpp:2018 @b29c606e2): an update when any of the
     /// caches has one, or any compressor state has queued copies.
     pub fn createUpdate(kv: *KvCacheDsv4, lctx: *anyopaque, optimize: bool, sc_info_csa: StreamCopyInfo, sc_info_hca: StreamCopyInfo, sc_info_lid: StreamCopyInfo) *Dsv4Context {
         const self = allocator.create(Dsv4Context) catch oom();
@@ -2446,7 +2446,7 @@ pub const Dsv4Context = struct {
     }
 
     /// Ports the batch constructor of `llama_kv_cache_dsv4_context`
-    /// (llama-kv-cache-dsv4.cpp:2043 @5266f24da): plans every ubatch for
+    /// (llama-kv-cache-dsv4.cpp:2043 @b29c606e2): plans every ubatch for
     /// each compressor, then consumes the rollbacks the ubatches touch.
     /// Takes every list.
     pub fn createBatch(
@@ -2503,7 +2503,7 @@ pub const Dsv4Context = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `next` (llama-kv-cache-dsv4.cpp:2091 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `next` (llama-kv-cache-dsv4.cpp:2091 @b29c606e2).
     pub fn next(self: *Dsv4Context) bool {
         std.debug.assert(self.status == .success);
 
@@ -2517,7 +2517,7 @@ pub const Dsv4Context = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4_context`'s `apply` (llama-kv-cache-dsv4.cpp:2106
-    /// @5266f24da): without ubatches, an update, which also applies the
+    /// @b29c606e2): without ubatches, an update, which also applies the
     /// compressor states' queued stream copies.
     pub fn apply(self: *Dsv4Context) bool {
         std.debug.assert(!memory.statusIsFail(self.status));
@@ -2545,74 +2545,74 @@ pub const Dsv4Context = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_status` (llama-kv-cache-dsv4.cpp:2128 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_status` (llama-kv-cache-dsv4.cpp:2128 @b29c606e2).
     pub fn getStatus(self: *const Dsv4Context) memory.Status {
         return self.status;
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_ubatch` (llama-kv-cache-dsv4.cpp:2132 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_ubatch` (llama-kv-cache-dsv4.cpp:2132 @b29c606e2).
     pub fn getUbatch(self: *const Dsv4Context) *const Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_raw` (llama-kv-cache-dsv4.cpp:2138 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_raw` (llama-kv-cache-dsv4.cpp:2138 @b29c606e2).
     pub fn getRaw(self: *const Dsv4Context) *const RawContext {
         std.debug.assert(self.status == .success);
         return self.ctx_raw.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_csa` (llama-kv-cache-dsv4.cpp:2144 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_csa` (llama-kv-cache-dsv4.cpp:2144 @b29c606e2).
     pub fn getCsa(self: *const Dsv4Context) *const CompContext {
         std.debug.assert(self.status == .success);
         return self.ctx_csa.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_hca` (llama-kv-cache-dsv4.cpp:2150 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_hca` (llama-kv-cache-dsv4.cpp:2150 @b29c606e2).
     pub fn getHca(self: *const Dsv4Context) *const CompContext {
         std.debug.assert(self.status == .success);
         return self.ctx_hca.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_lid` (llama-kv-cache-dsv4.cpp:2156 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_lid` (llama-kv-cache-dsv4.cpp:2156 @b29c606e2).
     pub fn getLid(self: *const Dsv4Context) *const CompContext {
         std.debug.assert(self.status == .success);
         return self.ctx_lid.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_csa_state` (llama-kv-cache-dsv4.cpp:2162 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_csa_state` (llama-kv-cache-dsv4.cpp:2162 @b29c606e2).
     pub fn getCsaState(self: *const Dsv4Context) *const CompState {
         std.debug.assert(self.status == .success);
         return self.csa_state.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_hca_state` (llama-kv-cache-dsv4.cpp:2168 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_hca_state` (llama-kv-cache-dsv4.cpp:2168 @b29c606e2).
     pub fn getHcaState(self: *const Dsv4Context) *const CompState {
         std.debug.assert(self.status == .success);
         return self.hca_state.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_lid_state` (llama-kv-cache-dsv4.cpp:2174 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_lid_state` (llama-kv-cache-dsv4.cpp:2174 @b29c606e2).
     pub fn getLidState(self: *const Dsv4Context) *const CompState {
         std.debug.assert(self.status == .success);
         return self.lid_state.?;
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_csa_plan` (llama-kv-cache-dsv4.cpp:2180 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_csa_plan` (llama-kv-cache-dsv4.cpp:2180 @b29c606e2).
     pub fn getCsaPlan(self: *const Dsv4Context) *const CompPlan {
         std.debug.assert(self.status == .success);
         if (self.plans_csa.items.len == 0) return &empty_plan;
         return &self.plans_csa.items[self.i_next];
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_hca_plan` (llama-kv-cache-dsv4.cpp:2191 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_hca_plan` (llama-kv-cache-dsv4.cpp:2191 @b29c606e2).
     pub fn getHcaPlan(self: *const Dsv4Context) *const CompPlan {
         std.debug.assert(self.status == .success);
         if (self.plans_hca.items.len == 0) return &empty_plan;
         return &self.plans_hca.items[self.i_next];
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `get_lid_plan` (llama-kv-cache-dsv4.cpp:2202 @5266f24da).
+    /// Ports `llama_kv_cache_dsv4_context`'s `get_lid_plan` (llama-kv-cache-dsv4.cpp:2202 @b29c606e2).
     pub fn getLidPlan(self: *const Dsv4Context) *const CompPlan {
         std.debug.assert(self.status == .success);
         if (self.plans_lid.items.len == 0) return &empty_plan;
@@ -2620,7 +2620,7 @@ pub const Dsv4Context = struct {
     }
 
     /// Ports the overload of `llama_kv_cache_dsv4_context`'s `get_csa_plan`
-    /// that takes a ubatch (llama-kv-cache-dsv4.cpp:2213 @5266f24da): the
+    /// that takes a ubatch (llama-kv-cache-dsv4.cpp:2213 @b29c606e2): the
     /// reserve graph's worst case, rebuilt for `ubatch`, else the current
     /// plan. The returned plan is valid until the next call.
     pub fn getCsaPlanFor(self: *const Dsv4Context, ubatch: *const Ubatch) *const CompPlan {
@@ -2634,7 +2634,7 @@ pub const Dsv4Context = struct {
     }
 
     /// Ports the overload of `llama_kv_cache_dsv4_context`'s `get_hca_plan`
-    /// that takes a ubatch (llama-kv-cache-dsv4.cpp:2227 @5266f24da).
+    /// that takes a ubatch (llama-kv-cache-dsv4.cpp:2227 @b29c606e2).
     pub fn getHcaPlanFor(self: *const Dsv4Context, ubatch: *const Ubatch) *const CompPlan {
         std.debug.assert(self.status == .success);
         if (!self.reserve_plans) return self.getHcaPlan();
@@ -2646,7 +2646,7 @@ pub const Dsv4Context = struct {
     }
 
     /// Ports the overload of `llama_kv_cache_dsv4_context`'s `get_lid_plan`
-    /// that takes a ubatch (llama-kv-cache-dsv4.cpp:2241 @5266f24da).
+    /// that takes a ubatch (llama-kv-cache-dsv4.cpp:2241 @b29c606e2).
     pub fn getLidPlanFor(self: *const Dsv4Context, ubatch: *const Ubatch) *const CompPlan {
         std.debug.assert(self.status == .success);
         if (!self.reserve_plans) return self.getLidPlan();

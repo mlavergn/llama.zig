@@ -13,7 +13,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/deepseek4v.cpp` at v0.4.0 (`5266f24da`).
+//! Ports `llama.cpp/tools/mtmd/models/deepseek4v.cpp` at v0.4.1 (`b29c606e2`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -22,7 +22,7 @@ const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
 
-/// The `add_pos` lambda (deepseek4v.cpp:27 @5266f24da): a two-section
+/// The `add_pos` lambda (deepseek4v.cpp:27 @b29c606e2): a two-section
 /// vision M-RoPE over the `positions` input, rows then columns.
 const Rope = struct {
     positions: graph.T,
@@ -36,12 +36,12 @@ const Rope = struct {
     }
 };
 
-/// `CLIP_ALIGN` (clip-impl.h:438 @5266f24da), over `int`.
+/// `CLIP_ALIGN` (clip-impl.h:438 @b29c606e2), over `int`.
 fn clipAlign(x: c_int, n: c_int) c_int {
     return @divTrunc(x + n - 1, n) * n;
 }
 
-/// Ports `build` (deepseek4v.cpp:18 @5266f24da), a member of
+/// Ports `build` (deepseek4v.cpp:18 @b29c606e2), a member of
 /// `clip_graph_deepseek4v`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

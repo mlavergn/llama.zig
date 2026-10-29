@@ -8,7 +8,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/bert.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/bert.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_bert`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_bert`'s `load_arch_hparams` (models/bert.cpp:3 @5266f24da).
+/// Ports `llama_model_bert`'s `load_arch_hparams` (models/bert.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
@@ -42,8 +42,20 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_bert`'s `load_arch_tensors` (models/bert.cpp:23 @5266f24da).
+/// Ports `llama_model_bert`'s `load_arch_tensors` (models/bert.cpp:23 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+    return loadBertTensors(self, .{ .pos_cls = true, .moe = false, .gate = false }, exc);
+}
+
+/// What tells the BERT family's `load_arch_tensors` apart: BERT's learned
+/// positions and classifier heads, Nomic-BERT MoE's expert layers, and
+/// Nomic-BERT's SwiGLU gate.
+pub const BertTensors = struct { pos_cls: bool, moe: bool, gate: bool };
+
+/// The body BERT, Jina-BERT v3, Nomic-BERT and Nomic-BERT MoE share in
+/// their `load_arch_tensors`, each citing its own; `v` picks the lines that
+/// differ.
+pub fn loadBertTensors(self: *Model, comptime v: BertTensors, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
@@ -54,7 +66,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
     self.type_embd = try self.createTensor(.{ .tensor = .token_types, .suffix = "weight" }, &.{ l.n_embd, l.n_token_types }, nr, exc);
 
-    if (self.arch == .bert) {
+    if (v.pos_cls) {
         self.pos_embd = try self.createTensor(.{ .tensor = .pos_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_ctx_train }, 0, exc);
 
         self.cls = try self.createTensor(.{ .tensor = .cls, .suffix = "weight" }, &.{ l.n_embd, l.n_embd }, nr, exc);
@@ -79,7 +91,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         layer.attn_out_norm = try self.createTensor(.{ .tensor = .attn_out_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
         layer.attn_out_norm_b = try self.createTensor(.{ .tensor = .attn_out_norm, .suffix = "bias", .bid = i }, &.{l.n_embd}, 0, exc);
 
-        if (hp.moe_every_n_layers > 0 and @as(u32, @intCast(i)) % hp.moe_every_n_layers == 1) {
+        if (v.moe and hp.moe_every_n_layers > 0 and @as(u32, @intCast(i)) % hp.moe_every_n_layers == 1) {
             layer.ffn_up_exps = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_ff, l.n_expert }, 0, exc);
             layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ l.n_ff, l.n_embd, l.n_expert }, 0, exc);
             layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_expert }, 0, exc);
@@ -88,10 +100,10 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
             layer.ffn_up_b = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "bias", .bid = i }, &.{l.n_ff}, nr, exc);
             layer.ffn_down = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "weight", .bid = i }, &.{ l.n_ff, l.n_embd }, 0, exc);
             layer.ffn_down_b = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "bias", .bid = i }, &.{l.n_embd}, nr, exc);
+        }
 
-            if (self.arch == .nomic_bert) {
-                layer.ffn_gate = try self.createTensor(.{ .tensor = .ffn_gate, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_ff }, 0, exc);
-            }
+        if (v.gate) {
+            layer.ffn_gate = try self.createTensor(.{ .tensor = .ffn_gate, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_ff }, 0, exc);
         }
 
         layer.layer_out_norm = try self.createTensor(.{ .tensor = .layer_out_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
@@ -99,13 +111,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_bert`'s `build_arch_graph` (models/bert.cpp:76 @5266f24da).
+/// Ports `llama_model_bert`'s `build_arch_graph` (models/bert.cpp:64 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_bert`'s `graph`
-/// (models/bert.cpp:80 @5266f24da), which Jina-BERT v2 and v3 and
+/// (models/bert.cpp:68 @b29c606e2), which Jina-BERT v2 and v3 and
 /// Nomic-BERT build with too.
 ///
 /// Parameters:
@@ -116,7 +128,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/bert.cpp", 83, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/bert.cpp", 71, "n_embd_head == hparams.n_embd_head_k()");
 
     var inp_pos: ?*Tensor = null;
 

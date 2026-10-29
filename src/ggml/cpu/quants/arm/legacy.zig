@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.4.0,
-//! `5266f24da`), the `__ARM_NEON` arms of the dot products at lines 140, 222,
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.4.1,
+//! `b29c606e2`), the `__ARM_NEON` arms of the dot products at lines 140, 222,
 //! 297, 590, 749, 810, 920, 1032, 1150 and 4196. Each function names the C it
 //! replaces and the line it began at.
 //!
@@ -63,7 +63,7 @@ inline fn dot2(a0: i8x16, b0: i8x16, a1: i8x16, b1: i8x16) i32x4 {
 // -----------------------------------------------------------------------------
 // q1_0
 
-/// Ports `table_b2b_0` (arch/arm/quants.c:37 @5266f24da): a byte's eight bits expanded to
+/// Ports `table_b2b_0` (arch/arm/quants.c:37 @b29c606e2): a byte's eight bits expanded to
 /// eight bytes, each `0x10` where the bit is set.
 ///
 /// The C builds this with an eight-deep macro (`B8`), which expands to 256
@@ -81,7 +81,7 @@ const table_b2b_0 = blk: {
     break :blk t;
 };
 
-/// Ports `table_b2b_1` (arch/arm/quants.c:38 @5266f24da): the complement of
+/// Ports `table_b2b_1` (arch/arm/quants.c:38 @b29c606e2): the complement of
 /// `table_b2b_0`, `0x10` where the bit is **clear**.
 ///
 /// `q5_0` uses it to fold the fifth bit and the bias of 16 into one subtract.
@@ -119,7 +119,7 @@ inline fn expandQh(comptime table: *const [256]u64, qh: u32) [2]i8x16 {
     };
 }
 
-/// Ports `ggml_vec_dot_q1_0_q8_0` (arch/arm/quants.c:140 @5266f24da).
+/// Ports `ggml_vec_dot_q1_0_q8_0` (arch/arm/quants.c:140 @b29c606e2).
 ///
 /// One-bit weights: each bit selects `+y` or `-y`. The sign vector is built by
 /// expanding four bytes of bits through `table_b2b_0`, shifting the `0x10`
@@ -184,7 +184,7 @@ pub export fn ggml_vec_dot_q1_0_q8_0(
 // -----------------------------------------------------------------------------
 // q2_0
 
-/// Ports `tbl_idx_lo`, `tbl_idx_hi` and `shift_vals` (arch/arm/quants.c:243 @5266f24da).
+/// Ports `tbl_idx_lo`, `tbl_idx_hi` and `shift_vals` (arch/arm/quants.c:243 @b29c606e2).
 ///
 /// Each byte of the packed row holds four 2-bit weights. Replicating the byte
 /// four times and shifting by `{0,-2,-4,-6}` puts a different field in the low
@@ -193,7 +193,7 @@ const tbl_idx_lo: u8x16 = .{ 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3 };
 const tbl_idx_hi: u8x16 = .{ 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7 };
 const shift_vals: i8x16 = .{ 0, -2, -4, -6, 0, -2, -4, -6, 0, -2, -4, -6, 0, -2, -4, -6 };
 
-/// Ports `ggml_vec_dot_q2_0_q8_0` (arch/arm/quants.c:222 @5266f24da).
+/// Ports `ggml_vec_dot_q2_0_q8_0` (arch/arm/quants.c:222 @b29c606e2).
 pub export fn ggml_vec_dot_q2_0_q8_0(
     n: c_int,
     s: [*c]f32,
@@ -257,7 +257,7 @@ pub export fn ggml_vec_dot_q2_0_q8_0(
 // -----------------------------------------------------------------------------
 // q4_0 and q4_1
 
-/// Ports `ggml_vec_dot_q4_0_q8_0` (arch/arm/quants.c:297 @5266f24da), the `__ARM_NEON`
+/// Ports `ggml_vec_dot_q4_0_q8_0` (arch/arm/quants.c:297 @b29c606e2), the `__ARM_NEON`
 /// arm at line 527.
 pub export fn ggml_vec_dot_q4_0_q8_0(
     n: c_int,
@@ -341,7 +341,7 @@ pub export fn ggml_vec_dot_q4_0_q8_0(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_q4_1_q8_1` (arch/arm/quants.c:590 @5266f24da).
+/// Ports `ggml_vec_dot_q4_1_q8_1` (arch/arm/quants.c:590 @b29c606e2).
 ///
 /// Like `q4_0` without the bias of eight, plus the per-block minimum times the
 /// right operand's sum. `summs` accumulates as a scalar across the whole
@@ -425,7 +425,7 @@ pub export fn ggml_vec_dot_q4_1_q8_1(
 // -----------------------------------------------------------------------------
 // mxfp4 and nvfp4
 
-/// Ports `ggml_vec_dot_mxfp4_q8_0` (arch/arm/quants.c:749 @5266f24da).
+/// Ports `ggml_vec_dot_mxfp4_q8_0` (arch/arm/quants.c:749 @b29c606e2).
 ///
 /// Four-bit indices into `kvalues_mxfp4`, looked up with a table permute
 /// rather than arithmetic. Note the scale: the C reaches for
@@ -498,7 +498,7 @@ pub export fn ggml_vec_dot_mxfp4_q8_0(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_nvfp4_q8_0` (arch/arm/quants.c:810 @5266f24da).
+/// Ports `ggml_vec_dot_nvfp4_q8_0` (arch/arm/quants.c:810 @b29c606e2).
 ///
 /// A 64-element super-block of four 16-element sub-blocks over two q8_0
 /// blocks. `vpaddq_s32` folds the two halves' four-lane sums into one vector
@@ -580,7 +580,7 @@ pub export fn ggml_vec_dot_nvfp4_q8_0(
     s[0] = neon.addvq_f32(acc);
 }
 
-/// Ports `GGML_CPU_UE4M3_TO_FP32` (simd-mappings.h:138 @5266f24da), the NEON arm.
+/// Ports `GGML_CPU_UE4M3_TO_FP32` (simd-mappings.h:138 @b29c606e2), the NEON arm.
 ///
 /// A lookup, not the arithmetic `ggml_ue4m3_to_fp32` the generic kernel uses.
 /// The values agree -- `ggml_cpu_init` fills the table from that same function
@@ -593,7 +593,7 @@ inline fn cpuUe4m3ToFp32(x: u8) f32 {
 // -----------------------------------------------------------------------------
 // q5_0, q5_1 and q8_0
 
-/// Ports `ggml_vec_dot_q5_0_q8_0` (arch/arm/quants.c:920 @5266f24da).
+/// Ports `ggml_vec_dot_q5_0_q8_0` (arch/arm/quants.c:920 @b29c606e2).
 ///
 /// The fifth bit and the bias of 16 are folded into one subtract through
 /// `table_b2b_1` -- see the note there.
@@ -690,7 +690,7 @@ pub export fn ggml_vec_dot_q5_0_q8_0(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_q5_1_q8_1` (arch/arm/quants.c:1032 @5266f24da).
+/// Ports `ggml_vec_dot_q5_1_q8_1` (arch/arm/quants.c:1032 @b29c606e2).
 ///
 /// Unlike `q4_1`, the two blocks' minimum terms go into **separate**
 /// accumulators, `summs0` and `summs1`, and are added in that order at the
@@ -791,7 +791,7 @@ pub export fn ggml_vec_dot_q5_1_q8_1(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_q8_0_q8_0` (arch/arm/quants.c:1150 @5266f24da).
+/// Ports `ggml_vec_dot_q8_0_q8_0` (arch/arm/quants.c:1150 @b29c606e2).
 pub export fn ggml_vec_dot_q8_0_q8_0(
     n: c_int,
     s: [*c]f32,
@@ -863,7 +863,7 @@ pub export fn ggml_vec_dot_q8_0_q8_0(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_iq4_nl_q8_0` (arch/arm/quants.c:4196 @5266f24da).
+/// Ports `ggml_vec_dot_iq4_nl_q8_0` (arch/arm/quants.c:4196 @b29c606e2).
 ///
 /// The same shape as `mxfp4`, over `kvalues_iq4nl` and with an fp16 delta in
 /// place of the e8m0 exponent.

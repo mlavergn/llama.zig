@@ -46,3 +46,18 @@
 -m $ROOT/Qwen3-0.6B-Q8_0.gguf -f $DATA/text.txt -c 128 --chunks 2
 -m $ROOT/Qwen3-0.6B-Q8_0.gguf -f $DATA/hs.txt -c 512 --hellaswag --hellaswag-tasks 4
 ~ -m /nonexistent.gguf -f $DATA/text.txt
+
+# --log-jsonl (v0.4.1): every log line one JSON object on stdout, and the
+# memory breakdown one `fit_memory_breakdown` record, whatever the
+# verbosity; common_init's timestamps, free memory and the timings move
+# between runs
+!mask s/"time":[0-9]+/"time":T/g
+!mask s/took [0-9.]+ seconds/took X seconds/
+!mask /"msg":"ggml_metal_/d
+!mask s/"(free|unaccounted)":-?[0-9]+/"\1":X/g
+!mask s/"msg":"(llama_perf_context_print: +[a-z ]+ = )[^"]*"/"msg":"\1X"/
+!mask s/"msg":"([0-9]+ hours )?[0-9]+\.[0-9]+ minutes\\n"/"msg":"X minutes\\n"/
+--log-jsonl -m $PLAIN -f $DATA/text.txt -c 64 --chunks 2
+--log-jsonl -m $PLAIN -f $DATA/text.txt -c 64 --chunks 2 -lv 4
+-m $PLAIN -f $DATA/text.txt -c 64 --chunks 2 --log-jsonl --no-log-jsonl
+--log-jsonl -m /nonexistent.gguf -f $DATA/text.txt

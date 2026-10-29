@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Mirrors the `ggml_metal_kargs_*` structs of
-//! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at v0.4.0
-//! (`5266f24da`).
+//! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at v0.4.1
+//! (`b29c606e2`).
 //!
 //! # Generated, not written
 //!
@@ -26,7 +26,7 @@
 
 const std = @import("std");
 
-/// Mirrors `ggml_metal_kargs_concat` (ggml-metal-impl.h:172 @5266f24da).
+/// Mirrors `ggml_metal_kargs_concat` (ggml-metal-impl.h:179 @b29c606e2).
 pub const concat = extern struct {
     ne00: i32,
     ne01: i32,
@@ -55,7 +55,7 @@ pub const concat = extern struct {
     dim: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_unary` (ggml-metal-impl.h:200 @5266f24da).
+/// Mirrors `ggml_metal_kargs_unary` (ggml-metal-impl.h:207 @b29c606e2).
 pub const unary = extern struct {
     ne00: i32,
     ne01: i32,
@@ -81,7 +81,7 @@ pub const unary = extern struct {
     max: f32,
 };
 
-/// Mirrors `ggml_metal_kargs_bin` (ggml-metal-impl.h:225 @5266f24da).
+/// Mirrors `ggml_metal_kargs_bin` (ggml-metal-impl.h:232 @b29c606e2).
 pub const bin = extern struct {
     ne00: i32,
     ne01: i32,
@@ -111,7 +111,7 @@ pub const bin = extern struct {
     o1: [8]u64,
 };
 
-/// Mirrors `ggml_metal_kargs_add_id` (ggml-metal-impl.h:254 @5266f24da).
+/// Mirrors `ggml_metal_kargs_add_id` (ggml-metal-impl.h:261 @b29c606e2).
 pub const add_id = extern struct {
     ne0: i64,
     ne1: i64,
@@ -121,7 +121,7 @@ pub const add_id = extern struct {
     nb21: usize,
 };
 
-/// Mirrors `ggml_metal_kargs_repeat` (ggml-metal-impl.h:263 @5266f24da).
+/// Mirrors `ggml_metal_kargs_repeat` (ggml-metal-impl.h:270 @b29c606e2).
 pub const repeat = extern struct {
     ne00: i32,
     ne01: i32,
@@ -141,7 +141,7 @@ pub const repeat = extern struct {
     nb3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_cpy` (ggml-metal-impl.h:282 @5266f24da).
+/// Mirrors `ggml_metal_kargs_cpy` (ggml-metal-impl.h:289 @b29c606e2).
 pub const cpy = extern struct {
     nk0: i64,
     ne00: i64,
@@ -162,7 +162,7 @@ pub const cpy = extern struct {
     nb3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_set` (ggml-metal-impl.h:302 @5266f24da).
+/// Mirrors `ggml_metal_kargs_set` (ggml-metal-impl.h:309 @b29c606e2).
 pub const set = extern struct {
     ne10: i64,
     ne11: i64,
@@ -178,7 +178,7 @@ pub const set = extern struct {
     inplace: bool,
 };
 
-/// Mirrors `ggml_metal_kargs_rope` (ggml-metal-impl.h:317 @5266f24da).
+/// Mirrors `ggml_metal_kargs_rope` (ggml-metal-impl.h:324 @b29c606e2).
 pub const rope = extern struct {
     ne00: i32,
     ne01: i32,
@@ -214,7 +214,7 @@ pub const rope = extern struct {
     inplace: bool,
 };
 
-/// Mirrors `ggml_metal_kargs_flash_attn_ext_kv_f16` (ggml-metal-impl.h:352 @5266f24da).
+/// Mirrors `ggml_metal_kargs_flash_attn_ext_kv_f16` (ggml-metal-impl.h:359 @b29c606e2).
 pub const flash_attn_ext_kv_f16 = extern struct {
     ne0: i32,
     ne1: i32,
@@ -227,7 +227,7 @@ pub const flash_attn_ext_kv_f16 = extern struct {
     nblocks: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_flash_attn_ext_pad` (ggml-metal-impl.h:364 @5266f24da).
+/// Mirrors `ggml_metal_kargs_flash_attn_ext_pad` (ggml-metal-impl.h:371 @b29c606e2).
 pub const flash_attn_ext_pad = extern struct {
     ne11: i32,
     ne_12_2: i32,
@@ -246,7 +246,7 @@ pub const flash_attn_ext_pad = extern struct {
     nb33: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_flash_attn_ext_blk` (ggml-metal-impl.h:382 @5266f24da).
+/// Mirrors `ggml_metal_kargs_flash_attn_ext_blk` (ggml-metal-impl.h:389 @b29c606e2).
 pub const flash_attn_ext_blk = extern struct {
     ne01: i32,
     ne30: i32,
@@ -258,7 +258,7 @@ pub const flash_attn_ext_blk = extern struct {
     nb33: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_flash_attn_ext` (ggml-metal-impl.h:393 @5266f24da).
+/// Mirrors `ggml_metal_kargs_flash_attn_ext` (ggml-metal-impl.h:400 @b29c606e2).
 pub const flash_attn_ext = extern struct {
     ne01: i32,
     ne02: i32,
@@ -294,7 +294,7 @@ pub const flash_attn_ext = extern struct {
     logit_softcap: f32,
 };
 
-/// Mirrors `ggml_metal_kargs_flash_attn_ext_vec` (ggml-metal-impl.h:428 @5266f24da).
+/// Mirrors `ggml_metal_kargs_flash_attn_ext_vec` (ggml-metal-impl.h:435 @b29c606e2).
 pub const flash_attn_ext_vec = extern struct {
     ne01: i32,
     ne02: i32,
@@ -331,7 +331,7 @@ pub const flash_attn_ext_vec = extern struct {
     n_kv_max_padded: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_flash_attn_ext_vec_idx` (ggml-metal-impl.h:464 @5266f24da).
+/// Mirrors `ggml_metal_kargs_flash_attn_ext_vec_idx` (ggml-metal-impl.h:471 @b29c606e2).
 pub const flash_attn_ext_vec_idx = extern struct {
     ne30: i32,
     ne31: i32,
@@ -344,12 +344,12 @@ pub const flash_attn_ext_vec_idx = extern struct {
     n_kv_max_padded: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_flash_attn_ext_vec_reduce` (ggml-metal-impl.h:476 @5266f24da).
+/// Mirrors `ggml_metal_kargs_flash_attn_ext_vec_reduce` (ggml-metal-impl.h:483 @b29c606e2).
 pub const flash_attn_ext_vec_reduce = extern struct {
     nrows: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_mul_mm` (ggml-metal-impl.h:480 @5266f24da).
+/// Mirrors `ggml_metal_kargs_mul_mm` (ggml-metal-impl.h:487 @b29c606e2).
 pub const mul_mm = extern struct {
     ne00: i32,
     ne02: i32,
@@ -367,7 +367,7 @@ pub const mul_mm = extern struct {
     r3: i16,
 };
 
-/// Mirrors `ggml_metal_kargs_mul_mv` (ggml-metal-impl.h:497 @5266f24da).
+/// Mirrors `ggml_metal_kargs_mul_mv` (ggml-metal-impl.h:504 @b29c606e2).
 pub const mul_mv = extern struct {
     ne00: i32,
     ne01: i32,
@@ -390,7 +390,7 @@ pub const mul_mv = extern struct {
     r3: i16,
 };
 
-/// Mirrors `ggml_metal_kargs_mul_mv_ext` (ggml-metal-impl.h:519 @5266f24da).
+/// Mirrors `ggml_metal_kargs_mul_mv_ext` (ggml-metal-impl.h:526 @b29c606e2).
 pub const mul_mv_ext = extern struct {
     ne00: i32,
     ne01: i32,
@@ -412,7 +412,7 @@ pub const mul_mv_ext = extern struct {
     r3: i16,
 };
 
-/// Mirrors `ggml_metal_kargs_mul_mm_id_map0` (ggml-metal-impl.h:540 @5266f24da).
+/// Mirrors `ggml_metal_kargs_mul_mm_id_map0` (ggml-metal-impl.h:547 @b29c606e2).
 pub const mul_mm_id_map0 = extern struct {
     ne02: i32,
     ne10: i32,
@@ -424,7 +424,7 @@ pub const mul_mm_id_map0 = extern struct {
     nb21: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_mul_mm_id` (ggml-metal-impl.h:551 @5266f24da).
+/// Mirrors `ggml_metal_kargs_mul_mm_id` (ggml-metal-impl.h:558 @b29c606e2).
 pub const mul_mm_id = extern struct {
     ne00: i32,
     ne02: i32,
@@ -444,7 +444,7 @@ pub const mul_mm_id = extern struct {
     r3: i16,
 };
 
-/// Mirrors `ggml_metal_kargs_mul_mv_id` (ggml-metal-impl.h:570 @5266f24da).
+/// Mirrors `ggml_metal_kargs_mul_mv_id` (ggml-metal-impl.h:577 @b29c606e2).
 pub const mul_mv_id = extern struct {
     nei0: i32,
     nei1: i32,
@@ -468,7 +468,7 @@ pub const mul_mv_id = extern struct {
     nr0: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_norm` (ggml-metal-impl.h:595 @5266f24da).
+/// Mirrors `ggml_metal_kargs_norm` (ggml-metal-impl.h:602 @b29c606e2).
 pub const norm = extern struct {
     ne00: i32,
     ne00_t: i32,
@@ -484,7 +484,7 @@ pub const norm = extern struct {
     nbf3: [3]u64,
 };
 
-/// Mirrors `ggml_metal_kargs_l2_norm` (ggml-metal-impl.h:610 @5266f24da).
+/// Mirrors `ggml_metal_kargs_l2_norm` (ggml-metal-impl.h:617 @b29c606e2).
 pub const l2_norm = extern struct {
     ne00: i32,
     ne01: i32,
@@ -505,7 +505,7 @@ pub const l2_norm = extern struct {
     eps: f32,
 };
 
-/// Mirrors `ggml_metal_kargs_group_norm` (ggml-metal-impl.h:630 @5266f24da).
+/// Mirrors `ggml_metal_kargs_group_norm` (ggml-metal-impl.h:637 @b29c606e2).
 pub const group_norm = extern struct {
     ne00: i64,
     ne01: i64,
@@ -517,7 +517,7 @@ pub const group_norm = extern struct {
     eps: f32,
 };
 
-/// Mirrors `ggml_metal_kargs_conv_transpose_1d` (ggml-metal-impl.h:641 @5266f24da).
+/// Mirrors `ggml_metal_kargs_conv_transpose_1d` (ggml-metal-impl.h:648 @b29c606e2).
 pub const conv_transpose_1d = extern struct {
     IC: i32,
     IL: i32,
@@ -527,7 +527,7 @@ pub const conv_transpose_1d = extern struct {
     nb1: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_col2im_1d` (ggml-metal-impl.h:650 @5266f24da).
+/// Mirrors `ggml_metal_kargs_col2im_1d` (ggml-metal-impl.h:657 @b29c606e2).
 pub const col2im_1d = extern struct {
     T_in: i32,
     T_out: i32,
@@ -538,13 +538,13 @@ pub const col2im_1d = extern struct {
     p0: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_snake` (ggml-metal-impl.h:660 @5266f24da).
+/// Mirrors `ggml_metal_kargs_snake` (ggml-metal-impl.h:667 @b29c606e2).
 pub const snake = extern struct {
     T: i32,
     C: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_conv_transpose_2d` (ggml-metal-impl.h:665 @5266f24da).
+/// Mirrors `ggml_metal_kargs_conv_transpose_2d` (ggml-metal-impl.h:672 @b29c606e2).
 pub const conv_transpose_2d = extern struct {
     IC: i32,
     IH: i32,
@@ -559,7 +559,7 @@ pub const conv_transpose_2d = extern struct {
     nb3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_conv_2d` (ggml-metal-impl.h:679 @5266f24da).
+/// Mirrors `ggml_metal_kargs_conv_2d` (ggml-metal-impl.h:686 @b29c606e2).
 pub const conv_2d = extern struct {
     nb00: u64,
     nb01: u64,
@@ -590,7 +590,7 @@ pub const conv_2d = extern struct {
     d1: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_conv_2d_dw` (ggml-metal-impl.h:709 @5266f24da).
+/// Mirrors `ggml_metal_kargs_conv_2d_dw` (ggml-metal-impl.h:716 @b29c606e2).
 pub const conv_2d_dw = extern struct {
     nb00: u64,
     nb01: u64,
@@ -619,7 +619,7 @@ pub const conv_2d_dw = extern struct {
     d1: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_im2col` (ggml-metal-impl.h:737 @5266f24da).
+/// Mirrors `ggml_metal_kargs_im2col` (ggml-metal-impl.h:744 @b29c606e2).
 pub const im2col = extern struct {
     ofs0: u64,
     ofs1: u64,
@@ -638,7 +638,7 @@ pub const im2col = extern struct {
     KHW: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_conv_3d` (ggml-metal-impl.h:755 @5266f24da).
+/// Mirrors `ggml_metal_kargs_conv_3d` (ggml-metal-impl.h:762 @b29c606e2).
 pub const conv_3d = extern struct {
     IW: i32,
     IH: i32,
@@ -675,7 +675,7 @@ pub const conv_3d = extern struct {
     nb3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_glu` (ggml-metal-impl.h:791 @5266f24da).
+/// Mirrors `ggml_metal_kargs_glu` (ggml-metal-impl.h:798 @b29c606e2).
 pub const glu = extern struct {
     ne00: i32,
     nb01: u64,
@@ -689,12 +689,12 @@ pub const glu = extern struct {
     limit: f32,
 };
 
-/// Mirrors `ggml_metal_kargs_sum` (ggml-metal-impl.h:804 @5266f24da).
+/// Mirrors `ggml_metal_kargs_sum` (ggml-metal-impl.h:811 @b29c606e2).
 pub const sum = extern struct {
     np: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_sum_rows` (ggml-metal-impl.h:808 @5266f24da).
+/// Mirrors `ggml_metal_kargs_sum_rows` (ggml-metal-impl.h:815 @b29c606e2).
 pub const sum_rows = extern struct {
     ne00: i64,
     ne01: i64,
@@ -714,7 +714,7 @@ pub const sum_rows = extern struct {
     nb3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_cumsum_blk` (ggml-metal-impl.h:827 @5266f24da).
+/// Mirrors `ggml_metal_kargs_cumsum_blk` (ggml-metal-impl.h:834 @b29c606e2).
 pub const cumsum_blk = extern struct {
     ne00: i64,
     ne01: i64,
@@ -735,7 +735,7 @@ pub const cumsum_blk = extern struct {
     outb: bool,
 };
 
-/// Mirrors `ggml_metal_kargs_cumsum_add` (ggml-metal-impl.h:847 @5266f24da).
+/// Mirrors `ggml_metal_kargs_cumsum_add` (ggml-metal-impl.h:854 @b29c606e2).
 pub const cumsum_add = extern struct {
     ne00: i64,
     ne01: i64,
@@ -755,7 +755,7 @@ pub const cumsum_add = extern struct {
     nbt3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_soft_max` (ggml-metal-impl.h:866 @5266f24da).
+/// Mirrors `ggml_metal_kargs_soft_max` (ggml-metal-impl.h:873 @b29c606e2).
 pub const soft_max = extern struct {
     ne00: i32,
     ne01: i32,
@@ -779,7 +779,7 @@ pub const soft_max = extern struct {
     n_head_log2: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_ssm_conv` (ggml-metal-impl.h:889 @5266f24da).
+/// Mirrors `ggml_metal_kargs_ssm_conv` (ggml-metal-impl.h:896 @b29c606e2).
 pub const ssm_conv = extern struct {
     ne00: i64,
     ne01: i64,
@@ -799,7 +799,7 @@ pub const ssm_conv = extern struct {
     nb2: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_ssm_scan` (ggml-metal-impl.h:908 @5266f24da).
+/// Mirrors `ggml_metal_kargs_ssm_scan` (ggml-metal-impl.h:915 @b29c606e2).
 pub const ssm_scan = extern struct {
     d_state: i64,
     d_inner: i64,
@@ -837,7 +837,7 @@ pub const ssm_scan = extern struct {
     nb0: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_gated_delta_net` (ggml-metal-impl.h:945 @5266f24da).
+/// Mirrors `ggml_metal_kargs_gated_delta_net` (ggml-metal-impl.h:952 @b29c606e2).
 pub const gated_delta_net = extern struct {
     ne00: i32,
     ne01: i32,
@@ -874,9 +874,10 @@ pub const gated_delta_net = extern struct {
     nb1: u64,
     nb2: u64,
     nb3: u64,
+    nb_out: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_solve_tri` (ggml-metal-impl.h:983 @5266f24da).
+/// Mirrors `ggml_metal_kargs_solve_tri` (ggml-metal-impl.h:991 @b29c606e2).
 pub const solve_tri = extern struct {
     ne00: i32,
     ne01: i32,
@@ -904,7 +905,7 @@ pub const solve_tri = extern struct {
     nb3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_get_rows` (ggml-metal-impl.h:1010 @5266f24da).
+/// Mirrors `ggml_metal_kargs_get_rows` (ggml-metal-impl.h:1018 @b29c606e2).
 pub const get_rows = extern struct {
     ne00t: i32,
     ne00: i32,
@@ -920,7 +921,7 @@ pub const get_rows = extern struct {
     nb3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_set_rows` (ggml-metal-impl.h:1025 @5266f24da).
+/// Mirrors `ggml_metal_kargs_set_rows` (ggml-metal-impl.h:1033 @b29c606e2).
 pub const set_rows = extern struct {
     nk0: i32,
     ne01: i32,
@@ -937,7 +938,7 @@ pub const set_rows = extern struct {
     nb3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_diag` (ggml-metal-impl.h:1041 @5266f24da).
+/// Mirrors `ggml_metal_kargs_diag` (ggml-metal-impl.h:1049 @b29c606e2).
 pub const diag = extern struct {
     ne00: i32,
     ne01: i32,
@@ -957,7 +958,7 @@ pub const diag = extern struct {
     nb3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_upscale` (ggml-metal-impl.h:1060 @5266f24da).
+/// Mirrors `ggml_metal_kargs_upscale` (ggml-metal-impl.h:1068 @b29c606e2).
 pub const upscale = extern struct {
     ne00: i64,
     ne01: i64,
@@ -982,7 +983,7 @@ pub const upscale = extern struct {
     poffs: f32,
 };
 
-/// Mirrors `ggml_metal_kargs_pad` (ggml-metal-impl.h:1084 @5266f24da).
+/// Mirrors `ggml_metal_kargs_pad` (ggml-metal-impl.h:1092 @b29c606e2).
 pub const pad = extern struct {
     ne00: i64,
     ne01: i64,
@@ -1002,7 +1003,7 @@ pub const pad = extern struct {
     nb3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_pad_reflect_1d` (ggml-metal-impl.h:1103 @5266f24da).
+/// Mirrors `ggml_metal_kargs_pad_reflect_1d` (ggml-metal-impl.h:1111 @b29c606e2).
 pub const pad_reflect_1d = extern struct {
     ne00: i64,
     ne01: i64,
@@ -1024,7 +1025,7 @@ pub const pad_reflect_1d = extern struct {
     p1: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_roll` (ggml-metal-impl.h:1124 @5266f24da).
+/// Mirrors `ggml_metal_kargs_roll` (ggml-metal-impl.h:1132 @b29c606e2).
 pub const roll = extern struct {
     ne00: i64,
     ne01: i64,
@@ -1048,14 +1049,14 @@ pub const roll = extern struct {
     s3: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_timestep_embedding` (ggml-metal-impl.h:1147 @5266f24da).
+/// Mirrors `ggml_metal_kargs_timestep_embedding` (ggml-metal-impl.h:1155 @b29c606e2).
 pub const timestep_embedding = extern struct {
     nb1: u64,
     dim: c_int,
     max_period: c_int,
 };
 
-/// Mirrors `ggml_metal_kargs_tri` (ggml-metal-impl.h:1153 @5266f24da).
+/// Mirrors `ggml_metal_kargs_tri` (ggml-metal-impl.h:1161 @b29c606e2).
 pub const tri = extern struct {
     ne00: i32,
     ne01: i32,
@@ -1075,7 +1076,7 @@ pub const tri = extern struct {
     nb3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_argsort` (ggml-metal-impl.h:1172 @5266f24da).
+/// Mirrors `ggml_metal_kargs_argsort` (ggml-metal-impl.h:1180 @b29c606e2).
 pub const argsort = extern struct {
     ne00: i32,
     ne01: i32,
@@ -1092,7 +1093,7 @@ pub const argsort = extern struct {
     top_k: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_argsort_merge` (ggml-metal-impl.h:1188 @5266f24da).
+/// Mirrors `ggml_metal_kargs_argsort_merge` (ggml-metal-impl.h:1196 @b29c606e2).
 pub const argsort_merge = extern struct {
     ne00: i64,
     ne01: i64,
@@ -1110,7 +1111,7 @@ pub const argsort_merge = extern struct {
     len: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_top_k` (ggml-metal-impl.h:1205 @5266f24da).
+/// Mirrors `ggml_metal_kargs_top_k` (ggml-metal-impl.h:1213 @b29c606e2).
 pub const top_k = extern struct {
     ne00: i32,
     ne01: i32,
@@ -1122,24 +1123,24 @@ pub const top_k = extern struct {
     top_k: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_fwht` (ggml-metal-impl.h:1216 @5266f24da).
+/// Mirrors `ggml_metal_kargs_fwht` (ggml-metal-impl.h:1224 @b29c606e2).
 pub const fwht = extern struct {
     nrows: i32,
 };
 
-/// Mirrors `ggml_metal_kargs_arange` (ggml-metal-impl.h:1220 @5266f24da).
+/// Mirrors `ggml_metal_kargs_arange` (ggml-metal-impl.h:1228 @b29c606e2).
 pub const arange = extern struct {
     ne0: i64,
     start: f32,
     step: f32,
 };
 
-/// Mirrors `ggml_metal_kargs_memset` (ggml-metal-impl.h:1226 @5266f24da).
+/// Mirrors `ggml_metal_kargs_memset` (ggml-metal-impl.h:1234 @b29c606e2).
 pub const memset = extern struct {
     val: i64,
 };
 
-/// Mirrors `ggml_metal_kargs_lightning_indexer` (ggml-metal-impl.h:1230 @5266f24da).
+/// Mirrors `ggml_metal_kargs_lightning_indexer` (ggml-metal-impl.h:1238 @b29c606e2).
 pub const lightning_indexer = extern struct {
     n_kv: i32,
     n_batch: i32,
@@ -1157,7 +1158,7 @@ pub const lightning_indexer = extern struct {
     nbm3: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_dsv4_hc_comb` (ggml-metal-impl.h:1247 @5266f24da).
+/// Mirrors `ggml_metal_kargs_dsv4_hc_comb` (ggml-metal-impl.h:1255 @b29c606e2).
 pub const dsv4_hc_comb = extern struct {
     n_tokens: i32,
     n_iter: i32,
@@ -1171,7 +1172,7 @@ pub const dsv4_hc_comb = extern struct {
     eps: f32,
 };
 
-/// Mirrors `ggml_metal_kargs_dsv4_hc_pre` (ggml-metal-impl.h:1260 @5266f24da).
+/// Mirrors `ggml_metal_kargs_dsv4_hc_pre` (ggml-metal-impl.h:1268 @b29c606e2).
 pub const dsv4_hc_pre = extern struct {
     n_embd: i32,
     n_tokens: i32,
@@ -1184,7 +1185,7 @@ pub const dsv4_hc_pre = extern struct {
     nb_d1: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_dsv4_hc_post` (ggml-metal-impl.h:1272 @5266f24da).
+/// Mirrors `ggml_metal_kargs_dsv4_hc_post` (ggml-metal-impl.h:1280 @b29c606e2).
 pub const dsv4_hc_post = extern struct {
     n_embd: i32,
     n_tokens: i32,
@@ -1203,7 +1204,7 @@ pub const dsv4_hc_post = extern struct {
     nb_d2: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_count_equal` (ggml-metal-impl.h:1290 @5266f24da).
+/// Mirrors `ggml_metal_kargs_count_equal` (ggml-metal-impl.h:1298 @b29c606e2).
 pub const count_equal = extern struct {
     ne00: i32,
     ne01: i32,
@@ -1219,7 +1220,7 @@ pub const count_equal = extern struct {
     nb13: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_pool_2d` (ggml-metal-impl.h:1305 @5266f24da).
+/// Mirrors `ggml_metal_kargs_pool_2d` (ggml-metal-impl.h:1313 @b29c606e2).
 pub const pool_2d = extern struct {
     k0: i32,
     k1: i32,
@@ -1234,7 +1235,7 @@ pub const pool_2d = extern struct {
     np: i64,
 };
 
-/// Mirrors `ggml_metal_kargs_pool_1d` (ggml-metal-impl.h:1319 @5266f24da).
+/// Mirrors `ggml_metal_kargs_pool_1d` (ggml-metal-impl.h:1327 @b29c606e2).
 pub const pool_1d = extern struct {
     k0: i32,
     s0: i32,
@@ -1244,23 +1245,23 @@ pub const pool_1d = extern struct {
     np: i64,
 };
 
-/// Mirrors `ggml_metal_kargs_argmax` (ggml-metal-impl.h:1328 @5266f24da).
+/// Mirrors `ggml_metal_kargs_argmax` (ggml-metal-impl.h:1336 @b29c606e2).
 pub const argmax = extern struct {
     ne00: i64,
     nb01: u64,
 };
 
-/// Mirrors `ggml_metal_kargs_opt_step_adamw` (ggml-metal-impl.h:1333 @5266f24da).
+/// Mirrors `ggml_metal_kargs_opt_step_adamw` (ggml-metal-impl.h:1341 @b29c606e2).
 pub const opt_step_adamw = extern struct {
     np: i64,
 };
 
-/// Mirrors `ggml_metal_kargs_opt_step_sgd` (ggml-metal-impl.h:1337 @5266f24da).
+/// Mirrors `ggml_metal_kargs_opt_step_sgd` (ggml-metal-impl.h:1345 @b29c606e2).
 pub const opt_step_sgd = extern struct {
     np: i64,
 };
 
-/// Mirrors `ggml_metal_kargs_silu_back` (ggml-metal-impl.h:1341 @5266f24da).
+/// Mirrors `ggml_metal_kargs_silu_back` (ggml-metal-impl.h:1349 @b29c606e2).
 pub const silu_back = extern struct {
     ne: i64,
 };

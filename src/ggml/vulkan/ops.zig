@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
-//! (`5266f24da`). The C++ specialises two templates per push-constant
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
+//! (`b29c606e2`). The C++ specialises two templates per push-constant
 //! struct -- `init_pushconst_fastdiv` and `init_pushconst_tensor_offsets`
 //! -- and the port switches on the struct's type at comptime.
 
@@ -45,7 +45,7 @@ pub fn typeSize(t: *const Tensor) u32 {
 // -----------------------------------------------------------------------------
 // Fast division
 
-/// Ports `init_fastdiv_values` (ggml-vulkan.cpp:1585 @5266f24da): `mp` and
+/// Ports `init_fastdiv_values` (ggml-vulkan.cpp:1679 @b29c606e2): `mp` and
 /// `L` with `n / d == (mulhi(n, mp) + n) >> L`.
 pub fn initFastdivValues(d: u32, mp: *u32, L: *u32) void {
     // compute L = ceil(log2(d));
@@ -55,7 +55,7 @@ pub fn initFastdivValues(d: u32, mp: *u32, L: *u32) void {
     mp.* = @truncate(((@as(u64, 1) << 32) *% ((@as(u64, 1) << @intCast(L.*)) - d)) / d + 1);
 }
 
-/// Ports `pack_fastdiv_L` (ggml-vulkan.cpp:1596 @5266f24da).
+/// Ports `pack_fastdiv_L` (ggml-vulkan.cpp:1690 @b29c606e2).
 pub fn packFastdivL(L0: u32, L1: u32, L2: u32) u32 {
     return L0 | (L1 << 8) | (L2 << 16);
 }
@@ -64,7 +64,7 @@ pub fn packFastdivL(L0: u32, L1: u32, L2: u32) u32 {
 /// `vk_op_unary_push_constants`, `vk_op_glu_push_constants`,
 /// `vk_op_count_experts_push_constants`, `vk_op_conv2d_push_constants`,
 /// `vk_op_conv3d_push_constants` and `vk_op_sum_rows_push_constants`
-/// (ggml-vulkan.cpp:1600, 1605, 1625, 1632, 1978, 2013, 2074 @5266f24da).
+/// (ggml-vulkan.cpp:1694, 1699, 1719, 1726, 2072, 2107, 2168 @b29c606e2).
 pub fn initPushconstFastdiv(p: anytype) void {
     const T = @TypeOf(p.*);
     if (T == push.Unary) {
@@ -100,7 +100,7 @@ pub fn initPushconstFastdiv(p: anytype) void {
 // -----------------------------------------------------------------------------
 // Push-constant initialisers
 
-/// Ports `vk_op_unary_push_constants_init` (ggml-vulkan.cpp:1495 @5266f24da).
+/// Ports `vk_op_unary_push_constants_init` (ggml-vulkan.cpp:1589 @b29c606e2).
 /// `ne` 0 means the destination's element count.
 pub fn unaryPushConstantsInit(src0: *const Tensor, dst: *const Tensor, ne_in: i64) push.Unary {
     impl.assert(ne_in != 0 or c.ggml_nelements(src0) == c.ggml_nelements(dst), "ne != 0 || (ggml_nelements(src0) == ggml_nelements(dst))");
@@ -130,7 +130,7 @@ pub fn unaryPushConstantsInit(src0: *const Tensor, dst: *const Tensor, ne_in: i6
     return p; // offsets are initialized later in ggml_vk_op
 }
 
-/// Ports `vk_op_pad_push_constants_init` (ggml-vulkan.cpp:1539 @5266f24da).
+/// Ports `vk_op_pad_push_constants_init` (ggml-vulkan.cpp:1633 @b29c606e2).
 pub fn padPushConstantsInit(src0: *const Tensor, dst: *const Tensor) push.Pad {
     const ne = c.ggml_nelements(dst);
     impl.assert(ne <= std.math.maxInt(u32), "ne <= (int64_t)std::numeric_limits<uint32_t>::max()");
@@ -167,7 +167,7 @@ pub fn padPushConstantsInit(src0: *const Tensor, dst: *const Tensor) push.Pad {
     return p; // fastdiv values and offsets are initialized later in ggml_vk_op
 }
 
-/// Ports `vk_op_sum_rows_push_constants_init` (ggml-vulkan.cpp:2058 @5266f24da).
+/// Ports `vk_op_sum_rows_push_constants_init` (ggml-vulkan.cpp:2152 @b29c606e2).
 pub fn sumRowsPushConstantsInit(src: *const Tensor, dst: *const Tensor, n_cols: i64) push.SumRows {
     const type_size: u32 = @sizeOf(f32);
     var p: push.SumRows = .{};
@@ -230,16 +230,19 @@ fn misalignIn(ctx: *const BackendCtx, t: *const Tensor, unit: u32) u32 {
     return m.context.getMisalignBytes(ctx, t) / unit;
 }
 
-/// Ports `init_pushconst_tensor_offsets` (ggml-vulkan.cpp:2530 @5266f24da), the
+/// Ports `init_pushconst_tensor_offsets` (ggml-vulkan.cpp:2656 @b29c606e2), the
 /// primary template, and its specialisations for the MatVecP021, MatVecNc,
-/// Fwht, Unary, Glu, SumRows, Pad, Im2col3d, Binary, Concat, Upscale and
-/// Rope structs (`init_pushconst_tensor_offsets`, `init_pushconst_tensor_offsets`,
+/// Fwht, Dsv4HcComb, Dsv4HcPre, Dsv4HcPost, Unary, Glu, SumRows, Pad,
+/// Im2col3d, Binary, Concat, Upscale and Rope structs
+/// (`init_pushconst_tensor_offsets`, `init_pushconst_tensor_offsets`,
 /// `init_pushconst_tensor_offsets`, `init_pushconst_tensor_offsets`,
 /// `init_pushconst_tensor_offsets`, `init_pushconst_tensor_offsets`,
 /// `init_pushconst_tensor_offsets`, `init_pushconst_tensor_offsets`,
 /// `init_pushconst_tensor_offsets`, `init_pushconst_tensor_offsets`,
-/// `init_pushconst_tensor_offsets`, `init_pushconst_tensor_offsets`
-/// (ggml-vulkan.cpp:2545, 2557, 2569, 12041, 12052, 12067, 12078, 12089, 12100, 12113, 12125, 12137 @5266f24da)):
+/// `init_pushconst_tensor_offsets`, `init_pushconst_tensor_offsets`,
+/// `init_pushconst_tensor_offsets`, `init_pushconst_tensor_offsets`,
+/// `init_pushconst_tensor_offsets`
+/// (ggml-vulkan.cpp:2671, 2683, 2695, 2704, 2713, 2722, 12315, 12326, 12341, 12352, 12363, 12374, 12389, 12401, 12413 @b29c606e2)):
 /// the elements by which each binding's start was rounded down, packed
 /// as the struct's shader expects; for a struct without them, the
 /// assertion that nothing was misaligned.
@@ -251,6 +254,21 @@ pub fn initPushconstTensorOffsets(ctx: *const BackendCtx, p: anytype, src0: ?*co
     } else if (T == push.Fwht) {
         p.src_offset = misalignIn(ctx, src0.?, typeSize(src0.?));
         p.dst_offset = misalignIn(ctx, dst.?, typeSize(dst.?));
+    } else if (T == push.Dsv4HcComb) {
+        p.m_offset = misalignIn(ctx, src0.?, typeSize(src0.?));
+        p.s_offset = misalignIn(ctx, src1.?, typeSize(src1.?));
+        p.b_offset = misalignIn(ctx, src2.?, typeSize(src2.?));
+        p.d_offset = misalignIn(ctx, dst.?, typeSize(dst.?));
+    } else if (T == push.Dsv4HcPre) {
+        p.x_offset = misalignIn(ctx, src0.?, typeSize(src0.?));
+        p.w_offset = misalignIn(ctx, src1.?, typeSize(src1.?));
+        p.d_offset = misalignIn(ctx, dst.?, typeSize(dst.?));
+    } else if (T == push.Dsv4HcPost) {
+        p.x_offset = misalignIn(ctx, src0.?, typeSize(src0.?));
+        p.r_offset = misalignIn(ctx, src1.?, typeSize(src1.?));
+        p.p_offset = misalignIn(ctx, src2.?, typeSize(src2.?));
+        p.c_offset = misalignIn(ctx, src3.?, typeSize(src3.?));
+        p.d_offset = misalignIn(ctx, dst.?, typeSize(dst.?));
     } else if (T == push.Unary or T == push.SumRows or T == push.Pad) {
         const a_offset = misalignIn(ctx, src0.?, typeSize(src0.?));
         const d_offset = misalignIn(ctx, dst.?, typeSize(dst.?));
@@ -271,7 +289,9 @@ pub fn initPushconstTensorOffsets(ctx: *const BackendCtx, p: anytype, src0: ?*co
         const a_offset = misalignIn(ctx, src0.?, typeSize(src0.?));
         const b_offset = misalignIn(ctx, src1.?, typeSize(src1.?));
         const d_offset = misalignIn(ctx, dst.?, typeSize(dst.?));
-        impl.assert(dst.?.op != c.GGML_OP_GET_ROWS or (a_offset == 0 and b_offset == 0 and d_offset == 0), "dst->op != GGML_OP_GET_ROWS || (a_offset == 0 && b_offset == 0 && d_offset == 0)");
+        impl.assert(a_offset <= 0xFFFF, "a_offset <= 0xFFFF");
+        impl.assert(b_offset <= 0xFF, "b_offset <= 0xFF");
+        impl.assert(d_offset <= 0xFF, "d_offset <= 0xFF");
         p.misalign_offsets = (a_offset << 16) | (b_offset << 8) | d_offset;
     } else if (T == push.Concat) {
         const unit_size = m.op_pipeline.concatUnitSize(dst.?.type);
@@ -298,10 +318,16 @@ pub fn split512(ne: u32) [3]u32 {
     return .{ ne, 1, 1 };
 }
 
-/// Ports `ggml_vk_op_f32` (ggml-vulkan.cpp:12147 @5266f24da): picks the
+/// Ports `ggml_vk_op_f32` (ggml-vulkan.cpp:12423 @b29c606e2): picks the
 /// op's pipeline, finishes the push constants, sizes the dispatch for the
 /// op, and binds the sources and destination as the op's shader expects.
 pub fn opF32(ctx: *BackendCtx, subctx: *Context, src0: ?*const Tensor, src1: ?*const Tensor, src2: ?*const Tensor, src3: ?*const Tensor, dst: *Tensor, op: c.enum_ggml_op, pc_in: anytype) void {
+    opF32Override(ctx, subctx, src0, src1, src2, src3, dst, op, pc_in, null);
+}
+
+/// `ggml_vk_op_f32` with its `pipeline_override` argument: a fused op
+/// dispatched through another op's sizing and bindings.
+pub fn opF32Override(ctx: *BackendCtx, subctx: *Context, src0: ?*const Tensor, src1: ?*const Tensor, src2: ?*const Tensor, src3: ?*const Tensor, dst: *Tensor, op: c.enum_ggml_op, pc_in: anytype, pipeline_override: ?*Pipeline) void {
     var pc = pc_in;
     const PC = @TypeOf(pc);
     const s0 = src0.?;
@@ -322,7 +348,7 @@ pub fn opF32(ctx: *BackendCtx, subctx: *Context, src0: ?*const Tensor, src1: ?*c
 
     initPushconstFastdiv(&pc);
 
-    const pipeline = m.op_pipeline.getPipeline(ctx, s0, src1, src2, dst, op) orelse {
+    const pipeline = pipeline_override orelse m.op_pipeline.getPipeline(ctx, s0, src1, src2, dst, op) orelse {
         impl.fprintfStderr("ggml_vulkan: Error: Missing op: %s for %s", .{ c.ggml_op_name(op), c.ggml_type_name(s0.type) });
         if (src1) |s1| impl.fprintfStderr(" and %s", .{c.ggml_type_name(s1.type)});
         impl.fprintfStderr(" to %s\n", .{c.ggml_type_name(dst.type)});
@@ -537,7 +563,7 @@ pub fn opF32(ctx: *BackendCtx, subctx: *Context, src0: ?*const Tensor, src1: ?*c
 // -----------------------------------------------------------------------------
 // Shared helpers
 
-/// Ports `ggml_vk_use_mul_mat_vec_id` (ggml-vulkan.cpp:10786 @5266f24da).
+/// Ports `ggml_vk_use_mul_mat_vec_id` (ggml-vulkan.cpp:11061 @b29c606e2).
 pub fn useMulMatVecId(cgraph: *const CGraph, node_idx: c_int) bool {
     const dst = cgraph.nodes[@intCast(node_idx)].?;
     const src0 = dst.src[0].*;
@@ -545,14 +571,14 @@ pub fn useMulMatVecId(cgraph: *const CGraph, node_idx: c_int) bool {
     return src2.ne[1] <= 8 and (src0.type == c.GGML_TYPE_F32 or src0.type == c.GGML_TYPE_F16 or c.ggml_is_quantized(src0.type));
 }
 
-/// Ports `ggml_vk_rms_num_partials` (ggml-vulkan.cpp:13421 @5266f24da).
+/// Ports `ggml_vk_rms_num_partials` (ggml-vulkan.cpp:13755 @b29c606e2).
 pub fn rmsNumPartials(ctx: *const BackendCtx, node: *const Tensor) u32 {
     const ne = u32Of(node.ne[0]);
     const denom = ctx.device.pipeline_add_rms[0][0][0].?.wg_denoms[0];
     return ceilDiv(ne, denom);
 }
 
-/// Ports `ggml_vk_rms_partials_size` (ggml-vulkan.cpp:13428 @5266f24da).
+/// Ports `ggml_vk_rms_partials_size` (ggml-vulkan.cpp:13762 @b29c606e2).
 pub fn rmsPartialsSize(ctx: *const BackendCtx, node: *const Tensor) u32 {
     const num_partials = rmsNumPartials(ctx, node);
     const a = ctx.device.partials_binding_alignment;
@@ -563,7 +589,7 @@ pub fn rmsPartialsSize(ctx: *const BackendCtx, node: *const Tensor) u32 {
 // -----------------------------------------------------------------------------
 // The node switch
 
-/// The `switch (node->op)` of `ggml_vk_build_graph` (ggml-vulkan.cpp:15667 @5266f24da).
+/// The `switch (node->op)` of `ggml_vk_build_graph` (ggml-vulkan.cpp:15984 @b29c606e2).
 ///
 /// Return: false where the C++ returns false, for an op it has no
 /// dispatch for.
@@ -606,6 +632,10 @@ pub fn dispatchNode(ctx: *BackendCtx, compute_ctx: *Context, cgraph: *CGraph, no
                 R.topkMoe(ctx, compute_ctx, cgraph, node_idx);
                 return true;
             }
+            if (ctx.num_additional_fused_ops != 0) {
+                B.unaryMul(ctx, compute_ctx, cgraph, node_idx);
+                return true;
+            }
             switch (c.ggml_get_unary_op(node)) {
                 c.GGML_UNARY_OP_ELU,
                 c.GGML_UNARY_OP_EXP,
@@ -646,6 +676,9 @@ pub fn dispatchNode(ctx: *BackendCtx, compute_ctx: *Context, cgraph: *CGraph, no
         c.GGML_OP_TOP_K => R.topk(ctx, compute_ctx, src0.?, node),
         c.GGML_OP_SUM, c.GGML_OP_SUM_ROWS, c.GGML_OP_MEAN => R.sumRows(ctx, compute_ctx, src0.?, node, node.op),
         c.GGML_OP_CUMSUM => R.cumsum(ctx, compute_ctx, src0.?, node),
+        c.GGML_OP_DSV4_HC_COMB => m.ops_matmul.dsv4HcComb(ctx, compute_ctx, src0.?, src1.?, src2_.?, node),
+        c.GGML_OP_DSV4_HC_PRE => m.ops_matmul.dsv4HcPre(ctx, compute_ctx, src0.?, src1.?, node),
+        c.GGML_OP_DSV4_HC_POST => m.ops_matmul.dsv4HcPost(ctx, compute_ctx, src0.?, src1.?, src2_.?, src3_.?, node),
         c.GGML_OP_ARGMAX => R.argmax(ctx, compute_ctx, src0.?, node),
         c.GGML_OP_CROSS_ENTROPY_LOSS => R.crossEntropyLoss(ctx, compute_ctx, node),
         c.GGML_OP_CROSS_ENTROPY_LOSS_BACK => R.crossEntropyLossBack(ctx, compute_ctx, node),

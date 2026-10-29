@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.4.0
-//! (`5266f24da`): `ggml_gemv_q4_K_8x8_q8_K` and `ggml_gemm_q4_K_8x8_q8_K`,
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.4.1
+//! (`b29c606e2`): `ggml_gemv_q4_K_8x8_q8_K` and `ggml_gemm_q4_K_8x8_q8_K`,
 //! their `__AVX2__` arms, and the gemm's `__AVX512BW__ && __AVX512DQ__` arm,
 //! which is the same body at 512 bits over two blocks (`wide.zig`).
 //!
@@ -52,7 +52,7 @@ inline fn nibbles(raw: m256i, comptime hi: bool) m256i {
 }
 
 /// The eight multiply-adds `ggml_gemv_q4_K_8x8_q8_K` takes over one
-/// sub-block (arch/x86/repack.cpp:1464 @5266f24da): four pairs of column
+/// sub-block (arch/x86/repack.cpp:1464 @b29c606e2): four pairs of column
 /// registers against an activation broadcast four bytes at a time, summed in
 /// sixteen bits.
 fn gemvDot(r0123: [4]m256i, r4567: [4]m256i, lhs_a: m256i, lhs_b: m256i) m256i {
@@ -67,7 +67,7 @@ fn gemvDot(r0123: [4]m256i, r4567: [4]m256i, lhs_a: m256i, lhs_b: m256i) m256i {
     return iacc;
 }
 
-/// Ports `ggml_gemv_q4_K_8x8_q8_K` (arch/x86/repack.cpp:1464 @5266f24da), the
+/// Ports `ggml_gemv_q4_K_8x8_q8_K` (arch/x86/repack.cpp:1464 @b29c606e2), the
 /// `__AVX2__` arm.
 ///
 /// The row is stored as `permute(acc_row) - acc_min_rows`: the minima's
@@ -246,7 +246,7 @@ inline fn nibblesWide(comptime L: type, raw: L.I, comptime hi: bool) L.I {
 }
 
 /// The gemm's per-`sb` column preparation (arch/x86/repack.cpp:2853
-/// @5266f24da) -- the 512-bit arm's opens at line 2117 -- for `b0` and, at
+/// @b29c606e2) -- the 512-bit arm's opens at line 2117 -- for `b0` and, at
 /// 512 bits, `b1` in the high half.
 ///
 /// The 512-bit arm builds its scales as `_mm512_cvtepu8_epi16` of one
@@ -303,7 +303,7 @@ inline fn rows(comptime L: type, m00: L.I, m01: L.I, m10: L.I, m11: L.I) [4]L.I 
 }
 
 /// The per-group body of `ggml_gemm_q4_K_8x8_q8_K` (arch/x86/repack.cpp:2042
-/// @5266f24da), either arm: one interleaved block of four activation rows
+/// @b29c606e2), either arm: one interleaved block of four activation rows
 /// against one prepared sub-block pair, into four row accumulators and four
 /// minima accumulators.
 fn accumulate4(comptime L: type, acc: *[4]L.F, acc_min: *[4]L.F, rhs: *const Rhs(L), col_scale_f32: L.F, col_dmin_f32: L.F, a: *const blocks.block_q8_Kx4, sb: usize) void {
@@ -420,7 +420,7 @@ fn rowLoops(comptime L: type, y: *usize, x_begin: usize, x_end: usize, nb: usize
     }
 }
 
-/// Ports `ggml_gemm_q4_K_8x8_q8_K` (arch/x86/repack.cpp:2042 @5266f24da).
+/// Ports `ggml_gemm_q4_K_8x8_q8_K` (arch/x86/repack.cpp:2042 @b29c606e2).
 ///
 /// With `__AVX512BW__ && __AVX512DQ__` the 512-bit arm, from line 2077,
 /// runs first over the columns up to the last multiple of

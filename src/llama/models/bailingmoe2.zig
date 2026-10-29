@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/bailingmoe2.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_bailingmoe2`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/bailingmoe2.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_bailingmoe2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_bailingmoe2`'s `load_arch_hparams` (models/bailingmoe2.cpp:3 @5266f24da).
+/// Ports `llama_model_bailingmoe2`'s `load_arch_hparams` (models/bailingmoe2.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -42,7 +42,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_bailingmoe2`'s `load_arch_tensors` (models/bailingmoe2.cpp:20 @5266f24da).
+/// Ports `llama_model_bailingmoe2`'s `load_arch_tensors` (models/bailingmoe2.cpp:20 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -111,13 +111,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_bailingmoe2`'s `build_arch_graph` (models/bailingmoe2.cpp:86 @5266f24da).
+/// Ports `llama_model_bailingmoe2`'s `build_arch_graph` (models/bailingmoe2.cpp:86 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_bailingmoe2`'s `graph`
-/// (models/bailingmoe2.cpp:90 @5266f24da).
+/// (models/bailingmoe2.cpp:90 @b29c606e2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

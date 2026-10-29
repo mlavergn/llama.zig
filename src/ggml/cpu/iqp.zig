@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cpu/iqp.cpp` and
-//! `llama.cpp/ggml/src/ggml-cpu/iqp.h` (v0.4.0, `5266f24da`): the portable
+//! `llama.cpp/ggml/src/ggml-cpu/iqp.h` (v0.4.1, `b29c606e2`): the portable
 //! half of the file -- the panel layout, the eight decoders, the `#else`
 //! arms, the eligibility tests and the two entry points. The `__AVX2__` arms
 //! are `iqp_x86.zig`, chosen at comptime as the C's `#if` chooses. Each
@@ -71,15 +71,15 @@ fn x86Has(comptime f: std.Target.x86.Feature) bool {
     return builtin.cpu.arch == .x86_64 and std.Target.x86.featureSetHas(builtin.cpu.features, f);
 }
 
-/// Ports `GGML_IQP_MIN_BATCH` (iqp.cpp:20 @5266f24da): the smallest `src1`
+/// Ports `GGML_IQP_MIN_BATCH` (iqp.cpp:20 @b29c606e2): the smallest `src1`
 /// batch for which the decode pays for itself.
 pub const min_batch: i64 = 8;
 
-/// Ports `GGML_IQP_MIN_BATCH_ID` (iqp.cpp:23 @5266f24da): the same, per
+/// Ports `GGML_IQP_MIN_BATCH_ID` (iqp.cpp:23 @b29c606e2): the same, per
 /// expert, for `MUL_MAT_ID`.
 pub const min_batch_id: i64 = 8;
 
-/// Ports `ggml_cpu_iqp_mul_mat_id_min_batch` (iqp.cpp:25 @5266f24da).
+/// Ports `ggml_cpu_iqp_mul_mat_id_min_batch` (iqp.cpp:25 @b29c606e2).
 ///
 /// Parameters:
 /// - `cne1`: how many `src1` rows were routed to one expert.
@@ -89,16 +89,16 @@ pub export fn ggml_cpu_iqp_mul_mat_id_min_batch(cne1: i64) bool {
     return cne1 >= min_batch_id;
 }
 
-/// Ports `IQP_NB_ROWS` (iqp.cpp:30 @5266f24da): `src0` rows per panel.
+/// Ports `IQP_NB_ROWS` (iqp.cpp:30 @b29c606e2): `src0` rows per panel.
 pub const nb_rows = 8;
 
-/// Ports `IQP_SB_SIZE` (iqp.cpp:32 @5266f24da): weights per sub-block.
+/// Ports `IQP_SB_SIZE` (iqp.cpp:32 @b29c606e2): weights per sub-block.
 pub const sb_size = 16;
 
-/// Ports `IQP_NSB` (iqp.cpp:33 @5266f24da): sub-blocks per super-block.
+/// Ports `IQP_NSB` (iqp.cpp:33 @b29c606e2): sub-blocks per super-block.
 pub const nsb = QK_K / sb_size;
 
-/// Ports `block_iqp_x8` (iqp.cpp:37 @5266f24da).
+/// Ports `block_iqp_x8` (iqp.cpp:37 @b29c606e2).
 ///
 /// One super-block of a grid-based IQ type decoded to `int8`, eight rows
 /// interleaved: `dfac[row] * iscales[sb*8 + row] * qs` is bit-identical to
@@ -118,7 +118,7 @@ comptime {
     std.debug.assert(@sizeOf(BlockX8) == 8 * @sizeOf(f32) + 8 * @sizeOf(i32) + nsb * 8 + QK_K * 8);
 }
 
-/// Ports `GGML_IQP_USE_BIAS` (iqp.cpp:49 @5266f24da).
+/// Ports `GGML_IQP_USE_BIAS` (iqp.cpp:49 @b29c606e2).
 ///
 /// With VNNI the activations are fed to `vpdpbusd` as unsigned bytes,
 /// `y + 128`, and `bias[]` corrects for it; without, the kernels use the
@@ -130,13 +130,13 @@ pub const use_bias = avx2 and ((x86Has(.avx512vnni) and x86Has(.avx512vl)) or x8
 /// set, every decoded value is checked against `to_float`. Kept, off.
 const verify = false;
 
-/// Ports `ggml_cpu_iqp_row_size` (iqp.cpp:54 @5266f24da): the bytes of one
+/// Ports `ggml_cpu_iqp_row_size` (iqp.cpp:54 @b29c606e2): the bytes of one
 /// `src1` row converted to `q8_K`.
 inline fn rowSize(dst: *const Tensor) usize {
     return types.ggml_row_size(c.GGML_TYPE_Q8_K, impl.one(Tensor, dst.src[1]).ne[0]);
 }
 
-/// Ports `iqp_unpack_ksigns` (iqp.cpp:59 @5266f24da).
+/// Ports `iqp_unpack_ksigns` (iqp.cpp:59 @b29c606e2).
 ///
 /// The low seven bits of `v` are the first seven signs and the eighth is
 /// their parity.
@@ -152,7 +152,7 @@ pub inline fn unpackKsigns(v: u32) u8 {
 // -----------------------------------------------------------------------------
 // The value stores, each with its `__AVX2__` arm in `iqp_x86.zig`
 
-/// Ports `iqp_store_signed_x8` (iqp.cpp:98 @5266f24da): 32 values from four
+/// Ports `iqp_store_signed_x8` (iqp.cpp:98 @b29c606e2): 32 values from four
 /// 8-byte grid entries, sign byte `l` of `signs` applied to group `l`.
 pub inline fn storeSignedX8(dst: [*]i8, g0: u64, g1: u64, g2: u64, g3: u64, signs: u32) void {
     if (comptime avx2) return x86.storeSignedX8(dst, g0, g1, g2, g3, signs);
@@ -169,7 +169,7 @@ pub inline fn storeSignedX8(dst: [*]i8, g0: u64, g1: u64, g2: u64, g3: u64, sign
     }
 }
 
-/// Ports `iqp_store_signed_x4` (iqp.cpp:124 @5266f24da): the same, but the
+/// Ports `iqp_store_signed_x4` (iqp.cpp:124 @b29c606e2): the same, but the
 /// eight values of group `l` come from two 4-byte grid entries.
 pub inline fn storeSignedX4(
     dst: [*]i8,
@@ -200,7 +200,7 @@ pub inline fn storeSignedX4(
     }
 }
 
-/// Ports `iqp_store_iq1_x8` (iqp.cpp:158 @5266f24da): 32 values of
+/// Ports `iqp_store_iq1_x8` (iqp.cpp:158 @b29c606e2): 32 values of
 /// `8 * grid + delta` from four 8-byte grid entries whose bytes are in
 /// `{-1, 0, 1}`, byte `l` of `deltas` applying to group `l`.
 pub inline fn storeIq1X8(dst: [*]i8, g0: u64, g1: u64, g2: u64, g3: u64, deltas: u32) void {
@@ -218,7 +218,7 @@ pub inline fn storeIq1X8(dst: [*]i8, g0: u64, g1: u64, g2: u64, g3: u64, deltas:
     }
 }
 
-/// Ports `iqp_store_iq4_x32` (iqp.cpp:188 @5266f24da): 32 values from 16
+/// Ports `iqp_store_iq4_x32` (iqp.cpp:188 @b29c606e2): 32 values from 16
 /// packed nibbles through `kvalues_iq4nl`, low nibbles first, then high.
 pub inline fn storeIq4X32(dst: [*]i8, qs: [*]const u8) void {
     if (comptime avx2) return x86.storeIq4X32(dst, qs);
@@ -229,7 +229,7 @@ pub inline fn storeIq4X32(dst: [*]i8, qs: [*]const u8) void {
     }
 }
 
-/// Ports `iqp_weighted_sum` (iqp.cpp:207 @5266f24da): `sum(qs * iscale)`
+/// Ports `iqp_weighted_sum` (iqp.cpp:207 @b29c606e2): `sum(qs * iscale)`
 /// over one super-block, at most `256 * 127 * 32`.
 ///
 /// Compiled only under `use_bias`, which implies AVX2, so the `#else` arm
@@ -275,7 +275,7 @@ inline fn ksigns4(aux: u32) u32 {
         @as(u32, unpackKsigns((aux >> 21) & 127)) << 24;
 }
 
-/// Ports `iqp_decode_iq2_xxs` (iqp.cpp:251 @5266f24da).
+/// Ports `iqp_decode_iq2_xxs` (iqp.cpp:251 @b29c606e2).
 ///
 /// `db = d * (0.5 + ls) * 0.25 = (d / 8) * (2 * ls + 1)`, `ls` four bits.
 fn decodeIq2Xxs(vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: *f32) void {
@@ -302,7 +302,7 @@ fn decodeIq2Xxs(vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: 
     }
 }
 
-/// Ports `iqp_decode_iq2_xs` (iqp.cpp:280 @5266f24da).
+/// Ports `iqp_decode_iq2_xs` (iqp.cpp:280 @b29c606e2).
 fn decodeIq2Xs(vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: *f32) void {
     const x = blockOf(qblocks.IQ2_XS, vx);
 
@@ -329,7 +329,7 @@ fn decodeIq2Xs(vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: *
     }
 }
 
-/// Ports `iqp_decode_iq2_s` (iqp.cpp:303 @5266f24da). The sign bytes are the
+/// Ports `iqp_decode_iq2_s` (iqp.cpp:303 @b29c606e2). The sign bytes are the
 /// tail of `qs`, at `qs + QK_K/8`.
 fn decodeIq2S(vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: *f32) void {
     const x = blockOf(qblocks.IQ2_S, vx);
@@ -361,7 +361,7 @@ fn decodeIq2S(vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: *f
     }
 }
 
-/// Ports `iqp_decode_iq3_xxs` (iqp.cpp:330 @5266f24da). The scales and signs
+/// Ports `iqp_decode_iq3_xxs` (iqp.cpp:330 @b29c606e2). The scales and signs
 /// are the tail of `qs`, at `qs + QK_K/4`.
 ///
 /// `db = d * (0.5 + ls) * 0.5 = (d / 4) * (2 * ls + 1)`, `ls` four bits.
@@ -396,7 +396,7 @@ fn decodeIq3Xxs(vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: 
     }
 }
 
-/// Ports `iqp_decode_iq3_s` (iqp.cpp:363 @5266f24da).
+/// Ports `iqp_decode_iq3_s` (iqp.cpp:363 @b29c606e2).
 ///
 /// `db = d * (1 + 2 * ls)`, `ls` four bits; one scale nibble per 32 values,
 /// two 32-value groups per pass.
@@ -447,7 +447,7 @@ fn decodeIq3S(vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: *f
     }
 }
 
-/// Ports `iqp_decode_iq1_s` (iqp.cpp:406 @5266f24da).
+/// Ports `iqp_decode_iq1_s` (iqp.cpp:406 @b29c606e2).
 ///
 /// `dequantize_row_iq1_*` computes `dl * (grid[j] + delta)` with
 /// `delta = ±1/8`, so the panel stores `8 * grid[j] ± 1` and folds the `/8`
@@ -480,7 +480,7 @@ fn decodeIq1S(vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: *f
     }
 }
 
-/// Ports `iqp_decode_iq1_m` (iqp.cpp:432 @5266f24da).
+/// Ports `iqp_decode_iq1_m` (iqp.cpp:432 @b29c606e2).
 ///
 /// `block_iq1_m` has no `d`: the fp16 super-block scale is spread over the
 /// top nibbles of the four scale words (`blocks.iq1mScale`).
@@ -526,7 +526,7 @@ fn decodeIq1M(vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: *f
     }
 }
 
-/// Ports `iqp_decode_iq4_xs` (iqp.cpp:470 @5266f24da).
+/// Ports `iqp_decode_iq4_xs` (iqp.cpp:470 @b29c606e2).
 ///
 /// `dl = d * (ls - 32)`, `ls` six bits, so the integer scale is in
 /// `[-32, 31]`.
@@ -551,7 +551,7 @@ fn decodeIq4Xs(vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: *
     }
 }
 
-/// Ports `IQP_TYPE_LIST` (iqp.cpp:494 @5266f24da): the types the panel path
+/// Ports `IQP_TYPE_LIST` (iqp.cpp:494 @b29c606e2): the types the panel path
 /// takes, each with its decoder. Expanded by the eligibility test and the
 /// decode dispatch, as the C's X-macro is.
 pub const type_list = [_]struct { t: c.enum_ggml_type, decode: *const DecodeFn }{
@@ -565,7 +565,7 @@ pub const type_list = [_]struct { t: c.enum_ggml_type, decode: *const DecodeFn }
     .{ .t = c.GGML_TYPE_IQ4_XS, .decode = &decodeIq4Xs },
 };
 
-/// Ports `iqp_decode_superblock` (iqp.cpp:504 @5266f24da).
+/// Ports `iqp_decode_superblock` (iqp.cpp:504 @b29c606e2).
 ///
 /// Return: false for a type outside `type_list`.
 fn decodeSuperblock(@"type": c.enum_ggml_type, vx: *const anyopaque, vals: *[QK_K]i8, iscales: *[nsb]i8, dfac: *f32) bool {
@@ -578,7 +578,7 @@ fn decodeSuperblock(@"type": c.enum_ggml_type, vx: *const anyopaque, vals: *[QK_
     return false;
 }
 
-/// Ports `iqp_decode_panel_8` (iqp.cpp:565 @5266f24da).
+/// Ports `iqp_decode_panel_8` (iqp.cpp:565 @b29c606e2).
 ///
 /// Decodes `nb_rows` consecutive source rows, starting at `src` and
 /// `nb01` bytes apart, into a panel of `nblocks` blocks at `dst`.
@@ -648,7 +648,7 @@ fn decodePanel8(@"type": c.enum_ggml_type, src: [*]const u8, nb01: usize, nblock
 // interleaved, `block_q8_K` rows. Unreachable, as the file header says, and
 // so unfused.
 
-/// Ports `iqp_gemv_8x8_q8_K_generic` (iqp.cpp:626 @5266f24da).
+/// Ports `iqp_gemv_8x8_q8_K_generic` (iqp.cpp:626 @b29c606e2).
 fn gemvGeneric(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     const nb: usize = @intCast(@divTrunc(n, QK_K));
     const ncols_interleaved = 8;
@@ -698,7 +698,7 @@ fn gemvGeneric(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const 
     }
 }
 
-/// Ports `iqp_gemm_tile_4_generic` (iqp.cpp:681 @5266f24da): one 4-row by
+/// Ports `iqp_gemm_tile_4_generic` (iqp.cpp:681 @b29c606e2): one 4-row by
 /// `nc`-column tile; `s` points at the first of the four output rows, `bs`
 /// floats apart.
 fn gemmTile4Generic(nb: usize, s: [*]f32, bs: usize, b_ptr_start: [*]const BlockX8, a_ptr: [4][*]const Q8K, nc: c_int) void {
@@ -744,7 +744,7 @@ fn gemmTile4Generic(nb: usize, s: [*]f32, bs: usize, b_ptr_start: [*]const Block
     }
 }
 
-/// Ports `iqp_gemm_8x8_q8_K_generic` (iqp.cpp:734 @5266f24da).
+/// Ports `iqp_gemm_8x8_q8_K_generic` (iqp.cpp:734 @b29c606e2).
 fn gemmGeneric(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     const nb: usize = @intCast(@divTrunc(n, QK_K));
 
@@ -765,7 +765,7 @@ fn gemmGeneric(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const 
     }
 }
 
-/// Ports `iqp_gemm_8x8_q8_K_p4_generic` (iqp.cpp:760 @5266f24da).
+/// Ports `iqp_gemm_8x8_q8_K_p4_generic` (iqp.cpp:760 @b29c606e2).
 fn gemmP4Generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const [4]*const anyopaque, nc: c_int) void {
     const nb: usize = @intCast(@divTrunc(n, QK_K));
 
@@ -784,7 +784,7 @@ fn gemmP4Generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *cons
 // The kernels the entry points call, each taking its `__AVX2__` arm where
 // that is compiled
 
-/// Ports `iqp_gemv_8x8_q8_K` (iqp.cpp:934 @5266f24da): one `src1` row
+/// Ports `iqp_gemv_8x8_q8_K` (iqp.cpp:934 @b29c606e2): one `src1` row
 /// against a panel.
 fn gemv(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     std.debug.assert(@rem(n, QK_K) == 0);
@@ -795,7 +795,7 @@ fn gemv(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaq
     gemvGeneric(n, s, bs, vx, vy, nr, nc);
 }
 
-/// Ports `iqp_gemm_8x8_q8_K` (iqp.cpp:976 @5266f24da): `nr` consecutive
+/// Ports `iqp_gemm_8x8_q8_K` (iqp.cpp:976 @b29c606e2): `nr` consecutive
 /// `src1` rows, a multiple of four, against a panel.
 fn gemm(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     std.debug.assert(@rem(n, QK_K) == 0);
@@ -807,7 +807,7 @@ fn gemm(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaq
     gemmGeneric(n, s, bs, vx, vy, nr, nc);
 }
 
-/// Ports `iqp_gemm_8x8_q8_K_p4` (iqp.cpp:1013 @5266f24da): `gemm` at
+/// Ports `iqp_gemm_8x8_q8_K_p4` (iqp.cpp:1013 @b29c606e2): `gemm` at
 /// `nr = 4`, the four activation rows passed separately, for the scattered
 /// rows of `MUL_MAT_ID`.
 fn gemmP4(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const [4]*const anyopaque, nc: c_int) void {
@@ -829,7 +829,7 @@ fn gemmP4(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const [4]*c
 // -----------------------------------------------------------------------------
 // Eligibility
 
-/// Ports `iqp_type_supported` (iqp.cpp:1042 @5266f24da).
+/// Ports `iqp_type_supported` (iqp.cpp:1042 @b29c606e2).
 fn typeSupported(@"type": c.enum_ggml_type) bool {
     inline for (type_list) |e| {
         if (@"type" == e.t) return true;
@@ -853,7 +853,7 @@ fn panelDisabled() bool {
     return v == 2;
 }
 
-/// Ports `iqp_supported_common` (iqp.cpp:1053 @5266f24da): what `MUL_MAT`
+/// Ports `iqp_supported_common` (iqp.cpp:1053 @b29c606e2): what `MUL_MAT`
 /// and `MUL_MAT_ID` both require.
 fn supportedCommon(dst: *const Tensor) bool {
     const src0 = impl.one(Tensor, dst.src[0]);
@@ -879,7 +879,7 @@ fn supportedCommon(dst: *const Tensor) bool {
     return true;
 }
 
-/// Ports `ggml_cpu_iqp_supports_mul_mat` (iqp.cpp:1095 @5266f24da).
+/// Ports `ggml_cpu_iqp_supports_mul_mat` (iqp.cpp:1095 @b29c606e2).
 ///
 /// Parameters:
 /// - `dst`: a `MUL_MAT` node.
@@ -899,7 +899,7 @@ pub export fn ggml_cpu_iqp_supports_mul_mat(dst: *const Tensor) bool {
     return true;
 }
 
-/// Ports `ggml_cpu_iqp_supports_mul_mat_id` (iqp.cpp:1115 @5266f24da).
+/// Ports `ggml_cpu_iqp_supports_mul_mat_id` (iqp.cpp:1115 @b29c606e2).
 ///
 /// A node-level test only: each expert is decided by
 /// `ggml_cpu_iqp_mul_mat_id_min_batch`.
@@ -924,7 +924,7 @@ pub export fn ggml_cpu_iqp_supports_mul_mat_id(dst: *const Tensor) bool {
 // -----------------------------------------------------------------------------
 // Entry points
 
-/// Ports `ggml_compute_forward_mul_mat_id_iqp` (iqp.cpp:1130 @5266f24da).
+/// Ports `ggml_compute_forward_mul_mat_id_iqp` (iqp.cpp:1130 @b29c606e2).
 ///
 /// One expert. Must be called after `src1` has been converted to `q8_K` in
 /// `params.wdata`, and the threads have synchronised on it.
@@ -1007,7 +1007,7 @@ pub export fn ggml_compute_forward_mul_mat_id_iqp(
     }
 }
 
-/// Ports `ggml_cpu_iqp_scratch_size` (iqp.cpp:1189 @5266f24da).
+/// Ports `ggml_cpu_iqp_scratch_size` (iqp.cpp:1189 @b29c606e2).
 ///
 /// Parameters:
 /// - `dst`: a node the panel path takes.
@@ -1018,7 +1018,7 @@ pub export fn ggml_cpu_iqp_scratch_size(dst: *const Tensor) usize {
     return impl.pad(@as(usize, @intCast(@divTrunc(ne00, QK_K))) * @sizeOf(BlockX8), 64);
 }
 
-/// Ports `ggml_compute_forward_mul_mat_iqp` (iqp.cpp:1193 @5266f24da).
+/// Ports `ggml_compute_forward_mul_mat_iqp` (iqp.cpp:1193 @b29c606e2).
 ///
 /// Must be called after `src1` has been converted to `q8_K` in
 /// `params.wdata` and the threads have synchronised on it, with the chunk

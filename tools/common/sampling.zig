@@ -6,7 +6,7 @@
 //! Ports `ring_buffer`, `common_sampler`, `common_sampler_free`,
 //! `grammar_should_apply`, `common_sampler_accept`, `common_sampler_reset`
 //! and `common_sampler_sample` from `llama.cpp/common/sampling.cpp` at
-//! v0.4.0 (`5266f24da`). The chain itself is built by `init.zig`'s port of
+//! v0.4.1 (`b29c606e2`). The chain itself is built by `init.zig`'s port of
 //! `common_sampler_init`. Each declaration names the C++ it replaces and the
 //! line it began at.
 //!
@@ -21,7 +21,7 @@
 const std = @import("std");
 const c = @import("tools_h");
 
-/// Ports `ring_buffer` (sampling.cpp:21 @5266f24da): a fixed-capacity deque.
+/// Ports `ring_buffer` (sampling.cpp:21 @b29c606e2): a fixed-capacity deque.
 pub fn RingBuffer(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -63,7 +63,7 @@ pub fn RingBuffer(comptime T: type) type {
     };
 }
 
-/// Ports `common_sampler` (sampling.cpp:111 @5266f24da).
+/// Ports `common_sampler` (sampling.cpp:111 @b29c606e2).
 pub const Sampler = struct {
     allocator: std.mem.Allocator,
     grammar_lazy: bool = false,
@@ -74,7 +74,7 @@ pub const Sampler = struct {
     cur_p: c.llama_token_data_array = .{ .data = null, .size = 0, .selected = -1, .sorted = false },
 
     /// The tail of `common_sampler_init`, which news the `common_sampler`
-    /// (sampling.cpp:427 @5266f24da) around a chain and grammar already built.
+    /// (sampling.cpp:427 @b29c606e2) around a chain and grammar already built.
     ///
     /// Parameters:
     /// - `allocator`: owns the ring buffer and the candidate list.
@@ -91,7 +91,7 @@ pub const Sampler = struct {
         return self;
     }
 
-    /// Ports `common_sampler_free` (sampling.cpp:440 @5266f24da).
+    /// Ports `common_sampler_free` (sampling.cpp:440 @b29c606e2).
     pub fn destroy(self: *Sampler) void {
         c.llama_sampler_free(self.grmr);
         c.llama_sampler_free(self.chain);
@@ -105,15 +105,15 @@ pub const Sampler = struct {
         return self.chain;
     }
 
-    /// Ports `reset` (sampling.cpp:124 @5266f24da), a member of
+    /// Ports `reset` (sampling.cpp:124 @b29c606e2), a member of
     /// `common_sampler`, which `common_sampler_reset` (sampling.cpp:501
-    /// @5266f24da) calls.
+    /// @b29c606e2) calls.
     pub fn reset(self: *Sampler) void {
         self.prev.clear();
         c.llama_sampler_reset(self.chain);
     }
 
-    /// Ports `set_logits` (sampling.cpp:130 @5266f24da), a member of
+    /// Ports `set_logits` (sampling.cpp:130 @b29c606e2), a member of
     /// `common_sampler`: the candidates, from a backend sampler's output or
     /// the raw logits.
     fn setLogits(self: *Sampler, ctx: ?*c.llama_context, idx: i32) !void {
@@ -149,13 +149,13 @@ pub const Sampler = struct {
         self.cur_p = .{ .data = self.cur.items.ptr, .size = self.cur.items.len, .selected = -1, .sorted = false };
     }
 
-    /// Ports `grammar_should_apply` (sampling.cpp:452 @5266f24da): with no
+    /// Ports `grammar_should_apply` (sampling.cpp:452 @b29c606e2): with no
     /// reasoning budget, whenever there is a grammar.
     fn grammarShouldApply(self: *const Sampler) bool {
         return self.grmr != null;
     }
 
-    /// Ports `common_sampler_accept` (sampling.cpp:467 @5266f24da).
+    /// Ports `common_sampler_accept` (sampling.cpp:467 @b29c606e2).
     pub fn accept(self: *Sampler, token: c.llama_token, is_generated: bool) void {
         const accept_grammar = is_generated and self.grammarShouldApply();
         if (self.grmr != null and accept_grammar) c.llama_sampler_accept(self.grmr, token);
@@ -163,7 +163,7 @@ pub const Sampler = struct {
         self.prev.pushBack(token);
     }
 
-    /// Ports `common_sampler_sample` (sampling.cpp:594 @5266f24da):
+    /// Ports `common_sampler_sample` (sampling.cpp:594 @b29c606e2):
     /// grammar-based rejection sampling over the chain.
     ///
     /// Return: the token, which `cur_p` records as selected.

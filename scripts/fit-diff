@@ -4,7 +4,7 @@
 # `llama-cli` fits its unset parameters to free memory before it loads a
 # model -- the context size, and on a GPU the layers and tensors given to
 # it -- and what it decides depends on what each device reports free. This
-# compiles common/fit.cpp and common/log.cpp unmodified over libllama-ref.a
+# compiles common/fit.cpp, common/log.cpp and common/json.cpp unmodified over libllama-ref.a
 # and runs every case through them and through fit.zig on the port, against
 # fake GPUs with chosen memory (harness/fit_dev.c), the CPU alone and Metal:
 # the parameters it leaves, every line it logs, and every libllama message
@@ -39,7 +39,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
-INC=(-I llama.cpp/common -I llama.cpp/include -I llama.cpp/ggml/include -I llama.cpp/src)
+INC=(-I llama.cpp/common -I llama.cpp/include -I llama.cpp/ggml/include -I llama.cpp/src -I llama.cpp/vendor)
 
 zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
     src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
@@ -48,7 +48,9 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
 zig cc -mcpu=baseline -c harness/fit_dev.c -o "$tmp/fit_dev.o" -O2 \
     -I llama.cpp/ggml/include -I llama.cpp/ggml/src 2>"$tmp/cerr" \
     || { echo "FAIL: cannot compile harness/fit_dev.c" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
-for src in llama.cpp/common/fit.cpp llama.cpp/common/log.cpp harness/fit_ref.cpp; do
+# json.cpp: `common_json::dump_safe`, which log.cpp's `--log-jsonl` path calls
+# since v0.4.1.
+for src in llama.cpp/common/fit.cpp llama.cpp/common/log.cpp llama.cpp/common/json.cpp harness/fit_ref.cpp; do
     obj="$tmp/$(basename "${src%.cpp}").o"
     zig c++ -mcpu=baseline -c "$src" -o "$obj" -std=c++17 -O2 -w "${INC[@]}" 2>"$tmp/cerr" \
         || { echo "FAIL: cannot compile $src" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
@@ -58,7 +60,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/fit_diff" -O"${FIT_DIFF_O:-fast}" 
     --dep harness_root=llama --dep fit -Mroot=harness/fit_diff.zig \
     --dep llama -Mfit=cli/fit.zig \
     --dep llama_c -Mllama=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
-    "$tmp/fit_dev.o" "$tmp/fit.o" "$tmp/log.o" "$tmp/fit_ref.o" \
+    "$tmp/fit_dev.o" "$tmp/fit.o" "$tmp/log.o" "$tmp/json.o" "$tmp/fit_ref.o" \
     zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \

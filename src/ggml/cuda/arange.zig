@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/arange.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/arange.cuh` at v0.4.0 (`5266f24da`). The
+//! `llama.cpp/ggml/src/ggml-cuda/arange.cuh` at v0.4.1 (`b29c606e2`). The
 //! kernel, `arange_f32`, stays CUDA.
 
 const std = @import("std");
@@ -15,10 +15,10 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_ARANGE_BLOCK_SIZE` (arange.cuh:3 @5266f24da).
+/// Ports `CUDA_ARANGE_BLOCK_SIZE` (arange.cuh:3 @b29c606e2).
 const block_size = 256;
 
-/// Ports `arange_f32_cuda` (arange.cu:12 @5266f24da), which launches with
+/// Ports `arange_f32_cuda` (arange.cu:12 @b29c606e2), which launches with
 /// `<<<>>>`.
 fn arangeF32Cuda(dst: ?*anyopaque, ne0: c_int, start: f32, step: f32, stream: cu.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(ne0 + block_size - 1, block_size);
@@ -29,7 +29,7 @@ fn arangeF32Cuda(dst: ?*anyopaque, ne0: c_int, start: f32, step: f32, stream: cu
     }, .{ dst, ne0, start, step });
 }
 
-/// Ports `ggml_cuda_op_arange` (arange.cu:17 @5266f24da).
+/// Ports `ggml_cuda_op_arange` (arange.cu:17 @b29c606e2).
 pub fn opArange(ctx: *common.Context, dst: *Tensor) void {
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();

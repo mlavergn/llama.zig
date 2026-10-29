@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ports `common_cpu_params`, `common_params_sampling`, `common_params_model`
-//! and `common_params` from `llama.cpp/common/common.h` (v0.4.0,
-//! `5266f24da`) -- the members the tools' options and the tools themselves
+//! and `common_params` from `llama.cpp/common/common.h` (v0.4.1,
+//! `b29c606e2`) -- the members the tools' options and the tools themselves
 //! touch, with upstream's defaults. The server's, the CLI's and the
 //! speculative decoder's members are left out: no option those tools take
 //! reaches them.
@@ -17,7 +17,7 @@
 const std = @import("std");
 const c = @import("tools_h");
 
-/// Ports `llama_example` (common/common.h:84 @5266f24da).
+/// Ports `llama_example` (common/common.h:84 @b29c606e2).
 pub const Example = enum(c_int) {
     batched,
     debug,
@@ -47,7 +47,7 @@ pub const Example = enum(c_int) {
     tokenize,
 };
 
-/// Ports `common_sampler_type` (common/common.h:115 @5266f24da).
+/// Ports `common_sampler_type` (common/common.h:115 @b29c606e2).
 pub const SamplerType = enum(c_int) {
     none = 0,
     dry = 1,
@@ -62,7 +62,7 @@ pub const SamplerType = enum(c_int) {
     top_n_sigma = 11,
     adaptive_p = 12,
 
-    /// Ports `common_sampler_type_to_chr` (sampling.cpp:795 @5266f24da).
+    /// Ports `common_sampler_type_to_chr` (sampling.cpp:795 @b29c606e2).
     pub fn toChr(self: SamplerType) u8 {
         return switch (self) {
             .dry => 'd',
@@ -80,7 +80,7 @@ pub const SamplerType = enum(c_int) {
         };
     }
 
-    /// Ports `common_sampler_type_to_str` (sampling.cpp:812 @5266f24da).
+    /// Ports `common_sampler_type_to_str` (sampling.cpp:812 @b29c606e2).
     pub fn toStr(self: SamplerType) []const u8 {
         return switch (self) {
             .dry => "dry",
@@ -99,7 +99,7 @@ pub const SamplerType = enum(c_int) {
     }
 };
 
-/// Ports `common_params_sampling_config` (common/common.h:156 @5266f24da).
+/// Ports `common_params_sampling_config` (common/common.h:156 @b29c606e2).
 pub const SamplingConfig = struct {
     pub const samplers: u64 = 1 << 0;
     pub const top_k: u64 = 1 << 1;
@@ -115,13 +115,13 @@ pub const SamplingConfig = struct {
     pub const mirostat_eta: u64 = 1 << 11;
 };
 
-/// Ports `dimre_method` (common/common.h:132 @5266f24da).
+/// Ports `dimre_method` (common/common.h:132 @b29c606e2).
 pub const DimreMethod = enum { pca, mean };
 
-/// Ports `common_grammar_type` (common/common.h:187 @5266f24da).
+/// Ports `common_grammar_type` (common/common.h:187 @b29c606e2).
 pub const GrammarType = enum { none, user, output_format, tool_calls };
 
-/// Ports `common_cpu_params` (common/common.h:68 @5266f24da).
+/// Ports `common_cpu_params` (common/common.h:68 @b29c606e2).
 pub const CpuParams = struct {
     n_threads: i32 = -1,
     cpumask: [c.GGML_MAX_N_THREADS]bool = @splat(false), // CPU affinity mask.
@@ -131,7 +131,7 @@ pub const CpuParams = struct {
     poll: u32 = 50, // Polling (busywait) level (0 - no polling, 100 - mostly polling)
 };
 
-/// Ports `common_adapter_lora_info` (common/common.h:50 @5266f24da).
+/// Ports `common_adapter_lora_info` (common/common.h:50 @b29c606e2).
 pub const LoraInfo = struct {
     path: [:0]const u8,
     scale: f32,
@@ -140,13 +140,13 @@ pub const LoraInfo = struct {
     ptr: ?*c.llama_adapter_lora = null,
 };
 
-/// Ports `common_control_vector_load_info` (common/common.h:1105 @5266f24da).
+/// Ports `common_control_vector_load_info` (common/common.h:1105 @b29c606e2).
 pub const ControlVectorLoadInfo = struct {
     strength: f32,
     fname: [:0]const u8,
 };
 
-/// Ports `common_params_sampling` (common/common.h:224 @5266f24da), the members an
+/// Ports `common_params_sampling` (common/common.h:224 @b29c606e2), the members an
 /// option sets.
 pub const Sampling = struct {
     seed: u32 = c.LLAMA_DEFAULT_SEED, // the seed used to initialize llama_sampler
@@ -188,7 +188,7 @@ pub const Sampling = struct {
     backend_sampling: bool = false,
 };
 
-/// Ports `common_params_model` (common/common.h:302 @5266f24da).
+/// Ports `common_params_model` (common/common.h:302 @b29c606e2).
 pub const Model = struct {
     path: []const u8 = "", // model local path
     url: []const u8 = "", // model url to download
@@ -197,7 +197,7 @@ pub const Model = struct {
     docker_repo: []const u8 = "", // Docker repo
 };
 
-/// Ports `common_params` (common/common.h:448 @5266f24da), the members the tools'
+/// Ports `common_params` (common/common.h:448 @b29c606e2), the members the tools'
 /// options and the tools themselves reach. `default_template_kwargs` and
 /// `preserve_reasoning_specified` are left out: no option the tools take sets
 /// them, and the one reader, `common_chat_format_example`, ignores them on the

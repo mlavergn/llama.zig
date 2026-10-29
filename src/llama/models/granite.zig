@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/granite.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/granite.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_granite`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` with `build_attention_layer` and
 //! `build_layer_ffn`. `llama_model_granite_moe` and `llama_model_minicpm`
@@ -28,7 +28,7 @@ fn oom() noreturn {
     impl.abort("models/granite.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_granite`'s `load_arch_hparams` (models/granite.cpp:5 @5266f24da).
+/// Ports `llama_model_granite`'s `load_arch_hparams` (models/granite.cpp:5 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -69,7 +69,13 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
     self.type = switch (hp.nLayer()) {
         32 => .@"3b",
-        40 => .@"3b",
+        40 => switch (hp.n_embd) {
+            2048 => .@"2b",
+            2560 => .@"3b",
+            4096 => .@"8b",
+            else => .unknown,
+        },
+        64 => .@"30b",
         // Add additional layer/vocab/etc checks here for other model sizes.
         else => .unknown,
     };
@@ -78,7 +84,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
 }
 
-/// Ports `llama_model_granite`'s `load_arch_tensors` (models/granite.cpp:50 @5266f24da).
+/// Ports `llama_model_granite`'s `load_arch_tensors` (models/granite.cpp:59 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -143,13 +149,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_granite`'s `build_arch_graph` (models/granite.cpp:110 @5266f24da).
+/// Ports `llama_model_granite`'s `build_arch_graph` (models/granite.cpp:119 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_granite`'s `graph`
-/// (models/granite.cpp:114 @5266f24da), which Granite MoE and MiniCPM
+/// (models/granite.cpp:123 @b29c606e2), which Granite MoE and MiniCPM
 /// build with too.
 ///
 /// Parameters:
@@ -162,8 +168,8 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/granite.cpp", 121, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/granite.cpp", 122, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/granite.cpp", 130, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/granite.cpp", 131, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -227,7 +233,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_granite`'s `graph`'s `build_attention_layer`
-/// (models/granite.cpp:196 @5266f24da).
+/// (models/granite.cpp:205 @b29c606e2).
 fn buildAttentionLayer(
     b: *const graph.Builder,
     cur_: *Tensor,
@@ -264,7 +270,7 @@ fn buildAttentionLayer(
 }
 
 /// Ports `llama_model_granite`'s `graph`'s `build_layer_ffn`
-/// (models/granite.cpp:234 @5266f24da).
+/// (models/granite.cpp:243 @b29c606e2).
 fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;

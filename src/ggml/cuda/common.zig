@@ -9,7 +9,7 @@
 //! `ggml_cuda_graph`, `ggml_cuda_concurrent_event`,
 //! `ggml_backend_cuda_context`) and `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu`
 //! (`ggml_cuda_error`, device selection, `ggml_cuda_init`, both pools and the
-//! context destructor), at v0.4.0 (`5266f24da`).
+//! context destructor), at v0.4.1 (`b29c606e2`).
 //!
 //! # What is not here
 //!
@@ -32,19 +32,19 @@ const Tensor = c.ggml_tensor;
 /// libc's is what a C entry point can reach, as in `metal/backend.zig`.
 pub const allocator = std.heap.c_allocator;
 
-/// Ports `GGML_CUDA_NAME` (ggml-cuda.h:11 @5266f24da).
+/// Ports `GGML_CUDA_NAME` (ggml-cuda.h:11 @b29c606e2).
 pub const name = "CUDA";
 
-/// Ports `GGML_CUDA_MAX_DEVICES` (ggml-cuda.h:20 @5266f24da).
+/// Ports `GGML_CUDA_MAX_DEVICES` (ggml-cuda.h:20 @b29c606e2).
 pub const max_devices = 16;
 
-/// Ports `GGML_CUDA_MAX_STREAMS` (common.cuh:179 @5266f24da).
+/// Ports `GGML_CUDA_MAX_STREAMS` (common.cuh:188 @b29c606e2).
 pub const max_streams = 8;
 
-/// Ports `WARP_SIZE` (common.cuh:46 @5266f24da).
+/// Ports `WARP_SIZE` (common.cuh:46 @b29c606e2).
 pub const warp_size = 32;
 
-/// Ports `MATRIX_ROW_PADDING` (common.cuh:177 @5266f24da): the last row of
+/// Ports `MATRIX_ROW_PADDING` (common.cuh:186 @b29c606e2): the last row of
 /// a quantized matrix is padded to a multiple of this, so kernels can read
 /// past it.
 pub const matrix_row_padding = 512;
@@ -53,7 +53,7 @@ pub const matrix_row_padding = 512;
 // Compute capabilities
 
 /// Ports the `GGML_CUDA_CC_*` constants this build's NVIDIA arms compare
-/// against, from `GGML_CUDA_CC_PASCAL` (common.cuh:50 @5266f24da).
+/// against, from `GGML_CUDA_CC_PASCAL` (common.cuh:50 @b29c606e2).
 pub const cc = struct {
     pub const pascal = 600;
     pub const dp4a = 610;
@@ -69,19 +69,19 @@ pub const cc = struct {
     pub const offset_amd = 0x1000000;
     pub const offset_mthreads = 0x0100000;
 
-    /// Ports `GGML_CUDA_CC_IS_NVIDIA` (common.cuh:65 @5266f24da).
+    /// Ports `GGML_CUDA_CC_IS_NVIDIA` (common.cuh:65 @b29c606e2).
     pub fn isNvidia(x: c_int) bool {
         return x < offset_mthreads;
     }
 
-    /// Ports `GGML_CUDA_CC_IS_AMD` (common.cuh:84 @5266f24da). Always false
+    /// Ports `GGML_CUDA_CC_IS_AMD` (common.cuh:86 @b29c606e2). Always false
     /// on a CUDA device, but the C's predicates test it, so it is kept for
     /// transliteration.
     pub fn isAmd(x: c_int) bool {
         return x >= offset_amd;
     }
 
-    /// Ports `GGML_CUDA_CC_IS_MTHREADS` (common.cuh:106 @5266f24da).
+    /// Ports `GGML_CUDA_CC_IS_MTHREADS` (common.cuh:109 @b29c606e2).
     pub fn isMthreads(x: c_int) bool {
         return x >= offset_mthreads and x < offset_amd;
     }
@@ -97,7 +97,7 @@ const compiled_archs = blk: {
     break :blk [_]c_int{n * 10};
 };
 
-/// Ports `ggml_cuda_highest_compiled_arch` (common.cuh:166 @5266f24da), the
+/// Ports `ggml_cuda_highest_compiled_arch` (common.cuh:175 @b29c606e2), the
 /// `__CUDA_ARCH_LIST__` arm: the highest compiled architecture not above
 /// `arch`, or -1.
 pub fn highestCompiledArch(arch: c_int) c_int {
@@ -108,68 +108,75 @@ pub fn highestCompiledArch(arch: c_int) c_int {
     return if (cur == 0) -1 else cur;
 }
 
-/// Ports `fp16_available` (common.cuh:299 @5266f24da).
+/// Ports `fp16_available` (common.cuh:308 @b29c606e2).
 pub fn fp16Available(x: c_int) bool {
     return highestCompiledArch(x) >= cc.pascal or (cc.isMthreads(x) and x >= cc.offset_mthreads + 0x310);
 }
 
-/// Ports `fast_fp16_available` (common.cuh:304 @5266f24da).
+/// Ports `fast_fp16_available` (common.cuh:313 @b29c606e2).
 pub fn fastFp16Available(x: c_int) bool {
     return cc.isAmd(x) or (cc.isNvidia(x) and fp16Available(x) and highestCompiledArch(x) != 610) or
         (cc.isMthreads(x) and fp16Available(x));
 }
 
-/// Ports `fast_fp16_hardware_available` (common.cuh:311 @5266f24da).
+/// Ports `fast_fp16_hardware_available` (common.cuh:320 @b29c606e2).
 pub fn fastFp16HardwareAvailable(x: c_int) bool {
     return (cc.isNvidia(x) and x >= cc.pascal and x != 610) or cc.isAmd(x) or
         (cc.isMthreads(x) and x >= cc.offset_mthreads + 0x220);
 }
 
-/// Ports `fp16_mma_hardware_available` (common.cuh:317 @5266f24da), NVIDIA
+/// Ports `fp16_mma_hardware_available` (common.cuh:326 @b29c606e2), NVIDIA
 /// arm; the CDNA/RDNA tests are false on a CUDA device.
 pub fn fp16MmaHardwareAvailable(x: c_int) bool {
     return (cc.isNvidia(x) and x >= cc.volta) or (cc.isMthreads(x) and x >= cc.offset_mthreads + 0x220);
 }
 
-/// Ports `bf16_mma_hardware_available` (common.cuh:323 @5266f24da), NVIDIA
+/// Ports `fast_bf16_hardware_available` (common.cuh:333 @b29c606e2), NVIDIA
+/// arm; the AMD test is false on a CUDA device. For feature selection of
+/// external libraries, e.g. cuBLAS.
+pub fn fastBf16HardwareAvailable(x: c_int) bool {
+    return cc.isNvidia(x) and x >= cc.ampere;
+}
+
+/// Ports `bf16_mma_hardware_available` (common.cuh:338 @b29c606e2), NVIDIA
 /// arm.
 pub fn bf16MmaHardwareAvailable(x: c_int) bool {
     return (cc.isNvidia(x) and x >= cc.ampere) or x >= cc.offset_amd + 0x1100 or
         (cc.isMthreads(x) and x >= cc.offset_mthreads + 0x310);
 }
 
-/// Ports `volta_mma_available` (common.cuh:345 @5266f24da).
+/// Ports `volta_mma_available` (common.cuh:360 @b29c606e2).
 pub fn voltaMmaAvailable(x: c_int) bool {
     return cc.isNvidia(x) and highestCompiledArch(x) == cc.volta;
 }
 
-/// Ports `turing_mma_available` (common.cuh:349 @5266f24da).
+/// Ports `turing_mma_available` (common.cuh:364 @b29c606e2).
 pub fn turingMmaAvailable(x: c_int) bool {
     return cc.isNvidia(x) and highestCompiledArch(x) >= cc.turing;
 }
 
-/// Ports `ampere_mma_available` (common.cuh:353 @5266f24da).
+/// Ports `ampere_mma_available` (common.cuh:368 @b29c606e2).
 pub fn ampereMmaAvailable(x: c_int) bool {
     return cc.isNvidia(x) and highestCompiledArch(x) >= cc.ampere;
 }
 
-/// Ports `cp_async_available` (common.cuh:357 @5266f24da).
+/// Ports `cp_async_available` (common.cuh:372 @b29c606e2).
 pub fn cpAsyncAvailable(x: c_int) bool {
     return cc.isNvidia(x) and highestCompiledArch(x) >= cc.ampere;
 }
 
-/// Ports `blackwell_mma_available` (common.cuh:361 @5266f24da).
+/// Ports `blackwell_mma_available` (common.cuh:376 @b29c606e2).
 pub fn blackwellMmaAvailable(x: c_int) bool {
     return cc.isNvidia(x) and highestCompiledArch(x) >= cc.blackwell and highestCompiledArch(x) < cc.rubin;
 }
 
-/// Ports `ggml_cuda_is_aligned` (common.cuh:367 @5266f24da).
+/// Ports `ggml_cuda_is_aligned` (common.cuh:382 @b29c606e2).
 pub fn isAligned(t: *const Tensor, alignment: usize) bool {
     return @intFromPtr(t.data) % alignment == 0 and
         t.nb[1] % alignment == 0 and t.nb[2] % alignment == 0 and t.nb[3] % alignment == 0;
 }
 
-/// Ports `init_fastdiv_values` (common.cuh:910 @5266f24da): `<mp, L, d>`
+/// Ports `init_fastdiv_values` (common.cuh:925 @b29c606e2): `<mp, L, d>`
 /// such that `n / d == (mulhi(n, mp) + n) >> L`.
 pub fn initFastdivValues(d_64: u64) cu.uint3 {
     impl.assert(d_64 != 0, "d_64 != 0");
@@ -184,7 +191,7 @@ pub fn initFastdivValues(d_64: u64) cu.uint3 {
 // -----------------------------------------------------------------------------
 // Errors
 
-/// Ports `ggml_cuda_error` (ggml-cuda.cu:100 @5266f24da).
+/// Ports `ggml_cuda_error` (ggml-cuda.cu:100 @b29c606e2).
 ///
 /// Parameters:
 /// - `stmt`: the call that failed, as the C's `#err` stringifies it.
@@ -199,18 +206,18 @@ pub fn cudaError(stmt: [*:0]const u8, src: std.builtin.SourceLocation, msg: [*:0
     impl.abort(name ++ " error");
 }
 
-/// Ports `CUDA_CHECK` (common.cuh:192 @5266f24da).
+/// Ports `CUDA_CHECK` (common.cuh:201 @b29c606e2).
 pub fn cudaCheck(err: cu.cudaError_t, stmt: [*:0]const u8, src: std.builtin.SourceLocation) void {
     if (err != cu.cudaSuccess) cudaError(stmt, src, cu.cudaGetErrorString(err));
 }
 
-/// Ports `CUBLAS_CHECK` (common.cuh:216 @5266f24da), with
+/// Ports `CUBLAS_CHECK` (common.cuh:225 @b29c606e2), with
 /// `cublas_get_error_str`'s CUDA 12 arm.
 pub fn cublasCheck(err: cu.cublasStatus_t, stmt: [*:0]const u8, src: std.builtin.SourceLocation) void {
     if (err != cu.CUBLAS_STATUS_SUCCESS) cudaError(stmt, src, cu.cublasGetStatusString(err));
 }
 
-/// Ports `CU_CHECK` (common.cuh:228 @5266f24da), with `cu_get_error_str`.
+/// Ports `CU_CHECK` (common.cuh:237 @b29c606e2), with `cu_get_error_str`.
 pub fn cuCheck(err: cu.CUresult, stmt: [*:0]const u8, src: std.builtin.SourceLocation) void {
     if (err != cu.CUDA_SUCCESS) {
         var str: [*c]const u8 = null;
@@ -255,7 +262,7 @@ pub fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 // -----------------------------------------------------------------------------
 // Devices
 
-/// Ports `ggml_cuda_device_info`'s `cuda_device_info` (common.cuh:1142 @5266f24da).
+/// Ports `ggml_cuda_device_info`'s `cuda_device_info` (common.cuh:1181 @b29c606e2).
 pub const DeviceInfo = struct {
     /// Compute capability.
     cc: c_int = 0,
@@ -276,7 +283,7 @@ pub const DeviceInfo = struct {
     virtual_index: c_int = 0,
 };
 
-/// Ports `ggml_cuda_device_info` (common.cuh:1138 @5266f24da).
+/// Ports `ggml_cuda_device_info` (common.cuh:1177 @b29c606e2).
 pub const Info = struct {
     /// Number of (possibly virtual) devices exposed to the rest of ggml.
     device_count: c_int = 0,
@@ -286,7 +293,7 @@ pub const Info = struct {
     default_tensor_split: [max_devices]f32 = @splat(0),
 };
 
-/// Ports `ggml_cuda_info` (ggml-cuda.cu:413 @5266f24da): the device table,
+/// Ports `ggml_cuda_info` (ggml-cuda.cu:410 @b29c606e2): the device table,
 /// built on first use.
 pub fn info() *const Info {
     const S = struct {
@@ -300,7 +307,7 @@ pub fn info() *const Info {
     return &S.value;
 }
 
-/// Ports `ggml_cuda_init` (ggml-cuda.cu:219 @5266f24da), the NVIDIA arms.
+/// Ports `ggml_cuda_init` (ggml-cuda.cu:220 @b29c606e2), the NVIDIA arms.
 fn init() Info {
     var inf: Info = .{};
 
@@ -460,14 +467,14 @@ fn init() Info {
     return inf;
 }
 
-/// Ports `ggml_cuda_get_physical_device` (ggml-cuda.cu:112 @5266f24da).
+/// Ports `ggml_cuda_get_physical_device` (ggml-cuda.cu:112 @b29c606e2).
 pub fn physicalDevice(device: c_int) c_int {
     const inf = info();
     impl.assert(device >= 0 and device < inf.device_count, "device >= 0 && device < info.device_count");
     return inf.devices[@intCast(device)].physical_device;
 }
 
-/// Ports `ggml_cuda_set_device` (ggml-cuda.cu:120 @5266f24da).
+/// Ports `ggml_cuda_set_device` (ggml-cuda.cu:120 @b29c606e2).
 pub fn setDevice(device: c_int) void {
     const physical_device = physicalDevice(device);
     var current_device: c_int = 0;
@@ -476,14 +483,14 @@ pub fn setDevice(device: c_int) void {
     cudaCheck(cu.cudaSetDevice(physical_device), "cudaSetDevice(physical_device)", @src());
 }
 
-/// Ports `ggml_cuda_get_device` (ggml-cuda.cu:134 @5266f24da).
+/// Ports `ggml_cuda_get_device` (ggml-cuda.cu:134 @b29c606e2).
 pub fn getDevice() c_int {
     var id: c_int = 0;
     cudaCheck(cu.cudaGetDevice(&id), "cudaGetDevice(&id)", @src());
     return id;
 }
 
-/// Ports `ggml_cuda_device_malloc` (ggml-cuda.cu:140 @5266f24da), CUDA arm.
+/// Ports `ggml_cuda_device_malloc` (ggml-cuda.cu:140 @b29c606e2), CUDA arm.
 pub fn deviceMalloc(ptr: *?*anyopaque, size: usize, device: c_int) cu.cudaError_t {
     setDevice(device);
     if (std.c.getenv("GGML_CUDA_ENABLE_UNIFIED_MEMORY") != null) {
@@ -495,7 +502,7 @@ pub fn deviceMalloc(ptr: *?*anyopaque, size: usize, device: c_int) cu.cudaError_
 // -----------------------------------------------------------------------------
 // Pools
 
-/// Ports `ggml_cuda_pool` (common.cuh:1168 @5266f24da). The C's virtual
+/// Ports `ggml_cuda_pool` (common.cuh:1207 @b29c606e2). The C's virtual
 /// base becomes a tagged union of its two implementations.
 pub const Pool = union(enum) {
     leg: PoolLeg,
@@ -520,7 +527,7 @@ pub const Pool = union(enum) {
     }
 };
 
-/// Ports `ggml_cuda_pool_leg` (ggml-cuda.cu:421 @5266f24da): a best-fit
+/// Ports `ggml_cuda_pool_leg` (ggml-cuda.cu:418 @b29c606e2): a best-fit
 /// cache of `cudaMalloc`ed buffers.
 pub const PoolLeg = struct {
     const max_buffers = 256;
@@ -608,7 +615,7 @@ pub const PoolLeg = struct {
     }
 };
 
-/// Ports `ggml_cuda_pool_vmm` (ggml-cuda.cu:538 @5266f24da): a stack
+/// Ports `ggml_cuda_pool_vmm` (ggml-cuda.cu:535 @b29c606e2): a stack
 /// allocator over one reserved virtual range, growing its physical backing
 /// on demand. Frees must come in reverse order.
 pub const PoolVmm = struct {
@@ -727,7 +734,7 @@ pub const PoolVmm = struct {
 };
 
 /// Ports `ggml_backend_cuda_context`'s `new_pool_for_device`
-/// (ggml-cuda.cu:687 @5266f24da).
+/// (ggml-cuda.cu:684 @b29c606e2).
 fn newPoolForDevice(device: c_int) *Pool {
     const p = allocator.create(Pool) catch impl.abort("ggml-cuda: out of memory");
     if (info().devices[@intCast(device)].vmm) {
@@ -738,7 +745,7 @@ fn newPoolForDevice(device: c_int) *Pool {
     return p;
 }
 
-/// Ports `ggml_cuda_pool_alloc` (common.cuh:1176 @5266f24da), for each `T`. The C's
+/// Ports `ggml_cuda_pool_alloc` (common.cuh:1215 @b29c606e2), for each `T`. The C's
 /// destructor is `deinit`, which the caller `defer`s.
 pub fn PoolAlloc(comptime T: type) type {
     return struct {
@@ -785,7 +792,7 @@ pub fn PoolAlloc(comptime T: type) type {
 // -----------------------------------------------------------------------------
 // CUDA graphs
 
-/// Ports `ggml_cuda_graph`'s `node_properties` (common.cuh:1250 @5266f24da).
+/// Ports `ggml_cuda_graph`'s `node_properties` (common.cuh:1289 @b29c606e2).
 pub const NodeProperties = struct {
     node: Tensor,
     node_src_data_ptrs: [c.GGML_MAX_SRC]?*anyopaque,
@@ -793,7 +800,7 @@ pub const NodeProperties = struct {
     node_src_nb: [c.GGML_MAX_SRC][c.GGML_MAX_DIMS]usize,
 };
 
-/// Ports `ggml_cuda_graph` (common.cuh:1232 @5266f24da), with
+/// Ports `ggml_cuda_graph` (common.cuh:1271 @b29c606e2), with
 /// `USE_CUDA_GRAPH` defined: `GGML_CUDA_USE_GRAPHS` is in the reference's
 /// flags.
 pub const Graph = struct {
@@ -814,7 +821,7 @@ pub const Graph = struct {
         self.node_props.deinit(allocator);
     }
 
-    /// Ports `ggml_cuda_graph`'s `is_enabled` (common.cuh:1258 @5266f24da).
+    /// Ports `ggml_cuda_graph`'s `is_enabled` (common.cuh:1297 @b29c606e2).
     pub fn isEnabled(self: *const Graph) bool {
         const S = struct {
             var disabled_by_env = false;
@@ -831,7 +838,7 @@ pub const Graph = struct {
 // -----------------------------------------------------------------------------
 // Concurrent streams
 
-/// Ports `ggml_cuda_concurrent_event` (common.cuh:1265 @5266f24da).
+/// Ports `ggml_cuda_concurrent_event` (common.cuh:1304 @b29c606e2).
 pub const ConcurrentEvent = struct {
     join_events: std.ArrayList(cu.cudaEvent_t) = .empty,
     fork_event: cu.cudaEvent_t = null,
@@ -876,7 +883,7 @@ pub const ConcurrentEvent = struct {
         return .{ .start = start, .end = start + @as(i64, @intCast(c.ggml_nbytes(t))) };
     }
 
-    /// Ports `ggml_cuda_concurrent_event`'s `is_valid` (common.cuh:1306 @5266f24da):
+    /// Ports `ggml_cuda_concurrent_event`'s `is_valid` (common.cuh:1345 @b29c606e2):
     /// whether the branches write disjoint memory and read only within
     /// their own branch.
     pub fn isValid(self: *const ConcurrentEvent) bool {
@@ -943,7 +950,7 @@ pub const ConcurrentEvent = struct {
     }
 };
 
-/// Ports `ggml_cuda_stream_context` (common.cuh:1408 @5266f24da).
+/// Ports `ggml_cuda_stream_context` (common.cuh:1447 @b29c606e2).
 pub const StreamContext = struct {
     concurrent_events: std.AutoArrayHashMapUnmanaged(*const Tensor, ConcurrentEvent) = .empty,
 
@@ -961,7 +968,7 @@ pub const StreamContext = struct {
 // -----------------------------------------------------------------------------
 // The backend context
 
-/// Ports `ggml_backend_cuda_context` (common.cuh:1416 @5266f24da).
+/// Ports `ggml_backend_cuda_context` (common.cuh:1455 @b29c606e2).
 pub const Context = struct {
     device: c_int,
     name_buf: [16:0]u8 = @splat(0),
@@ -995,7 +1002,7 @@ pub const Context = struct {
         return &self.name_buf;
     }
 
-    /// Ports the destructor of `ggml_backend_cuda_context` (ggml-cuda.cu:704 @5266f24da).
+    /// Ports the destructor of `ggml_backend_cuda_context` (ggml-cuda.cu:701 @b29c606e2).
     pub fn destroy(self: *Context) void {
         lock.waitIdle();
 
@@ -1027,7 +1034,7 @@ pub const Context = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (common.cuh:1435 @5266f24da).
+    /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (common.cuh:1474 @b29c606e2).
     pub fn cudaGraph(self: *Context, first_node_ptr: ?*const anyopaque) *Graph {
         const time_now = c.ggml_time_us();
 
@@ -1056,19 +1063,19 @@ pub const Context = struct {
         return gop.value_ptr.*;
     }
 
-    /// Ports `ggml_backend_cuda_context`'s `any_cuda_graph_enabled` (common.cuh:1460 @5266f24da).
+    /// Ports `ggml_backend_cuda_context`'s `any_cuda_graph_enabled` (common.cuh:1499 @b29c606e2).
     pub fn anyCudaGraphEnabled(self: *const Context) bool {
         for (self.cuda_graphs.values()) |g| if (g.isEnabled()) return true;
         return false;
     }
 
-    /// Ports `ggml_backend_cuda_context`'s `any_cuda_graph_has_instance` (common.cuh:1470 @5266f24da).
+    /// Ports `ggml_backend_cuda_context`'s `any_cuda_graph_has_instance` (common.cuh:1509 @b29c606e2).
     pub fn anyCudaGraphHasInstance(self: *const Context) bool {
         for (self.cuda_graphs.values()) |g| if (g.instance != null) return true;
         return false;
     }
 
-    /// Ports `ggml_backend_cuda_context`'s two-argument `stream` (common.cuh:1489 @5266f24da).
+    /// Ports `ggml_backend_cuda_context`'s two-argument `stream` (common.cuh:1528 @b29c606e2).
     pub fn streamFor(self: *Context, device: c_int, stream_no: c_int) cu.cudaStream_t {
         const s = &self.streams[@intCast(device)][@intCast(stream_no)];
         if (s.* == null) {
@@ -1078,12 +1085,12 @@ pub const Context = struct {
         return s.*;
     }
 
-    /// Ports `ggml_backend_cuda_context`'s argument-free `stream` (common.cuh:1497 @5266f24da).
+    /// Ports `ggml_backend_cuda_context`'s argument-free `stream` (common.cuh:1536 @b29c606e2).
     pub fn stream(self: *Context) cu.cudaStream_t {
         return self.streamFor(self.device, self.curr_stream_no);
     }
 
-    /// Ports `ggml_backend_cuda_context`'s `cublas_handle` (common.cuh:1501 @5266f24da).
+    /// Ports `ggml_backend_cuda_context`'s `cublas_handle` (common.cuh:1540 @b29c606e2).
     pub fn cublasHandle(self: *Context) cu.cublasHandle_t {
         const d: usize = @intCast(self.device);
         const s: usize = @intCast(self.curr_stream_no);
@@ -1102,14 +1109,14 @@ pub const Context = struct {
         return self.cublas_handles[d][s];
     }
 
-    /// Ports `ggml_backend_cuda_context`'s per-device `pool` (common.cuh:1524 @5266f24da).
+    /// Ports `ggml_backend_cuda_context`'s per-device `pool` (common.cuh:1563 @b29c606e2).
     pub fn poolFor(self: *Context, device: c_int) *Pool {
         const p = &self.pools[@intCast(device)][@intCast(self.curr_stream_no)];
         if (p.* == null) p.* = newPoolForDevice(device);
         return p.*.?;
     }
 
-    /// Ports `ggml_backend_cuda_context`'s argument-free `pool` (common.cuh:1531 @5266f24da).
+    /// Ports `ggml_backend_cuda_context`'s argument-free `pool` (common.cuh:1570 @b29c606e2).
     pub fn pool(self: *Context) *Pool {
         return self.poolFor(self.device);
     }
@@ -1121,7 +1128,7 @@ pub const Context = struct {
 };
 
 /// Ports `ggml_cuda_lock`, `ggml_cuda_lock_cv` and `ggml_cuda_lock_counter`
-/// (ggml-cuda.cu:700, 701, 702 @5266f24da): destroying a cuBLAS handle while a graph
+/// (ggml-cuda.cu:697, 698, 699 @b29c606e2): destroying a cuBLAS handle while a graph
 /// is being captured in another thread can be a CUDA error, so the context
 /// destructor waits until no capture is in progress.
 pub const lock = struct {
@@ -1153,7 +1160,7 @@ pub const lock = struct {
     }
 };
 
-/// Ports `ggml_cuda_mm_fusion_args_host` (common.cuh:1536 @5266f24da).
+/// Ports `ggml_cuda_mm_fusion_args_host` (common.cuh:1575 @b29c606e2).
 /// `glu_limit` is `GGML_GLU_OP_SWIGLU_CLAMP`'s limit, op_params slot 3.
 pub const MmFusionArgsHost = struct {
     x_bias: ?*const Tensor = null,
@@ -1165,7 +1172,7 @@ pub const MmFusionArgsHost = struct {
     glu_limit: f32 = 0.0,
 };
 
-/// Ports `ggml_cuda_mm_fusion_args_device` (common.cuh:1545 @5266f24da).
+/// Ports `ggml_cuda_mm_fusion_args_device` (common.cuh:1584 @b29c606e2).
 /// Passed to kernels by value, so its layout is the kernel's: the `float`
 /// follows the 4-byte enum, and the struct stays 48 bytes.
 pub const MmFusionArgsDevice = extern struct {
@@ -1182,7 +1189,7 @@ pub const MmFusionArgsDevice = extern struct {
 // Type traits
 
 /// Ports the `QR*` and `QI*` constants of `ggml-common.h`'s CUDA arm, from
-/// `QR1_0` (ggml-common.h:97 @5266f24da) to the arm's `#endif`: values per quantized unit (`qr`) and
+/// `QR1_0` (ggml-common.h:97 @b29c606e2) to the arm's `#endif`: values per quantized unit (`qr`) and
 /// 32-bit integers per block (`qi`). `ggml_c` is translated with
 /// `GGML_COMMON_DECL_C`, which leaves them out.
 pub const q = struct {
@@ -1238,8 +1245,10 @@ pub const q = struct {
     pub const QI3_S = c.QK_K / (4 * QR3_S);
 };
 
-/// Ports `ggml_cuda_type_traits` (common.cuh:967 @5266f24da): `qk`, `qr`
+/// Ports `ggml_cuda_type_traits` (common.cuh:982 @b29c606e2): `qk`, `qr`
 /// and `qi` for each type that has a specialisation. `F16` has no `qi`.
+/// The specialisations' `bs`, the block size in bytes, is left out: only
+/// device code reads it (`mul_mat_vec_q`'s DGX Spark prefetch).
 pub const TypeTraits = struct { qk: comptime_int, qr: comptime_int, qi: comptime_int };
 
 pub fn typeTraits(comptime t: c.enum_ggml_type) TypeTraits {

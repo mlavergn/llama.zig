@@ -269,11 +269,16 @@ upstream:
 	git -C $(ROOT)/llama.cpp archive HEAD | tar -x -C $(B)/upstream
 	cd $(B)/upstream && PATH="$(CMAKE_BIN):$$PATH" ./build-xcframework.sh > $(B)/upstream.log 2>&1 \
 	    || { tail -30 $(B)/upstream.log; exit 1; }
+	git -C $(ROOT)/llama.cpp rev-parse HEAD > $(B)/upstream/COMMIT
 	@ls -d $(UPSTREAM)
 
 compat:
 	@printf '\n== compat: ours against upstream ==\n'
 	@test -d $(UPSTREAM) || { echo "FAIL: no $(UPSTREAM) -- run 'make upstream'"; exit 1; }
+	@# A build at an older pin is a different upstream: the headers differ
+	@# by the sync, and compat would report the version gap as ours.
+	@test "$$(cat $(B)/upstream/COMMIT 2>/dev/null)" = "$$(git -C $(ROOT)/llama.cpp rev-parse HEAD)" \
+	    || { echo "FAIL: $(UPSTREAM) is not at llama.cpp's HEAD -- run 'make upstream'"; exit 1; }
 	./verify.sh compat $(XCF) $(UPSTREAM)
 
 # Every structural gate, fed an input with one fault injected.
@@ -357,7 +362,9 @@ negative-compat:
 DRIVER_CPUS := apple_m1 apple_a7
 ref-driver: $(addprefix $(B)/test/driver-,$(DRIVER_CPUS))
 
-$(B)/test/driver-%: test/driver.c
+# build/upstream.zig names the pin: a driver built at an older release is a
+# different reference, and the smoke would report the version gap as a port bug.
+$(B)/test/driver-%: test/driver.c $(ROOT)/build/upstream.zig
 	@printf '\n== reference driver for %s (zig build reference -Dblas -Dcpu=%s) ==\n' $* $*
 	cd $(ROOT) && $(HOST_ZIG) build reference --release=fast -Dblas -Dcpu=$* --prefix $(B)/ref-$*
 	mkdir -p $(B)/test

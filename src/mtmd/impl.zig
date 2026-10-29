@@ -5,7 +5,7 @@
 //!
 //! Ports the parts of `llama.cpp/tools/mtmd/clip-impl.h` and
 //! `llama.cpp/tools/mtmd/clip.h` that are not name tables (those are
-//! `names.zig`, generated) at v0.4.0 (`5266f24da`). Each declaration names
+//! `names.zig`, generated) at v0.4.1 (`b29c606e2`). Each declaration names
 //! what it ports and the line it began at.
 //!
 //! # One C namespace
@@ -47,7 +47,7 @@ pub fn abortUncaught(comptime kind: [*:0]const u8, what_: [*:0]const u8) noretur
     std.process.abort();
 }
 
-/// Ports `clip_image_size` (clip.h:17 @5266f24da).
+/// Ports `clip_image_size` (clip.h:17 @b29c606e2).
 pub const ImageSize = extern struct {
     width: c_int = 0,
     height: c_int = 0,
@@ -64,16 +64,16 @@ pub const ImageSize = extern struct {
     }
 };
 
-/// Ports `clip_modality` (clip.h:37 @5266f24da).
+/// Ports `clip_modality` (clip.h:37 @b29c606e2).
 pub const Modality = enum(c_int) { vision, audio, gen_audio };
 
-/// Ports `clip_flash_attn_type` (clip.h:43 @5266f24da).
+/// Ports `clip_flash_attn_type` (clip.h:43 @b29c606e2).
 pub const FlashAttnType = enum(c_int) { auto = -1, disabled = 0, enabled = 1 };
 
-/// Ports `clip_gen_process_type` (clip.h:90 @5266f24da).
+/// Ports `clip_gen_process_type` (clip.h:90 @b29c606e2).
 pub const GenProcessType = enum(c_int) { unknown, gen_code, gen_wav };
 
-/// Ports `clip_image_u8` (clip-impl.h:584 @5266f24da): RGB, eight bits a
+/// Ports `clip_image_u8` (clip-impl.h:584 @b29c606e2): RGB, eight bits a
 /// channel. An empty buffer marks a placeholder, which reads as black and
 /// ignores writes.
 pub const ImageU8 = struct {
@@ -141,7 +141,7 @@ pub const ImageU8 = struct {
     }
 };
 
-/// Ports `anyres_info` (clip-impl.h:670 @5266f24da), a member of `clip_image_f32`.
+/// Ports `anyres_info` (clip-impl.h:670 @b29c606e2), a member of `clip_image_f32`.
 pub const AnyresInfo = struct {
     grid_x: c_int = 0, // tiles per row, 0 means the image is not tiled
     grid_y: c_int = 0,
@@ -153,7 +153,7 @@ pub const AnyresInfo = struct {
     }
 };
 
-/// Ports `clip_image_f32` (clip-impl.h:657 @5266f24da). Images are RGB
+/// Ports `clip_image_f32` (clip-impl.h:657 @b29c606e2). Images are RGB
 /// interleaved; audio uses one channel, `nx` frames by `ny` mel bins.
 pub const ImageF32 = struct {
     /// marks the global view in e.g. DeepSeek-OCR models
@@ -210,7 +210,7 @@ pub const ImageF32 = struct {
         try self.buf.appendSlice(gpa, new_buf);
     }
 
-    /// Ports `from_u8` (clip-impl.h:707 @5266f24da), a member of `clip_image_f32`.
+    /// Ports `from_u8` (clip-impl.h:707 @b29c606e2), a member of `clip_image_f32`.
     pub fn fromU8(self: *ImageF32, img: *const ImageU8) !void {
         const size = img.getSize();
         self.nx_ = size.width;
@@ -231,7 +231,7 @@ pub const ImageF32 = struct {
         return @as(usize, @intCast(self.nx_)) * @as(usize, @intCast(self.ny_));
     }
 
-    /// Ports `normalize` (clip-impl.h:726 @5266f24da), a member of `clip_image_f32`.
+    /// Ports `normalize` (clip-impl.h:726 @b29c606e2), a member of `clip_image_f32`.
     pub fn normalize(self: *ImageF32, mean: *const [3]f32, std_: *const [3]f32) void {
         if (self.isPlaceholder()) return; // no-op
         const b = self.buf.items;
@@ -251,7 +251,7 @@ pub const ImageF32 = struct {
     }
 };
 
-/// Ports `clip_anyres_unpad` (clip-impl.h:765 @5266f24da): the token area
+/// Ports `clip_anyres_unpad` (clip-impl.h:765 @b29c606e2): the token area
 /// kept after removing the padding the anyres resize added.
 pub fn anyresUnpad(cur_w: c_int, cur_h: c_int, orig_w: c_int, orig_h: c_int) struct { off_x: c_int, off_y: c_int, out_w: c_int, out_h: c_int } {
     var r: @TypeOf(anyresUnpad(0, 0, 1, 1)) = .{ .off_x = 0, .off_y = 0, .out_w = cur_w, .out_h = cur_h };
@@ -269,7 +269,7 @@ pub fn anyresUnpad(cur_w: c_int, cur_h: c_int, orig_w: c_int, orig_h: c_int) str
     return r;
 }
 
-/// Ports `dsv4_block_layout` (clip-impl.h:783 @5266f24da): deepseek4v's
+/// Ports `dsv4_block_layout` (clip-impl.h:783 @b29c606e2): deepseek4v's
 /// layout of the LLM token block built from the aligner grid.
 pub const Dsv4BlockLayout = struct {
     rows: c_int, // grid rows, padded to an even count
@@ -278,7 +278,7 @@ pub const Dsv4BlockLayout = struct {
     n_out: c_int, // total block size, including lead pads and the start/end sentinels
 };
 
-/// Ports `dsv4_get_block_layout` (clip-impl.h:789 @5266f24da).
+/// Ports `dsv4_get_block_layout` (clip-impl.h:789 @b29c606e2).
 pub fn dsv4GetBlockLayout(n_llm_w: c_int, n_llm_h: c_int, lead_pad: c_int) Dsv4BlockLayout {
     var bl: Dsv4BlockLayout = undefined;
     bl.rows = n_llm_h + @rem(n_llm_h, 2);
@@ -288,7 +288,7 @@ pub fn dsv4GetBlockLayout(n_llm_w: c_int, n_llm_h: c_int, lead_pad: c_int) Dsv4B
     return bl;
 }
 
-/// Ports `clip_image_f32_batch` (clip-impl.h:854 @5266f24da).
+/// Ports `clip_image_f32_batch` (clip-impl.h:854 @b29c606e2).
 pub const ImageF32Batch = struct {
     entries: std.ArrayList(ImageF32) = .empty,
     is_audio: bool = false,
@@ -309,7 +309,7 @@ pub const ImageF32Batch = struct {
 // -----------------------------------------------------------------------------
 // logging
 
-/// Ports `clip_log_callback_default` (clip-impl.h:802 @5266f24da).
+/// Ports `clip_log_callback_default` (clip-impl.h:802 @b29c606e2).
 pub fn logCallbackDefault(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = level;
     _ = user_data;
@@ -318,8 +318,8 @@ pub fn logCallbackDefault(level: c.enum_ggml_log_level, text: [*c]const u8, user
     _ = fflush(stderr_);
 }
 
-/// Ports `clip_logger_state` (clip-impl.h:809 @5266f24da) and
-/// `g_logger_state` (mtmd/clip.cpp:30 @5266f24da).
+/// Ports `clip_logger_state` (clip-impl.h:809 @b29c606e2) and
+/// `g_logger_state` (mtmd/clip.cpp:30 @b29c606e2).
 pub const LoggerState = struct {
     log_callback: c.ggml_log_callback = logCallbackDefault,
     log_callback_user_data: ?*anyopaque = null,
@@ -341,7 +341,7 @@ pub fn cStderr() ?*anyopaque {
     return @extern(*?*anyopaque, .{ .name = "stderr" }).*;
 }
 
-/// Ports `clip_log_internal_v` (clip-impl.h:816 @5266f24da): format into
+/// Ports `clip_log_internal_v` (clip-impl.h:816 @b29c606e2): format into
 /// 128 bytes, or a heap buffer when that is too short.
 pub fn logInternal(level: c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
     var buffer: [128]u8 = undefined;
@@ -359,27 +359,27 @@ pub fn logInternal(level: c.enum_ggml_log_level, comptime fmt: [*:0]const u8, ar
     }
 }
 
-/// `LOG_DBG` and `LOG_TRC` (clip-impl.h:844, 843 @5266f24da).
+/// `LOG_DBG` and `LOG_TRC` (clip-impl.h:844, 843 @b29c606e2).
 pub fn logDbg(comptime fmt: [*:0]const u8, args: anytype) void {
     logInternal(c.GGML_LOG_LEVEL_DEBUG, fmt, args);
 }
 
-/// `LOG_INF` (clip-impl.h:845 @5266f24da).
+/// `LOG_INF` (clip-impl.h:845 @b29c606e2).
 pub fn logInf(comptime fmt: [*:0]const u8, args: anytype) void {
     logInternal(c.GGML_LOG_LEVEL_INFO, fmt, args);
 }
 
-/// `LOG_WRN` (clip-impl.h:846 @5266f24da).
+/// `LOG_WRN` (clip-impl.h:846 @b29c606e2).
 pub fn logWrn(comptime fmt: [*:0]const u8, args: anytype) void {
     logInternal(c.GGML_LOG_LEVEL_WARN, fmt, args);
 }
 
-/// `LOG_ERR` (clip-impl.h:847 @5266f24da).
+/// `LOG_ERR` (clip-impl.h:847 @b29c606e2).
 pub fn logErr(comptime fmt: [*:0]const u8, args: anytype) void {
     logInternal(c.GGML_LOG_LEVEL_ERROR, fmt, args);
 }
 
-/// `LOG_CNT` (clip-impl.h:848 @5266f24da).
+/// `LOG_CNT` (clip-impl.h:848 @b29c606e2).
 pub fn logCnt(comptime fmt: [*:0]const u8, args: anytype) void {
     logInternal(c.GGML_LOG_LEVEL_CONT, fmt, args);
 }
@@ -387,7 +387,7 @@ pub fn logCnt(comptime fmt: [*:0]const u8, args: anytype) void {
 // -----------------------------------------------------------------------------
 // string utilities
 
-/// Ports `string_format` (clip-impl.h:897 @5266f24da), with the C's
+/// Ports `string_format` (clip-impl.h:897 @b29c606e2), with the C's
 /// `snprintf`. The caller owns the string.
 pub fn stringFormat(a: std.mem.Allocator, comptime fmt: [*:0]const u8, args: anytype) ![:0]u8 {
     const size = @call(.auto, snprintf, .{ @as(?[*]u8, null), 0, fmt } ++ args);
@@ -397,7 +397,7 @@ pub fn stringFormat(a: std.mem.Allocator, comptime fmt: [*:0]const u8, args: any
     return buf;
 }
 
-/// Ports `string_replace_all` (clip-impl.h:912 @5266f24da).
+/// Ports `string_replace_all` (clip-impl.h:912 @b29c606e2).
 pub fn stringReplaceAll(a: std.mem.Allocator, s: []const u8, search: []const u8, replace: []const u8) ![]u8 {
     if (search.len == 0) return a.dupe(u8, s);
     var out: std.ArrayList(u8) = .empty;
@@ -411,7 +411,7 @@ pub fn stringReplaceAll(a: std.mem.Allocator, s: []const u8, search: []const u8,
     return out.toOwnedSlice(a);
 }
 
-/// Ports `string_split_str` (clip-impl.h:930 @5266f24da).
+/// Ports `string_split_str` (clip-impl.h:930 @b29c606e2).
 pub fn stringSplitStr(a: std.mem.Allocator, s: []const u8, delimiter: []const u8) !std.ArrayList([]const u8) {
     var tokens: std.ArrayList([]const u8) = .empty;
     var rest = s;
@@ -426,7 +426,7 @@ pub fn stringSplitStr(a: std.mem.Allocator, s: []const u8, delimiter: []const u8
 // -----------------------------------------------------------------------------
 // gguf utilities
 
-/// Ports `gguf_data_to_str` (clip-impl.h:960 @5266f24da): `std::to_string`
+/// Ports `gguf_data_to_str` (clip-impl.h:960 @b29c606e2): `std::to_string`
 /// per type, `%f` for the floats.
 pub fn ggufDataToStr(a: std.mem.Allocator, t: c.enum_gguf_type, data: ?*const anyopaque, i: usize) ![:0]u8 {
     return switch (t) {
@@ -445,7 +445,7 @@ pub fn ggufDataToStr(a: std.mem.Allocator, t: c.enum_gguf_type, data: ?*const an
     };
 }
 
-/// Ports `gguf_kv_to_str` (clip-impl.h:977 @5266f24da).
+/// Ports `gguf_kv_to_str` (clip-impl.h:977 @b29c606e2).
 pub fn ggufKvToStr(a: std.mem.Allocator, ctx_gguf: ?*const c.gguf_context, i: i64) ![:0]u8 {
     const t = c.gguf_get_kv_type(ctx_gguf, i);
     switch (t) {

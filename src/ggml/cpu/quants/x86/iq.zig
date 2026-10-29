@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.4.0,
-//! `5266f24da`), the `__AVX2__` arms. Each function names the C it replaces
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.4.1,
+//! `b29c606e2`), the `__AVX2__` arms. Each function names the C it replaces
 //! and the line it began at.
 //!
 //! # The grids are gathered with `set`, not loaded
@@ -38,7 +38,7 @@ const c = impl.c;
 const f = common.f;
 const as = common.as;
 
-/// Ports `keven_signs_q2xs` (arch/x86/quants.c:2624 @5266f24da), read as
+/// Ports `keven_signs_q2xs` (arch/x86/quants.c:2624 @b29c606e2), read as
 /// `uint64_t *`.
 ///
 /// Entry `i` has `-1` in byte `j` where bit `j` of `i` is set, for `j` in
@@ -83,7 +83,7 @@ inline fn oddScale(ls: u32) avx.m256i {
     return avx.mm256_set1_epi16(@intCast(2 * ls + 1));
 }
 
-/// Ports `ggml_vec_dot_iq2_xxs_q8_K` (arch/x86/quants.c:2660 @5266f24da),
+/// Ports `ggml_vec_dot_iq2_xxs_q8_K` (arch/x86/quants.c:2660 @b29c606e2),
 /// the `__AVX2__` arm.
 pub export fn ggml_vec_dot_iq2_xxs_q8_K(
     n: c_int,
@@ -147,7 +147,7 @@ pub export fn ggml_vec_dot_iq2_xxs_q8_K(
     s[0] = 0.125 * common.hsum_float_8(accumf);
 }
 
-/// Ports `ggml_vec_dot_iq2_xs_q8_K` (arch/x86/quants.c:2778 @5266f24da), the
+/// Ports `ggml_vec_dot_iq2_xs_q8_K` (arch/x86/quants.c:2778 @b29c606e2), the
 /// `__AVX2__` arm.
 ///
 /// Nine-bit grid indices and seven sign bits per `u16`; the eighth sign is
@@ -289,7 +289,7 @@ pub export fn ggml_vec_dot_iq2_xs_q8_K(
 
 /// The two masks `ggml_vec_dot_iq2_s_q8_K` and `ggml_vec_dot_iq3_s_q8_K`
 /// spread sixteen sign bits to bytes with (arch/x86/quants.c:3075, 3384
-/// @5266f24da): the first picks the byte holding each weight's bit, the
+/// @b29c606e2): the first picks the byte holding each weight's bit, the
 /// second the bit within it.
 const k_mask1 = [32]u8{
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
@@ -309,7 +309,7 @@ inline fn applySigns(q8: avx.m256i, bits: u32, mask1: avx.m256i, mask2: avx.m256
     return avx.mm256_sub_epi8(avx.mm256_xor_si256(s2, q8), s2);
 }
 
-/// Ports `ggml_vec_dot_iq2_s_q8_K` (arch/x86/quants.c:3075 @5266f24da), the
+/// Ports `ggml_vec_dot_iq2_s_q8_K` (arch/x86/quants.c:3075 @b29c606e2), the
 /// `__AVX2__` arm.
 pub export fn ggml_vec_dot_iq2_s_q8_K(
     n: c_int,
@@ -394,7 +394,7 @@ pub export fn ggml_vec_dot_iq2_s_q8_K(
     s[0] = 0.125 * common.hsum_float_8(accumf);
 }
 
-/// Ports `ggml_vec_dot_iq3_xxs_q8_K` (arch/x86/quants.c:3260 @5266f24da),
+/// Ports `ggml_vec_dot_iq3_xxs_q8_K` (arch/x86/quants.c:3260 @b29c606e2),
 /// the `__AVX2__` arm.
 pub export fn ggml_vec_dot_iq3_xxs_q8_K(
     n: c_int,
@@ -460,7 +460,7 @@ pub export fn ggml_vec_dot_iq3_xxs_q8_K(
     s[0] = 0.25 * common.hsum_float_8(accumf);
 }
 
-/// Ports `ggml_vec_dot_iq3_s_q8_K` (arch/x86/quants.c:3384 @5266f24da), the
+/// Ports `ggml_vec_dot_iq3_s_q8_K` (arch/x86/quants.c:3384 @b29c606e2), the
 /// `__AVX2__` arm.
 ///
 /// Nine-bit indices: eight from `qs` and the ninth from `qh`, moved into
@@ -543,7 +543,7 @@ pub export fn ggml_vec_dot_iq3_s_q8_K(
     s[0] = common.hsum_float_8(accumf);
 }
 
-/// Ports `ggml_vec_dot_iq1_s_q8_K` (arch/x86/quants.c:3594 @5266f24da), the
+/// Ports `ggml_vec_dot_iq1_s_q8_K` (arch/x86/quants.c:3594 @b29c606e2), the
 /// `__AVX2__` arm with its `__BMI2__` index assembly.
 ///
 /// The grid holds signed bytes, so `mul_add_epi8`'s sign trick takes them.
@@ -615,7 +615,7 @@ pub export fn ggml_vec_dot_iq1_s_q8_K(
     s[0] = @mulAdd(f32, c.IQ1S_DELTA, accum1, common.hsum_float_8(accum));
 }
 
-/// Ports `ggml_vec_dot_iq1_m_q8_K` (arch/x86/quants.c:3713 @5266f24da), the
+/// Ports `ggml_vec_dot_iq1_m_q8_K` (arch/x86/quants.c:3713 @b29c606e2), the
 /// `__AVX2__` arm with its `__BMI2__` index and delta assembly.
 ///
 /// The super-block's fp16 scale is spread across the top nibbles of the four
@@ -723,7 +723,7 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
     s[0] = @mulAdd(f32, c.IQ1M_DELTA, common.hsum_float_8(accum2), common.hsum_float_8(accum1));
 }
 
-/// Ports `ggml_vec_dot_iq4_xs_q8_K` (arch/x86/quants.c:4004 @5266f24da), the
+/// Ports `ggml_vec_dot_iq4_xs_q8_K` (arch/x86/quants.c:4004 @b29c606e2), the
 /// `__AVX2__` arm.
 ///
 /// `iq4_nl`'s codebook in super-blocks, with 6-bit signed group scales split

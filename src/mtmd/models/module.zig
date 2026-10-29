@@ -1,6 +1,6 @@
 //! The per-model encoder graphs (`llama.cpp/tools/mtmd/models/`), and
-//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.4.0,
-//! `5266f24da`), which picks one by projector type.
+//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.4.1,
+//! `b29c606e2`), which picks one by projector type.
 //!
 //! Each file here ports the `models/*.cpp` of the same name (hyphens become
 //! underscores) and exposes `build(g, params)`: the class's `build()`, run
@@ -76,7 +76,7 @@ pub const Built = struct {
     }
 };
 
-/// The `support_batch()` override of each builder (models.h @5266f24da),
+/// The `support_batch()` override of each builder (models.h @b29c606e2),
 /// or null for a projector `clip_get_graph_builder` has no builder for.
 pub fn supportBatch(t: names.ProjectorType) ?bool {
     return switch (t) {
@@ -128,7 +128,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
     };
 }
 
-/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:930 @5266f24da) and the
+/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:930 @b29c606e2) and the
 /// builder's `build()`.
 pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*const clip.EncodeParams) clip.Error!Built {
     const img = &imgs.entries.items[0];
@@ -186,7 +186,7 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
     return .{ .gf = gf, .support_batch = supportBatch(ctx.projType()).?, .ctx0 = g.ctx0 };
 }
 
-/// Ports `c2w_state_slot` (models/qwen3tts-gen.cpp @5266f24da): a persisted
+/// Ports `c2w_state_slot` (models/qwen3tts-gen.cpp @b29c606e2): a persisted
 /// state slot of a gen-audio decoder.
 pub const StateSlot = struct {
     name: [:0]const u8,
@@ -194,7 +194,7 @@ pub const StateSlot = struct {
     ne1: i64,
 };
 
-/// Ports `list_gen_state_slots` (mtmd/clip.cpp:4408 @5266f24da). The caller
+/// Ports `list_gen_state_slots` (mtmd/clip.cpp:4408 @b29c606e2). The caller
 /// frees the slice with `freeSlots`.
 pub fn genStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod.Model) clip.Error![]StateSlot {
     return switch (model.proj_type) {

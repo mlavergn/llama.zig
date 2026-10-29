@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/internlm2.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/internlm2.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_internlm2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -19,7 +19,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_internlm2`'s `load_arch_hparams` (models/internlm2.cpp:3 @5266f24da).
+/// Ports `llama_model_internlm2`'s `load_arch_hparams` (models/internlm2.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -31,7 +31,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_internlm2`'s `load_arch_tensors` (models/internlm2.cpp:13 @5266f24da).
+/// Ports `llama_model_internlm2`'s `load_arch_tensors` (models/internlm2.cpp:13 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -57,8 +57,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_internlm2`'s `build_arch_graph` (models/internlm2.cpp:37
-/// @5266f24da) and the constructor of its `graph` (models/internlm2.cpp:41
-/// @5266f24da).
+/// @b29c606e2) and the constructor of its `graph` (models/internlm2.cpp:41
+/// @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

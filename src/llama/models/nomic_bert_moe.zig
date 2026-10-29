@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nomic-bert-moe.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_nomic_bert_moe`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/nomic-bert-moe.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_nomic_bert_moe`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`. Its graph is
 //! `llama_model_bert`'s, in `bert.zig`.
 
@@ -14,27 +14,32 @@ const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
 const graph = @import("../graph.zig");
 const bert = @import("bert.zig");
-const nomic_bert = @import("nomic_bert.zig");
 
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_nomic_bert_moe`'s `load_arch_hparams` (models/nomic-bert-moe.cpp:3 @5266f24da),
-/// whose body is `llama_model_nomic_bert`'s `load_arch_hparams` (models/nomic-bert.cpp:3 @5266f24da)
-/// line for line.
+/// Ports `llama_model_nomic_bert_moe`'s `load_arch_hparams` (models/nomic-bert-moe.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
-    return nomic_bert.loadArchHparams(self, ml, exc);
+    const meta = &ml.meta;
+    const hp = &self.hparams;
+    hp.f_norm_eps = (try meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
+    if (try meta.getKey(u32, .moe_every_n_layers, false, exc)) |v| hp.moe_every_n_layers = v;
+
+    self.type = switch (hp.nLayer()) {
+        12 => .@"475m",
+        else => .unknown,
+    };
 }
 
-/// Ports `llama_model_nomic_bert_moe`'s `load_arch_tensors` (models/nomic-bert-moe.cpp:16 @5266f24da),
-/// whose body is `llama_model_bert`'s `load_arch_tensors` (models/bert.cpp:23 @5266f24da)
-/// line for line, its checks on the architecture included.
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
-    return bert.loadArchTensors(self, ml, exc);
+/// Ports `llama_model_nomic_bert_moe`'s `load_arch_tensors` (models/nomic-bert-moe.cpp:14 @b29c606e2):
+/// BERT's body without positions or classifier, with an expert layer every
+/// `moe_every_n_layers`.
+pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+    return bert.loadBertTensors(self, .{ .pos_cls = false, .moe = true, .gate = false }, exc);
 }
 
-/// Ports `llama_model_nomic_bert_moe`'s `build_arch_graph` (models/nomic-bert-moe.cpp:69 @5266f24da).
+/// Ports `llama_model_nomic_bert_moe`'s `build_arch_graph` (models/nomic-bert-moe.cpp:53 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     bert.buildGraph(model, b);
 }

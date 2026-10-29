@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.4.0 (`5266f24da`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.4.1 (`b29c606e2`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Four fused multiply-adds
@@ -48,7 +48,7 @@ const at = common.ptr;
 /// Stride as `i64`; see `common.sz`.
 const s = common.sz;
 
-/// Ports `rope_yarn_ramp` (ops.cpp:5951 @5266f24da).
+/// Ports `rope_yarn_ramp` (ops.cpp:5951 @b29c606e2).
 ///
 /// `MIN` and `MAX` are the C's ternary macros, mixing `int` literals with
 /// `float`; the comparisons happen in `float`.
@@ -64,7 +64,7 @@ fn ropeYarnRamp(low: f32, high: f32, j0: c_int) f32 {
 /// The cosine and sine `rope_yarn` writes through its two out-pointers.
 const CosSin = struct { cos: f32, sin: f32 };
 
-/// Ports `rope_yarn` (ops.cpp:5958 @5266f24da).
+/// Ports `rope_yarn` (ops.cpp:5958 @b29c606e2).
 ///
 /// YaRN algorithm based on LlamaYaRNScaledRotaryEmbedding.py from
 /// https://github.com/jquesnelle/yarn — MIT licensed. Copyright (c) 2023
@@ -95,7 +95,7 @@ fn ropeYarn(
     return .{ .cos = sc.cos * mscale, .sin = sc.sin * mscale };
 }
 
-/// Ports `ggml_rope_cache_init` (ops.cpp:5975 @5266f24da).
+/// Ports `ggml_rope_cache_init` (ops.cpp:5975 @b29c606e2).
 fn ropeCacheInit(
     theta_base: f32,
     freq_scale: f32,
@@ -123,7 +123,7 @@ fn ropeCacheInit(
     }
 }
 
-/// Ports `ggml_mrope_cache_init` (ops.cpp:5991 @5266f24da).
+/// Ports `ggml_mrope_cache_init` (ops.cpp:5991 @b29c606e2).
 fn mropeCacheInit(
     theta_base_t: f32,
     theta_base_h: f32,
@@ -205,7 +205,7 @@ fn mropeCacheInit(
     }
 }
 
-/// Ports `rotate_pairs` (ops.cpp:6063 @5266f24da).
+/// Ports `rotate_pairs` (ops.cpp:6063 @b29c606e2).
 ///
 /// Parameters:
 /// - `n`: elements to rotate, stepped two at a time.
@@ -234,7 +234,7 @@ inline fn rotatePairs(comptime T: type, n: i64, n_offset: i64, cache: [*]const f
     }
 }
 
-/// Ports `ggml_compute_forward_rope_flt` (ops.cpp:6082 @5266f24da).
+/// Ports `ggml_compute_forward_rope_flt` (ops.cpp:6082 @b29c606e2).
 ///
 /// Parameters:
 /// - `T`: `f32` or `ggml_fp16_t`.
@@ -414,7 +414,7 @@ fn ropeFlt(comptime T: type, params: *const ComputeParams, dst: *Tensor, forward
     }
 }
 
-/// Ports `ggml_compute_forward_rope` (ops.cpp:6240 @5266f24da).
+/// Ports `ggml_compute_forward_rope` (ops.cpp:6240 @b29c606e2).
 pub export fn ggml_compute_forward_rope(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -425,7 +425,7 @@ pub export fn ggml_compute_forward_rope(params: *const ComputeParams, dst: *Tens
     }
 }
 
-/// Ports `ggml_compute_forward_rope_back` (ops.cpp:6264 @5266f24da).
+/// Ports `ggml_compute_forward_rope_back` (ops.cpp:6264 @b29c606e2).
 pub export fn ggml_compute_forward_rope_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

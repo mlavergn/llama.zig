@@ -1661,6 +1661,87 @@ v0.4.1 pickup list.
 No machine has the AVX-VNNI-only or AVX-VNNI-INT8 arms of `iqp`. Both are
 compile-checked only.
 
+### Pickup for the v0.4.1 sync
+
+Upstream `v0.4.1` (`b29c606e2`). The CUDA and Vulkan host changes were
+ported on the Mac and have **never compiled against a toolkit or run**:
+CUDA could not build at all here, and Vulkan built only against a stub
+`libvulkan.dylib`. `NOTES.md`, "Upstream sync v0.4.0 → v0.4.1", has what
+each one changed.
+
+**GB10 (`spark-dbff`, `~/src/llama.zig`)**
+
+1. **CUDA build.** `zig build reference cuda-ref --release=fast --prefix
+   zig-out/cuda-port`, the same with `-Dcuda-port=false --prefix
+   zig-out/cuda-upstream`, and `zig build cli`. This is the changed Zig's
+   first compile. Watch three things:
+   - `fattn.zig`'s comptime `faCompiled`/`getFattnVecCase` unroll;
+   - `comptimePrint` of `config.cuda_fa_quants`;
+   - nvcc accepting `-DGGML_CUDA_FA_QUANTS="all"` as one quoted argument.
+
+   Every fatbin rebuilds, because device code changed in fattn-mma-f16,
+   fattn-vec, mmf, mmid, mmvq and vecdotq. The host names no new kernel key,
+   so the table must resolve unchanged.
+2. **CUDA gates** at the default `-Dcuda-fa-quants=all`:
+   - `cuda-ops-diff` and `cuda-node-diff`, per node **and** fused;
+   - `cuda-backend-diff`, where both sides now report `FA_QUANTS=all`;
+   - `cuda-parity-cli`;
+   - re-run `gen-mmq-config` and `gen-fattn-config`: no NVIDIA row may change.
+
+   New upstream cases to look for:
+   - `FLASH_ATTN_EXT` 256/256 F16 at gqa {6,2,4,12}, KV 512 and 4096 (mma
+     DKQ=256, stream-k);
+   - the 576/512 Q8_0 cases at gqa {8,1};
+   - `MUL_MAT_ID` token-tile cases, n = 1…49 for Q4_K, IQ2_XS and F16, plus
+     the case where experts get no rows (mmq `ncols_opt`);
+   - `GET_ROWS` over a view of src0.
+3. **CUDA fallback path.** Rebuild both sides with upstream's default,
+   `-Dcuda-fa-quants="q4_0-q4_0;q8_0-q8_0;f16-f16;bf16-bf16"`. Then run
+   `cuda-ops-diff` and `cuda-backend-diff`: the mixed K/V `FLASH_ATTN_EXT`
+   cases take the f16-f16 instance, including `get_alloc_size`'s
+   `f16_fallback` term. Inject one fault: drop `f16_fallback` from
+   `need_f16_K`.
+4. **Vulkan.** First `make vk-builds`, then on all four arms:
+   - **`vk-repro`.** The shaders moved a lot: one quant matmul shader with
+     an A-type spec constant, flash-attention dequant, argsort, rms_norm,
+     unary and fill. Check whether any shader besides `tri_f16` is now
+     non-reproducible under `glslc -O`.
+   - **`vk-push-layout`.** It already passes on the Mac.
+   - **`vk-backend-diff`.** Vulkan now calls `add_alloc_dep`, so the
+     `patterns` graph prints those lines on both sides, and the new
+     `fusions_041` graph's order must match.
+   - **`vk-ops-diff`**, on these cases:
+     - TQ1_0 `MUL_MAT`, `MUL_MAT_ID` and `GET_ROWS`;
+     - IQ4_XS at n=1;
+     - `dsv4_hc_comb/pre/post`;
+     - `GELU`/`SIGMOID`/`SILU`/`SOFTPLUS` `_MUL`;
+     - `RMS_NORM_MUL_ADD`, and `rms_norm_mul_rope` with mul and rope off
+       (the RMS_NORM+VIEW+SET_ROWS fusion);
+     - ROPE+SET_ROWS under IMROPE;
+     - `GET_ROWS` at a row offset (misaligned descriptors);
+     - F16 `MUL_MAT` 1×512×2048 and 1×509×2051 (swapped inputs), and
+       31/32×509×2051/2112 (split-k);
+     - every quantized `MUL_MAT` on the KHR coopmat arm, which now converts
+       B to f16;
+     - coopmat2 on the unified shader.
+   - **`vk-node-diff`**, per node and fused. A Qwen3.5 decode should now hit
+     RMS_NORM_MUL_ADD and UNARY+MUL.
+   - **`vk-parity-cli`**, expecting 6/6. The NVIDIA submit mutex is live on
+     this machine.
+5. **Linux arm64 CPU set:** `ops-diff`, `repack-diff`, `node-diff`,
+   `parity-port --cpu`, `host-arms-diff`, `quant-diff` and `tools-diff` (new
+   `--log-jsonl` and removed-flag cases).
+
+**DESKTOP-BR7J5S9 (x86_64_v3)**
+
+6. `make x86-gates` and `win-host-diffs`. No x86 kernel changed in this
+   sync; these confirm the common code.
+
+**JWHLPTOP (AVX-512)**
+
+7. v0.4.0's items 8 and 9 (`x86_64_v4` and `tigerlake`), run at v0.4.1.
+   That clears both syncs' AVX-512 pickups at once.
+
 ---
 
 ## Risk register

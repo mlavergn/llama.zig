@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ported from the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/fattn-common.cuh` at v0.4.0 (`5266f24da`),
+//! `llama.cpp/ggml/src/ggml-cuda/fattn-common.cuh` at v0.4.1 (`b29c606e2`),
 //! plus `amd_mfma_available` and `amd_wmma_available` from
 //! `llama.cpp/ggml/src/ggml-cuda/common.cuh`. The kernels --
 //! `flash_attn_mask_to_KV_max`, `flash_attn_stream_k_fixup_uniform`,
@@ -38,7 +38,7 @@ extern fn powf(x: f32, y: f32) f32;
 extern fn log2f(x: f32) f32;
 extern fn floorf(x: f32) f32;
 
-/// Ports `FATTN_KQ_STRIDE` (fattn-common.cuh:9 @5266f24da).
+/// Ports `FATTN_KQ_STRIDE` (fattn-common.cuh:9 @b29c606e2).
 pub const kq_stride = 256;
 
 /// `sizeof(half)`.
@@ -54,25 +54,36 @@ const Float2 = extern struct { x: f32, y: f32 };
 // -----------------------------------------------------------------------------
 // AMD predicates
 
-/// `GGML_CUDA_CC_CDNA1` (common.cuh:72 @5266f24da).
+/// `GGML_CUDA_CC_GFX909` (common.cuh:72 @b29c606e2), a GCN APU.
+const cc_gfx909 = common.cc.offset_amd + 0x909;
+/// `GGML_CUDA_CC_GFX90C` (common.cuh:73 @b29c606e2), a GCN APU.
+const cc_gfx90c = common.cc.offset_amd + 0x90c;
+/// `GGML_CUDA_CC_CDNA1` (common.cuh:74 @b29c606e2).
 const cc_cdna1 = common.cc.offset_amd + 0x908;
-/// `GGML_CUDA_CC_RDNA1` (common.cuh:78 @5266f24da).
+/// `GGML_CUDA_CC_RDNA1` (common.cuh:80 @b29c606e2).
 const cc_rdna1 = common.cc.offset_amd + 0x1010;
-/// `GGML_CUDA_CC_RDNA3` (common.cuh:80 @5266f24da).
+/// `GGML_CUDA_CC_RDNA3` (common.cuh:82 @b29c606e2).
 const cc_rdna3 = common.cc.offset_amd + 0x1100;
-/// `GGML_CUDA_CC_RDNA3_5` (common.cuh:81 @5266f24da).
+/// `GGML_CUDA_CC_RDNA3_5` (common.cuh:83 @b29c606e2).
 const cc_rdna3_5 = common.cc.offset_amd + 0x1150;
-/// `GGML_CUDA_CC_RDNA4` (common.cuh:82 @5266f24da).
+/// `GGML_CUDA_CC_RDNA4` (common.cuh:84 @b29c606e2).
 const cc_rdna4 = common.cc.offset_amd + 0x1200;
 
-/// Ports `amd_mfma_available` (common.cuh:333 @5266f24da), the
-/// `!GGML_HIP_NO_MMQ_MFMA` arm: `GGML_CUDA_CC_IS_CDNA(cc)`. False for every
-/// CUDA compute capability.
-pub fn amdMfmaAvailable(x: c_int) bool {
-    return x >= cc_cdna1 and x < cc_rdna1;
+/// Ports `GGML_CUDA_CC_IS_GCN_APU` (common.cuh:94 @b29c606e2): the two GCN
+/// APUs whose compute capabilities fall inside the CDNA range.
+fn isGcnApu(x: c_int) bool {
+    return x == cc_gfx909 or x == cc_gfx90c;
 }
 
-/// Ports `amd_wmma_available` (common.cuh:341 @5266f24da):
+/// Ports `amd_mfma_available` (common.cuh:348 @b29c606e2), the
+/// `!GGML_HIP_NO_MMQ_MFMA` arm, which is the CDNA test: ports
+/// `GGML_CUDA_CC_IS_CDNA` (common.cuh:96 @b29c606e2). False for every CUDA
+/// compute capability.
+pub fn amdMfmaAvailable(x: c_int) bool {
+    return !isGcnApu(x) and x >= cc_cdna1 and x < cc_rdna1;
+}
+
+/// Ports `amd_wmma_available` (common.cuh:356 @b29c606e2):
 /// `GGML_CUDA_CC_IS_RDNA4(cc) || GGML_CUDA_CC_IS_RDNA3(cc)`. False for every
 /// CUDA compute capability.
 pub fn amdWmmaAvailable(x: c_int) bool {
@@ -112,14 +123,14 @@ fn u32Of(x: anytype) u32 {
 // -----------------------------------------------------------------------------
 // F16 scratch
 
-/// Ports `ggml_cuda_flash_attn_ext_f16_extra_data` (fattn-common.cuh:47 @5266f24da).
+/// Ports `ggml_cuda_flash_attn_ext_f16_extra_data` (fattn-common.cuh:47 @b29c606e2).
 pub const F16ExtraData = struct {
     K: usize = 0,
     V: usize = 0,
     end: usize = 0,
 };
 
-/// Ports `ggml_cuda_flash_attn_ext_get_f16_extra_data` (fattn-common.cuh:53 @5266f24da):
+/// Ports `ggml_cuda_flash_attn_ext_get_f16_extra_data` (fattn-common.cuh:53 @b29c606e2):
 /// where in `dst`'s allocation, past `dst`'s own bytes, the F16 copies of K
 /// and V go. Computed from `dst->data`, so the buffer type's size (asked
 /// with whatever `data` the tensor has then) and the launch agree only
@@ -207,7 +218,24 @@ pub const LaunchArgs = struct {
     warp_size: c_int = common.warp_size,
 };
 
-/// Ports `launch_fattn` (fattn-common.cuh:976 @5266f24da).
+/// Ports `should_use_stream_k` (fattn-common.cuh:1136 @b29c606e2), the
+/// lambda in `launch_fattn`: whether a stream-k kernel takes the stream-k
+/// decomposition or whole tiles, which for short contexts can be faster
+/// because it skips the fixup.
+fn shouldUseStreamK(cc: c_int, ntiles_dst: c_int, max_blocks: c_int, DKQ: c_int) bool {
+    const tiles_nwaves = @divTrunc(ntiles_dst + max_blocks - 1, max_blocks);
+    const tiles_efficiency_percent = @divTrunc(100 * ntiles_dst, max_blocks * tiles_nwaves);
+
+    if (common.cc.isNvidia(cc) and cc >= common.cc.ada_lovelace) {
+        return true;
+    }
+    if (amdWmmaAvailable(cc) and DKQ == 64) {
+        return true; // TODO better configuration
+    }
+    return tiles_efficiency_percent < 75;
+}
+
+/// Ports `launch_fattn` (fattn-common.cuh:976 @b29c606e2).
 ///
 /// Parameters:
 /// - `library`: the translation unit the calling case is instantiated in;
@@ -385,12 +413,8 @@ pub fn launchFattn(
 
     var blocks_num: kernels.Dim3 = .{};
     if (a.stream_k) {
-        // For short contexts it can be faster to have the SMs work on whole tiles because this lets us skip the fixup.
         const max_blocks = max_blocks_per_sm * nsm;
-        const tiles_nwaves = @divTrunc(ntiles_dst + max_blocks - 1, max_blocks);
-        const tiles_efficiency_percent = @divTrunc(100 * ntiles_dst, max_blocks * tiles_nwaves);
-
-        const use_stream_k = cc >= common.cc.ada_lovelace or amdWmmaAvailable(cc) or tiles_efficiency_percent < 75;
+        const use_stream_k = shouldUseStreamK(cc, ntiles_dst, max_blocks, i32Of(Q.ne[0]));
 
         blocks_num.x = u32Of(ntiles_dst);
         blocks_num.y = 1;

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/tools/cvector-generator/cvector-generator.cpp`,
-//! `pca.hpp` and `mean.hpp` at v0.4.0 (`5266f24da`). Each declaration names
+//! `pca.hpp` and `mean.hpp` at v0.4.1 (`b29c606e2`). Each declaration names
 //! the C++ it replaces and the line it began at.
 //!
 //! # The PCA starts from the clock
@@ -36,14 +36,14 @@ extern fn malloc(n: usize) ?*anyopaque;
 extern fn free(p: ?*anyopaque) void;
 extern fn time(t: ?*i64) i64;
 
-/// Ports `tokens_to_str` (cvector-generator.cpp:36 @5266f24da).
+/// Ports `tokens_to_str` (cvector-generator.cpp:36 @b29c606e2).
 fn tokensToStr(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, tokens: []const c.llama_token) ![:0]u8 {
     var ret: std.ArrayList(u8) = .empty;
     for (tokens) |t| try ret.appendSlice(a, try tc.common.tokenToPiece(a, vocab, t, true));
     return a.dupeSentinel(u8, ret.items, 0);
 }
 
-/// Ports `print_usage` (cvector-generator.cpp:45 @5266f24da).
+/// Ports `print_usage` (cvector-generator.cpp:45 @b29c606e2).
 fn printUsage(argv: []const [:0]const u8) void {
     const e = argv[0].ptr;
     io.printf("\nexample usage:\n", .{});
@@ -54,10 +54,10 @@ fn printUsage(argv: []const [:0]const u8) void {
     io.printf("\n", .{});
 }
 
-/// `DEBUG_POS` (pca.hpp:19 @5266f24da).
+/// `DEBUG_POS` (pca.hpp:19 @b29c606e2).
 const debug_pos = 5;
 
-/// Ports `print_debug_tensor` (pca.hpp:21 @5266f24da).
+/// Ports `print_debug_tensor` (pca.hpp:21 @b29c606e2).
 fn printDebugTensor(t: *c.ggml_tensor) void {
     const func = "print_debug_tensor";
     io.printf("%s: %s (%s): [%d, %d]\n", .{ func, @as([*:0]const u8, @ptrCast(&t.name)), c.ggml_type_name(t.type), @as(c_int, @intCast(t.ne[0])), @as(c_int, @intCast(t.ne[1])) });
@@ -67,7 +67,7 @@ fn printDebugTensor(t: *c.ggml_tensor) void {
     io.printf(" ... ]\n", .{});
 }
 
-/// Mirrors `callback_data` (cvector-generator.cpp:58 @5266f24da).
+/// Mirrors `callback_data` (cvector-generator.cpp:58 @b29c606e2).
 const CallbackData = struct {
     a: std.mem.Allocator,
     ctx_ggml: ?*c.ggml_context = null, // holds v_pos, v_neg, v_diff_filtered
@@ -81,7 +81,7 @@ const CallbackData = struct {
     v_neg: std.ArrayList(*c.ggml_tensor) = .empty, // vector of matrices of size [n_embd, n_tokens]
     v_diff_filtered: std.ArrayList(*c.ggml_tensor) = .empty, // vector of matrices of size [n_embd, n_nonzero_rows]
 
-    /// Ports `save_tensor_for_layer` (cvector-generator.cpp:71 @5266f24da), a member of `callback_data`.
+    /// Ports `save_tensor_for_layer` (cvector-generator.cpp:71 @b29c606e2), a member of `callback_data`.
     fn saveTensorForLayer(self: *CallbackData, t: *c.ggml_tensor) !void {
         ggmlAssert(t.type == c.GGML_TYPE_F32, "cvector-generator.cpp", 72, "t->type == GGML_TYPE_F32");
 
@@ -101,7 +101,7 @@ const CallbackData = struct {
         if (self.is_eval_pos) try self.v_pos.append(self.a, t_layer) else try self.v_neg.append(self.a, t_layer);
     }
 
-    /// Ports `calc_diff` (cvector-generator.cpp:102 @5266f24da), a member of `callback_data`.
+    /// Ports `calc_diff` (cvector-generator.cpp:102 @b29c606e2), a member of `callback_data`.
     fn calcDiff(self: *CallbackData) ![]*c.ggml_tensor {
         for (self.v_pos.items, 0..) |vp, il| {
             const a: [*]f32 = @ptrCast(@alignCast(vp.data));
@@ -113,7 +113,7 @@ const CallbackData = struct {
         return self.v_diff_filtered.items; // for convenient, we return the result std::vector
     }
 
-    /// Ports `filter_nonzero_rows` (cvector-generator.cpp:118 @5266f24da), a member of `callback_data`.
+    /// Ports `filter_nonzero_rows` (cvector-generator.cpp:118 @b29c606e2), a member of `callback_data`.
     ///
     /// A row is all zeros unless an element is **greater than** `eps`: a row
     /// of negative numbers counts as zero, as the C counts it.
@@ -157,7 +157,7 @@ const CallbackData = struct {
         return diff_filtered;
     }
 
-    /// Ports `reset` (cvector-generator.cpp:164 @5266f24da), a member of `callback_data`.
+    /// Ports `reset` (cvector-generator.cpp:164 @b29c606e2), a member of `callback_data`.
     fn reset(self: *CallbackData) void {
         for (self.v_pos.items) |p| free(p.data);
         for (self.v_neg.items) |p| free(p.data);
@@ -170,7 +170,7 @@ const CallbackData = struct {
     }
 };
 
-/// Mirrors `train_context` (cvector-generator.cpp:182 @5266f24da).
+/// Mirrors `train_context` (cvector-generator.cpp:182 @b29c606e2).
 const TrainContext = struct {
     a: std.mem.Allocator,
     ctx_ggml: ?*c.ggml_context,
@@ -199,7 +199,7 @@ const TrainContext = struct {
         return self;
     }
 
-    /// Ports `concat_diff_tmp` (cvector-generator.cpp:220 @5266f24da), a member of `train_context`.
+    /// Ports `concat_diff_tmp` (cvector-generator.cpp:220 @b29c606e2), a member of `train_context`.
     fn concatDiffTmp(self: *TrainContext, diff_filtered: []const *c.ggml_tensor) !void {
         ggmlAssert(@as(c_int, @intCast(diff_filtered.len)) == self.n_layers - 1, "cvector-generator.cpp", 221, "(int) diff_filtered.size() == n_layers - 1");
         for (0..@intCast(self.n_layers - 1)) |il| {
@@ -209,7 +209,7 @@ const TrainContext = struct {
         }
     }
 
-    /// Ports `build_v_diff` (cvector-generator.cpp:233 @5266f24da), a member of `train_context`.
+    /// Ports `build_v_diff` (cvector-generator.cpp:233 @b29c606e2), a member of `train_context`.
     fn buildVDiff(self: *TrainContext, transpose: bool) !void {
         io.printf("build_v_diff\n", .{});
         var il: c_int = 0;
@@ -249,7 +249,7 @@ const TrainContext = struct {
     }
 };
 
-/// Mirrors `tokenized_prompt` (cvector-generator.cpp:273 @5266f24da).
+/// Mirrors `tokenized_prompt` (cvector-generator.cpp:273 @b29c606e2).
 const TokenizedPrompt = struct {
     tokens_pos: []c.llama_token,
     tokens_neg: []c.llama_token,
@@ -270,7 +270,7 @@ const TokenizedPrompt = struct {
         return self;
     }
 
-    /// Ports `padding_seq` (cvector-generator.cpp:289 @5266f24da), a member of `tokenized_prompt`.
+    /// Ports `padding_seq` (cvector-generator.cpp:289 @b29c606e2), a member of `tokenized_prompt`.
     fn paddingSeq(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, tokens: []c.llama_token, len: usize) ![]c.llama_token {
         // TODO: customize padding token
         const pad_tokens = try tc.common.tokenize(a, vocab, " ", false, false);
@@ -282,7 +282,7 @@ const TokenizedPrompt = struct {
     }
 };
 
-/// Ports `ctrlvec_load_prompt_file` (cvector-generator.cpp:308 @5266f24da).
+/// Ports `ctrlvec_load_prompt_file` (cvector-generator.cpp:308 @b29c606e2).
 fn loadPromptFile(a: std.mem.Allocator, path: []const u8, skip_empty_lines: bool) !std.ArrayList([]const u8) {
     var output: std.ArrayList([]const u8) = .empty;
     const z = try a.dupeSentinel(u8, path, 0);
@@ -310,7 +310,7 @@ fn loadPromptFile(a: std.mem.Allocator, path: []const u8, skip_empty_lines: bool
     return output;
 }
 
-/// Ports `cb_eval` (cvector-generator.cpp:329 @5266f24da).
+/// Ports `cb_eval` (cvector-generator.cpp:329 @b29c606e2).
 fn cbEval(t: [*c]c.ggml_tensor, ask: bool, user_data: ?*anyopaque) callconv(.c) bool {
     const cb_data: *CallbackData = @ptrCast(@alignCast(user_data.?));
     const is_l_out = std.mem.startsWith(u8, std.mem.sliceTo(&t.*.name, 0), "l_out");
@@ -324,7 +324,7 @@ fn cbEval(t: [*c]c.ggml_tensor, ask: bool, user_data: ?*anyopaque) callconv(.c) 
     return true;
 }
 
-/// Ports `get_hidden_layers` (cvector-generator.cpp:347 @5266f24da).
+/// Ports `get_hidden_layers` (cvector-generator.cpp:347 @b29c606e2).
 fn getHiddenLayers(ctx: ?*c.llama_context, tokens: []c.llama_token) bool {
     c.llama_memory_clear(c.llama_get_memory(ctx), true);
     if (c.llama_decode(ctx, c.llama_batch_get_one(tokens.ptr, @intCast(tokens.len))) != 0) {
@@ -334,7 +334,7 @@ fn getHiddenLayers(ctx: ?*c.llama_context, tokens: []c.llama_token) bool {
     return true;
 }
 
-/// Ports `export_gguf` (cvector-generator.cpp:356 @5266f24da).
+/// Ports `export_gguf` (cvector-generator.cpp:356 @b29c606e2).
 fn exportGguf(a: std.mem.Allocator, v_ctrl: []const *c.ggml_tensor, fname: []const u8, model_hint: [*:0]const u8) !void {
     const func = "export_gguf";
     const ctx = c.gguf_init_empty();
@@ -357,7 +357,7 @@ fn exportGguf(a: std.mem.Allocator, v_ctrl: []const *c.ggml_tensor, fname: []con
     c.gguf_free(ctx);
 }
 
-/// Ports `prepare_entries` (cvector-generator.cpp:380 @5266f24da).
+/// Ports `prepare_entries` (cvector-generator.cpp:380 @b29c606e2).
 fn prepareEntries(a: std.mem.Allocator, params: *tc.params.Params, ctx_train: *TrainContext) !c_int {
     // load prompts
     const positive_prompts = try loadPromptFile(a, params.cvector_positive_file, true);
@@ -404,7 +404,7 @@ const MinstdRand = struct {
     }
 };
 
-/// Mirrors `pca_params` (pca.hpp:34 @5266f24da), a member of `PCA`.
+/// Mirrors `pca_params` (pca.hpp:34 @b29c606e2), a member of `PCA`.
 const PcaParams = struct {
     n_threads: c_int = 1,
     n_batch: c_int = 20, // number of iterations do to in one batch
@@ -415,7 +415,7 @@ const PcaParams = struct {
     n_layers: c_int = 0,
 };
 
-/// Mirrors `pca_result` (pca.hpp:46 @5266f24da), a member of `PCA`.
+/// Mirrors `pca_result` (pca.hpp:46 @b29c606e2), a member of `PCA`.
 const PcaResult = struct {
     calculated_square: ?*c.ggml_tensor = null,
     eigenvectors: std.ArrayList(?*c.ggml_tensor) = .empty,
@@ -424,7 +424,7 @@ const PcaResult = struct {
 
 extern fn ggml_backend_cuda_init(device: c_int) c.ggml_backend_t;
 
-/// Mirrors `pca_model` (pca.hpp:52 @5266f24da), a member of `PCA`: CUDA where ggml has
+/// Mirrors `pca_model` (pca.hpp:52 @b29c606e2), a member of `PCA`: CUDA where ggml has
 /// it, the CPU otherwise -- upstream leaves Metal commented out.
 const PcaModel = struct {
     backend: c.ggml_backend_t = null,
@@ -492,7 +492,7 @@ const PcaModel = struct {
 /// The `static std::vector<uint8_t> buf` the graph is built in.
 var piter_buf: ?[]u8 = null;
 
-/// Ports `build_graph_piter` (pca.hpp:134 @5266f24da), a member of `PCA`.
+/// Ports `build_graph_piter` (pca.hpp:134 @b29c606e2), a member of `PCA`.
 fn buildGraphPiter(params: *const PcaParams, model: *const PcaModel, calc_square: bool) !*c.ggml_cgraph {
     ggmlAssert(params.n_batch > 0, "pca.hpp", 138, "params.n_batch > 0");
     const buf_size = c.ggml_tensor_overhead() * c.GGML_DEFAULT_GRAPH_SIZE + c.ggml_graph_overhead();
@@ -539,7 +539,7 @@ fn buildGraphPiter(params: *const PcaParams, model: *const PcaModel, calc_square
     return gf.?;
 }
 
-/// The `extract_i` lambda of `compute_piter` (pca.hpp:194 @5266f24da):
+/// The `extract_i` lambda of `compute_piter` (pca.hpp:194 @b29c606e2):
 /// `sscanf(str, prefix + "%d", &i)` when `str` starts with `prefix`.
 fn extractI(prefix: []const u8, str: []const u8) c_int {
     if (!std.mem.startsWith(u8, str, prefix)) return -1;
@@ -552,7 +552,7 @@ fn extractI(prefix: []const u8, str: []const u8) c_int {
     return std.fmt.parseInt(c_int, rest[st..i], 10) catch -1;
 }
 
-/// Ports `compute_piter` (pca.hpp:194 @5266f24da), a member of `PCA`.
+/// Ports `compute_piter` (pca.hpp:194 @b29c606e2), a member of `PCA`.
 fn computePiter(a: std.mem.Allocator, params: *const PcaParams, model: *const PcaModel, gf: *c.ggml_cgraph, allocr: c.ggml_gallocr_t, result: *PcaResult) !c.ggml_status {
     // allocate tensors
     _ = c.ggml_gallocr_alloc_graph(allocr, gf);
@@ -588,7 +588,7 @@ fn computePiter(a: std.mem.Allocator, params: *const PcaParams, model: *const Pc
     return res;
 }
 
-/// Ports `power_iteration` (pca.hpp:245 @5266f24da), a member of `PCA`.
+/// Ports `power_iteration` (pca.hpp:245 @b29c606e2), a member of `PCA`.
 fn powerIteration(a: std.mem.Allocator, params: *const PcaParams, input: *c.ggml_tensor, output: *c.ggml_tensor) !void {
     var model = try PcaModel.init(a, input);
     defer model.deinit();
@@ -628,7 +628,7 @@ fn powerIteration(a: std.mem.Allocator, params: *const PcaParams, input: *c.ggml
     c.ggml_gallocr_free(allocr);
 }
 
-/// Ports `run_pca` (pca.hpp:296 @5266f24da), a member of `PCA`.
+/// Ports `run_pca` (pca.hpp:296 @b29c606e2), a member of `PCA`.
 fn runPca(a: std.mem.Allocator, params: *PcaParams, v_input: []const *c.ggml_tensor, v_output: []const *c.ggml_tensor) !void {
     io.printf("%s: Running PCA...\n", .{"run_pca"});
     for (v_input, 0..) |inp, il| {
@@ -644,7 +644,7 @@ fn runPca(a: std.mem.Allocator, params: *PcaParams, v_input: []const *c.ggml_ten
     }
 }
 
-/// Ports `run` (mean.hpp:11 @5266f24da), a member of `mean`.
+/// Ports `run` (mean.hpp:11 @b29c606e2), a member of `mean`.
 fn runMean(v_input: []const *c.ggml_tensor, v_output: []const *c.ggml_tensor) void {
     io.printf("%s: Running mean...\n", .{"run"});
     for (v_input, 0..) |t_layer, il| {
@@ -684,7 +684,7 @@ fn runMean(v_input: []const *c.ggml_tensor, v_output: []const *c.ggml_tensor) vo
 
 // -----------------------------------------------------------------------------
 
-/// Ports `main` (cvector-generator.cpp:397 @5266f24da).
+/// Ports `main` (cvector-generator.cpp:397 @b29c606e2).
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     var params = try tc.params.Params.init(a);
 

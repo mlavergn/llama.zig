@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.cpp` at v0.4.0
-//! (`5266f24da`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.cpp` at v0.4.1
+//! (`b29c606e2`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # Not to be confused with `ggml-cpu.c`
@@ -47,7 +47,7 @@ const allocator = std.heap.c_allocator;
 // The extra buffer types
 
 /// Storage for `ggml_backend_cpu_get_extra_buffer_types` (ggml-cpu.cpp:42
-/// @5266f24da).
+/// @b29c606e2).
 ///
 /// Only the repack entry compiles on this target: the AMX, SpaceMIT and
 /// KleidiAI arms are behind `__AMX_INT8__`, `GGML_USE_CPU_RISCV64_SPACEMIT`
@@ -76,7 +76,7 @@ fn ensureExtraBufts() void {
 }
 
 /// Ports `ggml_backend_cpu_get_extra_buffer_types` (ggml-cpu.cpp:42
-/// @5266f24da).
+/// @b29c606e2).
 ///
 /// Return: the extra buffer types, borrowed for the life of the process.
 pub fn getExtraBufferTypes() []const c.ggml_backend_buffer_type_t {
@@ -85,7 +85,7 @@ pub fn getExtraBufferTypes() []const c.ggml_backend_buffer_type_t {
 }
 
 /// Ports `ggml_backend_cpu_device_get_extra_buffers_type` (ggml-cpu.cpp:76
-/// @5266f24da): the same list, null-terminated, as the proc-address export
+/// @b29c606e2): the same list, null-terminated, as the proc-address export
 /// hands to `llama.cpp`.
 fn deviceGetExtraBuffersType(device: c.ggml_backend_dev_t) callconv(.c) [*c]c.ggml_backend_buffer_type_t {
     _ = device;
@@ -97,7 +97,7 @@ fn deviceGetExtraBuffersType(device: c.ggml_backend_dev_t) callconv(.c) [*c]c.gg
 }
 
 /// Ports `ggml_backend_cpu_is_extra_buffer_type` (ggml-cpu.cpp:88
-/// @5266f24da).
+/// @b29c606e2).
 fn isExtraBufferType(buft: c.ggml_backend_buffer_type_t) bool {
     for (getExtraBufferTypes()) |e| {
         if (e == buft) return true;
@@ -108,7 +108,7 @@ fn isExtraBufferType(buft: c.ggml_backend_buffer_type_t) bool {
 // -----------------------------------------------------------------------------
 // The backend (stream)
 
-/// Ports `struct ggml_backend_cpu_context` (ggml-cpu.cpp:99 @5266f24da).
+/// Ports `struct ggml_backend_cpu_context` (ggml-cpu.cpp:99 @b29c606e2).
 const Context = struct {
     n_threads: c_int,
     threadpool: c.ggml_threadpool_t,
@@ -120,13 +120,13 @@ const Context = struct {
     use_ref: bool,
 };
 
-/// Ports `ggml_backend_cpu_get_name` (ggml-cpu.cpp:112 @5266f24da).
+/// Ports `ggml_backend_cpu_get_name` (ggml-cpu.cpp:112 @b29c606e2).
 fn getName(backend: c.ggml_backend_t) callconv(.c) [*c]const u8 {
     _ = backend;
     return "CPU";
 }
 
-/// Ports `ggml_backend_cpu_free` (ggml-cpu.cpp:118 @5266f24da).
+/// Ports `ggml_backend_cpu_free` (ggml-cpu.cpp:118 @b29c606e2).
 fn backendFree(backend: c.ggml_backend_t) callconv(.c) void {
     const b = impl.one(c.struct_ggml_backend, backend);
     const ctx: *Context = @ptrCast(@alignCast(b.context.?));
@@ -135,13 +135,13 @@ fn backendFree(backend: c.ggml_backend_t) callconv(.c) void {
     allocator.destroy(b);
 }
 
-/// Ports `struct ggml_backend_plan_cpu` (ggml-cpu.cpp:125 @5266f24da).
+/// Ports `struct ggml_backend_plan_cpu` (ggml-cpu.cpp:125 @b29c606e2).
 const PlanCpu = struct {
     cplan: c.struct_ggml_cplan,
     cgraph: impl.CGraph,
 };
 
-/// Ports `ggml_backend_cpu_graph_plan_create` (ggml-cpu.cpp:130 @5266f24da).
+/// Ports `ggml_backend_cpu_graph_plan_create` (ggml-cpu.cpp:130 @b29c606e2).
 fn graphPlanCreate(backend: c.ggml_backend_t, cgraph: *const impl.CGraph) callconv(.c) c.ggml_backend_graph_plan_t {
     const b = impl.one(c.struct_ggml_backend, backend);
     const ctx: *Context = @ptrCast(@alignCast(b.context.?));
@@ -167,7 +167,7 @@ fn graphPlanCreate(backend: c.ggml_backend_t, cgraph: *const impl.CGraph) callco
     return plan;
 }
 
-/// Ports `ggml_backend_cpu_graph_plan_free` (ggml-cpu.cpp:153 @5266f24da).
+/// Ports `ggml_backend_cpu_graph_plan_free` (ggml-cpu.cpp:153 @b29c606e2).
 fn graphPlanFree(backend: c.ggml_backend_t, plan_in: c.ggml_backend_graph_plan_t) callconv(.c) void {
     _ = backend;
     const plan: *PlanCpu = @ptrCast(@alignCast(plan_in.?));
@@ -175,14 +175,14 @@ fn graphPlanFree(backend: c.ggml_backend_t, plan_in: c.ggml_backend_graph_plan_t
     allocator.destroy(plan);
 }
 
-/// Ports `ggml_backend_cpu_graph_plan_compute` (ggml-cpu.cpp:162 @5266f24da).
+/// Ports `ggml_backend_cpu_graph_plan_compute` (ggml-cpu.cpp:162 @b29c606e2).
 fn graphPlanCompute(backend: c.ggml_backend_t, plan_in: c.ggml_backend_graph_plan_t) callconv(.c) c.enum_ggml_status {
     _ = backend;
     const plan: *PlanCpu = @ptrCast(@alignCast(plan_in.?));
     return c.ggml_graph_compute(@ptrCast(&plan.cgraph), &plan.cplan);
 }
 
-/// Ports `ggml_backend_cpu_graph_compute` (ggml-cpu.cpp:170 @5266f24da).
+/// Ports `ggml_backend_cpu_graph_compute` (ggml-cpu.cpp:170 @b29c606e2).
 fn graphCompute(backend: c.ggml_backend_t, cgraph: *impl.CGraph) callconv(.c) c.enum_ggml_status {
     const b = impl.one(c.struct_ggml_backend, backend);
     const ctx: *Context = @ptrCast(@alignCast(b.context.?));
@@ -208,7 +208,7 @@ fn graphCompute(backend: c.ggml_backend_t, cgraph: *impl.CGraph) callconv(.c) c.
     return c.ggml_graph_compute(@ptrCast(cgraph), &cplan);
 }
 
-/// Ports `ggml_backend_cpu_i` (ggml-cpu.cpp:193 @5266f24da).
+/// Ports `ggml_backend_cpu_i` (ggml-cpu.cpp:193 @b29c606e2).
 const backend_i = c.struct_ggml_backend_i{
     .get_name = getName,
     .free = backendFree,
@@ -228,7 +228,7 @@ const backend_i = c.struct_ggml_backend_i{
     .graph_optimize = null,
 };
 
-/// Ports `ggml_backend_cpu_guid` (ggml-cpu.cpp:212 @5266f24da).
+/// Ports `ggml_backend_cpu_guid` (ggml-cpu.cpp:212 @b29c606e2).
 var cpu_guid: c.ggml_guid = .{ 0xaa, 0x67, 0xc7, 0x43, 0x96, 0xe6, 0xa3, 0x8a, 0xe3, 0xaf, 0xea, 0x92, 0x36, 0xbc, 0xfc, 0x89 };
 
 fn guid() c.ggml_guid_t {
@@ -237,7 +237,7 @@ fn guid() c.ggml_guid_t {
 
 extern fn ggml_cpu_init() void;
 
-/// Ports `ggml_backend_cpu_init` (ggml-cpu.cpp:217 @5266f24da).
+/// Ports `ggml_backend_cpu_init` (ggml-cpu.cpp:217 @b29c606e2).
 ///
 /// Return: a new CPU backend, or null if allocation failed. The caller owns
 /// it and frees it with `ggml_backend_free`.
@@ -269,7 +269,7 @@ pub export fn ggml_backend_cpu_init() callconv(.c) c.ggml_backend_t {
     return backend;
 }
 
-/// Ports `ggml_backend_is_cpu` (ggml-cpu.cpp:249 @5266f24da).
+/// Ports `ggml_backend_is_cpu` (ggml-cpu.cpp:249 @b29c606e2).
 pub export fn ggml_backend_is_cpu(backend: c.ggml_backend_t) callconv(.c) bool {
     return backend != null and c.ggml_guid_matches(impl.one(c.struct_ggml_backend, backend).guid, guid());
 }
@@ -279,12 +279,12 @@ inline fn contextOf(backend_cpu: c.ggml_backend_t) *Context {
     return @ptrCast(@alignCast(impl.one(c.struct_ggml_backend, backend_cpu).context.?));
 }
 
-/// Ports `ggml_backend_cpu_set_n_threads` (ggml-cpu.cpp:253 @5266f24da).
+/// Ports `ggml_backend_cpu_set_n_threads` (ggml-cpu.cpp:253 @b29c606e2).
 pub export fn ggml_backend_cpu_set_n_threads(backend_cpu: c.ggml_backend_t, n_threads: c_int) callconv(.c) void {
     contextOf(backend_cpu).n_threads = n_threads;
 }
 
-/// Ports `ggml_backend_cpu_set_threadpool` (ggml-cpu.cpp:260 @5266f24da).
+/// Ports `ggml_backend_cpu_set_threadpool` (ggml-cpu.cpp:260 @b29c606e2).
 pub export fn ggml_backend_cpu_set_threadpool(backend_cpu: c.ggml_backend_t, threadpool: c.ggml_threadpool_t) callconv(.c) void {
     const ctx = contextOf(backend_cpu);
     if (ctx.threadpool != null and ctx.threadpool != threadpool) {
@@ -294,14 +294,14 @@ pub export fn ggml_backend_cpu_set_threadpool(backend_cpu: c.ggml_backend_t, thr
     ctx.threadpool = threadpool;
 }
 
-/// Ports `ggml_backend_cpu_set_abort_callback` (ggml-cpu.cpp:272 @5266f24da).
+/// Ports `ggml_backend_cpu_set_abort_callback` (ggml-cpu.cpp:272 @b29c606e2).
 pub export fn ggml_backend_cpu_set_abort_callback(backend_cpu: c.ggml_backend_t, abort_callback: c.ggml_abort_callback, abort_callback_data: ?*anyopaque) callconv(.c) void {
     const ctx = contextOf(backend_cpu);
     ctx.abort_callback = abort_callback;
     ctx.abort_callback_data = abort_callback_data;
 }
 
-/// Ports `ggml_backend_cpu_set_use_ref` (ggml-cpu.cpp:280 @5266f24da).
+/// Ports `ggml_backend_cpu_set_use_ref` (ggml-cpu.cpp:280 @b29c606e2).
 pub export fn ggml_backend_cpu_set_use_ref(backend_cpu: c.ggml_backend_t, use_ref: bool) callconv(.c) void {
     contextOf(backend_cpu).use_ref = use_ref;
 }
@@ -316,7 +316,7 @@ comptime {
 // The device
 
 /// Ports `struct ggml_backend_cpu_device_context` (ggml-cpu.cpp:289
-/// @5266f24da), the `__APPLE__`, `__linux__` and `_WIN32` arms of its
+/// @b29c606e2), the `__APPLE__`, `__linux__` and `_WIN32` arms of its
 /// constructor.
 ///
 /// The C holds a `std::string` and resizes it around `sysctlbyname`; here it
@@ -345,7 +345,7 @@ const DeviceContext = struct {
     }
 
     /// The `_WIN32` arm of `ggml_backend_cpu_device_context`
-    /// (ggml-cpu.cpp:292 @5266f24da): the first processor's
+    /// (ggml-cpu.cpp:292 @b29c606e2): the first processor's
     /// `ProcessorNameString` from the registry, cut at its first NUL.
     ///
     /// The C resizes "CPU" to the size the first query reports before the
@@ -412,14 +412,14 @@ fn deviceGetName(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
 }
 
 /// Ports `ggml_backend_cpu_device_get_description` (ggml-cpu.cpp:359
-/// @5266f24da).
+/// @b29c606e2).
 fn deviceGetDescription(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     const d = impl.one(c.struct_ggml_backend_device, dev);
     const ctx: *DeviceContext = @ptrCast(@alignCast(d.context.?));
     return &ctx.description;
 }
 
-/// Ports `ggml_backend_cpu_device_get_memory` (ggml-cpu.cpp:365 @5266f24da),
+/// Ports `ggml_backend_cpu_device_get_memory` (ggml-cpu.cpp:365 @b29c606e2),
 /// both arms. Windows reports the physical memory available as free; every
 /// other platform reports all of it.
 fn deviceGetMemory(dev: c.ggml_backend_dev_t, free: *usize, total: *usize) callconv(.c) void {
@@ -445,7 +445,7 @@ fn deviceGetType(dev: c.ggml_backend_dev_t) callconv(.c) c.enum_ggml_backend_dev
     return c.GGML_BACKEND_DEVICE_TYPE_CPU;
 }
 
-/// Ports `ggml_backend_cpu_device_get_props` (ggml-cpu.cpp:390 @5266f24da).
+/// Ports `ggml_backend_cpu_device_get_props` (ggml-cpu.cpp:390 @b29c606e2).
 fn deviceGetProps(dev: c.ggml_backend_dev_t, props: *c.struct_ggml_backend_dev_props) callconv(.c) void {
     props.name = deviceGetName(dev);
     props.description = deviceGetDescription(dev);
@@ -477,7 +477,7 @@ fn deviceBufferFromHostPtr(dev: c.ggml_backend_dev_t, ptr: ?*anyopaque, size: us
     return c.ggml_backend_cpu_buffer_from_ptr(ptr, size);
 }
 
-/// Ports `ggml_backend_cpu_device_supports_op` (ggml-cpu.cpp:424 @5266f24da).
+/// Ports `ggml_backend_cpu_device_supports_op` (ggml-cpu.cpp:424 @b29c606e2).
 /// `op->src[i]` narrowed, or null.
 ///
 /// Ports nothing by itself — the C writes `const struct ggml_tensor * src0
@@ -561,13 +561,13 @@ fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) callconv(.c) b
 }
 
 /// Ports `ggml_backend_cpu_device_supports_buft` (ggml-cpu.cpp:482
-/// @5266f24da).
+/// @b29c606e2).
 fn deviceSupportsBuft(dev: c.ggml_backend_dev_t, buft: c.ggml_backend_buffer_type_t) callconv(.c) bool {
     _ = dev;
     return c.ggml_backend_buft_is_host(buft) or isExtraBufferType(buft);
 }
 
-/// Ports `ggml_backend_cpu_device_i` (ggml-cpu.cpp:487 @5266f24da).
+/// Ports `ggml_backend_cpu_device_i` (ggml-cpu.cpp:487 @b29c606e2).
 const device_i = c.struct_ggml_backend_device_i{
     .get_name = deviceGetName,
     .get_description = deviceGetDescription,
@@ -614,7 +614,7 @@ fn ensureDevice(reg: c.ggml_backend_reg_t) void {
     device_ready.store(true, .release);
 }
 
-/// Ports `ggml_backend_cpu_reg_get_device` (ggml-cpu.cpp:519 @5266f24da).
+/// Ports `ggml_backend_cpu_reg_get_device` (ggml-cpu.cpp:519 @b29c606e2).
 ///
 /// The C's two `static` locals are initialised on first call; `std.once`
 /// is the same guarantee, and the device's `reg` back-pointer is captured
@@ -625,7 +625,7 @@ fn regGetDevice(reg: c.ggml_backend_reg_t, index: usize) callconv(.c) c.ggml_bac
     return &cpu_device;
 }
 
-/// Ports `ggml_backend_cpu_get_features` (ggml-cpu.cpp:534 @5266f24da).
+/// Ports `ggml_backend_cpu_get_features` (ggml-cpu.cpp:534 @b29c606e2).
 ///
 /// Only the entries whose predicate can be true on this target are kept:
 /// the x86, RISC-V, POWER, s390x and WASM arms are all compiled out. SVE,
@@ -667,7 +667,7 @@ fn regGetFeatures(reg: c.ggml_backend_reg_t) callconv(.c) [*c]c.ggml_backend_fea
     return &features;
 }
 
-/// Ports `ggml_backend_cpu_get_proc_address` (ggml-cpu.cpp:651 @5266f24da).
+/// Ports `ggml_backend_cpu_get_proc_address` (ggml-cpu.cpp:651 @b29c606e2).
 fn regGetProcAddress(reg: c.ggml_backend_reg_t, name: [*c]const u8) callconv(.c) ?*anyopaque {
     _ = reg;
     const n = std.mem.span(@as([*:0]const u8, @ptrCast(name)));
@@ -690,7 +690,7 @@ fn regGetProcAddress(reg: c.ggml_backend_reg_t, name: [*c]const u8) callconv(.c)
     return null;
 }
 
-/// Ports `ggml_backend_cpu_reg_i` (ggml-cpu.cpp:692 @5266f24da).
+/// Ports `ggml_backend_cpu_reg_i` (ggml-cpu.cpp:692 @b29c606e2).
 const reg_i = c.struct_ggml_backend_reg_i{
     .get_name = regGetName,
     .get_device_count = regGetDeviceCount,
@@ -704,7 +704,7 @@ var cpu_reg = c.struct_ggml_backend_reg{
     .context = null,
 };
 
-/// Ports `ggml_backend_cpu_reg` (ggml-cpu.cpp:699 @5266f24da).
+/// Ports `ggml_backend_cpu_reg` (ggml-cpu.cpp:699 @b29c606e2).
 ///
 /// Return: the CPU registration, a process-lifetime singleton.
 pub export fn ggml_backend_cpu_reg() callconv(.c) c.ggml_backend_reg_t {

@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/parakeet.cpp` at v0.4.0
-//! (`5266f24da`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/parakeet.cpp` at v0.4.1
+//! (`b29c606e2`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -18,9 +18,9 @@ const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// `PARAKEET_LOCAL_ATTN_THRESHOLD` (parakeet.cpp:3 @5266f24da).
+/// `PARAKEET_LOCAL_ATTN_THRESHOLD` (parakeet.cpp:3 @b29c606e2).
 const parakeet_local_attn_threshold: c_int = 8192;
-/// `PARAKEET_LOCAL_ATTN_WINDOW` (parakeet.cpp:4 @5266f24da).
+/// `PARAKEET_LOCAL_ATTN_WINDOW` (parakeet.cpp:4 @b29c606e2).
 const parakeet_local_attn_window: c_int = 128;
 
 /// `1.0f / std::sqrt(d_head)` with an `int` `d_head`: the double overload,
@@ -29,7 +29,7 @@ fn invSqrt(d_head: c_int) f32 {
     return @floatCast(1.0 / @sqrt(@as(f64, @floatFromInt(d_head))));
 }
 
-/// Ports `build` (parakeet.cpp:7 @5266f24da), a member of
+/// Ports `build` (parakeet.cpp:7 @b29c606e2), a member of
 /// `clip_graph_parakeet`: conv
 /// subsampling and the conformer encoder.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {

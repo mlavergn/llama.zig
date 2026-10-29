@@ -239,6 +239,7 @@ const ggml_metal_cxx_sources = [_][]const u8{
     // ggml-metal-tuning.cpp is ported -- src/ggml/metal/tuning.zig. Its
     // seven entry points are C++-linkage, so the Zig exports them under
     // their mangled names and the three C++ callers link unchanged.
+    // ggml-metal-fusion.cpp is ported -- src/ggml/metal/fusion.zig.
 };
 
 const ggml_metal_objc_sources = [_][]const u8{
@@ -385,6 +386,10 @@ pub const Cuda = struct {
     /// Until the swap (Decision 48) this is off by default and the gates
     /// build both.
     port: bool = false,
+    /// Upstream's `GGML_CUDA_FA_QUANTS`: the FlashAttention K-V type
+    /// combinations whose vector kernels are compiled, `"all"` or a list
+    /// such as `"q8_0-q8_0;q8_0-q4_0"`. See `cudaFaCombinations`.
+    fa_quants: []const u8 = "all",
 };
 
 /// Declares the ggml and llama static libraries and returns them.
@@ -448,6 +453,11 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     options.addOption(bool, "cuda_port", if (opts.cuda) |cu| cu.port else false);
     // The fatbins' architecture, for `ggml_cuda_highest_compiled_arch`.
     options.addOption([]const u8, "cuda_arch", if (opts.cuda) |cu| cu.arch else "");
+    // `GGML_CUDA_FA_QUANTS` as the C sees it, and the K-V combinations it
+    // compiles, for `src/ggml/cuda/fattn.zig` and `backend.zig`.
+    const fa: CudaFa = if (opts.cuda) |cu| cudaFaCombinations(b, cu) else .{ .define = "", .combinations = &.{} };
+    options.addOption([]const u8, "cuda_fa_quants", fa.define);
+    options.addOption([]const []const u8, "cuda_fa_combinations", fa.combinations);
     // Mirrors `-DGGML_USE_VULKAN`, for `backend_reg.zig`.
     options.addOption(bool, "use_vulkan", opts.vulkan != null);
     options.addOption(bool, "vulkan_port", if (opts.vulkan) |vk| vk.port else false);
@@ -535,18 +545,110 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
 }
 
 /// The `-D` flags upstream's CMake gives every `ggml-cuda` translation unit
-/// for the configuration this build selects: `GGML_CUDA_FA_ALL_QUANTS` and
-/// `GGML_CUDA_GRAPHS` on, NCCL off (one GPU). Taken from the `flags.make` a
-/// stock CMake build of the pinned tree writes, minus the `GGML_BACKEND_SHARED`/`GGML_SHARED` pair, which
-/// only exist to export symbols from a `.so`.
+/// for the configuration this build selects: `GGML_CUDA_GRAPHS` on, NCCL off
+/// (one GPU). Taken from the `flags.make` a stock CMake build of the pinned
+/// tree writes, minus the `GGML_BACKEND_SHARED`/`GGML_SHARED` pair, which
+/// only exist to export symbols from a `.so`, and minus the FlashAttention
+/// type defines, which depend on `Cuda.fa_quants` (`cudaFaDefines`).
 const cuda_defines = [_][]const u8{
-    "-DGGML_CUDA_FA_ALL_QUANTS",
     "-DGGML_CUDA_USE_GRAPHS",
     "-DGGML_SCHED_MAX_COPIES=4",
     "-D_GNU_SOURCE",
     "-D_XOPEN_SOURCE=600",
     "-DNDEBUG",
 };
+
+/// The K and V types a FlashAttention vector kernel can be instantiated
+/// for, in the order `ggml_cuda_fattn_vec_instances`
+/// (ggml/cmake/common.cmake:53 @b29c606e2) iterates them: its `FA_TYPES`.
+const cuda_fa_types = [_][]const u8{ "q4_0", "q4_1", "q5_0", "q5_1", "q8_0", "bf16", "f16" };
+
+/// What `cudaFaCombinations` derives from `Cuda.fa_quants`.
+const CudaFa = struct {
+    /// The value `GGML_CUDA_FA_QUANTS` is defined to.
+    define: []const u8,
+    /// Every compiled K-V combination, spelled `"<k>-<v>"` as the instance
+    /// files are.
+    combinations: []const []const u8,
+};
+
+/// Mirrors `ggml_cuda_fattn_vec_instances` (ggml/cmake/common.cmake:53
+/// @b29c606e2): the K-V type combinations whose FlashAttention vector
+/// kernel instances `GGML_CUDA_FA_QUANTS` selects. `"all"` is every pair,
+/// V outermost; otherwise `f16-f16` and each listed combination, separated
+/// by `;` or `,`, duplicates dropped. A malformed list fails the build, as
+/// it fails CMake's configure.
+///
+/// Parameters:
+/// - `b`: the build graph; the result is allocated on it.
+/// - `cuda`: carries `fa_quants`.
+///
+/// Return: the define's value and the combinations.
+fn cudaFaCombinations(b: *std.Build, cuda: Cuda) CudaFa {
+    const lowered = b.allocator.alloc(u8, cuda.fa_quants.len) catch @panic("OOM");
+    _ = std.ascii.lowerString(lowered, cuda.fa_quants);
+    const fa_quants = std.mem.trim(u8, lowered, " \t\r\n");
+    if (fa_quants.len == 0) std.debug.panic("GGML_CUDA_FA_QUANTS must not be empty", .{});
+
+    var combinations: std.ArrayList([]const u8) = .empty;
+    if (std.mem.eql(u8, fa_quants, "all")) {
+        for (cuda_fa_types) |type_V| {
+            for (cuda_fa_types) |type_K| {
+                combinations.append(b.allocator, b.fmt("{s}-{s}", .{ type_K, type_V })) catch @panic("OOM");
+            }
+        }
+    } else {
+        combinations.append(b.allocator, "f16-f16") catch @panic("OOM");
+        var it = std.mem.tokenizeAny(u8, fa_quants, ";,");
+        while (it.next()) |raw| {
+            const combination = std.mem.trim(u8, raw, " \t\r\n");
+            const dash = std.mem.findScalar(u8, combination, '-') orelse
+                std.debug.panic("GGML_CUDA_FA_QUANTS: \"{s}\" is not \"all\" or a <type_K>-<type_V> combination", .{combination});
+            for ([_][]const u8{ combination[0..dash], combination[dash + 1 ..] }) |ty| {
+                const known = for (cuda_fa_types) |t| {
+                    if (std.mem.eql(u8, t, ty)) break true;
+                } else false;
+                if (!known) std.debug.panic("GGML_CUDA_FA_QUANTS: unknown type \"{s}\" in \"{s}\"", .{ ty, combination });
+            }
+            const seen = for (combinations.items) |have| {
+                if (std.mem.eql(u8, have, combination)) break true;
+            } else false;
+            if (!seen) combinations.append(b.allocator, combination) catch @panic("OOM");
+        }
+    }
+
+    const define = b.allocator.dupe(u8, fa_quants) catch @panic("OOM");
+    std.mem.replaceScalar(u8, define, ';', ',');
+    return .{ .define = define, .combinations = combinations.items };
+}
+
+/// The FlashAttention `-D` flags `ggml_cuda_fattn_vec_instances` adds to
+/// every `ggml-cuda` translation unit: `GGML_CUDA_FA_QUANTS` as a string,
+/// and `GGML_CUDA_FA_<K>_<V>` as 1 or 0 for every type pair, which
+/// `ggml_cuda_get_fattn_vec_case`'s `if constexpr` reads.
+///
+/// Parameters:
+/// - `b`: the build graph; the result is allocated on it.
+/// - `cuda`: carries `fa_quants`.
+///
+/// Return: the flags, in CMake's order.
+fn cudaFaDefines(b: *std.Build, cuda: Cuda) []const []const u8 {
+    const fa = cudaFaCombinations(b, cuda);
+    var defines: std.ArrayList([]const u8) = .empty;
+    defines.append(b.allocator, b.fmt("-DGGML_CUDA_FA_QUANTS=\"{s}\"", .{fa.define})) catch @panic("OOM");
+    for (cuda_fa_types) |type_V| {
+        for (cuda_fa_types) |type_K| {
+            const name = b.fmt("{s}-{s}", .{ type_K, type_V });
+            const compiled = for (fa.combinations) |have| {
+                if (std.mem.eql(u8, have, name)) break true;
+            } else false;
+            const def = b.fmt("-DGGML_CUDA_FA_{s}_{s}={d}", .{ type_K, type_V, @intFromBool(compiled) });
+            _ = std.ascii.upperString(def["-D".len .. def.len - 2], def["-D".len .. def.len - 2]);
+            defines.append(b.allocator, def) catch @panic("OOM");
+        }
+    }
+    return defines.items;
+}
 
 /// Compiles upstream's `ggml-cuda` with `nvcc` and adds it to the ggml module.
 ///
@@ -560,8 +662,8 @@ const cuda_defines = [_][]const u8{
 /// `src/ggml/backend_reg.zig` calls under `config.use_cuda`.
 ///
 /// The source set is upstream's `CMakeLists.txt`'s: every `*.cu`, plus the
-/// `fattn-tile`, `fattn-mma`, `mmq`, `mmf` and -- under
-/// `GGML_CUDA_FA_ALL_QUANTS` -- `fattn-vec` template instances. One `nvcc` run
+/// `fattn-tile`, `fattn-mma`, `mmq` and `mmf` template instances, and the
+/// `fattn-vec` ones `GGML_CUDA_FA_QUANTS` selects. One `nvcc` run
 /// per file, so the build graph parallelises and caches them individually; a
 /// clean build is ~2 minutes on the GB10's 20 cores.
 ///
@@ -578,7 +680,7 @@ const cuda_defines = [_][]const u8{
 ///
 /// Return: nothing; propagates errors from reading the source directory.
 fn addCuda(b: *std.Build, mod: *std.Build.Module, cuda: Cuda) !void {
-    const files = try cudaSources(b);
+    const files = try cudaSources(b, cuda);
     if (cuda.port) {
         addCudaPort(b, mod, cuda, files);
     } else {
@@ -590,17 +692,20 @@ fn addCuda(b: *std.Build, mod: *std.Build.Module, cuda: Cuda) !void {
 /// Upstream's `ggml-cuda` source set, sorted.
 ///
 /// The set is upstream's `CMakeLists.txt`'s: every `*.cu`, plus the
-/// `fattn-tile`, `fattn-mma`, `mmq`, `mmf` and -- under
-/// `GGML_CUDA_FA_ALL_QUANTS` -- `fattn-vec` template instances.
+/// `fattn-tile`, `fattn-mma`, `mmq` and `mmf` template instances, and the
+/// `fattn-vec` instances of the combinations `cudaFaCombinations` selects.
 ///
 /// Parameters:
 /// - `b`: the build graph; the returned paths are allocated on it.
+/// - `cuda`: carries `fa_quants`.
 ///
 /// Return: paths relative to the build root; propagates directory errors.
-fn cudaSources(b: *std.Build) ![]const []const u8 {
+fn cudaSources(b: *std.Build, cuda: Cuda) ![]const []const u8 {
     const dir_path = root ++ "/ggml/src/ggml-cuda";
     var files: std.ArrayList([]const u8) = .empty;
-    const instance_prefixes = [_][]const u8{ "fattn-tile", "fattn-mma", "mmq", "mmf", "fattn-vec" };
+    const instance_prefixes = [_][]const u8{ "fattn-tile", "fattn-mma", "mmq", "mmf" };
+    const fa_combinations = cudaFaCombinations(b, cuda).combinations;
+    var fa_found: usize = 0;
     for ([_][]const u8{ "", "/template-instances" }) |sub| {
         const path = b.fmt("{s}{s}", .{ dir_path, sub });
         b.dependOnDirectoryMetadata(b.path(path));
@@ -611,13 +716,27 @@ fn cudaSources(b: *std.Build) ![]const []const u8 {
             if (entry.kind != .file) continue;
             if (!std.mem.endsWith(u8, entry.name, ".cu")) continue;
             if (sub.len != 0) {
-                const wanted = for (instance_prefixes) |prefix| {
+                const vec_prefix = "fattn-vec-instance-";
+                const wanted = if (std.mem.startsWith(u8, entry.name, vec_prefix)) vec: {
+                    const combination = entry.name[vec_prefix.len .. entry.name.len - ".cu".len];
+                    for (fa_combinations) |have| {
+                        if (std.mem.eql(u8, have, combination)) {
+                            fa_found += 1;
+                            break :vec true;
+                        }
+                    }
+                    break :vec false;
+                } else for (instance_prefixes) |prefix| {
                     if (std.mem.startsWith(u8, entry.name, prefix)) break true;
                 } else false;
                 if (!wanted) continue;
             }
             try files.append(b.allocator, b.fmt("{s}/{s}", .{ path, entry.name }));
         }
+    }
+    // CMake fails when a combination has no instance file.
+    if (fa_found != fa_combinations.len) {
+        std.debug.panic("GGML_CUDA_FA_QUANTS: {d} of {d} FlashAttention template instances exist", .{ fa_found, fa_combinations.len });
     }
     // Directory order is the filesystem's; sort so the archive is stable.
     std.mem.sort([]const u8, files.items, {}, struct {
@@ -658,6 +777,7 @@ fn nvccCompile(b: *std.Build, cuda: Cuda, file: []const u8, kind: NvccOutput, ex
     };
     const run = b.addSystemCommand(&.{ nvcc, mode, "-O3", "-std=c++17", gencode, "-use_fast_math", "-extended-lambda", "-compress-mode=size", "-Xcompiler=-Wno-pedantic,-mno-outline-atomics" });
     run.addArgs(&cuda_defines);
+    run.addArgs(cudaFaDefines(b, cuda));
     run.addArgs(extra);
     run.addDirectoryArg2(b.path(root ++ "/ggml/include"), .{ .prefix = "-I" });
     run.addDirectoryArg2(b.path(root ++ "/ggml/src"), .{ .prefix = "-I" });
@@ -799,7 +919,7 @@ pub fn addCudaRef(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     const mod = b.createModule(.{ .target = opts.target, .optimize = opts.optimize, .link_libc = true });
     var renames: std.ArrayList([]const u8) = .empty;
     for (cuda_c_exports) |name| try renames.append(b.allocator, b.fmt("-D{s}=ref_{s}", .{ name, name }));
-    for (try cudaSources(b)) |file| mod.addObjectFile(nvccCompile(b, cuda, file, .object, renames.items));
+    for (try cudaSources(b, cuda)) |file| mod.addObjectFile(nvccCompile(b, cuda, file, .object, renames.items));
     return b.addLibrary(.{ .name = "ggml-cuda-ref", .root_module = mod, .linkage = .static });
 }
 

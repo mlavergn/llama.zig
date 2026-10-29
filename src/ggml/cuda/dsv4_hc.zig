@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cuh` at v0.4.0 (`5266f24da`). The
+//! `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cuh` at v0.4.1 (`b29c606e2`). The
 //! kernels -- `dsv4_hc_comb_f32`, `dsv4_hc_pre_f32`, `dsv4_hc_post_f32` --
 //! stay CUDA. All three launch through `ggml_cuda_kernel_launch` (PDL).
 
@@ -16,7 +16,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `DSV4_HC` (dsv4-hc.cu:5 @5266f24da).
+/// Ports `DSV4_HC` (dsv4-hc.cu:5 @b29c606e2).
 const hc_n = 4;
 
 /// An `int64_t` into a `dim3` member, which is `unsigned int`.
@@ -34,7 +34,7 @@ fn srcOf(dst: *const Tensor, i: usize) *const Tensor {
     return impl.one(Tensor, dst.src[i]);
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_comb` (dsv4-hc.cu:184 @5266f24da).
+/// Ports `ggml_cuda_op_dsv4_hc_comb` (dsv4-hc.cu:184 @b29c606e2).
 pub fn opDsv4HcComb(ctx: *common.Context, dst: *Tensor) void {
     const mixes = srcOf(dst, 0);
     const scale = srcOf(dst, 1);
@@ -72,7 +72,7 @@ pub fn opDsv4HcComb(ctx: *common.Context, dst: *Tensor) void {
     });
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_pre` (dsv4-hc.cu:227 @5266f24da).
+/// Ports `ggml_cuda_op_dsv4_hc_pre` (dsv4-hc.cu:227 @b29c606e2).
 pub fn opDsv4HcPre(ctx: *common.Context, dst: *Tensor) void {
     const x = srcOf(dst, 0);
     const weights = srcOf(dst, 1);
@@ -101,7 +101,7 @@ pub fn opDsv4HcPre(ctx: *common.Context, dst: *Tensor) void {
     });
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_post` (dsv4-hc.cu:257 @5266f24da).
+/// Ports `ggml_cuda_op_dsv4_hc_post` (dsv4-hc.cu:257 @b29c606e2).
 pub fn opDsv4HcPost(ctx: *common.Context, dst: *Tensor) void {
     const x = srcOf(dst, 0);
     const residual = srcOf(dst, 1);

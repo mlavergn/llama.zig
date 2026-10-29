@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.4.0
-//! (`5266f24da`), the `__ARM_FEATURE_MATMUL_INT8` arms of five gemms. Each
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.4.1
+//! (`b29c606e2`), the `__ARM_FEATURE_MATMUL_INT8` arms of five gemms. Each
 //! declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Where these sit
@@ -89,7 +89,7 @@ inline fn deltas(p: *const [8]c.ggml_half, j: usize) f32x4 {
 // -----------------------------------------------------------------------------
 // q4_0: hand-written aarch64
 
-/// Ports `ggml_gemm_q4_0_4x8_q8_0` (arch/arm/repack.cpp:2307 @5266f24da),
+/// Ports `ggml_gemm_q4_0_4x8_q8_0` (arch/arm/repack.cpp:2307 @b29c606e2),
 /// the `__ARM_FEATURE_MATMUL_INT8` arm at line 2327.
 ///
 /// Like its 4x4 sibling in `q4_0_gemm.zig`, this is **hand-written
@@ -616,9 +616,9 @@ inline fn storeTile(s: [*]f32, bs: usize, y: usize, x: usize, acc_f32: *const [t
 /// The two formats `gemmQ45K8x8` serves.
 const Q45 = enum { q4_K, q5_K };
 
-/// Ports `ggml_gemm_q4_K_8x8_q8_K` (arch/arm/repack.cpp:3752 @5266f24da),
+/// Ports `ggml_gemm_q4_K_8x8_q8_K` (arch/arm/repack.cpp:3752 @b29c606e2),
 /// the `__ARM_FEATURE_MATMUL_INT8` arm at line 4083, and
-/// `ggml_gemm_q5_K_8x8_q8_K` (arch/arm/repack.cpp:4272 @5266f24da), the arm
+/// `ggml_gemm_q5_K_8x8_q8_K` (arch/arm/repack.cpp:4272 @b29c606e2), the arm
 /// at line 4293.
 ///
 /// One body for both because the C's two arms differ only in how a column
@@ -774,7 +774,7 @@ pub fn gemmQ5_K_8x8(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *c
     gemmQ45K8x8(.q5_K, n, s, bs, vx, vy, nr, nc);
 }
 
-/// Ports `ggml_gemm_q6_K_8x8_q8_K` (arch/arm/repack.cpp:4721 @5266f24da),
+/// Ports `ggml_gemm_q6_K_8x8_q8_K` (arch/arm/repack.cpp:4721 @b29c606e2),
 /// the `__ARM_FEATURE_MATMUL_INT8` arm at line 4742.
 ///
 /// Unlike `q4_K` and `q5_K`, the bias of 32 comes off each weight
@@ -907,7 +907,7 @@ pub fn gemmQ6_K_8x8(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *c
 // -----------------------------------------------------------------------------
 // q8_0
 
-/// Ports `ggml_gemm_q8_0_4x8_q8_0` (arch/arm/repack.cpp:5006 @5266f24da),
+/// Ports `ggml_gemm_q8_0_4x8_q8_0` (arch/arm/repack.cpp:5006 @b29c606e2),
 /// the `__ARM_FEATURE_MATMUL_INT8` arm at line 5091.
 ///
 /// Activations go in as `smmla`'s first operand here, so each accumulator

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/quantize.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/quantize.cuh` at v0.4.0 (`5266f24da`). The
+//! `llama.cpp/ggml/src/ggml-cuda/quantize.cuh` at v0.4.1 (`b29c606e2`). The
 //! `quantize_*` kernels stay CUDA.
 
 const std = @import("std");
@@ -16,20 +16,20 @@ const mmq = @import("mmq.zig");
 const c = impl.c;
 const cu = common.cu;
 
-/// Ports `CUDA_QUANTIZE_BLOCK_SIZE` (quantize.cuh:8 @5266f24da).
+/// Ports `CUDA_QUANTIZE_BLOCK_SIZE` (quantize.cuh:8 @b29c606e2).
 pub const block_size = 256;
 
-/// Ports `CUDA_QUANTIZE_BLOCK_SIZE_MMQ` (quantize.cuh:9 @5266f24da).
+/// Ports `CUDA_QUANTIZE_BLOCK_SIZE_MMQ` (quantize.cuh:9 @b29c606e2).
 pub const block_size_mmq = 128;
 
-/// Ports `quantize_cuda_t` (quantize.cuh:14 @5266f24da).
+/// Ports `quantize_cuda_t` (quantize.cuh:14 @b29c606e2).
 pub const QuantizeFn = *const fn (x: ?*const f32, ids: ?*const i32, vy: ?*anyopaque, type_src0: c.enum_ggml_type, ne00: i64, s01: i64, s02: i64, s03: i64, ne0: i64, ne1: i64, ne2: i64, ne3: i64, stream: cu.cudaStream_t) void;
 
 fn u32Of(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `quantize_row_q8_1_cuda` (quantize.cu:558 @5266f24da).
+/// Ports `quantize_row_q8_1_cuda` (quantize.cu:558 @b29c606e2).
 pub fn quantizeRowQ8_1(x: ?*const f32, ids: ?*const i32, vy: ?*anyopaque, type_src0: c.enum_ggml_type, ne00: i64, s01: i64, s02: i64, s03: i64, ne0: i64, ne1: i64, ne2: i64, ne3: i64, stream: cu.cudaStream_t) void {
     _ = type_src0;
     impl.assert(ids == null, "!ids");
@@ -49,7 +49,7 @@ fn q8_1MmqKernel(comptime layout: mmq.Q8_1DsLayout, comptime scatter: bool) kern
     return kernels.get("quantize", kernels.tmpl("quantize_mmq_q8_1", &.{ std.fmt.comptimePrint("(mmq_q8_1_ds_layout){d}", .{@backingInt(layout)}), kernels.boolean(scatter) }));
 }
 
-/// Ports `quantize_mmq_q8_1_cuda` (quantize.cu:575 @5266f24da).
+/// Ports `quantize_mmq_q8_1_cuda` (quantize.cu:575 @b29c606e2).
 pub fn quantizeMmqQ8_1(x: ?*const f32, ids: ?*const i32, vy: ?*anyopaque, type_src0: c.enum_ggml_type, ne00: i64, s01: i64, s02: i64, s03: i64, ne0: i64, ne1: i64, ne2: i64, ne3: i64, stream: cu.cudaStream_t) void {
     impl.assert(@rem(ne00, 4) == 0, "ne00 % 4 == 0");
     impl.assert(@rem(ne0, mmq.qk8_1_mmq) == 0, "ne0 % QK8_1_MMQ == 0");
@@ -68,7 +68,7 @@ pub fn quantizeMmqQ8_1(x: ?*const f32, ids: ?*const i32, vy: ?*anyopaque, type_s
     }
 }
 
-/// Ports `quantize_scatter_mmq_q8_1_cuda` (quantize.cu:606 @5266f24da).
+/// Ports `quantize_scatter_mmq_q8_1_cuda` (quantize.cu:606 @b29c606e2).
 pub fn quantizeScatterMmqQ8_1(x: ?*const f32, ids_src1_inv: ?*const i32, vy: ?*anyopaque, type_src0: c.enum_ggml_type, ne00: i64, stride_token: i64, ne0: i64, n_tokens: i64, nrows_dst: i64, n_expert_used: c_int, stream: cu.cudaStream_t) void {
     impl.assert(@rem(ne00, 4) == 0, "ne00 % 4 == 0");
     impl.assert(@rem(ne0, mmq.qk8_1_mmq) == 0, "ne0 % QK8_1_MMQ == 0");
@@ -85,7 +85,7 @@ pub fn quantizeScatterMmqQ8_1(x: ?*const f32, ids_src1_inv: ?*const i32, vy: ?*a
     }
 }
 
-/// Ports `quantize_scatter_mmq_fp4_cuda` (quantize.cu:636 @5266f24da).
+/// Ports `quantize_scatter_mmq_fp4_cuda` (quantize.cu:636 @b29c606e2).
 pub fn quantizeScatterMmqFp4(x: ?*const f32, ids_src1_inv: ?*const i32, vy: ?*anyopaque, scale: ?*f32, type_src0: c.enum_ggml_type, use_aligned_float8: bool, ne00: i64, stride_token: i64, ne0: i64, n_tokens: i64, nrows_dst: i64, n_expert_used: c_int, stream: cu.cudaStream_t) void {
     impl.assert(ne0 > 0, "ne0 > 0");
     if (type_src0 == c.GGML_TYPE_NVFP4) {
@@ -111,7 +111,7 @@ pub fn quantizeScatterMmqFp4(x: ?*const f32, ids_src1_inv: ?*const i32, vy: ?*an
     }
 }
 
-/// Ports `quantize_mmq_fp4_cuda` (quantize.cu:665 @5266f24da).
+/// Ports `quantize_mmq_fp4_cuda` (quantize.cu:665 @b29c606e2).
 pub fn quantizeMmqFp4(x: ?*const f32, ids: ?*const i32, vy: ?*anyopaque, scale: ?*f32, type_src0: c.enum_ggml_type, use_aligned_float8: bool, ne00: i64, s01: i64, s02: i64, s03: i64, ne0: i64, ne1: i64, ne2: i64, ne3: i64, stream: cu.cudaStream_t) void {
     impl.assert(type_src0 == c.GGML_TYPE_MXFP4 or type_src0 == c.GGML_TYPE_NVFP4, "type_src0 == GGML_TYPE_MXFP4 || type_src0 == GGML_TYPE_NVFP4");
     impl.assert(ne0 > 0, "ne0 > 0");

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/mtmd/mtmd-cli.cpp` at v0.4.0 (`5266f24da`).
+//! Ported from `llama.cpp/tools/mtmd/mtmd-cli.cpp` at v0.4.1 (`b29c606e2`).
 //! Each declaration names the C++ it replaces and the line it began at.
 //!
 //! # What differs
@@ -39,7 +39,7 @@ extern fn _exit(code: c_int) noreturn;
 const lc_numeric: c_int = if (builtin.os.tag.isDarwin()) 4 else if (builtin.os.tag == .windows) 4 else 1;
 
 // Ports `g_is_generating`, `g_is_interrupted` (mtmd-cli.cpp:31, 32
-// @5266f24da): volatile, because of signal being an interrupt
+// @b29c606e2): volatile, because of signal being an interrupt
 var g_is_generating_: bool = false;
 var g_is_interrupted_: bool = false;
 
@@ -53,7 +53,7 @@ fn isInterrupted() bool {
     return @as(*volatile bool, &g_is_interrupted_).*;
 }
 
-/// Ports `show_additional_info` (mtmd-cli.cpp:40 @5266f24da).
+/// Ports `show_additional_info` (mtmd-cli.cpp:40 @b29c606e2).
 fn showAdditionalInfo(argv: []const [:0]const u8) void {
     log.out("Experimental CLI for multimodal\n\n" ++
         "Usage: %s [options] -m <model> --mmproj <mmproj> --image <image> --audio <audio> -p <prompt>\n\n" ++
@@ -63,7 +63,7 @@ fn showAdditionalInfo(argv: []const [:0]const u8) void {
         "  to disable using GPU for mmproj model, add --no-mmproj-offload\n", .{argv[0].ptr});
 }
 
-/// Ports `sigint_handler` (mtmd-cli.cpp:53 @5266f24da).
+/// Ports `sigint_handler` (mtmd-cli.cpp:53 @b29c606e2).
 fn sigintHandler(signo: std.posix.SIG) callconv(.c) void {
     if (signo == std.posix.SIG.INT) {
         if (isGenerating()) {
@@ -76,13 +76,13 @@ fn sigintHandler(signo: std.posix.SIG) callconv(.c) void {
     }
 }
 
-/// Ports `inject_test_response_marker` (mtmd-cli.cpp:69 @5266f24da): only
+/// Ports `inject_test_response_marker` (mtmd-cli.cpp:69 @b29c606e2): only
 /// used by upstream's tests.sh to capture the response.
 fn injectTestResponseMarker() void {
     if (getenv("MTMD_TEST_RESPONSE_MARKER")) |env| log.out("%s\n", .{env});
 }
 
-/// Ports `mtmd_cli_context` (mtmd-cli.cpp:76 @5266f24da).
+/// Ports `mtmd_cli_context` (mtmd-cli.cpp:76 @b29c606e2).
 const CliContext = struct {
     a: std.mem.Allocator,
     ctx_vision: ?*c.mtmd_context = null,
@@ -113,7 +113,7 @@ const CliContext = struct {
     n_threads: c_int = 1,
     n_past: c.llama_pos = 0,
 
-    /// Ports the constructor `mtmd_cli_context` (mtmd-cli.cpp:109 @5266f24da). Every failure is the
+    /// Ports the constructor `mtmd_cli_context` (mtmd-cli.cpp:109 @b29c606e2). Every failure is the
     /// C++'s `exit(1)`, which runs no destructor.
     fn init(self: *CliContext, gpa: std.mem.Allocator, a: std.mem.Allocator, params: *tc.params.Params) !void {
         const llama_init = try tc.init.initFromParams(gpa, params, false);
@@ -172,7 +172,7 @@ const CliContext = struct {
         };
     }
 
-    /// Ports the destructor of `mtmd_cli_context` (mtmd-cli.cpp:150 @5266f24da), then the members in
+    /// Ports the destructor of `mtmd_cli_context` (mtmd-cli.cpp:150 @b29c606e2), then the members in
     /// reverse order of declaration.
     fn deinit(self: *CliContext) void {
         c.llama_batch_free(self.batch);
@@ -183,7 +183,7 @@ const CliContext = struct {
         if (self.ctx_vision) |v| c.mtmd_free(v);
     }
 
-    /// Ports `init_vision_context` (mtmd-cli.cpp:155 @5266f24da).
+    /// Ports `init_vision_context` (mtmd-cli.cpp:155 @b29c606e2).
     fn initVisionContext(self: *CliContext, params: *tc.params.Params) void {
         const clip_path = self.a.dupeSentinel(u8, params.mmproj.path, 0) catch tc.cExit(1);
         var mparams = c.mtmd_context_params_default();
@@ -211,13 +211,13 @@ const CliContext = struct {
         self.init_opt.video_params.ffmpeg_bin_dir = if (self.video_ffmpeg_bin_dir.len == 0) null else self.video_ffmpeg_bin_dir.ptr;
     }
 
-    /// Ports `check_antiprompt` (mtmd-cli.cpp:183 @5266f24da).
+    /// Ports `check_antiprompt` (mtmd-cli.cpp:183 @b29c606e2).
     fn checkAntiprompt(self: *const CliContext, generated_tokens: []const c.llama_token) bool {
         if (self.antiprompt_tokens.len == 0 or generated_tokens.len < self.antiprompt_tokens.len) return false;
         return std.mem.eql(c.llama_token, generated_tokens[generated_tokens.len - self.antiprompt_tokens.len ..], self.antiprompt_tokens);
     }
 
-    /// Ports `load_media` (mtmd-cli.cpp:194 @5266f24da).
+    /// Ports `load_media` (mtmd-cli.cpp:194 @b29c606e2).
     fn loadMedia(self: *CliContext, fname: []const u8) !bool {
         const f = try self.a.dupeSentinel(u8, fname, 0);
         const res = c.mtmd_helper_bitmap_init_from_file(self.ctx_vision, f.ptr, false, self.init_opt);
@@ -227,7 +227,7 @@ const CliContext = struct {
     }
 };
 
-/// Ports `generate_response` (mtmd-cli.cpp:207 @5266f24da).
+/// Ports `generate_response` (mtmd-cli.cpp:207 @b29c606e2).
 fn generateResponse(ctx: *CliContext, n_predict: c_int) !c_int {
     const a = ctx.a;
     var generated_tokens: std.ArrayList(c.llama_token) = .empty;
@@ -271,7 +271,7 @@ fn generateResponse(ctx: *CliContext, n_predict: c_int) !c_int {
     return 0;
 }
 
-/// Ports `chat_add_and_format` (mtmd-cli.cpp:250 @5266f24da).
+/// Ports `chat_add_and_format` (mtmd-cli.cpp:250 @b29c606e2).
 fn chatAddAndFormat(ctx: *CliContext, new_msg: chat.Msg) ![]const u8 {
     const a = ctx.a;
     log.dbg("chat_add_and_format: new_msg.role='%s', new_msg.content='%s'\n", .{ (try a.dupeSentinel(u8, new_msg.role, 0)).ptr, (try a.dupeSentinel(u8, new_msg.content, 0)).ptr });
@@ -280,7 +280,7 @@ fn chatAddAndFormat(ctx: *CliContext, new_msg: chat.Msg) ![]const u8 {
     return formatted;
 }
 
-/// Ports `eval_message` (mtmd-cli.cpp:260 @5266f24da).
+/// Ports `eval_message` (mtmd-cli.cpp:260 @b29c606e2).
 fn evalMessage(ctx: *CliContext, msg: chat.Msg) !c_int {
     const a = ctx.a;
     injectTestResponseMarker();
@@ -469,7 +469,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
     const System = struct {
         /// The `eval_system_prompt_if_present` lambda (mtmd-cli.cpp:465
-        /// @5266f24da).
+        /// @b29c606e2).
         fn evalIfPresent(cx: *CliContext, p: *const tc.params.Params) !c_int {
             if (p.system_prompt.len == 0) return 0;
             return evalMessage(cx, .{ .role = "system", .content = p.system_prompt });
@@ -570,7 +570,7 @@ const win32 = struct {
 };
 
 /// The Windows arm of the Ctrl+C handling, `console_ctrl_handler`
-/// (mtmd-cli.cpp:456 @5266f24da).
+/// (mtmd-cli.cpp:456 @b29c606e2).
 fn consoleCtrlHandler(ctrl_type: u32) callconv(.winapi) c_int {
     const ctrl_c_event: u32 = 0;
     if (ctrl_type == ctrl_c_event) {
@@ -580,7 +580,7 @@ fn consoleCtrlHandler(ctrl_type: u32) callconv(.winapi) c_int {
     return 0;
 }
 
-/// Ports `main` (mtmd-cli.cpp:414 @5266f24da).
+/// Ports `main` (mtmd-cli.cpp:414 @b29c606e2).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/gemma4ua.cpp` at v0.4.0
-//! (`5266f24da`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/gemma4ua.cpp` at v0.4.1
+//! (`b29c606e2`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -13,7 +13,7 @@ const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const c = impl.c;
 
-/// Ports `build` (gemma4ua.cpp:4 @5266f24da), a member of
+/// Ports `build` (gemma4ua.cpp:4 @b29c606e2), a member of
 /// `clip_graph_gemma4ua`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

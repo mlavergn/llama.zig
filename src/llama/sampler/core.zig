@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.4.0, `5266f24da`).
+//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.4.1, `b29c606e2`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //! This file and its siblings export the same C symbols with the same
 //! signatures, so `llama-context.cpp` and `llama-graph.cpp`, which stay C++
@@ -105,7 +105,7 @@ pub fn cvtzs(x: f32) i32 {
 // -----------------------------------------------------------------------------
 // ring_buffer
 
-/// Ports `ring_buffer` (llama-sampler.cpp:25 @5266f24da).
+/// Ports `ring_buffer` (llama-sampler.cpp:25 @b29c606e2).
 ///
 /// A fixed-capacity FIFO. The C++ throws `std::runtime_error` from an empty
 /// `front`/`back`/`pop_front` and from a push into zero capacity; nothing
@@ -120,7 +120,7 @@ pub fn RingBuffer(comptime T: type) type {
         pos: usize = 0,
         data: []T = &.{},
 
-        /// Ports the constructor of `ring_buffer` (llama-sampler.cpp:26 @5266f24da).
+        /// Ports the constructor of `ring_buffer` (llama-sampler.cpp:26 @b29c606e2).
         ///
         /// Parameters:
         /// - `cap`: the capacity.
@@ -159,7 +159,7 @@ pub fn RingBuffer(comptime T: type) type {
             self.pos = other.pos;
         }
 
-        /// Ports `ring_buffer`'s `front` (llama-sampler.cpp:28 @5266f24da).
+        /// Ports `ring_buffer`'s `front` (llama-sampler.cpp:28 @b29c606e2).
         ///
         /// Return: the oldest element.
         pub fn front(self: *const Self) T {
@@ -167,7 +167,7 @@ pub fn RingBuffer(comptime T: type) type {
             return self.data[self.first];
         }
 
-        /// Ports `ring_buffer`'s `push_back` (llama-sampler.cpp:56 @5266f24da).
+        /// Ports `ring_buffer`'s `push_back` (llama-sampler.cpp:56 @b29c606e2).
         ///
         /// Parameters:
         /// - `value`: the element; the oldest is overwritten when full.
@@ -184,7 +184,7 @@ pub fn RingBuffer(comptime T: type) type {
             self.pos = (self.pos + 1) % self.capacity;
         }
 
-        /// Ports `ring_buffer`'s `rat` (llama-sampler.cpp:95 @5266f24da): the
+        /// Ports `ring_buffer`'s `rat` (llama-sampler.cpp:95 @b29c606e2): the
         /// `i`-th element counting back from the newest.
         ///
         /// Parameters:
@@ -196,7 +196,7 @@ pub fn RingBuffer(comptime T: type) type {
             return self.data[(self.first + self.sz - i - 1) % self.capacity];
         }
 
-        /// Ports `ring_buffer`'s `clear` (llama-sampler.cpp:111 @5266f24da).
+        /// Ports `ring_buffer`'s `clear` (llama-sampler.cpp:111 @b29c606e2).
         ///
         /// Return: nothing.
         pub fn clear(self: *Self) void {
@@ -205,7 +205,7 @@ pub fn RingBuffer(comptime T: type) type {
             self.pos = 0;
         }
 
-        /// Ports `ring_buffer`'s `size` (llama-sampler.cpp:122 @5266f24da).
+        /// Ports `ring_buffer`'s `size` (llama-sampler.cpp:122 @b29c606e2).
         ///
         /// Return: the number of elements.
         pub fn size(self: *const Self) usize {
@@ -221,7 +221,7 @@ fn greaterLogit(_: void, a: TokenData, b: TokenData) bool {
     return a.logit > b.logit;
 }
 
-/// Ports `llama_token_data_array_partial_sort` (llama-sampler.cpp:135 @5266f24da).
+/// Ports `llama_token_data_array_partial_sort` (llama-sampler.cpp:135 @b29c606e2).
 ///
 /// Buckets the logits over [-10, 10] into 128 bins, keeps the top bins until
 /// they hold at least `npartial` candidates, sorts every full bin and
@@ -302,7 +302,7 @@ pub fn partialSortInto(cur: *const TokenDataArray, npartial: c_int, res: *std.Ar
     libcxx.partialSort(TokenData, out[ptr .. ptr + last], @intCast(npartial - ndone), {}, greaterLogit);
 }
 
-/// Ports `llama_token_data_array_partial_sort_inplace` (llama-sampler.cpp:193 @5266f24da).
+/// Ports `llama_token_data_array_partial_sort_inplace` (llama-sampler.cpp:193 @b29c606e2).
 ///
 /// Reduces `cur_p` to its top `npartial` candidates, sorted.
 ///
@@ -341,7 +341,7 @@ const ProbWeights = struct {
     }
 };
 
-/// Ports `llama_sample_dist` (llama-sampler.cpp:217 @5266f24da).
+/// Ports `llama_sample_dist` (llama-sampler.cpp:217 @b29c606e2).
 ///
 /// A fresh `std::discrete_distribution<int>` over the candidates' `p`, drawn
 /// once. libc++'s algorithm is reproduced in `libcxx.discreteDraw`.
@@ -357,7 +357,7 @@ pub fn sampleDist(cur_p: *const TokenDataArray, rng: *libcxx.Mt19937) c_int {
     return @intCast(idx);
 }
 
-/// Ports `llama_sampler_temp_impl` (llama-sampler.cpp:265 @5266f24da).
+/// Ports `llama_sampler_temp_impl` (llama-sampler.cpp:265 @b29c606e2).
 ///
 /// Scales the logits by `1/temp`, or at `temp <= 0` keeps only the first
 /// maximum and sets every other logit to -inf.
@@ -389,7 +389,7 @@ pub fn tempImpl(cur_p: *TokenDataArray, temp: f32) void {
     for (items(cur_p)) |*d| d.logit /= temp;
 }
 
-/// Ports `llama_sampler_softmax_impl` (llama-sampler.cpp:293 @5266f24da).
+/// Ports `llama_sampler_softmax_impl` (llama-sampler.cpp:293 @b29c606e2).
 ///
 /// Parameters:
 /// - `cur_p`: the candidates; at least one.
@@ -418,7 +418,7 @@ pub fn softmaxImpl(cur_p: *TokenDataArray, do_sort: bool) void {
     for (items(cur_p)) |*d| d.p /= cum_sum;
 }
 
-/// Ports `llama_sampler_top_k_impl` (llama-sampler.cpp:321 @5266f24da).
+/// Ports `llama_sampler_top_k_impl` (llama-sampler.cpp:321 @b29c606e2).
 ///
 /// Parameters:
 /// - `cur_p`: the candidates.
@@ -438,7 +438,7 @@ pub fn topKImpl(cur_p: *TokenDataArray, k_in: i32) void {
     cur_p.size = @intCast(k);
 }
 
-/// Ports `get_rng_seed` (llama-sampler.cpp:340 @5266f24da).
+/// Ports `get_rng_seed` (llama-sampler.cpp:340 @b29c606e2).
 ///
 /// `LLAMA_DEFAULT_SEED` asks for a random seed. The C++ asks
 /// `std::random_device().entropy()` once, in a function-local `static`; zero
@@ -584,7 +584,7 @@ const RandomDevice = struct {
 // -----------------------------------------------------------------------------
 // The llama_sampler API
 
-/// Ports `llama_sampler_init` (llama-sampler.cpp:355 @5266f24da).
+/// Ports `llama_sampler_init` (llama-sampler.cpp:355 @b29c606e2).
 ///
 /// Parameters:
 /// - `iface`: the vtable; borrowed, must outlive the sampler.
@@ -595,7 +595,7 @@ pub export fn llama_sampler_init(iface: [*c]SamplerI, ctx: c.llama_sampler_conte
     return create(Sampler, .{ .iface = iface, .ctx = ctx });
 }
 
-/// Ports `llama_sampler_name` (llama-sampler.cpp:364 @5266f24da).
+/// Ports `llama_sampler_name` (llama-sampler.cpp:364 @b29c606e2).
 ///
 /// Return: the sampler's name, borrowed from the sampler.
 pub export fn llama_sampler_name(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
@@ -605,7 +605,7 @@ pub export fn llama_sampler_name(smpl: [*c]const Sampler) callconv(.c) [*c]const
     return smpl.*.iface.*.name.?(smpl);
 }
 
-/// Ports `llama_sampler_accept` (llama-sampler.cpp:372 @5266f24da).
+/// Ports `llama_sampler_accept` (llama-sampler.cpp:372 @b29c606e2).
 ///
 /// Return: nothing.
 pub export fn llama_sampler_accept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
@@ -614,7 +614,7 @@ pub export fn llama_sampler_accept(smpl: [*c]Sampler, token: Token) callconv(.c)
     if (smpl.*.iface.*.accept) |f| f(smpl, token);
 }
 
-/// Ports `llama_sampler_apply` (llama-sampler.cpp:382 @5266f24da).
+/// Ports `llama_sampler_apply` (llama-sampler.cpp:382 @b29c606e2).
 ///
 /// Return: nothing.
 pub export fn llama_sampler_apply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
@@ -624,7 +624,7 @@ pub export fn llama_sampler_apply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) 
     smpl.*.iface.*.apply.?(smpl, cur_p);
 }
 
-/// Ports `llama_sampler_reset` (llama-sampler.cpp:391 @5266f24da).
+/// Ports `llama_sampler_reset` (llama-sampler.cpp:391 @b29c606e2).
 ///
 /// Return: nothing.
 pub export fn llama_sampler_reset(smpl: [*c]Sampler) callconv(.c) void {
@@ -633,7 +633,7 @@ pub export fn llama_sampler_reset(smpl: [*c]Sampler) callconv(.c) void {
     if (smpl.*.iface.*.reset) |f| f(smpl);
 }
 
-/// Ports `llama_sampler_clone` (llama-sampler.cpp:401 @5266f24da).
+/// Ports `llama_sampler_clone` (llama-sampler.cpp:401 @b29c606e2).
 ///
 /// Return: a new sampler with the same state, or null for a null input.
 pub export fn llama_sampler_clone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
@@ -648,7 +648,7 @@ pub export fn llama_sampler_clone(smpl: [*c]const Sampler) callconv(.c) [*c]Samp
     impl.abort(src, 417, "the sampler does not support cloning");
 }
 
-/// Ports `llama_sampler_free` (llama-sampler.cpp:420 @5266f24da).
+/// Ports `llama_sampler_free` (llama-sampler.cpp:420 @b29c606e2).
 ///
 /// Return: nothing.
 pub export fn llama_sampler_free(smpl: [*c]Sampler) callconv(.c) void {
@@ -662,7 +662,7 @@ pub export fn llama_sampler_free(smpl: [*c]Sampler) callconv(.c) void {
 // -----------------------------------------------------------------------------
 // The empty sampler
 
-/// Ports `llama_sampler_empty` (llama-sampler.cpp:434 @5266f24da).
+/// Ports `llama_sampler_empty` (llama-sampler.cpp:434 @b29c606e2).
 ///
 /// The placeholder each `init_*` returns for its disabled configuration --
 /// `top_k(0)`, `top_p(1.0)` and so on -- named `?top-k` and the like. It does
@@ -671,39 +671,39 @@ const Empty = struct {
     name: [*c]const u8,
 };
 
-/// Ports `llama_sampler_empty_name` (llama-sampler.cpp:440 @5266f24da).
+/// Ports `llama_sampler_empty_name` (llama-sampler.cpp:440 @b29c606e2).
 fn emptyName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
     return ctxOf(Empty, smpl).name;
 }
 
-/// Ports `llama_sampler_empty_accept` (llama-sampler.cpp:445 @5266f24da).
+/// Ports `llama_sampler_empty_accept` (llama-sampler.cpp:445 @b29c606e2).
 fn emptyAccept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
     _ = smpl;
     _ = token;
 }
 
-/// Ports `llama_sampler_empty_apply` (llama-sampler.cpp:450 @5266f24da).
+/// Ports `llama_sampler_empty_apply` (llama-sampler.cpp:450 @b29c606e2).
 fn emptyApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
     _ = smpl;
     _ = cur_p;
 }
 
-/// Ports `llama_sampler_empty_reset` (llama-sampler.cpp:455 @5266f24da).
+/// Ports `llama_sampler_empty_reset` (llama-sampler.cpp:455 @b29c606e2).
 fn emptyReset(smpl: [*c]Sampler) callconv(.c) void {
     _ = smpl;
 }
 
-/// Ports `llama_sampler_empty_clone` (llama-sampler.cpp:459 @5266f24da).
+/// Ports `llama_sampler_empty_clone` (llama-sampler.cpp:459 @b29c606e2).
 fn emptyClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     return initEmpty(ctxOf(Empty, smpl).name);
 }
 
-/// Ports `llama_sampler_empty_free` (llama-sampler.cpp:464 @5266f24da).
+/// Ports `llama_sampler_empty_free` (llama-sampler.cpp:464 @b29c606e2).
 fn emptyFree(smpl: [*c]Sampler) callconv(.c) void {
     destroy(Empty, ctxOf(Empty, smpl));
 }
 
-/// Ports `llama_sampler_empty_backend_init` (llama-sampler.cpp:468 @5266f24da).
+/// Ports `llama_sampler_empty_backend_init` (llama-sampler.cpp:468 @b29c606e2).
 fn emptyBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
     _ = smpl;
     _ = buft;
@@ -711,7 +711,7 @@ fn emptyBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_out
     return true;
 }
 
-/// Ports `llama_sampler_empty_backend_accept` (llama-sampler.cpp:479 @5266f24da).
+/// Ports `llama_sampler_empty_backend_accept` (llama-sampler.cpp:479 @b29c606e2).
 fn emptyBackendAccept(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, selected: [*c]c.struct_ggml_tensor) callconv(.c) void {
     _ = smpl;
     _ = ctx;
@@ -719,7 +719,7 @@ fn emptyBackendAccept(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.s
     _ = selected;
 }
 
-/// Ports `llama_sampler_empty_backend_apply` (llama-sampler.cpp:490 @5266f24da).
+/// Ports `llama_sampler_empty_backend_apply` (llama-sampler.cpp:490 @b29c606e2).
 fn emptyBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
     _ = smpl;
     _ = ctx;
@@ -727,12 +727,12 @@ fn emptyBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.st
     _ = data;
 }
 
-/// Ports `llama_sampler_empty_backend_set_input` (llama-sampler.cpp:501 @5266f24da).
+/// Ports `llama_sampler_empty_backend_set_input` (llama-sampler.cpp:501 @b29c606e2).
 fn emptyBackendSetInput(smpl: [*c]Sampler) callconv(.c) void {
     _ = smpl;
 }
 
-/// Ports `llama_sampler_empty_i` (llama-sampler.cpp:505 @5266f24da).
+/// Ports `llama_sampler_empty_i` (llama-sampler.cpp:505 @b29c606e2).
 var empty_iface: SamplerI = .{
     .name = emptyName,
     .accept = emptyAccept,
@@ -748,7 +748,7 @@ var empty_iface: SamplerI = .{
     .copy_state = null,
 };
 
-/// Ports `llama_sampler_init_empty` (llama-sampler.cpp:520 @5266f24da).
+/// Ports `llama_sampler_init_empty` (llama-sampler.cpp:520 @b29c606e2).
 ///
 /// Parameters:
 /// - `name`: the placeholder's name; borrowed, usually a literal.
@@ -761,7 +761,7 @@ pub fn initEmpty(name: [*c]const u8) [*c]Sampler {
 // -----------------------------------------------------------------------------
 // The backend-sampling base
 
-/// Ports `llama_sampler_backend` (llama-sampler.cpp:534 @5266f24da).
+/// Ports `llama_sampler_backend` (llama-sampler.cpp:534 @b29c606e2).
 ///
 /// Embedded first in every sampler that has a backend form. Before
 /// `backend_init` its name is the bare name; after, `+name` when the device
@@ -772,7 +772,7 @@ pub const Backend = struct {
     is_init: bool = false,
     support: bool = false,
 
-    /// Ports the constructor of `llama_sampler_backend` (llama-sampler.cpp:535 @5266f24da).
+    /// Ports the constructor of `llama_sampler_backend` (llama-sampler.cpp:535 @b29c606e2).
     ///
     /// Parameters:
     /// - `name`: the sampler's name; a literal.
@@ -782,7 +782,7 @@ pub const Backend = struct {
         return .{ .name = name };
     }
 
-    /// Ports `llama_sampler_backend`'s `get_name` (llama-sampler.cpp:537 @5266f24da).
+    /// Ports `llama_sampler_backend`'s `get_name` (llama-sampler.cpp:537 @b29c606e2).
     ///
     /// Return: the name, borrowed until the next call.
     pub fn getName(self: *Backend) [*c]const u8 {
@@ -794,7 +794,7 @@ pub const Backend = struct {
         return &self.name_ext;
     }
 
-    /// Ports `llama_sampler_backend`'s `init` (llama-sampler.cpp:551 @5266f24da).
+    /// Ports `llama_sampler_backend`'s `init` (llama-sampler.cpp:551 @b29c606e2).
     ///
     /// Parameters:
     /// - `support`: whether the device runs every op the sampler needs.
@@ -820,7 +820,7 @@ pub const Probe = struct {
     }
 };
 
-/// Ports `llama_sampler_backend_probe_graph` (llama-sampler.cpp:583 @5266f24da).
+/// Ports `llama_sampler_backend_probe_graph` (llama-sampler.cpp:583 @b29c606e2).
 ///
 /// Builds the sampler's backend graph over a dummy logits tensor, without
 /// allocating, so the ops can be checked against a device and counted.
@@ -862,7 +862,7 @@ pub fn probeGraph(sampler: [*c]Sampler, n_candidates: i64, max_nodes: u32, with_
     return .{ .ctx = ctx, .gf = gf };
 }
 
-/// Ports `llama_sampler_backend_probe_n_nodes` (llama-sampler.cpp:627 @5266f24da).
+/// Ports `llama_sampler_backend_probe_n_nodes` (llama-sampler.cpp:627 @b29c606e2).
 ///
 /// Parameters:
 /// - `probe`: a built probe graph.
@@ -877,7 +877,7 @@ pub fn probeNNodes(probe: Probe) u32 {
     return libcxx.max(u32, @intCast(c.ggml_graph_n_nodes(probe.gf)), n_tensors);
 }
 
-/// Ports `llama_sampler_backend_support` (llama-sampler.cpp:638 @5266f24da).
+/// Ports `llama_sampler_backend_support` (llama-sampler.cpp:638 @b29c606e2).
 ///
 /// Parameters:
 /// - `smpl`: the sampler.

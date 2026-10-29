@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/fattn-vec.cuh` at v0.4.0 (`5266f24da`).
+//! `llama.cpp/ggml/src/ggml-cuda/fattn-vec.cuh` at v0.4.1 (`b29c606e2`).
 //! The kernel stays CUDA, one instantiation set per (K type, V type) in
 //! `template-instances/fattn-vec-instance-<K>-<V>.cu`, which every
 //! `ggml_cuda_flash_attn_ext_vec_case` is declared `extern` against.
@@ -18,7 +18,7 @@ const fattn_common = @import("fattn_common.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `ggml_cuda_fattn_vec_get_nthreads_host` (fattn-vec.cuh:4 @5266f24da).
+/// Ports `ggml_cuda_fattn_vec_get_nthreads_host` (fattn-vec.cuh:4 @b29c606e2).
 fn getNthreadsHost(cc: c_int) c_int {
     _ = cc;
     return 128;
@@ -38,7 +38,7 @@ fn typeStem(comptime t: c.enum_ggml_type) []const u8 {
     };
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_vec_case_impl` (fattn-vec.cuh:534 @5266f24da).
+/// Ports `ggml_cuda_flash_attn_ext_vec_case_impl` (fattn-vec.cuh:532 @b29c606e2).
 fn vecCaseImpl(comptime D: comptime_int, comptime cols_per_block: comptime_int, comptime type_K: c.enum_ggml_type, comptime type_V: c.enum_ggml_type, comptime use_logit_softcap: bool, ctx: *common.Context, dst: *Tensor) void {
     const library = comptime std.fmt.comptimePrint("fattn-vec-instance-{s}-{s}", .{ typeStem(type_K), typeStem(type_V) });
     const cc = common.info().devices[@intCast(common.getDevice())].cc;
@@ -67,7 +67,7 @@ fn vecCaseImpl(comptime D: comptime_int, comptime cols_per_block: comptime_int, 
     });
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_vec_case` (fattn-vec.cuh:547 @5266f24da).
+/// Ports `ggml_cuda_flash_attn_ext_vec_case` (fattn-vec.cuh:545 @b29c606e2).
 pub fn vecCase(comptime D: comptime_int, comptime type_K: c.enum_ggml_type, comptime type_V: c.enum_ggml_type, ctx: *common.Context, dst: *Tensor) void {
     const KQV = dst;
     const Q = impl.one(Tensor, dst.src[0]);

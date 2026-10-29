@@ -229,7 +229,11 @@ fn cudaOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Cuda {
     // backend. `-Dcuda-port=false` builds upstream's instead, which only the
     // gates want -- `scripts/cuda-node-diff` diffs the two.
     const port = b.option(bool, "cuda-port", "Use the Zig CUDA host layer (default: true; false builds upstream's, for the gates)") orelse true;
-    return .{ .toolkit = toolkit, .arch = arch, .libstdcxx = libstdcxx, .port = port };
+    // Upstream's `GGML_CUDA_FA_QUANTS`. "all" is what this build compiled
+    // through v0.4.0 as `GGML_CUDA_FA_ALL_QUANTS`; a shorter list is how the
+    // f16 fallback of a K/V pair with no vector instance gets gated.
+    const fa_quants = b.option([]const u8, "cuda-fa-quants", "FlashAttention K-V type combinations to compile, \"all\" or e.g. \"q8_0-q8_0;q8_0-q4_0\" (default: all)") orelse "all";
+    return .{ .toolkit = toolkit, .arch = arch, .libstdcxx = libstdcxx, .port = port, .fa_quants = fa_quants };
 }
 
 /// Resolves `-Dblas`: ggml's BLAS backend over Apple's Accelerate.

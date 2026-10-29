@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nemotron-h-moe.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_nemotron_h_moe`'s `build_arch_graph` and its
+//! Ported from `llama.cpp/src/models/nemotron-h-moe.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_nemotron_h_moe`'s `build_arch_graph` and its
 //! `graph_mtp`. It reuses `llama_model_nemotron_h`'s loading and `graph`,
 //! in `nemotron_h.zig`.
 
@@ -20,7 +20,7 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llama_model_nemotron_h_moe`'s `build_arch_graph`
-/// (models/nemotron-h-moe.cpp:3 @5266f24da): the MTP draft head for that
+/// (models/nemotron-h-moe.cpp:3 @b29c606e2): the MTP draft head for that
 /// graph type, Nemotron-H's graph otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -28,7 +28,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_nemotron_h_moe`'s `graph_mtp`
-/// (models/nemotron-h-moe.cpp:11 @5266f24da): the MTP draft head.
+/// (models/nemotron-h-moe.cpp:11 @b29c606e2): the MTP draft head.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

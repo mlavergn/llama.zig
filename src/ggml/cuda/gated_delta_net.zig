@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/gated_delta_net.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/gated_delta_net.cuh` at v0.4.0
-//! (`5266f24da`). The kernel, `gated_delta_net_cuda`, stays CUDA.
+//! `llama.cpp/ggml/src/ggml-cuda/gated_delta_net.cuh` at v0.4.1
+//! (`b29c606e2`). The kernel, `gated_delta_net_cuda`, stays CUDA.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -19,7 +19,7 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
 /// Ports `ggml_cuda_gated_delta_net_fused_cache` (gated_delta_net.cuh:5
-/// @5266f24da): the fused kernel's recurrent-state output. Strides in
+/// @b29c606e2): the fused kernel's recurrent-state output. Strides in
 /// elements; the per-sequence stride is always `D`, set in-kernel.
 pub const FusedCache = struct {
     /// Rollback slot 0.
@@ -33,7 +33,7 @@ fn dim(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `launch_gated_delta_net` (gated_delta_net.cu:170 @5266f24da).
+/// Ports `launch_gated_delta_net` (gated_delta_net.cu:170 @b29c606e2).
 fn launchGatedDeltaNet(
     comptime kda: bool,
     comptime keep_rs_t: bool,
@@ -87,7 +87,7 @@ fn launchGatedDeltaNet(
 }
 
 /// Ports `ggml_cuda_op_gated_delta_net_impl` (gated_delta_net.cu:223
-/// @5266f24da).
+/// @b29c606e2).
 fn opGatedDeltaNetImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedCache) void {
     const src_q = impl.one(Tensor, dst.src[0]);
     const src_k = impl.one(Tensor, dst.src[1]);
@@ -186,13 +186,13 @@ fn opGatedDeltaNetImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedC
     }
 }
 
-/// Ports `ggml_cuda_op_gated_delta_net` (gated_delta_net.cu:320 @5266f24da).
+/// Ports `ggml_cuda_op_gated_delta_net` (gated_delta_net.cu:320 @b29c606e2).
 pub fn opGatedDeltaNet(ctx: *common.Context, dst: *Tensor) void {
     opGatedDeltaNetImpl(ctx, dst, null);
 }
 
 /// Ports `ggml_cuda_op_gated_delta_net_fused_cache` (gated_delta_net.cu:324
-/// @5266f24da): the same op, writing the snapshot(s) into the cache
+/// @b29c606e2): the same op, writing the snapshot(s) into the cache
 /// instead of `dst`.
 pub fn opGatedDeltaNetFusedCache(ctx: *common.Context, dst: *Tensor, cache: FusedCache) void {
     opGatedDeltaNetImpl(ctx, dst, &cache);

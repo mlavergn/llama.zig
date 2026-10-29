@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
-//! (`5266f24da`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
+//! (`b29c606e2`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -27,7 +27,7 @@ fn isF16(t: *const Tensor) usize {
     return @intFromBool(t.type == c.GGML_TYPE_F16);
 }
 
-/// Ports `ggml_vk_concat_unit_size` (ggml-vulkan.cpp:2496 @5266f24da): the
+/// Ports `ggml_vk_concat_unit_size` (ggml-vulkan.cpp:2622 @b29c606e2): the
 /// widest copy unit, for a quantized type the widest that divides a block.
 pub fn concatUnitSize(ty: c.ggml_type) u32 {
     const type_size: u32 = @intCast(c.ggml_type_size(ty));
@@ -38,7 +38,7 @@ pub fn concatUnitSize(ty: c.ggml_type) u32 {
     return 1;
 }
 
-/// Ports `ggml_vk_concat_supported` (ggml-vulkan.cpp:2516 @5266f24da).
+/// Ports `ggml_vk_concat_supported` (ggml-vulkan.cpp:2642 @b29c606e2).
 pub fn concatSupported(src0: *const Tensor, src1: *const Tensor, dst: *const Tensor) bool {
     if (src0.type != src1.type or src0.type != dst.type) return false;
     if (!c.ggml_is_quantized(src0.type)) {
@@ -49,14 +49,14 @@ pub fn concatSupported(src0: *const Tensor, src1: *const Tensor, dst: *const Ten
     return c.ggml_is_contiguous_rows(src0) and c.ggml_is_contiguous_rows(src1) and c.ggml_is_contiguous_rows(dst);
 }
 
-/// Ports `ggml_vk_dim01_contiguous` (ggml-vulkan.cpp:9035 @5266f24da).
+/// Ports `ggml_vk_dim01_contiguous` (ggml-vulkan.cpp:9200 @b29c606e2).
 pub fn dim01Contiguous(t: *const Tensor) bool {
     return t.nb[0] == c.ggml_type_size(t.type) and
         t.nb[1] == (t.nb[0] * @as(usize, @intCast(t.ne[0]))) / @as(usize, @intCast(c.ggml_blck_size(t.type))) and
         (t.ne[3] == 1 or t.nb[3] == t.nb[2] * @as(usize, @intCast(t.ne[2])));
 }
 
-/// Ports `ggml_vk_get_cpy_pipeline` (ggml-vulkan.cpp:9042 @5266f24da): a
+/// Ports `ggml_vk_get_cpy_pipeline` (ggml-vulkan.cpp:9207 @b29c606e2): a
 /// copy from `src`'s type to `to`, the contiguous variant when both sides
 /// are, the transposing ones when a swap puts the innermost dimension
 /// elsewhere.
@@ -112,7 +112,7 @@ pub fn getCpyPipeline(ctx: *BackendCtx, src: *const Tensor, dst: ?*const Tensor,
     impl.abort("fatal error");
 }
 
-/// Ports `ggml_vk_conv_select_shape` (ggml-vulkan.cpp:11263 @5266f24da):
+/// Ports `ggml_vk_conv_select_shape` (ggml-vulkan.cpp:11538 @b29c606e2):
 /// the largest tile that still gives every shader core two tiles.
 pub fn convSelectShape(ctx: *const BackendCtx, K: u32, NPQ: u32) ConvShape {
     const nTiles = struct {
@@ -151,7 +151,7 @@ fn opI32(t: *const Tensor, i: usize) u32 {
     return @bitCast(t.op_params[i]);
 }
 
-/// Ports `ggml_vk_op_get_pipeline` (ggml-vulkan.cpp:11295 @5266f24da).
+/// Ports `ggml_vk_op_get_pipeline` (ggml-vulkan.cpp:11570 @b29c606e2).
 ///
 /// Return: the pipeline, or null where the op has none for these types.
 pub fn getPipeline(ctx: *BackendCtx, src0_: ?*const Tensor, src1_: ?*const Tensor, src2_: ?*const Tensor, dst: *const Tensor, op: c.enum_ggml_op) ?*Pipeline {
@@ -303,7 +303,7 @@ pub fn getPipeline(ctx: *BackendCtx, src0_: ?*const Tensor, src1_: ?*const Tenso
         },
         c.GGML_OP_RMS_NORM => {
             if (src0_.?.type == F32 and dst.type == F32) {
-                const fused = ctx.num_additional_fused_ops > 0;
+                const fused = ctx.fused_rms_norm_mode == .mul;
                 if (ctx.do_add_rms_partials) return if (fused) dev.pipeline_rms_norm_mul_partials_f32 else dev.pipeline_rms_norm_partials_f32;
                 return if (fused) dev.pipeline_rms_norm_mul_f32 else dev.pipeline_rms_norm_f32;
             }

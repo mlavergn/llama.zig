@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/moe-weighted-reduction.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/moe-weighted-reduction.cuh` at v0.4.0
-//! (`5266f24da`), the host half. The kernel, `moe_weighted_reduction_f32`,
+//! `llama.cpp/ggml/src/ggml-cuda/moe-weighted-reduction.cuh` at v0.4.1
+//! (`b29c606e2`), the host half. The kernel, `moe_weighted_reduction_f32`,
 //! stays CUDA.
 
 const std = @import("std");
@@ -19,7 +19,7 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `launch_moe_weighted_reduction` (moe-weighted-reduction.cu:27 @5266f24da),
+/// Ports `launch_moe_weighted_reduction` (moe-weighted-reduction.cu:27 @b29c606e2),
 /// which launches with `<<<>>>`.
 fn launch(experts: ?*const anyopaque, expert_scale: ?*const anyopaque, weights: ?*const anyopaque, dst: ?*anyopaque, n_embd: i64, n_tokens: i64, n_expert_used: c_int, stream: cu.cudaStream_t) void {
     const threads = 256;
@@ -36,7 +36,7 @@ fn launch(experts: ?*const anyopaque, expert_scale: ?*const anyopaque, weights: 
     }, .{ experts, expert_scale, weights, dst, n_embd, n_expert_used });
 }
 
-/// Ports `ggml_cuda_op_moe_weighted_reduction` (moe-weighted-reduction.cu:41 @5266f24da).
+/// Ports `ggml_cuda_op_moe_weighted_reduction` (moe-weighted-reduction.cu:41 @b29c606e2).
 pub fn opMoeWeightedReduction(ctx: *common.Context, experts: *const Tensor, expert_scale: ?*const Tensor, weights: *const Tensor, dst: *Tensor) void {
     impl.assert(experts.type == c.GGML_TYPE_F32, "experts->type == GGML_TYPE_F32");
     impl.assert(weights.type == c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");

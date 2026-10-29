@@ -11,7 +11,7 @@
 //!   nests, for the order `add_tensors_from_model` walks them in
 //! - `llama.cpp/src/llama-vocab.cpp` -- `llama_vocab::get_bpe_merges`
 //!
-//! All at v0.4.0 (`5266f24da`). `llama_model_save_to_file`, which lives in
+//! All at v0.4.1 (`b29c606e2`). `llama_model_save_to_file`, which lives in
 //! `llama.cpp/src/llama.cpp`, is `api/quant.zig`'s.
 //!
 //! # Scope
@@ -67,7 +67,7 @@ fn oom() noreturn {
     impl.abort("llama-model-saver.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_saver_supports_arch` (llama-model-saver.cpp:15 @5266f24da).
+/// Ports `llama_model_saver_supports_arch` (llama-model-saver.cpp:15 @b29c606e2).
 ///
 /// Parameters:
 /// - `a`: the architecture.
@@ -75,13 +75,13 @@ fn oom() noreturn {
 /// Return: whether the saver can write a model of it.
 pub fn supportsArch(a: arch.Arch) bool {
     return switch (a) {
-        .plamo3, .gemma3, .gemma3n, .cohere2, .cohere2moe, .olmo2, .bitnet, .t5, .exaone_moe, .afmoe, .apertus, .mimo2, .step35, .muse_glimmer, .mellum, .laguna, .granite_swa, .dots3note => false,
+        .plamo3, .gemma3, .gemma3n, .cohere2, .cohere2moe, .olmo2, .bitnet, .t5, .exaone_moe, .afmoe, .apertus, .mimo2, .step35, .spark2_5, .muse_glimmer, .mellum, .laguna, .granite_swa, .dots3note, .maple => false,
         else => true,
     };
 }
 
 /// `add_tensors_from_model`'s model-level tensors, in its order
-/// (llama-model-saver.cpp:451 @5266f24da), after `tok_embd`.
+/// (llama-model-saver.cpp:454 @b29c606e2), after `tok_embd`.
 const model_fields = [_][]const u8{
     "type_embd",      "pos_embd",        "tok_norm",        "tok_norm_b",    "output_norm",        "output_norm_b",
     "output",         "output_b",        "output_norm_enc", "output_s",      "output_in_s",        "output_res_score",
@@ -90,7 +90,7 @@ const model_fields = [_][]const u8{
     "hc_head_down",   "hc_head_up",
 };
 
-/// `llama_model`'s tensors (llama-model.h:609 @5266f24da) that
+/// `llama_model`'s tensors (llama-model.h:612 @b29c606e2) that
 /// `add_tensors_from_model` does not write.
 const model_unsaved = [_][]const u8{
     "conv1d",                 "conv1d_b",            "altup_proj",           "altup_unembd_proj",
@@ -100,12 +100,12 @@ const model_unsaved = [_][]const u8{
     "dflash_selector_hidden", "dense_2_out_layers",  "dense_2_out_layers_b", "dense_3_out_layers",
 };
 
-/// Mirrors `llama_layer` (llama-model.h:251 @5266f24da) read as an array of
-/// tensor pointers, with its nested `llama_layer_posnet` (llama-model.h:163
-/// @5266f24da), `llama_layer_convnext` (llama-model.h:198 @5266f24da),
-/// `llama_layer_shortconv` (llama-model.h:214 @5266f24da),
-/// `llama_layer_nextn` (llama-model.h:220 @5266f24da) and
-/// `llama_layer_switch_lora` (llama-model.h:233 @5266f24da) in place.
+/// Mirrors `llama_layer` (llama-model.h:254 @b29c606e2) read as an array of
+/// tensor pointers, with its nested `llama_layer_posnet` (llama-model.h:166
+/// @b29c606e2), `llama_layer_convnext` (llama-model.h:201 @b29c606e2),
+/// `llama_layer_shortconv` (llama-model.h:217 @b29c606e2),
+/// `llama_layer_nextn` (llama-model.h:223 @b29c606e2) and
+/// `llama_layer_switch_lora` (llama-model.h:236 @b29c606e2) in place.
 pub const layer_fields = [_][]const u8{
     // BEGIN layer_fields
     "attn_norm",              "attn_norm_b",            "attn_norm_2",              "attn_norm_2_b",
@@ -246,7 +246,7 @@ const KeyZ = struct {
     }
 };
 
-/// Ports `llama_model_saver` (llama-model-saver.h:12 @5266f24da), built from
+/// Ports `llama_model_saver` (llama-model-saver.h:12 @b29c606e2), built from
 /// a model.
 pub const Saver = struct {
     gguf_ctx: *c.gguf_context,
@@ -255,7 +255,7 @@ pub const Saver = struct {
     arch: arch.Arch,
 
     /// Ports the constructor of `llama_model_saver` from a model
-    /// (llama-model-saver.cpp:41 @5266f24da).
+    /// (llama-model-saver.cpp:43 @b29c606e2).
     ///
     /// Parameters:
     /// - `model`: the model; borrowed for the saver's life.
@@ -263,12 +263,12 @@ pub const Saver = struct {
     /// Return: the saver; free it with `deinit`.
     pub fn init(model: *const Model) Saver {
         const ctx = c.gguf_init_empty().?;
-        impl.assert(supportsArch(model.arch), "llama-model-saver.cpp", 43, "llama_model_saver_supports_arch(model->arch)");
+        impl.assert(supportsArch(model.arch), "llama-model-saver.cpp", 45, "llama_model_saver_supports_arch(model->arch)");
         return .{ .gguf_ctx = ctx, .model = model, .arch = model.arch };
     }
 
-    /// Ports the destructor of `llama_model_saver` (llama-model-saver.cpp:49
-    /// @5266f24da).
+    /// Ports the destructor of `llama_model_saver` (llama-model-saver.cpp:51
+    /// @b29c606e2).
     ///
     /// Return: nothing.
     pub fn deinit(self: *Saver) void {
@@ -284,7 +284,7 @@ pub const Saver = struct {
     }
 
     /// Ports the scalar overloads `add_kv`, `add_kv`, `add_kv`, `add_kv` and
-    /// `add_kv` (llama-model-saver.cpp:55, 59, 63, 67, 71 @5266f24da) -- for
+    /// `add_kv` (llama-model-saver.cpp:57, 61, 65, 69, 73 @b29c606e2) -- for
     /// uint32_t, int32_t, uint64_t, float and bool -- chosen by the value's
     /// type.
     fn addScalar(self: *Saver, kv: arch.Kv, value: anytype) void {
@@ -299,14 +299,14 @@ pub const Saver = struct {
         }
     }
 
-    /// Ports the `const char *` overload of `add_kv` (llama-model-saver.cpp:75
-    /// @5266f24da).
+    /// Ports the `const char *` overload of `add_kv` (llama-model-saver.cpp:77
+    /// @b29c606e2).
     fn addCStr(self: *Saver, kv: arch.Kv, value: [*:0]const u8) void {
         const k = self.key(kv);
         c.gguf_set_val_str(self.gguf_ctx, k.ptr(), value);
     }
 
-    /// Ports the container `add_kv` (llama-model-saver.cpp:87 @5266f24da) for
+    /// Ports the container `add_kv` (llama-model-saver.cpp:89 @b29c606e2) for
     /// a `std::string`: nothing when it is empty.
     fn addString(self: *Saver, kv: arch.Kv, value: []const u8) void {
         if (value.len == 0) return;
@@ -315,12 +315,12 @@ pub const Saver = struct {
         self.addCStr(kv, z.ptr);
     }
 
-    /// Ports the container `add_kv` (llama-model-saver.cpp:87 @5266f24da) for
+    /// Ports the container `add_kv` (llama-model-saver.cpp:89 @b29c606e2) for
     /// an array: per layer, `n_layer()` values, written as one scalar when
     /// they all agree; nothing when there are none.
     fn addArr(self: *Saver, kv: arch.Kv, comptime T: type, value: []const T, per_layer: bool) void {
         const n_values: usize = if (per_layer) self.model.hparams.nLayer() else value.len;
-        impl.assert(n_values <= value.len, "llama-model-saver.cpp", 90, "n_values <= value.size()");
+        impl.assert(n_values <= value.len, "llama-model-saver.cpp", 92, "n_values <= value.size()");
 
         if (n_values == 0) return;
 
@@ -353,7 +353,7 @@ pub const Saver = struct {
     }
 
     /// Ports the `std::vector<std::string>` overload of `add_kv`
-    /// (llama-model-saver.cpp:135 @5266f24da): written even when empty.
+    /// (llama-model-saver.cpp:137 @b29c606e2): written even when empty.
     fn addStrArr(self: *Saver, kv: arch.Kv, value: []const []const u8) void {
         const tmp = allocator.alloc([*c]const u8, value.len) catch oom();
         defer allocator.free(tmp);
@@ -370,19 +370,19 @@ pub const Saver = struct {
         c.gguf_set_arr_str(self.gguf_ctx, k.ptr(), if (tmp.len == 0) null else tmp.ptr, tmp.len);
     }
 
-    /// Ports `add_tensor` (llama-model-saver.cpp:143 @5266f24da).
+    /// Ports `add_tensor` (llama-model-saver.cpp:145 @b29c606e2).
     fn addTensor(self: *Saver, tensor: ?*const Tensor) void {
         const t = tensor orelse return;
         if (c.gguf_find_tensor(self.gguf_ctx, &t.name) >= 0) {
             const name = std.mem.sliceTo(&t.name, 0);
             impl.assert(std.mem.eql(u8, name, "rope_freqs.weight") or std.mem.eql(u8, name, "rope_factors_long.weight") or
-                std.mem.eql(u8, name, "rope_factors_short.weight"), "llama-model-saver.cpp", 151, "tensor_name == \"rope_freqs.weight\" || tensor_name == \"rope_factors_long.weight\" || tensor_name == \"rope_factors_short.weight\"");
+                std.mem.eql(u8, name, "rope_factors_short.weight"), "llama-model-saver.cpp", 153, "tensor_name == \"rope_freqs.weight\" || tensor_name == \"rope_factors_long.weight\" || tensor_name == \"rope_factors_short.weight\"");
             return;
         }
         c.gguf_add_tensor(self.gguf_ctx, t);
     }
 
-    /// Ports `add_kv_from_model` (llama-model-saver.cpp:157 @5266f24da).
+    /// Ports `add_kv_from_model` (llama-model-saver.cpp:159 @b29c606e2).
     ///
     /// Parameters:
     /// - `exc`: receives the `std::out_of_range` an unnamed rope scaling
@@ -521,6 +521,7 @@ pub const Saver = struct {
         self.addScalar(.hyper_connection_count, hp.dsv4_hc_mult);
         self.addScalar(.hyper_connection_sinkhorn_iterations, hp.dsv4_hc_sinkhorn_iters);
         self.addScalar(.hyper_connection_epsilon, hp.dsv4_hc_eps);
+        self.addScalar(.hyper_connection_magnitude, hp.hc_magnitude);
         self.addScalar(.hash_layer_count, hp.dsv4_hash_layer_count);
         self.addScalar(.hyper_connection_low_rank, hp.hc_low_rank);
 
@@ -607,7 +608,7 @@ pub const Saver = struct {
         self.addScalar(.tokenizer_add_prefix, vocab.add_space_prefix);
         self.addScalar(.tokenizer_remove_extra_ws, vocab.remove_extra_whitespaces);
         // `std::vector<char>`: no branch of the template matches it.
-        if (vocab.precompiled_charsmap.items.len != 0) impl.abort("llama-model-saver.cpp", 127, "fatal error");
+        if (vocab.precompiled_charsmap.items.len != 0) impl.abort("llama-model-saver.cpp", 129, "fatal error");
         self.addScalar(.tokenizer_fim_pre_id, @as(u32, @bitCast(vocab.special_fim_pre_id)));
         self.addScalar(.tokenizer_fim_suf_id, @as(u32, @bitCast(vocab.special_fim_suf_id)));
         self.addScalar(.tokenizer_fim_mid_id, @as(u32, @bitCast(vocab.special_fim_mid_id)));
@@ -645,7 +646,7 @@ pub const Saver = struct {
         self.addScalar(.dense_3_feat_out, hp.dense_3_feat_out);
     }
 
-    /// Ports `add_tensors_from_model` (llama-model-saver.cpp:451 @5266f24da).
+    /// Ports `add_tensors_from_model` (llama-model-saver.cpp:454 @b29c606e2).
     ///
     /// Return: nothing.
     pub fn addTensorsFromModel(self: *Saver) void {
@@ -666,7 +667,7 @@ pub const Saver = struct {
         }
     }
 
-    /// Ports `save` to a path (llama-model-saver.cpp:490 @5266f24da).
+    /// Ports `save` to a path (llama-model-saver.cpp:493 @b29c606e2).
     ///
     /// Parameters:
     /// - `path_model`: where to write.
@@ -677,7 +678,7 @@ pub const Saver = struct {
     }
 };
 
-/// Ports `llama_vocab`'s `get_bpe_merges` (llama-vocab.cpp:4103 @5266f24da):
+/// Ports `llama_vocab`'s `get_bpe_merges` (llama-vocab.cpp:4121 @b29c606e2):
 /// each merge as `left right`, at its rank; a rank no pair holds stays
 /// empty.
 ///

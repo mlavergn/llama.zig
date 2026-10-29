@@ -8,7 +8,7 @@
 //!   getter with its override handling, `llama_model_loader::get_key`, and
 //!   the override map the constructor builds
 //!
-//! All at v0.4.0 (`5266f24da`).
+//! All at v0.4.1 (`b29c606e2`).
 //!
 //! # Scope
 //!
@@ -47,7 +47,7 @@ pub const Meta = struct {
     overrides: std.StringHashMapUnmanaged(c.llama_model_kv_override) = .empty,
 
     /// Ports the override half of `llama_model_loader`'s constructor
-    /// (llama-model-loader.cpp:532 @5266f24da): every override up to the
+    /// (llama-model-loader.cpp:532 @b29c606e2): every override up to the
     /// one with an empty key, the first of any repeated key kept, as
     /// `unordered_map`'s `insert` keeps it.
     ///
@@ -102,8 +102,8 @@ pub const Meta = struct {
     }
 
     /// Ports `llama_model_loader`'s `get_key` (llama-model-loader.cpp:420
-    /// @5266f24da) through `GGUFMeta::GKV<T>`'s `set` (llama-model-loader.cpp:255
-    /// @5266f24da): an override of the right type wins, logged; otherwise the
+    /// @b29c606e2) through `GGUFMeta::GKV<T>`'s `set` (llama-model-loader.cpp:255
+    /// @b29c606e2): an override of the right type wins, logged; otherwise the
     /// stored value, which must be exactly the type `T` maps to.
     ///
     /// Parameters:
@@ -136,7 +136,7 @@ pub const Meta = struct {
     }
 
     /// Ports the `llama_pooling_type` specialization of `get_key`
-    /// (llama-model-loader.cpp:446 @5266f24da): a `uint32_t` read, and
+    /// (llama-model-loader.cpp:446 @b29c606e2): a `uint32_t` read, and
     /// `LLAMA_POOLING_TYPE_UNSPECIFIED` when the key is absent.
     ///
     /// Return: the pooling type, or `error.Thrown`.
@@ -146,7 +146,7 @@ pub const Meta = struct {
     }
 
     /// Ports `llama_model_loader`'s `get_arr_n` (llama-model-loader.cpp:276
-    /// @5266f24da): the length of an array-typed key.
+    /// @b29c606e2): the length of an array-typed key.
     ///
     /// Return: the length, null when absent and not required, or
     /// `error.Thrown` -- a missing required key or a key that is not an array.
@@ -163,7 +163,7 @@ pub const Meta = struct {
     }
 
     /// Ports the `std::array` overload of `llama_model_loader`'s `get_arr`
-    /// (llama-model-loader.cpp:351 @5266f24da): an array key into `result`,
+    /// (llama-model-loader.cpp:351 @b29c606e2): an array key into `result`,
     /// whose length is `N_MAX`. A boolean array converts to 0 and 1.
     ///
     /// Parameters:
@@ -211,7 +211,7 @@ pub const Meta = struct {
     }
 
     /// Ports the `std::vector` overload of `llama_model_loader`'s `get_arr`
-    /// (llama-model-loader.cpp:305 @5266f24da): an array key as a new list.
+    /// (llama-model-loader.cpp:305 @b29c606e2): an array key as a new list.
     /// Unlike the `std::array` overload, a boolean array is refused.
     ///
     /// Parameters:
@@ -251,7 +251,7 @@ pub const Meta = struct {
     }
 
     /// Ports the `std::array` form of `llama_model_loader`'s `get_key_or_arr`
-    /// (llama-model-loader.cpp:459 @5266f24da): an array of exactly `n`
+    /// (llama-model-loader.cpp:459 @b29c606e2): an array of exactly `n`
     /// elements, or one value repeated `n` times.
     ///
     /// Parameters:
@@ -289,7 +289,7 @@ pub const Meta = struct {
     }
 
     /// Ports the scalar form of `llama_model_loader`'s `get_key_or_arr`
-    /// (llama-model-loader.cpp:503 @5266f24da): a `uint32_t`, refusing an
+    /// (llama-model-loader.cpp:503 @b29c606e2): a `uint32_t`, refusing an
     /// array -- with a throw only when the key is required.
     ///
     /// Return: the value, null when absent or an array and not required, or
@@ -314,7 +314,7 @@ fn isInt32(comptime T: type) bool {
     return T == i32 or T == u32 or T == c_int;
 }
 
-/// Ports `GGUFMeta`'s `ArrayInfo` (llama-model-loader.cpp:140 @5266f24da).
+/// Ports `GGUFMeta`'s `ArrayInfo` (llama-model-loader.cpp:140 @b29c606e2).
 const ArrayInfo = struct {
     gt: c.enum_gguf_type,
     length: usize,
@@ -365,7 +365,7 @@ fn checkType(ctx: *const c.gguf_context, k: i64, want: c.enum_gguf_type, exc: *i
     }
 }
 
-/// Ports `GGUFMeta::GKV<T>`'s `get_kv` (llama-model-loader.cpp:164 @5266f24da).
+/// Ports `GGUFMeta::GKV<T>`'s `get_kv` (llama-model-loader.cpp:164 @b29c606e2).
 fn getKv(ctx: *const c.gguf_context, comptime T: type, k: i64, exc: *impl.Exception) impl.Thrown!T {
     try checkType(ctx, k, ggufType(T), exc);
     return switch (Stored(T)) {
@@ -396,7 +396,7 @@ fn overrideTypeStr(ty: c.enum_llama_model_kv_override_type) [:0]const u8 {
 }
 
 /// Ports `GGUFMeta::GKV`'s `validate_override` (llama-model-loader.cpp:184
-/// @5266f24da): an override of the expected type is logged and taken; one
+/// @b29c606e2): an override of the expected type is logged and taken; one
 /// of another type is warned about and ignored.
 fn validateOverride(expected: c.enum_llama_model_kv_override_type, ovrd: ?*const c.llama_model_kv_override) bool {
     const o = ovrd orelse return false;
@@ -419,7 +419,7 @@ fn validateOverride(expected: c.enum_llama_model_kv_override_type, ovrd: ?*const
 
 /// Ports the four `GGUFMeta::GKV::try_override` overloads -- bool, integer,
 /// floating point, string: `try_override`, `try_override`, `try_override`,
-/// `try_override` (llama-model-loader.cpp:217, 227, 237, 247 @5266f24da).
+/// `try_override` (llama-model-loader.cpp:217, 227, 237, 247 @b29c606e2).
 /// An integer override is the `int64_t` narrowed to `T` and a float one the
 /// `double` rounded to `T`, as the C++'s assignments convert them.
 fn tryOverride(comptime T: type, ovrd: ?*const c.llama_model_kv_override) ?T {

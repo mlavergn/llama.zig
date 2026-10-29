@@ -280,6 +280,44 @@ int main(void) {
         ggml_set_loss(loss);  dump("ggml_set_loss", loss);
     }
 
+    puts("=== precision (ggml_prec_set_acc, ggml_prec_set_src) ===");
+    {
+        /* Each op gets a fresh node; every return value is printed beside the
+         * node, so a refusal arm that writes anyway shows in the params and a
+         * refusal reported as success shows in the return. */
+        const enum ggml_prec precs[] = { GGML_PREC_UNDEFINED, GGML_PREC_F32, GGML_PREC_BF16,
+                                         GGML_PREC_F16, GGML_PREC_Q8, GGML_PREC_Q4 };
+        struct ggml_tensor * w   = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 16);
+        struct ggml_tensor * as  = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 8, 16, 4);
+        struct ggml_tensor * bid = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 8, 2, 3);
+        struct ggml_tensor * ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 2, 3);
+        struct ggml_tensor * q   = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 4, 8, 1);
+        struct ggml_tensor * kk  = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 32, 2, 1);
+        struct ggml_tensor * vv  = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 32, 2, 1);
+        for (int p = 0; p < (int) (sizeof(precs) / sizeof(precs[0])); p++) {
+            struct ggml_tensor * nodes[4] = {
+                ggml_mul_mat(ctx, w, a2),
+                ggml_mul_mat_id(ctx, as, bid, ids),
+                ggml_flash_attn_ext(ctx, q, kk, vv, NULL, 0.125f, 0.0f, 0.0f),
+                ggml_add(ctx, a2, b2),
+            };
+            for (int n = 0; n < 4; n++) {
+                char label[64];
+                const bool acc = ggml_prec_set_acc(nodes[n], precs[p]);
+                snprintf(label, sizeof(label), "prec_set_acc(%d)=%d", (int) precs[p], acc);
+                dump(label, nodes[n]);
+                for (int idx = 0; idx < GGML_MAX_SRC; idx += 3) {
+                    const bool src = ggml_prec_set_src(nodes[n], precs[p], idx);
+                    snprintf(label, sizeof(label), "prec_set_src(%d,%d)=%d", (int) precs[p], idx, src);
+                    dump(label, nodes[n]);
+                }
+                const bool src1 = ggml_prec_set_src(nodes[n], precs[p], 1);
+                snprintf(label, sizeof(label), "prec_set_src(%d,1)=%d", (int) precs[p], src1);
+                dump(label, nodes[n]);
+            }
+        }
+    }
+
     puts("=== type and shape queries ===");
     for (int t = 0; t < GGML_TYPE_COUNT; t++) {
         printf("type %2d %-12s blck=%lld size=%zu quant=%d\n", t,

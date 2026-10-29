@@ -9,8 +9,8 @@
 // model per architecture through `llama_model_saver`, and those files are
 // what `scripts/arch-model-diff` loads through the C++ and the port.
 //
-// `common_batch_add` is copied from `llama.cpp/common/common.cpp` at v0.4.0
-// (`5266f24da`); the logging is reduced to stderr, which is all the test
+// `common_batch_add` is copied from `llama.cpp/common/common.cpp` at v0.4.1
+// (`b29c606e2`); the logging is reduced to stderr, which is all the test
 // needs: it only ever logs progress and errors.
 
 #include "common.h"
@@ -20,7 +20,7 @@
 #include <cstdio>
 
 // The threshold the LOG_* macros compare against, as `common/log.cpp` keeps
-// it (log.cpp:29, 31, 35 @5266f24da): since v0.4.0 the test raises it to
+// it (log.cpp:30, 32, 36 @b29c606e2): since v0.4.0 the test raises it to
 // LOG_LEVEL_DEBUG at start-up and filters libllama's log by
 // `common_log_get_verbosity` itself.
 int common_log_verbosity_thold = LOG_DEFAULT_LLAMA;
@@ -33,7 +33,7 @@ void common_log_set_verbosity_thold(int verbosity) {
     common_log_verbosity_thold = verbosity;
 }
 
-// Copied from `common/log.cpp` (log.cpp:441 @5266f24da).
+// Copied from `common/log.cpp` (log.cpp:529 @b29c606e2).
 int common_log_get_verbosity(enum ggml_log_level level) {
     switch (level) {
         case GGML_LOG_LEVEL_DEBUG: return LOG_LEVEL_DEBUG;

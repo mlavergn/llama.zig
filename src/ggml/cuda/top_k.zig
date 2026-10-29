@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/top-k.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/top-k.cuh` at v0.4.0 (`5266f24da`). It has
+//! `llama.cpp/ggml/src/ggml-cuda/top-k.cuh` at v0.4.1 (`b29c606e2`). It has
 //! no kernel of its own: it sorts with `argsort.zig`'s row sorters and
 //! copies the first `k` columns.
 //!
@@ -23,9 +23,9 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `ggml_cuda_op_top_k` (top-k.cu:213 @5266f24da), the
+/// Ports `ggml_cuda_op_top_k` (top-k.cu:213 @b29c606e2), the
 /// `GGML_CUDA_USE_CUB` arm without `CUB_TOP_K_AVAILABLE`, with that arm's
-/// own `next_power_of_2` (top-k.cu:41 @5266f24da), which is `argsort.cu`'s.
+/// own `next_power_of_2` (top-k.cu:41 @b29c606e2), which is `argsort.cu`'s.
 pub fn opTopK(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     var src0_d: [*]const f32 = @ptrCast(@alignCast(src0.data.?));

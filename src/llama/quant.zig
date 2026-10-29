@@ -13,7 +13,7 @@
 //! - `llama.cpp/src/llama-ext.h` -- `llama_quant_model_desc`
 //! - `llama.cpp/src/llama-impl.cpp` -- `llama_format_tensor_shape`
 //!
-//! All at v0.4.0 (`5266f24da`). The C entry points are `api/quant.zig`'s.
+//! All at v0.4.1 (`b29c606e2`). The C entry points are `api/quant.zig`'s.
 //!
 //! # The contract
 //!
@@ -55,7 +55,7 @@ const Tensor = c.ggml_tensor;
 const GgmlType = c.enum_ggml_type;
 const Ftype = c.enum_llama_ftype;
 
-/// Ports `LLAMA_QUANT_MAX_BUF_SIZE` (llama-quant.cpp:42 @5266f24da): the
+/// Ports `LLAMA_QUANT_MAX_BUF_SIZE` (llama-quant.cpp:42 @b29c606e2): the
 /// most tensor data kept in memory while quantizing one tensor.
 pub const max_buf_size_default: usize = 8 * 1024 * 1024 * 1024;
 
@@ -95,7 +95,7 @@ const KeyZ = struct {
 // -----------------------------------------------------------------------------
 // Tensor categories
 
-/// Mirrors `tensor_category` (llama-quant.cpp:26 @5266f24da).
+/// Mirrors `tensor_category` (llama-quant.cpp:26 @b29c606e2).
 pub const Category = enum {
     token_embd,
     attention_q,
@@ -111,17 +111,17 @@ pub const Category = enum {
     other,
 };
 
-/// Ports `tensor_name_match_token_embd` (llama-quant.cpp:104 @5266f24da).
+/// Ports `tensor_name_match_token_embd` (llama-quant.cpp:104 @b29c606e2).
 fn nameMatchTokenEmbd(name: []const u8) bool {
     return std.mem.eql(u8, name, "token_embd.weight") or std.mem.eql(u8, name, "per_layer_token_embd.weight");
 }
 
-/// Ports `tensor_name_match_output_weight` (llama-quant.cpp:109 @5266f24da).
+/// Ports `tensor_name_match_output_weight` (llama-quant.cpp:109 @b29c606e2).
 fn nameMatchOutputWeight(name: []const u8) bool {
     return std.mem.eql(u8, name, "output.weight");
 }
 
-/// Ports `tensor_get_category` (llama-quant.cpp:119 @5266f24da).
+/// Ports `tensor_get_category` (llama-quant.cpp:119 @b29c606e2).
 ///
 /// Parameters:
 /// - `name`: the tensor's name.
@@ -142,7 +142,7 @@ pub fn getCategory(name: []const u8) Category {
     return .other;
 }
 
-/// Ports `category_is_attn_v` (llama-quant.cpp:157 @5266f24da).
+/// Ports `category_is_attn_v` (llama-quant.cpp:157 @b29c606e2).
 fn categoryIsAttnV(cat: Category) bool {
     return cat == .attention_v or cat == .attention_qkv or cat == .attention_kv_b;
 }
@@ -156,7 +156,7 @@ const Pattern = struct {
     type: GgmlType,
 };
 
-/// Ports `quantize_state_impl` (llama-quant.cpp:167 @5266f24da).
+/// Ports `quantize_state_impl` (llama-quant.cpp:167 @b29c606e2).
 pub const State = struct {
     model: *const Model,
     params: *const c.llama_model_quantize_params,
@@ -181,7 +181,7 @@ pub const State = struct {
     tensor_type_patterns: std.ArrayList(Pattern) = .empty,
 
     /// Ports the constructor of `quantize_state_impl` (llama-quant.cpp:190
-    /// @5266f24da): every override pattern is compiled, in order, and the
+    /// @b29c606e2): every override pattern is compiled, in order, and the
     /// first that fails throws its `regex_error`.
     ///
     /// Parameters:
@@ -211,7 +211,7 @@ pub const State = struct {
     }
 };
 
-/// Mirrors `tensor_metadata` (llama-quant.cpp:203 @5266f24da).
+/// Mirrors `tensor_metadata` (llama-quant.cpp:203 @b29c606e2).
 const Metadata = struct {
     name: [:0]u8 = undefined,
     target_type: GgmlType = 0,
@@ -269,7 +269,7 @@ const LayerMap = struct {
     }
 };
 
-/// Ports `remap_layer` (llama-quant.cpp:51 @5266f24da).
+/// Ports `remap_layer` (llama-quant.cpp:51 @b29c606e2).
 ///
 /// Return: the new name, owned by the caller: empty when the block is
 /// pruned, `orig_name` when nothing moves.
@@ -303,7 +303,7 @@ fn remapLayer(re: *const regex.Regex, orig_name: []const u8, prune: []const c_in
     return allocator.dupe(u8, orig_name) catch oom();
 }
 
-/// Ports `remap_imatrix` (llama-quant.cpp:79 @5266f24da).
+/// Ports `remap_imatrix` (llama-quant.cpp:79 @b29c606e2).
 ///
 /// Return: the name the imatrix knows the tensor by, owned by the caller.
 fn remapImatrix(re: *const regex.Regex, orig_name: [:0]const u8, mapped: *const LayerMap, exc: *Exception) Thrown![]u8 {
@@ -330,7 +330,7 @@ fn remapImatrix(re: *const regex.Regex, orig_name: [:0]const u8, mapped: *const 
 // -----------------------------------------------------------------------------
 // Dequantization
 
-/// Ports `llama_tensor_dequantize_impl` (llama-quant.cpp:216 @5266f24da):
+/// Ports `llama_tensor_dequantize_impl` (llama-quant.cpp:216 @b29c606e2):
 /// `nelements` of `type` at `data` as f32 in `f32_output`, split across
 /// `nthread` threads.
 fn dequantize(ty: GgmlType, data: *const anyopaque, f32_output: [*]f32, nelements: usize, nthread: c_int, exc: *Exception) Thrown!void {
@@ -380,7 +380,7 @@ fn dequantize(ty: GgmlType, data: *const anyopaque, f32_output: [*]f32, nelement
 }
 
 /// The `compute` lambda of `llama_tensor_dequantize_impl`
-/// (llama-quant.cpp:216 @5266f24da).
+/// (llama-quant.cpp:216 @b29c606e2).
 fn convertRun(ty: GgmlType, to_float: c.ggml_to_float_t, inbuf: [*]const u8, outbuf: [*]f32, nels: i64) void {
     if (ty == c.GGML_TYPE_F16) {
         c.ggml_fp16_to_fp32_row(@ptrCast(@alignCast(inbuf)), outbuf, nels);
@@ -394,7 +394,7 @@ fn convertRun(ty: GgmlType, to_float: c.ggml_to_float_t, inbuf: [*]const u8, out
 // -----------------------------------------------------------------------------
 // Which tensors are quantized
 
-/// Ports `tensor_allows_quantization` (llama-quant.cpp:287 @5266f24da).
+/// Ports `tensor_allows_quantization` (llama-quant.cpp:287 @b29c606e2).
 ///
 /// Parameters:
 /// - `params`: the quantization parameters.
@@ -457,7 +457,7 @@ pub fn tensorAllowsQuantization(params: *const c.llama_model_quantize_params, a:
 // -----------------------------------------------------------------------------
 // Type selection
 
-/// Ports `tensor_type_fallback` (llama-quant.cpp:372 @5266f24da): a type
+/// Ports `tensor_type_fallback` (llama-quant.cpp:372 @b29c606e2): a type
 /// whose block the tensor's rows can hold. A 32-block target with no
 /// fallback of its own goes straight to the F16 check.
 fn typeFallback(qs: *State, t: *const Tensor, target_type: GgmlType, exc: *Exception) Thrown!GgmlType {
@@ -511,14 +511,14 @@ fn typeFallback(qs: *State, t: *const Tensor, target_type: GgmlType, exc: *Excep
 }
 
 /// The `use_more_bits` lambda of `llama_tensor_get_type_impl`
-/// (llama-quant.cpp:428 @5266f24da), with C's truncating division.
+/// (llama-quant.cpp:428 @b29c606e2), with C's truncating division.
 fn useMoreBits(i_layer: c_int, n_layers: c_int) bool {
     return i_layer < @divTrunc(n_layers, 8) or i_layer >= @divTrunc(7 * n_layers, 8) or
         @rem(i_layer - @divTrunc(n_layers, 8), 3) == 2;
 }
 
 /// The `layer_info` lambda of `llama_tensor_get_type_impl`
-/// (llama-quant.cpp:428 @5266f24da): with experts, the layer is read from
+/// (llama-quant.cpp:428 @b29c606e2): with experts, the layer is read from
 /// the name.
 fn layerInfo(n_expert: c_int, i_layer_in: c_int, n_layer: c_int, name: [:0]const u8, exc: *Exception) Thrown![2]c_int {
     var i_layer = i_layer_in;
@@ -533,7 +533,7 @@ fn layerInfo(n_expert: c_int, i_layer_in: c_int, n_layer: c_int, name: [:0]const
     return .{ i_layer, n_layer };
 }
 
-/// Ports `llama_tensor_get_type_impl` (llama-quant.cpp:428 @5266f24da): the
+/// Ports `llama_tensor_get_type_impl` (llama-quant.cpp:428 @b29c606e2): the
 /// standard mixture for a file type, by category, layer and architecture.
 fn getTypeImpl(qs: *State, new_type_in: GgmlType, tensor: *const Tensor, ftype: Ftype, category: Category, exc: *Exception) Thrown!GgmlType {
     var new_type = new_type_in;
@@ -779,7 +779,7 @@ fn getTypeImpl(qs: *State, new_type_in: GgmlType, tensor: *const Tensor, ftype: 
     return new_type;
 }
 
-/// Ports `llama_tensor_get_type` (llama-quant.cpp:683 @5266f24da): the type
+/// Ports `llama_tensor_get_type` (llama-quant.cpp:683 @b29c606e2): the type
 /// a tensor is written as -- the user's overrides, else the mixture, then
 /// the fallback for its shape.
 fn getType(qs: *State, params: *const c.llama_model_quantize_params, tensor: *const Tensor, default_type: GgmlType, category: Category, exc: *Exception) Thrown!GgmlType {
@@ -859,14 +859,14 @@ const QuantizeJob = struct {
     imatrix: ?[*]const f32,
 
     /// The `imatrix_for_row` lambda of `llama_tensor_quantize_impl`
-    /// (llama-quant.cpp:747 @5266f24da): each expert has its own slice.
+    /// (llama-quant.cpp:747 @b29c606e2): each expert has its own slice.
     fn imatrixForRow(imatrix: ?[*]const f32, row_global: i64, nrows_per_expert: i64, n_per_row: i64) ?[*]const f32 {
         const im = imatrix orelse return null;
         return im + @as(usize, @intCast(@divTrunc(row_global, nrows_per_expert) * n_per_row));
     }
 
     /// The `compute` lambda of `llama_tensor_quantize_impl`
-    /// (llama-quant.cpp:747 @5266f24da). The C++ takes its rows -- up to a
+    /// (llama-quant.cpp:747 @b29c606e2). The C++ takes its rows -- up to a
     /// chunk, never past an expert boundary -- and adds its total under a
     /// mutex; a compare-and-swap on the counter and an atomic add are the
     /// same exchange.
@@ -902,7 +902,7 @@ const QuantizeJob = struct {
     }
 };
 
-/// Ports `llama_tensor_quantize_impl` (llama-quant.cpp:747 @5266f24da):
+/// Ports `llama_tensor_quantize_impl` (llama-quant.cpp:747 @b29c606e2):
 /// rows `[first_row, first_row + nrows)`, indexed across every expert's
 /// matrix, of `f32_data` as `new_type`, chunk by chunk on `nthread`
 /// threads. A chunk never crosses an expert boundary, since each expert has
@@ -957,7 +957,7 @@ fn quantizeRows(new_type: GgmlType, f32_data: [*]const f32, new_data: [*]u8, chu
     return job.new_size.load(.seq_cst);
 }
 
-/// Ports `tensor_requires_imatrix` (llama-quant.cpp:822 @5266f24da).
+/// Ports `tensor_requires_imatrix` (llama-quant.cpp:822 @b29c606e2).
 fn requiresImatrix(tensor_name: []const u8, dst_type: GgmlType, ftype: Ftype) bool {
     if (nameMatchTokenEmbd(tensor_name) or nameMatchOutputWeight(tensor_name)) return false;
     return switch (dst_type) {
@@ -974,7 +974,7 @@ fn requiresImatrix(tensor_name: []const u8, dst_type: GgmlType, ftype: Ftype) bo
     };
 }
 
-/// Ports `llama_ftype_get_default_type` (llama-quant.cpp:847 @5266f24da).
+/// Ports `llama_ftype_get_default_type` (llama-quant.cpp:847 @b29c606e2).
 ///
 /// Parameters:
 /// - `ftype`: the file type.
@@ -1019,7 +1019,7 @@ pub fn ftypeGetDefaultType(ftype: Ftype) GgmlType {
     };
 }
 
-/// Ports `init_quantize_state_counters` (llama-quant.cpp:893 @5266f24da).
+/// Ports `init_quantize_state_counters` (llama-quant.cpp:893 @b29c606e2).
 fn initCounters(qs: *State, names: []const []const u8, categories: []Category) void {
     for (names, categories) |name, *cat_out| {
         const cat = getCategory(name);
@@ -1033,7 +1033,7 @@ fn initCounters(qs: *State, names: []const []const u8, categories: []Category) v
     qs.n_ffn_up = n;
 }
 
-/// Ports `llama_format_tensor_shape` for a tensor (llama-impl.cpp:110 @5266f24da).
+/// Ports `llama_format_tensor_shape` for a tensor (llama-impl.cpp:110 @b29c606e2).
 fn formatTensorShape(t: *const Tensor, buf: *[256]u8) [*:0]const u8 {
     var len: usize = @intCast(c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, t.ne[0])));
     var i: usize = 1;
@@ -1066,7 +1066,7 @@ const OutFile = struct {
         if (n != 0) _ = c.fwrite(data, 1, n, self.fp);
     }
 
-    /// Ports `zeros` (llama-quant.cpp:44 @5266f24da).
+    /// Ports `zeros` (llama-quant.cpp:44 @b29c606e2).
     fn zeros(self: *OutFile, n: usize) void {
         const z: [4096]u8 = @splat(0);
         var left = n;
@@ -1091,7 +1091,7 @@ const OutFile = struct {
 // The driver
 
 /// The `load_range` lambda of `llama_model_quantize_impl`
-/// (llama-quant.cpp:913 @5266f24da): a byte range of the current tensor,
+/// (llama-quant.cpp:913 @b29c606e2): a byte range of the current tensor,
 /// read into `read_data` without mmap.
 fn loadRange(ml: *const loader.Loader, weight: *const loader.Weight, read_data: *std.ArrayList(u8), offs: usize, size: usize, exc: *Exception) Thrown!?*const anyopaque {
     if (!ml.use_mmap and read_data.items.len < size) read_data.resize(allocator, size) catch oom();
@@ -1104,7 +1104,7 @@ fn mib(n: usize) f64 {
     return @as(f64, @floatFromInt(n)) / 1024.0 / 1024.0;
 }
 
-/// Ports `llama_model_quantize_impl` (llama-quant.cpp:913 @5266f24da).
+/// Ports `llama_model_quantize_impl` (llama-quant.cpp:913 @b29c606e2).
 ///
 /// Parameters:
 /// - `fname_inp`: the model to read.
@@ -1561,7 +1561,7 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     }
 }
 
-/// Ports `llama_model_quantize_default_params` (llama-quant.cpp:1365 @5266f24da).
+/// Ports `llama_model_quantize_default_params` (llama-quant.cpp:1365 @b29c606e2).
 ///
 /// Return: the default parameters.
 pub fn defaultParams() c.llama_model_quantize_params {
@@ -1587,7 +1587,7 @@ pub fn defaultParams() c.llama_model_quantize_params {
 // -----------------------------------------------------------------------------
 // The type-selection helpers of llama-ext.h
 
-/// Mirrors `llama_quant_model_desc` (llama-ext.h:31 @5266f24da).
+/// Mirrors `llama_quant_model_desc` (llama-ext.h:31 @b29c606e2).
 pub const ModelDesc = extern struct {
     architecture: [*:0]const u8,
     n_embd: u32,
@@ -1600,7 +1600,7 @@ pub const ModelDesc = extern struct {
     n_embd_head_v: u32,
 };
 
-/// Ports `llama_quant_init` (llama-quant.cpp:1405 @5266f24da).
+/// Ports `llama_quant_init` (llama-quant.cpp:1405 @b29c606e2).
 ///
 /// Parameters:
 /// - `model`: the model; borrowed for the state's life.
@@ -1615,7 +1615,7 @@ pub fn quantInit(model: *const Model, params: *const c.llama_model_quantize_para
     return qs;
 }
 
-/// Ports `llama_quant_free` (llama-quant.cpp:1411 @5266f24da).
+/// Ports `llama_quant_free` (llama-quant.cpp:1411 @b29c606e2).
 ///
 /// Return: nothing.
 pub fn quantFree(qs: *State) void {
@@ -1623,7 +1623,7 @@ pub fn quantFree(qs: *State) void {
     allocator.destroy(qs);
 }
 
-/// Ports `llama_quant_model_from_metadata` (llama-quant.cpp:1415 @5266f24da):
+/// Ports `llama_quant_model_from_metadata` (llama-quant.cpp:1415 @b29c606e2):
 /// a model with only what type selection reads.
 ///
 /// Parameters:
@@ -1659,14 +1659,14 @@ pub fn modelFromMetadata(desc: *const ModelDesc, exc: *Exception) Thrown!*Model 
 }
 
 /// Ports `llama_quant_tensor_allows_quantization` (llama-quant.cpp:1442
-/// @5266f24da).
+/// @b29c606e2).
 ///
 /// Return: whether `tensor` may be quantized under `qs`'s parameters.
 pub fn quantTensorAllowsQuantization(qs: *const State, tensor: *const Tensor) bool {
     return tensorAllowsQuantization(qs.params, qs.model.arch, tensor);
 }
 
-/// Ports `llama_quant_compute_types` (llama-quant.cpp:1448 @5266f24da): the
+/// Ports `llama_quant_compute_types` (llama-quant.cpp:1448 @b29c606e2): the
 /// type each tensor would get, with the state reset first.
 ///
 /// Parameters:

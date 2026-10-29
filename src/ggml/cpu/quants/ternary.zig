@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.4.0, `5266f24da`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.4.1, `b29c606e2`),
 //! the `_generic` dot products at lines 481 and 533. Each function names the C
 //! it replaces and the line it began at.
 //!
@@ -42,11 +42,11 @@ inline fn as(comptime Block: type, p: ?*const anyopaque) [*]const Block {
     return @ptrCast(@alignCast(p.?));
 }
 
-/// Ports `pow3` (ggml-cpu/quants.c:493 @5266f24da).
+/// Ports `pow3` (ggml-cpu/quants.c:493 @b29c606e2).
 const pow3 = [6]u8{ 1, 3, 9, 27, 81, 243 };
 
 /// One base-three digit, as `ggml_vec_dot_tq1_0_q8_K_generic` extracts it
-/// (ggml-cpu/quants.c:481 @5266f24da).
+/// (ggml-cpu/quants.c:481 @b29c606e2).
 ///
 /// Parameters:
 /// - `byte`: the packed byte, holding five digits as a base-3 fraction of 256.
@@ -62,7 +62,7 @@ inline fn digit(byte: u8, l: usize) u16 {
     return (@as(u16, q) * 3) >> 8;
 }
 
-/// Ports `ggml_vec_dot_tq1_0_q8_K_generic` (ggml-cpu/quants.c:481 @5266f24da).
+/// Ports `ggml_vec_dot_tq1_0_q8_K_generic` (ggml-cpu/quants.c:481 @b29c606e2).
 ///
 /// The 256 weights of a super-block are stored as 5 digits per byte across
 /// `qs`, plus a 4-digit tail in `qh`. `qs` is 48 bytes, so the first loop
@@ -131,7 +131,7 @@ pub export fn ggml_vec_dot_tq1_0_q8_K_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_tq2_0_q8_K_generic` (ggml-cpu/quants.c:533 @5266f24da).
+/// Ports `ggml_vec_dot_tq2_0_q8_K_generic` (ggml-cpu/quants.c:533 @b29c606e2).
 ///
 /// Four two-bit digits per byte, mapped `{0,1,2} -> {-1,0,1}` by subtracting
 /// one. Simpler than `tq1_0` because two bits waste a quarter of the range in
@@ -198,7 +198,7 @@ test "tq2_0 dot matches the C" {
 }
 
 /// Packs five ternary digits exactly as `quantize_row_tq1_0_ref` does
-/// (ggml-quants.c:2316 @5266f24da), for the round trip below.
+/// (ggml-quants.c:2316 @b29c606e2), for the round trip below.
 fn pack5(digits: [5]u8) u8 {
     var q: u16 = 0;
     for (digits) |d| {

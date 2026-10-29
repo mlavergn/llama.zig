@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
-//! (`5266f24da`). The C++ spells each family of pipelines as a macro
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
+//! (`b29c606e2`). The C++ spells each family of pipelines as a macro
 //! pasting the shader's variable name together (`NAMELC ## F16ACC ##
 //! _cm2_data`); the port pastes the same name at comptime and looks it up
 //! in the generated shader table with `@field`, so a misspelt name is a
@@ -28,8 +28,8 @@ const vk = common.vk;
 const allocator = common.allocator;
 const Device = m.device.Device;
 const Pipeline = m.pipeline.Pipeline;
-const MatmulPipeline = m.pipeline.MatmulPipeline;
-const MatmulPipeline2 = m.pipeline.MatmulPipeline2;
+const MatmulPipelineKey = m.pipeline.MatmulPipelineKey;
+const MatmulPipelinePair = m.pipeline.MatmulPipelinePair;
 const glslc = m.instance.glslc;
 const push = m.push;
 
@@ -72,7 +72,7 @@ pub const Tile = struct {
     }
 };
 
-/// Ports `ggml_vk_matmul_shmem_support` (ggml-vulkan.cpp:4010 @5266f24da):
+/// Ports `ggml_vk_matmul_shmem_support` (ggml-vulkan.cpp:4166 @b29c606e2):
 /// whether a float matmul tile fits in shared memory.
 pub fn matmulShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: bool, src0_type: c.ggml_type) bool {
     const lut_size: u32 = switch (src0_type) {
@@ -105,7 +105,7 @@ pub fn matmulShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: boo
     return total_size <= device.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `ggml_vk_matmul_int_shmem_support` (ggml-vulkan.cpp:4074 @5266f24da):
+/// Ports `ggml_vk_matmul_int_shmem_support` (ggml-vulkan.cpp:4230 @b29c606e2):
 /// the same question for the q8_1 integer-dot matmul's layout.
 pub fn matmulIntShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: bool, src0_type: c.ggml_type) bool {
     // FLOAT_TYPE in the shader is float16_t with fp16 support, otherwise float.
@@ -160,7 +160,7 @@ pub fn matmulIntShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: 
     return total_size <= device.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `fa_block_bytes` (ggml-vulkan.cpp:3982 @5266f24da): bytes per
+/// Ports `fa_block_bytes` (ggml-vulkan.cpp:4138 @b29c606e2): bytes per
 /// buffer block for the FaBlockBytesK/V spec constants. F32 is fed as a
 /// vec4 "block" of 4 floats, everything else uses its ggml block size.
 fn faBlockBytes(t: c.ggml_type) u32 {
@@ -168,7 +168,7 @@ fn faBlockBytes(t: c.ggml_type) u32 {
     return @intCast(c.ggml_type_size(t));
 }
 
-/// Ports `get_fa_spec_constants` (ggml-vulkan.cpp:3989 @5266f24da).
+/// Ports `get_fa_spec_constants` (ggml-vulkan.cpp:4145 @b29c606e2).
 pub fn faSpecConstants(state: m.device.FaPipelineState) Tile {
     return Tile.of(.{
         state.workgroup_size, // 0 WorkGroupSize
@@ -190,12 +190,12 @@ pub fn faSpecConstants(state: m.device.FaPipelineState) Tile {
     });
 }
 
-/// Ports `ggml_vk_fa_type_needs_shmem` (ggml-vulkan.cpp:4203 @5266f24da).
+/// Ports `ggml_vk_fa_type_needs_shmem` (ggml-vulkan.cpp:4359 @b29c606e2).
 fn faTypeNeedsShmem(t: c.ggml_type) bool {
     return t == c.GGML_TYPE_IQ4_NL;
 }
 
-/// Ports `ggml_vk_fa_scalar_uses_mmq` (ggml-vulkan.cpp:4212 @5266f24da):
+/// Ports `ggml_vk_fa_scalar_uses_mmq` (ggml-vulkan.cpp:4368 @b29c606e2):
 /// whether scalar flash attention takes the integer-dot path.
 pub fn faScalarUsesMmq(device: *const Device, k_type: c.ggml_type, v_type: c.ggml_type) bool {
     if (comptime !glslc.integer_dot) return false;
@@ -227,7 +227,7 @@ const Walk = struct {
     wait_pipeline: ?*Pipeline = null,
     claimed: ?struct { pipeline: *Pipeline, args: m.pipeline.CompileArgs } = null,
 
-    /// The `ggml_vk_create_pipeline` lambda (ggml-vulkan.cpp:4477 @5266f24da):
+    /// The `ggml_vk_create_pipeline` lambda (ggml-vulkan.cpp:4631 @b29c606e2):
     /// records the pipeline's description on first sight, and claims it for
     /// compilation if it is the one requested and nobody has yet.
     fn create(w: *Walk, base: *?*Pipeline, name: []const u8, a: Args) void {
@@ -330,17 +330,11 @@ const Tiles = struct {
     s_align: u32 = 0,
 };
 
-/// The three sizes and their aligned twins, in the macros' call order.
-const sizes = [_]struct { size: []const u8, slot: []const u8, aligned: bool }{
-    .{ .size = "l", .slot = "l", .aligned = false },
-    .{ .size = "m", .slot = "m", .aligned = false },
-    .{ .size = "s", .slot = "s", .aligned = false },
-    .{ .size = "l", .slot = "a_l", .aligned = true },
-    .{ .size = "m", .slot = "a_m", .aligned = true },
-    .{ .size = "s", .slot = "a_s", .aligned = true },
-};
+/// Ports `WARP_SIZE_IDX` (ggml-vulkan.cpp:4426 @b29c606e2): where a
+/// warptile holds WARP, the required subgroup size.
+const warp_size_idx = 10;
 
-/// `ggml_vk_mul_mm_spec` (ggml-vulkan.cpp:4675 @5266f24da): the matmul spec
+/// `ggml_vk_mul_mm_spec` (ggml-vulkan.cpp:4829 @b29c606e2): the matmul spec
 /// constants with ALIGNED, and the Intel Windows shared-memory switches.
 fn mulMmSpec(device: *const Device, spec_in: Tile, aligned: bool) Tile {
     var spec = spec_in;
@@ -354,126 +348,182 @@ fn mulMmSpec(device: *const Device, spec_in: Tile, aligned: bool) Tile {
     return spec;
 }
 
-/// `ggml_vk_mul_mm_cm2_spec` (ggml-vulkan.cpp:4689 @5266f24da).
-fn mulMmCm2Spec(spec_in: Tile, aligned: bool, mul_mat_id: bool) Tile {
+/// `ggml_vk_mul_mm_spec_quant` (ggml-vulkan.cpp:4839 @b29c606e2): as
+/// `mulMmSpec`, with the A type the unified quant shader decodes.
+fn mulMmSpecQuant(device: *const Device, spec_in: Tile, aligned: bool, ty: c.ggml_type) Tile {
     var spec = spec_in;
-    if (mul_mat_id and spec.n > 5) {
-        spec.insert(5, @intFromBool(aligned));
-    } else {
-        spec.push_(@intFromBool(aligned));
+    spec.push_(@intFromBool(aligned)); // constantID=11: ALIGNED
+    spec.push_(@intCast(ty)); // constantID=12: MmTypeA
+    if (device.vendor_id == common.vendor_id.intel and device.coopmat_support and
+        device.driver_id == vk.VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS)
+    {
+        spec.push_(0); // constantID=13: SHMEM_STRIDE_PAD = 0
+        spec.push_(1); // constantID=14: APPLY_SLM_A_RESHAPE = true
     }
-    if (mul_mat_id and spec.n == 6) spec.push_(32);
     return spec;
+}
+
+/// `ggml_vk_mul_mm_cm2_spec` (ggml-vulkan.cpp:4943 @b29c606e2): ALIGNED and
+/// the subgroup size, then for the unified quant shader the A type and its
+/// block size.
+fn mulMmCm2Spec(device: *const Device, spec_in: Tile, aligned: bool, ty: ?c.ggml_type) Tile {
+    var spec = spec_in;
+    spec.push_(@intFromBool(aligned)); // ALIGNED
+    spec.push_(device.subgroup_size); // subgroup_size
+    if (ty) |t| {
+        spec.push_(@intCast(t)); // MmTypeA
+        spec.push_(@intCast(c.ggml_type_size(t))); // MmABlockBytes
+    }
+    return spec;
+}
+
+/// The C++'s `spec_fn_t`: which of the spec-constant lambdas a family uses.
+const SpecFn = union(enum) {
+    mm,
+    mm_quant: c.ggml_type,
+    cm2,
+    cm2_quant: c.ggml_type,
+    identity,
+
+    fn apply(self: SpecFn, device: *const Device, wt: Tile, aligned: bool) Tile {
+        return switch (self) {
+            .mm => mulMmSpec(device, wt, aligned),
+            .mm_quant => |t| mulMmSpecQuant(device, wt, aligned, t),
+            .cm2 => mulMmCm2Spec(device, wt, aligned, null),
+            .cm2_quant => |t| mulMmCm2Spec(device, wt, aligned, t),
+            .identity => wt,
+        };
+    }
+};
+
+/// Ports `vk_tile_config` (ggml-vulkan.cpp:279 @b29c606e2).
+const TileConfig = struct {
+    warptile: Tile,
+    wg_denoms: [3]u32,
+    @"align": u32,
+};
+
+/// A `std::vector<vk_tile_config>` of at most the three sizes, smallest
+/// first.
+const TileConfigs = struct {
+    v: [3]TileConfig = undefined,
+    n: usize = 0,
+
+    fn slice(self: *const TileConfigs) []const TileConfig {
+        return self.v[0..self.n];
+    }
+};
+
+/// `{{s_WARPTILE, s_WG, s_align}, {m_...}, {l_...}}`.
+fn tcOf(t: *const Tiles, comptime warptile: []const u8, comptime wg: []const u8) TileConfigs {
+    return .{ .n = 3, .v = .{
+        .{ .warptile = @field(t, "s_" ++ warptile), .wg_denoms = @field(t, "s_" ++ wg), .@"align" = t.s_align },
+        .{ .warptile = @field(t, "m_" ++ warptile), .wg_denoms = @field(t, "m_" ++ wg), .@"align" = t.m_align },
+        .{ .warptile = @field(t, "l_" ++ warptile), .wg_denoms = @field(t, "l_" ++ wg), .@"align" = t.l_align },
+    } };
+}
+
+/// The `filter_tc` lambda (ggml-vulkan.cpp:4920 @b29c606e2): the configs
+/// whose size the device enables for `ty`.
+fn filterTc(device: *const Device, configs: TileConfigs, ty: c.ggml_type, is_id: bool, is_int: bool) TileConfigs {
+    const i: usize = @intCast(ty);
+    var enabled: [3]bool = undefined;
+    if (is_int) {
+        enabled[0] = if (is_id) device.mul_mat_id_s_int[i] else device.mul_mat_s_int[i];
+        enabled[1] = if (is_id) device.mul_mat_id_m_int[i] else device.mul_mat_m_int[i];
+        enabled[2] = if (is_id) device.mul_mat_id_l_int[i] else device.mul_mat_l_int[i];
+    } else {
+        enabled[0] = if (is_id) device.mul_mat_id_s[i] else device.mul_mat_s[i];
+        enabled[1] = if (is_id) device.mul_mat_id_m[i] else device.mul_mat_m[i];
+        enabled[2] = if (is_id) device.mul_mat_id_l[i] else device.mul_mat_l[i];
+    }
+    var result: TileConfigs = .{};
+    for (configs.slice(), 0..) |cfg, k| {
+        if (k >= 3) break;
+        if (enabled[k]) {
+            result.v[result.n] = cfg;
+            result.n += 1;
+        }
+    }
+    return result;
 }
 
 const mul_mat_id_param_count = 5;
 
-/// Which matmul macro a family uses.
-const MmKind = enum {
-    /// coopmat2's `CREATE_MM`: no tile-size switches, robustness off.
-    cm2,
-    /// coopmat1's `CREATE_MM`: tile-size switches, full subgroups.
-    cm1,
-    /// The fp16 scalar `CREATE_MM`: the dot2 variant when the device has it.
-    fp16,
-    /// The fp16 scalar `CREATE_MM_NODOT2`.
-    fp16_nodot2,
-    /// The fp32 scalar `CREATE_MM`.
-    fp32,
+/// `create_mm_pipelines`'s trailing defaulted arguments.
+const MmOpts = struct {
+    disable_robustness: bool = false,
+    require_full_subgroups: bool = false,
+    required_subgroup_size: u32 = 0,
+    create_aligned: bool = true,
+    pin_subgroup_to_warp: bool = false,
 };
 
-/// The six-pipeline matmul macros (`CREATE_MM`, `CREATE_MM_NODOT2`):
-/// `{s,m,l} x {unaligned,aligned}`, under the tile-size switches of
-/// `ID` for every kind but coopmat2.
-fn createMm(w: *Walk, t: *const Tiles, comptime kind: MmKind, ty: c.ggml_type, p: *MatmulPipeline, comptime namelc: []const u8, comptime f16acc: []const u8, comptime wg_denoms: []const u8, comptime warptile: []const u8, push_size: u32, param_count: u32, comptime id: []const u8, req_subgroup_size: u32) void {
+/// The `create_mm_pipelines` lambda (ggml-vulkan.cpp:4875 @b29c606e2): one
+/// pair per tile config under `key`, created on the first walk and walked
+/// again on every later one. Pipelines are named `<shader>_<i>` and
+/// `<shader>_aligned_<i>`.
+fn createMmPipelines(w: *Walk, mm_key: MatmulPipelineKey, tile_configs: TileConfigs, shader_name: []const u8, spv: []const u8, push_constant_size: u32, param_count: u32, spec_fn: SpecFn, o: MmOpts) void {
     const device = w.device;
-    const spv: []const u8 = switch (kind) {
-        .cm2 => @field(S, namelc ++ f16acc ++ "_cm2_data"),
-        .cm1 => @field(S, namelc ++ f16acc ++ "_cm1_data"),
-        .fp16 => if (device.dot2_f16) @field(S, namelc ++ "_dot2" ++ f16acc ++ "_data") else @field(S, namelc ++ f16acc ++ "_data"),
-        .fp16_nodot2 => @field(S, namelc ++ f16acc ++ "_data"),
-        .fp32 => @field(S, namelc ++ f16acc ++ "_fp32_data"),
-    };
-    inline for (sizes) |sz| {
-        const enabled = kind == .cm2 or @field(device, "mul_mat" ++ id ++ "_" ++ sz.size)[@intCast(ty)];
-        if (enabled) {
-            const tile = @field(t, sz.size ++ "_" ++ warptile);
-            const spec = if (kind == .cm2) mulMmCm2Spec(tile, sz.aligned, param_count == mul_mat_id_param_count) else mulMmSpec(device, tile, sz.aligned);
-            const name = namelc ++ f16acc ++ (if (sz.aligned) "_aligned_" else "_") ++ sz.size;
-            w.create(&@field(p, sz.slot), name, .{
+    const vec = m.device.matmulPipelines(device, mm_key);
+    const first_call = vec.items.len == 0;
+    for (tile_configs.slice(), 0..) |tc, i| {
+        // Intel coopmat1 pins the required subgroup size to each warptile's WARP element.
+        const rsgs = if (o.pin_subgroup_to_warp) tc.warptile.at(warp_size_idx) else o.required_subgroup_size;
+        const rfs = o.require_full_subgroups or o.pin_subgroup_to_warp;
+
+        if (first_call) {
+            vec.append(allocator, .{
+                .@"align" = tc.@"align",
+                .unaligned = Pipeline.create(),
+                .aligned = if (o.create_aligned) Pipeline.create() else null,
+            }) catch oom();
+        }
+
+        const pair = &vec.items[i];
+        const spec = spec_fn.apply(device, tc.warptile, false);
+        w.createFmt(&pair.unaligned, "{s}_{d}", .{ shader_name, i }, .{
+            .spv = spv,
+            .parameter_count = param_count,
+            .push_constant_size = push_constant_size,
+            .wg_denoms = tc.wg_denoms,
+            .spec = spec.slice(),
+            .@"align" = 1,
+            .disable_robustness = o.disable_robustness,
+            .require_full_subgroups = rfs,
+            .required_subgroup_size = rsgs,
+        });
+
+        if (pair.aligned != null) {
+            const spec_a = spec_fn.apply(device, tc.warptile, true);
+            w.createFmt(&pair.aligned, "{s}_aligned_{d}", .{ shader_name, i }, .{
                 .spv = spv,
                 .parameter_count = param_count,
-                .push_constant_size = push_size,
-                .wg_denoms = @field(t, sz.size ++ "_" ++ wg_denoms),
-                .spec = spec.slice(),
-                .@"align" = if (sz.aligned) @field(t, sz.size ++ "_align") else 1,
-                .disable_robustness = kind == .cm2,
-                .require_full_subgroups = switch (kind) {
-                    .cm2 => false,
-                    .cm1 => true,
-                    else => req_subgroup_size > 0,
-                },
-                .required_subgroup_size = switch (kind) {
-                    .cm2, .cm1 => 0,
-                    else => req_subgroup_size,
-                },
+                .push_constant_size = push_constant_size,
+                .wg_denoms = tc.wg_denoms,
+                .spec = spec_a.slice(),
+                .@"align" = tc.@"align",
+                .disable_robustness = o.disable_robustness,
+                .require_full_subgroups = rfs,
+                .required_subgroup_size = rsgs,
             });
         }
     }
 }
 
-/// `CREATE_MM2`: both accumulators, f16acc first. coopmat1 asks the device
-/// which accumulators it supports.
-fn createMm2(w: *Walk, t: *const Tiles, comptime kind: MmKind, ty: c.ggml_type, p: MatmulPipeline2, comptime namelc: []const u8, comptime wg_denoms: []const u8, comptime warptile: []const u8, push_size: u32, param_count: u32, comptime id: []const u8, req_subgroup_size: u32) void {
-    if (kind != .cm1 or w.device.coopmat_acc_f16_support) {
-        createMm(w, t, kind, ty, p.f16acc, namelc, "_f16acc", wg_denoms, warptile, push_size, param_count, id, req_subgroup_size);
-    }
-    if (kind != .cm1 or w.device.coopmat_acc_f32_support) {
-        createMm(w, t, kind, ty, p.f32acc, namelc, "", wg_denoms, warptile, push_size, param_count, id, req_subgroup_size);
-    }
-}
+/// Ports `non_lut_quant_types` (ggml-vulkan.cpp:4850 @b29c606e2): the types
+/// the unified quant matmul shader decodes, selected by `MmTypeA`.
+const non_lut_quant_types = [_]c.ggml_type{
+    c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1,  c.GGML_TYPE_Q8_0,
+    c.GGML_TYPE_Q2_K, c.GGML_TYPE_Q3_K, c.GGML_TYPE_Q4_K, c.GGML_TYPE_Q5_K, c.GGML_TYPE_Q6_K, c.GGML_TYPE_TQ1_0, c.GGML_TYPE_TQ2_0,
+};
 
-/// The q8_1 matmul macro (`CREATE_MMQ`): three sizes, unaligned only,
-/// under the integer-dot tile switches. The fp16 path forces full
-/// subgroups when given a size; the fp32 path takes the defaults.
-fn createMmq(w: *Walk, t: *const Tiles, comptime fp32: bool, ty: c.ggml_type, p: *MatmulPipeline, comptime namelc: []const u8, comptime wg_denoms: []const u8, comptime warptile: []const u8, push_size: u32, param_count: u32, comptime id: []const u8, req_subgroup_size: u32) void {
-    const device = w.device;
-    const spv: []const u8 = if (fp32) @field(S, namelc ++ "_fp32_data") else @field(S, namelc ++ "_data");
-    inline for (sizes[0..3]) |sz| {
-        if (@field(device, "mul_mat" ++ id ++ "_" ++ sz.size ++ "_int")[@intCast(ty)]) {
-            w.create(&@field(p, sz.slot), namelc ++ "_" ++ sz.size, .{
-                .spv = spv,
-                .parameter_count = param_count,
-                .push_constant_size = push_size,
-                .wg_denoms = @field(t, sz.size ++ "_" ++ wg_denoms),
-                .spec = @field(t, sz.size ++ "_" ++ warptile).slice(),
-                .require_full_subgroups = !fp32 and req_subgroup_size > 0,
-                .required_subgroup_size = if (fp32) 0 else req_subgroup_size,
-            });
-        }
-    }
-}
+/// A type and its shader-name fragment.
+const MmRow = struct { ty: c.ggml_type, frag: []const u8 };
 
-/// One row of a quantized-type matmul table: the type, its shader-name
-/// fragment, and which tile family it uses.
-const MmRow = struct { ty: c.ggml_type, frag: []const u8, k: bool = false };
-
-/// The quantized types of the dequant matmul tables, in the C++'s order.
-/// `k` marks the rows that use the `_k` tiles under coopmat2.
-const mm_quant_rows = [_]MmRow{
-    .{ .ty = c.GGML_TYPE_Q1_0, .frag = "q1_0" },
-    .{ .ty = c.GGML_TYPE_Q2_0, .frag = "q2_0" },
-    .{ .ty = c.GGML_TYPE_Q4_0, .frag = "q4_0" },
-    .{ .ty = c.GGML_TYPE_Q4_1, .frag = "q4_1" },
-    .{ .ty = c.GGML_TYPE_Q5_0, .frag = "q5_0" },
-    .{ .ty = c.GGML_TYPE_Q5_1, .frag = "q5_1" },
-    .{ .ty = c.GGML_TYPE_Q8_0, .frag = "q8_0" },
-    .{ .ty = c.GGML_TYPE_Q2_K, .frag = "q2_k", .k = true },
-    .{ .ty = c.GGML_TYPE_TQ2_0, .frag = "tq2_0", .k = true },
-    .{ .ty = c.GGML_TYPE_Q3_K, .frag = "q3_k", .k = true },
-    .{ .ty = c.GGML_TYPE_Q4_K, .frag = "q4_k", .k = true },
-    .{ .ty = c.GGML_TYPE_Q5_K, .frag = "q5_k", .k = true },
-    .{ .ty = c.GGML_TYPE_Q6_K, .frag = "q6_k", .k = true },
+/// Ports `FOR_EACH_LUT_TYPE_NONFP4` (ggml-vulkan.cpp:4855 @b29c606e2): the
+/// lookup-table types, each with its own shader.
+const lut_nonfp4_rows = [_]MmRow{
     .{ .ty = c.GGML_TYPE_IQ1_S, .frag = "iq1_s" },
     .{ .ty = c.GGML_TYPE_IQ1_M, .frag = "iq1_m" },
     .{ .ty = c.GGML_TYPE_IQ2_XXS, .frag = "iq2_xxs" },
@@ -485,15 +535,19 @@ const mm_quant_rows = [_]MmRow{
     .{ .ty = c.GGML_TYPE_IQ4_NL, .frag = "iq4_nl" },
 };
 
-/// The fp4 rows, which have an `_ocp` variant when the device does OCP fp4.
-const mm_fp4_rows = [_]MmRow{
+/// Ports `FOR_EACH_LUT_FP4_TYPE` (ggml-vulkan.cpp:4865 @b29c606e2): the fp4
+/// lookup-table types, which have an `_ocp` variant on coopmat paths.
+const lut_fp4_rows = [_]MmRow{
     .{ .ty = c.GGML_TYPE_MXFP4, .frag = "mxfp4" },
     .{ .ty = c.GGML_TYPE_NVFP4, .frag = "nvfp4" },
 };
 
-/// The integer-dot (q8_1) matmul rows: the types and whether they take
-/// the K-quant tiles.
-const mmq_rows = [_]MmRow{
+/// `FOR_EACH_LUT_TYPE`: both lists.
+const lut_rows = lut_nonfp4_rows ++ lut_fp4_rows;
+
+/// The integer-dot (q8_1) matmul rows, and whether each takes the K-quant
+/// tiles.
+const mmq_rows = [_]struct { ty: c.ggml_type, frag: []const u8, k: bool = false }{
     .{ .ty = c.GGML_TYPE_Q2_0, .frag = "q2_0" },
     .{ .ty = c.GGML_TYPE_Q4_0, .frag = "q4_0" },
     .{ .ty = c.GGML_TYPE_Q4_1, .frag = "q4_1" },
@@ -508,17 +562,11 @@ const mmq_rows = [_]MmRow{
     .{ .ty = c.GGML_TYPE_Q6_K, .frag = "q6_k", .k = true },
 };
 
-/// The integer-dot rows of the fp32 path, which has no MXFP4.
-const mmq_rows_fp32 = [_]MmRow{
-    mmq_rows[0], mmq_rows[1], mmq_rows[2], mmq_rows[3],  mmq_rows[4],  mmq_rows[5],
-    mmq_rows[7], mmq_rows[8], mmq_rows[9], mmq_rows[10], mmq_rows[11],
-};
-
 fn ocp(device: *const Device) bool {
     return glslc.float_e2m1 and glslc.float_e4m3 and device.ocp_fp4;
 }
 
-/// Ports `ggml_vk_load_shaders` (ggml-vulkan.cpp:4244 @5266f24da).
+/// Ports `ggml_vk_load_shaders` (ggml-vulkan.cpp:4400 @b29c606e2).
 ///
 /// Parameters:
 /// - `device`: the device whose pipeline slots are walked.
@@ -577,9 +625,9 @@ pub fn loadShaders(device: *Device, requested: ?*Pipeline) void {
 
         // spec constants and tile sizes for quant matmul_id
         const mmqid_bk: u32 = if (device.coopmat2_decode_vector) 64 else 32;
-        t.l_warptile_mmqid = .of(.{ 256, 128, 128, mmqid_bk, 1, device.subgroup_size });
-        t.m_warptile_mmqid = .of(.{ 256, 128, 64, mmqid_bk, 0, device.subgroup_size });
-        t.s_warptile_mmqid = .of(.{ 256, 128, 64, mmqid_bk, 0, device.subgroup_size });
+        t.l_warptile_mmqid = .of(.{ 256, 128, 128, mmqid_bk, 1 });
+        t.m_warptile_mmqid = .of(.{ 256, 128, 64, mmqid_bk, 0 });
+        t.s_warptile_mmqid = .of(.{ 256, 128, 64, mmqid_bk, 0 });
         t.l_mmqid_wg_denoms = .{ 128, 128, 1 };
         t.m_mmqid_wg_denoms = .{ 128, 64, 1 };
         t.s_mmqid_wg_denoms = .{ 128, 64, 1 };
@@ -648,10 +696,6 @@ pub fn loadShaders(device: *Device, requested: ?*Pipeline) void {
             t.l_warptile_mmq = .of(.{ 256, 128, 128, 32, mm_warp_8, 64, 2, tm_m, tn_m, tk_m, mm_warp_8 });
             t.l_warptile_mmq_int = t.l_warptile_mmq;
             t.l_warptile_mmq_int_k = .of(.{ 256, 128, 128, 32, mm_warp_16, 64, 1, 4, 2, 1, mm_warp_16 });
-        } else if (device.vendor_id == common.vendor_id.intel and device.coopmat_support) {
-            // Xe2/Xe3 with coopmat enabled - warptile performance tuning
-            t.l_warptile = .of(.{ 512, 128, 128, 16, mm_warp_8, 32, 2, tm_m, tn_m, tk_m, mm_warp_8 });
-            t.l_warptile_mmq = .of(.{ 512, 128, 128, 32, mm_warp_8, 32, 2, tm_m, tn_m, tk_m, mm_warp_8 });
         }
 
         t.l_wg_denoms = .{ 128, 128, 1 };
@@ -663,6 +707,20 @@ pub fn loadShaders(device: *Device, requested: ?*Pipeline) void {
         t.l_align = 128;
         t.m_align = 64;
         t.s_align = 32;
+
+        if (device.vendor_id == common.vendor_id.intel and device.coopmat_support) {
+            // Xe1/Xe2/Xe3 with coopmat enabled - warptile performance tuning
+            t.l_warptile = .of(.{ 512, 128, 128, 16, mm_warp_8, 32, 2, tm_l, tn_l, tk_l, mm_warp_8 });
+            if (device.architecture == .intel_xe1) {
+                t.l_warptile_mmq = .of(.{ 512, 256, 128, 32, 32, 32, 2, tm_l, tn_l, tk_l, 16 });
+                t.l_mmq_wg_denoms = .{ 256, 128, 1 };
+                t.l_align = 32; //set as BK
+            } else {
+                t.l_warptile_mmq = .of(.{ 512, 128, 256, 32, 32, 32, 2, tm_l, tn_l, tk_l, 16 });
+                t.l_mmq_wg_denoms = .{ 128, 256, 1 };
+                t.l_align = 32; //set as BK
+            }
+        }
 
         for (0..c.GGML_TYPE_COUNT) |i| {
             const ty: c.ggml_type = @intCast(i);
@@ -723,12 +781,6 @@ pub fn loadShaders(device: *Device, requested: ?*Pipeline) void {
             }
         }
     }
-
-    if (device.pipeline_matmul_f32 == null) device.pipeline_matmul_f32 = MatmulPipeline.create();
-    if (device.pipeline_matmul_f32_f16 == null) device.pipeline_matmul_f32_f16 = MatmulPipeline.create();
-    if (device.pipeline_matmul_id_f32 == null) device.pipeline_matmul_id_f32 = MatmulPipeline.create();
-    if (device.pipeline_matmul_bf16 == null) device.pipeline_matmul_bf16 = MatmulPipeline.create();
-    if (device.pipeline_matmul_id_bf16 == null) device.pipeline_matmul_id_bf16 = MatmulPipeline.create();
 
     walkFlashAttention(&w);
     walkMatmul(&w, &t, subgroup_min_size_16, mul_mat_subgroup_size, mul_mat_subgroup_size_16, subgroup_size_8, subgroup_size_32, mm_warp_8);
@@ -832,183 +884,446 @@ fn walkFlashAttention(w: *Walk) void {
     }
 }
 
-/// The dequant matmul tables of one path: every quantized row with
-/// `CREATE_MM2` (or `CREATE_MM` on `.f32acc` for fp32), then the fp4 rows
-/// with their OCP variant.
-fn mmQuantRows(w: *Walk, t: *const Tiles, comptime kind: MmKind, pipes: *[c.GGML_TYPE_COUNT]MatmulPipeline2, comptime prefix: []const u8, comptime suffix: []const u8, comptime wg: []const u8, comptime wg_k: []const u8, comptime tile: []const u8, comptime tile_k: []const u8, push_size: u32, param_count: u32, comptime id: []const u8, req_sg: u32) void {
-    inline for (mm_quant_rows) |row| {
-        const wgd = if (row.k) wg_k else wg;
-        const tl = if (row.k) tile_k else tile;
-        if (kind == .fp32) {
-            createMm(w, t, kind, row.ty, pipes[@intCast(row.ty)].f32acc, prefix ++ row.frag ++ suffix, "", wgd, tl, push_size, param_count, id, req_sg);
-        } else {
-            createMm2(w, t, kind, row.ty, pipes[@intCast(row.ty)], prefix ++ row.frag ++ suffix, wgd, tl, push_size, param_count, id, req_sg);
-        }
-    }
-    // The scalar paths have no OCP variant.
-    const has_ocp = (kind == .cm2 or kind == .cm1) and ocp(w.device);
-    inline for (mm_fp4_rows) |row| {
-        if (kind == .fp32) {
-            createMm(w, t, kind, row.ty, pipes[@intCast(row.ty)].f32acc, prefix ++ row.frag ++ suffix, "", wg, tile, push_size, param_count, id, req_sg);
-        } else if (has_ocp) {
-            if (comptime glslc.float_e2m1 and glslc.float_e4m3) {
-                createMm2(w, t, kind, row.ty, pipes[@intCast(row.ty)], prefix ++ row.frag ++ suffix ++ "_ocp", wg, tile, push_size, param_count, id, req_sg);
-            }
-        } else {
-            createMm2(w, t, kind, row.ty, pipes[@intCast(row.ty)], prefix ++ row.frag ++ suffix, wg, tile, push_size, param_count, id, req_sg);
+/// `SPV_DOT2(NAME)`: the dot2 variant when the device has it.
+fn spvDot2(device: *const Device, comptime name: []const u8) []const u8 {
+    return if (device.dot2_f16) @field(S, name ++ "_dot2_data") else @field(S, name ++ "_data");
+}
+
+/// `SPV_DOT2_F16ACC(NAME)`.
+fn spvDot2F16acc(device: *const Device, comptime name: []const u8) []const u8 {
+    return if (device.dot2_f16) @field(S, name ++ "_dot2_f16acc_data") else @field(S, name ++ "_f16acc_data");
+}
+
+fn key(type_a: c.ggml_type, type_b: c.ggml_type, mul_mat_id: bool, f16acc: bool) MatmulPipelineKey {
+    return .{ .type_a = type_a, .type_b = type_b, .mul_mat_id = mul_mat_id, .f16acc = f16acc };
+}
+
+/// The coopmat2 LUT rows (`X_CM2`, `X_CM2_OCP`, and their `_ID` forms):
+/// both accumulators of each row's f16-B shader, over the sizes the device
+/// enables for it.
+fn cm2LutRows(w: *Walk, comptime rows: []const MmRow, tc_base: TileConfigs, is_id: bool, comptime prefix: []const u8, comptime ocp_sfx: []const u8, push_size: u32, param_count: u32) void {
+    inline for (rows) |row| {
+        const tc = filterTc(w.device, tc_base, row.ty, is_id, false);
+        if (tc.n != 0) {
+            const base = prefix ++ row.frag ++ "_f16" ++ ocp_sfx;
+            createMmPipelines(w, key(row.ty, c.GGML_TYPE_F16, is_id, true), tc, base ++ "_f16acc", @field(S, base ++ "_f16acc_cm2_data"), push_size, param_count, .cm2, .{ .disable_robustness = true });
+            createMmPipelines(w, key(row.ty, c.GGML_TYPE_F16, is_id, false), tc, base, @field(S, base ++ "_cm2_data"), push_size, param_count, .cm2, .{ .disable_robustness = true });
         }
     }
 }
 
-/// The matmul and matmul_id pipelines of whichever path the device takes:
-/// coopmat2, coopmat1, fp16 scalar or fp32 scalar; then the bf16 fallback.
-fn walkMatmul(w: *Walk, t: *Tiles, subgroup_min_size_16: bool, mul_mat_subgroup_size: u32, mul_mat_subgroup_size_16: u32, subgroup_size_8: u32, subgroup_size_32: u32, mm_warp_8: u32) void {
+/// The coopmat2 matmul and matmul_id pipelines.
+fn walkMatmulCm2(w: *Walk, t: *const Tiles) void {
+    const device = w.device;
+    const pc: u32 = @sizeOf(push.MatMat);
+    const pcid: u32 = @sizeOf(push.MatMatId);
+    const dr: MmOpts = .{ .disable_robustness = true };
+
+    const tc_mm = tcOf(t, "warptile", "wg_denoms");
+    const tc_mmq = tcOf(t, "warptile_mmq", "mmq_wg_denoms");
+    const tc_mmq_k = tcOf(t, "warptile_mmq_k", "mmq_wg_denoms_k");
+    const tc_mmqid = tcOf(t, "warptile_mmqid", "mmqid_wg_denoms");
+
+    // F16 x F16
+    createMmPipelines(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F16, false, true), tc_mm, "matmul_f16_f16acc", S.matmul_f16_f16acc_cm2_data, pc, 3, .cm2, dr);
+    createMmPipelines(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F16, false, false), tc_mm, "matmul_f16", S.matmul_f16_cm2_data, pc, 3, .cm2, dr);
+    if (comptime glslc.bfloat16) {
+        if (device.coopmat_bf16_support) {
+            createMmPipelines(w, key(c.GGML_TYPE_BF16, c.GGML_TYPE_BF16, false, false), tc_mm, "matmul_bf16", S.matmul_bf16_cm2_data, pc, 3, .cm2, dr);
+        }
+    }
+    for (non_lut_quant_types) |ty| {
+        // regression in unified shader on Ampere
+        if (ty == c.GGML_TYPE_Q4_K or ty == c.GGML_TYPE_Q5_K) continue;
+        const tc = if ((ty >= c.GGML_TYPE_Q2_K and ty <= c.GGML_TYPE_Q6_K) or ty == c.GGML_TYPE_TQ1_0 or ty == c.GGML_TYPE_TQ2_0) tc_mmq_k else tc_mmq;
+        createMmPipelines(w, key(ty, c.GGML_TYPE_F16, false, true), tc, "matmul_quant_f16_f16acc", S.matmul_quant_f16_f16acc_cm2_data, pc, 3, .{ .cm2_quant = ty }, dr);
+        createMmPipelines(w, key(ty, c.GGML_TYPE_F16, false, false), tc, "matmul_quant_f16", S.matmul_quant_f16_cm2_data, pc, 3, .{ .cm2_quant = ty }, dr);
+    }
+    createMmPipelines(w, key(c.GGML_TYPE_Q4_K, c.GGML_TYPE_F16, false, true), tc_mmq_k, "matmul_q4_k_f16_f16acc", S.matmul_q4_k_f16_f16acc_cm2_data, pc, 3, .cm2, dr);
+    createMmPipelines(w, key(c.GGML_TYPE_Q4_K, c.GGML_TYPE_F16, false, false), tc_mmq_k, "matmul_q4_k_f16", S.matmul_q4_k_f16_cm2_data, pc, 3, .cm2, dr);
+    createMmPipelines(w, key(c.GGML_TYPE_Q5_K, c.GGML_TYPE_F16, false, true), tc_mmq_k, "matmul_q5_k_f16_f16acc", S.matmul_q5_k_f16_f16acc_cm2_data, pc, 3, .cm2, dr);
+    createMmPipelines(w, key(c.GGML_TYPE_Q5_K, c.GGML_TYPE_F16, false, false), tc_mmq_k, "matmul_q5_k_f16", S.matmul_q5_k_f16_cm2_data, pc, 3, .cm2, dr);
+    cm2LutRows(w, &lut_nonfp4_rows, tc_mmq, false, "matmul_", "", pc, 3);
+    if (ocp(device)) {
+        if (comptime glslc.float_e2m1 and glslc.float_e4m3) cm2LutRows(w, &lut_fp4_rows, tc_mmq, false, "matmul_", "_ocp", pc, 3);
+    } else {
+        cm2LutRows(w, &lut_fp4_rows, tc_mmq, false, "matmul_", "", pc, 3);
+    }
+
+    impl.assert(device.subgroup_ballot, "device->subgroup_ballot");
+
+    createMmPipelines(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F16, true, true), tc_mm, "matmul_id_subgroup_f16_f16acc", S.matmul_id_subgroup_f16_f16acc_cm2_data, pcid, 5, .cm2, dr);
+    createMmPipelines(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F16, true, false), tc_mm, "matmul_id_subgroup_f16", S.matmul_id_subgroup_f16_cm2_data, pcid, 5, .cm2, dr);
+    if (comptime glslc.bfloat16) {
+        if (device.coopmat_bf16_support) {
+            createMmPipelines(w, key(c.GGML_TYPE_BF16, c.GGML_TYPE_BF16, true, false), tc_mm, "matmul_id_subgroup_bf16", S.matmul_id_subgroup_bf16_cm2_data, pcid, 5, .cm2, dr);
+        }
+    }
+    for (non_lut_quant_types) |ty| {
+        if (ty == c.GGML_TYPE_Q4_K or ty == c.GGML_TYPE_Q5_K) continue;
+        createMmPipelines(w, key(ty, c.GGML_TYPE_F16, true, true), tc_mmqid, "matmul_id_subgroup_quant_f16_f16acc", S.matmul_id_subgroup_quant_f16_f16acc_cm2_data, pcid, 5, .{ .cm2_quant = ty }, dr);
+        createMmPipelines(w, key(ty, c.GGML_TYPE_F16, true, false), tc_mmqid, "matmul_id_subgroup_quant_f16", S.matmul_id_subgroup_quant_f16_cm2_data, pcid, 5, .{ .cm2_quant = ty }, dr);
+    }
+    createMmPipelines(w, key(c.GGML_TYPE_Q4_K, c.GGML_TYPE_F16, true, true), tc_mmqid, "matmul_id_subgroup_q4_k_f16_f16acc", S.matmul_id_subgroup_q4_k_f16_f16acc_cm2_data, pcid, 5, .cm2, dr);
+    createMmPipelines(w, key(c.GGML_TYPE_Q4_K, c.GGML_TYPE_F16, true, false), tc_mmqid, "matmul_id_subgroup_q4_k_f16", S.matmul_id_subgroup_q4_k_f16_cm2_data, pcid, 5, .cm2, dr);
+    createMmPipelines(w, key(c.GGML_TYPE_Q5_K, c.GGML_TYPE_F16, true, true), tc_mmqid, "matmul_id_subgroup_q5_k_f16_f16acc", S.matmul_id_subgroup_q5_k_f16_f16acc_cm2_data, pcid, 5, .cm2, dr);
+    createMmPipelines(w, key(c.GGML_TYPE_Q5_K, c.GGML_TYPE_F16, true, false), tc_mmqid, "matmul_id_subgroup_q5_k_f16", S.matmul_id_subgroup_q5_k_f16_cm2_data, pcid, 5, .cm2, dr);
+    cm2LutRows(w, &lut_nonfp4_rows, tc_mmqid, true, "matmul_id_subgroup_", "", pcid, 5);
+    if (ocp(device)) {
+        if (comptime glslc.float_e2m1 and glslc.float_e4m3) cm2LutRows(w, &lut_fp4_rows, tc_mmqid, true, "matmul_id_subgroup_", "_ocp", pcid, 5);
+    } else {
+        cm2LutRows(w, &lut_fp4_rows, tc_mmqid, true, "matmul_id_subgroup_", "", pcid, 5);
+    }
+}
+
+/// The coopmat1 `cm1_create` and `cm1_create_quant` lambdas: filtered by
+/// the key's A type, full subgroups, pinned to WARP on Intel.
+fn cm1Create(w: *Walk, k: MatmulPipelineKey, tc_base: TileConfigs, name: []const u8, spv: []const u8, pc_size: u32, pc: u32, spec_fn: SpecFn, cm1_pin: bool) void {
+    const tc = filterTc(w.device, tc_base, k.type_a, k.mul_mat_id, false);
+    if (tc.n != 0) createMmPipelines(w, k, tc, name, spv, pc_size, pc, spec_fn, .{ .require_full_subgroups = true, .create_aligned = true, .pin_subgroup_to_warp = cm1_pin });
+}
+
+/// The coopmat1 LUT rows (`X_CM1`, `X_CM1_OCP` and their `_ID` forms): the
+/// f32-B and f16-B shaders under each accumulator the device supports.
+fn cm1LutRows(w: *Walk, comptime rows: []const MmRow, tc: TileConfigs, is_id: bool, comptime prefix: []const u8, comptime ocp_sfx: []const u8, pc_size: u32, pc: u32, cm1_pin: bool) void {
+    const device = w.device;
+    inline for (rows) |row| {
+        const b32 = prefix ++ row.frag ++ "_f32" ++ ocp_sfx;
+        const b16 = prefix ++ row.frag ++ "_f16" ++ ocp_sfx;
+        if (device.coopmat_acc_f16_support) {
+            cm1Create(w, key(row.ty, c.GGML_TYPE_F32, is_id, true), tc, b32 ++ "_f16acc", @field(S, b32 ++ "_f16acc_cm1_data"), pc_size, pc, .mm, cm1_pin);
+            cm1Create(w, key(row.ty, c.GGML_TYPE_F16, is_id, true), tc, b16 ++ "_f16acc", @field(S, b16 ++ "_f16acc_cm1_data"), pc_size, pc, .mm, cm1_pin);
+        }
+        if (device.coopmat_acc_f32_support) {
+            cm1Create(w, key(row.ty, c.GGML_TYPE_F32, is_id, false), tc, b32, @field(S, b32 ++ "_cm1_data"), pc_size, pc, .mm, cm1_pin);
+            cm1Create(w, key(row.ty, c.GGML_TYPE_F16, is_id, false), tc, b16, @field(S, b16 ++ "_cm1_data"), pc_size, pc, .mm, cm1_pin);
+        }
+    }
+}
+
+/// The coopmat1 unified quant rows: both B types under each accumulator.
+fn cm1QuantRows(w: *Walk, tc: TileConfigs, is_id: bool, comptime prefix: []const u8, pc_size: u32, pc: u32, cm1_pin: bool) void {
+    const device = w.device;
+    for (non_lut_quant_types) |ty| {
+        if (device.coopmat_acc_f16_support) {
+            cm1Create(w, key(ty, c.GGML_TYPE_F32, is_id, true), tc, prefix ++ "quant_f32_f16acc", @field(S, prefix ++ "quant_f32_f16acc_cm1_data"), pc_size, pc, .{ .mm_quant = ty }, cm1_pin);
+            cm1Create(w, key(ty, c.GGML_TYPE_F16, is_id, true), tc, prefix ++ "quant_f16_f16acc", @field(S, prefix ++ "quant_f16_f16acc_cm1_data"), pc_size, pc, .{ .mm_quant = ty }, cm1_pin);
+        }
+        if (device.coopmat_acc_f32_support) {
+            cm1Create(w, key(ty, c.GGML_TYPE_F32, is_id, false), tc, prefix ++ "quant_f32", @field(S, prefix ++ "quant_f32_cm1_data"), pc_size, pc, .{ .mm_quant = ty }, cm1_pin);
+            cm1Create(w, key(ty, c.GGML_TYPE_F16, is_id, false), tc, prefix ++ "quant_f16", @field(S, prefix ++ "quant_f16_cm1_data"), pc_size, pc, .{ .mm_quant = ty }, cm1_pin);
+        }
+    }
+}
+
+/// The coopmat1 matmul and matmul_id pipelines.
+fn walkMatmulCm1(w: *Walk, t: *const Tiles) void {
     const device = w.device;
     const pc: u32 = @sizeOf(push.MatMat);
     const pcid: u32 = @sizeOf(push.MatMatId);
     const midpc = mul_mat_id_param_count;
 
-    if (glslc.coopmat2 and device.coopmat2) {
-        if (comptime glslc.coopmat2) {
-            createMm2(w, t, .cm2, c.GGML_TYPE_F16, device.pipeline_matmul_f16, "matmul_f16", "wg_denoms", "warptile", pc, 3, "", 0);
-            if (comptime glslc.bfloat16) {
-                if (device.coopmat_bf16_support) createMm(w, t, .cm2, c.GGML_TYPE_BF16, device.pipeline_matmul_bf16.?, "matmul_bf16", "", "wg_denoms", "warptile", pc, 3, "", 0);
-            }
-            mmQuantRows(w, t, .cm2, &device.pipeline_dequant_mul_mat_mat_f16, "matmul_", "_f16", "mmq_wg_denoms", "mmq_wg_denoms_k", "warptile_mmq", "warptile_mmq_k", pc, 3, "", 0);
+    const tc_mm = tcOf(t, "warptile", "wg_denoms");
+    const tc_mmq = tcOf(t, "warptile_mmq", "mmq_wg_denoms");
 
-            impl.assert(device.subgroup_ballot, "device->subgroup_ballot");
+    // Intel coopmat1 pins each pipeline's required subgroup size to its warptile WARP element.
+    const cm1_pin = device.vendor_id == common.vendor_id.intel;
 
-            createMm2(w, t, .cm2, c.GGML_TYPE_F16, device.pipeline_matmul_id_f16, "matmul_id_subgroup_f16", "wg_denoms", "warptile", pcid, 5, "", 0);
-            if (comptime glslc.bfloat16) {
-                if (device.coopmat_bf16_support) createMm(w, t, .cm2, c.GGML_TYPE_BF16, device.pipeline_matmul_id_bf16.?, "matmul_id_subgroup_bf16", "", "wg_denoms", "warptile", pcid, 5, "", 0);
-            }
-            mmQuantRows(w, t, .cm2, &device.pipeline_dequant_mul_mat_mat_id, "matmul_id_subgroup_", "_f16", "mmqid_wg_denoms", "mmqid_wg_denoms", "warptile_mmqid", "warptile_mmqid", pcid, 5, "", 0);
-        }
-    } else if (glslc.coopmat and device.coopmat_support) {
-        if (comptime glslc.coopmat) {
-            createMm(w, t, .cm1, c.GGML_TYPE_F32, device.pipeline_matmul_f32.?, "matmul_f32_f32", "", "wg_denoms", "warptile", pc, 3, "", 0);
-            createMm(w, t, .cm1, c.GGML_TYPE_F32, device.pipeline_matmul_f32_f16.?, "matmul_f32_f16", "", "wg_denoms", "warptile", pc, 3, "", 0);
-            createMm2(w, t, .cm1, c.GGML_TYPE_F16, device.pipeline_matmul_f16, "matmul_f16", "wg_denoms", "warptile", pc, 3, "", 0);
-            createMm2(w, t, .cm1, c.GGML_TYPE_F16, device.pipeline_matmul_f16_f32, "matmul_f16_f32", "wg_denoms", "warptile", pc, 3, "", 0);
-            if (comptime glslc.bfloat16) {
-                if (device.coopmat_bf16_support) createMm(w, t, .cm1, c.GGML_TYPE_BF16, device.pipeline_matmul_bf16.?, "matmul_bf16", "", "wg_denoms", "warptile", pc, 3, "", 0);
-            }
-            mmQuantRows(w, t, .cm1, &device.pipeline_dequant_mul_mat_mat, "matmul_", "_f32", "mmq_wg_denoms", "mmq_wg_denoms", "warptile_mmq", "warptile_mmq", pc, 3, "", 0);
-
-            impl.assert(device.subgroup_ballot, "device->subgroup_ballot");
-
-            createMm(w, t, .cm1, c.GGML_TYPE_F32, device.pipeline_matmul_id_f32.?, "matmul_id_subgroup_f32_f32", "", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-            createMm2(w, t, .cm1, c.GGML_TYPE_F16, device.pipeline_matmul_id_f16, "matmul_id_subgroup_f16", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-            createMm2(w, t, .cm1, c.GGML_TYPE_F16, device.pipeline_matmul_id_f16_f32, "matmul_id_subgroup_f16_f32", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-            if (comptime glslc.bfloat16) {
-                if (device.coopmat_bf16_support) createMm(w, t, .cm1, c.GGML_TYPE_BF16, device.pipeline_matmul_id_bf16.?, "matmul_id_subgroup_bf16", "", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-            }
-            mmQuantRows(w, t, .cm1, &device.pipeline_dequant_mul_mat_mat_id, "matmul_id_subgroup_", "_f32", "mmq_wg_denoms", "mmq_wg_denoms", "warptile_mmq", "warptile_mmq", pcid, midpc, "_id", 0);
-        }
-    } else if (device.fp16) {
-        createMm(w, t, .fp16, c.GGML_TYPE_F32, device.pipeline_matmul_f32.?, "matmul_f32_f32", "", "wg_denoms", "warptile", pc, 3, "", 0);
-        createMm(w, t, .fp16, c.GGML_TYPE_F32, device.pipeline_matmul_f32_f16.?, "matmul_f32_f16", "", "wg_denoms", "warptile", pc, 3, "", 0);
-        createMm2(w, t, .fp16, c.GGML_TYPE_F16, device.pipeline_matmul_f16, "matmul_f16", "wg_denoms", "warptile", pc, 3, "", 0);
-        createMm2(w, t, .fp16, c.GGML_TYPE_F16, device.pipeline_matmul_f16_f32, "matmul_f16_f32", "wg_denoms", "warptile", pc, 3, "", 0);
-        createMm(w, t, .fp16_nodot2, c.GGML_TYPE_BF16, device.pipeline_matmul_bf16.?, "matmul_bf16", "", "wg_denoms", "warptile", pc, 3, "", 0);
-        mmQuantRows(w, t, .fp16, &device.pipeline_dequant_mul_mat_mat, "matmul_", "_f32", "mmq_wg_denoms", "mmq_wg_denoms", "warptile_mmq", "warptile_mmq", pc, 3, "", 0);
-
-        if (comptime glslc.integer_dot) {
-            if (device.integer_dot_product) {
-                inline for (mmq_rows) |row| {
-                    createMmq(w, t, false, row.ty, device.pipeline_dequant_mul_mat_mat_q8_1[@intCast(row.ty)].f32acc, "matmul_" ++ row.frag ++ "_q8_1", "mmq_wg_denoms", if (row.k) "warptile_mmq_int_k" else "warptile_mmq_int", pc, 3, "", 0);
-                }
-            }
-        }
-
-        if (device.subgroup_ballot and device.subgroup_require_full_support and subgroup_min_size_16) {
-            createMm(w, t, .fp16, c.GGML_TYPE_F32, device.pipeline_matmul_id_f32.?, "matmul_id_subgroup_f32_f32", "", "wg_denoms", "warptile_id", pcid, midpc, "_id", mul_mat_subgroup_size_16);
-            createMm2(w, t, .fp16, c.GGML_TYPE_F16, device.pipeline_matmul_id_f16, "matmul_id_subgroup_f16", "wg_denoms", "warptile_id", pcid, midpc, "_id", mul_mat_subgroup_size_16);
-            createMm2(w, t, .fp16, c.GGML_TYPE_F16, device.pipeline_matmul_id_f16_f32, "matmul_id_subgroup_f16_f32", "wg_denoms", "warptile_id", pcid, midpc, "_id", mul_mat_subgroup_size_16);
-            createMm(w, t, .fp16_nodot2, c.GGML_TYPE_BF16, device.pipeline_matmul_id_bf16.?, "matmul_id_subgroup_bf16", "", "wg_denoms", "warptile_id", pcid, midpc, "_id", mul_mat_subgroup_size_16);
-            mmQuantRows(w, t, .fp16, &device.pipeline_dequant_mul_mat_mat_id, "matmul_id_subgroup_", "_f32", "mmq_wg_denoms", "mmq_wg_denoms", "warptile_mmqid", "warptile_mmqid", pcid, midpc, "_id", mul_mat_subgroup_size);
-
-            if (comptime glslc.integer_dot) {
-                if (device.integer_dot_product) {
-                    inline for (mmq_rows) |row| {
-                        createMmq(w, t, false, row.ty, device.pipeline_dequant_mul_mat_mat_id_q8_1[@intCast(row.ty)].f32acc, "matmul_id_subgroup_" ++ row.frag ++ "_q8_1", "mmq_wg_denoms", if (row.k) "warptile_mmqid_int_k" else "warptile_mmqid_int", pcid, midpc, "_id", if (row.k) mul_mat_subgroup_size_16 else mul_mat_subgroup_size);
-                    }
-                }
-            }
-        } else {
-            createMm(w, t, .fp16, c.GGML_TYPE_F32, device.pipeline_matmul_id_f32.?, "matmul_id_f32_f32", "", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-            createMm2(w, t, .fp16, c.GGML_TYPE_F16, device.pipeline_matmul_id_f16, "matmul_id_f16", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-            createMm2(w, t, .fp16, c.GGML_TYPE_F16, device.pipeline_matmul_id_f16_f32, "matmul_id_f16_f32", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-            createMm(w, t, .fp16_nodot2, c.GGML_TYPE_BF16, device.pipeline_matmul_id_bf16.?, "matmul_id_bf16", "", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-            mmQuantRows(w, t, .fp16, &device.pipeline_dequant_mul_mat_mat_id, "matmul_id_", "_f32", "mmq_wg_denoms", "mmq_wg_denoms", "warptile_mmqid", "warptile_mmqid", pcid, midpc, "_id", 0);
-
-            if (comptime glslc.integer_dot) {
-                if (device.integer_dot_product) {
-                    inline for (mmq_rows) |row| {
-                        createMmq(w, t, false, row.ty, device.pipeline_dequant_mul_mat_mat_id_q8_1[@intCast(row.ty)].f32acc, "matmul_id_" ++ row.frag ++ "_q8_1", "mmq_wg_denoms", if (row.k) "warptile_mmqid_int_k" else "warptile_mmqid_int", pcid, midpc, "_id", 0);
-                    }
-                }
-            }
-        }
-    } else {
-        createMm(w, t, .fp32, c.GGML_TYPE_F32, device.pipeline_matmul_f32.?, "matmul_f32_f32", "", "wg_denoms", "warptile", pc, 3, "", 0);
-        createMm(w, t, .fp32, c.GGML_TYPE_F32, device.pipeline_matmul_f32_f16.?, "matmul_f32_f16", "", "wg_denoms", "warptile", pc, 3, "", 0);
-        createMm(w, t, .fp32, c.GGML_TYPE_F16, device.pipeline_matmul_f16.f32acc, "matmul_f16", "", "wg_denoms", "warptile", pc, 3, "", 0);
-        createMm(w, t, .fp32, c.GGML_TYPE_F16, device.pipeline_matmul_f16_f32.f32acc, "matmul_f16_f32", "", "wg_denoms", "warptile", pc, 3, "", 0);
-        createMm(w, t, .fp32, c.GGML_TYPE_BF16, device.pipeline_matmul_bf16.?, "matmul_bf16", "", "wg_denoms", "warptile", pc, 3, "", 0);
-        mmQuantRows(w, t, .fp32, &device.pipeline_dequant_mul_mat_mat, "matmul_", "_f32", "mmq_wg_denoms", "mmq_wg_denoms", "warptile_mmq", "warptile_mmq", pc, 3, "", 0);
-
-        if (comptime glslc.integer_dot) {
-            if (device.integer_dot_product) {
-                inline for (mmq_rows_fp32) |row| {
-                    createMmq(w, t, true, row.ty, device.pipeline_dequant_mul_mat_mat_q8_1[@intCast(row.ty)].f32acc, "matmul_" ++ row.frag ++ "_q8_1", "mmq_wg_denoms", if (row.k) "warptile_mmq_int_k" else "warptile_mmq_int", pc, 3, "", 0);
-                }
-            }
-        }
-
-        walkMatmulIdFp32(w, t, subgroup_min_size_16, mul_mat_subgroup_size, mul_mat_subgroup_size_16);
+    // Intel coopmat1 uses a dedicated large-tile config for quant matmul_id.
+    var tc_mmq_id = tc_mmq;
+    if (cm1_pin) {
+        tc_mmq_id.v[2] = .{ .warptile = .of(.{ 512, 128, 128, 32, 32, 32, 2, device.coopmat_m, device.coopmat_n, device.coopmat_k, 32 }), .wg_denoms = .{ 128, 128, 1 }, .@"align" = 32 };
     }
 
-    // reusing CREATE_MM from the fp32 path
-    if ((device.coopmat2 or device.coopmat_support) and !(glslc.bfloat16 and device.coopmat_bf16_support)) {
-        const s_warptile_wm: u32 = if (device.subgroup_size == 8) 8 else 32;
+    cm1Create(w, key(c.GGML_TYPE_F32, c.GGML_TYPE_F32, false, false), tc_mm, "matmul_f32_f32", S.matmul_f32_f32_cm1_data, pc, 3, .mm, cm1_pin);
+    cm1Create(w, key(c.GGML_TYPE_F32, c.GGML_TYPE_F16, false, false), tc_mm, "matmul_f32_f16", S.matmul_f32_f16_cm1_data, pc, 3, .mm, cm1_pin);
+    if (device.coopmat_acc_f16_support) {
+        cm1Create(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F16, false, true), tc_mm, "matmul_f16_f16acc", S.matmul_f16_f16acc_cm1_data, pc, 3, .mm, cm1_pin);
+        cm1Create(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F32, false, true), tc_mm, "matmul_f16_f32_f16acc", S.matmul_f16_f32_f16acc_cm1_data, pc, 3, .mm, cm1_pin);
+    }
+    if (device.coopmat_acc_f32_support) {
+        cm1Create(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F16, false, false), tc_mm, "matmul_f16", S.matmul_f16_cm1_data, pc, 3, .mm, cm1_pin);
+        cm1Create(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F32, false, false), tc_mm, "matmul_f16_f32", S.matmul_f16_f32_cm1_data, pc, 3, .mm, cm1_pin);
+    }
+    if (comptime glslc.bfloat16) {
+        if (device.coopmat_bf16_support) {
+            cm1Create(w, key(c.GGML_TYPE_BF16, c.GGML_TYPE_BF16, false, false), tc_mm, "matmul_bf16", S.matmul_bf16_cm1_data, pc, 3, .mm, cm1_pin);
+        }
+    }
+    cm1QuantRows(w, tc_mmq, false, "matmul_", pc, 3, cm1_pin);
+    // The _f16 variants provide the f16 B-type pipeline used when y_non_contig converts f32->f16.
+    cm1LutRows(w, &lut_nonfp4_rows, tc_mmq, false, "matmul_", "", pc, 3, cm1_pin);
+    if (ocp(device)) {
+        if (comptime glslc.float_e2m1 and glslc.float_e4m3) cm1LutRows(w, &lut_fp4_rows, tc_mmq, false, "matmul_", "_ocp", pc, 3, cm1_pin);
+    } else {
+        cm1LutRows(w, &lut_fp4_rows, tc_mmq, false, "matmul_", "", pc, 3, cm1_pin);
+    }
 
-        // use scalar tile sizes
-        t.l_warptile = .of(.{ 128, 128, 128, 16, mm_warp_8 * 2, 64, 2, 4, 4, 1, mm_warp_8 });
-        t.m_warptile = .of(.{ 128, 64, 64, 16, mm_warp_8, 32, 2, 4, 2, 1, mm_warp_8 });
-        t.s_warptile = .of(.{ subgroup_size_32, 32, 32, 16, s_warptile_wm, 32, 2, 2, 2, 1, subgroup_size_8 });
+    impl.assert(device.subgroup_ballot, "device->subgroup_ballot");
 
-        t.l_wg_denoms = .{ 128, 128, 1 };
-        t.m_wg_denoms = .{ 64, 64, 1 };
-        t.s_wg_denoms = .{ 32, 32, 1 };
-
-        createMm(w, t, .fp32, c.GGML_TYPE_BF16, device.pipeline_matmul_bf16.?, "matmul_bf16", "", "wg_denoms", "warptile", pc, 3, "", 0);
-        createMm(w, t, .fp32, c.GGML_TYPE_BF16, device.pipeline_matmul_id_bf16.?, "matmul_id_bf16", "", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
+    cm1Create(w, key(c.GGML_TYPE_F32, c.GGML_TYPE_F32, true, false), tc_mm, "matmul_id_subgroup_f32_f32", S.matmul_id_subgroup_f32_f32_cm1_data, pcid, midpc, .mm, cm1_pin);
+    if (device.coopmat_acc_f16_support) {
+        cm1Create(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F16, true, true), tc_mm, "matmul_id_subgroup_f16_f16acc", S.matmul_id_subgroup_f16_f16acc_cm1_data, pcid, midpc, .mm, cm1_pin);
+        cm1Create(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F32, true, true), tc_mm, "matmul_id_subgroup_f16_f32_f16acc", S.matmul_id_subgroup_f16_f32_f16acc_cm1_data, pcid, midpc, .mm, cm1_pin);
+    }
+    if (device.coopmat_acc_f32_support) {
+        cm1Create(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F16, true, false), tc_mm, "matmul_id_subgroup_f16", S.matmul_id_subgroup_f16_cm1_data, pcid, midpc, .mm, cm1_pin);
+        cm1Create(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F32, true, false), tc_mm, "matmul_id_subgroup_f16_f32", S.matmul_id_subgroup_f16_f32_cm1_data, pcid, midpc, .mm, cm1_pin);
+    }
+    if (comptime glslc.bfloat16) {
+        if (device.coopmat_bf16_support) {
+            cm1Create(w, key(c.GGML_TYPE_BF16, c.GGML_TYPE_BF16, true, false), tc_mm, "matmul_id_subgroup_bf16", S.matmul_id_subgroup_bf16_cm1_data, pcid, midpc, .mm, cm1_pin);
+        }
+    }
+    cm1QuantRows(w, tc_mmq_id, true, "matmul_id_subgroup_", pcid, midpc, cm1_pin);
+    // The _f16 variants provide the f16 B-type pipeline used when y_non_contig converts f32->f16.
+    cm1LutRows(w, &lut_nonfp4_rows, tc_mmq_id, true, "matmul_id_subgroup_", "", pcid, midpc, cm1_pin);
+    if (ocp(device)) {
+        if (comptime glslc.float_e2m1 and glslc.float_e4m3) cm1LutRows(w, &lut_fp4_rows, tc_mmq_id, true, "matmul_id_subgroup_", "_ocp", pcid, midpc, cm1_pin);
+    } else {
+        cm1LutRows(w, &lut_fp4_rows, tc_mmq_id, true, "matmul_id_subgroup_", "", pcid, midpc, cm1_pin);
     }
 }
 
-/// The fp32 path's matmul_id pipelines: the subgroup variants when the
-/// device has full subgroups of at least 16, the plain ones otherwise.
-fn walkMatmulIdFp32(w: *Walk, t: *const Tiles, subgroup_min_size_16: bool, mul_mat_subgroup_size: u32, mul_mat_subgroup_size_16: u32) void {
+/// The `sg_create` and `sg_create_quant` lambdas (ggml-vulkan.cpp:5191,
+/// 5199 @b29c606e2): filtered by the key's A type; a required subgroup
+/// size forces full subgroups.
+fn sgCreate(w: *Walk, k: MatmulPipelineKey, tc_base: TileConfigs, name: []const u8, spv: []const u8, pc_size: u32, pc: u32, spec_fn: SpecFn, rsgs: u32) void {
+    const tc = filterTc(w.device, tc_base, k.type_a, k.mul_mat_id, false);
+    if (tc.n != 0) createMmPipelines(w, k, tc, name, spv, pc_size, pc, spec_fn, .{ .require_full_subgroups = rsgs > 0, .required_subgroup_size = rsgs });
+}
+
+/// The `sg_create_mmq` lambda (ggml-vulkan.cpp:5209 @b29c606e2): the
+/// integer-dot switches, the warptile as is, no aligned variant.
+fn sgCreateMmq(w: *Walk, k: MatmulPipelineKey, tc_base: TileConfigs, name: []const u8, spv: []const u8, pc_size: u32, pc: u32, rsgs: u32) void {
+    const tc = filterTc(w.device, tc_base, k.type_a, k.mul_mat_id, true);
+    if (tc.n != 0) createMmPipelines(w, k, tc, name, spv, pc_size, pc, .identity, .{ .require_full_subgroups = rsgs > 0, .required_subgroup_size = rsgs, .create_aligned = false });
+}
+
+/// One family of integer-dot matmul rows: `prefix<t>_q8_1<sfx>`, the K
+/// quants on the `_k` tiles with `rsgs_k`, the rest with `rsgs`.
+fn sgMmqRows(w: *Walk, comptime with_mxfp4: bool, tc_int: TileConfigs, tc_int_k: TileConfigs, is_id: bool, comptime prefix: []const u8, comptime sfx: []const u8, pc_size: u32, pc: u32, rsgs: u32, rsgs_k: u32) void {
+    inline for (mmq_rows) |row| {
+        if (with_mxfp4 or row.ty != c.GGML_TYPE_MXFP4) {
+            const name = prefix ++ row.frag ++ "_q8_1";
+            sgCreateMmq(w, key(row.ty, c.GGML_TYPE_Q8_1, is_id, false), if (row.k) tc_int_k else tc_int, name, @field(S, name ++ sfx ++ "_data"), pc_size, pc, if (row.k) rsgs_k else rsgs);
+        }
+    }
+}
+
+/// The scalar paths' LUT rows (`X_SG*`): the f32-B shader, under both
+/// accumulators on the fp16 path and f32 alone on the fp32 one.
+fn sgLutRows(w: *Walk, comptime fp16: bool, tc: TileConfigs, is_id: bool, comptime prefix: []const u8, pc_size: u32, pc: u32, rsgs: u32) void {
     const device = w.device;
+    inline for (lut_rows) |row| {
+        const base = prefix ++ row.frag ++ "_f32";
+        if (fp16) {
+            sgCreate(w, key(row.ty, c.GGML_TYPE_F32, is_id, true), tc, base ++ "_f16acc", spvDot2F16acc(device, base), pc_size, pc, .mm, rsgs);
+            sgCreate(w, key(row.ty, c.GGML_TYPE_F32, is_id, false), tc, base, spvDot2(device, base), pc_size, pc, .mm, rsgs);
+        } else {
+            sgCreate(w, key(row.ty, c.GGML_TYPE_F32, is_id, false), tc, base, @field(S, base ++ "_fp32_data"), pc_size, pc, .mm, rsgs);
+        }
+    }
+}
+
+/// The scalar paths' unified quant rows.
+fn sgQuantRows(w: *Walk, comptime fp16: bool, tc: TileConfigs, is_id: bool, comptime prefix: []const u8, pc_size: u32, pc: u32, rsgs: u32) void {
+    const device = w.device;
+    const base = prefix ++ "quant_f32";
+    for (non_lut_quant_types) |ty| {
+        if (fp16) {
+            sgCreate(w, key(ty, c.GGML_TYPE_F32, is_id, true), tc, base ++ "_f16acc", spvDot2F16acc(device, base), pc_size, pc, .{ .mm_quant = ty }, rsgs);
+            sgCreate(w, key(ty, c.GGML_TYPE_F32, is_id, false), tc, base, spvDot2(device, base), pc_size, pc, .{ .mm_quant = ty }, rsgs);
+        } else {
+            sgCreate(w, key(ty, c.GGML_TYPE_F32, is_id, false), tc, base, @field(S, base ++ "_fp32_data"), pc_size, pc, .{ .mm_quant = ty }, rsgs);
+        }
+    }
+}
+
+/// The fp16 scalar path's float matmuls: `prefix` names f32_f32 and the
+/// f16 pair, with or without f32_f16 (which matmul_id lacks).
+fn sgFloatFp16(w: *Walk, tc: TileConfigs, is_id: bool, comptime prefix: []const u8, pc_size: u32, pc: u32, rsgs: u32) void {
+    const device = w.device;
+    sgCreate(w, key(c.GGML_TYPE_F32, c.GGML_TYPE_F32, is_id, false), tc, prefix ++ "f32_f32", spvDot2(device, prefix ++ "f32_f32"), pc_size, pc, .mm, rsgs);
+    if (!is_id) sgCreate(w, key(c.GGML_TYPE_F32, c.GGML_TYPE_F16, false, false), tc, prefix ++ "f32_f16", spvDot2(device, prefix ++ "f32_f16"), pc_size, pc, .mm, rsgs);
+    sgCreate(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F16, is_id, true), tc, prefix ++ "f16_f16acc", spvDot2F16acc(device, prefix ++ "f16"), pc_size, pc, .mm, rsgs);
+    sgCreate(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F16, is_id, false), tc, prefix ++ "f16", spvDot2(device, prefix ++ "f16"), pc_size, pc, .mm, rsgs);
+    sgCreate(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F32, is_id, true), tc, prefix ++ "f16_f32_f16acc", spvDot2F16acc(device, prefix ++ "f16_f32"), pc_size, pc, .mm, rsgs);
+    sgCreate(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F32, is_id, false), tc, prefix ++ "f16_f32", spvDot2(device, prefix ++ "f16_f32"), pc_size, pc, .mm, rsgs);
+    // BF16 - no dot2
+    sgCreate(w, key(c.GGML_TYPE_BF16, c.GGML_TYPE_BF16, is_id, false), tc, prefix ++ "bf16", @field(S, prefix ++ "bf16_data"), pc_size, pc, .mm, rsgs);
+}
+
+/// The fp32 scalar path's float matmuls.
+fn sgFloatFp32(w: *Walk, tc: TileConfigs, is_id: bool, comptime prefix: []const u8, pc_size: u32, pc: u32, rsgs: u32) void {
+    sgCreate(w, key(c.GGML_TYPE_F32, c.GGML_TYPE_F32, is_id, false), tc, prefix ++ "f32_f32", @field(S, prefix ++ "f32_f32_fp32_data"), pc_size, pc, .mm, rsgs);
+    if (!is_id) sgCreate(w, key(c.GGML_TYPE_F32, c.GGML_TYPE_F16, false, false), tc, prefix ++ "f32_f16", @field(S, prefix ++ "f32_f16_fp32_data"), pc_size, pc, .mm, rsgs);
+    sgCreate(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F16, is_id, false), tc, prefix ++ "f16", @field(S, prefix ++ "f16_fp32_data"), pc_size, pc, .mm, rsgs);
+    sgCreate(w, key(c.GGML_TYPE_F16, c.GGML_TYPE_F32, is_id, false), tc, prefix ++ "f16_f32", @field(S, prefix ++ "f16_f32_fp32_data"), pc_size, pc, .mm, rsgs);
+    sgCreate(w, key(c.GGML_TYPE_BF16, c.GGML_TYPE_BF16, is_id, false), tc, prefix ++ "bf16", @field(S, prefix ++ "bf16_fp32_data"), pc_size, pc, .mm, rsgs);
+}
+
+/// The scalar (subgroup) matmul and matmul_id pipelines, fp16 or fp32.
+fn walkMatmulScalar(w: *Walk, t: *const Tiles, subgroup_min_size_16: bool, mul_mat_subgroup_size: u32, mul_mat_subgroup_size_16: u32) void {
+    const device = w.device;
+    const pc: u32 = @sizeOf(push.MatMat);
     const pcid: u32 = @sizeOf(push.MatMatId);
     const midpc = mul_mat_id_param_count;
-    if (device.subgroup_ballot and device.subgroup_require_full_support and subgroup_min_size_16) {
-        createMm(w, t, .fp32, c.GGML_TYPE_F32, device.pipeline_matmul_id_f32.?, "matmul_id_subgroup_f32_f32", "", "wg_denoms", "warptile_id", pcid, midpc, "_id", mul_mat_subgroup_size_16);
-        createMm(w, t, .fp32, c.GGML_TYPE_F16, device.pipeline_matmul_id_f16.f32acc, "matmul_id_subgroup_f16", "", "wg_denoms", "warptile_id", pcid, midpc, "_id", mul_mat_subgroup_size_16);
-        createMm(w, t, .fp32, c.GGML_TYPE_F16, device.pipeline_matmul_id_f16_f32.f32acc, "matmul_id_subgroup_f16_f32", "", "wg_denoms", "warptile_id", pcid, midpc, "_id", mul_mat_subgroup_size_16);
-        createMm(w, t, .fp32, c.GGML_TYPE_BF16, device.pipeline_matmul_id_bf16.?, "matmul_id_subgroup_bf16", "", "wg_denoms", "warptile_id", pcid, midpc, "_id", mul_mat_subgroup_size_16);
-        mmQuantRows(w, t, .fp32, &device.pipeline_dequant_mul_mat_mat_id, "matmul_id_subgroup_", "_f32", "mmq_wg_denoms", "mmq_wg_denoms", "warptile_mmqid", "warptile_mmqid", pcid, midpc, "_id", mul_mat_subgroup_size);
+
+    const tc_mm = tcOf(t, "warptile", "wg_denoms");
+    const tc_mmq = tcOf(t, "warptile_mmq", "mmq_wg_denoms");
+    const tc_id = tcOf(t, "warptile_id", "wg_denoms");
+    const tc_mmqid = tcOf(t, "warptile_mmqid", "mmq_wg_denoms");
+    const tc_mmq_int = tcOf(t, "warptile_mmq_int", "mmq_wg_denoms");
+    const tc_mmq_int_k = tcOf(t, "warptile_mmq_int_k", "mmq_wg_denoms");
+    const tc_mmqid_int = tcOf(t, "warptile_mmqid_int", "mmq_wg_denoms");
+    const tc_mmqid_int_k = tcOf(t, "warptile_mmqid_int_k", "mmq_wg_denoms");
+    const id_subgroup = device.subgroup_ballot and device.subgroup_require_full_support and subgroup_min_size_16;
+
+    if (device.fp16) {
+        // FP16 subgroup path - with dot2 runtime selection
+        sgFloatFp16(w, tc_mm, false, "matmul_", pc, 3, 0);
+        sgQuantRows(w, true, tc_mmq, false, "matmul_", pc, 3, 0);
+        sgLutRows(w, true, tc_mmq, false, "matmul_", pc, 3, 0);
+        if (comptime glslc.integer_dot) {
+            if (device.integer_dot_product) sgMmqRows(w, true, tc_mmq_int, tc_mmq_int_k, false, "matmul_", "", pc, 3, 0, 0);
+        }
+
+        if (id_subgroup) {
+            sgFloatFp16(w, tc_id, true, "matmul_id_subgroup_", pcid, midpc, mul_mat_subgroup_size_16);
+            sgQuantRows(w, true, tc_mmqid, true, "matmul_id_subgroup_", pcid, midpc, mul_mat_subgroup_size);
+            sgLutRows(w, true, tc_mmqid, true, "matmul_id_subgroup_", pcid, midpc, mul_mat_subgroup_size);
+            if (comptime glslc.integer_dot) {
+                if (device.integer_dot_product) sgMmqRows(w, true, tc_mmqid_int, tc_mmqid_int_k, true, "matmul_id_subgroup_", "", pcid, midpc, mul_mat_subgroup_size, mul_mat_subgroup_size_16);
+            }
+        } else {
+            sgFloatFp16(w, tc_mm, true, "matmul_id_", pcid, midpc, 0);
+            sgQuantRows(w, true, tc_mmqid, true, "matmul_id_", pcid, midpc, 0);
+            sgLutRows(w, true, tc_mmqid, true, "matmul_id_", pcid, midpc, 0);
+            if (comptime glslc.integer_dot) {
+                if (device.integer_dot_product) sgMmqRows(w, true, tc_mmqid_int, tc_mmqid_int_k, true, "matmul_id_", "", pcid, midpc, 0, 0);
+            }
+        }
     } else {
-        createMm(w, t, .fp32, c.GGML_TYPE_F32, device.pipeline_matmul_id_f32.?, "matmul_id_f32_f32", "", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-        createMm(w, t, .fp32, c.GGML_TYPE_F16, device.pipeline_matmul_id_f16.f32acc, "matmul_id_f16", "", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-        createMm(w, t, .fp32, c.GGML_TYPE_F16, device.pipeline_matmul_id_f16_f32.f32acc, "matmul_id_f16_f32", "", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-        createMm(w, t, .fp32, c.GGML_TYPE_BF16, device.pipeline_matmul_id_bf16.?, "matmul_id_bf16", "", "wg_denoms", "warptile", pcid, midpc, "_id", 0);
-        mmQuantRows(w, t, .fp32, &device.pipeline_dequant_mul_mat_mat_id, "matmul_id_", "_f32", "mmq_wg_denoms", "mmq_wg_denoms", "warptile_mmqid", "warptile_mmqid", pcid, midpc, "_id", 0);
+        // FP32-only fallback path
+        sgFloatFp32(w, tc_mm, false, "matmul_", pc, 3, 0);
+        sgQuantRows(w, false, tc_mmq, false, "matmul_", pc, 3, 0);
+        sgLutRows(w, false, tc_mmq, false, "matmul_", pc, 3, 0);
+        if (comptime glslc.integer_dot) {
+            if (device.integer_dot_product) sgMmqRows(w, false, tc_mmq_int, tc_mmq_int_k, false, "matmul_", "_fp32", pc, 3, 0, 0);
+        }
+
+        if (id_subgroup) {
+            sgFloatFp32(w, tc_id, true, "matmul_id_subgroup_", pcid, midpc, mul_mat_subgroup_size_16);
+            sgQuantRows(w, false, tc_mmqid, true, "matmul_id_subgroup_", pcid, midpc, mul_mat_subgroup_size);
+            sgLutRows(w, false, tc_mmqid, true, "matmul_id_subgroup_", pcid, midpc, mul_mat_subgroup_size);
+        } else {
+            sgFloatFp32(w, tc_mm, true, "matmul_id_", pcid, midpc, 0);
+            sgQuantRows(w, false, tc_mmqid, true, "matmul_id_", pcid, midpc, 0);
+            sgLutRows(w, false, tc_mmqid, true, "matmul_id_", pcid, midpc, 0);
+        }
     }
 }
 
-/// Ports `shader_reduction_mode` (ggml-vulkan.cpp:618 @5266f24da), the
+/// The matmul and matmul_id pipelines of whichever path the device takes:
+/// coopmat2, coopmat1, or the scalar paths; then the bf16 fallback and the
+/// tile selectors.
+fn walkMatmul(w: *Walk, t: *const Tiles, subgroup_min_size_16: bool, mul_mat_subgroup_size: u32, mul_mat_subgroup_size_16: u32, subgroup_size_8: u32, subgroup_size_32: u32, mm_warp_8: u32) void {
+    const device = w.device;
+    if (glslc.coopmat2 and device.coopmat2) {
+        if (comptime glslc.coopmat2) walkMatmulCm2(w, t);
+    } else if (glslc.coopmat and device.coopmat_support) {
+        if (comptime glslc.coopmat) walkMatmulCm1(w, t);
+    } else {
+        walkMatmulScalar(w, t, subgroup_min_size_16, mul_mat_subgroup_size, mul_mat_subgroup_size_16);
+    }
+
+    // BF16 fallback for coopmat devices without bf16 coopmat support
+    if ((device.coopmat2 or device.coopmat_support) and !(glslc.bfloat16 and device.coopmat_bf16_support)) {
+        const s_warptile_wm_bf16: u32 = if (device.subgroup_size == 8) 8 else 32;
+        const tc_bf16_fb: TileConfigs = .{ .n = 3, .v = .{
+            .{ .warptile = .of(.{ subgroup_size_32, 32, 32, 16, s_warptile_wm_bf16, 32, 2, 2, 2, 1, subgroup_size_8 }), .wg_denoms = .{ 32, 32, 1 }, .@"align" = t.s_align },
+            .{ .warptile = .of(.{ 128, 64, 64, 16, mm_warp_8, 32, 2, 4, 2, 1, mm_warp_8 }), .wg_denoms = .{ 64, 64, 1 }, .@"align" = t.m_align },
+            .{ .warptile = .of(.{ 128, 128, 128, 16, mm_warp_8 * 2, 64, 2, 4, 4, 1, mm_warp_8 }), .wg_denoms = .{ 128, 128, 1 }, .@"align" = t.l_align },
+        } };
+        const tc_bf16_filtered = filterTc(device, tc_bf16_fb, c.GGML_TYPE_BF16, false, false);
+        const tc_bf16_id_filtered = filterTc(device, tc_bf16_fb, c.GGML_TYPE_BF16, true, false);
+        if (tc_bf16_filtered.n != 0) {
+            createMmPipelines(w, key(c.GGML_TYPE_BF16, c.GGML_TYPE_BF16, false, false), tc_bf16_filtered, "matmul_bf16", S.matmul_bf16_fp32_data, @sizeOf(push.MatMat), 3, .mm, .{});
+        }
+        if (tc_bf16_id_filtered.n != 0) {
+            createMmPipelines(w, key(c.GGML_TYPE_BF16, c.GGML_TYPE_BF16, true, false), tc_bf16_id_filtered, "matmul_id_bf16", S.matmul_id_bf16_fp32_data, @sizeOf(push.MatMatId), mul_mat_id_param_count, .mm, .{});
+        }
+    }
+
+    // Set up tile selector functions
+    if (device.coopmat2) {
+        device.matmul_tile_selector = &cm2TileSelector;
+        device.matmul_id_tile_selector = &cm2IdTileSelector;
+    } else {
+        device.matmul_tile_selector = &defaultTileSelector;
+        device.matmul_id_tile_selector = &defaultTileSelector;
+    }
+}
+
+/// `CEIL_DIV` over C's unsigned arithmetic.
+fn ceilDiv(a: u32, b: u32) u32 {
+    return (a +% b -% 1) / b;
+}
+
+/// The coopmat2 `matmul_tile_selector` lambda (ggml-vulkan.cpp:5428 @b29c606e2).
+fn cm2TileSelector(mm: u32, n: u32, k: u32, shader_core_count: u32, configs: []const MatmulPipelinePair) u32 {
+    _ = k;
+    if (configs.len <= 1) return 0;
+    const last: u32 = @intCast(configs.len - 1);
+    if (configs.len == 2) {
+        const crossover = configs[0].unaligned.?.wg_denoms[1];
+        return if (n > crossover) 1 else 0;
+    }
+    // 3+ configs: s=0, m=1, l=2
+    const tiles_l = ceilDiv(mm, configs[last].unaligned.?.wg_denoms[0]) *% ceilDiv(n, configs[last].unaligned.?.wg_denoms[1]);
+    const tiles_m = ceilDiv(mm, configs[1].unaligned.?.wg_denoms[0]) *% ceilDiv(n, configs[1].unaligned.?.wg_denoms[1]);
+    const crossover_large = configs[1].unaligned.?.wg_denoms[1];
+    const prefer_large = tiles_m > shader_core_count or tiles_l > shader_core_count or
+        (tiles_l <= shader_core_count / 3 and tiles_m > shader_core_count / 2);
+    if (n > crossover_large and prefer_large) return last;
+    const crossover_medium_m = configs[0].unaligned.?.wg_denoms[0];
+    const crossover_medium_n = configs[0].unaligned.?.wg_denoms[1];
+    if (mm > crossover_medium_m and n > crossover_medium_n) return 1;
+    return 0;
+}
+
+/// The coopmat2 `matmul_id_tile_selector` lambda (ggml-vulkan.cpp:5448 @b29c606e2).
+fn cm2IdTileSelector(mm: u32, n: u32, k: u32, shader_core_count: u32, configs: []const MatmulPipelinePair) u32 {
+    _ = mm;
+    _ = k;
+    _ = shader_core_count;
+    if (configs.len <= 1) return 0;
+    const last: u32 = @intCast(configs.len - 1);
+    if (configs.len == 2) {
+        const crossover = configs[0].unaligned.?.wg_denoms[1];
+        return if (n > crossover) 1 else 0;
+    }
+    const crossover_large = configs[1].unaligned.?.wg_denoms[1];
+    if (n > crossover_large) return last;
+    const crossover_medium = configs[0].unaligned.?.wg_denoms[1];
+    if (n > crossover_medium) return 1;
+    return 0;
+}
+
+/// The other paths' `matmul_tile_selector` lambda (ggml-vulkan.cpp:5463 @b29c606e2),
+/// shared by matmul_id.
+fn defaultTileSelector(mm: u32, n: u32, k: u32, shader_core_count: u32, configs: []const MatmulPipelinePair) u32 {
+    _ = k;
+    _ = shader_core_count;
+    if (configs.len <= 1) return 0;
+    if (mm <= 32 or n <= 32) return 0;
+    if (configs.len == 2) return 1;
+    if (mm <= 64 or n <= 64) return 1;
+    return @intCast(configs.len - 1);
+}
+
+/// Ports `shader_reduction_mode` (ggml-vulkan.cpp:644 @b29c606e2), the
 /// index into a dmmv shader's three variants.
 const ReductionMode = enum(usize) { shmem, hybrid, subgroup };
 
@@ -1040,11 +1355,12 @@ const dmmv_rows = [_]DmmvRow{
     .{ .ty = c.GGML_TYPE_Q5_1, .frag = "q5_1", .rm = .stdq2 },
     .{ .ty = c.GGML_TYPE_Q8_0, .frag = "q8_0", .rm = .stdq1 },
     .{ .ty = c.GGML_TYPE_Q2_K, .frag = "q2_k", .rm = .kq, .sixteen = true },
-    .{ .ty = c.GGML_TYPE_TQ2_0, .frag = "tq2_0", .rm = .kq, .sixteen = true },
     .{ .ty = c.GGML_TYPE_Q3_K, .frag = "q3_k", .rm = .kq, .sixteen = true },
     .{ .ty = c.GGML_TYPE_Q4_K, .frag = "q4_k", .rm = .kq, .sixteen = true },
     .{ .ty = c.GGML_TYPE_Q5_K, .frag = "q5_k", .rm = .kq, .sixteen = true },
     .{ .ty = c.GGML_TYPE_Q6_K, .frag = "q6_k", .rm = .kq, .sixteen = true },
+    .{ .ty = c.GGML_TYPE_TQ1_0, .frag = "tq1_0", .rm = .kq, .sixteen = true },
+    .{ .ty = c.GGML_TYPE_TQ2_0, .frag = "tq2_0", .rm = .kq, .sixteen = true },
     .{ .ty = c.GGML_TYPE_IQ1_S, .frag = "iq1_s", .rm = .iq, .sixteen = true },
     .{ .ty = c.GGML_TYPE_IQ1_M, .frag = "iq1_m", .rm = .iq, .sixteen = true },
     .{ .ty = c.GGML_TYPE_IQ2_XXS, .frag = "iq2_xxs", .rm = .iq, .sixteen = true },
@@ -1128,8 +1444,11 @@ fn walkMulMatVec(w: *Walk, subgroup_min_size_16: bool) void {
     const rm_iq = 2 * rm_kq;
 
     const use_subgroups = device.subgroup_arithmetic;
+    // The Imagination proprietary compiler rejects the subgroup-only dequant mul_mat_vec
+    // shaders that require a subgroup size >= 16; fall back to shared-memory reduction.
+    const is_imagination_proprietary = device.driver_id == vk.VK_DRIVER_ID_IMAGINATION_PROPRIETARY;
     // Ensure a subgroup size >= 16 is available
-    const use_subgroups16 = use_subgroups and subgroup_min_size_16;
+    const use_subgroups16 = use_subgroups and subgroup_min_size_16 and !is_imagination_proprietary;
 
     const subgroup_size: u32 = if (device.vendor_id == common.vendor_id.intel and device.subgroup_size_control and device.subgroup_min_size <= 16 and device.subgroup_max_size >= 16) 16 else device.subgroup_size;
     const subgroup_size16 = @max(subgroup_size, 16);
@@ -1272,11 +1591,12 @@ const dequant_rows = [_]struct { ty: c.ggml_type, frag: []const u8, denom: u32 }
     .{ .ty = c.GGML_TYPE_Q5_1, .frag = "q5_1", .denom = 256 * 16 },
     .{ .ty = c.GGML_TYPE_Q8_0, .frag = "q8_0", .denom = 256 * 16 },
     .{ .ty = c.GGML_TYPE_Q2_K, .frag = "q2_k", .denom = 256 * 64 },
-    .{ .ty = c.GGML_TYPE_TQ2_0, .frag = "tq2_0", .denom = 256 * 64 },
     .{ .ty = c.GGML_TYPE_Q3_K, .frag = "q3_k", .denom = 256 * 64 },
     .{ .ty = c.GGML_TYPE_Q4_K, .frag = "q4_k", .denom = 256 * 32 },
     .{ .ty = c.GGML_TYPE_Q5_K, .frag = "q5_k", .denom = 256 * 64 },
     .{ .ty = c.GGML_TYPE_Q6_K, .frag = "q6_k", .denom = 256 * 64 },
+    .{ .ty = c.GGML_TYPE_TQ1_0, .frag = "tq1_0", .denom = 256 * 4 },
+    .{ .ty = c.GGML_TYPE_TQ2_0, .frag = "tq2_0", .denom = 256 * 64 },
     .{ .ty = c.GGML_TYPE_IQ1_S, .frag = "iq1_s", .denom = 256 * 32 },
     .{ .ty = c.GGML_TYPE_IQ1_M, .frag = "iq1_m", .denom = 256 * 32 },
     .{ .ty = c.GGML_TYPE_IQ2_XXS, .frag = "iq2_xxs", .denom = 256 * 32 },
@@ -1383,6 +1703,12 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
 
     cp(w, &device.pipeline_rms_norm_f32, "rms_norm_f32", S.rms_norm_f32_data, 4, pcb, .{ 1, 1, 1 }, &.{ 0, 0 }, 1, true);
     cp(w, &device.pipeline_rms_norm_mul_f32, "rms_norm_mul_f32", S.rms_norm_f32_data, 4, pcb, .{ 1, 1, 1 }, &.{ 0, 1 }, 1, true);
+    cp(w, &device.pipeline_rms_norm_mul_add_f32, "rms_norm_mul_add_f32", S.rms_norm_mul_add_f32_data, 5, pcb, .{ 1, 1, 1 }, &.{ 0, 1, 0 }, 1, true);
+    cp(w, &device.pipeline_rms_norm_mul_add_mul_f32, "rms_norm_mul_add_mul_f32", S.rms_norm_mul_add_f32_data, 5, pcb, .{ 1, 1, 1 }, &.{ 0, 1, 1 }, 1, true);
+    cp(w, &device.pipeline_rms_norm_mul_add_partials_f32, "rms_norm_mul_add_partials_f32", S.rms_norm_mul_add_partials_f32_data, 6, pcb, .{ 1, 1, 1 }, &.{ 0, 1, 0 }, 1, true);
+    cp(w, &device.pipeline_rms_norm_mul_add_mul_partials_f32, "rms_norm_mul_add_mul_partials_f32", S.rms_norm_mul_add_partials_f32_data, 6, pcb, .{ 1, 1, 1 }, &.{ 0, 1, 1 }, 1, true);
+    cp(w, &device.pipeline_rms_norm_set_rows_f32_f32, "rms_norm_set_rows_f32_f32", S.rms_norm_set_rows_f32_f32_data, 4, pcb, .{ 1, 1, 1 }, &.{ 0, 0 }, 1, true);
+    cp(w, &device.pipeline_rms_norm_set_rows_f32_f16, "rms_norm_set_rows_f32_f16", S.rms_norm_set_rows_f32_f16_data, 4, pcb, .{ 1, 1, 1 }, &.{ 0, 0 }, 1, true);
     cp(w, &device.pipeline_rms_norm_partials_f32, "rms_norm_partials_f32", S.rms_norm_partials_f32_data, 4, pcb, .{ 1, 1, 1 }, &.{ 0, 0 }, 1, true);
     cp(w, &device.pipeline_rms_norm_mul_partials_f32, "rms_norm_mul_partials_f32", S.rms_norm_partials_f32_data, 4, pcb, .{ 1, 1, 1 }, &.{ 0, 1 }, 1, true);
 
@@ -1481,6 +1807,18 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
     inline for (.{ "elu", "gelu", "gelu_erf", "gelu_quick", "silu", "relu", "sqr", "sqrt", "sin", "cos", "clamp", "leaky_relu", "xielu", "neg", "tanh", "sigmoid", "hardsigmoid", "hardswish", "abs", "softplus", "step", "round", "ceil", "floor", "trunc", "sgn", "exp", "expm1" }) |op| {
         cp(w, &@field(device, "pipeline_" ++ op)[0], op ++ "_f32", @field(S, op ++ "_f32_data"), 2, pcu, .{ 512, 1, 1 }, &.{}, 1, false);
         cp(w, &@field(device, "pipeline_" ++ op)[1], op ++ "_f16", @field(S, op ++ "_f16_data"), 2, pcu, .{ 512, 1, 1 }, &.{}, 1, false);
+    }
+
+    // CREATE_UNARY_MUL(name, idx); spec constants: {norepeat, op_on_b}
+    inline for (.{ "gelu", "sigmoid", "silu", "softplus" }, 0..) |op, idx| {
+        for (0..2) |dt| {
+            const data = if (dt != 0) @field(S, op ++ "_mul_f16_data") else @field(S, op ++ "_mul_f32_data");
+            const dts: []const u8 = if (dt != 0) "f16" else "f32";
+            for (0..2) |ob| for (0..2) |nr| {
+                const spec = [_]u32{ @intCast(nr), @intCast(ob) };
+                w.createFmt(&device.pipeline_unary_mul[idx][dt][nr][ob], "{s}_mul{s}_{s}{s}", .{ op, if (ob != 0) "_b" else "", dts, if (nr != 0) "_norepeat" else "" }, .{ .spv = data, .parameter_count = 3, .push_constant_size = pcb, .wg_denoms = .{ 512, 1, 1 }, .spec = &spec });
+            };
+        }
     }
 
     inline for (.{ "add1_f16_f16", "add1_f16_f32", "add1_f32_f32" }) |name| {
@@ -1606,6 +1944,16 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
         cp(w, &device.pipeline_count_experts, "count_experts", S.count_experts_data, 2, @sizeOf(push.CountExperts), .{ 1, 1, 1 }, &.{}, 1, true);
     }
 
+    // comb holds a token's 4x4 matrix in one 16-lane slice of a subgroup, so it
+    // needs at least 16 lanes, pinned to a known size.
+    if (device.subgroup_basic and device.subgroup_shuffle and device.subgroup_require_full_support and device.subgroup_size >= 16) {
+        const tokens_per_workgroup = 4 * (device.subgroup_size / 16);
+        w.create(&device.pipeline_dsv4_hc_comb_f32, "dsv4_hc_comb_f32", .{ .spv = S.dsv4_hc_comb_f32_data, .parameter_count = 4, .push_constant_size = @sizeOf(push.Dsv4HcComb), .wg_denoms = .{ tokens_per_workgroup, 1, 1 }, .spec = &.{device.subgroup_size}, .disable_robustness = true, .require_full_subgroups = true, .required_subgroup_size = device.subgroup_size });
+    }
+
+    cp(w, &device.pipeline_dsv4_hc_pre_f32, "dsv4_hc_pre_f32", S.dsv4_hc_pre_f32_data, 3, @sizeOf(push.Dsv4HcPre), .{ 256, 1, 1 }, &.{256}, 1, false);
+    cp(w, &device.pipeline_dsv4_hc_post_f32, "dsv4_hc_post_f32", S.dsv4_hc_post_f32_data, 5, @sizeOf(push.Dsv4HcPost), .{ 256, 1, 1 }, &.{256}, 1, false);
+
     var sit = device.pipeline_solve_tri_f32.iterator();
     while (sit.next()) |s| {
         const state = s.key_ptr.*;
@@ -1721,7 +2069,7 @@ fn walkGatedDeltaNet(w: *Walk) void {
     }
 }
 
-/// Ports `ggml_vk_intel_windows_driver_in_range` (ggml-vulkan.cpp:19556 @5266f24da):
+/// Ports `ggml_vk_intel_windows_driver_in_range` (ggml-vulkan.cpp:20164 @b29c606e2):
 /// whether `lower <= driver_version < upper`, each bound `xxx.yyyy`;
 /// always true off Windows.
 pub fn intelWindowsDriverInRange(driver_version: u32, lower_major: u32, lower_minor: u32, upper_major: u32, upper_minor: u32) bool {

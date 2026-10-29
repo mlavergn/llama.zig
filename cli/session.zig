@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** Our own code, written against libllama's C ABI. It follows
-//! the shape of `llama.cpp/tools/cli/cli-context.cpp` (v0.4.0, `5266f24da`) --
+//! the shape of `llama.cpp/tools/cli/cli-context.cpp` (v0.4.1, `b29c606e2`) --
 //! load, tokenize, build a sampler chain, decode in a loop -- but shares no
 //! code with it and is far smaller, because it does one-shot completion only.
 //!
@@ -73,7 +73,7 @@ pub const Session = struct {
     /// `GET_ROWS`, whose weights stay in host memory). Measured on a GB10 with
     /// Qwen3.5-2B: decode 7.59 ms/token without a pool, 7.03 with one, 6.75 at
     /// one thread. Upstream's CLI attaches one in `common_threadpools`'s `init`
-    /// (common/common.cpp:1786 @5266f24da). Null if creation failed, which leaves
+    /// (common/common.cpp:1785 @b29c606e2). Null if creation failed, which leaves
     /// libllama's per-call pools, as upstream does.
     threadpool: ?*c.struct_ggml_threadpool = null,
     /// Borrowed from the caller's `Args`; not owned.
@@ -111,8 +111,8 @@ pub const Session = struct {
         /// `common_params::tensor_split`, 128 zeros until `--fit` writes it.
         tensor_split: [128]f32 = @splat(0),
         /// `common_params::tensor_buft_overrides`, padded with empty entries
-        /// to `llama_max_tensor_buft_overrides` (common/arg.cpp:946
-        /// @5266f24da).
+        /// to `llama_max_tensor_buft_overrides` (common/arg.cpp:941
+        /// @b29c606e2).
         tensor_buft_overrides: []c.llama_model_tensor_buft_override,
         /// The regexes the overrides point at.
         patterns: fit.Patterns,
@@ -142,7 +142,7 @@ pub const Session = struct {
         errdefer load.patterns.deinit();
         @memset(load.tensor_buft_overrides, .{ .pattern = null, .buft = null });
 
-        // `common_model_params_to_llama` (common/common.cpp:1680 @5266f24da).
+        // `common_model_params_to_llama` (common/common.cpp:1679 @b29c606e2).
         // `load_mode` and v0.4.0's `lazy_mode` stay libllama's defaults,
         // `AUTO` both, which are `common_params`' too: `--load-mode` and
         // `--lazy-mode` are not among the flags this CLI takes.
@@ -164,7 +164,7 @@ pub const Session = struct {
         if (settings.n_ctx >= 0) ctx_params.n_ctx = @intCast(settings.n_ctx);
         if (settings.n_batch > 0) ctx_params.n_batch = @intCast(settings.n_batch);
         // `server_output_limits` (tools/server/server-context.cpp:41
-        // @5266f24da), which upstream's `llama-cli` reaches through the
+        // @b29c606e2), which upstream's `llama-cli` reaches through the
         // server it drives: one sequence and no draft model, so one output
         // in a batch and one per sequence -- all this binary ever reads.
         // libllama's default of 0 sizes the output buffer for the whole
@@ -578,7 +578,7 @@ pub const Session = struct {
         return .{
             .prompt_tokens = d.n_p_eval,
             // 1e3 / t_ms * n, as `llama_perf_context_print` computes it
-            // (llama-context.cpp:4270 @5266f24da).
+            // (llama-context.cpp:4276 @b29c606e2).
             .prompt_per_second = if (d.t_p_eval_ms > 0)
                 1e3 / d.t_p_eval_ms * @as(f64, @floatFromInt(d.n_p_eval))
             else
@@ -631,7 +631,7 @@ pub const Timings = struct {
     generated_per_second: f64,
 };
 
-/// Ports the warmup in `common_init_from_params` (common/common.cpp:1436 @5266f24da).
+/// Ports the warmup in `common_init_from_params` (common/common.cpp:1436 @b29c606e2).
 ///
 /// Runs one throwaway decode so the one-time costs -- Metal pipeline
 /// compilation, buffer allocation, first-touch page faults -- happen *before*
@@ -724,7 +724,7 @@ fn warmUp(model: *c.llama_model, ctx: *c.llama_context, vocab: *const c.llama_vo
 ///
 /// **There is deliberately no greedy short-circuit.** `--temp 0` looks like it
 /// should mean "add `llama_sampler_init_greedy` and skip the rest", and that
-/// is wrong: `llama_sampler_temp_impl` (llama-sampler.cpp:265 @5266f24da) already does the
+/// is wrong: `llama_sampler_temp_impl` (llama-sampler.cpp:265 @b29c606e2) already does the
 /// argmax when `temp <= 0`, and it does it *after* the penalty sampler has
 /// altered the logits. Short-circuiting would make `--temp 0 --repeat-penalty
 /// 1.1` pick a different token from upstream, on a path where both look

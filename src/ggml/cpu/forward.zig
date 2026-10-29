@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.0, `5266f24da`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.1, `b29c606e2`),
 //! `ggml_compute_forward` at line 1711.
 //!
 //! # The kernels are still C++
@@ -159,7 +159,7 @@ const kernels = struct {
     extern fn ggml_compute_forward_opt_step_sgd(params: *const ComputeParams, dst: *Tensor) void;
 };
 
-/// Ports `ggml_compute_forward` (ggml-cpu.c:1736 @5266f24da).
+/// Ports `ggml_compute_forward` (ggml-cpu.c:1736 @b29c606e2).
 ///
 /// Parameters:
 /// - `params`: this thread's index, count, and slice of the work buffer.

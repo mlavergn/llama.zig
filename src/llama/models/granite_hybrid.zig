@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/granite-hybrid.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_granite_hybrid`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/granite-hybrid.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_granite_hybrid`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_attention_layer` and `build_layer_ffn`.
 
@@ -24,7 +24,7 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llama_model_granite_hybrid`'s `load_arch_hparams`
-/// (models/granite-hybrid.cpp:3 @5266f24da).
+/// (models/granite-hybrid.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -59,7 +59,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         768 => .@"350m",
         1536 => if (hp.nFf(0) == 512) .@"7b_a1b" else .@"1b",
         2048, 2560 => .@"3b",
-        4096 => .@"32b",
+        4096 => .@"32b_a9b",
         else => .unknown,
     };
 
@@ -68,7 +68,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_granite_hybrid`'s `load_arch_tensors`
-/// (models/granite-hybrid.cpp:41 @5266f24da).
+/// (models/granite-hybrid.cpp:41 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -164,13 +164,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_granite_hybrid`'s `build_arch_graph`
-/// (models/granite-hybrid.cpp:131 @5266f24da).
+/// (models/granite-hybrid.cpp:131 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_granite_hybrid`'s `graph`
-/// (models/granite-hybrid.cpp:135 @5266f24da).
+/// (models/granite-hybrid.cpp:135 @b29c606e2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -240,7 +240,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_granite_hybrid::graph`'s `build_attention_layer`
-/// (models/granite-hybrid.cpp:202 @5266f24da).
+/// (models/granite-hybrid.cpp:202 @b29c606e2).
 fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_pos: ?*Tensor, inp_attn: *graph.InpAttnKv, n_embd_head: i64, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -269,7 +269,7 @@ fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tens
 }
 
 /// Ports `llama_model_granite_hybrid::graph`'s `build_layer_ffn`
-/// (models/granite-hybrid.cpp:232 @5266f24da).
+/// (models/granite-hybrid.cpp:232 @b29c606e2).
 fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;

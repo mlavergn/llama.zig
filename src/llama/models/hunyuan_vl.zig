@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/hunyuan-vl.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/hunyuan-vl.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_hunyuan_vl`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_hunyuan_vl`'s `load_arch_hparams` (models/hunyuan-vl.cpp:3 @5266f24da).
+/// Ports `llama_model_hunyuan_vl`'s `load_arch_hparams` (models/hunyuan-vl.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -44,7 +44,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_hunyuan_vl`'s `load_arch_tensors` (models/hunyuan-vl.cpp:23 @5266f24da).
+/// Ports `llama_model_hunyuan_vl`'s `load_arch_tensors` (models/hunyuan-vl.cpp:23 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -79,13 +79,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_hunyuan_vl`'s `build_arch_graph` (models/hunyuan-vl.cpp:56 @5266f24da).
+/// Ports `llama_model_hunyuan_vl`'s `build_arch_graph` (models/hunyuan-vl.cpp:56 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_hunyuan_vl`'s `graph`
-/// (models/hunyuan-vl.cpp:60 @5266f24da), which `llama_model_hunyuan_dense`
+/// (models/hunyuan-vl.cpp:60 @b29c606e2), which `llama_model_hunyuan_dense`
 /// builds too.
 pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;

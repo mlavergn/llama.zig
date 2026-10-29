@@ -7,7 +7,7 @@
 //! - `llama.cpp/src/llama-arch.h` -- the four enums
 //! - `llama.cpp/src/llama-arch.cpp` -- the four `std::map` initializers
 //!
-//! Both at v0.4.0 (`5266f24da`). **Do not edit**: regenerate after moving the
+//! Both at v0.4.1 (`b29c606e2`). **Do not edit**: regenerate after moving the
 //! pin, and `make arch-diff` compares every lookup against the C++.
 //!
 //! Each table is indexed by its enum's ordinal, which is the `std::map`'s
@@ -17,7 +17,7 @@
 
 const c = @import("impl.zig").c;
 
-/// Mirrors `llm_arch` (llama-arch.h:13 @5266f24da).
+/// Mirrors `llm_arch` (llama-arch.h:13 @b29c606e2).
 pub const Arch = enum(c_int) {
     clip,
     llama,
@@ -75,6 +75,7 @@ pub const Arch = enum(c_int) {
     starcoder2,
     mamba,
     mamba2,
+    maple,
     jamba,
     falcon_h1,
     xverse,
@@ -134,6 +135,7 @@ pub const Arch = enum(c_int) {
     hunyuan_dense,
     hunyuan_vl,
     hy_v3,
+    hy_v4,
     smollm3,
     openai_moe,
     lfm2,
@@ -154,6 +156,7 @@ pub const Arch = enum(c_int) {
     paddleocr,
     mimo2,
     step35,
+    spark2_5,
     llama_embed,
     maincoder,
     kimi_linear,
@@ -170,7 +173,7 @@ pub const Arch = enum(c_int) {
     unknown,
 };
 
-/// Mirrors `llm_kv` (llama-arch.h:165 @5266f24da).
+/// Mirrors `llm_kv` (llama-arch.h:168 @b29c606e2).
 pub const Kv = enum(c_int) {
     general_type,
     general_architecture,
@@ -304,6 +307,7 @@ pub const Kv = enum(c_int) {
     hyper_connection_count,
     hyper_connection_sinkhorn_iterations,
     hyper_connection_epsilon,
+    hyper_connection_magnitude,
     hyper_connection_low_rank,
     ple_layers,
     ple_ngram_size,
@@ -412,7 +416,7 @@ pub const Kv = enum(c_int) {
     dense_3_feat_out,
 };
 
-/// Mirrors `llm_tensor` (llama-arch.h:429 @5266f24da).
+/// Mirrors `llm_tensor` (llama-arch.h:433 @b29c606e2).
 pub const Tensor = enum(c_int) {
     token_embd,
     token_embd_norm,
@@ -689,20 +693,20 @@ pub const Tensor = enum(c_int) {
     dflash_selector_hidden,
 };
 
-/// Mirrors `llm_tensor_layer` (llama-arch.h:707 @5266f24da).
+/// Mirrors `llm_tensor_layer` (llama-arch.h:711 @b29c606e2).
 pub const TensorLayer = enum(c_int) {
     input,
     repeating,
     output,
 };
 
-/// Mirrors `llm_tensor_info` (llama-arch.h:770 @5266f24da).
+/// Mirrors `llm_tensor_info` (llama-arch.h:774 @b29c606e2).
 pub const TensorInfo = struct {
     layer: TensorLayer,
     op: c.enum_ggml_op,
 };
 
-/// Ports `LLM_ARCH_NAMES` (llama-arch.cpp:8 @5266f24da), by `Arch` ordinal.
+/// Ports `LLM_ARCH_NAMES` (llama-arch.cpp:8 @b29c606e2), by `Arch` ordinal.
 pub const arch_names = [_]?[:0]const u8{
     "clip",
     "llama",
@@ -760,6 +764,7 @@ pub const arch_names = [_]?[:0]const u8{
     "starcoder2",
     "mamba",
     "mamba2",
+    "maple",
     "jamba",
     "falcon-h1",
     "xverse",
@@ -819,6 +824,7 @@ pub const arch_names = [_]?[:0]const u8{
     "hunyuan-dense",
     "hunyuan_vl",
     "hy_v3",
+    "hy_v4",
     "smollm3",
     "gpt-oss",
     "lfm2",
@@ -839,6 +845,7 @@ pub const arch_names = [_]?[:0]const u8{
     "paddleocr",
     "mimo2",
     "step35",
+    "spark2_5",
     "llama-embed",
     "maincoder",
     "kimi-linear",
@@ -855,7 +862,7 @@ pub const arch_names = [_]?[:0]const u8{
     "(unknown)",
 };
 
-/// Ports `LLM_KV_NAMES` (llama-arch.cpp:160 @5266f24da), by `Kv` ordinal.
+/// Ports `LLM_KV_NAMES` (llama-arch.cpp:163 @b29c606e2), by `Kv` ordinal.
 pub const kv_names = [_]?[:0]const u8{
     "general.type",
     "general.architecture",
@@ -989,6 +996,7 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.hyper_connection.count",
     "%s.hyper_connection.sinkhorn_iterations",
     "%s.hyper_connection.epsilon",
+    "%s.hyper_connection.magnitude",
     "%s.hyper_connection.low_rank",
     "%s.ple.layers",
     "%s.ple.ngram_size",
@@ -1097,7 +1105,7 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.dense_3_feat_out",
 };
 
-/// Ports `LLM_TENSOR_NAMES` (llama-arch.cpp:424 @5266f24da), by `Tensor` ordinal.
+/// Ports `LLM_TENSOR_NAMES` (llama-arch.cpp:428 @b29c606e2), by `Tensor` ordinal.
 pub const tensor_names = [_]?[:0]const u8{
     "token_embd",
     "token_embd_norm",
@@ -1374,7 +1382,7 @@ pub const tensor_names = [_]?[:0]const u8{
     "selector_hidden",
 };
 
-/// Ports `LLM_TENSOR_INFOS` (llama-arch.cpp:709 @5266f24da), by `Tensor` ordinal.
+/// Ports `LLM_TENSOR_INFOS` (llama-arch.cpp:713 @b29c606e2), by `Tensor` ordinal.
 pub const tensor_infos = [_]?TensorInfo{
     .{ .layer = .input, .op = c.GGML_OP_GET_ROWS },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },

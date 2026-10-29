@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports the model-specific switch of `clip_model_loader::load_tensors`
-//! and `clip_n_mmproj_embd` from `llama.cpp/tools/mtmd/clip.cpp` at v0.4.0
-//! (`5266f24da`). Each declaration names what it ports and the line it
+//! and `clip_n_mmproj_embd` from `llama.cpp/tools/mtmd/clip.cpp` at v0.4.1
+//! (`b29c606e2`). Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # Order is part of the contract
@@ -92,7 +92,7 @@ fn loadClampInfo(tl: *TensorLoader) Error!void {
 }
 
 /// Ports the model-specific switch of `load_tensors` (mtmd/clip.cpp:2099
-/// @5266f24da), the `switch (model.proj_type)` at its line 2335.
+/// @b29c606e2), the `switch (model.proj_type)` at its line 2335.
 pub fn load(tl: *TensorLoader) Error!void {
     const func = "load_tensors";
     const model = &tl.ctx_clip.model;
@@ -1233,7 +1233,7 @@ inline fn neI(t: T, i: usize) c_int {
     return @truncate(graph.ne(t, i));
 }
 
-/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:5911 @5266f24da): the embedding
+/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:5911 @b29c606e2): the embedding
 /// size of the projector's output, which must be the text model's.
 pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
     const m = &ctx.model;

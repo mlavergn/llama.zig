@@ -8,7 +8,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/common.h` — `type_conversion_table` and
 //!   `get_thread_range`
 //!
-//! at v0.4.0 (`5266f24da`).
+//! at v0.4.1 (`b29c606e2`).
 //!
 //! `cpu/binary_ops.zig` and `cpu/unary_ops.zig` each carry their own copy of
 //! these two, because each states its own provenance and the C has them in a
@@ -89,7 +89,7 @@ pub inline fn barrier(params: *const ComputeParams) void {
 }
 
 /// Ports the `to_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:48 @5266f24da).
+/// (ggml-cpu/common.h:48 @b29c606e2).
 ///
 /// Parameters:
 /// - `T`: the element type, one of `f32`, `ggml_fp16_t`, `ggml_bf16_t`, `i32`.
@@ -107,7 +107,7 @@ pub inline fn toF32(comptime T: type, v: T) f32 {
 }
 
 /// Ports the `from_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:48 @5266f24da).
+/// (ggml-cpu/common.h:48 @b29c606e2).
 ///
 /// Parameters:
 /// - `T`: the element type to produce.
@@ -127,7 +127,7 @@ pub inline fn fromF32(comptime T: type, v: f32) T {
     };
 }
 
-/// Ports `get_thread_range` (ggml-cpu/common.h:74 @5266f24da).
+/// Ports `get_thread_range` (ggml-cpu/common.h:74 @b29c606e2).
 ///
 /// Parameters:
 /// - `params`: the thread index and count.
@@ -149,11 +149,13 @@ pub inline fn min64(a: i64, b: i64) i64 {
     return @min(a, b);
 }
 
-/// `CACHE_LINE_SIZE_F32` (ggml-cpu/ops.h:21 @5266f24da), the stride between
+/// `CACHE_LINE_SIZE_F32` (ggml-cpu/ops.h:20 @b29c606e2), the stride between
 /// per-thread scratch slots in `params.wdata`.
 ///
-/// `CACHE_LINE_SIZE` is 64 on this target -- the `#else` arm of ops.h:12-19,
-/// the POWER9 arm being the one that uses 256.
+/// `CACHE_LINE_SIZE` is 64 on this target -- the `#else` arm of ops.h:12-18,
+/// POWER9 using 128 and s390x 256. Since v0.4.1 that is so in C and C++
+/// translation units alike: the `std::hardware_destructive_interference_size`
+/// arm, which a C++ unit took depending on include order, is gone.
 pub const cache_line_size_f32: usize = 64 / @sizeOf(f32);
 
 /// A sine and cosine of the same argument, computed as the reference build

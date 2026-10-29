@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ports the launch helpers of `llama.cpp/ggml/src/ggml-cuda/common.cuh` at
-//! v0.4.0 (`5266f24da`): `ggml_cuda_kernel_launch`, `ggml_cuda_pdl_config`,
+//! v0.4.1 (`b29c606e2`): `ggml_cuda_kernel_launch`, `ggml_cuda_pdl_config`,
 //! `ggml_cuda_kernel_can_use_pdl` and `CUDA_SET_SHARED_MEMORY_LIMIT`. The
 //! lookup and the loader are not ports; they replace what `nvcc`'s host
 //! stubs and cudart's fatbin registration do for the C++ (PLAN.md,
@@ -148,7 +148,7 @@ pub const Dim3 = struct {
     }
 };
 
-/// Ports `ggml_cuda_kernel_launch_params` (common.cuh:1555 @5266f24da).
+/// Ports `ggml_cuda_kernel_launch_params` (common.cuh:1594 @b29c606e2).
 pub const LaunchParams = struct {
     grid: Dim3,
     block: Dim3,
@@ -228,7 +228,7 @@ pub fn launch(k: Kernel, p: LaunchParams, args: anytype) void {
     common.cuCheck(cu.cuLaunchKernel(@ptrCast(h), p.grid.x, p.grid.y, p.grid.z, p.block.x, p.block.y, p.block.z, @intCast(p.shmem), @ptrCast(p.stream), &ptrs, null), "kernel launch", @src());
 }
 
-/// Ports `ggml_cuda_kernel_launch` (common.cuh:1660 @5266f24da): `launch`
+/// Ports `ggml_cuda_kernel_launch` (common.cuh:1699 @b29c606e2): `launch`
 /// with programmatic dependent launch where the kernel's PTX allows it and
 /// `GGML_CUDA_PDL` does not forbid it.
 pub fn launchPdl(k: Kernel, p: LaunchParams, args: anytype) void {
@@ -236,7 +236,7 @@ pub fn launchPdl(k: Kernel, p: LaunchParams, args: anytype) void {
     if (pdlEnabled() and canUsePdl(k, h)) {
         var a = toRuntime(args);
         var ptrs = pack(k, h, &a);
-        // Ports `ggml_cuda_pdl_config` (common.cuh:1571 @5266f24da).
+        // Ports `ggml_cuda_pdl_config` (common.cuh:1610 @b29c606e2).
         var attr: cu.CUlaunchAttribute = std.mem.zeroes(cu.CUlaunchAttribute);
         attr.id = cu.CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION;
         attr.value.programmaticStreamSerializationAllowed = 1;
@@ -295,7 +295,7 @@ fn pdlEnabled() bool {
     return S.value;
 }
 
-/// Ports `ggml_cuda_kernel_can_use_pdl` (common.cuh:1595 @5266f24da).
+/// Ports `ggml_cuda_kernel_can_use_pdl` (common.cuh:1634 @b29c606e2).
 ///
 /// The C caches the answer per (device, kernel) behind a mutex; the PTX
 /// version a loaded function reports is a property of the kernel image and
@@ -319,7 +319,7 @@ fn canUsePdl(k: Kernel, h: cu.CUkernel) bool {
 
 var pdl_cache: [common.max_devices][gen.kernel_count]std.atomic.Value(u8) = @splat(@splat(.init(0)));
 
-/// Ports `CUDA_SET_SHARED_MEMORY_LIMIT` (common.cuh:232 @5266f24da): raise
+/// Ports `CUDA_SET_SHARED_MEMORY_LIMIT` (common.cuh:241 @b29c606e2): raise
 /// the kernel's dynamic shared memory limit on the current device, once.
 pub fn setSharedMemoryLimit(k: Kernel, nbytes: usize) void {
     const device = common.getDevice();

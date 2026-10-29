@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/grovemoe.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/grovemoe.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_grovemoe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_grovemoe`'s `load_arch_hparams` (models/grovemoe.cpp:3 @5266f24da).
+/// Ports `llama_model_grovemoe`'s `load_arch_hparams` (models/grovemoe.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -37,7 +37,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_grovemoe`'s `load_arch_tensors` (models/grovemoe.cpp:16 @5266f24da).
+/// Ports `llama_model_grovemoe`'s `load_arch_tensors` (models/grovemoe.cpp:16 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -88,13 +88,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_grovemoe`'s `build_arch_graph` (models/grovemoe.cpp:63 @5266f24da).
+/// Ports `llama_model_grovemoe`'s `build_arch_graph` (models/grovemoe.cpp:63 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_grovemoe`'s `graph`
-/// (models/grovemoe.cpp:67 @5266f24da).
+/// (models/grovemoe.cpp:67 @b29c606e2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

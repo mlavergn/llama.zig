@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/qwen3a.cpp` at v0.4.0 (`5266f24da`).
+//! Ports `llama.cpp/tools/mtmd/models/qwen3a.cpp` at v0.4.1 (`b29c606e2`).
 //! Each declaration names what it ports and the line it began at.
 
 const std = @import("std");
@@ -16,7 +16,7 @@ const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// The `conv_block` lambda (qwen3a.cpp:30 @5266f24da) of `build`: conv
+/// The `conv_block` lambda (qwen3a.cpp:30 @b29c606e2) of `build`: conv
 /// output `[OW, OH, C_out, n_chunks]`.
 fn convBlock(ctx0: ?*c.ggml_context, x_in: T, w: T, b: T) T {
     var x = c.ggml_conv_2d(ctx0, w, x_in, 2, 2, 1, 1, 1, 1);
@@ -26,7 +26,7 @@ fn convBlock(ctx0: ?*c.ggml_context, x_in: T, w: T, b: T) T {
     return c.ggml_gelu_erf(ctx0, x);
 }
 
-/// Ports `build` (qwen3a.cpp:3 @5266f24da), a member of
+/// Ports `build` (qwen3a.cpp:3 @b29c606e2), a member of
 /// `clip_graph_qwen3a`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

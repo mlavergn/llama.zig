@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! **Not a port.** Our own code. It covers the ground `common_chat_templates`
-//! does in `llama.cpp/common/chat.cpp` (v0.4.0, `5266f24da`) -- find the
+//! does in `llama.cpp/common/chat.cpp` (v0.4.1, `b29c606e2`) -- find the
 //! model's template, bind the conversation to it, render -- but shares no code
 //! with it, and renders through `zigjinja` rather than upstream's bundled
 //! Jinja.
@@ -177,7 +177,7 @@ fn segment(
 
 /// Upstream's rendering of a non-string `{{ }}` value.
 ///
-/// `gather_string_parts_recursive` (common/jinja/runtime.h:724 @5266f24da)
+/// `gather_string_parts_recursive` (common/jinja/runtime.h:724 @b29c606e2)
 /// writes a boolean as `True`/`False`, a list as its items' renderings run
 /// together, and none, undefined and dicts as nothing. zigjinja follows its own
 /// conventions there, so the chat path translates. Installed as

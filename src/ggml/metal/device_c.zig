@@ -9,7 +9,7 @@
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-context.h`
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-ops.h`
 //!
-//! all at v0.4.0 (`5266f24da`).
+//! all at v0.4.1 (`b29c606e2`).
 //!
 //! # Why these are hand-written rather than imported
 //!
@@ -49,33 +49,33 @@ pub const Tensor = c.ggml_tensor;
 pub const CGraph = c.ggml_cgraph;
 
 /// Mirrors `enum ggml_metal_device_id` (ggml-metal-device.h:245
-/// @5266f24da).
+/// @b29c606e2).
 pub const DeviceId = @import("tuning_table.zig").DeviceId;
 
-/// Mirrors `ggml_metal_device_t` (ggml-metal-device.h:14 @5266f24da): an
+/// Mirrors `ggml_metal_device_t` (ggml-metal-device.h:14 @b29c606e2): an
 /// opaque handle whose definition lives in the Objective-C.
 pub const Device = opaque {};
-/// Mirrors `ggml_metal_buffer_t` (ggml-metal-device.h:332 @5266f24da).
+/// Mirrors `ggml_metal_buffer_t` (ggml-metal-device.h:337 @b29c606e2).
 pub const Buffer = opaque {};
-/// Mirrors `ggml_metal_event_t` (ggml-metal-device.h:299 @5266f24da).
+/// Mirrors `ggml_metal_event_t` (ggml-metal-device.h:299 @b29c606e2).
 pub const Event = opaque {};
-/// Mirrors `ggml_metal_t` (ggml-metal-context.h:13 @5266f24da).
+/// Mirrors `ggml_metal_t` (ggml-metal-context.h:13 @b29c606e2).
 pub const Context = opaque {};
 
-/// Mirrors `ggml_metal_library_t` (ggml-metal-device.h:98 @5266f24da).
+/// Mirrors `ggml_metal_library_t` (ggml-metal-device.h:98 @b29c606e2).
 pub const Library = opaque {};
-/// Mirrors `ggml_metal_pipeline_t` (ggml-metal-device.h:33 @5266f24da).
+/// Mirrors `ggml_metal_pipeline_t` (ggml-metal-device.h:33 @b29c606e2).
 pub const Pipeline = opaque {};
-/// Mirrors `ggml_metal_cv_t` (ggml-metal-device.h:20 @5266f24da): a
+/// Mirrors `ggml_metal_cv_t` (ggml-metal-device.h:20 @b29c606e2): a
 /// wrapper over `MTLFunctionConstantValues`.
 pub const Cv = opaque {};
-/// Mirrors `ggml_metal_pipelines_t` (ggml-metal-device.h:39 @5266f24da).
+/// Mirrors `ggml_metal_pipelines_t` (ggml-metal-device.h:39 @b29c606e2).
 /// The struct behind it is ours — `library.zig` defines it, since
 /// `ggml-metal-device.cpp` did.
 pub const Pipelines = opaque {};
 
 /// Mirrors `struct ggml_metal_pipeline_with_params` (ggml-metal-device.h:47
-/// @5266f24da).
+/// @b29c606e2).
 ///
 /// **Returned by value by all 68 `get_pipeline_*` functions**, which makes
 /// its ABI load-bearing: it is 40 bytes with interior padding, and Zig
@@ -98,7 +98,7 @@ pub const PipelineWithParams = extern struct {
 };
 
 /// Mirrors `struct ggml_metal_device_props` (ggml-metal-device.h:272
-/// @5266f24da).
+/// @b29c606e2).
 ///
 /// Every field is present because the offsets have to match, not because
 /// this port reads them. `make struct-layout` checks that they do.
@@ -135,6 +135,10 @@ pub const DeviceProps = extern struct {
 pub extern fn ggml_metal_device_id_token(id: DeviceId) [*c]const u8;
 pub extern fn ggml_metal_device_get(device: c_int, n_devices: c_int) ?*Device;
 pub extern fn ggml_metal_device_get_props(dev: *Device) *const DeviceProps;
+/// `ggml_metal_device_get_fusion_info` (ggml-metal-device.h:331
+/// @b29c606e2): the device-owned fusion info, defined in `fusion.zig` and
+/// created by `ggml-metal-device.m`.
+pub extern fn ggml_metal_device_get_fusion_info(dev: *Device) ?*@import("fusion.zig").Info;
 pub extern fn ggml_metal_device_event_init(dev: *Device) ?*Event;
 pub extern fn ggml_metal_device_event_free(dev: *Device, ev: *Event) void;
 pub extern fn ggml_metal_device_event_synchronize(dev: *Device, ev: *Event) void;
@@ -150,11 +154,11 @@ pub extern fn ggml_metal_cv_set_int16(cv: *Cv, value: i16, idx: i32) void;
 pub extern fn ggml_metal_cv_set_int32(cv: *Cv, value: i32, idx: i32) void;
 pub extern fn ggml_metal_cv_set_bool(cv: *Cv, value: bool, idx: i32) void;
 
-/// `ggml_metal_pipeline_init` (ggml-metal-device.h:35 @5266f24da).
+/// `ggml_metal_pipeline_init` (ggml-metal-device.h:35 @b29c606e2).
 ///
 /// Lives in the `.m`; it only `calloc`s the wrapper and leaves `obj` nil,
 /// which is why the unit tests can make real handles without a device.
-/// `struct ggml_metal_buffer_id` (ggml-metal-device.h:9 @5266f24da).
+/// `struct ggml_metal_buffer_id` (ggml-metal-device.h:9 @b29c606e2).
 ///
 /// A Metal buffer handle and a byte offset into it. 16 bytes, which is one
 /// of the shapes the Zig 0.16 by-value-struct ABI bug does **not** affect
@@ -168,11 +172,11 @@ pub const BufferId = extern struct {
     offs: usize,
 };
 
-/// `ggml_metal_cmd_buf_t` (ggml-metal-device.h:67 @5266f24da) — an opaque
+/// `ggml_metal_cmd_buf_t` (ggml-metal-device.h:67 @b29c606e2) — an opaque
 /// `id<MTLCommandBuffer>`, which the C spells as `void *`.
 pub const CmdBuf = ?*anyopaque;
 
-/// `ggml_metal_encoder_t` (ggml-metal-device.h:73 @5266f24da).
+/// `ggml_metal_encoder_t` (ggml-metal-device.h:73 @b29c606e2).
 pub const Encoder = opaque {};
 
 // The encoder surface `ggml-metal-ops.cpp` drives. All of it lives in
@@ -191,13 +195,13 @@ pub extern fn ggml_metal_encoder_memory_barrier(encoder: *Encoder) void;
 pub extern fn ggml_metal_encoder_end_encoding(encoder: *Encoder) void;
 
 /// `ggml_metal_pipeline_max_theads_per_threadgroup`
-/// (ggml-metal-device.h:61 @5266f24da). The misspelling is upstream's.
+/// (ggml-metal-device.h:61 @b29c606e2). The misspelling is upstream's.
 pub extern fn ggml_metal_pipeline_max_theads_per_threadgroup(pipeline: PipelineWithParams) c_int;
 
-/// `ggml_metal_device_get_library` (ggml-metal-device.h:312 @5266f24da).
+/// `ggml_metal_device_get_library` (ggml-metal-device.h:312 @b29c606e2).
 pub extern fn ggml_metal_device_get_library(dev: *Device) ?*Library;
 
-/// `ggml_metal_buffer_get_id` (ggml-metal-device.h:351 @5266f24da).
+/// `ggml_metal_buffer_get_id` (ggml-metal-device.h:356 @b29c606e2).
 pub extern fn ggml_metal_buffer_get_id(buf: *Buffer, t: *const c.ggml_tensor) BufferId;
 
 pub extern fn ggml_metal_pipeline_init() ?*Pipeline;

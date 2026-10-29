@@ -11,7 +11,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/eagle3.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/eagle3.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_eagle3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<is_enc>` with `build_inp_embd_enc`.
 
@@ -33,7 +33,7 @@ fn oom() noreturn {
     impl.abort("models/eagle3.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_eagle3`'s `load_arch_hparams` (models/eagle3.cpp:3 @5266f24da).
+/// Ports `llama_model_eagle3`'s `load_arch_hparams` (models/eagle3.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -73,7 +73,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_eagle3`'s `load_arch_tensors` (models/eagle3.cpp:38 @5266f24da).
+/// Ports `llama_model_eagle3`'s `load_arch_tensors` (models/eagle3.cpp:38 @b29c606e2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -148,7 +148,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_eagle3`'s `build_arch_graph` (models/eagle3.cpp:103 @5266f24da).
+/// Ports `llama_model_eagle3`'s `build_arch_graph` (models/eagle3.cpp:103 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     switch (params.gtype) {
         .encoder => buildGraphEnc(model, b),
@@ -165,7 +165,7 @@ fn otherModel(b: *const graph.Builder) *const Model {
 }
 
 /// Ports `llama_model_eagle3`'s `graph<true>`'s `build_inp_embd_enc`
-/// (models/eagle3.cpp:116 @5266f24da): the target model's features, three
+/// (models/eagle3.cpp:116 @b29c606e2): the target model's features, three
 /// layers concatenated, given as the batch's embeddings.
 fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
     const hp = b.hparams;
@@ -184,7 +184,7 @@ fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
 }
 
 /// Ports the constructor of `llama_model_eagle3`'s `graph<true>`
-/// (models/eagle3.cpp:137 @5266f24da): the encoder, which fuses the target
+/// (models/eagle3.cpp:137 @b29c606e2): the encoder, which fuses the target
 /// model's features -- e.g. `[12288, n_tokens]` from its low, middle and
 /// high layers -- into `g_embeddings`, e.g. `[4096, n_tokens]`.
 fn buildGraphEnc(model: *const Model, b: *const graph.Builder) void {
@@ -209,7 +209,7 @@ fn buildGraphEnc(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_eagle3`'s `graph<false>`
-/// (models/eagle3.cpp:164 @5266f24da): the decoder, over draft tokens and
+/// (models/eagle3.cpp:164 @b29c606e2): the decoder, over draft tokens and
 /// the encoder's g_embeddings, to draft logits.
 fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;

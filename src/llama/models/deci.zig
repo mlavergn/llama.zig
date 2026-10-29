@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deci.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/deci.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_deci`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_deci`'s `load_arch_hparams` (models/deci.cpp:3 @5266f24da).
+/// Ports `llama_model_deci`'s `load_arch_hparams` (models/deci.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -34,7 +34,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deci`'s `load_arch_tensors` (models/deci.cpp:14 @5266f24da).
+/// Ports `llama_model_deci`'s `load_arch_tensors` (models/deci.cpp:14 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -102,8 +102,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_deci`'s `build_arch_graph` (models/deci.cpp:76
-/// @5266f24da) and the constructor of its `graph` (models/deci.cpp:80
-/// @5266f24da).
+/// @b29c606e2) and the constructor of its `graph` (models/deci.cpp:80
+/// @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

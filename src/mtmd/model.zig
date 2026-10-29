@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/clip-model.h` at v0.4.0 (`5266f24da`), field
+//! Ports `llama.cpp/tools/mtmd/clip-model.h` at v0.4.1 (`b29c606e2`), field
 //! for field. The tensor-pointer fields were extracted from the header
 //! mechanically, in the header's order, so a struct here reads against the
 //! C++ line by line; the rest is written by hand. Each declaration names
@@ -14,20 +14,20 @@ const names = @import("names.zig");
 const c = impl.c;
 const gpa = impl.gpa;
 
-/// Ports `ffn_op_type` (clip-model.h:14 @5266f24da).
+/// Ports `ffn_op_type` (clip-model.h:14 @b29c606e2).
 pub const FfnOpType = enum(c_int) { gelu, gelu_erf, silu, gelu_quick, relu_sqr };
 
-/// Ports `norm_type` (clip-model.h:22 @5266f24da).
+/// Ports `norm_type` (clip-model.h:22 @b29c606e2).
 pub const NormType = enum(c_int) { normal, rms };
 
-/// Ports `patch_merge_type` (clip-model.h:27 @5266f24da).
+/// Ports `patch_merge_type` (clip-model.h:27 @b29c606e2).
 pub const PatchMergeType = enum(c_int) { flat, spatial_unpad };
 
-/// Ports `resize_algo` (clip-model.h:33 @5266f24da): all algorithms are
+/// Ports `resize_algo` (clip-model.h:33 @b29c606e2): all algorithms are
 /// Pillow-compatible, matching `PIL.Image.resize`.
 pub const ResizeAlgo = enum(c_int) { bilinear, bicubic, lanczos };
 
-/// Ports `pad_style` (clip-model.h:43 @5266f24da): how `img_tool::resize`
+/// Ports `pad_style` (clip-model.h:43 @b29c606e2): how `img_tool::resize`
 /// pads.
 pub const PadStyle = enum(c_int) {
     /// no padding; direct resize to target dimensions
@@ -41,7 +41,7 @@ pub const PadStyle = enum(c_int) {
 /// `std::unordered_set<int32_t>`, as far as the C++ uses it: membership.
 pub const IntSet = std.AutoHashMapUnmanaged(i32, void);
 
-/// Ports `clip_hparams` (clip-model.h:49 @5266f24da).
+/// Ports `clip_hparams` (clip-model.h:49 @b29c606e2).
 pub const Hparams = struct {
     image_size: i32 = 0,
     patch_size: i32 = 0,
@@ -183,7 +183,7 @@ pub const Hparams = struct {
     custom_image_min_tokens: i32 = -1,
     custom_image_max_tokens: i32 = -1,
 
-    /// `pockettts_max_spk_seconds` (clip-model.h:156 @5266f24da), a member of `clip_hparams`.
+    /// `pockettts_max_spk_seconds` (clip-model.h:156 @b29c606e2), a member of `clip_hparams`.
     pub const pockettts_max_spk_seconds: i32 = 30;
 
     pub fn deinit(self: *Hparams) void {
@@ -198,7 +198,7 @@ pub const Hparams = struct {
         self.seanet_ratios.deinit(gpa);
     }
 
-    /// Ports `set_limit_image_tokens` (clip-model.h:190 @5266f24da), a member of `clip_hparams`.
+    /// Ports `set_limit_image_tokens` (clip-model.h:190 @b29c606e2), a member of `clip_hparams`.
     pub fn setLimitImageTokens(self: *Hparams, n_tokens_min: c_int, n_tokens_max: c_int) void {
         const patch_area = self.patch_size * self.patch_size * self.n_merge * self.n_merge;
         self.image_min_pixels = (if (self.custom_image_min_tokens > 0) self.custom_image_min_tokens else n_tokens_min) * patch_area;
@@ -206,7 +206,7 @@ pub const Hparams = struct {
         self.warmup_image_size = @intFromFloat(@sqrt(@as(f64, @floatFromInt(self.image_max_pixels))));
     }
 
-    /// Ports `set_limit_image_tokens` (clip-model.h:198 @5266f24da), a member of `clip_hparams`,
+    /// Ports `set_limit_image_tokens` (clip-model.h:198 @b29c606e2), a member of `clip_hparams`,
     /// the overload the longest-edge preprocessor uses.
     pub fn setLimitImageTokensCustom(self: *Hparams) void {
         const patch_area = self.patch_size * self.patch_size * self.n_merge * self.n_merge;
@@ -214,27 +214,27 @@ pub const Hparams = struct {
         if (self.custom_image_max_tokens > 0) self.image_max_pixels = self.custom_image_max_tokens * patch_area;
     }
 
-    /// Ports `set_warmup_n_tokens` (clip-model.h:208 @5266f24da), a member of `clip_hparams`.
+    /// Ports `set_warmup_n_tokens` (clip-model.h:208 @b29c606e2), a member of `clip_hparams`.
     pub fn setWarmupNTokens(self: *Hparams, n_tokens: c_int) void {
         const n_tok_per_side: c_int = @intFromFloat(@sqrt(@as(f64, @floatFromInt(n_tokens))));
         impl.ggmlAssert(n_tok_per_side * n_tok_per_side == n_tokens, "clip-model.h", 210, "n_tok_per_side * n_tok_per_side == n_tokens && \"n_tokens must be n*n\"");
         self.warmup_image_size = n_tok_per_side * self.patch_size * self.n_merge;
     }
 
-    /// Ports `is_global_attn` (clip-model.h:218 @5266f24da), a member of `clip_hparams`, over
+    /// Ports `is_global_attn` (clip-model.h:218 @b29c606e2), a member of `clip_hparams`, over
     /// `global_attn_indices`, the SAM ViT's {2, 5, 8, 11}.
     pub fn isGlobalAttn(self: *const Hparams, layer: i32) bool {
         _ = self;
         return layer == 2 or layer == 5 or layer == 8 or layer == 11;
     }
 
-    /// Ports `is_feature_layer` (clip-model.h:230 @5266f24da), a member of `clip_hparams`.
+    /// Ports `is_feature_layer` (clip-model.h:230 @b29c606e2), a member of `clip_hparams`.
     pub fn isFeatureLayer(self: *const Hparams, layer: i32) bool {
         return std.mem.indexOfScalar(i32, self.feature_layers.items, layer) != null;
     }
 };
 
-/// Ports `clip_layer` (clip-model.h:235 @5266f24da).
+/// Ports `clip_layer` (clip-model.h:235 @b29c606e2).
 pub const Layer = struct {
     // layernorm 1 (or layer input norm, or pre-attention norm)
     ln_1_w: ?*c.ggml_tensor = null,
@@ -346,7 +346,7 @@ pub const Layer = struct {
     }
 };
 
-/// Ports `mobilenetv5_block` (clip-model.h:358 @5266f24da): the expanded
+/// Ports `mobilenetv5_block` (clip-model.h:358 @b29c606e2): the expanded
 /// MobileNetV5 block of the Gemma3n vision encoder.
 pub const MobilenetV5Block = struct {
     // Stage 0 (Edge Residual)
@@ -378,7 +378,7 @@ pub const MobilenetV5Block = struct {
     attn_norm_w: ?*c.ggml_tensor = null,
 };
 
-/// Ports `yasa2_block` (clip-model.h:396 @5266f24da).
+/// Ports `yasa2_block` (clip-model.h:396 @b29c606e2).
 pub const Yasa2Block = struct {
     dw_w: ?*c.ggml_tensor = null,
     dw_b: ?*c.ggml_tensor = null,
@@ -392,7 +392,7 @@ pub const Yasa2Block = struct {
     pw2_b: ?*c.ggml_tensor = null,
 };
 
-/// Ports `yasa2_stage` (clip-model.h:409 @5266f24da).
+/// Ports `yasa2_stage` (clip-model.h:409 @b29c606e2).
 pub const Yasa2Stage = struct {
     down_ln_w: ?*c.ggml_tensor = null,
     down_ln_b: ?*c.ggml_tensor = null,
@@ -401,7 +401,7 @@ pub const Yasa2Stage = struct {
     blocks: std.ArrayList(Yasa2Block) = .empty,
 };
 
-/// Ports `qf_block` (clip-model.h:419 @5266f24da): a QFormer projector block
+/// Ports `qf_block` (clip-model.h:419 @b29c606e2): a QFormer projector block
 /// (Granite Speech, Granite4 Vision).
 pub const QfBlock = struct {
     qf_proj_query: ?*c.ggml_tensor = null,
@@ -415,10 +415,10 @@ pub const QfBlock = struct {
     qf_proj_layers: std.ArrayList(Layer) = .empty,
 };
 
-/// Ports `clip_seanet` (clip-model.h:434 @5266f24da): the pocket-tts SEANet
+/// Ports `clip_seanet` (clip-model.h:434 @b29c606e2): the pocket-tts SEANet
 /// stack, used in both directions.
 pub const Seanet = struct {
-    /// Ports `stage` (clip-model.h:436 @5266f24da), a member of `clip_seanet`.
+    /// Ports `stage` (clip-model.h:436 @b29c606e2), a member of `clip_seanet`.
     pub const Stage = struct {
         res_conv1_w: ?*c.ggml_tensor = null,
         res_conv1_b: ?*c.ggml_tensor = null,
@@ -435,10 +435,10 @@ pub const Seanet = struct {
     stages: std.ArrayList(Stage) = .empty,
 };
 
-/// Ports `clip_flow_net` (clip-model.h:453 @5266f24da): the pocket-tts
+/// Ports `clip_flow_net` (clip-model.h:453 @b29c606e2): the pocket-tts
 /// flow-matching decoder (SimpleMLPAdaLN).
 pub const FlowNet = struct {
-    /// Ports `block` (clip-model.h:455 @5266f24da), a member of `clip_flow_net`.
+    /// Ports `block` (clip-model.h:455 @b29c606e2), a member of `clip_flow_net`.
     pub const Block = struct {
         norm_w: ?*c.ggml_tensor = null,
         norm_b: ?*c.ggml_tensor = null,
@@ -450,7 +450,7 @@ pub const FlowNet = struct {
         ada_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `time_embd` (clip-model.h:467 @5266f24da), a member of `clip_flow_net`.
+    /// Ports `time_embd` (clip-model.h:467 @b29c606e2), a member of `clip_flow_net`.
     pub const TimeEmbd = struct {
         freqs: ?*c.ggml_tensor = null,
         up_w: ?*c.ggml_tensor = null,
@@ -472,10 +472,10 @@ pub const FlowNet = struct {
     blocks: std.ArrayList(Block) = .empty,
 };
 
-/// Ports `clip_code2wav` (clip-model.h:489 @5266f24da): qwen3tts RVQ codes
+/// Ports `clip_code2wav` (clip-model.h:489 @b29c606e2): qwen3tts RVQ codes
 /// to raw PCM.
 pub const Code2Wav = struct {
-    /// Ports `upsample_block` (clip-model.h:491 @5266f24da), a member of `clip_code2wav`.
+    /// Ports `upsample_block` (clip-model.h:491 @b29c606e2), a member of `clip_code2wav`.
     pub const UpsampleBlock = struct {
         conv_w: ?*c.ggml_tensor = null, // causal ConvTranspose1d, 2x
         conv_b: ?*c.ggml_tensor = null,
@@ -490,7 +490,7 @@ pub const Code2Wav = struct {
         gamma: ?*c.ggml_tensor = null, // layer scale
     };
 
-    /// Ports `dac_res` (clip-model.h:506 @5266f24da), a member of `clip_code2wav`.
+    /// Ports `dac_res` (clip-model.h:506 @b29c606e2), a member of `clip_code2wav`.
     pub const DacRes = struct {
         act1_alpha: ?*c.ggml_tensor = null,
         act1_beta: ?*c.ggml_tensor = null,
@@ -502,7 +502,7 @@ pub const Code2Wav = struct {
         conv2_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `dac_block` (clip-model.h:518 @5266f24da), a member of `clip_code2wav`.
+    /// Ports `dac_block` (clip-model.h:518 @b29c606e2), a member of `clip_code2wav`.
     pub const DacBlock = struct {
         snake_alpha: ?*c.ggml_tensor = null,
         snake_beta: ?*c.ggml_tensor = null,
@@ -540,7 +540,7 @@ pub const Code2Wav = struct {
     dac_post_conv_b: ?*c.ggml_tensor = null,
 };
 
-/// Ports `clamp_info` (clip-model.h:854 @5266f24da), a member of `clip_model`: the clamp
+/// Ports `clamp_info` (clip-model.h:854 @b29c606e2), a member of `clip_model`: the clamp
 /// bounds of a Gemma4ClippableLinear.
 pub const ClampInfo = struct {
     inp_max: f32,
@@ -549,7 +549,7 @@ pub const ClampInfo = struct {
     out_min: f32,
 };
 
-/// Ports `clip_model` (clip-model.h:555 @5266f24da).
+/// Ports `clip_model` (clip-model.h:555 @b29c606e2).
 pub const Model = struct {
     modality: impl.Modality = .vision,
     proj_type: names.ProjectorType = .mlp,
@@ -844,12 +844,12 @@ pub const Model = struct {
     ctc_out_mid_b: ?*c.ggml_tensor = null,
     // qformer projector(s)
 
-    /// Ports `audio_has_avgpool` (clip-model.h:881 @5266f24da), a member of `clip_model`.
+    /// Ports `audio_has_avgpool` (clip-model.h:881 @b29c606e2), a member of `clip_model`.
     pub fn audioHasAvgpool(self: *const Model) bool {
         return self.proj_type == .qwen2a or self.proj_type == .voxtral or self.proj_type == .music_flamingo;
     }
 
-    /// Ports `audio_has_stack_frames` (clip-model.h:887 @5266f24da), a member of `clip_model`.
+    /// Ports `audio_has_stack_frames` (clip-model.h:887 @b29c606e2), a member of `clip_model`.
     pub fn audioHasStackFrames(self: *const Model) bool {
         return self.proj_type == .ultravox or self.proj_type == .voxtral or self.proj_type == .meralion;
     }

@@ -246,7 +246,7 @@ static bool no_callback(int i, struct ggml_tensor * t1, struct ggml_tensor * t2,
     return true;
 }
 
-/* `graph_copy_dup_tensor` (ggml-backend.cpp:2153 @5266f24da) records a
+/* `graph_copy_dup_tensor` (ggml-backend.cpp:2146 @b29c606e2) records a
  * node's copy only after copying its sources, so `ggml_cast`'s `src[1]`,
  * the node itself, comes back NULL in the copy. Put it back; see the file
  * comment. */

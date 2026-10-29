@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/conv2d-dw.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/conv2d-dw.cuh` at v0.4.0 (`5266f24da`).
+//! `llama.cpp/ggml/src/ggml-cuda/conv2d-dw.cuh` at v0.4.1 (`b29c606e2`).
 //! The kernel, `conv2d_dw_kernel`, stays CUDA.
 
 const std = @import("std");
@@ -14,10 +14,10 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_CONV2D_DW_BLOCK_SIZE` (conv2d-dw.cuh:4 @5266f24da).
+/// Ports `CUDA_CONV2D_DW_BLOCK_SIZE` (conv2d-dw.cuh:4 @b29c606e2).
 const block_size = 256;
 
-/// Ports `ggml_cuda_op_conv2d_dw` (conv2d-dw.cu:119 @5266f24da).
+/// Ports `ggml_cuda_op_conv2d_dw` (conv2d-dw.cu:119 @b29c606e2).
 pub fn opConv2dDw(ctx: *common.Context, dst: *Tensor) void {
     const kernel = impl.one(Tensor, dst.src[0]);
     const input = impl.one(Tensor, dst.src[1]);

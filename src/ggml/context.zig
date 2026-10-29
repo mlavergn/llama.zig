@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.4.0, `5266f24da`), roughly
+//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.4.1, `b29c606e2`), roughly
 //! lines 1267-1283 and 1608-2026. Each function names the C function it
 //! replaces and the line it began at.
 //!
@@ -31,7 +31,7 @@ extern fn printf(fmt: [*:0]const u8, ...) c_int;
 /// rather than returning null in that case, and the difference is observable.
 const debug_build = builtin.mode == .debug;
 
-/// Ports `struct ggml_context` (ggml.c:975 @5266f24da).
+/// Ports `struct ggml_context` (ggml.c:975 @b29c606e2).
 ///
 /// Opaque to callers -- only a pointer crosses the ABI -- but the layout still
 /// has to match, because a context created by C code may be freed by this code
@@ -48,7 +48,7 @@ pub const Context = extern struct {
     objects_end: ?*impl.Object,
 };
 
-/// Ports `GGML_ASSERT_ALIGNED` (ggml.c:1606 @5266f24da).
+/// Ports `GGML_ASSERT_ALIGNED` (ggml.c:1606 @b29c606e2).
 inline fn assertAligned(ptr: ?*const anyopaque) void {
     std.debug.assert(@intFromPtr(ptr) % c.GGML_MEM_ALIGN == 0);
 }
@@ -59,7 +59,7 @@ var is_first_call = true;
 // -----------------------------------------------------------------------------
 // Context lifecycle
 
-/// Ports `ggml_init` (ggml.c:1611 @5266f24da).
+/// Ports `ggml_init` (ggml.c:1611 @b29c606e2).
 ///
 /// A caller may supply its own buffer, in which case the context does not own
 /// it and will not free it. Passing `mem_size` of 0 is allowed and rounds up to
@@ -102,7 +102,7 @@ pub export fn ggml_init(params: c.struct_ggml_init_params) ?*Context {
     return ctx;
 }
 
-/// Ports `ggml_reset` (ggml.c:1653 @5266f24da).
+/// Ports `ggml_reset` (ggml.c:1653 @b29c606e2).
 ///
 /// Drops every object without freeing memory, so the context can be refilled.
 /// Any tensor pointer handed out before this is invalid afterwards.
@@ -113,40 +113,40 @@ export fn ggml_reset(ctx_opt: ?*Context) void {
     ctx.objects_end = null;
 }
 
-/// Ports `ggml_free` (ggml.c:1663 @5266f24da).
+/// Ports `ggml_free` (ggml.c:1663 @b29c606e2).
 pub export fn ggml_free(ctx_opt: ?*Context) void {
     const ctx = ctx_opt orelse return;
     if (ctx.mem_buffer_owned) ggml_aligned_free(ctx.mem_buffer, ctx.mem_size);
     std.c.free(ctx);
 }
 
-/// Ports `ggml_used_mem` (ggml.c:1675 @5266f24da).
+/// Ports `ggml_used_mem` (ggml.c:1675 @b29c606e2).
 pub export fn ggml_used_mem(ctx: *const Context) usize {
     const end = ctx.objects_end orelse return 0;
     return end.offs + end.size;
 }
 
-/// Ports `ggml_get_no_alloc` (ggml.c:1679 @5266f24da).
+/// Ports `ggml_get_no_alloc` (ggml.c:1679 @b29c606e2).
 pub export fn ggml_get_no_alloc(ctx: *Context) bool {
     return ctx.no_alloc;
 }
 
-/// Ports `ggml_set_no_alloc` (ggml.c:1683 @5266f24da).
+/// Ports `ggml_set_no_alloc` (ggml.c:1683 @b29c606e2).
 pub export fn ggml_set_no_alloc(ctx: *Context, no_alloc: bool) void {
     ctx.no_alloc = no_alloc;
 }
 
-/// Ports `ggml_get_mem_buffer` (ggml.c:1687 @5266f24da).
+/// Ports `ggml_get_mem_buffer` (ggml.c:1687 @b29c606e2).
 export fn ggml_get_mem_buffer(ctx: *const Context) ?*anyopaque {
     return ctx.mem_buffer;
 }
 
-/// Ports `ggml_get_mem_size` (ggml.c:1691 @5266f24da).
+/// Ports `ggml_get_mem_size` (ggml.c:1691 @b29c606e2).
 export fn ggml_get_mem_size(ctx: *const Context) usize {
     return ctx.mem_size;
 }
 
-/// Ports `ggml_get_max_tensor_size` (ggml.c:1695 @5266f24da).
+/// Ports `ggml_get_max_tensor_size` (ggml.c:1695 @b29c606e2).
 export fn ggml_get_max_tensor_size(ctx: *const Context) usize {
     var max_size: usize = 0;
     var tensor = ggml_get_first_tensor(ctx);
@@ -159,7 +159,7 @@ export fn ggml_get_max_tensor_size(ctx: *const Context) usize {
 // -----------------------------------------------------------------------------
 // Object allocation
 
-/// Ports `ggml_new_object` (ggml.c:1708 @5266f24da).
+/// Ports `ggml_new_object` (ggml.c:1708 @b29c606e2).
 ///
 /// Appends an object header at the end of the pool. The overflow checks are
 /// not theoretical: `size` comes from tensor dimensions, which callers compute
@@ -216,7 +216,7 @@ pub fn newObject(ctx: *Context, obj_type: c.enum_ggml_object_type, size: usize) 
     return obj_new;
 }
 
-/// Ports `ggml_new_buffer` (ggml.c:1889 @5266f24da).
+/// Ports `ggml_new_buffer` (ggml.c:1889 @b29c606e2).
 pub export fn ggml_new_buffer(ctx: *Context, nbytes: usize) ?*anyopaque {
     const obj = newObject(ctx, c.GGML_OBJECT_TYPE_WORK_BUFFER, nbytes) orelse return null;
     const mem_buffer: [*]u8 = @ptrCast(ctx.mem_buffer.?);
@@ -226,7 +226,7 @@ pub export fn ggml_new_buffer(ctx: *Context, nbytes: usize) ?*anyopaque {
 // -----------------------------------------------------------------------------
 // Tensor creation
 
-/// Ports `ggml_new_tensor_impl` (ggml.c:1766 @5266f24da).
+/// Ports `ggml_new_tensor_impl` (ggml.c:1766 @b29c606e2).
 ///
 /// The single place tensors come from. A view shares its base tensor's data
 /// rather than allocating; views of views are collapsed onto the ultimate base
@@ -321,43 +321,43 @@ pub fn newTensorImpl(
     return result;
 }
 
-/// Ports `ggml_new_tensor` (ggml.c:1844 @5266f24da).
+/// Ports `ggml_new_tensor` (ggml.c:1844 @b29c606e2).
 pub export fn ggml_new_tensor(ctx: *Context, t: c.enum_ggml_type, n_dims: c_int, ne: [*]const i64) *c.ggml_tensor {
     return newTensorImpl(ctx, t, n_dims, ne, null, 0);
 }
 
-/// Ports `ggml_new_tensor_1d` (ggml.c:1852 @5266f24da).
+/// Ports `ggml_new_tensor_1d` (ggml.c:1852 @b29c606e2).
 pub export fn ggml_new_tensor_1d(ctx: *Context, t: c.enum_ggml_type, ne0: i64) *c.ggml_tensor {
     var ne = [_]i64{ne0};
     return ggml_new_tensor(ctx, t, 1, &ne);
 }
 
-/// Ports `ggml_new_tensor_2d` (ggml.c:1859 @5266f24da).
+/// Ports `ggml_new_tensor_2d` (ggml.c:1859 @b29c606e2).
 pub export fn ggml_new_tensor_2d(ctx: *Context, t: c.enum_ggml_type, ne0: i64, ne1: i64) *c.ggml_tensor {
     const ne = [_]i64{ ne0, ne1 };
     return ggml_new_tensor(ctx, t, 2, &ne);
 }
 
-/// Ports `ggml_new_tensor_3d` (ggml.c:1868 @5266f24da).
+/// Ports `ggml_new_tensor_3d` (ggml.c:1868 @b29c606e2).
 pub export fn ggml_new_tensor_3d(ctx: *Context, t: c.enum_ggml_type, ne0: i64, ne1: i64, ne2: i64) *c.ggml_tensor {
     const ne = [_]i64{ ne0, ne1, ne2 };
     return ggml_new_tensor(ctx, t, 3, &ne);
 }
 
-/// Ports `ggml_new_tensor_4d` (ggml.c:1878 @5266f24da).
+/// Ports `ggml_new_tensor_4d` (ggml.c:1878 @b29c606e2).
 pub export fn ggml_new_tensor_4d(ctx: *Context, t: c.enum_ggml_type, ne0: i64, ne1: i64, ne2: i64, ne3: i64) *c.ggml_tensor {
     const ne = [_]i64{ ne0, ne1, ne2, ne3 };
     return ggml_new_tensor(ctx, t, 4, &ne);
 }
 
-/// Ports `ggml_dup_tensor` (ggml.c:1895 @5266f24da).
+/// Ports `ggml_dup_tensor` (ggml.c:1895 @b29c606e2).
 ///
 /// Same type and shape, fresh storage. Not a copy: the data is uninitialised.
 pub export fn ggml_dup_tensor(ctx: *Context, src: *const c.ggml_tensor) *c.ggml_tensor {
     return ggml_new_tensor(ctx, src.type, c.GGML_MAX_DIMS, &src.ne);
 }
 
-/// Ports `ggml_view_tensor` (ggml.c:1963 @5266f24da).
+/// Ports `ggml_view_tensor` (ggml.c:1963 @b29c606e2).
 ///
 /// Shares `src`'s data and copies its strides, so the view sees the same
 /// layout rather than a contiguous reinterpretation.
@@ -373,7 +373,7 @@ pub export fn ggml_view_tensor(ctx: *Context, src: *c.ggml_tensor) *c.ggml_tenso
 // -----------------------------------------------------------------------------
 // Walking a context
 
-/// Ports `ggml_get_first_tensor` (ggml.c:1976 @5266f24da).
+/// Ports `ggml_get_first_tensor` (ggml.c:1976 @b29c606e2).
 pub export fn ggml_get_first_tensor(ctx: *const Context) ?*c.ggml_tensor {
     const mem_buffer: [*]u8 = @ptrCast(ctx.mem_buffer.?);
     var obj = ctx.objects_begin;
@@ -385,7 +385,7 @@ pub export fn ggml_get_first_tensor(ctx: *const Context) ?*c.ggml_tensor {
     return null;
 }
 
-/// Ports `ggml_get_next_tensor` (ggml.c:1992 @5266f24da).
+/// Ports `ggml_get_next_tensor` (ggml.c:1992 @b29c606e2).
 ///
 /// Steps back from the tensor to its object header, which sits immediately
 /// before it, then follows the list. Only valid for a tensor this context
@@ -402,7 +402,7 @@ pub export fn ggml_get_next_tensor(ctx: *const Context, tensor: *c.ggml_tensor) 
     return null;
 }
 
-/// Ports `ggml_get_tensor` (ggml.c:2009 @5266f24da).
+/// Ports `ggml_get_tensor` (ggml.c:2009 @b29c606e2).
 pub export fn ggml_get_tensor(ctx: *Context, name: [*:0]const u8) ?*c.ggml_tensor {
     const mem_buffer: [*]u8 = @ptrCast(ctx.mem_buffer.?);
     var obj = ctx.objects_begin;
@@ -417,7 +417,7 @@ pub export fn ggml_get_tensor(ctx: *Context, name: [*:0]const u8) ?*c.ggml_tenso
 // -----------------------------------------------------------------------------
 // Tensor accessors
 
-/// Ports `ggml_unravel_index` (ggml.c:1899 @5266f24da).
+/// Ports `ggml_unravel_index` (ggml.c:1899 @b29c606e2).
 ///
 /// Turns a flat element index into per-dimension indices. Any output pointer
 /// may be null, which callers use to ask for only the dimensions they need.
@@ -444,23 +444,23 @@ pub export fn ggml_unravel_index(
     if (out3) |p| p.* = idx3;
 }
 
-/// Ports `ggml_get_data` (ggml.c:1923 @5266f24da).
+/// Ports `ggml_get_data` (ggml.c:1923 @b29c606e2).
 pub export fn ggml_get_data(tensor: *const c.ggml_tensor) ?*anyopaque {
     return tensor.data;
 }
 
-/// Ports `ggml_get_data_f32` (ggml.c:1927 @5266f24da).
+/// Ports `ggml_get_data_f32` (ggml.c:1927 @b29c606e2).
 pub export fn ggml_get_data_f32(tensor: *const c.ggml_tensor) ?[*]f32 {
     std.debug.assert(tensor.type == c.GGML_TYPE_F32);
     return @ptrCast(@alignCast(tensor.data));
 }
 
-/// Ports `ggml_get_name` (ggml.c:1942 @5266f24da).
+/// Ports `ggml_get_name` (ggml.c:1942 @b29c606e2).
 pub export fn ggml_get_name(tensor: *const c.ggml_tensor) [*:0]const u8 {
     return @ptrCast(&tensor.name);
 }
 
-/// Ports `ggml_set_name` (ggml.c:1946 @5266f24da).
+/// Ports `ggml_set_name` (ggml.c:1946 @b29c606e2).
 ///
 /// Truncates rather than failing when the name does not fit, and always
 /// terminates.
@@ -475,7 +475,7 @@ pub export fn ggml_set_name(tensor: *c.ggml_tensor, name: [*:0]const u8) *c.ggml
     return tensor;
 }
 
-/// Ports `ggml_format_name` (ggml.c:1955 @5266f24da).
+/// Ports `ggml_format_name` (ggml.c:1955 @b29c606e2).
 ///
 /// Where Zig cannot define a variadic function (`impl.zig_varargs`) this is
 /// `src/ggml/varargs.c`'s, reached through the header's declaration.
@@ -495,7 +495,7 @@ comptime {
 // -----------------------------------------------------------------------------
 // Debug printing
 
-/// Ports `ggml_print_object` (ggml.c:1268 @5266f24da).
+/// Ports `ggml_print_object` (ggml.c:1268 @b29c606e2).
 export fn ggml_print_object(obj: *const impl.Object) void {
     _ = printf(
         "%s: type = %d, offset = %zu, size = %zu, next = %p\n",
@@ -507,7 +507,7 @@ export fn ggml_print_object(obj: *const impl.Object) void {
     );
 }
 
-/// Ports `ggml_print_objects` (ggml.c:1273 @5266f24da).
+/// Ports `ggml_print_objects` (ggml.c:1273 @b29c606e2).
 export fn ggml_print_objects(ctx: *const Context) void {
     _ = printf("%s: objects in context %p:\n", "ggml_print_objects", ctx);
     var obj = ctx.objects_begin;

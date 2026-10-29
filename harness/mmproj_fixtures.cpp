@@ -8,7 +8,7 @@
 // each projector type's keys and tensor shapes here are read off
 // `llama.cpp/tools/mtmd/clip.cpp` (`load_hparams`, `load_tensors`,
 // `clip_n_mmproj_embd`) and the graph builders under `models/`, at
-// v0.4.0 (`5266f24da`). Weights are small and random (fixed seed per
+// v0.4.1 (`b29c606e2`). Weights are small and random (fixed seed per
 // type), so a fixture checks plumbing and numerics, not output quality.
 //
 // Every projector targets n_embd 256, the arch fixtures' width. The text

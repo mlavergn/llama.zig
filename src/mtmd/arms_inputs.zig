@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports two switches of `llama.cpp/tools/mtmd/clip.cpp` at v0.4.0
-//! (`5266f24da`): the one that sets each projector's graph inputs in
+//! Ports two switches of `llama.cpp/tools/mtmd/clip.cpp` at v0.4.1
+//! (`b29c606e2`): the one that sets each projector's graph inputs in
 //! `clip_encode`, and `clip_n_output_tokens`'s token counts. Each
 //! declaration names what it ports and the line it began at.
 //!
@@ -90,7 +90,7 @@ const NormalF32 = struct {
     }
 };
 
-/// `CLIP_ALIGN` (clip-impl.h:438 @5266f24da), over `int`.
+/// `CLIP_ALIGN` (clip-impl.h:438 @b29c606e2), over `int`.
 fn clipAlign(x: c_int, n: c_int) c_int {
     return @divTrunc(x + n - 1, n) * n;
 }
@@ -114,7 +114,7 @@ fn usz(x: anytype) usize {
 const lowest = -std.math.floatMax(f32);
 
 /// Ports the per-projector input switch of `clip_encode` (mtmd/clip.cpp:4416
-/// @5266f24da), entered at mtmd/clip.cpp:4581.
+/// @b29c606e2), entered at mtmd/clip.cpp:4581.
 ///
 /// Return: false where the C++ `return false`s out of `clip_encode` (a
 /// qwen3tts code out of range), having logged why.
@@ -1257,7 +1257,7 @@ fn minicpmvPositions(pos_h: c_int, pos_w: c_int) clip.Error![]i32 {
 }
 
 /// The `make_ds_idx` lambda of the MiniCPM-V 4.6 arm (mtmd/clip.cpp:4714
-/// @5266f24da). The caller frees the slice.
+/// @b29c606e2). The caller frees the slice.
 fn makeDsIdx(off_r: c_int, off_c: c_int, ds_h: c_int, ds_w: c_int, stride_w: c_int) clip.Error![]i32 {
     const idx = try allocI32(usz(@max(ds_h * ds_w, 0)), 0);
     var i: c_int = 0;
@@ -1269,7 +1269,7 @@ fn makeDsIdx(off_r: c_int, off_c: c_int, ds_h: c_int, ds_w: c_int, stride_w: c_i
 }
 
 /// The `make_win_idx` lambda of the Granite4 Vision arm (mtmd/clip.cpp:5667
-/// @5266f24da): raster to window order, `dst[w*win*win + p]` the source
+/// @b29c606e2): raster to window order, `dst[w*win*win + p]` the source
 /// index. The caller frees the slice.
 fn makeWinIdx(side: c_int, win: c_int) clip.Error![]i32 {
     const nn = @divTrunc(side, win);
@@ -1294,7 +1294,7 @@ fn makeWinIdx(side: c_int, win: c_int) clip.Error![]i32 {
     return idx;
 }
 
-/// The `make_unwin_idx` lambda (mtmd/clip.cpp:5686 @5266f24da).
+/// The `make_unwin_idx` lambda (mtmd/clip.cpp:5686 @b29c606e2).
 fn makeUnwinIdx(side: c_int, win: c_int) clip.Error![]i32 {
     const fwd = try makeWinIdx(side, win);
     defer gpa.free(fwd);
@@ -1303,7 +1303,7 @@ fn makeUnwinIdx(side: c_int, win: c_int) clip.Error![]i32 {
     return inv;
 }
 
-/// The `make_spatial_idx` lambda (mtmd/clip.cpp:5695 @5266f24da).
+/// The `make_spatial_idx` lambda (mtmd/clip.cpp:5695 @b29c606e2).
 fn makeSpatialIdx(side: c_int, offset: i32) clip.Error![]i32 {
     const off_y = (offset >> 1) & 1;
     const off_x = offset & 1;
@@ -1323,7 +1323,7 @@ fn g4vName(buf: *[96]u8, bid: usize, comptime suffix: [*:0]const u8) [*:0]const 
     return @ptrCast(buf);
 }
 
-/// The `upload` lambda (mtmd/clip.cpp:5709 @5266f24da): the same permutation
+/// The `upload` lambda (mtmd/clip.cpp:5709 @b29c606e2): the same permutation
 /// for every tile of the stacked image.
 fn upload(gf: ?*c.ggml_cgraph, name: [*:0]const u8, idx: []const i32) void {
     const t = c.ggml_graph_get_tensor(gf, name);
@@ -1336,7 +1336,7 @@ fn upload(gf: ?*c.ggml_cgraph, name: [*:0]const u8, idx: []const i32) void {
     c.ggml_backend_tensor_set(t, buf.ptr, 0, c.ggml_nbytes(t));
 }
 
-/// Ports `clip_n_output_tokens` (mtmd/clip.cpp:4083 @5266f24da): the number of
+/// Ports `clip_n_output_tokens` (mtmd/clip.cpp:4083 @b29c606e2): the number of
 /// embeddings the projector produces for `img`.
 pub fn nOutputTokens(ctx: *const clip.Ctx, img: *const impl.ImageF32) c_int {
     const params = &ctx.model.hparams;

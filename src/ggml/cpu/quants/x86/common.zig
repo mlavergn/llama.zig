@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.4.0,
-//! `5266f24da`): the `__AVX2__` arms of the helpers at the top of the file
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.4.1,
+//! `b29c606e2`): the `__AVX2__` arms of the helpers at the top of the file
 //! and the scale shuffles before the dot products. Each names the C it
 //! replaces and the line it began at. At x86-64-v3 and v4 neither AVX-VNNI
 //! nor AVX512-VNNI is defined, so `mul_sum_us8_pairs_float` and
@@ -29,7 +29,7 @@ pub inline fn as(comptime Block: type, p: ?*const anyopaque) [*]const Block {
     return @ptrCast(@alignCast(p.?));
 }
 
-/// Ports `hsum_float_8` (arch/x86/quants.c:43 @5266f24da).
+/// Ports `hsum_float_8` (arch/x86/quants.c:43 @b29c606e2).
 ///
 /// `((x0+x4) + (x2+x6)) + ((x1+x5) + (x3+x7))`: the halves summed, then
 /// `movehl` and `movehdup` fold the four lanes pairwise. The order is the
@@ -42,7 +42,7 @@ pub inline fn hsum_float_8(x: m256) f32 {
     return avx.mm_cvtss_f32(res);
 }
 
-/// Ports `get_scale_shuffle_q3k` (arch/x86/quants.c:518 @5266f24da): the
+/// Ports `get_scale_shuffle_q3k` (arch/x86/quants.c:518 @b29c606e2): the
 /// control that broadcasts scale pair `4i, 4i+1` across the low 128-bit half
 /// and `4i+2, 4i+3` across the high one.
 pub inline fn get_scale_shuffle_q3k(i: usize) m256i {
@@ -59,7 +59,7 @@ pub inline fn get_scale_shuffle_q3k(i: usize) m256i {
     return avx.mm256_loadu_si256(k_shuffle[32 * i ..].ptr);
 }
 
-/// Ports `get_scale_shuffle_k4` (arch/x86/quants.c:527 @5266f24da): the
+/// Ports `get_scale_shuffle_k4` (arch/x86/quants.c:527 @b29c606e2): the
 /// `pshufb` control that broadcasts scale pair `i` -- bytes `2i` and `2i+1`
 /// of a 16-bit scale vector -- across all 32 bytes.
 pub inline fn get_scale_shuffle_k4(i: usize) m256i {
@@ -76,7 +76,7 @@ pub inline fn get_scale_shuffle_k4(i: usize) m256i {
     return avx.mm256_loadu_si256(k_shuffle[32 * i ..].ptr);
 }
 
-/// Ports `hsum_i32_8` (arch/x86/quants.c:52 @5266f24da): the halves summed,
+/// Ports `hsum_i32_8` (arch/x86/quants.c:52 @b29c606e2): the halves summed,
 /// then the high pair onto the low, then lane 1 onto lane 0. Integer, so the
 /// order cannot change the answer, but it is the C's.
 pub inline fn hsum_i32_8(a: m256i) i32 {
@@ -87,7 +87,7 @@ pub inline fn hsum_i32_8(a: m256i) i32 {
     return avx.mm_cvtsi128_si32(avx.mm_add_epi32(sum64, hi32));
 }
 
-/// Ports `mul_add_epi8` (arch/x86/quants.c:69 @5266f24da): signed bytes times
+/// Ports `mul_add_epi8` (arch/x86/quants.c:69 @b29c606e2): signed bytes times
 /// signed bytes, pairwise into `i16`, by moving `x`'s sign onto `y` so that
 /// `maddubs` can take `|x|` as its unsigned operand.
 pub inline fn mul_add_epi8(x: m256i, y: m256i) m256i {
@@ -96,7 +96,7 @@ pub inline fn mul_add_epi8(x: m256i, y: m256i) m256i {
     return avx.mm256_maddubs_epi16(ax, sy);
 }
 
-/// Ports `bytes_from_bits_32` (arch/x86/quants.c:76 @5266f24da): 32 bits to
+/// Ports `bytes_from_bits_32` (arch/x86/quants.c:76 @b29c606e2): 32 bits to
 /// 32 bytes, each `0xFF` where its bit is set and `0x00` where it is not.
 pub inline fn bytes_from_bits_32(x: *const [4]u8) m256i {
     const x32 = std.mem.readInt(u32, x, .little);
@@ -107,7 +107,7 @@ pub inline fn bytes_from_bits_32(x: *const [4]u8) m256i {
     return avx.mm256_cmpeq_epi8(bytes, avx.mm256_set1_epi64x(-1));
 }
 
-/// Ports `bytes_from_nibbles_32` (arch/x86/quants.c:90 @5266f24da): sixteen
+/// Ports `bytes_from_nibbles_32` (arch/x86/quants.c:90 @b29c606e2): sixteen
 /// bytes to 32 nibbles in `[0, 15]`, the low nibbles first.
 pub inline fn bytes_from_nibbles_32(rsi: *const [16]u8) m256i {
     const tmp = avx.mm_loadu_si128(rsi);
@@ -116,14 +116,14 @@ pub inline fn bytes_from_nibbles_32(rsi: *const [16]u8) m256i {
     return avx.mm256_and_si256(lowMask, bytes);
 }
 
-/// Ports `sum_i16_pairs_float` (arch/x86/quants.c:99 @5266f24da).
+/// Ports `sum_i16_pairs_float` (arch/x86/quants.c:99 @b29c606e2).
 pub inline fn sum_i16_pairs_float(x: m256i) m256 {
     const ones = avx.mm256_set1_epi16(1);
     const summed_pairs = avx.mm256_madd_epi16(ones, x);
     return avx.mm256_cvtepi32_ps(summed_pairs);
 }
 
-/// Ports `mul_sum_us8_pairs_float` (arch/x86/quants.c:105 @5266f24da): the
+/// Ports `mul_sum_us8_pairs_float` (arch/x86/quants.c:105 @b29c606e2): the
 /// `__AVX512VNNI__ && __AVX512VL__` arm where the target has it, the plain
 /// arm otherwise -- neither VNNI is in x86-64-v3 or v4.
 pub inline fn mul_sum_us8_pairs_float(ax: m256i, sy: m256i) m256 {
@@ -137,7 +137,7 @@ pub inline fn mul_sum_us8_pairs_float(ax: m256i, sy: m256i) m256 {
     return sum_i16_pairs_float(dot);
 }
 
-/// Ports `mul_sum_i8_pairs_float` (arch/x86/quants.c:122 @5266f24da), the
+/// Ports `mul_sum_i8_pairs_float` (arch/x86/quants.c:122 @b29c606e2), the
 /// arm without `__AVXVNNIINT8__`.
 pub inline fn mul_sum_i8_pairs_float(x: m256i, y: m256i) m256 {
     if (comptime avx.has_avxvnniint8) @compileError("the __AVXVNNIINT8__ arm of mul_sum_i8_pairs_float is not ported");
@@ -146,7 +146,7 @@ pub inline fn mul_sum_i8_pairs_float(x: m256i, y: m256i) m256 {
     return mul_sum_us8_pairs_float(ax, sy);
 }
 
-/// Ports `get_scale_shuffle` (arch/x86/quants.c:540 @5266f24da): the
+/// Ports `get_scale_shuffle` (arch/x86/quants.c:540 @b29c606e2): the
 /// 128-bit control that broadcasts bytes `2i` and `2i+1` eight times each.
 pub inline fn get_scale_shuffle(i: usize) m128i {
     const k_shuffle: [128]u8 = comptime blk: {
@@ -161,7 +161,7 @@ pub inline fn get_scale_shuffle(i: usize) m128i {
 
 /// The scale shuffle that opens each super-block of
 /// `ggml_vec_dot_q4_K_q8_K` and `ggml_vec_dot_q5_K_q8_K` (arch/x86/quants.c:2038, 2216
-/// @5266f24da): twelve packed bytes of 6-bit scales and mins to four words,
+/// @b29c606e2): twelve packed bytes of 6-bit scales and mins to four words,
 /// scales in the first two and mins in the last two.
 pub inline fn unpackScales(packed_scales: *const [12]u8) [4]u32 {
     const kmask1: u32 = 0x3f3f3f3f;

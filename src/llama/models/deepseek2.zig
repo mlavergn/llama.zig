@@ -11,8 +11,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek2.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_deepseek2`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek2.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_deepseek2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` and
 //! `graph_mtp`. `graph` also carries DeepSeek-OCR's attention, which
 //! `llama_model_deepseek2ocr` (`deepseek2ocr.zig`) and
@@ -31,7 +31,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_deepseek2`'s `load_arch_hparams` (models/deepseek2.cpp:3 @5266f24da).
+/// Ports `llama_model_deepseek2`'s `load_arch_hparams` (models/deepseek2.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -94,7 +94,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deepseek2`'s `load_arch_tensors` (models/deepseek2.cpp:55 @5266f24da).
+/// Ports `llama_model_deepseek2`'s `load_arch_tensors` (models/deepseek2.cpp:55 @b29c606e2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -210,7 +210,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // The graph
 
 /// Ports `llama_model_deepseek2`'s `build_arch_graph` (models/deepseek2.cpp:163
-/// @5266f24da): the MTP draft head for that graph type, the main model
+/// @b29c606e2): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -227,7 +227,7 @@ fn mlaKqScale(b: *const graph.Builder, n_embd_head_k: i64) f32 {
 }
 
 /// Ports the constructor of `llama_model_deepseek2`'s `graph_mtp`
-/// (models/deepseek2.cpp:170 @5266f24da).
+/// (models/deepseek2.cpp:170 @b29c606e2).
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -436,7 +436,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_deepseek2`'s `graph`
-/// (models/deepseek2.cpp:417 @5266f24da).
+/// (models/deepseek2.cpp:417 @b29c606e2).
 pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -496,18 +496,15 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const ocr_rope_type: c_int = c.GGML_ROPE_TYPE_NEOX;
             impl.assert(n_embed_head == n_embd_head_k and n_embed_head == n_embd_head_v, "models/deepseek2.cpp", 476, "n_embed_head == n_embd_head_k && n_embed_head == n_embd_head_v");
 
-            var Qcur: *Tensor = c.ggml_mul_mat(ctx, layer.wq, cur);
-            var Kcur: *Tensor = c.ggml_mul_mat(ctx, layer.wk, cur);
-            var Vcur: *Tensor = c.ggml_mul_mat(ctx, layer.wv, cur);
+            const qkv = b.buildQkv(layer, cur, n_embed_head, b.n_head, b.n_head, il);
+            var Qcur = qkv.q;
+            var Kcur = qkv.k;
+            const Vcur = qkv.v;
             b.cb(Qcur, "q", il);
             b.cb(Kcur, "k", il);
             b.cb(Vcur, "v", il);
 
-            Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embed_head, b.n_head, b.n_tokens);
-            Kcur = c.ggml_reshape_3d(ctx, Kcur, n_embed_head, b.n_head, b.n_tokens);
-            Vcur = c.ggml_reshape_3d(ctx, Vcur, n_embed_head, b.n_head, b.n_tokens);
-
-            impl.assert(@abs(@as(f64, b.freq_base) - 10000.0) < 1e-4, "models/deepseek2.cpp", 493, "fabs(freq_base - 10000.0) < 1e-4");
+            impl.assert(@abs(@as(f64, b.freq_base) - 10000.0) < 1e-4, "models/deepseek2.cpp", 484, "fabs(freq_base - 10000.0) < 1e-4");
             Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, n_embed_head, ocr_rope_type, 0, b.freq_base, 1, 0, 1, 0, 0);
             Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, n_embed_head, ocr_rope_type, 0, b.freq_base, 1, 0, 1, 0, 0);
             b.cb(Qcur, "q_pe", il);

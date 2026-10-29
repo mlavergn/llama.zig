@@ -13,7 +13,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/dflash.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/dflash.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_dflash`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph<is_enc>` with `build_inp_embd_enc`,
 //! `build_dspark_markov_head`, and `graph_dsv4`, which builds on
@@ -40,7 +40,7 @@ fn oom() noreturn {
     impl.abort("models/dflash.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_dflash`'s `load_arch_hparams` (models/dflash.cpp:7 @5266f24da).
+/// Ports `llama_model_dflash`'s `load_arch_hparams` (models/dflash.cpp:7 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -144,7 +144,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_dflash`'s `load_arch_tensors` (models/dflash.cpp:94 @5266f24da).
+/// Ports `llama_model_dflash`'s `load_arch_tensors` (models/dflash.cpp:94 @b29c606e2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -305,7 +305,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_dflash`'s `build_arch_graph` (models/dflash.cpp:243 @5266f24da).
+/// Ports `llama_model_dflash`'s `build_arch_graph` (models/dflash.cpp:243 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     switch (params.gtype) {
         .encoder => buildGraphEnc(model, b),
@@ -332,7 +332,7 @@ fn otherModel(b: *const graph.Builder) *const Model {
 }
 
 /// Ports `llama_model_dflash`'s `graph<true>`'s `build_inp_embd_enc`
-/// (models/dflash.cpp:259 @5266f24da): the target model's features, its
+/// (models/dflash.cpp:259 @b29c606e2): the target model's features, its
 /// chosen layers concatenated, given as the batch's embeddings.
 fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
     const hp = b.hparams;
@@ -353,7 +353,7 @@ fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph<true>`
-/// (models/dflash.cpp:276 @5266f24da): the encoder, the target model's
+/// (models/dflash.cpp:276 @b29c606e2): the encoder, the target model's
 /// features through the fusion layer and its norm.
 fn buildGraphEnc(model: *const Model, b: *const graph.Builder) void {
     var cur = buildInpEmbdEnc(b);
@@ -388,7 +388,7 @@ fn stoi(s: [:0]const u8) i64 {
 
 extern "c" fn strtol(s: [*:0]const u8, end: *[*c]u8, base: c_int) c_long;
 
-/// Ports `build_dspark_markov_head` (models/dflash.cpp:292 @5266f24da):
+/// Ports `build_dspark_markov_head` (models/dflash.cpp:292 @b29c606e2):
 /// DSpark's Markov bias on the draft logits, chained through each block's
 /// positions, and the confidence head beside it, which is optional.
 fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *Tensor) void {
@@ -515,7 +515,7 @@ fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *
     c.ggml_build_forward_expand(b.gf, out);
 }
 
-/// Ports `build_dflash2_conv` (models/dflash.cpp:405 @5266f24da): DFlash2's
+/// Ports `build_dflash2_conv` (models/dflash.cpp:405 @b29c606e2): DFlash2's
 /// causal convolution within each block, its `kernel_size` taps weighted by
 /// a static base plus the token's own dynamic coefficients, one weight per
 /// group of `group_size` channels. `side` picks the input (0) or output (1)
@@ -581,7 +581,7 @@ fn buildDflash2Conv(b: *const graph.Builder, hidden_: *Tensor, dynamic_: ?*Tenso
     return result.?;
 }
 
-/// Ports `build_dflash2_selector` (models/dflash.cpp:475 @5266f24da):
+/// Ports `build_dflash2_selector` (models/dflash.cpp:475 @b29c606e2):
 /// DFlash2's selector, the top-k candidates at every block position and
 /// the pairwise transition scores between neighbouring positions' sets,
 /// packed into the nextn output slot for the walk on the CPU.
@@ -659,7 +659,7 @@ const Selector = struct {
     gate_blk: *Tensor,
 
     /// Ports `build_dflash2_selector`'s `score_run` (models/dflash.cpp:510
-    /// @5266f24da): a position's score reads only the candidate sets at
+    /// @b29c606e2): a position's score reads only the candidate sets at
     /// pos - 1 and pos, so a run of positions has no internal dependency
     /// and scores in one batched matmul.
     fn scoreRun(self: *const Selector, beg_pos: i64, n_pos: i64, pred_ids: *Tensor) *Tensor {
@@ -695,7 +695,7 @@ const Selector = struct {
     }
 };
 
-/// `graph<false>`'s `build_rope` lambda (models/dflash.cpp:595 @5266f24da):
+/// `graph<false>`'s `build_rope` lambda (models/dflash.cpp:595 @b29c606e2):
 /// drafts for M-RoPE targets use the degenerate sections, the temporal
 /// dimension only.
 fn buildRope(b: *const graph.Builder, sections: *[4]c_int, cur: *Tensor, pos: *Tensor) *Tensor {
@@ -707,7 +707,7 @@ fn buildRope(b: *const graph.Builder, sections: *[4]c_int, cur: *Tensor, pos: *T
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph<false>`
-/// (models/dflash.cpp:570 @5266f24da): the decoder, in one of two modes by
+/// (models/dflash.cpp:570 @b29c606e2): the decoder, in one of two modes by
 /// the batch's type. An embedding batch is fused target features, projected
 /// and written into the K/V cache; a token batch is a noise block, diffused
 /// by attending over the committed tokens and the block's masks to draft
@@ -967,7 +967,7 @@ fn dsv4TokEmbd(model: *const Model, b: *const graph.Builder) *Tensor {
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph_dsv4`
-/// (models/dflash.cpp:831 @5266f24da): the DeepSeek-V4 DSpark decoder, in
+/// (models/dflash.cpp:831 @b29c606e2): the DeepSeek-V4 DSpark decoder, in
 /// the same two modes as the DFlash one. An embedding batch is the
 /// encoder's fused target features: each stage projects them through its
 /// `wkv` and writes K into the draft's ring cache. A token batch is a noise

@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** This is our own code. The *flag surface* it accepts is
-//! modelled on `llama.cpp/common/arg.cpp` (v0.4.0, `5266f24da`) and the
+//! modelled on `llama.cpp/common/arg.cpp` (v0.4.1, `b29c606e2`) and the
 //! defaults on `llama.cpp/common/common.h`, so a command line written for
 //! upstream's `llama-cli` runs unchanged against this binary for the features
 //! that are ported. Each option below names the upstream spelling it matches.
@@ -67,7 +67,7 @@ pub const Args = struct {
     /// `-fitc, --fit-ctx N`: the least context `--fit` shrinks to. An
     /// explicit `-c 0` sets it to `maxInt(u32)`, which forbids shrinking:
     /// upstream's `-c` handler sets `fit_params_min_ctx` so
-    /// (common/arg.cpp:1647 @5266f24da). The later of the two flags wins.
+    /// (common/arg.cpp:1642 @b29c606e2). The later of the two flags wins.
     fit_min_ctx: u32 = 4096,
     /// `-t, --threads`. 0 lets llama.cpp pick.
     n_threads: i32 = 0,
@@ -475,16 +475,16 @@ fn bad(arg: []const u8) Result {
     return .{ .fail = .{ .err = error.BadNumber, .arg = arg } };
 }
 
-/// `llama_max_devices` (src/llama.cpp:86 @5266f24da), which sizes upstream's
+/// `llama_max_devices` (src/llama.cpp:86 @b29c606e2), which sizes upstream's
 /// `fit_params_target`.
 pub const max_devices = 16;
 
-/// Ports `is_truthy` (arg.cpp:1336 @5266f24da), in `common_arg_utils`.
+/// Ports `is_truthy` (arg.cpp:1331 @b29c606e2), in `common_arg_utils`.
 fn isTruthy(v: []const u8) bool {
     return eq(v, &.{ "on", "enabled", "true", "1" });
 }
 
-/// Ports `is_falsey` (arg.cpp:1340 @5266f24da), in `common_arg_utils`.
+/// Ports `is_falsey` (arg.cpp:1335 @b29c606e2), in `common_arg_utils`.
 fn isFalsey(v: []const u8) bool {
     return eq(v, &.{ "off", "disabled", "false", "0" });
 }

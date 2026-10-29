@@ -9,7 +9,7 @@
 //!   `llama_memory_hybrid_context`
 //! - `llama.cpp/src/llama-memory-hybrid.cpp` -- their bodies
 //!
-//! All at v0.4.0 (`5266f24da`).
+//! All at v0.4.1 (`b29c606e2`).
 //!
 //! # A context other contexts extend
 //!
@@ -49,14 +49,14 @@ fn isNotRecr(ctx: ?*const anyopaque, il: i32) bool {
     return !isRecr(ctx, il);
 }
 
-/// Ports `llama_memory_hybrid` (llama-memory-hybrid.h:19 @5266f24da).
+/// Ports `llama_memory_hybrid` (llama-memory-hybrid.h:19 @b29c606e2).
 pub const MemoryHybrid = struct {
     hparams: *const Hparams,
     mem_attn: *kv_cache.KvCache,
     mem_recr: *memory_recurrent.MemoryRecurrent,
 
     /// Ports the constructor of `llama_memory_hybrid`
-    /// (llama-memory-hybrid.cpp:11 @5266f24da). An empty filter selects the
+    /// (llama-memory-hybrid.cpp:11 @b29c606e2). An empty filter selects the
     /// layers by `is_recr`.
     ///
     /// Return: the memory, the caller's to `destroy`, or `error.Thrown`.
@@ -101,7 +101,7 @@ pub const MemoryHybrid = struct {
     }
 
     /// Ports `llama_memory_hybrid`'s `init_batch` (llama-memory-hybrid.cpp:67
-    /// @5266f24da): split as the recurrent memory needs, then prepare both.
+    /// @b29c606e2): split as the recurrent memory needs, then prepare both.
     pub fn initBatch(self: *MemoryHybrid, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *HybridContext {
         const func = "init_batch";
         blk: {
@@ -153,96 +153,96 @@ pub const MemoryHybrid = struct {
         return HybridContext.createStatus(.failed_prepare);
     }
 
-    /// Ports `llama_memory_hybrid`'s `init_full` (llama-memory-hybrid.cpp:125 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `init_full` (llama-memory-hybrid.cpp:125 @b29c606e2).
     pub fn initFull(self: *MemoryHybrid) *HybridContext {
         return HybridContext.createFull(self);
     }
 
-    /// Ports `llama_memory_hybrid`'s `init_update` (llama-memory-hybrid.cpp:129 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `init_update` (llama-memory-hybrid.cpp:129 @b29c606e2).
     pub fn initUpdate(self: *MemoryHybrid, lctx: *anyopaque, optimize: bool) *HybridContext {
         return HybridContext.createUpdate(self, lctx, optimize);
     }
 
     /// Ports `llama_memory_hybrid`'s `get_can_shift` (llama-memory-hybrid.cpp:133
-    /// @5266f24da): shifting is trivial for the recurrent half.
+    /// @b29c606e2): shifting is trivial for the recurrent half.
     pub fn getCanShift(self: *const MemoryHybrid) bool {
         return self.mem_attn.getCanShift();
     }
 
-    /// Ports `llama_memory_hybrid`'s `clear` (llama-memory-hybrid.cpp:138 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `clear` (llama-memory-hybrid.cpp:138 @b29c606e2).
     pub fn clear(self: *MemoryHybrid, data: bool) void {
         self.mem_attn.clear(data);
         self.mem_recr.clear(data);
     }
 
     /// Ports `llama_memory_hybrid`'s `seq_rm` (llama-memory-hybrid.cpp:143
-    /// @5266f24da): the recurrent half first, since it may refuse without
+    /// @b29c606e2): the recurrent half first, since it may refuse without
     /// changing anything.
     pub fn seqRm(self: *MemoryHybrid, seq_id: i32, p0: i32, p1: i32) bool {
         if (!self.mem_recr.seqRm(seq_id, p0, p1)) return false;
         return self.mem_attn.seqRm(seq_id, p0, p1);
     }
 
-    /// Ports `llama_memory_hybrid`'s `seq_cp` (llama-memory-hybrid.cpp:152 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `seq_cp` (llama-memory-hybrid.cpp:152 @b29c606e2).
     pub fn seqCp(self: *MemoryHybrid, a: i32, b: i32, p0: i32, p1: i32) void {
         self.mem_attn.seqCp(a, b, p0, p1);
         self.mem_recr.seqCp(a, b, p0, p1);
     }
 
-    /// Ports `llama_memory_hybrid`'s `seq_keep` (llama-memory-hybrid.cpp:157 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `seq_keep` (llama-memory-hybrid.cpp:157 @b29c606e2).
     pub fn seqKeep(self: *MemoryHybrid, seq_id: i32) void {
         self.mem_attn.seqKeep(seq_id);
         self.mem_recr.seqKeep(seq_id);
     }
 
-    /// Ports `llama_memory_hybrid`'s `seq_add` (llama-memory-hybrid.cpp:162 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `seq_add` (llama-memory-hybrid.cpp:162 @b29c606e2).
     pub fn seqAdd(self: *MemoryHybrid, seq_id: i32, p0: i32, p1: i32, shift: i32) void {
         self.mem_attn.seqAdd(seq_id, p0, p1, shift);
         self.mem_recr.seqAdd(seq_id, p0, p1, shift);
     }
 
-    /// Ports `llama_memory_hybrid`'s `seq_div` (llama-memory-hybrid.cpp:167 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `seq_div` (llama-memory-hybrid.cpp:167 @b29c606e2).
     pub fn seqDiv(self: *MemoryHybrid, seq_id: i32, p0: i32, p1: i32, d: c_int) void {
         self.mem_attn.seqDiv(seq_id, p0, p1, d);
         self.mem_recr.seqDiv(seq_id, p0, p1, d);
     }
 
     /// Ports `llama_memory_hybrid`'s `seq_pos_min` (llama-memory-hybrid.cpp:172
-    /// @5266f24da): the larger of the two minimums.
+    /// @b29c606e2): the larger of the two minimums.
     pub fn seqPosMin(self: *const MemoryHybrid, seq_id: i32) i32 {
         return @max(self.mem_attn.seqPosMin(seq_id), self.mem_recr.seqPosMin(seq_id));
     }
 
     /// Ports `llama_memory_hybrid`'s `seq_pos_max` (llama-memory-hybrid.cpp:177
-    /// @5266f24da): the smaller of the two maximums.
+    /// @b29c606e2): the smaller of the two maximums.
     pub fn seqPosMax(self: *const MemoryHybrid, seq_id: i32) i32 {
         return @min(self.mem_attn.seqPosMax(seq_id), self.mem_recr.seqPosMax(seq_id));
     }
 
-    /// Ports `llama_memory_hybrid`'s `memory_breakdown` (llama-memory-hybrid.cpp:182 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `memory_breakdown` (llama-memory-hybrid.cpp:182 @b29c606e2).
     pub fn memoryBreakdown(self: *const MemoryHybrid, out: *std.ArrayList(memory.BuftSize)) void {
         self.mem_attn.memoryBreakdown(out);
         self.mem_recr.memoryBreakdown(out);
     }
 
-    /// Ports `llama_memory_hybrid`'s `state_write` (llama-memory-hybrid.cpp:190 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `state_write` (llama-memory-hybrid.cpp:190 @b29c606e2).
     pub fn stateWrite(self: *const MemoryHybrid, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         if (flags & c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY == 0) try self.mem_attn.stateWrite(w, seq_id, flags, exc);
         try self.mem_recr.stateWrite(w, seq_id, flags, exc);
     }
 
-    /// Ports `llama_memory_hybrid`'s `state_read` (llama-memory-hybrid.cpp:197 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `state_read` (llama-memory-hybrid.cpp:197 @b29c606e2).
     pub fn stateRead(self: *MemoryHybrid, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         if (flags & c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY == 0) try self.mem_attn.stateRead(r, seq_id, flags, exc);
         try self.mem_recr.stateRead(r, seq_id, flags, exc);
     }
 
-    /// Ports `llama_memory_hybrid`'s `get_mem_attn` (llama-memory-hybrid.cpp:204 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `get_mem_attn` (llama-memory-hybrid.cpp:204 @b29c606e2).
     pub fn getMemAttn(self: *const MemoryHybrid) *kv_cache.KvCache {
         return self.mem_attn;
     }
 
-    /// Ports `llama_memory_hybrid`'s `get_mem_recr` (llama-memory-hybrid.cpp:208 @5266f24da).
+    /// Ports `llama_memory_hybrid`'s `get_mem_recr` (llama-memory-hybrid.cpp:208 @b29c606e2).
     pub fn getMemRecr(self: *const MemoryHybrid) *memory_recurrent.MemoryRecurrent {
         return self.mem_recr;
     }
@@ -360,7 +360,7 @@ pub fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
     return out;
 }
 
-/// Ports `llama_memory_hybrid_context` (llama-memory-hybrid.h:93 @5266f24da).
+/// Ports `llama_memory_hybrid_context` (llama-memory-hybrid.h:93 @b29c606e2).
 pub const HybridContext = struct {
     i_next: usize = 0,
     ubatches: std.ArrayList(Ubatch) = .empty,
@@ -368,26 +368,26 @@ pub const HybridContext = struct {
     ctx_recr: ?*memory_recurrent.RecurrentContext = null,
     status: memory.Status,
 
-    /// Ports the status constructor of `llama_memory_hybrid_context` (llama-memory-hybrid.cpp:212 @5266f24da).
+    /// Ports the status constructor of `llama_memory_hybrid_context` (llama-memory-hybrid.cpp:212 @b29c606e2).
     pub fn initStatus(status: memory.Status) HybridContext {
         return .{ .status = status };
     }
 
-    /// Ports the full-memory constructor of `llama_memory_hybrid_context` (llama-memory-hybrid.cpp:214 @5266f24da).
+    /// Ports the full-memory constructor of `llama_memory_hybrid_context` (llama-memory-hybrid.cpp:214 @b29c606e2).
     pub fn initFull(mem: *MemoryHybrid) HybridContext {
         const a = mem.getMemAttn().initFull();
         const r = mem.getMemRecr().initFull();
         return .{ .ctx_attn = a, .ctx_recr = r, .status = memory.statusCombine(a.getStatus(), r.getStatus()) };
     }
 
-    /// Ports the update constructor of `llama_memory_hybrid_context` (llama-memory-hybrid.cpp:220 @5266f24da).
+    /// Ports the update constructor of `llama_memory_hybrid_context` (llama-memory-hybrid.cpp:220 @b29c606e2).
     pub fn initUpdate(mem: *MemoryHybrid, lctx: *anyopaque, optimize: bool) HybridContext {
         const a = mem.getMemAttn().initUpdate(lctx, optimize);
         const r = mem.getMemRecr().initUpdate(lctx, optimize);
         return .{ .ctx_attn = a, .ctx_recr = r, .status = memory.statusCombine(a.getStatus(), r.getStatus()) };
     }
 
-    /// Ports the batch constructor of `llama_memory_hybrid_context` (llama-memory-hybrid.cpp:229 @5266f24da):
+    /// Ports the batch constructor of `llama_memory_hybrid_context` (llama-memory-hybrid.cpp:229 @b29c606e2):
     /// each half gets its own copy of the ubatches, as the C++ copies them.
     /// Takes both lists.
     pub fn initBatch(mem: *MemoryHybrid, sinfos_attn: std.ArrayList(kv_cache.SlotInfo), ubatches: std.ArrayList(Ubatch)) HybridContext {
@@ -438,7 +438,7 @@ pub const HybridContext = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_memory_hybrid_context`'s `next` (llama-memory-hybrid.cpp:240 @5266f24da).
+    /// Ports `llama_memory_hybrid_context`'s `next` (llama-memory-hybrid.cpp:240 @b29c606e2).
     pub fn next(self: *HybridContext) bool {
         std.debug.assert(self.status == .success);
         _ = self.ctx_attn.?.next();
@@ -447,7 +447,7 @@ pub const HybridContext = struct {
         return self.i_next < self.ubatches.items.len;
     }
 
-    /// Ports `llama_memory_hybrid_context`'s `apply` (llama-memory-hybrid.cpp:253 @5266f24da).
+    /// Ports `llama_memory_hybrid_context`'s `apply` (llama-memory-hybrid.cpp:253 @b29c606e2).
     pub fn apply(self: *HybridContext) bool {
         std.debug.assert(!memory.statusIsFail(self.status));
         var res = true;
@@ -457,23 +457,23 @@ pub const HybridContext = struct {
         return res;
     }
 
-    /// Ports `llama_memory_hybrid_context`'s `get_status` (llama-memory-hybrid.cpp:264 @5266f24da).
+    /// Ports `llama_memory_hybrid_context`'s `get_status` (llama-memory-hybrid.cpp:264 @b29c606e2).
     pub fn getStatus(self: *const HybridContext) memory.Status {
         return self.status;
     }
 
-    /// Ports `llama_memory_hybrid_context`'s `get_ubatch` (llama-memory-hybrid.cpp:268 @5266f24da).
+    /// Ports `llama_memory_hybrid_context`'s `get_ubatch` (llama-memory-hybrid.cpp:268 @b29c606e2).
     pub fn getUbatch(self: *const HybridContext) *const Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
 
-    /// Ports `llama_memory_hybrid_context`'s `get_attn` (llama-memory-hybrid.cpp:273 @5266f24da).
+    /// Ports `llama_memory_hybrid_context`'s `get_attn` (llama-memory-hybrid.cpp:273 @b29c606e2).
     pub fn getAttn(self: *const HybridContext) *const kv_cache.KvCacheContext {
         return self.ctx_attn.?;
     }
 
-    /// Ports `llama_memory_hybrid_context`'s `get_recr` (llama-memory-hybrid.cpp:277 @5266f24da).
+    /// Ports `llama_memory_hybrid_context`'s `get_recr` (llama-memory-hybrid.cpp:277 @b29c606e2).
     pub fn getRecr(self: *const HybridContext) *const memory_recurrent.RecurrentContext {
         return self.ctx_recr.?;
     }

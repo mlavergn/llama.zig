@@ -3,9 +3,10 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/delta-net-base.cpp` at v0.4.0
-//! (`5266f24da`): `get_slice_2d` and every member of
-//! `llm_build_delta_net_base`.
+//! Ported from `llama.cpp/src/models/delta-net-base.cpp` at v0.4.1
+//! (`b29c606e2`): `get_slice_2d` and every member of
+//! `llm_build_delta_net_base`. Also from `llama.cpp/src/models/models.h`:
+//! `build_gdn_l2_norm`.
 //!
 //! The C++ makes these members of a subclass of `llm_graph_context`; here
 //! they are functions over the builder.
@@ -21,7 +22,16 @@ const Builder = graph.Builder;
 /// The output and the new state.
 pub const OutState = struct { out: *Tensor, state: *Tensor };
 
-/// Ports `get_slice_2d` (delta-net-base.cpp:9 @5266f24da): one slice of
+/// Ports `build_gdn_l2_norm` (src/models/models.h:14 @b29c606e2): the L2 norm the
+/// gated delta nets apply to `q` and `k`, as an RMS norm over `eps / n`
+/// scaled by `1 / sqrt(n)` (upstream PR 28068), `n` the row length.
+pub fn buildGdnL2Norm(ctx: *c.ggml_context, x: *Tensor, eps: f32) *Tensor {
+    const n: f32 = @floatFromInt(x.ne[0]);
+
+    return c.ggml_scale(ctx, c.ggml_rms_norm(ctx, x, eps / n), 1.0 / @sqrt(n));
+}
+
+/// Ports `get_slice_2d` (delta-net-base.cpp:9 @b29c606e2): one slice of
 /// the third dimension, `[x, y, c, b]` to `[x, y, 1, b]`.
 fn getSlice2d(ctx: *c.ggml_context, t: *Tensor, ch: i64) *Tensor {
     return c.ggml_view_4d(ctx, t, t.ne[0], t.ne[1], 1, t.ne[3], t.nb[1], t.nb[2], t.nb[3], t.nb[2] * @as(usize, @intCast(ch)));
@@ -46,7 +56,7 @@ fn checkShapes(q: *const Tensor, k: *const Tensor, v: *const Tensor, g: *const T
 }
 
 /// Ports `llm_build_delta_net_base`'s `build_delta_net_chunking`
-/// (delta-net-base.cpp:16 @5266f24da): many tokens at once, in chunks.
+/// (delta-net-base.cpp:16 @b29c606e2): many tokens at once, in chunks.
 pub fn buildDeltaNetChunking(self: *const Builder, q_: *Tensor, k_: *Tensor, v_: *Tensor, g_: *Tensor, b_: *Tensor, s_: *Tensor, il: c_int) OutState {
     const ctx = self.ctx0;
     var q = q_;
@@ -278,7 +288,7 @@ pub fn buildDeltaNetChunking(self: *const Builder, q_: *Tensor, k_: *Tensor, v_:
 }
 
 /// Ports `llm_build_delta_net_base`'s `build_delta_net_autoregressive`
-/// (delta-net-base.cpp:289 @5266f24da): one token.
+/// (delta-net-base.cpp:289 @b29c606e2): one token.
 pub fn buildDeltaNetAutoregressive(self: *const Builder, q_: *Tensor, k_: *Tensor, v_: *Tensor, g_: *Tensor, b_: *Tensor, s_: *Tensor, il: c_int) OutState {
     const ctx = self.ctx0;
     var q = q_;
@@ -343,7 +353,7 @@ pub fn buildDeltaNetAutoregressive(self: *const Builder, q_: *Tensor, k_: *Tenso
 }
 
 /// Ports `llm_build_delta_net_base`'s `build_delta_net_fused`
-/// (delta-net-base.cpp:373 @5266f24da): the fused operator, K = 1, which
+/// (delta-net-base.cpp:373 @b29c606e2): the fused operator, K = 1, which
 /// carries the final state only.
 pub fn buildDeltaNetFused(self: *const Builder, q: *Tensor, k: *Tensor, v: *Tensor, g: *Tensor, b: *Tensor, s: *Tensor, il: c_int) OutState {
     const ctx = self.ctx0;
@@ -364,7 +374,7 @@ pub fn buildDeltaNetFused(self: *const Builder, q: *Tensor, k: *Tensor, v: *Tens
 }
 
 /// Ports `llm_build_delta_net_base`'s `build_delta_net` (delta-net-base.cpp:425
-/// @5266f24da): fused or not, autoregressive or chunked, by the token count.
+/// @b29c606e2): fused or not, autoregressive or chunked, by the token count.
 pub fn buildDeltaNet(self: *const Builder, q: *Tensor, k: *Tensor, v: *Tensor, g: *Tensor, b: *Tensor, s: *Tensor, il: c_int) OutState {
     const n_seq_tokens = q.ne[2];
     if (n_seq_tokens == 1) {
@@ -376,7 +386,7 @@ pub fn buildDeltaNet(self: *const Builder, q: *Tensor, k: *Tensor, v: *Tensor, g
 }
 
 /// Ports `llm_build_delta_net_base`'s `build_conv_state` (delta-net-base.cpp:449
-/// @5266f24da): the convolution's input with the saved state in front, and
+/// @b29c606e2): the convolution's input with the saved state in front, and
 /// the state written back.
 pub fn buildConvState(self: *const Builder, inp: *const graph.InpRs, conv_states_all: *Tensor, qkv_mixed_: *Tensor, conv_kernel_size: i64, conv_channels: i64, il: c_int) *Tensor {
     const ctx = self.ctx0;
@@ -425,7 +435,7 @@ pub fn buildConvState(self: *const Builder, inp: *const graph.InpRs, conv_states
 }
 
 /// Ports `llm_build_delta_net_base`'s `build_recurrent_attn` (delta-net-base.cpp:527
-/// @5266f24da): the delta net over the saved state, with the new state, or
+/// @b29c606e2): the delta net over the saved state, with the new state, or
 /// its rollback snapshots, written back.
 pub fn buildRecurrentAttn(self: *const Builder, inp: *const graph.InpRs, ssm_states_all: *Tensor, q: *Tensor, k: *Tensor, v: *Tensor, g: *Tensor, b: *Tensor, s: *Tensor, il: c_int) *Tensor {
     const ctx = self.ctx0;

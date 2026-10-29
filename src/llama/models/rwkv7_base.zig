@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/rwkv7-base.cpp` at v0.4.0
-//! (`5266f24da`): `llm_build_rwkv7_base`'s `build_rwkv7_channel_mix` and
+//! Ported from `llama.cpp/src/models/rwkv7-base.cpp` at v0.4.1
+//! (`b29c606e2`): `llm_build_rwkv7_base`'s `build_rwkv7_channel_mix` and
 //! `build_rwkv7_time_mix`. Its constructor only stores the model, which the
 //! port passes to each function instead.
 
@@ -29,7 +29,7 @@ fn doubleToFloat(comptime x: f64) f32 {
 }
 
 /// Ports `llm_build_rwkv7_base`'s `build_rwkv7_channel_mix`
-/// (models/rwkv7-base.cpp:9 @5266f24da): the squared-ReLU feed-forward.
+/// (models/rwkv7-base.cpp:9 @b29c606e2): the squared-ReLU feed-forward.
 pub fn buildRwkv7ChannelMix(b: *const graph.Builder, layer: *const Layer, cur_: *Tensor, x_prev: *Tensor, arch: arch_mod.Arch) *Tensor {
     const ctx = b.ctx0;
     var cur = cur_;
@@ -48,7 +48,7 @@ pub fn buildRwkv7ChannelMix(b: *const graph.Builder, layer: *const Layer, cur_: 
 }
 
 /// Ports `llm_build_rwkv7_base`'s `build_rwkv7_time_mix`
-/// (models/rwkv7-base.cpp:30 @5266f24da): the WKV-7 recurrence.
+/// (models/rwkv7-base.cpp:30 @b29c606e2): the WKV-7 recurrence.
 /// `first_layer_value` is the first layer's value, set by the first call
 /// and mixed back into every later layer's.
 pub fn buildRwkv7TimeMix(model: *const Model, b: *const graph.Builder, inp: *const graph.InpRs, cur_: *Tensor, x_prev: *Tensor, first_layer_value: *?*Tensor, ubatch: *const batch.Ubatch, il: c_int) *Tensor {

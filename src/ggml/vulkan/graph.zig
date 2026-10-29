@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
-//! (`5266f24da`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
+//! (`b29c606e2`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -16,7 +16,7 @@ fn u(x: i64) u64 {
     return @bitCast(x);
 }
 
-/// Ports `ggml_vk_get_node_flops` (ggml-vulkan.cpp:2196 @5266f24da): the
+/// Ports `ggml_vk_get_node_flops` (ggml-vulkan.cpp:2292 @b29c606e2): the
 /// floating-point operations of a matmul, convolution or attention node,
 /// zero for anything else. Unsigned and wrapping, as the C++'s `uint64_t`.
 pub fn getNodeFlops(node: *const c.ggml_tensor) u64 {
@@ -51,7 +51,7 @@ pub fn getNodeFlops(node: *const c.ggml_tensor) u64 {
     return 0;
 }
 
-/// Ports `ggml_vk_print_node_list` (ggml-vulkan.cpp:2228 @5266f24da).
+/// Ports `ggml_vk_print_node_list` (ggml-vulkan.cpp:2324 @b29c606e2).
 pub fn printNodeList(cgraph: *const impl.CGraph, start: c_int, end: c_int) void {
     var total_flops: u64 = 0;
     var n_ops: c_int = 0;
@@ -96,25 +96,35 @@ fn srcOf(t: *const c.ggml_tensor, i: usize) *c.ggml_tensor {
 // The fused patterns the graph walk recognises, with the edges that make
 // them one subgraph. Each edge is {node, src index, node it must be}.
 
-/// Ports `topk_moe_early_softmax_norm` (ggml-vulkan.cpp:630 @5266f24da).
+/// Ports `topk_moe_early_softmax_norm` (ggml-vulkan.cpp:656 @b29c606e2).
 pub const topk_moe_early_softmax_norm = [_]Op{ c.GGML_OP_SOFT_MAX, c.GGML_OP_RESHAPE, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS, c.GGML_OP_RESHAPE, c.GGML_OP_SUM_ROWS, c.GGML_OP_CLAMP, c.GGML_OP_DIV, c.GGML_OP_RESHAPE };
-/// Ports `topk_moe_sigmoid_norm_bias` (ggml-vulkan.cpp:635 @5266f24da).
+/// Ports `topk_moe_sigmoid_norm_bias` (ggml-vulkan.cpp:661 @b29c606e2).
 pub const topk_moe_sigmoid_norm_bias = [_]Op{ c.GGML_OP_UNARY, c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS, c.GGML_OP_RESHAPE, c.GGML_OP_SUM_ROWS, c.GGML_OP_CLAMP, c.GGML_OP_DIV, c.GGML_OP_RESHAPE };
-/// Ports `topk_moe_sqrt_softplus_norm_bias` (ggml-vulkan.cpp:640 @5266f24da).
+/// Ports `topk_moe_sqrt_softplus_norm_bias` (ggml-vulkan.cpp:666 @b29c606e2).
 pub const topk_moe_sqrt_softplus_norm_bias = [_]Op{ c.GGML_OP_UNARY, c.GGML_OP_SQRT, c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS, c.GGML_OP_RESHAPE, c.GGML_OP_SUM_ROWS, c.GGML_OP_CLAMP, c.GGML_OP_DIV, c.GGML_OP_RESHAPE };
-/// Ports `topk_moe_early_softmax` (ggml-vulkan.cpp:647 @5266f24da).
+/// Ports `topk_moe_early_softmax` (ggml-vulkan.cpp:673 @b29c606e2).
 pub const topk_moe_early_softmax = [_]Op{ c.GGML_OP_SOFT_MAX, c.GGML_OP_RESHAPE, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS };
-/// Ports `topk_moe_late_softmax` (ggml-vulkan.cpp:650 @5266f24da).
+/// Ports `topk_moe_late_softmax` (ggml-vulkan.cpp:676 @b29c606e2).
 pub const topk_moe_late_softmax = [_]Op{ c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS, c.GGML_OP_RESHAPE, c.GGML_OP_SOFT_MAX, c.GGML_OP_RESHAPE };
-/// Ports `snake_pattern` (ggml-vulkan.cpp:656 @5266f24da).
+/// Ports `snake_pattern` (ggml-vulkan.cpp:682 @b29c606e2).
 pub const snake_pattern = [_]Op{ c.GGML_OP_MUL, c.GGML_OP_SIN, c.GGML_OP_SQR, c.GGML_OP_MUL, c.GGML_OP_ADD };
+/// Ports `rms_norm_mul_add_mul_pattern` (ggml-vulkan.cpp:700 @b29c606e2).
+pub const rms_norm_mul_add_mul_pattern = [_]Op{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ADD, c.GGML_OP_MUL };
+/// Ports `rms_norm_mul_add_pattern` (ggml-vulkan.cpp:701 @b29c606e2).
+pub const rms_norm_mul_add_pattern = [_]Op{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ADD };
+/// Ports `rms_norm_mul_rope_view_set_rows_pattern` (ggml-vulkan.cpp:702 @b29c606e2).
+pub const rms_norm_mul_rope_view_set_rows_pattern = [_]Op{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ROPE, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS };
+/// Ports `rms_norm_view_set_rows_pattern` (ggml-vulkan.cpp:703 @b29c606e2).
+pub const rms_norm_view_set_rows_pattern = [_]Op{ c.GGML_OP_RMS_NORM, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS };
+/// Ports `rope_view_set_rows_pattern` (ggml-vulkan.cpp:704 @b29c606e2).
+pub const rope_view_set_rows_pattern = [_]Op{ c.GGML_OP_ROPE, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS };
 
 // qwen4 QSA indexer: gather per-block scores to cells + add f16 mask (cast+reshape) + top-k,
 // fused into one radix-select. The cast/reshape are elided; the raw f16 mask is read in-shader.
 
-/// Ports `topk_qsa_pattern` (ggml-vulkan.cpp:662 @5266f24da).
+/// Ports `topk_qsa_pattern` (ggml-vulkan.cpp:688 @b29c606e2).
 pub const topk_qsa_pattern = [_]Op{ c.GGML_OP_GET_ROWS, c.GGML_OP_PERMUTE, c.GGML_OP_CONT, c.GGML_OP_CPY, c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_TOP_K };
-/// Ports `topk_qsa_edges` (ggml-vulkan.cpp:666 @5266f24da).
+/// Ports `topk_qsa_edges` (ggml-vulkan.cpp:692 @b29c606e2).
 const topk_qsa_edges = [_][3]c_int{
     .{ 1, 0, 0 }, // permute->src[0] == get_rows
     .{ 2, 0, 1 }, // cont->src[0]    == permute
@@ -124,22 +134,27 @@ const topk_qsa_edges = [_][3]c_int{
     .{ 6, 0, 5 }, // top_k->src[0]   == add
 };
 
-/// Ports `topk_moe_early_softmax_norm_edges` (ggml-vulkan.cpp:685 @5266f24da).
+/// Ports `topk_moe_early_softmax_norm_edges` (ggml-vulkan.cpp:716 @b29c606e2).
 const topk_moe_early_softmax_norm_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 3, 0, 2 }, .{ 4, 0, 1 }, .{ 4, 1, 3 }, .{ 5, 0, 4 }, .{ 6, 0, 5 }, .{ 7, 0, 6 }, .{ 8, 0, 5 }, .{ 8, 1, 7 }, .{ 9, 0, 8 } };
-/// Ports `topk_moe_sigmoid_norm_bias_edges` (ggml-vulkan.cpp:710 @5266f24da).
+/// Ports `topk_moe_sigmoid_norm_bias_edges` (ggml-vulkan.cpp:741 @b29c606e2).
 const topk_moe_sigmoid_norm_bias_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 3, 0, 2 }, .{ 4, 0, 3 }, .{ 5, 0, 1 }, .{ 5, 1, 4 }, .{ 6, 0, 5 }, .{ 7, 0, 6 }, .{ 8, 0, 7 }, .{ 9, 0, 6 }, .{ 9, 1, 8 }, .{ 10, 0, 9 } };
-/// Ports `topk_moe_sqrt_softplus_norm_bias_edges` (ggml-vulkan.cpp:725 @5266f24da).
+/// Ports `topk_moe_sqrt_softplus_norm_bias_edges` (ggml-vulkan.cpp:756 @b29c606e2).
 const topk_moe_sqrt_softplus_norm_bias_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 1 }, .{ 3, 0, 1 }, .{ 4, 0, 3 }, .{ 5, 0, 4 }, .{ 6, 0, 2 }, .{ 6, 1, 5 }, .{ 7, 0, 6 }, .{ 8, 0, 7 }, .{ 9, 0, 8 }, .{ 10, 0, 7 }, .{ 10, 1, 9 }, .{ 11, 0, 10 } };
-/// Ports `topk_moe_early_softmax_edges` (ggml-vulkan.cpp:742 @5266f24da).
+/// Ports `topk_moe_early_softmax_edges` (ggml-vulkan.cpp:773 @b29c606e2).
 const topk_moe_early_softmax_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 3, 0, 2 }, .{ 4, 0, 1 }, .{ 4, 1, 3 } };
-/// Ports `topk_moe_late_softmax_edges` (ggml-vulkan.cpp:756 @5266f24da).
+/// Ports `topk_moe_late_softmax_edges` (ggml-vulkan.cpp:787 @b29c606e2).
 const topk_moe_late_softmax_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 1, 1 }, .{ 3, 0, 2 }, .{ 4, 0, 3 }, .{ 5, 0, 4 } };
-/// Ports `rope_view_set_rows_edges` (ggml-vulkan.cpp:773 @5266f24da).
+/// Ports `rope_view_set_rows_edges` (ggml-vulkan.cpp:814 @b29c606e2).
 const rope_view_set_rows_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 1 } };
-/// Ports `rms_norm_mul_rope_view_set_rows_edges` (ggml-vulkan.cpp:778 @5266f24da).
+/// Ports `rms_norm_mul_rope_view_set_rows_edges` (ggml-vulkan.cpp:819 @b29c606e2).
 const rms_norm_mul_rope_view_set_rows_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 1 }, .{ 3, 0, 2 }, .{ 4, 0, 3 } };
+/// Ports `rms_norm_view_set_rows_edges` (ggml-vulkan.cpp:826 @b29c606e2).
+const rms_norm_view_set_rows_edges = [_][3]c_int{
+    .{ 1, 0, 0 }, // view->src[0]     == rms_norm
+    .{ 2, 0, 1 }, // set_rows->src[0] == view
+};
 
-/// Ports `ggml_vk_is_empty` (ggml-vulkan.cpp:16911 @5266f24da).
+/// Ports `ggml_vk_is_empty` (ggml-vulkan.cpp:17265 @b29c606e2).
 pub fn isEmpty(node: *const c.ggml_tensor) bool {
     return c.ggml_is_empty(node) or node.op == c.GGML_OP_NONE or node.op == c.GGML_OP_RESHAPE or node.op == c.GGML_OP_TRANSPOSE or node.op == c.GGML_OP_VIEW or node.op == c.GGML_OP_PERMUTE;
 }
@@ -148,12 +163,42 @@ fn opsAre(ops: []const Op, want: []const Op) bool {
     return std.mem.eql(Op, ops, want);
 }
 
-/// Ports `ggml_vk_can_fuse` (ggml-vulkan.cpp:16915 @5266f24da): ggml's
+/// Ports `ggml_vk_can_fuse_unary_mul` (ggml-vulkan.cpp:17269 @b29c606e2):
+/// whether the MUL at `mul_idx` can take the UNARY at `unary_idx` as one
+/// dispatch.
+pub fn canFuseUnaryMul(cgraph: *const CGraph, unary_idx: c_int, mul_idx: c_int) bool {
+    const unary = nodeAt(cgraph, unary_idx);
+    const mul = nodeAt(cgraph, mul_idx);
+
+    if (m.ops_basic.unaryMulOpIndex(c.ggml_get_unary_op(unary)) < 0) return false;
+    if (unary.type != c.GGML_TYPE_F32 and unary.type != c.GGML_TYPE_F16) return false;
+    if (unary.type != mul.type) return false;
+    if (mul.src[0] != unary and mul.src[1] != unary) return false;
+    const other_opt = if (mul.src[0] == unary) mul.src[1] else mul.src[0];
+    const other = other_opt orelse return false;
+    if (other.*.type != unary.type) return false;
+    if (!c.ggml_is_contiguous_1(other) or !c.ggml_is_contiguous_1(unary.src[0])) return false;
+    // fastmod needs src to tile into dst
+    if (mul.src[0] == unary) return c.ggml_can_repeat(other, unary);
+    return c.ggml_can_repeat(unary, mul.src[0]);
+}
+
+/// Ports `ggml_vk_can_fuse_unary_mul_pair` (ggml-vulkan.cpp:17299 @b29c606e2).
+fn canFuseUnaryMulPair(cgraph: *const CGraph, node_idx: c_int) bool {
+    return ggml_graph.canFuseSubgraph(cgraph, node_idx, &.{ c.GGML_OP_UNARY, c.GGML_OP_MUL }, &.{node_idx + 1}) and
+        canFuseUnaryMul(cgraph, node_idx, node_idx + 1);
+}
+
+/// Ports `ggml_vk_can_fuse` (ggml-vulkan.cpp:17306 @b29c606e2): ggml's
 /// structural test, then each fusion's own conditions.
 pub fn canFuse(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int, ops: []const Op) bool {
+    if (ops.len == 2 and ops[0] == c.GGML_OP_UNARY and ops[1] == c.GGML_OP_MUL) {
+        return canFuseUnaryMulPair(cgraph, node_idx);
+    }
+
     if (!ggml_graph.canFuse(cgraph, node_idx, ops)) return false;
 
-    if (ops.len == 2 and ops[0] == c.GGML_OP_RMS_NORM and ops[1] == c.GGML_OP_MUL) {
+    if ((ops.len == 2 or ops.len == 3 or ops.len == 4) and ops[0] == c.GGML_OP_RMS_NORM and ops[1] == c.GGML_OP_MUL) {
         const rms_norm = nodeAt(cgraph, node_idx);
         const mul = nodeAt(cgraph, node_idx + 1);
         impl.assert(srcOf(rms_norm, 0).type == c.GGML_TYPE_F32, "rms_norm->src[0]->type == GGML_TYPE_F32");
@@ -164,6 +209,30 @@ pub fn canFuse(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int, o
         if (rms_norm == srcOf(mul, 1) and !c.ggml_are_same_shape(srcOf(mul, 0), rms_norm)) return false;
         // rms_norm shader assumes contiguous rows
         if (!c.ggml_is_contiguous_rows(srcOf(mul, 0)) or !c.ggml_is_contiguous_rows(srcOf(mul, 1))) return false;
+
+        if (ops.len >= 3 and ops[2] == c.GGML_OP_ADD) {
+            const add = nodeAt(cgraph, node_idx + 2);
+            const residual = if (srcOf(add, 0) == mul) srcOf(add, 1) else srcOf(add, 0);
+            if (srcOf(add, 0) != mul and srcOf(add, 1) != mul) return false;
+            if (residual.type != c.GGML_TYPE_F32 or add.type != c.GGML_TYPE_F32 or
+                !c.ggml_are_same_shape(add, residual) or !c.ggml_is_contiguous(residual) or
+                !c.ggml_is_contiguous(add) or m.context.getMisalignBytes(ctx, residual) != 0) return false;
+
+            var dst: *const c.ggml_tensor = add;
+            if (ops.len == 4) {
+                if (ops[3] != c.GGML_OP_MUL) return false;
+                const post_mul = nodeAt(cgraph, node_idx + 3);
+                const scale = if (srcOf(post_mul, 0) == add) srcOf(post_mul, 1) else srcOf(post_mul, 0);
+                if (srcOf(post_mul, 0) != add and srcOf(post_mul, 1) != add) return false;
+                // The shader reads data_e[0], so the final multiply must use a scalar.
+                if (scale.type != c.GGML_TYPE_F32 or post_mul.type != c.GGML_TYPE_F32 or
+                    c.ggml_nelements(scale) != 1 or !c.ggml_is_contiguous(post_mul) or
+                    m.context.getMisalignBytes(ctx, scale) != 0) return false;
+                dst = post_mul;
+            }
+
+            if (m.context.getMisalignBytes(ctx, dst) != 0) return false;
+        }
     }
 
     const mmAddOk = struct {
@@ -236,7 +305,7 @@ pub fn canFuse(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int, o
     return true;
 }
 
-/// Ports `ggml_vk_can_fuse_ssm_conv` (ggml-vulkan.cpp:17069 @5266f24da):
+/// Ports `ggml_vk_can_fuse_ssm_conv` (ggml-vulkan.cpp:17503 @b29c606e2):
 /// SSM_CONV + UNARY(SILU), or with an ADD between; `num_extra` is 1 or 2.
 fn canFuseSsmConv(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int, num_extra: c_int) bool {
     const conv = nodeAt(cgraph, node_idx);
@@ -268,7 +337,7 @@ fn canFuseSsmConv(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int
     return true;
 }
 
-/// Ports `ggml_vk_can_fuse_topk_moe` (ggml-vulkan.cpp:17124 @5266f24da).
+/// Ports `ggml_vk_can_fuse_topk_moe` (ggml-vulkan.cpp:17558 @b29c606e2).
 fn canFuseTopkMoe(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int, mode: TopkMoeMode) bool {
     var softmax: *const c.ggml_tensor = undefined;
     var weights: *const c.ggml_tensor = undefined;
@@ -344,7 +413,7 @@ fn canFuseTopkMoe(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int
     return true;
 }
 
-/// Ports `ggml_vk_match_ops` (ggml-vulkan.cpp:17236 @5266f24da): a manual
+/// Ports `ggml_vk_match_ops` (ggml-vulkan.cpp:17670 @b29c606e2): a manual
 /// op-sequence match, since `ggml_can_fuse_subgraph` rejects the mask's
 /// external reshape/cpy.
 fn matchOps(cgraph: *const CGraph, node_idx: c_int, ops: []const Op) bool {
@@ -361,7 +430,7 @@ fn matchOps(cgraph: *const CGraph, node_idx: c_int, ops: []const Op) bool {
     return true;
 }
 
-/// Ports `ggml_vk_can_fuse_topk_qsa` (ggml-vulkan.cpp:17253 @5266f24da):
+/// Ports `ggml_vk_can_fuse_topk_qsa` (ggml-vulkan.cpp:17687 @b29c606e2):
 /// whether the qwen4 QSA indexer top-k can be fused at `node_idx`, the
 /// GET_ROWS.
 fn canFuseTopkQsa(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) bool {
@@ -428,24 +497,48 @@ fn canFuseTopkQsa(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int
     return true;
 }
 
-/// Ports `ggml_vk_can_fuse_rope_set_rows` (ggml-vulkan.cpp:17321 @5266f24da).
-fn canFuseRopeSetRows(cgraph: *const CGraph, node_idx: c_int) bool {
+/// Ports `ggml_vk_can_fuse_rope_set_rows` (ggml-vulkan.cpp:17755 @b29c606e2).
+fn canFuseRopeSetRows(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) bool {
     const rope = nodeAt(cgraph, node_idx + 0);
     const view = nodeAt(cgraph, node_idx + 1);
     const set_rows = nodeAt(cgraph, node_idx + 2);
-    // ne3 not tested
+    // The set_rows epilogue uses one index per ne2 slice and does not encode ne3.
     if (srcOf(rope, 0).ne[3] != 1) return false;
     if (set_rows.type != c.GGML_TYPE_F32 and set_rows.type != c.GGML_TYPE_F16) return false;
-    if (srcOf(set_rows, 1).type != c.GGML_TYPE_I64) return false;
-    // The view should flatten two dims of rope into one dim
-    if (!c.ggml_is_contiguous(view) or view.ne[0] != rope.ne[0] * rope.ne[1]) return false;
-    // Only norm/neox/mrope shaders have the fusion code
+    // The shader reads each aligned I64 index as a uvec2 and uses its low 32 bits.
+    if (srcOf(set_rows, 1).type != c.GGML_TYPE_I64 or !c.ggml_is_contiguous(srcOf(set_rows, 1)) or
+        set_rows.nb[0] != c.ggml_type_size(set_rows.type) or m.context.getMisalignBytes(ctx, srcOf(set_rows, 1)) != 0) return false;
+    // SET_ROWS consumes one flattened [ne0*ne1] row for each ne2 slice.
+    if (!c.ggml_is_contiguous(view) or
+        view.ne[0] != rope.ne[0] *% rope.ne[1] or view.ne[1] != rope.ne[2] or
+        view.ne[2] != 1 or view.ne[3] != 1 or
+        c.ggml_nelements(srcOf(set_rows, 1)) != rope.ne[2]) return false;
+    // Only norm/neox/mrope/imrope shaders have the fusion code
     const mode = rope.op_params[2];
-    if (mode != c.GGML_ROPE_TYPE_NORMAL and mode != c.GGML_ROPE_TYPE_NEOX and mode != c.GGML_ROPE_TYPE_MROPE) return false;
+    if (mode != c.GGML_ROPE_TYPE_NORMAL and mode != c.GGML_ROPE_TYPE_NEOX and
+        mode != c.GGML_ROPE_TYPE_MROPE and mode != c.GGML_ROPE_TYPE_IMROPE) return false;
     return true;
 }
 
-/// Ports `ggml_vk_can_fuse_snake` (ggml-vulkan.cpp:17359 @5266f24da): the
+/// Ports `ggml_vk_can_fuse_rms_norm_set_rows` (ggml-vulkan.cpp:17794 @b29c606e2).
+fn canFuseRmsNormSetRows(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) bool {
+    const rms = nodeAt(cgraph, node_idx);
+    const view = nodeAt(cgraph, node_idx + 1);
+    const set_rows = nodeAt(cgraph, node_idx + 2);
+    // The RMS kernel reads F32 and writes directly to the F32 or F16 SET_ROWS destination.
+    if (srcOf(rms, 0).type != c.GGML_TYPE_F32 or rms.type != c.GGML_TYPE_F32 or
+        (set_rows.type != c.GGML_TYPE_F32 and set_rows.type != c.GGML_TYPE_F16) or
+        srcOf(set_rows, 1).type != c.GGML_TYPE_I64 or !c.ggml_is_contiguous(srcOf(set_rows, 1)) or
+        set_rows.nb[0] != c.ggml_type_size(set_rows.type) or m.context.getMisalignBytes(ctx, srcOf(set_rows, 1)) != 0) return false;
+    // As with the ROPE epilogue, each ne2 slice supplies one flattened row and ne3 is not encoded.
+    if (rms.ne[3] != 1 or !c.ggml_is_contiguous(srcOf(rms, 0)) or !c.ggml_is_contiguous(view)) return false;
+    if (view.ne[0] != rms.ne[0] *% rms.ne[1] or view.ne[1] != rms.ne[2] or
+        view.ne[2] != 1 or view.ne[3] != 1 or
+        c.ggml_nelements(srcOf(set_rows, 1)) != rms.ne[2]) return false;
+    return true;
+}
+
+/// Ports `ggml_vk_can_fuse_snake` (ggml-vulkan.cpp:17823 @b29c606e2): the
 /// five-op chain y = x + sin(a*x)^2 * inv_b with [1, C] operands.
 fn canFuseSnake(cgraph: *const CGraph, node_idx: c_int) bool {
     if (!ggml_graph.canFuse(cgraph, node_idx, &snake_pattern)) return false;
@@ -480,7 +573,7 @@ fn canFuseSnake(cgraph: *const CGraph, node_idx: c_int) bool {
     return true;
 }
 
-/// Ports `ggml_vk_tensors_overlap` (ggml-vulkan.cpp:17419 @5266f24da):
+/// Ports `ggml_vk_tensors_overlap` (ggml-vulkan.cpp:17883 @b29c606e2):
 /// whether two tensors share bytes of one buffer, not counting an exact
 /// alias when the fusion is elementwise.
 fn tensorsOverlap(a: *const c.ggml_tensor, b: *const c.ggml_tensor, elementwise: bool) bool {
@@ -493,7 +586,7 @@ fn tensorsOverlap(a: *const c.ggml_tensor, b: *const c.ggml_tensor, elementwise:
     return (b_base <= a_base and a_base < b_base + b_size) or (a_base <= b_base and b_base < a_base + a_size);
 }
 
-/// Ports `ggml_vk_can_fuse_rms_norm_mul_rope` (ggml-vulkan.cpp:17442 @5266f24da).
+/// Ports `ggml_vk_can_fuse_rms_norm_mul_rope` (ggml-vulkan.cpp:17906 @b29c606e2).
 fn canFuseRmsNormMulRope(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) bool {
     const rms = nodeAt(cgraph, node_idx + 0);
     const mul = nodeAt(cgraph, node_idx + 1);
@@ -510,7 +603,7 @@ fn canFuseRmsNormMulRope(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx
     return true;
 }
 
-/// Ports `ggml_vk_fuse_multi_add` (ggml-vulkan.cpp:17476 @5266f24da): how
+/// Ports `ggml_vk_fuse_multi_add` (ggml-vulkan.cpp:17939 @b29c606e2): how
 /// many consecutive ADDs one multi_add dispatch can do, or 0.
 fn fuseMultiAdd(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) u32 {
     const first_node = nodeAt(cgraph, node_idx);
@@ -548,7 +641,7 @@ fn fuseMultiAdd(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) 
     return @intCast(num_adds);
 }
 
-/// Ports `find_first_set` (ggml-vulkan.cpp:17528 @5266f24da).
+/// Ports `find_first_set` (ggml-vulkan.cpp:17991 @b29c606e2).
 fn findFirstSet(x_in: u32) i32 {
     if (x_in == 0) return -1;
     return @intCast(@ctz(x_in));
@@ -596,23 +689,53 @@ fn chooseFusion(ctx: *BackendCtx, cgraph: *const CGraph, i: c_int, f: *Fusion) v
         ctx.num_additional_fused_ops = 1;
         f.name = "MUL_MAT_ID_MUL";
         set(ew, &.{ false, true });
-    } else if (ggml_graph.canFuseSubgraph(cgraph, i, &.{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ROPE, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS }, &.{i + 4}) and
+    } else if (ggml_graph.canFuseSubgraph(cgraph, i, &rms_norm_mul_rope_view_set_rows_pattern, &.{i + 4}) and
         ggml_graph.checkEdges(cgraph, i, &rms_norm_mul_rope_view_set_rows_edges) and
         canFuseRmsNormMulRope(ctx, cgraph, i) and
-        canFuseRopeSetRows(cgraph, i + 2))
+        canFuseRopeSetRows(ctx, cgraph, i + 2))
     {
         ctx.num_additional_fused_ops = 4;
+        ctx.fused_rms_norm_mode = .mul_rope_view_set_rows;
         f.name = "RMS_NORM_MUL_ROPE_VIEW_SET_ROWS";
         set(ew, &.{ false, false, false, false, false });
     } else if (canFuse(ctx, cgraph, i, &.{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ROPE }) and canFuseRmsNormMulRope(ctx, cgraph, i)) {
         ctx.num_additional_fused_ops = 2;
+        ctx.fused_rms_norm_mode = .mul_rope;
         f.name = "RMS_NORM_MUL_ROPE";
         // rope is approximately elementwise - whole rows are done by a single workgroup
         set(ew, &.{ false, true, true });
+    } else if (canFuse(ctx, cgraph, i, &rms_norm_mul_add_mul_pattern)) {
+        ctx.num_additional_fused_ops = 3;
+        ctx.fused_rms_norm_mode = .mul_add_mul;
+        f.name = "RMS_NORM_MUL_ADD_MUL";
+        @memset(ew[0..4], true);
+    } else if (canFuse(ctx, cgraph, i, &rms_norm_mul_add_pattern)) {
+        ctx.num_additional_fused_ops = 2;
+        ctx.fused_rms_norm_mode = .mul_add;
+        f.name = "RMS_NORM_MUL_ADD";
+        @memset(ew[0..3], true);
+    } else if (ggml_graph.canFuseSubgraph(cgraph, i, &rms_norm_view_set_rows_pattern, &.{i + 2}) and
+        ggml_graph.checkEdges(cgraph, i, &rms_norm_view_set_rows_edges) and
+        canFuseRmsNormSetRows(ctx, cgraph, i))
+    {
+        ctx.num_additional_fused_ops = 2;
+        ctx.fused_rms_norm_mode = .view_set_rows;
+        f.name = "RMS_NORM_VIEW_SET_ROWS";
+        @memset(ew[0..3], false);
     } else if (canFuse(ctx, cgraph, i, &.{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL })) {
         ctx.num_additional_fused_ops = 1;
+        ctx.fused_rms_norm_mode = .mul;
         f.name = "RMS_NORM_MUL";
         // whole rows are consumed before they are overwritten, one workgroup per row
+        set(ew, &.{ true, true });
+    } else if (canFuse(ctx, cgraph, i, &.{ c.GGML_OP_UNARY, c.GGML_OP_MUL })) {
+        ctx.num_additional_fused_ops = 1;
+        f.name = switch (c.ggml_get_unary_op(nodeAt(cgraph, i))) {
+            c.GGML_UNARY_OP_GELU => "GELU_MUL",
+            c.GGML_UNARY_OP_SIGMOID => "SIGMOID_MUL",
+            c.GGML_UNARY_OP_SILU => "SILU_MUL",
+            else => "SOFTPLUS_MUL",
+        };
         set(ew, &.{ true, true });
     } else if (canFuseSsmConv(ctx, cgraph, i, 2)) {
         ctx.num_additional_fused_ops = 2;
@@ -622,9 +745,9 @@ fn chooseFusion(ctx: *BackendCtx, cgraph: *const CGraph, i: c_int, f: *Fusion) v
         ctx.num_additional_fused_ops = 1;
         f.name = "SSM_CONV_SILU";
         set(ew, &.{ false, true });
-    } else if (ggml_graph.canFuseSubgraph(cgraph, i, &.{ c.GGML_OP_ROPE, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS }, &.{i + 2}) and
+    } else if (ggml_graph.canFuseSubgraph(cgraph, i, &rope_view_set_rows_pattern, &.{i + 2}) and
         ggml_graph.checkEdges(cgraph, i, &rope_view_set_rows_edges) and
-        canFuseRopeSetRows(cgraph, i))
+        canFuseRopeSetRows(ctx, cgraph, i))
     {
         ctx.num_additional_fused_ops = 2;
         f.name = "ROPE_VIEW_SET_ROWS";
@@ -677,7 +800,7 @@ fn topkMoe(ctx: *BackendCtx, cgraph: *const CGraph, i: c_int, f: *Fusion, ops: [
     return true;
 }
 
-/// Ports `ggml_backend_vk_graph_compute` (ggml-vulkan.cpp:17540 @5266f24da):
+/// Ports `ggml_backend_vk_graph_compute` (ggml-vulkan.cpp:18003 @b29c606e2):
 /// records the graph node by node, fusing where it can, and submits in
 /// batches sized by node count and estimated flops so the GPU starts while
 /// the rest is recorded.
@@ -691,14 +814,13 @@ pub fn graphCompute(backend: c.ggml_backend_t, cgraph_c: ?*c.ggml_cgraph) callco
     dev.diag_prev_end = -1;
 
     if (m.instance.instance.debug_utils_support) {
-        var dul = common.structure(vk.VkDebugUtilsLabelEXT, vk.VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT);
-        dul.pLabelName = "ggml_backend_vk_graph_compute";
-        dul.color = .{ 1.0, 1.0, 1.0, 1.0 };
-        const h = dev.compute_queue.?.handle;
-        h.lock();
-        m.instance.instance.pfn_vkQueueBeginDebugUtilsLabelEXT.?(h.queue, &dul);
-        h.unlock();
+        dev.debug_cmdbuf_idx = 0;
     }
+
+    // queue scope, so it encloses every submit this evaluation makes.
+    // closed when the function returns
+    var queue_dbg = m.submit.DebugLabel.queue(dev.compute_queue.?.handle, "ggml_backend_vk_graph_compute");
+    defer queue_dbg.close();
 
     ctx.prealloc_size_add_rms_partials_offset = 0;
     ctx.do_add_rms_partials = false;
@@ -819,6 +941,7 @@ pub fn graphCompute(backend: c.ggml_backend_t, cgraph_c: ?*c.ggml_cgraph) callco
         ctx.fused_topk_moe_mode = .count;
         ctx.fused_topk_moe_scale = false;
         ctx.fused_topk_qsa = false;
+        ctx.fused_rms_norm_mode = .count;
         if (!dev.disable_fusion) chooseFusion(ctx, cgraph, i, &fusion);
         impl.assert(ctx.num_additional_fused_ops < @as(c_int, fusion.srcs_elementwise.len), "ctx->num_additional_fused_ops < (int)(sizeof(op_srcs_fused_elementwise) / sizeof(op_srcs_fused_elementwise[0]))");
         ctx.fused_ops_write_mask |= @as(c_int, 1) << @intCast(ctx.num_additional_fused_ops);
@@ -874,7 +997,7 @@ pub fn graphCompute(backend: c.ggml_backend_t, cgraph_c: ?*c.ggml_cgraph) callco
 /// The overlap test that turns a fusion off: an output of the fused run
 /// overlapping a source the run still reads, other than an intermediate it
 /// elides.
-fn disableUnsafeFusion(ctx: *BackendCtx, cgraph: *const CGraph, i: c_int, fusion: *const Fusion) void {
+fn disableUnsafeFusion(ctx: *BackendCtx, cgraph: *const CGraph, i: c_int, fusion: *Fusion) void {
     // There are up to two output nodes - topk_moe has two.
     const bits: u32 = @bitCast(ctx.fused_ops_write_mask & ~(@as(c_int, 1) << @intCast(ctx.num_additional_fused_ops)));
     var output_nodes: [2]?*const c.ggml_tensor = .{ nodeAt(cgraph, i + ctx.num_additional_fused_ops), null };
@@ -885,29 +1008,26 @@ fn disableUnsafeFusion(ctx: *BackendCtx, cgraph: *const CGraph, i: c_int, fusion
     }
 
     var need_disable = false;
-    // topk_moe often overwrites the source, but one row is safe: all its
-    // src values are loaded before anything is stored.
-    const is_topk_moe_single_row = ctx.fused_topk_moe_mode != .count and c.ggml_nrows(srcOf(nodeAt(cgraph, i), 0)) == 1;
-
-    if (!is_topk_moe_single_row) {
-        for (output_nodes) |dst_opt| {
-            const dst = dst_opt orelse continue;
-            var k: c_int = 0;
-            while (k <= ctx.num_additional_fused_ops) : (k += 1) {
-                for (0..c.GGML_MAX_SRC) |s| {
-                    const src = nodeAt(cgraph, i + k).src[s] orelse continue;
-                    if (src.*.op == c.GGML_OP_NONE) continue;
-                    if (tensorsOverlap(src, dst, fusion.srcs_elementwise[@intCast(k)])) {
-                        var found = false;
-                        var n: c_int = 0;
-                        while (n < k) : (n += 1) {
-                            if (nodeAt(cgraph, i + n) == src) {
-                                found = true;
-                                break;
-                            }
+    for (output_nodes) |dst_opt| {
+        const dst = dst_opt orelse continue;
+        // Loop over all srcs of all nodes in the fusion. If the src overlaps
+        // the destination and the src is not an intermediate node that's being
+        // elided, then disable fusion.
+        var k: c_int = 0;
+        while (k <= ctx.num_additional_fused_ops) : (k += 1) {
+            for (0..c.GGML_MAX_SRC) |s| {
+                const src = nodeAt(cgraph, i + k).src[s] orelse continue;
+                if (src.*.op == c.GGML_OP_NONE) continue;
+                if (tensorsOverlap(src, dst, fusion.srcs_elementwise[@intCast(k)])) {
+                    var found = false;
+                    var n: c_int = 0;
+                    while (n < k) : (n += 1) {
+                        if (nodeAt(cgraph, i + n) == src) {
+                            found = true;
+                            break;
                         }
-                        if (!found) need_disable = true;
                     }
+                    if (!found) need_disable = true;
                 }
             }
         }
@@ -918,6 +1038,8 @@ fn disableUnsafeFusion(ctx: *BackendCtx, cgraph: *const CGraph, i: c_int, fusion
         ctx.fused_topk_moe_mode = .count;
         ctx.fused_topk_moe_scale = false;
         ctx.fused_topk_qsa = false;
+        ctx.fused_rms_norm_mode = .count;
+        fusion.name = null;
     }
 }
 
@@ -1006,16 +1128,16 @@ fn perfEnd(ctx: *BackendCtx, cgraph: *const CGraph) void {
     logger.printTimings(false);
 }
 
-/// Ports `ggml_vk_graph_optimize` (ggml-vulkan.cpp:18012 @5266f24da):
+/// Ports `ggml_vk_graph_optimize` (ggml-vulkan.cpp:18499 @b29c606e2):
 /// reorders the graph so independent nodes run together -- fewer barriers
-/// -- without splitting any fusion pattern. `params`, the scheduler's
-/// allocation-dependency callback, is unused, as in the C++. Each pass takes the first
-/// unused node, then up to 19 following "real" nodes that depend on
-/// nothing still pending (or only on the node just before them, where the
-/// pair fuses), pulling forward the rope / view+set_rows / bias tails of
-/// those fusions; then the view nodes whose sources are done.
+/// -- without splitting any fusion pattern. A kept topk_moe pattern tells
+/// the scheduler, through `params`' `add_alloc_dep`, to keep its external
+/// inputs alive until the fused output. Each pass takes the first unused
+/// node, then up to 19 following "real" nodes that depend on nothing still
+/// pending (or only on a node they fuse with), pulling forward the rope /
+/// view+set_rows / bias / MUL tails of those fusions; then the view nodes
+/// whose sources are done.
 pub fn graphOptimize(backend: c.ggml_backend_t, cgraph: ?*c.ggml_cgraph, params: ?*c.struct_ggml_backend_graph_optimize_params) callconv(.c) void {
-    _ = params;
     const ctx: *BackendCtx = @ptrCast(@alignCast(backend.*.context));
     if (ctx.device.disable_graph_optimize) return;
 
@@ -1095,7 +1217,20 @@ pub fn graphOptimize(backend: c.ggml_backend_t, cgraph: ?*c.ggml_cgraph, params:
                 self.matchPattern(&topk_moe_early_softmax, start) or
                 self.matchPattern(&topk_moe_late_softmax, start) or
                 self.matchPattern(&snake_pattern, start) or
-                self.inQsaPattern(start);
+                self.inQsaPattern(start) or
+                self.matchPattern(&rms_norm_mul_add_mul_pattern, start) or
+                self.matchPattern(&rms_norm_mul_add_pattern, start) or
+                self.matchPattern(&rms_norm_mul_rope_view_set_rows_pattern, start) or
+                self.matchPattern(&rms_norm_view_set_rows_pattern, start) or
+                self.matchPattern(&rope_view_set_rows_pattern, start);
+        }
+
+        // scheduled or zero-compute nodes in [lo, hi)
+        fn emptyOrScheduledBetween(self: @This(), lo: usize, hi: usize) bool {
+            for (lo..hi) |v| {
+                if (!self.used[v] and !isViewOp(self.nodes[v].?)) return false;
+            }
+            return true;
         }
 
         // Protect every interior QSA node (not just the start): the mask branch is
@@ -1113,9 +1248,33 @@ pub fn graphOptimize(backend: c.ggml_backend_t, cgraph: ?*c.ggml_cgraph, params:
     outer: while (first_unused < n) {
         current_set.clearRetainingCapacity();
 
-        // Kept patterns go out whole, in the C++'s order.
-        for ([_][]const Op{ &topk_moe_early_softmax_norm, &topk_moe_sigmoid_norm_bias, &topk_moe_sqrt_softplus_norm_bias, &topk_moe_early_softmax, &topk_moe_late_softmax, &snake_pattern, &topk_qsa_pattern }) |pattern| {
+        // Kept patterns go out whole, in the C++'s order. The topk_moe ones
+        // (`keep_topk_moe_pattern`) first keep their external inputs alive
+        // through the fused output (`add_pattern_alloc_deps`), which some
+        // variants extend by a trailing SCALE.
+        const kept = [_]struct { pattern: []const Op, topk_moe: bool }{
+            .{ .pattern = &topk_moe_early_softmax_norm, .topk_moe = true },
+            .{ .pattern = &topk_moe_sigmoid_norm_bias, .topk_moe = true },
+            .{ .pattern = &topk_moe_sqrt_softplus_norm_bias, .topk_moe = true },
+            .{ .pattern = &topk_moe_early_softmax, .topk_moe = true },
+            .{ .pattern = &topk_moe_late_softmax, .topk_moe = true },
+            .{ .pattern = &snake_pattern, .topk_moe = false },
+            .{ .pattern = &topk_qsa_pattern, .topk_moe = false },
+            .{ .pattern = &rms_norm_mul_add_mul_pattern, .topk_moe = false },
+            .{ .pattern = &rms_norm_mul_add_pattern, .topk_moe = false },
+            .{ .pattern = &rms_norm_mul_rope_view_set_rows_pattern, .topk_moe = false },
+            .{ .pattern = &rms_norm_view_set_rows_pattern, .topk_moe = false },
+            .{ .pattern = &rope_view_set_rows_pattern, .topk_moe = false },
+        };
+        for (kept) |kp| {
+            const pattern = kp.pattern;
             if (pc.matchPattern(pattern, first_unused)) {
+                if (kp.topk_moe) {
+                    var last_node = first_unused + pattern.len - 1;
+                    // Some TOPK_MOE variants fuse a trailing scale.
+                    if (last_node + 1 < n and node(nodes, last_node + 1).op == c.GGML_OP_SCALE) last_node += 1;
+                    addPatternAllocDeps(params.?, nodes, first_unused, pattern.len, last_node);
+                }
                 for (0..pattern.len) |j| {
                     new_order.appendAssumeCapacity(node(nodes, first_unused + j));
                     used_node_set.put(gpa, node(nodes, first_unused + j), {}) catch oom();
@@ -1146,15 +1305,17 @@ pub fn graphOptimize(backend: c.ggml_backend_t, cgraph: ?*c.ggml_cgraph, params:
             for (first_unused..j) |cc| {
                 const nc = node(nodes, cc);
                 const nj = node(nodes, j);
-                const adjacent = j == cc + 1 and cc == current_set.items[current_set.items.len - 1];
-                const fuses = adjacent and
-                    ((nc.op == c.GGML_OP_RMS_NORM and nj.op == c.GGML_OP_MUL) or
-                        (nc.op == c.GGML_OP_MUL_MAT and nj.op == c.GGML_OP_ADD) or
-                        (nc.op == c.GGML_OP_MUL_MAT_ID and nj.op == c.GGML_OP_ADD_ID) or
-                        (nc.op == c.GGML_OP_MUL_MAT_ID and nj.op == c.GGML_OP_MUL) or
-                        (nc.op == c.GGML_OP_ADD and nj.op == c.GGML_OP_ADD) or
-                        (nc.op == c.GGML_OP_SSM_CONV and nj.op == c.GGML_OP_ADD) or
-                        (nc.op == c.GGML_OP_SSM_CONV and nj.op == c.GGML_OP_UNARY));
+                const is_back = cc == current_set.items[current_set.items.len - 1];
+                const adjacent = j == cc + 1 and is_back;
+                const fuses = (is_back and nc.op == c.GGML_OP_RMS_NORM and nj.op == c.GGML_OP_MUL and pc.emptyOrScheduledBetween(cc + 1, j)) or
+                    (is_back and nc.op == c.GGML_OP_UNARY and nj.op == c.GGML_OP_MUL and pc.emptyOrScheduledBetween(cc + 1, j)) or
+                    adjacent and
+                        ((nc.op == c.GGML_OP_MUL_MAT and nj.op == c.GGML_OP_ADD) or
+                            (nc.op == c.GGML_OP_MUL_MAT_ID and nj.op == c.GGML_OP_ADD_ID) or
+                            (nc.op == c.GGML_OP_MUL_MAT_ID and nj.op == c.GGML_OP_MUL) or
+                            (nc.op == c.GGML_OP_ADD and nj.op == c.GGML_OP_ADD) or
+                            (nc.op == c.GGML_OP_SSM_CONV and nj.op == c.GGML_OP_ADD) or
+                            (nc.op == c.GGML_OP_SSM_CONV and nj.op == c.GGML_OP_UNARY));
                 if (!used[cc] and isSrcOf(nj, nc) and !fuses) {
                     ok = false;
                     break;
@@ -1183,27 +1344,42 @@ pub fn graphOptimize(backend: c.ggml_backend_t, cgraph: ?*c.ggml_cgraph, params:
                     }
                 }
             }
-            // Look for ROPE + VIEW + SET_ROWS and make them consecutive
-            if (node(nodes, rope_idx).op == c.GGML_OP_ROPE) {
+            // Look for ROPE/RMS_NORM + VIEW + SET_ROWS and make them consecutive
+            if (node(nodes, rope_idx).op == c.GGML_OP_ROPE or node(nodes, rope_idx).op == c.GGML_OP_RMS_NORM) {
                 var view_idx: ?usize = null;
                 var set_rows_idx: ?usize = null;
                 var k = rope_idx + 1;
-                while (k < @min(rope_idx + 10, n)) : (k += 1) {
+                while (k < @min(rope_idx + 15, n)) : (k += 1) {
+                    if (used[k]) continue;
                     const nk = node(nodes, k);
                     if (view_idx == null and nk.op == c.GGML_OP_VIEW and nk.src[0] == node(nodes, rope_idx)) {
                         view_idx = k;
                         continue;
                     }
-                    if (view_idx != null and set_rows_idx == null and nk.op == c.GGML_OP_SET_ROWS and nk.src[0] == node(nodes, view_idx.?)) {
+                    if (view_idx != null and nk.op == c.GGML_OP_SET_ROWS and nk.src[0] == node(nodes, view_idx.?)) {
                         set_rows_idx = k;
                         break;
                     }
                 }
                 if (set_rows_idx) |sr| {
-                    current_set.append(gpa, view_idx.?) catch oom();
-                    current_set.append(gpa, sr) catch oom();
-                    used[view_idx.?] = true;
-                    used[sr] = true;
+                    const vi = view_idx.?;
+                    const node_idxs = [_]c_int{ @intCast(rope_idx), @intCast(vi), @intCast(sr) };
+                    const pull_ops = [_]Op{ node(nodes, rope_idx).op, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS };
+                    const sr_c: c_int = @intCast(sr);
+                    var can_pull = ggml_graph.ggml_can_fuse_subgraph_ext(graph, &node_idxs, 3, &pull_ops, &sr_c, 1);
+
+                    var cc = rope_idx + 1;
+                    while (can_pull and cc < sr) : (cc += 1) {
+                        if (!used[cc] and cc != vi and !isViewOp(node(nodes, cc)) and
+                            isSrcOf(node(nodes, sr), node(nodes, cc))) can_pull = false;
+                    }
+
+                    if (can_pull) {
+                        current_set.append(gpa, vi) catch oom();
+                        current_set.append(gpa, sr) catch oom();
+                        used[vi] = true;
+                        used[sr] = true;
+                    }
                 }
             }
             // Look for MUL_MAT_ID + ADD_ID + MUL, and MUL_MAT + ADD + ADD:
@@ -1239,6 +1415,21 @@ pub fn graphOptimize(backend: c.ggml_backend_t, cgraph: ?*c.ggml_cgraph, params:
                     }
                 }
             }
+            // UNARY + MUL: pull the consuming MUL forward
+            if (j > 0 and node(nodes, j).op == c.GGML_OP_UNARY) {
+                var k = j + 1;
+                while (k < @min(j + 15, n)) : (k += 1) {
+                    const mul = node(nodes, k);
+                    if (mul.op != c.GGML_OP_MUL or (mul.src[0] != node(nodes, j) and mul.src[1] != node(nodes, j))) continue;
+                    const other = (if (mul.src[0] == node(nodes, j)) mul.src[1] else mul.src[0]).?;
+                    // the other src must either be weights or already processed
+                    if (!(other.*.op == c.GGML_OP_NONE or used_node_set.contains(other))) continue;
+                    if (!canFuseUnaryMul(graph, @intCast(j), @intCast(k))) continue;
+                    current_set.append(gpa, k) catch oom();
+                    used[k] = true;
+                    break;
+                }
+            }
         }
 
         // Second pass grabs view nodes -- unless that would split add->rms_norm or add->add.
@@ -1271,6 +1462,23 @@ pub fn graphOptimize(backend: c.ggml_backend_t, cgraph: ?*c.ggml_cgraph, params:
 
     // Replace the graph with the new order.
     for (nodes, new_order.items) |*slot, t| slot.* = t;
+}
+
+/// The `add_pattern_alloc_deps` lambda of `ggml_vk_graph_optimize`: keeps
+/// the external inputs of the pattern starting at `first` alive through
+/// node `last_node`, each source reported once, in source order.
+fn addPatternAllocDeps(params: *c.struct_ggml_backend_graph_optimize_params, nodes: []?*c.ggml_tensor, first: usize, len: usize, last_node: usize) void {
+    var seen: std.AutoHashMapUnmanaged(*c.ggml_tensor, void) = .empty;
+    defer seen.deinit(allocator);
+    for (0..len) |j| {
+        const nd = nodes[first + j].?;
+        for (0..c.GGML_MAX_SRC) |s| {
+            const src = nd.src[s] orelse continue;
+            const gop = seen.getOrPut(allocator, src) catch oom();
+            if (!gop.found_existing) params.add_alloc_dep.?(params.user_data, src, nodes[last_node]);
+        }
+        seen.put(allocator, nd, {}) catch oom();
+    }
 }
 
 // -----------------------------------------------------------------------------

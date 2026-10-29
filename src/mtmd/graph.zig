@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/mtmd/clip-graph.h` and the `clip_graph` methods of
-//! `llama.cpp/tools/mtmd/clip.cpp` at v0.4.0 (`5266f24da`). Each declaration
+//! `llama.cpp/tools/mtmd/clip.cpp` at v0.4.1 (`b29c606e2`). Each declaration
 //! names what it ports and the line it began at.
 //!
 //! # A class hierarchy, flattened
@@ -26,10 +26,10 @@ const c = impl.c;
 /// A tensor, as every builder passes it: a C pointer that may be null.
 pub const T = ?*c.ggml_tensor;
 
-/// `DEFAULT_INTERPOLATION_MODE` (clip-graph.h:12 @5266f24da).
+/// `DEFAULT_INTERPOLATION_MODE` (clip-graph.h:12 @b29c606e2).
 pub const default_interpolation_mode: u32 = c.GGML_SCALE_MODE_BILINEAR | c.GGML_SCALE_FLAG_ANTIALIAS;
 
-/// `CLIP_ALIGN` (clip-impl.h:438 @5266f24da).
+/// `CLIP_ALIGN` (clip-impl.h:438 @b29c606e2).
 pub fn clipAlign(x: i64, n: i64) i64 {
     return @divTrunc(x + n - 1, n) * n;
 }
@@ -56,7 +56,7 @@ pub const LayerOutHook = struct {
     f: *const fn (ctx: ?*anyopaque, g: *Graph, cur: T, il: c_int) void,
 };
 
-/// Ports `build_vit_opts` (clip-graph.h:14 @5266f24da).
+/// Ports `build_vit_opts` (clip-graph.h:14 @b29c606e2).
 pub const VitOpts = struct {
     attn_mask: T = null,
     attn_mask_layers: []const T = &.{}, // one per layer
@@ -67,7 +67,7 @@ pub const VitOpts = struct {
 };
 
 /// What a `Graph` is built from: the parts of `clip_ctx` its constructor
-/// reads (mtmd/clip.cpp:248 @5266f24da).
+/// reads (mtmd/clip.cpp:248 @b29c606e2).
 pub const Source = struct {
     model: *const model_mod.Model,
     buf_compute_meta: []u8,
@@ -76,7 +76,7 @@ pub const Source = struct {
     n_mmproj_embd: c_int,
 };
 
-/// Ports `clip_graph` (clip-graph.h:26 @5266f24da).
+/// Ports `clip_graph` (clip-graph.h:26 @b29c606e2).
 pub const Graph = struct {
     model: *const model_mod.Model,
     hparams: *const model_mod.Hparams,
@@ -109,7 +109,7 @@ pub const Graph = struct {
     /// `build_mm`'s override, for the three models that have one.
     mm_hook: ?*const fn (g: *const Graph, w: T, x: T) T = null,
 
-    /// Ports `clip_graph` (mtmd/clip.cpp:248 @5266f24da), its constructor over a
+    /// Ports `clip_graph` (mtmd/clip.cpp:248 @b29c606e2), its constructor over a
     /// context and an image.
     pub fn init(src: Source, img: *const impl.ImageF32) Graph {
         const hp = &src.model.hparams;
@@ -145,7 +145,7 @@ pub const Graph = struct {
         };
     }
 
-    /// Ports `clip_graph` (mtmd/clip.cpp:276 @5266f24da), its copy constructor: a
+    /// Ports `clip_graph` (mtmd/clip.cpp:276 @b29c606e2), its copy constructor: a
     /// sub-graph builder sharing its parent's context and graph.
     pub fn initChild(parent: *const Graph) Graph {
         var g = parent.*;
@@ -162,7 +162,7 @@ pub const Graph = struct {
         self.ctx0 = null;
     }
 
-    /// Ports `build_mm` (mtmd/clip.cpp:299 @5266f24da), a member of `clip_graph`, or the model's
+    /// Ports `build_mm` (mtmd/clip.cpp:299 @b29c606e2), a member of `clip_graph`, or the model's
     /// override.
     pub fn buildMm(self: *const Graph, w: T, x: T) T {
         if (self.mm_hook) |h| return h(self, w, x);
@@ -174,7 +174,7 @@ pub const Graph = struct {
         return c.ggml_mul_mat(self.ctx0, w, x);
     }
 
-    /// Ports `cb` (mtmd/clip.cpp:303 @5266f24da), a member of `clip_graph`.
+    /// Ports `cb` (mtmd/clip.cpp:303 @b29c606e2), a member of `clip_graph`.
     pub fn cb(self: *const Graph, cur: T, name: [*:0]const u8, il: c_int) void {
         _ = self;
         if (il >= 0) {
@@ -184,7 +184,7 @@ pub const Graph = struct {
         }
     }
 
-    /// Ports `get_img` (clip-graph.h:77 @5266f24da), a member of `clip_graph`.
+    /// Ports `get_img` (clip-graph.h:77 @b29c606e2), a member of `clip_graph`.
     pub fn getImg(self: *const Graph, idx: usize) *const impl.ImageF32 {
         impl.ggmlAssert(self.img_batch != null, "clip-graph.h", 78, "img_batch");
         impl.ggmlAssert(idx < self.img_batch.?.entries.items.len, "clip-graph.h", 79, "idx < img_batch->entries.size()");
@@ -192,7 +192,7 @@ pub const Graph = struct {
     }
 
     /// Ports `resize_position_embeddings` (mtmd/clip.cpp:312
-    /// @5266f24da), a member of `clip_graph`: siglip2 naflex.
+    /// @b29c606e2), a member of `clip_graph`: siglip2 naflex.
     pub fn resizePositionEmbeddings(self: *Graph, interpolation_mode: u32) T {
         var pos_embd = self.model.position_embeddings;
         const height = @divTrunc(self.img.ny(), self.patch_size);
@@ -214,7 +214,7 @@ pub const Graph = struct {
         return pos_embd;
     }
 
-    /// Ports `build_vit` (mtmd/clip.cpp:337 @5266f24da), a member of `clip_graph`: the vision
+    /// Ports `build_vit` (mtmd/clip.cpp:337 @b29c606e2), a member of `clip_graph`: the vision
     /// transformer most models use.
     pub fn buildVit(
         self: *Graph,
@@ -427,7 +427,7 @@ pub const Graph = struct {
         return inpL;
     }
 
-    /// Ports `build_inp` (mtmd/clip.cpp:572 @5266f24da), a member of `clip_graph`: the patches
+    /// Ports `build_inp` (mtmd/clip.cpp:572 @b29c606e2), a member of `clip_graph`: the patches
     /// after the conv2d, as `[n_embd, n_patches]`.
     pub fn buildInp(self: *Graph) T {
         const ctx0 = self.ctx0;
@@ -442,7 +442,7 @@ pub const Graph = struct {
         return inp;
     }
 
-    /// Ports `build_inp_raw` (mtmd/clip.cpp:584 @5266f24da), a member of `clip_graph`.
+    /// Ports `build_inp_raw` (mtmd/clip.cpp:584 @b29c606e2), a member of `clip_graph`.
     pub fn buildInpRaw(self: *Graph, channels: c_int) T {
         const inp_raw = c.ggml_new_tensor_4d(self.ctx0, c.GGML_TYPE_F32, self.img.nx(), self.img.ny(), channels, self.n_batch);
         _ = c.ggml_set_name(inp_raw, "inp_raw");
@@ -450,7 +450,7 @@ pub const Graph = struct {
         return inp_raw;
     }
 
-    /// Ports `build_norm` (mtmd/clip.cpp:591 @5266f24da), a member of `clip_graph`.
+    /// Ports `build_norm` (mtmd/clip.cpp:591 @b29c606e2), a member of `clip_graph`.
     pub fn buildNorm(self: *const Graph, cur_in: T, mw: T, mb: T, t: model_mod.NormType, norm_eps: f32, il: c_int) T {
         var cur = if (t == .rms) c.ggml_rms_norm(self.ctx0, cur_in, norm_eps) else c.ggml_norm(self.ctx0, cur_in, norm_eps);
         if (mw != null) {
@@ -464,7 +464,7 @@ pub const Graph = struct {
         return cur;
     }
 
-    /// Ports `build_ffn` (mtmd/clip.cpp:616 @5266f24da), a member of `clip_graph`: only the
+    /// Ports `build_ffn` (mtmd/clip.cpp:616 @b29c606e2), a member of `clip_graph`: only the
     /// parallel FFN.
     pub fn buildFfn(self: *const Graph, cur_in: T, up: T, up_b: T, gate: T, gate_b: T, down: T, down_b: T, type_op: model_mod.FfnOpType, il: c_int) T {
         const ctx0 = self.ctx0;
@@ -531,7 +531,7 @@ pub const Graph = struct {
         return cur;
     }
 
-    /// Ports `build_moe_ffn` (mtmd/clip.cpp:706 @5266f24da), a member of `clip_graph`: a sigmoid
+    /// Ports `build_moe_ffn` (mtmd/clip.cpp:706 @b29c606e2), a member of `clip_graph`: a sigmoid
     /// router with normalized top-k weights (dots3note vision).
     pub fn buildMoeFfn(self: *const Graph, cur_in: T, layer: *const model_mod.Layer, type_op: model_mod.FfnOpType, il: c_int) T {
         const ctx0 = self.ctx0;
@@ -573,7 +573,7 @@ pub const Graph = struct {
         return out;
     }
 
-    /// Ports `build_attn` (mtmd/clip.cpp:748 @5266f24da), a member of `clip_graph`.
+    /// Ports `build_attn` (mtmd/clip.cpp:748 @b29c606e2), a member of `clip_graph`.
     pub fn buildAttn(self: *const Graph, wo: T, wo_b: T, q_cur: T, k_cur: T, v_cur: T, kq_mask_in: T, kq_scale: f32, il: c_int, sinks: T) T {
         const ctx0 = self.ctx0;
         var kq_mask = kq_mask_in;
@@ -597,7 +597,7 @@ pub const Graph = struct {
             if (kq_mask != null) kq_mask = c.ggml_cast(ctx0, kq_mask, c.GGML_TYPE_F16);
 
             cur = c.ggml_flash_attn_ext(ctx0, q, k, v, kq_mask, kq_scale, 0.0, 0.0);
-            c.ggml_flash_attn_ext_set_prec(cur, c.GGML_PREC_F32);
+            _ = c.ggml_prec_set_acc(cur, c.GGML_PREC_F32);
             if (sinks != null) c.ggml_flash_attn_ext_add_sinks(cur, sinks);
 
             cur = c.ggml_reshape_2d(ctx0, cur, ne(cur, 0) * ne(cur, 1), ne(cur, 2) * ne(cur, 3));
@@ -621,7 +621,7 @@ pub const Graph = struct {
         return cur;
     }
 
-    /// Ports `build_rope_2d` (mtmd/clip.cpp:822 @5266f24da), a member of `clip_graph`: 2D RoPE as
+    /// Ports `build_rope_2d` (mtmd/clip.cpp:822 @b29c606e2), a member of `clip_graph`: 2D RoPE as
     /// two `ggml_rope_ext` calls over the halves of each head, rotating
     /// adjacent pairs; `interleave_freq` gives the second half the odd
     /// frequencies (pixtral).
@@ -639,7 +639,7 @@ pub const Graph = struct {
         return cur;
     }
 
-    /// Ports `build_stack` (mtmd/clip.cpp:873 @5266f24da), a member of `clip_graph`: ultravox's
+    /// Ports `build_stack` (mtmd/clip.cpp:873 @b29c606e2), a member of `clip_graph`: ultravox's
     /// StackAudioFrames.
     pub fn buildStack(self: *const Graph, cur_in: T, stack_factor: i32, n_embed: i32) T {
         if (stack_factor <= 1) return cur_in;
@@ -663,7 +663,7 @@ pub const Graph = struct {
     }
 
     /// Ports `build_patch_merge_permute` (mtmd/clip.cpp:899
-    /// @5266f24da), a member of `clip_graph`: pixel shuffle / patch merger, at any resolution.
+    /// @b29c606e2), a member of `clip_graph`: pixel shuffle / patch merger, at any resolution.
     pub fn buildPatchMergePermute(self: *const Graph, cur_in: T, scale_factor: c_int) T {
         impl.ggmlAssert(scale_factor > 1, "clip.cpp", 900, "scale_factor > 1");
         const ctx0 = self.ctx0;

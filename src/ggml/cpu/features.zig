@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.0, `5266f24da`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.4.1, `b29c606e2`),
 //! the arch-feature state at line 88, the predicates at line 3599, and
 //! `ggml_cpu_init` at line 3823. Each declaration names the C it replaces and
 //! the line it began at.
@@ -42,7 +42,7 @@ inline fn armHas(comptime name: []const u8) bool {
 }
 
 /// Ports `struct ggml_arm_arch_features_type` and the `ggml_arm_arch_features`
-/// instance (ggml-cpu.c:92 @5266f24da).
+/// instance (ggml-cpu.c:92 @b29c606e2).
 ///
 /// Exported because it is a file-scope non-static in the C, and therefore part
 /// of the translation unit's symbol contract even though only `ggml_cpu_init`
@@ -53,7 +53,7 @@ pub const ArmArchFeatures = extern struct {
 
 pub export var ggml_arm_arch_features: ArmArchFeatures = .{ .sve_cnt = 0 };
 
-/// Ports `ggml_cpu_disable_fusion` (ggml-cpu.c:3065 @5266f24da).
+/// Ports `ggml_cpu_disable_fusion` (ggml-cpu.c:3065 @b29c606e2).
 ///
 /// Written once by `ggml_cpu_init` and read-only afterwards, so no
 /// synchronisation -- the C says the same in a comment on the same line.
@@ -78,92 +78,92 @@ inline fn x86Has(comptime name: []const u8) bool {
     );
 }
 
-/// Ports `ggml_cpu_has_avx` (ggml-cpu.c:3635 @5266f24da).
+/// Ports `ggml_cpu_has_avx` (ggml-cpu.c:3635 @b29c606e2).
 pub export fn ggml_cpu_has_avx() c_int {
     return @intFromBool(x86Has("avx"));
 }
 
-/// Ports `ggml_cpu_has_avx_vnni` (ggml-cpu.c:3643 @5266f24da).
+/// Ports `ggml_cpu_has_avx_vnni` (ggml-cpu.c:3643 @b29c606e2).
 pub export fn ggml_cpu_has_avx_vnni() c_int {
     return @intFromBool(x86Has("avxvnni"));
 }
 
-/// Ports `ggml_cpu_has_avx2` (ggml-cpu.c:3651 @5266f24da).
+/// Ports `ggml_cpu_has_avx2` (ggml-cpu.c:3651 @b29c606e2).
 pub export fn ggml_cpu_has_avx2() c_int {
     return @intFromBool(x86Has("avx2"));
 }
 
-/// Ports `ggml_cpu_has_avx512` (ggml-cpu.c:3659 @5266f24da).
+/// Ports `ggml_cpu_has_avx512` (ggml-cpu.c:3659 @b29c606e2).
 pub export fn ggml_cpu_has_avx512() c_int {
     return @intFromBool(x86Has("avx512f"));
 }
 
-/// Ports `ggml_cpu_has_avx512_vbmi` (ggml-cpu.c:3667 @5266f24da).
+/// Ports `ggml_cpu_has_avx512_vbmi` (ggml-cpu.c:3667 @b29c606e2).
 pub export fn ggml_cpu_has_avx512_vbmi() c_int {
     return @intFromBool(x86Has("avx512vbmi"));
 }
 
-/// Ports `ggml_cpu_has_avx512_vnni` (ggml-cpu.c:3675 @5266f24da).
+/// Ports `ggml_cpu_has_avx512_vnni` (ggml-cpu.c:3675 @b29c606e2).
 pub export fn ggml_cpu_has_avx512_vnni() c_int {
     return @intFromBool(x86Has("avx512vnni"));
 }
 
-/// Ports `ggml_cpu_has_avx512_bf16` (ggml-cpu.c:3683 @5266f24da).
+/// Ports `ggml_cpu_has_avx512_bf16` (ggml-cpu.c:3683 @b29c606e2).
 pub export fn ggml_cpu_has_avx512_bf16() c_int {
     return @intFromBool(x86Has("avx512bf16"));
 }
 
-/// Ports `ggml_cpu_has_amx_int8` (ggml-cpu.c:3691 @5266f24da).
+/// Ports `ggml_cpu_has_amx_int8` (ggml-cpu.c:3691 @b29c606e2).
 pub export fn ggml_cpu_has_amx_int8() c_int {
     return @intFromBool(x86Has("amx_int8"));
 }
 
-/// Ports `ggml_cpu_has_bmi2` (ggml-cpu.c:3699 @5266f24da).
+/// Ports `ggml_cpu_has_bmi2` (ggml-cpu.c:3699 @b29c606e2).
 pub export fn ggml_cpu_has_bmi2() c_int {
     return @intFromBool(x86Has("bmi2"));
 }
 
-/// Ports `ggml_cpu_has_fma` (ggml-cpu.c:3707 @5266f24da). The x86 `__FMA__`, not ARM's.
+/// Ports `ggml_cpu_has_fma` (ggml-cpu.c:3707 @b29c606e2). The x86 `__FMA__`, not ARM's.
 pub export fn ggml_cpu_has_fma() c_int {
     return @intFromBool(x86Has("fma"));
 }
 
-/// Ports `ggml_cpu_has_f16c` (ggml-cpu.c:3739 @5266f24da).
+/// Ports `ggml_cpu_has_f16c` (ggml-cpu.c:3739 @b29c606e2).
 pub export fn ggml_cpu_has_f16c() c_int {
     return @intFromBool(x86Has("f16c"));
 }
 
-/// Ports `ggml_cpu_has_sse3` (ggml-cpu.c:3771 @5266f24da).
+/// Ports `ggml_cpu_has_sse3` (ggml-cpu.c:3771 @b29c606e2).
 pub export fn ggml_cpu_has_sse3() c_int {
     return @intFromBool(x86Has("sse3"));
 }
 
-/// Ports `ggml_cpu_has_ssse3` (ggml-cpu.c:3779 @5266f24da).
+/// Ports `ggml_cpu_has_ssse3` (ggml-cpu.c:3779 @b29c606e2).
 pub export fn ggml_cpu_has_ssse3() c_int {
     return @intFromBool(x86Has("ssse3"));
 }
 
-/// Ports `ggml_cpu_has_vsx` (ggml-cpu.c:3787 @5266f24da), POWER9.
+/// Ports `ggml_cpu_has_vsx` (ggml-cpu.c:3787 @b29c606e2), POWER9.
 pub export fn ggml_cpu_has_vsx() c_int {
     return 0;
 }
 
-/// Ports `ggml_cpu_has_vxe` (ggml-cpu.c:3795 @5266f24da), s390x.
+/// Ports `ggml_cpu_has_vxe` (ggml-cpu.c:3795 @b29c606e2), s390x.
 pub export fn ggml_cpu_has_vxe() c_int {
     return 0;
 }
 
-/// Ports `ggml_cpu_has_wasm_simd` (ggml-cpu.c:3755 @5266f24da).
+/// Ports `ggml_cpu_has_wasm_simd` (ggml-cpu.c:3755 @b29c606e2).
 pub export fn ggml_cpu_has_wasm_simd() c_int {
     return 0;
 }
 
-/// Ports `ggml_cpu_has_riscv_v` (ggml-cpu.c:3723 @5266f24da).
+/// Ports `ggml_cpu_has_riscv_v` (ggml-cpu.c:3723 @b29c606e2).
 pub export fn ggml_cpu_has_riscv_v() c_int {
     return 0;
 }
 
-/// Ports `ggml_cpu_get_rvv_vlen` (ggml-cpu.c:3731 @5266f24da).
+/// Ports `ggml_cpu_get_rvv_vlen` (ggml-cpu.c:3731 @b29c606e2).
 pub export fn ggml_cpu_get_rvv_vlen() c_int {
     return 0;
 }
@@ -171,7 +171,7 @@ pub export fn ggml_cpu_get_rvv_vlen() c_int {
 // -----------------------------------------------------------------------------
 // ARM
 
-/// Ports `ggml_cpu_has_arm_fma` (ggml-cpu.c:3715 @5266f24da).
+/// Ports `ggml_cpu_has_arm_fma` (ggml-cpu.c:3715 @b29c606e2).
 ///
 /// The C tests `__ARM_FEATURE_FMA`, which clang defines whenever the ARM
 /// floating-point unit is available -- always, on AArch64.
@@ -179,34 +179,34 @@ pub export fn ggml_cpu_has_arm_fma() c_int {
     return @intFromBool(armHas("fp_armv8"));
 }
 
-/// Ports `ggml_cpu_has_fp16_va` (ggml-cpu.c:3747 @5266f24da).
+/// Ports `ggml_cpu_has_fp16_va` (ggml-cpu.c:3747 @b29c606e2).
 ///
 /// `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`, which clang ties to FullFP16.
 pub export fn ggml_cpu_has_fp16_va() c_int {
     return @intFromBool(armHas("fullfp16"));
 }
 
-/// Ports `ggml_cpu_has_neon` (ggml-cpu.c:3803 @5266f24da).
+/// Ports `ggml_cpu_has_neon` (ggml-cpu.c:3803 @b29c606e2).
 pub export fn ggml_cpu_has_neon() c_int {
     return @intFromBool(armHas("neon"));
 }
 
-/// Ports `ggml_cpu_has_dotprod` (ggml-cpu.c:3811 @5266f24da).
+/// Ports `ggml_cpu_has_dotprod` (ggml-cpu.c:3811 @b29c606e2).
 pub export fn ggml_cpu_has_dotprod() c_int {
     return @intFromBool(armHas("dotprod"));
 }
 
-/// Ports `ggml_cpu_has_sve` (ggml-cpu.c:3819 @5266f24da).
+/// Ports `ggml_cpu_has_sve` (ggml-cpu.c:3819 @b29c606e2).
 pub export fn ggml_cpu_has_sve() c_int {
     return @intFromBool(armHas("sve"));
 }
 
-/// Ports `ggml_cpu_has_matmul_int8` (ggml-cpu.c:3827 @5266f24da).
+/// Ports `ggml_cpu_has_matmul_int8` (ggml-cpu.c:3827 @b29c606e2).
 pub export fn ggml_cpu_has_matmul_int8() c_int {
     return @intFromBool(armHas("i8mm"));
 }
 
-/// Ports `ggml_cpu_get_sve_cnt` (ggml-cpu.c:3835 @5266f24da).
+/// Ports `ggml_cpu_get_sve_cnt` (ggml-cpu.c:3835 @b29c606e2).
 ///
 /// Zero unless SVE is compiled in, in which case `ggml_cpu_init` has filled
 /// it from `svcntb()`.
@@ -215,12 +215,12 @@ pub export fn ggml_cpu_get_sve_cnt() c_int {
     return ggml_arm_arch_features.sve_cnt;
 }
 
-/// Ports `ggml_cpu_has_sme` (ggml-cpu.c:3843 @5266f24da).
+/// Ports `ggml_cpu_has_sme` (ggml-cpu.c:3843 @b29c606e2).
 pub export fn ggml_cpu_has_sme() c_int {
     return @intFromBool(armHas("sme"));
 }
 
-/// Ports `ggml_cpu_has_sme2` (ggml-cpu.c:3851 @5266f24da).
+/// Ports `ggml_cpu_has_sme2` (ggml-cpu.c:3851 @b29c606e2).
 pub export fn ggml_cpu_has_sme2() c_int {
     return @intFromBool(armHas("sme2"));
 }
@@ -228,7 +228,7 @@ pub export fn ggml_cpu_has_sme2() c_int {
 // -----------------------------------------------------------------------------
 // Build configuration
 
-/// Ports `ggml_cpu_has_llamafile` (ggml-cpu.c:3763 @5266f24da).
+/// Ports `ggml_cpu_has_llamafile` (ggml-cpu.c:3763 @b29c606e2).
 ///
 /// Not a CPU question at all: `GGML_USE_LLAMAFILE` is a build flag, and
 /// `build/llamacpp.zig` passes it. Kept true to match, and asserted against
@@ -274,7 +274,7 @@ var is_first_call = true;
 extern fn ggml_time_us() i64;
 extern fn atoi(str: [*:0]const u8) c_int;
 
-/// Ports `ggml_cpu_init` (ggml-cpu.c:3859 @5266f24da).
+/// Ports `ggml_cpu_init` (ggml-cpu.c:3859 @b29c606e2).
 ///
 /// Fills the lookup tables and reads `GGML_CPU_DISABLE_FUSION`, once per
 /// process. `ggml_graph_compute` calls it on every graph, so the guard is what
@@ -316,7 +316,7 @@ pub export fn ggml_cpu_init() void {
     c.ggml_critical_section_end();
 }
 
-/// Ports `ggml_init_arm_arch_features` (ggml-cpu.c:732 @5266f24da).
+/// Ports `ggml_init_arm_arch_features` (ggml-cpu.c:732 @b29c606e2).
 ///
 /// Empty on this build: the C reads `svcntb()` only under
 /// `__ARM_FEATURE_SVE`, and takes the empty arm at line 735 otherwise.

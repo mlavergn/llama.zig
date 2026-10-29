@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/llada.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/llada.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_llada`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -19,7 +19,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_llada`'s `load_arch_hparams` (models/llada.cpp:3 @5266f24da).
+/// Ports `llama_model_llada`'s `load_arch_hparams` (models/llada.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -34,7 +34,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.causal_attn = false;
 }
 
-/// Ports `llama_model_llada`'s `load_arch_tensors` (models/llada.cpp:19 @5266f24da).
+/// Ports `llama_model_llada`'s `load_arch_tensors` (models/llada.cpp:19 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -57,11 +57,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
         layer.attn_norm = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
 
-        // Separate Q, K and V projections without biases, as LLaDALlamaBlock has.
-        layer.wq = try self.createTensor(.{ .tensor = .attn_q, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd_head_k * l.n_head }, 0, exc);
-        layer.wk = try self.createTensor(.{ .tensor = .attn_k, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd_k_gqa }, 0, exc);
-        layer.wv = try self.createTensor(.{ .tensor = .attn_v, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd_v_gqa }, 0, exc);
-        // No QKV biases, per the config: include_bias=false, include_qkv_bias=false.
+        try self.createTensorQkv(layer, i, l.n_embd, l.n_embd_head_k * l.n_head, l.n_embd_k_gqa, l.n_embd_v_gqa, 0, exc);
         layer.wo = try self.createTensor(.{ .tensor = .attn_out, .suffix = "weight", .bid = i }, &.{ l.n_embd_head_k * l.n_head, l.n_embd }, 0, exc);
         layer.wo_b = try self.createTensor(.{ .tensor = .attn_out, .suffix = "bias", .bid = i }, &.{l.n_embd}, nr, exc);
 
@@ -80,21 +76,21 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_llada`'s `build_arch_graph` (models/llada.cpp:67 @5266f24da).
+/// Ports `llama_model_llada`'s `build_arch_graph` (models/llada.cpp:62 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_llada`'s `graph`
-/// (models/llada.cpp:71 @5266f24da). LLaDA is Llama with non-causal
+/// (models/llada.cpp:66 @b29c606e2). LLaDA is Llama with non-causal
 /// attention, for diffusion.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/llada.cpp", 75, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/llada.cpp", 76, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/llada.cpp", 70, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/llada.cpp", 71, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 

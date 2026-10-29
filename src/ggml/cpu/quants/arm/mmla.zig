@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.4.0,
-//! `5266f24da`), the `__ARM_FEATURE_MATMUL_INT8` arms of the dot products at
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.4.1,
+//! `b29c606e2`), the `__ARM_FEATURE_MATMUL_INT8` arms of the dot products at
 //! lines 297, 590, 1150, 2334 and 2964. Each function names the C it replaces
 //! and the line its arm began at.
 //!
@@ -127,7 +127,7 @@ inline fn mullSum(a: i16x8, b: i16x8) i32x4 {
 const m4b: u8x16 = @splat(0x0F);
 const s8b: i8x16 = @splat(0x8);
 
-/// Ports `ggml_vec_dot_q4_0_q8_0` (arch/arm/quants.c:297 @5266f24da), the
+/// Ports `ggml_vec_dot_q4_0_q8_0` (arch/arm/quants.c:297 @b29c606e2), the
 /// `__ARM_FEATURE_MATMUL_INT8` arm at line 315: two rows.
 pub fn q4_0(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize) void {
     const nb: usize = @intCast(@divTrunc(n, c.QK8_0));
@@ -168,7 +168,7 @@ pub fn q4_0(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, v
     storeTwoColumns(s, bs, sumv0);
 }
 
-/// Ports `ggml_vec_dot_q4_1_q8_1` (arch/arm/quants.c:590 @5266f24da), the
+/// Ports `ggml_vec_dot_q4_1_q8_1` (arch/arm/quants.c:590 @b29c606e2), the
 /// `__ARM_FEATURE_MATMUL_INT8` arm at line 608: two rows.
 ///
 /// `summs0` is built already in the reordered `ACBD` layout -- the C's
@@ -222,7 +222,7 @@ pub fn q4_1(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, v
     storeReordered(s, bs, reorder(sumv0) + summs0);
 }
 
-/// Ports `ggml_vec_dot_q8_0_q8_0` (arch/arm/quants.c:1150 @5266f24da), the
+/// Ports `ggml_vec_dot_q8_0_q8_0` (arch/arm/quants.c:1150 @b29c606e2), the
 /// `__ARM_FEATURE_MATMUL_INT8` arm at line 1168: two rows.
 pub fn q8_0(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize) void {
     const nb: usize = @intCast(@divTrunc(n, c.QK8_0));
@@ -297,7 +297,7 @@ inline fn decodeQ4K(packed_scales: *const [c.K_SCALE_SIZE]u8) Q4KScales {
     };
 }
 
-/// Ports `ggml_vec_dot_q4_K_q8_K` (arch/arm/quants.c:2334 @5266f24da), the
+/// Ports `ggml_vec_dot_q4_K_q8_K` (arch/arm/quants.c:2334 @b29c606e2), the
 /// `__ARM_FEATURE_MATMUL_INT8` arm at line 2569: two rows.
 ///
 /// The block scales multiply in integers (`vmlaq_s32` into `visum`), so only
@@ -463,7 +463,7 @@ inline fn q6Scales(scales: *const [c.QK_K / 16]i8) [2]i16x8 {
     return .{ neon.movl_s8(neon.low(v)), neon.movl_s8(neon.high(v)) };
 }
 
-/// Ports `ggml_vec_dot_q6_K_q8_K` (arch/arm/quants.c:2964 @5266f24da), the
+/// Ports `ggml_vec_dot_q6_K_q8_K` (arch/arm/quants.c:2964 @b29c606e2), the
 /// `__ARM_FEATURE_MATMUL_INT8` arm at line 3175: two rows.
 ///
 /// The bias of 32 is not subtracted from the weights. It comes off the

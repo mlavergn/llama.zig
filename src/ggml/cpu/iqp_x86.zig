@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/iqp.cpp` (v0.4.0, `5266f24da`):
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/iqp.cpp` (v0.4.1, `b29c606e2`):
 //! every `#if defined(__AVX2__)` block and arm, over the intrinsics in
 //! `quants/x86/avx2.zig`. Each names the C it replaces and the line it began
 //! at; the portable half and the `#else` arms are `iqp.zig`.
@@ -47,7 +47,7 @@ const BlockX8 = iqp.BlockX8;
 const QK_K = c.QK_K;
 const nsb = iqp.nsb;
 
-/// Ports `iqp_sign_mask` (iqp.cpp:71 @5266f24da): `0xFF` in every byte
+/// Ports `iqp_sign_mask` (iqp.cpp:71 @b29c606e2): `0xFF` in every byte
 /// whose sign bit is set; `sv` holds each sign byte broadcast over the eight
 /// bytes it governs.
 ///
@@ -62,7 +62,7 @@ inline fn signMask(sv: m256i) m256i {
     return avx.mm256_cmpeq_epi8(avx.mm256_and_si256(sv, sel), sel);
 }
 
-/// Ports `iqp_sign_bytes` (iqp.cpp:83 @5266f24da): `signs` holds four sign
+/// Ports `iqp_sign_bytes` (iqp.cpp:83 @b29c606e2): `signs` holds four sign
 /// bytes, byte `l` governing values `8l .. 8l+7`; each is spread over its
 /// eight lanes.
 inline fn signBytes(signs: u32) m256i {
@@ -74,13 +74,13 @@ inline fn signBytes(signs: u32) m256i {
     return avx.mm256_shuffle_epi8(avx.mm256_set1_epi32(@bitCast(signs)), bcast);
 }
 
-/// Ports `iqp_apply_signs` (iqp.cpp:91 @5266f24da): `x ^ m - m` negates the
+/// Ports `iqp_apply_signs` (iqp.cpp:91 @b29c606e2): `x ^ m - m` negates the
 /// lanes where `m` is `0xFF`.
 inline fn applySigns(x: m256i, m: m256i) m256i {
     return avx.mm256_sub_epi8(avx.mm256_xor_si256(x, m), m);
 }
 
-/// Ports the `__AVX2__` arm of `iqp_store_signed_x8` (iqp.cpp:98 @5266f24da).
+/// Ports the `__AVX2__` arm of `iqp_store_signed_x8` (iqp.cpp:98 @b29c606e2).
 pub inline fn storeSignedX8(dst: [*]i8, g0: u64, g1: u64, g2: u64, g3: u64, signs: u32) void {
     const g = avx.mm256_set_epi64x(@bitCast(g3), @bitCast(g2), @bitCast(g1), @bitCast(g0));
     const m = signMask(signBytes(signs));
@@ -88,7 +88,7 @@ pub inline fn storeSignedX8(dst: [*]i8, g0: u64, g1: u64, g2: u64, g3: u64, sign
     avx.mm256_storeu_si256(dst, applySigns(g, m));
 }
 
-/// Ports the `__AVX2__` arm of `iqp_store_signed_x4` (iqp.cpp:124 @5266f24da).
+/// Ports the `__AVX2__` arm of `iqp_store_signed_x4` (iqp.cpp:124 @b29c606e2).
 pub inline fn storeSignedX4(
     dst: [*]i8,
     g0a: u32,
@@ -110,7 +110,7 @@ pub inline fn storeSignedX4(
     avx.mm256_storeu_si256(dst, applySigns(g, m));
 }
 
-/// Ports the `__AVX2__` arm of `iqp_store_iq1_x8` (iqp.cpp:158 @5266f24da).
+/// Ports the `__AVX2__` arm of `iqp_store_iq1_x8` (iqp.cpp:158 @b29c606e2).
 /// AVX2 has no byte shift, so `8 * g` is three doublings.
 pub inline fn storeIq1X8(dst: [*]i8, g0: u64, g1: u64, g2: u64, g3: u64, deltas: u32) void {
     var g = avx.mm256_set_epi64x(@bitCast(g3), @bitCast(g2), @bitCast(g1), @bitCast(g0));
@@ -122,7 +122,7 @@ pub inline fn storeIq1X8(dst: [*]i8, g0: u64, g1: u64, g2: u64, g3: u64, deltas:
     avx.mm256_storeu_si256(dst, avx.mm256_add_epi8(g, signBytes(deltas)));
 }
 
-/// Ports the `__AVX2__` arm of `iqp_store_iq4_x32` (iqp.cpp:188 @5266f24da):
+/// Ports the `__AVX2__` arm of `iqp_store_iq4_x32` (iqp.cpp:188 @b29c606e2):
 /// `kvalues_iq4nl` as a `pshufb` table.
 pub inline fn storeIq4X32(dst: [*]i8, qs: [*]const u8) void {
     const q = avx.mm_loadu_si128(qs);
@@ -133,7 +133,7 @@ pub inline fn storeIq4X32(dst: [*]i8, qs: [*]const u8) void {
     avx.mm_storeu_si128(dst + 16, avx.mm_shuffle_epi8(lut, avx.mm_and_si128(avx.mm_srli_epi16(q, 4), m4)));
 }
 
-/// Ports the `__AVX2__` arm of `iqp_weighted_sum` (iqp.cpp:207 @5266f24da).
+/// Ports the `__AVX2__` arm of `iqp_weighted_sum` (iqp.cpp:207 @b29c606e2).
 ///
 /// Groups of four bytes are summed into `i32`; per 32-byte load the low four
 /// lanes cover sub-block `2i` and the high four `2i + 1`, so each half takes
@@ -163,7 +163,7 @@ pub inline fn weightedSum(vals: *const [QK_K]i8, iscales: *const [nsb]i8) i32 {
     return avx.mm_cvtsi128_si32(sum);
 }
 
-/// Ports `iqp_interleave_x8` (iqp.cpp:524 @5266f24da): the 8x8 `int32`
+/// Ports `iqp_interleave_x8` (iqp.cpp:524 @b29c606e2): the 8x8 `int32`
 /// transpose of the 32-column group starting at column `off` -- rows paired
 /// into dword couples, then qword quadruples, then the 128-bit halves
 /// swapped.
@@ -207,14 +207,14 @@ pub inline fn interleaveX8(dst: [*]i8, vals: *const [iqp.nb_rows][QK_K]i8, off: 
 // -----------------------------------------------------------------------------
 // The integer dot products
 
-/// Ports `sum_i16_pairs_acc_int32x8` (iqp.cpp:782 @5266f24da): adjacent
+/// Ports `sum_i16_pairs_acc_int32x8` (iqp.cpp:782 @b29c606e2): adjacent
 /// `i16` pairs summed into `i32`, then the accumulator added.
 inline fn sum_i16_pairs_acc_int32x8(acc: m256i, x: m256i) m256i {
     const ones = avx.mm256_set1_epi16(1);
     return avx.mm256_add_epi32(acc, avx.mm256_madd_epi16(ones, x));
 }
 
-/// Ports `mul_sum_us8_pairs_acc_int32x8` (iqp.cpp:787 @5266f24da): unsigned
+/// Ports `mul_sum_us8_pairs_acc_int32x8` (iqp.cpp:787 @b29c606e2): unsigned
 /// bytes of `ax` times signed bytes of `sy`, four to a lane, into `acc`.
 inline fn mul_sum_us8_pairs_acc_int32x8(acc: m256i, ax: m256i, sy: m256i) m256i {
     if (comptime avx.has_avx512vnni_vl) return avx.mm256_dpbusd_epi32(acc, ax, sy);
@@ -225,7 +225,7 @@ inline fn mul_sum_us8_pairs_acc_int32x8(acc: m256i, ax: m256i, sy: m256i) m256i 
     return sum_i16_pairs_acc_int32x8(acc, dot);
 }
 
-/// Ports `mul_sum_i8_pairs_acc_int32x8` (iqp.cpp:801 @5266f24da): signed
+/// Ports `mul_sum_i8_pairs_acc_int32x8` (iqp.cpp:801 @b29c606e2): signed
 /// bytes times signed bytes, four to a lane, into `acc`.
 inline fn mul_sum_i8_pairs_acc_int32x8(acc: m256i, x: m256i, y: m256i) m256i {
     if (comptime avx.has_avxvnniint8) return avx.mm256_dpbssd_epi32(acc, x, y);
@@ -236,7 +236,7 @@ inline fn mul_sum_i8_pairs_acc_int32x8(acc: m256i, x: m256i, y: m256i) m256i {
     return mul_sum_us8_pairs_acc_int32x8(acc, ax, sy);
 }
 
-/// Ports `iqp_load_y` (iqp.cpp:814 @5266f24da): the sixteen activations of
+/// Ports `iqp_load_y` (iqp.cpp:814 @b29c606e2): the sixteen activations of
 /// one sub-block in both halves, offset by 128 when they go to `vpdpbusd`
 /// as unsigned bytes.
 inline fn loadY(qs: [*]const i8) m256i {
@@ -247,7 +247,7 @@ inline fn loadY(qs: [*]const i8) m256i {
     return avx.mm256_broadcastsi128_si256(y);
 }
 
-/// Ports `iqp_dot4` (iqp.cpp:823 @5266f24da): `xv` holds eight rows of four
+/// Ports `iqp_dot4` (iqp.cpp:823 @b29c606e2): `xv` holds eight rows of four
 /// signed weights, `yb` the matching four activation bytes in all eight
 /// lanes.
 inline fn dot4(acc: m256i, xv: m256i, yb: m256i) m256i {
@@ -255,13 +255,13 @@ inline fn dot4(acc: m256i, xv: m256i, yb: m256i) m256i {
     return mul_sum_i8_pairs_acc_int32x8(acc, xv, yb);
 }
 
-/// Ports `iqp_load_iscales` (iqp.cpp:831 @5266f24da): eight sub-block scales
+/// Ports `iqp_load_iscales` (iqp.cpp:831 @b29c606e2): eight sub-block scales
 /// sign-extended to `i32`.
 inline fn loadIscales(iscales: [*]const i8) m256i {
     return avx.mm256_cvtepi8_epi32(avx.mm_loadl_epi64(iscales));
 }
 
-/// Ports `iqp_acc_block` (iqp.cpp:836 @5266f24da): one super-block of eight
+/// Ports `iqp_acc_block` (iqp.cpp:836 @b29c606e2): one super-block of eight
 /// interleaved rows against one `q8_K` row, in `i32`. The worst case,
 /// `16 * 32 * 16 * 255 * 127 = 2.65e8` plus a bias of at most `1.33e8`, does
 /// not overflow.
@@ -290,7 +290,7 @@ inline fn accBlock(b: *const BlockX8, a: *const Q8K) m256i {
     return sumi;
 }
 
-/// Ports `iqp_gemm_tile_4` (iqp.cpp:862 @5266f24da): one 4-row by
+/// Ports `iqp_gemm_tile_4` (iqp.cpp:862 @b29c606e2): one 4-row by
 /// `nc`-column tile; `s` points at the first of the four output rows, `bs`
 /// floats apart.
 pub fn gemmTile4(nb: usize, s: [*]f32, bs: usize, b_ptr_start: [*]const BlockX8, a_ptr: [4][*]const Q8K, nc: c_int) void {
@@ -361,7 +361,7 @@ pub fn gemmTile4(nb: usize, s: [*]f32, bs: usize, b_ptr_start: [*]const BlockX8,
     }
 }
 
-/// Ports the `__AVX2__` arm of `iqp_gemv_8x8_q8_K` (iqp.cpp:934 @5266f24da).
+/// Ports the `__AVX2__` arm of `iqp_gemv_8x8_q8_K` (iqp.cpp:934 @b29c606e2).
 pub fn gemv(n: c_int, s: [*]f32, b_ptr_start: [*]const BlockX8, a_ptr: [*]const Q8K, nc: c_int) void {
     const nb: usize = @intCast(@divTrunc(n, QK_K));
     const ncols_interleaved = 8;
@@ -381,7 +381,7 @@ pub fn gemv(n: c_int, s: [*]f32, b_ptr_start: [*]const BlockX8, a_ptr: [*]const 
     }
 }
 
-/// Ports the `__AVX2__` arm of `iqp_gemm_8x8_q8_K` (iqp.cpp:976 @5266f24da).
+/// Ports the `__AVX2__` arm of `iqp_gemm_8x8_q8_K` (iqp.cpp:976 @b29c606e2).
 pub fn gemm(n: c_int, s: [*]f32, bs: usize, b_ptr_start: [*]const BlockX8, a_ptr_start: [*]const Q8K, nr: c_int, nc: c_int) void {
     const nb: usize = @intCast(@divTrunc(n, QK_K));
 

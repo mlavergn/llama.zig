@@ -36,6 +36,7 @@
 -m $PLAIN -p 16 -n 0 -r 1 -lzm on,bogus
 -m $PLAIN -p 16 -n 0 -r 1 -lzm
 -m $PLAIN -p 16 -n 0 -r 1 -mmp 0,1
+-m $PLAIN -p 16 -n 0 -r 1 --direct-io 1
 -m $PLAIN -p 16 -n 0 -r 1 -ts 1/0 -sm none -mg 0
 -m $PLAIN -p 16 -n 0 -r 1 -ot token_embd=CPU,
 -m $PLAIN -p 16 -n 0 -r 1 -ot a=BOGUS

@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/kimi-linear.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_kimi_linear`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/kimi-linear.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_kimi_linear`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, `causal_conv1d`, and its
 //! `graph`. `models.h` also declares `build_kda_autoregressive` and
 //! `build_kda_chunking` on that `graph`; neither is defined upstream, and
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_kimi_linear`'s `load_arch_hparams` (models/kimi-linear.cpp:4 @5266f24da).
+/// Ports `llama_model_kimi_linear`'s `load_arch_hparams` (models/kimi-linear.cpp:4 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -59,7 +59,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_kimi_linear`'s `load_arch_tensors` (models/kimi-linear.cpp:34 @5266f24da).
+/// Ports `llama_model_kimi_linear`'s `load_arch_tensors` (models/kimi-linear.cpp:34 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -194,12 +194,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_kimi_linear`'s `build_arch_graph` (models/kimi-linear.cpp:169 @5266f24da).
+/// Ports `llama_model_kimi_linear`'s `build_arch_graph` (models/kimi-linear.cpp:169 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports `causal_conv1d` (models/kimi-linear.cpp:175 @5266f24da): the short
+/// Ports `causal_conv1d` (models/kimi-linear.cpp:175 @b29c606e2): the short
 /// convolution of one of Q (`qkv` 0), K (1) or V (2), its projection in
 /// front, its slice of the conv state in front of the input, and the last
 /// `d_conv - 1` columns written back.
@@ -217,7 +217,7 @@ fn causalConv1d(gf: *c.ggml_cgraph, ctx: *c.ggml_context, conv_states_all: *Tens
     const conv_state_x = c.ggml_view_3d(ctx, conv_state_all, d_conv - 1, d_inner, n_seqs, @as(usize, @intCast(d_conv - 1)) * es_state, @as(usize, @intCast(n_embd_r_total)) * es_state, @as(usize, @intCast(qkv * conv_state_size)) * es_state);
 
     // Step 1: the projection, to [d_inner, n_tokens].
-    const x_proj = c.ggml_mul_mat(ctx, proj_w, x);
+    const x_proj: *Tensor = if (proj_w != null) c.ggml_mul_mat(ctx, proj_w, x) else x;
 
     // {d_inner, n_tokens} -> {d_inner, n_seq_tokens, n_seqs}
     const x_3d = c.ggml_reshape_3d(ctx, x_proj, d_inner, n_seq_tokens, n_seqs);
@@ -254,7 +254,7 @@ fn causalConv1d(gf: *c.ggml_cgraph, ctx: *c.ggml_context, conv_states_all: *Tens
 }
 
 /// Ports the constructor of `llama_model_kimi_linear`'s `graph`
-/// (models/kimi-linear.cpp:234 @5266f24da).
+/// (models/kimi-linear.cpp:234 @b29c606e2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -320,9 +320,26 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const conv_states_all = mctx_cur.getRL(il);
             b.cb(conv_states_all, "conv_states_all", il);
             const conv_state_all = b.buildRs(inp_rs, conv_states_all, @intCast(hp.nEmbdR()), @intCast(n_seqs), null);
-            var Qcur = causalConv1d(b.gf, ctx, conv_states_all, conv_state_all, 0, cur, layer.wq, layer.ssm_q_conv, d_conv, head_dim, n_head, n_seq_tokens, n_seqs, n_tokens, kv_head);
-            var Kcur = causalConv1d(b.gf, ctx, conv_states_all, conv_state_all, 1, cur, layer.wk, layer.ssm_k_conv, d_conv, head_dim, n_head, n_seq_tokens, n_seqs, n_tokens, kv_head);
-            const Vcur = causalConv1d(b.gf, ctx, conv_states_all, conv_state_all, 2, cur, layer.wv, layer.ssm_v_conv, d_conv, head_dim, n_head, n_seq_tokens, n_seqs, n_tokens, kv_head);
+            var q_in = cur;
+            var k_in = cur;
+            var v_in = cur;
+            var q_w = layer.wq;
+            var k_w = layer.wk;
+            var v_w = layer.wv;
+            if (layer.wqkv) |wqkv| {
+                const qkv: *Tensor = c.ggml_mul_mat(ctx, wqkv, cur);
+                // `d_inner` is the outer one: `head_dim * n_head`.
+                const esize = c.ggml_element_size(qkv);
+                q_in = c.ggml_cont(ctx, c.ggml_view_2d(ctx, qkv, d_inner, n_tokens, qkv.nb[1], 0));
+                k_in = c.ggml_cont(ctx, c.ggml_view_2d(ctx, qkv, d_inner, n_tokens, qkv.nb[1], @as(usize, @intCast(d_inner)) * esize));
+                v_in = c.ggml_cont(ctx, c.ggml_view_2d(ctx, qkv, d_inner, n_tokens, qkv.nb[1], 2 * @as(usize, @intCast(d_inner)) * esize));
+                q_w = null;
+                k_w = null;
+                v_w = null;
+            }
+            var Qcur = causalConv1d(b.gf, ctx, conv_states_all, conv_state_all, 0, q_in, q_w, layer.ssm_q_conv, d_conv, head_dim, n_head, n_seq_tokens, n_seqs, n_tokens, kv_head);
+            var Kcur = causalConv1d(b.gf, ctx, conv_states_all, conv_state_all, 1, k_in, k_w, layer.ssm_k_conv, d_conv, head_dim, n_head, n_seq_tokens, n_seqs, n_tokens, kv_head);
+            const Vcur = causalConv1d(b.gf, ctx, conv_states_all, conv_state_all, 2, v_in, v_w, layer.ssm_v_conv, d_conv, head_dim, n_head, n_seq_tokens, n_seqs, n_tokens, kv_head);
 
             // g1 = -exp(A_log) * softplus(f_b(f_a(x)) + dt_bias)
             const f_a = c.ggml_mul_mat(ctx, layer.ssm_f_a, cur);
@@ -359,8 +376,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
             const eps_norm = hp.f_norm_rms_eps;
 
-            Qcur = c.ggml_l2_norm(ctx, Qcur, eps_norm);
-            Kcur = c.ggml_l2_norm(ctx, Kcur, eps_norm);
+            Qcur = delta_net.buildGdnL2Norm(ctx, Qcur, eps_norm);
+            Kcur = delta_net.buildGdnL2Norm(ctx, Kcur, eps_norm);
 
             // Chunked or recurrent, by the token count.
             const attn_out = delta_net.buildDeltaNet(b, Qcur, Kcur, Vcur, g1, beta, state, il);

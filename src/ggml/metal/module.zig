@@ -15,6 +15,7 @@ const std = @import("std");
 pub const backend = @import("backend.zig");
 pub const common = @import("common.zig");
 pub const device_c = @import("device_c.zig");
+pub const fusion = @import("fusion.zig");
 pub const impl_c = @import("impl_c.zig");
 pub const kargs = @import("kargs.zig");
 pub const library = @import("library.zig");
@@ -27,6 +28,7 @@ comptime {
     _ = backend;
     _ = common;
     _ = device_c;
+    _ = fusion;
     _ = impl_c;
     _ = kargs;
     _ = library;

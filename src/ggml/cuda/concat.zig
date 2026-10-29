@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/concat.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/concat.cuh` at v0.4.0 (`5266f24da`). The
+//! `llama.cpp/ggml/src/ggml-cuda/concat.cuh` at v0.4.1 (`b29c606e2`). The
 //! kernels, `concat_cont` and `concat_non_cont`, stay CUDA.
 //!
 //! # Launches
@@ -21,7 +21,7 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_CONCAT_BLOCK_SIZE` (concat.cuh:3 @5266f24da).
+/// Ports `CUDA_CONCAT_BLOCK_SIZE` (concat.cuh:3 @b29c606e2).
 const block_size = 256;
 
 /// A `dim3` member from an `int64_t`: C++ converts modulo 2^32.
@@ -29,7 +29,7 @@ fn dimOf(v: i64) u32 {
     return @truncate(@as(u64, @bitCast(v)));
 }
 
-/// Ports `concat_cont_cuda` (concat.cu:56 @5266f24da).
+/// Ports `concat_cont_cuda` (concat.cu:56 @b29c606e2).
 fn concatContCuda(comptime T: type, x: ?*const anyopaque, y: ?*const anyopaque, dst: ?*anyopaque, ne00: i64, ne01: i64, ne02: i64, ne0: i64, ne1: i64, ne2: i64, dim: c_int, stream: cu.cudaStream_t) void {
     const n: i64 = ne0 * ne1 * ne2;
     const num_blocks: c_int = @truncate(@divTrunc(n + block_size - 1, block_size));
@@ -59,7 +59,7 @@ fn plane(comptime T: type, p: ?*const anyopaque, j3: i64, nb3: usize) usize {
     return @intFromPtr(p) +% elems *% @sizeOf(T);
 }
 
-/// Ports `concat_cuda` (concat.cu:143 @5266f24da) with its
+/// Ports `concat_cuda` (concat.cu:143 @b29c606e2) with its
 /// `launch_kernel` lambda.
 fn concatCuda(comptime T: type, src0: *const Tensor, src1: *const Tensor, dst: *Tensor, dim: c_int, stream: cu.cudaStream_t) void {
     if (dim != 3 and c.ggml_is_contiguous_to_3(src0) and c.ggml_is_contiguous_to_3(src1)) {
@@ -113,7 +113,7 @@ fn concatCuda(comptime T: type, src0: *const Tensor, src1: *const Tensor, dst: *
     }
 }
 
-/// Ports `ggml_cuda_op_concat` (concat.cu:197 @5266f24da).
+/// Ports `ggml_cuda_op_concat` (concat.cu:197 @b29c606e2).
 pub fn opConcat(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

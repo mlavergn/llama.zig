@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/out-prod.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/out-prod.cuh` at v0.4.0 (`5266f24da`). The
+//! `llama.cpp/ggml/src/ggml-cuda/out-prod.cuh` at v0.4.1 (`b29c606e2`). The
 //! kernel, `k_compute_out_prod_ptrs`, stays CUDA.
 //!
 //! Like `ssm-scan.cu`'s SSD path, this calls cuBLAS through
@@ -36,7 +36,7 @@ fn u(x: i64) u64 {
     return @bitCast(x);
 }
 
-/// Ports `ggml_cuda_out_prod` (out-prod.cu:27 @5266f24da).
+/// Ports `ggml_cuda_out_prod` (out-prod.cu:27 @b29c606e2).
 pub fn outProd(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

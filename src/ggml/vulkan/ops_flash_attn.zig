@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
-//! (`5266f24da`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
+//! (`b29c606e2`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -36,7 +36,7 @@ const vendor_id_amd = 0x1002;
 const vendor_id_intel = 0x8086;
 const vendor_id_nvidia = 0x10de;
 
-/// Ports `vk_fa_tuning_params` (ggml-vulkan.cpp:3764 @5266f24da).
+/// Ports `vk_fa_tuning_params` (ggml-vulkan.cpp:3920 @b29c606e2).
 pub const FaTuningParams = struct {
     path: FaCodePath = .scalar,
     workgroup_size: u32 = 0,
@@ -55,7 +55,7 @@ fn lowestBit(d: u32) u32 {
     return d ^ (d & (d -% 1));
 }
 
-/// Ports `get_fa_tuning_params_scalar` (ggml-vulkan.cpp:3787 @5266f24da).
+/// Ports `get_fa_tuning_params_scalar` (ggml-vulkan.cpp:3943 @b29c606e2).
 fn tuningScalar(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, k_type: c.ggml_type, v_type: c.ggml_type, f32acc: bool) FaTuningParams {
     var r: FaTuningParams = .{ .path = .scalar };
 
@@ -117,7 +117,7 @@ fn tuningScalar(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, 
     return r;
 }
 
-/// Ports `get_fa_tuning_params_coopmat1` (ggml-vulkan.cpp:3862 @5266f24da).
+/// Ports `get_fa_tuning_params_coopmat1` (ggml-vulkan.cpp:4018 @b29c606e2).
 fn tuningCoopmat1(dev: *const Device, hsk: u32, hsv: u32) FaTuningParams {
     var r: FaTuningParams = .{ .path = .coopmat1 };
     const D = hsk | hsv;
@@ -135,7 +135,7 @@ fn tuningCoopmat1(dev: *const Device, hsk: u32, hsv: u32) FaTuningParams {
     return r;
 }
 
-/// Ports `get_fa_tuning_params_coopmat2` (ggml-vulkan.cpp:3893 @5266f24da).
+/// Ports `get_fa_tuning_params_coopmat2` (ggml-vulkan.cpp:4049 @b29c606e2).
 fn tuningCoopmat2(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, k_type: c.ggml_type, v_type: c.ggml_type) FaTuningParams {
     var r: FaTuningParams = .{ .path = .coopmat2 };
     const D = hsk | hsv;
@@ -155,7 +155,7 @@ fn tuningCoopmat2(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, k_type: c
     return r;
 }
 
-/// Ports `get_fa_tuning_params` (ggml-vulkan.cpp:3921 @5266f24da).
+/// Ports `get_fa_tuning_params` (ggml-vulkan.cpp:4077 @b29c606e2).
 pub fn tuningParams(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, k_type: c.ggml_type, v_type: c.ggml_type, f32acc: bool) FaTuningParams {
     var path: FaCodePath = if (dev.coopmat2) .coopmat2 else if (dev.coopmat1_fa_support) .coopmat1 else .scalar;
 
@@ -182,7 +182,7 @@ pub fn tuningParams(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u
     };
 }
 
-/// Ports `get_fa_pipeline_state` (ggml-vulkan.cpp:3965 @5266f24da).
+/// Ports `get_fa_pipeline_state` (ggml-vulkan.cpp:4121 @b29c606e2).
 pub fn pipelineState(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, aligned: bool, f32acc: bool, use_mask: bool, use_mask_opt: bool, use_logit_softcap: bool, k_type: c.ggml_type, v_type: c.ggml_type) FaPipelineState {
     const old_amd_windows = dev.vendor_id == vendor_id_amd and dev.driver_id == vk.VK_DRIVER_ID_AMD_PROPRIETARY and
         (dev.architecture == .amd_gcn or dev.architecture == .amd_rdna1 or dev.architecture == .amd_rdna2);
@@ -211,7 +211,7 @@ pub fn pipelineState(dev: *const Device, params: *const FaTuningParams, hsk: u32
     };
 }
 
-/// Ports `ggml_vk_flash_attn_scalar_shmem_support` (ggml-vulkan.cpp:10806 @5266f24da).
+/// Ports `ggml_vk_flash_attn_scalar_shmem_support` (ggml-vulkan.cpp:11081 @b29c606e2).
 /// Must track the shader; it overestimates `tmpsh` slightly.
 pub fn scalarShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, f32acc: bool, k_type: c.ggml_type, v_type: c.ggml_type) bool {
     _ = f32acc;
@@ -252,7 +252,7 @@ pub fn scalarShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk
     return total_size <= dev.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `ggml_vk_flash_attn_coopmat_shmem_support` (ggml-vulkan.cpp:10857 @5266f24da).
+/// Ports `ggml_vk_flash_attn_coopmat_shmem_support` (ggml-vulkan.cpp:11132 @b29c606e2).
 pub fn coopmatShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, f32acc: bool, k_type: c.ggml_type) bool {
     const Br = params.block_rows;
     const Bc = params.block_cols;
@@ -309,7 +309,7 @@ fn isDenseKvCache(t: *const Tensor) bool {
         (t.ne[3] == 1 or t.nb[3] == t.nb[1] * @as(usize, @intCast(t.ne[1])));
 }
 
-/// Ports `ggml_vk_flash_attn` (ggml-vulkan.cpp:10905 @5266f24da).
+/// Ports `ggml_vk_flash_attn` (ggml-vulkan.cpp:11180 @b29c606e2).
 pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const Tensor, v: *const Tensor, mask: ?*const Tensor, sinks: ?*const Tensor, dst: *Tensor) void {
     const dev = ctx.device;
     const limits = &dev.properties.limits;

@@ -4,8 +4,8 @@
 //! # Provenance
 //!
 //! Mirrors the `FC_*`, `OP_*`, `N_*` and `SZ_*` `#define`s of
-//! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at v0.4.0
-//! (`5266f24da`).
+//! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at v0.4.1
+//! (`b29c606e2`).
 //!
 //! # Hand-declared, generated, and checked
 //!
@@ -29,238 +29,252 @@
 
 const std = @import("std");
 
-/// Mirrors `SZ_SIMDGROUP` (ggml-metal-impl.h:8 @5266f24da).
+/// Mirrors `SZ_SIMDGROUP` (ggml-metal-impl.h:8 @b29c606e2).
 pub const SZ_SIMDGROUP: c_int = 16;
-/// Mirrors `N_MM_NK` (ggml-metal-impl.h:9 @5266f24da).
+/// Mirrors `N_MM_NK` (ggml-metal-impl.h:9 @b29c606e2).
 pub const N_MM_NK: c_int = 2;
-/// Mirrors `N_MM_BLOCK_X` (ggml-metal-impl.h:12 @5266f24da).
+/// Mirrors `N_MM_BLOCK_X` (ggml-metal-impl.h:12 @b29c606e2).
 pub const N_MM_BLOCK_X: c_int = 4;
-/// Mirrors `N_MM_BLOCK_Y` (ggml-metal-impl.h:13 @5266f24da).
+/// Mirrors `N_MM_BLOCK_Y` (ggml-metal-impl.h:13 @b29c606e2).
 pub const N_MM_BLOCK_Y: c_int = 2;
-/// Mirrors `N_MM_SIMD_GROUP_X` (ggml-metal-impl.h:14 @5266f24da).
+/// Mirrors `N_MM_SIMD_GROUP_X` (ggml-metal-impl.h:14 @b29c606e2).
 pub const N_MM_SIMD_GROUP_X: c_int = 2;
-/// Mirrors `N_MM_SIMD_GROUP_Y` (ggml-metal-impl.h:15 @5266f24da).
+/// Mirrors `N_MM_SIMD_GROUP_Y` (ggml-metal-impl.h:15 @b29c606e2).
 pub const N_MM_SIMD_GROUP_Y: c_int = 2;
-/// Mirrors `N_R0_Q1_0` (ggml-metal-impl.h:24 @5266f24da).
+/// Mirrors `N_R0_Q1_0` (ggml-metal-impl.h:24 @b29c606e2).
 pub const N_R0_Q1_0: c_int = 8;
-/// Mirrors `N_SG_Q1_0` (ggml-metal-impl.h:25 @5266f24da).
+/// Mirrors `N_SG_Q1_0` (ggml-metal-impl.h:25 @b29c606e2).
 pub const N_SG_Q1_0: c_int = 2;
-/// Mirrors `N_R0_Q2_0` (ggml-metal-impl.h:27 @5266f24da).
+/// Mirrors `N_R0_Q2_0` (ggml-metal-impl.h:27 @b29c606e2).
 pub const N_R0_Q2_0: c_int = 8;
-/// Mirrors `N_SG_Q2_0` (ggml-metal-impl.h:28 @5266f24da).
+/// Mirrors `N_SG_Q2_0` (ggml-metal-impl.h:28 @b29c606e2).
 pub const N_SG_Q2_0: c_int = 2;
-/// Mirrors `N_R0_Q4_0` (ggml-metal-impl.h:30 @5266f24da).
+/// Mirrors `N_R0_Q4_0` (ggml-metal-impl.h:30 @b29c606e2).
 pub const N_R0_Q4_0: c_int = 4;
-/// Mirrors `N_SG_Q4_0` (ggml-metal-impl.h:31 @5266f24da).
+/// Mirrors `N_SG_Q4_0` (ggml-metal-impl.h:31 @b29c606e2).
 pub const N_SG_Q4_0: c_int = 2;
-/// Mirrors `N_R0_Q4_1` (ggml-metal-impl.h:33 @5266f24da).
+/// Mirrors `N_R0_Q4_1` (ggml-metal-impl.h:33 @b29c606e2).
 pub const N_R0_Q4_1: c_int = 4;
-/// Mirrors `N_SG_Q4_1` (ggml-metal-impl.h:34 @5266f24da).
+/// Mirrors `N_SG_Q4_1` (ggml-metal-impl.h:34 @b29c606e2).
 pub const N_SG_Q4_1: c_int = 2;
-/// Mirrors `N_R0_Q5_0` (ggml-metal-impl.h:36 @5266f24da).
+/// Mirrors `N_R0_Q5_0` (ggml-metal-impl.h:36 @b29c606e2).
 pub const N_R0_Q5_0: c_int = 4;
-/// Mirrors `N_SG_Q5_0` (ggml-metal-impl.h:37 @5266f24da).
+/// Mirrors `N_SG_Q5_0` (ggml-metal-impl.h:37 @b29c606e2).
 pub const N_SG_Q5_0: c_int = 2;
-/// Mirrors `N_R0_Q5_1` (ggml-metal-impl.h:39 @5266f24da).
+/// Mirrors `N_R0_Q5_1` (ggml-metal-impl.h:39 @b29c606e2).
 pub const N_R0_Q5_1: c_int = 4;
-/// Mirrors `N_SG_Q5_1` (ggml-metal-impl.h:40 @5266f24da).
+/// Mirrors `N_SG_Q5_1` (ggml-metal-impl.h:40 @b29c606e2).
 pub const N_SG_Q5_1: c_int = 2;
-/// Mirrors `N_R0_Q8_0` (ggml-metal-impl.h:42 @5266f24da).
+/// Mirrors `N_R0_Q8_0` (ggml-metal-impl.h:42 @b29c606e2).
 pub const N_R0_Q8_0: c_int = 2;
-/// Mirrors `N_SG_Q8_0` (ggml-metal-impl.h:43 @5266f24da).
+/// Mirrors `N_SG_Q8_0` (ggml-metal-impl.h:43 @b29c606e2).
 pub const N_SG_Q8_0: c_int = 4;
-/// Mirrors `N_R0_MXFP4` (ggml-metal-impl.h:45 @5266f24da).
+/// Mirrors `N_R0_MXFP4` (ggml-metal-impl.h:45 @b29c606e2).
 pub const N_R0_MXFP4: c_int = 2;
-/// Mirrors `N_SG_MXFP4` (ggml-metal-impl.h:46 @5266f24da).
+/// Mirrors `N_SG_MXFP4` (ggml-metal-impl.h:46 @b29c606e2).
 pub const N_SG_MXFP4: c_int = 2;
-/// Mirrors `N_R0_Q2_K` (ggml-metal-impl.h:48 @5266f24da).
+/// Mirrors `N_R0_Q2_K` (ggml-metal-impl.h:48 @b29c606e2).
 pub const N_R0_Q2_K: c_int = 4;
-/// Mirrors `N_SG_Q2_K` (ggml-metal-impl.h:49 @5266f24da).
+/// Mirrors `N_SG_Q2_K` (ggml-metal-impl.h:49 @b29c606e2).
 pub const N_SG_Q2_K: c_int = 2;
-/// Mirrors `N_R0_Q3_K` (ggml-metal-impl.h:51 @5266f24da).
+/// Mirrors `N_R0_Q3_K` (ggml-metal-impl.h:51 @b29c606e2).
 pub const N_R0_Q3_K: c_int = 2;
-/// Mirrors `N_SG_Q3_K` (ggml-metal-impl.h:52 @5266f24da).
+/// Mirrors `N_SG_Q3_K` (ggml-metal-impl.h:52 @b29c606e2).
 pub const N_SG_Q3_K: c_int = 2;
-/// Mirrors `N_R0_Q4_K` (ggml-metal-impl.h:54 @5266f24da).
+/// Mirrors `N_R0_Q4_K` (ggml-metal-impl.h:54 @b29c606e2).
 pub const N_R0_Q4_K: c_int = 2;
-/// Mirrors `N_SG_Q4_K` (ggml-metal-impl.h:55 @5266f24da).
+/// Mirrors `N_SG_Q4_K` (ggml-metal-impl.h:55 @b29c606e2).
 pub const N_SG_Q4_K: c_int = 2;
-/// Mirrors `N_R0_Q5_K` (ggml-metal-impl.h:57 @5266f24da).
+/// Mirrors `N_R0_Q5_K` (ggml-metal-impl.h:57 @b29c606e2).
 pub const N_R0_Q5_K: c_int = 1;
-/// Mirrors `N_SG_Q5_K` (ggml-metal-impl.h:58 @5266f24da).
+/// Mirrors `N_SG_Q5_K` (ggml-metal-impl.h:58 @b29c606e2).
 pub const N_SG_Q5_K: c_int = 2;
-/// Mirrors `N_R0_Q6_K` (ggml-metal-impl.h:60 @5266f24da).
+/// Mirrors `N_R0_Q6_K` (ggml-metal-impl.h:60 @b29c606e2).
 pub const N_R0_Q6_K: c_int = 2;
-/// Mirrors `N_SG_Q6_K` (ggml-metal-impl.h:61 @5266f24da).
+/// Mirrors `N_SG_Q6_K` (ggml-metal-impl.h:61 @b29c606e2).
 pub const N_SG_Q6_K: c_int = 2;
-/// Mirrors `N_R0_IQ1_S` (ggml-metal-impl.h:63 @5266f24da).
+/// Mirrors `N_R0_IQ1_S` (ggml-metal-impl.h:63 @b29c606e2).
 pub const N_R0_IQ1_S: c_int = 4;
-/// Mirrors `N_SG_IQ1_S` (ggml-metal-impl.h:64 @5266f24da).
+/// Mirrors `N_SG_IQ1_S` (ggml-metal-impl.h:64 @b29c606e2).
 pub const N_SG_IQ1_S: c_int = 2;
-/// Mirrors `N_R0_IQ1_M` (ggml-metal-impl.h:66 @5266f24da).
+/// Mirrors `N_R0_IQ1_S_SPLIT` (ggml-metal-impl.h:65 @b29c606e2).
+pub const N_R0_IQ1_S_SPLIT: c_int = 8;
+/// Mirrors `N_R0_IQ1_M` (ggml-metal-impl.h:67 @b29c606e2).
 pub const N_R0_IQ1_M: c_int = 4;
-/// Mirrors `N_SG_IQ1_M` (ggml-metal-impl.h:67 @5266f24da).
+/// Mirrors `N_SG_IQ1_M` (ggml-metal-impl.h:68 @b29c606e2).
 pub const N_SG_IQ1_M: c_int = 2;
-/// Mirrors `N_R0_IQ2_XXS` (ggml-metal-impl.h:69 @5266f24da).
+/// Mirrors `N_R0_IQ1_M_SPLIT` (ggml-metal-impl.h:69 @b29c606e2).
+pub const N_R0_IQ1_M_SPLIT: c_int = 8;
+/// Mirrors `N_R0_IQ2_XXS` (ggml-metal-impl.h:71 @b29c606e2).
 pub const N_R0_IQ2_XXS: c_int = 4;
-/// Mirrors `N_SG_IQ2_XXS` (ggml-metal-impl.h:70 @5266f24da).
+/// Mirrors `N_SG_IQ2_XXS` (ggml-metal-impl.h:72 @b29c606e2).
 pub const N_SG_IQ2_XXS: c_int = 2;
-/// Mirrors `N_R0_IQ2_XS` (ggml-metal-impl.h:72 @5266f24da).
+/// Mirrors `N_R0_IQ2_XXS_SPLIT` (ggml-metal-impl.h:73 @b29c606e2).
+pub const N_R0_IQ2_XXS_SPLIT: c_int = 8;
+/// Mirrors `N_R0_IQ2_XS` (ggml-metal-impl.h:75 @b29c606e2).
 pub const N_R0_IQ2_XS: c_int = 4;
-/// Mirrors `N_SG_IQ2_XS` (ggml-metal-impl.h:73 @5266f24da).
+/// Mirrors `N_SG_IQ2_XS` (ggml-metal-impl.h:76 @b29c606e2).
 pub const N_SG_IQ2_XS: c_int = 2;
-/// Mirrors `N_R0_IQ2_S` (ggml-metal-impl.h:75 @5266f24da).
+/// Mirrors `N_R0_IQ2_XS_SPLIT` (ggml-metal-impl.h:77 @b29c606e2).
+pub const N_R0_IQ2_XS_SPLIT: c_int = 8;
+/// Mirrors `N_R0_IQ2_S` (ggml-metal-impl.h:79 @b29c606e2).
 pub const N_R0_IQ2_S: c_int = 4;
-/// Mirrors `N_SG_IQ2_S` (ggml-metal-impl.h:76 @5266f24da).
+/// Mirrors `N_SG_IQ2_S` (ggml-metal-impl.h:80 @b29c606e2).
 pub const N_SG_IQ2_S: c_int = 2;
-/// Mirrors `N_R0_IQ3_XXS` (ggml-metal-impl.h:78 @5266f24da).
+/// Mirrors `N_R0_IQ2_S_SPLIT` (ggml-metal-impl.h:81 @b29c606e2).
+pub const N_R0_IQ2_S_SPLIT: c_int = 8;
+/// Mirrors `N_R0_IQ3_XXS` (ggml-metal-impl.h:83 @b29c606e2).
 pub const N_R0_IQ3_XXS: c_int = 4;
-/// Mirrors `N_SG_IQ3_XXS` (ggml-metal-impl.h:79 @5266f24da).
+/// Mirrors `N_SG_IQ3_XXS` (ggml-metal-impl.h:84 @b29c606e2).
 pub const N_SG_IQ3_XXS: c_int = 2;
-/// Mirrors `N_R0_IQ3_S` (ggml-metal-impl.h:81 @5266f24da).
+/// Mirrors `N_R0_IQ3_XXS_SPLIT` (ggml-metal-impl.h:85 @b29c606e2).
+pub const N_R0_IQ3_XXS_SPLIT: c_int = 8;
+/// Mirrors `N_R0_IQ3_S` (ggml-metal-impl.h:87 @b29c606e2).
 pub const N_R0_IQ3_S: c_int = 4;
-/// Mirrors `N_SG_IQ3_S` (ggml-metal-impl.h:82 @5266f24da).
+/// Mirrors `N_SG_IQ3_S` (ggml-metal-impl.h:88 @b29c606e2).
 pub const N_SG_IQ3_S: c_int = 2;
-/// Mirrors `N_R0_IQ4_NL` (ggml-metal-impl.h:84 @5266f24da).
+/// Mirrors `N_R0_IQ3_S_SPLIT` (ggml-metal-impl.h:89 @b29c606e2).
+pub const N_R0_IQ3_S_SPLIT: c_int = 8;
+/// Mirrors `N_R0_IQ4_NL` (ggml-metal-impl.h:91 @b29c606e2).
 pub const N_R0_IQ4_NL: c_int = 2;
-/// Mirrors `N_SG_IQ4_NL` (ggml-metal-impl.h:85 @5266f24da).
+/// Mirrors `N_SG_IQ4_NL` (ggml-metal-impl.h:92 @b29c606e2).
 pub const N_SG_IQ4_NL: c_int = 2;
-/// Mirrors `N_R0_IQ4_XS` (ggml-metal-impl.h:87 @5266f24da).
+/// Mirrors `N_R0_IQ4_XS` (ggml-metal-impl.h:94 @b29c606e2).
 pub const N_R0_IQ4_XS: c_int = 2;
-/// Mirrors `N_SG_IQ4_XS` (ggml-metal-impl.h:88 @5266f24da).
+/// Mirrors `N_SG_IQ4_XS` (ggml-metal-impl.h:95 @b29c606e2).
 pub const N_SG_IQ4_XS: c_int = 2;
-/// Mirrors `N_R0_TQ2_0` (ggml-metal-impl.h:90 @5266f24da).
+/// Mirrors `N_R0_TQ2_0` (ggml-metal-impl.h:97 @b29c606e2).
 pub const N_R0_TQ2_0: c_int = 4;
-/// Mirrors `N_SG_TQ2_0` (ggml-metal-impl.h:91 @5266f24da).
+/// Mirrors `N_SG_TQ2_0` (ggml-metal-impl.h:98 @b29c606e2).
 pub const N_SG_TQ2_0: c_int = 2;
-/// Mirrors `FC_FLASH_ATTN_EXT_PAD` (ggml-metal-impl.h:94 @5266f24da).
+/// Mirrors `FC_FLASH_ATTN_EXT_PAD` (ggml-metal-impl.h:101 @b29c606e2).
 pub const FC_FLASH_ATTN_EXT_PAD: c_int = 100;
-/// Mirrors `FC_FLASH_ATTN_EXT_BLK` (ggml-metal-impl.h:95 @5266f24da).
+/// Mirrors `FC_FLASH_ATTN_EXT_BLK` (ggml-metal-impl.h:102 @b29c606e2).
 pub const FC_FLASH_ATTN_EXT_BLK: c_int = 200;
-/// Mirrors `FC_FLASH_ATTN_EXT` (ggml-metal-impl.h:96 @5266f24da).
+/// Mirrors `FC_FLASH_ATTN_EXT` (ggml-metal-impl.h:103 @b29c606e2).
 pub const FC_FLASH_ATTN_EXT: c_int = 300;
-/// Mirrors `FC_FLASH_ATTN_EXT_VEC` (ggml-metal-impl.h:97 @5266f24da).
+/// Mirrors `FC_FLASH_ATTN_EXT_VEC` (ggml-metal-impl.h:104 @b29c606e2).
 pub const FC_FLASH_ATTN_EXT_VEC: c_int = 400;
-/// Mirrors `FC_FLASH_ATTN_EXT_VEC_REDUCE` (ggml-metal-impl.h:98 @5266f24da).
+/// Mirrors `FC_FLASH_ATTN_EXT_VEC_REDUCE` (ggml-metal-impl.h:105 @b29c606e2).
 pub const FC_FLASH_ATTN_EXT_VEC_REDUCE: c_int = 500;
-/// Mirrors `FC_MUL_MV` (ggml-metal-impl.h:99 @5266f24da).
+/// Mirrors `FC_MUL_MV` (ggml-metal-impl.h:106 @b29c606e2).
 pub const FC_MUL_MV: c_int = 600;
-/// Mirrors `FC_MUL_MM` (ggml-metal-impl.h:100 @5266f24da).
+/// Mirrors `FC_MUL_MM` (ggml-metal-impl.h:107 @b29c606e2).
 pub const FC_MUL_MM: c_int = 700;
-/// Mirrors `FC_ROPE` (ggml-metal-impl.h:101 @5266f24da).
+/// Mirrors `FC_ROPE` (ggml-metal-impl.h:108 @b29c606e2).
 pub const FC_ROPE: c_int = 800;
-/// Mirrors `FC_SSM_CONV` (ggml-metal-impl.h:102 @5266f24da).
+/// Mirrors `FC_SSM_CONV` (ggml-metal-impl.h:109 @b29c606e2).
 pub const FC_SSM_CONV: c_int = 900;
-/// Mirrors `FC_SOLVE_TRI` (ggml-metal-impl.h:103 @5266f24da).
+/// Mirrors `FC_SOLVE_TRI` (ggml-metal-impl.h:110 @b29c606e2).
 pub const FC_SOLVE_TRI: c_int = 1000;
-/// Mirrors `FC_COUNT_EQUAL` (ggml-metal-impl.h:104 @5266f24da).
+/// Mirrors `FC_COUNT_EQUAL` (ggml-metal-impl.h:111 @b29c606e2).
 pub const FC_COUNT_EQUAL: c_int = 1100;
-/// Mirrors `FC_UNARY` (ggml-metal-impl.h:105 @5266f24da).
+/// Mirrors `FC_UNARY` (ggml-metal-impl.h:112 @b29c606e2).
 pub const FC_UNARY: c_int = 1200;
-/// Mirrors `FC_BIN` (ggml-metal-impl.h:106 @5266f24da).
+/// Mirrors `FC_BIN` (ggml-metal-impl.h:113 @b29c606e2).
 pub const FC_BIN: c_int = 1300;
-/// Mirrors `FC_SUM_ROWS` (ggml-metal-impl.h:107 @5266f24da).
+/// Mirrors `FC_SUM_ROWS` (ggml-metal-impl.h:114 @b29c606e2).
 pub const FC_SUM_ROWS: c_int = 1400;
-/// Mirrors `FC_UPSCALE` (ggml-metal-impl.h:108 @5266f24da).
+/// Mirrors `FC_UPSCALE` (ggml-metal-impl.h:115 @b29c606e2).
 pub const FC_UPSCALE: c_int = 1500;
-/// Mirrors `FC_GATED_DELTA_NET` (ggml-metal-impl.h:109 @5266f24da).
+/// Mirrors `FC_GATED_DELTA_NET` (ggml-metal-impl.h:116 @b29c606e2).
 pub const FC_GATED_DELTA_NET: c_int = 1600;
-/// Mirrors `OP_FLASH_ATTN_EXT_NQPSG` (ggml-metal-impl.h:112 @5266f24da).
+/// Mirrors `OP_FLASH_ATTN_EXT_NQPSG` (ggml-metal-impl.h:119 @b29c606e2).
 pub const OP_FLASH_ATTN_EXT_NQPSG: c_int = 8;
-/// Mirrors `OP_FLASH_ATTN_EXT_NCPSG` (ggml-metal-impl.h:113 @5266f24da).
+/// Mirrors `OP_FLASH_ATTN_EXT_NCPSG` (ggml-metal-impl.h:120 @b29c606e2).
 pub const OP_FLASH_ATTN_EXT_NCPSG: c_int = 64;
-/// Mirrors `OP_FLASH_ATTN_EXT_VEC_NQPSG` (ggml-metal-impl.h:115 @5266f24da).
+/// Mirrors `OP_FLASH_ATTN_EXT_VEC_NQPSG` (ggml-metal-impl.h:122 @b29c606e2).
 pub const OP_FLASH_ATTN_EXT_VEC_NQPSG: c_int = 1;
-/// Mirrors `OP_FLASH_ATTN_EXT_VEC_NCPSG` (ggml-metal-impl.h:116 @5266f24da).
+/// Mirrors `OP_FLASH_ATTN_EXT_VEC_NCPSG` (ggml-metal-impl.h:123 @b29c606e2).
 pub const OP_FLASH_ATTN_EXT_VEC_NCPSG: c_int = 32;
-/// Mirrors `OP_LIGHTNING_INDEXER_DK` (ggml-metal-impl.h:118 @5266f24da).
+/// Mirrors `OP_LIGHTNING_INDEXER_DK` (ggml-metal-impl.h:125 @b29c606e2).
 pub const OP_LIGHTNING_INDEXER_DK: c_int = 128;
-/// Mirrors `OP_LIGHTNING_INDEXER_NH` (ggml-metal-impl.h:119 @5266f24da).
+/// Mirrors `OP_LIGHTNING_INDEXER_NH` (ggml-metal-impl.h:126 @b29c606e2).
 pub const OP_LIGHTNING_INDEXER_NH: c_int = 64;
-/// Mirrors `OP_LIGHTNING_INDEXER_NHPTG` (ggml-metal-impl.h:120 @5266f24da).
+/// Mirrors `OP_LIGHTNING_INDEXER_NHPTG` (ggml-metal-impl.h:127 @b29c606e2).
 pub const OP_LIGHTNING_INDEXER_NHPTG: c_int = 8;
-/// Mirrors `OP_LIGHTNING_INDEXER_NKPSG` (ggml-metal-impl.h:121 @5266f24da).
+/// Mirrors `OP_LIGHTNING_INDEXER_NKPSG` (ggml-metal-impl.h:128 @b29c606e2).
 pub const OP_LIGHTNING_INDEXER_NKPSG: c_int = 8;
-/// Mirrors `OP_LIGHTNING_INDEXER_NSG` (ggml-metal-impl.h:122 @5266f24da).
+/// Mirrors `OP_LIGHTNING_INDEXER_NSG` (ggml-metal-impl.h:129 @b29c606e2).
 pub const OP_LIGHTNING_INDEXER_NSG: c_int = 8;
-/// Mirrors `OP_LIGHTNING_INDEXER_NBPTG` (ggml-metal-impl.h:123 @5266f24da).
+/// Mirrors `OP_LIGHTNING_INDEXER_NBPTG` (ggml-metal-impl.h:130 @b29c606e2).
 pub const OP_LIGHTNING_INDEXER_NBPTG: c_int = 8;
-/// Mirrors `OP_UNARY_NUM_SCALE` (ggml-metal-impl.h:125 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_SCALE` (ggml-metal-impl.h:132 @b29c606e2).
 pub const OP_UNARY_NUM_SCALE: c_int = 10;
-/// Mirrors `OP_UNARY_NUM_FILL` (ggml-metal-impl.h:126 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_FILL` (ggml-metal-impl.h:133 @b29c606e2).
 pub const OP_UNARY_NUM_FILL: c_int = 11;
-/// Mirrors `OP_UNARY_NUM_CLAMP` (ggml-metal-impl.h:127 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_CLAMP` (ggml-metal-impl.h:134 @b29c606e2).
 pub const OP_UNARY_NUM_CLAMP: c_int = 12;
-/// Mirrors `OP_UNARY_NUM_SQR` (ggml-metal-impl.h:128 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_SQR` (ggml-metal-impl.h:135 @b29c606e2).
 pub const OP_UNARY_NUM_SQR: c_int = 13;
-/// Mirrors `OP_UNARY_NUM_SQRT` (ggml-metal-impl.h:129 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_SQRT` (ggml-metal-impl.h:136 @b29c606e2).
 pub const OP_UNARY_NUM_SQRT: c_int = 14;
-/// Mirrors `OP_UNARY_NUM_SIN` (ggml-metal-impl.h:130 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_SIN` (ggml-metal-impl.h:137 @b29c606e2).
 pub const OP_UNARY_NUM_SIN: c_int = 15;
-/// Mirrors `OP_UNARY_NUM_COS` (ggml-metal-impl.h:131 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_COS` (ggml-metal-impl.h:138 @b29c606e2).
 pub const OP_UNARY_NUM_COS: c_int = 16;
-/// Mirrors `OP_UNARY_NUM_LOG` (ggml-metal-impl.h:132 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_LOG` (ggml-metal-impl.h:139 @b29c606e2).
 pub const OP_UNARY_NUM_LOG: c_int = 17;
-/// Mirrors `OP_UNARY_NUM_LEAKY_RELU` (ggml-metal-impl.h:133 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_LEAKY_RELU` (ggml-metal-impl.h:140 @b29c606e2).
 pub const OP_UNARY_NUM_LEAKY_RELU: c_int = 18;
-/// Mirrors `OP_UNARY_NUM_TANH` (ggml-metal-impl.h:135 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_TANH` (ggml-metal-impl.h:142 @b29c606e2).
 pub const OP_UNARY_NUM_TANH: c_int = 100;
-/// Mirrors `OP_UNARY_NUM_RELU` (ggml-metal-impl.h:136 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_RELU` (ggml-metal-impl.h:143 @b29c606e2).
 pub const OP_UNARY_NUM_RELU: c_int = 101;
-/// Mirrors `OP_UNARY_NUM_SIGMOID` (ggml-metal-impl.h:137 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_SIGMOID` (ggml-metal-impl.h:144 @b29c606e2).
 pub const OP_UNARY_NUM_SIGMOID: c_int = 102;
-/// Mirrors `OP_UNARY_NUM_GELU` (ggml-metal-impl.h:138 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_GELU` (ggml-metal-impl.h:145 @b29c606e2).
 pub const OP_UNARY_NUM_GELU: c_int = 103;
-/// Mirrors `OP_UNARY_NUM_GELU_ERF` (ggml-metal-impl.h:139 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_GELU_ERF` (ggml-metal-impl.h:146 @b29c606e2).
 pub const OP_UNARY_NUM_GELU_ERF: c_int = 104;
-/// Mirrors `OP_UNARY_NUM_GELU_QUICK` (ggml-metal-impl.h:140 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_GELU_QUICK` (ggml-metal-impl.h:147 @b29c606e2).
 pub const OP_UNARY_NUM_GELU_QUICK: c_int = 105;
-/// Mirrors `OP_UNARY_NUM_SILU` (ggml-metal-impl.h:141 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_SILU` (ggml-metal-impl.h:148 @b29c606e2).
 pub const OP_UNARY_NUM_SILU: c_int = 106;
-/// Mirrors `OP_UNARY_NUM_ELU` (ggml-metal-impl.h:142 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_ELU` (ggml-metal-impl.h:149 @b29c606e2).
 pub const OP_UNARY_NUM_ELU: c_int = 107;
-/// Mirrors `OP_UNARY_NUM_NEG` (ggml-metal-impl.h:143 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_NEG` (ggml-metal-impl.h:150 @b29c606e2).
 pub const OP_UNARY_NUM_NEG: c_int = 108;
-/// Mirrors `OP_UNARY_NUM_ABS` (ggml-metal-impl.h:144 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_ABS` (ggml-metal-impl.h:151 @b29c606e2).
 pub const OP_UNARY_NUM_ABS: c_int = 109;
-/// Mirrors `OP_UNARY_NUM_SGN` (ggml-metal-impl.h:145 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_SGN` (ggml-metal-impl.h:152 @b29c606e2).
 pub const OP_UNARY_NUM_SGN: c_int = 110;
-/// Mirrors `OP_UNARY_NUM_STEP` (ggml-metal-impl.h:146 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_STEP` (ggml-metal-impl.h:153 @b29c606e2).
 pub const OP_UNARY_NUM_STEP: c_int = 111;
-/// Mirrors `OP_UNARY_NUM_HARDSWISH` (ggml-metal-impl.h:147 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_HARDSWISH` (ggml-metal-impl.h:154 @b29c606e2).
 pub const OP_UNARY_NUM_HARDSWISH: c_int = 112;
-/// Mirrors `OP_UNARY_NUM_HARDSIGMOID` (ggml-metal-impl.h:148 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_HARDSIGMOID` (ggml-metal-impl.h:155 @b29c606e2).
 pub const OP_UNARY_NUM_HARDSIGMOID: c_int = 113;
-/// Mirrors `OP_UNARY_NUM_EXP` (ggml-metal-impl.h:149 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_EXP` (ggml-metal-impl.h:156 @b29c606e2).
 pub const OP_UNARY_NUM_EXP: c_int = 114;
-/// Mirrors `OP_UNARY_NUM_SOFTPLUS` (ggml-metal-impl.h:150 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_SOFTPLUS` (ggml-metal-impl.h:157 @b29c606e2).
 pub const OP_UNARY_NUM_SOFTPLUS: c_int = 115;
-/// Mirrors `OP_UNARY_NUM_EXPM1` (ggml-metal-impl.h:151 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_EXPM1` (ggml-metal-impl.h:158 @b29c606e2).
 pub const OP_UNARY_NUM_EXPM1: c_int = 116;
-/// Mirrors `OP_UNARY_NUM_FLOOR` (ggml-metal-impl.h:152 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_FLOOR` (ggml-metal-impl.h:159 @b29c606e2).
 pub const OP_UNARY_NUM_FLOOR: c_int = 117;
-/// Mirrors `OP_UNARY_NUM_CEIL` (ggml-metal-impl.h:153 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_CEIL` (ggml-metal-impl.h:160 @b29c606e2).
 pub const OP_UNARY_NUM_CEIL: c_int = 118;
-/// Mirrors `OP_UNARY_NUM_ROUND` (ggml-metal-impl.h:154 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_ROUND` (ggml-metal-impl.h:161 @b29c606e2).
 pub const OP_UNARY_NUM_ROUND: c_int = 119;
-/// Mirrors `OP_UNARY_NUM_TRUNC` (ggml-metal-impl.h:155 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_TRUNC` (ggml-metal-impl.h:162 @b29c606e2).
 pub const OP_UNARY_NUM_TRUNC: c_int = 120;
-/// Mirrors `OP_UNARY_NUM_XIELU` (ggml-metal-impl.h:156 @5266f24da).
+/// Mirrors `OP_UNARY_NUM_XIELU` (ggml-metal-impl.h:163 @b29c606e2).
 pub const OP_UNARY_NUM_XIELU: c_int = 121;
-/// Mirrors `OP_SUM_ROWS_NUM_SUM_ROWS` (ggml-metal-impl.h:158 @5266f24da).
+/// Mirrors `OP_SUM_ROWS_NUM_SUM_ROWS` (ggml-metal-impl.h:165 @b29c606e2).
 pub const OP_SUM_ROWS_NUM_SUM_ROWS: c_int = 10;
-/// Mirrors `OP_SUM_ROWS_NUM_MEAN` (ggml-metal-impl.h:159 @5266f24da).
+/// Mirrors `OP_SUM_ROWS_NUM_MEAN` (ggml-metal-impl.h:166 @b29c606e2).
 pub const OP_SUM_ROWS_NUM_MEAN: c_int = 11;
-/// Mirrors `OP_SSM_SCAN_SSD_CS` (ggml-metal-impl.h:161 @5266f24da): the SSD
+/// Mirrors `OP_SSM_SCAN_SSD_CS` (ggml-metal-impl.h:168 @b29c606e2): the SSD
 /// scan's chunk size.
 pub const OP_SSM_SCAN_SSD_CS: c_int = 64;
-/// Mirrors `OP_SSM_SCAN_SSD_HD` (ggml-metal-impl.h:162 @5266f24da): the head
+/// Mirrors `OP_SSM_SCAN_SSD_HD` (ggml-metal-impl.h:169 @b29c606e2): the head
 /// dimension the MMA kernel is specialised for.
 pub const OP_SSM_SCAN_SSD_HD: c_int = 64;
-/// Mirrors `OP_SSM_SCAN_SSD_NSG` (ggml-metal-impl.h:163 @5266f24da): simdgroups
+/// Mirrors `OP_SSM_SCAN_SSD_NSG` (ggml-metal-impl.h:170 @b29c606e2): simdgroups
 /// per threadgroup.
 pub const OP_SSM_SCAN_SSD_NSG: c_int = 4;
-/// Mirrors `N_MM_NK_TOTAL` (ggml-metal-impl.h:10 @5266f24da).
+/// Mirrors `N_MM_NK_TOTAL` (ggml-metal-impl.h:10 @b29c606e2).
 ///
 /// The one computed define: the C writes `(SZ_SIMDGROUP * N_MM_NK)`, kept as an
 /// expression here so it tracks its operands.
@@ -268,7 +282,7 @@ pub const N_MM_NK_TOTAL: c_int = SZ_SIMDGROUP * N_MM_NK;
 
 /// The count the gate cross-checks, so a constant added upstream and not
 /// here shows up as a mismatch rather than as nothing.
-pub const count: usize = 115;
+pub const count: usize = 122;
 
 // -----------------------------------------------------------------------------
 // The gate's view
@@ -314,18 +328,25 @@ const all = [_]Entry{
     .{ .name = "N_SG_Q6_K", .value = 2 },
     .{ .name = "N_R0_IQ1_S", .value = 4 },
     .{ .name = "N_SG_IQ1_S", .value = 2 },
+    .{ .name = "N_R0_IQ1_S_SPLIT", .value = 8 },
     .{ .name = "N_R0_IQ1_M", .value = 4 },
     .{ .name = "N_SG_IQ1_M", .value = 2 },
+    .{ .name = "N_R0_IQ1_M_SPLIT", .value = 8 },
     .{ .name = "N_R0_IQ2_XXS", .value = 4 },
     .{ .name = "N_SG_IQ2_XXS", .value = 2 },
+    .{ .name = "N_R0_IQ2_XXS_SPLIT", .value = 8 },
     .{ .name = "N_R0_IQ2_XS", .value = 4 },
     .{ .name = "N_SG_IQ2_XS", .value = 2 },
+    .{ .name = "N_R0_IQ2_XS_SPLIT", .value = 8 },
     .{ .name = "N_R0_IQ2_S", .value = 4 },
     .{ .name = "N_SG_IQ2_S", .value = 2 },
+    .{ .name = "N_R0_IQ2_S_SPLIT", .value = 8 },
     .{ .name = "N_R0_IQ3_XXS", .value = 4 },
     .{ .name = "N_SG_IQ3_XXS", .value = 2 },
+    .{ .name = "N_R0_IQ3_XXS_SPLIT", .value = 8 },
     .{ .name = "N_R0_IQ3_S", .value = 4 },
     .{ .name = "N_SG_IQ3_S", .value = 2 },
+    .{ .name = "N_R0_IQ3_S_SPLIT", .value = 8 },
     .{ .name = "N_R0_IQ4_NL", .value = 2 },
     .{ .name = "N_SG_IQ4_NL", .value = 2 },
     .{ .name = "N_R0_IQ4_XS", .value = 2 },

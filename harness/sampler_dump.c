@@ -544,6 +544,9 @@ static const struct grammar_case grammars[] = {
     { "noroot",  "start ::= \"x\"", "root" },
     { "badesc",  "root ::= \"\\q\"", "root" },
     { "toomany", "root ::= \"a\"{3000}", "root" },
+    // Exactly at MAX_REPETITION_THRESHOLD: accepted since v0.4.1, whose
+    // check is `>` where v0.4.0's was `>=`.
+    { "edge2000", "root ::= \"a\"{2000}", "root" },
     // Ranges just above the 2- and 3-byte UTF-8 floors, which a token ending
     // in a bare 0xE0 or 0xF0 lead byte is checked against as a partial
     // sequence.

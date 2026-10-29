@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/jais2.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/jais2.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_jais2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_jais2`'s `load_arch_hparams` (models/jais2.cpp:3 @5266f24da).
+/// Ports `llama_model_jais2`'s `load_arch_hparams` (models/jais2.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
@@ -32,7 +32,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_jais2`'s `load_arch_tensors` (models/jais2.cpp:13 @5266f24da).
+/// Ports `llama_model_jais2`'s `load_arch_tensors` (models/jais2.cpp:13 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -53,16 +53,9 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         layer.attn_norm = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
         layer.attn_norm_b = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "bias", .bid = i }, &.{l.n_embd}, 0, exc);
 
-        layer.wq = try self.createTensor(.{ .tensor = .attn_q, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd_head_k * l.n_head }, 0, exc);
-        layer.wk = try self.createTensor(.{ .tensor = .attn_k, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd_k_gqa }, 0, exc);
-        layer.wv = try self.createTensor(.{ .tensor = .attn_v, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd_v_gqa }, 0, exc);
+        try self.createTensorQkv(layer, i, l.n_embd, l.n_embd_head_k * l.n_head, l.n_embd_k_gqa, l.n_embd_v_gqa, 0, exc);
         layer.wo = try self.createTensor(.{ .tensor = .attn_out, .suffix = "weight", .bid = i }, &.{ l.n_embd_head_k * l.n_head, l.n_embd }, 0, exc);
 
-        // The attention biases, all `n_embd` wide: the projections' output
-        // dimension.
-        layer.wq_b = try self.createTensor(.{ .tensor = .attn_q, .suffix = "bias", .bid = i }, &.{l.n_embd}, 0, exc);
-        layer.wk_b = try self.createTensor(.{ .tensor = .attn_k, .suffix = "bias", .bid = i }, &.{l.n_embd}, 0, exc);
-        layer.wv_b = try self.createTensor(.{ .tensor = .attn_v, .suffix = "bias", .bid = i }, &.{l.n_embd}, 0, exc);
         layer.wo_b = try self.createTensor(.{ .tensor = .attn_out, .suffix = "bias", .bid = i }, &.{l.n_embd}, 0, exc);
 
         layer.ffn_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
@@ -76,21 +69,21 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_jais2`'s `build_arch_graph` (models/jais2.cpp:54 @5266f24da).
+/// Ports `llama_model_jais2`'s `build_arch_graph` (models/jais2.cpp:48 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_jais2`'s `graph` (models/jais2.cpp:60
-/// @5266f24da): LayerNorm rather than RMSNorm, the squared-ReLU activation,
+/// Ports the constructor of `llama_model_jais2`'s `graph` (models/jais2.cpp:54
+/// @b29c606e2): LayerNorm rather than RMSNorm, the squared-ReLU activation,
 /// separate Q, K and V, and RoPE.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/jais2.cpp", 63, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/jais2.cpp", 64, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/jais2.cpp", 57, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/jais2.cpp", 58, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 

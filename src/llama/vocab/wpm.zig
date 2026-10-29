@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.4.0 (`5266f24da`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.4.1 (`b29c606e2`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -20,8 +20,8 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `llm_tokenizer_wpm_session`'s `tokenize` (llama-vocab.cpp:771
-/// @5266f24da).
+/// Ports `llm_tokenizer_wpm_session`'s `tokenize` (llama-vocab.cpp:781
+/// @b29c606e2).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary.
@@ -79,8 +79,8 @@ pub fn tokenize(vocab: *const Vocab, text: []const u8, output: *std.ArrayList(To
     }
 }
 
-/// Ports `llm_tokenizer_wpm_session`'s `preprocess` (llama-vocab.cpp:818
-/// @5266f24da): NFD and accent stripping if asked, lowercasing if asked,
+/// Ports `llm_tokenizer_wpm_session`'s `preprocess` (llama-vocab.cpp:828
+/// @b29c606e2): NFD and accent stripping if asked, lowercasing if asked,
 /// whitespace dropped, controls dropped, and punctuation, ASCII symbols and
 /// Chinese characters each a word of their own.
 ///
@@ -139,8 +139,8 @@ fn last(words: *std.ArrayList(std.ArrayList(u8))) *std.ArrayList(u8) {
     return &words.items[words.items.len - 1];
 }
 
-/// Ports `llm_tokenizer_wpm_session`'s `is_chinese_char` (llama-vocab.cpp:863
-/// @5266f24da). Extension E starts at 0x2B920 here, as in the HF Rust code
+/// Ports `llm_tokenizer_wpm_session`'s `is_chinese_char` (llama-vocab.cpp:873
+/// @b29c606e2). Extension E starts at 0x2B920 here, as in the HF Rust code
 /// it follows, not at 0x2B820.
 pub fn isChineseChar(cpt: u32) bool {
     return (cpt >= 0x04E00 and cpt <= 0x09FFF) or

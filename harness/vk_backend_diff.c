@@ -303,18 +303,37 @@ static void ask_offload(ggml_backend_dev_t dev, struct ggml_context * ctx) {
  * view sources, never data. */
 
 /* The scheduler's allocation-dependency callback (ggml-backend.cpp, since
- * v0.4.0). Vulkan ignores it on both sides; printing each call makes a side
- * that starts using it differ from one that does not. */
+ * v0.4.0). Vulkan calls it from v0.4.1 on, for the external inputs of each
+ * topk_moe pattern it keeps whole; each call is printed with both tensors
+ * as their index in the original node order (a leaf as its name), so the
+ * calls, their order and their targets are compared. */
+struct alloc_dep_ctx {
+    struct ggml_tensor ** orig;
+    int n;
+};
+
+static void print_tensor_ref(const struct alloc_dep_ctx * c, const struct ggml_tensor * t) {
+    for (int k = 0; k < c->n; k++) {
+        if (c->orig[k] == t) { printf("node%d", k); return; }
+    }
+    printf("leaf[%s %lld,%lld,%lld,%lld]", t->name, (long long) t->ne[0], (long long) t->ne[1], (long long) t->ne[2], (long long) t->ne[3]);
+}
+
 static void record_alloc_dep(void * user_data, struct ggml_tensor * tensor, struct ggml_tensor * until) {
-    (void) user_data;
-    printf("add_alloc_dep %s until %s\n", tensor->name, until->name);
+    const struct alloc_dep_ctx * c = (const struct alloc_dep_ctx *) user_data;
+    printf("add_alloc_dep ");
+    print_tensor_ref(c, tensor);
+    printf(" until ");
+    print_tensor_ref(c, until);
+    printf("\n");
 }
 
 static void print_order(size_t i, const char * name, struct ggml_cgraph * g, ggml_backend_t be) {
     const int n = ggml_graph_n_nodes(g);
     struct ggml_tensor ** orig = (struct ggml_tensor **) malloc(sizeof(*orig) * (size_t) n);
     for (int k = 0; k < n; k++) orig[k] = ggml_graph_node(g, k);
-    struct ggml_backend_graph_optimize_params params = { record_alloc_dep, NULL };
+    struct alloc_dep_ctx dep = { orig, n };
+    struct ggml_backend_graph_optimize_params params = { record_alloc_dep, &dep };
     be->iface.graph_optimize(be, g, &params);
     printf("dev %zu graph_optimize %s (%d nodes):", i, name, n);
     for (int k = 0; k < n; k++) {
@@ -453,14 +472,75 @@ static struct ggml_cgraph * graph_snake_tail(struct ggml_context * ctx) {
     return g;
 }
 
+/* The v0.4.1 fusions the reorder keeps together or pulls forward:
+ * RMS_NORM+MUL+ADD(+MUL) and RMS_NORM+VIEW+SET_ROWS kept whole; a MUL that
+ * consumes a GELU/SILU a few nodes later, pulled forward when its other
+ * operand is a weight or already scheduled; an RMS_NORM's MUL found past
+ * independent nodes; a ROPE+VIEW+SET_ROWS whose SET_ROWS sits beyond an
+ * unrelated node; and an IMROPE rope. */
+static struct ggml_cgraph * graph_fusions_041(struct ggml_context * ctx) {
+    const int64_t d = 32, nt = 4, hd = 8, nh = 4;
+    struct ggml_cgraph * g = ggml_new_graph(ctx);
+    struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, d, nt);
+    struct ggml_tensor * w = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, d);
+    struct ggml_tensor * res = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, d, nt);
+    struct ggml_tensor * sc = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+    struct ggml_tensor * rows = ggml_new_tensor_1d(ctx, GGML_TYPE_I64, nt);
+    struct ggml_tensor * pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, nt);
+    /* RMS_NORM + MUL + ADD + MUL, consecutive */
+    struct ggml_tensor * h = ggml_mul(ctx, ggml_add(ctx, ggml_mul(ctx, ggml_rms_norm(ctx, x, 1e-6f), w), res), sc);
+    ggml_build_forward_expand(g, h);
+    /* RMS_NORM + MUL + ADD, with independent work expanded first */
+    ggml_build_forward_expand(g, ggml_sqr(ctx, res));
+    struct ggml_tensor * h2 = ggml_add(ctx, ggml_mul(ctx, ggml_rms_norm(ctx, h, 1e-6f), w), x);
+    ggml_build_forward_expand(g, h2);
+    /* RMS_NORM, an unrelated node, then its MUL */
+    struct ggml_tensor * n3 = ggml_rms_norm(ctx, h2, 1e-6f);
+    ggml_build_forward_expand(g, n3);
+    ggml_build_forward_expand(g, ggml_scale(ctx, res, 3.0f));
+    ggml_build_forward_expand(g, ggml_mul(ctx, n3, w));
+    /* RMS_NORM + VIEW + SET_ROWS with a node between the view and the set_rows */
+    struct ggml_tensor * r4 = ggml_rms_norm(ctx, ggml_reshape_3d(ctx, h2, hd, nh, nt), 1e-6f);
+    struct ggml_tensor * v4 = ggml_view_2d(ctx, r4, d, nt, r4->nb[2], 0);
+    ggml_build_forward_expand(g, v4);
+    ggml_build_forward_expand(g, ggml_sqr(ctx, x));
+    struct ggml_tensor * cache = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, d, 16);
+    ggml_build_forward_expand(g, ggml_set_rows(ctx, cache, v4, rows));
+    /* GELU then, a few nodes later, the MUL that consumes it with a weight;
+     * SILU whose MUL partner is computed only later */
+    struct ggml_tensor * ge = ggml_gelu(ctx, h);
+    ggml_build_forward_expand(g, ge);
+    ggml_build_forward_expand(g, ggml_sqr(ctx, h2));
+    ggml_build_forward_expand(g, ggml_scale(ctx, h, 0.25f));
+    ggml_build_forward_expand(g, ggml_mul(ctx, ge, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, d, nt)));
+    struct ggml_tensor * si = ggml_silu(ctx, h2);
+    ggml_build_forward_expand(g, si);
+    struct ggml_tensor * late = ggml_sqr(ctx, h);
+    ggml_build_forward_expand(g, late);
+    ggml_build_forward_expand(g, ggml_mul(ctx, late, si));
+    /* ROPE (imrope) + VIEW + SET_ROWS, the SET_ROWS past an unrelated node */
+    int sections[4] = { 1, 1, 2, 0 };
+    struct ggml_tensor * q = ggml_reshape_3d(ctx, h, hd, nh, nt);
+    struct ggml_tensor * pos4 = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, nt * 4);
+    struct ggml_tensor * ro = ggml_rope_multi(ctx, q, pos4, NULL, (int) hd, sections, GGML_ROPE_TYPE_IMROPE, 0, 10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f);
+    struct ggml_tensor * vr = ggml_view_2d(ctx, ro, d, nt, ro->nb[2], 0);
+    ggml_build_forward_expand(g, vr);
+    ggml_build_forward_expand(g, ggml_scale(ctx, x, 5.0f));
+    struct ggml_tensor * cache2 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, d, 16);
+    ggml_build_forward_expand(g, ggml_set_rows(ctx, cache2, vr, rows));
+    (void) pos;
+    return g;
+}
+
 static void ask_graph_optimize(size_t i, ggml_backend_dev_t dev) {
     ggml_backend_t be = ggml_backend_dev_init(dev, NULL);
     if (be == NULL) return;
-    struct ggml_init_params params = { 4096 * ggml_tensor_overhead() + 8 * ggml_graph_overhead(), NULL, true };
+    struct ggml_init_params params = { 4096 * ggml_tensor_overhead() + 9 * ggml_graph_overhead(), NULL, true };
     struct ggml_context * ctx = ggml_init(params);
     print_order(i, "decoder", graph_decoder(ctx), be);
     print_order(i, "patterns", graph_patterns(ctx), be);
     print_order(i, "snake_tail", graph_snake_tail(ctx), be);
+    print_order(i, "fusions_041", graph_fusions_041(ctx), be);
     for (uint32_t seed = 1; seed <= 4; seed++) {
         char name[32];
         snprintf(name, sizeof(name), "random%u", seed);

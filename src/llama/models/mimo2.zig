@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mimo2.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/mimo2.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_mimo2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and its `graph_mtp`.
 
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_mimo2`'s `load_arch_hparams` (models/mimo2.cpp:3 @5266f24da).
+/// Ports `llama_model_mimo2`'s `load_arch_hparams` (models/mimo2.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -35,7 +35,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
     if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
 
-    _ = try meta.getKeyOrArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, hp.nLayer(), true, exc);
+    _ = try meta.getArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, true, exc);
 
     if (try meta.getKey(f32, .attention_value_scale, false, exc)) |value_scale| {
         if (value_scale != 1.0) hp.f_attn_value_scale = value_scale;
@@ -47,7 +47,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_mimo2`'s `load_arch_tensors` (models/mimo2.cpp:25 @5266f24da).
+/// Ports `llama_model_mimo2`'s `load_arch_tensors` (models/mimo2.cpp:25 @b29c606e2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -111,7 +111,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_mimo2`'s `build_arch_graph` (models/mimo2.cpp:84 @5266f24da):
+/// Ports `llama_model_mimo2`'s `build_arch_graph` (models/mimo2.cpp:84 @b29c606e2):
 /// the MTP draft head for that graph type, the main model otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -119,7 +119,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_mimo2`'s `graph`
-/// (models/mimo2.cpp:91 @5266f24da).
+/// (models/mimo2.cpp:91 @b29c606e2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -273,7 +273,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_mimo2`'s `graph_mtp`
-/// (models/mimo2.cpp:261 @5266f24da).
+/// (models/mimo2.cpp:261 @b29c606e2).
 ///
 /// Mirrors MiMo's appended NextN block: normalize and fuse the token and
 /// hidden inputs, run the decoder block, expose its state before the head

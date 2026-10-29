@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/granite-moe.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_granite_moe`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/granite-moe.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_granite_moe`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, which builds
 //! `llama_model_granite`'s `graph` (`granite.zig`).
 
@@ -20,7 +20,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_granite_moe`'s `load_arch_hparams` (models/granite-moe.cpp:3 @5266f24da).
+/// Ports `llama_model_granite_moe`'s `load_arch_hparams` (models/granite-moe.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -32,8 +32,8 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(f32, .attention_scale, false, exc)) |v| hp.f_attention_scale = v;
 
     self.type = switch (hp.nLayer()) {
-        32 => .@"3b",
-        40 => .@"3b",
+        24 => .@"1b_a400m",
+        32 => .@"3b_a800m",
         // Add additional layer/vocab/etc checks here for other model sizes.
         else => .unknown,
     };
@@ -42,7 +42,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
 }
 
-/// Ports `llama_model_granite_moe`'s `load_arch_tensors` (models/granite-moe.cpp:21 @5266f24da).
+/// Ports `llama_model_granite_moe`'s `load_arch_tensors` (models/granite-moe.cpp:21 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -108,7 +108,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_granite_moe`'s `build_arch_graph`
-/// (models/granite-moe.cpp:81 @5266f24da): Granite's `graph`.
+/// (models/granite-moe.cpp:81 @b29c606e2): Granite's `graph`.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     granite.buildGraph(model, b);
 }

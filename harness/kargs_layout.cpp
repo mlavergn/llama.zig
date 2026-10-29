@@ -4199,7 +4199,7 @@ int main(void) {
     cmp_s("gated_delta_net: name", zz_kargs_name(40), "gated_delta_net");
     cmp("gated_delta_net: sizeof", zz_kargs_sizeof(40), sizeof(ggml_metal_kargs_gated_delta_net));
     cmp("gated_delta_net: alignof", zz_kargs_alignof(40), alignof(ggml_metal_kargs_gated_delta_net));
-    cmp("gated_delta_net: field count", zz_kargs_nfields(40), 35);
+    cmp("gated_delta_net: field count", zz_kargs_nfields(40), 36);
     snprintf(lbl, sizeof lbl, "gated_delta_net.ne00 offset");
     cmp(lbl, zz_kargs_field_offset(40, 0), offsetof(ggml_metal_kargs_gated_delta_net, ne00));
     snprintf(lbl, sizeof lbl, "gated_delta_net.ne00 width");
@@ -4410,6 +4410,12 @@ int main(void) {
     cmp(lbl, zz_kargs_field_size(40, 34), sizeof(((ggml_metal_kargs_gated_delta_net *) 0)->nb3));
     snprintf(lbl, sizeof lbl, "gated_delta_net field 34 name");
     cmp_s(lbl, zz_kargs_field_name(40, 34), "nb3");
+    snprintf(lbl, sizeof lbl, "gated_delta_net.nb_out offset");
+    cmp(lbl, zz_kargs_field_offset(40, 35), offsetof(ggml_metal_kargs_gated_delta_net, nb_out));
+    snprintf(lbl, sizeof lbl, "gated_delta_net.nb_out width");
+    cmp(lbl, zz_kargs_field_size(40, 35), sizeof(((ggml_metal_kargs_gated_delta_net *) 0)->nb_out));
+    snprintf(lbl, sizeof lbl, "gated_delta_net field 35 name");
+    cmp_s(lbl, zz_kargs_field_name(40, 35), "nb_out");
 
     /* solve_tri */
     cmp_s("solve_tri: name", zz_kargs_name(41), "solve_tri");

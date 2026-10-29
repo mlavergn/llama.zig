@@ -1333,7 +1333,7 @@ fn saveBoth(dir: []const u8, m: [:0]const u8, ngl: i32, vocab_only: bool) void {
             // And since v0.4.0 a vocab-only save aborts in upstream on any
             // file: `add_kv_from_model` asks `hparams.n_ff_exp()`, now an
             // accessor bounded by `n_layer_all`, which `load_hparams` never
-            // reads for vocab-only (llama-hparams.cpp:79 @5266f24da).
+            // reads for vocab-only (llama-hparams.cpp:79 @b29c606e2).
             var nb0: [256]u8 = undefined;
             const job: SaveJob = .{ .rm = rm, .pm = pm, .out = ref_out };
             const why = if (hasCharsmap(m)) "charsmap" else "vocab-only";

@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ports the per-projector `switch` inside `clip_model_loader::load_hparams`
-//! of `llama.cpp/tools/mtmd/clip.cpp` (lines 1416-2008) at v0.4.0
-//! (`5266f24da`). The code before and after the switch is `clip.zig`'s
+//! of `llama.cpp/tools/mtmd/clip.cpp` (lines 1416-2008) at v0.4.1
+//! (`b29c606e2`). The code before and after the switch is `clip.zig`'s
 //! `Loader.loadHparams`, which calls `load` here. Each arm keeps upstream's
 //! keys, required flags, defaults, log lines and messages verbatim; a comment
 //! names the `case` labels it covers.
@@ -46,7 +46,7 @@ var wa_ordered: std.ArrayList(i32) = .empty;
 const func = "load_hparams";
 
 /// Ports the model-specific switch of `load_hparams` (mtmd/clip.cpp:1244
-/// @5266f24da), a member of `clip_model_loader`.
+/// @b29c606e2), a member of `clip_model_loader`.
 pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!void {
     const hparams = &model.hparams;
     var kb: [256]u8 = undefined;

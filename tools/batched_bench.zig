@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/batched-bench/batched-bench.cpp` at v0.4.0
-//! (`5266f24da`). Each declaration names the C++ it replaces and the line it
+//! Ported from `llama.cpp/tools/batched-bench/batched-bench.cpp` at v0.4.1
+//! (`b29c606e2`). Each declaration names the C++ it replaces and the line it
 //! began at. The tokens are the C library's `rand()` from its default seed,
 //! as upstream's are, so both decode the same batches.
 
@@ -22,14 +22,14 @@ comptime {
 
 extern fn rand() c_int;
 
-/// Ports `print_usage` (batched-bench.cpp:12 @5266f24da).
+/// Ports `print_usage` (batched-bench.cpp:12 @b29c606e2).
 fn printUsage(argv: []const [:0]const u8) void {
     log.out("\nexample usage:\n", .{});
     log.out("\n    %s -m model.gguf -c 2048 -b 2048 -ub 512 -npp 128,256,512 -ntg 128,256 -npl 1,2,4,8,16,32 [-pps]\n", .{argv[0].ptr});
     log.out("\n", .{});
 }
 
-/// The `decode_helper` lambda (batched-bench.cpp:82 @5266f24da): `batch` in
+/// The `decode_helper` lambda (batched-bench.cpp:82 @b29c606e2): `batch` in
 /// views of `n_batch` tokens.
 fn decodeHelper(ctx: ?*c.llama_context, batch: *c.llama_batch, n_batch: i32, synchronize: bool) bool {
     var i: i32 = 0;
@@ -58,7 +58,7 @@ fn decodeHelper(ctx: ?*c.llama_context, batch: *c.llama_batch, n_batch: i32, syn
     return true;
 }
 
-/// Ports `llama_batched_bench` (batched-bench.cpp:21 @5266f24da).
+/// Ports `llama_batched_bench` (batched-bench.cpp:21 @b29c606e2).
 fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "llama_batched_bench";
     var params = try tc.params.Params.init(a);
@@ -257,7 +257,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     return 0;
 }
 
-/// Ports `main` (tools/batched-bench/main.cpp:3 @5266f24da).
+/// Ports `main` (tools/batched-bench/main.cpp:3 @b29c606e2).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

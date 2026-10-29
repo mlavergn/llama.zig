@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/lfm2.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/lfm2.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_lfm2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>` with the lambdas inside it.
 //! LFM2-MoE (`lfm2moe.zig`) builds the same graph.
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_lfm2`'s `load_arch_hparams` (models/lfm2.cpp:7 @5266f24da).
+/// Ports `llama_model_lfm2`'s `load_arch_hparams` (models/lfm2.cpp:7 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -61,7 +61,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_lfm2`'s `load_arch_tensors` (models/lfm2.cpp:34
-/// @5266f24da); LFM2-MoE's (models/lfm2moe.cpp:23 @5266f24da) is the same
+/// @b29c606e2); LFM2-MoE's (models/lfm2moe.cpp:23 @b29c606e2) is the same
 /// body.
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     try loadTensors(self, "models/lfm2.cpp", 54, 72, exc);
@@ -129,7 +129,7 @@ pub fn loadTensors(self: *Model, comptime file: [:0]const u8, comptime line_moe:
 }
 
 /// Ports `llama_model_lfm2`'s `build_arch_graph` (models/lfm2.cpp:89
-/// @5266f24da); LFM2-MoE's (models/lfm2moe.cpp:78 @5266f24da) is the same.
+/// @b29c606e2); LFM2-MoE's (models/lfm2moe.cpp:78 @b29c606e2) is the same.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const swa_type: hparams_mod.SwaType = @fromBackingInt(@intCast(model.hparams.swa_type));
     if (swa_type == .standard) {
@@ -140,7 +140,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// The constructor's `build_dense_feed_forward` lambda (models/lfm2.cpp:105
-/// @5266f24da).
+/// @b29c606e2).
 fn buildDenseFeedForward(model: *const Model, b: *const graph.Builder, cur: *Tensor, il: c_int) *Tensor {
     const layer = &model.layers[@intCast(il)];
     impl.assert(layer.ffn_up_b == null, "models/lfm2.cpp", 106, "!model.layers[il].ffn_up_b");
@@ -150,7 +150,7 @@ fn buildDenseFeedForward(model: *const Model, b: *const graph.Builder, cur: *Ten
 }
 
 /// The constructor's `build_moe_feed_forward` lambda (models/lfm2.cpp:115
-/// @5266f24da).
+/// @b29c606e2).
 fn buildMoeFeedForward(model: *const Model, b: *const graph.Builder, cur: *Tensor, il: c_int) *Tensor {
     const layer = &model.layers[@intCast(il)];
     const hp = b.hparams;
@@ -170,7 +170,7 @@ fn buildMoeFeedForward(model: *const Model, b: *const graph.Builder, cur: *Tenso
 }
 
 /// The constructor's `build_attn_block` lambda (models/lfm2.cpp:128
-/// @5266f24da): Q/K norms, RoPE and attention.
+/// @b29c606e2): Q/K norms, RoPE and attention.
 fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_pos: *Tensor, inp_attn: anytype, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -202,7 +202,7 @@ fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, i
 }
 
 /// The constructor's `build_shortconv_block` lambda (models/lfm2.cpp:159
-/// @5266f24da): a gated depthwise convolution over the last
+/// @b29c606e2): a gated depthwise convolution over the last
 /// `n_shortconv_l_cache` tokens, whose state is the recurrent memory.
 fn buildShortconvBlock(comptime iswa: bool, model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_recr: *const graph.InpRs, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -281,7 +281,7 @@ fn buildShortconvBlock(comptime iswa: bool, model: *const Model, b: *const graph
 }
 
 /// Ports the constructor of `llama_model_lfm2`'s `graph<iswa>`
-/// (models/lfm2.cpp:98 @5266f24da).
+/// (models/lfm2.cpp:98 @b29c606e2).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

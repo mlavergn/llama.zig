@@ -7,7 +7,7 @@
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.cpp` — the logic
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.h`   — the types and buckets
 //!
-//! both at v0.4.0 (`5266f24da`). `tuning_table.zig` holds the 936
+//! both at v0.4.1 (`b29c606e2`). `tuning_table.zig` holds the 936
 //! generated rows.
 //!
 //! # This file had to go first, and `PLAN.md` said otherwise
@@ -45,24 +45,24 @@ pub const DeviceId = table.DeviceId;
 pub const Cfg = table.Cfg;
 pub const Key = table.Key;
 
-/// Mirrors `FA_VEC_NE11_BUCKETS` (ggml-metal-tuning.h:15 @5266f24da): KV
+/// Mirrors `FA_VEC_NE11_BUCKETS` (ggml-metal-tuning.h:15 @b29c606e2): KV
 /// length buckets. The Q>1 crossover is head-size dependent, so the KV
 /// axis is bucketed rather than thresholded once.
 const fa_vec_ne11_buckets = [_]i32{ 1024, 4096, 16384 };
 
-/// Mirrors `FA_VEC_NE01_BUCKETS` (ggml-metal-tuning.h:16 @5266f24da):
+/// Mirrors `FA_VEC_NE01_BUCKETS` (ggml-metal-tuning.h:16 @b29c606e2):
 /// query rows, splitting decode (== 1) from batch (>= 2).
 const fa_vec_ne01_buckets = [_]i32{ 2, 3, 4, 5 };
 
-/// Mirrors `FA_VEC_NE11_DEFAULT` (ggml-metal-tuning.h:30 @5266f24da): the
+/// Mirrors `FA_VEC_NE11_DEFAULT` (ggml-metal-tuning.h:30 @b29c606e2): the
 /// `ne11_b` value a domain-default row carries.
 const fa_vec_ne11_default: i8 = -1;
-/// Mirrors `FA_VEC_DOMAIN_DECODE` (ggml-metal-tuning.h:31 @5266f24da).
+/// Mirrors `FA_VEC_DOMAIN_DECODE` (ggml-metal-tuning.h:31 @b29c606e2).
 const fa_vec_domain_decode: i8 = 0;
-/// Mirrors `FA_VEC_DOMAIN_BATCH` (ggml-metal-tuning.h:32 @5266f24da).
+/// Mirrors `FA_VEC_DOMAIN_BATCH` (ggml-metal-tuning.h:32 @b29c606e2).
 const fa_vec_domain_batch: i8 = 1;
 
-/// Ports `fa_vec_ne11_bucket` (ggml-metal-tuning.cpp:9 @5266f24da).
+/// Ports `fa_vec_ne11_bucket` (ggml-metal-tuning.cpp:9 @b29c606e2).
 ///
 /// Parameters:
 /// - `ne11`: the KV length.
@@ -75,7 +75,7 @@ pub fn ne11Bucket(ne11: i64) c_int {
     return fa_vec_ne11_buckets.len;
 }
 
-/// Ports `fa_vec_ne01_bucket` (ggml-metal-tuning.cpp:18 @5266f24da).
+/// Ports `fa_vec_ne01_bucket` (ggml-metal-tuning.cpp:18 @b29c606e2).
 ///
 /// Parameters:
 /// - `ne01`: the query-row count.
@@ -88,7 +88,7 @@ pub fn ne01Bucket(ne01: i64) c_int {
     return fa_vec_ne01_buckets.len;
 }
 
-/// Ports `fa_vec_baseline_ne` (ggml-metal-tuning.cpp:27 @5266f24da): the
+/// Ports `fa_vec_baseline_ne` (ggml-metal-tuning.cpp:27 @b29c606e2): the
 /// `NE` baked into each `(dk, dv)` baseline instantiation in
 /// `kernels/fa.metal`.
 ///
@@ -116,13 +116,13 @@ pub fn baselineNe(dk: c_int, dv: c_int) c_int {
     };
 }
 
-/// Ports `fa_vec_baseline_cfg` (ggml-metal-tuning.cpp:61 @5266f24da).
+/// Ports `fa_vec_baseline_cfg` (ggml-metal-tuning.cpp:61 @b29c606e2).
 pub fn baselineCfg(dk: c_int, dv: c_int) Cfg {
     return .{ .Q = 1, .NE = @intCast(baselineNe(dk, dv)) };
 }
 
-/// Ports `fa_vec_family_representative` (ggml-metal-tuning.cpp:3656
-/// @5266f24da): the SKU a GPU family falls back to.
+/// Ports `fa_vec_family_representative` (ggml-metal-tuning.cpp:3975
+/// @b29c606e2): the SKU a GPU family falls back to.
 fn familyRepresentative(gpu_family: c_int) DeviceId {
     return switch (gpu_family) {
         9 => .m4_max,
@@ -133,7 +133,7 @@ fn familyRepresentative(gpu_family: c_int) DeviceId {
 var g_override_set: bool = false;
 var g_override_cfg: Cfg = .{ .Q = 1, .NE = 4 };
 
-/// Ports `fa_vec_set_override` (ggml-metal-tuning.cpp:3666 @5266f24da).
+/// Ports `fa_vec_set_override` (ggml-metal-tuning.cpp:3985 @b29c606e2).
 ///
 /// `pub` because `metal/backend.zig` exposes it through the registry's
 /// `get_proc_address`, which `test-backend-ops` uses to sweep the FA
@@ -147,12 +147,12 @@ pub fn setOverride(cfg: Cfg) void {
     g_override_set = true;
 }
 
-/// Ports `fa_vec_clear_override` (ggml-metal-tuning.cpp:3671 @5266f24da).
+/// Ports `fa_vec_clear_override` (ggml-metal-tuning.cpp:3990 @b29c606e2).
 pub fn clearOverride() void {
     g_override_set = false;
 }
 
-/// Ports `find_cfg` (ggml-metal-tuning.cpp:3675 @5266f24da).
+/// Ports `find_cfg` (ggml-metal-tuning.cpp:3994 @b29c606e2).
 ///
 /// The C compares keys with `memcmp` over all eight bytes, which its own
 /// `static_assert(sizeof(fa_vec_key_t) == 8)` exists to license. The key
@@ -166,7 +166,7 @@ fn findCfg(k: Key) ?Cfg {
 }
 
 /// Ports `fa_vec_pick`'s inner lambda `lookup`
-/// (ggml-metal-tuning.cpp:3703 @5266f24da): the exact bucket, then the
+/// (ggml-metal-tuning.cpp:4022 @b29c606e2): the exact bucket, then the
 /// `ne01` domain default with `ne11` collapsed.
 fn lookup(dev: DeviceId, dtype: c_int, dk: c_int, dv: c_int, ne11_b: c_int, ne01_b: c_int) ?Cfg {
     var k: Key = .{
@@ -184,7 +184,7 @@ fn lookup(dev: DeviceId, dtype: c_int, dk: c_int, dv: c_int, ne11_b: c_int, ne01
     return findCfg(k);
 }
 
-/// Ports `fa_vec_pick` (ggml-metal-tuning.cpp:3684 @5266f24da).
+/// Ports `fa_vec_pick` (ggml-metal-tuning.cpp:4003 @b29c606e2).
 ///
 /// Parameters:
 /// - `device_id`: the detected SKU.

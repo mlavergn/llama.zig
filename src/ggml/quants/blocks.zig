@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-common.h` (v0.4.0, `5266f24da`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-common.h` (v0.4.1, `b29c606e2`), lines
 //! 180-330. Each type names the C struct it mirrors.
 //!
 //! # Why these are declared here rather than imported
@@ -36,25 +36,25 @@ pub const Half = u16;
 // -----------------------------------------------------------------------------
 // Symmetric formats: one scale
 
-/// Mirrors `block_q1_0` (ggml-common.h:181 @5266f24da).
+/// Mirrors `block_q1_0` (ggml-common.h:181 @b29c606e2).
 pub const Q1_0 = extern struct {
     d: Half,
     qs: [c.QK1_0 / 8]u8,
 };
 
-/// Mirrors `block_q2_0` (ggml-common.h:188 @5266f24da).
+/// Mirrors `block_q2_0` (ggml-common.h:188 @b29c606e2).
 pub const Q2_0 = extern struct {
     d: Half,
     qs: [c.QK2_0 / 4]u8,
 };
 
-/// Mirrors `block_q4_0` (ggml-common.h:195 @5266f24da).
+/// Mirrors `block_q4_0` (ggml-common.h:195 @b29c606e2).
 pub const Q4_0 = extern struct {
     d: Half,
     qs: [c.QK4_0 / 2]u8,
 };
 
-/// Mirrors `block_q5_0` (ggml-common.h:230 @5266f24da).
+/// Mirrors `block_q5_0` (ggml-common.h:230 @b29c606e2).
 ///
 /// `qh` is four loose bytes rather than a `u32` in the C too, because the
 /// struct would otherwise gain alignment padding after the `ggml_half`.
@@ -64,7 +64,7 @@ pub const Q5_0 = extern struct {
     qs: [c.QK5_0 / 2]u8,
 };
 
-/// Mirrors `block_q8_0` (ggml-common.h:252 @5266f24da).
+/// Mirrors `block_q8_0` (ggml-common.h:252 @b29c606e2).
 pub const Q8_0 = extern struct {
     d: Half,
     qs: [c.QK8_0]i8,
@@ -84,14 +84,14 @@ pub const Q8_0 = extern struct {
 // explicit `align(4)`, which is load-bearing rather than decorative: it was
 // added because the assertion caught its absence.
 
-/// Mirrors `block_q4_1` (ggml-common.h:202 @5266f24da).
+/// Mirrors `block_q4_1` (ggml-common.h:202 @b29c606e2).
 pub const Q4_1 = extern struct {
     d: Half align(4),
     m: Half,
     qs: [c.QK4_1 / 2]u8,
 };
 
-/// Mirrors `block_q5_1` (ggml-common.h:238 @5266f24da).
+/// Mirrors `block_q5_1` (ggml-common.h:238 @b29c606e2).
 pub const Q5_1 = extern struct {
     d: Half align(4),
     m: Half,
@@ -99,7 +99,7 @@ pub const Q5_1 = extern struct {
     qs: [c.QK5_1 / 2]u8,
 };
 
-/// Mirrors `block_q8_1` (ggml-common.h:259 @5266f24da).
+/// Mirrors `block_q8_1` (ggml-common.h:259 @b29c606e2).
 ///
 /// `s` is the sum of the quantized values times the scale, not a minimum: it
 /// lets a dot product against an asymmetric weight recover the offset term
@@ -113,13 +113,13 @@ pub const Q8_1 = extern struct {
 // -----------------------------------------------------------------------------
 // Codebook formats
 
-/// Mirrors `block_mxfp4` (ggml-common.h:215 @5266f24da).
+/// Mirrors `block_mxfp4` (ggml-common.h:215 @b29c606e2).
 pub const MXFP4 = extern struct {
     e: u8,
     qs: [c.QK_MXFP4 / 2]u8,
 };
 
-/// Mirrors `block_nvfp4` (ggml-common.h:223 @5266f24da).
+/// Mirrors `block_nvfp4` (ggml-common.h:223 @b29c606e2).
 pub const NVFP4 = extern struct {
     d: [c.QK_NVFP4 / c.QK_NVFP4_SUB]u8,
     qs: [c.QK_NVFP4 / 2]u8,
@@ -132,14 +132,14 @@ pub const NVFP4 = extern struct {
 // digits into a byte base-3 (3^5 = 243 < 256), which is why its `qs` length is
 // the odd `(QK_K - 4*QK_K/64) / 5`.
 
-/// Mirrors `block_tq1_0` (ggml-common.h:276 @5266f24da). 1.6875 bpw.
+/// Mirrors `block_tq1_0` (ggml-common.h:276 @b29c606e2). 1.6875 bpw.
 pub const TQ1_0 = extern struct {
     qs: [(c.QK_K - 4 * c.QK_K / 64) / 5]u8,
     qh: [c.QK_K / 64]u8,
     d: Half,
 };
 
-/// Mirrors `block_tq2_0` (ggml-common.h:284 @5266f24da). 2.0625 bpw.
+/// Mirrors `block_tq2_0` (ggml-common.h:284 @b29c606e2). 2.0625 bpw.
 pub const TQ2_0 = extern struct {
     qs: [c.QK_K / 4]u8,
     d: Half,
@@ -158,7 +158,7 @@ pub const TQ2_0 = extern struct {
 // `q3_K` put `scales` first; `q4_K` and `q5_K` put the scale pair first. Get it
 // wrong and the block is the right size and completely misread.
 
-/// Mirrors `block_q2_K` (ggml-common.h:298 @5266f24da). 16 sub-blocks of 16, ~2.625 bpw.
+/// Mirrors `block_q2_K` (ggml-common.h:298 @b29c606e2). 16 sub-blocks of 16, ~2.625 bpw.
 ///
 /// `x = d * q + dmin * m`, with both the scale and the min quantized to 4 bits
 /// and packed together in `scales`.
@@ -169,7 +169,7 @@ pub const Q2_K = extern struct {
     dmin: Half,
 };
 
-/// Mirrors `block_q3_K` (ggml-common.h:315 @5266f24da). 16 sub-blocks of 16, ~3.4375 bpw.
+/// Mirrors `block_q3_K` (ggml-common.h:315 @b29c606e2). 16 sub-blocks of 16, ~3.4375 bpw.
 ///
 /// The third bit of each weight lives in `hmask`, one bit per weight, separate
 /// from the low two bits in `qs`. The 16 sub-block scales are 6-bit, packed
@@ -181,7 +181,7 @@ pub const Q3_K = extern struct {
     d: Half,
 };
 
-/// Mirrors `block_q4_K` (ggml-common.h:327 @5266f24da). 8 sub-blocks of 32, ~4.5 bpw.
+/// Mirrors `block_q4_K` (ggml-common.h:327 @b29c606e2). 8 sub-blocks of 32, ~4.5 bpw.
 pub const Q4_K = extern struct {
     d: Half align(4),
     dmin: Half,
@@ -189,7 +189,7 @@ pub const Q4_K = extern struct {
     qs: [c.QK_K / 2]u8,
 };
 
-/// Mirrors `block_q5_K` (ggml-common.h:344 @5266f24da). 8 sub-blocks of 32, ~5.5 bpw.
+/// Mirrors `block_q5_K` (ggml-common.h:344 @b29c606e2). 8 sub-blocks of 32, ~5.5 bpw.
 pub const Q5_K = extern struct {
     d: Half align(4),
     dmin: Half,
@@ -198,7 +198,7 @@ pub const Q5_K = extern struct {
     qs: [c.QK_K / 2]u8,
 };
 
-/// Mirrors `block_q6_K` (ggml-common.h:362 @5266f24da). 16 sub-blocks of 16, ~6.5625 bpw.
+/// Mirrors `block_q6_K` (ggml-common.h:362 @b29c606e2). 16 sub-blocks of 16, ~6.5625 bpw.
 ///
 /// Symmetric -- no `dmin` -- and its sub-block scales are full `int8`, not
 /// packed, which is what makes it the most accurate of the K-quants.
@@ -209,7 +209,7 @@ pub const Q6_K = extern struct {
     d: Half,
 };
 
-/// Mirrors `block_q8_K` (ggml-common.h:371 @5266f24da).
+/// Mirrors `block_q8_K` (ggml-common.h:371 @b29c606e2).
 ///
 /// The activation side of the K-quant dot products, never a stored weight
 /// format. Note `d` is a full `f32` rather than an f16, and `bsums` caches the
@@ -234,20 +234,20 @@ pub const Q8_K = extern struct {
 // `iq3s_grid` and `iq1s_grid` in `ggml-common.h`, imported rather than
 // transcribed.
 
-/// Mirrors `block_iq2_xxs` (ggml-common.h:381 @5266f24da). 2.0625 bpw.
+/// Mirrors `block_iq2_xxs` (ggml-common.h:381 @b29c606e2). 2.0625 bpw.
 pub const IQ2_XXS = extern struct {
     d: Half,
     qs: [c.QK_K / 8]u16,
 };
 
-/// Mirrors `block_iq2_xs` (ggml-common.h:388 @5266f24da). 2.3125 bpw.
+/// Mirrors `block_iq2_xs` (ggml-common.h:388 @b29c606e2). 2.3125 bpw.
 pub const IQ2_XS = extern struct {
     d: Half,
     qs: [c.QK_K / 8]u16,
     scales: [c.QK_K / 32]u8,
 };
 
-/// Mirrors `block_iq2_s` (ggml-common.h:396 @5266f24da). 2.5625 bpw.
+/// Mirrors `block_iq2_s` (ggml-common.h:396 @b29c606e2). 2.5625 bpw.
 ///
 /// Note the sign bytes are not a named field: they live in the tail of `qs`,
 /// which the C indexes as `qs + QK_K/8`. The struct is sized for both.
@@ -258,7 +258,7 @@ pub const IQ2_S = extern struct {
     scales: [c.QK_K / 32]u8,
 };
 
-/// Mirrors `block_iq3_xxs` (ggml-common.h:407 @5266f24da). 3.0625 bpw.
+/// Mirrors `block_iq3_xxs` (ggml-common.h:407 @b29c606e2). 3.0625 bpw.
 ///
 /// `qs` again carries two things: `QK_K/4` grid indices followed by the packed
 /// scales and signs, which the C reaches as `qs + QK_K/4`.
@@ -267,7 +267,7 @@ pub const IQ3_XXS = extern struct {
     qs: [3 * c.QK_K / 8]u8,
 };
 
-/// Mirrors `block_iq3_s` (ggml-common.h:415 @5266f24da). 3.4375 bpw.
+/// Mirrors `block_iq3_s` (ggml-common.h:415 @b29c606e2). 3.4375 bpw.
 pub const IQ3_S = extern struct {
     d: Half,
     qs: [c.QK_K / 4]u8,
@@ -276,7 +276,7 @@ pub const IQ3_S = extern struct {
     scales: [c.QK_K / 64]u8,
 };
 
-/// Mirrors `block_iq1_s` (ggml-common.h:425 @5266f24da). 1.5625 bpw.
+/// Mirrors `block_iq1_s` (ggml-common.h:425 @b29c606e2). 1.5625 bpw.
 ///
 /// The scale is not a separate field: four bits of each `qh` entry carry the
 /// sub-block scale and one carries the sign of the delta.
@@ -286,7 +286,7 @@ pub const IQ1_S = extern struct {
     qh: [c.QK_K / 32]u16,
 };
 
-/// Mirrors `block_iq1_m` (ggml-common.h:433 @5266f24da). 1.75 bpw.
+/// Mirrors `block_iq1_m` (ggml-common.h:433 @b29c606e2). 1.75 bpw.
 ///
 /// **No `d` field at all.** The f16 super-block scale is scattered four bits at
 /// a time across the top of the four `scales` shorts, and reassembled by
@@ -297,13 +297,13 @@ pub const IQ1_M = extern struct {
     scales: [c.QK_K / 32]u8,
 };
 
-/// Mirrors `block_iq4_nl` (ggml-common.h:448 @5266f24da). Non-linear 4-bit, 32 per block.
+/// Mirrors `block_iq4_nl` (ggml-common.h:448 @b29c606e2). Non-linear 4-bit, 32 per block.
 pub const IQ4_NL = extern struct {
     d: Half,
     qs: [c.QK4_NL / 2]u8,
 };
 
-/// Mirrors `block_iq4_xs` (ggml-common.h:454 @5266f24da). Non-linear 4-bit, super-block.
+/// Mirrors `block_iq4_xs` (ggml-common.h:454 @b29c606e2). Non-linear 4-bit, super-block.
 pub const IQ4_XS = extern struct {
     d: Half,
     scales_h: u16,
@@ -311,7 +311,7 @@ pub const IQ4_XS = extern struct {
     qs: [c.QK_K / 2]u8,
 };
 
-/// Ports `IQ1S_DELTA` and `IQ1M_DELTA` (ggml-common.h:1133 @5266f24da).
+/// Ports `IQ1S_DELTA` and `IQ1M_DELTA` (ggml-common.h:1133 @b29c606e2).
 ///
 /// The 1-bit formats shift their grid values by a constant before scaling, so
 /// a "zero" weight is not exactly zero. `#define`s in the header's
@@ -322,7 +322,7 @@ pub const iq1m_delta: f32 = 0.125;
 /// Reassembles `iq1_m`'s f16 scale from the four nibbles it is scattered
 /// across.
 ///
-/// Ports the `iq1m_scale_t` union (ggml-common.h:441 @5266f24da): the C type-puns a `uint16_t` to a
+/// Ports the `iq1m_scale_t` union (ggml-common.h:441 @b29c606e2): the C type-puns a `uint16_t` to a
 /// `ggml_half`, which here is just the bit pattern the f16 conversion takes.
 pub inline fn iq1mScale(sc: [*]const u16) Half {
     return (sc[0] >> 12) | ((sc[1] >> 8) & 0x00f0) | ((sc[2] >> 4) & 0x0f00) | (sc[3] & 0xf000);

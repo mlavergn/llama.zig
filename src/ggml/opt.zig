@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-opt.cpp` (v0.4.0, `5266f24da`), 1,094
+//! Ported from `llama.cpp/ggml/src/ggml-opt.cpp` (v0.4.1, `b29c606e2`), 1,094
 //! lines of C++, plus the three pieces of libc++ its one `std::shuffle`
 //! reaches, which are not upstream code and are cited by header and template:
 //! `__random/mersenne_twister_engine.h`, `__random/uniform_int_distribution.h`
@@ -322,7 +322,7 @@ pub fn shuffle(items: []i64, g: *Mt19937) void {
 // -----------------------------------------------------------------------------
 // The three opaque structs
 
-/// Ports `struct ggml_opt_dataset` (ggml-opt.cpp:16 @5266f24da).
+/// Ports `struct ggml_opt_dataset` (ggml-opt.cpp:16 @b29c606e2).
 ///
 /// `nbs_data` and `nbs_labels` are `size_t` initialised to `-1` in the C++,
 /// so they start at the maximum.
@@ -340,7 +340,7 @@ const Dataset = struct {
     permutation: []i64 = &.{},
 };
 
-/// Ports `struct ggml_opt_context` (ggml-opt.cpp:30 @5266f24da).
+/// Ports `struct ggml_opt_context` (ggml-opt.cpp:30 @b29c606e2).
 ///
 /// The three vectors of tensors are indexed by forward-graph node, with null
 /// for nodes that need no accumulator or momentum.
@@ -389,7 +389,7 @@ const Context = struct {
     optimizer: c.enum_ggml_opt_optimizer_type = c.GGML_OPT_OPTIMIZER_TYPE_ADAMW,
 };
 
-/// Ports `struct ggml_opt_result` (ggml-opt.cpp:74 @5266f24da).
+/// Ports `struct ggml_opt_result` (ggml-opt.cpp:74 @b29c606e2).
 const Result = struct {
     ndata: i64 = 0,
     loss: std.ArrayList(f32) = .empty,
@@ -436,7 +436,7 @@ fn oom() noreturn {
 // -----------------------------------------------------------------------------
 // Dataset
 
-/// Ports `ggml_opt_dataset_init` (ggml-opt.cpp:86 @5266f24da).
+/// Ports `ggml_opt_dataset_init` (ggml-opt.cpp:86 @b29c606e2).
 ///
 /// Parameters:
 /// - `type_data`: the type of the internal data tensor.
@@ -493,7 +493,7 @@ pub fn ggml_opt_dataset_init(
     return @ptrCast(result);
 }
 
-/// Ports `ggml_opt_dataset_free` (ggml-opt.cpp:132 @5266f24da).
+/// Ports `ggml_opt_dataset_free` (ggml-opt.cpp:132 @b29c606e2).
 ///
 /// Parameters:
 /// - `dataset`: the dataset; invalid afterwards.
@@ -507,7 +507,7 @@ pub fn ggml_opt_dataset_free(dataset: c.ggml_opt_dataset_t) callconv(.c) void {
     allocator.destroy(ds);
 }
 
-/// Ports `ggml_opt_dataset_ndata` (ggml-opt.cpp:138 @5266f24da).
+/// Ports `ggml_opt_dataset_ndata` (ggml-opt.cpp:138 @b29c606e2).
 ///
 /// Parameters:
 /// - `dataset`: the dataset.
@@ -517,7 +517,7 @@ pub fn ggml_opt_dataset_ndata(dataset: c.ggml_opt_dataset_t) callconv(.c) i64 {
     return datasetOf(dataset).ndata;
 }
 
-/// Ports `ggml_opt_dataset_data` (ggml-opt.cpp:142 @5266f24da).
+/// Ports `ggml_opt_dataset_data` (ggml-opt.cpp:142 @b29c606e2).
 ///
 /// Parameters:
 /// - `dataset`: the dataset.
@@ -527,7 +527,7 @@ pub fn ggml_opt_dataset_data(dataset: c.ggml_opt_dataset_t) callconv(.c) [*c]c.g
     return datasetOf(dataset).data;
 }
 
-/// Ports `ggml_opt_dataset_labels` (ggml-opt.cpp:146 @5266f24da).
+/// Ports `ggml_opt_dataset_labels` (ggml-opt.cpp:146 @b29c606e2).
 ///
 /// Parameters:
 /// - `dataset`: the dataset.
@@ -538,7 +538,7 @@ pub fn ggml_opt_dataset_labels(dataset: c.ggml_opt_dataset_t) callconv(.c) [*c]c
     return datasetOf(dataset).labels;
 }
 
-/// Ports `ggml_opt_dataset_shuffle` (ggml-opt.cpp:150 @5266f24da).
+/// Ports `ggml_opt_dataset_shuffle` (ggml-opt.cpp:150 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context whose engine supplies the randomness.
@@ -562,7 +562,7 @@ pub fn ggml_opt_dataset_shuffle(opt_ctx: c.ggml_opt_context_t, dataset: c.ggml_o
     shuffle(ds.permutation[0..@intCast(ishard_max)], &ctx.rng);
 }
 
-/// Ports `ggml_opt_dataset_get_batch` (ggml-opt.cpp:163 @5266f24da).
+/// Ports `ggml_opt_dataset_get_batch` (ggml-opt.cpp:163 @b29c606e2).
 ///
 /// Parameters:
 /// - `dataset`: the dataset.
@@ -610,7 +610,7 @@ pub fn ggml_opt_dataset_get_batch(
     }
 }
 
-/// Ports `ggml_opt_dataset_get_batch_host` (ggml-opt.cpp:196 @5266f24da).
+/// Ports `ggml_opt_dataset_get_batch_host` (ggml-opt.cpp:196 @b29c606e2).
 ///
 /// Parameters:
 /// - `dataset`: the dataset.
@@ -656,7 +656,7 @@ pub fn ggml_opt_dataset_get_batch_host(
 // -----------------------------------------------------------------------------
 // Model / Context
 
-/// Ports `ggml_opt_get_default_optimizer_params` (ggml-opt.cpp:223 @5266f24da).
+/// Ports `ggml_opt_get_default_optimizer_params` (ggml-opt.cpp:223 @b29c606e2).
 ///
 /// Parameters:
 /// - `userdata`: unused.
@@ -680,7 +680,7 @@ pub fn ggml_opt_get_default_optimizer_params(userdata: ?*anyopaque) callconv(.c)
     return result;
 }
 
-/// Ports `ggml_opt_get_constant_optimizer_params` (ggml-opt.cpp:241 @5266f24da).
+/// Ports `ggml_opt_get_constant_optimizer_params` (ggml-opt.cpp:241 @b29c606e2).
 ///
 /// Parameters:
 /// - `userdata`: a `ggml_opt_optimizer_params *`.
@@ -690,7 +690,7 @@ pub fn ggml_opt_get_constant_optimizer_params(userdata: ?*anyopaque) callconv(.c
     return @as(*const c.struct_ggml_opt_optimizer_params, @ptrCast(@alignCast(userdata))).*;
 }
 
-/// Ports `ggml_opt_default_params` (ggml-opt.cpp:245 @5266f24da).
+/// Ports `ggml_opt_default_params` (ggml-opt.cpp:245 @b29c606e2).
 ///
 /// Parameters:
 /// - `backend_sched`: the scheduler the graphs are built for.
@@ -718,7 +718,7 @@ pub fn ggml_opt_default_params(backend_sched: c.ggml_backend_sched_t, loss_type:
 /// insertion — so a hash map is equivalent.
 const TensorMap = std.AutoHashMapUnmanaged(*c.ggml_tensor, *c.ggml_tensor);
 
-/// Ports `map_tensor` (ggml-opt.cpp:262 @5266f24da).
+/// Ports `map_tensor` (ggml-opt.cpp:262 @b29c606e2).
 ///
 /// Duplicates `tensor` into `ctx` field for field, sharing its data, and
 /// recurses into its view source and sources first-come — the order decides
@@ -756,7 +756,7 @@ fn mapTensor(tensor_map: *TensorMap, ctx: ?*c.ggml_context, tensor_c: [*c]c.ggml
     return new_tensor;
 }
 
-/// Ports `dup_graph` (ggml-opt.cpp:293 @5266f24da).
+/// Ports `dup_graph` (ggml-opt.cpp:293 @b29c606e2).
 ///
 /// Parameters:
 /// - `ctx`: the context the copy and its tensors are allocated in.
@@ -804,7 +804,7 @@ fn resizeList(list: *std.ArrayList([*c]c.ggml_tensor), n: usize) void {
     if (n > old) @memset(list.items[old..], null);
 }
 
-/// Ports `ggml_opt_build` (ggml-opt.cpp:322 @5266f24da).
+/// Ports `ggml_opt_build` (ggml-opt.cpp:322 @b29c606e2).
 ///
 /// Extends the forward graph with the loss, then — as far as the allocated
 /// build type reaches — duplicates it into the gradient graph and that into
@@ -1029,7 +1029,7 @@ fn optBuild(opt_ctx: *Context) void {
     opt_ctx.buf_cpu = c.ggml_backend_alloc_ctx_tensors_from_buft(opt_ctx.ctx_cpu, c.ggml_backend_cpu_buffer_type());
 }
 
-/// Ports `ggml_opt_init` (ggml-opt.cpp:549 @5266f24da).
+/// Ports `ggml_opt_init` (ggml-opt.cpp:549 @b29c606e2).
 ///
 /// Parameters:
 /// - `params`: the context's configuration. With `ctx_compute`, `inputs` and
@@ -1074,7 +1074,7 @@ pub fn ggml_opt_init(params: c.struct_ggml_opt_params) callconv(.c) c.ggml_opt_c
     return @ptrCast(result);
 }
 
-/// Ports `ggml_opt_free` (ggml-opt.cpp:584 @5266f24da).
+/// Ports `ggml_opt_free` (ggml-opt.cpp:584 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context, or null; invalid afterwards.
@@ -1094,7 +1094,7 @@ pub fn ggml_opt_free(opt_ctx: c.ggml_opt_context_t) callconv(.c) void {
     allocator.destroy(ctx);
 }
 
-/// Ports `ggml_opt_reset` (ggml-opt.cpp:596 @5266f24da).
+/// Ports `ggml_opt_reset` (ggml-opt.cpp:596 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context.
@@ -1111,7 +1111,7 @@ pub fn ggml_opt_reset(opt_ctx: c.ggml_opt_context_t, optimizer: bool) callconv(.
     }
 }
 
-/// Ports `ggml_opt_static_graphs` (ggml-opt.cpp:605 @5266f24da).
+/// Ports `ggml_opt_static_graphs` (ggml-opt.cpp:605 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context.
@@ -1121,7 +1121,7 @@ pub fn ggml_opt_static_graphs(opt_ctx: c.ggml_opt_context_t) callconv(.c) bool {
     return contextOf(opt_ctx).static_graphs;
 }
 
-/// Ports `ggml_opt_inputs` (ggml-opt.cpp:609 @5266f24da).
+/// Ports `ggml_opt_inputs` (ggml-opt.cpp:609 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context.
@@ -1132,7 +1132,7 @@ pub fn ggml_opt_inputs(opt_ctx: c.ggml_opt_context_t) callconv(.c) [*c]c.ggml_te
     return contextOf(opt_ctx).inputs;
 }
 
-/// Ports `ggml_opt_outputs` (ggml-opt.cpp:613 @5266f24da).
+/// Ports `ggml_opt_outputs` (ggml-opt.cpp:613 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context.
@@ -1143,7 +1143,7 @@ pub fn ggml_opt_outputs(opt_ctx: c.ggml_opt_context_t) callconv(.c) [*c]c.ggml_t
     return contextOf(opt_ctx).outputs;
 }
 
-/// Ports `ggml_opt_labels` (ggml-opt.cpp:617 @5266f24da).
+/// Ports `ggml_opt_labels` (ggml-opt.cpp:617 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context.
@@ -1154,7 +1154,7 @@ pub fn ggml_opt_labels(opt_ctx: c.ggml_opt_context_t) callconv(.c) [*c]c.ggml_te
     return contextOf(opt_ctx).labels;
 }
 
-/// Ports `ggml_opt_loss` (ggml-opt.cpp:621 @5266f24da).
+/// Ports `ggml_opt_loss` (ggml-opt.cpp:621 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context.
@@ -1164,7 +1164,7 @@ pub fn ggml_opt_loss(opt_ctx: c.ggml_opt_context_t) callconv(.c) [*c]c.ggml_tens
     return contextOf(opt_ctx).loss;
 }
 
-/// Ports `ggml_opt_pred` (ggml-opt.cpp:625 @5266f24da).
+/// Ports `ggml_opt_pred` (ggml-opt.cpp:625 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context.
@@ -1174,7 +1174,7 @@ pub fn ggml_opt_pred(opt_ctx: c.ggml_opt_context_t) callconv(.c) [*c]c.ggml_tens
     return contextOf(opt_ctx).pred;
 }
 
-/// Ports `ggml_opt_ncorrect` (ggml-opt.cpp:629 @5266f24da).
+/// Ports `ggml_opt_ncorrect` (ggml-opt.cpp:629 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context.
@@ -1185,7 +1185,7 @@ pub fn ggml_opt_ncorrect(opt_ctx: c.ggml_opt_context_t) callconv(.c) [*c]c.ggml_
     return contextOf(opt_ctx).ncorrect;
 }
 
-/// Ports `ggml_opt_grad_acc` (ggml-opt.cpp:633 @5266f24da).
+/// Ports `ggml_opt_grad_acc` (ggml-opt.cpp:633 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context.
@@ -1199,14 +1199,14 @@ pub fn ggml_opt_grad_acc(opt_ctx: c.ggml_opt_context_t, node: [*c]c.ggml_tensor)
 // -----------------------------------------------------------------------------
 // Optimization Result
 
-/// Ports `ggml_opt_result_init` (ggml-opt.cpp:639 @5266f24da).
+/// Ports `ggml_opt_result_init` (ggml-opt.cpp:639 @b29c606e2).
 ///
 /// Return: an empty result; free it with `ggml_opt_result_free`.
 pub fn ggml_opt_result_init() callconv(.c) c.ggml_opt_result_t {
     return @ptrCast(create(Result));
 }
 
-/// Ports `ggml_opt_result_free` (ggml-opt.cpp:643 @5266f24da).
+/// Ports `ggml_opt_result_free` (ggml-opt.cpp:643 @b29c606e2).
 ///
 /// Parameters:
 /// - `result`: the result, or null; invalid afterwards.
@@ -1220,7 +1220,7 @@ pub fn ggml_opt_result_free(result: c.ggml_opt_result_t) callconv(.c) void {
     allocator.destroy(r);
 }
 
-/// Ports `ggml_opt_result_reset` (ggml-opt.cpp:647 @5266f24da).
+/// Ports `ggml_opt_result_reset` (ggml-opt.cpp:647 @b29c606e2).
 ///
 /// `opt_period` and `loss_per_datapoint` are left as they were; the next
 /// `ggml_opt_eval` overwrites them because `ndata` is 0.
@@ -1237,7 +1237,7 @@ pub fn ggml_opt_result_reset(result: c.ggml_opt_result_t) callconv(.c) void {
     r.ncorrect = 0;
 }
 
-/// Ports `ggml_opt_result_ndata` (ggml-opt.cpp:654 @5266f24da).
+/// Ports `ggml_opt_result_ndata` (ggml-opt.cpp:654 @b29c606e2).
 ///
 /// Parameters:
 /// - `result`: the result.
@@ -1248,7 +1248,7 @@ pub fn ggml_opt_result_ndata(result: c.ggml_opt_result_t, ndata: [*c]i64) callco
     ndata.* = resultOf(result).ndata;
 }
 
-/// Ports `ggml_opt_result_loss` (ggml-opt.cpp:658 @5266f24da).
+/// Ports `ggml_opt_result_loss` (ggml-opt.cpp:658 @b29c606e2).
 ///
 /// `loss_scaled*loss_scaled` is a `float` product, rounded to `float` before
 /// it is widened; `sum_squared/nbatches - mean*mean` is one fused
@@ -1297,7 +1297,7 @@ pub fn ggml_opt_result_loss(result: c.ggml_opt_result_t, loss: [*c]f64, unc: [*c
     unc.* = if (r.loss_per_datapoint) @sqrt(var_sum / nm1) else @sqrt(var_sum * nb / nm1);
 }
 
-/// Ports `ggml_opt_result_pred` (ggml-opt.cpp:693 @5266f24da).
+/// Ports `ggml_opt_result_pred` (ggml-opt.cpp:693 @b29c606e2).
 ///
 /// Parameters:
 /// - `result`: the result.
@@ -1308,7 +1308,7 @@ pub fn ggml_opt_result_pred(result: c.ggml_opt_result_t, pred: [*c]i32) callconv
     for (resultOf(result).pred.items, 0..) |p, i| pred[i] = p;
 }
 
-/// Ports `ggml_opt_result_accuracy` (ggml-opt.cpp:699 @5266f24da).
+/// Ports `ggml_opt_result_accuracy` (ggml-opt.cpp:699 @b29c606e2).
 ///
 /// Parameters:
 /// - `result`: the result.
@@ -1331,7 +1331,7 @@ pub fn ggml_opt_result_accuracy(result: c.ggml_opt_result_t, accuracy: [*c]f64, 
 // -----------------------------------------------------------------------------
 // Computation
 
-/// Ports `ggml_opt_prepare_alloc` (ggml-opt.cpp:712 @5266f24da).
+/// Ports `ggml_opt_prepare_alloc` (ggml-opt.cpp:712 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: a context with dynamic graphs.
@@ -1356,7 +1356,7 @@ pub fn ggml_opt_prepare_alloc(
     ctx.outputs = outputs;
 }
 
-/// Ports `ggml_opt_alloc` (ggml-opt.cpp:725 @5266f24da).
+/// Ports `ggml_opt_alloc` (ggml-opt.cpp:725 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context.
@@ -1416,7 +1416,7 @@ pub fn ggml_opt_alloc(opt_ctx: c.ggml_opt_context_t, backward: bool) callconv(.c
     ctx.eval_ready = true;
 }
 
-/// Ports `ggml_opt_eval` (ggml-opt.cpp:782 @5266f24da).
+/// Ports `ggml_opt_eval` (ggml-opt.cpp:782 @b29c606e2).
 ///
 /// `powf(beta, iter)` converts the 64-bit iteration count to `float` and
 /// calls libm's `powf`, as the reference object does — two calls, measured.
@@ -1528,7 +1528,7 @@ pub fn ggml_opt_eval(opt_ctx: c.ggml_opt_context_t, result: c.ggml_opt_result_t)
 // -----------------------------------------------------------------------------
 // High-Level Functions
 
-/// Ports `ggml_opt_epoch` (ggml-opt.cpp:881 @5266f24da).
+/// Ports `ggml_opt_epoch` (ggml-opt.cpp:881 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: a context with static graphs.
@@ -1587,7 +1587,7 @@ pub fn ggml_opt_epoch(
     }
 }
 
-/// Ports `ggml_opt_epoch_callback_progress_bar` (ggml-opt.cpp:926 @5266f24da).
+/// Ports `ggml_opt_epoch_callback_progress_bar` (ggml-opt.cpp:926 @b29c606e2).
 ///
 /// Parameters:
 /// - `train`: whether the batch just evaluated was a training batch.
@@ -1686,7 +1686,7 @@ pub fn ggml_opt_epoch_callback_progress_bar(
     _ = dataset;
 }
 
-/// Ports `ggml_opt_fit` (ggml-opt.cpp:999 @5266f24da).
+/// Ports `ggml_opt_fit` (ggml-opt.cpp:999 @b29c606e2).
 ///
 /// Parameters:
 /// - `backend_sched`: the scheduler the graphs are built for.
@@ -1788,7 +1788,7 @@ pub fn ggml_opt_fit(
     ggml_opt_result_free(result_val);
 }
 
-/// Ports `ggml_opt_context_optimizer_type` (ggml-opt.cpp:1081 @5266f24da).
+/// Ports `ggml_opt_context_optimizer_type` (ggml-opt.cpp:1081 @b29c606e2).
 ///
 /// Parameters:
 /// - `opt_ctx`: the context.
@@ -1798,7 +1798,7 @@ pub fn ggml_opt_context_optimizer_type(opt_ctx: c.ggml_opt_context_t) callconv(.
     return contextOf(opt_ctx).optimizer;
 }
 
-/// Ports `ggml_opt_optimizer_name` (ggml-opt.cpp:1085 @5266f24da).
+/// Ports `ggml_opt_optimizer_name` (ggml-opt.cpp:1085 @b29c606e2).
 ///
 /// Parameters:
 /// - `o`: an optimizer type.

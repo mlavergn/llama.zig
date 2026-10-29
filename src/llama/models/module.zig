@@ -3,8 +3,8 @@
 //!
 //! **Not a port.** Upstream gives each architecture a class deriving from
 //! `llama_model_base` and overriding three virtuals -- `load_arch_hparams`,
-//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:764, 765, 766
-//! @5266f24da) -- and `llama_model_mapping` (llama-model.cpp:43 @5266f24da) picks the
+//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:767, 768, 769
+//! @b29c606e2) -- and `llama_model_mapping` (llama-model.cpp:43 @b29c606e2) picks the
 //! class. Here a class is a file exporting those three functions, and
 //! `forArch` is the mapping. An architecture with no entry is one the port
 //! has not reached: loading it stops at `error.Unported`, which
@@ -85,6 +85,7 @@ pub const hunyuan_dense = @import("hunyuan_dense.zig");
 pub const hunyuan_moe = @import("hunyuan_moe.zig");
 pub const hunyuan_vl = @import("hunyuan_vl.zig");
 pub const hy_v3 = @import("hy_v3.zig");
+pub const hy_v4 = @import("hy_v4.zig");
 pub const internlm2 = @import("internlm2.zig");
 pub const jais = @import("jais.zig");
 pub const jais2 = @import("jais2.zig");
@@ -104,6 +105,7 @@ pub const maincoder = @import("maincoder.zig");
 pub const mamba = @import("mamba.zig");
 pub const mamba2 = @import("mamba2.zig");
 pub const mamba_base = @import("mamba_base.zig");
+pub const maple = @import("maple.zig");
 pub const mellum = @import("mellum.zig");
 pub const mimo2 = @import("mimo2.zig");
 pub const minicpm = @import("minicpm.zig");
@@ -161,6 +163,7 @@ pub const rwkv7_base = @import("rwkv7_base.zig");
 pub const seed_oss = @import("seed_oss.zig");
 pub const smallthinker = @import("smallthinker.zig");
 pub const smollm3 = @import("smollm3.zig");
+pub const spark2_5 = @import("spark2_5.zig");
 pub const stablelm = @import("stablelm.zig");
 pub const starcoder = @import("starcoder.zig");
 pub const starcoder2 = @import("starcoder2.zig");
@@ -257,6 +260,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .hunyuan_moe => entryOf(hunyuan_moe),
         .hunyuan_vl => entryOf(hunyuan_vl),
         .hy_v3 => entryOf(hy_v3),
+        .hy_v4 => entryOf(hy_v4),
         .internlm2 => entryOf(internlm2),
         .jais => entryOf(jais),
         .jais2 => entryOf(jais2),
@@ -276,6 +280,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .maincoder => entryOf(maincoder),
         .mamba => entryOf(mamba),
         .mamba2 => entryOf(mamba2),
+        .maple => entryOf(maple),
         .mellum => entryOf(mellum),
         .mimo2 => entryOf(mimo2),
         .minicpm => entryOf(minicpm),
@@ -332,6 +337,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .seed_oss => entryOf(seed_oss),
         .smallthinker => entryOf(smallthinker),
         .smollm3 => entryOf(smollm3),
+        .spark2_5 => entryOf(spark2_5),
         .stablelm => entryOf(stablelm),
         .starcoder => entryOf(starcoder),
         .starcoder2 => entryOf(starcoder2),

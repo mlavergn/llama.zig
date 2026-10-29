@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.0
-//! (`5266f24da`). The C++ keys `std::map`s by name and prints them in that
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
+//! (`b29c606e2`). The C++ keys `std::map`s by name and prints them in that
 //! order; the port keeps the entries unordered and sorts the names when it
 //! prints, which is the same order.
 
@@ -18,7 +18,7 @@ fn oom() noreturn {
     impl.abort("ggml_vulkan: out of memory");
 }
 
-/// Ports `vk_perf_logger` (ggml-vulkan.cpp:2258 @5266f24da).
+/// Ports `vk_perf_logger` (ggml-vulkan.cpp:2354 @b29c606e2).
 pub const PerfLogger = struct {
     timings: std.StringHashMapUnmanaged(std.ArrayList(u64)) = .empty,
     flops: std.StringHashMapUnmanaged(std.ArrayList(u64)) = .empty,
@@ -39,7 +39,7 @@ pub const PerfLogger = struct {
         map.clearRetainingCapacity();
     }
 
-    /// Ports `vk_perf_logger`'s `print_timings` (ggml-vulkan.cpp:2260 @5266f24da).
+    /// Ports `vk_perf_logger`'s `print_timings` (ggml-vulkan.cpp:2356 @b29c606e2).
     pub fn printTimings(self: *PerfLogger, force: bool) void {
         if (self.timings.count() == 0) return;
         self.print_count += 1;
@@ -83,7 +83,7 @@ pub const PerfLogger = struct {
         clearMap(&self.flops);
     }
 
-    /// Ports `vk_perf_logger`'s `get_node_fusion_name` (ggml-vulkan.cpp:2305 @5266f24da):
+    /// Ports `vk_perf_logger`'s `get_node_fusion_name` (ggml-vulkan.cpp:2401 @b29c606e2):
     /// the label a node's timing is filed under, with its flops.
     fn nodeFusionName(w: *std.Io.Writer, node: *const c.ggml_tensor, fusion_name: ?[*:0]const u8, n_flops: *u64) void {
         n_flops.* = m.graph.getNodeFlops(node);
@@ -153,7 +153,7 @@ pub const PerfLogger = struct {
         gop.value_ptr.append(allocator, value) catch oom();
     }
 
-    /// Ports `vk_perf_logger`'s `log_timing` (ggml-vulkan.cpp:2386 @5266f24da)
+    /// Ports `vk_perf_logger`'s `log_timing` (ggml-vulkan.cpp:2482 @b29c606e2)
     /// for a fused run of nodes; one node is the first overload.
     pub fn logTiming(self: *PerfLogger, nodes: []const *c.ggml_tensor, names: []const ?[*:0]const u8, time: u64) void {
         var buf: [4096]u8 = undefined;

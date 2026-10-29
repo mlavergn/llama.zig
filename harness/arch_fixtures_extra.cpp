@@ -74,6 +74,19 @@ static bool write_fixture(llm_arch arch, bool moe, size_t seed, const std::strin
         }
         gguf_set_val_u32(meta.get(), (a + ".token_shift_count").c_str(), arch == LLM_ARCH_RWKV7 ? 2 : 1);
     }
+    // Since v0.4.1 Gemma 4 reads its SWA pattern with `get_arr`, which
+    // refuses the scalar `get_gguf_ctx` still writes; upstream's own loop
+    // skips the architecture, so nothing there noticed. The array is the
+    // recipe's comment: every fifth layer full attention.
+    if (arch == LLM_ARCH_GEMMA4) {
+        const std::string a = llm_arch_name(arch);
+        const uint32_t n_layer = gguf_get_val_u32(meta.get(), gguf_find_key(meta.get(), (a + ".block_count").c_str()));
+        std::vector<char> pattern(n_layer);
+        for (uint32_t il = 0; il < n_layer; il++) {
+            pattern[il] = il % 5 != 4;
+        }
+        gguf_set_arr_data(meta.get(), (a + ".attention.sliding_window_pattern").c_str(), GGUF_TYPE_BOOL, pattern.data(), pattern.size());
+    }
     if (is_bert_family(arch)) {
         gguf_set_val_u32(meta.get(), "tokenizer.ggml.token_type_count", 2);
     }

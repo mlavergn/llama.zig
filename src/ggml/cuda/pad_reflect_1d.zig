@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/pad_reflect_1d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/pad_reflect_1d.cuh` at v0.4.0
-//! (`5266f24da`). The kernel, `pad_reflect_1d_kernel_f32`, stays CUDA.
+//! `llama.cpp/ggml/src/ggml-cuda/pad_reflect_1d.cuh` at v0.4.1
+//! (`b29c606e2`). The kernel, `pad_reflect_1d_kernel_f32`, stays CUDA.
 //!
 //! The grid's x covers rows and column tiles together, `ne01 * tiles0`; the
 //! kernel splits it back with `fast_div_modulo` over `ne01`'s fastdiv
@@ -18,14 +18,14 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_PAD_REFLECT_1D_BLOCK_SIZE` (pad_reflect_1d.cuh:3 @5266f24da).
+/// Ports `CUDA_PAD_REFLECT_1D_BLOCK_SIZE` (pad_reflect_1d.cuh:3 @b29c606e2).
 const block_size = 256;
 
 fn uint(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `ggml_cuda_op_pad_reflect_1d` (pad_reflect_1d.cu:58 @5266f24da),
+/// Ports `ggml_cuda_op_pad_reflect_1d` (pad_reflect_1d.cu:58 @b29c606e2),
 /// which launches with `<<<>>>`.
 pub fn opPadReflect1d(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);

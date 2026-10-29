@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen3vl.cpp` at v0.4.0 (`5266f24da`):
+//! Ported from `llama.cpp/src/models/qwen3vl.cpp` at v0.4.1 (`b29c606e2`):
 //! `llama_model_qwen3vl`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. `llama_model_qwen3tts`
 //! (`llama.cpp/src/models/qwen3tts.cpp`) adds nothing of its own, so the
@@ -23,7 +23,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_qwen3vl`'s `load_arch_hparams` (src/models/qwen3vl.cpp:3 @5266f24da).
+/// Ports `llama_model_qwen3vl`'s `load_arch_hparams` (src/models/qwen3vl.cpp:3 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     if (try ml.meta.getKey(u32, .num_deepstack_layers, false, exc)) |v| hp.n_deepstack_layers = v;
@@ -38,7 +38,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen3vl`'s `load_arch_tensors` (src/models/qwen3vl.cpp:16 @5266f24da).
+/// Ports `llama_model_qwen3vl`'s `load_arch_tensors` (src/models/qwen3vl.cpp:16 @b29c606e2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -80,13 +80,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_qwen3vl`'s `build_arch_graph` (src/models/qwen3vl.cpp:55 @5266f24da).
+/// Ports `llama_model_qwen3vl`'s `build_arch_graph` (src/models/qwen3vl.cpp:56 @b29c606e2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_qwen3vl`'s `graph` (src/models/qwen3vl.cpp:59
-/// @5266f24da).
+/// Ports the constructor of `llama_model_qwen3vl`'s `graph` (src/models/qwen3vl.cpp:60
+/// @b29c606e2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -95,8 +95,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_embd: i64 = hp.n_embd;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/qwen3vl.cpp", 65, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/qwen3vl.cpp", 66, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/qwen3vl.cpp", 66, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/qwen3vl.cpp", 67, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -186,7 +186,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_vocab_out = model.output.?.ne[1];
     if (n_vocab_in > n_vocab_out) {
         // Qwen3-TTS, with the codec head as its output.
-        impl.assert(model.output_norm != null, "models/qwen3vl.cpp", 178, "model.output_norm");
+        impl.assert(model.output_norm != null, "models/qwen3vl.cpp", 179, "model.output_norm");
         const pad = n_vocab_in - n_vocab_out;
 
         // A scalar -inf tensor, by this trick, to pad the output with.
@@ -194,7 +194,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         neg_inf = c.ggml_repeat_4d(ctx, neg_inf, pad, cur.ne[1], 1, 1);
         cur = c.ggml_concat(ctx, neg_inf, cur, 0); // [padded .. n_vocab_out, n_stream]
     } else if (n_vocab_in < n_vocab_out) {
-        impl.abort("models/qwen3vl.cpp", 189, "invalid case");
+        impl.abort("models/qwen3vl.cpp", 190, "invalid case");
     }
 
     b.cb(cur, "result_output", -1);

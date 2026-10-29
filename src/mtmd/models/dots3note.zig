@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/dots3note.cpp` at v0.4.0
-//! (`5266f24da`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/dots3note.cpp` at v0.4.1
+//! (`b29c606e2`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -17,14 +17,14 @@ const c = impl.c;
 const T = graph.T;
 const ne = graph.ne;
 
-/// The `conv_block` lambda (mtmd/models/dots3note.cpp:12 @5266f24da) of `build`.
+/// The `conv_block` lambda (mtmd/models/dots3note.cpp:12 @b29c606e2) of `build`.
 fn convBlock(ctx0: ?*c.ggml_context, x_in: T, w: T, b: T) T {
     var x = c.ggml_conv_2d(ctx0, w, x_in, 2, 2, 1, 1, 1, 1);
     x = c.ggml_add(ctx0, x, c.ggml_reshape_4d(ctx0, b, 1, 1, ne(x, 2), 1));
     return c.ggml_gelu_erf(ctx0, x);
 }
 
-/// The `add_pos` lambda (mtmd/models/dots3note.cpp:40 @5266f24da) of `build`: partial
+/// The `add_pos` lambda (mtmd/models/dots3note.cpp:40 @b29c606e2) of `build`: partial
 /// rotary, the first half of each head, NEOX style. `ctx` is the positions
 /// tensor.
 fn addPos(ctx: ?*anyopaque, g: *graph.Graph, cur: T, layer: *const model_mod.Layer) T {
@@ -33,7 +33,7 @@ fn addPos(ctx: ?*anyopaque, g: *graph.Graph, cur: T, layer: *const model_mod.Lay
     return c.ggml_rope_ext(g.ctx0, cur, positions, null, @divTrunc(g.d_head, 2), c.GGML_ROPE_TYPE_NEOX, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 }
 
-/// Ports `build` (mtmd/models/dots3note.cpp:3 @5266f24da), a member of
+/// Ports `build` (mtmd/models/dots3note.cpp:3 @b29c606e2), a member of
 /// `clip_graph_dots3note_a`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

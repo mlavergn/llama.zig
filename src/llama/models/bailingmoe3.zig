@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/bailingmoe3.cpp` at v0.4.0
-//! (`5266f24da`): `llama_model_bailingmoe3`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/bailingmoe3.cpp` at v0.4.1
+//! (`b29c606e2`): `llama_model_bailingmoe3`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`,
 //! `bailingmoe3_causal_conv1d`, and its `graph` and `graph_mtp`.
 
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_bailingmoe3`'s `load_arch_hparams` (models/bailingmoe3.cpp:6 @5266f24da).
+/// Ports `llama_model_bailingmoe3`'s `load_arch_hparams` (models/bailingmoe3.cpp:6 @b29c606e2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -71,7 +71,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_bailingmoe3`'s `load_arch_tensors` (models/bailingmoe3.cpp:46 @5266f24da).
+/// Ports `llama_model_bailingmoe3`'s `load_arch_tensors` (models/bailingmoe3.cpp:46 @b29c606e2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -158,7 +158,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// The MLA tensors, which `load_arch_tensors` (models/bailingmoe3.cpp:46
-/// @5266f24da) loads alike for the trunk's attention layers and the MTP
+/// @b29c606e2) loads alike for the trunk's attention layers and the MTP
 /// block.
 fn loadMla(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i64, n_head: i64, q_lora_rank: i64, kv_lora_rank: i64, qk_rope_head_dim: i64, qk_head_dim: i64, v_head_dim: i64, exc: *Exception) Thrown!void {
     if (q_lora_rank > 0) {
@@ -177,7 +177,7 @@ fn loadMla(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i
 }
 
 /// The MoE tensors, routed and shared, which `load_arch_tensors`
-/// (models/bailingmoe3.cpp:46 @5266f24da) loads alike for the trunk's MoE
+/// (models/bailingmoe3.cpp:46 @b29c606e2) loads alike for the trunk's MoE
 /// layers and the MTP block.
 fn loadMoe(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i64, n_expert: i64, n_ff_exp: i64, n_ff_shexp: i64, exc: *Exception) Thrown!void {
     layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = il }, &.{ n_embd, n_expert }, flags, exc);
@@ -194,7 +194,7 @@ fn loadMoe(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i
 // The graph
 
 /// Ports `llama_model_bailingmoe3`'s `build_arch_graph` (models/bailingmoe3.cpp:161
-/// @5266f24da): the MTP draft head for that graph type, the main model
+/// @b29c606e2): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -202,7 +202,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports `bailingmoe3_causal_conv1d` (models/bailingmoe3.cpp:168
-/// @5266f24da): the short convolution of one of Q (`qkv` 0), K (1) or V
+/// @b29c606e2): the short convolution of one of Q (`qkv` 0), K (1) or V
 /// (2), its projection in front, its slice of the conv state in front of
 /// the input, and the last `d_conv - 1` columns written back -- one
 /// snapshot per rollback slot when `n_rs_seq` keeps any.
@@ -260,8 +260,8 @@ const MlaDims = struct {
 };
 
 /// The gated MLA attention of a trunk attention layer in `graph`
-/// (models/bailingmoe3.cpp:218 @5266f24da) and of the MTP block in
-/// `graph_mtp` (models/bailingmoe3.cpp:412 @5266f24da), the same lines:
+/// (models/bailingmoe3.cpp:218 @b29c606e2) and of the MTP block in
+/// `graph_mtp` (models/bailingmoe3.cpp:412 @b29c606e2), the same lines:
 /// Q through the optional low-rank pair, the latent and its RoPE key, Q
 /// absorbing `wk_b`, MQA over the K-only cache with `wv_b` decompressing
 /// its output, then the per-head sigmoid gate and the output projection.
@@ -312,8 +312,8 @@ fn buildMlaAttn(b: *const graph.Builder, layer: *const model_mod.Layer, inp_attn
 }
 
 /// The routed experts plus the shared experts, of the trunk's MoE layers in
-/// `graph` (models/bailingmoe3.cpp:218 @5266f24da) and of the MTP block in
-/// `graph_mtp` (models/bailingmoe3.cpp:412 @5266f24da).
+/// `graph` (models/bailingmoe3.cpp:218 @b29c606e2) and of the MTP block in
+/// `graph_mtp` (models/bailingmoe3.cpp:412 @b29c606e2).
 fn buildMoe(b: *const graph.Builder, layer: *const model_mod.Layer, cur: *Tensor, il: c_int) *Tensor {
     const hp = b.hparams;
     const moe = b.buildMoeFfn(cur, .{
@@ -333,7 +333,7 @@ fn buildMoe(b: *const graph.Builder, layer: *const model_mod.Layer, cur: *Tensor
     return c.ggml_add(b.ctx0, moe, shared);
 }
 
-/// Ports the constructor of `llama_model_bailingmoe3`'s `graph` (models/bailingmoe3.cpp:218 @5266f24da).
+/// Ports the constructor of `llama_model_bailingmoe3`'s `graph` (models/bailingmoe3.cpp:218 @b29c606e2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -392,8 +392,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var beta = c.ggml_mul_mat(ctx, layer.ssm_beta, cur);
             beta = c.ggml_sigmoid(ctx, c.ggml_reshape_4d(ctx, beta, 1, n_head, n_seq_tokens, n_seqs));
 
-            q = c.ggml_l2_norm(ctx, q, hp.f_norm_rms_eps);
-            k = c.ggml_l2_norm(ctx, k, hp.f_norm_rms_eps);
+            q = delta_net.buildGdnL2Norm(ctx, q, hp.f_norm_rms_eps);
+            k = delta_net.buildGdnL2Norm(ctx, k, hp.f_norm_rms_eps);
 
             const states_all = mctx_cur.getSL(il);
             var state = b.buildRs(inp_rs, states_all, @intCast(hp.nEmbdS()), @intCast(n_seqs), null);
@@ -449,7 +449,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_bailingmoe3`'s `graph_mtp`
-/// (models/bailingmoe3.cpp:412 @5266f24da): the NextN draft head.
+/// (models/bailingmoe3.cpp:412 @b29c606e2): the NextN draft head.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

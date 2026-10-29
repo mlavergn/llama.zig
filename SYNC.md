@@ -252,7 +252,14 @@ agree. Then move every file header's "at vX (`sha`)" provenance line.
    - `api-diff`, `adapter-diff`, `quant-diff`, `opt-diff` and
      `opt-llama-diff`;
    - `meta-diff`, `batch-diff`, `chat-diff` and `host-arms-diff`;
-   - `parity-cli` and `xcframework-check`.
+   - `parity-cli` and `xcframework-check`, after `make -C xcframework
+     upstream` rebuilds upstream's own framework at the new pin (`compat`
+     refuses a build made at any other commit).
+
+   `make arch-fixtures` reports an architecture the C++ cannot build as a
+   "no fixture" line, not a failure. Compare its count with the last
+   sync's: one that went missing takes its `arch-model-diff` coverage with
+   it, as Gemma 4's did at v0.4.1.
 
 **A gate that could not build is not a pass.** For every gate case you added
 in this sync, inject a fault, watch the case fail, and undo the injection by

@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/clamp.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/clamp.cuh` at v0.4.0 (`5266f24da`). The
+//! `llama.cpp/ggml/src/ggml-cuda/clamp.cuh` at v0.4.1 (`b29c606e2`). The
 //! kernel, `op_clamp_kernel`, stays CUDA.
 //!
 //! For `F16` the bounds are converted to `half` on the host, `(half)min`,
@@ -19,7 +19,7 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `CUDA_CLAMP_BLOCK_SIZE` (clamp.cuh:3 @5266f24da).
+/// Ports `CUDA_CLAMP_BLOCK_SIZE` (clamp.cuh:3 @b29c606e2).
 const block_size = 256;
 
 /// `(half) x`.
@@ -27,7 +27,7 @@ fn toHalf(x: f32) half {
     return @fromBackingInt(@intCast(@as(u16, @bitCast(@as(f16, @floatCast(x))))));
 }
 
-/// Ports `clamp_cuda` (clamp.cu:19 @5266f24da), which launches with `<<<>>>`.
+/// Ports `clamp_cuda` (clamp.cu:19 @b29c606e2), which launches with `<<<>>>`.
 fn clampCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, min: T, max: T, k: c_int, stream: cu.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(k + block_size - 1, block_size);
     kernels.launch(kernels.get("clamp", kernels.tmpl("op_clamp_kernel", &.{kernels.typeName(T)})), .{
@@ -37,7 +37,7 @@ fn clampCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, min: T, m
     }, .{ x, dst, min, max, k });
 }
 
-/// Ports `ggml_cuda_op_clamp` (clamp.cu:25 @5266f24da).
+/// Ports `ggml_cuda_op_clamp` (clamp.cu:25 @b29c606e2).
 pub fn opClamp(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;

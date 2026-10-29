@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/minicpmv.cpp` at v0.4.0 (`5266f24da`).
+//! Ports `llama.cpp/tools/mtmd/models/minicpmv.cpp` at v0.4.1 (`b29c606e2`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -14,7 +14,7 @@ const c = impl.c;
 
 extern fn sqrtf(x: f32) f32;
 
-/// Ports `build` (minicpmv.cpp:3 @5266f24da), a member of `clip_graph_minicpmv`.
+/// Ports `build` (minicpmv.cpp:3 @b29c606e2), a member of `clip_graph_minicpmv`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -106,7 +106,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     return g.gf;
 }
 
-/// The `add_i32_input` lambda (minicpmv.cpp:124 @5266f24da): a named I32 input.
+/// The `add_i32_input` lambda (minicpmv.cpp:124 @b29c606e2): a named I32 input.
 fn addI32Input(g: *graph.Graph, name: [*:0]const u8, n: c_int) graph.T {
     const t = c.ggml_new_tensor_1d(g.ctx0, c.GGML_TYPE_I32, n);
     _ = c.ggml_set_name(t, name);
@@ -114,7 +114,7 @@ fn addI32Input(g: *graph.Graph, name: [*:0]const u8, n: c_int) graph.T {
     return t;
 }
 
-/// The `build_vit_layers` lambda (minicpmv.cpp:180 @5266f24da): layers
+/// The `build_vit_layers` lambda (minicpmv.cpp:180 @b29c606e2): layers
 /// `[il_begin, il_end)` of the ViT over `n_pos_layer` tokens, with optional
 /// layer scales.
 fn buildVitLayers(g: *graph.Graph, input_in: graph.T, il_begin: c_int, il_end: c_int, n_pos_layer: i64) graph.T {
@@ -173,7 +173,7 @@ fn buildVitLayers(g: *graph.Graph, input_in: graph.T, il_begin: c_int, il_end: c
     return input;
 }
 
-/// Ports `build` (minicpmv.cpp:116 @5266f24da), a member of `clip_graph_minicpmv4_6`.
+/// Ports `build` (minicpmv.cpp:116 @b29c606e2), a member of `clip_graph_minicpmv4_6`.
 pub fn build4_6(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

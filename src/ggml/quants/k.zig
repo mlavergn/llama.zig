@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.4.0, `5266f24da`), the
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.4.1, `b29c606e2`), the
 //! 2- through 6-bit super-block sections at lines 889-2313 plus `q8_K` at
 //! 2766. Each function names the C function it replaces and the line it began
 //! at.
@@ -42,7 +42,7 @@ const QK_K = c.QK_K;
 // -----------------------------------------------------------------------------
 // q2_K -- 2 bits per weight, 16 sub-blocks of 16
 
-/// Ports `quantize_row_q2_K_ref` (ggml-quants.c:891 @5266f24da).
+/// Ports `quantize_row_q2_K_ref` (ggml-quants.c:891 @b29c606e2).
 ///
 /// Three passes: fit each sub-block's scale and min, quantize those 16 pairs
 /// against the block maxima into 4 bits each, then requantize the weights
@@ -122,7 +122,7 @@ pub export fn quantize_row_q2_K_ref(x_in: [*c]const f32, y: [*c]blocks.Q2_K, k: 
     }
 }
 
-/// Ports `dequantize_row_q2_K` (ggml-quants.c:961 @5266f24da).
+/// Ports `dequantize_row_q2_K` (ggml-quants.c:961 @b29c606e2).
 pub export fn dequantize_row_q2_K(x: [*c]const blocks.Q2_K, y_in: [*c]f32, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     const nb: usize = @intCast(@divExact(k, QK_K));
@@ -167,7 +167,7 @@ pub export fn dequantize_row_q2_K(x: [*c]const blocks.Q2_K, y_in: [*c]f32, k: i6
 // -----------------------------------------------------------------------------
 // q3_K -- 3 bits per weight, 16 sub-blocks of 16
 
-/// Ports `quantize_row_q3_K_ref` (ggml-quants.c:1229 @5266f24da).
+/// Ports `quantize_row_q3_K_ref` (ggml-quants.c:1229 @b29c606e2).
 ///
 /// Symmetric, so there is no min. The 16 sub-block scales are signed 6-bit
 /// values biased by 32, split across `scales[0..12]`: the low four bits in the
@@ -259,7 +259,7 @@ pub export fn quantize_row_q3_K_ref(x_in: [*c]const f32, y: [*c]blocks.Q3_K, k: 
     }
 }
 
-/// Ports `dequantize_row_q3_K` (ggml-quants.c:1305 @5266f24da).
+/// Ports `dequantize_row_q3_K` (ggml-quants.c:1305 @b29c606e2).
 ///
 /// Reassembles the 6-bit scales with the same word-at-a-time trick the C uses:
 /// the twelve bytes are read as four `u32`s and the high bits shuffled in
@@ -328,7 +328,7 @@ pub export fn dequantize_row_q3_K(x: [*c]const blocks.Q3_K, y_in: [*c]f32, k: i6
 // gets. The shared parts are factored out below rather than written twice.
 
 /// The scale and min fitting `quantize_row_q4_K_ref` and
-/// `quantize_row_q5_K_ref` share (ggml-quants.c:1457, 1644 @5266f24da) --
+/// `quantize_row_q5_K_ref` share (ggml-quants.c:1457, 1644 @b29c606e2) --
 /// the `for (int j = 0; j < QK_K/32; ++j)` loop in each, at :1470 and
 /// :1657.
 ///
@@ -364,7 +364,7 @@ fn fitScalesK(
 
 /// Packs eight 6-bit scale/min pairs into twelve bytes, as
 /// `quantize_row_q4_K_ref` and `quantize_row_q5_K_ref` both do
-/// (ggml-quants.c:1457, 1644 @5266f24da).
+/// (ggml-quants.c:1457, 1644 @b29c606e2).
 ///
 /// The first four pairs go in whole; the last four have their low nibble in
 /// `scales[j+4]` and their top two bits stolen into the *high* bits of an
@@ -389,7 +389,7 @@ fn packScalesK(scales_out: [*]u8, scales: *const [QK_K / 32]f32, mins: *const [Q
     }
 }
 
-/// Ports `quantize_row_q4_K_ref` (ggml-quants.c:1457 @5266f24da).
+/// Ports `quantize_row_q4_K_ref` (ggml-quants.c:1457 @b29c606e2).
 pub export fn quantize_row_q4_K_ref(x_in: [*c]const f32, y: [*c]blocks.Q4_K, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     const nb: usize = @intCast(@divExact(k, QK_K));
@@ -433,7 +433,7 @@ pub export fn quantize_row_q4_K_ref(x_in: [*c]const f32, y: [*c]blocks.Q4_K, k: 
     }
 }
 
-/// Ports `dequantize_row_q4_K` (ggml-quants.c:1529 @5266f24da).
+/// Ports `dequantize_row_q4_K` (ggml-quants.c:1529 @b29c606e2).
 pub export fn dequantize_row_q4_K(x: [*c]const blocks.Q4_K, y_in: [*c]f32, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     const nb: usize = @intCast(@divExact(k, QK_K));
@@ -469,7 +469,7 @@ pub export fn dequantize_row_q4_K(x: [*c]const blocks.Q4_K, y_in: [*c]f32, k: i6
     }
 }
 
-/// Ports `quantize_row_q5_K_ref` (ggml-quants.c:1644 @5266f24da).
+/// Ports `quantize_row_q5_K_ref` (ggml-quants.c:1644 @b29c606e2).
 pub export fn quantize_row_q5_K_ref(x_in: [*c]const f32, y: [*c]blocks.Q5_K, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     const nb: usize = @intCast(@divExact(k, QK_K));
@@ -535,7 +535,7 @@ pub export fn quantize_row_q5_K_ref(x_in: [*c]const f32, y: [*c]blocks.Q5_K, k: 
     }
 }
 
-/// Ports `dequantize_row_q5_K` (ggml-quants.c:1731 @5266f24da).
+/// Ports `dequantize_row_q5_K` (ggml-quants.c:1731 @b29c606e2).
 pub export fn dequantize_row_q5_K(x: [*c]const blocks.Q5_K, y_in: [*c]f32, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     const nb: usize = @intCast(@divExact(k, QK_K));
@@ -583,7 +583,7 @@ pub export fn dequantize_row_q5_K(x: [*c]const blocks.Q5_K, y_in: [*c]f32, k: i6
 // -----------------------------------------------------------------------------
 // q6_K -- 6 bits per weight, 16 sub-blocks of 16, symmetric
 
-/// Ports `quantize_row_q6_K_ref` (ggml-quants.c:1869 @5266f24da).
+/// Ports `quantize_row_q6_K_ref` (ggml-quants.c:1869 @b29c606e2).
 ///
 /// The most accurate K-quant: no min, and the sub-block scales are full signed
 /// bytes rather than packed 6-bit fields. Each weight is four low bits in `ql`
@@ -661,7 +661,7 @@ pub export fn quantize_row_q6_K_ref(x_in: [*c]const f32, y: [*c]blocks.Q6_K, k: 
     }
 }
 
-/// Ports `dequantize_row_q6_K` (ggml-quants.c:1939 @5266f24da).
+/// Ports `dequantize_row_q6_K` (ggml-quants.c:1939 @b29c606e2).
 pub export fn dequantize_row_q6_K(x: [*c]const blocks.Q6_K, y_in: [*c]f32, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     const nb: usize = @intCast(@divExact(k, QK_K));
@@ -698,7 +698,7 @@ pub export fn dequantize_row_q6_K(x: [*c]const blocks.Q6_K, y_in: [*c]f32, k: i6
 // -----------------------------------------------------------------------------
 // q8_K -- the activation side of the K-quant dot products
 
-/// Ports `quantize_row_q8_K_ref` (ggml-quants.c:2768 @5266f24da).
+/// Ports `quantize_row_q8_K_ref` (ggml-quants.c:2768 @b29c606e2).
 ///
 /// Never a stored weight format: this is what an activation is quantized into
 /// before a dot product against a K-quant weight. Hence the `f32` scale rather
@@ -747,7 +747,7 @@ pub export fn quantize_row_q8_K_ref(x_in: [*c]const f32, y: [*c]blocks.Q8_K, k: 
     }
 }
 
-/// Ports `dequantize_row_q8_K` (ggml-quants.c:2807 @5266f24da).
+/// Ports `dequantize_row_q8_K` (ggml-quants.c:2807 @b29c606e2).
 pub export fn dequantize_row_q8_K(x: [*c]const blocks.Q8_K, y_in: [*c]f32, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     const nb: usize = @intCast(@divExact(k, QK_K));
