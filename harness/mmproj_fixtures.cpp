@@ -1920,6 +1920,11 @@ static int cmd_gen(const std::string & arch_dir, const std::string & out_dir, co
         { "hunyuanvl", "hunyuan_vl-dense", false, 0, true },
         { "qwen3tts", "qwen3tts-dense", true, 0 },
         { "pockettts", "pockettts-dense", false, 0 },
+        // no projector names these: they give llama-server's multimodal
+        // cases a hybrid (recurrent) and a sliding-window text model, where
+        // the slots checkpoint and must skip a media chunk's batch
+        { "qwen35", "qwen35-dense", false, 0 },
+        { "gemma3", "gemma3-dense", false, 0 },
     };
     for (const auto & t : texts) {
         const std::string out = out_dir + "/text-" + t.key + ".gguf";

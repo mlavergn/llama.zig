@@ -1,0 +1,80 @@
+#!/bin/bash
+# Writes the multimodal cases' media into $DATA and names their base64 in
+# $DATA/setup.env, so a case line can carry an image as $PNG1 (Stage 10
+# step 8). Run once by scripts/server-diff vision and audio.
+#   PNG1, PNG2   64x64 and 100x60 RGB PNGs, PNG3 a 96x48 grey-alpha one
+#   JPG          upstream's tools/mtmd/test-1.jpeg (304x224 slices)
+#   WAV          0.4 s of a 16 kHz mono tone; WAV44 0.3 s of 44.1 kHz stereo
+#   MP3          upstream's tools/mtmd/test-2.mp3
+#   JUNK         bytes that are no image and no audio
+#   PNG1NL       PNG1's base64 broken into lines (a JSON \n every 76)
+#   TINYWAV      a WAV header with no samples
+#   WAV8         8-bit PCM whose data chunk claims one byte more than it has
+# and $DATA/media/ (for --media-path): red.png, tone.wav, sub/blue.png.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+python3 -I - "$DATA" "$ROOT" <<'PY'
+import base64, math, os, struct, sys, zlib
+out, root = sys.argv[1], sys.argv[2]
+
+def png(w, h, color_type, pix):
+    raw = bytearray()
+    for y in range(h):
+        raw.append(0)
+        for x in range(w):
+            raw += bytes(pix(x, y))
+    def chunk(t, d):
+        return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, color_type, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(bytes(raw), 9)) + chunk(b'IEND', b''))
+
+def wav(rate, ch, secs, f0):
+    n = int(rate * secs)
+    frames = bytearray()
+    for i in range(n):
+        for c in range(ch):
+            v = 0.4 * math.sin(2 * math.pi * (f0 + 40 * c) * i / rate) + 0.1 * math.sin(2 * math.pi * 3.1 * f0 * i / rate)
+            frames += struct.pack('<h', int(max(-1, min(1, v)) * 32767))
+    hdr = b'RIFF' + struct.pack('<I', 36 + len(frames)) + b'WAVE'
+    hdr += b'fmt ' + struct.pack('<IHHIIHH', 16, 1, ch, rate, rate * ch * 2, ch * 2, 16)
+    hdr += b'data' + struct.pack('<I', len(frames))
+    return hdr + frames
+
+def wav8(rate, secs, f0):
+    # 8-bit PCM, its data chunk declaring one byte more than the file holds,
+    # and the file a length base64 leaves a partial quantum for: every byte
+    # the decoder returns is one more sample
+    n = int(rate * secs)
+    frames = bytes(int(128 + 100 * math.sin(2 * math.pi * f0 * i / rate)) for i in range(n))
+    while (44 + len(frames)) % 3 == 0:
+        frames += b'\x80'
+    hdr = b'RIFF' + struct.pack('<I', 36 + len(frames) + 1) + b'WAVE'
+    hdr += b'fmt ' + struct.pack('<IHHIIHH', 16, 1, 1, rate, rate, 1, 8)
+    hdr += b'data' + struct.pack('<I', len(frames) + 1)
+    return hdr + frames
+
+media = {
+    'PNG1': png(64, 64, 2, lambda x, y: ((x * 4) & 255, (y * 4) & 255, ((x ^ y) * 8) & 255)),
+    'PNG2': png(100, 60, 2, lambda x, y: ((x * 7 + y) & 255, 200 - y * 3, (x * y) & 255)),
+    'PNG3': png(96, 48, 4, lambda x, y: ((x * 5 + y * 3) & 255, 255 - y * 4)),
+    'JPG': open(os.path.join(root, 'llama.cpp/tools/mtmd/test-1.jpeg'), 'rb').read(),
+    'WAV': wav(16000, 1, 0.4, 220),
+    'WAV44': wav(44100, 2, 0.3, 330),
+    'MP3': open(os.path.join(root, 'llama.cpp/tools/mtmd/test-2.mp3'), 'rb').read(),
+    'JUNK': b'this is neither an image nor a sound, just some text bytes',
+    'TINYWAV': wav(16000, 1, 0, 220),
+    'WAV8': wav8(16000, 0.3, 300),
+}
+with open(os.path.join(out, 'setup.env'), 'w') as f:
+    for k, v in media.items():
+        f.write(f'{k}={base64.b64encode(v).decode()}\n')
+    # MIME-style base64, a JSON "\n" every 76 characters: upstream's
+    # decoder stops at the first character outside the alphabet
+    b = base64.b64encode(media['PNG1']).decode()
+    f.write('PNG1NL=' + '\\n'.join(b[i:i + 76] for i in range(0, len(b), 76)) + '\n')
+os.makedirs(os.path.join(out, 'media', 'sub'), exist_ok=True)
+open(os.path.join(out, 'media', 'red.png'), 'wb').write(media['PNG1'])
+open(os.path.join(out, 'media', 'tone.wav'), 'wb').write(media['WAV'])
+open(os.path.join(out, 'media', 'sub', 'blue.png'), 'wb').write(media['PNG2'])
+open(os.path.join(out, 'outside.png'), 'wb').write(media['PNG1'])
+PY

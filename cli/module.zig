@@ -15,8 +15,11 @@ const std = @import("std");
 pub const c = @import("c.zig");
 pub const args = @import("args.zig");
 pub const chat = @import("chat.zig");
-pub const fit = @import("fit.zig");
-pub const json = @import("json/module.zig");
+pub const fit = @import("cli_fit");
+pub const json = fit.json;
+pub const common_chat = @import("common_chat");
+pub const conversation = @import("conversation.zig");
+pub const reasoning_budget = @import("reasoning_budget.zig");
 pub const session = @import("session.zig");
 pub const upstream_flags = @import("upstream_flags.zig");
 
@@ -40,6 +43,7 @@ test {
     _ = @import("c.zig");
     _ = @import("args.zig");
     _ = @import("chat.zig");
-    _ = @import("json/module.zig");
+    _ = @import("conversation.zig");
+    _ = @import("reasoning_budget.zig");
     _ = @import("session.zig");
 }

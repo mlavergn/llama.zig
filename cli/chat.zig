@@ -327,6 +327,8 @@ pub const Template = struct {
         var env = jinja.Environment.init(arena);
         defer env.deinit();
         env.finalize = upstreamOutput;
+        // tojson, sort and a container as a string, as llama.cpp writes them.
+        env.llama_cpp_semantics = true;
         // Upstream's lexer always runs with both on (its `opt_lstrip_blocks`
         // and `opt_trim_blocks`), and chat templates are written for Hugging
         // Face, which sets both.

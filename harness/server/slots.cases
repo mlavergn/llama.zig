@@ -1,0 +1,47 @@
+# Slots, their save/restore/erase actions, metrics and props (Stage 10
+# step 3c): scripts/server-diff slots. Qwen3-0.6B, two slots; each side saves
+# into its own working directory (--slot-save-path ./).
+!mask (seconds_total|tokens_seconds) [0-9.e+-]+
+!mask-key Process-Start-Time-Unix
+!mask Process-Start-Time-Unix: [0-9]+
+!server -m $QWEN3 -c 2048 -np 2 --no-jinja --metrics --props --slot-save-path ./ -lv 4
+!fulllog
+
+GET /slots
+GET /metrics
+POST /completion {"prompt": "Hello there, my name is", "n_predict": 6, "temperature": 0}
+POST /completion {"prompt": "The capital of Spain is", "n_predict": 6, "temperature": 0, "id_slot": 0}
+GET /slots
+GET /metrics
+POST /props {"anything": 1}
+POST /slots/0?action=save {"filename": "s0.bin"}
+POST /slots/1?action=save {"filename": "s1.bin"}
+POST /slots/0?action=save {"filename": "../escape.bin"}
+POST /slots/0?action=save {"filename": ""}
+POST /slots/0?action=save {"name": "s0.bin"}
+POST /slots/0?action=save not json
+POST /slots/abc?action=save {"filename": "x.bin"}
+POST /slots/0?action=bogus {"filename": "x.bin"}
+POST /slots/0
+POST /slots/7?action=erase
+GET /slots
+POST /slots/0?action=restore {"filename": "s1.bin"}
+GET /slots
+POST /completion {"prompt": "Hello there, my name is", "n_predict": 6, "temperature": 0, "id_slot": 0}
+POST /slots/1?action=restore {"filename": "missing.bin"}
+POST /slots/1?action=restore {"filename": "s0.bin"}
+POST /slots/0?action=erase
+POST /slots/1?action=erase
+GET /slots
+POST /completion {"prompt": "The capital of Spain is", "n_predict": 6, "temperature": 0, "id_slot": 1}
+GET /slots?fail_on_no_slot=1
+GET /metrics
+GET /props
+
+# the endpoints off
+!server -m $QWEN3 -c 2048 -np 2 --no-jinja --no-slots -lv 4
+!fulllog
+GET /slots
+POST /slots/0?action=save {"filename": "s0.bin"}
+POST /props {}
+GET /metrics

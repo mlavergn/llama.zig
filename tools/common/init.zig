@@ -7,17 +7,13 @@
 //! `common_init_sampler_from_model`, `common_control_vector_load`,
 //! `common_set_adapter_lora`, `common_threadpools::init`,
 //! `ggml_threadpool_params_from_cpu_params` and `set_process_priority` from
-//! `llama.cpp/common/common.cpp`, and `common_sampler_init` from
-//! `common/sampling.cpp` (v0.4.1, `b29c606e2`). Each declaration names what
-//! it ports and the line it began at.
+//! `llama.cpp/common/common.cpp` (v0.4.1, `b29c606e2`). Each declaration
+//! names what it ports and the line it began at.
 //!
 //! # The sampler, for the tools
 //!
-//! `common_sampler_init` builds a chain whether or not a tool samples. The
-//! ported tools never do, and set none of what the full routine reads beyond
-//! the chain -- grammar triggers, a generation prompt, a reasoning budget --
-//! so those arms are not ported; the chain itself, its grammar and logit
-//! biases are, so a bad `--grammar` fails as upstream's does.
+//! `common_sampler_init` builds a chain whether or not a tool samples; it is
+//! `sampling.zig`'s, whole.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -143,114 +139,14 @@ extern fn strtof(s: [*:0]const u8, end: *?[*:0]u8) f32;
 
 /// What `common_sampler_init` throws; `common_init_from_params` does not
 /// catch it, so it escapes `main`.
-pub const SamplerError = error{ InvalidArgument, Runtime };
+pub const SamplerError = sampling.InitError;
 
-/// Ports `common_sampler_init` (sampling.cpp:187 @b29c606e2), the chain
-/// and its grammar; see the file header for the arms left out.
+/// `common_sampler_init` over a tool's parameters; `sampling.init` is the
+/// port.
 ///
 /// Return: the sampler, which the caller owns (`Sampler.destroy`).
 pub fn samplerInit(p: *Params, model: ?*const c.llama_model) !*sampling.Sampler {
-    const sp = &p.sampling;
-    if (!std.math.isFinite(sp.penalty_repeat) or sp.penalty_repeat <= 0.0 or !std.math.isFinite(1.0 / sp.penalty_repeat)) {
-        _ = arg.throwStr("penalty_repeat must be finite and greater than 0") catch {};
-        return error.InvalidArgument;
-    }
-    if (!std.math.isFinite(sp.penalty_freq)) {
-        _ = arg.throwStr("penalty_freq must be finite") catch {};
-        return error.InvalidArgument;
-    }
-    if (!std.math.isFinite(sp.penalty_present)) {
-        _ = arg.throwStr("penalty_present must be finite") catch {};
-        return error.InvalidArgument;
-    }
-    const vocab = c.llama_model_get_vocab(model);
-    var lparams = c.llama_sampler_chain_default_params();
-    lparams.no_perf = sp.no_perf;
-
-    var grmr: ?*c.llama_sampler = null;
-    const chain = c.llama_sampler_chain_init(lparams);
-
-    const grammar_str = sp.grammar;
-    if (std.mem.startsWith(u8, grammar_str, "%llguidance")) {
-        _ = c.ggml_abort("sampling.cpp", 217, "llguidance (cmake -DLLAMA_LLGUIDANCE=ON) is not enabled");
-    } else if (grammar_str.len != 0) {
-        const g = try p.arena.dupeSentinel(u8, grammar_str, 0);
-        grmr = c.llama_sampler_init_grammar(vocab, g.ptr, "root");
-    }
-    if (grmr == null and grammar_str.len != 0) {
-        _ = arg.throwStr("failed to parse grammar") catch {};
-        return error.Runtime;
-    }
-
-    var samplers: std.ArrayList(*c.llama_sampler) = .empty;
-
-    // logit bias: user biases + model suppress tokens (-INFINITY)
-    {
-        var merged: std.ArrayList(c.llama_logit_bias) = .empty;
-        try merged.appendSlice(p.arena, sp.logit_bias.items);
-
-        var n_suppress: i32 = 0;
-        const suppress = c.llama_vocab_get_suppress_tokens(vocab, &n_suppress);
-        var i: i32 = 0;
-        while (i < n_suppress) : (i += 1) try merged.append(p.arena, .{ .token = suppress[@intCast(i)], .bias = -std.math.inf(f32) });
-
-        if (merged.items.len != 0) {
-            try samplers.append(p.arena, c.llama_sampler_init_logit_bias(c.llama_vocab_n_tokens(vocab), @intCast(merged.items.len), merged.items.ptr).?);
-        }
-    }
-
-    if (sp.mirostat == 0) {
-        var use_adaptive_p = false; // see below
-        for (sp.samplers.items) |cnstr| {
-            const s: ?*c.llama_sampler = switch (cnstr) {
-                .dry => blk: {
-                    var breakers: std.ArrayList([*:0]const u8) = .empty;
-                    for (sp.dry_sequence_breakers.items) |b| try breakers.append(p.arena, (try p.arena.dupeSentinel(u8, b, 0)).ptr);
-                    break :blk c.llama_sampler_init_dry(vocab, sp.dry_multiplier, sp.dry_base, sp.dry_allowed_length, sp.dry_penalty_last_n, @ptrCast(breakers.items.ptr), breakers.items.len);
-                },
-                .top_k => c.llama_sampler_init_top_k(sp.top_k),
-                .top_p => c.llama_sampler_init_top_p(sp.top_p, @intCast(sp.min_keep)),
-                .top_n_sigma => c.llama_sampler_init_top_n_sigma(sp.top_n_sigma),
-                .min_p => c.llama_sampler_init_min_p(sp.min_p, @intCast(sp.min_keep)),
-                .xtc => c.llama_sampler_init_xtc(sp.xtc_probability, sp.xtc_threshold, @intCast(sp.min_keep), sp.seed),
-                .typical_p => c.llama_sampler_init_typical(sp.typ_p, @intCast(sp.min_keep)),
-                .temperature => c.llama_sampler_init_temp_ext(sp.temp, sp.dynatemp_range, sp.dynatemp_exponent),
-                .infill => c.llama_sampler_init_infill(vocab),
-                .penalties => c.llama_sampler_init_penalties(c.llama_vocab_n_tokens(vocab), sp.penalty_last_n, sp.penalty_repeat, sp.penalty_freq, sp.penalty_present),
-                .adaptive_p => blk: {
-                    // the `adaptive-p` sampler selects a single token, like
-                    // `dist`; it goes at the end of the chain
-                    use_adaptive_p = true;
-                    break :blk null;
-                },
-                else => c.ggml_abort("sampling.cpp", 391, "GGML_ASSERT(%s) failed", "false && \"unknown sampler type\""),
-            };
-            if (s) |smpl| try samplers.append(p.arena, smpl);
-        }
-        if (use_adaptive_p) {
-            // only if user explicitly included adaptive-p sampler
-            try samplers.append(p.arena, c.llama_sampler_init_adaptive_p(sp.adaptive_target, sp.adaptive_decay, sp.seed).?);
-        } else {
-            // default: sample from distribution
-            try samplers.append(p.arena, c.llama_sampler_init_dist(sp.seed).?);
-        }
-    } else if (sp.mirostat == 1) {
-        try samplers.append(p.arena, c.llama_sampler_init_temp(sp.temp).?);
-        try samplers.append(p.arena, c.llama_sampler_init_mirostat(c.llama_vocab_n_tokens(vocab), sp.seed, sp.mirostat_tau, sp.mirostat_eta, 100).?);
-    } else if (sp.mirostat == 2) {
-        try samplers.append(p.arena, c.llama_sampler_init_temp(sp.temp).?);
-        try samplers.append(p.arena, c.llama_sampler_init_mirostat_v2(sp.seed, sp.mirostat_tau, sp.mirostat_eta).?);
-    } else {
-        _ = c.ggml_abort("sampling.cpp", 408, "GGML_ASSERT(%s) failed", "false && \"unknown mirostat version\"");
-    }
-
-    for (samplers.items) |smpl| c.llama_sampler_chain_add(chain, smpl);
-
-    if (grmr != null and sp.backend_sampling) {
-        log.wrn("%s: backend sampling is not compatible with grammar, disabling\n", .{"common_sampler_init"});
-        sp.backend_sampling = false;
-    }
-    return sampling.Sampler.create(std.heap.c_allocator, chain.?, grmr, sp.n_prev, sp.grammar_lazy);
+    return sampling.init(model, &p.sampling);
 }
 
 /// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1761 @b29c606e2).
@@ -469,7 +365,27 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
         comTrc("common_init_result", "%s", .{@as([*:0]const u8, "fitting params to device memory ...\n")});
         comTrc("common_init_result", "%s", .{@as([*:0]const u8, "(for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)\n")});
 
-        // no draft model and no MTP in any tool ported: no extra model
+        // the draft context is created from the same base params and follows the main context, fit both together
+        const has_draft = p.speculative.hasDft();
+        const spec_mtp = for (p.speculative.types.items) |t| {
+            if (t == .draft_mtp) break true;
+        } else false;
+
+        var params_dft = @import("speculative.zig").baseParamsToSpeculative(p);
+
+        var mparams_dft = common.modelParamsToLlama(&params_dft);
+        var cparams_dft = common.contextParamsToLlama(&params_dft);
+        if (spec_mtp) cparams_dft.ctx_type = c.LLAMA_CONTEXT_TYPE_MTP;
+        cparams_dft.n_rs_seq = 0;
+
+        const path_dft = try a.dupeSentinel(u8, params_dft.model.path, 0);
+        const extra: fit.ExtraModel = .{
+            .path_model = path_dft.ptr,
+            .mparams = @ptrCast(&mparams_dft),
+            .cparams = @ptrCast(&cparams_dft),
+            .shares_model = !has_draft, // an MTP context runs on the weights of the main model
+        };
+
         var patterns = try fit.Patterns.init(a);
         _ = try fit.fitParams(
             gpa,
@@ -482,7 +398,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
             @ptrCast(p.tensor_buft_overrides.items.ptr),
             p.fit_params_target.items.ptr,
             @bitCast(p.fit_params_min_ctx),
-            null,
+            if (has_draft or spec_mtp) &extra else null,
             if (p.verbosity >= log.level_debug) c.GGML_LOG_LEVEL_DEBUG else c.GGML_LOG_LEVEL_ERROR,
         );
     }
@@ -526,6 +442,8 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
             try logit_bias_eog.append(a, .{ .token = i, .bias = -std.math.inf(f32) });
         }
     }
+    // `params.sampling.logit_bias_eog.push_back`: the server reads it back
+    try p.sampling.logit_bias_eog.appendSlice(a, logit_bias_eog.items);
 
     if (p.sampling.ignore_eos) {
         // add EOG biases to the active set of logit biases

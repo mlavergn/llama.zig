@@ -1,0 +1,19 @@
+# Sleeping (Stage 10 step 3c): scripts/server-diff sleep. After a second
+# idle the server frees the model; /health, /props, /models and /metrics
+# answer from what was cached, and a request that needs the model wakes it.
+!mask (seconds_total|tokens_seconds) [0-9.e+-]+
+!mask Process-Start-Time-Unix: [0-9]+
+!server -m $QWEN3 -c 1024 -np 1 --no-jinja --metrics --sleep-idle-seconds 1 -lv 4
+!fulllog
+POST /completion {"prompt": "Hello", "n_predict": 4, "temperature": 0}
+!sleep 2.5
+GET /health
+GET /props
+GET /models
+GET /metrics
+POST /completion {"prompt": "Hello", "n_predict": 4, "temperature": 0}
+GET /props
+GET /metrics
+!sleep 2.5
+POST /tokenize {"content": "wakes it"}
+GET /props

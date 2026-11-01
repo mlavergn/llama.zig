@@ -941,6 +941,34 @@ pub fn addCudaLibraries(b: *std.Build, mod: *std.Build.Module, cuda: ?Cuda) void
     mod.addObjectFile(.{ .cwd_relative = tk.libstdcxx });
 }
 
+/// Linux: gcc's static `libgcc.a` on an executable's link, ahead of Zig's
+/// `compiler_rt`, as `scripts/platform-libs` gives the references.
+///
+/// glibc has no `__divti3`, so on Linux a Zig program that divides an
+/// `i128` -- zigjinja's clock and `random`, `std.Io.Threaded`'s timestamps --
+/// takes it from `compiler_rt`, which Zig links as one object, and with it
+/// `compiler_rt`'s weak `expf` and `logf` in place of glibc's (CLAUDE.md,
+/// "Zig's `compiler_rt` shadows the C library's `expf` and `logf`"). Every
+/// CPU op, the samplers and the server's token probabilities then round
+/// differently from upstream's gcc-built binaries; `server-task-diff` found
+/// it as one probability one ULP out. With `libgcc.a` first, `__divti3`
+/// comes from it, as in upstream's own build, and a link that needs nothing
+/// from it takes nothing. Native Linux builds only: the path is gcc's.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `mod`: an executable's root module.
+pub fn addLibgcc(b: *std.Build, mod: *std.Build.Module) void {
+    const t = mod.resolved_target orelse return;
+    if (@import("builtin").os.tag != .linux or t.result.os.tag != .linux) return;
+    if (t.result.cpu.arch != @import("builtin").cpu.arch or !t.result.abi.isGnu()) return;
+    var code: u8 = 0;
+    const out = b.runAllowFail(&.{ "gcc", "-print-libgcc-file-name" }, &code, .ignore) catch return;
+    const path = std.mem.trim(u8, out, " \r\n\t");
+    if (!std.fs.path.isAbsolute(path)) return;
+    mod.addObjectFile(.{ .cwd_relative = path });
+}
+
 /// `addCudaLibraries` without libstdc++, for an executable of C++ that
 /// throws: upstream's tools and the libmtmd gates. Zig's libc++abi supplies
 /// `__cxa_throw` while a libstdc++ on the line supplies

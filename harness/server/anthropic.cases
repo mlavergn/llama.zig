@@ -1,0 +1,37 @@
+# The Anthropic Messages API (Stage 10 step 4): scripts/server-diff
+# anthropic. /v1/messages converted into chat (server-chat.cpp): system
+# prompts (the billing header normalized), content blocks, thinking,
+# tool_use and tool_result, tool_choice, stop sequences, streaming events,
+# and /v1/messages/count_tokens. Qwen3-0.6B, greedy.
+!mask "id": "[A-Za-z0-9]{32}"
+!mask-key created_at
+!server -m $QWEN3 -c 4096 -np 1 -lv 4
+!fulllog
+
+POST /v1/messages {"model": "claude", "max_tokens": 48, "messages": [{"role": "user", "content": "Say hi."}], "temperature": 0}
+POST /v1/messages {"model": "claude", "max_tokens": 64, "messages": [{"role": "user", "content": "What is 2+2?"}], "temperature": 0, "stream": true}
+POST /v1/messages {"model": "claude", "max_tokens": 32, "system": "Answer in one word.", "messages": [{"role": "user", "content": [{"type": "text", "text": "Capital of France?"}]}], "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}
+POST /v1/messages {"model": "claude", "max_tokens": 32, "system": [{"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.101.e51; cc_entrypoint=cli; cch=a5145;"}, {"type": "text", "text": "You are terse."}], "messages": [{"role": "user", "content": "Hi"}], "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}
+POST /v1/messages {"model": "claude", "max_tokens": 32, "system": "x-anthropic-billing-header: cch=a51", "messages": [{"role": "user", "content": "Hi"}], "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}
+POST /v1/messages {"model": "claude", "max_tokens": 24, "messages": [{"role": "user", "content": "Count: 1, 2,"}], "stop_sequences": [", 4"], "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}
+POST /v1/messages {"model": "claude", "max_tokens": 48, "messages": [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": [{"type": "thinking", "thinking": "A greeting.", "signature": "x"}, {"type": "text", "text": "Hello!"}]}, {"role": "user", "content": "Again?"}], "temperature": 0}
+POST /v1/messages {"model": "claude", "max_tokens": 64, "messages": [{"role": "user", "content": "What is 5+6?"}], "thinking": {"type": "enabled", "budget_tokens": 6}, "temperature": 0, "stream": true}
+POST /v1/messages {"model": "claude", "messages": [{"role": "user", "content": "Say ok."}], "temperature": 0, "metadata": {"user_id": "u-1"}, "top_k": 1, "chat_template_kwargs": {"enable_thinking": false}}
+
+# tools
+POST /v1/messages {"model": "claude", "max_tokens": 160, "tools": [{"name": "get_weather", "description": "Get the weather", "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}], "messages": [{"role": "user", "content": "What is the weather in Paris?"}], "temperature": 0}
+POST /v1/messages {"model": "claude", "max_tokens": 160, "tools": [{"name": "get_weather", "description": "Get the weather", "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}], "messages": [{"role": "user", "content": "What is the weather in Paris?"}], "temperature": 0, "stream": true}
+POST /v1/messages {"model": "claude", "max_tokens": 60, "tools": [{"name": "get_weather", "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}], "tool_choice": {"type": "any"}, "messages": [{"role": "user", "content": "Weather in Rome?"}], "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}, "stream": true}
+POST /v1/messages {"model": "claude", "max_tokens": 60, "tools": [{"name": "get_weather", "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}}}], "messages": [{"role": "user", "content": "Weather in Rome?"}, {"role": "assistant", "content": [{"type": "text", "text": "Checking."}, {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Rome"}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "Cloudy"}]}], "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}
+POST /v1/messages {"model": "claude", "max_tokens": 60, "messages": [{"role": "user", "content": "Weather?"}, {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_2", "name": "get_weather", "input": {}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_2", "content": [{"type": "text", "text": "Hot"}, {"type": "text", "text": " and dry"}]}, {"type": "text", "text": "Summarize."}]}], "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}
+
+# refusals
+POST /v1/messages {"model": "claude"}
+POST /v1/messages {"messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"}}]}]}
+POST /v1/messages {"messages": [{"role": "user", "content": "x"}], "tools": [{"name": "f"}], "grammar": "root ::= \"x\"", "max_tokens": 16, "temperature": 0}
+POST /v1/messages [1, 2]
+
+# token counting
+POST /v1/messages/count_tokens {"model": "claude", "messages": [{"role": "user", "content": "How many tokens is this?"}]}
+POST /v1/messages/count_tokens {"model": "claude", "system": "Be brief.", "tools": [{"name": "f", "input_schema": {"type": "object"}}], "messages": [{"role": "user", "content": "Hi"}]}
+POST /v1/messages/count_tokens {"model": "claude"}

@@ -5,7 +5,13 @@
 //!
 //! **Not a port.** The files it re-exports port `llama.cpp/common/json.h`,
 //! `llama.cpp/common/json.cpp` and the parts of
-//! `llama.cpp/vendor/nlohmann/json.hpp` they reach; each names its own.
+//! `llama.cpp/vendor/nlohmann/json.hpp` they reach, and, over them,
+//! `llama.cpp/common/json-schema.cpp`, `llama.cpp/common/json-schema-to-grammar.cpp`
+//! and `llama.cpp/common/trie.cpp`; each names its own.
+//!
+//! `schema_to_grammar.zig` runs its `std::regex`es through libllama's
+//! `regex.zig`, so a module that compiles this one and reaches it imports
+//! `llama`; one that never references `schema_to_grammar` need not.
 //!
 //! # Using it
 //!
@@ -20,7 +26,8 @@
 //! Every fallible call returns `json.Error`; on `error.JsonError`,
 //! `json.what()` is the `what()` of the `common_json_error` upstream throws.
 //! `make json-diff` holds all of it to upstream's `json.cpp` over the
-//! vendored nlohmann, byte for byte.
+//! vendored nlohmann, byte for byte, and `make schema-diff` the schema
+//! conversion to `json-schema.cpp` and `json-schema-to-grammar.cpp`.
 
 const std = @import("std");
 
@@ -30,6 +37,9 @@ pub const parser = @import("parser.zig");
 pub const serializer = @import("serializer.zig");
 pub const dtoa = @import("dtoa.zig");
 pub const writer = @import("writer.zig");
+pub const trie = @import("trie.zig");
+pub const schema = @import("schema.zig");
+pub const schema_to_grammar = @import("schema_to_grammar.zig");
 
 pub const Error = errors.Error;
 pub const what = errors.what;
@@ -65,6 +75,9 @@ test {
     _ = serializer;
     _ = dtoa;
     _ = writer;
+    _ = trie;
+    _ = schema;
+    _ = schema_to_grammar;
 }
 
 test "a parsed document dumps back at every indent" {

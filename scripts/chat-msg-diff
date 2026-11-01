@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""Compare cli/common_chat/msg.zig with upstream's chat data model.
+
+`harness/chat_msg_ref.cpp` links upstream's `llama-common` -- `common/chat.cpp`
+unmodified -- and `harness/chat_msg_diff.zig` the port; both read the same
+records and write one transcript each, which must be identical: every
+parsed message's fields, its OpenAI form both ways, its rendered content,
+every diff between two messages, every exception's class and text.
+
+The records are generated here from a fixed seed: well-formed messages and
+tools, and the same mutated -- a field missing, of the wrong type, an
+unknown content-part or tool type, a non-array where an array goes --
+because the error texts are what a client of the server sees.
+
+Usage: scripts/chat-msg-diff
+  CHAT_MSG_N=<n>        records per kind (default 400)
+  CHAT_MSG_SEED=<n>     the generator's seed (default 1)
+  CHAT_MSG_OUT=<dir>    keep the inputs and both transcripts there
+"""
+
+import json
+import os
+import random
+import subprocess
+import sys
+import tempfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(ROOT)
+
+
+def platform_libs(mode):
+    """The system libraries a link beside zig-out/lib/libggml.a needs on this
+    OS, from scripts/platform-libs -- the SDK's frameworks on macOS; on Linux
+    the CUDA libraries when the toolkit is there, libgcc and libm. `mode` is
+    "cc" for a `zig c++` link and "exe" for `zig build-exe`, which spell an
+    rpath differently."""
+    r = subprocess.run(["bash", "-c", 'source scripts/platform-libs && platform_libs "$1" zig-out/lib/libggml.a'
+                        ' && printf "%s\\0" ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"}', "_", mode],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"FAIL: scripts/platform-libs\n{r.stderr}", file=sys.stderr)
+        sys.exit(2)
+    return [x for x in r.stdout.split("\0") if x]
+
+N = int(os.environ.get("CHAT_MSG_N", "400"))
+rng = random.Random(int(os.environ.get("CHAT_MSG_SEED", "1")))
+
+WORDS = ["hello", "world", "Paris", "", " ", "\n", "é", "日本", "😀", "\u0000x", "<think>", "\\", "\"q\"",
+         "{\"a\":1}", "[1,2]", "a" * 70, "tab\tchar", " "]
+ROLES = ["system", "user", "assistant", "tool", "developer", "", "User"]
+JUNK = [None, 0, -1, 2.5, True, False, [], {}, "s", [1], {"k": "v"}]
+
+
+def word():
+    return rng.choice(WORDS) + (rng.choice(WORDS) if rng.random() < 0.3 else "")
+
+
+def junk():
+    return rng.choice(JUNK)
+
+
+def maybe(p, good, bad):
+    return good() if rng.random() > p else bad()
+
+
+def part(p):
+    kind = rng.random()
+    if kind < 0.6:
+        d = {"type": "text", "text": word()}
+    elif kind < 0.8:
+        d = {"type": "media_marker", "text": "<__media__>"}
+    else:
+        d = {"type": rng.choice(["image_url", "input_audio", 7, None]), "text": word()}
+    if rng.random() < p:
+        rng.choice([lambda: d.pop("type", None), lambda: d.pop("text", None),
+                    lambda: d.__setitem__("text", junk())])()
+    if rng.random() < p / 3:
+        return junk()
+    return d
+
+
+def tool_call(p):
+    args = rng.choice([lambda: json.dumps({"x": word()}), lambda: {"x": 1, "y": [word()]},
+                       lambda: "", lambda: "\"quoted\"", lambda: 42, lambda: None])()
+    tc = {"type": "function", "function": {"name": rng.choice(["get_weather", "f", "", "日本"]), "arguments": args}}
+    if rng.random() < 0.6:
+        tc["id"] = rng.choice(["call_1", "abc", ""])
+    if rng.random() < p:
+        rng.choice([
+            lambda: tc.pop("type"), lambda: tc.__setitem__("type", rng.choice(["fn", 3, None])),
+            lambda: tc.pop("function"), lambda: tc["function"].pop("name"),
+            lambda: tc["function"].pop("arguments"), lambda: tc["function"].__setitem__("name", junk()),
+            lambda: tc.__setitem__("id", junk()), lambda: tc.__setitem__("function", junk()),
+        ])()
+    return tc
+
+
+def message(p):
+    m = {"role": rng.choice(ROLES)}
+    c = rng.random()
+    if c < 0.45:
+        m["content"] = word()
+    elif c < 0.75:
+        m["content"] = [part(p) for _ in range(rng.randint(0, 4))]
+    elif c < 0.85:
+        m["content"] = None
+    if rng.random() < 0.3 or "content" not in m:
+        if rng.random() < 0.9:
+            m["tool_calls"] = [tool_call(p) for _ in range(rng.randint(0, 3))]
+    for k in ("reasoning_content", "name", "tool_call_id"):
+        if rng.random() < 0.2:
+            m[k] = word()
+    if rng.random() < p:
+        rng.choice([
+            lambda: m.pop("role"), lambda: m.__setitem__("role", junk()),
+            lambda: m.__setitem__("content", junk()), lambda: m.pop("content", None),
+            lambda: m.__setitem__("reasoning_content", junk()), lambda: m.__setitem__("name", junk()),
+            lambda: m.__setitem__("tool_call_id", junk()), lambda: m.__setitem__("tool_calls", junk()),
+            lambda: m.__setitem__("content", [word(), word()]),
+        ])()
+    if rng.random() < p / 4:
+        return junk()
+    return m
+
+
+def tool(p):
+    t = {"type": "function", "function": {"name": rng.choice(["get_weather", "search", "", "日本"])}}
+    if rng.random() < 0.7:
+        t["function"]["description"] = word()
+    if rng.random() < 0.7:
+        t["function"]["parameters"] = rng.choice([
+            {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},
+            {}, None, {"type": "object"}, [1, 2], "str"])
+    if rng.random() < p:
+        rng.choice([
+            lambda: t.pop("type"), lambda: t.__setitem__("type", rng.choice(["fn", 1, None])),
+            lambda: t.pop("function"), lambda: t["function"].pop("name"),
+            lambda: t["function"].__setitem__("name", junk()),
+            lambda: t["function"].__setitem__("description", junk()),
+            lambda: t.__setitem__("function", junk()),
+        ])()
+    return t
+
+
+def grow(m):
+    """A message `m` grew into while streaming: content and arguments extended."""
+    n = json.loads(json.dumps(m))
+    if isinstance(n.get("content"), str) and rng.random() < 0.7:
+        n["content"] += word()
+    if isinstance(n.get("reasoning_content"), str) and rng.random() < 0.5:
+        n["reasoning_content"] += word()
+    tcs = n.get("tool_calls")
+    if isinstance(tcs, list):
+        if tcs and rng.random() < 0.5 and isinstance(tcs[-1].get("function", {}).get("arguments"), str):
+            tcs[-1]["function"]["arguments"] += rng.choice(["}", "\"x", ""])
+        if rng.random() < 0.3:
+            tcs.append(tool_call(0))
+        if tcs and rng.random() < 0.15:
+            tcs.pop()
+        if tcs and rng.random() < 0.15:
+            tcs[-1]["function"]["name"] = rng.choice(["get_weather_now", "other", ""])
+    if rng.random() < 0.1:
+        n["content"] = word()  # not a prefix: an invalid diff
+    for k in ("content", "reasoning_content"):
+        # the stream ended on a stop word, erased: the text shrank to a prefix
+        if isinstance(n.get(k), str) and n[k] and rng.random() < 0.1:
+            n[k] = n[k][:rng.randint(0, len(n[k]) - 1)]
+    return n
+
+
+def records():
+    for _ in range(N):
+        p = rng.choice([0.0, 0.2, 0.6])
+        msgs = [message(p) for _ in range(rng.randint(0, 4))]
+        yield "M", msgs if rng.random() > 0.05 else junk()
+    for _ in range(N):
+        p = rng.choice([0.0, 0.3])
+        yield "T", [tool(p) for _ in range(rng.randint(0, 3))] if rng.random() > 0.1 else junk()
+    for v in ["auto", "none", "required", "", "AUTO", "any", 3, None]:
+        yield "C", v
+    for v in [True, False, "reasoning_content", "content", "", None, 1, "auto", [], {}]:
+        yield "K", v
+    for _ in range(N // 4):
+        ds = [rng.choice([{"role": rng.choice(ROLES), "delimiter": word()}, {"role": "user"}, {"delimiter": "x"},
+                          junk(), {"role": junk(), "delimiter": "y"}, {"role": "user", "delimiter": junk()}])
+              for _ in range(rng.randint(0, 4))]
+        yield "D", ds if rng.random() > 0.1 else junk()
+    for _ in range(N // 2):
+        toks = [rng.randint(0, 5) for _ in range(rng.randint(0, 14))]
+        delims = [{"role": rng.choice(["user", "assistant", "system", "tool", "x"]), "delimiter": "d",
+                   "tokens": [rng.randint(0, 5) for _ in range(rng.randint(0, 2))]} for _ in range(rng.randint(0, 3))]
+        skips = sorted({rng.randint(0, 14): rng.randint(0, 4) for _ in range(rng.randint(0, 3))}.items())
+        yield "S", {"delims": delims, "tokens": toks, "skips": [list(s) for s in skips]}
+    for _ in range(N):
+        a = message(0)
+        if not isinstance(a, dict):
+            continue
+        yield "F", [a, grow(a)]
+    for v in ["none", "auto", "deepseek", "deepseek-legacy", "DeepSeek", "", "x"]:
+        yield "R", v
+    for _ in range(N // 4):
+        f = {}
+        if rng.random() < 0.8:
+            f["parameters"] = rng.choice([None, {}, {"type": "object"}, [], "s", 0, {"a": {}}])
+        yield "P", f if rng.random() > 0.1 else junk()
+
+
+def main():
+    out = os.environ.get("CHAT_MSG_OUT") or tempfile.mkdtemp(prefix="chat-msg-diff.")
+    os.makedirs(out, exist_ok=True)
+    inp = os.path.join(out, "input.txt")
+    n = 0
+    with open(inp, "w", encoding="utf-8") as f:
+        for op, payload in records():
+            f.write(f"{op} {json.dumps(payload, ensure_ascii=False)}\n")
+            n += 1
+
+    def run(cmd, what):
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"FAIL: {what}\n{r.stderr[-3000:]}", file=sys.stderr)
+            sys.exit(2)
+
+    run(["zig", "build", "reference", "tools-ref", "--release=fast"], "could not build the reference libraries (zig build reference tools-ref)")
+    ref = os.path.join(out, "chat_msg_ref")
+    run(["zig", "build-exe", "-OReleaseFast", f"-femit-bin={ref}",
+         "-I", "llama.cpp/common", "-I", "llama.cpp/include", "-I", "llama.cpp/ggml/include", "-I", "llama.cpp/vendor",
+         "-cflags", "-std=c++17", "-w", "--", "harness/chat_msg_ref.cpp",
+         "zig-out/lib/libllama-common-ref.a", "zig-out/lib/libllama-ref.a", "zig-out/lib/libggml.a",
+         "-lc++", "-lc"] + platform_libs("exe"),
+        "could not build harness/chat_msg_ref.cpp")
+    port = os.path.join(out, "chat_msg_diff")
+    run(["zig", "build-exe", "-OReleaseSafe", f"-femit-bin={port}",
+         "--dep", "json", "--dep", "common_chat", "-Mroot=harness/chat_msg_diff.zig",
+         "--dep", "json", "-Mcommon_chat=cli/common_chat/module.zig", "-Mjson=cli/json/module.zig", "-lc"],
+        "could not build harness/chat_msg_diff.zig")
+
+    run([ref, inp, os.path.join(out, "ref.txt")], "the reference failed")
+    run([port, inp, os.path.join(out, "port.txt")], "the port failed (or leaked)")
+    a = open(os.path.join(out, "ref.txt"), encoding="utf-8", errors="replace").read().splitlines()
+    b = open(os.path.join(out, "port.txt"), encoding="utf-8", errors="replace").read().splitlines()
+    errors = sum(1 for l in a if l.startswith(("runtime_error", "invalid_argument", "json_error")))
+    if a != b:
+        import difflib
+        print(f"FAIL: chat-msg-diff: transcripts differ ({n} records); in {out}")
+        for i, d in enumerate(difflib.unified_diff(a, b, "ref", "port", lineterm="", n=2)):
+            print("    " + d[:300])
+            if i > 40:
+                break
+        sys.exit(1)
+    print(f"ok: chat-msg-diff: {n} records, {len(a)} lines identical ({errors} exceptions)")
+
+
+if __name__ == "__main__":
+    main()

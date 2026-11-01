@@ -29,3 +29,6 @@ printf '/image %s\ndescribe it\nand then?\n/quit\n' "$IMG" > "$DATA/repl-two.txt
 # line editing: backspace, cursor left and insert, home/end, delete, a
 # history recall, then the result is sent
 printf 'abd\177c\033[Dx\033[H>\033[F<\033[3~\nsecond\n\033[A\033[A\033[B\n/quit\n' > "$DATA/repl-edit.txt"
+# -jf's schema, and one outside json_schema_to_grammar's subset
+printf '{"type": "object", "properties": {"n": {"type": "integer"}, "s": {"type": "string", "maxLength": 3}}, "required": ["n"]}' > "$DATA/schema.json"
+printf '{"type": "object", "properties": {"x": {"$ref": "#/definitions/missing"}}}' > "$DATA/schema-bad.json"

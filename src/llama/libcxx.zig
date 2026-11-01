@@ -1540,6 +1540,14 @@ pub fn I32Map(comptime V: type) type {
             }
         }
 
+        /// `rehash(n)`, which the sized constructor
+        /// `unordered_map(size_type n)` calls on an empty table.
+        ///
+        /// Return: nothing, or `error.OutOfMemory`.
+        pub fn rehashTo(self: *Self, n: usize) error{OutOfMemory}!void {
+            return self.rehash(n, self.count());
+        }
+
         /// Ports `__hash_table::__rehash<true>`.
         fn rehash(self: *Self, n_in: usize, len: usize) error{OutOfMemory}!void {
             var n = n_in;

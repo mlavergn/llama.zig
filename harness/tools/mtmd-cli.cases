@@ -62,6 +62,20 @@
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 -dev none -lv 5
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 -dev none -mmdev MTL0 -lv 5
 
+# -j and -jf (Stage 10 step 3b): the schema becomes an output-format
+# grammar, which constrains the reply; malformed JSON throws nlohmann's
+# parse error, a schema outside the subset json_schema_to_grammar's, and a
+# missing file the handler's own; -j with --grammar keeps whichever is last
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0 -j '{"type": "integer"}'
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 16 --temp 0 -jf $DATA/schema.json
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 8 --temp 0 -j '{"enum": ["red", "green"]}' --grammar 'root ::= "x"+'
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 8 --temp 0 --grammar 'root ::= "x"+' -j '{"enum": ["red", "green"]}'
+-m $MM/text-qwen3.gguf -p x -j '{"type": "object",'
+-m $MM/text-qwen3.gguf -p x -j '[1, 2'
+-m $MM/text-qwen3.gguf -p x -jf $DATA/schema-bad.json
+-m $MM/text-qwen3.gguf -p x -jf /nonexistent/schema.json
+-m $MM/text-qwen3.gguf -p x -j '{"type": "string", "pattern": "^(a|b"}'
+
 # sampling and templates: the default temperature 0.2 with a seed, a
 # system prompt, vicuna's antiprompt, other built-in families
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 16 --seed 3

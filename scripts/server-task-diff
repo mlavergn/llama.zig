@@ -1,0 +1,1159 @@
+#!/usr/bin/env python3
+"""Compare tools/server/'s data layer with upstream's server-common,
+server-task and server-schema (Stage 10 step 3a).
+
+`harness/server_task_ref.cpp` compiles beside upstream's `server-common.cpp`,
+`server-task.cpp`, `server-schema.cpp` and `server-chat.cpp`, unmodified,
+over the libraries `zig build tools-ref` installs; `harness/server_task_diff.zig`
+is the port's (`zig build server-task-diff-bins`). Both read the same records
+and write one transcript each, which must be identical, and log through
+`common_log` at debug verbosity with a marker per record, so stderr must be
+identical too.
+
+The records, generated here from a fixed seed:
+- B   params_base members (n_parallel, antiprompt, verbosity, samplers, ...)
+- P   a request through eval_llama_cmpl_schema, then task_params::to_json
+      both ways and every member to_json leaves out -- upstream's own test
+      payloads (tests/unit/*.py, read with `ast`, never run) and random and
+      mutated ones over every field and alias
+- O   oaicompat_completion_params_parse
+- C   oaicompat_chat_params_parse on the legacy (--no-jinja) path: media
+      parts as data URIs, bare base64 and file:// under a media path; and
+      through Jinja over every template in models/templates/ (tools, tool
+      choice, schemas, reasoning, kwargs, continuation, pure content)
+- CS  a Jinja chat request through the schema into a task_result_state,
+      then R partials and a final fed a reply in pieces: the request's own
+      PEG parser, streamed (Stage 10 step 4)
+- RC, AC, TC  server-chat.cpp's conversions: Responses, Anthropic and
+      transcriptions requests into /chat/completions bodies
+- T   tokenize_input_prompts / tokenize_mixed over six vocabularies, and
+      with an mmproj; M  process_mtmd_prompt; ST  server_tokens ops
+- U   validate_utf8 and is_valid_utf8 over every 1- and 2-byte string and
+      3- and 4-byte strings over the bytes that matter
+- S/R task_result_state and every result type in every response format,
+      partials streamed through a state; the SSE formatters
+- E, GT, F, K, I, Q, G, PC, PIPE, L, J, SSE, RND, TK -- error responses,
+      grammar triggers, embeddings and rerank responses, infill and rerank
+      prompts, token probabilities, the prompt cache, server_pipe, LoRA,
+      nested json, random ids, tasks
+
+Masked on both sides: `created`/`created_at`/`completed_at` (std::time),
+the 32-character random ids after `resp_`, `rs_`, `msg_`, `chatcmpl-`, and
+`%p` pointers in the prompt cache's trace log.
+
+Usage: scripts/server-task-diff
+  SERVER_TASK_N=<n>      records per random kind (default 300)
+  SERVER_TASK_SEED=<n>   the generator's seed (default 1)
+  SERVER_TASK_OUT=<dir>  keep the inputs, transcripts and logs there
+  SERVER_TASK_NOBUILD=1  use the binaries already built in the out dir /
+                         zig-out (for fault injection loops)
+"""
+
+import ast
+import json
+import os
+import random
+import re
+import struct
+import subprocess
+import sys
+import tempfile
+import zlib
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(ROOT)
+
+
+def platform_libs(mode):
+    """The system libraries a link beside zig-out/lib/libggml.a needs on this
+    OS, from scripts/platform-libs -- the SDK's frameworks on macOS; on Linux
+    the CUDA libraries when the toolkit is there, libgcc and libm. `mode` is
+    "cc" for a `zig c++` link and "exe" for `zig build-exe`, which spell an
+    rpath differently."""
+    r = subprocess.run(["bash", "-c", 'source scripts/platform-libs && platform_libs "$1" zig-out/lib/libggml.a'
+                        ' && printf "%s\\0" ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"}', "_", mode],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"FAIL: scripts/platform-libs\n{r.stderr}", file=sys.stderr)
+        sys.exit(2)
+    return [x for x in r.stdout.split("\0") if x]
+
+N = int(os.environ.get("SERVER_TASK_N", "300"))
+rng = random.Random(int(os.environ.get("SERVER_TASK_SEED", "1")))
+MARKER = "<__media__>"
+
+VOCABS = [
+    "llama.cpp/models/ggml-vocab-qwen2.gguf",
+    "llama.cpp/models/ggml-vocab-llama-spm.gguf",
+    "llama.cpp/models/ggml-vocab-bert-bge.gguf",
+    "llama.cpp/models/ggml-vocab-deepseek-coder.gguf",
+    "llama.cpp/models/ggml-vocab-starcoder.gguf",
+    "llama.cpp/models/ggml-vocab-phi-3.gguf",
+]
+PASSES = [
+    # (text model, mmproj, record filter)
+    ("zig-out/mmproj-fixtures/text-qwen3.gguf", "zig-out/mmproj-fixtures/gemma3.gguf",
+     lambda op, p: not (op == "G" and p.get("real"))),
+    ("zig-out/mmproj-fixtures/text-qwen2vl.gguf", "zig-out/mmproj-fixtures/qwen2vl_merger.gguf",
+     lambda op, p: op in ("M", "T")),
+    # a real byte-level BPE vocabulary for the token-probability records, whose
+    # single-byte pieces reach tokens_to_output_formatted_string's `byte:` arm
+    ("Qwen3-0.6B-Q8_0.gguf", "-", lambda op, p: op == "G" and p.get("real")),
+]
+
+# ---------------------------------------------------------------------------
+# inputs
+
+def png(w, h, seed):
+    r = random.Random(seed)
+    raw = b"".join(b"\x00" + bytes(r.randrange(256) for _ in range(w * 3)) for _ in range(h))
+    def chunk(t, d):
+        c = struct.pack(">I", len(d)) + t + d
+        return c + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+IMG1 = png(64, 64, 1)
+IMG2 = png(100, 60, 2)
+B64_1 = __import__("base64").b64encode(IMG1).decode()
+B64_2 = __import__("base64").b64encode(IMG2).decode()
+
+WORDS = ["hello", "world", " Paris", "", " ", "\n", "é", "日本", "😀", "<|im_start|>", "<|endoftext|>", "<s>", "</s>",
+         "\\", "\"q\"", "{\"a\":1}", "a" * 40, "tab\tchar", "def f():", "<think>", "ÿ", "x\u0000y"]
+JUNK = [None, 0, -1, 1, 2, 7, -7, 2.5, -0.5, 1e10, -1e10, 2147483648, -2147483649, 4294967296, 9007199254740993,
+        True, False, [], {}, "s", "", "-1", [1], ["a", "b"], [[1, 2]], {"k": "v"}, {"id": 0, "scale": 0.5}]
+
+
+def word():
+    return rng.choice(WORDS) + (rng.choice(WORDS) if rng.random() < 0.3 else "")
+
+
+def junk():
+    return rng.choice(JUNK)
+
+
+def test_payloads():
+    """Every `data=` / `json=` dict literal in upstream's server tests, as far
+    as it is literal: non-literal members are dropped, not guessed."""
+    out = []
+    d = "llama.cpp/tools/server/tests/unit"
+    for name in sorted(os.listdir(d)):
+        if not name.endswith(".py"):
+            continue
+        try:
+            tree = ast.parse(open(os.path.join(d, name), encoding="utf-8").read())
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                for kw in node.keywords:
+                    if kw.arg in ("data", "json") and isinstance(kw.value, ast.Dict):
+                        out.append(literal_dict(kw.value))
+    return [p for p in out if p]
+
+
+def literal_dict(node):
+    res = {}
+    for k, v in zip(node.keys, node.values):
+        try:
+            key = ast.literal_eval(k)
+        except Exception:
+            continue
+        if not isinstance(key, str):
+            continue
+        try:
+            res[key] = ast.literal_eval(v)
+        except Exception:
+            if isinstance(v, ast.Dict):
+                res[key] = literal_dict(v)
+    return res
+
+
+FIELDS = {
+    # name: list of plausible values
+    "verbose": [True, False], "timings_per_token": [True, False], "stream": [True, False],
+    "stream_options": [{"include_usage": True}, {"include_usage": "x"}, {}, "x", None],
+    "cache_prompt": [True, False], "return_tokens": [True], "return_progress": [True],
+    "sse_ping_interval": [-1, 0, 5, -2], "n_predict": [-1, 0, 8, -2, 2.9], "max_completion_tokens": [4, -3],
+    "max_tokens": [16, "x"], "n_indent": [0, 4, -1], "n_keep": [-1, 0, 3, -2], "n_discard": [0, 5, -1],
+    "n_cmpl": [1, 2, 4, 5, 0], "n": [1, 3, 9], "n_cache_reuse": [0, 256, -1],
+    "t_max_predict_ms": [-1, 0, 1000, -2, 9223372036854775807],
+    "response_fields": [["content"], ["generation_settings/n_predict", "content", "x/y"], "content", [1]],
+    "top_k": [0, 40, -5, 2147483647], "top_p": [0.0, 0.5, 1.0, 1.5, -0.1], "min_p": [0.05, 2.0],
+    "top_n_sigma": [-1.0, 2.0], "xtc_probability": [0.1, 1.5], "xtc_threshold": [0.1, -1.0],
+    "typical_p": [0.5, 1.0], "temperature": [0.0, 0.8, -1.0, 1e40], "dynatemp_range": [0.5],
+    "dynatemp_exponent": [1.5], "repeat_last_n": [0, 64, -1], "repeat_penalty": [1.1],
+    "frequency_penalty": [0.5], "presence_penalty": [0.5], "dry_multiplier": [0.8],
+    "dry_base": [1.75, 0.5, 2.0, "x"], "dry_allowed_length": [2, -1], "dry_penalty_last_n": [64, -3],
+    "mirostat": [0, 1, 2, 3, -1], "mirostat_tau": [5.0], "mirostat_eta": [0.1],
+    "adaptive_target": [-1.0, 0.5, 1.5], "adaptive_decay": [0.9, 0.99, 0.995, -0.1],
+    "seed": [42, -1, 4294967295, 4294967296, 1.5, "x"], "n_probs": [0, 5, -1], "logprobs": [3, True],
+    "min_keep": [0, 2, -1], "backend_sampling": [True], "post_sampling_probs": [True],
+    "lora": [[{"id": 0, "scale": 0.5}], [{"id": 1}], [], {"id": 0}, [{"id": "x", "scale": 1}], [{"id": 2, "scale": 1.0}, {"id": 2, "scale": 0.25}]],
+    "dry_sequence_breakers": [["\n"], [], ["a", 1], "x"],
+    "json_schema": [{}, {"type": "object", "properties": {"a": {"type": "string"}}}, {"type": "integer", "minimum": 3},
+                    {"type": "bogus"}, "x", {"$ref": "#/nope"}, {"type": "string", "pattern": "^a+$"}],
+    "grammar": ["root ::= \"a\"", "", 5],
+    "grammar_type": ["tool_calls", "user"],
+    "grammar_lazy": [True, False],
+    "chat_format": [0, 1, 4, 5, -1, "x"],
+    "reasoning_format": ["none", "auto", "deepseek", "deepseek-legacy", "bogus", 1],
+    "generation_prompt": ["<think>", "", 3],
+    "parse_tool_calls": [False],
+    "chat_parser": [5, None, "s", "", "{}", "{\"parsers\":[],\"rules\":{},\"root\":18446744073709551615}",
+                    "{\"parsers\":[],\"rules\":{\"a\":3},\"root\":0}", "{\"parsers\":5,\"rules\":{},\"root\":0}",
+                    "{\"parsers\":[],\"rules\":{}}", "{\"parsers\":[],\"rules\":{},\"root\":2}",
+                    "{\"parsers\":[{\"type\":\"bogus\"}],\"rules\":{},\"root\":0}"],
+    "continue_final_message": [True, False, "content", "reasoning_content", "x"],
+    "echo": [True],
+    "preserved_tokens": [["<think>", "</think>", "hello"], ["<|im_start|>"], "x", [1]],
+    "grammar_triggers": [[{"type": 1, "value": "<think>"}], [{"type": 1, "value": "hello world"}],
+                         [{"type": 0, "value": "x", "token": 5}], [{"type": 2, "value": "a.*"}], [{"type": 1}],
+                         [{"type": 1, "value": "<|im_start|>"}], []],
+    "reasoning_control": [True],
+    "reasoning_budget_tokens": [-1, 0, 128, -2],
+    "reasoning_budget_start_tag": ["<think>", ""],
+    "reasoning_budget_end_tags": [["</think>"], ["", "</think>"], [], "x"],
+    "reasoning_budget_end_tag": ["</think>", ""],
+    "reasoning_budget_message": ["Stop thinking.", ""],
+    "logit_bias": [[[15043, 1.0], ["Hello", -1.0], [1, False], [2, True], [3], "x"], {"15043": 2.0, "Hello": False, "": 1.0,
+                   " 7": 1.0, "99999999999": 1.0, "1x": 1.0}, [], {}, [[-1, 1.0], [999999, 1.0]], 5],
+    "ignore_eos": [True, False, 1],
+    "stop": [["\n"], "###", [], ["", "x"], [None, "y"], [1], {"a": 1}, {}, 5],
+    "samplers": [["top_k", "TOP-P", "temp", "nucleus", "bogus", "adaptive-p"], "kpyt", "kpz", [1], 3],
+}
+FIELD_NAMES = list(FIELDS)
+
+
+def rand_params():
+    d = {}
+    for _ in range(rng.randint(0, 6)):
+        k = rng.choice(FIELD_NAMES)
+        d[k] = rng.choice(FIELDS[k]) if rng.random() < 0.8 else junk()
+    return d
+
+
+def chat_message(p):
+    role = rng.choice(["system", "user", "assistant", "tool", "user", "user"])
+    m = {"role": role}
+    r = rng.random()
+    if r < 0.5:
+        m["content"] = word()
+    elif r < 0.85:
+        parts = []
+        for _ in range(rng.randint(0, 3)):
+            t = rng.random()
+            if t < 0.6:
+                parts.append({"type": "text", "text": word()})
+            elif t < 0.75:
+                parts.append({"type": "image_url", "image_url": {"url": rng.choice([
+                    "data:image/png;base64," + B64_1, B64_2, "data:image/png;base64,", "data:text/plain;base64,QQ==",
+                    "data:image/png," + B64_1, "data:image/png;base64,a,b", "file://img1.png", "file://../x.png",
+                    "file://missing.png", "file://sub/img2.png", "!!!", "file://", "QUJD-REVG", "-QUJD"])}})
+            elif t < 0.85:
+                parts.append({"type": "input_audio", "input_audio": {"data": "UklGRg==", "format": "wav"}})
+            elif t < 0.9:
+                parts.append({"type": "input_video", "input_video": {"url": B64_1}})
+            else:
+                parts.append({"type": rng.choice(["bogus", "media_marker", 3]), "text": "x"})
+        m["content"] = parts
+    elif r < 0.92:
+        m["content"] = None
+    if role == "assistant" and rng.random() < 0.3:
+        m["tool_calls"] = [{"type": "function", "id": "c1", "function": {"name": "f", "arguments": "{}"}}]
+    if rng.random() < p:
+        rng.choice([lambda: m.pop("content", None), lambda: m.__setitem__("content", junk()),
+                    lambda: m.__setitem__("role", junk())])()
+    return m
+
+
+def chat_body():
+    msgs = [chat_message(0.15) for _ in range(rng.randint(0, 4))]
+    b = {"messages": msgs if rng.random() > 0.05 else junk()}
+    if rng.random() < 0.05:
+        b.pop("messages")
+    for _ in range(rng.randint(0, 4)):
+        k = rng.choice(["stop", "response_format", "json_schema", "grammar", "chat_template_kwargs",
+                        "reasoning_effort", "logprobs", "top_logprobs", "continue_final_message",
+                        "add_generation_prompt", "tools", "tool_choice", "stream", "reasoning_format",
+                        "reasoning_budget_tokens", "thinking_budget_tokens", "parallel_tool_calls", "n_predict",
+                        "max_tokens", "temperature", "model"])
+        b[k] = rng.choice({
+            "stop": ["x", ["a", "b"], None, 5],
+            "response_format": [{"type": "json_object"}, {"type": "json_object", "schema": {"type": "string"}},
+                                {"type": "json_schema", "json_schema": {"schema": {"type": "integer"}}},
+                                {"type": "text"}, {"type": "xml"}, {"type": 3}, "x", {}],
+            "json_schema": [{"type": "object"}, {}, None, "x"],
+            "grammar": ["root ::= \"x\"", ""],
+            "chat_template_kwargs": [{"enable_thinking": True}, {"enable_thinking": "false"}, {"enable_thinking": False},
+                                     {"a": [1, 2]}, [1, 2], "x"],
+            "reasoning_effort": ["none", "high", "", 3],
+            "logprobs": [True, False, "x"], "top_logprobs": [3, None, "x"],
+            "continue_final_message": [True, "content", False],
+            "add_generation_prompt": [False, True, "x"],
+            "tools": [[{"type": "function", "function": {"name": "f"}}], [], {"a": 1}, "x"],
+            "tool_choice": ["auto", "none", "required", 3],
+            "stream": [True, False], "reasoning_format": ["none", "deepseek", "bogus", 3],
+            "reasoning_budget_tokens": [10, "x"], "thinking_budget_tokens": [5, "y"],
+            "parallel_tool_calls": [True, "x"], "n_predict": [3], "max_tokens": [7],
+            "temperature": [0.1], "model": ["m", 3],
+        }[k])
+    return b
+
+
+def chat_opt():
+    o = {"prefill_assistant": rng.random() < 0.7, "reasoning_format": rng.randint(0, 3),
+         "allow_image": rng.random() < 0.7, "allow_audio": rng.random() < 0.3, "allow_video": rng.random() < 0.2}
+    if rng.random() < 0.5:
+        o["media_path"] = MEDIA_DIR
+    if rng.random() < 0.3:
+        o["kwargs"] = rng.choice([{"enable_thinking": "true"}, {"enable_thinking": "\"yes\""}, {"x": "1"}])
+    if rng.random() < 0.3:
+        o["reasoning_budget"] = rng.choice([-1, 5])
+        o["reasoning_budget_message"] = "msg"
+    if rng.random() < 0.2:
+        o["enable_thinking"] = False
+    return o
+
+
+def results():
+    """S states and R results: streams of partials then a final, in every
+    response format; then one of every other result type."""
+    sid = 0
+    for res_type in (0, 1, 2, 3, 4, 6):  # 5, OAI_EMBD, is GGML_ASSERT for a completion
+        for stream in (False, True):
+            for gp in ("", "<think>"):
+                cont = rng.random() < 0.3
+                yield "S", {"id": sid, "parser": {"format": 0, "generation_prompt": gp, "is_continuation": cont,
+                                                   "echo": rng.random() < 0.5, "reasoning_format": rng.randint(0, 3)}}
+                text = ""
+                for k in range(rng.randint(0, 4)):
+                    piece = word()
+                    text += piece
+                    f = {"content": piece, "tokens": [rng.randint(0, 99)], "n_decoded": k + 1, "n_prompt_tokens": 7,
+                         "n_prompt_tokens_cache": 2, "res_type": res_type, "model": "m", "cmpl_id": "chatcmpl-x",
+                         "is_progress": rng.random() < 0.2, "is_begin": k == 0 and rng.random() < 0.2,
+                         "post_sampling_probs": rng.random() < 0.5, "verbose": rng.random() < 0.3}
+                    if rng.random() < 0.4:
+                        f["probs"] = [{"tok": 5, "prob": rng.choice([0.0, 0.5, 1.0]), "text": rng.choice(["a", "\xc3", "é"]),
+                                       "probs": [{"tok": 6, "txt": "b\xe2\x82", "prob": 0.25}, {"tok": 7, "txt": "", "prob": 0.0}]}]
+                    if rng.random() < 0.4:
+                        f["stats"] = {"cached": 2, "processed": 5, "gen": k + 1, "t_start": 1000, "t_prompt": 3000,
+                                      "t_gen": 3000 + 500 * k, "draft": rng.choice([0, 1, 3]), "accepted": 1}
+                    if f["is_progress"]:
+                        f["progress"] = {"total": 10, "cache": 2, "processed": 5, "time_ms": 12}
+                    yield "R", {"kind": "partial", "state": sid, "index": 1, "id_slot": 0, "f": f}
+                f = {"content": text if rng.random() < 0.8 else word(), "tokens": [1, 2], "stream": stream,
+                     "include_usage": rng.random() < 0.5, "prompt": "p", "truncated": rng.random() < 0.2,
+                     "n_decoded": 4, "n_prompt_tokens": 9, "n_prompt_tokens_cache": 3, "n_tokens_cached": 12,
+                     "has_new_line": True, "stopping_word": rng.choice(["", "###"]), "stop": rng.randint(0, 3),
+                     "post_sampling_probs": rng.random() < 0.5, "res_type": res_type, "model": "m",
+                     "cmpl_id": "chatcmpl-x", "verbose": rng.random() < 0.3,
+                     "response_fields": rng.choice([[], ["content", "generation_settings/seed", "timings/x"]])}
+                if rng.random() < 0.5:
+                    f["probs"] = [{"tok": 5, "prob": 0.5, "text": "hi", "probs": [{"tok": 6, "txt": "x", "prob": 0.5}]},
+                                  {"tok": 9, "prob": 0.0, "text": "\xf0\x9f", "probs": []}]
+                if rng.random() < 0.6:
+                    f["stats"] = {"cached": 3, "processed": 6, "gen": 4, "t_start": 1000, "t_prompt": 2500,
+                                  "t_gen": rng.choice([0, 2500, 9000]), "draft": rng.choice([0, 2]), "accepted": 1}
+                yield "R", {"kind": "final", "state": sid, "index": 2, "id_slot": 1, "f": f,
+                            "gp": {"v": 0, "data": rand_params()}}
+                sid += 1
+    for t in range(8):
+        yield "R", {"kind": "error", "f": {"type": t, "msg": word(), "n_prompt_tokens": 100, "n_ctx": 64}}
+    for rt in (0, 5):
+        yield "R", {"kind": "embd", "index": 3, "f": {"embedding": [[0.5, -1.25, 1e-7], [2.0]], "n_tokens": 4, "res_type": rt}}
+    yield "R", {"kind": "rerank", "index": 1, "f": {"score": 0.125, "n_tokens": 5}}
+    yield "R", {"kind": "rerank", "index": 2, "f": {"n_tokens": 5}}
+    for m in ({}, {"processing": 2, "deferred": 1, "prompt": [1234567, 1234567, 2500000], "predict": [42, 41, 1000000],
+                   "prompt_bucket": [100, 100, 50000], "predict_bucket": [20, 19, 400000], "n_prompt_cached": 7,
+                   "n_tokens_max": 2048, "n_decode": 33, "n_busy_slots": 50, "n_draft_tokens": 9,
+                   "n_draft_accepted": 4, "n_draft_verif_steps": 3, "per_pos": [4, 0, 12345678901]}):
+        yield "R", {"kind": "metrics", "f": m}
+    yield "R", {"kind": "slots", "f": {"data": [{"id": 0, "is_processing": False}]}}
+    for s in (True, False):
+        yield "R", {"kind": "save", "id_slot": 2, "f": {"filename": "a.bin", "is_save": s, "n_tokens": 10, "n_bytes": 4096, "t_ms": 1.5}}
+    yield "R", {"kind": "erase", "id_slot": 3, "f": {"n_erased": 17}}
+    yield "R", {"kind": "control", "f": {"success": True}}
+    yield "R", {"kind": "control", "f": {"success": False, "message": "no such completion"}}
+    yield "R", {"kind": "get_lora", "f": {"loras": [{"path": "a.gguf", "scale": 0.5, "task_name": "t", "prompt_prefix": "p"},
+                                                     {"path": "b.gguf", "scale": 1.0, "inv": "<x>", "inv_tokens": [1, 2]}]}}
+    yield "R", {"kind": "apply_lora"}
+    yield "R", {"kind": "router", "f": {"data": {"a": [1, "b"]}}}
+
+
+def tokens_ops(n, media=False):
+    ops = [["pos_next", -1], ["pos_next", 0], ["pos_next", min(n, 3)], ["pos_next", n],
+           ["size_up_to_pos", 0], ["size_up_to_pos", 2], ["size_up_to_pos", 5], ["size_up_to_pos", 1000],
+           ["size_up_to_pos", -1], ["validate"], ["text"], ["detok", True], ["detok", False], ["clone"],
+           ["serialize"], ["serialize", rng.randint(0, 12), rng.randint(0, 10), rng.choice([-1, 0, 2, 7, 1000])],
+           ["serialize", 3], ["serialize", 0], ["prefix", [rng.randint(0, 50) for _ in range(rng.randint(0, 6))]],
+           ["prefix_self"], ["prefix_self", rng.randint(0, max(n, 1))], ["next_media", 0], ["next_media", 3],
+           ["spans", [["user", "<|im_start|>user"], ["assistant", "<|im_start|>assistant"]]],
+           ["push_back"], ["push_token", 5], ["push_token", -1], ["insert", [7, 8]],
+           ["find_chunk", 0], ["find_chunk", rng.randint(0, max(n, 1))]]
+    for _ in range(4):
+        ops.append(["keep_first", rng.randint(0, n)])
+    if not media:
+        ops.append(["set_token", 0 if n else 0, 9] if n else ["text"])
+    return ops
+
+
+def targeted():
+    """One record per arm the random ones reach too rarely to count on."""
+    P = lambda d, v=0: ("P", {"v": v, "data": d})
+    yield P({"preserved_tokens": ["<|im_start|>"], "grammar_triggers": [{"type": 1, "value": "<|im_start|>"}]})
+    yield P({"grammar_triggers": [{"type": 1, "value": "<|im_start|>"}]})
+    yield P({"grammar_triggers": [{"type": 1, "value": "hello world again"}], "grammar_lazy": True})
+    yield P({"grammar_lazy": True, "grammar_triggers": []})
+    yield P({"grammar": "root ::= \"a\"", "grammar_type": "tool_calls"})
+    yield P({"grammar": "root ::= \"a\"", "json_schema": {"type": "string"}})
+    yield P({"json_schema": {"type": "string"}, "grammar": None})
+    yield P({"reasoning_budget_end_tags": None, "reasoning_budget_end_tag": "</think>", "reasoning_budget_message": "stop"})
+    yield P({"reasoning_budget_end_tags": ["</think>", "x"], "reasoning_budget_message": "Stop thinking now.", "reasoning_budget_start_tag": "<think>"})
+    yield P({"reasoning_budget_message": "m"})
+    yield P({"stream": True, "reasoning_format": "deepseek-legacy"})
+    yield P({"stream": True}, 1)
+    yield P({"dry_sequence_breakers": "x"})
+    yield P({"lora": {"id": 1}})
+    yield P({"chat_format": 7})
+    yield P({"samplers": ["bogus"], "seed": -1})
+    yield P({"ignore_eos": True, "logit_bias": [[1, 0.5]]})
+    O = lambda b: ("O", b)
+    yield O({})
+    yield O({"prompt": "x", "echo": True})
+    yield O({"prompt": "x", "best_of": 2})
+    yield O({"prompt": "x", "suffix": "y"})
+    yield O({"prompt": "x", "stop": "s", "max_tokens": 3, "n_predict": 9})
+
+    def C(body, **opt):
+        o = {"prefill_assistant": True, "reasoning_format": 0, "allow_image": True, "media_path": MEDIA_DIR}
+        o.update(opt)
+        return ("C", {"v": 0, "tmpl": "chatml", "opt": o, "body": body})
+    u = {"role": "user", "content": "hi"}
+    a = {"role": "assistant", "content": "yo"}
+    yield C({"messages": [u], "tools": [{"type": "function", "function": {"name": "f"}}]})
+    yield C({"messages": [u], "tool_choice": "none"})
+    yield C({"messages": [u], "json_schema": {"type": "object"}, "grammar": "root ::= \"x\""})
+    yield C({"messages": [u], "response_format": {"type": "xml"}})
+    yield C({"messages": [u], "response_format": {"type": "json_schema", "json_schema": {"schema": {"type": "integer"}}}})
+    yield C({"messages": [u], "response_format": {"type": "json_object"}, "json_schema": {"type": "string"}})
+    yield C({"messages": [u], "response_format": {"type": "json_object", "schema": {"type": "boolean"}}})
+    yield C({})
+    yield C({"messages": {"a": 1}})
+    yield C({"messages": [{"role": "user"}]})
+    yield C({"messages": [{"role": "assistant"}]})
+    yield C({"messages": [u, {"role": "assistant", "tool_calls": []}]})
+    yield C({"messages": [{"role": "user", "content": 5}]})
+    yield C({"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": B64_1}}]}]}, allow_image=False)
+    yield C({"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "UklGRg=="}}]}]})
+    yield C({"messages": [{"role": "user", "content": [{"type": "input_video", "input_video": {"data": B64_1}}]}]})
+    yield C({"messages": [{"role": "user", "content": [{"type": "bogus"}]}]})
+    yield C({"messages": [u, a, a]})
+    yield C({"messages": [u, a]})
+    yield C({"messages": [u, a]}, prefill_assistant=False)
+    yield C({"messages": [u], "continue_final_message": True})
+    yield C({"messages": [u, {"role": "assistant", "content": "x", "tool_calls": [{"type": "function", "id": "1", "function": {"name": "f", "arguments": "{}"}}]}],
+             "continue_final_message": True, "add_generation_prompt": False})
+    yield C({"messages": [u], "chat_template_kwargs": {"enable_thinking": "x"}})
+    yield C({"messages": [u], "chat_template_kwargs": {"enable_thinking": False}, "reasoning_effort": "none"})
+    yield C({"messages": [u], "reasoning_effort": "high"})
+    yield C({"messages": [u], "logprobs": True, "top_logprobs": 4})
+    yield C({"messages": [u], "top_logprobs": 4})
+    yield C({"messages": [u], "reasoning_format": "bogus"})
+    for url in ("file://img1.png", "file://sub/img2.png", "file://../x.png", "file://missing.png", "file://sub",
+                "data:image/png;base64," + B64_1, "data:image/png;base64,a,b", "data:text/plain;base64,QQ==",
+                "data:image/png," + B64_1, "!!!", B64_2, "QUJD-REVG", "QUJDREVG-x", "-QUJD"):
+        yield C({"messages": [{"role": "user", "content": [{"type": "text", "text": "see"}, {"type": "image_url", "image_url": {"url": url}}]}]})
+    yield C({"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "file://img1.png"}}]}]}, media_path="")
+    yield C({"messages": [u]}, kwargs={"enable_thinking": "\"yes\""})
+    yield C({"messages": [u]}, reasoning_budget=5, reasoning_budget_message="m")
+    yield ("C", {"v": 0, "tmpl": "bogus-template-name", "opt": {"allow_image": True}, "body": {"messages": [u]}})
+    for tmpl in ("llama2", "llama3", "gemma", "phi3", "zephyr", "vicuna", "mistral-v7", "deepseek3", ""):
+        yield ("C", {"v": 0, "tmpl": tmpl, "opt": {}, "body": {"messages": [{"role": "system", "content": "s"}, u, a, u]}})
+    yield "ST", {"tokens": [5, 6, 7], "ops": [["serialize", 1000], ["serialize", 6], ["serialize", 7, 1, 2], ["serialize", 7, 0, 7]]}
+    probs = [{"tok": 5, "prob": 0.5, "text": "h\u00e9", "probs": [{"tok": 6, "txt": "x\u00e9", "prob": 0.25}]}]
+    yield "S", {"id": 999, "parser": {"format": 0}}
+    for post in (False, True):
+        yield "R", {"kind": "partial", "state": 999, "f": {"content": "a", "n_decoded": 1, "post_sampling_probs": post, "probs": probs}}
+        yield "R", {"kind": "final", "state": 999, "f": {"content": "ab", "post_sampling_probs": post, "probs": probs}}
+    for rt in (0, 1, 2, 3, 4, 6):
+        for stop in range(4):
+            for stream in (False, True):
+                yield "R", {"kind": "final", "state": 999, "f": {"content": "c", "res_type": rt, "stop": stop, "stream": stream,
+                                                                 "stopping_word": "###" if stop == 2 else "", "verbose": stop == 0}}
+    MiB = 1 << 20
+    yield "PC", {"limit_mib": 1, "limit_tokens": 0, "ops": [
+        ["alloc", [1, 2, 3], 100, 0, []], ["alloc", [1, 2], 100, 0, []], ["alloc", [1, 2, 3, 4], 100, 20, [10]],
+        ["alloc", [5], 2 * MiB, 0, []], ["alloc", [6], 600000, 0, []], ["alloc", [7], 600000, 0, []], ["update"],
+        ["cur", [1, 2]], ["load", [1, 2, 3, 4, 9]], ["load", [7, 7]], ["cur", []], ["load", [6]]]}
+    yield "PC", {"limit_mib": 0, "limit_tokens": 4, "ops": [
+        ["alloc", [1, 2, 3], 10, 0, []], ["alloc", [4, 5, 6], 10, 0, []], ["update"], ["alloc", [7, 8, 9, 9, 9], 10, 0, []], ["update"]]}
+    yield "PC", {"limit_mib": 1, "limit_tokens": 2, "ops": [
+        ["alloc", [1, 2, 3], 1000, 0, []], ["alloc", [4, 5, 6], 1000, 0, []], ["update"]]}
+
+
+def records():
+    yield "RND", {}
+    for r in targeted():
+        yield r
+    payloads = test_payloads()
+    for p in payloads:
+        yield "P", {"v": 0, "data": p}
+        yield "O", p
+        if "messages" in p:
+            yield "C", {"v": 0, "tmpl": "chatml", "opt": chat_opt(), "body": p}
+    for k, vals in FIELDS.items():
+        for v in vals:
+            yield "P", {"v": rng.randrange(len(VOCABS)), "data": {k: v}}
+        yield "P", {"v": 0, "data": {k: None}}
+    for _ in range(N):
+        yield "P", {"v": rng.randrange(len(VOCABS)), "eog": rng.random() < 0.7, "data": rand_params()}
+    # the log-gated throws: at a lower verbosity the dumps are not evaluated
+    yield "P", {"v": 0, "data": {"json_schema": {"enum": ["\udcff"]}, "chat_format": 9}}
+    for b in ({"verbosity": 10, "antiprompt": ["###", "User:"], "n_predict": 64, "n_keep": 4, "seed": 7,
+               "samplers": "kt", "spec_types": [0, 6], "reasoning_format": 2, "dry_base": 2.5, "temp": 0.2,
+               "cache_prompt": False, "sse_ping_interval": 5, "n_cache_reuse": 16},
+              {"n_parallel": 1, "verbosity": 3, "antiprompt": [], "reasoning_format": 3}):
+        yield "B", b
+        for stop in ([], {}, [None, []], "", 5, ["x"]):
+            yield "P", {"v": 0, "data": {"stop": stop}}
+        for _ in range(N // 6):
+            yield "P", {"v": rng.randrange(len(VOCABS)), "data": rand_params()}
+    yield "B", {"n_parallel": 4, "verbosity": 3, "antiprompt": [], "seed": 4294967295, "reasoning_format": 3, "dry_base": 1.75,
+                "temp": 0.8, "samplers": "edskypmxt", "spec_types": [0], "n_predict": -1, "n_keep": 0, "cache_prompt": True,
+                "sse_ping_interval": 30, "n_cache_reuse": 0}
+    for _ in range(N):
+        b = {"prompt": rng.choice([word(), [1, 2], [word(), 5], None, 3])} if rng.random() < 0.9 else {}
+        for _ in range(rng.randint(0, 3)):
+            k = rng.choice(["stop", "echo", "best_of", "suffix", "n_predict", "max_tokens", "temperature", "x"])
+            b[k] = rng.choice(["s", ["a"], True, False, 3, None])
+        yield "O", b
+    for _ in range(N):
+        yield "C", {"v": rng.choice([0, 0, 1, 5]), "tmpl": rng.choice(["chatml", "chatml", "llama2", "llama3", "gemma", "phi3", "zephyr", "vicuna", "bogus-tmpl"]),
+                    "opt": chat_opt(), "body": chat_body()}
+    prompts = lambda: rng.choice([word(), [1, 2, 3], [word(), 5, word()], [word(), word()], [[1, 2], word()],
+                                  {"prompt_string": word()}, {"prompt_string": [5, word()]}, {"x": 1}, [], [[]],
+                                  [1.5], [True, "a"], [{"prompt_string": "p"}, 4], 5, None, [None],
+                                  {"prompt_string": "a " + MARKER + " b", "multimodal_data": [B64_1]},
+                                  {"prompt_string": "x", "multimodal_data": "!!"}])
+    for _ in range(N):
+        yield "T", {"v": rng.randrange(len(VOCABS)), "prompt": prompts(), "add_special": rng.random() < 0.6,
+                    "parse_special": rng.random() < 0.6, "mtmd": rng.random() < 0.3, "ops": tokens_ops(5)}
+    for prompt in ("describe " + MARKER, MARKER + " and " + MARKER + " end", "no media", MARKER):
+        n_img = prompt.count(MARKER)
+        for files in ([IMG1, IMG2][:n_img], [IMG2, IMG1][:n_img], [b"garbage"] * n_img, [IMG1] * (n_img + 1)):
+            ops = tokens_ops(80, True) + [["prefix_edit", k, 7] for k in range(0, 40, 3)]
+            yield "M", {"prompt": prompt, "files": [f.hex() for f in files], "ph": rng.random() < 0.3, "ops": ops}
+    yield "T", {"v": 0, "mtmd": True, "prompt": {"prompt_string": "a " + MARKER, "multimodal_data": [B64_1]},
+                "ops": [["keep_first", 3], ["pos_next", -1], ["serialize"]]}
+    for _ in range(N // 3):
+        toks = [rng.randint(-2, 160000) for _ in range(rng.randint(0, 10))]
+        yield "ST", {"tokens": toks, "ops": tokens_ops(len(toks))}
+    # utf-8: every 1- and 2-byte string, and 3/4-byte strings over the bytes that matter
+    alph = [0x00, 0x41, 0x7f, 0x80, 0xbf, 0xc0, 0xc2, 0xdf, 0xe0, 0xef, 0xf0, 0xf4, 0xf7, 0xf8, 0xff]
+    strs = [bytes([a]) for a in range(256)] + [bytes([a, b]) for a in range(256) for b in range(256)]
+    strs += [bytes([a, b, c]) for a in alph for b in alph for c in alph]
+    strs += [bytes([a, b, c, d]) for a in alph for b in alph for c in alph for d in alph]
+    strs += [b"", b"abc\xe2\x82", b"x\xf0\x9f\x98", b"\xf0\x9f\x98\x80\xc3"]
+    for i in range(0, len(strs), 512):
+        yield "U", [s.hex() for s in strs[i:i + 512]]
+    for t in [0, 1, 2, 3, 4, 5, 6, 7]:
+        yield "E", {"type": t, "msg": word()}
+    for gt in [{"type": 0, "value": "x", "token": 5}, {"type": 1, "value": "w"}, {"type": 3, "value": "p"},
+               {"type": 0, "value": "x"}, {"type": "1", "value": "w"}, {"value": "w"}, {"type": 2, "value": 4}, [], "x"]:
+        yield "GT", gt
+    for kind, ops in results():
+        yield kind, ops
+    # on a generator state of their own, so the records after them stay as they were
+    saved = rng.getstate()
+    rng.seed(int(os.environ.get("SERVER_TASK_SEED", "1")) * 7919 + 4)
+    for kind, ops in chat_step4():
+        yield kind, ops
+    rng.setstate(saved)
+    for _ in range(N // 4):
+        emb = [{"embedding": [rng.uniform(-2, 2) for _ in range(rng.randint(0, 4))], "tokens_evaluated": rng.randint(0, 9)}
+               for _ in range(rng.randint(0, 3))]
+        if rng.random() < 0.2:
+            emb.append(rng.choice([{"embedding": "x"}, {"tokens_evaluated": "x"}, 5, {}]))
+        yield "F", {"req": rng.choice([{}, {"model": "mm"}, {"model": 3}]), "model": "base", "emb": emb, "b64": rng.random() < 0.5}
+    for _ in range(N // 4):
+        n = rng.randint(0, 5)
+        ranks = [{"index": rng.randint(0, max(n - 1, 0)), "score": rng.choice([0.5, -1.0, 0.5, 2.0, rng.random()]),
+                  "tokens_evaluated": rng.randint(0, 9)} for _ in range(n)]
+        yield "K", {"req": rng.choice([{}, {"return_text": True}, {"model": "x", "return_text": True}]), "model": "base",
+                    "ranks": ranks, "tei": rng.random() < 0.5, "texts": [word() for _ in range(max(n, 1))],
+                    "top_n": rng.randint(0, 6)}
+    for v in range(len(VOCABS)):
+        for _ in range(6):
+            yield "I", {"v": v, "prefix": rng.choice([word(), [word(), 5], "def f():\n    "]),
+                        "suffix": rng.choice([word(), "\nreturn x"]),
+                        "extra": rng.choice([[], [{"text": word(), "filename": "a.py"}, {"text": "x"}], [{"filename": 3}]]),
+                        "n_batch": rng.choice([0, 4, 16, 512]), "n_predict": rng.choice([-1, 8, 100000]),
+                        "n_ctx": rng.choice([0, 64, 4096]), "spm": rng.random() < 0.5,
+                        "prompt": [rng.randint(0, 100) for _ in range(rng.randint(0, 3))]}
+        yield "Q", {"v": v, "query": word(), "doc": word()}
+    for _ in range(6):
+        # ASCII only on the fixture vocabulary: its byte tokens are not all there, and libllama throws on them
+        yield "G", {"prompt": rng.choice(["hello", " Paris", "def f():", "the cat", "x y z"]) + " the", "n_top": [0, 1, 5, 100000]}
+    yield "G", {"real": True, "prompt": "Bonjour \u00e9\u00e8 \U0001F600 \u65e5\u672c", "n_top": [0, 3, 100000000]}
+    # rare characters, which byte-level BPE leaves as single bytes
+    yield "G", {"real": True, "prompt": "\U00010348\U00013000\U0001F732\ua66e\U0001D4CD", "n_top": [2]}
+    for _ in range(N // 10):
+        ops = []
+        for _ in range(rng.randint(1, 10)):
+            k = rng.random()
+            toks = [rng.randint(1, 6) for _ in range(rng.randint(1, 8))]
+            if k < 0.5:
+                ops.append(["alloc", toks, rng.choice([0, 100, 1 << 20, 3 << 20]), rng.choice([0, 0, 50]),
+                            [rng.choice([10, 1 << 19]) for _ in range(rng.randint(0, 2))]])
+            elif k < 0.7:
+                ops.append(["update"])
+            elif k < 0.85:
+                ops.append(["cur", toks])
+            else:
+                ops.append(["load", toks])
+        yield "PC", {"limit_mib": rng.choice([-1, 0, 1, 2]), "limit_tokens": rng.choice([0, 4, 10]), "ops": ops}
+    yield "PIPE", {"max_size": 0, "ops": [["w", 1], ["r"], ["cw"], ["r"]]}
+    yield "PIPE", {"max_size": 1, "ops": [["w", 1], ["w", 2], ["r"], ["r"]]}
+    yield "PIPE", {"max_size": 2, "ops": [["w", 1], ["w", 2], ["w", 3], ["r"], ["r"], ["r"]]}
+    for _ in range(20):
+        ops = [rng.choice([["w", rng.randint(0, 9)], ["r"], ["r", False], ["cw"], ["cr"]]) for _ in range(rng.randint(1, 8))]
+        yield "PIPE", {"max_size": rng.choice([0, 1, 2]), "ops": ops}
+    for req in ([{"id": 0, "scale": 0.5}, {"id": 0, "scale": 0.25}, {"id": -3}], [], {"a": 1}, [{"id": "x"}], [1],
+                [{"id": 2, "scale": "s"}, {"scale": 2}]):
+        yield "L", {"req": req, "a": [0.5, 0.0, 1.0], "b": [rng.choice([0.5, 0.25]), 0.0, 1.0]}
+    yield "L", {"req": [], "a": [], "b": [0.0]}
+    for _ in range(40):
+        js = rng.choice([{"a": {"b": [1, 2]}, "c": 3, "": {"": 1}}, [1, 2, "x"], [1, 2], ["x"], [], 5, None, {"a/b": 1}])
+        yield "J", {"paths": [rng.choice(["a", "a/b", "c", "a/x", "", "/", "a/b/c", "a/b"]) for _ in range(rng.randint(0, 4))], "js": js}
+    for v in ([{"event": "e", "data": {"x": 1}}, {"data": 1}], {"event": "e", "data": "é"}, {"x": "\udcff"}, [], 5, None,
+              [{"event": 3, "data": 1}], {"event": "only"}):
+        yield "SSE", v
+    for t in range(14):
+        yield "TK", {"type": t, "seed": rng.choice([4294967295, 7, 4294967294]), "children": rng.randint(0, 3)}
+
+
+# ---------------------------------------------------------------------------
+# Stage 10 step 4: chat over Jinja, the request conversions, parsed streams
+
+TEMPLATES_DIR = "llama.cpp/models/templates"
+TEMPLATES = sorted(f for f in os.listdir(TEMPLATES_DIR) if f.endswith(".jinja"))
+# the templates CS streams through: one per parser family worth reaching
+CS_TEMPLATES = ["Qwen-Qwen3-0.6B.jinja", "Qwen3.5-4B.jinja", "Qwen3-Coder.jinja", "meta-llama-Llama-3.1-8B-Instruct.jinja",
+                "Mistral-Small-3.2-24B-Instruct-2506.jinja", "mistralai-Ministral-3-14B-Reasoning-2512.jinja",
+                "openai-gpt-oss-120b.jinja", "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja", "deepseek-ai-DeepSeek-V3.1.jinja",
+                "google-gemma-4-31B-it.jinja", "MiniMax-M3.jinja", "GLM-4.6.jinja", "Kimi-K2-Thinking.jinja",
+                "NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja", "ibm-granite-granite-4.0.jinja", "LFM2-8B-A1B.jinja",
+                "fireworks-ai-llama-3-firefunction-v2.jinja", "meetkai-functionary-medium-v3.2.jinja", "Apertus-8B-Instruct.jinja",
+                "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja", "ByteDance-Seed-OSS.jinja", "NVIDIA-Nemotron-Nano-v2.jinja"]
+
+TOOL_W = {"type": "function", "function": {"name": "get_weather", "description": "Get the weather",
+                                           "parameters": {"type": "object", "properties": {"city": {"type": "string"},
+                                                                                           "days": {"type": "integer"}},
+                                                          "required": ["city"]}}}
+TOOL_T = {"type": "function", "function": {"name": "get_time", "parameters": {"type": "object", "properties": {}}}}
+
+REPLIES = [
+    "Hello there!",
+    "<think>\nLet me think. 2+2 is 4.\n</think>\n\nThe answer is 4.",
+    "The answer is 4.</think>\n\nFour.",
+    "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>",
+    "<think>\nI should call the tool.\n</think>\n\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\", \"days\": 2}}\n</tool_call>\n<tool_call>\n{\"name\": \"get_time\", \"arguments\": {}}\n</tool_call>",
+    "<tool_call>\n<function=get_weather>\n<parameter=city>\nParis\n</parameter>\n</function>\n</tool_call>",
+    "{\"name\": \"get_weather\", \"parameters\": {\"city\": \"Paris\"}}",
+    "[TOOL_CALLS]get_weather[ARGS]{\"city\": \"Paris\"}",
+    "[THINK]Hmm.[/THINK]Sure, Paris is nice.",
+    "<|channel|>analysis<|message|>Think about it.<|end|><|start|>assistant<|channel|>final<|message|>It is sunny.",
+    "<|channel|>commentary to=functions.get_weather <|constrain|>json<|message|>{\"city\": \"Paris\"}",
+    "{\"answer\": 4}",
+    "Sure \u00e9\u00e8 \U0001F600 done",
+    "<|channel>thought\nHmm.<channel|><|tool_call>call:get_weather{city:<|\"|>Paris<|\"|>,days:2}<tool_call|>",
+    "<mm:think>Check.</mm:think>]<]minimax[>[<tool_call>\n]<]minimax[>[<invoke name=\"get_weather\">\n]<]minimax[>[<city>Paris]<]minimax[>[</city>\n]<]minimax[>[</invoke>\n]<]minimax[>[</tool_call>",
+    "<|tool_calls_section_begin|><|tool_call_begin|>functions.get_weather:0<|tool_call_argument_begin|>{\"city\": \"Paris\"}<|tool_call_end|><|tool_calls_section_end|>",
+]
+
+
+def chat_body_jinja():
+    b = chat_body()
+    if rng.random() < 0.5:
+        b["messages"] = [{"role": "system", "content": "Be brief."}, {"role": "user", "content": word() or "hi"}]
+    if rng.random() < 0.5:
+        b["tools"] = rng.choice([[TOOL_W], [TOOL_W, TOOL_T], [TOOL_T]])
+        b["tool_choice"] = rng.choice(["auto", "required", "none", "auto"])
+    if rng.random() < 0.2:
+        b["parallel_tool_calls"] = rng.choice([True, False])
+    return b
+
+
+def chat_opt_jinja():
+    o = chat_opt()
+    o["jinja"] = True
+    o.pop("media_path", None)
+    if rng.random() < 0.1:
+        o["force_pure_content"] = True
+    return o
+
+
+def response_items():
+    """Random Responses API input items, valid more often than not."""
+    items = []
+    for _ in range(rng.randint(0, 5)):
+        k = rng.random()
+        if k < 0.25:
+            it = {"role": rng.choice(["user", "system", "developer", "user"]),
+                  "content": rng.choice([word(), [{"type": "input_text", "text": word()}],
+                                         [{"type": "input_image", "image_url": B64_1}, {"type": "input_text", "text": "x"}],
+                                         [{"type": "input_file"}], [{"type": "input_text"}], [{"type": "bogus"}],
+                                         [{"type": "input_image"}], [5]])}
+            if rng.random() < 0.3:
+                it["type"] = "message"
+            if rng.random() < 0.2:
+                it["status"] = "completed"
+        elif k < 0.45:
+            it = {"role": "assistant", "type": "message",
+                  "content": rng.choice([word(), [{"type": "output_text", "text": word()}], [{"type": "refusal", "refusal": "no"}],
+                                         [{"type": "output_text"}], [{"type": "refusal"}], [{"type": "x"}], 5])}
+            if rng.random() < 0.5:
+                it["status"] = "completed"
+            if rng.random() < 0.3:
+                it["id"] = "msg_1"
+        elif k < 0.65:
+            it = {"type": "function_call", "call_id": "call_" + str(rng.randint(0, 9)), "name": "get_weather",
+                  "arguments": rng.choice(["{\"city\":\"Paris\"}", "{}"])}
+            if rng.random() < 0.15:
+                it.pop(rng.choice(["call_id", "name", "arguments"]))
+        elif k < 0.8:
+            it = {"type": "function_call_output", "call_id": "call_1",
+                  "output": rng.choice(["sunny", [{"type": "input_text", "text": "x"}], [{"type": "text", "text": "y"}], [{}], 5])}
+        elif k < 0.92:
+            it = {"type": "reasoning", "summary": [],
+                  "content": rng.choice([[{"type": "reasoning_text", "text": "thought"}], [], [{"text": 5}], "x", [5]])}
+            if rng.random() < 0.1:
+                it.pop("content")
+        else:
+            it = rng.choice([{"type": "bogus"}, 5, "x", {}, {"role": 3, "content": []}])
+        items.append(it)
+    return items
+
+
+def responses_body():
+    b = {"input": rng.choice([word(), response_items(), response_items(), 5, None, {"a": 1}])}
+    if rng.random() < 0.05:
+        b.pop("input")
+    for _ in range(rng.randint(0, 4)):
+        k = rng.choice(["instructions", "previous_response_id", "tools", "max_output_tokens", "reasoning", "model",
+                        "stream", "temperature", "max_tokens", "messages"])
+        b[k] = rng.choice({
+            "instructions": ["Be brief.", 5, None, ""],
+            "previous_response_id": ["", "resp_1", None, 3],
+            "tools": [[{"type": "function", "name": "f", "parameters": {"type": "object"}}],
+                      [{"type": "web_search"}, {"type": "function", "name": "g", "strict": False}], [5], "x", []],
+            "max_output_tokens": [16, "x", None],
+            "reasoning": [{"effort": "low"}, {"effort": None}, {}, "x", {"summary": "auto"}],
+            "model": ["m"], "stream": [True, False], "temperature": [0.5], "max_tokens": [3], "messages": [[]],
+        }[k])
+    return b
+
+
+def anthropic_content():
+    blocks = []
+    for _ in range(rng.randint(0, 4)):
+        blocks.append(rng.choice([
+            {"type": "text", "text": word()},
+            {"type": "thinking", "thinking": "hmm", "signature": "s"},
+            {"type": "thinking"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": B64_1}},
+            {"type": "image", "source": {"type": "base64", "data": "QUJD"}},
+            {"type": "image", "source": {"type": "url", "url": "http://x/y.png"}},
+            {"type": "image", "source": {"type": "file"}},
+            {"type": "image"},
+            {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Paris"}},
+            {"type": "tool_use", "name": "f"},
+            {"type": "tool_result", "tool_use_id": "toolu_1", "content": "sunny"},
+            {"type": "tool_result", "tool_use_id": "toolu_1", "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]},
+            {"type": "tool_result", "tool_use_id": "toolu_2", "content": [{"type": "text", "text": "a"},
+                                                                          {"type": "image", "source": {"type": "url", "url": "u"}}]},
+            {"type": "tool_result", "tool_use_id": "toolu_3", "content": [{"type": "image", "source": {"type": "base64", "data": "QQ=="}}]},
+            {"type": "tool_result", "tool_use_id": "toolu_4"},
+            {"type": "tool_result", "content": 5},
+            {"type": "bogus"}, 5,
+        ]))
+    return blocks
+
+
+def anthropic_body():
+    msgs = []
+    for _ in range(rng.randint(0, 4)):
+        m = {"role": rng.choice(["user", "assistant", "user"])}
+        r = rng.random()
+        if r < 0.3:
+            m["content"] = word()
+        elif r < 0.85:
+            m["content"] = anthropic_content()
+        elif r < 0.92:
+            m["content"] = rng.choice([5, None, {"a": 1}])
+        msgs.append(m)
+    b = {"messages": msgs if rng.random() > 0.05 else rng.choice([5, "x", {}])}
+    if rng.random() < 0.05:
+        b.pop("messages")
+    for _ in range(rng.randint(0, 5)):
+        k = rng.choice(["system", "tools", "tool_choice", "stop_sequences", "max_tokens", "temperature", "top_p", "top_k",
+                        "stream", "chat_template_kwargs", "thinking", "metadata", "model"])
+        b[k] = rng.choice({
+            "system": ["You are helpful.", [{"type": "text", "text": "A"}, {"type": "text", "text": "B"}, {"type": "image"}],
+                       "x-anthropic-billing-header: cc_version=2.1; cc_entrypoint=cli; cch=a5145;You are Claude",
+                       "x-anthropic-billing-header: cch=a51", "x-anthropic-billing-header: no stamp",
+                       [{"type": "text", "text": "x-anthropic-billing-header: cch=12345;rest"}], 5, None, {}],
+            "tools": [[{"name": "get_weather", "description": "w", "input_schema": {"type": "object"}}], [{"name": "f"}], [5], "x"],
+            "tool_choice": [{"type": "auto"}, {"type": "any"}, {"type": "tool", "name": "f"}, {"type": "none"}, "auto", {}],
+            "stop_sequences": [["\n\n"], "x", []], "max_tokens": [10, None, "x"], "temperature": [0.2], "top_p": [0.9],
+            "top_k": [5], "stream": [True, False], "chat_template_kwargs": [{"enable_thinking": False}],
+            "thinking": [{"type": "enabled", "budget_tokens": 50}, {"type": "enabled"}, {"type": "disabled"},
+                         {"type": "enabled", "budget_tokens": "x"}, "x"],
+            "metadata": [{"user_id": "u1"}, {"user_id": ""}, {}, 5], "model": ["claude"],
+        }[k])
+    return b
+
+
+def chat_step4():
+    u = {"role": "user", "content": "What is the weather in Paris?"}
+    # Jinja over every template: tools, choice, schemas, reasoning, kwargs
+    for t in TEMPLATES:
+        path = os.path.join(TEMPLATES_DIR, t)
+        for k in range(3):
+            body = {"messages": [{"role": "system", "content": "Be brief."}, u]} if k == 0 else chat_body_jinja()
+            if k == 0:
+                body["tools"] = [TOOL_W]
+            yield "C", {"v": 0, "tmpl_file": path, "opt": chat_opt_jinja(), "body": body}
+    for _ in range(N // 2):
+        yield "C", {"v": rng.choice([0, 0, 1]), "tmpl_file": os.path.join(TEMPLATES_DIR, rng.choice(TEMPLATES)),
+                    "opt": chat_opt_jinja(), "body": chat_body_jinja()}
+    q3 = os.path.join(TEMPLATES_DIR, "Qwen-Qwen3-0.6B.jinja")
+    J = lambda **o: dict({"jinja": True, "prefill_assistant": True}, **o)
+    for body, opt in (
+        ({"messages": [u], "tools": [TOOL_W], "grammar": "root ::= \"x\""}, J()),
+        ({"messages": [u], "tools": [TOOL_W], "tool_choice": "required", "parallel_tool_calls": True}, J()),
+        ({"messages": [u], "tools": [TOOL_W], "logprobs": True, "stream": True}, J()),
+        ({"messages": [u], "response_format": {"type": "json_schema", "json_schema": {"schema": {"type": "object", "properties": {"a": {"type": "integer"}}}}}}, J()),
+        ({"messages": [u], "reasoning_format": "deepseek"}, J()),
+        ({"messages": [u], "reasoning_format": "none", "chat_template_kwargs": {"enable_thinking": False}}, J()),
+        ({"messages": [u], "reasoning_budget_tokens": 5, "reasoning_control": True}, J(reasoning_budget=3, reasoning_budget_message="enough")),
+        ({"messages": [u], "thinking_budget_tokens": 7}, J()),
+        ({"messages": [u, {"role": "assistant", "content": "It is"}]}, J()),
+        ({"messages": [u, {"role": "assistant", "content": "<think>x"}], "continue_final_message": "reasoning_content", "add_generation_prompt": False}, J()),
+        ({"messages": [u], "chat_template_kwargs": {"enable_thinking": "no"}}, J()),
+        ({"messages": [u]}, J(kwargs={"enable_thinking": "false"})),
+        ({"messages": [u]}, J(enable_thinking=False)),
+        ({"messages": [u], "tools": [TOOL_W]}, J(force_pure_content=True)),
+        ({"messages": [u], "tools": [{"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {"x": {"type": "bogus"}}}}}]}, J()),
+    ):
+        yield "C", {"v": 0, "tmpl_file": q3, "opt": opt, "body": body}
+    # kwargs a template reads: gpt-oss's reasoning_effort, and one no
+    # template knows (it must still reach the context)
+    oss = os.path.join(TEMPLATES_DIR, "openai-gpt-oss-120b.jinja")
+    for body, opt in (({"messages": [u], "reasoning_effort": "high"}, J()),
+                      ({"messages": [u], "chat_template_kwargs": {"reasoning_effort": "low"}}, J()),
+                      ({"messages": [u]}, J(kwargs={"reasoning_effort": "\"medium\""})),
+                      ({"messages": [u], "chat_template_kwargs": {"builtin_tools": ["browser"]}}, J())):
+        yield "C", {"v": 0, "tmpl_file": oss, "opt": opt, "body": body}
+    # parsed streams: a chat request's state fed a reply in pieces
+    sid = 1000
+    for t in CS_TEMPLATES:
+        path = os.path.join(TEMPLATES_DIR, t)
+        for _ in range(3):
+            body = {"messages": [u], "tools": rng.choice([[TOOL_W, TOOL_T], [TOOL_W], []])}
+            if rng.random() < 0.3:
+                body["tool_choice"] = "required"
+            if rng.random() < 0.3:
+                body["reasoning_format"] = rng.choice(["none", "deepseek", "auto", "deepseek-legacy"])
+            if rng.random() < 0.3:
+                body["stream"] = True
+            if rng.random() < 0.2:
+                body["messages"] = [u, {"role": "assistant", "content": "Well"}]
+            yield "CS", {"v": 0, "tmpl_file": path, "opt": J(reasoning_format=rng.randint(0, 3)), "body": body, "id": sid}
+            reply = rng.choice(REPLIES)
+            res_type = rng.choice([1, 1, 3, 6, 0])
+            stream = rng.random() < 0.6
+            pos = 0
+            k = 0
+            while pos < len(reply):
+                n = rng.randint(1, 12)
+                piece = reply[pos:pos + n]
+                pos += n
+                k += 1
+                yield "R", {"kind": "partial", "state": sid, "index": 0, "f": {"content": piece, "n_decoded": k, "res_type": res_type,
+                                                                              "model": "m", "cmpl_id": "chatcmpl-x"}}
+            yield "R", {"kind": "final", "state": sid, "index": 0, "f": {"content": reply, "stream": stream, "res_type": res_type,
+                                                                        "stop": rng.choice([1, 1, 2, 3]), "model": "m",
+                                                                        "cmpl_id": "chatcmpl-x", "n_decoded": k}}
+            sid += 1
+    # each family's own syntax, so its mapper reads tool calls
+    own = {"google-gemma-4-31B-it.jinja": REPLIES[13], "MiniMax-M3.jinja": REPLIES[14], "Qwen-Qwen3-0.6B.jinja": REPLIES[4]}
+    for t, reply in own.items():
+        for stream in (False, True):
+            yield "CS", {"v": 0, "tmpl_file": os.path.join(TEMPLATES_DIR, t), "opt": J(reasoning_format=3),
+                         "body": {"messages": [u], "tools": [TOOL_W, TOOL_T], "parallel_tool_calls": True}, "id": sid}
+            for k, pos in enumerate(range(0, len(reply), 5)):
+                yield "R", {"kind": "partial", "state": sid, "index": 0, "f": {"content": reply[pos:pos + 5], "n_decoded": k + 1,
+                                                                              "res_type": 1, "model": "m", "cmpl_id": "chatcmpl-x"}}
+            yield "R", {"kind": "final", "state": sid, "index": 0, "f": {"content": reply, "stream": stream, "res_type": 1,
+                                                                        "stop": 1, "model": "m", "cmpl_id": "chatcmpl-x"}}
+            sid += 1
+    # an explicit continuation: the state's first parse, of nothing, through
+    # the request's own parser, so the prefill is not sent again
+    for t in ("Qwen-Qwen3-0.6B.jinja", "Qwen3.5-4B.jinja", "google-gemma-4-31B-it.jinja", "openai-gpt-oss-120b.jinja"):
+        for cont, last, echo in (("content", {"role": "assistant", "content": "The weather"}, False),
+                                 (True, {"role": "assistant", "content": "The weather"}, True),
+                                 ("reasoning_content", {"role": "assistant", "content": "", "reasoning_content": "I think"}, False)):
+            yield "CS", {"v": 0, "tmpl_file": os.path.join(TEMPLATES_DIR, t), "opt": J(reasoning_format=3),
+                         "body": {"messages": [u, last], "continue_final_message": cont, "add_generation_prompt": False, "echo": echo},
+                         "id": sid}
+            for k, piece in enumerate([" is", " sunny</think>", "\n\nYes."]):
+                yield "R", {"kind": "partial", "state": sid, "index": 0, "f": {"content": piece, "n_decoded": k + 1, "res_type": 1,
+                                                                              "model": "m", "cmpl_id": "chatcmpl-x"}}
+            yield "R", {"kind": "final", "state": sid, "index": 0, "f": {"content": " is sunny</think>\n\nYes.", "stream": True,
+                                                                        "res_type": 1, "stop": 1, "model": "m", "cmpl_id": "chatcmpl-x"}}
+            sid += 1
+    # every response format over a reply with reasoning and two tool calls
+    for res_type in (0, 1, 3, 6):
+        for stream in (False, True):
+            yield "CS", {"v": 0, "tmpl_file": q3, "opt": J(reasoning_format=3), "body": {"messages": [u], "tools": [TOOL_W, TOOL_T]}, "id": sid}
+            reply = REPLIES[4]
+            k = 0
+            for pos in range(0, len(reply), 7):
+                k += 1
+                yield "R", {"kind": "partial", "state": sid, "index": 0, "f": {"content": reply[pos:pos + 7], "n_decoded": k,
+                                                                              "res_type": res_type, "model": "m", "cmpl_id": "chatcmpl-x"}}
+            yield "R", {"kind": "final", "state": sid, "index": 0, "f": {"content": reply, "stream": stream, "res_type": res_type,
+                                                                        "stop": 1, "model": "m", "cmpl_id": "chatcmpl-x", "n_decoded": k}}
+            sid += 1
+    # the Responses API
+    for b in ({}, {"input": "hi"}, {"input": "hi", "previous_response_id": "resp_1"}, {"input": "hi", "previous_response_id": ""},
+              {"input": 5}, {"input": None}, {"input": "hi", "instructions": "Be brief.", "max_output_tokens": 8, "reasoning": {"effort": "high"}},
+              {"input": [{"role": "user", "content": "a"}, {"role": "assistant", "type": "message", "content": [{"type": "output_text", "text": "b"}]},
+                         {"type": "function_call", "call_id": "c1", "name": "f", "arguments": "{}"},
+                         {"type": "reasoning", "summary": [], "content": [{"type": "reasoning_text", "text": "r"}]},
+                         {"type": "function_call_output", "call_id": "c1", "output": "ok"}]},
+              {"input": [{"type": "function_call", "call_id": "c1", "name": "f", "arguments": "{}"},
+                         {"role": "assistant", "type": "message", "content": "plain"}]},
+              {"input": "x", "tools": [{"type": "function", "name": "f"}, {"type": "web_search"}, {"type": 3}]},
+              {"input": "x", "tools": {"a": 1}}, {"input": "x", "tools": []}, [1, 2], "x"):
+        yield "RC", b
+    for _ in range(N):
+        yield "RC", responses_body()
+    # the Anthropic API
+    for b in ({}, {"messages": []}, {"messages": 5}, {"system": "s", "messages": [{"role": "user", "content": "hi"}]},
+              {"system": "x-anthropic-billing-header: cc_version=2.1.101.e51; cc_entrypoint=cli; cch=a5145;You are", "messages": []},
+              {"system": "x-anthropic-billing-header: cch=a5145", "messages": []},
+              {"messages": [{"role": "assistant"}, {"role": "user"}, {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "f", "input": {"a": [1, 2]}}]},
+                            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "r"}, {"type": "text", "text": "next"}]}]},
+              {"messages": [], "thinking": {"type": "enabled"}, "metadata": {"user_id": "me"}, "tool_choice": {"type": "any"}}, [1], "x"):
+        yield "AC", b
+    for _ in range(N):
+        yield "AC", anthropic_body()
+    # the transcriptions API: the form's fields arrive as strings
+    wav = b"RIFF0000WAVEfmt "
+    lfm2 = os.path.join(TEMPLATES_DIR, "LFM2-8B-A1B.jinja")
+    for body, extra in (({}, {"file": wav.hex()}), ({}, {}), ({}, {"file": wav.hex(), "file_key": "audio"}),
+                        ({"prompt": "Say it", "language": "fr", "stream": "true", "max_tokens": "12", "temperature": "0.25"}, {"file": wav.hex()}),
+                        ({"response_format": "text"}, {"file": wav.hex()}), ({"response_format": "json"}, {"file": ""}),
+                        ({"max_tokens": "x"}, {"file": "00"}), ({"max_tokens": "010"}, {"file": "00"}),
+                        ({"max_tokens": "0x1f"}, {"file": "00"}), ({"temperature": "010"}, {"file": "00"}), ({"max_tokens": "-3"}, {"file": "00"}),
+                        ({"max_tokens": "99999999999999999999999"}, {"file": "00"}), ({"max_tokens": " 7z"}, {"file": "00"}),
+                        ({"temperature": "abc"}, {"file": "00"}), ({"temperature": "1e99"}, {"file": "00"}),
+                        ({"temperature": "0x1p-3"}, {"file": "00"}), ({"temperature": " inf"}, {"file": "00"}),
+                        ({"max_tokens": 5}, {"file": "00"}), ({"max_tokens": ["1", "2"]}, {"file": "00"}),
+                        ({"stream": "TRUE", "language": "de\u0000x"}, {"file": "00"}), ({"stream": True}, {"file": "00"})):
+        for tmpl in ({"tmpl": "chatml"}, {"tmpl_file": lfm2}):
+            yield "TC", dict({"v": 0, "body": body}, **tmpl, **extra)
+
+
+# ---------------------------------------------------------------------------
+
+COVERAGE = [
+    "Value must be between", "Grammar trigger word should be marked as preserved token",
+    "no triggers set for lazy grammar", "dry_sequence_breakers must be a non-empty", "'lora' must be an array",
+    "Unknown reasoning format", "Unknown chat format", "JSON schema conversion failed", "\"prompt\" is required",
+    "Only no echo is supported", "Unsupported param", "tools param requires --jinja flag",
+    "tool_choice param requires --jinja flag", "Cannot use both json_schema and grammar",
+    "response_format type must be one of", "'messages' is required", "Expected 'messages' to be an array",
+    "All non-assistant messages must contain 'content'", "Assistant message must contain either",
+    "Expected 'content' to be a string or an array", "image input is not supported", "audio input is not supported",
+    "video input is not supported", "unsupported content[].type", "Cannot have 2 or more assistant messages",
+    "Cannot set both add_generation_prompt", "invalid type for \"enable_thinking\"", "top_logprobs requires logprobs",
+    "file:// URLs are not allowed", "file path is not allowed", "file does not exist or cannot be opened",
+    "Invalid uri-encoded base64 value", "Invalid uri format", "uri must be base64 encoded", "Invalid base64 value",
+    "Multimodal data provided, but model does not support", "elements must be a string",
+    "must not be empty", "Invalid token", "Chunk not found", "Unsupported server tokens state version",
+    "Unexpected end of server tokens state", "Trailing data in server tokens state",
+    "Cannot restore media tokens without an mmproj", "Failed to load image or audio file", "event: ",
+    "this custom template is not supported", "byte: \\x", "Field 'chat_format'", "Field 'json_schema'",
+    "Cannot continue an assistant message that contains tool calls",
+    "completion_probabilities", "prompt_progress", "__verbose", "tool_calls\":[", "llamacpp:prompt_tokens_total",
+    "spec_decode_num_accepted_tokens_per_pos_total{position=", "response.output_text.delta", "content_block_start",
+    "message_stop", "transcript.text.done", "n_restored", "n_written", "alora_invocation_tokens", "router_clone",
+    "restored_bad", "n_prompts 2", "media_marker", "chat_format\":0", "cache 1", "load 0", "load 1", "pipe w1 r1",
+    # Stage 10 step 4
+    "'input' is required", "does not support 'previous_response_id'", "'Input text' requires 'text'",
+    "'image_url' is required", "'input_file' is not supported", "'type' must be one of 'input_text'",
+    "'Output text' requires 'text'", "'Refusal' requires 'refusal'", "'type' must be one of 'output_text' or 'refusal'",
+    "Output of tool call should be 'Input text'", "item['content'] is not an array", "item['content'] is empty",
+    "item['content']['text'] is not a string", "Cannot determine type of 'item'", "'input' must be a string or array",
+    "'tools' must be an array of objects", "No input file found for transcription",
+    "Only 'json' response_format is supported", "stoul: no conversion", "stof: no conversion", "out of range",
+    "__metadata_user_id", "thinking_budget_tokens", "Perform ASR", "Transcribe audio to text", "cch=fffff",
+    "chat_parser", "\"tool_calls\":[{", "reasoning_content", "Cannot use custom grammar constraints with tools",
+    "logprobs is not supported with tools + stream", "Unable to generate parser", "reasoning_budget_end_tags",
+    "\"parse_tool_calls\":true", "grammar_lazy\":true", "chat_format\":2", "chat_format\":3", "chat_format\":4",
+    "does not match the expected", "response.function_call_arguments.delta", "tool_use",
+]
+LOG_COVERAGE = [
+    "Wrong type supplied for parameter", "prompt is already in the cache",
+    "making room for prompt cache entry", "removing obsolete cached prompt", "exceeds cache size limit",
+    "cache token limit", "found better prompt", "unable to match sampler by name",
+    "unable to match sampler by char", "Converted grammar", "JSON schema:", "chat format: ", "reasoning budget: tokens=",
+    "No parser definition detected", "Parsed message", "Grammar (tool_calls)", "Grammar (", "n_prefix_take",
+    "loading image from local file", "cache state:",
+    "unsupported Responses tool type", "anthropic string not as expected", "Forcing pure content template",
+]
+
+
+LABELLED = re.compile(r"^(\w+)\(\d+\):")
+
+
+def same_jinja(ref, port):
+    """A port line holding the Jinja engine's failure (`jinja: `) matches a
+    reference line equal up to there, the length labels aside: the engine's
+    own text is not reproduced (NOTES.md, "Stage 9 step 4")."""
+    if "jinja: " not in port:
+        return False
+    r = LABELLED.sub(r"\1:", ref)
+    p = LABELLED.sub(r"\1:", port)
+    at = p.find("jinja: ")
+    return r[:at] == p[:at]
+
+
+def align_jinja(a, b):
+    """`b` with each line `same_jinja` accepts replaced by the reference's,
+    and a multi-line engine message in `a` -- the reference logs it whole --
+    taken as one: its continuation lines run up to the port's next line."""
+    out = []
+    i = j = 0
+    while j < len(b):
+        if i < len(a) and a[i] == b[j]:
+            out.append(a[i])
+            i += 1
+            j += 1
+        elif i < len(a) and same_jinja(a[i], b[j]):
+            nxt = b[j + 1] if j + 1 < len(b) else None
+            k = i + 1
+            while k < len(a) and a[k] != nxt and not (nxt is not None and same_jinja(a[k], nxt)):
+                k += 1
+            out.extend(a[i:k])
+            i = k
+            j += 1
+        else:
+            out.append(b[j])
+            i += 1
+            j += 1
+    return out
+
+
+def mask(s):
+    s = re.sub(r'"(created|created_at|completed_at)":-?\d+', r'"\1":0', s)
+    s = re.sub(r'(resp_|rs_|msg_|chatcmpl-|fc_|call_)[0-9A-Za-z]{32}', r'\1*', s)
+    s = re.sub(r'0x[0-9a-f]+', '0x*', s)
+    # a tool call's id, gen_tool_call_id's 32 random characters
+    s = re.sub(r'"id":"[0-9A-Za-z]{32}"', '"id":"*"', s)
+    return s
+
+
+def main():
+    global MEDIA_DIR
+    out = os.environ.get("SERVER_TASK_OUT") or tempfile.mkdtemp(prefix="server-task-diff.")
+    os.makedirs(out, exist_ok=True)
+    MEDIA_DIR = os.path.join(os.path.abspath(out), "media") + "/"
+    os.makedirs(MEDIA_DIR + "sub", exist_ok=True)
+    open(MEDIA_DIR + "img1.png", "wb").write(IMG1)
+    open(MEDIA_DIR + "sub/img2.png", "wb").write(IMG2)
+
+    recs = list(records())
+    inp = os.path.join(out, "input.txt")
+    with open(inp, "w", encoding="utf-8", errors="surrogatepass") as f:
+        for op, payload in recs:
+            f.write(f"{op} {json.dumps(payload, ensure_ascii=True)}\n")
+
+    def run(cmd, what, **kw):
+        r = subprocess.run(cmd, capture_output=True, **kw)
+        if r.returncode != 0:
+            print(f"FAIL: {what} (rc {r.returncode})\n{r.stderr.decode(errors='replace')[-3000:]}", file=sys.stderr)
+            sys.exit(2)
+        return r
+
+    ref = os.path.join(out, "server_task_ref")
+    port = "zig-out/server-task-diff/server_task_port"
+    if not os.environ.get("SERVER_TASK_NOBUILD"):
+        run(["zig", "build", "reference", "tools-ref", "mtmd-ref", "--release=fast"],
+            "could not build the reference libraries (zig build reference tools-ref mtmd-ref)")
+        run(["zig", "build-exe", "-OReleaseFast", f"-femit-bin={ref}",
+             "-I", "llama.cpp/tools/server", "-I", "llama.cpp/common", "-I", "llama.cpp/include",
+             "-I", "llama.cpp/ggml/include", "-I", "llama.cpp/vendor", "-I", "llama.cpp/tools/mtmd",
+             "-cflags", "-std=c++17", "-w", "--", "harness/server_task_ref.cpp",
+             "llama.cpp/tools/server/server-common.cpp", "llama.cpp/tools/server/server-task.cpp",
+             "llama.cpp/tools/server/server-schema.cpp", "llama.cpp/tools/server/server-chat.cpp",
+             "zig-out/lib/libllama-common-ref.a", "zig-out/lib/libmtmd-ref.a", "zig-out/lib/libllama-ref.a",
+             "zig-out/lib/libggml.a", "-lc++", "-lc"] + platform_libs("exe"),
+            "could not build harness/server_task_ref.cpp")
+        run(["zig", "build", "server-task-diff-bins", "--release=fast"], "could not build harness/server_task_diff.zig")
+
+    env = dict(os.environ, LLAMA_MEDIA_MARKER=MARKER)
+    failures = 0
+    total = 0
+    ref_all = ""
+    log_all = ""
+    for pi, (text_model, mmproj, only) in enumerate(PASSES):
+        pinp = os.path.join(out, f"input{pi}.txt")
+        with open(pinp, "w", encoding="utf-8") as f:
+            for op, payload in recs:
+                if only(op, payload if isinstance(payload, dict) else {}):
+                    f.write(f"{op} {json.dumps(payload, ensure_ascii=True)}\n")
+        sides = {}
+        for name, exe in (("ref", ref), ("port", port)):
+            t = os.path.join(out, f"{name}{pi}.txt")
+            r = run([exe, pinp, t, text_model, mmproj] + VOCABS, f"the {name} failed (or leaked) on pass {pi}", env=env)
+            sides[name] = (mask(open(t, encoding="utf-8", errors="replace").read()), mask(r.stderr.decode(errors="replace")))
+            open(os.path.join(out, f"{name}{pi}.log"), "w").write(r.stderr.decode(errors="replace"))
+        ref_all += sides["ref"][0]
+        log_all += sides["ref"][1]
+        for kind, idx in (("transcript", 0), ("log", 1)):
+            a = sides["ref"][idx].splitlines()
+            b = sides["port"][idx].splitlines()
+            total += len(a)
+            # a Jinja engine's own message is not reproduced (NOTES.md, "Stage
+            # 9 step 4"): where the port's reads `jinja: `, the class alone
+            b = align_jinja(a, b)
+            if a != b:
+                failures += 1
+                import difflib
+                print(f"FAIL: server-task-diff: pass {pi} {kind}s differ; in {out}")
+                for i, d in enumerate(difflib.unified_diff(a, b, "ref", "port", lineterm="", n=2)):
+                    print("    " + d[:300])
+                    if i > 40:
+                        break
+    missing = [p for p in COVERAGE if p not in ref_all] + [p for p in LOG_COVERAGE if p not in log_all]
+    if missing:
+        print("FAIL: server-task-diff: the reference never reached:")
+        for m in missing:
+            print("    " + m)
+        failures += 1
+    if failures:
+        sys.exit(1)
+    errors = sum(1 for l in ref_all.splitlines() if l.startswith(("runtime_error", "invalid_argument", "json_error")))
+    print(f"ok: server-task-diff: {len(recs)} records, {total} transcript and log lines identical "
+          f"({errors} exceptions, {len(COVERAGE) + len(LOG_COVERAGE)} coverage phrases)")
+
+
+if __name__ == "__main__":
+    main()

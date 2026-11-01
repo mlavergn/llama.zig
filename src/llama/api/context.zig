@@ -392,6 +392,13 @@ pub fn llama_get_memory_breakdown(ctx: ?*const c.struct_llama_context, gpa: std.
     return gpa.dupe(context.MemoryBreakdownEntry, mb);
 }
 
+/// Ports `llama_get_ctx_other` (llama-context.cpp:4333 @b29c606e2), from
+/// `llama-ext.h`: the context whose memory this one shares, if any.
+/// `common/speculative.cpp`'s MTP draft compares it with the target.
+pub fn llama_get_ctx_other(ctx: ?*c.struct_llama_context) callconv(.c) ?*c.struct_llama_context {
+    return @ptrCast(ctxOf(ctx).getCparams().ctx_other);
+}
+
 // -----------------------------------------------------------------------------
 // Unit Tests
 

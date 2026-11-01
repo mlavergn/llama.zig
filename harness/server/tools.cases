@@ -1,0 +1,237 @@
+# The server's built-in tools on POST /tools (Stage 10 step 6):
+# scripts/server-diff tools. Each side works in its own copy of
+# tools.setup's tree ($WORK, !fresh); $DATA/bin holds the stand-in docker,
+# podman, ssh and timeout the isolate cases run through.
+!env PATH=$DATA/bin:$PATH
+!fresh tree
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools all
+GET /tools
+
+# the request itself
+POST /tools not json
+POST /tools {"params": {}}
+POST /tools {"tool": 5}
+POST /tools {"tool": "no_such_tool"}
+POST /tools {"tool": "read_file", "params": {"path": "x"}, "stream": true}
+POST /tools {"tool": "get_info", "stream": "yes"}
+POST /tools ["tool"]
+POST /tools {"tool": "read_file"}
+POST /tools {"tool": "read_file", "params": {"path": 7}}
+
+!header x-tool-cwd: $WORK
+POST /tools {"tool": "get_info", "params": 5}
+POST /tools {"tool": "get_info", "params": null}
+# read_file
+POST /tools {"tool": "read_file", "params": {"path": "a.txt"}}
+POST /tools {"tool": "read_file", "params": {"path": "a.txt", "start_line": 2}}
+POST /tools {"tool": "read_file", "params": {"path": "a.txt", "start_line": 2, "end_line": 2, "append_loc": true}}
+POST /tools {"tool": "read_file", "params": {"path": "a.txt", "start_line": "two"}}
+POST /tools {"tool": "read_file", "params": {"path": "b.txt", "append_loc": true}}
+POST /tools {"tool": "read_file", "params": {"path": "crlf.txt"}}
+POST /tools {"tool": "read_file", "params": {"path": "empty.txt"}}
+POST /tools {"tool": "read_file", "params": {"path": "unicode.txt", "append_loc": true}}
+POST /tools {"tool": "read_file", "params": {"path": "missing.txt"}}
+POST /tools {"tool": "read_file", "params": {"path": "sub"}}
+POST /tools {"tool": "read_file", "params": {"path": "big.txt"}}
+POST /tools {"tool": "read_file", "params": {"path": "big.txt", "start_line": 1990, "end_line": 1995}}
+POST /tools {"tool": "read_file", "params": {"path": "big.txt", "start_line": 1, "end_line": 100000}}
+POST /tools {"tool": "read_file", "params": {"path": "./sub/../a.txt"}}
+POST /tools {"tool": "read_file", "params": {"path": "link_to_a.txt"}}
+POST /tools {"tool": "read_file", "params": {"path": "broken_link"}}
+POST /tools {"tool": "read_file", "params": {"path": "~/.llamazig-no-such-file"}}
+POST /tools {"tool": "read_file", "params": {"path": "$WORK/sub/notes.md"}}
+POST /tools {"tool": "read_file", "params": {"path": "a.txt", "cwd": "/nonexistent", "runtime": "fake:x"}}
+!header x-resp-type: base64
+POST /tools {"tool": "read_file", "params": {"path": "bin.dat"}}
+POST /tools {"tool": "read_file", "params": {"path": "missing.txt"}}
+!noheaders
+!header x-tool-cwd: $WORK
+!header x-resp-type: text
+POST /tools {"tool": "read_file", "params": {"path": "a.txt", "resp_type": "base64"}}
+!noheaders
+!header x-tool-cwd: $WORK
+
+# file_glob_search
+POST /tools {"tool": "file_glob_search", "params": {"path": "."}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "type": "dir"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "type": "all", "include": "*b*"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "include": "*.txt", "exclude": "big*"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "include": "sub/*.md"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "include": "sub/*.txt"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "type": "all", "include": "*/deep*"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "include": "**/deep/**"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "include": "/sub/*"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "include": "[a-c].txt"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "include": "[!a-c]*.txt"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "include": "?.txt"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "max_depth": 1}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "max_depth": 2, "type": "all"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "max_depth": -3, "limit": 2}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "limit": 0}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "limit": 1}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "limit": 100000}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "many", "limit": 100000}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "many", "limit": 100}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "many", "limit": 101}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "type": "bogus"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "nowhere"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "a.txt"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "repo"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "repo", "type": "all"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "repo/src/.."}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "sub/deep/deeper/../.."}}
+POST /tools {"tool": "file_glob_search", "params": {}}
+
+# grep_search
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "needle"}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "needle", "exclude": "big.txt"}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "todo", "ignore_case": true, "return_line_numbers": true}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "[Tt]o[Dd]o:", "include": "*.md", "context_lines": 1}}
+POST /tools {"tool": "grep_search", "params": {"path": "sub/notes.md", "pattern": "^todo", "ignore_case": true, "context_lines": 5}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "main()", "literal": true}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "main()"}}
+POST /tools {"tool": "grep_search", "params": {"path": "dots.txt", "pattern": "a.b", "literal": true}}
+POST /tools {"tool": "grep_search", "params": {"path": "dots.txt", "pattern": "(a|b)*", "literal": true}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "(unclosed"}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "a{2,1}"}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "[z-a]"}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "x\\"}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "*x"}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "[[:nope:]]"}}
+POST /tools {"tool": "grep_search", "params": {"path": "missing", "pattern": "x"}}
+POST /tools {"tool": "grep_search", "params": {"path": "repo", "pattern": "."}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "café|“quoted"}}
+POST /tools {"tool": "grep_search", "params": {"path": "crlf.txt", "pattern": "two$"}}
+POST /tools {"tool": "grep_search", "params": {"path": "crlf.txt", "pattern": "two\r$"}}
+POST /tools {"tool": "grep_search", "params": {"path": "big.txt", "pattern": "line 0199[0-9]", "context_lines": 2}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "x"}}
+POST /tools {"tool": "grep_search", "params": {"path": ".", "pattern": "dup", "include": "dup.txt", "context_lines": -2}}
+
+# exec_shell_command
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo out; echo err >&2; exit 3"}}
+POST /tools {"tool": "exec_shell_command", "params": {"command": "pwd; ls"}}
+POST /tools {"tool": "exec_shell_command", "params": {"command": "printf 'abcdefghij%.0s' 1 2 3 4 5", "max_output_size": 17}}
+POST /tools {"tool": "exec_shell_command", "params": {"command": "printf 'x%.0s' $(seq 1 20000)", "max_output_size": -1}}
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo before; sleep 3; echo after", "timeout": 1}}
+POST /tools {"tool": "exec_shell_command", "params": {"command": "/no/such/program"}}
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo hi > made.txt; cat made.txt"}}
+POST /tools {"tool": "read_file", "params": {"path": "made.txt"}}
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo one; sleep 0.3; echo two; sleep 0.3; exit 4"}, "stream": true}
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo s; sleep 3; echo late", "timeout": 1}, "stream": true}
+POST /tools {"tool": "exec_shell_command", "params": {"command": "printf 'abcdefghij%.0s' 1 2 3", "max_output_size": 12}, "stream": true}
+POST /tools {"tool": "exec_shell_command", "params": {}, "stream": true}
+POST /tools {"tool": "exec_shell_command", "params": {"command": 1}}
+
+# write_file and edit_file
+POST /tools {"tool": "write_file", "params": {"path": "new/dir/f.txt", "content": "first\nsecond\n"}}
+POST /tools {"tool": "read_file", "params": {"path": "new/dir/f.txt"}}
+POST /tools {"tool": "write_file", "params": {"path": "a.txt/x", "content": "y"}}
+POST /tools {"tool": "write_file", "params": {"path": "sub", "content": "y"}}
+POST /tools {"tool": "write_file", "params": {"path": "w.txt"}}
+POST /tools {"tool": "edit_file", "params": {"path": "new/dir/f.txt", "edits": [{"old_text": "first", "new_text": "1st"}, {"old_text": "second\n", "new_text": "2nd\n3rd\n"}]}}
+POST /tools {"tool": "read_file", "params": {"path": "new/dir/f.txt"}}
+POST /tools {"tool": "write_file", "params": {"path": "adj.txt", "content": "abcdef\n"}}
+POST /tools {"tool": "edit_file", "params": {"path": "adj.txt", "edits": [{"old_text": "def", "new_text": "2"}, {"old_text": "abc", "new_text": "1"}]}}
+POST /tools {"tool": "read_file", "params": {"path": "adj.txt"}}
+POST /tools {"tool": "edit_file", "params": {"path": "dup.txt", "edits": [{"old_text": "dup", "new_text": "x"}]}}
+POST /tools {"tool": "edit_file", "params": {"path": "a.txt", "edits": [{"old_text": "alpha\nbeta", "new_text": "A"}, {"old_text": "beta", "new_text": "B"}]}}
+POST /tools {"tool": "edit_file", "params": {"path": "a.txt", "edits": [{"old_text": "zeta", "new_text": "Z"}]}}
+POST /tools {"tool": "edit_file", "params": {"path": "a.txt", "edits": [{"old_text": "", "new_text": "Z"}]}}
+POST /tools {"tool": "edit_file", "params": {"path": "a.txt", "edits": []}}
+POST /tools {"tool": "edit_file", "params": {"path": "a.txt", "edits": {"old_text": "a"}}}
+POST /tools {"tool": "edit_file", "params": {"path": "a.txt", "edits": [{"old_text": "alpha"}]}}
+POST /tools {"tool": "edit_file", "params": {"path": "a.txt", "edits": ["alpha"]}}
+POST /tools {"tool": "edit_file", "params": {"path": "a.txt", "edits": [{"old_text": "beta", "new_text": "beta"}]}}
+POST /tools {"tool": "edit_file", "params": {"path": "missing.txt", "edits": [{"old_text": "a", "new_text": "b"}]}}
+POST /tools {"tool": "edit_file", "params": {"path": "unicode.txt", "edits": [{"old_text": "\"quoted\" - dash", "new_text": "QUOTED"}, {"old_text": "plain line\nlast", "new_text": "PLAIN\nLAST"}]}}
+POST /tools {"tool": "read_file", "params": {"path": "unicode.txt"}}
+POST /tools {"tool": "edit_file", "params": {"path": "crlf.txt", "edits": [{"old_text": "one\ntwo", "new_text": "1\n2"}]}}
+POST /tools {"tool": "read_file", "params": {"path": "crlf.txt", "append_loc": true}}
+POST /tools {"tool": "edit_file", "params": {"path": "a.txt", "edits": [{"old_text": "gamma\n", "new_text": "G\n"}, {"old_text": "alpha", "new_text": "A"}]}}
+POST /tools {"tool": "read_file", "params": {"path": "a.txt"}}
+
+# header names are matched without case
+!noheaders
+!header X-Tool-Cwd: $WORK/sub
+!header X-RESP-TYPE: base64
+POST /tools {"tool": "read_file", "params": {"path": "notes.md"}}
+!noheaders
+!header x-tool-cwd: $WORK
+# get_info, with and without a cwd
+POST /tools {"tool": "get_info"}
+!noheaders
+POST /tools {"tool": "get_info", "params": {"cwd": "/ignored"}}
+POST /tools {"tool": "read_file", "params": {"path": "work/a.txt"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "work/sub"}}
+
+# isolates: unknown and invalid runtimes, then the stand-in container and ssh host
+!header x-tool-runtime: fake:does-not-exist
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo hi"}}
+!noheaders
+!header x-tool-runtime: ssh:-oProxyCommand=touch
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo hi"}}
+!noheaders
+!header x-tool-runtime: ssh:
+POST /tools {"tool": "get_info"}
+!noheaders
+!header x-tool-runtime: docker-container:--privileged
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo hi"}}
+!noheaders
+!header x-tool-runtime: podman:busybox
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo hi"}}
+!noheaders
+!header x-tool-runtime: docker-container:abc123
+!header x-tool-cwd: $WORK
+POST /tools {"tool": "exec_shell_command", "params": {"command": "pwd; echo it's here"}}
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo one; sleep 0.3; echo two"}, "stream": true}
+POST /tools {"tool": "read_file", "params": {"path": "a.txt", "append_loc": true}}
+POST /tools {"tool": "read_file", "params": {"path": "missing.txt"}}
+POST /tools {"tool": "read_file", "params": {"path": "big.txt"}}
+POST /tools {"tool": "write_file", "params": {"path": "iso/new.txt", "content": "via the isolate\n"}}
+POST /tools {"tool": "read_file", "params": {"path": "iso/new.txt"}}
+POST /tools {"tool": "edit_file", "params": {"path": "iso/new.txt", "edits": [{"old_text": "isolate", "new_text": "container"}]}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "sub"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "sub", "type": "all", "max_depth": 1}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "type": "dir"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "repo"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": "nowhere"}}
+POST /tools {"tool": "grep_search", "params": {"path": "sub", "pattern": "todo", "ignore_case": true}}
+POST /tools {"tool": "grep_search", "params": {"path": "a.txt", "pattern": "e"}}
+POST /tools {"tool": "get_info"}
+!noheaders
+!header x-tool-runtime: docker-container:abc123
+POST /tools {"tool": "get_info"}
+POST /tools {"tool": "read_file", "params": {"path": "$WORK/b.txt"}}
+!noheaders
+!header x-tool-runtime: ssh:user@fakehost
+!header x-tool-cwd: $WORK
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo 'single quotes' \"and doubles\"; pwd"}}
+POST /tools {"tool": "write_file", "params": {"path": "ssh dir/it's.txt", "content": "quoted 'path'\n"}}
+POST /tools {"tool": "read_file", "params": {"path": "ssh dir/it's.txt"}}
+POST /tools {"tool": "file_glob_search", "params": {"path": ".", "include": "*.txt", "max_depth": 1}}
+!noheaders
+
+# a static --tools-runtime, and one this server spawns and owns
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools read_file,exec_shell_command,get_info --tools-runtime ssh:fakehost
+GET /tools
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo through ssh"}}
+POST /tools {"tool": "get_info"}
+POST /tools {"tool": "write_file", "params": {"path": "x", "content": "y"}}
+!header x-tool-runtime: docker-container:override
+POST /tools {"tool": "get_info"}
+!noheaders
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools exec_shell_command --tools-runtime docker:busybox
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo in the container"}}
+!header x-tool-cwd: $WORK
+POST /tools {"tool": "exec_shell_command", "params": {"command": "cat a.txt"}}
+!noheaders
+
+# startup refusals
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools read_file,bogus
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools all --tools-runtime fake:thing
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools all --tools-runtime ssh:-bad
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools all --tools-runtime docker:
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools all --tools-runtime docker-container:-x
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools-runtime ssh:fakehost
+GET /tools
+POST /tools {"tool": "get_info"}

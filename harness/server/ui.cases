@@ -1,0 +1,69 @@
+# The web UI's asset routes (server-http.cpp:340): scripts/server-diff ui,
+# with SERVER_UI=<dist> -- both servers embed that bundle (build/ui.zig).
+# -lv 5: the route setup's `serve nocache for` lines are debug-level
+!server -m $QWEN3 -c 1024 -np 1 --no-jinja -lv 5
+!fulllog
+# a gzip build refuses a client that does not accept gzip
+GET /
+GET /sw.js
+GET /_app/version.json
+!header Accept-Encoding: gzip, deflate
+GET /
+GET /index.html
+GET /index.html?x=1
+GET /nosuch.js
+# an asset's route is a std::regex of its name (cpp-httplib's RegexMatcher):
+# its `.` matches any character, and the whole path must match
+GET /swXjs
+GET /indexXhtml
+GET /build_json
+GET /sw.js/
+GET /_app/versionXjson
+!uiassets
+# a cached asset's ETag: 304 plain and weak, 200 for another tag; the
+# uncached PWA files carry no ETag and ignore it
+!etag /
+!header If-None-Match: $ETAG
+GET /
+GET /index.html
+GET /sw.js
+!header If-None-Match: W/$ETAG
+GET /
+!header If-None-Match: "0000"
+GET /
+!noheaders
+# Accept-Encoding: gzip somewhere in a longer value
+!header Accept-Encoding: br;q=1.0, gzip;q=0.5
+GET /manifest.webmanifest
+!noheaders
+
+# with an API key: the frontend paths are public, the API is not
+!server -m $QWEN3 -c 1024 -np 1 --no-jinja --api-key k1 -lv 4
+!header Accept-Encoding: gzip
+GET /
+GET /index.html
+GET /sw.js
+GET /build.json
+GET /props
+GET /health
+!noheaders
+
+# an API prefix: the assets move under it. (No --api-key here: the public
+# endpoints are unprefixed, so /api/health needs the key and the harness's
+# readiness probe would never see a 200.)
+!server -m $QWEN3 -c 1024 -np 1 --no-jinja --api-prefix /api -lv 4
+!header Accept-Encoding: gzip
+GET /api/
+GET /api/index.html
+GET /api/sw.js
+GET /
+GET /sw.js
+!noheaders
+
+# --no-ui: no asset routes
+!server -m $QWEN3 -c 1024 -np 1 --no-jinja --no-ui -lv 4
+!fulllog
+!header Accept-Encoding: gzip
+GET /
+GET /sw.js
+!noheaders

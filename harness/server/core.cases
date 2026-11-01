@@ -1,0 +1,113 @@
+# The server's core without Jinja (Stage 10 step 3): scripts/server-diff core.
+# Qwen3-0.6B (`make qwen3`), one slot, greedy unless a case says otherwise.
+!server -m $QWEN3 -c 4096 -np 1 --no-jinja -lv 4
+!fulllog
+
+GET /health
+GET /v1/health
+GET /props
+GET /slots
+GET /metrics
+GET /models
+GET /v1/models
+GET /nonexistent
+POST /tokenize {"content": "Hello, world! The capital of France is"}
+POST /tokenize {"content": "Hello <|im_start|>", "add_special": true, "parse_special": true, "with_pieces": true}
+POST /detokenize {"tokens": [9707, 11, 1879, 0]}
+POST /tokenize {not json
+POST /completion {"prompt": "The capital of France is", "n_predict": 16, "temperature": 0}
+POST /completion {"prompt": "The capital of France is", "n_predict": 16, "temperature": 0, "cache_prompt": true}
+POST /completion {"prompt": "Once upon a time", "n_predict": 24, "temperature": 0.8, "seed": 42}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 12, "temperature": 0, "stop": [", 7"]}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 8, "temperature": 0, "n_probs": 3}
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0, "stream": true}
+POST /completions {"prompt": [9707, 11, 1879], "n_predict": 4, "temperature": 0}
+POST /v1/completions {"model": "x", "prompt": "The capital of France is", "max_tokens": 8, "temperature": 0}
+POST /v1/completions {"model": "x", "prompt": "The capital of France is", "max_tokens": 8, "temperature": 0, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 12, "temperature": 0}
+POST /apply-template {"messages": [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "Hello"}]}
+POST /completion {"prompt": "x", "n_predict": "many"}
+POST /completion {}
+GET /slots
+GET /metrics
+
+# --- more of the core: every route a single slot answers, and its errors
+GET /slots?fail_on_no_slot=1
+POST /props {}
+GET /lora-adapters
+POST /lora-adapters []
+POST /lora-adapters {"id": 0}
+POST /slots/0?action=save {"filename": "a.bin"}
+POST /embedding {"content": "hello"}
+POST /v1/embeddings {"input": "hello"}
+POST /rerank {"query": "a", "documents": ["b"]}
+GET /cors-proxy
+POST /tools {}
+GET /v1/stream
+GET /v1/stream?conv_id=nothing
+POST /v1/streams/lookup {"conversation_ids": ["nothing", 3, ""]}
+POST /v1/streams/lookup not json
+DELETE /v1/stream?conv_id=nothing
+DELETE /v1/stream
+POST /tokenize {"content": "Hello", "with_pieces": true, "add_special": true}
+POST /tokenize {"content": [9707, "world", 11]}
+POST /tokenize {}
+POST /tokenize {"content": "Hello <|im_start|>"}
+POST /tokenize {"content": "Hello <|im_start|>", "parse_special": false}
+POST /tokenize {"content": "éè 你好", "with_pieces": true}
+POST /detokenize {"tokens": [9707, 11]}
+POST /detokenize {"tokens": "x"}
+POST /detokenize {"tokens": [1.5, 2]}
+POST /detokenize {}
+POST /completion {"prompt": ["The capital of France is", "Count: 1, 2,"], "n_predict": 6, "temperature": 0}
+POST /completion {"prompt": [[9707, 11], "Hello"], "n_predict": 4, "temperature": 0}
+POST /completion {"prompt": "", "n_predict": 4, "temperature": 0}
+POST /completion {"prompt": [], "n_predict": 4}
+POST /completion {"prompt": 42}
+POST /completion {"prompt": "Hi", "n_predict": 4, "temperature": 0, "return_tokens": true, "response_fields": ["content", "tokens", "generation_settings/n_predict"]}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 8, "temperature": 0, "n_probs": 2, "post_sampling_probs": true}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 4, "temperature": 0, "n_probs": 2, "stream": true}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 12, "temperature": 0, "stop": [" 6"], "stream": true}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 12, "temperature": 0, "stop": [" 6"], "n_probs": 1}
+POST /completion {"prompt": "def f():\n", "n_predict": 24, "temperature": 0, "n_indent": 4}
+POST /completion {"prompt": "def f(a, b):\n    x = a + b\n", "n_predict": 24, "temperature": 0, "n_indent": 4}
+POST /completion {"prompt": "def f(a, b):\n    x = a + b\n", "n_predict": 24, "temperature": 0, "n_indent": 5}
+POST /completion {"prompt": "Once upon a time", "n_predict": 8, "temperature": 0.9, "seed": 7, "n_cmpl": 3}
+POST /completion {"prompt": "Once upon a time", "n_predict": 8, "temperature": 0, "n_cmpl": 2}
+POST /completion {"prompt": "The sky is", "n_predict": 6, "temperature": 0, "stream": true, "return_progress": true}
+POST /completion {"prompt": "The sky is", "n_predict": 6, "temperature": 0, "stream": true, "timings_per_token": true}
+POST /completion {"prompt": "The sky is", "n_predict": 6, "temperature": 0, "id_slot": 5}
+POST /completion {"prompt": "The sky is", "n_predict": 6, "temperature": 0, "logit_bias": [[13, false]]}
+POST /completion {"prompt": "The sky is", "n_predict": 6, "temperature": 0, "grammar": "root ::= \"blue\" | \"red\""}
+POST /completion {"prompt": "The sky is", "n_predict": 6, "temperature": 0, "grammar": "root ::= oops"}
+POST /completion {"prompt": "JSON:", "n_predict": 16, "temperature": 0, "json_schema": {"type": "object", "properties": {"a": {"type": "integer"}}, "required": ["a"]}}
+POST /completion {"prompt": "The sky is", "n_predict": 6, "temperature": 0, "ignore_eos": true}
+POST /completion {"prompt": "The sky is", "n_predict": 3, "temperature": 0, "samplers": ["top_k", "temperature"], "top_k": 1}
+POST /completion {"prompt": "The sky is", "n_predict": 3, "temperature": 0, "repeat_penalty": -1}
+POST /completions {"prompt": "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n", "n_predict": 6, "temperature": 0}
+POST /v1/completions {"model": "x", "prompt": ["One", "Two"], "max_tokens": 4, "temperature": 0}
+POST /v1/completions {"model": "x", "prompt": "One", "max_tokens": 4, "temperature": 0, "logprobs": 2}
+POST /v1/completions {"model": "x", "prompt": "One", "max_tokens": 4, "temperature": 0, "stream": true, "stream_options": {"include_usage": true}}
+POST /v1/completions {"prompt": "One", "max_tokens": 4, "temperature": 0, "n": 2}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 8, "temperature": 0, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 8, "temperature": 0, "n": 2}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 8, "temperature": 0, "logprobs": true, "top_logprobs": 2}
+POST /chat/completions {"messages": [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "2+2?"}], "max_tokens": 8, "temperature": 0}
+POST /v1/chat/completions {"messages": "nope"}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "x"}], "tools": [{"type": "function", "function": {"name": "f"}}]}
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": "Say hi."}]}
+POST /chat/completions/input_tokens {"messages": [{"role": "user", "content": "Say hi."}]}
+POST /v1/chat/completions/control {"id": "chatcmpl-nothing", "action": "reasoning_end"}
+POST /v1/chat/completions/control {"id": "", "action": "reasoning_end"}
+POST /v1/chat/completions/control {"id": "x", "action": "other"}
+POST /infill {"input_prefix": "def add(a, b):\n    ", "input_suffix": "\n    return c\n", "n_predict": 8, "temperature": 0}
+POST /infill {"input_prefix": "x", "input_suffix": "y", "input_extra": [{"filename": "a.py", "text": "A = 1\n"}], "n_predict": 4, "temperature": 0}
+POST /infill {"input_prefix": "x", "input_suffix": "y", "input_extra": "no"}
+POST /infill {"input_prefix": "x", "input_suffix": "y", "input_extra": [{"filename": 3, "text": "t"}]}
+POST /infill {"input_prefix": "x", "input_suffix": "y", "input_extra": [{"text": 3}]}
+POST /infill {"input_suffix": "y"}
+POST /infill {"input_prefix": "x", "input_suffix": "y", "prompt": 3, "n_predict": 2, "temperature": 0}
+POST /apply-template {"messages": [{"role": "user", "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}]}
+POST /apply-template {"messages": [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}]}
+GET /slots
+GET /props

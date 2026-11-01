@@ -1,0 +1,34 @@
+# LoRA adapters (Stage 10 step 3c): scripts/server-diff lora. An adapter over
+# Qwen3-0.6B's first attention weight, loaded twice (subset.gguf from
+# harness/server/lora.setup; the full set's token-embedding adapter does not
+# fit the model's tied output); /lora-adapters lists and rescales them, and a
+# request can carry its own scales.
+!server -m $QWEN3 -c 2048 -np 2 --no-jinja --lora $DATA/q3/subset.gguf --lora-scaled $DATA/q3/subset.gguf:0.5 -lv 4
+!fulllog
+
+GET /lora-adapters
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0}
+POST /lora-adapters [{"id": 0, "scale": 0.0}, {"id": 1, "scale": 0.0}]
+GET /lora-adapters
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0}
+POST /lora-adapters [{"id": 1, "scale": 2.0}]
+GET /lora-adapters
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0}
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0, "lora": [{"id": 0, "scale": 1.0}]}
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0, "lora": [{"id": 0, "scale": 1.0}, {"id": 1, "scale": 0.25}]}
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0, "lora": [{"id": 7, "scale": 1.0}]}
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0, "lora": "bad"}
+POST /lora-adapters {"id": 0}
+POST /lora-adapters [{"scale": 3}]
+POST /lora-adapters not json
+GET /slots
+GET /props
+
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --lora $DATA/q3/subset.gguf --lora-init-without-apply -lv 4
+!fulllog
+GET /lora-adapters
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0}
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0, "lora": [{"id": 0, "scale": 1.0}]}
+
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --lora $DATA/q3/wrong-arch.gguf -lv 4
+!fulllog

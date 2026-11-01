@@ -118,6 +118,13 @@ pub fn pause() void {
     paused = true;
 }
 
+/// Ports `common_log_resume` (log.cpp:474 @b29c606e2): messages are written
+/// again. (`resume` is a Zig keyword.)
+pub fn unpause() void {
+    main();
+    paused = false;
+}
+
 extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
 extern fn fclose(f: *anyopaque) c_int;
 
@@ -273,29 +280,40 @@ fn print(entry: Entry, to: ?*anyopaque) void {
         return;
     }
 
+    // One message is one `fputs`: upstream's single worker thread writes a
+    // whole entry before the next, and here every thread writes its own, so
+    // a prefix written by one call could be split from its text by another
+    // thread's line (a server's HTTP thread against its decode loop). Each
+    // stdio call holds the stream's lock; one call per line keeps lines whole.
+    var head: [96]u8 = undefined;
+    var n_head: usize = 0;
     if (level != .none and level != .cont and prefix) {
         if (timestamp != 0) {
-            fprintfTo(fcur, "%s%d.%02d.%03d.%03d%s ", .{
-                col(col_blue),
-                @as(c_int, @intCast(@divTrunc(timestamp, 1000000 * 60))),
-                @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000000), 60))),
-                @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000), 1000))),
-                @as(c_int, @intCast(@mod(timestamp, 1000))),
-                col(col_default),
-            });
+            n_head = @min(head.len - 1, @as(usize, @intCast(@max(0, snprintf(&head, head.len, "%s%d.%02d.%03d.%03d%s ", col(col_blue), @as(c_int, @intCast(@divTrunc(timestamp, 1000000 * 60))), @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000000), 60))), @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000), 1000))), @as(c_int, @intCast(@mod(timestamp, 1000))), col(col_default))))));
         }
-        switch (level) {
-            .info => fprintfTo(fcur, "%sI %s", .{ col(col_green), col(col_default) }),
-            .warn => fprintfTo(fcur, "%sW %s", .{ col(col_magenta), @as([*:0]const u8, "") }),
-            .err => fprintfTo(fcur, "%sE %s", .{ col(col_red), @as([*:0]const u8, "") }),
-            .debug => fprintfTo(fcur, "%sD %s", .{ col(col_yellow), @as([*:0]const u8, "") }),
-            else => {},
-        }
+        const rest = head[n_head..];
+        const n: c_int = switch (level) {
+            .info => snprintf(rest.ptr, rest.len, "%sI %s", col(col_green), col(col_default)),
+            .warn => snprintf(rest.ptr, rest.len, "%sW %s", col(col_magenta), @as([*:0]const u8, "")),
+            .err => snprintf(rest.ptr, rest.len, "%sE %s", col(col_red), @as([*:0]const u8, "")),
+            .debug => snprintf(rest.ptr, rest.len, "%sD %s", col(col_yellow), @as([*:0]const u8, "")),
+            else => 0,
+        };
+        n_head = @min(head.len - 1, n_head + @as(usize, @intCast(@max(0, n))));
     }
+    const tail: []const u8 = if (level == .warn or level == .err or level == .debug) std.mem.span(col(col_default)) else "";
+    const body = std.mem.span(msg);
 
-    _ = fputs(msg, fcur);
-
-    if (level == .warn or level == .err or level == .debug) _ = fputs(col(col_default), fcur);
+    const a = std.heap.c_allocator;
+    if (std.mem.concatWithSentinel(a, u8, &.{ head[0..n_head], body, tail }, 0)) |line| {
+        defer a.free(line);
+        _ = fputs(line.ptr, fcur);
+    } else |_| {
+        head[n_head] = 0;
+        _ = fputs(@ptrCast(&head), fcur);
+        _ = fputs(msg, fcur);
+        if (tail.len != 0) _ = fputs(col(col_default), fcur);
+    }
 
     _ = fflush(fcur);
 }

@@ -14,6 +14,7 @@ const api = @import("api/module.zig");
 /// C++ linkage: they are no part of `llama.h`'s C contract, and the
 /// reference exports none of them by these names.
 const ext_only = [_][]const u8{
+    "llama_get_ctx_other",
     "llama_get_embeddings_layer_inp",
     "llama_get_embeddings_nextn",
     "llama_get_embeddings_nextn_ith",

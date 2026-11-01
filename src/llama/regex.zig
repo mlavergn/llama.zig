@@ -94,6 +94,14 @@ fn ctypeOf(ch: u32) Mask {
     return m;
 }
 
+/// Ports `regex_traits<CharT>::translate_nocase`: `ctype::tolower` in the
+/// `"C"` locale, which maps `A`-`Z` alone. Measured for `char` only: a
+/// byte above 0x7f is a negative `char`, which `isascii` rejects, so it
+/// passes through.
+fn translateNocase(ch: u32) u32 {
+    return if (ch >= 'A' and ch <= 'Z') ch + ('a' - 'A') else ch;
+}
+
 /// Ports `regex_traits<CharT>::isctype`.
 fn isctype(ch: u32, m: Mask) bool {
     if ((ctypeOf(ch) & m) != 0) return true;
@@ -138,9 +146,10 @@ fn narrowName(comptime CharT: type, name: []const CharT, buf: []u8) ?[]const u8 
     return buf[0..name.len];
 }
 
-/// `regex_traits<CharT>::lookup_classname` with `icase` false, measured:
-/// the name is matched case-insensitively against this table.
-fn lookupClassname(comptime CharT: type, name_in: []const CharT) Mask {
+/// `regex_traits<CharT>::lookup_classname`, measured with `icase` false:
+/// the name is matched case-insensitively against this table. With
+/// `icase`, `__get_classname` widens `lower` and `upper` to `alpha`.
+fn lookupClassname(comptime CharT: type, name_in: []const CharT, icase: bool) Mask {
     const table = [_]struct { []const u8, Mask }{
         .{ "alnum", m_alnum }, .{ "alpha", m_alpha },            .{ "blank", m_blank },
         .{ "cntrl", m_cntrl }, .{ "d", m_digit },                .{ "digit", m_digit },
@@ -154,7 +163,11 @@ fn lookupClassname(comptime CharT: type, name_in: []const CharT) Mask {
     if (name.len > buf.len) return 0;
     const lower = std.ascii.lowerString(&buf, name);
     for (table) |e| {
-        if (std.mem.eql(u8, e[0], lower)) return e[1];
+        if (std.mem.eql(u8, e[0], lower)) {
+            var r = e[1];
+            if (icase and (r & m_regex_word) == 0 and (r & (m_lower | m_upper)) != 0) r |= m_alpha;
+            return r;
+        }
     }
     return 0;
 }
@@ -311,6 +324,8 @@ const Node = struct {
     ch: u32 = 0,
     mexp: u32 = 0,
     invert: bool = false,
+    /// `__match_char_icase` / `__back_ref_icase` in place of the plain node.
+    icase: bool = false,
 
     loop_id: u32 = 0,
     min: usize = 0,
@@ -323,7 +338,8 @@ const Node = struct {
     aux: u32 = 0,
 };
 
-/// Ports `__bracket_expression` (non-`icase`, non-`collate`).
+/// Ports `__bracket_expression` (non-`collate`). With `icase`, every
+/// character it stores and the one it tests go through `translate_nocase`.
 const Bracket = struct {
     chars: std.ArrayList(u32) = .empty,
     neg_chars: std.ArrayList(u32) = .empty,
@@ -333,6 +349,7 @@ const Bracket = struct {
     mask: Mask = 0,
     neg_mask: Mask = 0,
     negate: bool,
+    icase: bool = false,
 
     fn deinit(self: *Bracket) void {
         self.chars.deinit(allocator);
@@ -343,7 +360,7 @@ const Bracket = struct {
     }
 
     fn clone(self: *const Bracket) Bracket {
-        var b: Bracket = .{ .mask = self.mask, .neg_mask = self.neg_mask, .negate = self.negate };
+        var b: Bracket = .{ .mask = self.mask, .neg_mask = self.neg_mask, .negate = self.negate, .icase = self.icase };
         b.chars.appendSlice(allocator, self.chars.items) catch oom();
         b.neg_chars.appendSlice(allocator, self.neg_chars.items) catch oom();
         b.ranges.appendSlice(allocator, self.ranges.items) catch oom();
@@ -353,22 +370,39 @@ const Bracket = struct {
     }
 
     /// Ports `__bracket_expression::__add_range`: both ends one character,
-    /// in unsigned order.
+    /// in unsigned order -- checked before `icase` translates them.
     fn addRange(self: *Bracket, b: []const u32, e: []const u32) Error!void {
         if (b.len != 1 or e.len != 1 or e[0] < b[0]) return error.Range;
+        if (self.icase) {
+            self.ranges.append(allocator, .{ translateNocase(b[0]), translateNocase(e[0]) }) catch oom();
+            return;
+        }
         self.ranges.append(allocator, .{ b[0], e[0] }) catch oom();
+    }
+
+    /// Ports `__bracket_expression::__add_char`.
+    fn addChar(self: *Bracket, ch: u32) void {
+        self.chars.append(allocator, if (self.icase) translateNocase(ch) else ch) catch oom();
+    }
+
+    /// Ports `__bracket_expression::__add_neg_char`.
+    fn addNegChar(self: *Bracket, ch: u32) void {
+        self.neg_chars.append(allocator, if (self.icase) translateNocase(ch) else ch) catch oom();
     }
 
     fn addStart(self: *Bracket, r: []const u32) void {
         if (r.len == 1) {
-            self.chars.append(allocator, r[0]) catch oom();
+            self.addChar(r[0]);
+        } else if (self.icase) {
+            self.digraphs.append(allocator, .{ translateNocase(r[0]), translateNocase(r[1]) }) catch oom();
         } else {
             self.digraphs.append(allocator, .{ r[0], r[1] }) catch oom();
         }
     }
 
     /// Ports `__bracket_expression::__exec`'s test, with no digraphs.
-    fn matches(self: *const Bracket, ch: u32) bool {
+    fn matches(self: *const Bracket, ch_in: u32) bool {
+        const ch = if (self.icase) translateNocase(ch_in) else ch_in;
         for (self.chars.items) |cc| {
             if (ch == cc) return true;
         }
@@ -408,6 +442,8 @@ pub fn BasicRegex(comptime CharT: type) type {
         open_count: i32 = 0,
         /// `regex_constants::nosubs`: groups are parsed but record nothing.
         nosubs: bool = false,
+        /// `regex_constants::icase`.
+        icase: bool = false,
 
         /// Ports `basic_regex(const std::string &)` and `__init`: the pattern
         /// must parse completely.
@@ -429,7 +465,7 @@ pub fn BasicRegex(comptime CharT: type) type {
         ///
         /// Return: the compiled regex, or the `regex_error`.
         pub fn compileWith(pattern: []const CharT, syntax: Syntax) Error!Self {
-            var re: Self = .{ .nosubs = syntax.nosubs };
+            var re: Self = .{ .nosubs = syntax.nosubs, .icase = syntax.icase };
             errdefer re.deinit();
             var p: Parser(CharT) = .{ .re = &re, .pat = pattern };
             const temp = try p.parse(0);
@@ -460,6 +496,7 @@ pub fn BasicRegex(comptime CharT: type) type {
         pub fn clone(self: *const Self) Self {
             var out: Self = .{
                 .nosubs = self.nosubs,
+                .icase = self.icase,
                 .start = self.start,
                 .end = self.end,
                 .marked_count = self.marked_count,
@@ -778,7 +815,7 @@ pub fn BasicRegex(comptime CharT: type) type {
                     const sm = s.sub_matches[n.mexp - 1];
                     if (sm.matched) {
                         const len = sm.second - sm.first;
-                        if (s.last - s.current >= len and std.mem.eql(CharT, input[sm.first..sm.second], input[s.current .. s.current + len])) {
+                        if (s.last - s.current >= len and backRefEql(n.icase, input[sm.first..sm.second], input[s.current .. s.current + len])) {
                             s.do_ = .accept_but_not_consume;
                             s.current += len;
                             s.node = n.first;
@@ -850,7 +887,7 @@ pub fn BasicRegex(comptime CharT: type) type {
                     }
                 },
                 .match_char => {
-                    if (s.current != s.last and input[s.current] == n.ch) {
+                    if (s.current != s.last and (if (n.icase) translateNocase(input[s.current]) else input[s.current]) == n.ch) {
                         s.do_ = .accept_and_consume;
                         s.current += 1;
                         s.node = n.first;
@@ -956,7 +993,18 @@ const flag_full_match: u32 = 1 << 12;
 /// that are supported. libc++ reads `optimize` nowhere, so it is not here.
 pub const Syntax = struct {
     nosubs: bool = false,
+    /// `regex_constants::icase` (`grep_search`'s `ignore_case`).
+    icase: bool = false,
 };
+
+/// Ports `__back_ref` and `__back_ref_icase`'s comparison.
+fn backRefEql(icase: bool, a: anytype, b: anytype) bool {
+    if (!icase) return std.mem.eql(@TypeOf(a[0]), a, b);
+    for (a, b) |x, y| {
+        if (translateNocase(x) != translateNocase(y)) return false;
+    }
+    return true;
+}
 
 /// `std::regex`.
 pub const Regex = BasicRegex(u8);
@@ -1077,7 +1125,7 @@ fn Parser(comptime CharT: type) type {
         }
 
         fn pushChar(self: *Self, ch: u32) void {
-            _ = self.re.pushNode(.{ .kind = .match_char, .ch = ch });
+            _ = self.re.pushNode(.{ .kind = .match_char, .ch = if (self.re.icase) translateNocase(ch) else ch, .icase = self.re.icase });
         }
 
         fn pushEmpty(self: *Self) void {
@@ -1122,7 +1170,7 @@ fn Parser(comptime CharT: type) type {
 
         fn startMatchingList(self: *Self, negate: bool) u32 {
             const re = self.re;
-            re.brackets.append(allocator, .{ .negate = negate }) catch oom();
+            re.brackets.append(allocator, .{ .negate = negate, .icase = re.icase }) catch oom();
             const idx: u32 = @intCast(re.brackets.items.len - 1);
             _ = re.pushNode(.{ .kind = .bracket, .aux = idx });
             return idx;
@@ -1209,7 +1257,7 @@ fn Parser(comptime CharT: type) type {
                             const ch = self.at(temp);
                             if (ch == '=' or ch == '!') {
                                 const sub = allocator.create(BasicRegex(CharT)) catch oom();
-                                sub.* = .{ .nosubs = self.re.nosubs };
+                                sub.* = .{ .nosubs = self.re.nosubs, .icase = self.re.icase };
                                 var sp: Self = .{ .re = sub, .pat = self.pat };
                                 temp = sp.parse(temp + 1) catch |err| {
                                     sub.deinit();
@@ -1312,7 +1360,7 @@ fn Parser(comptime CharT: type) type {
                         v = 10 * v + self.at(first) - '0';
                     }
                     if (v == 0 or v > self.re.marked_count) return error.Backref;
-                    _ = self.re.pushNode(.{ .kind = .back_ref, .mexp = v });
+                    _ = self.re.pushNode(.{ .kind = .back_ref, .mexp = v, .icase = self.re.icase });
                 }
             }
             return first;
@@ -1333,7 +1381,7 @@ fn Parser(comptime CharT: type) type {
                 'w', 'W' => {
                     const ml = self.startMatchingList(self.at(first) == 'W');
                     self.bracket(ml).mask |= m_alnum;
-                    self.bracket(ml).chars.append(allocator, '_') catch oom();
+                    self.bracket(ml).addChar('_');
                 },
                 else => return first,
             }
@@ -1527,7 +1575,7 @@ fn Parser(comptime CharT: type) type {
                 }
                 if (first == last) return error.Brack;
                 if (self.at(first) == '-') {
-                    self.bracket(ml).chars.append(allocator, '-') catch oom();
+                    self.bracket(ml).addChar('-');
                     first += 1;
                 }
                 if (first == last or self.at(first) != ']') return error.Brack;
@@ -1616,12 +1664,12 @@ fn Parser(comptime CharT: type) type {
                 },
                 'w' => {
                     b.mask |= m_alnum;
-                    b.chars.append(allocator, '_') catch oom();
+                    b.addChar('_');
                     return first + 1;
                 },
                 'W' => {
                     b.neg_mask |= m_alnum;
-                    b.neg_chars.append(allocator, '_') catch oom();
+                    b.addNegChar('_');
                     return first + 1;
                 },
                 else => return self.parseCharacterEscape(first, str),
@@ -1649,7 +1697,7 @@ fn Parser(comptime CharT: type) type {
         /// Ports `basic_regex::__parse_character_class`.
         fn parseCharacterClass(self: *Self, first: usize, ml: u32) Error!usize {
             const temp = self.searchClose(first, ':', ']') orelse return error.Brack;
-            const class_type = lookupClassname(CharT, self.pat[first..temp]);
+            const class_type = lookupClassname(CharT, self.pat[first..temp], self.re.icase);
             if (class_type == 0) return error.Ctype;
             self.bracket(ml).mask |= class_type;
             return temp + 2;
@@ -1712,4 +1760,20 @@ test "match requires the whole input" {
     defer m.deinit();
     try std.testing.expect(re.match("aaa", &m));
     try std.testing.expect(!re.match("aab", &m));
+}
+
+test "icase folds A-Z alone, in literals, brackets, ranges and back references" {
+    // Expectations measured against libc++'s std::regex::icase.
+    const cases = [_]struct { []const u8, []const u8, bool }{
+        .{ "hello", "HeLLo", true },              .{ "[A-C]x", "bX", true }, .{ "[[:lower:]]+", "ABC", true },
+        .{ "(ab)\\1", "abAB", true },             .{ "[^a]", "A", false },   .{ "[A-z]", "_", false },
+        .{ "caf\xc3\xa9", "CAF\xc3\x89", false }, .{ "[_A]", "a", true },    .{ "[a-c]x", "Bx", true },
+    };
+    for (cases) |cs| {
+        var re = try Regex.compileWith(cs[0], .{ .icase = true });
+        defer re.deinit();
+        var m = Match.init();
+        defer m.deinit();
+        try std.testing.expectEqual(cs[2], re.search(cs[1], &m));
+    }
 }

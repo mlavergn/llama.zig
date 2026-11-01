@@ -6,7 +6,8 @@
 //! `llama.cpp/common/arg.cpp` (v0.4.1, `b29c606e2`): every option an example
 //! this project ports admits -- `common`'s, and `tokenize`'s, `fit_params`',
 //! `export_lora`'s, `bench`'s, `cvector_generator`'s, `imatrix`'s,
-//! `perplexity`'s, `results`', `mtmd`'s and `tts`' own -- in the C's order, each with its
+//! `perplexity`'s, `results`', `mtmd`'s, `tts`' and `server`'s own -- in the
+//! C's order, split across `arg_options.zig` to `arg_options4.zig`, each with its
 //! spellings, value hints, help text, examples, environment variable and
 //! handler. The help text is built from the tool's current defaults, as the
 //! C's `string_format` builds it. Options only other examples take are left
@@ -69,6 +70,25 @@ pub fn readFile(p: *Params, fname: [:0]const u8) ![]const u8 {
     return content.items;
 }
 
+/// The body of the `-j` and `-jf` handlers (arg.cpp lines 2281 and 2288): the text as
+/// JSON, through `json_schema_to_grammar`, as an output-format grammar. A
+/// parse error throws nlohmann's `parse_error` text, a schema outside the
+/// subset `std::invalid_argument`'s; both reach the parser as the handler's
+/// exception.
+fn jsonSchemaGrammar(q: *Params, text: []const u8) !void {
+    const json = @import("cli_fit").json;
+    const value = json.parse(q.arena, text) catch |e| switch (e) {
+        error.JsonError => return throwStr(json.what()),
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    const grammar = json.schema_to_grammar.jsonSchemaToGrammar(q.arena, &value, false) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return throwStr(json.schema.what()),
+    };
+    q.sampling.grammar_type = .output_format;
+    q.sampling.grammar = grammar;
+}
+
 /// Ports `parse_csv_row` (arg.cpp:1347 @b29c606e2).
 pub fn parseCsvRow(a: std.mem.Allocator, input: []const u8) !std.ArrayList([:0]const u8) {
     var fields: std.ArrayList([:0]const u8) = .empty;
@@ -126,7 +146,7 @@ fn stoull(a: std.mem.Allocator, s: []const u8) !u64 {
 extern fn strtoull(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulonglong;
 
 /// Ports `parse_cpu_range` (common/common.cpp:312 @b29c606e2).
-fn parseCpuRange(a: std.mem.Allocator, range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !bool {
+pub fn parseCpuRange(a: std.mem.Allocator, range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !bool {
     const func = "parse_cpu_range";
     const dash_loc = std.mem.indexOfScalar(u8, range, '-') orelse {
         log.comErr(func, "%s", .{@as([*:0]const u8, "Format of CPU range is invalid! Expected [<start>]-[<end>].\n")});
@@ -198,60 +218,19 @@ pub fn parseCpuMask(mask: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) boo
     return true;
 }
 
-/// Ports `common_sampler_types_from_names` (sampling.cpp:829 @b29c606e2).
+/// `common_sampler_types_from_names`, ported in `sampling.zig`, into the
+/// parameters' arena.
 fn samplerTypesFromNames(p: *Params, names: []const []const u8) !std.ArrayList(SamplerType) {
-    const Entry = struct { []const u8, SamplerType };
-    const map = [_]Entry{
-        // canonical
-        .{ "dry", .dry },                 .{ "top_k", .top_k },           .{ "top_p", .top_p },
-        .{ "top_n_sigma", .top_n_sigma }, .{ "typ_p", .typical_p },       .{ "min_p", .min_p },
-        .{ "temperature", .temperature }, .{ "xtc", .xtc },               .{ "infill", .infill },
-        .{ "penalties", .penalties },     .{ "adaptive_p", .adaptive_p },
-        // kebab-case and no-dash aliases of the names with an underscore
-        .{ "top-k", .top_k },
-        .{ "topk", .top_k },              .{ "top-p", .top_p },           .{ "topp", .top_p },
-        .{ "top-n-sigma", .top_n_sigma }, .{ "topnsigma", .top_n_sigma }, .{ "typ-p", .typical_p },
-        .{ "typp", .typical_p },          .{ "min-p", .min_p },           .{ "minp", .min_p },
-        .{ "adaptive-p", .adaptive_p },   .{ "adaptivep", .adaptive_p },
-        // misc. aliases
-         .{ "nucleus", .top_p },
-        .{ "temp", .temperature },        .{ "typ", .typical_p },
-    };
-
-    var samplers: std.ArrayList(SamplerType) = .empty;
-    for (names) |name| {
-        const name_lower = try p.arena.dupeSentinel(u8, name, 0);
-        for (name_lower) |*ch| ch.* = std.ascii.toLower(ch.*);
-        const found = for (map) |e| {
-            if (std.mem.eql(u8, e[0], name_lower)) break e[1];
-        } else null;
-        if (found) |t| {
-            try samplers.append(p.arena, t);
-            continue;
-        }
-        log.wrn("%s: unable to match sampler by name '%s'\n", .{ "common_sampler_types_from_names", name_lower.ptr });
-    }
-    return samplers;
+    return std.ArrayList(SamplerType).fromOwnedSlice(try @import("sampling.zig").typesFromNames(p.arena, names));
 }
 
 /// `samplerTypesFromNames`, for `common_init_sampler_from_model`.
 pub const samplerTypesFromNamesPub = samplerTypesFromNames;
 
-/// Ports `common_sampler_types_from_chars` (sampling.cpp:891 @b29c606e2).
+/// `common_sampler_types_from_chars`, ported in `sampling.zig`, into the
+/// parameters' arena.
 fn samplerTypesFromChars(p: *Params, chars: []const u8) !std.ArrayList(SamplerType) {
-    const all = [_]SamplerType{ .dry, .top_k, .typical_p, .top_p, .top_n_sigma, .min_p, .temperature, .xtc, .infill, .penalties, .adaptive_p };
-    var samplers: std.ArrayList(SamplerType) = .empty;
-    for (chars) |ch| {
-        const found = for (all) |t| {
-            if (t.toChr() == ch) break t;
-        } else null;
-        if (found) |t| {
-            try samplers.append(p.arena, t);
-        } else {
-            log.wrn("%s: unable to match sampler by char '%c'\n", .{ "common_sampler_types_from_chars", @as(c_int, ch) });
-        }
-    }
-    return samplers;
+    return std.ArrayList(SamplerType).fromOwnedSlice(try @import("sampling.zig").typesFromChars(p.arena, chars));
 }
 
 /// `params.sampling.dry_sequence_breakers` as option 54's help lists them:
@@ -271,7 +250,7 @@ fn dryBreakersText(p: *Params) ![]const u8 {
 /// Option 54's `static bool defaults_cleared`, once per process.
 var dry_defaults_cleared = false;
 
-/// The table, part one: options 1-67 of the extracted list.
+/// The table, part one: `-h` to `--pooling`, arg.cpp's lines 1440 to 2309.
 fn addPart1(ctx: *Context) !void {
     const p = ctx.params;
     const ex = ctx.ex;
@@ -394,6 +373,18 @@ fn addPart1(ctx: *Context) !void {
             q.cpuparams_batch.poll = @bitCast(value);
         }
     }.f } });
+    // arg.cpp:1621
+    try ctx.add((Arg{ .args = &.{ "-lcs", "--lookup-cache-static" }, .value_hint = "FNAME", .help = "path to static lookup cache to use for lookup decoding (not updated by generation)", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            q.speculative.ngram_cache.lookup_cache_static = try arg.dupe(q, value);
+        }
+    }.f } }).setExamples(&.{ .lookup, .server }));
+    // arg.cpp:1628
+    try ctx.add((Arg{ .args = &.{ "-lcd", "--lookup-cache-dynamic" }, .value_hint = "FNAME", .help = "path to dynamic lookup cache to use for lookup decoding (updated by generation)", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            q.speculative.ngram_cache.lookup_cache_dynamic = try arg.dupe(q, value);
+        }
+    }.f } }).setExamples(&.{ .lookup, .server }));
     // arg.cpp:1635
     try ctx.add((Arg{
         .args = &.{ "-c", "--ctx-size" },
@@ -409,6 +400,12 @@ fn addPart1(ctx: *Context) !void {
             }.f,
         },
     }).setEnv("LLAMA_ARG_CTX_SIZE"));
+    // arg.cpp:1646
+    try ctx.add((Arg{ .args = &.{"--kv-unified-per-slot"}, .value_hint = "N", .help = "context limit per parallel slot (default: unset, behavior unchanged).\nwhen set without -c/--ctx-size, the shared KV pool is sized to n_parallel*N", .handler = .{ .int = struct {
+        fn f(q: *Params, value: c_int) !void {
+            q.kv_unified_per_slot = value;
+        }
+    }.f } }).setEnv("LLAMA_ARG_KV_UNIFIED_PER_SLOT").setExamples(&.{.server}));
     // arg.cpp:1654
     try ctx.add((Arg{ .args = &.{ "-n", "--predict", "--n-predict" }, .value_hint = "N", .help = if (ex == .completion)
         try ctx.fmt("number of tokens to predict (default: %d, -1 = infinity, -2 = until context filled)", .{p.n_predict})
@@ -442,12 +439,37 @@ fn addPart1(ctx: *Context) !void {
             q.swa_full = true;
         }
     }.f } }).setEnv("LLAMA_ARG_SWA_FULL"));
+    // arg.cpp:1694
+    try ctx.add((Arg{ .args = &.{ "-ctxcp", "--ctx-checkpoints", "--swa-checkpoints" }, .value_hint = "N", .help = try ctx.fmt("max number of context checkpoints to create per slot (default: %d)[(more info)](https://github.com/ggml-org/llama.cpp/pull/15293)", .{p.n_ctx_checkpoints}), .handler = .{ .int = struct {
+        fn f(q: *Params, value: c_int) !void {
+            q.n_ctx_checkpoints = value;
+        }
+    }.f } }).setEnv("LLAMA_ARG_CTX_CHECKPOINTS").setExamples(&.{ .server, .cli }));
+    // arg.cpp:1702
+    try ctx.add((Arg{ .args = &.{ "-cms", "--checkpoint-min-step" }, .value_hint = "N", .help = try ctx.fmt("minimum spacing between context checkpoints in tokens (default: %d, 0 = no minimum)", .{p.checkpoint_min_step}), .handler = .{ .int = struct {
+        fn f(q: *Params, value: c_int) !void {
+            if (value < 0) return throwStr("checkpoint-min-step must be non-negative");
+            q.checkpoint_min_step = value;
+        }
+    }.f } }).setEnv("LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT").setExamples(&.{.server}));
+    // arg.cpp:1712
+    try ctx.add((Arg{ .args = &.{ "-cram", "--cache-ram" }, .value_hint = "N", .help = try ctx.fmt("set the maximum cache size in MiB (default: %d, -1 - no limit, 0 - disable)[(more info)](https://github.com/ggml-org/llama.cpp/pull/16391)", .{p.cache_ram_mib}), .handler = .{ .int = struct {
+        fn f(q: *Params, value: c_int) !void {
+            q.cache_ram_mib = value;
+        }
+    }.f } }).setEnv("LLAMA_ARG_CACHE_RAM").setExamples(&.{ .server, .cli }));
     // arg.cpp:1720
     try ctx.add((Arg{ .args = &.{ "-kvu", "--kv-unified" }, .args_neg = &.{ "-no-kvu", "--no-kv-unified" }, .help = "use single unified KV buffer shared across all sequences (default: enabled if number of slots is auto)", .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {
             q.kv_unified = value;
         }
     }.f } }).setEnv("LLAMA_ARG_KV_UNIFIED").setExamples(&.{ .server, .perplexity, .batched, .bench, .parallel }));
+    // arg.cpp:1728
+    try ctx.add((Arg{ .args = &.{"--cache-idle-slots"}, .args_neg = &.{"--no-cache-idle-slots"}, .help = "save idle slots to the prompt cache on new task, and clear them when using unified KV (default: enabled, requires cache-ram)", .handler = .{ .bool_ = struct {
+        fn f(q: *Params, value: bool) !void {
+            q.cache_idle_slots = value;
+        }
+    }.f } }).setEnv("LLAMA_ARG_CACHE_IDLE_SLOTS").setExamples(&.{.server}));
     // arg.cpp:1736
     try ctx.add((Arg{ .args = &.{"--context-shift"}, .args_neg = &.{"--no-context-shift"}, .help = try ctx.fmt("whether to use context shift on infinite text generation (default: %s)", .{ed(p.ctx_shift)}), .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {
@@ -545,12 +567,30 @@ fn addPart1(ctx: *Context) !void {
             q.escape = value;
         }
     }.f } });
+    // arg.cpp:1884
+    try ctx.add((Arg{ .args = &.{ "-r", "--reverse-prompt" }, .value_hint = "PROMPT", .help = "halt generation at PROMPT, return control in interactive mode\n", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            try q.antiprompt.append(q.arena, try arg.dupe(q, value));
+        }
+    }.f } }).setExamples(&.{ .completion, .cli, .server }));
+    // arg.cpp:1891
+    try ctx.add((Arg{ .args = &.{ "-sp", "--special" }, .help = try ctx.fmt("special tokens output enabled (default: %s)", .{tf(p.special)}), .handler = .{ .void_ = struct {
+        fn f(q: *Params) !void {
+            q.special = true;
+        }
+    }.f } }).setExamples(&.{ .completion, .cli, .server }));
     // arg.cpp:1963
     try ctx.add((Arg{ .args = &.{"--warmup"}, .args_neg = &.{"--no-warmup"}, .help = try ctx.fmt("whether to perform warmup with an empty run (default: %s)", .{ed(p.warmup)}), .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {
             q.warmup = value;
         }
     }.f } }).setExamples(&.{ .completion, .cli, .server, .mtmd, .embedding, .retrieval, .perplexity, .debug }));
+    // arg.cpp:1971
+    try ctx.add((Arg{ .args = &.{"--spm-infill"}, .help = try ctx.fmt("use Suffix/Prefix/Middle pattern for infill (instead of Prefix/Suffix/Middle) as some models prefer this. (default: %s)", .{ed(p.spm_infill)}), .handler = .{ .void_ = struct {
+        fn f(q: *Params) !void {
+            q.spm_infill = true;
+        }
+    }.f } }).setExamples(&.{.server}));
     // arg.cpp:1981
     try ctx.add((Arg{ .args = &.{"--samplers"}, .value_hint = "SAMPLERS", .help = try ctx.fmt("samplers that will be used for generation in the order, separated by ';'\n(default: %s)", .{names_z}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -778,16 +818,14 @@ fn addPart1(ctx: *Context) !void {
     }.f } }).setSampling());
     // arg.cpp:2278
     try ctx.add((Arg{ .args = &.{ "-j", "--json-schema" }, .value_hint = "SCHEMA", .help = "JSON schema to constrain generations (https://json-schema.org/), e.g. `{\"type\": \"object\"}` for any JSON object", .handler = .{ .string = struct {
-        fn f(_: *Params, _: S) !void {
-            return throwStr("JSON-schema grammars are not supported by this port");
+        fn f(q: *Params, value: S) !void {
+            try jsonSchemaGrammar(q, value);
         }
     }.f } }).setSampling());
     // arg.cpp:2285
     try ctx.add((Arg{ .args = &.{ "-jf", "--json-schema-file" }, .value_hint = "FILE", .help = "File containing a JSON schema to constrain generations (https://json-schema.org/), e.g. `{\"type\": \"object\"}` for any JSON object", .handler = .{ .string = struct {
-        fn f(_: *Params, value: S) !void {
-            const file = std.c.fopen(value.ptr, "r") orelse return throw("error: failed to open file '%s'\n", .{value.ptr});
-            _ = std.c.fclose(file);
-            return throwStr("JSON-schema grammars are not supported by this port");
+        fn f(q: *Params, value: S) !void {
+            try jsonSchemaGrammar(q, try readFile(q, value));
         }
     }.f } }).setSampling());
     // arg.cpp:2302
@@ -796,6 +834,22 @@ fn addPart1(ctx: *Context) !void {
             q.sampling.backend_sampling = true;
         }
     }.f } }).setSampling().setEnv("LLAMA_ARG_BACKEND_SAMPLING"));
+    // arg.cpp:2309
+    try ctx.add((Arg{ .args = &.{"--pooling"}, .value_hint = "{none,mean,cls,last,rank}", .help = "pooling type for embeddings, use model default if unspecified", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            if (std.mem.eql(u8, value, "none")) {
+                q.pooling_type = c.LLAMA_POOLING_TYPE_NONE;
+            } else if (std.mem.eql(u8, value, "mean")) {
+                q.pooling_type = c.LLAMA_POOLING_TYPE_MEAN;
+            } else if (std.mem.eql(u8, value, "cls")) {
+                q.pooling_type = c.LLAMA_POOLING_TYPE_CLS;
+            } else if (std.mem.eql(u8, value, "last")) {
+                q.pooling_type = c.LLAMA_POOLING_TYPE_LAST;
+            } else if (std.mem.eql(u8, value, "rank")) {
+                q.pooling_type = c.LLAMA_POOLING_TYPE_RANK;
+            } else return throwStr("invalid value");
+        }
+    }.f } }).setExamples(&.{ .embedding, .retrieval, .server, .debug }).setEnv("LLAMA_ARG_POOLING"));
 }
 
 /// Option 62's parse: `ss >> key >> sign` then the rest of the line as the
@@ -823,12 +877,9 @@ fn parseLogitBias(value: []const u8) ?c.llama_logit_bias {
 /// Adds every option, in the C's order.
 pub fn addAll(ctx: *Context) !void {
     try addPart1(ctx);
-    try addPart2(ctx);
-}
-
-const part2 = @import("arg_options2.zig");
-fn addPart2(ctx: *Context) !void {
-    try part2.add(ctx);
+    try @import("arg_options2.zig").add(ctx);
+    try @import("arg_options3.zig").add(ctx);
+    try @import("arg_options4.zig").add(ctx);
 }
 
 // -----------------------------------------------------------------------------

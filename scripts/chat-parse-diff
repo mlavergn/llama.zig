@@ -1,0 +1,727 @@
+#!/usr/bin/env python3
+"""Compare cli/common_chat/'s templates and output parsing with upstream's.
+
+The gate for Stage 9 step 4 (PLAN.md): `common_chat_templates_apply` and
+`common_chat_parse`, with everything under them -- the template
+capabilities, the differential analysis, the auto-parser and the per-model
+parsers. `harness/chat_parse_ref.cpp` links upstream's `llama-common`
+(`zig build tools-ref`), `harness/chat_parse_diff.zig` the port; each
+replays the same records in its own process and writes a transcript, and
+the two must agree line for line: for a template, its capabilities, source,
+explicit flag, ASR prompt, `support_enable_thinking`, the formatted example,
+`verify_template` and every field the differential analysis reads off it;
+for an apply, the format, prompt, grammar, laziness, generation prompt,
+thinking tags, triggers, preserved tokens, extra stops, the serialized
+parser and the message delimiters; for a parse, the message, every field;
+for the auto-parser helpers, their results; every exception's class and
+`what()`; every INF/WRN/ERR line logged.
+
+The records:
+
+- **Upstream's own tests, recorded as they run.** `tests/test-chat.cpp`,
+  `tests/test-chat-template.cpp` and `tests/test-chat-auto-parser.cpp` are
+  built twice: as upstream builds them, and with `harness/chat_parse_rec.h`
+  force-included, which renames the chat API calls in each test's own
+  translation unit to wrappers that call the real thing and write what they
+  were given. The plain builds must pass on the reference; the recording
+  builds must pass too, and what they wrote -- templates, applies, every
+  prefix `test_peg_parser` parses, the helpers' inputs -- is replayed.
+- **Every template in `llama.cpp/models/templates/`**, applied over sampled
+  conversations (system and developer roles, typed content parts, tool calls
+  and responses, reasoning, a trailing assistant turn to continue), with and
+  without tools, each tool choice, parallel calls both ways, a JSON schema,
+  a grammar, each reasoning format, thinking on and off, a generation prompt
+  or not, each continuation, kwargs (good and bad JSON), pure content; some
+  applies keep their parser, and recorded and generic replies are parsed
+  through it, whole and cut short.
+- **Mutations** of the recorded replies (bytes deleted, inserted, repeated,
+  tags swapped) and replies parsed by another recorded parser of the same
+  format.
+
+A Jinja engine's own error text cannot match (`template.zig`'s header): a
+line where the port's text reaches `jinja: ` compares only up to there, on
+both sides. Every phrase in COVERAGE must appear in the reference
+transcript, so a generator that drifts off an arm fails rather than passing
+on nothing.
+
+Usage: scripts/chat-parse-diff
+  CHAT_PARSE_N=<n>        applies per template (default 20)
+  CHAT_PARSE_SEED=<n>     the generator's seed (default 1)
+  CHAT_PARSE_FILTER=<s>   only templates whose file name holds <s>; skips
+                          the recorded and mutated records
+  CHAT_PARSE_MUT=<n>      mutated replies (default 4000)
+  CHAT_PARSE_OUT=<dir>    keep the records and both transcripts there
+  CHAT_PARSE_O=<mode>     the port's optimization (default ReleaseSafe)
+  CHAT_PARSE_NO_TOOLS_REF=1  do not rebuild libllama-common-ref first
+Requires: zig build reference --release=fast (libllama-ref.a, libggml.a)
+"""
+
+import json
+import os
+import random
+import re
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(ROOT)
+
+
+def platform_libs(mode):
+    """The system libraries a link beside zig-out/lib/libggml.a needs on this
+    OS, from scripts/platform-libs -- the SDK's frameworks on macOS; on Linux
+    the CUDA libraries when the toolkit is there, libgcc and libm. `mode` is
+    "cc" for a `zig c++` link and "exe" for `zig build-exe`, which spell an
+    rpath differently."""
+    r = subprocess.run(["bash", "-c", 'source scripts/platform-libs && platform_libs "$1" zig-out/lib/libggml.a'
+                        ' && printf "%s\\0" ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"}', "_", mode],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"FAIL: scripts/platform-libs\n{r.stderr}", file=sys.stderr)
+        sys.exit(2)
+    return [x for x in r.stdout.split("\0") if x]
+
+N = int(os.environ.get("CHAT_PARSE_N", "20"))
+SEED = int(os.environ.get("CHAT_PARSE_SEED", "1"))
+FILTER = os.environ.get("CHAT_PARSE_FILTER", "")
+MUT = int(os.environ.get("CHAT_PARSE_MUT", "4000"))
+OPT = os.environ.get("CHAT_PARSE_O", "ReleaseSafe")
+rng = random.Random(SEED)
+
+LIB = os.path.join(ROOT, "zig-out", "lib")
+TESTS = ["test-chat", "test-chat-template", "test-chat-auto-parser"]
+
+# Each must appear in the reference transcript.
+COVERAGE = [
+    "format Content-only", "format peg-native", "format peg-gemma4", "format peg-minimax-m3",
+    "E invalid_argument Unable to generate parser for this template",
+    "E runtime_error Cannot specify grammar with tools",
+    "does not match the expected peg-native format",
+    "L W common_chat_peg_parse: unparsed",
+    "Failed to parse tool call arguments as JSON",
+    "L W Removing system prompt due to template not supporting system role",
+    "L W Template supports tool calls but does not natively describe tools",
+    "L W Forcing pure content template",
+    "E json_error",
+    "an.reasoning.mode TAG_BASED", "an.reasoning.mode TOOLS_ONLY",
+    "an.content.mode ALWAYS_WRAPPED",
+    "an.tools.mode JSON_NATIVE", "an.tools.mode TAG_WITH_JSON", "an.tools.mode TAG_WITH_TAGGED",
+    "an.call_id.pos BETWEEN_FUNC_AND_ARGS",
+    "tc.name ", "reasoning I", "trigger 1 ", "lazy 1", "think_end ",
+    "caps supports_typed_content=1", "caps supports_system_role=0", "caps supports_object_arguments=1",
+    "caps supports_preserve_reasoning=1", "caps supports_reasoning_effort=1", "caps supports_parallel_tool_calls=0",
+    "enable_thinking 1", "verify 0", "init_failed", "asr.system Perform ASR.",
+    "MARKER ", "output_A ",
+]
+
+
+def fail(msg, detail=""):
+    print(f"FAIL: chat-parse-diff: {msg}", file=sys.stderr)
+    if detail:
+        print(detail[-4000:], file=sys.stderr)
+    sys.exit(2)
+
+
+def run(cmd, what, cwd=None, env=None):
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, env=env)
+    if r.returncode != 0:
+        fail(what, r.stdout + r.stderr)
+    return r
+
+
+# -----------------------------------------------------------------------------
+# building
+
+
+def build(out):
+    if not os.environ.get("CHAT_PARSE_NO_TOOLS_REF"):
+        run(["zig", "build", "reference", "tools-ref", "mtmd-ref", "--release=fast"],
+            "could not build the reference libraries (zig build reference tools-ref mtmd-ref)")
+    for lib in ["libllama-common-ref.a", "libmtmd-ref.a", "libllama-ref.a", "libggml.a"]:
+        if not os.path.exists(os.path.join(LIB, lib)):
+            fail(f"missing zig-out/lib/{lib} -- run 'zig build reference tools-ref mtmd-ref --release=fast'")
+
+    frameworks = platform_libs("cc")
+    cxx = ["zig", "c++", "-mcpu=baseline", "-std=c++17", "-O2", "-DNDEBUG", "-w",
+           "-I", "llama.cpp", "-I", "llama.cpp/include", "-I", "llama.cpp/common", "-I", "llama.cpp/ggml/include",
+           "-I", "llama.cpp/ggml/src", "-I", "llama.cpp/vendor", "-I", "llama.cpp/tools/server",
+           "-I", "llama.cpp/tools/mtmd", "-I", "llama.cpp/vendor/cpp-httplib", "-I", "llama.cpp/tests"]
+    libs = [os.path.join(LIB, x) for x in ["libmtmd-ref.a", "libllama-common-ref.a", "libllama-ref.a", "libggml.a"]]
+
+    # The port's harness builds beside the C++. llama.h's translation is
+    # kept between runs: `zig translate-c` is slow, and has been seen to
+    # spin for minutes on this header.
+    cache = os.path.join(ROOT, "zig-out", "chat-parse-diff", "llama_c.zig")
+    sources = ["src/llama/c_import.h", "llama.cpp/include/llama.h", "llama.cpp/ggml/include/ggml.h"]
+    if not os.path.exists(cache) or any(os.path.getmtime(x) > os.path.getmtime(cache) for x in sources):
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        try:
+            tc = subprocess.run(["zig", "translate-c", "-I", "llama.cpp/include", "-I", "llama.cpp/ggml/include",
+                                 "src/llama/c_import.h"], capture_output=True, text=True, timeout=900)
+        except subprocess.TimeoutExpired:
+            fail("zig translate-c of llama.h did not finish in 15 minutes")
+        if tc.returncode != 0:
+            fail("cannot translate llama.h", tc.stderr)
+        with open(cache + ".tmp", "w") as f:
+            f.write(tc.stdout)
+        os.replace(cache + ".tmp", cache)
+    port = os.path.join(out, "chat_parse_diff")
+    port_cmd = ["zig", "build-exe", "-mcpu", "baseline", f"-O{OPT}", f"-femit-bin={port}", "-lc",
+                "--dep", "json", "--dep", "peg", "--dep", "zigjinja", "--dep", "common_chat", "--dep", "llama", "-Mroot=harness/chat_parse_diff.zig",
+                "--dep", "json", "--dep", "peg", "--dep", "llama", "--dep", "zigjinja", "-Mcommon_chat=cli/common_chat/module.zig",
+                "--dep", "json", "--dep", "llama", "-Mpeg=cli/peg/module.zig",
+                "--dep", "llama", "-Mjson=cli/json/module.zig",
+                "-Mzigjinja=../zigjinja/src/root.zig",
+                "--dep", "llama_c", "-Mllama=src/llama/harness_root.zig", f"-Mllama_c={cache}",
+                # libllama-ref.a for the two C helpers the port's model loader
+                # calls by name (`llama_split_path`, `llama_split_prefix`)
+                os.path.join(LIB, "libllama-ref.a"), os.path.join(LIB, "libggml.a"), "-lc++"] + platform_libs("exe")
+    jobs = {"port": subprocess.Popen(port_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)}
+
+    def obj(name, src, extra=()):
+        o = os.path.join(out, name + ".o")
+        jobs[name] = subprocess.Popen(cxx + list(extra) + ["-c", src, "-o", o],
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        return o
+
+    objs = {}
+    for t in TESTS:
+        objs["u-" + t] = obj("u-" + t, f"llama.cpp/tests/{t}.cpp")
+        objs["r-" + t] = obj("r-" + t, f"llama.cpp/tests/{t}.cpp", ["-include", "harness/chat_parse_rec.h"])
+    objs["server-chat"] = obj("server-chat", "llama.cpp/tools/server/server-chat.cpp")
+    objs["server-common"] = obj("server-common", "llama.cpp/tools/server/server-common.cpp")
+    objs["ref"] = obj("ref", "harness/chat_parse_ref.cpp")
+    for name, p in jobs.items():
+        text = p.communicate()[0]
+        if p.returncode != 0:
+            fail(f"could not build {name}", text)
+
+    exes = {}
+    for name in [f"{k}-{t}" for k in ("u", "r") for t in TESTS] + ["ref"]:
+        extra = [objs["server-chat"], objs["server-common"]] if name.endswith("test-chat") else []
+        exe = os.path.join(out, name)
+        run(cxx + ["-o", exe, objs[name]] + extra + libs + frameworks, f"could not link {name}")
+        exes[name] = exe
+    exes["port"] = port
+    return exes
+
+
+def record_upstream(exes, out):
+    """Upstream's tests pass as upstream builds them, then again recording."""
+    rec = os.path.join(out, "upstream.jsonl")
+    if os.path.exists(rec):
+        os.remove(rec)
+    for t in TESTS:
+        r = subprocess.run([exes["u-" + t]], capture_output=True, text=True, cwd="llama.cpp")
+        if r.returncode != 0:
+            fail(f"upstream's {t} fails on the reference", r.stdout + r.stderr)
+        env = dict(os.environ, CHAT_PARSE_REC=rec)
+        r = subprocess.run([exes["r-" + t]], capture_output=True, text=True, cwd="llama.cpp", env=env)
+        if r.returncode != 0:
+            fail(f"upstream's {t} fails under the recorder", r.stdout + r.stderr)
+    print(f"upstream's {', '.join(TESTS)}: pass on the reference, and recorded")
+    return rec
+
+
+# -----------------------------------------------------------------------------
+# records
+
+
+def hexs(b):
+    return b.hex()
+
+
+def raw_msg(role, content="", parts=(), tool_calls=(), reasoning="", tool_name="", tool_call_id=""):
+    return {"role": role, "content": content, "parts": [list(p) for p in parts],
+            "tool_calls": [list(t) for t in tool_calls], "reasoning_content": reasoning,
+            "tool_name": tool_name, "tool_call_id": tool_call_id}
+
+
+TOOLS = [
+    ["get_weather", "Get the weather for a city",
+     json.dumps({"type": "object", "properties": {"city": {"type": "string", "description": "The city"}},
+                 "required": ["city"]})],
+    ["calculate", "Do arithmetic",
+     json.dumps({"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "number"},
+                                                  "op": {"type": "string", "enum": ["+", "-", "*"]}},
+                 "required": ["a", "b"]})],
+    ["python", "Run Python code",
+     json.dumps({"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]})],
+    ["ping", "No arguments", "{}"],
+    ["configure", "Mixed types",
+     json.dumps({"type": "object", "properties": {"flag": {"type": "boolean"},
+                                                  "items": {"type": "array", "items": {"type": "string"}},
+                                                  "opt": {"type": ["string", "null"]}},
+                 "required": ["flag"]})],
+]
+
+SCHEMAS = [
+    json.dumps({"type": "object", "properties": {"answer": {"type": "string"}, "score": {"type": "integer"}},
+                "required": ["answer"]}),
+    json.dumps({"type": "array", "items": {"type": "number"}}),
+    "{not json",
+]
+
+WORDS = ["Hello!", "What's the weather in Paris?", "  spaced  \n", "héllo 世界 🙂", "Compute 2+2",
+         "<think>not really</think>", "line one\nline two", ""]
+
+
+# parameters that are no JSON at all: common_chat_tools_to_json_oaicompat throws
+BAD_TOOL = ["broken", "Unparseable parameters", ""]
+
+
+def tool_call(rng, i):
+    name, _, params = rng.choice(TOOLS)
+    args = rng.choice([json.dumps({"city": "Paris"}), "{\"a\": 1, \"b\": 2.5}", "{}", "{\"code\": \"print('hi')\"}",
+                       "not json", "{\"flag\": true, \"items\": [\"x\"]}"])
+    return [name, args, rng.choice([f"call_{i}", "", "123456789", f"call{i:05d}"])]
+
+
+def conversation(rng, trailing_assistant):
+    if not trailing_assistant and rng.random() < 0.04:
+        # a lone system message: dropped where the template has no system role
+        return [raw_msg("system", "You are alone.")]
+    msgs = []
+    r = rng.random()
+    if r < 0.35:
+        msgs.append(raw_msg("system", rng.choice(["You are a helpful assistant.", "  Be brief.  ", "Reasoning: high"])))
+    elif r < 0.45:
+        msgs.append(raw_msg("developer", "Follow the rules."))
+    turns = rng.randint(1, 3)
+    for t in range(turns):
+        if rng.random() < 0.15:
+            msgs.append(raw_msg("user", "", parts=[("text", "Look:"), ("text", rng.choice(WORDS))]))
+        else:
+            msgs.append(raw_msg("user", rng.choice(WORDS)))
+        if t == turns - 1 and not trailing_assistant:
+            break
+        kind = rng.random()
+        if t == turns - 1:
+            # the message to continue
+            content = rng.choice(["Hello, ", "The answer is", ""])
+            reasoning = rng.choice(["", "I'm thinking", "Let me see"])
+            if not content and not reasoning:
+                content = "Partial"
+            if reasoning and rng.random() < 0.25:
+                # typed content only: `continue_final_message: auto` reads the parts too
+                msgs.append(raw_msg("assistant", "", parts=[("text", "Partial ")], reasoning=reasoning))
+            else:
+                msgs.append(raw_msg("assistant", content, reasoning=reasoning))
+        elif kind < 0.35:
+            calls = [tool_call(rng, k) for k in range(rng.randint(1, 2))]
+            msgs.append(raw_msg("assistant", rng.choice(["", "Let me check."]), tool_calls=calls,
+                                reasoning=rng.choice(["", "I need a tool."])))
+            for c in calls:
+                msgs.append(raw_msg("tool", rng.choice(["{\"temp\": 20}", "4", "done"]), tool_name=c[0], tool_call_id=c[2]))
+            if rng.random() < 0.15:
+                # a response no call asked for
+                msgs.append(raw_msg("tool", "late", tool_call_id="call_late"))
+            msgs.append(raw_msg("assistant", "It is done.", reasoning=rng.choice(["", "Reading the result."])))
+        else:
+            msgs.append(raw_msg("assistant", rng.choice(["Sure.", "Paris is sunny.", " spaced answer "]),
+                                reasoning=rng.choice(["", "", "Thinking it over."])))
+    return msgs
+
+
+def gen_inputs(rng):
+    cont = rng.choice([0, 0, 0, 1, 2, 3])
+    tools = rng.sample(TOOLS, rng.randint(1, len(TOOLS))) if rng.random() < 0.55 else []
+    if tools and rng.random() < 0.03:
+        tools.append(BAD_TOOL)
+    kwargs = []
+    if rng.random() < 0.25:
+        kv = rng.choice([("reasoning_effort", "\"low\""), ("reasoning_effort", "\"high\""), ("preserve_reasoning", "true"),
+                         ("enable_thinking", "false"), ("custom", "{\"x\": 1}"), ("bad", "{oops")])
+        kwargs.append(list(kv))
+    grammar = ""
+    if rng.random() < 0.06:
+        grammar = "root ::= \"yes\" | \"no\""
+    return {
+        "messages": conversation(rng, cont != 0),
+        "grammar": grammar,
+        "json_schema": rng.choice(SCHEMAS) if rng.random() < 0.15 else "",
+        "add_generation_prompt": rng.random() < 0.8,
+        "continue": cont,
+        "use_jinja": rng.random() > 0.03,
+        "tools": tools,
+        "tool_choice": rng.choice([0, 0, 1, 2]),
+        "parallel": rng.random() < 0.5,
+        "reasoning_format": rng.choice([0, 1, 1, 2, 3]),
+        "enable_thinking": rng.random() < 0.7,
+        "kwargs": sorted(kwargs),
+        "add_bos": False,
+        "add_eos": False,
+        "force_pure_content": rng.random() < 0.05,
+    }
+
+
+SYNTHETIC = [
+    ("synthetic-unclosed", "{{ unclosed"),
+    ("synthetic-no-endfor", "{% for m in messages %}{{ m.content }}"),
+    ("synthetic-chatml", "chatml"),
+    ("synthetic-raise", "{{ raise_exception('this template refuses') }}"),
+    # a marker that closes the turn before, which the user-start heuristic
+    # skips (`detect_user_start_marker`)
+    ("synthetic-close-marker",
+     "{% for m in messages %}<|close_turn|><|{{ m.role }}|>{{ m.content }}{% endfor %}"
+     "{% if add_generation_prompt %}<|close_turn|><|assistant|>{% endif %}"),
+    # thinking that changes the system text too, with a generation prompt
+    # whose last 32 bytes recur inside the thinking markers: only the 64-byte
+    # anchor of `compare_thinking_enabled` finds the markers
+    ("synthetic-thinking-anchor",
+     "{%- if enable_thinking %}SYS ON{% else %}SYS OFF{% endif -%}"
+     "{%- for m in messages %}<|{{ m.role }}|>{{ m.content }}{% endfor -%}"
+     "{%- if add_generation_prompt %}<|assistant|>" + " " * 40 + "{% if enable_thinking %}<think>" + " " * 40 +
+     "</think>{% endif %}{% endif -%}"),
+    # the same with a third marker after the thinking: two markers or none
+    # (the padding keeps the 64-byte anchor clear of the system text)
+    ("synthetic-thinking-three",
+     "{%- if enable_thinking %}SYS ON{% else %}SYS OFF{% endif -%}"
+     "{%- for m in messages %}<|{{ m.role }}|>{{ m.content }}{% endfor -%}"
+     "{%- if add_generation_prompt %}<|assistant|>" + " " * 70 + "{% if enable_thinking %}<think></think><|tail|>{% endif %}{% endif -%}"),
+    ("synthetic-no-system",
+     "{% for m in messages %}{% if m.role == 'user' %}[U]{{ m.content }}{% elif m.role == 'assistant' %}"
+     "[A]{{ m.content }}{% endif %}{% endfor %}{% if add_generation_prompt %}[A]{% endif %}"),
+]
+
+GENERIC_REPLIES = [
+    "Hello, world!",
+    "<think>I'm thinking</think>The answer.",
+    "I'm thinking</think>The answer.",
+    "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>",
+    "<tool_call>\n<function=get_weather>\n<parameter=city>\nParis\n</parameter>\n</function>\n</tool_call>",
+    "[TOOL_CALLS]get_weather[ARGS]{\"city\": \"Paris\"}",
+    "{\"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}]}",
+    "{\"name\": \"get_weather\", \"parameters\": {\"city\": \"Paris\"}}",
+    "<|python_tag|>get_weather.call(city=\"Paris\")",
+    "{\"answer\": \"yes\", \"score\": 3}",
+    "```json\n{\"answer\": \"no\"}\n```",
+    "[get_weather(city=\"Paris\")]",
+    "",
+]
+
+MARKERS = [b"<", b">", b"</think>", b"<think>", b"<tool_call>", b"</tool_call>", b"{", b"}", b"\"", b"\n",
+           b"[TOOL_CALLS]", b"<|", b"|>", b"\xff", b"\xc3", b" ", b"\\", b"]", b"["]
+
+
+def mutate(rng, data):
+    b = bytearray(data)
+    for _ in range(rng.randint(1, 3)):
+        op = rng.random()
+        if op < 0.25 and b:
+            i = rng.randrange(len(b))
+            del b[i:i + rng.randint(1, 4)]
+        elif op < 0.55:
+            i = rng.randint(0, len(b))
+            b[i:i] = rng.choice(MARKERS)
+        elif op < 0.75 and b:
+            i = rng.randrange(len(b))
+            j = min(len(b), i + rng.randint(1, 12))
+            b[j:j] = b[i:j]
+        else:
+            tags = [m.span() for m in re.finditer(rb"<[^<>]{1,30}>", bytes(b))]
+            if len(tags) >= 2:
+                (s1, e1), (s2, e2) = sorted(rng.sample(tags, 2))
+                b = b[:s1] + b[s2:e2] + b[e1:s2] + b[s1:e1] + b[e2:]
+            elif b:
+                del b[rng.randrange(len(b)):]
+    return bytes(b)
+
+
+def make_records(rec_path):
+    records = []
+    stats = {"tmpl": 0, "apply": 0, "parse": 0, "helper": 0}
+    tmpl_ids = {}
+    parser_ids = {}
+    seen = set()
+    recorded_inputs = []          # (pid, format, gen, input bytes)
+    pool_by_src = {}              # template source -> replies parsed by its parsers
+    src_of_parser = {}
+
+    def add(r):
+        records.append(r)
+        return len(records) - 1
+
+    def tmpl(src, bos, eos, model=None):
+        key = (src, bos, eos, model)
+        if key not in tmpl_ids:
+            tmpl_ids[key] = len(tmpl_ids)
+            rec = {"op": "tmpl", "id": tmpl_ids[key], "src": src, "bos": bos, "eos": eos}
+            if model:
+                rec["model"] = model
+            add(rec)
+            stats["tmpl"] += 1
+        return tmpl_ids[key]
+
+    def parser(text):
+        if text not in parser_ids:
+            parser_ids[text] = len(parser_ids)
+            add({"op": "parser", "id": parser_ids[text], "text": text})
+        return parser_ids[text]
+
+    def parse(pid, fmt, gen, data, partial):
+        key = (pid, fmt, gen, data, partial)
+        if key in seen:
+            return
+        seen.add(key)
+        add({"op": "parse", "p": pid, "format": fmt, "gen": gen, "input_hex": hexs(data), "partial": partial})
+        stats["parse"] += 1
+
+    if rec_path:
+        old_ids = {}
+        old_src = {}
+        for text in open(rec_path, encoding="utf-8"):
+            r = json.loads(text)
+            op = r["op"]
+            if op == "tmpl":
+                old_ids[r["id"]] = tmpl(r["src"], r["bos"], r["eos"])
+                old_src[r["id"]] = r["src"]
+            elif op == "apply":
+                if r["t"] not in old_ids:
+                    continue
+                key = ("apply", old_ids[r["t"]], json.dumps(r["in"], sort_keys=True))
+                if "parser_out" in r and r["parser_out"]:
+                    src_of_parser[r["parser_out"]] = old_src[r["t"]]
+                if key in seen:
+                    continue
+                seen.add(key)
+                add({"op": "apply", "t": old_ids[r["t"]], "in": r["in"]})
+                stats["apply"] += 1
+            elif op == "parse":
+                if not r["parser"]:
+                    continue
+                pid = parser(r["parser"])
+                data = bytes.fromhex(r["input_hex"])
+                parse(pid, r["format"], r["gen"], data, r["partial"])
+                recorded_inputs.append((pid, r["format"], r["gen"], data))
+                src = src_of_parser.get(r["parser"])
+                if src is not None and not r["partial"]:
+                    pool_by_src.setdefault(src, set()).add(data)
+            else:
+                key = json.dumps(r, sort_keys=True)
+                if key in seen:
+                    continue
+                seen.add(key)
+                add(r)
+                stats["helper"] += 1
+
+        # mutations, and replies through another parser of the same format
+        if recorded_inputs:
+            by_format = {}
+            for item in recorded_inputs:
+                by_format.setdefault(item[1], set()).add(item[0])
+            for _ in range(MUT):
+                pid, fmt, gen, data = rng.choice(recorded_inputs)
+                parse(pid, fmt, gen, mutate(rng, data), rng.random() < 0.5)
+            for _ in range(MUT // 4):
+                pid, fmt, gen, data = rng.choice(recorded_inputs)
+                other = rng.choice(sorted(by_format[fmt]))
+                parse(other, fmt, gen, data, rng.random() < 0.3)
+
+    # every template in models/templates, and a few made up for the arms
+    # no real one reaches
+    tdir = "llama.cpp/models/templates"
+    sources = [(name, open(os.path.join(tdir, name), encoding="utf-8").read())
+               for name in sorted(os.listdir(tdir)) if name.endswith(".jinja")]
+    sources += SYNTHETIC
+    # Gemma 4's template as it was before its "OpenAI Chat Completions"
+    # comment: the outdated form whose tool responses are rewritten first
+    gemma4 = dict(sources).get("google-gemma-4-31B-it.jinja")
+    if gemma4:
+        sources.append(("synthetic-gemma4-outdated", gemma4.replace("OpenAI Chat Completions:", "Chat Completions:")))
+    # A model's vocabulary in place of the given BOS and EOS: llama-spm adds
+    # BOS itself, so a template that writes it has it cut from the prompt
+    vocab = os.path.join(ROOT, "llama.cpp/models/ggml-vocab-llama-spm.gguf")
+    with_model = {"synthetic-bos-eos", "meta-llama-Llama-3.1-8B-Instruct.jinja", "Qwen3.5-4B.jinja"}
+    sources.append(("synthetic-bos-eos", "{{ bos_token }}{% for m in messages %}[{{ m.role }}]{{ m.content }}{% endfor %}"
+                    "{% if add_generation_prompt %}[assistant]{% endif %}{{ eos_token }}"))
+    expanded = []
+    for name, src in sources:
+        expanded.append((name, src, None))
+        if name in with_model:
+            expanded.append((name + "+model", src, vocab))
+    for name, src, model in expanded:
+        if FILTER not in name:
+            continue
+        t = tmpl(src, "<s>", "</s>", model)
+        pool = sorted(pool_by_src.get(src, set()))
+        trng = random.Random(f"{SEED}:{name}")
+        for k in range(N):
+            keep = k % 4 == 0
+            r = {"op": "apply", "t": t, "in": gen_inputs(trng)}
+            if keep:
+                r["keep"] = True
+            idx = add(r)
+            stats["apply"] += 1
+            if not keep:
+                continue
+            replies = trng.sample(pool, min(6, len(pool))) + trng.sample(GENERIC_REPLIES, 5)
+            for reply in replies:
+                data = reply if isinstance(reply, bytes) else reply.encode()
+                add({"op": "parse", "a": idx, "input_hex": hexs(data), "partial": False})
+                cut = data[:trng.randint(0, len(data))]
+                add({"op": "parse", "a": idx, "input_hex": hexs(cut), "partial": True})
+                stats["parse"] += 2
+    return records, stats
+
+
+# -----------------------------------------------------------------------------
+# comparing
+
+
+JINJA = "jinja: "
+
+
+def blocks(path):
+    out = []
+    cur = None
+    for text in open(path, encoding="latin-1"):
+        text = text.rstrip("\n")
+        if text.startswith("== "):
+            cur = [text]
+            out.append(cur)
+        elif cur is not None:
+            cur.append(text)
+    return out
+
+
+def same_line(ref, port):
+    if ref == port:
+        return True
+    # a Jinja engine's own message: compare up to where the port's begins
+    at = port.find(JINJA)
+    if at >= 0 and ref[:at] == port[:at]:
+        return True
+    return False
+
+
+def compare(ref_path, port_path):
+    a = blocks(ref_path)
+    b = blocks(port_path)
+    diffs = []
+    skipped = 0
+    for i in range(max(len(a), len(b))):
+        ra = a[i] if i < len(a) else ["<missing>"]
+        pb = b[i] if i < len(b) else ["<missing>"]
+        if "undefined_mapping" in pb:
+            skipped += 1
+            continue
+        ok = len(ra) == len(pb) and all(same_line(x, y) for x, y in zip(ra, pb))
+        if not ok:
+            diffs.append((ra, pb))
+    return a, diffs, skipped
+
+
+HEADER = re.compile(r"^== (\d+) ")
+
+
+def run_side(cmd, transcript, records, env, stderr_path, max_restarts=500):
+    """Runs one side to the end, restarting past each record it crashes on.
+
+    A crashed record is written as `crash` in place of its lines, so it
+    differs from the other side, and is never run again.
+    """
+    crashes = []
+    start = 0
+    with open(stderr_path, "w") as err:
+        while True:
+            e = dict(env, CHAT_PARSE_SKIP=",".join(str(c) for c in crashes))
+            r = subprocess.run(cmd + [str(start)], stderr=err, stdout=subprocess.DEVNULL, env=e)
+            if r.returncode == 0:
+                return crashes
+            last = start - 1
+            with open(transcript, encoding="latin-1") as f:
+                for text in f:
+                    m = HEADER.match(text)
+                    if m:
+                        last = max(last, int(m.group(1)))
+            k = last + 1
+            while k in crashes:
+                k += 1
+            if k >= len(records) or len(crashes) >= max_restarts:
+                fail(f"{cmd[0]} failed (rc {r.returncode}) and could not be resumed; see {stderr_path}")
+            crashes.append(k)
+            with open(transcript, "a", encoding="latin-1") as f:
+                f.write(f"== {k} {records[k]['op']}\ncrash\n")
+            start = k + 1
+
+
+def first_diff(ra, pb):
+    for k in range(max(len(ra), len(pb))):
+        x = ra[k] if k < len(ra) else "<end>"
+        y = pb[k] if k < len(pb) else "<end>"
+        if not same_line(x, y):
+            return k, x, y
+    return 0, "", ""
+
+
+def main():
+    start = time.time()
+    out = os.environ.get("CHAT_PARSE_OUT") or tempfile.mkdtemp(prefix="chat-parse-diff.")
+    os.makedirs(out, exist_ok=True)
+    exes = build(out)
+    rec = record_upstream(exes, out) if not FILTER else None
+    records, stats = make_records(rec)
+    if not records:
+        fail("no records (does the filter match a template?)")
+    inp = os.path.join(out, "records.jsonl")
+    with open(inp, "w", encoding="utf-8") as f:
+        for r in records:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"records: {len(records)} ({stats['tmpl']} templates, {stats['apply']} applies, "
+          f"{stats['parse']} parses, {stats['helper']} helper calls)")
+
+    env = dict(os.environ, TZ="UTC")
+    t0 = time.time()
+    ref_crashes = run_side([exes["ref"], inp, os.path.join(out, "ref.txt"), os.path.join(out, "ref.log")],
+                           os.path.join(out, "ref.txt"), records, env, os.path.join(out, "ref.stderr"))
+    t1 = time.time()
+    port_crashes = run_side([exes["port"], inp, os.path.join(out, "port.txt")],
+                            os.path.join(out, "port.txt"), records, env, os.path.join(out, "port.stderr"))
+    t2 = time.time()
+    print(f"reference {t1 - t0:.1f} s, port {t2 - t1:.1f} s")
+    if ref_crashes:
+        print(f"the reference crashed on {len(ref_crashes)} records: {ref_crashes[:20]}")
+    if port_crashes:
+        print(f"the port crashed on {len(port_crashes)} records: {port_crashes[:20]}; see {out}/port.stderr")
+
+    ref_blocks, diffs, skipped = compare(os.path.join(out, "ref.txt"), os.path.join(out, "port.txt"))
+    ref_text = open(os.path.join(out, "ref.txt"), encoding="latin-1").read()
+    lines = ref_text.count("\n")
+    exceptions = sum(1 for blk in ref_blocks for x in blk if x.startswith("E "))
+    # a filtered run reaches only what its templates reach
+    missing = [p for p in COVERAGE if p not in ref_text] if not FILTER else []
+
+    print(f"transcript: {len(ref_blocks)} records, {lines} lines, {exceptions} exceptions, "
+          f"{skipped} parses skipped (undefined in upstream)")
+    if missing:
+        print("coverage: the reference never reached:")
+        for p in missing:
+            print(f"    {p!r}")
+    if diffs:
+        kinds = {}
+        for ra, pb in diffs:
+            op = ra[0].split(" ", 2)[2] if ra[0].startswith("== ") else "?"
+            kinds[op] = kinds.get(op, 0) + 1
+        print(f"FAIL: chat-parse-diff: {len(diffs)} of {len(ref_blocks)} records differ "
+              f"({', '.join(f'{k} {v}' for k, v in sorted(kinds.items()))}); in {out}")
+        shown = 0
+        for ra, pb in diffs:
+            k, x, y = first_diff(ra, pb)
+            print(f"  {ra[0]}  (line {k})")
+            print(f"    ref:  {x[:300]}")
+            print(f"    port: {y[:300]}")
+            shown += 1
+            if shown >= 25:
+                break
+        sys.exit(1)
+    if missing:
+        print(f"FAIL: chat-parse-diff: {len(missing)} coverage phrases missing; in {out}")
+        sys.exit(1)
+    print(f"ok: chat-parse-diff: {len(ref_blocks)} records, {lines} lines identical, {time.time() - start:.0f} s")
+
+
+if __name__ == "__main__":
+    main()

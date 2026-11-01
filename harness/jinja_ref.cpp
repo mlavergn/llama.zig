@@ -14,6 +14,7 @@
 // upstream's `is_input` -- so the harness can check ours never trusts a byte
 // upstream marks as input.
 
+#include "jinja/caps.h"
 #include "jinja/lexer.h"
 #include "jinja/parser.h"
 #include "jinja/runtime.h"
@@ -75,6 +76,25 @@ extern "C" int jinja_ref_render(const char * tmpl, size_t tmpl_len, const char *
     } catch (const std::exception & e) {
         *out = dup_bytes(e.what());
         return 2;
+    }
+}
+
+// The capabilities `jinja::caps_get` reads off `tmpl`, as
+// `common_chat_template`'s constructor computes them (chat.h:59 @b29c606e2),
+// in `caps::to_map`'s order: one byte each. Returns 1 if the template fails
+// to lex or parse.
+extern "C" int jinja_ref_caps(const char * tmpl, size_t tmpl_len, unsigned char * out) {
+    try {
+        jinja::lexer lexer;
+        auto lexed = lexer.tokenize(std::string(tmpl, tmpl_len));
+        jinja::program prog = jinja::parse_from_tokens(lexed);
+        size_t i = 0;
+        for (const auto & [name, value] : jinja::caps_get(prog).to_map()) {
+            out[i++] = value ? 1 : 0;
+        }
+        return 0;
+    } catch (const std::exception &) {
+        return 1;
     }
 }
 

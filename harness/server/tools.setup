@@ -1,0 +1,94 @@
+#!/bin/bash
+# Inputs for tools.cases (scripts/server-diff): a directory tree each side
+# gets its own copy of (!fresh tree), and stand-ins for `docker`, `ssh` and
+# the `timeout` an isolate must provide, which run the isolate's commands
+# on this machine -- so the isolate arms of server-tools.cpp run end to end
+# without a container engine or a remote host.
+set -eu
+T="$DATA/tree"
+mkdir -p "$T/sub/deep/deeper" "$T/build/out" "$T/node_modules/pkg" "$T/repo/src" "$T/empty_dir" "$T/Build"
+printf 'alpha\nbeta\ngamma\n' > "$T/a.txt"
+printf 'no trailing newline' > "$T/b.txt"
+printf 'one\r\ntwo\r\nthree\r\n' > "$T/crlf.txt"
+: > "$T/empty.txt"
+printf '# Notes\nTODO: first\ntodo: second\nToDo: third\n' > "$T/sub/notes.md"
+printf 'int main() { return 0; }\n// TODO in code\n' > "$T/sub/main.cpp"
+printf 'deep file\nneedle here\n' > "$T/sub/deep/deep.txt"
+printf 'deeper still\n' > "$T/sub/deep/deeper/x.txt"
+printf 'built artifact needle\n' > "$T/build/out/artifact.txt"
+printf 'package needle\n' > "$T/node_modules/pkg/index.js"
+printf 'capital build dir\n' > "$T/Build/cap.txt"
+printf 'caf\xc3\xa9 \xe2\x80\x9cquoted\xe2\x80\x9d \xe2\x80\x94 dash\nplain line   \nlast\n' > "$T/unicode.txt"
+printf 'dup\nmiddle\ndup\n' > "$T/dup.txt"
+printf 'a.b\naxb\n(a|b)*\n' > "$T/dots.txt"
+printf '\x00\x01\x02binary\xff\xfe\n' > "$T/bin.dat"
+python3 -c "
+import sys
+open(sys.argv[1], 'w').write(''.join('line %05d needle\n' % i for i in range(1, 2001)))
+" "$T/big.txt"
+mkdir -p "$T/many"
+for i in $(seq 1 120); do printf "f%d\n" "$i" > "$T/many/f$i.txt"; done
+ln -s a.txt "$T/link_to_a.txt"
+ln -s sub "$T/link_to_sub"
+ln -s missing.txt "$T/broken_link"
+# a git repository: tracked, untracked and ignored files
+(
+    cd "$T/repo"
+    git init -q .
+    printf 'ignored.log\n' > .gitignore
+    printf 'tracked\n' > src/tracked.c
+    printf 'ignored\n' > ignored.log
+    git -c user.email=t@t -c user.name=t add .gitignore src/tracked.c
+    git -c user.email=t@t -c user.name=t commit -q -m init
+    printf 'untracked\n' > src/untracked.c
+)
+
+B="$DATA/bin"
+mkdir -p "$B"
+cat > "$B/docker" <<'SH'
+#!/bin/sh
+# A stand-in for `docker`: `exec [-i] <id> cmd...` runs cmd here; `run --rm
+# -i --cidfile F IMAGE cmd...` writes an id into F and runs cmd, which
+# blocks on its stdin as a container's shell would.
+verb="$1"; shift
+case "$verb" in
+exec)
+    [ "$1" = "-i" ] && shift
+    shift
+    exec "$@" ;;
+run)
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --cidfile) cid="$2"; shift 2 ;;
+            --rm|-i) shift ;;
+            *) img="$1"; shift; break ;;
+        esac
+    done
+    echo "fake-$img" > "$cid"
+    exec "$@" ;;
+esac
+exit 125
+SH
+cp "$B/docker" "$B/podman"
+cat > "$B/ssh" <<'SH'
+#!/bin/sh
+# A stand-in for `ssh`: its options and the target dropped, the one quoted
+# command word run by a shell here, as the remote shell would.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o) shift 2 ;;
+        -n) shift ;;
+        *) break ;;
+    esac
+done
+shift
+exec sh -c "$1"
+SH
+cat > "$B/timeout" <<'SH'
+#!/bin/sh
+# The isolate's `timeout <n>s cmd...`: the host-side supervisor enforces
+# the limit here, so this only runs the command.
+shift
+exec "$@"
+SH
+chmod +x "$B/docker" "$B/podman" "$B/ssh" "$B/timeout"

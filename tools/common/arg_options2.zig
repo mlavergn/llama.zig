@@ -1,5 +1,6 @@
-//! The option table, part two: the options after `arg_options.zig`'s
-//! first 68, from `--rope-scaling` to `--check`.
+//! The option table, part two: from `--rope-scaling` to `-npl`
+//! -- arg.cpp's lines 2330 to 3273; `arg_options3.zig` and `arg_options4.zig`
+//! go on.
 //!
 //! # Provenance
 //!
@@ -12,10 +13,10 @@
 //! `llm_add_n_cpu_ffn_overrides`. Each names what it ports and the line it
 //! began at.
 //!
-//! The server's `-np` and `--rpc` -- added only when `llama_supports_rpc()`,
-//! never here, though the question is still asked -- are not among them: no
-//! tool ported admits them. The multimodal projector's options
-//! (`mmproj_examples`) are, for `llama-mtmd-cli` and `llama-tts`.
+//! `--rpc` -- added only when `llama_supports_rpc()`, never here, though the
+//! question is still asked -- is not among them. The multimodal projector's
+//! options (`mmproj_examples`) are, for `llama-mtmd-cli`, `llama-tts` and
+//! `llama-server`.
 
 const std = @import("std");
 const c = @import("tools_h");
@@ -35,7 +36,7 @@ const S = [:0]const u8;
 
 /// Ports `list_builtin_chat_templates` (arg.cpp:1319 @b29c606e2): libllama's
 /// built-in template names, comma-separated.
-fn listBuiltinChatTemplates(a: std.mem.Allocator) ![:0]const u8 {
+pub fn listBuiltinChatTemplates(a: std.mem.Allocator) ![:0]const u8 {
     const n = c.llama_chat_builtin_templates(null, 0);
     const names = try a.alloc([*c]const u8, @intCast(n));
     _ = c.llama_chat_builtin_templates(names.ptr, names.len);
@@ -49,7 +50,7 @@ fn listBuiltinChatTemplates(a: std.mem.Allocator) ![:0]const u8 {
 
 /// `mmproj_examples` (arg.cpp:60 @b29c606e2): the examples that load an
 /// mmproj.
-const mmproj_examples = [_]params_mod.Example{ .mtmd, .server, .cli, .tts };
+pub const mmproj_examples = [_]params_mod.Example{ .mtmd, .server, .cli, .tts };
 
 extern fn exit(code: c_int) noreturn;
 
@@ -65,7 +66,7 @@ const kv_cache_types = [_]c.ggml_type{
 };
 
 /// Ports `kv_cache_type_from_str` (arg.cpp:316 @b29c606e2).
-fn kvCacheTypeFromStr(s: []const u8) !c.ggml_type {
+pub fn kvCacheTypeFromStr(s: []const u8) !c.ggml_type {
     for (kv_cache_types) |t| {
         if (std.mem.eql(u8, std.mem.span(c.ggml_type_name(t)), s)) return t;
     }
@@ -74,7 +75,7 @@ fn kvCacheTypeFromStr(s: []const u8) !c.ggml_type {
 }
 
 /// Ports `get_all_kv_cache_types` (arg.cpp:325 @b29c606e2).
-fn allKvCacheTypes(a: std.mem.Allocator) ![:0]const u8 {
+pub fn allKvCacheTypes(a: std.mem.Allocator) ![:0]const u8 {
     var s: std.ArrayList(u8) = .empty;
     for (kv_cache_types, 0..) |t, i| {
         try s.appendSlice(a, std.mem.span(c.ggml_type_name(t)));
@@ -84,7 +85,7 @@ fn allKvCacheTypes(a: std.mem.Allocator) ![:0]const u8 {
 }
 
 /// Ports `parse_device_list` (arg.cpp:1116 @b29c606e2).
-fn parseDeviceList(p: *Params, value: []const u8) !std.ArrayList(c.ggml_backend_dev_t) {
+pub fn parseDeviceList(p: *Params, value: []const u8) !std.ArrayList(c.ggml_backend_dev_t) {
     var devices: std.ArrayList(c.ggml_backend_dev_t) = .empty;
     const dev_names = try strings.split(p.arena, value, ',');
     if (dev_names.items.len == 0) return throwStr("no devices specified");
@@ -132,7 +133,7 @@ pub fn printAvailableDevices(a: std.mem.Allocator) !void {
 }
 
 /// Ports `parse_tensor_buffer_overrides` (arg.cpp:252 @b29c606e2).
-fn parseTensorBufferOverrides(p: *Params, value: []const u8) !void {
+pub fn parseTensorBufferOverrides(p: *Params, value: []const u8, overrides_out: *std.ArrayList(c.llama_model_tensor_buft_override)) !void {
     c.ggml_backend_load_all();
 
     // `std::map<std::string, buft>`: by name, sorted
@@ -174,12 +175,12 @@ fn parseTensorBufferOverrides(p: *Params, value: []const u8) !void {
             for (buft_list.items) |e| io.printf("  %s\n", .{c.ggml_backend_buft_name(e.buft)});
             return throwStr("unknown buffer type");
         }
-        try p.tensor_buft_overrides.append(p.arena, .{ .pattern = (try p.arena.dupeSentinel(u8, tensor_name, 0)).ptr, .buft = found });
+        try overrides_out.append(p.arena, .{ .pattern = (try p.arena.dupeSentinel(u8, tensor_name, 0)).ptr, .buft = found });
     }
 }
 
 /// Ports `LLM_FFN_EXPS_REGEX` (common/common.h:1131 @b29c606e2).
-const llm_ffn_exps_regex = "\\.ffn_(up|down|gate|gate_up)_(ch|)exps";
+pub const llm_ffn_exps_regex = "\\.ffn_(up|down|gate|gate_up)_(ch|)exps";
 
 /// Ports `LLM_FFN_DENSE_REGEX` (common/common.h:1133 @b29c606e2).
 const llm_ffn_dense_regex = "\\.ffn_(up|down|gate)\\.";
@@ -194,11 +195,11 @@ fn llmFfnBlockRegex(p: *Params, idx: c_int, ffn_regex: []const u8) ![:0]const u8
 /// Ports `llm_add_n_cpu_ffn_overrides` (common/common.h:1143 @b29c606e2):
 /// one CPU buffer-type override per layer below `n`. The C keeps the
 /// patterns alive in a static list; here the arena does.
-fn llmAddNCpuFfnOverrides(p: *Params, n: c_int, ffn_regex: []const u8) !void {
+pub fn llmAddNCpuFfnOverrides(p: *Params, n: c_int, ffn_regex: []const u8, overrides: *std.ArrayList(c.llama_model_tensor_buft_override)) !void {
     var i: c_int = 0;
     while (i < n) : (i += 1) {
         const re = try llmFfnBlockRegex(p, i, ffn_regex);
-        try p.tensor_buft_overrides.append(p.arena, .{ .pattern = re.ptr, .buft = c.ggml_backend_cpu_buffer_type() });
+        try overrides.append(p.arena, .{ .pattern = re.ptr, .buft = c.ggml_backend_cpu_buffer_type() });
     }
 }
 
@@ -406,14 +407,29 @@ pub fn add(ctx: *Context) !void {
             log.wrn("DEPRECATED: --defrag-thold is deprecated and no longer necessary to specify\n", .{});
         }
     }.f } }).setEnv("LLAMA_ARG_DEFRAG_THOLD"));
-    // arg.cpp:2551, the arm for every example but the server
-    if (ex != .server) {
+    // arg.cpp:2538
+    if (ex == .server) {
+        // this is to make sure this option appears in the server-specific section of the help message
+        try ctx.add((Arg{ .args = &.{ "-np", "--parallel" }, .value_hint = "N", .help = try ctx.fmt("number of server slots (default: %d, -1 = auto)", .{p.n_parallel}), .handler = .{ .int = struct {
+            fn f(q: *Params, value: c_int) !void {
+                if (value == 0) return throwStr("error: invalid value for n_parallel\n");
+                q.n_parallel = value;
+            }
+        }.f } }).setEnv("LLAMA_ARG_N_PARALLEL").setExamples(&.{.server}));
+    } else {
+        // arg.cpp:2551
         try ctx.add((Arg{ .args = &.{ "-np", "--parallel" }, .value_hint = "N", .help = try ctx.fmt("number of parallel sequences to decode (default: %d)", .{p.n_parallel}), .handler = .{ .int = struct {
             fn f(q: *Params, value: c_int) !void {
                 q.n_parallel = value;
             }
         }.f } }).setEnv("LLAMA_ARG_N_PARALLEL"));
     }
+    // arg.cpp:2566
+    try ctx.add((Arg{ .args = &.{ "-cb", "--cont-batching" }, .args_neg = &.{ "-nocb", "--no-cont-batching" }, .help = try ctx.fmt("whether to enable continuous batching (a.k.a dynamic batching) (default: %s)", .{@as([*:0]const u8, if (p.cont_batching) "enabled" else "disabled")}), .handler = .{ .bool_ = struct {
+        fn f(q: *Params, value: bool) !void {
+            q.cont_batching = value;
+        }
+    }.f } }).setExamples(&.{.server}).setEnv("LLAMA_ARG_CONT_BATCHING"));
     // arg.cpp:2574
     try ctx.add((Arg{ .args = &.{ "-mm", "--mmproj" }, .value_hint = "FILE", .help = "path to a multimodal projector file. see tools/mtmd/README.md\nnote: if -hf is used, this argument can be omitted", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -479,6 +495,12 @@ pub fn add(ctx: *Context) !void {
             q.image_max_tokens = value;
         }
     }.f } }).setExamples(&mmproj_examples).setEnv("LLAMA_ARG_IMAGE_MAX_TOKENS"));
+    // arg.cpp:2648
+    try ctx.add((Arg{ .args = &.{"--mtmd-batch-max-tokens"}, .value_hint = "N", .help = try ctx.fmt("maximum number of image tokens per batch when encoding images (default: %d)", .{p.mtmd_batch_max_tokens}), .handler = .{ .int = struct {
+        fn f(q: *Params, value: c_int) !void {
+            q.mtmd_batch_max_tokens = value;
+        }
+    }.f } }).setExamples(&.{.server}).setEnv("LLAMA_ARG_MTMD_BATCH_MAX_TOKENS"));
     // arg.cpp:2655
     try ctx.add((Arg{ .args = &.{"--video-fps"}, .value_hint = "N", .help = try ctx.fmt("target video frame rate (default: %.1f)", .{@as(f64, p.video_fps)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -529,7 +551,7 @@ pub fn add(ctx: *Context) !void {
             } else return throwStr("invalid value");
         }
     }.f } }).setEnv("LLAMA_ARG_LAZY_MODE"));
-    // arg.cpp:2705
+    // arg.cpp:2718
     try ctx.add((Arg{ .args = &.{"--numa"}, .value_hint = "TYPE", .help = "attempt optimizations that help on some NUMA systems\n- distribute: spread execution evenly over all nodes\n- isolate: only spawn threads on CPUs on the node that execution started on\n- numactl: use the CPU map provided by numactl\nif run without this previously, it is recommended to drop the system page cache before using this\nsee https://github.com/ggml-org/llama.cpp/issues/1437", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             if (std.mem.eql(u8, value, "distribute") or value.len == 0) {
@@ -557,7 +579,7 @@ pub fn add(ctx: *Context) !void {
     // arg.cpp:2749
     try ctx.add((Arg{ .args = &.{ "-ot", "--override-tensor" }, .value_hint = "<tensor name pattern>=<buffer type>,...", .help = "override tensor buffer type", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
-            try parseTensorBufferOverrides(q, value);
+            try parseTensorBufferOverrides(q, value, &q.tensor_buft_overrides);
         }
     }.f } }).setEnv("LLAMA_ARG_OVERRIDE_TENSOR"));
     // arg.cpp:2755
@@ -582,7 +604,7 @@ pub fn add(ctx: *Context) !void {
             .int = struct {
                 fn f(q: *Params, value: c_int) !void {
                     if (value < 0) return throwStr("invalid value");
-                    try llmAddNCpuFfnOverrides(q, value, llm_ffn_exps_regex);
+                    try llmAddNCpuFfnOverrides(q, value, llm_ffn_exps_regex, &q.tensor_buft_overrides);
                 }
             }.f,
         },
@@ -596,7 +618,7 @@ pub fn add(ctx: *Context) !void {
             .int = struct {
                 fn f(q: *Params, value: c_int) !void {
                     if (value < 0) return throwStr("invalid value");
-                    try llmAddNCpuFfnOverrides(q, value, llm_ffn_dense_regex);
+                    try llmAddNCpuFfnOverrides(q, value, llm_ffn_dense_regex, &q.tensor_buft_overrides);
                 }
             }.f,
         },
@@ -784,6 +806,26 @@ pub fn add(ctx: *Context) !void {
             q.control_vector_layer_end = try arg.stoi(end);
         }
     }.f } });
+    // arg.cpp:3006
+    try ctx.add((Arg{ .args = &.{ "-a", "--alias" }, .value_hint = "STRING", .help = "set model name aliases, comma-separated (to be used by API)", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            const parts = try strings.split(q.arena, value, ',');
+            for (parts.items) |part| {
+                const alias = strings.strip(part);
+                if (alias.len != 0) try q.model_alias.insert(q.arena, try arg.dupe(q, alias));
+            }
+        }
+    }.f } }).setExamples(&.{.server}).setEnv("LLAMA_ARG_ALIAS"));
+    // arg.cpp:3018
+    try ctx.add((Arg{ .args = &.{"--tags"}, .value_hint = "STRING", .help = "set model tags, comma-separated (informational, not used for routing)", .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            const parts = try strings.split(q.arena, value, ',');
+            for (parts.items) |part| {
+                const tag = strings.strip(part);
+                if (tag.len != 0) try q.model_tags.insert(q.arena, try arg.dupe(q, tag));
+            }
+        }
+    }.f } }).setExamples(&.{.server}).setEnv("LLAMA_ARG_TAGS"));
     // arg.cpp:3030
     try ctx.add((Arg{ .args = &.{ "-m", "--model" }, .value_hint = "FNAME", .help = if (ex == .export_lora) "model path from which to load base model" else "model path to load", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -942,156 +984,6 @@ pub fn add(ctx: *Context) !void {
             try q.n_pl.appendSlice(q.arena, v.items);
         }
     }.f } }).setExamples(&.{.bench}));
-    // arg.cpp:3657
-    try ctx.add((Arg{ .args = &.{"--jinja"}, .args_neg = &.{"--no-jinja"}, .help = try ctx.fmt("whether to use jinja template engine for chat (default: %s)", .{@as([*:0]const u8, if (p.use_jinja) "enabled" else "disabled")}), .handler = .{ .bool_ = struct {
-        fn f(q: *Params, value: bool) !void {
-            q.use_jinja = value;
-        }
-    }.f } }).setExamples(&.{ .server, .completion, .cli, .mtmd }).setEnv("LLAMA_ARG_JINJA"));
-    // arg.cpp:3736
-    try ctx.add((Arg{ .args = &.{"--chat-template"}, .value_hint = "JINJA_TEMPLATE", .help = try ctx.fmt("set custom jinja chat template (default: template taken from model's metadata)\nif suffix/prefix are specified, template will be disabled\nonly commonly used templates are accepted (unless --jinja is set before this flag):\nlist of built-in templates:\n%s", .{(try listBuiltinChatTemplates(p.arena)).ptr}), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.chat_template = try arg.dupe(q, value);
-        }
-    }.f } }).setExamples(&.{ .completion, .cli, .server, .mtmd }).setEnv("LLAMA_ARG_CHAT_TEMPLATE"));
-    // arg.cpp:3813
-    const pos_z = try p.arena.dupeSentinel(u8, p.cvector_positive_file, 0);
-    try ctx.add((Arg{ .args = &.{"--positive-file"}, .value_hint = "FNAME", .help = try ctx.fmt("positive prompts file, one prompt per line (default: '%s')", .{pos_z.ptr}), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.cvector_positive_file = try arg.dupe(q, value);
-        }
-    }.f } }).setExamples(&.{.cvector_generator}));
-    // arg.cpp:3820
-    const neg_z = try p.arena.dupeSentinel(u8, p.cvector_negative_file, 0);
-    try ctx.add((Arg{ .args = &.{"--negative-file"}, .value_hint = "FNAME", .help = try ctx.fmt("negative prompts file, one prompt per line (default: '%s')", .{neg_z.ptr}), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.cvector_negative_file = try arg.dupe(q, value);
-        }
-    }.f } }).setExamples(&.{.cvector_generator}));
-    // arg.cpp:3827
-    try ctx.add((Arg{ .args = &.{"--pca-batch"}, .value_hint = "N", .help = try ctx.fmt("batch size used for PCA. Larger batch runs faster, but uses more memory (default: %d)", .{p.n_pca_batch}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
-            q.n_pca_batch = value;
-        }
-    }.f } }).setExamples(&.{.cvector_generator}));
-    // arg.cpp:3834
-    try ctx.add((Arg{ .args = &.{"--pca-iter"}, .value_hint = "N", .help = try ctx.fmt("number of iterations used for PCA (default: %d)", .{p.n_pca_iterations}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
-            q.n_pca_iterations = value;
-        }
-    }.f } }).setExamples(&.{.cvector_generator}));
-    // arg.cpp:3841
-    try ctx.add((Arg{ .args = &.{"--method"}, .value_hint = "{pca, mean}", .help = "dimensionality reduction method to be used (default: pca)", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            if (std.mem.eql(u8, value, "pca")) {
-                q.cvector_dimre_method = .pca;
-            } else if (std.mem.eql(u8, value, "mean")) {
-                q.cvector_dimre_method = .mean;
-            } else return throwStr("invalid value");
-        }
-    }.f } }).setExamples(&.{.cvector_generator}));
-    // arg.cpp:3850
-    try ctx.add((Arg{ .args = &.{"--output-format"}, .value_hint = "{md,jsonl}", .help = "output format for batched-bench results (default: md)", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            if (std.mem.eql(u8, value, "jsonl")) {
-                q.batched_bench_output_jsonl = true;
-            } else if (std.mem.eql(u8, value, "md")) {
-                q.batched_bench_output_jsonl = false;
-            } else return throwStr("invalid value");
-        }
-    }.f } }).setExamples(&.{.bench}));
-    // arg.cpp:3859
-    try ctx.add(.{ .args = &.{"--log-disable"}, .help = "Log disable", .handler = .{ .void_ = struct {
-        fn f(_: *Params) !void {
-            log.pause();
-        }
-    }.f } });
-    // arg.cpp:3866
-    try ctx.add((Arg{ .args = &.{"--log-file"}, .value_hint = "FNAME", .help = "Log to file", .handler = .{ .string = struct {
-        fn f(_: *Params, value: S) !void {
-            log.setFile(value);
-        }
-    }.f } }).setEnv("LLAMA_ARG_LOG_FILE"));
-    // arg.cpp:3873
-    try ctx.add((Arg{ .args = &.{"--log-jsonl"}, .args_neg = &.{"--no-log-jsonl"}, .help = "Log as JSONL (one JSON object per line) to stdout, this also disables colored logging (default: disabled)", .handler = .{ .bool_ = struct {
-        fn f(_: *Params, value: bool) !void {
-            log.setJsonl(value);
-        }
-    }.f } }).setEnv("LLAMA_ARG_LOG_JSONL"));
-    // arg.cpp:3893
-    try ctx.add((Arg{ .args = &.{"--log-colors"}, .value_hint = "[on|off|auto]", .help = "Set colored logging ('on', 'off', or 'auto', default: 'auto')\n'auto' enables colors when output is to a terminal", .handler = .{ .string = struct {
-        fn f(_: *Params, value: S) !void {
-            if (arg.isTruthy(value)) {
-                log.setColors(true);
-            } else if (arg.isFalsey(value)) {
-                log.setColors(false);
-            } else if (arg.isAutoy(value)) {
-                log.setColors(null);
-            } else return throw("error: unknown value for --log-colors: '%s'\n", .{value.ptr});
-        }
-    }.f } }).setEnv("LLAMA_ARG_LOG_COLORS"));
-    // arg.cpp:3910
-    try ctx.add(.{ .args = &.{ "-v", "--verbose", "--log-verbose" }, .help = "Set verbosity level to infinity (i.e. log all messages, useful for debugging)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
-            q.verbosity = std.math.maxInt(i32);
-            log.verbosity_thold = std.math.maxInt(i32);
-        }
-    }.f } });
-    // arg.cpp:3918
-    try ctx.add((Arg{ .args = &.{"--offline"}, .help = "Offline mode: forces use of cache, prevents network access", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
-            q.offline = true;
-        }
-    }.f } }).setExamples(&.{ .common, .download, .tokenize }).setEnv("LLAMA_ARG_OFFLINE"));
-    // arg.cpp:3925
-    try ctx.add((Arg{ .args = &.{ "-lv", "--verbosity", "--log-verbosity" }, .value_hint = "N", .help = try ctx.fmt("Set the verbosity threshold. Messages with a higher verbosity will be ignored. Values:\n - 0: generic output\n - 1: error\n - 2: warning\n - 3: info\n - 4: trace (more info)\n - 5: debug\n(default: %d)\n", .{p.verbosity}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
-            q.verbosity = value;
-            log.verbosity_thold = value;
-        }
-    }.f } }).setEnv("LLAMA_ARG_LOG_VERBOSITY"));
-    // arg.cpp:3940
-    try ctx.add((Arg{ .args = &.{"--log-prefix"}, .args_neg = &.{"--no-log-prefix"}, .help = "Enable prefix in log messages", .handler = .{ .bool_ = struct {
-        fn f(_: *Params, value: bool) !void {
-            log.setPrefix(value);
-        }
-    }.f } }).setEnv("LLAMA_ARG_LOG_PREFIX"));
-    // arg.cpp:3948
-    try ctx.add((Arg{ .args = &.{"--log-timestamps"}, .args_neg = &.{"--no-log-timestamps"}, .help = "Enable timestamps in log messages", .handler = .{ .bool_ = struct {
-        fn f(_: *Params, value: bool) !void {
-            log.setTimestamps(value);
-        }
-    }.f } }).setEnv("LLAMA_ARG_LOG_TIMESTAMPS"));
-    // arg.cpp:4076
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-type-k", "-ctkd", "--cache-type-k-draft" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for K for the draft model\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, c.ggml_type_name(p.spec_draft_cache_type_k) }), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.spec_draft_cache_type_k = try kvCacheTypeFromStr(value);
-        }
-    }.f } }).setEnv("LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_K"));
-    // arg.cpp:4089
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-type-v", "-ctvd", "--cache-type-v-draft" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for V for the draft model\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, c.ggml_type_name(p.spec_draft_cache_type_v) }), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.spec_draft_cache_type_v = try kvCacheTypeFromStr(value);
-        }
-    }.f } }).setEnv("LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_V"));
-    // arg.cpp:4413
-    try ctx.add((Arg{ .args = &.{"--tts-lang"}, .value_hint = "FNAME", .help = "language (ISO 639-1) for audio generation\nsee tts/README.md for per-model usage notes", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.tts_lang = try arg.dupe(q, value);
-        }
-    }.f } }).setExamples(&.{.tts}));
-    // arg.cpp:4421
-    try ctx.add((Arg{ .args = &.{"--tts-speaker-file"}, .value_hint = "FNAME", .help = "speaker file path for audio generation", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.tts_speaker_file = try arg.dupe(q, value);
-        }
-    }.f } }).setExamples(&.{.tts}));
-    // arg.cpp:4515
-    try ctx.add((Arg{ .args = &.{"--check"}, .help = try ctx.fmt("check rather than generate results (default: %s)", .{tf(p.check)}), .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
-            q.check = true;
-        }
-    }.f } }).setExamples(&.{.results}));
 }
 
 /// `std::stoull`.

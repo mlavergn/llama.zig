@@ -1,0 +1,163 @@
+# Model downloads (Stage 10 step 7, common/download.cpp and hf-cache.cpp)
+# against a plain-HTTP mock hub, one per side (hub.setup): the reference is
+# built without SSL, so only plain HTTP downloads. $MOCK is each side's
+# hub; downloads land in each side's own cache ($CWD/cache), never shared.
+# !mocklog compares the requests each hub saw: the paths, Range,
+# Authorization, User-Agent and Accept.
+!env LLAMA_CACHE=$CWD/cache
+!env MODEL_ENDPOINT=$MOCK
+!mask "--port",\s+"\d+"
+!mask load:   \d+$
+
+# --- -mu alone is router mode: the server decides it has no model before
+# the downloader would fill -m in (server.cpp:135), so nothing downloads
+!server -mu $MOCK/files/tiny.gguf -c 256 -np 1
+GET /models
+!mocklog
+
+# --- a URL (-mu) to the -m path, then from there
+!server -m $CWD/dl/tiny.gguf -mu $MOCK/files/tiny.gguf -c 256 -np 1 -lv 4
+!fulllog
+GET /props
+!mocklog
+!server -m $CWD/dl/tiny.gguf -mu $MOCK/files/tiny.gguf -c 256 -np 1 -lv 4
+!fulllog
+!mocklog
+# the server's ETag changed: downloaded again
+!server -m $CWD/dl/tiny.gguf -mu $MOCK/etag/v2/tiny.gguf -c 256 -np 1 -lv 4
+!fulllog
+!mocklog
+# the same ETag as saved: kept
+!server -m $CWD/dl/tiny.gguf -mu $MOCK/etag/v2/tiny.gguf -c 256 -np 1 -lv 4
+!mocklog
+# no ETag: whatever is cached is kept
+!server -m $CWD/dl/tiny.gguf -mu $MOCK/noetag/tiny.gguf -c 256 -np 1 -lv 4
+!mocklog
+# a projector by URL (-mmu) without -mm: into the cache directory
+!server -m $CWD/dl/tiny.gguf -mmu $MOCK/files/mmproj.gguf -c 256 -np 1 -lv 4
+!mocklog
+# to the path -m names
+!server -m $CWD/named.gguf -mu $MOCK/files/tiny2.gguf -c 256 -np 1 -lv 4
+!fulllog
+GET /props
+!mocklog
+# redirects are followed; no ranges; a split model's parts, all of them
+!server -m $CWD/dl/tiny5.gguf -mu $MOCK/redirect/tiny5.gguf -c 256 -np 1
+!mocklog
+!server -m $CWD/dl/tiny4.gguf -mu $MOCK/noranges/tiny4.gguf -c 256 -np 1
+!mocklog
+!server -m $CWD/dl/parts-00001-of-00002.gguf -mu $MOCK/files/parts-00001-of-00002.gguf -c 256 -np 1
+GET /props
+!mocklog
+# the first GET is cut short; the retry resumes with a Range
+!server -m $CWD/dl/tiny3.gguf -mu $MOCK/flaky/tiny3.gguf -c 256 -np 1 -lv 4
+!fulllog
+!mocklog
+
+# --- downloads that fail
+!server -m $CWD/dl/404 -mu $MOCK/status/404 -c 256 -np 1
+!mocklog
+!server -m $CWD/dl/tiny6.gguf -mu $MOCK/trunc/tiny6.gguf -c 256 -np 1 -lv 4
+!mocklog
+!server -m $CWD/dl/tiny7.gguf -mu $MOCK/headonly/tiny7.gguf -c 256 -np 1 -lv 4
+!mocklog
+!server -m $CWD/dl/model.gguf -mu https://example.invalid/model.gguf -c 256 -np 1
+!server -m $CWD/dl/model.gguf -mu ftp://example.invalid/model.gguf -c 256 -np 1
+!server -m $CWD/dl/notaurl -mu notaurl -c 256 -np 1
+!server -m $CWD/dl/model.gguf -mu http://127.0.0.1:1/model.gguf -c 256 -np 1
+!server -m $CWD/dl/model.gguf -mu http://[::1/model.gguf -c 256 -np 1
+!server -m $CWD/dl/model.gguf -mu http://127.0.0.1:notaport/model.gguf -c 256 -np 1
+!server -m $CWD/dl/never.gguf --offline -mu $MOCK/files/never.gguf -c 256 -np 1
+!server -m $CWD/dl/tiny.gguf --offline -mu $MOCK/files/tiny.gguf -c 256 -np 1
+!mocklog
+!server -dr ai/smollm2 -c 256 -np 1
+
+# --- a hub repository (-hf) through MODEL_ENDPOINT
+!server -hf test/tiny -c 256 -np 1 -lv 4
+!fulllog
+GET /props
+!mocklog
+!server -hf test/tiny:Q8_0 -c 256 -np 1 -lv 4
+!fulllog
+GET /props
+!mocklog
+!server -hf test/tiny -hff tiny-Q8_0.gguf -c 256 -np 1
+!mocklog
+!server -hf test/tiny:q4_k_m --offline -c 256 -np 1 -lv 4
+!fulllog
+!mocklog
+!server -hf test/split -c 256 -np 1
+!mocklog
+!server -hf test/nested -c 256 -np 1
+!mocklog
+!server -hf test/tiny:Q5_0 -c 256 -np 1
+!server -hf test/tiny -hff nope.gguf -c 256 -np 1
+!server -hf test/empty -c 256 -np 1
+!server -hf test/nope -c 256 -np 1
+!server -hf test/badref -c 256 -np 1 -lv 4
+!server -hf notarepo -c 256 -np 1
+!server -hf a/b/c -c 256 -np 1
+!server -hf test/tiny -hft hf_short -c 256 -np 1
+!mocklog
+!server -hf test/tiny -hft hf_0123456789abcdefghijklmnopqrstuvwxyzABCD -c 256 -np 1
+!mocklog
+# the default endpoint is https://huggingface.co/, which needs SSL
+!env MODEL_ENDPOINT=
+!server -hf test/tiny:Q2_K -c 256 -np 1
+!env HF_ENDPOINT=$MOCK
+!server -hf test/tiny -c 256 -np 1
+!mocklog
+!env MODEL_ENDPOINT=$MOCK
+
+# --- a preset repository: the server becomes a router over its preset.ini
+!server -hf test/preset -lv 4
+!fulllog
+GET /models
+GET /props
+!mocklog
+
+# --- the router over what the cache holds
+!server -c 256 -np 1 -lv 4
+!fulllog
+GET /models
+!sse /models/sse
+POST /models {"model":"test/vision"}
+!waitfor /models "id":"test/vision:Q4_K_M"
+!sseend
+GET /models
+POST /models {"model":"test/vision"}
+POST /models {"model":""}
+POST /models {}
+POST /models {"model":"notarepo"}
+POST /models {"model":"test/nope"}
+!sleep 2
+GET /models
+POST /models/load {"model":"test/tiny:Q8_0"}
+!waitfor /models "id":"test/tiny:Q8_0"[^{]*\{"value":"loaded"
+GET /models
+GET /props?model=test/tiny:Q8_0
+POST /models/unload {"model":"test/tiny:Q8_0"}
+!waitfor /models "id":"test/tiny:Q8_0"[^{]*\{"value":"unloaded"
+# a download cancelled by an unload while it runs
+!sse /models/sse
+POST /models {"model":"test/slowpoke"}
+!waitfor /models "id":"test/slowpoke"[^{]*\{"value":"downloading"
+# both sides' children well into their ~15 s download before either is
+# cancelled (each request goes to one side, then the other)
+!sleep 3
+POST /models/unload {"model":"test/slowpoke"}
+!sleep 1
+!sseend
+GET /models
+DELETE /models?model=test/vision:Q4_K_M
+GET /models
+DELETE /models?model=test/vision:Q4_K_M
+DELETE /models
+DELETE /models?model=test/split:Q8_0
+GET /models
+!mocklog
+
+# --- presets over cached models; one hides its cache entry
+!server --models-preset $DATA/dedup.ini -c 256 -np 1 -lv 4
+!fulllog
+GET /models

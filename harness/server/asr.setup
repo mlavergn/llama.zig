@@ -1,0 +1,18 @@
+#!/bin/bash
+# Writes the transcription cases' input into $DATA: a 16 kHz mono WAV.
+# Run once by scripts/server-diff asr.
+set -eu
+python3 -I - "$DATA" <<'PY'
+import math, struct, sys, os
+out = sys.argv[1]
+rate, n = 16000, 16000 * 2 // 5
+frames = bytearray()
+for i in range(n):
+    v = 0.4 * math.sin(2 * math.pi * 220 * i / rate) + 0.1 * math.sin(2 * math.pi * 682 * i / rate)
+    frames += struct.pack('<h', int(max(-1, min(1, v)) * 32767))
+hdr = b'RIFF' + struct.pack('<I', 36 + len(frames)) + b'WAVE'
+hdr += b'fmt ' + struct.pack('<IHHIIHH', 16, 1, 1, rate, rate * 2, 2, 16)
+hdr += b'data' + struct.pack('<I', len(frames))
+open(os.path.join(out, 'tone.wav'), 'wb').write(hdr + frames)
+open(os.path.join(out, 'junk.bin'), 'wb').write(b'not audio at all')
+PY

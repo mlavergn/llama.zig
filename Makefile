@@ -25,7 +25,7 @@ LINT_FILES := $(filter-out $(LINT_EXCLUDE),build.zig $(shell find $(LINT_DIRS) -
 
 .DEFAULT_GOAL := build
 
-.PHONY: test distclean build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff json-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat validate xcframework xcframework-check perf perf-cpu
+.PHONY: test distclean build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff json-diff schema-diff peg-diff chat-msg-diff chat-parse-diff spec-diff server-diff server-task-diff http-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat web ui validate xcframework xcframework-check perf perf-cpu
 
 CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
 
@@ -186,6 +186,12 @@ test:
 	./scripts/regex-diff
 	@printf '\n== common_json vs the port ==\n'
 	./scripts/json-diff
+	@printf '\n== json-schema-to-grammar.cpp vs the port ==\n'
+	./scripts/schema-diff
+	@printf '\n== peg-parser.cpp and chat-peg-parser.cpp vs the port ==\n'
+	./scripts/peg-diff
+	@printf '\n== chat.cpp, the auto-parser and parsers/ vs the port ==\n'
+	./scripts/chat-parse-diff
 	@printf '\n== unicode.cpp vs the port ==\n'
 	./scripts/unicode-diff
 	@printf '\n== llama-vocab.cpp vs the port ==\n'
@@ -432,6 +438,80 @@ regex-diff:
 json-diff:
 	./scripts/json-diff
 
+# tools/server/http.zig and tools/server/httplib/ against upstream's
+# server-http.cpp over cpp-httplib: the same routes on both, raw requests,
+# raw responses and every log line compared. See the header of
+# scripts/http-diff.
+http-diff:
+	./scripts/http-diff
+
+# cli/json/schema*.zig against upstream's json-schema.cpp and
+# json-schema-to-grammar.cpp, in one process: upstream's own test cases,
+# mutated and random schemas, the grammar text or the exception, byte for
+# byte. See the header of scripts/schema-diff.
+schema-diff:
+	zig build reference tools-ref --release=fast
+	./scripts/schema-diff
+
+# tools/common's sampler, reasoning budget, speculative drafters and n-gram
+# stores against upstream's common/ (libllama-common-ref), one process per
+# side: every draft, accepted run and candidate on bits, the stores' order
+# and saved bytes, and every log line, on Qwen3-0.6B and the draft fixtures.
+# See the header of scripts/spec-diff.
+spec-diff:
+	zig build reference --release=fast
+	./scripts/spec-diff
+
+# cli/peg/ and cli/common_chat/chat_peg.zig against upstream's
+# peg-parser.cpp and chat-peg-parser.cpp, in one process: the parsers
+# upstream's PEG tests build, recorded as they run, and random ones; every
+# parse complete and partial, the AST, the mapped message, the GBNF, the
+# saved arena, every exception. See the header of scripts/peg-diff.
+peg-diff:
+	zig build reference --release=fast
+	./scripts/peg-diff
+
+# cli/common_chat/'s chat data model against upstream's common/chat.cpp:
+# messages, tools and diffs both ways, every exception's text. See the
+# header of scripts/chat-msg-diff.
+chat-msg-diff:
+	./scripts/chat-msg-diff
+
+# cli/common_chat/'s templates, differential analysis, auto-parser,
+# per-model parsers and parse against upstream's common/chat.cpp and
+# friends, one process per side: every template applied over sampled
+# conversations, upstream's own chat tests recorded as they run, replies
+# whole, cut short and mutated. See the header of scripts/chat-parse-diff.
+chat-parse-diff:
+	zig build reference --release=fast
+	./scripts/chat-parse-diff
+
+# tools/server/'s data layer against upstream's server-common.cpp,
+# server-task.cpp, server-schema.cpp and server-chat.cpp: request fields
+# into task parameters and back, the OpenAI conversions on the legacy
+# template path, prompt tokenization with and without an mmproj, every
+# result in every response format, the SSE formatters, the prompt cache;
+# transcripts and logs. See the header of scripts/server-task-diff.
+server-task-diff:
+	./scripts/server-task-diff
+
+# Our llama-server against upstream's on request transcripts
+# (harness/server/<name>.cases), every case file or SERVER_CASES="core ...".
+# See the header of scripts/server-diff.
+# Both servers embed the web UI bundle `make ui` builds (build/ui.zig);
+# `ui` holds its asset routes.
+SERVER_CASES ?= core slots embd lora cache auth parallel spec sleep stream chat responses anthropic asr vision audio tools mcp proxy router hub ui
+server-diff: ui
+	@set -e; for n in $(SERVER_CASES); do SERVER_UI=$(UI_DIST) ./scripts/server-diff $$n; done
+
+# The web UI bundle both llama-servers embed (-Dui; build/ui.zig): upstream's
+# tools/ui, built with npm by llama.cpp.zmake's `make ui` into its .ui/dist,
+# once. Delete that directory to rebuild it. `npm run build` is not
+# reproducible, so both sides of a gate always embed this one bundle.
+UI_DIST ?= llama.cpp.zmake/.ui/dist
+ui:
+	@test -f $(UI_DIST)/index.html || $(MAKE) -C llama.cpp.zmake ui
+
 # src/llama/unicode.zig against the unmodified unicode.cpp, in one process:
 # every code point, UTF-8 decoding, the byte map, and every pre-tokenizer
 # pattern set in llama-vocab.cpp. See the header of scripts/unicode-diff.
@@ -521,6 +601,7 @@ gemma4-assistant-diff:
 
 # Diff our CLI's output against the C reference, end to end.
 parity-cli: buildcli
+	@[ "$$(uname -s)" = Darwin ] || zig build reference tools-ref --release=fast
 	./scripts/parity-cli $(MODEL) $(PARITY_NPRED)
 
 # Our CLI's conversation mode (-cnv) against a reference conversation over
@@ -540,7 +621,7 @@ fit-diff:
 # Upstream's other tools (PLAN.md, Decisions 61 and 62): each of our twelve ports run
 # beside upstream's own binary on harness/tools/<tool>.cases, stdout,
 # stderr, exit code and every file written compared. TOOL=<name> runs one.
-TOOLS ?= gguf-split quantize tokenize fit-params export-lora batched-bench cvector-generator imatrix perplexity bench tts mtmd-cli
+TOOLS ?= gguf-split quantize tokenize fit-params export-lora batched-bench cvector-generator imatrix perplexity bench tts mtmd-cli server
 tools-diff:
 	@set -e; for t in $(if $(TOOL),$(TOOL),$(TOOLS)); do ./scripts/tools-diff $$t; done
 
@@ -685,6 +766,23 @@ ref-chat:
 	@printf '\n$$ %s -m %s -p %s -n %s -st %s\n' "$(REF_CLI)" "$(MODEL)" "'$(PROMPT)'" "$(NPRED)" "$(ARGS)"
 	@$(REF_CLI) -m "$(MODEL)" -p "$(PROMPT)" -n $(NPRED) -st $(ARGS) </dev/null
 	@printf '\n'
+
+
+# Our llama-server on $(MODEL), port $(PORT), with the web UI embedded (`ui`)
+# and the default browser opened on it once /health answers 200 (503 while
+# the model loads). The server runs in the foreground; Ctrl-C stops it. The
+# waiter gives up after five minutes or as soon as the server has exited.
+# `llama.cpp.zmake`'s `make web` is the same over upstream's server.
+PORT ?= 8080
+OPEN ?= $(if $(filter Darwin,$(shell uname -s)),open,xdg-open)
+
+web: ui
+	zig build tools --release=fast -Dui=$(UI_DIST)
+	@( for i in $$(seq 1 600); do \
+	     curl -sf -o /dev/null http://127.0.0.1:$(PORT)/health && { $(OPEN) http://127.0.0.1:$(PORT)/; exit 0; }; \
+	     kill -0 $$$$ 2>/dev/null || exit 0; sleep 0.5; \
+	   done ) & \
+	exec ./zig-out/bin/llama-server -m $(MODEL) --port $(PORT) $(ARGS)
 
 #
 # Models

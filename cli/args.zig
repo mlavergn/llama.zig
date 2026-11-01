@@ -35,6 +35,7 @@
 
 const std = @import("std");
 const upstream = @import("upstream_flags.zig");
+const common_chat = @import("common_chat");
 
 /// Sampling and generation settings, plus what to run them on.
 ///
@@ -133,6 +134,46 @@ pub const Args = struct {
     /// `-sysf, --system-prompt-file FNAME`.
     system_prompt_file: []const u8 = "",
 
+    /// `--grammar`, `--grammar-file`, `-j, --json-schema` and
+    /// `-jf, --json-schema-file`: where the grammar constraining generation
+    /// comes from. Each sets upstream's `params.sampling.grammar` outright
+    /// in its handler in `common_params_parser_init` (common/arg.cpp:1391 @b29c606e2),
+    /// so the last one given wins.
+    grammar_source: GrammarSource = .none,
+    /// The GBNF `grammar_source` resolves to, filled in by `main.zig` before
+    /// the model loads -- upstream converts a schema while it parses the
+    /// command line -- and empty for none.
+    grammar: []const u8 = "",
+
+    /// `--reasoning-format FORMAT`: which parser the template's reply is read
+    /// with -- `none` leaves the thinking in the answer, `deepseek` and
+    /// `auto` take it out, `deepseek-legacy` too. `common_params`' default.
+    reasoning_format: common_chat.ReasoningFormat = .deepseek,
+    /// `-rea, --reasoning on|off|auto`: upstream's `enable_reasoning`, 1, 0
+    /// or -1. `on` and `off` also set the `enable_thinking` kwarg.
+    enable_reasoning: i8 = -1,
+    /// `--reasoning-budget N`: tokens the model may think for; -1 is
+    /// unlimited, 0 closes the block at once.
+    reasoning_budget: i32 = -1,
+    /// `--reasoning-budget-message MESSAGE`: written before the closing tag
+    /// when the budget forces it.
+    reasoning_budget_message: []const u8 = "",
+    /// `--skip-chat-parsing` / `--no-skip-chat-parsing`: render with the
+    /// template but read every reply as plain content -- upstream's
+    /// `force_pure_content_parser`.
+    skip_chat_parsing: bool = false,
+    /// What `--chat-template-kwargs`, `--reasoning on|off`,
+    /// `--reasoning-effort` and `--reasoning-preserve` did to upstream's
+    /// `default_template_kwargs`, in command-line order, which
+    /// `conversation.Kwargs` replays: a later write to a key wins, as the
+    /// `std::map`'s assignment does. The JSON is parsed there, before the model
+    /// loads, as upstream parses it with the command line.
+    kwarg_ops: [max_kwarg_ops]KwargOp = undefined,
+    n_kwarg_ops: usize = 0,
+    /// `-co, --color on|off|auto`: grey reasoning, as upstream's console
+    /// writes it. `auto` asks `tty_can_use_colors`, in `main.zig`.
+    color: Color = .auto,
+
     /// Whether to render the prompt through a chat template.
     ///
     /// **Opt-in, where upstream templates by default.** Our default mode is
@@ -156,6 +197,57 @@ pub const Args = struct {
     pub fn useChatTemplate(self: Args) bool {
         return self.chat and self.jinja;
     }
+
+    /// The kwarg writes, oldest first.
+    pub fn kwargOps(self: *const Args) []const KwargOp {
+        return self.kwarg_ops[0..self.n_kwarg_ops];
+    }
+};
+
+/// How many kwarg writes the command line may make; a longer one is refused
+/// rather than truncated.
+pub const max_kwarg_ops = 32;
+
+/// One write to upstream's `default_template_kwargs`, which maps a name to
+/// the JSON text of its value. Borrowed from `argv`, except the literals.
+pub const KwargOp = union(enum) {
+    /// `--chat-template-kwargs JSON`: every member of the object.
+    object: []const u8,
+    /// `name = value`, the value already JSON text (`--reasoning on` writes
+    /// `enable_thinking` = `true`).
+    set: struct { key: []const u8, value: []const u8 },
+    /// `--reasoning-effort LEVEL`: `reasoning_effort` = the level as a JSON
+    /// string, or `default`, which erases it.
+    effort: []const u8,
+};
+
+/// `--color`'s three answers.
+pub const Color = enum { auto, on, off };
+
+/// Where a grammar comes from, as the four flags that set one say. A value is
+/// borrowed from `argv`.
+pub const GrammarSource = union(enum) {
+    none,
+    /// `--grammar GRAMMAR`: GBNF, as given (`COMMON_GRAMMAR_TYPE_USER`).
+    gbnf: []const u8,
+    /// `--grammar-file FNAME`: GBNF, read from the file.
+    gbnf_file: []const u8,
+    /// `-j, --json-schema SCHEMA`: a JSON schema, converted
+    /// (`COMMON_GRAMMAR_TYPE_OUTPUT_FORMAT`).
+    schema: []const u8,
+    /// `-jf, --json-schema-file FILE`: the same, read from the file.
+    schema_file: []const u8,
+
+    /// The flag that set it, as upstream names it in an error.
+    pub fn flag(self: GrammarSource) []const u8 {
+        return switch (self) {
+            .none => "",
+            .gbnf => "--grammar",
+            .gbnf_file => "--grammar-file",
+            .schema => "--json-schema",
+            .schema_file => "--json-schema-file",
+        };
+    }
 };
 
 /// What went wrong, as distinct from how it is reported.
@@ -165,6 +257,11 @@ pub const Error = error{
     UnknownFlag,
     UnsupportedFlag,
     BadNumber,
+    /// A value the flag's handler throws on: `report` writes upstream's
+    /// `error while handling argument` line with its `what()`.
+    BadArgument,
+    /// More than `max_kwarg_ops` template kwarg writes.
+    TooManyKwargs,
     OutOfMemory,
 };
 
@@ -176,6 +273,8 @@ pub const Failure = struct {
     err: Error,
     /// The offending argument, borrowed from `argv` and valid as long as it is.
     arg: []const u8 = "",
+    /// For `BadArgument`, the value the flag was given.
+    value: []const u8 = "",
 
     /// Writes the message a user sees.
     ///
@@ -210,6 +309,15 @@ pub const Failure = struct {
             error.BadNumber => try w.print(
                 "error: {s} is not a valid number\n",
                 .{self.arg},
+            ),
+            error.BadArgument => {
+                try w.print("error while handling argument \"{s}\": ", .{self.arg});
+                try writeWhat(w, self.arg, self.value);
+                try w.print("\n", .{});
+            },
+            error.TooManyKwargs => try w.print(
+                "error: {s}: more than {d} template kwarg flags\n",
+                .{ self.arg, max_kwarg_ops },
             ),
             error.OutOfMemory => try w.print("error: out of memory\n", .{}),
         }
@@ -267,6 +375,19 @@ const specs = [_]Spec{
     .{ .names = &.{"--chat-template-file"}, .value = "FNAME", .help = "the same, read from a file" },
     .{ .names = &.{ "-sys", "--system-prompt" }, .value = "TEXT", .help = "system message prepended to the conversation" },
     .{ .names = &.{ "-sysf", "--system-prompt-file" }, .value = "FNAME", .help = "the same, read from a file" },
+    .{ .names = &.{"--grammar"}, .value = "GRAMMAR", .help = "BNF-like grammar to constrain generations" },
+    .{ .names = &.{"--grammar-file"}, .value = "FNAME", .help = "file to read grammar from" },
+    .{ .names = &.{ "-j", "--json-schema" }, .value = "SCHEMA", .help = "JSON schema to constrain generations" },
+    .{ .names = &.{ "-jf", "--json-schema-file" }, .value = "FILE", .help = "file containing a JSON schema to constrain generations" },
+    .{ .names = &.{"--reasoning-format"}, .value = "FORMAT", .help = "how thinking is read off a reply: none, auto, deepseek, deepseek-legacy (default: deepseek)" },
+    .{ .names = &.{ "-rea", "--reasoning" }, .value = "on|off|auto", .help = "use reasoning in the chat (default: auto, from the template)" },
+    .{ .names = &.{"--reasoning-budget"}, .value = "N", .help = "token budget for thinking: -1 unlimited, 0 immediate end (default: -1)" },
+    .{ .names = &.{"--reasoning-budget-message"}, .value = "MESSAGE", .help = "written before the end-of-thinking tag when the budget is spent" },
+    .{ .names = &.{"--reasoning-effort"}, .value = "LEVEL", .help = "reasoning effort given to the template, or 'default'" },
+    .{ .names = &.{ "--reasoning-preserve", "--no-reasoning-preserve" }, .help = "keep earlier turns' reasoning in the history (default: on)" },
+    .{ .names = &.{ "--skip-chat-parsing", "--no-skip-chat-parsing" }, .help = "read every reply as plain content, thinking included (default: off)" },
+    .{ .names = &.{"--chat-template-kwargs"}, .value = "STRING", .help = "JSON object of extra template variables" },
+    .{ .names = &.{ "-co", "--color" }, .value = "on|off|auto", .help = "grey the reasoning (default: auto, when a terminal)" },
     .{ .names = &.{ "-st", "--single-turn" }, .help = "generate once and exit (the only mode today)" },
     .{ .names = &.{ "-no-cnv", "--no-conversation" }, .help = "same; the spelling tools/main uses" },
     .{ .names = &.{ "-cnv", "--conversation", "-i", "--interactive" }, .help = "multi-turn conversation, reading turns from stdin" },
@@ -437,6 +558,56 @@ pub fn parse(argv: []const []const u8, w: *std.Io.Writer) !Result {
         } else if (eq(a, &.{ "-sysf", "--system-prompt-file" })) {
             args.system_prompt_file = value(argv, &i) orelse return missing(a);
             args.chat = true;
+        } else if (eq(a, &.{"--grammar"})) {
+            args.grammar_source = .{ .gbnf = value(argv, &i) orelse return missing(a) };
+        } else if (eq(a, &.{"--grammar-file"})) {
+            args.grammar_source = .{ .gbnf_file = value(argv, &i) orelse return missing(a) };
+        } else if (eq(a, &.{ "-j", "--json-schema" })) {
+            args.grammar_source = .{ .schema = value(argv, &i) orelse return missing(a) };
+        } else if (eq(a, &.{ "-jf", "--json-schema-file" })) {
+            args.grammar_source = .{ .schema_file = value(argv, &i) orelse return missing(a) };
+        } else if (eq(a, &.{"--reasoning-format"})) {
+            const v = value(argv, &i) orelse return missing(a);
+            args.reasoning_format = common_chat.ReasoningFormat.fromName(v) catch return badArg(a, v);
+            args.chat = true;
+        } else if (eq(a, &.{ "-rea", "--reasoning" })) {
+            const v = value(argv, &i) orelse return missing(a);
+            if (isTruthy(v)) {
+                args.enable_reasoning = 1;
+                if (!pushKwarg(&args, .{ .set = .{ .key = "enable_thinking", .value = "true" } })) return tooMany(a);
+            } else if (isFalsey(v)) {
+                args.enable_reasoning = 0;
+                if (!pushKwarg(&args, .{ .set = .{ .key = "enable_thinking", .value = "false" } })) return tooMany(a);
+            } else if (isAutoy(v)) {
+                args.enable_reasoning = -1;
+            } else return badArg(a, v);
+            args.chat = true;
+        } else if (eq(a, &.{"--reasoning-budget"})) {
+            const v = value(argv, &i) orelse return missing(a);
+            args.reasoning_budget = parseI32(v) catch return bad(a);
+            if (args.reasoning_budget < -1) return badArg(a, v);
+            args.chat = true;
+        } else if (eq(a, &.{"--reasoning-budget-message"})) {
+            args.reasoning_budget_message = value(argv, &i) orelse return missing(a);
+            args.chat = true;
+        } else if (eq(a, &.{"--reasoning-effort"})) {
+            const v = value(argv, &i) orelse return missing(a);
+            if (!pushKwarg(&args, .{ .effort = v })) return tooMany(a);
+            args.chat = true;
+        } else if (eq(a, &.{ "--reasoning-preserve", "--no-reasoning-preserve" })) {
+            const on = std.mem.eql(u8, a, "--reasoning-preserve");
+            if (!pushKwarg(&args, .{ .set = .{ .key = "preserve_reasoning", .value = if (on) "true" else "false" } })) return tooMany(a);
+            args.chat = true;
+        } else if (eq(a, &.{ "--skip-chat-parsing", "--no-skip-chat-parsing" })) {
+            args.skip_chat_parsing = std.mem.eql(u8, a, "--skip-chat-parsing");
+            args.chat = true;
+        } else if (eq(a, &.{"--chat-template-kwargs"})) {
+            const v = value(argv, &i) orelse return missing(a);
+            if (!pushKwarg(&args, .{ .object = v })) return tooMany(a);
+            args.chat = true;
+        } else if (eq(a, &.{ "-co", "--color" })) {
+            const v = value(argv, &i) orelse return missing(a);
+            args.color = if (isTruthy(v)) .on else if (isFalsey(v)) .off else if (isAutoy(v)) .auto else return badArg(a, v);
         } else if (eq(a, &.{"--no-show-timings"})) {
             args.show_timings = false;
         } else if (eq(a, &.{ "-cnv", "--conversation", "-i", "--interactive" })) {
@@ -475,6 +646,39 @@ fn bad(arg: []const u8) Result {
     return .{ .fail = .{ .err = error.BadNumber, .arg = arg } };
 }
 
+fn tooMany(arg: []const u8) Result {
+    return .{ .fail = .{ .err = error.TooManyKwargs, .arg = arg } };
+}
+
+fn badArg(arg: []const u8, v: []const u8) Result {
+    return .{ .fail = .{ .err = error.BadArgument, .arg = arg, .value = v } };
+}
+
+/// Records a kwarg write; false when the command line has made too many.
+/// The caller reports that as `tooMany`.
+fn pushKwarg(args: *Args, op: KwargOp) bool {
+    if (args.n_kwarg_ops == max_kwarg_ops) return false;
+    args.kwarg_ops[args.n_kwarg_ops] = op;
+    args.n_kwarg_ops += 1;
+    return true;
+}
+
+/// The `what()` of the exception the flag's handler in
+/// `common_params_parser_init` throws on `v` (common/arg.cpp @b29c606e2):
+/// `common_reasoning_format_from_name`'s, `--reasoning`'s and `--color`'s
+/// own, and `--reasoning-budget`'s "invalid value".
+fn writeWhat(w: *std.Io.Writer, flag: []const u8, v: []const u8) !void {
+    if (std.mem.eql(u8, flag, "--reasoning-format")) {
+        try w.print("Unknown reasoning format: {s}", .{v});
+    } else if (std.mem.eql(u8, flag, "--reasoning-budget")) {
+        try w.print("invalid value", .{});
+    } else {
+        // `--reasoning` and `--color`; the handler's message carries its own newline.
+        const name = if (eq(flag, &.{ "-rea", "--reasoning" })) "--reasoning" else "--color";
+        try w.print("error: unknown value for {s}: '{s}'\n", .{ name, v });
+    }
+}
+
 /// `llama_max_devices` (src/llama.cpp:86 @b29c606e2), which sizes upstream's
 /// `fit_params_target`.
 pub const max_devices = 16;
@@ -487,6 +691,11 @@ fn isTruthy(v: []const u8) bool {
 /// Ports `is_falsey` (arg.cpp:1335 @b29c606e2), in `common_arg_utils`.
 fn isFalsey(v: []const u8) bool {
     return eq(v, &.{ "off", "disabled", "false", "0" });
+}
+
+/// Ports `is_autoy` (arg.cpp:1339 @b29c606e2), in `common_arg_utils`.
+fn isAutoy(v: []const u8) bool {
+    return eq(v, &.{ "auto", "-1" });
 }
 
 /// Parses `-fitt`'s value as upstream's handler for it in `common/arg.cpp`
@@ -628,7 +837,7 @@ test {
 
 /// Parses into a `Result` with a throwaway writer, for the tests below.
 fn parseForTest(argv: []const []const u8) !Result {
-    var buf: [4096]u8 = undefined;
+    var buf: [16384]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
     return parse(argv, &w);
 }
@@ -844,7 +1053,7 @@ test "escape processing releases its buffer on every path" {
 }
 
 test "help lists every supported flag" {
-    var buf: [8192]u8 = undefined;
+    var buf: [16384]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
     try help(&w);
     const text = w.buffered();
@@ -856,6 +1065,16 @@ test "help lists every supported flag" {
             }
         }
     }
+}
+
+test "the last grammar flag wins, whichever kind it is" {
+    const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--grammar", "root ::= \"a\"", "-j", "{}" });
+    try testing.expectEqualStrings("{}", r.ok.grammar_source.schema);
+    const f = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-jf", "s.json", "--grammar-file", "g.gbnf" });
+    try testing.expectEqualStrings("g.gbnf", f.ok.grammar_source.gbnf_file);
+    try testing.expectEqualStrings("--grammar-file", f.ok.grammar_source.flag());
+    const m = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--json-schema" });
+    try testing.expectEqual(Error.MissingValue, m.fail.err);
 }
 
 test "timings default on, and both spellings of the switch work" {
@@ -870,4 +1089,45 @@ test "timings default on, and both spellings of the switch work" {
     // Later flags win, as with every other option here.
     const back_on = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--no-show-timings", "--show-timings" });
     try testing.expect(back_on.ok.show_timings);
+}
+
+test "the reasoning flags take upstream's values, imply chat, and refuse the rest" {
+    const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--reasoning-format", "none", "-rea", "off", "--reasoning-budget", "0", "--skip-chat-parsing" });
+    try testing.expectEqual(common_chat.ReasoningFormat.none, r.ok.reasoning_format);
+    try testing.expectEqual(@as(i8, 0), r.ok.enable_reasoning);
+    try testing.expectEqual(@as(i32, 0), r.ok.reasoning_budget);
+    try testing.expect(r.ok.skip_chat_parsing);
+    try testing.expect(r.ok.useChatTemplate());
+    // `--reasoning off` writes the kwarg as well as the switch.
+    try testing.expectEqualStrings("enable_thinking", r.ok.kwargOps()[0].set.key);
+    try testing.expectEqualStrings("false", r.ok.kwargOps()[0].set.value);
+
+    const defaults = try parseForTest(&.{ "llamazig", "-m", "m.gguf" });
+    try testing.expectEqual(common_chat.ReasoningFormat.deepseek, defaults.ok.reasoning_format);
+    try testing.expectEqual(@as(i8, -1), defaults.ok.enable_reasoning);
+    try testing.expectEqual(Color.auto, defaults.ok.color);
+
+    for ([_][2][]const u8{
+        .{ "--reasoning-format", "bogus" },
+        .{ "--reasoning", "maybe" },
+        .{ "--reasoning-budget", "-2" },
+        .{ "--color", "sometimes" },
+    }) |fv| {
+        const f = try parseForTest(&.{ "llamazig", "-m", "m.gguf", fv[0], fv[1] });
+        try testing.expectEqual(Error.BadArgument, f.fail.err);
+    }
+    var buf: [256]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&buf);
+    const f = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--reasoning", "maybe" });
+    try f.fail.report(&w);
+    try testing.expectEqualStrings("error while handling argument \"--reasoning\": error: unknown value for --reasoning: 'maybe'\n\n", w.buffered());
+}
+
+test "the kwarg flags are kept in command-line order" {
+    const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--chat-template-kwargs", "{\"a\":1}", "--reasoning-effort", "high", "--no-reasoning-preserve", "--reasoning", "auto" });
+    const ops = r.ok.kwargOps();
+    try testing.expectEqual(@as(usize, 3), ops.len);
+    try testing.expectEqualStrings("{\"a\":1}", ops[0].object);
+    try testing.expectEqualStrings("high", ops[1].effort);
+    try testing.expectEqualStrings("false", ops[2].set.value);
 }

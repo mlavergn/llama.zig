@@ -1,0 +1,962 @@
+#!/usr/bin/env python3
+"""Run our llama-server and upstream's on the same request transcripts and
+require the same answers (PLAN.md, Decision 65, "Stage 10").
+
+Each case file, harness/server/<name>.cases, is a sequence of lines:
+
+    # a comment
+    !server <args>        (re)start both servers with these arguments; the
+                          script adds --host 127.0.0.1 --port N. $FIX, $VOCAB,
+                          $QWEN3, $QWEN35 and $MM expand. Their logs up to
+                          "server is listening" are compared, masked.
+    !header Name: value   send this header with every later request
+    !noheaders            stop sending the headers set so far
+    !mask-key <key>       mask this JSON key's value, at any depth, in both
+                          sides' bodies from here on
+    !mask <regex>         replace every match in bodies and logs by "<M>"
+    !droplog <regex>      leave the log lines this matches (after masking)
+                          out of every log comparison: a line whose text is
+                          another library's, such as the Jinja engine's own
+                          message, which the port does not reproduce
+    !parallel             send the requests up to !end at once, each on
+                          its own connection and thread; each is compared
+                          as a lone request is, in the order written
+    !end                  ends a !parallel block
+    !abandon              send the next request and hang up once its
+                          response has begun; only its status is compared.
+                          What the server did about it shows in later
+                          requests (/slots) and in !fulllog
+    !control <action>     the next request is a stream: once its first
+                          event arrives, POST /v1/chat/completions/control
+                          {"id": <the stream's id>, "action": <action>} on a
+                          second connection. The control's answer is
+                          compared whole; of the stream, its status and how
+                          it ended, since where a forced end lands is timing
+    !sleep <seconds>      wait before the next line
+    !fulllog              compare the running servers' whole logs, masked,
+                          once they stop (at the next !server or the end):
+                          the slots' decisions -- LRU picks, cache reuse,
+                          context shifts, checkpoints -- show there, at
+                          -lv 4, and nowhere in a response
+    !fresh <dir>          (re)make each side's own scratch directory, $WORK,
+                          as a copy of $DATA/<dir>: a tool that writes
+                          there changes only its own side's
+    !env KEY=VALUE        set KEY for servers started from here on ($PATH
+                          and the like expand from the environment);
+                          !noenv drops them
+    !waitfor <path> <re>  poll GET <path> on each side until its body
+                          matches the regex (at most 120 s); not compared,
+                          but a side that never matches is a difference.
+                          Router mode changes a model's status in the
+                          background; this waits for it
+    !mocklog              compare what each side's mock hub was asked since
+                          the last !mocklog, sorted (harness/server/mock_hub.py;
+                          a setup starts one per side and names them
+                          MOCK_REF and MOCK_PORT in setup.env)
+    !sse <path>           open an event stream on each side and keep
+                          reading it in the background, as requests go on
+    !sseend               hang up the !sse streams and compare their
+                          events. A child's load-progress events between
+                          its first and its last ("value": 1) are dropped,
+                          and a download's between its start and its end:
+                          both are throttled by the clock. The same event
+                          twice in a row counts once
+    !uiassets             GET every file of the web UI bundle both servers
+                          embed (SERVER_UI=<dist>, passed to the build as
+                          -Dui); a binary body is compared by its bytes
+    !etag <path>          read each side's ETag for <path>, for $ETAG in
+                          later headers
+    FORM <path> <json>    a multipart/form-data POST: each member of the
+                          JSON object a text field, or, for a value
+                          "@file:<path>", a file upload of that path's bytes
+                          (a list of values repeats the field)
+    <METHOD> <path> [body]
+                          one request; the body is the rest of the line,
+                          sent as-is (normally JSON). The status, the
+                          headers (Date and Keep-Alive dropped) and the body
+                          must agree. A text/event-stream response is read
+                          to its end and compared event by event.
+
+Both sides run every request in order, so a later request sees what an
+earlier one changed (a slot's cache, a LoRA scale). A JSON body is
+compared after masking; anything else on bytes.
+
+A case file whose cases need input files writes them with
+harness/server/<name>.setup, run once with $DATA set to a fresh directory
+outside both sides'; $DATA expands in !server lines and bodies. A setup
+may also write $DATA/setup.env (KEY=VALUE lines: more names to expand)
+and $DATA/pids (processes it left running, killed at the end).
+
+Per side, in paths, bodies, header values, !server arguments and !env
+values: $WORK is that side's scratch directory (!fresh), $CWD its
+server's working directory, $SPORT its server's port, and $MOCK its mock
+hub's URL. In what comes back, each side's own $WORK, $CWD, $MOCK and
+binary ($BIN) are written as those names, and 127.0.0.1:<its port> as
+127.0.0.1:$SPORT, so the two compare.
+
+Router mode (Stage 10 step 7): a router forwards each child's output into
+its own log as "[<port>] <line>". Those lines are taken out of the
+router's log and compared child by child -- each child named by the
+"spawning server instance with name=<n> on port <p>" line before it --
+since children and router write concurrently; a startup log keeps only
+the router's own lines. The router's monitor thread's lines (a child
+reaped or force-killed) are compared as a set, after the rest. Dropped from a child's: the blank lines and
+"cmd_child_to_router:state:" lines its state notices make (their number
+follows the load-progress throttle, a clock), and "child server
+monitoring thread started", which upstream logs while notify_to_router
+has the logger paused, so it is dropped or not by timing.
+
+Usage: scripts/server-diff <name> [--self]
+  --self              run upstream's server against itself: what differs
+                      there is nondeterminism the masks must cover, not a
+                      porting bug
+  SERVER_O=fast|safe  the build mode (ReleaseFast by default)
+  SERVER_DIFF_NOBUILD=1  use the binaries already in zig-out
+  SERVER_DIFF_OUT=<dir>  keep both transcripts there
+  SERVER_DIFF_FAILFAST=1 stop at the first difference (fault injection)
+"""
+
+import json
+import os
+import re
+import shlex
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Fields that differ between two runs of the same server by design: wall
+# clock, timings, and ids drawn from a random device.
+DEFAULT_MASK_KEYS = {
+    "created", "timings", "t_load_ms", "t_prompt_processing",
+    "t_token_generation", "prompt_ms", "predicted_ms", "prompt_per_second",
+    "predicted_per_second", "prompt_per_token_ms", "predicted_per_token_ms",
+    "t_start", "t_last_used", "system_fingerprint",
+    # `server_context` draws a fresh marker per process (get_media_marker).
+    "media_marker",
+    # prompt progress: the wall clock since the prompt started
+    "time_ms",
+}
+# `chatcmpl-<random>`, `cmpl-<random>` and the like.
+DEFAULT_MASKS = [
+    r"(chatcmpl|cmpl|resp|msg|call|fc|rs|item)[-_][A-Za-z0-9]{8,}",
+]
+# What a whole log (!fulllog) has beyond the startup's: timings and clocks.
+FULL_LOG_MASKS = [
+    r"t_last = -?\d+",
+    r"\d+(\.\d+)? t/s",
+    r"\d+(\.\d+)? tokens per second",
+    r"\d+\.\d+ s /",
+    r"took \d+\.\d+",
+    r"graphs reused = +\d+",
+    r"dur\(b,g,a\) = [0-9., ]+",
+    r"#calls\(b,g,a\) = [0-9 ]+,",
+    r"\d+\.\d+ MiB",
+]
+# A child's line in a router's log, after an optional log prefix.
+CHILD_LINE = re.compile(r"^(?:\d+\.\d{2}\.\d{3}\.\d{3} [A-Z] )?\[ *(\d+)\] ?(.*)$")
+SPAWN_LINE = re.compile(r"spawning server instance with name=(\S+) on port (\d+)")
+CHILD_DROP = re.compile(r"^\s*$|child server monitoring thread started|cmd_child_to_router:state:")
+# A router's monitor thread's own lines: a child reaped or force-killed.
+MONITOR_LINE = re.compile(r"srv +run: (instance name=|force-killing)")
+# Lines an HTTP thread logs, left out of a whole-log comparison.
+HTTP_THREAD_LINES = r"srv +stop: |srv +evict_and_ca|srv +server_strea|DELETE /v1/stream conv_id|srv +operator\(\): got (another )?exception|srv +operator\(\): \(CORS\)|unauthorized: Invalid API Key"
+LOG_MASKS = [
+    r"^\d+\.\d{2}\.\d{3}\.\d{3} ",           # common_log timestamps
+    r" *\d+(\.\d+)? ms",                       # timings, with their padding
+    r" *\d+(\.\d+)? tokens per second",
+    r"took \d+\.\d+ seconds",                 # the fit's time
+    r"0x[0-9a-f]+",                              # %p
+    r"port \d+", r"127\.0\.0\.1:\d+",
+    r", \d+ MiB free\)",
+    r"pid \d+",
+    # A unified-memory GPU's free memory (the GB10's CUDA0) is read live
+    # from the OS as each side starts, one after the other: the breakdown's
+    # free and unaccounted columns, and the fit's two lines that quote it.
+    # On the Mac (Metal) these never differed between the two starts.
+    r"= +\d+ \+ \(", r"\) \+ +\d+ \|",
+    r"vs\. \d+ MiB of free device memory",
+    r"will leave -?\d+ [<>]=? \d+ MiB",
+    r"final available_memory_kb: \d+", r" - \d+ MiB free$",
+]
+
+
+def die(msg):
+    print(f"FAIL: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def free_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    p = s.getsockname()[1]
+    s.close()
+    return p
+
+
+class Server:
+    def __init__(self, name, binary, workdir):
+        self.name, self.binary, self.workdir = name, binary, workdir
+        self.proc = None
+        self.port = None
+        self.log_path = None
+        self.n = 0
+
+    def start(self, args, extra_env=None):
+        self.stop()
+        self.n += 1
+        self.port = free_port()
+        self.log_path = os.path.join(self.workdir, f"server{self.n}.log")
+        log = open(self.log_path, "wb")
+        argv = [self.binary] + args + ["--host", "127.0.0.1", "--port", str(self.port)]
+        self.proc = subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT,
+                                     stdin=subprocess.DEVNULL, cwd=self.workdir,
+                                     env={**os.environ, "GGML_NO_BACKTRACE": "1", **(extra_env or {})})
+        deadline = time.time() + 120
+        # /health sits under --api-prefix
+        prefix = args[args.index("--api-prefix") + 1] if "--api-prefix" in args else ""
+        while time.time() < deadline:
+            if self.proc.poll() is not None:
+                return False
+            try:
+                st, _, _ = request(self.port, "GET", prefix + "/health", None, {})
+                if st == 200:
+                    # /health answers once is_ready is set, a moment before
+                    # "listening on" is logged: wait for it, so the startup
+                    # logs compared are whole
+                    while time.time() < deadline and self.proc.poll() is None:
+                        with open(self.log_path, "rb") as f:
+                            if b"listening on" in f.read():
+                                break
+                        time.sleep(0.05)
+                    return True
+            except OSError:
+                pass
+            time.sleep(0.2)
+        return False
+
+    def startup_log(self):
+        if self.proc is not None and self.proc.poll() is not None:
+            pass  # exited: its whole log is the startup log
+        with open(self.log_path, "rb") as f:
+            text = f.read().decode("utf-8", "replace")
+        lines = []
+        for line in text.splitlines():
+            lines.append(line)
+            if "server is listening" in line:
+                break
+        return lines
+
+    def stop(self):
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait()
+        self.proc = None
+
+
+def multipart(fields):
+    """A multipart/form-data body from a JSON object (see FORM above).
+    Returns (content type, bytes)."""
+    boundary = "----serverdiffboundary7MA4YWxkTrZu0gW"
+    out = b""
+    for k, vs in fields.items():
+        for v in (vs if isinstance(vs, list) else [vs]):
+            out += f"--{boundary}\r\n".encode()
+            if isinstance(v, str) and v.startswith("@file:"):
+                fn = v[len("@file:"):]
+                data = open(fn, "rb").read()
+                out += f'Content-Disposition: form-data; name="{k}"; filename="{os.path.basename(fn)}"\r\n'.encode()
+                out += b"Content-Type: application/octet-stream\r\n\r\n" + data + b"\r\n"
+            else:
+                out += f'Content-Disposition: form-data; name="{k}"\r\n\r\n'.encode()
+                out += str(v).encode() + b"\r\n"
+    out += f"--{boundary}--\r\n".encode()
+    return f"multipart/form-data; boundary={boundary}", out
+
+
+def request(port, method, path, body, headers):
+    """One request on a fresh connection. Returns (status, headers, payload),
+    where payload is the body, or the list of events for an event stream.
+    A body is a JSON string, or (content type, bytes) for a FORM."""
+    s = socket.create_connection(("127.0.0.1", port), timeout=300)
+    try:
+        ctype = "application/json"
+        if isinstance(body, tuple):
+            ctype, data = body
+        else:
+            data = body.encode() if body is not None else b""
+        lines = [f"{method} {path} HTTP/1.1", f"Host: 127.0.0.1:{port}", "Connection: close"]
+        for k, v in headers.items():
+            lines.append(f"{k}: {v}")
+        if body is not None:
+            lines.append(f"Content-Type: {ctype}")
+            lines.append(f"Content-Length: {len(data)}")
+        s.sendall(("\r\n".join(lines) + "\r\n\r\n").encode() + data)
+        raw = b""
+        while True:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            raw += chunk
+    finally:
+        s.close()
+    head, _, rest = raw.partition(b"\r\n\r\n")
+    head_lines = head.decode("latin-1").split("\r\n")
+    status = int(head_lines[0].split(" ")[1]) if head_lines and " " in head_lines[0] else -1
+    hdrs = []
+    for h in head_lines[1:]:
+        k, _, v = h.partition(":")
+        hdrs.append((k.strip(), v.strip()))
+    if any(k.lower() == "transfer-encoding" and "chunked" in v.lower() for k, v in hdrs):
+        rest = dechunk(rest)
+    ctype = next((v for k, v in hdrs if k.lower() == "content-type"), "")
+    if "text/event-stream" in ctype:
+        events = [e for e in rest.decode("utf-8", "replace").split("\n\n") if e != ""]
+        return status, hdrs, events
+    return status, hdrs, rest
+
+
+def abandon(port, method, path, body, headers):
+    """Sends one request and closes the connection as soon as the response
+    has begun. Returns its status."""
+    s = socket.create_connection(("127.0.0.1", port), timeout=300)
+    try:
+        data = body.encode() if body is not None else b""
+        lines = [f"{method} {path} HTTP/1.1", f"Host: 127.0.0.1:{port}"]
+        for k, v in headers.items():
+            lines.append(f"{k}: {v}")
+        if body is not None:
+            lines.append("Content-Type: application/json")
+            lines.append(f"Content-Length: {len(data)}")
+        s.sendall(("\r\n".join(lines) + "\r\n\r\n").encode() + data)
+        raw = b""
+        while b"\r\n\r\n" not in raw:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            raw += chunk
+    finally:
+        s.close()
+    head = raw.split(b"\r\n", 1)[0].decode("latin-1")
+    return int(head.split(" ")[1]) if " " in head else -1
+
+
+def control(port, method, path, body, headers, action):
+    """!control: a stream, and a control request on its id once its first
+    event has arrived. Returns the text compared."""
+    s = socket.create_connection(("127.0.0.1", port), timeout=300)
+    try:
+        data = body.encode() if body is not None else b""
+        lines = [f"{method} {path} HTTP/1.1", f"Host: 127.0.0.1:{port}", "Connection: close"]
+        for k, v in headers.items():
+            lines.append(f"{k}: {v}")
+        lines.append("Content-Type: application/json")
+        lines.append(f"Content-Length: {len(data)}")
+        s.sendall(("\r\n".join(lines) + "\r\n\r\n").encode() + data)
+        raw = b""
+        m = None
+        while m is None:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            raw += chunk
+            m = re.search(rb'data: (\{[^\n]*\})\n', raw)
+        cid = json.loads(m.group(1)).get("id", "") if m else ""
+        cst, _, cbody = request(port, "POST", "/v1/chat/completions/control",
+                                json.dumps({"id": cid, "action": action}), headers)
+        while True:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            raw += chunk
+    finally:
+        s.close()
+    head, _, rest = raw.partition(b"\r\n\r\n")
+    status = head.split(b"\r\n", 1)[0].decode("latin-1")
+    rest = dechunk(rest) if b"chunked" in head.lower() else rest
+    finish = []
+    for e in rest.decode("utf-8", "replace").split("\n\n"):
+        if e.startswith("data: {"):
+            for ch in json.loads(e[6:]).get("choices", []):
+                if ch.get("finish_reason"):
+                    finish.append(ch["finish_reason"])
+    return f"control status {cst}\n{cbody.decode('utf-8', 'replace')}\nstream {status}\nfinish {finish}"
+
+
+def dechunk(b):
+    out = b""
+    while b:
+        line, _, b = b.partition(b"\r\n")
+        try:
+            n = int(line.split(b";")[0], 16)
+        except ValueError:
+            return out + b"<bad chunk>" + line + b
+        if n == 0:
+            break
+        out += b[:n]
+        b = b[n + 2:]
+    return out
+
+
+def norm_log(lines, masks, full, droplogs):
+    """A log's lines, masked, without the !droplog ones; a router's
+    children's lines (see the module doc) after its own, child by child --
+    or dropped, for a startup log."""
+    router, children, names, seen = [], {}, {}, {}
+    for l in lines:
+        m = SPAWN_LINE.search(l)
+        if m:
+            seen[m.group(1)] = seen.get(m.group(1), 0) + 1
+            names[m.group(2)] = f"{m.group(1)}#{seen[m.group(1)]}"
+        c = CHILD_LINE.match(l)
+        if c:
+            content = c.group(2)
+            if not full or CHILD_DROP.search(content) or re.search(HTTP_THREAD_LINES, content):
+                continue
+            label = names.get(c.group(1), "?")
+            children.setdefault(label, []).append(norm_text(content, LOG_MASKS + FULL_LOG_MASKS + masks))
+            continue
+        # lines an HTTP thread logs race the decode loop's: upstream's
+        # logger queues them for a worker, the port's writes them at once
+        if full and re.search(HTTP_THREAD_LINES, l):
+            continue
+        # the monitor thread reaps children concurrently with the requests
+        if MONITOR_LINE.search(l):
+            children.setdefault("monitor", []).append(norm_text(l, LOG_MASKS + FULL_LOG_MASKS + masks))
+            continue
+        router.append(norm_text(l, LOG_MASKS + (FULL_LOG_MASKS if full else []) + masks))
+    if "monitor" in children:
+        children["monitor"].sort()
+    for label in sorted(children):
+        router += [f"[{label}] {x}" for x in children[label]]
+    return [l for l in router if not any(re.search(d, l) for d in droplogs)]
+
+
+def mask_json(v, keys):
+    if isinstance(v, dict):
+        return {k: ("<M>" if k in keys else mask_json(x, keys)) for k, x in v.items()}
+    if isinstance(v, list):
+        return [mask_json(x, keys) for x in v]
+    return v
+
+
+def norm_text(t, masks):
+    for m in masks:
+        t = re.sub(m, "<M>", t)
+    return t
+
+
+def norm_payload(p, keys, masks):
+    if isinstance(p, list):  # events
+        out = []
+        for e in p:
+            # an event's lines: `data: ` ones are JSON, masked like a body;
+            # `event: ` names precede them in the Responses and Anthropic APIs
+            ls = []
+            for ln in e.split("\n"):
+                if ln.startswith("data: "):
+                    d = ln[6:]
+                    try:
+                        d = json.dumps(mask_json(json.loads(d), keys), ensure_ascii=False)
+                    except ValueError:
+                        pass
+                    ln = "data: " + d
+                ls.append(ln)
+            out.append(norm_text("\n".join(ls), masks))
+        return "\n\n".join(out)
+    try:
+        text = p.decode("utf-8")
+    except UnicodeDecodeError:
+        # a binary body -- a gzip-compressed UI asset -- compared on bytes
+        import hashlib
+        return f"<{len(p)} bytes, sha256 {hashlib.sha256(p).hexdigest()}>"
+    try:
+        text = json.dumps(mask_json(json.loads(text), keys), ensure_ascii=False, indent=1)
+    except ValueError:
+        pass
+    return norm_text(text, masks)
+
+
+def norm_headers(h, masks):
+    # Date is the wall clock. Content-Length follows the body, whose masked
+    # fields -- timings -- vary in width; the body itself is compared, and
+    # http-diff holds the framing to upstream's on bytes.
+    drop = {"date", "keep-alive"}
+    return "\n".join(norm_text(f"{k}: {'<len>' if k.lower() == 'content-length' else v}", masks)
+                     for k, v in h if k.lower() not in drop)
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        die("usage: scripts/server-diff <name> [--self]")
+    name, self_mode = args[0], "--self" in args
+    cases = os.path.join(ROOT, "harness", "server", f"{name}.cases")
+    if not os.path.isfile(cases):
+        die(f"no {cases}")
+
+    mode = os.environ.get("SERVER_O", "fast")
+    steps = ["server-ref"] if self_mode else ["server-ref", "tools"]
+    # SERVER_UI=<dist>: both servers embed that web UI bundle (build/ui.zig);
+    # `!uiassets` requests every file of it.
+    ui_dist = os.environ.get("SERVER_UI", "")
+    if ui_dist:
+        ui_dist = os.path.abspath(os.path.join(ROOT, ui_dist))
+        if not os.path.isfile(os.path.join(ui_dist, "index.html")):
+            die(f"SERVER_UI={ui_dist}: no index.html -- run 'make -C llama.cpp.zmake ui'")
+        steps.append(f"-Dui={ui_dist}")
+    if not os.environ.get("SERVER_DIFF_NOBUILD"):
+        rc = subprocess.run(["zig", "build", *steps, f"--release={mode}"], cwd=ROOT,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+        if rc != 0:
+            die(f"could not build ({' '.join(steps)})")
+    ref_bin = os.path.join(ROOT, "zig-out", "tools-ref", "bin", "llama-server")
+    port_bin = ref_bin if self_mode else os.path.join(ROOT, "zig-out", "bin", "llama-server")
+    for b in (ref_bin, port_bin):
+        if not os.access(b, os.X_OK):
+            die(f"missing {b}")
+
+    out = os.environ.get("SERVER_DIFF_OUT") or tempfile.mkdtemp(prefix="server-diff.")
+    data = os.path.join(out, "data")
+    os.makedirs(data, exist_ok=True)
+    setup = os.path.join(ROOT, "harness", "server", f"{name}.setup")
+    if os.path.isfile(setup):
+        rc = subprocess.run([setup], cwd=ROOT, env={**os.environ, "DATA": data}).returncode
+        if rc != 0:
+            die(f"{setup} failed ({rc})")
+
+    env = {
+        "DATA": data,
+        "FIX": os.path.join(ROOT, "zig-out", "arch-fixtures"),
+        "VOCAB": os.path.join(ROOT, "llama.cpp", "models"),
+        "QWEN3": os.path.join(ROOT, "Qwen3-0.6B-Q8_0.gguf"),
+        "QWEN35": os.path.join(ROOT, "Qwen3.5-2B-Q4_K_M.gguf"),
+        "MM": os.path.join(ROOT, "zig-out", "mmproj-fixtures"),
+    }
+    setup_env = os.path.join(data, "setup.env")
+    if os.path.isfile(setup_env):
+        for l in open(setup_env):
+            k, _, v = l.strip().partition("=")
+            if k:
+                env[k] = v
+
+    def expand(s):
+        return re.sub(r"\$([A-Z0-9]+)", lambda m: env.get(m.group(1), m.group(0)), s)
+
+    def side_env(s):
+        sv = sides[s]
+        return {"WORK": os.path.join(sv.workdir, "work"), "CWD": sv.workdir, "SPORT": str(sv.port),
+                "MOCK": env.get(f"MOCK_{s.upper()}", "$MOCK"), "ETAG": etags.get(s, "$ETAG")}
+
+    def expand_side(text, s):
+        """expand, with the per-side names first."""
+        if text is None:
+            return None
+        se = side_env(s)
+        text = re.sub(r"\$(WORK|CWD|SPORT|MOCK|ETAG)\b", lambda m: se[m.group(1)], text)
+        return expand(text)
+
+    def unside(text, s):
+        """A side's own directories and port written back as their names."""
+        se = side_env(s)
+        text = text.replace(se["WORK"], "$WORK").replace(se["CWD"], "$CWD")
+        if se["MOCK"] != "$MOCK":
+            text = text.replace(se["MOCK"], "$MOCK")
+        text = text.replace(os.path.realpath(sides[s].binary), "$BIN")
+        return text.replace(f"127.0.0.1:{se['SPORT']}", "127.0.0.1:$SPORT")
+
+    server_env = {}
+    etags = {}  # per side: the ETag `!etag <path>` read, as $ETAG
+
+    sides = {}
+    for side, b in (("ref", ref_bin), ("port", port_bin)):
+        d = os.path.join(out, side)
+        os.makedirs(d, exist_ok=True)
+        sides[side] = Server(side, b, d)
+    transcripts = {"ref": [], "port": []}
+
+    keys = set(DEFAULT_MASK_KEYS)
+    masks = list(DEFAULT_MASKS)
+    droplogs = []
+    headers = {}
+    n = fails = 0
+    started = False
+    parallel = None  # the requests of an open !parallel block
+    abandon_next = False
+    control_next = None  # the action of a pending !control
+
+    def run_requests(batch):
+        """Sends each (where, method, path, body) of batch to both sides --
+        all at once when there are several -- and compares."""
+        nonlocal n, fails
+        import threading
+        got = {}
+        for s in sides:
+            got[s] = [None] * len(batch)
+
+            def one(i, s=s):
+                _, method, path, body = batch[i]
+                try:
+                    hs = {k: expand_side(v, s) for k, v in headers.items()}
+                    path, body = expand_side(path, s), expand_side(body, s)
+                    if method == "FORM":
+                        method, body = "POST", multipart(json.loads(body))
+                    st, h, p = request(sides[s].port, method, path, body, hs)
+                    # each side's own paths and port first: the masks must
+                    # not see them
+                    h = [(k, unside(v, s)) for k, v in h]
+                    p = [unside(e, s) for e in p] if isinstance(p, list) else unside(p.decode("utf-8", "surrogateescape"), s).encode("utf-8", "surrogateescape")
+                    got[s][i] = f"status {st}\n{norm_headers(h, masks)}\n\n{norm_payload(p, keys, masks)}"
+                except OSError as e:
+                    got[s][i] = f"connection error: {e.__class__.__name__}"
+            if len(batch) == 1:
+                one(0)
+            else:
+                ts = [threading.Thread(target=one, args=(i,)) for i in range(len(batch))]
+                for t in ts:
+                    t.start()
+                for t in ts:
+                    t.join()
+        for i, (where, method, path, _) in enumerate(batch):
+            for s in sides:
+                transcripts[s].append(f"## {where} {method} {path}\n{got[s][i]}")
+            n += 1
+            if got["ref"][i] != got["port"][i]:
+                fails += 1
+                print(f"DIFF {where}: {method} {path}")
+                show_diff(got["ref"][i].splitlines(), got["port"][i].splitlines())
+        if fails and os.environ.get("SERVER_DIFF_FAILFAST"):
+            raise StopIteration
+
+    fulllog = None  # where the !fulllog of the running servers was asked
+    mock_seen = {}  # how much of each mock log !mocklog has compared
+    sse_open = {}  # the !sse readers: side -> (socket, thread, buffer)
+
+    def sse_start(path):
+        import threading
+        for s in sides:
+            sock = socket.create_connection(("127.0.0.1", sides[s].port), timeout=600)
+            sock.sendall(f"GET {expand_side(path, s)} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".encode())
+            buf = []
+
+            def pump(sock=sock, buf=buf):
+                try:
+                    while True:
+                        chunk = sock.recv(65536)
+                        if not chunk:
+                            break
+                        buf.append(chunk)
+                except OSError:
+                    pass
+            t = threading.Thread(target=pump, daemon=True)
+            t.start()
+            sse_open[s] = (sock, t, buf)
+
+    def sse_events(s):
+        sock, t, buf = sse_open.pop(s)
+        time.sleep(0.5)
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        sock.close()
+        t.join(timeout=10)
+        raw = b"".join(buf)
+        _, _, body = raw.partition(b"\r\n\r\n")
+        events = []
+        for e in dechunk(body).decode("utf-8", "replace").split("\n\n"):
+            if not e.startswith("data: "):
+                continue
+            try:
+                d = json.loads(e[6:])
+            except ValueError:
+                events.append(e)
+                continue
+            v = ((d.get("data") or {}).get("progress") or {}).get("value") if isinstance(d.get("data"), dict) else None
+            if d.get("event") == "status_change" and (d.get("data") or {}).get("status") == "loading" and v is not None and v not in (0, 1):
+                continue
+            # a download's progress events are throttled by the clock too:
+            # only its start and its end are kept
+            prog = (d.get("data") or {}).get("progress") if isinstance(d.get("data"), dict) else None
+            if d.get("event") == "download_progress" and isinstance(prog, dict) and any(
+                    isinstance(x, dict) and 0 < x.get("done", 0) < x.get("total", 0) for x in prog.values()):
+                continue
+            ev = norm_text(unside(json.dumps(mask_json(d, keys), ensure_ascii=False), s), masks)
+            # the same event twice in a row is one the throttle let through
+            # twice (a child's 0% before and as its loader starts)
+            if not events or events[-1] != ev:
+                events.append(ev)
+        return events
+
+    def compare_full_logs():
+        """Stops both servers and compares their whole logs (!fulllog)."""
+        nonlocal n, fails, fulllog
+        if fulllog is None:
+            return
+        where = fulllog
+        fulllog = None
+        logs = {}
+        for s in sides:
+            sides[s].stop()
+            with open(sides[s].log_path, "rb") as f:
+                text = f.read().decode("utf-8", "replace")
+            # each side's own paths and port first: the masks must not see them
+            logs[s] = norm_log([unside(l, s) for l in text.splitlines()], masks, True, droplogs)
+            # Lines written straight to stderr (llama-grammar's `parse:
+            # error parsing grammar`) race upstream's log worker as at
+            # startup, below: on the GB10 upstream's two slot lines landed
+            # after core.cases' bad-grammar message, where on the Mac, and
+            # in the port, they come before it. Each stream's own order is
+            # compared; their interleaving is not.
+            logs[s] = [l for l in logs[s] if l.startswith("<M>")] + ["<stderr>"] + \
+                      [l for l in logs[s] if not l.startswith("<M>")]
+            transcripts[s].append(f"## {where} !fulllog\n" + "\n".join(logs[s]))
+        n += 1
+        if logs["ref"] != logs["port"]:
+            fails += 1
+            print(f"DIFF {where}: the whole log")
+            show_diff(logs["ref"], logs["port"], limit=24)
+
+    try:
+        for lineno, raw in enumerate(open(cases), 1):
+            line = raw.rstrip("\n")
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            where = f"{name}.cases:{lineno}"
+            if line.strip() == "!parallel":
+                parallel = []
+                continue
+            if line.strip() == "!end":
+                if parallel is None:
+                    die(f"{where}: !end without !parallel")
+                run_requests(parallel)
+                parallel = None
+                continue
+            if line.strip() == "!abandon":
+                abandon_next = True
+                continue
+            if line.startswith("!control "):
+                control_next = line[len("!control "):].strip()
+                continue
+            if line.startswith("!sleep "):
+                time.sleep(float(line.split()[1]))
+                continue
+            if line.strip() == "!fulllog":
+                fulllog = where
+                continue
+            if line.startswith("!server"):
+                compare_full_logs()
+                words = shlex.split(line[len("!server"):])
+                ok = {s: sides[s].start([expand_side(a, s) for a in words],
+                                        {k: expand_side(v, s) for k, v in server_env.items()}) for s in sides}
+                logs = {s: norm_log([unside(l, s) for l in sides[s].startup_log()], masks, False, droplogs) for s in sides}
+                # A server that exits during startup interleaves two streams:
+                # what it fprintf's to stderr directly (`error: the supplied
+                # chat template ...`) and what common_log writes, which
+                # upstream queues for its worker thread. Their relative order
+                # races upstream's worker (measured: chat.cases' bad Jinja
+                # template); each stream's own order does not. The port's
+                # logger writes at once. Compare the two streams apart.
+                if not any(ok.values()):
+                    for s in sides:
+                        logs[s] = [l for l in logs[s] if l.startswith("<M>")] + ["<stderr>"] + \
+                                  [l for l in logs[s] if not l.startswith("<M>")]
+                n += 1
+                # a server that fails to start must fail on both sides, and
+                # say the same
+                if ok["ref"] != ok["port"] or logs["ref"] != logs["port"]:
+                    fails += 1
+                    print(f"DIFF {where}: startup (ref {'up' if ok['ref'] else 'down'}, port {'up' if ok['port'] else 'down'})")
+                    show_diff(logs["ref"], logs["port"])
+                    if os.environ.get("SERVER_DIFF_FAILFAST"):
+                        raise StopIteration
+                started = all(ok.values())
+                for s in sides:
+                    transcripts[s].append(f"## {where} !server\n" + "\n".join(logs[s]))
+                continue
+            if line.startswith("!waitfor "):
+                wpath, _, wre = line[len("!waitfor "):].partition(" ")
+                for s in sides:
+                    deadline = time.time() + 120
+                    hit = False
+                    while time.time() < deadline:
+                        try:
+                            _, _, p = request(sides[s].port, "GET", expand_side(wpath, s), None, {})
+                            if re.search(wre, p if isinstance(p, str) else p.decode("utf-8", "replace")):
+                                hit = True
+                                break
+                        except OSError:
+                            pass
+                        time.sleep(0.2)
+                    transcripts[s].append(f"## {where} !waitfor {wpath} {wre}\n{'matched' if hit else 'timed out'}")
+                    if not hit:
+                        n += 1
+                        fails += 1
+                        print(f"DIFF {where}: !waitfor timed out ({s})")
+                continue
+            if line.startswith("!sse "):
+                sse_start(line[len("!sse "):].strip())
+                continue
+            if line.strip() == "!sseend":
+                got = {s: sse_events(s) for s in list(sse_open)}
+                for s in got:
+                    transcripts[s].append(f"## {where} !sseend\n" + "\n".join(got[s]))
+                n += 1
+                if got.get("ref") != got.get("port"):
+                    fails += 1
+                    print(f"DIFF {where}: the event stream")
+                    show_diff(got.get("ref", []), got.get("port", []))
+                continue
+            if line.strip() == "!mocklog":
+                got = {}
+                for s in sides:
+                    lp = os.path.join(data, f"mock_{s}.log")
+                    text = open(lp).read() if os.path.isfile(lp) else ""
+                    new = text[mock_seen.get(s, 0):]
+                    mock_seen[s] = len(text)
+                    # sorted: a download's files are fetched concurrently
+                    got[s] = "\n".join(sorted(unside(new, s).splitlines()))
+                    transcripts[s].append(f"## {where} !mocklog\n{got[s]}")
+                n += 1
+                if got["ref"] != got["port"]:
+                    fails += 1
+                    print(f"DIFF {where}: what the mock hub was asked")
+                    show_diff(got["ref"].splitlines(), got["port"].splitlines())
+                continue
+            if line.strip() == "!uiassets":
+                # every file of the embedded bundle, by name, as GETs
+                if not ui_dist:
+                    die(f"{where}: !uiassets needs SERVER_UI=<dist>")
+                names = []
+                for d, _, fs in os.walk(ui_dist):
+                    for f in fs:
+                        names.append(os.path.relpath(os.path.join(d, f), ui_dist).replace(os.sep, "/"))
+                for nm in sorted(names):
+                    run_requests([(f"{where} ({nm})", "GET", "/" + nm, None)])
+                continue
+            if line.startswith("!etag "):
+                # each side's ETag for a path, for $ETAG in later headers
+                pth = line[len("!etag "):].strip()
+                for sd in sides:
+                    hs = {k: expand_side(v, sd) for k, v in headers.items()}
+                    _, h, _ = request(sides[sd].port, "GET", pth, None, hs)
+                    etags[sd] = next((v for k, v in h if k.lower() == "etag"), "")
+                continue
+            if line.startswith("!header "):
+                k, _, v = line[len("!header "):].partition(":")
+                headers[k.strip()] = v.strip()  # expanded per side when sent
+                continue
+            if line.startswith("!fresh "):
+                import shutil
+                src = os.path.join(data, line[len("!fresh "):].strip())
+                for s in sides:
+                    dst = side_env(s)["WORK"]
+                    if os.path.lexists(dst):
+                        shutil.rmtree(dst)
+                    shutil.copytree(src, dst, symlinks=True)
+                continue
+            if line.startswith("!env "):
+                k, _, v = line[len("!env "):].partition("=")
+                server_env[k.strip()] = re.sub(r"\$([A-Z0-9_]+)", lambda m: env.get(m.group(1), os.environ.get(m.group(1), m.group(0))), v.strip())
+                continue
+            if line.strip() == "!noenv":
+                server_env = {}
+                continue
+            if line.strip() == "!noheaders":
+                headers = {}
+                continue
+            if line.startswith("!mask-key "):
+                keys.add(line[len("!mask-key "):].strip())
+                continue
+            if line.startswith("!mask "):
+                masks.append(line[len("!mask "):])
+                continue
+            if line.startswith("!droplog "):
+                droplogs.append(line[len("!droplog "):])
+                continue
+            if not started:
+                die(f"{where}: request before a server is up")
+            parts = line.split(" ", 2)
+            method, path = parts[0], parts[1]
+            body = parts[2] if len(parts) > 2 else None  # expanded per side when sent
+            if control_next is not None:
+                action, control_next = control_next, None
+                got = {}
+                for sd in sides:
+                    try:
+                        got[sd] = norm_text(control(sides[sd].port, method, path, body, headers, action), masks)
+                    except (OSError, ValueError) as e:
+                        got[sd] = f"connection error: {e.__class__.__name__}"
+                    transcripts[sd].append(f"## {where} {method} {path} (control {action})\n{got[sd]}")
+                n += 1
+                if got["ref"] != got["port"]:
+                    fails += 1
+                    print(f"DIFF {where}: {method} {path} (control {action})")
+                    show_diff(got["ref"].splitlines(), got["port"].splitlines())
+            elif abandon_next:
+                abandon_next = False
+                got = {}
+                for sd in sides:
+                    try:
+                        m_, b_ = method, expand_side(body, sd)
+                        if m_ == "FORM":
+                            m_, b_ = "POST", multipart(json.loads(b_))
+                        hs = {k: expand_side(v, sd) for k, v in headers.items()}
+                        got[sd] = f"abandoned, status {abandon(sides[sd].port, m_, expand_side(path, sd), b_, hs)}"
+                    except OSError as e:
+                        got[sd] = f"connection error: {e.__class__.__name__}"
+                    transcripts[sd].append(f"## {where} {method} {path}\n{got[sd]}")
+                n += 1
+                if got["ref"] != got["port"]:
+                    fails += 1
+                    print(f"DIFF {where}: {method} {path} (abandoned)")
+                    show_diff(got["ref"].splitlines(), got["port"].splitlines())
+            elif parallel is not None:
+                parallel.append((where, method, path, body))
+            else:
+                run_requests([(where, method, path, body)])
+        compare_full_logs()
+    except StopIteration:
+        pass  # SERVER_DIFF_FAILFAST
+    finally:
+        for s in sides.values():
+            s.stop()
+        pids = os.path.join(data, "pids")
+        if os.path.isfile(pids):
+            import signal
+            for l in open(pids):
+                try:
+                    os.kill(int(l.strip()), signal.SIGTERM)
+                except (ValueError, OSError):
+                    pass
+        for s in transcripts:
+            with open(os.path.join(out, f"{s}.transcript"), "w") as f:
+                f.write("\n\n".join(transcripts[s]) + "\n")
+
+    label = "self" if self_mode else "port"
+    if fails:
+        print(f"FAIL: {name}: {fails} / {n} differ ({label}); transcripts in {out}")
+        sys.exit(1)
+    print(f"ok: {name}: {n} / {n} identical ({label})")
+
+
+def show_diff(a, b, limit=12):
+    import difflib
+    shown = 0
+    for d in difflib.unified_diff(a, b, "ref", "port", lineterm="", n=1):
+        print("    " + d)
+        shown += 1
+        if shown >= limit:
+            print("    ...")
+            break
+
+
+if __name__ == "__main__":
+    main()

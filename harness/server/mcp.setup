@@ -1,0 +1,34 @@
+#!/bin/bash
+# Inputs for mcp.cases (scripts/server-diff): MCP configurations over
+# upstream's own fixtures, run from where they live in llama.cpp, and
+# harness/server/mcp_probe_server.py for what they do not cover.
+set -eu
+FX="$PWD/llama.cpp/tools/server/tests/fixtures"
+PROBE="$PWD/harness/server/mcp_probe_server.py"
+mkdir -p "$DATA/cwd_dir"
+cat > "$DATA/setup.env" <<ENV
+FIXTURES=$FX
+PROBE=$PROBE
+ENV
+cat > "$DATA/once.sh" <<SH
+#!/bin/sh
+exec python3 "$PROBE" --tools hello "\$@"
+SH
+chmod +x "$DATA/once.sh"
+cat > "$DATA/mcp.json" <<JSON
+{
+  "mcpServers": {
+    "echo": {"command": "python3", "args": ["$FX/mcp_echo_server.py"]},
+    "burst": {"command": "python3", "args": ["$FX/mcp_burst_server.py"]},
+    "malformed": {"command": "python3", "args": ["$FX/mcp_malformed_server.py"]},
+    "crash": {"command": "python3", "args": ["$FX/mcp_crash_server.py"]},
+    "slow": {"command": "python3", "args": ["$FX/mcp_slow_server.py", "--delay", "2"], "timeout_ms": 600},
+    "grandchild": {"command": "python3", "args": ["$FX/mcp_grandchild_server.py"]},
+    "probe": {"command": "python3", "args": ["$PROBE"], "env": {"MCP_PROBE": "probe-env", "ZZ": "last"}, "cwd": "$DATA/cwd_dir", "timeout_ms": 700},
+    "plain": {"command": "python3", "args": ["$PROBE", "--tools", "env,args:null,str:str,none:none"]},
+    "once": {"command": "$DATA/once.sh"},
+    "bad": {"command": "/nonexistent/mcp-server", "args": ["x"]},
+    "nocmd": {"args": ["x"]}
+  }
+}
+JSON

@@ -1,0 +1,125 @@
+# Audio through llama-server (Stage 10 step 8): scripts/server-diff audio.
+# As in vision.cases, the fixtures are random and what is compared is the
+# prompt as tokenized, the chunks, the slots' decisions in the whole log and
+# the refusals. The media are vision.setup's ($WAV a 0.4 s 16 kHz tone,
+# $WAV44 44.1 kHz stereo, $MP3 upstream's test-2.mp3). Most audio projectors
+# pad to 450-840 tokens, past the fixtures' 256-token training context, so
+# the servers that take them override the context length.
+!mask (seconds_total|tokens_seconds) [0-9.e+-]+
+!mask-key Process-Start-Time-Unix
+!mask Process-Start-Time-Unix: [0-9]+
+!env LLAMA_MEDIA_MARKER=<__media__>
+# --override-kv's value is logged by a second call, which gets its own
+# timestamp; an assertion names upstream's source by its build path
+!mask = [0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} I (?=2048)
+!mask ^(llama\.cpp/tools/server/)?(?=server-context\.cpp:[0-9]+: GGML_ASSERT)
+
+# qwen3a: audio only; small batches, so each audio chunk decodes in pieces
+!server -m $MM/text-qwen3.gguf -mm $MM/qwen3a.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -b 32 -ub 32 --slot-save-path ./ -lv 4
+!fulllog
+GET /props
+GET /models
+POST /completion {"prompt": {"prompt_string": "Hear <__media__>", "multimodal_data": ["$WAV"]}, "n_predict": 6, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "Hear <__media__> and more", "multimodal_data": ["$WAV"]}, "n_predict": 6, "temperature": 0}
+# resampled and mixed down: another chunk, so the cache stops before it
+POST /completion {"prompt": {"prompt_string": "Hear <__media__> and more", "multimodal_data": ["$WAV44"]}, "n_predict": 6, "temperature": 0, "stream": true, "return_progress": true}
+POST /completion {"prompt": {"prompt_string": "<__media__>", "multimodal_data": ["$WAV"]}, "n_predict": 3, "temperature": 0, "cache_prompt": false}
+# an MP3 too long for the context; an empty WAV; an image to an
+# audio-only projector
+POST /completion {"prompt": {"prompt_string": "Hear <__media__>", "multimodal_data": ["$MP3"]}, "n_predict": 3, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "Hear <__media__>", "multimodal_data": ["$TINYWAV"]}, "n_predict": 3, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "See <__media__>", "multimodal_data": ["$PNG1"]}, "n_predict": 3, "temperature": 0}
+# chat: input_audio's data and url fields, a data URI, an audio sent as an
+# image_url, an image refused
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "text", "text": "Listen:"}, {"type": "input_audio", "input_audio": {"data": "$WAV", "format": "wav"}}]}], "max_tokens": 4, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"url": "data:audio/wav;base64,$WAV44"}}, {"type": "text", "text": "what?"}]}], "max_tokens": 4, "temperature": 0, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$WAV", "url": "ignored"}}]}], "max_tokens": 4, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_audio"}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$JUNK"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}], "max_tokens": 4}
+# a conversation over two audio clips, then the same with the cache warm
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$WAV"}}]}, {"role": "assistant", "content": "ok"}, {"role": "user", "content": "more?"}], "max_tokens": 4, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$WAV"}}]}, {"role": "assistant", "content": "ok"}, {"role": "user", "content": "more?"}, {"role": "assistant", "content": "no"}, {"role": "user", "content": "x"}], "max_tokens": 4, "temperature": 0}
+GET /slots
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$WAV"}}]}]}
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$MP3"}}]}]}
+POST /apply-template {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$WAV"}}, {"type": "text", "text": "x"}]}]}
+# the transcription route over the same projector, by URL and file
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/media/tone.wav", "max_tokens": "4", "temperature": "0"}
+# an audio prompt saved and restored
+POST /completion {"prompt": {"prompt_string": "Keep <__media__> this", "multimodal_data": ["$WAV"]}, "n_predict": 3, "temperature": 0}
+POST /slots/0?action=save {"filename": "au.bin"}
+POST /completion {"prompt": "something else entirely", "n_predict": 3, "temperature": 0}
+POST /slots/0?action=restore {"filename": "au.bin"}
+GET /slots
+POST /completion {"prompt": {"prompt_string": "Keep <__media__> this", "multimodal_data": ["$WAV"]}, "n_predict": 3, "temperature": 0}
+
+# embeddings of audio: the decoded samples reach the output's floats; WAV8
+# ends one byte short of its header and base64 one byte short of a quantum
+!server -m $MM/text-qwen3.gguf -mm $MM/qwen3a.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --embedding --pooling mean -b 512 -ub 512 -lv 4
+!fulllog
+POST /embeddings {"content": [{"prompt_string": "a <__media__> b", "multimodal_data": ["$WAV"]}, {"prompt_string": "a <__media__> b", "multimodal_data": ["$WAV8"]}]}
+POST /v1/embeddings {"input": {"prompt_string": "<__media__> b", "multimodal_data": ["$WAV44"]}, "encoding_format": "base64"}
+
+# other audio encoders: gemma4a, lfm2a, parakeet, mimo-audio. lfm2a wraps
+# its audio in no marker text, so a new prompt that ends with the audio
+# leaves update_slots an empty batch: upstream aborts on
+# GGML_ASSERT(batch.size() > 0), and so must the port
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma4a.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "a <__media__> b", "multimodal_data": ["$WAV"]}, "n_predict": 4, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$WAV44"}}]}], "max_tokens": 4, "temperature": 0}
+!server -m $MM/text-qwen3.gguf -mm $MM/lfm2a.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+# The line logged just before that abort reaches upstream's stderr only if
+# its log worker runs before the abort does: on the GB10 it did not, on the
+# Mac it did. The port writes it at once. Left out from here on.
+!droplog I audio decoded \(batch
+POST /completion {"prompt": {"prompt_string": "a <__media__> b <__media__> c", "multimodal_data": ["$WAV", "$WAV44"]}, "n_predict": 4, "temperature": 0}
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$WAV"}}]}]}
+POST /completion {"prompt": {"prompt_string": "z <__media__>", "multimodal_data": ["$WAV"]}, "n_predict": 4, "temperature": 0}
+GET /health
+# a prompt whose every token is cached starts one token back, which lands
+# inside the audio chunk: "Chunk not found". The error's task cancellation
+# races the decode loop's idle line, upstream against itself, so this
+# server's log is not compared
+!server -m $MM/text-qwen3.gguf -mm $MM/lfm2a.gguf -c 4096 -np 1 --chat-template chatml --no-warmup
+POST /completion {"prompt": {"prompt_string": "a <__media__> b <__media__> c", "multimodal_data": ["$WAV", "$WAV44"]}, "n_predict": 4, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b <__media__>", "multimodal_data": ["$WAV", "$WAV44"]}, "n_predict": 4, "temperature": 0}
+GET /slots
+!server -m $MM/text-qwen3.gguf -mm $MM/parakeet.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "a <__media__> b", "multimodal_data": ["$WAV"]}, "n_predict": 4, "temperature": 0}
+!server -m $MM/text-qwen3.gguf -mm $MM/mimo_audio.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "a <__media__> b", "multimodal_data": ["$WAV"]}, "n_predict": 4, "temperature": 0}
+
+# ultravox with the context made room for: a whisper encoder's padded
+# window, and the MP3
+!server -m $MM/text-qwen3.gguf -mm $MM/ultravox.gguf -c 2048 -np 1 --override-kv qwen3.context_length=int:2048 --chat-template chatml --no-warmup -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "a <__media__> b", "multimodal_data": ["$WAV"]}, "n_predict": 4, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b", "multimodal_data": ["$MP3"]}, "n_predict": 4, "temperature": 0}
+
+# qwen2.5-omni: vision and audio in one projector, M-RoPE positions for both
+!server -m $MM/text-qwen2vl.gguf -mm $MM/qwen2.5o.gguf -c 2048 -np 1 --override-kv qwen2vl.context_length=int:2048 --chat-template chatml --no-warmup -lv 4
+!fulllog
+GET /props
+GET /models
+POST /completion {"prompt": {"prompt_string": "hear <__media__> and see <__media__>", "multimodal_data": ["$WAV", "$PNG1"]}, "n_predict": 4, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "hear <__media__> and see <__media__> twice", "multimodal_data": ["$WAV", "$PNG1"]}, "n_predict": 4, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG2"}}, {"type": "input_audio", "input_audio": {"data": "$WAV44"}}, {"type": "text", "text": "both"}]}], "max_tokens": 4, "temperature": 0}
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG2"}}, {"type": "input_audio", "input_audio": {"data": "$WAV44"}}]}]}
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/media/tone.wav", "max_tokens": "4", "temperature": "0"}
+
+# vision-only projectors refuse audio by every route; a saved audio
+# prompt restores (a chunk is data, whatever encoder made it)
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --slot-save-path ./ -lv 4
+!fulllog
+POST /slots/0?action=restore {"filename": "au.bin"}
+GET /slots
+POST /completion {"prompt": "Keep", "n_predict": 3, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "Hear <__media__>", "multimodal_data": ["$WAV"]}, "n_predict": 3, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$WAV"}}]}], "max_tokens": 4}
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$WAV"}}]}]}

@@ -82,6 +82,7 @@ Settled in review. The plan below assumes all of these.
 | 62 | libmtmd and `llama-tts` | **Ported, with `llama-mtmd-cli`** (asked on 2026-10-26: "port mtmd and tts, don't stop until they are completed"). Upstream's multimodal library, `tools/mtmd/` -- 17,399 lines of C++ plus 8,292 in 43 graph files, 60 projector types -- is `src/mtmd/`, every translation unit, and its C contract is the 82 `mtmd_*`/`mtmd_helper_*` functions of `mtmd.h` and `mtmd-helper.h`, exported by `src/mtmd/exports.zig` and equal to the reference's by `nm` (`make mtmd-exports`). It is pure Zig like the rest: the stb_image and miniaudio decoders upstream compiles into `mtmd-helper.cpp` are ported to Zig as far as it reaches them (`src/mtmd/vendor/`), and the SHA-256 bitmap id is `std.crypto`'s. No `MTMD_VIDEO`, as the reference builds none: the video helpers are their `#else` arms. The debugging entry points (`mtmd_debug_*`, C++ linkage, `std::vector` arguments) are not ported; `mtmd_get_memory_usage`, C++ linkage and a `std::map`, is Zig-only. No mmproj file exists here, so `make mmproj-fixtures` writes one small random mmproj per projector type, checked through upstream's libmtmd. Gated by `make mtmd-diff` (libmtmd through its C API, port against upstream, every fixture, CPU and Metal, per node and fused), `make mtmd-image-diff`, `make mtmd-audio-diff`, `make mtmd-decode-diff` and `make mtmd-exports`; the two binaries by `make tools-diff TOOL=tts|mtmd-cli` against upstream's own (28 and 39 cases). `llama-mtmd-cli` formats prompts through upstream's legacy (non-Jinja) chat templates, ported in `tools/common/chat.zig`; `--jinja` is refused, as is `MTMD_DEBUG_GRAPH` (upstream's graph dumper is not ported), and the console's Windows arm falls back to plain line reading. `NOTES.md`, "Stage 8: libmtmd and `llama-tts`". |
 | 63 | The xcframework | **A drop-in for upstream's `build-xcframework.sh` output** (asked on 2026-10-26: "Our make xcframework target needs to produce an xcframework that is drop in compatible with it"), replacing the static `llamazig.xcframework`. `xcframework/` (renamed from `xcfwk/`) builds `llama.xcframework`: upstream's seven slices (macOS, iOS, tvOS and visionOS, devices and simulators, arm64 and x86_64 as upstream has them), its minimums (iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0), dynamic frameworks with its install names and dSYMs, and its headers, module map and `Info.plist` byte for byte -- `mtmd.h`, `mtmd-helper.h` and `ggml-blas.h` included, since libmtmd (Decision 62) and the BLAS backend (Decision 60) are ported. Each slice architecture is `zig build xcframework`: `libggml.a` with BLAS and `libmtmd.a`, libllama compiled into it. **The arm64 CPUs are Apple clang's defaults for each target** (`apple_m1` for macOS and the simulators, `apple_a7` for iOS and tvOS devices, `apple_a12` for visionOS), so it runs wherever upstream's does; x86_64 is `x86_64_v3`, the port's floor. Built with `../zig17`, Zig 0.17.0 patched for Apple's mobile SDKs. Gated by `make -C xcframework compat` against upstream's own, built by its script from a `git archive` of the pin; a binary built against upstream's framework runs on ours unrelinked (`dropin-macos`); upstream's `examples/llama.swiftui` builds against it untouched and runs on an iPhone 15 (`swiftui`). Gating `apple_a7` found the port's vectorizer model wrong for every Apple core before the A14. `NOTES.md`, "llama.xcframework". |
 | 64 | Chat parsing, and tool calling | **Port `common/`'s chat parsing stack to Zig, in `cli/`, before tool execution** (asked on 2026-10-29: "we should add tool calling, can we do that prior to calling 0.4.1 done"; answered "parsing stack first", and "commit 0.4.1+1 now, tools next"). Upstream's `llama-cli` has no tool calling at v0.4.1 -- `--tools` is a server flag -- but it does run the chat parser, through its embedded server, to separate reasoning from content. So the stage ports `common_chat_templates_apply_jinja` and `common_chat_parse` with everything under them: the PEG parser, the auto-parser and diff analyzer, the per-model parsers, `json-schema.cpp` and `json-schema-to-grammar.cpp`, over a port of nlohmann's `ordered_json`. `--json-schema` comes with it. Running tools is a later decision. "Stage 9 — Chat parsing". |
+| 65 | `llama-server` | **Ported, as `tools/server/`, a Zig `llama-server` held to upstream's on the wire** (asked on 2026-11-01, after learning that tool calling and MCP live only in the server: "we need to port llama-server ... get started"). Upstream's tool calling is the server's -- `--tools` (seven built-in tools), `--mcp-servers-config`/`--mcp-servers-json`, `--ui-mcp-proxy` are all `LLAMA_EXAMPLE_SERVER` options, and `llama-cli` links the code and never reaches it -- so porting the server is how this project gets tools without designing behaviour of its own. Measured at v0.4.1: 21,852 lines in `tools/server/`, over Stage 9's chat stack, `common/speculative.cpp` and its n-gram helpers (~4,000), `subproc`, `preset`, `download`/`hf-cache` for router mode, and cpp-httplib (`httplib.cpp` 18,209 + `httplib.h` 4,667, of which the server half and a plain-HTTP client are reached: the reference builds without SSL). The web UI is not built by either side -- the reference compiles `llama.cpp.zmake`'s `zig/ui-stub`, so both serve no assets -- and whether to embed upstream's prebuilt bundle is left open. Gated by `server-diff`: both binaries started on the same model, the same request transcript sent to each, status, headers and bodies compared with timings masked. "Stage 10 -- `llama-server`". |
 
 ---
 
@@ -1599,25 +1600,242 @@ Steps, each gated before the next:
 2. **`json-schema.cpp` and `json-schema-to-grammar.cpp`**, then
    `--json-schema` and `--json-schema-file` in `llama-cli`. `schema-diff`:
    upstream's own `tests/test-json-schema-to-grammar.cpp` cases and random
-   schemas, comparing the grammar text or the exception.
+   schemas, comparing the grammar text or the exception. **Done**:
+   `cli/json/schema.zig`, `schema_to_grammar.zig` and `trie.zig`;
+   `--grammar`, `--grammar-file`, `-j` and `-jf` in `llama-cli`;
+   `make schema-diff` identical over 751,324 checks, and seven grammar cases
+   in `parity-cli`. `NOTES.md`, "Stage 9 step 2: JSON schema to grammar".
 3. **`peg-parser.cpp`, `chat-peg-parser.cpp`**. `peg-diff`: parsers built
    through both APIs, run over complete and truncated inputs, comparing
-   the parse result, the partial state and the exported GBNF.
+   the parse result, the partial state and the exported GBNF. **Done**:
+   `cli/peg/` (the engine, builder, GBNF export, serialization) and
+   `cli/common_chat/chat_peg.zig` (the chat builders and mappers), with
+   the rest of `trie.cpp` in `cli/json/trie.zig`; `make peg-diff`
+   identical over 4,197,396 checks, the parsers upstream's own PEG tests
+   build recorded as they run. `NOTES.md`, "Stage 9 step 3: the PEG
+   parser".
 4. **`parsers/`, the auto-parser, the diff analyzer and `chat.cpp`**.
    `chat-parse-diff`: every template in `models/templates/` through
    `common_chat_templates_apply` with and without tools, a schema and each
    reasoning setting -- prompt, grammar, triggers, preserved tokens, the
    parser -- then `common_chat_parse` over upstream's `tests/test-chat.cpp`
    outputs, comparing the message as JSON. `jinja-diff` gains the probe
-   conversations first.
-5. **The CLI**: what upstream's CLI does with the parse -- reasoning shown
-   apart from the answer, `--reasoning-format`, `--reasoning`,
-   `--skip-chat-parsing` -- and `cnv-diff` scenarios on a reasoning model.
+   conversations first. **Done**: `cli/common_chat/` -- `templates.zig`,
+   `template.zig`, `caps.zig`, `parse.zig`, `autoparser/` and the fourteen
+   `parsers/` -- with zigjinja's llama.cpp mode and usage statistics;
+   `jinja-diff` renders the analyzer's and `caps_get`'s 29 probe
+   conversations and compares every template's capabilities, all agreeing;
+   `make chat-parse-diff` identical over 48,310 records, upstream's chat
+   tests recorded as they run. `NOTES.md`, "Stage 9 step 4: templates and
+   parsing".
+5. ~~**The CLI**~~ **done** (`NOTES.md`, "Stage 9 step 5: the CLI's
+   reasoning display"): `cli/conversation.zig` renders over
+   `common_chat.templates.apply` and parses every reply with `parse.parse`;
+   upstream's `ui::assistant_turn` is ported as its display; the reasoning
+   flags, `--chat-template-kwargs`, `--color`; `template.zig`'s
+   `mark_capture` keeps SPEC 5.2's trust split over the plain-string
+   prompt. `cnv-diff` 36/36 against a reference over
+   `libllama-common-ref.a` and upstream's `cli-ui.h`; 11 caught, 4 inert,
+   2 escaped (stop strings and the final whole parse, which no Qwen reply
+   reaches). `cli/reasoning_budget.zig` is a copy of
+   `tools/common/reasoning_budget.zig` without the tools' logger: change
+   both.
 
 **Tool calls reach the parser, not the user.** Upstream's `llama-cli`
 takes no tool declarations, so after step 5 a model in our CLI is never
 offered a tool. Offering tools and running them -- the server's built-in
 tools, MCP, an agent loop -- is the decision Decision 64 leaves open.
+
+## Stage 10 — `llama-server`
+
+Decision 65. Measured at v0.4.1 (`b29c606e2`):
+
+| Unit | Lines | What it is |
+|---|---|---|
+| `server-context.cpp`, `.h` | 5,558 + 193 | slots, the batch loop, every route's handler (`server_routes`) |
+| `server-models.cpp`, `.h` | 2,602 + 412 | router mode: child servers per model, presets, `/models` |
+| `server-tools.cpp`, `.h` | 2,172 + 55 | the built-in tools (`read_file`, `grep_search`, `exec_shell_command`, ...) |
+| `server-common.cpp`, `.h` | 1,986 + 651 | prompt tokenization, OAI/Anthropic request conversion, utf-8, base64, errors |
+| `server-task.cpp`, `.h` | 1,901 + 644 | task parameters from JSON, results to JSON (every API's shape) |
+| `server-http.cpp`, `.h` | 838 + 100 | `server_http_context` over cpp-httplib |
+| `server-mcp.cpp`, `.h` | 820 + 176 | the MCP client |
+| `server-chat.cpp`, `.h` | 692 + 24 | chat requests into `common_chat_templates_apply`, Responses API |
+| `server-stream.cpp`, `.h` | 668 + 79 | resumable stream sessions (`/v1/stream`) |
+| `server-schema.cpp`, `.h` | 662 + 104 | the request-field table: each JSON field, its aliases and how it sets `task_params` |
+| `server-queue.cpp`, `.h` | 621 + 244 | the task queue and result queue between HTTP threads and the loop |
+| `server.cpp`, `main.cpp` | 562 + 5 | `main`, the route table, shutdown |
+| `server-cors-proxy.h` | 83 | `--ui-mcp-proxy` |
+
+Under it, beyond Stage 9: `common/speculative.cpp` (2,997) with
+`ngram-cache`, `ngram-map`, `ngram-mod` (883), `reasoning-budget.cpp`
+(310), `subproc.cpp` (143), `preset.cpp` (501), `download.cpp` and
+`hf-cache.cpp` (1,599), the server's 80-odd options in `arg.cpp`, and
+cpp-httplib -- the `Server` half the server drives through
+`server_http_context`, and a plain-HTTP `Client` for router mode, the CORS
+proxy and the downloader. No SSL: `llama.cpp.zmake` defines no
+`CPPHTTPLIB_OPENSSL_SUPPORT`, so the reference has neither `SSLServer` nor
+`SSLClient`, and the port matches it.
+
+**Where it lives.** `tools/server/`, a binary like Decision 61's tools,
+over `tools/common/` and the Stage 9 stack in `cli/json/` and its
+siblings, imported as modules. Its reference is upstream's `llama-server`
+compiled unmodified over `libllama-ref` by `zig build tools-ref`, with
+`llama.cpp.zmake`'s `ui-stub`, so the only thing that differs between the
+two is the server's own code and the HTTP library under it.
+
+**The gate, `server-diff`.** `scripts/server-diff` starts both servers on
+the same model with the same flags, sends each the same transcript of
+requests (`harness/server/<name>.cases`: method, path, body, headers),
+and requires the same status, headers (`Date` and the like masked) and
+body -- JSON compared after masking the fields that differ by design
+(`created`, timings, `id`s drawn from a random device) -- and, for a
+stream, the same sequence of events. Generation is greedy or seeded, so
+the bodies are exact. Startup's log is compared like `tools-diff`'s.
+Upstream's own pytest suite (`tools/server/tests/`, 27 files) runs
+against any binary named by `LLAMA_SERVER_BIN_PATH` and is a second,
+independent check -- it needs `pytest` and friends, which this Mac does
+not have.
+
+Steps, each gated before the next:
+
+1. ~~**The options and startup.**~~ **Done** (`NOTES.md`, "Stage 10 step
+   1: the server's options"): the server's 125 missing options and every
+   `ex == SERVER` arm of `common_params_parse_ex`, in four table files;
+   `tools/server/server.zig` through `llama_numa_init`. `tools-diff server`
+   is 179 parse-time cases, 21 of them through the environment (`!env`);
+   16 of 17 injections caught. The escape -- a handler storing the wrong
+   value -- waits on `server-diff`'s `/props`. Pickup: `tools-diff server`
+   on the GB10 and DESKTOP-BR7J5S9.
+2. ~~**The HTTP layer**~~ **done** (`NOTES.md`, "Stage 10 step 2: the
+   HTTP layer"): `tools/server/http.zig` and `tools/server/httplib/`.
+   `make http-diff`: 11 configurations, 210 raw-byte cases, 243 checks,
+   ~42 s, 18/18 injections. Not ported: UI assets, `--path`, regex routes
+   (an `--api-prefix` with a regex character), Winsock, SSL, the client
+   half. Linux pickup: `make http-diff` on the GB10.
+3. ~~**The data layer**~~ **done** (`NOTES.md`, "Stage 10 step 3a"):
+   `server-common`, `server-task`, `server-schema` as
+   `tools/server/{common,tokens,oaicompat,task,result,schema,subproc}.zig`,
+   and `server-queue` as `queue.zig`; `server-task-diff` 3,043 records /
+   47,070 lines, 47/47 injections. Gaps for Stage 9 step 4:
+   `oaicompat.chatTemplatesApply`'s Jinja arm and `task.chatParse`'s PEG
+   arm; `http(s)` media waits on step 7. Then ~~**the core without
+   Jinja**~~ **done** (`NOTES.md`, "Stage 10 step 3c: the server's core"):
+   `tools/server/{context,routes,stream,server}.zig`; `server-diff` 10
+   case files, 363 checks, ReleaseSafe clean, 32/32 injections.
+   `server-stream` was done here, not in step 4. Refused with a message
+   until their step: the Responses, Anthropic and transcription routes
+   (500, step 4), `--tools`/MCP/`--ui-mcp-proxy` (exit 1, step 6), router
+   mode and downloads (exit 1, step 7); step 8's mmproj path is ported but
+   no case reaches it. Slots and the batch loop;
+   `/health`, `/props`, `/slots`, `/metrics`, `/completion(s)`,
+   `/v1/completions`, `/tokenize`, `/detokenize`, `/embedding(s)`,
+   `/rerank`, `/infill`, `/apply-template`, `/lora-adapters`, slot
+   save/restore; chat on the legacy template path (`--no-jinja`), which
+   `tools/common/chat.zig` already has. `server-diff` on fixtures and
+   Qwen3.5.
+4. ~~**Chat over Stage 9**~~ **done** (`NOTES.md`, "Stage 10 step 4: chat
+   over Stage 9"): `/v1/chat/completions` through the model's Jinja
+   template -- tools, `tool_choice`, `response_format`, reasoning,
+   `chat_template_kwargs`, streamed deltas, `/control` -- over
+   `common_chat`'s one templates object; the Responses, Anthropic and
+   transcription routes and their token counts (`tools/server/convert.zig`;
+   transcription needed no step 8, the `qwen3a` fixture carries it).
+   `server-diff` 14 case files, 539 checks; `server-task-diff` 5,609
+   records; 33/33 injections. Not verified: concurrent Jinja chat, images
+   through the Responses and Anthropic APIs, Jinja engine error texts.
+   Linux pickup: `server-diff` and `server-task-diff` on the GB10.
+5. **Speculative decoding**: `common/speculative.cpp` and the n-gram
+   helpers, `-md`, `--spec-*`. **`common/`'s half is done** (`NOTES.md`,
+   "Stage 10 step 3b: sampling and speculative decoding"): the whole
+   sampler, the reasoning budget, `speculative.cpp` and the n-gram stores;
+   `spec-diff` 38 cases, 26/28 injections. Left: the server's use of them,
+   `common_context_can_seq_rm`; MTP's single- and chained-head modes are
+   unproven (no fixture has nextn weights). Pickup: `spec-diff` on the GB10
+   and DESKTOP-BR7J5S9.
+6. ~~**Tools and MCP**~~ **done** (`NOTES.md`, "Stage 10 step 6: tools,
+   MCP and the CORS proxy"): `tools/server/{tools,mcp,cors_proxy,proxy}.zig`,
+   cpp-httplib's plain-HTTP client (`httplib/client.zig`) and
+   `tools/common/subproc.zig` (`posix_spawn`; the client, proxy and
+   subprocess are shared with step 7). `server-diff`'s `tools`, `mcp` and
+   `proxy` files, 175 + 59 + 60 checks, over upstream's own `mcp_*.py`
+   fixtures and stand-in `docker`/`ssh` scripts; 29/29 injections.
+   `regex.zig` gained `icase` (`regex-diff` unchanged). Not ported: the
+   `_WIN32` arms. Not verified: real docker and ssh, model-driven tool calls
+   end to end. Linux pickup: `server-diff` tools/mcp/proxy and `http-diff`
+   on the GB10.
+7. ~~**Router mode**~~ **done** (`NOTES.md`, "Stage 10 step 7: router
+   mode and downloads"): `tools/server/{models,preset,download,hf_cache}.zig`
+   over step 6's client, proxy and subprocess; `server-diff`'s `router`
+   (126) and `hub` (115) files, the hub a plain-HTTP mock per side
+   (`harness/server/mock_hub.py`); 30/31 injections, one provably inert.
+   The reference build now defines `LLAMA_SUBPROCESS`, as CMake does --
+   without it upstream's router refuses to start. Still refused: `arg.zig`'s
+   INI config files and `-hf` in the other tools (both could reuse
+   `preset.zig`/`download.zig` from `tools/common/`); HTTPS, which the
+   reference cannot do either. Not ported: the Windows arms. Linux pickup:
+   `router` and `hub` on the GB10 (`/proc/self/exe`, the cache's home
+   fallback).
+8. ~~**Multimodal and audio routes**~~ **done** (`NOTES.md`, "Stage 10
+   step 8: multimodal and audio"): no port change was needed in the
+   server; `server-diff`'s `vision` (210) and `audio` (76) files over
+   gemma3, qwen2-vl, internvl, gemma4v and seven audio projectors, with two
+   new text fixtures (`text-qwen35`, `text-gemma3`) so an image reaches the
+   checkpoint and sliding-window paths; 24/25 injections, one provably
+   inert. `tools/common/log.zig` now writes a message in one `fputs`: the
+   server logs from several threads and a line came out spliced. Linux
+   pickup: `make mmproj-fixtures`, then `server-diff vision audio` on the
+   GB10.
+
+**Web UI (2026-11-01):** first recorded as "none, because upstream has
+none" -- a wrong premise: upstream ships one (`tools/ui`, SvelteKit), and
+only the reference built here over `llama.cpp.zmake`'s `ui-stub` lacked it.
+**Decided instead, and done** (`NOTES.md`, "Stage 10: the web UI"): added
+to `llama.cpp.zmake` first (`make ui` builds it with npm, `zig build server
+-Dui=.ui/dist` embeds it through `zig/ui_embed.zig`), then the C/C++ around
+it ported -- `ui.cpp.in` as `tools/server/ui.zig`, `server-http.cpp`'s
+asset arm, and cpp-httplib's `RegexMatcher`, which every asset route is --
+with the Svelte app kept as Svelte, as `../zigwui` does. `build/ui.zig`
+embeds one bundle in both servers; `server-diff`'s `ui` file, 107 checks,
+12/12 injections. `make web` serves it. **`zigjinja` is compiled into
+`llama-server`** (through `cli/common_chat`), at v3.1.0 (`fe1882d`), which
+carries the `llama_cpp_semantics` mode the chat stack needs. **Open:**
+installing pytest to run upstream's suite.
+
+### Stage 9 and 10 pickup
+
+**GB10 done** (`NOTES.md`, "The Stage 9 and 10 pickup: GB10 and
+DESKTOP-BR7J5S9"): every Stage 9 gate, `spec-`, `server-task-`, `http-`
+and `cnv-diff`, `parity-cli`, the server's tools-diff cases and 20 of 21
+`server-diff` files pass with CUDA on, `router`, `hub`, `tools`, `mcp` and
+`proxy` on their Linux paths for the first time; 13/13 gates caught an
+injection there. It found that nothing in `tools/server/` compiled for
+Linux (`std.c.Stat` is `void`; `tools/common/fs_stat.zig`) and that every
+native Linux Zig binary took `compiler_rt`'s `expf` (`llamacpp.addLibgcc`).
+**Windows partly done**: `json-`, `schema-`, `peg-`, `jinja-` and
+`chat-msg-diff` pass on the laptop, injections caught; `llama-cli.exe`
+builds again (`std.c.write` takes a `HANDLE` there).
+
+Open:
+
+- **GB10:** `server-diff parallel` differs upstream against upstream on
+  CUDA (concurrent requests batch by timing); left failing, not masked.
+- **GB10:** `cnv-diff` against `llama.cpp.zmake`'s CPU-only library
+  differs on 26 of 36 scenarios, also with our CLI at `-Dcuda=false`; the
+  gate passes over the port's `libggml`. Cause not chased.
+- **GB10:** Debug builds still take `compiler_rt`'s `expf`.
+- **Windows:** `llama-server` (Winsock, `pollfd`, `stat`, the stderr
+  handle; 14 errors) -- expected, the server's Windows arms are unported.
+- **Windows:** 11 of 13 ported tools do not build (`clock_gettime`,
+  `std.c.Stat`); they had never been built for Windows.
+- **Windows:** `tools-ref`'s `mtmd-ref` under MinGW needs gnu++17
+  (`M_PI`).
+- **Windows:** `chat-parse-diff` pins the clock with `dlsym(RTLD_NEXT)`;
+  it needs another way there.
+- **Windows:** `expf`, `logf`, `sinf`, `cosf` come from Zig's runtime, not
+  the UCRT, on both sides of the x86 gates; how upstream's own Windows
+  build compares is unmeasured.
+- **Windows:** `schema-diff` runs 165,536 cases there against 165,529 on
+  ARM with the same seed. Not investigated.
 
 ## Upstream syncs
 
@@ -1824,7 +2042,7 @@ open a terminal`; `NOTES.md` has how to tell.
 | A 381-symbol translation unit has no parity check until it is complete | A systematic error in `ggml.c` stays invisible for the whole port | Unit tests per file, plus `scripts/port-coverage` to keep the endpoint visible; accept that the real gate lands late |
 | The diagnostic tool does not match the risk | `test-backend-ops` compares two backends over one graph, so it cannot see a wrong graph | Retired: `make graph-diff` covers constructors, and `make backend-ops` the kernels. See `NOTES.md` |
 | Two build descriptions drift apart | The port builds something subtly different from the reference | Only one is ours to change; `llama.cpp.zmake` is read-only (Decision 18) |
-| `zigjinja` is an external dependency | A supply-chain and maintenance exposure the rule otherwise forbids | Pin an exact commit, never a branch; confine it to `cli/` so `libllamazig` stays dependency-free; vendor it under its MIT licence if it goes unmaintained |
+| `zigjinja` is an external dependency | A supply-chain and maintenance exposure the rule otherwise forbids | Pin an exact commit, never a branch; confine it to `cli/`'s code (which `llama-server` compiles too, 2026-11-01) so `libllamazig` stays dependency-free; vendor it under its MIT licence if it goes unmaintained |
 | Two Jinja implementations disagree on a real template | Chat output differs from upstream for reasons unrelated to the port | The parity gate is raw-completion (Decision 23), so this cannot mask a port bug — it is a correctness risk for users, not for the gate |
 | Bit-exactness unreachable across compilers | Decision 4's gate becomes unusable | Detect early — Stage 1 tests exactly this before any port work. Fall back to logit-distance tolerance and document it |
 | Parity harness rots | The whole verification story collapses | It is a build target, not a script someone remembers to run. Keep it in `zig build` |

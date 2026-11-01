@@ -20,6 +20,9 @@
 # the stdout being compared -- and `!tty off` stops it: upstream's console
 # echoes typed input straight to its terminal while its log reaches stdout
 # from a worker thread, so with no terminal the two interleave by a race.
+# `!env NAME=VALUE` exports a variable to both sides from there on ($DATA
+# expands in it), and `!unenv NAME` takes it away again: the environment is
+# the other way common_params_parse reads an option.
 # A case written `~ <args>` compares stderr's lines in any order: upstream's
 # LOG_* messages are printed by a worker thread, so a direct fprintf(stderr)
 # can overtake them and upstream itself differs run to run there.
@@ -114,6 +117,8 @@ while IFS= read -r line || [ -n "$line" ]; do
         '!stdin') stdin_file=/dev/null; continue ;;
         '!tty '*) tty_mode="${line#!tty }"; continue ;;
         '!stdin '*) eval "stdin_file=${line#!stdin }"; continue ;;
+        '!env '*) eval "export ${line#!env }"; continue ;;
+        '!unenv '*) unset "${line#!unenv }"; continue ;;
         '!preload '*)
             eval "lib=${line#!preload }"
             if [ "$(uname)" = Darwin ]; then export DYLD_INSERT_LIBRARIES="$lib"; else export LD_PRELOAD="$lib"; fi

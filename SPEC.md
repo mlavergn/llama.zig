@@ -216,8 +216,40 @@ A command line written for upstream runs unchanged for the options below.
 | `-sys`, `--system-prompt` | `TEXT` | `""` | System message prepended to the conversation |
 | `-sysf`, `--system-prompt-file` | `FNAME` | — | The same, read from a file |
 | `-cnv`, `--conversation`, `-i`, `--interactive` | — | off | Multi-turn conversation, reading turns from stdin |
+| `--grammar` | `GRAMMAR` | — | GBNF grammar constraining generation |
+| `--grammar-file` | `FNAME` | — | The same, read from a file |
+| `-j`, `--json-schema` | `SCHEMA` | — | JSON schema constraining generation, converted to GBNF |
+| `-jf`, `--json-schema-file` | `FILE` | — | The same, read from a file |
+| `--reasoning-format` | `FORMAT` | `deepseek` | How a reply's thinking is read: `none` leaves it in the answer; `deepseek`, `auto` and `deepseek-legacy` take it out (§5.3) |
+| `-rea`, `--reasoning` | `on`\|`off`\|`auto` | `auto` | Thinking in the chat: `auto` follows the template; `on` and `off` also set the `enable_thinking` kwarg |
+| `--reasoning-budget` | `N` | `-1` | Tokens the model may think for: `-1` unlimited, `0` ends the block at once |
+| `--reasoning-budget-message` | `MESSAGE` | `""` | Written before the end-of-thinking tag when the budget forces it |
+| `--reasoning-effort` | `LEVEL` | `default` | The `reasoning_effort` kwarg; `default` leaves it unset |
+| `--reasoning-preserve`, `--no-reasoning-preserve` | — | on | The `preserve_reasoning` kwarg: whether a template that can keeps earlier turns' reasoning |
+| `--skip-chat-parsing`, `--no-skip-chat-parsing` | — | off | Read every reply as plain answer, thinking included |
+| `--chat-template-kwargs` | `STRING` | — | A JSON object of extra template variables; each member's value kept as JSON text |
+| `-co`, `--color` | `on`\|`off`\|`auto` | `auto` | Write the reasoning grey; `auto` when stdout or stderr is a terminal and neither `NO_COLOR` nor `TERM=dumb` says otherwise |
 | `-st`, `--single-turn` | — | — | Generate once and exit |
 | `-no-cnv`, `--no-conversation` | — | — | The same; the spelling `tools/main` uses |
+
+The four grammar flags each replace the grammar outright, so the last one
+given wins, as upstream's handlers do. A schema is parsed and converted while
+the command line is read, before anything loads, by a port of upstream's
+`json_schema_to_grammar` (`cli/json/schema_to_grammar.zig`, held to the C++
+by `make schema-diff`): the same GBNF, the same warning on stderr when a
+`pattern` has no grammar equivalent, and the same failures. A schema that
+fails, or a file that cannot be read, exits 1 with
+`error while handling argument "<flag>": <upstream's message>`. A grammar
+that does not parse exits 1 with `error: failed to parse grammar`.
+
+The reasoning and kwarg flags are chat flags: each turns templating on
+(§6.1). The kwarg flags write one map in command-line order, a later write to
+a name winning, as upstream's `default_template_kwargs` does; when nothing
+wrote `preserve_reasoning` it is `true`. A `--chat-template-kwargs` value that
+is not JSON exits 1 with `error while handling argument
+"--chat-template-kwargs": <nlohmann's message>`; an unknown `--reasoning-format`,
+`--reasoning` or `--color` value, or a budget below -1, exits 1 with `error
+while handling argument "<flag>": <upstream's message>`.
 
 All four one-shot spellings are accepted. When none is given the binary warns
 on stderr, because upstream would have been interactive.
@@ -239,8 +271,8 @@ distinguishable.
 
 | Stream | Carries |
 |---|---|
-| stdout | The prompt echo (unless suppressed), the completion, a trailing newline, and the timings line |
-| stderr | The `loading <model> ...` notice, the one-shot warning, libllama warnings and errors, `--fit`'s error line, and all failure messages |
+| stdout | The prompt echo (unless suppressed), the completion, a trailing newline, and the timings line; in a chat, each reply as §5.3 shows it, `[Start thinking]`/`[End thinking]` and `--color`'s escapes included, and `Error: <message>` when a reply does not parse |
+| stderr | A schema conversion's `WARNING: ...` line, the `loading <model> ...` notice, the one-shot warning, libllama warnings and errors, `--fit`'s error line, and all failure messages |
 
 libllama's INFO and DEBUG logging is suppressed. A redirected stdout contains
 the completion and nothing else, except the timings line when enabled.
@@ -282,15 +314,19 @@ verbatim.
 
 ### 5.2 Chat templates
 
-When a chat flag is given, the prompt is rendered through a Jinja template
-before tokenization.
+When a chat flag is given, the conversation is rendered through the model's
+Jinja template before tokenization, by `cli/common_chat/` -- the port of
+upstream's `common_chat_templates_apply`, held to it by `make chat-parse-diff`
+-- with the request upstream's `llama-cli` sends its server: the messages and
+nothing else, so the server's options decide the rest.
 
 | Aspect | Behaviour |
 |---|---|
-| Template source | `--chat-template`, else `--chat-template-file`, else the model's `tokenizer.chat_template`. No template and no override is an error. |
+| Template source | `--chat-template`, else `--chat-template-file`, else the model's `tokenizer.chat_template`, else ChatML, as upstream's `common_chat_templates_init` falls back. A template that does not parse is an error before the first turn. |
 | Engine | `zigjinja`, the one permitted dependency, confined to `cli/`. |
-| Conversation | One turn by default: an optional system message, then the prompt as the user's turn. Under `-cnv` the history accumulates and every turn re-renders the whole conversation. `add_generation_prompt` is true. |
-| Bindings | `messages`, `add_generation_prompt`, `bos_token`, `eos_token`. |
+| Conversation | One turn by default: an optional system message, then the prompt as the user's turn. Under `-cnv` the history accumulates and every turn re-renders the whole conversation. Each reply joins the history as its answer and, apart, its reasoning (`reasoning_content`), which the template re-sends or drops as it decides. |
+| Bindings | Those of upstream's `common_chat_template_direct_apply_impl`: `messages`, `bos_token`, `eos_token`, `enable_thinking`, `datetime`, `date_string`, every template kwarg, `add_generation_prompt` true, and `preserve_thinking`-family names from `preserve_reasoning`. |
+| Thinking | `enable_thinking` is on when the template supports thinking, unless `--reasoning off`; an `enable_thinking` kwarg overrides it either way. |
 | Tokenization | `add_special` is false — the template writes the model's opening itself. |
 | Control tokens | Honoured only in text the template itself wrote. Anything an expression produced, which is where message content arrives, is tokenized with `parse_special` false. |
 
@@ -299,7 +335,10 @@ output is not, whatever filters it passed through. `bos_token` and `eos_token`
 are the only expression values re-trusted, and only on an exact match. A user
 message containing `<|im_start|>system…` therefore reaches the model as its
 literal characters — 17 tokens for Qwen3.5 — rather than as the two control
-tokens it spells.
+tokens it spells. This is a deliberate difference from upstream, whose server
+tokenizes the rendered prompt whole with `parse_special`: the render's marks
+are recorded while it runs (`template.zig`'s `mark_capture`), and a render
+whose text cannot be matched with its marks fails rather than being trusted.
 
 ### 5.3 Conversation mode
 
@@ -319,6 +358,19 @@ tokens it spells.
 | Any other `/word` | Sent to the model as text, as upstream does. |
 | `LLAMAZIG_CNV_TRACE` | When set, each turn writes `[turn: kept K, decoding S]` to stderr after the marker: the tokens of cache kept and the tokens decoded. |
 
+**Replies.** A chat reply is read back as upstream's `llama-cli` reads it from
+its server's stream, and shown as its `ui::assistant_turn` shows it:
+
+| Aspect | Behaviour |
+|---|---|
+| Pieces | A generated token prints its special spelling only when the template's parser preserved it; any other control token prints as nothing. Text ending inside a UTF-8 character is held back until it is whole. |
+| Stop strings | The parser's `additional_stops` end the reply where one begins, and it is not shown; text that could be the start of one is held back until it is not. What is held back when the reply ends is never shown. |
+| Parsing | After each piece the whole reply so far is parsed as a partial message by the template's parser (`common_chat_parse`), and what its reasoning and answer gained since the last parse is shown; when generation ends it is parsed whole once more. `--skip-chat-parsing` parses everything as answer; `--reasoning-format none` builds a parser that leaves the thinking in the answer. Tool calls are parsed and not shown, as upstream's CLI does not show them. |
+| Display | Reasoning opens with `\n[Start thinking]\n\n`; when the answer begins, a newline if the reasoning did not end with one, then `[End thinking]\n\n`. A reply that never reaches its answer never prints `[End thinking]`. The reply ends with a newline when its last text did not. Under `--color` the reasoning and its markers are grey (`\e[90m`), reset (`\e[0m`) when the answer begins and at the end. |
+| A reply that does not parse | `Error: <message>` on stdout (red under `--color`); generation stops, and the reasoning and answer shown so far join the history. |
+| History | The reasoning and the answer as shown, the reasoning as `reasoning_content`. |
+| Reasoning budget | With `--reasoning-budget N >= 0` and a template whose parser names an end-of-thinking tag, upstream's budget sampler runs before the chain: fed the generation prompt's tokens, it counts N tokens once the start tag is seen, then forces `--reasoning-budget-message` and the end tag token by token. |
+
 ### 5.4 Sampler chain
 
 Constructed in this order, matching upstream's default:
@@ -333,13 +385,30 @@ Constructed in this order, matching upstream's default:
 `min_keep` is 0 throughout. There is no separate greedy path: `--temp 0`
 produces argmax inside the temperature step, after penalties have applied.
 
+A grammar (`--grammar`, `--json-schema` and their file forms) is a separate
+sampler, applied as upstream's `common_sampler_sample` applies it: the chain
+picks a token from the full logits; if the grammar rejects it, the logits are
+reloaded, the grammar applied, and the chain picks again -- drawing from the
+RNG a second time. The token is accepted by the grammar, then the chain. Under
+`-cnv` the grammar restarts every turn, as each upstream turn is a new request
+with a new sampler; the chain does not. The output-format prefill upstream
+applies after a chat template's generation prompt is not done.
+
+A reasoning budget (§5.3) applies before the chain, and before the grammar on
+a resample; it accepts each token first.
+
 ### 5.5 Loop and stop conditions
 
 Generation stops at the first of:
 
 - an end-of-generation token, unless `--ignore-eos`;
 - `n_predict` tokens generated, when `n_predict >= 0`;
-- the context filling.
+- the context filling;
+- in a chat, one of the parser's stop strings, or a reply that does not
+  parse (§5.3).
+
+The token sampled last when `n_predict` or the context stops a reply is not
+decoded, so a conversation's next turn does not count it as cached.
 
 A prompt at least as long as the context is an error before generation starts.
 
@@ -376,7 +445,7 @@ These must hold. Each is a runnable gate.
 | C10 | Every CPU op kernel computes the same **bits** as the stock C on ~300 fixed cases, at 1 and 3 threads | `make ops-diff` |
 | C11 | Every node of a real model's prompt decode and one single-token decode computes the same bits as the stock C, CPU and Metal | `make node-diff` |
 | C6b | C6 with the model on the CPU device alone, so the ported CPU kernels carry the whole forward pass | `make parity-port-cpu` |
-| C12 | `llama-cli -cnv` writes the same replies, stderr and per-turn cache report as a reference conversation over upstream's chat-template engine and libllama, on a hybrid and a plain-KV model | `make cnv-diff` |
+| C12 | `llama-cli -cnv` writes the same replies -- reasoning shown apart, under every reasoning flag -- stderr and per-turn cache report as a reference conversation over upstream's `llama-common` (templates, parser, sampler and budget, `ui::assistant_turn`) and libllama, on a hybrid and a plain-KV model | `make cnv-diff` |
 | C13 | `--fit` leaves the same parameters and logs the same trace as upstream's `common_fit_params`, on fake GPUs with chosen memory, the CPU alone and Metal, with every arm of `fit.cpp` reached | `make fit-diff` |
 | C14 | The BLAS backend answers every vtable question as upstream's `ggml-blas.cpp` does and computes the same **bits** for every type, and a decode with BLAS in the scheduler is identical node by node | `make blas-diff`, `make blas-node-diff` |
 

@@ -19,9 +19,18 @@
 # script checks -- if the sampler chain in cli/session.zig is reordered, this is
 # what notices.
 #
+# Then seven grammar cases, below the prompts.
+#
 # Usage: scripts/parity-cli <model.gguf> [n_predict]
 #   Requires: zig build cli --release=fast
-#             make buildmacos   (the Apple-clang reference libraries)
+#             make buildmacos   (the Apple-clang reference libraries), on macOS
+#             zig build reference tools-ref --release=fast, elsewhere
+#
+# Off macOS there is no Apple-clang build, so the reference side is the same
+# driver over upstream's libllama and libllama-common compiled unmodified
+# (`libllama-ref.a`, `libllama-common-ref.a`) and the port's libggml.a, as
+# `cuda-parity-cli` links it: what is compared is the CLI and libllama, over
+# one ggml.
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,6 +42,7 @@ NPRED="${2:-32}"
 CLI=zig-out/bin/llama-cli
 [ -x "$CLI" ] || { echo "missing $CLI -- run 'zig build cli --release=fast'" >&2; exit 2; }
 
+if [ "$(uname -s)" = Darwin ]; then
 REF_LIBS=(
     cmake-build/apple/src/libllama.a
     cmake-build/apple/ggml/src/libggml.a
@@ -40,8 +50,17 @@ REF_LIBS=(
     cmake-build/apple/ggml/src/libggml-cpu.a
     cmake-build/apple/ggml/src/libggml-base.a
 )
-for lib in "${REF_LIBS[@]}"; do
-    [ -f "$lib" ] || { echo "missing $lib -- run 'make buildmacos'" >&2; exit 2; }
+COMMON_LIBS=(cmake-build/apple/common/libllama-common.a cmake-build/apple/common/libllama-common-base.a)
+REF_HINT="run 'make buildmacos'"
+else
+REF_LIBS=(zig-out/lib/libllama-ref.a zig-out/lib/libggml.a)
+COMMON_LIBS=(zig-out/lib/libllama-common-ref.a)
+REF_HINT="run 'zig build reference tools-ref --release=fast'"
+. scripts/platform-libs
+platform_libs cc "${REF_LIBS[@]}"
+fi
+for lib in "${REF_LIBS[@]}" "${COMMON_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- $REF_HINT" >&2; exit 2; }
 done
 
 tmp="$(mktemp -d)"
@@ -53,19 +72,22 @@ trap 'rm -rf "$tmp"' EXIT
 # The reference side lives in harness/raw_completion.c, shared with
 # `make ref-raw` so the two cannot drift apart.
 
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
-FRAMEWORKS=(-lc++
-            -framework Foundation -framework Metal -framework MetalKit -framework Accelerate
-            -F "$SDK/System/Library/Frameworks")
 # Apple's clang, not `zig cc`: `REF_LIBS` are Apple-clang objects from the CMake
 # build, and since Xcode 27 Zig's linker rejects them with "failed to resolve
 # relocations and write atoms: Overflow". Apple's linker takes them, and this is
 # the Apple-clang reference side regardless. Apple's driver finds its own
-# libc++, so `FRAMEWORKS` is not used here.
+# libc++. Elsewhere the reference is `zig c++` output and wants Zig's.
+if [ "$(uname -s)" = Darwin ]; then
 clang harness/raw_completion.c -o "$tmp/ref" -std=c11 -w -I llama.cpp/include -I llama.cpp/ggml/include \
     "${REF_LIBS[@]}" -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     2>"$tmp/ref-link.log" \
     || { echo "FAIL: could not link the reference driver" >&2; tail -5 "$tmp/ref-link.log" >&2; exit 1; }
+else
+zig cc -c harness/raw_completion.c -o "$tmp/ref.o" -std=c11 -O2 -w -I llama.cpp/include -I llama.cpp/ggml/include \
+    || { echo "FAIL: could not compile the reference driver" >&2; exit 1; }
+zig c++ "$tmp/ref.o" -o "$tmp/ref" "${REF_LIBS[@]}" "${PLATFORM_LIBS[@]}" 2>"$tmp/ref-link.log" \
+    || { echo "FAIL: could not link the reference driver" >&2; tail -5 "$tmp/ref-link.log" >&2; exit 1; }
+fi
 
 PROMPTS=(
     "The capital of France is"
@@ -97,6 +119,72 @@ for p in "${PROMPTS[@]}"; do
         echo "DIFFERS"; diff "$tmp/a.txt" "$tmp/b.txt" | head -6; fail=$((fail+1))
     fi
 done
+
+# Grammars: --json-schema, --json-schema-file, --grammar and --grammar-file
+# against the reference driver given the GBNF upstream itself makes --
+# `json_schema_to_grammar` from the reference's own `libllama-common.a`, as
+# upstream's `-j` handler calls it. Two cases sample at temp 0.8 with a fixed
+# seed: a token the grammar rejects is drawn again, from the same RNG, so the
+# order of upstream's check-then-resample is part of what is compared.
+cat >"$tmp/to_gbnf.cpp" <<'CPP'
+#include "json-schema-to-grammar.h"
+#include <fstream>
+#include <iostream>
+#include <sstream>
+int main(int, char ** argv) {
+    std::ifstream f(argv[1]);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    std::cout << json_schema_to_grammar(common_json::parse(ss.str()));
+}
+CPP
+if [ "$(uname -s)" = Darwin ]; then
+    GBNF_CXX=(clang++) GBNF_SYS=(-framework Foundation -framework Metal -framework MetalKit -framework Accelerate)
+else
+    GBNF_CXX=(zig c++ -O2) GBNF_SYS=("${PLATFORM_LIBS[@]}")
+fi
+"${GBNF_CXX[@]}" -std=c++17 -w "$tmp/to_gbnf.cpp" -o "$tmp/to_gbnf" -I llama.cpp/common -I llama.cpp/include -I llama.cpp/ggml/include \
+    -I llama.cpp/vendor "${COMMON_LIBS[@]}" "${REF_LIBS[@]}" "${GBNF_SYS[@]}" 2>"$tmp/gbnf-link.log" \
+    || { echo "FAIL: could not link upstream's json_schema_to_grammar" >&2; tail -5 "$tmp/gbnf-link.log" >&2; exit 1; }
+
+SCHEMAS=(
+    '{"type":"object","properties":{"name":{"type":"string"},"age":{"type":"integer","minimum":0,"maximum":120}},"required":["name","age"],"additionalProperties":false}'
+    '{"type":"array","items":{"type":"string","pattern":"^[a-z]+$"},"minItems":2,"maxItems":4}'
+    '{"enum":["red","green","blue"]}'
+    '{"type":"string","format":"date"}'
+)
+GPROMPTS=("Describe a person as JSON:" "List some fruits:" "My favourite colour is" "Today's date is")
+GBNF='root ::= ("yes" | "no") "." [ a-z]*'
+printf '%s' "$GBNF" >"$tmp/user.gbnf"
+
+# one comparison: label, prompt, temp, seed, reference grammar file, our flags...
+grammar_case() {
+    local label="$1" prompt="$2" temp="$3" seed="$4" gfile="$5"
+    shift 5
+    "$tmp/ref" "$MODEL" "$prompt" "$NPRED" no-prompt,no-timings "$temp" "$seed" "$gfile" 2>/dev/null > "$tmp/a.txt"; rc_ref=$?
+    "$CLI" -m "$MODEL" -p "$prompt" -n "$NPRED" --temp "$temp" -s "$seed" --no-display-prompt --no-show-timings "$@" \
+        2>/dev/null > "$tmp/b.txt"; rc_cli=$?
+    printf '  %-36s ' "$label"
+    if [ "$rc_ref" -ne 0 ] || [ "$rc_cli" -ne 0 ]; then
+        echo "FAIL (exit: reference=$rc_ref cli=$rc_cli)"; fail=$((fail+1))
+    elif [ ! -s "$tmp/a.txt" ]; then
+        echo "FAIL (reference produced no output)"; fail=$((fail+1))
+    elif diff -q "$tmp/a.txt" "$tmp/b.txt" >/dev/null; then
+        echo "identical"; pass=$((pass+1))
+    else
+        echo "DIFFERS"; diff "$tmp/a.txt" "$tmp/b.txt" | head -6; fail=$((fail+1))
+    fi
+}
+
+for k in "${!SCHEMAS[@]}"; do
+    printf '%s' "${SCHEMAS[$k]}" >"$tmp/schema$k.json"
+    "$tmp/to_gbnf" "$tmp/schema$k.json" >"$tmp/schema$k.gbnf" 2>/dev/null \
+        || { echo "FAIL: upstream could not convert schema $k" >&2; exit 1; }
+    grammar_case "-j: $(echo "${GPROMPTS[$k]}" | cut -c1-30)" "${GPROMPTS[$k]}" 0 42 "$tmp/schema$k.gbnf" -j "${SCHEMAS[$k]}"
+done
+grammar_case "-jf, sampled" "${GPROMPTS[0]}" 0.8 42 "$tmp/schema0.gbnf" -jf "$tmp/schema0.json"
+grammar_case "--grammar" "Is the sky blue?" 0 42 "$tmp/user.gbnf" --grammar "$GBNF"
+grammar_case "--grammar-file, sampled" "Is the sky blue?" 0.8 7 "$tmp/user.gbnf" --grammar-file "$tmp/user.gbnf"
 
 echo
 if [ "$fail" -eq 0 ]; then

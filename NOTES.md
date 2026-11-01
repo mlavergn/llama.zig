@@ -8595,3 +8595,2829 @@ the whole of `make tools-diff`, one failed, on `--log-jsonl -m
 case's masked stdout was identical on both sides in 40 runs each, and the next
 14 runs all passed. The diff was not captured. If it recurs, keep the work
 directory.
+
+## Stage 9 step 2: JSON schema to grammar
+
+`cli/json/` gains three files, re-exported by its barrel:
+
+- `schema.zig` ports `common/json-schema.h` and `common/json-schema.cpp`:
+  the schema normalised into `common_chat_schema` nodes, `value_types`,
+  `may_be_string`, `kind_name`, `type_name`. The C++ class hierarchy is a
+  tagged union; every node, string and copied JSON value of a document
+  lives in the document's arena, and nodes never move, which is what lets a
+  `$ref` node hold its target as the C++'s raw pointer does.
+- `schema_to_grammar.zig` ports `common/json-schema-to-grammar.h` and
+  `.cpp`: `json_schema_to_grammar` (both overloads), `build_grammar` and
+  its builder, `gbnf_format_literal`, and the three string helpers it takes
+  from `common/common.cpp`. Its three `std::regex`es -- single character
+  classes, but `std::regex` all the same -- run through
+  `src/llama/regex.zig`, which `src/llama/module.zig` now exports as
+  `regex` so `cli/` can reach it through `@import("llama")`.
+- `trie.zig` ports what `_not_strings` uses of `common/trie.cpp` and the two
+  UTF-8 helpers of `common/unicode.cpp` it is built with. `check_at` and
+  the Aho-Corasick automaton serve the PEG parser and come with step 3.
+
+Errors follow `cli/json/`'s pattern: an error value, and the `what()` in a
+per-thread buffer (`schema.what()`), cut at its first NUL. Three error
+values stand for the three C++ classes that matter, because
+`json_schema_to_grammar(json)` catches `std::runtime_error` -- the
+builder's "JSON schema error at ...", a `common_json_error`, `build_min_max_int`'s
+"At least one of min_value or max_value must be set" -- and rewraps it as
+`std::invalid_argument`, while `check_errors`' own `invalid_argument`
+passes through untouched.
+
+### The gate
+
+**`make schema-diff`** compiles `json-schema.cpp`,
+`json-schema-to-grammar.cpp`, `json.cpp`, `trie.cpp`, `unicode.cpp` and
+`common.cpp` unmodified beside `harness/schema_ref.cpp`, which runs a
+bytecode of conversions; `harness/schema_diff.zig` runs the same bytecode
+through the port. Every record must be byte-identical: each grammar; the
+class (`IA:` `invalid_argument`, `RE:` `runtime_error`, `JE:`
+`common_json_error`) and `what()` of every exception; the line
+`check_errors` writes to stderr, captured on the C++ side by pointing fd 2
+at a scratch file around each conversion; a schema tree read back through
+every accessor `json-schema.h` has, `value_types` and `may_be_string` on
+every node; and every name `build_grammar`'s builder hands back.
+
+The cases:
+
+- **Upstream's own**, not copied: `tests/test-json-schema-to-grammar.cpp`
+  is `#include`d with its `main` renamed, and `ref_schema_upstream` drives
+  its `test_all` to hand over all 79 cases. Each is first held to its own
+  expectation on the reference -- all 79 reproduce -- and the test is also
+  built and run as its own program, which must pass. Its two
+  document-level checks in `main` are rewritten as builder scripts.
+- Those 79 mutated, 80 times each: a member deleted, replaced or added
+  (a keyword with a random value or subschema), an array element dropped or
+  appended.
+- 60,000 random schemas over every keyword the builder reads, malformed
+  values included, with `$defs`, `definitions` and an array under `$defs`
+  for the `$ref`s to resolve into; 30,000 integer-bound schemas; 40,000
+  patterns; 5,000 literals over every byte; 20,000 `build_grammar` scripts
+  (`add_rule` with reserved, colliding and unsanitised names, `add_schema`
+  on any node, `dotall` both ways); and a handwritten set for the edges.
+- Eight texts that are not JSON at all.
+
+**751,324 checks over 165,529 cases -- 220,205 grammars, 76,758
+exceptions, 46,608 warnings, 56,385 builder names -- in ~14 s**, plus ~10 s
+to build. 42 phrases, one per error message and per converter arm
+(`dotall`'s dot both ways, `-additional-k`, `-rest`, `date-time-string`,
+`uuid`, the parse error), must each appear in some reference record, so a
+generator that drifts off an arm fails rather than passing on nothing.
+`SCHEMA_DIFF_STATS=1` lists every distinct error.
+
+### What it found, and what was surprising
+
+- **Upstream recurses without bound on one schema**:
+  `{"allOf": [{"$ref": "#/$defs/a"}], "$defs": {"a": {"$ref": "#/$defs/a"}}}`.
+  `_visit_all_of`'s `add_component` follows a `$ref` to its target with no
+  visited set, and the target is the `$ref` itself. `visit`'s own path
+  guards with `_refs_being_resolved`; this one does not. The port does what
+  upstream does, so a CLI given that schema overflows its stack as
+  upstream's does. The gate runs the reference in forked children, a batch
+  at a time, reruns a batch whose child dies one case per child, and skips
+  a case that kills the reference on both sides, counted: one, that one.
+- **A port bug the gate's safe build caught**: `raise`, which sets
+  `what()`, was handed `what()` itself when `json_schema_to_grammar`
+  rewraps an error, and appended a slice of its own buffer to that buffer.
+  ReleaseSafe stopped on the aliasing `@memcpy`. It now builds the text
+  apart and swaps it in.
+- **Upstream's test cannot be called with its `main` renamed**: `main` is
+  the one function allowed to fall off its end, and as anything else clang
+  compiles the fall-off to a trap, after every case has passed. So the
+  harness only calls `test_all`, and the script runs the test as its own
+  program.
+- **`common.cpp` is linked for three string helpers** -- `string_split`,
+  `string_join`, `string_repeat` -- and the rest of it reaches `log.cpp`,
+  `sampling.cpp` and `fit.cpp`. A release link dead-strips them; a Debug
+  one did not and failed, so the harness links with `--gc-sections`.
+- **`what()` and `%s` both stop at a NUL.** A pattern may carry `\u0000`;
+  the warning `check_errors` prints is cut there by `fprintf`'s `%s`, and an
+  `unsupported_pattern` whose message quotes a NUL is cut inside the
+  parentheses. Both are held by cases.
+- **`std::stoi` and `std::stoull` are `strtol` and `strtoull`**: white space,
+  a sign, then digits, the rest ignored. So `{ 2}` is a repetition,
+  `#/$defs/arr/-0` resolves to element 0, `#/$defs/arr/ 1` to element 1,
+  and `{2147483648}` makes a whole pattern unsupported.
+- **`(int64_t)` of a double past `int64_t`** in `get_bound` is undefined;
+  AArch64 saturates and the port does too, as `cli/json/` already did. The
+  generator offers such bounds only on AArch64.
+
+### Injections
+
+Each was applied by exact replacement, the gate rebuilt and run, the build
+confirmed (four first versions did not build -- a discarded or unused value,
+which Zig rejects -- and were rewritten), and the file restored by reverse
+replacement -- by writing the original back, for a deletion -- and checked
+byte for byte against the original. The table is the last run, every
+injection against the final gate after the two escapes below were closed:
+37 injections,
+36 caught and one provably inert, across `build_repetition`,
+`build_min_max_int` and its `uniform_range`, `_add_rule`, `_add_primitive`,
+`_visit_pattern`, `_pattern_to_rule`'s `transform`, `gbnf_escape_length`,
+`format_literal`, `_not_strings`, `_resolve_ref`, `_build_object_rule`'s
+`get_recursive_refs`, `_visit_all_of`, `visit`, `check_errors`,
+`format_grammar`, `std::stoi`, and in the builder `get_count`, `get_bound`,
+`get_format`, `resolve_ref` and its `stoull`, `build_node`, `build_object`,
+`build_array`, `fail`, `value_types`, `may_be_string`, and the trie:
+
+| Injection | Result |
+|---|---|
+| buildRepetition: separator min not decremented | 401 differ |
+| uniformRange: middle digit range test < made <= | 9,588 differ |
+| buildMinMaxInt: less_decimals floor 1 made 0 | 1,507 differ |
+| getBound: exclusiveMinimum rounds up | 265 differ |
+| getFormat: uuid6 accepted | 396 differ |
+| stoull: minus not applied | 242 differ |
+| notStrings: empty name taken as absent | 80 differ |
+| gbnfEscapeLength: \U takes 6 digits | 132 differ |
+| transform: a literal no longer runs into a '.' | inert: `join_seq` re-merges the split literal |
+| visitAllOf: an enum value in any component counts | 429 differ |
+| recursiveRefs: optional ? and * swapped | 2,176 differ |
+| checkErrors: warning not cut at NUL | 2,336 differ |
+| mayBeString: allOf does not skip any | 14 differ |
+| valueTypes: number excludes integer | 2,931 differ |
+| regexReplace pattern: each character replaced alone | 5,506 differ |
+| formatLiteral: ] escaped too | 11,312 differ |
+| stoi: no leading white space | 5,227 differ |
+| buildNode: anyOf wins over oneOf | 1,520 differ |
+| buildObject: properties without additionalProperties still open | 6,381 differ |
+| trie: children appended, not sorted | 171 differ |
+| addRule: an equal rule under a suffix is not reused | 169 differ |
+| addPrimitive: deps skipped once the rule itself exists | 91,242 differ |
+| buildArray: prefixItems wins over items | 787 differ |
+| Builder.resolveRef: the leading empty segment walked | 24,355 differ |
+| notStringsVisit: the quote not rejected | 788 differ |
+| buildMinMaxInt: negative half starts at 1 | 6,864 differ |
+| checkErrors: warnings joined with a comma | 228 differ |
+| visit: a reserved name suffixed -x | 4,491 differ |
+| transform: sub-rule numbered from 0 | 1,810 differ |
+| getCount: zero refused | 1,216 differ |
+| valueTypes: a ref cycle contributes every type | 12 differ |
+| Builder.fail: path cut to its first character | 21,477 differ |
+| Converter.resolveRef: fragment not sanitised | 26 differ |
+| formatGrammar: rules sorted ignoring case | 4,642 differ |
+| stoi: INT_MAX itself out of range | 5,298 differ |
+| visitPattern: rules not restored after an unsupported pattern | 2,589 differ |
+| buildNode: additionalProperties counts only when not a boolean | 1,279 differ |
+
+The inert one: the literal loop's `sub_pattern[i + 1] == '.'` clause
+decides whether a character before a `.` joins the literal being read or
+starts a new one, and `join_seq` merges consecutive literals back into one,
+so no output can depend on it.
+
+Two escapes were closed by widening the inputs:
+
+- `std::stoi` refusing `INT_MAX` itself escaped because the one pattern
+  with `{2147483647}` also held `{2147483648}`, which makes the whole
+  pattern unsupported on both sides. The edges are now one to a pattern,
+  and the pattern tokens include them.
+- Sorting the rules ignoring case escaped because no generated name had an
+  upper-case letter -- every rule name is sanitised to `[a-zA-Z0-9-]`, and
+  none of the inputs used the capitals. The name pools now do.
+
+### The CLI
+
+`--grammar`, `--grammar-file`, `-j`/`--json-schema` and
+`-jf`/`--json-schema-file` are accepted, all four being `set_sampling()`
+options upstream admits for every example. Each replaces the grammar, so
+the last wins. A schema is parsed and converted before anything loads,
+as upstream's handler converts it while parsing the command line; a
+failure exits 1 with `error while handling argument "<flag>": <what()>`.
+The grammar is its own sampler beside the chain, and `Session.sampleNext`
+is `common_sampler_sample` with `grammar_first` false, then
+`common_sampler_accept`: the chain picks from the full logits; a token the
+grammar rejects sends it back to reload the logits, apply the grammar and
+pick again, drawing from the RNG a second time. Without a grammar the path
+is `llama_sampler_sample`, as before. Under `-cnv` the grammar is reset
+every turn. Not done: the output-format prefill `common_sampler_init`
+applies after a chat template's generation prompt, which arrives with step
+4.
+
+`parity-cli` gains seven grammar cases: four schemas through `-j`, one
+through `-jf` and two GBNF grammars, two of the seven sampled at temp 0.8
+with a fixed seed. The reference is `harness/raw_completion.c`, given a
+grammar file and the same check-then-resample in C, fed the GBNF upstream
+itself makes: `json_schema_to_grammar` from the CMake reference's
+`libllama-common.a`. **13/13 identical.** Negative-tested 2/2: applying the
+grammar before the chain made one sampled case differ, and resampling
+without reloading the logits failed seven.
+
+Not run: `WIN_X86=1` (wired through `scripts/win-target`) and Linux. The
+`-cnv` grammar reset has no reference to compare against.
+
+## Stage 9 step 3: the PEG parser
+
+`cli/peg/` ports `common/peg-parser.h` and `common/peg-parser.cpp`, a new
+module with its own barrel that imports `json` and `llama` by name, as
+`cli/common_chat/` does:
+
+- `arena.zig`: the 21 parser variants (a tagged union in `std::variant`'s
+  order), `common_peg_arena` with `parse`, `resolve_refs` and `dump`, the
+  AST arena, the parse context, and the executor -- one `switch` where the
+  C++ has `std::visit` over `parser_executor`.
+- `builder.zig`: `common_peg_parser_builder`, the JSON and Python value
+  grammars, `parse_char_classes`, `rule_name` (its `std::regex_replace`
+  through `regex.zig`) and the operators. The C++ handle is an id beside a
+  builder reference so `a + b` can reach the builder; here the operators
+  are methods (`b.plus(a, b)`, `b.litShl("x", a)`, `b.orAssign(&a, b)`).
+- `gbnf.zig`: `build_grammar`, `collect_reachable_rules` and the
+  Aho-Corasick GBNF of `until` and `ac`, through `schema_to_grammar.zig`'s
+  `GrammarBuilder`; `grammar()` is the `build_grammar([&](b) {
+  arena.build_grammar(b, lazy); })` every caller writes.
+- `serialize.zig`: `to_json`, `from_json`, `save`, `load`.
+- `errors.zig`: `RuntimeError`, `OutOfRange` (`std::vector::at`, whose
+  `what()` is "vector"), `InvalidArgument`, `JsonError`, and the two sinks
+  the debug trace goes through.
+
+`cli/json/trie.zig` gains `check_at` and `common_aho_corasick`, the rest
+of `trie.cpp`. `cli/common_chat/chat_peg.zig` ports `chat-peg-parser.h` and
+`.cpp`: `ChatBuilder` holds a `peg.Builder` as `b` where the C++ derives
+from it; the three mappers are one `Mapper` with a `Kind`, since the
+subclasses override only `from_ast`; the tagged parser and the string
+helpers. Exceptions follow `cli/json/`'s pattern: an error, and the text in
+`peg.what(e)`.
+
+Three things decide bytes and are easy to miss:
+
+- **The rule map is an `std::unordered_map`, and its order is output.**
+  `save` writes `rules_` in iteration order and `build_grammar` adds rules
+  to the converter in it, which decides which of two colliding names keeps
+  its own. So the map is `libcxx.StringMap`. A consequence the gate holds:
+  `save`, `load`, `save` is not idempotent -- reinserted, the rules iterate
+  differently.
+- **A parser's id is its position, so the order the C++ builds them in is
+  part of the result.** The chat builders are written as clang evaluates
+  the C++: a chain `a + b + c` is a left fold in which each operand is
+  built just before it is added (`ChatBuilder.Chain`), not a list built
+  first and joined after. The first draft built `"\"" + tool_id(...) +
+  "\""` as a separate sequence and appended it, which flattens to the same
+  grammar with different ids.
+- **`static_cast<uint32_t>(char)` sign-extends where `char` is signed.**
+  An escaped byte above 0x7F in a character class (`[\\\xc3...]`) is
+  range 0xFFFFFFC3 on Darwin and x86 and 0xC3 on Linux aarch64; the port
+  goes through `c_char`. The debug trace's `%s` stops at a NUL, so its
+  snippet, dumps and tag names are cut there too -- the one port bug the
+  gate found, 147 records on its first run.
+
+### The gate
+
+**`make peg-diff`** links upstream's `libllama-common-ref.a` (`zig build
+tools-ref`) beside `harness/peg_ref.cpp`, which interprets a bytecode of
+builder calls through upstream's builder, and `harness/peg_diff.zig` runs
+the same bytecode through the port's, in one process. Per parser: the
+build's outcome, `dump(root)`, `save`, the GBNF eager and lazy, the saved
+arena loaded and saved again. Per input: the parse with no flags and
+lenient, then every prefix leniently -- the state a stream sees -- each with
+the AST dump and the base, Gemma 4 and MiniMax-M3 mappers' messages; the
+tagged parser's `parse_and_extract` both ways and
+`parse_anywhere_and_extract`; and, for short inputs, the debug trace,
+captured from fd 2 on the C++ side. Every exception is a record: `IA:`,
+`JE:`, `OR:`, `RE:` and `what()`.
+
+**Upstream's cases are recorded, not copied.** Its PEG tests
+(`tests/test-peg-parser.cpp` over the six files of `tests/peg-parser/`,
+and `tests/test-chat-peg-parser.cpp`) build parsers inside C++ lambdas, so
+there is no data to hand over. They are compiled with `harness/peg_rec.h`
+force-included: it includes the real headers, then renames -- for the rest
+of the test's translation unit only -- the builder, the parser handle, the
+parse context and the `build_*` helpers to stand-ins that forward every
+call to the real builder and write it into a description, and note every
+input a context or tagged parser is given. A handle's slot is its call's
+ordinal, and a rule built by a function writes its body between the call
+and a closing marker, so a replay that skips the body of an existing rule
+skips the same slots on both sides. The tests must still pass under it,
+and each of the 146 descriptions, replayed through upstream's builder, must
+save exactly as the arena the test built did; 442 inputs come with them.
+The tests are also built as upstream builds them and must pass first.
+
+Then: 3,000 random descriptions over every builder call (unresolved and
+recursive rules, rule bodies, operators, every char-class escape, schemas
+that fail); 600 chat grammars in the shape upstream's templates take --
+optional reasoning, content up to the tools, `standard_json_tools`
+(flat, nested and function-is-key layouts, ids, `parameters_order`, the
+OpenAI wrapper), `standard_constructed_tools` with replaced markers, or
+`python_style_tool_calls` -- over random and malformed tools; grammars
+shaped as `common/parsers/gemma4.cpp` and `minimax-m3.cpp` build them, for
+their mappers; hand-ordered tool tags for the base mapper's state machine;
+1,500 saved arenas loaded back, four in five mutated; and every field of
+every serialized parser type missing and of each wrong type. Inputs are
+the recorded ones, strings derived by walking the port's built grammar,
+and both mutated.
+
+**4,197,396 checks over 5,687 cases -- 810,103 parses, 308,034 mapped
+messages with tool calls -- in ~20 s**, plus ~40 s to compile. 68 phrases,
+one per `from_json` error, `dump` form, GBNF construct and debug-trace arm,
+must each appear in some reference record, every mapper must produce tool
+calls, and the destroyed-tool-call path below must be reached.
+`PEG_DIFF_SEED` and `PEG_DIFF_SCALE`: seeds 2 and 3 at scale 3 passed,
+11.5M checks each.
+
+### What it found in upstream
+
+- **The base mapper writes through a destroyed tool call.** After a
+  `tool-close` resets `pending_tool_call`, `current_tool` still points into
+  the `std::optional`, and a tool node before the next `tool-open` reads
+  and writes the destroyed `common_chat_tool_call` -- for a name past
+  libc++'s 22-byte short string, a write into freed memory. Nothing written
+  there reaches the message (the next `tool-open` starts afresh), so the
+  port keeps the destroyed call as `dead`, writes it harmlessly, and sets
+  `Mapper.ub`; the gate does not compare that mapping and counts it (276).
+- **`dump` of a rule that cycles through a tag recurses without bound**:
+  the tag arm calls `dump`, not `dump_impl`, so the cycle check starts
+  afresh. The debug trace dumps every child, so a debug parse of such a
+  grammar overflows the stack. A left-recursive grammar does too, and a
+  PEG without memoization backtracks exponentially on some grammars. The
+  reference runs in forked children under `alarm`: a batch that dies is
+  rerun one case per child, and a case that kills or outlasts it is skipped
+  on both sides and counted (24).
+- `chars("")` and `chars("[")` read `front()` and `back()` of an empty
+  string; the port takes no ranges, and the generator never asks.
+- `from_json` checks rule ids and the root but not a child's id; a parse
+  that reaches one throws `std::out_of_range`.
+
+### Injections
+
+Each applied by exact replacement, the harness rebuilt (rc checked) and
+compared against the baseline binary's hash, run, and the file restored by
+reverse replacement and compared byte for byte. Two first versions did not
+build (an unused variable or parameter, which Zig rejects) and were
+rewritten. Three escaped the first run and were closed by widening the
+inputs: a vertical tab dropped from `space` (no input held `\x0b`), the
+escaped-byte sign extension (no class escaped a byte above 0x7F), and
+`json_brace_depth` ignoring escapes (no argument held `\"` before a
+brace). The table is the last run, every injection against the final
+gate:
+
+| Injection | Result |
+|---|---|
+| literal: a partial match ends at its start | 299,659 differ |
+| sequence: a partial result carries no nodes | 2,184,171 differ |
+| choice: a partial option counts as a failure | differ, then the port overflows its stack |
+| repetition: too few matches at the end is a failure even leniently | 4,426 differ |
+| not: a partial child negates to success | 2,186 differ |
+| any: an incomplete code point fails leniently | 1,552 differ |
+| space: vertical tab is not space | 626,046 differ |
+| chars: invalid UTF-8 after enough matches fails | 167 differ |
+| string: \/ is not an escape | 4 differ |
+| string: \u takes three digits | 539 differ |
+| until: a delimiter's prefix at the end does not stop it | 168,528 differ |
+| rule/tag: a node is partial only on failure | 72,730 differ |
+| atomic: a partial child keeps its nodes | 217,071 differ |
+| resolve_refs: the root left a reference | 1,714 differ |
+| dump: a tag's child shares the cycle check | 693 differ |
+| ast dump: one space per level | 244,357 differ |
+| char class: an escaped character not sign-extended | 1,902 differ |
+| char class: a trailing '-' starts a range | the port aborts building the inputs |
+| rule_name: each bad character its own '-' | 25,365 differ |
+| rule fn: an existing rule rebuilt | the port aborts building the inputs |
+| sequence/choice: nested ones not flattened | 10,646 differ |
+| gbnf: '-' unescaped in a class | 8 differ |
+| gbnf: state names not zero-padded | 1,385 differ |
+| gbnf: x{1,} not written x+ | 1,895 differ |
+| gbnf: lazy triggers unsorted | 77 differ |
+| serialize: max_count written unsigned | 3,598 differ |
+| from_json: an empty delimiter accepted | 19 differ |
+| from_json: rule ids not checked | differ, then hangs (stopped) |
+| normalize: a Python literal needs its whole name | 136 differ |
+| mapper: argument names not comma-separated | 23,389 differ |
+| brace depth: escapes ignored | 1,692 differ |
+| gemma4: a partial string closed | 537 differ |
+| minimax: containers always closed | 71,149 differ |
+| permute: subsets numbered from 1 off | 13,576 differ |
+| optspace: trailing spaces required | 834 differ |
+| flat keys: parameters_order reversed | 32,424 differ |
+| constructed tools: default closer | 47,491 differ |
+| tagged: anywhere starts at 1 | 10,347 differ |
+| mapper: whitespace reasoning kept | 21,865 differ |
+| trie: a prefix at the end is no match | 168,528 differ |
+| aho-corasick: no failure links | 14 differ |
+| aho-corasick: a match not inherited through the failure link | 11 differ |
+| errors: out_of_range text | 188 differ |
+
+43 injections, all caught. Two are caught by the harness aborting before
+any record is compared: a trailing `-` read as a range start indexes past
+the class, and a rule built by a function rebuilt every time recurses
+through `json()` without end. Two report differing records first and then
+stop: a partial choice option treated as a failure sends the port's
+recursion deeper than the reference's until its stack runs out, and with
+rule ids unchecked `collect_reachable_rules` loops on a loaded arena
+(stopped by hand after 7 minutes). Every one stops the gate, which is what
+it is for.
+
+Not run: `WIN_X86=1` (wired through `scripts/win-target` as in the other
+in-process diffs) and Linux, where `char` is unsigned and the sign-extension
+arm takes the other side. Nothing in the CLI uses the parser yet: that is
+step 4.
+
+## Stage 9 step 4: templates and parsing
+
+The rest of upstream's chat stack is in `cli/common_chat/`, beside the data
+model and the PEG chat builders steps 1-3 left there:
+
+- `template.zig`: `common_chat_template` -- the source as the lexer
+  normalises it, BOS and EOS, the capabilities -- and rendering:
+  `common_chat_template_direct_apply_impl`, the generation-prompt diff,
+  `common_chat_extra_context`, `autoparser::generation_params`, and
+  `global_from_json`'s binding of a JSON object as the template's
+  variables. It renders through zigjinja exactly as `cli/chat.zig` does,
+  every bound string marked input, because zigjinja follows llama.cpp's
+  builtins for a marked string; the marks are dropped from the result, as
+  upstream's `common_chat_params::prompt` is a plain string.
+- `caps.zig`: `jinja::caps` and `caps_get` -- the seven probe renders and
+  what each reads off the values the template touched.
+- `templates.zig`: `common_chat_templates` and its init (model or override,
+  the two template patches, BOS/EOS from the vocabulary), source, explicit
+  flag, caps, `support_enable_thinking`, the ASR preset,
+  `verify_template`, `format_single` and `format_example`, the five
+  `workaround`s, `common_chat_try_specialized_template` and
+  `common_chat_templates_apply` with its Jinja and legacy arms.
+- `parse.zig`: `common_chat_parser_params`, `common_chat_parse` and
+  `common_chat_peg_parse`.
+- `params.zig`: `common_chat_params` and `common_grammar_trigger`.
+- `autoparser/`: `chat-auto-parser.h`'s data (`types.zig`), its helpers
+  (`helpers.zig`: the marker-aware diff, segmentation, `compare_variants`),
+  the differential analysis (`analyzer.zig`, `chat-diff-analyzer.cpp`
+  whole: the probes, the twelve workarounds, the three analyzers) and the
+  parser generator (`generator.zig`).
+- `parsers/`: the fourteen per-model parsers of `common/parsers/`, one file
+  each, and `foreach_function` / `foreach_parameter`.
+- `log.zig`: `LOG_DBG`/`INF`/`WRN`/`ERR` into a sink the host installs;
+  `util.zig`: error conversions between the layers and the `std::string`
+  operations the C++ leans on (`substr` throws `basic_string` past the end).
+
+8,654 lines over 27 files. The modules still import their siblings by
+name -- `json`, `peg`, `llama`, and now `zigjinja` -- so a host that reaches
+`templates.zig` or `parse.zig` supplies all four.
+
+**Errors** stay `exception.zig`'s: `std::out_of_range` (a `substr` past
+the end, `vector::at`) becomes `error.RuntimeError` with its text, since
+the server answers 500 for both. A failed render is `error.RuntimeError`
+whose `what()` begins `jinja: `; upstream's text there is its own engine's
+and is not reproduced.
+
+### What `jinja-diff` found first
+
+PLAN.md asked for `jinja-diff` to gain the analyzer's probe conversations
+before anything else. It now renders 29 of them -- every conversation
+`chat-diff-analyzer.cpp` and `caps.cpp` builds (tool definitions, calls
+with object and string arguments, two calls, a call with reasoning and no
+content, tool responses, `reasoning_content` deep in the history, empty
+and typed content), plus a tool with no parameters -- each with and without
+a generation prompt and with thinking on and off, bound as
+`direct_apply_impl` binds them, through `template.zig`; and it compares
+every template's `caps_get` with `caps.zig`'s. **On the first run 3,424 of
+7,728 probe renders differed**; every difference was zigjinja answering as
+Jinja2 where llama.cpp's engine answers otherwise. They are fixed in
+`../zigjinja` behind one switch, `Environment.llama_cpp_semantics`, which
+`template.zig` and `cli/chat.zig` set (Jinja2's behaviour stays zigjinja's
+default):
+
+- **`tojson`** keeps a mapping's insertion order (Jinja2 sorts), takes
+  Hugging Face's arguments -- `ensure_ascii`, `indent`, `separators`,
+  `sort_keys`, by keyword or at positions 1-4, so `tojson(2)` is
+  `ensure_ascii` -- writes `", "` between items on one line and `","`
+  across lines, and a double as `std::ostream` does (`%g`).
+- **A container, none or a boolean as a string** -- `'x' + mapping`,
+  `mapping | string`, `none | trim` -- is Python's `repr`:
+  `{'name': 'x'}`, `None`, `True` (`llama_repr.zig`, upstream's
+  `as_string` and `value_to_string_repr`). Functionary v3.2 concatenates
+  tool-call arguments that way; Cohere's `content|trim` of a none is
+  `None`.
+- **`sort`, `indent` and `map`** take their keyword arguments
+  (`sort(attribute='type')`, `indent(4, first=true)`,
+  `map(attribute='function')`), which zigjinja ignored: Ministral sorted
+  typed content by its string form, Cohere lost its `Action:` indent.
+- **Filters and method calls reach only the receiver type's builtins**
+  (`get_builtins()` per type): `list.startswith(...)` is an error there,
+  not zigjinja's `startswith` filter applied to a list -- which is how
+  Qwen3 refuses typed content.
+- **`==` is `equivalent()`**: a list or mapping holding a list or mapping is
+  unhashable and equal to nothing, itself included -- Mistral Small's
+  `message == user_messages[-1]` is false for typed content, so the tools
+  block is not printed.
+- **An undefined or none operand is an error** except in a membership test
+  or a concatenation with a string; a `for` over anything but a list or
+  mapping (none, a string) is an error; `none[0]` and a list as a mapping's
+  key are errors; `items()` of none or undefined is empty; an unknown name
+  stays undefined rather than becoming `""`.
+- **A namespace is one object however it is passed**: Kimi K3 increments
+  `state.tool_index` inside a macro it hands the namespace to, and zigjinja
+  had copied it into the macro.
+
+The capabilities agreed on 68 of 69 templates on the first run; the one
+that did not (`llama-cpp-deepseek-r1`, `supports_tools`) was the `map`
+above. They come from zigjinja's new usage statistics
+(`zigjinja/src/stats.zig`): upstream records, on each value, that a render
+used it and with which operation, at its identifiers, member accesses,
+filters, tests and `for` loops; zigjinja copies values on every read, so a
+copy is mapped back to its original's address and every question is asked
+of the original. Addresses must not be reused during the probes, so they
+render through an allocator that never frees.
+
+`chat-parse-diff` then found three more, each in ReleaseSafe or on inputs
+the probes lack: `loop.previtem` and `loop.nextitem` were the loop's own
+items, borrowed and then freed by their reader -- a latent use-after-free
+in zigjinja that ReleaseFast never showed, because only safety-checked
+builds poison freed memory; two lists meeting in `in`, and a list as a
+mapping's key, are errors (GigaChat3's `ty in ["number", "integer"]` with a
+type array); and `items()` of an undefined `properties`
+(ByteDance-Seed-OSS with a parameterless tool). The no-parameters probe was
+added to `jinja-diff` for the last.
+
+### The gate
+
+**`make chat-parse-diff`** (`scripts/chat-parse-diff`,
+`harness/chat_parse_ref.cpp`, `harness/chat_parse_diff.zig`,
+`harness/chat_parse_rec.h`): one process per side, the same record file,
+one transcript each, compared line for line. Upstream's side links
+`libllama-common-ref.a` (`zig build tools-ref`) with `server-chat.cpp`
+and `server-common.cpp`, which `test-chat.cpp` includes.
+
+- **Per template**: the capabilities, source, explicit flag, ASR preset,
+  `support_enable_thinking`, the formatted example, `verify_template`, and
+  every field `autoparser::analyze_template` reads off it.
+- **Per apply**: every `common_chat_params` field -- format, prompt,
+  grammar, laziness, generation prompt, thinking tags, triggers, preserved
+  tokens, extra stops, the serialized parser byte for byte, the message
+  delimiters -- or the exception's class and `what()`.
+- **Per parse**: every field of the message, or the exception.
+- **Per helper call** (`calculate_diff_split`, `segmentize_markers`,
+  `until_common_prefix`, `after_common_suffix`, `compare_variants`): the
+  result.
+- **Everywhere**: every INF/WRN/ERR line logged (upstream's `common_log`
+  into a file read after each record). A line where the port's text holds
+  `jinja: ` is compared up to there.
+- Both clocks pinned (`time` and `clock_gettime` interposed in the
+  reference; `template.now_override` and zigjinja's `fixed_timestamp`),
+  under `TZ=UTC`.
+
+**Upstream's cases are recorded, not copied.** `tests/test-chat.cpp`,
+`test-chat-template.cpp` and `test-chat-auto-parser.cpp` are built as
+upstream builds them and must pass, then again with `chat_parse_rec.h`
+force-included, which renames the template init, apply and parse calls and
+the auto-parser helpers in each test's translation unit to wrappers that
+call the real function and write what they were given; they must pass
+under it too. Then every template in `models/templates/` (69) and ten
+synthetic ones (one that does not parse, an unclosed `for`, `chatml`, one
+that raises, one without a system role, Gemma 4's outdated form, a BOS/EOS
+writer, and three built for arms the injections showed unreached), three
+of them also initialised over `ggml-vocab-llama-spm.gguf` so a vocabulary
+supplies BOS, EOS and `add_bos`, 20 sampled applies each over
+tools, tool choice, parallel calls, a schema, a grammar, each reasoning
+format, thinking, the generation prompt, each continuation, kwargs (good
+and bad JSON), pure content and multi-turn conversations with tool calls,
+tool responses, typed parts and developer and system roles; every fourth
+apply keeps its parser and parses recorded and generic replies, whole and
+cut short. Then 4,000 recorded replies mutated and 1,000 parsed by another
+recorded parser of the same format. 37 phrases must each appear in the
+reference transcript.
+
+**48,918 records -- 174 templates, 2,162 applies, 46,309 parses, 73
+helper calls -- give 368,786 transcript lines and 1,942 exceptions,
+identical, in ~77 s** (24 s reference, 4 s port, the rest building and
+recording). Seed 2 at 40 applies per template and 8,000 mutations, before
+the last synthetic templates: 59,604 records, 431,054 lines, identical.
+
+### Upstream, as found
+
+- **`common_chat_templates_init` rethrows a sliced exception.** Its
+  `catch (const std::exception & e) { ...; throw e; }` throws a copy of the
+  `std::exception` base, so a template that does not parse reaches the
+  caller as `what()` "std::exception", whatever the parser said; the port
+  does the same.
+- **GigaChat3's template cannot render tools in upstream's engine**:
+  `ty in ["number", "integer"]` on a type array is "Unknown operator "in"
+  between Array and Array".
+- **`extract_args_markers`' JSON arm is unreachable** from
+  `analyze_tools`, which calls it only outside JSON formats.
+- `analyze_tool_call_format_json_native` keeps `find_first_of('{')` in an
+  `int`; with no brace, `substr(-1)` throws `basic_string`, which the
+  autoparser's catch turns into "Unable to generate parser".
+- The parsers test for a response format two ways: gpt-oss, deepseek,
+  gemma4, lfm2 and minimax-m3 with `!is_null() && is_object()`, so `{}`
+  counts; the rest with `is_object() && !empty()`. lfm2 adds its trigger
+  even when the grammar is not lazy; ministral3 and gigachat clear
+  `include_grammar` from inside the builder lambda; gpt-oss swaps the last
+  `<|return|>` for `<|end|>` when rendering for inference without a
+  generation prompt.
+
+### Not reproduced
+
+- A Jinja engine error's text (above), and a template that zigjinja parses
+  where upstream's parser refuses it, or the reverse, shows only as which
+  side fails.
+- A provenance sentinel byte (0x1d-0x1f) in bound text is dropped, where
+  upstream keeps it (`template.zig`'s header).
+- The DeepSeek V4 tool-result sort reads each `tool_call_id` once before a
+  stable sort; upstream reads it in the comparator, so with more than one
+  non-string id the type error could name a different element.
+- `LOG_DBG` lines are written but not gated.
+
+### Injections
+
+Each was applied by exact replacement, the gate rebuilt and run, and the
+file restored and compared byte for byte: the build checked, the gate's
+verdict read, the file's hash after the restore asserted. 34 in the first round, across the helpers, the analyzer, the
+generator, `templates.zig`, `template.zig`, `caps.zig`, `parse.zig`, seven
+of the per-model parsers and zigjinja's new code:
+
+| Injection | Result |
+|---|---|
+| helpers: `]` does not close a `[` marker | 100 records differ |
+| analyzer: the call-id suffix not preserved | 8 differ |
+| analyzer: Laguna's stop string misspelt | 50 differ |
+| analyzer: parameter order descending | 179 differ |
+| analyzer: TOOLS_ONLY never detected | 7 differ |
+| generator: a function parser's atomicity inverted | 111 differ |
+| generator: optional arguments at most once | 47 differ |
+| generator: lazy grammar for `required` too | 66 differ |
+| generator: pure content joined with `<<` | 238 differ |
+| templates: a merged system prompt joined with a space | 24 differ |
+| templates: argument JSON error text | 96 differ |
+| template: `date_string` month first | 48 differ |
+| caps: a system role always supported | 27 differ |
+| parse: a partial parse needs two bytes | 3 differ |
+| qwen3-coder: continuation closes thinking with one newline | 16 differ |
+| deepseek: tool results sorted descending | 6 differ |
+| ministral3: one call even when parallel | 8 differ |
+| muse-glimmer: lazy grammar for `required` | 1 differs |
+| kimi-k2: call-id separator | 26 differ |
+| zigjinja: `as_string` item separator | 22 differ |
+| zigjinja: `tojson` separator across lines | 45 differ |
+| zigjinja: `tojson` marks its input used shallowly | 920 differ |
+| zigjinja: a namespace copied into a macro | 2 differ |
+| analyzer: the thinking anchor 32 bytes | escaped; caught (50) after `synthetic-thinking-anchor` |
+| analyzer: a leading "close" marker kept as the user start | escaped; caught (13) after `synthetic-close-marker` |
+| templates: `auto` continuation ignores content parts | escaped; caught (117) after typed-part continuations |
+| template: an added BOS not cut | escaped; caught (35) after templates over a vocabulary |
+| gemma4: no fallback to the tool-call id | escaped; caught (2) after the outdated Gemma 4 template and unmatched tool responses |
+| helpers: degenerate diff takes `right` as its prefix | inert: both sides are empty only when `left == right` |
+| helpers: an all-space string keeps a character | inert: `trim_trailing_whitespace` has no caller upstream |
+| analyzer: the call-id prefix compared to the arguments' start | inert: outside JSON both are always "" there |
+| templates: kwargs bound in reverse order | inert: the variables are a map |
+| analyzer: the closer read from one byte earlier | inert unless a template writes the arguments twice: the closer parser looks for a second `YYYY` |
+| zigjinja: lists of containers compare equal | escaped: no template compares two such lists; the mapping arm is caught by `jinja-diff` (8 renders) |
+
+Then two more for the replacements of the inert ones: dropping
+`calculate_diff_split`'s left-is-prefix correction (462 differ), and
+`compare_thinking_enabled` accepting more than two markers (escaped, then
+caught -- 33 -- after `synthetic-thinking-three`, padded so the 64-byte
+anchor clears the system text). And `jinja-diff`'s own: the capability
+probe for object arguments disabled (120 capability values differ).
+
+**32 caught, 5 inert, 1 escape.** The five gaps the first round found were
+closed by widening the inputs: three synthetic templates, typed-part
+continuations and an unmatched tool response in the generator, an outdated
+Gemma 4 template derived from the current one, and three templates
+initialised over `ggml-vocab-llama-spm.gguf`, whose vocabulary adds BOS --
+the only way `add_bos` is ever true, since a template from a string alone
+never has it.
+
+Not run: Windows and Linux (the gate is wired for macOS only).
+
+## Stage 10: the chat data model, ahead of Stage 9 step 4
+
+The server's task and result types (`server-task.h`) carry
+`common_chat_msg`, `common_chat_msg_diff`, `common_chat_parser_params` and
+the message spans whether or not a request uses Jinja, so the data half of
+`common/chat.cpp` was ported ahead of the rest of Stage 9 step 4:
+`cli/common_chat/msg.zig` -- the message, tool call, content part, role,
+span, delimiter, tool, tool-choice, format, continuation and
+reasoning-format types; `render_content`, `to_json_oaicompat`,
+`compute_diffs` and `string_diff`; `common_chat_msgs_parse_oaicompat`,
+`common_chat_tools_parse_oaicompat` and their inverses;
+`common_chat_tool_parameters`; the message normalizer. Rendering a
+template and parsing output stay in step 4.
+
+**Exceptions are the API here.** The server's `ex_wrapper` answers 400 for
+`std::invalid_argument` and 500 for everything else, and puts `e.what()` in
+the body, so the class *and* the text of every throw reach a client.
+`cli/common_chat/exception.zig` gives each class an error
+(`InvalidArgument`, `RuntimeError`, and `cli/json`'s `JsonError`) and keeps
+the text in a per-thread buffer, as `cli/json/errors.zig` does for
+nlohmann. A `catch (const std::exception & e)` that rethrows with a prefix
+is `exception.rethrow`.
+
+**The module imports `json` by name**, not `../json/module.zig`: the server
+builds it as its own module, rooted at `cli/common_chat/module.zig`, where a
+relative path out of the root is a compile error.
+
+**The gate is `make chat-msg-diff`.** `harness/chat_msg_ref.cpp` links
+upstream's `llama-common` (now installed by `zig build tools-ref` as
+`zig-out/lib/libllama-common-ref.a`) and `harness/chat_msg_diff.zig` the
+port; both read the same records and write one transcript each. 1,625
+records from a fixed seed -- messages and tools well-formed and mutated
+(a field missing or of the wrong type, an unknown part or tool type, a
+non-array where an array goes), message pairs as a stream grows them,
+delimiter splits with skips -- give 17,840 transcript lines and 424
+exceptions over 40 distinct error texts. ~20 s.
+
+Negative-tested 14/14 after one fix. **The escape was the partial stop
+word**: `string_diff` returns "" when the new text is a prefix of the old
+-- the stream ended on a stop word that was then erased -- and no
+generated pair ever shrank. Changing that `return ""` to `return current`
+passed until the generator learned to truncate. One injection was void at
+first (it left a parameter unused, which Zig rejects) and was rewritten.
+
+## Stage 10 step 2: the HTTP layer
+
+`llama.cpp/tools/server/server-http.cpp` and `.h` (838 + 100 lines) are
+`tools/server/http.zig`; the part of cpp-httplib they reach is
+`tools/server/httplib/` -- `detail.zig` (ASCII classes, the
+insertion-ordered multimap behind `Headers` and `Params`, field
+validation, the splitters, URL coding, the header, query, `Accept` and
+`Range` parsers, `status_message`), `socket.zig` (the BSD calls,
+`SocketStream`, `BufferStream`, the line reader, `keep_alive`,
+`create_socket`), `message.zig` (`Request`, `Response`, header and body
+reading -- `Content-Length`, chunked with trailers, unframed --
+`FormDataParser`, ranges, the chunked writer), `thread_pool.zig`
+(`ThreadPool`) and `server.zig` (`Server`). 5,217 lines of Zig with 208
+`Ports` declarations; the definitions they cite span ~4,200 lines of
+`httplib.cpp` and ~1,400 of `httplib.h`, classes counted whole and
+compiled-out arms included. `http.zig` also carries
+`format_error_response` and `safe_json_to_str` (`server-common.cpp`, the
+first file to need them; they move when that file is ported) and the
+host half of `common_http_parse_url` (`common/http.h`).
+
+**Its shape.** `Params` is the seventeen `common_params` members
+`server_http_context::init` reads, under the same names, so this layer
+did not wait on `tools/common/params.zig`'s server members; the server
+copies its own `Params` into one. `Context.init` is the constructor and
+`Context.setup` is the C++'s `init`. `handler_t` is `Handler`, a context
+and a function returning `*Res`; `server_http_res` is `Res`, with a
+`vtable` for its two virtual members (`on_complete` and the destructor),
+so the server's derived responses embed a `Res`. A C++ exception is an
+error -- `InvalidArgument`, `RuntimeError`, `JsonError`, `OutOfMemory`,
+anything else a non-`std::exception` -- with its text in `what(err)`.
+cpp-httplib's handlers are context-plus-function structs the same way,
+and its exception handler is handed the error where the C hands it an
+`exception_ptr`.
+
+**What is not ported, and why.** The UI asset arm: the reference compiles
+`llama.cpp.zmake`'s `ui-stub`, which leaves `LLAMA_UI_HAS_ASSETS`
+undefined, so the frontend paths are `{"/"}` and no asset route exists.
+`--path` (`public_path`): it mounts a directory through cpp-httplib's
+mount points and file handler, and `setup` refuses it. `RegexMatcher`: a
+route with a regex metacharacter, which only an `--api-prefix` carrying
+one produces, is refused at registration
+(`error.RegexMatcherNotPorted`); porting it needs `src/llama/regex.zig`
+exported from the `llama` module. SSL, which the reference does not
+build. Winsock: the socket layer is written for Darwin and Linux, and
+only Darwin has run it. The client half of cpp-httplib, for router mode,
+the CORS proxy and the downloader.
+
+**cpp-httplib behaviours the gate pinned, every one reproduced:**
+
+- **A `SocketStream` is made per request**, with a 4 KiB read buffer, so
+  requests pipelined in one segment lose every request after the first;
+  so do a body-less POST's trailing bytes on a keep-alive connection.
+- **A streamed response always closes the connection**: the provider
+  returns `false` after `done()`, which `write_content_chunked` reads as
+  cancellation.
+- **A client that half-closes after its request never sees a stream's
+  chunks**: the writer checks `is_peer_alive` before each `next()`, and a
+  half-closed socket polls readable with nothing to peek. The driver keeps
+  its write side open while it reads a stream for this reason.
+- **A bad request line or bad headers answer 400 with `Connection: close`
+  and keep reading** -- `connection_closed` is set only by the framing,
+  URI, `Accept` and `Range` checks.
+- **414 is unreachable** with `llama.cpp.zmake`'s defines: the request
+  line is capped at `CPPHTTPLIB_MAX_LINE_LENGTH`, 32,768, the same as the
+  URI limit, so a line long enough to carry an over-long target is dropped
+  first, with no response at all.
+- **A path parameter is decoded twice**: cpp-httplib decodes the whole
+  path in `parse_request_line`, and `server-http.cpp` decodes the
+  parameter again, so `%253A` arrives as `:`.
+- **A WebSocket upgrade request runs the pre-routing handler twice**, once
+  in the upgrade check and once in `routing`, so its response carries the
+  CORS header twice.
+- **Every error status goes through `apply_ranges`**, because
+  `server-http.cpp`'s error handler returns nothing and so always counts
+  as `Handled`.
+- **A handler's own `Content-Length` is sent beside the real one**, and its
+  `Content-Type` is replaced by `set_content`.
+- **Ranges slice only a 206**, so a `Range` on a JSON route is validated
+  (416 out of bounds) and never applied. `coalesce_ranges` sorts with
+  libc++'s `std::sort` -- `src/llama/libcxx.zig`'s -- because ranges
+  sharing a start coalesce differently under another sort.
+
+**The gate is `make http-diff`** (`scripts/http-diff`;
+`zig build http-diff-bins` builds the two harnesses into
+`zig-out/http-diff/`, and `build/server_http.zig` is their wiring).
+`harness/http_ref.cpp` is upstream's `server_http_context` --
+`server-http.cpp`, `server-common.cpp` and `httplib.cpp` compiled
+unmodified with `httplib_defines` and the `ui-stub`, over `llama-common`,
+`libmtmd-ref` and `libllama-ref` -- and `harness/http_diff.zig` is the
+port's, with the same routes: echo (GET, POST, DELETE), two path-parameter
+routes, a route whose status, headers, body and content type come from its
+query, a stream, a stream that waits for `should_stop`, five throws (four
+through a copy of `server.cpp`'s `ex_wrapper`, one raw), health, empty.
+`harness/http_driver.py` (Python 3, standard library) starts each under
+eleven configurations -- default; two API keys with localhost-only CORS
+and one thread; an `/api` prefix with fixed CORS, methods and headers;
+`n_threads_http = -1` with the UI off; `--reuse-port`; never ready; Vertex
+AI (`AIP_*`, a fixed port overriding 0) with its predict route; a predict
+route that collides (exit 1); a Unix socket; SSL asked for (init fails);
+an unbindable host (start fails) -- and sends both the same raw bytes:
+210 cases, from well-formed requests through every malformed request line
+and header class, the size limits at and past their edges, every body
+framing, `Expect: 100-continue`, multipart (arrays, files,
+`filename*`, invalid UTF-8, every rejection), keep-alive, pipelining,
+ranges, CORS and API keys, and a stream read fully and one abandoned
+mid-stream. Every response's bytes and how the connection ended, and per
+configuration stdout, stderr and the exit code: 243 checks, ~42 s, stable
+over four runs. Masked: the port, the Unix socket path, and cpp-httplib's
+random `multipart/byteranges` boundary. The log runs at `LOG_LEVEL_DEBUG`,
+so each streamed chunk is compared as logged too. `zig build
+test-server-http` runs the 16 unit tests.
+
+**Negative-tested 18/18**, one after widening the inputs. Each injection
+built (rc 0) into a different `http_port`, ran the configurations it
+touches, and was undone by reverse replacement with the file's hash
+checked; the final clean build passed the whole gate.
+
+| Injection | Caught by |
+|---|---|
+| `Partial Content` spelled `Partial content` | 6 cases (206s) |
+| `Keep-Alive` header spelled `Keep-alive` | 75 cases |
+| chunk sizes in upper-case hex | 4 cases (streams) |
+| `Connection: close` only from 500, not 400 | 57 cases |
+| `+` not a space in a query | 2 cases, first `get-query` |
+| `Access-Control-Allow-Credentials` inverted | 4 cases (preflights) |
+| `Bearer ` stripped case-insensitively | `apikey/bearer-lower` |
+| path parameters not decoded a second time | **escaped**; then 2 cases, first `slots-double-escaped` |
+| line limit `>` made `>=` | `line-32768` |
+| header count limit off by one | `headers-101` |
+| `filename*` not percent-decoded | `multipart` |
+| identical ranges coalesced | `range-206-coalesce` |
+| `Expect: 100-continue` answered 417 | 2 cases, first `expect-100` |
+| `should_stop` never true | the log (`timed out` for `fired`) |
+| GCP alias not camel-cased | 3 predict cases |
+| a 404's JSON body dropped | 11 cases |
+| `n_threads_http` not raised to the core count | the `auto` log |
+| chunked terminator `0\r\n\r\n\r\n` | 4 cases |
+
+**The escape** was the path-parameter decode: every case's escapes were
+single, and cpp-httplib had already undone them before `server-http.cpp`
+looked. Two double-encoded cases closed it.
+
+**Two things about the apparatus.** Two injections first aborted on
+their own precondition -- the replacement text already occurred in the
+file -- before writing anything; they were rewritten. And a run that
+aborts leaves the last injected `http_port` in `zig-out`, which the next
+run's "artifact changed" check then compares against; each injection's
+failing gate is the evidence it changed behaviour, and the clean rebuild
+after the last one passed all 243 checks.
+
+**Left for later steps.** `tools/common/log.zig` writes synchronously
+with no lock; one `fputs` per message keeps lines whole under the HTTP
+threads, but with `--log-prefix` or timestamps several writes make one
+line and two threads can interleave them, where upstream's queue cannot.
+`http.zig` keeps its own per-thread `what` buffer;
+`cli/common_chat/exception.zig` keeps another, so once the server's
+routes throw through that module, `http.what` must read its buffer, or
+`ex_wrapper` will report stale text.
+
+## Stage 10 step 1: the server's options
+
+`llama-server`'s command line is `tools/common/`'s, so step 1 was the
+option table and the parse, not the server. Upstream's table has 355
+entries; 125 that `LLAMA_EXAMPLE_SERVER` admits were missing -- the server
+block (`--host` to `--models-autoload`), the reasoning and chat options,
+`--log-prompts-dir`, the 40 speculative options, the removed ones that
+still parse (`--draft`, `--spec-ngram-size-n`, ...), the eleven presets,
+and the server's own arm of `-np` (`number of server slots`, `-1 = auto`,
+0 refused). All are in, each at its place in arg.cpp's order, with
+`--spec-draft-cpu-range-batch`, which only `llama-speculative` takes, for
+completeness: 302 entries now, against 177. The table outgrew two files,
+so it is four, split at arg.cpp's line boundaries: `arg_options.zig` to
+`--pooling`, `arg_options2.zig` to `-npl`, `arg_options3.zig` the server
+block through `--log-timestamps`, `arg_options4.zig` the speculative
+options to the end. `addAll` calls them in that order. Every handler is
+real; none needed the refusal convention, because each only sets
+parameters -- the presets and `-hfd` name a repository the server would
+download later, which is where the refusal belongs.
+
+`params.zig` gained `common_params`' server block (the members
+`server-http.cpp` reads among them), `common_params_speculative` with its
+draft, n-gram and cache sub-structs, `default_template_kwargs` (a sorted
+map, as `std::map` is), `model_alias` and `model_tags` (sorted sets), the
+reasoning members, and the sampling struct's reasoning budget.
+`spec_draft_cache_type_k`/`_v` became `speculative.draft.cache_type_k`/`_v`.
+
+`common_params_parse_ex`'s other server arms: `n_parallel = -1` at
+parser init; `skip_model_download` for the server (no `--model is
+required`, no download refusal at parse time); the draft model's two
+`postprocess_cpu_params` calls; `input_prefix`, `input_suffix` and
+`antiprompt` through `string_process_escapes`; the CORS-origins warning
+when tools or MCP are on and `--cors-origins` was not given; the draft
+`tensor_buft_overrides` terminator; and `preserve_reasoning = "true"` as
+the default template kwarg. All of them run for every example, as
+upstream's do; the draft `postprocess_cpu_params` calls are new output
+for any tool given `-C` with fewer bits than threads (two more warnings,
+as upstream prints). `--chat-template-kwargs` and `--reasoning-effort` go
+through `cli/json/`, reached as `cli_fit`'s `json`, so a malformed kwarg
+throws nlohmann's own `parse_error` text. `--log-prompts-dir` reproduces
+libc++'s `create_directories` -- `File exists` for a file, `No such file
+or directory` for "" -- because the warning prints `ec.message()`.
+
+`tools/server/server.zig` ports `llama_server(argc, argv)` up to
+`llama_numa_init`: `setlocale`, `SIGPIPE` ignored, `common_init`, the
+parse. `server_stream_session_manager_start` is skipped -- it only starts
+a GC thread and prints nothing. Past the parse it says "serving is not
+ported yet" and exits 1.
+
+**The gate is `tools-diff server`**, 179 cases in
+`harness/tools/server.cases`, every one failing at parse time on both
+sides (a command line that parses starts upstream's server, which never
+exits; each case was first run against the reference under an alarm to
+prove it). `--help` held all 125 new options' text identical on the first
+build. `scripts/tools-diff` gained `!env NAME=VALUE` and `!unenv NAME`,
+since the environment is the parser's other input: 21 environment cases,
+each a variable through its handler or a variable the command line
+overrides. The post-parse checks are reached through a template libllama
+refuses (`--no-jinja --chat-template bogus`), which upstream checks after
+every other post-processing step.
+
+**It found a shared-parser bug on its first run.** `parse_bool_value`
+threw `invalid boolean value: maybe`; upstream's text has no value. No
+tool's cases had set a boolean option through the environment.
+
+**Upstream's logger races its own error message.** The log worker writes a
+line's prefix and its message in separate writes, so the parser's direct
+`fprintf` can land between them: 3 runs in 600 under load gave
+`0.00.027.207 W error: invalid argument: --bogus` and a bare `Setting ...`
+line. `~`'s line sort cannot undo that, so the cases mixing the two sit
+last, under a mask that drops the `T W ` prefix -- and three `-lv 1`/`-lv
+2` cases put the level back in view, because the mask let an injection
+that moved the CORS warning from warn to info pass. The same race showed
+once in `tools-diff imatrix` (the statistics table, from the reference's
+side) and did not recur in two reruns.
+
+Injections, each built (rc 0), checked to change `llama-server`, and
+undone by reverse replacement:
+
+| # | Fault | Caught by |
+|---|---|---|
+| 1 | `-cram`'s help reads `n_ctx_checkpoints` | `--help` |
+| 2 | `--port`'s `LLAMA_ARG_PORT` dropped | `--help`, env case |
+| 3 | `-sp` loses `.server` | `--help` |
+| 4 | `--cors-origins` not marked explicit | CORS cases |
+| 5 | `-ag` enables no tools | `-ag`, `LLAMA_ARG_AGENT` |
+| 6 | the draft batch `postprocess_cpu_params` dropped | `-C 0x1 -t 4` cases |
+| 7 | `--spec-type`'s hint drops the last type | `--help` |
+| 8 | `--sleep-idle-seconds` accepts 0 | `--sleep-idle-seconds 0` |
+| 9 | `--spec-synth-len` ignores trailing text | `--spec-synth-len 1.5x` |
+| 10 | the `enable_thinking` deprecation warning dropped | kwargs case |
+| 11 | the server `-np`'s env renamed | `--help` |
+| 12 | `create_directories` accepts an existing file | `--log-prompts-dir /etc/hosts` |
+| 13 | `none` no longer ends `--spec-type`'s list | `--spec-type none,bogus --bogus` |
+| 14 | `--embd-normalize` loses `.server` | `--help` |
+| 15 | the server requires `--model` at parse | post-parse cases |
+| 16 | `--api-key-file` keeps `#` comment lines | **escapes** |
+| 17 | the CORS warning logged at info | **escaped**; `-lv 2` case added, caught |
+
+16/17 caught. **No parse-time gate can see a value a handler stores**:
+#16 changes only `params.api_keys`, which nothing prints before the server
+starts; the same holds for any handler writing the wrong field. Those are
+`server-diff`'s once the HTTP layer and `/props` exist (step 3).
+
+**Not ported, and visible only on a command line that otherwise parses:**
+`common_chat_verify_template`'s Jinja arm (Stage 9), so a template that
+fails to parse as Jinja is refused upstream and accepted here; `-j`/`-jf`
+still refuse (Stage 9 step 2 owns them); the config files and `-hf`
+downloads, as for every tool.
+
+## Stage 10 step 3b: sampling and speculative decoding
+
+What the server's core calls in upstream's `common/` for sampling and
+speculative decoding, in `tools/common/`: all of `sampling.cpp` the
+server reaches (`sampling.zig`; only `common_perf_print` and llguidance
+are left out), `reasoning-budget.cpp` (`reasoning_budget.zig`), all of
+`speculative.cpp` -- the type tables, the parameter helpers, the driver,
+the four n-gram drafters (`speculative.zig`) and the four that run a
+second model: draft-simple, EAGLE3, DFlash/DSpark and MTP
+(`speculative_draft.zig`) -- and `ngram-cache.cpp`, `ngram-map.cpp`,
+`ngram-mod.cpp` (`ngram_cache.zig`, `ngram_map.zig`, `ngram_mod.zig`),
+over a libc++-layout `std::unordered_map` (`cxx.zig`'s `HashMap`).
+`common_sampler_init` moved from `init.zig` into `sampling.zig` and is
+whole now: grammar triggers (`regex_escape`, the anchored full patterns),
+lazy grammars, the generation-prompt prefill and the reasoning budget.
+`params.zig`'s sampling struct gained the members the server fills per
+request; `common_model_params_to_llama`/`common_context_params_to_llama`
+their speculative arms (`load_mtp`, `n_rs_seq`); `common_init_result`'s
+fit its draft "extra model". `-j`/`-jf` are real now, through Stage 9's
+`json_schema_to_grammar`. `src/llama/api/context.zig` gained
+`llama_get_ctx_other` (llama-ext.h, so in `exports.zig`'s `ext_only`),
+which the MTP drafter compares with the target.
+
+**libc++ shapes the n-gram cache's answers.** `common_ngram_cache` is an
+`unordered_map` of `unordered_map`s; `try_draft` keeps the first of
+equal counts in iteration order, and `common_ngram_cache_save` writes in
+it, so both depend on libc++'s bucket layout (`std::hash<int>` is the
+value itself, sign-extended; the n-gram hash is a Fibonacci product). `cxx.zig`'s
+`HashMap` reproduces `__hash_table` as `StringMap` does. One thing
+measured rather than assumed: libc++ 22's copy constructor and copy
+assignment are **structure-preserving** (`__copy_construct`: same bucket
+count, same list order), so upstream's copies of a part before iterating
+it change nothing, and `clone` keeps the order. A loaded cache iterates
+differently from the one saved -- `load` re-inserts in file order -- as
+upstream's does.
+
+**The fixtures needed two things they did not have.** The arch fixtures
+are `no_vocab`, and llama-vocab.cpp returns before reading any special
+token for that type, so a DFlash/DSpark draft has no mask token: every
+noise block decodes token -1, fails on both sides, and the block reading
+never ran. `harness/spec_fixtures.c` copies a fixture with an SPM
+vocabulary of the same size and the last token as the mask; with it every
+draft architecture drafts. And no fixture has next-token-prediction
+weights, so it also writes the Gemma 4 target and assistant pair
+`gemma4_assistant_diff.zig` builds -- the MTP drafter's shared-KV mode.
+
+**The gate is `make spec-diff`** (`scripts/spec-diff`):
+`harness/spec_ref.cpp` over libllama-common-ref and libllama-ref, and
+`harness/spec_diff.zig` over the port, one process per side, the same
+script: an `api` case (type tables, `n_max`, synthetic rates on `%a`,
+output limits, `types_from_gguf`, the n-gram stores on synthetic streams
+-- every cache's iteration order, bucket counts and saved bytes, merge,
+load, copy -- 270 reasoning-budget state machines with clone, copy,
+force and reset, `common_utf8_is_complete` over every string of up to four
+boundary bytes, the sampler's parameter print and name tables, and the
+n-gram drafters through the public driver with no model), and `run`
+cases: a speculative decode as `llama-speculative-simple` drives it, on
+one or two sequences, printing every draft, every accepted run, the
+target sampler's top candidates on bits, clone/copy round trips, the
+statistics. Qwen3-0.6B as target and draft (GPU and CPU, greedy and
+sampled, a grammar, a lazy grammar with all four trigger kinds and a
+reasoning budget, a tool-call grammar with prefill, synthetic
+acceptance, every n-gram type and a chain of three), EAGLE3 over a
+128-wide Gemma 4, DFlash, DFlash2 and DSpark over Nemotron-H, MTP over
+the Gemma 4 pair, and the error paths (no draft context, a draft vocab
+that does not match, a missing static cache -- an abort on both sides).
+Stdout must be identical and stderr -- every `common_log` line -- after
+masking timings, pointers and an abort's backtrace; GGML_ABORT's text is
+compared as a set, since upstream's races its asynchronous log worker.
+60 phrases must each appear in a reference transcript. 38 cases, 111,411
+lines, ~30 s.
+
+Injections, run in an isolated copy of the tree (so no other agent's build
+saw them), each built (rc 0), checked to change `spec_diff`, gated, and
+undone by reverse replacement verified byte for byte:
+
+| # | Fault | Caught by |
+|---|---|---|
+| 1 | `get_candidates` sorts with `>=` | ngram-mod-hot |
+| 2 | `common_sampler_accept` drops the history push | draft-simple and five more |
+| 3 | `sample_and_accept_n` tolerates a first mismatch | draft-simple-grammar, eagle3 x4, ngram-mod-hot |
+| 4 | `common_sampler_copy` skips the chain | draft-simple-sampled, ngram-mod-hot, rbudget-big |
+| 5 | the prefill's leading-space rule inverted | rbudget-big |
+| 6 | the budget never counts down | api |
+| 7 | forcing records the first end sequence, not the one matched | api |
+| 8 | `common_utf8_is_complete` expects 3 bytes after 0xF0 | **escaped**; api's UTF-8 sweep added, caught |
+| 9 | `token_matcher::collect` keeps empty sequences | api |
+| 10 | ngram-mod adds n-grams every 16 tokens, not 32 | api, chain |
+| 11 | ngram-mod's low-acceptance streak at `<= 0.25` | **escaped**; an exact-quarter combo added to api, caught |
+| 12 | ngram-cache's drafter drops the last token, not `id_last` | api, synth-reduced, ngram-cache |
+| 13 | `common_speculative_draft` truncates at `n_max + 1` | api, synth-reduced, ngram-simple, eagle3 x3 |
+| 14 | `accept` counts every position twice | api, draft-simple x5 |
+| 15 | the synthetic-rate bisection takes 31 steps | api, synth-len, dflash-iswa-clamp |
+| 16 | `n_max` of ngram-cache 7 | api, ngram-cache x3 |
+| 17 | `none` does not end a type list | api |
+| 18 | a block draft keeps `n_outputs_max_per_seq` 1 | the five DFlash/DSpark cases |
+| 19 | draft-simple decodes its next token one position late | draft-simple x5, synth-len |
+| 20 | EAGLE3's `accept` off by one | eagle3 x4 |
+| 21 | DSpark's anchor read from slot 1 | dspark x3 |
+| 22 | MTP with shared memory moves the position | mtp-gemma4 x2 |
+| 23 | the hash map grows to `2 * bc + pow2` | api |
+| 24 | an n-gram map key's hits count twice | api, ngram-map-k-2seq, ngram-map-k4v |
+| 25 | ngram-cache's lax percentage 60, not 66 | api |
+| 26 | the fit's extra model `shares_model` inverted | every draft-simple case |
+| 27 | a lazy grammar applies only while the budget is idle | **escapes** |
+| 28 | DFlash2's selector takes the last of equal scores | **escapes** |
+
+26/28 caught after two holes closed. #28 changes the answer only on two
+exactly equal `f32` scores, which random fixture weights never produce.
+#27 needs a lazy grammar that triggers after the budget is done and then
+constrains the reply: with the trigger firing after `</think>`, the
+reference's own output was unconstrained past the trigger (on both sides,
+so not a port bug) and the cause was not found; the arm is unproven.
+
+**Not reached, and why.** MTP's single-head and chained-head modes (no
+fixture has `nextn` weights for Qwen 3.5 or Step 3.5) and
+`types_from_gguf`'s MTP answer; EAGLE3's `get_state`/`set_state` bodies,
+which run only over a recurrent or hybrid target, and no 128-wide hybrid
+fixture extracts layer inputs (Kimi Linear aborts in the graph, on both
+sides); DSpark's "no confidence head" refusal (the fixture leaves the key
+out, which reads as present); draft-simple's `n_seq` mismatch, which
+`common_init_from_params` cannot produce. The grammar prefill's
+`catch` -- `LOG_ERR` then rethrow -- cannot be reproduced: the port's
+libllama aborts where the C++ grammar throws.
+
+**Not ported:** `common_perf_print` and `common_context_can_seq_rm`
+(common.cpp), which the server calls around checkpoints -- the server's
+step to take. `tools-diff` stayed green for server (183, four new `-j`
+cases), mtmd-cli (55, nine new `-j`/`-jf` cases), tts (30), perplexity
+(35), tokenize (51) and imatrix (35); tokenize's `--log-jsonl` case and
+imatrix's statistics table each failed once under load and passed on
+rerun, the logger race recorded under step 1.
+
+## Stage 10 step 3a: the server's data layer
+
+`llama.cpp/tools/server/server-common.cpp` and `.h`, `server-task.cpp`
+and `.h`, and `server-schema.cpp` and `.h` (1,986 + 651, 1,901 + 644,
+662 + 104 lines) are `tools/server/`'s data layer, split by seam:
+`common.zig` (`json_value`, the error types and `format_error_response`,
+`server_grammar_trigger`, the random ids and the media marker, the LoRA
+helpers, the JSON predicates and `json_get_nested_values`,
+`validate_utf8`/`is_valid_utf8`, `server_slot_stats`, `server_metrics`,
+`get_token_probabilities`, `safe_json_to_str`, `tokens_to_str` and
+`tokens_to_output_formatted_string`, the three SSE formatters,
+`server_pipe`), `tokens.zig` (`server_tokens` with its media chunks and
+its state format, `tokenize_mixed`, `tokenize_input_prompts`,
+`process_mtmd_prompt`, the server's own `base64_decode`,
+`format_prompt_infill`, `format_prompt_rerank`), `oaicompat.zig` (the
+`/completions` and `/chat/completions` conversions, `handle_media` with
+`fs_validate_filename`, the embeddings and rerank responses),
+`subproc.zig` (`server_subproc` and its waiter), `task.zig`
+(`task_params`, `task_result_state`, `server_task`,
+`completion_token_output`, `result_prompt_progress`, the prompt cache),
+`result.zig` (every `server_task_result_*` and every `to_json_*`, with
+`server_chat_msg_diff_to_json_oaicompat` from `server-chat.cpp`) and
+`schema.zig` (the field table and `eval_llama_cmpl_schema`). About 7,600
+lines of Zig with ~240 `Ports` declarations; `tools/server/module.zig`
+is their barrel (the queues are in it too; the HTTP layer and the
+executable still build from their own roots).
+
+**Its shape.** The result class hierarchy is one `Result`: the base's
+members and a tagged union of the subclasses', so `queue.zig`'s
+`ResultPtr` is `*Result` and each virtual is a `switch`; a result owns
+an arena, freed by `destroy`. A `Task` owns an arena for its parameters
+(made on first use, since the queue builds cancel tasks with no
+allocator), its tokens and its children; `TaskParams` owns nothing and
+deep-copies into another arena, which is how `add_child` copies.
+`task_params()` is `TaskParams.init(a)`, not `.{}`: the C++ default has
+the DRY breakers, the sampler chain and `{ none }` as its speculative
+types, and `/props` prints them (the gate found `.{}` answering empty
+lists). `task.params.sampling` is `tools/common/params.zig`'s
+`Sampling` -- the one `common_sampler_init` takes -- copied by a generic
+`deepClone`, so a member added there is copied without a change here.
+A C++ throw is `cli/common_chat/exception.zig`'s, so every error the
+layer returns reads through one `what()`; the schema converter's own
+buffer is moved into it where `schemaToGrammar` calls it.
+
+**One `json` module.** `cli/common_chat/` imports `json` by name, and
+`cli/fit.zig` already compiles `cli/json/` into `cli_fit` by a relative
+import; a file may belong to one module only, and two copies would give
+two `json.Value`s. `tools/server/json_module.zig` is the `json` module,
+re-exporting `cli_fit`'s. `build/tools.zig`'s `llama-server` imports it
+and `common_chat` now; `build/server_task.zig` builds the same tree for
+the tests and the harness.
+
+**The temporary gaps, all Stage 9 step 4's, each behind one function:**
+
+- `oaicompat.chatTemplatesApply` -- `common_chat_templates_apply`. The
+  legacy arm (`--no-jinja`) is ported whole, content parts, warnings,
+  throws and the JSON schema's grammar included; the Jinja arm answers
+  `error.RuntimeError` ("chat templates through Jinja are not ported
+  yet"). Beside it `chatTemplatesGetCaps` answers false for
+  `supports_parallel_tool_calls`, which only the Jinja arm reads.
+- `task.chatParse` -- `common_chat_parse`. With no parser (every
+  `--no-jinja` request) upstream builds `content(rest()) + end()`, and
+  that arm is ported, its two `LOG_DBG`s included; a request carrying a
+  serialized PEG arena answers `error.RuntimeError` until the PEG engine
+  and the chat mappers are wired together. The `chat_parser` field itself
+  is real: it loads the arena through `cli/peg/serialize.zig` to refuse a
+  malformed one as upstream does, and keeps the text ("" for an empty
+  arena, which upstream also parses as pure content).
+
+Two more, outside step 4: `handle_media`'s `http(s)` arm needs
+`common_remote_get_content` (`common/download.cpp`, step 7) -- it logs as
+upstream does and throws; and `tools/common/params.zig`'s
+`GrammarTriggerType` is an exhaustive enum where the C++ casts any
+integer to `common_grammar_trigger_type`, so a `grammar_triggers` entry
+of type 4 or more is refused here (`schema.triggerType`) where upstream
+stores and echoes it -- making that enum non-exhaustive (`_`) closes it,
+and `triggerType` already takes that path when it is.
+
+**Upstream behaviours the port keeps, each pinned by the gate or read off
+the C++:**
+
+- **Two throws depend on the log level.** `SRV_DBG`/`SRV_TRC` evaluate
+  their arguments only when the line prints, and the `json_schema`
+  handler's `dump(2)` throws on invalid UTF-8, the `chat_format`
+  handler's `common_chat_format_name` on a format that is none. At
+  debug verbosity both refuse the request; at the default, neither.
+- **`format_prompt_infill`'s three `static`s** are tokenized with the
+  first call's vocabulary and reused for every later one.
+- **`server_tokens::push_back(server_tokens &)`'s chunk loop never
+  advances** -- and is unreachable: every media position holds
+  `LLAMA_TOKEN_NULL`, which the token `push_back` refuses first
+  ("Invalid token"). The port keeps both.
+- **`json{}` is null**, so a metrics result's `to_json` dumps `null`.
+- **A `logit_bias` object's empty key is token 0** (`strtol` consumes
+  nothing and stops on the NUL), and `"stop": [""]` keeps the empty
+  string (`empty()` is false for a string).
+- **`format_response_rerank` moves a returned document out**: a second
+  rank with the same index gets "".
+- **A trigger word that tokenizes to one token must be preserved**, so
+  the field order (`preserved_tokens` before `grammar_triggers`) is
+  behaviour.
+
+**The gate is `make server-task-diff`** (`scripts/server-task-diff`;
+`zig build server-task-diff-bins` builds the port's half,
+`harness/server_task_diff.zig`, ReleaseSafe over ReleaseFast libraries,
+with a leak-checking allocator). `harness/server_task_ref.cpp` compiles
+beside upstream's `server-common.cpp`, `server-task.cpp`,
+`server-schema.cpp` and `server-chat.cpp`, unmodified, over the
+`libllama-common-ref.a`, `libmtmd-ref.a`, `libllama-ref.a` and
+`libggml.a` that `zig build tools-ref` installs. Both read the same
+records and write one transcript each, and log through `common_log` at
+debug verbosity with a marker per record, so stdout-like transcripts and
+stderr logs are both compared. Records, from a fixed seed: every
+literal `data=`/`json=` payload in upstream's `tests/unit/*.py` (read
+with `ast`, never run) through the schema, `/completions` and chat
+conversions; every schema field and alias with plausible and junk
+values, and random combinations, over six vocabularies (Qwen2, Llama
+SPM, BERT BGE, DeepSeek Coder, StarCoder, Phi-3) and four `params_base`s;
+chat bodies on the legacy path over nine template names, media parts as
+data URIs, bare base64 and `file://` under a media directory the script
+writes; `tokenize_input_prompts` and `server_tokens` operations
+(position counting, truncation, prefixes, spans, the state format
+round-tripped and corrupted) with and without an mmproj -- Gemma 3's,
+and Qwen2-VL's for M-RoPE positions, on generated PNGs; `validate_utf8`
+and `is_valid_utf8` over every 1- and 2-byte string and the 3- and
+4-byte strings over the 15 bytes that matter; every result kind in every
+response format, completions streamed through a `task_result_state`,
+and every result's JSON through all three SSE formatters; error
+responses, grammar triggers, embeddings and rerank responses, infill and
+rerank prompts, token probabilities (on the fixture and on Qwen3-0.6B,
+whose single-byte pieces reach the `byte: \x` arm), the prompt cache,
+`server_pipe`, LoRA requests, nested JSON, tasks. Masked: `created`,
+`created_at`, `completed_at`, the 32-character ids after `resp_`, `rs_`,
+`msg_`, `chatcmpl-`, and `%p` in the prompt cache's trace. 93 phrases
+-- each error text and log arm -- must appear in the reference's
+output. 3,043 records, 47,070 transcript and log lines over three passes (the third
+-- Qwen3-0.6B, no mmproj -- runs only the real-vocabulary token
+probabilities), 4,064 exceptions compared on class and text; ~5 s to run,
+~40 s with the builds; stable over seeds 1-5.
+
+Negative-tested 47/47 effective after closing six escapes; each injection built (rc 0), changed the
+port's binary, ran the gate, and was undone by reverse replacement with
+the file's hash checked; the clean rebuild after the last passed.
+
+| # | Injection | Caught by |
+|---|---|---|
+| 1 | `format_error_response`: 404 answers 405 | `E` records |
+| 2 | `validate_utf8`: a 3-byte lead cut only one byte from the end | `U` records |
+| 3 | `is_valid_utf8`: the 4th byte unchecked | `U` records |
+| 4 | `json_get_nested_values`: paths split on `.` | `response_fields` |
+| 5 | `server_slot_stats::to_json`: `draft_n` only from 2 | **escaped**; draft count 1 added, then caught |
+| 6 | `get_token_probabilities`: softmax sum off by 1e-7 | `G` probabilities' bits |
+| 7 | `format_anthropic_sse`: `event` or `data` | `SSE` records |
+| 8 | `server_pipe::write`: the bound applied one late | **escaped**; pipes written past their bound added, then caught |
+| 9 | `server_tokens::pos_next`: a media chunk's positions + 1 | `M` records |
+| 10 | `keep_first`: a chunk starting at `n` kept | `M` records |
+| 11 | `get_common_prefix`: a matching chunk skips one token more | **escaped**; `prefix_edit` (a copy cut after the chunk, continued differently) added, then caught |
+| 12 | `serialize`: format marker 0 | `serialized` hashes |
+| 13 | `base64_decode`: `-` in the alphabet | **escaped**; base64url strings added, then caught |
+| 14 | `tokenize_mixed`: later strings get the specials | `T` records |
+| 15 | `format_prompt_infill`: prefix takes 2/4 of a batch | `I` records |
+| 16 | `format_prompt_rerank`: SEP inverted | `Q` records (BERT) |
+| 17 | `handle_media`: `base` accepted for `base64` | chat media parts |
+| 18 | `oaicompat_chat_params_parse`: `top_logprobs` default 21 | chat bodies |
+| 19 | `format_response_rerank`: a returned text not moved out | `K` records |
+| 20 | embeddings response: `encoding_format` renamed | `F` records |
+| 21 | `fs_validate_filename`: `..` allowed | `file://../x.png` |
+| 22 | `task_params::to_json`: `n_discard` shows `n_keep` | `P` records |
+| 23 | `common_chat_parse`: generation prompt dropped | streamed results |
+| 24 | `common_speculative_type_name_str`: `;` | a two-type `params_base` |
+| 25 | `add_child`: seed + 2 | `TK` records |
+| 26 | `server_prompt_cache::load`: keep threshold 0.5 | `PC` records |
+| 27 | `server_prompt_cache::update`: half the dynamic token limit | `PC` records |
+| 28 | OAI chat final: EOS reads as `length` | **escaped**; every stop type in every format added, then caught |
+| 29 | OAI Responses partial: `in_progress` inverted | streamed results |
+| 30 | `to_metrics`: prompt seconds in ms | metrics results |
+| 31 | Anthropic final: input tokens keep the cached | results |
+| 32 | `field_num` hard limit: min exclusive | `P` records |
+| 33 | `stop`: no fallback to the command line's | **escaped**; empty stops over a base with antiprompts added, then caught |
+| 34 | `logit_bias`: the empty key is not token 0 | `P` records |
+| 35 | `grammar_triggers`: lazy check inverted | targeted `P` |
+| 36 | `reasoning_budget_message`: message after the tag | `extra` lists |
+| 37 | legacy template: parts joined by a blank line | chat bodies |
+| 38 | `reasoning_in_content` without `stream` | `P` records |
+| 39 | `json_schema` handler: a `tool_calls` grammar typed user | `extra` |
+| 40 | `parse_lora_request`: default scale 1 | `lora` field |
+| 41 | `tokens_to_output_formatted_string`: upper-case hex | `byte: \x9c` on Qwen3-0.6B |
+| 42 | `json_is_array_of_mixed_numbers_strings`: either suffices | `T` records |
+| 43 | `size_up_to_pos`: stops a position late | `M` records |
+| 44 | `deserialize`: one trailing token allowed | corrupted states |
+| 45 | `task_result_state`: `echo` inverted | `S` records |
+| 46 | `dry_base`: the built-in default, not the command line's | a base with `dry_base` 2.5 |
+| 47 | `chat_parser`: the text never loaded | malformed parsers |
+
+One injection first failed to build (the dynamic token limit removed
+outright left `size_per_token` unused) and was rewritten as #27. **The
+escapes were all input, never comparison**: a value the generator never
+produced (a draft count of 1, a `-`, a pipe over its bound), a pair it
+never built (a media prompt against a copy that diverges right after its
+chunk), or a combination too rare to land (EOS on a non-streamed OpenAI
+chat answer; an empty `stop` over a base that has stop strings). The
+binary is not byte-identical across clean rebuilds here because other
+workstreams edit `tools/common/` underneath it; each injected file was
+restored byte for byte and the gate passed after the last.
+
+**Not verified.** `server_subproc` and its waiter run only under unit
+tests (a pipe for the child): upstream's needs `common_subproc`, which
+step 6 brings. `server_pipe`'s waiting across threads (the gate drives
+it from one). `update_chat_msg`'s tool-call filter, which only a PEG
+parse can feed. The prompt cache's successful restore (the gate's states
+hold zeros, which `llama_state_seq_set_data_ext` refuses on both sides,
+so only the failure arm and the selection logic are compared). The
+`http(s)` media arm. Windows (`PeekNamedPipe`), which the waiter does
+not port yet.
+
+## Stage 10 step 3c: the server's core
+
+`llama-server` serves. `llama.cpp/tools/server/server-context.cpp` and
+`.h` (5,558 + 193 lines) are `tools/server/context.zig` -- `server_batch`,
+`server_slot`, `process_mtmd_chunk`, `server_context_impl` (loading,
+`init`, slot selection, `launch_slot_with_task`, `process_token`, the
+`send_*`, `process_single_task`, `update_slots` with `pre_decode`,
+`decode` and `post_decode`, checkpoints, metrics, sleeping) and
+`server_context` with `get_meta` -- and `tools/server/routes.zig` --
+`server_res_generator`, `server_routes` with every handler of
+`init_routes`, `handle_completions_impl` and its streaming lambda, the
+slot actions, embeddings, rerank, token counts, `update_cached_responses`,
+`get_res_props`, `get_res_models`, `get_res_model_info`.
+`server-stream.cpp` and `.h` (668 + 79) are `tools/server/stream.zig`;
+`server.cpp` (562) is the rest of `tools/server/server.zig`: the model or
+router decision, `ex_wrapper`, the route table, the 403 handlers, the GCP
+registration, shutdown and the signal handler. 8,027 lines of Zig with
+163 `Ports` declarations; `scripts/port-links` checks every one.
+
+**Added to `tools/common/`** (`common.zig`): `common_context_can_seq_rm`
+and its type, `common_memory`, `common_set_adapter_lora`,
+`common_embd_normalize`, `common_params_print_info` and
+`common_params_get_system_info`. `params.zig` gained
+`load_progress_callback` and its user data, which
+`common_model_params_to_llama` now passes (a callback also silences
+libllama's progress dots, as upstream's server's does);
+`common_init_from_params` now keeps `params.sampling.logit_bias_eog`,
+which only the server reads. `tools/server/task.zig`'s
+`common_prompt_checkpoint` gained `clear`, `update_tgt`, `update_dft`,
+`load_tgt` and `load_dft`; `common.randomDevice` is public.
+
+**zigjinja reaches `llama-server`.** Upstream's server parses the chat
+template with its Jinja engine at startup whether or not `--jinja` is on:
+`/props` reports the template's `chat_template_caps`, which only that
+analysis gives, and a template that does not parse stops the server.
+`cli/common_chat/` has the analysis (`templates.zig`, `caps.zig`, Stage 9
+step 4's), so `build/tools.zig` adds `zigjinja` to the server's
+`common_chat` module (a new `jinja` option, passed from `build.zig`). The
+dependency stays confined to `cli/` code; the binary that links it is new.
+Until step 4 unifies them the server keeps two template objects:
+`tools/common/chat.zig`'s, which the data layer's legacy path renders
+with, and `common_chat.templates`', for the capabilities and source.
+
+**Its shape.** `server_context_impl` is `Impl`; the public
+`server_context` holds a pointer to it. A slot's two `std::function`
+callbacks (`callback_on_release`, `callback_on_reset`) are one `owner`
+pointer, since both bind the context. A task is moved by value: the
+queue's `on_new_task` hands `processSingleTask` a `*Task`, which takes it
+-- into a slot, the deferred queue, or a `defer`'d `deinit`. A child
+task moved into its slot leaves an empty task behind in its parent's
+list, so the parent stays `is_parent()` and frees nothing twice. Every
+result owns an arena, as step 3a built them. `server_res_generator` is
+`ResGenerator`: an `http.Res`, the `server_res_spipe` members
+(`stream.Spipe`) and the reader, with `on_complete` and the destructor in
+its vtable; the destructor runs the reader's `stop()`, which cancels a
+task whose client went away, as upstream's destructor does. A lambda the
+C++ hands `iterate` or `yield_to_queue` is a method or a small work
+struct. Four `what()` buffers meet in the core: `common_chat`'s (the data
+layer), `cli/json`'s, `tools_common.arg`'s (the sampler and the drafters)
+and `http.zig`'s; `context.whatOf` reads the right one for each error
+class, and `ex_wrapper` maps `InvalidArgument` to 400 and the rest to 500
+through it.
+
+**Upstream behaviours the gate pinned, every one reproduced:**
+
+- **`common_json` has no constructor from an enum**: `get_res_model_info`
+  puts `llama_vocab_type` in, and it converts to `bool` -- `/models`
+  answers `"vocab_type": true`.
+- **`task_params()` is not empty**: an embedding or rerank task carries
+  the default sampler chain and DRY breakers, and `/slots` prints them
+  from `task_prev`; the port first gave those tasks `.{}`.
+- **`/infill`'s three "required" checks are dead**: each sets an error on
+  a response the handler then drops for `handle_completions_impl`'s, so a
+  missing `input_prefix` throws at `data.at()` and answers 500 with
+  nlohmann's text.
+- **The LRU tie goes to the last idle slot** (`<=`), so with two fresh
+  slots the first request lands in slot 1.
+- **The build-type suffix follows `NDEBUG`**: in a ReleaseSafe build the
+  reference logs `(debug)` after the target.
+- **A `POST /slots` action destroys its first response** before the action
+  makes its own; the port destroyed it twice when the action threw, which
+  crashed on the gate's first missing-`filename` case.
+
+**The gate is `scripts/server-diff`**, extended: `harness/server/<name>.setup`
+writes input files into `$DATA` once; `!parallel` ... `!end` sends a block
+of requests at once, each on its own thread; `!sleep`; a server that must
+fail to start is compared (log and exit) instead of counted down;
+`/health` is probed under `--api-prefix`; `!abandon` sends a request and hangs up once the response has begun; and startup waits for the
+"listening on" line, which upstream logs a moment after `/health`
+answers. **`!fulllog` compares the servers' whole logs at `-lv 4`** once
+they stop -- the slots' decisions (LRU and similarity picks, cache reuse,
+context shifts, checkpoints created, restored and erased, the prompt
+cache, draft acceptance) are visible there and in no response. Masks:
+times, rates, sizes in MiB, `%p`, the speculative statistics' durations;
+lines an HTTP thread logs (`stop: cancel task`, `got exception`, the
+stream sessions') are left out, because upstream's logger queues them for
+its worker and the port writes them at once, so they interleave with the
+decode loop's differently.
+
+| Case file | Server(s) | Cases |
+|---|---|---|
+| `core` | Qwen3-0.6B, one slot: every route and its errors, completions (stop words, probabilities, grammars, JSON schema, `n_indent`, `n_cmpl`, streaming with progress and per-token timings), OpenAI completions and chat (legacy template), tokenize (the special-token default), detokenize, infill, apply-template, the 403s, stream routes without a session | 108 |
+| `slots` | two slots, `--metrics --props --slot-save-path ./`: save, restore, erase, every refusal, metrics before and after, then the endpoints off | 38 |
+| `embd` | `--embedding` under mean, none, last and cls pooling (one refused for a too-small ubatch), `--rerank` in TEI and Jina shapes | 45 |
+| `lora` | two adapters (`lora.setup`, `make_lora.c` over Qwen3-0.6B): listing, rescaling, per-request scales, `--lora-init-without-apply`, a bad adapter refused at startup | 26 |
+| `cache` | context shift (`n_keep`, `n_discard`), cache reuse, `cache_prompt: false`, a reused chunk exactly `--cache-reuse` long, a prompt over the context, an invalid token; Qwen3.5 checkpoints with message delimiters | 34 |
+| `auth` | API keys, an `--api-key-file` with a comment line, `--api-prefix`, localhost CORS | 23 |
+| `parallel` | four slots, concurrent completions, streams, chat, tokenize; `n_cmpl` over free slots; `--no-cont-batching`; the auto (`-np -1`) unified cache | 28 |
+| `spec` | n-gram drafters (simple, map-k, mod), a draft model, synthetic acceptance, Qwen3.5 rolling back partly accepted drafts | 25 |
+| `sleep` | `--sleep-idle-seconds 1`: cached props, models and metrics while asleep, waking | 12 |
+| `stream` | `X-Conversation-Id` sessions: replay from offsets, lookup by id and `id::model`, delete, a failed request's session evicted; a client hanging up mid-stream, with and without a session (`!abandon`) | 24 |
+
+363 checks, ~20 min with the builds (`make server-diff` runs every file); every file passes `--self` first (the
+reference against itself), and every file passes in ReleaseSafe
+(`SERVER_O=safe`). **The reference is not deterministic everywhere**, and
+those cases are not in the files: a completion on an embeddings server
+samples logits it never computed; an embedding read from the rank head
+varies run to run; concurrent handlers draw task ids in whatever order
+they run (`id_task` is masked in `parallel`); a stream session's byte
+count includes its timings (`total_bytes` masked).
+
+Negative-tested 32/32 after closing three escapes. Each injection ran in an
+isolated copy of the tree, so no other workstream's build saw it: it built
+(rc 0), changed `llama-server`'s bytes, ran the case files named, and was
+undone by reverse replacement, the file then compared byte for byte with
+the main tree's. The binary rebuilt after the last is not the first one's
+byte for byte, with every source identical -- the build is not
+reproducible to the byte here -- and the clean gates passed after it.
+
+| # | Injection | Caught by |
+|---|---|---|
+| 1 | `process_token`: a partial stop word is sent, not held | `core`, a streamed stop word |
+| 2 | `find_stopping_strings`: a stop word stops as a limit | `core` (`stop_type`) |
+| 3 | `send_final_response`: the stop word's probabilities kept | `core`, `stop` with `n_probs` |
+| 4 | `get_available_slot`: an LRU tie goes to the first slot | `slots` |
+| 5 | context shift: `n_discard` a quarter, not a half | `cache` |
+| 6 | cache reuse: a chunk must exceed `--cache-reuse` | **escaped**; a chunk exactly 4 long added, then `cache` (whole log) |
+| 7 | `create_checkpoint`: `n_tokens` counts the batch in flight | `cache` (whole log) |
+| 8 | checkpoints only for infill tasks | `cache` (`/slots`, whole log) |
+| 9 | metrics: cached prompt tokens counted twice | `slots` (`/metrics`) |
+| 10 | `SLOT_ERASE`: `n_erased` read after the clear | `slots` |
+| 11 | `SLOT_RESTORE`: the error's prefix reworded | `slots` |
+| 12 | `get_slot_by_id`: an out-of-range id does not wrap | `slots` (`/slots/7`) |
+| 13 | progress: `processed` is the task's size | `core` (`return_progress`) |
+| 14 | speculative replay: the replayed token counted as accepted | `spec` (whole log) |
+| 15 | `n_remaining` off by one | `core` |
+| 16 | `n_indent`: an equal indent stops | **escaped**; two code prompts at the boundary added, then `core` |
+| 17 | embeddings: always the L2 norm | `embd` |
+| 18 | rerank: the score negated | `embd` |
+| 19 | OpenAI multi-result: a later choice dropped | `core` (`n: 2`) |
+| 20 | `/props`: `total_slots` one more | `core` |
+| 21 | `/tokenize`: `parse_special` defaults off | **escaped**; the default asked of a special token, then `core` |
+| 22 | embeddings: `content` keeps the OpenAI format | `embd` |
+| 23 | streams: `[DONE]` for the native format too | `core` |
+| 24 | `/slots?fail_on_no_slot` inverted | `core` |
+| 25 | `/rerank`: `top_n` defaults to 1 | `embd` |
+| 26 | `ex_wrapper`: a runtime error answers 400 | `core` |
+| 27 | the 403 handler answers 404 | `core` (`/cors-proxy`) |
+| 28 | the CORS warning only with API keys | every startup log (`auth` first) |
+| 29 | `X-Conversation-Id` matched with case | `stream` |
+| 30 | lookup: `<id>::<model>` not matched | `stream` |
+| 31 | `server_res_generator`: the reader not stopped on destruction | `stream` (the slot still busy after a hang-up) |
+| 32 | `on_complete`: a hung-up stream not drained into its session | `stream` (a failed request's session survives; the replay is cut) |
+
+**The escapes were all input again**: no reused chunk was ever exactly
+`--cache-reuse` long (the whole log showed no reuse at all before the
+case was added), no generated line had exactly `n_indent` spaces, and the
+only special-token tokenize case set `parse_special` itself.
+
+**Temporary gaps**, each behind one place and refused with a message:
+
+- **Stage 10 step 4**: the Responses, Anthropic and transcription routes
+  and their token counts (`server-chat.cpp`'s conversions) answer 500
+  "... is not ported yet (Stage 10 step 4)"; chat with Jinja is the data
+  layer's existing gap.
+- **Stage 10 step 6**: `--tools`, an MCP configuration and `--ui-mcp-proxy`
+  are refused at startup (exit 1); with them off, as on every other
+  command line, `/tools` and `/cors-proxy` answer 403 as upstream's do.
+- **Stage 10 step 7**: without a model, upstream starts router mode; here
+  it logs "router mode is not ported yet" and exits 1. So does a router's
+  child (`LLAMA_SERVER_ROUTER_PORT`), and a model to download (`-hf`,
+  `-mu`, `-dr`, `-hfd`, `-mmu`).
+- **Stage 10 step 8**: the multimodal path -- loading an mmproj (with its
+  memory fit), `process_mtmd_chunk`, media prompts -- is ported and has
+  no case yet.
+
+**Not verified.** The SSE ping after 30 silent seconds; the session GC's eviction after five minutes; a request
+that arrives while the model reloads after sleep; aLoRA invocation
+scanning; backend sampling; `/v1/chat/completions/control`'s success arm,
+which needs reasoning control armed by a Jinja template; decode failures
+(`try_clear_idle_slots`, the halving retry, "Context size has been
+exceeded."); `--cache-idle-slots` over a unified cache; MTP, EAGLE3 and
+DFlash through the server (spec-diff holds the drafters themselves); the
+Windows console handler, not ported. `tokenize_cli_input` is reached only
+from upstream's CLI.
+
+## Stage 10 step 4: chat over Stage 9
+
+`llama-server` chats through the model's Jinja template. The two gaps step
+3a left behind one function each are filled from `cli/common_chat/`, and
+the routes step 3c refused are ported:
+
+- **`oaicompat.chatTemplatesApply`** is `common_chat_templates_apply`
+  through `templates.apply` -- both arms, Jinja and legacy -- and
+  `chatTemplatesGetCaps` reads `templates.getCaps`. The server's own copy
+  of the legacy arm is gone: there is one template object, as upstream has
+  one `common_chat_templates`. `context.zig` drops `tools/common/chat.zig`'s
+  templates (`tmpls_legacy`); `chat_params.tmpls` points at the
+  `common_chat.templates.Templates` init already built for `/props`, and the
+  startup example renders through `templates.formatExample` on either arm.
+  `ChatParams` is `common_chat.params.ChatParams`.
+- **`task.chatParse`** is `common_chat_parse` through `parse.parse`, the
+  request's serialized parser loaded per call; `TaskResultState` loads it
+  once (`chatParseWith`), where upstream's state holds the loaded arena. A
+  `chat_format` integer that names no format maps through the base mapper,
+  as upstream's `if` chain does.
+- **`tools/server/convert.zig`** (827 lines) ports the rest of
+  `server-chat.cpp`: `server_chat_convert_responses_to_chatcmpl`,
+  `normalize_anthropic_billing_header`, `server_chat_convert_anthropic_to_oai`
+  and `convert_transcriptions_to_chatcmpl`, with libc++'s `std::stoul` and
+  `std::stof` (`strtoul`/`strtof` under `errno`, the texts "stoul: no
+  conversion" and "... out of range").
+- **`routes.zig`**: `/v1/responses` and `/responses`, `/v1/messages`,
+  `/v1/audio/transcriptions` and `/audio/transcriptions` convert, log the two
+  `SRV_DBG` lines (the second dumps the body only when it prints, since the
+  dump throws on invalid UTF-8) and run as chat in their response formats;
+  `handle_count_tokens` converts for the Responses and Anthropic token
+  counts. The transcription routes do not wait for step 8: upstream's
+  multimodal path was already ported in 3c, and an audio projector fixture
+  carries them.
+- **The chat log reaches `common_log`.** `cli/common_chat/log.zig`'s sink
+  and `msg.zig`'s were never installed in the server, so every `LOG_WRN`
+  from `common/chat.cpp` (a reply that does not parse, a template that does
+  not init) was silently dropped. `context.installChat`, called by
+  `server.zig` before the arguments are parsed, installs both, and a
+  verbosity check (`log.debug_on`) so `LOG_DBG`'s arguments -- the generated
+  parser's dump, the parsed message -- are built only when they print.
+- **`--chat-template` is verified with Jinja at parse time.**
+  `tools/common/arg.zig`'s `common_chat_verify_template` had no Jinja arm
+  (every template passed); it now calls `arg.verify_jinja_template`, which
+  the server sets to `templates.verifyTemplate`. A template that does not
+  parse is refused before the model loads, as upstream refuses it.
+
+`build/server_task.zig` gives the data layer's `common_chat` module
+`zigjinja` (the unit tests and the `server-task-diff` harness render
+through it now).
+
+### Two Stage 9 bugs the gates found
+
+- **`caps.zig` logged the capabilities at `LOG_DBG`** after every
+  `caps_get`; upstream's line is `JJ_DEBUG`, a `printf` behind the engine's
+  own `g_jinja_debug` switch, which nothing sets. At debug verbosity every
+  template init wrote eleven lines upstream never writes. Now behind
+  `caps.jinja_debug`.
+- **zigjinja spells the missing `else` of `a if b` as a lookup of the name
+  `""`**, "a name nothing can bind" -- but a request whose
+  `chat_template_kwargs` is a string binds exactly that: `items()` of a
+  string is one item keyed `""`, so `extra_context[""]` is the string, and
+  Gemma 4's `{{- ',' if not loop.last -}}` printed it between every
+  `required` entry. `template.zig`'s `Render.set` no longer binds an empty
+  name (no template can name one). Found by `server-task-diff`'s random
+  chat bodies over every template.
+
+### Upstream, as found
+
+- **A Responses tool call's id, a Responses item id and an Anthropic
+  `tool_use` id are 32 random characters** with no prefix
+  (`gen_tool_call_id`); `server-task-diff` masks `"id":"<32>"`, `fc_` and
+  `call_`, and the case files `"id": "<32>"`.
+- **`update_chat_msg`'s `filter_tool_calls` arm is dead**: both callers take
+  the default, false.
+- **The Anthropic conversion drops every field it does not name**:
+  `grammar`, `seed` and the rest never reach the chat request, so a request
+  without `temperature` samples at the default -- nondeterministic against
+  itself, which is how the first `anthropic.cases` failed `--self`.
+- **`normalize_anthropic_billing_header`'s `LOG_ERR` has no newline.**
+- **A reply that does not parse is logged by the HTTP thread** that parses
+  it (`update_chat_msg` runs there), and its error's task cancellation adds
+  an `all slots are idle` line whose place races the decode loop -- upstream
+  against itself. `chat.cases` drops the parse warning from log
+  comparisons (`!droplog`; the response carries the same text) and runs the
+  gpt-oss block without `!fulllog`.
+- **The transcription prompt does not fit a 256-token fixture context with
+  most projectors** (ultravox, voxtral, qwen2a and others pad to 450-840
+  tokens); `qwen3a` fits a 0.4 s tone.
+
+### The gates
+
+**`make server-task-diff`** gained four record kinds and Jinja on `C`:
+
+- `C` with `jinja` over every template in `models/templates/` (three
+  bodies each, one with a tool) and N/2 random ones: tools, tool choice,
+  parallel calls, response formats, reasoning formats and budgets, kwargs
+  (good, bad, a string), continuation, pure content; and 15 targeted.
+- `CS`: a Jinja chat request converted, its parameters evaluated through
+  the schema into a `task_result_state`, then `R` partials and a final fed
+  a reply in random pieces -- reasoning, one and two tool calls in Hermes,
+  Qwen3-Coder XML, Llama 3, Mistral, gpt-oss and Kimi syntaxes, JSON,
+  unicode -- over 22 templates, one per parser family, and every response
+  format (chat, Responses, Anthropic, native) streamed and not.
+- `RC`, `AC`, `TC`: the three conversions, targeted (every throw, the
+  billing header's arms, merges) and N random each.
+
+A Jinja engine's own message is not reproduced (Stage 9 step 4): a port
+line holding `jinja: ` matches a reference line equal up to there, and a
+multi-line engine message in the reference's log is taken as one line
+(`align_jinja`); every exception's text is written on one line. The new
+records run on a generator state of their own, so the records after them
+are what they were (the first attempt shifted a `PC` record onto
+upstream's `GGML_ASSERT(ctx_dft)`). **5,609 records, 90,045 transcript and
+log lines, 5,220 exceptions, 137 coverage phrases** (39 of them this step's), identical.
+
+**`make server-diff`** gained four case files, each passing `--self`
+first:
+
+| Case file | Server(s) | Checks |
+|---|---|---|
+| `chat` | Qwen3-0.6B: `/apply-template` with tools, tool results, reasoning, typed parts, developer role, bad kwargs, grammar with tools, continuing a tool call; chat with thinking on and off, every reasoning format, budgets, tools (auto, required, none, parallel, a round trip), response formats, continuation and echo, logprobs, `n`; token count; `/control` refusals and, on a live stream (`!control`), the success arm and the not-armed refusal; kwargs and `--reasoning` on the command line; Llama 3.1, Mistral Small 3.2, gpt-oss and Gemma 4 templates by `--chat-template-file`; a template that does not parse, one no built-in family takes with `--no-jinja`, an inline custom one; Qwen3.5 | 105 |
+| `responses` | Qwen3-0.6B: every input item kind, merges, instructions, reasoning effort, tools and function-call round trips, streamed events, refusals, `/v1/responses/input_tokens` | 28 |
+| `anthropic` | Qwen3-0.6B: system strings and blocks (the billing header both ways), thinking blocks and budget, stop sequences, metadata, tools, `tool_choice`, `tool_use`/`tool_result` round trips, streamed events, refusals, `/v1/messages/count_tokens` | 23 |
+| `asr` | the `text-qwen3` fixture with `qwen3a`'s audio projector: multipart uploads (`FORM`), prompt and language, streaming, every refusal and type error, an undecodable file; the LFM2 template's system-prompt preset; refused without audio | 20 |
+
+`scripts/server-diff` gained `FORM` (a multipart/form-data request),
+`!control <action>` (a stream, and a control request on its id once its
+first event arrives; the control's answer compared whole, the stream by
+status and finish reason, since where a forced end lands is timing -- the
+prompt is chosen so an unforced run ends `length` and a forced one
+`stop`), `!droplog`, `SERVER_DIFF_NOBUILD`, and masking of `data:` lines in
+multi-line SSE events (the Responses and Anthropic streams'
+`event:`/`data:` pairs were compared unmasked before, timings and
+`created_at` included). All fourteen case files pass: 539 checks (363 before).
+
+### Injections
+
+Each ran in an isolated copy of the tree (two other workstreams were
+editing `tools/server/`): applied by exact replacement, built (rc 0), the
+artifact's hash checked changed (`llama-server`, or the `server-task-diff`
+harness), the gate run, and the file restored and compared byte for byte.
+
+| # | Injection | Caught by |
+|---|---|---|
+| 1 | responses: an assistant message never merges into | server-task-diff (transcripts) |
+| 2 | responses: a string content's part typed text | server-task-diff (transcripts) |
+| 3 | responses: a function tool's strict defaults false | server-task-diff (transcripts) |
+| 4 | responses: max_output_tokens kept under its own name | server-task-diff (transcripts) |
+| 5 | responses: reasoning.effort renamed effort | server-task-diff (transcripts) |
+| 6 | responses: tool output parts keep input_text | server-task-diff (transcripts) |
+| 7 | responses: a merged reasoning item becomes content | server-task-diff (transcripts) |
+| 8 | anthropic: the billing stamp overwritten 4 characters | server-task-diff (transcripts) |
+| 9 | anthropic: a text-only tool result kept as parts | server-task-diff (transcripts) |
+| 10 | anthropic: max_tokens default 4095 | server-task-diff (transcripts) |
+| 11 | anthropic: tool_choice any is not required | server-task-diff (transcripts) |
+| 12 | anthropic: thinking budget default 1000 | server-task-diff (transcripts) |
+| 13 | anthropic: an assistant message without content kept | server-task-diff (transcripts) |
+| 14 | transcriptions: stream true only as True | server-task-diff (transcripts) |
+| 15 | transcriptions: language suffix reworded | server-task-diff (transcripts) |
+| 16 | transcriptions: response_format defaults to text | server-task-diff (logs) |
+| 17 | transcriptions: stoul reads base 0 (octal, hex) | **escaped**; `010` and `0x1f` added, then server-task-diff (transcripts) |
+| 18 | apply: parallel_tool_calls never passed | server-task-diff (logs) |
+| 19 | apply: chat_template_kwargs dropped | **escaped**; gpt-oss `reasoning_effort` and `builtin_tools` kwargs added, then server-task-diff (transcripts) |
+| 20 | grammar trigger: word typed as pattern | server-task-diff (transcripts) |
+| 21 | caps: supports_parallel_tool_calls read as supports_tool_calls | server-task-diff (logs) |
+| 22 | parse: reasoning_in_content dropped | server-task-diff (transcripts) |
+| 23 | state: the continuation's first parse without the parser | **escaped**; explicit `continue_final_message` states added (a trailing assistant message alone never sets `is_continuation`), then server-task-diff (logs) |
+| 24 | parse: a gemma4 format read with the base mapper | **escaped**; Gemma 4 and MiniMax M3 replies in their own syntax added, then server-task-diff (logs) |
+| 25 | init: the template's thinking support ignored | server-diff chat (49 of 103 checks) |
+| 26 | chat log: errors written as warnings | server-diff chat (1 of 103 checks) |
+| 27 | the Jinja template check not installed | server-diff chat (1 of 103 checks) |
+| 28 | control: reasoning_end answers success without forcing | server-diff chat (the !control block) (1 of 4 checks) |
+| 29 | Responses route answers in the chat format | server-diff responses (13 of 28 checks) |
+| 30 | Responses token count without its object | server-diff responses (2 of 28 checks) |
+| 31 | Anthropic route answers in the chat format | server-diff anthropic (15 of 23 checks) |
+| 32 | transcriptions: the audio check ignores the projector | server-diff asr (1 of 20 checks) |
+| 33 | Anthropic token count converts as Responses | server-diff anthropic (3 of 23 checks) |
+
+**33 caught after closing four escapes.** As in steps 3a and 3c, every
+escape was input: no transcription number with a leading zero or `0x`; no
+template that reads a kwarg the server does not also bind itself
+(Qwen3's `enable_thinking` arrives either way); no request that set
+`continue_final_message` -- a trailing assistant message prefills, but only
+the field sets `is_continuation`, so the state's first parse never ran;
+and no reply in Gemma 4's own syntax, so its mapper was never asked for a
+tool call. The clean rebuilds after the campaign passed all fourteen case
+files and `server-task-diff`.
+
+### Not verified
+
+- The engine's error texts (above): a template that fails to parse or
+  render shows only as which side fails, with `jinja: ` and the error name
+  on the port's side.
+- A `chat_format` integer naming no format, carried with a `chat_parser`
+  whose parse fails: upstream's `LOG_WRN` evaluates
+  `common_chat_format_name` and so throws "Unknown chat format"; the port
+  warns naming Content-only and throws the parse error.
+- Image inputs through the Responses and Anthropic APIs (no vision case;
+  step 8), `http(s)` media (step 7), and the transcription routes with any
+  projector but `qwen3a`.
+- Concurrency of chat requests rendering at once (zigjinja's provenance and
+  stats are thread-local; no `!parallel` chat case with Jinja).
+- `llama-cli` and the other tools still verify `--chat-template` without
+  Jinja (`verify_jinja_template` is null there).
+
+## Stage 10 step 6: tools, MCP and the CORS proxy
+
+`llama.cpp/tools/server/server-tools.cpp` and `.h` (2,172 + 55 lines) are
+`tools/server/tools.zig`; `server-mcp.cpp` and `.h` (820 + 176) are
+`tools/server/mcp.zig`; `server-cors-proxy.h` (83) is
+`tools/server/cors_proxy.zig`, with `common_http_parse_url`
+(`common/http.h`). Under them, three pieces router mode (step 7) shares,
+ported here first and adopted by it while this step ran:
+`common_subproc` and the POSIX arm of `vendor/sheredom/subprocess.h`
+(`tools/common/subproc.zig`), `server_http_proxy` from
+`server-models.cpp` (`tools/server/proxy.zig`), and cpp-httplib's
+plain-HTTP client -- `ClientImpl`'s send path, the redirect path, the
+`Client` verbs, the URL, status-line and request-target helpers -- as
+`tools/server/httplib/client.zig`. About 5,800 lines of Zig with ~240
+`Ports` declarations; `scripts/port-links` checks every one.
+`server.zig` registers the routes in place of step 3c's refusals, with
+`warn_names`, and shuts MCP down from the signal handler and `clean_up`.
+
+**Its shape.** `server_tool` and its eight subclasses are one `Tool` with
+a `Kind`; `tools_io` and its four subclasses are one `Io`, a union of the
+host (`Basic`) and an isolate whose transport is `<engine> exec` or `ssh`.
+`std::filesystem` is ported as far as the tools reach it, for POSIX paths:
+`lexically_normal` (libc++'s algorithm, read from its `path.cpp`),
+`operator/`, `filename`, `create_directories`, the `stat` predicates, and
+`directory_iterator` over `readdir`, whose order the gate compares. The
+seven definitions are JSON text in the C++ initializer lists' order: an
+ordered object keeps insertion order, so parsing the text builds the
+same value the lists do. The MCP transports are reference-counted where
+the C++ shares them through `shared_ptr`, so a concurrent respawn cannot
+free one mid-call. `server_http_proxy` shares its pipe with a detached
+client thread the same way.
+
+**Also changed.** `src/llama/regex.zig` gained `icase` (`grep_search`'s
+`ignore_case`): `__match_char_icase`, `__back_ref_icase` and the bracket
+expression's translations, `[:lower:]`/`[:upper:]` widened to `alpha` as
+`__get_classname` does; `translate_nocase` folds `A`-`Z` alone, measured
+against libc++ on 144 pattern/input pairs, identical. `httplib/message.zig`'s
+`readContent` takes any message, as the C++ template does, so the client
+reads a response through it. `httplib/server.zig` writes a streamed
+response with a length through `write_content` (new in `message.zig`)
+rather than chunked: the gate found it, below.
+
+**Upstream behaviours the gate pinned, every one reproduced:**
+
+- **A streamed 404 is written raw, under a `Content-Length` it does not
+  match.** `server-http.cpp`'s error handler gives any 404 the JSON "File
+  Not Found" body; `apply_ranges` then sets `content_length_` from that
+  body, and `write_content_with_provider` takes the known-length arm:
+  the provider's bytes go out unframed and the connection closes short.
+  Through the CORS proxy a target's 404 arrives as its own body under the
+  JSON's `Content-Type` and length. Step 2's port wrote every provider
+  chunked ("only the chunked arm is reachable"); no route had streamed an
+  error before.
+- **Every 3xx is a redirect to `handle_request`, 304 included**, though
+  `process_request` excludes 304: the proxy forwards a 304's status and
+  headers, then `redirect()` finds no `Location`, fails with `Error`
+  still `Success`, and `send_` makes it `Unknown` -- the body reads
+  "proxy error: Unknown". An `ftp:` `Location` and a missing one end the
+  same way.
+- **A failure after the headers keeps the target's status**: a gzip
+  body (no decompressor is built) or a short body arrive as 200 with
+  "proxy error: ..." appended -- the 500 header message comes too late.
+- **A redirect reuses the connection when the target left it open**, and
+  races the target's close when it did not say `Connection: close`: the
+  reference itself answered a two-hop redirect from a target that closed
+  silently with "Failed to read connection" or the page, depending on
+  whether the FIN had landed. The target now says `Connection: close`
+  (and `/keep/` keeps the connection, for the reuse path).
+- **An MCP error whose `message` is not a string is a 400**:
+  `rpc_error_message`'s `value("message", ...)` throws a JSON type error
+  out of the handler, which maps `common_json_error` to 400.
+- **`x-tool-cwd`, `x-tool-runtime` and `x-resp-type` reach an MCP tool**
+  as arguments `cwd`, `runtime` and `resp_type`: the handler adds them to
+  `params`, which `server_mcp_tool` passes whole.
+- **A notification-only MCP server dies between warmup and the call**
+  with "transport closed"; one that exits after replying is respawned
+  on the next call with "is no longer alive: last stderr: ..." -- the
+  stderr tail, newline and all.
+- **`read_file` on a directory fails at `file_size`; `edit_file` on one
+  reads it as empty** (`std::ifstream` opens a directory on Darwin).
+- **`edit_file` on a CRLF file** matches through the fuzzy path (it
+  strips `\r` per line) and rebuilds untouched lines from the original,
+  so the edited lines lose their `\r` and the others keep theirs.
+- **The isolate's `find` lists `.git` under a repository** with `-prune
+  -print`: junk directories are listed and not entered, by both walkers.
+
+**The gate is `scripts/server-diff`**, extended: `!fresh <dir>` gives
+each side its own copy of `$DATA/<dir>` as `$WORK`; `$CWD` and `$SPORT`
+are each side's server directory and port; all three are expanded per
+side in paths, bodies and header values, and written back as their names
+in what comes back -- before the masks run, since a default mask
+matched inside a scratch path. `!env KEY=VALUE` sets the servers'
+environment; a `.setup` may write `$DATA/setup.env` (more names) and
+`$DATA/pids` (processes killed at the end). `SERVER_DIFF_FAILFAST=1`
+stops at the first difference, for fault injection.
+
+| Case file | What | Cases |
+|---|---|---|
+| `tools` | every built-in tool over a tree each side copies (`tools.setup`: a git repository, junk directories, links, CRLF, UTF-8, a 36 KB file, 120 files): every parameter and error, the request's own errors (400/404/500 and their texts), header names without case, streams, timeouts, truncation; the isolate arms through stand-in `docker`, `podman`, `ssh` and `timeout` scripts that run the command here -- attached containers, ssh with quoting, `--tools-runtime` static and spawned (`docker run --cidfile`); every startup refusal | 175 |
+| `mcp` | upstream's six fixtures, run from `llama.cpp/tools/server/tests/fixtures/` (echo, burst, malformed, crash with respawn, slow with a per-call timeout and a stale reply, grandchild), and `harness/server/mcp_probe_server.py` for the rest: config `env` and `cwd`, every result and error shape, `isError`, a silent tool, a server that dies, failed handshakes, name collisions with a built-in and between servers, a name in both configurations, a command deleted after warmup (spawn failure, then the 5 s cooldown), every configuration that stops the server; `!fulllog` for the warnings | 59 |
+| `proxy` | `--ui-mcp-proxy` against `harness/server/proxy_target.py` (raw sockets, every byte fixed) and against the server itself: forwarded and stripped headers, bodies, 204/304/404/500, same-host, kept-alive, cross-host and 303 redirects, a redirect loop, chunked, close-delimited and HTTP/1.0 answers, duplicate headers, gzip, a bad status line, conflicting framing, a short body, `Expect: 100-continue` (answered, ignored, rejected), multipart re-encoded with and without files, every URL the handler refuses; the 403s when off | 60 |
+
+Every file passes `--self` first, and all three are in `make server-diff`'s
+`SERVER_CASES`. Masked: the multipart boundary the proxy
+draws from a random device. Nothing else needed masking: `uname -a`, the
+directory listings and the fixtures' output are the same for both sides.
+
+Negative-tested 29/29 after closing six escapes (and redefining one
+injection that did not build), in an isolated copy of
+the tree (two other agents were editing `tools/server/`): each injection
+built (rc 0), changed `llama-server`'s bytes, ran its case file with
+`SERVER_DIFF_FAILFAST`, and was undone byte for byte.
+
+| # | Injection | Caught by |
+|---|---|---|
+| 1 | `glob_match`: `*` crosses `/` | **escaped**; `sub/*.txt` added, then `tools` |
+| 2 | `lexically_normal`: `name/..` not folded | `tools` (`repo/src/..`) |
+| 3 | `read_file`: `->` for the line-number arrow | `tools` |
+| 4 | `file_glob_search`: the limit capped at 99 | **escaped**; a 120-file directory added, then `tools` |
+| 5 | junk directories walked | `tools` |
+| 6 | `grep_search`: `--` only past one context line | `tools` |
+| 7 | `grep_search` literal: `.` not escaped | **escaped**; `a.b` against `axb` added, then `tools` |
+| 8 | `exec_shell_command`: the timeout note dropped | `tools` |
+| 9 | fuzzy match keeps a trailing `\r` | `tools` (the CRLF edit) |
+| 10 | edit overlap tested with `>=` | **escaped**; two adjacent edits added, then `tools` |
+| 11 | `get_header` matched with case | **escaped**; `X-Tool-Cwd` and `X-RESP-TYPE` added, then `tools` |
+| 12 | ssh target may start with `-` | `tools` (`--tools-runtime ssh:-bad` at startup) |
+| 13 | `shell_quote_join`: `'` not escaped | `tools` (ssh with quotes) |
+| 14 | unknown tool answers 400, not 404 | `tools` |
+| 15 | MCP text parts joined by a space | `mcp` |
+| 16 | MCP reply id not compared | `mcp` (the malformed fixture's notification) |
+| 17 | dead MCP transport reused | `mcp` (crash fixture) |
+| 18 | MCP `env` overrides dropped | `mcp` (probe `env`); its first spelling did not build |
+| 19 | MCP per-call timeout ten times longer | `mcp` (slow fixture) |
+| 20 | an entry with no `command` kept | `mcp` (startup log) |
+| 21 | proxy keeps the target's `Server` header | `proxy` |
+| 22 | 303 keeps the method | `proxy` (`/see-other`) |
+| 23 | cross-host redirect keeps `Host` | `proxy` |
+| 24 | client sends no `Accept` | `proxy` |
+| 25 | streamed error body written chunked | `proxy` (a target's 404) |
+| 26 | a password in the target URL allowed | `proxy` |
+| 27 | `encode_path`: `+` left as is | **escaped**; `a%2Bb` added, then `proxy` |
+| 28 | `translate_nocase` folds `A`-`M` only | `tools` (`ignore_case`) |
+| 29 | a signalled child exits 137, not `EXIT_FAILURE` | `tools` (the timeout case) |
+
+**The escapes were all input**: no glob put a `*` before a `/`
+(`sub/*.txt` against `sub/deep/deep.txt`), no listing had more than 100
+entries, no literal pattern had a `.` in it, no two edits were adjacent,
+every header name was already lower-case, and no proxied path had a `+`.
+
+**Not verified.** Linux and Windows: the subprocess layer (`posix_spawn`
+and `addchdir_np` on glibc are written but have only run on Darwin), the
+pumps' `poll` loops, and the client's non-blocking `connect` have not
+run off this Mac; the `_WIN32` arms (OEM code page, `cmd /c`, junctions,
+`PeekNamedPipe`, `SearchPathW`) are not ported. A real container engine
+and a real ssh host: the stand-ins run the isolate's argv faithfully,
+but `docker exec` itself and ssh's quoting were not exercised; the spawned
+container's death and respawn ("died, respawning") has no case.
+`list_entries`' 15 s budget, the 8 MB line cap in the NDJSON pump, the
+64 KiB bound on the reply queue, and a proxied upload over HTTPS (which
+the reference cannot do either) have none. `edit_file`'s `npos` paths
+(a needle not found after normalization) are ported with C++'s wrapping
+arithmetic and `substr`'s `out_of_range`, unexercised. Tool calls driven
+by a model through `/v1/chat/completions` wait on step 4's Jinja chat.
+
+## Stage 10 step 7: router mode and downloads
+
+`llama.cpp/tools/server/server-models.cpp` and `.h` (2,602 + 412 lines)
+are `tools/server/models.zig` -- the monitor thread, the `models_max`
+scheduler (`server_lru_sched`), `server_models`, both sides of
+`server_child` (reporting to the router, and the download mode),
+`server_models_routes` with every handler -- except `server_http_proxy`,
+which the CORS proxy also constructs and step 6 ported as `proxy.zig`.
+`common/preset.cpp` and `.h` (501 + 88) are `tools/server/preset.zig`,
+with `common_params_to_map`, `common_params_add_preset_options`,
+`get_env`/`get_args` (`arg.cpp`) and `fs_list` (`common.cpp`).
+`common/download.cpp` and `.h` (1,090 + 121) are `tools/server/download.zig`,
+with `common_models_handler_init`/`_is_preset_repo`/`_apply` and their
+helpers (`arg.cpp`), the client half of `common/http.h`, and
+`fs_get_cache_directory`/`_file`; `common/hf-cache.cpp` (509) is
+`tools/server/hf_cache.zig`, with the slice of `std::filesystem` the C++
+leans on (`lexically_normal`, `lexically_relative`, `relative`,
+`create_directories`, `remove_all`, the directory iterators in `readdir`
+order). The HTTP goes through step 6's `httplib/client.zig`: its
+`ClientImpl` for the stream routes' child calls, and its `Client` verbs --
+`Get`, `Head`, `Post`, `Delete`, default headers, basic authentication --
+for the downloader (written first here as a facade of this step's, then
+folded into step 6's identical one). Step 6's
+`tools/common/subproc.zig` is the `common_subproc` the router spawns its
+children with. About 7,550 lines of Zig with ~240 citations;
+`scripts/port-links` is clean on all of them.
+
+`server.zig` wires it where step 3c refused: `-hf` resolved before
+anything else (a preset repository turns the server into a router),
+router mode with its routes (`POST/DELETE /models`, `/models/load`,
+`/models/unload`, `/models/sse`, the proxy handlers, the router's stream
+routes, `get_router_props`/`get_router_models`), the router's start,
+shutdown and clean-up, a child's state callback and stdin monitor, the
+download child (`LLAMA_SERVER_CHILD_MODE=download`), and
+`common_models_handler_apply` in single-model mode. `oaicompat.zig`'s
+`http(s)` media now goes through `download.zig`'s
+`common_remote_get_content` (one edit; no case reaches it, as it needs a
+projector, step 8's).
+
+**The reference had no router.** `build/tools.zig` compiled upstream's
+`llama-common` without `LLAMA_SUBPROCESS`, which upstream's CMake makes a
+PUBLIC definition on every platform but iOS, Android and WASM, and
+`llama.cpp.zmake` passes as `subprocess_defines`. Without it upstream's
+router refuses to start ("subprocess is not enabled on this build") and
+`common_subproc::create` always fails, so the reference could not have
+been compared at all. `refModule` now defines it (not on iOS).
+
+**Its shape.** `server_models::mapping` is a list of heap instances in
+name order; each owns an arena its `server_model_meta` lives in, and a
+field updated in place (status, `loaded_info`) is allocated there.
+`std::shared_ptr<server_subproc>`, shared by an instance and the monitor,
+is a reference-counted `SharedProc`; `get_meta`'s optional copy is a deep
+copy into the caller's allocator. `common_preset::options`, a
+`std::map<common_arg, std::string>`, is a list kept in
+`common_arg::operator<` order (`strcmp` of the first spelling), which is
+the order `to_args` and `to_ini` write; an option is copied by value as
+the C++ copies a `common_arg`. The libc++ containers upstream iterates
+are reproduced where the order shows: the de-duplicated download tasks
+(`std::unordered_map<std::string, ...>`, `libcxx.StringMap`) and the
+router's per-child stream lookups (`std::unordered_map<int, json>`,
+`libcxx.I32Map`). The `std::regex::icase` patterns (`canonical_tag`,
+`get_gguf_split_info`, and `find_best_model`'s, built from a user's tag)
+use the `icase` step 6 added to `src/llama/regex.zig`.
+
+**Upstream behaviours the gate pinned, every one reproduced:**
+
+- **`-mu <url>` without `-m` starts a router**: `is_router_server` is
+  decided from `model.path` before `common_models_handler_apply` would
+  fill it in from the URL, so nothing downloads. A download by URL needs
+  `-m`; only `-mmu`/`-mdu` reach the cache path.
+- **`{}` passed as a `const json &` is a null json, not an empty
+  object**: `download_finished` and `model_remove` events carry no
+  `data`, and a child's "ready" does not reset the model's progress.
+  The port first sent `"data": {}` and `"progress": {}`; the SSE cases
+  caught both.
+- **A child's "monitoring thread started" line is lost or not by
+  timing**: it is logged while `notify_to_router` has the logger paused,
+  and upstream's logger drops what it is given while paused.
+- **The router reaps children on its monitor thread**, so "instance
+  name=... exited" races the next request's lines; and a child's load
+  progress is throttled by the clock (first and last always sent, the
+  rest at most one per 200 ms), so the number of its state lines -- and
+  of the blank lines their leading newline makes -- varies.
+- **`total_bytes`, `started_at` and `completed_at` of a stream session**
+  are timings.
+- **`--ui-config` that is not JSON sometimes leaves no log at all**: the
+  half-built router's exception unwinds before upstream's asynchronous
+  logger has written anything (one run in four here), so that case is not
+  in the file.
+- **A download child cancelled before it starts its GET** logs one line
+  fewer than one cancelled mid-GET; server-diff sends each request to one
+  side and then the other, and the reference's `/models/unload` blocks
+  until its own cancel lands, so the case waits until both children are
+  well into a 15-second download.
+- `std::stoi` on a URL's port throws libc++'s `stoi: no conversion`;
+  `https` everywhere -- the hub's default endpoint, a Docker model, an
+  `https` `-mu` -- fails with "HTTPS is not supported. Please rebuild
+  with one of: ...".
+
+**The gate is `server-diff`**, with two new case files and its harness
+extended (each extension additive; the ten earlier files pass unchanged):
+
+- **Router logs.** A router writes each child's output into its own log
+  as `[<port>] <line>`; those lines are taken out and compared child by
+  child, each child named by the router's "spawning server instance with
+  name=<n> on port <p>" line (`qwen3#1`, `qwen3#2`, ...). Dropped from a
+  child's: blank lines and state lines (the throttle) and the monitoring
+  line (the pause). The router's monitor-thread lines are compared as a
+  set. A startup log keeps the router's own lines only.
+- **Per side**: `!server` arguments and `!env` values expand `$WORK`,
+  `$CWD` and `$MOCK` per side; each side's binary comes back as `$BIN`
+  (a router puts its own path in every child's arguments), and per-side
+  names are substituted before the masks run (the `rs-<id>` mask ate
+  "Users-mlavergn" in a path).
+- `!waitfor <path> <regex>`: poll until a router's background status
+  change lands. `!sse <path>` ... `!sseend`: an event stream read in the
+  background while requests run, then compared; load and download
+  progress between its first and last sample are dropped (the clock),
+  and the same event twice in a row counts once.
+- `!mocklog`: `harness/server/mock_hub.py` is a plain-HTTP stand-in for
+  the Hugging Face hub (`refs`, `tree`, `resolve`, LFS oids) and for a
+  file host with ETags, ranges, redirects, a first GET cut short, every
+  GET cut short, HEAD-only files and fixed statuses. `hub.setup` starts
+  one per side (`MOCK_REF`, `MOCK_PORT` in `setup.env`), so each side's
+  requests -- method, path, `Range`, `Authorization`, `User-Agent`,
+  `Accept` -- are compared, sorted (a download's files are fetched at
+  once).
+
+| Case file | Server(s) | Checks |
+|---|---|---|
+| `router` | a `--models-dir` (Qwen3-0.6B, a tokenizer-less fixture, a vision and a draft sub-directory, a split model, a broken file, companions) and a preset INI (global section, aliases, tags, `load-on-startup`, an invalid `stop-timeout`, canonicalised `user/repo:q4_k_m` and `user/repo:model.v2-q8_0`, negated flags, an override of the global): listing, props, load/unload, every error, completions, chat, tokenize and the rest proxied, autoload by alias and by GET, a child that fails to load, the router's stream routes through the conversation map, `/models/sse`; `--models-max 1 --no-models-autoload` with `?autoload`; LRU eviction at `--models-max 2` (a POST counts as a use, a GET does not); two requests for different models in one slot (the queue); a child sleeping and woken; colours on (the state lines after a warning); `?reload` of a changed preset; eight routers that must fail to start | 126 |
+| `hub` | `-mu` to `-m` (ETag kept, changed, absent; redirect; no ranges; a split URL; a first GET cut short and resumed; `-mmu` into the cache), failures (404, every GET cut short, GET 404 after HEAD, `https`, `ftp`, no scheme, no listener, a bad IPv6 authority, a bad port, offline), `-dr`; `-hf` (default tag, `:Q8_0`, `-hff`, a lower-case tag offline, a split model, a nested path, a missing tag, a missing file, an empty repository, a missing one, unusable refs, bad repository names, tokens), the default `https` endpoint, `HF_ENDPOINT`; a preset repository (router mode); the router over the cache: `POST /models` (the download child, its SSE events), validation errors, loading a cached model, a download cancelled by an unload, `DELETE /models`; `dedup-cache-models` | 115 |
+
+Every file passes `--self` first, then against the port: `router` 126
+checks in ~40 s, `hub` 115 in ~7 min (the retries' 2 s and 4 s waits and
+the 15 s download it cancels).
+
+Negative-tested in isolated copies of the tree (three, so batches could
+run at once): each injection applied by exact replacement, built (rc 0),
+checked to change `llama-server`'s bytes, run against the `!server`
+sections of the case file named (a section is one `!server` line to the
+next), and restored byte for byte. Sources are restored after each run but the binary is not rebuilt, so a
+rerun in the same copy starts from a clean rebuild (one did not, and the
+"binary changed" check refused it). Two first attempts did not build
+(`P6`, `M8`: Zig rejects a variable never mutated and an unused parameter)
+and were redone as other faults; two first runs were void (`M10`: the
+section run dropped the `!fresh` before its `!server`; `M12`'s section
+lacked the downloads before it, which timed out on both sides as well),
+and were rerun or are counted on the difference that was the fault's own.
+
+| # | Injection | Caught by |
+|---|---|---|
+| P1 | `to_args`: a falsey flag keeps its positive spelling | `router` startup, `/models` args |
+| P2 | `parse_bool_arg`: a negative INI key not reversed | `router` `/models` |
+| P3 | `canonical_tag`: the part after `-`/`.` not upper-cased | **escaped** (the only such section had no `-` or `.`); a `model.v2-q8_0` section added, then `router` startup |
+| P4 | `to_ini`: `=` without spaces | `router` `/models` (`preset`) |
+| P5 | a top-level `mtp-` companion counted as a model | `router` startup |
+| P6b | the first shard matched as `-00002-of-` | `router` `/models` (the split model's path) |
+| P7 | `cascade`: the global section overrides the model's | `router` `/models` (`parallel = 2`) |
+| P8 | `common_params_to_map`: a negative flag stored as `1` | `router` startup |
+| M1 | `--models-dir` not kept from the children | `router` startup, `/models` |
+| M2 | aliases not stripped | `router` startup |
+| M3 | LRU: the most recently used model evicted | `router` (`--models-max 2`): a `!waitfor` never met, `/models` |
+| M4 | `?autoload=1` not accepted | `router` (`--no-models-autoload`) |
+| M5 | `can_remove` inverted | `router` `/models` |
+| M6 | an alias not resolved to its model | `router` `POST /completion` by alias |
+| M7 | unload of an unknown model: 404, not 400 | `router` `POST /models/unload` |
+| M8b | a child's exit code lost | `router` (the broken model not `failed`) |
+| M9 | `max_instances` one more | `router` `GET /props` |
+| M10 | `?reload` unloads unchanged models | `router` `?reload`, the event stream |
+| M11 | a ready child's `loaded_info` dropped | `router` `/models` (`meta`) |
+| M12 | `download_finished` and `download_failed` swapped | `hub` event stream |
+| M13 | `notify_to_router` without its leading newline | **escaped** twice (the state line is still found when no colour reset dangles before it; the log filter drops a mangled state line); a `--log-colors on` section with the event stream added, then the colours section's event stream (the loading events lost) and whole log; at `-lv 4` an info line between the warnings and the notice takes the reset, so the section runs at the default verbosity |
+| D1 | an ETag match taken as a change | `hub` `!mocklog` (a GET where only a HEAD was due) |
+| D2 | a resume asks for the byte after the one it needs | `hub` `!mocklog` (`Range`) |
+| D3 | default tag order Q8_0 before Q4_K_M | `hub` startup, `/props` |
+| D4 | split part URLs padded to four digits | `hub` startup (the port's server does not start) |
+| D5 | the projector downloaded only when not wanted | `hub` event stream, `/models` |
+| H1 | a branch name escaping `refs/` accepted | `hub` startup (`test/badref`) |
+| H2 | the cache always in degraded mode (move, not link) | `hub` startup and whole log ("failed to create symlink ... switching to degraded mode") |
+| C1 | this step's client facade (since folded into step 6's) not sending its default headers | `hub` `!mocklog` (no `User-Agent`) |
+| C1b | step 6's `ClientImpl::send` not merging the default headers | **provably inert**: `write_request`'s `prepare_default_headers` merges them again, in upstream as here |
+| C1c | step 6's `Client` dropping `set_default_headers` | `hub` `!mocklog` |
+
+31 injections: 30 caught, after closing two escapes, and one provably inert.
+
+**The escapes were inputs again**: no preset section had a tag with a
+file-name prefix, and no case had a colour reset dangling before a
+child's state line. Both are cases now.
+
+**Not verified.** Windows: `get_server_exec_path`, `get_environment`,
+the stdin monitor and `common_subproc` have Windows arms upstream; the
+port has the POSIX ones only (step 6's `subproc.zig` likewise), so the
+router does not run on Windows. Linux: `/proc/self/exe` and the passwd
+offsets for the cache's home fallback are written but have not run --
+both are GB10 pickup items. The force-kill after `stop-timeout` (no case
+has a child ignoring its exit command), `LLAMA_SERVER_DEBUG_FAKE_TIMING`,
+`LLAMA_APP_CMD`, `DELETE /models` of a model still downloading, the degraded (copy instead of
+symlink) cache mode except by injection, the progress bar (stdout is
+never a terminal in the gate), and the Docker registry past its `https`
+refusal. `common_params_apply_system_config` (the INI config files) is
+still refused in `arg.zig`, and the other tools still refuse `-hf`:
+both could use `preset.zig` and `download.zig` now, which would move
+them to `tools/common/`.
+
+## Stage 9 step 5: the CLI's reasoning display
+
+Upstream's `llama-cli` at v0.4.1 is an HTTP client of a `llama-server` it
+runs in a thread (`tools/cli/cli-context.cpp`): it posts the conversation to
+`/v1/chat/completions` with `stream: true` and nothing but `messages`, and
+prints each SSE chunk's `reasoning_content` and `content` deltas through
+`ui::assistant_turn` (`tools/cli/cli-ui.h`). Our CLI does the same in one
+process, over the Stage 9 stack:
+
+- **`cli/conversation.zig`** (new): `Chat` -- the templates
+  (`common_chat.templates.init`, model or override, ChatML when the model has
+  none), the server's chat options as `load_model` sets them
+  (`enable_thinking` = `--reasoning` not off and the template thinks), and the
+  history as `common_chat_msg`s with `reasoning_content`; `Chat.inputs` is
+  `oaicompat_chat_params_parse` for a body of `messages` alone (an
+  `enable_thinking` kwarg overrides the switch, a string one is an error);
+  `Reply` is `update_chat_msg` -- every piece parsed partially, diffed with
+  `compute_diffs`, the deltas shown, a whole parse at the end; `Display` ports
+  `ui::assistant_turn` and the part of `console` it drives (`set_display`'s
+  grey for `DISPLAY_TYPE_REASONING`, red for an error).
+- **`cli/session.zig`**: `generateTurn` sends its reply through a `Sink` as
+  the server's `process_token` would -- a piece is special only for a
+  preserved token, nothing is sent while the text ends inside a UTF-8
+  character, a stop string (`additional_stops`) cuts the reply and a partial
+  one holds text back -- and `sampleNext` applies a reasoning budget before
+  the chain, accepting each token budget-first, as `common_sampler` holds its
+  `rbudget`.
+- **`cli/reasoning_budget.zig`** (new): `common_reasoning_budget`, a copy of
+  `tools/common/reasoning_budget.zig` with its two module dependencies cut
+  (the tools' logger, `common_token_to_piece`): importing the tools' file
+  would pull `tools_common` and its own translation of `llama.h` into the
+  CLI. A change to one belongs in both.
+- **`cli/args.zig`**: `--reasoning-format`, `-rea/--reasoning`,
+  `--reasoning-budget`, `--reasoning-budget-message`, `--reasoning-effort`,
+  `--[no-]reasoning-preserve`, `--[no-]skip-chat-parsing`,
+  `--chat-template-kwargs` and `-co/--color`. The kwarg flags are recorded in
+  command-line order and replayed into one map by
+  `conversation.resolveKwargs`, the last write to a name winning and
+  `preserve_reasoning` defaulting to `true`, as `common_params_parse_ex` adds
+  it. All are upstream spellings already in `upstream_flags.zig`.
+- **`cli/main.zig`**: both chat paths -- `-cnv` and the one-shot `--jinja`
+  turn -- go through `Chat.reply`.
+- **`build.zig`**: the CLI gains the `json`, `peg` and `common_chat`
+  modules. `cli/fit.zig` already compiles `cli/json/` by a relative import, so
+  it becomes the `cli_fit` module, as the tools have it, and
+  `cli/json_module.zig` re-exports its `json` under the name the chat stack
+  imports (the twin of `tools/server/json_module.zig`). `fit.zig`'s and
+  `cli/json/`'s tests are a test step of their own in `test-cli` (33 tests).
+
+### Rendering through `common_chat`, not `cli/chat.zig`
+
+The task asked whether the loop should leave `cli/chat.zig` for
+`templates.apply`. It does, for four reasons, each one a way the two would
+disagree:
+
+1. **The parser is built for the render.** `templates.apply` returns the
+   prompt *and* the generation prompt the parser starts from, the thinking
+   tags the budget needs, the preserved tokens and the stop strings. A second
+   render through `chat.zig` would have to agree with it byte for byte, and
+   for Qwen3 with thinking off it would not: the template appends
+   `<think>\n\n</think>\n\n` to the generation prompt only when
+   `enable_thinking` is bound false, which `chat.zig` never binds.
+2. **The history holds reasoning.** `chat.zig` binds `role` and `content`;
+   upstream's history is `common_chat_msg`s, and a template decides whether an
+   earlier turn's `reasoning_content` is re-sent. `plain-resend-reasoning`
+   keeps 82 tokens of the second turn's prefix where `--no-reasoning-preserve`
+   keeps 20 -- the first reply's reasoning is in the render, or is not.
+3. **The bindings are upstream's.** `enable_thinking`, the kwargs,
+   `preserve_reasoning`'s `preserve_thinking` family, `datetime` and
+   `date_string`, the system-role and developer-role workarounds and the
+   specialised templates (Qwen3.5 goes through the Qwen3-Coder parser, which
+   renders itself) come with `templates.apply`.
+4. **It is gated.** `templates.apply` is what `chat-parse-diff` holds to
+   upstream over every template; `chat.zig`'s bindings are what `jinja-diff`
+   holds over seven conversations.
+
+`cli/chat.zig` stays, for `jinja-diff` and for its `Segment` type.
+
+**The trust split survives the move.** `common_chat_params::prompt` is a
+plain string -- upstream's server tokenizes it whole with `parse_special`, so
+a message spelling `<|im_start|>` becomes the control token -- and SPEC.md 5.2
+requires the opposite. `template.zig` gains one opt-in hook,
+`mark_capture`: while a host sets it, every `directApplyImpl` records its text
+and the input runs the engine marked (clipped where a BOS or EOS is cut), and
+binds `bos_token`/`eos_token` as provenance tokens, which propagate as input
+does, so the text is unchanged. The CLI takes the longest recorded render
+the prompt begins with -- the prompt's own; the analyser's probe renders come
+first and cannot outgrow it -- and treats anything a parser appended after it
+(Gemma 4's `<|turn>model\n`) as template text. No match fails closed
+(`MarkingLost`). Null, the default, records nothing: `chat-parse-diff`
+(48,918 records) and `server-task-diff` (5,609 records) are unchanged.
+
+### The gate
+
+`make cnv-diff`'s reference is rebuilt over upstream's `llama-common`
+(`libllama-common-ref.a`, `zig build tools-ref`, which the script now runs)
+beside `llama.cpp.zmake`'s libllama:
+
+- `common_chat_templates_init`/`_apply` render the request, with the
+  options parsed from the same flags our CLI gets (`FLAGS='a|b|...'` in a
+  scenario; the reference reads them after `--` as `arg.cpp`'s handlers do);
+- the trust marks come from a second render of `direct_apply_impl`'s bindings
+  through `common/jinja`, which must equal `common_chat_templates_apply`'s
+  prompt byte for byte or the reference exits 3 -- it never has;
+- `common_sampler` at temperature 0 samples, with the budget fields the
+  server's schema builds;
+- `process_token`'s hold-back and stop strings, `common_chat_parse`,
+  `compute_diffs`;
+- upstream's own `ui::assistant_turn` and `ui::show_error`, by including
+  `tools/cli/cli-ui.h`, over `console` initialised with `simple_io` (without
+  it `console` writes to `/dev/tty`, not stdout).
+
+**36 scenarios, 36/36 identical, 28 turns keeping a prefix, ~2 min** (the 16 before, each now reading
+its replies through the parser, and 20 new): on both models the default,
+`--reasoning off`, `--reasoning-format none`, a 24-token budget with a
+message, `--skip-chat-parsing`; on Qwen3-0.6B `deepseek-legacy`, `auto`,
+`-rea on`, budget 0, the `enable_thinking` kwarg alone and overridden by a
+later `--reasoning on`, `--color on`, and a template that re-sends earlier
+reasoning unless `preserve_thinking` is false, with and without
+`--no-reasoning-preserve`, and that template's reply cut inside its
+thinking (`plain-resend-cut`).
+
+### Injections
+
+Each applied by exact replacement, built (rc 0), the binary's hash checked
+changed, `cnv-diff` run on a filter, and the file restored and its hash
+asserted (`scratchpad` runner; the binary after the final rebuild is not
+byte-identical to the one before, as `cnv-diff`'s first section records).
+
+| # | Injection | Result |
+|---|---|---|
+| 1 | display: no newline before switching mode | caught: both `reason-budget` (2 of 17) |
+| 2 | display: reasoning `\e[37m`, not grey | caught: `plain-reason-color` |
+| 3 | reply: a diff's content shown before its reasoning | **inert**: `compute_diffs` puts the reasoning and the content delta in separate diffs, so no diff has both |
+| 4 | reply: no final whole parse | **escaped**: on both Qwen parsers the whole parse never adds to the last partial one |
+| 5 | history: the reasoning dropped | caught: `plain-resend-reasoning` |
+| 6 | kwargs: `preserve_reasoning` defaults false | caught: `plain-resend-reasoning` |
+| 7 | request: the `enable_thinking` kwarg ignored | **inert here**: the kwarg is also bound as a template variable after `enable_thinking`, so both Qwen templates read it either way, and neither parser reads the switch |
+| 8 | budget: the message not forced | caught: both `reason-budget` |
+| 9 | budget: the generation prompt not fed to it | caught: `hybrid-reason-budget` (Qwen3.5's generation prompt opens `<think>`; Qwen3's does not) |
+| 10 | pieces: preserved tokens printed plain | **inert here**: `<think>`/`</think>` are not control tokens in either vocabulary |
+| 11 | request: `--skip-chat-parsing` ignored | caught: both `skip-chat-parsing` |
+| 12 | request: `--reasoning-format` not passed | caught: both `reason-format-none` |
+| 13 | trust: every run of the render trusted | caught: both `control-text` |
+| 14 | cache: the last token of a cut reply counted as decoded | **escaped**, then caught after `plain-resend-cut`: Qwen3's template drops the cut reply's reasoning, so no prefix ever reached that token |
+| 16 | init: `--reasoning off` ignored for the default | **inert**, as 7: `--reasoning off` also writes the kwarg |
+| 17 | stops: a full stop string never ends the reply | **escaped**: no scenario's parser has stop strings |
+| 18 | init: thinking off by default | caught: both `reason-default` |
+
+**11 caught (one after a new scenario), 4 inert, 2 escapes** -- both
+escapes are inputs these two models cannot produce, listed under "Not
+verified".
+
+
+### Found on the way
+
+- **A reply cut at `-n` or by a full context left its last token in
+  `Session.decoded` without decoding it**, so the next turn counted it as
+  cached and the model never saw it. The reference had the same loop, so the
+  gate agreed with it. Both now stop before appending that token, and
+  `plain-resend-cut` is the scenario that sees it (injection 14).
+- `args.zig`'s test writer was 4,096 bytes; the help text outgrew it.
+
+### Upstream, as found
+
+- **`deepseek-legacy` is `deepseek`.** The server sets
+  `reasoning_in_content` for it on a stream, and nothing in v0.4.1 reads that
+  field: `common_chat_parse` ignores it, so the thinking comes out of the
+  content as it does for `deepseek` and `auto`. `plain-reason-format-legacy`
+  shows exactly the default's display.
+- **`--reasoning-format none` and `--skip-chat-parsing` look alike and are
+  not**: `none` builds a parser that leaves `<think>...</think>` in the
+  content; skip builds the pure-content parser. Same display on Qwen3.
+- **A budget of 0 on Qwen3-0.6B**: `</think>` is forced straight after
+  `<think>`; the model then thinks in plain text and writes its own
+  `</think>`, so the reasoning is empty and everything after the first
+  close, the second `</think>` included, is the answer -- no
+  `[Start thinking]` at all.
+- **`[End thinking]` is only printed when the answer begins.** A reply cut
+  inside its thinking (most `-n 64` replies on Qwen3) shows
+  `[Start thinking]` and no close.
+- **The markers are grey too**: `set_display` switches before
+  `\n[Start thinking]\n\n` is written and resets only after
+  `[End thinking]\n\n`.
+- **`console` writes to `/dev/tty`** unless `--simple-io`: upstream's
+  `llama-cli` replies do not reach a redirected stdout at all.
+- Tool calls are parsed (the template's parser runs) and shown to nobody;
+  the history keeps only content and reasoning.
+
+### Not verified
+
+- **Stop strings**: neither Qwen template's parser has `additional_stops`, so
+  the hold-back and the cut run on empty lists in every scenario (injection
+  17 escaped for that reason). They follow `process_token` line for line.
+- **The final whole parse** (injection 4): it differs from the last partial
+  parse only where a partial parse holds something back -- a marker cut at
+  the end of the reply -- which no scenario produced.
+- **A reply that does not parse**: Qwen3's and Qwen3.5's parsers are lenient
+  and never threw; the `Error: <message>` path and stopping on it are
+  unexercised.
+- **Preserved tokens**: `<think>`/`</think>` are not control tokens in either
+  vocabulary, so printing them with `special` false changes nothing here
+  (injection 10).
+- **The one-shot `--jinja` turn** goes through the same `Chat.reply`, but
+  `cnv-diff` runs `-cnv` only.
+- **`--grammar`/`-j` in a chat**: upstream's server keeps the command line's
+  grammar as the request's default and, for a `-j` (output-format) grammar,
+  feeds it the generation prompt's tokens -- which a JSON grammar cannot
+  accept. Ours keeps the grammar unprefilled, as before; not compared.
+- `--reasoning-effort` reaches the kwargs; neither Qwen template reads it.
+- Windows and Linux: not built or run for this step.
+
+## Stage 10 step 8: multimodal and audio
+
+Step 3c ported the server's multimodal path -- the mmproj load with its
+memory fit, `process_mtmd_chunk`, `process_mtmd_prompt`, `server_tokens`'
+media chunks and their state format -- and step 4 reached it once, through
+`qwen3a` and the transcription route. This step is the gate: two case files
+for `server-diff`, `vision` (210 checks) and `audio` (76), each passing
+`--self` first, then against the port, in ReleaseFast and ReleaseSafe.
+**The port passed every case on first contact**; the one fix this step made
+was in the logger, below, and the gate's strength comes from the 25
+injections it had to catch.
+
+### The cases
+
+The media are `harness/server/vision.setup`'s (`audio.setup` runs it): PNGs
+(RGB, and grey-alpha), upstream's `test-1.jpeg` and `test-2.mp3`, a 16 kHz
+tone and a 44.1 kHz stereo one, junk bytes, an empty WAV, PNG1's base64 broken
+into MIME lines, and an 8-bit WAV whose data chunk claims one byte more than
+the file has; their base64 goes into `setup.env`, so a case line names one as
+`$PNG1`. `LLAMA_MEDIA_MARKER=<__media__>` is set by `!env` (one server runs
+without it, its random marker masked).
+
+| Server | What it covers |
+|---|---|
+| gemma3 (fixed-size image, non-causal decode, real begin/end tokens) | `/props`, `/models`, `/v1/models`; `/completion` with `multimodal_data`: cache hits by chunk id, another image of the same size, two images in both orders, no marker (appended), a JPEG streamed with progress, a list of prompts, `cache_prompt: false`, special-token text beside the marker; every refusal (marker counts, bad and empty data, audio bytes, a string or object or null for the list, a number, no `prompt_string`); `/v1/completions` (string only with a projector); `/infill`; chat with `image_url` as data URI and raw base64, several images, a three-turn conversation; token counts through the chat, Responses and Anthropic routes; `/apply-template`, `/tokenize`; images through `/v1/responses` and `/v1/messages` (base64, URL, default media type, a `file` source, a tool result's image); the data-URI and part-type refusals; slot save, erase, restore and continuing from a restored media prompt; `/metrics` |
+| gemma3, no `LLAMA_MEDIA_MARKER` | the random marker in `/props` and the rendered prompt; the fixed one is plain text |
+| qwen2-vl merger (M-RoPE, dynamic resolution) | positions that trail the tokens, cache reuse after the image, a JPEG over the context; `--image-min-tokens`/`--image-max-tokens` |
+| hybrid qwen35 + gemma3, qwen35 + qwen2-vl (M-RoPE), sliding-window gemma3 + gemma3 | checkpoints after a media prompt (never straight after the chunk), restoring one when a prompt diverges past the image, chat turns; the SWA server overrides its context to 2048 so a 360-token prompt outgrows the 256 SWA cells and a checkpoint with `pos_min < pos_max` is restored |
+| internvl (batched encode), gemma4v | 15 tiles encoded as one `mtmd_batch` and decoded across text; `--mtmd-batch-max-tokens 8` splitting it; equal-size images batched |
+| `--no-mmproj-offload`, `-mmdev none`, `--no-mmproj` with `-mm`, `LLAMA_ARG_MMPROJ` | the projector on the CPU; an explicit `-mm` survives `--no-mmproj` |
+| two slots | `n_cmpl: 2` and chat `n: 2` sharing one image prompt; concurrent image prompts |
+| `--context-shift --cache-reuse 4` | both turned off with a warning; a generation into the 256-token context stops there (`truncated`) |
+| draft model, `--sleep-idle-seconds 1` | the decode callback feeding the drafter image batches; the projector freed and reloaded on waking |
+| `--media-path` | `file://` below it, a subdirectory, `..`, an absolute path, a missing file, audio bytes; `--media-path` naming a file |
+| `--embedding --pooling mean` | image embeddings (equal for equal inputs, different without the image), the OpenAI route, the refusals |
+| text-only server | every media route refused; a saved media prompt cannot be restored |
+| mmproj load failures | a missing file, a PNG, a projector whose `n_embd` (256) is not Qwen3-0.6B's (1024), `gemma3na` (declared, never loadable), a text model as projector |
+| qwen3a, `-b 32 -ub 32` (`audio`) | audio decoded in pieces; WAV, resampled stereo WAV, MP3 over the context, empty WAV, an image refused; `input_audio`'s `data` before `url`, a data URI, an empty part; a two-clip conversation; token counts, template, the transcription route; save/restore of an audio prompt |
+| qwen3a `--embedding` | audio embeddings, the short 8-bit WAV among them |
+| gemma4a, lfm2a, parakeet, mimo-audio, ultravox (context overridden), qwen2.5-omni (image and audio in one prompt, M-RoPE) | each encoder through `/completion` and chat; lfm2a's two upstream failures below |
+| gemma3 vision-only | audio refused by every route; an audio prompt saved by qwen3a restores (a chunk is data) |
+
+**Two text fixtures were added for this**: `harness/mmproj_fixtures.cpp`
+now also writes `text-qwen35` (hybrid) and `text-gemma3` (sliding window)
+from the arch fixtures, paired with no projector; without them no case
+could reach the checkpoint path with a media chunk in the prompt (`do_checkpoint
+&& !has_mtmd`, `size_up_to_pos`). The existing fixtures regenerate byte for
+byte.
+
+### The fix: one message, one write
+
+`tools/common/log.zig`'s `print` wrote a message as up to four stdio calls --
+timestamp, level, text, colour reset. Upstream's logger hands every entry to
+one worker thread, so its lines never interleave; the port writes from the
+calling thread, and the server's HTTP thread (`stop: cancel task`, a
+warning) and its decode loop log at once. In the M-RoPE block one line came
+out as `W 0.00.281.536 I srv  update_slots: all slots are idle` -- the HTTP
+thread's prefix, then the decode loop's whole line, then the rest of the
+warning. `print` now builds the line and writes it with one `fputs`, which
+holds the stream's lock. Bytes are unchanged; `server-task-diff` and every
+case file pass.
+
+### Upstream, as found
+
+- **A new prompt that ends in a media chunk with no closing marker text
+  aborts the server**: lfm2a wraps its audio in no text, so after the chunk
+  `update_slots` has an empty batch and `GGML_ASSERT(batch.size() > 0)`
+  fails (server-context.cpp:3595). gemma3's `<end_of_image>` and qwen3a's
+  markers hide it. The port aborts identically; the case is in `audio`.
+- **A fully cached prompt ending in a media chunk** is set back one token,
+  which lands inside the chunk: "got exception: Chunk not found" (500). Its
+  task cancellation races the decode loop's idle line, upstream against
+  itself, so that server's log is not compared.
+- `/tokenize` and, with a projector loaded, `/v1/completions` take a string
+  prompt only (nlohmann's `type_error.302`, 500 and 400); `/completion` takes
+  the object.
+- `multimodal_data` is iterated as nlohmann iterates: a bare string is one
+  file, an object gives its values, `null` gives none.
+- The base64 decoder stops at the first character outside the alphabet, so
+  MIME-style line-broken base64 loads nothing ("Failed to load image or
+  audio file"); raw base64 that decodes to nothing is a 500 ("Invalid base64
+  value", a `runtime_error`) where a bad data URI is a 400.
+- A slot's context is capped at the model's training context, 256 for the
+  fixtures; most audio projectors pad to 420-840 tokens, so their servers
+  override `<arch>.context_length`. `--override-kv` logs the value with a
+  second call, which gets its own timestamp (masked).
+- An explicit `-mm` survives `--no-mmproj` (it only stops the `-hf`
+  lookup). Video is not compiled in (`MTMD_VIDEO`): `input_video` is refused
+  and a video's bytes fail to load.
+
+### Injections
+
+In an isolated copy of the tree (other workstreams were editing
+`tools/server/`): exact replacement, build rc 0, `llama-server`'s hash
+changed, the case files run with `SERVER_DIFF_FAILFAST`, the file restored
+and compared byte for byte.
+
+| # | Injection | Caught by |
+|---|---|---|
+| 1 | `pos_next(n)`: a media chunk advances by its tokens, not its positions | `vision` (hybrid M-RoPE block) |
+| 2 | `pos_next()`: M-RoPE's position deficit dropped | `vision` (qwen2-vl, whole log) |
+| 3 | `get_common_prefix`: media chunks equal by length, not id | `vision` (`/slots`) |
+| 4 | `keep_first`: cutting through a media chunk allowed | `audio` (`/slots`) |
+| 5 | `process_mtmd_chunk`: no batching of the following chunks | `vision` (internvl, whole log) |
+| 6 | `process_mtmd_chunk`: decoded one position late | `vision` |
+| 7 | metrics: a chunk's tokens counted twice | `vision` (`/metrics`) |
+| 8 | the cached chunk keeps its data (no placeholder) | provably inert: a placeholder is `load(save(chunk))`, so saves are identical and the slot's copy is never encoded |
+| 9 | `ctx_shift` left on with a projector (warning kept) | **escaped**; a generation into the context limit added, then `vision` |
+| 10 | `--image-max-tokens` passed as the minimum | `vision` (startup) |
+| 11 | `--mtmd-batch-max-tokens` not passed | `vision` (whole log) |
+| 12 | `--no-mmproj-offload` ignored | `vision` (startup) |
+| 13 | `allow_audio` from `mtmd_support_vision` | `audio` (`/props`) |
+| 14 | data URI: more than one comma accepted | `vision` |
+| 15 | data URI: `data:audio/` refused | `audio` |
+| 16 | `input_audio`: `url` read before `data` | `audio` |
+| 17 | base64: a character outside the alphabet skipped | `vision` (line-broken base64) |
+| 18 | base64: one byte too many from a partial quantum | **escaped** (decoders ignore a trailing byte); the 8-bit WAV one byte short of its header added, then `audio` (embeddings) |
+| 19 | `multimodal_data` tokenized as placeholders | `vision` |
+| 20 | `process_mtmd_prompt`: `parse_special` off | **escaped**; special-token text beside the marker added, then `vision` |
+| 21 | `/models`: multimodal capability dropped | `vision` |
+| 22 | `/props`: audio modality reports vision | `audio` |
+| 23 | state: media start indices one late | `vision` (restore) |
+| 24 | state: media restored without an mmproj | `vision` (text-only restore) |
+| 25 | `size_up_to_pos`: stops past the position | **escaped** twice; the hybrid and M-RoPE checkpoints restore at `pos_min + 1`, where `min(..., n_tokens)` hides it, so the SWA server with a restore at `pos_min < pos_max` was added, then `vision` (whole log) |
+
+**24 caught, one provably inert, after closing four escapes** -- all input
+again: no generation reached the context with a projector, no media whose
+length a decoder notices, no special-token text in a media prompt, and no
+checkpoint restored whose positions span more than one token.
+
+### Not verified
+
+- `http(s)` media URLs (step 7's downloader).
+- Video (`MTMD_VIDEO` is not built on either side).
+- The mtmd decode or encode failure paths ("failed to process mtmd chunk"):
+  no fixture fails there.
+- Concurrent image prompts' logs (`!parallel` compares responses only).
+- Linux and Windows: not run.
+
+## The Stage 9 and 10 pickup: GB10 and DESKTOP-BR7J5S9
+
+Tonight's Stage 9 and Stage 10 work, run where it had never run: the GB10
+(Ubuntu 24.04 aarch64, CUDA 13.0) and the Haswell laptop
+(`x86_64-windows-gnu`, `x86_64_v3`). The tree was uncommitted -- 189 staged
+files on top of `1862287` (v0.4.1+2) -- and stays so.
+
+### How the tree was carried
+
+Neither remote checkout pulls from GitHub; everything travelled over the
+`zupdater` link (ziglink's protocol), which pushes executables only. So:
+
+1. **A carrier.** A ten-line C program (`zig cc`, scratch, not in the tree)
+   that `.incbin`s a tar and writes it to the path in `argv[1]`, built for
+   `aarch64-linux-gnu` (or `x86_64-windows-gnu`) and pushed with
+   `zupdater push <agent> carry --run -- <path>`. The tar's SHA-256 was
+   checked on arrival.
+2. **The commits as bundles.** The GB10 was at `d4f0a16`: `git bundle
+   create … d4f0a16..master` (8cc2fef, 1862287) and, for `../zigjinja`
+   (at `711c2ac`), `git bundle create … 711c2ac..main` (fe1882d, v3.1.0).
+   There: `git bundle verify`, `git fetch <bundle> <branch>`, `git merge
+   --ff-only FETCH_HEAD`, after checking `git status --porcelain
+   --untracked-files=no` was empty. No commit was made anywhere.
+3. **The staged work as a patch.** `git diff --binary --cached 1862287`,
+   first checked to apply cleanly to `git archive 1862287` in a scratch
+   directory and to reproduce every staged file byte for byte; then `git
+   apply` on the GB10. There `git status` showed 42 modified and 147 new
+   files: 189, as staged.
+4. **Fixes made since, as whole files.** Each later round carried a tar of
+   every file that differs from the index (`git diff --name-only` plus the
+   untracked ones), extracted over the checkout; an MD5 over the list
+   compared equal on both sides. The first such round forgot the untracked
+   files (`win_child.zig`, `fs_stat.zig`) and its run was discarded.
+5. **Shell commands** through `zupdater tty` driven by a `pty.fork()`
+   helper, one command line per session; long jobs under `nohup`, one log
+   per gate under `~/pickup/s910/`.
+
+For the laptop the inputs `chat-msg-diff` needs went the same way, a
+carrier writing a tar into `%TEMP%\llamazig`, unpacked with the system
+`tar.exe`.
+
+### What failed first, and the fixes
+
+Every fix was made on the Mac, re-gated there, and carried over.
+
+**Nothing in `tools/server/` compiled for Linux.** `std.c.Stat` is `void`
+on Linux in Zig 0.17 (no glibc `struct stat` is declared), and the server
+named it in eleven places -- `preset.zig`, `tools.zig`, `hf_cache.zig`,
+`download.zig` -- as did `tools/common/arg_options3.zig`'s `fs_is_directory`
+and `arg.zig`'s config-file check, which every tool links. `quantize.zig`
+had met this already and asked `statx`. Now `tools/common/fs_stat.zig`
+does that for all of them: `statx` on Linux (what glibc's `stat` does
+underneath), libc's `stat`/`lstat` elsewhere, with the `errno` that
+`fs_is_directory` reads. `std.posix.getrandom` is gone in 0.17
+(`common.zig`'s `random_device`), and `std.c.arc4random_buf` is Darwin's
+(`httplib/message.zig`'s multipart boundary): both take
+`std.os.linux.getrandom` on Linux. The Mac never saw any of it, and a
+cross-build (`zig build tools cli spec-diff -Dtarget=aarch64-linux-gnu`)
+now finds nothing.
+
+**Zig's `compiler_rt` was every Linux binary's `expf` and `logf` again.**
+`server-task-diff` failed on one token probability one ULP out. The port
+binary defined `expf` and `logf` itself; the reference took glibc's.
+`objdump` named the callers of `__divti3`, the `i128` division glibc does
+not have: zigjinja's `Environment.fromString`, `filters.random` and
+`strftimeNowGlobal`, `cli/common_chat/templates.applyJinja`, and
+`std.Io.Threaded`. So on Linux any binary that renders a chat template --
+`llama-cli`, `llama-server`, the harnesses -- computes every CPU op's,
+sampler's and probability's `expf` with Zig's, not upstream's. It is the
+CUDA build's `@panic` lesson (CLAUDE.md) arriving by a road no `@panic`
+removal closes: zigjinja and `std.Io` divide `i128`s by design. The fix
+is the references' own: `llamacpp.addLibgcc` puts gcc's static `libgcc.a`
+on every native Linux executable's link ahead of `compiler_rt`, so
+`__divti3` comes from where upstream's gcc build takes it.
+
+### DESKTOP-BR7J5S9
+
+Built here as `x86_64-windows-gnu -mcpu=x86_64_v3`, the reference half too
+(`zig build reference tools-ref -Dtarget=… -p zig-out/win-host/x86_64_v3/port`
+gives `llama-common-ref.lib`; `tools-ref` as a whole does not build, below),
+run there through `scripts/win-run`.
+
+| gate | result |
+|---|---|
+| `json-diff` | 9,526,339 checks (98,570 of them `ub`, compared only off AArch64) |
+| `schema-diff` | 751,592 checks over 165,536 cases, 1 reference crash skipped |
+| `peg-diff` | 4,193,010 checks over 5,687 cases, 15 reference crashes skipped |
+| `jinja-diff` | 69 templates x 7 conversations, 476 identical renders, 8,004 probes |
+| `chat-msg-diff` | both sides' transcripts, run there, equal to the Mac's reference transcript: 17,631 lines each |
+| `llama-cli.exe` | builds; greedy completion and `-j` run on the laptop |
+
+Each was made to fail there once, and restored byte for byte: `json` (the
+`true` literal; the `null` injection's binary was refused by Application
+Control, the usual hash-specific block), `schema` (the space rule), `peg`
+(a negated class's GBNF), `jinja` (`add_generation_prompt` negated) and
+`chat-msg` (`tool_calls` renamed: 321 lines).
+
+**`schema-diff` and `peg-diff` had a `WIN_X86` path that could never have
+run.** Both sourced `scripts/win-target`, but both named the reference
+archives `libllama-ref.a` (MinGW's are `llama-ref.lib`), both harnesses run
+upstream's C++ in a `fork`ed child, and both C++ halves read their stderr
+capture back with `pread`. Now `win-target` names the archives per target
+(`GATE_LLAMA_REF`, `GATE_COMMON_REF`, `GATE_BUILD`); `harness/win_child.zig`
+is the child on Windows -- the harness started again as `--ref-child`, the
+bytecode and the result passed through files, the time limit a
+`WaitForSingleObject`, a crash an exit code with the error dialog off; the
+two `*_ref.cpp` read with `_lseek` + `_read` and open `NUL`; and `peg-diff`
+only compiles its unit tests for Windows. Windows' linker, like Linux's,
+resolves every reference in every object, so `schema-diff` links upstream's
+`libllama-common` off Darwin for what `common.cpp`'s unused functions name.
+
+**`llama-cli.exe` no longer built.** Tonight's `cli/common_chat/util.zig`
+(`ggmlAssert`) and `cli/peg/errors.zig` wrote to stderr with
+`std.c.write(2, …)`, whose descriptor is a `HANDLE` on Windows. Both take
+the CRT's `_write` there now.
+
+Not run there:
+
+- **`chat-parse-diff`**: its reference pins the clock by interposing `time`
+  and `clock_gettime` with `dlsym(RTLD_NEXT, …)`; libc++ on Windows reads
+  the clock through kernel32, which no definition in the program replaces,
+  so every `strftime_now` template would differ by design. `chat_parse_ref`
+  opens `NUL` there now, but nothing else was attempted.
+- **The server and the other tools.** `zig build cli tools` for Windows
+  builds `llama-cli.exe` and `llama-gguf-split.exe` only. `llama-server`
+  fails as expected (14 errors: `pollfd` and the sockets, `std.c.Stat`,
+  `std.c.write`'s handle -- no Winsock port yet). Eleven ported tools fail
+  on `tools/common/log.zig`'s `clock_gettime` (`std.c` declares it `void` on
+  Windows) and `fs_stat.zig`'s `std.c.Stat`: that predates tonight --
+  PLAN.md's Windows pickup already says the tools were never built for
+  Windows -- and was left. Upstream's own `tools-ref` does not build for
+  Windows either: `mtmd-ref` compiles `mtmd-audio.cpp` with `-std=c++17`,
+  under which MinGW's `<math.h>` withholds `M_PI`; `llama.cpp.zmake` uses
+  `gnu++17` on Windows for exactly this.
+- On Windows `llama-cli.exe` imports `erff`, `expm1f`, `pow`, `powf` and
+  `tanhf` from the UCRT but not `expf`, `logf`, `sinf` or `cosf`: those
+  come from Zig's MinGW runtime. The x86 gates' two sides link the same
+  ones, so they agree; whether upstream's MSVC or MinGW-gcc build rounds
+  as these do is unmeasured.
+
+### GB10
+
+Built there with its defaults -- CUDA on (`-Dcuda`, the ported host layer),
+the baseline CPU -- every reference beside it; the server gates were left
+on CUDA, since nothing in them failed for it once the reference shared the
+device (below). Final runs, after the fixes in this section:
+
+| gate | result on the GB10 |
+|---|---|
+| `zig build`, `zig build test-cli` | pass |
+| `make arch-fixtures` | 165 fixtures (111 + 54), as on the Mac |
+| `json-diff` | 9,526,339 checks |
+| `schema-diff` | 751,324 checks over 165,529 cases; upstream's own test passes on the reference |
+| `peg-diff` | 4,195,069 checks; **15** reference crashes or timeouts skipped where the Mac skips 24 (and the laptop 15), so 2,327 fewer checks than the Mac; why fewer cases kill the reference there was not looked into. 460 s against the Mac's 20 |
+| `chat-msg-diff` | 1,625 records, 17,840 lines |
+| `chat-parse-diff` | 48,918 records, 368,786 lines |
+| `jinja-diff` | 69 templates x 7 conversations, 8,004 probes, under both zones |
+| `spec-diff` | 38 cases, 110,148 lines, 60 phrases (the Mac's 111,411 lines include its own backtrace format's) |
+| `server-task-diff` | 5,609 records, 90,045 lines, 137 coverage phrases |
+| `http-diff` | 243 checks |
+| `make mmproj-fixtures` | 122 / 122 through upstream's libmtmd, CPU and CUDA; `text-qwen35` and `text-gemma3` among them |
+| `server-diff` | 20 of 21 case files identical, 1,332 checks: `core` 108, `slots` 38, `embd` 45, `lora` 26, `cache` 34, `auth` 23, `spec` 25, `sleep` 12, `stream` 24, `chat` 105, `responses` 28, `anthropic` 23, `asr` 20, `vision` 210, `audio` 76, `tools` 175, `mcp` 59, `proxy` 60, `router` 126, `hub` 115. `parallel`: below |
+| `tools-diff` | `server` 183, `tokenize` 51, `quantize` 46, `mtmd-cli` 55, `tts` 30 |
+| `cnv-diff` | 36 / 36, 28 turns kept a prefix (with its new Linux arm) |
+| `parity-cli` | 13 / 13: the six prompts and seven grammar cases (with its new Linux arm) |
+
+`router` and `hub` passing is the first run of the router's Linux paths:
+`/proc/self/exe`, the subprocess layer's `posix_spawn` and `poll` pumps,
+the cache's home fallback. `tools` and `mcp` ran the tool and MCP
+subprocesses there too.
+
+**`parallel.cases` cannot judge the port on the GB10.** One request --
+"The capital of France is", the first of a `!parallel` block -- answered
+differently in each run, and **upstream against itself** (`server-diff
+parallel --self`) differed on it in both of two runs: whether that prompt
+is decoded alone or batched with the next ones depends on when the
+requests land, and on CUDA a different batch is a different kernel and a
+different last bit. On the Mac the same block has never differed. It is
+left failing, not masked.
+
+### The scripts' Linux arms
+
+Several of tonight's gates had only ever run on the Mac:
+
+- `chat-msg-diff`, `chat-parse-diff` and `server-task-diff` asked `xcrun`
+  for the SDK and linked the Metal frameworks by name. Each now takes its
+  link line from `scripts/platform-libs` (a `platform_libs` helper in
+  Python), and builds every library it links -- `reference`, `tools-ref`,
+  `mtmd-ref` -- instead of relying on a `zig-out/` another gate left behind:
+  on a fresh `zig-out/` two of them stopped at `libmtmd-ref.a: file not
+  found`.
+- `parity-cli` linked the Apple-clang CMake build. Off macOS its reference
+  is the same `raw_completion.c` over `libllama-ref.a`,
+  `libllama-common-ref.a` and the port's `libggml.a`, as
+  `cuda-parity-cli` links it, and `make parity-cli` builds them there.
+- `cnv-diff`'s reference is `llama.cpp.zmake`'s libllama and libggml,
+  which on the GB10 are CPU-only, while our CLI decodes on CUDA: 25 of 36
+  scenarios parted on the last bits of a long reply. Built `-Dcuda=false`,
+  the CLI still parted on 26, both sides on the CPU; that was not chased
+  (zmake's library there was built on 2026-10-29 for an earlier gate, and
+  whether for the same CPU as the CLI was not checked).
+  Off macOS the reference is now upstream's libllama and common over the
+  port's libggml -- the CLI and libllama compared over one ggml, as in
+  `parity-cli` -- and all 36 agree.
+- `schema-diff` links `common.cpp` for its string helpers; Darwin's linker
+  never resolves what its unused functions name, Linux's and Windows' do
+  (`common_log_main`, `common_fit_params`, the build info). Off Darwin it
+  links upstream's `libllama-common-ref` for them, and `make schema-diff`
+  builds it.
+- `spec_fixtures` (`zig build spec-diff`) linked a CUDA `libggml` without
+  the toolkit's library path.
+- **Live memory.** On a unified-memory GPU, free memory is read from the OS
+  as each side starts, one after the other: `server-diff` failed `core`'s
+  startup on `common_memory_breakdown_print`'s free and unaccounted columns
+  and the fit's two lines that quote it, `spec-diff` 33 cases on those and
+  on `final available_memory_kb` and `- N MiB free`. Both mask them, as
+  `loader-diff` and `api-diff` learned to at the first GB10 pickup.
+- **Upstream's log worker races.** `server-diff`'s whole-log comparison now
+  compares the lines written straight to stderr (llama-grammar's `parse:
+  error parsing grammar`) apart from `common_log`'s, as its startup
+  comparison already did: on the GB10 upstream's two slot lines landed after
+  `core`'s bad-grammar message. `audio.cases` drops lfm2a's `audio decoded
+  (batch …)` line, the one logged just before its `GGML_ASSERT`, which
+  reached upstream's stderr on the Mac and not on the GB10. `spec-diff`
+  drops gdb's lines: on Linux `ggml_print_backtrace` attaches gdb, whose
+  thread list differs every run and whose warning glues itself to the last
+  log line. `GGML_NO_BACKTRACE` (what `tools-diff` sets) was tried first
+  and is wrong here: the attach is what gives upstream's worker time to
+  write `ngram-cache-missing`'s three lines before the abort, and without
+  it they were lost.
+
+Once, `audio.cases` showed the port logging `all slots are idle` twice
+where upstream logged it once; the next run of the port and two of
+upstream against itself agreed, and it is recorded as an unreproduced
+race, not a fix.
+
+`llama-cli` built Debug (`make parity-cli` builds it so) still defines
+`expf` and `logf` itself on Linux with `libgcc.a` first: something only a
+Debug build needs still pulls `compiler_rt`. The ReleaseFast `llama-cli`,
+`llama-server` and the server harnesses take glibc's (`nm`, after the
+fix). Not chased.
+
+### Each gate made to fail on the GB10
+
+One injected fault per gate that passed there for the first time, applied
+by exact replacement in the GB10's tree, the gate run, the replacement
+reversed and the file's SHA-256 checked against the original's (all
+restored):
+
+| gate | fault | result |
+|---|---|---|
+| `json-diff` | the `null` literal scanned as `nul` | 40,342 checks differ |
+| `schema-diff` | the space rule's `{1,2}` as `{1,3}` | 220,332 differ |
+| `peg-diff` | a negated class's GBNF `[^` as `[ ^` | 1,673 differ |
+| `chat-msg-diff` | `tool_calls` written as `tool_call` | transcripts differ |
+| `chat-parse-diff` | `chat_peg.zig`'s `until("<tool_call>")` | **escaped**: that builder is not on a path the cases reach; MiniMax-M3's template detection broken instead -- caught (`format peg-minimax-m3` against `peg-native`) |
+| `jinja-diff` | `add_generation_prompt` negated | 63 of 69 templates differ |
+| `http-diff` | `Invalid API Key` as `Invalid API key` | 10 of 243 |
+| `server-task-diff` | `n_probs` emitted as `n_prob` | transcripts differ |
+| `server-diff auth` | the same as `http-diff`'s | 5 of 23 |
+| `tools-diff server` | `error: invalid argument: %s` loses its colon | 37 of 183 |
+| `spec-diff` | the drafters' candidate log shows two candidates, not three | 12 cases (the 13th, `ngram-cache-missing`, was the gdb failure fixed after) |
+| `parity-cli` | `-n` parsed one higher | 7 of 13 |
+| `cnv-diff` | the `[turn: kept K, decoding S]` trace loses its comma | `plain-three-turns` differs |
+
+Every fix above was re-gated on the Mac after the last of them:
+`schema-diff`, `peg-diff`, `chat-msg-diff`, `chat-parse-diff`,
+`jinja-diff`, `spec-diff`, `server-task-diff`, `http-diff`, `server-diff`
+(21 files, 1,360 checks), `tools-diff server`, `tokenize`, `quantize`,
+`cnv-diff` 36 / 36, `parity-cli` 13 / 13, `test-cli`, `test-server-http`,
+`test-server-data` and `port-links` pass with their earlier counts. On the
+GB10 the server unit tests and `fs_stat.zig`'s pass too.
+
+### Where things stand
+
+The GB10's checkout is `1862287` with the staged work and these fixes in
+its working tree, uncommitted; `../zigjinja` there is at `fe1882d`. Open:
+
+- `parallel.cases` on CUDA, above: upstream is not reproducible there.
+- `cnv-diff` against `llama.cpp.zmake`'s CPU-only library on the GB10
+  parts on 26 of 36 scenarios even with our CLI on the CPU; not chased.
+- Debug Linux builds still take `compiler_rt`'s `expf`.
+- Windows: Winsock and the server; the ported tools'
+  `clock_gettime`/`stat` (pre-existing); `mtmd-ref`'s `M_PI`;
+  `chat-parse-diff`'s clock; where `expf` comes from on Windows.
+- `schema-diff` counts 165,536 cases on the laptop and 165,529 on both
+  ARM machines, with the same seed; why was not looked into.
+
+## Stage 10: the web UI
+
+The first record of this said "no web UI, because upstream has none". That
+was wrong: upstream ships one, `tools/ui` (SvelteKit), which its CMake builds
+with npm or downloads prebuilt and embeds as byte arrays
+(`scripts/ui-assets.cmake`). Only the reference built here lacked it, because
+`llama.cpp.zmake` compiled `zig/ui-stub`. Marc's call: add it to zmake first,
+then port the C/C++ around it, keeping the app itself as Svelte, as
+`../zigwui` does.
+
+### llama.cpp.zmake
+
+- `make ui` copies `llama.cpp/tools/ui` to `.ui/src` (npm writes
+  `node_modules` and `.svelte-kit` beside its sources; the checkout is
+  read-only), runs `npm ci` and `npm run build` with `LLAMA_UI_OUT_DIR` and
+  the build number as CMake passes them, and leaves the bundle in `.ui/dist`:
+  70 files, 10 MB, ~20 s.
+- `zig/ui_embed.zig` is `emit_files`: the sorted file list, the
+  required-asset check, gzip with a zero timestamp, ETag = quoted SHA-256 of
+  the embedded bytes, the MIME table, upstream's `ui.h.in`/`ui.cpp.in`
+  filled. `zig build server -Dui=.ui/dist` builds `llama-server` (new; zmake
+  built only `llama-cli`), `make web` builds both and opens the browser.
+- Verified there: all 70 assets served and gunzipped equal the bundle; 304
+  on `If-None-Match`, plain and weak; 415 to a client without gzip.
+
+### The port
+
+- `tools/server/ui.zig` ports `ui.cpp.in`/`ui.h.in` over the `ui_assets`
+  module `build/ui_assets.zig` generates from `-Dui` (`@embedFile` of each
+  gzipped file). `LLAMA_UI_HAS_ASSETS` is the comptime `has_assets`, so a
+  build without a UI compiles the no-assets path alone.
+- `tools/server/http.zig` gains the `LLAMA_UI_HAS_ASSETS` arm:
+  `handle_gzip_header`, `serve_asset_cached`, `serve_asset_nocache`, the
+  routes and `no_cache_names`, and `frontend_paths` with every asset in it.
+- **cpp-httplib's `RegexMatcher` is ported** (`httplib/server.zig`, over
+  `src/llama/regex.zig`). Every asset name holds a `.`, so every asset route
+  is a regex route upstream, and `/swXjs` is served as `/sw.js`; the port
+  refused regex routes at registration until now, which made the first port
+  server exit on `RegexMatcherNotPorted` before it listened.
+- `build/ui.zig` gives both servers the same bundle: the port through the
+  generated module, the reference through zmake's `ui_embed.zig`, so the
+  gzip bytes and ETags are the same compressor's on both sides. Without
+  `-Dui` both are the stub, as before.
+
+### The gate
+
+`harness/server/ui.cases`, run with `SERVER_UI=<dist>` (the Makefile passes
+`llama.cpp.zmake/.ui/dist` for every case file and builds it once if
+missing): the 415s; `/`, `/index.html`, a query string, a missing asset;
+the regex routes (`/swXjs`, `/indexXhtml`, a trailing `/`); every asset of
+the bundle (`!uiassets`, a binary body compared by length and SHA-256);
+304 for the ETag plain and `W/`, 200 for another; a longer
+`Accept-Encoding`; with `--api-key` (the frontend paths are public);
+under `--api-prefix`; and `--no-ui`. The first block runs at `-lv 5`, where
+the `serve nocache for` lines print. 107 checks, identical `--self` and
+port. `!etag <path>` reads each side's ETag into `$ETAG`.
+
+Injections, 12/12 caught, every file restored byte for byte: the weak ETag
+form, the isolation headers, the immutable `max-age`, `build.json` dropped
+from `no_cache_names`, the gzip check inverted, `frontend_paths` without
+the assets, the `/index.html` route, 304 as 200, the regex router as a
+literal compare, its 256-byte path limit, a MIME type, and the gzip level.
+
+Two things the gate cannot hold:
+
+- **`npm run build` is not reproducible** -- `_app/version.json` carries the
+  build time and the hashed bundle names follow it -- so both sides embed one
+  bundle; two `make ui` runs are not comparable.
+- **`--api-prefix` with `--api-key` cannot be started by the harness**:
+  upstream's public endpoints are unprefixed, so `/api/health` needs the key
+  and the readiness probe never sees a 200. The prefix block runs without a
+  key.

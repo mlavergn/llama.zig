@@ -1,0 +1,132 @@
+#!/bin/bash
+# Writes the models router.cases serves into $DATA (Stage 10 step 7): a
+# --models-dir and INI presets over Qwen3-0.6B and a small fixture without
+# a tokenizer (it loads, and is never asked to generate). Run by
+# scripts/server-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+Q3="$ROOT/Qwen3-0.6B-Q8_0.gguf"
+FIX="$ROOT/zig-out/arch-fixtures/llama-dense.gguf"
+MM="$ROOT/zig-out/mmproj-fixtures"
+
+m="$DATA/models"
+mkdir -p "$m/vision" "$m/audio" "$m/split" "$m/empty" "$m/draft"
+ln -s "$Q3" "$m/qwen3.gguf"
+cp "$FIX" "$m/tiny.gguf"
+# companions alone at the top level are not models
+cp "$FIX" "$m/mmproj-orphan.gguf"
+cp "$FIX" "$m/mtp-orphan.gguf"
+# a sub-directory: the model, its projector (vision) and a draft sidecar
+cp "$FIX" "$m/vision/model.gguf"
+cp "$MM/gemma3.gguf" "$m/vision/mmproj-gemma3.gguf"
+cp "$FIX" "$m/draft/model.gguf"
+cp "$FIX" "$m/draft/dflash-a.gguf"
+cp "$FIX" "$m/draft/mtp-b.gguf"
+cp "$FIX" "$m/audio/model.gguf"
+cp "$MM/ultravox.gguf" "$m/audio/mmproj-ultravox.gguf" 2>/dev/null || cp "$MM/gemma3.gguf" "$m/audio/mmproj-x.gguf"
+# a split model: the first shard is the one named
+cp "$FIX" "$m/split/big-00001-of-00002.gguf"
+cp "$FIX" "$m/split/big-00002-of-00002.gguf"
+# not a gguf at all: a child that fails to load
+printf 'not a gguf\n' > "$m/broken.gguf"
+printf 'ignored\n' > "$m/readme.txt"
+
+cat > "$DATA/presets.ini" <<INI
+version = 1
+
+; everything below inherits this
+[*]
+ctx-size = 256
+parallel = 1
+
+[custom-qwen]
+model = $Q3
+alias = cq, qwen-alias
+tags = chat, small
+temp = 0
+n-predict = 4
+stop-timeout = 5
+
+[tiny]
+# merges into the --models-dir entry of the same name
+tags = fixture
+no-jinja = false
+
+[startup]
+model = $FIX
+load-on-startup = true
+stop-timeout = later
+
+[user/repo:q4_k_m]
+hf-repo = user/repo:Q4_K_M
+
+; a tag with a file-name prefix: canonicalised to what follows its last - or .
+[user/repo:model.v2-q8_0]
+hf-repo = user/repo:Q8_0
+
+[flags]
+model = $FIX
+; overrides the global section's
+parallel = 2
+no-mmproj-offload = 1
+kv-offload = false
+no-warmup = 1
+cont-batching = off
+INI
+
+cat > "$DATA/bad-key.ini" <<INI
+[a]
+model = $FIX
+not-an-option = 1
+INI
+
+cat > "$DATA/bad-syntax.ini" <<INI
+[a
+model = x
+INI
+
+cat > "$DATA/dup-alias.ini" <<INI
+[one]
+model = $FIX
+alias = same
+[two]
+model = $FIX
+alias = same
+INI
+
+cat > "$DATA/alias-name.ini" <<INI
+[one]
+model = $FIX
+alias = two
+[two]
+model = $FIX
+INI
+
+cat > "$DATA/too-many.ini" <<INI
+[a]
+model = $FIX
+load-on-startup = 1
+[b]
+model = $FIX
+load-on-startup = 1
+INI
+
+cat > "$DATA/reload-a.ini" <<INI
+[keep]
+model = $FIX
+[gone]
+model = $FIX
+INI
+cat > "$DATA/reload-b.ini" <<INI
+[keep]
+model = $FIX
+[new]
+model = $FIX
+alias = fresh
+INI
+cp "$DATA/reload-a.ini" "$DATA/reload.ini"
+
+# the reload cases swap the preset in each side's own $WORK (!fresh)
+mkdir -p "$DATA/reload-a" "$DATA/reload-b"
+cp "$DATA/reload-a.ini" "$DATA/reload-a/reload.ini"
+cp "$DATA/reload-b.ini" "$DATA/reload-b/reload.ini"

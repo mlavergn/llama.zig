@@ -5,9 +5,12 @@
 //! Ports `common_cpu_params`, `common_params_sampling`, `common_params_model`
 //! and `common_params` from `llama.cpp/common/common.h` (v0.4.1,
 //! `b29c606e2`) -- the members the tools' options and the tools themselves
-//! touch, with upstream's defaults. The server's, the CLI's and the
-//! speculative decoder's members are left out: no option those tools take
-//! reaches them.
+//! touch, with upstream's defaults, and the server's: its block of
+//! `common_params`, `common_params_speculative` with its draft and n-gram
+//! sub-structs, and the reasoning and chat-template members its options set.
+//! The CLI's interactive members (`interactive`, `prompt_cache_all`, ...),
+//! the debug, retrieval, passkey, diffusion and finetune members are left
+//! out: no ported tool's option reaches them.
 //!
 //! # Ownership
 //!
@@ -121,6 +124,108 @@ pub const DimreMethod = enum { pca, mean };
 /// Ports `common_grammar_type` (common/common.h:187 @b29c606e2).
 pub const GrammarType = enum { none, user, output_format, tool_calls };
 
+/// Ports `common_speculative_type` (common/common.h:171 @b29c606e2).
+pub const SpeculativeType = enum(c_int) {
+    none, // no speculative decoding
+    draft_simple, // standalone draft model speculative decoding
+    draft_eagle3, // Eagle3 speculative decoding
+    draft_mtp, // Multi-token prediction
+    draft_dflash, // DFlash speculative decoding
+    draft_dspark, // DSpark speculative decoding (DFlash + Markov head)
+    ngram_simple, // simple self-speculative decoding based on n-grams
+    ngram_map_k, // self-speculative decoding with n-gram keys only
+    ngram_map_k4v, // self-speculative decoding with n-gram keys and 4 m-gram values
+    ngram_mod,
+    ngram_cache, // self-speculative decoding with 3-level n-gram cache
+    count, // number of types, unknown type
+
+    /// Ports `common_speculative_type_to_str` (speculative.cpp:2246 @b29c606e2).
+    pub fn toStr(self: SpeculativeType) []const u8 {
+        return switch (self) {
+            .none => "none",
+            .draft_simple => "draft-simple",
+            .draft_eagle3 => "draft-eagle3",
+            .draft_mtp => "draft-mtp",
+            .draft_dflash => "draft-dflash",
+            .draft_dspark => "draft-dspark",
+            .ngram_simple => "ngram-simple",
+            .ngram_map_k => "ngram-map-k",
+            .ngram_map_k4v => "ngram-map-k4v",
+            .ngram_mod => "ngram-mod",
+            .ngram_cache => "ngram-cache",
+            .count => "unknown",
+        };
+    }
+};
+
+/// Ports `common_reasoning_format` (common/common.h:419 @b29c606e2).
+pub const ReasoningFormat = enum(c_int) {
+    none,
+    auto, // Same as deepseek, using `message.reasoning_content`
+    deepseek_legacy, // Extract thinking tag contents and return as `message.reasoning_content`, or leave inline in <think> tags in stream mode
+    deepseek, // Extract thinking tag contents and return as `message.reasoning_content`, including in streaming deltas.
+};
+
+/// A `std::set<std::string>`: unique, in byte order, as `std::less`
+/// orders them.
+pub const StringSet = struct {
+    items: std.ArrayList([]const u8) = .empty,
+
+    /// `insert`: adds `s` where it sorts, unless it is there already.
+    pub fn insert(self: *StringSet, a: std.mem.Allocator, s: []const u8) !void {
+        var i: usize = 0;
+        while (i < self.items.items.len) : (i += 1) {
+            switch (std.mem.order(u8, self.items.items[i], s)) {
+                .lt => {},
+                .eq => return,
+                .gt => break,
+            }
+        }
+        try self.items.insert(a, i, s);
+    }
+
+    /// `empty`.
+    pub fn isEmpty(self: *const StringSet) bool {
+        return self.items.items.len == 0;
+    }
+};
+
+/// A `std::map<std::string, std::string>`: keyed in byte order.
+pub const StringMap = struct {
+    pub const Entry = struct { key: []const u8, value: []const u8 };
+    entries: std.ArrayList(Entry) = .empty,
+
+    /// `operator[](key) = value`.
+    pub fn put(self: *StringMap, a: std.mem.Allocator, key: []const u8, value: []const u8) !void {
+        var i: usize = 0;
+        while (i < self.entries.items.len) : (i += 1) {
+            switch (std.mem.order(u8, self.entries.items[i].key, key)) {
+                .lt => {},
+                .eq => {
+                    self.entries.items[i].value = value;
+                    return;
+                },
+                .gt => break,
+            }
+        }
+        try self.entries.insert(a, i, .{ .key = key, .value = value });
+    }
+
+    /// `count(key) != 0`.
+    pub fn contains(self: *const StringMap, key: []const u8) bool {
+        for (self.entries.items) |e| if (std.mem.eql(u8, e.key, key)) return true;
+        return false;
+    }
+
+    /// `erase(key)`.
+    pub fn erase(self: *StringMap, key: []const u8) void {
+        for (self.entries.items, 0..) |e, i| if (std.mem.eql(u8, e.key, key)) {
+            _ = self.entries.orderedRemove(i);
+            return;
+        };
+    }
+};
+
 /// Ports `common_cpu_params` (common/common.h:68 @b29c606e2).
 pub const CpuParams = struct {
     n_threads: i32 = -1,
@@ -146,8 +251,19 @@ pub const ControlVectorLoadInfo = struct {
     fname: [:0]const u8,
 };
 
-/// Ports `common_params_sampling` (common/common.h:224 @b29c606e2), the members an
-/// option sets.
+/// Ports `common_grammar_trigger_type` (common/common.h:143 @b29c606e2).
+pub const GrammarTriggerType = enum(c_int) { token, word, pattern, pattern_full, _ };
+
+/// Ports `common_grammar_trigger` (common/common.h:150 @b29c606e2).
+pub const GrammarTrigger = struct {
+    type: GrammarTriggerType,
+    value: []const u8 = "",
+    token: c.llama_token = c.LLAMA_TOKEN_NULL,
+};
+
+/// Ports `common_params_sampling` (common/common.h:224 @b29c606e2): the
+/// members an option sets, and those the server fills in per request and
+/// `common_sampler_init` reads.
 pub const Sampling = struct {
     seed: u32 = c.LLAMA_DEFAULT_SEED, // the seed used to initialize llama_sampler
     n_prev: i32 = 64, // number of previous tokens to remember
@@ -178,13 +294,33 @@ pub const Sampling = struct {
     mirostat_eta: f32 = 0.10, // learning rate
     ignore_eos: bool = false,
     no_perf: bool = false, // disable performance metrics
+    timing_per_token: bool = false,
     user_sampling_config: u64 = 0, // bitfield to track user-specified samplers
     dry_sequence_breakers: std.ArrayList([]const u8) = .empty,
     samplers: std.ArrayList(SamplerType) = .empty,
     grammar_type: GrammarType = .none,
     grammar: []const u8 = "",
     grammar_lazy: bool = false,
-    logit_bias: std.ArrayList(c.llama_logit_bias) = .empty,
+    grammar_triggers: std.ArrayList(GrammarTrigger) = .empty, // optional triggers (for lazy grammars)
+    preserved_tokens: std.ArrayList(c.llama_token) = .empty, // a `std::set`: kept sorted, unique
+    logit_bias: std.ArrayList(c.llama_logit_bias) = .empty, // logit biases to apply
+    logit_bias_eog: std.ArrayList(c.llama_logit_bias) = .empty, // pre-calculated logit biases for EOG tokens
+
+    // The assistant generation prompt already prefilled into the prompt.
+    // Fed to the grammar sampler (to advance past pre-existing tokens) and used
+    // to determine the reasoning budget sampler's initial state.
+    // Only applied when the grammar is of output-format or tool-calls type.
+    generation_prompt: []const u8 = "",
+
+    // reasoning budget sampler parameters
+    // these are populated by the server/CLI based on chat template params
+    reasoning_budget_tokens: i32 = -1, // -1 = disabled, >= 0 = token budget
+    reasoning_budget_start: std.ArrayList(c.llama_token) = .empty, // start tag token sequence
+    reasoning_budget_end: std.ArrayList(std.ArrayList(c.llama_token)) = .empty, // end tag token sequences; the first tag is used as the forcing sequence
+    reasoning_budget_forced: std.ArrayList(c.llama_token) = .empty, // forced sequence (message + first end tag)
+    reasoning_budget_message: []const u8 = "", // message injected before end tag when budget exhausted
+    reasoning_control: bool = false, // create the budget sampler on demand so reasoning can be ended at runtime
+
     backend_sampling: bool = false,
 };
 
@@ -195,13 +331,120 @@ pub const Model = struct {
     hf_repo: []const u8 = "", // HF repo
     hf_file: []const u8 = "", // HF file
     docker_repo: []const u8 = "", // Docker repo
+
+    /// Ports `get_name` (common/common.h:309 @b29c606e2), a member of
+    /// `common_params_model`.
+    ///
+    /// Return: the repository if there is one, else the path; borrowed.
+    pub fn getName(self: *const Model) []const u8 {
+        if (self.hf_repo.len != 0) return self.hf_repo;
+        if (self.docker_repo.len != 0) return self.docker_repo;
+        return self.path;
+    }
+
+    /// Ports `empty` (common/common.h:319 @b29c606e2), a member of
+    /// `common_params_model`.
+    pub fn empty(self: *const Model) bool {
+        return self.getName().len == 0;
+    }
+};
+
+/// Ports `common_params_speculative_draft` (common/common.h:325 @b29c606e2):
+/// draft-model-based speculative decoding parameters. `ctx_tgt` and
+/// `ctx_dft` are the server's to set, later.
+pub const SpeculativeDraft = struct {
+    n_max: i32 = 3, // maximum number of tokens to draft during speculative decoding
+    n_min: i32 = 0, // minimum number of draft tokens to use for speculative decoding
+
+    p_split: f32 = 0.1, // speculative decoding split probability
+    p_min: f32 = 0.0, // minimum speculative decoding probability (greedy)
+
+    backend_sampling: bool = true, // offload draft sampling to the backend (default: on)
+
+    mparams: Model = .{},
+
+    ctx_tgt: ?*c.llama_context = null,
+    ctx_dft: ?*c.llama_context = null,
+
+    n_gpu_layers: i32 = -1, // number of layers to store in VRAM for the draft model (-1 - use default)
+
+    cache_type_k: c.ggml_type = c.GGML_TYPE_F16, // KV cache data type for the K
+    cache_type_v: c.ggml_type = c.GGML_TYPE_F16, // KV cache data type for the V
+
+    cpuparams: CpuParams = .{},
+    cpuparams_batch: CpuParams = .{},
+
+    devices: std.ArrayList(c.ggml_backend_dev_t) = .empty, // devices to use for offloading
+
+    tensor_buft_overrides: std.ArrayList(c.llama_model_tensor_buft_override) = .empty,
+};
+
+/// Ports `common_params_speculative_ngram_mod` (common/common.h:352 @b29c606e2).
+pub const SpeculativeNgramMod = struct {
+    n_match: i32 = 24,
+
+    n_max: i32 = 64,
+    n_min: i32 = 48,
+};
+
+/// Ports `common_params_speculative_ngram_map` (common/common.h:359 @b29c606e2).
+pub const SpeculativeNgramMap = struct {
+    size_n: u16 = 12, // ngram size for lookup
+    size_m: u16 = 48, // mgram size for speculative tokens
+    min_hits: u16 = 1, // minimum hits at ngram/mgram lookup for mgram to be proposed
+};
+
+/// Ports `common_params_speculative_ngram_cache` (common/common.h:365 @b29c606e2).
+pub const SpeculativeNgramCache = struct {
+    lookup_cache_static: []const u8 = "", // path of static ngram cache file for lookup decoding
+    lookup_cache_dynamic: []const u8 = "", // path of dynamic ngram cache file for lookup decoding
+};
+
+/// Ports `common_params_speculative` (common/common.h:370 @b29c606e2).
+/// `types` starts as `{ none }`, set by `Params.init`.
+pub const Speculative = struct {
+    types: std.ArrayList(SpeculativeType) = .empty,
+
+    synth_len: f64 = -1.0,
+    synth_rates: std.ArrayList(f64) = .empty,
+
+    // used by Simple, MTP, Eagle3, etc. - all methods that require some kind of draft model
+    draft: SpeculativeDraft = .{},
+
+    ngram_mod: SpeculativeNgramMod = .{},
+    ngram_simple: SpeculativeNgramMap = .{},
+    ngram_map_k: SpeculativeNgramMap = .{},
+    ngram_map_k4v: SpeculativeNgramMap = .{},
+
+    ngram_cache: SpeculativeNgramCache = .{},
+
+    /// Ports `has_dft` (common/common.h:386 @b29c606e2), a member of
+    /// `common_params_speculative`: whether a draft model is named.
+    pub fn hasDft(self: *const Speculative) bool {
+        return !self.draft.mparams.empty();
+    }
+
+    /// Ports `has_synth` (common/common.h:390 @b29c606e2), a member of
+    /// `common_params_speculative`.
+    pub fn hasSynth(self: *const Speculative) bool {
+        return self.synth_len != -1.0 or self.synth_rates.items.len != 0;
+    }
+
+    /// Ports `need_n_rs_seq` (common/common.h:394 @b29c606e2), a member of
+    /// `common_params_speculative`.
+    ///
+    /// Return: `draft.n_max` when a type keeps recurrent state per draft
+    /// position, else 0 -- the C's `uint32_t` conversion of it.
+    pub fn needNRsSeq(self: *const Speculative) u32 {
+        for (self.types.items) |t| {
+            if (t == .draft_mtp or t == .draft_eagle3 or t == .draft_dflash or t == .draft_dspark) return @bitCast(self.draft.n_max);
+        }
+        return 0;
+    }
 };
 
 /// Ports `common_params` (common/common.h:448 @b29c606e2), the members the tools'
-/// options and the tools themselves reach. `default_template_kwargs` and
-/// `preserve_reasoning_specified` are left out: no option the tools take sets
-/// them, and the one reader, `common_chat_format_example`, ignores them on the
-/// legacy path, the only one `chat.zig` ports.
+/// options and the tools themselves reach.
 pub const Params = struct {
     arena: std.mem.Allocator,
 
@@ -252,18 +495,22 @@ pub const Params = struct {
     flash_attn_type: c.llama_flash_attn_type = c.LLAMA_FLASH_ATTN_TYPE_AUTO, // whether to use Flash Attention
 
     sampling: Sampling = .{},
-    /// `speculative.draft.cache_type_k` and `_v`.
-    spec_draft_cache_type_k: c.ggml_type = c.GGML_TYPE_F16,
-    spec_draft_cache_type_v: c.ggml_type = c.GGML_TYPE_F16,
+    speculative: Speculative = .{},
 
     model: Model = .{},
 
+    model_alias: StringSet = .{}, // model aliases
+    model_tags: StringSet = .{}, // model tags (informational, not used for routing)
     hf_token: []const u8 = "", // HF token (aka bearer token)
     prompt: []const u8 = "",
     prompt_file: []const u8 = "", // store the external prompt file name
+    input_prefix: []const u8 = "", // string to prefix user inputs with
+    input_suffix: []const u8 = "", // string to suffix user inputs with
     logits_file: []const u8 = "", // file for saving *all* logits
+    path_prompts_log_dir: []const u8 = "", // directory with logged prompts
 
     in_files: std.ArrayList([]const u8) = .empty, // all input files
+    antiprompt: std.ArrayList([]const u8) = .empty, // strings upon which more user input is prompted (a.k.a. reverse prompts)
     kv_overrides: std.ArrayList(c.llama_model_kv_override) = .empty,
     tensor_buft_overrides: std.ArrayList(c.llama_model_tensor_buft_override) = .empty,
 
@@ -295,13 +542,16 @@ pub const Params = struct {
     usage: bool = false, // print usage
     completion: bool = false, // print source-able completion script
     use_color: bool = false, // use color to distinguish generations and inputs
+    special: bool = false, // enable special token output
 
     escape: bool = true, // escape "\n", "\r", "\t", "\'", "\"", and "\\"
+    cont_batching: bool = true, // insert new sequences for decoding on-the-fly
     no_perf: bool = false, // disable performance metrics
     ctx_shift: bool = false, // context shift on infinite text generation
     swa_full: bool = false, // use full-size SWA cache
     kv_unified: bool = false, // enable unified KV cache
 
+    verbose_prompt: bool = false, // print prompt tokens before generation
     no_kv_offload: bool = false, // disable KV offloading
     warmup: bool = true, // warmup run
     check_tensors: bool = false, // validate tensor data
@@ -317,6 +567,7 @@ pub const Params = struct {
     mmproj_device: c.ggml_backend_dev_t = null, // GPU device to use for multimodal model
     image_min_tokens: c_int = -1,
     image_max_tokens: c_int = -1,
+    mtmd_batch_max_tokens: c_int = 1024,
     no_mmproj: bool = false, // explicitly disable multimodal model
     image: std.ArrayList([]const u8) = .empty, // path to image file(s)
 
@@ -327,13 +578,90 @@ pub const Params = struct {
 
     system_prompt: []const u8 = "",
     simple_io: bool = false, // improves compatibility with subprocesses and limited consoles
-    chat_template: []const u8 = "",
-    use_jinja: bool = true,
 
     tts_lang: []const u8 = "",
     tts_speaker_file: []const u8 = "",
 
     embedding: bool = false, // get only sentence embedding
+    embd_normalize: i32 = 2, // normalisation for embeddings (-1=none, 0=max absolute int16, 1=taxicab, 2=euclidean, >2=p-norm)
+
+    // server params
+    port: i32 = 8080, // server listens on this network port
+    reuse_port: bool = false, // allow multiple sockets to bind to the same port
+    timeout_read: i32 = 3600, // http read timeout in seconds
+    timeout_write: i32 = 3600, // http write timeout in seconds
+    sse_ping_interval: i32 = 30, // SSE ping interval in seconds
+    n_threads_http: i32 = -1, // number of threads to process HTTP requests (TODO: support threadpool)
+    n_cache_reuse: i32 = 0, // min chunk size to reuse from the cache via KV shifting
+    cache_prompt: bool = true, // whether to enable prompt caching
+    cache_idle_slots: bool = true, // save and clear idle slots upon starting a new task
+    n_ctx_checkpoints: i32 = 32, // max number of context checkpoints per slot
+    kv_unified_per_slot: i32 = 0, // max context per parallel slot; 0 = unset
+    checkpoint_min_step: i32 = 8192, // minimum spacing between context checkpoints
+    cache_ram_mib: i32 = 8192, // -1 = no limit, 0 - disable, 1 = 1 MiB, etc.
+
+    hostname: []const u8 = "127.0.0.1",
+    public_path: []const u8 = "",
+    api_prefix: []const u8 = "",
+    chat_template: []const u8 = "",
+    use_jinja: bool = true,
+
+    // server CORS params
+    cors_origins: []const u8 = "*",
+    cors_methods: []const u8 = "GET, POST, DELETE, OPTIONS",
+    cors_headers: []const u8 = "*",
+    cors_credentials: bool = true,
+    cors_origins_explicit: bool = false, // for --agent option
+
+    enable_chat_template: bool = true,
+    force_pure_content_parser: bool = false,
+    reasoning_format: ReasoningFormat = .deepseek,
+    enable_reasoning: c_int = -1, // -1 = auto, 0 = disable, 1 = enable
+    prefill_assistant: bool = true, // if true, any trailing assistant message will be prefilled into the response
+    sleep_idle_seconds: c_int = -1, // if >0, server will sleep after this many seconds of idle time
+
+    api_keys: std.ArrayList([]const u8) = .empty,
+
+    ssl_file_key: []const u8 = "",
+    ssl_file_cert: []const u8 = "",
+
+    default_template_kwargs: StringMap = .{},
+    preserve_reasoning_specified: bool = false,
+
+    // CLI params
+    server_base: []const u8 = "", // if set, connect to this server instead of starting a new one
+
+    // UI configs
+    ui: bool = true,
+    ui_mcp_proxy: bool = false,
+    ui_config_json: []const u8 = "",
+
+    // "advanced" endpoints are disabled by default for better security
+    endpoint_slots: bool = true,
+    endpoint_props: bool = false, // only control POST requests, not GET
+    endpoint_metrics: bool = false,
+
+    // enable built-in tools
+    server_tools: std.ArrayList([]const u8) = .empty,
+    server_tools_runtime: []const u8 = "",
+
+    // MCP server configs (Cursor-compatible JSON)
+    mcp_servers_config: []const u8 = "", // path to JSON file with MCP server definitions
+    mcp_servers_json: []const u8 = "", // inline JSON with MCP server definitions
+
+    // router server configs
+    models_dir: []const u8 = "", // directory containing models for the router server
+    models_preset: []const u8 = "", // directory containing model presets for the router server
+    models_max: c_int = 4, // maximum number of models to load simultaneously
+    models_autoload: bool = true, // automatically load models when requested via the router server
+    models_preset_hf: []const u8 = "", // show a warning about remote presets on router loaded (if not empty)
+
+    log_json: bool = false,
+
+    slot_save_path: []const u8 = "",
+    media_path: []const u8 = "", // path to directory for loading media files
+
+    slot_prompt_similarity: f32 = 0.1,
 
     is_pp_shared: bool = false,
     is_tg_separate: bool = false,
@@ -358,6 +686,8 @@ pub const Params = struct {
     cvector_positive_file: []const u8 = "tools/cvector-generator/positive.txt",
     cvector_negative_file: []const u8 = "tools/cvector-generator/negative.txt",
 
+    spm_infill: bool = false, // suffix/prefix/middle pattern for infill
+
     batched_bench_output_jsonl: bool = false,
 
     tokenize_ids: bool = false, // if true, only print the token IDs
@@ -368,8 +698,12 @@ pub const Params = struct {
     out_file: []const u8 = "", // output filename for all example programs
     no_alloc: bool = false, // Don't allocate model buffers
 
+    load_progress_callback: c.llama_progress_callback = null,
+    load_progress_callback_user_data: ?*anyopaque = null,
+
     /// The C++ default member initialisers that are not constants: the
-    /// sampler chain, the DRY breakers, and one fit margin per device.
+    /// sampler chain, the DRY breakers, one fit margin per device, and the
+    /// speculative types' `{ none }`.
     ///
     /// Return: the defaults, owning `arena`'s lists.
     pub fn init(arena: std.mem.Allocator) !Params {
@@ -380,6 +714,7 @@ pub const Params = struct {
             .top_p,     .min_p, .xtc,         .temperature,
         });
         try p.fit_params_target.appendNTimes(arena, 1024 * 1024 * 1024, c.llama_max_devices());
+        try p.speculative.types.append(arena, .none);
         return p;
     }
 };

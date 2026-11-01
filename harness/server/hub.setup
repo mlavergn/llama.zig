@@ -1,0 +1,62 @@
+#!/bin/bash
+# Starts two mock hubs (harness/server/mock_hub.py), one per side, over the
+# files and repositories hub.cases downloads (Stage 10 step 7), and names
+# them MOCK_REF and MOCK_PORT in $DATA/setup.env. Run by
+# scripts/server-diff, which kills what $DATA/pids lists at the end.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+FIX="$ROOT/zig-out/arch-fixtures/llama-dense.gguf"
+FIX2="$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf"
+MM="$ROOT/zig-out/mmproj-fixtures"
+
+h="$DATA/hub"
+mkdir -p "$h/files" "$h/repos/test/tiny" "$h/repos/test/vision" "$h/repos/test/split" \
+         "$h/repos/test/empty" "$h/repos/test/preset" "$h/repos/test/nested/sub" "$h/repos/test/badref"
+for n in tiny tiny2 tiny3 tiny4 tiny5 tiny6 tiny7; do cp "$FIX" "$h/files/$n.gguf"; done
+cp "$MM/gemma3.gguf" "$h/files/mmproj.gguf"
+cp "$FIX" "$h/files/parts-00001-of-00002.gguf"
+cp "$FIX" "$h/files/parts-00002-of-00002.gguf"
+cp "$FIX" "$h/repos/test/tiny/tiny-Q4_K_M.gguf"
+cp "$FIX2" "$h/repos/test/tiny/tiny-Q8_0.gguf"
+printf '# tiny\n' > "$h/repos/test/tiny/README.md"
+cp "$FIX" "$h/repos/test/vision/model-Q4_K_M.gguf"
+cp "$MM/gemma3.gguf" "$h/repos/test/vision/mmproj-model-f16.gguf"
+cp "$FIX" "$h/repos/test/split/big-Q8_0-00001-of-00002.gguf"
+cp "$FIX" "$h/repos/test/split/big-Q8_0-00002-of-00002.gguf"
+printf '# nothing here\n' > "$h/repos/test/empty/README.md"
+cp "$FIX" "$h/repos/test/nested/sub/deep-Q4_K_M.gguf"
+mkdir -p "$h/repos/test/slowpoke"
+cp "$FIX" "$h/repos/test/slowpoke/slow-Q4_K_M.gguf"
+cat > "$h/repos/test/preset/preset.ini" <<INI
+[from-hub]
+model = $FIX
+ctx-size = 256
+INI
+# refs with nothing usable: a branch escaping refs/, a commit that is not one
+cat > "$h/repos/test/badref.refs" <<JSON
+{"branches": [{"name": "../escape", "targetCommit": "0123456789012345678901234567890123456789"},
+              {"name": "dev", "targetCommit": "not-a-commit"},
+              {"name": 7}]}
+JSON
+
+# a preset over a cached model, hiding its cache entry
+cat > "$DATA/dedup.ini" <<INI
+[tiny-preset]
+hf-repo = test/tiny:Q4_K_M
+dedup-cache-models = 1
+[tiny-plain]
+hf-repo = test/tiny:Q8_0
+INI
+
+: > "$DATA/pids"
+for side in ref port; do
+  python3 "$ROOT/harness/server/mock_hub.py" "$h" "$DATA/mock_$side.port" "$DATA/mock_$side.log" &
+  echo $! >> "$DATA/pids"
+done
+for side in ref port; do
+  for i in $(seq 1 100); do [ -f "$DATA/mock_$side.port" ] && break; sleep 0.05; done
+done
+{
+  echo "MOCK_REF=http://127.0.0.1:$(cat "$DATA/mock_ref.port")"
+  echo "MOCK_PORT=http://127.0.0.1:$(cat "$DATA/mock_port.port")"
+} > "$DATA/setup.env"

@@ -20,7 +20,7 @@
 const std = @import("std");
 const args_mod = @import("args.zig");
 const chat = @import("chat.zig");
-const fit = @import("fit.zig");
+const fit = @import("cli_fit");
 
 /// libllama's C ABI. Re-exported so callers can reach it as
 /// `cli.session.c`; the import itself lives in `c.zig`, because two
@@ -37,6 +37,8 @@ pub const Error = error{
     NoVocab,
     ContextFailed,
     SamplerFailed,
+    /// The grammar did not parse: upstream's "failed to parse grammar".
+    GrammarFailed,
     TokenizeFailed,
     DecodeFailed,
     PromptTooLong,
@@ -54,6 +56,38 @@ pub const Stop = enum {
     n_predict,
     /// The context filled up.
     context_full,
+    /// A stop string the chat template's parser asked for appeared in the
+    /// reply (`common_chat_params::additional_stops`): a natural end, as
+    /// upstream's `STOP_TYPE_WORD` is.
+    word,
+    /// The reply's consumer refused it -- a chat reply that does not parse.
+    rejected,
+};
+
+/// What a chat turn generates with, beyond the session's own sampler: the
+/// parts of upstream's server task that `common_chat_templates_apply` fills
+/// in for a chat request (`oaicompat_chat_params_parse`,
+/// tools/server/server-common.cpp:1151 @b29c606e2). Everything is borrowed
+/// for the call.
+pub const TurnOptions = struct {
+    /// Tokens printed with their special spelling; every other control token
+    /// prints as nothing, as the server's `accept_special_token` decides
+    /// (tools/server/server-context.cpp:3800 @b29c606e2).
+    preserved: []const c.llama_token = &.{},
+    /// Stop strings: the reply ends where one appears, and it is not sent.
+    stops: []const []const u8 = &.{},
+    /// The reasoning budget sampler, applied before the chain and accepting
+    /// every generated token first, as `common_sampler` holds its `rbudget`.
+    /// Owned by the caller.
+    rbudget: ?*c.llama_sampler = null,
+};
+
+/// Where a chat turn's reply goes, a piece at a time: text the server would
+/// have sent, after its stop-string and UTF-8 hold-back.
+pub const Sink = struct {
+    ctx: *anyopaque,
+    /// Takes the text sent since the last call; false stops generating.
+    text: *const fn (ctx: *anyopaque, text: []const u8) anyerror!bool,
 };
 
 /// A loaded model and everything needed to generate from it.
@@ -65,6 +99,13 @@ pub const Session = struct {
     vocab: *const c.llama_vocab,
     ctx: *c.llama_context,
     sampler: *c.llama_sampler,
+    /// The grammar sampler, kept apart from the chain as upstream's
+    /// `common_sampler` keeps its `grmr`: null without `--grammar` or
+    /// `--json-schema`. See `sampleNext`.
+    grammar: ?*c.llama_sampler = null,
+    /// The candidate array `sampleNext` builds from the logits when a
+    /// grammar is set: `common_sampler`'s `cur`.
+    candidates: std.ArrayList(c.llama_token_data) = .empty,
     /// The CPU backend's persistent threadpool, attached to `ctx`.
     ///
     /// Without one, every `ggml_graph_compute` builds a disposable pool --
@@ -84,7 +125,7 @@ pub const Session = struct {
     /// much of the cache it can keep, so a conversation does not re-decode its
     /// whole history every turn.
     decoded: std.ArrayList(c.llama_token) = .empty,
-    /// Why the most recent `generate`, `generateChat` or `generateTurn` ended.
+    /// Why the most recent `generate` or `generateTurn` ended.
     last_stop: Stop = .eog,
     /// Where `generateTurn` reports how much of the cache each turn kept;
     /// null, the default, reports nothing.
@@ -225,6 +266,18 @@ pub const Session = struct {
         const sampler = try buildSampler(settings, vocab);
         errdefer c.llama_sampler_free(sampler);
 
+        // `common_sampler_init` (common/sampling.cpp:187 @b29c606e2): a grammar
+        // that does not parse fails the sampler, and with it the run. The
+        // output-format prefill that follows there needs the chat template's
+        // generation prompt, which a raw completion does not have.
+        var grammar: ?*c.llama_sampler = null;
+        if (settings.grammar.len != 0) {
+            const text = try allocator.dupeSentinel(u8, settings.grammar, 0);
+            defer allocator.free(text);
+            grammar = c.llama_sampler_init_grammar(vocab, text.ptr, "root") orelse return Error.GrammarFailed;
+        }
+        errdefer if (grammar) |g| c.llama_sampler_free(g);
+
         if (settings.warmup) warmUp(model, ctx, vocab, settings.n_batch);
 
         return .{
@@ -233,6 +286,7 @@ pub const Session = struct {
             .vocab = vocab,
             .ctx = ctx,
             .sampler = sampler,
+            .grammar = grammar,
             .threadpool = threadpool,
             .settings = settings,
             .gpu_layers = model_params.n_gpu_layers,
@@ -249,6 +303,8 @@ pub const Session = struct {
     /// requires: the context holds a reference to the model.
     pub fn deinit(self: *Self) void {
         self.decoded.deinit(self.allocator);
+        self.candidates.deinit(self.allocator);
+        if (self.grammar) |g| c.llama_sampler_free(g);
         c.llama_sampler_free(self.sampler);
         c.llama_free(self.ctx);
         // After the context: it holds the pool until it is freed.
@@ -377,30 +433,77 @@ pub const Session = struct {
         return self.generateTokens(tokens, prompt, w);
     }
 
-    /// Generates from a rendered chat prompt.
+    /// Samples the next token from the last decode's logits and accepts it.
+    ///
+    /// Without a grammar or a reasoning budget this is `llama_sampler_sample`
+    /// over the chain. With either it is upstream's `common_sampler_sample`
+    /// with `grammar_first` false, as its callers pass it
+    /// (common/sampling.cpp:594 @b29c606e2), then `common_sampler_accept`
+    /// (common/sampling.cpp:467 @b29c606e2): the budget, when there is one,
+    /// edits the logits first; the chain picks a token; if the grammar
+    /// rejects it, the logits are reloaded and the budget and grammar applied
+    /// before the chain picks again -- which draws from the RNG a second time
+    /// -- and the token is accepted by the budget, the grammar and the chain,
+    /// in that order.
     ///
     /// Parameters:
-    /// - `self`: the session.
-    /// - `segments`: the rendered prompt, trust-marked.
-    /// - `w`: destination.
+    /// - `rbudget`: the turn's reasoning budget, or null.
     ///
-    /// Return: the number of tokens generated.
-    pub fn generateChat(
-        self: *Self,
-        segments: []const chat.Segment,
-        w: *std.Io.Writer,
-    ) !usize {
-        const tokens = try self.tokenizeSegments(segments);
-        defer self.allocator.free(tokens);
+    /// Return: the token.
+    fn sampleNext(self: *Self, rbudget: ?*c.llama_sampler) !c.llama_token {
+        const grmr = self.grammar;
+        if (grmr == null and rbudget == null) return c.llama_sampler_sample(self.sampler, self.ctx, -1);
 
-        // Echo the templated text, which is what the model actually received.
-        var display: std.ArrayList(u8) = .empty;
-        defer display.deinit(self.allocator);
-        if (self.settings.display_prompt) {
-            for (segments) |seg| try display.appendSlice(self.allocator, seg.text);
+        try self.setLogits();
+        var cur_p = self.candidateArray();
+        if (rbudget) |rb| c.llama_sampler_apply(rb, &cur_p);
+        c.llama_sampler_apply(self.sampler, &cur_p);
+        var id = cur_p.data[@intCast(cur_p.selected)].id;
+
+        if (grmr) |g| {
+            // grammar-based rejection sampling
+            var single: c.llama_token_data = .{ .id = id, .logit = 1.0, .p = 0.0 };
+            var single_arr: c.llama_token_data_array = .{ .data = &single, .size = 1, .selected = -1, .sorted = false };
+            c.llama_sampler_apply(g, &single_arr);
+            if (single_arr.data[0].logit == -std.math.inf(f32)) {
+                try self.setLogits();
+                cur_p = self.candidateArray();
+                if (rbudget) |rb| c.llama_sampler_apply(rb, &cur_p);
+                c.llama_sampler_apply(g, &cur_p);
+                c.llama_sampler_apply(self.sampler, &cur_p);
+                if (cur_p.selected == -1) return Error.SamplerFailed;
+                id = cur_p.data[@intCast(cur_p.selected)].id;
+            }
         }
 
-        return self.generateTokens(tokens, display.items, w);
+        if (rbudget) |rb| c.llama_sampler_accept(rb, id);
+        if (grmr) |g| c.llama_sampler_accept(g, id);
+        c.llama_sampler_accept(self.sampler, id);
+        return id;
+    }
+
+    /// `common_sampler`'s `set_logits` (common/sampling.cpp:130 @b29c606e2), on
+    /// its CPU path: one candidate per vocabulary entry, from the last row of
+    /// logits.
+    fn setLogits(self: *Self) !void {
+        c.llama_synchronize(self.ctx);
+        const logits = c.llama_get_logits_ith(self.ctx, -1) orelse return Error.DecodeFailed;
+        const n_vocab: usize = @intCast(c.llama_vocab_n_tokens(self.vocab));
+        try self.candidates.resize(self.allocator, n_vocab);
+        for (self.candidates.items, 0..) |*t, i| {
+            t.* = .{ .id = @intCast(i), .logit = logits[i], .p = 0.0 };
+        }
+    }
+
+    fn candidateArray(self: *Self) c.llama_token_data_array {
+        return .{ .data = self.candidates.items.ptr, .size = self.candidates.items.len, .selected = -1, .sorted = false };
+    }
+
+    /// Starts a new turn's grammar over: upstream's CLI sends each turn to its
+    /// server as a new task, whose sampler -- grammar included -- is built
+    /// afresh. The chain is left as it is, as it always has been here.
+    pub fn resetGrammar(self: *Self) void {
+        if (self.grammar) |g| c.llama_sampler_reset(g);
     }
 
     /// The decode loop, shared by the raw and chat paths.
@@ -442,7 +545,7 @@ pub const Session = struct {
         while (self.settings.n_predict < 0 or generated < @as(usize, @intCast(self.settings.n_predict))) {
             if (c.llama_decode(self.ctx, batch) != 0) return Error.DecodeFailed;
 
-            id = c.llama_sampler_sample(self.sampler, self.ctx, -1);
+            id = try self.sampleNext(null);
             if (!self.settings.ignore_eos and c.llama_vocab_is_eog(self.vocab, id)) {
                 self.last_stop = .eog;
                 break;
@@ -481,21 +584,31 @@ pub const Session = struct {
     /// rewrites earlier turns simply gets a shorter prefix and more work, not
     /// a wrong answer.
     ///
+    /// The reply goes to `sink` as upstream's server sends it
+    /// (`process_token`, tools/server/server-context.cpp:1833 @b29c606e2): each
+    /// token's piece, special only for a preserved token, joins the text; while
+    /// the text ends inside a UTF-8 sequence nothing is sent; a stop string
+    /// ends the reply where it begins and is not sent; and text that could be
+    /// the start of one is held back until it is not. What is held back when
+    /// the reply ends is never sent, as a streamed reply's final chunk carries
+    /// no text.
+    ///
     /// Parameters:
     /// - `self`: the session.
     /// - `segments`: the whole conversation, rendered and trust-marked.
-    /// - `w`: destination for the reply, flushed after every token.
-    /// - `reply`: receives the reply text, for appending to the history.
+    /// - `opts`: the chat request's stops, preserved tokens and budget.
+    /// - `sink`: receives the reply.
     ///
-    /// Return: the number of tokens generated.
+    /// Return: the number of tokens generated; `last_stop` says why it ended.
     pub fn generateTurn(
         self: *Self,
         segments: []const chat.Segment,
-        w: *std.Io.Writer,
-        reply: *std.ArrayList(u8),
+        opts: TurnOptions,
+        sink: Sink,
     ) !usize {
         const tokens = try self.tokenizeSegments(segments);
         defer self.allocator.free(tokens);
+        self.resetGrammar();
 
         const n_ctx = c.llama_n_ctx(self.ctx);
         if (tokens.len >= n_ctx) return Error.PromptTooLong;
@@ -527,6 +640,10 @@ pub const Session = struct {
         }
         try self.decoded.appendSlice(self.allocator, suffix);
 
+        var text: std.ArrayList(u8) = .empty;
+        defer text.deinit(self.allocator);
+        var n_sent: usize = 0;
+
         var id: c.llama_token = undefined;
         var batch = c.llama_batch_get_one(@constCast(suffix.ptr), @intCast(suffix.len));
 
@@ -535,33 +652,57 @@ pub const Session = struct {
         while (self.settings.n_predict < 0 or generated < @as(usize, @intCast(self.settings.n_predict))) {
             if (c.llama_decode(self.ctx, batch) != 0) return Error.DecodeFailed;
 
-            id = c.llama_sampler_sample(self.sampler, self.ctx, -1);
+            id = try self.sampleNext(opts.rbudget);
             if (!self.settings.ignore_eos and c.llama_vocab_is_eog(self.vocab, id)) {
                 self.last_stop = .eog;
                 break;
             }
-
-            var piece: [256]u8 = undefined;
-            const n = c.llama_token_to_piece(self.vocab, id, &piece, piece.len, 0, true);
-            if (n > 0) {
-                const text = piece[0..@intCast(n)];
-                try reply.appendSlice(self.allocator, text);
-                try w.print("{s}", .{text});
-                try w.flush();
-            }
-
             generated += 1;
-            try self.decoded.append(self.allocator, id);
-            if (self.decoded.items.len >= n_ctx) {
-                self.last_stop = .context_full;
+
+            const special = std.mem.findScalar(c.llama_token, opts.preserved, id) != null;
+            var piece: [256]u8 = undefined;
+            const n = c.llama_token_to_piece(self.vocab, id, &piece, piece.len, 0, special);
+            const token_str = piece[0..@intCast(@max(n, 0))];
+            try text.appendSlice(self.allocator, token_str);
+
+            var stopped = false;
+            // Nothing is sent while the text ends inside a character.
+            if (validUtf8Len(text.items) == text.items.len) {
+                const pos = @min(n_sent, text.items.len);
+                const str_test = text.items[pos..];
+                var send = true;
+                if (findStop(opts.stops, str_test, token_str.len, true)) |stop_pos| {
+                    text.shrinkRetainingCapacity(pos + stop_pos);
+                    stopped = true;
+                } else if (findStop(opts.stops, str_test, token_str.len, false) != null) {
+                    send = false;
+                }
+                if (send and text.items.len > n_sent) {
+                    const fresh = text.items[n_sent..];
+                    n_sent = text.items.len;
+                    if (!try sink.text(sink.ctx, fresh)) {
+                        self.last_stop = .rejected;
+                        break;
+                    }
+                }
+            }
+            if (stopped) {
+                self.last_stop = .word;
                 break;
             }
 
+            // The last token of a reply cut short is never decoded, so it is
+            // not part of the cache the next turn compares against.
+            if (self.settings.n_predict >= 0 and generated >= @as(usize, @intCast(self.settings.n_predict))) break;
+            // Stopping here rather than letting llama_decode fail: running out
+            // of context is a normal end to a generation, not an error.
+            if (self.decoded.items.len + 1 >= n_ctx) {
+                self.last_stop = .context_full;
+                break;
+            }
+            try self.decoded.append(self.allocator, id);
             batch = c.llama_batch_get_one(&id, 1);
         }
-
-        try w.print("\n", .{});
-        try w.flush();
         return generated;
     }
 
@@ -615,6 +756,57 @@ pub const Session = struct {
         try w.flush();
     }
 };
+
+/// Ports `validate_utf8` (tools/server/server-common.cpp:903 @b29c606e2): the
+/// length of `text` without a multi-byte character cut off at its end.
+pub fn validUtf8Len(text: []const u8) usize {
+    const len = text.len;
+    if (len == 0) return 0;
+    var i: usize = 1;
+    while (i <= 4 and i <= len) : (i += 1) {
+        const ch = text[len - i];
+        if ((ch & 0xE0) == 0xC0) {
+            if (i < 2) return len - i;
+        } else if ((ch & 0xF0) == 0xE0) {
+            if (i < 3) return len - i;
+        } else if ((ch & 0xF8) == 0xF0) {
+            if (i < 4) return len - i;
+        }
+    }
+    return len;
+}
+
+/// Ports `server_slot`'s `find_stopping_strings` (tools/server/server-context.cpp:567 @b29c606e2): where the first stop string begins in `text`. A full stop
+/// looks only at the end the last token could have completed; otherwise this
+/// finds a stop string's beginning at the very end of `text`
+/// (`string_find_partial_stop`, common/common.h:858 @b29c606e2).
+///
+/// Return: the offset, or null.
+pub fn findStop(stops: []const []const u8, text: []const u8, last_token_size: usize, is_full_stop: bool) ?usize {
+    var stop_pos: ?usize = null;
+    for (stops) |word| {
+        const pos: ?usize = if (is_full_stop) blk: {
+            const tmp = word.len + last_token_size;
+            const from_pos = if (text.len > tmp) text.len - tmp else 0;
+            break :blk std.mem.findPos(u8, text, from_pos, word);
+        } else partialStop(text, word);
+        if (pos) |p| {
+            if (stop_pos == null or p < stop_pos.?) stop_pos = p;
+        }
+    }
+    return stop_pos;
+}
+
+/// Ports `string_find_partial_stop` (common/common.h:858 @b29c606e2).
+fn partialStop(str: []const u8, stop: []const u8) ?usize {
+    if (str.len == 0 or stop.len == 0) return null;
+    const last_char = str[str.len - 1];
+    var len = @min(str.len, stop.len);
+    while (len > 0) : (len -= 1) {
+        if (stop[len - 1] == last_char and std.mem.endsWith(u8, str, stop[0..len])) return str.len - len;
+    }
+    return null;
+}
 
 /// Prompt and generation throughput, in tokens per second.
 ///

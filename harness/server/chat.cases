@@ -1,0 +1,160 @@
+# Chat over Stage 9 (Stage 10 step 4): scripts/server-diff chat.
+# /v1/chat/completions through the model's Jinja template: tools, tool
+# choice, parallel calls, response formats, reasoning formats and thinking,
+# kwargs, continuation, streaming deltas, /apply-template, /props, /control.
+# Qwen3-0.6B (`make qwen3`), one slot, greedy unless a case says otherwise.
+# A tool call's id is 32 random characters (gen_tool_call_id).
+!mask "id": "[A-Za-z0-9]{32}"
+# a reply that does not parse is logged by the HTTP thread that parses it,
+# racing the decode loop's lines; the response carries the same text
+!droplog W common_chat_peg_parse: unparsed 
+!server -m $QWEN3 -c 4096 -np 1 -lv 4
+!fulllog
+
+GET /props
+POST /apply-template {"messages": [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "Hello"}]}
+POST /apply-template {"messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}
+POST /apply-template {"messages": [{"role": "user", "content": "Hello"}], "reasoning_effort": "none"}
+POST /apply-template {"messages": [{"role": "user", "content": "Weather?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "description": "Get the weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]}
+POST /apply-template {"messages": [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "", "tool_calls": [{"type": "function", "id": "c1", "function": {"name": "get_weather", "arguments": "{\"city\": \"Paris\"}"}}]}, {"role": "tool", "tool_call_id": "c1", "content": "sunny"}]}
+POST /apply-template {"messages": [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hel", "reasoning_content": "thinking"}]}
+POST /apply-template {"messages": [{"role": "user", "content": [{"type": "text", "text": "part one"}, {"type": "text", "text": "part two"}]}]}
+POST /apply-template {"messages": [{"role": "developer", "content": "Dev says"}, {"role": "user", "content": "Hi"}]}
+POST /apply-template {"messages": [{"role": "user", "content": "Hi"}], "chat_template_kwargs": {"enable_thinking": "yes"}}
+POST /apply-template {"messages": [{"role": "user", "content": "Hi"}], "tools": [{"type": "function", "function": {"name": "f"}}], "grammar": "root ::= \"x\""}
+POST /apply-template {"messages": [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "x", "tool_calls": [{"type": "function", "id": "1", "function": {"name": "f", "arguments": "{}"}}]}], "continue_final_message": true, "add_generation_prompt": false}
+POST /apply-template {"messages": [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "x", "tool_calls": [{"type": "function", "id": "1", "function": {"name": "f", "arguments": "not json"}}]}, {"role": "user", "content": "again"}]}
+
+# plain chat, thinking on (the template's default) and off
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 48, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 32, "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 32, "temperature": 0, "reasoning_effort": "none"}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 2+2?"}], "max_tokens": 64, "temperature": 0, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 2+2?"}], "max_tokens": 64, "temperature": 0, "stream": true, "stream_options": {"include_usage": true}}
+POST /chat/completions {"messages": [{"role": "user", "content": "Name a color."}], "max_tokens": 40, "temperature": 0.7, "seed": 5}
+
+# reasoning formats: none keeps the think block in the content, deepseek
+# splits it, deepseek-legacy inlines it while streaming
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 3+4?"}], "max_tokens": 64, "temperature": 0, "reasoning_format": "none"}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 3+4?"}], "max_tokens": 64, "temperature": 0, "reasoning_format": "deepseek"}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 3+4?"}], "max_tokens": 64, "temperature": 0, "reasoning_format": "deepseek-legacy", "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 3+4?"}], "max_tokens": 64, "temperature": 0, "reasoning_format": "deepseek-legacy"}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 3+4?"}], "max_tokens": 64, "temperature": 0, "reasoning_format": "bogus"}
+# a reasoning budget: the think block is cut after a few tokens
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 5+6?"}], "max_tokens": 64, "temperature": 0, "reasoning_budget_tokens": 8}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 5+6?"}], "max_tokens": 64, "temperature": 0, "thinking_budget_tokens": 4, "reasoning_budget_message": "Enough thinking.", "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 5+6?"}], "max_tokens": 64, "temperature": 0, "reasoning_budget_tokens": 0}
+
+# tools
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is the weather in Paris?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "description": "Get the weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}], "max_tokens": 160, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is the weather in Paris?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "description": "Get the weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}], "max_tokens": 160, "temperature": 0, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is the weather in Paris?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "description": "Get the weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}], "tool_choice": "required", "max_tokens": 80, "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is the weather in Paris?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "description": "Get the weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}], "tool_choice": "required", "max_tokens": 80, "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is the weather in Paris?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "description": "Get the weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}], "tool_choice": "none", "max_tokens": 40, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Weather in Paris and in Rome, and the time?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}, {"type": "function", "function": {"name": "get_time", "parameters": {"type": "object", "properties": {}}}}], "parallel_tool_calls": true, "max_tokens": 200, "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is the weather in Paris?"}, {"role": "assistant", "content": "", "tool_calls": [{"type": "function", "id": "call_1", "function": {"name": "get_weather", "arguments": "{\"city\": \"Paris\"}"}}]}, {"role": "tool", "tool_call_id": "call_1", "content": "Sunny, 25C"}], "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}], "max_tokens": 80, "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Hi"}], "tools": [{"type": "function", "function": {"name": "f"}}], "grammar": "root ::= \"x\""}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Hi"}], "tools": [{"type": "function", "function": {"name": "f"}}], "logprobs": true, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Hi"}], "tools": "not a list", "max_tokens": 4}
+
+# response formats
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Give me a JSON object with a name."}], "response_format": {"type": "json_object"}, "max_tokens": 48, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "An integer between 1 and 9?"}], "response_format": {"type": "json_schema", "json_schema": {"schema": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}}}, "max_tokens": 48, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "A color?"}], "json_schema": {"type": "string", "enum": ["red", "green"]}, "max_tokens": 16, "temperature": 0, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "x"}], "response_format": {"type": "xml"}}
+
+# continuation and prefill
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Tell me about Paris."}, {"role": "assistant", "content": "Paris is"}], "max_tokens": 16, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Tell me about Paris."}, {"role": "assistant", "content": "Paris is"}], "max_tokens": 16, "temperature": 0, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Tell me about Paris."}, {"role": "assistant", "content": "Paris is"}], "max_tokens": 16, "temperature": 0, "echo": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Tell me about Rome."}, {"role": "assistant", "content": "", "reasoning_content": "The user wants"}], "continue_final_message": "reasoning_content", "add_generation_prompt": false, "max_tokens": 24, "temperature": 0, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "x"}, {"role": "assistant", "content": "a"}, {"role": "assistant", "content": "b"}]}
+
+# logprobs, n, multiple choices
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say yes."}], "max_tokens": 6, "temperature": 0, "logprobs": true, "top_logprobs": 2, "chat_template_kwargs": {"enable_thinking": false}}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say yes."}], "max_tokens": 6, "temperature": 0, "n": 2, "chat_template_kwargs": {"enable_thinking": false}}
+
+# token counting and the control route's refusals
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": "How many tokens is this?"}]}
+POST /v1/chat/completions/control {"id": "chatcmpl-none", "action": "reasoning_end"}
+POST /v1/chat/completions/control {"id": "chatcmpl-none", "action": "bogus"}
+POST /v1/chat/completions/control {"action": "reasoning_end"}
+GET /slots
+
+# the same through a template given on the command line, and kwargs set there
+!server -m $QWEN3 -c 4096 -np 1 -lv 4 --chat-template-kwargs '{"enable_thinking":false}' --reasoning-format deepseek
+!fulllog
+GET /props
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 24, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 48, "temperature": 0, "chat_template_kwargs": {"enable_thinking": true}}
+
+!server -m $QWEN3 -c 4096 -np 1 -lv 4 --reasoning off
+!fulllog
+GET /props
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 24, "temperature": 0}
+
+!server -m $QWEN3 -c 4096 -np 1 -lv 4 --chat-template-file $VOCAB/templates/meta-llama-Llama-3.1-8B-Instruct.jinja
+!fulllog
+GET /props
+POST /apply-template {"messages": [{"role": "user", "content": "Weather?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}}]}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is the weather in Paris?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}], "max_tokens": 60, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Hi"}], "max_tokens": 24, "temperature": 0, "stream": true}
+
+!server -m $QWEN3 -c 4096 -np 1 -lv 4 --chat-template-file $VOCAB/templates/Mistral-Small-3.2-24B-Instruct-2506.jinja
+!fulllog
+POST /apply-template {"messages": [{"role": "system", "content": "S"}, {"role": "user", "content": "Weather?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}}]}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is the weather in Paris?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}], "tool_choice": "required", "max_tokens": 40, "temperature": 0}
+
+# no !fulllog: the tool stream's reply does not parse as gpt-oss's, and the
+# error's task cancellation races the decode loop's idle line, upstream
+# against itself too
+!server -m $QWEN3 -c 4096 -np 1 -lv 4 --chat-template-file $VOCAB/templates/openai-gpt-oss-120b.jinja
+GET /props
+POST /apply-template {"messages": [{"role": "user", "content": "Hi"}], "reasoning_effort": "high"}
+POST /apply-template {"messages": [{"role": "user", "content": "Hi"}], "chat_template_kwargs": {"reasoning_effort": "low", "builtin_tools": ["browser"]}}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Hi"}], "max_tokens": 32, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Weather in Paris?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}}], "max_tokens": 40, "temperature": 0, "stream": true}
+
+!server -m $QWEN3 -c 4096 -np 1 -lv 4 --chat-template-file $VOCAB/templates/google-gemma-4-31B-it.jinja
+!fulllog
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Hi"}], "max_tokens": 24, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Weather in Paris?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}}], "tool_choice": "required", "max_tokens": 40, "temperature": 0}
+
+# a template that does not parse is refused while the arguments are parsed
+# (common_chat_verify_template); the engine's own message is not reproduced
+!droplog ^<M>E common_chat_templates_init: error: 
+!droplog ^\.\.\.\{%- for\.\.\.$
+!droplog ^ +\^$
+!server -m $QWEN3 -c 4096 -np 1 --chat-template '{%- for'
+# one that parses but no built-in family matches, without Jinja
+!server -m $QWEN3 -c 4096 -np 1 --no-jinja --chat-template '{% for m in messages %}{{ m.content }}{% endfor %}'
+# a custom template through Jinja
+!server -m $QWEN3 -c 4096 -np 1 -lv 4 --chat-template '{% for m in messages %}<{{ m.role }}>{{ m.content }}</{{ m.role }}>{% endfor %}{% if add_generation_prompt %}<assistant>{% endif %}'
+!fulllog
+GET /props
+POST /apply-template {"messages": [{"role": "system", "content": "S"}, {"role": "user", "content": "Hi"}]}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Hi"}], "max_tokens": 8, "temperature": 0}
+!server -m $QWEN3 -c 4096 -np 1 --chat-template chatml --jinja
+POST /apply-template {"messages": [{"role": "user", "content": "Hi"}]}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Hi"}], "max_tokens": 8, "temperature": 0}
+
+# /v1/chat/completions/control on a live stream: the reasoning forced to
+# end, or refused where the request did not arm it. No !fulllog here: where
+# the forced end lands is timing. Unforced, this prompt is still thinking
+# at 200 tokens (finish "length"); forced, it answers within them ("stop")
+!server -m $QWEN3 -c 4096 -np 1
+!control reasoning_end
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Explain briefly why the sky is blue."}], "max_tokens": 200, "temperature": 0, "stream": true, "reasoning_control": true}
+!control reasoning_end
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Explain briefly why the sky is blue."}], "max_tokens": 200, "temperature": 0, "stream": true}
+!control stop_now
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Explain briefly why the sky is blue."}], "max_tokens": 200, "temperature": 0, "stream": true, "reasoning_control": true}
+
+# Qwen3.5: hybrid memory, its own thinking template
+!server -m $QWEN35 -c 4096 -np 1 -lv 4
+!fulllog
+GET /props
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 2+2? Answer briefly."}], "max_tokens": 96, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is 2+2? Answer briefly."}], "max_tokens": 96, "temperature": 0, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is the weather in Paris?"}], "tools": [{"type": "function", "function": {"name": "get_weather", "description": "Get the weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}], "max_tokens": 200, "temperature": 0, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 24, "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}

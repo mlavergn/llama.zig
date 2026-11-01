@@ -1,0 +1,219 @@
+# Router mode (Stage 10 step 7, server-models.cpp): no model on the command
+# line, so the server routes to a child per model. Each side's router
+# spawns its own binary ($BIN), so ours runs ours and upstream's upstream's.
+# router.setup writes $DATA/models and the presets.
+#
+# Masked: a child's port, which the kernel picks (`--port` in /models'
+# args, the args the router logs one per line).
+!mask "--port",\s+"\d+"
+!mask load:   \d+$
+# a log timestamp in colour (--log-colors on)
+!mask \x1b\[34m\d+\.\d{2}\.\d{3}\.\d{3}\x1b\[0m
+!env LLAMA_CACHE=$CWD/cache
+# a stream session's byte count includes its timings
+!mask-key total_bytes
+!mask-key started_at
+!mask-key completed_at
+
+# --- a models dir and a preset file, everything autoloaded
+!server --models-dir $DATA/models --models-preset $DATA/presets.ini -lv 4 --no-jinja
+!fulllog
+GET /health
+GET /props
+# the startup model comes up on its own
+!waitfor /models "id":"startup"[^{]*\{"value":"loaded"
+GET /models
+GET /v1/models
+POST /models/load {"model":"nonexistent"}
+POST /models/load {}
+POST /models/unload {"model":"qwen3"}
+POST /models/unload {"model":"nonexistent"}
+!sse /models/sse
+POST /models/load {"model":"qwen3"}
+!waitfor /models "id":"qwen3"[^{]*\{"value":"loaded"
+!sseend
+POST /models/load {"model":"qwen3"}
+GET /models
+POST /completion {"model":"qwen3","prompt":"The capital of France is","n_predict":8,"temperature":0}
+POST /completion {"model":"qwen3","prompt":"One, two,","n_predict":6,"temperature":0,"stream":true}
+POST /v1/chat/completions {"model":"qwen3","messages":[{"role":"user","content":"Hi"}],"max_tokens":4,"temperature":0}
+POST /tokenize {"model":"qwen3","content":"hello world"}
+POST /detokenize {"model":"qwen3","tokens":[14990,1879]}
+GET /props?model=qwen3
+GET /slots?model=qwen3
+GET /metrics?model=qwen3
+GET /lora-adapters?model=qwen3
+# the request names no model, or one that is not there
+POST /completion {"prompt":"x"}
+POST /completion {"model":"nope","prompt":"x"}
+POST /completion {"model":3,"prompt":"x"}
+POST /completion not json
+GET /props?model=nope
+GET /slots
+# an alias of the preset model, which autoloads it
+POST /completion {"model":"cq","prompt":"Paris is","n_predict":4}
+GET /models
+GET /props?model=qwen-alias
+POST /models/unload {"model":"cq"}
+!waitfor /models "id":"custom-qwen"[^{]*\{"value":"unloaded"
+GET /models
+# a child that cannot load its model
+!sse /models/sse
+POST /completion {"model":"broken","prompt":"x"}
+GET /models
+POST /models/load {"model":"broken"}
+!waitfor /models "id":"broken"[^{]*\{"value":"unloaded","args":\[[^\]]*\][^}]*"failed":true
+!sseend
+GET /models
+# a GET is proxied too, and autoloads
+GET /props?model=tiny
+GET /models
+GET /props?model=vision
+GET /props?model=draft
+POST /models/unload {"model":"tiny"}
+POST /models/unload {"model":"vision"}
+POST /models/unload {"model":"draft"}
+POST /models/unload {"model":"startup"}
+!waitfor /models "id":"startup"[^{]*\{"value":"unloaded"
+!waitfor /models "id":"tiny"[^{]*\{"value":"unloaded"
+!waitfor /models "id":"vision"[^{]*\{"value":"unloaded"
+!waitfor /models "id":"draft"[^{]*\{"value":"unloaded"
+GET /models
+# the resumable stream routes, through the conversation map
+GET /v1/stream?conv_id=nobody
+GET /v1/stream
+DELETE /v1/stream?conv_id=nobody
+DELETE /v1/stream
+POST /v1/streams/lookup {"conversation_ids":["nobody"]}
+POST /v1/streams/lookup not json
+!header X-Conversation-Id: conv-1
+POST /completion {"model":"qwen3","prompt":"Hello","n_predict":4,"temperature":0,"stream":true}
+!noheaders
+POST /v1/streams/lookup {"conversation_ids":["conv-1","nobody",""]}
+GET /v1/stream?conv_id=conv-1&from=0
+DELETE /v1/stream?conv_id=conv-1
+GET /v1/stream?conv_id=conv-1
+POST /models/unload {"model":"qwen3"}
+!waitfor /models "id":"qwen3"[^{]*\{"value":"unloaded"
+
+# --- one model at a time, loaded only when asked
+!server --models-dir $DATA/models -c 256 -np 1 -lv 4 --no-jinja --models-max 1 --no-models-autoload --ui-config '{"theme":"dark"}'
+!fulllog
+GET /props
+GET /models
+POST /completion {"model":"qwen3","prompt":"x","n_predict":2}
+GET /props?model=qwen3
+POST /completion?autoload=true {"model":"qwen3","prompt":"The sky is","n_predict":4,"temperature":0}
+GET /models
+GET /props?model=qwen3&autoload=0
+POST /models/load {"model":"tiny"}
+!waitfor /models "id":"tiny"[^{]*\{"value":"loaded"
+!waitfor /models "id":"qwen3"[^{]*\{"value":"unloaded"
+GET /models
+POST /completion?autoload=1 {"model":"qwen3","prompt":"The sky is","n_predict":4,"temperature":0}
+!waitfor /models "id":"tiny"[^{]*\{"value":"unloaded"
+GET /models
+POST /models/unload {"model":"qwen3"}
+!waitfor /models "id":"qwen3"[^{]*\{"value":"unloaded"
+
+# --- two slots: the least recently used model is the one evicted
+!server --models-dir $DATA/models -c 256 -np 1 -lv 4 --no-jinja --models-max 2
+!fulllog
+POST /models/load {"model":"tiny"}
+!waitfor /models "id":"tiny"[^{]*\{"value":"loaded"
+POST /models/load {"model":"vision"}
+!waitfor /models "id":"vision"[^{]*\{"value":"loaded"
+# a POST makes vision the most recently used, so tiny goes
+POST /props {"model":"vision"}
+POST /models/load {"model":"draft"}
+!waitfor /models "id":"draft"[^{]*\{"value":"loaded"
+!waitfor /models "id":"tiny"[^{]*\{"value":"unloaded"
+GET /models
+# a GET does not count as a use: draft is still the newest, vision goes
+GET /props?model=vision
+POST /models/load {"model":"tiny"}
+!waitfor /models "id":"tiny"[^{]*\{"value":"loaded"
+!waitfor /models "id":"vision"[^{]*\{"value":"unloaded"
+GET /models
+POST /models/unload {"model":"tiny"}
+POST /models/unload {"model":"draft"}
+!waitfor /models "id":"tiny"[^{]*\{"value":"unloaded"
+!waitfor /models "id":"draft"[^{]*\{"value":"unloaded"
+
+# --- one slot, two models asked for at once: one request waits in the
+# models_max queue until the other's model is idle, then evicts it. Which
+# one loads first is a race, so only the answers are compared
+!server --models-dir $DATA/models -c 256 -np 1 --no-jinja --models-max 1
+!parallel
+POST /completion {"model":"qwen3","prompt":"The capital of France is","n_predict":6,"temperature":0}
+POST /completion {"model":"cq","prompt":"The capital of Spain is","n_predict":6,"temperature":0}
+!end
+!parallel
+POST /completion {"model":"qwen3","prompt":"One plus one is","n_predict":4,"temperature":0}
+POST /completion {"model":"qwen3","prompt":"Two plus two is","n_predict":4,"temperature":0}
+POST /completion {"model":"custom-qwen","prompt":"Three plus three is","n_predict":4,"temperature":0}
+!end
+
+# --- a child that sleeps when idle, and a request that wakes it
+!server --models-dir $DATA/models -c 256 -np 1 -lv 4 --no-jinja --sleep-idle-seconds 1
+!fulllog
+!sse /models/sse
+POST /models/load {"model":"qwen3"}
+!waitfor /models "id":"qwen3"[^{]*\{"value":"sleeping"
+GET /models
+POST /completion {"model":"qwen3","prompt":"The capital of France is","n_predict":4,"temperature":0}
+!waitfor /models "id":"qwen3"[^{]*\{"value":"sleeping"
+!sseend
+GET /models
+POST /models/unload {"model":"qwen3"}
+!waitfor /models "id":"qwen3"[^{]*\{"value":"unloaded"
+
+# --- colours on, which the children inherit: a warning leaves its colour
+# reset at the start of the next line, so the router sees the state line
+# after the CORS warnings (loading) only because notify_to_router starts
+# it on a fresh line; the events show it. At the default verbosity: -lv 4
+# logs an info line between the two, which takes the reset
+!server --models-dir $DATA/models -c 256 -np 1 --no-jinja --log-colors on
+!fulllog
+!sse /models/sse
+POST /models/load {"model":"tiny"}
+!waitfor /models "id":"tiny"[^{]*\{"value":"loaded"
+!sseend
+GET /models
+POST /models/unload {"model":"tiny"}
+!waitfor /models "id":"tiny"[^{]*\{"value":"unloaded"
+
+# --- a preset that changes under a running router (?reload)
+!fresh reload-a
+!server --models-preset $WORK/reload.ini -c 256 -np 1 -lv 4 --no-jinja
+!fulllog
+GET /models
+POST /models/load {"model":"keep"}
+!waitfor /models "id":"keep"[^{]*\{"value":"loaded"
+POST /models/load {"model":"gone"}
+!waitfor /models "id":"gone"[^{]*\{"value":"loaded"
+!fresh reload-b
+!sse /models/sse
+GET /models?reload=1
+!sseend
+GET /models
+POST /models/load {"model":"fresh"}
+!waitfor /models "id":"new"[^{]*\{"value":"loaded"
+GET /models
+POST /models/unload {"model":"keep"}
+POST /models/unload {"model":"new"}
+!waitfor /models "id":"keep"[^{]*\{"value":"unloaded"
+!waitfor /models "id":"new"[^{]*\{"value":"unloaded"
+
+# --- routers that cannot start
+!server --models-preset $DATA/bad-key.ini
+!server --models-preset $DATA/bad-syntax.ini
+!server --models-preset $DATA/dup-alias.ini
+!server --models-preset $DATA/alias-name.ini
+!server --models-preset $DATA/too-many.ini --models-max 1
+!server --models-preset $DATA/no-such.ini
+!server --models-dir $DATA/no-such-dir
+!server --models-dir $DATA/presets.ini
+# not here: --ui-config '{not json', which upstream sometimes leaves with
+# no log at all (its asynchronous logger is not drained when the half-built
+# router's exception unwinds), so its startup cannot be compared

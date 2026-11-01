@@ -5,6 +5,9 @@ const zon = @import("build.zig.zon");
 const llamacpp = @import("build/llamacpp.zig");
 const tools_build = @import("build/tools.zig");
 const mtmd_build = @import("build/mtmd.zig");
+const server_http_build = @import("build/server_http.zig");
+const server_task_build = @import("build/server_task.zig");
+const ui_build = @import("build/ui.zig");
 
 const Git = struct {
     const Self = @This();
@@ -583,7 +586,37 @@ pub fn build(b: *std.Build) !void {
     // compilation, so the `llama.h` calls and the Zig ones reach the same
     // code; the module links `libggml` itself.
     cli_module.addImport("llama", reference.llama.root_module);
+    // Stage 9's chat stack, which the conversation loop renders and parses
+    // through (`cli/conversation.zig`). `cli/common_chat/` and `cli/peg/`
+    // import `json` by name, and `cli/fit.zig` already compiles `cli/json/`
+    // by a relative import, so `fit.zig` is a module of its own here, as the
+    // tools have it, and `json` re-exports its `cli/json/`
+    // (`cli/json_module.zig` says why).
+    const cli_fit_module = b.createModule(.{
+        .root_source_file = b.path("cli/fit.zig"),
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+        .link_libc = true,
+    });
+    cli_fit_module.addImport("llama", reference.llama.root_module);
+    const cli_json_module = b.createModule(.{ .root_source_file = b.path("cli/json_module.zig"), .target = cfg.target, .optimize = cfg.optimize, .link_libc = true });
+    cli_json_module.addImport("cli_fit", cli_fit_module);
+    const cli_peg_module = b.createModule(.{ .root_source_file = b.path("cli/peg/module.zig"), .target = cfg.target, .optimize = cfg.optimize, .link_libc = true });
+    cli_peg_module.addImport("json", cli_json_module);
+    cli_peg_module.addImport("llama", reference.llama.root_module);
+    const cli_chat_module = b.createModule(.{ .root_source_file = b.path("cli/common_chat/module.zig"), .target = cfg.target, .optimize = cfg.optimize, .link_libc = true });
+    cli_chat_module.addImport("json", cli_json_module);
+    cli_chat_module.addImport("peg", cli_peg_module);
+    cli_chat_module.addImport("llama", reference.llama.root_module);
+    cli_chat_module.addImport("zigjinja", jinja_module);
+    for ([_]*std.Build.Module{cli_module}) |m| {
+        m.addImport("cli_fit", cli_fit_module);
+        m.addImport("json", cli_json_module);
+        m.addImport("peg", cli_peg_module);
+        m.addImport("common_chat", cli_chat_module);
+    }
     llamacpp.addSdkPaths(b, cli_module, sdk);
+    llamacpp.addLibgcc(b, cli_module);
     llamacpp.addCudaLibraries(b, cli_module, cuda);
     llamacpp.addVulkanLibraries(b, cli_module, vulkan);
 
@@ -618,6 +651,9 @@ pub fn build(b: *std.Build) !void {
     // Upstream's libmtmd, the reference for every Stage 8 gate.
     const mtmd_ref = tools_build.addMtmdRef(b, .{ .target = cfg.target, .optimize = cfg.optimize, .sdk = sdk });
 
+    // The web UI both llama-servers embed under -Dui (build/ui.zig).
+    const ui = try ui_build.add(b);
+
     try tools_build.add(b, .{
         .target = cfg.target,
         .optimize = cfg.optimize,
@@ -626,7 +662,15 @@ pub fn build(b: *std.Build) !void {
         .reference = reference,
         .cuda = cuda,
         .mtmd_ref = mtmd_ref,
+        .jinja = jinja_module,
+        .ui = ui,
     });
+
+    // Stage 10 step 2: the http-diff harnesses (build/server_http.zig).
+    server_http_build.add(b, .{ .target = cfg.target, .optimize = cfg.optimize, .sdk = sdk, .reference = reference, .mtmd_ref = mtmd_ref, .cuda = cuda, .ui = ui });
+    // Stage 10 step 3a: the server's data layer, its tests and the
+    // server-task-diff harness (build/server_task.zig).
+    server_task_build.add(b, .{ .target = cfg.target, .optimize = cfg.optimize, .sdk = sdk, .reference = reference, .cuda = cuda, .jinja = jinja_module });
 
     const mtmd_module = mtmd_build.add(b, .{
         .target = cfg.target,
@@ -678,6 +722,10 @@ pub fn build(b: *std.Build) !void {
     // the header and the library behind it.
     cli_tests_module.addImport("llama_h", llama_h_module);
     cli_tests_module.addImport("llama", reference.llama.root_module);
+    cli_tests_module.addImport("cli_fit", cli_fit_module);
+    cli_tests_module.addImport("json", cli_json_module);
+    cli_tests_module.addImport("peg", cli_peg_module);
+    cli_tests_module.addImport("common_chat", cli_chat_module);
     llamacpp.addSdkPaths(b, cli_tests_module, sdk);
     llamacpp.addCudaLibraries(b, cli_tests_module, cuda);
     llamacpp.addVulkanLibraries(b, cli_tests_module, vulkan);
@@ -691,11 +739,29 @@ pub fn build(b: *std.Build) !void {
     cli_tests_run.has_side_effects = true;
     tests_step.dependOn(&cli_tests_run.step);
 
+    // `cli/fit.zig` and the `cli/json/` under it are a module of their own
+    // (above), so their tests are a compile step of their own too.
+    const cli_fit_tests_module = b.createModule(.{
+        .root_source_file = b.path("cli/fit.zig"),
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    cli_fit_tests_module.addImport("llama", reference.llama.root_module);
+    llamacpp.addSdkPaths(b, cli_fit_tests_module, sdk);
+    llamacpp.addCudaLibraries(b, cli_fit_tests_module, cuda);
+    llamacpp.addVulkanLibraries(b, cli_fit_tests_module, vulkan);
+    const cli_fit_tests_run = b.addRunArtifact(b.addTest(.{ .root_module = cli_fit_tests_module, .filters = test_filters }));
+    cli_fit_tests_run.has_side_effects = true;
+    tests_step.dependOn(&cli_fit_tests_run.step);
+
     // The CLI's tests on their own. `test` also runs the library's, which take
     // about a minute; this step exists so a change under `cli/` can be
     // iterated on -- and fault-injected -- without paying for that.
     const cli_tests_step = b.step("test-cli", "Run the CLI's unit tests only");
     cli_tests_step.dependOn(&cli_tests_run.step);
+    cli_tests_step.dependOn(&cli_fit_tests_run.step);
 
     // Unit tests for the ported ggml. They compile the whole reference tree,
     // because ported code still calls the parts that have not been ported yet.

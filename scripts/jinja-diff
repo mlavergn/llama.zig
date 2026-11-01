@@ -8,7 +8,10 @@
 # unmodified beside `chat.zig` and renders every template in
 # `llama.cpp/models/templates/` over a fixed set of conversations through
 # both: the text, which side raises, and that ours never trusts a byte
-# upstream marks as input. See harness/jinja_diff.zig.
+# upstream marks as input. Then the probe conversations upstream's
+# capability check and chat-template analyzer render (tools, tool calls,
+# reasoning) through cli/common_chat/template.zig, and each template's
+# capabilities. See harness/jinja_diff.zig.
 #
 # Usage: scripts/jinja-diff [template name substring]
 #   Requires: zig build reference --release=fast (for libggml.a, which
@@ -63,8 +66,9 @@ zig translate-c "${GATE_TC[@]}" -I llama.cpp/include -I llama.cpp/ggml/include \
 
 # zigjinja as build.zig.zon takes it: the sibling checkout, by path.
 zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/jinja_diff$GATE_SUFFIX" -Ofast -lc \
-    --dep chat --dep zigjinja --dep inputs -Mroot=harness/jinja_diff.zig \
+    --dep chat --dep zigjinja --dep inputs --dep common_chat --dep json -Mroot=harness/jinja_diff.zig \
     --dep zigjinja --dep llama_h -Mchat=cli/chat.zig \
+    --dep json --dep zigjinja -Mcommon_chat=cli/common_chat/module.zig -Mjson=cli/json/module.zig \
     -Mzigjinja=../zigjinja/src/root.zig -Mllama_h="$tmp/llama_h.zig" \
     -Minputs="$tmp/inputs/inputs.zig" \
     "${OBJS[@]}" "$GATE_GGML" -lc++ \

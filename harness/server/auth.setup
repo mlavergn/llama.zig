@@ -1,0 +1,5 @@
+#!/bin/bash
+# Writes an --api-key-file for auth.cases into $DATA: a comment line, which
+# is not a key, a key, and an empty line. Run by scripts/server-diff.
+set -eu
+printf '#k3\nk4\n\n' > "$DATA/keys.txt"

@@ -1,0 +1,309 @@
+# Images through llama-server (Stage 10 step 8): scripts/server-diff vision.
+# The text models and projectors are scripts/gen-mmproj-fixtures's random
+# pairs, so what they answer is noise; the prompt as tokenized, the media
+# chunks, the cache decisions and the refusals are what is compared, and
+# the whole log (-lv 4) shows the slots' handling of every chunk. The media
+# are vision.setup's, as base64 named in setup.env ($PNG1, $JPG, ...).
+!mask (seconds_total|tokens_seconds) [0-9.e+-]+
+!mask-key Process-Start-Time-Unix
+!mask-key created_at
+!mask-key completed_at
+!mask "id": "[A-Za-z0-9]{32}"
+!mask Process-Start-Time-Unix: [0-9]+
+# --override-kv's value is logged by a second call, which gets its own
+# timestamp
+!mask = [0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} I (?=2048)
+!env LLAMA_MEDIA_MARKER=<__media__>
+
+# gemma3: a fixed-size image, non-causal decode, begin/end markers that
+# are real tokens in this fixture's vocabulary
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --metrics --slot-save-path ./ -lv 4
+!fulllog
+GET /props
+GET /models
+GET /v1/models
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["$PNG1"]}, "n_predict": 6, "temperature": 0}
+# the same again: the whole prompt is cached, image included
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["$PNG1"]}, "n_predict": 6, "temperature": 0}
+# the same text, another image: the cache stops at the image
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["$PNG2"]}, "n_predict": 6, "temperature": 0}
+# the same image after a longer text: the image chunk is compared by id
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\nAnd more text after it", "multimodal_data": ["$PNG2"]}, "n_predict": 6, "temperature": 0, "n_probs": 2}
+# two images, in order and swapped
+POST /completion {"prompt": {"prompt_string": "first <__media__> then <__media__> end", "multimodal_data": ["$PNG1", "$PNG2"]}, "n_predict": 4, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "first <__media__> then <__media__> end", "multimodal_data": ["$PNG2", "$PNG1"]}, "n_predict": 4, "temperature": 0}
+# no marker: mtmd appends the media after the text
+POST /completion {"prompt": {"prompt_string": "No marker here", "multimodal_data": ["$PNG3"]}, "n_predict": 4, "temperature": 0}
+# special-token text in a media prompt is parsed as the token
+POST /completion {"prompt": {"prompt_string": "<start_of_image> typed <__media__> and </s>", "multimodal_data": ["$PNG1"]}, "n_predict": 3, "temperature": 0}
+# a JPEG; a stream with progress
+POST /completion {"prompt": {"prompt_string": "<__media__>Describe", "multimodal_data": ["$JPG"]}, "n_predict": 4, "temperature": 0, "stream": true, "return_progress": true}
+# a list of prompts, one with media, one plain
+POST /completion {"prompt": [{"prompt_string": "A <__media__>", "multimodal_data": ["$PNG1"]}, "plain text prompt"], "n_predict": 3, "temperature": 0}
+# a prompt object without media; mixed tokens
+POST /completion {"prompt": {"prompt_string": "just text in an object"}, "n_predict": 3, "temperature": 0}
+POST /completion {"prompt": [1, 2, "three", 4], "n_predict": 3, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "x <__media__>", "multimodal_data": ["$PNG1"]}, "n_predict": 3, "temperature": 0, "cache_prompt": false}
+# errors: more images than markers, more markers than images, bad data
+POST /completion {"prompt": {"prompt_string": "one <__media__> only", "multimodal_data": ["$PNG1", "$PNG2"]}, "n_predict": 3}
+POST /completion {"prompt": {"prompt_string": "<__media__> and <__media__>", "multimodal_data": ["$PNG1"]}, "n_predict": 3}
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["malformed"]}, "n_predict": 3}
+POST /completion {"prompt": {"prompt_string": "What is this:\n", "multimodal_data": [""]}, "n_predict": 3}
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["$JUNK"]}, "n_predict": 3}
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["$WAV"]}, "n_predict": 3}
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\n", "multimodal_data": "$PNG1"}, "n_predict": 3, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\n", "multimodal_data": [12]}, "n_predict": 3}
+POST /completion {"prompt": {"prompt_string": 5, "multimodal_data": ["$PNG1"]}, "n_predict": 3}
+POST /completion {"prompt": {"multimodal_data": ["$PNG1"]}, "n_predict": 3}
+# multimodal_data iterates as nlohmann iterates: an object's values, null
+# as nothing; a prompt_string of mixed tokens without media
+POST /completion {"prompt": {"prompt_string": "obj <__media__>", "multimodal_data": {"k": "$PNG1"}}, "n_predict": 3, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "null <__media__>", "multimodal_data": null}, "n_predict": 3, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "none", "multimodal_data": []}, "n_predict": 3, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": [1, "mixed", 2]}, "n_predict": 3, "temperature": 0}
+# OpenAI completions take only a string prompt with a projector loaded
+POST /v1/completions {"prompt": "plain text", "max_tokens": 3, "temperature": 0}
+POST /v1/completions {"prompt": ["a", "b"], "max_tokens": 3, "temperature": 0}
+POST /v1/completions {"prompt": {"prompt_string": "x <__media__>", "multimodal_data": ["$PNG1"]}, "max_tokens": 3, "temperature": 0}
+POST /v1/completions {"prompt": [1, 2, 3], "max_tokens": 3, "temperature": 0}
+POST /infill {"input_prefix": "def f(", "input_suffix": "):", "prompt": "x", "n_predict": 3, "temperature": 0}
+GET /slots
+GET /metrics
+
+# chat: image_url as a data URI and as raw base64, a PNG and a JPEG, the
+# media marker in the rendered prompt
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "text", "text": "What is this:\n"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}], "max_tokens": 6, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "$PNG2"}}, {"type": "text", "text": "and this?"}]}], "max_tokens": 6, "temperature": 0}
+POST /chat/completions {"messages": [{"role": "user", "content": [{"type": "text", "text": "Look"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,$JPG"}}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}], "max_tokens": 4, "temperature": 0, "stream": true}
+# a multi-turn conversation: each turn re-renders and reuses the cached
+# prefix, images included
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}, {"type": "text", "text": "One"}]}], "max_tokens": 4, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}, {"type": "text", "text": "One"}]}, {"role": "assistant", "content": "ok"}, {"role": "user", "content": [{"type": "text", "text": "Two:"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG2"}}]}], "max_tokens": 4, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}, {"type": "text", "text": "One"}]}, {"role": "assistant", "content": "ok"}, {"role": "user", "content": [{"type": "text", "text": "Two:"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG2"}}]}, {"role": "assistant", "content": "so"}, {"role": "user", "content": "Three"}], "max_tokens": 4, "temperature": 0}
+GET /slots
+# token counts and templates with media
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": [{"type": "text", "text": "What is this:"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}]}
+POST /chat/completions/input_tokens {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,$JPG"}}, {"type": "image_url", "image_url": {"url": "$PNG2"}}]}]}
+POST /v1/responses/input_tokens {"input": [{"role": "user", "content": [{"type": "input_text", "text": "see"}, {"type": "input_image", "image_url": "data:image/png;base64,$PNG1"}]}]}
+POST /v1/messages/count_tokens {"model": "m", "messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "$PNG1"}}, {"type": "text", "text": "what"}]}]}
+POST /apply-template {"messages": [{"role": "user", "content": [{"type": "text", "text": "What is this:"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}]}
+POST /tokenize {"content": "What is this: <__media__> and <start_of_image>", "with_pieces": true}
+POST /tokenize {"content": {"prompt_string": "x <__media__>", "multimodal_data": ["$PNG1"]}}
+# the Responses and Anthropic APIs carry images too
+POST /v1/responses {"input": [{"role": "user", "content": [{"type": "input_text", "text": "what is it"}, {"type": "input_image", "image_url": "data:image/png;base64,$PNG2"}]}], "max_output_tokens": 4, "temperature": 0}
+POST /v1/messages {"model": "m", "max_tokens": 4, "temperature": 0, "messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "$PNG1"}}, {"type": "text", "text": "what"}]}]}
+POST /v1/messages {"model": "m", "max_tokens": 4, "temperature": 0, "messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "url", "url": "data:image/jpeg;base64,$JPG"}}]}]}
+POST /v1/messages {"model": "m", "max_tokens": 4, "temperature": 0, "messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "base64", "data": "$PNG2"}}, {"type": "image", "source": {"type": "file", "file_id": "x"}}]}]}
+POST /v1/messages {"model": "m", "max_tokens": 4, "temperature": 0, "messages": [{"role": "user", "content": "q"}, {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "look", "input": {}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "seen"}, {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "$PNG1"}}]}]}]}
+POST /v1/responses {"input": [{"role": "user", "content": [{"type": "input_image"}]}], "max_output_tokens": 4}
+POST /v1/responses {"input": [{"role": "user", "content": [{"type": "input_file", "file_id": "f"}]}], "max_output_tokens": 4}
+POST /v1/responses {"input": [{"role": "user", "content": [{"type": "input_image", "image_url": "data:text/plain;base64,aGk="}]}], "max_output_tokens": 4}
+# the refusals: data URIs that are not media or not base64, bad base64,
+# bytes no decoder takes, audio to a vision-only projector, a video, a
+# file:// URL without --media-path, an unknown part type
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "malformed"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:text/html;base64,aGVsbG8="}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png,aGVsbG8="}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,a,b"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,!!!!"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1NL"}}]}], "max_tokens": 4}
+POST /completion {"prompt": {"prompt_string": "x <__media__>", "multimodal_data": ["$PNG1NL"]}, "n_predict": 3}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$JUNK"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": ""}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url"}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": "data:image/png;base64,$PNG1"}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$WAV", "format": "wav"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_video", "input_video": {"data": "$JPG"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "file://red.png"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image", "image": "$PNG1"}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:audio/wav;base64,$WAV"}}]}], "max_tokens": 4}
+# the slot's media prompt saved, erased, restored and continued from
+POST /completion {"prompt": {"prompt_string": "Saved: <__media__> tail", "multimodal_data": ["$PNG2"]}, "n_predict": 4, "temperature": 0}
+POST /slots/0?action=save {"filename": "mm.bin"}
+POST /slots/0?action=erase
+GET /slots
+POST /slots/0?action=restore {"filename": "mm.bin"}
+POST /completion {"prompt": {"prompt_string": "Saved: <__media__> tail and more", "multimodal_data": ["$PNG2"]}, "n_predict": 4, "temperature": 0}
+GET /metrics
+
+# a random marker: without LLAMA_MEDIA_MARKER each process draws its own,
+# which /props reports (masked) and every template render carries
+!noenv
+!mask <__media_[A-Za-z0-9]+__>
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+GET /props
+POST /apply-template {"messages": [{"role": "user", "content": [{"type": "text", "text": "x"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}]}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "text", "text": "x"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}], "max_tokens": 4, "temperature": 0}
+# the fixed marker is now just text
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["$PNG1"]}, "n_predict": 3, "temperature": 0}
+!env LLAMA_MEDIA_MARKER=<__media__>
+
+# M-RoPE: qwen2-vl's merger, positions that advance less than the tokens;
+# dynamic resolution, so --image-min-tokens and --image-max-tokens apply
+!server -m $MM/text-qwen2vl.gguf -mm $MM/qwen2vl_merger.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "M-RoPE <__media__> then text", "multimodal_data": ["$PNG2"]}, "n_predict": 6, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "M-RoPE <__media__> then text and more", "multimodal_data": ["$PNG2"]}, "n_predict": 6, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "<__media__><__media__> two", "multimodal_data": ["$PNG1", "$PNG3"]}, "n_predict": 4, "temperature": 0}
+# a JPEG at full resolution does not fit the fixture's 256-token context
+POST /completion {"prompt": {"prompt_string": "<__media__><__media__> two", "multimodal_data": ["$PNG1", "$JPG"]}, "n_predict": 4, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG3"}}, {"type": "text", "text": "grey"}]}], "max_tokens": 4, "temperature": 0}
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,$JPG"}}]}]}
+GET /slots
+!server -m $MM/text-qwen2vl.gguf -mm $MM/qwen2vl_merger.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --image-min-tokens 8 --image-max-tokens 16 -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "capped <__media__>", "multimodal_data": ["$JPG"]}, "n_predict": 4, "temperature": 0}
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}]}
+
+# internvl and gemma4v encode several images in one batch; a small
+# --mtmd-batch-max-tokens splits them
+!server -m $MM/text-qwen3.gguf -mm $MM/internvl.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "a <__media__> b <__media__> c <__media__>", "multimodal_data": ["$PNG1", "$PNG2", "$PNG1"]}, "n_predict": 4, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b <__media__> c <__media__> d", "multimodal_data": ["$PNG1", "$PNG2", "$PNG1"]}, "n_predict": 4, "temperature": 0}
+!server -m $MM/text-qwen3.gguf -mm $MM/internvl.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --mtmd-batch-max-tokens 8 -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "a <__media__> b <__media__> c <__media__>", "multimodal_data": ["$PNG1", "$PNG2", "$JPG"]}, "n_predict": 4, "temperature": 0}
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma4v.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "<__media__> and <__media__>", "multimodal_data": ["$PNG1", "$PNG2"]}, "n_predict": 4, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "<__media__> and <__media__>", "multimodal_data": ["$PNG1", "$PNG1"]}, "n_predict": 4, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "<__media__> or <__media__>", "multimodal_data": ["$PNG2", "$PNG2"]}, "n_predict": 4, "temperature": 0}
+
+# a hybrid (recurrent) and a sliding-window text model: the slots checkpoint
+# after a prompt, never straight after a media chunk, and a prompt that
+# diverges past the image restores one (size_up_to_pos counts the image's
+# positions). scripts/gen-mmproj-fixtures writes text-qwen35 and text-gemma3
+# for these; no projector is paired with them
+!server -m $MM/text-qwen35.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h i j k l m n o p", "multimodal_data": ["$PNG1"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h i j k l m n o p q r s", "multimodal_data": ["$PNG1"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h X", "multimodal_data": ["$PNG1"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b <__media__> c", "multimodal_data": ["$PNG1", "$PNG2"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b <__media__> c d", "multimodal_data": ["$PNG1", "$PNG2"]}, "n_predict": 2, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}, {"type": "text", "text": "One"}]}], "max_tokens": 3, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}, {"type": "text", "text": "One"}]}, {"role": "assistant", "content": "ok"}, {"role": "user", "content": "Two"}], "max_tokens": 3, "temperature": 0}
+GET /slots
+# the hybrid model under M-RoPE (qwen2-vl's merger): its checkpoints' positions
+# trail their token counts
+!server -m $MM/text-qwen35.gguf -mm $MM/qwen2vl_merger.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h i j k l m n o p", "multimodal_data": ["$PNG2"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h i j k l m n o p q r s", "multimodal_data": ["$PNG2"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h i j k l m n o p q r s t u", "multimodal_data": ["$PNG2"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h i j k l m n o p q X", "multimodal_data": ["$PNG2"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h X", "multimodal_data": ["$PNG2"]}, "n_predict": 2, "temperature": 0}
+# the sliding-window model with room past its cache: 256 SWA cells (n_swa
+# 32 plus a 32-token ubatch, padded) are outgrown by a 360-token prompt, so
+# one that diverges after the first checkpoint must restore it
+!server -m $MM/text-gemma3.gguf -mm $MM/gemma3.gguf -c 2048 --override-kv gemma3.context_length=int:2048 -b 32 -ub 32 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h i j k l m n o p", "multimodal_data": ["$PNG1"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h i j k l m n o p w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32 w33 w34 w35 w36 w37 w38 w39 w40 w41 w42 w43 w44 w45 w46 w47 w48 w49 w50 w51 w52 w53 w54 w55 w56 w57 w58 w59 w60 w61 w62 w63 w64 w65 w66 w67 w68 w69 w70 w71 w72 w73 w74 w75 w76 w77 w78 w79", "multimodal_data": ["$PNG1"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h i j k l m n o p q r X", "multimodal_data": ["$PNG1"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h i j k l m n o p", "multimodal_data": ["$PNG1"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h i j k l m n o p q r s", "multimodal_data": ["$PNG1"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b c d e f g h X", "multimodal_data": ["$PNG1"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b <__media__> c", "multimodal_data": ["$PNG1", "$PNG2"]}, "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "a <__media__> b <__media__> c d", "multimodal_data": ["$PNG1", "$PNG2"]}, "n_predict": 2, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}, {"type": "text", "text": "One"}]}], "max_tokens": 3, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}, {"type": "text", "text": "One"}]}, {"role": "assistant", "content": "ok"}, {"role": "user", "content": "Two"}], "max_tokens": 3, "temperature": 0}
+GET /slots
+
+# the projector on the CPU, by --no-mmproj-offload and by -mmdev none;
+# --no-mmproj does not drop an explicit -mm
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --no-mmproj-offload -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "cpu <__media__>", "multimodal_data": ["$PNG1"]}, "n_predict": 4, "temperature": 0}
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup -mmdev none -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "cpu <__media__>", "multimodal_data": ["$PNG1"]}, "n_predict": 4, "temperature": 0}
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --no-mmproj
+GET /models
+!env LLAMA_ARG_MMPROJ=$MM/gemma3.gguf
+!server -m $MM/text-qwen3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup
+GET /props
+!noenv
+!env LLAMA_MEDIA_MARKER=<__media__>
+
+# two slots: one prompt for two completions (n_cmpl) shares its chunks
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 2 --chat-template chatml --no-warmup -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "both <__media__> slots", "multimodal_data": ["$PNG2"]}, "n_predict": 4, "temperature": 0, "n_cmpl": 2}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}], "max_tokens": 3, "temperature": 0, "n": 2}
+GET /slots
+
+# two slots: concurrent image prompts, each its own chunks
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 2 --chat-template chatml --no-warmup
+!parallel
+POST /completion {"prompt": {"prompt_string": "slot <__media__> one", "multimodal_data": ["$PNG1"]}, "n_predict": 4, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "slot <__media__> two", "multimodal_data": ["$PNG2"]}, "n_predict": 4, "temperature": 0}
+!end
+
+# the startup warnings: context shift and cache reuse are turned off
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --context-shift --cache-reuse 4 -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "shift <__media__>", "multimodal_data": ["$PNG1"]}, "n_predict": 4, "temperature": 0, "n_cache_reuse": 4}
+GET /props
+# generation runs into the 256-token context: with the shift off it stops
+# there, where a shift would abort ("not supported by multimodal")
+POST /completion {"prompt": {"prompt_string": "long <__media__>", "multimodal_data": ["$PNG1"]}, "n_predict": 400, "temperature": 0, "ignore_eos": true}
+GET /slots
+
+# a draft model drafts over the image too: the decode callback feeds the
+# drafter every embedding batch
+!server -m $MM/text-qwen3.gguf -md $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --spec-type draft-simple --spec-draft-n-max 3 -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "draft <__media__> it", "multimodal_data": ["$PNG1"]}, "n_predict": 8, "temperature": 0}
+POST /completion {"prompt": {"prompt_string": "draft <__media__> it again", "multimodal_data": ["$PNG1"]}, "n_predict": 8, "temperature": 0}
+
+# asleep: the projector is freed with the model and reloaded on waking
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --sleep-idle-seconds 1 -lv 4
+!fulllog
+POST /completion {"prompt": {"prompt_string": "before <__media__>", "multimodal_data": ["$PNG1"]}, "n_predict": 3, "temperature": 0}
+!sleep 2.5
+GET /props
+POST /completion {"prompt": {"prompt_string": "after <__media__>", "multimodal_data": ["$PNG1"]}, "n_predict": 3, "temperature": 0}
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}]}
+
+# --media-path: file:// URLs below that directory, and the refusals
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --media-path $DATA/media -lv 4
+!fulllog
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "file://red.png"}}]}], "max_tokens": 4, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "file://sub/blue.png"}}]}], "max_tokens": 4, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "file://../outside.png"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "file:///etc/hosts"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "file://missing.png"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "file://tone.wav"}}]}], "max_tokens": 4}
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --media-path $DATA/media/red.png
+
+# embeddings with media
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --embedding --pooling mean -b 512 -ub 512 -lv 4
+!fulllog
+POST /embeddings {"content": [{"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["$PNG1"]}, {"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["$PNG1"]}, {"prompt_string": "What is this: <__media__>\n"}]}
+POST /v1/embeddings {"input": {"prompt_string": "x <__media__>", "multimodal_data": ["$PNG2"]}}
+POST /embeddings {"content": [{"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["malformed"]}]}
+POST /embeddings {"content": [{"prompt_string": "What is this:\n", "multimodal_data": ["base64"]}]}
+
+# text-only servers refuse media
+!server -m $MM/text-qwen3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --slot-save-path ./
+GET /props
+GET /models
+# a saved media prompt cannot be restored without a projector
+POST /slots/0?action=restore {"filename": "mm.bin"}
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["$PNG1"]}, "n_predict": 3}
+POST /completion {"prompt": {"prompt_string": "What is this: <__media__>\n"}, "n_predict": 3, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}], "max_tokens": 4}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "$WAV"}}]}], "max_tokens": 4}
+POST /v1/chat/completions/input_tokens {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}]}
+POST /v1/messages {"model": "m", "max_tokens": 4, "messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "$PNG1"}}]}]}
+
+# projectors that do not load
+!server -m $MM/text-qwen3.gguf -mm /nonexistent/mmproj.gguf -c 4096 -np 1 --no-warmup
+!server -m $MM/text-qwen3.gguf -mm $DATA/media/red.png -c 4096 -np 1 --no-warmup
+!server -m $QWEN3 -mm $MM/gemma3.gguf -c 4096 -np 1 --no-warmup
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3na.gguf -c 4096 -np 1 --no-warmup
+!server -m $MM/text-qwen3.gguf -mm $MM/text-qwen3.gguf -c 4096 -np 1 --no-warmup

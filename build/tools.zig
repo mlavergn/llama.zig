@@ -95,6 +95,19 @@ const common_sources = [_][]const u8{
     "common/parsers/muse-glimmer.cpp",     "common/parsers/qwen3-coder.cpp",
 };
 
+/// `llama.cpp.zmake`'s `server_context_sources`, `server_impl_sources` and
+/// the executable's `main.cpp`: upstream's `llama-server`.
+const server_sources = [_][]const u8{
+    "tools/server/server-chat.cpp",    "tools/server/server-task.cpp",
+    "tools/server/server-queue.cpp",   "tools/server/server-common.cpp",
+    "tools/server/server-context.cpp", "tools/server/server-stream.cpp",
+    "tools/server/server-tools.cpp",   "tools/server/server-mcp.cpp",
+    "tools/server/server-schema.cpp",  "tools/server/server.cpp",
+    "tools/server/server-http.cpp",    "tools/server/server-models.cpp",
+    "tools/server/main.cpp",
+};
+
+
 /// `llama.cpp.zmake`'s `httplib_defines`.
 const httplib_defines = [_][]const u8{
     "-DCPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH=1048576",
@@ -120,6 +133,13 @@ pub const Options = struct {
     /// Upstream's libmtmd (`addMtmdRef`), built once and shared with
     /// `build/mtmd.zig`.
     mtmd_ref: *std.Build.Step.Compile,
+    /// `zigjinja`, the CLI's one dependency, for `llama-server`'s
+    /// `cli/common_chat/` module: upstream's server parses the chat
+    /// template with its Jinja engine at startup, `--no-jinja` or not, for
+    /// the capabilities `/props` reports.
+    jinja: ?*std.Build.Module = null,
+    /// The web UI both servers embed (`build/ui.zig`).
+    ui: @import("ui.zig").Ui,
 };
 
 /// The target triple `--version` prints, as `llama.cpp.zmake` formats it.
@@ -164,6 +184,9 @@ pub fn add(b: *std.Build, opts: Options) !void {
     common_module.addImport("tools_h", tools_h_module);
     common_module.addOptions("build_info", build_info);
     common_module.addImport("cli_fit", fit_module);
+    // libllama's module, for what `common/speculative.cpp` reaches through
+    // `llama-ext.h` (C++ linkage, so not in `tools_h`) and for `libcxx`.
+    common_module.addImport("llama", opts.reference.llama.root_module);
 
     const tools_step = b.step("tools", "Build the ported upstream tools");
     // libmtmd's port, for the mtmd tools: its `exports.zig` gives them the
@@ -194,12 +217,53 @@ pub fn add(b: *std.Build, opts: Options) !void {
         mod.addImport("llama", opts.reference.llama.root_module);
         if (ti >= tools.len) mod.addImport("mtmd", mtmd_module);
         llamacpp.addSdkPaths(b, mod, opts.sdk);
+        llamacpp.addLibgcc(b, mod);
         const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod });
+        tools_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
+    }
+    // Our `llama-server` (Stage 10, Decision 65), over the same modules as
+    // the mtmd tools: it takes images and audio once step 8 lands.
+    {
+        const mod = b.createModule(.{
+            .root_source_file = b.path("tools/server/main.zig"),
+            .target = opts.target,
+            .optimize = opts.optimize,
+            .link_libc = true,
+            .link_libcpp = true,
+        });
+        mod.addImport("tools_common", common_module);
+        mod.addImport("tools_h", tools_h_module);
+        mod.addImport("cli_fit", fit_module);
+        mod.addImport("llama", opts.reference.llama.root_module);
+        mod.addImport("mtmd", mtmd_module);
+        mod.addImport("ui_assets", opts.ui.port_module);
+        // Stage 9's modules, for the data layer (`tools/server/module.zig`):
+        // `json` is `cli_fit`'s `cli/json/` under the name `cli/common_chat/`
+        // imports (`tools/server/json_module.zig` says why).
+        const json_module = b.createModule(.{ .root_source_file = b.path("tools/server/json_module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
+        json_module.addImport("cli_fit", fit_module);
+        const peg_module = b.createModule(.{ .root_source_file = b.path("cli/peg/module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
+        peg_module.addImport("json", json_module);
+        peg_module.addImport("llama", opts.reference.llama.root_module);
+        const chat_module = b.createModule(.{ .root_source_file = b.path("cli/common_chat/module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
+        chat_module.addImport("json", json_module);
+        chat_module.addImport("peg", peg_module);
+        chat_module.addImport("llama", opts.reference.llama.root_module);
+        if (opts.jinja) |j| chat_module.addImport("zigjinja", j);
+        mod.addImport("json", json_module);
+        mod.addImport("common_chat", chat_module);
+        mod.addImport("peg", peg_module);
+        llamacpp.addSdkPaths(b, mod, opts.sdk);
+        llamacpp.addLibgcc(b, mod);
+        const exe = b.addExecutable(.{ .name = "llama-server", .root_module = mod });
         tools_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
     }
 
     const ref_step = b.step("tools-ref", "Build upstream's tools over libllama-ref, the tool gates' references");
     const common_ref = addCommonRef(b, opts);
+    // Installed for the in-process gates over upstream's `common/`
+    // (`scripts/chat-msg-diff`), which link it beside a harness of their own.
+    ref_step.dependOn(&b.addInstallArtifact(common_ref, .{}).step);
     // Upstream's mtmd, and the two tools over it: the multimodal CLI and TTS.
     const mtmd_ref = opts.mtmd_ref;
     const mtmd_ref_step = b.step("mtmd-ref", "Build upstream's libmtmd over libllama-ref, the mtmd gates' reference");
@@ -212,11 +276,81 @@ pub fn add(b: *std.Build, opts: Options) !void {
         mod.linkLibrary(opts.reference.llama_ref);
         mod.linkLibrary(opts.reference.ggml);
         llamacpp.addSdkPaths(b, mod, opts.sdk);
+        llamacpp.addLibgcc(b, mod);
         llamacpp.addCudaRuntime(b, mod, opts.cuda);
         const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod });
         const install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = "tools-ref/bin" } } });
         ref_step.dependOn(&install.step);
         mtmd_ref_step.dependOn(&install.step);
+    }
+    // Upstream's `llama-server` (Stage 10, Decision 65), as `llama.cpp.zmake`
+    // builds it: `server-context` and `llama-server-impl` over common, mtmd
+    // and cpp-httplib, with the web UI embedded under -Dui (zmake's stub,
+    // and no assets, without it).
+    {
+        const mod = refModule(b, opts);
+        mod.addIncludePath(b.path(root ++ "/tools/server"));
+        mod.addIncludePath(b.path(root ++ "/vendor/cpp-httplib"));
+        mod.addIncludePath(opts.ui.ref_include);
+        const flags = if (opts.cuda != null) &(cxx_flags ++ .{"-DGGML_USE_CUDA"}) else &cxx_flags;
+        mod.addCSourceFiles(.{ .root = b.path(root), .files = &server_sources, .flags = flags });
+        mod.addCSourceFile(.{ .file = opts.ui.ref_cpp, .flags = &cxx_flags });
+        mod.linkLibrary(common_ref);
+        mod.linkLibrary(mtmd_ref);
+        mod.linkLibrary(opts.reference.llama_ref);
+        mod.linkLibrary(opts.reference.ggml);
+        llamacpp.addSdkPaths(b, mod, opts.sdk);
+        llamacpp.addLibgcc(b, mod);
+        llamacpp.addCudaRuntime(b, mod, opts.cuda);
+        const exe = b.addExecutable(.{ .name = "llama-server", .root_module = mod });
+        const install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = "tools-ref/bin" } } });
+        ref_step.dependOn(&install.step);
+        const server_ref_step = b.step("server-ref", "Build upstream's llama-server over libllama-ref, the server gates' reference");
+        server_ref_step.dependOn(&install.step);
+    }
+    // `scripts/spec-diff`'s two sides: `harness/spec_diff.zig` over the port's
+    // `tools/common/`, `harness/spec_ref.cpp` over upstream's `common/`.
+    {
+        const spec_step = b.step("spec-diff", "Build the spec-diff harnesses: the port's common/ sampling and speculative decoding, and upstream's");
+        const port = b.createModule(.{
+            .root_source_file = b.path("harness/spec_diff.zig"),
+            .target = opts.target,
+            .optimize = opts.optimize,
+            .link_libc = true,
+            .link_libcpp = true,
+        });
+        port.addImport("tools_common", common_module);
+        port.addImport("tools_h", tools_h_module);
+        port.addImport("cli_fit", fit_module);
+        port.addImport("llama", opts.reference.llama.root_module);
+        llamacpp.addSdkPaths(b, port, opts.sdk);
+        llamacpp.addLibgcc(b, port);
+        const port_exe = b.addExecutable(.{ .name = "spec_diff", .root_module = port });
+        spec_step.dependOn(&b.addInstallArtifact(port_exe, .{ .dest_dir = .{ .override = .{ .custom = "spec-diff" } } }).step);
+
+        const ref = refModule(b, opts);
+        ref.addCSourceFiles(.{ .root = b.path("harness"), .files = &.{"spec_ref.cpp"}, .flags = &cxx_flags });
+        ref.linkLibrary(common_ref);
+        ref.linkLibrary(opts.reference.llama_ref);
+        ref.linkLibrary(opts.reference.ggml);
+        llamacpp.addSdkPaths(b, ref, opts.sdk);
+        llamacpp.addLibgcc(b, ref);
+        llamacpp.addCudaRuntime(b, ref, opts.cuda);
+        const ref_exe = b.addExecutable(.{ .name = "spec_ref", .root_module = ref });
+        spec_step.dependOn(&b.addInstallArtifact(ref_exe, .{ .dest_dir = .{ .override = .{ .custom = "spec-diff" } } }).step);
+
+        // gives the draft fixtures a vocabulary, so DFlash has a mask token
+        const fx = b.createModule(.{ .target = opts.target, .optimize = opts.optimize, .link_libc = true, .link_libcpp = true });
+        fx.addCSourceFiles(.{ .root = b.path("harness"), .files = &.{"spec_fixtures.c"}, .flags = &.{"-std=c11"} });
+        fx.addIncludePath(b.path(root ++ "/ggml/include"));
+        fx.linkLibrary(opts.reference.ggml);
+        llamacpp.addSdkPaths(b, fx, opts.sdk);
+        llamacpp.addLibgcc(b, fx);
+        // libggml links the CUDA libraries by name on a CUDA build; this
+        // says where they are, as for every other reference here
+        llamacpp.addCudaRuntime(b, fx, opts.cuda);
+        const fx_exe = b.addExecutable(.{ .name = "spec_fixtures", .root_module = fx });
+        spec_step.dependOn(&b.addInstallArtifact(fx_exe, .{ .dest_dir = .{ .override = .{ .custom = "spec-diff" } } }).step);
     }
     for (tools) |t| {
         const mod = refModule(b, opts);
@@ -226,6 +360,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
         mod.linkLibrary(opts.reference.llama_ref);
         mod.linkLibrary(opts.reference.ggml);
         llamacpp.addSdkPaths(b, mod, opts.sdk);
+        llamacpp.addLibgcc(b, mod);
         llamacpp.addCudaRuntime(b, mod, opts.cuda);
         const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod });
         ref_step.dependOn(&b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = "tools-ref/bin" } } }).step);
@@ -249,6 +384,12 @@ fn refModule(b: *std.Build, opts: anytype) *std.Build.Module {
     mod.addIncludePath(b.path(root ++ "/ggml/src"));
     mod.addIncludePath(b.path(root ++ "/vendor"));
     mod.addIncludePath(b.path(root ++ "/tools/mtmd"));
+    // `LLAMA_SUBPROCESS`, a PUBLIC definition of `llama-common` on every
+    // platform but iOS, Android and WASM (CMakeLists.txt:104-110,
+    // common/CMakeLists.txt:142), as `llama.cpp.zmake`'s `subprocess_defines`
+    // gives it: without it upstream's router mode refuses to start ("subprocess
+    // is not enabled on this build") and `common_subproc::create` always fails.
+    if (opts.target.result.os.tag != .ios) mod.addCMacro("LLAMA_SUBPROCESS", "");
     return mod;
 }
 

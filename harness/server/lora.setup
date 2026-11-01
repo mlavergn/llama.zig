@@ -1,0 +1,14 @@
+#!/bin/bash
+# Writes LoRA adapters for Qwen3-0.6B into $DATA/q3 for lora.cases, with
+# harness/tools/make_lora.c (export-lora's fixture writer). Run by
+# scripts/server-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+bin="$DATA/make_lora"
+# The system libraries beside libggml.a: Metal on macOS, CUDA on Linux.
+. "$ROOT/scripts/platform-libs"
+platform_libs cc "$ROOT/zig-out/lib/libggml.a"
+zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/make_lora.c" \
+    "$ROOT/zig-out/lib/libggml.a" -lc++ "${PLATFORM_LIBS[@]}" -o "$bin"
+mkdir -p "$DATA/q3"
+"$bin" "$ROOT/Qwen3-0.6B-Q8_0.gguf" "$DATA/q3" >/dev/null

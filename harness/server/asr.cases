@@ -1,0 +1,32 @@
+# The transcriptions API (Stage 10 step 4): scripts/server-diff asr.
+# /v1/audio/transcriptions and /audio/transcriptions: a multipart upload
+# converted into chat over the template's ASR preset (server-chat.cpp),
+# then run through the audio projector. The text model and projector are
+# scripts/gen-mmproj-fixtures's random pair, so what they say is noise;
+# the prompt, the media chunk, the response shapes and the refusals are
+# what is compared, and the whole log shows the prompt as tokenized.
+!server -m $MM/text-qwen3.gguf -mm $MM/qwen3a.gguf -c 2048 -np 1 --chat-template chatml --no-warmup -lv 4
+!fulllog
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/tone.wav", "max_tokens": "8", "temperature": "0"}
+FORM /audio/transcriptions {"file": "@file:$DATA/tone.wav", "prompt": "Transcribe this", "language": "en", "max_tokens": "6", "temperature": "0"}
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/tone.wav", "max_tokens": "6", "temperature": "0", "stream": "true"}
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/tone.wav", "response_format": "text"}
+FORM /v1/audio/transcriptions {"audio": "@file:$DATA/tone.wav"}
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/tone.wav", "max_tokens": "many"}
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/tone.wav", "temperature": "warm"}
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/tone.wav", "max_tokens": ["1", "2"]}
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/junk.bin", "max_tokens": "4"}
+POST /v1/audio/transcriptions {"prompt": "no file"}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": [{"type": "text", "text": "Listen:"}, {"type": "input_audio", "input_audio": {"data": "UklGRg==", "format": "wav"}}]}], "max_tokens": 4}
+
+# an LFM2 template: its ASR preset is a system prompt
+!server -m $MM/text-qwen3.gguf -mm $MM/qwen3a.gguf -c 2048 -np 1 --chat-template-file $VOCAB/templates/LFM2-8B-A1B.jinja --no-warmup -lv 4
+!fulllog
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/tone.wav", "max_tokens": "6", "temperature": "0"}
+
+# a vision-only projector refuses audio
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 2048 -np 1 --chat-template chatml --no-warmup
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/tone.wav"}
+# and so does a model without one
+!server -m $QWEN3 -c 2048 -np 1
+FORM /v1/audio/transcriptions {"file": "@file:$DATA/tone.wav"}

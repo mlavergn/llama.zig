@@ -25,6 +25,17 @@
 //!   themselves are re-trusted, where upstream marks every bound variable as
 //!   input, those two included.
 //!
+//! Then the probes: the conversations upstream's capability check
+//! (`common/jinja/caps.cpp`) and differential analysis
+//! (`common/chat-diff-analyzer.cpp`) render -- tool definitions, assistant
+//! tool calls with object and string arguments, tool responses,
+//! `reasoning_content`, empty and typed content -- each with and without a
+//! generation prompt and with thinking on and off, bound as
+//! `common_chat_template_direct_apply_impl` binds them and rendered through
+//! `cli/common_chat/template.zig`; text and failure must agree. And the
+//! capabilities `caps_get` reads off each template must equal the port's
+//! (`cli/common_chat/caps.zig`, over zigjinja's usage statistics).
+//!
 //! Then the clock: `strftime_now` formats local time on both sides, and the
 //! conversations print a date only on some templates and differ only near
 //! midnight, so one template prints the hour, minute, weekday and day of
@@ -37,11 +48,14 @@
 
 const std = @import("std");
 const chat = @import("chat");
+const common_chat = @import("common_chat");
+const json_mod = @import("json");
 const jinja = @import("zigjinja");
 const inputs = @import("inputs");
 
 extern fn jinja_ref_render(tmpl: [*]const u8, tmpl_len: usize, vars: [*]const u8, vars_len: usize, out: *?[*]u8, out_len: *usize, input: *?[*]u8) c_int;
 extern fn jinja_ref_free(p: ?*anyopaque) void;
+extern fn jinja_ref_caps(tmpl: [*]const u8, tmpl_len: usize, out: *[9]u8) c_int;
 
 const gpa = std.heap.c_allocator;
 
@@ -209,6 +223,202 @@ fn snippet(label: []const u8, text: []const u8, at: usize) void {
     std.debug.print("\"{s}\n", .{if (to == text.len) " <end>" else ""});
 }
 
+// -----------------------------------------------------------------------------
+// The probes
+
+const FUN_FIRST = "FFF_FIRST_FUN_F";
+const FUN_SECOND = "SSS_SECOND_FUN_S";
+const ARG_FIRST = "AA_ARG_FST_AA";
+const ARG_SECOND = "BB_ARG_SND_BB";
+const USER = "{\"role\":\"user\",\"content\":\"U_USER_MSG Hello END_U\"}";
+const USER_TWO = "{\"role\":\"user\",\"content\":\"V_USER_MSG Hello END_V\"}";
+const ASSISTANT = "{\"role\":\"assistant\",\"content\":\"A_ASST_MSG I can help END_A\"}";
+const THINKING = "REASON_PART I am thinking END_R";
+
+fn call(comptime name: []const u8, comptime args: []const u8, comptime id: []const u8) []const u8 {
+    return "{\"id\":\"" ++ id ++ "\",\"type\":\"function\",\"function\":{\"name\":\"" ++ name ++ "\",\"arguments\":" ++ args ++ "}}";
+}
+
+fn calls(comptime cs: []const u8) []const u8 {
+    return "{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[" ++ cs ++ "]}";
+}
+
+const both_args = "{\"" ++ ARG_FIRST ++ "\":\"XXXX\",\"" ++ ARG_SECOND ++ "\":\"YYYY\"}";
+const params_schema = "{\"type\":\"object\",\"properties\":{\"" ++ ARG_FIRST ++ "\":{\"type\":\"string\",\"description\":\"First argument\"}," ++
+    "\"" ++ ARG_SECOND ++ "\":{\"type\":\"string\",\"description\":\"Second argument\"}},\"required\":[]}";
+const analysis_tools = "[{\"type\":\"function\",\"function\":{\"name\":\"" ++ FUN_FIRST ++ "\",\"description\":\"Test function foo\",\"parameters\":" ++ params_schema ++ "}}," ++
+    "{\"type\":\"function\",\"function\":{\"name\":\"" ++ FUN_SECOND ++ "\",\"description\":\"Test function bar\",\"parameters\":" ++ params_schema ++ "}}]";
+const caps_tools = "[{\"name\":\"tool\",\"type\":\"function\",\"function\":{\"name\":\"tool1\",\"description\":\"Tool description\"," ++
+    "\"parameters\":{\"type\":\"object\",\"properties\":{\"arg\":{\"type\":\"string\",\"description\":\"Arg description\"}},\"required\":[\"arg\"]}}}]";
+
+fn capsCalls(comptime args: []const u8, comptime two: bool) []const u8 {
+    const c1 = "{\"id\":\"call00001\",\"type\":\"function\",\"function\":{\"name\":\"tool1\",\"arguments\":" ++ args ++ "}}";
+    const c2 = if (two) ",{\"id\":\"call00002\",\"type\":\"function\",\"function\":{\"name\":\"tool1\",\"arguments\":" ++ args ++ "}}" else "";
+    return "[{\"role\":\"user\",\"content\":\"User message\"},{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[" ++ c1 ++ c2 ++ "]}," ++
+        "{\"role\":\"tool\",\"content\":\"Tool response\",\"tool_call_id\":\"call00001\"}," ++
+        "{\"role\":\"assistant\",\"content\":\"The tool response was 'tool response'\"},{\"role\":\"user\",\"content\":\"User message\"}]";
+}
+
+const Probe = struct { name: []const u8, messages: []const u8, tools: ?[]const u8 = null, extra: []const u8 = "" };
+
+/// The conversations `chat-diff-analyzer.cpp` and `caps.cpp` render, as
+/// those files build them.
+const probes = [_]Probe{
+    .{ .name = "empty", .messages = "[]" },
+    .{ .name = "user", .messages = "[" ++ USER ++ "]" },
+    .{ .name = "user-asst", .messages = "[" ++ USER ++ "," ++ ASSISTANT ++ "]" },
+    .{ .name = "two-turns", .messages = "[" ++ USER_TWO ++ "," ++ ASSISTANT ++ "," ++ USER ++ "]" },
+    .{ .name = "reasoning", .messages = "[" ++ USER ++ ",{\"role\":\"assistant\",\"content\":\"A_ASST_MSG I can help END_A\",\"reasoning_content\":\"" ++ THINKING ++ "\"}]" },
+    .{ .name = "reasoning-tools", .tools = analysis_tools, .messages = "[" ++ USER ++ ",{\"role\":\"assistant\",\"content\":\"A_ASST_MSG I can help END_A\",\"reasoning_content\":\"" ++ THINKING ++ "\"}]" },
+    .{ .name = "reasoning-call", .tools = analysis_tools, .messages = "[" ++ USER ++ ",{\"role\":\"assistant\",\"content\":null,\"reasoning_content\":\"" ++ THINKING ++ "\",\"tool_calls\":[" ++
+        call(FUN_FIRST, "{\"" ++ ARG_FIRST ++ "\":\"VVVV\",\"" ++ ARG_SECOND ++ "\":\"XXXX\"}", "call00001") ++ "]}]" },
+    .{ .name = "content-tools", .tools = analysis_tools, .messages = "[" ++ USER ++ "," ++ ASSISTANT ++ "]" },
+    .{ .name = "test-func", .tools = analysis_tools, .messages = "[" ++ USER ++ "," ++ calls(call("test_func", "{\"arg1\":\"value1\"}", "call00001")) ++ "]" },
+    .{ .name = "empty-reasoning", .tools = analysis_tools, .messages = "[" ++ USER ++ ",{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"" ++ THINKING ++ "\"}]" },
+    .{ .name = "call", .tools = analysis_tools, .messages = "[" ++ USER ++ "," ++ calls(call(FUN_FIRST, both_args, "call00001")) ++ "]" },
+    .{ .name = "two-calls", .tools = analysis_tools, .messages = "[" ++ USER ++ "," ++ calls(call(FUN_FIRST, both_args, "call00001") ++ "," ++ call(FUN_SECOND, both_args, "call00002")) ++ "]" },
+    .{ .name = "second-call", .tools = analysis_tools, .messages = "[" ++ USER ++ "," ++ calls(call(FUN_SECOND, both_args, "call00002")) ++ "]" },
+    .{ .name = "zero-args", .tools = analysis_tools, .messages = "[" ++ USER ++ "," ++ calls(call(FUN_FIRST, "{}", "call00001")) ++ "]" },
+    .{ .name = "one-arg", .tools = analysis_tools, .messages = "[" ++ USER ++ "," ++ calls(call(FUN_FIRST, "{\"" ++ ARG_FIRST ++ "\":\"XXXX\"}", "call00001")) ++ "]" },
+    .{ .name = "other-val", .tools = analysis_tools, .messages = "[" ++ USER ++ "," ++ calls(call(FUN_FIRST, "{\"" ++ ARG_FIRST ++ "\":\"YYYY\"}", "call00001")) ++ "]" },
+    .{ .name = "other-arg", .tools = analysis_tools, .messages = "[" ++ USER ++ "," ++ calls(call(FUN_FIRST, "{\"" ++ ARG_SECOND ++ "\":\"YYYY\"}", "call00001")) ++ "]" },
+    .{ .name = "alt-id", .tools = analysis_tools, .messages = "[" ++ USER ++ "," ++ calls(call(FUN_FIRST, both_args, "call99999")) ++ "]" },
+    // Not a probe upstream renders, but a tool shape it accepts that the
+    // probes above never reach: no parameters (`{}`), so no `properties`.
+    .{ .name = "no-params-tool", .tools = "[{\"type\":\"function\",\"function\":{\"name\":\"ping\",\"description\":\"No arguments\",\"parameters\":{}}}]", .messages = "[" ++ USER ++ "," ++ calls(call("ping", "{}", "call00001")) ++ "]" },
+    .{ .name = "caps-string", .messages = "[{\"role\":\"user\",\"content\":\"STRING_MARKER\"}]", .tools = "[]" },
+    .{ .name = "caps-typed", .messages = "[{\"role\":\"user\",\"content\":[]}]", .tools = "[]" },
+    .{ .name = "caps-typed-text", .messages = "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Hello\"},{\"type\":\"text\",\"text\":\"again\"}]}]" },
+    .{ .name = "caps-system", .messages = "[{\"role\":\"system\",\"content\":\"System message\"},{\"role\":\"user\",\"content\":\"User message\"}]", .tools = "[]" },
+    .{ .name = "caps-object-args", .messages = capsCalls("{\"arg\":\"value\"}", false), .tools = caps_tools },
+    .{ .name = "caps-string-args", .messages = capsCalls("\"{\\\"arg\\\": \\\"value\\\"}\"", false), .tools = caps_tools },
+    .{ .name = "caps-parallel", .messages = capsCalls("{\"arg\":\"value\"}", true), .tools = caps_tools },
+    .{ .name = "caps-parallel-string", .messages = capsCalls("\"{\\\"arg\\\": \\\"value\\\"}\"", true), .tools = caps_tools },
+    .{ .name = "caps-preserve", .tools = "[]", .extra = ",\"preserve_thinking\":true,\"clear_thinking\":false,\"truncate_history_thinking\":false,\"drop_thinking\":false", .messages = "[{\"role\":\"user\",\"content\":\"User message\"}," ++
+        "{\"role\":\"assistant\",\"content\":\"Assistant message\",\"reasoning_content\":\"<REASONING_CONTENT_PLACEHOLDER>\"},{\"role\":\"user\",\"content\":\"User message\"}," ++
+        "{\"role\":\"assistant\",\"content\":\"Assistant message\",\"reasoning_content\":\"Reasoning content\"},{\"role\":\"user\",\"content\":\"User message\"}]" },
+    .{ .name = "caps-effort", .tools = "[]", .extra = ",\"reasoning_effort\":\"low\",\"reasoning_strength\":\"low\"", .messages = "[{\"role\":\"user\",\"content\":\"User message\"}]" },
+};
+
+/// The variables `common_chat_template_direct_apply_impl` binds for a probe.
+fn probeVars(a: std.mem.Allocator, p: Probe, add_generation_prompt: bool, enable_thinking: bool) ![]u8 {
+    return std.fmt.allocPrint(a, "{{\"messages\":{s},\"bos_token\":\"{s}\",\"eos_token\":\"{s}\",\"enable_thinking\":{s}{s}{s}{s}{s}}}", .{
+        p.messages,                               bos,                                                                  eos,
+        if (enable_thinking) "true" else "false", if (p.tools != null) ",\"tools\":" else "",                           p.tools orelse "",
+        p.extra,                                  if (add_generation_prompt) ",\"add_generation_prompt\":true" else "",
+    });
+}
+
+const ProbeOutcome = union(enum) { ok: []const u8, failed: []const u8 };
+
+/// How many differing probe renders to show; `JINJA_DIFF_SHOW` raises it.
+var probe_show_max: usize = 30;
+
+fn refProbe(source: []const u8, vars: []const u8) !ProbeOutcome {
+    var out: ?[*]u8 = null;
+    var out_len: usize = 0;
+    var input: ?[*]u8 = null;
+    const rc = jinja_ref_render(source.ptr, source.len, vars.ptr, vars.len, &out, &out_len, &input);
+    defer jinja_ref_free(out);
+    defer jinja_ref_free(input);
+    if (rc != 0) return .{ .failed = try gpa.dupe(u8, std.mem.span(@as([*:0]u8, @ptrCast(out.?)))) };
+    return .{ .ok = try gpa.dupe(u8, out.?[0..out_len]) };
+}
+
+fn portProbe(tmpl: *const common_chat.template.Template, vars: []const u8) !ProbeOutcome {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    var v = try json_mod.parse(a, vars);
+    var r: common_chat.template.Render = undefined;
+    r.init(gpa, false);
+    defer r.deinit();
+    try r.bindJson(&v, true);
+    const text = r.run(tmpl, gpa) catch |e| {
+        if (e == error.OutOfMemory) return e;
+        return .{ .failed = try gpa.dupe(u8, common_chat.exception.what(e)) };
+    };
+    return .{ .ok = text };
+}
+
+/// Every template over every probe, and its capabilities.
+///
+/// Return: the number of differing renders and of templates whose
+/// capabilities differ.
+fn runProbes(filter: []const u8) !struct { renders: usize, differ: usize, caps_differ: usize, caps: usize } {
+    var renders: usize = 0;
+    var differ: usize = 0;
+    var caps_differ: usize = 0;
+    var caps_n: usize = 0;
+    var shown: usize = 0;
+    for (inputs.templates) |tmpl| {
+        if (std.mem.indexOf(u8, tmpl.name, filter) == null) continue;
+        var ref_caps: [9]u8 = undefined;
+        const ref_rc = jinja_ref_caps(tmpl.source.ptr, tmpl.source.len, &ref_caps);
+        var port = common_chat.template.Template.init(gpa, tmpl.source, bos, eos) catch |e| {
+            if (ref_rc != 0) continue;
+            std.debug.print("  {s}: ours fails to load: {s}\n", .{ tmpl.name, @errorName(e) });
+            differ += 1;
+            continue;
+        };
+        defer port.deinit();
+        if (ref_rc != 0) {
+            std.debug.print("  {s}: upstream fails to load, ours does not\n", .{tmpl.name});
+            differ += 1;
+            continue;
+        }
+        caps_n += 1;
+        const port_map = port.caps.toMap();
+        for (port_map, 0..) |e, i| {
+            if (@intFromBool(e.value) != ref_caps[i]) {
+                caps_differ += 1;
+                std.debug.print("  {s}: caps {s}: upstream {d}, ours {}\n", .{ tmpl.name, e.name, ref_caps[i], e.value });
+            }
+        }
+        var line: [probes.len * 4]u8 = undefined;
+        for (probes, 0..) |p, k| {
+            for ([_]bool{ false, true }, 0..) |gen, gi| for ([_]bool{ true, false }, 0..) |think, ti| {
+                const vars = try probeVars(gpa, p, gen, think);
+                defer gpa.free(vars);
+                const ref = try refProbe(tmpl.source, vars);
+                const ours = try portProbe(&port, vars);
+                renders += 1;
+                var mark: u8 = '=';
+                switch (ref) {
+                    .failed => mark = if (ours == .failed) 'x' else 'R',
+                    .ok => |rt| switch (ours) {
+                        .failed => mark = 'E',
+                        .ok => |pt| if (!std.mem.eql(u8, rt, pt)) {
+                            mark = 'T';
+                            if (shown < probe_show_max) {
+                                shown += 1;
+                                const at = std.mem.indexOfDiff(u8, rt, pt).?;
+                                std.debug.print("  {s} / probe {s} gen={} think={}: text\n", .{ tmpl.name, p.name, gen, think });
+                                snippet("ref ", rt, at);
+                                snippet("port", pt, at);
+                            }
+                        },
+                    },
+                }
+                if (mark != '=' and mark != 'x') differ += 1;
+                if ((mark == 'E' or mark == 'R') and shown < probe_show_max) {
+                    shown += 1;
+                    std.debug.print("  {s} / probe {s} gen={} think={}: {s} raises: {s}\n", .{ tmpl.name, p.name, gen, think, if (mark == 'E') "ours" else "upstream", if (mark == 'E') ours.failed else ref.failed });
+                }
+                switch (ref) {
+                    inline else => |x| gpa.free(x),
+                }
+                switch (ours) {
+                    inline else => |x| gpa.free(x),
+                }
+                line[k * 4 + gi * 2 + ti] = mark;
+            };
+        }
+        std.debug.print("{s}  {s}\n", .{ line, tmpl.name });
+    }
+    return .{ .renders = renders, .differ = differ, .caps_differ = caps_differ, .caps = caps_n };
+}
+
 const Verdict = enum { same, both_failed, text, trust, port_failed, ref_failed };
 
 pub fn main(init: std.process.Init) !void {
@@ -315,6 +525,12 @@ pub fn main(init: std.process.Init) !void {
         break :blk false;
     };
 
+    std.debug.print("-- probes: {d} conversations x generation prompt x thinking (= same, x both raise, T text, E ours raises, R upstream raises)\n", .{probes.len});
+    if (std.c.getenv("JINJA_DIFF_SHOW")) |v| probe_show_max = std.fmt.parseInt(usize, std.mem.span(v), 10) catch probe_show_max;
+    const probe_result = try runProbes(filter);
+    std.debug.print("  probes: {d} renders, {d} differ; capabilities: {d} templates, {d} values differ\n", .{ probe_result.renders, probe_result.differ, probe_result.caps, probe_result.caps_differ });
+    const probes_ok = probe_result.differ == 0 and probe_result.caps_differ == 0;
+
     var renders: usize = 0;
     for (std.enums.values(Verdict)) |v| renders += counts.get(v);
     std.debug.print(
@@ -335,10 +551,11 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("FAIL: no template matched\n", .{});
         std.process.exit(2);
     }
-    if (templates_ok == templates and clock_ok) {
-        std.debug.print("PASS: {d} templates x {d} conversations and the clock agree with upstream's engine\n", .{ templates, conversations.len });
+    if (templates_ok == templates and clock_ok and probes_ok) {
+        std.debug.print("PASS: {d} templates x {d} conversations, {d} probe renders, the capabilities and the clock agree with upstream's engine\n", .{ templates, conversations.len, probe_result.renders });
         return;
     }
+    if (!probes_ok) std.debug.print("FAIL: {d} probe renders and {d} capability values disagree with upstream's\n", .{ probe_result.differ, probe_result.caps_differ });
     if (!clock_ok) std.debug.print("FAIL: strftime_now disagrees with upstream's local time\n", .{});
     std.debug.print("FAIL: {d} of {d} templates disagree with upstream's engine ({d} of {d} renders)\n", .{
         templates - templates_ok, templates, renders - counts.get(.same) - counts.get(.both_failed), renders,

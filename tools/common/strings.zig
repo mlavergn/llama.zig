@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `string_remove_suffix`, `string_parse_kv_override` and the
-//! `std::string` specialisation of `string_split` from
+//! Ports `string_remove_suffix`, `string_strip`, `string_parse_kv_override`
+//! and the `std::string` specialisation of `string_split` from
 //! `llama.cpp/common/common.cpp` and `common/common.h` (v0.4.1, `b29c606e2`).
 //! Each declaration names what it ports and the line it began at.
 
@@ -19,6 +19,23 @@ extern fn atof(s: [*:0]const u8) f64;
 pub fn removeSuffix(str: []const u8, suffix: []const u8) ?[]const u8 {
     if (!std.mem.endsWith(u8, str, suffix)) return null;
     return str[0 .. str.len - suffix.len];
+}
+
+/// Ports `string_strip` (common/common.cpp:458 @b29c606e2): `str` without
+/// the leading and trailing bytes `std::isspace` accepts in the "C" locale.
+///
+/// Return: a slice of `str`.
+pub fn strip(str: []const u8) []const u8 {
+    var start: usize = 0;
+    var end: usize = str.len;
+    while (start < end and isSpace(str[start])) start += 1;
+    while (end > start and isSpace(str[end - 1])) end -= 1;
+    return str[start..end];
+}
+
+/// `std::isspace` in the "C" locale.
+fn isSpace(ch: u8) bool {
+    return ch == ' ' or (ch >= '\t' and ch <= '\r');
 }
 
 /// Ports `string_split` (common/common.h:818 @b29c606e2): the parts

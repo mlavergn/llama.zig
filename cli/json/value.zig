@@ -792,7 +792,7 @@ pub const Value = union(Type) {
 
 /// `JSON_ASSERT`, which `json.cpp` defines as `GGML_ASSERT`.
 fn jsonAssert(comptime cond: []const u8) noreturn {
-    std.debug.print("{s}:{d}: GGML_ASSERT({s}) failed\n", .{ "json.hpp", 0, cond });
+    @import("errors.zig").writeStderr("json.hpp" ++ ":0: GGML_ASSERT(" ++ cond ++ ") failed\n");
     std.process.abort();
 }
 

@@ -1,0 +1,35 @@
+# Speculative decoding through the server (Stage 10 step 3c): scripts/server-diff
+# spec. The drafters are tools/common's (spec-diff holds them to upstream's);
+# here the slots drive them: drafting, verifying, accepting, and on a
+# hybrid model restoring the speculative checkpoint.
+!server -m $QWEN3 -c 2048 -np 2 --no-jinja --spec-type ngram-simple --spec-ngram-simple-size-n 2 --spec-ngram-simple-size-m 6 -lv 4
+!fulllog
+POST /completion {"prompt": "a b c d e f g a b c d e f g a b c d e f g a b c", "n_predict": 24, "temperature": 0}
+POST /completion {"prompt": "1 2 3 4 5 1 2 3 4 5 1 2 3 4 5 1 2", "n_predict": 16, "temperature": 0, "stream": true}
+GET /slots
+GET /props
+
+!server -m $QWEN3 -md $QWEN3 -c 2048 -np 1 --no-jinja --spec-type draft-simple --spec-draft-n-max 4 -lv 4
+!fulllog
+POST /completion {"prompt": "The capital of France is", "n_predict": 16, "temperature": 0}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "n_probs": 2}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "stop": [" 9"]}
+POST /completion {"prompt": "Once upon a time", "n_predict": 24, "temperature": 1.0, "seed": 11}
+GET /slots
+
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --spec-type ngram-mod,ngram-map-k --spec-ngram-mod-n-match 4 --spec-ngram-mod-n-min 2 --spec-ngram-mod-n-max 8 --spec-ngram-map-k-size-n 2 --spec-ngram-map-k-size-m 6 -lv 4
+!fulllog
+POST /completion {"prompt": "red green blue red green blue red green blue red green blue red", "n_predict": 20, "temperature": 0}
+
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --spec-type ngram-simple --spec-ngram-simple-size-n 2 --spec-ngram-simple-size-m 6 --spec-synth-len 2.5 -lv 4
+!fulllog
+POST /completion {"prompt": "a b c a b c a b c a b c", "n_predict": 16, "temperature": 0, "seed": 3}
+
+# hybrid: a partly accepted draft rolls the recurrent state back to the
+# speculative checkpoint
+!server -m $QWEN35 -c 2048 -np 1 --no-jinja --spec-type ngram-simple --spec-ngram-simple-size-n 2 --spec-ngram-simple-size-m 6 -lv 4
+!fulllog
+POST /completion {"prompt": "a b c d e f g a b c d e f g a b c d e f g a b c", "n_predict": 24, "temperature": 0}
+POST /completion {"prompt": "one two three one two three one two three one", "n_predict": 16, "temperature": 0}
+POST /completion {"prompt": "1 2 3 4 1 2 3 5 1 2 3 4 1 2 3 5 1 2 3 4 1 2 3", "n_predict": 24, "temperature": 0}
+POST /completion {"prompt": "Once upon a time there was a cat. Once upon a time there was a dog. Once upon a time there was", "n_predict": 24, "temperature": 1.0, "seed": 5}

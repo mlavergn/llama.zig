@@ -1,0 +1,55 @@
+# Resumable streams (Stage 10 step 3c): scripts/server-diff stream. A
+# request carrying X-Conversation-Id tees its stream into a session that
+# /v1/stream replays from any offset; the lookup and delete routes find and
+# end it.
+!mask-key started_at
+# a stream's bytes include its timings, whose widths vary
+!mask-key total_bytes
+!mask-key completed_at
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja -lv 4
+!fulllog
+!header X-Conversation-Id: conv-1
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0, "stream": true}
+!noheaders
+POST /v1/streams/lookup {"conversation_ids": ["conv-1", "conv-2", "conv"]}
+GET /v1/stream?conv_id=conv-1
+GET /v1/stream?conv_id=conv-1&from=40
+GET /v1/stream?conv_id=conv-1&from=abc
+GET /v1/stream?conv_id=conv-1&from=999999
+!header x-conversation-ID: conv-1::model-b
+POST /v1/completions {"prompt": "Count: 1, 2,", "max_tokens": 6, "temperature": 0, "stream": true}
+!noheaders
+POST /v1/streams/lookup {"conversation_ids": ["conv-1"]}
+!header X-Conversation-Id: conv-3
+POST /completion {"prompt": "no stream here", "n_predict": 4, "temperature": 0}
+POST /completion {"prompt": 42, "stream": true}
+!noheaders
+POST /v1/streams/lookup {"conversation_ids": ["conv-3"]}
+DELETE /v1/stream?conv_id=conv-1
+DELETE /v1/stream?conv_id=conv-1
+GET /v1/stream?conv_id=conv-1
+POST /v1/streams/lookup {"conversation_ids": ["conv-1"]}
+GET /v1/stream?conv_id=conv-1::model-b
+
+# a client that hangs up mid-stream: without a session the reader cancels
+# the task and the slot is free again; with one, the generation runs to its
+# end into the session, which a later reader replays
+# (each decode step draws a task id, and how many ran before the hang-up
+# is the wall clock's)
+!mask-key id_task
+!mask-key n_decoded
+!mask-key n_remain
+!mask-key n_prompt_tokens
+!mask-key has_new_line
+!server -m $QWEN3 -c 4096 -np 1 --no-jinja
+!abandon
+POST /completion {"prompt": "Write a very long story.", "n_predict": 3000, "temperature": 0, "stream": true}
+!sleep 2
+GET /slots
+!header X-Conversation-Id: conv-gone
+!abandon
+POST /completion {"prompt": "Count from one:", "n_predict": 40, "temperature": 0, "stream": true}
+!noheaders
+!sleep 3
+GET /slots
+GET /v1/stream?conv_id=conv-gone

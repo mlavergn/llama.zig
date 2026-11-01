@@ -1,0 +1,80 @@
+# The CORS proxy, --ui-mcp-proxy (Stage 10 step 6): scripts/server-diff
+# proxy. Each side forwards to the one target proxy.setup starts
+# (harness/server/proxy_target.py, at $TPORT), or to itself ($SPORT).
+# A multipart body is re-encoded under a boundary drawn from a random
+# device, so the boundary is masked.
+!mask ----llama-cpp-proxy-[0-9a-z]{16}
+!server -m $QWEN3 -c 512 -np 1 --no-jinja
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/echo {}
+
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --ui-mcp-proxy
+!fulllog
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo%3Fa%3D1%26b%3Dtwo%20words
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo/a%20b,c;d'e
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo/a%2Bb+c
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/echo {"hello": "world"}
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/echo
+GET /cors-proxy?url=http://127.0.0.1:$TPORT
+GET /cors-proxy?url=http://127.0.0.1:$SPORT/health
+GET /cors-proxy?url=http://127.0.0.1:$SPORT/v1/models
+POST /cors-proxy?url=http://127.0.0.1:$SPORT/tokenize {"content": "hello world"}
+GET /cors-proxy?url=http://127.0.0.1:$SPORT/no-such-route
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/status/204
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/status/204 {}
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/status/304
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/status/404
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/status/500
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/redirect/echo%3Fvia%3Dredirect
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/redirect/redirect/echo
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/keep/keep/echo%3Fkept
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/keep/echo {"reused": "connection"}
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/redirect-abs/echo
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/redirect-abs/echo {"kept": true}
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/see-other {"dropped": true}
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/loop
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/redirect-ftp
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/redirect-empty
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/chunked
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/close
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/http10
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/dup-headers
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/gzip
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/bad-status
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/conflict
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/short
+GET /cors-proxy?url=http://127.0.0.1:1/
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/echo {"big": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/no-continue {"big": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"}
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/continue-reject {"big": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"}
+!header x-llama-server-proxy-header-Authorization: Bearer abc
+!header X-LLAMA-SERVER-PROXY-HEADER-x-custom: one
+!header x-llama-server-proxy-header-Accept-Encoding: gzip
+!header x-llama-server-proxy-header-Content-Length: 999
+!header x-llama-server-proxy-header-Transfer-Encoding: chunked
+!header x-llama-server-proxy-header-Host: elsewhere.example
+!header x-llama-server-proxy-header-: empty
+!header x-other: not forwarded
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/redirect-abs/echo {"x": 1}
+GET /cors-proxy?url=http://127.0.0.1:80/
+!noheaders
+!header x-llama-server-proxy-header-Content-Type: multipart/form-data; boundary=zzz
+FORM /cors-proxy?url=http://127.0.0.1:$TPORT/echo {"a": "1", "b": ["2", "3"]}
+!noheaders
+!header x-llama-server-proxy-header-Content-Type: text/plain
+FORM /cors-proxy?url=http://127.0.0.1:$TPORT/echo {"a": "x\"y", "file": "@file:$DATA/upload.txt"}
+!noheaders
+GET /cors-proxy
+GET /cors-proxy?url=ftp://127.0.0.1/x
+GET /cors-proxy?url=http://
+GET /cors-proxy?url=http:///path
+GET /cors-proxy?url=http://u:p@127.0.0.1:$TPORT/echo
+GET /cors-proxy?url=http://u@127.0.0.1:$TPORT/echo
+GET /cors-proxy?url=http://127.0.0.1:abc/
+GET /cors-proxy?url=http://127.0.0.1:99999999999/
+GET /cors-proxy?url=https://127.0.0.1:$TPORT/echo
+GET /cors-proxy?url=http://[::1/x
+GET /cors-proxy?url=http://[::1]:1/x
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo/%E2%9C%93

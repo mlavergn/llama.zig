@@ -69,6 +69,21 @@ pub fn fail(kind: Kind, id: u16, comptime fmt: []const u8, args: anytype) Error 
     return error.JsonError;
 }
 
+/// `fwrite(bytes, 1, n, stderr)` through the C library, as upstream's
+/// `fprintf(stderr, ...)` writes. Library code here never prints through
+/// `std.debug` (CLAUDE.md, "compiler_rt shadows the C library"), and
+/// `cli/json` links no `llama` module to reach `impl.cStderr` from.
+pub fn writeStderr(bytes: []const u8) void {
+    const builtin = @import("builtin");
+    const stream: *anyopaque = if (comptime builtin.os.tag == .windows)
+        __acrt_iob_func(2)
+    else
+        @extern(*const *anyopaque, .{ .name = if (builtin.os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
+    _ = fwrite(bytes.ptr, 1, bytes.len, stream);
+}
+extern fn fwrite(ptr: [*]const u8, size: usize, n: usize, stream: *anyopaque) usize;
+extern fn __acrt_iob_func(index: c_uint) callconv(.c) *anyopaque;
+
 /// `position_t`: where the lexer stands, as it counts.
 pub const Position = struct {
     /// the total number of characters read

@@ -1,0 +1,4900 @@
+//! The server's core: the slots, the batch loop that drives them, and the
+//! tasks the HTTP threads hand it -- `server_context`.
+//!
+//! # Provenance
+//!
+//! Ports `llama.cpp/tools/server/server-context.cpp` and
+//! `llama.cpp/tools/server/server-context.h` (llama.cpp v0.4.1,
+//! `b29c606e2`) up to the public `server_context` and `get_meta`:
+//! `server_output_limits`, `server_sample_and_accept_synth`, `slot_state`,
+//! `server_batch`, `server_slot`, `process_mtmd_chunk`,
+//! `server_context_impl` and `server_context`. The routes and the response
+//! generator are `routes.zig`. Each declaration names what it ports and the
+//! line it began at.
+//!
+//! # Threads
+//!
+//! As upstream: the decode loop runs on the thread that calls
+//! `startLoop` (the main thread), the HTTP handlers on cpp-httplib's pool,
+//! and the two meet only through `queue.zig`'s queues. `yield_to_queue`
+//! lets the queue's worker thread answer metrics and slot queries while a
+//! decode runs here.
+//!
+//! # Exceptions
+//!
+//! A C++ throw is an error; `whatOf` reads the text from whichever buffer
+//! the thrower set (`common_chat`'s for the data layer, `cli/json`'s for
+//! nlohmann, `tools_common.arg`'s for the sampler and the drafters).
+//!
+//! # Chat templates
+//!
+//! One template object, `common_chat.templates`' (Stage 9 step 4), as
+//! upstream's `common_chat_templates`: parsed with the Jinja engine at
+//! startup whether or not `--jinja` is on, for its capabilities and source
+//! (what `/props` reports), and rendered by `oaicompat.chatTemplatesApply`
+//! through Jinja or, with `--no-jinja`, through libllama's built-in
+//! families. Its log lines (`LOG_DBG` and friends in `common/chat.cpp`, the
+//! auto-parser and the per-model parsers) reach `common_log` through
+//! `chatLogSink`.
+
+const std = @import("std");
+const builtin = @import("builtin");
+const tc = @import("tools_common");
+const json = @import("json");
+const chat = @import("common_chat");
+const mtmd_mod = @import("mtmd");
+const libcxx = @import("llama").libcxx;
+
+const common = @import("common.zig");
+const tokens_mod = @import("tokens.zig");
+const task_mod = @import("task.zig");
+const result_mod = @import("result.zig");
+const queue_mod = @import("queue.zig");
+const oaicompat = @import("oaicompat.zig");
+
+const c = tc.c;
+const log = tc.log;
+const sampling = tc.sampling;
+const spec_mod = tc.speculative;
+const Params = tc.params.Params;
+const LoraInfo = tc.params.LoraInfo;
+
+const Allocator = std.mem.Allocator;
+const Value = json.Value;
+const Token = common.Token;
+const Task = task_mod.Task;
+const TaskType = task_mod.TaskType;
+const Result = result_mod.Result;
+const ServerTokens = tokens_mod.ServerTokens;
+const ServerPrompt = task_mod.ServerPrompt;
+const PromptCheckpoint = task_mod.PromptCheckpoint;
+const CompletionTokenOutput = task_mod.CompletionTokenOutput;
+const ErrorType = common.ErrorType;
+
+pub const TaskQueue = queue_mod.Queue(Task);
+pub const ResultQueue = queue_mod.Response(*Result);
+pub const Reader = queue_mod.ResponseReader(Task, *Result, task_mod.TaskResultState);
+
+/// Every allocation that crosses threads: tasks, results, slot state.
+pub const gpa = std.heap.c_allocator;
+
+const token_null = common.token_null;
+
+/// Ports `HTTP_POLLING_SECONDS` (server-context.cpp:39 @b29c606e2).
+pub const http_polling_seconds: c_int = 1;
+
+// -----------------------------------------------------------------------------
+// logging, assertions, exceptions
+
+/// `GGML_ASSERT` with this file's name.
+fn ggmlAssert(ok: bool, comptime line: c_int, comptime cond: [*:0]const u8) void {
+    common.ggmlAssert(ok, "server-context.cpp", line, cond);
+}
+
+/// `GGML_ABORT(msg)`.
+fn ggmlAbort(comptime line: c_int, comptime fmt: [*:0]const u8, args: anytype) noreturn {
+    _ = @call(.auto, c.ggml_abort, .{ "server-context.cpp", line, fmt } ++ args);
+    unreachable;
+}
+
+const srv = common.srv;
+
+/// Ports `SLT_DBG`, `SLT_TRC`, `SLT_INF`, `SLT_WRN` and `SLT_ERR`
+/// (server-common.h:26, 27, 28, 29, 30 @b29c606e2): the message prefixed
+/// with the calling function's name, the slot's id and its task's.
+fn slt(comptime level: common.SrvLevel, comptime func: []const u8, slot: *const Slot, comptime fmt: []const u8, args: anytype) void {
+    const f = "slot %12.*s: id %2d | task %d | " ++ fmt;
+    const pre = .{ @as(c_int, 12), @as([*:0]const u8, func ++ ""), @as(c_int, slot.id), @as(c_int, if (slot.task) |*t| t.id else -1) };
+    switch (level) {
+        .dbg => log.dbg(f, pre ++ args),
+        .trc => log.trc(f, pre ++ args),
+        .inf => log.inf(f, pre ++ args),
+        .wrn => log.wrn(f, pre ++ args),
+        .err => log.err(f, pre ++ args),
+    }
+}
+
+/// Whether a `LOG_*` line at `verbosity` prints: the macros evaluate their
+/// arguments only then, and some arguments are expensive or throw.
+fn logOn(verbosity: c_int) bool {
+    return verbosity <= log.verbosity_thold;
+}
+
+/// A NUL-terminated copy for a `%s`, freed by the caller with `freeZ`.
+const dupZ = common.dupZ;
+const freeZ = common.freeZ;
+
+/// `common/chat.cpp`'s `LOG_DBG`, `LOG_INF`, `LOG_WRN` and `LOG_ERR`, which
+/// `cli/common_chat/log.zig` hands its host as finished lines: into
+/// `common_log` at the macro's level and verbosity.
+fn chatLogSink(level: chat.log.Level, text: []const u8) void {
+    const z = dupZ(text);
+    defer freeZ(z);
+    switch (level) {
+        .debug => log.dbg("%s", .{z}),
+        .info => log.inf("%s", .{z}),
+        .warn => log.wrn("%s", .{z}),
+        .err => log.err("%s", .{z}),
+    }
+}
+
+/// `chat.h`'s message helpers' `LOG_WRN` and `LOG_ERR` (`msg.zig`'s own
+/// sink), likewise.
+fn chatMsgLogSink(level: chat.msg.Level, text: []const u8) void {
+    chatLogSink(if (level == .warn) .warn else .err, text);
+}
+
+/// Whether `LOG_DBG` prints at the current verbosity.
+fn chatDebugOn() bool {
+    return logOn(log.level_debug);
+}
+
+/// `common_chat_verify_template(tmpl, true)`, for `arg.zig`'s parse.
+fn verifyJinjaTemplate(_: std.mem.Allocator, tmpl: []const u8) anyerror!bool {
+    return chat.templates.verifyTemplate(gpa, tmpl, true);
+}
+
+/// Wires `cli/common_chat/` into the process, before the arguments are
+/// parsed: its log lines into `common_log`, as upstream's `common/chat.cpp`
+/// logs, and the Jinja arm of `common_chat_verify_template`, which
+/// `--chat-template` runs at parse time.
+pub fn installChat() void {
+    chat.log.sink = chatLogSink;
+    chat.log.debug_on = chatDebugOn;
+    chat.msg.log_sink = chatMsgLogSink;
+    tc.arg.verify_jinja_template = verifyJinjaTemplate;
+}
+
+/// `e.what()` for an error from any of the libraries the core calls: the
+/// data layer's (`common_chat`'s buffer), nlohmann's, and `tools_common`'s
+/// (`arg.what()`, the sampler's and the drafters').
+pub fn whatOf(e: anyerror) []const u8 {
+    return switch (e) {
+        error.JsonError => json.what(),
+        error.OutOfMemory => "std::bad_alloc",
+        error.InvalidArgument, error.RuntimeError => common.what(e),
+        error.Runtime, error.Throw => tc.arg.what(),
+        else => @errorName(e),
+    };
+}
+
+// -----------------------------------------------------------------------------
+// free functions
+
+/// Ports `server_output_limits` (server-context.cpp:41 @b29c606e2): the
+/// context's output buffer, sized for every slot verifying a full draft.
+fn serverOutputLimits(params: *const Params) spec_mod.OutputLimits {
+    if (params.embedding or
+        (params.pooling_type != c.LLAMA_POOLING_TYPE_UNSPECIFIED and params.pooling_type != c.LLAMA_POOLING_TYPE_NONE))
+    {
+        return .{ .total = params.n_batch, .per_seq = 1 };
+    }
+
+    var result = spec_mod.getOutputLimits(params.n_batch, params.n_parallel, spec_mod.nMaxParams(&params.speculative));
+
+    result.total = @max(1, result.total);
+    result.per_seq = @max(1, result.per_seq);
+    return result;
+}
+
+/// Ports `server_sample_and_accept_synth` (server-context.cpp:57 @b29c606e2):
+/// synthetic draft verification for benchmarking -- accept draft tokens at
+/// random instead of by match with the target; on replay the draft was
+/// already accepted before a context checkpoint restore, so repeat the same
+/// decisions.
+///
+/// Return: owned by `a`.
+fn sampleAndAcceptSynth(
+    a: Allocator,
+    smpl: *sampling.Sampler,
+    ctx: ?*c.llama_context,
+    idxs: []const i32,
+    draft: []const Token,
+    synth_probs: []const f64,
+    rng: *libcxx.Mt19937,
+    is_replay: bool,
+) ![]Token {
+    ggmlAssert(idxs.len == draft.len + 1, 65, "idxs.size() == draft.size() + 1");
+    ggmlAssert(synth_probs.len >= draft.len, 66, "synth_probs.size() >= draft.size()");
+
+    var result: std.ArrayList(Token) = .empty;
+    errdefer result.deinit(a);
+    try result.ensureTotalCapacity(a, idxs.len);
+
+    const vocab = c.llama_model_get_vocab(c.llama_get_model(ctx));
+    for (draft, 0..) |d, i| {
+        const id = try smpl.sample(ctx, idxs[i], false);
+        const accept = is_replay or libcxx.uniformF64(rng) < synth_probs[i];
+        // do not accept a drafted EOG token - it would end the generation early
+        // on replay the last token is from the target and can be EOG, so skip this check
+        if (accept and (is_replay or !c.llama_vocab_is_eog(vocab, d))) {
+            // synthetic draft tokens do not advance grammar or reasoning state
+            // the last replay token is from the target and must advance both
+            const is_replay_target = is_replay and i + 1 == draft.len;
+            smpl.accept(d, is_replay_target);
+            result.appendAssumeCapacity(d);
+            continue;
+        }
+
+        smpl.accept(id, true);
+        result.appendAssumeCapacity(id);
+        return result.toOwnedSlice(a);
+    }
+
+    const id = try smpl.sample(ctx, idxs[draft.len], false);
+    smpl.accept(id, true);
+    result.appendAssumeCapacity(id);
+
+    return result.toOwnedSlice(a);
+}
+
+/// Ports `slot_state` (server-context.cpp:100 @b29c606e2). State diagram:
+/// https://github.com/ggml-org/llama.cpp/pull/9283
+pub const SlotState = enum {
+    idle,
+    wait_other, // after assigning a task, but waiting for parent slot to process prompt
+    started, // after assigning a task and about to process prompt
+    processing_prompt,
+    done_prompt,
+    generating,
+};
+
+// -----------------------------------------------------------------------------
+// server_batch
+
+/// Ports `server_batch` (server-context.cpp:111 @b29c606e2): the tokens of
+/// one iteration, rendered into a `llama_batch` once complete.
+pub const Batch = struct {
+    /// Ports `server_batch`'s `token` (server-context.cpp:115 @b29c606e2).
+    pub const Tok = struct {
+        id_slot: i32,
+        token: Token,
+        pos: c.llama_pos,
+        output: bool,
+        is_prompt: bool, // for stats tracking
+    };
+
+    batch: c.llama_batch = std.mem.zeroes(c.llama_batch),
+    batch_rendered: bool = false,
+
+    tokens: std.ArrayList(Tok) = .empty,
+    n_tokens_alloc: i32 = 0,
+    n_embd: i32 = 0,
+
+    // track if given slot can be batched with slots already in the batch
+    slot_batched: ?*Slot = null,
+
+    // in embd mode, we temporarily swap out the tokens arr and restore it on clear()
+    has_embd: bool = false,
+    tokens_ptr: [*c]Token = null,
+    embd: std.ArrayList(f32) = .empty,
+
+    alora_scale: f32 = -1.0,
+    alora_disabled_id: usize = 0,
+
+    /// Ports the destructor of `server_batch` (server-context.cpp:141 @b29c606e2).
+    fn deinit(self: *Batch) void {
+        if (self.batch.pos != null) {
+            self.clear();
+            c.llama_batch_free(self.batch);
+        }
+        self.tokens.deinit(gpa);
+        self.embd.deinit(gpa);
+    }
+
+    /// Ports `server_batch`'s `init` (server-context.cpp:148 @b29c606e2).
+    fn init(self: *Batch, n_tokens_alloc: i32, n_embd: i32) !void {
+        self.n_tokens_alloc = n_tokens_alloc;
+        self.n_embd = n_embd;
+        self.batch = c.llama_batch_init(n_tokens_alloc, 0, 1);
+        self.tokens_ptr = self.batch.token;
+        try self.tokens.ensureTotalCapacity(gpa, @intCast(n_tokens_alloc));
+    }
+
+    /// Ports `server_batch`'s `add` (server-context.cpp:156 @b29c606e2), a token.
+    fn add(self: *Batch, id_slot: i32, token: Token, pos: c.llama_pos, output: bool, is_prompt: bool) !bool {
+        ggmlAssert(!self.has_embd, 157, "!has_embd"); // cannot mix tokens + embd in same batch
+        ggmlAssert(self.batch.pos != null, 158, "batch.pos != nullptr");
+        if (@as(i32, @intCast(self.tokens.items.len)) >= self.n_tokens_alloc) {
+            return false;
+        }
+        try self.tokens.append(gpa, .{ .id_slot = id_slot, .token = token, .pos = pos, .output = output, .is_prompt = is_prompt });
+        return true;
+    }
+
+    /// Ports `server_batch`'s `add` (server-context.cpp:166 @b29c606e2), an embedding.
+    fn addEmbd(self: *Batch, id_slot: i32, embd_in: []const f32, pos: c.llama_pos, output: bool, is_prompt: bool) !bool {
+        ggmlAssert(self.batch.pos != null, 167, "batch.pos != nullptr");
+        if (@as(i32, @intCast(self.tokens.items.len)) >= self.n_tokens_alloc) {
+            return false;
+        }
+        try self.tokens.append(gpa, .{ .id_slot = id_slot, .token = token_null, .pos = pos, .output = output, .is_prompt = is_prompt });
+        self.has_embd = true;
+        try self.embd.appendSlice(gpa, embd_in);
+        return true;
+    }
+
+    /// Ports `server_batch`'s `clear` (server-context.cpp:177 @b29c606e2).
+    fn clear(self: *Batch) void {
+        self.tokens.clearRetainingCapacity();
+        self.embd.clearRetainingCapacity();
+        tc.common.batchClear(&self.batch);
+        self.slot_batched = null;
+        self.alora_scale = -1.0;
+        self.alora_disabled_id = 0;
+        self.batch_rendered = false;
+        self.has_embd = false;
+        if (self.batch.token == null) {
+            self.batch.token = self.tokens_ptr;
+            self.batch.embd = null;
+        }
+    }
+
+    /// Ports `server_batch`'s `size` (server-context.cpp:192 @b29c606e2).
+    fn size(self: *const Batch) i32 {
+        return @intCast(self.tokens.items.len);
+    }
+
+    /// Ports `server_batch`'s `set_output` (server-context.cpp:196 @b29c606e2).
+    fn setOutput(self: *Batch, idx: i32, output: bool) void {
+        ggmlAssert(idx >= 0 and idx < self.size(), 197, "idx >= 0 && idx < (int32_t)tokens.size()");
+        self.tokens.items[@intCast(idx)].output = output;
+    }
+
+    /// Ports `server_batch`'s `render` (server-context.cpp:201 @b29c606e2).
+    fn render(self: *Batch) void {
+        ggmlAssert(!self.batch_rendered, 202, "!batch_rendered");
+        ggmlAssert(self.batch.pos != null, 203, "batch.pos != nullptr");
+        tc.common.batchClear(&self.batch);
+        for (self.tokens.items) |t| {
+            tc.common.batchAdd(&self.batch, t.token, t.pos, &.{t.id_slot}, t.output);
+        }
+        if (self.has_embd) {
+            self.batch.token = null; // will be restored on clear()
+            self.batch.embd = self.embd.items.ptr;
+        }
+        self.batch_rendered = true;
+    }
+
+    /// Ports `server_batch`'s `get_view` (server-context.cpp:216 @b29c606e2).
+    fn getView(self: *const Batch, off: i32, n_tokens: i32) c.llama_batch {
+        ggmlAssert(self.batch.pos != null, 217, "batch.pos != nullptr");
+        ggmlAssert(self.batch_rendered, 218, "batch_rendered");
+        ggmlAssert(off >= 0 and off < self.size(), 219, "off >= 0 && off < size()");
+        ggmlAssert(n_tokens > 0 and off + n_tokens <= self.size(), 220, "n_tokens > 0 && off + n_tokens <= size()");
+
+        const o: usize = @intCast(off);
+        const b = self.batch;
+        return .{
+            .n_tokens = n_tokens,
+            .token = if (b.token != null) b.token + o else null,
+            .embd = if (b.embd != null) b.embd + o * @as(usize, @intCast(self.n_embd)) else null,
+            .pos = b.pos + o,
+            .n_seq_id = b.n_seq_id + o,
+            .seq_id = b.seq_id + o,
+            .logits = b.logits + o,
+        };
+    }
+};
+
+// -----------------------------------------------------------------------------
+// server_slot
+
+/// Ports `server_slot` (server-context.cpp:239 @b29c606e2): one client's
+/// sequence -- its task, its prompt in the KV cache, its sampler.
+pub const Slot = struct {
+    id: c_int = 0,
+
+    ctx_tgt: ?*c.llama_context = null,
+    ctx_dft: ?*c.llama_context = null,
+
+    mem: tc.common.Memory = .{},
+
+    // multimodal
+    mctx: ?*c.mtmd_context = null,
+    mbatch: ?*c.mtmd_batch = null,
+
+    // speculative decoding
+    spec: ?*spec_mod.Speculative = null,
+
+    spec_draft: std.ArrayList(Token) = .empty,
+    spec_prompt: []Token = &.{},
+    spec_i_batch: std.ArrayList(i32) = .empty,
+    spec_ckpt: PromptCheckpoint = .{},
+    spec_is_replay: bool = false,
+    spec_synth_rng: libcxx.Mt19937 = libcxx.Mt19937.init(libcxx.Mt19937.default_seed),
+
+    // TODO: move members that belong to the task (such as `generated_text`, `has_new_line`) to task_results_state
+    //       see https://github.com/ggml-org/llama.cpp/pull/18283#issuecomment-3710175837
+    task: ?Task = null,
+    task_prev: ?Task = null, // used for debugging
+
+    // used to determine the slot that has been used the longest
+    t_last_used: i64 = -1,
+
+    // generation props
+    n_ctx: i32 = 0, // context size per slot
+    n_keep: i32 = 0,
+    i_batch: i32 = -1,
+
+    // effective generation limit for the current task, -1 means unlimited
+    n_predict_max: i32 = -1,
+
+    last_nl_pos: usize = 0,
+
+    generated_text: std.ArrayList(u8) = .empty,
+    debug_generated_text: std.ArrayList(u8) = .empty,
+    generated_tokens: std.ArrayList(Token) = .empty,
+    n_sent_text: usize = 0, // number of sent text character (i.e. handle partial UTF-8 on streaming)
+
+    generated_token_probs: std.ArrayList(CompletionTokenOutput) = .empty,
+    /// Owns the strings in `generated_token_probs`; reset with them.
+    probs_arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.c_allocator),
+
+    has_next_token: bool = true,
+    has_new_line: bool = false,
+    truncated: bool = false,
+
+    stop: task_mod.StopType = .none,
+
+    stopping_word: std.ArrayList(u8) = .empty,
+
+    // state
+    state: SlotState = .idle,
+
+    prompt: ServerPrompt = .{ .tokens = .{} },
+
+    lora: []LoraInfo = &.{},
+    alora_invocation_start: i32 = -1,
+
+    // sampling
+    json_schema: Value = .null,
+
+    smpl: ?*sampling.Sampler = null,
+
+    sampled: Token = 0, // in speculative mode, this is the last accepted token
+
+    // for TTS models, this is the embd generated from prev step, decode this to generate next hidden state
+    // corresponding to one token position (size = n_embd)
+    inp_embd: std.ArrayList(f32) = .empty,
+
+    stats: common.SlotStats = .{},
+
+    // accepted tokens per draft position
+    // not in server_slot_stats to avoid copying to every task result
+    n_accepted_per_pos: std.ArrayList(u64) = .empty,
+
+    /// `callback_on_release` and `callback_on_reset`: both bound to the
+    /// server context.
+    owner: ?*Impl = null,
+
+    // this is for printing timings with slot progress, not part of metrics
+    t_print_last: i64 = 0,
+    n_gen_last: i32 = 0,
+
+    fn deinit(self: *Slot) void {
+        if (self.task) |*t| t.deinit(gpa);
+        if (self.task_prev) |*t| t.deinit(gpa);
+        self.spec_draft.deinit(gpa);
+        gpa.free(self.spec_prompt);
+        self.spec_i_batch.deinit(gpa);
+        self.spec_ckpt.clear(gpa);
+        self.generated_text.deinit(gpa);
+        self.debug_generated_text.deinit(gpa);
+        self.generated_tokens.deinit(gpa);
+        self.generated_token_probs.deinit(gpa);
+        self.probs_arena.deinit();
+        self.stopping_word.deinit(gpa);
+        self.prompt.deinit();
+        gpa.free(self.lora);
+        self.json_schema.deinit(gpa);
+        if (self.smpl) |s| s.destroy();
+        self.inp_embd.deinit(gpa);
+        self.n_accepted_per_pos.deinit(gpa);
+        if (self.mbatch) |b| c.mtmd_batch_free(b);
+    }
+
+    fn taskRef(self: *const Slot) *const Task {
+        return &self.task.?;
+    }
+
+    /// Ports `server_slot`'s `prompt_save` (server-context.cpp:299 @b29c606e2).
+    fn promptSave(self: *const Slot, prompt_cache: *task_mod.PromptCache) !bool {
+        if (self.prompt.tokens.size() == 0) {
+            return false;
+        }
+
+        const cur_size_tgt = c.llama_state_seq_get_size_ext(self.ctx_tgt, self.id, c.LLAMA_STATE_SEQ_FLAGS_NONE);
+        const cur_size_dft: usize = if (self.ctx_dft != null) c.llama_state_seq_get_size_ext(self.ctx_dft, self.id, c.LLAMA_STATE_SEQ_FLAGS_NONE) else 0;
+
+        const cur_size = cur_size_tgt + cur_size_dft;
+
+        srv(.trc, "prompt_save", " - saving prompt with length %d, total state size = %.3f MiB (draft: %.3f MiB)\n", .{
+            @as(c_int, @intCast(self.prompt.tokens.size())),
+            @as(f64, @floatFromInt(cur_size)) / (1024.0 * 1024.0),
+            @as(f64, @floatFromInt(cur_size_dft)) / (1024.0 * 1024.0),
+        });
+
+        const cur = (try prompt_cache.alloc(&self.prompt, cur_size_tgt, cur_size_dft)) orelse return false;
+
+        _ = c.llama_state_seq_get_data_ext(self.ctx_tgt, cur.data.main.ptr, cur_size_tgt, self.id, c.LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (self.ctx_dft != null) {
+            _ = c.llama_state_seq_get_data_ext(self.ctx_dft, cur.data.drft.ptr, cur_size_dft, self.id, c.LLAMA_STATE_SEQ_FLAGS_NONE);
+        }
+
+        return true;
+    }
+
+    /// Ports `server_slot`'s `prompt_load` (server-context.cpp:325 @b29c606e2).
+    fn promptLoad(self: *Slot, prompt_cache: *task_mod.PromptCache, tokens: *const ServerTokens) !bool {
+        const res = try prompt_cache.load(&self.prompt, tokens, self.ctx_tgt, self.ctx_dft, self.id);
+        if (!res) {
+            slt(.wrn, "prompt_load", self, "%s", .{@as([*:0]const u8, "failed to load prompt from cache\n")});
+        }
+
+        return res;
+    }
+
+    /// Ports `server_slot`'s `prompt_clear` (server-context.cpp:334 @b29c606e2).
+    fn promptClear(self: *Slot) void {
+        slt(.trc, "prompt_clear", self, "clearing prompt with %zu tokens\n", .{self.prompt.tokens.size()});
+
+        self.mem.seqRm(self.id, -1, -1);
+
+        self.prompt.clear();
+    }
+
+    /// Ports `server_slot`'s `reset` (server-context.cpp:369 @b29c606e2).
+    fn reset(self: *Slot) void {
+        slt(.dbg, "reset", self, "%s", .{@as([*:0]const u8, "\n")});
+
+        self.spec_is_replay = false;
+
+        self.last_nl_pos = 0;
+        self.generated_text.clearRetainingCapacity();
+        self.has_new_line = false;
+        self.truncated = false;
+        self.stop = .none;
+        self.stopping_word.clearRetainingCapacity();
+        self.n_sent_text = 0;
+
+        if (self.canSpeculate()) {
+            self.spec_draft.clearRetainingCapacity();
+            self.spec_i_batch.clearRetainingCapacity();
+            self.spec_ckpt.clear(gpa);
+        }
+        self.generated_tokens.clearRetainingCapacity();
+        self.generated_token_probs.clearRetainingCapacity();
+        _ = self.probs_arena.reset(.retain_capacity);
+        self.json_schema.deinit(gpa);
+        self.json_schema = .null;
+
+        if (self.task_prev) |*t| t.deinit(gpa);
+        self.task_prev = self.task;
+        self.task = null;
+
+        // note: callback_on_reset() must have run before this, see release()
+        self.stats = .{};
+        self.n_accepted_per_pos.clearRetainingCapacity();
+
+        self.n_predict_max = -1;
+
+        _ = c.llama_set_sampler(self.ctx_tgt, self.id, null);
+
+        // clear alora start
+        self.alora_invocation_start = -1;
+
+        // clear multimodal state
+        if (self.mbatch) |b| c.mtmd_batch_free(b);
+        self.mbatch = null;
+    }
+
+    /// Ports `server_slot`'s `init_sampler` (server-context.cpp:409 @b29c606e2).
+    fn initSampler(self: *const Slot) void {
+        if (self.smpl) |s| s.reset();
+
+        if (!self.taskRef().needSampling()) {
+            return;
+        }
+
+        const t_start = c.ggml_time_us();
+
+        var n_text: c_int = 0;
+
+        for (self.prompt.tokens.tokens.items) |id| {
+            if (id != token_null) {
+                if (self.smpl) |s| s.accept(id, false);
+                n_text += 1;
+            }
+        }
+
+        slt(.trc, "init_sampler", self, "init sampler, took %0.2f ms, tokens: text = %d, total = %d\n", .{
+            @as(f64, @floatFromInt(c.ggml_time_us() - t_start)) / 1000.0, n_text, @as(c_int, @intCast(self.prompt.tokens.size())),
+        });
+    }
+
+    /// Ports `server_slot`'s `need_embd` (server-context.cpp:433 @b29c606e2).
+    fn needEmbd(self: *const Slot) bool {
+        ggmlAssert(self.task != null, 434, "task");
+        return self.taskRef().needEmbd();
+    }
+
+    /// Ports `server_slot`'s `can_split` (server-context.cpp:441 @b29c606e2):
+    /// if the context does not have a memory module then all embeddings have
+    /// to be computed within a single ubatch; also we cannot split if the
+    /// pooling would require any past tokens.
+    fn canSplit(self: *const Slot) bool {
+        ggmlAssert(self.task != null, 442, "task");
+
+        return !self.taskRef().needEmbd() or
+            (c.llama_get_memory(self.ctx_tgt) != null and c.llama_pooling_type(self.ctx_tgt) == c.LLAMA_POOLING_TYPE_LAST);
+    }
+
+    /// Ports `server_slot`'s `can_batch_with` (server-context.cpp:449 @b29c606e2).
+    fn canBatchWith(self: *const Slot, other_slot: *const Slot) bool {
+        ggmlAssert(self.task != null, 450, "task");
+
+        return self.taskRef().type == other_slot.taskRef().type and
+            self.inp_embd.items.len == other_slot.inp_embd.items.len and
+            common.areLoraEqual(self.lora, other_slot.lora);
+    }
+
+    /// Ports `server_slot`'s `n_remaining` (server-context.cpp:458 @b29c606e2):
+    /// -1 if the generation is limitless.
+    fn nRemaining(self: *const Slot) i32 {
+        return if (self.n_predict_max == -1) -1 else self.n_predict_max - @as(i32, @truncate(@as(i64, @bitCast(self.stats.n_gen))));
+    }
+
+    /// Ports `server_slot`'s `has_budget` (server-context.cpp:462 @b29c606e2).
+    fn hasBudget(self: *const Slot) bool {
+        return self.n_predict_max == -1 or self.nRemaining() > 0;
+    }
+
+    /// Ports `server_slot`'s `is_processing` (server-context.cpp:466 @b29c606e2).
+    pub fn isProcessing(self: *const Slot) bool {
+        return self.state != .idle;
+    }
+
+    /// Ports `server_slot`'s `can_speculate` (server-context.cpp:470 @b29c606e2).
+    fn canSpeculate(self: *const Slot) bool {
+        return self.spec != null;
+    }
+
+    /// Ports `server_slot`'s `add_token` (server-context.cpp:474 @b29c606e2).
+    fn addToken(self: *Slot, token: *const CompletionTokenOutput) !void {
+        if (!self.isProcessing()) {
+            slt(.wrn, "add_token", self, "%s", .{@as([*:0]const u8, "slot is not processing\n")});
+            return;
+        }
+
+        try self.generated_token_probs.append(gpa, try token.clone(self.probs_arena.allocator()));
+    }
+
+    /// Ports `server_slot`'s `get_n_draft_max` (server-context.cpp:483 @b29c606e2).
+    fn getNDraftMax(self: *const Slot) i32 {
+        ggmlAssert(self.task != null, 484, "task");
+
+        if (!self.canSpeculate()) {
+            return 0;
+        }
+
+        // determine the max draft that fits the current slot state
+        // note: slot.prompt is not yet expanded with the `id` token sampled above
+        //       also, need to leave space for 1 extra token to allow context shifts
+        var n_draft_max = self.n_ctx - self.prompt.nTokens() - 2;
+
+        if (self.nRemaining() > 0) {
+            n_draft_max = @min(n_draft_max, self.nRemaining() - 1);
+        }
+
+        slt(.dbg, "get_n_draft_max", self, "max possible draft: %d\n", .{n_draft_max});
+
+        return n_draft_max;
+    }
+
+    /// Ports `server_slot`'s `handle_last_sampled_token` (server-context.cpp:505
+    /// @b29c606e2): the sampled token of this slot into the batch, and the
+    /// speculative draft tokens if any.
+    fn handleLastSampledToken(self: *Slot, batch: *Batch) !void {
+        const func = "handle_last_sampled_token";
+        var add_ok = true;
+        if (self.spec_draft.items.len == 0) {
+            // no speculative decoding
+            self.i_batch = batch.size();
+
+            if (self.inp_embd.items.len != 0) {
+                add_ok = (try batch.addEmbd(self.id, self.inp_embd.items, self.prompt.tokens.posNext(-1), true, false)) and add_ok;
+            } else {
+                add_ok = (try batch.add(self.id, self.sampled, self.prompt.tokens.posNext(-1), true, false)) and add_ok;
+            }
+
+            slt(.dbg, func, self, "slot decode token, id=%d, n_ctx = %d, n_tokens = %d, truncated = %d\n", .{
+                self.sampled, self.n_ctx, self.prompt.nTokens(), @as(c_int, @intFromBool(self.truncated)),
+            });
+        } else {
+            slt(.dbg, func, self, "generate_draft: id=%d, #tokens=%zu, #draft=%zu, pos_next=%d\n", .{
+                self.sampled, self.prompt.tokens.size(), self.spec_draft.items.len, self.prompt.tokens.posNext(-1),
+            });
+
+            ggmlAssert(self.spec_i_batch.items.len == 0, 523, "spec_i_batch.empty()");
+
+            try self.spec_i_batch.append(gpa, batch.size());
+            for (0..self.spec_draft.items.len) |i| {
+                try self.spec_i_batch.append(gpa, batch.size() + @as(i32, @intCast(i)) + 1);
+            }
+
+            var pos0 = self.prompt.tokens.posNext(-1);
+
+            add_ok = (try batch.add(self.id, self.sampled, pos0, true, false)) and add_ok;
+            pos0 += 1;
+            for (self.spec_draft.items) |token| {
+                add_ok = (try batch.add(self.id, token, pos0, true, false)) and add_ok;
+                pos0 += 1;
+            }
+        }
+
+        ggmlAssert(add_ok, 538, "add_ok && \"batch must be large enough to hold the sampled and draft tokens\"");
+
+        try self.prompt.tokens.pushBackToken(self.sampled);
+        try self.prompt.tokens.insert(self.spec_draft.items);
+    }
+
+    /// Ports `server_slot`'s `release` (server-context.cpp:544 @b29c606e2).
+    fn release(self: *Slot) !void {
+        if (self.isProcessing()) {
+            ggmlAssert(self.task != null, 546, "task");
+
+            slt(.inf, "release", self, "stop processing: n_tokens = %d, truncated = %d\n", .{ self.prompt.nTokens(), @as(c_int, @intFromBool(self.truncated)) });
+
+            self.t_last_used = c.ggml_time_us();
+
+            self.state = .idle;
+
+            // do not keep context of the child slots - the parent's context is enough
+            if (self.taskRef().isChild()) {
+                self.promptClear();
+            }
+
+            // callback_on_reset: flush the generated token stats before reset()
+            const owner = self.owner.?;
+            if (self.stats.n_gen > 0) {
+                try owner.metricsOnPrediction(self);
+            }
+
+            self.reset();
+
+            // callback_on_release
+            try owner.queue_tasks.popDeferredTask(self.id);
+        }
+    }
+
+    /// Ports `server_slot`'s `find_stopping_strings` (server-context.cpp:567
+    /// @b29c606e2).
+    ///
+    /// Return: the position of the earliest stop word, or null.
+    fn findStoppingStrings(self: *Slot, text: []const u8, last_token_size: usize, is_full_stop: bool) !?usize {
+        ggmlAssert(self.task != null, 568, "task");
+
+        var stop_pos: ?usize = null;
+
+        for (self.taskRef().params.antiprompt) |word| {
+            var pos: ?usize = undefined;
+
+            if (is_full_stop) {
+                const tmp = word.len + last_token_size;
+                const from_pos = if (text.len > tmp) text.len - tmp else 0;
+
+                pos = std.mem.indexOfPos(u8, text, from_pos, word);
+            } else {
+                // otherwise, partial stop
+                pos = stringFindPartialStop(text, word);
+            }
+
+            if (pos != null and (stop_pos == null or pos.? < stop_pos.?)) {
+                if (is_full_stop) {
+                    self.stop = .word;
+                    self.stopping_word.clearRetainingCapacity();
+                    try self.stopping_word.appendSlice(gpa, word);
+                    self.has_next_token = false;
+                }
+                stop_pos = pos;
+            }
+        }
+
+        return stop_pos;
+    }
+
+    /// Ports `server_slot`'s `print_timings_tg` (server-context.cpp:598 @b29c606e2).
+    fn printTimingsTg(self: *Slot) void {
+        if (self.stats.n_gen < 100) {
+            return;
+        }
+
+        const t_now = c.ggml_time_us();
+
+        if (t_now - self.t_print_last < 3 * 1000 * 1000) {
+            return;
+        }
+
+        const n_gen_second = self.stats.nGenTps();
+        const n_gen_second_win = 1e6 / @as(f64, @floatFromInt(t_now - self.t_print_last)) * @as(f64, @floatFromInt(@as(i64, @intCast(self.stats.n_gen)) - self.n_gen_last));
+
+        self.t_print_last = t_now;
+        self.n_gen_last = @intCast(self.stats.n_gen);
+
+        slt(.inf, "print_timings_tg", self, "n_gen = %6d, tg = %6.2f t/s, tg_3s = %6.2f t/s\n", .{ @as(c_int, @intCast(self.stats.n_gen)), n_gen_second, n_gen_second_win });
+    }
+
+    /// Ports `server_slot`'s `print_timings_pp` (server-context.cpp:618 @b29c606e2).
+    fn printTimingsPp(self: *const Slot) void {
+        const t_prompt_total = self.stats.tPromptMs();
+
+        if (t_prompt_total < 3000.0) {
+            return;
+        }
+
+        const n_prompt_second = self.stats.nPromptTps();
+        const n_task = self.taskRef().nTokens();
+        const f_progress: f64 = if (n_task > 0) @as(f64, @floatFromInt(self.prompt.nTokens())) / @as(f64, @floatFromInt(n_task)) else 0.0;
+
+        slt(.inf, "print_timings_pp", self, "prompt processing, n_tokens = %6d, progress = %.2f, t = %6.2f s / %.2f tokens per second\n", .{
+            @as(c_int, @intCast(self.stats.n_prompt_processed)), f_progress, t_prompt_total / 1e3, n_prompt_second,
+        });
+    }
+
+    /// Ports `server_slot`'s `print_timings` (server-context.cpp:632 @b29c606e2).
+    fn printTimings(self: *const Slot) !void {
+        const func = "print_timings";
+        const t_prompt_total = self.stats.tPromptMs();
+        const t_gen_total = self.stats.tGenMs();
+
+        const t_prompt = self.stats.tPromptPerTokenMs();
+        const n_prompt_second = self.stats.nPromptTps();
+
+        const t_gen = self.stats.tGenPerTokenMs();
+        const n_gen_second = self.stats.nGenTps();
+
+        slt(.inf, func, self, "prompt eval time = %10.2f ms / %5d tokens (%8.2f ms per token, %8.2f tokens per second)\n", .{
+            t_prompt_total, @as(c_int, @intCast(self.stats.n_prompt_processed)), t_prompt, n_prompt_second,
+        });
+
+        slt(.inf, func, self, "       eval time = %10.2f ms / %5d tokens (%8.2f ms per token, %8.2f tokens per second)\n", .{
+            t_gen_total, @as(c_int, @intCast(self.stats.n_gen)), t_gen, n_gen_second,
+        });
+
+        slt(.inf, func, self, "      total time = %10.2f ms / %5d tokens\n", .{
+            t_prompt_total + t_gen_total, @as(c_int, @intCast(self.stats.n_prompt_processed + self.stats.n_gen)),
+        });
+
+        slt(.inf, func, self, "   graphs reused = %10d\n", .{c.llama_perf_context(self.ctx_tgt).n_reused});
+
+        const n_draft_total: i32 = @intCast(self.stats.n_draft_tokens);
+        const n_draft_accepted: i32 = @intCast(self.stats.n_draft_accepted);
+        const n_draft_verif_steps: i32 = @intCast(self.stats.n_draft_verif_steps);
+
+        if (n_draft_total > 0) {
+            const draft_ratio: f32 = @as(f32, @floatFromInt(n_draft_accepted)) / @as(f32, @floatFromInt(n_draft_total));
+            const mean_acc_len: f64 = if (n_draft_verif_steps > 0) 1.0 + @as(f64, @floatFromInt(n_draft_accepted)) / @as(f64, @floatFromInt(n_draft_verif_steps)) else 1.0;
+
+            var rates: std.ArrayList(u8) = .empty;
+            defer rates.deinit(gpa);
+            if (n_draft_verif_steps > 0) {
+                for (self.n_accepted_per_pos.items, 0..) |n, i| {
+                    if (i > 0) try rates.appendSlice(gpa, ", ");
+                    var buf: [64]u8 = undefined;
+                    const len = snprintf(&buf, buf.len, "%.3f", @as(f64, @floatFromInt(n)) / @as(f64, @floatFromInt(n_draft_verif_steps)));
+                    try rates.appendSlice(gpa, buf[0..@intCast(@min(len, buf.len - 1))]);
+                }
+            }
+            try rates.append(gpa, 0);
+
+            slt(.inf, func, self, "draft acceptance = %0.5f (%5d accepted / %5d generated), mean len = %5.2f\n", .{
+                @as(f64, draft_ratio), n_draft_accepted, n_draft_total, mean_acc_len,
+            });
+            slt(.trc, func, self, "     acc per pos = (%s)\n", .{@as([*:0]const u8, @ptrCast(rates.items.ptr))});
+        }
+
+        spec_mod.printStats(self.spec);
+    }
+
+    /// Ports `server_slot`'s `to_json` (server-context.cpp:686 @b29c606e2).
+    ///
+    /// Return: owned by `a`.
+    fn toJson(self: *const Slot, a: Allocator, only_metrics: bool) !Value {
+        var res = common.Obj.init(a);
+        errdefer res.deinit();
+
+        try res.put("id", self.id);
+        try res.put("n_ctx", self.n_ctx);
+        try res.put("speculative", self.canSpeculate());
+        try res.put("is_processing", self.isProcessing());
+
+        const ptask: ?*const Task = if (self.task) |*t| t else if (self.task_prev) |*t| t else null;
+
+        if (ptask) |pt| {
+            try res.put("id_task", pt.id);
+            try res.put("n_prompt_tokens", @as(i32, @intCast(self.prompt.tokens.size())));
+            try res.put("n_prompt_tokens_processed", self.stats.n_prompt_processed);
+            try res.put("n_prompt_tokens_cache", self.stats.n_prompt_cached);
+            try res.put("params", try pt.params.toJson(a, only_metrics));
+            var next = common.Obj.init(a);
+            errdefer next.deinit();
+            try next.put("has_next_token", self.has_next_token);
+            try next.put("has_new_line", self.has_new_line);
+            try next.put("n_remain", self.nRemaining());
+            try next.put("n_decoded", self.stats.n_gen);
+            var arr = Value.emptyArray();
+            try arr.pushBack(a, next.done());
+            try res.put("next_token", arr);
+
+            if (!only_metrics) {
+                try res.put("prompt", try pt.tokens.detokenize(a, self.ctx_tgt, true));
+                try res.put("generated", if (self.generated_text.items.len == 0) self.debug_generated_text.items else self.generated_text.items);
+            }
+        }
+
+        return res.done();
+    }
+
+    /// Ports `server_slot`'s `copy_state_to` (server-context.cpp:722 @b29c606e2).
+    fn copyStateTo(self: *const Slot, other: *Slot) !void {
+        ggmlAssert(self.state == .done_prompt, 723, "state == SLOT_STATE_DONE_PROMPT");
+
+        self.mem.seqRm(other.id, -1, -1);
+        self.mem.seqCp(self.id, other.id, -1, -1);
+
+        other.i_batch = self.i_batch;
+
+        other.stats = self.stats;
+
+        var p = try self.prompt.clone();
+        errdefer p.deinit();
+        other.prompt.deinit();
+        other.prompt = p;
+        other.initSampler();
+    }
+};
+
+extern fn snprintf(buf: [*]u8, n: usize, fmt: [*:0]const u8, ...) c_int;
+
+/// Ports `string_find_partial_stop` (common/common.h:858 @b29c606e2): where
+/// a prefix of `stop` ends `str`.
+fn stringFindPartialStop(str: []const u8, stop: []const u8) ?usize {
+    if (str.len != 0 and stop.len != 0) {
+        const max_len = @min(str.len, stop.len);
+        const last_char = str[str.len - 1];
+        var len = max_len;
+        while (len > 0) : (len -= 1) {
+            if (stop[len - 1] == last_char) {
+                if (std.mem.endsWith(u8, str, stop[0..len])) {
+                    return str.len - len;
+                }
+            }
+        }
+    }
+    return null;
+}
+
+/// Ports `process_mtmd_chunk` (server-context.cpp:742 @b29c606e2): the media
+/// chunk at `idx` encoded -- with the media chunks after it batched in --
+/// and decoded into the slot's sequence. The caller updates the prompt.
+///
+/// Return: 0 on success.
+fn processMtmdChunk(slot: *const Slot, mbatch: *?*c.mtmd_batch, idx: usize, n_tokens_out: *usize) !i32 {
+    const func = "process_mtmd_chunk";
+    ggmlAssert(slot.mctx != null, 743, "slot.mctx");
+    const mctx = slot.mctx;
+    const input_tokens = &slot.taskRef().tokens;
+    const chunk = try input_tokens.findChunk(idx);
+    var res: i32 = 0;
+
+    const TryDecode = struct {
+        fn cb(batch: c.llama_batch, user_data: ?*anyopaque) callconv(.c) c_int {
+            const spec: ?*spec_mod.Speculative = @ptrCast(@alignCast(user_data));
+            if (!spec_mod.process(spec, batch)) {
+                return 1;
+            }
+            return 0;
+        }
+
+        fn run(s: *const Slot, mb: *?*c.mtmd_batch, ch: *c.mtmd_input_chunk, i: usize, out: *usize) i32 {
+            if (mb.*) |b| {
+                const embd = c.mtmd_batch_get_output_embd(b, ch);
+                if (embd != null) {
+                    var new_n_past: c.llama_pos = 0; // unused for now
+                    const r = c.mtmd_helper_decode_image_chunk(
+                        s.mctx,
+                        s.ctx_tgt,
+                        ch,
+                        embd,
+                        s.prompt.tokens.posNext(-1),
+                        s.id,
+                        @intCast(c.llama_n_batch(s.ctx_tgt)),
+                        &new_n_past,
+                        cb,
+                        s.spec,
+                    );
+                    if (r != 0) {
+                        slt(.err, "operator()", s, "failed to decode mtmd chunk, idx = %zu, res = %d\n", .{ i, r });
+                        return -1;
+                    }
+                    out.* = c.mtmd_input_chunk_get_n_tokens(ch);
+                    return 0; // success
+                }
+            }
+            return 1; // (non-error) need to create & encode batch
+        }
+    };
+
+    // if the batch is already exist, try searching & encode
+    res = TryDecode.run(slot, mbatch, chunk, idx, n_tokens_out);
+    if (res == 0) {
+        return 0;
+    }
+    if (res < 0) {
+        // fatal error
+        return res;
+    }
+
+    // otherwise, the batch is either uninitialized or is used up
+    // we need to create & encode a new batch
+    if (mbatch.*) |b| c.mtmd_batch_free(b);
+    mbatch.* = c.mtmd_batch_init(mctx);
+    res = c.mtmd_batch_add_chunk(mbatch.*, chunk);
+    ggmlAssert(res == 0, 800, "res == 0"); // we should never have an empty batch
+
+    // try batching as much as possible
+    var n_added: c_int = 1;
+    var idx_cur = idx;
+    while (res == 0) {
+        const next = input_tokens.findNextMediaChunk(idx_cur) orelse break;
+        res = c.mtmd_batch_add_chunk(mbatch.*, next.chunk);
+        n_added += if (res == 0) 1 else 0;
+        idx_cur = next.idx;
+        slt(.dbg, func, slot, "try adding media chunk idx = %zu to batch, res = %d\n", .{ next.idx, res });
+        // if res != 0, batch is full or chunk is not compatible -> this loop breaks
+    }
+
+    // TODO @ngxson : move this log line to debug when it become more stable
+    slt(.trc, func, slot, "encoding mtmd batch from idx = %zu, n_chunks = %d\n", .{ idx, n_added });
+
+    res = c.mtmd_batch_encode(mbatch.*);
+    if (res != 0) {
+        slt(.err, func, slot, "failed to encode mtmd batch for chunk idx = %zu, res = %d\n", .{ idx, res });
+        return -1;
+    }
+
+    return TryDecode.run(slot, mbatch, chunk, idx, n_tokens_out);
+}
+
+// -----------------------------------------------------------------------------
+// server_state
+
+/// Ports `server_state` (server-context.h:57 @b29c606e2).
+pub const ServerState = enum { downloading, loading, ready, sleeping };
+
+/// Ports `server_state_to_str` (server-context.h:64 @b29c606e2).
+pub fn serverStateToStr(state: ServerState) []const u8 {
+    return switch (state) {
+        .downloading => "downloading",
+        .loading => "loading",
+        .ready => "ready",
+        .sleeping => "sleeping",
+    };
+}
+
+/// `server_state_callback_t` (server-context.h:82 @b29c606e2): set only by
+/// a child of router mode (step 7); the default is upstream's no-op lambda.
+pub const StateCallback = struct {
+    ctx: ?*anyopaque = null,
+    func: ?*const fn (ctx: ?*anyopaque, state: ServerState, payload: *const Value) void = null,
+
+    fn call(self: StateCallback, state: ServerState, payload: *const Value) void {
+        if (self.func) |f| f(self.ctx, state, payload);
+    }
+};
+
+/// Ports `server_context_meta` (server-context.h:16 @b29c606e2): what the
+/// routes read without touching the context, valid during sleep.
+pub const Meta = struct {
+    build_info: []const u8,
+    model_name: []const u8,
+    model_aliases: []const []const u8,
+    model_tags: []const []const u8,
+    model_path: []const u8,
+    has_mtmd: bool,
+    has_inp_image: bool,
+    has_inp_audio: bool,
+    has_inp_video: bool,
+    json_ui_settings: *const Value,
+    slot_n_ctx: c_int,
+    pooling_type: c.enum_llama_pooling_type,
+
+    // chat params
+    chat_params: *const oaicompat.ServerChatParams,
+    chat_template_caps: [9]chat.caps.Caps.Entry,
+    chat_template: []const u8,
+    chat_template_tool_use: []const u8,
+
+    // tokens
+    bos_token_str: []const u8,
+    eos_token_str: []const u8,
+    fim_pre_token: Token,
+    fim_sub_token: Token,
+    fim_mid_token: Token,
+    fim_pad_token: Token,
+    fim_rep_token: Token,
+    fim_sep_token: Token,
+
+    // sampling
+    logit_bias_eog: []const c.llama_logit_bias,
+
+    // model meta
+    model_vocab_type: c.enum_llama_vocab_type,
+    model_vocab_n_tokens: i32,
+    model_n_ctx_train: i32,
+    model_n_embd_inp: i32,
+    model_n_params: u64,
+    model_size: u64,
+    model_ftype: []const u8,
+};
+
+// -----------------------------------------------------------------------------
+// server_context_impl
+
+/// Ports `load_progress_data` (server-context.cpp:972 @b29c606e2), a member
+/// of `server_context_impl`.
+const LoadProgress = struct {
+    ctx: *Impl,
+    stage: []const u8,
+    stages: []const []const u8 = &.{},
+    t_last_load_progress_ms: i64 = 0,
+};
+
+/// Ports `server_context_impl` (server-context.cpp:833 @b29c606e2).
+pub const Impl = struct {
+    // only use these pointers outside of this class:
+    //  - when not in sleeping state
+    //  - and, with thread-safe APIs (e.g., tokenizer calls)
+    model_tgt: ?*c.llama_model = null,
+
+    mctx: ?*c.mtmd_context = null,
+    // note: video_params.ffmpeg_bin_dir points into params_base, which outlives this struct
+    init_opt: c.mtmd_helper_init_opt = undefined,
+    vocab: ?*const c.llama_vocab = null,
+
+    queue_tasks: TaskQueue,
+    queue_results: ResultQueue,
+
+    // note: chat_params must not be refreshed upon existing sleeping state
+    chat_params: oaicompat.ServerChatParams = undefined,
+    /// The templates `chat_params.tmpls` points at (see the file's doc
+    /// comment).
+    tmpls: ?chat.templates.Templates = null,
+
+    callback_state: StateCallback = .{},
+
+    // note: accessing these fields outside of this class is not thread-safe
+    // use server_context methods instead
+
+    params_base: Params = undefined,
+
+    // note: keep these alive - they determine the lifetime of the model, context, etc.
+    llama_init: ?tc.init.InitResult = null,
+
+    ctx_tgt: ?*c.llama_context = null,
+
+    batch: Batch = .{},
+
+    model_dft: ?*c.llama_model = null,
+    ctx_dft: ?*c.llama_context = null,
+
+    spec_init: ?spec_mod.InitResult = null,
+
+    ctx_tgt_seq_rm_type: tc.common.SeqRmType = .no,
+    ctx_dft_seq_rm_type: tc.common.SeqRmType = .no,
+
+    spec: ?*spec_mod.Speculative = null,
+
+    add_bos_token: bool = true,
+
+    n_ctx: i32 = 0, // total context for all clients / slots
+
+    // set to llama_model_n_swa(model)
+    // if swa_full is enabled, this is set to 0 to simulate a non-SWA model
+    n_swa: i32 = 0,
+
+    // slots / clients
+    slots: []Slot = &.{},
+
+    trace: c_int = 0, // env: LLAMA_TRACE
+    slots_debug: c_int = 0, // env: LLAMA_SERVER_SLOTS_DEBUG
+    slots_n_diff: c_int = 0, // env: LLAMA_SERVER_SLOTS_N_DIFF
+
+    n_empty_consecutive: c_int = 0,
+
+    prompt_cache: ?*task_mod.PromptCache = null,
+
+    metrics: common.Metrics = .{},
+
+    // queued prompt stats - llama_decode() is async, so the timing is only valid after a sync
+    // note: kept out of server_metrics, which is copied as-is into the task result
+    t_decode_start: i64 = 0, // start of the last submitted decode
+    t_prompt_start: i64 = 0, // start of the oldest queued prompt decode
+    n_prompt_queued: u64 = 0,
+
+    json_ui_settings: Value = Value.emptyObject(),
+
+    // Necessary similarity of prompt for slot selection
+    slot_prompt_similarity: f32 = 0.0,
+
+    model_name: []const u8 = "", // name of the loaded model, to be used by API
+    model_aliases: []const []const u8 = &.{}, // additional names for the model
+    model_tags: []const []const u8 = &.{}, // informational tags
+
+    sleeping: bool = false,
+
+    /// What the lifetime of the server owns: names, templates, settings.
+    arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.c_allocator),
+
+    /// Ports the constructor of `server_context_impl` (server-context.cpp:855 @b29c606e2).
+    pub fn init(self: *Impl) !void {
+        self.* = .{
+            .queue_tasks = TaskQueue.init(gpa),
+            .queue_results = try ResultQueue.init(gpa),
+        };
+        self.init_opt = c.mtmd_helper_init_opt_default();
+        c.mtmd_helper_log_set(tc.common.defaultLogCallback, null);
+    }
+
+    /// Ports the destructor of `server_context_impl` (server-context.cpp:859 @b29c606e2).
+    pub fn deinit(self: *Impl) void {
+        if (!self.sleeping) {
+            // destroy() is already called when entering sleeping state
+            // we don't call it again here to avoid double free
+            self.destroy();
+        }
+        for (self.slots) |*s| s.deinit();
+        gpa.free(self.slots);
+        self.batch.deinit();
+        if (self.tmpls) |*t| t.deinit();
+        if (self.prompt_cache) |pc| {
+            pc.deinit();
+            gpa.destroy(pc);
+        }
+        self.metrics.deinit(gpa);
+        self.queue_tasks.deinit();
+        self.queue_results.deinit();
+        self.arena.deinit();
+    }
+
+    /// Ports `server_context_impl`'s `get_metrics` (server-context.cpp:867 @b29c606e2).
+    pub fn getMetrics(self: *const Impl, a: Allocator) !common.Metrics {
+        return self.metrics.clone(a);
+    }
+
+    /// Ports `server_context_impl`'s `reset_metrics_bucket` (server-context.cpp:871 @b29c606e2).
+    pub fn resetMetricsBucket(self: *Impl) void {
+        self.metrics.resetBucket();
+    }
+
+    /// Ports `server_context_impl`'s `destroy` (server-context.cpp:938 @b29c606e2).
+    fn destroy(self: *Impl) void {
+        spec_mod.free(self.spec);
+        self.spec = null;
+        if (self.spec_init) |*si| si.deinit();
+        self.spec_init = null;
+
+        self.ctx_dft = null;
+        self.model_dft = null;
+
+        if (self.llama_init) |*li| li.deinit();
+        self.llama_init = null;
+
+        self.ctx_tgt = null;
+        self.model_tgt = null;
+
+        c.mtmd_free(self.mctx);
+        self.mctx = null;
+    }
+
+    /// Ports `server_context_impl`'s `handle_sleeping_state` (server-context.cpp:954 @b29c606e2).
+    fn handleSleepingState(self: *Impl, new_state: bool) !void {
+        ggmlAssert(self.sleeping != new_state, 955, "sleeping != new_state");
+        if (new_state) {
+            const empty: Value = .null;
+            self.callback_state.call(.sleeping, &empty);
+            // note: for sleeping == false, event is emitted by load_model()
+            srv(.inf, "handle_sleeping_state", "%s", .{@as([*:0]const u8, "server is entering sleeping state\n")});
+            self.destroy();
+        } else {
+            srv(.inf, "handle_sleeping_state", "%s", .{@as([*:0]const u8, "server is exiting sleeping state\n")});
+            if (!try self.loadModel(&self.params_base)) {
+                ggmlAbort(966, "failed to reload model after sleeping", .{});
+            }
+        }
+        self.sleeping = new_state;
+    }
+
+    /// Ports `server_context_impl`'s `load_progress_callback` (server-context.cpp:979 @b29c606e2).
+    fn loadProgressCallback(progress: f32, user_data: ?*anyopaque) callconv(.c) bool {
+        const d: *LoadProgress = @ptrCast(@alignCast(user_data.?));
+        // always emit the first and final sample; throttle the rest to one per 200ms
+        {
+            const t_last = &d.t_last_load_progress_ms;
+            const t_now = c.ggml_time_ms();
+            const first = t_last.* == 0;
+            const done = progress >= 1.0;
+            const throttled = !first and !done and (t_now - t_last.*) < 200;
+            if (throttled) {
+                return true;
+            }
+            t_last.* = t_now;
+        }
+        if (d.ctx.callback_state.func != null) {
+            var a = std.heap.ArenaAllocator.init(gpa);
+            defer a.deinit();
+            const ar = a.allocator();
+            var o = common.Obj.init(ar);
+            o.put("stages", d.stages) catch return true;
+            o.put("current", d.stage) catch return true;
+            o.put("value", progress) catch return true;
+            const payload = o.done();
+            d.ctx.callback_state.call(.loading, &payload);
+        }
+        return true;
+    }
+
+    /// Ports `server_context_impl`'s `load_model` (server-context.cpp:1006
+    /// @b29c606e2): load the model and initialize llama_context; this may
+    /// also be called to resume from sleeping state.
+    pub fn loadModel(self: *Impl, params: *Params) !bool {
+        const func = "load_model";
+        const a = self.arena.allocator();
+        var load_progress_text: LoadProgress = .{ .ctx = self, .stage = "text_model" };
+        var load_progress_mmproj: LoadProgress = .{ .ctx = self, .stage = "mmproj_model" };
+        var load_progress_spec: LoadProgress = .{ .ctx = self, .stage = "spec_model" };
+
+        const is_resume = self.sleeping;
+
+        if (params != &self.params_base) self.params_base = params.*;
+        const output_limits = serverOutputLimits(&self.params_base);
+        self.params_base.n_outputs_max = output_limits.total;
+        self.params_base.n_outputs_max_per_seq = output_limits.per_seq;
+
+        const has_mmproj = params.mmproj.path.len != 0;
+        const has_draft = params.speculative.hasDft();
+        const spec_mtp = for (self.params_base.speculative.types.items) |t| {
+            if (t == .draft_mtp) break true;
+        } else false;
+        const has_spec = has_draft or spec_mtp;
+
+        {
+            var stages: std.ArrayList([]const u8) = .empty;
+            try stages.append(a, "text_model");
+            if (has_spec) try stages.append(a, "spec_model");
+            if (has_mmproj) try stages.append(a, "mmproj_model");
+            load_progress_text.stages = stages.items;
+            load_progress_mmproj.stages = stages.items;
+            load_progress_spec.stages = stages.items;
+
+            // trigger 0% progress
+            _ = loadProgressCallback(0.0, &load_progress_text);
+        }
+
+        {
+            const name = dupZ(params.model.getName());
+            defer freeZ(name);
+            srv(.inf, func, "loading model '%s'\n", .{name});
+        }
+        if (logOn(log.level_trace)) {
+            const path = dupZ(params.model.path);
+            defer freeZ(path);
+            srv(.trc, func, "local path '%s'\n", .{path});
+        }
+
+        const mmproj_path = try a.dupeSentinel(u8, self.params_base.mmproj.path, 0);
+        var mparams = c.mtmd_context_params_default();
+        if (has_mmproj) {
+            mparams.use_gpu = self.params_base.mmproj_use_gpu;
+            mparams.device = self.params_base.mmproj_device;
+            mparams.print_timings = false;
+            mparams.n_threads = self.params_base.cpuparams.n_threads;
+            mparams.flash_attn_type = self.params_base.flash_attn_type;
+            mparams.warmup = self.params_base.warmup;
+            mparams.image_min_tokens = self.params_base.image_min_tokens;
+            mparams.image_max_tokens = self.params_base.image_max_tokens;
+            mparams.batch_max_tokens = self.params_base.mtmd_batch_max_tokens;
+            mparams.media_marker = common.getMediaMarker().ptr;
+            // progress callback
+            mparams.progress_callback = loadProgressCallback;
+            mparams.progress_callback_user_data = &load_progress_mmproj;
+        }
+
+        // optionally get the memory usage of mmproj
+        if (has_mmproj and self.params_base.fit_params) {
+            try self.addMmprojMemory(mmproj_path, mparams);
+        }
+
+        // note: the draft / MTP context is fitted together with the target model, see common_fit_extra_model
+
+        // attach a progress callback
+        {
+            self.params_base.load_progress_callback = loadProgressCallback;
+            self.params_base.load_progress_callback_user_data = &load_progress_text;
+        }
+
+        if (self.llama_init) |*li| li.deinit();
+        self.llama_init = try tc.init.initFromParams(gpa, &self.params_base, false);
+
+        self.model_tgt = self.llama_init.?.model;
+        self.ctx_tgt = self.llama_init.?.context;
+
+        if (self.model_tgt == null) {
+            const path = dupZ(self.params_base.model.path);
+            defer freeZ(path);
+            srv(.err, func, "failed to load model, '%s'\n", .{path});
+            return false;
+        }
+
+        if (self.ctx_tgt == null) {
+            const path = dupZ(self.params_base.model.path);
+            defer freeZ(path);
+            srv(.err, func, "failed to create_context with model '%s'\n", .{path});
+            return false;
+        }
+
+        self.vocab = c.llama_model_get_vocab(self.model_tgt);
+
+        self.n_ctx = @intCast(c.llama_n_ctx(self.ctx_tgt));
+
+        self.add_bos_token = c.llama_vocab_get_add_bos(self.vocab);
+
+        if (has_spec) {
+            // spec_mtp doesn't use load a model internally, so we report 0.0 and 1.0 manually
+            _ = loadProgressCallback(0.0, &load_progress_spec);
+            load_progress_spec.t_last_load_progress_ms = 0; // reset so internal cbs aren't delayed
+
+            {
+                var params_dft = spec_mod.baseParamsToSpeculative(&self.params_base);
+
+                // progress callback
+                params_dft.load_progress_callback = loadProgressCallback;
+                params_dft.load_progress_callback_user_data = &load_progress_spec;
+
+                self.spec_init = try spec_mod.initFromParams(&params_dft, self.model_tgt, self.ctx_tgt);
+                self.model_dft = self.spec_init.?.model();
+                self.ctx_dft = self.spec_init.?.context();
+
+                if (has_draft and self.model_dft == null) {
+                    const path = dupZ(params_dft.model.path);
+                    defer freeZ(path);
+                    srv(.err, func, "failed to load draft model, '%s'\n", .{path});
+                    return false;
+                }
+
+                if (self.ctx_dft == null) {
+                    srv(.err, func, "%s", .{@as([*:0]const u8, "failed to create MTP context\n")});
+                    return false;
+                }
+
+                self.params_base.speculative.draft.ctx_tgt = self.ctx_tgt;
+                self.params_base.speculative.draft.ctx_dft = self.ctx_dft;
+            }
+
+            _ = loadProgressCallback(1.0, &load_progress_spec);
+        }
+
+        if (has_mmproj) {
+            if (self.callback_state.func != null) {
+                var o = common.Obj.init(a);
+                try o.put("stage", "mmproj_model");
+                const payload = o.done();
+                self.callback_state.call(.loading, &payload);
+            }
+
+            if (!is_resume) {
+                c.mtmd_helper_log_set(tc.common.defaultLogCallback, null);
+            }
+
+            self.mctx = c.mtmd_init_from_file(mmproj_path.ptr, self.model_tgt, mparams);
+            if (self.mctx == null) {
+                srv(.err, func, "failed to load multimodal model, '%s'\n", .{mmproj_path.ptr});
+                return false;
+            }
+            srv(.inf, func, "loaded multimodal model, '%s'\n", .{mmproj_path.ptr});
+
+            self.init_opt.video_params.fps_target = self.params_base.video_fps;
+            self.init_opt.video_params.timestamp_interval_ms = self.params_base.video_timestamp_interval_ms;
+            self.init_opt.video_params.ffmpeg_bin_dir = if (self.params_base.video_ffmpeg_bin_dir.len == 0)
+                null
+            else
+                (try a.dupeSentinel(u8, self.params_base.video_ffmpeg_bin_dir, 0)).ptr;
+
+            if (self.params_base.ctx_shift) {
+                self.params_base.ctx_shift = false;
+                srv(.wrn, func, "%s\n", .{@as([*:0]const u8, "ctx_shift is not supported by multimodal, it will be disabled")});
+            }
+
+            if (self.params_base.n_cache_reuse != 0) {
+                self.params_base.n_cache_reuse = 0;
+                srv(.wrn, func, "%s\n", .{@as([*:0]const u8, "cache_reuse is not supported by multimodal, it will be disabled")});
+            }
+        }
+
+        if (!c.llama_memory_can_shift(c.llama_get_memory(self.ctx_tgt))) {
+            if (self.params_base.ctx_shift) {
+                self.params_base.ctx_shift = false;
+                srv(.wrn, func, "%s\n", .{@as([*:0]const u8, "ctx_shift is not supported by this context, it will be disabled")});
+            }
+
+            if (self.params_base.n_cache_reuse != 0) {
+                self.params_base.n_cache_reuse = 0;
+                srv(.wrn, func, "%s\n", .{@as([*:0]const u8, "cache_reuse is not supported by this context, it will be disabled")});
+            }
+        }
+
+        if (c.llama_model_n_swa(self.model_tgt) == 0) {
+            if (self.params_base.swa_full) {
+                self.params_base.swa_full = false;
+                srv(.wrn, func, "%s\n", .{@as([*:0]const u8, "swa_full is not supported by this model, it will be disabled")});
+            }
+        }
+
+        self.n_swa = if (self.params_base.swa_full) 0 else c.llama_model_n_swa(self.model_tgt);
+
+        // Necessary similarity of prompt for slot selection
+        self.slot_prompt_similarity = self.params_base.slot_prompt_similarity;
+
+        const n_ctx_train = c.llama_model_n_ctx_train(self.model_tgt);
+
+        {
+            // note: the capping itself is done in n_ctx_slot(), here we only report it
+            const n_ctx_seq: c_int = @intCast(c.llama_n_ctx_seq(self.ctx_tgt));
+            const per_slot = self.params_base.kv_unified_per_slot;
+
+            if (per_slot > 0) {
+                if (n_ctx_seq > per_slot) {
+                    srv(.inf, func, "capping per-slot context (%d) to --kv-unified-per-slot (%d)\n", .{ n_ctx_seq, per_slot });
+                } else if (per_slot > n_ctx_seq) {
+                    // cap is above the per-slot pool capacity, so it can never bind
+                    srv(.wrn, func, "--kv-unified-per-slot (%d) exceeds the per-slot pool capacity (%d) - cap has no effect, " ++
+                        "slots are limited to %d (raise the KV pool with -c, or unset -c to size it to " ++
+                        "n_parallel * kv_unified_per_slot)\n", .{ per_slot, n_ctx_seq, n_ctx_seq });
+                }
+            }
+
+            const n_ctx_capped = if (per_slot > 0) @min(n_ctx_seq, per_slot) else n_ctx_seq;
+
+            if (n_ctx_capped > n_ctx_train) {
+                srv(.wrn, func, "the slot context (%d) exceeds the training context of the model (%d) - capping\n", .{ n_ctx_capped, n_ctx_train });
+            }
+        }
+
+        for (self.slots) |*s| s.deinit();
+        gpa.free(self.slots);
+        self.slots = &.{};
+
+        self.ctx_tgt_seq_rm_type = tc.common.contextCanSeqRm(self.ctx_tgt);
+        if (self.ctx_tgt_seq_rm_type == .no) {
+            srv(.wrn, func, "%s", .{@as([*:0]const u8, "speculative decoding not supported by this context\n")});
+        }
+
+        if (self.ctx_tgt_seq_rm_type == .full) {
+            srv(.trc, func, "%s", .{@as([*:0]const u8, "speculative decoding will use checkpoints\n")});
+        }
+
+        // setup slots
+        srv(.inf, func, "initializing, n_slots = %d, n_ctx_slot = %d, kv_unified = '%s'\n", .{
+            self.params_base.n_parallel, self.nCtxSlot(), @as([*:0]const u8, if (self.params_base.kv_unified) "true" else "false"),
+        });
+
+        // initialize slots
+        self.slots = try gpa.alloc(Slot, @intCast(self.params_base.n_parallel));
+        for (self.slots) |*s| s.* = .{};
+
+        // try speculative decoding
+        if (self.ctx_tgt_seq_rm_type != .no) {
+            if (spec_mod.init(&self.params_base.speculative, @intCast(self.params_base.n_parallel))) |sp| {
+                self.spec = sp;
+            } else |e| {
+                if (e == error.OutOfMemory) return e;
+                const msg = dupZ(tc.arg.what());
+                defer freeZ(msg);
+                srv(.err, func, "failed to initialize speculative decoding context: %s\n", .{msg});
+                if (self.params_base.speculative.hasSynth()) {
+                    return false;
+                }
+            }
+        }
+
+        if (self.ctx_dft != null) {
+            self.ctx_dft_seq_rm_type = tc.common.contextCanSeqRm(self.ctx_dft);
+        }
+
+        if (self.spec != null) {
+            srv(.trc, func, "%s", .{@as([*:0]const u8, "speculative decoding context initialized\n")});
+        } else {
+            if (self.spec_init) |*si| si.deinit();
+            self.spec_init = null;
+            self.ctx_dft = null;
+            self.model_dft = null;
+        }
+
+        if (self.spec == null and self.params_base.speculative.hasSynth()) {
+            srv(.err, func, "%s", .{@as([*:0]const u8, "synthetic acceptance requires an initialized speculative decoding context\n")});
+            return false;
+        }
+
+        for (self.slots, 0..) |*slot, i| {
+            slot.id = @intCast(i);
+            slot.ctx_tgt = self.ctx_tgt;
+            slot.ctx_dft = self.ctx_dft;
+            slot.mem.init(self.ctx_tgt, self.ctx_dft);
+            slot.spec = self.spec;
+            slot.n_ctx = self.nCtxSlot();
+
+            slot.mctx = self.mctx;
+            slot.prompt.tokens.has_mtmd = self.mctx != null;
+
+            slt(.trc, func, slot, "new slot, n_ctx = %d\n", .{slot.n_ctx});
+
+            // callback_on_release and callback_on_reset, see `Slot.release`
+            slot.owner = self;
+
+            slot.reset();
+        }
+
+        {
+            self.trace = envInt("LLAMA_TRACE");
+
+            if (self.trace != 0) {
+                srv(.wrn, func, "LLAMA_TRACE = %d\n", .{self.trace});
+            }
+        }
+
+        {
+            self.slots_debug = envInt("LLAMA_SERVER_SLOTS_DEBUG");
+
+            if (self.slots_debug != 0) {
+                srv(.wrn, func, "LLAMA_SERVER_SLOTS_DEBUG = %d\n", .{self.slots_debug});
+            }
+        }
+
+        {
+            self.slots_n_diff = envInt("LLAMA_SERVER_SLOTS_N_DIFF");
+
+            if (self.slots_n_diff != 0) {
+                srv(.wrn, func, "LLAMA_SERVER_SLOTS_N_DIFF = %d\n", .{self.slots_n_diff});
+            }
+        }
+
+        // the update_slots() logic will always submit a maximum of n_batch or n_parallel tokens
+        // note that n_batch can be > n_ctx (e.g. for non-causal attention models such as BERT where the KV cache is not used)
+        {
+            const n_batch: i32 = @intCast(c.llama_n_batch(self.ctx_tgt));
+            const n_embd: i32 = c.llama_model_n_embd_inp(self.model_tgt);
+            self.batch.deinit();
+            self.batch = .{};
+            try self.batch.init(@max(n_batch, self.params_base.n_parallel), n_embd);
+        }
+
+        if (self.params_base.cache_ram_mib != 0) {
+            if (self.params_base.cache_ram_mib < 0) {
+                srv(.trc, func, "prompt cache is enabled, size limit: %s\n", .{@as([*:0]const u8, "no limit")});
+            } else {
+                srv(.trc, func, "prompt cache is enabled, size limit: %d MiB\n", .{self.params_base.cache_ram_mib});
+            }
+            srv(.trc, func, "%s", .{@as([*:0]const u8, "use `--cache-ram 0` to disable the prompt cache\n")});
+
+            if (self.prompt_cache) |pc| {
+                pc.deinit();
+                gpa.destroy(pc);
+            }
+            const pc = try gpa.create(task_mod.PromptCache);
+            pc.* = task_mod.PromptCache.init(gpa, self.params_base.cache_ram_mib, @intCast(self.n_ctx));
+            self.prompt_cache = pc;
+        } else {
+            srv(.trc, func, "%s", .{@as([*:0]const u8, "prompt cache is disabled - use `--cache-ram N` to enable it\n")});
+        }
+        srv(.trc, func, "%s", .{@as([*:0]const u8, "for more info see https://github.com/ggml-org/llama.cpp/pull/16391\n")});
+
+        if (self.params_base.n_ctx_checkpoints > 0) {
+            srv(.trc, func, "context checkpoints enabled, max = %d, min spacing = %d\n", .{ self.params_base.n_ctx_checkpoints, self.params_base.checkpoint_min_step });
+        } else {
+            srv(.trc, func, "%s", .{@as([*:0]const u8, "context checkpoints disabled\n")});
+        }
+
+        if (self.params_base.model_alias.items.items.len != 0) {
+            // backward compat: use first alias as model name
+            self.model_name = self.params_base.model_alias.items.items[0];
+        } else if (self.params_base.model.getName().len != 0) {
+            self.model_name = self.params_base.model.getName();
+        } else {
+            // fallback: derive model name from file name
+            self.model_name = std.fs.path.basename(self.params_base.model.path);
+        }
+
+        self.model_aliases = self.params_base.model_alias.items.items;
+        self.model_tags = self.params_base.model_tags.items.items;
+
+        // propagate new defaults back to caller
+        if (params != &self.params_base) params.* = self.params_base;
+
+        if (!is_resume) {
+            return self.initServer();
+        }
+
+        const empty: Value = .null;
+        self.callback_state.call(.ready, &empty);
+
+        return true;
+    }
+
+    /// The `has_mmproj && fit_params` block of `load_model`
+    /// (server-context.cpp:1006 @b29c606e2): the projector's worst-case
+    /// memory added to the fit's target margin, per device.
+    fn addMmprojMemory(self: *Impl, mmproj_path: [:0]const u8, mparams: c.mtmd_context_params) !void {
+        const func = "load_model";
+        const t_start = c.ggml_time_us();
+        const MtmdParams = @typeInfo(@TypeOf(mtmd_mod.mtmd.getMemoryUsage)).@"fn".param_types[1].?;
+        var mmproj_mem = mtmd_mod.mtmd.getMemoryUsage(mmproj_path.ptr, @as(*const MtmdParams, @ptrCast(&mparams)).*);
+        defer mmproj_mem.deinit();
+        const t_elapsed = c.ggml_time_us() - t_start;
+        if (mmproj_mem.items.items.len != 0) {
+            var total: usize = 0;
+            for (mmproj_mem.items.items) |e| total += e.size;
+            srv(.trc, func, "[mtmd] estimated worst-case memory usage of mmproj is %.2f MiB (took %.2f ms)\n", .{
+                @as(f64, @floatFromInt(total)) / (1024.0 * 1024.0), @as(f64, @floatFromInt(t_elapsed)) / 1000.0,
+            });
+            ggmlAssert(self.params_base.fit_params_target.items.len != 0, 1074, "!params_base.fit_params_target.empty()");
+            for (mmproj_mem.items.items) |e| {
+                const dev = e.dev;
+                const sz = e.size;
+                var i: usize = 0;
+                while (i < c.ggml_backend_dev_count()) : (i += 1) {
+                    if (@intFromPtr(c.ggml_backend_dev_get(i)) == @intFromPtr(dev)) {
+                        if (i < self.params_base.fit_params_target.items.len) {
+                            srv(.dbg, func, "[mtmd] adding %.2f MiB to fit_params_target for device %s\n", .{
+                                @as(f64, @floatFromInt(sz)) / (1024.0 * 1024.0), c.ggml_backend_dev_name(c.ggml_backend_dev_get(i)),
+                            });
+                            self.params_base.fit_params_target.items[i] += sz;
+                        }
+                        break;
+                    }
+                }
+            }
+        } else {
+            srv(.err, func, "%s", .{@as([*:0]const u8, "[mtmd] failed to get memory usage of mmproj\n")});
+        }
+    }
+
+    fn envInt(name: [*:0]const u8) c_int {
+        const v = std.c.getenv(name) orelse return 0;
+        return std.c.atoi(@ptrCast(v));
+    }
+
+    /// Ports `server_context_impl`'s `init` (server-context.cpp:1401
+    /// @b29c606e2): unlike `load_model`, this is only called once during
+    /// initialization.
+    fn initServer(self: *Impl) !bool {
+        const func = "init";
+        const a = self.arena.allocator();
+        ggmlAssert(self.ctx_tgt != null, 1402, "ctx_tgt   != nullptr");
+        ggmlAssert(self.model_tgt != null, 1403, "model_tgt != nullptr");
+
+        ggmlAssert(!self.sleeping, 1405, "!sleeping");
+
+        // wiring up server queues
+        self.queue_tasks.onCallbacks(self, onNewTask, onUpdateSlots);
+        try self.queue_tasks.onSleepingState(self, onSleeping);
+
+        self.metrics.init();
+
+        if (self.params_base.cache_idle_slots) {
+            if (self.params_base.cache_ram_mib == 0) {
+                srv(.wrn, func, "%s", .{@as([*:0]const u8, "--cache-idle-slots requires --cache-ram, disabling\n")});
+                self.params_base.cache_idle_slots = false;
+            } else {
+                if (self.params_base.kv_unified) {
+                    srv(.trc, func, "%s", .{@as([*:0]const u8, "idle slots will be saved to prompt cache and cleared upon starting a new task\n")});
+                } else {
+                    // without a unified KV cache, clearing a slot frees no reusable room, so we only
+                    // publish a RAM-cache copy of idle slots (their KV stays in VRAM) [TAG_IDLE_SLOT_CLEAR]
+                    srv(.trc, func, "%s", .{@as([*:0]const u8, "idle slots will be saved to prompt cache upon starting a new task\n")});
+                }
+                srv(.dbg, func, "%s", .{@as([*:0]const u8, "__TEST_TAG_CACHE_IDLE_SLOTS_ENABLED__\n")});
+            }
+        }
+
+        {
+            const cfg = self.params_base.ui_config_json;
+            if (cfg.len != 0) {
+                if (json.parse(a, cfg)) |json_settings| {
+                    self.json_ui_settings = json_settings;
+                } else |e| {
+                    const msg = dupZ(whatOf(e));
+                    defer freeZ(msg);
+                    srv(.err, func, "%s: failed to parse UI config: %s\n", .{ @as([*:0]const u8, func), msg });
+                    return false;
+                }
+            }
+        }
+
+        // populate chat template params
+        {
+            var enable_thinking = false;
+
+            const ok = self.initTemplates(&enable_thinking) catch |e| blk: {
+                if (e == error.OutOfMemory) return e;
+                const msg = dupZ(whatOf(e));
+                defer freeZ(msg);
+                srv(.err, func, "%s: chat template parsing error: %s\n", .{ @as([*:0]const u8, func), msg });
+                srv(.err, func, "%s: please consider disabling jinja via --no-jinja, or use a custom chat template via --chat-template\n", .{@as([*:0]const u8, func)});
+                srv(.err, func, "%s: for example: --no-jinja --chat-template chatml\n", .{@as([*:0]const u8, func)});
+                break :blk false;
+            };
+            if (!ok) return false;
+
+            // IMPORTANT: chat_params is reused across sleeping / resuming states,
+            //            never store llama_context/llama_model pointers in chat_params,
+            //            as they may be invalidated after sleeping
+            var kwargs: oaicompat.KwMap = .{};
+            for (self.params_base.default_template_kwargs.entries.items) |e| try kwargs.put(a, e.key, e.value);
+            self.chat_params = .{
+                .use_jinja = self.params_base.use_jinja,
+                .prefill_assistant = self.params_base.prefill_assistant,
+                .reasoning_format = @fromBackingInt(@intCast(@backingInt(self.params_base.reasoning_format))),
+                .chat_template_kwargs = kwargs,
+                .tmpls = &self.tmpls.?,
+                .allow_image = if (self.mctx != null) c.mtmd_support_vision(self.mctx) else false,
+                .allow_audio = if (self.mctx != null) c.mtmd_support_audio(self.mctx) else false,
+                .allow_video = if (self.mctx != null) c.mtmd_helper_support_video(self.mctx) else false,
+                .enable_thinking = enable_thinking,
+                .reasoning_budget = self.params_base.sampling.reasoning_budget_tokens,
+                .reasoning_budget_message = self.params_base.sampling.reasoning_budget_message,
+                .media_path = self.params_base.media_path,
+                .force_pure_content = self.params_base.force_pure_content_parser,
+            };
+
+            {
+                const caps = chat.templates.getCaps(&self.tmpls.?);
+                const it: ?[]const u8 = for (self.params_base.default_template_kwargs.entries.items) |e| {
+                    if (std.mem.eql(u8, e.key, "preserve_reasoning")) break e.value;
+                } else null;
+                const supported = chat.templates.capsValue(caps, "supports_preserve_reasoning");
+                const specified = self.params_base.preserve_reasoning_specified;
+                // note: the kwarg is enabled by default if not specified explicitly, so check the value
+                const enabled = it != null and std.mem.eql(u8, it.?, "true");
+                if (supported) {
+                    const v = dupZ(it orelse "unset (template default)");
+                    defer freeZ(v);
+                    srv(.trc, func, "preserve_reasoning kwarg: %s\n", .{v});
+                } else {
+                    srv(.trc, func, "%s", .{@as([*:0]const u8, "preserve_reasoning kwarg: not supported by template\n")});
+                }
+                if (supported and !specified) {
+                    srv(.wrn, func, "%s", .{@as([*:0]const u8, "chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)\n")});
+                }
+                if (supported and !enabled) {
+                    srv(.inf, func, "%s", .{@as([*:0]const u8, "chat template supports preserving reasoning, consider enabling it via --reasoning-preserve\n")});
+                }
+                if (!supported and specified and enabled) {
+                    srv(.wrn, func, "%s", .{@as([*:0]const u8, "chat template does NOT support preserving reasoning, --reasoning-preserve has no effect\n")});
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// The `try` block of `init`'s chat-template section
+    /// (server-context.cpp:1401 @b29c606e2): `common_chat_templates_init`,
+    /// the example's trace line, and whether thinking is on.
+    fn initTemplates(self: *Impl, enable_thinking: *bool) !bool {
+        const func = "init";
+        const a = self.arena.allocator();
+        var info = try chat.templates.modelInfo(a, @ptrCast(self.model_tgt.?));
+        self.tmpls = try chat.templates.init(gpa, &info, self.params_base.chat_template, "", "");
+
+        if (logOn(log.level_trace)) {
+            var tmp = std.heap.ArenaAllocator.init(gpa);
+            defer tmp.deinit();
+            const ta = tmp.allocator();
+            var kwargs: std.ArrayList(chat.templates.KwArg) = .empty;
+            for (self.params_base.default_template_kwargs.entries.items) |e| try kwargs.append(ta, .{ .key = e.key, .value = e.value });
+            const example = try chat.templates.formatExample(ta, &self.tmpls.?, self.params_base.use_jinja, kwargs.items);
+            srv(.trc, func, "%s: chat template, example_format: '%s'\n", .{ @as([*:0]const u8, func), (try ta.dupeSentinel(u8, example, 0)).ptr });
+        }
+
+        // thinking is enabled if:
+        // 1. It's not explicitly disabled via --reasoning off
+        // 2. The chat template supports it
+        const template_supports_thinking = self.params_base.use_jinja and try chat.templates.supportEnableThinking(gpa, &self.tmpls.?);
+        enable_thinking.* = self.params_base.enable_reasoning != 0 and template_supports_thinking;
+        srv(.trc, func, "%s: chat template, thinking = %d\n", .{ @as([*:0]const u8, func), @as(c_int, @intFromBool(enable_thinking.*)) });
+        return true;
+    }
+
+    fn onNewTask(ctx: *anyopaque, task: *Task, is_yielding: bool) anyerror!bool {
+        const self: *Impl = @ptrCast(@alignCast(ctx));
+        return self.processSingleTask(task, is_yielding);
+    }
+
+    fn onUpdateSlots(ctx: *anyopaque) anyerror!void {
+        const self: *Impl = @ptrCast(@alignCast(ctx));
+        return self.updateSlots();
+    }
+
+    fn onSleeping(ctx: *anyopaque, sleeping: bool) void {
+        const self: *Impl = @ptrCast(@alignCast(ctx));
+        self.handleSleepingState(sleeping) catch |e| {
+            const msg = dupZ(whatOf(e));
+            defer freeZ(msg);
+            ggmlAbort(966, "failed to change the sleeping state: %s", .{msg});
+        };
+    }
+
+    /// Ports `server_context_impl`'s `get_slot_by_id` (server-context.cpp:1520
+    /// @b29c606e2): an out-of-bounds id wraps around.
+    fn getSlotById(self: *Impl, id_slot_in: c_int) ?*Slot {
+        const n: c_int = @intCast(self.slots.len);
+        const id_slot = @rem(id_slot_in, n);
+
+        for (self.slots) |*slot| {
+            if (slot.id == id_slot) {
+                return slot;
+            }
+        }
+
+        return null;
+    }
+
+    /// Ports `server_context_impl`'s `get_slot_by_cmpl_id` (server-context.cpp:1533 @b29c606e2).
+    fn getSlotByCmplId(self: *Impl, cmpl_id: []const u8) ?*Slot {
+        if (cmpl_id.len == 0) {
+            return null;
+        }
+
+        for (self.slots) |*slot| {
+            if (slot.isProcessing() and slot.task != null and std.mem.eql(u8, slot.taskRef().params.oaicompat_cmpl_id, cmpl_id)) {
+                return slot;
+            }
+        }
+
+        return null;
+    }
+
+    /// Ports `server_context_impl`'s `get_available_slot` (server-context.cpp:1547 @b29c606e2).
+    fn getAvailableSlot(self: *Impl, task: *const Task) !?*Slot {
+        const func = "get_available_slot";
+        var ret: ?*Slot = null;
+
+        var update_cache = false;
+
+        // if a specific slot is requested, use it (still goes through cache update logic below)
+        if (task.id_slot != -1) {
+            ret = self.getSlotById(task.id_slot);
+            if (ret) |r| {
+                slt(.inf, func, r, "selected slot by id (%d)\n", .{task.id_slot});
+            }
+        }
+
+        // find the slot that has at least n% prompt similarity
+        if (self.slot_prompt_similarity != 0.0) {
+            var f_sim_best: f32 = 0;
+
+            for (self.slots) |*slot| {
+                if (task.id_slot != -1 and slot.id != task.id_slot) {
+                    continue;
+                }
+
+                // skip the slot if it is not available
+                if (slot.isProcessing()) {
+                    slt(.trc, func, slot, " - skipping, is_processing = %d\n", .{@as(c_int, @intFromBool(slot.isProcessing()))});
+                    continue;
+                }
+
+                const toks = &slot.prompt.tokens;
+
+                // skip the slot if it does not contains cached tokens
+                if (toks.empty()) {
+                    slt(.trc, func, slot, "%s", .{@as([*:0]const u8, " - skipping, slot is empty\n")});
+                    continue;
+                }
+
+                // fraction of the Longest Common Prefix length with respect to the input prompt length
+                const lcp_len = try toks.getCommonPrefix(&task.tokens);
+                const f_sim_cur: f32 = @as(f32, @floatFromInt(lcp_len)) / @as(f32, @floatFromInt(task.tokens.size()));
+
+                slt(.trc, func, slot, " - checking sim = %.3f (%zu/%zu) > %.3f\n", .{ @as(f64, f_sim_cur), lcp_len, task.tokens.size(), @as(f64, self.slot_prompt_similarity) });
+
+                // select the current slot if the criteria match
+                if (f_sim_cur > f_sim_best and f_sim_cur > self.slot_prompt_similarity) {
+                    f_sim_best = f_sim_cur;
+
+                    ret = slot;
+                }
+            }
+
+            if (ret) |r| {
+                const f_keep: f32 = (f_sim_best * @as(f32, @floatFromInt(task.tokens.size()))) / @as(f32, @floatFromInt(r.prompt.tokens.size()));
+
+                if (task.id_slot == -1) {
+                    slt(.inf, func, r, "selected slot by LCP similarity, f_sim_best = %.3f (> %.3f thold), f_keep = %.3f\n", .{ @as(f64, f_sim_best), @as(f64, self.slot_prompt_similarity), @as(f64, f_keep) });
+                }
+
+                // if we are about to lose a large portion of the existing context - save it in the prompt cache
+                if (f_keep < 0.5) {
+                    update_cache = true;
+                }
+            }
+        }
+
+        // find the slot that has been least recently used
+        if (ret == null) {
+            var t_last: i64 = -1;
+
+            for (self.slots) |*slot| {
+                // skip the slot if it is not available
+                if (slot.isProcessing()) {
+                    continue;
+                }
+
+                // select the current slot if the criteria match
+                if (ret == null or slot.t_last_used <= t_last) {
+                    t_last = slot.t_last_used;
+                    ret = slot;
+                }
+            }
+
+            if (ret) |r| {
+                slt(.inf, func, r, "selected slot by LRU, t_last = %lld\n", .{@as(c_longlong, t_last)});
+
+                update_cache = true;
+            }
+        }
+
+        if (ret) |r| {
+            update_cache = update_cache and self.prompt_cache != null;
+
+            // cache prompts only for completion tasks
+            update_cache = update_cache and task.type == .completion;
+
+            if (update_cache) {
+                srv(.trc, func, "%s", .{@as([*:0]const u8, "updating prompt cache\n")});
+
+                const t_start = c.ggml_time_us();
+
+                _ = try r.promptSave(self.prompt_cache.?);
+
+                if (!try r.promptLoad(self.prompt_cache.?, &task.tokens)) {
+                    r.promptClear();
+                }
+
+                self.prompt_cache.?.update();
+
+                srv(.trc, func, "prompt cache update took %.2f ms\n", .{@as(f64, @floatFromInt(c.ggml_time_us() - t_start)) / 1000.0});
+            }
+        }
+
+        return ret;
+    }
+
+    /// Ports `server_context_impl`'s `try_clear_idle_slots` (server-context.cpp:1667
+    /// @b29c606e2): true if at least one slot has been cleared.
+    fn tryClearIdleSlots(self: *Impl) bool {
+        var res = false;
+
+        if (!self.params_base.kv_unified) {
+            return res;
+        }
+
+        for (self.slots) |*slot| {
+            if (slot.isProcessing()) {
+                continue;
+            }
+
+            if (slot.prompt.nTokens() > 0) {
+                srv(.wrn, "try_clear_idle_slots", "purging slot %d with %zu tokens\n", .{ slot.id, slot.prompt.tokens.size() });
+
+                slot.promptClear();
+
+                res = true;
+
+                // clear slots one by one
+                break;
+            }
+        }
+
+        return res;
+    }
+
+    /// Ports `server_context_impl`'s `construct_lora_list` (server-context.cpp:1694 @b29c606e2).
+    ///
+    /// Return: owned by `gpa`.
+    fn constructLoraList(self: *const Impl, config: *const common.LoraMap) ![]LoraInfo {
+        const output = try gpa.dupe(LoraInfo, self.params_base.lora_adapters.items); // copy
+        for (output, 0..) |*o, i| {
+            o.scale = 0.0;
+            for (config.entries.items) |e| {
+                if (e.id == @as(c_int, @intCast(i))) {
+                    o.scale = e.scale;
+                    break;
+                }
+            }
+        }
+        return output;
+    }
+
+    /// Ports `server_context_impl`'s `launch_slot_with_task` (server-context.cpp:1707
+    /// @b29c606e2). Takes the task: it ends in the slot, or is dropped.
+    fn launchSlotWithTask(self: *Impl, slot: *Slot, task_in: Task) !bool {
+        const func = "launch_slot_with_task";
+        var task = task_in;
+        var moved = false;
+        defer if (!moved) task.deinit(gpa);
+
+        // process per-request lora adapters
+        if (task.params.lora.entries.items.len != 0) {
+            const task_loras = try self.constructLoraList(&task.params.lora);
+            if (!common.areLoraEqual(task_loras, slot.lora)) {
+                // if lora has changed, check to see if the cache should be cleared
+                if (common.loraShouldClearCache(slot.lora, task_loras)) {
+                    slt(.trc, func, slot, "clearing cache for lora change. %zu loras -> %zu loras\n", .{ slot.lora.len, task.params.lora.entries.items.len });
+                    slot.prompt.clear();
+                } else {
+                    slt(.trc, func, slot, "keeping cache for alora. %zu target loras\n", .{task_loras.len});
+                }
+                gpa.free(slot.lora);
+                slot.lora = task_loras;
+            } else {
+                gpa.free(task_loras);
+            }
+        } else {
+            gpa.free(slot.lora);
+            slot.lora = try gpa.dupe(LoraInfo, self.params_base.lora_adapters.items);
+        }
+
+        // if using alora, make sure it's only a single one requested and active
+        var alora_invocation_start: usize = task.tokens.size();
+        if (common.loraAllAlora(slot.lora)) {
+            const enabled_ids = try common.loraGetEnabledIds(gpa, slot.lora);
+            defer gpa.free(enabled_ids);
+            // TODO: This will error out if a user requests two aloras, but only
+            // provides the activation string for one. We could, instead search
+            // for all requested alora activation strings and then either keep
+            // only the last one, or reject if multiple are found.
+            if (enabled_ids.len != 1) {
+                try self.sendErrorTask(&task, "Cannot run multiple aLoRAs in a single request", .invalid_request);
+                return false;
+            }
+            const lora = slot.lora[enabled_ids[0]].ptr;
+
+            // get the pointer and count for the invocation tokens
+            const n_invocation_tokens = c.llama_adapter_get_alora_n_invocation_tokens(lora);
+            const invocation_tokens = c.llama_adapter_get_alora_invocation_tokens(lora);
+
+            // scan backwards through the prompt tokens to find the last
+            // occurrence of the invocation sequence
+            var match_idx: c_int = @as(c_int, @intCast(n_invocation_tokens)) - 1;
+            var i: c_int = @as(c_int, @intCast(task.tokens.size())) - 1;
+            while (i >= 0) : (i -= 1) {
+                // the token in this position matches the next token to find in
+                // the invocation sequence
+                if (task.tokens.at(@intCast(i)) == invocation_tokens[@intCast(match_idx)]) {
+                    // if it's a full match, we've found the start
+                    if (match_idx == 0) {
+                        alora_invocation_start = @intCast(i);
+                        break;
+                    }
+                    // otherwise, check the next token in the sequence
+                    match_idx -= 1;
+                } else {
+                    // no match in this position, so start looking over again
+                    match_idx = @as(c_int, @intCast(n_invocation_tokens)) - 1;
+                }
+            }
+
+            // if the activation string is not found, disable the alora
+            if (alora_invocation_start == task.tokens.size()) {
+                slt(.dbg, func, slot, "alora %zu requested, but not found. deactivating\n", .{enabled_ids[0]});
+                slot.lora[enabled_ids[0]].scale = 0.0;
+            } else {
+                slt(.dbg, func, slot, "alora %zu activated starting at %zu\n", .{ enabled_ids[0], alora_invocation_start });
+                slot.alora_invocation_start = @intCast(alora_invocation_start);
+            }
+        }
+
+        if (!task.tokens.validate(self.ctx_tgt)) {
+            try self.sendErrorTask(&task, "Prompt contains invalid tokens", .invalid_request);
+            return false;
+        }
+
+        if (logOn(log.level_debug)) {
+            var tmp = std.heap.ArenaAllocator.init(gpa);
+            defer tmp.deinit();
+            var j = try slot.toJson(tmp.allocator(), false);
+            const s = try tmp.allocator().dupeSentinel(u8, try common.safeJsonToStr(tmp.allocator(), &j), 0);
+            slt(.dbg, func, slot, "launching slot : %s\n", .{s.ptr});
+        }
+
+        // initialize samplers
+        if (task.needSampling()) {
+            if (slot.smpl) |s| s.destroy();
+            slot.smpl = null;
+            slot.smpl = sampling.init(self.model_tgt, &task.params.sampling) catch |e| {
+                if (e == error.OutOfMemory) return e;
+                var buf: [4200]u8 = undefined;
+                const err_msg = std.fmt.bufPrint(&buf, "Failed to initialize samplers: {s}", .{tc.arg.what()}) catch &buf;
+                try self.sendErrorTask(&task, err_msg, .invalid_request);
+                return false;
+            };
+
+            const need_pre_sample_logits = task.params.sampling.n_probs > 0 and !task.params.post_sampling_probs;
+
+            var use_backend_sampling = task.params.sampling.backend_sampling;
+
+            // TODO: getting pre sampling logits is not yet supported with backend sampling
+            use_backend_sampling = use_backend_sampling and !need_pre_sample_logits;
+
+            // TODO: tmp until backend sampling is fully implemented
+            if (use_backend_sampling) {
+                _ = c.llama_set_sampler(self.ctx_tgt, slot.id, slot.smpl.?.get());
+            } else {
+                _ = c.llama_set_sampler(self.ctx_tgt, slot.id, null);
+            }
+
+            if (logOn(log.level_trace)) {
+                var tmp = std.heap.ArenaAllocator.init(gpa);
+                defer tmp.deinit();
+                const ta = tmp.allocator();
+                const chain = try ta.dupeSentinel(u8, try slot.smpl.?.print(ta), 0);
+                slt(.trc, func, slot, "sampler chain: %s\n", .{chain.ptr});
+                const sp = try ta.dupeSentinel(u8, try sampling.paramsPrint(ta, &task.params.sampling), 0);
+                slt(.trc, func, slot, "sampler params: \n%s\n", .{sp.ptr});
+            }
+
+            if (self.spec != null and spec_mod.getSynthProbs(self.spec).len != 0) {
+                const seed: u32 = if (task.params.sampling.seed == c.LLAMA_DEFAULT_SEED)
+                    common.randomDevice()
+                else
+                    task.params.sampling.seed;
+                slot.spec_synth_rng.seed(seed);
+            }
+        } else {
+            if (slot.smpl) |s| s.destroy();
+            slot.smpl = null;
+        }
+
+        // the per-request limit takes priority over the global one
+        slot.n_predict_max = if (task.params.n_predict != -1) task.params.n_predict else self.params_base.n_predict;
+
+        if (slot.task) |*old| old.deinit(gpa);
+        slot.task = task;
+        moved = true;
+
+        slot.state = if (slot.taskRef().isChild())
+            .wait_other // wait for the parent to process prompt
+        else
+            .started;
+
+        // reset server kill-switch counter
+        self.n_empty_consecutive = 0;
+
+        slt(.inf, func, slot, "processing task, is_child = %d\n", .{@as(c_int, @intFromBool(slot.taskRef().isChild()))});
+        return true;
+    }
+
+    /// Ports `server_context_impl`'s `process_token` (server-context.cpp:1833 @b29c606e2).
+    ///
+    /// Return: whether the slot continues.
+    fn processToken(self: *Impl, result: *CompletionTokenOutput, slot: *Slot, a: Allocator) !bool {
+        const func = "process_token";
+        // remember which tokens were sampled - used for repetition penalties during sampling
+        const token_str = result.text_to_send;
+        slot.sampled = result.tok;
+
+        try slot.generated_text.appendSlice(gpa, token_str);
+        if (slot.taskRef().params.return_tokens) {
+            try slot.generated_tokens.append(gpa, result.tok);
+        }
+        slot.has_next_token = true;
+
+        // check if there is incomplete UTF-8 character at the end
+        const incomplete = common.validateUtf8(slot.generated_text.items) < slot.generated_text.items.len;
+
+        // search stop word and delete it
+        if (!incomplete) {
+            var pos = @min(slot.n_sent_text, slot.generated_text.items.len);
+
+            const str_test = try a.dupe(u8, slot.generated_text.items[pos..]);
+            var send_text = true;
+
+            var stop_pos = try slot.findStoppingStrings(str_test, token_str.len, true);
+            if (stop_pos) |sp| {
+                slot.generated_text.shrinkRetainingCapacity(pos + sp);
+                pos = @min(slot.n_sent_text, slot.generated_text.items.len);
+            } else if (slot.has_next_token and !c.llama_vocab_is_eog(self.vocab, result.tok)) {
+                stop_pos = try slot.findStoppingStrings(str_test, token_str.len, false);
+                send_text = stop_pos == null;
+            }
+
+            // check if there is any token to predict
+            if (send_text) {
+                // no send the stop word in the response
+                result.text_to_send = try a.dupe(u8, slot.generated_text.items[pos..]);
+                slot.n_sent_text += result.text_to_send.len;
+                // add the token to slot queue and cache
+            } else {
+                result.text_to_send = "";
+            }
+
+            try slot.addToken(result);
+            if (slot.taskRef().params.stream) {
+                try self.sendPartialResponse(slot, result, false, false);
+            }
+        }
+
+        if (incomplete) {
+            slot.has_next_token = true;
+        }
+
+        // if context shifting is disabled, make sure that we don't run out of context
+        if (!self.params_base.ctx_shift and slot.prompt.nTokens() + 1 >= slot.n_ctx) {
+            slot.truncated = true;
+            slot.stop = .limit;
+            slot.has_next_token = false;
+
+            slt(.dbg, func, slot, "stopped due to running out of context capacity, prompt.n_tokens() = %d, task.n_tokens = %d, n_gen = %d, n_ctx = %d\n", .{
+                slot.prompt.nTokens(), slot.taskRef().nTokens(), @as(c_int, @intCast(slot.stats.n_gen)), slot.n_ctx,
+            });
+        }
+
+        // check the limits
+        if (slot.stats.n_gen > 0 and slot.has_next_token and !slot.hasBudget()) {
+            slot.stop = .limit;
+            slot.has_next_token = false;
+
+            slt(.dbg, func, slot, "stopped by limit, n_gen = %d, n_predict = %d\n", .{ @as(c_int, @intCast(slot.stats.n_gen)), slot.taskRef().params.n_predict });
+        }
+
+        if (slot.has_new_line) {
+            // require that each new line has a whitespace prefix (i.e. indentation) of at least slot.params.n_indent
+            if (slot.taskRef().params.n_indent > 0) {
+                // check the current indentation
+                // TODO: improve by not doing it more than once for each new line
+                if (slot.last_nl_pos > 0) {
+                    var pos = slot.last_nl_pos;
+
+                    var n_indent: c_int = 0;
+                    const text = slot.generated_text.items;
+                    while (pos < text.len and (text[pos] == ' ' or text[pos] == '\t')) {
+                        n_indent += 1;
+                        pos += 1;
+                    }
+
+                    if (pos < slot.generated_text.items.len and n_indent < slot.taskRef().params.n_indent) {
+                        slot.stop = .limit;
+                        slot.has_next_token = false;
+
+                        // cut the last line
+                        slot.generated_text.shrinkRetainingCapacity(pos);
+
+                        slt(.dbg, func, slot, "stopped by indentation limit, n_gen = %d, n_indent = %d\n", .{ @as(c_int, @intCast(slot.stats.n_gen)), n_indent });
+                    }
+                }
+
+                // find the next new line
+                {
+                    if (std.mem.indexOfScalarPos(u8, slot.generated_text.items, @min(slot.last_nl_pos, slot.generated_text.items.len), '\n')) |pos| {
+                        slot.last_nl_pos = pos + 1;
+                    }
+                }
+            }
+        }
+
+        // check if there is a new line in the generated text
+        if (std.mem.indexOfScalar(u8, result.text_to_send, '\n') != null) {
+            slot.has_new_line = true;
+
+            // if we have seen a new line, we stop after a certain time limit, but only upon another new line
+            if (slot.taskRef().params.t_max_predict_ms > 0 and slot.stats.tGenMs() > @as(f64, @floatFromInt(slot.taskRef().params.t_max_predict_ms))) {
+                slot.stop = .limit;
+                slot.has_next_token = false;
+
+                slt(.dbg, func, slot, "stopped by time limit, n_gen = %d, t_max_predict_ms = %d ms\n", .{ @as(c_int, @intCast(slot.stats.n_gen)), @as(c_int, @truncate(slot.taskRef().params.t_max_predict_ms)) });
+            }
+        }
+
+        if (c.llama_vocab_is_eog(self.vocab, result.tok)) {
+            slot.stop = .eos;
+            slot.has_next_token = false;
+
+            slt(.dbg, func, slot, "%s", .{@as([*:0]const u8, "stopped by EOS\n")});
+        }
+
+        if (logOn(log.level_debug)) {
+            const z = try a.dupeSentinel(u8, token_str, 0);
+            slt(.dbg, func, slot, "n_gen = %d, n_remaining = %d, next token: %5d '%s'\n", .{ @as(c_int, @intCast(slot.stats.n_gen)), slot.nRemaining(), result.tok, z.ptr });
+        }
+
+        return slot.has_next_token; // continue
+    }
+
+    /// Ports `server_context_impl`'s `populate_token_probs` (server-context.cpp:1964 @b29c606e2).
+    fn populateTokenProbs(self: *const Impl, slot: *const Slot, result: *CompletionTokenOutput, post_sampling: bool, special: bool, idx: c_int, a: Allocator) !void {
+        const n_probs_request: usize = @intCast(@max(slot.taskRef().params.sampling.n_probs, 0));
+        var probs: std.ArrayList(CompletionTokenOutput.ProbInfo) = .empty;
+        const vocab = c.llama_model_get_vocab(c.llama_get_model(self.ctx_tgt));
+
+        if (post_sampling) {
+            const cur_p = slot.smpl.?.getCandidates(true);
+            const max_probs = cur_p.size;
+            const n_probs = @min(max_probs, n_probs_request);
+
+            // set probability for sampled token
+            for (0..max_probs) |i| {
+                if (cur_p.data[i].id == result.tok) {
+                    result.prob = cur_p.data[i].p;
+                    break;
+                }
+            }
+
+            // set probability for top n_probs tokens
+            try probs.ensureTotalCapacity(a, n_probs);
+            for (0..n_probs) |i| {
+                // Some samplers do return 0.0 probabilities, others don't.
+                // Filter 0.0 probailities, to ensure the behavior is consistent.
+                if (cur_p.data[i].p == 0.0) {
+                    break;
+                }
+
+                try probs.append(a, .{
+                    .tok = cur_p.data[i].id,
+                    .txt = try tc.common.tokenToPiece(a, vocab, cur_p.data[i].id, special),
+                    .prob = cur_p.data[i].p,
+                });
+            }
+        } else {
+            const cur = try common.getTokenProbabilities(a, self.ctx_tgt, idx, n_probs_request);
+            const max_probs = cur.len;
+            const n_probs = @min(max_probs, n_probs_request);
+
+            // set probability for sampled token
+            for (0..max_probs) |i| {
+                // set probability for sampled token
+                if (cur[i].id == result.tok) {
+                    result.prob = cur[i].p;
+                    break;
+                }
+            }
+
+            // set probability for top n_probs tokens
+            try probs.ensureTotalCapacity(a, n_probs);
+            for (0..n_probs) |i| {
+                try probs.append(a, .{
+                    .tok = cur[i].id,
+                    .txt = try tc.common.tokenToPiece(a, vocab, cur[i].id, special),
+                    .prob = cur[i].p,
+                });
+            }
+        }
+        result.probs = probs.items;
+    }
+
+    /// Ports `server_context_impl`'s `send_error` (server-context.cpp:2021 @b29c606e2), over a task.
+    fn sendErrorTask(self: *Impl, task: *const Task, err: []const u8, ty: ErrorType) !void {
+        try self.sendError(task.id, err, ty, 0, 0);
+    }
+
+    /// Ports `server_context_impl`'s `send_error` (server-context.cpp:2025 @b29c606e2), over a slot.
+    fn sendErrorSlot(self: *Impl, slot: *const Slot, err: []const u8, ty: ErrorType) !void {
+        try self.sendError(slot.taskRef().id, err, ty, slot.taskRef().nTokens(), slot.n_ctx);
+    }
+
+    /// Ports `server_context_impl`'s `send_error` (server-context.cpp:2029 @b29c606e2).
+    fn sendError(self: *Impl, id_task: c_int, err: []const u8, ty: ErrorType, n_prompt_tokens: i32, n_ctx: i32) !void {
+        {
+            const z = dupZ(err);
+            defer freeZ(z);
+            srv(.err, "send_error", "task id = %d, error: %s\n", .{ id_task, z });
+        }
+
+        if (ty == .exceed_context_size) {
+            ggmlAssert(n_ctx > 0 and n_prompt_tokens > 0, 2033, "n_ctx > 0 && n_prompt_tokens > 0");
+        }
+
+        const res = try Result.create(gpa, .err);
+        errdefer res.destroy(gpa);
+        res.id = id_task;
+        res.kind.err.err_type = ty;
+        res.kind.err.err_msg = try res.alloc().dupe(u8, err);
+        res.kind.err.n_prompt_tokens = n_prompt_tokens;
+        res.kind.err.n_ctx = n_ctx;
+
+        try self.queue_results.send(res);
+    }
+
+    /// Ports `server_context_impl`'s `send_partial_response` (server-context.cpp:2046 @b29c606e2).
+    fn sendPartialResponse(self: *Impl, slot: *Slot, tkn: *const CompletionTokenOutput, is_progress: bool, is_begin: bool) !void {
+        const res = try Result.create(gpa, .cmpl_partial);
+        errdefer res.destroy(gpa);
+        const ra = res.alloc();
+        const p = &res.kind.cmpl_partial;
+        const t = slot.taskRef();
+
+        res.id = t.id;
+        res.index = t.index;
+
+        if (is_progress) {
+            p.is_progress = true;
+            p.progress.total = t.nTokens();
+            p.progress.cache = @intCast(slot.stats.n_prompt_cached);
+            p.progress.processed = @intCast(slot.prompt.tokens.size());
+            p.progress.time_ms = @divTrunc(slot.stats.tElapsedUs(), 1000);
+        }
+        if (is_begin) {
+            p.is_begin = true;
+        } else {
+            p.content = try ra.dupe(u8, tkn.text_to_send);
+            p.tokens = try ra.dupe(Token, &.{tkn.tok});
+        }
+
+        p.n_decoded = @intCast(slot.stats.n_gen);
+        p.n_prompt_tokens = t.nTokens();
+        p.n_prompt_tokens_cache = @intCast(slot.stats.n_prompt_cached);
+        p.post_sampling_probs = t.params.post_sampling_probs;
+
+        p.verbose = t.params.verbose;
+        p.res_type = t.params.res_type;
+        p.oaicompat_model = try ra.dupe(u8, t.params.oaicompat_model);
+        p.oaicompat_cmpl_id = try ra.dupe(u8, t.params.oaicompat_cmpl_id);
+
+        // populate res.probs_output
+        if (t.params.sampling.n_probs > 0) {
+            p.prob_output = try tkn.clone(ra); // copy the token probs
+        }
+
+        // populate timings if this is final response or timings_per_token is enabled
+        if (slot.stop != .none or t.params.timings_per_token) {
+            p.stats = slot.stats;
+        }
+
+        try self.queue_results.send(res);
+    }
+
+    /// Ports `server_context_impl`'s `send_final_response` (server-context.cpp:2089 @b29c606e2).
+    fn sendFinalResponse(self: *Impl, slot: *Slot) !void {
+        const res = try Result.create(gpa, .cmpl_final);
+        errdefer res.destroy(gpa);
+        const ra = res.alloc();
+        const f = &res.kind.cmpl_final;
+        const t = &slot.task.?;
+
+        res.id = t.id;
+        res.id_slot = slot.id;
+
+        res.index = t.index;
+
+        // keep copy of last generated text for debugging purposes
+        if (self.slots_debug != 0) {
+            slot.debug_generated_text.clearRetainingCapacity();
+            try slot.debug_generated_text.appendSlice(gpa, slot.generated_text.items);
+        }
+
+        // in stream mode, content and tokens are already in last partial chunk
+        if (t.params.stream) {
+            f.content = "";
+            f.tokens = &.{};
+        } else {
+            f.content = try ra.dupe(u8, slot.generated_text.items);
+            slot.generated_text.clearRetainingCapacity(); // std::move
+            f.tokens = try ra.dupe(Token, slot.generated_tokens.items);
+            slot.generated_tokens.clearRetainingCapacity(); // std::move
+        }
+        f.stats = slot.stats;
+        f.prompt = try t.tokens.detokenize(ra, self.ctx_tgt, true);
+        f.response_fields = try task_mod.deepClone(ra, t.params.response_fields);
+        t.params.response_fields = &.{}; // std::move
+
+        f.truncated = slot.truncated;
+        f.n_decoded = @intCast(slot.stats.n_gen);
+        f.n_prompt_tokens = t.nTokens();
+        f.n_prompt_tokens_cache = @intCast(slot.stats.n_prompt_cached);
+        f.n_tokens_cached = slot.prompt.nTokens();
+        f.has_new_line = slot.has_new_line;
+        f.stopping_word = try ra.dupe(u8, slot.stopping_word.items);
+        f.stop = slot.stop;
+        f.post_sampling_probs = t.params.post_sampling_probs;
+
+        f.verbose = t.params.verbose;
+        f.stream = t.params.stream;
+        f.include_usage = t.params.include_usage;
+        f.res_type = t.params.res_type;
+        f.oaicompat_model = try ra.dupe(u8, t.params.oaicompat_model);
+        f.oaicompat_cmpl_id = try ra.dupe(u8, t.params.oaicompat_cmpl_id);
+
+        // populate res.probs_output
+        if (t.params.sampling.n_probs > 0) {
+            var n = slot.generated_token_probs.items.len;
+            if (!t.params.stream and slot.stop == .word) {
+                const stop_word_toks = try tc.common.tokenize(ra, self.vocab, slot.stopping_word.items, false, false);
+
+                const safe_offset = @min(slot.generated_token_probs.items.len, stop_word_toks.len);
+                n -= safe_offset;
+            }
+            const out = try ra.alloc(CompletionTokenOutput, n);
+            for (slot.generated_token_probs.items[0..n], 0..) |*p, i| out[i] = try p.clone(ra);
+            f.probs_output = out;
+        }
+
+        f.generation_params = try t.params.clone(ra); // copy the parameters
+
+        try self.queue_results.send(res);
+    }
+
+    /// Ports `server_context_impl`'s `send_embedding` (server-context.cpp:2152 @b29c606e2).
+    fn sendEmbedding(self: *Impl, slot: *const Slot, batch: *const c.llama_batch) !void {
+        const res = try Result.create(gpa, .embd);
+        errdefer res.destroy(gpa);
+        const ra = res.alloc();
+        const t = slot.taskRef();
+        res.id = t.id;
+        res.index = t.index;
+        res.kind.embd.n_tokens = t.nTokens();
+        res.kind.embd.res_type = t.params.res_type;
+
+        const n_embd_out: usize = @intCast(c.llama_model_n_embd_out(self.model_tgt));
+
+        const embd_res = try ra.alloc(f32, n_embd_out);
+        @memset(embd_res, 0.0);
+
+        var embeddings: std.ArrayList([]const f32) = .empty;
+
+        var i: usize = 0;
+        while (i < @as(usize, @intCast(batch.n_tokens))) : (i += 1) {
+            if (batch.logits[i] == 0 or batch.seq_id[i][0] != slot.id) {
+                continue;
+            }
+
+            var embd: [*c]const f32 = null;
+            if (c.llama_pooling_type(slot.ctx_tgt) == c.LLAMA_POOLING_TYPE_NONE) {
+                embd = c.llama_get_embeddings_ith(slot.ctx_tgt, @intCast(i));
+            } else {
+                embd = c.llama_get_embeddings_seq(slot.ctx_tgt, batch.seq_id[i][0]);
+            }
+
+            if (embd == null) {
+                slt(.err, "send_embedding", slot, "failed to get embeddings, token = %d, seq_id = %d\n", .{ batch.token[i], batch.seq_id[i][0] });
+
+                const zeros = try ra.alloc(f32, n_embd_out);
+                @memset(zeros, 0.0);
+                try embeddings.append(ra, zeros);
+                continue;
+            }
+
+            // normalize only when there is pooling
+            if (c.llama_pooling_type(slot.ctx_tgt) != c.LLAMA_POOLING_TYPE_NONE) {
+                tc.common.embdNormalize(embd, embd_res.ptr, @intCast(n_embd_out), t.params.embd_normalize);
+                try embeddings.append(ra, embd_res);
+                break;
+            }
+
+            try embeddings.append(ra, try ra.dupe(f32, embd[0..n_embd_out]));
+        }
+        res.kind.embd.embedding = embeddings.items;
+
+        slt(.dbg, "send_embedding", slot, "%s", .{@as([*:0]const u8, "sending embeddings\n")});
+
+        try self.queue_results.send(res);
+    }
+
+    /// Ports `server_context_impl`'s `send_rerank` (server-context.cpp:2197 @b29c606e2).
+    fn sendRerank(self: *Impl, slot: *const Slot, batch: *const c.llama_batch) !void {
+        const res = try Result.create(gpa, .rerank);
+        errdefer res.destroy(gpa);
+        const t = slot.taskRef();
+        res.id = t.id;
+        res.index = t.index;
+        res.kind.rerank.n_tokens = t.nTokens();
+
+        var i: usize = 0;
+        while (i < @as(usize, @intCast(batch.n_tokens))) : (i += 1) {
+            if (batch.logits[i] == 0 or batch.seq_id[i][0] != slot.id) {
+                continue;
+            }
+
+            var embd = c.llama_get_embeddings_seq(self.ctx_tgt, batch.seq_id[i][0]);
+            if (embd == null) {
+                embd = c.llama_get_embeddings_ith(self.ctx_tgt, @intCast(i));
+            }
+
+            if (embd == null) {
+                slt(.err, "send_rerank", slot, "failed to get embeddings, token = %d, seq_id = %d\n", .{ batch.token[i], batch.seq_id[i][0] });
+
+                res.kind.rerank.score = -1e6;
+                continue;
+            }
+
+            res.kind.rerank.score = embd[0];
+        }
+
+        slt(.dbg, "send_rerank", slot, "sending rerank result, res.score = %f\n", .{@as(f64, res.kind.rerank.score)});
+
+        try self.queue_results.send(res);
+    }
+
+    /// Ports `server_context_impl`'s `tokenize_cli_input` (server-context.cpp:2233
+    /// @b29c606e2): the input of a task set by the CLI. Unreached by the
+    /// HTTP server, which tokenizes on its own threads.
+    fn tokenizeCliInput(self: *Impl, task: *Task) !bool {
+        const a = try task.arenaAlloc(gpa);
+        const tokenized = blk: {
+            const prompt = task.cli_prompt;
+            if (self.mctx != null) {
+                break :blk tokens_mod.processMtmdPrompt(gpa, self.mctx, prompt, task.cli_files, self.init_opt, false);
+            } else {
+                var pv = try Value.initString(a, prompt);
+                var list = tokens_mod.tokenizeInputPrompts(gpa, self.vocab, self.mctx, &pv, true, true, self.init_opt) catch |e| break :blk @as(common.Error!ServerTokens, e);
+                const first = list.items[0];
+                for (list.items[1..]) |*t| t.deinit();
+                list.deinit(gpa);
+                break :blk @as(common.Error!ServerTokens, first);
+            }
+        };
+        if (tokenized) |toks| {
+            task.tokens.deinit();
+            task.tokens = toks;
+            task.cli_prompt = "";
+            task.cli_files = &.{};
+        } else |e| {
+            if (e == error.OutOfMemory) return e;
+            var buf: [4200]u8 = undefined;
+            const msg = std.fmt.bufPrint(&buf, "Failed to format input: {s}", .{whatOf(e)}) catch &buf;
+            try self.sendErrorTask(task, msg, .invalid_request);
+            return false;
+        }
+        return true;
+    }
+
+    /// Ports `server_context_impl`'s `get_free_slots` (server-context.cpp:2250 @b29c606e2).
+    fn getFreeSlots(self: *Impl, a: Allocator, n_slots_needed: usize, exclude_id_slot: c_int) ![]*Slot {
+        var free_slots: std.ArrayList(*Slot) = .empty;
+        for (self.slots) |*slot| {
+            if (!slot.isProcessing() and slot.id != exclude_id_slot) {
+                try free_slots.append(a, slot);
+            }
+            if (free_slots.items.len >= n_slots_needed) {
+                break;
+            }
+        }
+        return free_slots.toOwnedSlice(a);
+    }
+
+    /// The `release_slots` lambda of `launch_slots_with_parent_task`
+    /// (server-context.cpp:2264 @b29c606e2).
+    fn releaseSlotsOf(self: *Impl, id_parent: c_int) !void {
+        for (self.slots) |*slot| {
+            if (slot.isProcessing() and (slot.taskRef().id == id_parent or slot.taskRef().id_parent == id_parent)) {
+                try slot.release();
+            }
+        }
+    }
+
+    /// Ports `server_context_impl`'s `launch_slots_with_parent_task`
+    /// (server-context.cpp:2264 @b29c606e2): launch multiple slots for
+    /// parent + child tasks.
+    fn launchSlotsWithParentTask(self: *Impl, parent_slot: *Slot, child_slots: []*Slot, parent_task_in: Task) !bool {
+        const func = "launch_slots_with_parent_task";
+        var parent_task = parent_task_in;
+        ggmlAssert(!parent_slot.isProcessing(), 2265, "!parent_slot.is_processing()");
+        ggmlAssert(parent_task.isParent(), 2266, "parent_task.is_parent()");
+        ggmlAssert(child_slots.len == parent_task.child_tasks.items.len, 2267, "child_slots.size() == parent_task.child_tasks.size()");
+
+        const id_parent = parent_task.id;
+
+        srv(.trc, func, "launching slots for parent task id_task = %d with %zu child tasks\n", .{ id_parent, parent_task.child_tasks.items.len });
+
+        // launch all child tasks first
+        for (child_slots, 0..) |slot, idx| {
+            const id_child = parent_task.child_tasks.items[idx].id;
+            const child = parent_task.child_tasks.items[idx];
+            // moved out: the parent keeps an empty task in its place
+            parent_task.child_tasks.items[idx] = .{};
+            if (!try self.launchSlotWithTask(slot, child)) {
+                srv(.err, func, "failed to launch slot with child task, id_task = %d\n", .{id_child});
+                try self.releaseSlotsOf(id_parent);
+                parent_task.deinit(gpa);
+                return false;
+            }
+        }
+
+        // finally, launch the parent task
+        if (!try self.launchSlotWithTask(parent_slot, parent_task)) {
+            srv(.err, func, "failed to launch slot with task, id_task = %d\n", .{id_parent});
+            try self.releaseSlotsOf(id_parent);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// Ports `server_context_impl`'s `create_checkpoint` (server-context.cpp:2309
+    /// @b29c606e2). `n_tokens_cur`: the number of tokens added to the batch
+    /// for the current slot.
+    fn createCheckpoint(self: *Impl, slot: *Slot, n_tokens_cur: i64, pos_min: c.llama_pos, pos_max: c.llama_pos) !void {
+        const func = "create_checkpoint";
+        const id_task = slot.taskRef().id;
+        const cps = &slot.prompt.checkpoints;
+        const ca = slot.prompt.tokens.gpa;
+        const n_max: usize = @intCast(@max(self.params_base.n_ctx_checkpoints, 0));
+        const mib = 1024.0 * 1024.0;
+
+        // evict checkpoints within min-step of a previous checkpoint, unless they were
+        // created by the current task
+        // only when the list is full, otherwise short prompts keep just the oldest checkpoint
+        var last: i64 = -1;
+        var i: usize = 0;
+        while (cps.items.len + 1 >= n_max and i < cps.items.len) {
+            const it = &cps.items[i];
+            if (it.id_task != id_task and last >= 0 and it.n_tokens <= last + self.params_base.checkpoint_min_step) {
+                slt(.trc, func, slot, "erasing context checkpoint too close to an earlier one (pos_min = %d, pos_max = %d, n_tokens = %lld, size = %.3f MiB)\n", .{
+                    it.pos_min, it.pos_max, @as(c_longlong, it.n_tokens), @as(f64, @as(f32, @floatFromInt(it.size())) / 1024 / 1024),
+                });
+
+                var removed = cps.orderedRemove(i);
+                removed.clear(ca);
+                continue;
+            }
+
+            last = it.n_tokens;
+            i += 1;
+        }
+
+        while (cps.items.len >= n_max) {
+            // make room for the new checkpoint, if needed
+            const cur = &cps.items[0];
+
+            slt(.wrn, func, slot, "erasing old context checkpoint (pos_min = %d, pos_max = %d, n_tokens = %lld, size = %.3f MiB)\n", .{
+                cur.pos_min, cur.pos_max, @as(c_longlong, cur.n_tokens), @as(f64, @as(f32, @floatFromInt(cur.size())) / 1024 / 1024),
+            });
+
+            var removed = cps.orderedRemove(0);
+            removed.clear(ca);
+        }
+
+        // replace an existing checkpoint at the same n_tokens instead of appending a duplicate
+        {
+            const n_tokens_new = @as(i64, slot.prompt.nTokens()) - n_tokens_cur;
+            i = 0;
+            while (i < cps.items.len) {
+                if (cps.items[i].n_tokens == n_tokens_new) {
+                    slt(.trc, func, slot, "superseding context checkpoint at n_tokens = %lld\n", .{@as(c_longlong, cps.items[i].n_tokens)});
+                    var removed = cps.orderedRemove(i);
+                    removed.clear(ca);
+                } else {
+                    i += 1;
+                }
+            }
+        }
+
+        try cps.append(ca, .{});
+        const cur = &cps.items[cps.items.len - 1];
+
+        cur.id_task = id_task;
+
+        // [TAG_CHECKPOINTS_FIX_POS_MIN]
+        // TODO: here we incorrectly deterimne that the saved checkpoint data covers the [pos_min, pos_max] range
+        //       this is not true for SWA models: https://github.com/ggml-org/llama.cpp/pull/24411#issuecomment-4677983225
+        cur.updatePos(@as(i64, slot.prompt.nTokens()) - n_tokens_cur, pos_min, pos_max);
+
+        try cur.updateTgt(ca, self.ctx_tgt, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        try cur.updateDft(ca, self.ctx_dft, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        // stash the draft's speculative state with the checkpoint
+        {
+            var data: std.ArrayList(u8) = .fromOwnedSlice(cur.data_spec);
+            _ = spec_mod.getState(self.spec, slot.id, &data);
+            cur.data_spec = try data.toOwnedSlice(gpa);
+        }
+
+        slt(.trc, func, slot, "created context checkpoint %d of %d (pos_min = %d, pos_max = %d, n_tokens = %lld, size = %.3f MiB)\n", .{
+            @as(c_int, @intCast(cps.items.len)),                         self.params_base.n_ctx_checkpoints, cur.pos_min, cur.pos_max, @as(c_longlong, cur.n_tokens),
+            @as(f64, @as(f32, @floatFromInt(cur.size())) / 1024 / 1024),
+        });
+        _ = mib;
+    }
+
+    /// Ports `server_context_impl`'s `process_single_task` (server-context.cpp:2375
+    /// @b29c606e2): false declines the task, offered again after the decode is
+    /// done; otherwise the task is taken.
+    fn processSingleTask(self: *Impl, task: *Task, is_yielding: bool) !bool {
+        const func = "process_single_task";
+        // while yielding, an encode / decode is running and only reading the server state is safe
+        if (is_yielding and task.type != .metrics and task.type != .slot_get) {
+            srv(.dbg, func, "decoding, decline task, id_task = %d\n", .{task.id});
+            return false;
+        }
+
+        // the task is taken: moved somewhere below, or dropped at the end
+        var owned = task.*;
+        task.* = .{};
+        var moved = false;
+        defer if (!moved) owned.deinit(gpa);
+
+        switch (owned.type) {
+            .completion, .infill, .embedding, .rerank => blk: {
+                // special case: if input is provided via CLI, tokenize it first
+                // otherwise, no need to tokenize as it's already done inside the HTTP thread
+                if (owned.cli) {
+                    if (!try self.tokenizeCliInput(&owned)) {
+                        break :blk;
+                    }
+                }
+
+                const id_task = owned.id;
+
+                const slot_opt = try self.getAvailableSlot(&owned);
+
+                //
+                // slot scheduling logic
+                //
+
+                const slot = slot_opt orelse {
+                    // if no slot is available, we defer this task for processing later
+                    srv(.dbg, func, "no slot is available, defer task, id_task = %d\n", .{id_task});
+                    moved = true;
+                    try self.queue_tasks.deferTask(owned);
+                    break :blk;
+                };
+
+                if (slot.isProcessing()) {
+                    // if requested slot is unavailable, we defer this task for processing later
+                    srv(.dbg, func, "requested slot is unavailable, defer task, id_task = %d\n", .{id_task});
+                    moved = true;
+                    try self.queue_tasks.deferTask(owned);
+                    break :blk;
+                }
+
+                if (owned.isParent()) {
+                    // try getting free slots for all child tasks
+                    const n_child_tasks = owned.child_tasks.items.len;
+                    const child_slots = try self.getFreeSlots(gpa, n_child_tasks, slot.id);
+                    defer gpa.free(child_slots);
+                    if (child_slots.len < n_child_tasks) {
+                        srv(.dbg, func, "not enough free slots for child tasks, n_free = %zu, n_children = %zu, defer task, id_task = %d\n", .{ child_slots.len, n_child_tasks, id_task });
+                        moved = true;
+                        try self.queue_tasks.deferTask(owned);
+                        break :blk;
+                    }
+                    moved = true;
+                    if (!try self.launchSlotsWithParentTask(slot, child_slots, owned)) {
+                        srv(.err, func, "failed to launch slot with parent task, id_task = %d\n", .{id_task});
+                        break :blk; // drop the task
+                    }
+                } else {
+                    moved = true;
+                    if (!try self.launchSlotWithTask(slot, owned)) {
+                        srv(.err, func, "failed to launch slot with task, id_task = %d\n", .{id_task});
+                        break :blk; // drop the task
+                    }
+                }
+
+                if (self.params_base.cache_idle_slots) {
+                    for (self.slots) |*s| {
+                        if (!s.isProcessing()) {
+                            slt(.trc, func, s, "%s", .{@as([*:0]const u8, "saving idle slot to prompt cache\n")});
+
+                            if (try s.promptSave(self.prompt_cache.?)) {
+                                slt(.dbg, func, s, "%s", .{@as([*:0]const u8, "__TEST_TAG_CACHE_IDLE_SLOT__\n")});
+                                self.prompt_cache.?.update();
+                            }
+
+                            if (self.params_base.kv_unified) {
+                                // [TAG_IDLE_SLOT_CLEAR]
+                                s.promptClear();
+                            }
+                        }
+                    }
+                }
+            },
+            .cancel => {
+                // release slot linked with the task id
+                for (self.slots) |*slot| {
+                    if (slot.task != null and slot.taskRef().id == owned.id_target) {
+                        try slot.release();
+                        break;
+                    }
+                }
+            },
+            .control => blk: {
+                const res = try Result.create(gpa, .control);
+                res.id = owned.id;
+
+                const slot = self.getSlotByCmplId(owned.params.control_cmpl_id) orelse {
+                    const action = dupZ(owned.params.control_action);
+                    defer freeZ(action);
+                    const id = dupZ(owned.params.control_cmpl_id);
+                    defer freeZ(id);
+                    srv(.wrn, func, "control %s on unknown completion id=%s, no live slot\n", .{ action, id });
+                    res.kind.control.success = false;
+                    res.kind.control.message = "no active completion for this id";
+                    try self.queue_results.send(res);
+                    break :blk;
+                };
+
+                if (std.mem.eql(u8, owned.params.control_action, "reasoning_end")) {
+                    // the budget sampler only exists when reasoning control was armed
+                    if (!slot.taskRef().params.sampling.reasoning_control) {
+                        res.kind.control.success = false;
+                        res.kind.control.message = "reasoning control not enabled for this completion";
+                        try self.queue_results.send(res);
+                        break :blk;
+                    }
+                    // act on the live slot mid generation, never defer
+                    _ = slot.smpl.?.reasoningBudgetForce();
+                    res.kind.control.success = true;
+                } else {
+                    res.kind.control.success = false;
+                    res.kind.control.message = "unknown control action";
+                }
+
+                try self.queue_results.send(res);
+            },
+            .next_response => {
+                // do nothing
+            },
+            .metrics => {
+                var n_processing_slots: c_int = 0;
+
+                for (self.slots) |*slot| {
+                    if (slot.isProcessing()) {
+                        n_processing_slots += 1;
+                    }
+                }
+                srv(.dbg, func, "n_processing_slots = %d\n", .{n_processing_slots});
+
+                const res = try Result.create(gpa, .metrics);
+                errdefer res.destroy(gpa);
+                res.id = owned.id;
+                res.kind.metrics.n_processing_slots = n_processing_slots;
+                res.kind.metrics.n_tasks_deferred = @intCast(self.queue_tasks.queueTasksDeferredSize());
+                res.kind.metrics.metrics = try self.metrics.clone(res.alloc());
+
+                if (owned.metrics_reset_bucket) {
+                    self.metrics.resetBucket();
+                }
+                try self.queue_results.send(res);
+            },
+            .slot_get => {
+                const res = try Result.create(gpa, .slots);
+                errdefer res.destroy(gpa);
+                const ra = res.alloc();
+                var slots_data = Value.emptyArray();
+
+                var n_idle_slots: c_int = 0;
+
+                for (self.slots) |*slot| {
+                    if (!slot.isProcessing()) {
+                        n_idle_slots += 1;
+                    }
+
+                    try slots_data.pushBack(ra, try slot.toJson(ra, self.slots_debug == 0));
+                }
+                srv(.dbg, func, "n_idle_slots = %d\n", .{n_idle_slots});
+
+                res.id = owned.id;
+                res.kind.slots.slots_data = slots_data;
+                res.kind.slots.n_idle_slots = n_idle_slots;
+
+                try self.queue_results.send(res);
+            },
+            .slot_save => blk: {
+                const id_slot = owned.slot_action.id_slot;
+                const slot = self.getSlotById(id_slot) orelse {
+                    try self.sendErrorTask(&owned, "Invalid slot ID", .invalid_request);
+                    break :blk;
+                };
+                if (slot.isProcessing()) {
+                    // if requested slot is unavailable, we defer this task for processing later
+                    srv(.dbg, func, "requested slot is unavailable, defer task, id_task = %d\n", .{owned.id});
+                    moved = true;
+                    try self.queue_tasks.deferTask(owned);
+                    break :blk;
+                }
+
+                const t_start = c.ggml_time_us();
+
+                const filename = owned.slot_action.filename;
+                const filepath = owned.slot_action.filepath;
+
+                const packed_bytes = slot.prompt.tokens.serialize(gpa) catch |e| {
+                    if (e == error.OutOfMemory) return e;
+                    try self.sendErrorTask(&owned, whatOf(e), .not_supported);
+                    break :blk;
+                };
+                defer gpa.free(packed_bytes);
+
+                ggmlAssert(packed_bytes.len % @sizeOf(Token) == 0, 2573, "packed.size() % sizeof(llama_token) == 0");
+                const path_z = try gpa.dupeSentinel(u8, filepath, 0);
+                defer gpa.free(path_z);
+                const nwrite = c.llama_state_seq_save_file(self.ctx_tgt, path_z.ptr, slot.id, @ptrCast(@alignCast(packed_bytes.ptr)), packed_bytes.len / @sizeOf(Token));
+                if (nwrite == 0) {
+                    try self.sendErrorTask(&owned, "Unable to save slot", .server);
+                    break :blk;
+                }
+
+                const t_end = c.ggml_time_us();
+                const t_save_ms = @as(f64, @floatFromInt(t_end - t_start)) / 1000.0;
+
+                const res = try Result.create(gpa, .slot_save_load);
+                errdefer res.destroy(gpa);
+                res.id = owned.id;
+                res.id_slot = id_slot;
+                res.kind.slot_save_load.filename = try res.alloc().dupe(u8, filename);
+                res.kind.slot_save_load.is_save = true;
+                res.kind.slot_save_load.n_tokens = slot.prompt.tokens.size();
+                res.kind.slot_save_load.n_bytes = nwrite;
+                res.kind.slot_save_load.t_ms = t_save_ms;
+                try self.queue_results.send(res);
+            },
+            .slot_restore => blk: {
+                const id_slot = owned.slot_action.id_slot;
+                const slot = self.getSlotById(id_slot) orelse {
+                    try self.sendErrorTask(&owned, "Invalid slot ID", .invalid_request);
+                    break :blk;
+                };
+                if (slot.isProcessing()) {
+                    // if requested slot is unavailable, we defer this task for processing later
+                    srv(.dbg, func, "requested slot is unavailable, defer task, id_task = %d\n", .{owned.id});
+                    moved = true;
+                    try self.queue_tasks.deferTask(owned);
+                    break :blk;
+                }
+
+                const t_start = c.ggml_time_us();
+
+                const filename = owned.slot_action.filename;
+                const filepath = owned.slot_action.filepath;
+
+                const nread = self.restoreSlot(slot, filepath) catch |e| {
+                    if (e == error.OutOfMemory) return e;
+                    slot.promptClear();
+                    var buf: [4200]u8 = undefined;
+                    const msg = std.fmt.bufPrint(&buf, "Unable to restore slot: {s}", .{whatOf(e)}) catch &buf;
+                    try self.sendErrorTask(&owned, msg, .invalid_request);
+                    break :blk;
+                };
+
+                const t_end = c.ggml_time_us();
+                const t_restore_ms = @as(f64, @floatFromInt(t_end - t_start)) / 1000.0;
+
+                const res = try Result.create(gpa, .slot_save_load);
+                errdefer res.destroy(gpa);
+                res.id = owned.id;
+                res.id_slot = id_slot;
+                res.kind.slot_save_load.filename = try res.alloc().dupe(u8, filename);
+                res.kind.slot_save_load.is_save = false;
+                res.kind.slot_save_load.n_tokens = slot.prompt.tokens.size();
+                res.kind.slot_save_load.n_bytes = nread;
+                res.kind.slot_save_load.t_ms = t_restore_ms;
+                try self.queue_results.send(res);
+            },
+            .slot_erase => blk: {
+                const id_slot = owned.slot_action.id_slot;
+                const slot = self.getSlotById(id_slot) orelse {
+                    try self.sendErrorTask(&owned, "Invalid slot ID", .invalid_request);
+                    break :blk;
+                };
+                if (slot.isProcessing()) {
+                    // if requested slot is unavailable, we defer this task for processing later
+                    srv(.dbg, func, "requested slot is unavailable, defer task, id_task = %d\n", .{owned.id});
+                    moved = true;
+                    try self.queue_tasks.deferTask(owned);
+                    break :blk;
+                }
+
+                // Erase token cache
+                const n_erased = slot.prompt.tokens.size();
+
+                slot.promptClear();
+
+                const res = try Result.create(gpa, .slot_erase);
+                res.id = owned.id;
+                res.id_slot = id_slot;
+                res.kind.slot_erase.n_erased = n_erased;
+                try self.queue_results.send(res);
+            },
+            .get_lora => {
+                // TODO @ngxson : make lora_adapters a dedicated member of server_context
+                const loras = self.params_base.lora_adapters.items;
+                const res = try Result.create(gpa, .get_lora);
+                errdefer res.destroy(gpa);
+                const ra = res.alloc();
+                res.id = owned.id;
+                const out = try ra.alloc(result_mod.GetLora.Lora, loras.len);
+                for (loras, 0..) |lora, i| {
+                    var alora_invocation_string: std.ArrayList(u8) = .empty;
+                    const n_alora_tokens = c.llama_adapter_get_alora_n_invocation_tokens(lora.ptr);
+                    var alora_invocation_tokens: std.ArrayList(Token) = .empty;
+                    if (n_alora_tokens != 0) {
+                        const alora_tokens = c.llama_adapter_get_alora_invocation_tokens(lora.ptr);
+                        for (0..@intCast(n_alora_tokens)) |j| {
+                            try alora_invocation_string.appendSlice(ra, try tc.common.tokenToPiece(ra, self.vocab, alora_tokens[j], true));
+                            try alora_invocation_tokens.append(ra, alora_tokens[j]);
+                        }
+                    }
+                    out[i] = .{
+                        .info = lora,
+                        .alora_invocation_string = alora_invocation_string.items,
+                        .alora_invocation_tokens = alora_invocation_tokens.items,
+                    };
+                }
+                res.kind.get_lora.loras = out;
+                try self.queue_results.send(res);
+            },
+            .set_lora => {
+                const new_loras = try self.constructLoraList(&owned.set_lora);
+                defer gpa.free(new_loras);
+                // logging
+                for (new_loras, 0..) |l, i| {
+                    srv(.trc, func, "set lora adapter idx=%zu scale=%f\n", .{ i, @as(f64, l.scale) });
+                }
+                // TODO @ngxson : make lora_adapters a dedicated member of server_context
+                self.params_base.lora_adapters = .empty;
+                try self.params_base.lora_adapters.appendSlice(self.params_base.arena, new_loras);
+                const res = try Result.create(gpa, .apply_lora);
+                res.id = owned.id;
+                try self.queue_results.send(res);
+            },
+        }
+
+        return true;
+    }
+
+    /// The `try` block of the `SLOT_RESTORE` arm of `process_single_task`
+    /// (server-context.cpp:2375 @b29c606e2).
+    ///
+    /// Return: the bytes read.
+    fn restoreSlot(self: *Impl, slot: *Slot, filepath: []const u8) !usize {
+        const path_z = try gpa.dupeSentinel(u8, filepath, 0);
+        defer gpa.free(path_z);
+        var n_packed: usize = 0;
+        var nread = c.llama_state_seq_load_file(self.ctx_tgt, path_z.ptr, slot.id, null, 0, &n_packed);
+        var packed_tokens: []Token = &.{};
+        defer gpa.free(packed_tokens);
+        if (nread != 0) {
+            packed_tokens = try gpa.alloc(Token, @max(1, n_packed));
+            nread = c.llama_state_seq_load_file(self.ctx_tgt, path_z.ptr, slot.id, packed_tokens.ptr, packed_tokens.len, &n_packed);
+        }
+        if (nread == 0) {
+            return common.throw(error.RuntimeError, "No available space in KV cache or invalid slot save file", .{});
+        }
+
+        var restored = try ServerTokens.deserialize(gpa, packed_tokens[0..n_packed], self.mctx != null);
+        errdefer restored.deinit();
+
+        if (restored.size() > @as(usize, @intCast(slot.n_ctx))) {
+            return common.throw(error.RuntimeError, "Restored prompt does not fit in the slot context", .{});
+        }
+
+        if (!restored.validate(self.ctx_tgt)) {
+            return common.throw(error.RuntimeError, "Invalid tokens in slot save file", .{});
+        }
+
+        slot.prompt.clear();
+        slot.prompt.tokens.deinit();
+        slot.prompt.tokens = restored;
+        return nread;
+    }
+
+    /// Ports `server_context_impl`'s `iterate` (server-context.cpp:2730
+    /// @b29c606e2): an exception from one slot's step is that slot's error.
+    fn slotException(self: *Impl, slot: *Slot, e: anyerror) void {
+        const msg = gpa.dupe(u8, whatOf(e)) catch "std::bad_alloc";
+        defer if (msg.ptr != "std::bad_alloc".ptr) gpa.free(msg);
+        {
+            const z = dupZ(msg);
+            defer freeZ(z);
+            slt(.err, "iterate", slot, "got exception: %s\n", .{z});
+        }
+        var buf: [4200]u8 = undefined;
+        const text = std.fmt.bufPrint(&buf, "got exception: {s}", .{msg}) catch &buf;
+        self.sendErrorSlot(slot, text, .server) catch {};
+        slot.release() catch {};
+    }
+
+    /// Ports `server_context_impl`'s `abort_all_slots` (server-context.cpp:2754 @b29c606e2).
+    fn abortAllSlots(self: *Impl, reason: []const u8) !void {
+        for (self.slots) |*slot| {
+            if (slot.isProcessing()) {
+                try self.sendErrorSlot(slot, reason, .server);
+                try slot.release();
+            }
+        }
+    }
+
+    /// Ports `server_context_impl`'s `update_slots` (server-context.cpp:2793 @b29c606e2).
+    fn updateSlots(self: *Impl) !void {
+        const func = "update_slots";
+        // check if all slots are idle
+        {
+            var all_idle = true;
+
+            for (self.slots) |*slot| {
+                if (slot.isProcessing()) {
+                    all_idle = false;
+                    break;
+                }
+            }
+
+            if (all_idle) {
+                srv(.trc, func, "%s", .{@as([*:0]const u8, "all slots are idle\n")});
+
+                self.metricsFlushIdle();
+
+                return; // skip further processing
+            } else {
+                srv(.dbg, func, "%s", .{@as([*:0]const u8, "posting NEXT_RESPONSE\n")});
+
+                var task = Task.initType(.next_response);
+                task.id = self.queue_tasks.getNewId();
+                _ = try self.queue_tasks.post(task, false);
+            }
+        }
+
+        self.preDecode() catch |e| {
+            if (e == error.OutOfMemory) return e;
+            const msg = try gpa.dupe(u8, whatOf(e));
+            defer gpa.free(msg);
+            const z = dupZ(msg);
+            defer freeZ(z);
+            srv(.err, func, "pre_decode() failed: %s\n", .{z});
+            var buf: [4200]u8 = undefined;
+            try self.abortAllSlots(std.fmt.bufPrint(&buf, "pre_decode() failed: {s}", .{msg}) catch &buf);
+
+            // the batch is half-built and not rendered, skip now to avoid UB
+            return;
+        };
+        self.batch.render();
+
+        ggmlAssert(self.batch.slot_batched != null or self.batch.size() == 0, 2846, "batch.slot_batched || batch.size() == 0");
+
+        if (self.batch.slot_batched) |slot_batched| {
+            // TODO @ngxson : alora handling is too messy, need to refactor it to be more clear and maintainable
+            // apply lora, only need to do it once per batch
+            try tc.common.setAdapterLora(gpa, self.ctx_tgt, slot_batched.lora);
+
+            // if the lora is temporarily disabled for an alora, re-enable it
+            // for next time
+            if (self.batch.alora_scale > 0.0) {
+                srv(.dbg, func, "re-enabling alora with scale %f\n", .{@as(f64, self.batch.alora_scale)});
+                slot_batched.lora[self.batch.alora_disabled_id].scale = self.batch.alora_scale;
+            }
+
+            c.llama_set_embeddings(self.ctx_tgt, slot_batched.needEmbd());
+        }
+
+        var batch_view: c.llama_batch = undefined;
+        var off_next: i32 = 0;
+        var n_batch: i32 = @intCast(c.llama_n_batch(self.ctx_tgt));
+        var off: i32 = 0;
+        while (off < self.batch.size()) : (off = off_next) {
+            const n_tokens = @min(n_batch, self.batch.size() - off);
+            {
+                batch_view = self.batch.getView(off, n_tokens);
+                const ok = self.decode(&n_batch, off, &batch_view) catch |e| {
+                    if (e == error.OutOfMemory) return e;
+                    const msg = try gpa.dupe(u8, whatOf(e));
+                    defer gpa.free(msg);
+                    const z = dupZ(msg);
+                    defer freeZ(z);
+                    srv(.err, func, "decode() failed: %s\n", .{z});
+                    var buf: [4200]u8 = undefined;
+                    try self.abortAllSlots(std.fmt.bufPrint(&buf, "decode() failed: {s}", .{msg}) catch &buf);
+                    break; // stop any further processing
+                };
+
+                if (ok) {
+                    // move the head of the batch forward with the number of tokens we just processed
+                    off_next = off + n_tokens;
+
+                    // on successful decode, restore the original batch size
+                    n_batch = @intCast(c.llama_n_batch(self.ctx_tgt));
+                } else {
+                    // try again with the updated n_batch
+                    continue;
+                }
+            }
+
+            self.postDecode(n_tokens, off, &batch_view) catch |e| {
+                if (e == error.OutOfMemory) return e;
+                const msg = try gpa.dupe(u8, whatOf(e));
+                defer gpa.free(msg);
+                const z = dupZ(msg);
+                defer freeZ(z);
+                srv(.err, func, "post_decode() failed: %s\n", .{z});
+                var buf: [4200]u8 = undefined;
+                try self.abortAllSlots(std.fmt.bufPrint(&buf, "post_decode() failed: {s}", .{msg}) catch &buf);
+                break; // stop any further processing
+            };
+        }
+    }
+
+    /// The context-shift step of `pre_decode` (server-context.cpp:2909
+    /// @b29c606e2), one slot.
+    fn contextShift(self: *Impl, slot: *Slot) !void {
+        if (slot.state == .generating and slot.prompt.nTokens() + 1 >= slot.n_ctx) {
+            if (!self.params_base.ctx_shift) {
+                // this check is redundant (for good)
+                // we should never get here, because generation should already stopped in process_token()
+                try self.sendErrorSlot(slot, "context shift is disabled", .server);
+                try slot.release();
+                return;
+            }
+
+            if (self.mctx != null) {
+                // we should never reach this because params_base.ctx_shift is automatically disabled if mmproj is loaded
+                // we don't support ctx_shift because an image chunk may contains multiple tokens
+                ggmlAbort(2925, "not supported by multimodal", .{});
+            }
+
+            if (slot.taskRef().isParent() or slot.taskRef().isChild()) {
+                try self.sendErrorSlot(slot, "context shift cannot be used for shared prompt", .server);
+                try slot.release();
+                return;
+            }
+
+            // Shift context
+            var n_keep: i32 = if (slot.taskRef().params.n_keep < 0) slot.taskRef().nTokens() else slot.taskRef().params.n_keep;
+
+            if (self.add_bos_token) {
+                n_keep += 1;
+            }
+
+            n_keep = @min(slot.n_ctx - 4, n_keep);
+
+            const n_left = slot.prompt.nTokens() - n_keep;
+            var n_discard: i32 = if (slot.taskRef().params.n_discard != 0) slot.taskRef().params.n_discard else @divTrunc(n_left, 2);
+
+            // ref: https://github.com/ggml-org/llama.cpp/pull/24786
+            n_discard = std.math.clamp(n_discard, 0, @max(0, n_left - 1));
+
+            slt(.wrn, "operator()", slot, "slot context shift, n_keep = %d, n_left = %d, n_discard = %d\n", .{ n_keep, n_left, n_discard });
+
+            slot.mem.seqRm(slot.id, n_keep, n_keep + n_discard);
+            slot.mem.seqAdd(slot.id, n_keep + n_discard, slot.prompt.tokens.posNext(-1), -n_discard);
+
+            // add generated tokens to cache
+            // ref: https://github.com/ggml-org/llama.cpp/pull/16818#discussion_r2473269481
+            {
+                ggmlAssert(!slot.prompt.tokens.has_mtmd, 2957, "!slot.prompt.tokens.has_mtmd");
+
+                const new_tokens = try gpa.dupe(Token, slot.prompt.tokens.getTokens()); // copy
+                defer gpa.free(new_tokens);
+                const nk: usize = @intCast(n_keep);
+                const nd: usize = @intCast(n_discard);
+                var i = nk + nd;
+                while (i < new_tokens.len) : (i += 1) {
+                    new_tokens[i - nd] = new_tokens[i];
+                }
+
+                const new_len = slot.prompt.tokens.size() - nd;
+
+                slot.prompt.clear();
+                try slot.prompt.tokens.insert(new_tokens[0..new_len]);
+            }
+
+            slot.truncated = true;
+        }
+    }
+
+    /// The drafting step of `pre_decode` (server-context.cpp:2909
+    /// @b29c606e2), one slot: whether it generates in this batch, and
+    /// whether it drafts first.
+    fn selectGenerating(self: *Impl, slot: *Slot, generating: *std.ArrayList(*Slot), drafting: *std.ArrayList(*Slot)) !void {
+        if (slot.state != .generating) {
+            return;
+        }
+
+        // check if we can batch this slot with the previous one
+        if (self.batch.slot_batched == null) {
+            self.batch.slot_batched = slot;
+        } else if (!self.batch.slot_batched.?.canBatchWith(slot)) {
+            return;
+        }
+
+        try generating.append(gpa, slot);
+
+        if (self.spec != null) {
+            spec_mod.getDraftParams(self.spec, slot.id).drafting = false;
+
+            const use_ckpt_tgt = self.ctx_tgt_seq_rm_type == .full;
+            const use_ckpt_dft = self.ctx_dft_seq_rm_type == .full;
+
+            const n_draft_max = slot.getNDraftMax();
+
+            if (n_draft_max > 0) {
+                ggmlAssert(slot.canSpeculate(), 3007, "slot.can_speculate()");
+
+                if (slot.spec_draft.items.len != 0) {
+                    // we have a previous (partial) draft to reuse
+                    if (use_ckpt_tgt) {
+                        ggmlAssert(!slot.spec_ckpt.empty(), 3012, "!slot.spec_ckpt.empty()");
+                    }
+                } else {
+                    ggmlAssert(slot.spec_i_batch.items.len == 0, 3015, "slot.spec_i_batch.empty()");
+
+                    slot.spec_ckpt.updatePos(
+                        slot.prompt.nTokens(),
+                        c.llama_memory_seq_pos_min(c.llama_get_memory(self.ctx_tgt), slot.id),
+                        c.llama_memory_seq_pos_max(c.llama_get_memory(self.ctx_tgt), slot.id),
+                    );
+
+                    if (use_ckpt_dft) {
+                        try slot.spec_ckpt.updateDft(gpa, self.ctx_dft, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                    }
+
+                    gpa.free(slot.spec_prompt);
+                    slot.spec_prompt = try slot.prompt.tokens.getTextTokens(gpa);
+
+                    spec_mod.getDraftParams(self.spec, slot.id).* = .{
+                        .drafting = true,
+                        .n_max = n_draft_max,
+                        .pos0 = slot.prompt.tokens.posNext(-1),
+                        .id_last = slot.sampled,
+                        .prompt = slot.spec_prompt,
+                        .result = &slot.spec_draft,
+                    };
+
+                    try drafting.append(gpa, slot);
+                }
+            }
+        }
+    }
+
+    /// The checkpoint step of `pre_decode` (server-context.cpp:2909
+    /// @b29c606e2), one drafting slot.
+    fn draftCheckpoint(self: *Impl, slot: *Slot) !void {
+        const draft = &slot.spec_draft;
+        const ckpt = &slot.spec_ckpt;
+
+        slot.stats.n_draft_tokens += draft.items.len;
+
+        // TODO: avoid restoring the draft context and re-evaluating the drafted tokens when not needed [TAG_SPEC_AVOID_DRAFT_REEVAL]
+        const use_ckpt_dft_full = self.ctx_dft_seq_rm_type == .full;
+
+        if (self.ctx_dft != null) {
+            if (use_ckpt_dft_full) {
+                ckpt.loadDft(self.ctx_dft, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+            }
+
+            if (!c.llama_memory_seq_rm(c.llama_get_memory(self.ctx_dft), slot.id, ckpt.pos_max + 1, -1)) {
+                ggmlAbort(3066, "failed to remove sequence %d\n", .{slot.id});
+            }
+        }
+
+        if (draft.items.len != 0) {
+            const use_ckpt_tgt = self.ctx_tgt_seq_rm_type == .full or
+                (self.ctx_tgt_seq_rm_type == .rs and draft.items.len > c.llama_n_rs_seq(self.ctx_tgt));
+
+            const use_ckpt_dft = (self.ctx_dft_seq_rm_type == .rs and draft.items.len > c.llama_n_rs_seq(self.ctx_dft));
+
+            if (use_ckpt_tgt) {
+                try ckpt.updateTgt(gpa, self.ctx_tgt, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+
+                slt(.dbg, "operator()", slot, "created speculative checkpoint (pos_min = %d, pos_max = %d, n_tokens = %d, size = %.3f MiB, draft = %.3f MiB)\n", .{
+                    ckpt.pos_min,                                                 ckpt.pos_max,                                                       slot.prompt.nTokens(),
+                    @as(f64, @as(f32, @floatFromInt(ckpt.size())) / 1024 / 1024), @as(f64, @as(f32, @floatFromInt(ckpt.data_dft.len)) / 1024 / 1024),
+                });
+            }
+
+            if (use_ckpt_dft) {
+                try ckpt.updateDft(gpa, self.ctx_dft, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+            }
+        }
+    }
+
+    fn draftWork(self: *Impl) anyerror!void {
+        spec_mod.draft(self.spec);
+    }
+
+    /// Ports `server_context_impl`'s `pre_decode` (server-context.cpp:2909
+    /// @b29c606e2): context shifts, drafts, and the batch -- the sampled and
+    /// drafted tokens, then pending prompts up to `n_batch`.
+    fn preDecode(self: *Impl) !void {
+        // apply context-shift if needed
+        // TODO: simplify and improve
+        for (self.slots) |*slot| {
+            self.contextShift(slot) catch |e| self.slotException(slot, e);
+        }
+
+        // start populating the batch for this iteration
+        self.batch.clear();
+
+        var generating: std.ArrayList(*Slot) = .empty;
+        defer generating.deinit(gpa);
+        var drafting: std.ArrayList(*Slot) = .empty;
+        defer drafting.deinit(gpa);
+
+        // determine which slots are generating and drafting
+        for (self.slots) |*slot| {
+            self.selectGenerating(slot, &generating, &drafting) catch |e| self.slotException(slot, e);
+        }
+
+        // generate the actual drafts (if any)
+        if (drafting.items.len != 0) {
+            try self.queue_tasks.yieldToQueue(self, draftWork);
+        }
+
+        // make checkpoints if needed
+        for (drafting.items) |slot| {
+            self.draftCheckpoint(slot) catch |e| self.slotException(slot, e);
+        }
+
+        // update the batch with the sampled/drafted tokens
+        for (generating.items) |slot| {
+            slot.handleLastSampledToken(&self.batch) catch |e| self.slotException(slot, e);
+        }
+
+        // process in chunks of params.n_batch
+        const n_batch: i32 = @intCast(c.llama_n_batch(self.ctx_tgt));
+        const n_ubatch: i32 = @intCast(c.llama_n_ubatch(self.ctx_tgt));
+
+        // next, batch any pending prompts without exceeding n_batch
+        if (self.params_base.cont_batching or self.batch.size() == 0) {
+            var add_ok = true; // false means the batch is full, skip remaining slots
+
+            for (self.slots) |*slot| {
+                self.batchPrompt(slot, n_batch, n_ubatch, &add_ok) catch |e| self.slotException(slot, e);
+            }
+        }
+    }
+
+    const MtmdWork = struct {
+        slot: *Slot,
+        idx: usize,
+        n_tokens_out: usize = 0,
+        res: i32 = 0,
+
+        fn run(w: *MtmdWork) anyerror!void {
+            w.res = try processMtmdChunk(w.slot, &w.slot.mbatch, w.idx, &w.n_tokens_out);
+        }
+    };
+
+    /// The prompt step of `pre_decode` (server-context.cpp:2909 @b29c606e2),
+    /// one slot: a new prompt's cache reuse and checkpoint restore, then its
+    /// next tokens into the batch.
+    fn batchPrompt(self: *Impl, slot: *Slot, n_batch: i32, n_ubatch: i32, add_ok: *bool) !void {
+        const func = "operator()";
+        const batch = &self.batch;
+        const alora_scale = &batch.alora_scale;
+        const alora_disabled_id = &batch.alora_disabled_id;
+
+        if (!add_ok.* or batch.size() >= n_batch) {
+            return; // batch is full, skip remaining slots
+        }
+
+        if (!slot.isProcessing()) {
+            return;
+        }
+
+        // check if we can batch this slot with the previous one
+        if (batch.slot_batched != null and !batch.slot_batched.?.canBatchWith(slot)) {
+            return;
+        }
+
+        // check if this is a child slot
+        if (slot.state == .wait_other) {
+            slt(.dbg, func, slot, "%s", .{@as([*:0]const u8, "waiting for parent slot to complete\n")});
+            return;
+        }
+
+        // this slot still has a prompt to be processed
+        if (slot.state == .processing_prompt or slot.state == .started) {
+            const input_tokens = &slot.task.?.tokens;
+
+            // used to determine the number of tokens added to the batch for the current slot
+            const n_tokens_prev = batch.size();
+
+            // TODO: maybe move branch to outside of this loop in the future
+            if (slot.state == .started) {
+                slot.stats.updatePromptStart();
+
+                slot.state = .processing_prompt;
+
+                slt(.trc, func, slot, "new prompt, n_ctx_slot = %d, n_keep = %d, task.n_tokens = %d\n", .{ slot.n_ctx, slot.taskRef().params.n_keep, slot.taskRef().nTokens() });
+
+                // keep track how many tokens we can reuse from the previous state
+                var n_past: i32 = 0;
+
+                // empty prompt passed -> release the slot and send empty response
+                if (input_tokens.empty()) {
+                    slt(.wrn, func, slot, "%s", .{@as([*:0]const u8, "empty prompt - releasing slot\n")});
+
+                    try slot.printTimings();
+                    try self.sendFinalResponse(slot);
+                    try slot.release();
+
+                    return;
+                }
+
+                // TODO: support memory-less logits computation
+                if (slot.taskRef().needLogits() and c.llama_get_memory(self.ctx_tgt) == null) {
+                    try self.sendErrorSlot(slot, "the current context does not logits computation. skipping", .server);
+                    try slot.release();
+                    return;
+                }
+
+                if (!slot.canSplit()) {
+                    if (slot.taskRef().nTokens() > n_ubatch) {
+                        var buf: [256]u8 = undefined;
+                        const msg = std.fmt.bufPrint(&buf, "input ({d} tokens) is too large to process. increase the physical batch " ++
+                            "size (current batch size: {d})", .{ slot.taskRef().nTokens(), n_ubatch }) catch unreachable;
+                        try self.sendErrorSlot(slot, msg, .server);
+                        try slot.release();
+                        return;
+                    }
+
+                    if (slot.taskRef().nTokens() > slot.n_ctx) {
+                        var buf: [256]u8 = undefined;
+                        const msg = std.fmt.bufPrint(&buf, "input ({d} tokens) is larger than the max context size ({d} tokens). skipping", .{ slot.taskRef().nTokens(), slot.n_ctx }) catch unreachable;
+                        try self.sendErrorSlot(slot, msg, .exceed_context_size);
+                        try slot.release();
+                        return;
+                    }
+                } else {
+                    if (slot.taskRef().nTokens() >= slot.n_ctx) {
+                        var buf: [256]u8 = undefined;
+                        const msg = std.fmt.bufPrint(&buf, "request ({d} tokens) exceeds the available context size ({d} " ++
+                            "tokens), try increasing it", .{ slot.taskRef().nTokens(), slot.n_ctx }) catch unreachable;
+                        try self.sendErrorSlot(slot, msg, .exceed_context_size);
+                        try slot.release();
+                        return;
+                    }
+
+                    if (slot.taskRef().params.cache_prompt) {
+                        // reuse any previously computed tokens that are common with the new prompt
+                        n_past = @intCast(try slot.prompt.tokens.getCommonPrefix(input_tokens));
+
+                        // if there is an alora invoked, don't cache after the invocation start
+                        if (slot.alora_invocation_start > 0) {
+                            slt(.dbg, func, slot, "only caching to alora invocation start (n_past = %d, alora_invocation_start = %d)\n", .{ n_past, slot.alora_invocation_start });
+                            n_past = @min(n_past, slot.alora_invocation_start - 1);
+                        }
+
+                        const n_cache_reuse = slot.taskRef().params.n_cache_reuse;
+
+                        const can_cache_reuse =
+                            c.llama_memory_can_shift(c.llama_get_memory(self.ctx_tgt)) and
+                            !slot.prompt.tokens.has_mtmd;
+
+                        if (!can_cache_reuse and n_cache_reuse > 0) {
+                            slt(.wrn, func, slot, "cache reuse is not supported - ignoring n_cache_reuse = %d\n", .{n_cache_reuse});
+                        }
+
+                        // reuse chunks from the cached prompt by shifting their KV cache in the new position
+                        if (can_cache_reuse and n_cache_reuse > 0) {
+                            ggmlAssert(!slot.prompt.tokens.has_mtmd, 3239, "!slot.prompt.tokens.has_mtmd");
+
+                            var head_c: usize = @intCast(n_past); // cache
+                            var head_p: usize = @intCast(n_past); // current prompt
+
+                            if (self.mctx != null) {
+                                // we should never reach this
+                                ggmlAbort(3246, "not supported by multimodal", .{});
+                            }
+
+                            slt(.dbg, func, slot, "trying to reuse chunks with size > %d, n_past = %d\n", .{ n_cache_reuse, n_past });
+
+                            while (head_c < slot.prompt.tokens.size() and
+                                head_p < input_tokens.size())
+                            {
+                                var n_match: usize = 0;
+                                while (head_c + n_match < slot.prompt.tokens.size() and
+                                    head_p + n_match < input_tokens.size() and
+                                    slot.prompt.tokens.at(head_c + n_match) == input_tokens.at(head_p + n_match))
+                                {
+                                    n_match += 1;
+                                }
+
+                                if (n_match >= @as(usize, @intCast(n_cache_reuse))) {
+                                    slt(.trc, func, slot, "reusing chunk with size %zu, shifting KV cache [%zu, %zu) -> [%zu, %zu)\n", .{ n_match, head_c, head_c + n_match, head_p, head_p + n_match });
+
+                                    const kv_shift: i64 = @as(i64, @intCast(head_p)) - @as(i64, @intCast(head_c));
+
+                                    slot.mem.seqRm(slot.id, @intCast(head_p), @intCast(head_c));
+                                    slot.mem.seqAdd(slot.id, @intCast(head_c), @intCast(head_c + n_match), @truncate(kv_shift));
+
+                                    for (0..n_match) |i| {
+                                        slot.prompt.tokens.setToken(@intCast(head_p + i), slot.prompt.tokens.at(head_c + i));
+                                        n_past += 1;
+                                    }
+
+                                    head_c += n_match;
+                                    head_p += n_match;
+                                } else {
+                                    head_c += 1;
+                                }
+                            }
+
+                            slt(.dbg, func, slot, "after context reuse, new n_past = %d\n", .{n_past});
+                        }
+                    } else {
+                        // if we don't cache the prompt, we have to remove all previous tokens
+                        n_past = 0;
+                    }
+
+                    var pos_next = slot.prompt.tokens.posNext(n_past);
+
+                    // ref: https://github.com/ggml-org/llama.cpp/pull/24110
+                    const has_new_tokens = (n_past < slot.taskRef().nTokens());
+
+                    // the largest pos_min required for a checkpoint to be useful
+                    const pos_min_thold: i32 = @max(0, pos_next - self.n_swa - @as(i32, if (has_new_tokens) 0 else 1));
+
+                    if (n_past > 0 and n_past <= slot.prompt.nTokens()) {
+                        const pos_min = c.llama_memory_seq_pos_min(c.llama_get_memory(self.ctx_tgt), slot.id);
+                        if (pos_min == -1) {
+                            slt(.err, func, slot, "n_past = %d, slot.prompt.tokens.size() = %d, seq_id = %d, pos_min = %d\n", .{ n_past, @as(c_int, @intCast(slot.prompt.tokens.size())), slot.id, pos_min });
+                            ggmlAbort(3303, "pos_min == -1, but n_past > 0 - should not happen: https://github.com/ggml-org/llama.cpp/pull/13833#discussion_r2116181237", .{});
+                        }
+
+                        // when the prompt prefix does not match, print the tokens around the mismatch
+                        // this is useful for debugging prompt caching
+                        if (self.slots_debug != 0) {
+                            try self.printPrefixMismatch(slot, n_past);
+                        }
+
+                        if (pos_min >= pos_min_thold) {
+                            // search for a context checkpoint
+                            var found: ?*PromptCheckpoint = null;
+                            {
+                                var k = slot.prompt.checkpoints.items.len;
+                                while (k > 0) : (k -= 1) {
+                                    const cur = &slot.prompt.checkpoints.items[k - 1];
+                                    // guarantee that a checkpoint will result in at least one token being processed [TAG_PROMPT_LOGITS]
+                                    slt(.trc, func, slot, "checking checkpoint with [%d, %d] against %d...\n", .{ cur.pos_min, cur.pos_max, pos_min_thold });
+                                    // workaround for [TAG_CHECKPOINTS_FIX_POS_MIN]
+                                    if (cur.pos_max > pos_next) {
+                                        continue;
+                                    }
+                                    if (cur.pos_min < pos_min_thold or cur.pos_min == 0) {
+                                        found = cur;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            const do_reset = found == null;
+
+                            if (found) |it| {
+                                // restore the context checkpoint
+                                it.loadTgt(self.ctx_tgt, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                                it.loadDft(self.ctx_dft, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                                // restore the draft's speculative state
+                                spec_mod.setState(self.spec, slot.id, it.data_spec);
+
+                                pos_next = @min(pos_next, @max(it.pos_min + 1, it.pos_max));
+                                n_past = @intCast(@min(slot.prompt.tokens.sizeUpToPos(pos_next), @as(usize, @intCast(it.n_tokens))));
+                                slt(.trc, func, slot, "restored context checkpoint (pos_min = %d, pos_max = %d, n_tokens = %lld, n_past = %d, size = %.3f MiB)\n", .{
+                                    it.pos_min, it.pos_max, @as(c_longlong, it.n_tokens), n_past, @as(f64, @as(f32, @floatFromInt(it.size())) / 1024 / 1024),
+                                });
+                            }
+
+                            if (do_reset) {
+                                slt(.trc, func, slot, "forcing full prompt re-processing due to lack of cache data (likely due to SWA or hybrid/recurrent memory, see %s)\n", .{@as([*:0]const u8, "https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055")});
+                                pos_next = 0;
+                                n_past = 0;
+                            }
+                        }
+                    }
+
+                    {
+                        // erase any checkpoints with pos_max > pos_next
+                        var k: usize = 0;
+                        while (k < slot.prompt.checkpoints.items.len) {
+                            const cur = &slot.prompt.checkpoints.items[k];
+                            if (cur.pos_max > pos_next) {
+                                slt(.trc, func, slot, "erased invalidated context checkpoint (pos_min = %d, pos_max = %d, n_tokens = %lld, n_swa = %d, pos_next = %d, size = %.3f MiB)\n", .{
+                                    cur.pos_min, cur.pos_max, @as(c_longlong, cur.n_tokens), self.n_swa, pos_next, @as(f64, @as(f32, @floatFromInt(cur.size())) / 1024 / 1024),
+                                });
+                                var removed = slot.prompt.checkpoints.orderedRemove(k);
+                                removed.clear(slot.prompt.tokens.gpa);
+                            } else {
+                                k += 1;
+                            }
+                        }
+                    }
+                }
+
+                // [TAG_PROMPT_LOGITS]
+                if (n_past == slot.taskRef().nTokens() and n_past > 0) {
+                    slt(.wrn, func, slot, "need to evaluate at least 1 token for each active slot (n_past = %d, task.n_tokens() = %d)\n", .{ n_past, slot.taskRef().nTokens() });
+                    n_past -= 1;
+                    slt(.wrn, func, slot, "n_past was set to %d\n", .{n_past});
+                }
+
+                slot.stats.n_prompt_cached = @intCast(n_past);
+                slot.stats.n_prompt_processed = 0;
+
+                self.metrics.addPromptCached(@intCast(n_past));
+
+                try slot.prompt.tokens.keepFirst(@intCast(n_past));
+
+                // this is to signal the client that the request has started processing
+                if (slot.taskRef().params.stream) {
+                    const empty: CompletionTokenOutput = .{};
+                    if (slot.taskRef().params.return_progress) {
+                        // send initial 0% progress update if needed
+                        try self.sendPartialResponse(slot, &empty, true, false);
+                    } else {
+                        // otherwise, for streaming without progress, signal HTTP to send the headers (i.e. 200 status)
+                        try self.sendPartialResponse(slot, &empty, false, true);
+                    }
+                }
+            } // end of SLOT_STATE_STARTED
+
+            if (!slot.canSplit()) {
+                // cannot fit the prompt in the current batch - will try next iter
+                if (batch.size() + slot.taskRef().nTokens() > n_batch) {
+                    return;
+                }
+            }
+
+            // note: the prompt timing is advanced in post_decode(), so it does not cover
+            //       the tokens added to the batch below
+            slot.printTimingsPp();
+
+            // truncate any tokens that are beyond n_past for this slot
+            const p0 = slot.prompt.tokens.posNext(-1);
+
+            slt(.trc, func, slot, "cached n_tokens = %d, memory_seq_rm [%d, end)\n", .{ slot.prompt.nTokens(), p0 });
+
+            slot.mem.seqRm(slot.id, p0, -1);
+
+            // If using an alora, there may be uncached tokens that come
+            // before the invocation sequence. When this happens, the
+            // tokens before the invocation sequence need to be
+            // processed without the adapter in a separate batch, then
+            // the adapter needs to be enabled for the remaining tokens.
+            if (common.loraAllAlora(slot.lora) and slot.alora_invocation_start - 1 > slot.prompt.nTokens()) {
+                slt(.dbg, func, slot, "processing pre-alora tokens without the adapter (n_tokens = %d, alora_invocation_start = %d)\n", .{ slot.prompt.nTokens(), slot.alora_invocation_start });
+                const enabled_loras = try common.loraGetEnabledIds(gpa, slot.lora);
+                defer gpa.free(enabled_loras);
+                ggmlAssert(enabled_loras.len == 1, 3454, "enabled_loras.size() == 1");
+                alora_scale.* = slot.lora[enabled_loras[0]].scale;
+                slot.lora[enabled_loras[0]].scale = 0.0;
+                alora_disabled_id.* = enabled_loras[0];
+            }
+
+            var do_checkpoint = self.params_base.n_ctx_checkpoints > 0;
+
+            // make checkpoints only for completion tasks
+            do_checkpoint = do_checkpoint and slot.taskRef().type == .completion;
+
+            // make a checkpoint of the parts of the memory that cannot be rolled back.
+            // checkpoints are created only if:
+            // - the model does not support partial sequence removal
+            // - the model uses SWA (and we are not using `swa_full`)
+            // - the model supports partial sequence removal but only up to a fixed bound
+            do_checkpoint = do_checkpoint and (self.ctx_tgt_seq_rm_type == .full or
+                self.ctx_tgt_seq_rm_type == .rs or
+                self.n_swa > 0);
+
+            var has_mtmd = false;
+
+            // check if we should process the mtmd chunk
+            while (true) {
+                const cur_token_idx = slot.prompt.nTokens();
+                if (cur_token_idx >= slot.taskRef().nTokens() or
+                    input_tokens.at(@intCast(cur_token_idx)) != token_null // encountered a text token
+                ) {
+                    break;
+                }
+
+                // process the mtmd chunk
+                // note: it submits its own decode, potentially be async
+                //       so the timing is queued and flushed on the next sync
+                self.metricsPreDecode();
+
+                // encode on the worker thread, so we can still handle metrics tasks
+                var work: MtmdWork = .{ .slot = slot, .idx = @intCast(cur_token_idx) };
+                try self.queue_tasks.yieldToQueue(&work, MtmdWork.run);
+
+                if (work.res != 0) {
+                    slt(.err, func, slot, "failed to process mtmd chunk, res = %d\n", .{work.res});
+                    try self.sendErrorSlot(slot, "failed to process mtmd chunk", .server);
+                    try slot.release();
+                    return; // the slot is done, skip it entirely
+                }
+
+                self.metricsQueuePrompt(work.n_tokens_out);
+                slot.stats.n_prompt_processed += work.n_tokens_out;
+                slot.stats.updatePromptLast();
+
+                // add the mtmd chunk to cache
+                {
+                    const chunk = try input_tokens.findChunk(@intCast(cur_token_idx));
+                    // the chunk is already in the KV cache at this point, so we don't need to keep its data around
+                    try slot.prompt.tokens.pushBackPlaceholder(chunk);
+                }
+
+                has_mtmd = true;
+            }
+
+            const spans = &slot.taskRef().params.message_spans;
+            const last_user_pos = spans.lastUserMessagePos();
+
+            // add prompt tokens for processing in the current batch
+            while (slot.prompt.nTokens() < slot.taskRef().nTokens() and batch.size() < n_batch) {
+                // get next token to process
+                const cur_tok = input_tokens.at(@intCast(slot.prompt.nTokens()));
+                if (cur_tok == token_null) {
+                    break; // end of text chunk
+                }
+
+                // if this is an alora request with pre-invocation
+                // tokens that are not cached, we need to stop filling
+                // this batch at those pre-invocation tokens.
+                if (alora_scale.* > 0 and slot.prompt.nTokens() == slot.alora_invocation_start - 1) {
+                    slt(.dbg, func, slot, "stop prompt batch filling at (n_tokens = %d, alora_invocation_start = %d)\n", .{ slot.prompt.nTokens(), slot.alora_invocation_start });
+                    break;
+                }
+
+                // embedding requires all tokens in the batch to be output;
+                // MTP also wants logits at every prompt position so the
+                // streaming hook can mirror t_h_nextn into ctx_dft.
+                add_ok.* = (try batch.add(slot.id, cur_tok, slot.prompt.tokens.posNext(-1), slot.needEmbd(), true)) and add_ok.*;
+                try slot.prompt.tokens.pushBackToken(cur_tok);
+
+                // break at the last user message, or at user messages at least min step past the last checkpoint
+                if (do_checkpoint and spans.isUserStart(slot.prompt.nTokens())) {
+                    const pos = slot.prompt.nTokens();
+                    const checkpoints = slot.prompt.checkpoints.items;
+
+                    if (pos == last_user_pos or checkpoints.len == 0 or pos > checkpoints[checkpoints.len - 1].n_tokens + self.params_base.checkpoint_min_step) {
+                        break;
+                    }
+                }
+
+                // process the last few tokens of the prompt separately in order to allow for a checkpoint to be created.
+                // create checkpoints that many tokens before the end of the prompt:
+                //  - 4 + n_ubatch
+                //  - 4
+                // ref: https://github.com/ggml-org/llama.cpp/pull/20288
+                if (do_checkpoint) {
+                    // a function-local `static`: the first call's n_ubatch
+                    if (checkpoint_offsets == null) checkpoint_offsets = .{ 4 + n_ubatch, 4 };
+
+                    var should_break = false;
+                    for (checkpoint_offsets.?) |offset| {
+                        const n_last = @min(n_batch, offset);
+                        if (slot.taskRef().nTokens() == slot.prompt.nTokens() + n_last) {
+                            should_break = true;
+                            break;
+                        }
+                    }
+                    if (should_break) {
+                        break;
+                    }
+                }
+            }
+
+            // the number of tokens added to the batch for the current slot
+            const n_tokens_cur = batch.size() - n_tokens_prev;
+
+            const n_tokens_start = slot.prompt.nTokens() - n_tokens_cur;
+
+            const near_prompt_end = slot.taskRef().nTokens() < slot.prompt.nTokens() + n_ubatch;
+
+            const is_user_start = spans.isUserStart(n_tokens_start);
+            const is_last_user_message = n_tokens_start == last_user_pos;
+
+            // entire prompt has been processed
+            if (slot.prompt.nTokens() == slot.taskRef().nTokens()) {
+                slot.state = .done_prompt;
+
+                ggmlAssert(batch.size() > 0, 3595, "batch.size() > 0");
+
+                // extract the logits only for the last token
+                batch.setOutput(batch.size() - 1, true);
+
+                slot.stats.n_gen = 0;
+                slot.i_batch = batch.size() - 1;
+
+                slot.initSampler();
+            } else {
+                // skip ordinary mid-prompt checkpoints, unless the batch starts a user
+                // message or we are near the end of the prompt
+                if (!is_user_start and !near_prompt_end) {
+                    do_checkpoint = false;
+                }
+            }
+
+            const pos_min = c.llama_memory_seq_pos_min(c.llama_get_memory(self.ctx_tgt), slot.id);
+            const pos_max = c.llama_memory_seq_pos_max(c.llama_get_memory(self.ctx_tgt), slot.id);
+
+            // nothing to checkpoint yet
+            // TODO: is this check needed?
+            if (do_checkpoint and pos_min < 0) {
+                do_checkpoint = false;
+            }
+
+            // do not checkpoint after mtmd chunks
+            do_checkpoint = do_checkpoint and !has_mtmd;
+
+            // no need to create checkpoints that are too close together, unless it's the last user message
+            {
+                const cps = slot.prompt.checkpoints.items;
+                do_checkpoint = do_checkpoint and (cps.len == 0 or
+                    is_last_user_message or near_prompt_end or
+                    n_tokens_start > cps[cps.len - 1].n_tokens + self.params_base.checkpoint_min_step);
+            }
+            slt(.dbg, func, slot, "main/do_checkpoint = %s, pos_min = %d, pos_max = %d\n", .{ @as([*:0]const u8, if (do_checkpoint) "yes" else "no"), pos_min, pos_max });
+
+            // note: we create the checkpoint before calling llama_decode(), so the current batch is not
+            //       yet processed and therefore it is not part of the checkpoint.
+            if (do_checkpoint) {
+                try self.createCheckpoint(slot, n_tokens_cur, pos_min, pos_max);
+            }
+        }
+
+        if (batch.slot_batched == null) {
+            batch.slot_batched = slot;
+        }
+    }
+
+    /// The `slots_debug` block of `pre_decode` (server-context.cpp:2909
+    /// @b29c606e2): the tokens around a prefix mismatch.
+    fn printPrefixMismatch(self: *Impl, slot: *Slot, n_past: i32) !void {
+        const func = "operator()";
+        var tmp = std.heap.ArenaAllocator.init(gpa);
+        defer tmp.deinit();
+        const ta = tmp.allocator();
+        const np0: i32 = @max(n_past - self.slots_n_diff, 0);
+        const np1: i32 = @min(n_past + self.slots_n_diff + 2, @as(i32, @intCast(@min(slot.prompt.tokens.size(), slot.taskRef().tokens.size()))));
+
+        var ss0: std.ArrayList(u8) = .empty;
+        var ss1: std.ArrayList(u8) = .empty;
+        var st0: std.ArrayList(u8) = .empty;
+        var st1: std.ArrayList(u8) = .empty;
+
+        try ss0.appendSlice(ta, "old: ... ");
+        try ss1.appendSlice(ta, "new: ... ");
+
+        var i = np0;
+        while (i < np1) : (i += 1) {
+            if (i == n_past) {
+                try ss0.appendSlice(ta, " | ");
+                try ss1.appendSlice(ta, " | ");
+            }
+
+            {
+                const token = slot.prompt.tokens.at(@intCast(i));
+                const p = if (token != token_null) try tc.common.tokenToPiece(ta, self.vocab, token, true) else "[mtmd]";
+                try ss0.appendSlice(ta, p);
+                try st0.print(ta, "{d:>8}", .{token});
+            }
+
+            {
+                const token = slot.taskRef().tokens.at(@intCast(i));
+                const p = if (token != token_null) try tc.common.tokenToPiece(ta, self.vocab, token, true) else "[mtmd]";
+                try ss1.appendSlice(ta, p);
+                try st1.print(ta, "{d:>8}", .{token});
+            }
+        }
+
+        for ([_][]const u8{ ss0.items, ss1.items, st0.items, st1.items }) |line| {
+            slt(.wrn, func, slot, "%s\n", .{(try ta.dupeSentinel(u8, line, 0)).ptr});
+        }
+    }
+
+    const DecodeWork = struct {
+        ctx: ?*c.llama_context,
+        view: c.llama_batch,
+        has_output: bool,
+        ret: c_int = 0,
+
+        fn run(w: *DecodeWork) anyerror!void {
+            w.ret = c.llama_decode(w.ctx, w.view);
+            if (w.ret == 0 and w.has_output) {
+                c.llama_synchronize(w.ctx);
+            }
+        }
+    };
+
+    const SpecProcessWork = struct {
+        spec: ?*spec_mod.Speculative,
+        view: c.llama_batch,
+        ok: bool = true,
+
+        fn run(w: *SpecProcessWork) anyerror!void {
+            w.ok = spec_mod.process(w.spec, w.view);
+        }
+    };
+
+    /// Ports `server_context_impl`'s `decode` (server-context.cpp:3647
+    /// @b29c606e2): true on success, false to retry with a smaller batch;
+    /// an error is fatal.
+    fn decode(self: *Impl, n_batch: *i32, off: i32, batch_view: *c.llama_batch) !bool {
+        const func = "decode";
+        srv(.dbg, func, "n_batch (effective) = %d, off = %d\n", .{ n_batch.*, off });
+
+        self.metricsPreDecode();
+
+        if (self.batch.size() == 0) {
+            srv(.wrn, func, "%s", .{@as([*:0]const u8, "no tokens to decode\n")});
+
+            self.n_empty_consecutive += 1;
+            if (self.n_empty_consecutive > 3) {
+                ggmlAbort(3656, "fatal error - please provide logs and repro in %s\n", .{@as([*:0]const u8, "https://github.com/ggml-org/llama.cpp/pull/20277")});
+            }
+
+            return true; // nothing to decode
+        } else {
+            self.n_empty_consecutive = 0;
+        }
+
+        // TODO @ngxson : dft model may have different n_embd than the tgt model, so we check & reject if that's the case
+        // this case is not currently used by any models, but may need to be supported in the future
+        if (self.spec != null and self.batch.has_embd) {
+            if (c.llama_model_n_embd_inp(self.model_dft) != c.llama_model_n_embd_inp(self.model_tgt)) {
+                srv(.err, func, "%s", .{@as([*:0]const u8, "unsupported batch.has_embd + spec case\n")});
+                return common.throw(error.RuntimeError, "unsupported batch.has_embd + spec case", .{});
+            }
+        }
+
+        var has_output = false;
+        {
+            var i = off;
+            while (i < off + batch_view.n_tokens) : (i += 1) {
+                has_output = has_output or self.batch.tokens.items[@intCast(i)].output;
+            }
+        }
+
+        // yield to the queue, so we can still handle metrics tasks while decoding
+        // note: the sync is done here too, so that the wait is also covered by the yield
+        var work: DecodeWork = .{ .ctx = self.ctx_tgt, .view = batch_view.*, .has_output = has_output };
+        try self.queue_tasks.yieldToQueue(&work, DecodeWork.run);
+        const ret = work.ret;
+
+        if (ret != 0) {
+            {
+                var err: []const u8 = "";
+
+                if (n_batch.* == 1 and ret == 1) {
+                    // TODO: try to terminate only the largest active slot/sequence and continue with the rest
+                    //       need to remove the tokens from the current batch too
+                    err = "Context size has been exceeded.";
+                }
+
+                if (ret == -1) {
+                    err = "Invalid input batch.";
+                }
+
+                if (ret < -1) {
+                    // TODO: update slot state based on llama_memory_seq_pos_min() and llama_memory_seq_pos_max()
+                    err = "Compute error.";
+                }
+
+                // TODO: handle ret == 2 (abort) when we start aborting
+
+                if (err.len != 0) {
+                    const z = dupZ(err);
+                    defer freeZ(z);
+                    srv(.err, func, "%s off = %d, n_batch = %d, ret = %d\n", .{ z, off, n_batch.*, ret });
+
+                    for (self.slots) |*slot| {
+                        if (slot.isProcessing()) {
+                            try self.sendErrorSlot(slot, err, .server);
+                            try slot.release();
+
+                            // note: it's complicated to keep track of how much of the current batch has been
+                            //       processed before the error occurred, so we simply clear the entire context
+                            slot.promptClear();
+                        }
+                    }
+
+                    // stop, do not retry with smaller batch size
+                    return common.throw(error.RuntimeError, "{s}", .{err});
+                }
+            }
+
+            // retry with half the batch size to try to find a free slot in the KV cache
+            if (!self.tryClearIdleSlots()) {
+                n_batch.* = @divTrunc(n_batch.*, 2);
+            }
+
+            srv(.wrn, func, "failed to find free space in the KV cache, retrying with smaller batch size, off = %d, n_batch = %d, ret = %d\n", .{ off, n_batch.*, ret });
+
+            return false; // retry with the updated n_batch
+        } else {
+            // success, apply batch metrics
+            self.metricsPostDecode(off, batch_view.n_tokens, has_output);
+        }
+
+        // TODO: avoid restoring the draft context and re-evaluating the drafted tokens when not needed [TAG_SPEC_AVOID_DRAFT_REEVAL]
+        //       for now, always re-evaluate for simplicity
+        //       ref: https://github.com/ggml-org/llama.cpp/pull/22728#issuecomment-4400925384
+        if (self.spec != null) {
+            var sw: SpecProcessWork = .{ .spec = self.spec, .view = batch_view.* };
+            try self.queue_tasks.yieldToQueue(&sw, SpecProcessWork.run);
+
+            if (!sw.ok) {
+                srv(.err, func, "%s", .{@as([*:0]const u8, "failed to process speculative batch\n")});
+
+                // TODO: handle error
+                return common.throw(error.RuntimeError, "failed to process speculative batch", .{});
+            }
+        }
+
+        // handle `n_cmpl > 1` tasks - when the main prompt is processed, activate all child tasks too
+        for (self.slots) |*slot| {
+            if (slot.state == .done_prompt and slot.taskRef().isParent()) {
+                // all children slots should already launched by launch_slots_with_parent_task()
+                // copy state to the child slots
+                for (self.slots) |*child| {
+                    if (child.state == .wait_other and slot.taskRef().id == child.taskRef().id_parent) {
+                        slt(.trc, func, slot, " - copying state to child %d\n", .{child.id});
+
+                        ggmlAssert(child.state == .wait_other, 3773, "child->state == SLOT_STATE_WAIT_OTHER");
+
+                        try slot.copyStateTo(child);
+                        child.state = .done_prompt;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// The `accept_special_token` lambda of `post_decode` (server-context.cpp:3784 @b29c606e2).
+    fn acceptSpecialToken(self: *const Impl, slot: *const Slot, token: Token) bool {
+        if (self.params_base.special) return true;
+        for (slot.taskRef().params.sampling.preserved_tokens.items) |t| {
+            if (t == token) return true;
+        }
+        return false;
+    }
+
+    /// The sampling step of `post_decode` (server-context.cpp:3784
+    /// @b29c606e2), one slot.
+    fn sampleSlot(self: *Impl, slot: *Slot, off: i32, n_batch_tokens: i32, batch_view: *const c.llama_batch, a: Allocator) !void {
+        // optionally send prompt processing progress
+        if (slot.state == .processing_prompt or slot.state == .done_prompt) {
+            if (slot.taskRef().params.stream and slot.taskRef().params.return_progress) {
+                const empty: CompletionTokenOutput = .{};
+                try self.sendPartialResponse(slot, &empty, true, false);
+            }
+        }
+
+        if (!(slot.i_batch >= off and slot.i_batch < off + n_batch_tokens)) {
+            // the required token not in this sub-batch, skip
+            return;
+        }
+
+        if (slot.state == .done_prompt) {
+            if (slot.taskRef().type == .embedding) {
+                // prompt evaluated for embedding
+                try self.sendEmbedding(slot, batch_view);
+                try slot.release();
+                slot.i_batch = -1;
+                return;
+            }
+
+            if (slot.taskRef().type == .rerank) {
+                try self.sendRerank(slot, batch_view);
+                try slot.release();
+                slot.i_batch = -1;
+                return;
+            }
+
+            ggmlAssert(slot.taskRef().needSampling(), 3834, "slot.task->need_sampling()");
+
+            // prompt evaluated for next-token prediction
+            slot.state = .generating;
+
+            if (slot.canSpeculate()) {
+                spec_mod.begin(self.spec, slot.id, try slot.prompt.tokens.getTextTokens(a));
+            }
+        } else if (slot.state != .generating) {
+            return;
+        }
+
+        if (slot.canSpeculate() and slot.spec_draft.items.len != 0) {
+            return; // sample using speculative decoding
+        }
+
+        // shifted according to the current sub-batch
+        const tok_idx = slot.i_batch - off;
+
+        const id = try slot.smpl.?.sample(slot.ctx_tgt, tok_idx, false);
+
+        slot.i_batch = -1;
+
+        slot.smpl.?.accept(id, true);
+
+        // here we have synchronized the llama_context (due to the sampling above), so we can do time measurement
+        const t_now = c.ggml_time_us();
+
+        slot.stats.n_gen += 1;
+
+        if (slot.stats.n_gen == 1) {
+            slot.stats.updatePromptLast();
+            slot.t_print_last = t_now;
+            slot.n_gen_last = 0;
+        }
+
+        slot.stats.updateGenLast();
+
+        const vocab = c.llama_model_get_vocab(c.llama_get_model(slot.ctx_tgt));
+        var result: CompletionTokenOutput = .{};
+        result.tok = id;
+        result.text_to_send = try tc.common.tokenToPiece(a, vocab, result.tok, self.acceptSpecialToken(slot, result.tok));
+        result.prob = 1.0; // TODO: set it here instead of doing inside populate_token_probs
+
+        if (slot.taskRef().params.sampling.n_probs > 0) {
+            try self.populateTokenProbs(slot, &result, slot.taskRef().params.post_sampling_probs, self.params_base.special, tok_idx, a);
+        }
+
+        if (!try self.processToken(&result, slot, a)) {
+            // release slot because of stop condition
+            try slot.printTimings();
+            try self.sendFinalResponse(slot);
+            try slot.release();
+
+            return;
+        }
+
+        slot.printTimingsTg();
+    }
+
+    /// The speculative step of `post_decode` (server-context.cpp:3784
+    /// @b29c606e2), one slot: the main model samples and accepts.
+    fn acceptDraft(self: *Impl, slot: *Slot, a: Allocator) !void {
+        const func = "operator()";
+        if (slot.state != .generating or !slot.canSpeculate() or
+            slot.spec_draft.items.len == 0 or slot.spec_i_batch.items.len == 0)
+        {
+            return;
+        }
+
+        // save the original draft size
+        const n_draft = slot.spec_draft.items.len;
+
+        ggmlAssert(n_draft > 0, 3907, "n_draft > 0");
+
+        // verify and try to accept the draft
+        {
+            const smpl_save = slot.smpl.?.clone();
+            defer smpl_save.destroy();
+
+            ggmlAssert(slot.spec_i_batch.items.len == n_draft + 1, 3913, "slot.spec_i_batch.size() == n_draft + 1");
+            const synth_probs = spec_mod.getSynthProbs(self.spec);
+            const accepted = if (synth_probs.len == 0)
+                try slot.smpl.?.sampleAndAcceptNIdxs(a, slot.ctx_tgt, slot.spec_i_batch.items, slot.spec_draft.items, false)
+            else
+                try sampleAndAcceptSynth(a, slot.smpl.?, slot.ctx_tgt, slot.spec_i_batch.items, slot.spec_draft.items, synth_probs, &slot.spec_synth_rng, slot.spec_is_replay);
+            slot.spec_i_batch.clearRetainingCapacity();
+
+            ggmlAssert(accepted.len >= 1, 3922, "accepted.size() >= 1");
+
+            const n_rollback: u32 = @intCast(slot.spec_draft.items.len + 1 - accepted.len);
+
+            const use_ckpt_tgt = self.ctx_tgt_seq_rm_type == .full or
+                (self.ctx_tgt_seq_rm_type == .rs and n_rollback > c.llama_n_rs_seq(self.ctx_tgt));
+
+            // check for partial draft acceptance
+            if (n_rollback > 0) {
+                if (use_ckpt_tgt) {
+                    if (self.trace > 0) {
+                        slt(.inf, func, slot, "accepted %2zu/%2zu draft tokens (restore checkpoint)\n", .{ accepted.len - 1, slot.spec_draft.items.len });
+                    }
+
+                    // partial acceptance is not supported by the context -> truncate the draft and restore the state
+                    slot.spec_is_replay = true;
+                    slot.spec_draft.clearRetainingCapacity();
+                    try slot.spec_draft.appendSlice(gpa, accepted);
+
+                    const ckpt = &slot.spec_ckpt;
+
+                    slt(.dbg, func, slot, "restoring speculative checkpoint (pos_min = %d, pos_max = %d, size = %zu)\n", .{ ckpt.pos_min, ckpt.pos_max, ckpt.size() });
+
+                    ckpt.loadTgt(slot.ctx_tgt, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+
+                    if (slot.ctx_dft != null) {
+                        ckpt.loadDft(slot.ctx_dft, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                    }
+
+                    slot.mem.seqRm(slot.id, ckpt.pos_max + 1, -1);
+
+                    try slot.prompt.tokens.keepFirst(@intCast(ckpt.n_tokens));
+                    sampling.Sampler.copy(smpl_save, slot.smpl.?);
+
+                    return;
+                }
+            }
+
+            if (self.trace > 0) {
+                slt(.inf, func, slot, "accepted %2zu/%2zu draft tokens\n", .{ accepted.len - 1, n_draft });
+            }
+
+            spec_mod.accept(self.spec.?, slot.id, @intCast(accepted.len - 1));
+
+            slot.spec_draft.clearRetainingCapacity();
+            try slot.spec_draft.appendSlice(gpa, accepted);
+        }
+
+        const ids = try a.dupe(Token, slot.spec_draft.items);
+        slot.spec_draft.clearRetainingCapacity(); // std::move
+
+        var n_accepted = ids.len - 1;
+        if (slot.spec_is_replay and n_accepted > 0) {
+            n_accepted -= 1;
+        }
+        slot.spec_is_replay = false;
+
+        slot.stats.updateGenLast();
+
+        // update how many tokens out of those tested were accepted
+        slot.stats.n_draft_accepted += n_accepted;
+        slot.stats.n_draft_verif_steps += 1;
+
+        const n_accepted_per_pos = &slot.n_accepted_per_pos;
+        if (n_accepted_per_pos.items.len == 0) {
+            try n_accepted_per_pos.appendNTimes(gpa, 0, @intCast(spec_mod.nMax(self.spec)));
+        }
+        {
+            var i: usize = 0;
+            while (i < n_accepted and i < n_accepted_per_pos.items.len) : (i += 1) {
+                n_accepted_per_pos.items[i] += 1;
+            }
+        }
+
+        // add accepted tokens to the prompt
+        try slot.prompt.tokens.keepFirst(@intCast(slot.prompt.nTokens() - @as(i32, @intCast(n_draft))));
+        try slot.prompt.tokens.insert(ids[0 .. ids.len - 1]);
+
+        slot.sampled = ids[ids.len - 1]; // last accepted token
+        slt(.dbg, func, slot, "add accepted tokens: sampled=%d, ids.size=%zu, n_draft=%zu\n", .{ slot.sampled, ids.len, n_draft });
+
+        slot.mem.seqRm(slot.id, slot.prompt.tokens.posNext(-1), -1);
+
+        const vocab = c.llama_model_get_vocab(c.llama_get_model(slot.ctx_tgt));
+        for (ids) |tok| {
+            var result: CompletionTokenOutput = .{};
+
+            result.tok = tok;
+            result.text_to_send = try tc.common.tokenToPiece(a, vocab, result.tok, self.acceptSpecialToken(slot, result.tok));
+            result.prob = 1.0; // set later
+
+            // TODO: set result.probs
+
+            slot.stats.n_gen += 1;
+
+            if (!try self.processToken(&result, slot, a)) {
+                try slot.printTimings();
+                try self.sendFinalResponse(slot);
+                try slot.release();
+
+                return;
+            }
+        }
+
+        slot.printTimingsTg();
+
+        slt(.dbg, func, slot, "accepted %d/%d draft tokens, new n_tokens = %d\n", .{ @as(c_int, @intCast(n_accepted)), @as(c_int, @intCast(n_draft)), slot.prompt.nTokens() });
+    }
+
+    /// Ports `server_context_impl`'s `post_decode` (server-context.cpp:3784 @b29c606e2).
+    fn postDecode(self: *Impl, n_batch_tokens: i32, off: i32, batch_view: *const c.llama_batch) !void {
+        var tmp = std.heap.ArenaAllocator.init(gpa);
+        defer tmp.deinit();
+        const a = tmp.allocator();
+
+        // TODO @ngxson : it's tricky to make sub-batch compatible with common_sampler_sample_and_accept_n,
+        // so for now we will throw an error in this case: https://github.com/ggml-org/llama.cpp/issues/24840
+        for (self.slots) |*slot| {
+            for (slot.spec_i_batch.items) |i| {
+                if (!(i >= off and i < off + n_batch_tokens)) {
+                    self.slotException(slot, common.throw(error.RuntimeError, "speculative batch index {d} is not inside the current sub-batch [{d}, {d})", .{ i, off, off + n_batch_tokens }));
+                    break;
+                }
+            }
+        }
+
+        for (self.slots) |*slot| {
+            self.sampleSlot(slot, off, n_batch_tokens, batch_view, a) catch |e| self.slotException(slot, e);
+        }
+
+        // speculative decoding - main model sample and accept
+        for (self.slots) |*slot| {
+            self.acceptDraft(slot, a) catch |e| self.slotException(slot, e);
+        }
+    }
+
+    /// Ports `server_context_impl`'s `n_ctx_slot` (server-context.cpp:4027
+    /// @b29c606e2): context size of a single slot, capped by
+    /// --kv-unified-per-slot and by the training context of the model.
+    pub fn nCtxSlot(self: *const Impl) c_int {
+        var res: c_int = @intCast(c.llama_n_ctx_seq(self.ctx_tgt));
+
+        if (self.params_base.kv_unified_per_slot > 0) {
+            res = @min(res, self.params_base.kv_unified_per_slot);
+        }
+
+        return @min(res, c.llama_model_n_ctx_train(self.model_tgt));
+    }
+
+    //
+    // metrics helpers
+    //
+
+    /// Ports `server_context_impl`'s `metrics_pre_decode` (server-context.cpp:4046
+    /// @b29c606e2): call before submitting a decode, so that the queued
+    /// prompt stats can be timed.
+    fn metricsPreDecode(self: *Impl) void {
+        self.t_decode_start = c.ggml_time_us();
+    }
+
+    /// Ports `server_context_impl`'s `metrics_queue_prompt` (server-context.cpp:4051
+    /// @b29c606e2): the batch is submitted, but its compute may not be done yet.
+    fn metricsQueuePrompt(self: *Impl, n_tokens: u64) void {
+        if (n_tokens == 0) {
+            return;
+        }
+        if (self.n_prompt_queued == 0) {
+            self.t_prompt_start = self.t_decode_start;
+        }
+        self.n_prompt_queued += n_tokens;
+    }
+
+    /// Ports `server_context_impl`'s `metrics_flush_prompt` (server-context.cpp:4062
+    /// @b29c606e2): call only after the context is synchronized, otherwise
+    /// the time is meaningless.
+    fn metricsFlushPrompt(self: *Impl) void {
+        if (self.n_prompt_queued == 0) {
+            return;
+        }
+        self.metrics.addPrompt(self.n_prompt_queued, @bitCast(c.ggml_time_us() - self.t_prompt_start));
+        self.n_prompt_queued = 0;
+    }
+
+    /// Ports `server_context_impl`'s `metrics_post_decode` (server-context.cpp:4071
+    /// @b29c606e2): `has_output` is computed by the caller, which also
+    /// already synchronized the context if it is set.
+    fn metricsPostDecode(self: *Impl, off: i32, n_tokens: i32, has_output: bool) void {
+        self.metrics.n_decode += 1;
+        for (self.slots) |*slot| {
+            if (slot.isProcessing()) {
+                self.metrics.n_busy_slots += 1;
+            }
+            self.metrics.n_tokens_max = @max(self.metrics.n_tokens_max, @as(u64, @bitCast(@as(i64, slot.prompt.nTokens()))));
+        }
+
+        // apply enqueued prompt tokens stats
+        // note: a slot can be released before we get here, which clears its stats
+        //       the tokens were still computed, counted in the global metrics, not in slot
+        var n_prompt_tokens: u64 = 0;
+
+        var i = off;
+        while (i < off + n_tokens) : (i += 1) {
+            const t = &self.batch.tokens.items[@intCast(i)];
+
+            if (!t.is_prompt) {
+                continue; // generated tokens are handled after sampling
+            }
+
+            n_prompt_tokens += 1;
+
+            const slot = &self.slots[@intCast(t.id_slot)];
+            if (slot.stats.isSet()) {
+                slot.stats.n_prompt_processed += 1;
+            }
+        }
+
+        self.metricsQueuePrompt(n_prompt_tokens);
+
+        if (has_output) {
+            // the context is already synchronized, so the timings are correct
+            self.metricsFlushPrompt();
+        }
+
+        // advance the prompt timing of the slots that had tokens in this batch
+        // note: a second pass, it must run after the sync to reflect the compute
+        const t_now = c.ggml_time_us();
+        i = off;
+        while (i < off + n_tokens) : (i += 1) {
+            const t = &self.batch.tokens.items[@intCast(i)];
+            const slot = &self.slots[@intCast(t.id_slot)];
+            if (t.is_prompt and slot.stats.isSet()) {
+                slot.stats.setPromptLast(t_now);
+            }
+        }
+    }
+
+    /// Ports `server_context_impl`'s `metrics_flush_idle` (server-context.cpp:4120
+    /// @b29c606e2): flush any queued prompt metrics if all slots are now idle.
+    fn metricsFlushIdle(self: *Impl) void {
+        if (self.n_prompt_queued == 0) {
+            return;
+        }
+
+        c.llama_synchronize(self.ctx_tgt);
+        self.metricsFlushPrompt();
+    }
+
+    /// Ports `server_context_impl`'s `metrics_on_prediction` (server-context.cpp:4129 @b29c606e2).
+    fn metricsOnPrediction(self: *Impl, slot: *const Slot) !void {
+        const t_us: u64 = @bitCast(slot.stats.tGenUs());
+        const n = slot.stats.n_gen;
+        const n_steps = slot.stats.nGenSteps();
+
+        self.metrics.predict.add(n, n_steps, t_us);
+        self.metrics.predict_bucket.add(n, n_steps, t_us);
+
+        self.metrics.n_draft_tokens += slot.stats.n_draft_tokens;
+        self.metrics.n_draft_accepted += slot.stats.n_draft_accepted;
+        self.metrics.n_draft_verif_steps += slot.stats.n_draft_verif_steps;
+
+        const dst = &self.metrics.n_accepted_per_pos;
+        const src = slot.n_accepted_per_pos.items;
+
+        if (dst.items.len < src.len) {
+            try dst.appendNTimes(gpa, 0, src.len - dst.items.len);
+        }
+        for (src, 0..) |v, i| {
+            dst.items[i] += v;
+        }
+    }
+};
+
+/// The function-local `static const int checkpoint_offsets[]` of
+/// `pre_decode` (server-context.cpp:2909 @b29c606e2): set from the first
+/// call's `n_ubatch`.
+var checkpoint_offsets: ?[2]i32 = null;
+
+// -----------------------------------------------------------------------------
+// server_context
+
+/// Ports `server_context` (server-context.h:84 @b29c606e2): the public face
+/// of `Impl`.
+pub const ServerContext = struct {
+    impl: *Impl,
+
+    /// Ports the constructor of `server_context` (server-context.cpp:4157 @b29c606e2).
+    pub fn init() !ServerContext {
+        const impl = try gpa.create(Impl);
+        errdefer gpa.destroy(impl);
+        try impl.init();
+        return .{ .impl = impl };
+    }
+
+    pub fn deinit(self: *ServerContext) void {
+        self.impl.deinit();
+        gpa.destroy(self.impl);
+    }
+
+    /// Ports `server_context`'s `load_model` (server-context.cpp:4160
+    /// @b29c606e2): load the model and initialize llama_context.
+    ///
+    /// Return: true on success.
+    pub fn loadModel(self: *ServerContext, params: *Params) !bool {
+        return self.impl.loadModel(params);
+    }
+
+    /// Ports `server_context`'s `start_loop` (server-context.cpp:4164
+    /// @b29c606e2): blocks the main thread until termination.
+    pub fn startLoop(self: *ServerContext) !void {
+        const params = &self.impl.params_base;
+        try self.impl.queue_tasks.startLoop(@as(i64, params.sleep_idle_seconds) * 1000);
+    }
+
+    /// Ports `server_context`'s `terminate` (server-context.cpp:4169
+    /// @b29c606e2): unblocks `startLoop`.
+    pub fn terminate(self: *ServerContext) void {
+        self.impl.queue_tasks.terminate();
+    }
+
+    /// Ports `server_context`'s `get_llama_context` (server-context.cpp:4173
+    /// @b29c606e2): null while sleeping.
+    pub fn getLlamaContext(self: *const ServerContext) ?*c.llama_context {
+        return self.impl.ctx_tgt;
+    }
+
+    /// Ports `server_context`'s `set_state_callback` (server-context.cpp:4249
+    /// @b29c606e2): set before `loadModel`.
+    pub fn setStateCallback(self: *ServerContext, callback: StateCallback) void {
+        self.impl.callback_state = callback;
+    }
+
+    /// Ports `server_context`'s `get_meta` (server-context.cpp:4181
+    /// @b29c606e2): read-only metadata, after `loadModel`.
+    ///
+    /// Return: strings owned by `a`, or by the context for its lifetime.
+    pub fn getMeta(self: *const ServerContext, a: Allocator) !Meta {
+        const impl = self.impl;
+        const bos_id = c.llama_vocab_bos(impl.vocab);
+        const eos_id = c.llama_vocab_eos(impl.vocab);
+        const bos_token_str: []const u8 = if (bos_id != token_null) try tc.common.tokenToPiece(a, impl.vocab, bos_id, true) else "";
+        const eos_token_str: []const u8 = if (eos_id != token_null) try tc.common.tokenToPiece(a, impl.vocab, eos_id, true) else "";
+
+        const ftype_name = std.mem.span(c.llama_ftype_name(c.llama_model_ftype(impl.model_tgt)));
+
+        const tmpls = &impl.tmpls.?;
+        return .{
+            .build_info = result_mod.build_info,
+            .model_name = impl.model_name,
+            .model_aliases = impl.model_aliases,
+            .model_tags = impl.model_tags,
+            .model_path = impl.params_base.model.path,
+            .has_mtmd = impl.mctx != null,
+            .has_inp_image = impl.chat_params.allow_image,
+            .has_inp_audio = impl.chat_params.allow_audio,
+            .has_inp_video = impl.chat_params.allow_video,
+            .json_ui_settings = &impl.json_ui_settings,
+            .slot_n_ctx = impl.nCtxSlot(),
+            .pooling_type = c.llama_pooling_type(impl.ctx_tgt),
+
+            .chat_params = &impl.chat_params,
+            .chat_template_caps = chat.templates.getCaps(tmpls),
+            .chat_template = chat.templates.source(tmpls, ""),
+            .chat_template_tool_use = chat.templates.source(tmpls, "tool_use"),
+
+            .bos_token_str = bos_token_str,
+            .eos_token_str = eos_token_str,
+            .fim_pre_token = c.llama_vocab_fim_pre(impl.vocab),
+            .fim_sub_token = c.llama_vocab_fim_suf(impl.vocab),
+            .fim_mid_token = c.llama_vocab_fim_mid(impl.vocab),
+            .fim_pad_token = c.llama_vocab_fim_pad(impl.vocab),
+            .fim_rep_token = c.llama_vocab_fim_rep(impl.vocab),
+            .fim_sep_token = c.llama_vocab_fim_sep(impl.vocab),
+
+            .logit_bias_eog = impl.params_base.sampling.logit_bias_eog.items,
+
+            .model_vocab_type = c.llama_vocab_type(impl.vocab),
+            .model_vocab_n_tokens = c.llama_vocab_n_tokens(impl.vocab),
+            .model_n_ctx_train = c.llama_model_n_ctx_train(impl.model_tgt),
+            .model_n_embd_inp = c.llama_model_n_embd(impl.model_tgt),
+            .model_n_params = c.llama_model_n_params(impl.model_tgt),
+            .model_size = c.llama_model_size(impl.model_tgt),
+            .model_ftype = ftype_name,
+        };
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Unit Tests
+
+test {
+    std.testing.refAllDecls(@This());
+}
+
+test "a partial stop word is found where its prefix ends the text" {
+    try std.testing.expectEqual(@as(?usize, 3), stringFindPartialStop("abcxy", "xyz"));
+    try std.testing.expectEqual(@as(?usize, null), stringFindPartialStop("abc", "xyz"));
+    try std.testing.expectEqual(@as(?usize, null), stringFindPartialStop("", "x"));
+    try std.testing.expectEqual(@as(?usize, 2), stringFindPartialStop("abx", "x"));
+}

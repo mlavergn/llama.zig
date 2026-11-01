@@ -350,9 +350,7 @@ fn eqlAny(v: []const u8, list: []const []const u8) bool {
 fn parseBoolValue(value: []const u8) error{Throw}!bool {
     if (isTruthy(value)) return true;
     if (isFalsey(value)) return false;
-    var buf: [512]u8 = undefined;
-    const msg = std.fmt.bufPrint(&buf, "invalid boolean value: {s}", .{value}) catch "invalid boolean value";
-    return throwStr(msg);
+    return throwStr("invalid boolean value");
 }
 
 // -----------------------------------------------------------------------------
@@ -391,6 +389,8 @@ pub const Context = struct {
 pub fn parserInit(params: *Params, ex: Example, print_usage: ?*const fn ([]const [:0]const u8) void) !Context {
     // per-example default params
     switch (ex) {
+        .completion => params.use_jinja = false, // disable jinja by default
+        .server => params.n_parallel = -1, // auto by default
         .tokenize => params.parse_special = true, // parse special tokens by default, like the old tokenize tool
         .mtmd => {
             params.use_jinja = false; // disable jinja by default
@@ -431,8 +431,7 @@ fn refuseSystemConfig(a: std.mem.Allocator) !void {
         }
     }
     for (paths.items) |p| {
-        var st: std.c.Stat = undefined;
-        if (std.c.stat(p.ptr, &st) == 0) {
+        if (@import("fs_stat.zig").stat(p.ptr, true) != null) {
             io.eprintf("error: config file %s found, but config files are not supported by this port\n", .{p.ptr});
             exitC(1);
         }
@@ -587,27 +586,46 @@ fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
     postprocessCpuParams(&params.cpuparams, null);
     postprocessCpuParams(&params.cpuparams_batch, &params.cpuparams);
 
+    postprocessCpuParams(&params.speculative.draft.cpuparams, &params.cpuparams);
+    postprocessCpuParams(&params.speculative.draft.cpuparams_batch, &params.cpuparams_batch);
+
     // default the mmproj device to the global device selection if not set explicitly with -mmdev
     if (params.mmproj_use_gpu and params.mmproj_device == null and params.devices.items.len != 0) {
         params.mmproj_device = params.devices.items[0];
         params.mmproj_use_gpu = params.mmproj_device != null;
     }
 
-    // handle model and download: the download paths are refused
-    if (params.model.url.len != 0 or params.model.hf_repo.len != 0 or params.model.docker_repo.len != 0) {
-        setWhat("error: model downloads (-hf, -mu, -dr) are not supported by this port; pass a local file with -m\n", .{});
-        return error.InvalidArgument;
-    }
+    // `prompt_cache_all` and `interactive` are `llama-completion`'s, which no
+    // ported tool is, so the C's check of the two is not here.
 
-    // model is required (except for server)
-    const can_skip_model = params.usage or params.completion;
-    if (!can_skip_model and params.model.path.len == 0) {
-        setWhat("error: --model is required\n", .{});
-        return error.InvalidArgument;
+    const skip_model_download =
+        // server will call common_params_handle_models() later, so we skip it here
+        ctx.ex == .server or
+        // download calls common_params_handle_models() itself and prints the paths
+        ctx.ex == .download or
+        // export_graph_ops loads only metadata
+        ctx.ex == .export_graph_ops;
+
+    if (!skip_model_download) {
+        // handle model and download: the download paths are refused
+        if (params.model.url.len != 0 or params.model.hf_repo.len != 0 or params.model.docker_repo.len != 0) {
+            setWhat("error: model downloads (-hf, -mu, -dr) are not supported by this port; pass a local file with -m\n", .{});
+            return error.InvalidArgument;
+        }
+
+        // model is required (except for server)
+        const can_skip_model = params.usage or params.completion or params.server_base.len != 0;
+        if (!can_skip_model and params.model.path.len == 0) {
+            setWhat("error: --model is required\n", .{});
+            return error.InvalidArgument;
+        }
     }
 
     if (params.escape) {
         params.prompt = try processEscapes(a, params.prompt);
+        params.input_prefix = try processEscapes(a, params.input_prefix);
+        params.input_suffix = try processEscapes(a, params.input_suffix);
+        for (params.antiprompt.items) |*s| s.* = try processEscapes(a, s.*);
         for (params.sampling.dry_sequence_breakers.items) |*s| s.* = try processEscapes(a, s.*);
     }
 
@@ -615,10 +633,20 @@ fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
         try params.kv_overrides.append(a, std.mem.zeroes(c.llama_model_kv_override));
     }
 
+    const mcp_enabled = params.mcp_servers_config.len != 0 or params.mcp_servers_json.len != 0;
+    if ((params.server_tools.items.len != 0 or mcp_enabled) and !params.cors_origins_explicit) {
+        log.wrn("server tools or MCP servers are enabled, using localhost as default CORS origin (change via --cors-origins)\n", .{});
+        params.cors_origins = "localhost";
+    }
+
     // pad tensor_buft_overrides for llama_params_fit:
     const ntbo = c.llama_max_tensor_buft_overrides();
     while (params.tensor_buft_overrides.items.len < ntbo) {
         try params.tensor_buft_overrides.append(a, .{ .pattern = null, .buft = null });
+    }
+
+    if (params.speculative.draft.tensor_buft_overrides.items.len != 0) {
+        try params.speculative.draft.tensor_buft_overrides.append(a, .{ .pattern = null, .buft = null });
     }
 
     if (params.chat_template.len != 0 and !try verifyChatTemplate(a, params.chat_template, params.use_jinja)) {
@@ -628,18 +656,23 @@ fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
         return error.Other;
     }
 
-    // if the preserve_reasoning kwarg was not specified explicitly, the C
-    // enables it by default -- in `default_template_kwargs`, which `Params`
-    // does not carry: no option these tools take sets it, and the legacy
-    // template path, the only one `chat.zig` ports, never reads it.
+    // if the preserve_reasoning kwarg was not specified explicitly, enable it by default
+    if (!params.default_template_kwargs.contains("preserve_reasoning")) {
+        try params.default_template_kwargs.put(a, "preserve_reasoning", "true");
+    }
 }
 
-/// Ports `common_chat_verify_template` (chat.cpp:638 @b29c606e2), its
-/// legacy arm: whether libllama recognises the template's family. The Jinja
-/// arm, which parses and renders the source, is not ported (see
-/// `chat.zig`); there every template passes here.
+/// The Jinja arm of `common_chat_verify_template`, for a tool that links
+/// `cli/common_chat/` (`llama-server` sets it to `templates.verifyTemplate`
+/// before parsing); null passes every template, as the tools without a
+/// Jinja engine have done.
+pub var verify_jinja_template: ?*const fn (a: std.mem.Allocator, tmpl: []const u8) anyerror!bool = null;
+
+/// Ports `common_chat_verify_template` (chat.cpp:638 @b29c606e2): whether
+/// libllama recognises the template's family, or, with Jinja, whatever
+/// `verify_jinja_template` answers.
 fn verifyChatTemplate(a: std.mem.Allocator, tmpl: []const u8, use_jinja: bool) !bool {
-    if (use_jinja) return true;
+    if (use_jinja) return if (verify_jinja_template) |f| f(a, tmpl) else true;
     const chat = [_]c.llama_chat_message{.{ .role = "user", .content = "test" }};
     const t = try a.dupeSentinel(u8, tmpl, 0);
     const res = c.llama_chat_apply_template(t.ptr, &chat, 1, true, null, 0);

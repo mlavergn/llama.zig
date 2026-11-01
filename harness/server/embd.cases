@@ -1,0 +1,55 @@
+# Embeddings and reranking (Stage 10 step 3c): scripts/server-diff embd.
+# Qwen3-0.6B under each pooling, then as a reranker.
+!server -m $QWEN3 -c 2048 -np 2 --no-jinja --embedding --pooling mean -lv 4
+!fulllog
+
+POST /embedding {"content": "hello world"}
+POST /embeddings {"content": ["hello", "world"]}
+POST /embeddings {"content": "hello", "embd_normalize": -1}
+POST /embeddings {"content": "hello", "embd_normalize": 0}
+POST /embeddings {"content": "hello", "embd_normalize": 1}
+POST /embeddings {"content": "hello", "embd_normalize": 3}
+POST /embeddings {"content": "hello", "embd_normalize": "x"}
+POST /embeddings {"input": "hello"}
+POST /v1/embeddings {"input": "hello", "model": "m"}
+POST /v1/embeddings {"input": ["hello", [9707, 1879]], "model": "m"}
+POST /v1/embeddings {"input": "hello", "encoding_format": "base64"}
+POST /v1/embeddings {"input": "hello", "encoding_format": "float"}
+POST /v1/embeddings {"input": "hello", "encoding_format": "bogus"}
+POST /v1/embeddings {"content": "hello"}
+POST /v1/embeddings {"nothing": "here"}
+POST /v1/embeddings {"input": ""}
+POST /v1/embeddings {"input": []}
+# (a completion on an embeddings server samples logits it never computed:
+# the reference itself answers differently run to run, so it is not a case)
+POST /rerank {"query": "a", "documents": ["b"]}
+GET /slots
+GET /props
+
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --embedding --pooling none -lv 4
+!fulllog
+POST /embedding {"content": "hi there"}
+POST /v1/embeddings {"input": "hi there"}
+POST /embeddings {"content": "hi there", "embd_normalize": 2}
+
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --embedding --pooling last -b 4096 -ub 512 -lv 4
+!fulllog
+POST /embeddings {"content": "the last token decides"}
+POST /v1/embeddings {"input": ["one", "two", "three"]}
+
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --embedding --pooling cls -ub 16 -b 16 -lv 4
+!fulllog
+POST /embeddings {"content": "a prompt that is longer than the sixteen tokens of the physical batch, so it is refused because it cannot split"}
+POST /embeddings {"content": "short"}
+
+!server -m $QWEN3 -c 2048 -np 2 --no-jinja --rerank -lv 4
+!fulllog
+POST /rerank {"query": "What is a panda?", "documents": ["hi", "The giant panda is a bear native to China.", "Pandas eat bamboo."]}
+POST /rerank {"query": "What is a panda?", "documents": ["hi", "The giant panda is a bear native to China."], "top_n": 1}
+POST /reranking {"query": "What is a panda?", "texts": ["hi", "The giant panda is a bear."], "return_text": true}
+POST /v1/rerank {"query": "q", "documents": []}
+POST /v1/reranking {"query": 3, "documents": ["a"]}
+POST /rerank {"documents": ["a"]}
+POST /rerank {"query": "q", "documents": "a"}
+POST /rerank {"query": "q", "documents": [1, 2]}
+# (an embedding from the rank head is the reference's own run-to-run noise)

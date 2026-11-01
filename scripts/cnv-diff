@@ -11,12 +11,16 @@
 # positions, which reads as a template bug in the reply and is not one.
 #
 # The reference is harness/conversation_ref.cpp: the same loop written from
-# SPEC.md over upstream's Jinja engine and `llama.cpp.zmake`'s libllama. Both
-# sides read the same stdin; stdout (the replies), stderr (the banner, the
-# `> ` markers, the slash-command answers, the cut-off notes, the error
-# sentence) and the exit code must all be identical. Greedy on both: `--temp
-# 0` through upstream's default chain on ours, `llama_sampler_init_greedy`
-# on the reference's.
+# SPEC.md over upstream's `llama-common` (`libllama-common-ref.a`, `zig build
+# tools-ref`) -- `common_chat_templates_apply` renders, `common_sampler`
+# samples with the reasoning budget, `common_chat_parse` and `compute_diffs`
+# read each reply back, and upstream's own `ui::assistant_turn` shows it --
+# and `llama.cpp.zmake`'s libllama. Both sides read the same stdin; stdout
+# (the replies, reasoning bracketed by `[Start thinking]`/`[End thinking]`),
+# stderr (the banner, the `> ` markers, the slash-command answers, the
+# cut-off notes, the error sentence) and the exit code must all be
+# identical. Greedy on both: `--temp 0` through upstream's default chain on
+# ours, `common_sampler` at temperature 0 on the reference's.
 #
 # Two models, because the memory decides which path runs: Qwen3.5 is hybrid,
 # so its cache refuses `seq_rm` and every turn that cannot extend the decoded
@@ -33,8 +37,8 @@
 #
 # Usage: scripts/cnv-diff [scenario name substring]
 #   CNV_DIFF_OUT=<dir> keeps both sides' transcripts.
-#   Requires: zig build cli --release=fast
-#             make -C llama.cpp.zmake lib --release=fast   (the reference)
+#   CNV_DIFF_NO_TOOLS_REF=1 does not rebuild libllama-common-ref first.
+#   Requires: make -C llama.cpp.zmake lib --release=fast   (the reference)
 #             make qwen35 qwen3                             (the two models)
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -44,11 +48,30 @@ FILTER="${1:-}"
 CLI=zig-out/bin/llama-cli
 HYBRID="${CNV_HYBRID_MODEL:-Qwen3.5-2B-Q4_K_M.gguf}"
 PLAIN="${CNV_PLAIN_MODEL:-Qwen3-0.6B-Q8_0.gguf}"
-REF_LIBS=(llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
+REF_LIBS=(zig-out/lib/libllama-common-ref.a llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
+REF_HINT="make -C llama.cpp.zmake lib"
+# Off macOS llama.cpp.zmake's libggml is CPU-only, and our CLI decodes on
+# whatever GPU it was built for (CUDA on the GB10): the two sides would part
+# on the last bits of a long reply -- measured, 25 of 36 scenarios -- for
+# want of the same device, not of the same code. There the reference is
+# upstream's libllama and common over the port's libggml, as parity-cli's
+# Linux arm links it: what is compared is the CLI and libllama, over one
+# ggml (the CUDA host layer has cuda-parity-cli).
+if [ "$(uname -s)" != Darwin ]; then
+    REF_LIBS=(zig-out/lib/libllama-common-ref.a zig-out/lib/libllama-ref.a zig-out/lib/libggml.a)
+    REF_HINT="zig build reference tools-ref --release=fast"
+fi
 
-[ -x "$CLI" ] || { echo "missing $CLI -- run 'zig build cli --release=fast'" >&2; exit 2; }
+# Built here, not trusted from disk: the CPU path's bits move with the
+# optimization level, and a Debug or ReleaseSafe llama-cli left behind by
+# another run fails the --fit scenarios (gpu layers 0) for no porting reason.
+zig build cli --release=fast || { echo "FAIL: zig build cli --release=fast" >&2; exit 2; }
+if [ -z "${CNV_DIFF_NO_TOOLS_REF:-}" ]; then
+    zig build reference tools-ref --release=fast || { echo "FAIL: zig build reference tools-ref --release=fast" >&2; exit 2; }
+fi
+[ -x "$CLI" ] || { echo "missing $CLI" >&2; exit 2; }
 for f in "${REF_LIBS[@]}"; do
-    [ -f "$f" ] || { echo "missing $f -- run 'make -C llama.cpp.zmake lib'" >&2; exit 2; }
+    [ -f "$f" ] || { echo "missing $f -- run '$REF_HINT'" >&2; exit 2; }
 done
 for f in "$HYBRID" "$PLAIN"; do
     [ -f "$f" ] || { echo "missing $f -- run 'make qwen35 qwen3'" >&2; exit 2; }
@@ -58,14 +81,13 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# The reference: upstream's engine as scripts/jinja-diff compiles it, less
-# `src`, whose unicode.h would shadow common/unicode.h.
+# The reference: harness/conversation_ref.cpp over upstream's llama-common,
+# with `tools/cli` for the `ui` it includes; `src` stays out, whose unicode.h
+# would shadow common/unicode.h.
 CXX=(zig c++ -std=c++17 -O2 -w
-     -I llama.cpp -I llama.cpp/include -I llama.cpp/common
+     -I llama.cpp -I llama.cpp/include -I llama.cpp/common -I llama.cpp/tools/cli
      -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/vendor)
-SRCS=(llama.cpp/common/jinja/{lexer,parser,runtime,value,string,caps}.cpp
-      llama.cpp/common/json.cpp llama.cpp/common/unicode.cpp
-      llama.cpp/common/fit.cpp llama.cpp/common/log.cpp harness/conversation_ref.cpp)
+SRCS=(harness/conversation_ref.cpp)
 OBJS=()
 for src in "${SRCS[@]}"; do
     o="$tmp/$(basename "$(dirname "$src")")_$(basename "$src" .cpp).o"
@@ -87,6 +109,8 @@ reuse_seen=0
 
 # scenario <name> <model> <n_ctx> <n_predict> <system> <seed> [template file] <<< stdin
 #   An empty n_ctx passes no -c. FIT_MIB=<n> adds -fitt <n>, FIT=off --fit off.
+#   FLAGS='<flag>|<value>|...' adds llama-cli chat flags, `|`-separated, to
+#   both sides: ours takes them as given, the reference after `--`.
 scenario() {
     local name="$1" model="$2" nctx="$3" npred="$4" sys="$5" seed="$6" tmpl="${7:-}"
     [ -n "$FILTER" ] && [[ "$name" != *"$FILTER"* ]] && { cat >/dev/null; return; }
@@ -94,6 +118,8 @@ scenario() {
     mkdir -p "$d"
     cat > "$d/in"
 
+    local flags=()
+    [ -n "${FLAGS:-}" ] && IFS='|' read -ra flags <<< "$FLAGS"
     local args=(-m "$model" -cnv --temp 0 -n "$npred" --no-show-timings)
     [ -n "$nctx" ] && args+=(-c "$nctx")
     [ -n "${FIT_MIB:-}" ] && args+=(-fitt "$FIT_MIB")
@@ -101,14 +127,16 @@ scenario() {
     [ -n "$sys" ] && args+=(-sys "$sys")
     [ -n "$seed" ] && args+=(-p "$seed")
     [ -n "$tmpl" ] && args+=(--chat-template-file "$tmpl")
+    args+=(${flags[@]+"${flags[@]}"})
     local ref_args=("$model" "$nctx" "$npred" "$sys" "$seed")
+    local ref_tail=("${tmpl:--}" -- ${flags[@]+"${flags[@]}"})
     LLAMAZIG_CNV_TRACE=1 "$CLI" "${args[@]}" < "$d/in" > "$d/port.out" 2> "$d/port.err"
     echo "rc=$?" >> "$d/port.err"
     LLAMAZIG_CNV_TRACE=1 CNV_REF_FIT="${FIT:-}" CNV_REF_FIT_TARGET_MIB="${FIT_MIB:-1024}" \
-        "$tmp/ref" "${ref_args[@]}" reuse $tmpl < "$d/in" > "$d/ref.out" 2> "$d/ref.err"
+        "$tmp/ref" "${ref_args[@]}" reuse "${ref_tail[@]}" < "$d/in" > "$d/ref.out" 2> "$d/ref.err"
     echo "rc=$?" >> "$d/ref.err"
     CNV_REF_FIT="${FIT:-}" CNV_REF_FIT_TARGET_MIB="${FIT_MIB:-1024}" \
-        "$tmp/ref" "${ref_args[@]}" fresh $tmpl < "$d/in" > "$d/fresh.out" 2> "$d/fresh.err"
+        "$tmp/ref" "${ref_args[@]}" fresh "${ref_tail[@]}" < "$d/in" > "$d/fresh.out" 2> "$d/fresh.err"
 
     # Turns that kept a prefix, and the tokens they did not decode again.
     local turns kept saved
@@ -197,6 +225,60 @@ scenario "plain-verbatim-template" "$PLAIN" 4096 64 "" "" "$tmp/chatml.jinja" <<
 What is the capital of France? Answer in one word.
 And of Italy?
 TURNS
+
+# Reasoning (SPEC.md 5.3, "Replies"). Both models think by default, so
+# every scenario above already reads its replies through the template's
+# parser and shows the thinking bracketed; these turn each knob. The replies
+# are long enough to close the thinking, so the answer shows too.
+REASON_TURNS='What is the capital of France? Answer in one word.
+And of Italy?'
+for model in "$PLAIN" "$HYBRID"; do
+    tag=hybrid
+    [ "$model" = "$PLAIN" ] && tag=plain
+    # The default: deepseek, thinking on, earlier turns as the template keeps them.
+    scenario "$tag-reason-default" "$model" 4096 400 "" "" <<< "$REASON_TURNS"
+    FLAGS='--reasoning|off' scenario "$tag-reason-off" "$model" 4096 200 "" "" <<< "$REASON_TURNS"
+    FLAGS='--reasoning-format|none' scenario "$tag-reason-format-none" "$model" 4096 400 "" "" <<< "$REASON_TURNS"
+    # A budget, spent, with the message written before the closing tag.
+    FLAGS='--reasoning-budget|24|--reasoning-budget-message|Time is up, I answer now.' \
+        scenario "$tag-reason-budget" "$model" 4096 200 "" "" <<< "$REASON_TURNS"
+    FLAGS='--skip-chat-parsing' scenario "$tag-skip-chat-parsing" "$model" 4096 400 "" "" <<< "$REASON_TURNS"
+done
+FLAGS='--reasoning-format|deepseek-legacy' scenario "plain-reason-format-legacy" "$PLAIN" 4096 400 "" "" <<< "$REASON_TURNS"
+FLAGS='--reasoning-format|auto' scenario "plain-reason-format-auto" "$PLAIN" 4096 400 "" "" <<< "$REASON_TURNS"
+FLAGS='-rea|on' scenario "plain-reason-on" "$PLAIN" 4096 400 "" "" <<< "$REASON_TURNS"
+# Budget 0 closes the block as soon as it opens.
+FLAGS='--reasoning-budget|0' scenario "plain-reason-budget-zero" "$PLAIN" 4096 200 "" "" <<< "$REASON_TURNS"
+# The kwarg upstream deprecates in favour of --reasoning off, and a later
+# --reasoning on that overrides it.
+FLAGS='--chat-template-kwargs|{"enable_thinking": false}' scenario "plain-reason-kwargs" "$PLAIN" 4096 200 "" "" <<< "$REASON_TURNS"
+FLAGS='--chat-template-kwargs|{"enable_thinking": false}|--reasoning|on' scenario "plain-reason-kwargs-then-on" "$PLAIN" 4096 400 "" "" <<< "$REASON_TURNS"
+# Grey reasoning, upstream's DISPLAY_TYPE_REASONING, written into a file.
+FLAGS='--color|on' scenario "plain-reason-color" "$PLAIN" 4096 400 "" "" <<< "$REASON_TURNS"
+
+# Earlier turns' reasoning re-sent, or not, as a template decides: this one
+# writes an assistant turn's reasoning back unless `preserve_thinking` is
+# false, which `--no-reasoning-preserve` binds (`--reasoning-preserve`, the
+# default, binds it true). Qwen3's own template drops it either way. The
+# analyser's probes bind neither, so it finds the `<think>` markers.
+cat > "$tmp/think.jinja" <<'TMPL'
+{%- for message in messages -%}
+{%- if message.role == 'assistant' -%}
+{{- '<|im_start|>assistant\n' -}}
+{%- if message.reasoning_content and (preserve_thinking is not defined or preserve_thinking) -%}{{- '<think>\n' + message.reasoning_content + '\n</think>\n\n' -}}{%- endif -%}
+{{- message.content + '<|im_end|>\n' -}}
+{%- else -%}
+{{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' -}}
+{%- endif -%}
+{%- endfor -%}
+{%- if add_generation_prompt -%}{{- '<|im_start|>assistant\n' -}}{%- endif -%}
+TMPL
+scenario "plain-resend-reasoning" "$PLAIN" 4096 400 "" "" "$tmp/think.jinja" <<< "$REASON_TURNS"
+FLAGS='--no-reasoning-preserve' scenario "plain-resend-reasoning-off" "$PLAIN" 4096 400 "" "" "$tmp/think.jinja" <<< "$REASON_TURNS"
+# Cut inside the thinking, which this template then writes back: the next
+# turn's prefix runs into the reply, so a cache that counted the cut's last,
+# never-decoded token would keep one token too many.
+scenario "plain-resend-cut" "$PLAIN" 4096 24 "" "" "$tmp/think.jinja" <<< "$REASON_TURNS"
 
 # --fit, end to end: a margin far beyond any machine's memory, so the outcome
 # does not depend on the machine -- the context shrinks to -fitc's 4096 and,

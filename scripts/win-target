@@ -17,6 +17,10 @@
 #   GATE_TC      flags for a `zig translate-c` of llama.h
 #   GATE_LIBDIR  the directory holding the port's libggml/libllama
 #   GATE_GGML    the port's ggml archive
+#   GATE_LLAMA_REF, GATE_COMMON_REF
+#                upstream's libllama and common/ beside it (libllama-ref,
+#                libllama-common-ref), named as the target names archives
+#   GATE_BUILD   flags for a `zig build` of those libraries for the target
 #   GATE_SUFFIX  the executable suffix
 #   PLATFORM_LIBS  the system libraries (empty for Windows: MinGW's come with -lc)
 # and defines `gate_run <exe> <package name> [args...]`.
@@ -35,6 +39,9 @@ if [ -n "${WIN_X86:-}" ]; then
     GATE_TC=(-target x86_64-windows-gnu)
     GATE_LIBDIR="$ROOT/zig-out/win-host/$X86_CPU/port/lib"
     GATE_GGML="$GATE_LIBDIR/ggml.lib"
+    GATE_LLAMA_REF="$GATE_LIBDIR/llama-ref.lib"
+    GATE_COMMON_REF="$GATE_LIBDIR/llama-common-ref.lib"
+    GATE_BUILD=(-Dtarget=x86_64-windows-gnu -Dcpu="$X86_CPU" -p "$ROOT/zig-out/win-host/$X86_CPU/port")
     GATE_SUFFIX=.exe
     PLATFORM_LIBS=()
     # The program is kept under zig-out/win-host/, with the raw stream
@@ -56,6 +63,9 @@ else
     GATE_TC=(-lc)
     GATE_LIBDIR="$ROOT/zig-out/lib"
     GATE_GGML="$GATE_LIBDIR/libggml.a"
+    GATE_LLAMA_REF="$GATE_LIBDIR/libllama-ref.a"
+    GATE_COMMON_REF="$GATE_LIBDIR/libllama-common-ref.a"
+    GATE_BUILD=()
     GATE_SUFFIX=
     . "$ROOT/scripts/platform-libs"
     platform_libs exe

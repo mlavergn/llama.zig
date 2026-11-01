@@ -1,0 +1,44 @@
+# The OpenAI Responses API (Stage 10 step 4): scripts/server-diff responses.
+# /v1/responses and /responses converted into chat (server-chat.cpp), every
+# input item kind, tools and function-call round trips, reasoning, the
+# streamed event sequence, and its token count. Qwen3-0.6B, greedy.
+# `resp_`, `msg_`, `rs_`, `fc_` and `call_` ids are masked by default; a
+# tool call's own id is 32 random characters.
+!mask "id": "[A-Za-z0-9]{32}"
+!mask-key created_at
+!mask-key completed_at
+!server -m $QWEN3 -c 4096 -np 1 -lv 4
+!fulllog
+
+POST /v1/responses {"input": "Say hi.", "max_output_tokens": 48, "temperature": 0}
+POST /responses {"input": "Say hi.", "instructions": "Answer in French.", "max_output_tokens": 48, "temperature": 0}
+POST /v1/responses {"input": "What is 2+2?", "max_output_tokens": 64, "temperature": 0, "stream": true}
+POST /v1/responses {"input": "Say hi.", "reasoning": {"effort": "none"}, "max_output_tokens": 24, "temperature": 0}
+POST /v1/responses {"input": "Say hi.", "reasoning": {"effort": "none"}, "max_output_tokens": 24, "temperature": 0, "stream": true}
+POST /v1/responses {"input": [{"role": "user", "content": "Hello"}, {"role": "assistant", "type": "message", "content": [{"type": "output_text", "text": "Hi! How can I help?"}]}, {"role": "user", "content": [{"type": "input_text", "text": "Count to three."}]}], "max_output_tokens": 48, "temperature": 0}
+POST /v1/responses {"input": [{"role": "developer", "content": "Be terse."}, {"role": "user", "content": "Name a fruit."}], "max_output_tokens": 48, "temperature": 0, "reasoning": {"effort": "none"}}
+
+# tools
+POST /v1/responses {"input": "What is the weather in Paris?", "tools": [{"type": "function", "name": "get_weather", "description": "Get the weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}], "max_output_tokens": 160, "temperature": 0}
+POST /v1/responses {"input": "What is the weather in Paris?", "tools": [{"type": "function", "name": "get_weather", "description": "Get the weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}], "max_output_tokens": 160, "temperature": 0, "stream": true}
+POST /v1/responses {"input": "What is the weather in Paris?", "tools": [{"type": "function", "name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}, {"type": "web_search"}], "tool_choice": "required", "reasoning": {"effort": "none"}, "max_output_tokens": 60, "temperature": 0, "stream": true}
+POST /v1/responses {"input": [{"role": "user", "content": "What is the weather in Paris?"}, {"type": "function_call", "call_id": "call_1", "name": "get_weather", "arguments": "{\"city\": \"Paris\"}"}, {"type": "function_call_output", "call_id": "call_1", "output": "Sunny, 25C"}], "tools": [{"type": "function", "name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}], "reasoning": {"effort": "none"}, "max_output_tokens": 60, "temperature": 0}
+POST /v1/responses {"input": [{"role": "user", "content": "Weather?"}, {"role": "assistant", "type": "message", "content": "Let me check."}, {"type": "function_call", "call_id": "call_2", "name": "get_weather", "arguments": "{}"}, {"type": "function_call_output", "call_id": "call_2", "output": [{"type": "input_text", "text": "Rain"}]}], "reasoning": {"effort": "none"}, "max_output_tokens": 40, "temperature": 0}
+POST /v1/responses {"input": [{"role": "user", "content": "Hi"}, {"type": "reasoning", "summary": [], "content": [{"type": "reasoning_text", "text": "The user greets."}]}, {"role": "assistant", "type": "message", "content": [{"type": "output_text", "text": "Hello!"}]}, {"role": "user", "content": "Again?"}], "max_output_tokens": 48, "temperature": 0}
+
+# refusals and conversion errors
+POST /v1/responses {}
+POST /v1/responses {"input": "x", "previous_response_id": "resp_123"}
+POST /v1/responses {"input": 5}
+POST /v1/responses {"input": [{"type": "bogus"}]}
+POST /v1/responses {"input": [{"role": "user", "content": [{"type": "input_file"}]}]}
+POST /v1/responses {"input": [{"role": "user", "content": [{"type": "input_image"}]}]}
+POST /v1/responses {"input": [{"role": "user", "content": [{"type": "input_image", "image_url": "data:image/png;base64,AAAA"}]}]}
+POST /v1/responses {"input": [{"type": "function_call_output", "call_id": "c", "output": [{"type": "text"}]}]}
+POST /v1/responses {"input": "x", "tools": {"a": 1}}
+POST /v1/responses {not json
+
+# token counting
+POST /v1/responses/input_tokens {"input": "How many tokens is this?"}
+POST /responses/input_tokens {"input": [{"role": "user", "content": "Hi"}], "instructions": "Be brief.", "tools": [{"type": "function", "name": "f"}]}
+POST /v1/responses/input_tokens {"input": 5}

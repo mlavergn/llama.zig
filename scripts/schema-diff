@@ -1,0 +1,104 @@
+#!/bin/bash
+# Compare cli/json/schema.zig and cli/json/schema_to_grammar.zig with
+# upstream's json-schema.cpp and json-schema-to-grammar.cpp.
+#
+# The C++ -- json-schema.cpp, json-schema-to-grammar.cpp, json.cpp over the
+# vendored nlohmann, trie.cpp, unicode.cpp and common.cpp for the string
+# helpers -- is compiled unmodified and linked beside harness/schema_ref.cpp,
+# which runs a bytecode of conversions; harness/schema_diff.zig runs the same
+# bytecode through the Zig port and requires every record -- each grammar,
+# the class and what() of every exception, the warning line written to
+# stderr, the schema tree read back node by node -- to be identical. The
+# cases are upstream's own (tests/test-json-schema-to-grammar.cpp, included
+# and driven, not copied), those mutated, and random schemas, integer
+# bounds, patterns, literals and build_grammar scripts. See
+# harness/schema_diff.zig.
+#
+# Usage: scripts/schema-diff [case label substring]
+#   SCHEMA_DIFF_SEED=n, SCHEMA_DIFF_SCALE=n, SCHEMA_DIFF_STATS=1 as the
+#   harness takes them
+#   Requires: zig build reference --release=fast (libllama-ref.a, which
+#   common.cpp reaches, and libggml.a); off macOS also tools-ref
+#   (libllama-common-ref.a)
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+. scripts/win-target
+# the system libraries again, spelled for a `zig c++` link
+PLATFORM_LIBS_EXE=(${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"})
+PLATFORM_LIBS_CC=()
+if [ -z "${WIN_X86:-}" ]; then
+    platform_libs cc
+    PLATFORM_LIBS_CC=(${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"})
+    PLATFORM_LIBS=(${PLATFORM_LIBS_EXE[@]+"${PLATFORM_LIBS_EXE[@]}"})
+fi
+
+for lib in "$GATE_LLAMA_REF" "$GATE_GGML"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+# Off Darwin the linker resolves every reference in every object it is
+# given -- common.cpp's unused functions reach log.cpp, fit.cpp, sampling.cpp
+# and build-info -- so the rest of common/ comes from upstream's own
+# libllama-common (zig build tools-ref, for the target).
+COMMON_REST=()
+if [ -n "${WIN_X86:-}" ] || [ "$(uname -s)" != Darwin ]; then
+    [ -f "$GATE_COMMON_REF" ] || { echo "missing $GATE_COMMON_REF -- run 'zig build tools-ref --release=fast ${GATE_BUILD[*]}'" >&2; exit 2; }
+    COMMON_REST=("$GATE_COMMON_REF")
+fi
+
+CXX=(zig c++ "${GATE_CC[@]}" -std=c++17 -O2 -DNDEBUG -w
+     -I llama.cpp -I llama.cpp/include -I llama.cpp/common
+     -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/vendor)
+SRCS=(llama.cpp/common/json-schema.cpp llama.cpp/common/json-schema-to-grammar.cpp
+      llama.cpp/common/json.cpp llama.cpp/common/trie.cpp llama.cpp/common/unicode.cpp
+      llama.cpp/common/common.cpp harness/schema_ref.cpp)
+OBJS=()
+for src in "${SRCS[@]}"; do
+    o="$tmp/$(basename "$src" .cpp).o"
+    "${CXX[@]}" -c "$src" -o "$o" 2>"$o.err" &
+    OBJS+=("$o")
+done
+wait
+for o in "${OBJS[@]}"; do
+    [ -f "$o" ] || { echo "FAIL: cannot compile the reference ($o)" >&2; head -10 "$o.err" >&2; exit 1; }
+done
+
+# Upstream's own test, as upstream builds it, must pass on the reference
+# before the reference is used to judge anything.
+"${CXX[@]}" -o "$tmp/test-json-schema-to-grammar$GATE_SUFFIX" llama.cpp/tests/test-json-schema-to-grammar.cpp \
+    "${OBJS[@]:0:6}" ${COMMON_REST[@]+"${COMMON_REST[@]}"} "$GATE_LLAMA_REF" "$GATE_GGML" ${PLATFORM_LIBS_CC[@]+"${PLATFORM_LIBS_CC[@]}"} 2>"$tmp/uerr" \
+    || { echo "FAIL: cannot build upstream's test-json-schema-to-grammar" >&2; head -10 "$tmp/uerr" >&2; exit 1; }
+if [ -z "${WIN_X86:-}" ]; then
+    "$tmp/test-json-schema-to-grammar" >"$tmp/ulog" 2>&1 \
+        || { echo "FAIL: upstream's test-json-schema-to-grammar fails on the reference" >&2; tail -20 "$tmp/ulog" >&2; exit 1; }
+    echo "upstream's test-json-schema-to-grammar: passes on the reference"
+fi
+
+# regex.zig, which the port's converter runs its std::regexes through, is
+# reached through libllama's harness root.
+zig translate-c "${GATE_TC[@]}" -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+# --gc-sections: common.cpp is linked for its string helpers, and the rest of
+# it reaches common/log.cpp, sampling.cpp and others nothing here calls.
+zig build-exe "${GATE_EXE[@]}" --gc-sections -femit-bin="$tmp/schema_diff$GATE_SUFFIX" -O"${SCHEMA_DIFF_O:-ReleaseSafe}" -lc \
+    --dep json -Mroot=harness/schema_diff.zig \
+    --dep llama -Mjson=cli/json/module.zig \
+    --dep llama_c -Mllama=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
+    "${OBJS[@]}" ${COMMON_REST[@]+"${COMMON_REST[@]}"} "$GATE_LLAMA_REF" "$GATE_GGML" -lc++ \
+    ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+# SCHEMA_DIFF_KEEP=<path> keeps the harness binary.
+[ -n "${SCHEMA_DIFF_KEEP:-}" ] && cp "$tmp/schema_diff$GATE_SUFFIX" "$SCHEMA_DIFF_KEEP"
+
+start=$SECONDS
+gate_run "$tmp/schema_diff$GATE_SUFFIX" llamazig-schema-diff "$@"
+rc=$?
+echo "schema-diff: $((SECONDS - start)) s"
+exit $rc

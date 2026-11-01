@@ -1,0 +1,43 @@
+# API keys, the API prefix and the startup warnings they change (Stage 10
+# step 3c): scripts/server-diff auth.
+!server -m $QWEN3 -c 1024 -np 1 --no-jinja --api-key k1,k2 -lv 4
+!fulllog
+GET /health
+GET /props
+POST /completion {"prompt": "Hi", "n_predict": 2, "temperature": 0}
+!header Authorization: Bearer k2
+GET /props
+POST /completion {"prompt": "Hi", "n_predict": 2, "temperature": 0}
+!noheaders
+!header X-Api-Key: k1
+GET /slots
+!noheaders
+!header Authorization: Bearer nope
+GET /models
+
+!noheaders
+!server -m $QWEN3 -c 1024 -np 1 --no-jinja --api-prefix /api --cors-origins localhost -lv 4
+!fulllog
+GET /health
+GET /api/health
+GET /api/props
+POST /api/tokenize {"content": "Hi"}
+POST /tokenize {"content": "Hi"}
+!header Origin: http://localhost:3000
+GET /api/models
+!noheaders
+!header Origin: http://example.com
+GET /api/models
+
+# a key file: its comment line is no key (tools-diff server's one escape,
+# which no parse-time case can see)
+!noheaders
+!server -m $QWEN3 -c 1024 -np 1 --no-jinja --api-key-file $DATA/keys.txt -lv 4
+!fulllog
+GET /props
+!header Authorization: Bearer #k3
+GET /props
+!noheaders
+!header Authorization: Bearer k4
+GET /props
+!noheaders

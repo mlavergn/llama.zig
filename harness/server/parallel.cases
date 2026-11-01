@@ -1,0 +1,51 @@
+# Several slots at once (Stage 10 step 3c): scripts/server-diff parallel.
+# Requests in a !parallel block arrive together and are batched together;
+# each names its slot, so which slot serves it does not depend on arrival
+# order. Greedy, so the bodies are exact. The task ids are not: concurrent
+# handlers draw them in the order they happen to run.
+!mask-key id_task
+!server -m $QWEN3 -c 4096 -np 4 --no-jinja
+
+!parallel
+POST /completion {"prompt": "The capital of France is", "n_predict": 12, "temperature": 0, "id_slot": 0}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 12, "temperature": 0, "id_slot": 1}
+POST /completion {"prompt": "Once upon a time", "n_predict": 12, "temperature": 0, "id_slot": 2}
+POST /completion {"prompt": "def fibonacci(n):", "n_predict": 12, "temperature": 0, "id_slot": 3}
+!end
+GET /slots
+!parallel
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0, "id_slot": 0, "stream": true}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 8, "temperature": 0, "id_slot": 1, "stream": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 8, "temperature": 0, "id_slot": 2}
+POST /tokenize {"content": "while the slots decode"}
+GET /health
+!end
+!parallel
+POST /completion {"prompt": "Once upon a time", "n_predict": 10, "temperature": 0, "n_cmpl": 3, "id_slot": 0}
+POST /completion {"prompt": "A B C D", "n_predict": 4, "temperature": 0, "id_slot": 3}
+!end
+POST /completion {"prompt": "Once upon a time", "n_predict": 10, "temperature": 0, "n_cmpl": 4}
+POST /completion {"prompt": "Once upon a time", "n_predict": 10, "temperature": 0, "n_cmpl": 5}
+POST /completion {"prompt": ["one", "two", "three", "four", "five", "six"], "n_predict": 6, "temperature": 0}
+!parallel
+POST /completion {"prompt": "x", "n_predict": 6, "temperature": 0, "id_slot": 0}
+POST /completion {"prompt": "y", "n_predict": 6, "temperature": 0, "id_slot": 0}
+!end
+GET /slots
+
+# without continuous batching a prompt waits for the batch in flight
+!server -m $QWEN3 -c 4096 -np 2 --no-jinja --no-cont-batching
+!parallel
+POST /completion {"prompt": "The capital of France is", "n_predict": 12, "temperature": 0, "id_slot": 0}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 12, "temperature": 0, "id_slot": 1}
+!end
+
+# auto: four slots and a unified KV cache, as upstream's -np -1 default
+!server -m $QWEN3 -c 4096 --no-jinja
+GET /props
+GET /slots
+!parallel
+POST /completion {"prompt": "The capital of France is", "n_predict": 8, "temperature": 0, "id_slot": 0}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 8, "temperature": 0, "id_slot": 1}
+POST /completion {"prompt": "Once upon a time", "n_predict": 8, "temperature": 0, "id_slot": 2}
+!end

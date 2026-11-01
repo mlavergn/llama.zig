@@ -1,0 +1,77 @@
+# The server's MCP client (Stage 10 step 6): scripts/server-diff mcp.
+# Upstream's fixtures (llama.cpp/tools/server/tests/fixtures/mcp_*.py) and
+# harness/server/mcp_probe_server.py, configured by mcp.setup. Their
+# tools are called through POST /tools, as tests/unit/test_mcp_servers.py
+# calls them.
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-config $DATA/mcp.json --tools exec_shell_command
+GET /tools
+POST /tools {"tool": "echo_echo", "params": {"message": "hi"}}
+POST /tools {"tool": "echo_add", "params": {"a": 2, "b": 3.5}}
+POST /tools {"tool": "echo_fail_once"}
+POST /tools {"tool": "echo_fail_once"}
+POST /tools {"tool": "echo_echo", "params": {"message": "streamed?"}, "stream": true}
+POST /tools {"tool": "echo_nope"}
+POST /tools {"tool": "burst_echo", "params": {"message": "burst"}}
+POST /tools {"tool": "malformed_echo", "params": {"message": "notified"}}
+POST /tools {"tool": "grandchild_echo", "params": {"message": "held"}}
+POST /tools {"tool": "crash_echo", "params": {"message": "before"}}
+POST /tools {"tool": "crash_crash"}
+!sleep 0.6
+POST /tools {"tool": "crash_echo", "params": {"message": "respawned"}}
+POST /tools {"tool": "slow_sleep", "params": {"seconds": 2}}
+!sleep 2.5
+POST /tools {"tool": "slow_sleep", "params": {"seconds": 0}}
+POST /tools {"tool": "probe_env"}
+POST /tools {"tool": "plain_env"}
+POST /tools {"tool": "probe_args", "params": {"x": "y", "n": [1, 2]}}
+!header x-tool-cwd: /some/dir
+!header x-resp-type: base64
+POST /tools {"tool": "probe_args", "params": {"cwd": "dropped"}}
+!noheaders
+POST /tools {"tool": "probe_is_error"}
+POST /tools {"tool": "probe_is_error0"}
+POST /tools {"tool": "probe_mixed"}
+POST /tools {"tool": "probe_nocontent"}
+POST /tools {"tool": "probe_errstr"}
+POST /tools {"tool": "probe_errobj"}
+POST /tools {"tool": "probe_errnum"}
+POST /tools {"tool": "probe_noresult"}
+POST /tools {"tool": "probe_silent"}
+POST /tools {"tool": "probe_env"}
+POST /tools {"tool": "probe_die"}
+!sleep 0.6
+POST /tools {"tool": "probe_env"}
+POST /tools {"tool": "bad_x"}
+POST /tools {"tool": "exec_shell_command", "params": {"command": "rm -f $DATA/once.sh"}}
+POST /tools {"tool": "once_hello"}
+POST /tools {"tool": "once_hello"}
+!fulllog
+
+# names: a collision with a built-in tool, a collision between MCP
+# servers, a name in both configurations
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools read_file --mcp-servers-config $DATA/mcp.json --mcp-servers-json '{"mcpServers": {"read": {"command": "python3", "args": ["$PROBE", "--tools", "file,other"]}, "p": {"command": "python3", "args": ["$PROBE", "--tools", "x_y"]}, "p_x": {"command": "python3", "args": ["$PROBE", "--tools", "y,z"]}, "echo": {"command": "python3", "args": ["$PROBE"]}}}'
+GET /tools
+POST /tools {"tool": "read_other"}
+POST /tools {"tool": "p_x_y"}
+POST /tools {"tool": "p_x_z"}
+
+# handshakes that fail, and a server that stops after it
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '{"mcpServers": {"i": {"command": "python3", "args": ["$PROBE", "--init-error", "msg"]}, "j": {"command": "python3", "args": ["$PROBE", "--init-error", "str"]}, "k": {"command": "python3", "args": ["$PROBE", "--init-error", "none"]}, "l": {"command": "python3", "args": ["$PROBE", "--list-error", "msg"]}, "m": {"command": "python3", "args": ["$PROBE", "--list-error", "none"]}, "x": {"command": "python3", "args": ["$PROBE", "--exit-after-init", "--stderr", "probe says bye"]}}}'
+GET /tools
+POST /tools {"tool": "i_env"}
+
+# configurations that stop the server, and ones with no servers
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-config $DATA/missing.json
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json 'not json'
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '{"mcpServers": {"x": {"command": "a", "args": [1]}}}'
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '{"mcpServers": {"x": {"command": "a", "env": {"K": false}}}}'
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '{"mcpServers": {"x": {"command": 5}}}'
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '{"mcpServers": {"x": {"command": "a", "timeout_ms": "1"}}}'
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-config $DATA/cwd_dir
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '{}'
+GET /tools
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '{"mcpServers": []}'
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '{"mcpServers": {"nocmd": {"args": []}}, "other": 1}'
+GET /tools
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '[1, 2]'
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '{"mcpServers": {"s": "not an object"}}'

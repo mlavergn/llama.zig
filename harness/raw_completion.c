@@ -9,7 +9,14 @@
 // So the honest reference is this: the same tokenize/decode/sample loop our
 // CLI runs, linked against stock C libraries.
 //
-// Usage: raw_completion <model.gguf> <prompt> <n_predict> [flags] [temp] [seed]
+// Usage: raw_completion <model.gguf> <prompt> <n_predict> [flags] [temp] [seed] [grammar.gbnf]
+//
+// `grammar.gbnf`, when given, constrains generation as upstream's
+// `common_sampler` does with a grammar: kept apart from the chain, checked
+// after the chain picks, and applied before a second pick only when it
+// rejects the first (`common_sampler_sample`, common/sampling.cpp:594). The
+// grammar text comes from wherever the caller made it -- for a schema,
+// upstream's own `json_schema_to_grammar` -- so this file stays plain C.
 //
 // `flags` is a comma-separated list, empty or absent for the defaults:
 //   no-prompt    do not echo the prompt before the completion
@@ -20,6 +27,7 @@
 // passes both suppressors, because it diffs completions alone.
 
 #include "llama.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -81,6 +89,55 @@ static void warm_up(struct llama_model *model, struct llama_context *ctx,
     llama_perf_context_reset(ctx);
 }
 
+// Reads a whole file into a NUL-terminated buffer, or NULL.
+static char *read_all(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = malloc((size_t) n + 1);
+    if (fread(buf, 1, (size_t) n, f) != (size_t) n) { fclose(f); free(buf); return NULL; }
+    buf[n] = 0;
+    fclose(f);
+    return buf;
+}
+
+// `common_sampler`'s `set_logits`, CPU path: every vocabulary entry.
+static llama_token_data_array set_logits(struct llama_context *ctx, llama_token_data *cur, int n_vocab) {
+    const float *logits = llama_get_logits_ith(ctx, -1);
+    for (int i = 0; i < n_vocab; i++) {
+        cur[i].id = i;
+        cur[i].logit = logits[i];
+        cur[i].p = 0.0f;
+    }
+    llama_token_data_array a = { cur, (size_t) n_vocab, -1, false };
+    return a;
+}
+
+// `common_sampler_sample` with `grammar_first` false, then
+// `common_sampler_accept`: the grammar accepts first, then the chain.
+static llama_token sample_with_grammar(struct llama_sampler *chain, struct llama_sampler *grmr,
+                                       struct llama_context *ctx, llama_token_data *cur, int n_vocab) {
+    llama_synchronize(ctx);
+    llama_token_data_array cur_p = set_logits(ctx, cur, n_vocab);
+    llama_sampler_apply(chain, &cur_p);
+    llama_token id = cur_p.data[cur_p.selected].id;
+
+    llama_token_data single = { id, 1.0f, 0.0f };
+    llama_token_data_array single_arr = { &single, 1, -1, false };
+    llama_sampler_apply(grmr, &single_arr);
+    if (single_arr.data[0].logit == -INFINITY) {
+        cur_p = set_logits(ctx, cur, n_vocab);
+        llama_sampler_apply(grmr, &cur_p);
+        llama_sampler_apply(chain, &cur_p);
+        id = cur_p.data[cur_p.selected].id;
+    }
+    llama_sampler_accept(grmr, id);
+    llama_sampler_accept(chain, id);
+    return id;
+}
+
 int main(int argc, char **argv) {
     llama_backend_init();
     struct llama_model_params mp = llama_model_default_params();
@@ -122,6 +179,18 @@ int main(int argc, char **argv) {
     llama_sampler_chain_add(smpl, llama_sampler_init_min_p(0.05f, 0));
     llama_sampler_chain_add(smpl, llama_sampler_init_temp_ext(temp, 0.0f, 1.0f));
     llama_sampler_chain_add(smpl, llama_sampler_init_dist(seed));
+
+    struct llama_sampler *grmr = NULL;
+    llama_token_data *cur = NULL;
+    const int n_vocab = llama_vocab_n_tokens(vocab);
+    if (argc > 7) {
+        char *text = read_all(argv[7]);
+        if (!text) { fprintf(stderr, "cannot read %s\n", argv[7]); return 1; }
+        grmr = llama_sampler_init_grammar(vocab, text, "root");
+        free(text);
+        if (!grmr) { fprintf(stderr, "failed to parse grammar\n"); return 1; }
+        cur = malloc(sizeof(llama_token_data) * (size_t) n_vocab);
+    }
     // Echo the prompt, matching upstream's `--display-prompt` default and our
     // CLI's, so `make port` and `make ref` produce literally identical text.
     // `scripts/parity-cli` passes a fourth argument to suppress it, because it
@@ -134,7 +203,7 @@ int main(int argc, char **argv) {
     llama_token id;
     for (int i = 0; i < atoi(argv[3]); i++) {
         if (llama_decode(ctx, batch)) return 1;
-        id = llama_sampler_sample(smpl, ctx, -1);
+        id = grmr ? sample_with_grammar(smpl, grmr, ctx, cur, n_vocab) : llama_sampler_sample(smpl, ctx, -1);
         if (llama_vocab_is_eog(vocab, id)) break;
         char buf[256];
         int k = llama_token_to_piece(vocab, id, buf, sizeof buf, 0, true);
@@ -153,6 +222,8 @@ int main(int argc, char **argv) {
         printf("\n[ Prompt: %.1f t/s | Generation: %.1f t/s ]\n", pp, tg);
     }
 
+    if (grmr) llama_sampler_free(grmr);
+    free(cur);
     llama_sampler_free(smpl);
     llama_free(ctx);
     llama_model_free(model);
