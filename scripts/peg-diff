@@ -2,7 +2,7 @@
 # Compare cli/peg/ and cli/common_chat/chat_peg.zig with upstream's
 # peg-parser.cpp and chat-peg-parser.cpp.
 #
-# Upstream's libllama-common (`zig build tools-ref`, which this runs) holds
+# Upstream's libllama-common (`zig build common-ref`, which this runs) holds
 # the C++ unmodified; harness/peg_ref.cpp interprets a bytecode of builder
 # calls over it, and harness/peg_diff.zig the same bytecode over the port,
 # and every record -- the build, the arena's dump, save and GBNF, every
@@ -37,12 +37,12 @@ if [ -z "${WIN_X86:-}" ]; then
 fi
 
 if [ -z "${PEG_DIFF_NO_TOOLS_REF:-}" ]; then
-    zig build tools-ref --release=fast ${GATE_BUILD[@]+"${GATE_BUILD[@]}"} >"$tmp/tref" 2>&1 \
-        || { echo "FAIL: could not build the reference library (zig build tools-ref)" >&2; tail -20 "$tmp/tref" >&2; exit 2; }
+    zig build common-ref --release=fast ${GATE_BUILD[@]+"${GATE_BUILD[@]}"} >"$tmp/tref" 2>&1 \
+        || { echo "FAIL: could not build the reference library (zig build common-ref)" >&2; tail -20 "$tmp/tref" >&2; exit 2; }
 fi
 COMMON="$GATE_COMMON_REF"
 for lib in "$COMMON" "$GATE_LLAMA_REF" "$GATE_GGML"; do
-    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference tools-ref --release=fast'" >&2; exit 2; }
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference common-ref --release=fast'" >&2; exit 2; }
 done
 
 CXX=(zig c++ "${GATE_CC[@]}" -std=c++17 -O2 -DNDEBUG -w

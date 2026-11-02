@@ -18,7 +18,7 @@
 #   SCHEMA_DIFF_SEED=n, SCHEMA_DIFF_SCALE=n, SCHEMA_DIFF_STATS=1 as the
 #   harness takes them
 #   Requires: zig build reference --release=fast (libllama-ref.a, which
-#   common.cpp reaches, and libggml.a); off macOS also tools-ref
+#   common.cpp reaches, and libggml.a); off macOS also common-ref
 #   (libllama-common-ref.a)
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -43,10 +43,10 @@ done
 # Off Darwin the linker resolves every reference in every object it is
 # given -- common.cpp's unused functions reach log.cpp, fit.cpp, sampling.cpp
 # and build-info -- so the rest of common/ comes from upstream's own
-# libllama-common (zig build tools-ref, for the target).
+# libllama-common (zig build common-ref, for the target).
 COMMON_REST=()
 if [ -n "${WIN_X86:-}" ] || [ "$(uname -s)" != Darwin ]; then
-    [ -f "$GATE_COMMON_REF" ] || { echo "missing $GATE_COMMON_REF -- run 'zig build tools-ref --release=fast ${GATE_BUILD[*]}'" >&2; exit 2; }
+    [ -f "$GATE_COMMON_REF" ] || { echo "missing $GATE_COMMON_REF -- run 'zig build common-ref --release=fast ${GATE_BUILD[*]}'" >&2; exit 2; }
     COMMON_REST=("$GATE_COMMON_REF")
 fi
 

@@ -34,6 +34,7 @@
 //! a bit comparison would stop meaning anything.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 /// The public ggml headers, for the converter half: it drives the real
 /// `CPU_REPACK` buffer type rather than calling a kernel, so it needs
@@ -491,8 +492,11 @@ pub fn main() !void {
     // else reaches three of them. On x86 the bare names are the generics.
     try runCase("q1_0_4x4_q8_0", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x4_q8_0, reference.ref_ggml_gemv_q1_0_4x4_q8_0, ours.ggml_gemm_q1_0_4x4_q8_0, reference.ref_ggml_gemm_q1_0_4x4_q8_0, alloc);
     try runCase("q1_0_4x8_q8_0", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x8_q8_0, reference.ref_ggml_gemv_q1_0_4x8_q8_0, ours.ggml_gemm_q1_0_4x8_q8_0, reference.ref_ggml_gemm_q1_0_4x8_q8_0, alloc);
-    try runCase("q1_0_4x4_q8_0_generic", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x4_q8_0_generic, reference.ref_ggml_gemv_q1_0_4x4_q8_0_generic, ours.ggml_gemm_q1_0_4x4_q8_0_generic, reference.ref_ggml_gemm_q1_0_4x4_q8_0_generic, alloc);
-    try runCase("q1_0_4x8_q8_0_generic", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x8_q8_0_generic, reference.ref_ggml_gemv_q1_0_4x8_q8_0_generic, ours.ggml_gemm_q1_0_4x8_q8_0_generic, reference.ref_ggml_gemm_q1_0_4x8_q8_0_generic, alloc);
+    // `arch-fallback.h` gives x86 no `_generic` names for them at all.
+    if (comptime builtin.cpu.arch != .x86_64) {
+        try runCase("q1_0_4x4_q8_0_generic", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x4_q8_0_generic, reference.ref_ggml_gemv_q1_0_4x4_q8_0_generic, ours.ggml_gemm_q1_0_4x4_q8_0_generic, reference.ref_ggml_gemm_q1_0_4x4_q8_0_generic, alloc);
+        try runCase("q1_0_4x8_q8_0_generic", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x8_q8_0_generic, reference.ref_ggml_gemv_q1_0_4x8_q8_0_generic, ours.ggml_gemm_q1_0_4x8_q8_0_generic, reference.ref_ggml_gemm_q1_0_4x8_q8_0_generic, alloc);
+    }
     try runCase("q4_0_4x4_q8_0", Q4_0x4, Q8_0, Q8_0x4, 32, 4, ours.ggml_gemv_q4_0_4x4_q8_0, reference.ref_ggml_gemv_q4_0_4x4_q8_0, ours.ggml_gemm_q4_0_4x4_q8_0, reference.ref_ggml_gemm_q4_0_4x4_q8_0, alloc);
     try runCase("q4_0_4x8_q8_0", Q4_0x4, Q8_0, Q8_0x4, 32, 4, ours.ggml_gemv_q4_0_4x8_q8_0, reference.ref_ggml_gemv_q4_0_4x8_q8_0, ours.ggml_gemm_q4_0_4x8_q8_0, reference.ref_ggml_gemm_q4_0_4x8_q8_0, alloc);
     try runCase("q4_0_8x8_q8_0", Q4_0x8, Q8_0, Q8_0x4, 32, 8, ours.ggml_gemv_q4_0_8x8_q8_0, reference.ref_ggml_gemv_q4_0_8x8_q8_0, ours.ggml_gemm_q4_0_8x8_q8_0, reference.ref_ggml_gemm_q4_0_8x8_q8_0, alloc);

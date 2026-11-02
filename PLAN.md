@@ -2034,6 +2034,11 @@ open a terminal`; `NOTES.md` has how to tell.
 
 ### Pickup for the v0.5.0 sync
 
+**Run 2026-11-02: items 1–8 clear** (`NOTES.md`, "The v0.5.0 pickup").
+Still open: item 9's `http-diff` and `tools-diff server`, which wait for
+the server's Windows port; item 10, JWHLPTOP; and the gaps and Mac items
+below.
+
 Upstream `v0.5.0` (`7fe450e19`). As at v0.4.1, the CUDA host changes were
 ported on the Mac and have **never compiled** (no toolkit here), and the
 Vulkan host changes compiled only against a stub `libvulkan` (every glslc
@@ -2150,6 +2155,10 @@ v0.5.0", has what each area changed.
   27.0 simulator runtime is listed Ready but will not boot ("runtime path
   not found"). Reinstall the runtime, then `make -C xcframework
   smoke-sim`.
+- On a unified-memory machine (the GB10) `fit-diff`'s three real-device
+  cases differ in free memory read live; 65 of 68 compare. Masking that
+  figure there, as `server-diff` and `perplexity.cases` do, would let them
+  compare the rest.
 - Two upstream-side flakes seen once in the combined run and passing
   alone: `server-diff hub`'s `slowpoke` download timeout, and an `imatrix`
   case where upstream's `--show-statistics` output stopped mid-line.

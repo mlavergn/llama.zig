@@ -11738,3 +11738,104 @@ its own scratch copy or restored by reverse replacement:
 compiled on any machine, and the Vulkan host changes compiled only
 against a stub `libvulkan`; the GB10 runs both first. JWHLPTOP is
 unreachable, so its AVX-512 items carry forward again.
+
+## The v0.5.0 pickup
+
+JWHLPTOP is unreachable (item 10 carries forward). The trees moved over
+the link as bundles: llamazig `1862287..e9c4b5b`, `llama.cpp.zmake`
+`700b420..2d5f20e`, zigjinja `fe1882d..79ff891`; both GB10 `llama.cpp`
+checkouts fetched `v0.5.0` from upstream. The GB10 checkout held the
+Stage 9 and 10 pickup's carried state uncommitted: 180 of its 195 files
+equal to `216f26f`, 12 older versions of files the Mac changed after
+that pickup, and one macOS `._` file. It was kept, not discarded -- `git
+stash` there and a tarball in `~/pickup/v050/` -- before the
+fast-forward.
+
+### DESKTOP-BR7J5S9: items 8 and 9
+
+| gate | result |
+|---|---|
+| `x86-quants-diff` | 28 kernels identical |
+| `x86-repack-diff` | 129 checks identical, after the fix below; the q1_0 gemvs and gemms at 16 and 24 columns, 4 and 20 rows |
+| `x86-ops-diff` | 842 lines identical, 1 and 3 threads |
+| `x86-node-diff` | 5,649 lines identical, 1 and 4 threads and fused (a first push met "could not open a terminal"; the retry ran) |
+| `win-host-diffs` | `host-arms-diff` 168 lines, `libcxx-diff` 452,904, `regex-diff` 43,537,552, `unicode-diff` 7,076,654 |
+| `jinja-diff` | 74 templates × 7 conversations, 8,584 probe renders |
+| `json-diff`, `schema-diff`, `peg-diff` | 9,526,339; 752,162; 5,010,210 checks |
+
+**`x86-repack-diff` did not link**: the q1_0 `_generic` cases added for
+ARM name `ref_ggml_gemv_q1_0_4x4_q8_0_generic` and its kin, and on x86
+`arch-fallback.h` renames those generics to the bare names, so the
+reference exports no `_generic` symbol at all. The harness compares them
+by name only off x86. With that, the x86 fused epilogue of the q1_0
+generic gemm -- read off the reference's disassembly during the sync,
+`vmulps` then `vfmadd231ps` -- has its first oracle, and passes.
+
+**`peg-diff` and `schema-diff` could not build their reference on
+Windows**, because `zig build tools-ref` now also builds upstream's
+server and multimodal tools, which have no Windows build:
+`mtmd-audio.cpp` defines `_USE_MATH_DEFINES` after `mtmd-audio.h` has
+already included `<cmath>`, so under `-std=c++17` MinGW never defines
+`M_PI`. Both need only `libllama-common`; `zig build common-ref` builds
+that alone and the two scripts use it.
+
+Item 9's `http-diff` and `tools-diff server` need the server's Windows
+port, which does not exist yet; they move to that work.
+
+### GB10: items 1-7
+
+| gate | result |
+|---|---|
+| CUDA build (item 1) | one compile error, fixed below; then the port, upstream's host layer and `cli`, clean |
+| `gen-fattn-config`, `gen-mmq-config` | output equal to the Mac's |
+| `cuda-ops-diff` | 16,168 / 16,168 bit-identical (16,093 at v0.4.1), 14 `NONDET` as before; every case item 2 named is among them: `DSV4_HC_PRE` gated at n_hc 1, 2, 3, 5, 8, 65 and two more, `DSV4_HC_POST` identity, 1,724 `CONV_2D` with an f16 kernel, `MEAN` 13 and `SUM_ROWS` 10, `DUP` i16, 145 `hsk=256,hsv=256` with 14 at `n_kv_max=512` and 4 at 2048; 0 `SUPPORTS` disagreements |
+| `cuda-backend-diff` | 5,792 + 17,348 answers identical (4,005 + 11,987 at v0.4.1), after the fix below; the top-k MoE probe records 11 dependencies at `n_expert=32`, 0 for `softmax_weight` and `n_expert=31`, `until null` at the graph's end, and the `moe_reduce` lines, alike on both sides |
+| `cuda-node-diff` | 2,822 nodes and 33 fused decodes, 1 and 4 threads; and on `qwen3moe-moe`, `qwen4exp-moe` (1,032 nodes), `hrm_text-dense`, `dflash-gemma`, `qwen35-fusedqkv` |
+| `cuda-parity-cli` | 6 / 6 |
+| `ops-diff`, `repack-diff`, `node-diff`, `parity-port --cpu`, `host-arms-diff`, `vocab-diff` | identical |
+| `arch-model-diff` | 165 pass, the two known `REF-ABORT`s, and `qwen35-fusedqkv` failing under `tensor` -- the harness's fault, below; after the fix `qwen35-fusedqkv` passes gpu, cpu and tensor |
+| `context-diff` | 2,609,587 checks, 0 failures -- its first run off macOS |
+| `quant-diff` | 142,239,553 checks, 0 failures |
+| `http-diff`, `chat-parse-diff`, `peg-diff`, `spec-diff`, `cnv-diff` | identical |
+| `fit-diff` | 65 / 68; the three real-device cases differ only in free memory, read live (below) |
+| `tools-diff` | every tool's cases; `gguf-split` 29, `cvector-generator` 13, `imatrix` 35 and `perplexity` 35 rerun once the `plain-d6` model was back (below), `perplexity` after masking a live free-memory figure in its `--log-jsonl` output |
+| `server-diff` | 20 of 21 files identical; `parallel` 2 of 28 differ, and upstream against itself 1 and 2 of 28 |
+| `vk-push-layout`, `vk-backend-diff`, `vk-parity-cli` | pass; 6 / 6 |
+| `vk-repro` | reproducible over 3 runs on all four arms, each confirmed by its device line (coopmat2, KHR_coopmat, none, none with `int dot: 0`): 2,822 nodes and 33 fused decodes |
+| `vk-node-diff` | 2,822 nodes and 33 fused decodes on all four arms; also `qwen4exp-moe`, `hrm_text-dense`, `dflash-gemma`, `qwen35-fusedqkv` |
+| `vk-ops-diff` | 18,933 / 18,933 bit-identical on each of the four arms (18,759 at v0.4.1). Read by name on the coopmat2 and no-coopmat arms, each confirmed by its device line: gated `DSV4_HC_PRE` 8, identity `DSV4_HC_POST` 2, `MUL_MAT_ID` at `n_mats` 512 and 1,024 (8 each), the six `amax=100000` cases refused on both sides, IQ4_XS 18 and IQ3_S 26, `FLASH_ATTN_EXT` at `n_kv_max` 512 (15) and 2048 (4), and the extra sparse no-GQA case |
+
+**The CUDA host layer did not compile at first**: `conv2d.zig` bound
+`kernels.boolean(use_mma)` to a runtime `const` and passed it to the
+comptime kernel-name builder. The Mac can only `ast-check` the CUDA
+layer, which does not type-check; `comptime` fixed it.
+
+**`cuda-backend-diff` segfaulted, on both sides.** Its new top-k MoE
+probe builds a norm chain that ends the graph with no `SCALE` after it,
+and `ggml_cuda_topk_moe_fusion` then reads `nodes[n_nodes]->op`
+(ggml-cuda.cu:2963) -- NULL in the probe's zeroed graph. Run alone,
+upstream's backend crashes there exactly as the port does, which ported
+it as written. No real graph ends that way; the probe skips that one
+shape and says why.
+
+**`context-diff` and `fit-diff` had never run on Linux.** Both named the
+Metal frameworks on their link lines; they now take
+`scripts/platform-libs` like the rest. On the GB10, `context-diff`'s
+`tensor` configuration then found no device: CUDA reports the GB10 as an
+integrated GPU, and the harness asked only for a discrete one, leaving
+the list empty -- upstream said so (`LLAMA_SPLIT_MODE_TENSOR needs >= 1
+devices`), but the harness discarded the C++'s load log on failure. It
+prints it now, and falls back to the `IGPU`. `qwen35-fusedqkv` under
+`LLAMA_SPLIT_MODE_TENSOR` on CUDA and the CPU then passes, 32,300 checks:
+the first time the tensor split ran on CUDA under a gate.
+
+**`fit-diff`'s three real-device cases cannot agree on a unified-memory
+machine**: every differing line is a free-memory figure, read live from
+the one pool both sides share. The 65 cases on fake devices carry the
+logic; as for `server-diff` there, this is recorded rather than masked.
+
+**`tools-diff` passed `gguf-split` with no model.** The `plain-d6`
+model several case files use was gone from the GB10, both sides failed
+to load it alike, and the cases compared two failures. `tools-diff` now
+fails when a case file's model or fixtures are missing; the model was
+carried over and the four tools that use it rerun.

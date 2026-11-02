@@ -81,7 +81,7 @@ fn conv2dLaunchImplicitGemm(
 ) void {
     const lp: kernels.LaunchParams = .{ .grid = grid, .block = block, .shmem = 0, .stream = stream };
     const args = .{ input, weight, output, params, split_k };
-    const mma = kernels.boolean(use_mma);
+    const mma = comptime kernels.boolean(use_mma);
     if (params.KW == 3 and params.KH == 3) {
         kernels.launch(kernels.get("conv2d", kernels.tmpl("conv2d_implicit_gemm_f16", &.{ kernels.int(3), kernels.int(3), mma })), lp, args);
     } else if (params.KW == 1 and params.KH == 1) {

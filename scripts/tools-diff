@@ -48,6 +48,11 @@ VOCAB="$ROOT/llama.cpp/models"
 PLAIN="${PLAIN:-$HOME/.cache/zigtrain/gguf/plain-d6_base_005000.gguf}"
 MM="$ROOT/zig-out/mmproj-fixtures"
 export FIX VOCAB PLAIN MM
+# A case file over a model that is not there compares two failed loads, and
+# passes: on the GB10 at v0.5.0, gguf-split did, with the model gone.
+grep -q '\$PLAIN' "$cases" && [ ! -f "$PLAIN" ] && { echo "FAIL: missing $PLAIN, which $cases uses" >&2; exit 2; }
+grep -q '\$FIX' "$cases" && [ ! -d "$FIX" ] && { echo "FAIL: missing $FIX -- run 'make arch-fixtures'" >&2; exit 2; }
+grep -q '\$MM' "$cases" && [ ! -d "$MM" ] && { echo "FAIL: missing $MM -- run 'make mmproj-fixtures'" >&2; exit 2; }
 
 zig build tools tools-ref --release="${TOOLS_O:-fast}" >/dev/null 2>&1 \
     || { echo "FAIL: could not build the tools (zig build tools tools-ref)" >&2; exit 2; }

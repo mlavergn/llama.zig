@@ -821,8 +821,11 @@ const ModelEdits = struct {
     /// with every weight and cache tensor sliced by
     /// `llama_meta_device_get_split_state`. The multi-GPU path, on the two
     /// devices this machine has.
+    /// The GB10's CUDA device is integrated (`IGPU`), so a `GPU` lookup
+    /// alone found nothing there and left an empty list.
     fn tensorSplit(p: *c.llama_model_params) void {
-        tensor_devices[0] = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_GPU);
+        tensor_devices[0] = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_GPU) orelse
+            c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_IGPU);
         tensor_devices[1] = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU);
         p.devices = &tensor_devices;
         p.split_mode = c.LLAMA_SPLIT_MODE_TENSOR;
@@ -976,7 +979,13 @@ pub fn main(init: std.process.Init) !void {
         defer port_load.deinit(gpa);
         rec = &ref_load;
         const rm = c.llama_model_load_from_file(path.ptr, mp) orelse {
+            // The last lines say why, as for the port below.
+            var lines = std.mem.splitBackwardsScalar(u8, std.mem.trimEnd(u8, ref_load.items, "\n"), '\n');
+            var tail: [3][]const u8 = undefined;
+            var n: usize = 0;
+            while (n < tail.len) : (n += 1) tail[n] = lines.next() orelse break;
             std.debug.print("FAIL: the C++ cannot load {s}\n", .{path});
+            while (n > 0) : (n -= 1) std.debug.print("    ref: {s}\n", .{tail[n - 1]});
             std.process.exit(1);
         };
         defer c.llama_model_free(rm);

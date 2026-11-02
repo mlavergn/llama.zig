@@ -314,6 +314,12 @@ static void ask_graph_optimize(ggml_backend_dev_t dev) {
         for (size_t sh = 0; sh < sizeof(shapes) / sizeof(shapes[0]); sh++) {
             for (int v = 0; v < 16; v++) {
                 const bool bias = v & 1, norm = v & 2, scale = v & 4, at_end = v & 8;
+                /* A norm chain that ends the graph, with no SCALE after it:
+                 * ggml_cuda_topk_moe_fusion reads nodes[n_nodes]->op there
+                 * (ggml-cuda.cu:2963 @7fe450e19), a NULL in this zeroed
+                 * graph, and upstream segfaults -- the port, ported as
+                 * written, alike (measured on the GB10, each side alone). */
+                if (norm && !scale && at_end) continue;
                 memset(buf, 0, mem);
                 struct ggml_init_params ip = { mem, buf, true };
                 struct ggml_context * ctx = ggml_init(ip);

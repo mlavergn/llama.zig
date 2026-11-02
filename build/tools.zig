@@ -263,7 +263,13 @@ pub fn add(b: *std.Build, opts: Options) !void {
     const common_ref = addCommonRef(b, opts);
     // Installed for the in-process gates over upstream's `common/`
     // (`scripts/chat-msg-diff`), which link it beside a harness of their own.
-    ref_step.dependOn(&b.addInstallArtifact(common_ref, .{}).step);
+    const common_ref_install = b.addInstallArtifact(common_ref, .{});
+    ref_step.dependOn(&common_ref_install.step);
+    // That library alone: on Windows `tools-ref` cannot build (its server and
+    // multimodal tools have no Windows build yet), and peg-diff and
+    // schema-diff need nothing else from it.
+    const common_ref_step = b.step("common-ref", "Build upstream's libllama-common over libllama-ref alone");
+    common_ref_step.dependOn(&common_ref_install.step);
     // Upstream's mtmd, and the two tools over it: the multimodal CLI and TTS.
     const mtmd_ref = opts.mtmd_ref;
     const mtmd_ref_step = b.step("mtmd-ref", "Build upstream's libmtmd over libllama-ref, the mtmd gates' reference");
