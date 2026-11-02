@@ -248,6 +248,26 @@ ABORT = re.compile(r"(?:[\w./-]*/)?((?:speculative|sampling|ngram-cache|ngram-ma
                    r"llama-[a-z-]+|ggml[a-z-]*)\.(?:cpp|c)):(\d+): (.*)$")
 
 
+# v0.5.0: llama_graph_n_input_tensors (llama-context.cpp) logs each input
+# tensor's users from an unordered_map keyed by tensor address, so the order
+# of a run of those lines is the allocator's, run to run, on either side;
+# each run is compared sorted.
+GRAPH_INPUT = "llama_graph_n_input_tensors: input tensor "
+
+
+def sort_graph_inputs(lines):
+    out, run = [], []
+    for line in lines + [None]:
+        if line is not None and GRAPH_INPUT in line:
+            run.append(line)
+            continue
+        out.extend(sorted(run))
+        run = []
+        if line is not None:
+            out.append(line)
+    return out
+
+
 def mask(text):
     out, aborts = [], []
     for line in text.splitlines():
@@ -264,7 +284,7 @@ def mask(text):
             line = rx.sub(rep, line)
         if line.strip():
             out.append(line)
-    return out + sorted(aborts)
+    return sort_graph_inputs(out) + sorted(aborts)
 
 
 def run(cmd, what):

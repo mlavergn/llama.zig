@@ -23,7 +23,8 @@
 # left without a fixture. `clip` and `gptj` are left out, as upstream leaves
 # them: neither has a usable implementation. Granite-Switch, eagle3 and
 # DFlash need more than the recipe's keys and tensors, and
-# `harness/arch_fixtures_draft.cpp` writes them.
+# `harness/arch_fixtures_draft.cpp` writes them, with a Gemma-style DFlash
+# and a Qwen3.5 whose full-attention projections are fused (since v0.5.0).
 #
 # Usage: scripts/gen-arch-fixtures [out-dir] [seed]
 #   Default out-dir zig-out/arch-fixtures, seed 42.

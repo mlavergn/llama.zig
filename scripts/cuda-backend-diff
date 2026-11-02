@@ -28,7 +28,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 CUDA=/usr/local/cuda
-zig cc -c harness/cuda_backend_diff.c -o "$tmp/h.o" -std=c11 -O2 -I llama.cpp/ggml/include 2>"$tmp/cc.log" \
+zig cc -c harness/cuda_backend_diff.c -o "$tmp/h.o" -std=c11 -O2 -I llama.cpp/ggml/include -I llama.cpp/ggml/src 2>"$tmp/cc.log" \
     || { echo "FAIL: could not compile the harness" >&2; tail -5 "$tmp/cc.log" >&2; exit 1; }
 zig c++ "$tmp/h.o" -o "$tmp/cuda_backend_diff" "$PORT_LIB" "$REF_LIB" \
     -L"$CUDA/lib64" -Wl,-rpath,"$CUDA/lib64" -lcudart -lcublas -lcublasLt -lcuda \

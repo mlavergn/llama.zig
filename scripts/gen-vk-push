@@ -8,12 +8,14 @@ the shader reads **by offset** -- the same position as Metal's kargs
 different number and nothing in the ported code can notice, so they are
 generated from the C++ rather than typed.
 
-Unlike Metal's, these structs live inside the 19,787-line `.cpp`, not a
-header. The generator computes every struct's size and every field's
-offset itself, and writes the same numbers twice: as comptime assertions
-in the Zig, and as `static_assert`s in `harness/vk_push_layout.cpp`, which
-`#include`s the real `ggml-vulkan.cpp` and so checks them against the
-structs the reference compiles. Both passing means both agree with the
+Until v0.5.0 these structs lived inside the 19,787-line `.cpp`; since
+upstream split it they live in `ggml-vulkan-push-constants.h`. The
+generator reads both files (the `.cpp` holds none now, and must not grow
+one unnoticed), computes every struct's size and every field's offset
+itself, and writes the same numbers twice: as comptime assertions in the
+Zig, and as `static_assert`s in `harness/vk_push_layout.cpp`, which
+`#include`s the real `ggml-vulkan.cpp` -- and through it the header -- and
+so checks them against the structs the reference compiles. Both passing means both agree with the
 generator, and so with each other. `make vk-push-layout` builds it.
 
 Writes:
@@ -25,13 +27,27 @@ Run after moving the upstream pin.
 import re
 import sys
 
-SRC = "llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp"
+VK = "llama.cpp/ggml/src/ggml-vulkan/"
+# Every file a push-constant struct may live in; each line remembers its
+# file, so a citation names the file the struct is really in.
+SRCS = [VK + "ggml-vulkan-push-constants.h", VK + "ggml-vulkan.cpp"]
 from upstream_pin import COMMIT, TAG
-CONSTS = {"MAX_PARAMETER_COUNT": 12}
+
+# `MAX_PARAMETER_COUNT` is read from the header that defines it, not typed.
+_types = open(VK + "ggml-vulkan-types.h").read()
+_m = re.search(r"^#define\s+MAX_PARAMETER_COUNT\s+(\d+)\s*$", _types, re.M)
+if not _m:
+    sys.exit("gen-vk-push: no MAX_PARAMETER_COUNT in ggml-vulkan-types.h")
+CONSTS = {"MAX_PARAMETER_COUNT": int(_m.group(1))}
 
 SCALAR = {"uint32_t": ("u32", 4), "int32_t": ("i32", 4), "float": ("f32", 4), "uint64_t": ("u64", 8)}
 
-lines = open(SRC).read().split("\n")
+lines = []   # every line of every file in SRCS, in order
+origin = []  # (file name, 1-based line) for each entry of `lines`
+for src in SRCS:
+    for k, text in enumerate(open(src).read().split("\n")):
+        lines.append(text)
+        origin.append((src.split("/")[-1], k + 1))
 
 
 def zig_name(c):
@@ -52,7 +68,7 @@ while i < len(lines):
         i += 1
         continue
     name, base, brace, closed = m.group(1), m.group(2), m.group(3), m.group(4)
-    start = i + 1
+    start = origin[i]
     fields = []
     if closed:
         structs[name] = (start, base, fields)
@@ -62,7 +78,7 @@ while i < len(lines):
     j = i + 1
     if not brace:
         if lines[j].strip() != "{":
-            sys.exit(f"gen-vk-push: no opening brace for {name} at {SRC}:{start}")
+            sys.exit(f"gen-vk-push: no opening brace for {name} at {start[0]}:{start[1]}")
         j += 1
     while not lines[j].startswith("};"):
         text = re.sub(r"//.*", "", lines[j]).strip()
@@ -70,12 +86,12 @@ while i < len(lines):
             # `uint32_t a, b, c` declares three.
             tm = re.fullmatch(r"(\w+)\s+(.+)", decl)
             if not tm:
-                sys.exit(f"gen-vk-push: unparsed field at {SRC}:{j+1}: {lines[j]!r}")
+                sys.exit(f"gen-vk-push: unparsed field at {origin[j][0]}:{origin[j][1]}: {lines[j]!r}")
             for one in [x.strip() for x in tm.group(2).split(",")]:
                 dm = re.fullmatch(r"(\w+)((?:\s*\[\w+\])*)(?:\s*\{\s*\}|\s*=\s*.+)?", one)
                 if not dm:
                     # A field this script cannot read must stop it (gen-kargs).
-                    sys.exit(f"gen-vk-push: unparsed field at {SRC}:{j+1}: {lines[j]!r}")
+                    sys.exit(f"gen-vk-push: unparsed field at {origin[j][0]}:{origin[j][1]}: {lines[j]!r}")
                 dims = [int(CONSTS.get(d, d)) for d in re.findall(r"\[(\w+)\]", dm.group(2))]
                 fields.append((tm.group(1), dm.group(1), dims))
         j += 1
@@ -87,6 +103,11 @@ while i < len(lines):
 declared = set(re.findall(r"^struct\s+(vk_\w+_push_constants)\b", "\n".join(lines), re.M))
 if declared != set(order):
     sys.exit(f"gen-vk-push: parsed {sorted(order)} but the file declares {sorted(declared)}")
+# Both checks above pass on nothing: at v0.5.0 the structs left the `.cpp`
+# and a generator reading only it found none, consistently. Every file it
+# reads is named, so finding none means a file moved again.
+if not order:
+    sys.exit(f"gen-vk-push: no push-constant structs in {', '.join(SRCS)}")
 
 
 def layout(name):
@@ -120,8 +141,9 @@ z = ['''//! The push constants the Vulkan shaders read.
 //! # Provenance
 //!
 //! Mirrors the `vk_*_push_constants` structs of
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at ''' + TAG + '''
-//! (`''' + COMMIT + '''`).
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-push-constants.h` at ''' + TAG + '''
+//! (`''' + COMMIT + '''`), which upstream split out of
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.5.0.
 //!
 //! # Generated, not written
 //!
@@ -146,7 +168,7 @@ for name in order:
     line, base, fields = structs[name]
     zn = zig_name(name)
     size, align, lay = layout(name)
-    z.append(f"/// Mirrors `{name}` ({SRC.split('/')[-1]}:{line} @{COMMIT}).")
+    z.append(f"/// Mirrors `{name}` ({line[0]}:{line[1]} @{COMMIT}).")
     # A derived struct is its own type even with its base's layout: the
     # C++ overloads on it (`init_pushconst_tensor_offsets` for concat).
     z.append(f"pub const {zn} = extern struct {{")

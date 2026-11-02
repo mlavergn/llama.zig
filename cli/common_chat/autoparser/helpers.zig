@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/chat-auto-parser-helpers.h` and
-//! `llama.cpp/common/chat-auto-parser-helpers.cpp` (llama.cpp v0.4.1,
-//! `b29c606e2`). Each declaration names what it ports and the line it began
+//! `llama.cpp/common/chat-auto-parser-helpers.cpp` (llama.cpp v0.5.0,
+//! `7fe450e19`). Each declaration names what it ports and the line it began
 //! at.
 //!
 //! # Ownership
@@ -29,7 +29,7 @@ const Segment = types.Segment;
 const DiffSplit = types.DiffSplit;
 const isSpace = util.isSpace;
 
-/// Ports `trim_whitespace` (chat-auto-parser-helpers.cpp:12 @b29c606e2).
+/// Ports `trim_whitespace` (chat-auto-parser-helpers.cpp:12 @7fe450e19).
 pub fn trimWhitespace(str: []const u8) []const u8 {
     var start: usize = 0;
     while (start < str.len and isSpace(str[start])) start += 1;
@@ -39,14 +39,14 @@ pub fn trimWhitespace(str: []const u8) []const u8 {
     return str[start .. end + 1];
 }
 
-/// Ports `trim_leading_whitespace` (chat-auto-parser-helpers.cpp:30 @b29c606e2).
+/// Ports `trim_leading_whitespace` (chat-auto-parser-helpers.cpp:30 @7fe450e19).
 pub fn trimLeadingWhitespace(str: []const u8) []const u8 {
     var start: usize = 0;
     while (start < str.len and isSpace(str[start])) start += 1;
     return str[start..];
 }
 
-/// Ports `trim_trailing_whitespace` (chat-auto-parser-helpers.cpp:39 @b29c606e2).
+/// Ports `trim_trailing_whitespace` (chat-auto-parser-helpers.cpp:39 @7fe450e19).
 pub fn trimTrailingWhitespace(str: []const u8) []const u8 {
     if (str.len == 0) return "";
     var end = str.len - 1;
@@ -56,14 +56,14 @@ pub fn trimTrailingWhitespace(str: []const u8) []const u8 {
     return str[0 .. end + 1];
 }
 
-/// Ports `trim_trailing_newlines` (chat-auto-parser-helpers.cpp:57 @b29c606e2).
+/// Ports `trim_trailing_newlines` (chat-auto-parser-helpers.cpp:57 @7fe450e19).
 pub fn trimTrailingNewlines(str: []const u8) []const u8 {
     var end = str.len;
     while (end > 0 and str[end - 1] == '\n') end -= 1;
     return str[0..end];
 }
 
-/// Ports `common_prefix_len` (chat-auto-parser-helpers.cpp:66 @b29c606e2).
+/// Ports `common_prefix_len` (chat-auto-parser-helpers.cpp:66 @7fe450e19).
 fn commonPrefixLen(left: []const u8, right: []const u8) usize {
     var n: usize = 0;
     const min_len = @min(left.len, right.len);
@@ -71,7 +71,7 @@ fn commonPrefixLen(left: []const u8, right: []const u8) usize {
     return n;
 }
 
-/// Ports `common_suffix_len` (chat-auto-parser-helpers.cpp:75 @b29c606e2).
+/// Ports `common_suffix_len` (chat-auto-parser-helpers.cpp:75 @7fe450e19).
 fn commonSuffixLen(left: []const u8, right: []const u8) usize {
     var n: usize = 0;
     const min_len = @min(left.len, right.len);
@@ -83,7 +83,7 @@ fn cat(a: Allocator, x: []const u8, y: []const u8) Error![]const u8 {
     return std.mem.concat(a, u8, &.{ x, y });
 }
 
-/// Ports `calculate_diff_split` (chat-auto-parser-helpers.cpp:84 @b29c606e2):
+/// Ports `calculate_diff_split` (chat-auto-parser-helpers.cpp:84 @7fe450e19):
 /// the longest common prefix and suffix of two renders, each ending on a
 /// marker where one is in reach, and what is left of each between them.
 pub fn calculateDiffSplit(a: Allocator, left: []const u8, right: []const u8) Error!DiffSplit {
@@ -207,7 +207,7 @@ fn joinSegments(a: Allocator, segs: []const Segment) Error![]const u8 {
     return out.items;
 }
 
-/// Ports `until_common_prefix` (chat-auto-parser-helpers.cpp:207 @b29c606e2):
+/// Ports `until_common_prefix` (chat-auto-parser-helpers.cpp:207 @7fe450e19):
 /// `full` up to the first occurrence of what `left` and `right` begin with.
 pub fn untilCommonPrefix(full: []const u8, left: []const u8, right: []const u8) []const u8 {
     const n = commonPrefixLen(left, right);
@@ -216,7 +216,7 @@ pub fn untilCommonPrefix(full: []const u8, left: []const u8, right: []const u8) 
     return full[0..pos];
 }
 
-/// Ports `after_common_suffix` (chat-auto-parser-helpers.cpp:234 @b29c606e2):
+/// Ports `after_common_suffix` (chat-auto-parser-helpers.cpp:234 @7fe450e19):
 /// `full` after the last occurrence of what `left` and `right` end with.
 pub fn afterCommonSuffix(full: []const u8, left: []const u8, right: []const u8) []const u8 {
     const n = commonSuffixLen(left, right);
@@ -225,7 +225,7 @@ pub fn afterCommonSuffix(full: []const u8, left: []const u8, right: []const u8) 
     return full[pos + n ..];
 }
 
-/// Ports `segmentize_markers` (chat-auto-parser-helpers.cpp:266 @b29c606e2):
+/// Ports `segmentize_markers` (chat-auto-parser-helpers.cpp:266 @7fe450e19):
 /// `<...>` and `[...]` runs as markers, everything between as text.
 ///
 /// Return: owned by `a`; each value borrowed from `text`.
@@ -256,7 +256,7 @@ pub fn segmentizeMarkers(a: Allocator, text: []const u8) Error![]Segment {
     return retval.items;
 }
 
-/// Ports `prune_whitespace_segments` (chat-auto-parser-helpers.cpp:298 @b29c606e2).
+/// Ports `prune_whitespace_segments` (chat-auto-parser-helpers.cpp:298 @7fe450e19).
 pub fn pruneWhitespaceSegments(a: Allocator, segments: []const Segment) Error![]Segment {
     var result: std.ArrayList(Segment) = .empty;
     for (segments) |seg| {
@@ -265,11 +265,11 @@ pub fn pruneWhitespaceSegments(a: Allocator, segments: []const Segment) Error![]
     return result.items;
 }
 
-/// `ERR_TMPL` (chat-auto-parser-helpers.cpp:310 @b29c606e2): what a failed
+/// `ERR_TMPL` (chat-auto-parser-helpers.cpp:310 @7fe450e19): what a failed
 /// probe render reads as.
 pub const err_tmpl = "#**ERROR**#";
 
-/// Ports `apply_template` (chat-auto-parser-helpers.cpp:312 @b29c606e2): a
+/// Ports `apply_template` (chat-auto-parser-helpers.cpp:312 @7fe450e19): a
 /// probe rendered, `enable_thinking` bound in the extra context too, and
 /// `err_tmpl` when the template fails.
 pub fn applyTemplate(a: Allocator, tmpl: *const template.Template, params: *const types.TemplateParams) Error![]const u8 {
@@ -290,7 +290,7 @@ pub fn applyTemplate(a: Allocator, tmpl: *const template.Template, params: *cons
     };
 }
 
-/// Ports `compare_variants` (chat-auto-parser-helpers.cpp:332 @b29c606e2):
+/// Ports `compare_variants` (chat-auto-parser-helpers.cpp:332 @7fe450e19):
 /// two probes rendered and diffed, `params_b` being `params_a` modified as
 /// the C++'s lambda modifies its copy.
 ///

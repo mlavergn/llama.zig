@@ -7,7 +7,7 @@
 //! `common_init_sampler_from_model`, `common_control_vector_load`,
 //! `common_set_adapter_lora`, `common_threadpools::init`,
 //! `ggml_threadpool_params_from_cpu_params` and `set_process_priority` from
-//! `llama.cpp/common/common.cpp` (v0.4.1, `b29c606e2`). Each declaration
+//! `llama.cpp/common/common.cpp` (v0.5.0, `7fe450e19`). Each declaration
 //! names what it ports and the line it began at.
 //!
 //! # The sampler, for the tools
@@ -48,7 +48,7 @@ fn comErr(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype)
     log.err(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
 }
 
-/// Ports `common_init_result` (common/common.h:929 @b29c606e2).
+/// Ports `common_init_result` (common/common.h:929 @7fe450e19).
 pub const InitResult = struct {
     model: ?*c.llama_model = null,
     context: ?*c.llama_context = null,
@@ -57,12 +57,12 @@ pub const InitResult = struct {
     threadpool: ?*c.ggml_threadpool = null,
     threadpool_batch: ?*c.ggml_threadpool = null,
 
-    /// Ports `reset_samplers` (common/common.cpp:1426 @b29c606e2), a member of `common_init_result`.
+    /// Ports `reset_samplers` (common/common.cpp:1426 @7fe450e19), a member of `common_init_result`.
     fn resetSamplers(self: *InitResult) void {
         for (self.samplers.items) |s| c.llama_sampler_reset(s.get());
     }
 
-    /// Ports `sampler` (common/common.cpp:1419 @b29c606e2), a member of
+    /// Ports `sampler` (common/common.cpp:1419 @7fe450e19), a member of
     /// `common_init_result`.
     ///
     /// Return: the sampler for `seq_id`, or null past the last; owned by
@@ -82,7 +82,7 @@ pub const InitResult = struct {
     }
 };
 
-/// Ports `common_init_sampler_from_model` (common/common.cpp:1213 @b29c606e2): the
+/// Ports `common_init_sampler_from_model` (common/common.cpp:1213 @7fe450e19): the
 /// model's recommended sampling, where the command line set none.
 fn initSamplerFromModel(p: *Params, model: ?*const c.llama_model) !void {
     const sp = &p.sampling;
@@ -149,7 +149,7 @@ pub fn samplerInit(p: *Params, model: ?*const c.llama_model) !*sampling.Sampler 
     return sampling.init(model, &p.sampling);
 }
 
-/// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1761 @b29c606e2).
+/// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1761 @7fe450e19).
 fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
     var tpp: c.ggml_threadpool_params = undefined;
     c.ggml_threadpool_params_init(&tpp, cp.n_threads); // setup the defaults
@@ -160,7 +160,7 @@ fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
     return tpp;
 }
 
-/// Ports `init` (common/common.cpp:1785 @b29c606e2), a member of `common_threadpools`.
+/// Ports `init` (common/common.cpp:1785 @7fe450e19), a member of `common_threadpools`.
 fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) void {
     const func = "init";
     comInf(func, "llama threadpool init, n_threads = %d\n", .{p.cpuparams.n_threads});
@@ -199,7 +199,7 @@ fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) v
 extern fn setpriority(which: c_int, who: c_uint, prio: c_int) c_int;
 extern fn strerror(e: c_int) [*:0]const u8;
 
-/// Ports `set_process_priority` (common/common.cpp:260 @b29c606e2), the POSIX arm;
+/// Ports `set_process_priority` (common/common.cpp:260 @7fe450e19), the POSIX arm;
 /// Windows has its own, through `SetPriorityClass`.
 pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     if (prio == c.GGML_SCHED_PRIO_NORMAL) return true;
@@ -237,10 +237,10 @@ pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     return true;
 }
 
-/// Ports `common_control_vector_data` (common/common.h:1098 @b29c606e2).
+/// Ports `common_control_vector_data` (common/common.h:1098 @7fe450e19).
 const ControlVectorData = struct { n_embd: i32, data: std.ArrayList(f32) };
 
-/// Ports `common_control_vector_load_one` (common/common.cpp:2002 @b29c606e2).
+/// Ports `common_control_vector_load_one` (common/common.cpp:2002 @7fe450e19).
 fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoadInfo) !ControlVectorData {
     const func = "common_control_vector_load_one";
     var result: ControlVectorData = .{ .n_embd = -1, .data = .empty };
@@ -320,7 +320,7 @@ fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoad
     return result;
 }
 
-/// Ports `common_control_vector_load` (common/common.cpp:2087 @b29c606e2).
+/// Ports `common_control_vector_load` (common/common.cpp:2087 @7fe450e19).
 fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVectorLoadInfo) !ControlVectorData {
     const func = "common_control_vector_load";
     var result: ControlVectorData = .{ .n_embd = -1, .data = .empty };
@@ -353,7 +353,7 @@ fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVect
     return result;
 }
 
-/// Ports `common_init_result` (common/common.cpp:1290 @b29c606e2), a member of `common_init_result`.
+/// Ports `common_init_result` (common/common.cpp:1290 @7fe450e19), a member of `common_init_result`.
 fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitResult) !void {
     const a = p.arena;
     var mparams = common.modelParamsToLlama(p);
@@ -487,7 +487,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
 
 const io_ = @import("io.zig");
 
-/// Ports `common_init_from_params` (common/common.cpp:1436 @b29c606e2).
+/// Ports `common_init_from_params` (common/common.cpp:1436 @7fe450e19).
 ///
 /// Return: the model and context, either null where loading failed, having
 /// logged why. The caller owns the result.
@@ -550,7 +550,7 @@ pub fn initFromParams(gpa: std.mem.Allocator, p: *Params, model_only: bool) !Ini
     }
 
     if (!p.lora_init_without_apply) {
-        // `common_set_adapter_lora` (common/common.cpp:1667 @b29c606e2)
+        // `common_set_adapter_lora` (common/common.cpp:1667 @7fe450e19)
         var loras: std.ArrayList(?*c.llama_adapter_lora) = .empty;
         var scales: std.ArrayList(f32) = .empty;
         for (p.lora_adapters.items) |la| {

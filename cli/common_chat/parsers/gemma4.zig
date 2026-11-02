@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/gemma4.cpp` (llama.cpp v0.4.1,
-//! `b29c606e2`): `workaround::gemma4_model_turn_builder`,
+//! Ports `llama.cpp/common/parsers/gemma4.cpp` (llama.cpp v0.5.0,
+//! `7fe450e19`): `workaround::gemma4_model_turn_builder`,
 //! `workaround::convert_tool_responses_gemma4` and
 //! `common_chat_params_init_gemma4`. The parser is built in the order clang
 //! evaluates the C++ expressions, left to right, since a parser's id is its
@@ -43,7 +43,7 @@ fn member(m: *const Value, key: []const u8) Error!*Value {
     return m.at(key) catch |e| util.fromJson(e);
 }
 
-/// Ports `workaround`'s `gemma4_model_turn_builder` (parsers/gemma4.cpp:15 @b29c606e2):
+/// Ports `workaround`'s `gemma4_model_turn_builder` (parsers/gemma4.cpp:15 @7fe450e19):
 /// an assistant turn with tool calls, the tool results after it and the
 /// final assistant message, folded into one message.
 const ModelTurnBuilder = struct {
@@ -55,7 +55,7 @@ const ModelTurnBuilder = struct {
     content: Value = .null,
     reasoning_content: Value = .null,
 
-    /// Ports `collect` (parsers/gemma4.cpp:25 @b29c606e2).
+    /// Ports `collect` (parsers/gemma4.cpp:25 @7fe450e19).
     fn collect(self: *ModelTurnBuilder) Error!void {
         const a = self.a;
         // Collect the first assistant message
@@ -73,13 +73,17 @@ const ModelTurnBuilder = struct {
 
         // Collect tool call results
         while (self.pos < self.messages.size() and std.mem.eql(u8, try valueString(self.messages.indexAt(a, self.pos) catch |e| return util.fromJson(e), "role"), "tool")) {
-            try self.collectResult(self.messages.indexAt(a, self.pos) catch unreachable);
+            try self.collectResult(self.messages.indexAt(a, self.pos) catch |err| switch (err) {
+                error.OutOfMemory, error.JsonError => unreachable,
+            });
             self.pos += 1;
         }
 
         // Check if the next assistant message is the final message
         if (self.pos < self.messages.size() and std.mem.eql(u8, try valueString(self.messages.indexAt(a, self.pos) catch |e| return util.fromJson(e), "role"), "assistant")) {
-            const next = self.messages.indexAt(a, self.pos) catch unreachable;
+            const next = self.messages.indexAt(a, self.pos) catch |err| switch (err) {
+                error.OutOfMemory, error.JsonError => unreachable,
+            };
             if (!hasToolCalls(next) and hasContent(next)) {
                 self.content = try (try member(next, "content")).clone(a);
                 self.pos += 1;
@@ -87,7 +91,7 @@ const ModelTurnBuilder = struct {
         }
     }
 
-    /// Ports `collect_result` (parsers/gemma4.cpp:54 @b29c606e2).
+    /// Ports `collect_result` (parsers/gemma4.cpp:54 @7fe450e19).
     fn collectResult(self: *ModelTurnBuilder, curr: *const Value) Error!void {
         const a = self.a;
         var response: Value = .null;
@@ -126,7 +130,7 @@ const ModelTurnBuilder = struct {
         self.tool_responses.pushBack(a, entry) catch |e| return util.fromJson(e);
     }
 
-    /// Ports `build` (parsers/gemma4.cpp:89 @b29c606e2).
+    /// Ports `build` (parsers/gemma4.cpp:89 @7fe450e19).
     fn build(self: *ModelTurnBuilder) Error!Value {
         const a = self.a;
         try self.collect();
@@ -146,26 +150,30 @@ const ModelTurnBuilder = struct {
         return msg;
     }
 
-    /// Ports `has_content` (parsers/gemma4.cpp:108 @b29c606e2).
+    /// Ports `has_content` (parsers/gemma4.cpp:108 @7fe450e19).
     fn hasContent(msg: *const Value) bool {
         if (!msg.contains("content")) return false;
-        const content = msg.at("content") catch unreachable;
+        const content = msg.at("content") catch |err| switch (err) {
+            error.OutOfMemory, error.JsonError => unreachable,
+        };
         if (content.isNull()) return false;
         if (content.isString() and content.string.len != 0) return true;
         if (content.isArray() and !content.empty()) return true;
         return false;
     }
 
-    /// Ports `has_tool_calls` (parsers/gemma4.cpp:122 @b29c606e2).
+    /// Ports `has_tool_calls` (parsers/gemma4.cpp:122 @7fe450e19).
     fn hasToolCalls(msg: *const Value) bool {
         if (!msg.contains("tool_calls")) return false;
-        const tc = msg.at("tool_calls") catch unreachable;
+        const tc = msg.at("tool_calls") catch |err| switch (err) {
+            error.OutOfMemory, error.JsonError => unreachable,
+        };
         return tc.isArray() and !tc.empty();
     }
 };
 
 /// Ports `workaround`'s `convert_tool_responses_gemma4` (parsers/gemma4.cpp:127
-/// @b29c606e2): each assistant turn with tool calls, the `tool` messages
+/// @7fe450e19): each assistant turn with tool calls, the `tool` messages
 /// after it and the final assistant reply, as one assistant message with
 /// `tool_responses`, as the older Gemma 4 templates expect.
 pub fn convertToolResponses(a: Allocator, messages: *Value) Error!void {
@@ -279,6 +287,10 @@ const Build = struct {
             const max: c_int = if (self.inputs.parallel_tool_calls) -1 else 1;
             const tool_call = try b.triggerRule("tool-call", try b.repeat(try b.plusLit(try b.litPlus("<|tool_call>call:", self.tool_choice), "<tool_call|>"), min, max));
 
+            if (self.inputs.tool_choice == .required) {
+                return b.plus(try b.plus(start, thought), tool_call);
+            }
+
             const scan_to_toolcall = try b.rule("scan-to-toolcall", try b.until("<|tool_call>"), false);
             const content = try b.rule("content", try p.content(try b.untilOneOf(&.{ "<|channel>", "<channel|>", "<|tool_call>" })), false);
             const message = try b.rule("message", try b.plus(thought, content), false);
@@ -311,7 +323,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_gemma4` (parsers/gemma4.cpp:151 @b29c606e2).
+/// Ports `common_chat_params_init_gemma4` (parsers/gemma4.cpp:151 @7fe450e19).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

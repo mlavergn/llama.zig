@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mamba-base.cpp` at v0.4.1
-//! (`b29c606e2`): every member of `llm_build_mamba_base`.
+//! Ported from `llama.cpp/src/models/mamba-base.cpp` at v0.5.0
+//! (`7fe450e19`): every member of `llm_build_mamba_base`.
 //!
 //! The C++ makes these members of a subclass of `llm_graph_context`; here
 //! they are functions over the builder.
@@ -56,7 +56,7 @@ pub const SsmRows = struct {
 };
 
 /// Ports `llm_build_mamba_base`'s `build_mamba_layer` (models/mamba-base.cpp:9
-/// @b29c606e2): a Mamba-1 block over the recurrent states.
+/// @7fe450e19): a Mamba-1 block over the recurrent states.
 ///
 /// Return: `{n_embd, n_tokens}`.
 pub fn buildMambaLayer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {
@@ -140,6 +140,8 @@ pub fn buildMambaLayer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tensor
             dt = b.buildNorm(dt, layer.ssm_dt_norm, null, .rms, il);
             B = b.buildNorm(B, layer.ssm_b_norm, null, .rms, il);
             C = b.buildNorm(C, layer.ssm_c_norm, null, .rms, il);
+        } else {
+            dt = c.ggml_cont(ctx, dt);
         }
 
         // {dt_rank, d_inner} @ {dt_rank, n_seq_tokens, n_seqs} => {d_inner, n_seq_tokens, n_seqs}
@@ -172,8 +174,8 @@ pub fn buildMambaLayer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tensor
     return cur;
 }
 
-/// Ports `llm_build_mamba_base`'s `build_mamba2_layer` (models/mamba-base.cpp:151
-/// @b29c606e2): a Mamba-2 block over the recurrent states, with rollback
+/// Ports `llm_build_mamba_base`'s `build_mamba2_layer` (models/mamba-base.cpp:153
+/// @7fe450e19): a Mamba-2 block over the recurrent states, with rollback
 /// snapshots when the context keeps them.
 ///
 /// Return: `{n_embd, n_tokens}`.
@@ -198,11 +200,11 @@ pub fn buildMamba2Layer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tenso
     const n_seq_tokens: i64 = ubatch.n_seq_tokens;
     const K: i64 = if (b.cparams.n_rs_seq > 0) @as(i64, b.cparams.n_rs_seq) + 1 else 1;
 
-    impl.assert(n_seqs != 0, "models/mamba-base.cpp", 172, "n_seqs != 0");
-    impl.assert(ubatch.equalSeqs(), "models/mamba-base.cpp", 173, "ubatch.equal_seqs()");
-    impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/mamba-base.cpp", 174, "ubatch.n_tokens == n_seq_tokens * n_seqs");
-    impl.assert(@rem(d_inner, n_head) == 0, "models/mamba-base.cpp", 175, "d_inner % n_head  == 0");
-    impl.assert(@rem(d_inner, n_group) == 0, "models/mamba-base.cpp", 176, "d_inner % n_group == 0");
+    impl.assert(n_seqs != 0, "models/mamba-base.cpp", 174, "n_seqs != 0");
+    impl.assert(ubatch.equalSeqs(), "models/mamba-base.cpp", 175, "ubatch.equal_seqs()");
+    impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/mamba-base.cpp", 176, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(@rem(d_inner, n_head) == 0, "models/mamba-base.cpp", 177, "d_inner % n_head  == 0");
+    impl.assert(@rem(d_inner, n_group) == 0, "models/mamba-base.cpp", 178, "d_inner % n_group == 0");
 
     const conv_states_all = mctx_cur.getRL(il);
     const ssm_states_all = mctx_cur.getSL(il);

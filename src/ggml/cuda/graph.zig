@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.4.1
-//! (`b29c606e2`): `ggml_cuda_compute_forward`, the `USE_CUDA_GRAPH` helpers,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.5.0
+//! (`7fe450e19`): `ggml_cuda_compute_forward`, the `USE_CUDA_GRAPH` helpers,
 //! `ggml_cuda_graph_evaluate_and_capture`, `ggml_backend_cuda_graph_compute`
 //! and `ggml_backend_cuda_graph_optimize`.
 //!
@@ -61,6 +61,8 @@ const pool1d = @import("pool1d.zig");
 const pool2d = @import("pool2d.zig");
 const out_prod = @import("out_prod.zig");
 const dsv4_hc = @import("dsv4_hc.zig");
+const topk_moe = @import("topk_moe.zig");
+const ggml_graph = @import("../graph.zig");
 
 // Normalisation, softmax, rope and the training ops.
 const norm = @import("norm.zig");
@@ -90,7 +92,7 @@ const cudaCheck = common.cudaCheck;
 // -----------------------------------------------------------------------------
 // Dispatch
 
-/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2067 @b29c606e2).
+/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2067 @7fe450e19).
 fn computeForward(ctx: *Context, dst: *Tensor) bool {
     switch (dst.op) {
         c.GGML_OP_REPEAT => binbcast.opRepeat(ctx, dst),
@@ -234,7 +236,7 @@ const mulMatIdNeedsSync = mulmat.mulMatIdNeedsSync;
 // -----------------------------------------------------------------------------
 // CUDA graphs
 
-/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2552 @b29c606e2).
+/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2552 @7fe450e19).
 fn isViewOrNoop(t: *const Tensor) bool {
     return c.ggml_is_empty(t) or t.op == c.GGML_OP_RESHAPE or t.op == c.GGML_OP_TRANSPOSE or
         t.op == c.GGML_OP_VIEW or t.op == c.GGML_OP_PERMUTE or t.op == c.GGML_OP_NONE;
@@ -244,7 +246,7 @@ fn nodes(cgraph: *impl.CGraph) []*Tensor {
     return @ptrCast(cgraph.nodes[0..@intCast(cgraph.n_nodes)]);
 }
 
-/// Ports `ggml_cuda_graph_check_compability` (ggml-cuda.cu:2558 @b29c606e2).
+/// Ports `ggml_cuda_graph_check_compability` (ggml-cuda.cu:2558 @7fe450e19).
 fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
     var use_cuda_graph = true;
     for (nodes(cgraph)) |node| {
@@ -265,12 +267,12 @@ fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
     return use_cuda_graph;
 }
 
-/// Ports `ggml_cuda_graph_get_key` (ggml-cuda.cu:2591 @b29c606e2).
+/// Ports `ggml_cuda_graph_get_key` (ggml-cuda.cu:2591 @7fe450e19).
 fn graphGetKey(cgraph: *impl.CGraph) ?*const anyopaque {
     return cgraph.nodes[0];
 }
 
-/// Ports `ggml_cuda_graph_update_required` (ggml-cuda.cu:2595 @b29c606e2).
+/// Ports `ggml_cuda_graph_update_required` (ggml-cuda.cu:2595 @7fe450e19).
 fn graphUpdateRequired(cuda_ctx: *Context, cgraph: *impl.CGraph) bool {
     var res = false;
 
@@ -315,7 +317,7 @@ fn graphUpdateRequired(cuda_ctx: *Context, cgraph: *impl.CGraph) bool {
     return res;
 }
 
-/// Ports `ggml_cuda_graph_update_executable` (ggml-cuda.cu:2637 @b29c606e2),
+/// Ports `ggml_cuda_graph_update_executable` (ggml-cuda.cu:2637 @7fe450e19),
 /// the CUDA 12 arm.
 fn graphUpdateExecutable(cuda_ctx: *Context, graph_key: ?*const anyopaque) void {
     const graph = cuda_ctx.cudaGraph(graph_key);
@@ -335,7 +337,7 @@ fn graphUpdateExecutable(cuda_ctx: *Context, graph_key: ?*const anyopaque) void 
     }
 }
 
-/// Ports `ggml_cuda_graph_set_enabled` (ggml-cuda.cu:4404 @b29c606e2).
+/// Ports `ggml_cuda_graph_set_enabled` (ggml-cuda.cu:4405 @7fe450e19).
 fn graphSetEnabled(cuda_ctx: *Context, graph_key: ?*const anyopaque) bool {
     const graph = cuda_ctx.cudaGraph(graph_key);
 
@@ -380,7 +382,7 @@ const Concurrency = struct {
     }
 };
 
-/// Ports `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4185 @b29c606e2).
+/// Ports `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4186 @7fe450e19).
 fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_graph: bool, cuda_graph_update_required: bool, graph_key: ?*const anyopaque) void {
     var graph_evaluated_or_captured = false;
 
@@ -492,7 +494,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_gr
 }
 
 /// The C's "restore original node order within each concurrent region"
-/// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4185 @b29c606e2).
+/// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4186 @7fe450e19).
 fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     var node_to_idx: std.AutoHashMapUnmanaged(*const Tensor, usize) = .empty;
     defer node_to_idx.deinit(allocator);
@@ -530,7 +532,7 @@ fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     }
 }
 
-/// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:4420 @b29c606e2).
+/// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:4421 @7fe450e19).
 pub fn graphCompute(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgraph) callconv(.c) c.enum_ggml_status {
     const cuda_ctx = backend.backendCtx(backend_c);
     const cgraph: *impl.CGraph = @ptrCast(@alignCast(cgraph_c));
@@ -608,6 +610,35 @@ fn belongsToBranch(node: *const Tensor, branch: []const *const Tensor) bool {
     return false;
 }
 
+fn appendOps(buf: *[16]c.enum_ggml_op, n: *usize, items: []const c.enum_ggml_op) void {
+    for (items) |x| {
+        buf[n.*] = x;
+        n.* += 1;
+    }
+}
+
+/// `graph_optimize`'s `add_alloc_deps` lambda (ggml-cuda.cu:4510 @7fe450e19):
+/// keeps every node in `[start, last_node)` and each of its sources alive
+/// until `nodes[last_node]`.
+fn addAllocDeps(
+    cgraph: *const impl.CGraph,
+    params: *const c.struct_ggml_backend_graph_optimize_params,
+    start: usize,
+    last_node: usize,
+) void {
+    const add_alloc_dep = params.add_alloc_dep.?;
+    const user_data = params.user_data;
+    const last = cgraph.nodes[last_node];
+    var i = start;
+    while (i < last_node) : (i += 1) {
+        const n = cgraph.nodes[i].?;
+        add_alloc_dep(user_data, n, last);
+        for (n.src) |s| {
+            if (s) |sp| add_alloc_dep(user_data, sp, last);
+        }
+    }
+}
+
 const GraphOpt = struct {
     var enabled: bool = false;
     fn init() void {
@@ -617,13 +648,21 @@ const GraphOpt = struct {
     const once = common.Once(init);
 };
 
-/// Ports `ggml_backend_cuda_graph_optimize` (ggml-cuda.cu:4504 @b29c606e2).
+/// Ports `ggml_backend_cuda_graph_optimize` (ggml-cuda.cu:4505 @7fe450e19),
+/// with its `add_alloc_deps` lambda.
 ///
 /// Its first pass runs whether or not CUDA graphs are on: every
 /// MoE weighted reduction `fusion.zig` would fuse reads its experts, router
 /// weights and expert scale at the chain's last node, after the scheduler
 /// thinks they are dead, so each is kept allocated until then through
-/// `params.add_alloc_dep`.
+/// `params.add_alloc_dep`. Every top-k MoE chain `tryFuse` would fuse
+/// without a delayed softmax gets the same treatment: each of its nodes and
+/// their sources are kept alive until the node *after* the chain. That is
+/// `nodes[i + ops.size()]`, one past the chain's last node, as the C
+/// indexes it -- `last_node` names the end of the range, not its last
+/// element -- and it reads `nodes[n_nodes]` for a chain that ends the
+/// graph, as the C does. Unlike `tryFuse`, the C checks no memory ranges
+/// here.
 ///
 /// The C walks `fan_out`, a `std::unordered_map`, to pick fork nodes, and
 /// handles the first qualifying one in each range; which is "first" is
@@ -638,21 +677,70 @@ pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgra
 
     fusion.DisableFusion.once.call();
     if (!fusion.DisableFusion.value) {
+        const params = impl.one(c.struct_ggml_backend_graph_optimize_params, params_c);
+        const add_alloc_dep = params.add_alloc_dep.?;
+        // add alloc deps for performance positive fusions. This may increase the overall compute buffer size.
+        // TODO: consolidate fusion paths in graph_optimize and graph_compute
         var i: c_int = 0;
         while (i < cgraph.n_nodes) : (i += 1) {
-            if (cgraph.nodes[@intCast(i)].?.op != c.GGML_OP_MUL) continue;
-
             var match: fusion.MoeWeightedReductionMatch = .{};
-            if (!fusion.matchMoeWeightedReduction(cgraph, i, &match)) continue;
-
-            const params = impl.one(c.struct_ggml_backend_graph_optimize_params, params_c);
-            const add_alloc_dep = params.add_alloc_dep.?;
-            add_alloc_dep(params.user_data, @constCast(match.experts.?), match.dst.?);
-            add_alloc_dep(params.user_data, @constCast(match.weights.?), match.dst.?);
-            if (match.expert_scale) |expert_scale| {
-                add_alloc_dep(params.user_data, @constCast(expert_scale), match.dst.?);
+            if (fusion.matchMoeWeightedReduction(cgraph, i, &match)) {
+                add_alloc_dep(params.user_data, @constCast(match.experts.?), match.dst.?);
+                add_alloc_dep(params.user_data, @constCast(match.weights.?), match.dst.?);
+                if (match.expert_scale) |expert_scale| {
+                    add_alloc_dep(params.user_data, @constCast(expert_scale), match.dst.?);
+                }
+                i += match.node_count - 1;
             }
-            i += match.node_count - 1;
+
+            const nd = cgraph.nodes[@intCast(i)].?;
+            if (nd.op == c.GGML_OP_UNARY or nd.op == c.GGML_OP_SOFT_MAX or nd.op == c.GGML_OP_ARGSORT) {
+                var args: topk_moe.Args = .{};
+                const can_fuse = fusion.topkMoeFusion(cgraph, i, &args);
+                var ops_buf: [16]c.enum_ggml_op = undefined;
+                var n_ops: usize = 0;
+
+                if (can_fuse and !args.delayed_softmax) {
+                    const logits = impl.one(Tensor, nd.src[0]);
+                    var out_nodes: [2]c_int = undefined; // nodes which can't be elided
+
+                    if (args.sigmoid) {
+                        appendOps(&ops_buf, &n_ops, &.{c.GGML_OP_UNARY});
+                    } else if (args.sqrt_softplus) {
+                        appendOps(&ops_buf, &n_ops, &.{ c.GGML_OP_UNARY, c.GGML_OP_SQRT });
+                    } else {
+                        appendOps(&ops_buf, &n_ops, &.{c.GGML_OP_SOFT_MAX});
+                    }
+                    const i_probs = i + @as(c_int, @intCast(n_ops)) - 1; // last node of the gating activation
+
+                    if (args.prob_bias) {
+                        appendOps(&ops_buf, &n_ops, &.{ c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS });
+                        out_nodes[0] = i_probs + 4;
+                    } else {
+                        appendOps(&ops_buf, &n_ops, &.{ c.GGML_OP_RESHAPE, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS });
+                        out_nodes[0] = i_probs + 3;
+                    }
+                    const ids = cgraph.nodes[@intCast(out_nodes[0])].?;
+
+                    if (args.norm) {
+                        appendOps(&ops_buf, &n_ops, &.{ c.GGML_OP_RESHAPE, c.GGML_OP_SUM_ROWS, c.GGML_OP_CLAMP, c.GGML_OP_DIV, c.GGML_OP_RESHAPE });
+                    }
+                    if (args.scale) {
+                        appendOps(&ops_buf, &n_ops, &.{c.GGML_OP_SCALE});
+                    }
+
+                    const n: c_int = @intCast(n_ops);
+                    const weights = cgraph.nodes[@intCast(i + n - 1)].?;
+                    out_nodes[1] = i + n - 1;
+
+                    if (ggml_graph.canFuseSubgraph(cgraph, i, ops_buf[0..n_ops], &out_nodes) and
+                        topk_moe.shouldUseTopkMoe(nd, logits, weights, ids))
+                    {
+                        addAllocDeps(cgraph, params, @intCast(i), @intCast(i + n));
+                        i += n - 1;
+                    }
+                }
+            }
         }
     }
 

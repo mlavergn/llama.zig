@@ -6,14 +6,16 @@
 //! # Provenance
 //!
 //! Ported from the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/fattn-common.cuh` at v0.4.1 (`b29c606e2`),
+//! `llama.cpp/ggml/src/ggml-cuda/fattn-common.cuh` at v0.5.0 (`7fe450e19`),
 //! plus `amd_mfma_available` and `amd_wmma_available` from
 //! `llama.cpp/ggml/src/ggml-cuda/common.cuh`. The kernels --
 //! `flash_attn_mask_to_KV_max`, `flash_attn_stream_k_fixup_uniform`,
 //! `flash_attn_stream_k_fixup_general` and `flash_attn_combine_results` --
 //! stay CUDA. The sparse K/V path v0.4.0 added (`use_sparse`) reuses the
 //! `KV_max` buffer for the indices `fattn.compactMask` writes, which is
-//! `fattn.cu`'s and launches from that translation unit.
+//! `fattn.cu`'s and launches from that translation unit. Since v0.5.0 there
+//! is one index list per query tile of `ncols1` queries, not per query, and
+//! each list's live count follows the lists in the same buffer.
 //!
 //! # Which translation unit
 //!
@@ -38,7 +40,7 @@ extern fn powf(x: f32, y: f32) f32;
 extern fn log2f(x: f32) f32;
 extern fn floorf(x: f32) f32;
 
-/// Ports `FATTN_KQ_STRIDE` (fattn-common.cuh:9 @b29c606e2).
+/// Ports `FATTN_KQ_STRIDE` (fattn-common.cuh:9 @7fe450e19).
 pub const kq_stride = 256;
 
 /// `sizeof(half)`.
@@ -54,36 +56,36 @@ const Float2 = extern struct { x: f32, y: f32 };
 // -----------------------------------------------------------------------------
 // AMD predicates
 
-/// `GGML_CUDA_CC_GFX909` (common.cuh:72 @b29c606e2), a GCN APU.
+/// `GGML_CUDA_CC_GFX909` (common.cuh:72 @7fe450e19), a GCN APU.
 const cc_gfx909 = common.cc.offset_amd + 0x909;
-/// `GGML_CUDA_CC_GFX90C` (common.cuh:73 @b29c606e2), a GCN APU.
+/// `GGML_CUDA_CC_GFX90C` (common.cuh:73 @7fe450e19), a GCN APU.
 const cc_gfx90c = common.cc.offset_amd + 0x90c;
-/// `GGML_CUDA_CC_CDNA1` (common.cuh:74 @b29c606e2).
+/// `GGML_CUDA_CC_CDNA1` (common.cuh:74 @7fe450e19).
 const cc_cdna1 = common.cc.offset_amd + 0x908;
-/// `GGML_CUDA_CC_RDNA1` (common.cuh:80 @b29c606e2).
+/// `GGML_CUDA_CC_RDNA1` (common.cuh:80 @7fe450e19).
 const cc_rdna1 = common.cc.offset_amd + 0x1010;
-/// `GGML_CUDA_CC_RDNA3` (common.cuh:82 @b29c606e2).
+/// `GGML_CUDA_CC_RDNA3` (common.cuh:82 @7fe450e19).
 const cc_rdna3 = common.cc.offset_amd + 0x1100;
-/// `GGML_CUDA_CC_RDNA3_5` (common.cuh:83 @b29c606e2).
+/// `GGML_CUDA_CC_RDNA3_5` (common.cuh:83 @7fe450e19).
 const cc_rdna3_5 = common.cc.offset_amd + 0x1150;
-/// `GGML_CUDA_CC_RDNA4` (common.cuh:84 @b29c606e2).
+/// `GGML_CUDA_CC_RDNA4` (common.cuh:84 @7fe450e19).
 const cc_rdna4 = common.cc.offset_amd + 0x1200;
 
-/// Ports `GGML_CUDA_CC_IS_GCN_APU` (common.cuh:94 @b29c606e2): the two GCN
+/// Ports `GGML_CUDA_CC_IS_GCN_APU` (common.cuh:94 @7fe450e19): the two GCN
 /// APUs whose compute capabilities fall inside the CDNA range.
 fn isGcnApu(x: c_int) bool {
     return x == cc_gfx909 or x == cc_gfx90c;
 }
 
-/// Ports `amd_mfma_available` (common.cuh:348 @b29c606e2), the
+/// Ports `amd_mfma_available` (common.cuh:348 @7fe450e19), the
 /// `!GGML_HIP_NO_MMQ_MFMA` arm, which is the CDNA test: ports
-/// `GGML_CUDA_CC_IS_CDNA` (common.cuh:96 @b29c606e2). False for every CUDA
+/// `GGML_CUDA_CC_IS_CDNA` (common.cuh:96 @7fe450e19). False for every CUDA
 /// compute capability.
 pub fn amdMfmaAvailable(x: c_int) bool {
     return !isGcnApu(x) and x >= cc_cdna1 and x < cc_rdna1;
 }
 
-/// Ports `amd_wmma_available` (common.cuh:356 @b29c606e2):
+/// Ports `amd_wmma_available` (common.cuh:356 @7fe450e19):
 /// `GGML_CUDA_CC_IS_RDNA4(cc) || GGML_CUDA_CC_IS_RDNA3(cc)`. False for every
 /// CUDA compute capability.
 pub fn amdWmmaAvailable(x: c_int) bool {
@@ -123,14 +125,14 @@ fn u32Of(x: anytype) u32 {
 // -----------------------------------------------------------------------------
 // F16 scratch
 
-/// Ports `ggml_cuda_flash_attn_ext_f16_extra_data` (fattn-common.cuh:47 @b29c606e2).
+/// Ports `ggml_cuda_flash_attn_ext_f16_extra_data` (fattn-common.cuh:47 @7fe450e19).
 pub const F16ExtraData = struct {
     K: usize = 0,
     V: usize = 0,
     end: usize = 0,
 };
 
-/// Ports `ggml_cuda_flash_attn_ext_get_f16_extra_data` (fattn-common.cuh:53 @b29c606e2):
+/// Ports `ggml_cuda_flash_attn_ext_get_f16_extra_data` (fattn-common.cuh:53 @7fe450e19):
 /// where in `dst`'s allocation, past `dst`'s own bytes, the F16 copies of K
 /// and V go. Computed from `dst->data`, so the buffer type's size (asked
 /// with whatever `data` the tensor has then) and the launch agree only
@@ -212,13 +214,14 @@ pub const LaunchArgs = struct {
     need_f16_V: bool,
     stream_k: bool,
     /// Gather K/V through the sparse indices `fattn.compactMask` writes
-    /// from the mask's finite entries, `ggml_flash_attn_ext_set_n_kv_max`'s
-    /// op_params slot 4 of them per mask row; no default, as the C has none.
+    /// from the mask's finite entries: per query tile, up to `ncols1` times
+    /// `ggml_flash_attn_ext_set_n_kv_max`'s op_params slot 4, at most the K
+    /// length; no default, as the C has none.
     use_sparse: bool,
     warp_size: c_int = common.warp_size,
 };
 
-/// Ports `should_use_stream_k` (fattn-common.cuh:1136 @b29c606e2), the
+/// Ports `should_use_stream_k` (fattn-common.cuh:1140 @7fe450e19), the
 /// lambda in `launch_fattn`: whether a stream-k kernel takes the stream-k
 /// decomposition or whole tiles, which for short contexts can be faster
 /// because it skips the fixup.
@@ -235,7 +238,7 @@ fn shouldUseStreamK(cc: c_int, ntiles_dst: c_int, max_blocks: c_int, DKQ: c_int)
     return tiles_efficiency_percent < 75;
 }
 
-/// Ports `launch_fattn` (fattn-common.cuh:976 @b29c606e2).
+/// Ports `launch_fattn` (fattn-common.cuh:976 @7fe450e19).
 ///
 /// Parameters:
 /// - `library`: the translation unit the calling case is instantiated in;
@@ -368,15 +371,19 @@ pub fn launchFattn(
     const ntiles_z_gqa: c_int = @divTrunc(gqa_ratio + ncols2 - 1, ncols2);
     const ntiles_dst: c_int = i32Of(@as(i64, ntiles_x * ntiles_z_gqa) * K.ne[2] * Q.ne[3]);
 
-    const n_kv_max: i32 = if (a.use_sparse) impl.getOpParamsI32(KQV, 4) else 0;
+    // sparse: a query tile of ncols1 queries shares one index list, the union of the queries' visible columns
+    var n_kv_max: i32 = 0;
     if (a.use_sparse) {
         impl.assert(mask != null, "mask != nullptr");
-        impl.assert(n_kv_max > 0, "n_kv_max > 0");
         const m = mask.?;
-        const mask_rows: usize = @as(usize, @bitCast(m.ne[1])) *% @as(usize, @bitCast(m.ne[3]));
+        const n_kv_max_query = impl.getOpParamsI32(KQV, 4);
+        impl.assert(n_kv_max_query > 0, "n_kv_max_query > 0");
+        n_kv_max = @truncate(@min(K.ne[1], @as(i64, ncols1) * n_kv_max_query));
 
-        _ = KV_max.alloc(@as(usize, @intCast(n_kv_max)) *% mask_rows);
-        fattn.compactMask(m, KV_max.ptr, n_kv_max, main_stream);
+        const n_lists: usize = @as(usize, @as(u32, @bitCast(ntiles_x))) *% @as(usize, @bitCast(m.ne[3]));
+
+        _ = KV_max.alloc(@as(usize, @bitCast(@as(isize, n_kv_max))) *% n_lists +% n_lists);
+        fattn.compactMask(m, KV_max.ptr, KV_max.ptr.? + @as(usize, @bitCast(@as(isize, n_kv_max))) *% n_lists, @truncate(Q.ne[1]), ncols1, n_kv_max, main_stream);
     }
 
     // Optional optimization where the mask is scanned to determine whether part of the calculation can be skipped.

@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nemotron-h.cpp` at v0.4.1
-//! (`b29c606e2`): `llama_model_nemotron_h`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/nemotron-h.cpp` at v0.5.0
+//! (`7fe450e19`): `llama_model_nemotron_h`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_attention_layer` and `build_ffn_layer`, which Nemotron-H MoE
 //! shares.
@@ -32,7 +32,7 @@ fn divI64(a: i64, b: i64) i64 {
 }
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_hparams`
-/// (models/nemotron-h.cpp:5 @b29c606e2).
+/// (models/nemotron-h.cpp:5 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -49,8 +49,12 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         hp.is_recr_impl[i] = @intFromBool(i < hp.nLayer() and hp.nHeadKv(i) == 0 and hp.nFf(i) == 0);
     }
 
-    hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     hp.f_norm_eps = (try meta.getKey(f32, .attention_layernorm_eps, true, exc)).?; // the MTP head's final_layernorm
+    if (try meta.getKey(f32, .attention_layernorm_rms_eps, false, exc)) |v| {
+        hp.f_norm_rms_eps = v;
+    } else {
+        hp.f_norm_rms_eps = hp.f_norm_eps;
+    }
 
     // The Puzzle models set a different expert FFN size per layer.
     _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, false, exc);
@@ -79,7 +83,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_tensors`
-/// (models/nemotron-h.cpp:47 @b29c606e2).
+/// (models/nemotron-h.cpp:49 @7fe450e19).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -209,6 +213,8 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         layer.attn_post_norm = try self.createTensor(.{ .tensor = .attn_post_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, mtp_flags, exc);
         layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_expert }, mtp_flags, exc);
         layer.ffn_exp_probs_b = try self.createTensor(.{ .tensor = .ffn_exp_probs_b, .suffix = "bias", .bid = i }, &.{l.n_expert}, mtp_flags, exc);
+        layer.ffn_latent_down = try self.createTensor(.{ .tensor = .ffn_latent_down, .suffix = "weight", .bid = i }, &.{ l.n_embd, moe_n_embd }, mtp_flags | nr, exc);
+        layer.ffn_latent_up = try self.createTensor(.{ .tensor = .ffn_latent_up, .suffix = "weight", .bid = i }, &.{ moe_n_embd, l.n_embd }, mtp_flags | nr, exc);
         layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ n_ff_exp, moe_n_embd, l.n_expert }, mtp_flags, exc);
         layer.ffn_up_exps = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "weight", .bid = i }, &.{ moe_n_embd, n_ff_exp, l.n_expert }, mtp_flags, exc);
         layer.ffn_down_shexp = try self.createTensor(.{ .tensor = .ffn_down_shexp, .suffix = "weight", .bid = i }, &.{ n_ff_shexp, l.n_embd }, mtp_flags, exc);
@@ -217,19 +223,19 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `llama_model_nemotron_h`'s `build_arch_graph`
-/// (models/nemotron-h.cpp:180 @b29c606e2).
+/// (models/nemotron-h.cpp:184 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_nemotron_h`'s `graph`
-/// (models/nemotron-h.cpp:184 @b29c606e2).
+/// (models/nemotron-h.cpp:188 @7fe450e19).
 pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const cp = b.cparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h.cpp", 187, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h.cpp", 191, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
     c.ggml_build_forward_expand(b.gf, inpL);
@@ -306,7 +312,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_attention_layer`
-/// (models/nemotron-h.cpp:262 @b29c606e2): attention without RoPE.
+/// (models/nemotron-h.cpp:266 @7fe450e19): attention without RoPE.
 fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_attn: *graph.InpAttnKv, n_embd_head: i64, il: c_int) *Tensor {
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -319,7 +325,7 @@ fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tens
 }
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_ffn_layer`
-/// (models/nemotron-h.cpp:278 @b29c606e2): a squared-ReLU FFN, or the
+/// (models/nemotron-h.cpp:282 @7fe450e19): a squared-ReLU FFN, or the
 /// mixture of experts beside a shared expert.
 fn buildFfnLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;

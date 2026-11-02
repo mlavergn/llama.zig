@@ -1,0 +1,5 @@
+{#- v0.5.0: unary + and - bind tighter than a filter or a test, and nest. -#}
+{%- set n = messages|length -%}
+[{{ -n }}][{{ +n }}][{{ -n|abs }}][{{ -n is number }}][{{ - -n }}][{{ -+n }}]
+[{{ messages[:-n]|length }}][{{ messages[-n:]|length }}][{{ "abcdef"[:-n] }}]
+[{{ +(n / 2) }}][{{ -(n / 2) }}][{{ -(n / 2)|abs }}][{{ -n * 2 }}][{{ 1 - -n }}]

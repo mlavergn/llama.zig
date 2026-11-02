@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/minimax-m2.cpp` at v0.4.1
-//! (`b29c606e2`): `llama_model_minimax_m2`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/minimax-m2.cpp` at v0.5.0
+//! (`7fe450e19`): `llama_model_minimax_m2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_minimax_m2`'s `load_arch_hparams` (models/minimax-m2.cpp:3 @b29c606e2).
+/// Ports `llama_model_minimax_m2`'s `load_arch_hparams` (models/minimax-m2.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -35,7 +35,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_minimax_m2`'s `load_arch_tensors` (models/minimax-m2.cpp:14 @b29c606e2).
+/// Ports `llama_model_minimax_m2`'s `load_arch_tensors` (models/minimax-m2.cpp:14 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -66,13 +66,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_minimax_m2`'s `build_arch_graph` (models/minimax-m2.cpp:43 @b29c606e2).
+/// Ports `llama_model_minimax_m2`'s `build_arch_graph` (models/minimax-m2.cpp:43 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_minimax_m2`'s `graph`
-/// (models/minimax-m2.cpp:47 @b29c606e2). Unlike most, it does not assert
+/// (models/minimax-m2.cpp:47 @7fe450e19). Unlike most, it does not assert
 /// that the head size is `n_rot`: MiniMax rotates 64 of its 128 dimensions.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;

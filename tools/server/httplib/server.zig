@@ -6,7 +6,7 @@
 //!
 //! Ports `Server` from `llama.cpp/vendor/cpp-httplib/httplib.cpp` and its
 //! declaration in `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib
-//! 0.56.0, vendored at v0.4.1, `b29c606e2`), as far as
+//! 0.57.1, vendored at v0.5.0, `7fe450e19`), as far as
 //! `llama.cpp/tools/server/server-http.cpp` reaches it. Each declaration
 //! names what it ports and the line it began at.
 //!
@@ -49,6 +49,7 @@ const Response = message.Response;
 const SocketStream = socket.SocketStream;
 const Socket = socket.Socket;
 const ThreadPool = thread_pool.ThreadPool;
+const TaskQueue = thread_pool.TaskQueue;
 const StatusCode = detail.StatusCode;
 
 /// `Handler`: a route's callback. An error is an exception it threw.
@@ -57,7 +58,7 @@ pub const Handler = struct {
     func: *const fn (ctx: ?*anyopaque, req: *const Request, res: *Response) anyerror!void,
 };
 
-/// `HandlerResponse` (httplib.h:2141 @b29c606e2).
+/// `HandlerResponse` (httplib.h:2142 @7fe450e19).
 pub const HandlerResponse = enum { handled, unhandled };
 
 /// `HandlerWithResponse`: the pre-routing and error handlers.
@@ -73,20 +74,20 @@ pub const ExceptionHandler = struct {
     func: *const fn (ctx: ?*anyopaque, req: *const Request, res: *Response, err: anyerror) anyerror!void,
 };
 
-/// `new_task_queue`: makes the pool `listen_internal` hands connections to.
+/// `new_task_queue`: makes the queue `listen_internal` hands connections to.
 pub const TaskQueueFactory = struct {
     ctx: ?*anyopaque,
-    func: *const fn (ctx: ?*anyopaque, a: std.mem.Allocator) anyerror!*ThreadPool,
+    func: *const fn (ctx: ?*anyopaque, a: std.mem.Allocator) anyerror!TaskQueue,
 };
 
-/// Ports `PathParamsMatcher` (httplib.h:2045 @b29c606e2): a pattern's
+/// Ports `PathParamsMatcher` (httplib.h:2046 @7fe450e19): a pattern's
 /// literal fragments, and the names of the `:param` segments between them.
 const PathParamsMatcher = struct {
     pattern: []const u8,
     static_fragments: std.ArrayList([]const u8) = .empty,
     param_names: std.ArrayList([]const u8) = .empty,
 
-    /// Ports `PathParamsMatcher` (httplib.cpp:7482 @b29c606e2), the
+    /// Ports `PathParamsMatcher` (httplib.cpp:7494 @7fe450e19), the
     /// constructor. A repeated name throws `std::invalid_argument` in the
     /// C; this returns `error.InvalidArgument`.
     fn init(a: std.mem.Allocator, pattern: []const u8) !PathParamsMatcher {
@@ -108,7 +109,7 @@ const PathParamsMatcher = struct {
         return self;
     }
 
-    /// Ports `match` (httplib.cpp:7531 @b29c606e2), a member of
+    /// Ports `match` (httplib.cpp:7543 @7fe450e19), a member of
     /// `PathParamsMatcher`: fills `path_params` as it goes, so a failed
     /// match can leave some behind, as the C's does.
     fn match(self: *const PathParamsMatcher, req: *Request) error{OutOfMemory}!bool {
@@ -131,16 +132,16 @@ const PathParamsMatcher = struct {
     }
 };
 
-/// Ports `RegexMatcher` (httplib.h:2074 @b29c606e2): the whole path
+/// Ports `RegexMatcher` (httplib.h:2075 @7fe450e19): the whole path
 /// against a `std::regex` of the pattern.
 const RegexMatcher = struct {
     pattern: []const u8,
     regex: Regex,
 
-    /// `CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH` (httplib.h:160 @b29c606e2).
+    /// `CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH` (httplib.h:160 @7fe450e19).
     const path_max_length = 256;
 
-    /// Ports `match` (httplib.cpp:7578 @b29c606e2), a member of
+    /// Ports `match` (httplib.cpp:7590 @7fe450e19), a member of
     /// `RegexMatcher`: an overlong path is a non-match rather than a risk of
     /// overflowing the stack in `std::regex_match`. The C keeps the
     /// sub-matches in `request.matches`, which no handler of the server's
@@ -187,7 +188,7 @@ const Matcher = union(enum) {
 /// One route: its matcher and its handler.
 const Route = struct { matcher: Matcher, handler: Handler };
 
-/// Ports `Server` (httplib.h:2134 @b29c606e2).
+/// Ports `Server` (httplib.h:2135 @7fe450e19).
 pub const Server = struct {
     allocator: std.mem.Allocator,
     new_task_queue: ?TaskQueueFactory = null,
@@ -221,7 +222,7 @@ pub const Server = struct {
     socket_options: socket.SocketOptions = .{ .func = socket.defaultSocketOptions },
     default_headers: Headers = .{},
 
-    /// Ports `Server` (httplib.cpp:8124 @b29c606e2), the constructor:
+    /// Ports `Server` (httplib.cpp:8136 @7fe450e19), the constructor:
     /// ignores `SIGPIPE`, as the C does.
     ///
     /// Parameters:
@@ -251,7 +252,7 @@ pub const Server = struct {
         a.destroy(self);
     }
 
-    /// Ports `make_matcher` (httplib.cpp:8137 @b29c606e2), a member of
+    /// Ports `make_matcher` (httplib.cpp:8149 @7fe450e19), a member of
     /// `Server`, with `add_handler`: `/:` or no regex metacharacter makes a
     /// `PathParamsMatcher`, anything else a `RegexMatcher`, whose
     /// `std::regex_error` on a malformed pattern is `error.RegexError`.
@@ -266,22 +267,22 @@ pub const Server = struct {
         try list.append(a, .{ .matcher = matcher, .handler = handler });
     }
 
-    /// Ports `Get` (httplib.cpp:8155 @b29c606e2), a member of `Server`.
+    /// Ports `Get` (httplib.cpp:8167 @7fe450e19), a member of `Server`.
     pub fn get(self: *Server, pattern: []const u8, handler: Handler) !void {
         try self.addHandler(&self.get_handlers, pattern, handler);
     }
 
-    /// Ports `Post` (httplib.cpp:8159 @b29c606e2), a member of `Server`.
+    /// Ports `Post` (httplib.cpp:8171 @7fe450e19), a member of `Server`.
     pub fn post(self: *Server, pattern: []const u8, handler: Handler) !void {
         try self.addHandler(&self.post_handlers, pattern, handler);
     }
 
-    /// Ports `Delete` (httplib.cpp:8189 @b29c606e2), a member of `Server`.
+    /// Ports `Delete` (httplib.cpp:8201 @7fe450e19), a member of `Server`.
     pub fn delete(self: *Server, pattern: []const u8, handler: Handler) !void {
         try self.addHandler(&self.delete_handlers, pattern, handler);
     }
 
-    /// Ports `set_error_handler_core` (httplib.cpp:8331 @b29c606e2), a
+    /// Ports `set_error_handler_core` (httplib.cpp:8343 @7fe450e19), a
     /// member of `Server`: a handler without an answer, which counts as
     /// `Handled` whatever it does.
     pub fn setErrorHandler(self: *Server, handler: Handler) error{OutOfMemory}!void {
@@ -298,31 +299,37 @@ pub const Server = struct {
         self.error_handler = .{ .ctx = w, .func = Wrap.call };
     }
 
-    /// Ports `set_exception_handler` (httplib.cpp:8340 @b29c606e2), a member
+    /// Ports `set_exception_handler` (httplib.cpp:8352 @7fe450e19), a member
     /// of `Server`.
     pub fn setExceptionHandler(self: *Server, handler: ExceptionHandler) void {
         self.exception_handler = handler;
     }
 
-    /// Ports `set_pre_routing_handler` (httplib.cpp:8345 @b29c606e2), a
+    /// Ports `set_pre_routing_handler` (httplib.cpp:8357 @7fe450e19), a
     /// member of `Server`.
     pub fn setPreRoutingHandler(self: *Server, handler: HandlerWithResponse) void {
         self.pre_routing_handler = handler;
     }
 
-    /// Ports `set_address_family` (httplib.cpp:8386 @b29c606e2), a member of
+    /// Ports `set_address_family` (httplib.cpp:8398 @7fe450e19), a member of
     /// `Server`.
     pub fn setAddressFamily(self: *Server, family: c_int) void {
         self.address_family = family;
     }
 
-    /// Ports `set_socket_options` (httplib.cpp:8401 @b29c606e2), a member of
+    /// Ports `set_ipv6_v6only` (httplib.cpp:8408 @7fe450e19), a member of
+    /// `Server`: `IPV6_V6ONLY` on an IPv6 listening socket.
+    pub fn setIpv6V6only(self: *Server, on: bool) void {
+        self.ipv6_v6only = on;
+    }
+
+    /// Ports `set_socket_options` (httplib.cpp:8413 @7fe450e19), a member of
     /// `Server`.
     pub fn setSocketOptions(self: *Server, socket_options: socket.SocketOptions) void {
         self.socket_options = socket_options;
     }
 
-    /// Ports `set_default_headers` (httplib.cpp:8406 @b29c606e2), a member
+    /// Ports `set_default_headers` (httplib.cpp:8418 @7fe450e19), a member
     /// of `Server`: every response starts with these. The strings are
     /// copied.
     pub fn setDefaultHeaders(self: *Server, headers: []const Headers.Entry) error{OutOfMemory}!void {
@@ -330,21 +337,21 @@ pub const Server = struct {
         for (headers) |h| _ = try self.default_headers.emplace(a, try a.dupe(u8, h.key), try a.dupe(u8, h.value));
     }
 
-    /// Ports `set_read_timeout` (httplib.cpp:8442 @b29c606e2), a member of
+    /// Ports `set_read_timeout` (httplib.cpp:8454 @7fe450e19), a member of
     /// `Server`.
     pub fn setReadTimeout(self: *Server, sec: i64, usec: i64) void {
         self.read_timeout_sec = sec;
         self.read_timeout_usec = usec;
     }
 
-    /// Ports `set_write_timeout` (httplib.cpp:8448 @b29c606e2), a member of
+    /// Ports `set_write_timeout` (httplib.cpp:8460 @7fe450e19), a member of
     /// `Server`.
     pub fn setWriteTimeout(self: *Server, sec: i64, usec: i64) void {
         self.write_timeout_sec = sec;
         self.write_timeout_usec = usec;
     }
 
-    /// Ports `bind_to_port` (httplib.cpp:8499 @b29c606e2), a member of
+    /// Ports `bind_to_port` (httplib.cpp:8511 @7fe450e19), a member of
     /// `Server`.
     pub fn bindToPort(self: *Server, host: [:0]const u8, port: c_int) bool {
         const ret = self.bindInternal(host, port, 0);
@@ -352,7 +359,7 @@ pub const Server = struct {
         return ret >= 0;
     }
 
-    /// Ports `bind_to_any_port` (httplib.cpp:8505 @b29c606e2), a member of
+    /// Ports `bind_to_any_port` (httplib.cpp:8517 @7fe450e19), a member of
     /// `Server`.
     ///
     /// Return: the port bound, or -1.
@@ -362,19 +369,19 @@ pub const Server = struct {
         return ret;
     }
 
-    /// Ports `listen_after_bind` (httplib.cpp:8511 @b29c606e2), a member of
+    /// Ports `listen_after_bind` (httplib.cpp:8523 @7fe450e19), a member of
     /// `Server`: the accept loop, until `stop`.
     pub fn listenAfterBind(self: *Server) bool {
         return self.listenInternal();
     }
 
-    /// Ports `wait_until_ready` (httplib.cpp:8520 @b29c606e2), a member of
+    /// Ports `wait_until_ready` (httplib.cpp:8532 @7fe450e19), a member of
     /// `Server`: polls every millisecond.
     pub fn waitUntilReady(self: *const Server) void {
         while (!self.is_running.load(.seq_cst) and !self.is_decommissioned.load(.seq_cst)) socket.sleepUs(1000);
     }
 
-    /// Ports `stop` (httplib.cpp:8526 @b29c606e2), a member of `Server`:
+    /// Ports `stop` (httplib.cpp:8538 @7fe450e19), a member of `Server`:
     /// closes the listening socket, which ends the accept loop.
     pub fn stop(self: *Server) void {
         const sock = self.svr_sock.swap(socket.invalid_socket, .seq_cst);
@@ -385,7 +392,7 @@ pub const Server = struct {
         self.is_decommissioned.store(false, .seq_cst);
     }
 
-    /// Ports `create_server_socket` (httplib.cpp:9075 @b29c606e2), a member
+    /// Ports `create_server_socket` (httplib.cpp:9097 @7fe450e19), a member
     /// of `Server`.
     fn createServerSocket(self: *Server, host: [:0]const u8, port: c_int, socket_flags: c_int) Socket {
         const S = struct {
@@ -397,7 +404,7 @@ pub const Server = struct {
         return socket.createSocket(host, port, self.address_family, socket_flags, self.tcp_nodelay, self.ipv6_v6only, self.socket_options, .{ .ctx = null, .func = S.bindListen });
     }
 
-    /// Ports `bind_internal` (httplib.cpp:9094 @b29c606e2), a member of
+    /// Ports `bind_internal` (httplib.cpp:9116 @7fe450e19), a member of
     /// `Server`.
     fn bindInternal(self: *Server, host: [:0]const u8, port: c_int, socket_flags: c_int) c_int {
         if (self.is_decommissioned.load(.seq_cst)) return -1;
@@ -409,7 +416,7 @@ pub const Server = struct {
         return port;
     }
 
-    /// Ports `listen_internal` (httplib.cpp:9124 @b29c606e2), a member of
+    /// Ports `listen_internal` (httplib.cpp:9146 @7fe450e19), a member of
     /// `Server`: accepts until the listening socket closes, handing each
     /// connection to the task queue with the read and write timeouts and
     /// `TCP_NODELAY` set.
@@ -464,11 +471,11 @@ pub const Server = struct {
 
     /// `new_task_queue()`, or the C's default pool:
     /// `CPPHTTPLIB_THREAD_POOL_COUNT` threads, four times that at most.
-    fn makeTaskQueue(self: *Server) !*ThreadPool {
+    fn makeTaskQueue(self: *Server) !TaskQueue {
         if (self.new_task_queue) |f| return f.func(f.ctx, self.allocator);
         const hw = socket.hardwareConcurrency();
         const n: usize = @max(8, if (hw > 0) hw - 1 else 0);
-        return ThreadPool.create(self.allocator, n, n * 4);
+        return (try ThreadPool.create(self.allocator, n, n * 4)).taskQueue();
     }
 
     fn processAndCloseSocketTask(ctx: *anyopaque, arg: usize) void {
@@ -476,26 +483,30 @@ pub const Server = struct {
         _ = self.processAndCloseSocket(@intCast(arg));
     }
 
-    /// Ports `process_and_close_socket` (httplib.cpp:9924 @b29c606e2), a
-    /// member of `Server`, with `serve_guarded` (httplib.h:2300
-    /// @b29c606e2): an error escaping a request ends the connection, as an
+    /// Ports `process_and_close_socket` (httplib.cpp:9954 @7fe450e19), a
+    /// member of `Server`, with `serve_guarded` (httplib.h:2301
+    /// @7fe450e19): an error escaping a request ends the connection, as an
     /// exception escaping one does.
     fn processAndCloseSocket(self: *Server, sock: Socket) bool {
         var addrs = std.heap.ArenaAllocator.init(self.allocator);
         defer addrs.deinit();
         var remote_addr: []const u8 = "";
         var remote_port: c_int = 0;
-        socket.getRemoteIpAndPort(addrs.allocator(), sock, &remote_addr, &remote_port) catch {};
+        socket.getRemoteIpAndPort(addrs.allocator(), sock, &remote_addr, &remote_port) catch |err| switch (err) {
+            error.OutOfMemory => {},
+        };
         var local_addr: []const u8 = "";
         var local_port: c_int = 0;
-        socket.getLocalIpAndPort(addrs.allocator(), sock, &local_addr, &local_port) catch {};
+        socket.getLocalIpAndPort(addrs.allocator(), sock, &local_addr, &local_port) catch |err| switch (err) {
+            error.OutOfMemory => {},
+        };
         const ret = self.processServerSocket(sock, remote_addr, remote_port, local_addr, local_port) catch false;
         socket.drainAndCloseSocket(sock);
         return ret;
     }
 
-    /// Ports `process_server_socket` (httplib.cpp:1909 @b29c606e2) and
-    /// `process_server_socket_core` (httplib.cpp:1891 @b29c606e2): up to
+    /// Ports `process_server_socket` (httplib.cpp:1919 @7fe450e19) and
+    /// `process_server_socket_core` (httplib.cpp:1901 @7fe450e19): up to
     /// `keep_alive_max_count` requests, each on a fresh `SocketStream`,
     /// while the peer keeps sending; the last is answered with
     /// `Connection: close`.
@@ -520,7 +531,7 @@ pub const Server = struct {
         return ret;
     }
 
-    /// Ports `builtin_methods` (httplib.cpp:8203 @b29c606e2), a member of
+    /// Ports `builtin_methods` (httplib.cpp:8215 @7fe450e19), a member of
     /// `Server`.
     fn isBuiltinMethod(m: []const u8) bool {
         inline for (.{ "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH", "PRI" }) |b| {
@@ -529,7 +540,7 @@ pub const Server = struct {
         return false;
     }
 
-    /// Ports `parse_request_line` (httplib.cpp:8540 @b29c606e2), a member of
+    /// Ports `parse_request_line` (httplib.cpp:8552 @7fe450e19), a member of
     /// `Server`: three space-separated parts ending in CRLF, a built-in
     /// method, HTTP/1.0 or 1.1, the fragment dropped, the path decoded and
     /// the query parsed.
@@ -551,7 +562,7 @@ pub const Server = struct {
             }
         };
         var ctx: Ctx = .{ .req = req };
-        detail.split(line, ' ', std.math.maxInt(usize), &ctx) catch unreachable;
+        detail.split(line, ' ', std.math.maxInt(usize), &ctx) catch |err| switch (err) {};
         if (ctx.count != 3) return false;
         req.method = try a.dupe(u8, req.method);
         req.target = try a.dupe(u8, req.target);
@@ -565,8 +576,10 @@ pub const Server = struct {
         return true;
     }
 
-    /// Ports `process_request` (httplib.cpp:9594 @b29c606e2), a member of
-    /// `Server`: one request off `strm` and its response back.
+    /// Ports `process_request` (httplib.cpp:9616 @7fe450e19), a member of
+    /// `Server`: one request off `strm` and its response back. `100
+    /// Continue` is owed here and sent only when the body is read
+    /// (`read_content_core`).
     ///
     /// Return: whether the connection may carry another request; an error
     /// is an exception escaping outside `routing`.
@@ -629,11 +642,12 @@ pub const Server = struct {
             }
         }
 
+        // `100 Continue` itself is deferred until the body is actually read (see
+        // read_content_core), so a request rejected by a later handler never
+        // invites the client to send a body nobody will read.
         if (!std.mem.eql(u8, req.version, "HTTP/1.0") and detail.hasHeaderToken(&req.headers, "Expect", "100-continue")) {
             // no Expect: 100-continue handler is set, so the status is 100
-            const status = StatusCode.continue_100;
-            _ = message.writeResponseLine(strm, status);
-            _ = strm.write("\r\n");
+            req.expect_100_continue_pending = true;
         }
 
         req.sock = strm.sock;
@@ -642,7 +656,7 @@ pub const Server = struct {
             if (self.pre_routing_handler) |h| {
                 if (try h.func(h.ctx, &req, &res) == .handled) {
                     if (res.status == -1) res.status = StatusCode.ok_200;
-                    return self.writeResponse(strm, close_connection, &req, &res);
+                    return self.writeResponseCore(strm, close_connection, &req, &res, true);
                 }
             }
             // no WebSocket handler is registered: on to routing and its 404
@@ -693,7 +707,7 @@ pub const Server = struct {
         return ret;
     }
 
-    /// Ports `routing` (httplib.cpp:9218 @b29c606e2), a member of `Server`:
+    /// Ports `routing` (httplib.cpp:9240 @7fe450e19), a member of `Server`:
     /// the pre-routing handler, then the route table for the method.
     fn routing(self: *Server, req: *Request, res: *Response, strm: *SocketStream) !bool {
         if (self.pre_routing_handler) |h| {
@@ -712,7 +726,7 @@ pub const Server = struct {
         return false;
     }
 
-    /// Ports `dispatch_request` (httplib.cpp:9331 @b29c606e2), a member of
+    /// Ports `dispatch_request` (httplib.cpp:9353 @7fe450e19), a member of
     /// `Server`: the first route that matches, its body read only then.
     fn dispatchRequest(self: *Server, req: *Request, res: *Response, handlers: []const Route, strm: *SocketStream) !bool {
         for (handlers) |*x| {
@@ -726,7 +740,7 @@ pub const Server = struct {
         return false;
     }
 
-    /// Ports `read_content` (httplib.cpp:8737 @b29c606e2), a member of
+    /// Ports `read_content` (httplib.cpp:8752 @7fe450e19), a member of
     /// `Server`: the body into `req.body` -- or, for `multipart/form-data`,
     /// into `req.form` -- and a form-urlencoded body's pairs into
     /// `req.params`.
@@ -789,11 +803,11 @@ pub const Server = struct {
         return false;
     }
 
-    /// Ports `read_content_core` (httplib.cpp:8821 @b29c606e2), a member of
-    /// `Server`: a body framed by chunks or `Content-Length`; with neither,
-    /// none -- unless the connection will not persist and bytes are already
-    /// waiting, which are then read to the end of the stream so the payload
-    /// limit still applies.
+    /// Ports `read_content_core` (httplib.cpp:8836 @7fe450e19), a member of
+    /// `Server`: a body framed by chunks or `Content-Length`, after the owed
+    /// `100 Continue`; with neither, none -- unless the connection will not
+    /// persist and bytes are already waiting, which are then read to the end
+    /// of the stream so the payload limit still applies.
     fn readContentCore(self: *Server, strm: *SocketStream, req: *Request, res: *Response, sink: anytype) !bool {
         var parser: message.FormDataParser = .{ .a = req.a };
         const multipart = try req.isMultipartFormData();
@@ -823,6 +837,14 @@ pub const Server = struct {
             }
             return true;
         }
+
+        // The client is waiting for this before it sends the body.
+        if (req.expect_100_continue_pending) {
+            req.expect_100_continue_pending = false;
+            _ = message.writeResponseLine(strm, StatusCode.continue_100);
+            _ = strm.write("\r\n");
+        }
+
         if (!try message.readContent(strm, req, self.payload_max_length, &res.status, out, true)) return false;
         req.body_consumed = true;
         if (multipart and !parser.is_valid) {
@@ -832,14 +854,14 @@ pub const Server = struct {
         return true;
     }
 
-    /// Ports `write_response` (httplib.cpp:8597 @b29c606e2), a member of
+    /// Ports `write_response` (httplib.cpp:8609 @7fe450e19), a member of
     /// `Server`: a response whose ranges, if any, do not apply.
     fn writeResponse(self: *Server, strm: *SocketStream, close_connection: bool, req: *Request, res: *Response) !bool {
         req.ranges.clearRetainingCapacity();
         return self.writeResponseCore(strm, close_connection, req, res, false);
     }
 
-    /// Ports `apply_ranges` (httplib.cpp:9433 @b29c606e2), a member of
+    /// Ports `apply_ranges` (httplib.cpp:9455 @7fe450e19), a member of
     /// `Server`: a 206's range or ranges cut from the body, and the framing
     /// headers. No content coding is compiled in, so none is applied.
     fn applyRanges(req: *const Request, res: *Response) !void {
@@ -875,10 +897,11 @@ pub const Server = struct {
         }
     }
 
-    /// Ports `write_response_core` (httplib.cpp:8612 @b29c606e2), a member
+    /// Ports `write_response_core` (httplib.cpp:8624 @7fe450e19), a member
     /// of `Server`: the error handler for a status from 400, the ranges, the
     /// connection and framing headers, the head and a small body in one
-    /// write, then a streamed body.
+    /// write, then a streamed body. A body the client still withholds for a
+    /// `100 Continue` never sent closes the connection.
     fn writeResponseCore(self: *Server, strm: *SocketStream, close_connection: bool, req: *const Request, res: *Response, need_apply_ranges_in: bool) !bool {
         const a = res.a;
         var need_apply_ranges = need_apply_ranges_in;
@@ -889,7 +912,12 @@ pub const Server = struct {
         }
         if (need_apply_ranges) try applyRanges(req, res);
 
-        if (close_connection or detail.hasHeaderToken(&req.headers, "Connection", "close") or 400 <= res.status) {
+        if (close_connection or detail.hasHeaderToken(&req.headers, "Connection", "close") or
+            400 <= res.status or // Don't leave connections open after errors
+            // The client withholds the body until `100 Continue`, which was never
+            // sent, so whether and when the body follows is unknown.
+            (req.expect_100_continue_pending and message.hasFramedBody(req)))
+        {
             try res.setHeader("Connection", "close");
         } else {
             try res.setHeader("Keep-Alive", try std.fmt.allocPrint(a, "timeout={d}, max={d}", .{ self.keep_alive_timeout_sec, self.keep_alive_max_count }));
@@ -914,8 +942,8 @@ pub const Server = struct {
         var ret = true;
         if (!is_head) {
             if (res.content_provider) |provider| {
-                // Ports `write_content_with_provider` (httplib.cpp:8687
-                // @b29c606e2). Every provider here is chunked; it has a
+                // Ports `write_content_with_provider` (httplib.cpp:8702
+                // @7fe450e19). Every provider here is chunked; it has a
                 // length only when the error handler gave the response a
                 // body, which no 206 has, so the ranged arms stay out
                 const ok = if (res.content_length > 0)

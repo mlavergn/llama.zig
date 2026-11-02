@@ -46,6 +46,7 @@
 //! Usage: opt_llama_diff <base-qwen35.gguf> <tmp-dir> [--abort <case> <ref|port>]
 
 const std = @import("std");
+const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
 
 const c = harness_root.impl.c;
@@ -257,11 +258,11 @@ const Filter = enum {
     /// Measured, one weight at a time: every other weight reaches the
     /// attention output gate's `ggml_sigmoid`, a unary op with no backward
     /// pass, and aborts with "fatal error" after "unsupported unary op for
-    /// backward pass" (ggml.c:7165 @b29c606e2). Through v0.3.0 the KV
+    /// backward pass" (ggml.c:7193 @7fe450e19). Through v0.3.0 the KV
     /// cache's `ggml_set_rows` stopped several of them first, at
     /// `ggml_build_backward_expand`'s "inplace operations are currently not
     /// supported"; v0.4.0 admits `GGML_OP_SET_ROWS` there
-    /// (ggml.c:7390 @b29c606e2), so all three now end at the sigmoid.
+    /// (ggml.c:7418 @7fe450e19), so all three now end at the sigmoid.
     head,
     /// One weight per abort, below.
     attn_q,
@@ -487,7 +488,13 @@ fn script(comptime side: enum { ref, port }, model: *c.struct_llama_model, cs: C
     log_on = false;
 }
 
-fn firstDiff(name: []const u8, a: []const u8, b: []const u8) usize {
+fn firstDiff(name: []const u8, a_raw: []const u8, b_raw: []const u8) usize {
+    var sa = input_tensor_order.sortRuns(gpa, a_raw);
+    defer sa.deinit(gpa);
+    var sb = input_tensor_order.sortRuns(gpa, b_raw);
+    defer sb.deinit(gpa);
+    const a = sa.items;
+    const b = sb.items;
     var ia = std.mem.splitScalar(u8, a, '\n');
     var ib = std.mem.splitScalar(u8, b, '\n');
     var line: usize = 1;

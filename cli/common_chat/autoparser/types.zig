@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports the data half of `llama.cpp/common/chat-auto-parser.h` (llama.cpp
-//! v0.4.1, `b29c606e2`): `template_params`, `diff_split`,
+//! v0.5.0, `7fe450e19`): `template_params`, `diff_split`,
 //! `compare_variants_result`, the four mode enums with their names, the
 //! four analysis sub-structs, the three analyzers' fields, `autoparser`'s
 //! fields, `segment_type` and `segment`. The analyzers' and the parser
@@ -21,7 +21,7 @@ const caps_mod = @import("../caps.zig");
 
 const Value = json.Value;
 
-/// Ports `template_params` (chat-auto-parser.h:22 @b29c606e2): a probe's
+/// Ports `template_params` (chat-auto-parser.h:22 @7fe450e19): a probe's
 /// render.
 pub const TemplateParams = struct {
     messages: Value = .null,
@@ -31,29 +31,29 @@ pub const TemplateParams = struct {
     extra_context: ?Value = null,
 };
 
-/// Ports `diff_split` (chat-auto-parser.h:30 @b29c606e2).
+/// Ports `diff_split` (chat-auto-parser.h:30 @7fe450e19).
 pub const DiffSplit = struct {
     prefix: []const u8 = "",
     suffix: []const u8 = "",
     left: []const u8 = "",
     right: []const u8 = "",
 
-    /// Ports its `operator`== (chat-auto-parser.h:36 @b29c606e2).
+    /// Ports its `operator`== (chat-auto-parser.h:36 @7fe450e19).
     pub fn eql(a: DiffSplit, b: DiffSplit) bool {
         return std.mem.eql(u8, a.prefix, b.prefix) and std.mem.eql(u8, a.suffix, b.suffix) and
             std.mem.eql(u8, a.left, b.left) and std.mem.eql(u8, a.right, b.right);
     }
 };
 
-/// Ports `compare_variants_result` (chat-auto-parser.h:42 @b29c606e2).
+/// Ports `compare_variants_result` (chat-auto-parser.h:42 @7fe450e19).
 pub const CompareVariantsResult = struct {
     diff: DiffSplit,
     output_A: []const u8,
     output_B: []const u8,
 };
 
-/// Ports `reasoning_mode` (chat-auto-parser.h:85 @b29c606e2) and its
-/// `operator<<` (chat-auto-parser.h:91 @b29c606e2).
+/// Ports `reasoning_mode` (chat-auto-parser.h:85 @7fe450e19) and its
+/// `operator<<` (chat-auto-parser.h:91 @7fe450e19).
 pub const ReasoningMode = enum {
     NONE,
     TAG_BASED,
@@ -64,8 +64,8 @@ pub const ReasoningMode = enum {
     }
 };
 
-/// Ports `content_mode` (chat-auto-parser.h:105 @b29c606e2) and its
-/// `operator<<` (chat-auto-parser.h:111 @b29c606e2).
+/// Ports `content_mode` (chat-auto-parser.h:105 @7fe450e19) and its
+/// `operator<<` (chat-auto-parser.h:111 @7fe450e19).
 pub const ContentMode = enum {
     PLAIN,
     ALWAYS_WRAPPED,
@@ -76,8 +76,8 @@ pub const ContentMode = enum {
     }
 };
 
-/// Ports `call_id_position` (chat-auto-parser.h:125 @b29c606e2) and its
-/// `operator<<` (chat-auto-parser.h:132 @b29c606e2).
+/// Ports `call_id_position` (chat-auto-parser.h:125 @7fe450e19) and its
+/// `operator<<` (chat-auto-parser.h:132 @7fe450e19).
 pub const CallIdPosition = enum {
     NONE,
     PRE_FUNC_NAME,
@@ -89,8 +89,8 @@ pub const CallIdPosition = enum {
     }
 };
 
-/// Ports `tool_format` (chat-auto-parser.h:148 @b29c606e2) and its
-/// `operator<<` (chat-auto-parser.h:155 @b29c606e2).
+/// Ports `tool_format` (chat-auto-parser.h:148 @7fe450e19) and its
+/// `operator<<` (chat-auto-parser.h:155 @7fe450e19).
 pub const ToolFormat = enum {
     NONE,
     JSON_NATIVE,
@@ -102,7 +102,7 @@ pub const ToolFormat = enum {
     }
 };
 
-/// Ports `tool_format_analysis` (chat-auto-parser.h:174 @b29c606e2).
+/// Ports `tool_format_analysis` (chat-auto-parser.h:174 @7fe450e19).
 pub const ToolFormatAnalysis = struct {
     mode: ToolFormat = .NONE,
     section_start: []const u8 = "",
@@ -120,7 +120,7 @@ pub const ToolFormatAnalysis = struct {
     parameter_order: std.ArrayList([]const u8) = .empty,
 };
 
-/// Ports `tool_function_analysis` (chat-auto-parser.h:194 @b29c606e2).
+/// Ports `tool_function_analysis` (chat-auto-parser.h:194 @7fe450e19).
 pub const ToolFunctionAnalysis = struct {
     name_prefix: []const u8 = "",
     name_suffix: []const u8 = "",
@@ -128,7 +128,7 @@ pub const ToolFunctionAnalysis = struct {
     close: []const u8 = "",
 };
 
-/// Ports `tool_arguments_analysis` (chat-auto-parser.h:201 @b29c606e2).
+/// Ports `tool_arguments_analysis` (chat-auto-parser.h:201 @7fe450e19).
 pub const ToolArgumentsAnalysis = struct {
     start: []const u8 = "",
     end: []const u8 = "",
@@ -140,34 +140,34 @@ pub const ToolArgumentsAnalysis = struct {
     tolerate_intertag_whitespace: bool = false,
 };
 
-/// Ports `tool_id_analysis` (chat-auto-parser.h:212 @b29c606e2).
+/// Ports `tool_id_analysis` (chat-auto-parser.h:212 @7fe450e19).
 pub const ToolIdAnalysis = struct {
     pos: CallIdPosition = .NONE,
     prefix: []const u8 = "",
     suffix: []const u8 = "",
 };
 
-/// Ports `analyze_reasoning`'s fields (chat-auto-parser.h:256 @b29c606e2).
+/// Ports `analyze_reasoning`'s fields (chat-auto-parser.h:256 @7fe450e19).
 pub const AnalyzeReasoning = struct {
     mode: ReasoningMode = .NONE,
     start: []const u8 = "",
     end: []const u8 = "",
 };
 
-/// Ports `analyze_content`'s fields (chat-auto-parser.h:283 @b29c606e2).
+/// Ports `analyze_content`'s fields (chat-auto-parser.h:283 @7fe450e19).
 pub const AnalyzeContent = struct {
     mode: ContentMode = .PLAIN,
     start: []const u8 = "",
     end: []const u8 = "",
     requires_nonnull_content: bool = false,
 
-    /// Ports `is_always_wrapped` (chat-diff-analyzer.cpp:764 @b29c606e2).
+    /// Ports `is_always_wrapped` (chat-diff-analyzer.cpp:764 @7fe450e19).
     pub fn isAlwaysWrapped(self: *const AnalyzeContent) bool {
         return self.mode == .ALWAYS_WRAPPED and self.start.len != 0 and self.end.len != 0;
     }
 };
 
-/// Ports `analyze_tools`'s fields (chat-auto-parser.h:304 @b29c606e2).
+/// Ports `analyze_tools`'s fields (chat-auto-parser.h:304 @7fe450e19).
 pub const AnalyzeTools = struct {
     format: ToolFormatAnalysis = .{},
     function: ToolFunctionAnalysis = .{},
@@ -175,7 +175,7 @@ pub const AnalyzeTools = struct {
     call_id: ToolIdAnalysis = .{},
 };
 
-/// Ports `autoparser`'s fields (chat-auto-parser.h:381 @b29c606e2).
+/// Ports `autoparser`'s fields (chat-auto-parser.h:381 @7fe450e19).
 pub const Autoparser = struct {
     jinja_caps: caps_mod.Caps = .{},
     user_start: []const u8 = "",
@@ -188,8 +188,8 @@ pub const Autoparser = struct {
     additional_stops: std.ArrayList([]const u8) = .empty,
 };
 
-/// Ports `segment_type` (chat-auto-parser.h:427 @b29c606e2) and its
-/// `operator<<` (chat-auto-parser.h:429 @b29c606e2).
+/// Ports `segment_type` (chat-auto-parser.h:427 @7fe450e19) and its
+/// `operator<<` (chat-auto-parser.h:429 @7fe450e19).
 pub const SegmentType = enum {
     TEXT,
     MARKER,
@@ -199,12 +199,12 @@ pub const SegmentType = enum {
     }
 };
 
-/// Ports `segment` (chat-auto-parser.h:440 @b29c606e2).
+/// Ports `segment` (chat-auto-parser.h:440 @7fe450e19).
 pub const Segment = struct {
     type: SegmentType,
     value: []const u8,
 
-    /// Ports its `operator`== (chat-auto-parser.h:446 @b29c606e2).
+    /// Ports its `operator`== (chat-auto-parser.h:446 @7fe450e19).
     pub fn eql(a: Segment, b: Segment) bool {
         return a.type == b.type and std.mem.eql(u8, a.value, b.value);
     }

@@ -3,8 +3,9 @@
 //! # Provenance
 //!
 //! Mirrors the `vk_*_push_constants` structs of
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
-//! (`b29c606e2`).
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-push-constants.h` at v0.5.0
+//! (`7fe450e19`), which upstream split out of
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.5.0.
 //!
 //! # Generated, not written
 //!
@@ -16,7 +17,7 @@
 
 const std = @import("std");
 
-/// Mirrors `vk_mat_mat_push_constants` (ggml-vulkan.cpp:1353 @b29c606e2).
+/// Mirrors `vk_mat_mat_push_constants` (ggml-vulkan-push-constants.h:8 @7fe450e19).
 pub const MatMat = extern struct {
     M: u32 = std.mem.zeroes(u32),
     N: u32 = std.mem.zeroes(u32),
@@ -57,7 +58,7 @@ comptime {
     std.debug.assert(@offsetOf(MatMat, "padded_N") == 64);
 }
 
-/// Mirrors `vk_mat_vec_push_constants` (ggml-vulkan.cpp:1368 @b29c606e2).
+/// Mirrors `vk_mat_vec_push_constants` (ggml-vulkan-push-constants.h:18 @7fe450e19).
 pub const MatVec = extern struct {
     ncols: u32 = std.mem.zeroes(u32),
     stride_a: u32 = std.mem.zeroes(u32),
@@ -90,7 +91,7 @@ comptime {
     std.debug.assert(@offsetOf(MatVec, "broadcast3") == 48);
 }
 
-/// Mirrors `vk_mat_vec_p021_push_constants` (ggml-vulkan.cpp:1384 @b29c606e2).
+/// Mirrors `vk_mat_vec_p021_push_constants` (ggml-vulkan-push-constants.h:34 @7fe450e19).
 pub const MatVecP021 = extern struct {
     ncols_x: u32 = std.mem.zeroes(u32),
     nrows_x: u32 = std.mem.zeroes(u32),
@@ -111,7 +112,7 @@ comptime {
     std.debug.assert(@offsetOf(MatVecP021, "fusion_flags") == 24);
 }
 
-/// Mirrors `vk_mat_vec_nc_push_constants` (ggml-vulkan.cpp:1394 @b29c606e2).
+/// Mirrors `vk_mat_vec_nc_push_constants` (ggml-vulkan-push-constants.h:44 @7fe450e19).
 pub const MatVecNc = extern struct {
     ncols_x: u32 = std.mem.zeroes(u32),
     nrows_x: u32 = std.mem.zeroes(u32),
@@ -144,7 +145,7 @@ comptime {
     std.debug.assert(@offsetOf(MatVecNc, "fusion_flags") == 48);
 }
 
-/// Mirrors `vk_mat_mat_id_push_constants` (ggml-vulkan.cpp:1410 @b29c606e2).
+/// Mirrors `vk_mat_mat_id_push_constants` (ggml-vulkan-push-constants.h:60 @7fe450e19).
 pub const MatMatId = extern struct {
     M: u32 = std.mem.zeroes(u32),
     N: u32 = std.mem.zeroes(u32),
@@ -181,7 +182,7 @@ comptime {
     std.debug.assert(@offsetOf(MatMatId, "hoist_row_ids") == 56);
 }
 
-/// Mirrors `vk_mat_vec_id_push_constants` (ggml-vulkan.cpp:1418 @b29c606e2).
+/// Mirrors `vk_mat_vec_id_push_constants` (ggml-vulkan-push-constants.h:69 @7fe450e19).
 pub const MatVecId = extern struct {
     ncols: u32 = std.mem.zeroes(u32),
     stride_a: u32 = std.mem.zeroes(u32),
@@ -212,7 +213,7 @@ comptime {
     std.debug.assert(@offsetOf(MatVecId, "nbi1") == 44);
 }
 
-/// Mirrors `vk_flash_attn_push_constants` (ggml-vulkan.cpp:1433 @b29c606e2).
+/// Mirrors `vk_flash_attn_push_constants` (ggml-vulkan-push-constants.h:84 @7fe450e19).
 pub const FlashAttn = extern struct {
     N: u32 = std.mem.zeroes(u32),
     KV: u32 = std.mem.zeroes(u32),
@@ -283,7 +284,44 @@ comptime {
     std.debug.assert(@offsetOf(FlashAttn, "k_num") == 124);
 }
 
-/// Mirrors `vk_op_push_constants` (ggml-vulkan.cpp:1475 @b29c606e2).
+/// Mirrors `vk_fa_xe_opt_push_constants` (ggml-vulkan-push-constants.h:127 @7fe450e19).
+pub const FaXeOpt = extern struct {
+    kv_seq_len: u32 = std.mem.zeroes(u32),
+    activation_length: u32 = std.mem.zeroes(u32),
+    q_head: u32 = std.mem.zeroes(u32),
+    kv_head: u32 = std.mem.zeroes(u32),
+    qk_ratio: u32 = std.mem.zeroes(u32),
+    qk_sub_groups: u32 = std.mem.zeroes(u32),
+    flag: u32 = std.mem.zeroes(u32),
+    nbkv_tok: u32 = std.mem.zeroes(u32),
+    nbkv_head: u32 = std.mem.zeroes(u32),
+    batch_stride_q: u32 = std.mem.zeroes(u32),
+    batch_stride_k: u32 = std.mem.zeroes(u32),
+    batch_stride_v: u32 = std.mem.zeroes(u32),
+    batch_stride_m: u32 = std.mem.zeroes(u32),
+    batch_stride_o: u32 = std.mem.zeroes(u32),
+    softmax_scale: f32 = std.mem.zeroes(f32),
+};
+comptime {
+    std.debug.assert(@sizeOf(FaXeOpt) == 60);
+    std.debug.assert(@offsetOf(FaXeOpt, "kv_seq_len") == 0);
+    std.debug.assert(@offsetOf(FaXeOpt, "activation_length") == 4);
+    std.debug.assert(@offsetOf(FaXeOpt, "q_head") == 8);
+    std.debug.assert(@offsetOf(FaXeOpt, "kv_head") == 12);
+    std.debug.assert(@offsetOf(FaXeOpt, "qk_ratio") == 16);
+    std.debug.assert(@offsetOf(FaXeOpt, "qk_sub_groups") == 20);
+    std.debug.assert(@offsetOf(FaXeOpt, "flag") == 24);
+    std.debug.assert(@offsetOf(FaXeOpt, "nbkv_tok") == 28);
+    std.debug.assert(@offsetOf(FaXeOpt, "nbkv_head") == 32);
+    std.debug.assert(@offsetOf(FaXeOpt, "batch_stride_q") == 36);
+    std.debug.assert(@offsetOf(FaXeOpt, "batch_stride_k") == 40);
+    std.debug.assert(@offsetOf(FaXeOpt, "batch_stride_v") == 44);
+    std.debug.assert(@offsetOf(FaXeOpt, "batch_stride_m") == 48);
+    std.debug.assert(@offsetOf(FaXeOpt, "batch_stride_o") == 52);
+    std.debug.assert(@offsetOf(FaXeOpt, "softmax_scale") == 56);
+}
+
+/// Mirrors `vk_op_push_constants` (ggml-vulkan-push-constants.h:145 @7fe450e19).
 pub const Op = extern struct {
     KX: u32 = std.mem.zeroes(u32),
     KY: u32 = std.mem.zeroes(u32),
@@ -302,7 +340,7 @@ comptime {
     std.debug.assert(@offsetOf(Op, "param4") == 20);
 }
 
-/// Mirrors `vk_op_fwht_push_constants` (ggml-vulkan.cpp:1484 @b29c606e2).
+/// Mirrors `vk_op_fwht_push_constants` (ggml-vulkan-push-constants.h:154 @7fe450e19).
 pub const Fwht = extern struct {
     n_rows: u32 = std.mem.zeroes(u32),
     src_offset: u32 = std.mem.zeroes(u32),
@@ -317,7 +355,7 @@ comptime {
     std.debug.assert(@offsetOf(Fwht, "scale") == 12);
 }
 
-/// Mirrors `vk_op_dsv4_hc_comb_push_constants` (ggml-vulkan.cpp:1491 @b29c606e2).
+/// Mirrors `vk_op_dsv4_hc_comb_push_constants` (ggml-vulkan-push-constants.h:161 @7fe450e19).
 pub const Dsv4HcComb = extern struct {
     n_tokens: u32 = std.mem.zeroes(u32),
     nbm0: u32 = std.mem.zeroes(u32),
@@ -352,7 +390,7 @@ comptime {
     std.debug.assert(@offsetOf(Dsv4HcComb, "n_iter") == 52);
 }
 
-/// Mirrors `vk_op_dsv4_hc_pre_push_constants` (ggml-vulkan.cpp:1508 @b29c606e2).
+/// Mirrors `vk_op_dsv4_hc_pre_push_constants` (ggml-vulkan-push-constants.h:178 @7fe450e19).
 pub const Dsv4HcPre = extern struct {
     n_embd: u32 = std.mem.zeroes(u32),
     n_tokens: u32 = std.mem.zeroes(u32),
@@ -361,14 +399,16 @@ pub const Dsv4HcPre = extern struct {
     nbx2: u32 = std.mem.zeroes(u32),
     nbw0: u32 = std.mem.zeroes(u32),
     nbw1: u32 = std.mem.zeroes(u32),
+    nbw2: u32 = std.mem.zeroes(u32),
     nbd0: u32 = std.mem.zeroes(u32),
     nbd1: u32 = std.mem.zeroes(u32),
     x_offset: u32 = std.mem.zeroes(u32),
     w_offset: u32 = std.mem.zeroes(u32),
     d_offset: u32 = std.mem.zeroes(u32),
+    scale: f32 = std.mem.zeroes(f32),
 };
 comptime {
-    std.debug.assert(@sizeOf(Dsv4HcPre) == 48);
+    std.debug.assert(@sizeOf(Dsv4HcPre) == 56);
     std.debug.assert(@offsetOf(Dsv4HcPre, "n_embd") == 0);
     std.debug.assert(@offsetOf(Dsv4HcPre, "n_tokens") == 4);
     std.debug.assert(@offsetOf(Dsv4HcPre, "nbx0") == 8);
@@ -376,14 +416,16 @@ comptime {
     std.debug.assert(@offsetOf(Dsv4HcPre, "nbx2") == 16);
     std.debug.assert(@offsetOf(Dsv4HcPre, "nbw0") == 20);
     std.debug.assert(@offsetOf(Dsv4HcPre, "nbw1") == 24);
-    std.debug.assert(@offsetOf(Dsv4HcPre, "nbd0") == 28);
-    std.debug.assert(@offsetOf(Dsv4HcPre, "nbd1") == 32);
-    std.debug.assert(@offsetOf(Dsv4HcPre, "x_offset") == 36);
-    std.debug.assert(@offsetOf(Dsv4HcPre, "w_offset") == 40);
-    std.debug.assert(@offsetOf(Dsv4HcPre, "d_offset") == 44);
+    std.debug.assert(@offsetOf(Dsv4HcPre, "nbw2") == 28);
+    std.debug.assert(@offsetOf(Dsv4HcPre, "nbd0") == 32);
+    std.debug.assert(@offsetOf(Dsv4HcPre, "nbd1") == 36);
+    std.debug.assert(@offsetOf(Dsv4HcPre, "x_offset") == 40);
+    std.debug.assert(@offsetOf(Dsv4HcPre, "w_offset") == 44);
+    std.debug.assert(@offsetOf(Dsv4HcPre, "d_offset") == 48);
+    std.debug.assert(@offsetOf(Dsv4HcPre, "scale") == 52);
 }
 
-/// Mirrors `vk_op_dsv4_hc_post_push_constants` (ggml-vulkan.cpp:1521 @b29c606e2).
+/// Mirrors `vk_op_dsv4_hc_post_push_constants` (ggml-vulkan-push-constants.h:193 @7fe450e19).
 pub const Dsv4HcPost = extern struct {
     n_embd: u32 = std.mem.zeroes(u32),
     n_tokens: u32 = std.mem.zeroes(u32),
@@ -430,7 +472,7 @@ comptime {
     std.debug.assert(@offsetOf(Dsv4HcPost, "d_offset") == 76);
 }
 
-/// Mirrors `vk_op_count_experts_push_constants` (ggml-vulkan.cpp:1538 @b29c606e2).
+/// Mirrors `vk_op_count_experts_push_constants` (ggml-vulkan-push-constants.h:210 @7fe450e19).
 pub const CountExperts = extern struct {
     ne00: u32 = std.mem.zeroes(u32),
     ne01: u32 = std.mem.zeroes(u32),
@@ -455,7 +497,7 @@ comptime {
     std.debug.assert(@offsetOf(CountExperts, "ne00L") == 32);
 }
 
-/// Mirrors `vk_op_glu_push_constants` (ggml-vulkan.cpp:1550 @b29c606e2).
+/// Mirrors `vk_op_glu_push_constants` (ggml-vulkan-push-constants.h:222 @7fe450e19).
 pub const Glu = extern struct {
     N: u32 = std.mem.zeroes(u32),
     ne00: u32 = std.mem.zeroes(u32),
@@ -516,7 +558,7 @@ comptime {
     std.debug.assert(@offsetOf(Glu, "ne2_0L") == 104);
 }
 
-/// Mirrors `vk_op_unary_push_constants` (ggml-vulkan.cpp:1578 @b29c606e2).
+/// Mirrors `vk_op_unary_push_constants` (ggml-vulkan-push-constants.h:251 @7fe450e19).
 pub const Unary = extern struct {
     ne: u32 = std.mem.zeroes(u32),
     ne00: u32 = std.mem.zeroes(u32),
@@ -583,7 +625,7 @@ comptime {
     std.debug.assert(@offsetOf(Unary, "ne1_Ls") == 116);
 }
 
-/// Mirrors `vk_op_pad_push_constants` (ggml-vulkan.cpp:1620 @b29c606e2).
+/// Mirrors `vk_op_pad_push_constants` (ggml-vulkan-push-constants.h:294 @7fe450e19).
 pub const Pad = extern struct {
     ne: u32 = std.mem.zeroes(u32),
     ne00: u32 = std.mem.zeroes(u32),
@@ -644,7 +686,7 @@ comptime {
     std.debug.assert(@offsetOf(Pad, "rp3") == 104);
 }
 
-/// Mirrors `vk_op_binary_push_constants` (ggml-vulkan.cpp:1730 @b29c606e2).
+/// Mirrors `vk_op_binary_push_constants` (ggml-vulkan-push-constants.h:398 @7fe450e19).
 pub const Binary = extern struct {
     ne: u32 = std.mem.zeroes(u32),
     ne00: u32 = std.mem.zeroes(u32),
@@ -709,7 +751,7 @@ comptime {
     std.debug.assert(@offsetOf(Binary, "param3") == 112);
 }
 
-/// Mirrors `vk_op_concat_push_constants` (ggml-vulkan.cpp:1740 @b29c606e2).
+/// Mirrors `vk_op_concat_push_constants` (ggml-vulkan-push-constants.h:407 @7fe450e19).
 pub const Concat = extern struct {
     ne: u32 = std.mem.zeroes(u32),
     ne00: u32 = std.mem.zeroes(u32),
@@ -774,7 +816,7 @@ comptime {
     std.debug.assert(@offsetOf(Concat, "param3") == 112);
 }
 
-/// Mirrors `vk_op_multi_add_push_constants` (ggml-vulkan.cpp:1744 @b29c606e2).
+/// Mirrors `vk_op_multi_add_push_constants` (ggml-vulkan-push-constants.h:413 @7fe450e19).
 pub const MultiAdd = extern struct {
     ne20: u32 = std.mem.zeroes(u32),
     ne21: u32 = std.mem.zeroes(u32),
@@ -793,7 +835,7 @@ comptime {
     std.debug.assert(@offsetOf(MultiAdd, "rms_partials") == 208);
 }
 
-/// Mirrors `vk_op_topk_moe_push_constants` (ggml-vulkan.cpp:1757 @b29c606e2).
+/// Mirrors `vk_op_topk_moe_push_constants` (ggml-vulkan-push-constants.h:427 @7fe450e19).
 pub const TopkMoe = extern struct {
     n_rows: u32 = std.mem.zeroes(u32),
     n_experts_push: u32 = std.mem.zeroes(u32),
@@ -820,7 +862,7 @@ comptime {
     std.debug.assert(@offsetOf(TopkMoe, "output_bias") == 36);
 }
 
-/// Mirrors `vk_op_add_id_push_constants` (ggml-vulkan.cpp:1770 @b29c606e2).
+/// Mirrors `vk_op_add_id_push_constants` (ggml-vulkan-push-constants.h:440 @7fe450e19).
 pub const AddId = extern struct {
     ne0: u32 = std.mem.zeroes(u32),
     ne1: u32 = std.mem.zeroes(u32),
@@ -839,7 +881,7 @@ comptime {
     std.debug.assert(@offsetOf(AddId, "s21") == 20);
 }
 
-/// Mirrors `vk_op_diag_mask_push_constants` (ggml-vulkan.cpp:1779 @b29c606e2).
+/// Mirrors `vk_op_diag_mask_push_constants` (ggml-vulkan-push-constants.h:449 @7fe450e19).
 pub const DiagMask = extern struct {
     ncols: u32 = std.mem.zeroes(u32),
     rows_per_channel: u32 = std.mem.zeroes(u32),
@@ -852,7 +894,7 @@ comptime {
     std.debug.assert(@offsetOf(DiagMask, "n_past") == 8);
 }
 
-/// Mirrors `vk_op_rope_push_constants` (ggml-vulkan.cpp:1785 @b29c606e2).
+/// Mirrors `vk_op_rope_push_constants` (ggml-vulkan-push-constants.h:455 @7fe450e19).
 pub const Rope = extern struct {
     rope_mode: u32 = std.mem.zeroes(u32),
     nrows: u32 = std.mem.zeroes(u32),
@@ -911,7 +953,7 @@ comptime {
     std.debug.assert(@offsetOf(Rope, "d_offset") == 116);
 }
 
-/// Mirrors `vk_op_rms_norm_mul_rope_push_constants` (ggml-vulkan.cpp:1816 @b29c606e2).
+/// Mirrors `vk_op_rms_norm_mul_rope_push_constants` (ggml-vulkan-push-constants.h:486 @7fe450e19).
 pub const RmsNormMulRope = extern struct {
     bin: Binary = std.mem.zeroes(Binary),
     rope: Rope = std.mem.zeroes(Rope),
@@ -922,7 +964,7 @@ comptime {
     std.debug.assert(@offsetOf(RmsNormMulRope, "rope") == 116);
 }
 
-/// Mirrors `vk_op_soft_max_push_constants` (ggml-vulkan.cpp:1821 @b29c606e2).
+/// Mirrors `vk_op_soft_max_push_constants` (ggml-vulkan-push-constants.h:491 @7fe450e19).
 pub const SoftMax = extern struct {
     KX: u32 = std.mem.zeroes(u32),
     KY: u32 = std.mem.zeroes(u32),
@@ -963,7 +1005,7 @@ comptime {
     std.debug.assert(@offsetOf(SoftMax, "has_sinks") == 64);
 }
 
-/// Mirrors `vk_op_argsort_push_constants` (ggml-vulkan.cpp:1841 @b29c606e2).
+/// Mirrors `vk_op_argsort_push_constants` (ggml-vulkan-push-constants.h:511 @7fe450e19).
 pub const Argsort = extern struct {
     ncols: u32 = std.mem.zeroes(u32),
     ncols_padded: u32 = std.mem.zeroes(u32),
@@ -988,7 +1030,7 @@ comptime {
     std.debug.assert(@offsetOf(Argsort, "inner_end") == 32);
 }
 
-/// Mirrors `vk_op_topk_push_constants` (ggml-vulkan.cpp:1853 @b29c606e2).
+/// Mirrors `vk_op_topk_push_constants` (ggml-vulkan-push-constants.h:523 @7fe450e19).
 pub const Topk = extern struct {
     orig_ncols: u32 = std.mem.zeroes(u32),
     ncols_input: u32 = std.mem.zeroes(u32),
@@ -1009,7 +1051,7 @@ comptime {
     std.debug.assert(@offsetOf(Topk, "last_pass") == 24);
 }
 
-/// Mirrors `vk_op_topk_radix_push_constants` (ggml-vulkan.cpp:1863 @b29c606e2).
+/// Mirrors `vk_op_topk_radix_push_constants` (ggml-vulkan-push-constants.h:533 @7fe450e19).
 pub const TopkRadix = extern struct {
     ncols: u32 = std.mem.zeroes(u32),
     k: u32 = std.mem.zeroes(u32),
@@ -1028,7 +1070,7 @@ comptime {
     std.debug.assert(@offsetOf(TopkRadix, "n_stream") == 20);
 }
 
-/// Mirrors `vk_op_im2col_push_constants` (ggml-vulkan.cpp:1872 @b29c606e2).
+/// Mirrors `vk_op_im2col_push_constants` (ggml-vulkan-push-constants.h:542 @7fe450e19).
 pub const Im2col = extern struct {
     dst_addr: u64 = std.mem.zeroes(u64),
     batch_offset: u32 = std.mem.zeroes(u32),
@@ -1073,7 +1115,7 @@ comptime {
     std.debug.assert(@offsetOf(Im2col, "batch_IC") == 76);
 }
 
-/// Mirrors `vk_op_im2col_3d_push_constants` (ggml-vulkan.cpp:1887 @b29c606e2).
+/// Mirrors `vk_op_im2col_3d_push_constants` (ggml-vulkan-push-constants.h:557 @7fe450e19).
 pub const Im2col3d = extern struct {
     dst_addr: u64 = std.mem.zeroes(u64),
     nb10: u32 = std.mem.zeroes(u32),
@@ -1138,7 +1180,7 @@ comptime {
     std.debug.assert(@offsetOf(Im2col3d, "misalign_offsets") == 116);
 }
 
-/// Mirrors `vk_op_timestep_embedding_push_constants` (ggml-vulkan.cpp:1919 @b29c606e2).
+/// Mirrors `vk_op_timestep_embedding_push_constants` (ggml-vulkan-push-constants.h:589 @7fe450e19).
 pub const TimestepEmbedding = extern struct {
     nb1: u32 = std.mem.zeroes(u32),
     dim: u32 = std.mem.zeroes(u32),
@@ -1151,7 +1193,7 @@ comptime {
     std.debug.assert(@offsetOf(TimestepEmbedding, "max_period") == 8);
 }
 
-/// Mirrors `vk_op_col2im_1d_push_constants` (ggml-vulkan.cpp:1925 @b29c606e2).
+/// Mirrors `vk_op_col2im_1d_push_constants` (ggml-vulkan-push-constants.h:595 @7fe450e19).
 pub const Col2im1d = extern struct {
     T_out: u32 = std.mem.zeroes(u32),
     OC: u32 = std.mem.zeroes(u32),
@@ -1172,7 +1214,7 @@ comptime {
     std.debug.assert(@offsetOf(Col2im1d, "p0") == 24);
 }
 
-/// Mirrors `vk_op_conv_transpose_1d_push_constants` (ggml-vulkan.cpp:1935 @b29c606e2).
+/// Mirrors `vk_op_conv_transpose_1d_push_constants` (ggml-vulkan-push-constants.h:605 @7fe450e19).
 pub const ConvTranspose1d = extern struct {
     Cout: u32 = std.mem.zeroes(u32),
     Cin: u32 = std.mem.zeroes(u32),
@@ -1199,7 +1241,7 @@ comptime {
     std.debug.assert(@offsetOf(ConvTranspose1d, "s0") == 36);
 }
 
-/// Mirrors `vk_op_snake_push_constants` (ggml-vulkan.cpp:1950 @b29c606e2).
+/// Mirrors `vk_op_snake_push_constants` (ggml-vulkan-push-constants.h:620 @7fe450e19).
 pub const Snake = extern struct {
     ne0: u32 = std.mem.zeroes(u32),
     ne1: u32 = std.mem.zeroes(u32),
@@ -1210,7 +1252,7 @@ comptime {
     std.debug.assert(@offsetOf(Snake, "ne1") == 4);
 }
 
-/// Mirrors `vk_op_pool1d_push_constants` (ggml-vulkan.cpp:1955 @b29c606e2).
+/// Mirrors `vk_op_pool1d_push_constants` (ggml-vulkan-push-constants.h:625 @7fe450e19).
 pub const Pool1d = extern struct {
     IL: u32 = std.mem.zeroes(u32),
     OL: u32 = std.mem.zeroes(u32),
@@ -1233,7 +1275,7 @@ comptime {
     std.debug.assert(@offsetOf(Pool1d, "p0") == 28);
 }
 
-/// Mirrors `vk_op_pool2d_push_constants` (ggml-vulkan.cpp:1966 @b29c606e2).
+/// Mirrors `vk_op_pool2d_push_constants` (ggml-vulkan-push-constants.h:636 @7fe450e19).
 pub const Pool2d = extern struct {
     IW: u32 = std.mem.zeroes(u32),
     IH: u32 = std.mem.zeroes(u32),
@@ -1266,7 +1308,7 @@ comptime {
     std.debug.assert(@offsetOf(Pool2d, "p1") == 48);
 }
 
-/// Mirrors `vk_op_rwkv_wkv6_push_constants` (ggml-vulkan.cpp:1977 @b29c606e2).
+/// Mirrors `vk_op_rwkv_wkv6_push_constants` (ggml-vulkan-push-constants.h:647 @7fe450e19).
 pub const RwkvWkv6 = extern struct {
     B: u32 = std.mem.zeroes(u32),
     T: u32 = std.mem.zeroes(u32),
@@ -1281,7 +1323,7 @@ comptime {
     std.debug.assert(@offsetOf(RwkvWkv6, "H") == 12);
 }
 
-/// Mirrors `vk_op_rwkv_wkv7_push_constants` (ggml-vulkan.cpp:1984 @b29c606e2).
+/// Mirrors `vk_op_rwkv_wkv7_push_constants` (ggml-vulkan-push-constants.h:654 @7fe450e19).
 pub const RwkvWkv7 = extern struct {
     B: u32 = std.mem.zeroes(u32),
     T: u32 = std.mem.zeroes(u32),
@@ -1296,7 +1338,7 @@ comptime {
     std.debug.assert(@offsetOf(RwkvWkv7, "H") == 12);
 }
 
-/// Mirrors `vk_op_gated_linear_attn_push_constants` (ggml-vulkan.cpp:1990 @b29c606e2).
+/// Mirrors `vk_op_gated_linear_attn_push_constants` (ggml-vulkan-push-constants.h:661 @7fe450e19).
 pub const GatedLinearAttn = extern struct {
     B: u32 = std.mem.zeroes(u32),
     T: u32 = std.mem.zeroes(u32),
@@ -1313,7 +1355,7 @@ comptime {
     std.debug.assert(@offsetOf(GatedLinearAttn, "scale") == 16);
 }
 
-/// Mirrors `vk_op_lightning_indexer_push_constants` (ggml-vulkan.cpp:1997 @b29c606e2).
+/// Mirrors `vk_op_lightning_indexer_push_constants` (ggml-vulkan-push-constants.h:669 @7fe450e19).
 pub const LightningIndexer = extern struct {
     n_kv: u32 = std.mem.zeroes(u32),
     n_heads: u32 = std.mem.zeroes(u32),
@@ -1354,7 +1396,7 @@ comptime {
     std.debug.assert(@offsetOf(LightningIndexer, "d_nb3") == 64);
 }
 
-/// Mirrors `vk_op_gated_delta_net_push_constants` (ggml-vulkan.cpp:2017 @b29c606e2).
+/// Mirrors `vk_op_gated_delta_net_push_constants` (ggml-vulkan-push-constants.h:691 @7fe450e19).
 pub const GatedDeltaNet = extern struct {
     H: u32 = std.mem.zeroes(u32),
     n_tokens: u32 = std.mem.zeroes(u32),
@@ -1395,7 +1437,7 @@ comptime {
     std.debug.assert(@offsetOf(GatedDeltaNet, "K") == 64);
 }
 
-/// Mirrors `vk_op_ssm_scan_push_constants` (ggml-vulkan.cpp:2030 @b29c606e2).
+/// Mirrors `vk_op_ssm_scan_push_constants` (ggml-vulkan-push-constants.h:704 @7fe450e19).
 pub const SsmScan = extern struct {
     nb02: u32 = std.mem.zeroes(u32),
     nb03: u32 = std.mem.zeroes(u32),
@@ -1438,7 +1480,7 @@ comptime {
     std.debug.assert(@offsetOf(SsmScan, "K") == 68);
 }
 
-/// Mirrors `vk_op_ssm_conv_push_constants` (ggml-vulkan.cpp:2038 @b29c606e2).
+/// Mirrors `vk_op_ssm_conv_push_constants` (ggml-vulkan-push-constants.h:713 @7fe450e19).
 pub const SsmConv = extern struct {
     nb01: u32 = std.mem.zeroes(u32),
     nb02: u32 = std.mem.zeroes(u32),
@@ -1467,7 +1509,7 @@ comptime {
     std.debug.assert(@offsetOf(SsmConv, "n_s") == 40);
 }
 
-/// Mirrors `vk_op_conv2d_push_constants` (ggml-vulkan.cpp:2045 @b29c606e2).
+/// Mirrors `vk_op_conv2d_push_constants` (ggml-vulkan-push-constants.h:720 @7fe450e19).
 pub const Conv2d = extern struct {
     Cout: u32 = std.mem.zeroes(u32),
     Cin: u32 = std.mem.zeroes(u32),
@@ -1514,7 +1556,7 @@ comptime {
     std.debug.assert(@offsetOf(Conv2d, "OWOHL") == 76);
 }
 
-/// Mirrors `vk_op_conv3d_push_constants` (ggml-vulkan.cpp:2078 @b29c606e2).
+/// Mirrors `vk_op_conv3d_push_constants` (ggml-vulkan-push-constants.h:753 @7fe450e19).
 pub const Conv3d = extern struct {
     OC: u32 = std.mem.zeroes(u32),
     IC: u32 = std.mem.zeroes(u32),
@@ -1569,7 +1611,7 @@ comptime {
     std.debug.assert(@offsetOf(Conv3d, "OWOHODL") == 92);
 }
 
-/// Mirrors `vk_op_conv2d_dw_push_constants` (ggml-vulkan.cpp:2113 @b29c606e2).
+/// Mirrors `vk_op_conv2d_dw_push_constants` (ggml-vulkan-push-constants.h:788 @7fe450e19).
 pub const Conv2dDw = extern struct {
     ne: u32 = std.mem.zeroes(u32),
     batches: u32 = std.mem.zeroes(u32),
@@ -1606,7 +1648,7 @@ comptime {
     std.debug.assert(@offsetOf(Conv2dDw, "dilation_y") == 56);
 }
 
-/// Mirrors `vk_op_upscale_push_constants` (ggml-vulkan.cpp:2131 @b29c606e2).
+/// Mirrors `vk_op_upscale_push_constants` (ggml-vulkan-push-constants.h:806 @7fe450e19).
 pub const Upscale = extern struct {
     ne: u32 = std.mem.zeroes(u32),
     a_offset: u32 = std.mem.zeroes(u32),
@@ -1649,7 +1691,7 @@ comptime {
     std.debug.assert(@offsetOf(Upscale, "pixel_offset") == 68);
 }
 
-/// Mirrors `vk_op_sum_rows_push_constants` (ggml-vulkan.cpp:2140 @b29c606e2).
+/// Mirrors `vk_op_sum_rows_push_constants` (ggml-vulkan-push-constants.h:815 @7fe450e19).
 pub const SumRows = extern struct {
     n_cols: u32 = std.mem.zeroes(u32),
     ne01: u32 = std.mem.zeroes(u32),
@@ -1686,7 +1728,7 @@ comptime {
     std.debug.assert(@offsetOf(SumRows, "ne0_1L") == 56);
 }
 
-/// Mirrors `vk_quantize_q8_1_push_constants` (ggml-vulkan.cpp:2173 @b29c606e2).
+/// Mirrors `vk_quantize_q8_1_push_constants` (ggml-vulkan-push-constants.h:848 @7fe450e19).
 pub const QuantizeQ81 = extern struct {
     ne: u32 = std.mem.zeroes(u32),
     num_blocks: u32 = std.mem.zeroes(u32),
@@ -1697,7 +1739,7 @@ comptime {
     std.debug.assert(@offsetOf(QuantizeQ81, "num_blocks") == 4);
 }
 
-/// Mirrors `vk_op_flash_attn_split_k_reduce_push_constants` (ggml-vulkan.cpp:2178 @b29c606e2).
+/// Mirrors `vk_op_flash_attn_split_k_reduce_push_constants` (ggml-vulkan-push-constants.h:853 @7fe450e19).
 pub const FlashAttnSplitKReduce = extern struct {
     D: u32 = std.mem.zeroes(u32),
     ne1: u32 = std.mem.zeroes(u32),
@@ -1716,7 +1758,7 @@ comptime {
     std.debug.assert(@offsetOf(FlashAttnSplitKReduce, "sinks") == 20);
 }
 
-/// Mirrors `vk_op_flash_attn_mask_opt_push_constants` (ggml-vulkan.cpp:2187 @b29c606e2).
+/// Mirrors `vk_op_flash_attn_mask_opt_push_constants` (ggml-vulkan-push-constants.h:862 @7fe450e19).
 pub const FlashAttnMaskOpt = extern struct {
     nem0: u32 = std.mem.zeroes(u32),
     nem1: u32 = std.mem.zeroes(u32),
@@ -1739,4 +1781,25 @@ comptime {
     std.debug.assert(@offsetOf(FlashAttnMaskOpt, "nbd1") == 24);
     std.debug.assert(@offsetOf(FlashAttnMaskOpt, "nbd2") == 28);
     std.debug.assert(@offsetOf(FlashAttnMaskOpt, "nbd3") == 32);
+}
+
+/// Mirrors `vk_op_flash_attn_sparse_compact_push_constants` (ggml-vulkan-push-constants.h:874 @7fe450e19).
+pub const FlashAttnSparseCompact = extern struct {
+    KV: u32 = std.mem.zeroes(u32),
+    nem1: u32 = std.mem.zeroes(u32),
+    nem2: u32 = std.mem.zeroes(u32),
+    nbm1: u32 = std.mem.zeroes(u32),
+    nbm2: u32 = std.mem.zeroes(u32),
+    nbm3: u32 = std.mem.zeroes(u32),
+    n_kv_max: u32 = std.mem.zeroes(u32),
+};
+comptime {
+    std.debug.assert(@sizeOf(FlashAttnSparseCompact) == 28);
+    std.debug.assert(@offsetOf(FlashAttnSparseCompact, "KV") == 0);
+    std.debug.assert(@offsetOf(FlashAttnSparseCompact, "nem1") == 4);
+    std.debug.assert(@offsetOf(FlashAttnSparseCompact, "nem2") == 8);
+    std.debug.assert(@offsetOf(FlashAttnSparseCompact, "nbm1") == 12);
+    std.debug.assert(@offsetOf(FlashAttnSparseCompact, "nbm2") == 16);
+    std.debug.assert(@offsetOf(FlashAttnSparseCompact, "nbm3") == 20);
+    std.debug.assert(@offsetOf(FlashAttnSparseCompact, "n_kv_max") == 24);
 }

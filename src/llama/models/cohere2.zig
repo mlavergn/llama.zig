@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/cohere2.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/cohere2.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_cohere2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -22,15 +22,13 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_cohere2`'s `load_arch_hparams` (models/cohere2.cpp:3 @b29c606e2).
+/// Ports `llama_model_cohere2`'s `load_arch_hparams` (models/cohere2.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
-    var swa_period: u32 = 4;
-    if (try meta.getKeyOrArrScalar(.attention_sliding_window_pattern, false, exc)) |v| swa_period = v;
-    hp.setSwaPattern(swa_period, false);
+    try self.loadSwaPattern(ml, 4, false, exc);
 
     hp.rope_freq_base_train_swa = hp.rope_freq_base_train;
     hp.rope_freq_scale_train_swa = hp.rope_freq_scale_train;
@@ -46,7 +44,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_cohere2`'s `load_arch_tensors` (models/cohere2.cpp:23 @b29c606e2).
+/// Ports `llama_model_cohere2`'s `load_arch_tensors` (models/cohere2.cpp:21 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -72,19 +70,19 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_cohere2`'s `build_arch_graph` (models/cohere2.cpp:48 @b29c606e2).
+/// Ports `llama_model_cohere2`'s `build_arch_graph` (models/cohere2.cpp:46 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_cohere2`'s `graph`
-/// (models/cohere2.cpp:52 @b29c606e2).
+/// (models/cohere2.cpp:50 @7fe450e19).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cohere2.cpp", 55, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cohere2.cpp", 53, "n_embd_head == hparams.n_embd_head_k()");
 
     const f_logit_scale = hp.f_logit_scale;
 

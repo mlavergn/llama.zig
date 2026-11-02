@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-metal/ggml-metal-common.cpp` at
-//! v0.4.1 (`b29c606e2`). Each declaration below names the C++ it replaces
+//! v0.5.0 (`7fe450e19`). Each declaration below names the C++ it replaces
 //! and the line it began at.
 //!
 //! # Nothing here touches Metal
@@ -45,13 +45,13 @@ const CGraph = impl.CGraph;
 /// `backend_reg.zig`, `backend.zig` and `cpu_backend.zig`.
 const allocator = std.heap.c_allocator;
 
-/// Ports `enum ggml_mem_range_type` (ggml-metal-common.h:14 @b29c606e2).
+/// Ports `enum ggml_mem_range_type` (ggml-metal-common.h:14 @7fe450e19).
 pub const RangeType = enum(c_int) {
     src = 0,
     dst = 1,
 };
 
-/// Ports `struct ggml_mem_range` (ggml-metal-common.cpp:28 @b29c606e2): an
+/// Ports `struct ggml_mem_range` (ggml-metal-common.cpp:46 @7fe450e19): an
 /// interval `[p0, p1)` within the buffer `pb`.
 const MemRange = struct {
     /// Buffer id.
@@ -63,7 +63,32 @@ const MemRange = struct {
     pt: RangeType,
 };
 
-/// Ports `ggml_metal_op_mul_mat_use_mm` (ggml-metal-common.cpp:10 @b29c606e2).
+/// Ports `ggml_metal_fwht_supported_size` (ggml-metal-common.cpp:11
+/// @7fe450e19): the FWHT sizes there are kernels for. Must stay in sync
+/// with the `kernel_fwht_<type>_<N>` templates in `misc.metal`.
+fn fwhtSupportedSize(n: i64) bool {
+    return n == 64 or n == 128 or n == 256 or n == 512;
+}
+
+/// Ports `ggml_metal_op_mul_mat_use_fwht` (ggml-metal-common.cpp:18
+/// @7fe450e19).
+///
+/// Whether a Hadamard-hinted `MUL_MAT` goes to the FWHT kernels. The
+/// encoder and the Objective-C `supports_op` must ask the same question:
+/// an F16 `src[1]` that `supports_op` admits and the dispatch then lets
+/// fall through reaches the generic path, which has no F32-by-F16 kernel.
+pub export fn ggml_metal_op_mul_mat_use_fwht(op: *const c.ggml_tensor) callconv(.c) bool {
+    const src1 = impl.one(c.ggml_tensor, op.src[1]);
+    return impl.getOpParamsI32(op, 1) == c.GGML_HINT_SRC0_IS_HADAMARD and
+        op.type == c.GGML_TYPE_F32 and
+        (src1.type == c.GGML_TYPE_F32 or src1.type == c.GGML_TYPE_F16) and
+        c.ggml_is_contiguous(src1) and
+        c.ggml_is_contiguous(op) and
+        c.ggml_are_same_shape(src1, op) and
+        fwhtSupportedSize(src1.ne[0]);
+}
+
+/// Ports `ggml_metal_op_mul_mat_use_mm` (ggml-metal-common.cpp:28 @7fe450e19).
 ///
 /// Whether `MUL_MAT` takes the matrix-matrix kernel rather than a
 /// matrix-vector one: the break-even the encoder and the Objective-C
@@ -81,7 +106,7 @@ pub export fn ggml_metal_op_mul_mat_use_mm(op: *const c.ggml_tensor, has_simdgro
         has_simdgroup_mm and ne00 >= 64 and ne11 > 8;
 }
 
-/// Ports `ggml_metal_op_mul_mat_id_use_mm` (ggml-metal-common.cpp:19 @b29c606e2).
+/// Ports `ggml_metal_op_mul_mat_id_use_mm` (ggml-metal-common.cpp:37 @7fe450e19).
 ///
 /// `MUL_MAT_ID`'s counterpart: the matrix-matrix kernel once the batch
 /// (`ne21`, rows of the expert ids) reaches 32.
@@ -92,7 +117,7 @@ pub export fn ggml_metal_op_mul_mat_id_use_mm(op: *const c.ggml_tensor, has_simd
     return has_simdgroup_mm and ne00 >= 64 and ne21 >= 32;
 }
 
-/// Ports `struct ggml_mem_ranges` (ggml-metal-common.cpp:37 @b29c606e2).
+/// Ports `struct ggml_mem_ranges` (ggml-metal-common.cpp:55 @7fe450e19).
 ///
 /// Opaque to every caller — the C's `ggml_mem_ranges_t` is a pointer to an
 /// incomplete type — so the layout is ours to choose.
@@ -101,7 +126,7 @@ pub const MemRanges = struct {
     debug: c_int = 0,
 };
 
-/// Ports `ggml_mem_ranges_init` (ggml-metal-common.cpp:43 @b29c606e2).
+/// Ports `ggml_mem_ranges_init` (ggml-metal-common.cpp:61 @7fe450e19).
 ///
 /// Parameters:
 /// - `debug`: the C's debug level; above 2, every range is logged.
@@ -119,20 +144,20 @@ pub export fn ggml_mem_ranges_init(debug: c_int) callconv(.c) ?*MemRanges {
     return res;
 }
 
-/// Ports `ggml_mem_ranges_free` (ggml-metal-common.cpp:52 @b29c606e2).
+/// Ports `ggml_mem_ranges_free` (ggml-metal-common.cpp:70 @7fe450e19).
 pub export fn ggml_mem_ranges_free(mrs: ?*MemRanges) callconv(.c) void {
     const m = mrs orelse return;
     m.ranges.deinit(allocator);
     allocator.destroy(m);
 }
 
-/// Ports `ggml_mem_ranges_reset` (ggml-metal-common.cpp:56 @b29c606e2).
+/// Ports `ggml_mem_ranges_reset` (ggml-metal-common.cpp:74 @7fe450e19).
 pub export fn ggml_mem_ranges_reset(mrs: *MemRanges) callconv(.c) void {
     mrs.ranges.clearRetainingCapacity();
 }
 
 /// Ports the `ggml_mem_range` overload of `ggml_mem_ranges_add`
-/// (ggml-metal-common.cpp:60 @b29c606e2).
+/// (ggml-metal-common.cpp:78 @7fe450e19).
 ///
 /// The C has two functions of this name, separated by their parameter
 /// type; Zig has no overloading, so the private one is spelled out.
@@ -147,8 +172,8 @@ fn addRange(mrs: *MemRanges, mr: MemRange) bool {
     return true;
 }
 
-/// Ports `ggml_mem_range_from_tensor` (ggml-metal-common.cpp:66
-/// @b29c606e2).
+/// Ports `ggml_mem_range_from_tensor` (ggml-metal-common.cpp:84
+/// @7fe450e19).
 fn rangeFromTensor(tensor_in: *const Tensor, pt: RangeType) MemRange {
     // always use the base tensor
     const tensor = if (tensor_in.view_src != null)
@@ -182,19 +207,19 @@ fn rangeFromTensor(tensor_in: *const Tensor, pt: RangeType) MemRange {
     };
 }
 
-/// Ports `ggml_mem_range_from_tensor_src` (ggml-metal-common.cpp:100
-/// @b29c606e2).
+/// Ports `ggml_mem_range_from_tensor_src` (ggml-metal-common.cpp:118
+/// @7fe450e19).
 fn rangeFromTensorSrc(tensor: *const Tensor) MemRange {
     return rangeFromTensor(tensor, .src);
 }
 
-/// Ports `ggml_mem_range_from_tensor_dst` (ggml-metal-common.cpp:104
-/// @b29c606e2).
+/// Ports `ggml_mem_range_from_tensor_dst` (ggml-metal-common.cpp:122
+/// @7fe450e19).
 fn rangeFromTensorDst(tensor: *const Tensor) MemRange {
     return rangeFromTensor(tensor, .dst);
 }
 
-/// Ports `ggml_mem_ranges_add_src` (ggml-metal-common.cpp:108 @b29c606e2).
+/// Ports `ggml_mem_ranges_add_src` (ggml-metal-common.cpp:126 @7fe450e19).
 fn addSrc(mrs: *MemRanges, tensor: *const Tensor) bool {
     const mr = rangeFromTensorSrc(tensor);
     if (mrs.debug > 2) {
@@ -205,7 +230,7 @@ fn addSrc(mrs: *MemRanges, tensor: *const Tensor) bool {
     return addRange(mrs, mr);
 }
 
-/// Ports `ggml_mem_ranges_add_dst` (ggml-metal-common.cpp:120 @b29c606e2).
+/// Ports `ggml_mem_ranges_add_dst` (ggml-metal-common.cpp:138 @7fe450e19).
 fn addDst(mrs: *MemRanges, tensor: *const Tensor) bool {
     const mr = rangeFromTensorDst(tensor);
     if (mrs.debug > 2) {
@@ -217,7 +242,7 @@ fn addDst(mrs: *MemRanges, tensor: *const Tensor) bool {
 }
 
 /// Ports the tensor overload of `ggml_mem_ranges_add`
-/// (ggml-metal-common.cpp:132 @b29c606e2): every source, then the
+/// (ggml-metal-common.cpp:150 @7fe450e19): every source, then the
 /// destination.
 ///
 /// Parameters:
@@ -234,7 +259,7 @@ pub export fn ggml_mem_ranges_add(mrs: *MemRanges, tensor: *const Tensor) callco
 }
 
 /// Ports the `ggml_mem_range` overload of `ggml_mem_ranges_check`
-/// (ggml-metal-common.cpp:142 @b29c606e2).
+/// (ggml-metal-common.cpp:160 @7fe450e19).
 fn checkRange(mrs: *MemRanges, mr: MemRange) bool {
     for (mrs.ranges.items) |cmp| {
         // two memory ranges cannot intersect if they are in different buffers
@@ -267,20 +292,20 @@ fn checkRange(mrs: *MemRanges, mr: MemRange) bool {
     return true;
 }
 
-/// Ports `ggml_mem_ranges_check_src` (ggml-metal-common.cpp:173
-/// @b29c606e2).
+/// Ports `ggml_mem_ranges_check_src` (ggml-metal-common.cpp:191
+/// @7fe450e19).
 fn checkSrc(mrs: *MemRanges, tensor: *const Tensor) bool {
     return checkRange(mrs, rangeFromTensorSrc(tensor));
 }
 
-/// Ports `ggml_mem_ranges_check_dst` (ggml-metal-common.cpp:183
-/// @b29c606e2).
+/// Ports `ggml_mem_ranges_check_dst` (ggml-metal-common.cpp:201
+/// @7fe450e19).
 fn checkDst(mrs: *MemRanges, tensor: *const Tensor) bool {
     return checkRange(mrs, rangeFromTensorDst(tensor));
 }
 
 /// Ports the tensor overload of `ggml_mem_ranges_check`
-/// (ggml-metal-common.cpp:193 @b29c606e2).
+/// (ggml-metal-common.cpp:211 @7fe450e19).
 ///
 /// Parameters:
 /// - `mrs`: the ranges already in the concurrent set.
@@ -300,7 +325,7 @@ pub export fn ggml_mem_ranges_check(mrs: *MemRanges, tensor: *const Tensor) call
 // -----------------------------------------------------------------------------
 // The reordering pass
 
-/// Ports `struct node_info` (ggml-metal-common.cpp:205 @b29c606e2): one
+/// Ports `struct node_info` (ggml-metal-common.cpp:223 @7fe450e19): one
 /// graph node plus the nodes fused onto it.
 const NodeInfo = struct {
     node: *Tensor,
@@ -319,46 +344,74 @@ const NodeInfo = struct {
     fn isEmpty(self: NodeInfo) bool {
         return impl.opIsEmpty(self.node.op);
     }
+
+    /// Whether `t` is produced by this fused group: the node itself or
+    /// any tensor fused onto it.
+    fn isOutput(self: NodeInfo, t: *const Tensor) bool {
+        if (t == self.node) return true;
+        for (self.fused.items) |f| {
+            if (t == f) return true;
+        }
+        return false;
+    }
 };
 
-/// Ports the `h_add` lambda (ggml-metal-common.cpp:229 @b29c606e2): every
-/// source of the node and of everything fused onto it, then the
-/// destination.
+/// Ports the `h_add` lambda (ggml-metal-common.cpp:259 @7fe450e19): every
+/// external source of the node and of everything fused onto it, then every
+/// tensor the fused kernel writes. Sources produced inside the group are
+/// internal and are not ranges the group reads.
 fn hAdd(mrs: *MemRanges, node: NodeInfo) bool {
+    // only external sources matter: sources produced by the fused group are internal
     for (0..c.GGML_MAX_SRC) |i| {
         if (node.node.src[i]) |src| {
-            if (!addSrc(mrs, src)) return false;
-        }
-    }
-    // keep track of the sources of the fused nodes as well
-    for (node.fused.items) |fused| {
-        for (0..c.GGML_MAX_SRC) |i| {
-            if (fused.src[i]) |src| {
+            if (!node.isOutput(src)) {
                 if (!addSrc(mrs, src)) return false;
             }
         }
     }
-    return addDst(mrs, node.dst());
+    for (node.fused.items) |fused| {
+        for (0..c.GGML_MAX_SRC) |i| {
+            if (fused.src[i]) |src| {
+                if (!node.isOutput(src)) {
+                    if (!addSrc(mrs, src)) return false;
+                }
+            }
+        }
+    }
+    // all fused tensors are produced by the fused kernel
+    if (!addDst(mrs, node.node)) return false;
+    for (node.fused.items) |fused| {
+        if (!addDst(mrs, fused)) return false;
+    }
+    return true;
 }
 
-/// Ports the `h_check` lambda (ggml-metal-common.cpp:253 @b29c606e2).
+/// Ports the `h_check` lambda (ggml-metal-common.cpp:295 @7fe450e19).
 fn hCheck(mrs: *MemRanges, node: NodeInfo) bool {
     for (0..c.GGML_MAX_SRC) |i| {
         if (node.node.src[i]) |src| {
-            if (!checkSrc(mrs, src)) return false;
+            if (!node.isOutput(src)) {
+                if (!checkSrc(mrs, src)) return false;
+            }
         }
     }
     for (node.fused.items) |fused| {
         for (0..c.GGML_MAX_SRC) |i| {
             if (fused.src[i]) |src| {
-                if (!checkSrc(mrs, src)) return false;
+                if (!node.isOutput(src)) {
+                    if (!checkSrc(mrs, src)) return false;
+                }
             }
         }
     }
-    return checkDst(mrs, node.dst());
+    if (!checkDst(mrs, node.node)) return false;
+    for (node.fused.items) |fused| {
+        if (!checkDst(mrs, fused)) return false;
+    }
+    return true;
 }
 
-/// Ports the `h_safe` lambda (ggml-metal-common.cpp:277 @b29c606e2): the
+/// Ports the `h_safe` lambda (ggml-metal-common.cpp:330 @7fe450e19): the
 /// ops a reorder may cross. The C's comment says it "can be expanded when
 /// needed", so this list is a policy and not a property.
 fn hSafe(op: c.enum_ggml_op) bool {
@@ -394,8 +447,8 @@ fn hSafe(op: c.enum_ggml_op) bool {
     };
 }
 
-/// Ports `ggml_metal_graph_optimize_reorder` (ggml-metal-common.cpp:227
-/// @b29c606e2).
+/// Ports `ggml_metal_graph_optimize_reorder` (ggml-metal-common.cpp:257
+/// @7fe450e19).
 ///
 /// Parameters:
 /// - `arena`: owns the returned permutation and the scratch `used` set.
@@ -475,7 +528,7 @@ fn reorder(arena: std.mem.Allocator, nodes: []const NodeInfo) []const c_int {
     return res.items;
 }
 
-/// Ports `ggml_graph_optimize` (ggml-metal-common.cpp:393 @b29c606e2).
+/// Ports `ggml_graph_optimize` (ggml-metal-common.cpp:446 @7fe450e19).
 ///
 /// Fuses what can be fused, reorders the fused nodes for concurrency, then
 /// writes the nodes back out unfused. Fusing first is what keeps a reorder

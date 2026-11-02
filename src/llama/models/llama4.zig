@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/llama4.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/llama4.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_llama4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>`.
 
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_llama4`'s `load_arch_hparams` (src/models/llama4.cpp:3 @b29c606e2).
+/// Ports `llama_model_llama4`'s `load_arch_hparams` (src/models/llama4.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -46,9 +46,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         hp.f_attn_temp_scale = 0.1;
         hp.f_attn_temp_offset = 1.0;
 
-        var swa_period: u32 = 4; // The pattern: three chunked, one full.
-        if (try meta.getKeyOrArrScalar(.attention_sliding_window_pattern, false, exc)) |v| swa_period = v;
-        hp.setSwaPattern(swa_period, false);
+        try self.loadSwaPattern(ml, 4, false, exc); // The pattern: three chunked, one full.
 
         hp.rope_freq_base_train_swa = hp.rope_freq_base_train;
         hp.rope_freq_scale_train_swa = hp.rope_freq_scale_train;
@@ -71,7 +69,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.use_kq_norm = self.type != .@"17b_128e";
 }
 
-/// Ports `llama_model_llama4`'s `load_arch_tensors` (src/models/llama4.cpp:46 @b29c606e2).
+/// Ports `llama_model_llama4`'s `load_arch_tensors` (src/models/llama4.cpp:44 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -129,7 +127,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_llama4`'s `build_arch_graph` (src/models/llama4.cpp:98 @b29c606e2).
+/// Ports `llama_model_llama4`'s `build_arch_graph` (src/models/llama4.cpp:96 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (@as(hparams_mod.SwaType, @fromBackingInt(@intCast(model.hparams.swa_type))) == .none) {
         buildGraph(false, model, b);
@@ -139,14 +137,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_llama4`'s `graph<iswa>`
-/// (src/models/llama4.cpp:107 @b29c606e2).
+/// (src/models/llama4.cpp:105 @7fe450e19).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/llama4.cpp", 110, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/llama4.cpp", 111, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/llama4.cpp", 108, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/llama4.cpp", 109, "n_embd_head == n_rot");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 

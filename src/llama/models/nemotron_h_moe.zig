@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nemotron-h-moe.cpp` at v0.4.1
-//! (`b29c606e2`): `llama_model_nemotron_h_moe`'s `build_arch_graph` and its
+//! Ported from `llama.cpp/src/models/nemotron-h-moe.cpp` at v0.5.0
+//! (`7fe450e19`): `llama_model_nemotron_h_moe`'s `build_arch_graph` and its
 //! `graph_mtp`. It reuses `llama_model_nemotron_h`'s loading and `graph`,
 //! in `nemotron_h.zig`.
 
@@ -20,7 +20,7 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llama_model_nemotron_h_moe`'s `build_arch_graph`
-/// (models/nemotron-h-moe.cpp:3 @b29c606e2): the MTP draft head for that
+/// (models/nemotron-h-moe.cpp:3 @7fe450e19): the MTP draft head for that
 /// graph type, Nemotron-H's graph otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -28,7 +28,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_nemotron_h_moe`'s `graph_mtp`
-/// (models/nemotron-h-moe.cpp:11 @b29c606e2): the MTP draft head.
+/// (models/nemotron-h-moe.cpp:11 @7fe450e19): the MTP draft head.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -125,7 +125,14 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
         const router_logits = b.buildLoraMm(layer.ffn_gate_inp.?, cur, null);
         b.cb(router_logits, "mtp_ffn_moe_logits", il);
 
-        const moe_out = b.buildMoeFfn(cur, .{
+        const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, null, null, null, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .relu_sqr, .par, il);
+        b.cb(ffn_shexp, "mtp_ffn_shexp", il);
+
+        if (layer.ffn_latent_down) |w| {
+            cur = c.ggml_mul_mat(ctx, w, cur);
+        }
+
+        var moe_out = b.buildMoeFfn(cur, .{
             .gate_inp = layer.ffn_gate_inp,
             .up_exps = layer.ffn_up_exps,
             .gate_exps = null, // no gate
@@ -145,8 +152,9 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
         }, il);
         b.cb(moe_out, "mtp_ffn_moe_out", il);
 
-        const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, null, null, null, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .relu_sqr, .par, il);
-        b.cb(ffn_shexp, "mtp_ffn_shexp", il);
+        if (layer.ffn_latent_up) |w| {
+            moe_out = c.ggml_mul_mat(ctx, w, moe_out);
+        }
 
         cur = c.ggml_add(ctx, moe_out, ffn_shexp);
         b.cb(cur, "mtp_ffn_out", il);
@@ -156,7 +164,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_post_ffn", il);
 
     // The final head norm: the MTP head has its own LayerNorm.
-    impl.assert(layer.nextn.shared_head_norm != null, "models/nemotron-h-moe.cpp", 137, "layer.nextn.shared_head_norm && \"NEMOTRON_H_MOE MTP: missing final head norm\"");
+    impl.assert(layer.nextn.shared_head_norm != null, "models/nemotron-h-moe.cpp", 145, "layer.nextn.shared_head_norm && \"NEMOTRON_H_MOE MTP: missing final head norm\"");
     cur = b.buildNorm(cur, layer.nextn.shared_head_norm, null, .norm, -1);
 
     b.cb(cur, "h_nextn", -1);
@@ -169,7 +177,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     // The LM head.
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "models/nemotron-h-moe.cpp", 150, "head_w != nullptr && \"NEMOTRON_H_MOE MTP requires an output projection\"");
+    impl.assert(head_w != null, "models/nemotron-h-moe.cpp", 158, "head_w != nullptr && \"NEMOTRON_H_MOE MTP requires an output projection\"");
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
 

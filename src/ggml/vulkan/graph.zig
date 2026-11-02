@@ -3,8 +3,10 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
-//! (`b29c606e2`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.5.0
+//! (`7fe450e19`). Upstream split `ggml-vulkan.cpp` into those files at
+//! v0.5.0.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -16,7 +18,7 @@ fn u(x: i64) u64 {
     return @bitCast(x);
 }
 
-/// Ports `ggml_vk_get_node_flops` (ggml-vulkan.cpp:2292 @b29c606e2): the
+/// Ports `ggml_vk_get_node_flops` (ggml-vulkan.cpp:181 @7fe450e19): the
 /// floating-point operations of a matmul, convolution or attention node,
 /// zero for anything else. Unsigned and wrapping, as the C++'s `uint64_t`.
 pub fn getNodeFlops(node: *const c.ggml_tensor) u64 {
@@ -51,7 +53,7 @@ pub fn getNodeFlops(node: *const c.ggml_tensor) u64 {
     return 0;
 }
 
-/// Ports `ggml_vk_print_node_list` (ggml-vulkan.cpp:2324 @b29c606e2).
+/// Ports `ggml_vk_print_node_list` (ggml-vulkan.cpp:212 @7fe450e19).
 pub fn printNodeList(cgraph: *const impl.CGraph, start: c_int, end: c_int) void {
     var total_flops: u64 = 0;
     var n_ops: c_int = 0;
@@ -96,35 +98,35 @@ fn srcOf(t: *const c.ggml_tensor, i: usize) *c.ggml_tensor {
 // The fused patterns the graph walk recognises, with the edges that make
 // them one subgraph. Each edge is {node, src index, node it must be}.
 
-/// Ports `topk_moe_early_softmax_norm` (ggml-vulkan.cpp:656 @b29c606e2).
+/// Ports `topk_moe_early_softmax_norm` (ggml-vulkan-types.h:502 @7fe450e19).
 pub const topk_moe_early_softmax_norm = [_]Op{ c.GGML_OP_SOFT_MAX, c.GGML_OP_RESHAPE, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS, c.GGML_OP_RESHAPE, c.GGML_OP_SUM_ROWS, c.GGML_OP_CLAMP, c.GGML_OP_DIV, c.GGML_OP_RESHAPE };
-/// Ports `topk_moe_sigmoid_norm_bias` (ggml-vulkan.cpp:661 @b29c606e2).
+/// Ports `topk_moe_sigmoid_norm_bias` (ggml-vulkan-types.h:507 @7fe450e19).
 pub const topk_moe_sigmoid_norm_bias = [_]Op{ c.GGML_OP_UNARY, c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS, c.GGML_OP_RESHAPE, c.GGML_OP_SUM_ROWS, c.GGML_OP_CLAMP, c.GGML_OP_DIV, c.GGML_OP_RESHAPE };
-/// Ports `topk_moe_sqrt_softplus_norm_bias` (ggml-vulkan.cpp:666 @b29c606e2).
+/// Ports `topk_moe_sqrt_softplus_norm_bias` (ggml-vulkan-types.h:512 @7fe450e19).
 pub const topk_moe_sqrt_softplus_norm_bias = [_]Op{ c.GGML_OP_UNARY, c.GGML_OP_SQRT, c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS, c.GGML_OP_RESHAPE, c.GGML_OP_SUM_ROWS, c.GGML_OP_CLAMP, c.GGML_OP_DIV, c.GGML_OP_RESHAPE };
-/// Ports `topk_moe_early_softmax` (ggml-vulkan.cpp:673 @b29c606e2).
+/// Ports `topk_moe_early_softmax` (ggml-vulkan-types.h:519 @7fe450e19).
 pub const topk_moe_early_softmax = [_]Op{ c.GGML_OP_SOFT_MAX, c.GGML_OP_RESHAPE, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS };
-/// Ports `topk_moe_late_softmax` (ggml-vulkan.cpp:676 @b29c606e2).
+/// Ports `topk_moe_late_softmax` (ggml-vulkan-types.h:522 @7fe450e19).
 pub const topk_moe_late_softmax = [_]Op{ c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS, c.GGML_OP_RESHAPE, c.GGML_OP_SOFT_MAX, c.GGML_OP_RESHAPE };
-/// Ports `snake_pattern` (ggml-vulkan.cpp:682 @b29c606e2).
+/// Ports `snake_pattern` (ggml-vulkan-types.h:526 @7fe450e19).
 pub const snake_pattern = [_]Op{ c.GGML_OP_MUL, c.GGML_OP_SIN, c.GGML_OP_SQR, c.GGML_OP_MUL, c.GGML_OP_ADD };
-/// Ports `rms_norm_mul_add_mul_pattern` (ggml-vulkan.cpp:700 @b29c606e2).
+/// Ports `rms_norm_mul_add_mul_pattern` (ggml-vulkan-types.h:544 @7fe450e19).
 pub const rms_norm_mul_add_mul_pattern = [_]Op{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ADD, c.GGML_OP_MUL };
-/// Ports `rms_norm_mul_add_pattern` (ggml-vulkan.cpp:701 @b29c606e2).
+/// Ports `rms_norm_mul_add_pattern` (ggml-vulkan-types.h:546 @7fe450e19).
 pub const rms_norm_mul_add_pattern = [_]Op{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ADD };
-/// Ports `rms_norm_mul_rope_view_set_rows_pattern` (ggml-vulkan.cpp:702 @b29c606e2).
+/// Ports `rms_norm_mul_rope_view_set_rows_pattern` (ggml-vulkan-types.h:548 @7fe450e19).
 pub const rms_norm_mul_rope_view_set_rows_pattern = [_]Op{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ROPE, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS };
-/// Ports `rms_norm_view_set_rows_pattern` (ggml-vulkan.cpp:703 @b29c606e2).
+/// Ports `rms_norm_view_set_rows_pattern` (ggml-vulkan-types.h:550 @7fe450e19).
 pub const rms_norm_view_set_rows_pattern = [_]Op{ c.GGML_OP_RMS_NORM, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS };
-/// Ports `rope_view_set_rows_pattern` (ggml-vulkan.cpp:704 @b29c606e2).
+/// Ports `rope_view_set_rows_pattern` (ggml-vulkan-types.h:552 @7fe450e19).
 pub const rope_view_set_rows_pattern = [_]Op{ c.GGML_OP_ROPE, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS };
 
 // qwen4 QSA indexer: gather per-block scores to cells + add f16 mask (cast+reshape) + top-k,
 // fused into one radix-select. The cast/reshape are elided; the raw f16 mask is read in-shader.
 
-/// Ports `topk_qsa_pattern` (ggml-vulkan.cpp:688 @b29c606e2).
+/// Ports `topk_qsa_pattern` (ggml-vulkan-types.h:530 @7fe450e19).
 pub const topk_qsa_pattern = [_]Op{ c.GGML_OP_GET_ROWS, c.GGML_OP_PERMUTE, c.GGML_OP_CONT, c.GGML_OP_CPY, c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_TOP_K };
-/// Ports `topk_qsa_edges` (ggml-vulkan.cpp:692 @b29c606e2).
+/// Ports `topk_qsa_edges` (ggml-vulkan-types.h:535 @7fe450e19).
 const topk_qsa_edges = [_][3]c_int{
     .{ 1, 0, 0 }, // permute->src[0] == get_rows
     .{ 2, 0, 1 }, // cont->src[0]    == permute
@@ -134,27 +136,27 @@ const topk_qsa_edges = [_][3]c_int{
     .{ 6, 0, 5 }, // top_k->src[0]   == add
 };
 
-/// Ports `topk_moe_early_softmax_norm_edges` (ggml-vulkan.cpp:716 @b29c606e2).
+/// Ports `topk_moe_early_softmax_norm_edges` (ggml-vulkan-types.h:554 @7fe450e19).
 const topk_moe_early_softmax_norm_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 3, 0, 2 }, .{ 4, 0, 1 }, .{ 4, 1, 3 }, .{ 5, 0, 4 }, .{ 6, 0, 5 }, .{ 7, 0, 6 }, .{ 8, 0, 5 }, .{ 8, 1, 7 }, .{ 9, 0, 8 } };
-/// Ports `topk_moe_sigmoid_norm_bias_edges` (ggml-vulkan.cpp:741 @b29c606e2).
+/// Ports `topk_moe_sigmoid_norm_bias_edges` (ggml-vulkan-types.h:568 @7fe450e19).
 const topk_moe_sigmoid_norm_bias_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 3, 0, 2 }, .{ 4, 0, 3 }, .{ 5, 0, 1 }, .{ 5, 1, 4 }, .{ 6, 0, 5 }, .{ 7, 0, 6 }, .{ 8, 0, 7 }, .{ 9, 0, 6 }, .{ 9, 1, 8 }, .{ 10, 0, 9 } };
-/// Ports `topk_moe_sqrt_softplus_norm_bias_edges` (ggml-vulkan.cpp:756 @b29c606e2).
+/// Ports `topk_moe_sqrt_softplus_norm_bias_edges` (ggml-vulkan-types.h:583 @7fe450e19).
 const topk_moe_sqrt_softplus_norm_bias_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 1 }, .{ 3, 0, 1 }, .{ 4, 0, 3 }, .{ 5, 0, 4 }, .{ 6, 0, 2 }, .{ 6, 1, 5 }, .{ 7, 0, 6 }, .{ 8, 0, 7 }, .{ 9, 0, 8 }, .{ 10, 0, 7 }, .{ 10, 1, 9 }, .{ 11, 0, 10 } };
-/// Ports `topk_moe_early_softmax_edges` (ggml-vulkan.cpp:773 @b29c606e2).
+/// Ports `topk_moe_early_softmax_edges` (ggml-vulkan-types.h:599 @7fe450e19).
 const topk_moe_early_softmax_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 3, 0, 2 }, .{ 4, 0, 1 }, .{ 4, 1, 3 } };
-/// Ports `topk_moe_late_softmax_edges` (ggml-vulkan.cpp:787 @b29c606e2).
+/// Ports `topk_moe_late_softmax_edges` (ggml-vulkan-types.h:607 @7fe450e19).
 const topk_moe_late_softmax_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 1, 1 }, .{ 3, 0, 2 }, .{ 4, 0, 3 }, .{ 5, 0, 4 } };
-/// Ports `rope_view_set_rows_edges` (ggml-vulkan.cpp:814 @b29c606e2).
+/// Ports `rope_view_set_rows_edges` (ggml-vulkan-types.h:634 @7fe450e19).
 const rope_view_set_rows_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 1 } };
-/// Ports `rms_norm_mul_rope_view_set_rows_edges` (ggml-vulkan.cpp:819 @b29c606e2).
+/// Ports `rms_norm_mul_rope_view_set_rows_edges` (ggml-vulkan-types.h:639 @7fe450e19).
 const rms_norm_mul_rope_view_set_rows_edges = [_][3]c_int{ .{ 1, 0, 0 }, .{ 2, 0, 1 }, .{ 3, 0, 2 }, .{ 4, 0, 3 } };
-/// Ports `rms_norm_view_set_rows_edges` (ggml-vulkan.cpp:826 @b29c606e2).
+/// Ports `rms_norm_view_set_rows_edges` (ggml-vulkan-types.h:646 @7fe450e19).
 const rms_norm_view_set_rows_edges = [_][3]c_int{
     .{ 1, 0, 0 }, // view->src[0]     == rms_norm
     .{ 2, 0, 1 }, // set_rows->src[0] == view
 };
 
-/// Ports `ggml_vk_is_empty` (ggml-vulkan.cpp:17265 @b29c606e2).
+/// Ports `ggml_vk_is_empty` (ggml-vulkan.cpp:13170 @7fe450e19).
 pub fn isEmpty(node: *const c.ggml_tensor) bool {
     return c.ggml_is_empty(node) or node.op == c.GGML_OP_NONE or node.op == c.GGML_OP_RESHAPE or node.op == c.GGML_OP_TRANSPOSE or node.op == c.GGML_OP_VIEW or node.op == c.GGML_OP_PERMUTE;
 }
@@ -163,7 +165,7 @@ fn opsAre(ops: []const Op, want: []const Op) bool {
     return std.mem.eql(Op, ops, want);
 }
 
-/// Ports `ggml_vk_can_fuse_unary_mul` (ggml-vulkan.cpp:17269 @b29c606e2):
+/// Ports `ggml_vk_can_fuse_unary_mul` (ggml-vulkan.cpp:13174 @7fe450e19):
 /// whether the MUL at `mul_idx` can take the UNARY at `unary_idx` as one
 /// dispatch.
 pub fn canFuseUnaryMul(cgraph: *const CGraph, unary_idx: c_int, mul_idx: c_int) bool {
@@ -183,13 +185,13 @@ pub fn canFuseUnaryMul(cgraph: *const CGraph, unary_idx: c_int, mul_idx: c_int) 
     return c.ggml_can_repeat(unary, mul.src[0]);
 }
 
-/// Ports `ggml_vk_can_fuse_unary_mul_pair` (ggml-vulkan.cpp:17299 @b29c606e2).
+/// Ports `ggml_vk_can_fuse_unary_mul_pair` (ggml-vulkan.cpp:13204 @7fe450e19).
 fn canFuseUnaryMulPair(cgraph: *const CGraph, node_idx: c_int) bool {
     return ggml_graph.canFuseSubgraph(cgraph, node_idx, &.{ c.GGML_OP_UNARY, c.GGML_OP_MUL }, &.{node_idx + 1}) and
         canFuseUnaryMul(cgraph, node_idx, node_idx + 1);
 }
 
-/// Ports `ggml_vk_can_fuse` (ggml-vulkan.cpp:17306 @b29c606e2): ggml's
+/// Ports `ggml_vk_can_fuse` (ggml-vulkan.cpp:13211 @7fe450e19): ggml's
 /// structural test, then each fusion's own conditions.
 pub fn canFuse(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int, ops: []const Op) bool {
     if (ops.len == 2 and ops[0] == c.GGML_OP_UNARY and ops[1] == c.GGML_OP_MUL) {
@@ -305,7 +307,7 @@ pub fn canFuse(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int, o
     return true;
 }
 
-/// Ports `ggml_vk_can_fuse_ssm_conv` (ggml-vulkan.cpp:17503 @b29c606e2):
+/// Ports `ggml_vk_can_fuse_ssm_conv` (ggml-vulkan.cpp:13407 @7fe450e19):
 /// SSM_CONV + UNARY(SILU), or with an ADD between; `num_extra` is 1 or 2.
 fn canFuseSsmConv(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int, num_extra: c_int) bool {
     const conv = nodeAt(cgraph, node_idx);
@@ -337,7 +339,7 @@ fn canFuseSsmConv(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int
     return true;
 }
 
-/// Ports `ggml_vk_can_fuse_topk_moe` (ggml-vulkan.cpp:17558 @b29c606e2).
+/// Ports `ggml_vk_can_fuse_topk_moe` (ggml-vulkan.cpp:13462 @7fe450e19).
 fn canFuseTopkMoe(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int, mode: TopkMoeMode) bool {
     var softmax: *const c.ggml_tensor = undefined;
     var weights: *const c.ggml_tensor = undefined;
@@ -413,7 +415,7 @@ fn canFuseTopkMoe(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int
     return true;
 }
 
-/// Ports `ggml_vk_match_ops` (ggml-vulkan.cpp:17670 @b29c606e2): a manual
+/// Ports `ggml_vk_match_ops` (ggml-vulkan.cpp:13573 @7fe450e19): a manual
 /// op-sequence match, since `ggml_can_fuse_subgraph` rejects the mask's
 /// external reshape/cpy.
 fn matchOps(cgraph: *const CGraph, node_idx: c_int, ops: []const Op) bool {
@@ -430,7 +432,7 @@ fn matchOps(cgraph: *const CGraph, node_idx: c_int, ops: []const Op) bool {
     return true;
 }
 
-/// Ports `ggml_vk_can_fuse_topk_qsa` (ggml-vulkan.cpp:17687 @b29c606e2):
+/// Ports `ggml_vk_can_fuse_topk_qsa` (ggml-vulkan.cpp:13589 @7fe450e19):
 /// whether the qwen4 QSA indexer top-k can be fused at `node_idx`, the
 /// GET_ROWS.
 fn canFuseTopkQsa(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) bool {
@@ -497,7 +499,7 @@ fn canFuseTopkQsa(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int
     return true;
 }
 
-/// Ports `ggml_vk_can_fuse_rope_set_rows` (ggml-vulkan.cpp:17755 @b29c606e2).
+/// Ports `ggml_vk_can_fuse_rope_set_rows` (ggml-vulkan.cpp:13657 @7fe450e19).
 fn canFuseRopeSetRows(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) bool {
     const rope = nodeAt(cgraph, node_idx + 0);
     const view = nodeAt(cgraph, node_idx + 1);
@@ -520,7 +522,7 @@ fn canFuseRopeSetRows(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c
     return true;
 }
 
-/// Ports `ggml_vk_can_fuse_rms_norm_set_rows` (ggml-vulkan.cpp:17794 @b29c606e2).
+/// Ports `ggml_vk_can_fuse_rms_norm_set_rows` (ggml-vulkan.cpp:13696 @7fe450e19).
 fn canFuseRmsNormSetRows(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) bool {
     const rms = nodeAt(cgraph, node_idx);
     const view = nodeAt(cgraph, node_idx + 1);
@@ -538,7 +540,7 @@ fn canFuseRmsNormSetRows(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx
     return true;
 }
 
-/// Ports `ggml_vk_can_fuse_snake` (ggml-vulkan.cpp:17823 @b29c606e2): the
+/// Ports `ggml_vk_can_fuse_snake` (ggml-vulkan.cpp:13722 @7fe450e19): the
 /// five-op chain y = x + sin(a*x)^2 * inv_b with [1, C] operands.
 fn canFuseSnake(cgraph: *const CGraph, node_idx: c_int) bool {
     if (!ggml_graph.canFuse(cgraph, node_idx, &snake_pattern)) return false;
@@ -573,7 +575,7 @@ fn canFuseSnake(cgraph: *const CGraph, node_idx: c_int) bool {
     return true;
 }
 
-/// Ports `ggml_vk_tensors_overlap` (ggml-vulkan.cpp:17883 @b29c606e2):
+/// Ports `ggml_vk_tensors_overlap` (ggml-vulkan.cpp:13778 @7fe450e19):
 /// whether two tensors share bytes of one buffer, not counting an exact
 /// alias when the fusion is elementwise.
 fn tensorsOverlap(a: *const c.ggml_tensor, b: *const c.ggml_tensor, elementwise: bool) bool {
@@ -586,7 +588,7 @@ fn tensorsOverlap(a: *const c.ggml_tensor, b: *const c.ggml_tensor, elementwise:
     return (b_base <= a_base and a_base < b_base + b_size) or (a_base <= b_base and b_base < a_base + a_size);
 }
 
-/// Ports `ggml_vk_can_fuse_rms_norm_mul_rope` (ggml-vulkan.cpp:17906 @b29c606e2).
+/// Ports `ggml_vk_can_fuse_rms_norm_mul_rope` (ggml-vulkan.cpp:13801 @7fe450e19).
 fn canFuseRmsNormMulRope(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) bool {
     const rms = nodeAt(cgraph, node_idx + 0);
     const mul = nodeAt(cgraph, node_idx + 1);
@@ -603,7 +605,7 @@ fn canFuseRmsNormMulRope(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx
     return true;
 }
 
-/// Ports `ggml_vk_fuse_multi_add` (ggml-vulkan.cpp:17939 @b29c606e2): how
+/// Ports `ggml_vk_fuse_multi_add` (ggml-vulkan.cpp:13834 @7fe450e19): how
 /// many consecutive ADDs one multi_add dispatch can do, or 0.
 fn fuseMultiAdd(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) u32 {
     const first_node = nodeAt(cgraph, node_idx);
@@ -641,7 +643,7 @@ fn fuseMultiAdd(ctx: *const BackendCtx, cgraph: *const CGraph, node_idx: c_int) 
     return @intCast(num_adds);
 }
 
-/// Ports `find_first_set` (ggml-vulkan.cpp:17991 @b29c606e2).
+/// Ports `find_first_set` (ggml-vulkan.cpp:13886 @7fe450e19).
 fn findFirstSet(x_in: u32) i32 {
     if (x_in == 0) return -1;
     return @intCast(@ctz(x_in));
@@ -800,7 +802,7 @@ fn topkMoe(ctx: *BackendCtx, cgraph: *const CGraph, i: c_int, f: *Fusion, ops: [
     return true;
 }
 
-/// Ports `ggml_backend_vk_graph_compute` (ggml-vulkan.cpp:18003 @b29c606e2):
+/// Ports `ggml_backend_vk_graph_compute` (ggml-vulkan.cpp:13898 @7fe450e19):
 /// records the graph node by node, fusing where it can, and submits in
 /// batches sized by node count and estimated flops so the GPU starts while
 /// the rest is recorded.
@@ -1128,7 +1130,7 @@ fn perfEnd(ctx: *BackendCtx, cgraph: *const CGraph) void {
     logger.printTimings(false);
 }
 
-/// Ports `ggml_vk_graph_optimize` (ggml-vulkan.cpp:18499 @b29c606e2):
+/// Ports `ggml_vk_graph_optimize` (ggml-vulkan.cpp:14393 @7fe450e19):
 /// reorders the graph so independent nodes run together -- fewer barriers
 /// -- without splitting any fusion pattern. A kept topk_moe pattern tells
 /// the scheduler, through `params`' `add_alloc_dep`, to keep its external

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/llama.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/llama.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_llama`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<embed>`; and from
 //! `llama.cpp/src/models/llama-embed.cpp`, `llama_model_llama_embed`'s
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_llama`'s `load_arch_hparams` (models/llama.cpp:3 @b29c606e2).
+/// Ports `llama_model_llama`'s `load_arch_hparams` (models/llama.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -60,7 +60,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
 }
 
-/// Ports `llama_model_llama`'s `load_arch_tensors` (models/llama.cpp:34 @b29c606e2).
+/// Ports `llama_model_llama`'s `load_arch_tensors` (models/llama.cpp:34 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -125,20 +125,20 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_llama`'s `build_arch_graph` (models/llama.cpp:94 @b29c606e2).
+/// Ports `llama_model_llama`'s `build_arch_graph` (models/llama.cpp:94 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(false, model, b);
 }
 
 /// Ports `llama_model_llama_embed`'s `build_arch_graph` (llama-embed.cpp:3
-/// @b29c606e2): Llama's graph without a KV cache or an output projection.
+/// @7fe450e19): Llama's graph without a KV cache or an output projection.
 /// `llama_model_llama_embed` reuses Llama's loading unchanged.
 pub fn buildArchGraphEmbed(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(true, model, b);
 }
 
 /// Ports the constructor of `llama_model_llama`'s `graph<embed>`
-/// (models/llama.cpp:99 @b29c606e2).
+/// (models/llama.cpp:99 @7fe450e19).
 fn buildGraph(comptime embed: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

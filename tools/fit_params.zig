@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/fit-params/fit-params.cpp` at v0.4.1
-//! (`b29c606e2`). The fitting itself is `cli/fit.zig`, the port of
+//! Ported from `llama.cpp/tools/fit-params/fit-params.cpp` at v0.5.0
+//! (`7fe450e19`). The fitting itself is `cli/fit.zig`, the port of
 //! `common/fit.cpp` gated by `make fit-diff`; this is the command line
 //! around it.
 
@@ -21,7 +21,7 @@ comptime {
     _ = @import("llama");
 }
 
-/// Ports `llama_fit_params` (fit-params.cpp:18 @b29c606e2).
+/// Ports `llama_fit_params` (fit-params.cpp:18 @7fe450e19).
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "llama_fit_params";
     var params = try tc.params.Params.init(a);
@@ -107,7 +107,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     return 0;
 }
 
-/// Ports `main` (tools/fit-params/main.cpp:3 @b29c606e2).
+/// Ports `main` (tools/fit-params/main.cpp:3 @7fe450e19).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

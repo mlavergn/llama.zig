@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.4.1
-//! (`b29c606e2`): `ggml_backend_cuda_device_supports_op`, the CUDA arms
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.5.0
+//! (`7fe450e19`): `ggml_backend_cuda_device_supports_op`, the CUDA arms
 //! (the `GGML_USE_MUSA` exclusions compile out; `GGML_CUDA_USE_CUB` is
 //! defined, so `TOP_K` and `ARGSORT` are unconditional; `TOP_K` gained its
 //! own `#if` at v0.4.0, whose `GGML_CUDA_USE_CUB` arm is still `true`).
@@ -32,7 +32,7 @@ fn src(op: *const Tensor, i: usize) *const Tensor {
 
 /// `ggml_cuda_lightning_indexer_supported`; see `lightning_indexer.zig`.
 const lightningIndexerSupported = lightning_indexer.supported;
-/// Ports `ggml_backend_cuda_device_supports_op` (ggml-cuda.cu:5064 @b29c606e2).
+/// Ports `ggml_backend_cuda_device_supports_op` (ggml-cuda.cu:5132 @7fe450e19).
 pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
     const dev_ctx = backend.deviceCtx(dev);
 
@@ -89,6 +89,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
             const b = src(op, 1);
             if (a.nb[0] != c.ggml_element_size(a) or b.nb[0] != c.ggml_element_size(b)) return false;
             if (b.type == c.GGML_TYPE_F16 and a.type != c.GGML_TYPE_F16) return false;
+            if (op.op == c.GGML_OP_MUL_MAT_ID and impl.getOpParamsI32(op, 3) == c.GGML_PREC_F32) return false;
             return switch (a.type) {
                 c.GGML_TYPE_F32,
                 c.GGML_TYPE_F16,
@@ -188,10 +189,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
             }
             return s0 == s1 and c.ggml_is_contiguous(src(op, 0)) and c.ggml_is_contiguous(src(op, 1));
         },
-        c.GGML_OP_DUP => {
-            const s0 = src(op, 0).type;
-            return s0 != c.GGML_TYPE_I32 and s0 != c.GGML_TYPE_I16;
-        },
+        c.GGML_OP_DUP => return true,
         c.GGML_OP_ARGMAX, c.GGML_OP_COUNT_EQUAL => return true,
         c.GGML_OP_REPEAT => {
             // the CUDA REPEAT path only implements F32/F16
@@ -269,7 +267,9 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
         c.GGML_OP_ACC => return c.ggml_is_contiguous(src(op, 0)) and c.ggml_is_contiguous(src(op, 1)),
         c.GGML_OP_SUM => return c.ggml_is_contiguous_rows(src(op, 0)),
         c.GGML_OP_TOP_K, c.GGML_OP_ARGSORT => return true,
-        c.GGML_OP_SUM_ROWS, c.GGML_OP_MEAN, c.GGML_OP_GROUP_NORM => return c.ggml_is_contiguous(src(op, 0)),
+        c.GGML_OP_SUM_ROWS => return src(op, 0).type == c.GGML_TYPE_F32 and op.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous_rows(src(op, 0)),
+        c.GGML_OP_MEAN => return src(op, 0).type == c.GGML_TYPE_F32 and op.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous_rows(src(op, 0)),
+        c.GGML_OP_GROUP_NORM => return c.ggml_is_contiguous(src(op, 0)),
         c.GGML_OP_PAD => return true,
         c.GGML_OP_UPSCALE,
         c.GGML_OP_PAD_REFLECT_1D,
@@ -286,7 +286,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
         c.GGML_OP_DSV4_HC_PRE => return src(op, 0).type == c.GGML_TYPE_F32 and src(op, 1).type == c.GGML_TYPE_F32 and
             op.type == c.GGML_TYPE_F32,
         c.GGML_OP_DSV4_HC_POST => return src(op, 0).type == c.GGML_TYPE_F32 and src(op, 1).type == c.GGML_TYPE_F32 and
-            src(op, 2).type == c.GGML_TYPE_F32 and src(op, 3).type == c.GGML_TYPE_F32 and op.type == c.GGML_TYPE_F32,
+            src(op, 2).type == c.GGML_TYPE_F32 and (op.src[3] == null or src(op, 3).type == c.GGML_TYPE_F32) and op.type == c.GGML_TYPE_F32,
         c.GGML_OP_FLASH_ATTN_EXT => return fattn.supported(dev_ctx.device, op),
         c.GGML_OP_CROSS_ENTROPY_LOSS,
         c.GGML_OP_CROSS_ENTROPY_LOSS_BACK,

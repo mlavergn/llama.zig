@@ -169,7 +169,12 @@ for f in "$DIR"/*.gguf; do
     fi
     status=PASS
     detail=""
-    for m in $MODELS; do
+    models=$MODELS
+    # A fixture written for the tensor split's segments runs it too, unless
+    # ARCH_DIFF_MODELS names the configurations (arch_fixtures_draft.cpp's
+    # qwen35-fusedqkv).
+    case "$name" in *-fusedqkv) [ -z "${ARCH_DIFF_MODELS:-}" ] && models="$MODELS tensor" ;; esac
+    for m in $models; do
         mkdir -p "$tmp/state"
         skip=$(skip_for "$name" "$m")
         if [ -n "$skip" ]; then

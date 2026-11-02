@@ -6,7 +6,7 @@
 //!
 //! **Not a port.** Test scaffolding; it mirrors `harness/http_ref.cpp`
 //! line for line, and `exWrapper` mirrors upstream's `ex_wrapper`
-//! (tools/server/server.cpp:54 @b29c606e2), which the server's port will
+//! (tools/server/server.cpp:54 @7fe450e19), which the server's port will
 //! own.
 //!
 //! Usage: http_port <config> <port-file>
@@ -276,7 +276,7 @@ fn quit(_: *const Req) anyerror!*Res {
 // Configurations
 
 fn configure(name: []const u8, params: *http.Params, ready: *bool) void {
-    params.hostname = "127.0.0.1";
+    params.hostnames = &.{"127.0.0.1"};
     params.port = 0;
     params.timeout_read = 3;
     params.timeout_write = 3;
@@ -302,16 +302,42 @@ fn configure(name: []const u8, params: *http.Params, ready: *bool) void {
     } else if (std.mem.eql(u8, name, "notready")) {
         ready.* = false;
     } else if (std.mem.eql(u8, name, "unix")) {
-        params.hostname = if (std.c.getenv("HTTP_DIFF_SOCK")) |s| std.mem.span(s) else "http-diff.sock";
+        params.hostnames = gpa.dupe([]const u8, &.{sockPath()}) catch unreachable;
     } else if (std.mem.eql(u8, name, "ssl")) {
         params.ssl_file_key = "key.pem";
         params.ssl_file_cert = "cert.pem";
     } else if (std.mem.eql(u8, name, "badhost")) {
-        params.hostname = "256.1.1.1";
+        params.hostnames = &.{"256.1.1.1"};
     } else if (std.mem.eql(u8, name, "reuse")) {
         params.reuse_port = true;
         params.api_keys = &.{"abc"};
+    } else if (std.mem.eql(u8, name, "multi")) {
+        // v0.5.0: a listener per address, a Unix socket first and one TCP
+        // address, so port 0 is allowed
+        params.hostnames = gpa.dupe([]const u8, &.{ sockPath(), "127.0.0.1" }) catch unreachable;
+        params.api_keys = &.{"abc"};
+    } else if (std.mem.eql(u8, name, "multitcp")) {
+        // two TCP addresses on one fixed port, each IPv6-only where it can be
+        params.hostnames = &.{ "127.0.0.1", "::1" };
+        params.port = envPort();
+    } else if (std.mem.eql(u8, name, "multiport0")) {
+        // port 0 with two TCP addresses is refused
+        params.hostnames = &.{ "127.0.0.1", "::1" };
+    } else if (std.mem.eql(u8, name, "multibad")) {
+        // the second address cannot be bound: the first is stopped again
+        params.hostnames = &.{ "127.0.0.1", "256.1.1.1" };
+        params.port = envPort();
     }
+}
+
+fn sockPath() []const u8 {
+    return if (std.c.getenv("HTTP_DIFF_SOCK")) |s| std.mem.span(s) else "http-diff.sock";
+}
+
+/// `std::atoi(getenv("HTTP_DIFF_PORT"))`, 0 when unset.
+fn envPort() i32 {
+    const s = std.c.getenv("HTTP_DIFF_PORT") orelse return 0;
+    return std.fmt.parseInt(i32, std.mem.span(s), 10) catch 0;
 }
 
 extern "c" fn fflush(stream: ?*anyopaque) c_int;
@@ -360,8 +386,10 @@ pub fn main(init: std.process.Init) !u8 {
         return 1;
     }
     if (ready) ctx_http.is_ready.store(true, .seq_cst);
-    const addr = try gpa.dupeSentinel(u8, ctx_http.listening_address, 0);
-    log.inf("harness: listening on %s\n", .{addr.ptr});
+    for (ctx_http.listening_addresses.items) |address| {
+        const addr = try gpa.dupeSentinel(u8, address, 0);
+        log.inf("harness: listening on %s\n", .{addr.ptr});
+    }
 
     {
         const port_str = try std.fmt.allocPrint(gpa, "{d}\n", .{ctx_http.port});
@@ -381,7 +409,7 @@ pub fn main(init: std.process.Init) !u8 {
         sleepMs(5);
     }
     ctx_http.stop();
-    if (ctx_http.thread) |t| t.join();
+    ctx_http.join();
     log.inf("harness: stopped\n", .{});
     _ = fflush(null);
     return 0;

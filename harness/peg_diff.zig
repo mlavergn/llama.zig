@@ -704,7 +704,23 @@ fn resultText(r: peg.ParseResult) []u8 {
     var s: std.ArrayList(u8) = .empty;
     s.print(gpa, "{s} {d} {d}", .{ r.type.name(), r.start, r.end }) catch oom();
     for (r.nodes) |n| s.print(gpa, " {d}", .{n}) catch oom();
+    for (r.invalid_utf8) |u| s.print(gpa, " !{d}+{d}", .{ u.pos, u.len }) catch oom();
     return s.toOwnedSlice(gpa) catch oom();
+}
+
+/// `ast_invalid_text` in peg_ref.cpp: every node's invalid UTF-8 runs and
+/// sanitized text (v0.5.0).
+fn astInvalidText(ast: *const peg.AstArena) anyerror![]u8 {
+    var s: std.ArrayList(u8) = .empty;
+    for (ast.nodes.items, 0..) |*n, i| {
+        if (n.invalid_utf8.len == 0) continue;
+        try s.print(gpa, "\x1e{d}", .{i});
+        for (n.invalid_utf8) |u| try s.print(gpa, " {d}+{d}", .{ u.pos, u.len });
+        const t = try n.sanitizedText(gpa);
+        defer gpa.free(t);
+        try s.print(gpa, "\x1d{s}", .{t});
+    }
+    return s.toOwnedSlice(gpa);
 }
 
 fn msgText(m: *const chat.Msg) []u8 {
@@ -742,6 +758,9 @@ fn parseRecords(arena: *const peg.Arena, input: []const u8, flags: u32, comptime
     const ad = guardText(ctx.ast.dump(gpa));
     defer gpa.free(ad);
     rec(out, "A:{s}", .{ad});
+    const vd = guardText(astInvalidText(&ctx.ast));
+    defer gpa.free(vd);
+    rec(out, "V:{s}", .{vd});
     inline for (.{ cpeg.Mapper.Kind.base, .gemma4, .minimax_m3 }, 0..) |kind, k| {
         if (mapperText(&ctx, &result, kind)) |s| {
             defer gpa.free(s);

@@ -51,13 +51,14 @@ echo "reference: $n exports renamed to ref_*"
 [ "$n" -eq 6 ] || { echo "FAIL: expected 6 renamed exports, got $n" >&2; exit 1; }
 
 # The fusion table (v0.4.1): the reference `ggml-metal-fusion.cpp` with all
-# 17 of its exports renamed, beside ours. Its helpers -- ggml.c's
+# 18 of its exports renamed, beside ours (v0.5.0 dropped `_all` and added
+# `_get_id` and `_add_alloc_deps`). Its helpers -- ggml.c's
 # `ggml_can_fuse_subgraph_ext`, the `.m`'s `ggml_metal_buffer_get_id` --
 # are shared, so the comparison is of the table and the matching alone.
 FRENAME=()
-for f in all info_init info_free info_enabled info_stats info_debug info_n_fusions \
-         info_label info_count info_count_fusion info_set_enabled info_stats_init \
-         info_stats_reset info_stats_get info_labels_init next max; do
+for f in get_id add_alloc_deps info_init info_free info_enabled info_stats info_debug \
+         info_n_fusions info_label info_count info_count_fusion info_set_enabled \
+         info_stats_init info_stats_reset info_stats_get info_labels_init next max; do
     FRENAME+=(-Dggml_metal_fusion_$f=ref_ggml_metal_fusion_$f)
 done
 "${CXX[@]}" "${FRENAME[@]}" -c llama.cpp/ggml/src/ggml-metal/ggml-metal-fusion.cpp \
@@ -66,12 +67,47 @@ done
 n=$(nm -gUj "$tmp/ref_fusion.o" | sed 's/^_//' | grep -c '^ref_ggml_metal_fusion_')
 nplain=$(nm -gUj "$tmp/ref_fusion.o" | sed 's/^_//' | grep -c '^ggml_metal_fusion_')
 echo "reference: $n fusion exports renamed to ref_*"
-[ "$n" -eq 17 ] && [ "$nplain" -eq 0 ] || { echo "FAIL: expected 17 renamed fusion exports and none left, got $n and $nplain" >&2; exit 1; }
+[ "$n" -eq 18 ] && [ "$nplain" -eq 0 ] || { echo "FAIL: expected 18 renamed fusion exports and none left, got $n and $nplain" >&2; exit 1; }
+
+# The reordering pass (v0.5.0): `ggml-metal-common.cpp` with its nine exports
+# renamed, so `graph_optimize`'s order can be compared on the fusion probes.
+# Its `ggml_metal_fusion_max` stays ours, compared on its own above.
+CRENAME=()
+for f in ggml_metal_op_mul_mat_use_fwht ggml_metal_op_mul_mat_use_mm ggml_metal_op_mul_mat_id_use_mm \
+         ggml_mem_ranges_init ggml_mem_ranges_free ggml_mem_ranges_reset ggml_mem_ranges_add \
+         ggml_mem_ranges_check ggml_graph_optimize; do
+    CRENAME+=(-D$f=ref_$f)
+done
+"${CXX[@]}" "${CRENAME[@]}" -c llama.cpp/ggml/src/ggml-metal/ggml-metal-common.cpp \
+    -o "$tmp/ref_common.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile the renamed reference ggml-metal-common.cpp" >&2; head -10 "$tmp/err" >&2; exit 1; }
+n=$(nm -gUj "$tmp/ref_common.o" | sed 's/^_//' | grep -v '^_Z' | grep -c '^ref_')
+nplain=$(nm -gUj "$tmp/ref_common.o" | sed 's/^_//' | grep -v '^_Z\|^ref_' | grep -c .)
+echo "reference: $n common exports renamed to ref_*"
+[ "$n" -eq 9 ] && [ "$nplain" -eq 0 ] || { echo "FAIL: expected 9 renamed common exports and none left, got $n and $nplain" >&2; exit 1; }
+
+# The op encoders (v0.5.0): `ggml-metal-ops.cpp` with **all** of its exports
+# renamed -- read off a first compile, so the list cannot drift -- for the
+# scratch-size queries `get_alloc_size` adds up. The reference
+# `ggml-metal.cpp` above calls ours for those, so only this can compare them.
+"${CXX[@]}" -c llama.cpp/ggml/src/ggml-metal/ggml-metal-ops.cpp -o "$tmp/ops_plain.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile the reference ggml-metal-ops.cpp" >&2; head -10 "$tmp/err" >&2; exit 1; }
+ORENAME=()
+for f in $(nm -gUj "$tmp/ops_plain.o" | sed 's/^_//' | grep -v '^_Z\|__clang'); do
+    ORENAME+=(-D$f=ref_$f)
+done
+"${CXX[@]}" "${ORENAME[@]}" -c llama.cpp/ggml/src/ggml-metal/ggml-metal-ops.cpp \
+    -o "$tmp/ref_ops.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile the renamed reference ggml-metal-ops.cpp" >&2; head -10 "$tmp/err" >&2; exit 1; }
+n=$(nm -gUj "$tmp/ref_ops.o" | sed 's/^_//' | grep -v '^_Z' | grep -c '^ref_')
+nplain=$(nm -gUj "$tmp/ref_ops.o" | sed 's/^_//' | grep -v '^_Z\|^ref_\|__clang' | grep -c .)
+echo "reference: $n ops exports renamed to ref_*"
+[ "$n" -eq ${#ORENAME[@]} ] && [ "$n" -gt 60 ] && [ "$nplain" -eq 0 ] || { echo "FAIL: ops renames: $n of ${#ORENAME[@]}, $nplain left" >&2; exit 1; }
 
 # No "${RENAME[@]}" here: see the note above.
 zig cc -mcpu=baseline harness/metal_diff.c -o "$tmp/metal_diff" -std=c11 -O2 \
     -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-metal \
-    "$tmp/ref_metal.o" "$tmp/ref_fusion.o" "$LIB" \
+    "$tmp/ref_metal.o" "$tmp/ref_fusion.o" "$tmp/ref_common.o" "$tmp/ref_ops.o" "$LIB" \
     -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \

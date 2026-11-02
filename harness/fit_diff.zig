@@ -283,7 +283,7 @@ const required = [_][]const u8{
     "user has requested full context size",
     "which is <= the min. context size",
     "context size set by user to",
-    "context size unset and KV cache not unified",
+    "context size unset -> using",
     "was unable to fit model into system memory",
     "filling dense layers back-to-front",
     "filling dense-only layers back-to-front",
@@ -448,6 +448,45 @@ fn runPort(cs: Case, in: *Inputs, log: fit.Log) !c_int {
 var port_record: []u8 = &.{};
 
 /// One side's whole transcript of a case.
+/// v0.5.0: `llama_graph_n_input_tensors` (llama-context.cpp) logs each input
+/// tensor's users from an `unordered_map` keyed by tensor address, so a run
+/// of those lines comes in the allocator's order, run to run, on either
+/// side; each run is compared sorted.
+///
+/// Return: a sorted copy of `text`, owned by the caller.
+fn sortGraphInputs(text: []const u8) ![]u8 {
+    const marker = "llama_graph_n_input_tensors: input tensor ";
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+    var run: std.ArrayList([]const u8) = .empty;
+    defer run.deinit(gpa);
+    var it = std.mem.splitScalar(u8, text, '\n');
+    var first = true;
+    while (true) {
+        const line = it.next();
+        if (line) |l| if (std.mem.indexOf(u8, l, marker) != null) {
+            try run.append(gpa, l);
+            continue;
+        };
+        std.mem.sort([]const u8, run.items, {}, struct {
+            fn lt(_: void, x: []const u8, y: []const u8) bool {
+                return std.mem.order(u8, x, y) == .lt;
+            }
+        }.lt);
+        for (run.items) |r| {
+            if (!first) try out.append(gpa, '\n');
+            first = false;
+            try out.appendSlice(gpa, r);
+        }
+        run.clearRetainingCapacity();
+        const l = line orelse break;
+        if (!first) try out.append(gpa, '\n');
+        first = false;
+        try out.appendSlice(gpa, l);
+    }
+    return out.toOwnedSlice(gpa);
+}
+
 fn transcript(cs: Case, side: enum { ref, port }) ![]u8 {
     var in = try Inputs.init(cs);
     defer gpa.free(in.tbo_buf);
@@ -493,7 +532,7 @@ fn transcript(cs: Case, side: enum { ref, port }) ![]u8 {
     const masked_llama = try maskTiming(llama_log.items);
     defer gpa.free(masked_llama);
     try w.writer.writeAll(masked_llama);
-    return gpa.dupe(u8, w.written());
+    return sortGraphInputs(w.written());
 }
 
 /// `common_get_device_memory_data` and `common_fit_print` on the case's

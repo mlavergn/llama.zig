@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/olmo2.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/olmo2.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_olmo2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>`.
 
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_olmo2`'s `load_arch_hparams` (models/olmo2.cpp:3 @b29c606e2).
+/// Ports `llama_model_olmo2`'s `load_arch_hparams` (models/olmo2.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -36,9 +36,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
     if (found_swa and hp.n_swa > 0) {
         hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
-        var swa_period: u32 = 4;
-        if (try meta.getKeyOrArrScalar(.attention_sliding_window_pattern, false, exc)) |v| swa_period = v;
-        hp.setSwaPattern(swa_period, false);
+        try self.loadSwaPattern(ml, 4, false, exc);
 
         hp.rope_freq_base_train_swa = hp.rope_freq_base_train;
         hp.rope_freq_scale_train_swa = 1.0; // See the graph below.
@@ -56,7 +54,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_olmo2`'s `load_arch_tensors` (models/olmo2.cpp:29 @b29c606e2).
+/// Ports `llama_model_olmo2`'s `load_arch_tensors` (models/olmo2.cpp:27 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -85,7 +83,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_olmo2`'s `build_arch_graph` (models/olmo2.cpp:56 @b29c606e2).
+/// Ports `llama_model_olmo2`'s `build_arch_graph` (models/olmo2.cpp:54 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (b.hparams.swa_type == @backingInt(hparams_mod.SwaType.standard)) {
         buildGraph(true, model, b);
@@ -95,14 +93,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_olmo2`'s `graph<iswa>`
-/// (models/olmo2.cpp:65 @b29c606e2).
+/// (models/olmo2.cpp:63 @7fe450e19).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/olmo2.cpp", 68, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/olmo2.cpp", 69, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/olmo2.cpp", 66, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/olmo2.cpp", 67, "n_embd_head == n_rot");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 

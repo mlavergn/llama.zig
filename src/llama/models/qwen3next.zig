@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen3next.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/qwen3next.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_qwen3next`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
@@ -29,7 +29,7 @@ fn divI64(a: i64, b: i64) i64 {
     return if (b == 0) 0 else @divTrunc(a, b);
 }
 
-/// Ports `llama_model_qwen3next`'s `load_arch_hparams` (models/qwen3next.cpp:4 @b29c606e2).
+/// Ports `llama_model_qwen3next`'s `load_arch_hparams` (models/qwen3next.cpp:4 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -72,7 +72,7 @@ const Dims = struct {
     ba_dim: i64,
 };
 
-/// Ports `llama_model_qwen3next`'s `load_arch_tensors` (models/qwen3next.cpp:31 @b29c606e2).
+/// Ports `llama_model_qwen3next`'s `load_arch_tensors` (models/qwen3next.cpp:31 @7fe450e19).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -122,7 +122,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// `load_block_trunk`, a lambda of `load_arch_tensors` (models/qwen3next.cpp:31
-/// @b29c606e2).
+/// @7fe450e19).
 fn loadBlockTrunk(self: *Model, l: *const Model.Locals, d: *const Dims, il: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(il)];
@@ -165,7 +165,7 @@ fn loadBlockTrunk(self: *Model, l: *const Model.Locals, d: *const Dims, il: i32,
 }
 
 /// `load_block_mtp`, a lambda of `load_arch_tensors` (models/qwen3next.cpp:31
-/// @b29c606e2): the MTP head is the trunk block (full attention and the
+/// @7fe450e19): the MTP head is the trunk block (full attention and the
 /// FFN) plus the NextN tensors.
 fn loadBlockMtp(self: *Model, l: *const Model.Locals, d: *const Dims, il: i32, mtp_flags: u32, exc: *Exception) Thrown!void {
     try loadBlockTrunk(self, l, d, il, mtp_flags, exc);
@@ -187,14 +187,14 @@ fn loadBlockMtp(self: *Model, l: *const Model.Locals, d: *const Dims, il: i32, m
 // The graph
 
 /// Ports `llama_model_qwen3next`'s `build_arch_graph` (models/qwen3next.cpp:131
-/// @b29c606e2): the MTP draft head for that graph type, the main model
+/// @7fe450e19): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
     return buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_qwen3next`'s `graph` (models/qwen3next.cpp:138 @b29c606e2).
+/// Ports the constructor of `llama_model_qwen3next`'s `graph` (models/qwen3next.cpp:138 @7fe450e19).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -279,7 +279,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     c.ggml_build_forward_expand(b.gf, cur);
 }
 
-/// Ports `llama_model_qwen3next::graph`'s `build_norm_gated` (models/qwen3next.cpp:225 @b29c606e2).
+/// Ports `llama_model_qwen3next::graph`'s `build_norm_gated` (models/qwen3next.cpp:225 @7fe450e19).
 fn buildNormGated(b: *const graph.Builder, input: *Tensor, weights: ?*Tensor, gate: *Tensor, layer: c_int) *Tensor {
     const normalized = b.buildNorm(input, weights, null, .rms, layer);
     const gated_silu = c.ggml_silu(b.ctx0, gate);
@@ -287,7 +287,7 @@ fn buildNormGated(b: *const graph.Builder, input: *Tensor, weights: ?*Tensor, ga
 }
 
 /// Ports `llama_model_qwen3next::graph`'s `build_layer_attn` (models/qwen3next.cpp:236
-/// @b29c606e2): a joint Q and gate projection, the split, Q and K norms,
+/// @7fe450e19): a joint Q and gate projection, the split, Q and K norms,
 /// RoPE, attention, and the sigmoid gate.
 fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpAttnKv, cur_: *Tensor, inp_pos: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -354,7 +354,7 @@ fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpA
 }
 
 /// Ports `llama_model_qwen3next::graph`'s `build_qkvz` (models/qwen3next.cpp:314
-/// @b29c606e2): the separate QKV and gate projections, or the legacy joint
+/// @7fe450e19): the separate QKV and gate projections, or the legacy joint
 /// one split four ways.
 fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c_int) struct { *Tensor, *Tensor } {
     const ctx = b.ctx0;
@@ -432,7 +432,7 @@ fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c
 }
 
 /// Ports `llama_model_qwen3next::graph`'s `build_layer_attn_linear` (models/qwen3next.cpp:395
-/// @b29c606e2): the gated delta net layer.
+/// @7fe450e19): the gated delta net layer.
 fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *graph.InpRs, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
@@ -578,7 +578,7 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
 }
 
 /// Ports `llama_model_qwen3next::graph`'s `build_layer_ffn` (models/qwen3next.cpp:565
-/// @b29c606e2): the routed experts plus the gated shared expert, or a
+/// @7fe450e19): the routed experts plus the gated shared expert, or a
 /// dense FFN for a layer without a router.
 fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -631,7 +631,7 @@ fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il
 }
 
 /// Ports the constructor of `llama_model_qwen3next`'s `graph_mtp` (models/qwen3next.cpp:628
-/// @b29c606e2): the MTP draft head.
+/// @7fe450e19): the MTP draft head.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

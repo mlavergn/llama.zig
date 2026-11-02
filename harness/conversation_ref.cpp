@@ -16,18 +16,18 @@
 // `llama-common` (`libllama-common-ref.a`, `zig build tools-ref`) does the
 // rest, as upstream's `llama-cli` reaches it through the server it runs:
 //   - `common_chat_templates_init` and `common_chat_templates_apply`
-//     (chat.cpp:757, 1424 @b29c606e2) render the request
+//     (chat.cpp:757, 1434 @7fe450e19) render the request
 //     `oaicompat_chat_params_parse` (tools/server/server-common.cpp:1151
-//     @b29c606e2) builds from a body of `messages` alone;
-//   - `common_sampler` (common/sampling.cpp:187 @b29c606e2) samples, with the
+//     @7fe450e19) builds from a body of `messages` alone;
+//   - `common_sampler` (common/sampling.cpp:187 @7fe450e19) samples, with the
 //     reasoning budget the server's schema builds (server-schema.cpp:387
-//     @b29c606e2);
+//     @7fe450e19);
 //   - each piece is held back and cut at stop strings as `process_token`
-//     (server-context.cpp:1833 @b29c606e2) does, then parsed with
+//     (server-context.cpp:1833 @7fe450e19) does, then parsed with
 //     `common_chat_parse` and diffed with `compute_diffs` as
-//     `update_chat_msg` (server-task.cpp:162 @b29c606e2) does;
+//     `update_chat_msg` (server-task.cpp:162 @7fe450e19) does;
 //   - the display is upstream's own `ui::assistant_turn` and `ui::show_error`
-//     (tools/cli/cli-ui.h @b29c606e2) over `console`, included, not copied.
+//     (tools/cli/cli-ui.h @7fe450e19) over `console`, included, not copied.
 // Deliberately not our CLI recompiled -- that would compare the CLI against
 // itself.
 //
@@ -39,7 +39,7 @@
 //     separately, `parse_special` off for input. Upstream's own prompt is a
 //     plain string, so the marks come from a second render of the same
 //     bindings `common_chat_template_direct_apply_impl` (chat.cpp:905
-//     @b29c606e2) makes, through `common/jinja`, which must equal
+//     @7fe450e19) makes, through `common/jinja`, which must equal
 //     `common_chat_templates_apply`'s prompt byte for byte or the run fails.
 //     `bos_token` and `eos_token` are re-trusted only when a part is exactly
 //     their text; a message reading exactly `</s>` would be told apart by
@@ -47,7 +47,7 @@
 //   - the cache report our CLI writes under `LLAMAZIG_CNV_TRACE` -- tokens
 //     kept and tokens decoded, per turn -- the one place prefix reuse shows;
 //   - `--fit`, as upstream's `common_init_result` runs it before loading:
-//     `common_fit_params` (common/fit.cpp:879 @b29c606e2) over the buffers
+//     `common_fit_params` (common/fit.cpp:879 @7fe450e19) over the buffers
 //     `common_params` lends the model parameters, at `llama-cli`'s log
 //     verbosity, its error line flushed to stderr before the load; and the
 //     context size and GPU layers it left, which the trace reports once;
@@ -256,7 +256,7 @@ static int fail(const char * sentence) {
     return 1;
 }
 
-// tools/server/server-common.cpp:903 @b29c606e2, which is not in llama-common.
+// tools/server/server-common.cpp:903 @7fe450e19, which is not in llama-common.
 static size_t validate_utf8(const std::string & text) {
     size_t len = text.size();
     if (len == 0) return 0;
@@ -273,7 +273,7 @@ static size_t validate_utf8(const std::string & text) {
     return len;
 }
 
-// server_slot::find_stopping_strings (server-context.cpp:567 @b29c606e2).
+// server_slot::find_stopping_strings (server-context.cpp:567 @7fe450e19).
 static size_t find_stopping_strings(const std::vector<std::string> & stops, const std::string & text,
                                     size_t last_token_size, bool is_full_stop) {
     size_t stop_pos = std::string::npos;
@@ -368,7 +368,7 @@ int main(int argc, char ** argv) {
     chat_opts opts;
     if (!parse_chat_flags(argc, argv, n_pos + 1, opts)) return 2;
 
-    common_log_set_verbosity_thold(LOG_LEVEL_ERROR); // tools/cli/cli.cpp:36 @b29c606e2
+    common_log_set_verbosity_thold(LOG_LEVEL_ERROR); // tools/cli/cli.cpp:36 @7fe450e19
     console::init(/* simple_io */ true, opts.color);
     llama_log_set(quiet_log, nullptr);
     llama_backend_init();
@@ -376,7 +376,7 @@ int main(int argc, char ** argv) {
     fprintf(stderr, "loading %s ...\n", model_path);
 
     // The buffers `common_params` lends the model parameters
-    // (common/common.cpp:1679 @b29c606e2), padded as common/arg.cpp:941 @b29c606e2 pads
+    // (common/common.cpp:1679 @7fe450e19), padded as common/arg.cpp:941 @7fe450e19 pads
     // the overrides.
     std::vector<float> tensor_split(128, 0.0f);
     std::vector<llama_model_tensor_buft_override> tbo(llama_max_tensor_buft_overrides(), { nullptr, nullptr });
@@ -388,7 +388,7 @@ int main(int argc, char ** argv) {
     cp.n_ctx   = n_ctx_set ? (uint32_t) n_ctx_arg : 0;
     cp.n_batch = 2048;
     cp.no_perf = true;
-    // server_output_limits (tools/server/server-context.cpp:41 @b29c606e2):
+    // server_output_limits (tools/server/server-context.cpp:41 @7fe450e19):
     // one sequence, no draft.
     cp.n_outputs_max         = 1;
     cp.n_outputs_max_per_seq = 1;
@@ -423,7 +423,7 @@ int main(int argc, char ** argv) {
         fclose(f);
     }
 
-    // The server's chat options (server-context.cpp:1449 @b29c606e2).
+    // The server's chat options (server-context.cpp:1449 @7fe450e19).
     common_chat_templates_ptr tmpls;
     bool enable_thinking_default = false;
     try {
@@ -491,7 +491,7 @@ int main(int argc, char ** argv) {
             history.push_back(m);
         }
 
-        // The request (server-common.cpp:1151 @b29c606e2).
+        // The request (server-common.cpp:1151 @7fe450e19).
         common_chat_templates_inputs inputs;
         inputs.messages              = history;
         inputs.use_jinja             = true;
@@ -555,7 +555,7 @@ int main(int argc, char ** argv) {
         if (trace) fprintf(stderr, "[turn: kept %zu, decoding %zu]\n", decoded.size(), suffix.size());
         decoded.insert(decoded.end(), suffix.begin(), suffix.end());
 
-        // The server task (server-schema.cpp @b29c606e2): the generation
+        // The server task (server-schema.cpp @7fe450e19): the generation
         // prompt, the preserved tokens that are one token, and the budget
         // fields when the template has an end-of-thinking tag.
         common_params_sampling sp;

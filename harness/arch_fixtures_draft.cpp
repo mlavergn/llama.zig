@@ -1,5 +1,6 @@
 // Not a port. Writes fixtures for the three architectures upstream's
-// `test-llama-archs.cpp` cannot: graniteswitch, eagle3 and dflash.
+// `test-llama-archs.cpp` cannot: graniteswitch, eagle3 and dflash -- and
+// one variant of an architecture it can, Qwen3.5 with fused QKV.
 //
 // `llama.cpp/tests/test-llama-archs.cpp` is included unmodified, as
 // `harness/arch_fixtures_extra.cpp` does, so `get_gguf_ctx` and
@@ -33,7 +34,7 @@ static void fill_host(ggml_tensor * t, size_t seed) {
     std::hash<std::string> hasher;
     seed ^= hasher(t->name);
     std::mt19937 gen(seed);
-    std::normal_distribution<float> dis(0.0f, 1.0e-2f);
+    std::normal_distribution<float> dis(0.0f, 0.1f); // test-llama-archs' default -d since v0.5.0
     GGML_ASSERT(t->type == GGML_TYPE_F32);
     float * d = (float *) t->data;
     for (int64_t i = 0; i < ggml_nelements(t); i++) {
@@ -115,8 +116,9 @@ static bool write_fixture(llm_arch arch, const std::string & name, size_t seed, 
     ggml_backend_dev_t devs[2] = { ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU), nullptr };
     mp.devices = devs;
 
-    size_t tmp = seed;
-    llama_model * model = llama_model_init_from_user(meta.get(), set_tensor_data, &tmp, mp);
+    // test-llama-archs' default -d (0.1) since v0.5.0
+    tensor_data_params tp = { seed, 0.1f };
+    llama_model * model = llama_model_init_from_user(meta.get(), set_tensor_data, &tp, mp);
     if (!model) {
         printf("failed %s: the C++ cannot build the model\n", name.c_str());
         return false;
@@ -279,6 +281,63 @@ int main(int argc, char ** argv) {
                 x.f32((blk + "attn_conv_proj.weight").c_str(), {256, 24},   seed);
                 x.f32((blk + "ffn_conv_base").c_str(),         {256, 3, 2}, seed);
                 x.f32((blk + "ffn_conv_proj.weight").c_str(),  {256, 24},   seed);
+            }
+        });
+    });
+    // A Gemma-style DFlash backbone, new at v0.5.0 (models/dflash.cpp:7, 107,
+    // 573 @7fe450e19): an embedding and an attention scale, a GELU FFN, K
+    // and V sharing one projection (no attn_v, V RMS-normed bare), and no
+    // output head -- the token embedding stands in for it. The recipe
+    // already writes the post norms, the per-layer output scale and
+    // rope_freqs, so every DFlash fixture has those.
+    run([&] {
+        return write_fixture(df, "dflash-gemma", seed, dir, [&](gguf_context * m) {
+            df_meta(m);
+            gguf_remove_key(m, kv(df, "attention.sliding_window").c_str());
+            gguf_set_val_f32(m, kv(df, "embedding_scale").c_str(), 16.0f);
+            gguf_set_val_f32(m, kv(df, "attention.scale").c_str(), 0.0625f);
+            gguf_set_val_str(m, kv(df, "hidden_activation").c_str(), "gelu_pytorch_tanh");
+        }, [&](Extra & x, llama_model * model) {
+            for (const auto & [tname, t] : llama_internal_get_tensor_map(model)) {
+                const bool attn_v = tname.find(".attn_v.") != std::string::npos;
+                const bool output = tname.rfind("output.", 0) == 0;
+                if (attn_v || output) {
+                    x.replaces.insert(tname);
+                }
+            }
+        });
+    });
+    // Qwen3.5 with its full-attention layers' Q (and Q gate), K and V fused
+    // into one attn_qkv, which create_tensor_qkv takes when the file has it.
+    // v0.5.0 splits that tensor across devices by its own segments
+    // (llama-model.cpp:605, 691 @7fe450e19): the recipe writes the three
+    // separately, so without this no fixture reaches them.
+    run([&] {
+        return write_fixture(LLM_ARCH_QWEN35, "qwen35-fusedqkv", seed, dir, [&](gguf_context *) {
+        }, [&](Extra & x, llama_model * model) {
+            const auto & tmap = llama_internal_get_tensor_map(model);
+            auto find = [&](const std::string & n) -> ggml_tensor * {
+                for (const auto & [tname, t] : tmap) {
+                    if (tname == n) return t;
+                }
+                return nullptr;
+            };
+            const int n_layer = llama_model_n_layer(model);
+            for (int il = 0; il < n_layer; il++) {
+                const std::string blk = "blk." + std::to_string(il) + ".";
+                ggml_tensor * q = find(blk + "attn_q.weight");
+                ggml_tensor * k = find(blk + "attn_k.weight");
+                ggml_tensor * v = find(blk + "attn_v.weight");
+                if (!q || !k || !v) {
+                    continue; // a recurrent layer
+                }
+                for (const auto & [tname, t] : tmap) {
+                    if (tname.rfind(blk + "attn_q.", 0) == 0 || tname.rfind(blk + "attn_k.", 0) == 0 ||
+                            tname.rfind(blk + "attn_v.", 0) == 0) {
+                        x.replaces.insert(tname);
+                    }
+                }
+                x.f32((blk + "attn_qkv.weight").c_str(), {q->ne[0], q->ne[1] + k->ne[1] + v->ne[1]}, seed);
             }
         });
     });

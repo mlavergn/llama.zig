@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/kimi-k3.cpp` (llama.cpp v0.4.1,
-//! `b29c606e2`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/kimi-k3.cpp` (llama.cpp v0.5.0,
+//! `7fe450e19`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -117,8 +117,12 @@ const Build = struct {
         // attribute. the type is taken from the tool schema instead, as it tells
         // us if the value is JSON or a literal string
         var args = try b.eps();
-        if (schema.contains("properties") and !(schema.at("properties") catch unreachable).empty()) {
-            const props = schema.at("properties") catch unreachable;
+        if (schema.contains("properties") and !(schema.at("properties") catch |err| switch (err) {
+            error.OutOfMemory, error.JsonError => unreachable,
+        }).empty()) {
+            const props = schema.at("properties") catch |err| switch (err) {
+                error.OutOfMemory, error.JsonError => unreachable,
+            };
             var arg_choices = try b.choiceEmpty();
             var it = props.items();
             while (it.next()) |prop| {
@@ -126,7 +130,9 @@ const Build = struct {
 
                 var ty: []const u8 = "string";
                 if (prop.value.isObject() and prop.value.contains("type")) {
-                    const tv = prop.value.at("type") catch unreachable;
+                    const tv = prop.value.at("type") catch |err| switch (err) {
+                        error.OutOfMemory, error.JsonError => unreachable,
+                    };
                     if (tv.isString()) ty = tv.string;
                 }
 
@@ -158,7 +164,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_kimi_k3` (parsers/kimi-k3.cpp:8 @b29c606e2).
+/// Ports `common_chat_params_init_kimi_k3` (parsers/kimi-k3.cpp:8 @7fe450e19).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

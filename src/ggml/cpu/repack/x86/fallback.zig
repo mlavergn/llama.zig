@@ -1,17 +1,18 @@
-//! x86's `arch-fallback.h` renames for `repack.cpp`: the 24 kernels
+//! x86's `arch-fallback.h` renames for `repack.cpp`: the 28 kernels
 //! `arch/x86/repack.cpp` has no version of, so the generic body is the real
 //! one.
 //!
 //! # Provenance
 //!
 //! **Not a port of a function.** It reproduces
-//! `llama.cpp/ggml/src/ggml-cpu/arch-fallback.h` at v0.4.1 (`b29c606e2`),
-//! lines 88-111, the `__x86_64__` block, which `#define`s each generic to
+//! `llama.cpp/ggml/src/ggml-cpu/arch-fallback.h` at v0.5.0 (`7fe450e19`),
+//! lines 88-119, the `__x86_64__` block, which `#define`s each generic to
 //! the bare name before `repack.cpp` compiles. The bodies are the generic
 //! ports in `cpu/repack/`; this exports each under the name the C gives it.
 //! `arm/fallback.zig` does the same for ARM's eight.
 
 const nibble4 = @import("../nibble4.zig");
+const q1_0 = @import("../q1_0.zig");
 const q4_0 = @import("../q4_0.zig");
 const q4_k = @import("../q4_k.zig");
 const q5_k = @import("../q5_k.zig");
@@ -23,6 +24,8 @@ comptime {
     @export(&quantize.ggml_quantize_mat_q8_0_4x4_generic, .{ .name = "ggml_quantize_mat_q8_0_4x4" });
     @export(&quantize.ggml_quantize_mat_q8_K_4x4_generic, .{ .name = "ggml_quantize_mat_q8_K_4x4" });
 
+    @export(&q1_0.ggml_gemv_q1_0_4x4_q8_0_generic, .{ .name = "ggml_gemv_q1_0_4x4_q8_0" });
+    @export(&q1_0.ggml_gemv_q1_0_4x8_q8_0_generic, .{ .name = "ggml_gemv_q1_0_4x8_q8_0" });
     @export(&q4_0.ggml_gemv_q4_0_4x4_q8_0_generic, .{ .name = "ggml_gemv_q4_0_4x4_q8_0" });
     @export(&q4_0.ggml_gemv_q4_0_4x8_q8_0_generic, .{ .name = "ggml_gemv_q4_0_4x8_q8_0" });
     @export(&q4_k.ggml_gemv_q4_K_8x4_q8_K_generic, .{ .name = "ggml_gemv_q4_K_8x4_q8_K" });
@@ -35,6 +38,8 @@ comptime {
     @export(&q8_0.ggml_gemv_q8_0_4x4_q8_0_generic, .{ .name = "ggml_gemv_q8_0_4x4_q8_0" });
     @export(&q8_0.ggml_gemv_q8_0_4x8_q8_0_generic, .{ .name = "ggml_gemv_q8_0_4x8_q8_0" });
 
+    @export(&q1_0.ggml_gemm_q1_0_4x4_q8_0_generic, .{ .name = "ggml_gemm_q1_0_4x4_q8_0" });
+    @export(&q1_0.ggml_gemm_q1_0_4x8_q8_0_generic, .{ .name = "ggml_gemm_q1_0_4x8_q8_0" });
     @export(&q4_0.ggml_gemm_q4_0_4x4_q8_0_generic, .{ .name = "ggml_gemm_q4_0_4x4_q8_0" });
     @export(&q4_0.ggml_gemm_q4_0_4x8_q8_0_generic, .{ .name = "ggml_gemm_q4_0_4x8_q8_0" });
     @export(&q4_k.ggml_gemm_q4_K_8x4_q8_K_generic, .{ .name = "ggml_gemm_q4_K_8x4_q8_K" });

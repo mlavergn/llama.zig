@@ -46,6 +46,11 @@ hf-repo = test/tiny:Q4_K_M
 dedup-cache-models = 1
 [tiny-plain]
 hf-repo = test/tiny:Q8_0
+# v0.5.0: the draft model's repository is deduplicated too
+[tiny-draft]
+model = $FIX
+spec-draft-hf = test/tiny:Q8_0
+dedup-cache-models = 1
 INI
 
 : > "$DATA/pids"

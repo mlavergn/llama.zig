@@ -30,11 +30,13 @@
 # Usage: scripts/tools-diff <tool>
 #   TOOLS_O=fast|safe       the build mode, ReleaseFast by default
 #   TOOLS_DIFF_OUT=<dir>    keep both sides' transcripts there
+#   TOOLS_DIFF_CASES=<file> run that case file instead of the tool's own
+#                           (a subset, for a fault injection)
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 tool="${1:?usage: scripts/tools-diff <tool>}"
-cases="harness/tools/$tool.cases"
+cases="${TOOLS_DIFF_CASES:-harness/tools/$tool.cases}"
 [ -f "$cases" ] || { echo "FAIL: no $cases" >&2; exit 2; }
 
 # An abort's backtrace -- gdb attached by ggml_print_backtrace on Linux --
@@ -107,6 +109,28 @@ mask() { # file: apply every mask in place
     for m in "${masks[@]+"${masks[@]}"}"; do sed -E -i '' "$m" "$f" 2>/dev/null || sed -E -i "$m" "$f"; done
 }
 
+# v0.5.0: llama_graph_n_input_tensors (llama-context.cpp) logs each input
+# tensor's users from an unordered_map keyed by tensor address, so the order
+# of a run of those lines is the allocator's, run to run, on either side;
+# each run is compared sorted.
+sort_graph_inputs() { # file: sort each run of those lines in place
+    python3 - "$1" <<'PY'
+import sys
+p = sys.argv[1]
+lines = open(p, "rb").read().split(b"\n")
+out, run = [], []
+for line in lines + [None]:
+    if line is not None and b"llama_graph_n_input_tensors: input tensor " in line:
+        run.append(line)
+        continue
+    out.extend(sorted(run))
+    run = []
+    if line is not None:
+        out.append(line)
+open(p, "wb").write(b"\n".join(out))
+PY
+}
+
 n=0 fails=0
 stdin_file=/dev/null
 tty_mode=off
@@ -130,7 +154,12 @@ while IFS= read -r line || [ -n "$line" ]; do
     eval "args=($line)"
     run_side ref "$ref" "$n" "${args[@]}"
     run_side port "$port" "$n" "${args[@]}"
-    for side in ref port; do mask "$work/$side/$n.out"; mask "$work/$side/$n.err"; done
+    for side in ref port; do
+        mask "$work/$side/$n.out"; mask "$work/$side/$n.err"
+        for k in out err; do
+            grep -q 'llama_graph_n_input_tensors: input tensor ' "$work/$side/$n.$k" && sort_graph_inputs "$work/$side/$n.$k"
+        done
+    done
     if [ "$unordered" = 1 ]; then
         for side in ref port; do sort -o "$work/$side/$n.err" "$work/$side/$n.err"; done
     fi

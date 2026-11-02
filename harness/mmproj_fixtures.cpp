@@ -8,7 +8,7 @@
 // each projector type's keys and tensor shapes here are read off
 // `llama.cpp/tools/mtmd/clip.cpp` (`load_hparams`, `load_tensors`,
 // `clip_n_mmproj_embd`) and the graph builders under `models/`, at
-// v0.4.1 (`b29c606e2`). Weights are small and random (fixed seed per
+// v0.5.0 (`7fe450e19`). Weights are small and random (fixed seed per
 // type), so a fixture checks plumbing and numerics, not output quality.
 //
 // Every projector targets n_embd 256, the arch fixtures' width. The text
@@ -1003,9 +1003,11 @@ static std::vector<Fixture> fixtures() {
 
     // --- DeepSeek-OCR: a SAM ViT-B at a hardcoded 1024 px / patch 16 (640
     // and 768 px tiles), its neck and two stride-2 convs, then a CLIP or a
-    // Qwen2 encoder. The loader always reads 12 SAM blocks (n_sam_layers is
-    // a model constant, not the block_count key), so all 12 are written;
-    // the graph runs sam.block_count = 3, block 2 global over 64x64 patches
+    // Qwen2 encoder. Since v0.5.0 the loader reads as many SAM blocks as
+    // sam.block_count says (clip.cpp:3239 @7fe450e19); through v0.4.1
+    // n_sam_layers was a model constant, 12. Only the 3 the key names are
+    // written, so a loader that still reads 12 fails; block 2 is global
+    // over 64x64 patches
     auto sam = [](G & g, int E) {
         const int Es = 32, F = 64, Cn = 32, C2 = 48, W = 14;
         g.u32(KEY_SAM_N_BLOCK, 3);
@@ -1015,7 +1017,7 @@ static std::vector<Fixture> fixtures() {
         g.t(fmt(TN_SAM_PATCH_EMBD, "weight"), {16, 16, 3, Es}, 1.0f / 27.7f);
         g.bias(fmt(TN_SAM_PATCH_EMBD, "bias"), Es);
         g.t(fmt(TN_SAM_POS_EMBD, "weight"), {Es, 64, 64}, 0.02f);
-        for (int il = 0; il < 12; il++) {
+        for (int il = 0; il < 3; il++) {
             const bool global = il % 3 == 2;
             g.w(fmt(TN_SAM_ATTN_QKV, il, "weight"), Es, 3 * Es);
             g.bias(fmt(TN_SAM_ATTN_QKV, il, "bias"), 3 * Es);
@@ -1818,6 +1820,27 @@ static std::vector<Fixture> fixtures() {
         g.t(TN_TOK_IMG_PAD, {N_TEXT}, 0.1f);
     }});
     f.push_back({"qwen3tts_shared", "qwen3tts", "tts-qwen3", "tts:3", [qwen3tts](G & g) { qwen3tts(g, true); }});
+
+    // --- v0.5.0's loader range checks (clip.cpp:1413, 1465 @7fe450e19): a
+    // good fixture with one key edited out of range must fail to load, each
+    // with its own message, where through v0.4.1 the first indexed past the
+    // layers and the second inserted the merger nowhere
+    auto variant = [&f](const std::string & base, const std::string & name, std::function<void(G &)> edit) {
+        for (const Fixture & x : f) {
+            if (x.type != base) continue;
+            auto build = x.build;
+            f.push_back({name, x.text, "expect-fail", x.inputs, [build, edit](G & g) { build(g); edit(g); }});
+            return;
+        }
+        GGML_ABORT("no fixture %s", base.c_str());
+    };
+    // n_layer is 2: a feature layer of 2 is in range, 3 is not
+    variant("granite4_vision", "granite4_vision-feature-oob", [](G & g) {
+        g.ai32(fmt(KEY_FEATURE_LAYERS, "vision"), {0, 3});
+    });
+    // the merger insertion layer must lie in [0, n_layer)
+    variant("minicpmv4_6", "minicpmv4_6-insert-oob", [](G & g) { g.ai32(KEY_WIN_ATTN_LAYER_INDEXES, {2}); });
+    variant("minicpmv4_6", "minicpmv4_6-insert-neg", [](G & g) { g.ai32(KEY_WIN_ATTN_LAYER_INDEXES, {-1}); });
 
     return f;
 }

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/json-schema.h` and
-//! `llama.cpp/common/json-schema.cpp` (llama.cpp v0.4.1, `b29c606e2`).
+//! `llama.cpp/common/json-schema.cpp` (llama.cpp v0.5.0, `7fe450e19`).
 //! Each declaration names what it ports and the line it began at.
 //!
 //! # Shape
@@ -81,7 +81,7 @@ pub fn fromJson(e: json.Error) Error {
     };
 }
 
-/// Ports `node_kind` (json-schema.h:15 @b29c606e2), a member of
+/// Ports `node_kind` (json-schema.h:15 @7fe450e19), a member of
 /// `common_chat_schema`, in its order.
 pub const Kind = enum {
     any,
@@ -100,7 +100,7 @@ pub const Kind = enum {
     object,
 };
 
-/// Ports `value_type` (json-schema.h:32 @b29c606e2), a member of
+/// Ports `value_type` (json-schema.h:32 @7fe450e19), a member of
 /// `common_chat_schema`, in its order: the bit each takes in a `TypeSet`.
 pub const ValueType = enum(u5) {
     null,
@@ -112,7 +112,7 @@ pub const ValueType = enum(u5) {
     object,
 };
 
-/// Ports `string_format` (json-schema.h:42 @b29c606e2), a member of
+/// Ports `string_format` (json-schema.h:42 @7fe450e19), a member of
 /// `common_chat_schema`.
 pub const StringFormat = enum {
     none,
@@ -122,7 +122,7 @@ pub const StringFormat = enum {
     date_time,
 };
 
-/// Ports `type_set` (json-schema.h:50 @b29c606e2), a member of
+/// Ports `type_set` (json-schema.h:50 @7fe450e19), a member of
 /// `common_chat_schema`: a bit mask over `ValueType`.
 pub const TypeSet = struct {
     mask: u32 = 0,
@@ -134,33 +134,33 @@ pub const TypeSet = struct {
         return s;
     }
 
-    /// Ports `all` (json-schema.h:61 @b29c606e2).
+    /// Ports `all` (json-schema.h:61 @7fe450e19).
     pub fn all() TypeSet {
         return of(&.{ .null, .boolean, .number, .integer, .string, .array, .object });
     }
 
-    /// Ports `add` (json-schema.h:65 @b29c606e2).
+    /// Ports `add` (json-schema.h:65 @7fe450e19).
     pub fn add(self: *TypeSet, t: ValueType) void {
         self.mask |= @as(u32, 1) << @backingInt(t);
     }
 
-    /// Ports `has` (json-schema.h:67 @b29c606e2).
+    /// Ports `has` (json-schema.h:67 @7fe450e19).
     pub fn has(self: TypeSet, t: ValueType) bool {
         return self.mask & (@as(u32, 1) << @backingInt(t)) != 0;
     }
 
-    /// Ports `is_only` (json-schema.h:68 @b29c606e2).
+    /// Ports `is_only` (json-schema.h:68 @7fe450e19).
     pub fn isOnly(self: TypeSet, t: ValueType) bool {
         return self.mask == @as(u32, 1) << @backingInt(t);
     }
 
-    /// Ports `empty` (json-schema.h:69 @b29c606e2).
+    /// Ports `empty` (json-schema.h:69 @7fe450e19).
     pub fn empty(self: TypeSet) bool {
         return self.mask == 0;
     }
 };
 
-/// Ports `common_chat_schema_ref` (json-schema.h:97 @b29c606e2): only
+/// Ports `common_chat_schema_ref` (json-schema.h:97 @7fe450e19): only
 /// references into the same document.
 pub const Ref = struct {
     ref: []const u8,
@@ -168,7 +168,7 @@ pub const Ref = struct {
     target: ?*const Node = null,
 };
 
-/// Ports `common_chat_schema_integer` (json-schema.h:146 @b29c606e2):
+/// Ports `common_chat_schema_integer` (json-schema.h:146 @7fe450e19):
 /// inclusive bounds, `exclusiveMinimum`/`exclusiveMaximum` folded in.
 pub const Integer = struct {
     /// `minInt(i64)` for unbounded
@@ -177,7 +177,7 @@ pub const Integer = struct {
     maximum: i64 = std.math.maxInt(i64),
 };
 
-/// Ports `common_chat_schema_string` (json-schema.h:153 @b29c606e2).
+/// Ports `common_chat_schema_string` (json-schema.h:153 @7fe450e19).
 pub const String = struct {
     /// empty when absent
     pattern: []const u8 = "",
@@ -187,7 +187,7 @@ pub const String = struct {
     max_length: c_int = -1,
 };
 
-/// Ports `common_chat_schema_array` (json-schema.h:162 @b29c606e2).
+/// Ports `common_chat_schema_array` (json-schema.h:162 @7fe450e19).
 pub const Array = struct {
     /// an `any` node when `items` is absent
     items: *Node,
@@ -196,14 +196,14 @@ pub const Array = struct {
     max_items: c_int = -1,
 };
 
-/// Ports `common_chat_schema_property` (json-schema.h:176 @b29c606e2).
+/// Ports `common_chat_schema_property` (json-schema.h:176 @7fe450e19).
 pub const Property = struct {
     name: []const u8,
     schema: *Node,
     required: bool = false,
 };
 
-/// Ports `common_chat_schema_object` (json-schema.h:182 @b29c606e2).
+/// Ports `common_chat_schema_object` (json-schema.h:182 @7fe450e19).
 pub const Object = struct {
     /// in schema order
     properties: []Property = &.{},
@@ -211,20 +211,20 @@ pub const Object = struct {
     additional_properties: ?*Node = null,
 };
 
-/// Ports `common_chat_schema` (json-schema.h:14 @b29c606e2) and its
+/// Ports `common_chat_schema` (json-schema.h:14 @7fe450e19) and its
 /// subclasses: one node of a schema.
 pub const Node = union(Kind) {
-    /// `common_chat_schema_any` (json-schema.h:92 @b29c606e2)
+    /// `common_chat_schema_any` (json-schema.h:92 @7fe450e19)
     any,
     ref: Ref,
-    /// `common_chat_schema_any_of` (json-schema.h:107 @b29c606e2): oneOf,
+    /// `common_chat_schema_any_of` (json-schema.h:107 @7fe450e19): oneOf,
     /// anyOf, or a `type` array expanded to one alternative per type
     any_of: []*Node,
-    /// `common_chat_schema_all_of` (json-schema.h:113 @b29c606e2)
+    /// `common_chat_schema_all_of` (json-schema.h:113 @7fe450e19)
     all_of: []*Node,
-    /// `common_chat_schema_const` (json-schema.h:119 @b29c606e2)
+    /// `common_chat_schema_const` (json-schema.h:119 @7fe450e19)
     @"const": Value,
-    /// `common_chat_schema_enum` (json-schema.h:127 @b29c606e2)
+    /// `common_chat_schema_enum` (json-schema.h:127 @7fe450e19)
     @"enum": []Value,
     null,
     boolean,
@@ -232,7 +232,7 @@ pub const Node = union(Kind) {
     integer: Integer,
     string: String,
     array: Array,
-    /// `common_chat_schema_tuple` (json-schema.h:170 @b29c606e2)
+    /// `common_chat_schema_tuple` (json-schema.h:170 @7fe450e19)
     tuple: []*Node,
     object: Object,
 
@@ -241,13 +241,13 @@ pub const Node = union(Kind) {
         return self.*;
     }
 
-    /// Ports `value_types` (json-schema.cpp:424 @b29c606e2): the JSON types a
+    /// Ports `value_types` (json-schema.cpp:424 @7fe450e19): the JSON types a
     /// value matching this node may have.
     pub fn valueTypes(self: *const Node) TypeSet {
         return valueTypesImpl(self, null);
     }
 
-    /// Ports `may_be_string` (json-schema.cpp:478 @b29c606e2): whether a
+    /// Ports `may_be_string` (json-schema.cpp:478 @7fe450e19): whether a
     /// matching value may be a string, through any branch.
     pub fn mayBeString(self: *const Node) bool {
         return mayBeStringImpl(self, null);
@@ -260,7 +260,7 @@ pub const RefEntry = struct {
     node: *Node,
 };
 
-/// Ports `common_chat_schema_document` (json-schema.h:189 @b29c606e2).
+/// Ports `common_chat_schema_document` (json-schema.h:189 @7fe450e19).
 pub const Document = struct {
     arena: std.heap.ArenaAllocator,
     root: *Node,
@@ -282,7 +282,7 @@ pub const Document = struct {
     }
 };
 
-/// Ports `common_chat_schema_from_json` (json-schema.cpp:340 @b29c606e2):
+/// Ports `common_chat_schema_from_json` (json-schema.cpp:340 @7fe450e19):
 /// builds the schema, or fails when it falls outside the supported subset.
 ///
 /// Parameters:
@@ -297,7 +297,7 @@ pub fn fromJsonSchema(gpa: std.mem.Allocator, schema: *const Value) Error!Docume
     var b: Builder = .{ .a = arena.allocator(), .root = schema };
     const root = try b.buildNode(schema, "#");
 
-    // `build` (json-schema.cpp:328 @b29c606e2): the targets move into the
+    // `build` (json-schema.cpp:328 @7fe450e19): the targets move into the
     // document, then every ref node gets its target.
     const entries = try b.a.alloc(RefEntry, b.refs.count());
     var it = b.refs.iterator();
@@ -316,7 +316,7 @@ pub fn fromJsonSchema(gpa: std.mem.Allocator, schema: *const Value) Error!Docume
     return .{ .arena = arena, .root = root, .refs = entries };
 }
 
-/// Ports `common_chat_schema_builder` (json-schema.cpp:12 @b29c606e2).
+/// Ports `common_chat_schema_builder` (json-schema.cpp:12 @7fe450e19).
 const Builder = struct {
     a: std.mem.Allocator,
     root: *const Value,
@@ -326,7 +326,7 @@ const Builder = struct {
     /// ref nodes, which get their target once every `$ref` is built
     pending: std.ArrayList(*Node) = .empty,
 
-    /// Ports `fail` (json-schema.cpp:22 @b29c606e2).
+    /// Ports `fail` (json-schema.cpp:22 @7fe450e19).
     fn fail(path: []const u8, msg: []const []const u8) Error {
         const a = std.heap.smp_allocator;
         var text: std.ArrayList(u8) = .empty;
@@ -347,11 +347,13 @@ const Builder = struct {
 
     fn index(self: *Builder, path: []const u8, sep: []const u8, i: usize) Error![]u8 {
         var buf: [24]u8 = undefined;
-        const s = std.fmt.bufPrint(&buf, "{d}", .{i}) catch unreachable;
+        const s = std.fmt.bufPrint(&buf, "{d}", .{i}) catch |err| switch (err) {
+            error.NoSpaceLeft => unreachable,
+        };
         return self.cat(&.{ path, sep, s });
     }
 
-    /// Ports `get_count` (json-schema.cpp:26 @b29c606e2): a non-negative
+    /// Ports `get_count` (json-schema.cpp:26 @7fe450e19): a non-negative
     /// `int`, read as `get<int>()` reads it -- an integer out of range
     /// truncates first.
     fn getCount(schema: *const Value, key: []const u8, path: []const u8, def: c_int) Error!c_int {
@@ -363,7 +365,7 @@ const Builder = struct {
         return v.get(c_int) catch |e| return fromJson(e);
     }
 
-    /// Ports `get_bound` (json-schema.cpp:38 @b29c606e2): a fractional
+    /// Ports `get_bound` (json-schema.cpp:38 @7fe450e19): a fractional
     /// bound rounds inwards. `(int64_t)` of a double out of range is
     /// undefined in C++; this saturates, as AArch64's `fcvtzs` does.
     fn getBound(schema: *const Value, key: []const u8, path: []const u8, round_up: bool) Error!i64 {
@@ -375,7 +377,7 @@ const Builder = struct {
         return r.get(i64) catch |e| return fromJson(e);
     }
 
-    /// Ports `get_format` (json-schema.cpp:50 @b29c606e2).
+    /// Ports `get_format` (json-schema.cpp:50 @7fe450e19).
     fn getFormat(schema: *const Value, path: []const u8) Error!StringFormat {
         if (!schema.contains("format")) return .none;
         const v = schema.at("format") catch |e| return fromJson(e);
@@ -392,7 +394,7 @@ const Builder = struct {
         return .none;
     }
 
-    /// Ports `resolve_ref` (json-schema.cpp:74 @b29c606e2): walks the
+    /// Ports `resolve_ref` (json-schema.cpp:74 @7fe450e19): walks the
     /// pointer's segments as written -- no `~0`/`~1` unescaping -- an array
     /// index read by `std::stoull`.
     fn resolveRef(self: *Builder, ref: []const u8, path: []const u8) Error!*const Value {
@@ -417,7 +419,7 @@ const Builder = struct {
         return target;
     }
 
-    /// Ports `build_ref` (json-schema.cpp:99 @b29c606e2).
+    /// Ports `build_ref` (json-schema.cpp:99 @7fe450e19).
     fn buildRef(self: *Builder, value: *const Value, path: []const u8) Error!*Node {
         if (!value.isString()) return fail(path, &.{"$ref must be a string"});
         const ref = try self.a.dupe(u8, value.string);
@@ -436,7 +438,7 @@ const Builder = struct {
         return node;
     }
 
-    /// Ports `build_alternatives` (json-schema.cpp:118 @b29c606e2), for
+    /// Ports `build_alternatives` (json-schema.cpp:118 @7fe450e19), for
     /// both `any_of` and `all_of`.
     fn buildAlternatives(self: *Builder, comptime k: Kind, alts: *const Value, path: []const u8) Error!*Node {
         if (!alts.isArray()) return fail(path, &.{"must be an array of schemas"});
@@ -448,7 +450,7 @@ const Builder = struct {
         return self.newNode(@unionInit(Node, @tagName(k), children));
     }
 
-    /// Ports `build_object` (json-schema.cpp:133 @b29c606e2).
+    /// Ports `build_object` (json-schema.cpp:133 @7fe450e19).
     fn buildObject(self: *Builder, schema: *const Value, path: []const u8) Error!*Node {
         var obj: Object = .{};
 
@@ -496,7 +498,7 @@ const Builder = struct {
         return self.newNode(.{ .object = obj });
     }
 
-    /// Ports `build_array` (json-schema.cpp:174 @b29c606e2).
+    /// Ports `build_array` (json-schema.cpp:174 @7fe450e19).
     fn buildArray(self: *Builder, schema: *const Value, path: []const u8) Error!*Node {
         var arr: Array = undefined;
         if (schema.contains("items") or schema.contains("prefixItems")) {
@@ -520,7 +522,7 @@ const Builder = struct {
         return self.newNode(.{ .array = arr });
     }
 
-    /// Ports `build_string` (json-schema.cpp:197 @b29c606e2).
+    /// Ports `build_string` (json-schema.cpp:197 @7fe450e19).
     fn buildString(self: *Builder, schema: *const Value, path: []const u8) Error!*Node {
         var s: String = .{};
         if (schema.contains("pattern")) {
@@ -534,7 +536,7 @@ const Builder = struct {
         return self.newNode(.{ .string = s });
     }
 
-    /// Ports `build_integer` (json-schema.cpp:212 @b29c606e2). The `+ 1`
+    /// Ports `build_integer` (json-schema.cpp:212 @7fe450e19). The `+ 1`
     /// and `- 1` on a saturated bound overflow in the C++, which wraps.
     fn buildInteger(self: *Builder, schema: *const Value, path: []const u8) Error!*Node {
         var n: Integer = .{};
@@ -551,7 +553,7 @@ const Builder = struct {
         return self.newNode(.{ .integer = n });
     }
 
-    /// Ports `build_node` (json-schema.cpp:227 @b29c606e2).
+    /// Ports `build_node` (json-schema.cpp:227 @7fe450e19).
     fn buildNode(self: *Builder, schema: *const Value, path: []const u8) Error!*Node {
         if (!schema.isObject()) return fail(path, &.{"schema must be an object"});
         if (schema.contains("$ref")) {
@@ -668,7 +670,7 @@ pub fn isCSpace(ch: u8) bool {
     return ch == ' ' or (ch >= '\t' and ch <= '\r');
 }
 
-/// Ports `json_type` (json-schema.cpp:346 @b29c606e2).
+/// Ports `json_type` (json-schema.cpp:346 @7fe450e19).
 fn jsonType(v: *const Value) ValueType {
     if (v.isNull()) return .null;
     if (v.isBoolean()) return .boolean;
@@ -695,7 +697,7 @@ const Visited = struct {
     }
 };
 
-/// Ports `value_types_impl` (json-schema.cpp:368 @b29c606e2).
+/// Ports `value_types_impl` (json-schema.cpp:368 @7fe450e19).
 fn valueTypesImpl(s: *const Node, visited: ?*const Visited) TypeSet {
     switch (s.*) {
         .any => return TypeSet.all(),
@@ -732,7 +734,7 @@ fn valueTypesImpl(s: *const Node, visited: ?*const Visited) TypeSet {
     }
 }
 
-/// Ports `may_be_string_impl` (json-schema.cpp:429 @b29c606e2).
+/// Ports `may_be_string_impl` (json-schema.cpp:429 @7fe450e19).
 fn mayBeStringImpl(s: *const Node, visited: ?*const Visited) bool {
     switch (s.*) {
         .string => return true,
@@ -770,7 +772,7 @@ fn mayBeStringImpl(s: *const Node, visited: ?*const Visited) bool {
     }
 }
 
-/// Ports `kind_name` (json-schema.cpp:483 @b29c606e2).
+/// Ports `kind_name` (json-schema.cpp:483 @7fe450e19).
 pub fn kindName(k: Kind) []const u8 {
     return switch (k) {
         .any => "any",
@@ -790,7 +792,7 @@ pub fn kindName(k: Kind) []const u8 {
     };
 }
 
-/// Ports `type_name` (json-schema.cpp:503 @b29c606e2), a member of
+/// Ports `type_name` (json-schema.cpp:503 @7fe450e19), a member of
 /// `common_chat_schema`.
 pub fn typeName(t: ValueType) []const u8 {
     return switch (t) {

@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/gemma4v.cpp` at v0.4.1 (`b29c606e2`).
+//! Ports `llama.cpp/tools/mtmd/models/gemma4v.cpp` at v0.5.0 (`7fe450e19`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -15,7 +15,7 @@ const c = impl.c;
 
 extern fn sqrtf(x: f32) f32;
 
-/// The `add_pos` lambda (gemma4v.cpp:46 @b29c606e2): `build_rope_2d` with
+/// The `add_pos` lambda (gemma4v.cpp:46 @7fe450e19): `build_rope_2d` with
 /// NEOX ordering, `pos_x` on the first half of each head and `pos_y` on
 /// the second.
 pub const NeoxRope2d = struct {
@@ -62,7 +62,7 @@ pub fn addPosEmbd(g: *graph.Graph, inp_in: graph.T, pos_x: graph.T, pos_y: graph
     return inp;
 }
 
-/// Ports `build` (gemma4v.cpp:4 @b29c606e2), a member of `clip_graph_gemma4v`.
+/// Ports `build` (gemma4v.cpp:4 @7fe450e19), a member of `clip_graph_gemma4v`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     g.mm_hook = buildMm;
@@ -135,7 +135,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     return g.gf;
 }
 
-/// Ports `build_mm` (gemma4v.cpp:120 @b29c606e2), a member of
+/// Ports `build_mm` (gemma4v.cpp:120 @7fe450e19), a member of
 /// `clip_graph_gemma4v`: Gemma4ClippableLinear, clamping a weight's input
 /// and output where the model lists bounds for it.
 pub fn buildMm(g: *const graph.Graph, w: graph.T, x: graph.T) graph.T {

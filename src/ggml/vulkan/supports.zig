@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
-//! (`b29c606e2`): `ggml_backend_vk_device_supports_op`. The device vtable
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.5.0
+//! (`7fe450e19`): `ggml_backend_vk_device_supports_op`. The device vtable
 //! answers this AND-ed with `ops.ported`, so the scheduler sends nothing to
 //! host code the port does not have yet.
 
@@ -38,7 +38,7 @@ const quant_types = [_]c.ggml_type{
 /// The types a CPY converts f32 to and from.
 const cpy_types = [_]c.ggml_type{ c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0, c.GGML_TYPE_IQ4_NL };
 
-/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:19142 @b29c606e2).
+/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15024 @7fe450e19).
 pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
     const device = m.device.getDevice(dev_idx);
 
@@ -97,6 +97,7 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
                 const ti: usize = @intCast(t0);
                 // Not enough shared memory for row_ids and the result tile: fall back to CPU
                 if (!device.mul_mat_id_s[ti] and !device.mul_mat_id_m[ti] and !device.mul_mat_id_l[ti]) return false;
+                if (op.op_params[3] == c.GGML_PREC_F32) return false;
             }
             if (!(isAny(t0, &.{ F32, F16, BF16 }) or isAny(t0, &quant_types))) return false;
             const a = if (op.op == c.GGML_OP_MUL_MAT) s(op, 0) else s(op, 2);

@@ -199,6 +199,8 @@ test:
 	@printf '\n== llama-arch.cpp vs the port ==\n'
 	./scripts/arch-diff
 	@printf '\n== llama-model-loader.cpp vs the port ==\n'
+	@# loader-diff requires the arch fixtures, and validate's clean removed them.
+	./scripts/gen-arch-fixtures > /dev/null
 	./scripts/loader-diff
 	@printf '\n== llama-batch.cpp vs the port ==\n'
 	./scripts/batch-diff

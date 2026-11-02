@@ -14,7 +14,7 @@
 //! `llama.cpp/common/common.h` and `llama.cpp/common/common.cpp`;
 //! `common_chat_parser_params` and `common_chat_parse`, over
 //! `cli/common_chat/parse.zig`, from `llama.cpp/common/chat.h` and
-//! `llama.cpp/common/chat.cpp` (llama.cpp v0.4.1, `b29c606e2`). The result
+//! `llama.cpp/common/chat.cpp` (llama.cpp v0.5.0, `7fe450e19`). The result
 //! types are `result.zig`. Each declaration names what it ports and the
 //! line it began at.
 //!
@@ -45,7 +45,6 @@ const tokens_mod = @import("tokens.zig");
 const queue = @import("queue.zig");
 
 const c = tools.c;
-const log = tools.log;
 const Value = json.Value;
 const Allocator = std.mem.Allocator;
 const Error = common.Error;
@@ -62,12 +61,12 @@ pub const GrammarType = tools.params.GrammarType;
 // -----------------------------------------------------------------------------
 // common_params_sampling, as a task carries it
 
-/// `common_params_sampling` (common/common.h:224 @b29c606e2), as
+/// `common_params_sampling` (common/common.h:224 @7fe450e19), as
 /// `tools/common/params.zig` ports it: what a task's sampler is built
 /// from. `common_grammar` is its `grammar_type` and `grammar`.
 pub const Sampling = tools.params.Sampling;
 
-/// Ports `common_grammar_value` (common/common.h:212 @b29c606e2).
+/// Ports `common_grammar_value` (common/common.h:212 @7fe450e19).
 pub fn grammarValue(s: *const Sampling) []const u8 {
     return s.grammar;
 }
@@ -123,7 +122,7 @@ fn cloneSpeculative(a: Allocator, s: *const tools.params.Speculative) Error!tool
     return deepClone(a, s.*);
 }
 
-/// Ports `common_speculative_type_name_str` (speculative.cpp:2222 @b29c606e2).
+/// Ports `common_speculative_type_name_str` (speculative.cpp:2222 @7fe450e19).
 ///
 /// Return: owned by `a`.
 pub fn speculativeTypeNameStr(a: Allocator, types: []const SpeculativeType) Error![]u8 {
@@ -142,7 +141,7 @@ pub fn speculativeTypeNameStr(a: Allocator, types: []const SpeculativeType) Erro
 // -----------------------------------------------------------------------------
 // chat parsing
 
-/// Ports `common_chat_parser_params` (chat.h:287 @b29c606e2): per-message
+/// Ports `common_chat_parser_params` (chat.h:287 @7fe450e19): per-message
 /// parsing syntax. `format` is the integer a request may set, which need
 /// not name a format (`common_chat_format_name` then throws); `parser` is
 /// the serialized PEG arena (see the file's doc comment), and "" for the
@@ -174,7 +173,7 @@ pub const ChatParserParams = struct {
     }
 };
 
-/// Ports `common_chat_format_name` (chat.cpp:857 @b29c606e2) over an integer:
+/// Ports `common_chat_format_name` (chat.cpp:857 @7fe450e19) over an integer:
 /// a value that names no format throws, as the C++'s `default:` does.
 pub fn chatFormatName(format: c_int) Error![]const u8 {
     inline for (@typeInfo(chat.Format).@"enum".field_values) |v| {
@@ -192,7 +191,7 @@ fn formatOf(format: c_int) ?chat.Format {
     return null;
 }
 
-/// Ports `common_chat_parse` (chat.cpp:1431 @b29c606e2): the generated text
+/// Ports `common_chat_parse` (chat.cpp:1441 @7fe450e19): the generated text
 /// through the request's PEG parser, loaded from `params.parser` for this
 /// call (`""` is the empty arena: pure content). `TaskResultState` loads it
 /// once and calls `chatParseWith` instead.
@@ -206,7 +205,7 @@ pub fn chatParse(a: Allocator, input: []const u8, is_partial: bool, params: *con
 }
 
 /// `common_chat_parse` over a parser already loaded: `common_chat_peg_parse`
-/// (chat.cpp:1437 @b29c606e2), `cli/common_chat/parse.zig`'s. An integer
+/// (chat.cpp:1447 @7fe450e19), `cli/common_chat/parse.zig`'s. An integer
 /// format that names none maps through the base mapper, as upstream's
 /// `if` chain does; its one difference -- upstream's `LOG_WRN` on a failed
 /// parse names the format, and so throws "Unknown chat format" -- is not
@@ -234,7 +233,7 @@ pub fn chatParseWith(a: Allocator, parser: ?*const peg.Arena, input: []const u8,
 // -----------------------------------------------------------------------------
 // enums
 
-/// Ports `server_task_type` (server-task.h:15 @b29c606e2).
+/// Ports `server_task_type` (server-task.h:15 @7fe450e19).
 pub const TaskType = enum(c_int) {
     completion,
     embedding,
@@ -252,7 +251,7 @@ pub const TaskType = enum(c_int) {
     set_lora,
 };
 
-/// Ports `task_response_type` (server-task.h:33 @b29c606e2).
+/// Ports `task_response_type` (server-task.h:33 @7fe450e19).
 pub const ResponseType = enum(c_int) {
     none, // llama.cpp native format
     oai_chat,
@@ -263,7 +262,7 @@ pub const ResponseType = enum(c_int) {
     anthropic,
 };
 
-/// Ports `stop_type` (server-task.h:43 @b29c606e2).
+/// Ports `stop_type` (server-task.h:43 @7fe450e19).
 pub const StopType = enum(c_int) {
     none,
     eos,
@@ -271,7 +270,7 @@ pub const StopType = enum(c_int) {
     limit,
 };
 
-/// Ports `stop_type_to_str` (server-task.cpp:251 @b29c606e2).
+/// Ports `stop_type_to_str` (server-task.cpp:251 @7fe450e19).
 pub fn stopTypeToStr(ty: StopType) []const u8 {
     return switch (ty) {
         .eos => "eos",
@@ -284,7 +283,7 @@ pub fn stopTypeToStr(ty: StopType) []const u8 {
 // -----------------------------------------------------------------------------
 // task_params
 
-/// Ports `task_params` (server-task.h:50 @b29c606e2). Strings and lists are
+/// Ports `task_params` (server-task.h:50 @7fe450e19). Strings and lists are
 /// the owner's arena's.
 pub const TaskParams = struct {
     stream: bool = false,
@@ -363,7 +362,7 @@ pub const TaskParams = struct {
         return p;
     }
 
-    /// Ports `format_logit_bias` (server-task.cpp:19 @b29c606e2), a member of `task_params`.
+    /// Ports `format_logit_bias` (server-task.cpp:19 @7fe450e19), a member of `task_params`.
     ///
     /// Return: owned by `a`.
     pub fn formatLogitBias(self: *const TaskParams, a: Allocator, logit_bias: []const c.llama_logit_bias) Error!Value {
@@ -380,7 +379,7 @@ pub const TaskParams = struct {
         return data;
     }
 
-    /// Ports `to_json` (server-task.cpp:30 @b29c606e2), a member of
+    /// Ports `to_json` (server-task.cpp:30 @7fe450e19), a member of
     /// `task_params`: the request's settings as `/completion` echoes them
     /// back; `only_metrics` leaves out the lists and the grammar.
     ///
@@ -516,7 +515,7 @@ pub const TaskParams = struct {
 // -----------------------------------------------------------------------------
 // task_result_state
 
-/// Ports `task_result_state` (server-task.h:105 @b29c606e2): what an HTTP
+/// Ports `task_result_state` (server-task.h:105 @7fe450e19): what an HTTP
 /// thread tracks across a task's streamed results -- the text so far, the
 /// message parsed from it, tool-call ids, and the Responses and Anthropic
 /// streams' block state.
@@ -546,7 +545,7 @@ pub const TaskResultState = struct {
     oai_resp_message_id: []const u8 = "",
     oai_resp_fc_id: []const u8 = "", // function call ID for current args delta
 
-    /// Ports the constructor of `task_result_state` (server-task.cpp:151 @b29c606e2): fresh
+    /// Ports the constructor of `task_result_state` (server-task.cpp:151 @7fe450e19): fresh
     /// Responses ids, and for a continuation without echo a message parsed
     /// from nothing, so the first delta does not repeat the prefill.
     pub fn init(gpa: Allocator, chat_parser_params: *const ChatParserParams) Error!TaskResultState {
@@ -602,7 +601,7 @@ pub const TaskResultState = struct {
         return common.genToolCallId(a);
     }
 
-    /// Ports `update_chat_msg` (server-task.cpp:162 @b29c606e2), a member of
+    /// Ports `update_chat_msg` (server-task.cpp:162 @7fe450e19), a member of
     /// `task_result_state`: appends the new text, re-parses everything
     /// generated so far, and reports what changed. With `filter_tool_calls`
     /// a tool call's name is held back until its arguments start (or the
@@ -719,10 +718,10 @@ pub fn cloneDiff(a: Allocator, d: chat.MsgDiff) Error!chat.MsgDiff {
 // -----------------------------------------------------------------------------
 // server_task
 
-/// Ports `server_task` (server-task.h:136 @b29c606e2). Movable: everything it
+/// Ports `server_task` (server-task.h:136 @7fe450e19). Movable: everything it
 /// owns is behind its arena pointer, its token list and its child list.
 pub const Task = struct {
-    /// Ports `server_task`'s `slot_action` (server-task.h:165 @b29c606e2).
+    /// Ports `server_task`'s `slot_action` (server-task.h:165 @7fe450e19).
     pub const SlotAction = struct {
         id_slot: c_int = 0,
         filename: []const u8 = "",
@@ -796,12 +795,12 @@ pub const Task = struct {
         self.* = .{};
     }
 
-    /// Ports `n_tokens` (server-task.h:182 @b29c606e2).
+    /// Ports `n_tokens` (server-task.h:182 @7fe450e19).
     pub fn nTokens(self: *const Task) i32 {
         return @truncate(@as(i64, @intCast(self.tokens.size())));
     }
 
-    /// Ports `need_embd` (server-task.h:186 @b29c606e2).
+    /// Ports `need_embd` (server-task.h:186 @7fe450e19).
     pub fn needEmbd(self: *const Task) bool {
         return switch (self.type) {
             .embedding, .rerank => true,
@@ -809,7 +808,7 @@ pub const Task = struct {
         };
     }
 
-    /// Ports `need_logits` (server-task.h:196 @b29c606e2).
+    /// Ports `need_logits` (server-task.h:196 @7fe450e19).
     pub fn needLogits(self: *const Task) bool {
         return switch (self.type) {
             .completion, .infill => true,
@@ -817,7 +816,7 @@ pub const Task = struct {
         };
     }
 
-    /// Ports `need_sampling` (server-task.h:206 @b29c606e2).
+    /// Ports `need_sampling` (server-task.h:206 @7fe450e19).
     pub fn needSampling(self: *const Task) bool {
         return switch (self.type) {
             .completion, .infill => true,
@@ -825,7 +824,7 @@ pub const Task = struct {
         };
     }
 
-    /// Ports `get_list_id` (server-task.h:217 @b29c606e2): every task's id and
+    /// Ports `get_list_id` (server-task.h:217 @7fe450e19): every task's id and
     /// its children's, in a libc++ `unordered_set` reserved for `tasks.size()`.
     pub fn getListId(gpa: Allocator, tasks: []const Task) Error!queue.IdSet {
         var ids = try queue.IdSet.initCapacity(gpa, tasks.len);
@@ -839,7 +838,7 @@ pub const Task = struct {
         return ids;
     }
 
-    /// Ports `add_child` (server-task.h:228 @b29c606e2): a copy of this task
+    /// Ports `add_child` (server-task.h:228 @7fe450e19): a copy of this task
     /// as a child, with its own sampling seed.
     pub fn addChild(self: *Task, gpa: Allocator, id_parent: c_int, id_child: c_int) Error!void {
         var copy: Task = .{};
@@ -861,18 +860,18 @@ pub const Task = struct {
         try self.child_tasks.append(gpa, copy);
     }
 
-    /// Ports `create_state` (server-task.h:249 @b29c606e2): the state the
+    /// Ports `create_state` (server-task.h:249 @7fe450e19): the state the
     /// caller keeps while the task's results come back.
     pub fn createState(self: *const Task, gpa: Allocator) Error!TaskResultState {
         return TaskResultState.init(gpa, &self.params.chat_parser_params);
     }
 
-    /// Ports `is_parent` (server-task.h:253 @b29c606e2).
+    /// Ports `is_parent` (server-task.h:253 @7fe450e19).
     pub fn isParent(self: *const Task) bool {
         return self.child_tasks.items.len > 0;
     }
 
-    /// Ports `is_child` (server-task.h:257 @b29c606e2).
+    /// Ports `is_child` (server-task.h:257 @7fe450e19).
     pub fn isChild(self: *const Task) bool {
         return self.id_parent != -1;
     }
@@ -881,14 +880,14 @@ pub const Task = struct {
 // -----------------------------------------------------------------------------
 // result_prompt_progress, completion_token_output
 
-/// Ports `result_prompt_progress` (server-task.h:262 @b29c606e2).
+/// Ports `result_prompt_progress` (server-task.h:262 @7fe450e19).
 pub const ResultPromptProgress = struct {
     total: i32 = 0,
     cache: i32 = 0,
     processed: i32 = 0,
     time_ms: i64 = 0,
 
-    /// Ports `result_prompt_progress`'s `to_json` (server-task.cpp:242 @b29c606e2).
+    /// Ports `result_prompt_progress`'s `to_json` (server-task.cpp:242 @7fe450e19).
     pub fn toJson(self: ResultPromptProgress, a: Allocator) Error!Value {
         var o = Obj.init(a);
         errdefer o.deinit();
@@ -900,10 +899,10 @@ pub const ResultPromptProgress = struct {
     }
 };
 
-/// Ports `completion_token_output` (server-task.h:299 @b29c606e2): one
+/// Ports `completion_token_output` (server-task.h:299 @7fe450e19): one
 /// generated token, its probability and its candidates'.
 pub const CompletionTokenOutput = struct {
-    /// Ports `completion_token_output`'s `prob_info` (server-task.h:303 @b29c606e2).
+    /// Ports `completion_token_output`'s `prob_info` (server-task.h:303 @7fe450e19).
     pub const ProbInfo = struct {
         tok: Token = 0,
         txt: []const u8 = "",
@@ -926,7 +925,7 @@ pub const CompletionTokenOutput = struct {
         return o;
     }
 
-    /// Ports `completion_token_output`'s `to_json` (server-task.cpp:264 @b29c606e2):
+    /// Ports `completion_token_output`'s `to_json` (server-task.cpp:264 @7fe450e19):
     /// the candidates, each with its text cut to whole characters.
     ///
     /// Return: owned by `a`.
@@ -946,7 +945,7 @@ pub const CompletionTokenOutput = struct {
         return probs_for_token;
     }
 
-    /// Ports `probs_vector_to_json` (server-task.cpp:282 @b29c606e2), a member of `completion_token_output`.
+    /// Ports `probs_vector_to_json` (server-task.cpp:282 @7fe450e19), a member of `completion_token_output`.
     ///
     /// Return: owned by `a`.
     pub fn probsVectorToJson(a: Allocator, probs: []const CompletionTokenOutput, post_sampling_probs: bool) Error!Value {
@@ -966,7 +965,7 @@ pub const CompletionTokenOutput = struct {
         return out;
     }
 
-    /// Ports `logarithm` (server-task.cpp:304 @b29c606e2), a member of
+    /// Ports `logarithm` (server-task.cpp:304 @7fe450e19), a member of
     /// `completion_token_output`: the JSON library writes -inf as null, so
     /// log(0) is the lowest float instead.
     pub fn logarithm(x: f32) f32 {
@@ -974,7 +973,7 @@ pub const CompletionTokenOutput = struct {
         return if (x == 0.0) -std.math.floatMax(f32) else logf(x);
     }
 
-    /// Ports `str_to_bytes` (server-task.cpp:309 @b29c606e2), a member of `completion_token_output`.
+    /// Ports `str_to_bytes` (server-task.cpp:309 @7fe450e19), a member of `completion_token_output`.
     pub fn strToBytes(str: []const u8) common.Bytes {
         return .{ .s = str };
     }
@@ -985,7 +984,7 @@ extern fn logf(x: f32) f32;
 // -----------------------------------------------------------------------------
 // the prompt cache
 
-/// Ports `common_prompt_checkpoint` (common/common.h:1165 @b29c606e2), the
+/// Ports `common_prompt_checkpoint` (common/common.h:1165 @7fe450e19), the
 /// members the prompt cache reads. Its buffers are the owner's allocator's.
 pub const PromptCheckpoint = struct {
     n_tokens: i64 = 0,
@@ -1002,24 +1001,24 @@ pub const PromptCheckpoint = struct {
     // (optional) speculative-decoding implementation state stashed with the checkpoint
     data_spec: []u8 = &.{},
 
-    /// Ports `common_prompt_checkpoint`'s `size` (common/common.cpp:2254 @b29c606e2).
+    /// Ports `common_prompt_checkpoint`'s `size` (common/common.cpp:2254 @7fe450e19).
     pub fn size(self: *const PromptCheckpoint) usize {
         return self.data_tgt.len + self.data_dft.len + self.data_spec.len;
     }
 
-    /// Ports `common_prompt_checkpoint`'s `empty` (common/common.cpp:2258 @b29c606e2).
+    /// Ports `common_prompt_checkpoint`'s `empty` (common/common.cpp:2258 @7fe450e19).
     pub fn empty(self: *const PromptCheckpoint) bool {
         return self.data_tgt.len == 0;
     }
 
-    /// Ports `common_prompt_checkpoint`'s `update_pos` (common/common.cpp:2273 @b29c606e2).
+    /// Ports `common_prompt_checkpoint`'s `update_pos` (common/common.cpp:2273 @7fe450e19).
     pub fn updatePos(self: *PromptCheckpoint, n_tokens: i64, pos_min: c.llama_pos, pos_max: c.llama_pos) void {
         self.n_tokens = n_tokens;
         self.pos_min = pos_min;
         self.pos_max = pos_max;
     }
 
-    /// Ports `common_prompt_checkpoint`'s `clear` (common/common.cpp:2262 @b29c606e2).
+    /// Ports `common_prompt_checkpoint`'s `clear` (common/common.cpp:2262 @7fe450e19).
     pub fn clear(self: *PromptCheckpoint, a: Allocator) void {
         self.n_tokens = 0;
         self.pos_min = 0;
@@ -1047,12 +1046,12 @@ pub const PromptCheckpoint = struct {
         }
     }
 
-    /// Ports `common_prompt_checkpoint`'s `update_tgt` (common/common.cpp:2282 @b29c606e2).
+    /// Ports `common_prompt_checkpoint`'s `update_tgt` (common/common.cpp:2282 @7fe450e19).
     pub fn updateTgt(self: *PromptCheckpoint, a: Allocator, ctx: ?*c.llama_context, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) Error!void {
         try updateBuf(&self.data_tgt, a, ctx, seq_id, flags, 2296);
     }
 
-    /// Ports `common_prompt_checkpoint`'s `update_dft` (common/common.cpp:2300 @b29c606e2).
+    /// Ports `common_prompt_checkpoint`'s `update_dft` (common/common.cpp:2300 @7fe450e19).
     pub fn updateDft(self: *PromptCheckpoint, a: Allocator, ctx: ?*c.llama_context, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) Error!void {
         try updateBuf(&self.data_dft, a, ctx, seq_id, flags, 2314);
     }
@@ -1066,12 +1065,12 @@ pub const PromptCheckpoint = struct {
         }
     }
 
-    /// Ports `common_prompt_checkpoint`'s `load_tgt` (common/common.cpp:2318 @b29c606e2).
+    /// Ports `common_prompt_checkpoint`'s `load_tgt` (common/common.cpp:2318 @7fe450e19).
     pub fn loadTgt(self: *const PromptCheckpoint, ctx: ?*c.llama_context, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) void {
         loadBuf(self.data_tgt, ctx, seq_id, flags, 2332);
     }
 
-    /// Ports `common_prompt_checkpoint`'s `load_dft` (common/common.cpp:2336 @b29c606e2).
+    /// Ports `common_prompt_checkpoint`'s `load_dft` (common/common.cpp:2336 @7fe450e19).
     pub fn loadDft(self: *const PromptCheckpoint, ctx: ?*c.llama_context, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) void {
         loadBuf(self.data_dft, ctx, seq_id, flags, 2350);
     }
@@ -1095,25 +1094,25 @@ pub const PromptCheckpoint = struct {
     }
 };
 
-/// Ports `server_prompt` (server-task.h:566 @b29c606e2): a prompt's tokens and
+/// Ports `server_prompt` (server-task.h:566 @7fe450e19): a prompt's tokens and
 /// its checkpoints (`std::list`, kept in order).
 pub const ServerPrompt = struct {
     tokens: ServerTokens,
     checkpoints: std.ArrayList(PromptCheckpoint) = .empty,
 
-    /// Ports `clear` (server-task.h:571 @b29c606e2).
+    /// Ports `clear` (server-task.h:571 @7fe450e19).
     pub fn clear(self: *ServerPrompt) void {
         self.tokens.clear();
         for (self.checkpoints.items) |*ck| ck.deinit(self.tokens.gpa);
         self.checkpoints.clearRetainingCapacity();
     }
 
-    /// Ports `n_tokens` (server-task.h:576 @b29c606e2).
+    /// Ports `n_tokens` (server-task.h:576 @7fe450e19).
     pub fn nTokens(self: *const ServerPrompt) c_int {
         return @truncate(@as(i64, @intCast(self.tokens.size())));
     }
 
-    /// Ports `clone` (server-task.h:580 @b29c606e2).
+    /// Ports `clone` (server-task.h:580 @7fe450e19).
     pub fn clone(self: *const ServerPrompt) Error!ServerPrompt {
         var out: ServerPrompt = .{ .tokens = try self.tokens.clone() };
         errdefer out.deinit();
@@ -1129,23 +1128,23 @@ pub const ServerPrompt = struct {
     }
 };
 
-/// Ports `server_prompt_data` (server-task.h:588 @b29c606e2).
+/// Ports `server_prompt_data` (server-task.h:588 @7fe450e19).
 pub const PromptData = struct {
     main: []u8 = &.{},
     drft: []u8 = &.{},
 
-    /// Ports `size` (server-task.h:592 @b29c606e2).
+    /// Ports `size` (server-task.h:592 @7fe450e19).
     pub fn size(self: *const PromptData) usize {
         return self.main.len + self.drft.len;
     }
 };
 
-/// Ports `server_prompt_cache_state` (server-task.h:597 @b29c606e2).
+/// Ports `server_prompt_cache_state` (server-task.h:597 @7fe450e19).
 pub const PromptCacheState = struct {
     prompt: ServerPrompt,
     data: PromptData = .{},
 
-    /// Ports `size` (server-task.h:592 @b29c606e2).
+    /// Ports `size` (server-task.h:592 @7fe450e19).
     pub fn size(self: *const PromptCacheState) usize {
         var res = self.data.size();
 
@@ -1166,7 +1165,7 @@ pub const PromptCacheState = struct {
 
 const mib: f64 = 1024.0 * 1024.0;
 
-/// Ports `server_prompt_cache` (server-task.h:612 @b29c606e2): prompts and
+/// Ports `server_prompt_cache` (server-task.h:612 @7fe450e19): prompts and
 /// their saved states, oldest first, under a byte and a token limit.
 pub const PromptCache = struct {
     gpa: Allocator,
@@ -1180,7 +1179,7 @@ pub const PromptCache = struct {
     // in tokens, 0 = no limit
     limit_tokens: usize = 0,
 
-    /// Ports the constructor of `server_prompt_cache` (server-task.h:612 @b29c606e2).
+    /// Ports the constructor of `server_prompt_cache` (server-task.h:612 @7fe450e19).
     pub fn init(gpa: Allocator, limit_size_mib: i32, limit_tokens: usize) PromptCache {
         return .{
             .gpa = gpa,
@@ -1204,7 +1203,7 @@ pub const PromptCache = struct {
         self.destroyState(s);
     }
 
-    /// Ports `server_prompt_cache`'s `size` (server-task.cpp:1691 @b29c606e2).
+    /// Ports `server_prompt_cache`'s `size` (server-task.cpp:1691 @7fe450e19).
     pub fn size(self: *const PromptCache) usize {
         var res: usize = 0;
 
@@ -1215,7 +1214,7 @@ pub const PromptCache = struct {
         return res;
     }
 
-    /// Ports `server_prompt_cache`'s `n_tokens` (server-task.cpp:1701 @b29c606e2).
+    /// Ports `server_prompt_cache`'s `n_tokens` (server-task.cpp:1701 @7fe450e19).
     pub fn nTokens(self: *const PromptCache) usize {
         var res: usize = 0;
 
@@ -1226,7 +1225,7 @@ pub const PromptCache = struct {
         return res;
     }
 
-    /// Ports `server_prompt_cache`'s `alloc` (server-task.cpp:1711 @b29c606e2):
+    /// Ports `server_prompt_cache`'s `alloc` (server-task.cpp:1711 @7fe450e19):
     /// room for a prompt's state, after dropping prompts it contains and
     /// the oldest ones over the size limit.
     ///
@@ -1326,7 +1325,7 @@ pub const PromptCache = struct {
         return null;
     }
 
-    /// Ports `server_prompt_cache`'s `load` (server-task.cpp:1793 @b29c606e2): the
+    /// Ports `server_prompt_cache`'s `load` (server-task.cpp:1793 @7fe450e19): the
     /// cached prompt most like `tokens_new` that keeps the most of itself,
     /// restored into `id_slot` and moved into `prompt`.
     ///
@@ -1412,7 +1411,7 @@ pub const PromptCache = struct {
         return true;
     }
 
-    /// Ports `server_prompt_cache`'s `update` (server-task.cpp:1870 @b29c606e2):
+    /// Ports `server_prompt_cache`'s `update` (server-task.cpp:1870 @7fe450e19):
     /// drops the oldest prompts over the size limit, then over the token
     /// limit -- raised to what the size limit holds at the average size per
     /// token.

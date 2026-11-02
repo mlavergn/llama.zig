@@ -7,7 +7,7 @@
 //! `llama.cpp/tools/server/server-schema.h` (namespace `server_schema`),
 //! and `common_sampler_types_from_names` and
 //! `common_sampler_types_from_chars` from `llama.cpp/common/sampling.cpp`
-//! (llama.cpp v0.4.1, `b29c606e2`). Each declaration names what it ports and
+//! (llama.cpp v0.5.0, `7fe450e19`). Each declaration names what it ports and
 //! the line it began at.
 //!
 //! # The field classes
@@ -53,7 +53,7 @@ const TaskParams = task.TaskParams;
 const SamplerType = task.SamplerType;
 const GrammarTrigger = common.GrammarTrigger;
 
-/// Ports `field_eval_context` (server-schema.h:18 @b29c606e2), with what the
+/// Ports `field_eval_context` (server-schema.h:18 @7fe450e19), with what the
 /// handlers' lambdas capture.
 pub const EvalContext = struct {
     /// the task's arena: everything a handler sets is allocated here
@@ -64,10 +64,10 @@ pub const EvalContext = struct {
     logit_bias_eog: ?[]const c.llama_logit_bias = null,
 };
 
-/// Ports `field_handler` (server-schema.h:25 @b29c606e2).
+/// Ports `field_handler` (server-schema.h:25 @7fe450e19).
 pub const Handler = *const fn (ctx: *EvalContext, data: *const Value) Error!void;
 
-/// Ports `field_num` (server-schema.h:48 @b29c606e2): a number, clamped to
+/// Ports `field_num` (server-schema.h:48 @7fe450e19): a number, clamped to
 /// `[min, max]`, or refused outside it when the limits are hard.
 pub fn Num(comptime T: type) type {
     return struct {
@@ -90,7 +90,7 @@ pub const Kind = union(enum) {
     nested: []const Field,
 };
 
-/// Ports `field` (server-schema.h:27 @b29c606e2): a request member, its
+/// Ports `field` (server-schema.h:27 @7fe450e19): a request member, its
 /// aliases in the order they are tried, and how it is read.
 pub const Field = struct {
     name: []const []const u8,
@@ -106,7 +106,9 @@ fn toString(buf: *[512]u8, x: anytype) []const u8 {
             const n = snprintf(buf, buf.len, "%f", @as(f64, @floatCast(x)));
             return buf[0..@intCast(n)];
         },
-        else => return std.fmt.bufPrint(buf, "{d}", .{x}) catch unreachable,
+        else => return std.fmt.bufPrint(buf, "{d}", .{x}) catch |err| switch (err) {
+            error.NoSpaceLeft => unreachable,
+        },
     }
 }
 
@@ -115,7 +117,7 @@ extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 // -----------------------------------------------------------------------------
 // eval() implementations
 
-/// Ports `handle_with_catch` (server-schema.cpp:577 @b29c606e2): any
+/// Ports `handle_with_catch` (server-schema.cpp:577 @7fe450e19): any
 /// exception a field throws becomes `std::invalid_argument("Field '<name>':
 /// <what>")`.
 fn handleWithCatch(name: []const u8, r: Error!void) Error!void {
@@ -132,10 +134,12 @@ fn handleWithCatch(name: []const u8, r: Error!void) Error!void {
     };
 }
 
-/// Ports `has_value` (server-schema.cpp:586 @b29c606e2): a null value is
+/// Ports `has_value` (server-schema.cpp:586 @7fe450e19): a null value is
 /// absent, so a client can send null for the server's default.
 fn hasValue(data: *const Value, n: []const u8) bool {
-    return data.contains(n) and !(data.at(n) catch unreachable).isNull();
+    return data.contains(n) and !(data.at(n) catch |err| switch (err) {
+        error.OutOfMemory, error.JsonError => unreachable,
+    }).isNull();
 }
 
 /// `std::max(min, std::min(max, v))`, NaN included.
@@ -144,7 +148,7 @@ fn clamp(comptime T: type, min: T, max: T, v: T) T {
     return if (min < lo) lo else min;
 }
 
-/// Ports `field_num`'s `eval` (server-schema.cpp:591 @b29c606e2), the template's.
+/// Ports `field_num`'s `eval` (server-schema.cpp:591 @7fe450e19), the template's.
 fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
         if (hasValue(data, n)) {
@@ -152,11 +156,15 @@ fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, da
                 if (f.custom_handler) |h| {
                     break :blk h(ctx, data);
                 } else if (!num.is_hard_limit) {
-                    const v = (data.at(n) catch unreachable).get(T) catch |e| break :blk e;
+                    const v = (data.at(n) catch |err| switch (err) {
+                        error.OutOfMemory, error.JsonError => unreachable,
+                    }).get(T) catch |e| break :blk e;
                     num.val.* = clamp(T, num.min, num.max, v);
                     break :blk {};
                 } else {
-                    const tmp = (data.at(n) catch unreachable).get(T) catch |e| break :blk e;
+                    const tmp = (data.at(n) catch |err| switch (err) {
+                        error.OutOfMemory, error.JsonError => unreachable,
+                    }).get(T) catch |e| break :blk e;
                     if (tmp < num.min or tmp > num.max) {
                         var b1: [512]u8 = undefined;
                         var b2: [512]u8 = undefined;
@@ -172,8 +180,8 @@ fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, da
     }
 }
 
-/// Ports `field_str`'s `eval` (server-schema.cpp:612 @b29c606e2) and
-/// `field_json`'s `eval` (server-schema.cpp:639 @b29c606e2), which are the same.
+/// Ports `field_str`'s `eval` (server-schema.cpp:612 @7fe450e19) and
+/// `field_json`'s `eval` (server-schema.cpp:639 @7fe450e19), which are the same.
 fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const Value, comptime line: c_int) Error!void {
     common.ggmlAssert(f.custom_handler != null, "server-schema.cpp", line, "custom_handler");
     for (f.name) |n| {
@@ -184,7 +192,7 @@ fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const Value, comptime 
     }
 }
 
-/// Ports `field_bool`'s `eval` (server-schema.cpp:624 @b29c606e2).
+/// Ports `field_bool`'s `eval` (server-schema.cpp:624 @7fe450e19).
 fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
         if (hasValue(data, n)) {
@@ -192,7 +200,9 @@ fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const Value) 
                 if (f.custom_handler) |h| {
                     break :blk h(ctx, data);
                 } else {
-                    val.* = (data.at(n) catch unreachable).get(bool) catch |e| break :blk e;
+                    val.* = (data.at(n) catch |err| switch (err) {
+                        error.OutOfMemory, error.JsonError => unreachable,
+                    }).get(bool) catch |e| break :blk e;
                     break :blk {};
                 }
             });
@@ -201,12 +211,16 @@ fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const Value) 
     }
 }
 
-/// Ports `field_nested`'s `eval` (server-schema.cpp:651 @b29c606e2): the
+/// Ports `field_nested`'s `eval` (server-schema.cpp:651 @7fe450e19): the
 /// subfields, evaluated on the member's object.
 fn evalNested(f: *const Field, subfields: []const Field, ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
-        if (data.contains(n) and (data.at(n) catch unreachable).isObject()) {
-            const sub = data.at(n) catch unreachable;
+        if (data.contains(n) and (data.at(n) catch |err| switch (err) {
+            error.OutOfMemory, error.JsonError => unreachable,
+        }).isObject()) {
+            const sub = data.at(n) catch |err| switch (err) {
+                error.OutOfMemory, error.JsonError => unreachable,
+            };
             for (subfields) |*sf| {
                 try eval(sf, ctx, sub);
             }
@@ -551,7 +565,7 @@ fn dupeStrings(a: Allocator, xs: []const []const u8) Error![]const []const u8 {
     return out;
 }
 
-/// Ports `common_sampler_types_from_names` (sampling.cpp:829 @b29c606e2): each
+/// Ports `common_sampler_types_from_names` (sampling.cpp:829 @7fe450e19): each
 /// name, lower-cased, by its canonical spelling or an alias; an unknown
 /// one is warned about and skipped.
 pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) Error!std.ArrayList(SamplerType) {
@@ -592,7 +606,7 @@ pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) Error!std.
     return samplers;
 }
 
-/// Ports `common_sampler_types_from_chars` (sampling.cpp:891 @b29c606e2).
+/// Ports `common_sampler_types_from_chars` (sampling.cpp:891 @7fe450e19).
 pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) Error!std.ArrayList(SamplerType) {
     const all = [_]SamplerType{ .dry, .top_k, .typical_p, .top_p, .top_n_sigma, .min_p, .temperature, .xtc, .infill, .penalties, .adaptive_p };
     var samplers: std.ArrayList(SamplerType) = .empty;
@@ -613,7 +627,7 @@ pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) Error!std.ArrayLis
 // -----------------------------------------------------------------------------
 // the table
 
-/// Ports `make_llama_cmpl_schema` (server-schema.cpp:11 @b29c606e2): the
+/// Ports `make_llama_cmpl_schema` (server-schema.cpp:11 @7fe450e19): the
 /// llama.cpp-specific completion schema, every field pointing into
 /// `params`.
 ///
@@ -717,7 +731,7 @@ pub fn makeLlamaCmplSchema(a: Allocator, params_base: *const tools.params.Params
     return a.dupe(Field, &fields);
 }
 
-/// Ports `eval_llama_cmpl_schema` (server-schema.cpp:519 @b29c606e2): a
+/// Ports `eval_llama_cmpl_schema` (server-schema.cpp:519 @7fe450e19): a
 /// request's parameters -- the command line's defaults, every field the
 /// request carries applied over them in the table's order, then the
 /// derived ones.

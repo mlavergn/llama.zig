@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/scale.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/scale.cuh` at v0.4.1 (`b29c606e2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/scale.cuh` at v0.5.0 (`7fe450e19`). The
 //! kernel, `scale_f32`, stays CUDA and is launched from here.
 
 const std = @import("std");
@@ -14,13 +14,13 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_SCALE_BLOCK_SIZE` (scale.cuh:3 @b29c606e2).
+/// Ports `CUDA_SCALE_BLOCK_SIZE` (scale.cuh:3 @7fe450e19).
 const block_size = 256;
 
-/// Ports `MAX_GRIDDIM_X` (scale.cu:3 @b29c606e2).
+/// Ports `MAX_GRIDDIM_X` (scale.cu:3 @7fe450e19).
 const max_griddim_x = 0x7FFFFFFF;
 
-/// Ports `scale_f32_cuda` (scale.cu:16 @b29c606e2).
+/// Ports `scale_f32_cuda` (scale.cu:16 @7fe450e19).
 fn scaleF32Cuda(x: [*c]const f32, dst: [*c]f32, scale: f32, bias: f32, nelements: i64, stream: common.cu.cudaStream_t) void {
     const num_blocks = @divTrunc(nelements + block_size - 1, block_size);
     kernels.launchPdl(kernels.get("scale", "scale_f32"), .{
@@ -30,7 +30,7 @@ fn scaleF32Cuda(x: [*c]const f32, dst: [*c]f32, scale: f32, bias: f32, nelements
     }, .{ x, dst, scale, bias, nelements });
 }
 
-/// Ports `ggml_cuda_op_scale` (scale.cu:22 @b29c606e2).
+/// Ports `ggml_cuda_op_scale` (scale.cu:22 @7fe450e19).
 pub fn opScale(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

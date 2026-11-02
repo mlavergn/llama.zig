@@ -11,7 +11,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/eagle3.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/eagle3.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_eagle3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<is_enc>` with `build_inp_embd_enc`.
 
@@ -33,7 +33,7 @@ fn oom() noreturn {
     impl.abort("models/eagle3.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_eagle3`'s `load_arch_hparams` (models/eagle3.cpp:3 @b29c606e2).
+/// Ports `llama_model_eagle3`'s `load_arch_hparams` (models/eagle3.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -73,7 +73,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_eagle3`'s `load_arch_tensors` (models/eagle3.cpp:38 @b29c606e2).
+/// Ports `llama_model_eagle3`'s `load_arch_tensors` (models/eagle3.cpp:38 @7fe450e19).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -148,12 +148,12 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_eagle3`'s `build_arch_graph` (models/eagle3.cpp:103 @b29c606e2).
+/// Ports `llama_model_eagle3`'s `build_arch_graph` (models/eagle3.cpp:328 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     switch (params.gtype) {
         .encoder => buildGraphEnc(model, b),
         .default, .decoder => buildGraphDec(model, b),
-        else => impl.abort("models/eagle3.cpp", 111, "invalid graph type"),
+        else => impl.abort("models/eagle3.cpp", 336, "invalid graph type"),
     }
 }
 
@@ -165,7 +165,7 @@ fn otherModel(b: *const graph.Builder) *const Model {
 }
 
 /// Ports `llama_model_eagle3`'s `graph<true>`'s `build_inp_embd_enc`
-/// (models/eagle3.cpp:116 @b29c606e2): the target model's features, three
+/// (models/eagle3.cpp:104 @7fe450e19): the target model's features, three
 /// layers concatenated, given as the batch's embeddings.
 fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
     const hp = b.hparams;
@@ -184,7 +184,7 @@ fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
 }
 
 /// Ports the constructor of `llama_model_eagle3`'s `graph<true>`
-/// (models/eagle3.cpp:137 @b29c606e2): the encoder, which fuses the target
+/// (models/eagle3.cpp:125 @7fe450e19): the encoder, which fuses the target
 /// model's features -- e.g. `[12288, n_tokens]` from its low, middle and
 /// high layers -- into `g_embeddings`, e.g. `[4096, n_tokens]`.
 fn buildGraphEnc(model: *const Model, b: *const graph.Builder) void {
@@ -209,26 +209,26 @@ fn buildGraphEnc(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_eagle3`'s `graph<false>`
-/// (models/eagle3.cpp:164 @b29c606e2): the decoder, over draft tokens and
+/// (models/eagle3.cpp:152 @7fe450e19): the decoder, over draft tokens and
 /// the encoder's g_embeddings, to draft logits.
 fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/eagle3.cpp", 167, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/eagle3.cpp", 155, "n_embd_head == hparams.n_embd_head_k()");
     // EAGLE-3 has a single decoder layer.
-    impl.assert(b.n_layer == 1, "models/eagle3.cpp", 168, "n_layer == 1");
+    impl.assert(b.n_layer == 1, "models/eagle3.cpp", 156, "n_layer == 1");
 
     // The decoder's two inputs: the token embeddings -- EAGLE-3's own, as
     // Llama 3.3 70B's has, or the target model's, as Llama 3.1 8B's uses --
     // and the encoder's g_embeddings.
     var tok_embd = model.tok_embd;
     if (model.tok_embd == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/eagle3.cpp", 178, "cparams.ctx_other != nullptr");
+        impl.assert(b.cparams.ctx_other != null, "models/eagle3.cpp", 166, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
 
-        impl.assert(model_other.tok_embd != null, "models/eagle3.cpp", 181, "model_other->tok_embd != nullptr && \"EAGLE3 decoder requires token embeddings (own or from target model)\"");
+        impl.assert(model_other.tok_embd != null, "models/eagle3.cpp", 169, "model_other->tok_embd != nullptr && \"EAGLE3 decoder requires token embeddings (own or from target model)\"");
         tok_embd = model_other.tok_embd;
     }
 
@@ -339,10 +339,10 @@ fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
     // model's when it has none.
     var output = model.output;
     if (output == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/eagle3.cpp", 311, "cparams.ctx_other != nullptr");
+        impl.assert(b.cparams.ctx_other != null, "models/eagle3.cpp", 299, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
 
-        impl.assert(model_other.output != null, "models/eagle3.cpp", 314, "model_other->output != nullptr && \"EAGLE3 decoder requires an output projection (own or from target model)\"");
+        impl.assert(model_other.output != null, "models/eagle3.cpp", 302, "model_other->output != nullptr && \"EAGLE3 decoder requires an output projection (own or from target model)\"");
         output = model_other.output;
     }
     cur = b.buildLoraMm(output.?, cur, null);
@@ -352,8 +352,8 @@ fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
         const n_outputs = cur.ne[1];
         const n_vocab: i64 = model.vocab.nTokens();
 
-        impl.assert(d2t.type == c.GGML_TYPE_I64, "models/eagle3.cpp", 324, "model.d2t->type == GGML_TYPE_I64");
-        impl.assert(d2t.ne[0] == n_draft_vocab, "models/eagle3.cpp", 325, "model.d2t->ne[0] == n_draft_vocab");
+        impl.assert(d2t.type == c.GGML_TYPE_I64, "models/eagle3.cpp", 312, "model.d2t->type == GGML_TYPE_I64");
+        impl.assert(d2t.ne[0] == n_draft_vocab, "models/eagle3.cpp", 313, "model.d2t->ne[0] == n_draft_vocab");
 
         const logits: *Tensor = c.ggml_fill(ctx, c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, 1, n_vocab, n_outputs), -std.math.inf(f32));
         cur = c.ggml_set_rows(ctx, logits, c.ggml_reshape_3d(ctx, cur, 1, n_draft_vocab, n_outputs), c.ggml_reshape_3d(ctx, d2t, n_draft_vocab, 1, 1));

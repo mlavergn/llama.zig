@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports the model-specific switch of `clip_model_loader::load_tensors`
-//! and `clip_n_mmproj_embd` from `llama.cpp/tools/mtmd/clip.cpp` at v0.4.1
-//! (`b29c606e2`). Each declaration names what it ports and the line it
+//! and `clip_n_mmproj_embd` from `llama.cpp/tools/mtmd/clip.cpp` at v0.5.0
+//! (`7fe450e19`). Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # Order is part of the contract
@@ -91,8 +91,8 @@ fn loadClampInfo(tl: *TensorLoader) Error!void {
     }
 }
 
-/// Ports the model-specific switch of `load_tensors` (mtmd/clip.cpp:2099
-/// @b29c606e2), the `switch (model.proj_type)` at its line 2335.
+/// Ports the model-specific switch of `load_tensors` (mtmd/clip.cpp:2109
+/// @7fe450e19), the `switch (model.proj_type)` at its line 2345.
 pub fn load(tl: *TensorLoader) Error!void {
     const func = "load_tensors";
     const model = &tl.ctx_clip.model;
@@ -272,7 +272,7 @@ pub fn load(tl: *TensorLoader) Error!void {
         .yasa2 => {
             // reuse tensors already loaded by the common section
             // (TN_PATCH_EMBD and TN_PATCH_BIAS have the same tensor names)
-            impl.ggmlAssert(model.patch_embeddings_0 != null, "clip.cpp", 2528, "model.patch_embeddings_0 && \"yasa2 requires v.patch_embd.weight\"");
+            impl.ggmlAssert(model.patch_embeddings_0 != null, "clip.cpp", 2538, "model.patch_embeddings_0 && \"yasa2 requires v.patch_embd.weight\"");
             model.yasa_patch_w = model.patch_embeddings_0;
             model.yasa_patch_b = model.patch_bias;
             model.yasa_patch_ln_w = try tl.getTensor(names.TN_YASA_PATCH_LN_W, false);
@@ -914,6 +914,7 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.pos_embed = try get(tl, names.TN_SAM_POS_EMBD, .{W}, true);
             model.patch_embed_proj_w = try get(tl, names.TN_SAM_PATCH_EMBD, .{W}, true);
             model.patch_embed_proj_b = try get(tl, names.TN_SAM_PATCH_EMBD, .{B}, true);
+            model.n_sam_layers = hparams.sam_n_layer;
             try resizeList(model_mod.Layer, &model.sam_layers, @intCast(model.n_sam_layers));
             for (model.sam_layers.items, 0..) |*layer, ilu| {
                 const il: c_int = @intCast(ilu);
@@ -1191,7 +1192,7 @@ pub fn load(tl: *TensorLoader) Error!void {
                 try loadQfLayer(tl, &b.qf_proj_layers.items[0], prefix, bid);
             }
         },
-        else => impl.ggmlAssert(false, "clip.cpp", 3581, "false && \"unknown projector type\""),
+        else => impl.ggmlAssert(false, "clip.cpp", 3592, "false && \"unknown projector type\""),
     }
 }
 
@@ -1233,7 +1234,7 @@ inline fn neI(t: T, i: usize) c_int {
     return @truncate(graph.ne(t, i));
 }
 
-/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:5911 @b29c606e2): the embedding
+/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:5927 @7fe450e19): the embedding
 /// size of the projector's output, which must be the text model's.
 pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
     const m = &ctx.model;
@@ -1276,7 +1277,7 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .pockettts_spkenc => neI(m.spk_proj_w, 1),
         .pockettts_gen => neI(m.gen_input_lin_w, 1),
         .parakeet => neI(m.mm_1_w, 1),
-        else => impl.abort("clip.cpp", 6011, "Unknown projector type"),
+        else => impl.abort("clip.cpp", 6027, "Unknown projector type"),
     };
 }
 

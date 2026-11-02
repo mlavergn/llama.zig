@@ -27,8 +27,17 @@
  * - `get_alloc_size` for every type at row lengths on both sides of the
  *   512-element `MATRIX_ROW_PADDING`, and for flash-attention nodes --
  *   whose size depends on `dst->data`, so each is asked at several
- *   addresses.
+ *   addresses;
+ * - `graph_optimize`'s allocation dependencies: every `add_alloc_dep` call
+ *   it makes on top-k MoE gating chains (each gating function, with and
+ *   without the bias, the norm and the scale, followed by a consumer or
+ *   ending the graph) and on MoE weighted reductions. They only keep
+ *   tensors allocated longer, so a missing one shows in no result until the
+ *   allocator happens to reuse the memory -- and `test-backend-ops` never
+ *   calls `graph_optimize` at all.
  */
+#include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +45,7 @@
 
 #include "ggml.h"
 #include "ggml-backend.h"
+#include "ggml-backend-impl.h"
 #include "ggml-cpu.h"
 #include "ggml-cuda.h"
 
@@ -168,6 +178,172 @@ static void ask_offload(ggml_backend_dev_t dev, struct ggml_context * ctx) {
     }
 }
 
+/* graph_optimize: the graph being optimized and the case's label, for the
+ * recording callback. */
+static struct ggml_cgraph * opt_graph;
+static const char * opt_label;
+static long opt_deps;
+static long opt_deps_topk;
+
+/* A tensor as the dependency report names it: its node index, else its name
+ * (every leaf the cases build is named), else "null". */
+static void tensor_label(char * buf, size_t n, const struct ggml_tensor * t) {
+    if (t == NULL) {
+        snprintf(buf, n, "null");
+        return;
+    }
+    for (int i = 0; i < ggml_graph_n_nodes(opt_graph); i++) {
+        if (ggml_graph_node(opt_graph, i) == t) {
+            snprintf(buf, n, "node%d", i);
+            return;
+        }
+    }
+    snprintf(buf, n, "leaf:%s", ggml_get_name(t));
+}
+
+static void record_alloc_dep(void * user_data, struct ggml_tensor * tensor, struct ggml_tensor * until) {
+    (void) user_data;
+    char a[64], b[64];
+    tensor_label(a, sizeof(a), tensor);
+    tensor_label(b, sizeof(b), until);
+    SAY("graph_optimize %s dep %s until %s", opt_label, a, b);
+    opt_deps++;
+}
+
+enum gating { GATE_SOFTMAX, GATE_SIGMOID, GATE_SQRT_SOFTPLUS, GATE_SOFTMAX_WEIGHT };
+
+/* test-backend-ops' `test_topk_moe` graph (test-backend-ops.cpp:6774
+ * @7fe450e19), plus, unless `at_end`, a consumer of the ids and one of the
+ * weights after the chain, as a MoE layer has. Its context memory is
+ * zeroed, so `nodes[n_nodes]` -- which graph_optimize names as the
+ * dependency target of a chain that ends the graph -- reads as null. */
+static struct ggml_cgraph * build_topk_moe(struct ggml_context * ctx, int64_t n_expert, int64_t n_used, int64_t n_tokens,
+                                           enum gating g, bool bias, bool norm, float scale_w, bool at_end) {
+    struct ggml_tensor * logits = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_expert, n_tokens);
+    ggml_set_name(logits, "logits");
+    struct ggml_tensor * probs = g == GATE_SOFTMAX ? ggml_soft_max(ctx, logits) :
+                                 g == GATE_SIGMOID ? ggml_sigmoid(ctx, logits) :
+                                 g == GATE_SQRT_SOFTPLUS ? ggml_sqrt(ctx, ggml_softplus(ctx, logits)) : logits;
+    struct ggml_tensor * selection = probs;
+    if (bias) {
+        struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_expert);
+        ggml_set_name(b, "exp_probs_b");
+        selection = ggml_add(ctx, probs, b);
+    }
+    struct ggml_tensor * ids = ggml_argsort_top_k(ctx, selection, (int) n_used);
+    struct ggml_tensor * w = ggml_get_rows(ctx, ggml_reshape_3d(ctx, probs, 1, n_expert, n_tokens), ids);
+    if (g == GATE_SOFTMAX_WEIGHT) {
+        w = ggml_reshape_3d(ctx, ggml_soft_max(ctx, ggml_reshape_2d(ctx, w, n_used, n_tokens)), 1, n_used, n_tokens);
+    }
+    if (norm) {
+        w = ggml_reshape_2d(ctx, w, n_used, n_tokens);
+        struct ggml_tensor * sum = ggml_clamp(ctx, ggml_sum_rows(ctx, w), 6.103515625e-5f, INFINITY);
+        w = ggml_reshape_3d(ctx, ggml_div(ctx, w, sum), 1, n_used, n_tokens);
+    }
+    if (scale_w != 0.0f) {
+        w = ggml_scale(ctx, w, scale_w);
+    }
+    struct ggml_cgraph * gf = ggml_new_graph(ctx);
+    if (at_end) {
+        /* `ids` is reached through the GET_ROWS, after the RESHAPE, which
+         * keeps the order the fusion matches. */
+        ggml_build_forward_expand(gf, w);
+        return gf;
+    }
+    struct ggml_tensor * x = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 4, n_used, n_tokens);
+    ggml_set_name(x, "x");
+    struct ggml_tensor * table = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 4, n_expert, n_tokens);
+    ggml_set_name(table, "table");
+    ggml_build_forward_expand(gf, ggml_add(ctx, ggml_mul(ctx, x, w), ggml_get_rows(ctx, table, ids)));
+    return gf;
+}
+
+/* test-backend-ops' `test_moe_reduce` graph (test-backend-ops.cpp:6873
+ * @7fe450e19) in its test-mode node order, plus a consumer. */
+static struct ggml_cgraph * build_moe_reduce(struct ggml_context * ctx, int64_t n_embd, int64_t n_used, int64_t n_tokens, bool expert_scale) {
+    struct ggml_cgraph * gf = ggml_new_graph(ctx);
+    struct ggml_tensor * experts = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_embd, n_used, n_tokens);
+    ggml_set_name(experts, "experts");
+    struct ggml_tensor * weights = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 1, n_used, n_tokens);
+    ggml_set_name(weights, "weights");
+    struct ggml_tensor * scaled = experts;
+    if (expert_scale) {
+        struct ggml_tensor * es = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 1, n_used, n_tokens);
+        ggml_set_name(es, "expert_scale");
+        scaled = ggml_mul(ctx, experts, es);
+    }
+    struct ggml_tensor * weighted = ggml_mul(ctx, scaled, weights);
+    struct ggml_tensor * views[16];
+    for (int64_t e = 0; e < n_used; e++) {
+        views[e] = ggml_view_2d(ctx, weighted, n_embd, n_tokens, weighted->nb[2], e * weighted->nb[1]);
+        ggml_build_forward_expand(gf, views[e]);
+    }
+    struct ggml_tensor * out = views[0];
+    for (int64_t e = 1; e < n_used; e++) {
+        out = ggml_add(ctx, out, views[e]);
+        ggml_build_forward_expand(gf, out);
+    }
+    struct ggml_tensor * y = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, n_tokens);
+    ggml_set_name(y, "y");
+    ggml_build_forward_expand(gf, ggml_add(ctx, out, y));
+    return gf;
+}
+
+static void optimize_one(ggml_backend_t backend, const char * label, struct ggml_cgraph * gf) {
+    opt_graph = gf;
+    opt_label = label;
+    const long before = opt_deps;
+    struct ggml_backend_graph_optimize_params params = { record_alloc_dep, NULL };
+    backend->iface.graph_optimize(backend, gf, &params);
+    SAY("graph_optimize %s nodes = %d deps = %ld", label, ggml_graph_n_nodes(gf), opt_deps - before);
+}
+
+static void ask_graph_optimize(ggml_backend_dev_t dev) {
+    ggml_backend_t backend = ggml_backend_dev_init(dev, NULL);
+    if (backend == NULL || backend->iface.graph_optimize == NULL) {
+        SAY("graph_optimize = %s", backend == NULL ? "no backend" : "null");
+        if (backend) ggml_backend_free(backend);
+        return;
+    }
+    static const char * gate_names[] = { "softmax", "sigmoid", "sqrt_softplus", "softmax_weight" };
+    static const struct { int64_t n_expert, n_used, n_tokens; } shapes[] = { { 32, 4, 8 }, { 256, 6, 3 }, { 31, 4, 8 } };
+    const size_t mem = 16 * 1024 * 1024;
+    void * buf = malloc(mem);
+    char label[160];
+    for (int g = 0; g < 4; g++) {
+        for (size_t sh = 0; sh < sizeof(shapes) / sizeof(shapes[0]); sh++) {
+            for (int v = 0; v < 16; v++) {
+                const bool bias = v & 1, norm = v & 2, scale = v & 4, at_end = v & 8;
+                memset(buf, 0, mem);
+                struct ggml_init_params ip = { mem, buf, true };
+                struct ggml_context * ctx = ggml_init(ip);
+                struct ggml_cgraph * gf = build_topk_moe(ctx, shapes[sh].n_expert, shapes[sh].n_used, shapes[sh].n_tokens,
+                                                         (enum gating) g, bias, norm, scale ? 2.5f : 0.0f, at_end);
+                snprintf(label, sizeof(label), "topk_moe %s n_expert=%lld n_used=%lld bias=%d norm=%d scale=%d at_end=%d",
+                         gate_names[g], (long long) shapes[sh].n_expert, (long long) shapes[sh].n_used, bias, norm, scale, at_end);
+                const long before = opt_deps;
+                optimize_one(backend, label, gf);
+                if (strcmp(side, "ref") == 0) {
+                    opt_deps_topk += opt_deps - before;
+                }
+                ggml_free(ctx);
+            }
+        }
+    }
+    for (int64_t n_used = 2; n_used <= 8; n_used *= 2) {
+        for (int es = 0; es < 2; es++) {
+            memset(buf, 0, mem);
+            struct ggml_init_params ip = { mem, buf, true };
+            struct ggml_context * ctx = ggml_init(ip);
+            snprintf(label, sizeof(label), "moe_reduce n_used=%lld expert_scale=%d", (long long) n_used, es);
+            optimize_one(backend, label, build_moe_reduce(ctx, 64, n_used, 5, es));
+            ggml_free(ctx);
+        }
+    }
+    free(buf);
+    ggml_backend_free(backend);
+}
+
 static void ask_device(size_t i, ggml_backend_dev_t dev) {
     SAY("dev %zu name = %s", i, ggml_backend_dev_name(dev));
     SAY("dev %zu description = %s", i, ggml_backend_dev_description(dev));
@@ -201,6 +377,7 @@ static void ask_device(size_t i, ggml_backend_dev_t dev) {
     ask_alloc_types(host, ctx);
     ask_alloc_fattn(buft, ctx);
     ggml_free(ctx);
+    ask_graph_optimize(dev);
 }
 
 static void ask(const char * name, ggml_backend_reg_t reg) {
@@ -214,5 +391,11 @@ static void ask(const char * name, ggml_backend_reg_t reg) {
 int main(void) {
     ask("port", ggml_backend_cuda_reg());
     ask("ref", ref_ggml_backend_cuda_reg());
+    /* A gate that recorded no top-k dependency on the reference compared
+     * nothing about the v0.5.0 arm: say so rather than pass. */
+    if (opt_deps_topk == 0) {
+        fprintf(stderr, "cuda_backend_diff: graph_optimize recorded no top-k MoE dependency\n");
+        return 3;
+    }
     return 0;
 }

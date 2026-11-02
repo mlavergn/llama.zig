@@ -8,7 +8,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/traits.cpp` — the two entry points
 //! - `llama.cpp/ggml/src/ggml-cpu/traits.h`   — the two abstract classes
 //!
-//! both at v0.4.1 (`b29c606e2`).
+//! both at v0.5.0 (`7fe450e19`).
 //!
 //! # Why this file forces a four-way port
 //!
@@ -42,7 +42,7 @@ const c = impl.c;
 pub const Tensor = defs.Tensor;
 pub const ComputeParams = defs.ComputeParams;
 
-/// Ports `tensor_traits` (ggml-cpu/traits.h:20 @b29c606e2).
+/// Ports `tensor_traits` (ggml-cpu/traits.h:20 @7fe450e19).
 ///
 /// Registered in `tensor->extra` by whatever buffer type owns the weights.
 pub const TensorTraits = extern struct {
@@ -61,7 +61,7 @@ pub const TensorTraits = extern struct {
 };
 
 /// Ports `extra_buffer_type` (ggml-cpu/traits.h:27
-/// @b29c606e2), the context hanging off an extra `ggml_backend_buffer_type`.
+/// @7fe450e19), the context hanging off an extra `ggml_backend_buffer_type`.
 pub const ExtraBufferType = extern struct {
     vtable: *const VTable,
 
@@ -83,7 +83,7 @@ pub const ExtraBufferType = extern struct {
 /// its one-time initialiser has run.
 const cpu_backend = @import("cpu_backend.zig");
 
-/// Ports `ggml_cpu_extra_compute_forward` (traits.cpp:12 @b29c606e2).
+/// Ports `ggml_cpu_extra_compute_forward` (traits.cpp:12 @7fe450e19).
 ///
 /// Parameters:
 /// - `params`: this thread's slice of the work.
@@ -103,7 +103,7 @@ pub export fn ggml_cpu_extra_compute_forward(params: *ComputeParams, op: *Tensor
     return false;
 }
 
-/// Ports `ggml_cpu_extra_work_size` (traits.cpp:25 @b29c606e2).
+/// Ports `ggml_cpu_extra_work_size` (traits.cpp:25 @7fe450e19).
 ///
 /// Parameters:
 /// - `n_threads`: the thread count the plan is being sized for.

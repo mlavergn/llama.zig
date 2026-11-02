@@ -21,7 +21,8 @@
 # reorders them. `vk-backend-diff` compares the reorder and `vk-node-diff`
 # a real decode through it. Shapes upstream's list lacks need extra cases
 # (`harness/vk_ops_diff.c`, `extra_cases`): the misaligned set_rows leaf,
-# split-k and large-tile matmuls, a second fused bias in `src[0]`.
+# split-k and large-tile matmuls, a second fused bias in `src[0]`, sparse
+# flash attention with no GQA (the scalar path's N == 1 arm).
 # `supports_op` must agree both ways; before the swap a refusal was only
 # counted.
 #
@@ -45,10 +46,10 @@ done
 
 # The ported library must really be the port: no upstream Vulkan object.
 # The reference archive must carry the renamed exports.
-if nm -A "$PORT_LIB" 2>/dev/null | grep -q '/ggml-vulkan\.o:'; then
-    echo "FAIL: $PORT_LIB contains upstream's ggml-vulkan.o -- build it with -Dvulkan-port" >&2; exit 1
+if nm -A "$PORT_LIB" 2>/dev/null | grep -qE '/ggml-vulkan(-buffers|-debug)?\.o:'; then
+    echo "FAIL: $PORT_LIB contains upstream's ggml-vulkan objects -- build it with -Dvulkan-port" >&2; exit 1
 fi
-n=$(nm -g --defined-only "$REF_LIB" 2>/dev/null | grep -cE ' [TD] ref_(ggml_backend_|vk_conv_block_sizes)')
+n=$(nm -g --defined-only "$REF_LIB" 2>/dev/null | grep -cE ' [TDVW] ref_(ggml_backend_|vk_conv_block_sizes)')
 [ "$n" -eq 9 ] || { echo "FAIL: expected 9 renamed reference exports, got $n" >&2; exit 1; }
 
 . "$ROOT/scripts/platform-libs"

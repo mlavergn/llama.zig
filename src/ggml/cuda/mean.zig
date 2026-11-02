@@ -2,9 +2,9 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/mean.cu` at v0.4.1
-//! (`b29c606e2`). The kernel, `reduce_rows_f32<true>` from
-//! `reduce_rows.cuh`, stays CUDA.
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/mean.cu` at v0.5.0
+//! (`7fe450e19`). The kernels, `reduce_rows_f32<true>` and
+//! `reduce_rows_f32_strided<true>` from `reduce_rows.cuh`, stay CUDA.
 //!
 //! A single long row (`nrows == 1` and more than 65536 columns, or more than
 //! 32768 while CUDA graphs are capturing or replaying) goes to
@@ -23,10 +23,12 @@ const Tensor = c.ggml_tensor;
 const sum = @import("sum.zig");
 
 const kernel = kernels.get("mean", "reduce_rows_f32<(bool)1>");
+const kernel_strided = kernels.get("mean", "reduce_rows_f32_strided<(bool)1>");
 const divide_by_count = kernels.get("mean", "divide_by_count<float>");
 
-/// Ports `ggml_cuda_op_mean` (mean.cu:13 @b29c606e2), the
-/// `GGML_CUDA_USE_CUB` and `USE_CUDA_GRAPH` arms.
+/// Ports `ggml_cuda_op_mean` (mean.cu:13 @7fe450e19), the
+/// `GGML_CUDA_USE_CUB` and `USE_CUDA_GRAPH` arms. A source with contiguous
+/// rows but gaps between them takes the strided kernel.
 pub fn opMean(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
@@ -35,7 +37,7 @@ pub fn opMean(ctx: *common.Context, dst: *Tensor) void {
 
     impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
     impl.assert(dst.type == c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
-    impl.assert(c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    impl.assert(c.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
 
     const ncols: i64 = src0.ne[0];
     const nrows: i64 = c.ggml_nrows(src0);
@@ -76,11 +78,28 @@ pub fn opMean(ctx: *common.Context, dst: *Tensor) void {
     const n: c_int = @truncate(ncols);
     // Heuristic for block size selection to optimize occupancy.
     // See discussion in: https://github.com/ggml-org/llama.cpp/pull/15132
+    var block_dims: kernels.Dim3 = undefined;
     if (@divTrunc(nrows, nsm) < 2) {
-        const block_dims: kernels.Dim3 = .{ .x = 512 };
-        kernels.launchPdl(kernel, .{ .grid = block_nums, .block = block_dims, .stream = stream }, .{ src0_d, dst_d, n });
+        block_dims = .{ .x = 512 };
     } else {
-        const block_dims: kernels.Dim3 = .{ .x = if (ncols < 1024) 32 else 128 };
-        kernels.launchPdl(kernel, .{ .grid = block_nums, .block = block_dims, .stream = stream }, .{ src0_d, dst_d, n });
+        block_dims = .{ .x = if (ncols < 1024) 32 else 128 };
     }
+    const launch_params: kernels.LaunchParams = .{ .grid = block_nums, .block = block_dims, .stream = stream };
+
+    if (c.ggml_is_contiguous(src0)) {
+        kernels.launchPdl(kernel, launch_params, .{ src0_d, dst_d, n });
+        return;
+    }
+
+    const src0_d_bytes: ?[*]const u8 = @ptrCast(src0.data);
+    kernels.launchPdl(kernel_strided, launch_params, .{
+        src0_d_bytes,
+        dst_d,
+        n,
+        src0.ne[1],
+        src0.ne[2],
+        @as(i64, @bitCast(src0.nb[1])),
+        @as(i64, @bitCast(src0.nb[2])),
+        @as(i64, @bitCast(src0.nb[3])),
+    });
 }

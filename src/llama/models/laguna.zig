@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/laguna.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/laguna.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_laguna`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_laguna`'s `load_arch_hparams` (models/laguna.cpp:9 @b29c606e2).
+/// Ports `llama_model_laguna`'s `load_arch_hparams` (models/laguna.cpp:9 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -58,9 +58,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (hp.n_swa > 0) {
         hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
 
-        var swa_period: u32 = 4;
-        if (try meta.getKeyOrArrScalar(.attention_sliding_window_pattern, false, exc)) |v| swa_period = v;
-        hp.setSwaPattern(swa_period, true); // XS.2: full at il % 4 == 0.
+        try self.loadSwaPattern(ml, 4, true, exc); // XS.2: full at il % 4 == 0.
 
         // RoPE per layer type: the full layers take YaRN with theta 500000
         // over 64 dimensions, the SWA layers default RoPE with theta 10000
@@ -85,7 +83,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_laguna`'s `load_arch_tensors` (models/laguna.cpp:67 @b29c606e2).
+/// Ports `llama_model_laguna`'s `load_arch_tensors` (models/laguna.cpp:65 @7fe450e19).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -138,7 +136,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         if (gate_meta) |gm| {
             n_gate_out = gm.ne[1];
             if (n_gate_out != n_gate_per_head and n_gate_out != n_gate_per_elem) {
-                c.ggml_abort("models/laguna.cpp", 119, "Laguna: unexpected attention gate width %lld at layer %d (expected %lld per-head or %lld per-element)", @as(c_longlong, n_gate_out), @as(c_int, i), @as(c_longlong, n_gate_per_head), @as(c_longlong, n_gate_per_elem));
+                c.ggml_abort("models/laguna.cpp", 117, "Laguna: unexpected attention gate width %lld at layer %d (expected %lld per-head or %lld per-element)", @as(c_longlong, n_gate_out), @as(c_int, i), @as(c_longlong, n_gate_per_head), @as(c_longlong, n_gate_per_elem));
             }
         } else {
             n_gate_out = n_gate_per_head;
@@ -169,7 +167,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_laguna`'s `build_arch_graph` (models/laguna.cpp:150 @b29c606e2).
+/// Ports `llama_model_laguna`'s `build_arch_graph` (models/laguna.cpp:148 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     // XS.2 is hybrid SWA and takes the interleaved-SWA KV input; M.1 is
     // all full attention and takes the plain one. The C++ picks the input,
@@ -179,12 +177,12 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_laguna`'s `graph`
-/// (models/laguna.cpp:154 @b29c606e2).
+/// (models/laguna.cpp:152 @7fe450e19).
 fn buildGraph(comptime has_swa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/laguna.cpp", 156, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/laguna.cpp", 154, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
     // No MuP embedding scale: laguna omits it, where afmoe scales by

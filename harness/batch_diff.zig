@@ -32,6 +32,7 @@
 //! Usage: batch_diff <vocab.gguf> [seed]
 
 const std = @import("std");
+const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
 
 const c = harness_root.impl.c;
@@ -138,8 +139,14 @@ fn logCb(level: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callc
     }
 }
 
-fn firstDiff(a: []const u8, b: []const u8) void {
+fn firstDiff(a_raw: []const u8, b_raw: []const u8) void {
     checks += 1;
+    var sa = input_tensor_order.sortRuns(gpa, a_raw);
+    defer sa.deinit(gpa);
+    var sb = input_tensor_order.sortRuns(gpa, b_raw);
+    defer sb.deinit(gpa);
+    const a = sa.items;
+    const b = sb.items;
     if (std.mem.eql(u8, a, b)) return;
     var ia = std.mem.splitScalar(u8, a, '\n');
     var ib = std.mem.splitScalar(u8, b, '\n');

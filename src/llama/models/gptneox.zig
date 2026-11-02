@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gptneox.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/gptneox.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_gptneox`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gptneox`'s `load_arch_hparams` (models/gptneox.cpp:3 @b29c606e2).
+/// Ports `llama_model_gptneox`'s `load_arch_hparams` (models/gptneox.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -64,7 +64,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_gptneox`'s `load_arch_tensors` (models/gptneox.cpp:50 @b29c606e2).
+/// Ports `llama_model_gptneox`'s `load_arch_tensors` (models/gptneox.cpp:50 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -99,8 +99,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gptneox`'s `build_arch_graph` (models/gptneox.cpp:83 @b29c606e2)
-/// and the constructor of its `graph` (models/gptneox.cpp:87 @b29c606e2).
+/// Ports `llama_model_gptneox`'s `build_arch_graph` (models/gptneox.cpp:83 @7fe450e19)
+/// and the constructor of its `graph` (models/gptneox.cpp:87 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

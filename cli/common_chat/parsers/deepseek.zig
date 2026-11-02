@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/deepseek.cpp` (llama.cpp v0.4.1,
-//! `b29c606e2`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/deepseek.cpp` (llama.cpp v0.5.0,
+//! `7fe450e19`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -45,7 +45,7 @@ fn role(m: *const Value) Error![]const u8 {
     return m.value("role", []const u8, "") catch |e| util.fromJson(e);
 }
 
-/// Ports `deepseek_v4_sort_tool_results` (parsers/deepseek.cpp:6 @b29c606e2): each
+/// Ports `deepseek_v4_sort_tool_results` (parsers/deepseek.cpp:6 @7fe450e19): each
 /// run of user and tool messages with its tool results put in the order of
 /// the preceding assistant message's tool calls, matched by id.
 ///
@@ -61,7 +61,9 @@ fn deepseekV4SortToolResults(a: Allocator, messages: *const Value) Error!Value {
         const r = try role(msg);
 
         if (std.mem.eql(u8, r, "assistant") and msg.contains("tool_calls")) {
-            const tool_calls = msg.at("tool_calls") catch unreachable;
+            const tool_calls = msg.at("tool_calls") catch |err| switch (err) {
+                error.OutOfMemory, error.JsonError => unreachable,
+            };
             if (tool_calls.isArray() and !tool_calls.empty()) {
                 call_order.clearRetainingCapacity();
                 for (tool_calls.array.items, 0..) |*tc, idx| {
@@ -101,7 +103,9 @@ fn deepseekV4SortToolResults(a: Allocator, messages: *const Value) Error!Value {
             const Keyed = struct { order: usize, v: Value };
             const results = try a.alloc(Keyed, tool_positions.items.len);
             for (tool_positions.items, results) |pos, *res| {
-                const m = adjusted.atIndex(pos) catch unreachable;
+                const m = adjusted.atIndex(pos) catch |err| switch (err) {
+                    error.OutOfMemory, error.JsonError => unreachable,
+                };
                 const id = m.value("tool_call_id", []const u8, "") catch |e| return util.fromJson(e);
                 var order: usize = 0;
                 for (call_order.items) |e| {
@@ -119,7 +123,9 @@ fn deepseekV4SortToolResults(a: Allocator, messages: *const Value) Error!Value {
                 }
             }.lt);
             for (tool_positions.items, results) |pos, res| {
-                (adjusted.atIndex(pos) catch unreachable).* = res.v;
+                (adjusted.atIndex(pos) catch |err| switch (err) {
+                    error.OutOfMemory, error.JsonError => unreachable,
+                }).* = res.v;
             }
         }
 
@@ -280,7 +286,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:69 @b29c606e2).
+/// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:69 @7fe450e19).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -315,6 +321,10 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     const tc_block = if (is_v4) "tool_calls" else "function_calls";
     const fc_start = try std.mem.concat(a, u8, &.{ "<", DSML, tc_block, ">" });
     const fc_end = try std.mem.concat(a, u8, &.{ "</", DSML, tc_block, ">" });
+
+    // lets the server find user turns in the prompt and place context checkpoints there
+    try data.message_delimiters.add(a, .assistant, GEN_PROMPT);
+    try data.message_delimiters.add(a, .user, "<｜User｜>");
 
     data.prompt = try template.directApplyImpl(a, tmpl, inputs, adjusted_messages, null, additional_context);
     data.generation_prompt = try template.generationPromptImpl(a, tmpl, inputs, adjusted_messages, null, additional_context);

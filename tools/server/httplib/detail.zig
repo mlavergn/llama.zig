@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ports parts of `llama.cpp/vendor/cpp-httplib/httplib.cpp` and
-//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.56.0, vendored
-//! at v0.4.1, `b29c606e2`), built as `llama.cpp.zmake` builds it: no SSL,
+//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.57.1, vendored
+//! at v0.5.0, `7fe450e19`), built as `llama.cpp.zmake` builds it: no SSL,
 //! no zlib, brotli or zstd, and `build/tools.zig`'s `httplib_defines`. Each
 //! declaration names what it ports and the line it began at.
 //!
@@ -23,40 +23,40 @@ const std = @import("std");
 
 /// `CPPHTTPLIB_REQUEST_URI_MAX_LENGTH`, as `httplib_defines` sets it.
 pub const request_uri_max_length: usize = 32768;
-/// `CPPHTTPLIB_HEADER_MAX_LENGTH` (httplib.h:114 @b29c606e2).
+/// `CPPHTTPLIB_HEADER_MAX_LENGTH` (httplib.h:114 @7fe450e19).
 pub const header_max_length: usize = 8192;
-/// `CPPHTTPLIB_HEADER_MAX_COUNT` (httplib.h:118 @b29c606e2).
+/// `CPPHTTPLIB_HEADER_MAX_COUNT` (httplib.h:118 @7fe450e19).
 pub const header_max_count: usize = 100;
-/// `CPPHTTPLIB_MULTIPART_FORM_DATA_FILE_MAX_COUNT` (httplib.h:126 @b29c606e2).
+/// `CPPHTTPLIB_MULTIPART_FORM_DATA_FILE_MAX_COUNT` (httplib.h:126 @7fe450e19).
 pub const multipart_form_data_file_max_count: usize = 1024;
-/// `CPPHTTPLIB_PAYLOAD_MAX_LENGTH` (httplib.h:130 @b29c606e2).
+/// `CPPHTTPLIB_PAYLOAD_MAX_LENGTH` (httplib.h:130 @7fe450e19).
 pub const payload_max_length: usize = 100 * 1024 * 1024;
 /// `CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH`, as `httplib_defines` sets it.
 pub const form_url_encoded_payload_max_length: usize = 1048576;
-/// `CPPHTTPLIB_RANGE_MAX_COUNT` (httplib.h:148 @b29c606e2).
+/// `CPPHTTPLIB_RANGE_MAX_COUNT` (httplib.h:148 @7fe450e19).
 pub const range_max_count: usize = 1024;
-/// `CPPHTTPLIB_MAX_LINE_LENGTH` (httplib.h:211 @b29c606e2).
+/// `CPPHTTPLIB_MAX_LINE_LENGTH` (httplib.h:211 @7fe450e19).
 pub const max_line_length: usize = 32768;
-/// `CPPHTTPLIB_RECV_BUFSIZ` (httplib.h:172 @b29c606e2).
+/// `CPPHTTPLIB_RECV_BUFSIZ` (httplib.h:172 @7fe450e19).
 pub const recv_bufsiz: usize = 16384;
-/// `CPPHTTPLIB_KEEPALIVE_TIMEOUT_SECOND` (httplib.h:26 @b29c606e2).
+/// `CPPHTTPLIB_KEEPALIVE_TIMEOUT_SECOND` (httplib.h:26 @7fe450e19).
 pub const keepalive_timeout_second: i64 = 5;
-/// `CPPHTTPLIB_KEEPALIVE_TIMEOUT_CHECK_INTERVAL_USECOND` (httplib.h:30 @b29c606e2).
+/// `CPPHTTPLIB_KEEPALIVE_TIMEOUT_CHECK_INTERVAL_USECOND` (httplib.h:30 @7fe450e19).
 pub const keepalive_timeout_check_interval_usecond: i64 = 10000;
-/// `CPPHTTPLIB_KEEPALIVE_MAX_COUNT` (httplib.h:34 @b29c606e2).
+/// `CPPHTTPLIB_KEEPALIVE_MAX_COUNT` (httplib.h:34 @7fe450e19).
 pub const keepalive_max_count: usize = 100;
-/// `CPPHTTPLIB_SERVER_READ_TIMEOUT_SECOND` (httplib.h:46 @b29c606e2).
+/// `CPPHTTPLIB_SERVER_READ_TIMEOUT_SECOND` (httplib.h:46 @7fe450e19).
 pub const server_read_timeout_second: i64 = 5;
-/// `CPPHTTPLIB_SERVER_WRITE_TIMEOUT_SECOND` (httplib.h:54 @b29c606e2).
+/// `CPPHTTPLIB_SERVER_WRITE_TIMEOUT_SECOND` (httplib.h:54 @7fe450e19).
 pub const server_write_timeout_second: i64 = 5;
-/// `CPPHTTPLIB_THREAD_POOL_IDLE_TIMEOUT` (httplib.h:195 @b29c606e2).
+/// `CPPHTTPLIB_THREAD_POOL_IDLE_TIMEOUT` (httplib.h:195 @7fe450e19).
 pub const thread_pool_idle_timeout: i64 = 3;
 /// `CPPHTTPLIB_LISTEN_BACKLOG`, as `httplib_defines` sets it.
 pub const listen_backlog: c_uint = 512;
 /// `CPPHTTPLIB_TCP_NODELAY`, as `httplib_defines` sets it.
 pub const tcp_nodelay = true;
 
-/// `StatusCode` (httplib.h:958 @b29c606e2): the members the server writes.
+/// `StatusCode` (httplib.h:958 @7fe450e19): the members the server writes.
 pub const StatusCode = struct {
     pub const continue_100: c_int = 100;
     pub const ok_200: c_int = 200;
@@ -74,22 +74,22 @@ pub const StatusCode = struct {
 // -----------------------------------------------------------------------------
 // ASCII classification
 
-/// Ports `is_ascii_digit` (httplib.h:612 @b29c606e2).
+/// Ports `is_ascii_digit` (httplib.h:612 @7fe450e19).
 pub fn isAsciiDigit(c: u8) bool {
     return '0' <= c and c <= '9';
 }
 
-/// Ports `is_ascii_alpha` (httplib.h:614 @b29c606e2).
+/// Ports `is_ascii_alpha` (httplib.h:614 @7fe450e19).
 pub fn isAsciiAlpha(c: u8) bool {
     return ('a' <= c and c <= 'z') or ('A' <= c and c <= 'Z');
 }
 
-/// Ports `is_ascii_alnum` (httplib.h:618 @b29c606e2).
+/// Ports `is_ascii_alnum` (httplib.h:618 @7fe450e19).
 pub fn isAsciiAlnum(c: u8) bool {
     return isAsciiDigit(c) or isAsciiAlpha(c);
 }
 
-/// Ports `to_lower` (httplib.h:624 @b29c606e2), in `case_ignore`: ASCII
+/// Ports `to_lower` (httplib.h:624 @7fe450e19), in `case_ignore`: ASCII
 /// and the Latin-1 capitals, through the C's table -- 0xC0 to 0xDE but for
 /// 0xD7, the multiplication sign.
 pub fn toLower(c: u8) u8 {
@@ -100,19 +100,19 @@ pub fn toLower(c: u8) u8 {
     };
 }
 
-/// Ports `equal` (httplib.h:656 @b29c606e2), in `case_ignore`.
+/// Ports `equal` (httplib.h:656 @7fe450e19), in `case_ignore`.
 pub fn caseIgnoreEqual(a: []const u8, b: []const u8) bool {
     if (a.len != b.len) return false;
     for (a, b) |ca, cb| if (toLower(ca) != toLower(cb)) return false;
     return true;
 }
 
-/// Ports `is_space_or_tab` (httplib.cpp:1149 @b29c606e2).
+/// Ports `is_space_or_tab` (httplib.cpp:1149 @7fe450e19).
 pub fn isSpaceOrTab(c: u8) bool {
     return c == ' ' or c == '\t';
 }
 
-/// Ports `is_numeric` (httplib.h:3422 @b29c606e2).
+/// Ports `is_numeric` (httplib.h:3423 @7fe450e19).
 pub fn isNumeric(s: []const u8) bool {
     if (s.len == 0) return false;
     for (s) |c| if (!isAsciiDigit(c)) return false;
@@ -122,7 +122,7 @@ pub fn isNumeric(s: []const u8) bool {
 // -----------------------------------------------------------------------------
 // The multimap
 
-/// Ports `insertion_ordered_multimap` (httplib.h:1052 @b29c606e2): entries
+/// Ports `insertion_ordered_multimap` (httplib.h:1052 @7fe450e19): entries
 /// in a flat list, in the order they were inserted, looked up by a linear
 /// scan. `case_insensitive` is the C's `KeyEqual`: `Headers` compare names
 /// as `case_ignore::equal_to`, `Params` and the form maps as
@@ -218,16 +218,16 @@ pub fn OrderedMultimap(comptime V: type, comptime case_insensitive: bool) type {
     };
 }
 
-/// `Headers` (httplib.h:1311 @b29c606e2): names compared case-insensitively.
+/// `Headers` (httplib.h:1311 @7fe450e19): names compared case-insensitively.
 pub const Headers = OrderedMultimap([]const u8, true);
 
-/// `Params` (httplib.h:1316 @b29c606e2): names compared exactly.
+/// `Params` (httplib.h:1316 @7fe450e19): names compared exactly.
 pub const Params = OrderedMultimap([]const u8, false);
 
 // -----------------------------------------------------------------------------
 // Field validation
 
-/// Ports `is_token_char` (httplib.cpp:5452 @b29c606e2), in `fields`.
+/// Ports `is_token_char` (httplib.cpp:5464 @7fe450e19), in `fields`.
 pub fn isTokenChar(c: u8) bool {
     return isAsciiAlnum(c) or switch (c) {
         '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~' => true,
@@ -235,35 +235,35 @@ pub fn isTokenChar(c: u8) bool {
     };
 }
 
-/// Ports `is_token` (httplib.cpp:5458 @b29c606e2), in `fields`.
+/// Ports `is_token` (httplib.cpp:5470 @7fe450e19), in `fields`.
 pub fn isToken(s: []const u8) bool {
     if (s.len == 0) return false;
     for (s) |c| if (!isTokenChar(c)) return false;
     return true;
 }
 
-/// Ports `is_field_name` (httplib.cpp:5466 @b29c606e2), in `fields`.
+/// Ports `is_field_name` (httplib.cpp:5478 @7fe450e19), in `fields`.
 pub fn isFieldName(s: []const u8) bool {
     return isToken(s);
 }
 
-/// Ports `is_vchar` (httplib.cpp:5468 @b29c606e2), in `fields`: on a signed
+/// Ports `is_vchar` (httplib.cpp:5480 @7fe450e19), in `fields`: on a signed
 /// `char`, so a byte at or above 0x80 is not one.
 fn isVchar(c: u8) bool {
     return c >= 33 and c <= 126;
 }
 
-/// Ports `is_obs_text` (httplib.cpp:5470 @b29c606e2), in `fields`.
+/// Ports `is_obs_text` (httplib.cpp:5482 @7fe450e19), in `fields`.
 fn isObsText(c: u8) bool {
     return 128 <= c;
 }
 
-/// Ports `is_field_vchar` (httplib.cpp:5472 @b29c606e2), in `fields`.
-fn isFieldVchar(c: u8) bool {
+/// Ports `is_field_vchar` (httplib.cpp:5484 @7fe450e19), in `fields`.
+pub fn isFieldVchar(c: u8) bool {
     return isVchar(c) or isObsText(c);
 }
 
-/// Ports `is_field_content` (httplib.cpp:5474 @b29c606e2), in `fields`.
+/// Ports `is_field_content` (httplib.cpp:5486 @7fe450e19), in `fields`.
 fn isFieldContent(s: []const u8) bool {
     if (s.len == 0) return true;
     if (s.len == 1) return isFieldVchar(s[0]);
@@ -279,12 +279,12 @@ fn isFieldContent(s: []const u8) bool {
     return isFieldVchar(s[i]);
 }
 
-/// Ports `is_field_value` (httplib.cpp:5499 @b29c606e2), in `fields`.
+/// Ports `is_field_value` (httplib.cpp:5511 @7fe450e19), in `fields`.
 pub fn isFieldValue(s: []const u8) bool {
     return isFieldContent(s);
 }
 
-/// Ports `is_field_valid` (httplib.cpp:5501 @b29c606e2), in `fields`.
+/// Ports `is_field_valid` (httplib.cpp:5513 @7fe450e19), in `fields`.
 pub fn isFieldValid(name: []const u8, value: []const u8) bool {
     return isFieldName(name) and isFieldValue(value);
 }
@@ -295,7 +295,7 @@ pub fn isFieldValid(name: []const u8, value: []const u8) bool {
 /// A half-open span `[first, second)` of a slice.
 pub const Span = struct { first: usize, second: usize };
 
-/// Ports `trim` (httplib.cpp:1285 @b29c606e2): narrows `[left, right)` of
+/// Ports `trim` (httplib.cpp:1295 @7fe450e19): narrows `[left, right)` of
 /// `b` past spaces and tabs.
 pub fn trim(b: []const u8, left_in: usize, right_in: usize) Span {
     var left = left_in;
@@ -305,7 +305,7 @@ pub fn trim(b: []const u8, left_in: usize, right_in: usize) Span {
     return .{ .first = left, .second = right };
 }
 
-/// Ports `trim_copy` (httplib.cpp:1296 @b29c606e2), as a borrowed slice;
+/// Ports `trim_copy` (httplib.cpp:1306 @7fe450e19), as a borrowed slice;
 /// the C's `substr` of a crossed span is empty here as there.
 pub fn trimCopy(s: []const u8) []const u8 {
     const r = trim(s, 0, s.len);
@@ -313,13 +313,13 @@ pub fn trimCopy(s: []const u8) []const u8 {
     return s[r.first..r.second];
 }
 
-/// Ports `trim_double_quotes_copy` (httplib.cpp:1301 @b29c606e2), borrowed.
+/// Ports `trim_double_quotes_copy` (httplib.cpp:1311 @7fe450e19), borrowed.
 pub fn trimDoubleQuotesCopy(s: []const u8) []const u8 {
     if (s.len >= 2 and s[0] == '"' and s[s.len - 1] == '"') return s[1 .. s.len - 1];
     return s;
 }
 
-/// Ports `divide` (httplib.cpp:1309 @b29c606e2): `data` at its first `d`.
+/// Ports `divide` (httplib.cpp:1319 @7fe450e19): `data` at its first `d`.
 ///
 /// Return: the halves either side, the second empty when `d` is absent.
 pub fn divide(data: []const u8, d: u8) struct { lhs: []const u8, rhs: []const u8 } {
@@ -328,7 +328,7 @@ pub fn divide(data: []const u8, d: u8) struct { lhs: []const u8, rhs: []const u8
     return .{ .lhs = data[0..it], .rhs = data[it + found ..] };
 }
 
-/// Ports `split` (httplib.cpp:1334 @b29c606e2): calls `fn_.call(segment)`
+/// Ports `split` (httplib.cpp:1344 @7fe450e19): calls `fn_.call(segment)`
 /// for each trimmed, non-empty segment of `s` between `d`s, splitting at
 /// most `m - 1` times.
 ///
@@ -352,7 +352,7 @@ pub fn split(s: []const u8, d: u8, m: usize, fn_: anytype) !void {
     }
 }
 
-/// Ports `split_unquoted` (httplib.cpp:1359 @b29c606e2): `split`, where a
+/// Ports `split_unquoted` (httplib.cpp:1369 @7fe450e19): `split`, where a
 /// delimiter inside a quoted-string is not one.
 pub fn splitUnquoted(s: []const u8, d: u8, m: usize, fn_: anytype) !void {
     var i: usize = 0;
@@ -375,7 +375,7 @@ pub fn splitUnquoted(s: []const u8, d: u8, m: usize, fn_: anytype) !void {
     }
 }
 
-/// Ports `split_find` (httplib.cpp:1405 @b29c606e2): `split` that stops at
+/// Ports `split_find` (httplib.cpp:1415 @7fe450e19): `split` that stops at
 /// the first segment `pred` accepts.
 ///
 /// Return: whether one did.
@@ -398,7 +398,7 @@ pub fn splitFind(s: []const u8, d: u8, m: usize, ctx: anytype, comptime pred: fn
     return false;
 }
 
-/// Ports `divide_param_pair` (httplib.cpp:1393 @b29c606e2): a header
+/// Ports `divide_param_pair` (httplib.cpp:1403 @7fe450e19): a header
 /// parameter at its first `=`, both sides trimmed.
 pub fn divideParamPair(s: []const u8) struct { key: []const u8, val: []const u8 } {
     const d = divide(s, '=');
@@ -410,7 +410,7 @@ pub fn divideParamPair(s: []const u8) struct { key: []const u8, val: []const u8 
     };
 }
 
-/// Ports `divide_query_pair` (httplib.cpp:4251 @b29c606e2).
+/// Ports `divide_query_pair` (httplib.cpp:4263 @7fe450e19).
 pub fn divideQueryPair(s: []const u8) struct { key: []const u8, val: []const u8 } {
     const d = divide(s, '=');
     return .{ .key = d.lhs, .val = d.rhs };
@@ -419,7 +419,7 @@ pub fn divideQueryPair(s: []const u8) struct { key: []const u8, val: []const u8 
 // -----------------------------------------------------------------------------
 // Numbers
 
-/// Ports `is_hex` (httplib.cpp:479 @b29c606e2).
+/// Ports `is_hex` (httplib.cpp:479 @7fe450e19).
 ///
 /// Return: the digit's value, or null.
 pub fn isHex(c: u8) ?u8 {
@@ -429,7 +429,7 @@ pub fn isHex(c: u8) ?u8 {
     return null;
 }
 
-/// Ports `from_hex_to_i` (httplib.cpp:493 @b29c606e2): `cnt` hex digits of
+/// Ports `from_hex_to_i` (httplib.cpp:493 @7fe450e19): `cnt` hex digits of
 /// `s` from `i`; the C's `s[size()]` is its NUL and fails the same way.
 pub fn fromHexToI(s: []const u8, i_in: usize, cnt_in: usize) ?c_int {
     if (i_in >= s.len) return null;
@@ -447,7 +447,7 @@ pub fn fromHexToI(s: []const u8, i_in: usize, cnt_in: usize) ?c_int {
     return val;
 }
 
-/// Ports `from_i_to_hex` (httplib.cpp:510 @b29c606e2), into `buf`.
+/// Ports `from_i_to_hex` (httplib.cpp:510 @7fe450e19), into `buf`.
 ///
 /// Return: the digits, a slice of `buf`.
 pub fn fromIToHex(buf: *[16]u8, n_in: usize) []const u8 {
@@ -463,7 +463,7 @@ pub fn fromIToHex(buf: *[16]u8, n_in: usize) []const u8 {
     return buf[i..];
 }
 
-/// Ports `to_utf8` (httplib.cpp:607 @b29c606e2).
+/// Ports `to_utf8` (httplib.cpp:607 @7fe450e19).
 ///
 /// Return: the bytes written to `buff`, 0 for a surrogate.
 pub fn toUtf8(code: c_int, buff: *[4]u8) usize {
@@ -499,7 +499,7 @@ pub fn toUtf8(code: c_int, buff: *[4]u8) usize {
 /// What `from_chars` answers.
 pub const FromChars = enum { ok, invalid_argument, result_out_of_range };
 
-/// Ports `from_chars` (httplib.h:727 @b29c606e2) for an integer type, base
+/// Ports `from_chars` (httplib.h:727 @7fe450e19) for an integer type, base
 /// 10: an optional `-`, then digits to the first non-digit.
 pub fn fromChars(comptime T: type, s: []const u8, value: *T) FromChars {
     value.* = 0;
@@ -532,7 +532,7 @@ pub fn fromChars(comptime T: type, s: []const u8, value: *T) FromChars {
     return .ok;
 }
 
-/// Ports `from_chars` (httplib.h:781 @b29c606e2) for `double`:
+/// Ports `from_chars` (httplib.h:781 @7fe450e19) for `double`:
 /// `1*DIGIT [ "." *DIGIT ]`.
 ///
 /// Return: the value and how many bytes it took, or null.
@@ -565,7 +565,7 @@ pub fn fromCharsF64(s: []const u8) ?struct { value: f64, end: usize } {
 // -----------------------------------------------------------------------------
 // URL coding
 
-/// Ports `decode_path_component` (httplib.cpp:6569 @b29c606e2): `%XX`, and
+/// Ports `decode_path_component` (httplib.cpp:6581 @7fe450e19): `%XX`, and
 /// `%uXXXX` as UTF-8.
 ///
 /// Return: allocated by `a`.
@@ -593,7 +593,7 @@ pub fn decodePathComponent(a: std.mem.Allocator, component: []const u8) error{Ou
     return result.toOwnedSlice(a);
 }
 
-/// Ports `encode_query_component` (httplib.cpp:6606 @b29c606e2), with
+/// Ports `encode_query_component` (httplib.cpp:6618 @7fe450e19), with
 /// `space_as_plus` at its default, `true`.
 ///
 /// Return: allocated by `a`.
@@ -619,7 +619,7 @@ pub fn encodeQueryComponent(a: std.mem.Allocator, component: []const u8) error{O
     return result.toOwnedSlice(a);
 }
 
-/// Ports `decode_query_component` (httplib.cpp:6661 @b29c606e2), with
+/// Ports `decode_query_component` (httplib.cpp:6673 @7fe450e19), with
 /// `plus_as_space` at its default, `true`.
 ///
 /// Return: allocated by `a`.
@@ -640,10 +640,10 @@ pub fn decodeQueryComponent(a: std.mem.Allocator, component: []const u8) error{O
     return result.toOwnedSlice(a);
 }
 
-/// Ports `parse_query_text` (httplib.cpp:4261 @b29c606e2): `key=value`
+/// Ports `parse_query_text` (httplib.cpp:4273 @7fe450e19): `key=value`
 /// pairs between `&`s into `params`, decoded, an exact repeat of an earlier
 /// pair skipped and an empty key dropped. The second overload
-/// (httplib.cpp:4279 @b29c606e2) is this one.
+/// (httplib.cpp:4291 @7fe450e19) is this one.
 pub fn parseQueryText(a: std.mem.Allocator, data: []const u8, params: *Params) error{OutOfMemory}!void {
     const Ctx = struct {
         a: std.mem.Allocator,
@@ -669,7 +669,7 @@ pub fn parseQueryText(a: std.mem.Allocator, data: []const u8, params: *Params) e
 /// One `key=value` of a media type's parameters, in `std::map` order.
 pub const MediaParams = std.ArrayList(Params.Entry);
 
-/// Ports `extract_media_type` (httplib.cpp:2814 @b29c606e2): the type and
+/// Ports `extract_media_type` (httplib.cpp:2824 @7fe450e19): the type and
 /// subtype before the first `;`, trimmed, and -- when `params` is given --
 /// the parameters after it, `std::map::emplace`d: the first of a repeated
 /// key wins.
@@ -699,7 +699,7 @@ pub fn extractMediaType(a: std.mem.Allocator, content_type: []const u8, params: 
     return trimCopy(media_type);
 }
 
-/// Ports `parse_multipart_boundary` (httplib.cpp:4350 @b29c606e2).
+/// Ports `parse_multipart_boundary` (httplib.cpp:4362 @7fe450e19).
 ///
 /// Return: the boundary, borrowed from `content_type`, or null.
 pub fn parseMultipartBoundary(a: std.mem.Allocator, content_type: []const u8) error{OutOfMemory}!?[]const u8 {
@@ -715,7 +715,7 @@ pub fn parseMultipartBoundary(a: std.mem.Allocator, content_type: []const u8) er
     return null;
 }
 
-/// Ports `parse_disposition_params` (httplib.cpp:4364 @b29c606e2): a
+/// Ports `parse_disposition_params` (httplib.cpp:4376 @7fe450e19): a
 /// `Content-Disposition`'s parameters into `params`, an exact repeat of an
 /// earlier one skipped.
 pub fn parseDispositionParams(a: std.mem.Allocator, s: []const u8, params: *Params) error{OutOfMemory}!void {
@@ -735,7 +735,7 @@ pub fn parseDispositionParams(a: std.mem.Allocator, s: []const u8, params: *Para
     try splitUnquoted(s, ';', std.math.maxInt(usize), &ctx);
 }
 
-/// Ports `parse_quality` (httplib.cpp:2868 @b29c606e2): a list element's
+/// Ports `parse_quality` (httplib.cpp:2878 @7fe450e19): a list element's
 /// token and its `q=` weight.
 ///
 /// Return: null where the C returns false.
@@ -777,7 +777,7 @@ pub fn parseQuality(s: []const u8) ?struct { token: []const u8, quality: f64 } {
     return .{ .token = token, .quality = quality };
 }
 
-/// Ports `parse_accept_header` (httplib.cpp:4450 @b29c606e2), as far as its
+/// Ports `parse_accept_header` (httplib.cpp:4462 @7fe450e19), as far as its
 /// answer: whether every element is a valid media range. The server never
 /// reads `accept_content_types`, the order the C sorts it into, so the list
 /// is not kept.
@@ -811,7 +811,7 @@ pub fn parseAcceptHeader(a: std.mem.Allocator, s: []const u8) error{OutOfMemory}
 /// `Range`: `first` and `last`, -1 where absent.
 pub const Range = struct { first: isize, second: isize };
 
-/// Ports `parse_range_header` (httplib.cpp:4386 @b29c606e2): `bytes=` and
+/// Ports `parse_range_header` (httplib.cpp:4398 @7fe450e19): `bytes=` and
 /// one or more `first-last` specs.
 ///
 /// Return: whether it parsed; `ranges` holds what it read either way.
@@ -864,14 +864,14 @@ pub fn parseRangeHeader(a: std.mem.Allocator, s: []const u8, ranges: *std.ArrayL
 // -----------------------------------------------------------------------------
 // Headers
 
-/// Ports `str2tag` (httplib.cpp:2726 @b29c606e2).
+/// Ports `str2tag` (httplib.cpp:2736 @7fe450e19).
 fn str2tag(s: []const u8) u32 {
     var h: u32 = 0;
     for (s) |c| h = ((std.math.maxInt(u32) >> 6) & (h *% 33)) ^ c;
     return h;
 }
 
-/// Ports `is_prohibited_header_name` (httplib.cpp:3342 @b29c606e2): by its
+/// Ports `is_prohibited_header_name` (httplib.cpp:3352 @7fe450e19): by its
 /// hash, as the C's `switch` compares.
 pub fn isProhibitedHeaderName(name: []const u8) bool {
     const tag = str2tag(name);
@@ -881,21 +881,21 @@ pub fn isProhibitedHeaderName(name: []const u8) bool {
     return false;
 }
 
-/// Ports `has_header` (httplib.cpp:3354 @b29c606e2), what `Request`'s
+/// Ports `has_header` (httplib.cpp:3364 @7fe450e19), what `Request`'s
 /// `has_header` calls.
 pub fn hasHeader(headers: *const Headers, key: []const u8) bool {
     if (isProhibitedHeaderName(key)) return false;
     return headers.find(key) != null;
 }
 
-/// Ports `get_header_value` (httplib.cpp:3359 @b29c606e2) with `def` "" and
+/// Ports `get_header_value` (httplib.cpp:3369 @7fe450e19) with `def` "" and
 /// `id` 0. A prohibited name throws in the C; the server asks for none.
 pub fn getHeaderValue(headers: *const Headers, key: []const u8) []const u8 {
     if (isProhibitedHeaderName(key)) return "";
     return headers.get(key, 0) orelse "";
 }
 
-/// Ports `get_header_value_u64` (httplib.h:3426 @b29c606e2) with `id` 0.
+/// Ports `get_header_value_u64` (httplib.h:3427 @7fe450e19) with `id` 0.
 pub fn getHeaderValueU64(headers: *const Headers, key: []const u8, def: usize, is_invalid_value: *bool) usize {
     is_invalid_value.* = false;
     const v = headers.get(key, 0) orelse return def;
@@ -911,7 +911,7 @@ pub fn getHeaderValueU64(headers: *const Headers, key: []const u8, def: usize, i
     return def;
 }
 
-/// Ports `get_combined_header_value` (httplib.cpp:3388 @b29c606e2): every
+/// Ports `get_combined_header_value` (httplib.cpp:3398 @7fe450e19): every
 /// non-empty field line under `key`, joined by `", "`.
 ///
 /// Return: allocated by `a`.
@@ -927,7 +927,7 @@ pub fn getCombinedHeaderValue(a: std.mem.Allocator, headers: *const Headers, key
     return combined.toOwnedSlice(a);
 }
 
-/// Ports `has_header_token` (httplib.cpp:3403 @b29c606e2): whether any line
+/// Ports `has_header_token` (httplib.cpp:3413 @7fe450e19): whether any line
 /// under `key` lists `token`, case-insensitively.
 pub fn hasHeaderToken(headers: *const Headers, key: []const u8, token: []const u8) bool {
     const S = struct {
@@ -942,13 +942,13 @@ pub fn hasHeaderToken(headers: *const Headers, key: []const u8, token: []const u
     return false;
 }
 
-/// Ports `set_header` (httplib.cpp:3432 @b29c606e2): adds the field when
+/// Ports `set_header` (httplib.cpp:3442 @7fe450e19): adds the field when
 /// its name and value are valid, and silently drops it otherwise.
 pub fn setHeader(a: std.mem.Allocator, headers: *Headers, key: []const u8, val: []const u8) error{OutOfMemory}!void {
     if (isFieldValid(key, val)) _ = try headers.emplace(a, key, val);
 }
 
-/// Ports `is_chunked_transfer_encoding` (httplib.cpp:3687 @b29c606e2): whether
+/// Ports `is_chunked_transfer_encoding` (httplib.cpp:3697 @7fe450e19): whether
 /// the final coding of the combined `Transfer-Encoding` is `chunked`.
 pub fn isChunkedTransferEncoding(headers: *const Headers) bool {
     var it = headers.find("Transfer-Encoding") orelse return false;
@@ -962,27 +962,27 @@ pub fn isChunkedTransferEncoding(headers: *const Headers) bool {
     while (true) {
         last_coding = "";
         var ctx: Ctx = .{ .last = &last_coding };
-        split(headers.entries.items[it].value, ',', std.math.maxInt(usize), &ctx) catch unreachable;
+        split(headers.entries.items[it].value, ',', std.math.maxInt(usize), &ctx) catch |err| switch (err) {};
         it = headers.nextOf("Transfer-Encoding", it) orelse break;
     }
     return caseIgnoreEqual(last_coding, "chunked");
 }
 
-/// Ports `has_conflicting_content_length` (httplib.cpp:3719 @b29c606e2).
+/// Ports `has_conflicting_content_length` (httplib.cpp:3729 @7fe450e19).
 pub fn hasConflictingContentLength(headers: *const Headers) bool {
     var invalid = false;
     return hasHeader(headers, "Transfer-Encoding") and getHeaderValueU64(headers, "Content-Length", 0, &invalid) > 0;
 }
 
-/// Ports `is_known_content_encoding` (httplib.cpp:3301 @b29c606e2), and
+/// Ports `is_known_content_encoding` (httplib.cpp:3311 @7fe450e19), and
 /// with it `is_zlib_encoding`, `is_brotli_encoding` and `is_zstd_encoding`
-/// (httplib.cpp:3286, 3291, 3295 @b29c606e2).
+/// (httplib.cpp:3296, 3301, 3305 @7fe450e19).
 pub fn isKnownContentEncoding(encoding: []const u8) bool {
     return caseIgnoreEqual(encoding, "gzip") or caseIgnoreEqual(encoding, "deflate") or
         caseIgnoreEqual(encoding, "br") or caseIgnoreEqual(encoding, "zstd");
 }
 
-/// Ports `is_websocket_upgrade` (httplib.cpp:818 @b29c606e2).
+/// Ports `is_websocket_upgrade` (httplib.cpp:818 @7fe450e19).
 pub fn isWebsocketUpgrade(method: []const u8, headers: *const Headers) bool {
     if (!std.mem.eql(u8, method, "GET")) return false;
     if (!hasHeaderToken(headers, "Upgrade", "websocket")) return false;
@@ -994,7 +994,7 @@ pub fn isWebsocketUpgrade(method: []const u8, headers: *const Headers) bool {
     return std.mem.eql(u8, getHeaderValue(headers, "Sec-WebSocket-Version"), "13");
 }
 
-/// Ports `status_message` (httplib.cpp:6271 @b29c606e2).
+/// Ports `status_message` (httplib.cpp:6283 @7fe450e19).
 pub fn statusMessage(status: c_int) []const u8 {
     return switch (status) {
         100 => "Continue",

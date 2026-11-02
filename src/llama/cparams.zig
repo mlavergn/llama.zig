@@ -7,22 +7,22 @@
 //! - `llama.cpp/src/llama-cparams.h` -- `LLAMA_MAX_SEQ` and `llama_cparams`
 //! - `llama.cpp/src/llama-cparams.cpp` -- `llama_max_parallel_sequences`
 //!
-//! All at v0.4.1 (`b29c606e2`).
+//! All at v0.5.0 (`7fe450e19`).
 
 const std = @import("std");
 const impl = @import("impl.zig");
 
 const c = impl.c;
 
-/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @b29c606e2).
+/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @7fe450e19).
 pub const max_seq: u32 = 256;
 
-/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @b29c606e2).
+/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @7fe450e19).
 pub fn maxParallelSequences() usize {
     return max_seq;
 }
 
-/// Mirrors `llama_cparams` (llama-cparams.h:10 @b29c606e2).
+/// Mirrors `llama_cparams` (llama-cparams.h:10 @7fe450e19).
 pub const Cparams = struct {
     /// Context size used during inference.
     n_ctx: u32 = 0,

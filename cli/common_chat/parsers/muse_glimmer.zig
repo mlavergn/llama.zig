@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/muse-glimmer.cpp` (llama.cpp v0.4.1,
-//! `b29c606e2`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/muse-glimmer.cpp` (llama.cpp v0.5.0,
+//! `7fe450e19`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -131,7 +131,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_muse_glimmer` (parsers/muse-glimmer.cpp:10 @b29c606e2).
+/// Ports `common_chat_params_init_muse_glimmer` (parsers/muse-glimmer.cpp:10 @7fe450e19).
 /// The generation prompt is just `<|start|>assistant`; the model emits its
 /// own ` to=...<|message|>`.
 ///
@@ -192,7 +192,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
         try data.grammar_triggers.append(a, .{
             .type = .pattern,
-            .value = "<\\|start\\|>assistant( to=(?!self<\\|message\\|>)(?!user<\\|message\\|>)[^<]*?<\\|message\\|>)",
+            .value = "(?:^|<\\|start\\|>assistant)( to=(?!self<\\|message\\|>)(?!user<\\|message\\|>)[^<]*?<\\|message\\|>)",
         });
     }
 

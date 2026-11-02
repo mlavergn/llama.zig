@@ -22,7 +22,7 @@
 //!   all four `remove_special` x `unparse_special`, with `clean_spaces`
 //!   reached wherever the model sets it.
 //!
-//! The vocabulary types no real file covers -- RWKV, PLaMo-2, `hybriddna`,
+//! The vocabulary types no real file covers -- RWKV, PLaMo-2, `hybriddna`, `test`,
 //! `whitespace`, `none` -- and the load-time error paths are synthesized
 //! from upstream's files with the gguf writer, into the directory given.
 //!
@@ -679,6 +679,18 @@ const edits = struct {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "spark2_5");
     }
 
+    /// The v0.5.0 pre-tokenizer: Qwen2's pattern without the English
+    /// contraction group.
+    fn preUfakzeka(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "ufakzeka");
+    }
+
+    /// The v0.5.0 `LLAMA_VOCAB_TYPE_TEST`: a rolling hash of five-byte
+    /// chunks into the vocabulary, and each token's id in hex back out.
+    fn testType(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "test");
+    }
+
     fn badPre(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "no-such-pre");
     }
@@ -766,6 +778,9 @@ pub fn main(init: std.process.Init) !void {
         .{ .name = "synthetic-bad-special", .path = derive(dir, gpt2, "bad-special", edits.badSpecial) },
         .{ .name = "synthetic-pre-hy-v4", .path = derive(dir, gpt2, "pre-hy-v4", edits.preHyV4) },
         .{ .name = "synthetic-pre-spark2-5", .path = derive(dir, gpt2, "pre-spark2-5", edits.preSpark25) },
+        .{ .name = "synthetic-pre-ufakzeka", .path = derive(dir, gpt2, "pre-ufakzeka", edits.preUfakzeka) },
+        .{ .name = "synthetic-test-bpe", .path = derive(dir, gpt2, "test-bpe", edits.testType) },
+        .{ .name = "synthetic-test-spm", .path = derive(dir, spm, "test-spm", edits.testType) },
         .{ .name = "error-model", .path = derive(dir, gpt2, "bad-model", edits.badModel) },
         .{ .name = "error-pre", .path = derive(dir, gpt2, "bad-pre", edits.badPre) },
         .{ .name = "error-merges", .path = derive(dir, gpt2, "no-merges", edits.noMerges) },

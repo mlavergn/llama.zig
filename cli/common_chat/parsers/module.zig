@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/parsers/parsers.h` and
-//! `llama.cpp/common/parsers/parsers.cpp` (llama.cpp v0.4.1, `b29c606e2`):
+//! `llama.cpp/common/parsers/parsers.cpp` (llama.cpp v0.5.0, `7fe450e19`):
 //! `foreach_function` and `foreach_parameter`. Each per-model file names its
 //! own source; `common_chat_try_specialized_template` in `../templates.zig`
 //! chooses between them.
@@ -39,13 +39,14 @@ pub const gpt_oss = @import("gpt_oss.zig");
 pub const kimi_k2 = @import("kimi_k2.zig");
 pub const kimi_k3 = @import("kimi_k3.zig");
 pub const lfm2 = @import("lfm2.zig");
+pub const ling3 = @import("ling3.zig");
 pub const minicpm5 = @import("minicpm5.zig");
 pub const minimax_m3 = @import("minimax_m3.zig");
 pub const ministral3 = @import("ministral3.zig");
 pub const muse_glimmer = @import("muse_glimmer.zig");
 pub const qwen3_coder = @import("qwen3_coder.zig");
 
-/// Ports `foreach_function` (parsers.cpp:5 @b29c606e2): `f` over each
+/// Ports `foreach_function` (parsers.cpp:5 @7fe450e19): `f` over each
 /// function tool of an OpenAI-style `tools`, logging and skipping the rest.
 /// Iterates as a range-`for` over a `common_json` does: an array's
 /// elements, an object's values, a scalar once, null never.
@@ -54,7 +55,9 @@ pub fn foreachFunction(tools: *const Value, ctx: anytype, comptime f: fn (@TypeO
     while (it.next()) |item| {
         const tool = item.value;
         const is_function = tool.contains("type") and blk: {
-            const t = tool.at("type") catch unreachable;
+            const t = tool.at("type") catch |err| switch (err) {
+                error.OutOfMemory, error.JsonError => unreachable,
+            };
             break :blk t.isString() and std.mem.eql(u8, t.string, "function");
         };
         if (!is_function or !tool.contains("function")) {
@@ -70,7 +73,7 @@ pub fn foreachFunction(tools: *const Value, ctx: anytype, comptime f: fn (@TypeO
     }
 }
 
-/// Ports `foreach_parameter` (parsers.cpp:15 @b29c606e2): `f` over each
+/// Ports `foreach_parameter` (parsers.cpp:15 @7fe450e19): `f` over each
 /// property of a function tool's parameters schema, in schema order, with
 /// the document that owns them -- nothing when the schema is not an object.
 ///

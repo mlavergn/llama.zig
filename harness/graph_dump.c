@@ -267,6 +267,27 @@ int main(void) {
     D(ggml_win_unpart(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 8, 8, 4), 14, 14, 8));
     D(ggml_get_rel_pos(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 64, 15), 8, 8));
 
+    puts("=== hyper-connections (dsv4) ===");
+    {
+        /* hc_pre's two forms share GGML_OP_DSV4_HC_PRE and differ only in
+         * op_params -- scale in slot 0, gated in slot 1 -- and in the
+         * weights' shape; hc_post's comb may be NULL since v0.5.0, which
+         * shows in src=. The scales are chosen so a slot swap or a dropped
+         * sign is visible: 1.0 is what the plain form writes. */
+        const int hc = 4, nt = 5, ne = 8;
+        struct ggml_tensor * x3 = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt);
+        D(ggml_dsv4_hc_comb(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, (2 + hc) * hc, nt), ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 3),
+                            ggml_new_tensor_1d(ctx, GGML_TYPE_F32, (2 + hc) * hc), 1e-6f, 4));
+        D(ggml_dsv4_hc_pre(ctx, x3, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc, nt)));
+        D(ggml_dsv4_hc_pre_gated(ctx, x3, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt), 0.75f));
+        D(ggml_dsv4_hc_pre_gated(ctx, x3, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt), -2.5f));
+        D(ggml_dsv4_hc_pre_gated(ctx, x3, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt), 1.0f));
+        D(ggml_dsv4_hc_post(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne, nt), x3,
+                            ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc, nt), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, hc, hc, nt)));
+        D(ggml_dsv4_hc_post(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne, nt), x3,
+                            ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc, nt), NULL));
+    }
+
     puts("=== flags ===");
     {
         struct ggml_tensor * f = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4);

@@ -435,6 +435,20 @@ std::string tool_calls_text(const common_chat_msg & m) {
 std::string result_text(const common_peg_parse_result & r) {
     std::string s = std::string(common_peg_parse_result_type_name(r.type)) + " " + std::to_string(r.start) + " " + std::to_string(r.end);
     for (auto n : r.nodes) s += " " + std::to_string(n);
+    for (const auto & u : r.invalid_utf8) s += " !" + std::to_string(u.pos) + "+" + std::to_string(u.len);
+    return s;
+}
+
+// Every node's invalid UTF-8 runs and sanitized text (v0.5.0).
+std::string ast_invalid_text(const common_peg_ast_arena & ast) {
+    std::string s;
+    for (size_t i = 0; i < ast.size(); i++) {
+        const auto & n = ast.get(i);
+        if (n.invalid_utf8.empty()) continue;
+        s += "\x1e" + std::to_string(i);
+        for (const auto & u : n.invalid_utf8) s += " " + std::to_string(u.pos) + "+" + std::to_string(u.len);
+        s += "\x1d" + n.sanitized_text();
+    }
     return s;
 }
 
@@ -454,6 +468,7 @@ void parse_records(const common_peg_arena & arena, const std::string & input, co
     }
     w.rec(tag + result_text(result));
     w.rec("A:" + guard([&] { return ctx.ast.dump(); }));
+    w.rec("V:" + guard([&] { return ast_invalid_text(ctx.ast); }));
     for (int k = 0; k < 3; k++) {
         std::string out = guard([&] {
             common_chat_msg msg;

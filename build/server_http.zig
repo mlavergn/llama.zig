@@ -34,7 +34,6 @@ const httplib_defines = [_][]const u8{
 
 const cxx_flags = [_][]const u8{ "-std=c++17", "-w" };
 
-
 pub const Options = struct {
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,

@@ -8,13 +8,13 @@
 //! - `llama.cpp/src/llama-model.cpp` -- the switches of `llm_type_name`
 //!   and `llama_model_rope_type`
 //!
-//! Both at v0.4.1 (`b29c606e2`). **Do not edit**: regenerate after moving the
+//! Both at v0.5.0 (`7fe450e19`). **Do not edit**: regenerate after moving the
 //! pin. The rope rules marked `.conditional` read the hyperparameters and are
 //! ported by hand in `model.zig`.
 
 const c = @import("impl.zig").c;
 
-/// Mirrors `llm_type` (llama-model.h:22 @b29c606e2).
+/// Mirrors `llm_type` (llama-model.h:22 @7fe450e19).
 pub const Type = enum(c_int) {
     unknown,
     @"14m",
@@ -153,7 +153,7 @@ pub const Type = enum(c_int) {
     e4b,
 };
 
-/// Ports `llm_type_name` (llama-model.cpp:843 @b29c606e2), by `Type` ordinal; the
+/// Ports `llm_type_name` (llama-model.cpp:868 @7fe450e19), by `Type` ordinal; the
 /// switch's default where it names none.
 pub const type_names = [_][:0]const u8{
     "?B",
@@ -302,7 +302,7 @@ pub const RopeRule = union(enum) {
     abort,
 };
 
-/// Ports the switch of `llama_model_rope_type` (llama-model.cpp:2876 @b29c606e2), by
+/// Ports the switch of `llama_model_rope_type` (llama-model.cpp:2901 @7fe450e19), by
 /// `arch.Arch` ordinal. An architecture the switch does not name falls out of
 /// it to `LLAMA_ROPE_TYPE_NONE`.
 pub const rope_rules = [_]RopeRule{
@@ -457,10 +457,11 @@ pub const rope_rules = [_]RopeRule{
     .{ .fixed = c.LLAMA_ROPE_TYPE_IMROPE }, // LLM_ARCH_QWEN3TTS
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_POCKETTTS
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_MINIMAX_01
+    .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_HRM_TEXT
     .abort, // LLM_ARCH_UNKNOWN
 };
 
-/// Ports the cases of `llama_model_mapping` (llama-model.cpp:43 @b29c606e2), by
+/// Ports the cases of `llama_model_mapping` (llama-model.cpp:43 @7fe450e19), by
 /// `arch.Arch` ordinal: whether the architecture has a model class. One that
 /// does not is `unsupported model architecture`.
 pub const mapped = [_]bool{
@@ -615,5 +616,6 @@ pub const mapped = [_]bool{
     true, // LLM_ARCH_QWEN3TTS
     true, // LLM_ARCH_POCKETTTS
     true, // LLM_ARCH_MINIMAX_01
+    true, // LLM_ARCH_HRM_TEXT
     false, // LLM_ARCH_UNKNOWN
 };

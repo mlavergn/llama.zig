@@ -11421,3 +11421,320 @@ Two things the gate cannot hold:
   upstream's public endpoints are unprefixed, so `/api/health` needs the key
   and the readiness probe never sees a 200. The prefix block runs without a
   key.
+
+## Upstream sync v0.4.1 → v0.5.0
+
+The third sync. The pin moved from `v0.4.1` (`b29c606e2`, `b10964`) to
+`v0.5.0` (`7fe450e19`, `b11146`), ggml from 0.24.0 to 0.25.1, and the
+port's version with it: `0.5.0`. It started over one open pickup,
+JWHLPTOP's, which is unreachable (Marc, 2026-11-01) and carries forward.
+`llama.cpp.zmake` moved first: its `llama-cli` is token-identical to a
+CMake build of the same sources on 6 of 6 prompts once upstream's
+`Loading model... |/-\` spinner is filtered out -- it prints a frame per
+tick, so the byte count of stdout depends on load time and two runs of
+one binary differed by two bytes, which read as nondeterminism until the
+bytes were looked at.
+
+### What moved
+
+182 commits; over the ported paths 168 files, +17,683 / −15,129.
+`scripts/upstream-map` gave **762 touched citations**, **246 hunks no
+citation covered** and **24 changed files with no citation**; the repin
+moved **9,560 citation sites** in 610 files and `upstream-relines` moved
+**388** abort-message line numbers, leaving 4 for hand work. Upstream added
+three sources to the build -- `common/parsers/ling3.cpp`,
+`ggml-vulkan-buffers.cpp` and `ggml-vulkan-debug.cpp` -- and compiles its
+Vulkan backend with hidden visibility; both `build.zig`s follow.
+
+Before the area agents started, the lead moved the reference, ran the
+generators and both mechanical moves, and ported `ggml_dsv4_hc_pre_gated`
+(a new public constructor sharing `GGML_OP_DSV4_HC_PRE`: op_params slot 0
+the f32 scale, slot 1 the gated flag) and `ggml_dsv4_hc_post`'s optional
+`comb`, which libllama's `qwen4exp` and every backend's kernels read. The
+work was then split across six agents, each with its own files: ggml core
+and CPU, Metal, CUDA, Vulkan, libllama with libmtmd, and `common/` with
+the tools and the server.
+
+**What was ported, by area:**
+
+- **ggml and the CPU backend**: the gated `hc_pre` and comb-less `hc_post`
+  kernels; fwht over F16 input, and `mul_mat` widening an F16 `src1` when
+  `vec_dot_type` is F32 (reached under the Hadamard hint with `use_ref`,
+  which `test-backend-ops` sets); iq1_m's prefix-sum split search; GGUF
+  data padded relative to where the GGUF starts in its file; the
+  scheduler checking `gallocr_reserve_n`'s result; meta views inheriting
+  their source slice's sub-buffer; and a new **q1_0 repack** -- four
+  generic and four ARM kernels (the 4x8 gemm on `smmla`), `block_q1_0x4`,
+  its converter, two `tensor_traits`, four more x86 fallback names.
+- **Metal**:
+  - `ggml-metal-tuning.cpp` rewritten: the table is keyed by Apple GPU
+    family (7–10, 1,033 rows, where v0.4.1 had 3,884 per-SKU rows) and
+    the family fallback is gone. `fa_vec_pick` lost its `device_id`
+    argument and so its mangled name.
+  - `ggml-metal-fusion.cpp` grew four patterns -- NORM_SCALE,
+    SSM_CONV_SILU, TOPK_MOE (four shapes) and MOE_REDUCE (k = 2…8) --
+    each entry now carries a raw and a filtered op list and extra outputs;
+    a FULL-mode memory-overlap check and allocation dependencies reported
+    through `graph_optimize` are new. `struct ggml_metal_fusion` became
+    opaque.
+  - New encoders for the fused MoE routing and reduction; `MUL_MAT_ID`'s
+    amax rescale for an F32 `src1` precision; the gated `hc_pre` kernel
+    and any `n_hc`; `hc_post` without comb; the FWHT predicate moved into
+    `common.cpp` because the `.m`'s `supports_op` now asks it.
+  - Exports by `nm`, each equal to the reference: ops 70 (67), device 81
+    (76), common 9 (8), fusion 18 (17).
+- **CUDA**: `fattn-swizzle.cuh` is gone -- its host half is three
+  functions in `fattn-mma-f16.cuh`, and one swizzle decision now covers K
+  and V. Sparse flash attention keeps one index list per query tile with
+  a count array, gains 256/256 variants at (1,8) and the wide (8,8), and a
+  sparse decode goes to the MMA kernel. `CONV_2D` with an F16 kernel takes
+  an implicit-GEMM path (cuBLAS for pointwise, MMA tiles with split-K
+  otherwise). `graph_optimize` keeps every node of a top-k MoE chain alive
+  until the node after it -- `nodes[n_nodes]` when the chain ends the
+  graph, ported as written. `SUM_ROWS`/`MEAN` accept row-contiguous
+  sources, `DUP` I16 and I32; `MUL_MAT_ID` with an F32 accumulator is
+  refused; argsort sorts keys out of place, so `cub_shim.cu`'s six wrappers
+  gained an output-keys argument.
+- **Vulkan**: upstream split `ggml-vulkan.cpp` (20,964 lines at v0.4.1)
+  into itself (16,274), `ggml-vulkan-buffers.cpp` (783),
+  `ggml-vulkan-debug.cpp` (1,561) and three headers. Integer-dot mmq for
+  IQ4_XS and IQ3_S and an IQ4_XS q8_1 mat-vec; `MUL_MAT_ID` hoisting row
+  ids to 1,024 experts; the gated `hc_pre` and comb-less `hc_post`; sparse
+  flash attention (an `n_kv_max` hint, a compact prepass, an eighth FA
+  binding); an Intel Xe two-phase decode path no machine here can reach.
+  Push constants 51 → 53 structs. `vk_conv_block_sizes` became an
+  `inline` variable, so a weak symbol, and the port's export is weak to
+  match. Out of scope: `ggml-vulkan-debug.cpp`'s `CHECK_RESULTS` and
+  `RUN_TESTS` arms. 154 shader files (151 at v0.4.1), 1,119–1,541
+  variants.
+- **libllama**: a new architecture, `hrm_text` -- looped low and high
+  stacks over one stream, its cache slots aliasing two physical blocks
+  (151 architectures, 153 model files). A new `llama.h` function,
+  `llama_adapter_lora_init_from_file_ptr` (241 exports, equal to the
+  reference), with the loader's mmap alignment check for a GGUF embedded
+  at an offset. A new vocabulary type, `TEST` -- a rolling hash, which
+  upstream's own fixtures now use -- and pre-tokenizer `ufakzeka`. Names
+  for the graph's input tensors; two `gf_res_prev` arenas (ubatches with
+  and without outputs); `llama_graph_n_input_tensors` and a one-line graph
+  summary log; `load_swa_pattern`, now used by 17 models; `qwen4exp` on
+  the fused gated `hc_pre` and sparse attention; `dflash` on a Gemma
+  backbone; the saver's shrunk exclusion list and per-layer SWA pattern.
+- **libmtmd**: `clip.cpp`'s feature- and insert-layer range checks, the
+  SAM layer count from its key, and `mtmd-image.cpp`'s resize range throw.
+- **`common/`, the tools and the server**: a new chat parser, Ling 3
+  (`parsers/ling3.zig`, dispatched before Cohere2 MoE); Qwen3-Coder's
+  dispatch now excludes tags not followed by a newline, DeepSeek V3.2 and
+  V4 take new delimiters, Gemma 4's tool calls are required, Muse
+  Glimmer's trigger is anchored. The PEG engine runs invalid UTF-8
+  through itself (sanitized to U+FFFD) and `common_parse_utf8_codepoint`
+  returns the valid prefix's length; GBNF escapes `-`. `--fit`'s
+  automatic context is sized by `n_seq_max`. Six new `LLAMA_ARG_*`
+  environment variables, `--host` as a comma list. The HTTP layer opens
+  one listener per address over a shared pool, refuses port 0 with
+  several TCP addresses and supports IPv6-only; cpp-httplib moved to
+  0.57.1 (deferred `100 Continue`, chunk-extension validation, trailer
+  counting). Router mode no longer passes environment variables to its
+  children and queues stopping models; `input_image` tool output and the
+  `video_url` alias; `llama-bench --version`. zigjinja took unary `+`/`-`
+  precedence and typing (v3.1.1, `79ff891`).
+
+### What the tooling and the generators got right and wrong
+
+- **`upstream-map` cannot see a move across files.** 461 of the 762
+  touched citations were Vulkan, and 395 of those were definitions that
+  had only moved file. Matching top-level definitions by text, after
+  stripping the `static`, `inline` and default arguments the split
+  removed, showed 562 of 586 identical; those were re-cited by script.
+  It also read three quantizer helpers as running to the end of
+  `ggml-quants.c`, and listed the deleted `fattn-swizzle.cuh`'s three
+  citations as touched when their logic had moved.
+- **The repin missed citations sharing a line with another** (five in
+  ggml) and, again, the two wrapped ones in `cpy.zig` and `convert.zig`.
+- **`upstream-relines` cannot see a line literal passed through a local
+  constant**: `qwen4exp.zig`'s 14 (`src, N`) were moved by hand, and
+  `memory_hybrid_idx.zig`'s 7 (`file, N`) turned out to have been four
+  lines stale since before v0.4.1.
+- **Two generators stopped at v0.5.0, one of them silently.**
+  `gen-tuning-table` stopped on the new family key, as it should; it now
+  reads the family rows and refuses anything else. `gen-vk-push` found 0
+  push-constant structs -- they moved to `ggml-vulkan-push-constants.h` --
+  **and its consistency check passed**, because an empty parsed set and an
+  empty declared set agree. It now reads both files and refuses to find
+  none.
+- **`impl_c.zig` is hand-kept, and five new `#define`s were missed** by a
+  count check that compared two hand lists. `struct-layout` now diffs the
+  header's `#define` names against `impl_c.zig`.
+
+### Gates that were wrong
+
+- **`metal-diff` compared our allocation sizes with our own.** The
+  reference `ggml-metal.cpp` calls the `extra_*` size functions, and the
+  port supplies them, so an `extra_amax` four bytes short passed.
+  `metal-diff` now compiles upstream's `ggml-metal-ops.cpp` with all 70
+  exports renamed (the list read from `nm`) and compares the queries.
+- **`vecdot-golden` compiled `ggml-quants.c` with contraction on**, so the
+  ARM goldens tested the quantizer's input bytes as well as the dot
+  product: iq1_m's new search moved an ARM golden whose kernel had not
+  changed. Both runs now compile the quantizer with contraction off.
+- **A Vulkan unit test had not compiled since v0.4.1**: the Vulkan
+  layer's tests build only under `-Dvulkan`, so `mulMmCm2Spec` broke
+  unnoticed. On a Mac, `zig build test -Dvulkan` needs a stub loader.
+- **Fixture holes**: no fixture reached `dflash`'s Gemma backbone or a
+  fused-QKV full-attention layer, so injections into the new `meta_split`
+  Qwen branches escaped until `dflash-gemma` and `qwen35-fusedqkv` were
+  added. The DeepSeek-OCR mmproj fixture wrote 12 SAM blocks where its key
+  names 3, so reverting the loader's count to 12 passed; it writes 3 now.
+  The arch fixtures have two experts with two used, so top-k
+  renormalisation is the identity on them; `backend-ops` covers it.
+
+- **`server-diff` found a serialization change `upstream-map` called
+  unchanged.** `json.h`'s enum constructor now writes `vocab_type` as the
+  integer 2 where it wrote `true`; `get_res_model_info` was repinned as
+  untouched because its own lines did not move. Three port bugs it and
+  `server-task-diff` found besides: a NUL in the generation prompt logged
+  whole where upstream's `%s` stops at it, floats printed `1` for `1.0`
+  in `chat.zig` and `template.zig`, and `serve nocache` logged from
+  `init` rather than `init_listener`.
+- **`loader-diff` and `quant-diff` passed without their new cases.** Both
+  gained cases this sync that read `zig-out/arch-fixtures/`, added only
+  when the file existed. The combined run reached them before
+  `arch-fixtures` had written anything: `loader-diff` printed one "no
+  fixture given" line among its results and reported 263,887 checks
+  where 372,133 are its count, and `quant-diff` said nothing at all. Both
+  now fail when a fixture they list is missing (`ARCH_FIXTURES=<empty
+  dir>` shows it), `make test` writes the fixtures before `loader-diff`,
+  and both were rerun with them in place. Requiring them showed one more
+  hole: `loader-diff`'s `gemma4-moe*` pattern had matched nothing since it
+  was written -- `test-llama-archs` builds Gemma 4 dense only.
+- **`chat-parse-diff` hung in `zig translate-c` whenever its translation
+  was cached.** Sampled at full CPU in macOS's `fcopyfile`: on a cache
+  hit, translate-c copies the cached file to its stdout, and with stdout
+  a pipe that copy never ends. The script captured stdout through a pipe;
+  every shell gate redirects to a file, so it alone hung -- in `make
+  validate` right after `peg-diff` had filled the cache with the same
+  translation, and under any earlier run's leftovers, which read as "only
+  under load". The same hit takes 0.03 s to a file and does not finish in
+  15 s to a pipe. It now writes the file directly.
+- **`make validate` had not passed since `216f26f`.** Its lint step
+  (zlint `--deny-warnings`) reported 103 warnings at that commit and 102
+  at the start of the combined run, all in `cli/` and `tools/`: `catch
+  unreachable` at 54 sites, `catch {}` at 28, five discarded `throwStr`
+  error sets and 17 unused declarations. zlint has
+  no suppression comment and the style guide allows none, so each became
+  an exhaustive `catch |err| switch (err) { ... }` naming the errors the
+  compiler reported -- the same behaviour, but a new error from a callee
+  now fails the build instead of being dropped.
+- **Prose line numbers are not citations.** 33 file headers say "at
+  line N" of an upstream file outside a `Ports`/`Mirrors` citation, so
+  `port-links` never reads them, and the repin moved none of them. They
+  are stale by whatever the sync moved, recorded here rather than
+  rewritten by hand.
+
+### Decisions taken in this sync
+
+- **Debug lines in pointer-hash order are compared as a multiset.**
+  `llama_graph_n_input_tensors` logs, at DEBUG, in `std::unordered_map`
+  order keyed on tensor addresses, which differs between the C++ and the
+  port and between runs. The port reproduces libc++'s order over the
+  pointer bytes; the gates sort each run of those lines
+  (`harness/input_tensor_order.zig`). It is a sharp detector: a node
+  renumbering shows in it first.
+- **q1_0's generic gemm fuses on x86 and not on ARM.** Read off the
+  reference's disassembly at every CPU the gates build: on aarch64 the SLP
+  vectorizer packs the inner loop and both multiplies round; on x86-64-v3
+  and v4 it packs the columns, `vmulps` then `vfmadd231ps`. `gemmStep`
+  chooses at comptime; `repack-diff` confirms the ARM side and
+  `x86-repack-diff` is the x86 pickup.
+- **Gate runs used private builds where the shared tree moved.** Six
+  agents shared one working tree; two broke the build briefly and others
+  rebuilt the shared libraries at other `GATE_CPU`s mid-run, which
+  `gate-cpu` caught. The Metal agent finished on `--prefix` builds; the
+  combined pass below is on one tree.
+
+### The gates
+
+The combined pass ran on one tree after every agent had finished: the
+library gates first, then `make validate` and the fixtures, then the CLI,
+tool and server gates, then the reruns the findings above called for, with
+a last `make validate` passing after every fix.
+
+| Gate | Result |
+|---|---|
+| `make probe` | both runs |
+| `ops-diff`, `repack-diff`, `node-diff`, `parity-port`, `parity-port-cpu` | identical at `baseline`, `apple_m3`, `generic`, `apple_a7` and `apple_a12`: 778 op results, 141 repack checks, 6/6 and 6/6 |
+| `node-diff --gpu` | every node and every fused decode identical |
+| `graph-diff` | 282 nodes |
+| `backend-ops` | 22,879 op configurations, both backends; `--diff` 27,264 lines identical |
+| `sched-diff` | 16 assignments |
+| `metal-diff` | 15,547 answers |
+| `tuning-diff` | 10,291,540 lookups, 2,969 answered by a tuned row |
+| `struct-layout` | 3,231 `kargs` facts and 328 more; all 127 `#define`s in `impl_c.zig` |
+| `abi-check` | 34 entry points |
+| `sampler-diff` | 40,308 records |
+| `libcxx-diff`, `regex-diff` | 452,904 and 43,537,552 results |
+| `unicode-diff`, `vocab-diff`, `arch-diff` | 7,076,654, 59,553,754 (46 files) and 139,419 checks |
+| `loader-diff` | 372,133 checks (rerun with the fixtures in place; see above) |
+| `api-diff` | 85,854,221 checks |
+| `adapter-diff` | 289,884 checks |
+| `batch-diff`, `chat-diff` | 180,654 and 953,596 results |
+| `host-arms-diff` | 18 scenarios |
+| `blas-diff`, `blas-node-diff` | 2,547 checks; 384 nodes, 366 computed differently without BLAS |
+| `quant-diff` | 144,005,781 checks (likewise) |
+| `opt-diff`, `opt-llama-diff` | 89,924 checks; 6 abort cases alike |
+| `meta-diff` | 77,990 end-to-end lines |
+| `arch-fixtures`, `mmproj-fixtures` | 168 fixtures (127 through `test-llama-archs`, 41 extra); 128 of 128 mmproj checks |
+| `arch-model-diff` | 166 pass, 0 fail, the two `REF-ABORT`s known since v0.3.0 (PLM, `rwkv6qwen2`) |
+| `gemma4-assistant-diff` | dense and MoE, Metal and CPU |
+| `mtmd-gates` | `mtmd-diff` 256 identical (4 aborting alike), 2,840 image cases, 3,309 audio cases, 999 decoder files; 84 exports |
+| `context-diff` | 2,342,537 checks |
+| `port-links` | 10,780 citations in 632 files, every one at `7fe450e19` |
+| `json-diff`, `schema-diff`, `peg-diff` | 9,526,339; 751,908 over 165,703 cases; 5,013,840 over 5,689 cases |
+| `chat-parse-diff` | 51,417 records, 389,741 lines (after the `fcopyfile` fix below) |
+| `chat-msg-diff` | 1,625 records |
+| `jinja-diff` | 74 templates (70 upstream, 4 unary-operator probes) × 7 conversations, 8,584 probe renders, both time zones |
+| `cnv-diff` | 36 scenarios |
+| `fit-diff` | 68 cases, ReleaseFast and ReleaseSafe |
+| `spec-diff` | 38 cases, 172,178 lines |
+| `server-task-diff` | 5,571 records |
+| `http-diff` | 282 checks |
+| `parity-cli` | 13/13 |
+| `tools-diff` | the ten upstream tools' 306 cases, `llama-tts` 30, `llama-mtmd-cli` 55, `llama-server` 195. In the combined run one `imatrix` case differed because upstream's own `--show-statistics` output stopped mid-line with exit 0 -- its log worker racing exit -- and the rerun passed 35/35 |
+| `server-diff` | 22 files, 1,469 checks. `hub` differed on 2 of 115 in the combined run, both in the `slowpoke` download timeout, which F had seen flake upstream against upstream under load; alone it passed 115/115 |
+| `xcframework-check` | every slice built and verified, the negative tests, the macOS smoke 6/6 on GPU and CPU, the iOS and tvOS simulator smokes 6/6, `pkg-test`, `zip`, the port gates, `compat` (91 files byte-identical, 11,011 exports) and `dropin-macos`; upstream's generic-CPU macOS slice against ours, reported and not a gate, differs on 3 of 6 prompts as at v0.4.1. **The visionOS simulator smoke could not run**: this Mac's visionOS 27.0 simulator runtime is listed Ready but CoreSimulator refuses to boot it ("runtime path not found"), a machine problem the check passed through at v0.4.1 |
+
+### Injections
+
+Each area made every new gate case and changed function fail once, in
+its own scratch copy or restored by reverse replacement:
+
+- **ggml and the CPU**, 21: 20 caught. The escape, iq1_m's `q2` term
+  reassociated, is not proven inert. The meta backend's new view arm is
+  unreachable here (it needs a multi-buffer meta sub-buffer), and
+  `alloc_splits`' reserve-failure branch has no gate.
+- **Metal**, 43: 37 caught, 4 inert, 2 escapes. `encode_impl`'s
+  concurrency check on the last rather than the first fused node shows
+  only as a timing race; top-k renormalisation turned off escaped
+  `node-diff --gpu` on fixtures with two experts and was caught by
+  `backend-ops`. The F16-`src1` FWHT kernel choice has no case.
+- **CUDA**: none here; the injection list is the GB10's (PLAN items 2 and
+  3).
+- **Vulkan**: 3 caught by `vk-push-layout`; the rest is the GB10's (PLAN
+  item 5).
+- **libllama and libmtmd**, 48: 43 caught, 1 inert (the `TEST`
+  vocabulary's `byte_to_token`), 4 escapes: the saver's per-layer SWA
+  pattern collapsed to one value, the `gf_res_prev_active` check,
+  Hunyuan-VL's `t_layer_inp`, and `gate_up_exps`' `TENSOR_SKIP`. Not injected:
+  the sampler probe's size and libmtmd's allocation-failure and resize
+  range throws.
+- **`common/`, the tools and the server**, 59: all caught, two only after
+  new cases (an `Expect: 100-continue` `OPTIONS` request, and a router
+  case whose children read the environment). Unreachable here: the
+  stopping-instance queue's timing, an IPv6-only address conflict, the
+  client's method token, websockets and the trailer cap.
+
+### Pickups
+
+`PLAN.md`, "Pickup for the v0.5.0 sync". The CUDA host changes have not
+compiled on any machine, and the Vulkan host changes compiled only
+against a stub `libvulkan`; the GB10 runs both first. JWHLPTOP is
+unreachable, so its AVX-512 items carry forward again.

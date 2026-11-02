@@ -130,3 +130,6 @@ cp "$DATA/reload-a.ini" "$DATA/reload.ini"
 mkdir -p "$DATA/reload-a" "$DATA/reload-b"
 cp "$DATA/reload-a.ini" "$DATA/reload-a/reload.ini"
 cp "$DATA/reload-b.ini" "$DATA/reload-b/reload.ini"
+
+# the router's --api-key-file (router.cases), which its children must not inherit
+printf 'k4\n' > "$DATA/keys.txt"

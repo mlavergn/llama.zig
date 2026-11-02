@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma-embedding.cpp` at v0.4.1
-//! (`b29c606e2`): `llama_model_gemma_embedding`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/gemma-embedding.cpp` at v0.5.0
+//! (`7fe450e19`): `llama_model_gemma_embedding`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -22,15 +22,13 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma_embedding`'s `load_arch_hparams` (models/gemma-embedding.cpp:3 @b29c606e2).
+/// Ports `llama_model_gemma_embedding`'s `load_arch_hparams` (models/gemma-embedding.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.swa_type = @backingInt(hparams_mod.SwaType.symmetric);
-    var swa_period: u32 = 6;
-    if (try meta.getKeyOrArrScalar(.attention_sliding_window_pattern, false, exc)) |v| swa_period = v;
-    hp.setSwaPattern(swa_period, false);
+    try self.loadSwaPattern(ml, 6, false, exc);
 
     hp.causal_attn = false; // Embeddings do not use causal attention.
 
@@ -45,8 +43,8 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(u32, .dense_3_feat_in, false, exc)) |v| hp.dense_3_feat_in = v;
     if (try meta.getKey(u32, .dense_3_feat_out, false, exc)) |v| hp.dense_3_feat_out = v;
 
-    impl.assert(hp.dense_2_feat_in == 0 or hp.dense_2_feat_in == hp.n_embd, "models/gemma-embedding.cpp", 21, "(hparams.dense_2_feat_in == 0 || hparams.dense_2_feat_in == hparams.n_embd) && \"dense_2_feat_in must be equal to n_embd\"");
-    impl.assert(hp.dense_3_feat_out == 0 or hp.dense_3_feat_out == hp.n_embd, "models/gemma-embedding.cpp", 22, "(hparams.dense_3_feat_out == 0 || hparams.dense_3_feat_out == hparams.n_embd) && \"dense_3_feat_out must be equal to n_embd\"");
+    impl.assert(hp.dense_2_feat_in == 0 or hp.dense_2_feat_in == hp.n_embd, "models/gemma-embedding.cpp", 19, "(hparams.dense_2_feat_in == 0 || hparams.dense_2_feat_in == hparams.n_embd) && \"dense_2_feat_in must be equal to n_embd\"");
+    impl.assert(hp.dense_3_feat_out == 0 or hp.dense_3_feat_out == hp.n_embd, "models/gemma-embedding.cpp", 20, "(hparams.dense_3_feat_out == 0 || hparams.dense_3_feat_out == hparams.n_embd) && \"dense_3_feat_out must be equal to n_embd\"");
 
     self.type = switch (hp.nLayer()) {
         24 => .@"0_3b",
@@ -55,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.f_attention_scale = 1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadK(0)));
 }
 
-/// Ports `llama_model_gemma_embedding`'s `load_arch_tensors` (models/gemma-embedding.cpp:32 @b29c606e2).
+/// Ports `llama_model_gemma_embedding`'s `load_arch_tensors` (models/gemma-embedding.cpp:30 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -97,13 +95,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma_embedding`'s `build_arch_graph` (models/gemma-embedding.cpp:71 @b29c606e2).
+/// Ports `llama_model_gemma_embedding`'s `build_arch_graph` (models/gemma-embedding.cpp:69 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma_embedding`'s `graph`
-/// (models/gemma-embedding.cpp:75 @b29c606e2).
+/// (models/gemma-embedding.cpp:73 @7fe450e19).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

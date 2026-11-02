@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/im2col.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/im2col.cuh` at v0.4.1 (`b29c606e2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/im2col.cuh` at v0.5.0 (`7fe450e19`). The
 //! kernels, `im2col_kernel` and `im2col_3d_kernel`, stay CUDA.
 
 const std = @import("std");
@@ -17,11 +17,11 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `CUDA_IM2COL_BLOCK_SIZE` (im2col.cuh:3 @b29c606e2).
+/// Ports `CUDA_IM2COL_BLOCK_SIZE` (im2col.cuh:3 @7fe450e19).
 const block_size = 256;
-/// Ports `MAX_GRIDDIM_Y` (im2col.cu:3 @b29c606e2).
+/// Ports `MAX_GRIDDIM_Y` (im2col.cu:3 @7fe450e19).
 const max_griddim_y = 65535;
-/// Ports `MAX_GRIDDIM_Z` (im2col.cu:4 @b29c606e2).
+/// Ports `MAX_GRIDDIM_Z` (im2col.cu:4 @7fe450e19).
 const max_griddim_z = 65535;
 
 /// An `int64_t` into a `dim3` member, which is `unsigned int`.
@@ -29,8 +29,10 @@ fn dim(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `im2col_cuda` (im2col.cu:48 @b29c606e2), reached through
-/// `im2col_cuda_f16` and `im2col_cuda_f32` (im2col.cu:62, 70 @b29c606e2).
+/// Ports `im2col_cuda` (im2col.cu:49 @7fe450e19), reached through
+/// `im2col_cuda_f16` and `im2col_cuda_f32` (im2col.cu:65, 73 @7fe450e19).
+/// One block per output position (`x` the column, `y` the batch and row),
+/// its threads striding over the `IC*KH*KW` channels.
 fn im2colCuda(
     comptime T: type,
     x: ?*const anyopaque,
@@ -54,19 +56,20 @@ fn im2colCuda(
     stream: cu.cudaStream_t,
 ) void {
     const IC_KH_KW = IC * KH * KW;
-    const num_blocks = @divTrunc(IC_KH_KW + block_size - 1, block_size);
     const N_OH = N * OH;
     const KH_KW = KW * KH;
-    const block_nums: kernels.Dim3 = .{ .x = dim(num_blocks), .y = dim(@min(OW, max_griddim_y)), .z = dim(@min(N_OH, max_griddim_z)) };
+    const threads_per_block: c_int = @min(@as(c_int, @truncate(IC_KH_KW)), block_size);
+    const block_nums: kernels.Dim3 = .{ .x = dim(@min(OW, max_griddim_y)), .y = dim(@min(N_OH, max_griddim_z)) };
+
     kernels.launch(kernels.get("im2col", kernels.tmpl("im2col_kernel", &.{kernels.typeName(T)})), .{
         .grid = block_nums,
-        .block = .{ .x = dim(@min(IC_KH_KW, block_size)) },
+        .block = .{ .x = @bitCast(threads_per_block) },
         .shmem = 0,
         .stream = stream,
-    }, .{ x, dst, IC, IW, IH, OH, OW, KW, KH, IC_IH_IW, IH_IW, N_OH, KH_KW, IC_KH_KW, s0, s1, p0, p1, d0, d1 });
+    }, .{ x, dst, IC, IW, IH, OH, OW, KW, KH, N, IC_IH_IW, IH_IW, N_OH, KH_KW, IC_KH_KW, s0, s1, p0, p1, d0, d1 });
 }
 
-/// Ports `ggml_cuda_op_im2col` (im2col.cu:78 @b29c606e2).
+/// Ports `ggml_cuda_op_im2col` (im2col.cu:81 @7fe450e19).
 pub fn opIm2col(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -107,9 +110,9 @@ pub fn opIm2col(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `im2col_3d_cuda` (im2col.cu:165 @b29c606e2), reached through
-/// `im2col_3d_cuda_f16` and `im2col_3d_cuda_f32` (im2col.cu:193, 204
-/// @b29c606e2).
+/// Ports `im2col_3d_cuda` (im2col.cu:168 @7fe450e19), reached through
+/// `im2col_3d_cuda_f16` and `im2col_3d_cuda_f32` (im2col.cu:196, 207
+/// @7fe450e19).
 fn im2col3dCuda(
     comptime T: type,
     src: ?*const anyopaque,
@@ -170,7 +173,7 @@ fn im2col3dCuda(
     });
 }
 
-/// Ports `ggml_cuda_op_im2col_3d` (im2col.cu:215 @b29c606e2).
+/// Ports `ggml_cuda_op_im2col_3d` (im2col.cu:218 @7fe450e19).
 pub fn opIm2col3d(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

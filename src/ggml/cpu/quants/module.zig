@@ -4,7 +4,7 @@
 //!
 //! **Not a port.** Scaffolding this project owns, matching the barrels above
 //! it. Everything it gathers ports
-//! `llama.cpp/ggml/src/ggml-cpu/quants.c` at v0.4.1 (`b29c606e2`), split by
+//! `llama.cpp/ggml/src/ggml-cpu/quants.c` at v0.5.0 (`7fe450e19`), split by
 //! format family:
 //!
 //! - `rows.zig`    — the 20 row quantizers `type_traits_cpu` points at

@@ -48,6 +48,7 @@ pub const AstId = arena.AstId;
 pub const invalid_ast_id = arena.invalid_ast_id;
 pub const ResultType = arena.ResultType;
 pub const Flags = arena.Flags;
+pub const InvalidUtf8 = arena.InvalidUtf8;
 pub const AstNode = arena.AstNode;
 pub const AstArena = arena.AstArena;
 pub const ParseResult = arena.ParseResult;

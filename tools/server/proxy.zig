@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports `server_http_proxy` from `llama.cpp/tools/server/server-models.cpp`
-//! and `llama.cpp/tools/server/server-models.h` (llama.cpp v0.4.1,
-//! `b29c606e2`), with the helpers it calls: `to_lower_copy`,
+//! and `llama.cpp/tools/server/server-models.h` (llama.cpp v0.5.0,
+//! `7fe450e19`), with the helpers it calls: `to_lower_copy`,
 //! `should_strip_proxy_header`, `generate_multipart_boundary` and
 //! `build_multipart_body`. Each declaration names what it ports and the
 //! line it began at.
@@ -32,7 +32,7 @@ const throw = common.throw;
 
 const gpa = std.heap.c_allocator;
 
-/// Ports `server_http_proxy`'s `msg_t` (server-models.h:406 @b29c606e2): the
+/// Ports `server_http_proxy`'s `msg_t` (server-models.h:406 @7fe450e19): the
 /// headers (first message only) or a chunk of the body.
 const Msg = struct {
     headers: http.StringMap = .{}, // a std::map: sorted, unique keys
@@ -68,12 +68,12 @@ const Shared = struct {
     }
 };
 
-/// Ports `to_lower_copy` (server-models.cpp:2333 @b29c606e2).
+/// Ports `to_lower_copy` (server-models.cpp:2359 @7fe450e19).
 fn toLowerCopy(a: Allocator, value: []const u8) ![]u8 {
     return std.ascii.allocLowerString(a, value);
 }
 
-/// Ports `should_strip_proxy_header` (server-models.cpp:2339 @b29c606e2): headers
+/// Ports `should_strip_proxy_header` (server-models.cpp:2365 @7fe450e19): headers
 /// the router would duplicate.
 fn shouldStripProxyHeader(header_name: []const u8) bool {
     // Headers that get duplicated when router forwards child responses
@@ -88,7 +88,7 @@ fn shouldStripProxyHeader(header_name: []const u8) bool {
     return std.mem.startsWith(u8, header_name, "access-control-");
 }
 
-/// Ports `generate_multipart_boundary` (server-models.cpp:2356 @b29c606e2): 16
+/// Ports `generate_multipart_boundary` (server-models.cpp:2382 @7fe450e19): 16
 /// characters from a `std::mt19937` seeded by `std::random_device`.
 fn generateMultipartBoundary(a: Allocator) ![]u8 {
     const chars = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -111,7 +111,7 @@ fn sanitizeField(a: Allocator, text: []const u8) ![]u8 {
     return result.items;
 }
 
-/// Ports `build_multipart_body` (server-models.cpp:2367 @b29c606e2): the form
+/// Ports `build_multipart_body` (server-models.cpp:2393 @7fe450e19): the form
 /// fields (from the JSON the HTTP layer made of them) and the files,
 /// re-encoded as `multipart/form-data`.
 fn buildMultipartBody(a: Allocator, form_fields: *Value, files: *const http.SortedMap(http.UploadedFile), boundary: []const u8) ![]u8 {
@@ -149,10 +149,10 @@ fn buildMultipartBody(a: Allocator, form_fields: *Value, files: *const http.Sort
     return body.items;
 }
 
-/// `common_http_format_host` (common/http.h:25 @b29c606e2).
+/// `common_http_format_host` (common/http.h:25 @7fe450e19).
 const formatHost = http.commonHttpFormatHost;
 
-/// Ports `server_http_proxy` (server-models.h:381 @b29c606e2): the response
+/// Ports `server_http_proxy` (server-models.h:381 @7fe450e19): the response
 /// whose `next` reads the pipe the client thread fills.
 pub const Proxy = struct {
     base: http.Res,
@@ -166,7 +166,7 @@ pub const Proxy = struct {
 
     const vtable: http.Res.VTable = .{ .on_complete = http.Res.noComplete, .destroy = destroyProxy };
 
-    /// Ports `server_http_proxy`'s destructor (server-models.h:395 @b29c606e2): the pipe
+    /// Ports `server_http_proxy`'s destructor (server-models.h:395 @7fe450e19): the pipe
     /// closed both ways, then `cleanup`.
     fn destroyProxy(res: *http.Res) void {
         const self: *Proxy = @fieldParentPtr("base", res);
@@ -275,7 +275,7 @@ pub const Proxy = struct {
         }
     };
 
-    /// Ports the constructor `server_http_proxy` (server-models.cpp:2427 @b29c606e2):
+    /// Ports the constructor `server_http_proxy` (server-models.cpp:2453 @7fe450e19):
     /// starts the client thread and waits for the target's status and
     /// headers.
     ///

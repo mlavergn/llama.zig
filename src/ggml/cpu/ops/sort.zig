@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.4.1 (`b29c606e2`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.5.0 (`7fe450e19`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! The grouping is ours. `argsort` and `top_k` sit together in the C; `fill`
@@ -45,7 +45,7 @@ const off = common.byteOff;
 // fill
 
 /// Ports `ggml_compute_forward_fill_f32` and `ggml_compute_forward_fill_f16`
-/// (ops.cpp:2230, 2249 @b29c606e2).
+/// (ops.cpp:2230, 2249 @7fe450e19).
 ///
 /// The two differ only in the element type and which `ggml_vec_set_*` they
 /// call. The `f16` constant is narrowed once, before the loop, as the C does.
@@ -76,7 +76,7 @@ fn fillTyped(comptime T: type, params: *const ComputeParams, dst: *Tensor) void 
     }
 }
 
-/// Ports `ggml_compute_forward_fill` (ops.cpp:2268 @b29c606e2).
+/// Ports `ggml_compute_forward_fill` (ops.cpp:2268 @7fe450e19).
 pub export fn ggml_compute_forward_fill(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -90,7 +90,7 @@ pub export fn ggml_compute_forward_fill(params: *const ComputeParams, dst: *Tens
 // -----------------------------------------------------------------------------
 // tri
 
-/// Ports `ggml_compute_forward_tri_f32` (ops.cpp:2289 @b29c606e2).
+/// Ports `ggml_compute_forward_tri_f32` (ops.cpp:2289 @7fe450e19).
 ///
 /// The C picks one of four lambdas into a function pointer before the loop;
 /// here the switch is on the row/column comparison itself, which is the same
@@ -138,7 +138,7 @@ fn triF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_tri` (ops.cpp:2324 @b29c606e2).
+/// Ports `ggml_compute_forward_tri` (ops.cpp:2324 @7fe450e19).
 pub export fn ggml_compute_forward_tri(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -151,7 +151,7 @@ pub export fn ggml_compute_forward_tri(params: *const ComputeParams, dst: *Tenso
 // -----------------------------------------------------------------------------
 // argsort
 
-/// Ports `cmp_argsort` (ops.cpp:8478 @b29c606e2), the comparator.
+/// Ports `cmp_argsort` (ops.cpp:8478 @7fe450e19), the comparator.
 ///
 /// `template<enum ggml_sort_order order>` becomes a comptime `bool`. A strict
 /// `<` or `>` on the referenced floats, exactly as the C compares.
@@ -167,7 +167,7 @@ fn CmpArgsort(comptime ascending: bool) type {
     };
 }
 
-/// Ports `ggml_compute_forward_argsort_f32` (ops.cpp:8489 @b29c606e2).
+/// Ports `ggml_compute_forward_argsort_f32` (ops.cpp:8489 @7fe450e19).
 ///
 /// `std::sort` becomes a stable sort; see the file header for why that is the
 /// right answer to an unstable sort's ties.
@@ -210,7 +210,7 @@ fn argsortF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_argsort` (ops.cpp:8530 @b29c606e2).
+/// Ports `ggml_compute_forward_argsort` (ops.cpp:8530 @7fe450e19).
 pub export fn ggml_compute_forward_argsort(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -223,9 +223,9 @@ pub export fn ggml_compute_forward_argsort(params: *const ComputeParams, dst: *T
 // -----------------------------------------------------------------------------
 // top_k
 
-/// Ports `ggml_compute_forward_top_k_f32` (ops.cpp:8557 @b29c606e2).
+/// Ports `ggml_compute_forward_top_k_f32` (ops.cpp:8557 @7fe450e19).
 ///
-/// `std::partial_sort` with `cmp_top_k` (ops.cpp:8550 @b29c606e2), a strict `>`, leaves
+/// `std::partial_sort` with `cmp_top_k` (ops.cpp:8550 @7fe450e19), a strict `>`, leaves
 /// the `top_k` largest keys at the front in descending order. A stable sort of
 /// the whole row leaves exactly the same prefix whenever the keys are
 /// distinct; among equal keys it keeps index order, where libc++'s heap-based
@@ -275,7 +275,7 @@ fn topKF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_top_k` (ops.cpp:8596 @b29c606e2).
+/// Ports `ggml_compute_forward_top_k` (ops.cpp:8596 @7fe450e19).
 pub export fn ggml_compute_forward_top_k(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -291,19 +291,20 @@ pub export fn ggml_compute_forward_top_k(params: *const ComputeParams, dst: *Ten
 /// `GGML_F32_EPR`; see `simd.F32`.
 const f32_epr = simd.F32.epr;
 
-/// Ports `ggml_compute_forward_fwht_f32` (ops.cpp:11990 @b29c606e2), the
-/// `GGML_SIMD` arm without SVE.
+/// Ports `ggml_compute_forward_fwht_impl` (ops.cpp:12027 @7fe450e19), the
+/// `GGML_SIMD` arm without SVE. `S` is the template's `src_t`, `f32` or
+/// `ggml_fp16_t`; an `f16` element widens exactly, before the scale.
 ///
 /// The C runs the butterflies narrower than `GGML_F32_EPR` as scalars and the
 /// rest a vector at a time. The vector `u - v` is
 /// `GGML_F32_VEC_FMA(u, v, -1)`, a fused `u + v * -1` — and `v * -1` is exact,
 /// so it is bit-for-bit `u - v`. Both phases are therefore the same
 /// arithmetic, and the split is kept only so the loop reads like the C.
-fn fwhtF32(params: *const ComputeParams, dst: *Tensor) void {
+fn fwhtImpl(comptime S: type, params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
 
-    impl.assert(src1.type == c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    impl.assert(src1.type == (if (S == f32) c.GGML_TYPE_F32 else c.GGML_TYPE_F16), "src1->type == (std::is_same_v<src_t, float> ? GGML_TYPE_F32 : GGML_TYPE_F16)");
     impl.assert(dst.type == c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const l = common.BinaryLocals.of(src0, src1, dst);
@@ -331,10 +332,10 @@ fn fwhtF32(params: *const ComputeParams, dst: *Tensor) void {
         const j12 = @divTrunc(r - j13 * l.ne11 * l.ne12, l.ne11);
         const j11 = r - j13 * l.ne11 * l.ne12 - j12 * l.ne11;
 
-        const src_row: [*]const f32 = @ptrCast(@alignCast(s1 + off(j11, l.nb11) + off(j12, l.nb12) + off(j13, l.nb13)));
+        const src_row: [*]const S = @ptrCast(@alignCast(s1 + off(j11, l.nb11) + off(j12, l.nb12) + off(j13, l.nb13)));
         const dst_row: [*]f32 = @ptrCast(@alignCast(dd + off(j11, l.nb1) + off(j12, l.nb2) + off(j13, l.nb3)));
 
-        for (0..nn) |j| dst_row[j] = src_row[j] * scale;
+        for (0..nn) |j| dst_row[j] = fwhtLoad(S, src_row[j]) * scale;
 
         // Scalar passes
         var len: usize = 1;
@@ -345,7 +346,13 @@ fn fwhtF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// One radix-2 pass of `fwhtF32` at span `len`.
+/// Ports `ggml_fwht_load` (ops.cpp:12018 @7fe450e19) and its `ggml_fp16_t`
+/// overload, `ggml_fwht_load` (ops.cpp:12022 @7fe450e19).
+inline fn fwhtLoad(comptime S: type, value: S) f32 {
+    return if (S == f32) value else impl.fp16ToFp32(value);
+}
+
+/// One radix-2 pass of `fwhtImpl` at span `len`.
 inline fn butterfly(row: [*]f32, n: usize, len: usize) void {
     var i: usize = 0;
     while (i < n) : (i += 2 * len) {
@@ -358,13 +365,14 @@ inline fn butterfly(row: [*]f32, n: usize, len: usize) void {
     }
 }
 
-/// Ports `ggml_compute_forward_fwht` (ops.cpp:12066 @b29c606e2).
+/// Ports `ggml_compute_forward_fwht` (ops.cpp:12103 @7fe450e19).
 pub export fn ggml_compute_forward_fwht(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src1 = impl.one(Tensor, dst.src[1]);
 
     switch (src1.type) {
-        c.GGML_TYPE_F32 => fwhtF32(params, dst),
-        else => impl.abort("fatal error - fwht is F32 only"),
+        c.GGML_TYPE_F32 => fwhtImpl(f32, params, dst),
+        c.GGML_TYPE_F16 => fwhtImpl(c.ggml_fp16_t, params, dst),
+        else => impl.abort("fatal error - fwht supports F32 and F16 input"),
     }
 }
 

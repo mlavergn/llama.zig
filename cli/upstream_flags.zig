@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! **Not a port.** Extracted from `llama.cpp/common/arg.cpp` (v0.4.1,
-//! `b29c606e2`) by listing every string in every `common_arg` constructor:
+//! **Not a port.** Extracted from `llama.cpp/common/arg.cpp` (v0.5.0,
+//! `7fe450e19`) by listing every string in every `common_arg` constructor:
 //!
 //! ```sh
 //! grep -oE '\{ *"[-a-zA-Z0-9_]+"( *, *"[^"]+")* *\}' llama.cpp/common/arg.cpp \

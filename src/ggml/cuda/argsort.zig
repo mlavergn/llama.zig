@@ -3,13 +3,13 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/argsort.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/argsort.cuh` at v0.4.1 (`b29c606e2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/argsort.cuh` at v0.5.0 (`7fe450e19`). The
 //! kernels -- `init_indices`, `init_offsets`, `k_argsort_f32_i32` -- stay
 //! CUDA.
 //!
 //! # CUB
 //!
-//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:115 @b29c606e2), so rows
+//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:115 @7fe450e19), so rows
 //! too long for the bitonic kernel go to CUB's device-wide sorts. Their
 //! host-side dispatch is CUB's header templates, which Zig cannot
 //! instantiate; `cub_shim.cu` wraps exactly upstream's six calls behind a C
@@ -32,15 +32,15 @@ const Tensor = c.ggml_tensor;
 // -----------------------------------------------------------------------------
 // The CUB shim (`cub_shim.cu`)
 
-const CubSort = fn (d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, stream: cu.cudaStream_t) callconv(.c) cu.cudaError_t;
-const CubSegmentedSort = fn (d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, nrows: c_int, offset_iterator: [*]c_int, stream: cu.cudaStream_t) callconv(.c) cu.cudaError_t;
+const CubSort = fn (d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_keys_out: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, stream: cu.cudaStream_t) callconv(.c) cu.cudaError_t;
+const CubSegmentedSort = fn (d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_keys_out: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, nrows: c_int, offset_iterator: [*]c_int, stream: cu.cudaStream_t) callconv(.c) cu.cudaError_t;
 
-extern fn ggml_cuda_cub_radix_sort_pairs(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, stream: cu.cudaStream_t) cu.cudaError_t;
-extern fn ggml_cuda_cub_radix_sort_pairs_descending(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, stream: cu.cudaStream_t) cu.cudaError_t;
-extern fn ggml_cuda_cub_segmented_radix_sort_pairs(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, nrows: c_int, offset_iterator: [*]c_int, stream: cu.cudaStream_t) cu.cudaError_t;
-extern fn ggml_cuda_cub_segmented_radix_sort_pairs_descending(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, nrows: c_int, offset_iterator: [*]c_int, stream: cu.cudaStream_t) cu.cudaError_t;
-extern fn ggml_cuda_cub_segmented_sort_pairs(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, nrows: c_int, offset_iterator: [*]c_int, stream: cu.cudaStream_t) cu.cudaError_t;
-extern fn ggml_cuda_cub_segmented_sort_pairs_descending(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, nrows: c_int, offset_iterator: [*]c_int, stream: cu.cudaStream_t) cu.cudaError_t;
+extern fn ggml_cuda_cub_radix_sort_pairs(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_keys_out: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, stream: cu.cudaStream_t) cu.cudaError_t;
+extern fn ggml_cuda_cub_radix_sort_pairs_descending(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_keys_out: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, stream: cu.cudaStream_t) cu.cudaError_t;
+extern fn ggml_cuda_cub_segmented_radix_sort_pairs(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_keys_out: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, nrows: c_int, offset_iterator: [*]c_int, stream: cu.cudaStream_t) cu.cudaError_t;
+extern fn ggml_cuda_cub_segmented_radix_sort_pairs_descending(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_keys_out: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, nrows: c_int, offset_iterator: [*]c_int, stream: cu.cudaStream_t) cu.cudaError_t;
+extern fn ggml_cuda_cub_segmented_sort_pairs(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_keys_out: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, nrows: c_int, offset_iterator: [*]c_int, stream: cu.cudaStream_t) cu.cudaError_t;
+extern fn ggml_cuda_cub_segmented_sort_pairs_descending(d_temp_storage: ?*anyopaque, temp_storage_bytes: *usize, temp_keys: [*]f32, temp_keys_out: [*]f32, temp_indices: [*]c_int, dst: [*]c_int, ncols: c_int, nrows: c_int, offset_iterator: [*]c_int, stream: cu.cudaStream_t) cu.cudaError_t;
 
 comptime {
     // The externs above must match the shim's two shapes.
@@ -55,7 +55,7 @@ comptime {
 // -----------------------------------------------------------------------------
 // CUB
 
-/// Ports `argsort_f32_i32_cuda_cub_chunk_nrows` (argsort.cu:33 @b29c606e2):
+/// Ports `argsort_f32_i32_cuda_cub_chunk_nrows` (argsort.cu:33 @7fe450e19):
 /// the suggested maximum number of rows to process during one
 /// `argsortF32I32CudaCub` call.
 pub fn cubChunkNrows(nb01: usize, nrows: i64) c_int {
@@ -70,15 +70,21 @@ pub fn cubChunkNrows(nb01: usize, nrows: i64) c_int {
     return @truncate(@min(@as(i64, chunk_nrows), nrows));
 }
 
-/// Ports `argsort_f32_i32_cuda_cub` (argsort.cu:45 @b29c606e2).
+/// Ports `argsort_f32_i32_cuda_cub` (argsort.cu:45 @7fe450e19). The keys
+/// sort out of place, into `temp_keys_out`: CUB's device-wide sorts do not
+/// allow their input and output to alias.
 pub fn argsortF32I32CudaCub(pool: *common.Pool, x: ?*const anyopaque, dst: [*]c_int, ncols: c_int, nrows: c_int, order: c.ggml_sort_order, stream: cu.cudaStream_t) void {
     var temp_indices_alloc = common.PoolAlloc(c_int).initAlloc(pool, @as(usize, @bitCast(@as(isize, ncols *% nrows))));
     defer temp_indices_alloc.deinit();
     var temp_keys_alloc = common.PoolAlloc(f32).initAlloc(pool, @as(usize, @bitCast(@as(isize, ncols *% nrows))));
     defer temp_keys_alloc.deinit();
+    // Device*Sort algorithms currently do not allow for in-place sorting/aliasing of input/outputs
+    var temp_keys_out_alloc = common.PoolAlloc(f32).initAlloc(pool, @as(usize, @bitCast(@as(isize, ncols *% nrows))));
+    defer temp_keys_out_alloc.deinit();
 
     const temp_indices = temp_indices_alloc.get().?;
     const temp_keys = temp_keys_alloc.get().?;
+    const temp_keys_out = temp_keys_out_alloc.get().?;
 
     const block_size = 256;
     const grid_size: kernels.Dim3 = .{ .x = @bitCast(@divTrunc(ncols + block_size - 1, block_size)), .y = @bitCast(nrows) };
@@ -115,40 +121,40 @@ pub fn argsortF32I32CudaCub(pool: *common.Pool, x: ?*const anyopaque, dst: [*]c_
     // The C repeats the same six-way dispatch twice, once with a null
     // temporary buffer to size it and once to sort.
     const Dispatch = struct {
-        fn run(d_temp_storage: ?*anyopaque, bytes: *usize, o: c.ggml_sort_order, n: c_int, cap: bool, keys: [*]f32, idx: [*]c_int, out: [*]c_int, nc: c_int, offs: [*]c_int, s: cu.cudaStream_t) void {
+        fn run(d_temp_storage: ?*anyopaque, bytes: *usize, o: c.ggml_sort_order, n: c_int, cap: bool, keys: [*]f32, keys_out: [*]f32, idx: [*]c_int, out: [*]c_int, nc: c_int, offs: [*]c_int, s: cu.cudaStream_t) void {
             if (o == c.GGML_SORT_ORDER_ASC) {
                 if (n == 1) {
-                    common.cudaCheck(ggml_cuda_cub_radix_sort_pairs(d_temp_storage, bytes, keys, idx, out, nc, s), "DeviceRadixSort::SortPairs(...)", @src());
+                    common.cudaCheck(ggml_cuda_cub_radix_sort_pairs(d_temp_storage, bytes, keys, keys_out, idx, out, nc, s), "DeviceRadixSort::SortPairs(...)", @src());
                 } else if (cap) {
-                    common.cudaCheck(ggml_cuda_cub_segmented_radix_sort_pairs(d_temp_storage, bytes, keys, idx, out, nc, n, offs, s), "DeviceSegmentedRadixSort::SortPairs(...)", @src());
+                    common.cudaCheck(ggml_cuda_cub_segmented_radix_sort_pairs(d_temp_storage, bytes, keys, keys_out, idx, out, nc, n, offs, s), "DeviceSegmentedRadixSort::SortPairs(...)", @src());
                 } else {
-                    common.cudaCheck(ggml_cuda_cub_segmented_sort_pairs(d_temp_storage, bytes, keys, idx, out, nc, n, offs, s), "DeviceSegmentedSort::SortPairs(...)", @src());
+                    common.cudaCheck(ggml_cuda_cub_segmented_sort_pairs(d_temp_storage, bytes, keys, keys_out, idx, out, nc, n, offs, s), "DeviceSegmentedSort::SortPairs(...)", @src());
                 }
             } else {
                 if (n == 1) {
-                    common.cudaCheck(ggml_cuda_cub_radix_sort_pairs_descending(d_temp_storage, bytes, keys, idx, out, nc, s), "DeviceRadixSort::SortPairsDescending(...)", @src());
+                    common.cudaCheck(ggml_cuda_cub_radix_sort_pairs_descending(d_temp_storage, bytes, keys, keys_out, idx, out, nc, s), "DeviceRadixSort::SortPairsDescending(...)", @src());
                 } else if (cap) {
-                    common.cudaCheck(ggml_cuda_cub_segmented_radix_sort_pairs_descending(d_temp_storage, bytes, keys, idx, out, nc, n, offs, s), "DeviceSegmentedRadixSort::SortPairsDescending(...)", @src());
+                    common.cudaCheck(ggml_cuda_cub_segmented_radix_sort_pairs_descending(d_temp_storage, bytes, keys, keys_out, idx, out, nc, n, offs, s), "DeviceSegmentedRadixSort::SortPairsDescending(...)", @src());
                 } else {
-                    common.cudaCheck(ggml_cuda_cub_segmented_sort_pairs_descending(d_temp_storage, bytes, keys, idx, out, nc, n, offs, s), "DeviceSegmentedSort::SortPairsDescending(...)", @src());
+                    common.cudaCheck(ggml_cuda_cub_segmented_sort_pairs_descending(d_temp_storage, bytes, keys, keys_out, idx, out, nc, n, offs, s), "DeviceSegmentedSort::SortPairsDescending(...)", @src());
                 }
             }
         }
     };
 
-    Dispatch.run(null, &temp_storage_bytes, order, nrows, is_capturing, temp_keys, temp_indices, dst, ncols, offset_iterator, stream);
+    Dispatch.run(null, &temp_storage_bytes, order, nrows, is_capturing, temp_keys, temp_keys_out, temp_indices, dst, ncols, offset_iterator, stream);
 
     var temp_storage_alloc = common.PoolAlloc(u8).initAlloc(pool, temp_storage_bytes);
     defer temp_storage_alloc.deinit();
     const d_temp_storage: ?*anyopaque = temp_storage_alloc.get();
 
-    Dispatch.run(d_temp_storage, &temp_storage_bytes, order, nrows, is_capturing, temp_keys, temp_indices, dst, ncols, offset_iterator, stream);
+    Dispatch.run(d_temp_storage, &temp_storage_bytes, order, nrows, is_capturing, temp_keys, temp_keys_out, temp_indices, dst, ncols, offset_iterator, stream);
 }
 
 // -----------------------------------------------------------------------------
 // Bitonic
 
-/// Ports `next_power_of_2` (argsort.cu:216 @b29c606e2).
+/// Ports `next_power_of_2` (argsort.cu:219 @7fe450e19).
 pub fn nextPowerOf2(x: c_int) c_int {
     var n: c_int = 1;
     while (n < x) {
@@ -157,7 +163,7 @@ pub fn nextPowerOf2(x: c_int) c_int {
     return n;
 }
 
-/// Ports `argsort_f32_i32_cuda_bitonic` (argsort.cu:224 @b29c606e2).
+/// Ports `argsort_f32_i32_cuda_bitonic` (argsort.cu:227 @7fe450e19).
 pub fn argsortF32I32CudaBitonic(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, order: c.ggml_sort_order, stream: cu.cudaStream_t) void {
     // bitonic sort requires ncols to be power of 2
     const ncols_pad = nextPowerOf2(ncols);
@@ -183,7 +189,7 @@ pub fn argsortF32I32CudaBitonic(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c
 // -----------------------------------------------------------------------------
 // The op
 
-/// Ports `ggml_cuda_op_argsort` (argsort.cu:251 @b29c606e2), the
+/// Ports `ggml_cuda_op_argsort` (argsort.cu:254 @7fe450e19), the
 /// `GGML_CUDA_USE_CUB` arm.
 pub fn opArgsort(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);

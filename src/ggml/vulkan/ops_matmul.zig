@@ -4,8 +4,10 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
-//! (`b29c606e2`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.5.0
+//! (`7fe450e19`). Upstream split `ggml-vulkan.cpp` into those files at
+//! v0.5.0.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -26,7 +28,7 @@ const ops = m.ops;
 const ceilDiv = ops.ceilDiv;
 
 /// Mirror `DMMV_WG_SIZE_SUBGROUP` and `DMMV_WG_SIZE_LARGE`
-/// (ggml-vulkan.cpp:573, 574 @b29c606e2), the indices into the dmmv tables.
+/// (ggml-vulkan-types.h:418, 419 @7fe450e19), the indices into the dmmv tables.
 pub const dmmv_wg_size_subgroup = 0;
 pub const dmmv_wg_size_large = 1;
 
@@ -38,7 +40,7 @@ pub fn roundupPow2(x: u64, n: u64) u64 {
     return (x + n - 1) & ~(n - 1);
 }
 
-/// Ports `ggml_vk_align_size` (ggml-vulkan.cpp:8580 @b29c606e2).
+/// Ports `ggml_vk_align_size` (ggml-vulkan.cpp:5626 @7fe450e19).
 pub fn alignSize(width: u64, a: u64) u64 {
     return ((width + a - 1) / a) * a;
 }
@@ -104,18 +106,19 @@ fn hasDmmvQ81(t: c.ggml_type) bool {
         c.GGML_TYPE_Q6_K,
         c.GGML_TYPE_IQ1_S,
         c.GGML_TYPE_IQ1_M,
+        c.GGML_TYPE_IQ4_XS,
         => true,
         else => false,
     };
 }
 
-/// Ports `ggml_vk_get_to_fp16` (ggml-vulkan.cpp:8008 @b29c606e2).
+/// Ports `ggml_vk_get_to_fp16` (ggml-vulkan.cpp:5261 @7fe450e19).
 pub fn getToFp16(ctx: *BackendCtx, t: c.ggml_type) ?*Pipeline {
     if (!hasDequant(t)) return null;
     return ctx.device.pipeline_dequant[@intCast(t)];
 }
 
-/// Ports `ggml_vk_get_mul_mat_mat_f16acc` (ggml-vulkan.cpp:9133 @b29c606e2):
+/// Ports `ggml_vk_get_mul_mat_mat_f16acc` (ggml-vulkan.cpp:5738 @7fe450e19):
 /// whether a matmul of these types and precision prefers the f16
 /// accumulator.
 fn getMulMatMatF16acc(ctx: *const BackendCtx, src0_type: c.ggml_type, src1_type: c.ggml_type, prec: c.ggml_prec) bool {
@@ -131,7 +134,7 @@ fn getMulMatMatF16acc(ctx: *const BackendCtx, src0_type: c.ggml_type, src1_type:
     return dev.fp16 and prec == c.GGML_PREC_DEFAULT;
 }
 
-/// Ports `ggml_vk_get_mul_mat_mat_pipeline_map` (ggml-vulkan.cpp:9149 @b29c606e2):
+/// Ports `ggml_vk_get_mul_mat_mat_pipeline_map` (ggml-vulkan.cpp:5754 @7fe450e19):
 /// the tile configurations of the matmul for these types, falling back to
 /// the f32 accumulator when the f16 one has none.
 ///
@@ -155,7 +158,7 @@ pub fn getMulMatMatPipelineMap(ctx: *const BackendCtx, src0_type: c.ggml_type, s
     return found.?.items;
 }
 
-/// Ports `ggml_vk_guess_matmul_pipeline_map` (ggml-vulkan.cpp:9166 @b29c606e2):
+/// Ports `ggml_vk_guess_matmul_pipeline_map` (ggml-vulkan.cpp:5771 @7fe450e19):
 /// the device's tile selector's choice, aligned when asked and available.
 pub fn guessMatmulPipelineMap(ctx: *const BackendCtx, configs: []const MatmulPipelinePair, mm: u32, n: u32, aligned: bool, mul_mat_id: bool) *Pipeline {
     const dev = ctx.device;
@@ -165,7 +168,7 @@ pub fn guessMatmulPipelineMap(ctx: *const BackendCtx, configs: []const MatmulPip
     return if (aligned and configs[idx].aligned != null) configs[idx].aligned.? else configs[idx].unaligned.?;
 }
 
-/// Ports `ggml_vk_guess_matmul_pipeline_align_map` (ggml-vulkan.cpp:9175 @b29c606e2).
+/// Ports `ggml_vk_guess_matmul_pipeline_align_map` (ggml-vulkan.cpp:5780 @7fe450e19).
 pub fn guessMatmulPipelineAlignMap(ctx: *const BackendCtx, configs: []const MatmulPipelinePair, mm: u32, n: u32, mul_mat_id: bool) u32 {
     const dev = ctx.device;
     const selector = (if (mul_mat_id) dev.matmul_id_tile_selector else dev.matmul_tile_selector).?;
@@ -190,7 +193,7 @@ fn dmmvWg(ctx: *const BackendCtx, a_type: c.ggml_type, mm: u32, k: u32) usize {
     return wg;
 }
 
-/// Ports `ggml_vk_get_dequantize_mul_mat_vec` (ggml-vulkan.cpp:8045 @b29c606e2).
+/// Ports `ggml_vk_get_dequantize_mul_mat_vec` (ggml-vulkan.cpp:5298 @7fe450e19).
 pub fn getDequantizeMulMatVec(ctx: *BackendCtx, a_type: c.ggml_type, b_type: c.ggml_type, num_cols: u32, mm: u32, k: u32) ?*Pipeline {
     impl.assert(b_type == c.GGML_TYPE_F32 or b_type == c.GGML_TYPE_F16 or b_type == c.GGML_TYPE_Q8_1, "b_type == GGML_TYPE_F32 || b_type == GGML_TYPE_F16 || b_type == GGML_TYPE_Q8_1");
     impl.assert(num_cols >= 1 and num_cols <= m.device.mul_mat_vec_max_cols, "num_cols >= 1 && num_cols <= mul_mat_vec_max_cols");
@@ -207,7 +210,7 @@ pub fn getDequantizeMulMatVec(ctx: *BackendCtx, a_type: c.ggml_type, b_type: c.g
     return if (b_type == c.GGML_TYPE_F32) dev.pipeline_dequant_mul_mat_vec_f32_f32[wg][t][num_cols - 1] else dev.pipeline_dequant_mul_mat_vec_f16_f32[wg][t][num_cols - 1];
 }
 
-/// Ports `ggml_vk_get_dequantize_mul_mat_vec_id` (ggml-vulkan.cpp:8133 @b29c606e2).
+/// Ports `ggml_vk_get_dequantize_mul_mat_vec_id` (ggml-vulkan.cpp:5387 @7fe450e19).
 pub fn getDequantizeMulMatVecId(ctx: *BackendCtx, a_type: c.ggml_type, b_type: c.ggml_type, mm: u32, k: u32) ?*Pipeline {
     impl.assert(b_type == c.GGML_TYPE_F32 or b_type == c.GGML_TYPE_Q8_1, "b_type == GGML_TYPE_F32 || b_type == GGML_TYPE_Q8_1");
     if (b_type == c.GGML_TYPE_Q8_1 and !hasDmmvQ81(a_type)) return null;
@@ -223,7 +226,7 @@ pub fn getDequantizeMulMatVecId(ctx: *BackendCtx, a_type: c.ggml_type, b_type: c
     return dev.pipeline_dequant_mul_mat_vec_id_f32[wg][t];
 }
 
-/// Ports `ggml_vk_guess_split_k` (ggml-vulkan.cpp:9039 @b29c606e2).
+/// Ports `ggml_vk_guess_split_k` (ggml-vulkan.cpp:5647 @7fe450e19).
 pub fn guessSplitK(ctx: *const BackendCtx, mm: u32, n: u32, k: u32, disable_split_k: bool, pipeline: *const Pipeline) u32 {
     if (disable_split_k) return 1;
 
@@ -255,7 +258,7 @@ pub fn guessSplitK(ctx: *const BackendCtx, mm: u32, n: u32, k: u32, disable_spli
     return split_k;
 }
 
-/// Ports `ggml_vk_matmul` (ggml-vulkan.cpp:9083 @b29c606e2): batches split
+/// Ports `ggml_vk_matmul` (ggml-vulkan.cpp:5689 @7fe450e19): batches split
 /// over the z workgroup limit, and with split_k > 1 a pass into scratch and
 /// a reduction.
 pub fn matmul(
@@ -338,7 +341,7 @@ pub fn matmul(
     ctx.prealloc_split_k_need_sync = true;
 }
 
-/// Ports `ggml_vk_matmul_id` (ggml-vulkan.cpp:9184 @b29c606e2).
+/// Ports `ggml_vk_matmul_id` (ggml-vulkan.cpp:5789 @7fe450e19).
 pub fn matmulId(
     ctx: *BackendCtx,
     subctx: *Context,
@@ -391,7 +394,7 @@ fn cpyElements(ne: u32) [3]u32 {
     return .{ ne, 1, 1 };
 }
 
-/// Ports `ggml_vk_cpy_to_contiguous` (ggml-vulkan.cpp:9348 @b29c606e2).
+/// Ports `ggml_vk_cpy_to_contiguous` (ggml-vulkan.cpp:5953 @7fe450e19).
 pub fn cpyToContiguous(ctx: *BackendCtx, subctx: *Context, pipeline: *Pipeline, tensor: *const Tensor, in: Subbuffer, out: Subbuffer) void {
     const ne = ops.u32Of(c.ggml_nelements(tensor));
     var pc = ops.unaryPushConstantsInit(tensor, tensor, ne);
@@ -404,7 +407,7 @@ pub fn cpyToContiguous(ctx: *BackendCtx, subctx: *Context, pipeline: *Pipeline, 
     m.context.syncBuffers(ctx, subctx);
 }
 
-/// Ports `ggml_vk_cpy_to_strided` (ggml-vulkan.cpp:9375 @b29c606e2): copy
+/// Ports `ggml_vk_cpy_to_strided` (ggml-vulkan.cpp:5978 @7fe450e19): copy
 /// into a caller-defined dense layout, strides in output elements.
 pub fn cpyToStrided(ctx: *BackendCtx, subctx: *Context, pipeline: *Pipeline, tensor: *const Tensor, in: Subbuffer, out: Subbuffer, nb10: u32, nb11: u32, nb12: u32, nb13: u32) void {
     const ne = ops.u32Of(c.ggml_nelements(tensor));
@@ -418,14 +421,14 @@ pub fn cpyToStrided(ctx: *BackendCtx, subctx: *Context, pipeline: *Pipeline, ten
     m.context.syncBuffers(ctx, subctx);
 }
 
-/// Ports `ggml_vk_get_quantize_pipeline` (ggml-vulkan.cpp:9403 @b29c606e2).
+/// Ports `ggml_vk_get_quantize_pipeline` (ggml-vulkan.cpp:6006 @7fe450e19).
 pub fn getQuantizePipeline(ctx: *BackendCtx, t: c.ggml_type) *Pipeline {
     if (t == c.GGML_TYPE_Q8_1) return ctx.device.pipeline_quantize_q8_1_x4.?;
     impl.fprintfStderr("Missing quantize pipeline for type: %s\n", .{c.ggml_type_name(t)});
     impl.abort("fatal error");
 }
 
-/// Ports `ggml_vk_quantize_q8_1` (ggml-vulkan.cpp:9413 @b29c606e2).
+/// Ports `ggml_vk_quantize_q8_1` (ggml-vulkan.cpp:6016 @7fe450e19).
 pub fn quantizeQ81(ctx: *BackendCtx, subctx: *Context, in: Subbuffer, out: Subbuffer, ne: u32) void {
     const pipeline = getQuantizePipeline(ctx, c.GGML_TYPE_Q8_1);
     const num_blocks = ceilDiv(ne, pipeline.wg_denoms[0]);
@@ -437,7 +440,7 @@ pub fn quantizeQ81(ctx: *BackendCtx, subctx: *Context, in: Subbuffer, out: Subbu
     m.context.syncBuffers(ctx, subctx);
 }
 
-/// Ports `ggml_vk_get_64b_indexing_pipeline` (ggml-vulkan.cpp:9432 @b29c606e2):
+/// Ports `ggml_vk_get_64b_indexing_pipeline` (ggml-vulkan.cpp:6035 @7fe450e19):
 /// the 64-bit-indexing variant along the pipeline's `next` chain, when the
 /// headers have the extension.
 pub fn get64bIndexingPipeline(pipeline: *Pipeline) *Pipeline {
@@ -481,7 +484,7 @@ fn typeSizeOf(t: c.ggml_type) u64 {
     return c.ggml_type_size(t);
 }
 
-/// Ports `ggml_vk_mul_mat_q_f16` (ggml-vulkan.cpp:9446 @b29c606e2): the
+/// Ports `ggml_vk_mul_mat_q_f16` (ggml-vulkan.cpp:6049 @7fe450e19): the
 /// matrix-matrix path. Operands the chosen shader cannot read directly are
 /// converted into `prealloc_x`/`prealloc_y` first -- dequantized to fp16,
 /// made contiguous, or quantized to q8_1 for the integer-dot shaders.
@@ -716,7 +719,7 @@ fn at(cg: *const impl.CGraph, i: c_int) *Tensor {
     return cg.nodes[@intCast(i)].?;
 }
 
-/// Ports `ggml_vk_should_use_mmvq` (ggml-vulkan.cpp:9719 @b29c606e2): whether
+/// Ports `ggml_vk_should_use_mmvq` (ggml-vulkan.cpp:6321 @7fe450e19): whether
 /// quantizing B to q8_1 for the integer-dot matrix-vector shader pays.
 pub fn shouldUseMmvq(dev: *const m.device.Device, mm: u32, n: u32, k: u32, src0_type: c.ggml_type) bool {
     _ = mm;
@@ -756,7 +759,7 @@ pub fn shouldUseMmvq(dev: *const m.device.Device, mm: u32, n: u32, k: u32, src0_
             if (k < 2048) return false;
             return switch (src0_type) {
                 // From tests on A770 Linux, may need more tuning
-                c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q5_1 => false,
+                c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q5_1, c.GGML_TYPE_IQ4_XS => false,
                 else => true,
             };
         },
@@ -793,7 +796,7 @@ fn fusedBiases(ctx: *const BackendCtx, cgraph: *const impl.CGraph, node_idx: c_i
     return b;
 }
 
-/// Ports `ggml_vk_mul_mat_vec_q_f16` (ggml-vulkan.cpp:9800 @b29c606e2): the
+/// Ports `ggml_vk_mul_mat_vec_q_f16` (ggml-vulkan.cpp:6403 @7fe450e19): the
 /// matrix-vector path, for one column or up to `mul_mat_vec_max_cols`,
 /// with B optionally quantized to q8_1 and one or two biases fused.
 /// `swap_inputs` computes B^T*A for a one-row result, whose flat output
@@ -977,7 +980,7 @@ pub fn mulMatVecQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGr
     if (y_non_contig or quantize_y) ctx.prealloc_y_need_sync = true;
 }
 
-/// Ports `ggml_vk_mul_mat_vec_p021_f16_f32` (ggml-vulkan.cpp:10043 @b29c606e2):
+/// Ports `ggml_vk_mul_mat_vec_p021_f16_f32` (ggml-vulkan.cpp:6646 @7fe450e19):
 /// f16 x f32 over the 0213-permuted operands attention produces, with
 /// several Q heads per K head under grouped-query attention.
 pub fn mulMatVecP021F16F32(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
@@ -1029,7 +1032,7 @@ pub fn mulMatVecP021F16F32(ctx: *BackendCtx, subctx: *Context, cgraph: *const im
     m.context.dispatch(ctx, subctx, pipeline, &.{ d_Qx, d_Qy, d_D, biases.f0, biases.f1 }, &pc, .{ 1, @truncate(ne01), workgroups_z });
 }
 
-/// Ports `ggml_vk_mul_mat_vec_nc_f16_f32` (ggml-vulkan.cpp:10135 @b29c606e2):
+/// Ports `ggml_vk_mul_mat_vec_nc_f16_f32` (ggml-vulkan.cpp:6738 @7fe450e19):
 /// f16 x f32 with a non-contiguous, unpermuted A.
 pub fn mulMatVecNcF16F32(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
     const dst = at(cgraph, node_idx);
@@ -1090,7 +1093,7 @@ pub fn mulMatVecNcF16F32(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl
     m.context.dispatch(ctx, subctx, pipeline, &.{ d_Qx, d_Qy, d_D, biases.f0, biases.f1 }, &pc, .{ @truncate(ne03), @truncate(ne01), @truncate(ne12) });
 }
 
-/// Ports `ggml_vk_fwht_pipeline_idx` (ggml-vulkan.cpp:10229 @b29c606e2).
+/// Ports `ggml_vk_fwht_pipeline_idx` (ggml-vulkan.cpp:6832 @7fe450e19).
 fn fwhtPipelineIdx(n: i64) i32 {
     return switch (n) {
         64 => 0,
@@ -1101,7 +1104,7 @@ fn fwhtPipelineIdx(n: i64) i32 {
     };
 }
 
-/// Ports `ggml_vk_can_use_fwht` (ggml-vulkan.cpp:10239 @b29c606e2): a
+/// Ports `ggml_vk_can_use_fwht` (ggml-vulkan.cpp:6842 @7fe450e19): a
 /// MUL_MAT whose A is hinted to be a Hadamard matrix runs as a fast
 /// Walsh-Hadamard transform of B instead.
 fn canUseFwht(ctx: *const BackendCtx, src1: *const Tensor, dst: *const Tensor) bool {
@@ -1115,7 +1118,7 @@ fn canUseFwht(ctx: *const BackendCtx, src1: *const Tensor, dst: *const Tensor) b
     return true;
 }
 
-/// Ports `ggml_vk_fwht` (ggml-vulkan.cpp:10265 @b29c606e2).
+/// Ports `ggml_vk_fwht` (ggml-vulkan.cpp:6868 @7fe450e19).
 fn fwht(ctx: *BackendCtx, subctx: *Context, src: *const Tensor, dst: *Tensor) void {
     const idx = fwhtPipelineIdx(src.ne[0]);
     const pipeline = ctx.device.pipeline_fwht_f32[@intCast(idx)].?;
@@ -1134,13 +1137,13 @@ fn fwht(ctx: *BackendCtx, subctx: *Context, src: *const Tensor, dst: *Tensor) vo
     m.context.dispatch(ctx, subctx, pipeline, &.{ src_buf, dst_buf }, &pc, .{ workgroups_x, 1, 1 });
 }
 
-/// Ports `ggml_vk_nb_elem` (ggml-vulkan.cpp:10291 @b29c606e2): a stride in
+/// Ports `ggml_vk_nb_elem` (ggml-vulkan.cpp:6894 @7fe450e19): a stride in
 /// elements.
 fn nbElem(t: *const Tensor, i: usize) u32 {
     return @truncate(t.nb[i] / c.ggml_type_size(t.type));
 }
 
-/// Ports `ggml_vk_dsv4_hc_comb` (ggml-vulkan.cpp:10295 @b29c606e2): the
+/// Ports `ggml_vk_dsv4_hc_comb` (ggml-vulkan.cpp:6898 @7fe450e19): the
 /// DeepSeek-V4 hyper-connection combine matrix, one token per 16 lanes.
 pub fn dsv4HcComb(ctx: *BackendCtx, subctx: *Context, mixes: *const Tensor, scale: *const Tensor, base: *const Tensor, dst: *Tensor) void {
     const pipeline = ctx.device.pipeline_dsv4_hc_comb_f32 orelse impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
@@ -1174,10 +1177,13 @@ pub fn dsv4HcComb(ctx: *BackendCtx, subctx: *Context, mixes: *const Tensor, scal
     m.context.dispatch(ctx, subctx, pipeline, &.{ mixes_buf, scale_buf, base_buf, dst_buf }, &pc, .{ n_tokens, 1, 1 });
 }
 
-/// Ports `ggml_vk_dsv4_hc_pre` (ggml-vulkan.cpp:10325 @b29c606e2): the
+/// Ports `ggml_vk_dsv4_hc_pre` (ggml-vulkan.cpp:6928 @7fe450e19): the
 /// weighted sum of a token's hyper-connection streams.
 pub fn dsv4HcPre(ctx: *BackendCtx, subctx: *Context, x: *const Tensor, weights: *const Tensor, dst: *Tensor) void {
-    const pipeline = ctx.device.pipeline_dsv4_hc_pre_f32 orelse impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
+    const scale: f32 = @bitCast(dst.op_params[0]);
+    const gated = dst.op_params[1] != 0;
+
+    const pipeline = (if (gated) ctx.device.pipeline_dsv4_hc_pre_gated_f32 else ctx.device.pipeline_dsv4_hc_pre_f32) orelse impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
     const n_embd: u32 = @truncate(@as(u64, @bitCast(x.ne[0])));
     const n_tokens: u32 = @truncate(@as(u64, @bitCast(x.ne[2])));
 
@@ -1195,22 +1201,25 @@ pub fn dsv4HcPre(ctx: *BackendCtx, subctx: *Context, x: *const Tensor, weights: 
         .nbx2 = nbElem(x, 2),
         .nbw0 = nbElem(weights, 0),
         .nbw1 = nbElem(weights, 1),
+        .nbw2 = nbElem(weights, 2),
         .nbd0 = nbElem(dst, 0),
         .nbd1 = nbElem(dst, 1),
         .x_offset = 0,
         .w_offset = 0,
         .d_offset = 0,
+        .scale = scale,
     };
     ops.initPushconstTensorOffsets(ctx, &pc, x, weights, null, null, dst);
 
     m.context.dispatch(ctx, subctx, pipeline, &.{ x_buf, w_buf, d_buf }, &pc, .{ n_embd, n_tokens, 1 });
 }
 
-/// Ports `ggml_vk_dsv4_hc_post` (ggml-vulkan.cpp:10352 @b29c606e2): the
+/// Ports `ggml_vk_dsv4_hc_post` (ggml-vulkan.cpp:6959 @7fe450e19): the
 /// streams' update from a layer's output, its post weights and the combine
-/// matrix.
-pub fn dsv4HcPost(ctx: *BackendCtx, subctx: *Context, x: *const Tensor, residual: *const Tensor, post: *const Tensor, comb: *const Tensor, dst: *Tensor) void {
-    const pipeline = ctx.device.pipeline_dsv4_hc_post_f32 orelse impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
+/// matrix -- or, with no `comb`, the identity, through the `nocomb`
+/// pipeline, with `x` bound in its slot.
+pub fn dsv4HcPost(ctx: *BackendCtx, subctx: *Context, x: *const Tensor, residual: *const Tensor, post: *const Tensor, comb: ?*const Tensor, dst: *Tensor) void {
+    const pipeline = (if (comb != null) ctx.device.pipeline_dsv4_hc_post_f32 else ctx.device.pipeline_dsv4_hc_post_nocomb_f32) orelse impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
     const n_embd: u32 = @truncate(@as(u64, @bitCast(x.ne[0])));
     const n_tokens: u32 = @truncate(@as(u64, @bitCast(x.ne[1])));
 
@@ -1219,7 +1228,7 @@ pub fn dsv4HcPost(ctx: *BackendCtx, subctx: *Context, x: *const Tensor, residual
     const x_buf = m.context.tensorSubbuffer(ctx, x, true);
     const r_buf = m.context.tensorSubbuffer(ctx, residual, true);
     const p_buf = m.context.tensorSubbuffer(ctx, post, true);
-    const c_buf = m.context.tensorSubbuffer(ctx, comb, true);
+    const c_buf = if (comb) |cb| m.context.tensorSubbuffer(ctx, cb, true) else x_buf;
     const d_buf = m.context.tensorSubbuffer(ctx, dst, true);
 
     var pc: push.Dsv4HcPost = .{
@@ -1232,9 +1241,9 @@ pub fn dsv4HcPost(ctx: *BackendCtx, subctx: *Context, x: *const Tensor, residual
         .nbr2 = nbElem(residual, 2),
         .nbp0 = nbElem(post, 0),
         .nbp1 = nbElem(post, 1),
-        .nbc0 = nbElem(comb, 0),
-        .nbc1 = nbElem(comb, 1),
-        .nbc2 = nbElem(comb, 2),
+        .nbc0 = if (comb) |cb| nbElem(cb, 0) else 0,
+        .nbc1 = if (comb) |cb| nbElem(cb, 1) else 0,
+        .nbc2 = if (comb) |cb| nbElem(cb, 2) else 0,
         .nbd0 = nbElem(dst, 0),
         .nbd1 = nbElem(dst, 1),
         .nbd2 = nbElem(dst, 2),
@@ -1249,7 +1258,7 @@ pub fn dsv4HcPost(ctx: *BackendCtx, subctx: *Context, x: *const Tensor, residual
     m.context.dispatch(ctx, subctx, pipeline, &.{ x_buf, r_buf, p_buf, c_buf, d_buf }, &pc, .{ n_embd, n_tokens, 1 });
 }
 
-/// Ports `ggml_vk_mul_mat` (ggml-vulkan.cpp:10383 @b29c606e2): chooses the
+/// Ports `ggml_vk_mul_mat` (ggml-vulkan.cpp:6990 @7fe450e19): chooses the
 /// path -- M split for an A past the storage range, FWHT, the two
 /// attention-shaped vector kernels, the vector kernel with the inputs
 /// swapped for a one-row result, the general vector kernel, or the

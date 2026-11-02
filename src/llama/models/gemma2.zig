@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma2.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/gemma2.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_gemma2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -21,16 +21,14 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma2`'s `load_arch_hparams` (models/gemma2.cpp:3 @b29c606e2).
+/// Ports `llama_model_gemma2`'s `load_arch_hparams` (models/gemma2.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
     hp.n_swa = 4096; // Gemma 2's default.
-    var swa_period: u32 = 2;
-    if (try meta.getKeyOrArrScalar(.attention_sliding_window_pattern, false, exc)) |v| swa_period = v;
-    hp.setSwaPattern(swa_period, false);
+    try self.loadSwaPattern(ml, 2, false, exc);
     hp.attn_soft_cap = true;
     hp.rope_freq_base_train_swa = hp.rope_freq_base_train;
     hp.rope_freq_scale_train_swa = hp.rope_freq_scale_train;
@@ -55,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadK(0)));
 }
 
-/// Ports `llama_model_gemma2`'s `load_arch_tensors` (models/gemma2.cpp:32 @b29c606e2).
+/// Ports `llama_model_gemma2`'s `load_arch_tensors` (models/gemma2.cpp:30 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -83,13 +81,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma2`'s `build_arch_graph` (models/gemma2.cpp:58 @b29c606e2).
+/// Ports `llama_model_gemma2`'s `build_arch_graph` (models/gemma2.cpp:56 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma2`'s `graph`
-/// (models/gemma2.cpp:62 @b29c606e2).
+/// (models/gemma2.cpp:60 @7fe450e19).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

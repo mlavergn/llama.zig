@@ -60,7 +60,17 @@ mask() {
     # an abort names its source as the compiler saw it: upstream's C++ by
     # path, the port by file name
     sed -E -e 's/[0-9]+(\.[0-9]+)? ?(ms|sec|s)([^a-zA-Z0-9]|$)/N\2\3/g' -e 's/0x[0-9a-f]{6,}/0xADDR/g' \
-        -e 's#[^ :]*/([^/ :]+\.(cpp|c|h|zig)):([0-9]+):#\1:\3:#g' "$1"
+        -e 's#[^ :]*/([^/ :]+\.(cpp|c|h|zig)):([0-9]+):#\1:\3:#g' "$1" | sort_input_tensor_runs
+}
+
+# llama_graph_n_input_tensors (llama-context.cpp:583 @7fe450e19) logs in an
+# unordered_map's order over tensor addresses, which differ between the
+# sides: each run of its lines is compared as a set (harness/input_tensor_order.zig)
+sort_input_tensor_runs() {
+    LC_ALL=C awk '
+        /llama_graph_n_input_tensors: / { if (!inrun) { fflush(); inrun = 1 } print | "LC_ALL=C sort"; next }
+        { if (inrun) { close("LC_ALL=C sort"); inrun = 0 } print }
+        END { if (inrun) close("LC_ALL=C sort") }'
 }
 
 n_ok=0

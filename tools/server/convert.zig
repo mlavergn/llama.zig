@@ -9,7 +9,7 @@
 //! `server_chat_convert_anthropic_to_oai` and
 //! `convert_transcriptions_to_chatcmpl` from
 //! `llama.cpp/tools/server/server-chat.cpp` and
-//! `llama.cpp/tools/server/server-chat.h` (llama.cpp v0.4.1, `b29c606e2`);
+//! `llama.cpp/tools/server/server-chat.h` (llama.cpp v0.5.0, `7fe450e19`);
 //! the file's fourth function, `server_chat_msg_diff_to_json_oaicompat`, is
 //! `result.zig`'s. Each declaration names what it ports and the line it
 //! began at.
@@ -35,12 +35,16 @@ const jsonValueJson = common.jsonValueJson;
 
 /// `j.contains(key) && j.at(key).is_array()`.
 fn existsAndIsArray(j: *const Value, key: []const u8) bool {
-    return j.contains(key) and (j.at(key) catch unreachable).isArray();
+    return j.contains(key) and (j.at(key) catch |err| switch (err) {
+        error.OutOfMemory, error.JsonError => unreachable,
+    }).isArray();
 }
 
 /// `j.contains(key) && j.at(key).is_string()`.
 fn existsAndIsString(j: *const Value, key: []const u8) bool {
-    return j.contains(key) and (j.at(key) catch unreachable).isString();
+    return j.contains(key) and (j.at(key) catch |err| switch (err) {
+        error.OutOfMemory, error.JsonError => unreachable,
+    }).isString();
 }
 
 /// `j.at(key) == s`: false for anything but that string.
@@ -68,7 +72,7 @@ fn arrayOf(a: Allocator, v: Value) Error!Value {
 // the Responses API
 
 /// Ports `server_chat_convert_responses_to_chatcmpl` (server-chat.cpp:6
-/// @b29c606e2): an OpenAI Responses request as a `/chat/completions` one --
+/// @7fe450e19): an OpenAI Responses request as a `/chat/completions` one --
 /// `instructions` a system message, each input item a message (an output
 /// item, a function call or a reasoning item following an assistant
 /// message merged into it), function tools unwrapped, `max_output_tokens`
@@ -270,10 +274,24 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
                 } else {
                     const chatcmpl_outputs = try (try item.at("output")).clone(a);
                     for (chatcmpl_outputs.array.items) |*chatcmpl_output| {
-                        if (!chatcmpl_output.contains("type") or !try atIs(chatcmpl_output, "type", "input_text")) {
-                            return throw(error.InvalidArgument, "Output of tool call should be 'Input text'", .{});
+                        if (!chatcmpl_output.contains("type")) {
+                            return throw(error.InvalidArgument, "Output of tool call missing 'type' field", .{});
                         }
-                        try chatcmpl_output.set(a, "type", try Value.initString(a, "text"));
+                        const is_text = try atIs(chatcmpl_output, "type", "input_text");
+                        const is_image = try atIs(chatcmpl_output, "type", "input_image");
+                        if (!is_text and !is_image) {
+                            return throw(error.InvalidArgument, "Output of tool call should be 'Input text' or 'Input image'", .{});
+                        }
+                        if (is_text) {
+                            try chatcmpl_output.set(a, "type", try Value.initString(a, "text"));
+                        } else {
+                            if (!chatcmpl_output.contains("image_url")) {
+                                return throw(error.InvalidArgument, "'image_url' is required", .{});
+                            }
+                            try chatcmpl_output.set(a, "type", try Value.initString(a, "image_url"));
+                            const url = try object(a, .{.{ "url", try (try chatcmpl_output.at("image_url")).clone(a) }});
+                            try chatcmpl_output.set(a, "image_url", url);
+                        }
                     }
                     try chatcmpl_messages.pushBack(a, try object(a, .{
                         .{ "content", chatcmpl_outputs },
@@ -372,8 +390,8 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
 // -----------------------------------------------------------------------------
 // the Anthropic Messages API
 
-/// Ports `normalize_anthropic_billing_header` (server-chat.cpp:312
-/// @b29c606e2): the five-character `cch=` stamp of an
+/// Ports `normalize_anthropic_billing_header` (server-chat.cpp:326
+/// @7fe450e19): the five-character `cch=` stamp of an
 /// `x-anthropic-billing-header:` system prompt overwritten with `f`s, so it
 /// does not break prefix caching. Any other prompt is left alone.
 ///
@@ -423,8 +441,8 @@ fn imageUrlOf(a: Allocator, source: *const Value) Error!?Value {
     return null;
 }
 
-/// Ports `server_chat_convert_anthropic_to_oai` (server-chat.cpp:334
-/// @b29c606e2): an Anthropic Messages request as a `/chat/completions`
+/// Ports `server_chat_convert_anthropic_to_oai` (server-chat.cpp:348
+/// @7fe450e19): an Anthropic Messages request as a `/chat/completions`
 /// one -- the system prompt a message, content blocks as parts, thinking
 /// blocks as reasoning, `tool_use` blocks as tool calls and `tool_result`
 /// blocks as tool messages after their turn; tools, `tool_choice`,
@@ -725,8 +743,8 @@ pub fn stof(s: []const u8) Error!f32 {
     return r;
 }
 
-/// Ports `convert_transcriptions_to_chatcmpl` (server-chat.cpp:637
-/// @b29c606e2): a transcription request -- its form fields as JSON, its
+/// Ports `convert_transcriptions_to_chatcmpl` (server-chat.cpp:651
+/// @7fe450e19): a transcription request -- its form fields as JSON, its
 /// uploaded `file` -- as a `/chat/completions` body: the template's ASR
 /// preset as the system and user messages, the prompt ending in the media
 /// marker, and the form's string fields typed.

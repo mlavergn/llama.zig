@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! **Not a port by itself.** It gathers the port of
-//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.4.1
-//! (`b29c606e2`), the x86 counterpart of `repack/arm/`, and x86's
+//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.5.0
+//! (`7fe450e19`), the x86 counterpart of `repack/arm/`, and x86's
 //! `arch-fallback.h` renames (`fallback.zig`): the file's 12 exports at the
 //! `__AVX2__` arms x86-64-v3 compiles, and the gemms' `__AVX512BW__ &&
 //! __AVX512DQ__` arms x86-64-v4 adds.
@@ -15,7 +15,7 @@
 //! - `q4_b32.zig`   — the `q4_0`, `iq4_nl` and `mxfp4` gemv and gemm
 //! - `q4_k.zig`     — the `q4_K` gemv and gemm
 //! - `q2_k.zig`     — the `q2_K` gemv and gemm
-//! - `fallback.zig` — the 24 names x86 takes from the generic bodies
+//! - `fallback.zig` — the 28 names x86 takes from the generic bodies
 //!
 //! # The oracle
 //!

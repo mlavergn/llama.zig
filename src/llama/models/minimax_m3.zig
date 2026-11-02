@@ -10,12 +10,12 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/minimax-m3.cpp` at v0.4.1
-//! (`b29c606e2`): `llama_model_minimax_m3`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/minimax-m3.cpp` at v0.5.0
+//! (`7fe450e19`): `llama_model_minimax_m3`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` with
 //! `build_attn_msa_fa`, and `llm_graph_input_msa`, which upstream defines
-//! in the model's own file. `msa_params` (src/models/models.h:2220
-//! @b29c606e2) is not kept on the model: its three fields are the
+//! in the model's own file. `msa_params` (src/models/models.h:2241
+//! @7fe450e19) is not kept on the model: its three fields are the
 //! hyperparameters they are loaded from, read where the graph needs them.
 
 const std = @import("std");
@@ -33,7 +33,7 @@ const Tensor = c.ggml_tensor;
 const Ubatch = @import("../batch.zig").Ubatch;
 const MsaContext = kv_cache_msa.MsaContext;
 
-/// Ports `llama_model_minimax_m3`'s `load_arch_hparams` (src/models/minimax-m3.cpp:13 @b29c606e2).
+/// Ports `llama_model_minimax_m3`'s `load_arch_hparams` (src/models/minimax-m3.cpp:13 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -52,7 +52,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.indexer_local_blocks = (try meta.getKey(u32, .attention_indexer_local_blocks, true, exc)).?;
 
     // Avoid a division by zero.
-    impl.assert(hp.indexer_block_size > 0, "models/minimax-m3.cpp", 28, "hparams.indexer_block_size > 0");
+    impl.assert(hp.indexer_block_size > 0, "models/minimax-m3.cpp", 33, "hparams.indexer_block_size > 0");
 
     self.type = switch (hp.nLayer()) {
         60 => .@"428b_a23b",
@@ -60,7 +60,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_minimax_m3`'s `load_arch_tensors` (src/models/minimax-m3.cpp:36 @b29c606e2).
+/// Ports `llama_model_minimax_m3`'s `load_arch_tensors` (src/models/minimax-m3.cpp:41 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -114,18 +114,18 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_minimax_m3`'s `build_arch_graph` (src/models/minimax-m3.cpp:87 @b29c606e2).
+/// Ports `llama_model_minimax_m3`'s `build_arch_graph` (src/models/minimax-m3.cpp:92 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// `GGML_PAD` (ggml.h:267 @b29c606e2) over `int64_t`: a mask, so for a
+/// `GGML_PAD` (ggml.h:267 @7fe450e19) over `int64_t`: a mask, so for a
 /// block size that is not a power of two it is not a round-up, as in the C.
 fn padI64(x: i64, n: i64) i64 {
     return (x +% n -% 1) & ~(n -% 1);
 }
 
-/// Ports `llm_graph_input_msa` (src/models/minimax-m3.cpp:91 @b29c606e2): the
+/// Ports `llm_graph_input_msa` (src/models/minimax-m3.cpp:96 @7fe450e19): the
 /// per-ubatch maps between positions and cells that MSA's block selection
 /// reads, and the bias that forces the local blocks.
 const InpMsa = struct {
@@ -145,7 +145,7 @@ const InpMsa = struct {
     blk: c_int,
     local: c_int,
 
-    /// Ports `llm_graph_input_msa`'s `set_input` (src/models/minimax-m3.cpp:96 @b29c606e2).
+    /// Ports `llm_graph_input_msa`'s `set_input` (src/models/minimax-m3.cpp:101 @7fe450e19).
     pub fn setInput(self: *InpMsa, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         if (self.pos_slot_i) |t| self.mctx.setInputPosSlot(t, ubatch);
@@ -158,7 +158,7 @@ const InpMsa = struct {
             if (ubatch.pos == null) return;
             const n_tokens: i64 = ubatch.n_tokens;
             const nblk: i64 = bias.ne[0];
-            const data = impl.allocator.alloc(f32, @intCast(nblk * n_tokens)) catch impl.abort("models/minimax-m3.cpp", 106, "out of memory");
+            const data = impl.allocator.alloc(f32, @intCast(nblk * n_tokens)) catch impl.abort("models/minimax-m3.cpp", 111, "out of memory");
             defer impl.allocator.free(data);
             @memset(data, 0.0);
             var i: i64 = 0;
@@ -175,8 +175,8 @@ const InpMsa = struct {
         }
     }
 
-    /// Ports `llm_graph_input_msa`'s `can_reuse` (src/models/minimax-m3.cpp:121
-    /// @b29c606e2): valid while the tensors' dimensions still match the new
+    /// Ports `llm_graph_input_msa`'s `can_reuse` (src/models/minimax-m3.cpp:126
+    /// @7fe450e19): valid while the tensors' dimensions still match the new
     /// ubatch and cache window, and the ubatch is in the same regime --
     /// decode graphs have `pos_slot_f`, batch graphs `cell_blk`.
     pub fn canReuse(self: *InpMsa, params: *const graph.Params) bool {
@@ -221,7 +221,7 @@ const InpMsa = struct {
 };
 
 /// Ports `llama_model_minimax_m3`'s `graph`'s `build_attn_msa_fa`
-/// (src/models/minimax-m3.cpp:171 @b29c606e2): one flash-attention call for
+/// (src/models/minimax-m3.cpp:176 @7fe450e19): one flash-attention call for
 /// every GQA group -- and at a multi-stream decode, every stream -- by
 /// mapping them onto its sequence dimension, `ne[3]`.
 ///
@@ -237,8 +237,8 @@ fn buildAttnMsaFa(b: *const graph.Builder, q_cur: *Tensor, k: *Tensor, v: *Tenso
     const T = q_cur.ne[2];
     const C = k.ne[3];
     const R = @divTrunc(HQ * T, Gp * C);
-    impl.assert(Gp * C * R == HQ * T, "models/minimax-m3.cpp", 183, "Gp*C*R == HQ*T");
-    impl.assert(mask.type == c.GGML_TYPE_F16, "models/minimax-m3.cpp", 184, "mask->type == GGML_TYPE_F16");
+    impl.assert(Gp * C * R == HQ * T, "models/minimax-m3.cpp", 188, "Gp*C*R == HQ*T");
+    impl.assert(mask.type == c.GGML_TYPE_F16, "models/minimax-m3.cpp", 189, "mask->type == GGML_TYPE_F16");
 
     // [D, HQ, T] -> [D, Gp, C, R] -> [D, R, Gp, C]
     // batch  (C = HKV,    R = T): channel = group
@@ -267,7 +267,7 @@ var warned_no_fa = false;
 var warned_unified = false;
 
 /// Ports the constructor of `llama_model_minimax_m3`'s `graph`
-/// (src/models/minimax-m3.cpp:205 @b29c606e2). Partial rotary: the head size
+/// (src/models/minimax-m3.cpp:210 @7fe450e19). Partial rotary: the head size
 /// is not `n_rot`, so that is not asserted.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
@@ -276,7 +276,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
     const n_tokens = b.n_tokens;
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/minimax-m3.cpp", 209, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/minimax-m3.cpp", 214, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -332,8 +332,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         n_kv = msa_kqm.ne[0];
         n_tps = msa_kqm.ne[1]; // tokens per stream
         ns = msa_kqm.ne[3]; // streams in this ubatch
-        impl.assert(msa_kqm.type == c.GGML_TYPE_F16, "models/minimax-m3.cpp", 264, "msa_kqm->type == GGML_TYPE_F16 && \"MSA requires the FA (f16) mask\"");
-        impl.assert(n_tps * ns == n_tokens, "models/minimax-m3.cpp", 265, "n_tps*ns == n_tokens");
+        impl.assert(msa_kqm.type == c.GGML_TYPE_F16, "models/minimax-m3.cpp", 269, "msa_kqm->type == GGML_TYPE_F16 && \"MSA requires the FA (f16) mask\"");
+        impl.assert(n_tps * ns == n_tokens, "models/minimax-m3.cpp", 270, "n_tps*ns == n_tokens");
 
         // The position axis covers every position in the cache, padded to
         // whole blocks.
@@ -341,7 +341,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         nblk = @divTrunc(n_ps, blk);
         msa_decode = n_tps == 1;
 
-        const inp = impl.allocator.create(InpMsa) catch impl.abort("models/minimax-m3.cpp", 272, "out of memory");
+        const inp = impl.allocator.create(InpMsa) catch impl.abort("models/minimax-m3.cpp", 277, "out of memory");
         inp.* = .{ .mctx = mctx_msa, .blk = blk, .local = local };
 
         // Stream-grouped tokens.
@@ -439,13 +439,13 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 c.ggml_build_forward_expand(b.gf, mctx_cur.cpyV(ctx, Vcur, inp_attn.base.getVIdxs(), il));
                 const k = mctx_cur.getK(ctx, il);
                 const v = mctx_cur.getV(ctx, il);
-                impl.assert(!(v.nb[1] > v.nb[2]), "models/minimax-m3.cpp", 372, "!(v->nb[1] > v->nb[2]) && \"MSA assumes v_trans=false (FA on)\"");
+                impl.assert(!(v.nb[1] > v.nb[2]), "models/minimax-m3.cpp", 377, "!(v->nb[1] > v->nb[2]) && \"MSA assumes v_trans=false (FA on)\"");
 
                 const D = k.ne[0];
                 const HKV = k.ne[1];
                 const Gp = @divTrunc(b.n_head, HKV);
-                impl.assert(HKV == Hd, "models/minimax-m3.cpp", 377, "HKV == Hd && \"MSA: one indexer head per GQA group\"");
-                impl.assert(k.ne[3] == ns, "models/minimax-m3.cpp", 378, "k->ne[3] == ns");
+                impl.assert(HKV == Hd, "models/minimax-m3.cpp", 382, "HKV == Hd && \"MSA: one indexer head per GQA group\"");
+                impl.assert(k.ne[3] == ns, "models/minimax-m3.cpp", 383, "k->ne[3] == ns");
                 const K: c_int = if (topk_blocks < @as(c_int, @truncate(nblk))) topk_blocks else @truncate(nblk);
                 const K64: i64 = K;
                 const blk64: i64 = blk;
@@ -509,7 +509,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                     cur = buildAttnMsaFa(b, Qcur, kfa, vfa, mfa, Gp, kq_scale, il);
                 } else {
                     // A batch: a loop over the streams.
-                    const outs = impl.allocator.alloc(*Tensor, @intCast(ns)) catch impl.abort("models/minimax-m3.cpp", 445, "out of memory");
+                    const outs = impl.allocator.alloc(*Tensor, @intCast(ns)) catch impl.abort("models/minimax-m3.cpp", 450, "out of memory");
                     defer impl.allocator.free(outs);
                     const mf = msa_mf.?;
                     var st: i64 = 0;

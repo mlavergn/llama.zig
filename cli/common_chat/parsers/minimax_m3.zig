@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/minimax-m3.cpp` (llama.cpp v0.4.1,
-//! `b29c606e2`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/minimax-m3.cpp` (llama.cpp v0.5.0,
+//! `7fe450e19`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -216,7 +216,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_minimax_m3` (parsers/minimax-m3.cpp:3 @b29c606e2).
+/// Ports `common_chat_params_init_minimax_m3` (parsers/minimax-m3.cpp:3 @7fe450e19).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

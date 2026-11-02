@@ -35,6 +35,7 @@
 //! Usage: adapter_diff <tmpdir> <model.gguf> [--quick]
 
 const std = @import("std");
+const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
 
 const c = harness_root.impl.c;
@@ -48,6 +49,7 @@ const gpa = std.heap.c_allocator;
 extern fn adapter_ref_loras_order(keys: [*]const ?*anyopaque, scales: [*]const f32, n: usize, out_keys: [*]?*anyopaque, out_scales: [*]f32, out_bc: *usize) usize;
 extern fn adapter_ref_loras_find(keys: [*]const ?*anyopaque, scales: [*]const f32, n: usize, key: ?*anyopaque, out_scale: *f32) c_int;
 extern fn truncate(path: [*:0]const u8, len: i64) c_int;
+extern fn access(path: [*:0]const u8, mode: c_int) c_int;
 
 var checks: usize = 0;
 var failures: usize = 0;
@@ -148,7 +150,9 @@ fn normalize(log: []const u8) std.ArrayList(u8) {
         }
         out.appendSlice(gpa, line) catch unreachable;
     }
-    return out;
+    const sorted = input_tensor_order.sortRuns(gpa, out.items);
+    out.deinit(gpa);
+    return sorted;
 }
 
 fn firstDiff(name: []const u8, a: []const u8, b: []const u8) void {
@@ -531,6 +535,7 @@ fn Api(comptime port: bool) type {
         const decode = if (port) Pctx.llama_decode else c.llama_decode;
         const get_logits_ith = if (port) Pctx.llama_get_logits_ith else c.llama_get_logits_ith;
         const lora_init = if (port) Pad.llama_adapter_lora_init else c.llama_adapter_lora_init;
+        const lora_init_fp = if (port) Pad.llama_adapter_lora_init_from_file_ptr else c.llama_adapter_lora_init_from_file_ptr;
         const lora_free = if (port) Pad.llama_adapter_lora_free else c.llama_adapter_lora_free;
         const meta_count = if (port) Pad.llama_adapter_meta_count else c.llama_adapter_meta_count;
         const meta_key_by_index = if (port) Pad.llama_adapter_meta_key_by_index else c.llama_adapter_meta_key_by_index;
@@ -544,6 +549,59 @@ fn Api(comptime port: bool) type {
 }
 
 const Handle = ?*c.struct_llama_adapter_lora;
+
+/// The prefix `embedFile` puts before an embedded GGUF: not a multiple of
+/// anything, so every absolute offset differs from the GGUF's own.
+const embed_offset = 37;
+
+/// A copy of `path` behind `embed_offset` bytes of padding, as
+/// `llama_adapter_lora_init_from_file_ptr` reads it from the open file's
+/// current position.
+///
+/// Return: the copy's path.
+fn embedFile(path: [:0]const u8) [:0]u8 {
+    const out = std.fmt.allocPrintSentinel(gpa, "{s}.embedded", .{path}, 0) catch unreachable;
+    const in = c.fopen(path.ptr, "rb") orelse unreachable;
+    defer _ = c.fclose(in);
+    const o = c.fopen(out.ptr, "wb") orelse unreachable;
+    defer _ = c.fclose(o);
+    const pad: [embed_offset]u8 = @splat('x');
+    _ = c.fwrite(&pad, 1, pad.len, o);
+    var buf: [65536]u8 = undefined;
+    while (true) {
+        const n = c.fread(&buf, 1, buf.len, in);
+        if (n == 0) break;
+        _ = c.fwrite(&buf, 1, n, o);
+    }
+    return out;
+}
+
+/// `llama_adapter_lora_init_from_file_ptr` on one side: a null file, every
+/// file opened at its start, and every one again embedded behind
+/// `embed_offset` bytes with the file positioned at the GGUF. Each result,
+/// where it left the file, and a loaded adapter's metadata are noted; the
+/// adapters are freed again.
+fn filePtrSection(comptime A: type, model: ?*c.struct_llama_model, files: []const Lf, embedded: []const [:0]u8) void {
+    note("file_ptr null: {s}", .{if (A.lora_init_fp(model, null) == null) "null" else "ok"});
+    for (files, 0..) |f, i| {
+        for (0..2) |pass| {
+            const path = if (pass == 0) f.path else (embedded[i]);
+            if (path.len == 0) continue;
+            const fp = c.fopen(path.ptr, "rb") orelse {
+                note("file_ptr {s} #{d}: cannot open", .{ f.name, pass });
+                continue;
+            };
+            if (pass == 1) _ = c.fseek(fp, embed_offset, c.SEEK_SET);
+            const h = A.lora_init_fp(model, fp);
+            note("file_ptr {s} #{d}: {s} at {d}", .{ f.name, pass, if (h == null) "null" else "ok", c.ftell(fp) });
+            if (h != null) {
+                query(A, h, f.name);
+                A.lora_free(h);
+            }
+            _ = c.fclose(fp);
+        }
+    }
+}
 
 fn query(comptime A: type, ad: Handle, name: []const u8) void {
     if (ad == null) {
@@ -1054,6 +1112,24 @@ pub fn main(init: std.process.Init) !void {
         }
         rec = null;
         compare(init.io, out_dir, mc.name, "load", ref.items, port.items, 0);
+
+        // ---- llama_adapter_lora_init_from_file_ptr
+        {
+            var embedded = gpa.alloc([:0]u8, files.items.len) catch unreachable;
+            defer gpa.free(embedded);
+            for (files.items, 0..) |f, i| {
+                const exists = access(f.path.ptr, 0) == 0;
+                embedded[i] = if (exists) embedFile(f.path) else @constCast("");
+            }
+            ref.clearRetainingCapacity();
+            port.clearRetainingCapacity();
+            rec = &ref;
+            filePtrSection(Api(false), rm, files.items, embedded);
+            rec = &port;
+            filePtrSection(Api(true), pmc, files.items, embedded);
+            rec = null;
+            compare(init.io, out_dir, mc.name, "file_ptr", ref.items, port.items, 0);
+        }
 
         // ---- the script
         // An adapter one side failed to load has already failed the load

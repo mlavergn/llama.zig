@@ -53,13 +53,23 @@ trap 'rm -rf "$tmp"' EXIT
 #    fusion sites there are explicit intrinsics (`vmlaq_n_f32`, `vfmaq_f32`),
 #    not expressions the compiler chose, so the port can name them with
 #    `@mulAdd` and match exactly.
+#
+# The quantizer that writes the kernels' inputs, ggml-quants.c, is built
+# **off** in both runs. The port's quantizers stay plain (CLAUDE.md, "Float
+# contraction"), and the goldens test the dot product, not the bytes it is
+# fed: at v0.5.0 `quantize_row_iq1_m_impl`'s new split search quantized the
+# `ties` pattern differently with contraction on, and the iq1_m ARM golden
+# moved with a kernel nobody had touched.
 source scripts/upstream_pin.sh
+zig cc -mcpu="$GOLDEN_CPU" -c llama.cpp/ggml/src/ggml-quants.c -o "$tmp/ggml-quants-off.o" \
+    -std=c11 -w -O2 -ffp-contract=off \
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu
 build() {
     local out="$1"; shift
     zig cc -mcpu="$GOLDEN_CPU" harness/vecdot_golden.c \
         llama.cpp/ggml/src/ggml-cpu/quants.c \
         llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c \
-        llama.cpp/ggml/src/ggml-quants.c \
+        "$tmp/ggml-quants-off.o" \
         -o "$out" -std=c11 -w -O2 "$@" "${PIN_DEFS[@]}" \
         -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-cpu \
         "${REF_LIBS[@]}" \

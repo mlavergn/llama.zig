@@ -3,8 +3,8 @@
 //!
 //! **Not a port.** Upstream gives each architecture a class deriving from
 //! `llama_model_base` and overriding three virtuals -- `load_arch_hparams`,
-//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:767, 768, 769
-//! @b29c606e2) -- and `llama_model_mapping` (llama-model.cpp:43 @b29c606e2) picks the
+//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:770, 771, 772
+//! @7fe450e19) -- and `llama_model_mapping` (llama-model.cpp:43 @7fe450e19) picks the
 //! class. Here a class is a file exporting those three functions, and
 //! `forArch` is the mapping. An architecture with no entry is one the port
 //! has not reached: loading it stops at `error.Unported`, which
@@ -81,6 +81,7 @@ pub const granite_swa = @import("granite_swa.zig");
 pub const granite_switch = @import("granite_switch.zig");
 pub const grok = @import("grok.zig");
 pub const grovemoe = @import("grovemoe.zig");
+pub const hrm_text = @import("hrm_text.zig");
 pub const hunyuan_dense = @import("hunyuan_dense.zig");
 pub const hunyuan_moe = @import("hunyuan_moe.zig");
 pub const hunyuan_vl = @import("hunyuan_vl.zig");
@@ -257,6 +258,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .grok => entryOf(grok),
         .grovemoe => entryOf(grovemoe),
         .hunyuan_dense => .{ .loadArchHparams = hunyuan_vl.loadArchHparams, .loadArchTensors = hunyuan_vl.loadArchTensors, .buildArchGraph = hunyuan_dense.buildArchGraph },
+        .hrm_text => entryOf(hrm_text),
         .hunyuan_moe => entryOf(hunyuan_moe),
         .hunyuan_vl => entryOf(hunyuan_vl),
         .hy_v3 => entryOf(hy_v3),

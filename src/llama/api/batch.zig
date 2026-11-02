@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-batch.cpp` (v0.4.1, `b29c606e2`):
+//! Ported from `llama.cpp/src/llama-batch.cpp` (v0.5.0, `7fe450e19`):
 //! `llama_batch_get_one`, `llama_batch_init` and `llama_batch_free`, its
 //! three unmangled exports. The bodies are `batch.zig`'s.
 //!
@@ -16,17 +16,17 @@ const batch = @import("../batch.zig");
 
 const c = impl.c;
 
-/// Ports `llama_batch_get_one` (llama-batch.cpp:931 @b29c606e2).
+/// Ports `llama_batch_get_one` (llama-batch.cpp:931 @7fe450e19).
 pub fn llama_batch_get_one(tokens: [*c]c.llama_token, n_tokens: i32) callconv(.c) c.struct_llama_batch {
     return batch.batchGetOne(tokens, n_tokens);
 }
 
-/// Ports `llama_batch_init` (llama-batch.cpp:945 @b29c606e2).
+/// Ports `llama_batch_init` (llama-batch.cpp:945 @7fe450e19).
 pub fn llama_batch_init(n_tokens: i32, embd: i32, n_seq_max: i32) callconv(.c) c.struct_llama_batch {
     return batch.batchInit(n_tokens, embd, n_seq_max);
 }
 
-/// Ports `llama_batch_free` (llama-batch.cpp:975 @b29c606e2).
+/// Ports `llama_batch_free` (llama-batch.cpp:975 @7fe450e19).
 pub fn llama_batch_free(b: c.struct_llama_batch) callconv(.c) void {
     batch.batchFree(b);
 }

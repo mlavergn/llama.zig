@@ -3,15 +3,14 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/qwen3-coder.cpp` (llama.cpp v0.4.1,
-//! `b29c606e2`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/qwen3-coder.cpp` (llama.cpp v0.5.0,
+//! `7fe450e19`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
 const json = @import("json");
 const peg = @import("peg");
 const exception = @import("../exception.zig");
-const msg_mod = @import("../msg.zig");
 const chat_peg = @import("../chat_peg.zig");
 const params_mod = @import("../params.zig");
 const template = @import("../template.zig");
@@ -172,7 +171,7 @@ const Starts = struct {
     }
 };
 
-/// Ports `common_chat_params_init_qwen3_coder` (qwen3-coder.cpp:3 @b29c606e2).
+/// Ports `common_chat_params_init_qwen3_coder` (qwen3-coder.cpp:3 @7fe450e19).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -192,8 +191,9 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     if (supports_reasoning) {
         data.thinking_start_tag = "<think>";
         // Support both </think> and <tool_call> as reasoning end sequences.
+        // The newline variant comes first so it is included in the forced message
         // <function= is omitted, as it is a workaround for Qwen3-Coder which is not a thinking model
-        try data.thinking_end_tags.appendSlice(a, &.{ "</think>", "<tool_call>" });
+        try data.thinking_end_tags.appendSlice(a, &.{ "\n</think>", "</think>", "<tool_call>" });
         try data.preserved_tokens.appendSlice(a, &.{ "<think>", "</think>" });
     }
 

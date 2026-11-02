@@ -9,7 +9,7 @@
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-context.h`
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-ops.h`
 //!
-//! all at v0.4.1 (`b29c606e2`).
+//! all at v0.5.0 (`7fe450e19`).
 //!
 //! # Why these are hand-written rather than imported
 //!
@@ -48,36 +48,62 @@ const c = impl.c;
 pub const Tensor = c.ggml_tensor;
 pub const CGraph = c.ggml_cgraph;
 
-/// Mirrors `enum ggml_metal_device_id` (ggml-metal-device.h:245
-/// @b29c606e2).
-pub const DeviceId = @import("tuning_table.zig").DeviceId;
+/// Mirrors `enum ggml_metal_device_id` (ggml-metal-device.h:251 @7fe450e19).
+///
+/// Written by `scripts/gen-tuning-table`, in the enum's own order: until
+/// v0.4.1 the tuning table indexed it, and the props field below still has
+/// its width. Since v0.5.0 the port only carries it through to
+/// `ggml_metal_device_id_token`. Do not edit the members; rerun the script.
+pub const DeviceId = enum(c_uint) {
+    generic = 0,
+    m1,
+    m1_pro,
+    m1_max,
+    m1_ultra,
+    m2,
+    m2_pro,
+    m2_max,
+    m2_ultra,
+    m3,
+    m3_pro,
+    m3_max,
+    m3_ultra,
+    m4,
+    m4_pro,
+    m4_max,
+    m5,
+    m5_pro,
+    m5_max,
+    m5_ultra,
+    a18_pro,
+};
 
-/// Mirrors `ggml_metal_device_t` (ggml-metal-device.h:14 @b29c606e2): an
+/// Mirrors `ggml_metal_device_t` (ggml-metal-device.h:14 @7fe450e19): an
 /// opaque handle whose definition lives in the Objective-C.
 pub const Device = opaque {};
-/// Mirrors `ggml_metal_buffer_t` (ggml-metal-device.h:337 @b29c606e2).
+/// Mirrors `ggml_metal_buffer_t` (ggml-metal-device.h:343 @7fe450e19).
 pub const Buffer = opaque {};
-/// Mirrors `ggml_metal_event_t` (ggml-metal-device.h:299 @b29c606e2).
+/// Mirrors `ggml_metal_event_t` (ggml-metal-device.h:305 @7fe450e19).
 pub const Event = opaque {};
-/// Mirrors `ggml_metal_t` (ggml-metal-context.h:13 @b29c606e2).
+/// Mirrors `ggml_metal_t` (ggml-metal-context.h:13 @7fe450e19).
 pub const Context = opaque {};
 
-/// Mirrors `ggml_metal_library_t` (ggml-metal-device.h:98 @b29c606e2).
+/// Mirrors `ggml_metal_library_t` (ggml-metal-device.h:98 @7fe450e19).
 pub const Library = opaque {};
-/// Mirrors `ggml_metal_pipeline_t` (ggml-metal-device.h:33 @b29c606e2).
+/// Mirrors `ggml_metal_pipeline_t` (ggml-metal-device.h:33 @7fe450e19).
 pub const Pipeline = opaque {};
-/// Mirrors `ggml_metal_cv_t` (ggml-metal-device.h:20 @b29c606e2): a
+/// Mirrors `ggml_metal_cv_t` (ggml-metal-device.h:20 @7fe450e19): a
 /// wrapper over `MTLFunctionConstantValues`.
 pub const Cv = opaque {};
-/// Mirrors `ggml_metal_pipelines_t` (ggml-metal-device.h:39 @b29c606e2).
+/// Mirrors `ggml_metal_pipelines_t` (ggml-metal-device.h:39 @7fe450e19).
 /// The struct behind it is ours — `library.zig` defines it, since
 /// `ggml-metal-device.cpp` did.
 pub const Pipelines = opaque {};
 
 /// Mirrors `struct ggml_metal_pipeline_with_params` (ggml-metal-device.h:47
-/// @b29c606e2).
+/// @7fe450e19).
 ///
-/// **Returned by value by all 68 `get_pipeline_*` functions**, which makes
+/// **Returned by value by all 76 `get_pipeline_*` functions**, which makes
 /// its ABI load-bearing: it is 40 bytes with interior padding, and Zig
 /// 0.16 is known to mishandle small `extern struct`s *received* by value
 /// (see `CLAUDE.md`). `make struct-layout` checks the layout and the
@@ -97,8 +123,8 @@ pub const PipelineWithParams = extern struct {
     cnt: bool,
 };
 
-/// Mirrors `struct ggml_metal_device_props` (ggml-metal-device.h:272
-/// @b29c606e2).
+/// Mirrors `struct ggml_metal_device_props` (ggml-metal-device.h:278
+/// @7fe450e19).
 ///
 /// Every field is present because the offsets have to match, not because
 /// this port reads them. `make struct-layout` checks that they do.
@@ -135,8 +161,8 @@ pub const DeviceProps = extern struct {
 pub extern fn ggml_metal_device_id_token(id: DeviceId) [*c]const u8;
 pub extern fn ggml_metal_device_get(device: c_int, n_devices: c_int) ?*Device;
 pub extern fn ggml_metal_device_get_props(dev: *Device) *const DeviceProps;
-/// `ggml_metal_device_get_fusion_info` (ggml-metal-device.h:331
-/// @b29c606e2): the device-owned fusion info, defined in `fusion.zig` and
+/// `ggml_metal_device_get_fusion_info` (ggml-metal-device.h:337
+/// @7fe450e19): the device-owned fusion info, defined in `fusion.zig` and
 /// created by `ggml-metal-device.m`.
 pub extern fn ggml_metal_device_get_fusion_info(dev: *Device) ?*@import("fusion.zig").Info;
 pub extern fn ggml_metal_device_event_init(dev: *Device) ?*Event;
@@ -154,11 +180,11 @@ pub extern fn ggml_metal_cv_set_int16(cv: *Cv, value: i16, idx: i32) void;
 pub extern fn ggml_metal_cv_set_int32(cv: *Cv, value: i32, idx: i32) void;
 pub extern fn ggml_metal_cv_set_bool(cv: *Cv, value: bool, idx: i32) void;
 
-/// `ggml_metal_pipeline_init` (ggml-metal-device.h:35 @b29c606e2).
+/// `ggml_metal_pipeline_init` (ggml-metal-device.h:35 @7fe450e19).
 ///
 /// Lives in the `.m`; it only `calloc`s the wrapper and leaves `obj` nil,
 /// which is why the unit tests can make real handles without a device.
-/// `struct ggml_metal_buffer_id` (ggml-metal-device.h:9 @b29c606e2).
+/// `struct ggml_metal_buffer_id` (ggml-metal-device.h:9 @7fe450e19).
 ///
 /// A Metal buffer handle and a byte offset into it. 16 bytes, which is one
 /// of the shapes the Zig 0.16 by-value-struct ABI bug does **not** affect
@@ -172,11 +198,11 @@ pub const BufferId = extern struct {
     offs: usize,
 };
 
-/// `ggml_metal_cmd_buf_t` (ggml-metal-device.h:67 @b29c606e2) — an opaque
+/// `ggml_metal_cmd_buf_t` (ggml-metal-device.h:67 @7fe450e19) — an opaque
 /// `id<MTLCommandBuffer>`, which the C spells as `void *`.
 pub const CmdBuf = ?*anyopaque;
 
-/// `ggml_metal_encoder_t` (ggml-metal-device.h:73 @b29c606e2).
+/// `ggml_metal_encoder_t` (ggml-metal-device.h:73 @7fe450e19).
 pub const Encoder = opaque {};
 
 // The encoder surface `ggml-metal-ops.cpp` drives. All of it lives in
@@ -195,13 +221,13 @@ pub extern fn ggml_metal_encoder_memory_barrier(encoder: *Encoder) void;
 pub extern fn ggml_metal_encoder_end_encoding(encoder: *Encoder) void;
 
 /// `ggml_metal_pipeline_max_theads_per_threadgroup`
-/// (ggml-metal-device.h:61 @b29c606e2). The misspelling is upstream's.
+/// (ggml-metal-device.h:61 @7fe450e19). The misspelling is upstream's.
 pub extern fn ggml_metal_pipeline_max_theads_per_threadgroup(pipeline: PipelineWithParams) c_int;
 
-/// `ggml_metal_device_get_library` (ggml-metal-device.h:312 @b29c606e2).
+/// `ggml_metal_device_get_library` (ggml-metal-device.h:318 @7fe450e19).
 pub extern fn ggml_metal_device_get_library(dev: *Device) ?*Library;
 
-/// `ggml_metal_buffer_get_id` (ggml-metal-device.h:356 @b29c606e2).
+/// `ggml_metal_buffer_get_id` (ggml-metal-device.h:362 @7fe450e19).
 pub extern fn ggml_metal_buffer_get_id(buf: *Buffer, t: *const c.ggml_tensor) BufferId;
 
 pub extern fn ggml_metal_pipeline_init() ?*Pipeline;
@@ -246,6 +272,7 @@ pub extern fn ggml_metal_capture_next_compute(ctx: *Context) void;
 
 pub extern fn ggml_metal_op_mul_mat_id_extra_tpe(op: *const Tensor) usize;
 pub extern fn ggml_metal_op_mul_mat_id_extra_ids(op: *const Tensor) usize;
+pub extern fn ggml_metal_op_mul_mat_id_extra_amax(op: *const Tensor) usize;
 pub extern fn ggml_metal_op_flash_attn_ext_extra_pad(op: *const Tensor) usize;
 pub extern fn ggml_metal_op_flash_attn_ext_extra_blk(op: *const Tensor) usize;
 pub extern fn ggml_metal_op_flash_attn_ext_extra_tmp(op: *const Tensor) usize;
@@ -265,7 +292,7 @@ export fn zz_props_sizeof() usize {
 
 /// The same facts for `PipelineWithParams`, plus a value the C side reads
 /// back to prove the **return** ABI — 40 bytes with interior padding,
-/// returned by value 68 times over.
+/// returned by value 76 times over.
 export fn zz_pwp_sizeof() usize {
     return @sizeOf(PipelineWithParams);
 }
@@ -375,10 +402,9 @@ test "the props struct has the field count the gate expects" {
     try std.testing.expectEqual(@as(usize, 19), zz_props_nfields());
 }
 
-test "the device id enum matches the table's" {
-    // `DeviceProps.device_id` is typed as the same enum the tuning table
-    // indexes, so a renumbering there would silently change what this
-    // port reads out of the props.
+test "the device id enum has the C's width and order" {
+    // `DeviceProps.device_id` is typed as this enum, so its width places
+    // every later field, and `ggml_metal_device_id_token` reads its value.
     try std.testing.expectEqual(@as(c_uint, 15), @backingInt(DeviceId.m4_max));
     try std.testing.expectEqual(@as(usize, 4), @sizeOf(DeviceId));
 }

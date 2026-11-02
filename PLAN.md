@@ -2031,6 +2031,129 @@ open a terminal`; `NOTES.md` has how to tell.
 7. v0.4.0's items 8 and 9 (`x86_64_v4` and `tigerlake`), run at v0.4.1.
    That clears both syncs' AVX-512 pickups at once.
 
+
+### Pickup for the v0.5.0 sync
+
+Upstream `v0.5.0` (`7fe450e19`). As at v0.4.1, the CUDA host changes were
+ported on the Mac and have **never compiled** (no toolkit here), and the
+Vulkan host changes compiled only against a stub `libvulkan` (every glslc
+feature on, and every one off). `NOTES.md`, "Upstream sync v0.4.1 →
+v0.5.0", has what each area changed.
+
+**GB10 (`spark-dbff`, `~/src/mlavergn/llama.zig`)**
+
+1. **CUDA build.** `zig build reference cuda-ref --release=fast --prefix
+   zig-out/cuda-port`, `zig build reference -Dcuda-port=false
+   --release=fast --prefix zig-out/cuda-upstream`, `zig build cli`. First
+   compile of the changed Zig: watch `conv2d.zig` (`cublasGemmEx`,
+   `PoolAlloc`), `graph.zig` (`addAllocDeps`, the `[*c]` source loop) and
+   `fattn_common.zig` (`KV_max.ptr.? + …`). Every fatbin rebuilds, and the
+   generated kernel table must resolve the new keys:
+   `dsv4_hc_pre_f32<bool>` and `dsv4_hc_post_f32<bool>`,
+   `flash_attn_mask_to_sparse_indices<1,0>`, `<8,1>` and `<8,0>`,
+   `conv2d_pad_f16`, `conv2d_reduce_split_k`, `conv2d_implicit_gemm_f16<…>`,
+   `convert_unary_cont_vec4<S,T>`, `reduce_rows_f32_strided<bool>`, and the
+   sparse `flash_attn_ext_f16<256,256,…>` instances. Re-run
+   `gen-fattn-config` and `gen-mmq-config` (output must equal the Mac's),
+   and compare `cub_shim.cu`'s SASS with the reference `argsort.o` (argsort
+   now sorts keys out of place).
+2. **`cuda-ops-diff`**, every case bit-identical, 0 `SUPPORTS`. Find by
+   name: `DSV4_HC_PRE(…gated=1)` at n_hc 1, 2, 3, 5, 8, 65;
+   `DSV4_HC_POST(…identity=1)`; the three new `CONV_2D(…type_kernel=f16…)`
+   (pad, split_k=2, cuBLAS pointwise); `MEAN`/`SUM_ROWS` over permuted and
+   sliced `[11,5,6,3]`, `[16,5,6,3]`; `DUP(type=i16…)`;
+   `FLASH_ATTN_EXT(hsk=256,hsv=256,…n_kv_max=512|2048)`, nr23 [12,1] at kv
+   4096 and 8192, [12,2] with 67 queries; the 128/128 Q8_0 sparse cases;
+   `MUL_MAT_ID` with an F32 `prec_set_src` not supported on both sides.
+   Injections: drop `scale` in `hc_pre`; the `<true>` kernel with a null
+   comb; `ncols1*` removed from `n_kv_max`; `has_wide_sparse` false;
+   `getStrideTile` without `+ 4`; `split_k` capped at 1; the vec4
+   alignment test inverted; the strided `sum_rows` `nb` swapped.
+3. **`cuda-backend-diff`**, both runs (physical and
+   `GGML_CUDA_DEVICES=3`). The new `graph_optimize` probe must print
+   `topk_moe softmax n_expert=32 … at_end=0 … deps = N` with N > 0 on both
+   sides, `at_end=1` lines ending `until null`, `softmax_weight` and
+   `n_expert=31` lines with `deps = 0`, and `moe_reduce` lines.
+   Injections: `addAllocDeps(i, i+n-1)`; `topkMoeFusion` without the
+   `!delayed_softmax` guard; source dependencies skipped. Take the new
+   answer counts for `CLAUDE.md`.
+4. **`cuda-node-diff`**, per node and fused, on Qwen3.5; the fused pass
+   also on `qwen3moe`, `qwen4exp-moe` (gated `HC_PRE`, `HC_POST` without
+   comb), `hrm_text-dense`, `dflash-gemma` and `qwen35-fusedqkv` from
+   `make arch-fixtures`. Confirm the two `gf_res_prev` arenas give distinct
+   CUDA-graph keys. **`cuda-parity-cli`** 6/6.
+5. **Vulkan.** No `vk-toolchain` (the SDK pin is unchanged). On all four
+   arms: `vk-repro` (four new shaders, `fa_decode_ph1/ph2_cm1`,
+   `fa_sparse_compact`, `fa_sparse_compact_subgroup`, are new inputs to
+   `glslc -O`'s nondeterminism); `vk-push-layout` (53 structs);
+   `vk-backend-diff` (9 ref exports, `vk_conv_block_sizes` now weak);
+   `vk-ops-diff`, finding by name `DSV4_HC_PRE(…gated=1)` (31×17, 4096×21,
+   n_hc=4), `DSV4_HC_POST(…identity=1)`, `FLASH_ATTN_EXT(…n_kv_max=512|2048)`
+   (gqa-12 hsk 256, gqa-8 hsk 128), `MUL_MAT_ID` with `n_mats` 512 and 1024
+   (the hoist past 256), `MUL_MAT_ID(…amax=100000…)` not supported on both
+   sides, IQ4_XS and IQ3_S `MUL_MAT(_ID)` on the integer-dot arms, and
+   `EXTRA sparse n_kv_max=512, no GQA, N == 1`. Injections: flag 16 dropped
+   or `use_sparse` forced false; `dsv4HcPre` ignoring `gated`; `dsv4HcPost`
+   binding the comb pipeline with a null comb; the PREC_F32 refusal
+   removed; the IQ4_XS mmq row removed; the scalar `N == 1` term false; the
+   hoist limit back at 256 (possibly inert: record either way). Then
+   `vk-node-diff` per node and fused (also on `hrm_text-dense`,
+   `dflash-gemma`, `qwen35-fusedqkv`) and `vk-parity-cli` 6/6. The Intel Xe
+   two-phase decode path has no machine.
+6. **Linux arm64 CPU set:** `ops-diff`, `repack-diff` (the q1_0 kernels
+   are the generics at `generic`), `node-diff`, `parity-port --cpu`,
+   `host-arms-diff`, `arch-model-diff` (168 fixtures), `context-diff`,
+   `vocab-diff` (the `TEST` vocabulary and `ufakzeka`), `quant-diff`, and
+   `tools-diff`.
+7. **Server and chat set on Linux:** `http-diff` (15 configurations, the
+   new multi-address listeners among them: one listener per address over
+   a shared pool, port 0 refused with several TCP addresses, IPv6-only),
+   `server-diff` on a quiet machine (`hub` flaked upstream against upstream
+   under load here, cases 121–158; `router` 128 checks, child environments
+   no longer inherited), `tools-diff` (`server` 195 cases, `--host` as a
+   comma list), `cnv-diff`, `chat-parse-diff` (the Ling 3 parser),
+   `peg-diff`, `spec-diff` and `fit-diff` (the automatic context now sized
+   by `n_seq_max`), each after `zigjinja` moves to v3.1.1 (`79ff891`).
+
+**DESKTOP-BR7J5S9 (x86_64_v3)**
+
+8. `make x86-gates` and `win-host-diffs`. New on x86: the q1_0 repack
+   generics are live kernels, and their gemm's fused epilogue
+   (`vmulps` then `vfmadd231ps`) was read off the reference's
+   disassembly, not measured: `x86-repack-diff` is its first oracle.
+   `x86-ops-diff` has new cases (`hc_pre` gated, `hc_post` identity, fwht
+   f16, `mul_mat` f32×f16).
+9. `http-diff` (the configurations over `AF_UNIX` may need skipping, as
+   at v0.4.1), `jinja-diff` with the 29 probe conversations (zigjinja
+   v3.1.1's unary `+`/`-` precedence and typing), and `tools-diff server`
+   (`--host` as a comma list).
+
+**JWHLPTOP (AVX-512)**
+
+10. **Open, unreachable** (Marc, 2026-11-01: no access for now). Carries
+    v0.4.0's items 8–9 and v0.4.1's item 7, plus `x86-repack-diff` at
+    `x86_64_v4` and `tigerlake` for the q1_0 kernels.
+
+**Gaps found, no machine needed**
+
+- A gate for the Metal encoder's barrier decisions (`encode_impl`'s
+  concurrency check on the last fused node): an injection escaped
+  `backend-ops`, and only a timing race would show it.
+- The meta backend's new view arm (a meta sub-buffer that is a
+  multi-buffer) is unreached by every `meta-diff` configuration here.
+- An MTP-context case for `nemotron_h_moe`'s MTP latent projections; only
+  `gemma4-assistant-diff` builds an MTP context.
+
+**Mac**
+
+- `xcframework-check`'s visionOS simulator smoke: this Mac's visionOS
+  27.0 simulator runtime is listed Ready but will not boot ("runtime path
+  not found"). Reinstall the runtime, then `make -C xcframework
+  smoke-sim`.
+- Two upstream-side flakes seen once in the combined run and passing
+  alone: `server-diff hub`'s `slowpoke` download timeout, and an `imatrix`
+  case where upstream's `--show-statistics` output stopped mid-line.
+
 ---
 
 ## Risk register

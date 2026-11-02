@@ -6,7 +6,7 @@
 //! Ports `common_trie` from `llama.cpp/common/trie.h` and
 //! `llama.cpp/common/trie.cpp`, and `common_parse_utf8_codepoint` and
 //! `common_unicode_cpt_to_utf8` from `llama.cpp/common/unicode.cpp`
-//! (llama.cpp v0.4.1, `b29c606e2`). Each declaration names what it ports
+//! (llama.cpp v0.5.0, `7fe450e19`). Each declaration names what it ports
 //! and the line it began at.
 //!
 //! # Scope
@@ -22,7 +22,10 @@
 
 const std = @import("std");
 
-/// Ports `utf8_parse_result` (common/unicode.h:10 @b29c606e2).
+/// Ports `utf8_parse_result` (common/unicode.h:10 @7fe450e19). Since
+/// v0.5.0 `bytes_consumed` is also set when decoding fails: it is then the
+/// length of the valid prefix, at least one byte, which the PEG `until`
+/// consumes as one invalid run.
 pub const Utf8Parse = struct {
     pub const Status = enum { success, incomplete, invalid };
 
@@ -31,49 +34,64 @@ pub const Utf8Parse = struct {
     status: Status,
 };
 
-/// Ports `common_parse_utf8_codepoint` (common/unicode.cpp:17 @b29c606e2). It
+/// Ports `common_parse_utf8_codepoint` (common/unicode.cpp:17 @7fe450e19). It
 /// checks the lead byte's shape and the continuation bytes' tags and nothing
-/// else: overlong forms, surrogates and lead bytes up to 0xF7 decode.
+/// else: overlong forms, surrogates and lead bytes up to 0xF7 decode. A
+/// longer sequence is checked one byte at a time, so a bad continuation byte
+/// is reported as `invalid` before a short input is `incomplete`.
 ///
 /// Parameters:
 /// - `input`: the text.
 /// - `offset`: where the code point starts.
 ///
-/// Return: the code point and its length, or why there is none.
+/// Return: the code point and its length, or why there is none and the
+/// length of the valid prefix (zero only at the end of the input).
 pub fn parseUtf8Codepoint(input: []const u8, offset: usize) Utf8Parse {
     if (offset >= input.len) return .{ .status = .incomplete };
     const b0: u32 = input[offset];
     if (b0 & 0x80 == 0) return .{ .status = .success, .codepoint = b0, .bytes_consumed = 1 };
-    if (b0 & 0x40 == 0) return .{ .status = .invalid };
+    if (b0 & 0x40 == 0) return .{ .status = .invalid, .bytes_consumed = 1 };
     if (b0 & 0x20 == 0) {
-        if (offset + 1 >= input.len) return .{ .status = .incomplete };
+        if (offset + 1 >= input.len) return .{ .status = .incomplete, .bytes_consumed = 1 };
         const b1: u32 = input[offset + 1];
-        if (b1 & 0xc0 != 0x80) return .{ .status = .invalid };
+        if (b1 & 0xc0 != 0x80) return .{ .status = .invalid, .bytes_consumed = 1 };
         return .{ .status = .success, .codepoint = ((b0 & 0x1f) << 6) | (b1 & 0x3f), .bytes_consumed = 2 };
     }
     if (b0 & 0x10 == 0) {
-        if (offset + 2 >= input.len) return .{ .status = .incomplete };
+        if (checkContinuation(input, offset, 3)) |bad| return bad;
         const b1: u32 = input[offset + 1];
         const b2: u32 = input[offset + 2];
-        if (b1 & 0xc0 != 0x80 or b2 & 0xc0 != 0x80) return .{ .status = .invalid };
         return .{ .status = .success, .codepoint = ((b0 & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f), .bytes_consumed = 3 };
     }
     if (b0 & 0x08 == 0) {
-        if (offset + 3 >= input.len) return .{ .status = .incomplete };
+        if (checkContinuation(input, offset, 4)) |bad| return bad;
         const b1: u32 = input[offset + 1];
         const b2: u32 = input[offset + 2];
         const b3: u32 = input[offset + 3];
-        if (b1 & 0xc0 != 0x80 or b2 & 0xc0 != 0x80 or b3 & 0xc0 != 0x80) return .{ .status = .invalid };
         return .{
             .status = .success,
             .codepoint = ((b0 & 0x07) << 18) | ((b1 & 0x3f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f),
             .bytes_consumed = 4,
         };
     }
-    return .{ .status = .invalid };
+    return .{ .status = .invalid, .bytes_consumed = 1 };
 }
 
-/// Ports `common_unicode_cpt_to_utf8` (common/unicode.cpp:94 @b29c606e2).
+/// The `for (size_t i = 1; i < n; i++)` loop the three- and four-byte arms
+/// of `parseUtf8Codepoint` above each spell out.
+///
+/// Return: null when all `n - 1` continuation bytes are present and tagged,
+/// otherwise the failure and the valid prefix's length.
+fn checkContinuation(input: []const u8, offset: usize, n: usize) ?Utf8Parse {
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        if (offset + i >= input.len) return .{ .status = .incomplete, .bytes_consumed = i };
+        if (input[offset + i] & 0xc0 != 0x80) return .{ .status = .invalid, .bytes_consumed = i };
+    }
+    return null;
+}
+
+/// Ports `common_unicode_cpt_to_utf8` (common/unicode.cpp:99 @7fe450e19).
 ///
 /// Parameters:
 /// - `cpt`: the code point.
@@ -108,12 +126,12 @@ pub fn cptToUtf8(cpt: u32, buf: *[4]u8) error{InvalidCodepoint}![]const u8 {
     return error.InvalidCodepoint;
 }
 
-/// Ports `common_trie` (trie.h:12 @b29c606e2).
+/// Ports `common_trie` (trie.h:12 @7fe450e19).
 pub const Trie = struct {
     /// One child edge: the code point and the node it leads to.
     pub const Edge = struct { cpt: u32, child: usize };
 
-    /// Ports `node` (trie.h:13 @b29c606e2), a member of `common_trie`.
+    /// Ports `node` (trie.h:13 @7fe450e19), a member of `common_trie`.
     pub const Node = struct {
         /// sorted by `cpt`, as the `std::map` iterates
         children: std.ArrayList(Edge) = .empty,
@@ -132,7 +150,7 @@ pub const Trie = struct {
     nodes: std.ArrayList(Node) = .empty,
     n_patterns: i32 = 0,
 
-    /// Ports `common_trie` (trie.h:24 @b29c606e2), the constructor taking
+    /// Ports `common_trie` (trie.h:24 @7fe450e19), the constructor taking
     /// words: a root, then every word inserted in order.
     ///
     /// Parameters:
@@ -154,10 +172,10 @@ pub const Trie = struct {
         self.nodes.deinit(self.allocator);
     }
 
-    /// Ports `match_result` (trie.h:30 @b29c606e2), a member of `common_trie`.
+    /// Ports `match_result` (trie.h:30 @7fe450e19), a member of `common_trie`.
     pub const MatchResult = enum { no_match, partial_match, complete_match };
 
-    /// Ports `check_at` (trie.cpp:7 @b29c606e2): whether a word starts at
+    /// Ports `check_at` (trie.cpp:7 @7fe450e19): whether a word starts at
     /// `start_pos` -- complete as soon as one ends, partial when the input
     /// ends inside the trie. A code point that fails to decode ends the walk
     /// as the end of input does.
@@ -181,14 +199,14 @@ pub const Trie = struct {
         return .no_match;
     }
 
-    /// Ports `create_node` (trie.h:45 @b29c606e2).
+    /// Ports `create_node` (trie.h:45 @7fe450e19).
     fn createNode(self: *Trie) error{OutOfMemory}!usize {
         const index = self.nodes.items.len;
         try self.nodes.append(self.allocator, .{});
         return index;
     }
 
-    /// Ports `insert` (trie.cpp:44 @b29c606e2), the overload taking a
+    /// Ports `insert` (trie.cpp:44 @7fe450e19), the overload taking a
     /// string: its code points up to the first that fails to decode.
     ///
     /// Return: the word's pattern index.
@@ -205,7 +223,7 @@ pub const Trie = struct {
         return self.insertSymbols(symbols.items);
     }
 
-    /// Ports `insert` (trie.cpp:59 @b29c606e2), the overload taking code
+    /// Ports `insert` (trie.cpp:59 @7fe450e19), the overload taking code
     /// points.
     ///
     /// Return: the pattern index; a duplicate keeps the first one's.
@@ -231,7 +249,7 @@ pub const Trie = struct {
     }
 };
 
-/// Ports `common_aho_corasick` (trie.h:53 @b29c606e2): the automaton over a
+/// Ports `common_aho_corasick` (trie.h:53 @7fe450e19): the automaton over a
 /// trie's words, with failure links, the longest word ending at each state,
 /// and every code point that has a transition.
 pub const AhoCorasick = struct {
@@ -245,7 +263,7 @@ pub const AhoCorasick = struct {
     /// every code point with a transition, ascending, as `std::set` holds it
     alphabet: []u32,
 
-    /// Ports `common_aho_corasick` (trie.cpp:77 @b29c606e2), the
+    /// Ports `common_aho_corasick` (trie.cpp:77 @7fe450e19), the
     /// constructor: the trie of `strings` and its automaton.
     ///
     /// Parameters:
@@ -324,22 +342,22 @@ pub const AhoCorasick = struct {
         self.t.deinit();
     }
 
-    /// Ports `num_states` (trie.h:65 @b29c606e2).
+    /// Ports `num_states` (trie.h:65 @7fe450e19).
     pub fn numStates(self: *const AhoCorasick) usize {
         return self.t.nodes.items.len;
     }
 
-    /// Ports `is_terminal` (trie.h:66 @b29c606e2).
+    /// Ports `is_terminal` (trie.h:66 @7fe450e19).
     pub fn isTerminal(self: *const AhoCorasick, s: usize) bool {
         return self.match[s] >= 0;
     }
 
-    /// Ports `match_pattern` (trie.h:69 @b29c606e2).
+    /// Ports `match_pattern` (trie.h:69 @7fe450e19).
     pub fn matchPattern(self: *const AhoCorasick, s: usize) i32 {
         return self.match[s];
     }
 
-    /// Ports `next` (trie.cpp:116 @b29c606e2): the transition on `ch`,
+    /// Ports `next` (trie.cpp:116 @7fe450e19): the transition on `ch`,
     /// following failure links until one exists.
     ///
     /// Return: the next state; the root when nothing matches.

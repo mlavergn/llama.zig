@@ -6,8 +6,8 @@
 //!
 //! Ports `server_subproc` and `server_subproc::waiter` from
 //! `llama.cpp/tools/server/server-common.cpp` and
-//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.4.1,
-//! `b29c606e2`), their POSIX arms. Each declaration names what it ports
+//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.5.0,
+//! `7fe450e19`), their POSIX arms. Each declaration names what it ports
 //! and the line it began at.
 //!
 //! # Generic over `common_subproc`
@@ -45,7 +45,7 @@ fn setNonBlocking(fd: c_int) void {
     _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, @as(c_int, 0)) | O_NONBLOCK);
 }
 
-/// Ports `server_subproc` (server-common.h:619 @b29c606e2) over a
+/// Ports `server_subproc` (server-common.h:619 @7fe450e19) over a
 /// `common_subproc`-like `P` (see the file's doc comment).
 pub fn Subproc(comptime P: type) type {
     return struct {
@@ -56,22 +56,22 @@ pub fn Subproc(comptime P: type) type {
 
         out_handle: isize = -1, // fd on POSIX, HANDLE on Windows; taken lazily from sproc
 
-        /// Ports `is_alive` (server-common.h:623 @b29c606e2).
+        /// Ports `is_alive` (server-common.h:623 @7fe450e19).
         pub fn isAlive(self: *Self) bool {
             return self.sproc.alive();
         }
 
-        /// Ports `terminate` (server-common.h:624 @b29c606e2).
+        /// Ports `terminate` (server-common.h:624 @7fe450e19).
         pub fn terminate(self: *Self) void {
             self.sproc.terminate();
         }
 
-        /// Ports `join` (server-common.h:625 @b29c606e2).
+        /// Ports `join` (server-common.h:625 @7fe450e19).
         pub fn join(self: *Self) c_int {
             return self.sproc.join();
         }
 
-        /// Ports `server_subproc`'s `has_output` (server-common.cpp:1862 @b29c606e2): true when the
+        /// Ports `server_subproc`'s `has_output` (server-common.cpp:1864 @7fe450e19): true when the
         /// child's combined output pipe is available; the first call makes
         /// it non-blocking.
         pub fn hasOutput(self: *Self) bool {
@@ -87,7 +87,7 @@ pub fn Subproc(comptime P: type) type {
             return self.out_handle >= 0;
         }
 
-        /// Ports `server_subproc`'s `read_output` (server-common.cpp:1885 @b29c606e2): a
+        /// Ports `server_subproc`'s `read_output` (server-common.cpp:1887 @7fe450e19): a
         /// non-blocking read.
         ///
         /// Return: the bytes read, 0 when nothing is available, -1 when the
@@ -117,34 +117,34 @@ pub fn Subproc(comptime P: type) type {
     };
 }
 
-/// Ports `server_subproc`'s `waiter` (server-common.h:635 @b29c606e2): a
+/// Ports `server_subproc`'s `waiter` (server-common.h:635 @7fe450e19): a
 /// self-pipe to wake a `poll` on the children's output.
 pub const Waiter = struct {
     wake_fd: [2]c_int = .{ -1, -1 }, // POSIX self-pipe
 
-    /// Ports the constructor of `server_subproc`'s `waiter` (server-common.cpp:1936 @b29c606e2).
+    /// Ports the constructor of `server_subproc`'s `waiter` (server-common.cpp:1938 @7fe450e19).
     pub fn init() Waiter {
         var fds: [2]c_int = undefined;
-        common.ggmlAssert(pipe(&fds) == 0, "server-common.cpp", 1935, "pipe(fds) == 0");
+        common.ggmlAssert(pipe(&fds) == 0, "server-common.cpp", 1937, "pipe(fds) == 0");
         for (fds) |fd| {
             setNonBlocking(fd);
         }
         return .{ .wake_fd = fds };
     }
 
-    /// Ports the destructor of `server_subproc`'s `waiter` (server-common.cpp:1936 @b29c606e2).
+    /// Ports the destructor of `server_subproc`'s `waiter` (server-common.cpp:1938 @7fe450e19).
     pub fn deinit(self: *Waiter) void {
         _ = close(self.wake_fd[0]);
         _ = close(self.wake_fd[1]);
     }
 
-    /// Ports `server_subproc::waiter`'s `wake` (server-common.cpp:1943 @b29c606e2): thread-safe.
+    /// Ports `server_subproc::waiter`'s `wake` (server-common.cpp:1945 @7fe450e19): thread-safe.
     pub fn wake(self: *Waiter) void {
         const ch: u8 = 1;
         _ = write(self.wake_fd[1], (&ch)[0..1].ptr, 1);
     }
 
-    /// Ports `server_subproc::waiter`'s `wait` (server-common.cpp:1950 @b29c606e2): until a
+    /// Ports `server_subproc::waiter`'s `wait` (server-common.cpp:1952 @7fe450e19): until a
     /// child has output (or a broken pipe), `wake()` is called, or
     /// `timeout_ms` passes (forever when negative).
     ///

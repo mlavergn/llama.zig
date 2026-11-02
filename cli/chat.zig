@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! **Not a port.** Our own code. It covers the ground `common_chat_templates`
-//! does in `llama.cpp/common/chat.cpp` (v0.4.1, `b29c606e2`) -- find the
+//! does in `llama.cpp/common/chat.cpp` (v0.5.0, `7fe450e19`) -- find the
 //! model's template, bind the conversation to it, render -- but shares no code
 //! with it, and renders through `zigjinja` rather than upstream's bundled
 //! Jinja.
@@ -177,7 +177,7 @@ fn segment(
 
 /// Upstream's rendering of a non-string `{{ }}` value.
 ///
-/// `gather_string_parts_recursive` (common/jinja/runtime.h:724 @b29c606e2)
+/// `gather_string_parts_recursive` (common/jinja/runtime.h:717 @7fe450e19)
 /// writes a boolean as `True`/`False`, a list as its items' renderings run
 /// together, and none, undefined and dicts as nothing. zigjinja follows its own
 /// conventions there, so the chat path translates. Installed as
@@ -194,6 +194,8 @@ fn upstreamOutput(allocator: std.mem.Allocator, val: jinja.Value) jinja.Value {
         .boolean => |b| .{ .string = if (b) "True" else "False" },
         .null, .undefined, .dict => .{ .string = "" },
         .list => gatherList(allocator, val) catch val,
+        // a float's `as_string`: `std::to_string`, trailing zeros trimmed
+        .float => .{ .string = jinja.llama_repr.LlamaRepr.asString(allocator, val) catch return val },
         else => val,
     };
 }
@@ -213,7 +215,8 @@ fn gather(allocator: std.mem.Allocator, val: jinja.Value, pieces: *std.ArrayList
         .list => |list| for (list.items.items) |item| try gather(allocator, item, pieces),
         .string => |str| try pieces.append(allocator, str),
         .boolean => |b| try pieces.append(allocator, if (b) "True" else "False"),
-        .integer, .float => try pieces.append(allocator, try val.toString(allocator)),
+        .integer => try pieces.append(allocator, try val.toString(allocator)),
+        .float => try pieces.append(allocator, try jinja.llama_repr.LlamaRepr.asString(allocator, val)),
         else => {},
     }
 }

@@ -36,6 +36,7 @@
 //! Usage: api_diff <tmpdir> <file.gguf | corpus.inp>...
 
 const std = @import("std");
+const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
 
 const c = harness_root.impl.c;
@@ -56,6 +57,63 @@ extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
 extern "c" fn _exit(code: c_int) noreturn;
 extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*c.FILE;
 extern "c" fn fclose(f: *c.FILE) c_int;
+extern "c" fn fseek(f: *c.FILE, off: c_long, whence: c_int) c_int;
+extern "c" fn fread(p: [*]u8, size: usize, n: usize, f: *c.FILE) usize;
+extern "c" fn fwrite(p: [*]const u8, size: usize, n: usize, f: *c.FILE) usize;
+
+/// The scratch directory `main` was given.
+var tmp_dir: []const u8 = "";
+
+/// A copy of `path` behind `offset` bytes of padding: a GGUF embedded in a
+/// larger file, which `llama_model_load_from_file_ptr` reads from the
+/// file's current position.
+///
+/// Return: the copy's path.
+fn embedCopy(path: [:0]const u8, offset: usize) [:0]const u8 {
+    const out = gpa.printSentinel("{s}/embedded-{d}.gguf", .{ tmp_dir, offset }, 0) catch unreachable;
+    const in = fopen(path.ptr, "rb").?;
+    defer _ = fclose(in);
+    const o = fopen(out.ptr, "wb").?;
+    defer _ = fclose(o);
+    var buf: [65536]u8 = undefined;
+    @memset(&buf, 'x');
+    _ = fwrite(&buf, 1, offset, o);
+    while (true) {
+        const n = fread(&buf, 1, buf.len, in);
+        if (n == 0) break;
+        _ = fwrite(&buf, 1, n, o);
+    }
+    return out;
+}
+
+/// `llama_model_load_from_file_ptr` on both sides, each reading its own
+/// handle positioned `offset` bytes in.
+fn filePtrLoad(label: []const u8, path: [:0]const u8, offset: c_long, mp: c.struct_llama_model_params) void {
+    var la: std.ArrayList(u8) = .empty;
+    defer la.deinit(gpa);
+    var lb: std.ArrayList(u8) = .empty;
+    defer lb.deinit(gpa);
+    const fa = fopen(path.ptr, "rb").?;
+    defer _ = fclose(fa);
+    const fb = fopen(path.ptr, "rb").?;
+    defer _ = fclose(fb);
+    _ = fseek(fa, offset, 0);
+    _ = fseek(fb, offset, 0);
+    rec = &la;
+    const rm = c.llama_model_load_from_file_ptr(@ptrCast(fa), mp);
+    rec = &lb;
+    const pm = F(.port, "llama_model_load_from_file_ptr")(@ptrCast(fb), mp);
+    rec = null;
+    checks += 1;
+    if ((rm == null) != (pm == null)) fail("{s}: C++ {} port {}", .{ label, rm != null, pm != null });
+    var na = normalize(la.items);
+    defer na.deinit(gpa);
+    var nb = normalize(lb.items);
+    defer nb.deinit(gpa);
+    sameTranscript(label, na.items, nb.items);
+    if (rm != null and pm != null) compareModels(label, rm.?, pm.?);
+    freeBoth(.{ .rm = rm, .pm = pm });
+}
 
 var checks: usize = 0;
 var failures: usize = 0;
@@ -153,7 +211,9 @@ fn normalize(log: []const u8) std.ArrayList(u8) {
         }
         out.appendSlice(gpa, line) catch unreachable;
     }
-    return out;
+    const sorted = input_tensor_order.sortRuns(gpa, out.items);
+    out.deinit(gpa);
+    return sorted;
 }
 
 /// Compares two transcripts line by line, reporting the first difference.
@@ -922,30 +982,23 @@ fn checkLoadVariants(path: [:0]const u8) void {
     freeBoth(loadBoth("load_from_file a corpus file", "llama_model_load_from_file", .{ "llama.cpp/models/ggml-vocab-llama-spm.gguf.inp", mp }));
     freeBoth(loadBoth("load_from_file_ptr null", "llama_model_load_from_file_ptr", .{ @as([*c]c.FILE, null), mp }));
 
+    // Each side reads its own handle from the start.
+    filePtrLoad("load_from_file_ptr", path, 0, mp);
     {
-        // Each side reads its own handle from the start.
-        var la: std.ArrayList(u8) = .empty;
-        defer la.deinit(gpa);
-        var lb: std.ArrayList(u8) = .empty;
-        defer lb.deinit(gpa);
-        const fa = fopen(path.ptr, "rb").?;
-        defer _ = fclose(fa);
-        const fb = fopen(path.ptr, "rb").?;
-        defer _ = fclose(fb);
-        rec = &la;
-        const rm = c.llama_model_load_from_file_ptr(@ptrCast(fa), mp);
-        rec = &lb;
-        const pm = F(.port, "llama_model_load_from_file_ptr")(@ptrCast(fb), mp);
-        rec = null;
-        checks += 1;
-        if ((rm == null) != (pm == null)) fail("load_from_file_ptr: C++ {} port {}", .{ rm != null, pm != null });
-        var na = normalize(la.items);
-        defer na.deinit(gpa);
-        var nb = normalize(lb.items);
-        defer nb.deinit(gpa);
-        sameTranscript("load_from_file_ptr", na.items, nb.items);
-        if (rm != null and pm != null) compareModels("file_ptr load", rm.?, pm.?);
-        freeBoth(.{ .rm = rm, .pm = pm });
+        // A GGUF embedded in a larger file: mmap places tensors at their
+        // file offsets, so the data section must be aligned in the file
+        // too. 37 bytes in it is not; 64 bytes in it is; without mmap
+        // neither matters.
+        for ([_]usize{ 37, 64 }) |off| {
+            const p = embedCopy(path, off);
+            var m2 = mp;
+            for ([_]c.enum_llama_load_mode{ c.LLAMA_LOAD_MODE_AUTO, c.LLAMA_LOAD_MODE_MMAP, c.LLAMA_LOAD_MODE_NONE }) |lm| {
+                m2.load_mode = lm;
+                var lb_buf: [64]u8 = undefined;
+                const label = std.fmt.bufPrint(&lb_buf, "load_from_file_ptr +{d} mode {d}", .{ off, lm }) catch unreachable;
+                filePtrLoad(label, p, @intCast(off), m2);
+            }
+        }
     }
     {
         const meta = c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = null }).?;
@@ -1055,6 +1108,7 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
+    tmp_dir = args[1];
     c.llama_log_set(logCb, null);
 
     harness_root.api.impl.llama_log_set(logCb, null);

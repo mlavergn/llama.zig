@@ -183,6 +183,13 @@ GET /models
 POST /models/unload {"model":"tiny"}
 !waitfor /models "id":"tiny"[^{]*\{"value":"unloaded"
 
+# --- v0.5.0: --log-file and --api-key-file stay the router's; the children's
+# arguments (GET /models) carry neither
+!server --models-dir $DATA/models -c 256 -np 1 --no-jinja --log-file $CWD/router.log --api-key-file $DATA/keys.txt
+!header Authorization: Bearer k4
+GET /models
+!noheaders
+
 # --- a preset that changes under a running router (?reload)
 !fresh reload-a
 !server --models-preset $WORK/reload.ini -c 256 -np 1 -lv 4 --no-jinja

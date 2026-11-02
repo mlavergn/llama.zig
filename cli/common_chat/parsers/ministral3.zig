@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/ministral3.cpp` (llama.cpp v0.4.1,
-//! `b29c606e2`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/ministral3.cpp` (llama.cpp v0.5.0,
+//! `7fe450e19`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -116,7 +116,9 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
 
         // If message contains `reasoning_content`, add it as a block of type `thinking`
         if (msg.contains("reasoning_content")) {
-            const rc = msg.at("reasoning_content") catch unreachable;
+            const rc = msg.at("reasoning_content") catch |err| switch (err) {
+                error.OutOfMemory, error.JsonError => unreachable,
+            };
             if (rc.isString()) {
                 content.pushBack(a, try block(a, "thinking", "thinking", rc.string)) catch |e| return util.fromJson(e);
             }
@@ -124,7 +126,9 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
 
         // If message contains `content`, add it as a block of type `text`
         if (msg.contains("content")) {
-            const c = msg.at("content") catch unreachable;
+            const c = msg.at("content") catch |err| switch (err) {
+                error.OutOfMemory, error.JsonError => unreachable,
+            };
             if (c.isString()) {
                 content.pushBack(a, try block(a, "text", "text", c.string)) catch |e| return util.fromJson(e);
             } else if (c.isArray()) {
@@ -142,7 +146,7 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
     return adjusted_messages;
 }
 
-/// Ports `common_chat_params_init_ministral_3` (parsers/ministral3.cpp:3 @b29c606e2).
+/// Ports `common_chat_params_init_ministral_3` (parsers/ministral3.cpp:3 @7fe450e19).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

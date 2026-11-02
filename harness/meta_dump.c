@@ -71,6 +71,13 @@ static int volatile_line(const char * s) {
     if (strstr(s, "SPLIT_STATE")) return 0;
     /* Addresses, timings and free-memory figures: different every run. */
     if (has_address(s)) return 1;
+    /* New at v0.5.0: libllama lists each graph input's users from
+     * `llama_graph_n_input_tensors` (llama-context.cpp:583 @7fe450e19),
+     * walking a std::unordered_map keyed by tensor pointer, so their order
+     * follows the addresses malloc returned and differs run to run -- the
+     * same libllama.a against itself. Upstream's order is unspecified; the
+     * lines are dropped, not matched. */
+    if (strstr(s, "llama_graph_n_input_tensors: input tensor") && strstr(s, "is used by node")) return 1;
     static const char * const skip[] = {
         " ms", " sec", "t/s", "took", "MiB free", "free ", "recommendedMaxWorkingSetSize",
         "load time", "eval time", "total time", "mmap", "loaded meta data",

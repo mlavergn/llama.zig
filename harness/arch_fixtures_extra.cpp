@@ -100,8 +100,9 @@ static bool write_fixture(llm_arch arch, bool moe, size_t seed, const std::strin
     ggml_backend_dev_t devs[2] = { ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU), nullptr };
     mp.devices = devs;
 
-    size_t tmp = seed;
-    llama_model * model = llama_model_init_from_user(meta.get(), set_tensor_data, &tmp, mp);
+    // test-llama-archs' default -d (0.1) since v0.5.0
+    tensor_data_params tp = { seed, 0.1f };
+    llama_model * model = llama_model_init_from_user(meta.get(), set_tensor_data, &tp, mp);
     if (!model) {
         printf("failed %s (%s): the C++ cannot build the model\n", llm_arch_name(arch), moe ? "MoE" : "dense");
         return false;

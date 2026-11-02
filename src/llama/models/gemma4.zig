@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma4.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/gemma4.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_gemma4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and the graph's helpers.
 
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma4`'s `load_arch_hparams` (models/gemma4.cpp:3 @b29c606e2).
+/// Ports `llama_model_gemma4`'s `load_arch_hparams` (models/gemma4.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -62,7 +62,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_gemma4`'s `load_arch_tensors` (models/gemma4.cpp:36 @b29c606e2).
+/// Ports `llama_model_gemma4`'s `load_arch_tensors` (models/gemma4.cpp:36 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -176,27 +176,27 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma4`'s `build_arch_graph` (models/gemma4.cpp:143 @b29c606e2).
+/// Ports `llama_model_gemma4`'s `build_arch_graph` (models/gemma4.cpp:143 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const g: Graph = .{ .model = model, .b = b, .n_embd_per_layer = b.hparams.n_embd_per_layer };
     g.build();
 }
 
-/// Ports `gemma4_view_2d_slice` (models/gemma4.cpp:148 @b29c606e2): the 2D
+/// Ports `gemma4_view_2d_slice` (models/gemma4.cpp:148 @7fe450e19): the 2D
 /// slice of a 3D tensor at `idx` along its third dimension.
 fn view2dSlice(ctx: *c.ggml_context, x: *Tensor, idx: c_int) *Tensor {
     impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma4.cpp", 149, "idx < (int) x->ne[2]");
     return c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], c.ggml_row_size(x.type, x.ne[0]), @intCast(idx * x.ne[0] * x.ne[1] * @as(i64, @intCast(c.ggml_element_size(x)))));
 }
 
-/// Ports `llama_model_gemma4`'s `graph` (src/models/models.h:869 @b29c606e2).
+/// Ports `llama_model_gemma4`'s `graph` (src/models/models.h:869 @7fe450e19).
 const Graph = struct {
     model: *const Model,
     b: *const graph.Builder,
     n_embd_per_layer: i64,
 
     /// Ports the constructor of `llama_model_gemma4`'s `graph`
-    /// (models/gemma4.cpp:154 @b29c606e2).
+    /// (models/gemma4.cpp:154 @7fe450e19).
     fn build(self: *const Graph) void {
         const model = self.model;
         const b = self.b;
@@ -460,7 +460,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma4`'s `graph`'s `build_inp_per_layer`
-    /// (models/gemma4.cpp:440 @b29c606e2): equivalent to the Python code's
+    /// (models/gemma4.cpp:440 @7fe450e19): equivalent to the Python code's
     /// `get_per_layer_inputs()`.
     ///
     /// Return: `[n_embd_per_layer, n_layer, n_tokens]`.
@@ -504,7 +504,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma4`'s `graph`'s `project_per_layer_inputs`
-    /// (models/gemma4.cpp:478 @b29c606e2): equivalent to the Python code's
+    /// (models/gemma4.cpp:478 @7fe450e19): equivalent to the Python code's
     /// `project_per_layer_inputs()`, the per-layer inputs with `n_layer` as
     /// the last dimension, from `inp_batch` `[n_embd, n_tokens]` and
     /// `build_inp_per_layer`'s `[n_embd_per_layer, n_layer, n_tokens]`.

@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `common_params_parser_init` (arg.cpp:1391 @b29c606e2) from
-//! `llama.cpp/common/arg.cpp` (v0.4.1, `b29c606e2`): every option an example
+//! Ports `common_params_parser_init` (arg.cpp:1391 @7fe450e19) from
+//! `llama.cpp/common/arg.cpp` (v0.5.0, `7fe450e19`): every option an example
 //! this project ports admits -- `common`'s, and `tokenize`'s, `fit_params`',
 //! `export_lora`'s, `bench`'s, `cvector_generator`'s, `imatrix`'s,
 //! `perplexity`'s, `results`', `mtmd`'s, `tts`' and `server`'s own -- in the
@@ -56,7 +56,7 @@ fn ed(b: bool) [*:0]const u8 {
 /// A value hint or a spelling.
 const S = [:0]const u8;
 
-/// Ports `read_file` (arg.cpp:67 @b29c606e2).
+/// Ports `read_file` (arg.cpp:67 @7fe450e19).
 pub fn readFile(p: *Params, fname: [:0]const u8) ![]const u8 {
     const f = std.c.fopen(fname.ptr, "r") orelse return throw("error: failed to open file '%s'\n", .{fname.ptr});
     defer _ = std.c.fclose(f);
@@ -89,7 +89,7 @@ fn jsonSchemaGrammar(q: *Params, text: []const u8) !void {
     q.sampling.grammar = grammar;
 }
 
-/// Ports `parse_csv_row` (arg.cpp:1347 @b29c606e2).
+/// Ports `parse_csv_row` (arg.cpp:1347 @7fe450e19).
 pub fn parseCsvRow(a: std.mem.Allocator, input: []const u8) !std.ArrayList([:0]const u8) {
     var fields: std.ArrayList([:0]const u8) = .empty;
     var field: std.ArrayList(u8) = .empty;
@@ -145,7 +145,7 @@ fn stoull(a: std.mem.Allocator, s: []const u8) !u64 {
 }
 extern fn strtoull(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulonglong;
 
-/// Ports `parse_cpu_range` (common/common.cpp:312 @b29c606e2).
+/// Ports `parse_cpu_range` (common/common.cpp:312 @7fe450e19).
 pub fn parseCpuRange(a: std.mem.Allocator, range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !bool {
     const func = "parse_cpu_range";
     const dash_loc = std.mem.indexOfScalar(u8, range, '-') orelse {
@@ -179,7 +179,7 @@ pub fn parseCpuRange(a: std.mem.Allocator, range: []const u8, boolmask: *[c.GGML
     return true;
 }
 
-/// Ports `parse_cpu_mask` (common/common.cpp:349 @b29c606e2).
+/// Ports `parse_cpu_mask` (common/common.cpp:349 @7fe450e19).
 pub fn parseCpuMask(mask: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) bool {
     // Discard potential 0x prefix
     var start_i: usize = 0;
@@ -625,7 +625,7 @@ fn addPart1(ctx: *Context) !void {
             q.sampling.temp = @max(try arg.stof(value), 0.0);
             q.sampling.user_sampling_config |= SamplingConfig.temp;
         }
-    }.f } }).setSampling());
+    }.f } }).setSampling().setEnv("LLAMA_ARG_TEMPERATURE"));
     // arg.cpp:2020
     try ctx.add((Arg{ .args = &.{"--top-k"}, .value_hint = "N", .help = try ctx.fmt("top-k sampling (default: %d, 0 = disabled)", .{p.sampling.top_k}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
@@ -639,14 +639,14 @@ fn addPart1(ctx: *Context) !void {
             q.sampling.top_p = try arg.stof(value);
             q.sampling.user_sampling_config |= SamplingConfig.top_p;
         }
-    }.f } }).setSampling());
+    }.f } }).setSampling().setEnv("LLAMA_ARG_TOP_P"));
     // arg.cpp:2036
     try ctx.add((Arg{ .args = &.{"--min-p"}, .value_hint = "N", .help = try ctx.fmt("min-p sampling (default: %.2f, 0.0 = disabled)", .{@as(f64, p.sampling.min_p)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.min_p = try arg.stof(value);
             q.sampling.user_sampling_config |= SamplingConfig.min_p;
         }
-    }.f } }).setSampling());
+    }.f } }).setSampling().setEnv("LLAMA_ARG_MIN_P"));
     // arg.cpp:2044
     try ctx.add((Arg{ .args = &.{ "--top-nsigma", "--top-n-sigma" }, .value_hint = "N", .help = try ctx.fmt("top-n-sigma sampling (default: %.2f, -1.0 = disabled)", .{@as(f64, p.sampling.top_n_sigma)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -692,7 +692,7 @@ fn addPart1(ctx: *Context) !void {
             q.sampling.penalty_repeat = penalty_repeat;
             q.sampling.user_sampling_config |= SamplingConfig.penalty_repeat;
         }
-    }.f } }).setSampling());
+    }.f } }).setSampling().setEnv("LLAMA_ARG_REPEAT_PENALTY"));
     // arg.cpp:2100
     try ctx.add((Arg{ .args = &.{"--presence-penalty"}, .value_hint = "N", .help = try ctx.fmt("repeat alpha presence penalty (default: %.2f, 0.0 = disabled)", .{@as(f64, p.sampling.penalty_present)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -700,7 +700,7 @@ fn addPart1(ctx: *Context) !void {
             if (!std.math.isFinite(penalty_present)) return throwStr("error: presence-penalty must be finite\n");
             q.sampling.penalty_present = penalty_present;
         }
-    }.f } }).setSampling());
+    }.f } }).setSampling().setEnv("LLAMA_ARG_PRESENCE_PENALTY"));
     // arg.cpp:2111
     try ctx.add((Arg{ .args = &.{"--frequency-penalty"}, .value_hint = "N", .help = try ctx.fmt("repeat alpha frequency penalty (default: %.2f, 0.0 = disabled)", .{@as(f64, p.sampling.penalty_freq)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -708,7 +708,7 @@ fn addPart1(ctx: *Context) !void {
             if (!std.math.isFinite(penalty_freq)) return throwStr("error: frequency-penalty must be finite\n");
             q.sampling.penalty_freq = penalty_freq;
         }
-    }.f } }).setSampling());
+    }.f } }).setSampling().setEnv("LLAMA_ARG_FREQUENCY_PENALTY"));
     // arg.cpp:2122
     try ctx.add((Arg{ .args = &.{"--dry-multiplier"}, .value_hint = "N", .help = try ctx.fmt("set DRY sampling multiplier (default: %.2f, 0.0 = disabled)", .{@as(f64, p.sampling.dry_multiplier)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {

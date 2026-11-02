@@ -5,8 +5,10 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
-//! (`b29c606e2`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.5.0
+//! (`7fe450e19`). Upstream split `ggml-vulkan.cpp` into those files at
+//! v0.5.0.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -36,7 +38,7 @@ const vendor_id_amd = 0x1002;
 const vendor_id_intel = 0x8086;
 const vendor_id_nvidia = 0x10de;
 
-/// Ports `vk_fa_tuning_params` (ggml-vulkan.cpp:3920 @b29c606e2).
+/// Ports `vk_fa_tuning_params` (ggml-vulkan-types.h:1337 @7fe450e19).
 pub const FaTuningParams = struct {
     path: FaCodePath = .scalar,
     workgroup_size: u32 = 0,
@@ -55,7 +57,7 @@ fn lowestBit(d: u32) u32 {
     return d ^ (d & (d -% 1));
 }
 
-/// Ports `get_fa_tuning_params_scalar` (ggml-vulkan.cpp:3943 @b29c606e2).
+/// Ports `get_fa_tuning_params_scalar` (ggml-vulkan.cpp:1172 @7fe450e19).
 fn tuningScalar(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, k_type: c.ggml_type, v_type: c.ggml_type, f32acc: bool) FaTuningParams {
     var r: FaTuningParams = .{ .path = .scalar };
 
@@ -117,7 +119,7 @@ fn tuningScalar(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, 
     return r;
 }
 
-/// Ports `get_fa_tuning_params_coopmat1` (ggml-vulkan.cpp:4018 @b29c606e2).
+/// Ports `get_fa_tuning_params_coopmat1` (ggml-vulkan.cpp:1247 @7fe450e19).
 fn tuningCoopmat1(dev: *const Device, hsk: u32, hsv: u32) FaTuningParams {
     var r: FaTuningParams = .{ .path = .coopmat1 };
     const D = hsk | hsv;
@@ -135,7 +137,7 @@ fn tuningCoopmat1(dev: *const Device, hsk: u32, hsv: u32) FaTuningParams {
     return r;
 }
 
-/// Ports `get_fa_tuning_params_coopmat2` (ggml-vulkan.cpp:4049 @b29c606e2).
+/// Ports `get_fa_tuning_params_coopmat2` (ggml-vulkan.cpp:1278 @7fe450e19).
 fn tuningCoopmat2(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, k_type: c.ggml_type, v_type: c.ggml_type) FaTuningParams {
     var r: FaTuningParams = .{ .path = .coopmat2 };
     const D = hsk | hsv;
@@ -155,7 +157,7 @@ fn tuningCoopmat2(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, k_type: c
     return r;
 }
 
-/// Ports `get_fa_tuning_params` (ggml-vulkan.cpp:4077 @b29c606e2).
+/// Ports `get_fa_tuning_params` (ggml-vulkan.cpp:1306 @7fe450e19).
 pub fn tuningParams(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, k_type: c.ggml_type, v_type: c.ggml_type, f32acc: bool) FaTuningParams {
     var path: FaCodePath = if (dev.coopmat2) .coopmat2 else if (dev.coopmat1_fa_support) .coopmat1 else .scalar;
 
@@ -182,14 +184,15 @@ pub fn tuningParams(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u
     };
 }
 
-/// Ports `get_fa_pipeline_state` (ggml-vulkan.cpp:4121 @b29c606e2).
-pub fn pipelineState(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, aligned: bool, f32acc: bool, use_mask: bool, use_mask_opt: bool, use_logit_softcap: bool, k_type: c.ggml_type, v_type: c.ggml_type) FaPipelineState {
+/// Ports `get_fa_pipeline_state` (ggml-vulkan.cpp:1350 @7fe450e19).
+pub fn pipelineState(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, aligned: bool, f32acc: bool, use_mask: bool, use_mask_opt: bool, use_logit_softcap: bool, use_sparse: bool, k_type: c.ggml_type, v_type: c.ggml_type) FaPipelineState {
     const old_amd_windows = dev.vendor_id == vendor_id_amd and dev.driver_id == vk.VK_DRIVER_ID_AMD_PROPRIETARY and
         (dev.architecture == .amd_gcn or dev.architecture == .amd_rdna1 or dev.architecture == .amd_rdna2);
     const flags: u32 = @as(u32, @intFromBool(use_mask_opt)) |
         @as(u32, if (use_mask) 2 else 0) |
         @as(u32, if (use_logit_softcap) 4 else 0) |
-        @as(u32, if (old_amd_windows) 8 else 0);
+        @as(u32, if (old_amd_windows) 8 else 0) |
+        @as(u32, if (use_sparse) 16 else 0);
     const subgroup_size: u32 = if (params.disable_subgroups) 0 else params.subgroup_size;
     return .{
         .HSK = hsk,
@@ -211,7 +214,7 @@ pub fn pipelineState(dev: *const Device, params: *const FaTuningParams, hsk: u32
     };
 }
 
-/// Ports `ggml_vk_flash_attn_scalar_shmem_support` (ggml-vulkan.cpp:11081 @b29c606e2).
+/// Ports `ggml_vk_flash_attn_scalar_shmem_support` (ggml-vulkan.cpp:7690 @7fe450e19).
 /// Must track the shader; it overestimates `tmpsh` slightly.
 pub fn scalarShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, f32acc: bool, k_type: c.ggml_type, v_type: c.ggml_type) bool {
     _ = f32acc;
@@ -252,7 +255,7 @@ pub fn scalarShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk
     return total_size <= dev.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `ggml_vk_flash_attn_coopmat_shmem_support` (ggml-vulkan.cpp:11132 @b29c606e2).
+/// Ports `ggml_vk_flash_attn_coopmat_shmem_support` (ggml-vulkan.cpp:7741 @7fe450e19).
 pub fn coopmatShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, f32acc: bool, k_type: c.ggml_type) bool {
     const Br = params.block_rows;
     const Bc = params.block_cols;
@@ -309,7 +312,7 @@ fn isDenseKvCache(t: *const Tensor) bool {
         (t.ne[3] == 1 or t.nb[3] == t.nb[1] * @as(usize, @intCast(t.ne[1])));
 }
 
-/// Ports `ggml_vk_flash_attn` (ggml-vulkan.cpp:11180 @b29c606e2).
+/// Ports `ggml_vk_flash_attn` (ggml-vulkan.cpp:7789 @7fe450e19).
 pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const Tensor, v: *const Tensor, mask: ?*const Tensor, sinks: ?*const Tensor, dst: *Tensor) void {
     const dev = ctx.device;
     const limits = &dev.properties.limits;
@@ -388,6 +391,24 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
 
     tuning = tuningParams(dev, HSK, HSV, N, KV, k_type_eff, v_type_eff, f32acc);
 
+    var scale: f32 = @bitCast(dst.op_params[0]);
+    const max_bias: f32 = @bitCast(dst.op_params[1]);
+    const logit_softcap: f32 = @bitCast(dst.op_params[2]);
+    if (logit_softcap != 0) scale /= logit_softcap;
+
+    // Sparse mask hint (op_params[4]): compact the <= n_kv_max finite
+    // positions and gather only those.
+    const n_kv_max: i32 = if (mask != null) dst.op_params[4] else 0;
+    const disable_sparse = DisableSparse.get();
+    // cm2 dense is fast, so it needs a larger reduction to win.
+    const min_ratio: i64 = if (tuning.path == .coopmat2) 4 else 2;
+    const use_sparse = !disable_sparse and n_kv_max > 0 and mask != null and
+        max_bias == 0.0 and logit_softcap == 0.0 and
+        k_type_eff == c.GGML_TYPE_F16 and v_type_eff == c.GGML_TYPE_F16 and
+        nem0 == KV and
+        @as(i64, KV) >= @max(4096, min_ratio * @as(i64, n_kv_max)) and
+        (gqa_ratio > 1 or (tuning.path == .scalar and N == 1));
+
     const q_stride: u32 = @truncate(q.nb[1] / c.ggml_type_size(q.type));
     var k_stride: u32 = @truncate(k.nb[1] / c.ggml_type_size(k.type));
     var v_stride: u32 = @truncate(v.nb[1] / c.ggml_type_size(v.type));
@@ -415,16 +436,24 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
     // coopmat2 needs the variant that clamps loads when HSK/HSV aren't sufficiently aligned.
     if (((HSK | HSV) % 16) != 0 and tuning.path == .coopmat2) aligned = false;
 
-    var scale: f32 = @bitCast(dst.op_params[0]);
-    const max_bias: f32 = @bitCast(dst.op_params[1]);
-    const logit_softcap: f32 = @bitCast(dst.op_params[2]);
-    if (logit_softcap != 0) scale /= logit_softcap;
-
     // Only use mask opt when the mask is fairly large. Not tuned extensively.
-    const use_mask_opt = mask != null and nem1 >= 32 and nem0 *% nem1 > 32768 and nem0 >= tuning.block_cols * 16 and
+    var use_mask_opt = mask != null and !use_sparse and nem1 >= 32 and nem0 *% nem1 > 32768 and nem0 >= tuning.block_cols * 16 and
         (dev.architecture != .amd_gcn or HSK > 256 or HSV > 256);
 
-    const state = pipelineState(dev, &tuning, HSK, HSV, aligned, f32acc, mask != null, use_mask_opt, logit_softcap != 0, k_type_eff, v_type_eff);
+    const state = pipelineState(dev, &tuning, HSK, HSV, aligned, f32acc, mask != null, use_mask_opt, logit_softcap != 0, use_sparse, k_type_eff, v_type_eff);
+
+    // Intel Xe's two-phase decode path: its platforms, shapes and types.
+    var xe_fa_opt = false;
+    var fa_copy_qstate = false;
+    const xe_fa_supported_platform =
+        (dev.architecture == .intel_xe2 and dev.properties.deviceID != 0xFD80 and dev.properties.deviceID != 0xFD81) or
+        (dev.architecture == .intel_xe1 and dev.coopmat_support and dev.uma);
+    const xe_fa_supported_usage = @mod(q.ne[0], 32) == 0 and @mod(v.ne[0], 16) == 0 and q.nb[1] > q.nb[2] and k.nb[1] > k.nb[2] and v.nb[1] > v.nb[2] and mask != null;
+    const xe_fa_supported_dtype = q.type == c.GGML_TYPE_F32 and k.type == c.GGML_TYPE_F16 and v.type == c.GGML_TYPE_F16 and (mask != null and mask.?.type == c.GGML_TYPE_F16);
+    var xe_fa_pipeline_dual_phases: m.device.XeFaDecodePipelines = .{};
+    var size_p: u64 = 0;
+    var size_group_max: u64 = 0;
+
     const pipeline = dynamicPipeline(ctx, &dev.pipeline_flash_attn_f32_f16, state);
 
     // Compile early to initialize wg_denoms.
@@ -444,19 +473,60 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
     const Tr = ceilDiv(N, Br);
 
     // Try to use split_k when KV is large enough to be worth the overhead.
-    if (gqa_ratio > 1 and workgroups_x <= Br) {
+    // Sparse: split_kv carries n_kv_max, split_k partitions its blocks for
+    // occupancy.
+    if (use_sparse) {
+        split_kv = @intCast(n_kv_max);
+        const total_blocks = ceilDiv(@as(u32, @intCast(n_kv_max)), Bc);
+        const base_wgs = (if (gqa_ratio > 1) workgroups_x else Tr) *% workgroups_y *% workgroups_z;
+        if (base_wgs < shader_core_count * 2) split_k = shader_core_count * 2 / base_wgs;
+        split_k = @max(1, @min(split_k, total_blocks));
+        // Match the shader's per-split block count so no split is empty.
+        const per_blocks = ceilDiv(total_blocks, split_k);
+        split_k = ceilDiv(total_blocks, per_blocks);
+    } else if (gqa_ratio > 1 and workgroups_x <= Br) {
         split_k = shader_core_count * 2 / (workgroups_x *% workgroups_y *% workgroups_z);
     } else if (gqa_ratio <= 1) {
         const total_wgs_no_split = Tr *% workgroups_y *% workgroups_z;
         if (total_wgs_no_split < shader_core_count * 2) split_k = shader_core_count * 2 / total_wgs_no_split;
     }
 
-    if (split_k > 1) {
+    if (!use_sparse and split_k > 1) {
         // Split KV evenly into split_k chunks, each a multiple of the
         // alignment, and recompute split_k from that.
         split_kv = @intCast(roundupPow2(@max(1, KV / split_k), alignment));
         split_k = ceilDiv(KV, split_kv);
+        xe_fa_opt = xe_fa_supported_platform and xe_fa_supported_usage and xe_fa_supported_dtype;
+        if (xe_fa_opt) {
+            const split_p_size: u64 = 32;
+            const nek1: u64 = @intCast(k.ne[1]);
+            const max_dim = (nek1 +% split_p_size -% 1) / split_p_size;
+            const p_dim = max_dim *% split_p_size;
+            // The C++ holds `compile_mutex` for the rest of this block.
+            _ = std.c.pthread_mutex_lock(&dev.compile_mutex);
+            defer _ = std.c.pthread_mutex_unlock(&dev.compile_mutex);
+            const xe_key: m.device.XeFaDecodeKey = .{ u(q.ne[0]), u(v.ne[0]), qk_ratio, u(q.ne[1]) };
+            const gop = dev.pipeline_xe_fa_decode_dual_phases.getOrPut(m.common.allocator, xe_key) catch impl.abort("ggml_vulkan: out of memory");
+            if (!gop.found_existing) gop.value_ptr.* = .{ .first = Pipeline.create(), .second = Pipeline.create() };
+            xe_fa_pipeline_dual_phases = gop.value_ptr.*;
+
+            const neq1: u64 = @intCast(q.ne[1]);
+            const neq2: u64 = @intCast(q.ne[2]);
+            const neq3: u64 = @intCast(q.ne[3]);
+            size_p = neq1 *% neq2 *% p_dim *% neq3 *% @sizeOf(c.ggml_fp16_t);
+            size_group_max = neq1 *% neq2 *% max_dim *% neq3 *% @sizeOf(f32);
+            const temp_size = @as(u64, @intCast(c.ggml_nelements(q))) *% @sizeOf(c.ggml_fp16_t) +% size_p +% size_group_max;
+            fa_copy_qstate = true;
+            if (ctx.prealloc_size_x < temp_size) {
+                ctx.prealloc_size_x = temp_size;
+                m.nodes.preallocateBuffers(ctx, subctx);
+            }
+
+            if (ctx.prealloc_x_need_sync) m.context.syncBuffers(ctx, subctx);
+        }
     }
+
+    if (xe_fa_opt) use_mask_opt = false;
 
     const ne1: u64 = @intCast(dst.ne[1]);
     const ne2: u64 = @intCast(dst.ne[2]);
@@ -486,6 +556,18 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
         if (ctx.prealloc_y_need_sync) m.context.syncBuffers(ctx, subctx);
     }
 
+    // Sparse index scratch reuses prealloc_y (mutually exclusive with mask opt).
+    const sparse_idx_size: u64 = if (use_sparse) @sizeOf(i32) *% @as(u64, @intCast(n_kv_max)) *% nem1 *% nem2 *% nem3 else 0;
+    const sparse_compact_pipeline = if (dev.fa_sparse_compact_use_subgroups) dev.pipeline_fa_sparse_compact_subgroup else dev.pipeline_fa_sparse_compact;
+    if (use_sparse) {
+        m.context.requestDescriptorSets(ctx, sparse_compact_pipeline.?, 1);
+        if (ctx.prealloc_size_y < sparse_idx_size) {
+            ctx.prealloc_size_y = sparse_idx_size;
+            m.nodes.preallocateBuffers(ctx, subctx);
+        }
+        if (ctx.prealloc_y_need_sync) m.context.syncBuffers(ctx, subctx);
+    }
+
     const n_head_kv = u(q.ne[2]);
     const n_head_log2: u32 = @as(u32, 1) << @intCast(@as(u32, @intFromFloat(floorf(log2f(@floatFromInt(n_head_kv))))));
     const nhl: f32 = @floatFromInt(n_head_log2);
@@ -499,6 +581,7 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
     const mask_buf = if (mask) |t| m.context.tensorSubbuffer(ctx, t, false) else q_buf;
     const sinks_buf = if (sinks) |t| m.context.tensorSubbuffer(ctx, t, false) else q_buf;
     const mask_opt_buf = if (use_mask_opt) m.context.subbuffer(ctx, ctx.prealloc_y.?, 0) else q_buf;
+    const sparse_buf = if (use_sparse) m.context.subbuffer(ctx, ctx.prealloc_y.?, 0) else q_buf;
 
     if (use_dequant_kv) {
         const k_f16_sz = @as(u64, @intCast(c.ggml_nelements(k))) * fp16sz;
@@ -550,6 +633,22 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
         m.context.syncBuffers(ctx, subctx);
     }
 
+    if (use_sparse) {
+        const mk = mask.?;
+        const h: u32 = @sizeOf(c.ggml_fp16_t);
+        const sc_pc: push.FlashAttnSparseCompact = .{
+            .KV = KV,
+            .nem1 = nem1,
+            .nem2 = nem2,
+            .nbm1 = @truncate(mk.nb[1] / h),
+            .nbm2 = @truncate(mk.nb[2] / h),
+            .nbm3 = @truncate(mk.nb[3] / h),
+            .n_kv_max = @intCast(n_kv_max),
+        };
+        m.context.dispatch(ctx, subctx, sparse_compact_pipeline.?, &.{ mask_buf, sparse_buf }, &sc_pc, .{ nem1, nem2, nem3 });
+        m.context.syncBuffers(ctx, subctx);
+    }
+
     const pc: push.FlashAttn = .{
         .N = N,
         .KV = KV,
@@ -585,7 +684,24 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
         .k_num = split_k,
     };
 
-    if (split_k > 1) {
+    if (xe_fa_opt and split_k > 1) {
+        xeFaDecode(ctx, subctx, q, k, v, mask, sinks, dst, .{
+            .pipelines = xe_fa_pipeline_dual_phases,
+            .qk_ratio = qk_ratio,
+            .k_stride = k_stride,
+            .v_stride = v_stride,
+            .scale = scale,
+            .fa_copy_qstate = fa_copy_qstate,
+            .size_p = size_p,
+            .size_group_max = size_group_max,
+            .q_buf = q_buf,
+            .k_buf = k_buf,
+            .v_buf = v_buf,
+            .mask_buf = mask_buf,
+            .sinks_buf = sinks_buf,
+            .dst_buf = dst_buf,
+        });
+    } else if (split_k > 1) {
         const reduce = dev.pipeline_flash_attn_split_k_reduce.?;
         m.context.requestDescriptorSets(ctx, reduce, 1);
         if (ctx.prealloc_split_k_need_sync) m.context.syncBuffers(ctx, subctx);
@@ -600,7 +716,7 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
         }
 
         const split_k_buf = m.context.subbuffer(ctx, ctx.prealloc_split_k.?, 0);
-        m.context.dispatch(ctx, subctx, pipeline, &.{ q_buf, k_buf, v_buf, mask_buf, sinks_buf, split_k_buf, mask_opt_buf }, &pc, .{ dispatch_x, workgroups_y, workgroups_z });
+        m.context.dispatch(ctx, subctx, pipeline, &.{ q_buf, k_buf, v_buf, mask_buf, sinks_buf, split_k_buf, mask_opt_buf, sparse_buf }, &pc, .{ dispatch_x, workgroups_y, workgroups_z });
 
         m.context.syncBuffers(ctx, subctx);
         const pc2: push.FlashAttnSplitKReduce = .{ .D = HSV, .ne1 = @truncate(ne1), .ne2 = @truncate(ne2), .ne3 = @truncate(ne3), .k_num = split_k, .sinks = @intFromBool(sinks != null) };
@@ -609,10 +725,130 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
     } else {
         // With gqa, one actual workgroup per batch: cancel out wg_denoms
         if (gqa_ratio > 1) workgroups_x *%= pipeline.wg_denoms[0];
-        m.context.dispatch(ctx, subctx, pipeline, &.{ q_buf, k_buf, v_buf, mask_buf, sinks_buf, dst_buf, mask_opt_buf }, &pc, .{ workgroups_x, workgroups_y, workgroups_z });
+        m.context.dispatch(ctx, subctx, pipeline, &.{ q_buf, k_buf, v_buf, mask_buf, sinks_buf, dst_buf, mask_opt_buf, sparse_buf }, &pc, .{ workgroups_x, workgroups_y, workgroups_z });
     }
 
     if (use_dequant_kv) ctx.prealloc_x_need_sync = true;
+    if (use_mask_opt or use_sparse) ctx.prealloc_y_need_sync = true;
+}
+
+/// The function-static `disable_sparse` (ggml-vulkan.cpp:7902 @7fe450e19):
+/// whether `GGML_VK_FA_SPARSE_DISABLE` is set, read once, on first use.
+const DisableSparse = struct {
+    /// 0 unread, 1 false, 2 true.
+    var state: std.atomic.Value(u8) = .init(0);
+
+    fn get() bool {
+        const v = state.load(.acquire);
+        if (v != 0) return v == 2;
+        const set = m.common.envSet("GGML_VK_FA_SPARSE_DISABLE");
+        state.store(if (set) 2 else 1, .release);
+        return set;
+    }
+};
+
+/// What `xeFaDecode` takes from `flashAttn`'s locals.
+const XeFaArgs = struct {
+    pipelines: m.device.XeFaDecodePipelines,
+    qk_ratio: u32,
+    k_stride: u32,
+    v_stride: u32,
+    scale: f32,
+    fa_copy_qstate: bool,
+    size_p: u64,
+    size_group_max: u64,
+    q_buf: Subbuffer,
+    k_buf: Subbuffer,
+    v_buf: Subbuffer,
+    mask_buf: Subbuffer,
+    sinks_buf: Subbuffer,
+    dst_buf: Subbuffer,
+};
+
+/// The `upper_power_of_2` and `upper_power_of_2` lambdas
+/// (ggml-vulkan.cpp:8208, 2984 @7fe450e19), one in `ggml_vk_flash_attn` and
+/// one in `ggml_vk_load_shaders`, which are the same: the next power of two
+/// at or above `in`.
+pub fn upperPowerOf2(in: u32) u32 {
+    impl.assert(in != 0, "in != 0");
+    if (in <= 1) return 1;
+    var ret = in - 1;
+    ret |= ret >> 1;
+    ret |= ret >> 2;
+    ret |= ret >> 4;
+    ret |= ret >> 8;
+    ret |= ret >> 16;
+    return ret +% 1;
+}
+
+/// The `xe_fa_opt` arm (ggml-vulkan.cpp:8207 @7fe450e19) of
+/// `ggml_vk_flash_attn`, taken when `split_k > 1`: Intel Xe's two-phase decode -- Q copied
+/// to fp16 into `prealloc_x`, phase 1 writing P and each group's max beside
+/// it, phase 2 reducing them against V into `dst`.
+fn xeFaDecode(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const Tensor, v: *const Tensor, mask: ?*const Tensor, sinks: ?*const Tensor, dst: *const Tensor, a: XeFaArgs) void {
+    const dev = ctx.device;
+    const u = ops.u32Of;
+    const to_fp16_vk_0 = m.ops_matmul.getToFp16(ctx, q.type);
+    const out_dim_per_wg: i64 = if (a.qk_ratio > 16) 8 else 16;
+    const x_ne: u64 = @intCast(c.ggml_nelements(q));
+    var temp_buf_offset: u64 = 0;
+    const head_stride_k: u32 = @truncate(k.nb[2] / c.ggml_type_size(k.type));
+    const head_stride_v: u32 = @truncate(v.nb[2] / c.ggml_type_size(v.type));
+    const batch_stride_q: u32 = @truncate(q.nb[3] / c.ggml_type_size(q.type));
+    const batch_stride_k: u32 = @truncate(k.nb[3] / c.ggml_type_size(k.type));
+    const batch_stride_v: u32 = @truncate(v.nb[3] / c.ggml_type_size(v.type));
+    const batch_stride_m: u32 = if (mask) |mk| @truncate(mk.nb[3] / c.ggml_type_size(mk.type)) else 0;
+    const batch_stride_o: u32 = @truncate(dst.nb[3] / c.ggml_type_size(dst.type));
+    const pc_ph1: push.FaXeOpt = .{
+        .kv_seq_len = u(k.ne[1]),
+        .activation_length = u(q.ne[1]),
+        .q_head = u(q.ne[2]),
+        .kv_head = u(k.ne[2]),
+        .qk_ratio = a.qk_ratio,
+        .qk_sub_groups = 1,
+        .flag = @intFromBool(sinks != null),
+        .nbkv_tok = a.k_stride,
+        .nbkv_head = head_stride_k,
+        .batch_stride_q = batch_stride_q,
+        .batch_stride_k = batch_stride_k,
+        .batch_stride_v = batch_stride_v,
+        .batch_stride_m = batch_stride_m,
+        .batch_stride_o = batch_stride_o,
+        .softmax_scale = a.scale,
+    };
+    var pc_ph2 = pc_ph1;
+    pc_ph2.nbkv_tok = a.v_stride;
+    pc_ph2.nbkv_head = head_stride_v;
+    const q_temp_buf = if (a.fa_copy_qstate) m.context.subbuffer(ctx, ctx.prealloc_x.?, temp_buf_offset) else a.q_buf;
+    temp_buf_offset += if (a.fa_copy_qstate) x_ne * @sizeOf(c.ggml_fp16_t) else 0;
+    const p_temp_buf = m.context.subbuffer(ctx, ctx.prealloc_x.?, temp_buf_offset);
+    temp_buf_offset += a.size_p;
+    const max_temp_buf = m.context.subbuffer(ctx, ctx.prealloc_x.?, temp_buf_offset);
+    temp_buf_offset += a.size_group_max;
+    const xe_native_sub_group_size: u32 = if (dev.architecture == .intel_xe1) 8 else 16;
+    const aligned_gqa_ratio = upperPowerOf2(a.qk_ratio);
+    const neq1: u32 = u(q.ne[1]);
+    const out_per_wg_ph1 = @min(256 / xe_native_sub_group_size, neq1);
+    const out_per_wg_ph2 = @min(@max(16 / aligned_gqa_ratio, 1), neq1);
+    // int64_t arithmetic in the C++: neq1, nek2 and ne0 are int64_t.
+    const ph1_wg: u32 = @truncate(@as(u64, @bitCast(@divTrunc(q.ne[1] + out_per_wg_ph1 - 1, out_per_wg_ph1) * k.ne[2])));
+    const ph2_wg: u32 = @truncate(@as(u64, @bitCast(@divTrunc(@divTrunc(q.ne[1] + out_per_wg_ph2 - 1, out_per_wg_ph2) * dst.ne[0], out_dim_per_wg))));
+    if (a.fa_copy_qstate) {
+        const pc_cpy_fp16 = [5]u32{ u(q.ne[0]), u(q.ne[1]), u(q.ne[2]), u(q.ne[3]), @truncate(x_ne) };
+        m.context.syncBuffers(ctx, subctx);
+        m.context.requestDescriptorSets(ctx, to_fp16_vk_0.?, 1);
+        m.context.dispatch(ctx, subctx, to_fp16_vk_0.?, &.{ a.q_buf, q_temp_buf }, &pc_cpy_fp16, .{ @truncate(x_ne), 1, 1 });
+    }
+
+    m.context.syncBuffers(ctx, subctx);
+    m.context.requestDescriptorSets(ctx, a.pipelines.first.?, 1);
+    m.context.dispatch(ctx, subctx, a.pipelines.first.?, &.{ q_temp_buf, a.k_buf, a.mask_buf, p_temp_buf, max_temp_buf }, &pc_ph1, .{ ph1_wg, u(k.ne[1]), u(q.ne[3]) });
+
+    m.context.syncBuffers(ctx, subctx);
+    m.context.requestDescriptorSets(ctx, a.pipelines.second.?, 1);
+    m.context.dispatch(ctx, subctx, a.pipelines.second.?, &.{ p_temp_buf, a.v_buf, max_temp_buf, a.sinks_buf, a.dst_buf }, &pc_ph2, .{ ph2_wg, u(v.ne[2]), u(q.ne[3]) });
+
+    ctx.prealloc_x_need_sync = true;
 }
 
 // -----------------------------------------------------------------------------
@@ -620,4 +856,17 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
 
 test {
     std.testing.refAllDecls(@This());
+}
+
+test "upperPowerOf2 is the smallest power of two at or above its input" {
+    var x: u32 = 1;
+    while (x <= 1 << 20) : (x += 1) {
+        const p = upperPowerOf2(x);
+        try std.testing.expect(std.math.isPowerOfTwo(p));
+        try std.testing.expect(p >= x and (p == 1 or p / 2 < x));
+    }
+    try std.testing.expectEqual(@as(u32, 1 << 31), upperPowerOf2((1 << 30) + 1));
+    try std.testing.expectEqual(@as(u32, 1 << 31), upperPowerOf2(1 << 31));
+    // Past 2^31 the C++'s uint32_t wraps to 0, and so does the port.
+    try std.testing.expectEqual(@as(u32, 0), upperPowerOf2((1 << 31) + 1));
 }

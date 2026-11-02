@@ -15,15 +15,31 @@
 #   metadata is loaded as the other files' is, and its tensors are loaded in
 #   full through llama_model_load_from_file and through the port, once each,
 #   and the first one again under every parameter that changes where a
-#   tensor goes or how it is read. The gemma4 and qwen4exp fixtures, when
-#   scripts/gen-arch-fixtures has written them, are loaded under every lazy
-#   mode.
+#   tensor goes or how it is read. The gemma4 and qwen4exp fixtures, which
+#   scripts/gen-arch-fixtures writes and this requires, are loaded under every lazy
+#   mode, and so is hrm_text's, whose cache slots alias two physical blocks.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
 for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+# The lazy-read and aliased-layer cases below need scripts/gen-arch-fixtures'
+# output. A missing fixture is a failure, not a smaller run: at v0.5.0 a
+# combined gate run reached this script before the fixtures were written,
+# printed one "no fixture given" line and passed on the rest.
+FIXTURES="${ARCH_FIXTURES:-zig-out/arch-fixtures}"
+fixtures=()
+# (A `gemma4-moe*` pattern stood here, matching nothing: test-llama-archs
+# writes Gemma 4 dense only. Required, it would have said so long ago.)
+for pat in "gemma4-dense*.gguf" "qwen4exp-*.gguf" "hrm_text-*.gguf" "nemotron_h-dense.gguf"; do
+    found=0
+    for m in "$FIXTURES"/$pat; do
+        [ -f "$m" ] && { fixtures+=("$m"); found=1; }
+    done
+    [ $found = 1 ] || { echo "FAIL: no $FIXTURES/$pat -- run 'make arch-fixtures'" >&2; exit 2; }
 done
 
 tmp="$(mktemp -d)"
@@ -55,10 +71,10 @@ models=(llama.cpp/models/ggml-vocab-*.gguf)
 for m in Qwen3.5-*.gguf; do
     [ -f "$m" ] && models+=("$m")
 done
-# The architectures that mark a tensor `TENSOR_READ_LAZY`, from
-# scripts/gen-arch-fixtures: their tensors are loaded under every lazy mode.
-for m in zig-out/arch-fixtures/gemma4-dense*.gguf zig-out/arch-fixtures/gemma4-moe*.gguf zig-out/arch-fixtures/qwen4exp-*.gguf; do
-    [ -f "$m" ] && models+=("$m")
-done
+# The architectures that mark a tensor `TENSOR_READ_LAZY`, and hrm_text's
+# aliased layers, from scripts/gen-arch-fixtures: their tensors are loaded
+# under every lazy mode. hrm_text's and nemotron_h's metadata are edited a
+# key at a time too.
+models+=("${fixtures[@]}")
 
 "$tmp/loader_diff" "$tmp" "${models[@]}" "$@"

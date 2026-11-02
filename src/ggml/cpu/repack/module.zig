@@ -47,6 +47,7 @@ pub const convert = @import("convert.zig");
 pub const dispatch = @import("dispatch.zig");
 pub const epilogue = @import("epilogue.zig");
 pub const nibble4 = @import("nibble4.zig");
+pub const q1_0 = @import("q1_0.zig");
 pub const q2_k = @import("q2_k.zig");
 pub const q4_0 = @import("q4_0.zig");
 pub const q4_k = @import("q4_k.zig");
@@ -55,8 +56,8 @@ pub const q6_k = @import("q6_k.zig");
 pub const q8_0 = @import("q8_0.zig");
 pub const quantize = @import("quantize.zig");
 
-/// Ports `ggml_backend_cpu_repack_buffer_type` (ggml-cpu/repack.cpp:4826
-/// @b29c606e2). Re-exported from `dispatch.zig` so `cpu_backend.zig` keeps
+/// Ports `ggml_backend_cpu_repack_buffer_type` (ggml-cpu/repack.cpp:5238
+/// @7fe450e19). Re-exported from `dispatch.zig` so `cpu_backend.zig` keeps
 /// reaching this directory through the barrel.
 pub const ggml_backend_cpu_repack_buffer_type = dispatch.ggml_backend_cpu_repack_buffer_type;
 
@@ -67,6 +68,7 @@ comptime {
     _ = dispatch;
     _ = epilogue;
     _ = nibble4;
+    _ = q1_0;
     _ = q2_k;
     _ = q4_0;
     _ = q4_k;

@@ -7,7 +7,7 @@
 # every ported file sees. The struct is 19 fields of which the port reads
 # seven; the rest exist only to place those seven correctly.
 #
-# It also checks two generated files for the same reason: the 112
+# It also checks two generated files for the same reason: the 127
 # `FC_*`/`OP_*`/`N_*` constants in `metal/impl_c.zig`, and the 65
 # `ggml_metal_kargs_*` structs in `metal/kargs.zig` -- 936 fields the
 # Metal kernels read **by offset**, where one wrong offset feeds a kernel
@@ -53,4 +53,18 @@ zig c++ -mcpu=baseline harness/struct_layout.cpp "$LIB" -o "$tmp/layout" \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/err" \
     || { echo "FAIL: could not build the layout harness" >&2; head -20 "$tmp/err" >&2; exit 1; }
 
-"$tmp/layout"
+"$tmp/layout" || exit 1
+
+# The harness compares the Zig table with its own hand-kept list, so a
+# `#define` upstream adds to neither passes it: both counts move together or
+# not at all. Ask the header for its names directly.
+grep -oE '^#define [A-Z0-9_]+' llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h \
+    | awk '$2 != "GGML_METAL_IMPL" {print $2}' | sort > "$tmp/hdr"
+grep -oE '\.name = "[A-Z0-9_]+"' src/ggml/metal/impl_c.zig \
+    | sed 's/.*"\(.*\)"/\1/' | sort > "$tmp/zig"
+if ! diff "$tmp/hdr" "$tmp/zig" > "$tmp/ddiff"; then
+    echo "FAIL: ggml-metal-impl.h #defines and impl_c.zig differ (< header only, > impl_c only):"
+    cat "$tmp/ddiff"
+    exit 1
+fi
+echo "ggml-metal-impl.h: all $(wc -l < "$tmp/hdr" | tr -d ' ') #defines are in impl_c.zig"

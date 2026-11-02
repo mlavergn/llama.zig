@@ -28,7 +28,7 @@
 static std::atomic<bool> g_quit{false};
 static std::atomic<bool> g_wait_complete{false};
 
-// Copied from tools/server/server.cpp:54 @b29c606e2, unmodified: every
+// Copied from tools/server/server.cpp:54 @7fe450e19, unmodified: every
 // route the server registers goes through it.
 static server_http_context::handler_t ex_wrapper(server_http_context::handler_t func) {
     return [func = std::move(func)](const server_http_req & req) -> server_http_res_ptr {
@@ -111,7 +111,7 @@ struct wait_res : server_http_res {
 };
 
 static void configure(const std::string & name, common_params & params, bool & ready) {
-    params.hostname       = "127.0.0.1";
+    params.hostnames      = {"127.0.0.1"};
     params.port           = 0;
     params.timeout_read   = 3;
     params.timeout_write  = 3;
@@ -138,15 +138,34 @@ static void configure(const std::string & name, common_params & params, bool & r
         ready = false;
     } else if (name == "unix") {
         const char * sock = std::getenv("HTTP_DIFF_SOCK");
-        params.hostname = sock ? sock : "http-diff.sock";
+        params.hostnames = {sock ? sock : "http-diff.sock"};
     } else if (name == "ssl") {
         params.ssl_file_key  = "key.pem";
         params.ssl_file_cert = "cert.pem";
     } else if (name == "badhost") {
-        params.hostname = "256.1.1.1";
+        params.hostnames = {"256.1.1.1"};
     } else if (name == "reuse") {
         params.reuse_port = true;
         params.api_keys   = {"abc"};
+    } else if (name == "multi") {
+        // v0.5.0: a listener per address, a Unix socket first and one TCP
+        // address, so port 0 is allowed
+        const char * sock = std::getenv("HTTP_DIFF_SOCK");
+        params.hostnames = {sock ? sock : "http-diff.sock", "127.0.0.1"};
+        params.api_keys  = {"abc"};
+    } else if (name == "multitcp") {
+        // two TCP addresses on one fixed port, each IPv6-only where it can be
+        const char * port = std::getenv("HTTP_DIFF_PORT");
+        params.hostnames = {"127.0.0.1", "::1"};
+        params.port      = port ? std::atoi(port) : 0;
+    } else if (name == "multiport0") {
+        // port 0 with two TCP addresses is refused
+        params.hostnames = {"127.0.0.1", "::1"};
+    } else if (name == "multibad") {
+        // the second address cannot be bound: the first is stopped again
+        params.hostnames = {"127.0.0.1", "256.1.1.1"};
+        const char * port = std::getenv("HTTP_DIFF_PORT");
+        params.port      = port ? std::atoi(port) : 0;
     }
 }
 
@@ -272,7 +291,9 @@ int main(int argc, char ** argv) {
     if (ready) {
         ctx_http.is_ready.store(true);
     }
-    LOG_INF("harness: listening on %s\n", ctx_http.listening_address.c_str());
+    for (const auto & address : ctx_http.listening_addresses) {
+        LOG_INF("harness: listening on %s\n", address.c_str());
+    }
     common_log_flush(common_log_main());
 
     FILE * f = fopen(argv[2], "w");
@@ -292,9 +313,7 @@ int main(int argc, char ** argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     ctx_http.stop();
-    if (ctx_http.thread.joinable()) {
-        ctx_http.thread.join();
-    }
+    ctx_http.join();
     LOG_INF("harness: stopped\n");
     common_log_flush(common_log_main());
     return 0;

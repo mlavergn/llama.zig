@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! **Mostly not a port.** Upstream's `llama-cli` (v0.4.1, `b29c606e2`) is a
+//! **Mostly not a port.** Upstream's `llama-cli` (v0.5.0, `7fe450e19`) is a
 //! client of a `llama-server` it runs in-process: it posts the conversation
 //! to `/v1/chat/completions` and prints the `reasoning_content` and `content`
 //! deltas of the stream (`llama.cpp/tools/cli/cli-context.cpp`). This file
@@ -12,12 +12,12 @@
 //!
 //! - **the request**: what upstream's server makes of a body holding only
 //!   `messages` -- `Chat.init` and `Chat.inputs`, after
-//!   `oaicompat_chat_params_parse` (tools/server/server-common.cpp:1151 @b29c606e2)
-//!   and the chat options `load_model` (tools/server/server-context.cpp:1006 @b29c606e2)
+//!   `oaicompat_chat_params_parse` (tools/server/server-common.cpp:1151 @7fe450e19)
+//!   and the chat options `load_model` (tools/server/server-context.cpp:1006 @7fe450e19)
 //!   sets from the command line;
 //! - **the stream**: every piece of reply parsed partially and diffed
 //!   against the last parse, then parsed whole at the end -- `Reply`, after
-//!   `update_chat_msg` (tools/server/server-task.cpp:162 @b29c606e2);
+//!   `update_chat_msg` (tools/server/server-task.cpp:162 @7fe450e19);
 //! - **the display**: `ui::assistant_turn`, whose port is `Display`.
 //!
 //! One deliberate difference: upstream's server tokenizes the rendered
@@ -75,7 +75,7 @@ fn setError(text: []const u8) !void {
 /// Replays the command line's writes to upstream's `default_template_kwargs`
 /// -- a `std::map` from a name to the JSON text of its value -- and adds the
 /// `preserve_reasoning` default added when nothing set it, at the end of
-/// `common_params_parse_ex` (common/arg.cpp:762 @b29c606e2).
+/// `common_params_parse_ex` (common/arg.cpp:762 @7fe450e19).
 ///
 /// Parameters:
 /// - `a`: owns the result; an arena in practice.
@@ -129,11 +129,11 @@ fn find(map: []const KwArg, key: []const u8) ?[]const u8 {
 // -----------------------------------------------------------------------------
 // The display
 
-/// Ports `assistant_turn` (tools/cli/cli-ui.h:187 @b29c606e2), in namespace
+/// Ports `assistant_turn` (tools/cli/cli-ui.h:187 @7fe450e19), in namespace
 /// `ui`, with the part of `console` it drives: reasoning opens with
 /// `[Start thinking]` and closes with `[End thinking]` when the answer
 /// begins, and under `--color` is written grey -- the markers too -- as
-/// `DISPLAY_TYPE_REASONING`'s colour in `set_display` (common/console.cpp:173 @b29c606e2).
+/// `DISPLAY_TYPE_REASONING`'s colour in `set_display` (common/console.cpp:173 @7fe450e19).
 pub const Display = struct {
     out: *std.Io.Writer,
     /// `console`'s `advanced_display`: whether set_display writes anything.
@@ -159,7 +159,7 @@ pub const Display = struct {
         try self.setDisplay(.reset);
     }
 
-    /// Ports `assistant_turn`'s `push` (tools/cli/cli-ui.h:198 @b29c606e2).
+    /// Ports `assistant_turn`'s `push` (tools/cli/cli-ui.h:198 @7fe450e19).
     pub fn push(self: *Display, m: Mode, buffer: []const u8) !void {
         if (m != self.mode) {
             try self.addNewlineIfNeeded();
@@ -191,7 +191,7 @@ pub const Display = struct {
         try self.addNewlineIfNeeded();
     }
 
-    /// Ports `assistant_turn`'s `add_newline_if_needed` (tools/cli/cli-ui.h:226 @b29c606e2).
+    /// Ports `assistant_turn`'s `add_newline_if_needed` (tools/cli/cli-ui.h:226 @7fe450e19).
     fn addNewlineIfNeeded(self: *Display) !void {
         if (!self.trailing_newline) {
             try self.log("\n");
@@ -199,7 +199,7 @@ pub const Display = struct {
         }
     }
 
-    /// Ports `ui`'s `show_error` (tools/cli/cli-ui.h:234 @b29c606e2) as a reply
+    /// Ports `ui`'s `show_error` (tools/cli/cli-ui.h:234 @7fe450e19) as a reply
     /// shows it: `console::error`, in red under `--color`, the colour before
     /// it restored.
     pub fn showError(self: *Display, title: []const u8) !void {
@@ -218,7 +218,7 @@ pub const Display = struct {
         try self.out.writeAll(s[0..end_at]);
     }
 
-    /// Ports `console`'s `set_display` (common/console.cpp:173 @b29c606e2) for
+    /// Ports `console`'s `set_display` (common/console.cpp:173 @7fe450e19) for
     /// the three kinds a reply uses.
     fn setDisplay(self: *Display, kind: Kind) !void {
         if (!self.color or self.current == kind) return;
@@ -239,7 +239,7 @@ pub const Display = struct {
 /// the text, the text is parsed as a partial message and the difference from
 /// the last parse is shown; `finish` parses it whole. The reasoning and the
 /// answer shown are what the history keeps, as `generate_completion`
-/// (tools/cli/cli-context.cpp:350 @b29c606e2) collects them.
+/// (tools/cli/cli-context.cpp:350 @7fe450e19) collects them.
 pub const Reply = struct {
     gpa: Allocator,
     display: *Display,
@@ -278,7 +278,7 @@ pub const Reply = struct {
         _ = try self.update(false);
     }
 
-    /// Ports `task_result_state`'s `update_chat_msg` (tools/server/server-task.cpp:162 @b29c606e2)
+    /// Ports `task_result_state`'s `update_chat_msg` (tools/server/server-task.cpp:162 @7fe450e19)
     /// and what `generate_completion` does with the diffs: a
     /// reasoning delta, then a content delta, each shown when not empty; tool
     /// call deltas reach nobody, as upstream's CLI reads neither. A parse that
@@ -391,7 +391,7 @@ pub const Chat = struct {
         self.history.clearRetainingCapacity();
     }
 
-    /// `add_system_prompt` (tools/cli/cli-context.cpp:278 @b29c606e2).
+    /// `add_system_prompt` (tools/cli/cli-context.cpp:278 @7fe450e19).
     fn addSystem(self: *Chat) !void {
         if (self.system.len != 0) try self.push("system", self.system, "");
     }
@@ -428,7 +428,7 @@ pub const Chat = struct {
     }
 
     /// The request `oaicompat_chat_params_parse` (tools/server/server-common.cpp:1151
-    /// @b29c606e2) builds for a body of `messages` alone: no tools, no
+    /// @7fe450e19) builds for a body of `messages` alone: no tools, no
     /// schema, a generation prompt, the server's reasoning format, its
     /// thinking switch -- which an `enable_thinking` kwarg overrides -- and
     /// its kwargs.
@@ -488,7 +488,7 @@ pub const Chat = struct {
         }
 
         // The server task's token-level `preserved_tokens`
-        // (tools/server/server-schema.cpp:341 @b29c606e2): a preserved token
+        // (tools/server/server-schema.cpp:341 @7fe450e19): a preserved token
         // counts only when it is one token.
         var preserved: std.ArrayList(c.llama_token) = .empty;
         for (params.preserved_tokens.items) |t| {
@@ -528,7 +528,7 @@ pub const Chat = struct {
     }
 
     /// The reasoning budget sampler `common_sampler_init`
-    /// (common/sampling.cpp:187 @b29c606e2) builds from the server task's
+    /// (common/sampling.cpp:187 @7fe450e19) builds from the server task's
     /// budget fields: only for a template with an end-of-thinking tag, only
     /// when there is a budget (or a lazy grammar), and fed the generation
     /// prompt's tokens so a template that opens the block itself starts it
@@ -626,7 +626,7 @@ fn segmentsFor(a: Allocator, capture: *const template.MarkCapture, prompt: []con
     return out.items;
 }
 
-/// Ports `tty_can_use_colors` (common/common.cpp:1185 @b29c606e2): `--color
+/// Ports `tty_can_use_colors` (common/common.cpp:1185 @7fe450e19): `--color
 /// auto`'s answer.
 ///
 /// Parameters:

@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/bitnet.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/bitnet.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_bitnet`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_bitnet`'s `load_arch_hparams` (models/bitnet.cpp:3 @b29c606e2).
+/// Ports `llama_model_bitnet`'s `load_arch_hparams` (models/bitnet.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -33,7 +33,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_bitnet`'s `load_arch_tensors` (models/bitnet.cpp:12 @b29c606e2).
+/// Ports `llama_model_bitnet`'s `load_arch_tensors` (models/bitnet.cpp:12 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -71,13 +71,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_bitnet`'s `build_arch_graph` (models/bitnet.cpp:47 @b29c606e2).
+/// Ports `llama_model_bitnet`'s `build_arch_graph` (models/bitnet.cpp:47 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_bitnet`'s `graph`
-/// (models/bitnet.cpp:51 @b29c606e2).
+/// (models/bitnet.cpp:51 @7fe450e19).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.4.1, `b29c606e2`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.5.0, `7fe450e19`), lines
 //! 4383-4964. Each function names the C function it replaces and the line it
 //! began at.
 //!
@@ -39,13 +39,13 @@ const c = impl.c;
 const fp16 = impl.fp32ToFp16;
 const QK_K = c.QK_K;
 
-/// Ports `IQ1S_BLOCK_SIZE` (ggml-quants.c:4506 @b29c606e2).
+/// Ports `IQ1S_BLOCK_SIZE` (ggml-quants.c:4506 @7fe450e19).
 const iq1s_block_size = 32;
-/// Ports `IQ1M_BLOCK_SIZE` (ggml-quants.c:4507 @b29c606e2).
+/// Ports `IQ1M_BLOCK_SIZE` (ggml-quants.c:4507 @7fe450e19).
 const iq1m_block_size = 16;
 const ngrid_iq1s = 2048;
 
-/// Ports `iq1_find_best_neighbour2` (ggml-quants.c:4443 @b29c606e2).
+/// Ports `iq1_find_best_neighbour2` (ggml-quants.c:4443 @7fe450e19).
 ///
 /// Weighted-closest entry, with the grid values mapped through `xg` -- the
 /// shifted level table -- rather than used directly.
@@ -118,7 +118,7 @@ const Pair = struct {
     x: f32,
     idx: u32,
 
-    /// Ports `iq1_sort_helper` (ggml-quants.c:4500 @b29c606e2), **plus a tie-break the
+    /// Ports `iq1_sort_helper` (ggml-quants.c:4500 @7fe450e19), **plus a tie-break the
     /// C does not have**.
     ///
     /// The C compares only the value, and hands that to `qsort`, which leaves
@@ -142,7 +142,7 @@ const Pair = struct {
     }
 };
 
-/// Ports `quantize_row_iq1_s_impl` (ggml-quants.c:4508 @b29c606e2).
+/// Ports `quantize_row_iq1_s_impl` (ggml-quants.c:4508 @7fe450e19).
 fn iq1SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f32) void {
     const t = c.GGML_TYPE_IQ1_S;
     const kgrid = codebook.iq2Grid(t);
@@ -313,7 +313,7 @@ fn iq1SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f3
     }
 }
 
-/// Ports `quantize_iq1_s` (ggml-quants.c:4672 @b29c606e2).
+/// Ports `quantize_iq1_s` (ggml-quants.c:4672 @7fe450e19).
 pub export fn quantize_iq1_s(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
     impl.assert(quant_weights != null, "missing quantization weights");
@@ -336,17 +336,19 @@ pub export fn quantize_iq1_s(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_
 // So there are four combinations rather than two, scored together at every
 // split point, and `best_k` records which won.
 
-/// Ports `masks` (ggml-quants.c:4720 @b29c606e2): the `qh` bits encoding the shift pair.
+/// Ports `masks` (ggml-quants.c:4720 @7fe450e19): the `qh` bits encoding the shift pair.
 const iq1m_masks = [4]u8{ 0x00, 0x80, 0x08, 0x88 };
 
-/// Ports `quantize_row_iq1_m_impl` (ggml-quants.c:4692 @b29c606e2).
+/// Ports `quantize_row_iq1_m_impl` (ggml-quants.c:4692 @7fe450e19).
 ///
 /// Two things here have no counterpart in `iq1_s`:
 ///
 /// - **Four shift combinations.** `x_p`/`x_m` are chosen per half-block, so
-///   `k` runs 0..3 as `(+,+), (+,-), (-,+), (-,-)`. The inner loops accumulate
-///   all four scores at once, splitting on whether the element index falls in
-///   the first or second half.
+///   `k` runs 0..3 as `(+,+), (+,-), (-,+), (-,-)`. Since v0.5.0 the split
+///   search scores them from prefix sums kept per half -- `weight*x` and
+///   `weight` over the sorted order -- instead of re-accumulating every run
+///   at every split, which is a different summation order and so different
+///   bits.
 /// - **A second scale fit at the end.** After the per-block scales are
 ///   quantized, the super-block scale is refitted against the *rounded*
 ///   values, which is why the weights are recomputed in that final loop.
@@ -412,16 +414,52 @@ fn iq1MImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f
             var besti2: i32 = -1;
             var best_k: i32 = -1;
 
+            // prefix sums are kept per half of the block because each half can use a different sign (x_p or x_m)
+            // since v[0]-v[1] = v[1]-v[2] = -1 for both x_p and x_m, the 3-group sum for a split collapses to T*v[2] - px[i1] - px[i2]
+            var px: [2][block_size + 1]f32 = undefined;
+            var pw: [2][block_size + 1]f32 = undefined;
+            px[0][0] = 0;
+            px[1][0] = 0;
+            pw[0][0] = 0;
+            pw[1][0] = 0;
+            for (0..block_size) |j| {
+                const i = pairs[j].idx;
+                const hh: usize = if (i < block_size / 2) 0 else 1;
+                px[hh][j + 1] = px[hh][j] + weight[i] * xb[i];
+                px[1 - hh][j + 1] = px[1 - hh][j];
+                pw[hh][j + 1] = pw[hh][j] + weight[i];
+                pw[1 - hh][j + 1] = pw[1 - hh][j];
+            }
+            const txs = [2]f32{ px[0][block_size], px[1][block_size] }; // total weight*x per half
+            const tws = [2]f32{ pw[0][block_size], pw[1][block_size] }; // total weight per half
+            const p2 = x_p[2];
+            const m2 = x_m[2];
+            const cp1 = x_p[0] * x_p[0] - x_p[1] * x_p[1];
+            const cp2 = x_p[1] * x_p[1] - x_p[2] * x_p[2];
+            const cm1 = x_m[0] * x_m[0] - x_m[1] * x_m[1];
+            const cm2 = x_m[1] * x_m[1] - x_m[2] * x_m[2];
+
             for (0..block_size + 1) |lo| {
                 for (lo..block_size + 1) |hi| {
-                    @memset(&sumqx, 0);
-                    @memset(&sumq2, 0);
-                    // Three runs, each contributing its level to all four
-                    // shift combinations. Which of x_p/x_m a combination uses
-                    // for this element depends on which half it is in.
-                    accumulate(&sumqx, &sumq2, pairs[0..lo], weight[0..], xb, &x_p, &x_m, 0, block_size);
-                    accumulate(&sumqx, &sumq2, pairs[lo..hi], weight[0..], xb, &x_p, &x_m, 1, block_size);
-                    accumulate(&sumqx, &sumq2, pairs[hi..block_size], weight[0..], xb, &x_p, &x_m, 2, block_size);
+                    var qx_p: [2]f32 = undefined;
+                    var qx_m: [2]f32 = undefined;
+                    var q2_p: [2]f32 = undefined;
+                    var q2_m: [2]f32 = undefined;
+                    for (0..2) |hh| {
+                        const sx = px[hh][lo] + px[hh][hi];
+                        qx_p[hh] = txs[hh] * p2 - sx;
+                        qx_m[hh] = txs[hh] * m2 - sx;
+                        q2_p[hh] = tws[hh] * p2 * p2 + pw[hh][lo] * cp1 + pw[hh][hi] * cp2;
+                        q2_m[hh] = tws[hh] * m2 * m2 + pw[hh][lo] * cm1 + pw[hh][hi] * cm2;
+                    }
+                    sumqx[0] = qx_p[0] + qx_p[1];
+                    sumqx[1] = qx_p[0] + qx_m[1];
+                    sumqx[2] = qx_m[0] + qx_p[1];
+                    sumqx[3] = qx_m[0] + qx_m[1];
+                    sumq2[0] = q2_p[0] + q2_p[1];
+                    sumq2[1] = q2_p[0] + q2_m[1];
+                    sumq2[2] = q2_m[0] + q2_p[1];
+                    sumq2[3] = q2_m[0] + q2_m[1];
 
                     for (0..4) |k| {
                         if (sumq2[k] > 0 and sumqx[k] * sumqx[k] > best_score * sumq2[k]) {
@@ -559,52 +597,7 @@ inline fn shiftFor(best_k: i32, k: usize, x_p: *const [3]f32, x_m: *const [3]f32
     return if (@rem(best_k, 2) == 0) x_p else x_m;
 }
 
-/// Accumulates one sorted run's contribution to all four shift combinations.
-///
-/// The C writes this out three times -- once per run -- with the level index
-/// as the only difference, and inside each an if/else on which half the
-/// element belongs to. Both are parameters here.
-fn accumulate(
-    sumqx: *[4]f32,
-    sumq2: *[4]f32,
-    run: []const Pair,
-    weight: []const f32,
-    xb: [*]const f32,
-    x_p: *const [3]f32,
-    x_m: *const [3]f32,
-    level: usize,
-    block_size: usize,
-) void {
-    for (run) |p| {
-        const i = p.idx;
-        const w = weight[i];
-        const xp = x_p[level];
-        const xm = x_m[level];
-        if (i < block_size / 2) {
-            // First half: combinations 0 and 1 use the positive shift.
-            sumqx[0] += w * xp * xb[i];
-            sumqx[1] += w * xp * xb[i];
-            sumqx[2] += w * xm * xb[i];
-            sumqx[3] += w * xm * xb[i];
-            sumq2[0] += w * xp * xp;
-            sumq2[1] += w * xp * xp;
-            sumq2[2] += w * xm * xm;
-            sumq2[3] += w * xm * xm;
-        } else {
-            // Second half: 0 and 2 use the positive shift instead.
-            sumqx[0] += w * xp * xb[i];
-            sumqx[2] += w * xp * xb[i];
-            sumqx[1] += w * xm * xb[i];
-            sumqx[3] += w * xm * xb[i];
-            sumq2[0] += w * xp * xp;
-            sumq2[2] += w * xp * xp;
-            sumq2[1] += w * xm * xm;
-            sumq2[3] += w * xm * xm;
-        }
-    }
-}
-
-/// Ports `quantize_iq1_m` (ggml-quants.c:4946 @b29c606e2).
+/// Ports `quantize_iq1_m` (ggml-quants.c:4917 @7fe450e19).
 pub export fn quantize_iq1_m(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
     const nblock: usize = @intCast(@divExact(n_per_row, QK_K));

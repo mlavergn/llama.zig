@@ -560,7 +560,7 @@ const cuda_defines = [_][]const u8{
 
 /// The K and V types a FlashAttention vector kernel can be instantiated
 /// for, in the order `ggml_cuda_fattn_vec_instances`
-/// (ggml/cmake/common.cmake:53 @b29c606e2) iterates them: its `FA_TYPES`.
+/// (ggml/cmake/common.cmake:53 @7fe450e19) iterates them: its `FA_TYPES`.
 const cuda_fa_types = [_][]const u8{ "q4_0", "q4_1", "q5_0", "q5_1", "q8_0", "bf16", "f16" };
 
 /// What `cudaFaCombinations` derives from `Cuda.fa_quants`.
@@ -573,7 +573,7 @@ const CudaFa = struct {
 };
 
 /// Mirrors `ggml_cuda_fattn_vec_instances` (ggml/cmake/common.cmake:53
-/// @b29c606e2): the K-V type combinations whose FlashAttention vector
+/// @7fe450e19): the K-V type combinations whose FlashAttention vector
 /// kernel instances `GGML_CUDA_FA_QUANTS` selects. `"all"` is every pair,
 /// V outermost; otherwise `f16-f16` and each listed combination, separated
 /// by `;` or `,`, duplicates dropped. A malformed list fails the build, as
@@ -1009,6 +1009,15 @@ fn hasDefine(defines: []const []const u8, define: []const u8) bool {
     return false;
 }
 
+/// Upstream's Vulkan backend: `ggml-vulkan.cpp` and, since v0.5.0, the
+/// buffer and debug code split out of it (ggml-vulkan/CMakeLists.txt:62-68
+/// @7fe450e19).
+const vulkan_sources = [_][]const u8{
+    "ggml/src/ggml-vulkan/ggml-vulkan.cpp",
+    "ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp",
+    "ggml/src/ggml-vulkan/ggml-vulkan-debug.cpp",
+};
+
 /// The flags `ggml-vulkan.cpp` compiles with in the reference: ggml's own,
 /// `GGML_USE_VULKAN`, and the extension macros. `NDEBUG` is upstream's
 /// release default, as for CUDA.
@@ -1017,6 +1026,9 @@ fn vulkanCxxFlags(b: *std.Build, vk: Vulkan, extra: []const []const u8) []const 
     list.appendSlice(b.allocator, &cxx_flags) catch @panic("OOM");
     list.appendSlice(b.allocator, &.{ "-DGGML_USE_VULKAN", "-DGGML_SCHED_MAX_COPIES=4", "-DNDEBUG" }) catch @panic("OOM");
     list.appendSlice(b.allocator, vk.features) catch @panic("OOM");
+    // `CXX_VISIBILITY_PRESET hidden` and `VISIBILITY_INLINES_HIDDEN ON`
+    // (ggml-vulkan/CMakeLists.txt:73-75 @7fe450e19).
+    list.appendSlice(b.allocator, &.{ "-fvisibility=hidden", "-fvisibility-inlines-hidden" }) catch @panic("OOM");
     list.appendSlice(b.allocator, extra) catch @panic("OOM");
     // `-idirafter`, not `-I`: the header directory may be `/usr/include`,
     // which must not shadow the libc headers Zig supplies.
@@ -1182,7 +1194,7 @@ fn addVulkan(b: *std.Build, mod: *std.Build.Module, vk: Vulkan) !void {
     for (shaders.cpps) |cpp| mod.addCSourceFile(.{ .file = cpp, .flags = &cxx_flags });
     mod.addCSourceFiles(.{
         .root = b.path(root),
-        .files = &.{"ggml/src/ggml-vulkan/ggml-vulkan.cpp"},
+        .files = &vulkan_sources,
         .flags = vulkanCxxFlags(b, vk, &.{}),
     });
 }
@@ -1272,7 +1284,7 @@ pub fn addVulkanRef(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     for (shaders.cpps) |cpp| mod.addCSourceFile(.{ .file = cpp, .flags = &cxx_flags });
     mod.addCSourceFiles(.{
         .root = b.path(root),
-        .files = &.{"ggml/src/ggml-vulkan/ggml-vulkan.cpp"},
+        .files = &vulkan_sources,
         .flags = vulkanCxxFlags(b, vk, renames.items),
     });
     return b.addLibrary(.{ .name = "ggml-vulkan-ref", .root_module = mod, .linkage = .static });

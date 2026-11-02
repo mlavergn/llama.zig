@@ -24,7 +24,9 @@
 #include "ggml-alloc.h"
 
 #include "ggml-metal-fusion.h"
+#include "ggml-backend-impl.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -37,7 +39,36 @@ extern ggml_backend_reg_t ref_ggml_backend_metal_reg(void);
  * `ggml-metal-fusion.h`) and the reference's `ggml-metal-fusion.cpp` with
  * its 17 exports renamed by -D. Each side's info object is its own struct,
  * so each is only ever handed to its own functions. */
-extern const ggml_metal_fusion * ref_ggml_metal_fusion_all(int * n);
+/* The reordering pass (`ggml-metal-common.cpp`, ours `src/ggml/metal/common.zig`),
+ * the reference's nine exports renamed ref_*. Its fusion queries are
+ * shared -- both sides pack by our `ggml_metal_fusion_max`, compared above
+ * -- so this compares the packing-aware reorder alone. */
+extern void ggml_graph_optimize(struct ggml_cgraph * gf);
+
+/* The op encoders' scratch-size queries (`ggml-metal-ops.cpp`), which
+ * `get_alloc_size` adds up. The reference `ggml-metal.cpp` calls *ours*
+ * -- they are shared symbols -- so the get_alloc_size comparison cannot
+ * see them; the reference `ggml-metal-ops.cpp` is compiled with all its
+ * exports renamed ref_* and these are asked directly. */
+#define EXTRA(f) extern size_t f(const struct ggml_tensor *); extern size_t ref_##f(const struct ggml_tensor *);
+EXTRA(ggml_metal_op_mul_mat_id_extra_tpe)
+EXTRA(ggml_metal_op_mul_mat_id_extra_ids)
+EXTRA(ggml_metal_op_mul_mat_id_extra_amax)
+EXTRA(ggml_metal_op_flash_attn_ext_extra_pad)
+EXTRA(ggml_metal_op_flash_attn_ext_extra_blk)
+EXTRA(ggml_metal_op_flash_attn_ext_extra_tmp)
+EXTRA(ggml_metal_op_flash_attn_ext_extra_kv_f16)
+EXTRA(ggml_metal_op_flash_attn_ext_extra_idx)
+#undef EXTRA
+extern bool ggml_metal_op_flash_attn_ext_use_vec(const struct ggml_tensor *);
+extern bool ref_ggml_metal_op_flash_attn_ext_use_vec(const struct ggml_tensor *);
+
+/* Each side's backend, for its `graph_optimize` vtable entry. */
+static ggml_backend_t backend_a = NULL, backend_b = NULL;
+extern void ref_ggml_graph_optimize(struct ggml_cgraph * gf);
+
+extern ggml_metal_fusion_id ref_ggml_metal_fusion_get_id(const struct ggml_metal_fusion * fusion);
+extern void ref_ggml_metal_fusion_add_alloc_deps(void * user_data, void (*add_alloc_dep)(void *, struct ggml_tensor *, struct ggml_tensor *), struct ggml_cgraph * gf);
 extern struct ggml_metal_fusion_info * ref_ggml_metal_fusion_info_init(bool enabled, int debug);
 extern void         ref_ggml_metal_fusion_info_free(struct ggml_metal_fusion_info * finfo);
 extern bool         ref_ggml_metal_fusion_info_enabled(const struct ggml_metal_fusion_info * finfo);
@@ -93,11 +124,46 @@ static void cmp_s(const char *what, const char *a, const char *b) {
  * graphs live in Metal buffers, because the FULL mode asks which buffer
  * an addend is in. */
 
-static int table_index(const ggml_metal_fusion * all, int n, const ggml_metal_fusion * f) {
+/* Since v0.5.0 the table is opaque -- `ggml_metal_fusion_all` is gone and
+ * the header declares `struct ggml_metal_fusion` without a body -- so an
+ * entry's position is read back the only way the API allows: count it in
+ * a stats-enabled info and see which counter moved. Both sides count by
+ * the entry's offset into their own table. */
+static struct ggml_metal_fusion_info * idx_info_a = NULL;
+static struct ggml_metal_fusion_info * idx_info_b = NULL;
+
+static int table_index(int ref, const ggml_metal_fusion * f) {
     if (f == NULL) return -1;
-    for (int i = 0; i < n; i++) if (&all[i] == f) return i;
+    struct ggml_metal_fusion_info * fi = ref ? idx_info_b : idx_info_a;
+    const int n = ref ? ref_ggml_metal_fusion_info_n_fusions(fi) : ggml_metal_fusion_info_n_fusions(fi);
+    if (ref) ref_ggml_metal_fusion_info_stats_reset(fi); else ggml_metal_fusion_info_stats_reset(fi);
+    if (ref) ref_ggml_metal_fusion_info_count_fusion(fi, f); else ggml_metal_fusion_info_count_fusion(fi, f);
+    for (int i = 0; i < n; i++) {
+        const uint64_t k = ref ? ref_ggml_metal_fusion_info_count(fi, i) : ggml_metal_fusion_info_count(fi, i);
+        if (k == 1) return i;
+    }
     return -2; /* not in the table at all */
 }
+
+/* `ggml_metal_fusion_add_alloc_deps` reports (tensor, until) pairs through
+ * a callback; each side's are recorded and compared in order. */
+#define MAX_DEPS 512
+struct dep_log { int n; struct ggml_tensor * t[MAX_DEPS]; struct ggml_tensor * u[MAX_DEPS]; };
+static void dep_record(void * ud, struct ggml_tensor * t, struct ggml_tensor * u) {
+    struct dep_log * l = (struct dep_log *) ud;
+    if (l->n < MAX_DEPS) { l->t[l->n] = t; l->u[l->n] = u; }
+    l->n++;
+}
+static int deps_seen = 0;
+static int reorders_seen = 0;
+static int backend_deps_seen = 0;
+
+/* Every table entry each side handed out, by table index, as the probes
+ * found them: the info object's counters are fed these. */
+static const ggml_metal_fusion * entry_a[32];
+static const ggml_metal_fusion * entry_b[32];
+static int n_entry = 0;
+
 
 /* How often the reference matched each table entry, per mode, and how
  * often STRUCTURAL matched where FULL refused: every entry must be reached
@@ -112,10 +178,6 @@ static int n_fusion_bufs = 0;
 /* Every position of `gf`: `_max` on raw indices, `_next` on the
  * non-empty ones (as `ggml-metal-ops.cpp` filters them), both modes. */
 static void fusion_probe_graph(const char * name, struct ggml_cgraph * gf) {
-    int n_all = 0, n_ref = 0;
-    const ggml_metal_fusion * all = ggml_metal_fusion_all(&n_all);
-    const ggml_metal_fusion * ref = ref_ggml_metal_fusion_all(&n_ref);
-
     const int n_nodes = ggml_graph_n_nodes(gf);
     int idxs[256];
     int n_idxs = 0;
@@ -135,10 +197,13 @@ static void fusion_probe_graph(const char * name, struct ggml_cgraph * gf) {
             const ggml_metal_fusion * fa = ggml_metal_fusion_next(gf, idxs, n_idxs, i, (ggml_metal_fusion_mode) m, &na);
             const ggml_metal_fusion * fb = ref_ggml_metal_fusion_next(gf, idxs, n_idxs, i, (ggml_metal_fusion_mode) m, &nb);
             snprintf(lbl, sizeof lbl, "fusion_next(%s @%d %s)", name, i, m ? "full" : "struct");
-            cmp_i(lbl, table_index(all, n_all, fa), table_index(ref, n_ref, fb));
+            cmp_i(lbl, table_index(0, fa), table_index(1, fb));
             snprintf(lbl, sizeof lbl, "fusion_next n_out(%s @%d %s)", name, i, m ? "full" : "struct");
             cmp_i(lbl, na, nb);
-            const int ib = table_index(ref, n_ref, fb);
+            snprintf(lbl, sizeof lbl, "fusion_get_id(%s @%d %s)", name, i, m ? "full" : "struct");
+            cmp_i(lbl, fa ? (long) ggml_metal_fusion_get_id(fa) : -1, fb ? (long) ref_ggml_metal_fusion_get_id(fb) : -1);
+            const int ib = table_index(1, fb);
+            if (ib >= 0 && ib < 32 && ib == table_index(0, fa)) { entry_a[ib] = fa; entry_b[ib] = fb; }
             if (ib >= 0 && ib < 32) fusion_hits[m][ib]++;
             if (m == 1) {
                 int ns = 0;
@@ -147,6 +212,63 @@ static void fusion_probe_graph(const char * name, struct ggml_cgraph * gf) {
                 }
             }
         }
+    }
+
+    /* the alloc deps graph_optimize hands the scheduler */
+    static struct dep_log da, db;
+    da.n = 0; db.n = 0;
+    ggml_metal_fusion_add_alloc_deps(&da, dep_record, gf);
+    ref_ggml_metal_fusion_add_alloc_deps(&db, dep_record, gf);
+    snprintf(lbl, sizeof lbl, "alloc_deps n(%s)", name);
+    cmp_i(lbl, da.n, db.n);
+    for (int k = 0; k < da.n && k < db.n && k < MAX_DEPS; k++) {
+        snprintf(lbl, sizeof lbl, "alloc_dep[%d] tensor(%s)", k, name);
+        cmp_i(lbl, (long) (intptr_t) da.t[k], (long) (intptr_t) db.t[k]);
+        snprintf(lbl, sizeof lbl, "alloc_dep[%d] until(%s)", k, name);
+        cmp_i(lbl, (long) (intptr_t) da.u[k], (long) (intptr_t) db.u[k]);
+    }
+    deps_seen += db.n;
+
+    /* graph_optimize's order on a copy of the graph, each side its own */
+    {
+        struct ggml_init_params gp = { ggml_graph_overhead_custom(GGML_DEFAULT_GRAPH_SIZE, false) * 4 + 4096, NULL, true };
+        struct ggml_context * gctx = ggml_init(gp);
+        struct ggml_cgraph * ga = ggml_graph_dup(gctx, gf, false);
+        struct ggml_cgraph * gb = ggml_graph_dup(gctx, gf, false);
+        ggml_graph_optimize(ga);
+        ref_ggml_graph_optimize(gb);
+        int moved = 0;
+        for (int i = 0; i < n_nodes; i++) {
+            snprintf(lbl, sizeof lbl, "graph_optimize(%s)[%d]", name, i);
+            cmp_i(lbl, (long) (intptr_t) ggml_graph_node(ga, i), (long) (intptr_t) ggml_graph_node(gb, i));
+            if (ggml_graph_node(gb, i) != ggml_graph_node(gf, i)) moved = 1;
+        }
+        reorders_seen += moved;
+
+        /* and the backend's own graph_optimize: alloc deps, then the
+         * context's reorder, through each side's vtable */
+        if (backend_a && backend_b) {
+            struct ggml_cgraph * va = ggml_graph_dup(gctx, gf, false);
+            struct ggml_cgraph * vb = ggml_graph_dup(gctx, gf, false);
+            static struct dep_log la, lb;
+            la.n = 0; lb.n = 0;
+            struct ggml_backend_graph_optimize_params pa = { dep_record, &la };
+            struct ggml_backend_graph_optimize_params pb = { dep_record, &lb };
+            backend_a->iface.graph_optimize(backend_a, va, &pa);
+            backend_b->iface.graph_optimize(backend_b, vb, &pb);
+            snprintf(lbl, sizeof lbl, "backend graph_optimize deps n(%s)", name);
+            cmp_i(lbl, la.n, lb.n);
+            for (int k = 0; k < la.n && k < lb.n && k < MAX_DEPS; k++) {
+                snprintf(lbl, sizeof lbl, "backend graph_optimize dep[%d](%s)", k, name);
+                cmp_i(lbl, (long) (intptr_t) la.t[k] ^ (long) (intptr_t) la.u[k], (long) (intptr_t) lb.t[k] ^ (long) (intptr_t) lb.u[k]);
+            }
+            for (int i = 0; i < n_nodes; i++) {
+                snprintf(lbl, sizeof lbl, "backend graph_optimize(%s)[%d]", name, i);
+                cmp_i(lbl, (long) (intptr_t) ggml_graph_node(va, i), (long) (intptr_t) ggml_graph_node(vb, i));
+            }
+            backend_deps_seen += lb.n;
+        }
+        ggml_free(gctx);
     }
 }
 
@@ -161,21 +283,15 @@ static void fusion_alloc(struct ggml_context * ctx, ggml_backend_buffer_type_t b
     if (buf && n_fusion_bufs < 64) fusion_bufs[n_fusion_bufs++] = buf;
 }
 
-static void fusion_diff(ggml_backend_buffer_type_t buft) {
-    printf("=== Metal fusion table: ported vs reference ===\n");
-
-    int n_all = 0, n_ref = 0;
-    const ggml_metal_fusion * all = ggml_metal_fusion_all(&n_all);
-    const ggml_metal_fusion * ref = ref_ggml_metal_fusion_all(&n_ref);
-    cmp_i("fusion_all n", n_all, n_ref);
+static void fusion_info_diff(void) {
     char lbl[96];
-    for (int i = 0; i < n_all && i < n_ref; i++) {
-        snprintf(lbl, sizeof lbl, "fusion[%d] id", i);       cmp_i(lbl, all[i].id, ref[i].id);
-        snprintf(lbl, sizeof lbl, "fusion[%d] n_ops", i);    cmp_i(lbl, all[i].n_ops, ref[i].n_ops);
-        snprintf(lbl, sizeof lbl, "fusion[%d] unsafe", i);   cmp_i(lbl, all[i].unsafe, ref[i].unsafe);
-        snprintf(lbl, sizeof lbl, "fusion[%d] has check", i); cmp_i(lbl, all[i].check != NULL, ref[i].check != NULL);
-        for (int j = 0; j < all[i].n_ops && j < ref[i].n_ops; j++) {
-            snprintf(lbl, sizeof lbl, "fusion[%d] ops[%d]", i, j); cmp_i(lbl, all[i].ops[j], ref[i].ops[j]);
+    const ggml_metal_fusion * first_a = entry_a[0];
+    const ggml_metal_fusion * first_b = entry_b[0];
+    for (int i = 0; i < n_entry; i++) {
+        if (!entry_a[i] || !entry_b[i]) {
+            checks++; fails++;
+            printf("  fusion[%d]: no entry pointer recorded for the info checks\n", i);
+            return;
         }
     }
 
@@ -192,8 +308,8 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
             cmp_i(lbl, ggml_metal_fusion_info_stats_get(a, NULL, NULL, 0), ref_ggml_metal_fusion_info_stats_get(b, NULL, NULL, 0));
 
             /* counted before stats are on: must not count */
-            ggml_metal_fusion_info_count_fusion(a, &all[0]);
-            ref_ggml_metal_fusion_info_count_fusion(b, &ref[0]);
+            ggml_metal_fusion_info_count_fusion(a, first_a);
+            ref_ggml_metal_fusion_info_count_fusion(b, first_b);
 
             ggml_metal_fusion_info_stats_init(a);
             ref_ggml_metal_fusion_info_stats_init(b);
@@ -205,10 +321,10 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
 
             const int nf = ggml_metal_fusion_info_n_fusions(a);
             snprintf(lbl, sizeof lbl, "info(%d,%d) n_fusions after init", en, debug); cmp_i(lbl, nf, ref_ggml_metal_fusion_info_n_fusions(b));
-            for (int i = 0; i < nf && i < n_all; i++) {
+            for (int i = 0; i < nf && i < n_entry; i++) {
                 for (int k = 0; k <= i % 3; k++) {
-                    ggml_metal_fusion_info_count_fusion(a, &all[i]);
-                    ref_ggml_metal_fusion_info_count_fusion(b, &ref[i]);
+                    ggml_metal_fusion_info_count_fusion(a, entry_a[i]);
+                    ref_ggml_metal_fusion_info_count_fusion(b, entry_b[i]);
                 }
             }
             ggml_metal_fusion_info_count_fusion(a, NULL);
@@ -238,11 +354,33 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
         }
     }
 
+}
+
+static void fusion_diff(ggml_backend_buffer_type_t buft) {
+    printf("=== Metal fusion table: ported vs reference ===\n");
+
+    /* The table's length and each entry's non-empty op sequence, through
+     * the labels; the ids, the raw sequences, `unsafe` and the checks are
+     * compared through what `_next`, `_get_id` and `_add_alloc_deps` say
+     * on the graphs below, every entry reached in both modes. */
+    idx_info_a = ggml_metal_fusion_info_init(true, 1);
+    idx_info_b = ref_ggml_metal_fusion_info_init(true, 1);
+    const int n_all = ggml_metal_fusion_info_n_fusions(idx_info_a);
+    const int n_ref = ref_ggml_metal_fusion_info_n_fusions(idx_info_b);
+    cmp_i("fusion table length", n_all, n_ref);
+    char lbl[96];
+    for (int i = 0; i < n_all && i < n_ref; i++) {
+        snprintf(lbl, sizeof lbl, "fusion[%d] label", i);
+        cmp_s(lbl, ggml_metal_fusion_info_label(idx_info_a, i), ref_ggml_metal_fusion_info_label(idx_info_b, i));
+    }
+
     /* NORM / RMS_NORM + MUL (+ ADD): the plain chains, a weight of the wrong
      * width (it broadcasts, so it builds), a non-F32 result, a view packed
      * between the norm and the mul, an intermediate that is an output,
-     * and an intermediate with a second consumer. */
-    for (int variant = 0; variant < 8; variant++) {
+     * and an intermediate with a second consumer; then (v8) the MUL
+     * placed overlapping the final ADD, as gallocr may place an
+     * intermediate: FULL must still fuse, the overlap being internal. */
+    for (int variant = 0; variant < 9; variant++) {
         struct ggml_context * ctx = fusion_ctx();
         const enum ggml_type tx = variant == 3 ? GGML_TYPE_F16 : GGML_TYPE_F32;
         struct ggml_tensor * x = ggml_new_tensor_2d(ctx, tx, 64, 4);
@@ -258,6 +396,7 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
         if (variant == 6) ggml_build_forward_expand(gf, ggml_scale(ctx, m, 2.0f));
         if (variant == 7) ggml_build_forward_expand(gf, ggml_add(ctx, ggml_rms_norm(ctx, a, 1e-5f), b));
         fusion_alloc(ctx, buft);
+        if (variant == 8) m->data = (char *) a->data + 4;
         char name[32]; snprintf(name, sizeof name, "norm v%d", variant);
         fusion_probe_graph(name, gf);
         ggml_free(ctx);
@@ -349,6 +488,184 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
         ggml_free(ctx);
     }
 
+    /* NORM / RMS_NORM + SCALE (v0.5.0): both norms, an F16 norm, a scale
+     * of something else after the norm, a reshape between them, the norm
+     * also consumed elsewhere, a scale_bias (still a SCALE), and -- after
+     * allocation -- the norm's input moved to overlap the output, which
+     * FULL mode must refuse (`check_memory_ranges`) and STRUCTURAL not.
+     * The input is an op there, not a leaf: the memory check skips
+     * GGML_OP_NONE sources, so a leaf overlapping proves nothing. v8 hangs
+     * a src[1] on the SCALE by hand -- no constructor does, but the check
+     * asks. */
+    for (int variant = 0; variant < 9; variant++) {
+        struct ggml_context * ctx = fusion_ctx();
+        const enum ggml_type tx = variant == 2 ? GGML_TYPE_F16 : GGML_TYPE_F32;
+        struct ggml_tensor * x0 = ggml_new_tensor_2d(ctx, tx, 64, 4);
+        struct ggml_tensor * x = variant == 7 ? ggml_scale(ctx, x0, 1.0f) : x0;
+        struct ggml_tensor * y = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64, 4);
+        struct ggml_tensor * n = (variant & 1) ? ggml_norm(ctx, x, 1e-5f) : ggml_rms_norm(ctx, x, 1e-5f);
+        struct ggml_tensor * in = variant == 4 ? ggml_reshape_2d(ctx, n, 128, 2) : n;
+        struct ggml_tensor * sc = variant == 3 ? ggml_scale(ctx, ggml_add(ctx, n, y), 0.5f)
+                                : variant == 6 ? ggml_scale_bias(ctx, in, 0.5f, 1.0f)
+                                :                ggml_scale(ctx, in, 0.25f + variant);
+        struct ggml_cgraph * gf = ggml_new_graph(ctx);
+        ggml_build_forward_expand(gf, sc);
+        if (variant == 5) ggml_build_forward_expand(gf, ggml_scale(ctx, n, 3.0f));
+        if (variant == 8) sc->src[1] = y;
+        fusion_alloc(ctx, buft);
+        if (variant == 7) x->data = (char *) sc->data + 16;
+        char name[32]; snprintf(name, sizeof name, "norm_scale v%d", variant);
+        fusion_probe_graph(name, gf);
+        ggml_free(ctx);
+    }
+
+    /* SSM_CONV + UNARY(silu) (v0.5.0): silu, gelu (not silu), the conv
+     * consumed elsewhere, a scale between them, an output overlapping
+     * the conv's input. */
+    for (int variant = 0; variant < 5; variant++) {
+        struct ggml_context * ctx = fusion_ctx();
+        const int64_t d_conv = 4, d_inner = 32, n_t = 3, n_s = 2;
+        struct ggml_tensor * sx = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, d_conv - 1 + n_t, d_inner, n_s);
+        struct ggml_tensor * cw0 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, d_conv, d_inner);
+        struct ggml_tensor * cw = variant == 4 ? ggml_scale(ctx, cw0, 1.0f) : cw0;
+        struct ggml_tensor * cv = ggml_ssm_conv(ctx, sx, cw);
+        struct ggml_tensor * in = variant == 3 ? ggml_scale(ctx, cv, 2.0f) : cv;
+        struct ggml_tensor * un = variant == 1 ? ggml_gelu(ctx, in) : ggml_silu(ctx, in);
+        struct ggml_cgraph * gf = ggml_new_graph(ctx);
+        ggml_build_forward_expand(gf, un);
+        if (variant == 2) ggml_build_forward_expand(gf, ggml_scale(ctx, cv, 3.0f));
+        fusion_alloc(ctx, buft);
+        if (variant == 4) cw->data = (char *) un->data + 8;
+        char name[32]; snprintf(name, sizeof name, "ssm_conv v%d", variant);
+        fusion_probe_graph(name, gf);
+        ggml_free(ctx);
+    }
+
+    /* MoE routing and output reduction (v0.5.0), built as llama-graph.cpp's
+     * `build_moe_ffn` builds them: softmax gating, `ggml_argsort_top_k`,
+     * the weights gathered, optionally renormalised by their clamped sum
+     * and optionally scaled; then the experts' outputs times the weights,
+     * one VIEW per expert expanded first, and an ADD chain. Over k = 1..9
+     * (MOE_REDUCE covers 2..8) and the shapes and arms each check refuses:
+     *   v0 plain        v1 scale        v2 norm         v3 norm+scale
+     *   v4 softmax scale != 1           v5 softmax with a mask
+     *   v6 n_expert past 1024           v7 norm without its trailing reshape
+     *   v8 adds summed out of order     v9 a view at the wrong offset
+     *   v10 non-F32 experts             v11 logits overlapping the ARGSORT,
+     *   the routing's second output (FULL; only `outs` makes it one)
+     *   v12 one expert view consumed elsewhere
+     *   v13 the experts overlapping the reduction's output (FULL)
+     *   v14 the MUL and its views overlapping the output: internal, so
+     *   FULL must still fuse
+     *   v15 the third ADD reading the first view instead of the running
+     *   sum: src[1] is right, only the src[0] check refuses it
+     */
+    for (int variant = 0; variant < 16; variant++) {
+        for (int k = 1; k <= 9; k++) {
+            if (variant >= 4 && k != 4 && k != 8) continue;
+            struct ggml_context * ctx = fusion_ctx();
+            const int64_t n_embd = 32, n_tokens = 3;
+            const int64_t n_expert = variant == 6 ? 1100 : 16;
+            if (k > n_expert) { ggml_free(ctx); continue; }
+            const int with_norm  = variant == 2 || variant == 3 || variant == 7;
+            const int with_scale = variant == 1 || variant == 3;
+
+            struct ggml_tensor * logits0 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_expert, n_tokens);
+            struct ggml_tensor * logits = variant == 11 ? ggml_scale(ctx, logits0, 1.0f) : logits0;
+            struct ggml_tensor * mask   = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_expert, n_tokens);
+            struct ggml_tensor * probs  = variant == 4 ? ggml_soft_max_ext(ctx, logits, NULL, 0.5f, 0.0f)
+                                        : variant == 5 ? ggml_soft_max_ext(ctx, logits, mask, 1.0f, 0.0f)
+                                        :                ggml_soft_max(ctx, logits);
+            struct ggml_tensor * probs_r = ggml_reshape_3d(ctx, probs, 1, n_expert, n_tokens);
+            struct ggml_tensor * selected = ggml_argsort_top_k(ctx, probs, k);
+            struct ggml_tensor * weights = ggml_get_rows(ctx, probs_r, selected);
+            if (with_norm) {
+                struct ggml_tensor * wr = ggml_reshape_2d(ctx, weights, k, n_tokens);
+                struct ggml_tensor * sum = ggml_sum_rows(ctx, wr);
+                sum = ggml_clamp(ctx, sum, 6.103515625e-5f, INFINITY);
+                wr = ggml_div(ctx, wr, sum);
+                weights = variant == 7 ? wr : ggml_reshape_3d(ctx, wr, 1, k, n_tokens);
+            }
+            if (with_scale) weights = ggml_scale(ctx, weights, 2.5f);
+
+            struct ggml_cgraph * gf = ggml_new_graph(ctx);
+            ggml_build_forward_expand(gf, weights);
+
+            /* the expert outputs: a stand-in for mul_mat_id's [n_embd, k, n_tokens] */
+            struct ggml_tensor * emb = ggml_new_tensor_3d(ctx, variant == 10 ? GGML_TYPE_F16 : GGML_TYPE_F32, n_embd, n_expert, n_tokens);
+            struct ggml_tensor * experts = ggml_get_rows(ctx, emb, selected);
+            if (variant == 10) experts = ggml_cast(ctx, experts, GGML_TYPE_F16);
+            ggml_build_forward_expand(gf, experts);
+            struct ggml_tensor * w3 = variant == 7 ? ggml_reshape_3d(ctx, weights, 1, k, n_tokens) : weights;
+            struct ggml_tensor * mul = ggml_mul(ctx, experts, variant == 10 ? ggml_cast(ctx, w3, GGML_TYPE_F16) : w3);
+            ggml_build_forward_expand(gf, mul);
+            struct ggml_tensor * views[16];
+            for (int i = 0; i < k; i++) {
+                const size_t offs = (size_t) (variant == 9 && i == k - 1 ? i + 1 : i) * mul->nb[1];
+                views[i] = ggml_view_2d(ctx, mul, n_embd, n_tokens, mul->nb[2], variant == 9 && i == k - 1 ? 0 : offs);
+                ggml_build_forward_expand(gf, views[i]);
+            }
+            struct ggml_tensor * acc = views[0];
+            for (int i = 1; i < k; i++) {
+                if (variant == 15 && i == 2) {
+                    ggml_build_forward_expand(gf, acc);
+                    acc = ggml_add(ctx, views[0], views[i]);
+                    continue;
+                }
+                acc = (variant == 8 && i == 2) ? ggml_add(ctx, views[i], acc) : ggml_add(ctx, acc, views[i]);
+            }
+            ggml_build_forward_expand(gf, acc);
+            if (variant == 12 && k > 1) ggml_build_forward_expand(gf, ggml_scale(ctx, views[1], 2.0f));
+            ggml_build_forward_expand(gf, ggml_scale(ctx, acc, 1.5f));
+            fusion_alloc(ctx, buft);
+            if (variant == 11) logits->data = (char *) selected->src[0]->data + 4;
+            if (variant == 13) experts->data = (char *) acc->data + 4;
+            if (variant == 14) {
+                mul->data = (char *) acc->data + 4;
+                for (int i = 0; i < k; i++) views[i]->data = (char *) mul->data + views[i]->view_offs;
+            }
+            char name[32]; snprintf(name, sizeof name, "moe v%d k%d", variant, k);
+            fusion_probe_graph(name, gf);
+            ggml_free(ctx);
+        }
+    }
+
+    /* graph_optimize's reorder (common.cpp): four independent chains of
+     * RMS_NORM + MUL (one fused group each) then SCALE, summed, so the
+     * pass has nodes to pull forward. In the variants a later node's
+     * output is placed over a fused group's *internal* source (the norm
+     * between RMS_NORM and MUL) or over its first node's output. Since
+     * v0.5.0 a group's internal sources are not ranges it reads, and every
+     * fused tensor is a range it writes (`h_add`/`h_check`); these are the
+     * cases where that decides whether a node may move. */
+    for (int variant = 0; variant < 6; variant++) {
+        struct ggml_context * ctx = fusion_ctx();
+        struct ggml_tensor * n[4], * m[4], * sc[4];
+        for (int c = 0; c < 4; c++) {
+            struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64, 4);
+            struct ggml_tensor * w = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 64);
+            n[c] = ggml_rms_norm(ctx, x, 1e-5f);
+            m[c] = ggml_mul(ctx, n[c], w);
+            sc[c] = ggml_scale(ctx, m[c], 0.5f + c);
+        }
+        struct ggml_tensor * acc = ggml_add(ctx, ggml_add(ctx, sc[0], sc[1]), ggml_add(ctx, sc[2], sc[3]));
+        struct ggml_cgraph * gf = ggml_new_graph(ctx);
+        for (int c = 0; c < 4; c++) ggml_build_forward_expand(gf, sc[c]);
+        ggml_build_forward_expand(gf, acc);
+        fusion_alloc(ctx, buft);
+        switch (variant) {
+            case 1: sc[1]->data = n[0]->data; break;                 /* over an internal source */
+            case 2: sc[2]->data = (char *) n[1]->data + 64; break;
+            case 3: m[2]->data = n[3]->data; break;                  /* a group writing over another's internal */
+            case 4: sc[3]->data = m[0]->data; break;                 /* over a group's output */
+            case 5: n[2]->data = (char *) sc[0]->data + 32; break;   /* an internal over an earlier output */
+            default: break;
+        }
+        char name[32]; snprintf(name, sizeof name, "reorder v%d", variant);
+        fusion_probe_graph(name, gf);
+        ggml_free(ctx);
+    }
+
     /* a run longer than GGML_METAL_FUSION_MAX: chained patterns stop at 16 */
     {
         struct ggml_context * ctx = fusion_ctx();
@@ -368,11 +685,29 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
             checks++;
             if (fusion_hits[m][i] == 0) {
                 printf("  fusion[%d] (%s) never matched in %s mode -- the probes do not reach it\n",
-                       i, ggml_op_name(ref[i].ops[0]), m ? "full" : "structural");
+                       i, ref_ggml_metal_fusion_info_label(idx_info_b, i), m ? "full" : "structural");
                 fails++;
             }
         }
     }
+    checks++;
+    if (backend_deps_seen == 0) {
+        printf("  no backend graph_optimize produced an alloc dep\n");
+        fails++;
+    }
+    checks++;
+    if (reorders_seen == 0) {
+        printf("  graph_optimize reordered no probe graph\n");
+        fails++;
+    }
+    checks++;
+    if (deps_seen == 0) {
+        printf("  no probe produced an alloc dep\n");
+        fails++;
+    }
+
+    n_entry = n_ref < 32 ? n_ref : 32;
+    fusion_info_diff();
     checks++;
     if (fusion_full_refusals == 0) {
         printf("  no probe matched structurally and was refused in full mode\n");
@@ -486,6 +821,30 @@ int main(void) {
         }
     }
 
+    {
+        /* sparse FLASH_ATTN_EXT (`n_kv_max` set, a mask present): the
+         * vec kernel's (dk, dv) list decides whether the index scratch is
+         * allocated -- v0.5.0 added (96, 64) -- and so do the bound and
+         * the KV type. One pair off the list, one over the 4096 bound. */
+        const int64_t dks[]  = { 96, 96, 128, 80, 128, 576 };
+        const int64_t dvs[]  = { 96, 64, 128, 80, 128, 512 };
+        const int32_t nkv[]  = { 256, 256, 512, 256, 5000, 1024 };
+        for (int i = 0; i < 6; i++) {
+            struct ggml_tensor *q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, dks[i], 1, 8, 1);
+            struct ggml_tensor *k = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, dks[i], 8192, 8, 1);
+            struct ggml_tensor *v = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, dvs[i], 8192, 8, 1);
+            struct ggml_tensor *m = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 8192, 1, 1, 1);
+            struct ggml_tensor *t = ggml_flash_attn_ext(ctx, q, k, v, m, 1.0f/8.0f, 0.0f, 0.0f);
+            if (t) {
+                ggml_flash_attn_ext_set_n_kv_max(t, nkv[i]);
+                static char buf[6][64];
+                snprintf(buf[i], sizeof buf[i], "FLASH_ATTN_EXT sparse dk=%lld dv=%lld n_kv_max=%d",
+                         (long long) dks[i], (long long) dvs[i], nkv[i]);
+                probes[n] = t; labels[n] = buf[i]; n++;
+            }
+        }
+    }
+
     char lbl[128];
     for (int i = 0; i < n; i++) {
         snprintf(lbl, sizeof lbl, "get_alloc_size(%s)", labels[i]);
@@ -499,6 +858,23 @@ int main(void) {
         snprintf(lbl, sizeof lbl, "dev_offload_op(%s)", labels[i]);
         cmp_i(lbl, ggml_backend_dev_offload_op(dev_a, probes[i]),
                    ggml_backend_dev_offload_op(dev_b, probes[i]));
+
+#define CMP_EXTRA(f) snprintf(lbl, sizeof lbl, #f "(%s)", labels[i]); cmp_sz(lbl, f(probes[i]), ref_##f(probes[i]));
+        if (probes[i]->op == GGML_OP_MUL_MAT_ID) {
+            CMP_EXTRA(ggml_metal_op_mul_mat_id_extra_tpe)
+            CMP_EXTRA(ggml_metal_op_mul_mat_id_extra_ids)
+            CMP_EXTRA(ggml_metal_op_mul_mat_id_extra_amax)
+        }
+        if (probes[i]->op == GGML_OP_FLASH_ATTN_EXT) {
+            CMP_EXTRA(ggml_metal_op_flash_attn_ext_extra_pad)
+            CMP_EXTRA(ggml_metal_op_flash_attn_ext_extra_blk)
+            CMP_EXTRA(ggml_metal_op_flash_attn_ext_extra_tmp)
+            CMP_EXTRA(ggml_metal_op_flash_attn_ext_extra_kv_f16)
+            CMP_EXTRA(ggml_metal_op_flash_attn_ext_extra_idx)
+            snprintf(lbl, sizeof lbl, "flash_attn_ext_use_vec(%s)", labels[i]);
+            cmp_i(lbl, ggml_metal_op_flash_attn_ext_use_vec(probes[i]), ref_ggml_metal_op_flash_attn_ext_use_vec(probes[i]));
+        }
+#undef CMP_EXTRA
     }
 
     /* supports_buft both ways: each side must accept its own buffer type
@@ -524,7 +900,14 @@ int main(void) {
         }
     }
 
+    backend_a = ggml_backend_dev_init(dev_a, NULL);
+    backend_b = ggml_backend_dev_init(dev_b, NULL);
+    if (!backend_a || !backend_b) { printf("FAIL: could not init both Metal backends\n"); return 1; }
+
     fusion_diff(bt_a);
+
+    ggml_backend_free(backend_a);
+    ggml_backend_free(backend_b);
 
     printf("\n");
     if (fails == 0) {

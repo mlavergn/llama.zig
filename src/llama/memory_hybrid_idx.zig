@@ -10,7 +10,7 @@
 //! - `llama.cpp/src/llama-memory-hybrid-idx.cpp` -- their bodies and
 //!   `llama_memory_hybrid_idx_ns`
 //!
-//! All at v0.4.1 (`b29c606e2`).
+//! All at v0.5.0 (`7fe450e19`).
 //!
 //! # A side buffer over the attention cells
 //!
@@ -54,7 +54,7 @@ const SlotInfo = kv_cache.SlotInfo;
 const MemoryHybrid = memory_hybrid.MemoryHybrid;
 const HybridContext = memory_hybrid.HybridContext;
 
-/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @b29c606e2).
+/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @7fe450e19).
 const max_seq = kv_cells.max_seq;
 
 fn oom() noreturn {
@@ -73,7 +73,7 @@ fn cloneSinfos(list: []const SlotInfo) std.ArrayList(SlotInfo) {
     return out;
 }
 
-/// Ports `llama_memory_hybrid_idx` (llama-memory-hybrid-idx.h:15 @b29c606e2).
+/// Ports `llama_memory_hybrid_idx` (llama-memory-hybrid-idx.h:15 @7fe450e19).
 pub const MemoryHybridIdx = struct {
     /// The `llama_memory_hybrid` this extends.
     base: *MemoryHybrid,
@@ -85,7 +85,7 @@ pub const MemoryHybridIdx = struct {
     mem_idx: ?*KvCache = null,
 
     /// Ports the constructor of `llama_memory_hybrid_idx`
-    /// (llama-memory-hybrid-idx.cpp:19 @b29c606e2): the hybrid memory, and
+    /// (llama-memory-hybrid-idx.cpp:19 @7fe450e19): the hybrid memory, and
     /// the indexer cache when `filter_idx` is given (`func != null`). The
     /// indexer is MQA with one key head of `indexer_head_size`, as
     /// `llama_kv_cache_dsa` shapes its own, and has no RoPE: its keys are
@@ -144,7 +144,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `init_batch`
-    /// (llama-memory-hybrid-idx.cpp:70 @b29c606e2): `llama_memory_hybrid`'s,
+    /// (llama-memory-hybrid-idx.cpp:70 @7fe450e19): `llama_memory_hybrid`'s,
     /// repeated because the indexer needs the attention slot infos the base
     /// context hides.
     pub fn initBatch(self: *MemoryHybridIdx, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *HybridIdxContext {
@@ -204,12 +204,12 @@ pub const MemoryHybridIdx = struct {
         return HybridIdxContext.createStatus(.failed_prepare);
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `init_full` (llama-memory-hybrid-idx.cpp:135 @b29c606e2).
+    /// Ports `llama_memory_hybrid_idx`'s `init_full` (llama-memory-hybrid-idx.cpp:135 @7fe450e19).
     pub fn initFull(self: *MemoryHybridIdx) *HybridIdxContext {
         return HybridIdxContext.createFull(self);
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `init_update` (llama-memory-hybrid-idx.cpp:139 @b29c606e2).
+    /// Ports `llama_memory_hybrid_idx`'s `init_update` (llama-memory-hybrid-idx.cpp:139 @7fe450e19).
     pub fn initUpdate(self: *MemoryHybridIdx, lctx: *anyopaque, optimize: bool) *HybridIdxContext {
         return HybridIdxContext.createUpdate(self, lctx, optimize);
     }
@@ -219,14 +219,14 @@ pub const MemoryHybridIdx = struct {
         return self.base.getCanShift();
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `clear` (llama-memory-hybrid-idx.cpp:143 @b29c606e2).
+    /// Ports `llama_memory_hybrid_idx`'s `clear` (llama-memory-hybrid-idx.cpp:143 @7fe450e19).
     pub fn clear(self: *MemoryHybridIdx, data: bool) void {
         self.base.clear(data);
         if (self.mem_idx) |m| m.clear(data);
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `seq_rm` (llama-memory-hybrid-idx.cpp:151
-    /// @b29c606e2): in `llama_memory_hybrid`'s order, the recurrent cache
+    /// @7fe450e19): in `llama_memory_hybrid`'s order, the recurrent cache
     /// first, since it may refuse.
     pub fn seqRm(self: *MemoryHybridIdx, seq_id: i32, p0: i32, p1: i32) bool {
         if (!self.getMemRecr().seqRm(seq_id, p0, p1)) return false;
@@ -234,25 +234,25 @@ pub const MemoryHybridIdx = struct {
         return self.getMemAttn().seqRm(seq_id, p0, p1);
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `seq_cp` (llama-memory-hybrid-idx.cpp:164 @b29c606e2).
+    /// Ports `llama_memory_hybrid_idx`'s `seq_cp` (llama-memory-hybrid-idx.cpp:164 @7fe450e19).
     pub fn seqCp(self: *MemoryHybridIdx, a: i32, b: i32, p0: i32, p1: i32) void {
         self.base.seqCp(a, b, p0, p1);
         if (self.mem_idx) |m| m.seqCp(a, b, p0, p1);
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `seq_keep` (llama-memory-hybrid-idx.cpp:172 @b29c606e2).
+    /// Ports `llama_memory_hybrid_idx`'s `seq_keep` (llama-memory-hybrid-idx.cpp:172 @7fe450e19).
     pub fn seqKeep(self: *MemoryHybridIdx, seq_id: i32) void {
         self.base.seqKeep(seq_id);
         if (self.mem_idx) |m| m.seqKeep(seq_id);
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `seq_add` (llama-memory-hybrid-idx.cpp:180 @b29c606e2).
+    /// Ports `llama_memory_hybrid_idx`'s `seq_add` (llama-memory-hybrid-idx.cpp:180 @7fe450e19).
     pub fn seqAdd(self: *MemoryHybridIdx, seq_id: i32, p0: i32, p1: i32, shift: i32) void {
         self.base.seqAdd(seq_id, p0, p1, shift);
         if (self.mem_idx) |m| m.seqAdd(seq_id, p0, p1, shift);
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `seq_div` (llama-memory-hybrid-idx.cpp:188 @b29c606e2).
+    /// Ports `llama_memory_hybrid_idx`'s `seq_div` (llama-memory-hybrid-idx.cpp:188 @7fe450e19).
     pub fn seqDiv(self: *MemoryHybridIdx, seq_id: i32, p0: i32, p1: i32, d: c_int) void {
         self.base.seqDiv(seq_id, p0, p1, d);
         if (self.mem_idx) |m| m.seqDiv(seq_id, p0, p1, d);
@@ -269,7 +269,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `memory_breakdown`
-    /// (llama-memory-hybrid-idx.cpp:196 @b29c606e2): the indexer's bytes
+    /// (llama-memory-hybrid-idx.cpp:196 @7fe450e19): the indexer's bytes
     /// added to the hybrid memory's, per buffer type.
     pub fn memoryBreakdown(self: *const MemoryHybridIdx, out: *std.ArrayList(memory.BuftSize)) void {
         self.base.memoryBreakdown(out);
@@ -277,7 +277,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `state_write`
-    /// (llama-memory-hybrid-idx.cpp:208 @b29c606e2): the indexer section
+    /// (llama-memory-hybrid-idx.cpp:208 @7fe450e19): the indexer section
     /// goes last, a pure suffix, under the attention cache's PARTIAL_ONLY
     /// gate ([TAG_HYBRID_IDX_STATE]).
     pub fn stateWrite(self: *const MemoryHybridIdx, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
@@ -288,7 +288,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `state_read`
-    /// (llama-memory-hybrid-idx.cpp:221 @b29c606e2): `llama_memory_hybrid`'s,
+    /// (llama-memory-hybrid-idx.cpp:221 @7fe450e19): `llama_memory_hybrid`'s,
     /// with the indexer restored into the cells the attention restore chose
     /// ([TAG_HYBRID_IDX_SINFO]). A failure drops what was being restored
     /// from all three caches, a state they agree on, and rethrows.
@@ -317,7 +317,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `state_drop`
-    /// (llama-memory-hybrid-idx.cpp:253 @b29c606e2): forget `seq_id` in
+    /// (llama-memory-hybrid-idx.cpp:253 @7fe450e19): forget `seq_id` in
     /// every cache at once, or the whole context when it is negative --
     /// directly, not through `seqRm`, which the recurrent cache may refuse
     /// and leave only the other two cleared.
@@ -342,13 +342,13 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `get_mem_idx` (llama-memory-hybrid-idx.cpp:269
-    /// @b29c606e2): null when the model carries no indexer.
+    /// @7fe450e19): null when the model carries no indexer.
     pub fn getMemIdx(self: *const MemoryHybridIdx) ?*KvCache {
         return self.mem_idx;
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `set_input_qsa`
-    /// (llama-memory-hybrid-idx.cpp:273 @b29c606e2): block-compressed
+    /// (llama-memory-hybrid-idx.cpp:273 @7fe450e19): block-compressed
     /// sparse attention over the indexer cache's cells. Blocks cut the
     /// position line, not the cell array, so no caller assumes a contiguous
     /// layout:
@@ -367,9 +367,9 @@ pub const MemoryHybridIdx = struct {
     /// sequences into one block.
     pub fn setInputQsa(self: *const MemoryHybridIdx, cell_blk: *Tensor, blk_cells: *Tensor, blk_pos: *Tensor, bias: *Tensor, ubatch: *const Ubatch, ratio: u32, blk_bias: bool) void {
         const file = "llama-memory-hybrid-idx.cpp";
-        impl.assert(ratio > 0, file, 277, "ratio > 0");
-        impl.assert(self.getMemIdx() != null, file, 278, "get_mem_idx() != nullptr");
-        impl.assert(c.ggml_backend_buffer_is_host(cell_blk.buffer), file, 280, "ggml_backend_buffer_is_host(cell_blk->buffer)");
+        impl.assert(ratio > 0, file, 281, "ratio > 0");
+        impl.assert(self.getMemIdx() != null, file, 282, "get_mem_idx() != nullptr");
+        impl.assert(c.ggml_backend_buffer_is_host(cell_blk.buffer), file, 284, "ggml_backend_buffer_is_host(cell_blk->buffer)");
 
         const mem_idx = self.getMemIdx().?;
 
@@ -380,7 +380,7 @@ pub const MemoryHybridIdx = struct {
         const n_tokens: i64 = ubatch.n_tokens;
         const r: i64 = ratio;
 
-        impl.assert(@rem(n_tokens, n_ns) == 0, file, 288, "n_tokens % n_ns == 0");
+        impl.assert(@rem(n_tokens, n_ns) == 0, file, 292, "n_tokens % n_ns == 0");
         // Tokens per stream.
         const n_tps: i64 = @divTrunc(n_tokens, n_ns);
 
@@ -389,7 +389,7 @@ pub const MemoryHybridIdx = struct {
         const dst_blk_pos: [*]i32 = @ptrCast(@alignCast(blk_pos.data));
         const dst_bias: [*]f32 = @ptrCast(@alignCast(bias.data));
 
-        impl.assert(r <= 64, file, 298, "r <= 64");
+        impl.assert(r <= 64, file, 302, "r <= 64");
         const slots_full: u64 = if (r == 64) ~@as(u64, 0) else ((@as(u64, 1) << @intCast(r)) - 1);
 
         const nkv: usize = @intCast(n_kv);
@@ -460,7 +460,7 @@ pub const MemoryHybridIdx = struct {
                 st.groupCells(cells, n_kv, n_blocks, r, one_seq, ranked, &flags);
             }
 
-            impl.assert(!blk_bias or !flags.oor, file, 452, "(!blk_bias || !oor) && \"qsa: cell position runs past the cell window\"");
+            impl.assert(!blk_bias or !flags.oor, file, 456, "(!blk_bias || !oor) && \"qsa: cell position runs past the cell window\"");
 
             var n_bid: i32 = 0;
             for (0..nb) |pb| {
@@ -478,7 +478,7 @@ pub const MemoryHybridIdx = struct {
                 }
             }
 
-            impl.assert(n_bid <= n_blocks, file, 470, "n_bid <= n_blocks");
+            impl.assert(n_bid <= n_blocks, file, 474, "n_bid <= n_blocks");
 
             for (0..@intCast(n_bid)) |b| {
                 var sec_pos: [4]i32 = @splat(st.bid_idx.items[b]);
@@ -710,7 +710,7 @@ const QsaScratch = struct {
         inline for (@typeInfo(QsaScratch).@"struct".field_names) |name| @field(self, name).deinit(allocator);
     }
 
-    /// Ports `group_cells` (llama-memory-hybrid-idx.cpp:356 @b29c606e2), a
+    /// Ports `group_cells` (llama-memory-hybrid-idx.cpp:356 @7fe450e19), a
     /// lambda inside `set_input_qsa`: each non-empty cell
     /// into the group of its block and sequence set; -1 where no usable
     /// block, an incomplete or short group, takes it.
@@ -773,7 +773,7 @@ const QsaScratch = struct {
 };
 
 /// Ports `llama_memory_hybrid_idx_ns` (llama-memory-hybrid-idx.cpp:596
-/// @b29c606e2): the streams in each ubatch's slot info, `get_k`/`get_v`'s
+/// @7fe450e19): the streams in each ubatch's slot info, `get_k`/`get_v`'s
 /// `ns`.
 fn streamsPerUbatch(sinfos: []const SlotInfo) std.ArrayList(u32) {
     var res: std.ArrayList(u32) = .empty;
@@ -783,7 +783,7 @@ fn streamsPerUbatch(sinfos: []const SlotInfo) std.ArrayList(u32) {
 }
 
 /// Ports `llama_memory_hybrid_idx_context` (llama-memory-hybrid-idx.h:102
-/// @b29c606e2).
+/// @7fe450e19).
 pub const HybridIdxContext = struct {
     /// The `llama_memory_hybrid_idx_context`'s base. The `memory.Context`
     /// points here.
@@ -798,7 +798,7 @@ pub const HybridIdxContext = struct {
     i_cur: usize = 0,
 
     /// Ports the status constructor of `llama_memory_hybrid_idx_context`
-    /// (llama-memory-hybrid-idx.cpp:607 @b29c606e2).
+    /// (llama-memory-hybrid-idx.cpp:607 @7fe450e19).
     pub fn createStatus(status: memory.Status) *HybridIdxContext {
         const self = allocator.create(HybridIdxContext) catch oom();
         self.* = .{ .base = HybridContext.initStatus(status) };
@@ -806,7 +806,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports the full-memory constructor of `llama_memory_hybrid_idx_context`
-    /// (llama-memory-hybrid-idx.cpp:610 @b29c606e2). Graph reservation walks
+    /// (llama-memory-hybrid-idx.cpp:610 @7fe450e19). Graph reservation walks
     /// a full context, and qwen4exp builds the sparse attention only when
     /// the indexer context is set: without it the reserved worst case
     /// would be the dense graph.
@@ -821,7 +821,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports the update constructor of `llama_memory_hybrid_idx_context`
-    /// (llama-memory-hybrid-idx.cpp:620 @b29c606e2): `update` applies a
+    /// (llama-memory-hybrid-idx.cpp:620 @7fe450e19): `update` applies a
     /// pending cross-stream `seq_cp`, without which the copy keeps stale
     /// indexer keys.
     pub fn createUpdate(mem: *MemoryHybridIdx, lctx: *anyopaque, optimize: bool) *HybridIdxContext {
@@ -832,7 +832,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports the batch constructor of `llama_memory_hybrid_idx_context`
-    /// (llama-memory-hybrid-idx.cpp:630 @b29c606e2): takes the three lists;
+    /// (llama-memory-hybrid-idx.cpp:630 @7fe450e19): takes the three lists;
     /// the base and the indexer each get their own copy of the ubatches.
     pub fn createBatch(mem: *MemoryHybridIdx, sinfos_attn: std.ArrayList(SlotInfo), sinfos_idx: std.ArrayList(SlotInfo), ubatches: std.ArrayList(Ubatch)) *HybridIdxContext {
         const self = allocator.create(HybridIdxContext) catch oom();
@@ -863,7 +863,7 @@ pub const HybridIdxContext = struct {
         return @alignCast(@fieldParentPtr("base", base));
     }
 
-    /// Ports `llama_memory_hybrid_idx_context`'s `next` (llama-memory-hybrid-idx.cpp:642 @b29c606e2).
+    /// Ports `llama_memory_hybrid_idx_context`'s `next` (llama-memory-hybrid-idx.cpp:642 @7fe450e19).
     pub fn next(self: *HybridIdxContext) bool {
         if (self.ctx_idx) |x| _ = x.next();
         self.i_cur += 1;
@@ -871,7 +871,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `apply`
-    /// (llama-memory-hybrid-idx.cpp:652 @b29c606e2): `&`, so the indexer
+    /// (llama-memory-hybrid-idx.cpp:652 @7fe450e19): `&`, so the indexer
     /// applies whatever the base answered.
     pub fn apply(self: *HybridIdxContext) bool {
         var res = self.base.apply();
@@ -900,13 +900,13 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `get_idx`
-    /// (llama-memory-hybrid-idx.cpp:662 @b29c606e2): null with no indexer.
+    /// (llama-memory-hybrid-idx.cpp:662 @7fe450e19): null with no indexer.
     pub fn getIdx(self: *const HybridIdxContext) ?*const kv_cache.KvCacheContext {
         return self.ctx_idx;
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `get_n_stream`
-    /// (llama-memory-hybrid-idx.cpp:666 @b29c606e2): the streams in the
+    /// (llama-memory-hybrid-idx.cpp:666 @7fe450e19): the streams in the
     /// current slot info, `get_k`/`get_v`'s `ns`; 1 when unified.
     pub fn getNStream(self: *const HybridIdxContext) u32 {
         impl.assert(self.i_cur < self.ns_ubatch.items.len, "llama-memory-hybrid-idx.cpp", 667, "i_cur < ns_ubatch.size()");
@@ -914,7 +914,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `set_input_qsa`
-    /// (llama-memory-hybrid-idx.cpp:672 @b29c606e2); see
+    /// (llama-memory-hybrid-idx.cpp:672 @7fe450e19); see
     /// `MemoryHybridIdx.setInputQsa`.
     pub fn setInputQsa(self: *const HybridIdxContext, cell_blk: *Tensor, blk_cells: *Tensor, blk_pos: *Tensor, bias: *Tensor, ubatch: *const Ubatch, ratio: u32, blk_bias: bool) void {
         const mem = self.mem orelse impl.abort("llama-memory-hybrid-idx.cpp", 680, "GGML_ASSERT(mem != nullptr) failed");

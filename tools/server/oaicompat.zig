@@ -13,7 +13,7 @@
 //! `common_chat_templates_apply` from `llama.cpp/common/chat.h` and
 //! `llama.cpp/common/chat.cpp`, over `cli/common_chat/templates.zig`'s
 //! port of both arms; and `base64::encode` from
-//! `llama.cpp/common/base64.hpp` (llama.cpp v0.4.1, `b29c606e2`). Each
+//! `llama.cpp/common/base64.hpp` (llama.cpp v0.5.0, `7fe450e19`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # Remote media
@@ -25,13 +25,10 @@
 const std = @import("std");
 const json = @import("json");
 const chat = @import("common_chat");
-const tools = @import("tools_common");
 const common = @import("common.zig");
 const tokens_mod = @import("tokens.zig");
 const download = @import("download.zig");
 
-const c = tools.c;
-const log = tools.log;
 const Value = json.Value;
 const Allocator = std.mem.Allocator;
 const Error = common.Error;
@@ -41,13 +38,13 @@ const jsonValue = common.jsonValue;
 const jsonValueJson = common.jsonValueJson;
 const GrammarTrigger = common.GrammarTrigger;
 
-/// `DIRECTORY_SEPARATOR` (common/common.h:28 @b29c606e2).
+/// `DIRECTORY_SEPARATOR` (common/common.h:28 @7fe450e19).
 const directory_separator: u8 = if (@import("builtin").os.tag == .windows) '\\' else '/';
 
 // -----------------------------------------------------------------------------
 // /completions
 
-/// Ports `oaicompat_completion_params_parse` (server-common.cpp:1036 @b29c606e2):
+/// Ports `oaicompat_completion_params_parse` (server-common.cpp:1036 @7fe450e19):
 /// an OpenAI `/completions` body as llama.cpp's own parameters.
 ///
 /// Return: owned by `a`.
@@ -108,7 +105,7 @@ fn copyRemaining(a: Allocator, llama_params: *Value, body: *const Value) Error!v
 // -----------------------------------------------------------------------------
 // media
 
-/// Ports `fs_validate_filename` (common/common.cpp:825 @b29c606e2): no control
+/// Ports `fs_validate_filename` (common/common.cpp:825 @7fe450e19): no control
 /// characters, no lookalikes of path syntax, no `..`, no leading or
 /// trailing space and no trailing dot.
 pub fn fsValidateFilename(filename: []const u8, allow_subdirs: bool) bool {
@@ -210,7 +207,7 @@ fn readFile(a: Allocator, path: []const u8) Error!?[]u8 {
     return try data.toOwnedSlice(a);
 }
 
-/// Ports `handle_media` (server-common.cpp:1079 @b29c606e2): a media URL --
+/// Ports `handle_media` (server-common.cpp:1079 @7fe450e19): a media URL --
 /// `http(s)://`, `file://` under `media_path`, a `data:` URI, or bare
 /// base64 -- as bytes appended to `out_files`.
 ///
@@ -299,7 +296,7 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
 // -----------------------------------------------------------------------------
 // chat templates
 
-/// Ports `common_chat_templates` (chat.cpp:337 @b29c606e2), through
+/// Ports `common_chat_templates` (chat.cpp:337 @7fe450e19), through
 /// `cli/common_chat/templates.zig`: the model's templates (or the
 /// override) parsed by the Jinja engine, which both arms render from.
 pub const Templates = chat.templates.Templates;
@@ -374,7 +371,7 @@ pub const KwMap = struct {
     }
 };
 
-/// Ports `common_chat_templates_inputs` (chat.h:249 @b29c606e2), as the
+/// Ports `common_chat_templates_inputs` (chat.h:249 @7fe450e19), as the
 /// conversion builds it: lists it grows and the kwargs map it merges into.
 /// The messages and tools are owned by the allocator the conversion used.
 pub const ChatTemplatesInputs = struct {
@@ -396,7 +393,7 @@ pub const ChatTemplatesInputs = struct {
     force_pure_content: bool = false,
 };
 
-/// Ports `common_chat_params` (chat.h:269 @b29c606e2): `templates.zig`'s.
+/// Ports `common_chat_params` (chat.h:269 @7fe450e19): `templates.zig`'s.
 /// Every string and list is owned by the allocator `chatTemplatesApply`
 /// took.
 pub const ChatParams = chat.params.ChatParams;
@@ -413,7 +410,7 @@ pub fn schemaToGrammar(a: Allocator, schema: *const Value) Error![]u8 {
     };
 }
 
-/// Ports `common_chat_templates_apply` (chat.cpp:1424 @b29c606e2): the
+/// Ports `common_chat_templates_apply` (chat.cpp:1434 @7fe450e19): the
 /// conversation rendered through Jinja (`--jinja`, with the parsers and
 /// grammars the template's analysis gives) or through libllama's built-in
 /// template families (`--no-jinja`), both `templates.zig`'s.
@@ -449,7 +446,7 @@ pub fn chatTemplatesGetCaps(tmpls: *const Templates) bool {
 // -----------------------------------------------------------------------------
 // /chat/completions
 
-/// Ports `server_chat_params` (server-common.h:308 @b29c606e2): the global
+/// Ports `server_chat_params` (server-common.h:308 @7fe450e19): the global
 /// parameters for chat formatting and parsing.
 pub const ServerChatParams = struct {
     use_jinja: bool,
@@ -467,7 +464,7 @@ pub const ServerChatParams = struct {
     force_pure_content: bool = false,
 };
 
-/// Ports `oaicompat_chat_params_parse` (server-common.cpp:1151 @b29c606e2): an
+/// Ports `oaicompat_chat_params_parse` (server-common.cpp:1151 @7fe450e19): an
 /// OpenAI `/chat/completions` body as llama.cpp's own parameters -- the
 /// conversation rendered into `prompt`, every media part decoded into
 /// `out_files` and replaced in `body` by the media marker.
@@ -582,16 +579,18 @@ pub fn oaicompatChatParamsParse(a: Allocator, body: *Value, opt: *const ServerCh
                 try handleMedia(a, out_files, url, opt.media_path);
 
                 try setMediaMarker(a, p, "input_audio");
-            } else if (std.mem.eql(u8, ty, "input_video")) {
+            } else if (std.mem.eql(u8, ty, "input_video") or std.mem.eql(u8, ty, "video_url")) {
                 if (!opt.allow_video) {
                     return throw(error.RuntimeError, "video input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
                 }
 
-                const input_video = try jsonValueJson(ar, p, "input_video", Value.emptyObject());
+                // accept the OpenAI-style "video_url" key as an alias of "input_video"
+                const input_video = try jsonValueJson(ar, p, ty, Value.emptyObject());
                 const url = jsonValue(&input_video, "data", []const u8, jsonValue(&input_video, "url", []const u8, ""));
                 try handleMedia(a, out_files, url, opt.media_path);
 
                 try setMediaMarker(a, p, "input_video");
+                try p.erase(a, "video_url");
             } else if (!std.mem.eql(u8, ty, "text")) {
                 return throw(error.InvalidArgument, "unsupported content[].type", .{});
             }
@@ -752,7 +751,7 @@ fn setMediaMarker(a: Allocator, p: *Value, key: []const u8) Error!void {
 // -----------------------------------------------------------------------------
 // responses
 
-/// Ports the `encode` overload over a buffer (base64.hpp:171 @b29c606e2): the
+/// Ports the `encode` overload over a buffer (base64.hpp:171 @7fe450e19): the
 /// standard alphabet, padded.
 ///
 /// Return: owned by `a`.
@@ -763,7 +762,7 @@ pub fn base64Encode(a: Allocator, data: []const u8) Error![]u8 {
     return out;
 }
 
-/// Ports `format_embeddings_response_oaicompat` (server-common.cpp:1427 @b29c606e2).
+/// Ports `format_embeddings_response_oaicompat` (server-common.cpp:1429 @7fe450e19).
 ///
 /// Return: owned by `a`.
 pub fn formatEmbeddingsResponseOaicompat(a: Allocator, request: *const Value, model_name: []const u8, embeddings: *Value, use_base64: bool) Error!Value {
@@ -821,7 +820,7 @@ fn scoreGreater(ctx: ScoreCtx, x: Value, y: Value) bool {
     return jsonValue(&x, ctx.label, f64, 0.0) > jsonValue(&y, ctx.label, f64, 0.0);
 }
 
-/// Ports `format_response_rerank` (server-common.cpp:1473 @b29c606e2): the
+/// Ports `format_response_rerank` (server-common.cpp:1475 @7fe450e19): the
 /// ranks sorted by score (libc++'s `std::sort`, ties in its order), cut to
 /// `top_n`; TEI's bare array or the Jina-style object.
 ///

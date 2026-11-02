@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.4.1
-//! (`b29c606e2`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.5.0
+//! (`7fe450e19`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -54,7 +54,7 @@ fn yStagedDst(src1: *const Tensor, f16_type: c.ggml_type, row_stride: u32, ne11:
     return t;
 }
 
-/// Ports `ggml_vk_mul_mat_id_q_f16` (ggml-vulkan.cpp:10457 @b29c606e2).
+/// Ports `ggml_vk_mul_mat_id_q_f16` (ggml-vulkan.cpp:7064 @7fe450e19).
 pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, ids: *const Tensor, dst: *Tensor) void {
     const dim01 = m.op_pipeline.dim01Contiguous;
     impl.assert(dim01(src1) or src1.type == c.GGML_TYPE_F32 or src1.type == c.GGML_TYPE_F16, "ggml_vk_dim01_contiguous(src1) || src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16");
@@ -80,7 +80,10 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     // n_as counts, n_as offsets, one total, then one packed row id per (expert, token).
     // Hoisting requires 16-bit indices for the packing and a table that fits one binding.
     const hoisted_row_id_words: u64 = 2 *% n_as +% 1 +% nei0 *% nei1;
-    const hoist_row_ids = n_as <= 256 and nei0 <= 0xffff and nei1 <= 0xffff and
+    // 1024 matches MAX_EXPERTS in count_experts.comp and LLAMA_MAX_EXPERTS.
+    // It costs 3 * 1024 * 4 = 12 KiB of shared memory, within the 16 KiB
+    // Vulkan guarantees.
+    const hoist_row_ids = n_as <= 1024 and nei0 <= 0xffff and nei1 <= 0xffff and
         hoisted_row_id_words *% @sizeOf(u32) <= limits.maxStorageBufferRange;
     const prec: c.ggml_prec = @intCast(dst.op_params[0]);
 
@@ -350,7 +353,7 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     ctx.prealloc_split_k_need_sync = true;
 }
 
-/// Ports `ggml_vk_mul_mat_vec_id_q_f16` (ggml-vulkan.cpp:10825 @b29c606e2):
+/// Ports `ggml_vk_mul_mat_vec_id_q_f16` (ggml-vulkan.cpp:7434 @7fe450e19):
 /// one matrix-vector dispatch per token row, the expert read from `ids`,
 /// with a fused ADD_ID bias or MUL scale and a second scale.
 pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
@@ -529,7 +532,7 @@ pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.C
     if (y_non_contig or quantize_y) ctx.prealloc_y_need_sync = true;
 }
 
-/// Ports `ggml_vk_mul_mat_id` (ggml-vulkan.cpp:11068 @b29c606e2).
+/// Ports `ggml_vk_mul_mat_id` (ggml-vulkan.cpp:7677 @7fe450e19).
 pub fn mulMatId(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
     const dst = at(cgraph, node_idx);
     if (ops.useMulMatVecId(cgraph, node_idx)) {

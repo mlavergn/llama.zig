@@ -5,7 +5,7 @@
 //!
 //! Ports `serialize_parser_variant`, `deserialize_parser_variant`,
 //! `common_peg_arena::to_json`, `from_json`, `save` and `load` from
-//! `llama.cpp/common/peg-parser.cpp` (llama.cpp v0.4.1, `b29c606e2`). Each
+//! `llama.cpp/common/peg-parser.cpp` (llama.cpp v0.5.0, `7fe450e19`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! The rules are written in the rule map's iteration order, libc++'s, and
@@ -64,7 +64,7 @@ fn typed(gpa: Allocator, t: []const u8) Error!Value {
     return o;
 }
 
-/// Ports `serialize_parser_variant` (peg-parser.cpp:1791 @b29c606e2).
+/// Ports `serialize_parser_variant` (peg-parser.cpp:1817 @7fe450e19).
 ///
 /// Return: owned by the caller.
 fn serializeParser(gpa: Allocator, parser: *const Parser) Error!Value {
@@ -148,7 +148,7 @@ fn serializeParser(gpa: Allocator, parser: *const Parser) Error!Value {
     return o;
 }
 
-/// Ports `to_json` (peg-parser.cpp:1873 @b29c606e2), a member of
+/// Ports `to_json` (peg-parser.cpp:1899 @7fe450e19), a member of
 /// `common_peg_arena`.
 ///
 /// Return: owned by the caller.
@@ -170,7 +170,7 @@ pub fn toJson(gpa: Allocator, arena: *const Arena) Error!Value {
     return o;
 }
 
-/// Ports `save` (peg-parser.cpp:2086 @b29c606e2): `to_json().dump()`.
+/// Ports `save` (peg-parser.cpp:2112 @7fe450e19): `to_json().dump()`.
 ///
 /// Return: owned by the caller; `JsonError` when a string in it is not
 /// UTF-8.
@@ -204,7 +204,7 @@ fn fail(text: []const u8) Error {
     return errors.raise(error.RuntimeError, &.{text});
 }
 
-/// Ports `deserialize_parser_variant` (peg-parser.cpp:1885 @b29c606e2).
+/// Ports `deserialize_parser_variant` (peg-parser.cpp:1911 @7fe450e19).
 ///
 /// Return: the parser; its strings and lists are allocated in `arena`.
 fn deserializeParser(arena: *Arena, j: *const Value) Error!Parser {
@@ -321,7 +321,7 @@ fn dupeStrings(a: Allocator, v: *const Value) Error![]const []const u8 {
     return list;
 }
 
-/// Ports `from_json` (peg-parser.cpp:2051 @b29c606e2), a member of
+/// Ports `from_json` (peg-parser.cpp:2077 @7fe450e19), a member of
 /// `common_peg_arena`. Nothing checks that a child id is in range; a parse
 /// that reaches one fails with `OutOfRange`, as `std::vector::at` throws.
 ///
@@ -349,7 +349,9 @@ pub fn fromJson(gpa: Allocator, j: *const Value) Error!Arena {
     while (it.next()) |e| {
         if (e.value.* >= arena.parsers.items.len) {
             var buf: [24]u8 = undefined;
-            const n = std.fmt.bufPrint(&buf, "{d}", .{e.value.*}) catch unreachable;
+            const n = std.fmt.bufPrint(&buf, "{d}", .{e.value.*}) catch |err| switch (err) {
+                error.NoSpaceLeft => unreachable,
+            };
             return errors.raise(error.RuntimeError, &.{ "Rule '", e.key, "' references invalid parser ID: ", n });
         }
     }
@@ -357,13 +359,15 @@ pub fn fromJson(gpa: Allocator, j: *const Value) Error!Arena {
     arena.root = try getAt(j, "root", usize);
     if (arena.root != invalid_parser_id and arena.root >= arena.parsers.items.len) {
         var buf: [24]u8 = undefined;
-        const n = std.fmt.bufPrint(&buf, "{d}", .{arena.root}) catch unreachable;
+        const n = std.fmt.bufPrint(&buf, "{d}", .{arena.root}) catch |err| switch (err) {
+            error.NoSpaceLeft => unreachable,
+        };
         return errors.raise(error.RuntimeError, &.{ "Root references invalid parser ID: ", n });
     }
     return arena;
 }
 
-/// Ports `load` (peg-parser.cpp:2090 @b29c606e2): `*this =
+/// Ports `load` (peg-parser.cpp:2116 @7fe450e19): `*this =
 /// from_json(common_json::parse(data))`; on failure the arena is unchanged.
 pub fn load(arena: *Arena, data: []const u8) Error!void {
     const gpa = arena.gpa;

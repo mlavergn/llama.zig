@@ -6,7 +6,7 @@
 //! **Not a port of a file.** Upstream throws `std::invalid_argument`,
 //! `std::runtime_error` and `common_json_error` (a `std::runtime_error`),
 //! and its callers tell them apart: the server's `ex_wrapper`
-//! (server.cpp:54 @b29c606e2) answers 400 for the first and
+//! (server.cpp:54 @7fe450e19) answers 400 for the first and
 //! 500 for the rest, and every caller prints `e.what()`. A Zig error carries
 //! no payload, so each class is an error and the text lives in a per-thread
 //! buffer, as `cli/json/errors.zig` keeps nlohmann's.

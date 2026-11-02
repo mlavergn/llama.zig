@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/gpt-oss.cpp` (llama.cpp v0.4.1,
-//! `b29c606e2`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/gpt-oss.cpp` (llama.cpp v0.5.0,
+//! `7fe450e19`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -133,11 +133,17 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
     var it = @constCast(messages).items();
     while (it.next()) |item| {
         var msg = try item.value.clone(a);
-        if (msg.contains("reasoning_content") and (msg.at("reasoning_content") catch unreachable).isString()) {
-            const reasoning = try (msg.at("reasoning_content") catch unreachable).clone(a);
+        if (msg.contains("reasoning_content") and (msg.at("reasoning_content") catch |err| switch (err) {
+            error.OutOfMemory, error.JsonError => unreachable,
+        }).isString()) {
+            const reasoning = try (msg.at("reasoning_content") catch |err| switch (err) {
+                error.OutOfMemory, error.JsonError => unreachable,
+            }).clone(a);
             msg.set(a, "thinking", reasoning) catch |e| return util.fromJson(e);
             if (msg.contains("tool_calls")) {
-                const tool_calls = msg.at("tool_calls") catch unreachable;
+                const tool_calls = msg.at("tool_calls") catch |err| switch (err) {
+                    error.OutOfMemory, error.JsonError => unreachable,
+                };
                 if (tool_calls.isArray() and !tool_calls.empty()) {
                     msg.erase(a, "content") catch |e| return util.fromJson(e);
                 }
@@ -148,7 +154,7 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
     return adjusted;
 }
 
-/// Ports `common_chat_params_init_gpt_oss` (parsers/gpt-oss.cpp:3 @b29c606e2).
+/// Ports `common_chat_params_init_gpt_oss` (parsers/gpt-oss.cpp:3 @7fe450e19).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

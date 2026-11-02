@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen35.cpp` at v0.4.1 (`b29c606e2`):
+//! Ported from `llama.cpp/src/models/qwen35.cpp` at v0.5.0 (`7fe450e19`):
 //! `llama_model_qwen35`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
@@ -21,7 +21,7 @@ const Model = model_mod.Model;
 const Layer = model_mod.Layer;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_qwen35`'s `load_arch_hparams` (qwen35.cpp:4 @b29c606e2).
+/// Ports `llama_model_qwen35`'s `load_arch_hparams` (qwen35.cpp:4 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -53,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen35`'s `load_arch_tensors` (qwen35.cpp:33 @b29c606e2).
+/// Ports `llama_model_qwen35`'s `load_arch_tensors` (qwen35.cpp:33 @7fe450e19).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const n_layer: i32 = @intCast(hp.nLayer());
@@ -89,7 +89,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// `load_block_trunk`, a lambda of `load_arch_tensors` (qwen35.cpp:33
-/// @b29c606e2).
+/// @7fe450e19).
 fn loadBlockTrunk(self: *Model, il: i32, flags: u32, n_embd: i64, n_head: i64, n_embd_head_k: i64, n_embd_k_gqa: i64, n_embd_v_gqa: i64, n_ff: i64, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(il)];
@@ -134,7 +134,7 @@ fn loadBlockTrunk(self: *Model, il: i32, flags: u32, n_embd: i64, n_head: i64, n
 }
 
 /// `load_block_mtp`, a lambda of `load_arch_tensors` (qwen35.cpp:33
-/// @b29c606e2): the MTP block looks like a full-attention decoder block.
+/// @7fe450e19): the MTP block looks like a full-attention decoder block.
 fn loadBlockMtp(self: *Model, il: i32, mtp_flags: u32, n_embd: i64, n_head: i64, n_embd_head_k: i64, n_embd_k_gqa: i64, n_embd_v_gqa: i64, n_ff: i64, n_vocab: i64, exc: *Exception) Thrown!void {
     const layer = &self.layers[@intCast(il)];
     const nr = loader.tensor_not_required;
@@ -163,14 +163,14 @@ fn loadBlockMtp(self: *Model, il: i32, mtp_flags: u32, n_embd: i64, n_head: i64,
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_qwen35`'s `build_arch_graph` (qwen35.cpp:126 @b29c606e2):
+/// Ports `llama_model_qwen35`'s `build_arch_graph` (qwen35.cpp:126 @7fe450e19):
 /// the MTP draft head for that graph type, the main model otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
     return buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_qwen35`'s `graph` (qwen35.cpp:133 @b29c606e2).
+/// Ports the constructor of `llama_model_qwen35`'s `graph` (qwen35.cpp:133 @7fe450e19).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -258,7 +258,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     c.ggml_build_forward_expand(b.gf, cur);
 }
 
-/// Ports `llama_model_qwen35::graph`'s `build_qkvz` (qwen35.cpp:227 @b29c606e2).
+/// Ports `llama_model_qwen35::graph`'s `build_qkvz` (qwen35.cpp:227 @7fe450e19).
 fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c_int) struct { *Tensor, *Tensor } {
     const layer = &model.layers[@intCast(il)];
     const n_seqs: i64 = b.ubatch.n_seqs;
@@ -274,7 +274,7 @@ fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c
     return .{ qkv_mixed, z };
 }
 
-/// Ports `llama_model_qwen35::graph`'s `build_norm_gated` (qwen35.cpp:243 @b29c606e2).
+/// Ports `llama_model_qwen35::graph`'s `build_norm_gated` (qwen35.cpp:243 @7fe450e19).
 fn buildNormGated(b: *const graph.Builder, input: *Tensor, weights: ?*Tensor, gate: *Tensor, layer: c_int) *Tensor {
     const normalized = b.buildNorm(input, weights, null, .rms, layer);
     const gated_silu = c.ggml_silu(b.ctx0, gate);
@@ -282,7 +282,7 @@ fn buildNormGated(b: *const graph.Builder, input: *Tensor, weights: ?*Tensor, ga
 }
 
 /// Ports `llama_model_qwen35::graph`'s `build_layer_attn` (qwen35.cpp:254
-/// @b29c606e2): a joint Q and gate projection, Q and K norms, M-RoPE,
+/// @7fe450e19): a joint Q and gate projection, Q and K norms, M-RoPE,
 /// attention, and the sigmoid gate.
 fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpAttnKv, cur_: *Tensor, inp_pos: *Tensor, sections: *[4]c_int, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -347,7 +347,7 @@ fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpA
 }
 
 /// Ports `llama_model_qwen35::graph`'s `build_layer_attn_linear` (qwen35.cpp:335
-/// @b29c606e2): the gated delta net layer.
+/// @7fe450e19): the gated delta net layer.
 fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *graph.InpRs, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
@@ -463,7 +463,7 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
 }
 
 /// Ports `llama_model_qwen35::graph`'s `build_layer_ffn` (qwen35.cpp:470
-/// @b29c606e2): a dense FFN, never MoE.
+/// @7fe450e19): a dense FFN, never MoE.
 fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
     const layer = &model.layers[@intCast(il)];
     impl.assert(layer.ffn_gate_inp == null, "qwen35.cpp", 472, "model.layers[il].ffn_gate_inp == nullptr");
@@ -473,7 +473,7 @@ fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il
 }
 
 /// Ports the constructor of `llama_model_qwen35`'s `graph_mtp` (qwen35.cpp:486
-/// @b29c606e2): the dense series' MTP draft head.
+/// @7fe450e19): the dense series' MTP draft head.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

@@ -21,6 +21,18 @@ for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
 done
 
+# The saver cases below need scripts/gen-arch-fixtures' output. A missing
+# fixture is a failure, not a smaller run: at v0.5.0 a combined gate run
+# reached this script before the fixtures were written and passed on the
+# rest.
+FIXTURES="${ARCH_FIXTURES:-zig-out/arch-fixtures}"
+save_fixtures=("$FIXTURES/hrm_text-dense.gguf" "$FIXTURES/gemma3-dense.gguf"
+               "$FIXTURES/cohere2moe-moe.gguf" "$FIXTURES/olmo2-dense.gguf"
+               "$FIXTURES/exaone-moe-moe.gguf")
+for m in "${save_fixtures[@]}"; do
+    [ -f "$m" ] || { echo "FAIL: missing $m -- run 'make arch-fixtures'" >&2; exit 2; }
+done
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -66,6 +78,11 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/quant_diff" -Ofast -lc \
 models=(llama.cpp/models/ggml-vocab-*.gguf)
 for m in Qwen3.5-*.gguf; do
     [ -f "$m" ] && models+=("$m")
+done
+# Saved and nothing else: the looped hrm_text, and architectures with an
+# SWA pattern the saver writes per layer since v0.5.0.
+for m in "${save_fixtures[@]}"; do
+    models+=("save:$m")
 done
 
 "$tmp/quant_diff" "$tmp" "$@" "${models[@]}"

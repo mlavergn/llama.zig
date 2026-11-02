@@ -1279,9 +1279,14 @@ fn portSaveJob(p: *const anyopaque) void {
 // -----------------------------------------------------------------------------
 // 4. The saver
 
-fn saverRuns(dir: []const u8, models: []const [:0]const u8, vocab_files: []const [:0]const u8) void {
+fn saverRuns(dir: []const u8, models: []const [:0]const u8, vocab_files: []const [:0]const u8, save_files: []const [:0]const u8) void {
     for (models) |m| saveBoth(dir, m, -1, false);
     for (models) |m| saveBoth(dir, m, 0, false);
+    // Fixtures saved and nothing else: since v0.5.0 the saver writes the
+    // SWA pattern per layer, skips null special ids, the hrm.* keys and
+    // `hrm_z_l_init`, and saves each tensor of a looped model's aliased
+    // cache slots once (llama-model-saver.cpp:145, 451 @7fe450e19).
+    for (save_files) |m| saveBoth(dir, m, 0, false);
     // Every upstream vocabulary, vocab-only. Through v0.3.0 this compared
     // each tokenizer's tokens, scores, types, merges and special ids as
     // saved; since v0.4.0 upstream aborts saving any vocab-only model
@@ -1333,7 +1338,7 @@ fn saveBoth(dir: []const u8, m: [:0]const u8, ngl: i32, vocab_only: bool) void {
             // And since v0.4.0 a vocab-only save aborts in upstream on any
             // file: `add_kv_from_model` asks `hparams.n_ff_exp()`, now an
             // accessor bounded by `n_layer_all`, which `load_hparams` never
-            // reads for vocab-only (llama-hparams.cpp:79 @b29c606e2).
+            // reads for vocab-only (llama-hparams.cpp:79 @7fe450e19).
             var nb0: [256]u8 = undefined;
             const job: SaveJob = .{ .rm = rm, .pm = pm, .out = ref_out };
             const why = if (hasCharsmap(m)) "charsmap" else "vocab-only";
@@ -1380,6 +1385,7 @@ pub fn main(init: std.process.Init) !void {
     var only: ?[]const u8 = null;
     var models: std.ArrayList([:0]const u8) = .empty;
     var vocab_files: std.ArrayList([:0]const u8) = .empty;
+    var save_files: std.ArrayList([:0]const u8) = .empty;
     var i: usize = 2;
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--quick")) {
@@ -1389,6 +1395,8 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, args[i], "--only") and i + 1 < args.len) {
             only = args[i + 1];
             i += 1;
+        } else if (std.mem.startsWith(u8, args[i], "save:")) {
+            try save_files.append(gpa, try gpa.dupeSentinel(u8, args[i]["save:".len..], 0));
         } else if (std.mem.find(u8, args[i], "ggml-vocab-") != null) {
             try vocab_files.append(gpa, try gpa.dupeSentinel(u8, args[i], 0));
         } else {
@@ -1430,7 +1438,7 @@ pub fn main(init: std.process.Init) !void {
     if (want(only, "types")) typeRules(quick);
     if (want(only, "files")) fileRuns(dir, quick);
     if (want(only, "big") and !skip_big and models.items.len != 0) bigRuns(dir, if (quick) models.items[0..1] else models.items);
-    if (want(only, "saver")) saverRuns(dir, if (quick and models.items.len != 0) models.items[0..1] else models.items, vocab_files.items);
+    if (want(only, "saver")) saverRuns(dir, if (quick and models.items.len != 0) models.items[0..1] else models.items, vocab_files.items, save_files.items);
 
     std.debug.print("quant-diff: {d} checks, {d} failures\n", .{ checks, failures });
     if (failures != 0) std.process.exit(1);

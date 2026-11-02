@@ -254,6 +254,31 @@ def base_cases():
     c.append(simple("expect-100", req("POST /echo HTTP/1.1", "Content-Length: 4", "Expect: 100-continue"), ("send", b"body"), ("resp",)))
     c.append(simple("expect-100-list", req("POST /echo HTTP/1.1", "Content-Length: 4", "Expect: foo, 100-CONTINUE"), ("send", b"body"), ("resp",)))
     c.append(simple("expect-100-http10", b"POST /echo HTTP/1.0\r\n" + H + b"Content-Length: 4\r\nExpect: 100-continue\r\n\r\nbody"))
+    # cpp-httplib 0.57: `100 Continue` is sent only when the body is read, and
+    # a body still withheld for it closes the connection
+    c.append(simple("expect-100-404", req("POST /nope HTTP/1.1", "Content-Length: 4", "Expect: 100-continue")))
+    c.append(simple("expect-100-get", req("GET /echo HTTP/1.1", "Content-Length: 4", "Expect: 100-continue")))
+    c.append(simple("expect-100-get-nobody", req("GET /echo HTTP/1.1", "Expect: 100-continue"), ("send", req("GET /health HTTP/1.1")), ("resp",)))
+    # answered before routing reads the body: the connection closes
+    c.append(simple("expect-100-options", req("OPTIONS /echo HTTP/1.1", "Content-Length: 4", "Expect: 100-continue"),
+                    ("send", req("GET /health HTTP/1.1")), ("resp",)))
+    c.append(simple("expect-100-chunked", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", "Expect: 100-continue"), ("send", b"3\r\nabc\r\n0\r\n\r\n"), ("resp",)))
+    # cpp-httplib 0.57: the chunk-size line is bounded by its terminator, and
+    # only a chunk extension of visible characters may follow the size
+    c.append(simple("post-chunked-ext", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", body=b"3;name=\"v a\"\r\nabc\r\n0\r\n\r\n")))
+    c.append(simple("post-chunked-ext-ctl", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", body=b"3;a\x01b\r\nabc\r\n0\r\n\r\n")))
+    c.append(simple("post-chunked-size-nul", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", body=b"3\x00junk\r\nabc\r\n0\r\n\r\n")))
+    c.append(simple("post-chunked-ext-lf", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", body=b"3;a\nb\r\nabc\r\n0\r\n\r\n")))
+    c.append(simple("post-chunked-ext-tab", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", body=b"3 \t;a=\x80\t\r\nabc\r\n0\r\n\r\n")))
+    c.append(simple("post-chunked-size-trail", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", body=b"3 x\r\nabc\r\n0\r\n\r\n")))
+    # cpp-httplib 0.57: every trailer field received counts toward the limit
+    c.append(simple("post-chunked-100-trailers", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked",
+                                                     body=b"3\r\nabc\r\n0\r\n" + b"X-U: 1\r\n" * 100 + b"\r\n")))
+    c.append(simple("post-chunked-101-trailers", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked",
+                                                     body=b"3\r\nabc\r\n0\r\n" + b"X-U: 1\r\n" * 101 + b"\r\n")))
+    c.append(simple("post-chunked-declared-trailers", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked",
+                                                          "Trailer: " + ", ".join("X-T%d" % i for i in range(150)),
+                                                          body=b"3\r\nabc\r\n0\r\nX-T120: late\r\nX-T3: early\r\n\r\n")))
     # multipart
     b = b"XyZ"
     form = mp(b, [
@@ -385,6 +410,8 @@ def base_cases():
 def key_cases():
     c = []
     c.append(simple("nokey", req("GET /echo HTTP/1.1")))
+    # cpp-httplib 0.57: a request the middleware rejects is never sent `100 Continue`
+    c.append(simple("expect-100-nokey", req("POST /echo HTTP/1.1", "Content-Length: 4", "Expect: 100-continue")))
     c.append(simple("bearer", req("GET /echo HTTP/1.1", "Authorization: Bearer sk-test-1")))
     c.append(simple("bare-key", req("GET /echo HTTP/1.1", "Authorization: k2")))
     c.append(simple("x-api-key", req("GET /echo HTTP/1.1", "X-Api-Key: k2")))
@@ -476,6 +503,31 @@ def gcp_cases():
     return c
 
 
+def multi_cases():
+    # v0.5.0: every listener has every route; "sock-" cases go to the Unix
+    # socket, the others to the TCP address
+    c = []
+    c.append(simple("echo", req("GET /echo?a=b HTTP/1.1", "Authorization: Bearer abc")))
+    c.append(simple("post-nokey", post("/echo", b"x")))
+    c.append(simple("health", req("GET /health HTTP/1.1")))
+    c.append(simple("sock-echo", req("GET /echo?s=1 HTTP/1.1", "X-Api-Key: abc")))
+    c.append(simple("sock-post", post("/echo", b"y", "Authorization: Bearer abc")))
+    c.append(simple("sock-404", req("GET /nope HTTP/1.1", "X-Api-Key: abc")))
+    c.append(("sock-stream", [("send", req("GET /stream HTTP/1.1", "X-Api-Key: abc")), ("resp",)]))
+    return c
+
+
+def multitcp_cases():
+    # "v6-" cases go to ::1, the others to 127.0.0.1, on the same port
+    c = []
+    c.append(simple("echo", req("GET /echo?a=b HTTP/1.1")))
+    c.append(simple("v6-echo", req("GET /echo?a=c HTTP/1.1")))
+    c.append(simple("v6-post", post("/echo", b"v6")))
+    c.append(("v6-stream", [("send", req("GET /stream HTTP/1.1")), ("resp",)]))
+    c.append(simple("post", post("/echo", b"v4")))
+    return c
+
+
 def unix_cases():
     c = []
     c.append(simple("echo", req("GET /echo?u=1 HTTP/1.1")))
@@ -496,6 +548,10 @@ CONFIGS = [
     ("unix", {}, unix_cases),
     ("ssl", {}, None),
     ("badhost", {}, None),
+    ("multi", {}, multi_cases),
+    ("multitcp", {"HTTP_DIFF_PORT": "FREE"}, multitcp_cases),
+    ("multiport0", {}, None),
+    ("multibad", {"HTTP_DIFF_PORT": "FREE"}, None),
 ]
 
 # -----------------------------------------------------------------------------
@@ -533,7 +589,12 @@ def run_side(binary, config, env_extra, cases, tmp, side, only_case):
         for name, steps in cases():
             if only_case and only_case not in name:
                 continue
-            conn = Conn(target)
+            if name.startswith("sock-"):
+                conn = Conn(sock_path)
+            elif name.startswith("v6-"):
+                conn = Conn(("::1", port))
+            else:
+                conn = Conn(target)
             conn.run(steps)
             results.append((name, mask_bytes(b"".join(conn.out))))
         with open(os.path.join(tmp, "%s-%s.transcript" % (config, side)), "wb") as f:

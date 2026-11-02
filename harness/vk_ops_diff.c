@@ -46,6 +46,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
 #include "ggml.h"
 #include "ggml-backend.h"
@@ -246,7 +247,7 @@ static bool no_callback(int i, struct ggml_tensor * t1, struct ggml_tensor * t2,
     return true;
 }
 
-/* `graph_copy_dup_tensor` (ggml-backend.cpp:2146 @b29c606e2) records a
+/* `graph_copy_dup_tensor` (ggml-backend.cpp:2149 @7fe450e19) records a
  * node's copy only after copying its sources, so `ggml_cast`'s `src[1]`,
  * the node itself, comes back NULL in the copy. Put it back; see the file
  * comment. */
@@ -471,7 +472,37 @@ static void fill_tensor(struct ggml_tensor * t, uint32_t seed) {
         return;
     }
     float * data = (float *) malloc(n * sizeof(float));
-    fill(data, n, seed);
+    int n_kv_max = 0;
+    if (sscanf(t->name, "sparse_mask:%d", &n_kv_max) == 1) {
+        /* A flash-attention mask with at most `n_kv_max` finite entries
+         * per row, as test-backend-ops' init_tensor_kq_mask_sparse makes
+         * one: -inf everywhere, then `n_kv_max - row % min(n_kv_max, 17)`
+         * positions chosen by a seeded shuffle, each a small negative. */
+        const int64_t ne0 = t->ne[0];
+        int32_t * order = (int32_t *) malloc(ne0 * sizeof(int32_t));
+        uint32_t x = seed;
+        for (int64_t j = 0; j < n; j++) {
+            data[j] = -INFINITY;
+        }
+        for (int64_t row = 0; row < n / ne0; row++) {
+            for (int64_t j = 0; j < ne0; j++) {
+                order[j] = (int32_t) j;
+            }
+            for (int64_t j = ne0 - 1; j > 0; j--) {
+                x = x * 1664525u + 1013904223u;
+                const int64_t r = (int64_t) ((x >> 8) % (uint32_t) (j + 1));
+                const int32_t tmp = order[j]; order[j] = order[r]; order[r] = tmp;
+            }
+            const int64_t m = n_kv_max < 17 ? n_kv_max : 17;
+            const int64_t count = n_kv_max - row % m;
+            for (int64_t j = 0; j < count; j++) {
+                data[row * ne0 + order[j]] = -0.03125f * (float) (1 + (j + row) % 7);
+            }
+        }
+        free(order);
+    } else {
+        fill(data, n, seed);
+    }
     if (t->type == GGML_TYPE_F32) {
         ggml_backend_tensor_set(t, data, 0, ggml_nbytes(t));
     } else {
@@ -601,6 +632,26 @@ static struct ggml_tensor * build_mm_bias_swapped(struct ggml_context * ctx, str
     return out;
 }
 
+/* Sparse flash attention (`ggml_flash_attn_ext_set_n_kv_max`) with no
+ * grouped-query attention: one query row on one head. Upstream's sparse
+ * cases all have a GQA ratio of 8 or more, so the other arm of
+ * `use_sparse` -- the scalar path at N == 1 -- is reached by none of them.
+ * On the coopmat2 arm the path is coopmat2 and the case runs dense; on
+ * the others it is scalar, and compacts the mask. */
+static struct ggml_tensor * build_fa_sparse_no_gqa(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    const int64_t hs = 128, kv = 8192, n_kv_max = 512;
+    struct ggml_tensor * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, hs, 1, 1, 1);
+    struct ggml_tensor * k = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, hs, kv, 1, 1);
+    struct ggml_tensor * v = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, hs, kv, 1, 1);
+    struct ggml_tensor * m = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, kv, 1, 1, 1);
+    ggml_set_name(m, "sparse_mask:512");
+    struct ggml_tensor * out = ggml_flash_attn_ext(ctx, q, k, v, m, 1.0f / sqrtf((float) hs), 0.0f, 0.0f);
+    ggml_flash_attn_ext_set_n_kv_max(out, (int32_t) n_kv_max);
+    ggml_prec_set_acc(out, GGML_PREC_F32);
+    *cmp = out;
+    return out;
+}
+
 /* Shapes and patterns upstream's list lacks; each later layer of the port
  * adds the cases its host code needs. */
 static int extra_cases(const char * filter) {
@@ -611,6 +662,7 @@ static int extra_cases(const char * filter) {
         { "MUL_MAT",           "q4_0 128x96x8192, split_k",                         build_mm_split_k_q4_0 },
         { "MUL_MAT",           "f16 1024x1024x256, large tiles",                    build_mm_large_tiles },
         { "MUL_MAT_VEC_FUSION", "mul_mat+add+add, second bias in src[0]",           build_mm_bias_swapped },
+        { "FLASH_ATTN_EXT",    "sparse n_kv_max=512, no GQA, N == 1",               build_fa_sparse_no_gqa },
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

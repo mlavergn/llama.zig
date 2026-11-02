@@ -13,7 +13,7 @@
 //!   and `llama_adapter_lora_free`
 //! - `llama.cpp/src/llama-model.cpp` -- the LoRA half of `~llama_model`
 //!
-//! All at v0.4.1 (`b29c606e2`). The C entry points are `api/adapter.zig`'s;
+//! All at v0.5.0 (`7fe450e19`). The C entry points are `api/adapter.zig`'s;
 //! the context's setters are `context.zig`'s.
 //!
 //! # The order the C++ leaves to libc++
@@ -86,7 +86,7 @@ const BuftCtxMap = struct {
     }
 };
 
-/// Mirrors `llama_adapter_cvec` (llama-adapter.h:17 @b29c606e2): one
+/// Mirrors `llama_adapter_cvec` (llama-adapter.h:17 @7fe450e19): one
 /// direction per layer, added to that layer's output.
 pub const Cvec = struct {
     layer_start: i32 = -1,
@@ -105,7 +105,7 @@ pub const Cvec = struct {
         self.tensors.deinit(allocator);
     }
 
-    /// Ports `llama_adapter_cvec`'s `tensor_for` (llama-adapter.cpp:14 @b29c606e2).
+    /// Ports `llama_adapter_cvec`'s `tensor_for` (llama-adapter.cpp:16 @7fe450e19).
     ///
     /// Return: layer `il`'s direction, or null outside the active range.
     pub fn tensorFor(self: *const Cvec, il: c_int) ?*c.ggml_tensor {
@@ -115,7 +115,7 @@ pub const Cvec = struct {
         return self.tensors.items[@intCast(il)];
     }
 
-    /// Ports `llama_adapter_cvec`'s `apply_to` (llama-adapter.cpp:22 @b29c606e2).
+    /// Ports `llama_adapter_cvec`'s `apply_to` (llama-adapter.cpp:24 @7fe450e19).
     ///
     /// Return: `cur` plus layer `il`'s direction, or `cur` when it has none.
     pub fn applyTo(self: *const Cvec, ctx: *c.ggml_context, cur: *c.ggml_tensor, il: c_int) *c.ggml_tensor {
@@ -123,7 +123,7 @@ pub const Cvec = struct {
         return cur;
     }
 
-    /// Ports `llama_adapter_cvec`'s `init` (llama-adapter.cpp:31 @b29c606e2):
+    /// Ports `llama_adapter_cvec`'s `init` (llama-adapter.cpp:33 @7fe450e19):
     /// one `n_embd` vector per layer but the first, each on the buffer type
     /// its layer's device can add it from, zeroed.
     ///
@@ -133,9 +133,9 @@ pub const Cvec = struct {
         const func = "init";
         const hparams = &model.hparams;
 
-        impl.assert(self.tensors.items.len == 0, "llama-adapter.cpp", 34, "tensors.empty()");
-        impl.assert(self.ctxs.items.len == 0, "llama-adapter.cpp", 35, "ctxs.empty()");
-        impl.assert(self.bufs.items.len == 0, "llama-adapter.cpp", 36, "bufs.empty()");
+        impl.assert(self.tensors.items.len == 0, "llama-adapter.cpp", 36, "tensors.empty()");
+        impl.assert(self.ctxs.items.len == 0, "llama-adapter.cpp", 37, "ctxs.empty()");
+        impl.assert(self.bufs.items.len == 0, "llama-adapter.cpp", 38, "bufs.empty()");
 
         var ctx_map: BuftCtxMap = .{};
         defer ctx_map.deinit();
@@ -150,7 +150,7 @@ pub const Cvec = struct {
             // `select_buft` throws only when no buffer type of the layer's
             // can add two vectors; nothing on this path catches it.
             var exc: Exception = .{};
-            const buft = model.selectBuft(il, &exc) catch exc.terminate("llama-adapter.cpp", 67);
+            const buft = model.selectBuft(il, &exc) catch exc.terminate("llama-adapter.cpp", 69);
             const ctx = ctx_map.ctxForBuft(buft, mem_size, &self.ctxs) orelse {
                 impl.logError("%s: failed to allocate context for control vector\n", .{func});
                 return false;
@@ -171,7 +171,7 @@ pub const Cvec = struct {
         return true;
     }
 
-    /// Ports `llama_adapter_cvec`'s `apply` (llama-adapter.cpp:94 @b29c606e2):
+    /// Ports `llama_adapter_cvec`'s `apply` (llama-adapter.cpp:96 @7fe450e19):
     /// set the vector from `data`, which holds layers 1 onward, `n_embd`
     /// floats each, and activate it over `[il_start, il_end]`. A null
     /// `data` deactivates it and keeps the tensors for later.
@@ -222,13 +222,13 @@ pub const Cvec = struct {
     }
 };
 
-/// Mirrors `llama_adapter_lora_weight` (llama-adapter.h:48 @b29c606e2).
+/// Mirrors `llama_adapter_lora_weight` (llama-adapter.h:48 @7fe450e19).
 pub const LoraWeight = struct {
     a: ?*c.ggml_tensor = null,
     b: ?*c.ggml_tensor = null,
 
     /// Ports `llama_adapter_lora_weight`'s `get_scale` (llama-adapter.h:53
-    /// @b29c606e2): the adapter's scale, times `alpha / rank` when the
+    /// @7fe450e19): the adapter's scale, times `alpha / rank` when the
     /// adapter has an alpha.
     pub fn getScale(self: *const LoraWeight, alpha: f32, adapter_scale: f32) f32 {
         const rank: f32 = @floatFromInt(self.b.?.ne[0]);
@@ -236,7 +236,7 @@ pub const LoraWeight = struct {
     }
 };
 
-/// Mirrors `llama_adapter_lora` (llama-adapter.h:63 @b29c606e2).
+/// Mirrors `llama_adapter_lora` (llama-adapter.h:63 @7fe450e19).
 ///
 /// Behind a `llama_adapter_lora *`, so it is always heap-allocated through
 /// `create` and released through `destroy`.
@@ -254,7 +254,7 @@ pub const Lora = struct {
     alora_invocation_tokens: std.ArrayList(c.llama_token) = .empty,
 
     /// Ports the constructor of `llama_adapter_lora` (llama-adapter.h:80
-    /// @b29c606e2).
+    /// @7fe450e19).
     ///
     /// Return: an empty adapter for `model`, the caller's to `destroy`.
     pub fn create(model: ?*Model) *Lora {
@@ -284,14 +284,14 @@ pub const Lora = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_adapter_lora`'s `get_weight` (llama-adapter.cpp:138 @b29c606e2).
+    /// Ports `llama_adapter_lora`'s `get_weight` (llama-adapter.cpp:140 @7fe450e19).
     ///
     /// Return: the pair adapting `w`, borrowed from the adapter, or null.
     pub fn getWeight(self: *Lora, w: *const c.ggml_tensor) ?*LoraWeight {
         return self.ab_map.get(std.mem.sliceTo(&w.name, 0));
     }
 
-    /// Ports `llama_adapter_lora`'s `get_n_nodes` (llama-adapter.h:85 @b29c606e2).
+    /// Ports `llama_adapter_lora`'s `get_n_nodes` (llama-adapter.h:85 @7fe450e19).
     pub fn getNNodes(self: *const Lora) u32 {
         return @as(u32, @truncate(self.ab_map.count())) *% 6;
     }
@@ -355,26 +355,30 @@ fn kvF32(ctx: *const c.gguf_context, key: arch.Kv) f32 {
     return if (id < 0) 0.0 else c.gguf_get_val_f32(ctx, id);
 }
 
-/// Ports `llama_adapter_lora_init_impl` (llama-adapter.cpp:149 @b29c606e2):
-/// read a LoRA file, check it was made for this model's architecture, pair
-/// its `lora_a` and `lora_b` tensors, check each pair against the weight it
-/// adapts, put each pair on that weight's buffer type -- the CPU's where
-/// that is a repacking type -- and load the data.
+/// Ports `llama_adapter_lora_init_impl` (llama-adapter.cpp:151 @7fe450e19):
+/// read a LoRA file from an open `FILE *`'s current position, check it was
+/// made for this model's architecture, pair its `lora_a` and `lora_b`
+/// tensors, check each pair against the weight it adapts, put each pair on
+/// that weight's buffer type -- the CPU's where that is a repacking type --
+/// and load the data.
 ///
 /// Return: nothing, or `error.Thrown` with what the C++ throws. On success
 /// the adapter is registered with the model.
-fn loraInitImpl(model: *Model, path_lora: [*:0]const u8, adapter: *Lora, exc: *Exception) Thrown!void {
+fn loraInitImpl(model: *Model, file: *c.FILE, adapter: *Lora, exc: *Exception) Thrown!void {
     const func = "llama_adapter_lora_init_impl";
-    impl.logInfo("%s: loading lora adapter from '%s' ...\n", .{ func, path_lora });
 
     var ctx_init: ?*c.ggml_context = null;
-    const ctx_gguf = c.gguf_init_from_file(path_lora, .{ .no_alloc = true, .ctx = @ptrCast(&ctx_init) }) orelse
-        return exc.throw(.runtime_error, "failed to load lora adapter file from {s}", .{std.mem.span(path_lora)});
+    const ctx_gguf = c.gguf_init_from_file_ptr(file, .{ .no_alloc = true, .ctx = @ptrCast(&ctx_init) }) orelse
+        return exc.throw(.runtime_error, "failed to load lora adapter from file", .{});
     defer c.gguf_free(ctx_gguf);
 
     // Freed before the metadata, as the C++'s locals are destroyed.
     const ctx = ctx_init;
     defer if (ctx) |p| c.ggml_free(p);
+
+    // must come after gguf_init_from_file_ptr, the llama_file constructor moves the file position
+    var gguf_file = try mmap.File.borrow(file, exc);
+    defer gguf_file.close();
 
     // check metadata
     {
@@ -577,20 +581,18 @@ fn loraInitImpl(model: *Model, path_lora: [*:0]const u8, adapter: *Lora, exc: *E
 
     // set tensor data
     {
-        var gguf_file = try mmap.File.open(std.mem.span(path_lora), "rb", false, exc);
-        defer gguf_file.close();
         var read_buf: std.ArrayList(u8) = .empty;
         defer read_buf.deinit(allocator);
         const SetTensor = struct {
-            fn run(g: *const c.gguf_context, file: *mmap.File, buf: *std.ArrayList(u8), orig: *c.ggml_tensor, dev: *c.ggml_tensor, e: *Exception) Thrown!void {
+            fn run(g: *const c.gguf_context, gf: *mmap.File, buf: *std.ArrayList(u8), orig: *c.ggml_tensor, dev: *c.ggml_tensor, e: *Exception) Thrown!void {
                 const offs = c.gguf_get_data_offset(g) +% c.gguf_get_tensor_offset(g, c.gguf_find_tensor(g, &orig.name));
                 const size = c.ggml_nbytes(orig);
-                if (offs +% size < offs or offs +% size > file.size) {
+                if (offs +% size < offs or offs +% size > gf.size) {
                     return e.throw(.runtime_error, "LoRA tensor '{s}' data is not within the file bounds, file is corrupted or incomplete", .{std.mem.sliceTo(&orig.name, 0)});
                 }
                 buf.resize(allocator, size) catch oom();
-                try file.seek(offs, c.SEEK_SET, e);
-                try file.readRaw(buf.items.ptr, size, e);
+                try gf.seek(offs, c.SEEK_SET, e);
+                try gf.readRaw(buf.items.ptr, size, e);
                 c.ggml_backend_tensor_set(dev, buf.items.ptr, 0, size);
             }
         };
@@ -609,7 +611,11 @@ fn loraInitImpl(model: *Model, path_lora: [*:0]const u8, adapter: *Lora, exc: *E
     impl.logInfo("%s: loaded %zu tensors from lora file\n", .{ func, adapter.ab_map.count() * 2 });
 }
 
-/// Ports `llama_adapter_lora_init` (llama-adapter.cpp:423 @b29c606e2).
+/// libc's `strerror`, which `llama.h`'s import does not declare.
+extern "c" fn strerror(errnum: c_int) [*:0]const u8;
+
+/// Ports `llama_adapter_lora_init` (llama-adapter.cpp:425 @7fe450e19):
+/// open the file and read it through `loraInitFromFilePtr`.
 ///
 /// Parameters:
 /// - `model`: the model to adapt; it owns the adapter from here on.
@@ -617,17 +623,47 @@ fn loraInitImpl(model: *Model, path_lora: [*:0]const u8, adapter: *Lora, exc: *E
 ///
 /// Return: the adapter, or null with the reason logged.
 pub fn loraInit(model: *Model, path_lora: [*:0]const u8) ?*Lora {
+    const func = "llama_adapter_lora_init";
+    impl.logInfo("%s: loading lora adapter from '%s' ...\n", .{ func, path_lora });
+
+    const file = c.ggml_fopen(path_lora, "rb") orelse {
+        impl.logError("%s: failed to open '%s': %s\n", .{ func, path_lora, strerror(std.c._errno().*) });
+        return null;
+    };
+
+    const adapter = loraInitFromFilePtr(model, file);
+    _ = c.fclose(file);
+
+    return adapter;
+}
+
+/// Ports `llama_adapter_lora_init_from_file_ptr` (llama-adapter.cpp:440
+/// @7fe450e19): read a LoRA adapter from an open file, starting at its
+/// current position.
+///
+/// Parameters:
+/// - `model`: the model to adapt; it owns the adapter from here on.
+/// - `file`: the open file; borrowed, never closed here. Null is refused.
+///
+/// Return: the adapter, or null with the reason logged.
+pub fn loraInitFromFilePtr(model: *Model, file: ?*c.FILE) ?*Lora {
+    const func = "llama_adapter_lora_init_from_file_ptr";
+    const fp = file orelse {
+        impl.logError("%s: file is NULL\n", .{func});
+        return null;
+    };
+
     const adapter = Lora.create(model);
     var exc: Exception = .{};
-    loraInitImpl(model, path_lora, adapter, &exc) catch {
-        impl.logError("%s: failed to apply lora adapter: %s\n", .{ "llama_adapter_lora_init", exc.whatZ() });
+    loraInitImpl(model, fp, adapter, &exc) catch {
+        impl.logError("%s: failed to apply lora adapter: %s\n", .{ func, exc.whatZ() });
         adapter.destroy();
         return null;
     };
     return adapter;
 }
 
-/// Ports `llama_adapter_lora_free` (llama-adapter.cpp:477 @b29c606e2):
+/// Ports `llama_adapter_lora_free` (llama-adapter.cpp:499 @7fe450e19):
 /// detach the adapter from its model, then free it.
 ///
 /// Return: nothing.
@@ -647,7 +683,7 @@ pub fn loraFree(adapter: ?*Lora) void {
     a.destroy();
 }
 
-/// Ports the destructor of `llama_model` (llama-model.cpp:1195 @b29c606e2):
+/// Ports the destructor of `llama_model` (llama-model.cpp:1220 @7fe450e19):
 /// every adapter still registered with the model is freed with it.
 ///
 /// Return: nothing.
@@ -656,7 +692,7 @@ pub fn freeModelLoras(model: *Model) void {
     model.loras.clearRetainingCapacity();
 }
 
-/// `llama_adapter_loras` (llama-adapter.h:90 @b29c606e2): the active
+/// `llama_adapter_loras` (llama-adapter.h:90 @7fe450e19): the active
 /// adapters and their scales, in the order the C++'s
 /// `std::unordered_map<llama_adapter_lora *, float>` iterates them, which
 /// is the order the graph adds their deltas in.

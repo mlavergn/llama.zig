@@ -198,6 +198,35 @@
 !env LLAMA_ARG_SPEC_SYNTH_LEN=-1
 --bogus
 !unenv LLAMA_ARG_SPEC_SYNTH_LEN
+# v0.5.0: six sampling options gained a variable, and --host takes a list
+!env LLAMA_ARG_TEMPERATURE=abc
+--bogus
+!unenv LLAMA_ARG_TEMPERATURE
+!env LLAMA_ARG_TOP_P=x
+--bogus
+!unenv LLAMA_ARG_TOP_P
+!env LLAMA_ARG_MIN_P=
+--bogus
+!unenv LLAMA_ARG_MIN_P
+!env LLAMA_ARG_REPEAT_PENALTY=0
+--bogus
+!unenv LLAMA_ARG_REPEAT_PENALTY
+!env LLAMA_ARG_PRESENCE_PENALTY=inf
+--bogus
+!unenv LLAMA_ARG_PRESENCE_PENALTY
+!env LLAMA_ARG_FREQUENCY_PENALTY=nan
+--bogus
+!unenv LLAMA_ARG_FREQUENCY_PENALTY
+!env LLAMA_ARG_HOST=' , '
+--bogus
+!unenv LLAMA_ARG_HOST
+!env LLAMA_ARG_HOST=192.0.2.1
+--host , --bogus
+!unenv LLAMA_ARG_HOST
+--host ''
+--host ' ,, '
+--host '"",x'
+--host '127.0.0.1, ::1' --no-jinja --chat-template bogus
 !env LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT=-1
 --bogus
 !unenv LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT

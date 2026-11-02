@@ -17,6 +17,7 @@
 !mask s/(load time|sample time|prompt eval time|eval time|total time) += .*/\1 = X/
 
 --help
+--version
 -m $PLAIN -p 16 -n 4 -r 2
 -m $PLAIN -p 16 -n 4 -r 2 -o csv
 -m $PLAIN -p 16 -n 4 -r 2 -o json

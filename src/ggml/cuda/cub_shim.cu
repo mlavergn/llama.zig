@@ -7,11 +7,13 @@
 // file is the only CUDA host code the port writes in C++. It wraps exactly
 // the calls upstream makes and nothing else:
 //
-// - `llama.cpp/ggml/src/ggml-cuda/argsort.cu` (v0.3.0, `c1d0e7a00`),
+// - `llama.cpp/ggml/src/ggml-cuda/argsort.cu` (v0.5.0, `7fe450e19`),
 //   `argsort_f32_i32_cuda_cub` (argsort.cu:45): `DeviceRadixSort`,
 //   `DeviceSegmentedRadixSort` and `DeviceSegmentedSort`, `SortPairs` and
 //   `SortPairsDescending`, each called once to size the temporary storage
-//   and once to sort.
+//   and once to sort. Since v0.5.0 the keys are sorted out of place, into
+//   a second pool buffer: CUB's sorts do not allow the input and output to
+//   alias. Both are still `float *`, so the instantiation is unchanged.
 // - `llama.cpp/ggml/src/ggml-cuda/cumsum.cu` (v0.3.0, `c1d0e7a00`),
 //   `cumsum_cub<float>` (cumsum.cu:190): `DeviceScan::InclusiveSum`.
 // - `llama.cpp/ggml/src/ggml-cuda/sum.cu` (v0.3.0, `c1d0e7a00`),
@@ -21,7 +23,7 @@
 //   `int64_t` count, so one wrapper is both instantiations.
 //
 // Each function takes its arguments with **the C++ types upstream's call
-// site has** -- `float *` keys passed as both `d_keys_in` and `d_keys_out`,
+// site has** -- `float *` keys in `d_keys_in` and `d_keys_out`,
 // `int *` values, `const int` counts, `int *` offsets, the `0, sizeof(float)
 // * 8` bit range -- and passes them in upstream's order, so template
 // argument deduction picks the same instantiation and the device code is
@@ -52,63 +54,64 @@ using namespace cub;
 
 extern "C" {
 
-// argsort.cu:88, 126 -- `nrows == 1`, ascending.
+// argsort.cu:91, 129 -- `nrows == 1`, ascending.
 cudaError_t ggml_cuda_cub_radix_sort_pairs(void * d_temp_storage, size_t * temp_storage_bytes, float * temp_keys,
-                                           int * temp_indices, int * dst, const int ncols, cudaStream_t stream) {
-    return DeviceRadixSort::SortPairs(d_temp_storage, *temp_storage_bytes, temp_keys, temp_keys,  // keys (in-place)
+                                           float * temp_keys_out, int * temp_indices, int * dst, const int ncols, cudaStream_t stream) {
+    return DeviceRadixSort::SortPairs(d_temp_storage, *temp_storage_bytes, temp_keys, temp_keys_out,  // keys in, keys out
                                       temp_indices, dst,  // values (indices)
                                       ncols, 0, sizeof(float) * 8, stream);
 }
 
-// argsort.cu:106, 141 -- `nrows == 1`, descending.
+// argsort.cu:109, 144 -- `nrows == 1`, descending.
 cudaError_t ggml_cuda_cub_radix_sort_pairs_descending(void * d_temp_storage, size_t * temp_storage_bytes,
-                                                      float * temp_keys, int * temp_indices, int * dst,
-                                                      const int ncols, cudaStream_t stream) {
+                                                      float * temp_keys, float * temp_keys_out, int * temp_indices,
+                                                      int * dst, const int ncols, cudaStream_t stream) {
     return DeviceRadixSort::SortPairsDescending(d_temp_storage, *temp_storage_bytes, temp_keys,
-                                                temp_keys,          // keys (in-place)
+                                                temp_keys_out,      // keys out
                                                 temp_indices, dst,  // values (indices)
                                                 ncols, 0, sizeof(float) * 8, stream);
 }
 
-// argsort.cu:92, 131 -- several rows while the stream is capturing, ascending.
+// argsort.cu:95, 134 -- several rows while the stream is capturing, ascending.
 cudaError_t ggml_cuda_cub_segmented_radix_sort_pairs(void * d_temp_storage, size_t * temp_storage_bytes,
-                                                     float * temp_keys, int * temp_indices, int * dst,
-                                                     const int ncols, const int nrows, int * offset_iterator,
-                                                     cudaStream_t stream) {
+                                                     float * temp_keys, float * temp_keys_out, int * temp_indices,
+                                                     int * dst, const int ncols, const int nrows,
+                                                     int * offset_iterator, cudaStream_t stream) {
     return DeviceSegmentedRadixSort::SortPairs(d_temp_storage, *temp_storage_bytes, temp_keys,
-                                               temp_keys,                                  // keys (in-place)
+                                               temp_keys_out,                              // keys in, keys out
                                                temp_indices, dst,                          // values (indices)
                                                ncols * nrows, nrows,                       // num items, num segments
                                                offset_iterator, offset_iterator + 1, 0, sizeof(float) * 8, stream);
 }
 
-// argsort.cu:111, 146 -- several rows while the stream is capturing, descending.
+// argsort.cu:114, 149 -- several rows while the stream is capturing, descending.
 cudaError_t ggml_cuda_cub_segmented_radix_sort_pairs_descending(void * d_temp_storage, size_t * temp_storage_bytes,
-                                                                float * temp_keys, int * temp_indices, int * dst,
-                                                                const int ncols, const int nrows,
-                                                                int * offset_iterator, cudaStream_t stream) {
-    return DeviceSegmentedRadixSort::SortPairsDescending(d_temp_storage, *temp_storage_bytes, temp_keys, temp_keys,
+                                                                float * temp_keys, float * temp_keys_out,
+                                                                int * temp_indices, int * dst, const int ncols,
+                                                                const int nrows, int * offset_iterator,
+                                                                cudaStream_t stream) {
+    return DeviceSegmentedRadixSort::SortPairsDescending(d_temp_storage, *temp_storage_bytes, temp_keys, temp_keys_out,
                                                          temp_indices, dst, ncols * nrows, nrows, offset_iterator,
                                                          offset_iterator + 1, 0, sizeof(float) * 8, stream);
 }
 
-// argsort.cu:98, 135 -- several rows, not capturing, ascending.
+// argsort.cu:101, 138 -- several rows, not capturing, ascending.
 cudaError_t ggml_cuda_cub_segmented_sort_pairs(void * d_temp_storage, size_t * temp_storage_bytes, float * temp_keys,
-                                               int * temp_indices, int * dst, const int ncols, const int nrows,
-                                               int * offset_iterator, cudaStream_t stream) {
+                                               float * temp_keys_out, int * temp_indices, int * dst, const int ncols,
+                                               const int nrows, int * offset_iterator, cudaStream_t stream) {
     return DeviceSegmentedSort::SortPairs(d_temp_storage, *temp_storage_bytes, temp_keys,
-                                          temp_keys,             // keys (in-place)
+                                          temp_keys_out,         // keys out
                                           temp_indices, dst,     // values (indices)
                                           ncols * nrows, nrows,  // num items, num segments
                                           offset_iterator, offset_iterator + 1, stream);
 }
 
-// argsort.cu:115, 150 -- several rows, not capturing, descending.
+// argsort.cu:118, 153 -- several rows, not capturing, descending.
 cudaError_t ggml_cuda_cub_segmented_sort_pairs_descending(void * d_temp_storage, size_t * temp_storage_bytes,
-                                                          float * temp_keys, int * temp_indices, int * dst,
-                                                          const int ncols, const int nrows, int * offset_iterator,
-                                                          cudaStream_t stream) {
-    return DeviceSegmentedSort::SortPairsDescending(d_temp_storage, *temp_storage_bytes, temp_keys, temp_keys,
+                                                          float * temp_keys, float * temp_keys_out, int * temp_indices,
+                                                          int * dst, const int ncols, const int nrows,
+                                                          int * offset_iterator, cudaStream_t stream) {
+    return DeviceSegmentedSort::SortPairsDescending(d_temp_storage, *temp_storage_bytes, temp_keys, temp_keys_out,
                                                     temp_indices, dst, ncols * nrows, nrows, offset_iterator,
                                                     offset_iterator + 1, stream);
 }

@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/sampling.cpp` (v0.4.1, `b29c606e2`): the ring
+//! Ports `llama.cpp/common/sampling.cpp` (v0.5.0, `7fe450e19`): the ring
 //! buffer, `common_sampler` and every function the tools and the server call,
 //! with `regex_escape` from `llama.cpp/common/common.cpp`. Each declaration
 //! names the C++ it replaces and the line it began at.
@@ -56,7 +56,7 @@ fn throwUncaught(comptime line: c_int, msg: [*:0]const u8) noreturn {
     unreachable;
 }
 
-/// Ports `ring_buffer` (sampling.cpp:21 @b29c606e2): a fixed-capacity deque.
+/// Ports `ring_buffer` (sampling.cpp:21 @7fe450e19): a fixed-capacity deque.
 pub fn RingBuffer(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -84,13 +84,13 @@ pub fn RingBuffer(comptime T: type) type {
             return r;
         }
 
-        /// Ports `front` (sampling.cpp:24 @b29c606e2), a member of `ring_buffer`.
+        /// Ports `front` (sampling.cpp:24 @7fe450e19), a member of `ring_buffer`.
         pub fn front(self: *const Self) T {
             if (self.sz == 0) throwUncaught(26, "ring buffer is empty");
             return self.data[self.first];
         }
 
-        /// Ports `push_back` (sampling.cpp:52 @b29c606e2), a member of
+        /// Ports `push_back` (sampling.cpp:52 @7fe450e19), a member of
         /// `ring_buffer`: the oldest element goes when full.
         pub fn pushBack(self: *Self, value: T) void {
             if (self.sz == self.capacity) {
@@ -103,7 +103,7 @@ pub fn RingBuffer(comptime T: type) type {
             self.pos = (self.pos + 1) % self.capacity;
         }
 
-        /// Ports `pop_front` (sampling.cpp:63 @b29c606e2), a member of `ring_buffer`.
+        /// Ports `pop_front` (sampling.cpp:63 @7fe450e19), a member of `ring_buffer`.
         pub fn popFront(self: *Self) T {
             if (self.sz == 0) throwUncaught(65, "ring buffer is empty");
             const value = self.data[self.first];
@@ -112,14 +112,14 @@ pub fn RingBuffer(comptime T: type) type {
             return value;
         }
 
-        /// Ports `rat` (sampling.cpp:73 @b29c606e2), a member of
+        /// Ports `rat` (sampling.cpp:73 @7fe450e19), a member of
         /// `ring_buffer`: the `i`th element from the back.
         pub fn rat(self: *const Self, i: usize) T {
             if (i >= self.sz) throwUncaught(75, "ring buffer: index out of bounds");
             return self.data[(self.first + self.sz - i - 1) % self.capacity];
         }
 
-        /// Ports `to_vector` (sampling.cpp:80 @b29c606e2), a member of `ring_buffer`.
+        /// Ports `to_vector` (sampling.cpp:80 @7fe450e19), a member of `ring_buffer`.
         ///
         /// Return: the elements oldest first, the allocator's.
         pub fn toVector(self: *const Self, a: std.mem.Allocator) ![]T {
@@ -128,7 +128,7 @@ pub fn RingBuffer(comptime T: type) type {
             return result;
         }
 
-        /// Ports `clear` (sampling.cpp:89 @b29c606e2), a member of
+        /// Ports `clear` (sampling.cpp:89 @7fe450e19), a member of
         /// `ring_buffer`: here only reset the status of the buffer.
         pub fn clear(self: *Self) void {
             self.sz = 0;
@@ -136,19 +136,19 @@ pub fn RingBuffer(comptime T: type) type {
             self.pos = 0;
         }
 
-        /// Ports `empty` (sampling.cpp:96 @b29c606e2), a member of `ring_buffer`.
+        /// Ports `empty` (sampling.cpp:96 @7fe450e19), a member of `ring_buffer`.
         pub fn empty(self: *const Self) bool {
             return self.sz == 0;
         }
 
-        /// Ports `size` (sampling.cpp:100 @b29c606e2), a member of `ring_buffer`.
+        /// Ports `size` (sampling.cpp:100 @7fe450e19), a member of `ring_buffer`.
         pub fn size(self: *const Self) usize {
             return self.sz;
         }
     };
 }
 
-/// Ports `print` (sampling.cpp:171 @b29c606e2), a member of
+/// Ports `print` (sampling.cpp:171 @7fe450e19), a member of
 /// `common_params_sampling`: the parameters as the tools and the server log
 /// them.
 ///
@@ -164,7 +164,7 @@ pub fn paramsPrint(a: std.mem.Allocator, p: *const SamplingParams) ![]u8 {
 
 extern fn snprintf(buf: [*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
-/// Ports `regex_escape` (common/common.cpp:524 @b29c606e2): every one of
+/// Ports `regex_escape` (common/common.cpp:524 @7fe450e19): every one of
 /// `.^$|()*+?[]{}\` behind a backslash. `std::regex_replace` over that one
 /// character class does exactly this, byte by byte.
 fn regexEscape(a: std.mem.Allocator, s: []const u8) ![]u8 {
@@ -176,7 +176,7 @@ fn regexEscape(a: std.mem.Allocator, s: []const u8) ![]u8 {
     return out.toOwnedSlice(a);
 }
 
-/// Ports `common_grammar_needs_prefill` (common/common.h:218 @b29c606e2):
+/// Ports `common_grammar_needs_prefill` (common/common.h:218 @7fe450e19):
 /// only output-format and tool-call grammars are prefilled.
 pub fn grammarNeedsPrefill(t: params_mod.GrammarType) bool {
     return t == .output_format or t == .tool_calls;
@@ -185,7 +185,7 @@ pub fn grammarNeedsPrefill(t: params_mod.GrammarType) bool {
 /// What `common_sampler_init` throws.
 pub const InitError = error{ InvalidArgument, Runtime, OutOfMemory, Throw };
 
-/// Ports `common_sampler` (sampling.cpp:111 @b29c606e2).
+/// Ports `common_sampler` (sampling.cpp:111 @7fe450e19).
 pub const Sampler = struct {
     allocator: std.mem.Allocator,
     grammar_lazy: bool = false,
@@ -198,19 +198,19 @@ pub const Sampler = struct {
     cur_p: c.llama_token_data_array = .{ .data = null, .size = 0, .selected = -1, .sorted = false },
     t_total_us: i64 = 0,
 
-    /// Ports `tm` (sampling.cpp:164 @b29c606e2), a member of
+    /// Ports `tm` (sampling.cpp:164 @7fe450e19), a member of
     /// `common_sampler`: a `common_time_meas` over `t_total_us`. End it
     /// with `tmEnd`.
     fn tm(self: *const Sampler) i64 {
         return if (self.no_perf) -1 else c.ggml_time_us();
     }
 
-    /// The `common_time_meas` destructor (common/common.cpp:68 @b29c606e2).
+    /// The `common_time_meas` destructor (common/common.cpp:68 @7fe450e19).
     fn tmEnd(self: *Sampler, t_start_us: i64) void {
         if (t_start_us >= 0) self.t_total_us += c.ggml_time_us() - t_start_us;
     }
 
-    /// Ports `common_sampler_free` (sampling.cpp:440 @b29c606e2).
+    /// Ports `common_sampler_free` (sampling.cpp:440 @7fe450e19).
     pub fn destroy(self: *Sampler) void {
         c.llama_sampler_free(self.grmr);
         c.llama_sampler_free(self.rbudget);
@@ -220,20 +220,20 @@ pub const Sampler = struct {
         self.allocator.destroy(self);
     }
 
-    /// Ports `common_sampler_get` (sampling.cpp:586 @b29c606e2): the chain.
+    /// Ports `common_sampler_get` (sampling.cpp:586 @7fe450e19): the chain.
     pub fn get(self: *const Sampler) *c.llama_sampler {
         return self.chain;
     }
 
-    /// Ports `reset` (sampling.cpp:124 @b29c606e2), a member of
+    /// Ports `reset` (sampling.cpp:124 @7fe450e19), a member of
     /// `common_sampler`, which `common_sampler_reset` (sampling.cpp:501
-    /// @b29c606e2) calls.
+    /// @7fe450e19) calls.
     pub fn reset(self: *Sampler) void {
         self.prev.clear();
         c.llama_sampler_reset(self.chain);
     }
 
-    /// Ports `set_logits` (sampling.cpp:130 @b29c606e2), a member of
+    /// Ports `set_logits` (sampling.cpp:130 @7fe450e19), a member of
     /// `common_sampler`: the candidates, from a backend sampler's output or
     /// the raw logits.
     fn setLogits(self: *Sampler, ctx: ?*c.llama_context, idx: i32) void {
@@ -269,7 +269,7 @@ pub const Sampler = struct {
         self.cur_p = .{ .data = self.cur.items.ptr, .size = self.cur.items.len, .selected = -1, .sorted = false };
     }
 
-    /// Ports `grammar_should_apply` (sampling.cpp:452 @b29c606e2).
+    /// Ports `grammar_should_apply` (sampling.cpp:452 @7fe450e19).
     fn grammarShouldApply(self: *const Sampler) bool {
         if (self.grmr == null) return false;
         if (self.rbudget == null) return true;
@@ -281,7 +281,7 @@ pub const Sampler = struct {
         return true;
     }
 
-    /// Ports `common_sampler_accept` (sampling.cpp:467 @b29c606e2): with
+    /// Ports `common_sampler_accept` (sampling.cpp:467 @7fe450e19): with
     /// `is_generated`, the token goes to the chain, the reasoning budget and
     /// the grammar; otherwise to the chain alone.
     pub fn accept(self: *Sampler, token: c.llama_token, is_generated: bool) void {
@@ -310,7 +310,7 @@ pub const Sampler = struct {
         self.prev.pushBack(token);
     }
 
-    /// Ports `common_sampler_clone` (sampling.cpp:509 @b29c606e2).
+    /// Ports `common_sampler_clone` (sampling.cpp:509 @7fe450e19).
     ///
     /// Return: a new sampler with this one's state, freed with `destroy`.
     pub fn clone(self: *const Sampler) *Sampler {
@@ -333,7 +333,7 @@ pub const Sampler = struct {
         return r;
     }
 
-    /// Ports `common_sampler_copy` (sampling.cpp:521 @b29c606e2): `src`'s
+    /// Ports `common_sampler_copy` (sampling.cpp:521 @7fe450e19): `src`'s
     /// state into `dst`, which must have the same grammar and budget shape.
     pub fn copy(src: ?*const Sampler, dst: ?*Sampler) void {
         if (src == null or dst == null or @intFromPtr(src.?) == @intFromPtr(dst.?)) return;
@@ -358,7 +358,7 @@ pub const Sampler = struct {
         d.t_total_us = s.t_total_us;
     }
 
-    /// Ports `common_sampler_sample` (sampling.cpp:594 @b29c606e2):
+    /// Ports `common_sampler_sample` (sampling.cpp:594 @7fe450e19):
     /// grammar-based rejection sampling over the chain, after the reasoning
     /// budget.
     ///
@@ -432,7 +432,7 @@ pub const Sampler = struct {
     }
 
     /// Ports `common_sampler_sample_and_accept_n` (sampling.cpp:678
-    /// @b29c606e2), the overload taking output indices: samples and accepts
+    /// @7fe450e19), the overload taking output indices: samples and accepts
     /// at each index while the samples agree with `draft`.
     ///
     /// Parameters:
@@ -469,7 +469,7 @@ pub const Sampler = struct {
     }
 
     /// Ports `common_sampler_sample_and_accept_n` (sampling.cpp:708
-    /// @b29c606e2), the overload that assumes `idxs == [0, 1, ...,
+    /// @7fe450e19), the overload that assumes `idxs == [0, 1, ...,
     /// draft.size()]`.
     ///
     /// Return: the accepted tokens, the allocator's.
@@ -481,13 +481,13 @@ pub const Sampler = struct {
         return self.sampleAndAcceptNIdxs(a, ctx, idxs, draft, grammar_first);
     }
 
-    /// Ports `common_sampler_get_seed` (sampling.cpp:717 @b29c606e2).
+    /// Ports `common_sampler_get_seed` (sampling.cpp:717 @7fe450e19).
     pub fn getSeed(self: *const Sampler) u32 {
         return c.llama_sampler_get_seed(self.chain);
     }
 
     /// Ports `common_sampler_reasoning_budget_force` (sampling.cpp:721
-    /// @b29c606e2): the reasoning budget, if any, begins forcing its end
+    /// @7fe450e19): the reasoning budget, if any, begins forcing its end
     /// sequence now.
     ///
     /// Return: whether it did.
@@ -495,7 +495,7 @@ pub const Sampler = struct {
         return reasoning_budget.force(self.rbudget);
     }
 
-    /// Ports `common_sampler_get_candidates` (sampling.cpp:731 @b29c606e2):
+    /// Ports `common_sampler_get_candidates` (sampling.cpp:731 @7fe450e19):
     /// the current candidates, sorted by descending probability with
     /// libc++'s `std::sort` when `do_sort` and not already sorted.
     ///
@@ -530,13 +530,13 @@ pub const Sampler = struct {
         return res;
     }
 
-    /// Ports `common_sampler_last` (sampling.cpp:758 @b29c606e2): the last
+    /// Ports `common_sampler_last` (sampling.cpp:758 @7fe450e19): the last
     /// accepted token.
     pub fn last(self: *const Sampler) c.llama_token {
         return self.prev.rat(0);
     }
 
-    /// Ports `common_sampler_print` (sampling.cpp:762 @b29c606e2): the chain
+    /// Ports `common_sampler_print` (sampling.cpp:762 @7fe450e19): the chain
     /// as `logits -> name -> name ...`.
     ///
     /// Return: the text, the allocator's.
@@ -555,7 +555,7 @@ pub const Sampler = struct {
         return result.toOwnedSlice(a);
     }
 
-    /// Ports `common_sampler_prev_str` (sampling.cpp:774 @b29c606e2): the
+    /// Ports `common_sampler_prev_str` (sampling.cpp:774 @7fe450e19): the
     /// last `n` accepted tokens' text.
     ///
     /// Return: the text, the allocator's.
@@ -583,7 +583,7 @@ pub const Sampler = struct {
     }
 };
 
-/// Ports `common_sampler_init` (sampling.cpp:187 @b29c606e2): the grammar,
+/// Ports `common_sampler_init` (sampling.cpp:187 @7fe450e19): the grammar,
 /// the reasoning budget and the chain `params` describes.
 ///
 /// Parameters:
@@ -594,15 +594,21 @@ pub const Sampler = struct {
 /// Return: the sampler, which the caller owns (`Sampler.destroy`).
 pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sampler {
     if (!std.math.isFinite(params.penalty_repeat) or params.penalty_repeat <= 0.0 or !std.math.isFinite(1.0 / params.penalty_repeat)) {
-        _ = arg.throwStr("penalty_repeat must be finite and greater than 0") catch {};
+        switch (arg.throwStr("penalty_repeat must be finite and greater than 0")) {
+            error.Throw => {},
+        }
         return error.InvalidArgument;
     }
     if (!std.math.isFinite(params.penalty_freq)) {
-        _ = arg.throwStr("penalty_freq must be finite") catch {};
+        switch (arg.throwStr("penalty_freq must be finite")) {
+            error.Throw => {},
+        }
         return error.InvalidArgument;
     }
     if (!std.math.isFinite(params.penalty_present)) {
-        _ = arg.throwStr("penalty_present must be finite") catch {};
+        switch (arg.throwStr("penalty_present must be finite")) {
+            error.Throw => {},
+        }
         return error.InvalidArgument;
     }
 
@@ -669,7 +675,9 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
     }
     if (grmr == null and grammar_str.len != 0) {
         c.llama_sampler_free(chain);
-        _ = arg.throwStr("failed to parse grammar") catch {};
+        switch (arg.throwStr("failed to parse grammar")) {
+            error.Throw => {},
+        }
         return error.Runtime;
     }
 
@@ -809,12 +817,12 @@ fn isspace(ch: u8) bool {
     return ch == ' ' or (ch >= '\t' and ch <= '\r');
 }
 
-/// Ports `common_sampler_free` (sampling.cpp:440 @b29c606e2): null-safe.
+/// Ports `common_sampler_free` (sampling.cpp:440 @7fe450e19): null-safe.
 pub fn free(gsmpl: ?*Sampler) void {
     if (gsmpl) |s| s.destroy();
 }
 
-/// Ports `common_sampler_types_from_names` (sampling.cpp:829 @b29c606e2):
+/// Ports `common_sampler_types_from_names` (sampling.cpp:829 @7fe450e19):
 /// each name, lower-cased, through the canonical names, their kebab-case and
 /// no-dash forms, and three aliases; an unknown one is logged and skipped.
 ///
@@ -856,7 +864,7 @@ pub fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) ![]Sample
     return samplers.toOwnedSlice(a);
 }
 
-/// Ports `common_sampler_types_from_chars` (sampling.cpp:891 @b29c606e2).
+/// Ports `common_sampler_types_from_chars` (sampling.cpp:891 @7fe450e19).
 ///
 /// Return: the types, the allocator's.
 pub fn typesFromChars(a: std.mem.Allocator, chars: []const u8) ![]SamplerType {

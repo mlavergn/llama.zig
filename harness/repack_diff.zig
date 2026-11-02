@@ -73,6 +73,14 @@ const Kernel = fn (c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_i
 const QuantizeMat = fn ([*]const f32, *anyopaque, i64) callconv(.c) void;
 
 const ours = struct {
+    extern fn ggml_gemv_q1_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ggml_gemv_q1_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ggml_gemm_q1_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ggml_gemm_q1_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ggml_gemv_q1_0_4x4_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ggml_gemv_q1_0_4x8_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ggml_gemm_q1_0_4x4_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ggml_gemm_q1_0_4x8_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
     extern fn ggml_gemv_q4_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
     extern fn ggml_gemv_q4_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
     extern fn ggml_gemv_q4_0_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
@@ -114,6 +122,14 @@ const ours = struct {
 };
 
 const reference = struct {
+    extern fn ref_ggml_gemv_q1_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ref_ggml_gemv_q1_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ref_ggml_gemm_q1_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ref_ggml_gemm_q1_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ref_ggml_gemv_q1_0_4x4_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ref_ggml_gemv_q1_0_4x8_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ref_ggml_gemm_q1_0_4x4_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+    extern fn ref_ggml_gemm_q1_0_4x8_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
     extern fn ref_ggml_gemv_q4_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
     extern fn ref_ggml_gemv_q4_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
     extern fn ref_ggml_gemv_q4_0_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
@@ -168,7 +184,7 @@ const QK4_NL = 32;
 const QK_MXFP4 = 32;
 const half = u16;
 
-/// Mirrors `block<K, N>` (ggml-cpu/repack.h:23 @b29c606e2).
+/// Mirrors `block<K, N>` (ggml-cpu/repack.h:26 @7fe450e19), for `K` 4 and 8.
 fn Block(comptime K: comptime_int, comptime N: comptime_int) type {
     return extern struct {
         d: [N]half,
@@ -180,34 +196,40 @@ const Q4_0x4 = Block(4, 4);
 const Q4_0x8 = Block(4, 8);
 const Q8_0x4 = Block(8, 4);
 
-/// Mirrors `block_q4_Kx8` (ggml-cpu/repack.h:43 @b29c606e2).
+/// Mirrors `block<1, 4>`, `block_q1_0x4` (ggml-cpu/repack.h:26 @7fe450e19):
+/// `QK_0<1>()` is `QK1_0`, 128, where every other `K` has 32.
+const QK1_0 = 128;
+const Q1_0x4 = extern struct { d: [4]half, qs: [(QK1_0 * 4 * 1) / 8]i8 };
+
+/// Mirrors `block_q4_Kx8` (ggml-cpu/repack.h:48 @7fe450e19).
 const Q4_Kx8 = extern struct { d: [8]half, dmin: [8]half, scales: [96]u8, qs: [1024]u8 };
-/// Mirrors `block_q2_Kx8` (ggml-cpu/repack.h:59 @b29c606e2).
+/// Mirrors `block_q2_Kx8` (ggml-cpu/repack.h:64 @7fe450e19).
 const Q2_Kx8 = extern struct { d: [8]half, dmin: [8]half, scales: [128]u8, qs: [512]u8 };
-/// Mirrors `block_q5_Kx8` (ggml-cpu/repack.h:75 @b29c606e2).
+/// Mirrors `block_q5_Kx8` (ggml-cpu/repack.h:80 @7fe450e19).
 const Q5_Kx8 = extern struct { d: [8]half, dmin: [8]half, scales: [96]u8, qh: [QK_K * 8 / 8]u8, qs: [QK_K * 8 / 2]u8 };
-/// Mirrors `block_q6_Kx8` (ggml-cpu/repack.h:86 @b29c606e2).
+/// Mirrors `block_q6_Kx8` (ggml-cpu/repack.h:91 @7fe450e19).
 const Q6_Kx8 = extern struct { d: [8]half, scales: [QK_K / 16 * 8]i8, ql: [QK_K / 2 * 8]u8, qh: [QK_K / 4 * 8]u8 };
-/// Mirrors `block_q8_Kx4` (ggml-cpu/repack.h:96 @b29c606e2).
+/// Mirrors `block_q8_Kx4` (ggml-cpu/repack.h:101 @7fe450e19).
 const Q8Kx4 = extern struct { d: [4]f32, qs: [QK_K * 4]i8, bsums: [QK_K / 4]i16 };
-/// Mirrors `block_iq4_nlx4` (ggml-cpu/repack.h:104 @b29c606e2).
+/// Mirrors `block_iq4_nlx4` (ggml-cpu/repack.h:109 @7fe450e19).
 const IQ4_NLx4 = extern struct { d: [4]half, qs: [QK4_NL * 2]u8 };
-/// Mirrors `block_iq4_nlx8` (ggml-cpu/repack.h:111 @b29c606e2).
+/// Mirrors `block_iq4_nlx8` (ggml-cpu/repack.h:116 @7fe450e19).
 const IQ4_NLx8 = extern struct { d: [8]half, qs: [QK4_NL * 4]u8 };
-/// Mirrors `block_mxfp4x4` (ggml-cpu/repack.h:124 @b29c606e2).
+/// Mirrors `block_mxfp4x4` (ggml-cpu/repack.h:129 @7fe450e19).
 const MXFP4x4 = extern struct { e: [4]u8, qs: [QK_MXFP4 * 2]u8 };
-/// Mirrors `block_mxfp4x8` (ggml-cpu/repack.h:130 @b29c606e2).
+/// Mirrors `block_mxfp4x8` (ggml-cpu/repack.h:135 @7fe450e19).
 const MXFP4x8 = extern struct { e: [8]u8, qs: [QK_MXFP4 * 4]u8 };
 
-/// Mirrors `block_q8_0` (ggml-common.h:239 @b29c606e2): the Q8_0
+/// Mirrors `block_q8_0` (ggml-common.h:239 @7fe450e19): the Q8_0
 /// activation row a gemv reads.
 const Q8_0 = extern struct { d: half, qs: [QK8_0]i8 };
-/// Mirrors `block_q8_K` (ggml-common.h:371 @b29c606e2): the Q8_K one.
+/// Mirrors `block_q8_K` (ggml-common.h:371 @7fe450e19): the Q8_K one.
 const Q8K = extern struct { d: f32, qs: [QK_K]i8, bsums: [QK_K / 16]i16 };
 
 comptime {
     // The C's own static_asserts, which are what catch a mistyped bound.
     const h = @sizeOf(half);
+    std.debug.assert(@sizeOf(Q1_0x4) == 4 * h + QK1_0 / 2);
     std.debug.assert(@sizeOf(Q4_0x4) == 4 * h + QK8_0 * 2);
     std.debug.assert(@sizeOf(Q4_0x8) == 8 * h + QK8_0 * 4);
     std.debug.assert(@sizeOf(Q8_0x4) == 4 * h + QK8_0 * 4);
@@ -313,6 +335,9 @@ fn runCase(
 ) !void {
     const nb: i64 = 2;
     const n: c_int = @intCast(qk * nb);
+    // Activation blocks per weight block: a `q1_0` block spans four `q8_0`
+    // ones (`QK1_0 / QK8_0`); every other pair here is one to one.
+    const ya: i64 = if (Y == Q8_0) @divExact(qk, QK8_0) else 1;
 
     // Sixteen columns, then twenty-four. The x86 AVX-512 gemms take sixteen
     // columns a pass and hand what is left to their AVX2 loop, which then
@@ -325,7 +350,7 @@ fn runCase(
 
         // gemv: a single activation row.
         {
-            const y = try alloc.alloc(Y, @intCast(nb));
+            const y = try alloc.alloc(Y, @intCast(nb * ya));
             defer alloc.free(y);
             fillBlocks(Y, y);
             const a = try alloc.alloc(f32, @intCast(nc));
@@ -345,7 +370,7 @@ fn runCase(
         // twenty reach both. The intrinsic gemms loop over rows in fours and
         // see the extra rows as more of the same.
         inline for (.{ 4, 20 }) |nr| {
-            const y = try alloc.alloc(Y4, @intCast(nb * nr / 4));
+            const y = try alloc.alloc(Y4, @intCast(nb * ya * nr / 4));
             defer alloc.free(y);
             fillBlocks(Y4, y);
             const a = try alloc.alloc(f32, @intCast(nr * nc));
@@ -460,6 +485,14 @@ pub fn main() !void {
     });
     std.debug.print("=== repack kernels: ported vs reference, on bits ===\n", .{});
 
+    // New at v0.5.0. On ARM the bare names are NEON bodies behind dotprod
+    // (the 4x8 gemm behind i8mm) and the generics run only at `generic`,
+    // so the generics are also compared by name: at the baseline nothing
+    // else reaches three of them. On x86 the bare names are the generics.
+    try runCase("q1_0_4x4_q8_0", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x4_q8_0, reference.ref_ggml_gemv_q1_0_4x4_q8_0, ours.ggml_gemm_q1_0_4x4_q8_0, reference.ref_ggml_gemm_q1_0_4x4_q8_0, alloc);
+    try runCase("q1_0_4x8_q8_0", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x8_q8_0, reference.ref_ggml_gemv_q1_0_4x8_q8_0, ours.ggml_gemm_q1_0_4x8_q8_0, reference.ref_ggml_gemm_q1_0_4x8_q8_0, alloc);
+    try runCase("q1_0_4x4_q8_0_generic", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x4_q8_0_generic, reference.ref_ggml_gemv_q1_0_4x4_q8_0_generic, ours.ggml_gemm_q1_0_4x4_q8_0_generic, reference.ref_ggml_gemm_q1_0_4x4_q8_0_generic, alloc);
+    try runCase("q1_0_4x8_q8_0_generic", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x8_q8_0_generic, reference.ref_ggml_gemv_q1_0_4x8_q8_0_generic, ours.ggml_gemm_q1_0_4x8_q8_0_generic, reference.ref_ggml_gemm_q1_0_4x8_q8_0_generic, alloc);
     try runCase("q4_0_4x4_q8_0", Q4_0x4, Q8_0, Q8_0x4, 32, 4, ours.ggml_gemv_q4_0_4x4_q8_0, reference.ref_ggml_gemv_q4_0_4x4_q8_0, ours.ggml_gemm_q4_0_4x4_q8_0, reference.ref_ggml_gemm_q4_0_4x4_q8_0, alloc);
     try runCase("q4_0_4x8_q8_0", Q4_0x4, Q8_0, Q8_0x4, 32, 4, ours.ggml_gemv_q4_0_4x8_q8_0, reference.ref_ggml_gemv_q4_0_4x8_q8_0, ours.ggml_gemm_q4_0_4x8_q8_0, reference.ref_ggml_gemm_q4_0_4x8_q8_0, alloc);
     try runCase("q4_0_8x8_q8_0", Q4_0x8, Q8_0, Q8_0x4, 32, 8, ours.ggml_gemv_q4_0_8x8_q8_0, reference.ref_ggml_gemv_q4_0_8x8_q8_0, ours.ggml_gemm_q4_0_8x8_q8_0, reference.ref_ggml_gemm_q4_0_8x8_q8_0, alloc);
@@ -497,6 +530,7 @@ pub fn main() !void {
         .{ .name = "iq4_nl", .ty = c.GGML_TYPE_IQ4_NL },
         .{ .name = "mxfp4", .ty = c.GGML_TYPE_MXFP4 },
         .{ .name = "q2_K", .ty = c.GGML_TYPE_Q2_K },
+        .{ .name = "q1_0", .ty = c.GGML_TYPE_Q1_0 },
     }) |case| try runConverter(case, alloc);
 
     std.debug.print("\n", .{});

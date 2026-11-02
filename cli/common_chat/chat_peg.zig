@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/chat-peg-parser.h` and
-//! `llama.cpp/common/chat-peg-parser.cpp` (llama.cpp v0.4.1, `b29c606e2`):
+//! `llama.cpp/common/chat-peg-parser.cpp` (llama.cpp v0.5.0, `7fe450e19`):
 //! `common_chat_peg_builder`, `common_chat_peg_mapper` and its gemma4 and
 //! minimax-m3 variants, `tag_based_peg_mapper`, `tagged_peg_parser`, and the
 //! string helpers they share. Each declaration names what it ports and the
@@ -78,7 +78,7 @@ fn isCAlnum(c: u8) bool {
     return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z');
 }
 
-/// Ports `trim_trailing_space` (chat-peg-parser.cpp:12 @b29c606e2): at most
+/// Ports `trim_trailing_space` (chat-peg-parser.cpp:12 @7fe450e19): at most
 /// `max` characters, -1 for all.
 fn trimTrailingSpace(sv_in: []const u8, max: c_int) []const u8 {
     var sv = sv_in;
@@ -91,7 +91,7 @@ fn trimTrailingSpace(sv_in: []const u8, max: c_int) []const u8 {
     return sv;
 }
 
-/// Ports `trim_leading_space` (chat-peg-parser.cpp:24 @b29c606e2).
+/// Ports `trim_leading_space` (chat-peg-parser.cpp:24 @7fe450e19).
 fn trimLeadingSpace(sv_in: []const u8, max: c_int) []const u8 {
     var sv = sv_in;
     var count: c_int = 0;
@@ -103,13 +103,13 @@ fn trimLeadingSpace(sv_in: []const u8, max: c_int) []const u8 {
     return sv;
 }
 
-/// Ports `trim` (chat-peg-parser.cpp:36 @b29c606e2): one leading space,
+/// Ports `trim` (chat-peg-parser.cpp:36 @7fe450e19): one leading space,
 /// every trailing one.
 fn trim(sv: []const u8) []const u8 {
     return trimTrailingSpace(trimLeadingSpace(sv, 1), -1);
 }
 
-/// Ports `json_brace_depth` (chat-peg-parser.cpp:42 @b29c606e2): unclosed
+/// Ports `json_brace_depth` (chat-peg-parser.cpp:42 @7fe450e19): unclosed
 /// `{` outside strings.
 fn jsonBraceDepth(s: []const u8) c_int {
     var depth: c_int = 0;
@@ -148,7 +148,7 @@ fn dumpString(gpa: Allocator, s: []const u8) Error![]u8 {
     return json.dump(gpa, &v, -1) catch |e| fromJson(e);
 }
 
-/// Ports `escape_json_string_inner` (chat-peg-parser.cpp:71 @b29c606e2):
+/// Ports `escape_json_string_inner` (chat-peg-parser.cpp:71 @7fe450e19):
 /// `s` JSON-escaped, without the quotes.
 ///
 /// Return: owned by the caller.
@@ -161,7 +161,7 @@ fn escapeJsonStringInner(gpa: Allocator, s: []const u8) Error![]u8 {
     return escaped;
 }
 
-/// Ports `normalize_quotes_to_json` (chat-peg-parser.cpp:84 @b29c606e2):
+/// Ports `normalize_quotes_to_json` (chat-peg-parser.cpp:84 @7fe450e19):
 /// Python's single-quoted strings as JSON's double-quoted ones, and
 /// `True`, `False` and `None` -- or a prefix of one, as a stream ends --
 /// as JSON's literals.
@@ -268,10 +268,19 @@ fn appendStr(gpa: Allocator, field: *[]const u8, s: []const u8) Error!void {
     field.* = out;
 }
 
+/// `field += node.sanitized_text()`: the node's text with every invalid
+/// UTF-8 run replaced by U+FFFD.
+fn appendSanitized(gpa: Allocator, field: *[]const u8, node: *const AstNode) Error!void {
+    if (node.invalid_utf8.len == 0) return appendStr(gpa, field, node.text);
+    const text = try node.sanitizedText(gpa);
+    defer gpa.free(text);
+    return appendStr(gpa, field, text);
+}
+
 // -----------------------------------------------------------------------------
 // The tagged parser
 
-/// Ports `tag_based_peg_mapper` (chat-peg-parser.h:189 @b29c606e2): every
+/// Ports `tag_based_peg_mapper` (chat-peg-parser.h:189 @7fe450e19): every
 /// tag's last text, keyed as a `std::map` orders them.
 pub const TagMap = struct {
     pub const Entry = struct { key: []const u8, value: []const u8 };
@@ -305,7 +314,7 @@ pub const TagMap = struct {
         try self.entries.insert(self.gpa, at, .{ .key = k, .value = v });
     }
 
-    /// Ports `from_ast` (chat-peg-parser.cpp:188 @b29c606e2), a member of
+    /// Ports `from_ast` (chat-peg-parser.cpp:188 @7fe450e19), a member of
     /// `tag_based_peg_mapper`.
     pub fn fromAst(self: *TagMap, arena: *const AstArena, result: *const ParseResult) Error!void {
         try arena.visitResult(result, self, struct {
@@ -316,19 +325,20 @@ pub const TagMap = struct {
     }
 };
 
-/// Ports `tagged_parse_result` (chat-peg-parser.h:196 @b29c606e2).
+/// Ports `tagged_parse_result` (chat-peg-parser.h:196 @7fe450e19).
 pub const TaggedParseResult = struct {
-    /// its node list owned here; the AST it named is gone
+    /// its node list and invalid runs owned here; the AST it named is gone
     result: ParseResult,
     tags: TagMap,
 
     pub fn deinit(self: *TaggedParseResult) void {
         self.tags.gpa.free(self.result.nodes);
+        self.tags.gpa.free(self.result.invalid_utf8);
         self.tags.deinit();
     }
 };
 
-/// Ports `tagged_peg_parser` (chat-peg-parser.h:201 @b29c606e2).
+/// Ports `tagged_peg_parser` (chat-peg-parser.h:201 @7fe450e19).
 pub const TaggedPegParser = struct {
     arena: peg.Arena,
     flags: u32 = peg.Flags.none,
@@ -337,13 +347,13 @@ pub const TaggedPegParser = struct {
         self.arena.deinit();
     }
 
-    /// Ports `withDebug` (chat-peg-parser.h:205 @b29c606e2).
+    /// Ports `withDebug` (chat-peg-parser.h:205 @7fe450e19).
     pub fn withDebug(self: *TaggedPegParser) *TaggedPegParser {
         self.flags |= peg.Flags.debug;
         return self;
     }
 
-    /// Ports `withoutDebug` (chat-peg-parser.h:210 @b29c606e2).
+    /// Ports `withoutDebug` (chat-peg-parser.h:210 @7fe450e19).
     pub fn withoutDebug(self: *TaggedPegParser) *TaggedPegParser {
         self.flags &= ~peg.Flags.debug;
         return self;
@@ -355,10 +365,12 @@ pub const TaggedPegParser = struct {
         try tags.fromAst(&ctx.ast, &result);
         var r = result;
         r.nodes = try gpa.dupe(AstId, result.nodes);
+        errdefer gpa.free(r.nodes);
+        r.invalid_utf8 = try gpa.dupe(peg.InvalidUtf8, result.invalid_utf8);
         return .{ .result = r, .tags = tags };
     }
 
-    /// Ports `parse_and_extract` (chat-peg-parser.cpp:196 @b29c606e2).
+    /// Ports `parse_and_extract` (chat-peg-parser.cpp:196 @7fe450e19).
     ///
     /// Return: owned by the caller; free with `deinit`.
     pub fn parseAndExtract(self: *const TaggedPegParser, gpa: Allocator, input: []const u8, extra_flags: u32) Error!TaggedParseResult {
@@ -368,7 +380,7 @@ pub const TaggedPegParser = struct {
         return extract(gpa, &ctx, result);
     }
 
-    /// Ports `parse_anywhere_and_extract` (chat-peg-parser.cpp:206 @b29c606e2):
+    /// Ports `parse_anywhere_and_extract` (chat-peg-parser.cpp:206 @7fe450e19):
     /// the first position the parser succeeds at, or the last position's
     /// result.
     ///
@@ -385,7 +397,7 @@ pub const TaggedPegParser = struct {
     }
 };
 
-/// Ports `build_tagged_peg_parser` (chat-peg-parser.cpp:222 @b29c606e2).
+/// Ports `build_tagged_peg_parser` (chat-peg-parser.cpp:222 @7fe450e19).
 pub fn buildTaggedPegParser(gpa: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *peg.Builder) Error!ParserId) Error!TaggedPegParser {
     return .{ .arena = try peg.buildPegParser(gpa, ctx, f) };
 }
@@ -393,17 +405,17 @@ pub fn buildTaggedPegParser(gpa: Allocator, ctx: anytype, comptime f: fn (@TypeO
 // -----------------------------------------------------------------------------
 // The mappers
 
-/// Ports `common_chat_peg_mapper` (chat-peg-parser.h:10 @b29c606e2) and its
-/// two subclasses, `common_chat_peg_gemma4_mapper` (chat-peg-parser.h:35 @b29c606e2)
-/// and `common_chat_peg_minimax_m3_mapper` (chat-peg-parser.h:43 @b29c606e2).
+/// Ports `common_chat_peg_mapper` (chat-peg-parser.h:10 @7fe450e19) and its
+/// two subclasses, `common_chat_peg_gemma4_mapper` (chat-peg-parser.h:35 @7fe450e19)
+/// and `common_chat_peg_minimax_m3_mapper` (chat-peg-parser.h:43 @7fe450e19).
 pub const Mapper = struct {
     pub const Kind = enum { base, gemma4, minimax_m3 };
 
-    /// Ports `TOOL_ARG_OBJECT` (chat-peg-parser.h:45 @b29c606e2).
+    /// Ports `TOOL_ARG_OBJECT` (chat-peg-parser.h:45 @7fe450e19).
     pub const TOOL_ARG_OBJECT = "tool-arg-object";
-    /// Ports `TOOL_ARG_ARRAY` (chat-peg-parser.h:46 @b29c606e2).
+    /// Ports `TOOL_ARG_ARRAY` (chat-peg-parser.h:46 @7fe450e19).
     pub const TOOL_ARG_ARRAY = "tool-arg-array";
-    /// Ports `TOOL_ARG_ITEM` (chat-peg-parser.h:47 @b29c606e2).
+    /// Ports `TOOL_ARG_ITEM` (chat-peg-parser.h:47 @7fe450e19).
     pub const TOOL_ARG_ITEM = "tool-arg-item";
 
     /// Where `current_tool` points.
@@ -459,7 +471,7 @@ pub const Mapper = struct {
         }
     }
 
-    /// Ports `args_target` (chat-peg-parser.cpp:276 @b29c606e2): the
+    /// Ports `args_target` (chat-peg-parser.cpp:276 @7fe450e19): the
     /// arguments once the tool's name is known, the buffer before.
     fn argsTarget(self: *Mapper) *[]const u8 {
         if (self.currentTool()) |t| {
@@ -468,14 +480,14 @@ pub const Mapper = struct {
         return &self.args_buffer;
     }
 
-    /// Ports `normalize_container_value` (chat-peg-parser.cpp:280 @b29c606e2).
+    /// Ports `normalize_container_value` (chat-peg-parser.cpp:280 @7fe450e19).
     fn normalizeContainerValue(self: *Mapper, input: []const u8) Error![]u8 {
         return normalizeQuotesToJson(self.gpa, input);
     }
 
-    /// Ports `from_ast` (chat-peg-parser.cpp:284 @b29c606e2), and the two
-    /// overrides, `common_chat_peg_gemma4_mapper`'s `from_ast` (chat-peg-parser.cpp:956 @b29c606e2)
-    /// and `common_chat_peg_minimax_m3_mapper`'s `from_ast` (chat-peg-parser.cpp:1198 @b29c606e2).
+    /// Ports `from_ast` (chat-peg-parser.cpp:284 @7fe450e19), and the two
+    /// overrides, `common_chat_peg_gemma4_mapper`'s `from_ast` (chat-peg-parser.cpp:956 @7fe450e19)
+    /// and `common_chat_peg_minimax_m3_mapper`'s `from_ast` (chat-peg-parser.cpp:1198 @7fe450e19).
     pub fn fromAst(self: *Mapper, arena: *const AstArena, parse_result: *const ParseResult) Error!void {
         switch (self.kind) {
             .gemma4 => for (parse_result.nodes) |n| try self.gemma4Visit(arena, n),
@@ -505,7 +517,7 @@ pub const Mapper = struct {
         }
     }
 
-    /// Ports `map` (chat-peg-parser.cpp:315 @b29c606e2), a member of
+    /// Ports `map` (chat-peg-parser.cpp:315 @7fe450e19), a member of
     /// `common_chat_peg_mapper`: one node's effect on the message.
     pub fn map(self: *Mapper, node: *const AstNode) Error!void {
         const gpa = self.gpa;
@@ -513,8 +525,8 @@ pub const Mapper = struct {
         const eq = std.mem.eql;
         const tag = node.tag;
 
-        if (eq(u8, tag, T.REASONING)) try appendStr(gpa, &self.result.reasoning_content, node.text);
-        if (eq(u8, tag, T.CONTENT)) try appendStr(gpa, &self.result.content, node.text);
+        if (eq(u8, tag, T.REASONING)) try appendSanitized(gpa, &self.result.reasoning_content, node);
+        if (eq(u8, tag, T.CONTENT)) try appendSanitized(gpa, &self.result.content, node);
 
         const is_tool_open = eq(u8, tag, T.TOOL_OPEN);
         const is_tool_close = eq(u8, tag, T.TOOL_CLOSE);
@@ -632,7 +644,7 @@ pub const Mapper = struct {
     // -------------------------------------------------------------------------
     // gemma4
 
-    /// Ports `gemma4_to_json` (chat-peg-parser.cpp:962 @b29c606e2): a value
+    /// Ports `gemma4_to_json` (chat-peg-parser.cpp:962 @7fe450e19): a value
     /// of Gemma 4's tool-call syntax as JSON, left open while partial.
     ///
     /// Return: owned by the caller.
@@ -697,12 +709,12 @@ pub const Mapper = struct {
         return gpa.dupe(u8, "");
     }
 
-    /// Ports `common_chat_peg_gemma4_mapper`'s `visit` (chat-peg-parser.cpp:1057 @b29c606e2).
+    /// Ports `common_chat_peg_gemma4_mapper`'s `visit` (chat-peg-parser.cpp:1057 @7fe450e19).
     fn gemma4Visit(self: *Mapper, arena: *const AstArena, id: AstId) Error!void {
         const gpa = self.gpa;
         const node = try arena.get(id);
-        if (std.mem.eql(u8, node.tag, "reasoning")) return appendStr(gpa, &self.result.reasoning_content, node.text);
-        if (std.mem.eql(u8, node.tag, "content")) return appendStr(gpa, &self.result.content, node.text);
+        if (std.mem.eql(u8, node.tag, "reasoning")) return appendSanitized(gpa, &self.result.reasoning_content, node);
+        if (std.mem.eql(u8, node.tag, "content")) return appendSanitized(gpa, &self.result.content, node);
         if (std.mem.eql(u8, node.tag, "tool")) {
             const name_id = try arena.findByTag(node, "tool-name", 3);
             const args_id = try arena.findByTag(node, "tool-args", 3);
@@ -724,7 +736,7 @@ pub const Mapper = struct {
     // -------------------------------------------------------------------------
     // minimax-m3
 
-    /// Ports `minimax_m3_collect` (chat-peg-parser.cpp:1096 @b29c606e2): the
+    /// Ports `minimax_m3_collect` (chat-peg-parser.cpp:1096 @7fe450e19): the
     /// nearest descendants tagged `tag`.
     fn minimaxCollect(gpa: Allocator, arena: *const AstArena, node: *const AstNode, tag: []const u8, out: *std.ArrayList(AstId)) Error!void {
         for (node.children) |child_id| {
@@ -737,7 +749,7 @@ pub const Mapper = struct {
         }
     }
 
-    /// Ports `minimax_m3_value_of` (chat-peg-parser.cpp:1110 @b29c606e2).
+    /// Ports `minimax_m3_value_of` (chat-peg-parser.cpp:1110 @7fe450e19).
     fn minimaxValueOf(arena: *const AstArena, node: *const AstNode) Error!AstId {
         for (node.children) |child_id| {
             const tag = (try arena.get(child_id)).tag;
@@ -748,7 +760,7 @@ pub const Mapper = struct {
         return invalid_ast_id;
     }
 
-    /// Ports `minimax_m3_member_to_json` (chat-peg-parser.cpp:1125 @b29c606e2).
+    /// Ports `minimax_m3_member_to_json` (chat-peg-parser.cpp:1125 @7fe450e19).
     fn minimaxMemberToJson(self: *Mapper, arena: *const AstArena, node: *const AstNode) Error![]u8 {
         const gpa = self.gpa;
         const name_id = try arena.findByTag(node, ChatBuilder.TOOL_ARG_NAME, 3);
@@ -760,7 +772,7 @@ pub const Mapper = struct {
         return std.mem.concat(gpa, u8, &.{ name, ":", value });
     }
 
-    /// Ports `minimax_m3_container_to_json` (chat-peg-parser.cpp:1135 @b29c606e2).
+    /// Ports `minimax_m3_container_to_json` (chat-peg-parser.cpp:1135 @7fe450e19).
     fn minimaxContainerToJson(self: *Mapper, arena: *const AstArena, node: *const AstNode, is_object: bool, closed: bool) Error![]u8 {
         const gpa = self.gpa;
         const tag = if (is_object) ChatBuilder.TOOL_ARG else TOOL_ARG_ITEM;
@@ -788,7 +800,7 @@ pub const Mapper = struct {
         return out.toOwnedSlice(gpa);
     }
 
-    /// Ports `minimax_m3_value_to_json` (chat-peg-parser.cpp:1175 @b29c606e2).
+    /// Ports `minimax_m3_value_to_json` (chat-peg-parser.cpp:1175 @7fe450e19).
     fn minimaxValueToJson(self: *Mapper, arena: *const AstArena, id: AstId, closed: bool) Error![]u8 {
         const gpa = self.gpa;
         if (id == invalid_ast_id) return gpa.dupe(u8, "");
@@ -803,12 +815,12 @@ pub const Mapper = struct {
         return gpa.dupe(u8, node.text);
     }
 
-    /// Ports `common_chat_peg_minimax_m3_mapper`'s `visit` (chat-peg-parser.cpp:1205 @b29c606e2).
+    /// Ports `common_chat_peg_minimax_m3_mapper`'s `visit` (chat-peg-parser.cpp:1205 @7fe450e19).
     fn minimaxVisit(self: *Mapper, arena: *const AstArena, id: AstId) Error!void {
         const gpa = self.gpa;
         const node = try arena.get(id);
-        if (std.mem.eql(u8, node.tag, ChatBuilder.REASONING)) return appendStr(gpa, &self.result.reasoning_content, node.text);
-        if (std.mem.eql(u8, node.tag, ChatBuilder.CONTENT)) return appendStr(gpa, &self.result.content, node.text);
+        if (std.mem.eql(u8, node.tag, ChatBuilder.REASONING)) return appendSanitized(gpa, &self.result.reasoning_content, node);
+        if (std.mem.eql(u8, node.tag, ChatBuilder.CONTENT)) return appendSanitized(gpa, &self.result.content, node);
         if (std.mem.eql(u8, node.tag, ChatBuilder.TOOL)) {
             const name_id = try arena.findByTag(node, ChatBuilder.TOOL_NAME, 3);
             if (name_id != invalid_ast_id) {
@@ -826,20 +838,20 @@ pub const Mapper = struct {
 // -----------------------------------------------------------------------------
 // The builder
 
-/// Ports `COMMON_CHAT_MAX_PERMUTE` (chat-peg-parser.h:58 @b29c606e2).
+/// Ports `COMMON_CHAT_MAX_PERMUTE` (chat-peg-parser.h:58 @7fe450e19).
 pub const max_permute: usize = 6;
 
 /// One entry of `standard_constructed_tools`' `std::map` of markers.
 pub const Marker = struct { key: []const u8, value: []const u8 };
 
-/// Ports `parse_key_spec` (chat-peg-parser.cpp:619 @b29c606e2): `a.b` as
+/// Ports `parse_key_spec` (chat-peg-parser.cpp:619 @7fe450e19): `a.b` as
 /// `{a, b}`, a key without a dot as `{"", key}`.
 fn parseKeySpec(key: []const u8) struct { []const u8, []const u8 } {
     const dot = std.mem.indexOfScalar(u8, key, '.') orelse return .{ "", key };
     return .{ key[0..dot], key[dot + 1 ..] };
 }
 
-/// Ports `common_chat_peg_builder` (chat-peg-parser.h:60 @b29c606e2).
+/// Ports `common_chat_peg_builder` (chat-peg-parser.h:60 @7fe450e19).
 pub const ChatBuilder = struct {
     b: peg.Builder,
 
@@ -883,87 +895,87 @@ pub const ChatBuilder = struct {
         return self.b.literal(try self.cat(&.{ "\"", s, "\"" }));
     }
 
-    /// Ports `reasoning_block` (chat-peg-parser.h:82 @b29c606e2).
+    /// Ports `reasoning_block` (chat-peg-parser.h:82 @7fe450e19).
     pub fn reasoningBlock(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.tag(REASONING_BLOCK, p);
     }
 
-    /// Ports `reasoning` (chat-peg-parser.h:84 @b29c606e2).
+    /// Ports `reasoning` (chat-peg-parser.h:84 @7fe450e19).
     pub fn reasoning(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.tag(REASONING, p);
     }
 
-    /// Ports `content` (chat-peg-parser.h:86 @b29c606e2).
+    /// Ports `content` (chat-peg-parser.h:86 @7fe450e19).
     pub fn content(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.tag(CONTENT, p);
     }
 
-    /// Ports `tool` (chat-peg-parser.h:93 @b29c606e2).
+    /// Ports `tool` (chat-peg-parser.h:93 @7fe450e19).
     pub fn tool(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.tag(TOOL, p);
     }
 
-    /// Ports `tool_open` (chat-peg-parser.h:94 @b29c606e2).
+    /// Ports `tool_open` (chat-peg-parser.h:94 @7fe450e19).
     pub fn toolOpen(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.atomic(try self.b.tag(TOOL_OPEN, p));
     }
 
-    /// Ports `tool_close` (chat-peg-parser.h:95 @b29c606e2).
+    /// Ports `tool_close` (chat-peg-parser.h:95 @7fe450e19).
     pub fn toolClose(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.atomic(try self.b.tag(TOOL_CLOSE, p));
     }
 
-    /// Ports `tool_id` (chat-peg-parser.h:96 @b29c606e2).
+    /// Ports `tool_id` (chat-peg-parser.h:96 @7fe450e19).
     pub fn toolId(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.atomic(try self.b.tag(TOOL_ID, p));
     }
 
-    /// Ports `tool_name` (chat-peg-parser.h:97 @b29c606e2).
+    /// Ports `tool_name` (chat-peg-parser.h:97 @7fe450e19).
     pub fn toolName(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.atomic(try self.b.tag(TOOL_NAME, p));
     }
 
-    /// Ports `tool_args` (chat-peg-parser.h:98 @b29c606e2).
+    /// Ports `tool_args` (chat-peg-parser.h:98 @7fe450e19).
     pub fn toolArgs(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.tag(TOOL_ARGS, p);
     }
 
-    /// Ports `tool_arg` (chat-peg-parser.h:99 @b29c606e2).
+    /// Ports `tool_arg` (chat-peg-parser.h:99 @7fe450e19).
     pub fn toolArg(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.tag(TOOL_ARG, p);
     }
 
-    /// Ports `tool_arg_open` (chat-peg-parser.h:100 @b29c606e2).
+    /// Ports `tool_arg_open` (chat-peg-parser.h:100 @7fe450e19).
     pub fn toolArgOpen(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.atomic(try self.b.tag(TOOL_ARG_OPEN, p));
     }
 
-    /// Ports `tool_arg_close` (chat-peg-parser.h:101 @b29c606e2).
+    /// Ports `tool_arg_close` (chat-peg-parser.h:101 @7fe450e19).
     pub fn toolArgClose(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.atomic(try self.b.tag(TOOL_ARG_CLOSE, p));
     }
 
-    /// Ports `tool_arg_name` (chat-peg-parser.h:102 @b29c606e2).
+    /// Ports `tool_arg_name` (chat-peg-parser.h:102 @7fe450e19).
     pub fn toolArgName(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.atomic(try self.b.tag(TOOL_ARG_NAME, p));
     }
 
-    /// Ports `tool_arg_value` (chat-peg-parser.h:103 @b29c606e2).
+    /// Ports `tool_arg_value` (chat-peg-parser.h:103 @7fe450e19).
     pub fn toolArgValue(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.tag(TOOL_ARG_VALUE, p);
     }
 
-    /// Ports `tool_arg_string_value` (chat-peg-parser.h:106 @b29c606e2).
+    /// Ports `tool_arg_string_value` (chat-peg-parser.h:106 @7fe450e19).
     pub fn toolArgStringValue(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.tag(TOOL_ARG_STRING_VALUE, p);
     }
 
-    /// Ports `tool_arg_json_value` (chat-peg-parser.h:107 @b29c606e2).
+    /// Ports `tool_arg_json_value` (chat-peg-parser.h:107 @7fe450e19).
     pub fn toolArgJsonValue(self: *ChatBuilder, p: ParserId) Error!ParserId {
         return self.b.tag(TOOL_ARG_VALUE, p);
     }
 
-    /// Ports `tag_with_safe_content` (chat-peg-parser.cpp:229 @b29c606e2):
+    /// Ports `tag_with_safe_content` (chat-peg-parser.cpp:229 @7fe450e19):
     /// `p` wherever it matches, content everywhere else.
     pub fn tagWithSafeContent(self: *ChatBuilder, tag_name: []const u8, marker: []const u8, p: ParserId) Error!ParserId {
         const b = &self.b;
@@ -975,7 +987,7 @@ pub const ChatBuilder = struct {
         return b.zeroOrMore(try b.choice(&.{ p, content_chunk }));
     }
 
-    /// Ports `permute` (chat-peg-parser.cpp:239 @b29c606e2): every parser
+    /// Ports `permute` (chat-peg-parser.cpp:239 @7fe450e19): every parser
     /// once, in any order -- one rule per subset still to match, so shared
     /// tails are written once. Past `max_permute` parsers, the given order.
     pub fn permute(self: *ChatBuilder, rule_prefix: []const u8, parsers: []const ParserId) Error!ParserId {
@@ -1011,7 +1023,7 @@ pub const ChatBuilder = struct {
         return st.remainingOf((@as(u32, 1) << @intCast(parsers.len)) - 1);
     }
 
-    /// Ports `prefix` (chat-peg-parser.cpp:869 @b29c606e2): `s` up to the
+    /// Ports `prefix` (chat-peg-parser.cpp:869 @7fe450e19): `s` up to the
     /// first `delimiter`.
     pub fn prefix(self: *ChatBuilder, s: []const u8, delimiter: []const u8) Error!ParserId {
         if (s.len == 0) return self.b.eps();
@@ -1020,7 +1032,7 @@ pub const ChatBuilder = struct {
         return self.b.literal(s[0..at]);
     }
 
-    /// Ports `optspace` (chat-peg-parser.cpp:879 @b29c606e2): `tag` with its
+    /// Ports `optspace` (chat-peg-parser.cpp:879 @7fe450e19): `tag` with its
     /// leading and trailing spaces each optional.
     pub fn optspace(self: *ChatBuilder, tag: []const u8) Error!ParserId {
         const b = &self.b;
@@ -1069,7 +1081,7 @@ pub const ChatBuilder = struct {
         return p;
     }
 
-    /// Ports `standard_constructed_tools` (chat-peg-parser.cpp:458 @b29c606e2):
+    /// Ports `standard_constructed_tools` (chat-peg-parser.cpp:458 @7fe450e19):
     /// XML-like tool calls, `<function=name><param=k>v</param></function>`
     /// by default, each marker replaceable.
     pub fn standardConstructedTools(self: *ChatBuilder, markers: []const Marker, tools: *const Value, parallel_tool_calls: bool, force_tool_calls: bool) Error!ParserId {
@@ -1144,7 +1156,7 @@ pub const ChatBuilder = struct {
         return if (force_tool_calls) section else b.optional(section);
     }
 
-    /// Ports `python_or_json_value` (chat-peg-parser.cpp:529 @b29c606e2):
+    /// Ports `python_or_json_value` (chat-peg-parser.cpp:529 @7fe450e19):
     /// `python_value` whose leaves also take JSON's `true`, `false` and
     /// `null`.
     fn pythonOrJsonValue(self: *ChatBuilder) Error!ParserId {
@@ -1178,7 +1190,7 @@ pub const ChatBuilder = struct {
         }.body, false);
     }
 
-    /// Ports `python_style_tool_calls` (chat-peg-parser.cpp:552 @b29c606e2):
+    /// Ports `python_style_tool_calls` (chat-peg-parser.cpp:552 @7fe450e19):
     /// `[name(arg="v", n=1), ...]`, as LFM2 writes them.
     pub fn pythonStyleToolCalls(self: *ChatBuilder, tools: *const Value, parallel_tool_calls: bool, allow_json_literals: bool) Error!ParserId {
         const b = &self.b;
@@ -1332,7 +1344,7 @@ pub const ChatBuilder = struct {
         return b.atomic(c.acc);
     }
 
-    /// Ports `build_json_tools_function_is_key` (chat-peg-parser.cpp:628 @b29c606e2):
+    /// Ports `build_json_tools_function_is_key` (chat-peg-parser.cpp:628 @7fe450e19):
     /// `{"name": {...}}`.
     fn buildJsonToolsFunctionIsKey(self: *ChatBuilder, tools: *const Value, args_key: []const u8, effective_args_key: []const u8, call_id_key: []const u8, gen_call_id_key: []const u8) Error!ParserId {
         const b = &self.b;
@@ -1393,7 +1405,7 @@ pub const ChatBuilder = struct {
         return tool_choices;
     }
 
-    /// Ports `build_json_tools_nested_keys` (chat-peg-parser.cpp:707 @b29c606e2):
+    /// Ports `build_json_tools_nested_keys` (chat-peg-parser.cpp:707 @7fe450e19):
     /// `{"function": {"name": ..., "arguments": ...}}`, keys in dot
     /// notation.
     fn buildJsonToolsNestedKeys(self: *ChatBuilder, tools: *const Value, effective_name_key: []const u8, effective_args_key: []const u8, call_id_key: []const u8, gen_call_id_key: []const u8) Error!ParserId {
@@ -1456,7 +1468,7 @@ pub const ChatBuilder = struct {
         return order.len;
     }
 
-    /// Ports `build_json_tools_flat_keys` (chat-peg-parser.cpp:779 @b29c606e2):
+    /// Ports `build_json_tools_flat_keys` (chat-peg-parser.cpp:779 @7fe450e19):
     /// `{"name": ..., "arguments": ...}`, the fields in `parameters_order`,
     /// sorted by libc++'s `std::sort`.
     fn buildJsonToolsFlatKeys(self: *ChatBuilder, tools: *const Value, effective_name_key: []const u8, effective_args_key: []const u8, call_id_key: []const u8, gen_call_id_key: []const u8, parameters_order: []const []const u8, accept_openai_wrapper: bool) Error!ParserId {
@@ -1542,7 +1554,7 @@ pub const ChatBuilder = struct {
         accept_openai_wrapper: bool = false,
     };
 
-    /// Ports `standard_json_tools` (chat-peg-parser.cpp:905 @b29c606e2): JSON
+    /// Ports `standard_json_tools` (chat-peg-parser.cpp:905 @7fe450e19): JSON
     /// tool calls between `section_start` and `section_end`, in whichever
     /// of the three layouts the keys describe.
     pub fn standardJsonTools(self: *ChatBuilder, section_start: []const u8, section_end: []const u8, tools: *const Value, parallel_tool_calls: bool, force_tool_calls: bool, o: JsonToolsOptions) Error!ParserId {
@@ -1590,13 +1602,13 @@ pub const ChatBuilder = struct {
         return if (force_tool_calls) section else b.optional(section);
     }
 
-    /// Ports `build` (peg-parser.cpp:1163 @b29c606e2), through the base.
+    /// Ports `build` (peg-parser.cpp:1189 @7fe450e19), through the base.
     pub fn build(self: *ChatBuilder) Error!peg.Arena {
         return self.b.build();
     }
 };
 
-/// Ports `build_chat_peg_parser` (chat-peg-parser.h:182 @b29c606e2).
+/// Ports `build_chat_peg_parser` (chat-peg-parser.h:182 @7fe450e19).
 ///
 /// Return: the arena, owned by the caller.
 pub fn buildChatPegParser(gpa: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *ChatBuilder) Error!ParserId) Error!peg.Arena {

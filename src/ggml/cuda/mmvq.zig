@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmvq.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/mmvq.cuh` at v0.4.1 (`b29c606e2`), the host
+//! `llama.cpp/ggml/src/ggml-cuda/mmvq.cuh` at v0.5.0 (`7fe450e19`), the host
 //! half; the `VDR_*_MMVQ` constants are `vecdotq.cuh`'s. The kernels,
 //! `mul_mat_vec_q` and `mul_mat_vec_q_moe`, stay CUDA.
 //!
@@ -22,10 +22,10 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `MMVQ_MAX_BATCH_SIZE` (mmvq.cuh:3 @b29c606e2).
+/// Ports `MMVQ_MAX_BATCH_SIZE` (mmvq.cuh:3 @7fe450e19).
 pub const max_batch_size = 8;
 
-/// Ports `get_vdr_mmvq` (mmvq.cu:69 @b29c606e2), with the `VDR_*_MMVQ`
+/// Ports `get_vdr_mmvq` (mmvq.cu:69 @7fe450e19), with the `VDR_*_MMVQ`
 /// constants of `vecdotq.cuh`.
 fn getVdrMmvq(comptime ty: c.enum_ggml_type) comptime_int {
     return switch (ty) {
@@ -54,10 +54,10 @@ fn getVdrMmvq(comptime ty: c.enum_ggml_type) comptime_int {
     };
 }
 
-/// Ports `mmvq_parameter_table_id` (mmvq.cu:96 @b29c606e2).
+/// Ports `mmvq_parameter_table_id` (mmvq.cu:96 @7fe450e19).
 const TableId = enum(c_int) { generic = 0, turing, gcn, rdna2, rdna3_0, rdna4, gb10 };
 
-/// Ports the host `get_device_table_id` (mmvq.cu:124 @b29c606e2), NVIDIA arms.
+/// Ports the host `get_device_table_id` (mmvq.cu:124 @7fe450e19), NVIDIA arms.
 fn getDeviceTableId(x: c_int) TableId {
     const h = common.highestCompiledArch(x);
     if (common.cc.isNvidia(x) and h >= common.cc.turing and h < common.cc.ampere) return .turing;
@@ -65,7 +65,7 @@ fn getDeviceTableId(x: c_int) TableId {
     return .generic;
 }
 
-/// Ports `get_mmvq_mmid_max_batch_pascal_older` (mmvq.cu:150 @b29c606e2).
+/// Ports `get_mmvq_mmid_max_batch_pascal_older` (mmvq.cu:150 @7fe450e19).
 fn mmidMaxBatchPascalOlder(ty: c.enum_ggml_type) c_int {
     return switch (ty) {
         c.GGML_TYPE_IQ1_S => 6,
@@ -93,7 +93,7 @@ fn mmidMaxBatchPascalOlder(ty: c.enum_ggml_type) c_int {
     };
 }
 
-/// Ports `get_mmvq_mmid_max_batch_turing_plus` (mmvq.cu:177 @b29c606e2).
+/// Ports `get_mmvq_mmid_max_batch_turing_plus` (mmvq.cu:177 @7fe450e19).
 fn mmidMaxBatchTuringPlus(ty: c.enum_ggml_type) c_int {
     return switch (ty) {
         c.GGML_TYPE_IQ2_S => 7,
@@ -107,7 +107,7 @@ fn mmidMaxBatchTuringPlus(ty: c.enum_ggml_type) c_int {
     };
 }
 
-/// Ports `get_mmvq_mmid_max_batch` (mmvq.cu:285 @b29c606e2), NVIDIA arms.
+/// Ports `get_mmvq_mmid_max_batch` (mmvq.cu:285 @7fe450e19), NVIDIA arms.
 pub fn getMmidMaxBatch(ty: c.enum_ggml_type, x: c_int) c_int {
     // NVIDIA: Volta, Ada Lovelace, and Blackwell always use MMVQ for MUL_MAT_ID.
     if (common.cc.isNvidia(x)) {
@@ -118,7 +118,7 @@ pub fn getMmidMaxBatch(ty: c.enum_ggml_type, x: c_int) c_int {
     return max_batch_size;
 }
 
-/// Ports `ggml_cuda_should_use_mmvq` (mmvq.cu:318 @b29c606e2), NVIDIA arms.
+/// Ports `ggml_cuda_should_use_mmvq` (mmvq.cu:318 @7fe450e19), NVIDIA arms.
 pub fn shouldUseMmvq(ty: c.enum_ggml_type, x: c_int, ne11: i64) bool {
     if (!c.ggml_is_quantized(ty)) return false;
     // k-quants cost more to decode and mvq redoes that per column, so MMQ
@@ -151,10 +151,20 @@ pub fn shouldUseMmvq(ty: c.enum_ggml_type, x: c_int, ne11: i64) bool {
             else => ne11 <= max_batch_size,
         };
     }
+    if (common.cc.isNvidia(x) and x == common.cc.volta) {
+        return switch (ty) {
+            c.GGML_TYPE_Q2_K => ne11 <= 4,
+            c.GGML_TYPE_Q3_K => ne11 <= 6,
+            c.GGML_TYPE_Q4_K => ne11 <= 5,
+            c.GGML_TYPE_Q5_K => ne11 <= 6,
+            c.GGML_TYPE_Q6_K => ne11 <= 7,
+            else => ne11 <= max_batch_size,
+        };
+    }
     return ne11 <= max_batch_size;
 }
 
-/// Ports `calc_nwarps` (mmvq.cu:436 @b29c606e2), the NVIDIA tables; the
+/// Ports `calc_nwarps` (mmvq.cu:452 @7fe450e19), the NVIDIA tables; the
 /// AMD tables are unreachable from `getDeviceTableId` here.
 fn calcNwarps(ty: c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, small_k: bool, halve_iters: bool) c_int {
     switch (table_id) {
@@ -201,7 +211,7 @@ fn calcNwarps(ty: c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, small_k
     }
 }
 
-/// Ports `calc_rows_per_block` (mmvq.cu:563 @b29c606e2).
+/// Ports `calc_rows_per_block` (mmvq.cu:579 @7fe450e19).
 fn calcRowsPerBlock(ncols_dst: c_int, table_id: TableId, small_k: bool, nwarps: c_int) c_int {
     if (table_id == .generic or table_id == .gcn or table_id == .turing or table_id == .gb10) {
         return switch (ncols_dst) {
@@ -213,7 +223,7 @@ fn calcRowsPerBlock(ncols_dst: c_int, table_id: TableId, small_k: bool, nwarps: 
     return 1;
 }
 
-/// Ports `calc_launch_params` (mmvq.cu:983 @b29c606e2).
+/// Ports `calc_launch_params` (mmvq.cu:999 @7fe450e19).
 fn calcLaunchParams(ty: c.enum_ggml_type, ncols_dst: c_int, nrows_x: c_int, nchannels_dst: c_int, nsamples_or_ntokens: c_int, warp_size: c_int, table_id: TableId, small_k: bool, halve_iters: bool) [2]kernels.Dim3 {
     const nwarps = calcNwarps(ty, ncols_dst, table_id, small_k, halve_iters);
     const rpb = calcRowsPerBlock(ncols_dst, table_id, small_k, nwarps);
@@ -252,7 +262,7 @@ fn mmvqKernel(comptime ty: c.enum_ggml_type, comptime ncols_dst: comptime_int, c
     return kernels.get("mmvq", kernels.tmpl("mul_mat_vec_q", &.{ kernels.ggmlType(ty), kernels.int(ncols_dst), kernels.boolean(has_fusion), kernels.boolean(small_k), kernels.boolean(halve_iters) }));
 }
 
-/// Ports `mul_mat_vec_q_switch_fusion` (mmvq.cu:995 @b29c606e2).
+/// Ports `mul_mat_vec_q_switch_fusion` (mmvq.cu:1011 @7fe450e19).
 fn switchFusion(comptime ty: c.enum_ggml_type, comptime ncols_dst: comptime_int, comptime small_k: bool, comptime halve_iters: bool, a: *const Common, dims: [2]kernels.Dim3, nbytes_shared: c_int, stream: cu.cudaStream_t) void {
     const f = a.fusion;
     const has_fusion = f.gate != null or f.x_bias != null or f.gate_bias != null or f.x_scale != null or f.gate_scale != null;
@@ -275,7 +285,7 @@ fn switchFusion(comptime ty: c.enum_ggml_type, comptime ncols_dst: comptime_int,
     kernels.launchPdl(comptime mmvqKernel(ty, ncols_dst, false, small_k, halve_iters), p, args);
 }
 
-/// Ports `mul_mat_vec_q_moe_launch` (mmvq.cu:1027 @b29c606e2). The kernel
+/// Ports `mul_mat_vec_q_moe_launch` (mmvq.cu:1043 @7fe450e19). The kernel
 /// takes the fusion arguments by value either way; `has_fusion` picks the
 /// instantiation that reads them.
 fn moeLaunch(comptime ty: c.enum_ggml_type, a: *const Common, nrows_x: u32, ncols_dst: u32, warp_size: c_int, nchannels_dst: c_int, stream: cu.cudaStream_t) void {
@@ -313,7 +323,7 @@ fn contains(list: []const c.enum_ggml_type, t: c.enum_ggml_type) bool {
     return false;
 }
 
-/// Ports `mul_mat_vec_q_switch_ncols_dst` (mmvq.cu:1060 @b29c606e2).
+/// Ports `mul_mat_vec_q_switch_ncols_dst` (mmvq.cu:1076 @7fe450e19).
 fn switchNcolsDst(
     comptime ty: c.enum_ggml_type,
     vx: ?*const anyopaque,
@@ -458,7 +468,7 @@ fn switchNcolsDst(
     }
 }
 
-/// Ports `mul_mat_vec_q_switch_type` (mmvq.cu:1252 @b29c606e2).
+/// Ports `mul_mat_vec_q_switch_type` (mmvq.cu:1268 @7fe450e19).
 fn switchType(vx: ?*const anyopaque, type_x: c.enum_ggml_type, vy: ?*const anyopaque, ids: ?*const i32, fusion: common.MmFusionArgsDevice, dst: ?*f32, ncols_x: c_int, nrows_x: c_int, ncols_dst: c_int, stride_row_x: c_int, stride_col_y: c_int, stride_col_dst: c_int, nchannels_x: c_int, nchannels_y: c_int, nchannels_dst: c_int, stride_channel_x: c_int, stride_channel_y: c_int, stride_channel_dst: c_int, nsamples_x: c_int, nsamples_dst: c_int, stride_sample_x: c_int, stride_sample_y: c_int, stride_sample_dst: c_int, ids_stride: c_int, stream: cu.cudaStream_t) void {
     switch (type_x) {
         inline c.GGML_TYPE_Q1_0,
@@ -493,7 +503,7 @@ fn i32Of(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `ggml_cuda_mul_mat_vec_q` (mmvq.cu:1405 @b29c606e2).
+/// Ports `ggml_cuda_mul_mat_vec_q` (mmvq.cu:1421 @7fe450e19).
 pub fn mulMatVecQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor, fusion: ?*const common.MmFusionArgsHost) void {
     impl.assert(src1.type == c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
     impl.assert(dst.type == c.GGML_TYPE_F32, "        dst->type  == GGML_TYPE_F32");

@@ -151,21 +151,22 @@ def build(out):
     libs = [os.path.join(LIB, x) for x in ["libmtmd-ref.a", "libllama-common-ref.a", "libllama-ref.a", "libggml.a"]]
 
     # The port's harness builds beside the C++. llama.h's translation is
-    # kept between runs: `zig translate-c` is slow, and has been seen to
-    # spin for minutes on this header.
+    # kept between runs, and written straight to a file: on a cache hit
+    # `zig translate-c` copies its cached output to stdout with macOS's
+    # `fcopyfile`, which spins at full CPU forever when stdout is a pipe
+    # (sampled; a file is fine, as peg-diff's and schema-diff's are).
     cache = os.path.join(ROOT, "zig-out", "chat-parse-diff", "llama_c.zig")
     sources = ["src/llama/c_import.h", "llama.cpp/include/llama.h", "llama.cpp/ggml/include/ggml.h"]
     if not os.path.exists(cache) or any(os.path.getmtime(x) > os.path.getmtime(cache) for x in sources):
         os.makedirs(os.path.dirname(cache), exist_ok=True)
         try:
-            tc = subprocess.run(["zig", "translate-c", "-I", "llama.cpp/include", "-I", "llama.cpp/ggml/include",
-                                 "src/llama/c_import.h"], capture_output=True, text=True, timeout=900)
+            with open(cache + ".tmp", "w") as f:
+                tc = subprocess.run(["zig", "translate-c", "-lc", "-I", "llama.cpp/include", "-I", "llama.cpp/ggml/include",
+                                     "src/llama/c_import.h"], stdout=f, stderr=subprocess.PIPE, text=True, timeout=900)
         except subprocess.TimeoutExpired:
             fail("zig translate-c of llama.h did not finish in 15 minutes")
         if tc.returncode != 0:
             fail("cannot translate llama.h", tc.stderr)
-        with open(cache + ".tmp", "w") as f:
-            f.write(tc.stdout)
         os.replace(cache + ".tmp", cache)
     port = os.path.join(out, "chat_parse_diff")
     port_cmd = ["zig", "build-exe", "-mcpu", "baseline", f"-O{OPT}", f"-femit-bin={port}", "-lc",
@@ -381,6 +382,14 @@ SYNTHETIC = [
      "{%- if enable_thinking %}SYS ON{% else %}SYS OFF{% endif -%}"
      "{%- for m in messages %}<|{{ m.role }}|>{{ m.content }}{% endfor -%}"
      "{%- if add_generation_prompt %}<|assistant|>" + " " * 70 + "{% if enable_thinking %}<think></think><|tail|>{% endif %}{% endif -%}"),
+    # v0.5.0: Qwen3-Coder's markers with no newline between the tags, which
+    # the specialized Qwen3-Coder parser refuses (common_chat_try_specialized_template)
+    ("synthetic-qwen3-coder-tight",
+     "{%- for m in messages %}<|im_start|>{{ m.role }}\n{{ m.content }}"
+     "{%- if m.tool_calls %}{%- for tool_call in m.tool_calls %}"
+     "{{ '<tool_call><function=' ~ tool_call.name ~ '>' }}<parameter=a>x</parameter></function></tool_call>"
+     "{%- endfor %}{%- endif %}<|im_end|>\n{% endfor %}"
+     "{%- if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"),
     ("synthetic-no-system",
      "{% for m in messages %}{% if m.role == 'user' %}[U]{{ m.content }}{% elif m.role == 'assistant' %}"
      "[A]{{ m.content }}{% endif %}{% endfor %}{% if add_generation_prompt %}[A]{% endif %}"),

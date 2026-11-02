@@ -27,6 +27,7 @@
 //!   [--case-exact <name>] [--skip-case <name>] [--list-cases]
 
 const std = @import("std");
+const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
 
 const c = harness_root.impl.c;
@@ -166,7 +167,9 @@ fn normalize(log: []const u8) std.ArrayList(u8) {
         }
         out.appendSlice(gpa, line) catch unreachable;
     }
-    return out;
+    const sorted = input_tensor_order.sortRuns(gpa, out.items);
+    out.deinit(gpa);
+    return sorted;
 }
 
 fn firstDiff(name: []const u8, a: []const u8, b: []const u8) bool {

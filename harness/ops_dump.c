@@ -192,6 +192,12 @@ static uint64_t fnv1a(const void * p, size_t n) {
     return h;
 }
 
+/* Set around a run_amp call to compute with `cplan.use_ref`, the CPU's
+ * reference-only switch: it skips the dispatches a kernel takes over the
+ * general path -- the Hadamard hint's fwht, the IQ panel GEMM -- so the
+ * general path behind them is what gets compared. */
+static int run_use_ref = 0;
+
 /* Builds a one-node graph, fills every leaf, computes on the CPU with one
  * thread, and prints the output bits. */
 static void run_amp(const char * label, struct ggml_tensor * node, int64_t bound, float amp) {
@@ -205,7 +211,17 @@ static void run_amp(const char * label, struct ggml_tensor * node, int64_t bound
         fill_inputs(ggml_graph_node(gf, i), bound);
     }
 
-    const enum ggml_status st = ggml_graph_compute_with_ctx(ctx, gf, n_threads);
+    enum ggml_status st;
+    if (run_use_ref) {
+        struct ggml_cplan cp = ggml_graph_plan(gf, n_threads, NULL);
+        cp.use_ref = true;
+        void * work = cp.work_size > 0 ? malloc(cp.work_size) : NULL;
+        cp.work_data = (uint8_t *) work;
+        st = ggml_graph_compute(gf, &cp);
+        free(work);
+    } else {
+        st = ggml_graph_compute_with_ctx(ctx, gf, n_threads);
+    }
     if (st != GGML_STATUS_SUCCESS) {
         printf("%-34s amp=%-4g STATUS=%d\n", label, (double) amp, (int) st);
         return;
@@ -884,6 +900,16 @@ int main(int argc, char ** argv) {
         R(ggml_dsv4_hc_pre(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc, nt)));
         R(ggml_dsv4_hc_post(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne, nt), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt),
                             ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc, nt), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, hc, hc, nt)));
+        /* New at v0.5.0: the gated form -- a per-element sigmoid gate and a
+         * scale in op_params -- and hc_post's identity comb (src[3] NULL).
+         * The gate runs at amplitude 30 too, where the sigmoid saturates. */
+        R(ggml_dsv4_hc_pre_gated(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt), 0.75f));
+        RW(ggml_dsv4_hc_pre_gated(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt), 1.0f));
+        R(ggml_dsv4_hc_pre_gated(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3 * ne + 1, hc, nt), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3 * ne + 1, hc, nt), -1.5f));
+        R(ggml_dsv4_hc_post(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne, nt), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt),
+                            ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc, nt), NULL));
+        R(ggml_dsv4_hc_post(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 3 * ne + 1, nt), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3 * ne + 1, hc, nt),
+                            ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc, nt), NULL));
     }
 
     puts("=== windows and relative position ===");
@@ -898,6 +924,20 @@ int main(int argc, char ** argv) {
         struct ggml_tensor * h = ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 16, 16), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 16, 3));
         ggml_mul_mat_set_hint(h, GGML_HINT_SRC0_IS_HADAMARD);
         run_amp("mul_mat hint=hadamard (fwht)", h, 0, 1.0f);
+    }
+    {
+        /* New at v0.5.0: fwht reads F16 input, and the general mul_mat
+         * widens an F16 src1 for an F32 src0 -- reached under the hint only
+         * with use_ref, and without the hint directly. */
+        struct ggml_tensor * h = ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 32, 32), ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 32, 5));
+        ggml_mul_mat_set_hint(h, GGML_HINT_SRC0_IS_HADAMARD);
+        run_amp("mul_mat hint=hadamard f16 (fwht)", h, 0, 1.0f);
+        struct ggml_tensor * hr = ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 32, 32), ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 32, 5));
+        ggml_mul_mat_set_hint(hr, GGML_HINT_SRC0_IS_HADAMARD);
+        run_use_ref = 1;
+        run_amp("mul_mat hint=hadamard f16 use_ref", hr, 0, 1.0f);
+        run_use_ref = 0;
+        run_amp("mul_mat f32 x f16", ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 40, 7), ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 40, 6, 2)), 0, 1.0f);
     }
     {
         /* Lower-triangular with a diagonal bounded away from zero. */

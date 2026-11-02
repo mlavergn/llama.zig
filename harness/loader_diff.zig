@@ -634,6 +634,29 @@ fn kvStr(key: []const u8, v: []const u8) c.llama_model_kv_override {
     return o;
 }
 
+/// The edits on fixtures' metadata.
+const Fixture = struct {
+    fn hrmPrefix(ctx: *c.gguf_context) void {
+        c.gguf_set_val_bool(ctx, "hrm_text.hrm.prefix_lm", true);
+    }
+    fn hrmNoL(ctx: *c.gguf_context) void {
+        _ = c.gguf_remove_key(ctx, "hrm_text.hrm.l_cycles");
+    }
+    fn hrmHFloat(ctx: *c.gguf_context) void {
+        c.gguf_set_val_f32(ctx, "hrm_text.hrm.h_cycles", 2.0);
+    }
+    fn hrmScale(ctx: *c.gguf_context) void {
+        c.gguf_set_val_f32(ctx, "hrm_text.embedding_scale", 39.19);
+    }
+    fn nemotronNoRms(ctx: *c.gguf_context) void {
+        _ = c.gguf_remove_key(ctx, "nemotron_h.attention.layer_norm_rms_epsilon");
+        c.gguf_set_val_f32(ctx, "nemotron_h.attention.layer_norm_epsilon", 3.0e-5);
+    }
+    fn nemotronNoEps(ctx: *c.gguf_context) void {
+        _ = c.gguf_remove_key(ctx, "nemotron_h.attention.layer_norm_epsilon");
+    }
+};
+
 /// A tensor-less copy of `base`'s metadata with `edit` applied, written to
 /// `dir/name.gguf`.
 fn derive(dir: []const u8, base: [:0]const u8, name: []const u8, comptime edit: fn (*c.gguf_context) void) [:0]const u8 {
@@ -985,10 +1008,14 @@ pub fn main(init: std.process.Init) !void {
 
     var qwen: ?[:0]const u8 = null;
     var gpt2: ?[:0]const u8 = null;
+    var hrm: ?[:0]const u8 = null;
+    var nemotron_h: ?[:0]const u8 = null;
     for (args[2..]) |a| {
         const path = try gpa.dupeSentinel(u8, a, 0);
         const name = std.fs.path.basename(a);
         if (std.mem.startsWith(u8, name, "Qwen3.5")) qwen = path;
+        if (std.mem.startsWith(u8, name, "hrm_text-")) hrm = path;
+        if (std.mem.startsWith(u8, name, "nemotron_h-")) nemotron_h = path;
         if (std.mem.eql(u8, name, "ggml-vocab-gpt-2.gguf")) gpt2 = path;
         runCase(.{ .name = name, .path = path, .vocab_only = true });
         var nb: [128]u8 = undefined;
@@ -1008,6 +1035,21 @@ pub fn main(init: std.process.Init) !void {
         runCase(.{ .name = "split: duplicate tensor", .path = splitSet(dir, base, "s-dup", .duplicate), .vocab_only = true });
         runCase(.{ .name = "split: unrecognized name", .path = splitSet(dir, base, "s-name", .bad_name), .vocab_only = true });
         runCase(.{ .name = "missing file", .path = try gpa.printSentinel("{s}/no-such-file.gguf", .{dir}, 0), .vocab_only = true });
+    }
+
+    // v0.5.0's hyperparameter reads on fixtures, one key edited at a time:
+    // hrm_text's four hrm.* keys (models/hrm-text.cpp:6 @7fe450e19) and
+    // nemotron_h's RMS epsilon, which falls back to the LayerNorm one
+    // (models/nemotron-h.cpp:5 @7fe450e19).
+    if (hrm) |base| {
+        runCase(.{ .name = "hrm_text: prefix_lm", .path = derive(dir, base, "hrm-prefix", Fixture.hrmPrefix), .vocab_only = false });
+        runCase(.{ .name = "hrm_text: no l_cycles", .path = derive(dir, base, "hrm-nol", Fixture.hrmNoL), .vocab_only = false });
+        runCase(.{ .name = "hrm_text: h_cycles as f32", .path = derive(dir, base, "hrm-hf", Fixture.hrmHFloat), .vocab_only = false });
+        runCase(.{ .name = "hrm_text: embedding_scale", .path = derive(dir, base, "hrm-scale", Fixture.hrmScale), .vocab_only = false });
+    }
+    if (nemotron_h) |base| {
+        runCase(.{ .name = "nemotron_h: no rms eps", .path = derive(dir, base, "nh-norms", Fixture.nemotronNoRms), .vocab_only = false });
+        runCase(.{ .name = "nemotron_h: no eps", .path = derive(dir, base, "nh-noeps", Fixture.nemotronNoEps), .vocab_only = false });
     }
 
     if (qwen) |base| {
@@ -1132,8 +1174,10 @@ pub fn main(init: std.process.Init) !void {
     var n_lazy: usize = 0;
     for (args[2..]) |a| {
         const name = std.fs.path.basename(a);
+        // hrm_text marks nothing lazy, but its cache slots alias two
+        // physical blocks, and these are the loads that place tensors.
         if (!std.mem.startsWith(u8, name, "gemma4-dense") and !std.mem.startsWith(u8, name, "gemma4-moe") and
-            !std.mem.startsWith(u8, name, "qwen4exp-")) continue;
+            !std.mem.startsWith(u8, name, "qwen4exp-") and !std.mem.startsWith(u8, name, "hrm_text-")) continue;
         n_lazy += 1;
         const path = try gpa.dupeSentinel(u8, a, 0);
         const variants = .{

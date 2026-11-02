@@ -8,7 +8,7 @@
 //! (`basic_json<ordered_map>`, `llama.cpp/vendor/nlohmann/json.hpp`, 3.12.0)
 //! that `common_json` reaches: the value model, `ordered_map`, the accessors
 //! and their exceptions, `operator==`, and `from_json` for the `get<T>()`
-//! types `json.cpp` instantiates. llama.cpp v0.4.1, `b29c606e2`. Each
+//! types `json.cpp` instantiates. llama.cpp v0.5.0, `7fe450e19`. Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # Shape
@@ -52,7 +52,7 @@ pub const Member = struct {
     value: Value,
 };
 
-/// Ports `ordered_map` (json.hpp:19746 @b29c606e2): a vector of pairs,
+/// Ports `ordered_map` (json.hpp:19746 @7fe450e19): a vector of pairs,
 /// searched linearly, kept in insertion order.
 pub const Map = struct {
     members: std.ArrayList(Member) = .empty,
@@ -94,7 +94,7 @@ pub const Map = struct {
         return &self.members.items[i].value;
     }
 
-    /// Ports `ordered_map`'s `emplace` (json.hpp:19771 @b29c606e2) as
+    /// Ports `ordered_map`'s `emplace` (json.hpp:19771 @7fe450e19) as
     /// `operator[]` calls it, with a null value: the existing member if
     /// `key` is there, otherwise a new one at the end.
     ///
@@ -111,7 +111,7 @@ pub const Map = struct {
         return &self.members.items[self.members.items.len - 1].value;
     }
 
-    /// Ports `ordered_map`'s key `erase` (json.hpp:19879 @b29c606e2):
+    /// Ports `ordered_map`'s key `erase` (json.hpp:19879 @7fe450e19):
     /// removes `key`, shifting the members after it down.
     ///
     /// Parameters:
@@ -146,12 +146,12 @@ pub const Value = union(Type) {
     // -------------------------------------------------------------------------
     // construction
 
-    /// Ports `common_json`'s `object` (json.cpp:240 @b29c606e2): `{}`.
+    /// Ports `common_json`'s `object` (json.cpp:240 @7fe450e19): `{}`.
     pub fn emptyObject() Value {
         return .{ .object = .{} };
     }
 
-    /// Ports `common_json`'s `array` (json.cpp:222 @b29c606e2): `[]`.
+    /// Ports `common_json`'s `array` (json.cpp:222 @7fe450e19): `[]`.
     pub fn emptyArray() Value {
         return .{ .array = .empty };
     }
@@ -168,7 +168,7 @@ pub const Value = union(Type) {
     }
 
     /// Ports `common_json_value`'s constructors and `to_json`
-    /// (json.cpp:46 @b29c606e2): a value from a Zig one, as `common_json(x)`
+    /// (json.cpp:46 @7fe450e19): a value from a Zig one, as `common_json(x)`
     /// makes it. A signed integer is `number_integer` and an unsigned one
     /// `number_unsigned`, whatever its value; a float widens to `double`; a
     /// string slice is copied; `null` and an optional that is null are null;
@@ -216,7 +216,7 @@ pub const Value = union(Type) {
         self.* = .null;
     }
 
-    /// A deep copy: `common_json`'s copy constructor (json.cpp:167 @b29c606e2).
+    /// A deep copy: `common_json`'s copy constructor (json.cpp:167 @7fe450e19).
     ///
     /// Parameters:
     /// - `gpa`: the copy's allocator.
@@ -256,7 +256,7 @@ pub const Value = union(Type) {
     // -------------------------------------------------------------------------
     // type
 
-    /// Ports `type_name` (json.hpp:24200 @b29c606e2): what an exception calls
+    /// Ports `type_name` (json.hpp:24200 @7fe450e19): what an exception calls
     /// this value's type.
     pub fn typeName(self: *const Value) []const u8 {
         return switch (self.*) {
@@ -270,40 +270,40 @@ pub const Value = union(Type) {
         };
     }
 
-    /// Ports `common_json`'s `is_null` (json.cpp:254 @b29c606e2).
+    /// Ports `common_json`'s `is_null` (json.cpp:254 @7fe450e19).
     pub fn isNull(self: *const Value) bool {
         return self.* == .null;
     }
-    /// Ports `common_json`'s `is_object` (json.cpp:255 @b29c606e2).
+    /// Ports `common_json`'s `is_object` (json.cpp:255 @7fe450e19).
     pub fn isObject(self: *const Value) bool {
         return self.* == .object;
     }
-    /// Ports `common_json`'s `is_array` (json.cpp:256 @b29c606e2).
+    /// Ports `common_json`'s `is_array` (json.cpp:256 @7fe450e19).
     pub fn isArray(self: *const Value) bool {
         return self.* == .array;
     }
-    /// Ports `common_json`'s `is_string` (json.cpp:257 @b29c606e2).
+    /// Ports `common_json`'s `is_string` (json.cpp:257 @7fe450e19).
     pub fn isString(self: *const Value) bool {
         return self.* == .string;
     }
-    /// Ports `common_json`'s `is_boolean` (json.cpp:258 @b29c606e2).
+    /// Ports `common_json`'s `is_boolean` (json.cpp:258 @7fe450e19).
     pub fn isBoolean(self: *const Value) bool {
         return self.* == .boolean;
     }
-    /// Ports `common_json`'s `is_number` (json.cpp:259 @b29c606e2).
+    /// Ports `common_json`'s `is_number` (json.cpp:259 @7fe450e19).
     pub fn isNumber(self: *const Value) bool {
         return self.isNumberInteger() or self.isNumberFloat();
     }
-    /// Ports `common_json`'s `is_number_integer` (json.cpp:260 @b29c606e2): signed
+    /// Ports `common_json`'s `is_number_integer` (json.cpp:260 @7fe450e19): signed
     /// or unsigned.
     pub fn isNumberInteger(self: *const Value) bool {
         return self.* == .number_integer or self.* == .number_unsigned;
     }
-    /// Ports `common_json`'s `is_number_float` (json.cpp:261 @b29c606e2).
+    /// Ports `common_json`'s `is_number_float` (json.cpp:261 @7fe450e19).
     pub fn isNumberFloat(self: *const Value) bool {
         return self.* == .number_float;
     }
-    /// Ports `common_json`'s `is_discarded` (json.cpp:218 @b29c606e2): what
+    /// Ports `common_json`'s `is_discarded` (json.cpp:218 @7fe450e19): what
     /// `parseNoThrow` gives for invalid text.
     pub fn isDiscarded(self: *const Value) bool {
         return self.* == .discarded;
@@ -312,7 +312,7 @@ pub const Value = union(Type) {
     // -------------------------------------------------------------------------
     // capacity
 
-    /// Ports `size` (json.hpp:22986 @b29c606e2): 0 for null, the element
+    /// Ports `size` (json.hpp:22986 @7fe450e19): 0 for null, the element
     /// count of a container, 1 for anything else.
     pub fn size(self: *const Value) usize {
         return switch (self.*) {
@@ -323,7 +323,7 @@ pub const Value = union(Type) {
         };
     }
 
-    /// Ports `empty` (json.hpp:22947 @b29c606e2): true for null and an empty
+    /// Ports `empty` (json.hpp:22947 @7fe450e19): true for null and an empty
     /// container, false for anything else.
     pub fn empty(self: *const Value) bool {
         return switch (self.*) {
@@ -334,7 +334,7 @@ pub const Value = union(Type) {
         };
     }
 
-    /// Ports `contains` (json.hpp:22770 @b29c606e2): false for anything but
+    /// Ports `contains` (json.hpp:22770 @7fe450e19): false for anything but
     /// an object.
     pub fn contains(self: *const Value, key: []const u8) bool {
         return switch (self.*) {
@@ -343,7 +343,7 @@ pub const Value = union(Type) {
         };
     }
 
-    /// Ports `count` (json.hpp:22752 @b29c606e2): 1 if `key` is a member, 0
+    /// Ports `count` (json.hpp:22752 @7fe450e19): 1 if `key` is a member, 0
     /// otherwise.
     pub fn count(self: *const Value, key: []const u8) usize {
         return @intFromBool(self.contains(key));
@@ -352,8 +352,8 @@ pub const Value = union(Type) {
     // -------------------------------------------------------------------------
     // comparison
 
-    /// Ports nlohmann's equality `operator` (json.hpp:23724 @b29c606e2),
-    /// which `common_json`'s equality `operator` (json.cpp:270 @b29c606e2) calls: integers
+    /// Ports nlohmann's equality `operator` (json.hpp:23724 @7fe450e19),
+    /// which `common_json`'s equality `operator` (json.cpp:270 @7fe450e19) calls: integers
     /// and floats compare by value, a signed and an unsigned integer by the
     /// unsigned one's bits as `int64_t`, NaN equals nothing, a discarded
     /// value equals nothing, and objects compare member by member **in
@@ -409,8 +409,8 @@ pub const Value = union(Type) {
     // -------------------------------------------------------------------------
     // element access
 
-    /// Ports `common_json`'s key `at` (json.cpp:282 @b29c606e2)
-    /// over `at` (json.hpp:22025 @b29c606e2): the member `key`, or an error
+    /// Ports `common_json`'s key `at` (json.cpp:282 @7fe450e19)
+    /// over `at` (json.hpp:22025 @7fe450e19): the member `key`, or an error
     /// if this is not an object or has no such member.
     ///
     /// Return: borrowed; valid until this value next changes.
@@ -421,8 +421,8 @@ pub const Value = union(Type) {
         }
     }
 
-    /// Ports `common_json`'s index `at` (json.cpp:284 @b29c606e2) over `at`
-    /// (json.hpp:21979 @b29c606e2): element `idx`, bounds-checked.
+    /// Ports `common_json`'s index `at` (json.cpp:284 @7fe450e19) over `at`
+    /// (json.hpp:21979 @7fe450e19): element `idx`, bounds-checked.
     ///
     /// Return: borrowed; valid until this value next changes.
     pub fn atIndex(self: *const Value, idx: usize) Error!*Value {
@@ -435,8 +435,8 @@ pub const Value = union(Type) {
         }
     }
 
-    /// Ports `common_json`'s key `operator[]`, `common_json` (json.cpp:287 @b29c606e2)
-    /// over `operator` `[]` (json.hpp:22160 @b29c606e2): the member `key`,
+    /// Ports `common_json`'s key `operator[]`, `common_json` (json.cpp:287 @7fe450e19)
+    /// over `operator` `[]` (json.hpp:22160 @7fe450e19): the member `key`,
     /// added as null if absent; a null value becomes an object first.
     ///
     /// Return: borrowed; valid until this value next changes.
@@ -448,8 +448,8 @@ pub const Value = union(Type) {
         }
     }
 
-    /// Ports `common_json`'s index `operator[]`, `common_json` (json.cpp:289 @b29c606e2) over
-    /// `operator` `[]` (json.hpp:22101 @b29c606e2): element `idx`, the array
+    /// Ports `common_json`'s index `operator[]`, `common_json` (json.cpp:289 @7fe450e19) over
+    /// `operator` `[]` (json.hpp:22101 @7fe450e19): element `idx`, the array
     /// padded with nulls up to it; a null value becomes an array first.
     ///
     /// Return: borrowed; valid until this value next changes.
@@ -464,8 +464,8 @@ pub const Value = union(Type) {
         }
     }
 
-    /// Ports `common_json`'s `front` (json.cpp:292 @b29c606e2) over `front`
-    /// (json.hpp:22435 @b29c606e2): the first element or member, or the
+    /// Ports `common_json`'s `front` (json.cpp:292 @7fe450e19) over `front`
+    /// (json.hpp:22435 @7fe450e19): the first element or member, or the
     /// value itself if it is not a container. Null throws, uncaught by
     /// `guard`, the same text.
     ///
@@ -477,8 +477,8 @@ pub const Value = union(Type) {
         return self.end(true);
     }
 
-    /// Ports `common_json`'s `back` (json.cpp:294 @b29c606e2) over `back`
-    /// (json.hpp:22449 @b29c606e2): as `front`, at the other end.
+    /// Ports `common_json`'s `back` (json.cpp:294 @7fe450e19) over `back`
+    /// (json.hpp:22449 @7fe450e19): as `front`, at the other end.
     pub fn back(self: *Value) Error!*Value {
         return self.end(false);
     }
@@ -501,8 +501,8 @@ pub const Value = union(Type) {
     // -------------------------------------------------------------------------
     // modifiers
 
-    /// Ports `clear` (json.hpp:23068 @b29c606e2), which
-    /// `common_json`'s `clear` (json.cpp:297 @b29c606e2) calls: a number becomes
+    /// Ports `clear` (json.hpp:23068 @7fe450e19), which
+    /// `common_json`'s `clear` (json.cpp:297 @7fe450e19) calls: a number becomes
     /// 0 of its own kind, a boolean false, a string or container empty;
     /// null and discarded stay.
     pub fn clear(self: *Value, gpa: std.mem.Allocator) void {
@@ -530,8 +530,8 @@ pub const Value = union(Type) {
         }
     }
 
-    /// Ports `common_json`'s key `erase` (json.cpp:301 @b29c606e2)
-    /// over `erase_internal` (json.hpp:22611 @b29c606e2): drops `key` if it
+    /// Ports `common_json`'s key `erase` (json.cpp:301 @7fe450e19)
+    /// over `erase_internal` (json.hpp:22611 @7fe450e19): drops `key` if it
     /// is a member; an error if this is not an object.
     pub fn erase(self: *Value, gpa: std.mem.Allocator, key: []const u8) Error!void {
         switch (self.*) {
@@ -540,8 +540,8 @@ pub const Value = union(Type) {
         }
     }
 
-    /// Ports `common_json`'s index `erase` (json.cpp:305 @b29c606e2) over
-    /// the index `erase` (json.hpp:22663 @b29c606e2).
+    /// Ports `common_json`'s index `erase` (json.cpp:305 @7fe450e19) over
+    /// the index `erase` (json.hpp:22663 @7fe450e19).
     pub fn eraseIndex(self: *Value, gpa: std.mem.Allocator, idx: usize) Error!void {
         switch (self.*) {
             .array => |*a| {
@@ -553,7 +553,7 @@ pub const Value = union(Type) {
         }
     }
 
-    /// Ports `common_json`'s `assign` (json.cpp:309 @b29c606e2) and
+    /// Ports `common_json`'s `assign` (json.cpp:309 @7fe450e19) and
     /// `operator=`: replaces this value with `v`.
     ///
     /// Parameters:
@@ -564,7 +564,7 @@ pub const Value = union(Type) {
         self.* = v;
     }
 
-    /// Ports `common_json`'s `set` (json.cpp:313 @b29c606e2): `self[key] = v`,
+    /// Ports `common_json`'s `set` (json.cpp:313 @7fe450e19): `self[key] = v`,
     /// so an existing member keeps its place and takes the new value.
     ///
     /// Parameters:
@@ -580,8 +580,8 @@ pub const Value = union(Type) {
         slot.assign(gpa, owned);
     }
 
-    /// Ports `common_json`'s `push_back` (json.cpp:317 @b29c606e2) over
-    /// `push_back` (json.hpp:23129 @b29c606e2): appends to an array; a null
+    /// Ports `common_json`'s `push_back` (json.cpp:317 @7fe450e19) over
+    /// `push_back` (json.hpp:23129 @7fe450e19): appends to an array; a null
     /// value becomes an array first.
     ///
     /// Parameters:
@@ -600,8 +600,8 @@ pub const Value = union(Type) {
         };
     }
 
-    /// Ports `common_json`'s `insert` (json.cpp:331 @b29c606e2) over `insert`
-    /// (json.hpp:23373 @b29c606e2): appends a copy of every element of
+    /// Ports `common_json`'s `insert` (json.cpp:331 @7fe450e19) over `insert`
+    /// (json.hpp:23373 @7fe450e19): appends a copy of every element of
     /// `vals`. Only an array can be inserted into; inserting it into itself
     /// is an error; and `vals` that is not an array inserts nothing, because
     /// the C++ then reads two default `array_iterator`s, an empty range.
@@ -626,14 +626,14 @@ pub const Value = union(Type) {
     // -------------------------------------------------------------------------
     // get<T>()
 
-    /// Ports `common_json`'s `get<T>()`, `COMMON_JSON_GET` (json.cpp:405 @b29c606e2) for a scalar
+    /// Ports `common_json`'s `get<T>()`, `COMMON_JSON_GET` (json.cpp:405 @7fe450e19) for a scalar
     /// `T`: `bool`, `[]const u8` (borrowed), or any integer or float type.
     ///
     /// The numeric rules are nlohmann's two `from_json` overloads.
-    /// `get_arithmetic_value` (json.hpp:4857 @b29c606e2) serves
+    /// `get_arithmetic_value` (json.hpp:4857 @7fe450e19) serves
     /// `number_integer_t`, `number_unsigned_t` and `number_float_t` --
     /// `int64_t`, `uint64_t`, `double` -- and refuses a boolean; the other
-    /// arithmetic `from_json` (json.hpp:5194 @b29c606e2) serves every other
+    /// arithmetic `from_json` (json.hpp:5194 @7fe450e19) serves every other
     /// type and takes `true` as 1. Which C++ types are `int64_t` depends on
     /// the platform (`long` on Linux, `long long` on Darwin and Windows), so
     /// `usize`, `isize`, `c_long` and `c_longlong` follow the platform: see
@@ -660,8 +660,8 @@ pub const Value = union(Type) {
         return fail(.type_error, 302, "type must be number, but is {s}", .{self.typeName()});
     }
 
-    /// Ports `get<std::vector<T>>()`, `COMMON_JSON_GET` (json.cpp:417 @b29c606e2)
-    /// over the array `from_json_array_impl` (json.hpp:5048 @b29c606e2): every element
+    /// Ports `get<std::vector<T>>()`, `COMMON_JSON_GET` (json.cpp:417 @7fe450e19)
+    /// over the array `from_json_array_impl` (json.hpp:5048 @7fe450e19): every element
     /// through `get(T)`.
     ///
     /// Parameters:
@@ -677,7 +677,7 @@ pub const Value = union(Type) {
         return out;
     }
 
-    /// Ports `get<std::set<std::string>>()`, `COMMON_JSON_GET` (json.cpp:419 @b29c606e2):
+    /// Ports `get<std::set<std::string>>()`, `COMMON_JSON_GET` (json.cpp:419 @7fe450e19):
     /// the array's strings, sorted bytewise as `std::string` compares, with
     /// duplicates dropped.
     ///
@@ -704,8 +704,8 @@ pub const Value = union(Type) {
     }
 
     /// Ports `get<std::unordered_map<std::string, T>>()`, `COMMON_JSON_GET`
-    /// (json.cpp:422 @b29c606e2) over the object `from_json`
-    /// (json.hpp:5162 @b29c606e2): every member's value through `get(T)`,
+    /// (json.cpp:422 @7fe450e19) over the object `from_json`
+    /// (json.hpp:5162 @7fe450e19): every member's value through `get(T)`,
     /// in the object's order. (The C++ map's own order is its hash table's;
     /// a caller that iterates it must not depend on it.)
     ///
@@ -723,7 +723,7 @@ pub const Value = union(Type) {
         return out;
     }
 
-    /// Ports the template `value` (json.h:227 @b29c606e2), `value(key, def)`:
+    /// Ports the template `value` (json.h:231 @7fe450e19), `value(key, def)`:
     /// `contains(key) ? at(key).get<T>() : def`. Not nlohmann's `value()`:
     /// on anything but an object this gives `def` rather than throwing.
     ///
@@ -745,7 +745,7 @@ pub const Value = union(Type) {
     };
 
     /// Ports `common_json::items_view` and its iterator's `entry`
-    /// (json.cpp:377 @b29c606e2): an object's members in insertion order, an
+    /// (json.cpp:377 @7fe450e19): an object's members in insertion order, an
     /// array's elements keyed by index, a plain value once with key "",
     /// null never.
     pub const Items = struct {
@@ -762,7 +762,9 @@ pub const Value = union(Type) {
             switch (self.node.*) {
                 .object => |*m| return .{ .key = m.members.items[i].key, .value = &m.members.items[i].value },
                 .array => |*a| {
-                    const k = std.fmt.bufPrint(&self.key_buf, "{d}", .{i}) catch unreachable;
+                    const k = std.fmt.bufPrint(&self.key_buf, "{d}", .{i}) catch |err| switch (err) {
+                        error.NoSpaceLeft => unreachable,
+                    };
                     return .{ .key = k, .value = &a.items[i] };
                 },
                 else => return .{ .key = "", .value = self.node },
@@ -770,14 +772,14 @@ pub const Value = union(Type) {
         }
     };
 
-    /// Ports `common_json`'s `items` (json.cpp:394 @b29c606e2).
+    /// Ports `common_json`'s `items` (json.cpp:394 @7fe450e19).
     ///
     /// Return: an iterator over this value; invalid once the value changes.
     pub fn items(self: *Value) Items {
         return .{ .node = self, .n = self.size() };
     }
 
-    /// Ports `common_json::iterator`'s `key` (json.cpp:364 @b29c606e2): the
+    /// Ports `common_json::iterator`'s `key` (json.cpp:364 @7fe450e19): the
     /// name of member `i`. Anything but an object is an error, as the C++
     /// iterator's `key()` is.
     ///

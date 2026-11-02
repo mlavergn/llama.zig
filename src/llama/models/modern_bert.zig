@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.4.1
-//! (`b29c606e2`): `llama_model_modern_bert`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.5.0
+//! (`7fe450e19`): `llama_model_modern_bert`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`; and from
 //! `llama.cpp/src/llama-model.cpp`, `llm_ffn_op_type_from_string`, which
 //! only this architecture calls.
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1017 @b29c606e2):
+/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1042 @7fe450e19):
 /// the GGUF `<arch>.hidden_activation` strings that map cleanly to a gated
 /// feed-forward op.
 const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
@@ -37,7 +37,7 @@ const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
     .{ "reglu", .reglu },
 };
 
-/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:1027 @b29c606e2).
+/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:1052 @7fe450e19).
 ///
 /// Parameters:
 /// - `name`: the activation's name.
@@ -49,7 +49,7 @@ fn ffnOpTypeFromString(name: []const u8, fallback: graph.FfnOp) graph.FfnOp {
     return fallback;
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:3 @b29c606e2).
+/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:3 @7fe450e19).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -59,9 +59,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (found_swa != null and hp.n_swa > 0) {
         hp.swa_type = @backingInt(hparams_mod.SwaType.symmetric);
         if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
-        var swa_period: u32 = 3;
-        if (try meta.getKeyOrArrScalar(.attention_sliding_window_pattern, false, exc)) |v| swa_period = v;
-        hp.setSwaPattern(swa_period, true);
+        try self.loadSwaPattern(ml, 3, true, exc);
     } else {
         hp.swa_type = @backingInt(hparams_mod.SwaType.none);
     }
@@ -83,7 +81,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:36 @b29c606e2).
+/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:34 @7fe450e19).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -119,19 +117,19 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.cls_norm = try self.createTensor(.{ .tensor = .cls_norm, .suffix = "weight" }, &.{l.n_embd}, nr, exc);
 }
 
-/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:70 @b29c606e2).
+/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:68 @7fe450e19).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_modern_bert`'s `graph`
-/// (models/modern-bert.cpp:74 @b29c606e2).
+/// (models/modern-bert.cpp:72 @7fe450e19).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/modern-bert.cpp", 77, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/modern-bert.cpp", 75, "n_embd_head == hparams.n_embd_head_k()");
 
     const inp_pos = b.buildInpPos();
 
