@@ -54,7 +54,8 @@ int ref_arch_flags(int arch) {
            (llm_arch_is_hybrid(a)            ? 2  : 0) |
            (llm_arch_is_diffusion(a)         ? 4  : 0) |
            (llm_arch_supports_rs_rollback(a) ? 8  : 0) |
-           (llm_arch_supports_sm_tensor(a)   ? 16 : 0);
+           (llm_arch_supports_sm_tensor(a)   ? 16 : 0) |
+           (llm_arch_supports_mixed_batch(a) ? 32 : 0);
 }
 
 // LLM_KV(arch, suffix)(kv). Returns the name's length, or -1 with what() in buf.

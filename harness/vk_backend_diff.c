@@ -532,15 +532,42 @@ static struct ggml_cgraph * graph_fusions_041(struct ggml_context * ctx) {
     return g;
 }
 
+/* v0.6.0's HC_POST_GATE: qwen4exp's hc_combine weights,
+ * scale(sigmoid(scale(p))), feeding a DSV4_HC_POST. The reorder keeps the
+ * four nodes whole and asks the scheduler to keep their external inputs
+ * (p, x, residual, comb) alive until the HC_POST. An independent node
+ * comes before the pattern and another after it: the first pass has to
+ * skip the pattern's SCALE, which depends on nothing pending, and pull the
+ * second forward. Then the same chain without comb, and one whose first
+ * scale carries a bias (still kept whole by the reorder, which only
+ * matches ops). */
+static struct ggml_cgraph * graph_hc_post_gate(struct ggml_context * ctx) {
+    const int64_t n_embd = 32, hc = 4, nt = 5;
+    struct ggml_cgraph * g = ggml_new_graph(ctx);
+    for (int v = 0; v < 3; v++) {
+        struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, nt);
+        struct ggml_tensor * residual = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_embd, hc, nt);
+        struct ggml_tensor * p = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc, nt);
+        struct ggml_tensor * comb = v == 1 ? NULL : ggml_new_tensor_3d(ctx, GGML_TYPE_F32, hc, hc, nt);
+        ggml_build_forward_expand(g, ggml_sqr(ctx, x));
+        struct ggml_tensor * s1 = v == 2 ? ggml_scale_bias(ctx, p, 0.25f, 1.0f) : ggml_scale(ctx, p, 0.25f);
+        struct ggml_tensor * post = ggml_scale(ctx, ggml_sigmoid(ctx, s1), 2.0f);
+        ggml_build_forward_expand(g, ggml_dsv4_hc_post(ctx, x, residual, post, comb));
+        ggml_build_forward_expand(g, ggml_sqr(ctx, residual));
+    }
+    return g;
+}
+
 static void ask_graph_optimize(size_t i, ggml_backend_dev_t dev) {
     ggml_backend_t be = ggml_backend_dev_init(dev, NULL);
     if (be == NULL) return;
-    struct ggml_init_params params = { 4096 * ggml_tensor_overhead() + 9 * ggml_graph_overhead(), NULL, true };
+    struct ggml_init_params params = { 4096 * ggml_tensor_overhead() + 10 * ggml_graph_overhead(), NULL, true };
     struct ggml_context * ctx = ggml_init(params);
     print_order(i, "decoder", graph_decoder(ctx), be);
     print_order(i, "patterns", graph_patterns(ctx), be);
     print_order(i, "snake_tail", graph_snake_tail(ctx), be);
     print_order(i, "fusions_041", graph_fusions_041(ctx), be);
+    print_order(i, "hc_post_gate", graph_hc_post_gate(ctx), be);
     for (uint32_t seed = 1; seed <= 4; seed++) {
         char name[32];
         snprintf(name, sizeof(name), "random%u", seed);

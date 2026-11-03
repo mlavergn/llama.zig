@@ -685,6 +685,15 @@ fn runOp(op: []const u8, j: *Value) !void {
         try str("marker", common.getMediaMarker());
     } else if (std.mem.eql(u8, op, "TK")) {
         try opTK(j);
+    } else if (std.mem.eql(u8, op, "D")) {
+        try guarded(opD(j));
+    } else if (std.mem.eql(u8, op, "DR")) {
+        try guarded(opDR(j));
+    } else if (std.mem.eql(u8, op, "MA")) {
+        try guarded(opMA(j));
+    } else if (std.mem.eql(u8, op, "OE")) {
+        try guarded(opOE(j));
+        try guarded(opOESub(j));
     } else {
         try str("bad_op", op);
     }
@@ -933,10 +942,10 @@ fn opG(j: *Value) !void {
     const vocab = c.llama_model_get_vocab(text_model);
     const toks = try common.tokenize(ra(), vocab, try (try j.at("prompt")).get([]const u8), true, true);
     c.llama_memory_clear(c.llama_get_memory(text_ctx), true);
-    var batch = c.llama_batch_init(@intCast(toks.len), 0, 1);
-    for (toks, 0..) |t, i| tools.common.batchAdd(&batch, t, @intCast(i), &.{0}, true);
-    if (c.llama_decode(text_ctx, batch) != 0) return common.throw(error.RuntimeError, "decode failed", .{});
-    c.llama_batch_free(batch);
+    var batch = tools.common.Batch.init(gpa, text_ctx);
+    defer batch.deinit();
+    for (toks, 0..) |t, i| _ = batch.add(t, @intCast(i), 0, true);
+    if (c.llama_process(text_ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) return common.throw(error.RuntimeError, "decode failed", .{});
     var it = (try j.at("n_top")).items();
     while (it.next()) |nt| {
         const idx = try j.value("idx", c_int, -1);
@@ -1230,4 +1239,170 @@ fn chatLog(level: chat.msg.Level, text: []const u8) void {
         .warn => log.wrn("%s", .{z}),
         .err => log.err("%s", .{z}),
     }
+}
+
+// ---------------------------------------------------------------------------
+// the typed decision API (v0.6.0)
+
+fn showDecisionTask(t: *const task.Task) !void {
+    const d = &t.decision;
+    try linef("task {d} labels{s} markers{s} column{d} pointer{d} first{d} order{s} n_scores{d} embd{d} logits{d}", .{
+        t.id,         try toksStr(d.labels.items), try toksStr(d.markers.items), d.column,                   d.pointer,
+        d.posFirst(), try toksStr(d.order.items),  d.n_scores,                   @intFromBool(t.needEmbd()), @intFromBool(t.needLogits()),
+    });
+    try showTokens("prompt", &t.tokens);
+}
+
+/// `D`: a /v1/systemone request through a decision model's context.
+fn opD(j: *Value) !void {
+    const a = ra();
+    const decision = sd.decision;
+    const i = try j.value("v", usize, 0);
+    if (i >= vocab_models.items.len) return error.JsonError;
+    const model = vocab_models.items[i];
+    try linef("decision_type {d}", .{@backingInt(tools.common.getDecisionType(model))});
+    var dc: decision.DecisionContext = .{};
+    defer dc.deinit();
+    try dc.init(gpa, model);
+    try linef("flags share{d} joint{d} images{d} type{d}", .{ @intFromBool(dc.canSharePrompt()), @intFromBool(dc.isJoint()), @intFromBool(dc.canUseImages()), @backingInt(dc.type) });
+    if (dc.type == .none) return;
+
+    const body = try j.at("body");
+    const questions = try dc.parseQuestions(a, body);
+    for (questions) |*q| {
+        var s: std.ArrayList(u8) = .empty;
+        try s.print(a, "q {s} {d} {s}", .{ q.id, @backingInt(q.type), try dumpV(&q.instructions) });
+        for (q.options) |*o| try s.print(a, " [{s}|{s}]", .{ o.key, try dumpV(&o.description) });
+        try str("question", s.items);
+        try linef("variants {d}", .{dc.nVariants(q)});
+    }
+    var files: std.ArrayList([]u8) = .empty;
+    const state = try dc.parseState(a, body, &files);
+    try str("state", try dumpV(&state));
+    for (files.items) |f| try linef("file {d} {d}", .{ f.len, fnv(f) });
+    // the model is vocab-only: a request with files would tokenize them through mtmd
+    if (files.items.len != 0) return;
+
+    var tasks: std.ArrayList(task.Task) = .empty;
+    defer {
+        for (tasks.items) |*t| t.deinit(gpa);
+        tasks.deinit(gpa);
+    }
+    var id: c_int = 100;
+    const no_files: []const []const u8 = &.{};
+    if (dc.isJoint()) {
+        var t = task.Task.initType(.decision);
+        errdefer t.deinit(gpa);
+        t.id = id;
+        id += 1;
+        try dc.fillTaskJoint(a, gpa, &state, questions, no_files, null, init_opt, &t);
+        try showDecisionTask(&t);
+        try tasks.append(gpa, t);
+    } else {
+        for (questions) |*q| {
+            for (0..dc.nVariants(q)) |v| {
+                var t = task.Task.initType(.decision);
+                errdefer t.deinit(gpa);
+                t.id = id;
+                id += 1;
+                try dc.fillTask(a, gpa, &state, questions, q, v, no_files, null, init_opt, &t);
+                try showDecisionTask(&t);
+                try tasks.append(gpa, t);
+            }
+        }
+    }
+    // the outputs each task reads: its labels, its markers, or for a joint head one per option
+    var n_out: std.ArrayList(usize) = .empty;
+    for (tasks.items) |*t| {
+        const d = &t.decision;
+        try n_out.append(a, if (d.labels.items.len != 0) d.labels.items.len else if (d.markers.items.len != 0) d.markers.items.len else @intCast(d.n_scores));
+    }
+    const pool: []const f32 = if (j.contains("pool")) try (try j.at("pool")).getSlice(a, f32) else &.{};
+    var i_pool: usize = 0;
+    const Take = struct {
+        fn run(al: std.mem.Allocator, pl: []const f32, ip: *usize, n: usize) ![]f32 {
+            const v = try al.alloc(f32, n);
+            for (v) |*x| {
+                x.* = if (pl.len == 0) 0.0 else pl[ip.* % pl.len];
+                if (pl.len != 0) ip.* += 1;
+            }
+            return v;
+        }
+    };
+    const nan_at = try j.value("nan_at", c_int, -1);
+    const short = try j.value("short", bool, false);
+    var i_task: usize = 0;
+    var i_score: usize = 0;
+    var n_answer: c_int = 0;
+    for (questions) |*q| {
+        var scores: std.ArrayList([]f32) = .empty;
+        if (dc.isJoint()) {
+            const all = try Take.run(a, pool, &i_pool, n_out.items[0]);
+            const lo = @min(all.len, i_score);
+            const hi = @min(all.len, i_score + q.options.len);
+            try scores.append(a, all[lo..hi]);
+            i_score += q.options.len;
+        } else {
+            for (0..dc.nVariants(q)) |_| {
+                try scores.append(a, try Take.run(a, pool, &i_pool, n_out.items[i_task]));
+                i_task += 1;
+            }
+        }
+        const this = n_answer;
+        n_answer += 1;
+        if (this == nan_at and scores.items.len != 0 and scores.items[0].len != 0) scores.items[0][0] = std.math.nan(f32);
+        if (short and scores.items.len != 0 and scores.items[0].len != 0) scores.items[0] = scores.items[0][0 .. scores.items[0].len - 1];
+        const cs = try a.alloc([]const f32, scores.items.len);
+        for (scores.items, cs) |x, *y| y.* = x;
+        try guarded(answerLine(&dc, q, cs));
+    }
+    if (dc.canSharePrompt()) {
+        var groups = try decision.groupTasks(gpa, tasks.items, try j.value("n_slots", usize, 1));
+        defer {
+            for (groups.items) |*g| g.deinit(gpa);
+            groups.deinit(gpa);
+        }
+        for (groups.items) |*g| {
+            var s: std.ArrayList(u8) = .empty;
+            try s.print(a, "group {d} shared{d} n{d}", .{ g.id, g.n_tokens_shared, g.tokens.size() });
+            for (g.child_tasks.items) |*ch| try s.print(a, " {d}:{d}:{d}", .{ ch.id, ch.id_parent, ch.tokens.size() });
+            try line(s.items);
+        }
+    }
+}
+
+fn answerLine(dc: *const sd.decision.DecisionContext, q: *const sd.decision.Question, scores: []const []const f32) !void {
+    try str("answer", try dumpV(&(try dc.formatAnswer(ra(), q, scores))));
+}
+
+/// `DR`: `server_task_result_decision::to_json`.
+fn opDR(j: *Value) !void {
+    const r = try result.Result.create(gpa, .decision);
+    defer r.destroy(gpa);
+    r.index = try j.value("index", usize, 0);
+    r.kind.decision.n_tokens = try j.value("n_tokens", i32, 0);
+    r.kind.decision.scores = if (j.contains("scores")) try (try j.at("scores")).getSlice(r.alloc(), f32) else &.{};
+    try str("decision_result", try dumpV(&(try r.toJson(ra()))));
+}
+
+/// `MA`: the architecture object of GET /models.
+fn opMA(j: *Value) !void {
+    const ty: tools.common.DecisionType = @fromBackingInt(@intCast(try j.value("type", c_int, 0)));
+    const out_mod = common.serverModelOutputModalities(ty);
+    var v = try common.serverModelArchitectureJson(ra(), try j.value("image", bool, false), try j.value("audio", bool, false), try j.value("video", bool, false), out_mod);
+    try str("arch", try dumpV(&v));
+}
+
+/// `OE`: an /embeddings content array, and the same input as a subprompt.
+fn opOE(j: *Value) !void {
+    const opt = try makeChatOpt(j);
+    var t = try oaicompat.tokenizeOaiContentArray(gpa, try vocabAt(j), if (try j.value("mtmd", bool, false)) mctx else null, &opt, try j.at("content"), try j.value("add_special", bool, true), try j.value("parse_special", bool, true), init_opt);
+    defer t.deinit();
+    try showTokens("oe", &t);
+}
+
+fn opOESub(j: *Value) !void {
+    var t = try tokens.tokenizeInputSubprompt(gpa, try vocabAt(j), if (try j.value("mtmd", bool, false)) mctx else null, try j.at("content"), try j.value("add_special", bool, true), try j.value("parse_special", bool, true), init_opt);
+    defer t.deinit();
+    try showTokens("sub", &t);
 }

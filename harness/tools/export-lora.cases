@@ -13,13 +13,13 @@
 -m $FIX/qwen3-dense.gguf --lora-scaled $DATA/qwen3-dense/good.gguf:0.5,$DATA/qwen3-dense/good-f16.gguf:2 -o two.gguf
 -m $FIX/llama-dense.gguf --lora $DATA/llama-dense/good.gguf -o llama.gguf
 -m $FIX/qwen3-dense.gguf -o copy-only.gguf
--m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/good.gguf,$DATA/qwen3-dense/subset.gguf -o subset-out.gguf
--m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/not-adapter.gguf -o e1.gguf
--m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/not-lora.gguf -o e2.gguf
--m $FIX/qwen3-dense.gguf --lora $DATA/llama-dense/good.gguf -o e3.gguf
--m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/missing-b.gguf -o e4.gguf
--m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/quant.gguf -o e5.gguf
--m $FIX/qwen3-dense.gguf --lora /nonexistent/lora.gguf -o e6.gguf
--m /nonexistent/model.gguf --lora $DATA/qwen3-dense/good.gguf -o e7.gguf
--m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/good.gguf -o /nonexistent/dir/out.gguf
--m $FIX/qwen3-dense.gguf --lora-scaled $DATA/qwen3-dense/good.gguf -o e8.gguf
+!fail -m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/good.gguf,$DATA/qwen3-dense/subset.gguf -o subset-out.gguf
+!fail -m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/not-adapter.gguf -o e1.gguf
+!fail -m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/not-lora.gguf -o e2.gguf
+!fail -m $FIX/qwen3-dense.gguf --lora $DATA/llama-dense/good.gguf -o e3.gguf
+!fail -m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/missing-b.gguf -o e4.gguf
+!fail -m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/quant.gguf -o e5.gguf
+!fail -m $FIX/qwen3-dense.gguf --lora /nonexistent/lora.gguf -o e6.gguf
+!fail -m /nonexistent/model.gguf --lora $DATA/qwen3-dense/good.gguf -o e7.gguf
+!fail -m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/good.gguf -o /nonexistent/dir/out.gguf
+!fail -m $FIX/qwen3-dense.gguf --lora-scaled $DATA/qwen3-dense/good.gguf -o e8.gguf

@@ -1,23 +1,31 @@
-//! Batches: sanitizing a `llama_batch` and splitting it into ubatches.
+//! Batches: the extended batch, sanitizing one and splitting it into
+//! ubatches.
 //!
 //! # Provenance
 //!
 //! Ported from, in the reference checkout:
 //!
-//! - `llama.cpp/src/llama-batch.h`   -- `llama_ubatch`, `llama_batch_allocr`
-//! - `llama.cpp/src/llama-batch.cpp` -- their bodies, and `llama_batch_get_one`,
-//!   `llama_batch_init` and `llama_batch_free`
+//! - `llama.cpp/src/llama-batch.h`   -- `llama_ubatch`, `llama_batch_ext`,
+//!   `llama_batch_allocr`, `llama_batch_compat`
+//! - `llama.cpp/src/llama-batch.cpp` -- their bodies, `llama_batch_get_one`,
+//!   `llama_batch_init` and `llama_batch_free`, and the `llama_batch_ext_*`
+//!   C API's bodies
 //! - `llama.cpp/src/llama-cparams.h` -- `LLAMA_MAX_SEQ`
 //!
-//! All at v0.5.0 (`7fe450e19`). Each declaration below names the source file
-//! and line it came from.
+//! All at v0.6.0 (`d81235049`). Each declaration below names the source file
+//! and line it came from. The C entry points are `api/batch.zig`'s.
 //!
-//! # Not exported yet
+//! # The extended batch's sequence sets
 //!
-//! libllama swaps once, at `llama.h` (`PLAN.md`, Decision 42), and until then
-//! the C++ still defines `llama_batch_get_one`, `llama_batch_init` and
-//! `llama_batch_free`. Here they are plain Zig functions; the shim that
-//! exports them comes with the swap.
+//! A `llama_batch_ext` entry keeps its sequence ids in a
+//! `std::unordered_set<llama_seq_id>`, and `llama_batch_allocr::init` copies
+//! them out in its iteration order -- the order `seq_id[i]` then has, whose
+//! first element decides coupling, `split_equal`'s sequential test and
+//! `llama_batch_compat`'s generated positions. `SeqIdSet` keeps the ids in
+//! insertion order and replays that order through `libcxx.I32Map`, which
+//! lays the table out as libc++ does (`std::hash<int>` is the value
+//! sign-extended). libc++ 22's copy constructor keeps a table's layout, so
+//! the C++'s copies of an entry change nothing.
 //!
 //! # What the C++ leaves to libc++, and why none of it is reproduced
 //!
@@ -45,6 +53,9 @@
 const std = @import("std");
 const impl = @import("impl.zig");
 const vm = @import("vocab/module.zig");
+const libcxx = @import("libcxx.zig");
+const arch_mod = @import("arch.zig");
+const hparams_mod = @import("hparams.zig");
 
 const c = impl.c;
 const allocator = impl.allocator;
@@ -60,7 +71,7 @@ fn oom() noreturn {
     impl.abort("llama-batch.cpp", 0, "out of memory");
 }
 
-/// Ports `LLAMA_MAX_SEQ` (llama-cparams.h:8 @7fe450e19).
+/// Ports `LLAMA_MAX_SEQ` (llama-cparams.h:8 @d81235049).
 pub const max_seq: u32 = 256;
 
 /// Ports `llama_batch_allocr`'s `seq_set_t`, `std::bitset<LLAMA_MAX_SEQ>`:
@@ -85,7 +96,7 @@ fn cInt(v: u32) c_int {
 // -----------------------------------------------------------------------------
 // llama_ubatch
 
-/// Ports `llama_ubatch`'s `data_t` (llama-batch.h:54 @7fe450e19): the arrays a
+/// Ports `llama_ubatch`'s `data_t` (llama-batch.h:63 @d81235049): the arrays a
 /// `Ubatch` built by the allocator points into, with the reference count
 /// `std`'s `shared_ptr` keeps beside them.
 pub const UbatchData = struct {
@@ -101,6 +112,11 @@ pub const UbatchData = struct {
     seq_id_unq: std.ArrayList(SeqId) = .empty,
     seq_idx: std.ArrayList(i32) = .empty,
     output: std.ArrayList(i8) = .empty,
+    /// Mixed ubatches only: 1 for an embedding row, 0 for a token.
+    type: std.ArrayList(i8) = .empty,
+    /// Each token's index in the original batch.
+    batch_idxs: std.ArrayList(i32) = .empty,
+    decision_order: std.ArrayList(i32) = .empty,
 
     seq_id_data: std.ArrayList(SeqId) = .empty,
 
@@ -122,12 +138,15 @@ pub const UbatchData = struct {
         self.seq_id_unq.deinit(allocator);
         self.seq_idx.deinit(allocator);
         self.output.deinit(allocator);
+        self.type.deinit(allocator);
+        self.batch_idxs.deinit(allocator);
+        self.decision_order.deinit(allocator);
         self.seq_id_data.deinit(allocator);
         allocator.destroy(self);
     }
 };
 
-/// Ports `llama_ubatch` (llama-batch.h:15 @7fe450e19).
+/// Ports `llama_ubatch` (llama-batch.h:17 @d81235049).
 ///
 /// A value type, as in the C++, and default-initializable to the empty
 /// ubatch the splitters return when the batch is consumed. Its pointers
@@ -169,22 +188,47 @@ pub const Ubatch = struct {
     seq_idx: [*c]i32 = null,
     /// `[n_tokens]`.
     output: [*c]i8 = null,
+    /// `[n_tokens]`, mixed ubatches only: 0 for a token, 1 for an embedding.
+    type: [*c]i8 = null,
+    /// `[n_tokens]`, or null when no entry has one: see
+    /// `llama_batch_ext_set_decision_order`.
+    decision_order: [*c]i32 = null,
 
     /// The arrays above, when this ubatch owns them.
     data: ?*UbatchData = null,
 
-    /// Ports `llama_ubatch`'s `equal_seqs` (llama-batch.h:16 @7fe450e19).
+    /// Ports `llama_ubatch`'s `equal_seqs` (llama-batch.h:18 @d81235049).
     ///
     /// Return: whether every sequence set has `n_seq_tokens` tokens.
     pub fn equalSeqs(self: *const Ubatch) bool {
         return self.b_equal_seqs != 0;
     }
 
-    /// Ports `llama_ubatch`'s `is_pos_2d` (llama-batch.h:25 @7fe450e19).
+    /// Ports `llama_ubatch`'s `is_pos_2d` (llama-batch.h:27 @d81235049).
     ///
     /// Return: whether positions are M-RoPE's, three or more per token.
     pub fn isPos2d(self: *const Ubatch) bool {
         return self.n_pos >= 3;
+    }
+
+    /// Ports `llama_ubatch`'s `is_mixed` (llama-batch.h:33 @d81235049).
+    ///
+    /// Return: whether `type` picks a token or an embedding per row, with
+    /// `n_pos` position sections for every row.
+    pub fn isMixed(self: *const Ubatch) bool {
+        return self.type != null;
+    }
+
+    /// Ports `ASSERT_EMBD_OR_TOKEN` (llama-batch.h:84 @d81235049): aborts
+    /// when a mixed ubatch reaches code that takes only tokens or only
+    /// embeddings.
+    ///
+    /// Parameters:
+    /// - `file`, `line`: the call site, for the abort message.
+    ///
+    /// Return: nothing.
+    pub fn assertEmbdOrToken(self: *const Ubatch, comptime file: [:0]const u8, comptime line: c_int) void {
+        impl.assert(!self.isMixed(), file, line, "!(ubatch).is_mixed() && \"mixed token/embd ubatch is not supported here\"");
     }
 
     /// Takes a reference to `data`, as copying the C++'s `shared_ptr` does.
@@ -250,11 +294,9 @@ const PosSet = struct {
 // -----------------------------------------------------------------------------
 // llama_batch_allocr
 
-/// Ports `llama_batch_allocr` (llama-batch.h:72 @7fe450e19): sanitizes an
-/// input batch, fills in what it omits, and splits it into ubatches.
-///
-/// **It must not move once `initBatch` has run**: the sanitized batch points
-/// at `seq_id_0`, a field, as the C++'s does.
+/// Ports `llama_batch_allocr` (llama-batch.h:145 @d81235049): converts a
+/// `llama_batch_ext` into the flat `llama_batch` it keeps, sanitizes it,
+/// and splits it into ubatches.
 pub const BatchAllocr = struct {
     batch: c.llama_batch = .{},
 
@@ -263,12 +305,21 @@ pub const BatchAllocr = struct {
 
     n_pos_per_embd: u32,
 
+    /// Whether a batch may mix token and embedding entries.
+    allow_mixed: bool = false,
+
     n_embd: u32 = 0,
     n_seq_max: u32 = 0,
     n_outputs: u32 = 0,
 
-    /// The default sequence id.
-    seq_id_0: [1]SeqId = .{0},
+    /// The token ids built from the extended batch.
+    token_vec: std.ArrayList(Token) = .empty,
+    /// The embeddings built from the extended batch.
+    embd_vec: std.ArrayList(f32) = .empty,
+    /// Mixed batches only: 1 for an embedding entry, 0 for a token.
+    is_embd_vec: std.ArrayList(i8) = .empty,
+    /// Flat storage the `seq_id` pointers point into.
+    seq_id_data: std.ArrayList(SeqId) = .empty,
 
     pos: std.ArrayList(Pos) = .empty,
     n_seq_id: std.ArrayList(i32) = .empty,
@@ -276,6 +327,8 @@ pub const BatchAllocr = struct {
     seq_id_unq: std.ArrayList(SeqId) = .empty,
     seq_idx: std.ArrayList(i32) = .empty,
     output: std.ArrayList(i8) = .empty,
+    /// Empty when no entry has one.
+    decision_order: std.ArrayList(i32) = .empty,
 
     /// Whether any token in the batch belongs to more than one sequence.
     has_cpl: bool = false,
@@ -300,15 +353,16 @@ pub const BatchAllocr = struct {
 
     debug: c_int = 0,
 
-    /// Ports the constructor of `llama_batch_allocr` (llama-batch.cpp:12
-    /// @7fe450e19), which reads `LLAMA_BATCH_DEBUG` once, here.
+    /// Ports the constructor of `llama_batch_allocr` (llama-batch.cpp:15
+    /// @d81235049), which reads `LLAMA_BATCH_DEBUG` once, here.
     ///
     /// Parameters:
     /// - `n_pos_per_embd`: positions per token, 4 for M-RoPE.
+    /// - `allow_mixed`: whether a batch may mix token and embedding entries.
     ///
     /// Return: an allocator with no batch; free it with `deinit`.
-    pub fn init(n_pos_per_embd: u32) BatchAllocr {
-        var self: BatchAllocr = .{ .n_pos_per_embd = n_pos_per_embd };
+    pub fn init(n_pos_per_embd: u32, allow_mixed: bool) BatchAllocr {
+        var self: BatchAllocr = .{ .n_pos_per_embd = n_pos_per_embd, .allow_mixed = allow_mixed };
         self.debug = if (std.c.getenv("LLAMA_BATCH_DEBUG")) |v| atoi(v) else 0;
         self.seq_idx.appendNTimes(allocator, -1, max_seq) catch oom();
         return self;
@@ -316,6 +370,11 @@ pub const BatchAllocr = struct {
 
     /// Return: nothing.
     pub fn deinit(self: *BatchAllocr) void {
+        self.token_vec.deinit(allocator);
+        self.embd_vec.deinit(allocator);
+        self.is_embd_vec.deinit(allocator);
+        self.seq_id_data.deinit(allocator);
+        self.decision_order.deinit(allocator);
         self.pos.deinit(allocator);
         self.n_seq_id.deinit(allocator);
         self.seq_id.deinit(allocator);
@@ -336,64 +395,165 @@ pub const BatchAllocr = struct {
         self.seq_set_map.clearRetainingCapacity();
     }
 
-    /// Ports `llama_batch_allocr`'s `init` (llama-batch.cpp:25 @7fe450e19):
-    /// validates the batch, generates what it omits -- sequence ids,
-    /// positions, output flags -- and checks it against the memory.
+    /// Ports `llama_batch_allocr`'s `init` (llama-batch.cpp:28 @d81235049):
+    /// converts the extended batch into the flat batch this allocator keeps,
+    /// validates it, and checks it against the memory the extended batch
+    /// names.
     ///
     /// Parameters:
-    /// - `batch_inp`: the batch; its arrays are borrowed until the next
-    ///   `initBatch`, `ubatchReserve` or `deinit`.
-    /// - `vocab`: the vocabulary, for the token-id check and the debug log;
-    ///   borrowed for as long as the batch.
-    /// - `memory`: the memory module, for sequence continuity and the
-    ///   starting positions; null for none.
-    /// - `n_embd`: the embedding width, for an embeddings batch.
-    /// - `n_seq_max`: the number of sequences the context has.
+    /// - `batch_inp`: the batch; read only during the call.
+    /// - `vocab`: the vocabulary, for the debug log; borrowed until the next
+    ///   `initBatch` or `deinit`.
     /// - `output_all`: every token is an output.
     ///
     /// Return: whether the batch is valid; what is wrong is logged.
-    pub fn initBatch(
-        self: *BatchAllocr,
-        batch_inp: c.llama_batch,
-        vocab: *const Vocab,
-        memory: ?MemoryPos,
-        n_embd: u32,
-        n_seq_max: u32,
-        output_all: bool,
-    ) bool {
+    pub fn initBatch(self: *BatchAllocr, batch_inp: *const BatchExt, vocab: *const Vocab, output_all: bool) bool {
         const f = "init";
         self.clear();
 
-        self.batch = batch_inp;
         self.vocab = vocab;
+        self.n_embd = @truncate(if (batch_inp.n_embd > 0) batch_inp.n_embd else batch_inp.n_embd_inp);
+        self.n_seq_max = @bitCast(batch_inp.n_seq_max);
 
-        impl.assert(self.batch.n_tokens > 0, "llama-batch.cpp", 38, "batch.n_tokens > 0");
-        const n_tokens: usize = @intCast(self.batch.n_tokens);
+        const toks = batch_inp.tokens.items;
+        const n_tok: i32 = @truncate(@as(isize, @bitCast(toks.len)));
 
-        //
-        // validate input batch
-        //
+        impl.assert(n_tok > 0, "llama-batch.cpp", 40, "n_tok > 0");
+        const n_tokens: usize = @intCast(n_tok);
 
-        if (n_seq_max > max_seq) {
-            impl.logError("%s: n_seq_max = %d > %d\n", .{ f, cInt(n_seq_max), cInt(max_seq) });
+        if (self.n_seq_max > max_seq) {
+            impl.logError("%s: n_seq_max = %d > %d\n", .{ f, cInt(self.n_seq_max), cInt(max_seq) });
             return false;
         }
 
-        if (self.batch.token != null) {
-            for (0..n_tokens) |i| {
-                const t = self.batch.token[i];
-                if (t < 0 or @as(u32, @bitCast(t)) >= vocab.nTokens()) {
-                    impl.logError("%s: invalid token[%d] = %d\n", .{ f, @as(i32, @intCast(i)), t });
+        const mem = batch_inp.mem;
+        const n_seq_max = self.n_seq_max;
+
+        //
+        // the content types: an entry carries a token id, an embedding, or
+        // both (MTP hook batches); all carry the same, or tokens and
+        // embeddings mix
+        //
+
+        var n_tok_only: i32 = 0;
+        var n_embd_only: i32 = 0;
+        var n_both: i32 = 0;
+
+        for (toks, 0..) |*t, i| {
+            const is_tok = t.id != null_token;
+            const is_emb = t.has_embd;
+
+            if (!is_tok and !is_emb) {
+                impl.logError("%s: entry %d has neither a token id nor an embedding\n", .{ f, @as(i32, @intCast(i)) });
+                return false;
+            }
+
+            n_tok_only += @intFromBool(is_tok and !is_emb);
+            n_embd_only += @intFromBool(is_emb and !is_tok);
+            n_both += @intFromBool(is_tok and is_emb);
+        }
+
+        if (n_both > 0 and n_both != n_tok) {
+            impl.logError("%s: entries with both a token id and an embedding cannot be mixed with other entries\n", .{f});
+            return false;
+        }
+
+        const mixed = n_tok_only > 0 and n_embd_only > 0;
+
+        if (mixed and !self.allow_mixed) {
+            impl.logError("%s: this model or context does not support batches mixing token and embedding entries\n", .{f});
+            return false;
+        }
+
+        const has_token = n_tok_only > 0 or n_both > 0;
+        const has_embd = n_embd_only > 0 or n_both > 0;
+
+        if (mixed) {
+            self.is_embd_vec.resize(allocator, n_tokens) catch oom();
+            for (toks, 0..) |*t, i| self.is_embd_vec.items[i] = @intFromBool(t.has_embd);
+        }
+
+        //
+        // the flat token and embedding arrays
+        //
+
+        if (has_token) {
+            self.token_vec.resize(allocator, n_tokens) catch oom();
+            for (toks, 0..) |*t, i| {
+                if (mixed and self.is_embd_vec.items[i] != 0) {
+                    self.token_vec.items[i] = 0; // a placeholder
+                    continue;
+                }
+                const id = t.id;
+                if (id < 0 or id >= batch_inp.n_vocab) {
+                    impl.logError("%s: invalid token[%d] = %d\n", .{ f, @as(i32, @intCast(i)), id });
                     return false;
                 }
+                self.token_vec.items[i] = id;
             }
         }
 
-        if (self.batch.seq_id != null) {
-            for (0..n_tokens) |i| {
+        const n_embd: usize = self.n_embd;
+        if (mixed) {
+            self.embd_vec.appendNTimes(allocator, 0, n_tokens * n_embd) catch oom();
+            for (toks, 0..) |*t, i| {
+                if (self.is_embd_vec.items[i] != 0) {
+                    @memcpy(self.embd_vec.items[i * n_embd ..][0..n_embd], batch_inp.embd.items[t.embd_off..][0..n_embd]);
+                }
+            }
+        } else if (has_embd) {
+            // as the entries filled it, which is the entries' order only
+            // when each one's embedding was set in turn, as the C++ copies
+            self.embd_vec.appendSlice(allocator, batch_inp.embd.items) catch oom();
+        }
+
+        //
+        // the flat positions, section-major: pos[j*n_tok + i] is section j of
+        // entry i; a token entry is [p, p, p, 0] (M-RoPE's text position),
+        // an embedding entry its positions as they are
+        //
+
+        const n_pos: usize = self.n_pos_per_embd;
+        self.pos.resize(allocator, n_tokens * n_pos) catch oom();
+        for (toks, 0..) |*tok, i| {
+            const expand = tok.id != null_token;
+            for (0..n_pos) |j| {
+                var p = tok.pos[j];
+                if (expand) {
+                    p = if (j < 3) tok.pos[0] else 0;
+                }
+                self.pos.items[j * n_tokens + i] = p;
+            }
+        }
+
+        //
+        // n_seq_id and seq_id
+        //
+
+        self.n_seq_id.resize(allocator, n_tokens) catch oom();
+        self.seq_id.resize(allocator, n_tokens + 1) catch oom();
+        self.seq_id.items[n_tokens] = null;
+
+        {
+            var total: usize = 0;
+            for (toks) |*t| total += t.seq_ids.count();
+            self.seq_id_data.ensureTotalCapacity(allocator, total) catch oom();
+
+            for (toks) |*t| {
+                const n = t.seq_ids.count();
+                const dst = self.seq_id_data.addManyAsSliceAssumeCapacity(n);
+                t.seq_ids.ordered(dst);
+            }
+
+            var off: usize = 0;
+            for (toks, 0..) |*t, i| {
+                self.n_seq_id.items[i] = @intCast(t.seq_ids.count());
+                self.seq_id.items[i] = self.seq_id_data.items.ptr + off;
+                off += @intCast(self.n_seq_id.items[i]);
+
                 var s: i32 = 0;
-                while (s < self.batch.n_seq_id[i]) : (s += 1) {
-                    const id = self.batch.seq_id[i][@intCast(s)];
+                while (s < self.n_seq_id.items[i]) : (s += 1) {
+                    const id = self.seq_id.items[i][@intCast(s)];
                     if (id < 0 or id >= @as(SeqId, @bitCast(n_seq_max))) {
                         impl.logError("%s: invalid seq_id[%d][%d] = %d >= %d\n", .{ f, @as(i32, @intCast(i)), s, id, cInt(n_seq_max) });
                         return false;
@@ -403,75 +563,53 @@ pub const BatchAllocr = struct {
         }
 
         //
-        // auto-generate missing fields
+        // the output flags
         //
 
-        if (self.batch.n_seq_id == null) {
-            self.n_seq_id.appendNTimes(allocator, self.seq_id_0.len, n_tokens) catch oom();
-            self.batch.n_seq_id = self.n_seq_id.items.ptr;
-        }
+        {
+            self.output.resize(allocator, n_tokens) catch oom();
+            for (toks, 0..) |*t, i| self.output.items[i] = @intFromBool(t.output);
 
-        if (self.batch.seq_id == null) {
-            self.seq_id.appendNTimes(allocator, &self.seq_id_0, n_tokens) catch oom();
-            self.seq_id.append(allocator, null) catch oom();
-            self.batch.seq_id = self.seq_id.items.ptr;
-        }
-
-        if (self.batch.pos == null) {
-            self.pos.resize(allocator, n_tokens) catch oom();
-
-            // the starting position of each sequence, from the memory
-            var p0: [max_seq]Pos = undefined;
-            for (0..n_seq_max) |s| {
-                p0[s] = if (memory) |m| m.posMax(@intCast(s)) + 1 else 0;
-            }
-
-            for (0..n_tokens) |i| {
-                const seq_id = self.batch.seq_id[i][0];
-
-                self.pos.items[i] = p0[@intCast(seq_id)];
-
-                // update the starting position of every sequence this token is in
-                var s: usize = 0;
-                while (s < self.batch.n_seq_id[i]) : (s += 1) {
-                    p0[@intCast(self.batch.seq_id[i][s])] = self.pos.items[i] + 1;
+            if (output_all) {
+                var warn = false;
+                for (self.output.items) |o| {
+                    if (o == 0) {
+                        warn = true;
+                        break;
+                    }
+                }
+                if (warn) {
+                    impl.logWarn("%s: embeddings required but some input tokens were not marked as outputs -> overriding\n", .{f});
+                    @memset(self.output.items, 1);
                 }
             }
-
-            self.batch.pos = self.pos.items.ptr;
         }
 
-        if (self.batch.logits == null) {
-            if (output_all) {
-                self.output.appendNTimes(allocator, 1, n_tokens) catch oom();
-            } else {
-                // only the last token
-                self.output.appendNTimes(allocator, 0, n_tokens) catch oom();
-                self.output.items[n_tokens - 1] = 1;
-            }
-            self.batch.logits = self.output.items.ptr;
-        } else if (output_all) {
-            var warn = false;
-            for (0..n_tokens) |i| {
-                if (self.batch.logits[i] == 0) warn = true;
-            }
-
-            if (warn) {
-                impl.logWarn("%s: embeddings required but some input tokens were not marked as outputs -> overriding\n", .{f});
-
-                // `output` is empty here: `clear` emptied it and the arm
-                // above did not run, so the C++'s resize fills every slot
-                self.output.appendNTimes(allocator, 1, n_tokens) catch oom();
-                self.batch.logits = self.output.items.ptr;
+        // kept empty when no entry has one
+        for (toks, 0..) |*t, i| {
+            if (t.decision_order != 0) {
+                if (self.decision_order.items.len < n_tokens) {
+                    self.decision_order.appendNTimes(allocator, 0, n_tokens - self.decision_order.items.len) catch oom();
+                }
+                self.decision_order.items[i] = t.decision_order;
             }
         }
+
+        //
+        // the flat batch, over the arrays above
+        //
+
+        self.batch.n_tokens = n_tok;
+        self.batch.token = if (has_token) dataPtr(Token, &self.token_vec) else null;
+        self.batch.embd = if (has_embd) dataPtr(f32, &self.embd_vec) else null;
+        self.batch.pos = dataPtr(Pos, &self.pos);
+        self.batch.n_seq_id = dataPtr(i32, &self.n_seq_id);
+        self.batch.seq_id = dataPtr([*c]SeqId, &self.seq_id);
+        self.batch.logits = dataPtr(i8, &self.output);
 
         //
         // compute stats
         //
-
-        self.n_embd = n_embd;
-        self.n_seq_max = n_seq_max;
 
         for (0..n_tokens) |i| {
             self.n_outputs += @intFromBool(self.batch.logits[i] != 0);
@@ -542,6 +680,8 @@ pub const BatchAllocr = struct {
                 .seq_id_unq = self.seq_id_unq.items.ptr,
                 .seq_idx = self.seq_idx.items.ptr,
                 .output = self.batch.logits,
+                .type = dataPtr(i8, &self.is_embd_vec),
+                .decision_order = dataPtr(i32, &self.decision_order),
                 .data = null,
             };
 
@@ -573,14 +713,30 @@ pub const BatchAllocr = struct {
         //
 
         if (self.n_pos_per_embd > 1) {
+            // in a mixed batch, the first entry of each sequence picks the rule
+            var seq_first_embd: [max_seq]i8 = @splat(if (self.batch.token != null) 0 else 1);
+            if (mixed) {
+                var seen: [max_seq]bool = @splat(false);
+                for (0..n_tokens) |i| {
+                    var s: usize = 0;
+                    while (s < self.batch.n_seq_id[i]) : (s += 1) {
+                        const sid: usize = @intCast(self.batch.seq_id[i][s]);
+                        if (!seen[sid]) {
+                            seen[sid] = true;
+                            seq_first_embd[sid] = self.is_embd_vec.items[i];
+                        }
+                    }
+                }
+            }
+
             // M-RoPE: positions may jump forward, and need not be continuous
             for (0..n_seq_max) |su| {
                 if (self.seq_pos[su].items.items.len == 0) continue;
                 const s: SeqId = @intCast(su);
 
-                const p0: Pos = if (memory) |m| m.posMax(s) else -1;
+                const p0: Pos = if (mem) |m| m.posMax(s) else -1;
 
-                if (self.batch.token != null) {
+                if (seq_first_embd[su] == 0) {
                     if (p0 >= 0 and p0 >= self.seqPosMin(s)) {
                         impl.logError(
                             "%s: the tokens of sequence %d in the input batch have inconsistent sequence positions:\n" ++
@@ -610,7 +766,7 @@ pub const BatchAllocr = struct {
                 if (self.seq_pos[su].items.items.len == 0) continue;
                 const s: SeqId = @intCast(su);
 
-                const p0: Pos = if (memory) |m| m.posMax(s) else -1;
+                const p0: Pos = if (mem) |m| m.posMax(s) else -1;
 
                 if (p0 >= 0) {
                     if (self.seqPosMin(s) != p0 + 1) {
@@ -632,7 +788,7 @@ pub const BatchAllocr = struct {
             }
         }
 
-        if (memory) |m| {
+        if (mem) |m| {
             for (0..n_seq_max) |s0| {
                 for (0..n_seq_max) |s1| {
                     if (self.seq_cpl[s0] & bit(@intCast(s1)) != 0) {
@@ -685,8 +841,8 @@ pub const BatchAllocr = struct {
         return true;
     }
 
-    /// Ports `llama_batch_allocr`'s `ubatch_reserve` (llama-batch.cpp:393
-    /// @7fe450e19): a well-defined ubatch of `n_seqs` sequences of
+    /// Ports `llama_batch_allocr`'s `ubatch_reserve` (llama-batch.cpp:484
+    /// @d81235049): a well-defined ubatch of `n_seqs` sequences of
     /// `n_seq_tokens` tokens, all zero, for sizing compute buffers. It clears
     /// the allocator's batch.
     ///
@@ -732,39 +888,41 @@ pub const BatchAllocr = struct {
             .seq_id_unq = dataPtr(SeqId, &udata.seq_id_unq),
             .seq_idx = dataPtr(i32, &udata.seq_idx),
             .output = dataPtr(i8, &udata.output),
+            .type = null,
+            .decision_order = null,
             .data = udata,
         };
     }
 
-    /// Ports `llama_batch_allocr`'s `get_batch` (llama-batch.cpp:439 @7fe450e19).
+    /// Ports `llama_batch_allocr`'s `get_batch` (llama-batch.cpp:532 @d81235049).
     ///
     /// Return: the sanitized batch, borrowed from the allocator.
     pub fn getBatch(self: *const BatchAllocr) *const c.llama_batch {
         return &self.batch;
     }
 
-    /// Ports `llama_batch_allocr`'s `get_n_tokens` (llama-batch.cpp:443 @7fe450e19).
+    /// Ports `llama_batch_allocr`'s `get_n_tokens` (llama-batch.cpp:536 @d81235049).
     ///
     /// Return: the batch's token count.
     pub fn getNTokens(self: *const BatchAllocr) u32 {
         return @bitCast(self.batch.n_tokens);
     }
 
-    /// Ports `llama_batch_allocr`'s `get_n_outputs` (llama-batch.cpp:447 @7fe450e19).
+    /// Ports `llama_batch_allocr`'s `get_n_outputs` (llama-batch.cpp:540 @d81235049).
     ///
     /// Return: how many tokens are outputs.
     pub fn getNOutputs(self: *const BatchAllocr) u32 {
         return self.n_outputs;
     }
 
-    /// Ports `llama_batch_allocr`'s `get_n_used` (llama-batch.cpp:451 @7fe450e19).
+    /// Ports `llama_batch_allocr`'s `get_n_used` (llama-batch.cpp:544 @d81235049).
     ///
     /// Return: how many tokens the splits since `splitReset` took.
     pub fn getNUsed(self: *const BatchAllocr) u32 {
         return self.n_used;
     }
 
-    /// Ports `llama_batch_allocr`'s `get_out_ids` (llama-batch.cpp:455 @7fe450e19).
+    /// Ports `llama_batch_allocr`'s `get_out_ids` (llama-batch.cpp:548 @d81235049).
     ///
     /// Return: the output indices in the order the splits met them; the
     /// list is the allocator's, and the caller may change it, as the C++'s
@@ -773,7 +931,7 @@ pub const BatchAllocr = struct {
         return &self.out_ids;
     }
 
-    /// Ports `llama_batch_allocr`'s `seq_pos_min` (llama-batch.cpp:459 @7fe450e19).
+    /// Ports `llama_batch_allocr`'s `seq_pos_min` (llama-batch.cpp:552 @d81235049).
     ///
     /// Parameters:
     /// - `seq_id`: the sequence, in `[0, LLAMA_MAX_SEQ)`.
@@ -784,7 +942,7 @@ pub const BatchAllocr = struct {
         return if (p.len == 0) -1 else p[0];
     }
 
-    /// Ports `llama_batch_allocr`'s `seq_pos_max` (llama-batch.cpp:463 @7fe450e19).
+    /// Ports `llama_batch_allocr`'s `seq_pos_max` (llama-batch.cpp:556 @d81235049).
     ///
     /// Parameters:
     /// - `seq_id`: the sequence, in `[0, LLAMA_MAX_SEQ)`.
@@ -795,8 +953,8 @@ pub const BatchAllocr = struct {
         return if (p.len == 0) -1 else p[p.len - 1];
     }
 
-    /// Ports `llama_batch_allocr`'s `split_reset` (llama-batch.cpp:467
-    /// @7fe450e19): call once before splitting.
+    /// Ports `llama_batch_allocr`'s `split_reset` (llama-batch.cpp:560
+    /// @d81235049): call once before splitting.
     ///
     /// Return: nothing.
     pub fn splitReset(self: *BatchAllocr) void {
@@ -808,8 +966,8 @@ pub const BatchAllocr = struct {
         self.used.appendNTimes(allocator, false, self.getNTokens()) catch oom();
     }
 
-    /// Ports `llama_batch_allocr`'s `split_simple` (llama-batch.cpp:476
-    /// @7fe450e19): the next `n_ubatch` unused tokens, in batch order, as
+    /// Ports `llama_batch_allocr`'s `split_simple` (llama-batch.cpp:569
+    /// @d81235049): the next `n_ubatch` unused tokens, in batch order, as
     /// sequence sets of one token each.
     ///
     /// Parameters:
@@ -849,8 +1007,8 @@ pub const BatchAllocr = struct {
         return self.seq_set_map.getPtr(set).?.items;
     }
 
-    /// Ports `llama_batch_allocr`'s `split_equal` (llama-batch.cpp:510
-    /// @7fe450e19): ubatches of non-overlapping sequence sets with the same
+    /// Ports `llama_batch_allocr`'s `split_equal` (llama-batch.cpp:603
+    /// @d81235049): ubatches of non-overlapping sequence sets with the same
     /// number of tokens each.
     ///
     /// Parameters:
@@ -957,7 +1115,7 @@ pub const BatchAllocr = struct {
         // least n_keep_tail tokens for later, so no set's trailing
         // n_keep_tail tokens are split across ubatches
         if (n_keep_tail > 0) {
-            impl.assert(n_ubatch > n_keep_tail, "llama-batch.cpp", 609, "n_ubatch > n_keep_tail");
+            impl.assert(n_ubatch > n_keep_tail, "llama-batch.cpp", 702, "n_ubatch > n_keep_tail");
 
             const Remaining = struct {
                 fn of(a: *BatchAllocr, sets: []const SeqSet, idx: []const i32, s: usize) u32 {
@@ -1031,8 +1189,8 @@ pub const BatchAllocr = struct {
         return self.ubatchAdd(idxs.items, n_seqs, true);
     }
 
-    /// Ports `llama_batch_allocr`'s `split_seq` (llama-batch.cpp:681
-    /// @7fe450e19): one sequence set per ubatch, taking later tokens whose
+    /// Ports `llama_batch_allocr`'s `split_seq` (llama-batch.cpp:774
+    /// @d81235049): one sequence set per ubatch, taking later tokens whose
     /// set is a subset of the current one.
     ///
     /// Parameters:
@@ -1077,18 +1235,23 @@ pub const BatchAllocr = struct {
         return self.ubatchAdd(idxs.items, 1, true);
     }
 
-    /// Ports `llama_batch_allocr`'s `clear` (llama-batch.cpp:723 @7fe450e19).
+    /// Ports `llama_batch_allocr`'s `clear` (llama-batch.cpp:816 @d81235049).
     /// `has_cpl`, `used`, `out_ids` and `n_used` survive it, as in the C++.
     fn clear(self: *BatchAllocr) void {
         self.n_outputs = 0;
 
         self.batch = .{};
 
+        self.token_vec.clearRetainingCapacity();
+        self.embd_vec.clearRetainingCapacity();
+        self.is_embd_vec.clearRetainingCapacity();
+        self.seq_id_data.clearRetainingCapacity();
         self.pos.clearRetainingCapacity();
         self.n_seq_id.clearRetainingCapacity();
         self.seq_id.clearRetainingCapacity();
         self.seq_id_unq.clearRetainingCapacity();
         self.output.clearRetainingCapacity();
+        self.decision_order.clearRetainingCapacity();
 
         for (&self.seq_pos) |*p| p.items.clearRetainingCapacity();
 
@@ -1101,17 +1264,26 @@ pub const BatchAllocr = struct {
         @memset(self.seq_idx.items, -1);
     }
 
-    /// Ports `llama_batch_allocr`'s `ubatch_add` (llama-batch.cpp:749
-    /// @7fe450e19): copies the tokens at `idxs` into a new ubatch and
-    /// records its outputs in `out_ids`.
+    /// Ports `llama_batch_allocr`'s `ubatch_add` (llama-batch.cpp:847
+    /// @d81235049): copies the tokens at `idxs` into a new ubatch and
+    /// records its outputs in `out_ids`. From a mixed batch, a ubatch whose
+    /// rows are all of one kind is a plain token or embedding ubatch.
     fn ubatchAdd(self: *BatchAllocr, idxs: []const i32, n_seqs: u32, equal_seqs: bool) Ubatch {
         const n_tokens: u32 = @intCast(idxs.len);
 
-        std.debug.assert(n_tokens % n_seqs == 0);
-
         const udata = UbatchData.create();
 
-        const n_embd_all: usize = if (self.batch.embd != null) @as(usize, n_tokens) * self.n_embd else 0;
+        const mixed_batch = self.is_embd_vec.items.len != 0;
+
+        var n_embd_rows: u32 = 0;
+        if (mixed_batch) {
+            for (idxs) |idx| n_embd_rows += @intCast(self.is_embd_vec.items[@intCast(idx)]);
+        }
+        const mixed = mixed_batch and n_embd_rows > 0 and n_embd_rows < n_tokens;
+        const use_token = self.batch.token != null and !(mixed_batch and n_embd_rows == n_tokens);
+        const use_embd = self.batch.embd != null and !(mixed_batch and n_embd_rows == 0);
+
+        const n_embd_all: usize = if (use_embd) @as(usize, n_tokens) * self.n_embd else 0;
         const n_pos_all: usize = @as(usize, n_tokens) * self.n_pos_per_embd;
 
         udata.token.appendNTimes(allocator, 0, n_tokens) catch oom();
@@ -1121,7 +1293,10 @@ pub const BatchAllocr = struct {
         udata.seq_id.appendNTimes(allocator, null, n_tokens) catch oom();
         udata.seq_idx.appendNTimes(allocator, -1, max_seq) catch oom();
         udata.output.appendNTimes(allocator, 0, n_tokens) catch oom();
+        udata.type.appendNTimes(allocator, 0, if (mixed) n_tokens else 0) catch oom();
+        udata.decision_order.appendNTimes(allocator, 0, if (self.decision_order.items.len == 0) 0 else n_tokens) catch oom();
 
+        udata.batch_idxs.appendSlice(allocator, idxs) catch oom();
         udata.seq_id_data.ensureTotalCapacity(allocator, n_tokens) catch oom();
 
         var seq_set_unq: SeqSet = 0;
@@ -1132,23 +1307,28 @@ pub const BatchAllocr = struct {
         for (idxs, 0..) |idx_i, i| {
             const idx: usize = @intCast(idx_i);
 
-            if (self.batch.token != null) {
+            if (use_token) {
                 udata.token.items[i] = self.batch.token[idx];
             }
 
-            if (self.batch.embd != null) {
+            if (use_embd) {
                 @memcpy(udata.embd.items[i * n_embd ..][0..n_embd], self.batch.embd[idx * n_embd ..][0..n_embd]);
             }
 
+            if (mixed) {
+                udata.type.items[i] = self.is_embd_vec.items[idx];
+            }
+
             for (0..self.n_pos_per_embd) |j| {
-                // M-RoPE: a text batch broadcasts its one position to every
-                // section; an embeddings batch carries all of them
-                const src_off: usize = if (self.batch.token != null) 0 else j * batch_n_tokens;
-                udata.pos.items[j * n_tokens + i] = self.batch.pos[src_off + idx];
+                udata.pos.items[j * n_tokens + i] = self.batch.pos[j * batch_n_tokens + idx];
             }
 
             udata.n_seq_id.items[i] = self.batch.n_seq_id[idx];
             udata.output.items[i] = self.batch.logits[idx];
+
+            if (self.decision_order.items.len != 0) {
+                udata.decision_order.items[i] = self.decision_order.items[idx];
+            }
 
             var s: usize = 0;
             while (s < udata.n_seq_id.items[i]) : (s += 1) {
@@ -1183,14 +1363,16 @@ pub const BatchAllocr = struct {
             .n_seqs = n_seqs,
             .n_seqs_unq = @intCast(udata.seq_id_unq.items.len),
             .n_pos = self.n_pos_per_embd,
-            .token = if (self.batch.token != null) dataPtr(Token, &udata.token) else null,
-            .embd = if (self.batch.embd != null) dataPtr(f32, &udata.embd) else null,
+            .token = if (use_token) dataPtr(Token, &udata.token) else null,
+            .embd = if (use_embd) dataPtr(f32, &udata.embd) else null,
             .pos = dataPtr(Pos, &udata.pos),
             .n_seq_id = dataPtr(i32, &udata.n_seq_id),
             .seq_id = dataPtr([*c]SeqId, &udata.seq_id),
             .seq_id_unq = dataPtr(SeqId, &udata.seq_id_unq),
             .seq_idx = dataPtr(i32, &udata.seq_idx),
             .output = dataPtr(i8, &udata.output),
+            .type = if (mixed) dataPtr(i8, &udata.type) else null,
+            .decision_order = dataPtr(i32, &udata.decision_order),
             .data = udata,
         };
 
@@ -1203,8 +1385,8 @@ pub const BatchAllocr = struct {
         return res;
     }
 
-    /// Ports `llama_batch_allocr`'s `ubatch_print` (llama-batch.cpp:846
-    /// @7fe450e19), for `LLAMA_BATCH_DEBUG`.
+    /// Ports `llama_batch_allocr`'s `ubatch_print` (llama-batch.cpp:965
+    /// @d81235049), for `LLAMA_BATCH_DEBUG`.
     fn ubatchPrint(self: *const BatchAllocr, ubatch: *const Ubatch, debug: c_int) void {
         if (debug <= 0) return;
         const f = "ubatch_print";
@@ -1246,6 +1428,7 @@ pub const BatchAllocr = struct {
         impl.logDebug("%s:   seq_id_unq = %s\n", .{ f, @as([*:0]const u8, @ptrCast(ss_seq_id_unq.items.ptr)) });
         impl.logDebug("%s:   seq_idx    = %s\n", .{ f, @as([*:0]const u8, @ptrCast(ss_seq_idx.items.ptr)) });
         impl.logDebug("%s:   output     = %p\n", .{ f, @as(?*anyopaque, @ptrCast(ubatch.output)) });
+        impl.logDebug("%s:   type       = %p\n", .{ f, @as(?*anyopaque, @ptrCast(ubatch.type)) });
         impl.logDebug("%s:   n_outputs  = %d\n", .{ f, cInt(self.n_outputs) });
 
         var seq_id_max: SeqId = 0;
@@ -1285,9 +1468,9 @@ pub const BatchAllocr = struct {
             const ss_z: [*:0]const u8 = @ptrCast(ss.items.ptr);
 
             const ii: c_int = @intCast(i);
-            if (ubatch.token != null) {
+            if (ubatch.token != null and !(ubatch.isMixed() and ubatch.type[i] != 0)) {
                 var exc: impl.Exception = .{};
-                const text = self.vocab.?.cachedPiece(ubatch.token[i], &exc) catch exc.terminate("llama-batch.cpp", 915);
+                const text = self.vocab.?.cachedPiece(ubatch.token[i], &exc) catch exc.terminate("llama-batch.cpp", 1035);
                 piece.clearRetainingCapacity();
                 piece.appendSlice(allocator, text) catch oom();
                 piece.append(allocator, 0) catch oom();
@@ -1309,9 +1492,395 @@ pub const BatchAllocr = struct {
 };
 
 // -----------------------------------------------------------------------------
+// llama_batch_ext
+
+/// `LLAMA_TOKEN_NULL`.
+pub const null_token: Token = -1;
+
+/// `GGML_MROPE_SECTIONS`: the positions an entry holds.
+pub const mrope_sections = 4;
+
+/// A `llama_batch_ext` entry's `std::unordered_set<llama_seq_id>`: the ids
+/// in insertion order, without duplicates, from which `ordered` replays
+/// libc++'s iteration order.
+pub const SeqIdSet = struct {
+    items: std.ArrayList(SeqId) = .empty,
+
+    fn deinit(self: *SeqIdSet) void {
+        self.items.deinit(allocator);
+    }
+
+    /// `insert(s)`: a no-op when `s` is already present.
+    fn insert(self: *SeqIdSet, s: SeqId) void {
+        for (self.items.items) |x| if (x == s) return;
+        self.items.append(allocator, s) catch oom();
+    }
+
+    /// `size()`.
+    pub fn count(self: *const SeqIdSet) usize {
+        return self.items.items.len;
+    }
+
+    /// The set in libc++'s iteration order.
+    ///
+    /// Parameters:
+    /// - `out`: `count()` slots to fill.
+    ///
+    /// Return: nothing.
+    pub fn ordered(self: *const SeqIdSet, out: []SeqId) void {
+        const items = self.items.items;
+        if (items.len <= 1) {
+            @memcpy(out, items);
+            return;
+        }
+        var m = libcxx.I32Map(void).init(allocator) catch oom();
+        defer m.deinit();
+        for (items) |s| m.put(s, {}) catch oom();
+        var it = m.iterator();
+        var k: usize = 0;
+        while (it.next()) |e| : (k += 1) out[k] = e.key;
+    }
+};
+
+/// Ports `llama_batch_ext_select_n_embd_inp` (llama-batch.cpp:1112
+/// @d81235049): the width of a batch's embedding rows. MTP hook batches carry
+/// the target model's hidden state, DFlash batches the fused target features
+/// at the encoder's input width, and the rest token embeddings.
+///
+/// Parameters:
+/// - `ctx_type`: the context's type.
+/// - `arch`: the model's architecture.
+/// - `hparams`: the model's hyperparameters.
+///
+/// Return: the row width, in floats.
+pub fn selectNEmbdInp(ctx_type: c.enum_llama_context_type, arch: arch_mod.Arch, hparams: *const hparams_mod.Hparams) usize {
+    if (ctx_type == c.LLAMA_CONTEXT_TYPE_MTP) {
+        return hparams.nEmbdOut();
+    }
+    if (arch == .dflash) {
+        return hparams.nEmbdInpEnc();
+    }
+    return hparams.nEmbdInp();
+}
+
+/// Ports `llama_batch_ext` (llama-batch.h:93 @d81235049): the extended
+/// batch, a list of entries each carrying a token id, an embedding or both,
+/// its sequences, positions and output flag. The handle behind
+/// `struct llama_batch_ext *`.
+pub const BatchExt = struct {
+    /// The most entries the batch holds.
+    n_tokens_max: usize,
+    /// The decoder's embedding row width.
+    n_embd_inp: usize,
+    /// The encoder's embedding row width (eagle3 and DFlash features).
+    n_embd_inp_enc: usize,
+    /// The most sequences.
+    n_seq_max: SeqId,
+    /// The memory, for position inference; null for none.
+    mem: ?MemoryPos,
+    /// One past the largest token id accepted.
+    n_vocab: Token,
+    n_pos_per_embd: usize,
+
+    /// This batch's embedding row width, set by the first `setTokenEmbd`:
+    /// `n_embd_inp` or `n_embd_inp_enc`, checked against the graph's input
+    /// by encode and decode.
+    n_embd: usize = 0,
+
+    tokens: std.ArrayList(Entry) = .empty,
+    embd: std.ArrayList(f32) = .empty,
+
+    /// Ports `llama_batch_ext`'s `token` (llama-batch.h:106 @d81235049).
+    pub const Entry = struct {
+        id: Token = null_token,
+        /// Whether `embd_off` is set.
+        has_embd: bool = false,
+        /// The offset of the entry's embedding in `embd`.
+        embd_off: usize = 0,
+        output: bool = false,
+        decision_order: i32 = 0,
+        seq_ids: SeqIdSet = .{},
+        pos: [mrope_sections]Pos = .{ 0, 0, 0, 0 },
+    };
+
+    /// Ports the test constructor of `llama_batch_ext` (llama-batch.cpp:1133
+    /// @d81235049), which the context constructor calls with the context's
+    /// values: `Context.batchExtCreate` ports that one (llama-batch.cpp:1122
+    /// @d81235049).
+    ///
+    /// Return: an empty batch on the heap; free it with `destroy`.
+    pub fn create(
+        n_tokens_max: usize,
+        n_embd_inp: usize,
+        n_embd_inp_enc: usize,
+        n_seq_max: SeqId,
+        mem: ?MemoryPos,
+        n_vocab: Token,
+        n_pos_per_embd: usize,
+    ) *BatchExt {
+        const self = allocator.create(BatchExt) catch oom();
+        self.* = .{
+            .n_tokens_max = n_tokens_max,
+            .n_embd_inp = n_embd_inp,
+            .n_embd_inp_enc = n_embd_inp_enc,
+            .n_seq_max = n_seq_max,
+            .mem = mem,
+            .n_vocab = n_vocab,
+            .n_pos_per_embd = n_pos_per_embd,
+        };
+        return self;
+    }
+
+    /// Frees the batch, as `delete` does.
+    ///
+    /// Return: nothing.
+    pub fn destroy(self: *BatchExt) void {
+        self.clear();
+        self.tokens.deinit(allocator);
+        self.embd.deinit(allocator);
+        allocator.destroy(self);
+    }
+
+    /// Ports `llama_batch_ext`'s `clear` (llama-batch.cpp:1151 @d81235049).
+    ///
+    /// Return: nothing.
+    pub fn clear(self: *BatchExt) void {
+        for (self.tokens.items) |*t| t.seq_ids.deinit();
+        self.tokens.clearRetainingCapacity();
+        self.embd.clearRetainingCapacity();
+        self.n_embd = 0;
+    }
+
+    fn validIdx(self: *const BatchExt, idx: i32) bool {
+        return idx >= 0 and idx < @as(i32, @truncate(@as(isize, @bitCast(self.tokens.items.len))));
+    }
+
+    /// Ports `llama_batch_ext`'s `add_token` (llama-batch.cpp:1157
+    /// @d81235049): an entry in one sequence, with no position yet.
+    ///
+    /// Return: its index, -1 when the batch is full, -3 for an invalid
+    /// sequence id.
+    pub fn addToken(self: *BatchExt, seq_id: SeqId) i32 {
+        if (self.tokens.items.len >= self.n_tokens_max) {
+            return -1; // size limit reached
+        }
+        if (seq_id < 0 or seq_id >= self.n_seq_max) {
+            return -3; // invalid sequence id
+        }
+
+        var t: Entry = .{};
+        t.seq_ids.insert(seq_id);
+
+        self.tokens.append(allocator, t) catch oom();
+
+        return @truncate(@as(isize, @bitCast(self.tokens.items.len - 1)));
+    }
+
+    /// Ports `llama_batch_ext`'s `add_seq` (llama-batch.cpp:1174 @d81235049).
+    ///
+    /// Return: false for an invalid index or sequence id.
+    pub fn addSeq(self: *BatchExt, idx: i32, seq_id: SeqId) bool {
+        if (!self.validIdx(idx)) {
+            return false;
+        }
+        if (seq_id < 0 or seq_id >= self.n_seq_max) {
+            return false;
+        }
+
+        self.tokens.items[@intCast(idx)].seq_ids.insert(seq_id);
+
+        return true;
+    }
+
+    /// Ports `llama_batch_ext`'s `set_token_id` (llama-batch.cpp:1189
+    /// @d81235049).
+    ///
+    /// Return: false for an invalid index or token id.
+    pub fn setTokenId(self: *BatchExt, idx: i32, id: Token) bool {
+        if (!self.validIdx(idx)) {
+            return false;
+        }
+        if (id < 0 or id >= self.n_vocab) {
+            return false;
+        }
+        self.tokens.items[@intCast(idx)].id = id;
+        return true;
+    }
+
+    /// Ports `llama_batch_ext`'s `set_token_embd` (llama-batch.cpp:1200
+    /// @d81235049): the entry's embedding, `n_rows * n_embd` floats, which
+    /// must be the batch's row width -- the first one sets it.
+    ///
+    /// Return: false for an invalid index, a null or mis-sized embedding, or
+    /// an entry that has one already.
+    pub fn setTokenEmbd(self: *BatchExt, idx: i32, embd_in: c.struct_llama_embd) bool {
+        const f = "set_token_embd";
+        if (!self.validIdx(idx)) {
+            return false;
+        }
+        if (embd_in.data == null) {
+            return false;
+        }
+
+        const n_total = embd_in.n_rows *% embd_in.n_embd;
+        if (self.n_embd == 0) {
+            if (n_total != self.n_embd_inp and n_total != self.n_embd_inp_enc) {
+                impl.logError("%s: embedding size mismatch, got %zu rows x %zu = %zu, expected %zu or %zu\n", .{ f, embd_in.n_rows, embd_in.n_embd, n_total, self.n_embd_inp, self.n_embd_inp_enc });
+                return false;
+            }
+            self.n_embd = n_total;
+        } else if (n_total != self.n_embd) {
+            impl.logError("%s: embedding size mismatch, got %zu rows x %zu = %zu, expected %zu\n", .{ f, embd_in.n_rows, embd_in.n_embd, n_total, self.n_embd });
+            return false;
+        }
+
+        const t = &self.tokens.items[@intCast(idx)];
+
+        if (t.has_embd) {
+            impl.logError("%s: embedding for token %d is already set\n", .{ f, idx });
+            return false;
+        }
+
+        t.has_embd = true;
+        t.embd_off = self.embd.items.len;
+        self.embd.appendSlice(allocator, embd_in.data[0..n_total]) catch oom();
+
+        return true;
+    }
+
+    /// Ports `llama_batch_ext`'s `set_token_pos` (llama-batch.cpp:1236
+    /// @d81235049): one position for an entry with a token id, and
+    /// `n_pos_per_embd` for an embedding.
+    ///
+    /// Return: false for an invalid index or a null `pos_in`.
+    pub fn setTokenPos(self: *BatchExt, idx: i32, pos_in: [*c]const Pos) bool {
+        if (!self.validIdx(idx)) {
+            return false;
+        }
+        if (pos_in == null) {
+            return false;
+        }
+
+        const t = &self.tokens.items[@intCast(idx)];
+
+        const n_pos: usize = if (t.id != null_token) 1 else self.n_pos_per_embd;
+        for (0..n_pos) |i| {
+            t.pos[i] = pos_in[i];
+        }
+
+        return true;
+    }
+
+    /// Ports `llama_batch_ext`'s `set_output` (llama-batch.cpp:1254
+    /// @d81235049).
+    ///
+    /// Return: false for an invalid index.
+    pub fn setOutput(self: *BatchExt, idx: i32, output_last: bool) bool {
+        if (!self.validIdx(idx)) {
+            return false;
+        }
+        self.tokens.items[@intCast(idx)].output = output_last;
+        return true;
+    }
+
+    /// Ports `llama_batch_ext`'s `set_decision_order` (llama-batch.cpp:1262
+    /// @d81235049).
+    ///
+    /// Return: false for an invalid index.
+    pub fn setDecisionOrder(self: *BatchExt, idx: i32, order: i32) bool {
+        if (!self.validIdx(idx)) {
+            return false;
+        }
+        self.tokens.items[@intCast(idx)].decision_order = order;
+        return true;
+    }
+};
+
+/// Ports `llama_batch_compat`'s `init` (llama-batch.cpp:1344 @d81235049):
+/// fills an extended batch from a `llama_batch`, generating what the old API
+/// leaves out -- one sequence 0, positions continuing from the memory along
+/// each entry's first sequence, and the last entry as the only output.
+///
+/// Parameters:
+/// - `dst`: the batch to append to.
+/// - `batch_inp`: the old batch; read only during the call.
+/// - `n_embd_row_in`: the width of its embedding rows, 0 for the decoder's.
+///
+/// Return: nothing.
+pub fn compatInit(dst: *BatchExt, batch_inp: c.llama_batch, n_embd_row_in: usize) void {
+    const n_embd_row = if (n_embd_row_in == 0) dst.n_embd_inp else n_embd_row_in;
+
+    // a batch can carry both, the MTP hook batches for one
+    const has_token = batch_inp.token != null;
+    const has_embd = batch_inp.embd != null;
+
+    const default_seq_id: SeqId = 0;
+
+    // positions continue from the memory when batch_inp.pos is null
+    const n_seq_max: usize = @intCast(@max(dst.n_seq_max, 0));
+    const pos_next = allocator.alloc(Pos, n_seq_max) catch oom();
+    defer allocator.free(pos_next);
+    for (0..n_seq_max) |s| {
+        const p_max: Pos = if (dst.mem) |m| m.posMax(@intCast(s)) else -1;
+        pos_next[s] = p_max + 1;
+    }
+
+    var i: i32 = 0;
+    while (i < batch_inp.n_tokens) : (i += 1) {
+        const iu: usize = @intCast(i);
+        const n_sid: i32 = if (batch_inp.n_seq_id != null) batch_inp.n_seq_id[iu] else 1;
+        const sids: [*c]const SeqId = if (batch_inp.seq_id != null) batch_inp.seq_id[iu] else &default_seq_id;
+
+        var t: BatchExt.Entry = .{};
+
+        var s: i32 = 0;
+        while (s < n_sid) : (s += 1) {
+            t.seq_ids.insert(sids[@intCast(s)]);
+        }
+
+        if (batch_inp.pos != null) {
+            if (has_token) {
+                // a token batch: one position per token
+                t.pos[0] = batch_inp.pos[iu];
+            } else {
+                // an embedding batch (M-RoPE): section-major, pos[j*n_tokens + i]
+                for (0..dst.n_pos_per_embd) |j| {
+                    t.pos[j] = batch_inp.pos[@as(usize, @intCast(@as(i32, @intCast(j)) * batch_inp.n_tokens + i))];
+                }
+            }
+        } else {
+            // from the first sequence id; one out of range makes the C++
+            // index past its vector, and the batch fails validation anyway
+            const sid = sids[0];
+            if (sid >= 0 and @as(usize, @intCast(sid)) < n_seq_max) {
+                t.pos[0] = pos_next[@intCast(sid)];
+                pos_next[@intCast(sid)] += 1;
+            }
+        }
+
+        if (has_token) {
+            t.id = batch_inp.token[iu];
+        }
+
+        if (has_embd) {
+            t.has_embd = true;
+            t.embd_off = dst.embd.items.len;
+            const src = batch_inp.embd + iu * n_embd_row;
+            dst.embd.appendSlice(allocator, src[0..n_embd_row]) catch oom();
+            dst.n_embd = n_embd_row;
+        }
+
+        // without a logits array, only the last token is an output
+        t.output = if (batch_inp.logits != null) batch_inp.logits[iu] != 0 else i == batch_inp.n_tokens - 1;
+
+        dst.tokens.append(allocator, t) catch oom();
+    }
+}
+
+// -----------------------------------------------------------------------------
 // The C interface
 
-/// Ports `llama_batch_get_one` (llama-batch.cpp:931 @7fe450e19): a batch of
+/// Ports `llama_batch_get_one` (llama-batch.cpp:1051 @d81235049): a batch of
 /// one sequence over `tokens`, everything else left for `initBatch` to fill.
 ///
 /// Parameters:
@@ -1339,7 +1908,7 @@ fn cMalloc(comptime T: type, n: usize) [*c]T {
     return @ptrCast(@alignCast(std.c.malloc(n)));
 }
 
-/// Ports `llama_batch_init` (llama-batch.cpp:945 @7fe450e19): a batch whose
+/// Ports `llama_batch_init` (llama-batch.cpp:1065 @d81235049): a batch whose
 /// arrays are `malloc`ed for `n_tokens_alloc` tokens, with `n_tokens` 0.
 ///
 /// Parameters:
@@ -1374,7 +1943,7 @@ pub fn batchInit(n_tokens_alloc: i32, embd: i32, n_seq_max: i32) c.llama_batch {
     return batch;
 }
 
-/// Ports `llama_batch_free` (llama-batch.cpp:975 @7fe450e19).
+/// Ports `llama_batch_free` (llama-batch.cpp:1095 @d81235049).
 ///
 /// Parameters:
 /// - `batch`: a batch from `batchInit`, or the C's `llama_batch_init`.
@@ -1415,7 +1984,7 @@ test "the empty ubatch is all zeros and null" {
 }
 
 test "a retained copy outlives the release of its source" {
-    var a = BatchAllocr.init(1);
+    var a = BatchAllocr.init(1, false);
     defer a.deinit();
 
     var u = a.ubatchReserve(3, 2);

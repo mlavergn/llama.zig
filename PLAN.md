@@ -2163,6 +2163,205 @@ v0.5.0", has what each area changed.
   alone: `server-diff hub`'s `slowpoke` download timeout, and an `imatrix`
   case where upstream's `--show-statistics` output stopped mid-line.
 
+### Pickup for the v0.6.0 sync
+
+Upstream `v0.6.0` (`d81235049`). The CUDA host changes were ported on the
+Mac and have **never compiled against a toolkit** (they type-check for
+aarch64 Linux against real CUDA 13 headers and a fake toolkit); the Vulkan
+host changes compiled against a stub loader and ran on llvmpipe in a
+Linux container, port against reference, on bits. `NOTES.md`, "Upstream
+sync v0.5.0 → v0.6.0", has what each area changed. Move both `llama.cpp`
+checkouts to `v0.6.0` and `zigjinja` to v3.1.4 (`060187a`) first.
+
+**GB10 (`spark-dbff`, `~/src/mlavergn/llama.zig`)**
+
+1. **CUDA build.** `zig build reference cuda-ref --release=fast --prefix
+   zig-out/cuda-port`, and `-Dcuda-port=false --prefix
+   zig-out/cuda-upstream`. Every fatbin rebuilds; rerun `gen-fattn-config`
+   and `gen-mmq-config` (output must equal the Mac's). The kernel keys
+   written blind, each a compile error naming the nearest key if wrong:
+   `conv2d_dw_kernel<__half, …>`, `fwht_cuda<N, float|__half>`,
+   `rms_norm_f32<256|1024, m, a, s>` (four arguments now),
+   `scale_f32<float|__nv_bfloat16>`, `k_bin_bcast[_unravel]` and the unary
+   and gated-unary kernels at `__nv_bfloat16`, the new `conv3d`
+   translation unit (`conv3d_kernel`, `conv3d_pad_f16`,
+   `conv3d_implicit_gemm_f16<…>`, `conv3d_reduce_split_k`),
+   `ssm_scan_f32_group<3, 96>`, `lightning_indexer_kernel_tile|vec<8, 64,
+   128, 4, type>`, and `mul_mat_q`/`mul_mat_q_stream_k_fixup` at
+   `(ggml_prec)30` for every type plus `(ggml_prec)40` for MXFP4 and
+   NVFP4 (the `(ggml_prec)` spelling is assumed by analogy). Arguments
+   ported blind, which the first launch's `cuKernelGetParamInfo` check
+   names: `rms_norm_f32`'s trailing `float`, `dequantize_block_iq4_nl`'s
+   `int`, the 80-byte MMVQ/MMVF fusion struct, the 176-byte
+   `conv3d_params`, `conv3d_implicit_gemm_f16`'s trailing `bool`.
+2. **`cuda-ops-diff`**, 0 BITDIFF, 0 SUPPORTS. Find by name: `CONV_3D`
+   (all 10 shapes, f16 and f32), `MUL_MAT_ID_SHARED(type=q4_K|q8_0,
+   n=1..9)`, `RMS_NORM_SCALE`, `SCALE(type=bf16…)`, ADD/SUB/MUL/DIV at
+   bf16 (with `type_src1=f32`, and the fused add at n 2 and 3), `SSM_SCAN`
+   at `d_state=96` (three cases and the rollback case),
+   `LIGHTNING_INDEXER` `nh=4` and `EXTRA LIGHTNING_INDEXER(nh=4,nb=7|8|9…)`,
+   `MUL_MAT_HADAMARD` with F16 `src1`, the `w4a8`/`w4a4` MUL_MAT and
+   MUL_MAT_ID variants, `CONV_1D_DW`/`CONV_2D_DW` with an f16 kernel, `CPY`
+   permuted into a strided destination, `EXTRA FLASH_ATTN_EXT(…mask
+   scan)`.
+3. **`cuda-backend-diff`**, both runs: the `alloc_buffer_n/get_alloc_size_n
+   = null` and `alloc_n` lines, and `graph_optimize shared_expert q4_0 …`
+   (`shared_gate_mm`, `shared_up_mm`, `shared` right after `routed`; deps
+   `node0` and `leaf:ids` until `node6`); the f16 negative has 0 deps.
+4. **`cuda-node-diff`**, per node and fused: on a quantized MoE with a
+   shared expert at decode (the fusion takes `ne11 == 1`), on a GQA model
+   with a prompt of at least 1024 tokens (the mask scan and the
+   DGX-Spark-only `prefer_whole_tiles` arm), and the fused pass on the new
+   fixtures (`glm5-next-moe`, `glm5-next-topk8-moe`, `qwen4exp-topk8-moe`,
+   `clef-dense`). **`cuda-parity-cli`** 6/6.
+5. **CUDA injections** (29), each restored by exact text and checked
+   with `git diff`, the expected catcher in parentheses:
+   - `fattn_common.zig`: `cc == common.cc.dgx_spark` → `false` (ops EXTRA FA
+     mask scan, or node-diff at 1024 tokens; an escape here means neither
+     case reaches the arm).
+   - `mmq.zig` `getPrecSrc1`: always return Q8 (w4a4).
+   - `mmq.zig` `getConfig`: drop the "below Q4 → Ampere" arm (w4a8).
+   - `mmq.zig` ids path: `getJMax(…, ne12)` → `ne11` (sizing only; record as
+     inert or escape).
+   - `mmvq.zig` `moeLaunch`: drop `+ @intFromBool(shared_up != null)`
+     (`MUL_MAT_ID_SHARED` n = 2..8).
+   - `mmvq.zig` `switchNcolsDst`: `nchannels_launch` → `nchannels_dst`
+     (`MUL_MAT_ID_SHARED` n = 1).
+   - `mmvq.zig`: `shared_stride_col_dst` → 0 (n > 1).
+   - `fusion.zig` `tryFuse` shared arm: swap `shared_up` and `shared_gate`
+     (`MUL_MAT_ID_SHARED`).
+   - `graph.zig` `graphOptimize`: rotate by `j - (r + 3) + 1` (backend-diff
+     order lines).
+   - `graph.zig`: drop the `up.src[2]` dep (backend-diff).
+   - `norm.zig` `opRmsNormScaleFused`: read scale op_params slot 1 instead of
+     0 (`RMS_NORM_SCALE`).
+   - `fusion.zig` `canFuse` `RMS_NORM+SCALE`: drop `bias == 0` (expected
+     escape unless a case has a biased scale; record).
+   - `scale.zig`: launch the f32 kernel for BF16 (`SCALE` bf16).
+   - `binbcast.zig`: the bf16/f32/bf16 arm uses bf16/bf16/bf16 (`ADD`
+     bf16+f32).
+   - `unary.zig` gated BF16: swap the `swapped` offsets (GLU bf16
+     split=false, if upstream has it).
+   - `supports.zig`: SCALE accepts F16 (SUPPORTS).
+   - `supports.zig`: CONV_3D drops `ggml_is_contiguous(op)` (expected inert).
+   - `conv3d.zig`: `split_k` cap 32 → 16 (split-k shapes); `use_blas` → false
+     (pointwise f16); fallback `blocks` cap 65535 → 1024 (direct f32).
+   - `conv2d_dw.zig`: the F16 kernel launches the float key (`CONV_2D_DW`
+     f16).
+   - `fwht.zig` `opMulMatUseFwht`: accept an F16 `a` (SUPPORTS).
+   - `ssm_scan.zig` d96: `num_warps` from 128 (`SSM_SCAN` d96).
+   - `lightning_indexer.zig`: `tile_tokens` 8 → 7 (EXTRA nb=7).
+   - `convert.zig` iq4_nl: `nb32 = k/QK4_NL + 1` (iq4_nl dequant shapes, or
+     inert; record).
+   - `cpy.zig`: drop `and c.ggml_is_contiguous(src1)` (CPY permuted→strided).
+   - `mulmat.zig` `mulMatId`: drop the `op_params` copy (`MUL_MAT_ID` w4a4
+     via the slice path, or escape; record).
+   - `mulmat.zig` `mulMatCublas`: drop the BF16-precision arm (likely escape;
+     record).
+   - `mmvf.zig`: drop the MMF check in the F16 and BF16 arms (F16 `MUL_MAT`
+     where MMF cannot tile).
+   - `fattn.zig` `getBestKernel`: drop `max_bias == 0.0` (FA `max_bias=8` GQA
+     cases).
+   - `cuda_backend_diff.c`'s own check: comment out the shared-expert block
+     on the port side only; the gate must fail.
+6. **Vulkan.** No `vk-toolchain`: SDK 1.4.363 builds all 155 shader files,
+   `mul_mmq_cm1` included. Build `zig build reference vk-ref
+   --release=fast -Dvulkan -Dcuda=false` with `--prefix zig-out/vk-port`
+   and with `-Dvulkan-port=false --prefix zig-out/vk-upstream`; the table
+   must have the 26 `*_q8_1_cm1` variants and no
+   `lightning_indexer_subgroup_f32`. Then on all four arms: `vk-repro`;
+   `vk-push-layout` (53 structs, 1,483 facts); `vk-backend-diff` (25
+   environments; `graph_optimize hc_post_gate (18 nodes)` with 11
+   `add_alloc_dep` lines after `fusions_041`; once more with
+   `GGML_VK_DISABLE_DESCRIPTOR_REUSE=1`); `vk-ops-diff`, finding by name the
+   six new EXTRA cases (sparse `n_kv_max=1024` over q8_0, gated hc_post
+   with a biased inner scale, misaligned conv_2d and conv_3d, the two
+   "matmul of the same src1" cases), `DSV4_HC_POST(…gated=1)`, the
+   quantized sparse FA cases, the `m_v`/`pad` MUL_MAT(_ID) cases,
+   `type_b=bf16`, `test_mul_mat_pos`, `test_mul_mat_add`, the w4a8/w4a4
+   NVFP4 cases, `CONV_2D(…kernel_offset=1)`, `CONV_3D(…,1)`,
+   LIGHTNING_INDEXER and GATED_DELTA_NET (COUNT_EQUAL segfaulted reference
+   against reference on llvmpipe: record whether the GPU does too);
+   `vk-node-diff` per node and fused (fused again with descriptor reuse
+   off); `vk-parity-cli` 6/6. Injections: descriptor reuse always taken,
+   its cache reset dropped, its offset ignored (`test-backend-ops` escapes
+   all three: `vk-node-diff` fused or `vk-parity-cli` must catch them);
+   the `prealloc_y_last_*` resets removed; `!y_non_contig` back in
+   `quantize_y`; FA's `(kv_f16 or path != coopmat2)` dropped; `y_range`
+   back to `y_sz`. The coopmat1 integer-dot path runs only on AMD
+   RDNA3/4: no machine here reaches it.
+7. **Linux arm64 CPU set:** `ops-diff`, `repack-diff`, `node-diff`,
+   `parity-port --cpu`, `host-arms-diff`, `arch-model-diff` (173 fixtures;
+   record whether the unfused hc path runs on CUDA), `gemma4-assistant-diff`,
+   `context-diff`, `vocab-diff`, `quant-diff`, `loader-diff` and
+   `context-diff` with direct I/O and a lazy PLE model (`mmap.prefetchRanges`'
+   `madvise` arm and `readAlignedChunk`'s bounded staging buffer are
+   Linux-only), `mtmd-diff` and `mmproj-fixtures` (`glm5v`, `ling3vl`;
+   confirm `harness/mtmd_mem_ref.cpp` links against libstdc++), and
+   `tools-diff` for every tool under the fixed script (expected exits,
+   `!fail`).
+8. **Server and chat set on Linux:** every `server-diff` file (23, the new
+   `decision` among them; it needs `make qwen3`), `server-task-diff`,
+   `http-diff` (cpp-httplib 0.59.0), `tools-diff server`; `router` and `hub`
+   specifically (the reserved child stdout uses `F_DUPFD_CLOEXEC`, and
+   `O_NONBLOCK` differs per OS); `spec-diff` on CUDA with the new
+   rejection cases; `cnv-diff`, `chat-parse-diff`, `peg-diff`, `fit-diff`,
+   `jinja-diff`.
+
+**DESKTOP-BR7J5S9 (x86_64_v3)**
+
+9. `make x86-gates` and `win-host-diffs`. **The tiled kernels have no
+   bit-exact gate yet**: in `x86-ops-diff`, find by label `tiled mul_mat
+   <13 types> [512 x 40] x 33` (standard), `[512|768|1280 x 24] x 9|16`
+   (narrow), `[512 x 160] x 64` (multi-chunk), `[512 x 16] x [9, 2]`
+   (batch clamp), `tiled mul_mat_id <type> …`, `flash_attn_ext tiled d36
+   f16|f32 [softcap]`, `mul_mat f32 x bf16` and the BF16 activations.
+   sgemm's new `k % 8` tail needs an F32/F16/BF16 `mul_mat` with `ne00` not
+   a multiple of 8 -- add one if none shows. Negative test:
+   `X86_PORT_ENV=GGML_CPU_TILED_MM=0` must make the tiled lines differ.
+   Also compiled only there: `log.ttyEnableAnsi`'s console arm,
+   `arg.zig`'s `PROGRAMDATA`/`APPDATA` config paths,
+   `PrefetchVirtualMemory`, and `mtmd-image-diff`'s `glm5v` kind.
+10. The server's Windows port is still owed (`http-diff`, `tools-diff
+    server`); it now also needs `server_reserve_stdout`'s Windows arm
+    (`_dup`, `SetHandleInformation`, `SetStdHandle`), two-pipe
+    `PeekNamedPipe` polling, and `wstring_to_utf8` in the child and MCP
+    environments.
+
+**JWHLPTOP (AVX-512)**
+
+11. **Open, unreachable.** Carries v0.4.0's, v0.4.1's and v0.5.0's items,
+    plus `make x86-gates` at `X86_CPU=x86_64_v4` (the AVX2 tiled arm, the
+    AVX-512 sgemm tail) and `tigerlake` (the VNNI tiled arm); confirm by
+    disassembly that tigerlake's `ops_port.exe` has zmm `vpdpbusd` (1,440
+    measured on the Mac) and v3's none.
+
+**Gaps found, no machine needed**
+
+- No fixture or local model has NextN layers: every `graph_mtp`, MTP-only
+  tensor loading, the non-shared MTP catch-up decode and imatrix's NextN
+  collection beyond its synthetic case are unreached.
+- A real mmBERT vocabulary for `vocab-diff` (three injections into its
+  word split escape the GPT-2 and Gemma 4 vocabularies).
+- A clef with real decision-head tensors (upstream's fixture writer has a
+  TODO): the decision order's effect on the output is unverified, the
+  kev dot product's fused tail needs an `n_embd` not a multiple of 8, and
+  the replay acceptance arm needs a probabilistic draft on a hybrid model.
+- A pocket-tts prompt that crosses a chunk boundary within `mtmd-diff`'s
+  step budget (one escape in `finish_chunk`).
+- A gate for `prec_policy` (no file with `general.tensor_extra.*` keys).
+- A `node-diff` mode linking the reference libllama on both sides, which
+  isolates ggml while libllama lags (the Metal area's `mixgate.sh` did it
+  in 13 s).
+- `make buildmacos`, zmake's `make ui` and the xcframework `Makefile` break
+  on a checkout path with a space in it; all three were run by hand or
+  through a symlink.
+
+**Mac**
+
+- `xcframework-check`'s visionOS simulator smoke: no visionOS runtime is
+  installed. Install it, then `make -C xcframework smoke-sim`.
+
 ---
 
 ## Risk register

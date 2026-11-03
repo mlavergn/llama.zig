@@ -3,8 +3,8 @@
 //!
 //! **Not a port.** Upstream gives each architecture a class deriving from
 //! `llama_model_base` and overriding three virtuals -- `load_arch_hparams`,
-//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:770, 771, 772
-//! @7fe450e19) -- and `llama_model_mapping` (llama-model.cpp:43 @7fe450e19) picks the
+//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:801, 802, 803
+//! @d81235049) -- and `llama_model_mapping` (llama-model.cpp:43 @d81235049) picks the
 //! class. Here a class is a file exporting those three functions, and
 //! `forArch` is the mapping. An architecture with no entry is one the port
 //! has not reached: loading it stops at `error.Unported`, which
@@ -35,6 +35,7 @@ pub const bitnet = @import("bitnet.zig");
 pub const bloom = @import("bloom.zig");
 pub const chameleon = @import("chameleon.zig");
 pub const chatglm = @import("chatglm.zig");
+pub const clef = @import("clef.zig");
 pub const clip = @import("clip.zig");
 pub const codeshell = @import("codeshell.zig");
 pub const cogvlm = @import("cogvlm.zig");
@@ -72,6 +73,7 @@ pub const gemma_embedding = @import("gemma_embedding.zig");
 pub const glm4 = @import("glm4.zig");
 pub const glm4_moe = @import("glm4_moe.zig");
 pub const glm_dsa = @import("glm_dsa.zig");
+pub const glm5_next = @import("glm5_next.zig");
 pub const gpt2 = @import("gpt2.zig");
 pub const gptneox = @import("gptneox.zig");
 pub const granite = @import("granite.zig");
@@ -212,6 +214,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .bloom => entryOf(bloom),
         .chameleon => entryOf(chameleon),
         .chatglm => entryOf(chatglm),
+        .clef => entryOf(clef),
         .clip => entryOf(clip),
         .codeshell => entryOf(codeshell),
         .cogvlm => entryOf(cogvlm),
@@ -248,6 +251,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .glm4 => entryOf(glm4),
         .glm4_moe => entryOf(glm4_moe),
         .glm_dsa => entryOf(glm_dsa),
+        .glm5_next => entryOf(glm5_next),
         .gpt2 => entryOf(gpt2),
         .gptneox => entryOf(gptneox),
         .granite => entryOf(granite),

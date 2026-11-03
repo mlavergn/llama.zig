@@ -827,6 +827,12 @@ const Qwen = struct {
         c.gguf_set_val_u32(ctx, "qwen35.embedding_length_out", 512);
     }
 
+    /// v0.6.0's `pooling_type_cls`, the pooling before a RANK classifier
+    /// head (ModernBERT's "mean").
+    fn classifierPooling(ctx: *c.gguf_context) void {
+        c.gguf_set_val_u32(ctx, "qwen35.classifier.pooling_type", 1);
+    }
+
     fn moe(ctx: *c.gguf_context) void {
         c.gguf_set_val_u32(ctx, "qwen35.expert_count", 8);
         c.gguf_set_val_u32(ctx, "qwen35.expert_used_count", 2);
@@ -1038,9 +1044,9 @@ pub fn main(init: std.process.Init) !void {
     }
 
     // v0.5.0's hyperparameter reads on fixtures, one key edited at a time:
-    // hrm_text's four hrm.* keys (models/hrm-text.cpp:6 @7fe450e19) and
+    // hrm_text's four hrm.* keys (models/hrm-text.cpp:6 @d81235049) and
     // nemotron_h's RMS epsilon, which falls back to the LayerNorm one
-    // (models/nemotron-h.cpp:5 @7fe450e19).
+    // (models/nemotron-h.cpp:5 @d81235049).
     if (hrm) |base| {
         runCase(.{ .name = "hrm_text: prefix_lm", .path = derive(dir, base, "hrm-prefix", Fixture.hrmPrefix), .vocab_only = false });
         runCase(.{ .name = "hrm_text: no l_cycles", .path = derive(dir, base, "hrm-nol", Fixture.hrmNoL), .vocab_only = false });
@@ -1084,6 +1090,7 @@ pub fn main(init: std.process.Init) !void {
             .{ "head sizes", Qwen.headSizes },
             .{ "no heads", Qwen.noHeads },
             .{ "pooling", Qwen.pooling },
+            .{ "classifier pooling", Qwen.classifierPooling },
             .{ "moe", Qwen.moe },
             .{ "no ssm state", Qwen.noSsm },
             .{ "rms eps as f64", Qwen.rmsEpsAsDouble },

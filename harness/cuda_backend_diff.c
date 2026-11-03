@@ -34,7 +34,10 @@
  *   ending the graph) and on MoE weighted reductions. They only keep
  *   tensors allocated longer, so a missing one shows in no result until the
  *   allocator happens to reuse the memory -- and `test-backend-ops` never
- *   calls `graph_optimize` at all.
+ *   calls `graph_optimize` at all. Since v0.6.0 also the shared-expert
+ *   reordering: the node order it leaves and the two dependencies it adds;
+ * - since v0.6.0, whether each buffer type sets `alloc_buffer_n` and
+ *   `get_alloc_size_n`, and `get_alloc_size_n` over short tensor lists.
  */
 #include <math.h>
 #include <stdbool.h>
@@ -44,6 +47,7 @@
 #include <string.h>
 
 #include "ggml.h"
+#include "ggml-alloc.h"
 #include "ggml-backend.h"
 #include "ggml-backend-impl.h"
 #include "ggml-cpu.h"
@@ -80,6 +84,25 @@ static void ask_buft(const char * what, ggml_backend_buffer_type_t buft) {
     SAY("%s alignment = %zu", what, ggml_backend_buft_get_alignment(buft));
     SAY("%s max_size = %zu", what, ggml_backend_buft_get_max_size(buft));
     SAY("%s is_host = %d", what, ggml_backend_buft_is_host(buft));
+    /* v0.6.0's list entry points: CUDA sets neither, so the generic
+     * planner in ggml-backend.cpp serves both. */
+    SAY("%s iface alloc_buffer_n = %s", what, buft->iface.alloc_buffer_n ? "set" : "null");
+    SAY("%s iface get_alloc_size_n = %s", what, buft->iface.get_alloc_size_n ? "set" : "null");
+}
+
+/* get_alloc_size_n over lists that mix padded quantized rows and plain
+ * ones: the planner sums each tensor's get_alloc_size at the buffer
+ * type's alignment, so the port's per-tensor padding shows here too. */
+static void ask_alloc_n(const char * what, ggml_backend_buffer_type_t buft, struct ggml_context * ctx) {
+    struct ggml_tensor * t[4] = {
+        ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_0, 544, 3),
+        ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 17, 5),
+        ggml_new_tensor_2d(ctx, GGML_TYPE_Q8_0, 1056, 1),
+        ggml_new_tensor_1d(ctx, GGML_TYPE_F16, 1),
+    };
+    for (int n = 0; n <= 4; n++) {
+        SAY("%s alloc_n %d = %zu", what, n, ggml_backend_buft_get_alloc_size_n(buft, t, n));
+    }
 }
 
 /* get_alloc_size for every type, at row lengths around the padding. */
@@ -184,6 +207,9 @@ static struct ggml_cgraph * opt_graph;
 static const char * opt_label;
 static long opt_deps;
 static long opt_deps_topk;
+static long opt_deps_shared;
+/* opt_deps before the last optimize_one call. */
+static long opt_deps_before_last;
 
 /* A tensor as the dependency report names it: its node index, else its name
  * (every leaf the cases build is named), else "null". */
@@ -212,8 +238,8 @@ static void record_alloc_dep(void * user_data, struct ggml_tensor * tensor, stru
 
 enum gating { GATE_SOFTMAX, GATE_SIGMOID, GATE_SQRT_SOFTPLUS, GATE_SOFTMAX_WEIGHT };
 
-/* test-backend-ops' `test_topk_moe` graph (test-backend-ops.cpp:6774
- * @7fe450e19), plus, unless `at_end`, a consumer of the ids and one of the
+/* test-backend-ops' `test_topk_moe` graph (test-backend-ops.cpp:7024
+ * @d81235049), plus, unless `at_end`, a consumer of the ids and one of the
  * weights after the chain, as a MoE layer has. Its context memory is
  * zeroed, so `nodes[n_nodes]` -- which graph_optimize names as the
  * dependency target of a chain that ends the graph -- reads as null. */
@@ -258,8 +284,8 @@ static struct ggml_cgraph * build_topk_moe(struct ggml_context * ctx, int64_t n_
     return gf;
 }
 
-/* test-backend-ops' `test_moe_reduce` graph (test-backend-ops.cpp:6873
- * @7fe450e19) in its test-mode node order, plus a consumer. */
+/* test-backend-ops' `test_moe_reduce` graph (test-backend-ops.cpp:7123
+ * @d81235049) in its test-mode node order, plus a consumer. */
 static struct ggml_cgraph * build_moe_reduce(struct ggml_context * ctx, int64_t n_embd, int64_t n_used, int64_t n_tokens, bool expert_scale) {
     struct ggml_cgraph * gf = ggml_new_graph(ctx);
     struct ggml_tensor * experts = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_embd, n_used, n_tokens);
@@ -289,10 +315,85 @@ static struct ggml_cgraph * build_moe_reduce(struct ggml_context * ctx, int64_t 
     return gf;
 }
 
+/* test-backend-ops' `test_mul_mat_id_shared` graph (test-backend-ops.cpp:5437
+ * @d81235049) -- routed experts' gate/up/GLU over a reshaped input and a
+ * shared expert's over the same input -- with `n_between` unrelated nodes
+ * expanded between the two, and with `blocker` another routed gate/up pair
+ * among them instead. v0.6.0's graph_optimize moves the shared expert's
+ * three nodes to right after the routed GLU and keeps the routed input and
+ * ids alive until the shared GLU; the blocker stops its search. The
+ * weights live in `wctx`, allocated in the device's buffer, because the
+ * match refuses weights with no buffer. Every node is named, so the order
+ * after graph_optimize can be printed. */
+static struct ggml_cgraph * build_shared_expert(struct ggml_context * ctx, struct ggml_context * wctx, int64_t n, int n_between, bool blocker) {
+    struct ggml_cgraph * gf = ggml_new_graph(ctx);
+    struct ggml_tensor * input = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, n);
+    ggml_set_name(input, "input");
+    struct ggml_tensor * input_ids = ggml_reshape_3d(ctx, input, 512, 1, n);
+    ggml_set_name(input_ids, "input_ids");
+    struct ggml_tensor * ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 3, n);
+    ggml_set_name(ids, "ids");
+    struct ggml_tensor * up = ggml_get_tensor(wctx, "up");
+    struct ggml_tensor * gate = ggml_get_tensor(wctx, "gate");
+    struct ggml_tensor * shared_up = ggml_get_tensor(wctx, "shared_up");
+    struct ggml_tensor * shared_gate = ggml_get_tensor(wctx, "shared_gate");
+    struct ggml_tensor * gate_mm = ggml_mul_mat_id(ctx, gate, input_ids, ids);
+    ggml_set_name(gate_mm, "gate_mm");
+    struct ggml_tensor * up_mm = ggml_mul_mat_id(ctx, up, input_ids, ids);
+    ggml_set_name(up_mm, "up_mm");
+    struct ggml_tensor * routed = ggml_swiglu_split(ctx, gate_mm, up_mm);
+    ggml_set_name(routed, "routed");
+    ggml_build_forward_expand(gf, routed);
+    struct ggml_tensor * side_out = NULL;
+    if (blocker) {
+        struct ggml_tensor * b_gate = ggml_mul_mat_id(ctx, gate, input_ids, ids);
+        ggml_set_name(b_gate, "blocker_gate");
+        struct ggml_tensor * b_up = ggml_mul_mat_id(ctx, up, input_ids, ids);
+        ggml_set_name(b_up, "blocker_up");
+        ggml_build_forward_expand(gf, b_up);
+        ggml_build_forward_expand(gf, b_gate);
+        side_out = ggml_add(ctx, b_gate, b_up);
+        ggml_set_name(side_out, "blocker_add");
+        ggml_build_forward_expand(gf, side_out);
+    }
+    struct ggml_tensor * mid = input;
+    for (int k = 0; k < n_between; k++) {
+        mid = ggml_scale(ctx, mid, 0.5f);
+        char name[32];
+        snprintf(name, sizeof(name), "mid%d", k);
+        ggml_set_name(mid, name);
+        ggml_build_forward_expand(gf, mid);
+    }
+    struct ggml_tensor * sg = ggml_mul_mat(ctx, shared_gate, input);
+    ggml_set_name(sg, "shared_gate_mm");
+    struct ggml_tensor * su = ggml_mul_mat(ctx, shared_up, input);
+    ggml_set_name(su, "shared_up_mm");
+    struct ggml_tensor * shared = ggml_swiglu_split(ctx, sg, su);
+    ggml_set_name(shared, "shared");
+    ggml_build_forward_expand(gf, shared);
+    struct ggml_tensor * shared3 = ggml_reshape_3d(ctx, shared, 128, 1, n);
+    ggml_set_name(shared3, "shared3");
+    struct ggml_tensor * out = ggml_add(ctx, routed, shared3);
+    ggml_set_name(out, "out");
+    ggml_build_forward_expand(gf, out);
+    if (side_out) {
+        struct ggml_tensor * o2 = ggml_add(ctx, side_out, side_out);
+        ggml_set_name(o2, "blocker_out");
+        ggml_build_forward_expand(gf, o2);
+    }
+    if (n_between > 0) {
+        struct ggml_tensor * o3 = ggml_add(ctx, mid, input);
+        ggml_set_name(o3, "mid_out");
+        ggml_build_forward_expand(gf, o3);
+    }
+    return gf;
+}
+
 static void optimize_one(ggml_backend_t backend, const char * label, struct ggml_cgraph * gf) {
     opt_graph = gf;
     opt_label = label;
     const long before = opt_deps;
+    opt_deps_before_last = before;
     struct ggml_backend_graph_optimize_params params = { record_alloc_dep, NULL };
     backend->iface.graph_optimize(backend, gf, &params);
     SAY("graph_optimize %s nodes = %d deps = %ld", label, ggml_graph_n_nodes(gf), opt_deps - before);
@@ -316,7 +417,7 @@ static void ask_graph_optimize(ggml_backend_dev_t dev) {
                 const bool bias = v & 1, norm = v & 2, scale = v & 4, at_end = v & 8;
                 /* A norm chain that ends the graph, with no SCALE after it:
                  * ggml_cuda_topk_moe_fusion reads nodes[n_nodes]->op there
-                 * (ggml-cuda.cu:2963 @7fe450e19), a NULL in this zeroed
+                 * (ggml-cuda.cu:3022 @d81235049), a NULL in this zeroed
                  * graph, and upstream segfaults -- the port, ported as
                  * written, alike (measured on the GB10, each side alone). */
                 if (norm && !scale && at_end) continue;
@@ -345,6 +446,43 @@ static void ask_graph_optimize(ggml_backend_dev_t dev) {
             optimize_one(backend, label, build_moe_reduce(ctx, 64, n_used, 5, es));
             ggml_free(ctx);
         }
+    }
+    /* The shared expert (v0.6.0), with quantized weights in this device's
+     * buffer and, as a negative, F16 ones the match refuses. */
+    static const enum ggml_type wtypes[] = { GGML_TYPE_Q4_0, GGML_TYPE_F16 };
+    for (size_t wt = 0; wt < sizeof(wtypes) / sizeof(wtypes[0]); wt++) {
+        struct ggml_init_params wp = { 8 * ggml_tensor_overhead(), NULL, true };
+        struct ggml_context * wctx = ggml_init(wp);
+        ggml_set_name(ggml_new_tensor_3d(wctx, wtypes[wt], 512, 128, 8), "up");
+        ggml_set_name(ggml_new_tensor_3d(wctx, wtypes[wt], 512, 128, 8), "gate");
+        ggml_set_name(ggml_new_tensor_2d(wctx, wtypes[wt], 512, 128), "shared_up");
+        ggml_set_name(ggml_new_tensor_2d(wctx, wtypes[wt], 512, 128), "shared_gate");
+        ggml_backend_buffer_t wbuf = ggml_backend_alloc_ctx_tensors_from_buft(wctx, ggml_backend_dev_buffer_type(dev));
+        SAY("graph_optimize shared_expert %s weights allocated = %d", ggml_type_name(wtypes[wt]), wbuf != NULL);
+        for (int64_t n = 1; n <= 4; n += 3) {
+            for (int between = 0; between <= 2; between++) {
+                for (int blocker = 0; blocker < 2; blocker++) {
+                    if (blocker && between == 0) continue;
+                    memset(buf, 0, mem);
+                    struct ggml_init_params ip = { mem, buf, true };
+                    struct ggml_context * ctx = ggml_init(ip);
+                    snprintf(label, sizeof(label), "shared_expert %s n=%lld between=%d blocker=%d",
+                             ggml_type_name(wtypes[wt]), (long long) n, between, blocker);
+                    struct ggml_cgraph * gf = build_shared_expert(ctx, wctx, n, between, blocker);
+                    optimize_one(backend, label, gf);
+                    for (int k = 0; k < ggml_graph_n_nodes(gf); k++) {
+                        struct ggml_tensor * t = ggml_graph_node(gf, k);
+                        SAY("graph_optimize %s order %d = %s %s", label, k, ggml_op_desc(t), ggml_get_name(t));
+                    }
+                    if (strcmp(side, "ref") == 0 && wt == 0) {
+                        opt_deps_shared += opt_deps - opt_deps_before_last;
+                    }
+                    ggml_free(ctx);
+                }
+            }
+        }
+        if (wbuf) ggml_backend_buffer_free(wbuf);
+        ggml_free(wctx);
     }
     free(buf);
     ggml_backend_free(backend);
@@ -381,6 +519,8 @@ static void ask_device(size_t i, ggml_backend_dev_t dev) {
     ask_offload(dev, ctx);
     ask_alloc_types(buft, ctx);
     ask_alloc_types(host, ctx);
+    ask_alloc_n("buft", buft, ctx);
+    ask_alloc_n("host_buft", host, ctx);
     ask_alloc_fattn(buft, ctx);
     ggml_free(ctx);
     ask_graph_optimize(dev);
@@ -401,6 +541,11 @@ int main(void) {
      * nothing about the v0.5.0 arm: say so rather than pass. */
     if (opt_deps_topk == 0) {
         fprintf(stderr, "cuda_backend_diff: graph_optimize recorded no top-k MoE dependency\n");
+        return 3;
+    }
+    /* Likewise for v0.6.0's shared-expert reordering. */
+    if (opt_deps_shared == 0) {
+        fprintf(stderr, "cuda_backend_diff: graph_optimize recorded no shared-expert dependency\n");
         return 3;
     }
     return 0;

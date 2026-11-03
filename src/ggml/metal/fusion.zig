@@ -5,7 +5,7 @@
 //!
 //! Ports `llama.cpp/ggml/src/ggml-metal/ggml-metal-fusion.cpp`, with the
 //! types and constants of `llama.cpp/ggml/src/ggml-metal/ggml-metal-fusion.h`,
-//! at v0.5.0 (`7fe450e19`). Each declaration below names the C++ it
+//! at v0.6.0 (`d81235049`). Each declaration below names the C++ it
 //! replaces and the line it began at.
 //!
 //! # Why one table
@@ -45,6 +45,7 @@ const mc = @import("device_c.zig");
 const types = @import("../types.zig");
 const graph = @import("../graph.zig");
 const backend = @import("../backend.zig");
+const common = @import("common.zig");
 
 const Tensor = c.ggml_tensor;
 const CGraph = impl.CGraph;
@@ -52,21 +53,22 @@ const CGraph = impl.CGraph;
 /// The allocator ported ggml uses — libc's, as in the rest of `metal/`.
 const allocator = std.heap.c_allocator;
 
-/// Ports `GGML_METAL_FUSION_MAX` (ggml-metal-fusion.h:20 @7fe450e19): the
+/// Ports `GGML_METAL_FUSION_MAX` (ggml-metal-fusion.h:23 @d81235049): the
 /// most nodes one kernel fuses, and the longest run the optimizer packs.
 pub const max = 16;
 
-/// Ports `ggml_metal_fusion_mode` (ggml-metal-fusion.h:22 @7fe450e19).
+/// Ports `ggml_metal_fusion_mode` (ggml-metal-fusion.h:25 @d81235049).
 pub const Mode = enum(c_uint) {
-    /// structural checks only; used by the graph optimizer, at which point
-    /// the graph tensors are not allocated yet, so buffer placement cannot
-    /// be verified
+    /// structural checks for the graph optimizer, which runs before the
+    /// graph tensors are allocated (weights already are); a check may skip
+    /// conditions that differ between batch sizes, and so accept more than
+    /// `full`
     structural = 0,
     /// full checks, including buffer placement; used by the op encoders
     full = 1,
 };
 
-/// Ports `ggml_metal_fusion_id` (ggml-metal-fusion.h:31 @7fe450e19): which
+/// Ports `ggml_metal_fusion_id` (ggml-metal-fusion.h:34 @d81235049): which
 /// kernel an encoder uses for a matched pattern.
 pub const Id = enum(c_uint) {
     none = 0,
@@ -88,6 +90,8 @@ pub const Id = enum(c_uint) {
     moe_reduce = 8,
     /// SSM_CONV + UNARY (silu)
     ssm_conv_silu = 9,
+    /// MUL_MAT + ADD (residual added in the few-row MMA store)
+    mul_mat_add = 10,
 };
 
 /// The `check` callback's type: `nodes[j]` is the pattern's `j`-th
@@ -101,7 +105,7 @@ pub const CheckFn = *const fn (
     mode: Mode,
 ) bool;
 
-/// Ports `struct ggml_metal_fusion` (ggml-metal-fusion.cpp:26 @7fe450e19).
+/// Ports `struct ggml_metal_fusion` (ggml-metal-fusion.cpp:28 @d81235049).
 ///
 /// Since v0.5.0 the header declares it opaque, so the layout is ours. Its
 /// address is still what identifies an entry: `count_fusion` takes the
@@ -126,8 +130,8 @@ pub const Fusion = struct {
     check: ?CheckFn,
 };
 
-/// Ports `ggml_metal_fusion_filter_ops` (ggml-metal-fusion.cpp:14
-/// @7fe450e19): the non-empty op sequence of a raw one. The table is a
+/// Ports `ggml_metal_fusion_filter_ops` (ggml-metal-fusion.cpp:16
+/// @d81235049): the non-empty op sequence of a raw one. The table is a
 /// constant, so this runs at compile time.
 fn filterOps(comptime ops_all: []const c.enum_ggml_op) []const c.enum_ggml_op {
     comptime {
@@ -144,7 +148,7 @@ fn filterOps(comptime ops_all: []const c.enum_ggml_op) []const c.enum_ggml_op {
     }
 }
 
-/// Ports `ggml_metal_fusion_get_id` (ggml-metal-fusion.cpp:67 @7fe450e19):
+/// Ports `ggml_metal_fusion_get_id` (ggml-metal-fusion.cpp:69 @d81235049):
 /// the pattern's identifier, for callers that see the struct as opaque.
 pub export fn ggml_metal_fusion_get_id(fusion: *const Fusion) callconv(.c) Id {
     return fusion.id;
@@ -164,8 +168,8 @@ inline fn gnode(gf: *const CGraph, i: c_int) *const Tensor {
     return gf.nodes[@intCast(i)].?;
 }
 
-/// Ports `ggml_metal_fusion_same_buffer` (ggml-metal-fusion.cpp:74
-/// @7fe450e19): true if two tensors live in the same Metal buffer.
+/// Ports `ggml_metal_fusion_same_buffer` (ggml-metal-fusion.cpp:76
+/// @d81235049): true if two tensors live in the same Metal buffer.
 fn sameBuffer(a_opt: ?*const Tensor, b_opt: ?*const Tensor) bool {
     const a = a_opt orelse return false;
     const b = b_opt orelse return false;
@@ -179,11 +183,31 @@ fn sameBuffer(a_opt: ?*const Tensor, b_opt: ?*const Tensor) bool {
     return mc.ggml_metal_buffer_get_id(ca, a).metal == mc.ggml_metal_buffer_get_id(cb, b).metal;
 }
 
+/// Ports `ggml_metal_fusion_overlap` (ggml-metal-fusion.cpp:91
+/// @d81235049): true if the memory of two tensors overlaps in the same
+/// Metal buffer.
+fn overlap(a: *const Tensor, b: *const Tensor) bool {
+    const ba = impl.one(c.ggml_backend_buffer, if (a.view_src != null) impl.one(Tensor, a.view_src).buffer else a.buffer);
+    const bb = impl.one(c.ggml_backend_buffer, if (b.view_src != null) impl.one(Tensor, b.view_src).buffer else b.buffer);
+
+    const bid_a = mc.ggml_metal_buffer_get_id(@ptrCast(@alignCast(ba.context.?)), a);
+    const bid_b = mc.ggml_metal_buffer_get_id(@ptrCast(@alignCast(bb.context.?)), b);
+
+    if (bid_a.metal == null or bid_a.metal != bid_b.metal) {
+        return false;
+    }
+
+    return if (bid_a.offs <= bid_b.offs)
+        bid_b.offs - bid_a.offs < c.ggml_nbytes(a)
+    else
+        bid_a.offs - bid_b.offs < c.ggml_nbytes(b);
+}
+
 // -----------------------------------------------------------------------------
 // Pattern checks
 
-/// Ports `ggml_metal_fusion_check_norm` (ggml-metal-fusion.cpp:92
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_check_norm` (ggml-metal-fusion.cpp:111
+/// @d81235049).
 ///
 /// NORM/RMS_NORM + MUL + ADD: the weight/bias of each fused step must match
 /// the norm input width, be contiguous rows, and the fused outputs must
@@ -233,8 +257,8 @@ fn checkNorm(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *const CG
     return true;
 }
 
-/// Ports `ggml_metal_fusion_check_ssm_conv_silu` (ggml-metal-fusion.cpp:142
-/// @7fe450e19): SSM_CONV + UNARY (silu).
+/// Ports `ggml_metal_fusion_check_ssm_conv_silu` (ggml-metal-fusion.cpp:161
+/// @d81235049): SSM_CONV + UNARY (silu).
 fn checkSsmConvSilu(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *const CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     _ = fusion;
     _ = gf;
@@ -260,8 +284,8 @@ fn checkSsmConvSilu(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *c
     return true;
 }
 
-/// Ports `ggml_metal_fusion_check_add_chain` (ggml-metal-fusion.cpp:175
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_check_add_chain` (ggml-metal-fusion.cpp:194
+/// @d81235049).
 ///
 /// ADD x N: each ADD reads the previous ADD as src0, and all addends must
 /// share layout (and, in FULL mode, live in the same Metal buffer).
@@ -291,8 +315,8 @@ fn checkAddChain(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *cons
     return true;
 }
 
-/// Ports `ggml_metal_fusion_check_gdn_cache` (ggml-metal-fusion.cpp:211
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_check_gdn_cache` (ggml-metal-fusion.cpp:230
+/// @d81235049).
 ///
 /// GATED_DELTA_NET + CPY: the trailing cpy scatters the gdn state
 /// snapshots into the recurrent cache, so the gdn kernel writes them
@@ -358,8 +382,8 @@ fn checkGdnCache(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *cons
     return true;
 }
 
-/// Ports `ggml_metal_fusion_check_snake` (ggml-metal-fusion.cpp:273
-/// @7fe450e19): MUL + SIN + SQR + MUL + ADD (snake activation).
+/// Ports `ggml_metal_fusion_check_snake` (ggml-metal-fusion.cpp:292
+/// @d81235049): MUL + SIN + SQR + MUL + ADD (snake activation).
 fn checkSnake(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *const CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     _ = fusion;
     _ = mode;
@@ -408,13 +432,13 @@ fn checkSnake(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *const C
     return types_ok and shape_ok and dim_ok and contig_ok and x_in_add == x;
 }
 
-/// Ports `GGML_METAL_TOPK_MOE_MAX_EXPERTS` (ggml-metal-fusion.cpp:327
-/// @7fe450e19).
+/// Ports `GGML_METAL_TOPK_MOE_MAX_EXPERTS` (ggml-metal-fusion.cpp:346
+/// @d81235049).
 const topk_moe_max_experts = 1024;
 
 // Ports `ops_topk_moe`, `ops_topk_moe_scale`, `ops_topk_moe_norm` and
-// `ops_topk_moe_norm_scale` (ggml-metal-fusion.cpp:332, 335, 338, 342
-// @7fe450e19): SOFT_MAX + ARGSORT + GET_ROWS (plus optional norm/scale)
+// `ops_topk_moe_norm_scale` (ggml-metal-fusion.cpp:351, 354, 357, 361
+// @d81235049): SOFT_MAX + ARGSORT + GET_ROWS (plus optional norm/scale)
 // for MoE routing. A multi-output elision chain: the fused kernel writes
 // both the selected expert ids and the gathered/normalized routing
 // weights.
@@ -434,8 +458,8 @@ const ops_topk_moe_norm_scale = [_]c.enum_ggml_op{
     c.GGML_OP_SCALE,
 };
 
-/// Ports `ggml_metal_fusion_check_topk_moe` (ggml-metal-fusion.cpp:347
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_check_topk_moe` (ggml-metal-fusion.cpp:366
+/// @d81235049).
 ///
 /// The table matches on the non-empty node sequence; this check walks the
 /// raw graph, RESHAPE and VIEW nodes included, and holds it to `ops_all`.
@@ -507,7 +531,8 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *const
     const n_tokens: i64 = logits.ne[1];
     const n_expert_used: i64 = ids.ne[0];
 
-    if (n_expert <= 0 or n_tokens <= 0 or n_expert_used <= 0 or n_expert_used > n_expert or
+    // note: n_tokens == 0 (no-output batch) must match so that the packing stays shape-independent
+    if (n_expert <= 0 or n_expert_used <= 0 or n_expert_used > n_expert or
         n_expert > topk_moe_max_experts or n_expert_used > topk_moe_max_experts)
     {
         return false;
@@ -574,12 +599,12 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *const
     return true;
 }
 
-/// Ports `GGML_METAL_MOE_REDUCE_MAX_EXPERTS` (ggml-metal-fusion.cpp:483
-/// @7fe450e19).
+/// Ports `GGML_METAL_MOE_REDUCE_MAX_EXPERTS` (ggml-metal-fusion.cpp:503
+/// @d81235049).
 const moe_reduce_max_experts = 8;
 
-/// Ports `struct ggml_metal_moe_reduce_match` (ggml-metal-fusion.cpp:485
-/// @7fe450e19).
+/// Ports `struct ggml_metal_moe_reduce_match` (ggml-metal-fusion.cpp:505
+/// @d81235049).
 const MoeReduceMatch = struct {
     experts: *const Tensor,
     weights: *const Tensor,
@@ -587,8 +612,8 @@ const MoeReduceMatch = struct {
     node_count: c_int,
 };
 
-/// Ports `ggml_metal_fusion_match_moe_reduce` (ggml-metal-fusion.cpp:492
-/// @7fe450e19): a MUL by the routing weights, one VIEW per expert, then
+/// Ports `ggml_metal_fusion_match_moe_reduce` (ggml-metal-fusion.cpp:512
+/// @d81235049): a MUL by the routing weights, one VIEW per expert, then
 /// one ADD per additional expert summing the views in order.
 ///
 /// Return: the match, or null.
@@ -650,7 +675,8 @@ fn matchMoeReduce(gf: *const CGraph, node_idx: c_int, ops_all: []const c.enum_gg
     const n_embd: i64 = experts.ne[0];
     const n_tokens: i64 = experts.ne[2];
 
-    if (n_embd <= 0 or n_tokens <= 0 or experts.ne[1] != n_expert_used or experts.ne[3] != 1 or
+    // note: n_tokens == 0 (no-output batch) must match so that the packing stays shape-independent
+    if (n_embd <= 0 or experts.ne[1] != n_expert_used or experts.ne[3] != 1 or
         weights.ne[0] != 1 or weights.ne[1] != n_expert_used or weights.ne[2] != n_tokens or weights.ne[3] != 1 or
         dst.ne[0] != n_embd or dst.ne[1] != n_tokens or dst.ne[2] != 1 or dst.ne[3] != 1)
     {
@@ -698,8 +724,8 @@ fn matchMoeReduce(gf: *const CGraph, node_idx: c_int, ops_all: []const c.enum_gg
     };
 }
 
-/// Ports `ggml_metal_fusion_check_moe_reduce` (ggml-metal-fusion.cpp:591
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_check_moe_reduce` (ggml-metal-fusion.cpp:612
+/// @d81235049).
 fn checkMoeReduce(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *const CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     _ = nodes;
 
@@ -726,14 +752,89 @@ fn checkMoeReduce(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *con
 // -----------------------------------------------------------------------------
 // Patterns
 
+/// Ports `ggml_metal_tensor_is_weight` (ggml-metal-fusion.cpp:646
+/// @d81235049): true if `t` is or views a tensor in a buffer marked as
+/// weights, such as a bias. The model loader marks its buffers before any
+/// graph is optimized, and tensors in unmarked or not yet allocated
+/// buffers count as non-weights in both phases.
+fn tensorIsWeight(t: *const Tensor) bool {
+    const base: *const Tensor = if (t.view_src != null) impl.one(Tensor, t.view_src) else t;
+
+    return base.buffer != null and c.ggml_backend_buffer_get_usage(base.buffer) == c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS;
+}
+
+/// Ports `ggml_metal_mul_mat_add_operand` (ggml-metal-fusion.cpp:652
+/// @d81235049): the `ADD`'s other operand when exactly one of its sources
+/// is `mm`, and that operand is an F32 non-weight into an F32 sum.
+fn mulMatAddOperand(mm: *const Tensor, add: *const Tensor) ?*const Tensor {
+    if (add.op != c.GGML_OP_ADD or ((add.src[0] == mm) == (add.src[1] == mm))) {
+        return null;
+    }
+
+    const other = if (add.src[0] == mm) src(add, 1) else src(add, 0);
+
+    const ok = other.type == c.GGML_TYPE_F32 and add.type == c.GGML_TYPE_F32 and !tensorIsWeight(other);
+
+    return if (ok) other else null;
+}
+
+/// Ports `ggml_metal_mul_mat_add_residual` (ggml-metal-fusion.cpp:664
+/// @d81235049): the operand, when it is a same-shape contiguous residual
+/// the MMA store can add.
+fn mulMatAddResidual(mm: *const Tensor, add: *const Tensor) ?*const Tensor {
+    const res = mulMatAddOperand(mm, add);
+
+    const ok = res != null and c.ggml_are_same_shape(res.?, mm) and
+        c.ggml_is_contiguous(res.?) and c.ggml_is_contiguous(mm) and c.ggml_is_contiguous(add);
+
+    return if (ok) res else null;
+}
+
+/// Ports `ggml_metal_fusion_check_mul_mat_add` (ggml-metal-fusion.cpp:675
+/// @d81235049).
+///
+/// `MUL_MAT + ADD` of an F32 non-weight. The reorder packs it without
+/// reading row counts (`STRUCTURAL` stops after the operand and type
+/// checks), so ubatch sizes share one node order; the encoder fuses only
+/// a same-shape residual on the few-row MMA path, which the sum may
+/// overlap only in place.
+fn checkMulMatAdd(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *const CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
+    _ = gf;
+    _ = node_idxs;
+    _ = idx;
+    _ = fusion;
+
+    const mm = nodes[0];
+    const add = nodes[1];
+
+    if (mulMatAddOperand(mm, add) == null or
+        !common.ggml_metal_op_mul_mat_may_use_mma(mm))
+    {
+        return false;
+    }
+
+    if (mode == .structural) {
+        return true;
+    }
+
+    const res = mulMatAddResidual(mm, add) orelse return false;
+
+    if (!common.ggml_metal_op_mul_mat_use_mma(mm)) {
+        return false;
+    }
+
+    return !overlap(add, src(mm, 0)) and !overlap(add, src(mm, 1)) and
+        (add.data == res.data or !overlap(add, res));
+}
+
 // Ports `ops_norm_mul`, `ops_norm_mul_add`, `ops_norm_scale`,
 // `ops_rms_norm_mul`, `ops_rms_norm_mul_add`, `ops_rms_norm_scale`
-// (ggml-metal-fusion.cpp:625, 626, 627, 628, 629, 630 @7fe450e19),
+// (ggml-metal-fusion.cpp:711, 712, 713, 714, 715, 716 @d81235049),
 // `ops_add_2`, `ops_add_3`, `ops_add_4`, `ops_add_5`, `ops_add_6`,
-// `ops_add_7` (ggml-metal-fusion.cpp:632, 633, 634, 635, 636, 637
-// @7fe450e19), `ops_snake` (ggml-metal-fusion.cpp:638 @7fe450e19),
-// `ops_gdn_cache` (ggml-metal-fusion.cpp:640 @7fe450e19) and
-// `ops_ssm_conv_silu` (ggml-metal-fusion.cpp:642 @7fe450e19).
+// `ops_add_7` (ggml-metal-fusion.cpp:718, 719, 720, 721, 722, 723
+// @d81235049), `ops_snake` (ggml-metal-fusion.cpp:724 @d81235049),
+// `ops_gdn_cache` (ggml-metal-fusion.cpp:726 @d81235049) and
+// `ops_ssm_conv_silu` (ggml-metal-fusion.cpp:728 @d81235049).
 const ops_norm_mul = [_]c.enum_ggml_op{ c.GGML_OP_NORM, c.GGML_OP_MUL };
 const ops_norm_mul_add = [_]c.enum_ggml_op{ c.GGML_OP_NORM, c.GGML_OP_MUL, c.GGML_OP_ADD };
 const ops_norm_scale = [_]c.enum_ggml_op{ c.GGML_OP_NORM, c.GGML_OP_SCALE };
@@ -755,8 +856,8 @@ const ops_ssm_conv_silu = [_]c.enum_ggml_op{ c.GGML_OP_SSM_CONV, c.GGML_OP_UNARY
 
 /// Ports `ops_moe_reduce_2`, `ops_moe_reduce_3`, `ops_moe_reduce_4`,
 /// `ops_moe_reduce_5`, `ops_moe_reduce_6`, `ops_moe_reduce_7` and
-/// `ops_moe_reduce_8` (ggml-metal-fusion.cpp:644, 647, 650, 654, 658, 662,
-/// 666 @7fe450e19): MUL, `n` VIEWs, `n - 1` ADDs. The C spells each out; they are one
+/// `ops_moe_reduce_8` (ggml-metal-fusion.cpp:730, 733, 736, 740, 744, 748,
+/// 752 @d81235049): MUL, `n` VIEWs, `n - 1` ADDs. The C spells each out; they are one
 /// shape, so one comptime function writes them.
 fn opsMoeReduce(comptime n: usize) [2 * n]c.enum_ggml_op {
     var ops: [2 * n]c.enum_ggml_op = undefined;
@@ -773,6 +874,9 @@ const ops_moe_reduce_6 = opsMoeReduce(6);
 const ops_moe_reduce_7 = opsMoeReduce(7);
 const ops_moe_reduce_8 = opsMoeReduce(8);
 
+/// Ports `ops_mul_mat_add` (ggml-metal-fusion.cpp:758 @d81235049).
+const ops_mul_mat_add = [_]c.enum_ggml_op{ c.GGML_OP_MUL_MAT, c.GGML_OP_ADD };
+
 const out_1 = [_]c_int{1};
 
 fn entry(id: Id, comptime ops_all: []const c.enum_ggml_op, outs: []const c_int, unsafe: bool, check: CheckFn) Fusion {
@@ -786,7 +890,7 @@ fn entry(id: Id, comptime ops_all: []const c.enum_ggml_op, outs: []const c_int, 
     };
 }
 
-/// Ports `ggml_metal_fusions` (ggml-metal-fusion.cpp:672 @7fe450e19): the
+/// Ports `ggml_metal_fusions` (ggml-metal-fusion.cpp:760 @d81235049): the
 /// single table of all fusions the Metal backend supports, in the C's
 /// order — `ggml_metal_fusion_next` keeps the *first* longest match, and
 /// the stats labels are indexed by position.
@@ -817,6 +921,7 @@ const fusions = [_]Fusion{
     entry(.moe_reduce, &ops_moe_reduce_7, &.{}, true, &checkMoeReduce),
     entry(.moe_reduce, &ops_moe_reduce_8, &.{}, true, &checkMoeReduce),
     entry(.ssm_conv_silu, &ops_ssm_conv_silu, &.{}, false, &checkSsmConvSilu),
+    entry(.mul_mat_add, &ops_mul_mat_add, &.{}, false, &checkMulMatAdd),
 };
 
 comptime {
@@ -829,8 +934,8 @@ comptime {
 // -----------------------------------------------------------------------------
 // Alloc deps
 
-/// Ports `ggml_metal_fusion_match_raw_pattern` (ggml-metal-fusion.cpp:703
-/// @7fe450e19): whether the raw nodes from `node_idx` have exactly `ops`.
+/// Ports `ggml_metal_fusion_match_raw_pattern` (ggml-metal-fusion.cpp:792
+/// @d81235049): whether the raw nodes from `node_idx` have exactly `ops`.
 fn matchRawPattern(gf: *const CGraph, node_idx: c_int, ops: []const c.enum_ggml_op) bool {
     if (node_idx < 0 or node_idx + @as(c_int, @intCast(ops.len)) > gf.n_nodes) {
         return false;
@@ -849,7 +954,7 @@ fn matchRawPattern(gf: *const CGraph, node_idx: c_int, ops: []const c.enum_ggml_
 pub const AddAllocDepFn = *const fn (?*anyopaque, ?*Tensor, ?*Tensor) callconv(.c) void;
 
 /// Ports `ggml_metal_fusion_add_pattern_alloc_deps`
-/// (ggml-metal-fusion.cpp:718 @7fe450e19): keep every external input of
+/// (ggml-metal-fusion.cpp:807 @d81235049): keep every external input of
 /// the run alive until its last node.
 ///
 /// The C's `std::set` is a membership test and nothing reads its order,
@@ -882,8 +987,8 @@ fn addPatternAllocDeps(user_data: ?*anyopaque, add_alloc_dep: AddAllocDepFn, gf:
     }
 }
 
-/// Ports `ggml_metal_fusion_add_alloc_deps` (ggml-metal-fusion.cpp:740
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_add_alloc_deps` (ggml-metal-fusion.cpp:829
+/// @d81235049).
 ///
 /// Called from `graph_optimize`: at each raw position, the table entry
 /// whose raw op sequence (`ops_all`) is the longest exact match there --
@@ -921,8 +1026,8 @@ pub export fn ggml_metal_fusion_add_alloc_deps(
 // -----------------------------------------------------------------------------
 // Shared fusion info
 
-/// Ports `struct ggml_metal_fusion_info` (ggml-metal-fusion.cpp:780
-/// @7fe450e19).
+/// Ports `struct ggml_metal_fusion_info` (ggml-metal-fusion.cpp:869
+/// @d81235049).
 ///
 /// The device owns one and every backend context on that device shares it,
 /// so the counters accumulate across contexts. Opaque to the C callers.
@@ -938,7 +1043,7 @@ pub const Info = struct {
     debug: c_int,
 };
 
-/// Ports `ggml_metal_fusion_label` (ggml-metal-fusion.cpp:767 @7fe450e19):
+/// Ports `ggml_metal_fusion_label` (ggml-metal-fusion.cpp:856 @d81235049):
 /// the pattern's non-empty op names joined with `+`.
 fn label(fusion: *const Fusion) [:0]u8 {
     var buf: std.ArrayList(u8) = .empty;
@@ -953,8 +1058,8 @@ fn label(fusion: *const Fusion) [:0]u8 {
     return buf.toOwnedSliceSentinel(allocator, 0) catch impl.abort("metal: out of memory building a fusion label");
 }
 
-/// Ports `ggml_metal_fusion_info_init` (ggml-metal-fusion.cpp:789
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_info_init` (ggml-metal-fusion.cpp:878
+/// @d81235049).
 ///
 /// Parameters:
 /// - `enabled`: whether the encoders try to fuse at all.
@@ -978,8 +1083,8 @@ pub export fn ggml_metal_fusion_info_init(enabled: bool, debug: c_int) callconv(
     return finfo;
 }
 
-/// Ports `ggml_metal_fusion_info_free` (ggml-metal-fusion.cpp:803
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_info_free` (ggml-metal-fusion.cpp:892
+/// @d81235049).
 pub export fn ggml_metal_fusion_info_free(finfo: ?*Info) callconv(.c) void {
     const self = finfo orelse return; // `delete nullptr` is a no-op
     freeLabels(self);
@@ -994,32 +1099,32 @@ fn freeLabels(finfo: *Info) void {
     finfo.counts = &.{};
 }
 
-/// Ports `ggml_metal_fusion_info_enabled` (ggml-metal-fusion.cpp:807
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_info_enabled` (ggml-metal-fusion.cpp:896
+/// @d81235049).
 pub export fn ggml_metal_fusion_info_enabled(finfo: *const Info) callconv(.c) bool {
     return finfo.enabled;
 }
 
-/// Ports `ggml_metal_fusion_info_stats` (ggml-metal-fusion.cpp:811
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_info_stats` (ggml-metal-fusion.cpp:900
+/// @d81235049).
 pub export fn ggml_metal_fusion_info_stats(finfo: *const Info) callconv(.c) bool {
     return finfo.stats;
 }
 
-/// Ports `ggml_metal_fusion_info_debug` (ggml-metal-fusion.cpp:815
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_info_debug` (ggml-metal-fusion.cpp:904
+/// @d81235049).
 pub export fn ggml_metal_fusion_info_debug(finfo: *const Info) callconv(.c) c_int {
     return finfo.debug;
 }
 
-/// Ports `ggml_metal_fusion_info_n_fusions` (ggml-metal-fusion.cpp:819
-/// @7fe450e19). Zero until the labels are built.
+/// Ports `ggml_metal_fusion_info_n_fusions` (ggml-metal-fusion.cpp:908
+/// @d81235049). Zero until the labels are built.
 pub export fn ggml_metal_fusion_info_n_fusions(finfo: *const Info) callconv(.c) c_int {
     return @intCast(finfo.labels.len);
 }
 
-/// Ports `ggml_metal_fusion_info_label` (ggml-metal-fusion.cpp:823
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_info_label` (ggml-metal-fusion.cpp:912
+/// @d81235049).
 ///
 /// Return: the label of table entry `idx`, borrowed from `finfo`.
 pub export fn ggml_metal_fusion_info_label(finfo: *const Info, idx: c_int) callconv(.c) [*:0]const u8 {
@@ -1027,15 +1132,15 @@ pub export fn ggml_metal_fusion_info_label(finfo: *const Info, idx: c_int) callc
     return finfo.labels[@intCast(idx)].ptr;
 }
 
-/// Ports `ggml_metal_fusion_info_count` (ggml-metal-fusion.cpp:828
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_info_count` (ggml-metal-fusion.cpp:917
+/// @d81235049).
 pub export fn ggml_metal_fusion_info_count(finfo: *const Info, idx: c_int) callconv(.c) u64 {
     impl.assert(idx >= 0 and idx < @as(c_int, @intCast(finfo.counts.len)), "idx >= 0 && idx < (int) finfo->counts.size()");
     return finfo.counts[@intCast(idx)];
 }
 
-/// Ports `ggml_metal_fusion_info_count_fusion` (ggml-metal-fusion.cpp:833
-/// @7fe450e19): one more firing of `fusion`, its table index being its
+/// Ports `ggml_metal_fusion_info_count_fusion` (ggml-metal-fusion.cpp:922
+/// @d81235049): one more firing of `fusion`, its table index being its
 /// offset from the table's start. Single-threaded by construction: the
 /// context encodes on one thread whenever stats are on.
 ///
@@ -1057,14 +1162,14 @@ pub export fn ggml_metal_fusion_info_count_fusion(finfo: *Info, fusion: ?*const 
     }
 }
 
-/// Ports `ggml_metal_fusion_info_set_enabled` (ggml-metal-fusion.cpp:844
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_info_set_enabled` (ggml-metal-fusion.cpp:933
+/// @d81235049).
 pub export fn ggml_metal_fusion_info_set_enabled(finfo: *Info, enabled: bool) callconv(.c) void {
     finfo.enabled = enabled;
 }
 
-/// Ports `ggml_metal_fusion_info_labels_init` (ggml-metal-fusion.cpp:848
-/// @7fe450e19): one label and one zeroed counter per table entry, once.
+/// Ports `ggml_metal_fusion_info_labels_init` (ggml-metal-fusion.cpp:937
+/// @d81235049): one label and one zeroed counter per table entry, once.
 pub export fn ggml_metal_fusion_info_labels_init(finfo: *Info) callconv(.c) void {
     if (finfo.labels_set) {
         return;
@@ -1085,21 +1190,21 @@ pub export fn ggml_metal_fusion_info_labels_init(finfo: *Info) callconv(.c) void
     finfo.labels_set = true;
 }
 
-/// Ports `ggml_metal_fusion_info_stats_init` (ggml-metal-fusion.cpp:864
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_info_stats_init` (ggml-metal-fusion.cpp:953
+/// @d81235049).
 pub export fn ggml_metal_fusion_info_stats_init(finfo: *Info) callconv(.c) void {
     finfo.stats = true;
     ggml_metal_fusion_info_labels_init(finfo);
 }
 
-/// Ports `ggml_metal_fusion_info_stats_reset` (ggml-metal-fusion.cpp:869
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_info_stats_reset` (ggml-metal-fusion.cpp:958
+/// @d81235049).
 pub export fn ggml_metal_fusion_info_stats_reset(finfo: *Info) callconv(.c) void {
     @memset(finfo.counts, 0);
 }
 
-/// Ports `ggml_metal_fusion_info_stats_get` (ggml-metal-fusion.cpp:873
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_info_stats_get` (ggml-metal-fusion.cpp:962
+/// @d81235049).
 ///
 /// Parameters:
 /// - `labels`: receives up to `n` labels, borrowed from `finfo`; null asks
@@ -1131,7 +1236,7 @@ pub export fn ggml_metal_fusion_info_stats_get(finfo: *const Info, labels: ?[*][
 // Memory-range checks
 
 /// The `same_memory` lambda of `ggml_metal_fusion_check_memory_ranges`
-/// (ggml-metal-fusion.cpp:896 @7fe450e19): one tensor's data is the
+/// (ggml-metal-fusion.cpp:985 @d81235049): one tensor's data is the
 /// other's, or either is a view (at any depth) of the other.
 fn sameMemory(a: *const Tensor, b: *const Tensor) bool {
     if (a.data != null and b.data != null and a.data == b.data) {
@@ -1204,8 +1309,8 @@ fn checkDst(nodes: [*]const *const Tensor, node_count: usize, dst: *const Tensor
     return true;
 }
 
-/// Ports `ggml_metal_fusion_check_memory_ranges` (ggml-metal-fusion.cpp:896
-/// @7fe450e19).
+/// Ports `ggml_metal_fusion_check_memory_ranges` (ggml-metal-fusion.cpp:985
+/// @d81235049).
 ///
 /// Reject fusions where an external source overlaps any fused output. The
 /// fused kernels elide intermediate nodes, so only sources that are not
@@ -1232,7 +1337,7 @@ fn checkMemoryRanges(fusion: *const Fusion, nodes: [*]const *const Tensor, node_
 // -----------------------------------------------------------------------------
 // Queries
 
-/// Ports `ggml_metal_fusion_next` (ggml-metal-fusion.cpp:986 @7fe450e19).
+/// Ports `ggml_metal_fusion_next` (ggml-metal-fusion.cpp:1075 @d81235049).
 ///
 /// Parameters:
 /// - `gf`: the graph.
@@ -1336,28 +1441,33 @@ pub export fn ggml_metal_fusion_next(
     return res;
 }
 
-/// Ports `ggml_metal_fusion_max` (ggml-metal-fusion.cpp:1081 @7fe450e19).
+/// Ports `ggml_metal_fusion_max` (ggml-metal-fusion.cpp:1170 @d81235049).
 ///
 /// The optimize phase's question: how many nodes from `idx` (a raw graph
 /// index) could be fused, chaining patterns back to back. Matching runs on
 /// the same view-transparent sequence the encoders see, so the answer is
 /// the raw span to the last matched node, views packed along.
 ///
+/// Since v0.6.0 a zero-element node is no longer skipped here (the
+/// encoders still skip it): an empty graph packs like its non-empty
+/// counterpart, so a no-output ubatch gets the same node order.
+///
 /// Return: at least 1.
 pub export fn ggml_metal_fusion_max(gf: *const CGraph, idx: c_int) callconv(.c) c_int {
-    // an empty/view node cannot start a pattern - pack it alone
+    // a view node cannot start a pattern - pack it alone
     const first = gf.nodes[@intCast(idx)].?;
-    if (impl.opIsEmpty(first.op) or types.ggml_is_empty(first)) {
+    if (impl.opIsEmpty(first.op)) {
         return 1;
     }
 
-    // collect the non-empty node indices starting at idx
+    // collect the non-view node indices starting at idx; 0-element tensors are included so
+    // that empty graphs pack like their non-empty counterparts (see ggml_metal_fusion_filter_ops)
     var idxs: [max]c_int = undefined;
     var n_idxs: c_int = 0;
     var i = idx;
     while (i < gf.n_nodes and n_idxs < max) : (i += 1) {
         const t = gf.nodes[@intCast(i)].?;
-        if (!impl.opIsEmpty(t.op) and !types.ggml_is_empty(t)) {
+        if (!impl.opIsEmpty(t.op)) {
             idxs[@intCast(n_idxs)] = i;
             n_idxs += 1;
         }
@@ -1401,7 +1511,8 @@ test "the table's labels are its op names joined by +" {
 
     try std.testing.expectEqual(@as(c_int, fusions.len), ggml_metal_fusion_info_n_fusions(finfo));
     try std.testing.expectEqualStrings("NORM+MUL", std.mem.span(ggml_metal_fusion_info_label(finfo, 0)));
-    try std.testing.expectEqualStrings("SSM_CONV+UNARY", std.mem.span(ggml_metal_fusion_info_label(finfo, fusions.len - 1)));
+    try std.testing.expectEqualStrings("SSM_CONV+UNARY", std.mem.span(ggml_metal_fusion_info_label(finfo, fusions.len - 2)));
+    try std.testing.expectEqualStrings("MUL_MAT+ADD", std.mem.span(ggml_metal_fusion_info_label(finfo, fusions.len - 1)));
     // the labels name the non-empty ops: RESHAPE and VIEW are filtered out
     try std.testing.expectEqualStrings("SOFT_MAX+ARGSORT+GET_ROWS", std.mem.span(ggml_metal_fusion_info_label(finfo, 14)));
     try std.testing.expectEqualStrings("MUL+ADD", std.mem.span(ggml_metal_fusion_info_label(finfo, 18)));

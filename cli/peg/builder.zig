@@ -7,7 +7,7 @@
 //! Ports `common_peg_parser_builder`, the operators of `common_peg_parser`,
 //! `parse_char_classes` and its helpers, `rule_name` and `build_peg_parser`
 //! from `llama.cpp/common/peg-parser.h` and `llama.cpp/common/peg-parser.cpp`
-//! (llama.cpp v0.5.0, `7fe450e19`). Each declaration names what it ports and
+//! (llama.cpp v0.6.0, `d81235049`). Each declaration names what it ports and
 //! the line it began at.
 //!
 //! # Shape
@@ -36,7 +36,7 @@ const CharRange = arena_mod.CharRange;
 const SharedDoc = arena_mod.SharedDoc;
 const schema = json_mod.schema;
 
-/// Ports `parse_hex_escape` (peg-parser.cpp:34 @7fe450e19).
+/// Ports `parse_hex_escape` (peg-parser.cpp:34 @d81235049).
 ///
 /// Return: the value and how many digits it took, or `{0, 0}`.
 fn parseHexEscape(str: []const u8, pos: usize, hex_count: usize) struct { u32, usize } {
@@ -64,7 +64,7 @@ fn charToU32(c: u8) u32 {
     return @bitCast(@as(c_int, cc));
 }
 
-/// Ports `parse_char_class_char` (peg-parser.cpp:59 @7fe450e19).
+/// Ports `parse_char_class_char` (peg-parser.cpp:59 @d81235049).
 ///
 /// Return: the code point and how many bytes it took.
 fn parseCharClassChar(content: []const u8, pos: usize) struct { u32, usize } {
@@ -92,7 +92,7 @@ fn parseCharClassChar(content: []const u8, pos: usize) struct { u32, usize } {
     return .{ content[pos], 1 };
 }
 
-/// Ports `parse_char_classes` (peg-parser.cpp:100 @7fe450e19): `[a-z\n]`,
+/// Ports `parse_char_classes` (peg-parser.cpp:100 @d81235049): `[a-z\n]`,
 /// `^` negating, with or without the brackets.
 ///
 /// An empty class -- `""` or `"["` -- is undefined in the C++ (`front()`
@@ -127,7 +127,7 @@ fn parseCharClasses(a: Allocator, classes: []const u8) Error!struct { []CharRang
 
 threadlocal var invalid_rule_chars_re: ?regex.Regex = null;
 
-/// Ports `rule_name` (peg-parser.cpp:1072 @7fe450e19): every run of
+/// Ports `rule_name` (peg-parser.cpp:1072 @d81235049): every run of
 /// characters outside `[a-zA-Z0-9-]` becomes one `-`.
 ///
 /// Return: allocated with `a`.
@@ -151,11 +151,11 @@ pub fn ruleName(a: Allocator, name: []const u8) Error![]u8 {
     return out.items;
 }
 
-/// Ports `common_peg_parser_builder` (peg-parser.h:370 @7fe450e19).
+/// Ports `common_peg_parser_builder` (peg-parser.h:370 @d81235049).
 pub const Builder = struct {
     arena: Arena,
 
-    /// Ports `common_peg_parser_builder` (peg-parser.cpp:1077 @7fe450e19),
+    /// Ports `common_peg_parser_builder` (peg-parser.cpp:1077 @d81235049),
     /// the constructor.
     ///
     /// Return: a builder over an empty arena; `deinit` frees it unless
@@ -187,45 +187,45 @@ pub const Builder = struct {
         return out;
     }
 
-    /// Ports `eps` (peg-parser.h:381 @7fe450e19).
+    /// Ports `eps` (peg-parser.h:381 @d81235049).
     pub fn eps(self: *Builder) Error!ParserId {
         return self.add(.epsilon);
     }
 
-    /// Ports `start` (peg-parser.h:385 @7fe450e19).
+    /// Ports `start` (peg-parser.h:385 @d81235049).
     pub fn start(self: *Builder) Error!ParserId {
         return self.add(.start);
     }
 
-    /// Ports `end` (peg-parser.h:389 @7fe450e19).
+    /// Ports `end` (peg-parser.h:389 @d81235049).
     pub fn end(self: *Builder) Error!ParserId {
         return self.add(.end);
     }
 
-    /// Ports `literal` (peg-parser.h:393 @7fe450e19).
+    /// Ports `literal` (peg-parser.h:393 @d81235049).
     pub fn literal(self: *Builder, lit: []const u8) Error!ParserId {
         return self.add(.{ .literal = try self.dupe(lit) });
     }
 
-    /// Ports `sequence` (peg-parser.h:397 @7fe450e19), the overload taking
+    /// Ports `sequence` (peg-parser.h:397 @d81235049), the overload taking
     /// nothing: an empty sequence.
     pub fn sequenceEmpty(self: *Builder) Error!ParserId {
         return self.add(.{ .sequence = &.{} });
     }
 
-    /// Ports `sequence` (peg-parser.cpp:1079 @7fe450e19): nested sequences
+    /// Ports `sequence` (peg-parser.cpp:1079 @d81235049): nested sequences
     /// are flattened into this one.
     pub fn sequence(self: *Builder, parsers: []const ParserId) Error!ParserId {
         return self.add(.{ .sequence = try self.flatten(parsers, .sequence) });
     }
 
-    /// Ports `choice` (peg-parser.h:404 @7fe450e19), the overload taking
+    /// Ports `choice` (peg-parser.h:404 @d81235049), the overload taking
     /// nothing: an empty choice.
     pub fn choiceEmpty(self: *Builder) Error!ParserId {
         return self.add(.{ .choice = &.{} });
     }
 
-    /// Ports `choice` (peg-parser.cpp:1111 @7fe450e19): nested choices are
+    /// Ports `choice` (peg-parser.cpp:1111 @d81235049): nested choices are
     /// flattened into this one.
     pub fn choice(self: *Builder, parsers: []const ParserId) Error!ParserId {
         return self.add(.{ .choice = try self.flatten(parsers, .choice) });
@@ -244,37 +244,37 @@ pub const Builder = struct {
         return out.items;
     }
 
-    /// Ports `one_or_more` (peg-parser.h:411 @7fe450e19).
+    /// Ports `one_or_more` (peg-parser.h:411 @d81235049).
     pub fn oneOrMore(self: *Builder, p: ParserId) Error!ParserId {
         return self.repeat(p, 1, -1);
     }
 
-    /// Ports `zero_or_more` (peg-parser.h:415 @7fe450e19).
+    /// Ports `zero_or_more` (peg-parser.h:415 @d81235049).
     pub fn zeroOrMore(self: *Builder, p: ParserId) Error!ParserId {
         return self.repeat(p, 0, -1);
     }
 
-    /// Ports `optional` (peg-parser.h:419 @7fe450e19).
+    /// Ports `optional` (peg-parser.h:419 @d81235049).
     pub fn optional(self: *Builder, p: ParserId) Error!ParserId {
         return self.repeat(p, 0, 1);
     }
 
-    /// Ports `peek` (peg-parser.h:423 @7fe450e19).
+    /// Ports `peek` (peg-parser.h:423 @d81235049).
     pub fn peek(self: *Builder, p: ParserId) Error!ParserId {
         return self.add(.{ .and_ = p });
     }
 
-    /// Ports `negate` (peg-parser.h:427 @7fe450e19).
+    /// Ports `negate` (peg-parser.h:427 @d81235049).
     pub fn negate(self: *Builder, p: ParserId) Error!ParserId {
         return self.add(.{ .not_ = p });
     }
 
-    /// Ports `any` (peg-parser.h:431 @7fe450e19).
+    /// Ports `any` (peg-parser.h:431 @d81235049).
     pub fn any(self: *Builder) Error!ParserId {
         return self.add(.any);
     }
 
-    /// Ports `chars` (peg-parser.cpp:1143 @7fe450e19). A max of -1 is
+    /// Ports `chars` (peg-parser.cpp:1143 @d81235049). A max of -1 is
     /// unbounded.
     pub fn chars(self: *Builder, classes: []const u8, min: c_int, max: c_int) Error!ParserId {
         const parsed = try parseCharClasses(self.mem(), classes);
@@ -287,54 +287,54 @@ pub const Builder = struct {
         } });
     }
 
-    /// Ports `ref` (peg-parser.h:442 @7fe450e19).
+    /// Ports `ref` (peg-parser.h:442 @d81235049).
     pub fn ref(self: *Builder, name: []const u8) Error!ParserId {
         return self.add(.{ .ref = try self.dupe(name) });
     }
 
-    /// Ports `space` (peg-parser.h:446 @7fe450e19).
+    /// Ports `space` (peg-parser.h:446 @d81235049).
     pub fn space(self: *Builder) Error!ParserId {
         return self.add(.space);
     }
 
-    /// Ports `until` (peg-parser.h:451 @7fe450e19).
+    /// Ports `until` (peg-parser.h:451 @d81235049).
     pub fn until(self: *Builder, delimiter: []const u8) Error!ParserId {
         return self.untilOneOf(&.{delimiter});
     }
 
-    /// Ports `until_one_of` (peg-parser.h:455 @7fe450e19).
+    /// Ports `until_one_of` (peg-parser.h:455 @d81235049).
     pub fn untilOneOf(self: *Builder, delimiters: []const []const u8) Error!ParserId {
         return self.add(.{ .until = try self.dupeAll(delimiters) });
     }
 
-    /// Ports `rest` (peg-parser.h:459 @7fe450e19).
+    /// Ports `rest` (peg-parser.h:459 @d81235049).
     pub fn rest(self: *Builder) Error!ParserId {
         return self.untilOneOf(&.{});
     }
 
-    /// Ports `repeat` (peg-parser.h:464 @7fe450e19), the overload taking a
+    /// Ports `repeat` (peg-parser.h:464 @d81235049), the overload taking a
     /// range.
     pub fn repeat(self: *Builder, p: ParserId, min: c_int, max: c_int) Error!ParserId {
         return self.add(.{ .repetition = .{ .child = p, .min_count = min, .max_count = max } });
     }
 
-    /// Ports `repeat` (peg-parser.h:468 @7fe450e19), the overload taking a
+    /// Ports `repeat` (peg-parser.h:468 @d81235049), the overload taking a
     /// count.
     pub fn repeatN(self: *Builder, p: ParserId, n: c_int) Error!ParserId {
         return self.repeat(p, n, n);
     }
 
-    /// Ports `string_content` (peg-parser.cpp:1196 @7fe450e19).
+    /// Ports `string_content` (peg-parser.cpp:1196 @d81235049).
     pub fn stringContent(self: *Builder, delimiter: u8) Error!ParserId {
         return self.add(.{ .string = delimiter });
     }
 
-    /// Ports `double_quoted_string` (peg-parser.cpp:1200 @7fe450e19).
+    /// Ports `double_quoted_string` (peg-parser.cpp:1200 @d81235049).
     pub fn doubleQuotedString(self: *Builder) Error!ParserId {
         return self.ruleFn("double-quoted-string", self, quotedBody('"'), false);
     }
 
-    /// Ports `single_quoted_string` (peg-parser.cpp:1206 @7fe450e19).
+    /// Ports `single_quoted_string` (peg-parser.cpp:1206 @d81235049).
     pub fn singleQuotedString(self: *Builder) Error!ParserId {
         return self.ruleFn("single-quoted-string", self, quotedBody('\''), false);
     }
@@ -347,7 +347,7 @@ pub const Builder = struct {
         }.body;
     }
 
-    /// Ports `quoted_string` (peg-parser.cpp:1212 @7fe450e19).
+    /// Ports `quoted_string` (peg-parser.cpp:1212 @d81235049).
     pub fn quotedString(self: *Builder) Error!ParserId {
         return self.ruleFn("quoted-string", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -356,7 +356,7 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `json_number` (peg-parser.cpp:1220 @7fe450e19): committed only
+    /// Ports `json_number` (peg-parser.cpp:1220 @d81235049): committed only
     /// when the next character cannot extend it.
     pub fn jsonNumber(self: *Builder) Error!ParserId {
         return self.ruleFn("json-number", self, struct {
@@ -372,12 +372,12 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `json_string` (peg-parser.cpp:1235 @7fe450e19).
+    /// Ports `json_string` (peg-parser.cpp:1235 @d81235049).
     pub fn jsonString(self: *Builder) Error!ParserId {
         return self.ruleFn("json-string", self, quotedBody('"'), false);
     }
 
-    /// Ports `json_bool` (peg-parser.cpp:1241 @7fe450e19).
+    /// Ports `json_bool` (peg-parser.cpp:1241 @d81235049).
     pub fn jsonBool(self: *Builder) Error!ParserId {
         return self.ruleFn("json-bool", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -386,7 +386,7 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `json_null` (peg-parser.cpp:1247 @7fe450e19).
+    /// Ports `json_null` (peg-parser.cpp:1247 @d81235049).
     pub fn jsonNull(self: *Builder) Error!ParserId {
         return self.ruleFn("json-null", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -395,7 +395,7 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `json_object` (peg-parser.cpp:1253 @7fe450e19).
+    /// Ports `json_object` (peg-parser.cpp:1253 @d81235049).
     pub fn jsonObject(self: *Builder) Error!ParserId {
         return self.ruleFn("json-object", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -411,7 +411,7 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `json_array` (peg-parser.cpp:1269 @7fe450e19).
+    /// Ports `json_array` (peg-parser.cpp:1269 @d81235049).
     pub fn jsonArray(self: *Builder) Error!ParserId {
         return self.ruleFn("json-array", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -426,7 +426,7 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `json` (peg-parser.cpp:1284 @7fe450e19): any JSON value.
+    /// Ports `json` (peg-parser.cpp:1284 @d81235049): any JSON value.
     pub fn json(self: *Builder) Error!ParserId {
         return self.ruleFn("json-value", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -442,7 +442,7 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `python_string` (peg-parser.cpp:1297 @7fe450e19).
+    /// Ports `python_string` (peg-parser.cpp:1297 @d81235049).
     pub fn pythonString(self: *Builder) Error!ParserId {
         return self.ruleFn("python-string", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -451,12 +451,12 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `python_number` (peg-parser.cpp:1303 @7fe450e19).
+    /// Ports `python_number` (peg-parser.cpp:1303 @d81235049).
     pub fn pythonNumber(self: *Builder) Error!ParserId {
         return self.jsonNumber();
     }
 
-    /// Ports `python_bool` (peg-parser.cpp:1307 @7fe450e19).
+    /// Ports `python_bool` (peg-parser.cpp:1307 @d81235049).
     pub fn pythonBool(self: *Builder) Error!ParserId {
         return self.ruleFn("python-bool", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -465,7 +465,7 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `python_null` (peg-parser.cpp:1313 @7fe450e19).
+    /// Ports `python_null` (peg-parser.cpp:1313 @d81235049).
     pub fn pythonNull(self: *Builder) Error!ParserId {
         return self.ruleFn("python-none", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -474,7 +474,7 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `python_dict` (peg-parser.cpp:1319 @7fe450e19).
+    /// Ports `python_dict` (peg-parser.cpp:1319 @d81235049).
     pub fn pythonDict(self: *Builder) Error!ParserId {
         return self.ruleFn("python-dict", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -491,7 +491,7 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `python_array` (peg-parser.cpp:1336 @7fe450e19).
+    /// Ports `python_array` (peg-parser.cpp:1336 @d81235049).
     pub fn pythonArray(self: *Builder) Error!ParserId {
         return self.ruleFn("python-array", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -507,7 +507,7 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `python_value` (peg-parser.cpp:1352 @7fe450e19).
+    /// Ports `python_value` (peg-parser.cpp:1352 @d81235049).
     pub fn pythonValue(self: *Builder) Error!ParserId {
         return self.ruleFn("python-value", self, struct {
             fn body(b: *Builder) Error!ParserId {
@@ -523,21 +523,21 @@ pub const Builder = struct {
         }.body, false);
     }
 
-    /// Ports `marker` (peg-parser.cpp:1365 @7fe450e19): `<...>` or `[...]`.
+    /// Ports `marker` (peg-parser.cpp:1365 @d81235049): `<...>` or `[...]`.
     pub fn marker(self: *Builder) Error!ParserId {
         const sharp = try self.plus(try self.plus(try self.literal("<"), try self.until(">")), try self.literal(">"));
         const square = try self.plus(try self.plus(try self.literal("["), try self.until("]")), try self.literal("]"));
         return self.choice(&.{ sharp, square });
     }
 
-    /// Ports `json_member` (peg-parser.cpp:1371 @7fe450e19).
+    /// Ports `json_member` (peg-parser.cpp:1371 @d81235049).
     pub fn jsonMember(self: *Builder, key: []const u8, p: ParserId) Error!ParserId {
         const ws = try self.space();
         const quoted = try std.mem.concat(self.mem(), u8, &.{ "\"", key, "\"" });
         return self.sequence(&.{ try self.literal(quoted), ws, try self.literal(":"), ws, p });
     }
 
-    /// Ports `schema` (peg-parser.cpp:1148 @7fe450e19), the overload taking
+    /// Ports `schema` (peg-parser.cpp:1148 @d81235049), the overload taking
     /// a document: `node` lives in `doc`, which the arena now also holds.
     pub fn schemaDoc(self: *Builder, p: ParserId, name: []const u8, doc: *SharedDoc, node: *const schema.Node, raw: bool) Error!ParserId {
         const n = try self.dupe(name);
@@ -546,7 +546,7 @@ pub const Builder = struct {
         return id;
     }
 
-    /// Ports `schema` (peg-parser.cpp:1152 @7fe450e19), the overload taking
+    /// Ports `schema` (peg-parser.cpp:1152 @d81235049), the overload taking
     /// JSON: parsed into a document of its own.
     pub fn schemaJson(self: *Builder, p: ParserId, name: []const u8, value: *const json_mod.Value, raw: bool) Error!ParserId {
         const doc = try SharedDoc.fromJson(self.arena.gpa, value);
@@ -554,7 +554,7 @@ pub const Builder = struct {
         return self.schemaDoc(p, name, doc, doc.doc.root, raw);
     }
 
-    /// Ports `rule` (peg-parser.cpp:1157 @7fe450e19), the overload taking a
+    /// Ports `rule` (peg-parser.cpp:1157 @d81235049), the overload taking a
     /// parser: the rule, stored under its cleaned name.
     ///
     /// Return: a reference to it.
@@ -565,7 +565,7 @@ pub const Builder = struct {
         return self.ref(clean_name);
     }
 
-    /// Ports `rule` (peg-parser.cpp:1164 @7fe450e19), the overload taking a
+    /// Ports `rule` (peg-parser.cpp:1164 @d81235049), the overload taking a
     /// builder function: an existing rule of that name is reused; otherwise
     /// a placeholder is registered so `f` can refer to the rule, then the
     /// rule `f` builds replaces it.
@@ -589,52 +589,52 @@ pub const Builder = struct {
         return self.ref(clean_name);
     }
 
-    /// Ports `trigger_rule` (peg-parser.h:528 @7fe450e19), the overload
+    /// Ports `trigger_rule` (peg-parser.h:528 @d81235049), the overload
     /// taking a parser.
     pub fn triggerRule(self: *Builder, name: []const u8, p: ParserId) Error!ParserId {
         return self.rule(name, p, true);
     }
 
-    /// Ports `trigger_rule` (peg-parser.h:529 @7fe450e19), the overload
+    /// Ports `trigger_rule` (peg-parser.h:529 @d81235049), the overload
     /// taking a builder function.
     pub fn triggerRuleFn(self: *Builder, name: []const u8, ctx: anytype, comptime f: fn (@TypeOf(ctx)) Error!ParserId) Error!ParserId {
         return self.ruleFn(name, ctx, f, true);
     }
 
-    /// Ports `atomic` (peg-parser.h:534 @7fe450e19).
+    /// Ports `atomic` (peg-parser.h:534 @d81235049).
     pub fn atomic(self: *Builder, p: ParserId) Error!ParserId {
         return self.add(.{ .atomic = p });
     }
 
-    /// Ports `tag` (peg-parser.h:538 @7fe450e19).
+    /// Ports `tag` (peg-parser.h:538 @d81235049).
     pub fn tag(self: *Builder, t: []const u8, p: ParserId) Error!ParserId {
         return self.add(.{ .tag = .{ .child = p, .tag = try self.dupe(t) } });
     }
 
-    /// Ports `gbnf` (peg-parser.h:542 @7fe450e19).
+    /// Ports `gbnf` (peg-parser.h:542 @d81235049).
     pub fn gbnf(self: *Builder, p: ParserId, grammar: []const u8) Error!ParserId {
         return self.add(.{ .gbnf = .{ .child = p, .grammar = try self.dupe(grammar) } });
     }
 
-    /// Ports `ac` (peg-parser.cpp:1382 @7fe450e19), the overload taking a
+    /// Ports `ac` (peg-parser.cpp:1382 @d81235049), the overload taking a
     /// list.
     pub fn ac(self: *Builder, p: ParserId, delimiters: []const []const u8) Error!ParserId {
         if (delimiters.len == 0) return errors.raise(error.RuntimeError, &.{"ac parser requires at least one delimiter"});
         return self.add(.{ .ac = .{ .child = p, .delimiters = try self.dupeAll(delimiters) } });
     }
 
-    /// Ports `ac` (peg-parser.h:549 @7fe450e19), the overload taking one
+    /// Ports `ac` (peg-parser.h:549 @d81235049), the overload taking one
     /// delimiter.
     pub fn acOne(self: *Builder, p: ParserId, delimiter: []const u8) Error!ParserId {
         return self.ac(p, &.{delimiter});
     }
 
-    /// Ports `set_root` (peg-parser.cpp:1185 @7fe450e19).
+    /// Ports `set_root` (peg-parser.cpp:1185 @d81235049).
     pub fn setRoot(self: *Builder, p: ParserId) void {
         self.arena.root = p;
     }
 
-    /// Ports `build` (peg-parser.cpp:1189 @7fe450e19): references resolved,
+    /// Ports `build` (peg-parser.cpp:1189 @d81235049): references resolved,
     /// the arena moved out. The builder is left empty, and is not used
     /// again; a failure leaves the arena in the builder.
     ///
@@ -649,58 +649,58 @@ pub const Builder = struct {
     // -------------------------------------------------------------------------
     // the operators of `common_peg_parser`
 
-    /// Ports `operator`+ (peg-parser.cpp:1012 @7fe450e19): `a + b`.
+    /// Ports `operator`+ (peg-parser.cpp:1012 @d81235049): `a + b`.
     pub fn plus(self: *Builder, a: ParserId, b: ParserId) Error!ParserId {
         return self.sequence(&.{ a, b });
     }
 
-    /// Ports `operator`| (peg-parser.cpp:1016 @7fe450e19): `a | b`.
+    /// Ports `operator`| (peg-parser.cpp:1016 @d81235049): `a | b`.
     pub fn orr(self: *Builder, a: ParserId, b: ParserId) Error!ParserId {
         return self.choice(&.{ a, b });
     }
 
-    /// Ports `operator`<< (peg-parser.cpp:1020 @7fe450e19): `a << b`, a
+    /// Ports `operator`<< (peg-parser.cpp:1020 @d81235049): `a << b`, a
     /// sequence with optional space between.
     pub fn shl(self: *Builder, a: ParserId, b: ParserId) Error!ParserId {
         return self.sequence(&.{ a, try self.space(), b });
     }
 
-    /// Ports `operator`+ (peg-parser.cpp:1024 @7fe450e19): `a + "str"`.
+    /// Ports `operator`+ (peg-parser.cpp:1024 @d81235049): `a + "str"`.
     pub fn plusLit(self: *Builder, a: ParserId, s: []const u8) Error!ParserId {
         return self.plus(a, try self.literal(s));
     }
 
-    /// Ports `operator`<< (peg-parser.cpp:1032 @7fe450e19): `a << "str"`.
+    /// Ports `operator`<< (peg-parser.cpp:1032 @d81235049): `a << "str"`.
     pub fn shlLit(self: *Builder, a: ParserId, s: []const u8) Error!ParserId {
         return self.shl(a, try self.literal(s));
     }
 
-    /// Ports `operator`| (peg-parser.cpp:1040 @7fe450e19): `a | "str"`.
+    /// Ports `operator`| (peg-parser.cpp:1040 @d81235049): `a | "str"`.
     pub fn orLit(self: *Builder, a: ParserId, s: []const u8) Error!ParserId {
         return self.orr(a, try self.literal(s));
     }
 
-    /// Ports `operator`+ (peg-parser.cpp:1048 @7fe450e19): `"str" + a`.
+    /// Ports `operator`+ (peg-parser.cpp:1048 @d81235049): `"str" + a`.
     pub fn litPlus(self: *Builder, s: []const u8, a: ParserId) Error!ParserId {
         return self.plus(try self.literal(cstr(s)), a);
     }
 
-    /// Ports `operator`<< (peg-parser.cpp:1056 @7fe450e19): `"str" << a`.
+    /// Ports `operator`<< (peg-parser.cpp:1056 @d81235049): `"str" << a`.
     pub fn litShl(self: *Builder, s: []const u8, a: ParserId) Error!ParserId {
         return self.shl(try self.literal(cstr(s)), a);
     }
 
-    /// Ports `operator`| (peg-parser.cpp:1064 @7fe450e19): `"str" | a`.
+    /// Ports `operator`| (peg-parser.cpp:1064 @d81235049): `"str" | a`.
     pub fn litOr(self: *Builder, s: []const u8, a: ParserId) Error!ParserId {
         return self.orr(try self.literal(cstr(s)), a);
     }
 
-    /// Ports `operator`+= (peg-parser.cpp:1002 @7fe450e19): `a += b`.
+    /// Ports `operator`+= (peg-parser.cpp:1002 @d81235049): `a += b`.
     pub fn plusAssign(self: *Builder, a: *ParserId, b: ParserId) Error!void {
         a.* = try self.sequence(&.{ a.*, b });
     }
 
-    /// Ports `operator`|= (peg-parser.cpp:1007 @7fe450e19): `a |= b`.
+    /// Ports `operator`|= (peg-parser.cpp:1007 @d81235049): `a |= b`.
     pub fn orAssign(self: *Builder, a: *ParserId, b: ParserId) Error!void {
         a.* = try self.choice(&.{ a.*, b });
     }
@@ -712,7 +712,7 @@ fn cstr(s: []const u8) []const u8 {
     return if (std.mem.indexOfScalar(u8, s, 0)) |n| s[0..n] else s;
 }
 
-/// Ports `build_peg_parser` (peg-parser.cpp:2120 @7fe450e19): a builder,
+/// Ports `build_peg_parser` (peg-parser.cpp:2120 @d81235049): a builder,
 /// its root from `f`, built.
 ///
 /// Return: the arena, owned by the caller.

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-backend.cpp` (v0.5.0, `7fe450e19`),
+//! Ported from `llama.cpp/ggml/src/ggml-backend.cpp` (v0.6.0, `d81235049`),
 //! together with `src/ggml/backend_sched.zig`, which takes the scheduler. Each
 //! declaration below names the C++ it replaces and the line it began at. This
 //! file exports the same C symbols with the same signatures, so the C and C++
@@ -58,13 +58,13 @@ const allocator = std.heap.c_allocator;
 // Every entry point here is a null check and a jump through `buft->iface`. The
 // only interest is which members are optional and what they default to.
 
-/// Ports `ggml_backend_buft_name` (src/ggml-backend.cpp:34 @7fe450e19).
+/// Ports `ggml_backend_buft_name` (src/ggml-backend.cpp:34 @d81235049).
 pub export fn ggml_backend_buft_name(buft: c.ggml_backend_buffer_type_t) callconv(.c) [*c]const u8 {
     impl.assert(buft != null, "buft");
     return buft.*.iface.get_name.?(buft);
 }
 
-/// Ports `ggml_backend_buft_alloc_buffer` (src/ggml-backend.cpp:39 @7fe450e19).
+/// Ports `ggml_backend_buft_alloc_buffer` (src/ggml-backend.cpp:39 @d81235049).
 ///
 /// Return: a buffer of `size` bytes, or a dummy zero-sized buffer when `size`
 /// is 0 — the C returns one rather than asking the backend for nothing.
@@ -77,13 +77,156 @@ pub export fn ggml_backend_buft_alloc_buffer(buft: c.ggml_backend_buffer_type_t,
     return buft.*.iface.alloc_buffer.?(buft, size);
 }
 
-/// Ports `ggml_backend_buft_get_alignment` (src/ggml-backend.cpp:48 @7fe450e19).
+/// Ports `ggml_backend_buft_alloc_buffer_n_plan_item` (src/ggml-backend.cpp:49 @d81235049):
+/// one buffer of a plan, and the tensors placed in it.
+const AllocBufferNPlanItem = struct {
+    /// Total bytes for this buffer.
+    size: usize,
+    /// First tensor index (inclusive).
+    first: usize,
+    /// Last tensor index (exclusive).
+    last: usize,
+};
+
+/// Ports `ggml_backend_buft_alloc_buffer_n_plan` (src/ggml-backend.cpp:57 @d81235049).
+///
+/// Splits `tensors` into runs that each fit the buffer type's maximum size,
+/// the shared planning logic of the two defaults below.
+///
+/// Return: the plan, owned by the caller and freed with `deinit(allocator)`.
+fn allocBufferNPlan(buft: c.ggml_backend_buffer_type_t, tensors: [*c]?*c.ggml_tensor, n_tensors: c_int) std.ArrayList(AllocBufferNPlanItem) {
+    var plan: std.ArrayList(AllocBufferNPlanItem) = .empty;
+
+    const alignment = ggml_backend_buft_get_alignment(buft);
+    const max_size = ggml_backend_buft_get_max_size(buft);
+
+    var cur_buf_size: usize = 0;
+    var first: usize = 0;
+
+    const n: usize = if (n_tensors > 0) @intCast(n_tensors) else 0;
+    for (0..n) |i| {
+        var this_size: usize = 0;
+        const t = tensors[i].?;
+        if (t.data == null and t.view_src == null) {
+            this_size = impl.pad(ggml_backend_buft_get_alloc_size(buft, t), alignment);
+        }
+
+        // flush the current buffer if adding this tensor would exceed max_size
+        if (cur_buf_size > 0 and (cur_buf_size + this_size) > max_size) {
+            plan.append(allocator, .{ .size = cur_buf_size, .first = first, .last = i }) catch impl.abort("backend: out of memory");
+            cur_buf_size = this_size;
+            first = i;
+        } else {
+            cur_buf_size += this_size;
+        }
+    }
+
+    if (cur_buf_size > 0) {
+        plan.append(allocator, .{ .size = cur_buf_size, .first = first, .last = n }) catch impl.abort("backend: out of memory");
+    }
+
+    return plan;
+}
+
+/// Ports `ggml_backend_buft_alloc_buffer_n_default` (src/ggml-backend.cpp:93 @d81235049).
+///
+/// The default `alloc_buffer_n`: allocates tensors from a list into one or
+/// more buffers of the given type, as `allocBufferNPlan` splits them.
+///
+/// Return: one buffer, a multi-buffer over several, or null when nothing
+/// needed memory or an allocation failed.
+fn allocBufferNDefault(buft: c.ggml_backend_buffer_type_t, tensors: [*c]?*c.ggml_tensor, n_tensors: c_int) c.ggml_backend_buffer_t {
+    var plan = allocBufferNPlan(buft, tensors, n_tensors);
+    defer plan.deinit(allocator);
+
+    var buffers: std.ArrayList(c.ggml_backend_buffer_t) = .empty;
+    defer buffers.deinit(allocator);
+    buffers.ensureTotalCapacity(allocator, plan.items.len) catch impl.abort("backend: out of memory");
+
+    for (plan.items) |item| {
+        const buffer = ggml_backend_buft_alloc_buffer(buft, item.size);
+        if (buffer == null) {
+            impl.logError("%s: failed to allocate %s buffer of size %zu\n", .{ "ggml_backend_buft_alloc_buffer_n_default", ggml_backend_buft_name(buft), item.size });
+            for (buffers.items) |b| ggml_backend_buffer_free(b);
+            return null;
+        }
+
+        var tallocr = c.ggml_tallocr_new(buffer);
+
+        // allocate tensors in the current buffer
+        var t_failed: ?*c.ggml_tensor = null;
+        for (item.first..item.last) |j| {
+            const t = tensors[j].?;
+            if (t.data == null) {
+                if (t.view_src == null) {
+                    if (c.ggml_tallocr_alloc(&tallocr, t) != c.GGML_STATUS_SUCCESS) {
+                        t_failed = t;
+                        break;
+                    }
+                } else if (t.buffer == null) {
+                    if (c.ggml_backend_view_init(t) != c.GGML_STATUS_SUCCESS) {
+                        t_failed = t;
+                        break;
+                    }
+                }
+            } else {
+                if (t.view_src != null and t.buffer == null) {
+                    // view of a pre-allocated tensor
+                    if (c.ggml_backend_view_init(t) != c.GGML_STATUS_SUCCESS) {
+                        t_failed = t;
+                        break;
+                    }
+                }
+            }
+        }
+        if (t_failed) |t| {
+            impl.logError("%s: failed to initialize tensor %s\n", .{ "ggml_backend_buft_alloc_buffer_n_default", &t.name });
+            for (buffers.items) |b| ggml_backend_buffer_free(b);
+            ggml_backend_buffer_free(buffer);
+            return null;
+        }
+
+        buffers.appendAssumeCapacity(buffer);
+    }
+
+    if (buffers.items.len == 0) return null;
+
+    if (buffers.items.len == 1) return buffers.items[0];
+
+    return ggml_backend_multi_buffer_alloc_buffer(buffers.items.ptr, buffers.items.len);
+}
+
+/// Ports `ggml_backend_buft_get_alloc_size_n_default` (src/ggml-backend.cpp:162 @d81235049).
+///
+/// Return: the total size `allocBufferNDefault` would allocate for `tensors`.
+fn getAllocSizeNDefault(buft: c.ggml_backend_buffer_type_t, tensors: [*c]?*c.ggml_tensor, n_tensors: c_int) usize {
+    var plan = allocBufferNPlan(buft, tensors, n_tensors);
+    defer plan.deinit(allocator);
+
+    var total: usize = 0;
+    for (plan.items) |item| total += item.size;
+    return total;
+}
+
+/// Ports `ggml_backend_buft_alloc_buffer_n` (src/ggml-backend.cpp:172 @d81235049).
+///
+/// Return: the buffer type's own `alloc_buffer_n` when it has one, else the
+/// default's answer.
+pub export fn ggml_backend_buft_alloc_buffer_n(buft: c.ggml_backend_buffer_type_t, tensors: [*c]?*c.ggml_tensor, n_tensors: c_int) callconv(.c) c.ggml_backend_buffer_t {
+    impl.assert(buft != null, "buft");
+    if (buft.*.iface.alloc_buffer_n) |f| {
+        return f(buft, @ptrCast(tensors), n_tensors);
+    }
+    return allocBufferNDefault(buft, tensors, n_tensors);
+}
+
+/// Ports `ggml_backend_buft_get_alignment` (src/ggml-backend.cpp:180 @d81235049).
 pub export fn ggml_backend_buft_get_alignment(buft: c.ggml_backend_buffer_type_t) callconv(.c) usize {
     impl.assert(buft != null, "buft");
     return buft.*.iface.get_alignment.?(buft);
 }
 
-/// Ports `ggml_backend_buft_get_max_size` (src/ggml-backend.cpp:53 @7fe450e19).
+/// Ports `ggml_backend_buft_get_max_size` (src/ggml-backend.cpp:185 @d81235049).
 ///
 /// Return: the backend's limit, or `SIZE_MAX` — `get_max_size` is optional.
 pub export fn ggml_backend_buft_get_max_size(buft: c.ggml_backend_buffer_type_t) callconv(.c) usize {
@@ -95,7 +238,7 @@ pub export fn ggml_backend_buft_get_max_size(buft: c.ggml_backend_buffer_type_t)
     return std.math.maxInt(usize);
 }
 
-/// Ports `ggml_backend_buft_get_alloc_size` (src/ggml-backend.cpp:62 @7fe450e19).
+/// Ports `ggml_backend_buft_get_alloc_size` (src/ggml-backend.cpp:194 @d81235049).
 ///
 /// Return: the bytes this buffer type needs for `tensor`, which may exceed
 /// `ggml_nbytes` for a type that pads. Defaults to `ggml_nbytes`.
@@ -121,7 +264,19 @@ pub export fn ggml_backend_buft_get_alloc_size(buft: c.ggml_backend_buffer_type_
     return c.ggml_nbytes(tensor);
 }
 
-/// Ports `ggml_backend_buft_is_host` (src/ggml-backend.cpp:81 @7fe450e19).
+/// Ports `ggml_backend_buft_get_alloc_size_n` (src/ggml-backend.cpp:213 @d81235049).
+///
+/// Return: the buffer type's own `get_alloc_size_n` when it has one, else the
+/// default's answer.
+pub export fn ggml_backend_buft_get_alloc_size_n(buft: c.ggml_backend_buffer_type_t, tensors: [*c]?*c.ggml_tensor, n_tensors: c_int) callconv(.c) usize {
+    impl.assert(buft != null, "buft");
+    if (buft.*.iface.get_alloc_size_n) |f| {
+        return f(buft, @ptrCast(tensors), n_tensors);
+    }
+    return getAllocSizeNDefault(buft, tensors, n_tensors);
+}
+
+/// Ports `ggml_backend_buft_is_host` (src/ggml-backend.cpp:221 @d81235049).
 pub export fn ggml_backend_buft_is_host(buft: c.ggml_backend_buffer_type_t) callconv(.c) bool {
     impl.assert(buft != null, "buft");
     if (buft.*.iface.is_host) |f| {
@@ -130,7 +285,7 @@ pub export fn ggml_backend_buft_is_host(buft: c.ggml_backend_buffer_type_t) call
     return false;
 }
 
-/// Ports `ggml_backend_buft_get_device` (src/ggml-backend.cpp:89 @7fe450e19).
+/// Ports `ggml_backend_buft_get_device` (src/ggml-backend.cpp:229 @d81235049).
 pub export fn ggml_backend_buft_get_device(buft: c.ggml_backend_buffer_type_t) callconv(.c) c.ggml_backend_dev_t {
     impl.assert(buft != null, "buft");
     return buft.*.device;
@@ -139,7 +294,7 @@ pub export fn ggml_backend_buft_get_device(buft: c.ggml_backend_buffer_type_t) c
 // -----------------------------------------------------------------------------
 // Backend buffer
 
-/// Ports `ggml_backend_buffer_init` (src/ggml-backend.cpp:96 @7fe450e19).
+/// Ports `ggml_backend_buffer_init` (src/ggml-backend.cpp:236 @d81235049).
 ///
 /// The C++ uses `new ggml_backend_buffer{...}`; this is that allocation, and
 /// `ggml_backend_buffer_free` is the matching `delete`.
@@ -163,12 +318,12 @@ pub export fn ggml_backend_buffer_init(
     return buffer;
 }
 
-/// Ports `ggml_backend_buffer_name` (src/ggml-backend.cpp:112 @7fe450e19).
+/// Ports `ggml_backend_buffer_name` (src/ggml-backend.cpp:252 @d81235049).
 pub export fn ggml_backend_buffer_name(buffer: c.ggml_backend_buffer_t) callconv(.c) [*c]const u8 {
     return ggml_backend_buft_name(ggml_backend_buffer_get_type(buffer));
 }
 
-/// Ports `ggml_backend_buffer_free` (src/ggml-backend.cpp:116 @7fe450e19).
+/// Ports `ggml_backend_buffer_free` (src/ggml-backend.cpp:256 @d81235049).
 ///
 /// Return: nothing. Null is accepted, as the C++'s `delete` is.
 pub export fn ggml_backend_buffer_free(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
@@ -181,13 +336,13 @@ pub export fn ggml_backend_buffer_free(buffer: c.ggml_backend_buffer_t) callconv
     allocator.destroy(@as(*c.struct_ggml_backend_buffer, @ptrCast(buffer)));
 }
 
-/// Ports `ggml_backend_buffer_get_size` (src/ggml-backend.cpp:127 @7fe450e19).
+/// Ports `ggml_backend_buffer_get_size` (src/ggml-backend.cpp:267 @d81235049).
 pub export fn ggml_backend_buffer_get_size(buffer: c.ggml_backend_buffer_t) callconv(.c) usize {
     impl.assert(buffer != null, "buffer");
     return buffer.*.size;
 }
 
-/// Ports `ggml_backend_buffer_get_base` (src/ggml-backend.cpp:132 @7fe450e19).
+/// Ports `ggml_backend_buffer_get_base` (src/ggml-backend.cpp:272 @d81235049).
 ///
 /// Return: the buffer's base address, or null for a zero-sized non-meta buffer
 /// or a buffer type with no `get_base`. The C carries a `FIXME` here about
@@ -211,7 +366,7 @@ pub export fn ggml_backend_buffer_get_base(buffer: c.ggml_backend_buffer_t) call
     return base;
 }
 
-/// Ports `ggml_backend_buffer_init_tensor` (src/ggml-backend.cpp:152 @7fe450e19).
+/// Ports `ggml_backend_buffer_init_tensor` (src/ggml-backend.cpp:292 @d81235049).
 pub export fn ggml_backend_buffer_init_tensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor) callconv(.c) c.enum_ggml_status {
     impl.assert(buffer != null, "buffer");
     // init_tensor is optional
@@ -221,7 +376,7 @@ pub export fn ggml_backend_buffer_init_tensor(buffer: c.ggml_backend_buffer_t, t
     return c.GGML_STATUS_SUCCESS;
 }
 
-/// Ports `ggml_backend_buffer_clear` (src/ggml-backend.cpp:161 @7fe450e19).
+/// Ports `ggml_backend_buffer_clear` (src/ggml-backend.cpp:301 @d81235049).
 pub export fn ggml_backend_buffer_clear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
     impl.assert(buffer != null, "buffer");
     // clear is optional if the buffer is zero-sized
@@ -231,27 +386,27 @@ pub export fn ggml_backend_buffer_clear(buffer: c.ggml_backend_buffer_t, value: 
     buffer.*.iface.clear.?(buffer, value);
 }
 
-/// Ports `ggml_backend_buffer_get_alignment` (src/ggml-backend.cpp:171 @7fe450e19).
+/// Ports `ggml_backend_buffer_get_alignment` (src/ggml-backend.cpp:311 @d81235049).
 pub export fn ggml_backend_buffer_get_alignment(buffer: c.ggml_backend_buffer_t) callconv(.c) usize {
     return ggml_backend_buft_get_alignment(ggml_backend_buffer_get_type(buffer));
 }
 
-/// Ports `ggml_backend_buffer_get_max_size` (src/ggml-backend.cpp:175 @7fe450e19).
+/// Ports `ggml_backend_buffer_get_max_size` (src/ggml-backend.cpp:315 @d81235049).
 pub export fn ggml_backend_buffer_get_max_size(buffer: c.ggml_backend_buffer_t) callconv(.c) usize {
     return ggml_backend_buft_get_max_size(ggml_backend_buffer_get_type(buffer));
 }
 
-/// Ports `ggml_backend_buffer_get_alloc_size` (src/ggml-backend.cpp:179 @7fe450e19).
+/// Ports `ggml_backend_buffer_get_alloc_size` (src/ggml-backend.cpp:319 @d81235049).
 pub export fn ggml_backend_buffer_get_alloc_size(buffer: c.ggml_backend_buffer_t, tensor: [*c]const c.ggml_tensor) callconv(.c) usize {
     return ggml_backend_buft_get_alloc_size(ggml_backend_buffer_get_type(buffer), tensor);
 }
 
-/// Ports `ggml_backend_buffer_is_host` (src/ggml-backend.cpp:183 @7fe450e19).
+/// Ports `ggml_backend_buffer_is_host` (src/ggml-backend.cpp:323 @d81235049).
 pub export fn ggml_backend_buffer_is_host(buffer: c.ggml_backend_buffer_t) callconv(.c) bool {
     return ggml_backend_buft_is_host(ggml_backend_buffer_get_type(buffer));
 }
 
-/// Ports `ggml_backend_buffer_set_usage` (src/ggml-backend.cpp:187 @7fe450e19).
+/// Ports `ggml_backend_buffer_set_usage` (src/ggml-backend.cpp:327 @d81235049).
 ///
 /// A multi-buffer or a meta buffer forwards the usage to every buffer it owns.
 /// The C marks those special cases `FIXME: add a generic callback to the buffer
@@ -268,19 +423,19 @@ pub export fn ggml_backend_buffer_set_usage(buffer: c.ggml_backend_buffer_t, usa
     }
 }
 
-/// Ports `ggml_backend_buffer_get_usage` (src/ggml-backend.cpp:199 @7fe450e19).
+/// Ports `ggml_backend_buffer_get_usage` (src/ggml-backend.cpp:339 @d81235049).
 pub export fn ggml_backend_buffer_get_usage(buffer: c.ggml_backend_buffer_t) callconv(.c) c.enum_ggml_backend_buffer_usage {
     impl.assert(buffer != null, "buffer");
     return buffer.*.usage;
 }
 
-/// Ports `ggml_backend_buffer_get_type` (src/ggml-backend.cpp:204 @7fe450e19).
+/// Ports `ggml_backend_buffer_get_type` (src/ggml-backend.cpp:344 @d81235049).
 pub export fn ggml_backend_buffer_get_type(buffer: c.ggml_backend_buffer_t) callconv(.c) c.ggml_backend_buffer_type_t {
     impl.assert(buffer != null, "buffer");
     return buffer.*.buft;
 }
 
-/// Ports `ggml_backend_buffer_reset` (src/ggml-backend.cpp:209 @7fe450e19).
+/// Ports `ggml_backend_buffer_reset` (src/ggml-backend.cpp:349 @d81235049).
 pub export fn ggml_backend_buffer_reset(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
     impl.assert(buffer != null, "buffer");
     if (buffer.*.iface.reset) |f| {
@@ -288,7 +443,7 @@ pub export fn ggml_backend_buffer_reset(buffer: c.ggml_backend_buffer_t) callcon
     }
 }
 
-/// Ports `ggml_backend_buffer_copy_tensor` (src/ggml-backend.cpp:216 @7fe450e19).
+/// Ports `ggml_backend_buffer_copy_tensor` (src/ggml-backend.cpp:356 @d81235049).
 ///
 /// Return: true if the destination's buffer performed the copy; false if it
 /// has no `cpy_tensor`, leaving the caller to fall back.
@@ -303,7 +458,7 @@ pub export fn ggml_backend_buffer_copy_tensor(src: [*c]const c.ggml_tensor, dst:
 // -----------------------------------------------------------------------------
 // Backend
 
-/// Ports `ggml_backend_guid` (src/ggml-backend.cpp:226 @7fe450e19).
+/// Ports `ggml_backend_guid` (src/ggml-backend.cpp:366 @d81235049).
 pub export fn ggml_backend_guid(backend: c.ggml_backend_t) callconv(.c) c.ggml_guid_t {
     if (backend == null) {
         return null;
@@ -311,7 +466,7 @@ pub export fn ggml_backend_guid(backend: c.ggml_backend_t) callconv(.c) c.ggml_g
     return backend.*.guid;
 }
 
-/// Ports `ggml_backend_name` (src/ggml-backend.cpp:233 @7fe450e19).
+/// Ports `ggml_backend_name` (src/ggml-backend.cpp:373 @d81235049).
 ///
 /// Return: the backend's name, or the literal `"NULL"` for a null backend —
 /// this is a logging helper and does not assert.
@@ -322,7 +477,7 @@ pub export fn ggml_backend_name(backend: c.ggml_backend_t) callconv(.c) [*c]cons
     return backend.*.iface.get_name.?(backend);
 }
 
-/// Ports `ggml_backend_free` (src/ggml-backend.cpp:240 @7fe450e19).
+/// Ports `ggml_backend_free` (src/ggml-backend.cpp:380 @d81235049).
 pub export fn ggml_backend_free(backend: c.ggml_backend_t) callconv(.c) void {
     if (backend == null) {
         return;
@@ -330,28 +485,28 @@ pub export fn ggml_backend_free(backend: c.ggml_backend_t) callconv(.c) void {
     backend.*.iface.free.?(backend);
 }
 
-/// Ports `ggml_backend_get_default_buffer_type` (src/ggml-backend.cpp:248 @7fe450e19).
+/// Ports `ggml_backend_get_default_buffer_type` (src/ggml-backend.cpp:388 @d81235049).
 pub export fn ggml_backend_get_default_buffer_type(backend: c.ggml_backend_t) callconv(.c) c.ggml_backend_buffer_type_t {
     impl.assert(backend != null, "backend");
     return ggml_backend_dev_buffer_type(backend.*.device);
 }
 
-/// Ports `ggml_backend_alloc_buffer` (src/ggml-backend.cpp:253 @7fe450e19).
+/// Ports `ggml_backend_alloc_buffer` (src/ggml-backend.cpp:393 @d81235049).
 pub export fn ggml_backend_alloc_buffer(backend: c.ggml_backend_t, size: usize) callconv(.c) c.ggml_backend_buffer_t {
     return ggml_backend_buft_alloc_buffer(ggml_backend_get_default_buffer_type(backend), size);
 }
 
-/// Ports `ggml_backend_get_alignment` (src/ggml-backend.cpp:257 @7fe450e19).
+/// Ports `ggml_backend_get_alignment` (src/ggml-backend.cpp:397 @d81235049).
 pub export fn ggml_backend_get_alignment(backend: c.ggml_backend_t) callconv(.c) usize {
     return ggml_backend_buft_get_alignment(ggml_backend_get_default_buffer_type(backend));
 }
 
-/// Ports `ggml_backend_get_max_size` (src/ggml-backend.cpp:261 @7fe450e19).
+/// Ports `ggml_backend_get_max_size` (src/ggml-backend.cpp:401 @d81235049).
 pub export fn ggml_backend_get_max_size(backend: c.ggml_backend_t) callconv(.c) usize {
     return ggml_backend_buft_get_max_size(ggml_backend_get_default_buffer_type(backend));
 }
 
-/// Ports `ggml_backend_tensor_set_async` (src/ggml-backend.cpp:265 @7fe450e19).
+/// Ports `ggml_backend_tensor_set_async` (src/ggml-backend.cpp:405 @d81235049).
 ///
 /// Falls back to a synchronize plus a blocking set when the backend has no
 /// async path.
@@ -375,7 +530,7 @@ pub export fn ggml_backend_tensor_set_async(
     }
 }
 
-/// Ports `ggml_backend_tensor_get_async` (src/ggml-backend.cpp:279 @7fe450e19).
+/// Ports `ggml_backend_tensor_get_async` (src/ggml-backend.cpp:419 @d81235049).
 pub export fn ggml_backend_tensor_get_async(
     backend: c.ggml_backend_t,
     tensor: [*c]const c.ggml_tensor,
@@ -396,7 +551,7 @@ pub export fn ggml_backend_tensor_get_async(
     }
 }
 
-/// Ports `ggml_backend_tensor_set_2d_async` (src/ggml-backend.cpp:293 @7fe450e19).
+/// Ports `ggml_backend_tensor_set_2d_async` (src/ggml-backend.cpp:433 @d81235049).
 ///
 /// A strided batch of `n_copies` writes. Falls back to a loop of 1-D async
 /// writes when the backend has no 2-D path or there is at most one copy —
@@ -436,7 +591,7 @@ pub export fn ggml_backend_tensor_set_2d_async(
     backend.*.iface.set_tensor_2d_async.?(backend, tensor, data, offset, size, n_copies, stride_tensor, stride_data);
 }
 
-/// Ports `ggml_backend_tensor_get_2d_async` (src/ggml-backend.cpp:314 @7fe450e19).
+/// Ports `ggml_backend_tensor_get_2d_async` (src/ggml-backend.cpp:454 @d81235049).
 pub export fn ggml_backend_tensor_get_2d_async(
     backend: c.ggml_backend_t,
     tensor: [*c]const c.ggml_tensor,
@@ -472,7 +627,7 @@ pub export fn ggml_backend_tensor_get_2d_async(
     backend.*.iface.get_tensor_2d_async.?(backend, tensor, data, offset, size, n_copies, stride_tensor, stride_data);
 }
 
-/// Ports `ggml_backend_tensor_set` (src/ggml-backend.cpp:335 @7fe450e19).
+/// Ports `ggml_backend_tensor_set` (src/ggml-backend.cpp:475 @d81235049).
 ///
 /// Writes through the *view source's* buffer when the tensor is a view, which
 /// is the rule everywhere in this file.
@@ -491,7 +646,7 @@ pub export fn ggml_backend_tensor_set(tensor: [*c]c.ggml_tensor, data: ?*const a
     buf.*.iface.set_tensor.?(buf, tensor, data, offset, size);
 }
 
-/// Ports `ggml_backend_tensor_get` (src/ggml-backend.cpp:350 @7fe450e19).
+/// Ports `ggml_backend_tensor_get` (src/ggml-backend.cpp:490 @d81235049).
 pub export fn ggml_backend_tensor_get(tensor: [*c]const c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
     impl.assert(tensor != null, "tensor");
     const buf = if (tensor.*.view_src != null) tensor.*.view_src.*.buffer else tensor.*.buffer;
@@ -507,7 +662,7 @@ pub export fn ggml_backend_tensor_get(tensor: [*c]const c.ggml_tensor, data: ?*a
     buf.*.iface.get_tensor.?(buf, tensor, data, offset, size);
 }
 
-/// Ports `ggml_backend_tensor_set_2d` (src/ggml-backend.cpp:365 @7fe450e19).
+/// Ports `ggml_backend_tensor_set_2d` (src/ggml-backend.cpp:505 @d81235049).
 pub export fn ggml_backend_tensor_set_2d(
     tensor: [*c]c.ggml_tensor,
     data: ?*const anyopaque,
@@ -542,7 +697,7 @@ pub export fn ggml_backend_tensor_set_2d(
     buf.*.iface.set_tensor_2d.?(buf, tensor, data, offset, size, n_copies, stride_tensor, stride_data);
 }
 
-/// Ports `ggml_backend_tensor_get_2d` (src/ggml-backend.cpp:387 @7fe450e19).
+/// Ports `ggml_backend_tensor_get_2d` (src/ggml-backend.cpp:527 @d81235049).
 pub export fn ggml_backend_tensor_get_2d(
     tensor: [*c]const c.ggml_tensor,
     data: ?*anyopaque,
@@ -577,7 +732,7 @@ pub export fn ggml_backend_tensor_get_2d(
     buf.*.iface.get_tensor_2d.?(buf, tensor, data, offset, size, n_copies, stride_tensor, stride_data);
 }
 
-/// Ports `ggml_backend_tensor_memset` (src/ggml-backend.cpp:409 @7fe450e19).
+/// Ports `ggml_backend_tensor_memset` (src/ggml-backend.cpp:549 @d81235049).
 ///
 /// Note the assertion order: unlike its neighbours this one tests `size == 0`
 /// *before* asserting the buffer is set, so a zero-length memset on an
@@ -598,35 +753,35 @@ pub export fn ggml_backend_tensor_memset(tensor: [*c]c.ggml_tensor, value: u8, o
     buf.*.iface.memset_tensor.?(buf, tensor, value, offset, size);
 }
 
-/// Ports `ggml_backend_synchronize` (src/ggml-backend.cpp:425 @7fe450e19).
+/// Ports `ggml_backend_synchronize` (src/ggml-backend.cpp:565 @d81235049).
 pub export fn ggml_backend_synchronize(backend: c.ggml_backend_t) callconv(.c) void {
     impl.assert(backend != null, "backend");
     const f = backend.*.iface.synchronize orelse return;
     f(backend);
 }
 
-/// Ports `ggml_backend_graph_plan_create` (src/ggml-backend.cpp:434 @7fe450e19).
+/// Ports `ggml_backend_graph_plan_create` (src/ggml-backend.cpp:574 @d81235049).
 pub export fn ggml_backend_graph_plan_create(backend: c.ggml_backend_t, cgraph: *impl.CGraph) callconv(.c) c.ggml_backend_graph_plan_t {
     impl.assert(backend != null, "backend");
     impl.assert(backend.*.iface.graph_plan_create != null, "backend->iface.graph_plan_create != NULL");
     return backend.*.iface.graph_plan_create.?(backend, @ptrCast(cgraph));
 }
 
-/// Ports `ggml_backend_graph_plan_free` (src/ggml-backend.cpp:441 @7fe450e19).
+/// Ports `ggml_backend_graph_plan_free` (src/ggml-backend.cpp:581 @d81235049).
 pub export fn ggml_backend_graph_plan_free(backend: c.ggml_backend_t, plan: c.ggml_backend_graph_plan_t) callconv(.c) void {
     impl.assert(backend != null, "backend");
     impl.assert(backend.*.iface.graph_plan_free != null, "backend->iface.graph_plan_free != NULL");
     backend.*.iface.graph_plan_free.?(backend, plan);
 }
 
-/// Ports `ggml_backend_graph_plan_compute` (src/ggml-backend.cpp:448 @7fe450e19).
+/// Ports `ggml_backend_graph_plan_compute` (src/ggml-backend.cpp:588 @d81235049).
 pub export fn ggml_backend_graph_plan_compute(backend: c.ggml_backend_t, plan: c.ggml_backend_graph_plan_t) callconv(.c) c.enum_ggml_status {
     impl.assert(backend != null, "backend");
     impl.assert(backend.*.iface.graph_plan_compute != null, "backend->iface.graph_plan_compute != NULL");
     return backend.*.iface.graph_plan_compute.?(backend, plan);
 }
 
-/// Ports `ggml_backend_graph_compute` (src/ggml-backend.cpp:455 @7fe450e19).
+/// Ports `ggml_backend_graph_compute` (src/ggml-backend.cpp:595 @d81235049).
 ///
 /// Return: the compute status. Synchronizes before returning, and returns the
 /// status from *before* the synchronize, as the C does.
@@ -636,31 +791,31 @@ pub export fn ggml_backend_graph_compute(backend: c.ggml_backend_t, cgraph: *imp
     return err;
 }
 
-/// Ports `ggml_backend_graph_compute_async` (src/ggml-backend.cpp:461 @7fe450e19).
+/// Ports `ggml_backend_graph_compute_async` (src/ggml-backend.cpp:601 @d81235049).
 pub export fn ggml_backend_graph_compute_async(backend: c.ggml_backend_t, cgraph: *impl.CGraph) callconv(.c) c.enum_ggml_status {
     impl.assert(backend != null, "backend");
     return backend.*.iface.graph_compute.?(backend, @ptrCast(cgraph));
 }
 
-/// Ports `ggml_backend_supports_op` (src/ggml-backend.cpp:466 @7fe450e19).
+/// Ports `ggml_backend_supports_op` (src/ggml-backend.cpp:606 @d81235049).
 pub export fn ggml_backend_supports_op(backend: c.ggml_backend_t, op: [*c]const c.ggml_tensor) callconv(.c) bool {
     impl.assert(backend != null, "backend");
     return ggml_backend_dev_supports_op(backend.*.device, op);
 }
 
-/// Ports `ggml_backend_supports_buft` (src/ggml-backend.cpp:471 @7fe450e19).
+/// Ports `ggml_backend_supports_buft` (src/ggml-backend.cpp:611 @d81235049).
 pub export fn ggml_backend_supports_buft(backend: c.ggml_backend_t, buft: c.ggml_backend_buffer_type_t) callconv(.c) bool {
     impl.assert(backend != null, "backend");
     return ggml_backend_dev_supports_buft(backend.*.device, buft);
 }
 
-/// Ports `ggml_backend_offload_op` (src/ggml-backend.cpp:476 @7fe450e19).
+/// Ports `ggml_backend_offload_op` (src/ggml-backend.cpp:616 @d81235049).
 pub export fn ggml_backend_offload_op(backend: c.ggml_backend_t, op: [*c]const c.ggml_tensor) callconv(.c) bool {
     impl.assert(backend != null, "backend");
     return ggml_backend_dev_offload_op(backend.*.device, op);
 }
 
-/// Ports `ggml_backend_get_device` (src/ggml-backend.cpp:481 @7fe450e19).
+/// Ports `ggml_backend_get_device` (src/ggml-backend.cpp:621 @d81235049).
 pub export fn ggml_backend_get_device(backend: c.ggml_backend_t) callconv(.c) c.ggml_backend_dev_t {
     impl.assert(backend != null, "backend");
     return backend.*.device;
@@ -669,7 +824,7 @@ pub export fn ggml_backend_get_device(backend: c.ggml_backend_t) callconv(.c) c.
 // -----------------------------------------------------------------------------
 // Backend copy
 
-/// Ports `ggml_backend_tensor_copy` (src/ggml-backend.cpp:488 @7fe450e19).
+/// Ports `ggml_backend_tensor_copy` (src/ggml-backend.cpp:628 @d81235049).
 ///
 /// Three paths in priority order: a host source reads directly, a host
 /// destination writes directly, and otherwise the destination buffer is asked
@@ -706,7 +861,7 @@ pub export fn ggml_backend_tensor_copy(src: [*c]const c.ggml_tensor, dst: [*c]c.
 /// with `-DNDEBUG` only in release, matching Zig's own optimize mode.
 const debug_off = @import("builtin").mode != .debug;
 
-/// Ports `ggml_backend_tensor_copy_async` (src/ggml-backend.cpp:511 @7fe450e19).
+/// Ports `ggml_backend_tensor_copy_async` (src/ggml-backend.cpp:651 @d81235049).
 ///
 /// The fallback synchronizes *both* backends before a blocking copy, because
 /// an async copy would otherwise have to wait for work already queued on each.
@@ -740,7 +895,7 @@ pub export fn ggml_backend_tensor_copy_async(
 // -----------------------------------------------------------------------------
 // Events
 
-/// Ports `ggml_backend_event_new` (src/ggml-backend.cpp:534 @7fe450e19).
+/// Ports `ggml_backend_event_new` (src/ggml-backend.cpp:674 @d81235049).
 ///
 /// Return: a new event, or null when the device is null or has no events —
 /// the C notes a null device is allowed during the transition to the device
@@ -753,7 +908,7 @@ pub export fn ggml_backend_event_new(device: c.ggml_backend_dev_t) callconv(.c) 
     return device.*.iface.event_new.?(device);
 }
 
-/// Ports `ggml_backend_event_free` (src/ggml-backend.cpp:542 @7fe450e19).
+/// Ports `ggml_backend_event_free` (src/ggml-backend.cpp:682 @d81235049).
 pub export fn ggml_backend_event_free(event: c.ggml_backend_event_t) callconv(.c) void {
     if (event == null) {
         return;
@@ -761,28 +916,28 @@ pub export fn ggml_backend_event_free(event: c.ggml_backend_event_t) callconv(.c
     event.*.device.*.iface.event_free.?(event.*.device, event);
 }
 
-/// Ports `ggml_backend_event_record` (src/ggml-backend.cpp:549 @7fe450e19).
+/// Ports `ggml_backend_event_record` (src/ggml-backend.cpp:689 @d81235049).
 pub export fn ggml_backend_event_record(event: c.ggml_backend_event_t, backend: c.ggml_backend_t) callconv(.c) void {
     impl.assert(backend != null, "backend");
     impl.assert(backend.*.iface.event_record != null, "backend->iface.event_record != NULL");
     backend.*.iface.event_record.?(backend, event);
 }
 
-/// Ports `ggml_backend_event_synchronize` (src/ggml-backend.cpp:556 @7fe450e19).
+/// Ports `ggml_backend_event_synchronize` (src/ggml-backend.cpp:696 @d81235049).
 pub export fn ggml_backend_event_synchronize(event: c.ggml_backend_event_t) callconv(.c) void {
     impl.assert(event != null, "event");
     impl.assert(event.*.device.*.iface.event_synchronize != null, "event->device->iface.event_synchronize");
     event.*.device.*.iface.event_synchronize.?(event.*.device, event);
 }
 
-/// Ports `ggml_backend_event_wait` (src/ggml-backend.cpp:563 @7fe450e19).
+/// Ports `ggml_backend_event_wait` (src/ggml-backend.cpp:703 @d81235049).
 pub export fn ggml_backend_event_wait(backend: c.ggml_backend_t, event: c.ggml_backend_event_t) callconv(.c) void {
     impl.assert(backend != null, "backend");
     impl.assert(backend.*.iface.event_wait != null, "backend->iface.event_wait != NULL");
     backend.*.iface.event_wait.?(backend, event);
 }
 
-/// Ports `ggml_backend_graph_optimize` (src/ggml-backend.cpp:570 @7fe450e19).
+/// Ports `ggml_backend_graph_optimize` (src/ggml-backend.cpp:710 @d81235049).
 ///
 /// File-private in the C++ and used only by the scheduler, so it is `pub`
 /// here rather than exported: `backend_sched.zig` is the one caller.
@@ -798,31 +953,31 @@ pub fn graphOptimize(backend: c.ggml_backend_t, cgraph: *impl.CGraph, params: *c
 // -----------------------------------------------------------------------------
 // Backend device
 
-/// Ports `ggml_backend_dev_name` (src/ggml-backend.cpp:579 @7fe450e19).
+/// Ports `ggml_backend_dev_name` (src/ggml-backend.cpp:719 @d81235049).
 pub export fn ggml_backend_dev_name(device: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     impl.assert(device != null, "device");
     return device.*.iface.get_name.?(device);
 }
 
-/// Ports `ggml_backend_dev_description` (src/ggml-backend.cpp:584 @7fe450e19).
+/// Ports `ggml_backend_dev_description` (src/ggml-backend.cpp:724 @d81235049).
 pub export fn ggml_backend_dev_description(device: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     impl.assert(device != null, "device");
     return device.*.iface.get_description.?(device);
 }
 
-/// Ports `ggml_backend_dev_memory` (src/ggml-backend.cpp:589 @7fe450e19).
+/// Ports `ggml_backend_dev_memory` (src/ggml-backend.cpp:729 @d81235049).
 pub export fn ggml_backend_dev_memory(device: c.ggml_backend_dev_t, free: [*c]usize, total: [*c]usize) callconv(.c) void {
     impl.assert(device != null, "device");
     device.*.iface.get_memory.?(device, free, total);
 }
 
-/// Ports `ggml_backend_dev_type` (src/ggml-backend.cpp:594 @7fe450e19).
+/// Ports `ggml_backend_dev_type` (src/ggml-backend.cpp:734 @d81235049).
 pub export fn ggml_backend_dev_type(device: c.ggml_backend_dev_t) callconv(.c) c.enum_ggml_backend_dev_type {
     impl.assert(device != null, "device");
     return device.*.iface.get_type.?(device);
 }
 
-/// Ports `ggml_backend_dev_get_props` (src/ggml-backend.cpp:599 @7fe450e19).
+/// Ports `ggml_backend_dev_get_props` (src/ggml-backend.cpp:739 @d81235049).
 ///
 /// Zeroes `props` first, so a device that fills only some fields leaves the
 /// rest defined.
@@ -832,25 +987,25 @@ pub export fn ggml_backend_dev_get_props(device: c.ggml_backend_dev_t, props: [*
     device.*.iface.get_props.?(device, props);
 }
 
-/// Ports `ggml_backend_dev_backend_reg` (src/ggml-backend.cpp:605 @7fe450e19).
+/// Ports `ggml_backend_dev_backend_reg` (src/ggml-backend.cpp:745 @d81235049).
 pub export fn ggml_backend_dev_backend_reg(device: c.ggml_backend_dev_t) callconv(.c) c.ggml_backend_reg_t {
     impl.assert(device != null, "device");
     return device.*.reg;
 }
 
-/// Ports `ggml_backend_dev_init` (src/ggml-backend.cpp:610 @7fe450e19).
+/// Ports `ggml_backend_dev_init` (src/ggml-backend.cpp:750 @d81235049).
 pub export fn ggml_backend_dev_init(device: c.ggml_backend_dev_t, params: [*c]const u8) callconv(.c) c.ggml_backend_t {
     impl.assert(device != null, "device");
     return device.*.iface.init_backend.?(device, params);
 }
 
-/// Ports `ggml_backend_dev_buffer_type` (src/ggml-backend.cpp:615 @7fe450e19).
+/// Ports `ggml_backend_dev_buffer_type` (src/ggml-backend.cpp:755 @d81235049).
 pub export fn ggml_backend_dev_buffer_type(device: c.ggml_backend_dev_t) callconv(.c) c.ggml_backend_buffer_type_t {
     impl.assert(device != null, "device");
     return device.*.iface.get_buffer_type.?(device);
 }
 
-/// Ports `ggml_backend_dev_host_buffer_type` (src/ggml-backend.cpp:620 @7fe450e19).
+/// Ports `ggml_backend_dev_host_buffer_type` (src/ggml-backend.cpp:760 @d81235049).
 ///
 /// Return: the device's pinned-host buffer type, or null when it has none.
 pub export fn ggml_backend_dev_host_buffer_type(device: c.ggml_backend_dev_t) callconv(.c) c.ggml_backend_buffer_type_t {
@@ -859,7 +1014,7 @@ pub export fn ggml_backend_dev_host_buffer_type(device: c.ggml_backend_dev_t) ca
     return f(device);
 }
 
-/// Ports `ggml_backend_dev_buffer_from_host_ptr` (src/ggml-backend.cpp:629 @7fe450e19).
+/// Ports `ggml_backend_dev_buffer_from_host_ptr` (src/ggml-backend.cpp:769 @d81235049).
 pub export fn ggml_backend_dev_buffer_from_host_ptr(
     device: c.ggml_backend_dev_t,
     ptr: ?*anyopaque,
@@ -870,19 +1025,19 @@ pub export fn ggml_backend_dev_buffer_from_host_ptr(
     return device.*.iface.buffer_from_host_ptr.?(device, ptr, size, max_tensor_size);
 }
 
-/// Ports `ggml_backend_dev_supports_op` (src/ggml-backend.cpp:634 @7fe450e19).
+/// Ports `ggml_backend_dev_supports_op` (src/ggml-backend.cpp:774 @d81235049).
 pub export fn ggml_backend_dev_supports_op(device: c.ggml_backend_dev_t, op: [*c]const c.ggml_tensor) callconv(.c) bool {
     impl.assert(device != null, "device");
     return device.*.iface.supports_op.?(device, op);
 }
 
-/// Ports `ggml_backend_dev_supports_buft` (src/ggml-backend.cpp:639 @7fe450e19).
+/// Ports `ggml_backend_dev_supports_buft` (src/ggml-backend.cpp:779 @d81235049).
 pub export fn ggml_backend_dev_supports_buft(device: c.ggml_backend_dev_t, buft: c.ggml_backend_buffer_type_t) callconv(.c) bool {
     impl.assert(device != null, "device");
     return device.*.iface.supports_buft.?(device, buft);
 }
 
-/// Ports `ggml_backend_dev_offload_op` (src/ggml-backend.cpp:644 @7fe450e19).
+/// Ports `ggml_backend_dev_offload_op` (src/ggml-backend.cpp:784 @d81235049).
 ///
 /// Return: whether a higher-priority device wants to take this op off the CPU.
 /// Optional; false when the device does not implement it.
@@ -897,25 +1052,25 @@ pub export fn ggml_backend_dev_offload_op(device: c.ggml_backend_dev_t, op: [*c]
 // -----------------------------------------------------------------------------
 // Backend registry
 
-/// Ports `ggml_backend_reg_name` (src/ggml-backend.cpp:655 @7fe450e19).
+/// Ports `ggml_backend_reg_name` (src/ggml-backend.cpp:795 @d81235049).
 pub export fn ggml_backend_reg_name(reg: c.ggml_backend_reg_t) callconv(.c) [*c]const u8 {
     impl.assert(reg != null, "reg");
     return reg.*.iface.get_name.?(reg);
 }
 
-/// Ports `ggml_backend_reg_dev_count` (src/ggml-backend.cpp:660 @7fe450e19).
+/// Ports `ggml_backend_reg_dev_count` (src/ggml-backend.cpp:800 @d81235049).
 pub export fn ggml_backend_reg_dev_count(reg: c.ggml_backend_reg_t) callconv(.c) usize {
     impl.assert(reg != null, "reg");
     return reg.*.iface.get_device_count.?(reg);
 }
 
-/// Ports `ggml_backend_reg_dev_get` (src/ggml-backend.cpp:665 @7fe450e19).
+/// Ports `ggml_backend_reg_dev_get` (src/ggml-backend.cpp:805 @d81235049).
 pub export fn ggml_backend_reg_dev_get(reg: c.ggml_backend_reg_t, index: usize) callconv(.c) c.ggml_backend_dev_t {
     impl.assert(reg != null, "reg");
     return reg.*.iface.get_device.?(reg, index);
 }
 
-/// Ports `ggml_backend_reg_get_proc_address` (src/ggml-backend.cpp:670 @7fe450e19).
+/// Ports `ggml_backend_reg_get_proc_address` (src/ggml-backend.cpp:810 @d81235049).
 ///
 /// Return: the named extension entry point, or null when the registry has no
 /// `get_proc_address` or does not know the name.
@@ -932,13 +1087,13 @@ pub export fn ggml_backend_reg_get_proc_address(reg: c.ggml_backend_reg_t, name:
 // to all of them. Its `iface` deliberately leaves everything else null, so a
 // multi-buffer cannot be read from or written to directly.
 
-/// Ports `struct ggml_backend_multi_buffer_context` (src/ggml-backend.cpp:680 @7fe450e19).
+/// Ports `struct ggml_backend_multi_buffer_context` (src/ggml-backend.cpp:820 @d81235049).
 const MultiBufferContext = extern struct {
     buffers: [*c]c.ggml_backend_buffer_t,
     n_buffers: usize,
 };
 
-/// Ports `ggml_backend_multi_buffer_free_buffer` (src/ggml-backend.cpp:685 @7fe450e19).
+/// Ports `ggml_backend_multi_buffer_free_buffer` (src/ggml-backend.cpp:825 @d81235049).
 ///
 /// Its address is also the tag `ggml_backend_buffer_is_multi_buffer` compares
 /// against, so this function must stay a distinct symbol.
@@ -952,7 +1107,7 @@ fn multiBufferFreeBuffer(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
     std.c.free(ctx);
 }
 
-/// Ports `ggml_backend_multi_buffer_clear` (src/ggml-backend.cpp:696 @7fe450e19).
+/// Ports `ggml_backend_multi_buffer_clear` (src/ggml-backend.cpp:836 @d81235049).
 fn multiBufferClear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
     impl.assert(buffer != null, "buffer");
     const ctx: *MultiBufferContext = @ptrCast(@alignCast(buffer.*.context.?));
@@ -961,7 +1116,7 @@ fn multiBufferClear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) voi
     }
 }
 
-/// Ports `ggml_backend_multi_buffer_i` (src/ggml-backend.cpp:704 @7fe450e19).
+/// Ports `ggml_backend_multi_buffer_i` (src/ggml-backend.cpp:844 @d81235049).
 const multi_buffer_i: c.ggml_backend_buffer_i = .{
     .free_buffer = multiBufferFreeBuffer,
     .get_base = null,
@@ -976,7 +1131,7 @@ const multi_buffer_i: c.ggml_backend_buffer_i = .{
     .reset = null,
 };
 
-/// Ports `ggml_backend_multi_buffer_alloc_buffer` (src/ggml-backend.cpp:718 @7fe450e19).
+/// Ports `ggml_backend_multi_buffer_alloc_buffer` (src/ggml-backend.cpp:858 @d81235049).
 ///
 /// Parameters:
 /// - `buffers`: the buffers to take ownership of; copied into the context.
@@ -1000,7 +1155,7 @@ pub export fn ggml_backend_multi_buffer_alloc_buffer(buffers: [*c]c.ggml_backend
     return ggml_backend_buffer_init(buffers[0].*.buft, multi_buffer_i, ctx, total_size);
 }
 
-/// Ports `ggml_backend_buffer_is_multi_buffer` (src/ggml-backend.cpp:734 @7fe450e19).
+/// Ports `ggml_backend_buffer_is_multi_buffer` (src/ggml-backend.cpp:874 @d81235049).
 ///
 /// Identified by the address of its `free_buffer`, which is how the C tells
 /// them apart — there is no tag field.
@@ -1009,7 +1164,7 @@ pub export fn ggml_backend_buffer_is_multi_buffer(buffer: c.ggml_backend_buffer_
     return buffer.*.iface.free_buffer == @as(?*const fn (c.ggml_backend_buffer_t) callconv(.c) void, multiBufferFreeBuffer);
 }
 
-/// Ports `ggml_backend_multi_buffer_set_usage` (src/ggml-backend.cpp:739 @7fe450e19).
+/// Ports `ggml_backend_multi_buffer_set_usage` (src/ggml-backend.cpp:879 @d81235049).
 pub export fn ggml_backend_multi_buffer_set_usage(buffer: c.ggml_backend_buffer_t, usage: c.enum_ggml_backend_buffer_usage) callconv(.c) void {
     impl.assert(buffer != null, "buffer");
     impl.assert(ggml_backend_buffer_is_multi_buffer(buffer), "ggml_backend_buffer_is_multi_buffer(buffer)");
@@ -1019,7 +1174,7 @@ pub export fn ggml_backend_multi_buffer_set_usage(buffer: c.ggml_backend_buffer_
     }
 }
 
-/// Ports `ggml_dup_tensor_layout` (src/ggml-backend.cpp:749 @7fe450e19).
+/// Ports `ggml_dup_tensor_layout` (src/ggml-backend.cpp:889 @d81235049).
 ///
 /// `ggml_dup_tensor` gives the same shape and type but contiguous strides;
 /// this copies the source's `nb` over the top so the layout matches too.
@@ -1041,7 +1196,7 @@ pub fn dupTensorLayout(ctx: ?*c.ggml_context, tensor: [*c]const c.ggml_tensor) [
     return dup;
 }
 
-/// Ports `ggml_is_view_op` (src/ggml-backend.cpp:757 @7fe450e19).
+/// Ports `ggml_is_view_op` (src/ggml-backend.cpp:897 @d81235049).
 ///
 /// The four ops that produce a view rather than compute anything; the
 /// scheduler skips them everywhere it walks a graph.
@@ -1052,7 +1207,7 @@ pub fn isViewOp(op: c.enum_ggml_op) bool {
 // -----------------------------------------------------------------------------
 // Utils
 
-/// Ports `ggml_op_alloc_size_may_expand` (src/ggml-backend.cpp:2108 @7fe450e19).
+/// Ports `ggml_op_alloc_size_may_expand` (src/ggml-backend.cpp:2264 @d81235049).
 ///
 /// The ops whose output a backend's `get_alloc_size` may size beyond
 /// `ggml_nbytes`, for scratch it keeps beside the result
@@ -1071,7 +1226,7 @@ pub export fn ggml_op_alloc_size_may_expand(op: c.enum_ggml_op) callconv(.c) boo
     };
 }
 
-/// Ports `ggml_backend_view_init` (src/ggml-backend.cpp:2122 @7fe450e19).
+/// Ports `ggml_backend_view_init` (src/ggml-backend.cpp:2278 @d81235049).
 ///
 /// Points a view at its source's buffer and offset, then lets the buffer
 /// initialise it. Asserts the view is not already attached.
@@ -1087,7 +1242,7 @@ pub export fn ggml_backend_view_init(tensor: [*c]c.ggml_tensor) callconv(.c) c.e
     return ggml_backend_buffer_init_tensor(tensor.*.buffer, tensor);
 }
 
-/// Ports `ggml_backend_tensor_alloc` (src/ggml-backend.cpp:2134 @7fe450e19).
+/// Ports `ggml_backend_tensor_alloc` (src/ggml-backend.cpp:2290 @d81235049).
 ///
 /// Parameters:
 /// - `buffer`: the buffer the tensor will live in.
@@ -1112,7 +1267,7 @@ pub export fn ggml_backend_tensor_alloc(buffer: c.ggml_backend_buffer_t, tensor:
     return ggml_backend_buffer_init_tensor(buffer, tensor);
 }
 
-/// Ports `graph_copy_dup_tensor` (src/ggml-backend.cpp:2149 @7fe450e19).
+/// Ports `graph_copy_dup_tensor` (src/ggml-backend.cpp:2305 @d81235049).
 ///
 /// Recursively duplicates `src` and everything it depends on into one of two
 /// contexts: allocated tensors go to `ctx_allocated`, views and unallocated
@@ -1163,7 +1318,7 @@ fn graphCopyDupTensor(
     return dst;
 }
 
-/// Ports `graph_copy_init_tensor` (src/ggml-backend.cpp:2183 @7fe450e19).
+/// Ports `graph_copy_init_tensor` (src/ggml-backend.cpp:2339 @d81235049).
 ///
 /// Walks the same graph a second time, now that storage exists: views are
 /// wired to their source and everything else has its data copied across.
@@ -1198,7 +1353,7 @@ fn graphCopyInitTensor(
     }
 }
 
-/// Ports `ggml_backend_graph_copy` (src/ggml-backend.cpp:2210 @7fe450e19).
+/// Ports `ggml_backend_graph_copy` (src/ggml-backend.cpp:2366 @d81235049).
 ///
 /// Parameters:
 /// - `backend`: the backend the copy's tensors are allocated on.
@@ -1283,14 +1438,14 @@ pub export fn ggml_backend_graph_copy(backend: c.ggml_backend_t, graph: *impl.CG
     };
 }
 
-/// Ports `ggml_backend_graph_copy_free` (src/ggml-backend.cpp:2292 @7fe450e19).
+/// Ports `ggml_backend_graph_copy_free` (src/ggml-backend.cpp:2448 @d81235049).
 pub export fn ggml_backend_graph_copy_free(copy: c.struct_ggml_backend_graph_copy) callconv(.c) void {
     ggml_backend_buffer_free(copy.buffer);
     c.ggml_free(copy.ctx_allocated);
     c.ggml_free(copy.ctx_unallocated);
 }
 
-/// Ports `ggml_backend_compare_graph_backend` (src/ggml-backend.cpp:2298 @7fe450e19).
+/// Ports `ggml_backend_compare_graph_backend` (src/ggml-backend.cpp:2454 @d81235049).
 ///
 /// Runs `graph` on two backends and hands each pair of results to `callback`.
 /// With `test_nodes` it computes both graphs whole and compares only those
@@ -1367,7 +1522,7 @@ pub export fn ggml_backend_compare_graph_backend(
 // Defined here rather than in the CPU backend so that every backend can reach
 // it — the C says so in a comment above the buffer type.
 
-/// Ports `ggml_backend_cpu_buffer_get_base` (src/ggml-backend.cpp:2355 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_get_base` (src/ggml-backend.cpp:2511 @d81235049).
 ///
 /// The context *is* the allocation, rounded up to `TENSOR_ALIGNMENT`. A
 /// from-pointer buffer is already aligned and the rounding is a no-op.
@@ -1383,20 +1538,20 @@ fn cpuBufferGetBase(buffer: c.ggml_backend_buffer_t) callconv(.c) ?*anyopaque {
     return @ptrFromInt(data);
 }
 
-/// Ports `ggml_backend_cpu_buffer_free_buffer` (src/ggml-backend.cpp:2367 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_free_buffer` (src/ggml-backend.cpp:2523 @d81235049).
 fn cpuBufferFreeBuffer(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
     impl.assert(buffer != null, "buffer");
     ggml_aligned_free(buffer.*.context, buffer.*.size);
 }
 
-/// Ports `ggml_backend_cpu_buffer_memset_tensor` (src/ggml-backend.cpp:2372 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_memset_tensor` (src/ggml-backend.cpp:2528 @d81235049).
 fn cpuBufferMemsetTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor, value: u8, offset: usize, size: usize) callconv(.c) void {
     _ = buffer;
     impl.assert(tensor != null, "tensor");
     @memset((@as([*]u8, @ptrCast(tensor.*.data)) + offset)[0..size], value);
 }
 
-/// Ports `ggml_backend_cpu_buffer_set_tensor` (src/ggml-backend.cpp:2379 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_set_tensor` (src/ggml-backend.cpp:2535 @d81235049).
 fn cpuBufferSetTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) callconv(.c) void {
     _ = buffer;
     impl.assert(tensor != null, "tensor");
@@ -1406,7 +1561,7 @@ fn cpuBufferSetTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor
     );
 }
 
-/// Ports `ggml_backend_cpu_buffer_get_tensor` (src/ggml-backend.cpp:2386 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_get_tensor` (src/ggml-backend.cpp:2542 @d81235049).
 fn cpuBufferGetTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]const c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
     _ = buffer;
     impl.assert(tensor != null, "tensor");
@@ -1416,7 +1571,7 @@ fn cpuBufferGetTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]const c.ggml_
     );
 }
 
-/// Ports `ggml_backend_cpu_buffer_cpy_tensor` (src/ggml-backend.cpp:2393 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_cpy_tensor` (src/ggml-backend.cpp:2549 @d81235049).
 ///
 /// Return: true only when the source is host memory, which is the one case a
 /// plain `memcpy` can serve.
@@ -1431,7 +1586,7 @@ fn cpuBufferCpyTensor(buffer: c.ggml_backend_buffer_t, src: [*c]const c.ggml_ten
     return false;
 }
 
-/// Ports `ggml_backend_cpu_buffer_clear` (src/ggml-backend.cpp:2404 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_clear` (src/ggml-backend.cpp:2560 @d81235049).
 ///
 /// Clears from the *context*, not from `get_base`, so the alignment padding
 /// is cleared too. That is what the C does.
@@ -1440,7 +1595,7 @@ fn cpuBufferClear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) void 
     @memset(@as([*]u8, @ptrCast(buffer.*.context))[0..buffer.*.size], value);
 }
 
-/// Ports `ggml_backend_cpu_buffer_i` (src/ggml-backend.cpp:2409 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_i` (src/ggml-backend.cpp:2565 @d81235049).
 const cpu_buffer_i: c.ggml_backend_buffer_i = .{
     .free_buffer = cpuBufferFreeBuffer,
     .get_base = cpuBufferGetBase,
@@ -1455,7 +1610,7 @@ const cpu_buffer_i: c.ggml_backend_buffer_i = .{
     .reset = null,
 };
 
-/// Ports `ggml_backend_cpu_buffer_from_ptr_i` (src/ggml-backend.cpp:2423 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_from_ptr_i` (src/ggml-backend.cpp:2579 @d81235049).
 ///
 /// Identical to `cpu_buffer_i` but for `free_buffer`: the pointer is the
 /// caller's and must not be freed.
@@ -1476,13 +1631,13 @@ const cpu_buffer_from_ptr_i: c.ggml_backend_buffer_i = .{
 // -----------------------------------------------------------------------------
 // CPU backend buffer type
 
-/// Ports `ggml_backend_cpu_buffer_type_get_name` (src/ggml-backend.cpp:2441 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_type_get_name` (src/ggml-backend.cpp:2597 @d81235049).
 fn cpuBufferTypeGetName(buft: c.ggml_backend_buffer_type_t) callconv(.c) [*c]const u8 {
     _ = buft;
     return "CPU";
 }
 
-/// Ports `ggml_backend_cpu_buffer_type_alloc_buffer` (src/ggml-backend.cpp:2447 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_type_alloc_buffer` (src/ggml-backend.cpp:2603 @d81235049).
 fn cpuBufferTypeAllocBuffer(buft: c.ggml_backend_buffer_type_t, size: usize) callconv(.c) c.ggml_backend_buffer_t {
     const data = ggml_aligned_malloc(size);
 
@@ -1494,13 +1649,13 @@ fn cpuBufferTypeAllocBuffer(buft: c.ggml_backend_buffer_type_t, size: usize) cal
     return ggml_backend_buffer_init(buft, cpu_buffer_i, data, size);
 }
 
-/// Ports `ggml_backend_cpu_buffer_type_get_alignment` (src/ggml-backend.cpp:2458 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_type_get_alignment` (src/ggml-backend.cpp:2614 @d81235049).
 fn cpuBufferTypeGetAlignment(buft: c.ggml_backend_buffer_type_t) callconv(.c) usize {
     _ = buft;
     return impl.tensor_alignment;
 }
 
-/// Ports `ggml_backend_cpu_buffer_type_is_host` (src/ggml-backend.cpp:2464 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_type_is_host` (src/ggml-backend.cpp:2620 @d81235049).
 fn cpuBufferTypeIsHost(buft: c.ggml_backend_buffer_type_t) callconv(.c) bool {
     _ = buft;
     return true;
@@ -1516,23 +1671,25 @@ var cpu_buffer_type_storage: c.ggml_backend_buffer_type = .{
     .iface = .{
         .get_name = cpuBufferTypeGetName,
         .alloc_buffer = cpuBufferTypeAllocBuffer,
+        .alloc_buffer_n = null,
         .get_alignment = cpuBufferTypeGetAlignment,
         .get_max_size = null, // defaults to SIZE_MAX
         .get_alloc_size = null, // defaults to ggml_nbytes
+        .get_alloc_size_n = null,
         .is_host = cpuBufferTypeIsHost,
     },
     .device = null, // FIXME ggml_backend_reg_dev_get(ggml_backend_cpu_reg(), 0)
     .context = null,
 };
 
-/// Ports `ggml_backend_cpu_buffer_type` (src/ggml-backend.cpp:2470 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_type` (src/ggml-backend.cpp:2626 @d81235049).
 ///
 /// Return: the shared CPU buffer type. Not owned by the caller.
 pub export fn ggml_backend_cpu_buffer_type() callconv(.c) c.ggml_backend_buffer_type_t {
     return &cpu_buffer_type_storage;
 }
 
-/// Ports `ggml_backend_cpu_buffer_from_ptr_type_get_name` (src/ggml-backend.cpp:2487 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_from_ptr_type_get_name` (src/ggml-backend.cpp:2645 @d81235049).
 fn cpuBufferFromPtrTypeGetName(buft: c.ggml_backend_buffer_type_t) callconv(.c) [*c]const u8 {
     _ = buft;
     return "CPU_Mapped";
@@ -1547,16 +1704,18 @@ var cpu_buffer_from_ptr_type_storage: c.ggml_backend_buffer_type = .{
     .iface = .{
         .get_name = cpuBufferFromPtrTypeGetName,
         .alloc_buffer = cpuBufferTypeAllocBuffer,
+        .alloc_buffer_n = null,
         .get_alignment = cpuBufferTypeGetAlignment,
         .get_max_size = null, // defaults to SIZE_MAX
         .get_alloc_size = null, // defaults to ggml_nbytes
+        .get_alloc_size_n = null,
         .is_host = cpuBufferTypeIsHost,
     },
     .device = null, // FIXME ggml_backend_reg_dev_get(ggml_backend_cpu_reg(), 0)
     .context = null,
 };
 
-/// Ports `ggml_backend_cpu_buffer_from_ptr_type` (src/ggml-backend.cpp:2493 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_from_ptr_type` (src/ggml-backend.cpp:2651 @d81235049).
 ///
 /// File-private in the C++, and only `ggml_backend_cpu_buffer_from_ptr` calls
 /// it.
@@ -1564,7 +1723,7 @@ fn cpuBufferFromPtrType() c.ggml_backend_buffer_type_t {
     return &cpu_buffer_from_ptr_type_storage;
 }
 
-/// Ports `ggml_backend_cpu_buffer_from_ptr` (src/ggml-backend.cpp:2510 @7fe450e19).
+/// Ports `ggml_backend_cpu_buffer_from_ptr` (src/ggml-backend.cpp:2670 @d81235049).
 ///
 /// Wraps memory the caller owns. The buffer never frees it.
 pub export fn ggml_backend_cpu_buffer_from_ptr(ptr: ?*anyopaque, size: usize) callconv(.c) c.ggml_backend_buffer_t {

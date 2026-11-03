@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.5.0
-//! (`7fe450e19`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.6.0
+//! (`d81235049`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0.
 
 const std = @import("std");
@@ -38,7 +38,7 @@ const vendor_id_amd = 0x1002;
 const vendor_id_intel = 0x8086;
 const vendor_id_nvidia = 0x10de;
 
-/// Ports `vk_fa_tuning_params` (ggml-vulkan-types.h:1337 @7fe450e19).
+/// Ports `vk_fa_tuning_params` (ggml-vulkan-types.h:1360 @d81235049).
 pub const FaTuningParams = struct {
     path: FaCodePath = .scalar,
     workgroup_size: u32 = 0,
@@ -57,7 +57,7 @@ fn lowestBit(d: u32) u32 {
     return d ^ (d & (d -% 1));
 }
 
-/// Ports `get_fa_tuning_params_scalar` (ggml-vulkan.cpp:1172 @7fe450e19).
+/// Ports `get_fa_tuning_params_scalar` (ggml-vulkan.cpp:1205 @d81235049).
 fn tuningScalar(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, k_type: c.ggml_type, v_type: c.ggml_type, f32acc: bool) FaTuningParams {
     var r: FaTuningParams = .{ .path = .scalar };
 
@@ -119,7 +119,7 @@ fn tuningScalar(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, 
     return r;
 }
 
-/// Ports `get_fa_tuning_params_coopmat1` (ggml-vulkan.cpp:1247 @7fe450e19).
+/// Ports `get_fa_tuning_params_coopmat1` (ggml-vulkan.cpp:1280 @d81235049).
 fn tuningCoopmat1(dev: *const Device, hsk: u32, hsv: u32) FaTuningParams {
     var r: FaTuningParams = .{ .path = .coopmat1 };
     const D = hsk | hsv;
@@ -137,7 +137,7 @@ fn tuningCoopmat1(dev: *const Device, hsk: u32, hsv: u32) FaTuningParams {
     return r;
 }
 
-/// Ports `get_fa_tuning_params_coopmat2` (ggml-vulkan.cpp:1278 @7fe450e19).
+/// Ports `get_fa_tuning_params_coopmat2` (ggml-vulkan.cpp:1311 @d81235049).
 fn tuningCoopmat2(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, k_type: c.ggml_type, v_type: c.ggml_type) FaTuningParams {
     var r: FaTuningParams = .{ .path = .coopmat2 };
     const D = hsk | hsv;
@@ -157,7 +157,7 @@ fn tuningCoopmat2(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, k_type: c
     return r;
 }
 
-/// Ports `get_fa_tuning_params` (ggml-vulkan.cpp:1306 @7fe450e19).
+/// Ports `get_fa_tuning_params` (ggml-vulkan.cpp:1339 @d81235049).
 pub fn tuningParams(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, k_type: c.ggml_type, v_type: c.ggml_type, f32acc: bool) FaTuningParams {
     var path: FaCodePath = if (dev.coopmat2) .coopmat2 else if (dev.coopmat1_fa_support) .coopmat1 else .scalar;
 
@@ -184,7 +184,7 @@ pub fn tuningParams(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u
     };
 }
 
-/// Ports `get_fa_pipeline_state` (ggml-vulkan.cpp:1350 @7fe450e19).
+/// Ports `get_fa_pipeline_state` (ggml-vulkan.cpp:1383 @d81235049).
 pub fn pipelineState(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, aligned: bool, f32acc: bool, use_mask: bool, use_mask_opt: bool, use_logit_softcap: bool, use_sparse: bool, k_type: c.ggml_type, v_type: c.ggml_type) FaPipelineState {
     const old_amd_windows = dev.vendor_id == vendor_id_amd and dev.driver_id == vk.VK_DRIVER_ID_AMD_PROPRIETARY and
         (dev.architecture == .amd_gcn or dev.architecture == .amd_rdna1 or dev.architecture == .amd_rdna2);
@@ -214,7 +214,7 @@ pub fn pipelineState(dev: *const Device, params: *const FaTuningParams, hsk: u32
     };
 }
 
-/// Ports `ggml_vk_flash_attn_scalar_shmem_support` (ggml-vulkan.cpp:7690 @7fe450e19).
+/// Ports `ggml_vk_flash_attn_scalar_shmem_support` (ggml-vulkan.cpp:7934 @d81235049).
 /// Must track the shader; it overestimates `tmpsh` slightly.
 pub fn scalarShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, f32acc: bool, k_type: c.ggml_type, v_type: c.ggml_type) bool {
     _ = f32acc;
@@ -255,7 +255,7 @@ pub fn scalarShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk
     return total_size <= dev.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `ggml_vk_flash_attn_coopmat_shmem_support` (ggml-vulkan.cpp:7741 @7fe450e19).
+/// Ports `ggml_vk_flash_attn_coopmat_shmem_support` (ggml-vulkan.cpp:7985 @d81235049).
 pub fn coopmatShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, f32acc: bool, k_type: c.ggml_type) bool {
     const Br = params.block_rows;
     const Bc = params.block_cols;
@@ -312,7 +312,7 @@ fn isDenseKvCache(t: *const Tensor) bool {
         (t.ne[3] == 1 or t.nb[3] == t.nb[1] * @as(usize, @intCast(t.ne[1])));
 }
 
-/// Ports `ggml_vk_flash_attn` (ggml-vulkan.cpp:7789 @7fe450e19).
+/// Ports `ggml_vk_flash_attn` (ggml-vulkan.cpp:8033 @d81235049).
 pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const Tensor, v: *const Tensor, mask: ?*const Tensor, sinks: ?*const Tensor, dst: *Tensor) void {
     const dev = ctx.device;
     const limits = &dev.properties.limits;
@@ -400,11 +400,14 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
     // positions and gather only those.
     const n_kv_max: i32 = if (mask != null) dst.op_params[4] else 0;
     const disable_sparse = DisableSparse.get();
+    const kv_f16 = k_type_eff == c.GGML_TYPE_F16 and v_type_eff == c.GGML_TYPE_F16;
     // cm2 dense is fast, so it needs a larger reduction to win.
-    const min_ratio: i64 = if (tuning.path == .coopmat2) 4 else 2;
+    // With quantized K/V, sparse only breaks even around 16x (measured on RDNA3/RDNA4).
+    const min_ratio: i64 = if (tuning.path == .coopmat2) 4 else if (kv_f16) 2 else 16;
     const use_sparse = !disable_sparse and n_kv_max > 0 and mask != null and
         max_bias == 0.0 and logit_softcap == 0.0 and
-        k_type_eff == c.GGML_TYPE_F16 and v_type_eff == c.GGML_TYPE_F16 and
+        // the cm2 sparse gather only reads f16
+        (kv_f16 or tuning.path != .coopmat2) and
         nem0 == KV and
         @as(i64, KV) >= @max(4096, min_ratio * @as(i64, n_kv_max)) and
         (gqa_ratio > 1 or (tuning.path == .scalar and N == 1));
@@ -502,27 +505,38 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
             const nek1: u64 = @intCast(k.ne[1]);
             const max_dim = (nek1 +% split_p_size -% 1) / split_p_size;
             const p_dim = max_dim *% split_p_size;
-            // The C++ holds `compile_mutex` for the rest of this block.
-            _ = std.c.pthread_mutex_lock(&dev.compile_mutex);
-            defer _ = std.c.pthread_mutex_unlock(&dev.compile_mutex);
-            const xe_key: m.device.XeFaDecodeKey = .{ u(q.ne[0]), u(v.ne[0]), qk_ratio, u(q.ne[1]) };
-            const gop = dev.pipeline_xe_fa_decode_dual_phases.getOrPut(m.common.allocator, xe_key) catch impl.abort("ggml_vulkan: out of memory");
-            if (!gop.found_existing) gop.value_ptr.* = .{ .first = Pipeline.create(), .second = Pipeline.create() };
-            xe_fa_pipeline_dual_phases = gop.value_ptr.*;
-
-            const neq1: u64 = @intCast(q.ne[1]);
-            const neq2: u64 = @intCast(q.ne[2]);
-            const neq3: u64 = @intCast(q.ne[3]);
-            size_p = neq1 *% neq2 *% p_dim *% neq3 *% @sizeOf(c.ggml_fp16_t);
-            size_group_max = neq1 *% neq2 *% max_dim *% neq3 *% @sizeOf(f32);
-            const temp_size = @as(u64, @intCast(c.ggml_nelements(q))) *% @sizeOf(c.ggml_fp16_t) +% size_p +% size_group_max;
-            fa_copy_qstate = true;
-            if (ctx.prealloc_size_x < temp_size) {
-                ctx.prealloc_size_x = temp_size;
-                m.nodes.preallocateBuffers(ctx, subctx);
+            // The two-phase pipelines exist only where glslc took coopmat
+            // (`fa_decode_ph1`/`ph2` are generated under it); the C++ holds
+            // `compile_mutex` for the rest of this block when it does.
+            const have_xe_pipelines = comptime m.instance.glslc.coopmat;
+            if (have_xe_pipelines) _ = std.c.pthread_mutex_lock(&dev.compile_mutex);
+            defer if (have_xe_pipelines) {
+                _ = std.c.pthread_mutex_unlock(&dev.compile_mutex);
+            };
+            if (have_xe_pipelines) {
+                const xe_key: m.device.XeFaDecodeKey = .{ u(q.ne[0]), u(v.ne[0]), qk_ratio, u(q.ne[1]) };
+                const gop = dev.pipeline_xe_fa_decode_dual_phases.getOrPut(m.common.allocator, xe_key) catch impl.abort("ggml_vulkan: out of memory");
+                if (!gop.found_existing) gop.value_ptr.* = .{ .first = Pipeline.create(), .second = Pipeline.create() };
+                xe_fa_pipeline_dual_phases = gop.value_ptr.*;
             }
+            if (xe_fa_pipeline_dual_phases.first == null or xe_fa_pipeline_dual_phases.second == null) {
+                xe_fa_opt = false;
+                fa_copy_qstate = false;
+            } else {
+                const neq1: u64 = @intCast(q.ne[1]);
+                const neq2: u64 = @intCast(q.ne[2]);
+                const neq3: u64 = @intCast(q.ne[3]);
+                size_p = neq1 *% neq2 *% p_dim *% neq3 *% @sizeOf(c.ggml_fp16_t);
+                size_group_max = neq1 *% neq2 *% max_dim *% neq3 *% @sizeOf(f32);
+                const temp_size = @as(u64, @intCast(c.ggml_nelements(q))) *% @sizeOf(c.ggml_fp16_t) +% size_p +% size_group_max;
+                fa_copy_qstate = true;
+                if (ctx.prealloc_size_x < temp_size) {
+                    ctx.prealloc_size_x = temp_size;
+                    m.nodes.preallocateBuffers(ctx, subctx);
+                }
 
-            if (ctx.prealloc_x_need_sync) m.context.syncBuffers(ctx, subctx);
+                if (ctx.prealloc_x_need_sync) m.context.syncBuffers(ctx, subctx);
+            }
         }
     }
 
@@ -582,6 +596,11 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
     const sinks_buf = if (sinks) |t| m.context.tensorSubbuffer(ctx, t, false) else q_buf;
     const mask_opt_buf = if (use_mask_opt) m.context.subbuffer(ctx, ctx.prealloc_y.?, 0) else q_buf;
     const sparse_buf = if (use_sparse) m.context.subbuffer(ctx, ctx.prealloc_y.?, 0) else q_buf;
+    if (use_mask_opt or use_sparse) {
+        // the mask opt bits and the sparse index list overwrite a matmul input converted into prealloc_y
+        ctx.prealloc_y_last_pipeline_used = null;
+        ctx.prealloc_y_last_tensor_used = null;
+    }
 
     if (use_dequant_kv) {
         const k_f16_sz = @as(u64, @intCast(c.ggml_nelements(k))) * fp16sz;
@@ -732,7 +751,7 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
     if (use_mask_opt or use_sparse) ctx.prealloc_y_need_sync = true;
 }
 
-/// The function-static `disable_sparse` (ggml-vulkan.cpp:7902 @7fe450e19):
+/// The function-static `disable_sparse` (ggml-vulkan.cpp:8146 @d81235049):
 /// whether `GGML_VK_FA_SPARSE_DISABLE` is set, read once, on first use.
 const DisableSparse = struct {
     /// 0 unread, 1 false, 2 true.
@@ -766,7 +785,7 @@ const XeFaArgs = struct {
 };
 
 /// The `upper_power_of_2` and `upper_power_of_2` lambdas
-/// (ggml-vulkan.cpp:8208, 2984 @7fe450e19), one in `ggml_vk_flash_attn` and
+/// (ggml-vulkan.cpp:8466, 3185 @d81235049), one in `ggml_vk_flash_attn` and
 /// one in `ggml_vk_load_shaders`, which are the same: the next power of two
 /// at or above `in`.
 pub fn upperPowerOf2(in: u32) u32 {
@@ -781,7 +800,7 @@ pub fn upperPowerOf2(in: u32) u32 {
     return ret +% 1;
 }
 
-/// The `xe_fa_opt` arm (ggml-vulkan.cpp:8207 @7fe450e19) of
+/// The `xe_fa_opt` arm (ggml-vulkan.cpp:8465 @d81235049) of
 /// `ggml_vk_flash_attn`, taken when `split_k > 1`: Intel Xe's two-phase decode -- Q copied
 /// to fp16 into `prealloc_x`, phase 1 writing P and each group's max beside
 /// it, phase 2 reducing them against V into `dst`.

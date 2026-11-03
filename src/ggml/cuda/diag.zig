@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/diag.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/diag.cuh` at v0.5.0 (`7fe450e19`). The
+//! `llama.cpp/ggml/src/ggml-cuda/diag.cuh` at v0.6.0 (`d81235049`). The
 //! kernel, `diag_kernel`, stays CUDA.
 
 const std = @import("std");
@@ -14,10 +14,10 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_DIAG_BLOCK_SIZE` (diag.cuh:3 @7fe450e19).
+/// Ports `CUDA_DIAG_BLOCK_SIZE` (diag.cuh:3 @d81235049).
 const block_size = 256;
 
-/// Ports `ggml_cuda_op_diag` (diag.cu:36 @7fe450e19), which launches with
+/// Ports `ggml_cuda_op_diag` (diag.cu:36 @d81235049), which launches with
 /// `<<<>>>`.
 pub fn opDiag(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);

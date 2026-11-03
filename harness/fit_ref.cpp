@@ -21,11 +21,15 @@
 #include <unistd.h>
 #include <vector>
 
-// `common.cpp` defines this, and `log.cpp` asks it once when the logger
-// starts; compiling `common.cpp` for one predicate would bring most of
+// `common.cpp` defines these, and `log.cpp` asks them when the logger
+// starts and whenever colours are set (`tty_enable_ansi`, v0.6.0); compiling `common.cpp` for one predicate would bring most of
 // `common/` with it. The harness turns colours off regardless.
 bool tty_can_use_colors() {
     return false;
+}
+
+bool tty_enable_ansi() {
+    return true;
 }
 
 extern "C" {

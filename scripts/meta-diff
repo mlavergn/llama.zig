@@ -25,7 +25,7 @@
 #    ubatch.
 #
 # 2. In process (harness/meta_diff.c). The reference .cpp compiled with its
-#    eight unmangled exports -D-renamed to ref_* -- the rename that NOTES.md
+#    unmangled exports (seven since v0.6.0) -D-renamed to ref_* -- the rename that NOTES.md
 #    records as unusable for swapping, because it renames internal callers
 #    too, which is exactly what keeps the renamed object self-consistent --
 #    beside the port in one process. Every vtable answer, every transfer

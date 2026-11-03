@@ -151,6 +151,7 @@ int ref_preprocess(int kind, int proj_type, const ref_hparams * hp, const uint8_
         case 11: pp = std::make_unique<mtmd_image_preprocessor_granite>(&ctx); break;
         case 12: pp = std::make_unique<mtmd_image_preprocessor_muse_glimmer>(&ctx); break;
         case 13: pp = std::make_unique<mtmd_image_preprocessor_deepseek4v>(&ctx); break;
+        case 14: pp = std::make_unique<mtmd_image_preprocessor_glm5v>(&ctx); break;
         default: return 1;
     }
 

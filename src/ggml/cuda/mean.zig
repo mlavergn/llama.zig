@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/mean.cu` at v0.5.0
-//! (`7fe450e19`). The kernels, `reduce_rows_f32<true>` and
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/mean.cu` at v0.6.0
+//! (`d81235049`). The kernels, `reduce_rows_f32<true>` and
 //! `reduce_rows_f32_strided<true>` from `reduce_rows.cuh`, stay CUDA.
 //!
 //! A single long row (`nrows == 1` and more than 65536 columns, or more than
@@ -26,7 +26,7 @@ const kernel = kernels.get("mean", "reduce_rows_f32<(bool)1>");
 const kernel_strided = kernels.get("mean", "reduce_rows_f32_strided<(bool)1>");
 const divide_by_count = kernels.get("mean", "divide_by_count<float>");
 
-/// Ports `ggml_cuda_op_mean` (mean.cu:13 @7fe450e19), the
+/// Ports `ggml_cuda_op_mean` (mean.cu:13 @d81235049), the
 /// `GGML_CUDA_USE_CUB` and `USE_CUDA_GRAPH` arms. A source with contiguous
 /// rows but gaps between them takes the strided kernel.
 pub fn opMean(ctx: *common.Context, dst: *Tensor) void {

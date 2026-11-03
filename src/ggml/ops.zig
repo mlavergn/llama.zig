@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.5.0, `7fe450e19`), the section
+//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.6.0, `d81235049`), the section
 //! beginning at line 2027. Each function names the C function it replaces and
 //! the line it began at.
 //!
@@ -67,12 +67,12 @@ inline fn binaryOp(ctx: *Context, a: *Tensor, b: *Tensor, op: c.enum_ggml_op, in
 // -----------------------------------------------------------------------------
 // ggml_dup
 
-/// Ports `ggml_dup` (ggml.c:2044 @7fe450e19).
+/// Ports `ggml_dup` (ggml.c:2053 @d81235049).
 pub export fn ggml_dup(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_DUP, false);
 }
 
-/// Ports `ggml_dup_inplace` (ggml.c:2050 @7fe450e19).
+/// Ports `ggml_dup_inplace` (ggml.c:2059 @d81235049).
 pub export fn ggml_dup_inplace(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_DUP, true);
 }
@@ -80,17 +80,17 @@ pub export fn ggml_dup_inplace(ctx: *Context, a: *Tensor) *Tensor {
 // -----------------------------------------------------------------------------
 // ggml_add
 
-/// Ports `ggml_add` (ggml.c:2074 @7fe450e19).
+/// Ports `ggml_add` (ggml.c:2083 @d81235049).
 pub export fn ggml_add(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return binaryOp(ctx, a, b, c.GGML_OP_ADD, false);
 }
 
-/// Ports `ggml_add_inplace` (ggml.c:2081 @7fe450e19).
+/// Ports `ggml_add_inplace` (ggml.c:2090 @d81235049).
 pub export fn ggml_add_inplace(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return binaryOp(ctx, a, b, c.GGML_OP_ADD, true);
 }
 
-/// Ports `ggml_add_cast` (ggml.c:2113 @7fe450e19).
+/// Ports `ggml_add_cast` (ggml.c:2122 @d81235049).
 ///
 /// Adds and changes type in one node, so a quantized weight can accumulate
 /// into a wider gradient without a separate cast. Only quantized, f16, and
@@ -110,7 +110,7 @@ pub export fn ggml_add_cast(ctx: *Context, a: *Tensor, b: *Tensor, t: c.enum_ggm
     return result;
 }
 
-/// Ports `ggml_add_id` (ggml.c:2121 @7fe450e19).
+/// Ports `ggml_add_id` (ggml.c:2130 @d81235049).
 ///
 /// Adds a row of `b` selected per position by `ids`, which is how mixture-of-
 /// experts biases are applied without materialising the full bias tensor.
@@ -131,7 +131,7 @@ pub export fn ggml_add_id(ctx: *Context, a: *Tensor, b: *Tensor, ids: *Tensor) *
 // -----------------------------------------------------------------------------
 // ggml_add1
 
-/// Ports `ggml_add1_impl` (ggml.c:2144 @7fe450e19).
+/// Ports `ggml_add1_impl` (ggml.c:2153 @d81235049).
 pub fn add1Impl(ctx: *Context, a: *Tensor, b: *Tensor, inplace: bool) *Tensor {
     impl.assert(types.ggml_is_scalar(b), "ggml_is_scalar(b)");
     impl.assert(types.isPadded1d(a), "ggml_is_padded_1d(a)");
@@ -143,12 +143,12 @@ pub fn add1Impl(ctx: *Context, a: *Tensor, b: *Tensor, inplace: bool) *Tensor {
     return result;
 }
 
-/// Ports `ggml_add1` (ggml.c:2161 @7fe450e19).
+/// Ports `ggml_add1` (ggml.c:2170 @d81235049).
 pub export fn ggml_add1(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return add1Impl(ctx, a, b, false);
 }
 
-/// Ports `ggml_add1_inplace` (ggml.c:2168 @7fe450e19).
+/// Ports `ggml_add1_inplace` (ggml.c:2177 @d81235049).
 pub export fn ggml_add1_inplace(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return add1Impl(ctx, a, b, true);
 }
@@ -156,7 +156,7 @@ pub export fn ggml_add1_inplace(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
 // -----------------------------------------------------------------------------
 // ggml_acc
 
-/// Ports `ggml_acc_impl` (ggml.c:2177 @7fe450e19).
+/// Ports `ggml_acc_impl` (ggml.c:2186 @d81235049).
 ///
 /// Accumulates `b` into a strided window of `a`. The strides and offset go
 /// into `op_params` as i32, which is what the C writes even though the
@@ -190,12 +190,12 @@ pub fn accImpl(
     return result;
 }
 
-/// Ports `ggml_acc` (ggml.c:2203 @7fe450e19).
+/// Ports `ggml_acc` (ggml.c:2212 @d81235049).
 pub export fn ggml_acc(ctx: *Context, a: *Tensor, b: *Tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) *Tensor {
     return accImpl(ctx, a, b, nb1, nb2, nb3, offset, false);
 }
 
-/// Ports `ggml_acc_inplace` (ggml.c:2214 @7fe450e19).
+/// Ports `ggml_acc_inplace` (ggml.c:2223 @d81235049).
 pub export fn ggml_acc_inplace(ctx: *Context, a: *Tensor, b: *Tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) *Tensor {
     return accImpl(ctx, a, b, nb1, nb2, nb3, offset, true);
 }
@@ -203,7 +203,7 @@ pub export fn ggml_acc_inplace(ctx: *Context, a: *Tensor, b: *Tensor, nb1: usize
 // -----------------------------------------------------------------------------
 // Elementwise binaries
 
-/// Ports `ggml_add_impl` (ggml.c:2058 @7fe450e19) and `ggml_sub_impl` (ggml.c:2227 @7fe450e19).
+/// Ports `ggml_add_impl` (ggml.c:2067 @d81235049) and `ggml_sub_impl` (ggml.c:2236 @d81235049).
 ///
 /// The C keeps these as separate static helpers; both are `binaryOp` with a
 /// different op, and the wrappers above already go through it. They exist
@@ -213,37 +213,37 @@ pub fn addImpl(ctx: *Context, a: *Tensor, b: *Tensor, inplace: bool) *Tensor {
     return binaryOp(ctx, a, b, c.GGML_OP_ADD, inplace);
 }
 
-/// Ports `ggml_sub_impl` (ggml.c:2227 @7fe450e19). See `addImpl`.
+/// Ports `ggml_sub_impl` (ggml.c:2236 @d81235049). See `addImpl`.
 pub fn subImpl(ctx: *Context, a: *Tensor, b: *Tensor, inplace: bool) *Tensor {
     return binaryOp(ctx, a, b, c.GGML_OP_SUB, inplace);
 }
 
-/// Ports `ggml_sub` (ggml.c:2243 @7fe450e19).
+/// Ports `ggml_sub` (ggml.c:2252 @d81235049).
 pub export fn ggml_sub(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return binaryOp(ctx, a, b, c.GGML_OP_SUB, false);
 }
 
-/// Ports `ggml_sub_inplace` (ggml.c:2250 @7fe450e19).
+/// Ports `ggml_sub_inplace` (ggml.c:2259 @d81235049).
 pub export fn ggml_sub_inplace(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return binaryOp(ctx, a, b, c.GGML_OP_SUB, true);
 }
 
-/// Ports `ggml_mul` (ggml.c:2275 @7fe450e19).
+/// Ports `ggml_mul` (ggml.c:2284 @d81235049).
 pub export fn ggml_mul(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return binaryOp(ctx, a, b, c.GGML_OP_MUL, false);
 }
 
-/// Ports `ggml_mul_inplace` (ggml.c:2282 @7fe450e19).
+/// Ports `ggml_mul_inplace` (ggml.c:2291 @d81235049).
 pub export fn ggml_mul_inplace(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return binaryOp(ctx, a, b, c.GGML_OP_MUL, true);
 }
 
-/// Ports `ggml_div` (ggml.c:2307 @7fe450e19).
+/// Ports `ggml_div` (ggml.c:2316 @d81235049).
 pub export fn ggml_div(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return binaryOp(ctx, a, b, c.GGML_OP_DIV, false);
 }
 
-/// Ports `ggml_div_inplace` (ggml.c:2314 @7fe450e19).
+/// Ports `ggml_div_inplace` (ggml.c:2323 @d81235049).
 pub export fn ggml_div_inplace(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return binaryOp(ctx, a, b, c.GGML_OP_DIV, true);
 }
@@ -254,52 +254,52 @@ pub export fn ggml_div_inplace(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
 // These predate `GGML_OP_UNARY` and keep dedicated op codes, unlike the
 // activations further down which share one.
 
-/// Ports `ggml_sqr` (ggml.c:2335 @7fe450e19).
+/// Ports `ggml_sqr` (ggml.c:2344 @d81235049).
 pub export fn ggml_sqr(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_SQR, false);
 }
 
-/// Ports `ggml_sqr_inplace` (ggml.c:2341 @7fe450e19).
+/// Ports `ggml_sqr_inplace` (ggml.c:2350 @d81235049).
 pub export fn ggml_sqr_inplace(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_SQR, true);
 }
 
-/// Ports `ggml_sqrt` (ggml.c:2361 @7fe450e19).
+/// Ports `ggml_sqrt` (ggml.c:2370 @d81235049).
 pub export fn ggml_sqrt(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_SQRT, false);
 }
 
-/// Ports `ggml_sqrt_inplace` (ggml.c:2367 @7fe450e19).
+/// Ports `ggml_sqrt_inplace` (ggml.c:2376 @d81235049).
 pub export fn ggml_sqrt_inplace(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_SQRT, true);
 }
 
-/// Ports `ggml_log` (ggml.c:2387 @7fe450e19).
+/// Ports `ggml_log` (ggml.c:2396 @d81235049).
 pub export fn ggml_log(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_LOG, false);
 }
 
-/// Ports `ggml_log_inplace` (ggml.c:2393 @7fe450e19).
+/// Ports `ggml_log_inplace` (ggml.c:2402 @d81235049).
 pub export fn ggml_log_inplace(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_LOG, true);
 }
 
-/// Ports `ggml_sin` (ggml.c:2437 @7fe450e19).
+/// Ports `ggml_sin` (ggml.c:2446 @d81235049).
 pub export fn ggml_sin(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_SIN, false);
 }
 
-/// Ports `ggml_sin_inplace` (ggml.c:2443 @7fe450e19).
+/// Ports `ggml_sin_inplace` (ggml.c:2452 @d81235049).
 pub export fn ggml_sin_inplace(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_SIN, true);
 }
 
-/// Ports `ggml_cos` (ggml.c:2463 @7fe450e19).
+/// Ports `ggml_cos` (ggml.c:2472 @d81235049).
 pub export fn ggml_cos(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_COS, false);
 }
 
-/// Ports `ggml_cos_inplace` (ggml.c:2469 @7fe450e19).
+/// Ports `ggml_cos_inplace` (ggml.c:2478 @d81235049).
 pub export fn ggml_cos_inplace(ctx: *Context, a: *Tensor) *Tensor {
     return unaryOp(ctx, a, c.GGML_OP_COS, true);
 }
@@ -307,7 +307,7 @@ pub export fn ggml_cos_inplace(ctx: *Context, a: *Tensor) *Tensor {
 // -----------------------------------------------------------------------------
 // Reductions
 
-/// Ports `ggml_sum` (ggml.c:2477 @7fe450e19).
+/// Ports `ggml_sum` (ggml.c:2486 @d81235049).
 ///
 /// Collapses every dimension to a single element, keeping the input's type.
 pub export fn ggml_sum(ctx: *Context, a: *Tensor) *Tensor {
@@ -317,7 +317,7 @@ pub export fn ggml_sum(ctx: *Context, a: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_sum_rows` (ggml.c:2490 @7fe450e19).
+/// Ports `ggml_sum_rows` (ggml.c:2499 @d81235049).
 ///
 /// Collapses only dimension 0, so a matrix becomes a column.
 pub export fn ggml_sum_rows(ctx: *Context, a: *Tensor) *Tensor {
@@ -330,7 +330,7 @@ pub export fn ggml_sum_rows(ctx: *Context, a: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_cumsum` (ggml.c:2508 @7fe450e19).
+/// Ports `ggml_cumsum` (ggml.c:2517 @d81235049).
 pub export fn ggml_cumsum(ctx: *Context, a: *Tensor) *Tensor {
     impl.assert(a.type == c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
     const result = context.ggml_dup_tensor(ctx, a);
@@ -339,7 +339,7 @@ pub export fn ggml_cumsum(ctx: *Context, a: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_mean` (ggml.c:2523 @7fe450e19).
+/// Ports `ggml_mean` (ggml.c:2532 @d81235049).
 ///
 /// Always f32 out, whatever went in, because the division needs a float.
 pub export fn ggml_mean(ctx: *Context, a: *Tensor) *Tensor {
@@ -350,7 +350,7 @@ pub export fn ggml_mean(ctx: *Context, a: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_argmax` (ggml.c:2537 @7fe450e19).
+/// Ports `ggml_argmax` (ggml.c:2546 @d81235049).
 ///
 /// Index of the largest element in each row, so the result is i32 and one
 /// element per row.
@@ -364,7 +364,7 @@ pub export fn ggml_argmax(ctx: *Context, a: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_count_equal` (ggml.c:2553 @7fe450e19).
+/// Ports `ggml_count_equal` (ggml.c:2562 @d81235049).
 ///
 /// i64 out, because the count can exceed what i32 holds for a large tensor.
 pub export fn ggml_count_equal(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
@@ -380,7 +380,7 @@ pub export fn ggml_count_equal(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
 // -----------------------------------------------------------------------------
 // Broadcasting and concatenation
 
-/// Ports `ggml_repeat` (ggml.c:2570 @7fe450e19).
+/// Ports `ggml_repeat` (ggml.c:2579 @d81235049).
 ///
 /// Tiles `a` up to `b`'s shape. `b` supplies only the shape; it is not a source
 /// of the node, so it does not create a graph dependency.
@@ -393,7 +393,7 @@ pub export fn ggml_repeat(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_repeat_4d` (ggml.c:2584 @7fe450e19).
+/// Ports `ggml_repeat_4d` (ggml.c:2593 @d81235049).
 ///
 /// Same as `ggml_repeat` with the target shape given directly. The check is
 /// spelled out rather than reusing `ggml_can_repeat`, since there is no tensor
@@ -412,7 +412,7 @@ pub export fn ggml_repeat_4d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2:
     return result;
 }
 
-/// Ports `ggml_repeat_back` (ggml.c:2606 @7fe450e19).
+/// Ports `ggml_repeat_back` (ggml.c:2615 @d81235049).
 ///
 /// The gradient of `ggml_repeat`: sums the tiles back down.
 pub export fn ggml_repeat_back(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
@@ -424,7 +424,7 @@ pub export fn ggml_repeat_back(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_concat` (ggml.c:2622 @7fe450e19).
+/// Ports `ggml_concat` (ggml.c:2631 @d81235049).
 ///
 /// Joins along `dim`; every other dimension must match exactly.
 pub export fn ggml_concat(ctx: *Context, a: *Tensor, b: *Tensor, dim: c_int) *Tensor {
@@ -601,7 +601,7 @@ test "acc records its strides and offset in op_params" {
 // bodies are generated from a table and exported under the C names, so the
 // mapping from symbol to activation is stated once and cannot drift.
 
-/// Ports `ggml_unary_impl` (ggml.c:6007 @7fe450e19).
+/// Ports `ggml_unary_impl` (ggml.c:6016 @d81235049).
 fn unaryActivation(ctx: *Context, a: *Tensor, op: c.enum_ggml_unary_op, inplace: bool) *Tensor {
     impl.assert(types.ggml_is_contiguous_rows(a), "ggml_is_contiguous_rows(a)");
 
@@ -613,12 +613,12 @@ fn unaryActivation(ctx: *Context, a: *Tensor, op: c.enum_ggml_unary_op, inplace:
     return result;
 }
 
-/// Ports `ggml_unary` (ggml.c:6024 @7fe450e19).
+/// Ports `ggml_unary` (ggml.c:6033 @d81235049).
 pub export fn ggml_unary(ctx: *Context, a: *Tensor, op: c.enum_ggml_unary_op) *Tensor {
     return unaryActivation(ctx, a, op, false);
 }
 
-/// Ports `ggml_unary_inplace` (ggml.c:6031 @7fe450e19).
+/// Ports `ggml_unary_inplace` (ggml.c:6040 @d81235049).
 pub export fn ggml_unary_inplace(ctx: *Context, a: *Tensor, op: c.enum_ggml_unary_op) *Tensor {
     return unaryActivation(ctx, a, op, true);
 }
@@ -710,7 +710,7 @@ pub const unary = struct {
     pub const sigmoid = activationWrapper(c.GGML_UNARY_OP_SIGMOID, false);
 };
 
-/// Ports `ggml_xielu` (ggml.c:2838 @7fe450e19).
+/// Ports `ggml_xielu` (ggml.c:2847 @d81235049).
 ///
 /// The only activation with parameters of its own. `alpha_n` and `alpha_p`
 /// arrive raw and are passed through softplus here, at graph-build time, so
@@ -729,7 +729,7 @@ pub export fn ggml_xielu(ctx: *Context, a: *Tensor, alpha_n: f32, alpha_p: f32, 
     return result;
 }
 
-/// Ports `ggml_silu_back` (ggml.c:2861 @7fe450e19).
+/// Ports `ggml_silu_back` (ggml.c:2870 @d81235049).
 pub export fn ggml_silu_back(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     const result = context.ggml_dup_tensor(ctx, a);
     result.op = c.GGML_OP_SILU_BACK;
@@ -745,7 +745,7 @@ pub export fn ggml_silu_back(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
 // other, and so halves that dimension. The `_split` forms take the two halves
 // as separate tensors instead, in which case the shape is unchanged.
 
-/// Ports `ggml_glu_impl` (ggml.c:2906 @7fe450e19).
+/// Ports `ggml_glu_impl` (ggml.c:2915 @d81235049).
 fn gluImpl(ctx: *Context, a: *Tensor, b: ?*Tensor, op: c.enum_ggml_glu_op, swapped: bool) *Tensor {
     impl.assert(types.ggml_is_contiguous_1(a), "ggml_is_contiguous_1(a)");
 
@@ -772,12 +772,12 @@ fn gluImpl(ctx: *Context, a: *Tensor, b: ?*Tensor, op: c.enum_ggml_glu_op, swapp
     return result;
 }
 
-/// Ports `ggml_glu` (ggml.c:2989 @7fe450e19).
+/// Ports `ggml_glu` (ggml.c:2998 @d81235049).
 pub export fn ggml_glu(ctx: *Context, a: *Tensor, op: c.enum_ggml_glu_op, swapped: bool) *Tensor {
     return gluImpl(ctx, a, null, op, swapped);
 }
 
-/// Ports `ggml_glu_split` (ggml.c:2997 @7fe450e19).
+/// Ports `ggml_glu_split` (ggml.c:3006 @d81235049).
 pub export fn ggml_glu_split(ctx: *Context, a: *Tensor, b: *Tensor, op: c.enum_ggml_glu_op) *Tensor {
     return gluImpl(ctx, a, b, op, false);
 }
@@ -986,7 +986,7 @@ comptime {
     }
 }
 
-/// Ports `ggml_rms_norm_back` (ggml.c:3198 @7fe450e19).
+/// Ports `ggml_rms_norm_back` (ggml.c:3207 @d81235049).
 pub export fn ggml_rms_norm_back(ctx: *Context, a: *Tensor, b: *Tensor, eps: f32) *Tensor {
     const result = context.ggml_dup_tensor(ctx, a);
     impl.setOpParamsValue(result, eps);
@@ -996,7 +996,7 @@ pub export fn ggml_rms_norm_back(ctx: *Context, a: *Tensor, b: *Tensor, eps: f32
     return result;
 }
 
-/// Ports `ggml_group_norm_impl` (ggml.c:3216 @7fe450e19).
+/// Ports `ggml_group_norm_impl` (ggml.c:3225 @d81235049).
 fn groupNormImpl(ctx: *Context, a: *Tensor, n_groups: c_int, eps: f32, inplace: bool) *Tensor {
     const result = dupOrView(ctx, a, inplace);
     impl.setOpParamsI32(result, 0, n_groups);
@@ -1006,12 +1006,12 @@ fn groupNormImpl(ctx: *Context, a: *Tensor, n_groups: c_int, eps: f32, inplace: 
     return result;
 }
 
-/// Ports `ggml_group_norm` (ggml.c:3233 @7fe450e19).
+/// Ports `ggml_group_norm` (ggml.c:3242 @d81235049).
 pub export fn ggml_group_norm(ctx: *Context, a: *Tensor, n_groups: c_int, eps: f32) *Tensor {
     return groupNormImpl(ctx, a, n_groups, eps, false);
 }
 
-/// Ports `ggml_group_norm_inplace` (ggml.c:3241 @7fe450e19).
+/// Ports `ggml_group_norm_inplace` (ggml.c:3250 @d81235049).
 pub export fn ggml_group_norm_inplace(ctx: *Context, a: *Tensor, n_groups: c_int, eps: f32) *Tensor {
     return groupNormImpl(ctx, a, n_groups, eps, true);
 }
@@ -1019,7 +1019,7 @@ pub export fn ggml_group_norm_inplace(ctx: *Context, a: *Tensor, n_groups: c_int
 // -----------------------------------------------------------------------------
 // Precision
 
-/// Ports `ggml_prec_set_acc` (ggml.c:3282 @7fe450e19).
+/// Ports `ggml_prec_set_acc` (ggml.c:3291 @d81235049).
 ///
 /// Records the minimum accumulator precision in the op's own slot: 0 for a
 /// matmul, 3 for flash attention, where the slots before it hold the scale,
@@ -1033,7 +1033,7 @@ pub export fn ggml_prec_set_acc(a: *Tensor, prec: c.enum_ggml_prec) bool {
     return true;
 }
 
-/// Ports `ggml_prec_set_src` (ggml.c:3306 @7fe450e19).
+/// Ports `ggml_prec_set_src` (ggml.c:3315 @d81235049).
 ///
 /// Only a matmul's `src[1]` has a slot (op_params 3), so any other op or
 /// source index is refused.
@@ -1053,7 +1053,7 @@ pub export fn ggml_prec_set_src(a: *Tensor, prec: c.enum_ggml_prec, idx: c_int) 
 // -----------------------------------------------------------------------------
 // Matrix multiplication
 
-/// Ports `ggml_can_mul_mat` (ggml.c:3333 @7fe450e19).
+/// Ports `ggml_can_mul_mat` (ggml.c:3342 @d81235049).
 ///
 /// The shared dimension must match exactly; the batch dimensions of `t0` need
 /// only divide `t1`'s, so a single weight matrix broadcasts over a batch.
@@ -1064,7 +1064,7 @@ fn canMulMat(t0: *const Tensor, t1: *const Tensor) bool {
         @rem(t1.ne[3], t0.ne[3]) == 0;
 }
 
-/// Ports `ggml_mul_mat` (ggml.c:3341 @7fe450e19).
+/// Ports `ggml_mul_mat` (ggml.c:3350 @d81235049).
 ///
 /// Always f32 out, whatever the input types, because that is what the backends
 /// accumulate in. Note `a` is the weight and is indexed by its second
@@ -1081,7 +1081,7 @@ pub export fn ggml_mul_mat(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_mul_mat_set_prec` (ggml.c:3358 @7fe450e19).
+/// Ports `ggml_mul_mat_set_prec` (ggml.c:3367 @d81235049).
 ///
 /// Mutates an existing node rather than building one, so it must be called on
 /// a tensor that is already a matmul.
@@ -1090,13 +1090,13 @@ pub export fn ggml_mul_mat_set_prec(a: *Tensor, prec: c.enum_ggml_prec) void {
     impl.setOpParamsI32(a, 0, @intCast(prec));
 }
 
-/// Ports `ggml_mul_mat_set_hint` (ggml.c:3368 @7fe450e19).
+/// Ports `ggml_mul_mat_set_hint` (ggml.c:3377 @d81235049).
 pub export fn ggml_mul_mat_set_hint(a: *Tensor, hint: c.enum_ggml_op_hint) void {
     impl.assert(a.op == c.GGML_OP_MUL_MAT, "a->op == GGML_OP_MUL_MAT");
     impl.setOpParamsI32(a, 1, @intCast(hint));
 }
 
-/// Ports `ggml_mul_mat_id` (ggml.c:3392 @7fe450e19).
+/// Ports `ggml_mul_mat_id` (ggml.c:3401 @d81235049).
 ///
 /// Mixture-of-experts matmul: `ids` selects which expert matrix in `as` each
 /// row of `b` goes through, so the experts are never materialised as one big
@@ -1126,7 +1126,7 @@ pub export fn ggml_mul_mat_id(ctx: *Context, as: *Tensor, b: *Tensor, ids: *Tens
     return result;
 }
 
-/// Ports `ggml_can_out_prod` (ggml.c:3420 @7fe450e19).
+/// Ports `ggml_can_out_prod` (ggml.c:3429 @d81235049).
 fn canOutProd(t0: *const Tensor, t1: *const Tensor) bool {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return t0.ne[1] == t1.ne[1] and
@@ -1134,7 +1134,7 @@ fn canOutProd(t0: *const Tensor, t1: *const Tensor) bool {
         @rem(t1.ne[3], t0.ne[3]) == 0;
 }
 
-/// Ports `ggml_out_prod` (ggml.c:3428 @7fe450e19).
+/// Ports `ggml_out_prod` (ggml.c:3437 @d81235049).
 pub export fn ggml_out_prod(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     impl.assert(canOutProd(a, b), "ggml_can_out_prod(a, b)");
     impl.assert(!types.ggml_is_transposed(a), "!ggml_is_transposed(a)");
@@ -1151,7 +1151,7 @@ pub export fn ggml_out_prod(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
 // -----------------------------------------------------------------------------
 // Scaling
 
-/// Ports `ggml_scale_impl` (ggml.c:3448 @7fe450e19).
+/// Ports `ggml_scale_impl` (ggml.c:3457 @d81235049).
 ///
 /// Computes `s * x + b`, so the bias is part of the same node rather than a
 /// separate add.
@@ -1166,22 +1166,22 @@ pub fn scaleImpl(ctx: *Context, a: *Tensor, s: f32, b: f32, inplace: bool) *Tens
     return result;
 }
 
-/// Ports `ggml_scale` (ggml.c:3467 @7fe450e19).
+/// Ports `ggml_scale` (ggml.c:3476 @d81235049).
 pub export fn ggml_scale(ctx: *Context, a: *Tensor, s: f32) *Tensor {
     return scaleImpl(ctx, a, s, 0.0, false);
 }
 
-/// Ports `ggml_scale_inplace` (ggml.c:3474 @7fe450e19).
+/// Ports `ggml_scale_inplace` (ggml.c:3483 @d81235049).
 pub export fn ggml_scale_inplace(ctx: *Context, a: *Tensor, s: f32) *Tensor {
     return scaleImpl(ctx, a, s, 0.0, true);
 }
 
-/// Ports `ggml_scale_bias` (ggml.c:3481 @7fe450e19).
+/// Ports `ggml_scale_bias` (ggml.c:3490 @d81235049).
 pub export fn ggml_scale_bias(ctx: *Context, a: *Tensor, s: f32, b: f32) *Tensor {
     return scaleImpl(ctx, a, s, b, false);
 }
 
-/// Ports `ggml_scale_bias_inplace` (ggml.c:3489 @7fe450e19).
+/// Ports `ggml_scale_bias_inplace` (ggml.c:3498 @d81235049).
 pub export fn ggml_scale_bias_inplace(ctx: *Context, a: *Tensor, s: f32, b: f32) *Tensor {
     return scaleImpl(ctx, a, s, b, true);
 }
@@ -1285,7 +1285,7 @@ test "out_prod widens rather than contracts" {
 // -----------------------------------------------------------------------------
 // Writing into a tensor
 
-/// Ports `ggml_set_impl` (ggml.c:3499 @7fe450e19).
+/// Ports `ggml_set_impl` (ggml.c:3508 @d81235049).
 ///
 /// Writes `b` into a strided window of `a`. The offset is capped at 2^30
 /// because it is stored as an i32 in `op_params`, and the C asserts that
@@ -1317,34 +1317,34 @@ fn setImpl(
     return result;
 }
 
-/// Ports `ggml_set` (ggml.c:3524 @7fe450e19).
+/// Ports `ggml_set` (ggml.c:3533 @d81235049).
 pub export fn ggml_set(ctx: *Context, a: *Tensor, b: *Tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) *Tensor {
     return setImpl(ctx, a, b, nb1, nb2, nb3, offset, false);
 }
 
-/// Ports `ggml_set_inplace` (ggml.c:3535 @7fe450e19).
+/// Ports `ggml_set_inplace` (ggml.c:3544 @d81235049).
 pub export fn ggml_set_inplace(ctx: *Context, a: *Tensor, b: *Tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) *Tensor {
     return setImpl(ctx, a, b, nb1, nb2, nb3, offset, true);
 }
 
-/// Ports `ggml_set_1d` (ggml.c:3546 @7fe450e19).
+/// Ports `ggml_set_1d` (ggml.c:3555 @d81235049).
 ///
 /// Takes `a`'s own strides, so the window is a contiguous run.
 pub export fn ggml_set_1d(ctx: *Context, a: *Tensor, b: *Tensor, offset: usize) *Tensor {
     return setImpl(ctx, a, b, a.nb[1], a.nb[2], a.nb[3], offset, false);
 }
 
-/// Ports `ggml_set_1d_inplace` (ggml.c:3554 @7fe450e19).
+/// Ports `ggml_set_1d_inplace` (ggml.c:3563 @d81235049).
 pub export fn ggml_set_1d_inplace(ctx: *Context, a: *Tensor, b: *Tensor, offset: usize) *Tensor {
     return setImpl(ctx, a, b, a.nb[1], a.nb[2], a.nb[3], offset, true);
 }
 
-/// Ports `ggml_set_2d` (ggml.c:3562 @7fe450e19).
+/// Ports `ggml_set_2d` (ggml.c:3571 @d81235049).
 pub export fn ggml_set_2d(ctx: *Context, a: *Tensor, b: *Tensor, nb1: usize, offset: usize) *Tensor {
     return setImpl(ctx, a, b, nb1, a.nb[2], a.nb[3], offset, false);
 }
 
-/// Ports `ggml_set_2d_inplace` (ggml.c:3571 @7fe450e19).
+/// Ports `ggml_set_2d_inplace` (ggml.c:3580 @d81235049).
 pub export fn ggml_set_2d_inplace(ctx: *Context, a: *Tensor, b: *Tensor, nb1: usize, offset: usize) *Tensor {
     return setImpl(ctx, a, b, nb1, a.nb[2], a.nb[3], offset, true);
 }
@@ -1356,7 +1356,7 @@ pub export fn ggml_set_2d_inplace(ctx: *Context, a: *Tensor, b: *Tensor, nb1: us
 // copy. All three exist because a view can have any strides, and most kernels
 // need contiguous input.
 
-/// Ports `ggml_cpy_impl` (ggml.c:3582 @7fe450e19).
+/// Ports `ggml_cpy_impl` (ggml.c:3591 @d81235049).
 ///
 /// The result is a view of the destination, not of the source: the node writes
 /// into `b`'s storage.
@@ -1376,12 +1376,12 @@ fn cpyImpl(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_cpy` (ggml.c:3603 @7fe450e19).
+/// Ports `ggml_cpy` (ggml.c:3612 @d81235049).
 pub export fn ggml_cpy(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return cpyImpl(ctx, a, b);
 }
 
-/// Ports `ggml_cast` (ggml.c:3610 @7fe450e19).
+/// Ports `ggml_cast` (ggml.c:3619 @d81235049).
 ///
 /// Note `src[1]` points at the result itself. The C flags this as looking
 /// redundant but required: some backends read `src[1]` as the destination, and
@@ -1396,7 +1396,7 @@ pub export fn ggml_cast(ctx: *Context, a: *Tensor, t: c.enum_ggml_type) *Tensor 
     return result;
 }
 
-/// Ports `ggml_cont_impl` (ggml.c:3627 @7fe450e19).
+/// Ports `ggml_cont_impl` (ggml.c:3636 @d81235049).
 fn contImpl(ctx: *Context, a: *Tensor) *Tensor {
     const result = context.ggml_dup_tensor(ctx, a);
     _ = context.ggml_format_name(result, "%s (cont)", &a.name);
@@ -1406,12 +1406,12 @@ fn contImpl(ctx: *Context, a: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_cont` (ggml.c:3639 @7fe450e19).
+/// Ports `ggml_cont` (ggml.c:3648 @d81235049).
 pub export fn ggml_cont(ctx: *Context, a: *Tensor) *Tensor {
     return contImpl(ctx, a);
 }
 
-/// Ports `ggml_cont_4d` (ggml.c:3670 @7fe450e19).
+/// Ports `ggml_cont_4d` (ggml.c:3679 @d81235049).
 ///
 /// Makes contiguous and reshapes in one node. The element count must be
 /// preserved; only the layout changes.
@@ -1426,17 +1426,17 @@ pub export fn ggml_cont_4d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i
     return result;
 }
 
-/// Ports `ggml_cont_1d` (ggml.c:3646 @7fe450e19).
+/// Ports `ggml_cont_1d` (ggml.c:3655 @d81235049).
 pub export fn ggml_cont_1d(ctx: *Context, a: *Tensor, ne0: i64) *Tensor {
     return ggml_cont_4d(ctx, a, ne0, 1, 1, 1);
 }
 
-/// Ports `ggml_cont_2d` (ggml.c:3653 @7fe450e19).
+/// Ports `ggml_cont_2d` (ggml.c:3662 @d81235049).
 pub export fn ggml_cont_2d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64) *Tensor {
     return ggml_cont_4d(ctx, a, ne0, ne1, 1, 1);
 }
 
-/// Ports `ggml_cont_3d` (ggml.c:3661 @7fe450e19).
+/// Ports `ggml_cont_3d` (ggml.c:3670 @d81235049).
 pub export fn ggml_cont_3d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i64) *Tensor {
     return ggml_cont_4d(ctx, a, ne0, ne1, ne2, 1);
 }
@@ -1447,7 +1447,7 @@ pub export fn ggml_cont_3d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i
 // A reshape is a view with different extents, so it requires contiguous input
 // and costs nothing at run time. `cont_*` is the version that copies.
 
-/// Ports `ggml_reshape` (ggml.c:3690 @7fe450e19).
+/// Ports `ggml_reshape` (ggml.c:3699 @d81235049).
 ///
 /// `b` supplies only the shape, and may itself be non-contiguous; it is not a
 /// source of the node.
@@ -1482,25 +1482,25 @@ fn reshapeWrapper(comptime n: usize) fn (*Context, *Tensor, [*]const i64) *Tenso
     }.f;
 }
 
-/// Ports `ggml_reshape_1d` (ggml.c:3707 @7fe450e19).
+/// Ports `ggml_reshape_1d` (ggml.c:3716 @d81235049).
 pub export fn ggml_reshape_1d(ctx: *Context, a: *Tensor, ne0: i64) *Tensor {
     const ne = [_]i64{ne0};
     return reshapeWrapper(1)(ctx, a, &ne);
 }
 
-/// Ports `ggml_reshape_2d` (ggml.c:3724 @7fe450e19).
+/// Ports `ggml_reshape_2d` (ggml.c:3733 @d81235049).
 pub export fn ggml_reshape_2d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64) *Tensor {
     const ne = [_]i64{ ne0, ne1 };
     return reshapeWrapper(2)(ctx, a, &ne);
 }
 
-/// Ports `ggml_reshape_3d` (ggml.c:3742 @7fe450e19).
+/// Ports `ggml_reshape_3d` (ggml.c:3751 @d81235049).
 pub export fn ggml_reshape_3d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i64) *Tensor {
     const ne = [_]i64{ ne0, ne1, ne2 };
     return reshapeWrapper(3)(ctx, a, &ne);
 }
 
-/// Ports `ggml_reshape_4d` (ggml.c:3761 @7fe450e19).
+/// Ports `ggml_reshape_4d` (ggml.c:3770 @d81235049).
 pub export fn ggml_reshape_4d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64) *Tensor {
     const ne = [_]i64{ ne0, ne1, ne2, ne3 };
     return reshapeWrapper(4)(ctx, a, &ne);
@@ -1512,7 +1512,7 @@ pub export fn ggml_reshape_4d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2
 // Unlike `ggml_view_tensor`, which copies the source's strides, these take the
 // strides explicitly, so a view can stride over a subset of its source.
 
-/// Ports `ggml_view_impl` (ggml.c:3781 @7fe450e19).
+/// Ports `ggml_view_impl` (ggml.c:3790 @d81235049).
 ///
 /// The byte offset goes into `op_params` as a `size_t`, not an i32, so views
 /// are not subject to the 2^30 limit `ggml_set` has.
@@ -1527,13 +1527,13 @@ fn viewImpl(ctx: *Context, a: *Tensor, n_dims: c_int, ne: [*]const i64, offset: 
     return result;
 }
 
-/// Ports `ggml_view_1d` (ggml.c:3800 @7fe450e19).
+/// Ports `ggml_view_1d` (ggml.c:3809 @d81235049).
 pub export fn ggml_view_1d(ctx: *Context, a: *Tensor, ne0: i64, offset: usize) *Tensor {
     const ne = [_]i64{ne0};
     return viewImpl(ctx, a, 1, &ne, offset);
 }
 
-/// Ports `ggml_view_2d` (ggml.c:3812 @7fe450e19).
+/// Ports `ggml_view_2d` (ggml.c:3821 @d81235049).
 ///
 /// Only `nb1` is given; the higher strides follow from it, which is what makes
 /// this a plain 2-D window rather than an arbitrary layout.
@@ -1546,7 +1546,7 @@ pub export fn ggml_view_2d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, nb1: u
     return result;
 }
 
-/// Ports `ggml_view_3d` (ggml.c:3832 @7fe450e19).
+/// Ports `ggml_view_3d` (ggml.c:3841 @d81235049).
 pub export fn ggml_view_3d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i64, nb1: usize, nb2: usize, offset: usize) *Tensor {
     const ne = [_]i64{ ne0, ne1, ne2 };
     const result = viewImpl(ctx, a, 3, &ne, offset);
@@ -1556,7 +1556,7 @@ pub export fn ggml_view_3d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i
     return result;
 }
 
-/// Ports `ggml_view_4d` (ggml.c:3854 @7fe450e19).
+/// Ports `ggml_view_4d` (ggml.c:3863 @d81235049).
 pub export fn ggml_view_4d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64, nb1: usize, nb2: usize, nb3: usize, offset: usize) *Tensor {
     const ne = [_]i64{ ne0, ne1, ne2, ne3 };
     const result = viewImpl(ctx, a, 4, &ne, offset);
@@ -1569,7 +1569,7 @@ pub export fn ggml_view_4d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i
 // -----------------------------------------------------------------------------
 // Reordering dimensions
 
-/// Ports `ggml_permute` (ggml.c:3878 @7fe450e19).
+/// Ports `ggml_permute` (ggml.c:3887 @d81235049).
 ///
 /// The axis arguments say where each of the source's dimensions *goes*, not
 /// where it comes from, which is the easy thing to get backwards. All four must
@@ -1608,7 +1608,7 @@ pub export fn ggml_permute(ctx: *Context, a: *Tensor, axis0: c_int, axis1: c_int
     return result;
 }
 
-/// Ports `ggml_transpose` (ggml.c:3934 @7fe450e19).
+/// Ports `ggml_transpose` (ggml.c:3943 @d81235049).
 ///
 /// Swaps the first two dimensions by swapping their strides, so no data moves
 /// and the result is not contiguous.
@@ -1759,7 +1759,7 @@ test "set records strides and rejects an offset that would not fit i32" {
 // The embedding lookup and its inverse: `get_rows` indexes a table, `set_rows`
 // scatters back into one.
 
-/// Ports `ggml_get_rows` (ggml.c:3954 @7fe450e19).
+/// Ports `ggml_get_rows` (ggml.c:3963 @d81235049).
 ///
 /// Indexes rows of `a` by the i32 indices in `b`. This is how token embeddings
 /// are looked up.
@@ -1782,7 +1782,7 @@ pub export fn ggml_get_rows(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_get_rows_back` (ggml.c:3979 @7fe450e19).
+/// Ports `ggml_get_rows_back` (ggml.c:3988 @d81235049).
 ///
 /// The gradient of `get_rows`: scatters rows back to where they came from.
 /// `c` supplies the output shape only and is not a source, matching the C.
@@ -1803,7 +1803,7 @@ pub export fn ggml_get_rows_back(ctx: *Context, a: *Tensor, b: *Tensor, shape: *
     return result;
 }
 
-/// Ports `ggml_set_rows` (ggml.c:4000 @7fe450e19).
+/// Ports `ggml_set_rows` (ggml.c:4009 @d81235049).
 ///
 /// Writes rows of `b` into `a` at the indices in `idx`. Used to fill the KV
 /// cache in place.
@@ -1841,7 +1841,7 @@ pub export fn ggml_set_rows(ctx: *Context, a: *Tensor, b: *Tensor, idx: *Tensor)
 // -----------------------------------------------------------------------------
 // Diagonals and masking
 
-/// Ports `ggml_diag` (ggml.c:4030 @7fe450e19).
+/// Ports `ggml_diag` (ggml.c:4039 @d81235049).
 ///
 /// Turns a row vector into a square matrix with that vector on the diagonal.
 pub export fn ggml_diag(ctx: *Context, a: *Tensor) *Tensor {
@@ -1887,7 +1887,7 @@ comptime {
     }
 }
 
-/// Ports `ggml_diag_mask_zero_impl` (ggml.c:4078 @7fe450e19) with `inplace` false.
+/// Ports `ggml_diag_mask_zero_impl` (ggml.c:4087 @d81235049) with `inplace` false.
 ///
 /// The exported wrappers are generated above and so have no Zig-visible name;
 /// this is the one variant the autodiff pass calls directly.
@@ -1896,7 +1896,7 @@ pub const diagMaskZero = diagMaskWrapper(c.GGML_OP_DIAG_MASK_ZERO, false);
 // -----------------------------------------------------------------------------
 // Clamping
 
-/// Ports `ggml_clamp_impl` (ggml.c:4110 @7fe450e19).
+/// Ports `ggml_clamp_impl` (ggml.c:4119 @d81235049).
 fn clampImpl(ctx: *Context, a: *Tensor, min: f32, max: f32, inplace: bool) *Tensor {
     const result = dupOrView(ctx, a, inplace);
     impl.setOpParamsValue(result, [_]f32{ min, max });
@@ -1905,12 +1905,12 @@ fn clampImpl(ctx: *Context, a: *Tensor, min: f32, max: f32, inplace: bool) *Tens
     return result;
 }
 
-/// Ports `ggml_clamp` (ggml.c:4127 @7fe450e19).
+/// Ports `ggml_clamp` (ggml.c:4136 @d81235049).
 pub export fn ggml_clamp(ctx: *Context, a: *Tensor, min: f32, max: f32) *Tensor {
     return clampImpl(ctx, a, min, max, false);
 }
 
-/// Ports `ggml_clamp_inplace` (ggml.c:4135 @7fe450e19).
+/// Ports `ggml_clamp_inplace` (ggml.c:4144 @d81235049).
 pub export fn ggml_clamp_inplace(ctx: *Context, a: *Tensor, min: f32, max: f32) *Tensor {
     return clampImpl(ctx, a, min, max, true);
 }
@@ -1922,7 +1922,7 @@ pub export fn ggml_clamp_inplace(ctx: *Context, a: *Tensor, min: f32, max: f32) 
 // position bias; both live in `op_params`, and a mask can be supplied as a
 // second source.
 
-/// Ports `ggml_soft_max_impl` (ggml.c:4145 @7fe450e19).
+/// Ports `ggml_soft_max_impl` (ggml.c:4154 @d81235049).
 fn softMaxImpl(
     ctx: *Context,
     a: *Tensor,
@@ -1959,27 +1959,27 @@ fn softMaxImpl(
     return result;
 }
 
-/// Ports `ggml_soft_max` (ggml.c:4179 @7fe450e19).
+/// Ports `ggml_soft_max` (ggml.c:4188 @d81235049).
 pub export fn ggml_soft_max(ctx: *Context, a: *Tensor) *Tensor {
     return softMaxImpl(ctx, a, null, 1.0, 0.0, false);
 }
 
-/// Ports `ggml_soft_max_inplace` (ggml.c:4185 @7fe450e19).
+/// Ports `ggml_soft_max_inplace` (ggml.c:4194 @d81235049).
 pub export fn ggml_soft_max_inplace(ctx: *Context, a: *Tensor) *Tensor {
     return softMaxImpl(ctx, a, null, 1.0, 0.0, true);
 }
 
-/// Ports `ggml_soft_max_ext` (ggml.c:4191 @7fe450e19).
+/// Ports `ggml_soft_max_ext` (ggml.c:4200 @d81235049).
 pub export fn ggml_soft_max_ext(ctx: *Context, a: *Tensor, mask: ?*Tensor, scale: f32, max_bias: f32) *Tensor {
     return softMaxImpl(ctx, a, mask, scale, max_bias, false);
 }
 
-/// Ports `ggml_soft_max_ext_inplace` (ggml.c:4200 @7fe450e19).
+/// Ports `ggml_soft_max_ext_inplace` (ggml.c:4209 @d81235049).
 pub export fn ggml_soft_max_ext_inplace(ctx: *Context, a: *Tensor, mask: ?*Tensor, scale: f32, max_bias: f32) *Tensor {
     return softMaxImpl(ctx, a, mask, scale, max_bias, true);
 }
 
-/// Ports `ggml_soft_max_add_sinks` (ggml.c:4209 @7fe450e19).
+/// Ports `ggml_soft_max_add_sinks` (ggml.c:4218 @d81235049).
 ///
 /// Attaches attention sinks to an existing softmax node, in `src[2]`. Mutates
 /// rather than building, so it must be called on a node that is already a
@@ -2000,7 +2000,7 @@ pub export fn ggml_soft_max_add_sinks(a: *Tensor, sinks: ?*Tensor) void {
     a.src[2] = s;
 }
 
-/// Ports `ggml_soft_max_ext_back_impl` (ggml.c:4227 @7fe450e19).
+/// Ports `ggml_soft_max_ext_back_impl` (ggml.c:4236 @d81235049).
 fn softMaxBackImpl(ctx: *Context, a: *Tensor, b: *Tensor, scale: f32, max_bias: f32, inplace: bool) *Tensor {
     const result = dupOrView(ctx, a, inplace);
 
@@ -2015,12 +2015,12 @@ fn softMaxBackImpl(ctx: *Context, a: *Tensor, b: *Tensor, scale: f32, max_bias: 
     return result;
 }
 
-/// Ports `ggml_soft_max_ext_back` (ggml.c:4246 @7fe450e19).
+/// Ports `ggml_soft_max_ext_back` (ggml.c:4255 @d81235049).
 pub export fn ggml_soft_max_ext_back(ctx: *Context, a: *Tensor, b: *Tensor, scale: f32, max_bias: f32) *Tensor {
     return softMaxBackImpl(ctx, a, b, scale, max_bias, false);
 }
 
-/// Ports `ggml_soft_max_ext_back_inplace` (ggml.c:4255 @7fe450e19).
+/// Ports `ggml_soft_max_ext_back_inplace` (ggml.c:4264 @d81235049).
 pub export fn ggml_soft_max_ext_back_inplace(ctx: *Context, a: *Tensor, b: *Tensor, scale: f32, max_bias: f32) *Tensor {
     return softMaxBackImpl(ctx, a, b, scale, max_bias, true);
 }
@@ -2154,7 +2154,7 @@ test "attention sinks attach to src[2] and clear" {
 // place produces plausible-looking garbage rather than a crash.
 
 /// The `op_params` layout shared by `GGML_OP_ROPE` and `GGML_OP_ROPE_BACK`,
-/// from `ggml_rope_impl` (ggml.c:4266 @7fe450e19).
+/// from `ggml_rope_impl` (ggml.c:4275 @d81235049).
 ///
 /// Slots 0 and 3 are `n_past` and `n_ctx`, both retired but still occupying
 /// their positions. Slot 15 is set later by `ggml_rope_set_offset`.
@@ -2180,7 +2180,7 @@ const RopeParams = extern struct {
     }
 };
 
-/// Ports `ggml_rope_impl` (ggml.c:4266 @7fe450e19).
+/// Ports `ggml_rope_impl` (ggml.c:4275 @d81235049).
 ///
 /// Parameters:
 /// - `a`: the tensor to rotate.
@@ -2253,19 +2253,19 @@ fn ropeImpl(
     return result;
 }
 
-/// Ports `ggml_rope` (ggml.c:4325 @7fe450e19).
+/// Ports `ggml_rope` (ggml.c:4334 @d81235049).
 ///
 /// The plain form, with the defaults the original paper used.
 pub export fn ggml_rope(ctx: *Context, a: *Tensor, b: *Tensor, n_dims: c_int, mode: c_int) *Tensor {
     return ropeImpl(ctx, a, b, null, n_dims, null, mode, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0, false);
 }
 
-/// Ports `ggml_rope_inplace` (ggml.c:4378 @7fe450e19).
+/// Ports `ggml_rope_inplace` (ggml.c:4387 @d81235049).
 pub export fn ggml_rope_inplace(ctx: *Context, a: *Tensor, b: *Tensor, n_dims: c_int, mode: c_int) *Tensor {
     return ropeImpl(ctx, a, b, null, n_dims, null, mode, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0, true);
 }
 
-/// Ports `ggml_rope_ext` (ggml.c:4389 @7fe450e19).
+/// Ports `ggml_rope_ext` (ggml.c:4398 @d81235049).
 ///
 /// The form models actually use: every scaling knob exposed, plus optional
 /// per-dimension frequency factors for YaRN-style context extension.
@@ -2287,7 +2287,7 @@ pub export fn ggml_rope_ext(
     return ropeImpl(ctx, a, b, freqs, n_dims, null, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow, false);
 }
 
-/// Ports `ggml_rope_ext_inplace` (ggml.c:4409 @7fe450e19).
+/// Ports `ggml_rope_ext_inplace` (ggml.c:4418 @d81235049).
 pub export fn ggml_rope_ext_inplace(
     ctx: *Context,
     a: *Tensor,
@@ -2306,7 +2306,7 @@ pub export fn ggml_rope_ext_inplace(
     return ropeImpl(ctx, a, b, freqs, n_dims, null, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow, true);
 }
 
-/// Ports `ggml_rope_multi` (ggml.c:4336 @7fe450e19).
+/// Ports `ggml_rope_multi` (ggml.c:4345 @d81235049).
 ///
 /// Multimodal rope: the head dimension is split into sections rotated by
 /// different position components, so image patches carry spatial position
@@ -2330,7 +2330,7 @@ pub export fn ggml_rope_multi(
     return ropeImpl(ctx, a, b, freqs, n_dims, sections, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow, false);
 }
 
-/// Ports `ggml_rope_multi_inplace` (ggml.c:4357 @7fe450e19).
+/// Ports `ggml_rope_multi_inplace` (ggml.c:4366 @d81235049).
 pub export fn ggml_rope_multi_inplace(
     ctx: *Context,
     a: *Tensor,
@@ -2350,7 +2350,7 @@ pub export fn ggml_rope_multi_inplace(
     return ropeImpl(ctx, a, b, freqs, n_dims, sections, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow, true);
 }
 
-/// Ports `ggml_rope_custom` (ggml.c:4429 @7fe450e19).
+/// Ports `ggml_rope_custom` (ggml.c:4438 @d81235049).
 ///
 /// Deprecated alias kept for the C ABI: `ggml_rope_ext` without frequency
 /// factors.
@@ -2371,7 +2371,7 @@ pub export fn ggml_rope_custom(
     return ropeImpl(ctx, a, b, null, n_dims, null, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow, false);
 }
 
-/// Ports `ggml_rope_custom_inplace` (ggml.c:4448 @7fe450e19).
+/// Ports `ggml_rope_custom_inplace` (ggml.c:4457 @d81235049).
 pub export fn ggml_rope_custom_inplace(
     ctx: *Context,
     a: *Tensor,
@@ -2389,7 +2389,7 @@ pub export fn ggml_rope_custom_inplace(
     return ropeImpl(ctx, a, b, null, n_dims, null, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow, true);
 }
 
-/// Ports `ggml_rope_ext_back` (ggml.c:4485 @7fe450e19).
+/// Ports `ggml_rope_ext_back` (ggml.c:4494 @d81235049).
 ///
 /// Builds the forward node and flips the op, as the C does: the shape and
 /// parameters are identical, only the direction differs.
@@ -2413,7 +2413,7 @@ pub export fn ggml_rope_ext_back(
     return result;
 }
 
-/// Ports `ggml_rope_multi_back` (ggml.c:4505 @7fe450e19).
+/// Ports `ggml_rope_multi_back` (ggml.c:4514 @d81235049).
 pub export fn ggml_rope_multi_back(
     ctx: *Context,
     a: *Tensor,
@@ -2435,7 +2435,7 @@ pub export fn ggml_rope_multi_back(
     return result;
 }
 
-/// Ports `ggml_rope_set_offset` (ggml.c:4526 @7fe450e19).
+/// Ports `ggml_rope_set_offset` (ggml.c:4535 @d81235049).
 ///
 /// Sets the position offset on an existing rope node, in the last params slot.
 /// Vision mode has no offset, and the C rejects it.
@@ -2453,14 +2453,14 @@ pub export fn ggml_rope_set_offset(a: *Tensor, n_offs: c_int) *Tensor {
     return a;
 }
 
-/// Ports `ggml_rope_yarn_corr_dim` (ggml.c:4469 @7fe450e19).
+/// Ports `ggml_rope_yarn_corr_dim` (ggml.c:4478 @d81235049).
 fn ropeYarnCorrDim(n_dims: c_int, n_ctx_orig: c_int, n_rot: f32, base: f32) f32 {
     const dims: f32 = @floatFromInt(n_dims);
     const orig: f32 = @floatFromInt(n_ctx_orig);
     return dims * @log(orig / (n_rot * 2 * std.math.pi)) / (2 * @log(base));
 }
 
-/// Ports `ggml_rope_yarn_corr_dims` (ggml.c:4473 @7fe450e19).
+/// Ports `ggml_rope_yarn_corr_dims` (ggml.c:4482 @d81235049).
 ///
 /// The dimension range over which YaRN blends between interpolated and
 /// extrapolated frequencies. Below `dims[0]` the frequency is extrapolated,
@@ -2596,12 +2596,12 @@ test "yarn correction dims stay inside the dimension range" {
 // for instance is im2col, then a matmul, then two reshapes. Only `im2col`,
 // `col2im_1d`, `conv_transpose_1d` and the direct variants are real op codes.
 
-/// Ports `ggml_calc_conv_output_size` (ggml.c:4539 @7fe450e19).
+/// Ports `ggml_calc_conv_output_size` (ggml.c:4548 @d81235049).
 fn convOutputSize(ins: i64, ks: i64, s: c_int, p: c_int, d: c_int) i64 {
     return @divTrunc(ins + 2 * p - @as(i64, d) * (ks - 1) - 1, @as(i64, s)) + 1;
 }
 
-/// Ports `ggml_calc_conv_transpose_1d_output_size` (ggml.c:4714 @7fe450e19).
+/// Ports `ggml_calc_conv_transpose_1d_output_size` (ggml.c:4723 @d81235049).
 fn convTranspose1dOutputSize(ins: i64, ks: i64, s: c_int, p: c_int, d: c_int) i64 {
     return (ins - 1) * s - 2 * p + @as(i64, d) * (ks - 1) + 1;
 }
@@ -2614,7 +2614,7 @@ fn im2colType(a: *const Tensor) c.enum_ggml_type {
     return if (a.type == c.GGML_TYPE_BF16) c.GGML_TYPE_F32 else c.GGML_TYPE_F16;
 }
 
-/// Ports `ggml_im2col` (ggml.c:4547 @7fe450e19).
+/// Ports `ggml_im2col` (ggml.c:4556 @d81235049).
 ///
 /// Rearranges overlapping patches into rows so a convolution becomes a matrix
 /// multiply:
@@ -2668,7 +2668,7 @@ pub export fn ggml_im2col(
     return result;
 }
 
-/// Ports `ggml_im2col_back` (ggml.c:4591 @7fe450e19).
+/// Ports `ggml_im2col_back` (ggml.c:4600 @d81235049).
 ///
 /// The gradient of `im2col`. The output shape cannot be derived from the
 /// inputs, so the caller supplies it.
@@ -2694,7 +2694,7 @@ pub export fn ggml_im2col_back(
     return result;
 }
 
-/// Ports `ggml_conv_1d` (ggml.c:4616 @7fe450e19).
+/// Ports `ggml_conv_1d` (ggml.c:4625 @d81235049).
 ///
 /// im2col, then one matmul, then a reshape back to [N, OC, OL]. No op code of
 /// its own.
@@ -2713,14 +2713,14 @@ pub export fn ggml_conv_1d(ctx: *Context, a: *Tensor, b: *Tensor, s0: c_int, p0:
     return ggml_reshape_3d(ctx, result, im2col.ne[1], a.ne[2], im2col.ne[2]);
 }
 
-/// Ports `ggml_conv_1d_ph` (ggml.c:4637 @7fe450e19).
+/// Ports `ggml_conv_1d_ph` (ggml.c:4646 @d81235049).
 ///
 /// "Padded half": padding chosen so the output length matches the input.
 pub export fn ggml_conv_1d_ph(ctx: *Context, a: *Tensor, b: *Tensor, s: c_int, d: c_int) *Tensor {
     return ggml_conv_1d(ctx, a, b, s, @intCast(@divTrunc(a.ne[0], 2)), d);
 }
 
-/// Ports `ggml_conv_1d_dw` (ggml.c:4648 @7fe450e19).
+/// Ports `ggml_conv_1d_dw` (ggml.c:4657 @d81235049).
 ///
 /// Depthwise: each channel is convolved by its own kernel, so there is no
 /// summation across channels and the matmul is smaller.
@@ -2731,12 +2731,12 @@ pub export fn ggml_conv_1d_dw(ctx: *Context, a: *Tensor, b: *Tensor, s0: c_int, 
     return ggml_reshape_3d(ctx, result, result.ne[0], result.ne[2], 1);
 }
 
-/// Ports `ggml_conv_1d_dw_ph` (ggml.c:4668 @7fe450e19).
+/// Ports `ggml_conv_1d_dw_ph` (ggml.c:4677 @d81235049).
 pub export fn ggml_conv_1d_dw_ph(ctx: *Context, a: *Tensor, b: *Tensor, s0: c_int, d0: c_int) *Tensor {
     return ggml_conv_1d_dw(ctx, a, b, s0, @intCast(@divTrunc(a.ne[0], 2)), d0);
 }
 
-/// Ports `ggml_col2im_1d` (ggml.c:4679 @7fe450e19).
+/// Ports `ggml_col2im_1d` (ggml.c:4688 @d81235049).
 ///
 /// Folds overlapping columns back into a signal, summing where they overlap.
 /// The input's first dimension packs `oc` blocks of kernel taps, so it must
@@ -2769,7 +2769,7 @@ pub export fn ggml_col2im_1d(ctx: *Context, a: *Tensor, s0: c_int, oc: c_int, p0
     return result;
 }
 
-/// Ports `ggml_conv_transpose_1d` (ggml.c:4718 @7fe450e19).
+/// Ports `ggml_conv_transpose_1d` (ggml.c:4727 @d81235049).
 ///
 /// Padding and dilation are asserted away rather than supported; the C takes
 /// the arguments only to keep the signature stable.
@@ -2902,7 +2902,7 @@ test "convolution output size matches the formula" {
 // composite over im2col and matmul, which is what runs when a backend has no
 // direct kernel.
 
-/// Ports `ggml_conv_2d` (ggml.c:4753 @7fe450e19).
+/// Ports `ggml_conv_2d` (ggml.c:4762 @d81235049).
 ///
 /// The matmul leaves the result as [OC, N, OH, OW], so it ends with a permute
 /// and a `cont` to reach [N, OC, OH, OW]. That copy is why the `_direct`
@@ -2931,7 +2931,7 @@ pub export fn ggml_conv_2d(
     return ggml_cont(ctx, ggml_permute(ctx, result, 0, 1, 3, 2));
 }
 
-/// Ports `ggml_conv_2d_sk_p0` (ggml.c:4864 @7fe450e19).
+/// Ports `ggml_conv_2d_sk_p0` (ggml.c:4873 @d81235049).
 ///
 /// Stride equal to the kernel, no padding: tiles the input into
 /// non-overlapping patches. This is how vision transformers embed patches.
@@ -2939,14 +2939,14 @@ pub export fn ggml_conv_2d_sk_p0(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor 
     return ggml_conv_2d(ctx, a, b, @intCast(a.ne[0]), @intCast(a.ne[1]), 0, 0, 1, 1);
 }
 
-/// Ports `ggml_conv_2d_s1_ph` (ggml.c:4873 @7fe450e19).
+/// Ports `ggml_conv_2d_s1_ph` (ggml.c:4882 @d81235049).
 ///
 /// Stride one, padding half the kernel: preserves the spatial size.
 pub export fn ggml_conv_2d_s1_ph(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     return ggml_conv_2d(ctx, a, b, 1, 1, @intCast(@divTrunc(a.ne[0], 2)), @intCast(@divTrunc(a.ne[1], 2)), 1, 1);
 }
 
-/// Ports `ggml_conv_2d_dw` (ggml.c:4882 @7fe450e19).
+/// Ports `ggml_conv_2d_dw` (ggml.c:4891 @d81235049).
 ///
 /// Depthwise: one kernel per channel, no summation across channels. Both
 /// kernel and input are reshaped to fold the channel dimension into the batch,
@@ -2985,7 +2985,7 @@ pub export fn ggml_conv_2d_dw(
     return ggml_reshape_4d(ctx, result, im2col.ne[1], im2col.ne[2], b.ne[2], b.ne[3]);
 }
 
-/// Ports `ggml_conv_2d_dw_direct` (ggml.c:4907 @7fe450e19).
+/// Ports `ggml_conv_2d_dw_direct` (ggml.c:4916 @d81235049).
 ///
 /// A real op code, so no im2col buffer is materialised.
 ///
@@ -3030,7 +3030,7 @@ pub export fn ggml_conv_2d_dw_direct(
     return result;
 }
 
-/// Ports `ggml_conv_2d_direct` (ggml.c:4947 @7fe450e19).
+/// Ports `ggml_conv_2d_direct` (ggml.c:4956 @d81235049).
 ///
 /// Note the result takes `b`'s type, not f32: a direct kernel writes in the
 /// input's precision.
@@ -3068,7 +3068,7 @@ pub export fn ggml_conv_2d_direct(
     return result;
 }
 
-/// Ports `ggml_im2col_3d` (ggml.c:4780 @7fe450e19).
+/// Ports `ggml_im2col_3d` (ggml.c:4789 @d81235049).
 ///
 /// The 3-D counterpart of `im2col`. Channels are folded into the batch
 /// dimension of both operands, so `IC` has to be passed explicitly to recover
@@ -3108,7 +3108,7 @@ pub export fn ggml_im2col_3d(
     return result;
 }
 
-/// Ports `ggml_conv_3d` (ggml.c:4830 @7fe450e19).
+/// Ports `ggml_conv_3d` (ggml.c:4839 @d81235049).
 ///
 /// Composite, like `ggml_conv_2d`: im2col_3d, matmul, then reshapes and a
 /// permute to get the depth and channel dimensions back in order.
@@ -3144,7 +3144,7 @@ pub export fn ggml_conv_3d(
     return ggml_reshape_4d(ctx, result, im2col.ne[1], im2col.ne[2], od, oc * n);
 }
 
-/// Ports `ggml_conv_3d_direct` (ggml.c:4985 @7fe450e19).
+/// Ports `ggml_conv_3d_direct` (ggml.c:4994 @d81235049).
 pub export fn ggml_conv_3d_direct(
     ctx: *Context,
     a: *Tensor,
@@ -3182,12 +3182,12 @@ pub export fn ggml_conv_3d_direct(
     return result;
 }
 
-/// Ports `ggml_calc_conv_transpose_output_size` (ggml.c:5035 @7fe450e19).
+/// Ports `ggml_calc_conv_transpose_output_size` (ggml.c:5044 @d81235049).
 fn convTransposeOutputSize(ins: i64, ks: i64, s: c_int, p: c_int) i64 {
     return (ins - 1) * s - 2 * p + ks;
 }
 
-/// Ports `ggml_conv_transpose_2d_p0` (ggml.c:5039 @7fe450e19).
+/// Ports `ggml_conv_transpose_2d_p0` (ggml.c:5048 @d81235049).
 ///
 /// Zero padding only, which is what the `_p0` names.
 pub export fn ggml_conv_transpose_2d_p0(ctx: *Context, a: *Tensor, b: *Tensor, stride: c_int) *Tensor {
@@ -3211,7 +3211,7 @@ pub export fn ggml_conv_transpose_2d_p0(ctx: *Context, a: *Tensor, b: *Tensor, s
 // -----------------------------------------------------------------------------
 // Pooling
 
-/// Ports `ggml_calc_pool_output_size` (ggml.c:5065 @7fe450e19).
+/// Ports `ggml_calc_pool_output_size` (ggml.c:5074 @d81235049).
 ///
 /// Padding is a float here, not an int, because `ggml_pool_2d` accepts
 /// fractional padding. The division still truncates, matching the C.
@@ -3220,7 +3220,7 @@ fn poolOutputSize(ins: i64, ks: c_int, s: c_int, p: f32) i64 {
     return @as(i64, @intFromFloat(padded / @as(f32, @floatFromInt(s)))) + 1;
 }
 
-/// Ports `ggml_pool_1d` (ggml.c:5071 @7fe450e19).
+/// Ports `ggml_pool_1d` (ggml.c:5080 @d81235049).
 pub export fn ggml_pool_1d(ctx: *Context, a: *Tensor, op: c.enum_ggml_op_pool, k0: c_int, s0: c_int, p0: c_int) *Tensor {
     const ne = [_]i64{
         poolOutputSize(a.ne[0], k0, s0, @floatFromInt(p0)),
@@ -3238,7 +3238,7 @@ pub export fn ggml_pool_1d(ctx: *Context, a: *Tensor, op: c.enum_ggml_op_pool, k
     return result;
 }
 
-/// Ports `ggml_pool_2d` (ggml.c:5099 @7fe450e19).
+/// Ports `ggml_pool_2d` (ggml.c:5108 @d81235049).
 ///
 /// The padding arguments are floats but land in `op_params` as i32, truncated,
 /// which is what the C's brace-initialised `int32_t params[]` does.
@@ -3273,7 +3273,7 @@ pub export fn ggml_pool_2d(
     return result;
 }
 
-/// Ports `ggml_pool_2d_back` (ggml.c:5130 @7fe450e19).
+/// Ports `ggml_pool_2d_back` (ggml.c:5139 @d81235049).
 ///
 /// `af` is the forward pass's input, needed because max pooling has to know
 /// which element won in order to route the gradient to it.
@@ -3445,7 +3445,7 @@ test "3d im2col folds channels into the batch dimension" {
 // -----------------------------------------------------------------------------
 // Resampling and padding
 
-/// Ports `ggml_interpolate_impl` (ggml.c:5156 @7fe450e19).
+/// Ports `ggml_interpolate_impl` (ggml.c:5165 @d81235049).
 ///
 /// `mode` packs a scale mode in its low byte and flags above it, so it is
 /// masked before the range check.
@@ -3467,7 +3467,7 @@ fn interpolateImpl(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i64, ne3:
     return result;
 }
 
-/// Ports `ggml_upscale` (ggml.c:5179 @7fe450e19).
+/// Ports `ggml_upscale` (ggml.c:5188 @d81235049).
 ///
 /// Scales the two spatial dimensions by an integer factor, leaving channels
 /// and batch alone.
@@ -3476,12 +3476,12 @@ pub export fn ggml_upscale(ctx: *Context, a: *Tensor, scale_factor: c_int, mode:
     return interpolateImpl(ctx, a, a.ne[0] * scale_factor, a.ne[1] * scale_factor, a.ne[2], a.ne[3], @intCast(mode));
 }
 
-/// Ports `ggml_upscale_ext` (ggml.c:5188 @7fe450e19).
+/// Ports `ggml_upscale_ext` (ggml.c:5197 @d81235049).
 pub export fn ggml_upscale_ext(ctx: *Context, a: *Tensor, ne0: c_int, ne1: c_int, ne2: c_int, ne3: c_int, mode: c.enum_ggml_scale_mode) *Tensor {
     return interpolateImpl(ctx, a, ne0, ne1, ne2, ne3, @intCast(mode));
 }
 
-/// Ports `ggml_interpolate` (ggml.c:5199 @7fe450e19).
+/// Ports `ggml_interpolate` (ggml.c:5208 @d81235049).
 ///
 /// The general form: any target shape, and `mode` may carry flags as well as a
 /// scale mode.
@@ -3489,7 +3489,7 @@ pub export fn ggml_interpolate(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne
     return interpolateImpl(ctx, a, ne0, ne1, ne2, ne3, mode);
 }
 
-/// Ports `ggml_pad_ext` (ggml.c:5234 @7fe450e19).
+/// Ports `ggml_pad_ext` (ggml.c:5243 @d81235049).
 ///
 /// Independent left and right padding on all four dimensions. Slot 8 records
 /// whether the padding wraps; `ggml_pad_ext_circular` flips it afterwards.
@@ -3523,14 +3523,14 @@ pub export fn ggml_pad_ext(
     return result;
 }
 
-/// Ports `ggml_pad` (ggml.c:5212 @7fe450e19).
+/// Ports `ggml_pad` (ggml.c:5221 @d81235049).
 ///
 /// Right-hand padding only, which is the common case.
 pub export fn ggml_pad(ctx: *Context, a: *Tensor, p0: c_int, p1: c_int, p2: c_int, p3: c_int) *Tensor {
     return ggml_pad_ext(ctx, a, 0, p0, 0, p1, 0, p2, 0, p3);
 }
 
-/// Ports `ggml_pad_ext_circular` (ggml.c:5271 @7fe450e19).
+/// Ports `ggml_pad_ext_circular` (ggml.c:5280 @d81235049).
 ///
 /// Same shape as `ggml_pad_ext`, but the padding wraps around from the
 /// opposite edge rather than being filled with zeros.
@@ -3551,12 +3551,12 @@ pub export fn ggml_pad_ext_circular(
     return result;
 }
 
-/// Ports `ggml_pad_circular` (ggml.c:5224 @7fe450e19).
+/// Ports `ggml_pad_circular` (ggml.c:5233 @d81235049).
 pub export fn ggml_pad_circular(ctx: *Context, a: *Tensor, p0: c_int, p1: c_int, p2: c_int, p3: c_int) *Tensor {
     return ggml_pad_ext_circular(ctx, a, 0, p0, 0, p1, 0, p2, 0, p3);
 }
 
-/// Ports `ggml_pad_reflect_1d` (ggml.c:5290 @7fe450e19).
+/// Ports `ggml_pad_reflect_1d` (ggml.c:5299 @d81235049).
 ///
 /// Mirrors the signal at each edge instead of filling. The padding must be
 /// shorter than the dimension, since there would otherwise be nothing to
@@ -3667,7 +3667,7 @@ test "reflect padding grows only the first dimension" {
 // -----------------------------------------------------------------------------
 // Sorting and selection
 
-/// Ports `ggml_argsort` (ggml.c:5423 @7fe450e19).
+/// Ports `ggml_argsort` (ggml.c:5432 @d81235049).
 ///
 /// Returns indices, not values, so the result is i32 whatever went in.
 pub export fn ggml_argsort(ctx: *Context, a: *Tensor, order: c.enum_ggml_sort_order) *Tensor {
@@ -3681,7 +3681,7 @@ pub export fn ggml_argsort(ctx: *Context, a: *Tensor, order: c.enum_ggml_sort_or
     return result;
 }
 
-/// Ports `ggml_argsort_top_k` (ggml.c:5441 @7fe450e19).
+/// Ports `ggml_argsort_top_k` (ggml.c:5450 @d81235049).
 ///
 /// A full descending sort, then a view of its first `k` columns. Cheaper than
 /// it looks only when the backend fuses the two; `ggml_top_k` is the dedicated
@@ -3704,7 +3704,7 @@ pub export fn ggml_argsort_top_k(ctx: *Context, a: *Tensor, k: c_int) *Tensor {
     );
 }
 
-/// Ports `ggml_top_k` (ggml.c:5459 @7fe450e19).
+/// Ports `ggml_top_k` (ggml.c:5468 @d81235049).
 pub export fn ggml_top_k(ctx: *Context, a: *Tensor, k: c_int) *Tensor {
     impl.assert(a.ne[0] >= k, "a->ne[0] >= k");
 
@@ -3717,7 +3717,7 @@ pub export fn ggml_top_k(ctx: *Context, a: *Tensor, k: c_int) *Tensor {
 // -----------------------------------------------------------------------------
 // Generators and rearrangement
 
-/// Ports `ggml_arange` (ggml.c:5475 @7fe450e19).
+/// Ports `ggml_arange` (ggml.c:5484 @d81235049).
 ///
 /// The only op with no source at all: it generates rather than transforms.
 pub export fn ggml_arange(ctx: *Context, start: f32, stop: f32, step: f32) *Tensor {
@@ -3734,7 +3734,7 @@ pub export fn ggml_arange(ctx: *Context, start: f32, stop: f32, step: f32) *Tens
     return result;
 }
 
-/// Ports `ggml_timestep_embedding` (ggml.c:5349 @7fe450e19).
+/// Ports `ggml_timestep_embedding` (ggml.c:5358 @d81235049).
 ///
 /// Sinusoidal position encoding for diffusion timesteps: one `dim`-wide
 /// embedding per timestep.
@@ -3749,7 +3749,7 @@ pub export fn ggml_timestep_embedding(ctx: *Context, timesteps: *Tensor, dim: c_
     return result;
 }
 
-/// Ports `ggml_roll` (ggml.c:5321 @7fe450e19).
+/// Ports `ggml_roll` (ggml.c:5330 @d81235049).
 ///
 /// Circular shift along each dimension. Requires a contiguous first dimension,
 /// and each shift must be smaller than the dimension it moves.
@@ -3769,7 +3769,7 @@ pub export fn ggml_roll(ctx: *Context, a: *Tensor, shift0: c_int, shift1: c_int,
     return result;
 }
 
-/// Ports `ggml_tri` (ggml.c:5368 @7fe450e19).
+/// Ports `ggml_tri` (ggml.c:5377 @d81235049).
 ///
 /// Masks a square matrix to one triangle. `type` selects which triangle and
 /// whether the diagonal is kept.
@@ -3786,7 +3786,7 @@ pub export fn ggml_tri(ctx: *Context, a: *Tensor, tri_type: c.enum_ggml_tri_type
     return result;
 }
 
-/// Ports `ggml_fill_impl` (ggml.c:5389 @7fe450e19).
+/// Ports `ggml_fill_impl` (ggml.c:5398 @d81235049).
 fn fillImpl(ctx: *Context, a: *Tensor, value: f32, inplace: bool) *Tensor {
     impl.assert(
         a.type == c.GGML_TYPE_F32 or a.type == c.GGML_TYPE_F16,
@@ -3802,17 +3802,17 @@ fn fillImpl(ctx: *Context, a: *Tensor, value: f32, inplace: bool) *Tensor {
     return result;
 }
 
-/// Ports `ggml_fill` (ggml.c:5407 @7fe450e19).
+/// Ports `ggml_fill` (ggml.c:5416 @d81235049).
 pub export fn ggml_fill(ctx: *Context, a: *Tensor, value: f32) *Tensor {
     return fillImpl(ctx, a, value, false);
 }
 
-/// Ports `ggml_fill_inplace` (ggml.c:5414 @7fe450e19).
+/// Ports `ggml_fill_inplace` (ggml.c:5423 @d81235049).
 pub export fn ggml_fill_inplace(ctx: *Context, a: *Tensor, value: f32) *Tensor {
     return fillImpl(ctx, a, value, true);
 }
 
-/// Ports `ggml_leaky_relu` (ggml.c:2751 @7fe450e19).
+/// Ports `ggml_leaky_relu` (ggml.c:2760 @d81235049).
 ///
 /// Its own op code rather than a `GGML_UNARY_OP`, because it carries a
 /// parameter and the unary ops do not.
@@ -3825,7 +3825,7 @@ pub export fn ggml_leaky_relu(ctx: *Context, a: *Tensor, negative_slope: f32, in
     return result;
 }
 
-/// Ports `ggml_swiglu_oai` (ggml.c:3110 @7fe450e19).
+/// Ports `ggml_swiglu_oai` (ggml.c:3119 @d81235049).
 ///
 /// SwiGLU with OpenAI's clamping. Slots 0 and 1 are the op and swap flag that
 /// `gluImpl` writes; the two extra parameters go above them.
@@ -3836,7 +3836,7 @@ pub export fn ggml_swiglu_oai(ctx: *Context, a: *Tensor, b: *Tensor, alpha: f32,
     return result;
 }
 
-/// Ports `ggml_swiglu_clamp` (ggml.c:3123 @7fe450e19).
+/// Ports `ggml_swiglu_clamp` (ggml.c:3132 @d81235049).
 ///
 /// SwiGLU with the gate clamped to `limit`; the limit takes slot 3, as
 /// `ggml_swiglu_oai`'s does, and slot 2 stays zero.
@@ -3852,7 +3852,7 @@ pub export fn ggml_swiglu_clamp(ctx: *Context, a: *Tensor, b: *Tensor, limit: f3
 // Used by vision models that attend within local windows rather than globally.
 // The C marks these as internal-only and subject to removal.
 
-/// Ports `ggml_win_part` (ggml.c:5758 @7fe450e19).
+/// Ports `ggml_win_part` (ggml.c:5767 @d81235049).
 ///
 /// Splits an image into `w`-by-`w` windows, padding up to a whole number of
 /// them, and stacks the windows along the batch dimension.
@@ -3876,7 +3876,7 @@ pub export fn ggml_win_part(ctx: *Context, a: *Tensor, w: c_int) *Tensor {
     return result;
 }
 
-/// Ports `ggml_win_unpart` (ggml.c:5787 @7fe450e19).
+/// Ports `ggml_win_unpart` (ggml.c:5796 @d81235049).
 ///
 /// The inverse. The original size cannot be recovered from the windows, so the
 /// caller supplies it.
@@ -3892,7 +3892,7 @@ pub export fn ggml_win_unpart(ctx: *Context, a: *Tensor, w0: c_int, h0: c_int, w
     return result;
 }
 
-/// Ports `ggml_get_rel_pos` (ggml.c:5809 @7fe450e19).
+/// Ports `ggml_get_rel_pos` (ggml.c:5818 @d81235049).
 ///
 /// Expands a table of relative position embeddings into a query-by-key matrix.
 /// The table holds `2*max(qh,kh) - 1` entries, one per possible offset.
@@ -3908,7 +3908,7 @@ pub export fn ggml_get_rel_pos(ctx: *Context, a: *Tensor, qh: c_int, kh: c_int) 
     return result;
 }
 
-/// Ports `ggml_add_rel_pos_impl` (ggml.c:5828 @7fe450e19).
+/// Ports `ggml_add_rel_pos_impl` (ggml.c:5837 @d81235049).
 fn addRelPosImpl(ctx: *Context, a: *Tensor, pw: *Tensor, ph: *Tensor, inplace: bool) *Tensor {
     impl.assert(types.ggml_are_same_shape(pw, ph), "ggml_are_same_shape(pw, ph)");
     impl.assert(types.ggml_is_contiguous(a), "ggml_is_contiguous(a)");
@@ -3930,12 +3930,12 @@ fn addRelPosImpl(ctx: *Context, a: *Tensor, pw: *Tensor, ph: *Tensor, inplace: b
     return result;
 }
 
-/// Ports `ggml_add_rel_pos` (ggml.c:5855 @7fe450e19).
+/// Ports `ggml_add_rel_pos` (ggml.c:5864 @d81235049).
 pub export fn ggml_add_rel_pos(ctx: *Context, a: *Tensor, pw: *Tensor, ph: *Tensor) *Tensor {
     return addRelPosImpl(ctx, a, pw, ph, false);
 }
 
-/// Ports `ggml_add_rel_pos_inplace` (ggml.c:5863 @7fe450e19).
+/// Ports `ggml_add_rel_pos_inplace` (ggml.c:5872 @d81235049).
 pub export fn ggml_add_rel_pos_inplace(ctx: *Context, a: *Tensor, pw: *Tensor, ph: *Tensor) *Tensor {
     return addRelPosImpl(ctx, a, pw, ph, true);
 }
@@ -3945,12 +3945,13 @@ pub export fn ggml_add_rel_pos_inplace(ctx: *Context, a: *Tensor, pw: *Tensor, p
 //
 // These mark a tensor's role for the graph allocator and the autodiff pass.
 
-/// Ports `ggml_set_input` (ggml.c:7994 @7fe450e19).
+/// Ports `ggml_set_input` (ggml.c:8003 @d81235049).
 pub export fn ggml_set_input(tensor: *Tensor) void {
+    impl.assert(tensor.op == c.GGML_OP_NONE, "tensor->op == GGML_OP_NONE");
     tensor.flags |= c.GGML_TENSOR_FLAG_INPUT;
 }
 
-/// Ports `ggml_set_output` (ggml.c:7998 @7fe450e19).
+/// Ports `ggml_set_output` (ggml.c:8008 @d81235049).
 ///
 /// Walks the view chain, because the allocator must not reuse the storage a
 /// view points into either.
@@ -3961,7 +3962,7 @@ pub export fn ggml_set_output(tensor: *Tensor) void {
     }
 }
 
-/// Ports `ggml_set_param` (ggml.c:8004 @7fe450e19).
+/// Ports `ggml_set_param` (ggml.c:8014 @d81235049).
 ///
 /// Only a leaf can be a parameter: something computed has a gradient path of
 /// its own.
@@ -3970,14 +3971,14 @@ pub export fn ggml_set_param(tensor: *Tensor) void {
     tensor.flags |= c.GGML_TENSOR_FLAG_PARAM;
 }
 
-/// Ports `ggml_set_loss` (ggml.c:8009 @7fe450e19).
+/// Ports `ggml_set_loss` (ggml.c:8019 @d81235049).
 pub export fn ggml_set_loss(tensor: *Tensor) void {
     impl.assert(types.ggml_is_scalar(tensor), "ggml_is_scalar(tensor)");
     impl.assert(tensor.type == c.GGML_TYPE_F32, "tensor->type == GGML_TYPE_F32");
     tensor.flags |= c.GGML_TENSOR_FLAG_LOSS;
 }
 
-/// Ports `ggml_set_zero` (ggml.c:7597 @7fe450e19).
+/// Ports `ggml_set_zero` (ggml.c:7606 @d81235049).
 ///
 /// Zeroes a tensor's data now, rather than adding a node. Goes through the
 /// backend when the tensor lives on one, since the memory may not be host
@@ -4001,7 +4002,7 @@ pub export fn ggml_set_zero(tensor: *Tensor) *Tensor {
 // One node standing in for the whole scaled-dot-product attention block, so a
 // backend can fuse it and never materialise the [n_kv, n_q] score matrix.
 
-/// Ports `ggml_flash_attn_ext` (ggml.c:5497 @7fe450e19).
+/// Ports `ggml_flash_attn_ext` (ggml.c:5506 @d81235049).
 ///
 /// The result is the attention output already permuted to `(0, 2, 1, 3)`:
 /// `[head_dim, n_head, n_tokens, n_batch]`. That transposition is folded in
@@ -4058,7 +4059,7 @@ pub export fn ggml_flash_attn_ext(
     return result;
 }
 
-/// Ports `ggml_flash_attn_ext_set_prec` (ggml.c:5542 @7fe450e19).
+/// Ports `ggml_flash_attn_ext_set_prec` (ggml.c:5551 @d81235049).
 ///
 /// Slot 3, immediately after the three floats `ggml_flash_attn_ext` wrote.
 pub export fn ggml_flash_attn_ext_set_prec(a: *Tensor, prec: c.enum_ggml_prec) void {
@@ -4067,14 +4068,14 @@ pub export fn ggml_flash_attn_ext_set_prec(a: *Tensor, prec: c.enum_ggml_prec) v
     impl.setOpParamsI32(a, 3, @intCast(prec));
 }
 
-/// Ports `ggml_flash_attn_ext_get_prec` (ggml.c:5552 @7fe450e19).
+/// Ports `ggml_flash_attn_ext_get_prec` (ggml.c:5561 @d81235049).
 pub export fn ggml_flash_attn_ext_get_prec(a: *const Tensor) c.enum_ggml_prec {
     impl.assert(a.op == c.GGML_OP_FLASH_ATTN_EXT, "a->op == GGML_OP_FLASH_ATTN_EXT");
 
     return @intCast(impl.getOpParamsI32(a, 3));
 }
 
-/// Ports `ggml_flash_attn_ext_set_n_kv_max` (ggml.c:5561 @7fe450e19).
+/// Ports `ggml_flash_attn_ext_set_n_kv_max` (ggml.c:5570 @d81235049).
 ///
 /// Treats the finite mask entries as a sparse K/V set of at most `n_kv_max`
 /// per row; 0 disables it. Slot 4, after the precision in slot 3.
@@ -4085,7 +4086,7 @@ pub export fn ggml_flash_attn_ext_set_n_kv_max(a: *Tensor, n_kv_max: i32) void {
     impl.setOpParamsI32(a, 4, n_kv_max);
 }
 
-/// Ports `ggml_flash_attn_ext_add_sinks` (ggml.c:5570 @7fe450e19).
+/// Ports `ggml_flash_attn_ext_add_sinks` (ggml.c:5579 @d81235049).
 ///
 /// Attaches per-head attention sinks as `src[4]`. A null `sinks` clears the
 /// slot and returns before the assertions, so it is valid on any tensor --
@@ -4104,7 +4105,7 @@ pub export fn ggml_flash_attn_ext_add_sinks(a: *Tensor, sinks: ?*Tensor) void {
     a.src[4] = s;
 }
 
-/// Ports `ggml_flash_attn_back` (ggml.c:5588 @7fe450e19).
+/// Ports `ggml_flash_attn_back` (ggml.c:5597 @d81235049).
 ///
 /// **Aborts unconditionally.** The C opens with
 /// `GGML_ABORT("TODO: adapt to ggml_flash_attn_ext() changes")`, which is
@@ -4130,7 +4131,7 @@ pub export fn ggml_flash_attn_back(
 // output and the updated recurrent state end to end, because the state has to
 // survive the call and ggml has no second return value.
 
-/// Ports `ggml_ssm_conv` (ggml.c:5659 @7fe450e19).
+/// Ports `ggml_ssm_conv` (ggml.c:5668 @d81235049).
 ///
 /// The depthwise causal convolution at the front of a Mamba block. `sx` holds
 /// the `d_conv - 1` tokens of left context followed by the tokens themselves,
@@ -4157,7 +4158,7 @@ pub export fn ggml_ssm_conv(ctx: *Context, sx: *Tensor, conv: *Tensor) *Tensor {
     return result;
 }
 
-/// Ports `ggml_ssm_scan` (ggml.c:5687 @7fe450e19).
+/// Ports `ggml_ssm_scan` (ggml.c:5696 @d81235049).
 ///
 /// The selective scan. Seven sources -- more than any other op -- and a flat
 /// 1d result holding `y` followed by `K` snapshots of the state per sequence.
@@ -4257,7 +4258,7 @@ inline fn wkvResult(ctx: *Context, s: i64, h: i64, n_tokens: i64, n_seqs: i64) *
     return context.ggml_new_tensor(ctx, c.GGML_TYPE_F32, 4, &ne);
 }
 
-/// Ports `ggml_rwkv_wkv6` (ggml.c:5873 @7fe450e19).
+/// Ports `ggml_rwkv_wkv6` (ggml.c:5882 @d81235049).
 pub export fn ggml_rwkv_wkv6(
     ctx: *Context,
     k: *Tensor,
@@ -4299,7 +4300,7 @@ pub export fn ggml_rwkv_wkv6(
     return result;
 }
 
-/// Ports `ggml_gated_linear_attn` (ggml.c:5916 @7fe450e19).
+/// Ports `ggml_gated_linear_attn` (ggml.c:5925 @d81235049).
 pub export fn ggml_gated_linear_attn(
     ctx: *Context,
     k: *Tensor,
@@ -4341,7 +4342,7 @@ pub export fn ggml_gated_linear_attn(
     return result;
 }
 
-/// Ports `ggml_rwkv_wkv7` (ggml.c:5959 @7fe450e19).
+/// Ports `ggml_rwkv_wkv7` (ggml.c:5968 @d81235049).
 ///
 /// Note the source order: `r, w, k, v, a, b, state`, which is not the order
 /// the shapes are checked in and not `wkv6`'s order either.
@@ -4391,7 +4392,7 @@ pub export fn ggml_rwkv_wkv7(
     return result;
 }
 
-/// Ports `ggml_gated_delta_net` (ggml.c:6366 @7fe450e19).
+/// Ports `ggml_gated_delta_net` (ggml.c:6375 @d81235049).
 ///
 /// `state` holds only the initial state; `K` snapshot slots are appended to
 /// the result, as in `ggml_ssm_scan`.
@@ -4452,7 +4453,7 @@ pub export fn ggml_gated_delta_net(
     return result;
 }
 
-/// Ports `ggml_lightning_indexer` (ggml.c:6423 @7fe450e19).
+/// Ports `ggml_lightning_indexer` (ggml.c:6432 @d81235049).
 ///
 /// Scores every key against every query for sparse-attention selection, so the
 /// result is `[n_kv, n_tokens, 1, n_batch]` rather than an attention output.
@@ -4497,7 +4498,7 @@ pub export fn ggml_lightning_indexer(
 // collapses the widths going into a block, `comb` builds the mixing matrix,
 // and `post` expands back out.
 
-/// Ports `ggml_dsv4_hc_comb` (ggml.c:6459 @7fe450e19).
+/// Ports `ggml_dsv4_hc_comb` (ggml.c:6468 @d81235049).
 ///
 /// `hc` is recovered from the input width by solving `(2 + i)*i == hc_mix_dim`
 /// -- the mixes tensor packs an `hc x hc` matrix plus two `hc`-wide vectors --
@@ -4553,7 +4554,7 @@ pub export fn ggml_dsv4_hc_comb(
     return result;
 }
 
-/// Ports `ggml_dsv4_hc_pre_impl` (ggml.c:6510 @7fe450e19): the plain and
+/// Ports `ggml_dsv4_hc_pre_impl` (ggml.c:6519 @d81235049): the plain and
 /// gated forms share the constructor, and op_params record which one this
 /// is -- `scale` in slot 0, `gated` in slot 1 -- since both are
 /// `GGML_OP_DSV4_HC_PRE`.
@@ -4590,18 +4591,18 @@ fn dsv4HcPreImpl(ctx: *Context, x: *Tensor, weights: *Tensor, scale: f32, gated:
     return result;
 }
 
-/// Ports `ggml_dsv4_hc_pre` (ggml.c:6548 @7fe450e19).
+/// Ports `ggml_dsv4_hc_pre` (ggml.c:6557 @d81235049).
 pub export fn ggml_dsv4_hc_pre(ctx: *Context, x: *Tensor, weights: *Tensor) *Tensor {
     return dsv4HcPreImpl(ctx, x, weights, 1.0, false);
 }
 
-/// Ports `ggml_dsv4_hc_pre_gated` (ggml.c:6555 @7fe450e19): `hc_pre` with a
+/// Ports `ggml_dsv4_hc_pre_gated` (ggml.c:6564 @d81235049): `hc_pre` with a
 /// per-element sigmoid gate of shape `[n_embd, hc, n_tokens]`.
 pub export fn ggml_dsv4_hc_pre_gated(ctx: *Context, x: *Tensor, gate: *Tensor, scale: f32) *Tensor {
     return dsv4HcPreImpl(ctx, x, gate, scale, true);
 }
 
-/// Ports `ggml_dsv4_hc_post` (ggml.c:6565 @7fe450e19). A null `comb` is
+/// Ports `ggml_dsv4_hc_post` (ggml.c:6574 @d81235049). A null `comb` is
 /// the identity: each stream keeps its own residual.
 pub export fn ggml_dsv4_hc_post(
     ctx: *Context,
@@ -4659,7 +4660,7 @@ pub export fn ggml_dsv4_hc_post(
 // ops whose parameters are not plain numbers.
 
 /// The shared body of `ggml_map_custom1_impl`, `ggml_map_custom2_impl` and
-/// `ggml_map_custom3_impl` (ggml.c:6040, 6084, 6132 @7fe450e19).
+/// `ggml_map_custom3_impl` (ggml.c:6049, 6093, 6141 @d81235049).
 ///
 /// The three C functions differ only in how many sources they wire up and
 /// which `ggml_map_customN_op_params` they write. Those three structs have
@@ -4690,7 +4691,7 @@ inline fn mapCustomImpl(
     return result;
 }
 
-/// Ports `ggml_map_custom1` (ggml.c:6064 @7fe450e19).
+/// Ports `ggml_map_custom1` (ggml.c:6073 @d81235049).
 pub export fn ggml_map_custom1(
     ctx: *Context,
     a: *Tensor,
@@ -4701,7 +4702,7 @@ pub export fn ggml_map_custom1(
     return mapCustomImpl(ctx, &.{a}, c.GGML_OP_MAP_CUSTOM1, @ptrCast(fun), n_tasks, userdata, false);
 }
 
-/// Ports `ggml_map_custom1_inplace` (ggml.c:6073 @7fe450e19).
+/// Ports `ggml_map_custom1_inplace` (ggml.c:6082 @d81235049).
 pub export fn ggml_map_custom1_inplace(
     ctx: *Context,
     a: *Tensor,
@@ -4712,7 +4713,7 @@ pub export fn ggml_map_custom1_inplace(
     return mapCustomImpl(ctx, &.{a}, c.GGML_OP_MAP_CUSTOM1, @ptrCast(fun), n_tasks, userdata, true);
 }
 
-/// Ports `ggml_map_custom2` (ggml.c:6110 @7fe450e19).
+/// Ports `ggml_map_custom2` (ggml.c:6119 @d81235049).
 pub export fn ggml_map_custom2(
     ctx: *Context,
     a: *Tensor,
@@ -4724,7 +4725,7 @@ pub export fn ggml_map_custom2(
     return mapCustomImpl(ctx, &.{ a, b }, c.GGML_OP_MAP_CUSTOM2, @ptrCast(fun), n_tasks, userdata, false);
 }
 
-/// Ports `ggml_map_custom2_inplace` (ggml.c:6120 @7fe450e19).
+/// Ports `ggml_map_custom2_inplace` (ggml.c:6129 @d81235049).
 pub export fn ggml_map_custom2_inplace(
     ctx: *Context,
     a: *Tensor,
@@ -4736,7 +4737,7 @@ pub export fn ggml_map_custom2_inplace(
     return mapCustomImpl(ctx, &.{ a, b }, c.GGML_OP_MAP_CUSTOM2, @ptrCast(fun), n_tasks, userdata, true);
 }
 
-/// Ports `ggml_map_custom3` (ggml.c:6160 @7fe450e19).
+/// Ports `ggml_map_custom3` (ggml.c:6169 @d81235049).
 pub export fn ggml_map_custom3(
     ctx: *Context,
     a: *Tensor,
@@ -4749,7 +4750,7 @@ pub export fn ggml_map_custom3(
     return mapCustomImpl(ctx, &.{ a, b, c_arg }, c.GGML_OP_MAP_CUSTOM3, @ptrCast(fun), n_tasks, userdata, false);
 }
 
-/// Ports `ggml_map_custom3_inplace` (ggml.c:6171 @7fe450e19).
+/// Ports `ggml_map_custom3_inplace` (ggml.c:6180 @d81235049).
 pub export fn ggml_map_custom3_inplace(
     ctx: *Context,
     a: *Tensor,
@@ -4762,7 +4763,7 @@ pub export fn ggml_map_custom3_inplace(
     return mapCustomImpl(ctx, &.{ a, b, c_arg }, c.GGML_OP_MAP_CUSTOM3, @ptrCast(fun), n_tasks, userdata, true);
 }
 
-/// Ports `ggml_custom_4d` (ggml.c:6182 @7fe450e19).
+/// Ports `ggml_custom_4d` (ggml.c:6191 @d81235049).
 ///
 /// The general form: the caller states the result shape outright rather than
 /// inheriting it from an input, and passes its sources as an array.
@@ -4805,7 +4806,7 @@ pub export fn ggml_custom_4d(
     return result;
 }
 
-/// Ports `ggml_custom_inplace` (ggml.c:6214 @7fe450e19).
+/// Ports `ggml_custom_inplace` (ggml.c:6223 @d81235049).
 ///
 /// Note the source shift: `a` takes `src[0]` and the extra arguments start at
 /// `src[1]`, which is why the bound is one lower than `ggml_custom_4d`'s.
@@ -4844,7 +4845,7 @@ pub export fn ggml_custom_inplace(
 // Loss and optimiser steps. These exist for ggml's own training support and
 // are not reached by inference.
 
-/// Ports `ggml_cross_entropy_loss` (ggml.c:6244 @7fe450e19).
+/// Ports `ggml_cross_entropy_loss` (ggml.c:6253 @d81235049).
 ///
 /// Reduces to a single scalar, which is what `ggml_set_loss` then marks.
 pub export fn ggml_cross_entropy_loss(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
@@ -4859,7 +4860,7 @@ pub export fn ggml_cross_entropy_loss(ctx: *Context, a: *Tensor, b: *Tensor) *Te
     return result;
 }
 
-/// Ports `ggml_cross_entropy_loss_back` (ggml.c:6261 @7fe450e19).
+/// Ports `ggml_cross_entropy_loss_back` (ggml.c:6270 @d81235049).
 ///
 /// `a` is the incoming scalar gradient; the result has `b`'s shape.
 pub export fn ggml_cross_entropy_loss_back(ctx: *Context, a: *Tensor, b: *Tensor, c_arg: *Tensor) *Tensor {
@@ -4876,7 +4877,7 @@ pub export fn ggml_cross_entropy_loss_back(ctx: *Context, a: *Tensor, b: *Tensor
     return result;
 }
 
-/// Ports `ggml_opt_step_adamw` (ggml.c:6281 @7fe450e19).
+/// Ports `ggml_opt_step_adamw` (ggml.c:6290 @d81235049).
 ///
 /// Updates `a` in place, so the result is a view of it rather than new
 /// storage. `adamw_params` is a 7-element f32 vector holding the learning
@@ -4908,7 +4909,7 @@ pub export fn ggml_opt_step_adamw(
     return result;
 }
 
-/// Ports `ggml_opt_step_sgd` (ggml.c:6309 @7fe450e19).
+/// Ports `ggml_opt_step_sgd` (ggml.c:6318 @d81235049).
 ///
 /// `params` is a 2-element f32 vector: learning rate and weight decay.
 pub export fn ggml_opt_step_sgd(ctx: *Context, a: *Tensor, grad: *Tensor, params: *Tensor) *Tensor {
@@ -4930,7 +4931,7 @@ pub export fn ggml_opt_step_sgd(ctx: *Context, a: *Tensor, grad: *Tensor, params
 // -----------------------------------------------------------------------------
 // Triangular solve
 
-/// Ports `ggml_solve_tri` (ggml.c:6331 @7fe450e19).
+/// Ports `ggml_solve_tri` (ggml.c:6340 @d81235049).
 ///
 /// Solves `A X = B` for `X` with `A` triangular. The three booleans describe
 /// which variant, but the C asserts `lower && left && !uni`, so only the

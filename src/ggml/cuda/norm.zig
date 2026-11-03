@@ -1,11 +1,11 @@
 //! Normalisation: `NORM`, `RMS_NORM`, `RMS_NORM_BACK`, `L2_NORM`,
-//! `GROUP_NORM`, and the fused `RMS_NORM + MUL (+ ADD)` entry points
-//! `ggml_cuda_try_fuse` calls.
+//! `GROUP_NORM`, and the fused `RMS_NORM + MUL (+ ADD)` and (since v0.6.0)
+//! `RMS_NORM + SCALE` entry points `ggml_cuda_try_fuse` calls.
 //!
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/norm.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/norm.cuh` at v0.5.0 (`7fe450e19`). The
+//! `llama.cpp/ggml/src/ggml-cuda/norm.cuh` at v0.6.0 (`d81235049`). The
 //! kernels -- `norm_f32`, `group_norm_f32`, `rms_norm_f32`,
 //! `rms_norm_back_f32`, `l2_norm_f32` -- stay CUDA.
 //!
@@ -13,8 +13,8 @@
 //!
 //! `norm_f32`, `group_norm_f32` and `rms_norm_back_f32` launch with
 //! `<<<>>>`; `rms_norm_f32` and `l2_norm_f32` launch through
-//! `ggml_cuda_kernel_launch` (PDL). `rms_norm_f32` has sixteen trailing
-//! parameters with C++ defaults, and `cudaLaunchKernelEx` does not apply
+//! `ggml_cuda_kernel_launch` (PDL). `rms_norm_f32` has seventeen trailing
+//! parameters with C++ defaults (v0.6.0 added `scale_out`), and `cudaLaunchKernelEx` does not apply
 //! defaults, so the C spells the zeros out at every launch; so does this.
 
 const std = @import("std");
@@ -54,7 +54,7 @@ fn int(v: i64) c_int {
     return @truncate(v);
 }
 
-/// Ports `norm_f32_cuda` (norm.cu:280 @7fe450e19).
+/// Ports `norm_f32_cuda` (norm.cu:284 @d81235049).
 fn normF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: cu.cudaStream_t) void {
     const blocks_num: kernels.Dim3 = .{ .x = uint(nrows), .y = uint(nchannels), .z = uint(nsamples) };
     if (ncols < 1024) {
@@ -76,7 +76,7 @@ fn normF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, 
     }
 }
 
-/// Ports `group_norm_f32_cuda` (norm.cu:293 @7fe450e19).
+/// Ports `group_norm_f32_cuda` (norm.cu:297 @d81235049).
 fn groupNormF32Cuda(x: CPtr, dst: Ptr, num_groups: c_int, eps: f32, group_size: c_int, ne_elements: c_int, stream: cu.cudaStream_t) void {
     if (group_size < 1024) {
         const block_dims: kernels.Dim3 = .{ .x = warp_size };
@@ -97,22 +97,27 @@ fn groupNormF32Cuda(x: CPtr, dst: Ptr, num_groups: c_int, eps: f32, group_size: 
     }
 }
 
-/// `rms_norm_f32<block_size, do_multiply, do_add>`.
-fn rmsNormKernel(comptime block_size: comptime_int, comptime do_multiply: bool, comptime do_add: bool) kernels.Kernel {
-    return kernels.get("norm", kernels.tmpl("rms_norm_f32", &.{ kernels.int(block_size), kernels.boolean(do_multiply), kernels.boolean(do_add) }));
+/// `rms_norm_f32<block_size, do_multiply, do_add, do_scale>`; `do_scale`
+/// is v0.6.0's, and the demangled key spells every template argument,
+/// defaulted or not.
+fn rmsNormKernel(comptime block_size: comptime_int, comptime do_multiply: bool, comptime do_add: bool, comptime do_scale: bool) kernels.Kernel {
+    return kernels.get("norm", kernels.tmpl("rms_norm_f32", &.{ kernels.int(block_size), kernels.boolean(do_multiply), kernels.boolean(do_add), kernels.boolean(do_scale) }));
 }
 
-/// Ports `rms_norm_f32_cuda` (norm.cu:304 @7fe450e19).
-fn rmsNormF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: cu.cudaStream_t) void {
+/// Ports `rms_norm_f32_cuda` (norm.cu:309 @d81235049), its `do_scale`
+/// template argument comptime; `scale_out` multiplies the normalised row
+/// when it is set (the `RMS_NORM + SCALE` fusion) and is ignored otherwise.
+fn rmsNormF32Cuda(comptime do_scale: bool, x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: cu.cudaStream_t, scale_out: f32) void {
     const blocks_num: kernels.Dim3 = .{ .x = uint(nrows), .y = uint(nchannels), .z = uint(nsamples) };
     // underlying cudaLaunchKernelEx does not support default params
     const defaults = .{
         rt(CPtr, null), rt(i64, 0), rt(i64, 0), rt(i64, 0), uint3Zero(), uint3Zero(), uint3Zero(), uint3Zero(),
         rt(CPtr, null), rt(i64, 0), rt(i64, 0), rt(i64, 0), uint3Zero(), uint3Zero(), uint3Zero(), uint3Zero(),
+        scale_out,
     };
     if (ncols < 1024) {
         const block_dims: kernels.Dim3 = .{ .x = 256 };
-        kernels.launchPdl(rmsNormKernel(256, false, false), .{
+        kernels.launchPdl(rmsNormKernel(256, false, false, do_scale), .{
             .grid = blocks_num,
             .block = block_dims,
             .shmem = if (block_dims.x > warp_size) 32 * @sizeOf(f32) else 0,
@@ -120,7 +125,7 @@ fn rmsNormF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_in
         }, .{ x, dst, ncols, stride_row, stride_channel, stride_sample, eps } ++ defaults);
     } else {
         const block_dims: kernels.Dim3 = .{ .x = 1024 };
-        kernels.launchPdl(rmsNormKernel(1024, false, false), .{
+        kernels.launchPdl(rmsNormKernel(1024, false, false, do_scale), .{
             .grid = blocks_num,
             .block = block_dims,
             .shmem = if (block_dims.x > warp_size) 32 * @sizeOf(f32) else 0,
@@ -129,7 +134,7 @@ fn rmsNormF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_in
     }
 }
 
-/// Ports `rms_norm_mul_f32_cuda` (norm.cu:326 @7fe450e19).
+/// Ports `rms_norm_mul_f32_cuda` (norm.cu:332 @d81235049).
 fn rmsNormMulF32Cuda(
     x: CPtr,
     mul: CPtr,
@@ -161,7 +166,7 @@ fn rmsNormMulF32Cuda(
 ) void {
     const blocks_num: kernels.Dim3 = .{ .x = uint(nrows), .y = uint(nchannels), .z = uint(nsamples) };
     if (mul == null) {
-        rmsNormF32Cuda(x, dst, ncols, nrows, nchannels, nsamples, stride_row, stride_channel, stride_sample, eps, stream);
+        rmsNormF32Cuda(false, x, dst, ncols, nrows, nchannels, nsamples, stride_row, stride_channel, stride_sample, eps, stream, 1.0);
         return;
     }
     if (add == null) {
@@ -174,11 +179,11 @@ fn rmsNormMulF32Cuda(
             mul_stride_sample, mul_ncols_packed, mul_nrows_packed, mul_nchannels_packed, mul_nsamples_packed,
             // underlying cudaLaunchKernelEx does not support default params
             rt(CPtr, null), rt(i64, 0), rt(i64, 0), rt(i64, 0),     uint3Zero(),
-            uint3Zero(),       uint3Zero(),      uint3Zero(),
+            uint3Zero(),       uint3Zero(),      uint3Zero(),      rt(f32, 1.0),
         };
         if (ncols < 1024) {
             const block_dims: kernels.Dim3 = .{ .x = 256 };
-            kernels.launchPdl(rmsNormKernel(256, true, false), .{
+            kernels.launchPdl(rmsNormKernel(256, true, false, false), .{
                 .grid = blocks_num,
                 .block = block_dims,
                 .shmem = if (block_dims.x > warp_size) 32 * @sizeOf(f32) else 0,
@@ -186,7 +191,7 @@ fn rmsNormMulF32Cuda(
             }, head);
         } else {
             const block_dims: kernels.Dim3 = .{ .x = 1024 };
-            kernels.launchPdl(rmsNormKernel(1024, true, false), .{
+            kernels.launchPdl(rmsNormKernel(1024, true, false, false), .{
                 .grid = blocks_num,
                 .block = block_dims,
                 .shmem = if (block_dims.x > warp_size) 32 * @sizeOf(f32) else 0,
@@ -206,11 +211,11 @@ fn rmsNormMulF32Cuda(
         const args = .{
             x,                 dst,                  ncols,               stride_row,           stride_channel,      stride_sample, eps,            mul,                mul_stride_row,    mul_stride_channel,
             mul_stride_sample, mul_ncols_packed,     mul_nrows_packed,    mul_nchannels_packed, mul_nsamples_packed, add,           add_stride_row, add_stride_channel, add_stride_sample, add_ncols_packed,
-            add_nrows_packed,  add_nchannels_packed, add_nsamples_packed,
+            add_nrows_packed,  add_nchannels_packed, add_nsamples_packed, rt(f32, 1.0),
         };
         if (ncols < 1024) {
             const block_dims: kernels.Dim3 = .{ .x = 256 };
-            kernels.launchPdl(rmsNormKernel(256, true, true), .{
+            kernels.launchPdl(rmsNormKernel(256, true, true, false), .{
                 .grid = blocks_num,
                 .block = block_dims,
                 .shmem = if (block_dims.x > warp_size) 32 * @sizeOf(f32) else 0,
@@ -218,7 +223,7 @@ fn rmsNormMulF32Cuda(
             }, args);
         } else {
             const block_dims: kernels.Dim3 = .{ .x = 1024 };
-            kernels.launchPdl(rmsNormKernel(1024, true, true), .{
+            kernels.launchPdl(rmsNormKernel(1024, true, true, false), .{
                 .grid = blocks_num,
                 .block = block_dims,
                 .shmem = if (block_dims.x > warp_size) 32 * @sizeOf(f32) else 0,
@@ -228,7 +233,7 @@ fn rmsNormMulF32Cuda(
     }
 }
 
-/// Ports `rms_norm_back_f32_cuda` (norm.cu:410 @7fe450e19).
+/// Ports `rms_norm_back_f32_cuda` (norm.cu:416 @d81235049).
 fn rmsNormBackF32Cuda(grad: CPtr, xf: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, eps: f32, stream: cu.cudaStream_t) void {
     if (ncols < 1024) {
         const block_dims: kernels.Dim3 = .{ .x = warp_size };
@@ -249,7 +254,7 @@ fn rmsNormBackF32Cuda(grad: CPtr, xf: CPtr, dst: Ptr, ncols: c_int, nrows: c_int
     }
 }
 
-/// Ports `l2_norm_f32_cuda` (norm.cu:420 @7fe450e19).
+/// Ports `l2_norm_f32_cuda` (norm.cu:426 @d81235049).
 fn l2NormF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: cu.cudaStream_t) void {
     const blocks_num: kernels.Dim3 = .{ .x = uint(nrows), .y = uint(nchannels), .z = uint(nsamples) };
     if (ncols < 1024) {
@@ -305,7 +310,7 @@ fn rowArgs(dst: *const Tensor) RowArgs {
     };
 }
 
-/// Ports `ggml_cuda_op_norm` (norm.cu:435 @7fe450e19).
+/// Ports `ggml_cuda_op_norm` (norm.cu:441 @d81235049).
 pub fn opNorm(ctx: *common.Context, dst: *Tensor) void {
     const stream = ctx.stream();
     const a = rowArgs(dst);
@@ -313,7 +318,7 @@ pub fn opNorm(ctx: *common.Context, dst: *Tensor) void {
     normF32Cuda(a.src0.data, dst.data, int(ne[0]), int(ne[1]), int(ne[2]), int(ne[3]), a.s01, a.s02, a.s03, a.eps, stream);
 }
 
-/// Ports `ggml_cuda_op_group_norm` (norm.cu:459 @7fe450e19).
+/// Ports `ggml_cuda_op_group_norm` (norm.cu:465 @d81235049).
 pub fn opGroupNorm(ctx: *common.Context, dst: *Tensor) void {
     const src0 = srcOf(dst, 0);
     const stream = ctx.stream();
@@ -330,12 +335,37 @@ pub fn opGroupNorm(ctx: *common.Context, dst: *Tensor) void {
     groupNormF32Cuda(src0.data, dst.data, int(num_groups * src0.ne[3]), eps, group_size, int(c.ggml_nelements(src0)), stream);
 }
 
-/// Ports `ggml_cuda_op_rms_norm` (norm.cu:478 @7fe450e19).
+/// Ports `ggml_cuda_op_rms_norm` (norm.cu:484 @d81235049).
 pub fn opRmsNorm(ctx: *common.Context, dst: *Tensor) void {
     const stream = ctx.stream();
     const a = rowArgs(dst);
     const ne = a.src0.ne;
-    rmsNormF32Cuda(a.src0.data, dst.data, int(ne[0]), int(ne[1]), int(ne[2]), int(ne[3]), a.s01, a.s02, a.s03, a.eps, stream);
+    rmsNormF32Cuda(false, a.src0.data, dst.data, int(ne[0]), int(ne[1]), int(ne[2]), int(ne[3]), a.s01, a.s02, a.s03, a.eps, stream, 1.0);
+}
+
+/// Ports `ggml_cuda_op_rms_norm_scale_fused` (norm.cu:508 @d81235049), new
+/// at v0.6.0: `RMS_NORM` followed by a bias-free `SCALE` of its result,
+/// written straight to the `SCALE` node.
+pub fn opRmsNormScaleFused(ctx: *common.Context, dst: *Tensor, scale_tensor: *Tensor) void {
+    const src0 = srcOf(dst, 0);
+    const stream = ctx.stream();
+
+    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    impl.assert(scale_tensor.type == c.GGML_TYPE_F32, "scale_tensor->type == GGML_TYPE_F32");
+
+    const eps = impl.getOpParamsF32(dst, 0);
+    impl.assert(eps >= 0.0, "eps >= 0.0f");
+
+    const scale = impl.getOpParamsF32(scale_tensor, 0);
+
+    const ts0 = c.ggml_type_size(src0.type);
+    impl.assert(src0.nb[0] == ts0, "nb00 == ts0");
+    const s01: i64 = @intCast(src0.nb[1] / ts0);
+    const s02: i64 = @intCast(src0.nb[2] / ts0);
+    const s03: i64 = @intCast(src0.nb[3] / ts0);
+
+    const ne = src0.ne;
+    rmsNormF32Cuda(true, src0.data, scale_tensor.data, int(ne[0]), int(ne[1]), int(ne[2]), int(ne[3]), s01, s02, s03, eps, stream, scale);
 }
 
 /// The other operand of a binary node one of whose sources is `t`; the
@@ -374,7 +404,7 @@ fn bcastOf(t: *const Tensor, comptime which: []const u8) Bcast {
     };
 }
 
-/// Ports `ggml_cuda_op_rms_norm_fused` (norm.cu:502 @7fe450e19): `RMS_NORM`
+/// Ports `ggml_cuda_op_rms_norm_fused` (norm.cu:535 @d81235049): `RMS_NORM`
 /// followed by a `MUL` with `dst` as one operand.
 pub fn opRmsNormFused(ctx: *common.Context, dst: *Tensor, mul_tensor: *Tensor) void {
     const rms_norm_src = srcOf(dst, 0);
@@ -432,7 +462,7 @@ pub fn opRmsNormFused(ctx: *common.Context, dst: *Tensor, mul_tensor: *Tensor) v
     );
 }
 
-/// Ports `ggml_cuda_op_rms_norm_fused_add` (norm.cu:562 @7fe450e19):
+/// Ports `ggml_cuda_op_rms_norm_fused_add` (norm.cu:595 @d81235049):
 /// `RMS_NORM`, then `MUL`, then `ADD`.
 pub fn opRmsNormFusedAdd(ctx: *common.Context, dst: *Tensor, mul_tensor: *Tensor, add_tensor: *Tensor) void {
     const rms_norm_src = srcOf(dst, 0);
@@ -494,7 +524,7 @@ pub fn opRmsNormFusedAdd(ctx: *common.Context, dst: *Tensor, mul_tensor: *Tensor
     );
 }
 
-/// Ports `ggml_cuda_op_rms_norm_back` (norm.cu:650 @7fe450e19).
+/// Ports `ggml_cuda_op_rms_norm_back` (norm.cu:683 @d81235049).
 pub fn opRmsNormBack(ctx: *common.Context, dst: *Tensor) void {
     const grad = srcOf(dst, 0); // gradients
     const src0f = srcOf(dst, 1); // src0 from forward pass
@@ -516,7 +546,7 @@ pub fn opRmsNormBack(ctx: *common.Context, dst: *Tensor) void {
     rmsNormBackF32Cuda(grad.data, src0f.data, dst.data, int(ne00), int(nrows), eps, stream);
 }
 
-/// Ports `ggml_cuda_op_l2_norm` (norm.cu:676 @7fe450e19).
+/// Ports `ggml_cuda_op_l2_norm` (norm.cu:709 @d81235049).
 pub fn opL2Norm(ctx: *common.Context, dst: *Tensor) void {
     const stream = ctx.stream();
     const a = rowArgs(dst);

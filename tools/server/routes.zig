@@ -4,8 +4,8 @@
 //! # Provenance
 //!
 //! Ports the rest of `llama.cpp/tools/server/server-context.cpp` and
-//! `llama.cpp/tools/server/server-context.h` (llama.cpp v0.5.0,
-//! `7fe450e19`): `server_res_generator`, `server_routes` with every handler
+//! `llama.cpp/tools/server/server-context.h` (llama.cpp v0.6.0,
+//! `d81235049`): `server_res_generator`, `server_routes` with every handler
 //! of `init_routes`, `handle_completions_impl`, the slot actions, the
 //! embeddings and token-count handlers, `update_cached_responses`, and
 //! `get_res_model_info`, `get_res_models` and `get_res_props`. Each
@@ -41,6 +41,7 @@ const convert = @import("convert.zig");
 const schema = @import("schema.zig");
 const stream = @import("stream.zig");
 const context = @import("context.zig");
+const decision_mod = @import("decision.zig");
 
 const c = tc.c;
 const log = tc.log;
@@ -69,7 +70,7 @@ fn ggmlAssert(ok: bool, comptime line: c_int, comptime cond: [*:0]const u8) void
 // -----------------------------------------------------------------------------
 // server_res_generator
 
-/// Ports `server_res_generator` (server-context.cpp:4229 @7fe450e19): a
+/// Ports `server_res_generator` (server-context.cpp:4580 @d81235049): a
 /// generator-like response, its reader on the task queues, and the stream
 /// replay tee it derives from (`server_res_spipe`).
 pub const ResGenerator = struct {
@@ -83,8 +84,8 @@ pub const ResGenerator = struct {
 
     const vtable: http.Res.VTable = .{ .on_complete = onComplete, .destroy = destroyGen };
 
-    /// Ports `server_res_generator`'s constructor (server-context.cpp:4231
-    /// @7fe450e19): may bypass sleep if the task does not use the context.
+    /// Ports `server_res_generator`'s constructor (server-context.cpp:4582
+    /// @d81235049): may bypass sleep if the task does not use the context.
     fn create(queue_tasks: *context.TaskQueue, queue_results: *context.ResultQueue, sleep_idle_seconds: c_int, bypass_sleep_in: bool) !*ResGenerator {
         const self = try gpa.create(ResGenerator);
         errdefer gpa.destroy(self);
@@ -121,13 +122,13 @@ pub const ResGenerator = struct {
         return self.base.allocator();
     }
 
-    /// Ports `server_res_generator`'s `ok` (server-context.cpp:4239 @7fe450e19).
+    /// Ports `server_res_generator`'s `ok` (server-context.cpp:4590 @d81235049).
     fn ok(self: *ResGenerator, response_data: *const Value) !void {
         self.base.status = 200;
         try self.base.setData(try common.safeJsonToStr(self.alloc(), response_data));
     }
 
-    /// Ports `server_res_generator`'s `error` (server-context.cpp:4243 @7fe450e19).
+    /// Ports `server_res_generator`'s `error` (server-context.cpp:4594 @d81235049).
     fn err(self: *ResGenerator, error_data: *const Value) !void {
         const a = self.alloc();
         self.base.status = common.jsonValue(error_data, "code", c_int, 500);
@@ -159,7 +160,7 @@ const ReqStop = struct {
 // -----------------------------------------------------------------------------
 // server_routes
 
-/// Ports `server_routes` (server-context.h:119 @7fe450e19): every handler,
+/// Ports `server_routes` (server-context.h:120 @d81235049): every handler,
 /// as a field so router mode can replace it, and what they share.
 pub const Routes = struct {
     // handlers using lambda function, so that they can capture `this` without `std::bind`
@@ -188,6 +189,7 @@ pub const Routes = struct {
     post_embeddings: http.Handler = undefined,
     post_embeddings_oai: http.Handler = undefined,
     post_rerank: http.Handler = undefined,
+    post_systemone: http.Handler = undefined,
     get_lora_adapters: http.Handler = undefined,
     post_lora_adapters: http.Handler = undefined,
 
@@ -210,8 +212,8 @@ pub const Routes = struct {
     // set when a scrape during sleep already reported the throughput buckets
     should_reset_buckets: bool = false,
 
-    /// Ports the constructor of `server_routes` (server-context.cpp:4529
-    /// @7fe450e19). `self` must not move afterwards: the handlers and the
+    /// Ports the constructor of `server_routes` (server-context.cpp:4880
+    /// @d81235049). `self` must not move afterwards: the handlers and the
     /// sleeping callback point at it.
     pub fn init(self: *Routes, params: *const Params, ctx_server: *context.ServerContext) !void {
         self.* = .{
@@ -239,8 +241,8 @@ pub const Routes = struct {
         };
     }
 
-    /// Ports `server_routes`'s `update_meta` (server-context.h:125
-    /// @7fe450e19): not thread-safe, only while `is_ready` is false.
+    /// Ports `server_routes`'s `update_meta` (server-context.h:126
+    /// @d81235049): not thread-safe, only while `is_ready` is false.
     pub fn updateMeta(self: *Routes, ctx_server: *const context.ServerContext) !void {
         _ = self.meta_arena.reset(.free_all);
         self.meta = try ctx_server.getMeta(self.meta_arena.allocator());
@@ -250,7 +252,7 @@ pub const Routes = struct {
         return &self.meta.?;
     }
 
-    /// Ports `server_routes`'s `create_response` (server-context.cpp:4525 @7fe450e19).
+    /// Ports `server_routes`'s `create_response` (server-context.cpp:4876 @d81235049).
     fn createResponse(self: *Routes, bypass_sleep: bool) !*ResGenerator {
         return ResGenerator.create(self.queue_tasks, self.queue_results, self.params.sleep_idle_seconds, bypass_sleep);
     }
@@ -263,8 +265,8 @@ pub const Routes = struct {
         }.call };
     }
 
-    /// Ports `server_routes`'s `init_routes` (server-context.cpp:4650
-    /// @7fe450e19). IMPORTANT: all handlers must start with
+    /// Ports `server_routes`'s `init_routes` (server-context.cpp:5006
+    /// @d81235049). IMPORTANT: all handlers must start with
     /// `createResponse`, so that the sleeping case is handled correctly.
     fn initRoutes(self: *Routes) void {
         self.get_health = self.handler(getHealth);
@@ -291,6 +293,7 @@ pub const Routes = struct {
         self.post_embeddings = self.handler(postEmbeddings);
         self.post_embeddings_oai = self.handler(postEmbeddingsOai);
         self.post_rerank = self.handler(postRerank);
+        self.post_systemone = self.handler(postSystemone);
         self.get_lora_adapters = self.handler(getLoraAdapters);
         self.post_lora_adapters = self.handler(postLoraAdapters);
     }
@@ -298,7 +301,7 @@ pub const Routes = struct {
     // -------------------------------------------------------------------------
     // the handlers
 
-    /// The `get_health` lambda (server-context.cpp:4654 @7fe450e19): error
+    /// The `get_health` lambda (server-context.cpp:5010 @d81235049): error
     /// and loading states are handled by the middleware; reachable during
     /// sleep.
     fn getHealth(self: *Routes, _: *const http.Req) anyerror!*http.Res {
@@ -312,7 +315,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The cached-metrics lambda of `get_metrics` (server-context.cpp:4667 @7fe450e19).
+    /// The cached-metrics lambda of `get_metrics` (server-context.cpp:5023 @d81235049).
     fn useCachedMetrics(self: *Routes, res: *ResGenerator) !void {
         _ = std.c.pthread_mutex_lock(&self.mutex_cache);
         defer _ = std.c.pthread_mutex_unlock(&self.mutex_cache);
@@ -329,7 +332,7 @@ pub const Routes = struct {
         self.should_reset_buckets = true;
     }
 
-    /// The `get_metrics` lambda (server-context.cpp:4667 @7fe450e19).
+    /// The `get_metrics` lambda (server-context.cpp:5023 @d81235049).
     fn getMetrics(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(true);
         errdefer res.destroy();
@@ -372,7 +375,7 @@ pub const Routes = struct {
                 return &res.base;
             }
 
-            ggmlAssert(result.kind == .metrics, 4718, "res_task != nullptr");
+            ggmlAssert(result.kind == .metrics, 5074, "res_task != nullptr");
 
             const a = res.alloc();
             try res.base.setHeader("Process-Start-Time-Unix", try std.fmt.allocPrint(a, "{d}", .{result.kind.metrics.metrics.t_start}));
@@ -384,7 +387,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `get_slots` lambda (server-context.cpp:4729 @7fe450e19).
+    /// The `get_slots` lambda (server-context.cpp:5085 @d81235049).
     fn getSlots(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -403,7 +406,7 @@ pub const Routes = struct {
         // get the result
         const result = (try res.rd.next(ReqStop{ .req = req })) orelse {
             // connection was closed
-            ggmlAssert(req.should_stop.call(), 4747, "req.should_stop()");
+            ggmlAssert(req.should_stop.call(), 5103, "req.should_stop()");
             return &res.base;
         };
         defer result.destroy(gpa);
@@ -414,7 +417,7 @@ pub const Routes = struct {
             return &res.base;
         }
 
-        ggmlAssert(result.kind == .slots, 4757, "res_task != nullptr");
+        ggmlAssert(result.kind == .slots, 5113, "res_task != nullptr");
 
         // optionally return "fail_on_no_slot" error
         if (req.getParam("fail_on_no_slot", "").len != 0) {
@@ -429,7 +432,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_slots` lambda (server-context.cpp:4771 @7fe450e19).
+    /// The `post_slots` lambda (server-context.cpp:5127 @d81235049).
     fn postSlots(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         var res_alive = true;
@@ -468,7 +471,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `get_props` lambda (server-context.cpp:4804 @7fe450e19): must be
+    /// The `get_props` lambda (server-context.cpp:5160 @d81235049): must be
     /// reachable during sleep, so it never touches the context.
     fn getProps(self: *Routes, _: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(true);
@@ -484,7 +487,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_props` lambda (server-context.cpp:4816 @7fe450e19).
+    /// The `post_props` lambda (server-context.cpp:5172 @d81235049).
     fn postProps(self: *Routes, _: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -501,7 +504,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_infill` lambda (server-context.cpp:4828 @7fe450e19). Its
+    /// The `post_infill` lambda (server-context.cpp:5184 @d81235049). Its
     /// three "required" checks set an error on a response that is then
     /// dropped, as upstream's do; a missing field throws at `at` instead.
     fn postInfill(self: *Routes, req: *const http.Req) anyerror!*http.Res {
@@ -594,7 +597,7 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .infill, &data, &.{}, .none); // infill is not OAI compatible
     }
 
-    /// The `post_completions` lambda (server-context.cpp:4906 @7fe450e19).
+    /// The `post_completions` lambda (server-context.cpp:5262 @d81235049).
     fn postCompletions(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
@@ -603,7 +606,7 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .completion, &body, &.{}, .none);
     }
 
-    /// The `post_completions_oai` lambda (server-context.cpp:4918 @7fe450e19).
+    /// The `post_completions_oai` lambda (server-context.cpp:5274 @d81235049).
     fn postCompletionsOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
@@ -673,7 +676,7 @@ pub const Routes = struct {
         gpa.destroy(p);
     }
 
-    /// The `post_chat_completions` lambda (server-context.cpp:4930 @7fe450e19).
+    /// The `post_chat_completions` lambda (server-context.cpp:5286 @d81235049).
     fn postChatCompletions(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
@@ -682,12 +685,12 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .completion, &p.body, p.files.items, .oai_chat);
     }
 
-    /// The `post_chat_completions_tok` lambda (server-context.cpp:4946 @7fe450e19).
+    /// The `post_chat_completions_tok` lambda (server-context.cpp:5302 @d81235049).
     fn postChatCompletionsTok(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         return self.handleCountTokens(req, .oai_chat);
     }
 
-    /// The `post_control` lambda (server-context.cpp:4950 @7fe450e19).
+    /// The `post_control` lambda (server-context.cpp:5306 @d81235049).
     fn postControl(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -715,7 +718,7 @@ pub const Routes = struct {
         }
 
         const result = (try res.rd.next(ReqStop{ .req = req })) orelse {
-            ggmlAssert(req.should_stop.call(), 4976, "req.should_stop()");
+            ggmlAssert(req.should_stop.call(), 5332, "req.should_stop()");
             return &res.base;
         };
         defer result.destroy(gpa);
@@ -728,7 +731,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_responses_oai` lambda (server-context.cpp:4987 @7fe450e19):
+    /// The `post_responses_oai` lambda (server-context.cpp:5343 @d81235049):
     /// the request converted from the Responses API, then run as chat.
     fn postResponsesOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
@@ -738,13 +741,13 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .completion, &p.body, p.files.items, .oai_resp);
     }
 
-    /// The `post_responses_tok_oai` lambda (server-context.cpp:5005 @7fe450e19).
+    /// The `post_responses_tok_oai` lambda (server-context.cpp:5361 @d81235049).
     fn postResponsesTokOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         return self.handleCountTokens(req, .oai_resp);
     }
 
-    /// The `post_transcriptions_oai` lambda (server-context.cpp:5009
-    /// @7fe450e19): refused without audio input; otherwise the upload and
+    /// The `post_transcriptions_oai` lambda (server-context.cpp:5365
+    /// @d81235049): refused without audio input; otherwise the upload and
     /// its form converted into chat over the template's ASR preset.
     fn postTranscriptionsOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
@@ -761,8 +764,8 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .completion, &p.body, p.files.items, .oai_asr);
     }
 
-    /// The `post_anthropic_messages` lambda (server-context.cpp:5037
-    /// @7fe450e19): the request converted from the Anthropic Messages API,
+    /// The `post_anthropic_messages` lambda (server-context.cpp:5393
+    /// @d81235049): the request converted from the Anthropic Messages API,
     /// then run as chat.
     fn postAnthropicMessages(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
@@ -772,13 +775,13 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .completion, &p.body, p.files.items, .anthropic);
     }
 
-    /// The `post_anthropic_count_tokens` lambda (server-context.cpp:5055 @7fe450e19).
+    /// The `post_anthropic_count_tokens` lambda (server-context.cpp:5411 @d81235049).
     fn postAnthropicCountTokens(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         return self.handleCountTokens(req, .anthropic);
     }
 
-    /// The `post_apply_template` lambda (server-context.cpp:5060
-    /// @7fe450e19): `handle_chat_completions` without the inference.
+    /// The `post_apply_template` lambda (server-context.cpp:5416
+    /// @d81235049): `handle_chat_completions` without the inference.
     fn postApplyTemplate(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -792,7 +795,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `get_models` lambda (server-context.cpp:5072 @7fe450e19).
+    /// The `get_models` lambda (server-context.cpp:5428 @d81235049).
     fn getModels(self: *Routes, _: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(true);
         errdefer res.destroy();
@@ -808,7 +811,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_tokenize` lambda (server-context.cpp:5084 @7fe450e19).
+    /// The `post_tokenize` lambda (server-context.cpp:5440 @d81235049).
     fn postTokenize(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -855,7 +858,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_detokenize` lambda (server-context.cpp:5125 @7fe450e19).
+    /// The `post_detokenize` lambda (server-context.cpp:5481 @d81235049).
     fn postDetokenize(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -875,17 +878,127 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_embeddings` lambda (server-context.cpp:5139 @7fe450e19).
+    /// The `post_embeddings` lambda (server-context.cpp:5495 @d81235049).
     fn postEmbeddings(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         return self.handleEmbeddingsImpl(req, .none);
     }
 
-    /// The `post_embeddings_oai` lambda (server-context.cpp:5143 @7fe450e19).
+    /// The `post_embeddings_oai` lambda (server-context.cpp:5499 @d81235049).
     fn postEmbeddingsOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         return self.handleEmbeddingsImpl(req, .oai_embd);
     }
 
-    /// The `post_rerank` lambda (server-context.cpp:5147 @7fe450e19).
+    /// The `post_systemone` lambda (server-context.cpp:5583 @d81235049): the
+    /// typed decision API. One task per variant of each question, or one
+    /// task for all the questions of a joint model.
+    fn postSystemone(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+        const res = try self.createResponse(false);
+        errdefer res.destroy();
+        const a = res.alloc();
+        const decision = &self.ctx_server.decision;
+        if (decision.type == .none) {
+            try res.errMsg("This model is not a decision model", .not_supported);
+            return &res.base;
+        }
+
+        const body = try json.parse(a, req.body);
+        const questions = try decision.parseQuestions(a, &body);
+
+        var files: std.ArrayList([]u8) = .empty;
+        const state = try decision.parseState(a, &body, &files);
+        if (files.items.len != 0 and (!decision.canUseImages() or !self.metaRef().has_inp_image)) {
+            try res.errMsg("This server does not support image input for decisions. For a model that supports it, start it with `--mmproj`", .not_supported);
+            return &res.base;
+        }
+        const fs: []const []const u8 = @ptrCast(files.items);
+
+        // one task per variant of each question, or one task for all the questions
+        {
+            var tasks: std.ArrayList(Task) = .empty;
+            defer {
+                for (tasks.items) |*t| t.deinit(gpa);
+                tasks.deinit(gpa);
+            }
+            if (decision.isJoint()) {
+                var task = Task.initType(.decision);
+                errdefer task.deinit(gpa);
+                task.params = try task_mod.TaskParams.init(try task.arenaAlloc(gpa));
+                task.id = res.rd.getNewId();
+                try decision.fillTaskJoint(a, gpa, &state, questions, fs, self.ctx_server.mctx, self.ctx_server.init_opt, &task);
+                try tasks.append(gpa, task);
+            } else {
+                for (questions) |*question| {
+                    for (0..decision.nVariants(question)) |variant| {
+                        var task = Task.initType(.decision);
+                        errdefer task.deinit(gpa);
+                        task.params = try task_mod.TaskParams.init(try task.arenaAlloc(gpa));
+                        task.id = res.rd.getNewId();
+                        try decision.fillTask(a, gpa, &state, questions, question, variant, fs, self.ctx_server.mctx, self.ctx_server.init_opt, &task);
+                        try tasks.append(gpa, task);
+                    }
+                }
+            }
+            if (decision.canSharePrompt()) {
+                var groups = try decision_mod.groupTasks(gpa, tasks.items, @intCast(self.params.n_parallel));
+                defer groups.deinit(gpa);
+                for (tasks.items) |*t| t.deinit(gpa);
+                tasks.clearRetainingCapacity();
+                try tasks.appendSlice(gpa, groups.items);
+            }
+            try res.rd.postTasks(tasks.items, false);
+            tasks.clearRetainingCapacity();
+        }
+
+        var all_results = try res.rd.waitForAll(ReqStop{ .req = req });
+        defer all_results.deinit(gpa);
+
+        if (all_results.is_terminated) {
+            return &res.base; // connection is closed
+        } else if (all_results.err) |e| {
+            var j = try e.toJson(a);
+            try res.err(&j);
+            return &res.base;
+        }
+
+        var answers = Value.emptyObject();
+        var n_tokens: i32 = 0;
+        var i_result: usize = 0;
+        var i_score: usize = 0;
+        for (questions) |*question| {
+            var scores: std.ArrayList([]const f32) = .empty;
+            if (decision.isJoint()) {
+                // one result with the scores of all the questions, in order
+                const result = all_results.results[0];
+                ggmlAssert(result != null and result.?.kind == .decision and i_score + question.options.len <= result.?.kind.decision.scores.len, 5644, "result != nullptr && i_score + question.options.size() <= result->scores.size()");
+                const sc = result.?.kind.decision.scores;
+                try scores.append(a, sc[i_score .. i_score + question.options.len]);
+                i_score += question.options.len;
+                n_tokens = result.?.kind.decision.n_tokens;
+            }
+            var variant: usize = 0;
+            while (!decision.isJoint() and variant < decision.nVariants(question)) : (variant += 1) {
+                const result = all_results.results[i_result];
+                i_result += 1;
+                ggmlAssert(result != null and result.?.kind == .decision, 5651, "result != nullptr");
+                try scores.append(a, result.?.kind.decision.scores);
+                n_tokens += result.?.kind.decision.n_tokens;
+            }
+            try answers.set(a, question.id, try decision.formatAnswer(a, question, scores.items));
+        }
+
+        var o = common.Obj.init(a);
+        try o.put("model", self.metaRef().model_name);
+        try o.put("answers", answers);
+        var usage = common.Obj.init(a);
+        try usage.put("input_tokens", n_tokens);
+        try usage.put("output_tokens", @as(i32, 0));
+        try o.put("usage", usage.done());
+        var root = o.done();
+        try res.ok(&root);
+        return &res.base;
+    }
+
+    /// The `post_rerank` lambda (server-context.cpp:5503 @d81235049).
     fn postRerank(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -956,7 +1069,7 @@ pub const Routes = struct {
             return &res.base;
         } else {
             for (all_results.results) |r| {
-                ggmlAssert(r.?.kind == .rerank, 5209, "dynamic_cast<server_task_result_rerank*>(res.get()) != nullptr");
+                ggmlAssert(r.?.kind == .rerank, 5565, "dynamic_cast<server_task_result_rerank*>(res.get()) != nullptr");
                 try responses.pushBack(a, try r.?.toJson(a));
             }
         }
@@ -968,7 +1081,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `get_lora_adapters` lambda (server-context.cpp:5227 @7fe450e19).
+    /// The `get_lora_adapters` lambda (server-context.cpp:5669 @d81235049).
     fn getLoraAdapters(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -980,10 +1093,10 @@ pub const Routes = struct {
         }
 
         // get the result
-        return self.finishSimple(res, req, .get_lora, 5250);
+        return self.finishSimple(res, req, .get_lora, 5692);
     }
 
-    /// The `post_lora_adapters` lambda (server-context.cpp:5255 @7fe450e19).
+    /// The `post_lora_adapters` lambda (server-context.cpp:5697 @d81235049).
     fn postLoraAdapters(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -1002,7 +1115,7 @@ pub const Routes = struct {
         }
 
         // get the result
-        return self.finishSimple(res, req, .apply_lora, 5284);
+        return self.finishSimple(res, req, .apply_lora, 5726);
     }
 
     /// The common tail of the single-task handlers: wait for the one
@@ -1066,8 +1179,8 @@ pub const Routes = struct {
         return self.finishSimple(res, req, kind, line);
     }
 
-    /// Ports `server_routes`'s `handle_slots_save` (server-context.cpp:5290
-    /// @7fe450e19). Its result is not type-checked, as upstream's is not.
+    /// Ports `server_routes`'s `handle_slots_save` (server-context.cpp:5732
+    /// @d81235049). Its result is not type-checked, as upstream's is not.
     fn handleSlotsSave(self: *Routes, req: *const http.Req, id_slot: c_int) !*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -1085,7 +1198,7 @@ pub const Routes = struct {
 
         const result = (try res.rd.next(ReqStop{ .req = req })) orelse {
             // connection was closed
-            ggmlAssert(req.should_stop.call(), 5313, "req.should_stop()");
+            ggmlAssert(req.should_stop.call(), 5755, "req.should_stop()");
             return &res.base;
         };
         defer result.destroy(gpa);
@@ -1100,17 +1213,17 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// Ports `server_routes`'s `handle_slots_restore` (server-context.cpp:5326 @7fe450e19).
+    /// Ports `server_routes`'s `handle_slots_restore` (server-context.cpp:5768 @d81235049).
     fn handleSlotsRestore(self: *Routes, req: *const http.Req, id_slot: c_int) !*http.Res {
-        return self.postSlotAction(req, .slot_restore, id_slot, .slot_save_load, 5358);
+        return self.postSlotAction(req, .slot_restore, id_slot, .slot_save_load, 5800);
     }
 
-    /// Ports `server_routes`'s `handle_slots_erase` (server-context.cpp:5363 @7fe450e19).
+    /// Ports `server_routes`'s `handle_slots_erase` (server-context.cpp:5805 @d81235049).
     fn handleSlotsErase(self: *Routes, req: *const http.Req, id_slot: c_int) !*http.Res {
-        return self.postSlotAction(req, .slot_erase, id_slot, .slot_erase, 5385);
+        return self.postSlotAction(req, .slot_erase, id_slot, .slot_erase, 5827);
     }
 
-    /// Ports `server_routes`'s `handle_embeddings_impl` (server-context.cpp:5390 @7fe450e19).
+    /// Ports `server_routes`'s `handle_embeddings_impl` (server-context.cpp:5832 @d81235049).
     fn handleEmbeddingsImpl(self: *Routes, req: *const http.Req, res_type_in: ResponseType) !*http.Res {
         var res_type = res_type_in;
         const res = try self.createResponse(false);
@@ -1151,11 +1264,41 @@ pub const Routes = struct {
             }
         }
 
-        var tokenized_prompts = try tokens_mod.tokenizeInputPrompts(gpa, self.ctx_server.vocab, self.ctx_server.mctx, prompt, true, true, self.ctx_server.init_opt);
+        // same shapes as tokenize_input_prompts(), plus OAI content: { "content": [ { "type": "text"|"image_url"|"input_audio"|"input_video", ... } ] }
+        const TokenizeEntry = struct {
+            fn run(r: *Routes, p: *const Value) !ServerTokens {
+                if (p.isObject() and p.contains("content")) {
+                    return oaicompat.tokenizeOaiContentArray(gpa, r.ctx_server.vocab, r.ctx_server.mctx, r.metaRef().chat_params, try p.at("content"), true, true, r.ctx_server.init_opt);
+                }
+                return tokens_mod.tokenizeInputSubprompt(gpa, r.ctx_server.vocab, r.ctx_server.mctx, p, true, true, r.ctx_server.init_opt);
+            }
+        };
+
+        var tokenized_prompts: std.ArrayList(ServerTokens) = .empty;
         defer {
             for (tokenized_prompts.items) |*t| t.deinit();
             tokenized_prompts.deinit(gpa);
         }
+        if (prompt.isArray() and !common.jsonIsArrayAndContainsNumbers(prompt)) {
+            for (prompt.array.items) |*p| {
+                var t = try TokenizeEntry.run(self, p);
+                tokenized_prompts.append(gpa, t) catch |e| {
+                    t.deinit();
+                    return e;
+                };
+            }
+        } else {
+            var t = try TokenizeEntry.run(self, prompt);
+            tokenized_prompts.append(gpa, t) catch |e| {
+                t.deinit();
+                return e;
+            };
+        }
+        if (tokenized_prompts.items.len == 0) {
+            try res.errMsg("\"input\" must not be empty", .invalid_request);
+            return &res.base;
+        }
+
         for (tokenized_prompts.items) |*t| {
             // this check is necessary for models that do not add BOS token to the input
             if (t.empty()) {
@@ -1209,7 +1352,7 @@ pub const Routes = struct {
             return &res.base;
         } else {
             for (all_results.results) |r| {
-                ggmlAssert(r.?.kind == .embd, 5475, "dynamic_cast<server_task_result_embd*>(res.get()) != nullptr");
+                ggmlAssert(r.?.kind == .embd, 5937, "dynamic_cast<server_task_result_embd*>(res.get()) != nullptr");
                 try responses.pushBack(a, try r.?.toJson(a));
             }
         }
@@ -1223,8 +1366,8 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// Ports `server_routes`'s `handle_count_tokens` (server-context.cpp:5488
-    /// @7fe450e19): the prompt a chat, Responses or Anthropic request would
+    /// Ports `server_routes`'s `handle_count_tokens` (server-context.cpp:5950
+    /// @d81235049): the prompt a chat, Responses or Anthropic request would
     /// render, counted in tokens.
     fn handleCountTokens(self: *Routes, req: *const http.Req, res_type: ResponseType) !*http.Res {
         const res = try self.createResponse(false);
@@ -1277,9 +1420,9 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// Ports `server_routes`'s `handle_completions_impl` (server-context.cpp:4257 @7fe450e19).
+    /// Ports `server_routes`'s `handle_completions_impl` (server-context.cpp:4608 @d81235049).
     fn handleCompletionsImpl(self: *Routes, req: *const http.Req, ty: TaskType, data: *Value, files: []const []u8, res_type: ResponseType) !*http.Res {
-        ggmlAssert(ty == .completion or ty == .infill, 4263, "type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL");
+        ggmlAssert(ty == .completion or ty == .infill, 4614, "type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL");
 
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -1312,10 +1455,10 @@ pub const Routes = struct {
             } else {
                 var arr = Value.emptyArray();
                 for (all_results.results) |r| {
-                    ggmlAssert(r.?.kind == .cmpl_final, 4361, "dynamic_cast<server_task_result_cmpl_final*>(res.get()) != nullptr");
+                    ggmlAssert(r.?.kind == .cmpl_final, 4712, "dynamic_cast<server_task_result_cmpl_final*>(res.get()) != nullptr");
                     try arr.pushBack(a, try r.?.toJson(a));
                 }
-                ggmlAssert(arr.array.items.len != 0, 4364, "!arr.empty() && \"empty results\"");
+                ggmlAssert(arr.array.items.len != 0, 4715, "!arr.empty() && \"empty results\"");
                 if (arr.array.items.len == 1) {
                     // if single request, return single object instead of array
                     try res.ok(&arr.array.items[0]);
@@ -1338,7 +1481,7 @@ pub const Routes = struct {
             // this is to match the OAI API behavior
             // ref: https://github.com/ggml-org/llama.cpp/pull/16486#discussion_r2419657309
             const first_result = (try res.rd.next(ReqStop{ .req = req })) orelse {
-                ggmlAssert(req.should_stop.call(), 4386, "req.should_stop()");
+                ggmlAssert(req.should_stop.call(), 4737, "req.should_stop()");
                 return &res.base; // connection is closed
             };
             defer first_result.destroy(gpa);
@@ -1349,7 +1492,7 @@ pub const Routes = struct {
                 return &res.base;
             }
 
-            ggmlAssert(first_result.kind == .cmpl_partial or first_result.kind == .cmpl_final, 4395, "dynamic_cast<server_task_result_cmpl_partial*>(first_result.get()) != nullptr || dynamic_cast<server_task_result_cmpl_final*>  (first_result.get()) != nullptr");
+            ggmlAssert(first_result.kind == .cmpl_partial or first_result.kind == .cmpl_final, 4746, "dynamic_cast<server_task_result_cmpl_partial*>(first_result.get()) != nullptr || dynamic_cast<server_task_result_cmpl_final*>  (first_result.get()) != nullptr");
 
             // next responses are streamed
             // to be sent immediately
@@ -1373,8 +1516,8 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `try` block of `handle_completions_impl` (server-context.cpp:4257
-    /// @7fe450e19): tokenize, build one task per prompt (and its children),
+    /// The `try` block of `handle_completions_impl` (server-context.cpp:4608
+    /// @d81235049): tokenize, build one task per prompt (and its children),
     /// post them.
     fn postCompletionTasks(self: *Routes, res: *ResGenerator, ty: TaskType, data: *Value, files: []const []u8, res_type: ResponseType, completion_id: []const u8, sse_ping_interval: *i32) !void {
         const params = self.params;
@@ -1454,7 +1597,7 @@ pub const Routes = struct {
     }
 
     /// The `path_prompts_log_dir` block of `handle_completions_impl`
-    /// (server-context.cpp:4257 @7fe450e19): the prompt, written to a file
+    /// (server-context.cpp:4608 @d81235049): the prompt, written to a file
     /// named for the time.
     fn logPrompt(a: Allocator, dir: []const u8, prompt: *const Value) !void {
         const name = try std.fmt.allocPrint(a, "{d:0>12}.txt", .{c.ggml_time_ms()});
@@ -1472,7 +1615,7 @@ pub const Routes = struct {
     }
 
     /// The `set_next` lambda of `handle_completions_impl`
-    /// (server-context.cpp:4257 @7fe450e19): one result per call as SSE, a
+    /// (server-context.cpp:4608 @d81235049): one result per call as SSE, a
     /// ping when the stream stays silent, `[DONE]` at the end where the
     /// format has one.
     fn streamNext(ctx: ?*anyopaque, output: *std.ArrayList(u8), oa: Allocator) anyerror!bool {
@@ -1492,7 +1635,7 @@ pub const Routes = struct {
         };
     }
 
-    /// The `format_error` lambda of the streaming lambda (server-context.cpp:4415 @7fe450e19).
+    /// The `format_error` lambda of the streaming lambda (server-context.cpp:4766 @d81235049).
     fn formatError(a: Allocator, res_type: ResponseType, res_json: *const Value) ![]u8 {
         if (res_type == .anthropic) {
             var o = common.Obj.init(a);
@@ -1563,7 +1706,7 @@ pub const Routes = struct {
 
         const result = result_opt orelse {
             srv(.dbg, func, "%s", .{@as([*:0]const u8, "stopping streaming due to should_stop condition\n")});
-            ggmlAssert(res_this.shouldStop(), 4484, "effective_should_stop()");
+            ggmlAssert(res_this.shouldStop(), 4835, "effective_should_stop()");
             return false; // should_stop condition met
         };
         defer result.destroy(gpa);
@@ -1579,7 +1722,7 @@ pub const Routes = struct {
             srv(.dbg, func, "%s", .{@as([*:0]const u8, "error received during streaming, terminating stream\n")});
             return false; // terminate on error
         } else {
-            ggmlAssert(result.kind == .cmpl_partial or result.kind == .cmpl_final, 4495, "dynamic_cast<server_task_result_cmpl_partial*>(result.get()) != nullptr || dynamic_cast<server_task_result_cmpl_final*>(result.get()) != nullptr");
+            ggmlAssert(result.kind == .cmpl_partial or result.kind == .cmpl_final, 4846, "dynamic_cast<server_task_result_cmpl_partial*>(result.get()) != nullptr || dynamic_cast<server_task_result_cmpl_final*>(result.get()) != nullptr");
             var res_json = try result.toJson(a);
             if (res_type == .anthropic) {
                 try output.appendSlice(oa, try common.formatAnthropicSse(a, &res_json));
@@ -1594,14 +1737,14 @@ pub const Routes = struct {
         return true;
     }
 
-    /// Ports `server_routes`'s `get_model_info` (server-context.cpp:4646
-    /// @7fe450e19): for router mode.
+    /// Ports `server_routes`'s `get_model_info` (server-context.cpp:5002
+    /// @d81235049): for router mode.
     pub fn getModelInfo(self: *const Routes, a: Allocator) !Value {
         return getResModelInfo(a, self.metaRef());
     }
 
-    /// Ports `server_routes`'s `update_cached_responses` (server-context.cpp:5539
-    /// @7fe450e19): the caller is the task queue, so the context can be
+    /// Ports `server_routes`'s `update_cached_responses` (server-context.cpp:6001
+    /// @d81235049): the caller is the task queue, so the context can be
     /// read without holding locks.
     fn updateCachedResponses(self: *Routes, is_sleeping: bool) !void {
         _ = std.c.pthread_mutex_lock(&self.mutex_cache);
@@ -1647,7 +1790,7 @@ fn jsonValueStringsOr(a: Allocator, body: *const Value, key: []const u8, default
     return a.dupe([]const u8, default_value);
 }
 
-/// Ports `get_res_model_info` (server-context.cpp:4543 @7fe450e19): do NOT
+/// Ports `get_res_model_info` (server-context.cpp:4894 @d81235049): do NOT
 /// use the context here, so it works during sleep.
 fn getResModelInfo(a: Allocator, meta: *const Meta) !Value {
     var o = common.Obj.init(a);
@@ -1655,11 +1798,18 @@ fn getResModelInfo(a: Allocator, meta: *const Meta) !Value {
     try o.put("aliases", meta.model_aliases);
     try o.put("tags", meta.model_tags);
     try o.put("object", "model");
+    try o.put("architecture", try common.serverModelArchitectureJson(
+        a,
+        meta.has_inp_image,
+        meta.has_inp_audio,
+        meta.has_inp_video,
+        meta.model_output_modalities,
+    ));
     try o.put("created", @as(i64, ctime(null)));
     try o.put("owned_by", "llamacpp");
     var m = common.Obj.init(a);
     // since v0.5.0 an enum is its underlying type in a `common_json_value`
-    // (json.h:86 @7fe450e19); before, `llama_vocab_type` converted to `bool`
+    // (json.h:86 @d81235049); before, `llama_vocab_type` converted to `bool`
     try m.put("vocab_type", @as(c_uint, @intCast(meta.model_vocab_type)));
     try m.put("n_vocab", meta.model_vocab_n_tokens);
     try m.put("n_ctx", meta.slot_n_ctx);
@@ -1672,7 +1822,7 @@ fn getResModelInfo(a: Allocator, meta: *const Meta) !Value {
     return o.done();
 }
 
-/// Ports `get_res_models` (server-context.cpp:4566 @7fe450e19).
+/// Ports `get_res_models` (server-context.cpp:4922 @d81235049).
 fn getResModels(a: Allocator, meta: *const Meta) !Value {
     var model = common.Obj.init(a);
     try model.put("name", meta.model_name);
@@ -1710,7 +1860,7 @@ fn getResModels(a: Allocator, meta: *const Meta) !Value {
     return o.done();
 }
 
-/// Ports `get_res_props` (server-context.cpp:4599 @7fe450e19): do NOT use
+/// Ports `get_res_props` (server-context.cpp:4955 @d81235049): do NOT use
 /// the context here, so it works during sleep.
 fn getResProps(a: Allocator, meta: *const Meta, params: *const Params, is_sleeping: bool) !Value {
     var tparams = try task_mod.TaskParams.init(a);

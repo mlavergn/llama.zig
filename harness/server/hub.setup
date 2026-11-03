@@ -36,7 +36,8 @@ INI
 cat > "$h/repos/test/badref.refs" <<JSON
 {"branches": [{"name": "../escape", "targetCommit": "0123456789012345678901234567890123456789"},
               {"name": "dev", "targetCommit": "not-a-commit"},
-              {"name": 7}]}
+              {"name": 7},
+              {"name": "../both", "targetCommit": "neither"}]}
 JSON
 
 # a preset over a cached model, hiding its cache entry
@@ -51,6 +52,47 @@ hf-repo = test/tiny:Q8_0
 model = $FIX
 spec-draft-hf = test/tiny:Q8_0
 dedup-cache-models = 1
+INI
+
+# a repository whose only branch is nested: its ref is written to
+# refs/release/v1, the directory made first (fs_write_atomic)
+mkdir -p "$h/repos/test/nestedref"
+cp "$FIX" "$h/repos/test/nestedref/nested-Q4_K_M.gguf"
+cat > "$h/repos/test/nestedref.refs" <<JSON
+{"branches": [{"name": "release/v1", "targetCommit": "89abcdef0123456789abcdef0123456789abcdef"}]}
+JSON
+
+# v0.6.0: a Hugging Face cache made by hand, read offline by the router's
+# update_caps (server-models.cpp): a decision model's GGUF metadata makes
+# its output modality "decisions", and a preset's hf-file now picks the
+# file (LLAMA_ARG_HF_FILE). hub.cases copies it per side (!fresh hfcache)
+GG="$ROOT/harness/server/router.gguf.py"
+C=0123456789abcdef0123456789abcdef01234567
+for r in judge vision; do
+  mkdir -p "$DATA/hfcache/models--test--$r/refs" "$DATA/hfcache/models--test--$r/snapshots/$C"
+  printf '%s' "$C" > "$DATA/hfcache/models--test--$r/refs/main"
+done
+cp "$FIX" "$DATA/hfcache/models--test--judge/snapshots/$C/judge-Q4_K_M.gguf"
+python3 "$GG" "$FIX" "$DATA/hfcache/models--test--judge/snapshots/$C/judge-Q8_0.gguf" '{arch}.decision.type=arch-str:nimble'
+cp "$FIX" "$DATA/hfcache/models--test--vision/snapshots/$C/model-Q4_K_M.gguf"
+cp "$MM/gemma3.gguf" "$DATA/hfcache/models--test--vision/snapshots/$C/mmproj-model-f16.gguf"
+cat > "$DATA/judge.ini" <<INI
+[judge-q8]
+hf-repo = test/judge
+hf-file = judge-Q8_0.gguf
+[judge-default]
+hf-repo = test/judge
+[vision-plain]
+hf-repo = test/vision
+no-mmproj = 1
+INI
+# v0.6.0: a model the router cannot resolve offline (update_caps logs it
+# and keeps the text default) until its child has downloaded and loaded it
+# -- with the projector, which the child reports (update_status)
+cat > "$DATA/byurl.ini" <<INI
+[byurl]
+model = byurl.gguf
+ctx-size = 256
 INI
 
 : > "$DATA/pids"

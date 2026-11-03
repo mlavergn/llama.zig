@@ -7,22 +7,22 @@
 //! - `llama.cpp/src/llama-cparams.h` -- `LLAMA_MAX_SEQ` and `llama_cparams`
 //! - `llama.cpp/src/llama-cparams.cpp` -- `llama_max_parallel_sequences`
 //!
-//! All at v0.5.0 (`7fe450e19`).
+//! All at v0.6.0 (`d81235049`).
 
 const std = @import("std");
 const impl = @import("impl.zig");
 
 const c = impl.c;
 
-/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @7fe450e19).
+/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @d81235049).
 pub const max_seq: u32 = 256;
 
-/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @7fe450e19).
+/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @d81235049).
 pub fn maxParallelSequences() usize {
     return max_seq;
 }
 
-/// Mirrors `llama_cparams` (llama-cparams.h:10 @7fe450e19).
+/// Mirrors `llama_cparams` (llama-cparams.h:10 @d81235049).
 pub const Cparams = struct {
     /// Context size used during inference.
     n_ctx: u32 = 0,
@@ -76,6 +76,8 @@ pub const Cparams = struct {
     op_offload: bool = false,
     kv_unified: bool = false,
     pipeline_parallel: bool = false,
+    /// Set by `llama_opt_init`.
+    training: bool = false,
 
     /// `std::vector<bool>`, `[n_layer()]`: extract each layer's input
     /// embeddings. Shares its storage across copies: the C++ copies the

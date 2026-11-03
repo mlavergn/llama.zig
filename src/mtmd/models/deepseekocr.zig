@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/deepseekocr.cpp` at v0.5.0
-//! (`7fe450e19`). Each declaration names the C++ it replaces and the line
+//! Ports `llama.cpp/tools/mtmd/models/deepseekocr.cpp` at v0.6.0
+//! (`d81235049`). Each declaration names the C++ it replaces and the line
 //! it began at.
 
 const std = @import("std");
@@ -20,7 +20,7 @@ const nb = graph.nb;
 
 extern fn sqrtf(x: f32) f32;
 
-/// Ports `window_partition` (deepseekocr.cpp:5 @7fe450e19).
+/// Ports `window_partition` (deepseekocr.cpp:5 @d81235049).
 fn windowPartition(ctx0: ?*c.ggml_context, x: T, window: c_int) T {
     const ch = ne(x, 0);
     const w = ne(x, 1);
@@ -43,7 +43,7 @@ fn windowPartition(ctx0: ?*c.ggml_context, x: T, window: c_int) T {
     return cur;
 }
 
-/// Ports `window_unpartition` (deepseekocr.cpp:28 @7fe450e19).
+/// Ports `window_unpartition` (deepseekocr.cpp:28 @d81235049).
 fn windowUnpartition(ctx0: ?*c.ggml_context, x: T, w: c_int, h: c_int, window: c_int) T {
     const ch = ne(x, 0);
     // same as
@@ -65,7 +65,7 @@ fn windowUnpartition(ctx0: ?*c.ggml_context, x: T, w: c_int, h: c_int, window: c
     return cur;
 }
 
-/// Ports `get_rel_pos` (deepseekocr.cpp:53 @7fe450e19).
+/// Ports `get_rel_pos` (deepseekocr.cpp:53 @d81235049).
 fn getRelPos(ctx0: ?*c.ggml_context, rel_pos: T, indices: T, q_size: c_int, k_size: c_int) T {
     const C = ne(rel_pos, 0); // channels
     const L = ne(rel_pos, 1); // length
@@ -98,7 +98,7 @@ fn getRelPos(ctx0: ?*c.ggml_context, rel_pos: T, indices: T, q_size: c_int, k_si
     return cur; // [C, k_size, q_size]
 }
 
-/// Ports `conv_2d_f32` (deepseekocr.cpp:92 @7fe450e19): `ggml_conv_2d`
+/// Ports `conv_2d_f32` (deepseekocr.cpp:92 @d81235049): `ggml_conv_2d`
 /// with the im2col kept in F32.
 fn conv2dF32(ctx0: ?*c.ggml_context, a: T, b: T, s0: c_int, s1: c_int, p0: c_int, p1: c_int, d0: c_int, d1: c_int) T {
     const im2col_type: c.ggml_type = if (a.?.type == c.GGML_TYPE_F16) c.GGML_TYPE_F16 else c.GGML_TYPE_F32;
@@ -112,7 +112,7 @@ fn conv2dF32(ctx0: ?*c.ggml_context, a: T, b: T, s0: c_int, s1: c_int, p0: c_int
     return result;
 }
 
-/// Ports `build_sam` (deepseekocr.cpp:108 @7fe450e19), a member of
+/// Ports `build_sam` (deepseekocr.cpp:108 @d81235049), a member of
 /// `clip_graph_deepseekocr`: the SAM encoder, shared with DeepSeek-OCR 2.
 pub fn buildSam(g: *graph.Graph, inp_raw: T) T {
     const ctx0 = g.ctx0;
@@ -255,7 +255,7 @@ pub fn buildSam(g: *graph.Graph, inp_raw: T) T {
     return cur;
 }
 
-/// Ports `build` (deepseekocr.cpp:267 @7fe450e19), a member of `clip_graph_deepseekocr`.
+/// Ports `build` (deepseekocr.cpp:267 @d81235049), a member of `clip_graph_deepseekocr`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

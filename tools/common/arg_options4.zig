@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports that stretch of `common_params_parser_init` (arg.cpp:1391 @7fe450e19)
-//! from `llama.cpp/common/arg.cpp` (v0.5.0, `7fe450e19`), as
+//! Ports that stretch of `common_params_parser_init` (arg.cpp:1397 @d81235049)
+//! from `llama.cpp/common/arg.cpp` (v0.6.0, `d81235049`), as
 //! `arg_options.zig` describes, with `arg_removed` from the same file and
 //! the speculative type names from `llama.cpp/common/speculative.cpp`:
 //! `common_speculative_type_from_name_map`,
@@ -42,12 +42,12 @@ fn tf(b: bool) [*:0]const u8 {
     return if (b) "true" else "false";
 }
 
-/// Ports `arg_removed` (arg.cpp:343 @7fe450e19).
+/// Ports `arg_removed` (arg.cpp:343 @d81235049).
 fn argRemoved(comptime msg: []const u8) error{Throw} {
     return throwStr("the argument has been removed. " ++ msg);
 }
 
-/// Ports `common_speculative_type_from_name_map` (speculative.cpp:33 @7fe450e19),
+/// Ports `common_speculative_type_from_name_map` (speculative.cpp:72 @d81235049),
 /// in the `std::map`'s key order.
 const type_from_name_map = [_]struct { []const u8, SpeculativeType }{
     .{ "draft-dflash", .draft_dflash }, .{ "draft-dspark", .draft_dspark },
@@ -58,7 +58,7 @@ const type_from_name_map = [_]struct { []const u8, SpeculativeType }{
     .{ "none", .none },
 };
 
-/// Ports `common_speculative_type_name_str` (speculative.cpp:2222 @7fe450e19).
+/// Ports `common_speculative_type_name_str` (speculative.cpp:2283 @d81235049).
 fn typeNameStr(a: std.mem.Allocator, types: []const SpeculativeType) ![:0]const u8 {
     var result: std.ArrayList(u8) = .empty;
     for (types, 0..) |t, i| {
@@ -68,14 +68,14 @@ fn typeNameStr(a: std.mem.Allocator, types: []const SpeculativeType) ![:0]const 
     return result.toOwnedSliceSentinel(a, 0);
 }
 
-/// Ports `common_speculative_all_types_str` (speculative.cpp:2234 @7fe450e19).
+/// Ports `common_speculative_all_types_str` (speculative.cpp:2295 @d81235049).
 fn allTypesStr(a: std.mem.Allocator) ![:0]const u8 {
     var types: [@backingInt(SpeculativeType.count)]SpeculativeType = undefined;
     for (&types, 0..) |*t, i| t.* = @fromBackingInt(@intCast(i));
     return typeNameStr(a, &types);
 }
 
-/// Ports `common_speculative_types_from_names` (speculative.cpp:2263 @7fe450e19).
+/// Ports `common_speculative_types_from_names` (speculative.cpp:2324 @d81235049).
 fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) !std.ArrayList(SpeculativeType) {
     var types: std.ArrayList(SpeculativeType) = .empty;
     for (names) |name| {
@@ -245,7 +245,7 @@ pub fn add(ctx: *Context) !void {
         .handler = .{
             .void_ = struct {
                 fn f(q: *Params) !void {
-                    // `llm_ffn_exps_cpu_override` (common/common.h:1139 @7fe450e19)
+                    // `llm_ffn_exps_cpu_override` (common/common.h:1232 @d81235049)
                     try q.speculative.draft.tensor_buft_overrides.append(q.arena, .{ .pattern = options2.llm_ffn_exps_regex, .buft = c.ggml_backend_cpu_buffer_type() });
                 }
             }.f,
@@ -312,6 +312,18 @@ pub fn add(ctx: *Context) !void {
             q.speculative.draft.backend_sampling = value;
         }
     }.f } }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_SPEC_DRAFT_BACKEND_SAMPLING"));
+    // arg.cpp:4222
+    try ctx.add((Arg{ .args = &.{"--spec-draft-sampling"}, .value_hint = "{greedy,probabilistic}", .help = try ctx.fmt("how the draft is sampled: greedy takes its argmax, probabilistic samples it and has the target verify by rejection sampling (default: %s)", .{@as([*:0]const u8, if (p.speculative.draft.probabilistic) "probabilistic" else "greedy")}), .handler = .{ .string = struct {
+        fn f(q: *Params, value: S) !void {
+            if (std.mem.eql(u8, value, "greedy")) {
+                q.speculative.draft.probabilistic = false;
+            } else if (std.mem.eql(u8, value, "probabilistic")) {
+                q.speculative.draft.probabilistic = true;
+            } else {
+                return arg.throwStr("invalid value, must be one of: greedy, probabilistic");
+            }
+        }
+    }.f } }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_SPEC_DRAFT_SAMPLING"));
     // arg.cpp:4208
     try ctx.add((Arg{ .args = &.{ "--spec-draft-device", "-devd", "--device-draft" }, .value_hint = "<dev1,dev2,..>", .help = "comma-separated list of devices to use for offloading the draft model (none = don't offload, default: follows --device)\nuse --list-devices to see a list of available devices", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -349,7 +361,7 @@ pub fn add(ctx: *Context) !void {
                 }
             }.f,
         },
-    }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_SPEC_DRAFT_MODEL"));
+    }).setSpec().setExamples(&.{ .speculative, .server, .cli, .imatrix }).setEnv("LLAMA_ARG_SPEC_DRAFT_MODEL"));
     // arg.cpp:4244
     try ctx.add((Arg{ .args = &.{"--spec-type"}, .value_hint = try allTypesStr(p.arena), .help = try ctx.fmt("comma-separated list of types of speculative decoding to use (default: %s)\n", .{(try typeNameStr(p.arena, p.speculative.types.items)).ptr}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {

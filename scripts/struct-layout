@@ -4,12 +4,12 @@
 # `src/ggml/metal/device_c.zig` hand-declares `ggml_metal_device_props`
 # instead of importing `ggml-metal-device.h`, because that header would
 # have to join `impl.zig`'s single cImport and widen the `c` namespace
-# every ported file sees. The struct is 19 fields of which the port reads
+# every ported file sees. The struct is 18 fields of which the port reads
 # seven; the rest exist only to place those seven correctly.
 #
-# It also checks two generated files for the same reason: the 127
-# `FC_*`/`OP_*`/`N_*` constants in `metal/impl_c.zig`, and the 65
-# `ggml_metal_kargs_*` structs in `metal/kargs.zig` -- 936 fields the
+# It also checks two generated files for the same reason: the 136
+# `FC_*`/`OP_*`/`N_*` constants in `metal/impl_c.zig`, and the 71
+# `ggml_metal_kargs_*` structs in `metal/kargs.zig` -- the fields the
 # Metal kernels read **by offset**, where one wrong offset feeds a kernel
 # a different number with nothing in the ported code able to notice.
 #

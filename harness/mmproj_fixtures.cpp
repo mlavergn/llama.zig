@@ -8,7 +8,7 @@
 // each projector type's keys and tensor shapes here are read off
 // `llama.cpp/tools/mtmd/clip.cpp` (`load_hparams`, `load_tensors`,
 // `clip_n_mmproj_embd`) and the graph builders under `models/`, at
-// v0.5.0 (`7fe450e19`). Weights are small and random (fixed seed per
+// v0.6.0 (`d81235049`). Weights are small and random (fixed seed per
 // type), so a fixture checks plumbing and numerics, not output quality.
 //
 // Every projector targets n_embd 256, the arch fixtures' width. The text
@@ -590,6 +590,54 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_MM_GATE, "weight"), Hf, Fm);
         g.w(fmt(TN_MM_DOWN, "weight"), Fm, N_TEXT);
     }});
+    f.push_back({"glm5v", "qwen2vl", "vision", "img:64x64,96x48,20x12,40x200", [](G & g) {
+        // v0.6.0 (GLM-5.3-Flash): the glm4v tower without the pos-conv
+        // norm, every SwiGLU clamped, and its own ceil-aligned resize.
+        // The budgets put 96x48 above the max (the height search), 20x12
+        // below the min (the upscale) and 40x200 in between (the pad)
+        const int E = 64, P = 8, Em = 64, Hf = 96, Fm = 128;
+        vision(g, "glm5v", 64, P, false);
+        g.b(KEY_USE_SILU, true);
+        hp(g, "vision", E, 128, 4, 2, N_TEXT);
+        g.u32(KEY_SPATIAL_MERGE_SIZE, 2);
+        g.f32(KEY_SWIGLU_CLAMP, 0.3f);
+        g.u32(KEY_IMAGE_MIN_PIXELS, 32 * 32);
+        g.u32(KEY_IMAGE_MAX_PIXELS, 64 * 64);
+        patch_embd(g, P, E, 8 * 8);
+        g.t(TN_PATCH_EMBD_1, {P, P, 3, E}, 0.05f);
+        VitOpts o;
+        o.ln_bias = false;
+        o.gated = true;
+        vit_layers(g, "v", 2, E, 128, 4, o);
+        g.norm(fmt(TN_LN_POST, "v", "weight"), E);
+        g.t(fmt(TN_MM_PATCH_MERGER, "weight"), {2, 2, E, Em}, 0.05f);
+        g.bias(fmt(TN_MM_PATCH_MERGER, "bias"), Em);
+        g.w(fmt(TN_MM_PROJECTOR, "weight"), Em, Hf);
+        g.norm(fmt(TN_MM_POST_NORM, "weight"), Hf);
+        g.bias(fmt(TN_MM_POST_NORM, "bias"), Hf);
+        g.w(fmt(TN_MM_UP, "weight"), Hf, Fm);
+        g.w(fmt(TN_MM_GATE, "weight"), Hf, Fm);
+        g.w(fmt(TN_MM_DOWN, "weight"), Fm, N_TEXT);
+    }});
+    f.push_back({"ling3vl", "qwen3vl", "vision", "img:64x64,96x48", [](G & g) {
+        // v0.6.0 (Ling 3.0 VL): Qwen3-VL's tower through build_vit, a
+        // norm-only merger over n_embd, then the mm.0/mm.2 MLP
+        const int E = 64, P = 8, H = 128;
+        vision(g, "ling3vl", 64, P);
+        hp(g, "vision", E, 128, 4, 2, N_TEXT);
+        g.u32(KEY_SPATIAL_MERGE_SIZE, 2);
+        patch_embd(g, P, E, 8 * 8);
+        g.t(TN_PATCH_EMBD_1, {P, P, 3, E}, 0.05f);
+        VitOpts o;
+        o.qkv = true;
+        vit_layers(g, "v", 2, E, 128, 4, o);
+        g.norm(TN_MM_INP_NORM, E);
+        g.bias(TN_MM_INP_NORM_B, E);
+        g.w(fmt(TN_LLAVA_PROJ, 0, "weight"), 4 * E, H);
+        g.bias(fmt(TN_LLAVA_PROJ, 0, "bias"), H);
+        g.w(fmt(TN_LLAVA_PROJ, 2, "weight"), H, N_TEXT);
+        g.bias(fmt(TN_LLAVA_PROJ, 2, "bias"), N_TEXT);
+    }});
     f.push_back({"cogvlm", "qwen3", "vision", "img:32x32,60x40", [](G & g) {
         const int E = 32, P = 8, S = 32, Hc = 64, F = 96;
         vision(g, "cogvlm", S, P);
@@ -1004,7 +1052,7 @@ static std::vector<Fixture> fixtures() {
     // --- DeepSeek-OCR: a SAM ViT-B at a hardcoded 1024 px / patch 16 (640
     // and 768 px tiles), its neck and two stride-2 convs, then a CLIP or a
     // Qwen2 encoder. Since v0.5.0 the loader reads as many SAM blocks as
-    // sam.block_count says (clip.cpp:3239 @7fe450e19); through v0.4.1
+    // sam.block_count says (clip.cpp:3270 @d81235049); through v0.4.1
     // n_sam_layers was a model constant, 12. Only the 3 the key names are
     // written, so a loader that still reads 12 fails; block 2 is global
     // over 64x64 patches
@@ -1821,7 +1869,7 @@ static std::vector<Fixture> fixtures() {
     }});
     f.push_back({"qwen3tts_shared", "qwen3tts", "tts-qwen3", "tts:3", [qwen3tts](G & g) { qwen3tts(g, true); }});
 
-    // --- v0.5.0's loader range checks (clip.cpp:1413, 1465 @7fe450e19): a
+    // --- v0.5.0's loader range checks (clip.cpp:1420, 1472 @d81235049): a
     // good fixture with one key edited out of range must fail to load, each
     // with its own message, where through v0.4.1 the first indexed past the
     // layers and the second inserted the merger nowhere

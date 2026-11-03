@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma-embedding.cpp` at v0.5.0
-//! (`7fe450e19`): `llama_model_gemma_embedding`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/gemma-embedding.cpp` at v0.6.0
+//! (`d81235049`): `llama_model_gemma_embedding`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma_embedding`'s `load_arch_hparams` (models/gemma-embedding.cpp:3 @7fe450e19).
+/// Ports `llama_model_gemma_embedding`'s `load_arch_hparams` (models/gemma-embedding.cpp:3 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -53,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.f_attention_scale = 1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadK(0)));
 }
 
-/// Ports `llama_model_gemma_embedding`'s `load_arch_tensors` (models/gemma-embedding.cpp:30 @7fe450e19).
+/// Ports `llama_model_gemma_embedding`'s `load_arch_tensors` (models/gemma-embedding.cpp:30 @d81235049).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -95,22 +95,21 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma_embedding`'s `build_arch_graph` (models/gemma-embedding.cpp:69 @7fe450e19).
+/// Ports `llama_model_gemma_embedding`'s `build_arch_graph` (models/gemma-embedding.cpp:69 @d81235049).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma_embedding`'s `graph`
-/// (models/gemma-embedding.cpp:73 @7fe450e19).
+/// (models/gemma-embedding.cpp:73 @d81235049).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
 
-    var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
-
-    // Raw embeddings given as input (e.g. encoded images) are not scaled.
-    inpL = c.ggml_scale(ctx, inpL, if (b.ubatch.token != null) impl.sqrtf(@floatFromInt(b.n_embd)) else 1.0);
+    // Raw embeddings given as input (e.g. encoded images) are not scaled:
+    // the scale applies to the token rows only.
+    var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, impl.sqrtf(@floatFromInt(b.n_embd)));
     b.cb(inpL, "inp_scaled", -1);
 
     // The positions.

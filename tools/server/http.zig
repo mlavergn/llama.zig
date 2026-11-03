@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-http.cpp` and
-//! `llama.cpp/tools/server/server-http.h` (v0.5.0, `7fe450e19`), with
+//! `llama.cpp/tools/server/server-http.h` (v0.6.0, `d81235049`), with
 //! `common_http_parse_url` and `common_http_format_host` from
 //! `llama.cpp/common/http.h`, and `format_error_response` and
 //! `safe_json_to_str` from `llama.cpp/tools/server/server-common.cpp`, which
@@ -25,7 +25,9 @@
 //! does not accept gzip with 415. Without, the frontend paths are `{"/"}`
 //! and no asset route is registered. `--path` (`public_path`), which mounts
 //! a directory through cpp-httplib's file handler, is not ported: `init`
-//! refuses it.
+//! refuses it. With the UI off, `/sw.js` answers with a service worker that
+//! removes itself (v0.6.0), so a browser that cached the built-in UI drops
+//! it.
 //!
 //! # Handlers and exceptions
 //!
@@ -107,7 +109,7 @@ pub fn what(err: anyerror) ?[]const u8 {
 // -----------------------------------------------------------------------------
 // server-common.cpp
 
-/// `error_type` (server-common.h:58 @7fe450e19).
+/// `error_type` (server-common.h:58 @d81235049).
 pub const ErrorType = enum {
     invalid_request,
     authentication,
@@ -119,7 +121,7 @@ pub const ErrorType = enum {
     exceed_context_size,
 };
 
-/// Ports `format_error_response` (server-common.cpp:36 @7fe450e19):
+/// Ports `format_error_response` (server-common.cpp:36 @d81235049):
 /// `{"code", "message", "type"}`.
 ///
 /// Return: the object, owned by the caller.
@@ -142,7 +144,7 @@ pub fn formatErrorResponse(a: std.mem.Allocator, msg: []const u8, ty: ErrorType)
     return v;
 }
 
-/// Ports `safe_json_to_str` (server-common.cpp:1578 @7fe450e19): compact,
+/// Ports `safe_json_to_str` (server-common.cpp:1643 @d81235049): compact,
 /// bad UTF-8 replaced.
 ///
 /// Return: allocated by `a`.
@@ -167,7 +169,7 @@ fn errorBody(a: std.mem.Allocator, msg: []const u8, type_str: []const u8, code: 
 // -----------------------------------------------------------------------------
 // common/http.h
 
-/// Ports `common_http_format_host` (http.h:25 @7fe450e19): an IPv6 literal
+/// Ports `common_http_format_host` (http.h:25 @d81235049): an IPv6 literal
 /// bracketed.
 ///
 /// Return: allocated by `a`.
@@ -176,7 +178,7 @@ pub fn commonHttpFormatHost(a: std.mem.Allocator, host: []const u8) error{OutOfM
     return a.dupe(u8, host);
 }
 
-/// Ports `common_http_parse_url` (http.h:29 @7fe450e19) as far as
+/// Ports `common_http_parse_url` (http.h:29 @d81235049) as far as
 /// `origin_is_localhost` reads it: the host. A malformed URL throws in the
 /// C; this returns null.
 fn commonHttpParseUrlHost(a: std.mem.Allocator, url: []const u8) error{OutOfMemory}!?[]const u8 {
@@ -205,7 +207,7 @@ fn commonHttpParseUrlHost(a: std.mem.Allocator, url: []const u8) error{OutOfMemo
     return host;
 }
 
-/// Ports `origin_is_localhost` (server-http.cpp:74 @7fe450e19).
+/// Ports `origin_is_localhost` (server-http.cpp:74 @d81235049).
 fn originIsLocalhost(a: std.mem.Allocator, origin: []const u8) error{OutOfMemory}!bool {
     const host = try commonHttpParseUrlHost(a, origin) orelse return false;
     return std.mem.eql(u8, host, "localhost") or std.mem.eql(u8, host, "127.0.0.1") or std.mem.eql(u8, host, "::1");
@@ -281,7 +283,7 @@ pub fn SortedMap(comptime V: type) type {
 /// `std::map<std::string, std::string>`.
 pub const StringMap = SortedMap([]const u8);
 
-/// Ports `uploaded_file` (server-http.h:43 @7fe450e19).
+/// Ports `uploaded_file` (server-http.h:43 @d81235049).
 pub const UploadedFile = struct {
     data: []const u8,
     filename: []const u8,
@@ -293,7 +295,7 @@ pub const UploadedFile = struct {
 pub const ShouldStop = struct {
     req: ?*const httplib.Request,
     /// `[]() { return false; }`: what router mode's `proxy_request` passes
-    /// when `detached` (server-models.cpp:1599 @7fe450e19) is set.
+    /// when `detached` (server-models.cpp:1638 @d81235049) is set.
     never: bool = false,
 
     pub fn call(self: ShouldStop) bool {
@@ -303,7 +305,7 @@ pub const ShouldStop = struct {
     }
 };
 
-/// Ports `server_http_req` (server-http.h:49 @7fe450e19): what a handler is
+/// Ports `server_http_req` (server-http.h:49 @d81235049): what a handler is
 /// given. Every string is borrowed for the request's lifetime.
 pub const Req = struct {
     /// path_params + query_params
@@ -318,7 +320,7 @@ pub const Req = struct {
     files: SortedMap(UploadedFile) = .{},
     should_stop: ShouldStop = .{ .req = null },
 
-    /// Ports `get_param` (server-http.h:58 @7fe450e19), a member of
+    /// Ports `get_param` (server-http.h:58 @d81235049), a member of
     /// `server_http_req`.
     pub fn getParam(self: *const Req, key: []const u8, def: []const u8) []const u8 {
         if (self.params.get(key)) |v| return v.*;
@@ -326,7 +328,7 @@ pub const Req = struct {
     }
 };
 
-/// Ports `server_http_res` (server-http.h:21 @7fe450e19): one of two
+/// Ports `server_http_res` (server-http.h:21 @d81235049): one of two
 /// modes -- a whole body in `data`, or, with `next` set, a stream each
 /// call to which writes the next chunk (possibly empty) and says whether
 /// more follow. Owns an arena every string in it lives in.
@@ -384,7 +386,7 @@ pub const Res = struct {
         return self.arena.allocator();
     }
 
-    /// Ports `is_stream` (server-http.h:28 @7fe450e19), a member of
+    /// Ports `is_stream` (server-http.h:28 @d81235049), a member of
     /// `server_http_res`.
     pub fn isStream(self: *const Res) bool {
         return self.next != null;
@@ -411,7 +413,7 @@ pub const Res = struct {
     }
 };
 
-/// `handler_t` (server-http.h:74 @7fe450e19): a route. An error is an
+/// `handler_t` (server-http.h:74 @d81235049): a route. An error is an
 /// exception it threw; the server wraps every route in `ex_wrapper` so
 /// none escapes.
 pub const Handler = struct {
@@ -452,7 +454,7 @@ pub const Params = struct {
 // -----------------------------------------------------------------------------
 // GCP
 
-/// Ports `gcp_params` (server-http.cpp:84 @7fe450e19): the Vertex AI
+/// Ports `gcp_params` (server-http.cpp:84 @d81235049): the Vertex AI
 /// container's `AIP_*` variables.
 const GcpParams = struct {
     enabled: bool,
@@ -460,7 +462,7 @@ const GcpParams = struct {
     path_predict: []const u8,
     port: c_int,
 
-    /// Ports `gcp_params` (server-http.cpp:91 @7fe450e19), the constructor.
+    /// Ports `gcp_params` (server-http.cpp:91 @d81235049), the constructor.
     /// `std::stoi` on a bad `AIP_HTTP_PORT` throws out of it, uncaught, and
     /// terminates; so does this.
     fn init(a: std.mem.Allocator) error{OutOfMemory}!GcpParams {
@@ -478,7 +480,7 @@ const GcpParams = struct {
         };
     }
 
-    /// Ports `getenv` (server-http.cpp:98 @7fe450e19), a member of
+    /// Ports `getenv` (server-http.cpp:98 @d81235049), a member of
     /// `gcp_params`.
     fn getenvOr(a: std.mem.Allocator, name: [*:0]const u8, default_value: []const u8, ensure_leading_slash: bool) error{OutOfMemory}![]const u8 {
         const value = std.c.getenv(name) orelse return default_value;
@@ -489,7 +491,7 @@ const GcpParams = struct {
     }
 };
 
-/// Ports `path_to_gcp_format` (server-http.cpp:758 @7fe450e19): a route as
+/// Ports `path_to_gcp_format` (server-http.cpp:775 @d81235049): a route as
 /// its camelCase `@requestFormat` alias.
 fn pathToGcpFormat(a: std.mem.Allocator, path: []const u8) error{OutOfMemory}![]u8 {
     var s = path;
@@ -513,8 +515,8 @@ fn pathToGcpFormat(a: std.mem.Allocator, path: []const u8) error{OutOfMemory}![]
 // -----------------------------------------------------------------------------
 // The context
 
-/// Ports `server_http_context` (server-http.h:67 @7fe450e19), with its
-/// `Impl` (server-http.cpp:19 @7fe450e19): one cpp-httplib server per
+/// Ports `server_http_context` (server-http.h:67 @d81235049), with its
+/// `Impl` (server-http.cpp:19 @d81235049): one cpp-httplib server per
 /// listening address, each on a thread of its own, all handing their
 /// connections to one shared pool.
 pub const Context = struct {
@@ -542,7 +544,7 @@ pub const Context = struct {
 
     const default_params: Params = .{};
 
-    /// Ports `server_http_context` (server-http.cpp:37 @7fe450e19), the
+    /// Ports `server_http_context` (server-http.cpp:37 @d81235049), the
     /// constructor.
     ///
     /// Parameters:
@@ -560,7 +562,7 @@ pub const Context = struct {
     }
 
     /// Ports the destructor (`~server_http_context`, server-http.cpp:41
-    /// @7fe450e19): stops and joins, in case an exit path forgot to, then
+    /// @d81235049): stops and joins, in case an exit path forgot to, then
     /// frees the servers.
     pub fn deinit(self: *Context) void {
         self.stop();
@@ -577,7 +579,7 @@ pub const Context = struct {
         return self.arena.allocator();
     }
 
-    /// Ports `init` (server-http.cpp:111 @7fe450e19), a member of
+    /// Ports `init` (server-http.cpp:111 @d81235049), a member of
     /// `server_http_context`: a listener per host (`init_listener`), each
     /// IPv6-only when several TCP addresses are given, and the size of the
     /// pool they share.
@@ -628,10 +630,11 @@ pub const Context = struct {
         return true;
     }
 
-    /// Ports `init_listener` (server-http.cpp:158 @7fe450e19), a member of
+    /// Ports `init_listener` (server-http.cpp:158 @d81235049), a member of
     /// `server_http_context`: builds one listener -- default headers, the
     /// exception and error handlers, timeouts, socket options, the
-    /// middleware, the task queue over the shared pool, the UI routes --
+    /// middleware, the task queue over the shared pool, the UI routes, the
+    /// self-removing service worker when the built-in UI is not served --
     /// from `params`.
     ///
     /// Return: false where the C returns false.
@@ -679,7 +682,35 @@ pub const Context = struct {
         } else if (comptime ui.has_assets) {
             try self.registerUiRoutes(srv, params);
         }
+
+        // a browser that used the built-in UI keeps its service worker, so it shows the old UI even after the UI is replaced or disabled
+        // answer the worker's update check with a worker that removes itself; a sw.js in public_path is served first
+        // (`public_path` is refused above, so only a disabled UI reaches this)
+        if (!params.ui or params.public_path.len != 0) {
+            try srv.get(try std.mem.concat(a, u8, &.{ params.api_prefix, "/sw.js" }), .{ .ctx = null, .func = serveSwRemove });
+        }
         return true;
+    }
+
+    /// `sw_remove_js` (server-http.cpp:478 @d81235049): a service worker
+    /// that unregisters itself, empties its caches and reloads its windows.
+    const sw_remove_js =
+        \\
+        \\self.addEventListener('install', () => self.skipWaiting());
+        \\self.addEventListener('activate', (e) => e.waitUntil((async () => {
+        \\    await self.registration.unregister();
+        \\    for (const key of await caches.keys()) await caches.delete(key);
+        \\    for (const c of await self.clients.matchAll({ type: 'window' })) c.navigate(c.url);
+        \\})()));
+        \\
+    ;
+
+    /// The `/sw.js` route `init_listener` registers when the built-in UI is
+    /// not served: the lambda passed to `Get` (server-http.cpp:477
+    /// @d81235049).
+    fn serveSwRemove(_: ?*anyopaque, _: *const httplib.Request, res: *httplib.Response) anyerror!void {
+        try res.setHeader("Cache-Control", "no-cache");
+        try res.setContent(sw_remove_js, "application/javascript");
     }
 
     /// One embedded asset's route: what `serve_asset_cached` or
@@ -695,12 +726,12 @@ pub const Context = struct {
     /// `index.html`: its name is stable while its contents change on every build.
     const cache_revalidate = "no-cache";
 
-    /// `no_cache_names` (server-http.cpp:453 @7fe450e19): the PWA
+    /// `no_cache_names` (server-http.cpp:453 @d81235049): the PWA
     /// revalidation files.
     const no_cache_names = [_][]const u8{ "sw.js", "manifest.webmanifest", "_app/version.json", "build.json" };
 
     /// The `LLAMA_UI_HAS_ASSETS` arm of the UI setup in `init_listener`
-    /// (server-http.cpp:158 @7fe450e19), the block at its line 384: a route
+    /// (server-http.cpp:158 @d81235049), the block at its line 384: a route
     /// per embedded asset, the index at `/` and `/index.html`.
     fn registerUiRoutes(self: *Context, srv: *httplib.Server, params: *const Params) !void {
         const a = self.arenaAlloc();
@@ -730,7 +761,7 @@ pub const Context = struct {
         }
     }
 
-    /// The `handle_gzip_header` lambda (server-http.cpp:385 @7fe450e19): a
+    /// The `handle_gzip_header` lambda (server-http.cpp:385 @d81235049): a
     /// gzip build needs a client that accepts gzip.
     ///
     /// Return: false, with a 415 and its message set, when it does not.
@@ -748,8 +779,8 @@ pub const Context = struct {
         return true;
     }
 
-    /// The handlers `serve_asset_cached` (server-http.cpp:407 @7fe450e19)
-    /// and `serve_asset_nocache` (server-http.cpp:430 @7fe450e19) return: the
+    /// The handlers `serve_asset_cached` (server-http.cpp:407 @d81235049)
+    /// and `serve_asset_nocache` (server-http.cpp:430 @d81235049) return: the
     /// asset with its caching policy, and for a cached one its ETag and a 304
     /// when `If-None-Match` names it, plain or weak.
     fn serveAsset(ctx: ?*anyopaque, req: *const httplib.Request, res: *httplib.Response) anyerror!void {
@@ -781,7 +812,7 @@ pub const Context = struct {
     }
 
     /// The `new_task_queue` lambda: a `server_http_task_queue`
-    /// (server-http.cpp:28 @7fe450e19) over the pool `start` made, whose
+    /// (server-http.cpp:28 @d81235049) over the pool `start` made, whose
     /// `shutdown` and delete leave the pool alone -- `join` drains it.
     fn newTaskQueue(ctx: ?*anyopaque, _: std.mem.Allocator) anyerror!httplib.TaskQueue {
         const self: *Context = @ptrCast(@alignCast(ctx.?));
@@ -823,7 +854,7 @@ pub const Context = struct {
         }
     }
 
-    /// `frontend_paths` (server-http.cpp:242 @7fe450e19): "/", and "/"
+    /// `frontend_paths` (server-http.cpp:242 @d81235049): "/", and "/"
     /// plus every embedded asset's name.
     fn isFrontendPath(path: []const u8) bool {
         if (std.mem.eql(u8, path, "/")) return true;
@@ -898,7 +929,7 @@ pub const Context = struct {
         return .unhandled;
     }
 
-    /// Ports `start` (server-http.cpp:476 @7fe450e19), a member of
+    /// Ports `start` (server-http.cpp:493 @d81235049), a member of
     /// `server_http_context`: binds each listener -- a Unix socket for a
     /// host ending in `.sock`, any free port for port 0 -- then makes the
     /// shared pool and runs each accept loop on a thread of its own.
@@ -962,13 +993,13 @@ pub const Context = struct {
         }
     }
 
-    /// Ports `stop` (server-http.cpp:531 @7fe450e19), a member of
+    /// Ports `stop` (server-http.cpp:548 @d81235049), a member of
     /// `server_http_context`: every listener.
     pub fn stop(self: *const Context) void {
         for (self.servers.items) |s| s.stop();
     }
 
-    /// Ports `join` (server-http.cpp:539 @7fe450e19), a member of
+    /// Ports `join` (server-http.cpp:556 @d81235049), a member of
     /// `server_http_context`: waits for every accept loop, then drains and
     /// frees the shared pool -- queued requests still refer to their servers
     /// until the workers finish.
@@ -1003,13 +1034,13 @@ pub const Context = struct {
         };
     }
 
-    /// Ports `get` (server-http.cpp:658 @7fe450e19), a member of
+    /// Ports `get` (server-http.cpp:675 @d81235049), a member of
     /// `server_http_context`.
     pub fn get(self: *Context, path: []const u8, handler: Handler) !void {
         try self.registerRoute(path, handler, .get);
     }
 
-    /// Ports `post` (server-http.cpp:679 @7fe450e19), a member of
+    /// Ports `post` (server-http.cpp:696 @d81235049), a member of
     /// `server_http_context`: a `multipart/form-data` body becomes a JSON
     /// object of its text fields -- a repeated name an array -- and its
     /// files.
@@ -1017,7 +1048,7 @@ pub const Context = struct {
         try self.registerRoute(path, handler, .post);
     }
 
-    /// Ports `del` (server-http.cpp:730 @7fe450e19), a member of
+    /// Ports `del` (server-http.cpp:747 @d81235049), a member of
     /// `server_http_context`.
     pub fn del(self: *Context, path: []const u8, handler: Handler) !void {
         try self.registerRoute(path, handler, .del);
@@ -1068,7 +1099,7 @@ pub const Context = struct {
         try processHandlerResponse(request, response, res);
     }
 
-    /// Ports `register_gcp_compat` (server-http.cpp:797 @7fe450e19), a
+    /// Ports `register_gcp_compat` (server-http.cpp:814 @d81235049), a
     /// member of `server_http_context`: with `AIP_MODE=PREDICTION`, the
     /// health route's alias and a predict route that runs each instance's
     /// `@requestFormat` route on a thread of its own. Call it after every
@@ -1103,7 +1134,7 @@ pub const Context = struct {
     }
 };
 
-/// Ports `get_params` (server-http.cpp:585 @7fe450e19): the query
+/// Ports `get_params` (server-http.cpp:602 @d81235049): the query
 /// parameters, the last of a repeated name winning, then the path
 /// parameters, decoded, over them.
 fn getParams(a: std.mem.Allocator, req: *const httplib.Request) error{OutOfMemory}!StringMap {
@@ -1113,7 +1144,7 @@ fn getParams(a: std.mem.Allocator, req: *const httplib.Request) error{OutOfMemor
     return params;
 }
 
-/// Ports `get_headers` (server-http.cpp:596 @7fe450e19): the last of a
+/// Ports `get_headers` (server-http.cpp:613 @d81235049): the last of a
 /// repeated name winning, names compared exactly.
 fn getHeaders(a: std.mem.Allocator, req: *const httplib.Request) error{OutOfMemory}!StringMap {
     var headers: StringMap = .{};
@@ -1121,7 +1152,7 @@ fn getHeaders(a: std.mem.Allocator, req: *const httplib.Request) error{OutOfMemo
     return headers;
 }
 
-/// Ports `build_query_string` (server-http.cpp:604 @7fe450e19): the query
+/// Ports `build_query_string` (server-http.cpp:621 @d81235049): the query
 /// parameters, re-encoded, in the order sent.
 fn buildQueryString(a: std.mem.Allocator, req: *const httplib.Request) error{OutOfMemory}![]u8 {
     var qs: std.ArrayList(u8) = .empty;
@@ -1134,7 +1165,7 @@ fn buildQueryString(a: std.mem.Allocator, req: *const httplib.Request) error{Out
     return qs.toOwnedSlice(a);
 }
 
-/// Ports `decode_path_component` (server-http.cpp:561 @7fe450e19): `%XX`
+/// Ports `decode_path_component` (server-http.cpp:578 @d81235049): `%XX`
 /// only -- path parameters arrive undecoded from cpp-httplib.
 fn decodePathComponent(a: std.mem.Allocator, in: []const u8) error{OutOfMemory}![]u8 {
     var out: std.ArrayList(u8) = .empty;
@@ -1163,7 +1194,7 @@ fn decodePathComponent(a: std.mem.Allocator, in: []const u8) error{OutOfMemory}!
     return out.toOwnedSlice(a);
 }
 
-/// Ports `set_headers` (server-http.cpp:552 @7fe450e19): in the map's order.
+/// Ports `set_headers` (server-http.cpp:569 @d81235049): in the map's order.
 fn setHeaders(res: *httplib.Response, headers: *const StringMap) error{OutOfMemory}!void {
     for (headers.entries.items) |e| try res.setHeader(e.key, e.value);
 }
@@ -1205,7 +1236,7 @@ const Stream = struct {
     }
 };
 
-/// Ports `process_handler_response` (server-http.cpp:618 @7fe450e19): a
+/// Ports `process_handler_response` (server-http.cpp:635 @d81235049): a
 /// stream becomes a chunked provider, `X-Accel-Buffering: no` added; a
 /// body is set whole and `on_complete` fired at once.
 fn processHandlerResponse(request: *Req, response: *Res, res: *httplib.Response) !void {
@@ -1258,7 +1289,7 @@ const Predict = struct {
         return outer;
     }
 
-    /// Ports `parse_gcp_predict_response` (server-http.cpp:780 @7fe450e19):
+    /// Ports `parse_gcp_predict_response` (server-http.cpp:797 @d81235049):
     /// a route's body as JSON, as a string when it is not JSON, null when
     /// empty; a stream is refused.
     fn parseGcpPredictResponse(a: std.mem.Allocator, res: ?*Res) !json.Value {

@@ -63,6 +63,24 @@ EXTRA(ggml_metal_op_flash_attn_ext_extra_idx)
 extern bool ggml_metal_op_flash_attn_ext_use_vec(const struct ggml_tensor *);
 extern bool ref_ggml_metal_op_flash_attn_ext_use_vec(const struct ggml_tensor *);
 
+/* The mat-mul dispatch predicates of `ggml-metal-common.cpp` (ours
+ * `src/ggml/metal/common.zig`), the reference's renamed ref_*. Both the
+ * encoder and the Objective-C `supports_op` ask these, and since v0.6.0
+ * the fusion table's MUL_MAT + ADD check does too, so they are swept
+ * directly: a wrong answer moves a MUL_MAT to another kernel, which only
+ * `node-diff ARGS=--gpu` could otherwise see, and only for the shapes one
+ * decode reaches. */
+#define PRED(ret, f, ...) extern ret f(__VA_ARGS__); extern ret ref_##f(__VA_ARGS__);
+PRED(bool,    ggml_metal_op_mul_mat_use_fwht,    const struct ggml_tensor *, size_t)
+PRED(bool,    ggml_metal_op_mul_mat_use_mm,      const struct ggml_tensor *, bool)
+PRED(bool,    ggml_metal_op_mul_mat_id_use_mm,   const struct ggml_tensor *, bool)
+PRED(bool,    ggml_metal_op_mul_mat_use_mma,     const struct ggml_tensor *)
+PRED(bool,    ggml_metal_op_mul_mat_may_use_mma, const struct ggml_tensor *)
+PRED(int,     ggml_metal_mul_mv_mma_kind,        enum ggml_type, int)
+PRED(int,     ggml_metal_mul_mv_mma_rt,          const struct ggml_tensor *)
+PRED(int64_t, ggml_metal_mul_mv_mma_k_step,      enum ggml_type, int)
+#undef PRED
+
 /* Each side's backend, for its `graph_optimize` vtable entry. */
 static ggml_backend_t backend_a = NULL, backend_b = NULL;
 extern void ref_ggml_graph_optimize(struct ggml_cgraph * gf);
@@ -356,6 +374,143 @@ static void fusion_info_diff(void) {
 
 }
 
+/* ---- the mat-mul dispatch predicates -------------------------------------
+ *
+ * Every type, row lengths around each K step (32 and 64) and block size,
+ * src1 rows across every per-type minimum and the 16-row maximum, F32 and
+ * F16 src1, a src1 whose row stride is not 16-byte aligned, a batch past
+ * INT16_MAX, a broadcast batch, and a src0 strided in K; then the Hadamard
+ * hint over FWHT widths from 32 to 16384 against threadgroup-memory
+ * budgets either side of each width's float[N]. */
+static int mma_true = 0, mma_may_true = 0, fwht_true = 0, fwht_false_wide = 0;
+
+static void mma_predicates_diff(void) {
+    printf("=== Metal mat-mul dispatch predicates: ported vs reference ===\n");
+
+    struct ggml_init_params ip = { 256u * 1024u * 1024u, NULL, true };
+    char lbl[160];
+
+    const int64_t ne00s[] = { 32, 64, 96, 128, 160, 256, 288, 320, 512, 768, 4096 };
+    const int64_t ne11s[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 32 };
+
+    for (int t = 0; t < GGML_TYPE_COUNT; t++) {
+        const enum ggml_type type = (enum ggml_type) t;
+        if (ggml_type_size(type) == 0 || ggml_blck_size(type) == 0) continue;
+
+        for (int rt = 0; rt <= 3; rt++) {
+            snprintf(lbl, sizeof lbl, "mma_kind(%s, rt=%d)", ggml_type_name(type), rt);
+            cmp_i(lbl, ggml_metal_mul_mv_mma_kind(type, rt), ref_ggml_metal_mul_mv_mma_kind(type, rt));
+            snprintf(lbl, sizeof lbl, "mma_k_step(%s, rt=%d)", ggml_type_name(type), rt);
+            cmp_i(lbl, (long) ggml_metal_mul_mv_mma_k_step(type, rt), (long) ref_ggml_metal_mul_mv_mma_k_step(type, rt));
+        }
+
+        struct ggml_context * ctx = ggml_init(ip);
+        for (size_t i = 0; i < sizeof ne00s / sizeof *ne00s; i++) {
+            const int64_t ne00 = ne00s[i];
+            if (ne00 % ggml_blck_size(type) != 0) continue;
+            for (size_t j = 0; j < sizeof ne11s / sizeof *ne11s; j++) {
+                const int64_t ne11 = ne11s[j];
+                /* shape variants: 0 plain, 1 F16 src1, 2 src1 rows not 16-byte strided,
+                 * 3 batch past INT16_MAX, 4 broadcast batch, 5 src0 strided in K */
+                for (int v = 0; v < 6; v++) {
+                    if (v >= 2 && j % 3 != 0) continue;
+                    struct ggml_tensor * a = v == 3 ? ggml_new_tensor_3d(ctx, type, ne00, 64, 1)
+                                           : v == 4 ? ggml_new_tensor_4d(ctx, type, ne00, 64, 2, 1)
+                                           :          ggml_new_tensor_2d(ctx, type, ne00, 64);
+                    if (v == 5) {
+                        /* a src0 whose nb[0] is not the type size: no view
+                         * constructor makes one, so the stride is set by hand */
+                        for (int d = 0; d < 4; d++) a->nb[d] *= 2;
+                    }
+                    struct ggml_tensor * b;
+                    if (v == 1) {
+                        b = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, ne00, ne11);
+                    } else if (v == 2) {
+                        struct ggml_tensor * big = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne00 + 1, ne11);
+                        b = ggml_view_2d(ctx, big, ne00, ne11, big->nb[1], 0);
+                    } else if (v == 3) {
+                        b = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne00, ne11, 40000);
+                    } else if (v == 4) {
+                        b = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, ne00, ne11, 6, 3);
+                    } else {
+                        b = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne00, ne11);
+                    }
+                    struct ggml_tensor * mm = ggml_mul_mat(ctx, a, b);
+
+                    snprintf(lbl, sizeof lbl, "use_mma(%s ne00=%lld ne11=%lld v%d)", ggml_type_name(type), (long long) ne00, (long long) ne11, v);
+                    const bool um = ggml_metal_op_mul_mat_use_mma(mm);
+                    cmp_i(lbl, um, ref_ggml_metal_op_mul_mat_use_mma(mm));
+                    mma_true += um;
+                    snprintf(lbl, sizeof lbl, "may_use_mma(%s ne00=%lld ne11=%lld v%d)", ggml_type_name(type), (long long) ne00, (long long) ne11, v);
+                    const bool mu = ggml_metal_op_mul_mat_may_use_mma(mm);
+                    cmp_i(lbl, mu, ref_ggml_metal_op_mul_mat_may_use_mma(mm));
+                    mma_may_true += mu;
+                    snprintf(lbl, sizeof lbl, "mma_rt(%s ne00=%lld ne11=%lld v%d)", ggml_type_name(type), (long long) ne00, (long long) ne11, v);
+                    cmp_i(lbl, ggml_metal_mul_mv_mma_rt(mm), ref_ggml_metal_mul_mv_mma_rt(mm));
+                    for (int sm = 0; sm <= 1; sm++) {
+                        snprintf(lbl, sizeof lbl, "use_mm(%s ne00=%lld ne11=%lld v%d sm=%d)", ggml_type_name(type), (long long) ne00, (long long) ne11, v, sm);
+                        cmp_i(lbl, ggml_metal_op_mul_mat_use_mm(mm, sm), ref_ggml_metal_op_mul_mat_use_mm(mm, sm));
+                    }
+                }
+            }
+        }
+        ggml_free(ctx);
+    }
+
+    /* MUL_MAT_ID's matrix-matrix break-even, at expert-id rows either side of 32 */
+    {
+        struct ggml_context * ctx = ggml_init(ip);
+        const int64_t ne21s[] = { 1, 31, 32, 33 };
+        const int64_t ne00s2[] = { 32, 64 };
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 2; j++) {
+                struct ggml_tensor * w   = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne00s2[j], 16, 4);
+                struct ggml_tensor * x   = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne00s2[j], 2, ne21s[i]);
+                struct ggml_tensor * ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 2, ne21s[i]);
+                struct ggml_tensor * t = ggml_mul_mat_id(ctx, w, x, ids);
+                for (int sm = 0; sm <= 1; sm++) {
+                    snprintf(lbl, sizeof lbl, "id_use_mm(ne00=%lld ne21=%lld sm=%d)", (long long) ne00s2[j], (long long) ne21s[i], sm);
+                    cmp_i(lbl, ggml_metal_op_mul_mat_id_use_mm(t, sm), ref_ggml_metal_op_mul_mat_id_use_mm(t, sm));
+                }
+            }
+        }
+        ggml_free(ctx);
+    }
+
+    /* the Hadamard hint: widths with and without a kernel, F32 and F16 src1
+     * and a non-F32 result type, against budgets either side of float[N] */
+    {
+        struct ggml_context * ctx = ggml_init(ip);
+        const int64_t ns[] = { 32, 64, 128, 256, 512, 768, 1024, 2048, 4096, 8192, 16384 };
+        const size_t mems[] = { 0, 4095, 4096, 8191, 8192, 16384, 32767, 32768, 65536 };
+        for (size_t i = 0; i < sizeof ns / sizeof *ns; i++) {
+            for (int v = 0; v < 4; v++) {
+                const enum ggml_type tb = v == 1 ? GGML_TYPE_F16 : GGML_TYPE_F32;
+                struct ggml_tensor * h = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ns[i], ns[i]);
+                struct ggml_tensor * x = ggml_new_tensor_2d(ctx, tb, ns[i], 3);
+                struct ggml_tensor * mm = ggml_mul_mat(ctx, h, x);
+                if (v != 2) ggml_mul_mat_set_hint(mm, GGML_HINT_SRC0_IS_HADAMARD);
+                if (v == 3) mm->type = GGML_TYPE_F16; /* the check reads op->type */
+                for (size_t k = 0; k < sizeof mems / sizeof *mems; k++) {
+                    snprintf(lbl, sizeof lbl, "use_fwht(n=%lld v%d tg_mem=%zu)", (long long) ns[i], v, mems[k]);
+                    const bool f = ggml_metal_op_mul_mat_use_fwht(mm, mems[k]);
+                    cmp_i(lbl, f, ref_ggml_metal_op_mul_mat_use_fwht(mm, mems[k]));
+                    fwht_true += f;
+                    if (!f && v == 0 && ns[i] >= 1024 && ns[i] <= 8192) fwht_false_wide++;
+                }
+            }
+        }
+        ggml_free(ctx);
+    }
+
+    /* each predicate must have answered yes somewhere, or the sweep tests nothing */
+    checks += 4;
+    if (mma_true == 0)        { printf("  use_mma never true\n"); fails++; }
+    if (mma_may_true == 0)    { printf("  may_use_mma never true\n"); fails++; }
+    if (fwht_true == 0)       { printf("  use_fwht never true\n"); fails++; }
+    if (fwht_false_wide == 0) { printf("  use_fwht never refused a wide width for its budget\n"); fails++; }
+}
+
 static void fusion_diff(ggml_backend_buffer_type_t buft) {
     printf("=== Metal fusion table: ported vs reference ===\n");
 
@@ -404,19 +559,22 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
 
     /* ADD x N, N up to 9 (past the table's 7), with the addends in the
      * same buffer, in a second buffer (FULL refuses, STRUCTURAL packs),
-     * with one addend of a different layout, and with a chain broken by
-     * reading the previous ADD as src1. */
-    for (int variant = 0; variant < 4; variant++) {
+     * with one addend of a different layout, with a chain broken by
+     * reading the previous ADD as src1, and (v4) with no rows at all. */
+    for (int variant = 0; variant < 5; variant++) {
         for (int len = 1; len <= 9; len++) {
             struct ggml_context * ctx  = fusion_ctx();
             struct ggml_context * ctx2 = fusion_ctx();
-            struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 32, 4);
+            /* v4: zero rows -- since v0.6.0 `_max` packs 0-element nodes
+             * as it packs their non-empty counterparts */
+            const int64_t rows = variant == 4 ? 0 : 4;
+            struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 32, rows);
             struct ggml_tensor * c = x;
             for (int k = 0; k < len; k++) {
                 struct ggml_context * actx = (variant == 1 && k == len / 2) ? ctx2 : ctx;
                 struct ggml_tensor * bk = (variant == 2 && k == len - 1)
                     ? ggml_new_tensor_2d(actx, GGML_TYPE_F32, 32, 1)
-                    : ggml_new_tensor_2d(actx, GGML_TYPE_F32, 32, 4);
+                    : ggml_new_tensor_2d(actx, GGML_TYPE_F32, 32, rows);
                 c = (variant == 3 && k == 2) ? ggml_add(ctx, bk, c) : ggml_add(ctx, c, bk);
             }
             struct ggml_cgraph * gf = ggml_new_graph(ctx);
@@ -559,12 +717,14 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
      *   FULL must still fuse
      *   v15 the third ADD reading the first view instead of the running
      *   sum: src[1] is right, only the src[0] check refuses it
+     *   v16 no tokens (a no-output ubatch): since v0.6.0 both checks
+     *   accept it, so the packing does not depend on the batch
      */
-    for (int variant = 0; variant < 16; variant++) {
+    for (int variant = 0; variant < 17; variant++) {
         for (int k = 1; k <= 9; k++) {
             if (variant >= 4 && k != 4 && k != 8) continue;
             struct ggml_context * ctx = fusion_ctx();
-            const int64_t n_embd = 32, n_tokens = 3;
+            const int64_t n_embd = 32, n_tokens = variant == 16 ? 0 : 3;
             const int64_t n_expert = variant == 6 ? 1100 : 16;
             if (k > n_expert) { ggml_free(ctx); continue; }
             const int with_norm  = variant == 2 || variant == 3 || variant == 7;
@@ -628,6 +788,86 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
             fusion_probe_graph(name, gf);
             ggml_free(ctx);
         }
+    }
+
+    /* MUL_MAT + ADD (v0.6.0): the residual added in the few-row MMA store.
+     * The weight sits in a buffer marked WEIGHTS, as the model loader marks
+     * them; STRUCTURAL packs on the operand and types alone, FULL also
+     * wants the MMA path, a same-shape contiguous residual and no overlap
+     * but in place. The variants:
+     *   v0 Q4_0, 4 rows             v1 the residual in the weights buffer
+     *   v2 32 rows (no MMA)         v3 a broadcast residual
+     *   v4 Q2_K (no MMA kernel)     v5 F16 src1
+     *   v6 add(mm, mm)              v7 an F16 residual
+     *   v8 in place on the residual v9 add(r, mm)
+     *   v10 the sum over src1       v11 the sum 4 bytes into the residual
+     *   v12 the sum over src0       v13 F32 src0, 5 rows (below its 6)
+     *   v14 F32 src0, 6 rows        v15 a transposed (non-contiguous) residual
+     *   v16 F16 src0, 96 wide (not a whole K step)
+     *   v17 two MUL_MAT + ADD in a residual chain
+     *   v18 the MUL_MAT also consumed elsewhere
+     *   v19 Q8_0 at 9 rows (two tiles: the generic kernel, not per block)
+     *   v20 the sum ending exactly where the residual begins, and v21
+     *   starting exactly where it ends: adjacent is not overlapping, so
+     *   FULL must fuse both -- the edges of `ggml_metal_fusion_overlap` */
+    for (int variant = 0; variant < 22; variant++) {
+        struct ggml_context * ctx  = fusion_ctx();
+        struct ggml_context * wctx = fusion_ctx();
+        const int64_t ne01 = 64;
+        int64_t ne00 = 256, ne11 = 4;
+        enum ggml_type t0 = GGML_TYPE_Q4_0;
+        if (variant == 2)  ne11 = 32;
+        if (variant == 4)  t0 = GGML_TYPE_Q2_K;
+        if (variant == 13) { t0 = GGML_TYPE_F32; ne11 = 5; }
+        if (variant == 14) { t0 = GGML_TYPE_F32; ne11 = 6; }
+        if (variant == 16) { t0 = GGML_TYPE_F16; ne00 = 96; }
+        if (variant == 19) { t0 = GGML_TYPE_Q8_0; ne11 = 9; }
+
+        struct ggml_tensor * w  = ggml_new_tensor_2d(variant == 12 ? ctx : wctx, t0, ne00, ne01);
+        if (variant == 12) ggml_new_tensor_1d(wctx, GGML_TYPE_F32, 64); /* keep the weights buffer */
+        struct ggml_tensor * x  = ggml_new_tensor_2d(ctx, variant == 5 ? GGML_TYPE_F16 : GGML_TYPE_F32, ne00, ne11);
+        /* v20: a tensor the size of the sum, allocated just before the residual */
+        struct ggml_tensor * spacer = variant == 20 ? ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne01, ne11) : NULL;
+        struct ggml_tensor * r  = variant == 1  ? ggml_new_tensor_2d(wctx, GGML_TYPE_F32, ne01, ne11)
+                                : variant == 3  ? ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne01, 1)
+                                : variant == 7  ? ggml_new_tensor_2d(ctx, GGML_TYPE_F16, ne01, ne11)
+                                : variant == 15 ? ggml_transpose(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne11, ne01))
+                                :                 ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne01, ne11);
+        struct ggml_tensor * mm = ggml_mul_mat(ctx, w, x);
+        struct ggml_tensor * add = variant == 6 ? ggml_add(ctx, mm, mm)
+                                 : variant == 8 ? ggml_add_inplace(ctx, r, mm)
+                                 : variant == 9 ? ggml_add(ctx, r, mm)
+                                 :                ggml_add(ctx, mm, r);
+        struct ggml_tensor * out = add;
+        if (variant == 17) {
+            struct ggml_tensor * w2 = ggml_new_tensor_2d(wctx, t0, ne01, ne01);
+            out = ggml_add(ctx, ggml_mul_mat(ctx, w2, add), add);
+        }
+        struct ggml_cgraph * gf = ggml_new_graph(ctx);
+        ggml_build_forward_expand(gf, ggml_scale(ctx, out, 0.5f));
+        if (variant == 18) ggml_build_forward_expand(gf, ggml_scale(ctx, mm, 2.0f));
+        fusion_alloc(ctx, buft);
+        {
+            /* every variant puts something in wctx, so this is never the main buffer */
+            ggml_backend_buffer_t wbuf = ggml_backend_alloc_ctx_tensors_from_buft(wctx, buft);
+            if (!wbuf) { printf("FAIL: mul_mat_add v%d has no weights buffer\n", variant); fails++; checks++; }
+            else {
+                ggml_backend_buffer_set_usage(wbuf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+                if (n_fusion_bufs < 64) fusion_bufs[n_fusion_bufs++] = wbuf;
+            }
+        }
+        if (variant == 10) add->data = x->data;
+        if (variant == 11) add->data = (char *) r->data + 4;
+        if (variant == 12) add->data = w->data;
+        if (variant == 20) {
+            if ((char *) spacer->data + ggml_nbytes(add) != (char *) r->data) { printf("FAIL: mul_mat_add v20: the spacer is not adjacent\n"); fails++; checks++; }
+            add->data = spacer->data;
+        }
+        if (variant == 21) add->data = (char *) r->data + ggml_nbytes(r);
+        char name[32]; snprintf(name, sizeof name, "mul_mat_add v%d", variant);
+        fusion_probe_graph(name, gf);
+        ggml_free(ctx);
+        ggml_free(wctx);
     }
 
     /* graph_optimize's reorder (common.cpp): four independent chains of
@@ -899,6 +1139,8 @@ int main(void) {
                        ggml_backend_reg_get_proc_address(reg_b, names[i]) != NULL);
         }
     }
+
+    mma_predicates_diff();
 
     backend_a = ggml_backend_dev_init(dev_a, NULL);
     backend_b = ggml_backend_dev_init(dev_b, NULL);

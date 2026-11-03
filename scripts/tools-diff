@@ -23,6 +23,17 @@
 # `!env NAME=VALUE` exports a variable to both sides from there on ($DATA
 # expands in it), and `!unenv NAME` takes it away again: the environment is
 # the other way common_params_parse reads an option.
+# A case is expected to succeed: upstream's own tool must exit 0 on it, or the
+# case fails whatever the port did -- two sides that both fail (a model path
+# that does not resolve, say) agree trivially and prove nothing. A case meant
+# to fail is written `!fail <args>`, and then upstream's must exit nonzero.
+# The prefixes combine as `!fail ~ <args>`.
+#
+# The names substituted into a case line ($FIX, $VOCAB, $PLAIN, $MM, $DATA,
+# $ROOT, ...) are expanded with IFS set to a newline only: a checkout path
+# with a space in it would otherwise split into two arguments on both sides
+# alike, and every case over a model would compare two failed loads.
+#
 # A case written `~ <args>` compares stderr's lines in any order: upstream's
 # LOG_* messages are printed by a worker thread, so a direct fprintf(stderr)
 # can overtake them and upstream itself differs run to run there.
@@ -46,11 +57,16 @@ export GGML_NO_BACKTRACE=1
 FIX="$ROOT/zig-out/arch-fixtures"
 VOCAB="$ROOT/llama.cpp/models"
 PLAIN="${PLAIN:-$HOME/.cache/zigtrain/gguf/plain-d6_base_005000.gguf}"
+# $PLAIN's fine-tuned sibling, beside it unless named: perplexity's KL
+# divergence cases. Until v0.6.0 the case file spelled it under $HOME, so
+# where the zigtrain models live elsewhere both sides failed to load it.
+PLAIN_SFT="${PLAIN_SFT:-$(dirname "$PLAIN")/plain-d6_sft_001499.gguf}"
 MM="$ROOT/zig-out/mmproj-fixtures"
-export FIX VOCAB PLAIN MM
+export FIX VOCAB PLAIN PLAIN_SFT MM
 # A case file over a model that is not there compares two failed loads, and
 # passes: on the GB10 at v0.5.0, gguf-split did, with the model gone.
-grep -q '\$PLAIN' "$cases" && [ ! -f "$PLAIN" ] && { echo "FAIL: missing $PLAIN, which $cases uses" >&2; exit 2; }
+grep -qE '\$PLAIN([^_A-Z]|$)' "$cases" && [ ! -f "$PLAIN" ] && { echo "FAIL: missing $PLAIN, which $cases uses" >&2; exit 2; }
+grep -q '\$PLAIN_SFT' "$cases" && [ ! -f "$PLAIN_SFT" ] && { echo "FAIL: missing $PLAIN_SFT, which $cases uses" >&2; exit 2; }
 grep -q '\$FIX' "$cases" && [ ! -d "$FIX" ] && { echo "FAIL: missing $FIX -- run 'make arch-fixtures'" >&2; exit 2; }
 grep -q '\$MM' "$cases" && [ ! -d "$MM" ] && { echo "FAIL: missing $MM -- run 'make mmproj-fixtures'" >&2; exit 2; }
 
@@ -154,9 +170,12 @@ while IFS= read -r line || [ -n "$line" ]; do
             continue ;;
     esac
     n=$((n + 1))
+    expect_fail=0
+    case "$line" in '!fail '*) expect_fail=1; line="${line#!fail }" ;; esac
     unordered=0
     case "$line" in '~ '*) unordered=1; line="${line#\~ }" ;; esac
-    eval "args=($line)"
+    # IFS: an expanded path stays one argument, spaces and all
+    IFS=$'\n' eval "args=($line)"
     run_side ref "$ref" "$n" "${args[@]}"
     run_side port "$port" "$n" "${args[@]}"
     for side in ref port; do
@@ -173,10 +192,16 @@ while IFS= read -r line || [ -n "$line" ]; do
         cmp -s "$work/ref/$n.$k" "$work/port/$n.$k" || bad="$bad $k"
     done
     rc=$(cat "$work/ref/$n.rc")
+    if [ "$expect_fail" = 0 ] && [ "$rc" != 0 ]; then
+        bad="$bad ref-exit-status(expected 0; mark a case meant to fail !fail)"
+    elif [ "$expect_fail" = 1 ] && [ "$rc" = 0 ]; then
+        bad="$bad ref-exit-status(a !fail case exited 0)"
+    fi
     if [ -n "$bad" ]; then
         fails=$((fails + 1))
         echo "FAIL  #$n rc=$rc differ:$bad  $line"
-        for k in $bad; do diff "$work/ref/$n.$k" "$work/port/$n.$k" | head -6 | sed 's/^/        /'; done
+        for k in $bad; do [ -f "$work/ref/$n.$k" ] && diff "$work/ref/$n.$k" "$work/port/$n.$k" | head -6 | sed 's/^/        /'; done
+        case "$bad" in *ref-exit-status*) tail -3 "$work/ref/$n.err" | sed 's/^/        ref stderr: /' ;; esac
     else
         printf 'ok    #%-3d rc=%-3s %s\n' "$n" "$rc" "$line"
     fi

@@ -21,7 +21,7 @@
  * Two departures from a straight `ggml_backend_compare_graph_backend`:
  *
  * - **Whole-graph cases give the reference a graph it can fuse.**
- *   `ggml_backend_graph_copy` (ggml-backend.cpp:2210 @7fe450e19) fills the
+ *   `ggml_backend_graph_copy` (ggml-backend.cpp:2366 @d81235049) fills the
  *   copy's `nodes[]` directly and never builds its use counts, so the second
  *   backend of a comparison can never fuse -- harmless upstream, where that
  *   backend is the CPU, and fatal here, where it would compare the port's
@@ -31,7 +31,7 @@
  *   into a fresh graph: same nodes, same order, real use counts.
  * - **The copy keeps `ggml_cast`'s self-reference.** `ggml_cast` builds a
  *   `CPY` whose `src[1]` is the node itself, and `graph_copy_dup_tensor`
- *   (ggml-backend.cpp:2149 @7fe450e19) records a node's copy only after
+ *   (ggml-backend.cpp:2305 @d81235049) records a node's copy only after
  *   copying its sources, so the self-reference comes back as
  *   the still-empty slot: the copy's `src[1]` is NULL. Upstream's CPU never
  *   reads it; the reference CUDA backend dispatches `CPY` as
@@ -69,6 +69,7 @@
  * gate's verdict.
  */
 #define _GNU_SOURCE
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <dlfcn.h>
@@ -405,6 +406,39 @@ static struct ggml_tensor * build_mmid_q4_0_9(struct ggml_context * c, struct gg
 static struct ggml_tensor * build_mmid_q4_k_8(struct ggml_context * c, struct ggml_tensor ** t) { return build_mmid(c, t, GGML_TYPE_Q4_K, 8); }
 static struct ggml_tensor * build_mmid_q4_k_9(struct ggml_context * c, struct ggml_tensor ** t) { return build_mmid(c, t, GGML_TYPE_Q4_K, 9); }
 
+/* LIGHTNING_INDEXER with four heads (v0.6.0) on both sides of the tile
+ * kernel's eight-token threshold (`LIGHTNING_INDEXER_TILE_TOKENS`):
+ * upstream's batches are 1 and 512, so neither the boundary nor a
+ * partial last token tile is asked. */
+static struct ggml_tensor * build_li4(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum ggml_type type_k, int64_t nb) {
+    const int64_t hsk = 128, nh = 4, kv = 256;
+    struct ggml_tensor * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, hsk, nh, nb, 1);
+    struct ggml_tensor * k = ggml_new_tensor_4d(ctx, type_k, hsk, 1, kv, 1);
+    struct ggml_tensor * w = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, nh, nb, 1, 1);
+    struct ggml_tensor * m = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, kv, nb, 1, 1);
+    return *cmp = ggml_lightning_indexer(ctx, q, k, w, m);
+}
+static struct ggml_tensor * build_li4_f16_7(struct ggml_context * c, struct ggml_tensor ** t) { return build_li4(c, t, GGML_TYPE_F16, 7); }
+static struct ggml_tensor * build_li4_f16_8(struct ggml_context * c, struct ggml_tensor ** t) { return build_li4(c, t, GGML_TYPE_F16, 8); }
+static struct ggml_tensor * build_li4_f16_9(struct ggml_context * c, struct ggml_tensor ** t) { return build_li4(c, t, GGML_TYPE_F16, 9); }
+static struct ggml_tensor * build_li4_q8_0_9(struct ggml_context * c, struct ggml_tensor ** t) { return build_li4(c, t, GGML_TYPE_Q8_0, 9); }
+
+/* FLASH_ATTN_EXT through the tensor-core kernel with the mask scan on
+ * (`Q->ne[1] >= 1024`, `K->ne[1] % FATTN_KQ_STRIDE == 0`) and GQA, so two
+ * pipeline stages: v0.6.0's `prefer_whole_tiles` arm of `launch_fattn`,
+ * live only on a DGX Spark (cc 1210), takes whole tiles over stream-k
+ * there. Upstream's test-mode batches stop at 75. */
+static struct ggml_tensor * build_fa_scan(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    const int64_t hs = 128, nh = 8, nr2 = 4, kv = 4096, nb = 1024;
+    struct ggml_tensor * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, hs, nb, nh * nr2, 1);
+    struct ggml_tensor * k = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, hs, kv, nh, 1);
+    struct ggml_tensor * v = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, hs, kv, nh, 1);
+    struct ggml_tensor * m = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, kv, nb, 1, 1);
+    struct ggml_tensor * out = ggml_flash_attn_ext(ctx, q, k, v, m, 1.0f / sqrtf((float) hs), 0.0f, 0.0f);
+    ggml_prec_set_acc(out, GGML_PREC_F32);
+    return *cmp = out;
+}
+
 static void run_extra(ggml_backend_t backend, extra_build build, unsigned char ** result, size_t * nbytes, int * n_nodes) {
     struct ggml_init_params params = { 64 * ggml_tensor_overhead() + ggml_graph_overhead(), NULL, true };
     struct ggml_context * ctx = ggml_init(params);
@@ -465,7 +499,9 @@ static bool extra_case(const char * name, extra_build build) {
  * 32769. No upstream case builds the gated-delta-net snapshot copy that
  * `ggml_cuda_try_gdn_cache_fusion` fuses. And upstream's test-mode
  * `MUL_MAT_ID` batches are 1, 4, 5, 17, 32 and 129, so none sits on the
- * MMVQ/MMQ boundary at 8 (`get_mmvq_mmid_max_batch`). */
+ * MMVQ/MMQ boundary at 8 (`get_mmvq_mmid_max_batch`). Since v0.6.0 also
+ * the four-head lightning indexer at its tile threshold and a
+ * flash-attention case that scans its mask with two pipeline stages. */
 static int extra_cases(const char * filter) {
     static const struct { const char * op; const char * name; extra_build build; } cases[] = {
         { "MEAN", "MEAN(ne=[65536,1,1,1])", build_mean_65536 },
@@ -476,6 +512,11 @@ static int extra_cases(const char * filter) {
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_0,n_tokens=9)", build_mmid_q4_0_9 },
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_K,n_tokens=8)", build_mmid_q4_k_8 },
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_K,n_tokens=9)", build_mmid_q4_k_9 },
+        { "LIGHTNING_INDEXER", "LIGHTNING_INDEXER(nh=4,nb=7,f16)", build_li4_f16_7 },
+        { "LIGHTNING_INDEXER", "LIGHTNING_INDEXER(nh=4,nb=8,f16)", build_li4_f16_8 },
+        { "LIGHTNING_INDEXER", "LIGHTNING_INDEXER(nh=4,nb=9,f16)", build_li4_f16_9 },
+        { "LIGHTNING_INDEXER", "LIGHTNING_INDEXER(nh=4,nb=9,q8_0)", build_li4_q8_0_9 },
+        { "FLASH_ATTN_EXT", "FLASH_ATTN_EXT(hs=128,nh=8,nr2=4,kv=4096,nb=1024,mask scan)", build_fa_scan },
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

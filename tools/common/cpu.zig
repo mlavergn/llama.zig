@@ -4,7 +4,7 @@
 //!
 //! Ports `common_cpu_get_num_physical_cores`, `common_cpu_get_num_math` and
 //! the x86 Linux hybrid-core probe from `llama.cpp/common/common.cpp`
-//! (v0.5.0, `7fe450e19`). Each declaration names what it ports and the line
+//! (v0.6.0, `d81235049`). Each declaration names what it ports and the line
 //! it began at. The AIX arm is not ported, and Windows takes the MinGW
 //! path upstream's own `#if` takes: `hardware_concurrency` halved.
 
@@ -20,7 +20,7 @@ fn hardwareConcurrency() u32 {
     return @intCast(std.Thread.getCpuCount() catch 0);
 }
 
-/// Ports `common_cpu_get_num_physical_cores` (common/common.cpp:78 @7fe450e19).
+/// Ports `common_cpu_get_num_physical_cores` (common/common.cpp:81 @d81235049).
 pub fn numPhysicalCores() i32 {
     if (comptime builtin.os.tag == .linux) {
         // enumerate the set of thread siblings, num entries is num cores
@@ -76,12 +76,12 @@ fn cpuid(leaf: u32, subleaf: u32) [4]u32 {
     return .{ eax, ebx, ecx, edx };
 }
 
-/// Ports `is_hybrid_cpu` (common/common.cpp:168 @7fe450e19).
+/// Ports `is_hybrid_cpu` (common/common.cpp:171 @d81235049).
 fn isHybridCpu() bool {
     return cpuid(7, 0)[3] & (1 << 15) != 0;
 }
 
-/// Ports `is_running_on_efficiency_core` (common/common.cpp:174 @7fe450e19).
+/// Ports `is_running_on_efficiency_core` (common/common.cpp:177 @d81235049).
 fn isRunningOnEfficiencyCore() bool {
     const intel_atom = 0x20;
     const core_type = (cpuid(0x1a, 0)[0] & 0xff000000) >> 24;
@@ -93,14 +93,14 @@ extern fn pthread_self() usize;
 extern fn pthread_setaffinity_np(thread: usize, size: usize, set: *const CpuSet) c_int;
 extern fn pthread_getaffinity_np(thread: usize, size: usize, set: *CpuSet) c_int;
 
-/// Ports `pin_cpu` (common/common.cpp:161 @7fe450e19).
+/// Ports `pin_cpu` (common/common.cpp:164 @d81235049).
 fn pinCpu(cpu: usize) c_int {
     var mask: CpuSet = @splat(0);
     mask[cpu / 8] |= @as(u8, 1) << @intCast(cpu % 8);
     return pthread_setaffinity_np(pthread_self(), @sizeOf(CpuSet), &mask);
 }
 
-/// Ports `cpu_count_math_cpus` (common/common.cpp:182 @7fe450e19).
+/// Ports `cpu_count_math_cpus` (common/common.cpp:185 @d81235049).
 fn countMathCpus(n_cpu: usize) i32 {
     var result: i32 = 0;
     var cpu: usize = 0;
@@ -113,7 +113,7 @@ fn countMathCpus(n_cpu: usize) i32 {
     return result;
 }
 
-/// Ports `common_cpu_get_num_math` (common/common.cpp:202 @7fe450e19): the CPUs
+/// Ports `common_cpu_get_num_math` (common/common.cpp:205 @d81235049): the CPUs
 /// useful for math.
 pub fn numMath() i32 {
     if (comptime builtin.cpu.arch == .x86_64 and builtin.os.tag == .linux and builtin.abi != .android) {

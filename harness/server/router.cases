@@ -168,11 +168,10 @@ GET /models
 POST /models/unload {"model":"qwen3"}
 !waitfor /models "id":"qwen3"[^{]*\{"value":"unloaded"
 
-# --- colours on, which the children inherit: a warning leaves its colour
-# reset at the start of the next line, so the router sees the state line
-# after the CORS warnings (loading) only because notify_to_router starts
-# it on a fresh line; the events show it. At the default verbosity: -lv 4
-# logs an info line between the two, which takes the reset
+# --- colours on, which the children follow (v0.6.0: LLAMA_ARG_LOG_COLORS in
+# their arguments). Since v0.6.0 a child's state lines go to its stdout and
+# its log to stderr, so a colour reset left by a warning cannot hide a state
+# line; the events show it. At the default verbosity
 !server --models-dir $DATA/models -c 256 -np 1 --no-jinja --log-colors on
 !fulllog
 !sse /models/sse
@@ -211,6 +210,41 @@ POST /models/unload {"model":"keep"}
 POST /models/unload {"model":"new"}
 !waitfor /models "id":"keep"[^{]*\{"value":"unloaded"
 !waitfor /models "id":"new"[^{]*\{"value":"unloaded"
+
+# --- v0.6.0: a preset's --log-file reaches its child and the router's does
+# not (GET /models' args); the child writes its commands to stdout and its
+# log to stderr, so the router forwards its log whole
+!server --models-preset $DATA/logfile.ini -c 256 -np 1 -lv 4 --no-jinja --log-file $CWD/router.log
+!fulllog
+GET /models
+POST /models/load {"model":"logged"}
+!waitfor /models "id":"logged"[^{]*\{"value":"loaded"
+GET /models
+POST /props {"model":"logged"}
+POST /models/unload {"model":"logged"}
+!waitfor /models "id":"logged"[^{]*\{"value":"unloaded"
+
+# --- v0.6.0: a child whose log is JSON lines on its stdout
+!mask "time":\d+
+!server --models-preset $DATA/jsonlog.ini -c 256 -np 1 --no-jinja
+!fulllog
+POST /models/load {"model":"jsonlog"}
+!waitfor /models "id":"jsonlog"[^{]*\{"value":"loaded"
+GET /models
+POST /models/unload {"model":"jsonlog"}
+!waitfor /models "id":"jsonlog"[^{]*\{"value":"unloaded"
+
+# --- v0.6.0: the router's --no-mmproj applies to every child's input
+# modalities (update_caps), the decision models' output ones are kept
+!server --models-dir $DATA/models -c 256 -np 1 --no-jinja --no-mmproj
+GET /models
+# the flag reaches each preset as LLAMA_ARG_MMPROJ_AUTO; the environment
+# reaches only the router's own parameters, which update_caps copies
+!env LLAMA_ARG_MMPROJ_AUTO=0
+!server --models-dir $DATA/models -c 256 -np 1 --no-jinja
+GET /models
+!noenv
+!env LLAMA_CACHE=$CWD/cache
 
 # --- routers that cannot start
 !server --models-preset $DATA/bad-key.ini

@@ -57,7 +57,7 @@ TVOS_MIN     := 16.4
 MODEL      ?= $(ROOT)/Qwen3.5-2B-Q4_K_M.gguf
 NPRED      ?= 32
 SIM_DEVICE ?= iPhone 17 Pro
-TV_DEVICE  ?= Apple TV 4K (3rd generation)
+TV_DEVICE  ?= Apple TV 4K (4th generation)
 XR_DEVICE  ?= Apple Vision Pro
 # smoke-device and swiftui: the phone (a UDID from `xcrun devicectl list
 # devices`) and the development team its apps are signed for. The phone must

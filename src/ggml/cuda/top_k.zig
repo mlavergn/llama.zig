@@ -3,13 +3,14 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/top-k.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/top-k.cuh` at v0.5.0 (`7fe450e19`). It has
+//! `llama.cpp/ggml/src/ggml-cuda/top-k.cuh` at v0.6.0 (`d81235049`). It has
 //! no kernel of its own: it sorts with `argsort.zig`'s row sorters and
 //! copies the first `k` columns.
 //!
 //! # Which arm
 //!
-//! `CUB_TOP_K_AVAILABLE` needs CCCL >= 3.2 and this toolkit ships 3.0, so
+//! `CUB_TOP_K_AVAILABLE` needs CCCL >= 3.4.3 since v0.6.0 (`DeviceTopK`
+//! races before it; it was 3.2) and this toolkit ships 3.0, so
 //! upstream's `cub::DeviceTopK` arm is not compiled; `GGML_CUDA_USE_CUB` is
 //! defined, so the "argsort + copy" arm is the one ported. `top_k_cub` is
 //! therefore not ported -- the reference does not contain it either.
@@ -23,9 +24,9 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `ggml_cuda_op_top_k` (top-k.cu:213 @7fe450e19), the
+/// Ports `ggml_cuda_op_top_k` (top-k.cu:217 @d81235049), the
 /// `GGML_CUDA_USE_CUB` arm without `CUB_TOP_K_AVAILABLE`, with that arm's
-/// own `next_power_of_2` (top-k.cu:41 @7fe450e19), which is `argsort.cu`'s.
+/// own `next_power_of_2` (top-k.cu:45 @d81235049), which is `argsort.cu`'s.
 pub fn opTopK(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     var src0_d: [*]const f32 = @ptrCast(@alignCast(src0.data.?));

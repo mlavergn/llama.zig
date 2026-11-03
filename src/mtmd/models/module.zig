@@ -1,6 +1,6 @@
 //! The per-model encoder graphs (`llama.cpp/tools/mtmd/models/`), and
-//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.5.0,
-//! `7fe450e19`), which picks one by projector type.
+//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.6.0,
+//! `d81235049`), which picks one by projector type.
 //!
 //! Each file here ports the `models/*.cpp` of the same name (hyphens become
 //! underscores) and exposes `build(g, params)`: the class's `build()`, run
@@ -36,6 +36,7 @@ pub const internvl = @import("internvl.zig");
 pub const kimik25 = @import("kimik25.zig");
 pub const kimivl = @import("kimivl.zig");
 pub const llama4 = @import("llama4.zig");
+pub const ling3vl = @import("ling3vl.zig");
 pub const llava = @import("llava.zig");
 pub const mimo_audio = @import("mimo_audio.zig");
 pub const mimovl = @import("mimovl.zig");
@@ -76,7 +77,7 @@ pub const Built = struct {
     }
 };
 
-/// The `support_batch()` override of each builder (models.h @7fe450e19),
+/// The `support_batch()` override of each builder (models.h @d81235049),
 /// or null for a projector `clip_get_graph_builder` has no builder for.
 pub fn supportBatch(t: names.ProjectorType) ?bool {
     return switch (t) {
@@ -89,6 +90,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .dots3note_a => false,
         .qwen2vl, .qwen25vl => false,
         .qwen3vl => false,
+        .ling3vl => false,
         .exaone4_5 => false,
         .mimovl => false,
         .minimax_m3 => false,
@@ -113,7 +115,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .gemma4a => false,
         .gemma4ua => false,
         .granite_speech => false,
-        .glm4v => false,
+        .glm4v, .glm5v => false,
         .qwen3a => false,
         .mimo_audio => false,
         .qwen3tts_spkenc => false,
@@ -128,7 +130,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
     };
 }
 
-/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:930 @7fe450e19) and the
+/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:932 @d81235049) and the
 /// builder's `build()`.
 pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*const clip.EncodeParams) clip.Error!Built {
     const img = &imgs.entries.items[0];
@@ -146,6 +148,7 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .dots3note_a => try dots3note.build(&g, params),
         .qwen2vl, .qwen25vl => try qwen2vl.build(&g, params),
         .qwen3vl => try qwen3vl.build(&g, params),
+        .ling3vl => try ling3vl.build(&g, params),
         .exaone4_5 => try exaone4_5.build(&g, params),
         .mimovl => try mimovl.build(&g, params),
         .minimax_m3 => try minimax_m3.build(&g, params),
@@ -170,7 +173,7 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .gemma4a => try gemma4a.build(&g, params),
         .gemma4ua => try gemma4ua.build(&g, params),
         .granite_speech => try granite_speech.build(&g, params),
-        .glm4v => try glm4v.build(&g, params),
+        .glm4v, .glm5v => try glm4v.build(&g, params),
         .qwen3a => try qwen3a.build(&g, params),
         .mimo_audio => try mimo_audio.build(&g, params),
         .qwen3tts_spkenc => try qwen3tts_spkenc.build(&g, params),
@@ -181,12 +184,12 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .yasa2 => try yasa2.build(&g, params),
         .parakeet => try parakeet.build(&g, params),
         .granite4_vision => try granite4_vision.build(&g, params),
-        else => impl.abort("clip.cpp", 1143, "missing cgraph builder"),
+        else => impl.abort("clip.cpp", 1150, "missing cgraph builder"),
     };
     return .{ .gf = gf, .support_batch = supportBatch(ctx.projType()).?, .ctx0 = g.ctx0 };
 }
 
-/// Ports `c2w_state_slot` (models/qwen3tts-gen.cpp @7fe450e19): a persisted
+/// Ports `c2w_state_slot` (models/qwen3tts-gen.cpp @d81235049): a persisted
 /// state slot of a gen-audio decoder.
 pub const StateSlot = struct {
     name: [:0]const u8,
@@ -194,7 +197,7 @@ pub const StateSlot = struct {
     ne1: i64,
 };
 
-/// Ports `list_gen_state_slots` (mtmd/clip.cpp:4419 @7fe450e19). The caller
+/// Ports `list_gen_state_slots` (mtmd/clip.cpp:4468 @d81235049). The caller
 /// frees the slice with `freeSlots`.
 pub fn genStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod.Model) clip.Error![]StateSlot {
     return switch (model.proj_type) {

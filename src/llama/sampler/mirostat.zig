@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.5.0, `7fe450e19`).
+//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.6.0, `d81235049`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Fused multiply-adds
@@ -35,7 +35,7 @@ const src = core.src;
 // -----------------------------------------------------------------------------
 // mirostat
 
-/// Ports `llama_sampler_mirostat` (llama-sampler.cpp:2440 @7fe450e19).
+/// Ports `llama_sampler_mirostat` (llama-sampler.cpp:2440 @d81235049).
 pub const Mirostat = struct {
     n_vocab: i32,
 
@@ -52,13 +52,13 @@ pub const Mirostat = struct {
     rng: libcxx.Mt19937,
 };
 
-/// Ports `llama_sampler_mirostat_name` (llama-sampler.cpp:2456 @7fe450e19).
+/// Ports `llama_sampler_mirostat_name` (llama-sampler.cpp:2456 @d81235049).
 fn mirostatName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "mirostat";
 }
 
-/// Ports `llama_sampler_mirostat_apply` (llama-sampler.cpp:2460 @7fe450e19).
+/// Ports `llama_sampler_mirostat_apply` (llama-sampler.cpp:2460 @d81235049).
 ///
 /// Estimates the Zipf exponent from the top `m` probabilities, derives the
 /// top-k that should give surprise `mu`, draws, and moves `mu` toward `tau`.
@@ -98,7 +98,7 @@ fn mirostatApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void
     ctx.mu = @mulAdd(f32, -ctx.eta, e, ctx.mu);
 }
 
-/// Ports `llama_sampler_mirostat_clone` (llama-sampler.cpp:2496 @7fe450e19).
+/// Ports `llama_sampler_mirostat_clone` (llama-sampler.cpp:2496 @d81235049).
 fn mirostatClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     const ctx = core.ctxOf(Mirostat, smpl);
     const result = llama_sampler_init_mirostat(ctx.n_vocab, ctx.seed, ctx.tau, ctx.eta, ctx.m);
@@ -110,7 +110,7 @@ fn mirostatClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     return result;
 }
 
-/// Ports `llama_sampler_mirostat_reset` (llama-sampler.cpp:2511 @7fe450e19).
+/// Ports `llama_sampler_mirostat_reset` (llama-sampler.cpp:2511 @d81235049).
 fn mirostatReset(smpl: [*c]Sampler) callconv(.c) void {
     const ctx = core.ctxOf(Mirostat, smpl);
     ctx.mu = 2.0 * ctx.tau;
@@ -118,12 +118,12 @@ fn mirostatReset(smpl: [*c]Sampler) callconv(.c) void {
     ctx.rng.seed(ctx.seed_cur);
 }
 
-/// Ports `llama_sampler_mirostat_free` (llama-sampler.cpp:2518 @7fe450e19).
+/// Ports `llama_sampler_mirostat_free` (llama-sampler.cpp:2518 @d81235049).
 fn mirostatFree(smpl: [*c]Sampler) callconv(.c) void {
     core.destroy(Mirostat, core.ctxOf(Mirostat, smpl));
 }
 
-/// Ports `llama_sampler_mirostat_i` (llama-sampler.cpp:2522 @7fe450e19).
+/// Ports `llama_sampler_mirostat_i` (llama-sampler.cpp:2522 @d81235049).
 pub var mirostat_iface: SamplerI = .{
     .name = mirostatName,
     .accept = null,
@@ -133,7 +133,7 @@ pub var mirostat_iface: SamplerI = .{
     .free = mirostatFree,
 };
 
-/// Ports `llama_sampler_init_mirostat` (llama-sampler.cpp:2537 @7fe450e19).
+/// Ports `llama_sampler_init_mirostat` (llama-sampler.cpp:2537 @d81235049).
 ///
 /// Parameters:
 /// - `n_vocab`: the vocabulary size.
@@ -161,7 +161,7 @@ pub export fn llama_sampler_init_mirostat(n_vocab: i32, seed: u32, tau: f32, eta
 // -----------------------------------------------------------------------------
 // mirostat v2
 
-/// Ports `llama_sampler_mirostat_v2` (llama-sampler.cpp:2557 @7fe450e19).
+/// Ports `llama_sampler_mirostat_v2` (llama-sampler.cpp:2557 @d81235049).
 pub const MirostatV2 = struct {
     seed: u32,
     seed_cur: u32,
@@ -174,13 +174,13 @@ pub const MirostatV2 = struct {
     rng: libcxx.Mt19937,
 };
 
-/// Ports `llama_sampler_mirostat_v2_name` (llama-sampler.cpp:2569 @7fe450e19).
+/// Ports `llama_sampler_mirostat_v2_name` (llama-sampler.cpp:2569 @d81235049).
 fn mirostatV2Name(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "mirostat-v2";
 }
 
-/// Ports `llama_sampler_mirostat_v2_apply` (llama-sampler.cpp:2573 @7fe450e19).
+/// Ports `llama_sampler_mirostat_v2_apply` (llama-sampler.cpp:2573 @d81235049).
 ///
 /// Cuts at the first candidate whose surprise exceeds `mu`, keeping at least
 /// one, draws, and moves `mu` toward `tau`.
@@ -211,7 +211,7 @@ fn mirostatV2Apply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) vo
     ctx.mu = @mulAdd(f32, -ctx.eta, e, ctx.mu);
 }
 
-/// Ports `llama_sampler_mirostat_v2_reset` (llama-sampler.cpp:2601 @7fe450e19).
+/// Ports `llama_sampler_mirostat_v2_reset` (llama-sampler.cpp:2601 @d81235049).
 fn mirostatV2Reset(smpl: [*c]Sampler) callconv(.c) void {
     const ctx = core.ctxOf(MirostatV2, smpl);
     ctx.mu = 2.0 * ctx.tau;
@@ -219,7 +219,7 @@ fn mirostatV2Reset(smpl: [*c]Sampler) callconv(.c) void {
     ctx.rng.seed(ctx.seed_cur);
 }
 
-/// Ports `llama_sampler_mirostat_v2_clone` (llama-sampler.cpp:2608 @7fe450e19).
+/// Ports `llama_sampler_mirostat_v2_clone` (llama-sampler.cpp:2608 @d81235049).
 fn mirostatV2Clone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     const ctx = core.ctxOf(MirostatV2, smpl);
 
@@ -232,12 +232,12 @@ fn mirostatV2Clone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     return result;
 }
 
-/// Ports `llama_sampler_mirostat_v2_free` (llama-sampler.cpp:2624 @7fe450e19).
+/// Ports `llama_sampler_mirostat_v2_free` (llama-sampler.cpp:2624 @d81235049).
 fn mirostatV2Free(smpl: [*c]Sampler) callconv(.c) void {
     core.destroy(MirostatV2, core.ctxOf(MirostatV2, smpl));
 }
 
-/// Ports `llama_sampler_mirostat_v2_i` (llama-sampler.cpp:2628 @7fe450e19).
+/// Ports `llama_sampler_mirostat_v2_i` (llama-sampler.cpp:2628 @d81235049).
 pub var mirostat_v2_iface: SamplerI = .{
     .name = mirostatV2Name,
     .accept = null,
@@ -247,7 +247,7 @@ pub var mirostat_v2_iface: SamplerI = .{
     .free = mirostatV2Free,
 };
 
-/// Ports `llama_sampler_init_mirostat_v2` (llama-sampler.cpp:2643 @7fe450e19).
+/// Ports `llama_sampler_init_mirostat_v2` (llama-sampler.cpp:2643 @d81235049).
 ///
 /// Parameters:
 /// - `seed`: the seed; `LLAMA_DEFAULT_SEED` picks a random one.
@@ -270,7 +270,7 @@ pub export fn llama_sampler_init_mirostat_v2(seed: u32, tau: f32, eta: f32) call
 // -----------------------------------------------------------------------------
 // adaptive-p
 
-/// Ports `llama_sampler_adaptive_p` (llama-sampler.cpp:3727 @7fe450e19).
+/// Ports `llama_sampler_adaptive_p` (llama-sampler.cpp:3727 @d81235049).
 const AdaptiveP = struct {
     target: f32,
     decay: f32,
@@ -285,13 +285,13 @@ const AdaptiveP = struct {
 };
 
 // Ports `DISTRIBUTION_WIDTH`, `PEAK_LOGIT_VALUE`, `SHARPNESS`, `INV_WIDTH`
-// (llama-sampler.cpp:3741, 3742, 3743, 3744 @7fe450e19).
+// (llama-sampler.cpp:3741, 3742, 3743, 3744 @d81235049).
 const DISTRIBUTION_WIDTH: f32 = 0.3;
 const PEAK_LOGIT_VALUE: f32 = 5.0;
 const SHARPNESS: f32 = 10.0;
 const INV_WIDTH: f32 = 1.0 / DISTRIBUTION_WIDTH;
 
-/// Ports `llama_sampler_adaptive_p_name` (llama-sampler.cpp:3746 @7fe450e19).
+/// Ports `llama_sampler_adaptive_p_name` (llama-sampler.cpp:3746 @d81235049).
 fn adaptivePName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "adaptive-p";
@@ -302,7 +302,7 @@ fn clamp(v: f32, lo: f32, hi: f32) f32 {
     return if (v < lo) lo else if (hi < v) hi else v;
 }
 
-/// Ports `llama_sampler_adaptive_p_apply` (llama-sampler.cpp:3750 @7fe450e19).
+/// Ports `llama_sampler_adaptive_p_apply` (llama-sampler.cpp:3750 @d81235049).
 ///
 /// Re-weights candidates toward a target probability that adapts to the
 /// running average of what was picked, then draws.
@@ -340,7 +340,7 @@ fn adaptivePApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) voi
     ctx.pending_token_idx = idx;
 }
 
-/// Ports `llama_sampler_adaptive_p_accept` (llama-sampler.cpp:3801 @7fe450e19).
+/// Ports `llama_sampler_adaptive_p_accept` (llama-sampler.cpp:3801 @d81235049).
 ///
 /// Folds the selected token's original probability into the average, when
 /// the accepted token is the one this sampler picked.
@@ -356,7 +356,7 @@ fn adaptivePAccept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
     ctx.pending_token_idx = -1;
 }
 
-/// Ports `llama_sampler_adaptive_p_reset` (llama-sampler.cpp:3814 @7fe450e19).
+/// Ports `llama_sampler_adaptive_p_reset` (llama-sampler.cpp:3814 @d81235049).
 fn adaptivePReset(smpl: [*c]Sampler) callconv(.c) void {
     const ctx = core.ctxOf(AdaptiveP, smpl);
     ctx.weighted_sum = ctx.target / (1.0 - ctx.decay);
@@ -367,7 +367,7 @@ fn adaptivePReset(smpl: [*c]Sampler) callconv(.c) void {
     ctx.rng.seed(ctx.seed_cur);
 }
 
-/// Ports `llama_sampler_adaptive_p_clone` (llama-sampler.cpp:3827 @7fe450e19).
+/// Ports `llama_sampler_adaptive_p_clone` (llama-sampler.cpp:3827 @d81235049).
 ///
 /// Copies the average and the pending token but not the engine: the clone
 /// starts from a freshly seeded one, as the C++'s does.
@@ -384,14 +384,14 @@ fn adaptivePClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     return result;
 }
 
-/// Ports `llama_sampler_adaptive_p_free` (llama-sampler.cpp:3841 @7fe450e19).
+/// Ports `llama_sampler_adaptive_p_free` (llama-sampler.cpp:3841 @d81235049).
 fn adaptivePFree(smpl: [*c]Sampler) callconv(.c) void {
     const ctx = core.ctxOf(AdaptiveP, smpl);
     ctx.original_probs.deinit(impl.allocator);
     core.destroy(AdaptiveP, ctx);
 }
 
-/// Ports `llama_sampler_adaptive_p_i` (llama-sampler.cpp:3845 @7fe450e19).
+/// Ports `llama_sampler_adaptive_p_i` (llama-sampler.cpp:3845 @d81235049).
 var adaptive_p_iface: SamplerI = .{
     .name = adaptivePName,
     .accept = adaptivePAccept,
@@ -401,7 +401,7 @@ var adaptive_p_iface: SamplerI = .{
     .free = adaptivePFree,
 };
 
-/// Ports `llama_sampler_init_adaptive_p` (llama-sampler.cpp:3860 @7fe450e19).
+/// Ports `llama_sampler_init_adaptive_p` (llama-sampler.cpp:3860 @d81235049).
 ///
 /// Parameters:
 /// - `target`: the target probability; negative makes it a plain draw.

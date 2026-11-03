@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/step35.cpp` at v0.5.0 (`7fe450e19`):
+//! Ported from `llama.cpp/src/models/step35.cpp` at v0.6.0 (`d81235049`):
 //! `llama_model_step35`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and its `graph_mtp`.
 
@@ -23,7 +23,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_step35`'s `load_arch_hparams` (models/step35.cpp:3 @7fe450e19).
+/// Ports `llama_model_step35`'s `load_arch_hparams` (models/step35.cpp:3 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -61,7 +61,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_step35`'s `load_arch_tensors` (models/step35.cpp:37 @7fe450e19).
+/// Ports `llama_model_step35`'s `load_arch_tensors` (models/step35.cpp:37 @d81235049).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -113,7 +113,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `load_arch_tensors`'s `load_block_trunk` lambda
-/// (models/step35.cpp:69 @7fe450e19).
+/// (models/step35.cpp:69 @d81235049).
 fn loadBlockTrunk(self: *Model, l: *const Model.Locals, n_rot_max: u32, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
@@ -165,7 +165,7 @@ fn loadBlockTrunk(self: *Model, l: *const Model.Locals, n_rot_max: u32, i: i32, 
 }
 
 /// Ports `load_arch_tensors`'s `load_block_mtp` lambda
-/// (models/step35.cpp:115 @7fe450e19).
+/// (models/step35.cpp:115 @d81235049).
 fn loadBlockMtp(self: *Model, l: *const Model.Locals, n_rot_max: u32, mtp_flags: u32, i: i32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
@@ -227,7 +227,7 @@ fn loadBlockMtp(self: *Model, l: *const Model.Locals, n_rot_max: u32, mtp_flags:
 }
 
 /// Ports `llama_model_step35`'s `build_arch_graph` (models/step35.cpp:184
-/// @7fe450e19): the MTP draft head for that graph type, the main model
+/// @d81235049): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -257,7 +257,7 @@ fn headGate(b: *const graph.Builder, wqkv_gate: *Tensor, cur: *Tensor, attn_out:
 }
 
 /// Ports the constructor of `llama_model_step35`'s `graph`
-/// (models/step35.cpp:191 @7fe450e19).
+/// (models/step35.cpp:191 @d81235049).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -404,7 +404,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_step35`'s `graph_mtp`
-/// (models/step35.cpp:368 @7fe450e19): the `LLM_GRAPH_TYPE_DECODER_MTP`
+/// (models/step35.cpp:368 @d81235049): the `LLM_GRAPH_TYPE_DECODER_MTP`
 /// draft head for Step3p5.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;

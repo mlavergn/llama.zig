@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.5.0 (`7fe450e19`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.6.0 (`d81235049`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -18,7 +18,7 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_unescape_rwkv_token` (llama-vocab.cpp:1258 @7fe450e19):
+/// Ports `llama_unescape_rwkv_token` (llama-vocab.cpp:1288 @d81235049):
 /// `\t`, `\n`, `\r`, `\xHH` and `\` before anything else. A hex digit is
 /// read as lowercase-or-digit with no check, as there.
 pub fn unescapeToken(escaped: []const u8, output: *std.ArrayList(u8)) void {
@@ -67,7 +67,7 @@ pub fn unescapeToken(escaped: []const u8, output: *std.ArrayList(u8)) void {
     }
 }
 
-/// Ports `llm_tokenizer_rwkv` (llama-vocab.cpp:1312 @7fe450e19).
+/// Ports `llm_tokenizer_rwkv` (llama-vocab.cpp:1342 @d81235049).
 pub const Tokenizer = struct {
     token_matcher: Trie,
 
@@ -92,8 +92,8 @@ pub const Tokenizer = struct {
     }
 };
 
-/// Ports `llm_tokenizer_rwkv_session`'s `tokenize` (llama-vocab.cpp:1331
-/// @7fe450e19). A byte with no token becomes UNK; otherwise the longest
+/// Ports `llm_tokenizer_rwkv_session`'s `tokenize` (llama-vocab.cpp:1361
+/// @d81235049). A byte with no token becomes UNK; otherwise the longest
 /// valued prefix is taken. A path with no valued node yields token 0 and
 /// restarts at 0, as the C++ does.
 pub fn tokenize(vocab: *const Vocab, tokenizer: *const Tokenizer, text: []const u8, output: *std.ArrayList(Token)) void {

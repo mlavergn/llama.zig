@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.5.0
-//! (`7fe450e19`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.6.0
+//! (`d81235049`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # The nibbles are shifted into place, not masked down
@@ -62,7 +62,7 @@ inline fn hi4(v: i8x16) i8x16 {
     return @bitCast(u & @as(@Vector(16, u8), @splat(0xf0)));
 }
 
-/// Ports `ggml_gemv_q4_0_4x4_q8_0` (arch/arm/repack.cpp:230 @7fe450e19).
+/// Ports `ggml_gemv_q4_0_4x4_q8_0` (arch/arm/repack.cpp:230 @d81235049).
 pub export fn ggml_gemv_q4_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q4_0_4x4_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const qk: c_int = 32;
@@ -109,7 +109,7 @@ pub export fn ggml_gemv_q4_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
     }
 }
 
-/// Ports `ggml_gemv_q4_0_4x8_q8_0` (arch/arm/repack.cpp:291 @7fe450e19).
+/// Ports `ggml_gemv_q4_0_4x8_q8_0` (arch/arm/repack.cpp:291 @d81235049).
 pub export fn ggml_gemv_q4_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q4_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);

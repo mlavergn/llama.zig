@@ -7,16 +7,16 @@
 # whatever was on its stack.
 --help
 --version
--h
---foo in out
---split --merge in out
---split-max-tensors
---split-max-size 4K in out
---split-max-size 0M in out
---split-max-tensors 3 --split-max-size 1M in out
---merge --split in out
-one-arg-only
-/nonexistent/in.gguf out
+!fail -h
+!fail --foo in out
+!fail --split --merge in out
+!fail --split-max-tensors
+!fail --split-max-size 4K in out
+!fail --split-max-size 0M in out
+!fail --split-max-tensors 3 --split-max-size 1M in out
+!fail --merge --split in out
+!fail one-arg-only
+!fail /nonexistent/in.gguf out
 
 # Split by tensor count, with the default and with a small limit
 $FIX/qwen3-dense.gguf qd
@@ -28,17 +28,17 @@ $FIX/qwen3-dense.gguf qd
 # Split by size; a limit below one tensor leaves a split empty
 --split-max-size 100M $PLAIN pd
 --split-max-size 2M $FIX/qwen3moe-moe.gguf qm
---split-max-size 1M $PLAIN tiny
+!fail --split-max-size 1M $PLAIN tiny
 
 # No tensors at all
 $VOCAB/ggml-vocab-llama-spm.gguf vs
 
 # Merge
 --merge ld-00001-of-00013.gguf ld-merged.gguf
---merge ld-00001-of-00013.gguf ld-merged.gguf
+!fail --merge ld-00001-of-00013.gguf ld-merged.gguf
 --merge gd-00001-of-00010.gguf gd-merged.gguf
 --merge --dry-run pd-00001-of-00002.gguf pd-dry.gguf
 --merge --delete-splits pd-00001-of-00002.gguf pd-merged.gguf
---merge $FIX/qwen3-dense.gguf notsplit.gguf
---merge ld-merged.gguf again.gguf
---merge /nonexistent-00001-of-00002.gguf x.gguf
+!fail --merge $FIX/qwen3-dense.gguf notsplit.gguf
+!fail --merge ld-merged.gguf again.gguf
+!fail --merge /nonexistent-00001-of-00002.gguf x.gguf

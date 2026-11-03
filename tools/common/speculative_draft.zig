@@ -7,15 +7,16 @@
 //! `common_speculative_impl_draft_eagle3`,
 //! `common_speculative_impl_draft_dflash` and
 //! `common_speculative_impl_draft_mtp` from
-//! `llama.cpp/common/speculative.cpp` (v0.5.0, `7fe450e19`). Each
-//! declaration names what it ports and the line it began at; the rest of the
-//! file is `speculative.zig`.
+//! `llama.cpp/common/speculative.cpp` (v0.6.0, `d81235049`), with
+//! `spec_retune`. Each declaration names what it ports and the line it
+//! began at; the rest of the file is `speculative.zig`.
 //!
 //! # Batches
 //!
-//! EAGLE3 and MTP feed their decoder tokens *and* embeddings in one batch;
-//! `llama_batch_init` allocates only one of the two, so the token array is a
-//! separate `malloc`, freed before `llama_batch_free`, as upstream does.
+//! Every batch is a `common.Batch` over the draft context. An embedding set
+//! on an entry is a *view*, read when the batch is rendered: EAGLE3's bridge
+//! row points at `pending_g_last`, which the same `process` then overwrites
+//! before decoding, and the decoder reads the new row -- as upstream's does.
 
 const std = @import("std");
 const c = @import("tools_h");
@@ -133,35 +134,82 @@ fn freeSamplers(smpls: []*sampling.Sampler) void {
     gpa.free(smpls);
 }
 
-/// A batch of `n` tokens with `embd`-wide embeddings and a token array
-/// beside them.
-fn tokenAndEmbdBatch(n: i32, embd: i32) c.llama_batch {
-    var batch = c.llama_batch_init(n, embd, 1);
-    // llama_batch_init allocates only one of token/embd; the decoder needs both.
-    batch.token = @ptrCast(@alignCast(c.malloc(@sizeOf(c.llama_token) * @as(usize, @intCast(n)))));
-    return batch;
+/// What `spec_retune` remembers of a draft sampler's parameters: the C++
+/// keeps a whole `common_params_sampling` and reads these two.
+pub const SmplCfg = struct { temp: f32, seed: u32 };
+
+/// Ports `spec_retune` (speculative.cpp:35 @d81235049): rebuilds
+/// `seq_id`'s draft sampler at the target's temperature, since rejection
+/// weighs q against p and both have to sample alike. Only temp and seed
+/// carry over; the draft keeps its own top_k.
+fn specRetune(smpls: []*sampling.Sampler, cfg: *std.ArrayList(SmplCfg), model: ?*const c.llama_model, seq_id: c.llama_seq_id, temp: f32, seed: u32) void {
+    if (cfg.items.len != smpls.len) {
+        const n_old = cfg.items.len;
+        // `resize` default-constructs; the temperature is what is read
+        cfg.resize(gpa, smpls.len) catch oom();
+
+        // the initial sampler has no temperature, so no request may match the cache and skip a rebuild
+        for (cfg.items[n_old..]) |*e| e.* = .{ .temp = std.math.nan(f32), .seed = c.LLAMA_DEFAULT_SEED };
+    }
+
+    const cur = &cfg.items[@intCast(seq_id)];
+
+    if (cur.temp == temp and cur.seed == seed) return;
+
+    cur.temp = temp;
+    cur.seed = seed;
+
+    var sparams: params_mod.Sampling = .{};
+    sparams.no_perf = false;
+    sparams.top_k = 10;
+    sparams.temp = cur.temp;
+    // must be explicit, the default reseeds at random; mixed so it differs from the target's
+    sparams.seed = if (cur.seed == c.LLAMA_DEFAULT_SEED) cur.seed else cur.seed ^ 0x85ebca6b;
+    var types = [_]params_mod.SamplerType{ .top_k, .temperature };
+    // `sampling.init` reads the list and keeps nothing of it
+    sparams.samplers = .fromOwnedSlice(&types);
+
+    const smpl = sampling.init(model, &sparams) catch |e| switch (e) {
+        error.OutOfMemory => oom(),
+        // top-k and a temperature over default penalties cannot throw
+        else => unreachable,
+    };
+    smpls[@intCast(seq_id)].destroy();
+    smpls[@intCast(seq_id)] = smpl;
 }
 
-fn freeTokenAndEmbdBatch(batch: *c.llama_batch) void {
-    if (batch.token != null) {
-        c.free(batch.token);
-        batch.token = null;
-    }
-    c.llama_batch_free(batch.*);
+/// The candidates `cur_p` holds, appended to `q` as one list -- the C++'s
+/// `emplace_back(cur_p->data, cur_p->data + cur_p->size)`.
+fn appendCandidates(q: *S.Candidates, cur_p: *const c.llama_token_data_array) void {
+    var e: std.ArrayList(c.llama_token_data) = .empty;
+    e.appendSlice(gpa, cur_p.data[0..cur_p.size]) catch oom();
+    q.append(gpa, e) catch oom();
+}
+
+/// `{ data, n_rows, n_embd }`.
+fn embdView(data: [*]const f32, n_rows: usize, n_embd: usize) c.llama_embd {
+    return .{ .data = data, .n_rows = n_rows, .n_embd = n_embd };
 }
 
 // -----------------------------------------------------------------------------
 // draft-simple
 
-/// Ports `common_speculative_impl_draft_simple` (speculative.cpp:179
-/// @7fe450e19): a standalone draft model, decoding its own guesses.
+/// Ports `common_speculative_impl_draft_simple` (speculative.cpp:218
+/// @d81235049): a standalone draft model, decoding its own guesses.
 pub const DraftSimple = struct {
     params: params_mod.SpeculativeDraft,
-    batch: c.llama_batch,
+    batch: common.Batch,
+
+    // zero row at the draft input width, stands in for target embeddings the draft cannot read
+    zeros: []f32,
+    zeros_warned: bool = false, // the substitution is reported once
+
     smpls: []*sampling.Sampler,
 
-    /// Ports `common_speculative_impl_draft_simple` (speculative.cpp:186
-    /// @7fe450e19), the constructor.
+    smpls_cfg: std.ArrayList(SmplCfg) = .empty,
+
+    /// Ports `common_speculative_impl_draft_simple` (speculative.cpp:231
+    /// @d81235049), the constructor.
     pub fn init(base: *Base, params: *const params_mod.Speculative) S.InitError!DraftSimple {
         const func = "common_speculative_impl_draft_simple";
         const p = params.draft;
@@ -169,6 +217,9 @@ pub const DraftSimple = struct {
         const ctx_tgt = p.ctx_tgt;
 
         if (ctx_dft == null) return S.throwRuntime("draft-simple requires a draft context");
+
+        const zeros = gpa.alloc(f32, @intCast(c.llama_model_n_embd_inp(c.llama_get_model(ctx_dft)))) catch oom();
+        @memset(zeros, 0.0);
 
         spcTrc(func, "%s", .{@as([*:0]const u8, "adding speculative implementation 'draft-simple'\n")});
         spcTrc(func, "- n_max=%d, n_min=%d, p_min=%f\n", .{ p.n_max, p.n_min, @as(f64, p.p_min) });
@@ -183,12 +234,12 @@ pub const DraftSimple = struct {
             devs.ptr,
         });
 
-        const batch = c.llama_batch_init(@intCast(c.llama_n_batch(ctx_dft)), 0, 1);
+        const batch = common.Batch.init(gpa, ctx_dft);
 
         const smpls = gpa.alloc(*sampling.Sampler, base.n_seq) catch oom();
         for (smpls) |*s| s.* = draftSampler(c.llama_get_model(ctx_dft));
 
-        var self: DraftSimple = .{ .params = p, .batch = batch, .smpls = smpls };
+        var self: DraftSimple = .{ .params = p, .batch = batch, .zeros = zeros, .smpls = smpls };
 
         const vocab_cmpt = S.areCompatible(c.llama_get_model(ctx_tgt), c.llama_get_model(ctx_dft));
         spcDbg(func, "vocab_cmpt = %d\n", .{@as(c_int, @intFromBool(vocab_cmpt))});
@@ -207,26 +258,58 @@ pub const DraftSimple = struct {
         return self;
     }
 
-    /// Ports the destructor of `common_speculative_impl_draft_simple` (speculative.cpp:254 @7fe450e19).
+    /// The members' destructors: upstream's is the default since v0.6.0.
     pub fn deinit(self: *DraftSimple) void {
-        c.llama_batch_free(self.batch);
+        self.batch.deinit();
+        gpa.free(self.zeros);
         freeSamplers(self.smpls);
+        self.smpls_cfg.deinit(gpa);
     }
 
-    /// Ports `begin` (speculative.cpp:258 @7fe450e19): nothing to do.
-    pub fn begin(_: *DraftSimple, _: *Base, _: c.llama_seq_id, _: []const c.llama_token) void {
-        // noop
+    /// Ports `begin` (speculative.cpp:299 @d81235049): the sequence's
+    /// sampler is reset here rather than per round, or two identical
+    /// requests differ.
+    pub fn begin(self: *DraftSimple, _: *Base, seq_id: c.llama_seq_id, _: []const c.llama_token) void {
+        self.smpls[@intCast(seq_id)].reset();
     }
 
-    /// Ports `process` (speculative.cpp:262 @7fe450e19): the target's batch
-    /// through the draft model, without outputs.
-    pub fn process(self: *DraftSimple, _: *Base, batch: c.llama_batch) bool {
+    /// Ports `process` (speculative.cpp:304 @d81235049): the target's batch
+    /// copied to one the draft context owns, only the last entry an output;
+    /// an embedding entry the draft cannot read becomes a zero row.
+    pub fn process(self: *DraftSimple, _: *Base, batch_in: *const common.Batch) bool {
         const ctx_dft = self.params.ctx_dft;
 
-        var batch_dft = batch;
-        batch_dft.logits = null;
+        // copy the entries to a batch owned by the draft context, only the last token is output
+        self.batch.clear();
+        const n_tokens = batch_in.size();
+        var k: i32 = 0;
+        while (k < n_tokens) : (k += 1) {
+            const t = &batch_in.tokens.items[@intCast(k)];
+            const output = k == n_tokens - 1;
+            if (t.id != c.LLAMA_TOKEN_NULL) {
+                const idx = self.batch.add(t.id, t.pos[0], t.seq_id, output);
+                if (t.embd.data != null) {
+                    _ = self.batch.setEmbd(idx, t.embd);
+                }
+            } else {
+                // mtmd input is projected by the target encoder, a draft with a different width cannot read it
+                // it gets zeros instead, keeping its positions contiguous
+                // ref: https://github.com/ggml-org/llama.cpp/pull/29385#discussion_r4124743243
+                const n_embd = t.embd.n_rows * t.embd.n_embd;
+                const same_width = n_embd == self.zeros.len;
+                if (!same_width and !self.zeros_warned) {
+                    spcWrn("process", "target embeddings of size %zu do not fit the draft input width %zu, " ++
+                        "the draft receives zero rows for them and drafts after multimodal input will be poor\n", .{ n_embd, self.zeros.len });
+                    self.zeros_warned = true;
+                }
+                const embd = if (same_width) t.embd else embdView(self.zeros.ptr, 1, self.zeros.len);
+                _ = self.batch.addEmbd(embd, &t.pos, t.seq_id, output);
+            }
+        }
 
-        const ret = c.llama_decode(ctx_dft, batch_dft);
+        if (self.batch.size() == 0) return true;
+
+        const ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
 
         if (ret != 0) {
             spcErr("process", "failed to decode draft batch, ret = %d\n", .{ret});
@@ -236,14 +319,15 @@ pub const DraftSimple = struct {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:279 @7fe450e19): every drafting
-    /// sequence decodes `id_last`, then its own best guess, until it runs
-    /// out of confidence or room.
+    /// Ports `draft` (speculative.cpp:350 @d81235049): every drafting
+    /// sequence decodes `id_last`, then its own guess -- the best one, or a
+    /// sample with its candidates kept when the caller verifies by
+    /// rejection -- until it runs out of confidence or room.
     pub fn draft(self: *DraftSimple, base: *Base, dparams: []DraftParams) void {
         const ctx_dft = self.params.ctx_dft;
         const n_seq = base.n_seq;
 
-        common.batchClear(&self.batch);
+        self.batch.clear();
 
         // keep track of which sequences are still drafting
         var n_drafting: c_int = 0;
@@ -259,14 +343,27 @@ pub const DraftSimple = struct {
 
             n_drafting += 1;
             drafting[s] = true;
-            self.smpls[s].reset();
+            // greedy drafting leaves no candidates behind, so the verifier falls back to sample-and-match
+            if (!self.params.probabilistic) {
+                dp.result_q = null;
+            }
 
-            common.batchAdd(&self.batch, dp.id_last, dp.pos0, &.{seq_id}, true);
+            // result_q is only set when the caller wants rejection, so it also gates the retune
+            if (dp.result_q != null) {
+                specRetune(self.smpls, &self.smpls_cfg, c.llama_get_model(ctx_dft), seq_id, dp.temp, dp.seed);
+            }
+
+            // a reset reseeds the chain, which breaks probabilistic drafting
+            if (dp.result_q == null) {
+                self.smpls[s].reset();
+            }
+
+            _ = self.batch.add(dp.id_last, dp.pos0, seq_id, true);
         }
 
-        var ret = c.llama_decode(ctx_dft, self.batch);
+        var ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
         if (ret != 0) {
-            spcErr("draft", "llama_decode returned %d\n", .{ret});
+            spcErr("draft", "llama_process returned %d\n", .{ret});
             return;
         }
 
@@ -275,7 +372,7 @@ pub const DraftSimple = struct {
         while (n_drafting > 0) {
             var i_batch: c_int = 0;
 
-            common.batchClear(&self.batch);
+            self.batch.clear();
 
             for (0..n_seq) |s| {
                 const seq_id: c.llama_seq_id = @intCast(s);
@@ -283,7 +380,7 @@ pub const DraftSimple = struct {
 
                 const smpl = self.smpls[s];
 
-                _ = smpl.sample(ctx_dft, i_batch, true) catch oom();
+                const id_sampled = smpl.sample(ctx_dft, i_batch, true) catch oom();
                 i_batch += 1;
 
                 const cur_p = smpl.getCandidates(true);
@@ -291,7 +388,7 @@ pub const DraftSimple = struct {
                 logCandidates("draft", ctx_dft, seq_id, i, cur_p);
 
                 // add drafted token for each sequence
-                const id = cur_p.data[0].id;
+                const id = if (dparams[s].result_q != null) id_sampled else cur_p.data[0].id;
 
                 // only collect very high-confidence draft tokens
                 if (cur_p.data[0].p < self.params.p_min) {
@@ -307,6 +404,8 @@ pub const DraftSimple = struct {
 
                 result.append(gpa, id) catch oom();
 
+                if (dp.result_q) |q| appendCandidates(q, cur_p);
+
                 if (self.params.n_max <= @as(i32, @intCast(result.items.len)) or
                     (dp.n_max > 0 and dp.n_max <= @as(i32, @intCast(result.items.len))))
                 {
@@ -315,15 +414,15 @@ pub const DraftSimple = struct {
                     continue;
                 }
 
-                common.batchAdd(&self.batch, id, dp.pos0 + i + 1, &.{seq_id}, true);
+                _ = self.batch.add(id, dp.pos0 + i + 1, seq_id, true);
             }
 
-            if (self.batch.n_tokens == 0) break;
+            if (self.batch.size() == 0) break;
 
             // evaluate the drafted tokens on the draft model
-            ret = c.llama_decode(ctx_dft, self.batch);
+            ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
             if (ret != 0) {
-                spcErr("draft", "llama_decode[%d] returned %d\n", .{ i, ret });
+                spcErr("draft", "llama_process[%d] returned %d\n", .{ i, ret });
                 break;
             }
 
@@ -337,7 +436,7 @@ pub const DraftSimple = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:386 @7fe450e19): nothing to do.
+    /// Ports `accept` (speculative.cpp:474 @d81235049): nothing to do.
     pub fn accept(_: *DraftSimple, _: *Base, _: c.llama_seq_id, _: u16, _: bool) void {
         // noop
     }
@@ -346,14 +445,15 @@ pub const DraftSimple = struct {
 // -----------------------------------------------------------------------------
 // draft-eagle3
 
-/// Ports `common_speculative_impl_draft_eagle3` (speculative.cpp:426
-/// @7fe450e19). See the C++'s comment for the input convention and the
+/// Ports `common_speculative_impl_draft_eagle3` (speculative.cpp:514
+/// @d81235049). See the C++'s comment for the input convention and the
 /// deferred boundary: at memory position P the decoder reads the pair
 /// (token[P+1], g[P]), so the last position of every `process` waits for the
 /// next call -- or `draft`'s seed step -- to bring its token.
 pub const Eagle3 = struct {
     params: params_mod.SpeculativeDraft,
-    batch: c.llama_batch,
+    batch: common.Batch, // decoder input, (token, g_embd) pairs
+    batch_enc: common.Batch, // encoder input, built from the extracted target features
 
     smpls: []*sampling.Sampler,
 
@@ -381,8 +481,8 @@ pub const Eagle3 = struct {
     features_buf: std.ArrayList(f32) = .empty,
     g_embd_buf: std.ArrayList(f32) = .empty,
 
-    /// Ports `common_speculative_impl_draft_eagle3` (speculative.cpp:456
-    /// @7fe450e19), the constructor.
+    /// Ports `common_speculative_impl_draft_eagle3` (speculative.cpp:545
+    /// @d81235049), the constructor.
     pub fn init(base: *Base, params: *const params_mod.Speculative) S.InitError!Eagle3 {
         const func = "common_speculative_impl_draft_eagle3";
         const n_seq = base.n_seq;
@@ -392,7 +492,7 @@ pub const Eagle3 = struct {
         const p = params.draft;
         const ctx_tgt = p.ctx_tgt;
         const ctx_dft = p.ctx_dft;
-        assertC(ctx_tgt != null and ctx_dft != null, 465, "ctx_tgt && ctx_dft && \"EAGLE3 requires ctx_tgt and ctx_dft to be set\"");
+        assertC(ctx_tgt != null and ctx_dft != null, 554, "ctx_tgt && ctx_dft && \"EAGLE3 requires ctx_tgt and ctx_dft to be set\"");
 
         const model_dft = c.llama_get_model(ctx_dft);
         const model_tgt = c.llama_get_model(ctx_tgt);
@@ -408,8 +508,8 @@ pub const Eagle3 = struct {
         const n_embd_enc: i32 = @as(i32, @intCast(target_layer_ids_n)) * n_embd_tgt;
         const n_layer_tgt = c.llama_model_n_layer(model_tgt);
 
-        const n_b: i32 = @intCast(c.llama_n_batch(ctx_dft));
-        const batch = tokenAndEmbdBatch(n_b, n_embd_dec);
+        const batch = common.Batch.init(gpa, ctx_dft);
+        const batch_enc = common.Batch.init(gpa, ctx_dft);
 
         const smpls = gpa.alloc(*sampling.Sampler, n_seq) catch oom();
         for (smpls) |*s| s.* = draftSampler(c.llama_get_model(ctx_dft));
@@ -425,7 +525,7 @@ pub const Eagle3 = struct {
             } else if (lid == n_layer_tgt) {
                 ext.setEmbeddingsNextn(ctx_tgt, true, false);
             } else {
-                _ = c.ggml_abort("speculative.cpp", 520, "EAGLE3: target layer id %d exceeds target n_layer %d", lid, n_layer_tgt);
+                _ = c.ggml_abort("speculative.cpp", 606, "EAGLE3: target layer id %d exceeds target n_layer %d", lid, n_layer_tgt);
             }
         }
 
@@ -450,6 +550,7 @@ pub const Eagle3 = struct {
         return .{
             .params = p,
             .batch = batch,
+            .batch_enc = batch_enc,
             .smpls = smpls,
             .backend_chains = chains,
             .n_embd_dec = n_embd_dec,
@@ -466,10 +567,11 @@ pub const Eagle3 = struct {
         };
     }
 
-    /// Ports the destructor of `common_speculative_impl_draft_eagle3` (speculative.cpp:536 @7fe450e19).
+    /// Ports the destructor of `common_speculative_impl_draft_eagle3` (speculative.cpp:622 @d81235049).
     pub fn deinit(self: *Eagle3) void {
         freeBackendChains(self.params.ctx_dft, self.backend_chains);
-        freeTokenAndEmbdBatch(&self.batch);
+        self.batch.deinit();
+        self.batch_enc.deinit();
         freeSamplers(self.smpls);
         for (self.pending_g_last) |g| gpa.free(g);
         gpa.free(self.pending_g_last);
@@ -482,7 +584,7 @@ pub const Eagle3 = struct {
         self.g_embd_buf.deinit(gpa);
     }
 
-    /// Ports `begin` (speculative.cpp:556 @7fe450e19): warns when the
+    /// Ports `begin` (speculative.cpp:636 @d81235049): warns when the
     /// draft context is missing more than the one deferred position.
     pub fn begin(self: *Eagle3, _: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
         const n: i32 = @intCast(prompt.len);
@@ -496,16 +598,17 @@ pub const Eagle3 = struct {
         }
     }
 
-    /// Ports `process` (speculative.cpp:572 @7fe450e19): the target's
+    /// Ports `process` (speculative.cpp:652 @d81235049): the target's
     /// features through the encoder, then the decoder over this batch's
     /// pairs, the last position deferred.
-    pub fn process(self: *Eagle3, base: *Base, batch_in: c.llama_batch) bool {
-        if (batch_in.n_tokens <= 0) return true;
+    pub fn process(self: *Eagle3, base: *Base, batch_in: *const common.Batch) bool {
+        if (batch_in.size() <= 0) return true;
 
-        if (batch_in.token == null or batch_in.embd != null) return true;
+        if (!batch_in.hasToken() or batch_in.hasEmbd()) return true;
 
         const n_seq = base.n_seq;
-        const n_tokens: usize = @intCast(batch_in.n_tokens);
+        const n_tokens: usize = @intCast(batch_in.size());
+        const tok = batch_in.tokens.items;
         const n_embd_dec: usize = @intCast(self.n_embd_dec);
         const n_embd_enc: usize = @intCast(self.n_embd_enc);
         const n_embd_tgt: usize = @intCast(self.n_embd_tgt);
@@ -520,8 +623,7 @@ pub const Eagle3 = struct {
         @memset(i_batch_beg, -1);
         @memset(i_batch_end, -1);
         for (0..n_tokens) |k| {
-            assertC(batch_in.n_seq_id[k] == 1, 587, "batch_in.n_seq_id[k] == 1");
-            const seq_id = batch_in.seq_id[k][0];
+            const seq_id = tok[k].seq_id;
             if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(n_seq))) continue;
             const s: usize = @intCast(seq_id);
             i_batch_end[s] = @intCast(k);
@@ -545,7 +647,7 @@ pub const Eagle3 = struct {
             else
                 ext.getEmbeddingsNextn(ctx_tgt);
             if (layer == null) {
-                _ = c.ggml_abort("speculative.cpp", 613, "EAGLE3: target layer %d input not extracted.", lid);
+                _ = c.ggml_abort("speculative.cpp", 692, "EAGLE3: target layer %d input not extracted.", lid);
             }
             for (0..n_tokens) |i| {
                 const dst = self.features_buf.items.ptr + i * n_embd_enc + k * n_embd_tgt;
@@ -556,31 +658,33 @@ pub const Eagle3 = struct {
 
         self.g_embd_buf.resize(gpa, n_tokens * n_embd_dec) catch oom();
 
-        // llama_encode() requires the full encoder batch to fit in n_ubatch.
+        // llama_process() requires the full encoder batch to fit in n_ubatch.
         // Allow batch > ubatch: eagle3's per-token encoder can be chunked safely.
         const n_ubatch_dft: usize = @intCast(c.llama_n_ubatch(ctx_dft));
         var i: usize = 0;
         while (i < n_tokens) : (i += n_ubatch_dft) {
             const n_chunk = @min(n_ubatch_dft, n_tokens - i);
 
-            const enc_batch: c.llama_batch = .{
-                .n_tokens = @intCast(n_chunk),
-                .token = null,
-                .embd = self.features_buf.items.ptr + i * n_embd_enc,
-                .pos = null,
-                .n_seq_id = null,
-                .seq_id = null,
-                .logits = null,
-            };
-            const rc = c.llama_encode(ctx_dft, enc_batch);
+            // the per-token encoder does not use positions, generate placeholder ones from the memory state
+            self.batch_enc.clear();
+            var pos: c.llama_pos = c.llama_memory_seq_pos_max(c.llama_get_memory(ctx_dft), 0) + 1;
+            for (0..n_chunk) |j| {
+                // the C++ passes `&pos`, from which `add_embd` reads `n_pos`
+                // positions: one, the draft being no M-RoPE model
+                const pos_arr = [_]c.llama_pos{ pos, 0, 0, 0 };
+                _ = self.batch_enc.addEmbd(embdView(self.features_buf.items.ptr + (i + j) * n_embd_enc, 1, n_embd_enc), &pos_arr, 0, true);
+                pos += 1;
+            }
+
+            const rc = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_ENCODE, self.batch_enc.get());
             if (rc != 0) {
-                spcErr("process", "llama_encode(ctx_dft) failed rc=%d (n_tokens=%d, offset=%d)\n", .{ rc, @as(c_int, @intCast(n_chunk)), @as(c_int, @intCast(i)) });
+                spcErr("process", "llama_process(ctx_dft) failed rc=%d (n_tokens=%d, offset=%d)\n", .{ rc, @as(c_int, @intCast(n_chunk)), @as(c_int, @intCast(i)) });
                 return false;
             }
 
             // g_embd has shape [n_chunk, n_embd_dec] in ctx_dft's pre-norm embeddings buffer.
             const g_embd_chunk = ext.getEmbeddingsNextn(ctx_dft);
-            assertC(g_embd_chunk != null, 652, "g_embd_chunk && \"EAGLE3 encoder produced no output.\"");
+            assertC(g_embd_chunk != null, 726, "g_embd_chunk && \"EAGLE3 encoder produced no output.\"");
             rowCopy(self.g_embd_buf.items.ptr + i * n_embd_dec, g_embd_chunk.?, n_chunk * n_embd_dec);
         }
 
@@ -588,7 +692,7 @@ pub const Eagle3 = struct {
 
         // EAGLE3 decoder input convention: at memory pos P the input pair is
         // (token[P+1], g_embd[P]). This shifts the token index "left by one" relative to g_embd.
-        common.batchClear(&self.batch);
+        self.batch.clear();
 
         for (0..n_seq) |s| {
             const seq_id: c.llama_seq_id = @intCast(s);
@@ -600,24 +704,24 @@ pub const Eagle3 = struct {
 
             // cross-ubatch bridge — complete the prior ubatch's deferred boundary.
             const pending_pos = self.pending_pos_last[s];
-            if (pending_pos >= 0 and pending_pos + 1 == batch_in.pos[ub]) {
+            if (pending_pos >= 0 and pending_pos + 1 == tok[ub].pos[0]) {
                 const dft_pos_max = c.llama_memory_seq_pos_max(c.llama_get_memory(ctx_dft), seq_id);
                 if (pending_pos > dft_pos_max) {
-                    common.batchAdd(&self.batch, batch_in.token[ub], pending_pos, &.{seq_id}, false);
-                    rowCopy(self.batch.embd + @as(usize, @intCast(self.batch.n_tokens - 1)) * n_embd_dec, self.pending_g_last[s].ptr, n_embd_dec);
+                    const idx = self.batch.add(tok[ub].id, pending_pos, seq_id, false);
+                    _ = self.batch.setEmbd(idx, embdView(self.pending_g_last[s].ptr, 1, n_embd_dec));
                 }
             }
 
             var k = ub;
             while (k < ue) : (k += 1) {
-                common.batchAdd(&self.batch, batch_in.token[k + 1], batch_in.pos[k], &.{seq_id}, false);
-                rowCopy(self.batch.embd + @as(usize, @intCast(self.batch.n_tokens - 1)) * n_embd_dec, g_embd + k * n_embd_dec, n_embd_dec);
+                const idx = self.batch.add(tok[k + 1].id, tok[k].pos[0], seq_id, false);
+                _ = self.batch.setEmbd(idx, embdView(g_embd + k * n_embd_dec, 1, n_embd_dec));
             }
 
             // refresh deferred state
             const n_rows: usize = ue - ub + 1;
-            self.verify_pos_first[s] = batch_in.pos[ub];
-            self.pending_pos_last[s] = batch_in.pos[ue];
+            self.verify_pos_first[s] = tok[ub].pos[0];
+            self.pending_pos_last[s] = tok[ue].pos[0];
             self.verify_g_rows[s] = @intCast(n_rows);
             const vg = &self.verify_g[s];
             const vold = vg.items.len;
@@ -627,10 +731,10 @@ pub const Eagle3 = struct {
             rowCopy(self.pending_g_last[s].ptr, g_embd + ue * n_embd_dec, n_embd_dec);
         }
 
-        if (self.batch.n_tokens > 0) {
-            const rc = c.llama_decode(ctx_dft, self.batch);
+        if (self.batch.size() > 0) {
+            const rc = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
             if (rc != 0) {
-                spcErr("process", "llama_decode(ctx_dft) failed rc=%d (n_tokens=%d, ubatch_pos[0]=%d)\n", .{ rc, self.batch.n_tokens, batch_in.pos[0] });
+                spcErr("process", "llama_process(ctx_dft) failed rc=%d (n_tokens=%d, ubatch_pos[0]=%d)\n", .{ rc, self.batch.size(), tok[0].pos[0] });
                 return false;
             }
         }
@@ -638,7 +742,7 @@ pub const Eagle3 = struct {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:721 @7fe450e19): the seed step
+    /// Ports `draft` (speculative.cpp:797 @d81235049): the seed step
     /// completes the deferred pair with `id_last`, then each step feeds back
     /// its own pre-norm state.
     pub fn draft(self: *Eagle3, base: *Base, dparams: []DraftParams) void {
@@ -646,7 +750,7 @@ pub const Eagle3 = struct {
         const n_seq = base.n_seq;
         const n_embd_dec: usize = @intCast(self.n_embd_dec);
 
-        common.batchClear(&self.batch);
+        self.batch.clear();
 
         // keep track of which sequences are still drafting
         var n_drafting: c_int = 0;
@@ -667,15 +771,15 @@ pub const Eagle3 = struct {
 
             _ = c.llama_memory_seq_rm(c.llama_get_memory(ctx_dft), seq_id, self.pending_pos_last[s], -1);
 
-            common.batchAdd(&self.batch, dp.id_last, self.pending_pos_last[s], &.{seq_id}, true);
-            rowCopy(self.batch.embd + @as(usize, @intCast(self.batch.n_tokens - 1)) * n_embd_dec, self.pending_g_last[s].ptr, n_embd_dec);
+            const idx = self.batch.add(dp.id_last, self.pending_pos_last[s], seq_id, true);
+            _ = self.batch.setEmbd(idx, embdView(self.pending_g_last[s].ptr, 1, n_embd_dec));
         }
 
-        if (self.batch.n_tokens == 0) return;
+        if (self.batch.size() == 0) return;
 
-        var ret = c.llama_decode(ctx_dft, self.batch);
+        var ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
         if (ret != 0) {
-            spcErr("draft", "llama_decode returned %d\n", .{ret});
+            spcErr("draft", "llama_process returned %d\n", .{ret});
             return;
         }
 
@@ -684,7 +788,7 @@ pub const Eagle3 = struct {
         while (n_drafting > 0) {
             var i_batch: c_int = 0;
 
-            common.batchClear(&self.batch);
+            self.batch.clear();
 
             for (0..n_seq) |s| {
                 const seq_id: c.llama_seq_id = @intCast(s);
@@ -724,15 +828,15 @@ pub const Eagle3 = struct {
                     continue;
                 }
 
-                common.batchAdd(&self.batch, id, self.pending_pos_last[s] + (i + 1), &.{seq_id}, true);
-                rowCopy(self.batch.embd + @as(usize, @intCast(self.batch.n_tokens - 1)) * n_embd_dec, prenorm.?, n_embd_dec);
+                const idx = self.batch.add(id, self.pending_pos_last[s] + (i + 1), seq_id, true);
+                _ = self.batch.setEmbd(idx, embdView(prenorm.?, 1, n_embd_dec));
             }
 
-            if (self.batch.n_tokens == 0) break;
+            if (self.batch.size() == 0) break;
 
-            ret = c.llama_decode(ctx_dft, self.batch);
+            ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
             if (ret != 0) {
-                spcErr("draft", "llama_decode[%d] returned %d\n", .{ i, ret });
+                spcErr("draft", "llama_process[%d] returned %d\n", .{ i, ret });
                 break;
             }
 
@@ -747,7 +851,7 @@ pub const Eagle3 = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:848 @7fe450e19): the deferred
+    /// Ports `accept` (speculative.cpp:920 @d81235049): the deferred
     /// boundary moves to the first position the target did not accept.
     pub fn accept(self: *Eagle3, base: *Base, seq_id: c.llama_seq_id, n_accepted: u16, _: bool) void {
         if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
@@ -762,14 +866,14 @@ pub const Eagle3 = struct {
         rowCopy(self.pending_g_last[s].ptr, self.verify_g[s].items.ptr + @as(usize, @intCast(i_g)) * n_embd_dec, n_embd_dec);
     }
 
-    /// Ports `need_boundary_stash` (speculative.cpp:867 @7fe450e19): only a
+    /// Ports `need_boundary_stash` (speculative.cpp:939 @d81235049): only a
     /// recurrent or hybrid target drops the deferred row on restore.
     fn needBoundaryStash(self: *const Eagle3) bool {
         const model_tgt = c.llama_get_model(self.params.ctx_tgt);
         return c.llama_model_is_recurrent(model_tgt) or c.llama_model_is_hybrid(model_tgt);
     }
 
-    /// Ports `get_state` (speculative.cpp:872 @7fe450e19): the deferred
+    /// Ports `get_state` (speculative.cpp:944 @d81235049): the deferred
     /// position and its row, as bytes.
     pub fn getState(self: *const Eagle3, base: *const Base, seq_id: c.llama_seq_id, data: *std.ArrayList(u8)) bool {
         if (!self.needBoundaryStash()) return false;
@@ -785,7 +889,7 @@ pub const Eagle3 = struct {
         return true;
     }
 
-    /// Ports `set_state` (speculative.cpp:889 @7fe450e19).
+    /// Ports `set_state` (speculative.cpp:961 @d81235049).
     pub fn setState(self: *Eagle3, base: *const Base, seq_id: c.llama_seq_id, data: []const u8) void {
         if (!self.needBoundaryStash()) return;
         if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
@@ -807,15 +911,17 @@ pub const Eagle3 = struct {
 // -----------------------------------------------------------------------------
 // draft-dflash, draft-dspark
 
-/// Ports `common_speculative_impl_draft_dflash` (speculative.cpp:910
-/// @7fe450e19): block-diffusion drafting with the target's features
+/// Ports `common_speculative_impl_draft_dflash` (speculative.cpp:982
+/// @d81235049): block-diffusion drafting with the target's features
 /// injected into the draft's KV cache. DSpark is the same driver with a
 /// Markov head, an anchor-first block and an optional confidence head.
 pub const DFlash = struct {
     params: params_mod.SpeculativeDraft,
 
-    batch: c.llama_batch, // noise tokens
-    batch_inject: c.llama_batch, // target features for KV cache injection
+    batch: common.Batch, // noise tokens
+    batch_inject: common.Batch, // target features for KV cache injection
+
+    features_buf: std.ArrayList(f32) = .empty, // [n_chunk, n_embd_enc] gathered target features
 
     smpls: []*sampling.Sampler,
 
@@ -845,8 +951,8 @@ pub const DFlash = struct {
     target_layer_ids: [*c]const i32 = null, // model_dft's extract layer indices
     target_layer_ids_n: u32 = 0,
 
-    /// Ports `common_speculative_impl_draft_dflash` (speculative.cpp:944
-    /// @7fe450e19), the constructor.
+    /// Ports `common_speculative_impl_draft_dflash` (speculative.cpp:1018
+    /// @d81235049), the constructor.
     pub fn init(base: *Base, params: *const params_mod.Speculative, kind: params_mod.SpeculativeType) S.InitError!DFlash {
         const func = "common_speculative_impl_draft_dflash";
         var p = params.draft;
@@ -854,14 +960,14 @@ pub const DFlash = struct {
         const is_dspark = kind == .draft_dspark;
         const ctx_tgt = p.ctx_tgt;
         const ctx_dft = p.ctx_dft;
-        assertC(ctx_tgt != null and ctx_dft != null, 953, "ctx_tgt && ctx_dft && \"DFlash requires ctx_tgt and ctx_dft to be set\"");
+        assertC(ctx_tgt != null and ctx_dft != null, 1026, "ctx_tgt && ctx_dft && \"DFlash requires ctx_tgt and ctx_dft to be set\"");
 
         const model_dft = c.llama_get_model(ctx_dft);
         const model_tgt = c.llama_get_model(ctx_tgt);
 
         const target_layer_ids = ext.modelTargetLayerIds(model_dft);
         const target_layer_ids_n = ext.modelTargetLayerIdsN(model_dft);
-        assertC(target_layer_ids_n > 0, 960, "target_layer_ids_n > 0 && \"DFlash model has no target_layer_ids\"");
+        assertC(target_layer_ids_n > 0, 1033, "target_layer_ids_n > 0 && \"DFlash model has no target_layer_ids\"");
 
         const n_embd_tgt = c.llama_model_n_embd(model_tgt);
         const n_embd_dec = c.llama_model_n_embd(model_dft);
@@ -913,15 +1019,11 @@ pub const DFlash = struct {
         }
         base.n_max = p.n_max;
 
-        const batch = c.llama_batch_init(@intCast(c.llama_n_batch(ctx_dft)), 0, @intCast(n_seq));
-        var batch_inject = c.llama_batch_init(@intCast(c.llama_n_ubatch(ctx_dft)), n_embd_enc, @intCast(n_seq));
+        const batch = common.Batch.init(gpa, ctx_dft);
+        const batch_inject = common.Batch.init(gpa, ctx_dft);
 
-        // embd batches on an M-RoPE draft need 4 position rows per token
+        // embd batches on an M-RoPE draft carry 4 position rows per token
         const is_mrope = c.llama_model_rope_type(model_dft) == c.LLAMA_ROPE_TYPE_MROPE;
-        if (is_mrope) {
-            c.free(batch_inject.pos);
-            batch_inject.pos = @ptrCast(@alignCast(c.malloc(@sizeOf(c.llama_pos) * 4 * @as(usize, c.llama_n_batch(ctx_dft)))));
-        }
 
         const smpls = gpa.alloc(*sampling.Sampler, n_seq) catch oom();
         for (smpls) |*s| s.* = draftSampler(model_dft);
@@ -958,15 +1060,16 @@ pub const DFlash = struct {
         };
     }
 
-    /// Ports the destructor of `common_speculative_impl_draft_dflash` (speculative.cpp:1055 @7fe450e19).
+    /// Ports the destructor of `common_speculative_impl_draft_dflash` (speculative.cpp:1125 @d81235049).
     pub fn deinit(self: *DFlash) void {
         freeBackendChains(self.params.ctx_dft, self.backend_chains);
-        c.llama_batch_free(self.batch);
-        c.llama_batch_free(self.batch_inject);
+        self.batch.deinit();
+        self.batch_inject.deinit();
+        self.features_buf.deinit(gpa);
         freeSamplers(self.smpls);
     }
 
-    /// Ports `begin` (speculative.cpp:1072 @7fe450e19).
+    /// Ports `begin` (speculative.cpp:1139 @d81235049).
     pub fn begin(self: *DFlash, base: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
         if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
 
@@ -980,21 +1083,23 @@ pub const DFlash = struct {
         }
     }
 
-    /// Ports `process` (speculative.cpp:1090 @7fe450e19): each sequence's
+    /// Ports `process` (speculative.cpp:1157 @d81235049): each sequence's
     /// target features, chunked by the draft's micro-batch, injected into
     /// the draft's KV cache at the target positions.
-    pub fn process(self: *DFlash, base: *Base, batch_in: c.llama_batch) bool {
-        if (batch_in.n_tokens <= 0) return true;
+    pub fn process(self: *DFlash, base: *Base, batch_in: *const common.Batch) bool {
+        if (batch_in.size() <= 0) return true;
 
         // Target prefill may contain token IDs or multimodal embeddings. Both
         // produce the target-layer features used to seed the draft KV cache, so
         // embeddings are injected too, except the pinned ones skipped below.
-        const has_tokens = batch_in.token != null;
-        const has_embeddings = batch_in.embd != null;
+        // TODO: revisit after https://github.com/ggml-org/llama.cpp/pull/24669 is merged
+        const has_tokens = batch_in.hasToken();
+        const has_embeddings = batch_in.hasEmbd();
         if (has_tokens == has_embeddings) return true;
 
         const n_seq = base.n_seq;
-        const n_tokens: usize = @intCast(batch_in.n_tokens);
+        const n_tokens: usize = @intCast(batch_in.size());
+        const tok = batch_in.tokens.items;
         const n_embd_enc: usize = @intCast(self.n_embd_enc);
         const n_embd_tgt: usize = @intCast(self.n_embd_tgt);
 
@@ -1006,8 +1111,7 @@ pub const DFlash = struct {
         @memset(i_batch_beg, -1);
         @memset(i_batch_end, -1);
         for (0..n_tokens) |k| {
-            assertC(batch_in.n_seq_id[k] == 1, 1111, "batch_in.n_seq_id[k] == 1");
-            const seq_id = batch_in.seq_id[k][0];
+            const seq_id = tok[k].seq_id;
             if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(n_seq))) continue;
             const s: usize = @intCast(seq_id);
             i_batch_end[s] = @intCast(k);
@@ -1027,7 +1131,7 @@ pub const DFlash = struct {
 
             // an M-RoPE image pins all its rows to one position, so a windowed draft
             // cache cannot free cells for it - skip it, the draft can jump over the gap
-            const pos_pinned = batch_in.pos[ub] == batch_in.pos[@intCast(i_batch_end[s])];
+            const pos_pinned = tok[ub].pos[0] == tok[@intCast(i_batch_end[s])].pos[0];
             if (has_embeddings and n_rows > 1 and pos_pinned) continue;
 
             var offset: i32 = 0;
@@ -1038,34 +1142,28 @@ pub const DFlash = struct {
 
                 // gather target features per extract layer; the fused decode encodes and
                 // injects them into the K/V cache at the target positions
-                self.batch_inject.n_tokens = n_chunk;
+                self.features_buf.resize(gpa, nc * n_embd_enc) catch oom();
                 for (0..self.target_layer_ids_n) |k| {
                     const layer = ext.getEmbeddingsLayerInp(ctx_tgt, @intCast(self.target_layer_ids[k]));
                     if (layer == null) {
-                        _ = c.ggml_abort("speculative.cpp", 1149, "DFlash: target layer %d input not extracted.", self.target_layer_ids[k]);
+                        _ = c.ggml_abort("speculative.cpp", 1215, "DFlash: target layer %d input not extracted.", self.target_layer_ids[k]);
                     }
                     for (0..nc) |i| {
-                        const dst = self.batch_inject.embd + i * n_embd_enc + k * n_embd_tgt;
+                        const dst = self.features_buf.items.ptr + i * n_embd_enc + k * n_embd_tgt;
                         const src = layer.? + (ub + uo + i) * n_embd_tgt;
                         rowCopy(dst, src, n_embd_tgt);
                     }
                 }
 
+                self.batch_inject.clear();
                 for (0..nc) |i| {
-                    const p = batch_in.pos[ub + uo + i];
-                    self.batch_inject.pos[i] = p;
-                    if (self.is_mrope) {
-                        self.batch_inject.pos[1 * nc + i] = p;
-                        self.batch_inject.pos[2 * nc + i] = p;
-                        self.batch_inject.pos[3 * nc + i] = 0;
-                    }
-                    self.batch_inject.n_seq_id[i] = 1;
-                    self.batch_inject.seq_id[i][0] = seq_id;
-                    self.batch_inject.logits[i] = 0;
+                    const p = tok[ub + uo + i].pos[0];
+                    const pos_arr = [4]c.llama_pos{ p, p, p, 0 };
+                    _ = self.batch_inject.addEmbd(embdView(self.features_buf.items.ptr + i * n_embd_enc, 1, n_embd_enc), &pos_arr, seq_id, false);
                 }
-                const rc = c.llama_decode(ctx_dft, self.batch_inject);
+                const rc = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch_inject.get());
                 if (rc != 0) {
-                    log.err("%s: llama_decode(ctx_dft) failed rc=%d (n_tokens=%d, offset=%d)\n", .{ @as([*:0]const u8, "process"), rc, n_chunk, offset });
+                    log.err("%s: llama_process(ctx_dft) failed rc=%d (n_tokens=%d, offset=%d)\n", .{ @as([*:0]const u8, "process"), rc, n_chunk, offset });
                     return false;
                 }
             }
@@ -1074,7 +1172,7 @@ pub const DFlash = struct {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:1182 @7fe450e19): one noise block per
+    /// Ports `draft` (speculative.cpp:1242 @d81235049): one noise block per
     /// drafting sequence, all decoded at once, then each block read out --
     /// through the selector lattice (DFlash2), the confidence head (DSpark)
     /// or the samplers.
@@ -1082,7 +1180,7 @@ pub const DFlash = struct {
         const ctx_dft = self.params.ctx_dft;
         const n_seq = base.n_seq;
 
-        common.batchClear(&self.batch);
+        self.batch.clear();
 
         // build one batch holding every drafting sequence's noise block into a single decode)
         // record where each block starts and its size
@@ -1105,20 +1203,20 @@ pub const DFlash = struct {
             const n_draft = self.params.n_max;
 
             const n_block_tokens: i32 = n_draft + @as(i32, if (self.is_dspark and self.sample_from_anchor) 0 else 1);
-            i_block_beg[s] = self.batch.n_tokens;
+            i_block_beg[s] = self.batch.size();
             n_block[s] = n_block_tokens;
             var i: i32 = 0;
             while (i < n_block_tokens) : (i += 1) {
-                common.batchAdd(&self.batch, if (i == 0) dp.id_last else self.mask_token_id, n + i, &.{seq_id}, !self.is_dflash2);
+                _ = self.batch.add(if (i == 0) dp.id_last else self.mask_token_id, n + i, seq_id, !self.is_dflash2);
             }
         }
 
-        if (self.batch.n_tokens == 0) return;
+        if (self.batch.size() == 0) return;
 
         // decode all sequence's noise block in a single batch
-        const ret = c.llama_decode(ctx_dft, self.batch);
+        const ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
         if (ret != 0) {
-            log.wrn("%s: llama_decode returned %d\n", .{ @as([*:0]const u8, "draft"), ret });
+            log.wrn("%s: llama_process returned %d\n", .{ @as([*:0]const u8, "draft"), ret });
             return;
         }
 
@@ -1139,7 +1237,7 @@ pub const DFlash = struct {
 
             if (self.is_dflash2) {
                 const lattice = ext.getEmbeddingsNextn(ctx_dft);
-                assertC(lattice != null, 1234, "lattice && \"DFlash2 selector produced no lattice\"");
+                assertC(lattice != null, 1298, "lattice && \"DFlash2 selector produced no lattice\"");
 
                 var predecessor: usize = 0;
                 var i: i32 = 1;
@@ -1213,7 +1311,7 @@ pub const DFlash = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:1325 @7fe450e19): nothing to do.
+    /// Ports `accept` (speculative.cpp:1385 @d81235049): nothing to do.
     pub fn accept(_: *DFlash, _: *Base, _: c.llama_seq_id, _: u16, _: bool) void {
         // noop
     }
@@ -1222,16 +1320,18 @@ pub const DFlash = struct {
 // -----------------------------------------------------------------------------
 // draft-mtp
 
-/// Ports `common_speculative_impl_draft_mtp` (speculative.cpp:1330
-/// @7fe450e19): multi-token prediction heads, in one of three modes -- a
+/// Ports `common_speculative_impl_draft_mtp` (speculative.cpp:1390
+/// @d81235049): multi-token prediction heads, in one of three modes -- a
 /// shared KV cache with every head in one graph (Gemma 4), chained heads
 /// one per draft step (Step 3.5), or a single head (Qwen 3.5).
 pub const Mtp = struct {
     params: params_mod.SpeculativeDraft, // reuses the draft-model params slot (ctx_tgt/ctx_dft)
 
-    batch: c.llama_batch,
+    batch: common.Batch,
 
     smpls: []*sampling.Sampler,
+
+    smpls_cfg: std.ArrayList(SmplCfg) = .empty,
 
     // backend sampler chain per seq, attached to ctx_dft
     backend_chains: []?*c.llama_sampler,
@@ -1256,18 +1356,18 @@ pub const Mtp = struct {
     i_last: []c_int,
     chain_h: []std.ArrayList(f32),
 
-    /// Ports `common_speculative_impl_draft_mtp` (speculative.cpp:1366
-    /// @7fe450e19), the constructor.
+    /// Ports `common_speculative_impl_draft_mtp` (speculative.cpp:1428
+    /// @d81235049), the constructor.
     pub fn init(base: *Base, params: *const params_mod.Speculative) S.InitError!Mtp {
         const func = "common_speculative_impl_draft_mtp";
         var p = params.draft;
         const n_seq = base.n_seq;
         const ctx_tgt = p.ctx_tgt;
         const ctx_dft = p.ctx_dft;
-        assertC(ctx_tgt != null and ctx_dft != null, 1372, "ctx_tgt && ctx_dft && \"MTP requires ctx_tgt and ctx_dft to be set\"");
+        assertC(ctx_tgt != null and ctx_dft != null, 1434, "ctx_tgt && ctx_dft && \"MTP requires ctx_tgt and ctx_dft to be set\"");
 
         const n_embd = c.llama_model_n_embd_out(c.llama_get_model(ctx_dft));
-        assertC(n_embd == c.llama_model_n_embd_out(c.llama_get_model(ctx_tgt)), 1375, "n_embd == llama_model_n_embd_out(llama_get_model(ctx_tgt)) && \"MTP input row width must match the target h_nextn width\"");
+        assertC(n_embd == c.llama_model_n_embd_out(c.llama_get_model(ctx_tgt)), 1437, "n_embd == llama_model_n_embd_out(llama_get_model(ctx_tgt)) && \"MTP input row width must match the target h_nextn width\"");
         const n_mtp_layers: i32 = @max(1, c.llama_model_n_layer_nextn(c.llama_get_model(ctx_dft)));
 
         spcTrc(func, "%s", .{@as([*:0]const u8, "adding speculative implementation 'draft-mtp'\n")});
@@ -1283,8 +1383,7 @@ pub const Mtp = struct {
             devs.ptr,
         });
 
-        const n_b: i32 = @intCast(c.llama_n_batch(ctx_dft));
-        const batch = tokenAndEmbdBatch(n_b, n_embd);
+        const batch = common.Batch.init(gpa, ctx_dft);
 
         const smpls = gpa.alloc(*sampling.Sampler, n_seq) catch oom();
         for (smpls) |*s| s.* = draftSampler(c.llama_get_model(ctx_dft));
@@ -1346,11 +1445,12 @@ pub const Mtp = struct {
         };
     }
 
-    /// Ports the destructor of `common_speculative_impl_draft_mtp` (speculative.cpp:1446 @7fe450e19).
+    /// Ports the destructor of `common_speculative_impl_draft_mtp` (speculative.cpp:1504 @d81235049).
     pub fn deinit(self: *Mtp) void {
         freeBackendChains(self.params.ctx_dft, self.backend_chains);
-        freeTokenAndEmbdBatch(&self.batch);
+        self.batch.deinit();
         freeSamplers(self.smpls);
+        self.smpls_cfg.deinit(gpa);
         for (self.pending_h) |h| gpa.free(h);
         gpa.free(self.pending_h);
         gpa.free(self.i_batch_beg);
@@ -1363,8 +1463,12 @@ pub const Mtp = struct {
         gpa.free(self.chain_h);
     }
 
-    /// Ports `begin` (speculative.cpp:1466 @7fe450e19).
+    /// Ports `begin` (speculative.cpp:1518 @d81235049): the sequence's
+    /// sampler is reset here rather than per round, or two identical
+    /// requests differ.
     pub fn begin(self: *Mtp, _: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
+        self.smpls[@intCast(seq_id)].reset();
+
         const n: i32 = @intCast(prompt.len);
         if (n <= 0) return;
 
@@ -1373,23 +1477,24 @@ pub const Mtp = struct {
         if (pos_max < n - 1 and !self.is_mem_shared) {
             spcWrn("begin", "ctx_dft pos_max=%d < N-1=%d - " ++
                 "process() hook may not have run on every prefill ubatch " ++
-                "(need_embd / logits=1 on every prompt position?). " ++
+                "(need_embd / output flag on every prompt position?). " ++
                 "Drafts may degrade.\n", .{ pos_max, n - 1 });
         }
     }
 
-    /// Ports `process` (speculative.cpp:1484 @7fe450e19): the catch-up
+    /// Ports `process` (speculative.cpp:1539 @d81235049): the catch-up
     /// decode of the target's batch under every head, the hidden states
     /// shifted one position right, and the rows the next `accept` chooses
     /// from.
-    pub fn process(self: *Mtp, base: *Base, batch_in: c.llama_batch) bool {
-        if (batch_in.n_tokens <= 0) return true;
+    pub fn process(self: *Mtp, base: *Base, batch_in: *const common.Batch) bool {
+        if (batch_in.size() <= 0) return true;
 
         // TODO: how to make it work with vision tokens?
-        if (batch_in.token == null or batch_in.embd != null) return true;
+        if (!batch_in.hasToken() or batch_in.hasEmbd()) return true;
 
         const n_seq = base.n_seq;
-        const n_tokens: usize = @intCast(batch_in.n_tokens);
+        const n_tokens: usize = @intCast(batch_in.size());
+        const tok = batch_in.tokens.items;
         const n_embd: usize = @intCast(self.n_embd);
 
         // remember the first and last batch index for each sequence
@@ -1398,9 +1503,7 @@ pub const Mtp = struct {
 
         for (0..n_tokens) |k| {
             for (0..n_seq) |s| {
-                assertC(batch_in.n_seq_id[k] == 1, 1502, "batch_in.n_seq_id[k] == 1");
-
-                if (batch_in.seq_id[k][0] == @as(c.llama_seq_id, @intCast(s))) {
+                if (tok[k].seq_id == @as(c.llama_seq_id, @intCast(s))) {
                     self.i_batch_end[s] = @intCast(k);
                     if (self.i_batch_beg[s] < 0) self.i_batch_beg[s] = @intCast(k);
                 }
@@ -1412,23 +1515,28 @@ pub const Mtp = struct {
 
         // if kv is shared with target (e.g Gemma4), then we can skip this catch-up decode
         if (!self.is_mem_shared) {
-            common.batchClear(&self.batch);
+            self.batch.clear();
+
+            // pair each token with the tgt embedding shifted right by one position, and
+            // the first token of each sequence with the pending embedding from a previous run
+            // assumes that the tokens in the batch are sequential for each sequence
+            // i.e. we cannot have seq_id like this: [0, 0, 0, 1, 1, 0, 1, 1]
+            //                                                       ^--- this is a problem
+            // TODO:this is generally true, but would be nice to assert it
+            const h_tgt = ext.getEmbeddingsNextn(ctx_tgt);
 
             for (0..n_tokens) |k| {
-                common.batchAdd(&self.batch, batch_in.token[k], batch_in.pos[k], &.{batch_in.seq_id[k][0]}, false);
-            }
+                const seq_id = tok[k].seq_id;
+                const s: usize = @intCast(seq_id);
 
-            // shift the tgt embeddings to the right by one position
-            // assumes that the tokens in the batch are sequential for each sequence
-            {
-                const h_tgt = ext.getEmbeddingsNextn(ctx_tgt);
-                if (n_tokens > 1) rowCopy(self.batch.embd + 1 * n_embd, h_tgt.?, n_embd * (n_tokens - 1));
-            }
+                const idx = self.batch.add(tok[k].id, tok[k].pos[0], seq_id, false);
 
-            // fill the pending embeddings from a previous run
-            for (0..n_seq) |s| {
-                if (self.i_batch_beg[s] < 0) continue;
-                rowCopy(self.batch.embd + @as(usize, @intCast(self.i_batch_beg[s])) * n_embd, self.pending_h[s].ptr, n_embd);
+                const h_row: [*]const f32 = if (@as(i64, @intCast(k)) == self.i_batch_beg[s])
+                    self.pending_h[s].ptr
+                else
+                    h_tgt.? + (k - 1) * n_embd;
+
+                _ = self.batch.setEmbd(idx, embdView(h_row, 1, n_embd));
             }
 
             const mem_dft = c.llama_get_memory(ctx_dft);
@@ -1439,14 +1547,14 @@ pub const Mtp = struct {
                 if (self.chain_heads) {
                     for (0..n_seq) |s| {
                         if (self.i_batch_beg[s] < 0) continue;
-                        _ = c.llama_memory_seq_rm(mem_dft, @intCast(s), batch_in.pos[@intCast(self.i_batch_beg[s])], -1);
+                        _ = c.llama_memory_seq_rm(mem_dft, @intCast(s), tok[@intCast(self.i_batch_beg[s])].pos[0], -1);
                     }
                     ext.setNextnLayerOffset(ctx_dft, head);
                 }
 
-                const rc = c.llama_decode(ctx_dft, self.batch);
+                const rc = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
                 if (rc != 0) {
-                    spcErr("process", "llama_decode(ctx_dft) head=%d failed rc=%d (pos=%d)\n", .{ head, rc, batch_in.pos[0] });
+                    spcErr("process", "llama_process(ctx_dft) head=%d failed rc=%d (pos=%d)\n", .{ head, rc, tok[0].pos[0] });
                     ok = false;
                     break;
                 }
@@ -1474,13 +1582,15 @@ pub const Mtp = struct {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:1602 @7fe450e19).
+    /// Ports `draft` (speculative.cpp:1648 @d81235049): the best guess of
+    /// each head, or a sample with its candidates kept when the caller
+    /// verifies by rejection.
     pub fn draft(self: *Mtp, base: *Base, dparams: []DraftParams) void {
         const ctx_dft = self.params.ctx_dft;
         const n_seq = base.n_seq;
         const n_embd: usize = @intCast(self.n_embd);
 
-        common.batchClear(&self.batch);
+        self.batch.clear();
 
         // keep track of which sequences are still drafting
         var n_drafting: c_int = 0;
@@ -1496,12 +1606,25 @@ pub const Mtp = struct {
 
             n_drafting += 1;
             drafting[s] = true;
-            self.smpls[s].reset();
+            // greedy drafting leaves no candidates behind, so the verifier falls back to sample-and-match
+            if (!self.params.probabilistic) {
+                dp.result_q = null;
+            }
 
-            common.batchAdd(&self.batch, dp.id_last, dp.pos0, &.{seq_id}, true);
-            rowCopy(self.batch.embd + @as(usize, @intCast(self.batch.n_tokens - 1)) * n_embd, self.pending_h[s].ptr, n_embd);
+            // result_q is only set when the caller wants rejection, so it also gates the retune
+            if (dp.result_q != null) {
+                specRetune(self.smpls, &self.smpls_cfg, c.llama_get_model(ctx_dft), seq_id, dp.temp, dp.seed);
+            }
 
-            self.i_last[s] = self.batch.n_tokens - 1;
+            // a reset reseeds the chain, which breaks probabilistic drafting
+            if (dp.result_q == null) {
+                self.smpls[s].reset();
+            }
+
+            const idx = self.batch.add(dp.id_last, dp.pos0, seq_id, true);
+            _ = self.batch.setEmbd(idx, embdView(self.pending_h[s].ptr, 1, n_embd));
+
+            self.i_last[s] = idx;
 
             if (self.chain_heads) {
                 self.chain_h[s].clearRetainingCapacity();
@@ -1523,16 +1646,16 @@ pub const Mtp = struct {
                 ext.setNextnLayerOffset(ctx_dft, i);
             }
 
-            const ret = c.llama_decode(ctx_dft, self.batch);
+            const ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
             if (ret != 0) {
-                spcErr("draft", "llama_decode[%d] returned %d\n", .{ i, ret });
+                spcErr("draft", "llama_process[%d] returned %d\n", .{ i, ret });
                 break;
             }
 
             // rebuild the batch for the next step: the growing-KV paths re-add only the
             // new token (the KV already holds the prefix), while chained heads re-add the
             // whole prefix at the next head. dropped sequences are simply not re-added.
-            common.batchClear(&self.batch);
+            self.batch.clear();
 
             for (0..n_seq) |s| {
                 const seq_id: c.llama_seq_id = @intCast(s);
@@ -1540,7 +1663,7 @@ pub const Mtp = struct {
 
                 const smpl = self.smpls[s];
 
-                _ = smpl.sample(ctx_dft, self.i_last[s], true) catch oom();
+                const id_sampled = smpl.sample(ctx_dft, self.i_last[s], true) catch oom();
                 const h_row = ext.getEmbeddingsNextnIth(ctx_dft, self.i_last[s]);
 
                 const cur_p = smpl.getCandidates(true);
@@ -1548,7 +1671,7 @@ pub const Mtp = struct {
                 logCandidates("draft", ctx_dft, seq_id, i, cur_p);
 
                 // add drafted token for each sequence
-                const id = cur_p.data[0].id;
+                const id = if (dparams[s].result_q != null) id_sampled else cur_p.data[0].id;
 
                 // only collect very high-confidence draft tokens
                 if (cur_p.data[0].p < self.params.p_min) {
@@ -1564,6 +1687,8 @@ pub const Mtp = struct {
 
                 result.append(gpa, id) catch oom();
 
+                if (dp.result_q) |q| appendCandidates(q, cur_p);
+
                 if (self.params.n_max <= @as(i32, @intCast(result.items.len))) {
                     drafting[s] = false;
                     n_drafting -= 1;
@@ -1575,23 +1700,25 @@ pub const Mtp = struct {
 
                     const n_rows: usize = result.items.len + 1; // id_last + tokens drafted so far
                     for (0..n_rows) |t| {
-                        const tok = if (t == 0) dp.id_last else result.items[t - 1];
-                        common.batchAdd(&self.batch, tok, dp.pos0 + @as(c.llama_pos, @intCast(t)), &.{seq_id}, t == n_rows - 1);
-                        rowCopy(self.batch.embd + @as(usize, @intCast(self.batch.n_tokens - 1)) * n_embd, self.chain_h[s].items.ptr + t * n_embd, n_embd);
+                        const tk = if (t == 0) dp.id_last else result.items[t - 1];
+                        const idx = self.batch.add(tk, dp.pos0 + @as(c.llama_pos, @intCast(t)), seq_id, t == n_rows - 1);
+                        _ = self.batch.setEmbd(idx, embdView(self.chain_h[s].items.ptr + t * n_embd, 1, n_embd));
+                        self.i_last[s] = idx;
                     }
                 } else if (self.is_mem_shared) {
                     // note: with shared memory (e.g. Gemma4 assistants) we use the same position for all draft tokens
-                    common.batchAdd(&self.batch, id, dp.pos0, &.{seq_id}, true);
-                    rowCopy(self.batch.embd + @as(usize, @intCast(self.batch.n_tokens - 1)) * n_embd, h_row.?, n_embd);
+                    // ref: https://github.com/huggingface/transformers/blob/effde20942e3f82a1b97449f60b3a48c5ff96145/docs/source/en/model_doc/gemma4_assistant.md?plain=1#L36-L37
+                    const idx = self.batch.add(id, dp.pos0, seq_id, true);
+                    _ = self.batch.setEmbd(idx, embdView(h_row.?, 1, n_embd));
+                    self.i_last[s] = idx;
                 } else {
-                    common.batchAdd(&self.batch, id, dp.pos0 + i + 1, &.{seq_id}, true);
-                    rowCopy(self.batch.embd + @as(usize, @intCast(self.batch.n_tokens - 1)) * n_embd, h_row.?, n_embd);
+                    const idx = self.batch.add(id, dp.pos0 + i + 1, seq_id, true);
+                    _ = self.batch.setEmbd(idx, embdView(h_row.?, 1, n_embd));
+                    self.i_last[s] = idx;
                 }
-
-                self.i_last[s] = self.batch.n_tokens - 1;
             }
 
-            if (self.batch.n_tokens == 0) break;
+            if (self.batch.size() == 0) break;
 
             i += 1;
         }
@@ -1606,7 +1733,7 @@ pub const Mtp = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:1753 @7fe450e19): the hidden row of
+    /// Ports `accept` (speculative.cpp:1814 @d81235049): the hidden row of
     /// the first position the target did not accept becomes pending.
     pub fn accept(self: *Mtp, base: *Base, seq_id: c.llama_seq_id, n_accepted: u16, _: bool) void {
         if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `clip_ctx`, `clip_model_loader` and the free functions of
-//! `llama.cpp/tools/mtmd/clip.cpp` at v0.5.0 (`7fe450e19`), apart from the
+//! `llama.cpp/tools/mtmd/clip.cpp` at v0.6.0 (`d81235049`), apart from the
 //! four per-projector switches, which live beside it:
 //!
 //! - `arms_hparams.zig` -- `load_hparams`'s model-specific switch
@@ -63,7 +63,7 @@ pub fn what() [:0]const u8 {
     return what_buf[0..what_len :0];
 }
 
-/// Ports `clip_context_params` (clip.h:49 @7fe450e19).
+/// Ports `clip_context_params` (clip.h:49 @d81235049).
 pub const ContextParams = extern struct {
     use_gpu: bool,
     device: c.ggml_backend_dev_t,
@@ -78,14 +78,14 @@ pub const ContextParams = extern struct {
     progress_callback_user_data: ?*anyopaque,
 };
 
-/// Ports `clip_init_result` (clip.h:63 @7fe450e19).
+/// Ports `clip_init_result` (clip.h:63 @d81235049).
 pub const InitResult = struct {
     ctx_v: ?*Ctx = null, // vision context
     ctx_a: ?*Ctx = null, // audio context
     ctx_gen_a: ?*Ctx = null, // audio generation context
 };
 
-/// Ports `clip_cap` (clip.h:135 @7fe450e19).
+/// Ports `clip_cap` (clip.h:138 @d81235049).
 pub const Cap = struct { has_vision: bool, has_audio: bool };
 
 /// A `std::map<ggml_backend_dev_t, size_t>`: by device pointer, ascending.
@@ -115,7 +115,7 @@ pub const DevSizeMap = struct {
     }
 };
 
-/// Ports `clip_encode_params` (clip.h:95 @7fe450e19).
+/// Ports `clip_encode_params` (clip.h:98 @d81235049).
 pub const EncodeParams = struct {
     n_threads: c_int = 1,
     imgs: ?*const impl.ImageF32Batch = null,
@@ -142,7 +142,7 @@ pub const EncodeParams = struct {
     state_out: ?*std.ArrayList(u8) = null, // state for the next call
 };
 
-/// Ports `clip_ctx` (mtmd/clip.cpp:147 @7fe450e19).
+/// Ports `clip_ctx` (mtmd/clip.cpp:147 @d81235049).
 pub const Ctx = struct {
     model: model_mod.Model = .{},
 
@@ -176,7 +176,7 @@ pub const Ctx = struct {
     rng: libcxx.Mt19937 = undefined,
     rng_seed: u32 = std.math.maxInt(u32),
 
-    /// Ports `clip_ctx` (mtmd/clip.cpp:181 @7fe450e19), a member of `clip_ctx`.
+    /// Ports `clip_ctx` (mtmd/clip.cpp:181 @d81235049), a member of `clip_ctx`.
     pub fn create(ctx_params: *const ContextParams) Error!*Ctx {
         const self = try gpa.create(Ctx);
         self.* = .{};
@@ -223,7 +223,7 @@ pub const Ctx = struct {
         return self;
     }
 
-    /// Ports `clip_ctx` (mtmd/clip.cpp:231 @7fe450e19), its destructor, with the smart
+    /// Ports `clip_ctx` (mtmd/clip.cpp:231 @d81235049), its destructor, with the smart
     /// pointers' destructors in reverse member order.
     pub fn destroy(self: *Ctx) void {
         c.ggml_backend_free(self.backend);
@@ -281,7 +281,7 @@ fn randomDevice() u32 {
 // -----------------------------------------------------------------------------
 // clip_model_loader
 
-/// Ports `clip_model_loader` (mtmd/clip.cpp:1158 @7fe450e19).
+/// Ports `clip_model_loader` (mtmd/clip.cpp:1165 @d81235049).
 pub const Loader = struct {
     ctx_meta: ?*c.ggml_context = null,
     ctx_gguf: ?*c.gguf_context = null,
@@ -297,7 +297,7 @@ pub const Loader = struct {
     progress_callback: ?*const fn (f32, ?*anyopaque) callconv(.c) bool = null,
     progress_callback_user_data: ?*anyopaque = null,
 
-    /// Ports `clip_model_loader` (mtmd/clip.cpp:1174 @7fe450e19), a member of `clip_model_loader`.
+    /// Ports `clip_model_loader` (mtmd/clip.cpp:1181 @d81235049), a member of `clip_model_loader`.
     pub fn init(fname: [:0]const u8, skip_tensors: bool, progress_cb: ?*const fn (f32, ?*anyopaque) callconv(.c) bool, progress_user_data: ?*anyopaque) Error!Loader {
         const func = "clip_model_loader";
         var self: Loader = .{ .fname = fname, .progress_callback = progress_cb, .progress_callback_user_data = progress_user_data };
@@ -367,7 +367,7 @@ pub const Loader = struct {
         return c.gguf_find_key(self.ctx_gguf, key);
     }
 
-    /// Ports `get_bool` (mtmd/clip.cpp:3818 @7fe450e19), a member of `clip_model_loader`.
+    /// Ports `get_bool` (mtmd/clip.cpp:3849 @d81235049), a member of `clip_model_loader`.
     pub fn getBool(self: *const Loader, key: [*:0]const u8, output: *bool, required: bool) Error!void {
         const i = self.findKey(key);
         if (i < 0) {
@@ -377,7 +377,7 @@ pub const Loader = struct {
         output.* = c.gguf_get_val_bool(self.ctx_gguf, i);
     }
 
-    /// Ports `get_i32` (mtmd/clip.cpp:3829 @7fe450e19), a member of `clip_model_loader`.
+    /// Ports `get_i32` (mtmd/clip.cpp:3860 @d81235049), a member of `clip_model_loader`.
     pub fn getI32(self: *const Loader, key: [*:0]const u8, output: *i32, required: bool) Error!void {
         const i = self.findKey(key);
         if (i < 0) {
@@ -387,7 +387,7 @@ pub const Loader = struct {
         output.* = c.gguf_get_val_i32(self.ctx_gguf, i);
     }
 
-    /// Ports `get_u32` (mtmd/clip.cpp:3840 @7fe450e19), a member of `clip_model_loader`.
+    /// Ports `get_u32` (mtmd/clip.cpp:3871 @d81235049), a member of `clip_model_loader`.
     pub fn getU32(self: *const Loader, key: [*:0]const u8, output: *i32, required: bool) Error!void {
         const i = self.findKey(key);
         if (i < 0) {
@@ -402,7 +402,7 @@ pub const Loader = struct {
         output.* = @intCast(val);
     }
 
-    /// Ports `get_f32` (mtmd/clip.cpp:3857 @7fe450e19), a member of `clip_model_loader`.
+    /// Ports `get_f32` (mtmd/clip.cpp:3888 @d81235049), a member of `clip_model_loader`.
     pub fn getF32(self: *const Loader, key: [*:0]const u8, output: *f32, required: bool) Error!void {
         const i = self.findKey(key);
         if (i < 0) {
@@ -412,7 +412,7 @@ pub const Loader = struct {
         output.* = c.gguf_get_val_f32(self.ctx_gguf, i);
     }
 
-    /// Ports `get_arr_f32` (mtmd/clip.cpp:3868 @7fe450e19), a member of `clip_model_loader`.
+    /// Ports `get_arr_f32` (mtmd/clip.cpp:3899 @d81235049), a member of `clip_model_loader`.
     pub fn getArrF32(self: *const Loader, key: [*:0]const u8, output: *std.ArrayList(f32), required: bool) Error!void {
         const func = "get_arr_f32";
         const i = self.findKey(key);
@@ -430,7 +430,7 @@ pub const Loader = struct {
         for (0..n) |j| output.items[j] = values[j];
     }
 
-    /// Ports `get_string` (mtmd/clip.cpp:3894 @7fe450e19), a member of `clip_model_loader`:
+    /// Ports `get_string` (mtmd/clip.cpp:3925 @d81235049), a member of `clip_model_loader`:
     /// the value, borrowed from the GGUF context, or `output` left alone.
     pub fn getStringPtr(self: *const Loader, key: [*:0]const u8, output: *?[*:0]const u8, required: bool) Error!void {
         const i = self.findKey(key);
@@ -449,7 +449,7 @@ pub const Loader = struct {
         if (p) |s| output.* = try gpa.dupeSentinel(u8, std.mem.span(s), 0);
     }
 
-    /// Ports `get_arr_int` (mtmd/clip.cpp:3905 @7fe450e19), a member of `clip_model_loader`.
+    /// Ports `get_arr_int` (mtmd/clip.cpp:3936 @d81235049), a member of `clip_model_loader`.
     pub fn getArrInt(self: *const Loader, key: [*:0]const u8, output: *std.ArrayList(i32), required: bool) Error!void {
         const func = "get_arr_int";
         const i = self.findKey(key);
@@ -471,7 +471,7 @@ pub const Loader = struct {
         return throwErr("Key not found: %s", .{key});
     }
 
-    /// Ports `set_llava_uhd_res_candidates` (mtmd/clip.cpp:3931 @7fe450e19), a member of `clip_model_loader`.
+    /// Ports `set_llava_uhd_res_candidates` (mtmd/clip.cpp:3962 @d81235049), a member of `clip_model_loader`.
     pub fn setLlavaUhdResCandidates(model: *model_mod.Model, max_patches_per_side: c_int) Error!void {
         const hparams = &model.hparams;
         var x: c_int = 1;
@@ -484,7 +484,7 @@ pub const Loader = struct {
         }
     }
 
-    /// Ports `set_internvl_dhr_res_candidates` (mtmd/clip.cpp:3946 @7fe450e19), a member of `clip_model_loader`.
+    /// Ports `set_internvl_dhr_res_candidates` (mtmd/clip.cpp:3977 @d81235049), a member of `clip_model_loader`.
     pub fn setInternvlDhrResCandidates(model: *model_mod.Model) Error!void {
         const hparams = &model.hparams;
         const min_num = hparams.preproc_min_tiles;
@@ -503,7 +503,7 @@ pub const Loader = struct {
         }
     }
 
-    /// Ports `load_hparams` (mtmd/clip.cpp:1244 @7fe450e19), a member of `clip_model_loader`;
+    /// Ports `load_hparams` (mtmd/clip.cpp:1251 @d81235049), a member of `clip_model_loader`;
     /// the model-specific switch is `arms_hparams.load`.
     pub fn loadHparams(self: *Loader, model: *model_mod.Model, modality: impl.Modality) Error!void {
         const func = "load_hparams";
@@ -512,9 +512,9 @@ pub const Loader = struct {
 
         // sanity check
         switch (modality) {
-            .vision => impl.ggmlAssert(self.has_vision, "clip.cpp", 1250, "has_vision"),
-            .audio => impl.ggmlAssert(self.has_audio, "clip.cpp", 1252, "has_audio"),
-            .gen_audio => impl.ggmlAssert(self.has_gen_audio, "clip.cpp", 1254, "has_gen_audio"),
+            .vision => impl.ggmlAssert(self.has_vision, "clip.cpp", 1257, "has_vision"),
+            .audio => impl.ggmlAssert(self.has_audio, "clip.cpp", 1259, "has_audio"),
+            .gen_audio => impl.ggmlAssert(self.has_gen_audio, "clip.cpp", 1261, "has_gen_audio"),
         }
         model.modality = modality;
 
@@ -587,7 +587,7 @@ pub const Loader = struct {
                 hparams.patch_size = 1;
                 try self.getString(names.KEY_GEN_AUDIO_VARIANT, &hparams.gen_model_variant, false);
             } else {
-                impl.ggmlAssert(false, "clip.cpp", 1345, "false && \"unknown modality\"");
+                impl.ggmlAssert(false, "clip.cpp", 1352, "false && \"unknown modality\"");
             }
 
             // for pinpoints, we need to convert it into a list of resolution candidates
@@ -747,7 +747,7 @@ pub const Loader = struct {
         }
     }
 
-    /// Ports `load_tensors` (mtmd/clip.cpp:2109 @7fe450e19), a member of `clip_model_loader`;
+    /// Ports `load_tensors` (mtmd/clip.cpp:2130 @d81235049), a member of `clip_model_loader`;
     /// the model-specific switch is `arms_tensors.load`.
     pub fn loadTensors(self: *Loader, ctx_clip: *Ctx) Error!void {
         const func = "load_tensors";
@@ -899,9 +899,9 @@ pub const Loader = struct {
                 for (tl.tensors_to_load.items) |t| {
                     const tname: [*:0]const u8 = @ptrCast(&t.?.name);
                     const cur = c.ggml_get_tensor(ctx_clip.ctx_data, tname);
-                    impl.ggmlAssert(cur != null, "clip.cpp", 3619, "cur && \"tensor not found in ctx_data\"");
+                    impl.ggmlAssert(cur != null, "clip.cpp", 3650, "cur && \"tensor not found in ctx_data\"");
                     const off = tl.tensor_offset.get(std.mem.span(tname));
-                    impl.ggmlAssert(off != null, "clip.cpp", 3621, "it_off != tensor_offset.end() && \"no offset for tensor\"");
+                    impl.ggmlAssert(off != null, "clip.cpp", 3652, "it_off != tensor_offset.end() && \"no offset for tensor\"");
                     if (fseeko(tl.fin, @intCast(off.?), 0) != 0) {
                         return throwErr("%s: failed to seek for tensor %s\n", .{ func, tname });
                     }
@@ -932,7 +932,7 @@ pub const Loader = struct {
         }
     }
 
-    /// Ports `get_dummy_batch` (mtmd/clip.cpp:3669 @7fe450e19), a member of `clip_model_loader`.
+    /// Ports `get_dummy_batch` (mtmd/clip.cpp:3700 @d81235049), a member of `clip_model_loader`.
     pub fn getDummyBatch(ctx_clip: *Ctx) Error!impl.ImageF32Batch {
         const func = "get_dummy_batch";
         // create a fake batch
@@ -958,7 +958,7 @@ pub const Loader = struct {
         return batch;
     }
 
-    /// Ports `init_ctx` (mtmd/clip.cpp:3692 @7fe450e19), a member of `clip_model_loader`.
+    /// Ports `init_ctx` (mtmd/clip.cpp:3723 @d81235049), a member of `clip_model_loader`.
     pub fn initCtx(ctx_clip: *Ctx) Error!void {
         try ctx_clip.buf_compute_meta.resize(gpa, @as(usize, @intCast(ctx_clip.max_nodes)) * c.ggml_tensor_overhead() + c.ggml_graph_overhead());
 
@@ -966,10 +966,10 @@ pub const Loader = struct {
         // dummy batch and asks it, without building
         var batch = try getDummyBatch(ctx_clip);
         defer batch.deinit();
-        ctx_clip.support_batch = models.supportBatch(ctx_clip.projType()) orelse impl.abort("clip.cpp", 1143, "missing cgraph builder");
+        ctx_clip.support_batch = models.supportBatch(ctx_clip.projType()) orelse impl.abort("clip.cpp", 1150, "missing cgraph builder");
     }
 
-    /// Ports `warmup` (mtmd/clip.cpp:3701 @7fe450e19), a member of
+    /// Ports `warmup` (mtmd/clip.cpp:3732 @d81235049), a member of
     /// `clip_model_loader`: the overload over a context.
     pub fn warmup(ctx_clip: *Ctx) Error!void {
         var batch = try getDummyBatch(ctx_clip);
@@ -994,7 +994,7 @@ pub const Loader = struct {
         }
     };
 
-    /// Ports `warmup` (mtmd/clip.cpp:3706 @7fe450e19), a member of
+    /// Ports `warmup` (mtmd/clip.cpp:3737 @d81235049), a member of
     /// `clip_model_loader`: the overload over a context and a batch.
     pub fn warmupBatch(ctx_clip: *Ctx, batch: *const impl.ImageF32Batch) Error!void {
         const func = "warmup";
@@ -1061,7 +1061,7 @@ pub const Loader = struct {
         }
     }
 
-    /// The `print_shape` lambda of `warmup` (mtmd/clip.cpp:3706 @7fe450e19): `%d`
+    /// The `print_shape` lambda of `warmup` (mtmd/clip.cpp:3737 @d81235049): `%d`
     /// over `int64_t` and `size_t`, which the C++ passes as 64-bit values
     /// and `printf` reads as their low 32 bits on this ABI.
     fn printShape(func: [*:0]const u8, name: [*:0]const u8, t: T) void {
@@ -1074,8 +1074,8 @@ pub const Loader = struct {
         });
     }
 
-    /// Ports `reserve_compute_meta` (mtmd/clip.cpp:3774
-    /// @7fe450e19), a member of `clip_model_loader`: initialize the backend buffers, without allocating.
+    /// Ports `reserve_compute_meta` (mtmd/clip.cpp:3805
+    /// @d81235049), a member of `clip_model_loader`: initialize the backend buffers, without allocating.
     fn reserveComputeMeta(ctx_clip: *Ctx, batch: *const impl.ImageF32Batch) Error!SupportInfoGraph {
         const func = "reserve_compute_meta";
         var built = try models.buildGraph(ctx_clip, batch, null);
@@ -1138,7 +1138,7 @@ pub const TensorLoader = struct {
         self.loaded_tensor_names.deinit(gpa);
     }
 
-    /// The `get_tensor` lambda (mtmd/clip.cpp:2144 @7fe450e19).
+    /// The `get_tensor` lambda (mtmd/clip.cpp:2165 @d81235049).
     pub fn getTensor(self: *TensorLoader, name: [*:0]const u8, required: bool) Error!T {
         const func = "load_tensors";
         const key = std.mem.span(name);
@@ -1158,7 +1158,7 @@ pub const TensorLoader = struct {
         return cur;
     }
 
-    /// The `get_vector` lambda (mtmd/clip.cpp:2190 @7fe450e19). The caller owns
+    /// The `get_vector` lambda (mtmd/clip.cpp:2211 @d81235049). The caller owns
     /// the list.
     pub fn getVector(self: *TensorLoader, name: [*:0]const u8) Error!std.ArrayList(f32) {
         const func = "load_tensors";
@@ -1181,7 +1181,7 @@ pub const TensorLoader = struct {
         return result;
     }
 
-    /// The `get_scalar` lambda (mtmd/clip.cpp:2219 @7fe450e19).
+    /// The `get_scalar` lambda (mtmd/clip.cpp:2240 @d81235049).
     pub fn getScalar(self: *TensorLoader, name: [*:0]const u8, default_val: f32) Error!f32 {
         var v = try self.getVector(name);
         defer v.deinit(gpa);
@@ -1190,7 +1190,7 @@ pub const TensorLoader = struct {
         return v.items[0];
     }
 
-    /// The `load_seanet` lambda (mtmd/clip.cpp:2166 @7fe450e19): pocket-tts's
+    /// The `load_seanet` lambda (mtmd/clip.cpp:2187 @d81235049): pocket-tts's
     /// encoder and decoder share a layout under different prefixes.
     pub fn loadSeanet(self: *TensorLoader, seanet: *model_mod.Seanet, is_decoder: bool) Error!void {
         const hparams = &self.ctx_clip.model.hparams;
@@ -1261,7 +1261,7 @@ pub fn fmtRt(buf: *[256]u8, fmt: [*:0]const u8, args: anytype) [*:0]const u8 {
 // -----------------------------------------------------------------------------
 // clip_init and the free functions
 
-/// Ports `clip_init` (mtmd/clip.cpp:3968 @7fe450e19).
+/// Ports `clip_init` (mtmd/clip.cpp:3999 @d81235049).
 pub fn init(fname: [:0]const u8, ctx_params: ContextParams) InitResult {
     var res: InitResult = .{};
     initInner(fname, &ctx_params, &res) catch |e| {
@@ -1308,7 +1308,7 @@ fn initInner(fname: [:0]const u8, ctx_params: *const ContextParams, res: *InitRe
     }
 }
 
-/// Ports `clip_get_cap` (mtmd/clip.cpp:4025 @7fe450e19). A load failure is the
+/// Ports `clip_get_cap` (mtmd/clip.cpp:4056 @d81235049). A load failure is the
 /// C++'s escaping exception, which `mtmd_get_cap_from_file` catches.
 pub fn getCap(fname: [:0]const u8) Error!Cap {
     var loader = try Loader.init(fname, true, null, null);
@@ -1316,23 +1316,38 @@ pub fn getCap(fname: [:0]const u8) Error!Cap {
     return .{ .has_vision = loader.has_vision, .has_audio = loader.has_audio };
 }
 
-/// Ports `clip_free` (mtmd/clip.cpp:4033 @7fe450e19).
+/// Ports `clip_get_image_max_tokens` (mtmd/clip.cpp:4064 @d81235049), new at
+/// v0.6.0: the most output tokens one image can take, -1 where the size is
+/// not dynamic.
+pub fn getImageMaxTokens(ctx: *const Ctx) c_int {
+    const hparams = &ctx.model.hparams;
+    if (ctx.projType() == .deepseek4v) {
+        return hparams.dsv4_max_n_token;
+    }
+    if (hparams.image_max_pixels <= 0) {
+        return -1;
+    }
+    const patch_area = hparams.patch_size * hparams.patch_size * hparams.n_merge * hparams.n_merge;
+    return @divTrunc(hparams.image_max_pixels, patch_area);
+}
+
+/// Ports `clip_free` (mtmd/clip.cpp:4076 @d81235049).
 pub fn free(ctx: ?*Ctx) void {
     if (ctx) |x| x.destroy();
 }
 
-/// Ports `clip_patch_merge_type` (mtmd/clip.cpp:4040 @7fe450e19).
+/// Ports `clip_patch_merge_type` (mtmd/clip.cpp:4083 @d81235049).
 pub fn patchMergeType(ctx: *const Ctx) [*:0]const u8 {
     return if (ctx.model.hparams.mm_patch_merge_type == .spatial_unpad) "spatial_unpad" else "flat";
 }
 
-/// Ports `clip_n_output_tokens_x` (mtmd/clip.cpp:4044 @7fe450e19): for M-RoPE,
+/// Ports `clip_n_output_tokens_x` (mtmd/clip.cpp:4087 @d81235049): for M-RoPE,
 /// the token positions in X; otherwise every token.
 pub fn nOutputTokensX(ctx: *const Ctx, img: *const impl.ImageF32) c_int {
     const params = &ctx.model.hparams;
     const n_total = nOutputTokens(ctx, img);
     switch (ctx.projType()) {
-        .qwen2vl, .qwen25vl, .qwen3vl, .exaone4_5, .mimovl, .glm4v, .paddleocr, .hunyuanvl, .youtuvl, .muse_glimmer => return @divTrunc(@divTrunc(img.nx(), params.patch_size), 2),
+        .qwen2vl, .qwen25vl, .qwen3vl, .ling3vl, .exaone4_5, .mimovl, .glm4v, .glm5v, .paddleocr, .hunyuanvl, .youtuvl, .muse_glimmer => return @divTrunc(@divTrunc(img.nx(), params.patch_size), 2),
         .step3vl => return @divTrunc(img.nx(), params.patch_size * params.n_merge),
         .deepseekocr, .deepseekocr2 => return @divTrunc(@divTrunc(img.nx(), params.patch_size), 4),
         else => {},
@@ -1340,24 +1355,24 @@ pub fn nOutputTokensX(ctx: *const Ctx, img: *const impl.ImageF32) c_int {
     return n_total;
 }
 
-/// Ports `clip_n_output_tokens_y` (mtmd/clip.cpp:4071 @7fe450e19).
+/// Ports `clip_n_output_tokens_y` (mtmd/clip.cpp:4116 @d81235049).
 pub fn nOutputTokensY(ctx: *const Ctx, img: *const impl.ImageF32) c_int {
     const params = &ctx.model.hparams;
     switch (ctx.projType()) {
-        .qwen2vl, .qwen25vl, .qwen3vl, .exaone4_5, .mimovl, .glm4v, .paddleocr, .hunyuanvl, .youtuvl, .muse_glimmer => return @divTrunc(@divTrunc(img.ny(), params.patch_size), 2),
+        .qwen2vl, .qwen25vl, .qwen3vl, .ling3vl, .exaone4_5, .mimovl, .glm4v, .glm5v, .paddleocr, .hunyuanvl, .youtuvl, .muse_glimmer => return @divTrunc(@divTrunc(img.ny(), params.patch_size), 2),
         .step3vl => return @divTrunc(img.ny(), params.patch_size * params.n_merge),
         else => {},
     }
     return 1;
 }
 
-/// Ports `clip_n_output_tokens` (mtmd/clip.cpp:4094 @7fe450e19): the
+/// Ports `clip_n_output_tokens` (mtmd/clip.cpp:4141 @d81235049): the
 /// per-projector body is `arms_inputs.nOutputTokens`.
 pub fn nOutputTokens(ctx: *const Ctx, img: *const impl.ImageF32) c_int {
     return arms_inputs.nOutputTokens(ctx, img);
 }
 
-/// Ports `clip_image_encode` (mtmd/clip.cpp:4401 @7fe450e19).
+/// Ports `clip_image_encode` (mtmd/clip.cpp:4450 @d81235049).
 pub fn imageEncode(ctx: *Ctx, n_threads: c_int, img: *const impl.ImageF32, out_vec: *std.ArrayList(f32)) Error!bool {
     var imgs: impl.ImageF32Batch = .{};
     defer imgs.deinit();
@@ -1365,14 +1380,14 @@ pub fn imageEncode(ctx: *Ctx, n_threads: c_int, img: *const impl.ImageF32, out_v
     return imageBatchEncode(ctx, n_threads, &imgs, out_vec);
 }
 
-/// Ports `clip_image_batch_encode` (mtmd/clip.cpp:4409 @7fe450e19).
+/// Ports `clip_image_batch_encode` (mtmd/clip.cpp:4458 @d81235049).
 pub fn imageBatchEncode(ctx: *Ctx, n_threads: c_int, imgs: *const impl.ImageF32Batch, out_batch_embd: *std.ArrayList(f32)) Error!bool {
     var params: EncodeParams = .{ .imgs = imgs, .n_threads = n_threads, .out_embd = out_batch_embd };
     return encode(ctx, &params);
 }
 
 /// What the input arms of `clip_encode` read and the helpers they call
-/// (mtmd/clip.cpp:4427 @7fe450e19).
+/// (mtmd/clip.cpp:4476 @d81235049).
 pub const EncodeState = struct {
     ctx: *Ctx,
     params: *EncodeParams,
@@ -1387,31 +1402,31 @@ pub const EncodeState = struct {
     pos_w: c_int,
     pos_h: c_int,
 
-    /// The `get_inp_tensor` lambda (mtmd/clip.cpp:4469 @7fe450e19).
+    /// The `get_inp_tensor` lambda (mtmd/clip.cpp:4518 @d81235049).
     pub fn getInpTensor(self: *const EncodeState, name: [*:0]const u8) T {
         const inp = c.ggml_graph_get_tensor(self.gf, name);
-        if (inp == null) _ = c.ggml_abort("clip.cpp", 4472, "Failed to get tensor %s", name);
-        if (inp.*.flags & c.GGML_TENSOR_FLAG_INPUT == 0) _ = c.ggml_abort("clip.cpp", 4475, "Tensor %s is not an input tensor", name);
+        if (inp == null) _ = c.ggml_abort("clip.cpp", 4521, "Failed to get tensor %s", name);
+        if (inp.*.flags & c.GGML_TENSOR_FLAG_INPUT == 0) _ = c.ggml_abort("clip.cpp", 4524, "Tensor %s is not an input tensor", name);
         return inp;
     }
 
-    /// The `set_input_f32` lambda (mtmd/clip.cpp:4480 @7fe450e19).
+    /// The `set_input_f32` lambda (mtmd/clip.cpp:4529 @d81235049).
     pub fn setInputF32(self: *const EncodeState, name: [*:0]const u8, values: []const f32) void {
         const cur = self.getInpTensor(name);
-        impl.ggmlAssert(cur.?.type == c.GGML_TYPE_F32, "clip.cpp", 4482, "cur->type == GGML_TYPE_F32");
-        impl.ggmlAssert(c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "clip.cpp", 4483, "ggml_nelements(cur) == (int64_t)values.size()");
+        impl.ggmlAssert(cur.?.type == c.GGML_TYPE_F32, "clip.cpp", 4531, "cur->type == GGML_TYPE_F32");
+        impl.ggmlAssert(c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "clip.cpp", 4532, "ggml_nelements(cur) == (int64_t)values.size()");
         c.ggml_backend_tensor_set(cur, values.ptr, 0, c.ggml_nbytes(cur));
     }
 
-    /// The `set_input_i32` lambda (mtmd/clip.cpp:4487 @7fe450e19).
+    /// The `set_input_i32` lambda (mtmd/clip.cpp:4536 @d81235049).
     pub fn setInputI32(self: *const EncodeState, name: [*:0]const u8, values: []const i32) void {
         const cur = self.getInpTensor(name);
-        impl.ggmlAssert(cur.?.type == c.GGML_TYPE_I32, "clip.cpp", 4489, "cur->type == GGML_TYPE_I32");
-        impl.ggmlAssert(c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "clip.cpp", 4490, "ggml_nelements(cur) == (int64_t)values.size()");
+        impl.ggmlAssert(cur.?.type == c.GGML_TYPE_I32, "clip.cpp", 4538, "cur->type == GGML_TYPE_I32");
+        impl.ggmlAssert(c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "clip.cpp", 4539, "ggml_nelements(cur) == (int64_t)values.size()");
         c.ggml_backend_tensor_set(cur, values.ptr, 0, c.ggml_nbytes(cur));
     }
 
-    /// The `set_gen_state_in` lambda (mtmd/clip.cpp:4495 @7fe450e19): upload the
+    /// The `set_gen_state_in` lambda (mtmd/clip.cpp:4544 @d81235049): upload the
     /// decoder state from the previous call, or zero-fill on a cold start.
     pub fn setGenStateIn(self: *const EncodeState) Error!void {
         var offset: usize = 0;
@@ -1434,12 +1449,12 @@ pub const EncodeState = struct {
         }
     }
 
-    /// The `set_pockettts_tfm_inputs` lambda (mtmd/clip.cpp:4512 @7fe450e19): rope
+    /// The `set_pockettts_tfm_inputs` lambda (mtmd/clip.cpp:4561 @d81235049): rope
     /// positions and the causal sliding-window mask of the mimi transformers.
     pub fn setPocketttsTfmInputs(self: *const EncodeState) Error!void {
         const hparams = &self.ctx.model.hparams;
         const n_pos = c.ggml_nelements(self.getInpTensor("inp_pos"));
-        impl.ggmlAssert(n_pos > 0, "clip.cpp", 4514, "n_pos > 0");
+        impl.ggmlAssert(n_pos > 0, "clip.cpp", 4563, "n_pos > 0");
         const positions = try gpa.alloc(i32, @intCast(n_pos));
         defer gpa.free(positions);
         for (positions, 0..) |*p, i| p.* = @intCast(i);
@@ -1447,7 +1462,7 @@ pub const EncodeState = struct {
 
         // the preprocessor truncates the waveform to keep this mask bounded
         const max_pos: i64 = @divTrunc(@as(i64, model_mod.Hparams.pockettts_max_spk_seconds) * hparams.audio_sample_rate, 120);
-        impl.ggmlAssert(n_pos <= max_pos, "clip.cpp", 4523, "n_pos <= max_pos && \"pocket-tts speaker reference too long for a dense mask\"");
+        impl.ggmlAssert(n_pos <= max_pos, "clip.cpp", 4572, "n_pos <= max_pos && \"pocket-tts speaker reference too long for a dense mask\"");
 
         const context: i64 = hparams.mimi_tfm_context;
         const mask = try gpa.alloc(f32, @intCast(n_pos * n_pos));
@@ -1465,7 +1480,7 @@ pub const EncodeState = struct {
     }
 };
 
-/// Ports `clip_encode` (mtmd/clip.cpp:4427 @7fe450e19); the per-projector input
+/// Ports `clip_encode` (mtmd/clip.cpp:4476 @d81235049); the per-projector input
 /// switch is `arms_inputs.setInputs`.
 pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     const func = "clip_encode";
@@ -1552,13 +1567,13 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
         st.setInputF32("inp_raw", inp_raw);
     } else if (params.gen_process != .gen_wav) {
         // audio input. GEN_WAV is not here: it takes codes or feats, set in the switch below
-        impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 4583, "imgs.entries.size() == 1");
+        impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 4632, "imgs.entries.size() == 1");
 
         const mel_inp = &imgs.entries.items[0];
         const buf = mel_inp.roBuf();
         const n_step = mel_inp.nx();
         const n_mel = mel_inp.ny();
-        impl.ggmlAssert(@as(usize, @intCast(n_step)) * @as(usize, @intCast(n_mel)) == buf.len, "clip.cpp", 4589, "(size_t)n_step * n_mel == buf.size()");
+        impl.ggmlAssert(@as(usize, @intCast(n_step)) * @as(usize, @intCast(n_mel)) == buf.len, "clip.cpp", 4638, "(size_t)n_step * n_mel == buf.size()");
 
         st.setInputF32("inp_raw", buf);
     }
@@ -1593,7 +1608,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
         const expected_n_tokens_out = nOutputTokens(ctx, &imgs.entries.items[0]);
         if (n_tokens_out != expected_n_tokens_out) {
             impl.logErr("%s: expected output %d tokens, got %d\n", .{ func, expected_n_tokens_out, n_tokens_out });
-            _ = c.ggml_abort("clip.cpp", 5780, "Invalid number of output tokens");
+            _ = c.ggml_abort("clip.cpp", 5831, "Invalid number of output tokens");
         }
 
         impl.logDbg("%s: output embedding shape [%d, %d, %d]\n", .{ func, @as(c_int, @intCast(embeddings.?.ne[0])), @as(c_int, @intCast(embeddings.?.ne[1])), @as(c_int, @intCast(embeddings.?.ne[2])) });
@@ -1604,7 +1619,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
         if (out_batch_embd.items.len != 0) {
             if (out_batch_embd.items.len != @as(usize, @intCast(c.ggml_nelements(embeddings)))) {
                 impl.logErr("%s: output buffer has %zu elements but expected %zu\n", .{ func, out_batch_embd.items.len, @as(usize, @intCast(c.ggml_nelements(embeddings))) });
-                _ = c.ggml_abort("clip.cpp", 5792, "Output buffer size mismatch");
+                _ = c.ggml_abort("clip.cpp", 5843, "Output buffer size mismatch");
             }
             c.ggml_backend_tensor_get(embeddings, out_batch_embd.items.ptr, 0, c.ggml_nbytes(embeddings));
         } else {
@@ -1634,7 +1649,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     if (params.out_is_eos) |out_is_eos| {
         const eos = c.ggml_graph_get_tensor(gf, "out_eos_score");
         if (eos != null) {
-            impl.ggmlAssert(c.ggml_nelements(eos) == 1, "clip.cpp", 5824, "ggml_nelements(eos) == 1");
+            impl.ggmlAssert(c.ggml_nelements(eos) == 1, "clip.cpp", 5875, "ggml_nelements(eos) == 1");
             var score: f32 = 0.0;
             c.ggml_backend_tensor_get(eos, &score, 0, @sizeOf(f32));
             out_is_eos.* = score > hparams.gen_eos_threshold;
@@ -1642,7 +1657,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     }
     if (params.out_audio) |out_audio| {
         const audio = c.ggml_graph_get_tensor(gf, "out_audio");
-        if (audio == null) _ = c.ggml_abort("clip.cpp", 5833, "out_audio requested but graph has no \"out_audio\" tensor");
+        if (audio == null) _ = c.ggml_abort("clip.cpp", 5884, "out_audio requested but graph has no \"out_audio\" tensor");
         try out_audio.resize(gpa, @intCast(c.ggml_nelements(audio)));
         c.ggml_backend_tensor_get(audio, out_audio.items.ptr, 0, c.ggml_nbytes(audio));
 
@@ -1666,7 +1681,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
             var nb: [256]u8 = undefined;
             _ = snprintf(&nb, nb.len, "state_out_%s", slot.name.ptr);
             const t = c.ggml_graph_get_tensor(gf, @ptrCast(&nb));
-            if (t == null) _ = c.ggml_abort("clip.cpp", 5859, "state_out requested but graph has no \"state_out_%s\" tensor", slot.name.ptr);
+            if (t == null) _ = c.ggml_abort("clip.cpp", 5910, "state_out requested but graph has no \"state_out_%s\" tensor", slot.name.ptr);
             const n = c.ggml_nbytes(t);
             c.ggml_backend_tensor_get(t, state_out.items.ptr + offset, 0, n);
             offset += n;
@@ -1737,53 +1752,53 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
 
 extern fn sqrtf(x: f32) f32;
 
-/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:5927 @7fe450e19): the embedding
+/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:5978 @d81235049): the embedding
 /// size of the projector's output, which must be the text model's; the
 /// per-projector body is `arms_tensors.nMmprojEmbd`.
 pub fn nMmprojEmbd(ctx: *const Ctx) c_int {
     return arms_tensors.nMmprojEmbd(ctx);
 }
 
-/// Ports `clip_is_llava` (mtmd/clip.cpp:6031 @7fe450e19).
+/// Ports `clip_is_llava` (mtmd/clip.cpp:6085 @d81235049).
 pub fn isLlava(ctx: *const Ctx) bool {
     return ctx.model.hparams.has_llava_projector;
 }
 
-/// Ports `clip_has_vision_encoder` (mtmd/clip.cpp:6035 @7fe450e19).
+/// Ports `clip_has_vision_encoder` (mtmd/clip.cpp:6089 @d81235049).
 pub fn hasVisionEncoder(ctx: *const Ctx) bool {
     return ctx.model.modality == .vision;
 }
 
-/// Ports `clip_has_audio_encoder` (mtmd/clip.cpp:6039 @7fe450e19).
+/// Ports `clip_has_audio_encoder` (mtmd/clip.cpp:6093 @d81235049).
 pub fn hasAudioEncoder(ctx: *const Ctx) bool {
     return ctx.model.modality == .audio;
 }
 
-/// Ports `clip_support_batch` (mtmd/clip.cpp:6043 @7fe450e19).
+/// Ports `clip_support_batch` (mtmd/clip.cpp:6097 @d81235049).
 pub fn supportBatch(ctx: *const Ctx) bool {
     return ctx.support_batch;
 }
 
-/// Ports `clip_model_n_temporal_merge` (mtmd/clip.cpp:6050 @7fe450e19): the
+/// Ports `clip_model_n_temporal_merge` (mtmd/clip.cpp:6104 @d81235049): the
 /// qwen-vl models fuse two frames into one.
 pub fn modelNTemporalMerge(ctx: *const Ctx) c_int {
     return switch (ctx.projType()) {
-        .qwen2vl, .qwen25vl, .qwen3vl => 2,
+        .qwen2vl, .qwen25vl, .qwen3vl, .ling3vl => 2,
         else => 1,
     };
 }
 
-/// Ports `clip_get_projector_type` (mtmd/clip.cpp:6065 @7fe450e19).
+/// Ports `clip_get_projector_type` (mtmd/clip.cpp:6120 @d81235049).
 pub fn getProjectorType(ctx: *const Ctx) names.ProjectorType {
     return ctx.projType();
 }
 
-/// Ports `clip_get_hparams` (mtmd/clip.cpp:6069 @7fe450e19).
+/// Ports `clip_get_hparams` (mtmd/clip.cpp:6124 @d81235049).
 pub fn getHparams(ctx: *const Ctx) *const model_mod.Hparams {
     return &ctx.model.hparams;
 }
 
-/// Ports `clip_get_mem_usage` (mtmd/clip.cpp:6073 @7fe450e19): weights plus
+/// Ports `clip_get_mem_usage` (mtmd/clip.cpp:6128 @d81235049): weights plus
 /// compute, by device. The caller owns the map.
 pub fn getMemUsage(ctx: *const Ctx) Error!DevSizeMap {
     var res: DevSizeMap = .{};
@@ -1792,7 +1807,7 @@ pub fn getMemUsage(ctx: *const Ctx) Error!DevSizeMap {
     return res;
 }
 
-/// Ports `clip_set_debug_output_embeddings` (mtmd/clip.cpp:6085 @7fe450e19).
+/// Ports `clip_set_debug_output_embeddings` (mtmd/clip.cpp:6140 @d81235049).
 pub fn setDebugOutputEmbeddings(ctx: *Ctx, enable: bool) void {
     ctx.debug_output_embeddings = enable;
 }

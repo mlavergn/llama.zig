@@ -4,10 +4,10 @@
 //!
 //! **Generated** by `scripts/gen-unicode-data` from
 //! `llama.cpp/src/unicode-data.cpp` and `llama.cpp/src/unicode-data.h`
-//! (`7fe450e19`), which upstream itself generates. Do not edit; rerun the
+//! (`d81235049`), which upstream itself generates. Do not edit; rerun the
 //! script. `scripts/unicode-diff` checks every code point against the C++.
 
-/// Ports `unicode_ranges_flags` (unicode-data.cpp:10 @7fe450e19): each
+/// Ports `unicode_ranges_flags` (unicode-data.cpp:10 @d81235049): each
 /// entry's flags apply from its start up to the next entry's start. The
 /// last entry is the 0x110000 sentinel.
 pub const ranges_flags = [_]struct { u32, u16 }{
@@ -2286,7 +2286,7 @@ pub const ranges_flags = [_]struct { u32, u16 }{
     .{ 0x110000, 0x0000 },
 };
 
-/// Ports `unicode_set_whitespace` (unicode-data.cpp:2286 @7fe450e19),
+/// Ports `unicode_set_whitespace` (unicode-data.cpp:2286 @d81235049),
 /// in the source's order.
 pub const set_whitespace = [_]u32{
     0x000009,
@@ -2316,7 +2316,7 @@ pub const set_whitespace = [_]u32{
     0x003000,
 };
 
-/// Ports `unicode_map_lowercase` (unicode-data.cpp:2315 @7fe450e19),
+/// Ports `unicode_map_lowercase` (unicode-data.cpp:2315 @d81235049),
 /// ascending by code point.
 pub const map_lowercase = [_][2]u32{
     .{ 0x000041, 0x000061 },
@@ -3754,7 +3754,7 @@ pub const map_lowercase = [_][2]u32{
     .{ 0x01E921, 0x01E943 },
 };
 
-/// Ports `unicode_map_uppercase` (unicode-data.cpp:3752 @7fe450e19).
+/// Ports `unicode_map_uppercase` (unicode-data.cpp:3752 @d81235049).
 pub const map_uppercase = [_][2]u32{
     .{ 0x000061, 0x000041 },
     .{ 0x000062, 0x000042 },
@@ -5208,10 +5208,10 @@ pub const map_uppercase = [_][2]u32{
     .{ 0x01E943, 0x01E921 },
 };
 
-/// Ports `range_nfd` (unicode-data.h:8 @7fe450e19).
+/// Ports `range_nfd` (unicode-data.h:8 @d81235049).
 pub const RangeNfd = struct { first: u32, last: u32, nfd: u32 };
 
-/// Ports `unicode_ranges_nfd` (unicode-data.cpp:5205 @7fe450e19),
+/// Ports `unicode_ranges_nfd` (unicode-data.cpp:5205 @d81235049),
 /// ascending by start.
 pub const ranges_nfd = [_]RangeNfd{
     .{ .first = 0x000000, .last = 0x000000, .nfd = 0x000000 },

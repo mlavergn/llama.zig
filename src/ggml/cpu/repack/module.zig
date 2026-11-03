@@ -57,7 +57,7 @@ pub const q8_0 = @import("q8_0.zig");
 pub const quantize = @import("quantize.zig");
 
 /// Ports `ggml_backend_cpu_repack_buffer_type` (ggml-cpu/repack.cpp:5238
-/// @7fe450e19). Re-exported from `dispatch.zig` so `cpu_backend.zig` keeps
+/// @d81235049). Re-exported from `dispatch.zig` so `cpu_backend.zig` keeps
 /// reaching this directory through the barrel.
 pub const ggml_backend_cpu_repack_buffer_type = dispatch.ggml_backend_cpu_repack_buffer_type;
 

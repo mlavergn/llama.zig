@@ -111,6 +111,13 @@ fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
         const src: *c.ggml_tensor = s;
         r.print(gpa, " {s}:{s}:{x}", .{ std.mem.sliceTo(&src.name, 0), c.ggml_op_desc(src), src.flags }) catch unreachable;
     }
+    // A node without GGML_TENSOR_FLAG_COMPUTE (an unselected
+    // `ggml_build_forward_select` branch) is never computed: its bytes are
+    // leftovers. Its flags are compared above.
+    if ((node.flags & c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
+        r.appendSlice(gpa, " h -\n") catch unreachable;
+        return true;
+    }
     r.print(gpa, " h {x}\n", .{tensorHash(node)}) catch unreachable;
     return true;
 }
@@ -258,11 +265,11 @@ const Filter = enum {
     /// Measured, one weight at a time: every other weight reaches the
     /// attention output gate's `ggml_sigmoid`, a unary op with no backward
     /// pass, and aborts with "fatal error" after "unsupported unary op for
-    /// backward pass" (ggml.c:7193 @7fe450e19). Through v0.3.0 the KV
+    /// backward pass" (ggml.c:7202 @d81235049). Through v0.3.0 the KV
     /// cache's `ggml_set_rows` stopped several of them first, at
     /// `ggml_build_backward_expand`'s "inplace operations are currently not
     /// supported"; v0.4.0 admits `GGML_OP_SET_ROWS` there
-    /// (ggml.c:7418 @7fe450e19), so all three now end at the sigmoid.
+    /// (ggml.c:7427 @d81235049), so all three now end at the sigmoid.
     head,
     /// One weight per abort, below.
     attn_q,
@@ -346,6 +353,9 @@ const Case = struct {
     n_batch: u32 = 128,
     n_ubatch: u32 = 64,
     n_ctx_train: u32 = 0,
+    /// The context; with `n_ubatch` equal to it, `opt_init` trains through
+    /// the ubatch's own K and V instead of the cache (since v0.6.0).
+    n_ctx: u32 = 256,
     epochs: usize = 2,
     /// Datapoints trained on before evaluation starts.
     idata_split: i64 = 2,
@@ -357,6 +367,12 @@ const cases = [_]Case{
     .{ .name = "gpu adamw head, one ubatch per batch", .filter = .head, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = -1, .n_batch = 64, .n_ubatch = 64 },
     .{ .name = "cpu adamw head", .filter = .head, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = 0 },
     .{ .name = "cpu sgd output, n_ctx_train 128", .filter = .output, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_SGD, .n_gpu_layers = 0, .n_ctx_train = 128, .idata_split = 3 },
+    // No case has n_ubatch == n_ctx, v0.6.0's training graph that reads the
+    // ubatch's own K and V: on this hybrid model upstream then aborts in
+    // `llm_graph_input_mem_hybrid::set_input`, which still writes the
+    // K and V indices the training graph left unallocated
+    // (llama-graph.cpp:1127 @d81235049; only `llm_graph_input_attn_kv`
+    // skips them).
 };
 
 /// The weights' names, in the port's `tensors_by_name` order, to read both
@@ -389,7 +405,7 @@ fn script(comptime side: enum { ref, port }, model: *c.struct_llama_model, cs: C
     params.cb_eval = nodeCb;
     params.cb_eval_user_data = null;
     params.no_perf = true;
-    params.n_ctx = 256;
+    params.n_ctx = cs.n_ctx;
     params.n_batch = cs.n_batch;
     params.n_ubatch = cs.n_ubatch;
     params.type_k = c.GGML_TYPE_F32;
@@ -502,6 +518,17 @@ fn firstDiff(name: []const u8, a_raw: []const u8, b_raw: []const u8) usize {
         const la = ia.next();
         const lb = ib.next();
         if (la == null and lb == null) return line - 1;
+        // a reserve's time, which since v0.6.0 `opt_init` always logs: it
+        // reserves the training graph whether or not flash attention was on
+        if (la != null and lb != null) {
+            if (std.mem.find(u8, la.?, "reserve took ")) |at| {
+                if (std.mem.startsWith(u8, lb.?, la.?[0 .. at + "reserve took ".len])) {
+                    const ra = std.mem.find(u8, la.?, " ms") orelse la.?.len;
+                    const rb = std.mem.find(u8, lb.?, " ms") orelse lb.?.len;
+                    if (std.mem.eql(u8, la.?[ra..], lb.?[rb..])) continue;
+                }
+            }
+        }
         if (la == null or lb == null or !std.mem.eql(u8, la.?, lb.?)) {
             std.debug.print("FAIL {s}: transcript line {d}:\n    ref  '{s}'\n    port '{s}'\n", .{ name, line, la orelse "<end>", lb orelse "<end>" });
             std.process.exit(1);

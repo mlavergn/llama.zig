@@ -6,10 +6,10 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/preset.cpp` and `llama.cpp/common/preset.h`
-//! (v0.5.0, `7fe450e19`) whole, with what they need from
+//! (v0.6.0, `d81235049`) whole, with what they need from
 //! `llama.cpp/common/arg.cpp` -- `common_params_to_map`,
 //! `common_params_add_preset_options`, `common_arg::get_args` and
-//! `get_env` -- and from `llama.cpp/common/common.cpp`, `fs_list`. Each
+//! `get_env`. Each
 //! declaration names the C++ it replaces and the line it began at.
 //!
 //! # Its shape
@@ -36,11 +36,11 @@ const Arg = arg.Arg;
 const Params = tc.params.Params;
 const Allocator = std.mem.Allocator;
 
-/// Ports `COMMON_PRESET_DEFAULT_NAME` (preset.h:15 @7fe450e19).
+/// Ports `COMMON_PRESET_DEFAULT_NAME` (preset.h:15 @d81235049).
 pub const default_name = "default";
 
 /// Ports `COMMON_ARG_PRESET_LOAD_ON_STARTUP`, `COMMON_ARG_PRESET_STOP_TIMEOUT`
-/// and `COMMON_ARG_PRESET_DEDUP_CACHE_MODELS` (arg.h:14, 15, 16 @7fe450e19).
+/// and `COMMON_ARG_PRESET_DEDUP_CACHE_MODELS` (arg.h:14, 15, 16 @d81235049).
 pub const env_load_on_startup = "__PRESET_LOAD_ON_STARTUP";
 pub const env_stop_timeout = "__PRESET_STOP_TIMEOUT";
 pub const env_dedup_cache_models = "__PRESET_DEDUP_CACHE_MODELS";
@@ -52,7 +52,7 @@ pub const Error = error{ Throw, OutOfMemory };
 // -----------------------------------------------------------------------------
 // helpers
 
-/// Ports `rm_leading_dashes` (preset.cpp:12 @7fe450e19).
+/// Ports `rm_leading_dashes` (preset.cpp:12 @d81235049).
 fn rmLeadingDashes(str: []const u8) []const u8 {
     var pos: usize = 0;
     while (pos < str.len and str[pos] == '-') pos += 1;
@@ -63,7 +63,7 @@ fn upperInPlace(s: []u8) void {
     for (s) |*ch| ch.* = std.ascii.toUpper(ch.*);
 }
 
-/// Ports `canonical_tag` (preset.cpp:20 @7fe450e19): a quant tag in upper
+/// Ports `canonical_tag` (preset.cpp:20 @d81235049): a quant tag in upper
 /// case, the part after the last `-` or `.` when that part is a tag.
 fn canonicalTag(a: Allocator, tag: []const u8) Error![]u8 {
     var re = regex.Regex.compileWith("[-.]([A-Z0-9_]+)$", .{ .icase = true }) catch |err| switch (err) {
@@ -82,7 +82,7 @@ fn canonicalTag(a: Allocator, tag: []const u8) Error![]u8 {
     return upper;
 }
 
-/// Ports `operator`< (arg.h:91 @7fe450e19), a member of `common_arg`:
+/// Ports `operator`< (arg.h:91 @d81235049), a member of `common_arg`:
 /// `strcmp` of the first spellings. An option with no spellings is never
 /// less.
 fn argLess(x: *const Arg, y: *const Arg) bool {
@@ -90,13 +90,13 @@ fn argLess(x: *const Arg, y: *const Arg) bool {
     return std.mem.order(u8, x.args[0], y.args[0]) == .lt;
 }
 
-/// Ports `operator`== (arg.h:97 @7fe450e19), a member of `common_arg`,
+/// Ports `operator`== (arg.h:97 @d81235049), a member of `common_arg`,
 /// which `std::map` reaches as neither being less.
 fn argEql(x: *const Arg, y: *const Arg) bool {
     return !argLess(x, y) and !argLess(y, x);
 }
 
-/// Ports `get_env` (arg.cpp:233 @7fe450e19), a member of `common_arg`: the
+/// Ports `get_env` (arg.cpp:233 @d81235049), a member of `common_arg`: the
 /// variable and, for an option with a negative spelling, its
 /// `LLAMA_ARG_NO_` twin. `string_replace_all` replaces every occurrence.
 fn getEnvs(a: Allocator, opt: *const Arg) Error![]const []const u8 {
@@ -121,7 +121,7 @@ pub const Option = struct {
     value: []const u8,
 };
 
-/// Ports `common_preset` (preset.h:19 @7fe450e19).
+/// Ports `common_preset` (preset.h:19 @d81235049).
 pub const Preset = struct {
     name: []const u8 = "",
     // options are stored as common_arg to string mapping, representing CLI arg and its value
@@ -179,7 +179,7 @@ pub const Preset = struct {
         return null;
     }
 
-    /// Ports `to_args` (preset.cpp:37 @7fe450e19), a member of
+    /// Ports `to_args` (preset.cpp:37 @d81235049), a member of
     /// `common_preset`: the preset as a command line.
     ///
     /// Parameters:
@@ -228,7 +228,7 @@ pub const Preset = struct {
         return args;
     }
 
-    /// Ports `to_ini` (preset.cpp:81 @7fe450e19), a member of
+    /// Ports `to_ini` (preset.cpp:81 @d81235049), a member of
     /// `common_preset`.
     ///
     /// Return: the INI text, owned by `a`.
@@ -248,7 +248,7 @@ pub const Preset = struct {
         return ss.items;
     }
 
-    /// Ports `set_option` (preset.cpp:96 @7fe450e19), a member of
+    /// Ports `set_option` (preset.cpp:96 @d81235049), a member of
     /// `common_preset`: the option whose variable is `env` takes `value`.
     pub fn setOption(self: *Preset, gpa: Allocator, ctx: *const Context, env: []const u8, value: []const u8) Error!void {
         // try if option exists, update it
@@ -269,7 +269,7 @@ pub const Preset = struct {
         try self.put(gpa, opt, value);
     }
 
-    /// Ports `unset_option` (preset.cpp:114 @7fe450e19), a member of
+    /// Ports `unset_option` (preset.cpp:114 @d81235049), a member of
     /// `common_preset`: the first option whose variable is `env` goes.
     pub fn unsetOption(self: *Preset, gpa: Allocator, env: []const u8) void {
         for (self.options.items, 0..) |o, i| {
@@ -281,7 +281,7 @@ pub const Preset = struct {
         }
     }
 
-    /// Ports `get_option` (preset.cpp:126 @7fe450e19), a member of
+    /// Ports `get_option` (preset.cpp:126 @d81235049), a member of
     /// `common_preset`.
     ///
     /// Return: the value, borrowed, or null.
@@ -292,7 +292,7 @@ pub const Preset = struct {
         return null;
     }
 
-    /// Ports `merge` (preset.cpp:136 @7fe450e19), a member of
+    /// Ports `merge` (preset.cpp:136 @d81235049), a member of
     /// `common_preset`: `other`'s options overwrite.
     pub fn merge(self: *Preset, gpa: Allocator, other: *const Preset) Error!void {
         for (other.options.items) |*o| {
@@ -300,7 +300,7 @@ pub const Preset = struct {
         }
     }
 
-    /// Ports `apply_to_params` (preset.cpp:142 @7fe450e19), a member of
+    /// Ports `apply_to_params` (preset.cpp:142 @d81235049), a member of
     /// `common_preset`: each option's handler on `params`, or only those
     /// whose variable is in `handled_keys` when it is not empty.
     pub fn applyToParams(self: *const Preset, params: *Params, handled_keys: []const []const u8) anyerror!void {
@@ -328,7 +328,7 @@ pub const Preset = struct {
     }
 };
 
-/// Ports `common_presets` (preset.h:51 @7fe450e19): a
+/// Ports `common_presets` (preset.h:51 @d81235049): a
 /// `std::map<std::string, common_preset>`, in name order.
 pub const Presets = struct {
     entries: std.ArrayList(Preset) = .empty,
@@ -423,7 +423,7 @@ const Ini = struct {
 };
 
 /// The grammar `parse_ini_from_file` gives `build_peg_parser` (preset.cpp:184
-/// @7fe450e19).
+/// @d81235049).
 fn buildIni(_: void, p: *peg.Builder) peg.Error!peg.ParserId {
     // newline ::= "\r\n" / "\n" / "\r"
     const newline = try p.rule("newline", try p.choice(&.{ try p.literal("\r\n"), try p.literal("\n"), try p.literal("\r") }), false);
@@ -537,7 +537,7 @@ pub fn fsIsRegularFile(path: []const u8) bool {
     return st.mode & tc.fs_stat.IFMT == tc.fs_stat.IFREG;
 }
 
-/// Ports `parse_ini_from_file` (preset.cpp:170 @7fe450e19): sections in
+/// Ports `parse_ini_from_file` (preset.cpp:170 @d81235049): sections in
 /// name order, each its keys in key order. A section named twice keeps
 /// only what follows its last header.
 fn parseIniFromFile(a: Allocator, path: []const u8) Error!Ini {
@@ -579,59 +579,45 @@ pub fn throwConcat(a: Allocator, prefix: []const u8, s: []const u8) Error {
 }
 
 // -----------------------------------------------------------------------------
-// fs_list
+// std::filesystem::directory_iterator, as load_from_models_dir uses it
 
-/// Ports `common_file_info` (common/common.h:904 @7fe450e19).
-pub const FileInfo = struct {
-    path: []const u8 = "",
-    name: []const u8 = "",
-    size: usize = 0, // in bytes
-    is_dir: bool = false,
+/// One `std::filesystem::directory_entry` as `load_from_models_dir`'s loops
+/// read it: its path (`dir / name`), its filename, and `is_directory(ec)`
+/// and `is_regular_file(ec)`, which follow a symbolic link.
+const DirEntry = struct {
+    path: []const u8,
+    name: []const u8,
+    is_dir: bool,
+    is_regular: bool,
 };
 
-/// Ports `fs_list` (common/common.cpp:1128 @7fe450e19): the regular files,
-/// and the directories when asked, of `path`, in `readdir`'s order (which
-/// `directory_iterator` follows); a symbolic link counts as what it points
-/// to.
+/// `std::filesystem::directory_iterator(dir)` in `readdir`'s order, which
+/// libc++'s iterator follows; a directory that cannot be opened has no
+/// entries.
 ///
 /// Return: the entries; strings owned by `a`.
-pub fn fsList(a: Allocator, path: []const u8, include_directories: bool) Error![]FileInfo {
-    var files: std.ArrayList(FileInfo) = .empty;
-    if (path.len == 0) return files.items;
-
-    if (!fsExists(path) or !fsIsDirectory(path)) {
-        return files.items;
-    }
-
-    const z = try a.dupeSentinel(u8, path, 0);
-    const dir = std.c.opendir(z.ptr) orelse return files.items;
+fn directoryEntries(a: Allocator, dir_path: []const u8) Error![]DirEntry {
+    var out: std.ArrayList(DirEntry) = .empty;
+    const z = try a.dupeSentinel(u8, dir_path, 0);
+    const dir = std.c.opendir(z.ptr) orelse return out.items;
     defer _ = std.c.closedir(dir);
     while (std.c.readdir(dir)) |ent| {
         const name = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&ent.name)), 0);
         if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
         // `path / name`: a separator is added unless `path` ends in one
-        const p = if (std.mem.endsWith(u8, path, "/"))
-            try std.mem.concat(a, u8, &.{ path, name })
+        const p = if (std.mem.endsWith(u8, dir_path, "/"))
+            try std.mem.concat(a, u8, &.{ dir_path, name })
         else
-            try std.mem.concat(a, u8, &.{ path, "/", name });
-        // Only include regular files (skip directories)
-        if (fsIsRegularFile(p)) {
-            var info: FileInfo = .{ .path = p, .name = try a.dupe(u8, name), .is_dir = false };
-            const pz = try a.dupeSentinel(u8, p, 0);
-            info.size = if (tc.fs_stat.stat(pz.ptr, true)) |st| @intCast(st.size) else 0;
-            try files.append(a, info);
-        } else if (include_directories and fsIsDirectory(p)) {
-            try files.append(a, .{ .path = p, .name = try a.dupe(u8, name), .size = 0, .is_dir = true });
-        }
+            try std.mem.concat(a, u8, &.{ dir_path, "/", name });
+        try out.append(a, .{ .path = p, .name = try a.dupe(u8, name), .is_dir = fsIsDirectory(p), .is_regular = fsIsRegularFile(p) });
     }
-
-    return files.items;
+    return out.items;
 }
 
 // -----------------------------------------------------------------------------
 // common_preset_context
 
-/// Ports `common_preset_context` (preset.h:54 @7fe450e19).
+/// Ports `common_preset_context` (preset.h:54 @d81235049).
 pub const Context = struct {
     gpa: Allocator,
     /// Backs the parser context's tables, the options' help text and
@@ -648,7 +634,7 @@ pub const Context = struct {
     // used for config files shared by all binaries, where each binary only knows a subset of options
     ignore_unknown_keys: bool = false,
 
-    /// Ports `common_preset_context` (preset.cpp:279 @7fe450e19), the
+    /// Ports `common_preset_context` (preset.cpp:279 @d81235049), the
     /// constructor.
     ///
     /// Parameters:
@@ -688,7 +674,7 @@ pub const Context = struct {
         gpa.destroy(arena);
     }
 
-    /// Ports `load_from_ini` (preset.cpp:285 @7fe450e19): every section but
+    /// Ports `load_from_ini` (preset.cpp:285 @d81235049): every section but
     /// `*`, which goes to `global`, and an empty `default`.
     pub fn loadFromIni(self: *const Context, path: []const u8, global: *Preset) Error!Presets {
         const gpa = self.gpa;
@@ -767,7 +753,7 @@ pub const Context = struct {
         return out;
     }
 
-    /// Ports `load_from_cache` (preset.cpp:350 @7fe450e19): one preset per
+    /// Ports `load_from_cache` (preset.cpp:350 @d81235049): one preset per
     /// cached model, `repo:tag`, naming its repository.
     pub fn loadFromCache(self: *const Context) Error!Presets {
         const gpa = self.gpa;
@@ -793,7 +779,7 @@ pub const Context = struct {
         return out;
     }
 
-    /// Ports `load_from_models_dir` (preset.cpp:387 @7fe450e19): one preset
+    /// Ports `load_from_models_dir` (preset.cpp:387 @d81235049): one preset
     /// per model file, and per sub-directory holding one, with its mmproj
     /// and draft sidecars.
     pub fn loadFromModelsDir(self: *const Context, models_dir: []const u8) Error!Presets {
@@ -809,18 +795,24 @@ pub const Context = struct {
 
         var models: std.ArrayList(LocalModel) = .empty;
 
-        const files = try fsList(sa, models_dir, true);
-        for (files) |file| {
-            if (file.is_dir) {
-                try scanSubdir(sa, &models, file.path, file.name);
-            } else if (std.mem.endsWith(u8, file.name, ".gguf")) {
-                if (isMmprojFile(file.name) or isDraftFile(file.name)) {
-                    continue; // companion file, cannot be loaded as a model on its own
-                }
-                // single file model
-                const name = try std.mem.replaceOwned(u8, sa, file.name, ".gguf", "");
-                try models.append(sa, .{ .name = name, .path = file.path, .path_mmproj = "", .path_draft = "" });
+        for (try directoryEntries(sa, models_dir)) |entry| {
+            if (entry.is_dir) {
+                try scanSubdir(sa, &models, entry.path, entry.name);
+                continue;
             }
+            if (!entry.is_regular) {
+                continue;
+            }
+            const fname = entry.name;
+            if (!std.mem.endsWith(u8, fname, ".gguf")) {
+                continue;
+            }
+            if (isMmprojFile(fname) or isDraftFile(fname)) {
+                continue; // companion file, cannot be loaded as a model on its own
+            }
+            // single file model
+            const name = try std.mem.replaceOwned(u8, sa, fname, ".gguf", "");
+            try models.append(sa, .{ .name = name, .path = entry.path, .path_mmproj = "", .path_draft = "" });
         }
 
         // convert local models to presets
@@ -843,7 +835,7 @@ pub const Context = struct {
         return out;
     }
 
-    /// Ports `load_from_args` (preset.cpp:465 @7fe450e19): the command line
+    /// Ports `load_from_args` (preset.cpp:477 @d81235049): the command line
     /// as one preset named `default`.
     pub fn loadFromArgs(self: *const Context, argv: []const [:0]const u8) Error!Preset {
         var preset: Preset = .{};
@@ -855,7 +847,7 @@ pub const Context = struct {
         return preset;
     }
 
-    /// Ports `cascade` (preset.cpp:477 @7fe450e19), the overload taking two
+    /// Ports `cascade` (preset.cpp:489 @d81235049), the overload taking two
     /// sets: `added` merged into a copy of `base`, name by name.
     pub fn cascadeSets(self: *const Context, base: *const Presets, added: *const Presets) Error!Presets {
         const gpa = self.gpa;
@@ -873,7 +865,7 @@ pub const Context = struct {
         return out;
     }
 
-    /// Ports `cascade` (preset.cpp:492 @7fe450e19), the overload taking a
+    /// Ports `cascade` (preset.cpp:504 @d81235049), the overload taking a
     /// base preset: each preset over a copy of `base`, under its own name.
     pub fn cascade(self: *const Context, base: *const Preset, presets: *const Presets) Error!Presets {
         const gpa = self.gpa;
@@ -897,8 +889,8 @@ fn mapErr(e: anyerror) Error {
     };
 }
 
-/// Ports `get_map_key_opt` (preset.cpp:251 @7fe450e19), over `get_args`
-/// (arg.cpp:222 @7fe450e19): every option by each of its variables and each
+/// Ports `get_map_key_opt` (preset.cpp:251 @d81235049), over `get_args`
+/// (arg.cpp:222 @d81235049): every option by each of its variables and each
 /// spelling without its dashes; a later option takes a key an earlier one
 /// had.
 fn getMapKeyOpt(a: Allocator, ctx_params: *const arg.Context, mapping: *std.StringHashMapUnmanaged(Arg)) Error!void {
@@ -912,12 +904,12 @@ fn getMapKeyOpt(a: Allocator, ctx_params: *const arg.Context, mapping: *std.Stri
     }
 }
 
-/// Ports `is_bool_arg` (preset.cpp:264 @7fe450e19).
+/// Ports `is_bool_arg` (preset.cpp:264 @d81235049).
 fn isBoolArg(opt: *const Arg) bool {
     return opt.args_neg.len != 0;
 }
 
-/// Ports `parse_bool_arg` (preset.cpp:268 @7fe450e19): a negative spelling
+/// Ports `parse_bool_arg` (preset.cpp:268 @d81235049): a negative spelling
 /// reverses the value.
 fn parseBoolArg(opt: *const Arg, key: []const u8, value: []const u8) []const u8 {
     // if this is a negated arg, we need to reverse the value
@@ -930,7 +922,7 @@ fn parseBoolArg(opt: *const Arg, key: []const u8, value: []const u8) []const u8 
     return value;
 }
 
-/// Ports `local_model` (preset.cpp:364 @7fe450e19).
+/// Ports `local_model` (preset.cpp:364 @d81235049).
 const LocalModel = struct {
     name: []const u8,
     path: []const u8,
@@ -938,16 +930,16 @@ const LocalModel = struct {
     path_draft: []const u8,
 };
 
-/// Ports `draft_prefixes` (preset.cpp:372 @7fe450e19).
+/// Ports `draft_prefixes` (preset.cpp:372 @d81235049).
 // TODO @ngxson: handle "eagle3-" when it's supported by common_speculative_types_from_gguf()
 const draft_prefixes = [_][]const u8{ "mtp-", "dspark-", "dflash-" };
 
-/// Ports `is_mmproj_file` (preset.cpp:374 @7fe450e19).
+/// Ports `is_mmproj_file` (preset.cpp:374 @d81235049).
 fn isMmprojFile(fname: []const u8) bool {
     return std.mem.indexOf(u8, fname, "mmproj") != null;
 }
 
-/// Ports `is_draft_file` (preset.cpp:378 @7fe450e19).
+/// Ports `is_draft_file` (preset.cpp:378 @d81235049).
 fn isDraftFile(fname: []const u8) bool {
     for (draft_prefixes) |prefix| {
         if (std.mem.startsWith(u8, fname, prefix)) return true;
@@ -955,46 +947,50 @@ fn isDraftFile(fname: []const u8) bool {
     return false;
 }
 
-/// The `scan_subdir` (preset.cpp:393 @7fe450e19) lambda of
+/// The `scan_subdir` (preset.cpp:394 @d81235049) lambda of
 /// `load_from_models_dir`: a sub-directory's model, its first shard if it
 /// is split, and its sidecars.
 fn scanSubdir(a: Allocator, models: *std.ArrayList(LocalModel), subdir_path: []const u8, name: []const u8) Error!void {
-    const files = try fsList(a, subdir_path, false);
-    var model_file: FileInfo = .{};
-    var first_shard_file: FileInfo = .{};
-    var mmproj_file: FileInfo = .{};
-    var draft_file: FileInfo = .{};
-    for (files) |file| {
-        if (std.mem.endsWith(u8, file.name, ".gguf")) {
-            if (isMmprojFile(file.name)) {
-                mmproj_file = file;
-            } else if (isDraftFile(file.name)) {
-                if (draft_file.path.len == 0) {
-                    draft_file = file; // first sidecar found wins
-                }
-            } else if (std.mem.indexOf(u8, file.name, "-00001-of-") != null) {
-                first_shard_file = file;
-            } else {
-                model_file = file;
+    var model_file: []const u8 = "";
+    var first_shard_file: []const u8 = "";
+    var mmproj_file: []const u8 = "";
+    var draft_file: []const u8 = "";
+    for (try directoryEntries(a, subdir_path)) |entry| {
+        if (!entry.is_regular) {
+            continue;
+        }
+        const fname = entry.name;
+        if (!std.mem.endsWith(u8, fname, ".gguf")) {
+            continue;
+        }
+        if (isMmprojFile(fname)) {
+            mmproj_file = entry.path;
+        } else if (isDraftFile(fname)) {
+            if (draft_file.len == 0) {
+                draft_file = entry.path; // first sidecar found wins
             }
+        } else if (std.mem.indexOf(u8, fname, "-00001-of-") != null) {
+            first_shard_file = entry.path;
+        } else {
+            model_file = entry.path;
         }
     }
     // single file model
-    const model: LocalModel = .{
-        .name = name,
-        .path = if (first_shard_file.path.len == 0) model_file.path else first_shard_file.path,
-        .path_mmproj = mmproj_file.path, // can be empty
-        .path_draft = draft_file.path, // can be empty
-    };
-    if (model.path.len != 0) {
-        try models.append(a, model);
+    const path = if (first_shard_file.len == 0) model_file else first_shard_file;
+    if (path.len != 0) {
+        try models.append(a, .{
+            .name = name,
+            .path = path,
+            .path_mmproj = mmproj_file, // can be empty
+            .path_draft = draft_file, // can be empty
+        });
     }
 }
 
 // -----------------------------------------------------------------------------
 // From arg.cpp
 
-/// Ports `common_params_add_preset_options` (arg.cpp:4738 @7fe450e19): the
+/// Ports `common_params_add_preset_options` (arg.cpp:4767 @d81235049): the
 /// options only a preset can set.
 pub fn addPresetOptions(ctx: *arg.Context) Error!void {
     const a = ctx.params.arena;
@@ -1025,7 +1021,7 @@ pub fn addPresetOptions(ctx: *arg.Context) Error!void {
     }).setEnv(env_dedup_cache_models).setPresetOnly());
 }
 
-/// Ports `common_params_to_map` (arg.cpp:1184 @7fe450e19): the command
+/// Ports `common_params_to_map` (arg.cpp:1190 @d81235049): the command
 /// line into `out_map` -- each option's value, `"1"` or `"0"` for a flag
 /// by the spelling used -- without running any handler.
 ///

@@ -29,7 +29,9 @@
 // `token_shift_count` of 1, without which the C++ asserts `n_embd ==
 // n_embd_r()` itself. RWKV-7 and ARWKV-7 additionally get the LoRA ranks
 // they read, and `--variant hs64nogate` writes ARWKV-7 without a gate rank,
-// its gateless form. Written as `<arch>-<variant>-dense.gguf`.
+// its gateless form. `--variant topk8` gives the k-pool indexers of
+// GLM5-Next and Qwen4exp a top_k of 8 (since v0.6.0). Written as
+// `<arch>-<variant>-dense.gguf` (or `-moe.gguf`).
 //
 // Usage: arch_fixtures_extra <out-dir> <seed> [--variant hs64] <arch>...
 // Prints one line per fixture: `wrote <path>` or `failed <arch> (<config>): <why>`.
@@ -86,6 +88,14 @@ static bool write_fixture(llm_arch arch, bool moe, size_t seed, const std::strin
             pattern[il] = il % 5 != 4;
         }
         gguf_set_arr_data(meta.get(), (a + ".attention.sliding_window_pattern").c_str(), GGUF_TYPE_BOOL, pattern.data(), pattern.size());
+    }
+    // The k-pool indexers (GLM5-Next, Qwen4exp) at an indexer top_k of 8,
+    // two pools of four: the recipe's 131072 keeps every pool, so selection
+    // never drops one, and GLM5-Next's gather path needs n_ctx above
+    // top_k + kpool - 1 (glm5-next.cpp:331 @d81235049).
+    if (variant == "topk8") {
+        const std::string a = llm_arch_name(arch);
+        gguf_set_val_u32(meta.get(), (a + ".attention.indexer.top_k").c_str(), 8);
     }
     if (is_bert_family(arch)) {
         gguf_set_val_u32(meta.get(), "tokenizer.ggml.token_type_count", 2);

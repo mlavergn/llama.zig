@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/falcon.cpp` at v0.5.0 (`7fe450e19`):
+//! Ported from `llama.cpp/src/models/falcon.cpp` at v0.6.0 (`d81235049`):
 //! `llama_model_falcon`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_falcon`'s `load_arch_hparams` (models/falcon.cpp:3 @7fe450e19).
+/// Ports `llama_model_falcon`'s `load_arch_hparams` (models/falcon.cpp:3 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
@@ -32,7 +32,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_falcon`'s `load_arch_tensors` (models/falcon.cpp:13 @7fe450e19).
+/// Ports `llama_model_falcon`'s `load_arch_tensors` (models/falcon.cpp:13 @d81235049).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -68,8 +68,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_falcon`'s `build_arch_graph` (models/falcon.cpp:46 @7fe450e19)
-/// and the constructor of its `graph` (models/falcon.cpp:50 @7fe450e19).
+/// Ports `llama_model_falcon`'s `build_arch_graph` (models/falcon.cpp:46 @d81235049)
+/// and the constructor of its `graph` (models/falcon.cpp:50 @d81235049).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

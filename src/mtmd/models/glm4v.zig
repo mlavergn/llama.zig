@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/glm4v.cpp` at v0.5.0 (`7fe450e19`).
+//! Ports `llama.cpp/tools/mtmd/models/glm4v.cpp` at v0.6.0 (`d81235049`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -20,14 +20,14 @@ const PosCtx = struct {
     mrope_sections: [4]c_int,
 };
 
-/// The `add_pos` lambda (glm4v.cpp:64 @7fe450e19) of `build`.
+/// The `add_pos` lambda (glm4v.cpp:66 @d81235049) of `build`.
 fn addPos(ctx: ?*anyopaque, g: *graph.Graph, cur: T, layer: *const model_mod.Layer) T {
     _ = layer;
     const p: *PosCtx = @ptrCast(@alignCast(ctx.?));
     return c.ggml_rope_multi(g.ctx0, cur, p.positions, null, @divTrunc(g.d_head, 2), &p.mrope_sections, c.GGML_ROPE_TYPE_VISION, 32768, g.hparams.rope_theta, 1, 0, 1, 32, 1);
 }
 
-/// Ports `build` (glm4v.cpp:3 @7fe450e19), a member of `clip_graph_glm4v`.
+/// Ports `build` (glm4v.cpp:3 @d81235049), a member of `clip_graph_glm4v`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -70,8 +70,10 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     inp = c.ggml_add(ctx0, inp, model.patch_bias);
     g.cb(inp, "patch_bias", -1);
 
-    // pos-conv norm
-    inp = g.buildNorm(inp, model.norm_embd_w, model.norm_embd_b, norm_t, g.eps, -1);
+    // pos-conv norm (absent in GLM-5.3-Flash)
+    if (model.norm_embd_w != null) {
+        inp = g.buildNorm(inp, model.norm_embd_w, model.norm_embd_b, norm_t, g.eps, -1);
+    }
 
     var learned_pos_embd: T = null;
     // Note: GLM-OCR does not have learned position embeddings
@@ -94,7 +96,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     // patch merger (downsample)
     {
         const n_merge = g.hparams.n_merge;
-        impl.ggmlAssert(n_merge > 0, "glm4v.cpp", 87, "n_merge > 0");
+        impl.ggmlAssert(n_merge > 0, "glm4v.cpp", 89, "n_merge > 0");
 
         const n_token_out = @divTrunc(@divTrunc(g.n_patches, n_merge), n_merge);
         cur = c.ggml_reshape_4d(ctx0, cur, n_embd, n_merge, n_merge, n_token_out);

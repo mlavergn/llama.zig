@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/laguna.cpp` at v0.5.0 (`7fe450e19`):
+//! Ported from `llama.cpp/src/models/laguna.cpp` at v0.6.0 (`d81235049`):
 //! `llama_model_laguna`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_laguna`'s `load_arch_hparams` (models/laguna.cpp:9 @7fe450e19).
+/// Ports `llama_model_laguna`'s `load_arch_hparams` (models/laguna.cpp:9 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -83,7 +83,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_laguna`'s `load_arch_tensors` (models/laguna.cpp:65 @7fe450e19).
+/// Ports `llama_model_laguna`'s `load_arch_tensors` (models/laguna.cpp:65 @d81235049).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -167,7 +167,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_laguna`'s `build_arch_graph` (models/laguna.cpp:148 @7fe450e19).
+/// Ports `llama_model_laguna`'s `build_arch_graph` (models/laguna.cpp:148 @d81235049).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     // XS.2 is hybrid SWA and takes the interleaved-SWA KV input; M.1 is
     // all full attention and takes the plain one. The C++ picks the input,
@@ -177,7 +177,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_laguna`'s `graph`
-/// (models/laguna.cpp:152 @7fe450e19).
+/// (models/laguna.cpp:152 @d81235049).
 fn buildGraph(comptime has_swa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

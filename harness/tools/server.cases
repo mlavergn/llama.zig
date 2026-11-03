@@ -19,234 +19,234 @@
 
 # The parser's errors. `~`: the parser logs some of these through
 # common_log's worker thread, which races its direct fprintf.
---bogus
--np 0
--np x
--np
---parallel 99999999999
--p hello
--f /nonexistent/prompt.txt
--bf /nonexistent/prompt.bin
--cms -1
---checkpoint-min-step x
--ctxcp x
---swa-checkpoints
--cram x
---kv-unified-per-slot abc
---no-cache-idle-slots x
--r
---pooling sideways
--cb --bogus
--nocb --bogus
---mtmd-batch-max-tokens x
--a "x, ,y" --bogus
---tags
---embd-normalize x
---port x
---port 99999999999
---reuse-port --bogus
---cors-credentials x
---ui-config-file /nonexistent/ui.json
---webui-config-file
---api-key-file /nonexistent/keys.txt
---chat-template-kwargs notjson
---chat-template-kwargs '{"a":'
---chat-template-kwargs '{"a":1,}'
--to x
---timeout
---sse-ping-interval x
---threads-http x
---cache-reuse x
---metrics --bogus
---slot-save-path /nonexistent/dir
---slot-save-path /etc/hosts
---media-path /nonexistent/dir
---media-path /etc/hosts
---models-max x
---no-models-autoload x
---reasoning-format bogus
---reasoning-format
--rea maybe
---reasoning maybe
---reasoning-effort high --bogus
---reasoning-budget -2
---reasoning-budget x
---chat-template-file /nonexistent/template.jinja
--sps x
---slot-prompt-similarity
---sleep-idle-seconds 0
---sleep-idle-seconds -5
---sleep-idle-seconds x
---sleep-idle-seconds -1 --bogus
---log-prompts-dir /dev/null/x --bogus
---log-prompts-dir /etc/hosts --bogus
---log-prompts-dir "" --bogus
---log-prompts-dir a/b/c --bogus
---spm-infill --bogus
--sp --bogus
---embedding --rerank --bogus
+!fail --bogus
+!fail -np 0
+!fail -np x
+!fail -np
+!fail --parallel 99999999999
+!fail -p hello
+!fail -f /nonexistent/prompt.txt
+!fail -bf /nonexistent/prompt.bin
+!fail -cms -1
+!fail --checkpoint-min-step x
+!fail -ctxcp x
+!fail --swa-checkpoints
+!fail -cram x
+!fail --kv-unified-per-slot abc
+!fail --no-cache-idle-slots x
+!fail -r
+!fail --pooling sideways
+!fail -cb --bogus
+!fail -nocb --bogus
+!fail --mtmd-batch-max-tokens x
+!fail -a "x, ,y" --bogus
+!fail --tags
+!fail --embd-normalize x
+!fail --port x
+!fail --port 99999999999
+!fail --reuse-port --bogus
+!fail --cors-credentials x
+!fail --ui-config-file /nonexistent/ui.json
+!fail --webui-config-file
+!fail --api-key-file /nonexistent/keys.txt
+!fail --chat-template-kwargs notjson
+!fail --chat-template-kwargs '{"a":'
+!fail --chat-template-kwargs '{"a":1,}'
+!fail -to x
+!fail --timeout
+!fail --sse-ping-interval x
+!fail --threads-http x
+!fail --cache-reuse x
+!fail --metrics --bogus
+!fail --slot-save-path /nonexistent/dir
+!fail --slot-save-path /etc/hosts
+!fail --media-path /nonexistent/dir
+!fail --media-path /etc/hosts
+!fail --models-max x
+!fail --no-models-autoload x
+!fail --reasoning-format bogus
+!fail --reasoning-format
+!fail -rea maybe
+!fail --reasoning maybe
+!fail --reasoning-effort high --bogus
+!fail --reasoning-budget -2
+!fail --reasoning-budget x
+!fail --chat-template-file /nonexistent/template.jinja
+!fail -sps x
+!fail --slot-prompt-similarity
+!fail --sleep-idle-seconds 0
+!fail --sleep-idle-seconds -5
+!fail --sleep-idle-seconds x
+!fail --sleep-idle-seconds -1 --bogus
+!fail --log-prompts-dir /dev/null/x --bogus
+!fail --log-prompts-dir /etc/hosts --bogus
+!fail --log-prompts-dir "" --bogus
+!fail --log-prompts-dir a/b/c --bogus
+!fail --spm-infill --bogus
+!fail -sp --bogus
+!fail --embedding --rerank --bogus
 
 # The speculative options.
--td x
--tbd x
--Crd
---spec-draft-cpu-strict x
---spec-draft-prio 9
---prio-batch-draft -1
---spec-draft-poll x
---spec-draft-cpu-range-batch 0-1
--otd "x=nosuchbuft"
--ncmoed -1
---spec-draft-n-cpu-moe x
---spec-draft-n-max -1
---spec-draft-n-min x
---spec-synth-len abc
---spec-synth-len -1
---spec-synth-len 1.5x
---spec-synth-len 1e999
---spec-synth-rates 0.5,x
---spec-synth-rates "0.5, 1e999"
---spec-draft-p-split x
---spec-draft-p-min x
---no-spec-draft-backend-sampling x
--devd nosuchdevice
--ngld x
---spec-draft-model
---spec-type bogus
---spec-type ngram-mod,
---spec-type
---spec-type none,bogus --bogus
---spec-type draft-mtp,ngram-mod --bogus
---spec-ngram-mod-n-min 2000
---spec-ngram-mod-n-max -1
---spec-ngram-mod-n-match 0
---spec-ngram-simple-size-n 0
---spec-ngram-simple-size-m 2000
---spec-ngram-simple-min-hits 0
---spec-ngram-map-k-size-n 1025
---spec-ngram-map-k-size-m 0
---spec-ngram-map-k-min-hits -3
---spec-ngram-map-k4v-size-n 0
---spec-ngram-map-k4v-size-m 1025
---spec-ngram-map-k4v-min-hits 0
---draft 5
---draft x
---draft-max 3
---draft-min 1
---spec-ngram-size-n 1
---spec-ngram-size-m 1
---spec-ngram-min-hits 1
--ctkd q9
---fim-qwen-7b-spec --bogus
---gpt-oss-20b-default --spec-default --bogus
+!fail -td x
+!fail -tbd x
+!fail -Crd
+!fail --spec-draft-cpu-strict x
+!fail --spec-draft-prio 9
+!fail --prio-batch-draft -1
+!fail --spec-draft-poll x
+!fail --spec-draft-cpu-range-batch 0-1
+!fail -otd "x=nosuchbuft"
+!fail -ncmoed -1
+!fail --spec-draft-n-cpu-moe x
+!fail --spec-draft-n-max -1
+!fail --spec-draft-n-min x
+!fail --spec-synth-len abc
+!fail --spec-synth-len -1
+!fail --spec-synth-len 1.5x
+!fail --spec-synth-len 1e999
+!fail --spec-synth-rates 0.5,x
+!fail --spec-synth-rates "0.5, 1e999"
+!fail --spec-draft-p-split x
+!fail --spec-draft-p-min x
+!fail --no-spec-draft-backend-sampling x
+!fail -devd nosuchdevice
+!fail -ngld x
+!fail --spec-draft-model
+!fail --spec-type bogus
+!fail --spec-type ngram-mod,
+!fail --spec-type
+!fail --spec-type none,bogus --bogus
+!fail --spec-type draft-mtp,ngram-mod --bogus
+!fail --spec-ngram-mod-n-min 2000
+!fail --spec-ngram-mod-n-max -1
+!fail --spec-ngram-mod-n-match 0
+!fail --spec-ngram-simple-size-n 0
+!fail --spec-ngram-simple-size-m 2000
+!fail --spec-ngram-simple-min-hits 0
+!fail --spec-ngram-map-k-size-n 1025
+!fail --spec-ngram-map-k-size-m 0
+!fail --spec-ngram-map-k-min-hits -3
+!fail --spec-ngram-map-k4v-size-n 0
+!fail --spec-ngram-map-k4v-size-m 1025
+!fail --spec-ngram-map-k4v-min-hits 0
+!fail --draft 5
+!fail --draft x
+!fail --draft-max 3
+!fail --draft-min 1
+!fail --spec-ngram-size-n 1
+!fail --spec-ngram-size-m 1
+!fail --spec-ngram-min-hits 1
+!fail -ctkd q9
+!fail --fim-qwen-7b-spec --bogus
+!fail --gpt-oss-20b-default --spec-default --bogus
 
 # The options the server takes from the shared table.
--c x
--m
--ctk q9
--ngl x
--dev nosuchdevice
--ot "x=nosuchbuft"
--fa maybe
---temp x
---samplers
--hft
---mmproj-device nosuchdevice
---image x.png
+!fail -c x
+!fail -m
+!fail -ctk q9
+!fail -ngl x
+!fail -dev nosuchdevice
+!fail -ot "x=nosuchbuft"
+!fail -fa maybe
+!fail --temp x
+!fail --samplers
+!fail -hft
+!fail --mmproj-device nosuchdevice
+!fail --image x.png
 
 # The checks after the parse, reached through a template libllama refuses.
---no-jinja --chat-template bogus
---chat-template bogus --no-jinja -r 'a\nb' --in-prefix x
--otd "x=CPU" --no-jinja --chat-template bogus
--cmoed -ncmoed 2 --no-jinja --chat-template bogus
---chat-template-file /etc/hosts --no-jinja
--hf ggml-org/nothing --no-jinja --chat-template bogus
--m /nonexistent/model.gguf --no-jinja --chat-template bogus
+!fail --no-jinja --chat-template bogus
+!fail --chat-template bogus --no-jinja -r 'a\nb' --in-prefix x
+!fail -otd "x=CPU" --no-jinja --chat-template bogus
+!fail -cmoed -ncmoed 2 --no-jinja --chat-template bogus
+!fail --chat-template-file /etc/hosts --no-jinja
+!fail -hf ggml-org/nothing --no-jinja --chat-template bogus
+!fail -m /nonexistent/model.gguf --no-jinja --chat-template bogus
 
 # The environment: each variable through its handler, and a variable that
 # the command line overrides.
 !env LLAMA_ARG_N_PARALLEL=0
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_N_PARALLEL
 !env LLAMA_ARG_PORT=abc
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_PORT
 !env LLAMA_ARG_CACHE_PROMPT=maybe
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_CACHE_PROMPT
 !env LLAMA_ARG_NO_CACHE_PROMPT=1
---cache-prompt --bogus
+!fail --cache-prompt --bogus
 !unenv LLAMA_ARG_NO_CACHE_PROMPT
 !env LLAMA_ARG_THINK=bogus
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_THINK
 !env LLAMA_ARG_REASONING=maybe
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_REASONING
 !env LLAMA_API_KEY=k1
---api-key x --bogus
+!fail --api-key x --bogus
 !unenv LLAMA_API_KEY
 !env LLAMA_ARG_SPEC_TYPE=bogus
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_SPEC_TYPE
 !env LLAMA_ARG_DRAFT_MAX=3
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_DRAFT_MAX
 !env LLAMA_ARG_CHAT_TEMPLATE_KWARGS='{'
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_CHAT_TEMPLATE_KWARGS
 !env LLAMA_ARG_SPEC_SYNTH_LEN=-1
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_SPEC_SYNTH_LEN
 # v0.5.0: six sampling options gained a variable, and --host takes a list
 !env LLAMA_ARG_TEMPERATURE=abc
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_TEMPERATURE
 !env LLAMA_ARG_TOP_P=x
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_TOP_P
 !env LLAMA_ARG_MIN_P=
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_MIN_P
 !env LLAMA_ARG_REPEAT_PENALTY=0
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_REPEAT_PENALTY
 !env LLAMA_ARG_PRESENCE_PENALTY=inf
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_PRESENCE_PENALTY
 !env LLAMA_ARG_FREQUENCY_PENALTY=nan
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_FREQUENCY_PENALTY
 !env LLAMA_ARG_HOST=' , '
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_HOST
 !env LLAMA_ARG_HOST=192.0.2.1
---host , --bogus
+!fail --host , --bogus
 !unenv LLAMA_ARG_HOST
---host ''
---host ' ,, '
---host '"",x'
---host '127.0.0.1, ::1' --no-jinja --chat-template bogus
+!fail --host ''
+!fail --host ' ,, '
+!fail --host '"",x'
+!fail --host '127.0.0.1, ::1' --no-jinja --chat-template bogus
 !env LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT=-1
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT
 !env LLAMA_ARG_KV_UNIFIED_PER_SLOT=x
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_KV_UNIFIED_PER_SLOT
 !env LLAMA_ARG_EMBEDDINGS=1
---embedding --bogus
+!fail --embedding --bogus
 !unenv LLAMA_ARG_EMBEDDINGS
 !env LLAMA_ARG_UI_CONFIG_FILE=/nonexistent/ui.json
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_UI_CONFIG_FILE
 !env LLAMA_ARG_SPEC_DRAFT_N_MAX=-1
---bogus
+!fail --bogus
 !unenv LLAMA_ARG_SPEC_DRAFT_N_MAX
 !env LLAMA_ARG_NO_UI=1
---ui --bogus
+!fail --ui --bogus
 !unenv LLAMA_ARG_NO_UI
 !env LLAMA_ARG_HOST=0.0.0.0
---host 1.2.3.4 --bogus
+!fail --host 1.2.3.4 --bogus
 !unenv LLAMA_ARG_HOST
 
 # The cases whose stderr carries both common_log's worker-thread output and
@@ -258,35 +258,35 @@
 !mask s/^(T )?[WIE] //
 # ... but the verbosity threshold still is: at -lv 2 a warning shows and
 # an info line does not, at -lv 1 neither does.
-~ -lv 2 --tools all --no-jinja --chat-template bogus
-~ -lv 1 --tools all --no-jinja --chat-template bogus
-~ -lv 2 --chat-template-kwargs '{"enable_thinking":true}' --bogus
+!fail ~ -lv 2 --tools all --no-jinja --chat-template bogus
+!fail ~ -lv 1 --tools all --no-jinja --chat-template bogus
+!fail ~ -lv 2 --chat-template-kwargs '{"enable_thinking":true}' --bogus
 
-~ --chat-template-kwargs '[1,2]' --bogus
-~ --chat-template-kwargs '{"enable_thinking":true,"preserve_reasoning":false}' --bogus
-~ -Cd 0xZZ
-~ -Crd 9999-
-~ -Cbd 0xQQ
-~ --tools all --no-jinja --chat-template bogus
-~ --tools read_file --cors-origins '*' --no-jinja --chat-template bogus
-~ --mcp-servers-json '{}' --no-jinja --chat-template bogus
-~ -ag --no-jinja --chat-template bogus
-~ -ag --no-agent --no-jinja --chat-template bogus
-~ -C 0x1 -t 4 --no-jinja --chat-template bogus
-~ -C 0x1 -t 4 -td 2 --no-jinja --chat-template bogus
-~ -Cd 0x1 -td 3 --no-jinja --chat-template bogus
+!fail ~ --chat-template-kwargs '[1,2]' --bogus
+!fail ~ --chat-template-kwargs '{"enable_thinking":true,"preserve_reasoning":false}' --bogus
+!fail ~ -Cd 0xZZ
+!fail ~ -Crd 9999-
+!fail ~ -Cbd 0xQQ
+!fail ~ --tools all --no-jinja --chat-template bogus
+!fail ~ --tools read_file --cors-origins '*' --no-jinja --chat-template bogus
+!fail ~ --mcp-servers-json '{}' --no-jinja --chat-template bogus
+!fail ~ -ag --no-jinja --chat-template bogus
+!fail ~ -ag --no-agent --no-jinja --chat-template bogus
+!fail ~ -C 0x1 -t 4 --no-jinja --chat-template bogus
+!fail ~ -C 0x1 -t 4 -td 2 --no-jinja --chat-template bogus
+!fail ~ -Cd 0x1 -td 3 --no-jinja --chat-template bogus
 !env LLAMA_ARG_TOOLS=all
-~ --no-jinja --chat-template bogus
+!fail ~ --no-jinja --chat-template bogus
 !unenv LLAMA_ARG_TOOLS
 !env LLAMA_ARG_AGENT=1
-~ --no-jinja --chat-template bogus
+!fail ~ --no-jinja --chat-template bogus
 !unenv LLAMA_ARG_AGENT
 !env LLAMA_ARG_CORS_ORIGINS=http://x
-~ --tools all --no-jinja --chat-template bogus
+!fail ~ --tools all --no-jinja --chat-template bogus
 !unenv LLAMA_ARG_CORS_ORIGINS
 # -j and -jf (Stage 10 step 3b): parsed and converted at parse time, so a
 # bad schema fails before the post-parse checks
--j '{"type":' --no-jinja --chat-template bogus
--j '{"type": "integer"}' --no-jinja --chat-template bogus
--j '{"oneOf": [{"type": "integer"}, {"$ref": "#/nowhere"}]}' --no-jinja --chat-template bogus
--jf /nonexistent/schema.json --no-jinja --chat-template bogus
+!fail -j '{"type":' --no-jinja --chat-template bogus
+!fail -j '{"type": "integer"}' --no-jinja --chat-template bogus
+!fail -j '{"oneOf": [{"type": "integer"}, {"$ref": "#/nowhere"}]}' --no-jinja --chat-template bogus
+!fail -jf /nonexistent/schema.json --no-jinja --chat-template bogus

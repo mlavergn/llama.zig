@@ -5,7 +5,7 @@
 //!
 //! Ports `common_chat_parser_params`, `common_chat_parse` and
 //! `common_chat_peg_parse` from `llama.cpp/common/chat.h` and
-//! `llama.cpp/common/chat.cpp` (llama.cpp v0.5.0, `7fe450e19`). Each
+//! `llama.cpp/common/chat.cpp` (llama.cpp v0.6.0, `d81235049`). Each
 //! declaration names what it ports and the line it began at.
 
 const std = @import("std");
@@ -22,7 +22,7 @@ const Allocator = std.mem.Allocator;
 const Error = exception.Error;
 const Msg = msg_mod.Msg;
 
-/// Ports `common_chat_parser_params` (chat.h:287 @7fe450e19): per-message
+/// Ports `common_chat_parser_params` (chat.h:287 @d81235049): per-message
 /// parsing syntax, derived from `common_chat_params`.
 pub const ParserParams = struct {
     format: msg_mod.Format = .content_only,
@@ -37,7 +37,7 @@ pub const ParserParams = struct {
     /// `common_peg_arena parser`: null for the empty arena. Borrowed.
     parser: ?*const peg.Arena = null,
 
-    /// Ports its constructor from `common_chat_params` (chat.h:299 @7fe450e19):
+    /// Ports its constructor from `common_chat_params` (chat.h:299 @d81235049):
     /// the format and the generation prompt; the parser is loaded apart
     /// (`loadParser`), as the C++'s caller does.
     pub fn fromChatParams(p: *const params_mod.ChatParams) ParserParams {
@@ -55,12 +55,7 @@ pub fn loadParser(gpa: Allocator, text: []const u8) Error!peg.Arena {
     return arena;
 }
 
-/// Whether the last `pegParse` on this thread mapped through a tool call
-/// the C++ had already destroyed (`chat_peg.zig`'s header): upstream was
-/// undefined there, so a gate does not compare that message.
-pub threadlocal var last_parse_undefined: bool = false;
-
-/// Ports `common_chat_parse` (chat.cpp:1441 @7fe450e19).
+/// Ports `common_chat_parse` (chat.cpp:1447 @d81235049).
 pub fn parse(gpa: Allocator, input: []const u8, is_partial: bool, params: *const ParserParams) Error!Msg {
     return pegParse(gpa, params.parser, input, is_partial, params);
 }
@@ -77,7 +72,7 @@ fn mapperKind(format: msg_mod.Format) chat_peg.Mapper.Kind {
     };
 }
 
-/// Ports `common_chat_peg_parse` (chat.cpp:1447 @7fe450e19): the reply,
+/// Ports `common_chat_peg_parse` (chat.cpp:1453 @d81235049): the reply,
 /// with the generation prompt in front, parsed leniently and mapped to an
 /// assistant message. A partial reply that fails past its start still maps
 /// what it matched; anything else that fails throws.
@@ -88,7 +83,6 @@ fn mapperKind(format: msg_mod.Format) chat_peg.Mapper.Kind {
 ///
 /// Return: the message. `error.RuntimeError` when the reply does not match.
 pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: []const u8, is_partial: bool, params: *const ParserParams) Error!Msg {
-    last_parse_undefined = false;
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const a = arena_state.allocator();
@@ -155,7 +149,6 @@ fn mapMessage(gpa: Allocator, ctx: *const peg.ParseContext, result: *const peg.P
     var mapper = chat_peg.Mapper.init(gpa, &msg, mapperKind(format));
     defer mapper.deinit();
     mapper.fromAst(&ctx.ast, result) catch |e| return util.fromPeg(e);
-    if (mapper.ub) last_parse_undefined = true;
     return msg;
 }
 

@@ -502,7 +502,7 @@ server-task-diff:
 # See the header of scripts/server-diff.
 # Both servers embed the web UI bundle `make ui` builds (build/ui.zig);
 # `ui` holds its asset routes.
-SERVER_CASES ?= core slots embd lora cache auth parallel spec sleep stream chat responses anthropic asr vision audio tools mcp proxy router hub ui
+SERVER_CASES ?= core slots embd lora cache auth parallel spec sleep stream chat responses anthropic asr vision audio tools mcp proxy router hub ui decision
 server-diff: ui
 	@set -e; for n in $(SERVER_CASES); do SERVER_UI=$(UI_DIST) ./scripts/server-diff $$n; done
 

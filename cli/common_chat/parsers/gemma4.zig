@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/gemma4.cpp` (llama.cpp v0.5.0,
-//! `7fe450e19`): `workaround::gemma4_model_turn_builder`,
+//! Ports `llama.cpp/common/parsers/gemma4.cpp` (llama.cpp v0.6.0,
+//! `d81235049`): `workaround::gemma4_model_turn_builder`,
 //! `workaround::convert_tool_responses_gemma4` and
 //! `common_chat_params_init_gemma4`. The parser is built in the order clang
 //! evaluates the C++ expressions, left to right, since a parser's id is its
@@ -43,7 +43,7 @@ fn member(m: *const Value, key: []const u8) Error!*Value {
     return m.at(key) catch |e| util.fromJson(e);
 }
 
-/// Ports `workaround`'s `gemma4_model_turn_builder` (parsers/gemma4.cpp:15 @7fe450e19):
+/// Ports `workaround`'s `gemma4_model_turn_builder` (parsers/gemma4.cpp:15 @d81235049):
 /// an assistant turn with tool calls, the tool results after it and the
 /// final assistant message, folded into one message.
 const ModelTurnBuilder = struct {
@@ -55,7 +55,7 @@ const ModelTurnBuilder = struct {
     content: Value = .null,
     reasoning_content: Value = .null,
 
-    /// Ports `collect` (parsers/gemma4.cpp:25 @7fe450e19).
+    /// Ports `collect` (parsers/gemma4.cpp:25 @d81235049).
     fn collect(self: *ModelTurnBuilder) Error!void {
         const a = self.a;
         // Collect the first assistant message
@@ -91,7 +91,7 @@ const ModelTurnBuilder = struct {
         }
     }
 
-    /// Ports `collect_result` (parsers/gemma4.cpp:54 @7fe450e19).
+    /// Ports `collect_result` (parsers/gemma4.cpp:54 @d81235049).
     fn collectResult(self: *ModelTurnBuilder, curr: *const Value) Error!void {
         const a = self.a;
         var response: Value = .null;
@@ -130,7 +130,7 @@ const ModelTurnBuilder = struct {
         self.tool_responses.pushBack(a, entry) catch |e| return util.fromJson(e);
     }
 
-    /// Ports `build` (parsers/gemma4.cpp:89 @7fe450e19).
+    /// Ports `build` (parsers/gemma4.cpp:89 @d81235049).
     fn build(self: *ModelTurnBuilder) Error!Value {
         const a = self.a;
         try self.collect();
@@ -150,7 +150,7 @@ const ModelTurnBuilder = struct {
         return msg;
     }
 
-    /// Ports `has_content` (parsers/gemma4.cpp:108 @7fe450e19).
+    /// Ports `has_content` (parsers/gemma4.cpp:108 @d81235049).
     fn hasContent(msg: *const Value) bool {
         if (!msg.contains("content")) return false;
         const content = msg.at("content") catch |err| switch (err) {
@@ -162,7 +162,7 @@ const ModelTurnBuilder = struct {
         return false;
     }
 
-    /// Ports `has_tool_calls` (parsers/gemma4.cpp:122 @7fe450e19).
+    /// Ports `has_tool_calls` (parsers/gemma4.cpp:122 @d81235049).
     fn hasToolCalls(msg: *const Value) bool {
         if (!msg.contains("tool_calls")) return false;
         const tc = msg.at("tool_calls") catch |err| switch (err) {
@@ -173,7 +173,7 @@ const ModelTurnBuilder = struct {
 };
 
 /// Ports `workaround`'s `convert_tool_responses_gemma4` (parsers/gemma4.cpp:127
-/// @7fe450e19): each assistant turn with tool calls, the `tool` messages
+/// @d81235049): each assistant turn with tool calls, the `tool` messages
 /// after it and the final assistant reply, as one assistant message with
 /// `tool_responses`, as the older Gemma 4 templates expect.
 pub fn convertToolResponses(a: Allocator, messages: *Value) Error!void {
@@ -323,7 +323,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_gemma4` (parsers/gemma4.cpp:151 @7fe450e19).
+/// Ports `common_chat_params_init_gemma4` (parsers/gemma4.cpp:151 @d81235049).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

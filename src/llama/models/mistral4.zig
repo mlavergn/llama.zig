@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mistral4.cpp` at v0.5.0 (`7fe450e19`):
+//! Ported from `llama.cpp/src/models/mistral4.cpp` at v0.6.0 (`d81235049`):
 //! `llama_model_mistral4`'s `build_arch_graph`. The class derives from
 //! `llama_model_deepseek2` and reuses its `load_arch_hparams`,
 //! `load_arch_tensors` and `graph`, which `deepseek2.zig` holds.
@@ -17,7 +17,7 @@ const deepseek2 = @import("deepseek2.zig");
 const Model = model_mod.Model;
 
 /// Ports `llama_model_mistral4`'s `build_arch_graph` (models/mistral4.cpp:3
-/// @7fe450e19): DeepSeek-V2's main graph, whatever the graph type.
+/// @d81235049): DeepSeek-V2's main graph, whatever the graph type.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     deepseek2.buildGraph(model, b);
 }

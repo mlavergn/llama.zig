@@ -293,9 +293,12 @@ LANG_=cxx report_unit "vec.cpp" llama.cpp/ggml/src/ggml-cpu/vec.cpp yes \
 # `make ops-diff`, which backend-ops and parity cannot stand in for.
 LANG_=cxx report_unit "ops.cpp" llama.cpp/ggml/src/ggml-cpu/ops.cpp yes \
     "$PORTED_DIR/ported.zig"
-# The IQ panel GEMM (v0.4.0): live only where `ggml_cpu_has_avx2()`, so on
-# ARM its six exports are compiled and never reached; x86-ops-diff gates them.
-LANG_=cxx report_unit "iqp.cpp" llama.cpp/ggml/src/ggml-cpu/iqp.cpp yes \
+# The tiled K-quant GEMM (v0.6.0, replacing v0.4.0's iqp.cpp): live only
+# where `__AVX2__`, so on ARM its three exports are compiled and decline at
+# once; x86-ops-diff gates them. `tiled/tiled-kernel.cpp` has no unmangled
+# export -- its microkernels and repacks are C++-linkage, called only from
+# tiled.cpp, and ported with it (`cpu/tiled_kernel.zig`).
+LANG_=cxx report_unit "tiled/tiled.cpp" llama.cpp/ggml/src/ggml-cpu/tiled/tiled.cpp yes \
     "$PORTED_DIR/ported.zig"
 LANG_=cxx report_unit "llamafile/sgemm.cpp" llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp yes \
     "$PORTED_DIR/ported.zig"
@@ -324,7 +327,7 @@ LANG_=cxx report_unit "ggml-metal-common.cpp" llama.cpp/ggml/src/ggml-metal/ggml
 # read `0 / 0 symbols (100%)` for an untouched file.
 LANG_=cxx report_unit "ggml-metal.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal.cpp yes \
     "$PORTED_DIR/ported.zig"
-MANGLED_="_ZN17ggml_metal_tuning11fa_vec_pickE20ggml_metal_device_idiiiixx
+MANGLED_="_ZN17ggml_metal_tuning11fa_vec_pickEiiiixx
 _ZN17ggml_metal_tuning18fa_vec_baseline_neEii
 _ZN17ggml_metal_tuning18fa_vec_ne01_bucketEx
 _ZN17ggml_metal_tuning18fa_vec_ne11_bucketEx

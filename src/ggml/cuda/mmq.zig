@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmq.cu` and the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/mmq.cuh` at v0.5.0 (`7fe450e19`). The
+//! `llama.cpp/ggml/src/ggml-cuda/mmq.cuh` at v0.6.0 (`d81235049`). The
 //! configuration tables of `mmq-config-{pascal,ampere,blackwell}.cuh` are
 //! generated into `mmq_config_table.zig`. The kernels, `mul_mat_q` and
 //! `mul_mat_q_stream_k_fixup`, stay CUDA, one instantiation set per type in
@@ -17,6 +17,16 @@
 //! because `blackwell_mma_available(cc)` and the device's
 //! `BLACKWELL_MMA_AVAILABLE` both test the one architecture the fatbins hold.
 //! Only the NVIDIA arms are ported.
+//!
+//! # The `src1` precision
+//!
+//! Since v0.6.0 every MMQ kernel and launcher takes `prec_src1`, a
+//! `ggml_prec`: `GGML_PREC_Q8` quantizes `src1` to `q8_1` as before, and
+//! `GGML_PREC_Q4` -- the FP4 types on Blackwell only -- keeps it at FP4 for
+//! the native W4A4 instructions. Which one a multiplication takes is
+//! `getPrecSrc1`'s answer: `GGML_CUDA_MMQ_PREC` overrides the graph's op
+//! param slot 3. On Blackwell an FP4 type at `Q8` takes the Ampere
+//! configuration, so the native path is no longer implied by the type.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -31,31 +41,31 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const q = common.q;
 
-/// Ports `MMQ_DP4A_MAX_BATCH_SIZE` (mmq.cuh:8 @7fe450e19).
+/// Ports `MMQ_DP4A_MAX_BATCH_SIZE` (mmq.cuh:8 @d81235049).
 const dp4a_max_batch_size = 64;
 
-/// Ports `MMQ_TILE_NE_K` (mmq.cuh:116 @7fe450e19).
+/// Ports `MMQ_TILE_NE_K` (mmq.cuh:116 @d81235049).
 const tile_ne_k = 32;
 
-/// Ports `QK8_1_MMQ` (mmq.cuh:24 @7fe450e19).
+/// Ports `QK8_1_MMQ` (mmq.cuh:24 @d81235049).
 pub const qk8_1_mmq = 4 * c.QK8_1;
 
-/// Ports `QK_FP4_MMQ` (mmq.cuh:25 @7fe450e19).
+/// Ports `QK_FP4_MMQ` (mmq.cuh:25 @d81235049).
 pub const qk_fp4_mmq = 2 * qk8_1_mmq;
 
-/// `sizeof(block_q8_1)`: two halves and `QK8_1` bytes (ggml-common.h:269 @7fe450e19).
+/// `sizeof(block_q8_1)`: two halves and `QK8_1` bytes (ggml-common.h:269 @d81235049).
 pub const sizeof_block_q8_1 = 2 * 2 + c.QK8_1;
 
-/// The size of `block_q8_1_mmq` (mmq.cuh:56 @7fe450e19): `QK8_1_MMQ + 4*sizeof(half2)`.
+/// The size of `block_q8_1_mmq` (mmq.cuh:56 @d81235049): `QK8_1_MMQ + 4*sizeof(half2)`.
 pub const sizeof_block_q8_1_mmq = qk8_1_mmq + 4 * 4;
 
-/// The size of `block_fp4_mmq` (mmq.cuh:58 @7fe450e19), equal to `block_q8_1_mmq`'s.
+/// The size of `block_fp4_mmq` (mmq.cuh:58 @d81235049), equal to `block_q8_1_mmq`'s.
 pub const sizeof_block_fp4_mmq = sizeof_block_q8_1_mmq;
 
-/// Ports `mmq_q8_1_ds_layout` (mmq.cuh:18 @7fe450e19).
+/// Ports `mmq_q8_1_ds_layout` (mmq.cuh:18 @d81235049).
 pub const Q8_1DsLayout = enum(c_int) { d4 = 0, ds4 = 1, d2s6 = 2 };
 
-/// Ports `mmq_get_q8_1_ds_layout` (mmq.cuh:60 @7fe450e19).
+/// Ports `mmq_get_q8_1_ds_layout` (mmq.cuh:60 @d81235049).
 pub fn getQ8_1DsLayout(type_x: c.enum_ggml_type) Q8_1DsLayout {
     return switch (type_x) {
         c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0 => .d4,
@@ -75,10 +85,10 @@ pub fn getQ8_1DsLayout(type_x: c.enum_ggml_type) Q8_1DsLayout {
     };
 }
 
-/// Ports `ggml_cuda_mmq_sram_layout` (mmq.cuh:122 @7fe450e19).
+/// Ports `ggml_cuda_mmq_sram_layout` (mmq.cuh:122 @d81235049).
 pub const SramLayout = enum { q8_0, q8_1, q2_k, q3_k, q6_k, fp4, nvfp4 };
 
-/// Ports `ggml_cuda_mmq_get_sram_stride` (mmq.cuh:132 @7fe450e19): the
+/// Ports `ggml_cuda_mmq_get_sram_stride` (mmq.cuh:132 @d81235049): the
 /// padded SRAM tile length, in 32-bit elements.
 fn getSramStride(layout: SramLayout) c_int {
     return switch (layout) {
@@ -92,7 +102,7 @@ fn getSramStride(layout: SramLayout) c_int {
     };
 }
 
-/// Ports `ggml_cuda_mmq_config` (mmq.cuh:165 @7fe450e19).
+/// Ports `ggml_cuda_mmq_config` (mmq.cuh:165 @d81235049).
 pub const Config = struct {
     type: c.enum_ggml_type,
     nthreads: c_int,
@@ -104,7 +114,7 @@ pub const Config = struct {
     stream_k: bool,
     fallback: bool,
 
-    /// Ports `ggml_cuda_mmq_config`'s `use_mma_data_layout` (mmq.cuh:189 @7fe450e19).
+    /// Ports `ggml_cuda_mmq_config`'s `use_mma_data_layout` (mmq.cuh:189 @d81235049).
     fn useMmaDataLayout(self: Config, x: c_int) bool {
         _ = self;
         return common.turingMmaAvailable(x);
@@ -119,31 +129,38 @@ fn lookup(t: *const table.Table, ty: c.enum_ggml_type, J: c_int, fallback: bool)
     return lookup(t.fallthrough.?, ty, J, fallback);
 }
 
-/// Ports the host `ggml_cuda_mmq_get_config` (mmq.cuh:230 @7fe450e19),
+/// Ports the host `ggml_cuda_mmq_get_config` (mmq.cuh:230 @d81235049),
 /// NVIDIA arms. The AMD arms -- GCN, CDNA, RDNA2/3/4 -- are taken only for
-/// an AMD compute capability, which a CUDA device never has.
-pub fn getConfig(ty: c.enum_ggml_type, J: c_int, fallback: bool, x: c_int) Config {
-    if (common.blackwellMmaAvailable(x)) return lookup(&table.blackwell, ty, J, fallback);
+/// an AMD compute capability, which a CUDA device never has. `prec_src1`
+/// is the C's defaulted `GGML_PREC_Q8` wherever a caller omits it.
+pub fn getConfig(ty: c.enum_ggml_type, J: c_int, fallback: bool, x: c_int, prec_src1: c.enum_ggml_prec) Config {
+    if (common.blackwellMmaAvailable(x)) {
+        // only src1 at Q4 uses the native FP4 config, higher precisions keep src1 at Q8_1
+        if (prec_src1 != c.GGML_PREC_Q4 and (ty == c.GGML_TYPE_NVFP4 or ty == c.GGML_TYPE_MXFP4)) {
+            return lookup(&table.ampere, ty, J, fallback);
+        }
+        return lookup(&table.blackwell, ty, J, fallback);
+    }
     if (common.highestCompiledArch(x) >= common.cc.volta) return lookup(&table.ampere, ty, J, fallback);
     if (common.highestCompiledArch(x) >= common.cc.dp4a) return lookup(&table.pascal_dp4a, ty, J, fallback);
     return lookup(&table.pascal_older, ty, J, fallback);
 }
 
-/// Ports `ggml_cuda_mmq_get_J_max` (mmq.cuh:372 @7fe450e19).
+/// Ports `ggml_cuda_mmq_get_J_max` (mmq.cuh:372 @d81235049).
 fn getJMax(ty: c.enum_ggml_type, fallback: bool, x: c_int, ne11: i64) c_int {
     var ret: c_int = @intCast(@min(ne11, 512));
     ret -= @rem(ret, 8);
     while (ret > 0) : (ret -= 8) {
-        if (getConfig(ty, ret, fallback, x).type != c.GGML_TYPE_COUNT) return ret;
+        if (getConfig(ty, ret, fallback, x, c.GGML_PREC_Q8).type != c.GGML_TYPE_COUNT) return ret;
     }
     return ret;
 }
 
-/// Ports `tile_x_sizes` (mmq.cuh:103 @7fe450e19).
+/// Ports `tile_x_sizes` (mmq.cuh:103 @d81235049).
 const TileXSizes = struct { qs: c_int, dm: c_int, sc: c_int };
 
-/// Ports `mmq_get_dp4a_tile_x_sizes` (mmq.cuh:398 @7fe450e19) with the
-/// `MMQ_DP4A_TXS_*` macros, from `MMQ_DP4A_TXS_Q4_0` (mmq.cuh:387 @7fe450e19).
+/// Ports `mmq_get_dp4a_tile_x_sizes` (mmq.cuh:398 @d81235049) with the
+/// `MMQ_DP4A_TXS_*` macros, from `MMQ_DP4A_TXS_Q4_0` (mmq.cuh:387 @d81235049).
 fn getDp4aTileXSizes(ty: c.enum_ggml_type, I: c_int) TileXSizes {
     const K = tile_ne_k;
     const q4_0: TileXSizes = .{ .qs = I * K + I, .dm = @divTrunc(I * K, q.QI4_0) + @divTrunc(I, q.QI4_0), .sc = 0 };
@@ -177,7 +194,7 @@ fn getDp4aTileXSizes(ty: c.enum_ggml_type, I: c_int) TileXSizes {
     };
 }
 
-/// Ports `ggml_cuda_mmq_get_nbytes_shared_x` (mmq.cuh:427 @7fe450e19).
+/// Ports `ggml_cuda_mmq_get_nbytes_shared_x` (mmq.cuh:427 @d81235049).
 fn getNbytesSharedX(config: Config, x: c_int) c_int {
     if (config.useMmaDataLayout(x)) {
         return config.I * getSramStride(config.sram_layout) * 4;
@@ -186,7 +203,7 @@ fn getNbytesSharedX(config: Config, x: c_int) c_int {
     return (txs.qs + txs.dm + txs.sc) * 4;
 }
 
-/// Ports `mmq_get_nbytes_shared` (mmq.cuh:1388 @7fe450e19).
+/// Ports `mmq_get_nbytes_shared` (mmq.cuh:1396 @d81235049).
 fn getNbytesShared(config: Config, x: c_int) usize {
     const nbs_ids: usize = @as(usize, @intCast(config.J)) * @sizeOf(c_int);
     const nbs_x: usize = @intCast(getNbytesSharedX(config, x));
@@ -194,7 +211,7 @@ fn getNbytesShared(config: Config, x: c_int) usize {
     return nbs_ids + nbs_x + impl.pad(nbs_y, @as(usize, @intCast(config.nthreads)) * @sizeOf(c_int));
 }
 
-/// Ports `mmq_args` (mmq.cuh:1378 @7fe450e19).
+/// Ports `mmq_args` (mmq.cuh:1386 @d81235049).
 pub const Args = struct {
     x: ?*const anyopaque,
     type_x: c.enum_ggml_type,
@@ -254,12 +271,12 @@ fn instanceTu(comptime ty: c.enum_ggml_type) []const u8 {
     };
 }
 
-fn mulMatQKernel(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool) kernels.Kernel {
-    return kernels.get(instanceTu(ty), kernels.tmpl("mul_mat_q", &.{ kernels.ggmlType(ty), kernels.int(J), kernels.boolean(fallback) }));
+fn mulMatQKernel(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec) kernels.Kernel {
+    return kernels.get(instanceTu(ty), kernels.tmpl("mul_mat_q", &.{ kernels.ggmlType(ty), kernels.int(J), kernels.boolean(fallback), kernels.ggmlPrec(prec_src1) }));
 }
 
-fn fixupKernel(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool) kernels.Kernel {
-    return kernels.get(instanceTu(ty), kernels.tmpl("mul_mat_q_stream_k_fixup", &.{ kernels.ggmlType(ty), kernels.int(J), kernels.boolean(fallback) }));
+fn fixupKernel(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec) kernels.Kernel {
+    return kernels.get(instanceTu(ty), kernels.tmpl("mul_mat_q_stream_k_fixup", &.{ kernels.ggmlType(ty), kernels.int(J), kernels.boolean(fallback), kernels.ggmlPrec(prec_src1) }));
 }
 
 fn i32Of(x: i64) c_int {
@@ -270,23 +287,23 @@ fn u32Of(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `launch_mul_mat_q` (mmq.cuh:1396 @7fe450e19).
-fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
+/// Ports `launch_mul_mat_q` (mmq.cuh:1404 @d81235049).
+fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
     const id = common.getDevice();
     const dev = common.info().devices[@intCast(id)];
     const x = dev.cc;
     const nsm = dev.nsm;
     const warp_size = dev.warp_size;
 
-    const config = getConfig(ty, J, fallback, x);
+    const config = getConfig(ty, J, fallback, x, prec_src1);
     impl.assert(@rem(config.nthreads, warp_size) == 0, "config.nthreads % warp_size == 0");
     const nwarps = @divTrunc(config.nthreads, warp_size);
     const nbytes_shared: c_int = @intCast(getNbytesShared(config, x));
 
     const block_dims: kernels.Dim3 = .{ .x = @intCast(warp_size), .y = @intCast(nwarps), .z = 1 };
 
-    kernels.setSharedMemoryLimit(comptime mulMatQKernel(ty, J, false), @intCast(nbytes_shared));
-    kernels.setSharedMemoryLimit(comptime mulMatQKernel(ty, J, true), @intCast(nbytes_shared));
+    kernels.setSharedMemoryLimit(comptime mulMatQKernel(ty, J, false, prec_src1), @intCast(nbytes_shared));
+    kernels.setSharedMemoryLimit(comptime mulMatQKernel(ty, J, true, prec_src1), @intCast(nbytes_shared));
 
     const nty: c_int = i32Of(@divTrunc(args.nrows_x + config.I - 1, config.I));
     const ntx: c_int = i32Of(@divTrunc(args.ncols_max + config.J - 1, config.J));
@@ -305,10 +322,10 @@ fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, compti
     const channel_ratio_fd = common.initFastdivValues(@intCast(channel_ratio));
     const sample_ratio_fd = common.initFastdivValues(@intCast(sample_ratio));
 
-    const k = comptime mulMatQKernel(ty, J, fallback);
+    const k = comptime mulMatQKernel(ty, J, fallback, prec_src1);
     const shmem: usize = @intCast(nbytes_shared);
 
-    if (!getConfig(ty, J, fallback, x).stream_k) {
+    if (!config.stream_k) {
         kernels.launch(k, .{ .grid = block_nums_xy_tiling, .block = block_dims, .shmem = shmem, .stream = stream }, .{
             args.x,                       args.y,                         args.ids_dst,                  args.expert_bounds,
             args.dst,                     @as(?*f32, null),               args.y_scale,                  blocks_per_ne00_fd,
@@ -358,7 +375,7 @@ fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, compti
     if (!fixup_needed) return;
 
     common.cudaCheck(cu.cudaGetLastError(), "cudaGetLastError()", @src());
-    kernels.launch(comptime fixupKernel(ty, J, fallback), .{ .grid = block_nums_fixup, .block = block_dims_fixup, .stream = stream }, .{
+    kernels.launch(comptime fixupKernel(ty, J, fallback, prec_src1), .{ .grid = block_nums_fixup, .block = block_dims_fixup, .stream = stream }, .{
         args.ids_dst,       args.expert_bounds,             args.dst,              tmp_ptr,
         blocks_per_ne00_fd, i32Of(args.nrows_x),            i32Of(args.ncols_dst), i32Of(args.nrows_dst),
         nchannels_y_fd,     i32Of(args.stride_channel_dst), nsamples_y_fd,         i32Of(args.stride_sample_dst),
@@ -366,8 +383,8 @@ fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, compti
     });
 }
 
-/// Ports `mul_mat_q_switch_J` (mmq.cuh:1478 @7fe450e19).
-fn mulMatQSwitchJ(comptime ty: c.enum_ggml_type, comptime fallback: bool, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
+/// Ports `mul_mat_q_switch_J` (mmq.cuh:1486 @d81235049).
+fn mulMatQSwitchJ(comptime ty: c.enum_ggml_type, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
     const id = common.getDevice();
     const x = common.info().devices[@intCast(id)].cc;
     const smpbo = common.info().devices[@intCast(id)].smpbo;
@@ -377,7 +394,7 @@ fn mulMatQSwitchJ(comptime ty: c.enum_ggml_type, comptime fallback: bool, ctx: *
 
     var J: c_int = 8;
     while (J <= 128 and ntiles_J_best > 1) : (J += 8) {
-        const config = getConfig(ty, J, fallback, x);
+        const config = getConfig(ty, J, fallback, x, prec_src1);
         if (config.type == c.GGML_TYPE_COUNT) continue;
         if (getNbytesShared(config, x) > smpbo) continue;
 
@@ -389,7 +406,7 @@ fn mulMatQSwitchJ(comptime ty: c.enum_ggml_type, comptime fallback: bool, ctx: *
     }
 
     switch (J_best) {
-        inline 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128 => |j| launchMulMatQ(ty, j, fallback, ctx, args, stream),
+        inline 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128 => |j| launchMulMatQ(ty, j, fallback, prec_src1, ctx, args, stream),
         else => {
             impl.logError("J_best=%d\n", .{J_best});
             impl.abort("fatal error");
@@ -397,18 +414,27 @@ fn mulMatQSwitchJ(comptime ty: c.enum_ggml_type, comptime fallback: bool, ctx: *
     }
 }
 
-/// Ports `mul_mat_q_case` (mmq.cuh:1561 @7fe450e19).
-fn mulMatQCase(comptime ty: c.enum_ggml_type, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
+/// Ports `mul_mat_q_case` (mmq.cuh:1569 @d81235049). The `GGML_PREC_Q4`
+/// instantiation exists for MXFP4 and NVFP4 only (`DECL_MMQ_CASE_W4A4`).
+fn mulMatQCase(comptime ty: c.enum_ggml_type, comptime prec_src1: c.enum_ggml_prec, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
     if (@rem(args.nrows_x, 128) == 0) {
-        mulMatQSwitchJ(ty, false, ctx, args, stream);
+        mulMatQSwitchJ(ty, false, prec_src1, ctx, args, stream);
     } else {
-        mulMatQSwitchJ(ty, true, ctx, args, stream);
+        mulMatQSwitchJ(ty, true, prec_src1, ctx, args, stream);
     }
 }
 
-/// Ports `ggml_cuda_mul_mat_q_switch_type` (mmq.cu:8 @7fe450e19).
-fn mulMatQSwitchType(ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
+/// Ports `ggml_cuda_mul_mat_q_switch_type` (mmq.cu:8 @d81235049).
+fn mulMatQSwitchType(ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t, prec_src1: c.enum_ggml_prec) void {
     switch (args.type_x) {
+        // src1 at Q4 uses the native FP4 instructions, which are Blackwell-only
+        inline c.GGML_TYPE_MXFP4, c.GGML_TYPE_NVFP4 => |t| {
+            if (prec_src1 == c.GGML_PREC_Q4) {
+                mulMatQCase(t, c.GGML_PREC_Q4, ctx, args, stream);
+            } else {
+                mulMatQCase(t, c.GGML_PREC_Q8, ctx, args, stream);
+            }
+        },
         inline c.GGML_TYPE_Q1_0,
         c.GGML_TYPE_Q2_0,
         c.GGML_TYPE_Q4_0,
@@ -429,14 +455,65 @@ fn mulMatQSwitchType(ctx: *common.Context, args: *const Args, stream: cu.cudaStr
         c.GGML_TYPE_IQ3_S,
         c.GGML_TYPE_IQ4_XS,
         c.GGML_TYPE_IQ4_NL,
-        c.GGML_TYPE_MXFP4,
-        c.GGML_TYPE_NVFP4,
-        => |t| mulMatQCase(t, ctx, args, stream),
+        => |t| mulMatQCase(t, c.GGML_PREC_Q8, ctx, args, stream),
         else => impl.abort("fatal error"),
     }
 }
 
-/// Ports `ggml_cuda_mul_mat_q` (mmq.cu:85 @7fe450e19).
+/// `ggml_cuda_mmq_get_prec_env`'s `static const` in
+/// `ggml_cuda_mmq_get_prec_src1`: read once per process.
+const PrecEnv = struct {
+    var value: c.enum_ggml_prec = c.GGML_PREC_UNDEFINED;
+    fn run() void {
+        value = getPrecEnv();
+    }
+    const once = common.Once(run);
+};
+
+/// Ports `ggml_cuda_mmq_get_prec_env` (mmq.cu:95 @d81235049), new at
+/// v0.6.0: `GGML_CUDA_MMQ_PREC` overrides the `src1` precision the graph
+/// asks for; "auto" (or anything unknown, with a warning) keeps it.
+fn getPrecEnv() c.enum_ggml_prec {
+    const env_c = std.c.getenv("GGML_CUDA_MMQ_PREC") orelse return c.GGML_PREC_UNDEFINED;
+    const env = std.mem.span(env_c);
+    const env_cpp = common.allocator.allocSentinel(u8, env.len, 0) catch impl.abort("out of memory");
+    defer common.allocator.free(env_cpp);
+    for (env, 0..) |ch, i| env_cpp[i] = std.ascii.toLower(ch);
+    if (std.mem.eql(u8, env_cpp, "q4")) {
+        return c.GGML_PREC_Q4;
+    }
+    if (std.mem.eql(u8, env_cpp, "q8")) {
+        return c.GGML_PREC_Q8;
+    }
+    if (!std.mem.eql(u8, env_cpp, "auto")) {
+        impl.logWarn("%s: Unknown value for GGML_CUDA_MMQ_PREC: '%s'. Available: 'q4', 'q8', 'auto'.\n", .{ "ggml_cuda_mmq_get_prec_env", env_cpp.ptr });
+    }
+    return c.GGML_PREC_UNDEFINED;
+}
+
+/// Ports `ggml_cuda_mmq_get_prec_src1` (mmq.cu:118 @d81235049), new at
+/// v0.6.0: `src1` is quantized to Q8_1 unless the FP4 types can use 4-bit
+/// activations, in which case they default to the native W4A4 instructions
+/// on Blackwell.
+fn getPrecSrc1(src0: *const Tensor, dst: *const Tensor, x: c_int) c.enum_ggml_prec {
+    PrecEnv.once.call();
+    const prec_env = PrecEnv.value;
+
+    var prec = prec_env;
+    if (prec == c.GGML_PREC_UNDEFINED) {
+        prec = @bitCast(impl.getOpParamsI32(dst, 3));
+    }
+
+    // Q4 only for the FP4 types on Blackwell
+    impl.assert(prec == c.GGML_PREC_UNDEFINED or prec == c.GGML_PREC_Q8 or prec == c.GGML_PREC_Q4, "prec == GGML_PREC_UNDEFINED || prec == GGML_PREC_Q8 || prec == GGML_PREC_Q4");
+    const can_use_q4 = (src0.type == c.GGML_TYPE_NVFP4 or src0.type == c.GGML_TYPE_MXFP4) and common.blackwellMmaAvailable(x);
+    if (prec == c.GGML_PREC_Q8 or !can_use_q4) {
+        return c.GGML_PREC_Q8;
+    }
+    return c.GGML_PREC_Q4;
+}
+
+/// Ports `ggml_cuda_mul_mat_q` (mmq.cu:135 @d81235049).
 pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor) void {
     impl.assert(src1.type == c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
     impl.assert(dst.type == c.GGML_TYPE_F32, "        dst->type  == GGML_TYPE_F32");
@@ -494,7 +571,9 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
 
     const fallback = @rem(ne01, 128) != 0;
 
-    const use_native_fp4 = common.blackwellMmaAvailable(x) and (src0.type == c.GGML_TYPE_MXFP4 or src0.type == c.GGML_TYPE_NVFP4);
+    const prec_src1 = getPrecSrc1(src0, dst, x);
+
+    const use_native_fp4 = prec_src1 == c.GGML_PREC_Q4;
     const y_block_size: i64 = if (use_native_fp4) sizeof_block_fp4_mmq else sizeof_block_q8_1_mmq;
     const y_values_per_block: i64 = if (use_native_fp4) qk_fp4_mmq else qk8_1_mmq;
 
@@ -557,7 +636,7 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
             .ncols_max = ne1,
             .ncols_opt = ne1,
         };
-        mulMatQSwitchType(ctx, &args, stream);
+        mulMatQSwitchType(ctx, &args, stream, prec_src1);
         return;
     }
 
@@ -592,7 +671,7 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
     }
 
     const nbytes_src1_q8_1: usize = @intCast(@divTrunc(ne12 * n_expert_used * ne10_padded * y_block_size, y_values_per_block) +
-        @as(i64, getJMax(src0.type, fallback, x, ne11)) * sizeof_block_q8_1_mmq);
+        @as(i64, getJMax(src0.type, fallback, x, ne12)) * sizeof_block_q8_1_mmq);
     var src1_q8_1 = common.PoolAlloc(u8).initAlloc(ctx.pool(), nbytes_src1_q8_1);
     defer src1_q8_1.deinit();
     var src1_scale = common.PoolAlloc(f32).init(ctx.pool());
@@ -668,14 +747,16 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
         .ncols_opt = ncols_opt,
     };
 
-    mulMatQSwitchType(ctx, &args, stream);
+    mulMatQSwitchType(ctx, &args, stream, prec_src1);
 }
 
 fn firstOf(comptime T: type, p: ?[*]T) ?*T {
     return if (p) |x| &x[0] else null;
 }
 
-/// Ports `ggml_cuda_should_use_mmq` (mmq.cu:266 @7fe450e19), NVIDIA arms.
+/// Ports `ggml_cuda_should_use_mmq` (mmq.cu:318 @d81235049), NVIDIA arms.
+/// v0.6.0's `cc == GGML_CUDA_CC_PH1` refusal is a Moore Threads arm, which
+/// no CUDA device's compute capability reaches.
 pub fn shouldUseMmq(ty: c.enum_ggml_type, x: c_int, ne11: i64, n_experts: i64) bool {
     const mmq_supported = switch (ty) {
         c.GGML_TYPE_Q1_0,

@@ -27,6 +27,15 @@ cp "$MM/ultravox.gguf" "$m/audio/mmproj-ultravox.gguf" 2>/dev/null || cp "$MM/ge
 # a split model: the first shard is the one named
 cp "$FIX" "$m/split/big-00001-of-00002.gguf"
 cp "$FIX" "$m/split/big-00002-of-00002.gguf"
+# v0.6.0: GET /models reads each model's output modalities from its GGUF
+# metadata, "<arch>.decision.type" (server-models.cpp update_caps): a known
+# decision type is "decisions", an unknown or malformed one "text"
+GG="$ROOT/harness/server/router.gguf.py"
+python3 "$GG" "$FIX" "$m/judge.gguf" '{arch}.decision.type=arch-str:kev'
+python3 "$GG" "$FIX" "$m/oddjudge.gguf" '{arch}.decision.type=arch-str:martian'
+python3 "$GG" "$FIX" "$m/numjudge.gguf" '{arch}.decision.type=u32:3'
+mkdir -p "$m/clefdir"
+python3 "$GG" "$FIX" "$m/clefdir/model.gguf" '{arch}.decision.type=arch-str:clef'
 # not a gguf at all: a child that fails to load
 printf 'not a gguf\n' > "$m/broken.gguf"
 printf 'ignored\n' > "$m/readme.txt"
@@ -130,6 +139,25 @@ cp "$DATA/reload-a.ini" "$DATA/reload.ini"
 mkdir -p "$DATA/reload-a" "$DATA/reload-b"
 cp "$DATA/reload-a.ini" "$DATA/reload-a/reload.ini"
 cp "$DATA/reload-b.ini" "$DATA/reload-b/reload.ini"
+
+# v0.6.0: a preset may set the child's --log-file (server-models.cpp, the
+# constructor); the router's own is still not passed down. A relative path:
+# each side's child writes in its own router's working directory
+cat > "$DATA/logfile.ini" <<INI
+[logged]
+model = $FIX
+log-file = child.log
+[plain]
+model = $FIX
+INI
+
+# v0.6.0: a child logging JSON lines writes them to stdout, which its
+# server_child constructor sent to stderr: the router forwards them as logs
+cat > "$DATA/jsonlog.ini" <<INI
+[jsonlog]
+model = $FIX
+log-jsonl = true
+INI
 
 # the router's --api-key-file (router.cases), which its children must not inherit
 printf 'k4\n' > "$DATA/keys.txt"

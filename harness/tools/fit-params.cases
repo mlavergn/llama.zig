@@ -6,7 +6,7 @@
 !mask /^ggml_metal_/d
 
 --help
-$FIX/qwen3-dense.gguf
+!fail $FIX/qwen3-dense.gguf
 -m $FIX/qwen3-dense.gguf
 -m $FIX/llama-dense.gguf -c 512
 -m $FIX/llama-dense.gguf -c 512 -ngl 3
@@ -19,11 +19,13 @@ $FIX/qwen3-dense.gguf
 -m $FIX/qwen3-dense.gguf -fitp on
 -m $FIX/gemma3-dense.gguf --fit-print on -c 2048 -ctk q8_0 -ctv q8_0 -fa on
 -m $ROOT/Qwen3-0.6B-Q8_0.gguf -fitp on
--m $ROOT/Qwen3-0.6B-Q8_0.gguf -fitp on -np 4 -kvu
--m $FIX/qwen3-dense.gguf -fitp maybe
--m /nonexistent/model.gguf
+# -kvu is not one of fit-params' options, upstream or here
+!fail -m $ROOT/Qwen3-0.6B-Q8_0.gguf -fitp on -np 4 -kvu
+-m $ROOT/Qwen3-0.6B-Q8_0.gguf -fitp on -np 4
+!fail -m $FIX/qwen3-dense.gguf -fitp maybe
+!fail -m /nonexistent/model.gguf
 # Upstream throws through main here, and std::terminate races common_log's
 # worker: on the GB10 its three load errors were lost in 8 runs of 20. The
 # abort itself is still compared.
 !mask /(failed to open GGUF file|error loading model|failed to load model)/d
--m /nonexistent/model.gguf -fitp on
+!fail -m /nonexistent/model.gguf -fitp on

@@ -27,42 +27,60 @@
 -m $PLAIN -p 8,16 -n 0 -b 8 -ub 4 -t 2 -r 1
 -m $PLAIN -p 0 -n 0 -pg 8,4 -d 8,16 -r 2
 -m $PLAIN -p 16 -n 2 -r 1 -ngl 0,99 -fa 1 -ctk q8_0 -ctv q8_0,f16
--m $PLAIN -p 16 -n 2 -r 1 -ngl 99 -fa 1,0 -ctk q8_0 -ctv q8_0
+!fail -m $PLAIN -p 16 -n 2 -r 1 -ngl 99 -fa 1,0 -ctk q8_0 -ctv q8_0
 -m $PLAIN -p 16 -n 2 -r 1 -embd 1 -nopo 1 --no-host 1 -nkvo 1
+-m $PLAIN -p 16 -n 0 -r 1 --repack 0,1
+-m $PLAIN -p 16 -n 0 -r 1 --repack 0 -o csv
+-m $PLAIN -p 16 -n 0 -r 1 --repack 1,0 -o json
+-m $PLAIN -p 16 -n 0 -r 1 --repack 0 -o sql
+!fail -m $PLAIN -p 16 -n 0 -r 1 --repack
+-m $FIX/llama-dense.gguf -p 16 -n 1 -r 1 -ngl 0 --repack 0,1 -o jsonl
 -m $PLAIN -p 16 -n 0 -r 1 -lm none,mmap
 -m $PLAIN -p 16 -n 0 -r 1 -lzm on,off
 -m $PLAIN -p 16 -n 0 -r 1 -lzm auto -o csv
 -m $PLAIN -p 16 -n 0 -r 1 --lazy-mode off -o json
 -m $PLAIN -p 16 -n 0 -r 1 -lzm off -lm none -o sql
--m $PLAIN -p 16 -n 0 -r 1 -lzm on,bogus
--m $PLAIN -p 16 -n 0 -r 1 -lzm
--m $PLAIN -p 16 -n 0 -r 1 -mmp 0,1
--m $PLAIN -p 16 -n 0 -r 1 --direct-io 1
+!fail -m $PLAIN -p 16 -n 0 -r 1 -lzm on,bogus
+!fail -m $PLAIN -p 16 -n 0 -r 1 -lzm
+!fail -m $PLAIN -p 16 -n 0 -r 1 -mmp 0,1
+!fail -m $PLAIN -p 16 -n 0 -r 1 --direct-io 1
 -m $PLAIN -p 16 -n 0 -r 1 -ts 1/0 -sm none -mg 0
 -m $PLAIN -p 16 -n 0 -r 1 -ot token_embd=CPU,
--m $PLAIN -p 16 -n 0 -r 1 -ot a=BOGUS
--m $PLAIN -p 16 -n 0 -r 1 -ot noequals -r 1
+!fail -m $PLAIN -p 16 -n 0 -r 1 -ot a=BOGUS
+!fail -m $PLAIN -p 16 -n 0 -r 1 -ot noequals -r 1
 -m $PLAIN -p 16 -n 0 -r 1 -dev none
 -m $PLAIN -p 16 -n 0 -r 1 -dev MTL0,auto
--m $PLAIN -p 16 -n 0 -r 1 -dev bogus
+!fail -m $PLAIN -p 16 -n 0 -r 1 -dev bogus
 -m $PLAIN -p 16 -n 0 -r 1 -C 0x3 --cpu-strict 1 --poll 0
 -m $PLAIN -p 8-16+8 -n 1-4*2 -r 1 -o csv
--m $PLAIN -p '1-3|2' -r 1
+!fail -m $PLAIN -p '1-3|2' -r 1
 -m $PLAIN -p 5-1 -n 0 -r 1
 -m $PLAIN -p 8, -n 0 -r 1
--m $PLAIN -p x -r 1
--m $PLAIN -p 99999999999 -r 1
+!fail -m $PLAIN -p x -r 1
+!fail -m $PLAIN -p 99999999999 -r 1
 -m $PLAIN -ngl -1 -p 8 -n 0 -r 1
--m $PLAIN --cpu-strict 2,x,0 -p 8 -n 0 -r 1 -o csv
--m $PLAIN -r x
--m $PLAIN -o bad
--m $PLAIN --bogus
--m $PLAIN -p
--m $PLAIN -pg 8
---numa bogus
+!fail -m $PLAIN --cpu-strict 2,x,0 -p 8 -n 0 -r 1 -o csv
+!fail -m $PLAIN -nkvo x -p 8 -n 0 -r 1
+!fail -m $PLAIN --repack 1,,0 -p 8 -n 0 -r 1
+-m $PLAIN -embd ' +1x,-0' -p 8 -n 0 -r 1 -o csv
+!fail -m $PLAIN --no-host -1 -p 8 -n 0 -r 1
+!fail -m $PLAIN -nopo 99999999999999999999 -p 8 -n 0 -r 1
+!fail -m $PLAIN --repack + -p 8 -n 0 -r 1
+-m $PLAIN --repack 0, -p 8 -n 0 -r 1 -o csv
+!fail -m $PLAIN -r x
+!fail -m $PLAIN -o bad
+!fail -m $PLAIN --bogus
+!fail -m $PLAIN -p
+!fail -m $PLAIN -pg 8
+!fail --numa bogus
 --list-devices
 -m $FIX/qwen3moe-moe.gguf -p 16 -n 2 -ncmoe 0,1 -r 1
 -m $FIX/qwen3moe-moe.gguf,$FIX/llama-dense.gguf -p 16 -n 0 -r 1 -o jsonl
 -m $PLAIN -p 8 -n 2 -r 1 --progress
 -m $PLAIN -p 8 -n 2 -r 1 -fitt 1024 -fitc 64
--m /nonexistent.gguf -p 8 -n 0 -r 1
+!fail -m /nonexistent.gguf -p 8 -n 0 -r 1
+# --repack reaches the model: in the verbose log, the CPU_REPACK buffer is
+# there or not, and the second value reloads the model (equal_mparams).
+# Only those lines are compared, so this mask stays last.
+!mask /(model buffer size|cannot be used with preferred buffer type)/!d
+-m $ROOT/Qwen3-0.6B-Q8_0.gguf -p 8 -n 0 -r 1 -ngl 0 --repack 0,1 -v

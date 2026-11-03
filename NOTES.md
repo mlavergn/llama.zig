@@ -11839,3 +11839,335 @@ model several case files use was gone from the GB10, both sides failed
 to load it alike, and the cases compared two failures. `tools-diff` now
 fails when a case file's model or fixtures are missing; the model was
 carried over and the four tools that use it rerun.
+
+## Upstream sync v0.5.0 → v0.6.0
+
+The fourth sync. The pin moved from `v0.5.0` (`7fe450e19`, `b11146`) to
+`v0.6.0` (`d81235049`, `b11429`), ggml from 0.25.1 to 0.26.0, and the
+port's version with it: `0.6.0`. It started over JWHLPTOP's open pickup,
+which carries forward again. `llama.cpp.zmake` moved first: its source
+lists follow upstream's (`iqp.cpp` out, `tiled/tiled.cpp` and
+`tiled-kernel.cpp` in, `llm-jp-harmony.cpp`, `server-decision.cpp`), and
+`zig/metal_embed.zig` inlines the two shared flash-attention bodies,
+`fa_common.metal` and `fa_vec_common.metal`, the way CMake now does:
+`fa.metal` became fifteen libraries and `mul_mv_mma.metal` is new, so
+35 are embedded where there were 20. It builds for macOS (both binaries
+answering on Metal and the CPU), iOS, Linux arm64 and x86_64, and Windows.
+
+### What moved
+
+283 commits; over the ported paths 386 files, +32,888 / −10,390 -- the
+largest sync so far. `scripts/upstream-map` gave **757 touched
+citations**, **416 unmapped hunks** and **42 changed files with no
+citation**; after the extent fix below, 760, 413 and 42. The repin moved
+**9,584 citation sites** and `upstream-relines` **599** line literals,
+with 13 for hand work.
+
+The lead moved both checkouts and the version files, ran the generators
+and both mechanical moves, and made the tree compile again at B before
+any area started: the new buffer-type allocation path
+(`ggml_backend_alloc_ctx_tensors_from_buft` over
+`ggml_backend_buft_alloc_buffer_n` and `_get_alloc_size_n`, with
+`ggml-backend.cpp`'s default planner), the Metal `concat` and `pad`
+encoders whose kernel arguments changed, and `model_saver.zig`'s field
+lists. The work then went to nine agents, each with its own files: ggml
+and the CPU, Metal, CUDA, Vulkan, libllama's core, its architectures,
+libmtmd, `common/` with the CLI, and the server with the tools. The
+libllama agent landed the new `llama.h` API first and marked it ready;
+the agents that call it built against agreed names until then. They
+coordinated through one append-only log, 40-odd requests in all.
+
+**What was ported, by area:**
+
+- **ggml and the CPU backend**: `ggml_backend_buffer_type_i` gained
+  `alloc_buffer_n` and `get_alloc_size_n` (`GGML_BACKEND_API_VERSION` 3),
+  NULL everywhere but the meta backend, whose `alloc_buffer_n` replaces
+  the removed `ggml_backend_meta_alloc_ctx_tensors_from_buft`; the meta
+  backend zeroes disabled slices with `FILL`, not `SCALE` by 0, which kept
+  NaNs. The scheduler's pipeline-parallel input copies moved to a new
+  **pass 6** over the graph's leafs. `ggml-cpu/iqp.cpp` is gone and
+  `ggml-cpu/tiled/` replaces it -- tiled `mul_mat` for k-quants,
+  `mul_mat_id` and flash attention -- ported as `cpu/tiled.zig` and
+  `tiled_kernel.zig` with all three microkernel arms (scalar, AVX2,
+  AVX512-VNNI) chosen at comptime; on ARM only the stub runs, but
+  `graph_plan` now pads every `MUL_MAT` work size to 64 on every target.
+  BF16 unary, GLU and scale kernels; BF16 `src1` for `mul_mat`;
+  `soft_max_back` in one loop; the tiled FA softcap before padding; the
+  sgemm x86 k-tail; `make_qkx3_quants`' inf-safe rounding; gguf's
+  duplicate-key, duplicate-tensor and overflow checks.
+- **Metal**: few-row MMA mat-vec (`mul_mv_mma`, five new predicates in
+  `common.cpp`, `MUL_MAT + ADD` fused into it, a new fusion-table entry);
+  the flash-attention tensor-API path; fwht's threadgroup kernel from 512;
+  `get_pipeline_pad`'s `c4` variant gone and `circular` a function
+  constant; `lightning_indexer`'s head count a function constant; the
+  device props lost `supports_gpu_family_apple7`. Exports by `nm`, each
+  equal to the reference: ops 70, common 14, fusion 18, backend 6, device
+  84. Library selection over the 35 split libraries is the `.m`'s.
+- **CUDA**: the `CONV_3D` op (`conv3d.zig`), the shared-expert fusion
+  (`graph_optimize`, MMVQ, the fusion struct 48 → 80 bytes),
+  RMS_NORM+SCALE, MMQ's `prec_src1` template parameter, BF16 arms across
+  binbcast, unary and scale, SSM `d_state` 96, a 4-head lightning indexer,
+  and the DGX-Spark-only whole-tile FA arm. Both config tables
+  regenerated. Ported blind: **it has not compiled against CUDA**; it
+  type-checks for aarch64 Linux against real CUDA 13 headers.
+- **Vulkan**: the coopmat1 integer-dot mmq (`mul_mmq_cm1`, AMD RDNA3/4
+  only, so no machine here runs it), descriptor-set reuse, the
+  `HC_POST_GATE` fusion. 155 shader files; the SDK pin (1.4.363) holds.
+- **libllama**: **`llama_batch_ext`** -- 12 functions, `llama_embd`,
+  `llama_process` and `llama_get_causal_attn`, 255 exports equal to the
+  reference's -- with `llama-ext.h`'s `llama_batch_ext_set_decision_order`
+  (C++ linkage, unexported). Encode and decode take an extended batch
+  internally; `llama_batch_allocr` builds mixed token-and-embedding
+  ubatches, and the entries' `std::unordered_set` order is libc++'s.
+  `LLAMA_SESSION_VERSION` 11 / `LLAMA_STATE_SEQ_VERSION` 4: the KV cache
+  writes `n_rot_k`/`n_rot_v`. `llama-memory-hybrid-idx.cpp` rewritten
+  (948 changed lines: the QSA path replaced by k-pools), restore-failure
+  clears in every memory, `llama_prec_policy`, `can_prefetch`,
+  `llama_prefetch_rows`, the mmBERT pre-tokenizer, `glm4`/`glm5` vocab
+  names. Two new architectures, **`clef`** (a text-only decision model:
+  one forward pass answers each question) and **`glm5-next`** (GLM-5.3
+  Flash, k-pool indexer) -- 153 architectures, 155 model files -- and
+  `qwen4exp` moved to k-pools.
+- **libmtmd**: two new projector types, `ling3vl` and `glm5v` (63); the
+  move to `llama_batch_ext`; `mtmd_helper_post_decode_callback` takes the
+  new `mtmd_helper_embd_batch`; `mtmd_get_memory_usage` returns a struct
+  with the image-token budget; `ggml_pad_ext` in four audio encoders; the
+  LFM2 mel fix; `mtmd-cli` caps image tokens to `n_ubatch` for
+  non-causal models.
+- **`common/`, the CLI and the chat stack**: `common_batch`, typed
+  decision models (`common_decision_type`), probabilistic drafting with
+  rejection sampling, all four model drafters on `common_batch` and
+  `llama_process`, the sampler's own mt19937; the **LLM-jp Harmony**
+  chat parser; `--nextn`, `--spec-draft-sampling`, `--rpc`. zigjinja
+  v3.1.4 (`060187a`): a test's argument without parentheses,
+  `iterable`/`sequence` of a mapping, `sameas`.
+- **The server and the tools**: the **`/v1/systemone`** decision API
+  (`tools/server/decision.zig`, from the new `server-decision.cpp`,
+  840 lines); the server on `common_batch` and `llama_process`; mixed
+  batches for embeddings; cpp-httplib 0.57.1 → 0.59.0 (pipelining, one
+  stream per connection, `Connection: close` on every error); the
+  router's split pipes. The nine bench and eval tools on the new batch
+  API, `llama-bench --repack`, imatrix's activation statistics and NextN
+  collection.
+
+### What the tooling got wrong
+
+- **`upstream-map`'s extent ended at a braced initializer.** A `{` in
+  `pimpl(new impl{})`, or `mem{m}` in a member-initializer list, closed
+  the "definition" on its signature's second line, so a change further
+  into the constructor read as untouched and **was repinned**:
+  `common_init_result`, `common_speculative_init_result` and
+  `llama_memory_hybrid_idx_context`. Found by the common agent's
+  brace-matching audit of the repinned citations (23 hits, 20 of them
+  false). `extentEnd` now treats a brace opened inside parentheses or
+  straight after an identifier, before the body, as an initializer.
+  Rerun on the committed tree in a throwaway worktree, it reports exactly
+  those three more touched; the run before the fix is the negative test.
+  It still reads `make_qx_quants` and `make_qkx2_quants` as running to
+  the end of `ggml-quants.c`, and it credited 151 new Metal MMA lines to
+  `pool_2d`, which they follow.
+- **`upstream-relines` never moved a line passed through a helper.**
+  Eight helpers that take a bare upstream line (`assertC` in two
+  speculative files, `dsv4SetIdx`, the server queue's, schema's and
+  checkpoint helpers) were missing from `HELPERS`, so their literals had
+  stayed at A through every sync: 25 more found by the fixed script, and
+  checked against B's text. `graph.zig`'s `dsv4SetIdx` lines were three
+  off since before v0.5.0. Hand work found more it cannot see: 47 in
+  `deepseek4.zig` (`src, N` over a file-name constant), 8 in
+  `kv_cache_dsv4.zig`, struct fields in `deepseek32` and `glm-dsa`, and
+  one off by one in `common_context_seq_rm`.
+- **The repin skips** the second names of a multi-symbol citation, range
+  citations, `@sha, and ...` and citations wrapped across comment lines;
+  those were moved by hand.
+- `gen-model-tables` stopped on BAILINGMOE3's conditional rope type, as
+  it should: it is a CONDITIONAL now, ported in `model.zig`.
+  `gen-mtmd-names` had **not** been rerun with the others -- `names.zig`
+  was still at A, without either new projector -- and its output needs
+  `zig fmt`.
+
+### Gates that were wrong
+
+- **`tools-diff` passed when both sides failed.** This checkout's path now
+  has a space in it ("Macintosh HD"), `eval "args=($line)"` split every
+  substituted model path, both tools failed to load, and identical
+  failures read as PASS: `llama-mtmd-cli` was 60 of 62 cases at exit 1
+  under "PASS". The case lines now expand with `IFS` at a newline, and
+  the gate **refuses a vacuous pass**: upstream must exit 0 on a case
+  unless the case is marked `!fail`, and then it must exit nonzero.
+  Negative-tested 3/3. Every `tools-diff` count taken earlier in the sync
+  was void and was re-taken; 130 of the ten tools' cases, 190 of
+  `server`'s 195 and 36 of mtmd-cli's and tts's are deliberate failures.
+- **`struct-layout`'s Metal constant table held literals**, not the
+  declarations the encoders read, so a wrong `pub const` passed beside a
+  correct copy. All 136 entries now name their declarations.
+- **`arch-model-diff` read a port load abort as `REF-ABORT`**:
+  `CONTEXT_DIFF_SIDE=ref` still loaded the port's model. Each side now
+  loads only its own; the injection that exposed it now fails.
+- **`context-diff` hashed nodes that never ran.**
+  `ggml_build_forward_select` builds every branch and flags only the
+  selected one for computing; the unselected mixed-batch branch of
+  `build_inp_embd` was hashed from allocator leftovers and failed
+  `jina-bert-v2`. Nodes without `GGML_TENSOR_FLAG_COMPUTE` are now
+  recorded without their data, and their flags are still compared on
+  both sides.
+- `http-diff`'s old `pipelined` case passed at 0.57.1 because both sides
+  silently dropped the pipelined request.
+- A Metal unit test pinned the fusion table's last label; the new
+  `MUL_MAT + ADD` entry appended after it.
+- **`port-coverage` had read `ggml-metal-tuning.cpp` as 6 / 7 since
+  v0.5.0.** Its hand-kept list of the seven mangled names still spelled
+  `fa_vec_pick` with the device-id argument v0.5.0 removed; both the port
+  and the reference export `fa_vec_pickEiiiixx`. The list now names it.
+- **Three perplexity cases named the SFT model under `$HOME`**, which is
+  not where this machine keeps the zigtrain models: both sides had failed
+  to load it, and it passed until the rule above refused it. `tools-diff`
+  now takes `$PLAIN_SFT` (beside `$PLAIN` unless named) and refuses to run
+  without it; negative-tested.
+- **`make server-diff` did not list the new `decision` case file**; it
+  runs all 23 now.
+
+### Bugs and traps found
+
+- **Upstream reads past the end for a token in no sequence.** Since
+  v0.6.0, `llama_batch_allocr::init` points `seq_id[i]` into a flat array
+  and the splits read `seq_id[i][0]`; `batch-diff` segfaulted in
+  `split_equal`. `llama_batch_compat` also indexes positions by an
+  unchecked first sequence id. The generators avoid both.
+- **Training a hybrid model aborts upstream**: `llm_graph_input_mem_hybrid`
+  writes K/V indices the training graph never allocates. The four
+  training-mode injections are unreachable for that reason.
+- **BF16 output hides contraction from `ops-diff`**: an unfused
+  `scale_bf16` and a fused `gelu_bf16` both passed 2^20-element cases.
+  The fusions were read from the reference's disassembly and named.
+- **The gate's inputs again decided what it could see**: `soft_max_back`'s
+  scale of 0.5 is exact (a 0.37 case caught the reorder), the masked FA
+  case hid the softcap order, the recipe's indexer `top_k` of 131072
+  never drops a k-pool (only a `topk8` fixture reaches GLM5-Next's gather
+  path), and upstream's Qwen3.5 fixture already carries `cls.output`.
+- `rms_norm`/`l2_norm` ran `@memcpy(y, x)` in place, a panic in safe
+  builds (found by `clef`).
+- `stb_image.zig` took `stbi_zlib_decode_malloc_guesssize_headerflag`'s
+  `int initial_size` as unsigned: a corrupted PNG said "bad codelengths"
+  where upstream fails silently. Latent since v0.5.0.
+- The `-md` speculative-type inference lives in argument parsing
+  (arg.cpp:566), so missing it showed up as a crash in fit; the server's
+  copy had it, the tools' did not.
+- `libllama-ref.a` built without `--release=fast` turns on `#ifndef
+  NDEBUG` aborts and logs, and made every fixture fail once mid-sync.
+- Metal at v0.6.0 logs per-library compile timings, which the
+  `spec-diff`, `server-diff` and `ui` masks now take.
+
+### Decisions taken in this sync
+
+- **Metal's two function-constant bases collide** (`FC_LIGHTNING_INDEXER`
+  and `FC_FLASH_ATTN_EXT_TENSOR` are both 2200). Harmless upstream, the
+  kernels being in different libraries; reproduced, not corrected.
+- **Embeddings in `common_batch` are views, as upstream's**: EAGLE3's
+  bridge row points at a buffer the same `process` overwrites before the
+  decode, so upstream decodes the new row. No case reaches it.
+- **The checkout's path has a space.** `make buildmacos` (its
+  `$(CURDIR)` and the `.tools/cmake` wildcard, and a cache from the old
+  path) and zmake's `make ui` (`LLAMA_UI_OUT_DIR` unquoted) break on it;
+  the agents ran their steps by hand. Not fixed in this sync.
+
+### The gates
+
+The combined pass ran on one tree after every agent had finished: `make
+validate` first (red three times before it passed: seven zlint warnings in
+the server and imatrix files, the Metal fusion test above, and nine
+citations -- one the lead's, eight wrapped or `Class::member` forms in
+libllama), then the CPU matrix, then every other Mac gate in one script,
+then the reruns the findings below called for.
+
+| Gate | Result |
+|---|---|
+| `make validate` | unit tests 537/539 (2 skipped), `test-port` 418 debug and 419 release, `test-llama` 319, `test-mtmd` 91, and every gate `make test` runs |
+| `make probe` | both runs |
+| `ops-diff`, `repack-diff`, `node-diff`, `parity-port`, `parity-port-cpu` | identical at `baseline`, `apple_m3`, `generic`, `apple_a7` and `apple_a12`: 1,048 op results, 141 repack checks, 2,896 nodes and 33 fused decodes at 1 and 4 threads, 6/6 and 6/6 |
+| `node-diff --gpu` | 2,896 nodes and 33 fused decodes identical at 1 and 4 threads |
+| `graph-diff` | 282 nodes |
+| `backend-ops` | 24,179 op configurations, both backends; `--diff` 29,011 lines identical |
+| `sched-diff` | 20 assignments (a pass-6 case added) |
+| `metal-diff` | 77,139 answers |
+| `tuning-diff` | 10,291,540 lookups |
+| `struct-layout` | 3,246 `kargs` facts and 344 more; all 136 `#define`s in `impl_c.zig` |
+| `abi-check` | 34 entry points |
+| `sampler-diff` | 40,308 records |
+| `libcxx-diff`, `regex-diff` | 452,904 and 43,537,552 results |
+| `unicode-diff`, `vocab-diff`, `arch-diff` | 7,079,754, 67,518,702 (51 files) and 146,490 checks |
+| `loader-diff` | 386,636 checks |
+| `batch-diff` | 245,122 results, 18,988,489 checks (145,711 `llama_batch_ext` calls) |
+| `api-diff` | 85,854,227 checks |
+| `adapter-diff` | 299,985 checks (after the compute-flag harness fix) |
+| `chat-diff` | 954,464 results |
+| `quant-diff` | 170,091,682 checks |
+| `opt-diff`, `opt-llama-diff` | 89,924 checks; 2,997 lines and 6 abort cases alike |
+| `meta-diff` | 79,685 end-to-end lines |
+| `blas-diff`, `blas-node-diff` | 2,547 checks; 390 nodes, 367 computed differently without BLAS |
+| `host-arms-diff` | 18 scenarios |
+| `arch-fixtures`, `mmproj-fixtures` | 173 fixtures (128 through `test-llama-archs`, 45 extra); 132 of 132 mmproj checks |
+| `arch-model-diff` | 171 pass, 0 fail, the two `REF-ABORT`s known since v0.3.0 (PLM, `rwkv6qwen2`) |
+| `gemma4-assistant-diff` | dense and MoE, Metal and CPU |
+| `mtmd-gates` | `mtmd-diff` 264 identical (4 aborting alike), 3,401 image cases, 3,309 audio cases, 999 decoder files; 84 exports |
+| `context-diff` | 4,209,963 checks |
+| `port-links` | 11,165 citations in 638 files, every one at `d81235049` |
+| `port-coverage` | every unit 100% (`ggml-metal-tuning.cpp` 7/7 after the fix above) |
+| `json-diff`, `schema-diff`, `peg-diff` | 9,526,339; 751,908 over 165,703 cases; 5,032,857 over 5,705 cases |
+| `chat-parse-diff` | 52,718 records, 398,259 lines |
+| `chat-msg-diff` | 1,625 records |
+| `jinja-diff` | 78 templates (71 upstream, 7 probes) × 7 conversations, 9,048 probe renders, both time zones |
+| `cnv-diff` | 36 scenarios |
+| `fit-diff` | 68 cases, ReleaseFast and ReleaseSafe |
+| `spec-diff` | 43 cases, 202,629 lines |
+| `server-task-diff` | 6,342 records |
+| `http-diff` | 318 checks |
+| `parity-cli` | 13/13 |
+| `tools-diff` | the ten tools 362 cases (gguf-split 29, quantize 46, tokenize 51, fit-params 19, export-lora 18, batched-bench 11, cvector-generator 13, imatrix 75, perplexity 36, bench 64), `llama-tts` 30, `llama-mtmd-cli` 63, `llama-server` 195, every one under the expected-exit rule |
+| `server-diff` | 23 files, 1,638 checks (`decision` 94) |
+| `xcframework-check` | every slice built and verified, the negative tests, the macOS smoke 6/6 on GPU and CPU, the iOS and tvOS simulator smokes 6/6, `pkg-test`, `zip`, the port gates, `compat` (91 files byte-identical, 11,187 exports) and `dropin-macos`; upstream's generic-CPU macOS slice against ours, reported and not a gate, differs on 3 of 6 prompts as before. Run through a symlink with no space in its path: the xcframework `Makefile` splits `$(abspath …)` at "Macintosh HD" (and its `rm -rf` of the build directory became `rm -rf /Volumes/Macintosh`, harmless only because that path does not exist). tvOS 27.2 offers only the 4th-generation Apple TV 4K, now `TV_DEVICE`'s default. **The visionOS simulator smoke could not run**: no visionOS runtime is installed |
+
+
+### Injections
+
+Each area made every new gate case and changed function fail once, in
+its own scratch copy or restored by reverse replacement:
+
+- **ggml and the CPU**, 22: 18 caught (two only after new cases), 2
+  escaped (the BF16 `scale` and `gelu` fusions, which BF16 rounding hides;
+  read from the disassembly instead), 3 inert. The x86 kernels have no
+  bit-exact gate here: the Windows pickup.
+- **Metal**, 40: 38 caught (one after two new adjacent-tensor probes),
+  2 inert, 0 escaped.
+- **CUDA**: 2 here (comptime size checks), 29 listed for the GB10.
+- **Vulkan**, 23: 21 caught (4 only by new extra cases), 2 escaped --
+  descriptor-set reuse, which `test-backend-ops` cannot see at all; on the
+  GB10 list.
+- **libllama core**, 57: 49 caught, 8 escaped: four in training mode,
+  unreachable because upstream aborts there; three in mmBERT's word split,
+  which no vocabulary here shows; the KV cache's restore-time cell-count
+  check.
+- **Architectures**, 85 across the agent and its three sub-agents: 70
+  caught, 6 escaped (a redundant PLE `can_reuse`, the k-pool `can_reuse`
+  `n_kv` check, a PLE mixed-type flag written before the mixed-batch case,
+  GLM5-Next's Sinkhorn normalisation which the fused hc ops always skip),
+  1 inert, 1 misread as `REF-ABORT` (the harness hole above, now fixed).
+- **libmtmd**, 45: 43 caught, 1 inert (an unreachable clamp in the glm5v
+  preprocessor), 1 escaped (pocket-tts `finish_chunk`'s logits row, not
+  proven inert).
+- **`common/` and the CLI**, 26: 20 caught (four after new cases), 4
+  inert, 2 escaped (an exact `p == q` acceptance, never generated; the
+  EAGLE3 bridge row as a copy).
+- **The server and the tools**, 37 + 19 + 20 + 21 + 19 across the core,
+  HTTP, router, imatrix and bench work: 33, 13, 18, 19 and 19 caught;
+  the escapes are a fused tail that Qwen3's widths leave empty and the
+  replay acceptance arm, which needs a hybrid model.
+
+
+### Pickups
+
+`PLAN.md`, "Pickup for the v0.6.0 sync". CUDA has not compiled against a
+toolkit; the Vulkan host compiled against a stub loader and ran on
+llvmpipe in a Linux container (`vk-backend-diff` and `vk-ops-diff`,
+4,899 sweep cases, port against reference, on bits). JWHLPTOP is
+unreachable, so its AVX-512 items carry forward again, now with the
+tiled AVX-512 and VNNI arms.

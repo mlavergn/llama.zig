@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.5.0, `7fe450e19`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.6.0, `d81235049`), lines
 //! 4383-4964. Each function names the C function it replaces and the line it
 //! began at.
 //!
@@ -39,13 +39,13 @@ const c = impl.c;
 const fp16 = impl.fp32ToFp16;
 const QK_K = c.QK_K;
 
-/// Ports `IQ1S_BLOCK_SIZE` (ggml-quants.c:4506 @7fe450e19).
+/// Ports `IQ1S_BLOCK_SIZE` (ggml-quants.c:4507 @d81235049).
 const iq1s_block_size = 32;
-/// Ports `IQ1M_BLOCK_SIZE` (ggml-quants.c:4507 @7fe450e19).
+/// Ports `IQ1M_BLOCK_SIZE` (ggml-quants.c:4508 @d81235049).
 const iq1m_block_size = 16;
 const ngrid_iq1s = 2048;
 
-/// Ports `iq1_find_best_neighbour2` (ggml-quants.c:4443 @7fe450e19).
+/// Ports `iq1_find_best_neighbour2` (ggml-quants.c:4444 @d81235049).
 ///
 /// Weighted-closest entry, with the grid values mapped through `xg` -- the
 /// shifted level table -- rather than used directly.
@@ -118,7 +118,7 @@ const Pair = struct {
     x: f32,
     idx: u32,
 
-    /// Ports `iq1_sort_helper` (ggml-quants.c:4500 @7fe450e19), **plus a tie-break the
+    /// Ports `iq1_sort_helper` (ggml-quants.c:4501 @d81235049), **plus a tie-break the
     /// C does not have**.
     ///
     /// The C compares only the value, and hands that to `qsort`, which leaves
@@ -142,7 +142,7 @@ const Pair = struct {
     }
 };
 
-/// Ports `quantize_row_iq1_s_impl` (ggml-quants.c:4508 @7fe450e19).
+/// Ports `quantize_row_iq1_s_impl` (ggml-quants.c:4509 @d81235049).
 fn iq1SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f32) void {
     const t = c.GGML_TYPE_IQ1_S;
     const kgrid = codebook.iq2Grid(t);
@@ -313,7 +313,7 @@ fn iq1SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f3
     }
 }
 
-/// Ports `quantize_iq1_s` (ggml-quants.c:4672 @7fe450e19).
+/// Ports `quantize_iq1_s` (ggml-quants.c:4673 @d81235049).
 pub export fn quantize_iq1_s(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
     impl.assert(quant_weights != null, "missing quantization weights");
@@ -336,10 +336,10 @@ pub export fn quantize_iq1_s(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_
 // So there are four combinations rather than two, scored together at every
 // split point, and `best_k` records which won.
 
-/// Ports `masks` (ggml-quants.c:4720 @7fe450e19): the `qh` bits encoding the shift pair.
+/// Ports `masks` (ggml-quants.c:4721 @d81235049): the `qh` bits encoding the shift pair.
 const iq1m_masks = [4]u8{ 0x00, 0x80, 0x08, 0x88 };
 
-/// Ports `quantize_row_iq1_m_impl` (ggml-quants.c:4692 @7fe450e19).
+/// Ports `quantize_row_iq1_m_impl` (ggml-quants.c:4693 @d81235049).
 ///
 /// Two things here have no counterpart in `iq1_s`:
 ///
@@ -597,7 +597,7 @@ inline fn shiftFor(best_k: i32, k: usize, x_p: *const [3]f32, x_m: *const [3]f32
     return if (@rem(best_k, 2) == 0) x_p else x_m;
 }
 
-/// Ports `quantize_iq1_m` (ggml-quants.c:4917 @7fe450e19).
+/// Ports `quantize_iq1_m` (ggml-quants.c:4918 @d81235049).
 pub export fn quantize_iq1_m(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
     const nblock: usize = @intCast(@divExact(n_per_row, QK_K));

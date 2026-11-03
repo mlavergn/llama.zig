@@ -235,6 +235,9 @@ const sizes = [_][2]c_int{
     // an edge at an odd multiple of half the alignment, where lfm2's
     // round-half-to-even decides whether the image is tiled
     .{ 512, 272 }, .{ 1024, 528 },
+    // exactly 8 tokens of 14-pixel patches merged 2x2 (6272 pixels) with
+    // neither edge aligned, where glm5v's `>= min_px` keeps the scale at 1
+    .{ 98, 64 },   .{ 64, 98 },
 };
 
 const clip_mean = [3]f32{ 0.48145466, 0.4578275, 0.40821073 };
@@ -412,6 +415,25 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_resize_algo = algo;
                 h.image_pad_color = .{ 127, 127, 127, 0 };
                 try out.append(gpa, .{ h, .deepseek4v, "deepseek4v" });
+            };
+        },
+        .glm5v => {
+            // budgets below, around and above every size's aligned canvas,
+            // so the min-budget upscale, the height search and the plain
+            // pad each run; min == max; a max below one aligned cell; and
+            // 226 tokens at patch 14, where 224x224's upscaled edge (420.9)
+            // floors onto a cell boundary, so only the C's ceil reaches 448
+            for ([_]i32{ 14, 16 }) |ps| for ([_][2]i32{ .{ 8, 1024 }, .{ 4, 64 }, .{ 2048, 4096 }, .{ 64, 64 }, .{ 1, 1 }, .{ 226, 4096 } }) |mm| for ([_]i32{ 0, 1, 2 }) |algo| {
+                var h = base;
+                h.patch_size = ps;
+                h.n_merge = 2;
+                const area = ps * ps * 4;
+                h.image_min_pixels = mm[0] * area;
+                h.image_max_pixels = mm[1] * area;
+                h.image_resize_algo = algo;
+                h.image_resize_pad = 1;
+                h.image_pad_color = .{ 1, 2, 3, 0 };
+                try out.append(gpa, .{ h, .glm5v, "glm5v" });
             };
         },
     }

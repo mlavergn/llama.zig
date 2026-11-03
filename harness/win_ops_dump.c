@@ -11,7 +11,7 @@
 // Usage: win_ops_dump <threads> <out name> <write-q|read-q> <q name> [NAME=VALUE]
 //   The optional last argument is set in the environment first -- the
 //   port side's `X86_PORT_ENV` in `scripts/x86-ops-diff`, for negative
-//   tests such as `GGML_NO_IQ_PANEL=1`.
+//   tests such as `GGML_CPU_TILED_MM=0`.
 
 #define main ops_dump_main
 #include "ops_dump.c"

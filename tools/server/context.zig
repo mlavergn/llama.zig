@@ -4,8 +4,8 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-context.cpp` and
-//! `llama.cpp/tools/server/server-context.h` (llama.cpp v0.5.0,
-//! `7fe450e19`) up to the public `server_context` and `get_meta`:
+//! `llama.cpp/tools/server/server-context.h` (llama.cpp v0.6.0,
+//! `d81235049`) up to the public `server_context` and `get_meta`:
 //! `server_output_limits`, `server_sample_and_accept_synth`, `slot_state`,
 //! `server_batch`, `server_slot`, `process_mtmd_chunk`,
 //! `server_context_impl` and `server_context`. The routes and the response
@@ -50,6 +50,7 @@ const task_mod = @import("task.zig");
 const result_mod = @import("result.zig");
 const queue_mod = @import("queue.zig");
 const oaicompat = @import("oaicompat.zig");
+const decision_mod = @import("decision.zig");
 
 const c = tc.c;
 const log = tc.log;
@@ -78,7 +79,7 @@ pub const gpa = std.heap.c_allocator;
 
 const token_null = common.token_null;
 
-/// Ports `HTTP_POLLING_SECONDS` (server-context.cpp:39 @7fe450e19).
+/// Ports `HTTP_POLLING_SECONDS` (server-context.cpp:40 @d81235049).
 pub const http_polling_seconds: c_int = 1;
 
 // -----------------------------------------------------------------------------
@@ -98,7 +99,7 @@ fn ggmlAbort(comptime line: c_int, comptime fmt: [*:0]const u8, args: anytype) n
 const srv = common.srv;
 
 /// Ports `SLT_DBG`, `SLT_TRC`, `SLT_INF`, `SLT_WRN` and `SLT_ERR`
-/// (server-common.h:26, 27, 28, 29, 30 @7fe450e19): the message prefixed
+/// (server-common.h:26, 27, 28, 29, 30 @d81235049): the message prefixed
 /// with the calling function's name, the slot's id and its task's.
 fn slt(comptime level: common.SrvLevel, comptime func: []const u8, slot: *const Slot, comptime fmt: []const u8, args: anytype) void {
     const f = "slot %12.*s: id %2d | task %d | " ++ fmt;
@@ -179,7 +180,7 @@ pub fn whatOf(e: anyerror) []const u8 {
 // -----------------------------------------------------------------------------
 // free functions
 
-/// Ports `server_output_limits` (server-context.cpp:41 @7fe450e19): the
+/// Ports `server_output_limits` (server-context.cpp:42 @d81235049): the
 /// context's output buffer, sized for every slot verifying a full draft.
 fn serverOutputLimits(params: *const Params) spec_mod.OutputLimits {
     if (params.embedding or
@@ -195,7 +196,39 @@ fn serverOutputLimits(params: *const Params) spec_mod.OutputLimits {
     return result;
 }
 
-/// Ports `server_sample_and_accept_synth` (server-context.cpp:57 @7fe450e19):
+/// Ports `server_accept_replay` (server-context.cpp:57 @d81235049): a
+/// checkpoint restore dropped tokens the target had accepted -- re-accept
+/// them rather than verify again.
+///
+/// Return: owned by `a`.
+fn acceptReplay(
+    a: Allocator,
+    smpl: *sampling.Sampler,
+    ctx: ?*c.llama_context,
+    idxs: []const i32,
+    draft: []const Token,
+) ![]Token {
+    ggmlAssert(idxs.len == draft.len + 1, 62, "idxs.size() == draft.size() + 1");
+
+    var result: std.ArrayList(Token) = .empty;
+    errdefer result.deinit(a);
+    try result.ensureTotalCapacity(a, idxs.len);
+
+    for (draft, 0..) |d, i| {
+        // the token is discarded - the call is what advances the sampler over this position
+        _ = try smpl.sample(ctx, idxs[i], false);
+        smpl.accept(d, true);
+        result.appendAssumeCapacity(d);
+    }
+
+    const id = try smpl.sample(ctx, idxs[draft.len], false);
+    smpl.accept(id, true);
+    result.appendAssumeCapacity(id);
+
+    return result.toOwnedSlice(a);
+}
+
+/// Ports `server_sample_and_accept_synth` (server-context.cpp:83 @d81235049):
 /// synthetic draft verification for benchmarking -- accept draft tokens at
 /// random instead of by match with the target; on replay the draft was
 /// already accepted before a context checkpoint restore, so repeat the same
@@ -212,8 +245,8 @@ fn sampleAndAcceptSynth(
     rng: *libcxx.Mt19937,
     is_replay: bool,
 ) ![]Token {
-    ggmlAssert(idxs.len == draft.len + 1, 65, "idxs.size() == draft.size() + 1");
-    ggmlAssert(synth_probs.len >= draft.len, 66, "synth_probs.size() >= draft.size()");
+    ggmlAssert(idxs.len == draft.len + 1, 91, "idxs.size() == draft.size() + 1");
+    ggmlAssert(synth_probs.len >= draft.len, 92, "synth_probs.size() >= draft.size()");
 
     var result: std.ArrayList(Token) = .empty;
     errdefer result.deinit(a);
@@ -246,7 +279,7 @@ fn sampleAndAcceptSynth(
     return result.toOwnedSlice(a);
 }
 
-/// Ports `slot_state` (server-context.cpp:100 @7fe450e19). State diagram:
+/// Ports `slot_state` (server-context.cpp:126 @d81235049). State diagram:
 /// https://github.com/ggml-org/llama.cpp/pull/9283
 pub const SlotState = enum {
     idle,
@@ -260,20 +293,22 @@ pub const SlotState = enum {
 // -----------------------------------------------------------------------------
 // server_batch
 
-/// Ports `server_batch` (server-context.cpp:111 @7fe450e19): the tokens of
-/// one iteration, rendered into a `llama_batch` once complete.
+/// Ports `server_batch` (server-context.cpp:137 @d81235049): the entries of
+/// one iteration, tokens and embeddings, rendered a sub-batch at a time into
+/// `view`.
 pub const Batch = struct {
-    /// Ports `server_batch`'s `token` (server-context.cpp:115 @7fe450e19).
+    /// Ports `server_batch`'s `token` (server-context.cpp:140 @d81235049).
     pub const Tok = struct {
         id_slot: i32,
         token: Token,
-        pos: c.llama_pos,
+        pos: [c.GGML_MROPE_SECTIONS]c.llama_pos, // only pos[0] is used for text tokens
         output: bool,
         is_prompt: bool, // for stats tracking
+        decision_order: i32 = 0,
+        i_embd: i32 = -1, // row in embd, -1 if this is a token
     };
 
-    batch: c.llama_batch = std.mem.zeroes(c.llama_batch),
-    batch_rendered: bool = false,
+    view: tc.common.Batch = tc.common.Batch.initEmpty(gpa), // the rendered sub-batch [off, off + n_tokens), see render()
 
     tokens: std.ArrayList(Tok) = .empty,
     n_tokens_alloc: i32 = 0,
@@ -282,123 +317,129 @@ pub const Batch = struct {
     // track if given slot can be batched with slots already in the batch
     slot_batched: ?*Slot = null,
 
-    // in embd mode, we temporarily swap out the tokens arr and restore it on clear()
-    has_embd: bool = false,
-    tokens_ptr: [*c]Token = null,
-    embd: std.ArrayList(f32) = .empty,
+    // embedding entries, they can be mixed with tokens if the context supports it
+    embd: std.ArrayList(f32) = .empty, // n_embd per row
 
     alora_scale: f32 = -1.0,
     alora_disabled_id: usize = 0,
 
-    /// Ports the destructor of `server_batch` (server-context.cpp:141 @7fe450e19).
+    /// The destructor of `server_batch`'s members.
     fn deinit(self: *Batch) void {
-        if (self.batch.pos != null) {
-            self.clear();
-            c.llama_batch_free(self.batch);
-        }
+        self.view.deinit();
         self.tokens.deinit(gpa);
         self.embd.deinit(gpa);
     }
 
-    /// Ports `server_batch`'s `init` (server-context.cpp:148 @7fe450e19).
-    fn init(self: *Batch, n_tokens_alloc: i32, n_embd: i32) !void {
+    /// Ports `server_batch`'s `init` (server-context.cpp:162 @d81235049).
+    fn init(self: *Batch, ctx: ?*c.llama_context, n_tokens_alloc: i32, n_embd: i32) !void {
         self.n_tokens_alloc = n_tokens_alloc;
         self.n_embd = n_embd;
-        self.batch = c.llama_batch_init(n_tokens_alloc, 0, 1);
-        self.tokens_ptr = self.batch.token;
+        self.view.deinit();
+        self.view = tc.common.Batch.init(gpa, ctx);
         try self.tokens.ensureTotalCapacity(gpa, @intCast(n_tokens_alloc));
     }
 
-    /// Ports `server_batch`'s `add` (server-context.cpp:156 @7fe450e19), a token.
+    /// Ports `server_batch`'s `add` (server-context.cpp:169 @d81235049), a token.
     fn add(self: *Batch, id_slot: i32, token: Token, pos: c.llama_pos, output: bool, is_prompt: bool) !bool {
-        ggmlAssert(!self.has_embd, 157, "!has_embd"); // cannot mix tokens + embd in same batch
-        ggmlAssert(self.batch.pos != null, 158, "batch.pos != nullptr");
         if (@as(i32, @intCast(self.tokens.items.len)) >= self.n_tokens_alloc) {
             return false;
         }
-        try self.tokens.append(gpa, .{ .id_slot = id_slot, .token = token, .pos = pos, .output = output, .is_prompt = is_prompt });
+        try self.tokens.append(gpa, .{ .id_slot = id_slot, .token = token, .pos = .{ pos, 0, 0, 0 }, .output = output, .is_prompt = is_prompt });
         return true;
     }
 
-    /// Ports `server_batch`'s `add` (server-context.cpp:166 @7fe450e19), an embedding.
-    fn addEmbd(self: *Batch, id_slot: i32, embd_in: []const f32, pos: c.llama_pos, output: bool, is_prompt: bool) !bool {
-        ggmlAssert(self.batch.pos != null, 167, "batch.pos != nullptr");
+    /// Ports `server_batch`'s `add_embd` (server-context.cpp:178 @d81235049):
+    /// `embd_in` has `n_embd` values, `pos` has GGML_MROPE_SECTIONS values.
+    fn addEmbd(self: *Batch, id_slot: i32, embd_in: [*]const f32, pos: *const [c.GGML_MROPE_SECTIONS]c.llama_pos, output: bool, is_prompt: bool) !bool {
         if (@as(i32, @intCast(self.tokens.items.len)) >= self.n_tokens_alloc) {
             return false;
         }
-        try self.tokens.append(gpa, .{ .id_slot = id_slot, .token = token_null, .pos = pos, .output = output, .is_prompt = is_prompt });
-        self.has_embd = true;
-        try self.embd.appendSlice(gpa, embd_in);
+        const n_embd: usize = @intCast(self.n_embd);
+        try self.tokens.append(gpa, .{ .id_slot = id_slot, .token = token_null, .pos = pos.*, .output = output, .is_prompt = is_prompt });
+        self.tokens.items[self.tokens.items.len - 1].i_embd = @intCast(self.embd.items.len / n_embd);
+        try self.embd.appendSlice(gpa, embd_in[0..n_embd]);
         return true;
     }
 
-    /// Ports `server_batch`'s `clear` (server-context.cpp:177 @7fe450e19).
+    /// Ports `server_batch`'s `has_embd` (server-context.cpp:188 @d81235049).
+    fn hasEmbd(self: *const Batch) bool {
+        return self.embd.items.len != 0;
+    }
+
+    /// Ports `server_batch`'s `clear` (server-context.cpp:192 @d81235049).
     fn clear(self: *Batch) void {
         self.tokens.clearRetainingCapacity();
         self.embd.clearRetainingCapacity();
-        tc.common.batchClear(&self.batch);
+        self.view.clear();
         self.slot_batched = null;
         self.alora_scale = -1.0;
         self.alora_disabled_id = 0;
-        self.batch_rendered = false;
-        self.has_embd = false;
-        if (self.batch.token == null) {
-            self.batch.token = self.tokens_ptr;
-            self.batch.embd = null;
-        }
     }
 
-    /// Ports `server_batch`'s `size` (server-context.cpp:192 @7fe450e19).
+    /// Ports `server_batch`'s `size` (server-context.cpp:201 @d81235049).
     fn size(self: *const Batch) i32 {
         return @intCast(self.tokens.items.len);
     }
 
-    /// Ports `server_batch`'s `set_output` (server-context.cpp:196 @7fe450e19).
+    /// Ports `server_batch`'s `truncate` (server-context.cpp:206 @d81235049):
+    /// remove the entries after the first `n`.
+    fn truncate(self: *Batch, n: i32) void {
+        ggmlAssert(n >= 0 and n <= self.size(), 207, "n >= 0 && n <= size()");
+        var i = n;
+        while (i < self.size()) : (i += 1) {
+            const t = &self.tokens.items[@intCast(i)];
+            if (t.i_embd >= 0) {
+                self.embd.shrinkRetainingCapacity(@as(usize, @intCast(t.i_embd)) * @as(usize, @intCast(self.n_embd)));
+                break;
+            }
+        }
+        self.tokens.shrinkRetainingCapacity(@intCast(n));
+    }
+
+    /// Ports `server_batch`'s `set_output` (server-context.cpp:217 @d81235049).
     fn setOutput(self: *Batch, idx: i32, output: bool) void {
-        ggmlAssert(idx >= 0 and idx < self.size(), 197, "idx >= 0 && idx < (int32_t)tokens.size()");
+        ggmlAssert(idx >= 0 and idx < self.size(), 218, "idx >= 0 && idx < (int32_t)tokens.size()");
         self.tokens.items[@intCast(idx)].output = output;
     }
 
-    /// Ports `server_batch`'s `render` (server-context.cpp:201 @7fe450e19).
-    fn render(self: *Batch) void {
-        ggmlAssert(!self.batch_rendered, 202, "!batch_rendered");
-        ggmlAssert(self.batch.pos != null, 203, "batch.pos != nullptr");
-        tc.common.batchClear(&self.batch);
-        for (self.tokens.items) |t| {
-            tc.common.batchAdd(&self.batch, t.token, t.pos, &.{t.id_slot}, t.output);
-        }
-        if (self.has_embd) {
-            self.batch.token = null; // will be restored on clear()
-            self.batch.embd = self.embd.items.ptr;
-        }
-        self.batch_rendered = true;
+    /// Ports `server_batch`'s `set_decision_order` (server-context.cpp:222 @d81235049).
+    fn setDecisionOrder(self: *Batch, idx: i32, order: i32) void {
+        ggmlAssert(idx >= 0 and idx < self.size(), 223, "idx >= 0 && idx < (int32_t)tokens.size()");
+        self.tokens.items[@intCast(idx)].decision_order = order;
     }
 
-    /// Ports `server_batch`'s `get_view` (server-context.cpp:216 @7fe450e19).
-    fn getView(self: *const Batch, off: i32, n_tokens: i32) c.llama_batch {
-        ggmlAssert(self.batch.pos != null, 217, "batch.pos != nullptr");
-        ggmlAssert(self.batch_rendered, 218, "batch_rendered");
-        ggmlAssert(off >= 0 and off < self.size(), 219, "off >= 0 && off < size()");
-        ggmlAssert(n_tokens > 0 and off + n_tokens <= self.size(), 220, "n_tokens > 0 && off + n_tokens <= size()");
+    /// Ports `server_batch`'s `render` (server-context.cpp:228 @d81235049):
+    /// the sub-batch `[off, off + n_tokens)` into `view`; index `i` in `view`
+    /// is index `off + i` here.
+    fn render(self: *Batch, off: i32, n_tokens: i32) void {
+        ggmlAssert(off >= 0 and off < self.size(), 229, "off >= 0 && off < size()");
+        ggmlAssert(n_tokens > 0 and off + n_tokens <= self.size(), 230, "n_tokens > 0 && off + n_tokens <= size()");
 
-        const o: usize = @intCast(off);
-        const b = self.batch;
-        return .{
-            .n_tokens = n_tokens,
-            .token = if (b.token != null) b.token + o else null,
-            .embd = if (b.embd != null) b.embd + o * @as(usize, @intCast(self.n_embd)) else null,
-            .pos = b.pos + o,
-            .n_seq_id = b.n_seq_id + o,
-            .seq_id = b.seq_id + o,
-            .logits = b.logits + o,
-        };
+        const n_embd: usize = @intCast(self.n_embd);
+        self.view.clear();
+        var i = off;
+        while (i < off + n_tokens) : (i += 1) {
+            const t = &self.tokens.items[@intCast(i)];
+            if (t.i_embd >= 0) {
+                const embd: c.llama_embd = .{ .data = self.embd.items.ptr + @as(usize, @intCast(t.i_embd)) * n_embd, .n_rows = 1, .n_embd = n_embd };
+                _ = self.view.addEmbd(embd, &t.pos, t.id_slot, t.output);
+            } else {
+                _ = self.view.add(t.token, t.pos[0], t.id_slot, t.output);
+            }
+            self.view.tokens.items[self.view.tokens.items.len - 1].decision_order = t.decision_order;
+        }
     }
 };
 
 // -----------------------------------------------------------------------------
 // server_slot
 
-/// Ports `server_slot` (server-context.cpp:239 @7fe450e19): one client's
+/// `spec_draft_q.clear()`: the inner vectors freed too.
+fn clearDraftQ(q: *spec_mod.Candidates) void {
+    spec_mod.truncateCandidates(q, 0);
+}
+
+/// Ports `server_slot` (server-context.cpp:245 @d81235049): one client's
 /// sequence -- its task, its prompt in the KV cache, its sampler.
 pub const Slot = struct {
     id: c_int = 0,
@@ -416,6 +457,9 @@ pub const Slot = struct {
     spec: ?*spec_mod.Speculative = null,
 
     spec_draft: std.ArrayList(Token) = .empty,
+
+    // draft candidates per token in spec_draft; only draft-simple and draft-mtp fill it
+    spec_draft_q: spec_mod.Candidates = .empty,
     spec_prompt: []Token = &.{},
     spec_i_batch: std.ArrayList(i32) = .empty,
     spec_ckpt: PromptCheckpoint = .{},
@@ -494,6 +538,8 @@ pub const Slot = struct {
         if (self.task) |*t| t.deinit(gpa);
         if (self.task_prev) |*t| t.deinit(gpa);
         self.spec_draft.deinit(gpa);
+        clearDraftQ(&self.spec_draft_q);
+        self.spec_draft_q.deinit(gpa);
         gpa.free(self.spec_prompt);
         self.spec_i_batch.deinit(gpa);
         self.spec_ckpt.clear(gpa);
@@ -516,7 +562,7 @@ pub const Slot = struct {
         return &self.task.?;
     }
 
-    /// Ports `server_slot`'s `prompt_save` (server-context.cpp:299 @7fe450e19).
+    /// Ports `server_slot`'s `prompt_save` (server-context.cpp:308 @d81235049).
     fn promptSave(self: *const Slot, prompt_cache: *task_mod.PromptCache) !bool {
         if (self.prompt.tokens.size() == 0) {
             return false;
@@ -543,7 +589,7 @@ pub const Slot = struct {
         return true;
     }
 
-    /// Ports `server_slot`'s `prompt_load` (server-context.cpp:325 @7fe450e19).
+    /// Ports `server_slot`'s `prompt_load` (server-context.cpp:334 @d81235049).
     fn promptLoad(self: *Slot, prompt_cache: *task_mod.PromptCache, tokens: *const ServerTokens) !bool {
         const res = try prompt_cache.load(&self.prompt, tokens, self.ctx_tgt, self.ctx_dft, self.id);
         if (!res) {
@@ -553,7 +599,7 @@ pub const Slot = struct {
         return res;
     }
 
-    /// Ports `server_slot`'s `prompt_clear` (server-context.cpp:334 @7fe450e19).
+    /// Ports `server_slot`'s `prompt_clear` (server-context.cpp:343 @d81235049).
     fn promptClear(self: *Slot) void {
         slt(.trc, "prompt_clear", self, "clearing prompt with %zu tokens\n", .{self.prompt.tokens.size()});
 
@@ -562,7 +608,7 @@ pub const Slot = struct {
         self.prompt.clear();
     }
 
-    /// Ports `server_slot`'s `reset` (server-context.cpp:369 @7fe450e19).
+    /// Ports `server_slot`'s `reset` (server-context.cpp:378 @d81235049).
     fn reset(self: *Slot) void {
         slt(.dbg, "reset", self, "%s", .{@as([*:0]const u8, "\n")});
 
@@ -607,7 +653,7 @@ pub const Slot = struct {
         self.mbatch = null;
     }
 
-    /// Ports `server_slot`'s `init_sampler` (server-context.cpp:409 @7fe450e19).
+    /// Ports `server_slot`'s `init_sampler` (server-context.cpp:418 @d81235049).
     fn initSampler(self: *const Slot) void {
         if (self.smpl) |s| s.reset();
 
@@ -631,54 +677,82 @@ pub const Slot = struct {
         });
     }
 
-    /// Ports `server_slot`'s `need_embd` (server-context.cpp:433 @7fe450e19).
+    /// Ports `server_slot`'s `need_embd` (server-context.cpp:442 @d81235049).
     fn needEmbd(self: *const Slot) bool {
-        ggmlAssert(self.task != null, 434, "task");
+        ggmlAssert(self.task != null, 443, "task");
         return self.taskRef().needEmbd();
     }
 
-    /// Ports `server_slot`'s `can_split` (server-context.cpp:441 @7fe450e19):
-    /// if the context does not have a memory module then all embeddings have
-    /// to be computed within a single ubatch; also we cannot split if the
-    /// pooling would require any past tokens.
+    /// Ports `server_slot`'s `can_split` (server-context.cpp:447 @d81235049).
     fn canSplit(self: *const Slot) bool {
-        ggmlAssert(self.task != null, 442, "task");
-
-        return !self.taskRef().needEmbd() or
-            (c.llama_get_memory(self.ctx_tgt) != null and c.llama_pooling_type(self.ctx_tgt) == c.LLAMA_POOLING_TYPE_LAST);
+        ggmlAssert(self.task != null, 448, "task");
+        // MTP supports splitting - uses task->need_embd() not need_embd()
+        if (!self.taskRef().needEmbd()) {
+            return true;
+        }
+        // if the context does not have a memory module then all embeddings have to be computed within a single ubatch
+        if (c.llama_get_memory(self.ctx_tgt) == null) {
+            return false;
+        }
+        // context can be chunked/split if the pooling type is LAST
+        const pooling = c.llama_pooling_type(self.ctx_tgt);
+        if (pooling == c.LLAMA_POOLING_TYPE_LAST) {
+            return true;
+        }
+        // causal rerankers read the last token and have a KV cache, so they can also be chunked/split.
+        if (pooling == c.LLAMA_POOLING_TYPE_RANK and c.llama_get_causal_attn(self.ctx_tgt)) {
+            return true;
+        }
+        // a decision task reads its outputs from the last batch
+        if (self.taskRef().type == .decision) {
+            return true;
+        }
+        return false;
     }
 
-    /// Ports `server_slot`'s `can_batch_with` (server-context.cpp:449 @7fe450e19).
+    /// Ports `server_slot`'s `can_batch_with` (server-context.cpp:473 @d81235049).
     fn canBatchWith(self: *const Slot, other_slot: *const Slot) bool {
-        ggmlAssert(self.task != null, 450, "task");
+        ggmlAssert(self.task != null, 474, "task");
+
+        // a joint decision head reads the whole batch
+        if (self.taskRef().decision.order.items.len != 0 or other_slot.taskRef().decision.order.items.len != 0) {
+            return false;
+        }
 
         return self.taskRef().type == other_slot.taskRef().type and
             self.inp_embd.items.len == other_slot.inp_embd.items.len and
             common.areLoraEqual(self.lora, other_slot.lora);
     }
 
-    /// Ports `server_slot`'s `n_remaining` (server-context.cpp:458 @7fe450e19):
+    /// Ports `server_slot`'s `n_remaining` (server-context.cpp:487 @d81235049):
     /// -1 if the generation is limitless.
     fn nRemaining(self: *const Slot) i32 {
         return if (self.n_predict_max == -1) -1 else self.n_predict_max - @as(i32, @truncate(@as(i64, @bitCast(self.stats.n_gen))));
     }
 
-    /// Ports `server_slot`'s `has_budget` (server-context.cpp:462 @7fe450e19).
+    /// Ports `server_slot`'s `has_budget` (server-context.cpp:491 @d81235049).
     fn hasBudget(self: *const Slot) bool {
         return self.n_predict_max == -1 or self.nRemaining() > 0;
     }
 
-    /// Ports `server_slot`'s `is_processing` (server-context.cpp:466 @7fe450e19).
+    /// Ports `server_slot`'s `is_processing` (server-context.cpp:495 @d81235049).
     pub fn isProcessing(self: *const Slot) bool {
         return self.state != .idle;
     }
 
-    /// Ports `server_slot`'s `can_speculate` (server-context.cpp:470 @7fe450e19).
+    /// Ports `server_slot`'s `can_speculate` (server-context.cpp:499 @d81235049).
     fn canSpeculate(self: *const Slot) bool {
         return self.spec != null;
     }
 
-    /// Ports `server_slot`'s `add_token` (server-context.cpp:474 @7fe450e19).
+    /// Ports `server_slot`'s `use_spec_rejection` (server-context.cpp:504
+    /// @d81235049): at temp 0 both p and q are point masses, so rejection is
+    /// the same as sample-and-match.
+    fn useSpecRejection(self: *const Slot) bool {
+        return self.task != null and self.taskRef().params.sampling.temp > 0.0;
+    }
+
+    /// Ports `server_slot`'s `add_token` (server-context.cpp:508 @d81235049).
     fn addToken(self: *Slot, token: *const CompletionTokenOutput) !void {
         if (!self.isProcessing()) {
             slt(.wrn, "add_token", self, "%s", .{@as([*:0]const u8, "slot is not processing\n")});
@@ -688,9 +762,9 @@ pub const Slot = struct {
         try self.generated_token_probs.append(gpa, try token.clone(self.probs_arena.allocator()));
     }
 
-    /// Ports `server_slot`'s `get_n_draft_max` (server-context.cpp:483 @7fe450e19).
+    /// Ports `server_slot`'s `get_n_draft_max` (server-context.cpp:517 @d81235049).
     fn getNDraftMax(self: *const Slot) i32 {
-        ggmlAssert(self.task != null, 484, "task");
+        ggmlAssert(self.task != null, 518, "task");
 
         if (!self.canSpeculate()) {
             return 0;
@@ -710,8 +784,8 @@ pub const Slot = struct {
         return n_draft_max;
     }
 
-    /// Ports `server_slot`'s `handle_last_sampled_token` (server-context.cpp:505
-    /// @7fe450e19): the sampled token of this slot into the batch, and the
+    /// Ports `server_slot`'s `handle_last_sampled_token` (server-context.cpp:539
+    /// @d81235049): the sampled token of this slot into the batch, and the
     /// speculative draft tokens if any.
     fn handleLastSampledToken(self: *Slot, batch: *Batch) !void {
         const func = "handle_last_sampled_token";
@@ -721,7 +795,11 @@ pub const Slot = struct {
             self.i_batch = batch.size();
 
             if (self.inp_embd.items.len != 0) {
-                add_ok = (try batch.addEmbd(self.id, self.inp_embd.items, self.prompt.tokens.posNext(-1), true, false)) and add_ok;
+                // text embeddings broadcast the same position across the M-RoPE sections
+                const p = self.prompt.tokens.posNext(-1);
+                const pos = [c.GGML_MROPE_SECTIONS]c.llama_pos{ p, p, p, 0 };
+                ggmlAssert(@as(i32, @intCast(self.inp_embd.items.len)) == batch.n_embd, 549, "(int32_t) inp_embd.size() == batch.n_embd");
+                add_ok = (try batch.addEmbd(self.id, self.inp_embd.items.ptr, &pos, true, false)) and add_ok;
             } else {
                 add_ok = (try batch.add(self.id, self.sampled, self.prompt.tokens.posNext(-1), true, false)) and add_ok;
             }
@@ -734,7 +812,7 @@ pub const Slot = struct {
                 self.sampled, self.prompt.tokens.size(), self.spec_draft.items.len, self.prompt.tokens.posNext(-1),
             });
 
-            ggmlAssert(self.spec_i_batch.items.len == 0, 523, "spec_i_batch.empty()");
+            ggmlAssert(self.spec_i_batch.items.len == 0, 561, "spec_i_batch.empty()");
 
             try self.spec_i_batch.append(gpa, batch.size());
             for (0..self.spec_draft.items.len) |i| {
@@ -751,16 +829,16 @@ pub const Slot = struct {
             }
         }
 
-        ggmlAssert(add_ok, 538, "add_ok && \"batch must be large enough to hold the sampled and draft tokens\"");
+        ggmlAssert(add_ok, 576, "add_ok && \"batch must be large enough to hold the sampled and draft tokens\"");
 
         try self.prompt.tokens.pushBackToken(self.sampled);
         try self.prompt.tokens.insert(self.spec_draft.items);
     }
 
-    /// Ports `server_slot`'s `release` (server-context.cpp:544 @7fe450e19).
+    /// Ports `server_slot`'s `release` (server-context.cpp:582 @d81235049).
     fn release(self: *Slot) !void {
         if (self.isProcessing()) {
-            ggmlAssert(self.task != null, 546, "task");
+            ggmlAssert(self.task != null, 584, "task");
 
             slt(.inf, "release", self, "stop processing: n_tokens = %d, truncated = %d\n", .{ self.prompt.nTokens(), @as(c_int, @intFromBool(self.truncated)) });
 
@@ -786,12 +864,12 @@ pub const Slot = struct {
         }
     }
 
-    /// Ports `server_slot`'s `find_stopping_strings` (server-context.cpp:567
-    /// @7fe450e19).
+    /// Ports `server_slot`'s `find_stopping_strings` (server-context.cpp:605
+    /// @d81235049).
     ///
     /// Return: the position of the earliest stop word, or null.
     fn findStoppingStrings(self: *Slot, text: []const u8, last_token_size: usize, is_full_stop: bool) !?usize {
-        ggmlAssert(self.task != null, 568, "task");
+        ggmlAssert(self.task != null, 606, "task");
 
         var stop_pos: ?usize = null;
 
@@ -822,7 +900,7 @@ pub const Slot = struct {
         return stop_pos;
     }
 
-    /// Ports `server_slot`'s `print_timings_tg` (server-context.cpp:598 @7fe450e19).
+    /// Ports `server_slot`'s `print_timings_tg` (server-context.cpp:636 @d81235049).
     fn printTimingsTg(self: *Slot) void {
         if (self.stats.n_gen < 100) {
             return;
@@ -843,7 +921,7 @@ pub const Slot = struct {
         slt(.inf, "print_timings_tg", self, "n_gen = %6d, tg = %6.2f t/s, tg_3s = %6.2f t/s\n", .{ @as(c_int, @intCast(self.stats.n_gen)), n_gen_second, n_gen_second_win });
     }
 
-    /// Ports `server_slot`'s `print_timings_pp` (server-context.cpp:618 @7fe450e19).
+    /// Ports `server_slot`'s `print_timings_pp` (server-context.cpp:656 @d81235049).
     fn printTimingsPp(self: *const Slot) void {
         const t_prompt_total = self.stats.tPromptMs();
 
@@ -860,7 +938,7 @@ pub const Slot = struct {
         });
     }
 
-    /// Ports `server_slot`'s `print_timings` (server-context.cpp:632 @7fe450e19).
+    /// Ports `server_slot`'s `print_timings` (server-context.cpp:670 @d81235049).
     fn printTimings(self: *const Slot) !void {
         const func = "print_timings";
         const t_prompt_total = self.stats.tPromptMs();
@@ -915,7 +993,7 @@ pub const Slot = struct {
         spec_mod.printStats(self.spec);
     }
 
-    /// Ports `server_slot`'s `to_json` (server-context.cpp:686 @7fe450e19).
+    /// Ports `server_slot`'s `to_json` (server-context.cpp:724 @d81235049).
     ///
     /// Return: owned by `a`.
     fn toJson(self: *const Slot, a: Allocator, only_metrics: bool) !Value {
@@ -954,9 +1032,21 @@ pub const Slot = struct {
         return res.done();
     }
 
-    /// Ports `server_slot`'s `copy_state_to` (server-context.cpp:722 @7fe450e19).
+    /// Ports `server_slot`'s `copy_prompt_to` (server-context.cpp:761
+    /// @d81235049): the other slot continues from the tokens processed so far.
+    fn copyPromptTo(self: *const Slot, other: *Slot) !void {
+        self.mem.seqRm(other.id, -1, -1);
+        self.mem.seqCp(self.id, other.id, -1, -1);
+
+        var p = try self.prompt.clone();
+        errdefer p.deinit();
+        other.prompt.deinit();
+        other.prompt = p;
+    }
+
+    /// Ports `server_slot`'s `copy_state_to` (server-context.cpp:768 @d81235049).
     fn copyStateTo(self: *const Slot, other: *Slot) !void {
-        ggmlAssert(self.state == .done_prompt, 723, "state == SLOT_STATE_DONE_PROMPT");
+        ggmlAssert(self.state == .done_prompt, 769, "state == SLOT_STATE_DONE_PROMPT");
 
         self.mem.seqRm(other.id, -1, -1);
         self.mem.seqCp(self.id, other.id, -1, -1);
@@ -975,7 +1065,7 @@ pub const Slot = struct {
 
 extern fn snprintf(buf: [*]u8, n: usize, fmt: [*:0]const u8, ...) c_int;
 
-/// Ports `string_find_partial_stop` (common/common.h:858 @7fe450e19): where
+/// Ports `string_find_partial_stop` (common/common.h:867 @d81235049): where
 /// a prefix of `stop` ends `str`.
 fn stringFindPartialStop(str: []const u8, stop: []const u8) ?usize {
     if (str.len != 0 and stop.len != 0) {
@@ -993,32 +1083,87 @@ fn stringFindPartialStop(str: []const u8, stop: []const u8) ?usize {
     return null;
 }
 
-/// Ports `process_mtmd_chunk` (server-context.cpp:742 @7fe450e19): the media
+/// Ports `encode_mtmd_chunk` (server-context.cpp:785 @d81235049): encode
+/// the mtmd chunk at `idx`, batched with as many of the next chunks as
+/// possible.
+///
+/// Return: 0 on success.
+fn encodeMtmdChunk(slot: *const Slot, mbatch: *?*c.mtmd_batch, idx: usize) !i32 {
+    const func = "encode_mtmd_chunk";
+    const mctx = slot.mctx;
+    const input_tokens = &slot.taskRef().tokens;
+    const chunk = try input_tokens.findChunk(idx);
+
+    if (mbatch.*) |b| c.mtmd_batch_free(b);
+    mbatch.* = c.mtmd_batch_init(mctx);
+    var res = c.mtmd_batch_add_chunk(mbatch.*, chunk);
+    ggmlAssert(res == 0, 792, "res == 0"); // we should never have an empty batch
+
+    // try batching as much as possible
+    var n_added: c_int = 1;
+    var idx_cur = idx;
+    while (res == 0) {
+        const next = input_tokens.findNextMediaChunk(idx_cur) orelse break;
+        res = c.mtmd_batch_add_chunk(mbatch.*, next.chunk);
+        n_added += if (res == 0) 1 else 0;
+        idx_cur = next.idx;
+        slt(.dbg, func, slot, "try adding media chunk idx = %zu to batch, res = %d\n", .{ next.idx, res });
+        // if res != 0, batch is full or chunk is not compatible -> this loop breaks
+    }
+
+    // TODO @ngxson : move this log line to debug when it become more stable
+    slt(.trc, func, slot, "encoding mtmd batch from idx = %zu, n_chunks = %d\n", .{ idx, n_added });
+
+    res = c.mtmd_batch_encode(mbatch.*);
+    if (res != 0) {
+        slt(.err, func, slot, "failed to encode mtmd batch for chunk idx = %zu, res = %d\n", .{ idx, res });
+        return -1;
+    }
+
+    return 0;
+}
+
+/// Ports `process_mtmd_chunk` (server-context.cpp:826 @d81235049): the media
 /// chunk at `idx` encoded -- with the media chunks after it batched in --
 /// and decoded into the slot's sequence. The caller updates the prompt.
 ///
 /// Return: 0 on success.
 fn processMtmdChunk(slot: *const Slot, mbatch: *?*c.mtmd_batch, idx: usize, n_tokens_out: *usize) !i32 {
-    const func = "process_mtmd_chunk";
-    ggmlAssert(slot.mctx != null, 743, "slot.mctx");
-    const mctx = slot.mctx;
+    ggmlAssert(slot.mctx != null, 827, "slot.mctx");
     const input_tokens = &slot.taskRef().tokens;
     const chunk = try input_tokens.findChunk(idx);
     var res: i32 = 0;
 
     const TryDecode = struct {
-        fn cb(batch: c.llama_batch, user_data: ?*anyopaque) callconv(.c) c_int {
-            const spec: ?*spec_mod.Speculative = @ptrCast(@alignCast(user_data));
-            if (!spec_mod.process(spec, batch)) {
-                return 1;
+        const CbData = struct {
+            spec: ?*spec_mod.Speculative,
+            ctx: ?*c.llama_context,
+        };
+
+        fn cb(b_ptr: [*c]const c.mtmd_helper_embd_batch, user_data: ?*anyopaque) callconv(.c) i32 {
+            const data: *const CbData = @ptrCast(@alignCast(user_data));
+            const b = &b_ptr[0];
+
+            var batch = tc.common.Batch.init(gpa, data.ctx);
+            defer batch.deinit();
+            const n_tokens: usize = @intCast(b.n_tokens);
+            const n_embd: usize = @intCast(b.n_embd);
+            for (0..n_tokens) |i| {
+                var pos = [c.GGML_MROPE_SECTIONS]c.llama_pos{ 0, 0, 0, 0 };
+                for (0..@intCast(b.n_pos)) |j| {
+                    pos[j] = b.pos[j * n_tokens + i];
+                }
+                _ = batch.addEmbd(.{ .data = b.embd + i * n_embd, .n_rows = 1, .n_embd = n_embd }, &pos, b.seq_id, false);
             }
-            return 0;
+
+            return if (spec_mod.process(data.spec, &batch)) 0 else 1;
         }
 
         fn run(s: *const Slot, mb: *?*c.mtmd_batch, ch: *c.mtmd_input_chunk, i: usize, out: *usize) i32 {
             if (mb.*) |b| {
                 const embd = c.mtmd_batch_get_output_embd(b, ch);
                 if (embd != null) {
+                    var cb_data: CbData = .{ .spec = s.spec, .ctx = s.ctx_tgt };
                     var new_n_past: c.llama_pos = 0; // unused for now
                     const r = c.mtmd_helper_decode_image_chunk(
                         s.mctx,
@@ -1030,7 +1175,7 @@ fn processMtmdChunk(slot: *const Slot, mbatch: *?*c.mtmd_batch, idx: usize, n_to
                         @intCast(c.llama_n_batch(s.ctx_tgt)),
                         &new_n_past,
                         cb,
-                        s.spec,
+                        &cb_data,
                     );
                     if (r != 0) {
                         slt(.err, "operator()", s, "failed to decode mtmd chunk, idx = %zu, res = %d\n", .{ i, r });
@@ -1056,42 +1201,50 @@ fn processMtmdChunk(slot: *const Slot, mbatch: *?*c.mtmd_batch, idx: usize, n_to
 
     // otherwise, the batch is either uninitialized or is used up
     // we need to create & encode a new batch
-    if (mbatch.*) |b| c.mtmd_batch_free(b);
-    mbatch.* = c.mtmd_batch_init(mctx);
-    res = c.mtmd_batch_add_chunk(mbatch.*, chunk);
-    ggmlAssert(res == 0, 800, "res == 0"); // we should never have an empty batch
-
-    // try batching as much as possible
-    var n_added: c_int = 1;
-    var idx_cur = idx;
-    while (res == 0) {
-        const next = input_tokens.findNextMediaChunk(idx_cur) orelse break;
-        res = c.mtmd_batch_add_chunk(mbatch.*, next.chunk);
-        n_added += if (res == 0) 1 else 0;
-        idx_cur = next.idx;
-        slt(.dbg, func, slot, "try adding media chunk idx = %zu to batch, res = %d\n", .{ next.idx, res });
-        // if res != 0, batch is full or chunk is not compatible -> this loop breaks
-    }
-
-    // TODO @ngxson : move this log line to debug when it become more stable
-    slt(.trc, func, slot, "encoding mtmd batch from idx = %zu, n_chunks = %d\n", .{ idx, n_added });
-
-    res = c.mtmd_batch_encode(mbatch.*);
-    if (res != 0) {
-        slt(.err, func, slot, "failed to encode mtmd batch for chunk idx = %zu, res = %d\n", .{ idx, res });
+    if (try encodeMtmdChunk(slot, mbatch, idx) != 0) {
         return -1;
     }
 
     return TryDecode.run(slot, mbatch, chunk, idx, n_tokens_out);
 }
 
+/// Ports `add_mtmd_chunk` (server-context.cpp:903 @d81235049): an encoded
+/// mtmd chunk added to the batch of the text tokens, instead of decoded on
+/// its own like `processMtmdChunk`; `embd` is the encoder's output for it.
+///
+/// Return: false if the batch is full.
+fn addMtmdChunk(slot: *const Slot, chunk: ?*const c.mtmd_input_chunk, embd: [*]const f32, batch: *Batch) !bool {
+    // positions are the ones of mtmd_helper_decode_image_chunk()
+    const image = c.mtmd_input_chunk_get_tokens_image(chunk);
+    const is_mrope = c.mtmd_decode_use_mrope(slot.mctx);
+    const n_tokens = c.mtmd_input_chunk_get_n_tokens(chunk);
+    const n_embd: usize = @intCast(batch.n_embd);
+    const pos_0 = slot.prompt.tokens.posNext(-1);
+
+    for (0..n_tokens) |i| {
+        const p: c.llama_pos = pos_0 + @as(c.llama_pos, @intCast(i));
+        var pos = [c.GGML_MROPE_SECTIONS]c.llama_pos{ p, p, p, p };
+        if (is_mrope and image != null) {
+            const rel = c.mtmd_image_tokens_get_decoder_pos(image, pos_0, i);
+            pos[0] = @bitCast(rel.t);
+            pos[1] = @bitCast(rel.y);
+            pos[2] = @bitCast(rel.x);
+            pos[3] = @bitCast(rel.z);
+        }
+        if (!try batch.addEmbd(slot.id, embd + i * n_embd, &pos, slot.needEmbd(), true)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // -----------------------------------------------------------------------------
 // server_state
 
-/// Ports `server_state` (server-context.h:57 @7fe450e19).
+/// Ports `server_state` (server-context.h:58 @d81235049).
 pub const ServerState = enum { downloading, loading, ready, sleeping };
 
-/// Ports `server_state_to_str` (server-context.h:64 @7fe450e19).
+/// Ports `server_state_to_str` (server-context.h:65 @d81235049).
 pub fn serverStateToStr(state: ServerState) []const u8 {
     return switch (state) {
         .downloading => "downloading",
@@ -1101,7 +1254,7 @@ pub fn serverStateToStr(state: ServerState) []const u8 {
     };
 }
 
-/// `server_state_callback_t` (server-context.h:82 @7fe450e19): set only by
+/// `server_state_callback_t` (server-context.h:83 @d81235049): set only by
 /// a child of router mode (step 7); the default is upstream's no-op lambda.
 pub const StateCallback = struct {
     ctx: ?*anyopaque = null,
@@ -1112,7 +1265,7 @@ pub const StateCallback = struct {
     }
 };
 
-/// Ports `server_context_meta` (server-context.h:16 @7fe450e19): what the
+/// Ports `server_context_meta` (server-context.h:16 @d81235049): what the
 /// routes read without touching the context, valid during sleep.
 pub const Meta = struct {
     build_info: []const u8,
@@ -1120,6 +1273,7 @@ pub const Meta = struct {
     model_aliases: []const []const u8,
     model_tags: []const []const u8,
     model_path: []const u8,
+    model_output_modalities: []const []const u8, // output modalities for GET /models
     has_mtmd: bool,
     has_inp_image: bool,
     has_inp_audio: bool,
@@ -1160,7 +1314,7 @@ pub const Meta = struct {
 // -----------------------------------------------------------------------------
 // server_context_impl
 
-/// Ports `load_progress_data` (server-context.cpp:972 @7fe450e19), a member
+/// Ports `load_progress_data` (server-context.cpp:1073 @d81235049), a member
 /// of `server_context_impl`.
 const LoadProgress = struct {
     ctx: *Impl,
@@ -1169,7 +1323,7 @@ const LoadProgress = struct {
     t_last_load_progress_ms: i64 = 0,
 };
 
-/// Ports `server_context_impl` (server-context.cpp:833 @7fe450e19).
+/// Ports `server_context_impl` (server-context.cpp:932 @d81235049).
 pub const Impl = struct {
     // only use these pointers outside of this class:
     //  - when not in sleeping state
@@ -1180,6 +1334,8 @@ pub const Impl = struct {
     // note: video_params.ffmpeg_bin_dir points into params_base, which outlives this struct
     init_opt: c.mtmd_helper_init_opt = undefined,
     vocab: ?*const c.llama_vocab = null,
+
+    decision: decision_mod.DecisionContext = .{},
 
     queue_tasks: TaskQueue,
     queue_results: ResultQueue,
@@ -1255,7 +1411,7 @@ pub const Impl = struct {
     /// What the lifetime of the server owns: names, templates, settings.
     arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.c_allocator),
 
-    /// Ports the constructor of `server_context_impl` (server-context.cpp:855 @7fe450e19).
+    /// Ports the constructor of `server_context_impl` (server-context.cpp:956 @d81235049).
     pub fn init(self: *Impl) !void {
         self.* = .{
             .queue_tasks = TaskQueue.init(gpa),
@@ -1265,7 +1421,7 @@ pub const Impl = struct {
         c.mtmd_helper_log_set(tc.common.defaultLogCallback, null);
     }
 
-    /// Ports the destructor of `server_context_impl` (server-context.cpp:859 @7fe450e19).
+    /// Ports the destructor of `server_context_impl` (server-context.cpp:960 @d81235049).
     pub fn deinit(self: *Impl) void {
         if (!self.sleeping) {
             // destroy() is already called when entering sleeping state
@@ -1275,6 +1431,7 @@ pub const Impl = struct {
         for (self.slots) |*s| s.deinit();
         gpa.free(self.slots);
         self.batch.deinit();
+        self.decision.deinit();
         if (self.tmpls) |*t| t.deinit();
         if (self.prompt_cache) |pc| {
             pc.deinit();
@@ -1286,17 +1443,17 @@ pub const Impl = struct {
         self.arena.deinit();
     }
 
-    /// Ports `server_context_impl`'s `get_metrics` (server-context.cpp:867 @7fe450e19).
+    /// Ports `server_context_impl`'s `get_metrics` (server-context.cpp:968 @d81235049).
     pub fn getMetrics(self: *const Impl, a: Allocator) !common.Metrics {
         return self.metrics.clone(a);
     }
 
-    /// Ports `server_context_impl`'s `reset_metrics_bucket` (server-context.cpp:871 @7fe450e19).
+    /// Ports `server_context_impl`'s `reset_metrics_bucket` (server-context.cpp:972 @d81235049).
     pub fn resetMetricsBucket(self: *Impl) void {
         self.metrics.resetBucket();
     }
 
-    /// Ports `server_context_impl`'s `destroy` (server-context.cpp:938 @7fe450e19).
+    /// Ports `server_context_impl`'s `destroy` (server-context.cpp:1039 @d81235049).
     fn destroy(self: *Impl) void {
         spec_mod.free(self.spec);
         self.spec = null;
@@ -1316,9 +1473,9 @@ pub const Impl = struct {
         self.mctx = null;
     }
 
-    /// Ports `server_context_impl`'s `handle_sleeping_state` (server-context.cpp:954 @7fe450e19).
+    /// Ports `server_context_impl`'s `handle_sleeping_state` (server-context.cpp:1055 @d81235049).
     fn handleSleepingState(self: *Impl, new_state: bool) !void {
-        ggmlAssert(self.sleeping != new_state, 955, "sleeping != new_state");
+        ggmlAssert(self.sleeping != new_state, 1056, "sleeping != new_state");
         if (new_state) {
             const empty: Value = .null;
             self.callback_state.call(.sleeping, &empty);
@@ -1334,7 +1491,7 @@ pub const Impl = struct {
         self.sleeping = new_state;
     }
 
-    /// Ports `server_context_impl`'s `load_progress_callback` (server-context.cpp:979 @7fe450e19).
+    /// Ports `server_context_impl`'s `load_progress_callback` (server-context.cpp:1080 @d81235049).
     fn loadProgressCallback(progress: f32, user_data: ?*anyopaque) callconv(.c) bool {
         const d: *LoadProgress = @ptrCast(@alignCast(user_data.?));
         // always emit the first and final sample; throttle the rest to one per 200ms
@@ -1363,8 +1520,8 @@ pub const Impl = struct {
         return true;
     }
 
-    /// Ports `server_context_impl`'s `load_model` (server-context.cpp:1006
-    /// @7fe450e19): load the model and initialize llama_context; this may
+    /// Ports `server_context_impl`'s `load_model` (server-context.cpp:1107
+    /// @d81235049): load the model and initialize llama_context; this may
     /// also be called to resume from sleeping state.
     pub fn loadModel(self: *Impl, params: *Params) !bool {
         const func = "load_model";
@@ -1429,9 +1586,21 @@ pub const Impl = struct {
             mparams.progress_callback_user_data = &load_progress_mmproj;
         }
 
-        // optionally get the memory usage of mmproj
+        // get the memory usage of mmproj, also used to check image_max_tokens against n_ubatch
+        const MtmdParams = @typeInfo(@TypeOf(mtmd_mod.mtmd.getMemoryUsage)).@"fn".param_types[1].?;
+        var mmproj_usage: mtmd_mod.mtmd.MemoryUsage = .{ .backend_mem_usage = .{}, .image_max_tokens = -1, .use_non_causal = false };
+        defer mmproj_usage.deinit();
+        var mmproj_usage_t_us: i64 = 0;
+        if (has_mmproj) {
+            const t_start = c.ggml_time_us();
+            mmproj_usage.deinit();
+            mmproj_usage = mtmd_mod.mtmd.getMemoryUsage(mmproj_path.ptr, @as(*const MtmdParams, @ptrCast(&mparams)).*);
+            mmproj_usage_t_us = c.ggml_time_us() - t_start;
+        }
+
+        // optionally fit mmproj memory usage
         if (has_mmproj and self.params_base.fit_params) {
-            try self.addMmprojMemory(mmproj_path, mparams);
+            try self.addMmprojMemory(&mmproj_usage, mmproj_usage_t_us);
         }
 
         // note: the draft / MTP context is fitted together with the target model, see common_fit_extra_model
@@ -1463,6 +1632,13 @@ pub const Impl = struct {
         }
 
         self.vocab = c.llama_model_get_vocab(self.model_tgt);
+
+        self.decision.init(gpa, self.model_tgt) catch |e| {
+            const w = dupZ(whatOf(e));
+            defer freeZ(w);
+            srv(.err, func, "failed to init decision model: %s\n", .{w});
+            return false;
+        };
 
         self.n_ctx = @intCast(c.llama_n_ctx(self.ctx_tgt));
 
@@ -1513,6 +1689,23 @@ pub const Impl = struct {
 
             if (!is_resume) {
                 c.mtmd_helper_log_set(tc.common.defaultLogCallback, null);
+            }
+
+            // the image must fit in one ubatch if the model needs non-causal attention on it
+            // a non-causal model also has the text of the prompt in that ubatch, leave half of it to the text
+            {
+                const n_ubatch: c_int = @intCast(c.llama_n_ubatch(self.ctx_tgt));
+                const is_mixed = self.useMixedBatch();
+                if (is_mixed or mmproj_usage.use_non_causal) {
+                    const n_max: c_int = if (is_mixed) @divTrunc(n_ubatch, 2) else n_ubatch;
+                    if (mmproj_usage.image_max_tokens > n_max) {
+                        const why: [*:0]const u8 = if (is_mixed) "the model processes the prompt in one ubatch" else "model needs non-causal attention on image";
+                        srv(.wrn, func, "cap image_max_tokens (original=%d) to %d (n_ubatch = %d) because %s\n", .{ mmproj_usage.image_max_tokens, n_max, n_ubatch, why });
+                        srv(.wrn, func, "%s\n", .{@as([*:0]const u8, "increase n_ubatch (-ub) to increase vision token budget")});
+                        mparams.image_max_tokens = n_max;
+                        mparams.image_min_tokens = @min(mparams.image_min_tokens, n_max);
+                    }
+                }
             }
 
             self.mctx = c.mtmd_init_from_file(mmproj_path.ptr, self.model_tgt, mparams);
@@ -1694,7 +1887,7 @@ pub const Impl = struct {
             const n_embd: i32 = c.llama_model_n_embd_inp(self.model_tgt);
             self.batch.deinit();
             self.batch = .{};
-            try self.batch.init(@max(n_batch, self.params_base.n_parallel), n_embd);
+            try self.batch.init(self.ctx_tgt, @max(n_batch, self.params_base.n_parallel), n_embd);
         }
 
         if (self.params_base.cache_ram_mib != 0) {
@@ -1750,22 +1943,18 @@ pub const Impl = struct {
     }
 
     /// The `has_mmproj && fit_params` block of `load_model`
-    /// (server-context.cpp:1006 @7fe450e19): the projector's worst-case
+    /// (server-context.cpp:1107 @d81235049): the projector's worst-case
     /// memory added to the fit's target margin, per device.
-    fn addMmprojMemory(self: *Impl, mmproj_path: [:0]const u8, mparams: c.mtmd_context_params) !void {
+    fn addMmprojMemory(self: *Impl, mmproj_usage: *const mtmd_mod.mtmd.MemoryUsage, t_elapsed: i64) !void {
         const func = "load_model";
-        const t_start = c.ggml_time_us();
-        const MtmdParams = @typeInfo(@TypeOf(mtmd_mod.mtmd.getMemoryUsage)).@"fn".param_types[1].?;
-        var mmproj_mem = mtmd_mod.mtmd.getMemoryUsage(mmproj_path.ptr, @as(*const MtmdParams, @ptrCast(&mparams)).*);
-        defer mmproj_mem.deinit();
-        const t_elapsed = c.ggml_time_us() - t_start;
+        const mmproj_mem = &mmproj_usage.backend_mem_usage;
         if (mmproj_mem.items.items.len != 0) {
             var total: usize = 0;
             for (mmproj_mem.items.items) |e| total += e.size;
             srv(.trc, func, "[mtmd] estimated worst-case memory usage of mmproj is %.2f MiB (took %.2f ms)\n", .{
                 @as(f64, @floatFromInt(total)) / (1024.0 * 1024.0), @as(f64, @floatFromInt(t_elapsed)) / 1000.0,
             });
-            ggmlAssert(self.params_base.fit_params_target.items.len != 0, 1074, "!params_base.fit_params_target.empty()");
+            ggmlAssert(self.params_base.fit_params_target.items.len != 0, 1183, "!params_base.fit_params_target.empty()");
             for (mmproj_mem.items.items) |e| {
                 const dev = e.dev;
                 const sz = e.size;
@@ -1792,16 +1981,16 @@ pub const Impl = struct {
         return std.c.atoi(@ptrCast(v));
     }
 
-    /// Ports `server_context_impl`'s `init` (server-context.cpp:1401
-    /// @7fe450e19): unlike `load_model`, this is only called once during
+    /// Ports `server_context_impl`'s `init` (server-context.cpp:1534
+    /// @d81235049): unlike `load_model`, this is only called once during
     /// initialization.
     fn initServer(self: *Impl) !bool {
         const func = "init";
         const a = self.arena.allocator();
-        ggmlAssert(self.ctx_tgt != null, 1402, "ctx_tgt   != nullptr");
-        ggmlAssert(self.model_tgt != null, 1403, "model_tgt != nullptr");
+        ggmlAssert(self.ctx_tgt != null, 1535, "ctx_tgt   != nullptr");
+        ggmlAssert(self.model_tgt != null, 1536, "model_tgt != nullptr");
 
-        ggmlAssert(!self.sleeping, 1405, "!sleeping");
+        ggmlAssert(!self.sleeping, 1538, "!sleeping");
 
         // wiring up server queues
         self.queue_tasks.onCallbacks(self, onNewTask, onUpdateSlots);
@@ -1907,7 +2096,7 @@ pub const Impl = struct {
     }
 
     /// The `try` block of `init`'s chat-template section
-    /// (server-context.cpp:1401 @7fe450e19): `common_chat_templates_init`,
+    /// (server-context.cpp:1534 @d81235049): `common_chat_templates_init`,
     /// the example's trace line, and whether thinking is on.
     fn initTemplates(self: *Impl, enable_thinking: *bool) !bool {
         const func = "init";
@@ -1953,8 +2142,8 @@ pub const Impl = struct {
         };
     }
 
-    /// Ports `server_context_impl`'s `get_slot_by_id` (server-context.cpp:1520
-    /// @7fe450e19): an out-of-bounds id wraps around.
+    /// Ports `server_context_impl`'s `get_slot_by_id` (server-context.cpp:1653
+    /// @d81235049): an out-of-bounds id wraps around.
     fn getSlotById(self: *Impl, id_slot_in: c_int) ?*Slot {
         const n: c_int = @intCast(self.slots.len);
         const id_slot = @rem(id_slot_in, n);
@@ -1968,7 +2157,7 @@ pub const Impl = struct {
         return null;
     }
 
-    /// Ports `server_context_impl`'s `get_slot_by_cmpl_id` (server-context.cpp:1533 @7fe450e19).
+    /// Ports `server_context_impl`'s `get_slot_by_cmpl_id` (server-context.cpp:1666 @d81235049).
     fn getSlotByCmplId(self: *Impl, cmpl_id: []const u8) ?*Slot {
         if (cmpl_id.len == 0) {
             return null;
@@ -1983,7 +2172,7 @@ pub const Impl = struct {
         return null;
     }
 
-    /// Ports `server_context_impl`'s `get_available_slot` (server-context.cpp:1547 @7fe450e19).
+    /// Ports `server_context_impl`'s `get_available_slot` (server-context.cpp:1680 @d81235049).
     fn getAvailableSlot(self: *Impl, task: *const Task) !?*Slot {
         const func = "get_available_slot";
         var ret: ?*Slot = null;
@@ -2099,8 +2288,8 @@ pub const Impl = struct {
         return ret;
     }
 
-    /// Ports `server_context_impl`'s `try_clear_idle_slots` (server-context.cpp:1667
-    /// @7fe450e19): true if at least one slot has been cleared.
+    /// Ports `server_context_impl`'s `try_clear_idle_slots` (server-context.cpp:1800
+    /// @d81235049): true if at least one slot has been cleared.
     fn tryClearIdleSlots(self: *Impl) bool {
         var res = false;
 
@@ -2128,7 +2317,7 @@ pub const Impl = struct {
         return res;
     }
 
-    /// Ports `server_context_impl`'s `construct_lora_list` (server-context.cpp:1694 @7fe450e19).
+    /// Ports `server_context_impl`'s `construct_lora_list` (server-context.cpp:1827 @d81235049).
     ///
     /// Return: owned by `gpa`.
     fn constructLoraList(self: *const Impl, config: *const common.LoraMap) ![]LoraInfo {
@@ -2145,8 +2334,8 @@ pub const Impl = struct {
         return output;
     }
 
-    /// Ports `server_context_impl`'s `launch_slot_with_task` (server-context.cpp:1707
-    /// @7fe450e19). Takes the task: it ends in the slot, or is dropped.
+    /// Ports `server_context_impl`'s `launch_slot_with_task` (server-context.cpp:1840
+    /// @d81235049). Takes the task: it ends in the slot, or is dropped.
     fn launchSlotWithTask(self: *Impl, slot: *Slot, task_in: Task) !bool {
         const func = "launch_slot_with_task";
         var task = task_in;
@@ -2304,7 +2493,7 @@ pub const Impl = struct {
         return true;
     }
 
-    /// Ports `server_context_impl`'s `process_token` (server-context.cpp:1833 @7fe450e19).
+    /// Ports `server_context_impl`'s `process_token` (server-context.cpp:1966 @d81235049).
     ///
     /// Return: whether the slot continues.
     fn processToken(self: *Impl, result: *CompletionTokenOutput, slot: *Slot, a: Allocator) !bool {
@@ -2440,7 +2629,7 @@ pub const Impl = struct {
         return slot.has_next_token; // continue
     }
 
-    /// Ports `server_context_impl`'s `populate_token_probs` (server-context.cpp:1964 @7fe450e19).
+    /// Ports `server_context_impl`'s `populate_token_probs` (server-context.cpp:2097 @d81235049).
     fn populateTokenProbs(self: *const Impl, slot: *const Slot, result: *CompletionTokenOutput, post_sampling: bool, special: bool, idx: c_int, a: Allocator) !void {
         const n_probs_request: usize = @intCast(@max(slot.taskRef().params.sampling.n_probs, 0));
         var probs: std.ArrayList(CompletionTokenOutput.ProbInfo) = .empty;
@@ -2501,17 +2690,17 @@ pub const Impl = struct {
         result.probs = probs.items;
     }
 
-    /// Ports `server_context_impl`'s `send_error` (server-context.cpp:2021 @7fe450e19), over a task.
+    /// Ports `server_context_impl`'s `send_error` (server-context.cpp:2154 @d81235049), over a task.
     fn sendErrorTask(self: *Impl, task: *const Task, err: []const u8, ty: ErrorType) !void {
         try self.sendError(task.id, err, ty, 0, 0);
     }
 
-    /// Ports `server_context_impl`'s `send_error` (server-context.cpp:2025 @7fe450e19), over a slot.
+    /// Ports `server_context_impl`'s `send_error` (server-context.cpp:2158 @d81235049), over a slot.
     fn sendErrorSlot(self: *Impl, slot: *const Slot, err: []const u8, ty: ErrorType) !void {
         try self.sendError(slot.taskRef().id, err, ty, slot.taskRef().nTokens(), slot.n_ctx);
     }
 
-    /// Ports `server_context_impl`'s `send_error` (server-context.cpp:2029 @7fe450e19).
+    /// Ports `server_context_impl`'s `send_error` (server-context.cpp:2162 @d81235049).
     fn sendError(self: *Impl, id_task: c_int, err: []const u8, ty: ErrorType, n_prompt_tokens: i32, n_ctx: i32) !void {
         {
             const z = dupZ(err);
@@ -2520,7 +2709,7 @@ pub const Impl = struct {
         }
 
         if (ty == .exceed_context_size) {
-            ggmlAssert(n_ctx > 0 and n_prompt_tokens > 0, 2033, "n_ctx > 0 && n_prompt_tokens > 0");
+            ggmlAssert(n_ctx > 0 and n_prompt_tokens > 0, 2166, "n_ctx > 0 && n_prompt_tokens > 0");
         }
 
         const res = try Result.create(gpa, .err);
@@ -2534,7 +2723,7 @@ pub const Impl = struct {
         try self.queue_results.send(res);
     }
 
-    /// Ports `server_context_impl`'s `send_partial_response` (server-context.cpp:2046 @7fe450e19).
+    /// Ports `server_context_impl`'s `send_partial_response` (server-context.cpp:2179 @d81235049).
     fn sendPartialResponse(self: *Impl, slot: *Slot, tkn: *const CompletionTokenOutput, is_progress: bool, is_begin: bool) !void {
         const res = try Result.create(gpa, .cmpl_partial);
         errdefer res.destroy(gpa);
@@ -2582,7 +2771,7 @@ pub const Impl = struct {
         try self.queue_results.send(res);
     }
 
-    /// Ports `server_context_impl`'s `send_final_response` (server-context.cpp:2089 @7fe450e19).
+    /// Ports `server_context_impl`'s `send_final_response` (server-context.cpp:2222 @d81235049).
     fn sendFinalResponse(self: *Impl, slot: *Slot) !void {
         const res = try Result.create(gpa, .cmpl_final);
         errdefer res.destroy(gpa);
@@ -2652,8 +2841,8 @@ pub const Impl = struct {
         try self.queue_results.send(res);
     }
 
-    /// Ports `server_context_impl`'s `send_embedding` (server-context.cpp:2152 @7fe450e19).
-    fn sendEmbedding(self: *Impl, slot: *const Slot, batch: *const c.llama_batch) !void {
+    /// Ports `server_context_impl`'s `send_embedding` (server-context.cpp:2285 @d81235049).
+    fn sendEmbedding(self: *Impl, slot: *const Slot, batch: *const tc.common.Batch) !void {
         const res = try Result.create(gpa, .embd);
         errdefer res.destroy(gpa);
         const ra = res.alloc();
@@ -2671,8 +2860,9 @@ pub const Impl = struct {
         var embeddings: std.ArrayList([]const f32) = .empty;
 
         var i: usize = 0;
-        while (i < @as(usize, @intCast(batch.n_tokens))) : (i += 1) {
-            if (batch.logits[i] == 0 or batch.seq_id[i][0] != slot.id) {
+        while (i < @as(usize, @intCast(batch.size()))) : (i += 1) {
+            const bt = &batch.tokens.items[i];
+            if (!bt.output or bt.seq_id != slot.id) {
                 continue;
             }
 
@@ -2680,11 +2870,11 @@ pub const Impl = struct {
             if (c.llama_pooling_type(slot.ctx_tgt) == c.LLAMA_POOLING_TYPE_NONE) {
                 embd = c.llama_get_embeddings_ith(slot.ctx_tgt, @intCast(i));
             } else {
-                embd = c.llama_get_embeddings_seq(slot.ctx_tgt, batch.seq_id[i][0]);
+                embd = c.llama_get_embeddings_seq(slot.ctx_tgt, bt.seq_id);
             }
 
             if (embd == null) {
-                slt(.err, "send_embedding", slot, "failed to get embeddings, token = %d, seq_id = %d\n", .{ batch.token[i], batch.seq_id[i][0] });
+                slt(.err, "send_embedding", slot, "failed to get embeddings, token = %d, seq_id = %d\n", .{ bt.id, bt.seq_id });
 
                 const zeros = try ra.alloc(f32, n_embd_out);
                 @memset(zeros, 0.0);
@@ -2708,8 +2898,104 @@ pub const Impl = struct {
         try self.queue_results.send(res);
     }
 
-    /// Ports `server_context_impl`'s `send_rerank` (server-context.cpp:2197 @7fe450e19).
-    fn sendRerank(self: *Impl, slot: *const Slot, batch: *const c.llama_batch) !void {
+    /// Ports `server_context_impl`'s `send_decision` (server-context.cpp:2330
+    /// @d81235049): the raw model output of each option -- the logits of the
+    /// labels, the scores of a joint head, or the embeddings at the markers.
+    fn sendDecision(self: *Impl, slot: *const Slot, batch: *const tc.common.Batch, i_batch: i32) !void {
+        const func = "send_decision";
+        const res = try Result.create(gpa, .decision);
+        errdefer res.destroy(gpa);
+        const ra = res.alloc();
+        const t = slot.taskRef();
+        res.id = t.id;
+        res.index = t.index;
+        res.kind.decision.n_tokens = t.nTokens();
+
+        const decision = &t.decision;
+        var scores: std.ArrayList(f32) = .empty;
+
+        if (decision.labels.items.len != 0) {
+            const logits = c.llama_get_logits_ith(slot.ctx_tgt, i_batch);
+            if (logits == null) {
+                res.destroy(gpa);
+                try self.sendErrorSlot(slot, "failed to get logits", .server);
+                return;
+            }
+            const n_vocab = c.llama_vocab_n_tokens(self.vocab);
+            for (decision.labels.items) |label| {
+                ggmlAssert(label >= 0 and label < n_vocab, 2346, "label >= 0 && label < n_vocab");
+                try scores.append(ra, logits[@intCast(label)]);
+            }
+        } else {
+            // the outputs of this slot in this batch are the last tokens of the prompt
+            var idx: std.ArrayList(i32) = .empty;
+            for (batch.tokens.items, 0..) |*bt, i| {
+                if (bt.output and bt.seq_id == slot.id) {
+                    try idx.append(ra, @intCast(i));
+                }
+            }
+            const n_idx: i32 = @intCast(idx.items.len);
+            const pos_first: i32 = slot.prompt.nTokens() - n_idx;
+            const GetEmbd = struct {
+                fn run(ctx: ?*c.llama_context, ids: []const i32, first: i32, pos: i32) [*c]const f32 {
+                    const i = pos - first;
+                    return if (i >= 0 and i < @as(i32, @intCast(ids.len))) c.llama_get_embeddings_ith(ctx, ids[@intCast(i)]) else null;
+                }
+            };
+
+            // joint head (decision model): the scores are the first rows
+            var i: i32 = 0;
+            while (i < decision.n_scores) : (i += 1) {
+                const embd: [*c]const f32 = if (i < n_idx) c.llama_get_embeddings_ith(slot.ctx_tgt, idx.items[@intCast(i)]) else null;
+                if (embd == null) {
+                    res.destroy(gpa);
+                    try self.sendErrorSlot(slot, "failed to get embeddings", .server);
+                    return;
+                }
+                try scores.append(ra, embd[0]);
+            }
+
+            const n_embd_out = c.llama_model_n_embd_out(self.model_tgt);
+            const n_pointer = @divTrunc(n_embd_out, 2);
+            const embd_q: [*c]const f32 = if (decision.pointer >= 0) GetEmbd.run(slot.ctx_tgt, idx.items, pos_first, decision.pointer) else null;
+            ggmlAssert(decision.column >= 0 and decision.column < n_embd_out, 2376, "decision.column >= 0 && decision.column < n_embd_out");
+
+            for (decision.markers.items) |marker| {
+                const embd = GetEmbd.run(slot.ctx_tgt, idx.items, pos_first, marker);
+                if (embd == null or (decision.pointer >= 0 and embd_q == null)) {
+                    res.destroy(gpa);
+                    try self.sendErrorSlot(slot, "failed to get embeddings, the question and its options must fit in one batch", .server);
+                    return;
+                }
+                if (decision.pointer < 0) {
+                    try scores.append(ra, embd[@intCast(decision.column)]);
+                    continue;
+                }
+                // as the reference compiles it: from 4 elements, four at a time
+                // with each product rounded and added in order, and only the
+                // `n % 4` left over fused (read from the disassembly)
+                const np: usize = @intCast(n_pointer);
+                const n_vec = if (np >= 4) np - np % 4 else 0;
+                var dot: f32 = 0.0;
+                for (0..np) |k| {
+                    if (k < n_vec) {
+                        dot += embd_q[k] * embd[np + k];
+                    } else {
+                        dot = @mulAdd(f32, embd_q[k], embd[np + k], dot);
+                    }
+                }
+                try scores.append(ra, dot / @sqrt(@as(f32, @floatFromInt(n_pointer))));
+            }
+        }
+        res.kind.decision.scores = scores.items;
+
+        slt(.dbg, func, slot, "%s", .{@as([*:0]const u8, "sending decision result\n")});
+
+        try self.queue_results.send(res);
+    }
+
+    /// Ports `server_context_impl`'s `send_rerank` (server-context.cpp:2401 @d81235049).
+    fn sendRerank(self: *Impl, slot: *const Slot, batch: *const tc.common.Batch) !void {
         const res = try Result.create(gpa, .rerank);
         errdefer res.destroy(gpa);
         const t = slot.taskRef();
@@ -2718,18 +3004,19 @@ pub const Impl = struct {
         res.kind.rerank.n_tokens = t.nTokens();
 
         var i: usize = 0;
-        while (i < @as(usize, @intCast(batch.n_tokens))) : (i += 1) {
-            if (batch.logits[i] == 0 or batch.seq_id[i][0] != slot.id) {
+        while (i < @as(usize, @intCast(batch.size()))) : (i += 1) {
+            const bt = &batch.tokens.items[i];
+            if (!bt.output or bt.seq_id != slot.id) {
                 continue;
             }
 
-            var embd = c.llama_get_embeddings_seq(self.ctx_tgt, batch.seq_id[i][0]);
+            var embd = c.llama_get_embeddings_seq(self.ctx_tgt, bt.seq_id);
             if (embd == null) {
                 embd = c.llama_get_embeddings_ith(self.ctx_tgt, @intCast(i));
             }
 
             if (embd == null) {
-                slt(.err, "send_rerank", slot, "failed to get embeddings, token = %d, seq_id = %d\n", .{ batch.token[i], batch.seq_id[i][0] });
+                slt(.err, "send_rerank", slot, "failed to get embeddings, token = %d, seq_id = %d\n", .{ bt.id, bt.seq_id });
 
                 res.kind.rerank.score = -1e6;
                 continue;
@@ -2743,8 +3030,8 @@ pub const Impl = struct {
         try self.queue_results.send(res);
     }
 
-    /// Ports `server_context_impl`'s `tokenize_cli_input` (server-context.cpp:2233
-    /// @7fe450e19): the input of a task set by the CLI. Unreached by the
+    /// Ports `server_context_impl`'s `tokenize_cli_input` (server-context.cpp:2437
+    /// @d81235049): the input of a task set by the CLI. Unreached by the
     /// HTTP server, which tokenizes on its own threads.
     fn tokenizeCliInput(self: *Impl, task: *Task) !bool {
         const a = try task.arenaAlloc(gpa);
@@ -2776,7 +3063,7 @@ pub const Impl = struct {
         return true;
     }
 
-    /// Ports `server_context_impl`'s `get_free_slots` (server-context.cpp:2250 @7fe450e19).
+    /// Ports `server_context_impl`'s `get_free_slots` (server-context.cpp:2454 @d81235049).
     fn getFreeSlots(self: *Impl, a: Allocator, n_slots_needed: usize, exclude_id_slot: c_int) ![]*Slot {
         var free_slots: std.ArrayList(*Slot) = .empty;
         for (self.slots) |*slot| {
@@ -2791,7 +3078,7 @@ pub const Impl = struct {
     }
 
     /// The `release_slots` lambda of `launch_slots_with_parent_task`
-    /// (server-context.cpp:2264 @7fe450e19).
+    /// (server-context.cpp:2468 @d81235049).
     fn releaseSlotsOf(self: *Impl, id_parent: c_int) !void {
         for (self.slots) |*slot| {
             if (slot.isProcessing() and (slot.taskRef().id == id_parent or slot.taskRef().id_parent == id_parent)) {
@@ -2801,14 +3088,14 @@ pub const Impl = struct {
     }
 
     /// Ports `server_context_impl`'s `launch_slots_with_parent_task`
-    /// (server-context.cpp:2264 @7fe450e19): launch multiple slots for
+    /// (server-context.cpp:2468 @d81235049): launch multiple slots for
     /// parent + child tasks.
     fn launchSlotsWithParentTask(self: *Impl, parent_slot: *Slot, child_slots: []*Slot, parent_task_in: Task) !bool {
         const func = "launch_slots_with_parent_task";
         var parent_task = parent_task_in;
-        ggmlAssert(!parent_slot.isProcessing(), 2265, "!parent_slot.is_processing()");
-        ggmlAssert(parent_task.isParent(), 2266, "parent_task.is_parent()");
-        ggmlAssert(child_slots.len == parent_task.child_tasks.items.len, 2267, "child_slots.size() == parent_task.child_tasks.size()");
+        ggmlAssert(!parent_slot.isProcessing(), 2469, "!parent_slot.is_processing()");
+        ggmlAssert(parent_task.isParent(), 2470, "parent_task.is_parent()");
+        ggmlAssert(child_slots.len == parent_task.child_tasks.items.len, 2471, "child_slots.size() == parent_task.child_tasks.size()");
 
         const id_parent = parent_task.id;
 
@@ -2838,8 +3125,8 @@ pub const Impl = struct {
         return true;
     }
 
-    /// Ports `server_context_impl`'s `create_checkpoint` (server-context.cpp:2309
-    /// @7fe450e19). `n_tokens_cur`: the number of tokens added to the batch
+    /// Ports `server_context_impl`'s `create_checkpoint` (server-context.cpp:2513
+    /// @d81235049). `n_tokens_cur`: the number of tokens added to the batch
     /// for the current slot.
     fn createCheckpoint(self: *Impl, slot: *Slot, n_tokens_cur: i64, pos_min: c.llama_pos, pos_max: c.llama_pos) !void {
         const func = "create_checkpoint";
@@ -2923,8 +3210,8 @@ pub const Impl = struct {
         _ = mib;
     }
 
-    /// Ports `server_context_impl`'s `process_single_task` (server-context.cpp:2375
-    /// @7fe450e19): false declines the task, offered again after the decode is
+    /// Ports `server_context_impl`'s `process_single_task` (server-context.cpp:2579
+    /// @d81235049): false declines the task, offered again after the decode is
     /// done; otherwise the task is taken.
     fn processSingleTask(self: *Impl, task: *Task, is_yielding: bool) !bool {
         const func = "process_single_task";
@@ -2941,7 +3228,7 @@ pub const Impl = struct {
         defer if (!moved) owned.deinit(gpa);
 
         switch (owned.type) {
-            .completion, .infill, .embedding, .rerank => blk: {
+            .completion, .infill, .embedding, .rerank, .decision => blk: {
                 // special case: if input is provided via CLI, tokenize it first
                 // otherwise, no need to tokenize as it's already done inside the HTTP thread
                 if (owned.cli) {
@@ -3133,7 +3420,7 @@ pub const Impl = struct {
                 };
                 defer gpa.free(packed_bytes);
 
-                ggmlAssert(packed_bytes.len % @sizeOf(Token) == 0, 2573, "packed.size() % sizeof(llama_token) == 0");
+                ggmlAssert(packed_bytes.len % @sizeOf(Token) == 0, 2778, "packed.size() % sizeof(llama_token) == 0");
                 const path_z = try gpa.dupeSentinel(u8, filepath, 0);
                 defer gpa.free(path_z);
                 const nwrite = c.llama_state_seq_save_file(self.ctx_tgt, path_z.ptr, slot.id, @ptrCast(@alignCast(packed_bytes.ptr)), packed_bytes.len / @sizeOf(Token));
@@ -3271,7 +3558,7 @@ pub const Impl = struct {
     }
 
     /// The `try` block of the `SLOT_RESTORE` arm of `process_single_task`
-    /// (server-context.cpp:2375 @7fe450e19).
+    /// (server-context.cpp:2579 @d81235049).
     ///
     /// Return: the bytes read.
     fn restoreSlot(self: *Impl, slot: *Slot, filepath: []const u8) !usize {
@@ -3306,8 +3593,8 @@ pub const Impl = struct {
         return nread;
     }
 
-    /// Ports `server_context_impl`'s `iterate` (server-context.cpp:2730
-    /// @7fe450e19): an exception from one slot's step is that slot's error.
+    /// Ports `server_context_impl`'s `iterate` (server-context.cpp:2935
+    /// @d81235049): an exception from one slot's step is that slot's error.
     fn slotException(self: *Impl, slot: *Slot, e: anyerror) void {
         const msg = gpa.dupe(u8, whatOf(e)) catch "std::bad_alloc";
         defer if (msg.ptr != "std::bad_alloc".ptr) gpa.free(msg);
@@ -3326,7 +3613,7 @@ pub const Impl = struct {
         };
     }
 
-    /// Ports `server_context_impl`'s `abort_all_slots` (server-context.cpp:2754 @7fe450e19).
+    /// Ports `server_context_impl`'s `abort_all_slots` (server-context.cpp:2959 @d81235049).
     fn abortAllSlots(self: *Impl, reason: []const u8) !void {
         for (self.slots) |*slot| {
             if (slot.isProcessing()) {
@@ -3336,7 +3623,7 @@ pub const Impl = struct {
         }
     }
 
-    /// Ports `server_context_impl`'s `update_slots` (server-context.cpp:2793 @7fe450e19).
+    /// Ports `server_context_impl`'s `update_slots` (server-context.cpp:2998 @d81235049).
     fn updateSlots(self: *Impl) !void {
         const func = "update_slots";
         // check if all slots are idle
@@ -3378,9 +3665,8 @@ pub const Impl = struct {
             // the batch is half-built and not rendered, skip now to avoid UB
             return;
         };
-        self.batch.render();
 
-        ggmlAssert(self.batch.slot_batched != null or self.batch.size() == 0, 2846, "batch.slot_batched || batch.size() == 0");
+        ggmlAssert(self.batch.slot_batched != null or self.batch.size() == 0, 3050, "batch.slot_batched || batch.size() == 0");
 
         if (self.batch.slot_batched) |slot_batched| {
             // TODO @ngxson : alora handling is too messy, need to refactor it to be more clear and maintainable
@@ -3397,15 +3683,14 @@ pub const Impl = struct {
             c.llama_set_embeddings(self.ctx_tgt, slot_batched.needEmbd());
         }
 
-        var batch_view: c.llama_batch = undefined;
         var off_next: i32 = 0;
         var n_batch: i32 = @intCast(c.llama_n_batch(self.ctx_tgt));
         var off: i32 = 0;
         while (off < self.batch.size()) : (off = off_next) {
             const n_tokens = @min(n_batch, self.batch.size() - off);
             {
-                batch_view = self.batch.getView(off, n_tokens);
-                const ok = self.decode(&n_batch, off, &batch_view) catch |e| {
+                self.batch.render(off, n_tokens);
+                const ok = self.decode(&n_batch, off) catch |e| {
                     if (e == error.OutOfMemory) return e;
                     const msg = try gpa.dupe(u8, whatOf(e));
                     defer gpa.free(msg);
@@ -3429,7 +3714,7 @@ pub const Impl = struct {
                 }
             }
 
-            self.postDecode(n_tokens, off, &batch_view) catch |e| {
+            self.postDecode(n_tokens, off) catch |e| {
                 if (e == error.OutOfMemory) return e;
                 const msg = try gpa.dupe(u8, whatOf(e));
                 defer gpa.free(msg);
@@ -3443,8 +3728,8 @@ pub const Impl = struct {
         }
     }
 
-    /// The context-shift step of `pre_decode` (server-context.cpp:2909
-    /// @7fe450e19), one slot.
+    /// The context-shift step of `pre_decode` (server-context.cpp:3112
+    /// @d81235049), one slot.
     fn contextShift(self: *Impl, slot: *Slot) !void {
         if (slot.state == .generating and slot.prompt.nTokens() + 1 >= slot.n_ctx) {
             if (!self.params_base.ctx_shift) {
@@ -3490,7 +3775,7 @@ pub const Impl = struct {
             // add generated tokens to cache
             // ref: https://github.com/ggml-org/llama.cpp/pull/16818#discussion_r2473269481
             {
-                ggmlAssert(!slot.prompt.tokens.has_mtmd, 2957, "!slot.prompt.tokens.has_mtmd");
+                ggmlAssert(!slot.prompt.tokens.has_mtmd, 3160, "!slot.prompt.tokens.has_mtmd");
 
                 const new_tokens = try gpa.dupe(Token, slot.prompt.tokens.getTokens()); // copy
                 defer gpa.free(new_tokens);
@@ -3511,8 +3796,8 @@ pub const Impl = struct {
         }
     }
 
-    /// The drafting step of `pre_decode` (server-context.cpp:2909
-    /// @7fe450e19), one slot: whether it generates in this batch, and
+    /// The drafting step of `pre_decode` (server-context.cpp:3112
+    /// @d81235049), one slot: whether it generates in this batch, and
     /// whether it drafts first.
     fn selectGenerating(self: *Impl, slot: *Slot, generating: *std.ArrayList(*Slot), drafting: *std.ArrayList(*Slot)) !void {
         if (slot.state != .generating) {
@@ -3537,15 +3822,18 @@ pub const Impl = struct {
             const n_draft_max = slot.getNDraftMax();
 
             if (n_draft_max > 0) {
-                ggmlAssert(slot.canSpeculate(), 3007, "slot.can_speculate()");
+                ggmlAssert(slot.canSpeculate(), 3210, "slot.can_speculate()");
+
+                // stale candidates: a replay never reads them, a new draft refills them
+                clearDraftQ(&slot.spec_draft_q);
 
                 if (slot.spec_draft.items.len != 0) {
                     // we have a previous (partial) draft to reuse
                     if (use_ckpt_tgt) {
-                        ggmlAssert(!slot.spec_ckpt.empty(), 3012, "!slot.spec_ckpt.empty()");
+                        ggmlAssert(!slot.spec_ckpt.empty(), 3218, "!slot.spec_ckpt.empty()");
                     }
                 } else {
-                    ggmlAssert(slot.spec_i_batch.items.len == 0, 3015, "slot.spec_i_batch.empty()");
+                    ggmlAssert(slot.spec_i_batch.items.len == 0, 3221, "slot.spec_i_batch.empty()");
 
                     slot.spec_ckpt.updatePos(
                         slot.prompt.nTokens(),
@@ -3560,6 +3848,8 @@ pub const Impl = struct {
                     gpa.free(slot.spec_prompt);
                     slot.spec_prompt = try slot.prompt.tokens.getTextTokens(gpa);
 
+                    const spec_reject = slot.useSpecRejection();
+
                     spec_mod.getDraftParams(self.spec, slot.id).* = .{
                         .drafting = true,
                         .n_max = n_draft_max,
@@ -3567,6 +3857,9 @@ pub const Impl = struct {
                         .id_last = slot.sampled,
                         .prompt = slot.spec_prompt,
                         .result = &slot.spec_draft,
+                        .result_q = if (spec_reject) &slot.spec_draft_q else null,
+                        .temp = slot.taskRef().params.sampling.temp,
+                        .seed = slot.taskRef().params.sampling.seed,
                     };
 
                     try drafting.append(gpa, slot);
@@ -3575,8 +3868,8 @@ pub const Impl = struct {
         }
     }
 
-    /// The checkpoint step of `pre_decode` (server-context.cpp:2909
-    /// @7fe450e19), one drafting slot.
+    /// The checkpoint step of `pre_decode` (server-context.cpp:3112
+    /// @d81235049), one drafting slot.
     fn draftCheckpoint(self: *Impl, slot: *Slot) !void {
         const draft = &slot.spec_draft;
         const ckpt = &slot.spec_ckpt;
@@ -3621,8 +3914,8 @@ pub const Impl = struct {
         spec_mod.draft(self.spec);
     }
 
-    /// Ports `server_context_impl`'s `pre_decode` (server-context.cpp:2909
-    /// @7fe450e19): context shifts, drafts, and the batch -- the sampled and
+    /// Ports `server_context_impl`'s `pre_decode` (server-context.cpp:3112
+    /// @d81235049): context shifts, drafts, and the batch -- the sampled and
     /// drafted tokens, then pending prompts up to `n_batch`.
     fn preDecode(self: *Impl) !void {
         // apply context-shift if needed
@@ -3684,7 +3977,7 @@ pub const Impl = struct {
         }
     };
 
-    /// The prompt step of `pre_decode` (server-context.cpp:2909 @7fe450e19),
+    /// The prompt step of `pre_decode` (server-context.cpp:3112 @d81235049),
     /// one slot: a new prompt's cache reuse and checkpoint restore, then its
     /// next tokens into the batch.
     fn batchPrompt(self: *Impl, slot: *Slot, n_batch: i32, n_ubatch: i32, add_ok: *bool) !void {
@@ -3743,7 +4036,7 @@ pub const Impl = struct {
 
                 // TODO: support memory-less logits computation
                 if (slot.taskRef().needLogits() and c.llama_get_memory(self.ctx_tgt) == null) {
-                    try self.sendErrorSlot(slot, "the current context does not logits computation. skipping", .server);
+                    try self.sendErrorSlot(slot, "the current context does not support logits computation. skipping", .server);
                     try slot.release();
                     return;
                 }
@@ -3781,9 +4074,29 @@ pub const Impl = struct {
                         return;
                     }
 
-                    if (slot.taskRef().params.cache_prompt) {
+                    // the outputs of a decision are read from one batch
+                    const n_decision_first: i32 = if (slot.taskRef().type == .decision) slot.taskRef().decision.posFirst() else -1;
+                    if (n_decision_first >= 0 and slot.taskRef().nTokens() - n_decision_first > n_batch) {
+                        var buf: [256]u8 = undefined;
+                        const msg = std.fmt.bufPrint(&buf, "the question and its options ({d} tokens) are too large to process. " ++
+                            "increase the batch size (current batch size: {d})", .{ slot.taskRef().nTokens() - n_decision_first, n_batch }) catch |err| switch (err) {
+                            error.NoSpaceLeft => unreachable,
+                        };
+                        try self.sendErrorSlot(slot, msg, .invalid_request);
+                        try slot.release();
+                        return;
+                    }
+
+                    const is_stateless_task = slot.taskRef().type == .embedding or slot.taskRef().type == .rerank;
+
+                    if (slot.taskRef().params.cache_prompt and !is_stateless_task) {
                         // reuse any previously computed tokens that are common with the new prompt
                         n_past = @intCast(try slot.prompt.tokens.getCommonPrefix(input_tokens));
+
+                        // the children start from the shared prefix, do not go past it
+                        if (slot.taskRef().n_tokens_shared > 0) {
+                            n_past = @min(n_past, slot.taskRef().n_tokens_shared);
+                        }
 
                         // if there is an alora invoked, don't cache after the invocation start
                         if (slot.alora_invocation_start > 0) {
@@ -3803,7 +4116,7 @@ pub const Impl = struct {
 
                         // reuse chunks from the cached prompt by shifting their KV cache in the new position
                         if (can_cache_reuse and n_cache_reuse > 0) {
-                            ggmlAssert(!slot.prompt.tokens.has_mtmd, 3239, "!slot.prompt.tokens.has_mtmd");
+                            ggmlAssert(!slot.prompt.tokens.has_mtmd, 3469, "!slot.prompt.tokens.has_mtmd");
 
                             var head_c: usize = @intCast(n_past); // cache
                             var head_p: usize = @intCast(n_past); // current prompt
@@ -3981,6 +4294,24 @@ pub const Impl = struct {
 
             slot.mem.seqRm(slot.id, p0, -1);
 
+            // shared prompt prefix: once it is processed, the children continue from it with their own prompt
+            var wait_shared = false;
+            if (slot.taskRef().n_tokens_shared > 0) {
+                const is_shared_done = slot.prompt.nTokens() == slot.taskRef().n_tokens_shared;
+                for (self.slots) |*other| {
+                    if (other.state != .wait_other or other.taskRef().id_parent != slot.taskRef().id) {
+                        continue;
+                    }
+                    if (is_shared_done) {
+                        slt(.trc, func, slot, " - copying shared prompt (%d tokens) to child %d\n", .{ slot.prompt.nTokens(), other.id });
+                        try slot.copyPromptTo(other);
+                        other.state = .started;
+                    } else {
+                        wait_shared = true;
+                    }
+                }
+            }
+
             // If using an alora, there may be uncached tokens that come
             // before the invocation sequence. When this happens, the
             // tokens before the invocation sequence need to be
@@ -3990,7 +4321,7 @@ pub const Impl = struct {
                 slt(.dbg, func, slot, "processing pre-alora tokens without the adapter (n_tokens = %d, alora_invocation_start = %d)\n", .{ slot.prompt.nTokens(), slot.alora_invocation_start });
                 const enabled_loras = try common.loraGetEnabledIds(gpa, slot.lora);
                 defer gpa.free(enabled_loras);
-                ggmlAssert(enabled_loras.len == 1, 3454, "enabled_loras.size() == 1");
+                ggmlAssert(enabled_loras.len == 1, 3702, "enabled_loras.size() == 1");
                 alora_scale.* = slot.lora[enabled_loras[0]].scale;
                 slot.lora[enabled_loras[0]].scale = 0.0;
                 alora_disabled_id.* = enabled_loras[0];
@@ -4009,6 +4340,13 @@ pub const Impl = struct {
             do_checkpoint = do_checkpoint and (self.ctx_tgt_seq_rm_type == .full or
                 self.ctx_tgt_seq_rm_type == .rs or
                 self.n_swa > 0);
+
+            // TODO: do the same for all models, then remove process_mtmd_chunk()
+            if (self.useMixedBatch() and !slot.canSplit() and input_tokens.has_mtmd) {
+                if (!try self.addPromptMixed(slot)) {
+                    return;
+                }
+            }
 
             var has_mtmd = false;
 
@@ -4054,12 +4392,24 @@ pub const Impl = struct {
             const spans = &slot.taskRef().params.message_spans;
             const last_user_pos = spans.lastUserMessagePos();
 
+            const n_decision_first: i32 = if (slot.taskRef().type == .decision) slot.taskRef().decision.posFirst() else -1;
+
             // add prompt tokens for processing in the current batch
             while (slot.prompt.nTokens() < slot.taskRef().nTokens() and batch.size() < n_batch) {
                 // get next token to process
                 const cur_tok = input_tokens.at(@intCast(slot.prompt.nTokens()));
                 if (cur_tok == token_null) {
                     break; // end of text chunk
+                }
+
+                // stop at the end of the shared prefix, the children are started from this state
+                if (wait_shared and slot.prompt.nTokens() == slot.taskRef().n_tokens_shared) {
+                    break;
+                }
+
+                // the outputs of a decision are read from one batch, do not split them
+                if (slot.prompt.nTokens() == n_decision_first and batch.size() + slot.taskRef().nTokens() - n_decision_first > n_batch) {
+                    break;
                 }
 
                 // if this is an alora request with pre-invocation
@@ -4074,6 +4424,9 @@ pub const Impl = struct {
                 // MTP also wants logits at every prompt position so the
                 // streaming hook can mirror t_h_nextn into ctx_dft.
                 add_ok.* = (try batch.add(slot.id, cur_tok, slot.prompt.tokens.posNext(-1), slot.needEmbd(), true)) and add_ok.*;
+                if (slot.taskRef().decision.order.items.len != 0) {
+                    batch.setDecisionOrder(batch.size() - 1, slot.taskRef().decision.order.items[@intCast(slot.prompt.nTokens())]);
+                }
                 try slot.prompt.tokens.pushBackToken(cur_tok);
 
                 // break at the last user message, or at user messages at least min step past the last checkpoint
@@ -4123,7 +4476,7 @@ pub const Impl = struct {
             if (slot.prompt.nTokens() == slot.taskRef().nTokens()) {
                 slot.state = .done_prompt;
 
-                ggmlAssert(batch.size() > 0, 3595, "batch.size() > 0");
+                ggmlAssert(batch.size() > 0, 3865, "batch.size() > 0");
 
                 // extract the logits only for the last token
                 batch.setOutput(batch.size() - 1, true);
@@ -4173,8 +4526,8 @@ pub const Impl = struct {
         }
     }
 
-    /// The `slots_debug` block of `pre_decode` (server-context.cpp:2909
-    /// @7fe450e19): the tokens around a prefix mismatch.
+    /// The `slots_debug` block of `pre_decode` (server-context.cpp:3112
+    /// @d81235049): the tokens around a prefix mismatch.
     fn printPrefixMismatch(self: *Impl, slot: *Slot, n_past: i32) !void {
         const func = "operator()";
         var tmp = std.heap.ArenaAllocator.init(gpa);
@@ -4220,12 +4573,12 @@ pub const Impl = struct {
 
     const DecodeWork = struct {
         ctx: ?*c.llama_context,
-        view: c.llama_batch,
+        view: *tc.common.Batch,
         has_output: bool,
         ret: c_int = 0,
 
         fn run(w: *DecodeWork) anyerror!void {
-            w.ret = c.llama_decode(w.ctx, w.view);
+            w.ret = c.llama_process(w.ctx, c.LLAMA_PROCESS_TYPE_DECODE, w.view.get());
             if (w.ret == 0 and w.has_output) {
                 c.llama_synchronize(w.ctx);
             }
@@ -4234,7 +4587,7 @@ pub const Impl = struct {
 
     const SpecProcessWork = struct {
         spec: ?*spec_mod.Speculative,
-        view: c.llama_batch,
+        view: *const tc.common.Batch,
         ok: bool = true,
 
         fn run(w: *SpecProcessWork) anyerror!void {
@@ -4242,10 +4595,76 @@ pub const Impl = struct {
         }
     };
 
-    /// Ports `server_context_impl`'s `decode` (server-context.cpp:3647
-    /// @7fe450e19): true on success, false to retry with a smaller batch;
+    /// Ports `server_context_impl`'s `use_mixed_batch` (server-context.cpp:3917
+    /// @d81235049): the mtmd chunks go in the batch as embeddings beside the
+    /// text tokens. See https://github.com/ggml-org/llama.cpp/pull/29969
+    fn useMixedBatch(self: *const Impl) bool {
+        return c.llama_get_memory(self.ctx_tgt) == null or !c.llama_get_causal_attn(self.ctx_tgt);
+    }
+
+    const EncodeWork = struct {
+        slot: *Slot,
+        idx: usize,
+        res: i32 = 0,
+
+        fn run(w: *EncodeWork) anyerror!void {
+            w.res = try encodeMtmdChunk(w.slot, &w.slot.mbatch, w.idx);
+        }
+    };
+
+    /// Ports `server_context_impl`'s `add_prompt_mixed` (server-context.cpp:3924
+    /// @d81235049): the rest of the prompt into the batch, the mtmd chunks as
+    /// embeddings next to the text tokens; the caller makes sure that it fits.
+    ///
+    /// Return: false on error, the slot is then released.
+    fn addPromptMixed(self: *Impl, slot: *Slot) !bool {
+        const func = "add_prompt_mixed";
+        const input_tokens = &slot.task.?.tokens;
+        const n_tokens_prev = self.batch.size();
+
+        while (slot.prompt.nTokens() < slot.taskRef().nTokens()) {
+            const cur_token_idx: usize = @intCast(slot.prompt.nTokens());
+            const cur_tok = input_tokens.at(cur_token_idx);
+
+            if (cur_tok != token_null) {
+                const add_ok = try self.batch.add(slot.id, cur_tok, slot.prompt.tokens.posNext(-1), slot.needEmbd(), true);
+                ggmlAssert(add_ok, 3938, "add_ok");
+                if (slot.taskRef().decision.order.items.len != 0) {
+                    self.batch.setDecisionOrder(self.batch.size() - 1, slot.taskRef().decision.order.items[cur_token_idx]);
+                }
+                try slot.prompt.tokens.pushBackToken(cur_tok);
+                continue;
+            }
+
+            const chunk = try input_tokens.findChunk(cur_token_idx);
+
+            var embd: [*c]f32 = if (slot.mbatch) |mb| c.mtmd_batch_get_output_embd(mb, chunk) else null;
+            if (embd == null) {
+                // encode on the worker thread, so we can still handle metrics tasks
+                var work: EncodeWork = .{ .slot = slot, .idx = cur_token_idx };
+                try self.queue_tasks.yieldToQueue(&work, EncodeWork.run);
+                embd = if (work.res == 0) c.mtmd_batch_get_output_embd(slot.mbatch, chunk) else null;
+            }
+
+            if (embd == null or !try addMtmdChunk(slot, chunk, embd, &self.batch)) {
+                slt(.err, func, slot, "%s", .{@as([*:0]const u8, "failed to process mtmd chunk\n")});
+                // the batch must not keep the entries of a released slot
+                self.batch.truncate(n_tokens_prev);
+                try self.sendErrorSlot(slot, "failed to process mtmd chunk", .server);
+                try slot.release();
+                return false;
+            }
+
+            try slot.prompt.tokens.pushBackPlaceholder(chunk);
+        }
+
+        return true;
+    }
+
+    /// Ports `server_context_impl`'s `decode` (server-context.cpp:3975
+    /// @d81235049): true on success, false to retry with a smaller batch;
     /// an error is fatal.
-    fn decode(self: *Impl, n_batch: *i32, off: i32, batch_view: *c.llama_batch) !bool {
+    fn decode(self: *Impl, n_batch: *i32, off: i32) !bool {
         const func = "decode";
         srv(.dbg, func, "n_batch (effective) = %d, off = %d\n", .{ n_batch.*, off });
 
@@ -4256,7 +4675,7 @@ pub const Impl = struct {
 
             self.n_empty_consecutive += 1;
             if (self.n_empty_consecutive > 3) {
-                ggmlAbort(3656, "fatal error - please provide logs and repro in %s\n", .{@as([*:0]const u8, "https://github.com/ggml-org/llama.cpp/pull/20277")});
+                ggmlAbort(3984, "fatal error - please provide logs and repro in %s\n", .{@as([*:0]const u8, "https://github.com/ggml-org/llama.cpp/pull/20277")});
             }
 
             return true; // nothing to decode
@@ -4266,7 +4685,7 @@ pub const Impl = struct {
 
         // TODO @ngxson : dft model may have different n_embd than the tgt model, so we check & reject if that's the case
         // this case is not currently used by any models, but may need to be supported in the future
-        if (self.spec != null and self.batch.has_embd) {
+        if (self.spec != null and self.batch.hasEmbd()) {
             if (c.llama_model_n_embd_inp(self.model_dft) != c.llama_model_n_embd_inp(self.model_tgt)) {
                 srv(.err, func, "%s", .{@as([*:0]const u8, "unsupported batch.has_embd + spec case\n")});
                 return common.throw(error.RuntimeError, "unsupported batch.has_embd + spec case", .{});
@@ -4276,14 +4695,14 @@ pub const Impl = struct {
         var has_output = false;
         {
             var i = off;
-            while (i < off + batch_view.n_tokens) : (i += 1) {
+            while (i < off + self.batch.view.size()) : (i += 1) {
                 has_output = has_output or self.batch.tokens.items[@intCast(i)].output;
             }
         }
 
         // yield to the queue, so we can still handle metrics tasks while decoding
         // note: the sync is done here too, so that the wait is also covered by the yield
-        var work: DecodeWork = .{ .ctx = self.ctx_tgt, .view = batch_view.*, .has_output = has_output };
+        var work: DecodeWork = .{ .ctx = self.ctx_tgt, .view = &self.batch.view, .has_output = has_output };
         try self.queue_tasks.yieldToQueue(&work, DecodeWork.run);
         const ret = work.ret;
 
@@ -4339,14 +4758,14 @@ pub const Impl = struct {
             return false; // retry with the updated n_batch
         } else {
             // success, apply batch metrics
-            self.metricsPostDecode(off, batch_view.n_tokens, has_output);
+            self.metricsPostDecode(off, self.batch.view.size(), has_output);
         }
 
         // TODO: avoid restoring the draft context and re-evaluating the drafted tokens when not needed [TAG_SPEC_AVOID_DRAFT_REEVAL]
         //       for now, always re-evaluate for simplicity
         //       ref: https://github.com/ggml-org/llama.cpp/pull/22728#issuecomment-4400925384
         if (self.spec != null) {
-            var sw: SpecProcessWork = .{ .spec = self.spec, .view = batch_view.* };
+            var sw: SpecProcessWork = .{ .spec = self.spec, .view = &self.batch.view };
             try self.queue_tasks.yieldToQueue(&sw, SpecProcessWork.run);
 
             if (!sw.ok) {
@@ -4366,7 +4785,9 @@ pub const Impl = struct {
                     if (child.state == .wait_other and slot.taskRef().id == child.taskRef().id_parent) {
                         slt(.trc, func, slot, " - copying state to child %d\n", .{child.id});
 
-                        ggmlAssert(child.state == .wait_other, 3773, "child->state == SLOT_STATE_WAIT_OTHER");
+                        ggmlAssert(child.state == .wait_other, 4101, "child->state == SLOT_STATE_WAIT_OTHER");
+                        // children with their own prompt are started at the end of the shared prefix
+                        ggmlAssert(slot.taskRef().n_tokens_shared == 0, 4103, "slot.task->n_tokens_shared == 0");
 
                         try slot.copyStateTo(child);
                         child.state = .done_prompt;
@@ -4378,7 +4799,7 @@ pub const Impl = struct {
         return true;
     }
 
-    /// The `accept_special_token` lambda of `post_decode` (server-context.cpp:3784 @7fe450e19).
+    /// The `accept_special_token` lambda of `post_decode` (server-context.cpp:4114 @d81235049).
     fn acceptSpecialToken(self: *const Impl, slot: *const Slot, token: Token) bool {
         if (self.params_base.special) return true;
         for (slot.taskRef().params.sampling.preserved_tokens.items) |t| {
@@ -4387,9 +4808,10 @@ pub const Impl = struct {
         return false;
     }
 
-    /// The sampling step of `post_decode` (server-context.cpp:3784
-    /// @7fe450e19), one slot.
-    fn sampleSlot(self: *Impl, slot: *Slot, off: i32, n_batch_tokens: i32, batch_view: *const c.llama_batch, a: Allocator) !void {
+    /// The sampling step of `post_decode` (server-context.cpp:4114
+    /// @d81235049), one slot.
+    fn sampleSlot(self: *Impl, slot: *Slot, off: i32, n_batch_tokens: i32, a: Allocator) !void {
+        const batch_view = &self.batch.view;
         // optionally send prompt processing progress
         if (slot.state == .processing_prompt or slot.state == .done_prompt) {
             if (slot.taskRef().params.stream and slot.taskRef().params.return_progress) {
@@ -4419,7 +4841,14 @@ pub const Impl = struct {
                 return;
             }
 
-            ggmlAssert(slot.taskRef().needSampling(), 3834, "slot.task->need_sampling()");
+            if (slot.taskRef().type == .decision) {
+                try self.sendDecision(slot, batch_view, slot.i_batch - off);
+                try slot.release();
+                slot.i_batch = -1;
+                return;
+            }
+
+            ggmlAssert(slot.taskRef().needSampling(), 4171, "slot.task->need_sampling()");
 
             // prompt evaluated for next-token prediction
             slot.state = .generating;
@@ -4479,8 +4908,8 @@ pub const Impl = struct {
         slot.printTimingsTg();
     }
 
-    /// The speculative step of `post_decode` (server-context.cpp:3784
-    /// @7fe450e19), one slot: the main model samples and accepts.
+    /// The speculative step of `post_decode` (server-context.cpp:4114
+    /// @d81235049), one slot: the main model samples and accepts.
     fn acceptDraft(self: *Impl, slot: *Slot, a: Allocator) !void {
         const func = "operator()";
         if (slot.state != .generating or !slot.canSpeculate() or
@@ -4492,22 +4921,36 @@ pub const Impl = struct {
         // save the original draft size
         const n_draft = slot.spec_draft.items.len;
 
-        ggmlAssert(n_draft > 0, 3907, "n_draft > 0");
+        ggmlAssert(n_draft > 0, 4244, "n_draft > 0");
 
         // verify and try to accept the draft
         {
             const smpl_save = slot.smpl.?.clone();
             defer smpl_save.destroy();
 
-            ggmlAssert(slot.spec_i_batch.items.len == n_draft + 1, 3913, "slot.spec_i_batch.size() == n_draft + 1");
+            ggmlAssert(slot.spec_i_batch.items.len == n_draft + 1, 4250, "slot.spec_i_batch.size() == n_draft + 1");
+            ggmlAssert(slot.spec_draft_q.items.len == 0 or (slot.spec_draft_q.items.len == slot.spec_draft.items.len), 4251, "slot.spec_draft_q.empty() || (slot.spec_draft_q.size() == slot.spec_draft.size())");
             const synth_probs = spec_mod.getSynthProbs(self.spec);
-            const accepted = if (synth_probs.len == 0)
-                try slot.smpl.?.sampleAndAcceptNIdxs(a, slot.ctx_tgt, slot.spec_i_batch.items, slot.spec_draft.items, false)
-            else
-                try sampleAndAcceptSynth(a, slot.smpl.?, slot.ctx_tgt, slot.spec_i_batch.items, slot.spec_draft.items, synth_probs, &slot.spec_synth_rng, slot.spec_is_replay);
+
+            // drafters that fill no distribution fall back here
+            const use_rejection = slot.useSpecRejection() and slot.spec_draft_q.items.len != 0;
+
+            var accepted: []Token = undefined;
+            if (synth_probs.len != 0) {
+                // synthetic acceptance replaces verification entirely, so it comes first
+                accepted = try sampleAndAcceptSynth(a, slot.smpl.?, slot.ctx_tgt, slot.spec_i_batch.items, slot.spec_draft.items, synth_probs, &slot.spec_synth_rng, slot.spec_is_replay);
+            } else if (slot.spec_is_replay and slot.useSpecRejection()) {
+                accepted = try acceptReplay(a, slot.smpl.?, slot.ctx_tgt, slot.spec_i_batch.items, slot.spec_draft.items);
+            } else if (use_rejection) {
+                const q = try a.alloc([]const c.llama_token_data, slot.spec_draft_q.items.len);
+                for (slot.spec_draft_q.items, q) |*v, *o| o.* = v.items;
+                accepted = try slot.smpl.?.sampleAndAcceptNRejection(a, slot.ctx_tgt, slot.spec_i_batch.items, slot.spec_draft.items, q, false);
+            } else {
+                accepted = try slot.smpl.?.sampleAndAcceptNIdxs(a, slot.ctx_tgt, slot.spec_i_batch.items, slot.spec_draft.items, false);
+            }
             slot.spec_i_batch.clearRetainingCapacity();
 
-            ggmlAssert(accepted.len >= 1, 3922, "accepted.size() >= 1");
+            ggmlAssert(accepted.len >= 1, 4272, "accepted.size() >= 1");
 
             const n_rollback: u32 = @intCast(slot.spec_draft.items.len + 1 - accepted.len);
 
@@ -4616,8 +5059,8 @@ pub const Impl = struct {
         slt(.dbg, func, slot, "accepted %d/%d draft tokens, new n_tokens = %d\n", .{ @as(c_int, @intCast(n_accepted)), @as(c_int, @intCast(n_draft)), slot.prompt.nTokens() });
     }
 
-    /// Ports `server_context_impl`'s `post_decode` (server-context.cpp:3784 @7fe450e19).
-    fn postDecode(self: *Impl, n_batch_tokens: i32, off: i32, batch_view: *const c.llama_batch) !void {
+    /// Ports `server_context_impl`'s `post_decode` (server-context.cpp:4114 @d81235049).
+    fn postDecode(self: *Impl, n_batch_tokens: i32, off: i32) !void {
         var tmp = std.heap.ArenaAllocator.init(gpa);
         defer tmp.deinit();
         const a = tmp.allocator();
@@ -4634,7 +5077,7 @@ pub const Impl = struct {
         }
 
         for (self.slots) |*slot| {
-            self.sampleSlot(slot, off, n_batch_tokens, batch_view, a) catch |e| self.slotException(slot, e);
+            self.sampleSlot(slot, off, n_batch_tokens, a) catch |e| self.slotException(slot, e);
         }
 
         // speculative decoding - main model sample and accept
@@ -4643,8 +5086,8 @@ pub const Impl = struct {
         }
     }
 
-    /// Ports `server_context_impl`'s `n_ctx_slot` (server-context.cpp:4027
-    /// @7fe450e19): context size of a single slot, capped by
+    /// Ports `server_context_impl`'s `n_ctx_slot` (server-context.cpp:4377
+    /// @d81235049): context size of a single slot, capped by
     /// --kv-unified-per-slot and by the training context of the model.
     pub fn nCtxSlot(self: *const Impl) c_int {
         var res: c_int = @intCast(c.llama_n_ctx_seq(self.ctx_tgt));
@@ -4660,15 +5103,15 @@ pub const Impl = struct {
     // metrics helpers
     //
 
-    /// Ports `server_context_impl`'s `metrics_pre_decode` (server-context.cpp:4046
-    /// @7fe450e19): call before submitting a decode, so that the queued
+    /// Ports `server_context_impl`'s `metrics_pre_decode` (server-context.cpp:4396
+    /// @d81235049): call before submitting a decode, so that the queued
     /// prompt stats can be timed.
     fn metricsPreDecode(self: *Impl) void {
         self.t_decode_start = c.ggml_time_us();
     }
 
-    /// Ports `server_context_impl`'s `metrics_queue_prompt` (server-context.cpp:4051
-    /// @7fe450e19): the batch is submitted, but its compute may not be done yet.
+    /// Ports `server_context_impl`'s `metrics_queue_prompt` (server-context.cpp:4401
+    /// @d81235049): the batch is submitted, but its compute may not be done yet.
     fn metricsQueuePrompt(self: *Impl, n_tokens: u64) void {
         if (n_tokens == 0) {
             return;
@@ -4679,8 +5122,8 @@ pub const Impl = struct {
         self.n_prompt_queued += n_tokens;
     }
 
-    /// Ports `server_context_impl`'s `metrics_flush_prompt` (server-context.cpp:4062
-    /// @7fe450e19): call only after the context is synchronized, otherwise
+    /// Ports `server_context_impl`'s `metrics_flush_prompt` (server-context.cpp:4412
+    /// @d81235049): call only after the context is synchronized, otherwise
     /// the time is meaningless.
     fn metricsFlushPrompt(self: *Impl) void {
         if (self.n_prompt_queued == 0) {
@@ -4690,8 +5133,8 @@ pub const Impl = struct {
         self.n_prompt_queued = 0;
     }
 
-    /// Ports `server_context_impl`'s `metrics_post_decode` (server-context.cpp:4071
-    /// @7fe450e19): `has_output` is computed by the caller, which also
+    /// Ports `server_context_impl`'s `metrics_post_decode` (server-context.cpp:4421
+    /// @d81235049): `has_output` is computed by the caller, which also
     /// already synchronized the context if it is set.
     fn metricsPostDecode(self: *Impl, off: i32, n_tokens: i32, has_output: bool) void {
         self.metrics.n_decode += 1;
@@ -4743,8 +5186,8 @@ pub const Impl = struct {
         }
     }
 
-    /// Ports `server_context_impl`'s `metrics_flush_idle` (server-context.cpp:4120
-    /// @7fe450e19): flush any queued prompt metrics if all slots are now idle.
+    /// Ports `server_context_impl`'s `metrics_flush_idle` (server-context.cpp:4470
+    /// @d81235049): flush any queued prompt metrics if all slots are now idle.
     fn metricsFlushIdle(self: *Impl) void {
         if (self.n_prompt_queued == 0) {
             return;
@@ -4754,7 +5197,7 @@ pub const Impl = struct {
         self.metricsFlushPrompt();
     }
 
-    /// Ports `server_context_impl`'s `metrics_on_prediction` (server-context.cpp:4129 @7fe450e19).
+    /// Ports `server_context_impl`'s `metrics_on_prediction` (server-context.cpp:4479 @d81235049).
     fn metricsOnPrediction(self: *Impl, slot: *const Slot) !void {
         const t_us: u64 = @bitCast(slot.stats.tGenUs());
         const n = slot.stats.n_gen;
@@ -4780,19 +5223,19 @@ pub const Impl = struct {
 };
 
 /// The function-local `static const int checkpoint_offsets[]` of
-/// `pre_decode` (server-context.cpp:2909 @7fe450e19): set from the first
+/// `pre_decode` (server-context.cpp:3112 @d81235049): set from the first
 /// call's `n_ubatch`.
 var checkpoint_offsets: ?[2]i32 = null;
 
 // -----------------------------------------------------------------------------
 // server_context
 
-/// Ports `server_context` (server-context.h:84 @7fe450e19): the public face
+/// Ports `server_context` (server-context.h:85 @d81235049): the public face
 /// of `Impl`.
 pub const ServerContext = struct {
     impl: *Impl,
 
-    /// Ports the constructor of `server_context` (server-context.cpp:4157 @7fe450e19).
+    /// Ports the constructor of `server_context` (server-context.cpp:4507 @d81235049).
     pub fn init() !ServerContext {
         const impl = try gpa.create(Impl);
         errdefer gpa.destroy(impl);
@@ -4805,41 +5248,41 @@ pub const ServerContext = struct {
         gpa.destroy(self.impl);
     }
 
-    /// Ports `server_context`'s `load_model` (server-context.cpp:4160
-    /// @7fe450e19): load the model and initialize llama_context.
+    /// Ports `server_context`'s `load_model` (server-context.cpp:4510
+    /// @d81235049): load the model and initialize llama_context.
     ///
     /// Return: true on success.
     pub fn loadModel(self: *ServerContext, params: *Params) !bool {
         return self.impl.loadModel(params);
     }
 
-    /// Ports `server_context`'s `start_loop` (server-context.cpp:4164
-    /// @7fe450e19): blocks the main thread until termination.
+    /// Ports `server_context`'s `start_loop` (server-context.cpp:4514
+    /// @d81235049): blocks the main thread until termination.
     pub fn startLoop(self: *ServerContext) !void {
         const params = &self.impl.params_base;
         try self.impl.queue_tasks.startLoop(@as(i64, params.sleep_idle_seconds) * 1000);
     }
 
-    /// Ports `server_context`'s `terminate` (server-context.cpp:4169
-    /// @7fe450e19): unblocks `startLoop`.
+    /// Ports `server_context`'s `terminate` (server-context.cpp:4519
+    /// @d81235049): unblocks `startLoop`.
     pub fn terminate(self: *ServerContext) void {
         self.impl.queue_tasks.terminate();
     }
 
-    /// Ports `server_context`'s `get_llama_context` (server-context.cpp:4173
-    /// @7fe450e19): null while sleeping.
+    /// Ports `server_context`'s `get_llama_context` (server-context.cpp:4523
+    /// @d81235049): null while sleeping.
     pub fn getLlamaContext(self: *const ServerContext) ?*c.llama_context {
         return self.impl.ctx_tgt;
     }
 
-    /// Ports `server_context`'s `set_state_callback` (server-context.cpp:4249
-    /// @7fe450e19): set before `loadModel`.
+    /// Ports `server_context`'s `set_state_callback` (server-context.cpp:4600
+    /// @d81235049): set before `loadModel`.
     pub fn setStateCallback(self: *ServerContext, callback: StateCallback) void {
         self.impl.callback_state = callback;
     }
 
-    /// Ports `server_context`'s `get_meta` (server-context.cpp:4181
-    /// @7fe450e19): read-only metadata, after `loadModel`.
+    /// Ports `server_context`'s `get_meta` (server-context.cpp:4531
+    /// @d81235049): read-only metadata, after `loadModel`.
     ///
     /// Return: strings owned by `a`, or by the context for its lifetime.
     pub fn getMeta(self: *const ServerContext, a: Allocator) !Meta {
@@ -4858,6 +5301,7 @@ pub const ServerContext = struct {
             .model_aliases = impl.model_aliases,
             .model_tags = impl.model_tags,
             .model_path = impl.params_base.model.path,
+            .model_output_modalities = common.serverModelOutputModalities(tc.common.getDecisionType(impl.model_tgt)),
             .has_mtmd = impl.mctx != null,
             .has_inp_image = impl.chat_params.allow_image,
             .has_inp_audio = impl.chat_params.allow_audio,

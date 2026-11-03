@@ -7,7 +7,7 @@
 //! - `llama.cpp/src/llama-io.h` -- `llama_io_write_i` and `llama_io_read_i`
 //! - `llama.cpp/src/llama-io.cpp` -- `write_string` and `read_string`
 //!
-//! All at v0.5.0 (`7fe450e19`).
+//! All at v0.6.0 (`d81235049`).
 //!
 //! # Exceptions
 //!
@@ -25,7 +25,7 @@ const allocator = impl.allocator;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 
-/// Ports `llama_io_write_i` (llama-io.h:9 @7fe450e19): a sink for state.
+/// Ports `llama_io_write_i` (llama-io.h:9 @d81235049): a sink for state.
 pub const Writer = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
@@ -60,7 +60,7 @@ pub const Writer = struct {
         return self.write(std.mem.asBytes(&value), exc);
     }
 
-    /// Ports `llama_io_write_i`'s `write_string` (llama-io.cpp:5 @7fe450e19):
+    /// Ports `llama_io_write_i`'s `write_string` (llama-io.cpp:5 @d81235049):
     /// a `uint32_t` length, then the bytes.
     ///
     /// Return: nothing, or `error.Thrown`.
@@ -71,7 +71,7 @@ pub const Writer = struct {
     }
 };
 
-/// Ports `llama_io_read_i` (llama-io.h:23 @7fe450e19): a source of state.
+/// Ports `llama_io_read_i` (llama-io.h:23 @d81235049): a source of state.
 pub const Reader = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
@@ -80,7 +80,16 @@ pub const Reader = struct {
         read: *const fn (ptr: *anyopaque, dst: []u8, exc: *Exception) Thrown!void,
         readTensor: *const fn (ptr: *anyopaque, tensor: *c.ggml_tensor, offset: usize, size: usize, exc: *Exception) Thrown!void,
         nBytes: *const fn (ptr: *anyopaque) usize,
+        /// `discard`, a no-op unless a source overrides it.
+        discard: ?*const fn (ptr: *anyopaque) void = null,
     };
+
+    /// Drops tensor data read but not yet applied, as when a restore fails.
+    ///
+    /// Return: nothing.
+    pub fn discard(self: Reader) void {
+        if (self.vtable.discard) |f| f(self.ptr);
+    }
 
     /// Return: nothing, or `error.Thrown` when the source runs out.
     pub fn read(self: Reader, dst: []u8, exc: *Exception) Thrown!void {
@@ -108,7 +117,7 @@ pub const Reader = struct {
         return v;
     }
 
-    /// Ports `llama_io_read_i`'s `read_string` (llama-io.cpp:12 @7fe450e19).
+    /// Ports `llama_io_read_i`'s `read_string` (llama-io.cpp:12 @d81235049).
     ///
     /// Parameters:
     /// - `out`: receives the string, replacing what it held.

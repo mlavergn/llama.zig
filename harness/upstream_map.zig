@@ -62,6 +62,13 @@ const FileMap = struct {
 /// returns the depth to zero. A `{` in an unbalanced macro arm can fool it;
 /// the extent then runs long, which only over-reports touched definitions.
 ///
+/// Before the body opens, a brace inside parentheses or straight after an
+/// identifier is a braced initializer -- `pimpl(new impl{})`, `mem{m}` in a
+/// constructor's member-initializer list -- and closes nothing. Until v0.6.0
+/// such a brace ended the extent on the signature's second line, so changes
+/// further into the constructor read as untouched and were repinned
+/// (`common_init_result`, `common_speculative_init_result`).
+///
 /// Parameters:
 /// - `lines`: the file, split on newlines.
 /// - `n`: the definition's first line.
@@ -79,6 +86,8 @@ fn extentEnd(lines: []const []const u8, n: usize) usize {
     // A `;` inside parentheses -- a `for` header -- ends nothing.
     var parens: isize = 0;
     var opened = false;
+    // Braced initializers open before the body, which end nothing.
+    var init_braces: isize = 0;
     var in_block_comment = false;
     var i = n;
     while (i <= lines.len) : (i += 1) {
@@ -110,10 +119,18 @@ fn extentEnd(lines: []const []const u8, n: usize) usize {
                     }
                 },
                 '{' => {
+                    if (!opened and (parens > 0 or (k > 0 and isInitPrefix(line[k - 1])))) {
+                        init_braces += 1;
+                        continue;
+                    }
                     depth += 1;
                     opened = true;
                 },
                 '}' => {
+                    if (init_braces > 0) {
+                        init_braces -= 1;
+                        continue;
+                    }
                     depth -= 1;
                     if (opened and depth <= 0) return i;
                 },
@@ -128,6 +145,12 @@ fn extentEnd(lines: []const []const u8, n: usize) usize {
         if (i > n + 5000) return i;
     }
     return lines.len;
+}
+
+/// Whether `ch`, directly before a `{`, makes it a braced initializer
+/// (`impl{}`, `std::vector<int>{}`) rather than a block.
+fn isInitPrefix(ch: u8) bool {
+    return std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '>';
 }
 
 /// Parses `git diff -U0` output for one file into hunks.

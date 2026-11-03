@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/chat-auto-parser-generator.cpp` (llama.cpp
-//! v0.5.0, `7fe450e19`): `peg_generator`'s `generate_parser`,
+//! v0.6.0, `d81235049`): `peg_generator`'s `generate_parser`,
 //! `autoparser`'s `build_parser` and the three analyzers' `build_parser`
 //! methods with their helpers. Each declaration names what it ports and the
 //! line it began at.
@@ -45,7 +45,7 @@ const Autoparser = types.Autoparser;
 const trimWhitespace = helpers.trimWhitespace;
 
 /// Ports `peg_generator`'s `generate_parser` (chat-auto-parser-generator.cpp:23
-/// @7fe450e19), the overload that analyses the template first.
+/// @d81235049), the overload that analyses the template first.
 pub fn generateParser(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error!ChatParams {
     // Run differential analysis to extract template structure
     var ap: Autoparser = .{};
@@ -54,7 +54,7 @@ pub fn generateParser(a: Allocator, tmpl: *const Template, inputs: *const Genera
 }
 
 /// Ports `peg_generator`'s `generate_parser` (chat-auto-parser-generator.cpp:31
-/// @7fe450e19): the prompt, the generation prompt (rebuilt for a continued
+/// @d81235049): the prompt, the generation prompt (rebuilt for a continued
 /// message), the parser, and -- for tools or a response format -- the
 /// grammar and its lazy trigger.
 pub fn generateParserAnalyzed(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams, ap: *const Autoparser) Error!ChatParams {
@@ -122,8 +122,8 @@ pub fn generateParserAnalyzed(a: Allocator, tmpl: *const Template, inputs: *cons
     return data;
 }
 
-/// Ports `parser_build_context` (chat-auto-parser.h:226 @7fe450e19) and its
-/// constructor (chat-auto-parser-generator.cpp:18 @7fe450e19), which builds
+/// Ports `parser_build_context` (chat-auto-parser.h:226 @d81235049) and its
+/// constructor (chat-auto-parser-generator.cpp:18 @d81235049), which builds
 /// the `eps` the reasoning parser starts as.
 const Ctx = struct {
     p: *ChatBuilder,
@@ -191,7 +191,7 @@ const Root = struct {
 };
 
 /// Ports `autoparser`'s `build_parser` (chat-auto-parser-generator.cpp:99
-/// @7fe450e19).
+/// @d81235049).
 ///
 /// Return: the arena, its `gpa` `a`; release with `deinit`.
 pub fn buildParser(a: Allocator, ap: *const Autoparser, inputs: *const GenerationParams, generation_prompt: []const u8) Error!peg.Arena {
@@ -203,7 +203,7 @@ pub fn buildParser(a: Allocator, ap: *const Autoparser, inputs: *const Generatio
 }
 
 /// Ports `analyze_reasoning`'s `build_parser` (chat-auto-parser-generator.cpp:138
-/// @7fe450e19).
+/// @d81235049).
 fn reasoningBuildParser(r: *const types.AnalyzeReasoning, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;
@@ -228,7 +228,7 @@ fn reasoningBuildParser(r: *const types.AnalyzeReasoning, ctx: *Ctx) PegError!Pa
 }
 
 /// Ports `analyze_content`'s `build_parser` (chat-auto-parser-generator.cpp:159
-/// @7fe450e19).
+/// @d81235049).
 fn contentBuildParser(c: *const types.AnalyzeContent, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;
@@ -249,7 +249,7 @@ fn contentBuildParser(c: *const types.AnalyzeContent, ctx: *Ctx) PegError!Parser
 }
 
 /// Ports `analyze_content`'s `build_optional_wrapped` (chat-auto-parser-generator.cpp:171
-/// @7fe450e19).
+/// @d81235049).
 fn contentBuildOptionalWrapped(c: *const types.AnalyzeContent, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;
@@ -261,7 +261,7 @@ fn contentBuildOptionalWrapped(c: *const types.AnalyzeContent, ctx: *Ctx) PegErr
 }
 
 /// Ports `analyze_tools`'s `build_parser` (chat-auto-parser-generator.cpp:180
-/// @7fe450e19).
+/// @d81235049).
 fn toolsBuildParser(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
     switch (t.format.mode) {
         .JSON_NATIVE => return buildToolParserJsonNative(t, ctx),
@@ -277,7 +277,7 @@ fn toolsBuildParser(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
 }
 
 /// Ports `analyze_tools`'s `build_tool_parser_json_native` (chat-auto-parser-generator.cpp:196
-/// @7fe450e19).
+/// @d81235049).
 fn buildToolParserJsonNative(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;
@@ -334,7 +334,7 @@ fn buildToolParserJsonNative(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!P
 }
 
 /// Ports `analyze_tools`'s `build_func_parser` (chat-auto-parser-generator.cpp:240
-/// @7fe450e19): a function's opening with its name, the call id and the
+/// @d81235049): a function's opening with its name, the call id and the
 /// arguments, then its closing, atomic where a partial match would
 /// mislead.
 fn buildFuncParser(t: *const types.AnalyzeTools, p: *ChatBuilder, name: []const u8, call_id_section: ParserId, have_call_id: bool, args: ParserId, atomic_peek: ?ParserId) PegError!ParserId {
@@ -434,7 +434,7 @@ const TagJson = struct {
 };
 
 /// Ports `analyze_tools`'s `build_tool_parser_tag_json` (chat-auto-parser-generator.cpp:288
-/// @7fe450e19): tagged calls with JSON arguments.
+/// @d81235049): tagged calls with JSON arguments.
 fn buildToolParserTagJson(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;
@@ -595,7 +595,7 @@ const TagTagged = struct {
 };
 
 /// Ports `analyze_tools`'s `build_tool_parser_tag_tagged` (chat-auto-parser-generator.cpp:359
-/// @7fe450e19): tagged calls with tagged arguments.
+/// @d81235049): tagged calls with tagged arguments.
 fn buildToolParserTagTagged(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;

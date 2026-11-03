@@ -17,7 +17,10 @@
 //! the chunks `mtmd_tokenize` makes -- type, tokens, counts, ids, every
 //! decoder position, the serialized bytes; every encoded embedding on bits,
 //! through `mtmd_encode_chunk` and the batch API; the logits after
-//! `mtmd_helper_eval_chunks`; and for a TTS fixture the generation helper's
+//! `mtmd_helper_eval_chunks`; each media chunk through
+//! `mtmd_helper_decode_image_chunk` with its post-decode callback's views;
+//! `mtmd_get_memory_usage`'s result (through `harness/mtmd_mem_ref.cpp` on
+//! the reference side); and for a TTS fixture the generation helper's
 //! hidden states and output WAV.
 //!
 //! Usage: mtmd_diff <ref|port> <cpu|gpu> <nodes|fused> <tmp-dir>
@@ -63,6 +66,7 @@ comptime {
     checkLayout(H.VideoInitParams, mtmd_c.struct_mtmd_helper_video_init_params);
     checkLayout(H.InitOpt, mtmd_c.struct_mtmd_helper_init_opt);
     checkLayout(G.Inp, mtmd_c.struct_mtmd_helper_gen_audio_inp);
+    checkLayout(H.EmbdBatchView, mtmd_c.struct_mtmd_helper_embd_batch);
 }
 
 // -----------------------------------------------------------------------------
@@ -133,6 +137,7 @@ const Api = struct {
     mtmd_helper_get_n_tokens: *const fn (P) callconv(.c) usize,
     mtmd_helper_get_n_pos: *const fn (P) callconv(.c) c.llama_pos,
     mtmd_helper_eval_chunks: *const fn (P, OptP, P, c.llama_pos, c.llama_seq_id, i32, bool, *c.llama_pos) callconv(.c) i32,
+    mtmd_helper_decode_image_chunk: *const fn (P, OptP, P, ?[*]f32, c.llama_pos, c.llama_seq_id, i32, *c.llama_pos, H.PostDecodeCallback, OptP) callconv(.c) i32,
     mtmd_helper_model_can_chat: *const fn (OptP, OptP) callconv(.c) bool,
     mtmd_helper_gen_audio_init: *const fn (OptP, P) callconv(.c) P,
     mtmd_helper_gen_audio_free: *const fn (OptP) callconv(.c) void,
@@ -150,6 +155,8 @@ const Api = struct {
     llama_free: *const fn (?*c.llama_context) callconv(.c) void,
     llama_get_logits_ith: *const fn (?*c.llama_context, i32) callconv(.c) ?[*]f32,
     llama_get_embeddings_ith: *const fn (?*c.llama_context, i32) callconv(.c) ?[*]f32,
+    llama_get_memory: *const fn (?*const c.llama_context) callconv(.c) c.llama_memory_t,
+    llama_memory_clear: *const fn (c.llama_memory_t, bool) callconv(.c) void,
     llama_model_n_embd: *const fn (?*const c.llama_model) callconv(.c) i32,
     llama_model_n_embd_inp: *const fn (?*const c.llama_model) callconv(.c) i32,
     llama_model_get_vocab: *const fn (?*const c.llama_model) callconv(.c) ?*const c.llama_vocab,
@@ -422,6 +429,72 @@ fn evalChunks(x: *const Ctx, chunks: P) void {
     print("\n", .{});
 }
 
+/// The post-decode callback (v0.6.0: a `mtmd_helper_embd_batch` view, not
+/// a `llama_batch`): every field of each sub-batch's view, its embeddings
+/// and its section-major positions by hash.
+fn postDecode(v: ?*const H.EmbdBatchView, _: ?*anyopaque) callconv(.c) i32 {
+    const b = v.?;
+    const n: usize = @intCast(b.n_tokens);
+    const ne: usize = @intCast(b.n_embd);
+    const np: usize = @intCast(b.n_pos);
+    var h: u64 = 0;
+    if (b.pos) |p| h = hashBytes(std.mem.sliceAsBytes(p[0 .. n * np]));
+    print("  post-decode n_tokens {d} n_embd {d} n_pos {d} seq {d} embd {x:0>16} pos {x:0>16}\n", .{ b.n_tokens, b.n_embd, b.n_pos, b.seq_id, hashF32(b.embd, n * ne), h });
+    return 0;
+}
+
+/// `mtmd_helper_decode_image_chunk` on each media chunk, from an empty
+/// cache at position 3, in sub-batches of 5 so the views start mid-chunk,
+/// with the post-decode callback; then the logits of its last token.
+fn decodeMediaChunks(x: *const Ctx, chunks: P) void {
+    const api = x.api;
+    const lctx = x.lctx orelse return;
+    const n = api.mtmd_input_chunks_size(chunks);
+    for (0..n) |i| {
+        const ch = api.mtmd_input_chunks_get(chunks, i).?;
+        if (api.mtmd_input_chunk_get_type(ch) == 0) continue;
+        if (api.mtmd_encode_chunk(x.mctx, ch) != 0) continue;
+        api.llama_memory_clear(api.llama_get_memory(lctx), true);
+        var new_n_past: c.llama_pos = -1;
+        print("decode-chunk {d}\n", .{i});
+        const rc = api.mtmd_helper_decode_image_chunk(x.mctx, lctx, ch, api.mtmd_get_output_embd(x.mctx), 3, 0, 5, &new_n_past, postDecode, null);
+        print("decode-chunk {d} rc {d} n_past {d}\n", .{ i, rc, new_n_past });
+        flush();
+    }
+}
+
+/// `mtmd_get_memory_usage` (C++ linkage upstream, so the reference is
+/// reached through `harness/mtmd_mem_ref.cpp`): per device, the image token
+/// budget and whether the image decodes non-causally (v0.6.0).
+extern fn ref_mtmd_get_memory_usage(fname: [*:0]const u8, params: M.ContextParams, devs: [*]c.ggml_backend_dev_t, sizes: [*]usize, cap: c_int, image_max_tokens: *c_int, use_non_causal: *bool) c_int;
+
+fn memoryUsage(port: bool, fname: [*:0]const u8, params: M.ContextParams) void {
+    var devs: [16]c.ggml_backend_dev_t = undefined;
+    var sizes: [16]usize = undefined;
+    var n: usize = 0;
+    var imt: c_int = 0;
+    var nc = false;
+    if (port) {
+        var r = M.getMemoryUsage(fname, params);
+        defer r.deinit();
+        for (r.backend_mem_usage.items.items) |e| {
+            if (n < devs.len) {
+                devs[n] = e.dev;
+                sizes[n] = e.size;
+            }
+            n += 1;
+        }
+        imt = r.image_max_tokens;
+        nc = r.use_non_causal;
+    } else {
+        n = @intCast(ref_mtmd_get_memory_usage(fname, params, &devs, &sizes, devs.len, &imt, &nc));
+    }
+    print("memory-usage n {d} image_max_tokens {d} non_causal {}", .{ n, imt, nc });
+    for (0..@min(n, devs.len)) |k| print(" {s}={d}", .{ std.mem.span(c.ggml_backend_dev_name(devs[k])), sizes[k] });
+    print("\n", .{});
+    flush();
+}
+
 fn runMedia(x: *const Ctx, tmp: []const u8, inputs: []const u8, vision: bool, audio: bool) !void {
     const api = x.api;
     var bitmaps: std.ArrayList(P) = .empty;
@@ -577,9 +650,18 @@ fn tokenizeAndRun(x: *const Ctx, bitmaps: []const P, run: bool) !void {
     flush();
     evalChunks(x, chunks);
     flush();
+    decodeMediaChunks(x, chunks);
+    flush();
 }
 
 fn runTts(x: *const Ctx, qwen: bool, steps: c_int) void {
+    runTtsPrompt(x, qwen, steps, "hello there, test.");
+    // pocket: two sentences past its 50-token chunk, run until the first
+    // chunk's budget ends it, so finish_chunk re-prompts the second
+    if (!qwen) runTtsPrompt(x, qwen, 400, "one two three four five six seven. eight nine ten eleven twelve.");
+}
+
+fn runTtsPrompt(x: *const Ctx, qwen: bool, steps: c_int, prompt: [:0]const u8) void {
     const api = x.api;
     const lctx = x.lctx orelse return;
     const gen = api.mtmd_helper_gen_audio_init(lctx, x.mctx);
@@ -588,13 +670,15 @@ fn runTts(x: *const Ctx, qwen: bool, steps: c_int) void {
     defer x.a.free(spk);
     const spk_bm = api.mtmd_bitmap_init_from_audio(spk.len, spk.ptr);
     defer api.mtmd_bitmap_free(spk_bm);
-    const prompt = "hello there, test.";
-    var inp: G.Inp = .{ .seq_id = 0, .prompt = prompt, .prompt_len = prompt.len, .speaker_ref = @ptrCast(@alignCast(spk_bm)), .lang = "", .top_k = 8, .top_p = 1.0, .seed = 42, .out_type = .wav };
+    api.llama_memory_clear(api.llama_get_memory(lctx), true);
+    var inp: G.Inp = .{ .seq_id = 0, .prompt = prompt.ptr, .prompt_len = prompt.len, .speaker_ref = @ptrCast(@alignCast(spk_bm)), .lang = "", .top_k = 8, .top_p = 1.0, .seed = 42, .out_type = .wav };
     var rc = api.mtmd_helper_gen_audio_set_input(gen, &inp);
     print("tts set_input {d}\n", .{rc});
     if (rc != 0) return;
     while (true) {
-        const r = api.mtmd_helper_gen_audio_step_prompt(gen, 16);
+        // a few tokens a step, so the prompt takes several batches and the
+        // last batch's output row sits past its start
+        const r = api.mtmd_helper_gen_audio_step_prompt(gen, 5);
         print("tts step_prompt {d}\n", .{r});
         if (r <= 0) break;
     }
@@ -619,7 +703,7 @@ fn runTts(x: *const Ctx, qwen: bool, steps: c_int) void {
         rc = api.mtmd_helper_gen_audio_step_gen(gen, sampled, h, &h_next, &stop);
         print("tts step_gen {d} rc {d} stop {} h {x:0>16}\n", .{ s, rc, stop, hashF32(h_next, n_embd) });
         flush();
-        if (rc != 0 or h_next == null) break;
+        if (rc != 0 or h_next == null or stop) break;
         h = h_next;
     }
     var sr: i32 = 0;
@@ -701,6 +785,13 @@ pub fn main(init: std.process.Init) !u8 {
         api.mtmd_support_vision(mctx),   api.mtmd_support_audio(mctx),               api.mtmd_get_audio_sample_rate(mctx),
         api.mtmd_decode_use_mrope(mctx), api.mtmd_decode_use_non_causal(mctx, null), std.mem.span(api.mtmd_get_marker(mctx)),
     });
+    memoryUsage(api == &port_api, mmproj.ptr, mparams);
+    // with a custom budget, which the token cap reads
+    var mparams_cap = mparams;
+    mparams_cap.image_max_tokens = 40;
+    mparams_cap.image_min_tokens = 16;
+    memoryUsage(api == &port_api, mmproj.ptr, mparams_cap);
+    memoryUsage(api == &port_api, "/nonexistent.gguf", mparams);
     const info = api.mtmd_gen_audio_get_info(mctx);
     const gi = api.mtmd_gen_inp_default(mctx);
     print("gen type {d} rate {d} variant {s} default top_k {d} top_p {x} temp {x} seed {d}\n", .{ @backingInt(info.type), info.sample_rate, if (info.model_variant) |v| std.mem.span(v) else "(null)", gi.top_k, @as(u32, @bitCast(gi.top_p)), @as(u32, @bitCast(gi.temp)), gi.seed });

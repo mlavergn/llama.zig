@@ -95,6 +95,10 @@ GET /props
 !server -hf test/empty -c 256 -np 1
 !server -hf test/nope -c 256 -np 1
 !server -hf test/badref -c 256 -np 1 -lv 4
+!server -hf test/nestedref -c 256 -np 1 -lv 4
+!fulllog
+GET /props
+!mocklog
 !server -hf notarepo -c 256 -np 1
 !server -hf a/b/c -c 256 -np 1
 !server -hf test/tiny -hft hf_short -c 256 -np 1
@@ -160,4 +164,54 @@ GET /models
 # --- presets over cached models; one hides its cache entry
 !server --models-preset $DATA/dedup.ini -c 256 -np 1 -lv 4
 !fulllog
+GET /models
+
+# --- v0.6.0: the cache directory is a path. LLAMA_CACHE is taken as it is,
+# so a file there fails without a separator added to its name
+!env LLAMA_CACHE=$DATA/hub/files/tiny.gguf
+!server -m $CWD/dl/tiny.gguf -mmu $MOCK/files/mmproj.gguf -c 256 -np 1
+# and the platform's directory is joined as a path: a HOME ending in a
+# separator does not double it
+!env LLAMA_CACHE=
+!env XDG_CACHE_HOME=
+!env HOME=$CWD/home/
+!server -m $CWD/dl/tiny.gguf -mmu $MOCK/files/mmproj.gguf -c 256 -np 1 -lv 4
+!fulllog
+GET /props
+!mocklog
+# a HOME that is a file: the cache directory cannot be made, and the
+# message names the path as joined
+!env HOME=$DATA/hub/files/tiny.gguf
+!server -m $CWD/dl/tiny.gguf -mmu $MOCK/files/mmproj.gguf -c 256 -np 1
+
+# --- v0.6.0: input and output modalities resolved offline from a cache
+# (hub.setup's hfcache): a decision model's metadata, a preset's hf-file,
+# a preset's no-mmproj, and the router's --no-mmproj for every child
+!noenv
+!fresh hfcache
+!env LLAMA_CACHE=$WORK
+!env MODEL_ENDPOINT=$MOCK
+!server --models-preset $DATA/judge.ini -c 256 -np 1 -lv 4
+!fulllog
+GET /models
+!server --models-preset $DATA/judge.ini -c 256 -np 1 --no-mmproj
+GET /models
+!mocklog
+
+# --- v0.6.0: the router's own -mu and -mmu reach every model's offline
+# resolution (update_caps copies its model), which cannot find them: the
+# text default until a child has downloaded and loaded them, when the
+# child's own modalities replace it (update_status)
+!noenv
+!env LLAMA_CACHE=$CWD/cache
+!env MODEL_ENDPOINT=$MOCK
+!server --models-preset $DATA/byurl.ini -mu $MOCK/files/tiny.gguf -mmu $MOCK/files/mmproj.gguf -c 256 -np 1 -lv 4
+!fulllog
+GET /models
+POST /models/load {"model":"byurl"}
+!waitfor /models "id":"byurl"[^{]*\{"value":"loaded"
+GET /models
+!mocklog
+POST /models/unload {"model":"byurl"}
+!waitfor /models "id":"byurl"[^{]*\{"value":"unloaded"
 GET /models

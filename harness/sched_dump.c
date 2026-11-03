@@ -14,6 +14,7 @@
 #include "ggml.h"
 #include "ggml-backend.h"
 #include "ggml-backend-impl.h"
+#include "ggml-cpu.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -137,8 +138,10 @@ int main(void) {
         struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4);
         struct ggml_tensor * t = ggml_add(ctx, a, b);
         // Pin an intermediate *node*: pass 2 walks nodes, not leafs, so a
-        // flagged leaf would leave it with nothing to expand from.
-        ggml_set_input(t);
+        // flagged leaf would leave it with nothing to expand from. The flag
+        // is set by hand: since v0.6.0 `ggml_set_input` asserts the tensor
+        // is a leaf (`op == GGML_OP_NONE`).
+        t->flags |= GGML_TENSOR_FLAG_INPUT;
         for (int i = 0; i < 3; i++) t = ggml_add(ctx, t, b);
         struct ggml_cgraph * g = ggml_new_graph(ctx);
         ggml_build_forward_expand(g, t);
@@ -155,6 +158,43 @@ int main(void) {
         struct ggml_cgraph * g = ggml_new_graph(ctx);
         ggml_build_forward_expand(g, o);
         dump("view", g);
+        ggml_free(ctx);
+    }
+    {   // Pipeline parallelism (`n_copies > 1`): pass 6 gives every input
+        // *leaf* its per-copy tensors and lists it in `graph_inputs`, which
+        // the graph copy then allocates first -- including an input no node
+        // consumes (`x`, expanded on its own). Neither is visible in the
+        // assignments, so this allocates on a real CPU backend and prints
+        // the buffer size and where each leaf landed.
+        struct ggml_context * ctx = ggml_init(p);
+        struct ggml_tensor * x = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 64);
+        struct ggml_tensor * a = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 16);
+        struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 16);
+        struct ggml_tensor * w = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 16);
+        ggml_set_name(x, "x"); ggml_set_name(a, "a"); ggml_set_name(b, "b"); ggml_set_name(w, "w");
+        ggml_set_input(x);
+        ggml_set_input(a);
+        ggml_set_input(b);
+        struct ggml_tensor * t = ggml_add(ctx, b, w);
+        t = ggml_mul(ctx, t, a);
+        struct ggml_cgraph * g = ggml_new_graph(ctx);
+        ggml_build_forward_expand(g, x);
+        ggml_build_forward_expand(g, t);
+
+        ggml_backend_t cpu = ggml_backend_cpu_init();
+        ggml_backend_t backends[1] = { cpu };
+        ggml_backend_sched_t sched = ggml_backend_sched_new(backends, NULL, 1, 512, true, false);
+        bool ok = ggml_backend_sched_alloc_graph(sched, g);
+        printf("parallel: alloc=%d n_copies=%d buffer=%zu\n", ok, ggml_backend_sched_get_n_copies(sched),
+               ggml_backend_sched_get_buffer_size(sched, cpu));
+        struct ggml_tensor * leafs[4] = { x, a, b, w };
+        for (int i = 0; i < 4; i++) {
+            struct ggml_tensor * l = leafs[i];
+            long off = l->data && l->buffer ? (long) ((char *) l->data - (char *) ggml_backend_buffer_get_base(l->buffer)) : -1;
+            printf("  parallel leaf %s -> off %ld\n", l->name, off);
+        }
+        ggml_backend_sched_free(sched);
+        ggml_backend_free(cpu);
         ggml_free(ctx);
     }
     return 0;

@@ -1,0 +1,4 @@
+{#- v0.6.0: a test takes one argument without parentheses: `x is divisibleby 3`. -#}
+{%- set n = messages|length -%}
+[{{ 6 is divisibleby 3 }}][{{ n is divisibleby 2 }}][{{ n is eq n }}][{{ 'a' is in 'abc' }}][{{ n is not ge 100 }}]
+[{{ n is gt 0 and n is lt 100 }}][{{ n is ne 1 or n is ne 2 }}][{{ 'x' if n is ge 1 else 'y' }}][{{ n is sameas [n][0] }}]

@@ -633,14 +633,14 @@ static int run_decode(common_params & params) {
     {
         int n = 0;
         for (auto & v : inp) n += (int) v.size();
-        llama_batch b = llama_batch_init(n, 0, 1);
+        (void) n;
+        common_batch b(ctx_tgt);
         for (int s = 0; s < n_seq; s++) {
-            for (size_t i = 0; i + 1 < inp[s].size(); i++) common_batch_add(b, inp[s][i], (llama_pos) i, { s }, false);
+            for (size_t i = 0; i + 1 < inp[s].size(); i++) b.add(inp[s][i], (llama_pos) i, s, false);
         }
-        int rc = llama_decode(ctx_tgt, b);
+        int rc = llama_process(ctx_tgt, LLAMA_PROCESS_TYPE_DECODE, b.get());
         printf("prefill rc=%d\n", rc);
         printf("process prefill %d\n", (int) common_speculative_process(spec, b));
-        llama_batch_free(b);
     }
 
     std::vector<llama_token> id_last(n_seq);
@@ -656,8 +656,11 @@ static int run_decode(common_params & params) {
     }
 
     const llama_vocab * vocab = llama_model_get_vocab(model_tgt);
-    llama_batch batch_tgt = llama_batch_init(llama_n_batch(ctx_tgt), 0, 1);
+    common_batch batch_tgt(ctx_tgt);
     const int n_predict = params.n_predict < 0 ? 32 : params.n_predict;
+    // verify by rejection, as the server does at temp > 0: the drafters keep their candidates
+    const bool reject = getenv("SPEC_REJECT") != nullptr;
+    std::vector<std::vector<std::vector<llama_token_data>>> draft_q(n_seq);
 
     for (int it = 0; it < 4 * n_predict; it++) {
         bool any = false;
@@ -668,36 +671,57 @@ static int run_decode(common_params & params) {
             n_draft_max = std::min(n_draft_max, n_predict - n_gen[s] - 1);
             n_draft_max = std::max(n_draft_max, 0);
             draft[s].clear();
+            draft_q[s].clear();
             if (spec) {
-                common_speculative_get_draft_params(spec, s) = { true, n_draft_max, n_past[s], id_last[s], &prompt_tgt[s], &draft[s] };
+                auto & dp = common_speculative_get_draft_params(spec, s);
+                dp = { true, n_draft_max, n_past[s], id_last[s], &prompt_tgt[s], &draft[s] };
+                if (reject) {
+                    dp.result_q = &draft_q[s];
+                    dp.temp     = params.sampling.temp;
+                    dp.seed     = params.sampling.seed;
+                }
             }
         }
         if (!any) break;
         common_speculative_draft(spec);
 
-        common_batch_clear(batch_tgt);
+        batch_tgt.clear();
         std::vector<std::vector<int>> idxs(n_seq);
         for (int s = 0; s < n_seq; s++) {
             if (done[s]) continue;
             printf("it %d seq %d pos %d last %d", it, s, n_past[s], id_last[s]);
             print_tokens(" draft", draft[s]);
+            if (reject) {
+                uint64_t h = fnv(nullptr, 0);
+                for (const auto & q : draft_q[s]) {
+                    const size_t n = q.size();
+                    h = fnv(&n, sizeof(n), h);
+                    if (n) h = fnv(q.data(), n * sizeof(llama_token_data), h);
+                }
+                printf(" q %zu %016" PRIx64, draft_q[s].size(), h);
+            }
             printf("\n");
             if (ctx_dft) llama_memory_seq_rm(llama_get_memory(ctx_dft), s, n_past[s], -1);
-            idxs[s].push_back(batch_tgt.n_tokens);
-            common_batch_add(batch_tgt, id_last[s], n_past[s], { s }, true);
+            idxs[s].push_back(batch_tgt.size());
+            batch_tgt.add(id_last[s], n_past[s], s, true);
             for (size_t i = 0; i < draft[s].size(); i++) {
-                idxs[s].push_back(batch_tgt.n_tokens);
-                common_batch_add(batch_tgt, draft[s][i], n_past[s] + 1 + (int) i, { s }, true);
+                idxs[s].push_back(batch_tgt.size());
+                batch_tgt.add(draft[s][i], n_past[s] + 1 + (int) i, s, true);
             }
         }
-        int rc = llama_decode(ctx_tgt, batch_tgt);
+        int rc = llama_process(ctx_tgt, LLAMA_PROCESS_TYPE_DECODE, batch_tgt.get());
         if (rc != 0) { printf("decode rc=%d\n", rc); break; }
         if (!common_speculative_process(spec, batch_tgt)) { printf("process failed\n"); break; }
 
         for (int s = 0; s < n_seq; s++) {
             if (done[s]) continue;
             common_sampler * keep = (it % 3 == 1) ? common_sampler_clone(smpl[s]) : nullptr;
-            auto ids = common_sampler_sample_and_accept_n(smpl[s], ctx_tgt, idxs[s], draft[s]);
+            // the server's rule: rejection only over candidates for every drafted token
+            const bool use_rejection = reject && !draft_q[s].empty() && draft_q[s].size() == draft[s].size();
+            auto ids = use_rejection
+                ? common_sampler_sample_and_accept_n_rejection(smpl[s], ctx_tgt, idxs[s], draft[s], draft_q[s])
+                : common_sampler_sample_and_accept_n(smpl[s], ctx_tgt, idxs[s], draft[s]);
+            if (use_rejection) printf("  rejection\n");
             print_tokens("  ids", ids);
             printf(" acc %zu last %d\n", ids.size() - 1, common_sampler_last(smpl[s]));
             print_cands(smpl[s], s);
@@ -732,7 +756,6 @@ static int run_decode(common_params & params) {
     common_speculative_print_stats(spec);
     common_speculative_free(spec);
     for (auto * s : smpl) common_sampler_free(s);
-    llama_batch_free(batch_tgt);
     return 0;
 }
 

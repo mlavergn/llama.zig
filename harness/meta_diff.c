@@ -2,7 +2,7 @@
  * the port, side by side in one process, asked the same questions.
  *
  * `scripts/meta-diff` compiles `llama.cpp/ggml/src/ggml-backend-meta.cpp`
- * with its eight unmangled exports renamed to `ref_*` on the command line --
+ * with its unmangled exports (seven since v0.6.0) renamed to `ref_*` on the command line --
  * which renames the C++'s own internal calls to them too, so the renamed
  * object is self-consistent -- and links it beside `src/ggml/backend_meta.zig`
  * and a `libggml.a` with the stock meta object deleted. Everything else in
@@ -20,7 +20,8 @@
  *   - graphs built to steer `graph_compute` down its delayed-reduction
  *     branches: `ADD_ID` with a partial bias followed by a `MUL` chain, two
  *     partial branches summed by one `ADD`, and zero-slice devices that need
- *     the `SCALE`-by-zero step before the butterfly;
+ *     the zeroing step before the butterfly (a `FILL` with 0 since v0.6.0,
+ *     a `SCALE` by 0 before);
  *   - one, two, three and four devices, Metal and CPU mixed, so the
  *     butterfly runs with no reduction, one step, a non-power-of-two fold,
  *     and two steps.
@@ -32,12 +33,14 @@
  * return what was written), so a bug both sides share in that place still
  * fails.
  *
- * Where the shared library calls a meta predicate by name -- `alloc.zig`'s
- * `ggml_backend_buft_is_meta`, `backend.zig`'s `ggml_backend_buffer_is_meta`
- * -- it reaches the port's, which says "no" to a reference object. The
- * harness therefore calls each side's `alloc_ctx_tensors_from_buft`
- * directly, and the end-to-end half, which links one implementation per
- * binary, is what covers those call sites faithfully.
+ * Where the shared library calls a meta predicate by name -- `backend.zig`'s
+ * `ggml_backend_buffer_is_meta` -- it reaches the port's, which says "no" to
+ * a reference object; the end-to-end half, which links one implementation
+ * per binary, is what covers that call site faithfully. Allocation needs no
+ * such care since v0.6.0: `ggml_backend_alloc_ctx_tensors_from_buft` reaches
+ * the meta buffer type's own `alloc_buffer_n` through its vtable, so the
+ * shared allocator runs each side's, and `_size` the shared default
+ * `get_alloc_size_n` over each side's `get_alloc_size`.
  *
  * Usage: meta_diff [combo ...]   (default: every combo below)
  *   A combo is one letter per device: m = Metal, c = CPU.
@@ -68,7 +71,6 @@ bool ref_ggml_backend_buffer_is_meta(ggml_backend_buffer_t);
 bool ref_ggml_backend_is_meta(ggml_backend_t);
 size_t ref_ggml_backend_meta_n_backends(ggml_backend_t);
 ggml_backend_t ref_ggml_backend_meta_simple_backend(ggml_backend_t, size_t);
-struct ggml_backend_buffer * ref_ggml_backend_meta_alloc_ctx_tensors_from_buft(struct ggml_context *, ggml_backend_buffer_type_t);
 
 typedef struct {
     const char * label;
@@ -85,12 +87,12 @@ typedef struct {
 static const impl_t IMPL_REF = {
     "ref", ref_ggml_backend_meta_split_axis_name, ref_ggml_backend_meta_device, ref_ggml_backend_buft_is_meta,
     ref_ggml_backend_buffer_is_meta, ref_ggml_backend_is_meta, ref_ggml_backend_meta_n_backends,
-    ref_ggml_backend_meta_simple_backend, ref_ggml_backend_meta_alloc_ctx_tensors_from_buft,
+    ref_ggml_backend_meta_simple_backend, ggml_backend_alloc_ctx_tensors_from_buft,
 };
 static const impl_t IMPL_PORT = {
     "port", ggml_backend_meta_split_axis_name, ggml_backend_meta_device, ggml_backend_buft_is_meta,
     ggml_backend_buffer_is_meta, ggml_backend_is_meta, ggml_backend_meta_n_backends,
-    ggml_backend_meta_simple_backend, ggml_backend_meta_alloc_ctx_tensors_from_buft,
+    ggml_backend_meta_simple_backend, ggml_backend_alloc_ctx_tensors_from_buft,
 };
 
 // ---------------------------------------------------------------------------
@@ -338,6 +340,9 @@ static void dump_alloc_sizes(ggml_backend_buffer_type_t buft, weights_t * w) {
     for (int i = 0; i < w->n; i++) {
         fprintf(out, "alloc_size %s=%zu\n", w->t[i]->name, ggml_backend_buft_get_alloc_size(buft, w->t[i]));
     }
+    /* The whole context: the default get_alloc_size_n's plan over the meta
+     * buffer type, as libllama sizes its weight buffers. */
+    fprintf(out, "alloc_size_ctx=%zu\n", ggml_backend_alloc_ctx_tensors_from_buft_size(w->ctx, buft));
 }
 
 // ---------------------------------------------------------------------------

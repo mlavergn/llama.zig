@@ -75,6 +75,7 @@ pub fn modules(b: *std.Build, opts: Options, optimize: std.builtin.OptimizeMode)
     common_module.addImport("tools_h", tools_h_module);
     common_module.addOptions("build_info", build_info);
     common_module.addImport("cli_fit", fit_module);
+    common_module.addImport("llama", opts.reference.llama.root_module);
 
     const json_module = b.createModule(.{ .root_source_file = b.path("tools/server/json_module.zig"), .target = opts.target, .optimize = optimize, .link_libc = true });
     json_module.addImport("cli_fit", fit_module);

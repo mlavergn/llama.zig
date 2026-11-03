@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/glm4-moe.cpp` at v0.5.0 (`7fe450e19`):
+//! Ported from `llama.cpp/src/models/glm4-moe.cpp` at v0.6.0 (`d81235049`):
 //! `llama_model_glm4_moe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_glm4_moe`'s `load_arch_hparams` (models/glm4-moe.cpp:3 @7fe450e19).
+/// Ports `llama_model_glm4_moe`'s `load_arch_hparams` (models/glm4-moe.cpp:3 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -51,7 +51,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_glm4_moe`'s `load_arch_tensors` (models/glm4-moe.cpp:28 @7fe450e19).
+/// Ports `llama_model_glm4_moe`'s `load_arch_tensors` (models/glm4-moe.cpp:28 @d81235049).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -146,7 +146,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // The graph
 
 /// Ports `llama_model_glm4_moe`'s `build_arch_graph` (models/glm4-moe.cpp:125
-/// @7fe450e19): the MTP draft head for that graph type, the main model
+/// @d81235049): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -154,7 +154,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_glm4_moe`'s `graph_mtp`
-/// (models/glm4-moe.cpp:132 @7fe450e19).
+/// (models/glm4-moe.cpp:132 @d81235049).
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -184,6 +184,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     c.ggml_set_input(inp.embd);
 
     var tok_embd: *Tensor = undefined;
+    b.ubatch.assertEmbdOrToken("models/glm4-moe.cpp", 161);
     if (b.ubatch.token != null) {
         const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
         tok_embd = c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
@@ -277,7 +278,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_post_ffn", il);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/glm4-moe.cpp", 265, "head_norm_w && \"GLM4_MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
+    impl.assert(head_norm_w != null, "models/glm4-moe.cpp", 266, "head_norm_w && \"GLM4_MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
 
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
     b.cb(cur, "h_nextn", -1);
@@ -288,7 +289,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "models/glm4-moe.cpp", 282, "head_w && \"GLM4_MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    impl.assert(head_w != null, "models/glm4-moe.cpp", 283, "head_w && \"GLM4_MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
 
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
@@ -298,13 +299,13 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_glm4_moe`'s `graph`
-/// (models/glm4-moe.cpp:291 @7fe450e19).
+/// (models/glm4-moe.cpp:292 @d81235049).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 294, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 295, "n_embd_head == hparams.n_embd_head_k()");
 
     var sections: [4]c_int = undefined;
     @memcpy(&sections, hp.rope_sections[0..4]);
@@ -314,7 +315,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const use_mrope = hp.useMrope();
     if (b.ubatch.embd != null and !use_mrope) {
         // Stopped here rather than give wrong results.
-        impl.abort("models/glm4-moe.cpp", 307, "This GGUF does not support multimodal. Please reconvert it.");
+        impl.abort("models/glm4-moe.cpp", 308, "This GGUF does not support multimodal. Please reconvert it.");
     }
 
     // The positions.

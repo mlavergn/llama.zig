@@ -8,8 +8,8 @@
 //! `process_mtmd_prompt`), the server's `base64_decode`, and
 //! `format_prompt_infill` and `format_prompt_rerank` from
 //! `llama.cpp/tools/server/server-common.cpp` and
-//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.5.0,
-//! `7fe450e19`). Each declaration names what it ports and the line it
+//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.6.0,
+//! `d81235049`). Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # Ownership
@@ -40,7 +40,7 @@ const token_null = common.token_null;
 const throw = common.throw;
 const ggmlAssert = common.ggmlAssert;
 
-/// `raw_buffer` (server-common.h:40 @7fe450e19): a file's bytes.
+/// `raw_buffer` (server-common.h:40 @d81235049): a file's bytes.
 pub const RawBuffer = []u8;
 
 /// One entry of `map_idx_to_media`: a media chunk's **start** index in the
@@ -50,7 +50,7 @@ pub const Media = struct {
     chunk: *c.mtmd_input_chunk,
 };
 
-/// Ports `server_tokens` (server-common.h:138 @7fe450e19): the input tokens,
+/// Ports `server_tokens` (server-common.h:152 @d81235049): the input tokens,
 /// where `LLAMA_TOKEN_NULL` marks a position a media chunk occupies, and the
 /// chunks by start index. For M-RoPE a chunk can occupy a different number
 /// of positions than tokens.
@@ -81,7 +81,7 @@ pub const ServerTokens = struct {
         self.tokens.deinit(self.gpa);
     }
 
-    /// Ports the constructor from `mtmd`'s `input_chunks` (server-common.cpp:380 @7fe450e19).
+    /// Ports the constructor from `mtmd`'s `input_chunks` (server-common.cpp:421 @d81235049).
     pub fn fromChunks(gpa: Allocator, mtmd_chunks: ?*const c.mtmd_input_chunks, has_mtmd: bool) Error!ServerTokens {
         var self: ServerTokens = .{ .gpa = gpa, .has_mtmd = has_mtmd };
         errdefer self.deinit();
@@ -92,29 +92,29 @@ pub const ServerTokens = struct {
         return self;
     }
 
-    /// Ports the constructor from `llama_tokens` (server-common.cpp:386 @7fe450e19).
+    /// Ports the constructor from `llama_tokens` (server-common.cpp:427 @d81235049).
     pub fn fromTokens(gpa: Allocator, tokens: []const Token, has_mtmd: bool) Error!ServerTokens {
         var self: ServerTokens = .{ .gpa = gpa, .has_mtmd = has_mtmd };
         try self.tokens.appendSlice(gpa, tokens);
         return self;
     }
 
-    /// Ports `server_tokens`'s `operator` `[]` (server-common.h:175 @7fe450e19), the const one.
+    /// Ports `server_tokens`'s `operator` `[]` (server-common.h:189 @d81235049), the const one.
     pub fn at(self: *const ServerTokens, index: usize) Token {
         return self.tokens.items[index];
     }
 
-    /// `size` (server-common.h:607 @7fe450e19).
+    /// `size` (server-common.h:646 @d81235049).
     pub fn size(self: *const ServerTokens) usize {
         return self.tokens.items.len;
     }
 
-    /// `empty` (server-common.h:583 @7fe450e19).
+    /// `empty` (server-common.h:622 @d81235049).
     pub fn empty(self: *const ServerTokens) bool {
         return self.tokens.items.len == 0;
     }
 
-    /// `clear` (server-common.h:225 @7fe450e19).
+    /// `clear` (server-common.h:239 @d81235049).
     pub fn clear(self: *ServerTokens) void {
         for (self.map_idx_to_media.items) |m| c.mtmd_input_chunk_free(m.chunk);
         self.map_idx_to_media.clearRetainingCapacity();
@@ -148,7 +148,7 @@ pub const ServerTokens = struct {
         };
     }
 
-    /// Ports `pos_next` (server-common.cpp:389 @7fe450e19): the next position
+    /// Ports `pos_next` (server-common.cpp:430 @d81235049): the next position
     /// after `n_tokens` tokens, or after all of them when `n_tokens < 0`.
     pub fn posNext(self: *const ServerTokens, n_tokens: i64) c.llama_pos {
         if (!self.has_mtmd) {
@@ -172,7 +172,7 @@ pub const ServerTokens = struct {
         var idx: i64 = 0;
         var pos: c.llama_pos = 0;
 
-        ggmlAssert(n_tokens <= @as(i64, @intCast(self.tokens.items.len)), "server-common.cpp", 411, "n_tokens <= (int64_t)tokens.size()");
+        ggmlAssert(n_tokens <= @as(i64, @intCast(self.tokens.items.len)), "server-common.cpp", 453, "n_tokens <= (int64_t)tokens.size()");
 
         while (idx < n_tokens) {
             if (self.mediaFind(@intCast(idx))) |mi| {
@@ -191,7 +191,7 @@ pub const ServerTokens = struct {
         return pos;
     }
 
-    /// Ports `size_up_to_pos` (server-common.cpp:432 @7fe450e19): the number
+    /// Ports `size_up_to_pos` (server-common.cpp:473 @d81235049): the number
     /// of tokens with a position below `max_pos`.
     pub fn sizeUpToPos(self: *const ServerTokens, max_pos: c.llama_pos) usize {
         if (!self.has_mtmd) {
@@ -223,7 +223,7 @@ pub const ServerTokens = struct {
         return idx;
     }
 
-    /// Ports `str` (server-common.cpp:462 @7fe450e19), for debugging.
+    /// Ports `str` (server-common.cpp:503 @d81235049), for debugging.
     ///
     /// Return: owned by `a`.
     pub fn str(self: *const ServerTokens, a: Allocator) Error![]u8 {
@@ -246,7 +246,7 @@ pub const ServerTokens = struct {
         return oss.toOwnedSlice(a);
     }
 
-    /// Ports `find_chunk` (server-common.cpp:482 @7fe450e19).
+    /// Ports `find_chunk` (server-common.cpp:523 @d81235049).
     ///
     /// Return: the chunk starting at `idx`, borrowed.
     pub fn findChunk(self: *const ServerTokens, idx: usize) Error!*c.mtmd_input_chunk {
@@ -256,7 +256,7 @@ pub const ServerTokens = struct {
         return throw(error.RuntimeError, "Chunk not found", .{});
     }
 
-    /// Ports `find_next_media_chunk` (server-common.cpp:490 @7fe450e19): the
+    /// Ports `find_next_media_chunk` (server-common.cpp:531 @d81235049): the
     /// first media chunk starting after `idx`.
     pub fn findNextMediaChunk(self: *const ServerTokens, idx: usize) ?Media {
         for (self.map_idx_to_media.items) |m| {
@@ -265,7 +265,7 @@ pub const ServerTokens = struct {
         return null;
     }
 
-    /// Ports the `push_back` overload taking a token (server-common.cpp:498 @7fe450e19).
+    /// Ports the `push_back` overload taking a token (server-common.cpp:539 @d81235049).
     pub fn pushBackToken(self: *ServerTokens, tok: Token) Error!void {
         if (tok == token_null) {
             return throw(error.RuntimeError, "Invalid token", .{});
@@ -273,12 +273,12 @@ pub const ServerTokens = struct {
         try self.tokens.append(self.gpa, tok);
     }
 
-    /// Ports the `push_back` overload taking a chunk (server-common.cpp:505 @7fe450e19):
+    /// Ports the `push_back` overload taking a chunk (server-common.cpp:546 @d81235049):
     /// a media chunk is copied, a text chunk's tokens appended.
     pub fn pushBackChunk(self: *ServerTokens, chunk: ?*const c.mtmd_input_chunk) Error!void {
         const ty = c.mtmd_input_chunk_get_type(chunk);
         if (ty == c.MTMD_INPUT_CHUNK_TYPE_IMAGE or ty == c.MTMD_INPUT_CHUNK_TYPE_AUDIO) {
-            ggmlAssert(self.has_mtmd, "server-common.cpp", 505, "has_mtmd");
+            ggmlAssert(self.has_mtmd, "server-common.cpp", 549, "has_mtmd");
             const n_tokens = c.mtmd_input_chunk_get_n_tokens(chunk);
             const start_idx = self.tokens.items.len;
             try self.tokens.appendNTimes(self.gpa, token_null, n_tokens);
@@ -291,18 +291,18 @@ pub const ServerTokens = struct {
                 try self.pushBackToken(text_tokens[i]);
             }
         } else {
-            _ = c.ggml_abort("server-common.cpp", 520, "Invalid chunk type");
+            _ = c.ggml_abort("server-common.cpp", 564, "Invalid chunk type");
         }
     }
 
-    /// Ports `push_back_placeholder` (server-common.cpp:527 @7fe450e19): as
+    /// Ports `push_back_placeholder` (server-common.cpp:568 @d81235049): as
     /// `pushBackChunk`, with a media chunk stored as a placeholder.
     pub fn pushBackPlaceholder(self: *ServerTokens, chunk: ?*const c.mtmd_input_chunk) Error!void {
         const ty = c.mtmd_input_chunk_get_type(chunk);
         if (ty == c.MTMD_INPUT_CHUNK_TYPE_IMAGE or ty == c.MTMD_INPUT_CHUNK_TYPE_AUDIO) {
-            ggmlAssert(self.has_mtmd, "server-common.cpp", 527, "has_mtmd");
+            ggmlAssert(self.has_mtmd, "server-common.cpp", 571, "has_mtmd");
             const new_chunk = c.mtmd_input_chunk_get_placeholder(chunk);
-            ggmlAssert(new_chunk != null, "server-common.cpp", 529, "new_chunk != nullptr && \"failed to create placeholder chunk\"");
+            ggmlAssert(new_chunk != null, "server-common.cpp", 573, "new_chunk != nullptr && \"failed to create placeholder chunk\"");
             const n_tokens = c.mtmd_input_chunk_get_n_tokens(chunk);
             const start_idx = self.tokens.items.len;
             self.tokens.appendNTimes(self.gpa, token_null, n_tokens) catch |e| {
@@ -315,7 +315,7 @@ pub const ServerTokens = struct {
         }
     }
 
-    /// Ports the `push_back` overload taking `server_tokens` (server-common.cpp:386 @7fe450e19):
+    /// Ports the `push_back` overload taking `server_tokens` (server-common.cpp:427 @d81235049):
     /// appends `other`'s tokens and copies its chunks. Every media position
     /// holds `LLAMA_TOKEN_NULL`, which the token `push_back` refuses, so
     /// with media this throws `Invalid token` before reaching the chunk loop
@@ -328,7 +328,7 @@ pub const ServerTokens = struct {
         if (other.has_mtmd) {
             // Assert if we are copying MTMD chunks to a server_tokens that does not have mtmd.
             // We could also just check, but this will prevent silently dropping MTMD data.
-            ggmlAssert(self.has_mtmd, "server-common.cpp", 550, "has_mtmd");
+            ggmlAssert(self.has_mtmd, "server-common.cpp", 593, "has_mtmd");
             const items = other.map_idx_to_media.items;
             // the C++ loop's iterator is never incremented
             const it: usize = 0;
@@ -340,21 +340,21 @@ pub const ServerTokens = struct {
         }
     }
 
-    /// Ports `insert` (server-common.cpp:561 @7fe450e19): for compatibility
+    /// Ports `insert` (server-common.cpp:602 @d81235049): for compatibility
     /// with context shift and prompt truncation.
     pub fn insert(self: *ServerTokens, inp_tokens: []const Token) Error!void {
         try self.tokens.appendSlice(self.gpa, inp_tokens);
     }
 
-    /// Ports `get_tokens` (server-common.cpp:565 @7fe450e19).
+    /// Ports `get_tokens` (server-common.cpp:606 @d81235049).
     ///
     /// Return: borrowed until the next change.
     pub fn getTokens(self: *const ServerTokens) []const Token {
-        ggmlAssert(!self.has_mtmd, "server-common.cpp", 564, "!has_mtmd");
+        ggmlAssert(!self.has_mtmd, "server-common.cpp", 607, "!has_mtmd");
         return self.tokens.items;
     }
 
-    /// Ports `get_text_tokens` (server-common.cpp:637 @7fe450e19).
+    /// Ports `get_text_tokens` (server-common.cpp:678 @d81235049).
     ///
     /// Return: owned by `a`.
     pub fn getTextTokens(self: *const ServerTokens, a: Allocator) Error![]Token {
@@ -369,16 +369,16 @@ pub const ServerTokens = struct {
         return res.toOwnedSlice(a);
     }
 
-    /// Ports `set_token` (server-common.cpp:648 @7fe450e19).
+    /// Ports `set_token` (server-common.cpp:689 @d81235049).
     pub fn setToken(self: *ServerTokens, pos: c.llama_pos, id: Token) void {
-        ggmlAssert(!self.has_mtmd, "server-common.cpp", 644, "!has_mtmd"); // only allow this if mtmd is disabled
+        ggmlAssert(!self.has_mtmd, "server-common.cpp", 690, "!has_mtmd"); // only allow this if mtmd is disabled
         self.tokens.items[@intCast(pos)] = id;
     }
 
-    /// Ports `keep_first` (server-common.cpp:653 @7fe450e19): truncates to
+    /// Ports `keep_first` (server-common.cpp:694 @d81235049): truncates to
     /// `n` tokens, refusing to cut through a media chunk.
     pub fn keepFirst(self: *ServerTokens, n: usize) Error!void {
-        ggmlAssert(n <= self.tokens.items.len, "server-common.cpp", 649, "n <= tokens.size()");
+        ggmlAssert(n <= self.tokens.items.len, "server-common.cpp", 695, "n <= tokens.size()");
         if (self.has_mtmd) {
             if (n == self.tokens.items.len) {
                 return; // nothing to do
@@ -389,7 +389,7 @@ pub const ServerTokens = struct {
                 // note that the case where we keep a full image at the end is allowed:
                 //   tokens[n - 1] == LLAMA_TOKEN_NULL && tokens[n] != LLAMA_TOKEN_NULL
                 if (self.tokens.items[n - 1] == token_null and self.tokens.items[n] == token_null) {
-                    _ = try self.findChunk(n - 1); // will throw an error if the token is not begin-of-chunk
+                    _ = try self.findChunk(n); // will throw an error if the cut is not at a chunk boundary
                 }
             }
             // remove all image chunks that are not used anymore
@@ -407,7 +407,7 @@ pub const ServerTokens = struct {
         self.tokens.shrinkRetainingCapacity(n);
     }
 
-    /// Ports `detokenize` (server-common.cpp:686 @7fe450e19): the text tokens'
+    /// Ports `detokenize` (server-common.cpp:727 @d81235049): the text tokens'
     /// text.
     ///
     /// Return: owned by `a`.
@@ -418,7 +418,7 @@ pub const ServerTokens = struct {
         return common.detokenize(a, c.llama_model_get_vocab(model), text_tokens, special);
     }
 
-    /// Ports `get_common_prefix` (server-common.cpp:697 @7fe450e19): equal
+    /// Ports `get_common_prefix` (server-common.cpp:738 @d81235049): equal
     /// media chunks (same id, same length) count as equal tokens.
     pub fn getCommonPrefix(self: *const ServerTokens, b: *const ServerTokens) Error!usize {
         const max_idx = @min(self.tokens.items.len, b.tokens.items.len);
@@ -451,7 +451,7 @@ pub const ServerTokens = struct {
                 const n_tok_b = c.mtmd_input_chunk_get_n_tokens(b_chunk);
 
                 if (std.mem.eql(u8, id_ai, id_bi) and n_tok_a == n_tok_b) {
-                    ggmlAssert(n_tok_a > 0, "server-common.cpp", 723, "n_tok_a > 0 && \"Invalid media chunk\""); // should never happen
+                    ggmlAssert(n_tok_a > 0, "server-common.cpp", 770, "n_tok_a > 0 && \"Invalid media chunk\""); // should never happen
                     i += n_tok_a - 1; // will be +1 by the for loop
                     continue;
                 }
@@ -469,7 +469,7 @@ pub const ServerTokens = struct {
         return max_idx; // all tokens are equal
     }
 
-    /// Ports `find_message_spans` (server-common.cpp:747 @7fe450e19): the
+    /// Ports `find_message_spans` (server-common.cpp:788 @d81235049): the
     /// tokens split into message spans, skipping over media chunks.
     ///
     /// Return: owned by `a`.
@@ -484,7 +484,7 @@ pub const ServerTokens = struct {
         };
     }
 
-    /// Ports `validate` (server-common.cpp:755 @7fe450e19): every text token in
+    /// Ports `validate` (server-common.cpp:796 @d81235049): every text token in
     /// the vocabulary, every media position covered by exactly one chunk.
     pub fn validate(self: *const ServerTokens, ctx: ?*const c.llama_context) bool {
         const model = c.llama_get_model(ctx);
@@ -519,7 +519,7 @@ pub const ServerTokens = struct {
         return n_media == self.map_idx_to_media.items.len;
     }
 
-    /// Ports `clone` (server-common.cpp:791 @7fe450e19): a deep copy, chunks
+    /// Ports `clone` (server-common.cpp:832 @d81235049): a deep copy, chunks
     /// included.
     pub fn clone(self: *const ServerTokens) Error!ServerTokens {
         var res: ServerTokens = .{ .gpa = self.gpa, .has_mtmd = self.has_mtmd };
@@ -534,10 +534,10 @@ pub const ServerTokens = struct {
     // -------------------------------------------------------------------------
     // the state format
 
-    /// Ports `SERVER_TOKENS_STATE_VERSION` (server-common.cpp:286 @7fe450e19).
+    /// Ports `SERVER_TOKENS_STATE_VERSION` (server-common.cpp:327 @d81235049).
     const state_version: u32 = 1;
 
-    /// Ports `server_tokens_state_u32` (server-common.cpp:288 @7fe450e19).
+    /// Ports `server_tokens_state_u32` (server-common.cpp:329 @d81235049).
     fn stateU32(value: usize) Error!u32 {
         if (value > std.math.maxInt(u32)) {
             return throw(error.RuntimeError, "Server tokens state is too large", .{});
@@ -545,7 +545,7 @@ pub const ServerTokens = struct {
         return @intCast(value);
     }
 
-    /// Ports `server_tokens_state_writer` (server-common.cpp:295 @7fe450e19).
+    /// Ports `server_tokens_state_writer` (server-common.cpp:336 @d81235049).
     const Writer = struct {
         a: Allocator,
         data: std.ArrayList(u8) = .empty,
@@ -567,7 +567,7 @@ pub const ServerTokens = struct {
             try self.data.appendSlice(self.a, bytes);
         }
 
-        /// Ports `write_media_chunk` (server-common.cpp:315 @7fe450e19).
+        /// Ports `write_media_chunk` (server-common.cpp:356 @d81235049).
         fn writeMediaChunk(self: *Writer, chunk: *const c.mtmd_input_chunk) Error!void {
             var chunk_size: usize = 0;
             if (c.mtmd_input_chunk_save(chunk, null, 0, &chunk_size) != 0 or chunk_size == 0) {
@@ -582,7 +582,7 @@ pub const ServerTokens = struct {
             try self.writeVector(chunk_data, chunk_data.len);
         }
 
-        /// Ports `take` (server-common.cpp:327 @7fe450e19): padded with zeros
+        /// Ports `take` (server-common.cpp:368 @d81235049): padded with zeros
         /// to a whole number of tokens.
         fn take(self: *Writer) Error![]u8 {
             const n = (self.data.items.len + @sizeOf(Token) - 1) / @sizeOf(Token) * @sizeOf(Token);
@@ -591,12 +591,12 @@ pub const ServerTokens = struct {
         }
     };
 
-    /// Ports `server_tokens_state_reader` (server-common.cpp:336 @7fe450e19).
+    /// Ports `server_tokens_state_reader` (server-common.cpp:377 @d81235049).
     const Reader = struct {
         data: []const u8,
         pos: usize = 0,
 
-        /// Ports `read` (server-common.cpp:341 @7fe450e19).
+        /// Ports `read` (server-common.cpp:382 @d81235049).
         fn read(self: *Reader, comptime T: type) Error!T {
             if (self.data.len - self.pos < @sizeOf(T)) {
                 return throw(error.RuntimeError, "Unexpected end of server tokens state", .{});
@@ -606,7 +606,7 @@ pub const ServerTokens = struct {
             return v;
         }
 
-        /// Ports `read_vector` (server-common.cpp:353 @7fe450e19).
+        /// Ports `read_vector` (server-common.cpp:394 @d81235049).
         ///
         /// Return: the elements' bytes, borrowed from the state.
         fn readVector(self: *Reader, comptime T: type) Error![]const u8 {
@@ -620,13 +620,13 @@ pub const ServerTokens = struct {
             return bytes;
         }
 
-        /// Ports `remaining` (server-common.cpp:368 @7fe450e19).
+        /// Ports `remaining` (server-common.cpp:409 @d81235049).
         fn remaining(self: *const Reader) usize {
             return self.data.len - self.pos;
         }
     };
 
-    /// Ports `serialize` (server-common.cpp:570 @7fe450e19): a format marker,
+    /// Ports `serialize` (server-common.cpp:611 @d81235049): a format marker,
     /// the version, the tokens, the media start indices and each chunk's
     /// saved bytes, padded to a whole number of tokens.
     ///
@@ -652,7 +652,7 @@ pub const ServerTokens = struct {
         return writer.take();
     }
 
-    /// Ports `deserialize` (server-common.cpp:592 @7fe450e19): a list that
+    /// Ports `deserialize` (server-common.cpp:633 @d81235049): a list that
     /// does not start with the marker is a plain token list, as older
     /// versions wrote.
     pub fn deserialize(gpa: Allocator, packed_tokens: []const Token, has_mtmd: bool) Error!ServerTokens {
@@ -706,7 +706,7 @@ pub const ServerTokens = struct {
 // -----------------------------------------------------------------------------
 // tokenizer and input processing utils
 
-/// Ports `tokenize_mixed` (server-common.cpp:867 @7fe450e19): a string, or an
+/// Ports `tokenize_mixed` (server-common.cpp:908 @d81235049): a string, or an
 /// array mixing strings and token ids. Only the first element, when it is a
 /// string, gets the special tokens.
 ///
@@ -753,10 +753,10 @@ pub fn tokenizeMixed(a: Allocator, vocab: ?*const c.llama_vocab, json_prompt: *c
 
 // base64 utils (TODO: use the base64::decode from base64.hpp)
 
-/// Ports `base64_chars` (server-common.cpp:219 @7fe450e19).
+/// Ports `base64_chars` (server-common.cpp:260 @d81235049).
 const base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ++ "abcdefghijklmnopqrstuvwxyz" ++ "0123456789+/";
 
-/// Ports `is_base64` (server-common.cpp:224 @7fe450e19): `isalnum` in the
+/// Ports `is_base64` (server-common.cpp:265 @d81235049): `isalnum` in the
 /// "C" locale.
 fn isBase64(ch: u8) bool {
     return std.ascii.isAlphanumeric(ch) or (ch == '+') or (ch == '/');
@@ -768,7 +768,7 @@ fn findChar(ch: u8) u8 {
     return if (std.mem.indexOfScalar(u8, base64_chars, ch)) |i| @intCast(i) else 0xFF;
 }
 
-/// Ports `base64_decode` (server-common.cpp:228 @7fe450e19): decodes up to the
+/// Ports `base64_decode` (server-common.cpp:269 @d81235049): decodes up to the
 /// first `=` or the first byte outside the alphabet.
 ///
 /// Return: owned by `a`.
@@ -818,7 +818,7 @@ pub fn base64Decode(a: Allocator, encoded_string: []const u8) Error![]u8 {
     return ret.toOwnedSlice(a);
 }
 
-/// Ports `process_mtmd_prompt` (server-common.cpp:930 @7fe450e19): the prompt
+/// Ports `process_mtmd_prompt` (server-common.cpp:971 @d81235049): the prompt
 /// and its files through `mtmd_tokenize`. With `is_placeholder` the media
 /// chunks only count tokens; they cannot be decoded.
 pub fn processMtmdPrompt(
@@ -874,10 +874,10 @@ pub fn processMtmdPrompt(
     return ServerTokens.fromChunks(gpa, chunks, true);
 }
 
-/// Ports `tokenize_input_subprompt` (server-common.cpp:981 @7fe450e19): one
+/// Ports `tokenize_input_subprompt` (server-common.cpp:1022 @d81235049): one
 /// prompt -- a string, a list of tokens, strings and tokens mixed, or an
 /// object with `prompt_string` and optionally `multimodal_data`.
-fn tokenizeInputSubprompt(
+pub fn tokenizeInputSubprompt(
     gpa: Allocator,
     vocab: ?*const c.llama_vocab,
     mctx: ?*c.mtmd_context,
@@ -929,11 +929,11 @@ fn tokenizeInputSubprompt(
             return ServerTokens.fromTokens(gpa, tmp, false);
         }
     } else {
-        return throw(error.RuntimeError, "\"prompt\" elements must be a string, a list of tokens, a JSON object containing a prompt string, or a list of mixed strings & tokens.", .{});
+        return throw(error.InvalidArgument, "\"prompt\" elements must be a string, a list of tokens, a JSON object containing a prompt string, or a list of mixed strings & tokens.", .{});
     }
 }
 
-/// Ports `tokenize_input_prompts` (server-common.cpp:1015 @7fe450e19): a
+/// Ports `tokenize_input_prompts` (server-common.cpp:1056 @d81235049): a
 /// `prompt` that may hold several prompts (an array without bare tokens),
 /// each through `tokenize_input_subprompt`.
 ///
@@ -965,7 +965,7 @@ pub fn tokenizeInputPrompts(
         };
     }
     if (result.items.len == 0) {
-        return throw(error.RuntimeError, "\"prompt\" must not be empty", .{});
+        return throw(error.InvalidArgument, "\"prompt\" must not be empty", .{});
     }
     return result;
 }
@@ -990,7 +990,7 @@ const InfillStatics = struct {
 };
 var infill_statics: InfillStatics = .{};
 
-/// Ports `format_prompt_infill` (server-common.cpp:1713 @7fe450e19): the
+/// Ports `format_prompt_infill` (server-common.cpp:1778 @d81235049): the
 /// FIM repo-level pattern -- extra chunks, then prefix, suffix and the
 /// middle marker -- cut to fit a batch.
 ///
@@ -1113,7 +1113,7 @@ pub fn formatPromptInfill(
     return embd_inp.toOwnedSlice(a);
 }
 
-/// Ports `string_replace_all` (common/common.cpp:507 @7fe450e19).
+/// Ports `string_replace_all` (common/common.cpp:510 @d81235049).
 ///
 /// Return: owned by `a`.
 pub fn replaceAll(a: Allocator, s: []const u8, search: []const u8, replace: []const u8) Error![]u8 {
@@ -1130,7 +1130,7 @@ pub fn replaceAll(a: Allocator, s: []const u8, search: []const u8, replace: []co
     return o.toOwnedSlice(a);
 }
 
-/// Ports `format_prompt_rerank` (server-common.cpp:1815 @7fe450e19): the
+/// Ports `format_prompt_rerank` (server-common.cpp:1880 @d81235049): the
 /// model's `rerank` template with `{query}` and `{document}` filled, or
 /// `[BOS]query[EOS][SEP]doc[EOS]`.
 pub fn formatPromptRerank(

@@ -173,10 +173,15 @@ fn llamaCModule(b: *std.Build, opts: Options) *std.Build.Module {
 /// becomes a `ggml_metallib_<name>_{start,end}` symbol pair that the Obj-C
 /// device layer reads at runtime.
 const metal_kernels = [_][]const u8{
-    "fa",   "mul_mv",  "mul_mm",          "quantize",  "softmax",
-    "norm", "unary",   "binbcast",        "reduce",    "tri",
-    "ssm",  "wkv",     "gated_delta_net", "solve_tri", "rope",
-    "conv", "upscale", "argsort",         "pool",      "misc",
+    "fa_aux",      "fa_f16",      "fa_f32",      "fa_q4_0",
+    "fa_q4_1",     "fa_q5_0",     "fa_q5_1",     "fa_q8_0",
+    "fa_vec_f16",  "fa_vec_f32",  "fa_vec_q4_0", "fa_vec_q4_1",
+    "fa_vec_q5_0", "fa_vec_q5_1", "fa_vec_q8_0", "mul_mv",
+    "mul_mv_mma",  "mul_mm",      "quantize",    "softmax",
+    "norm",        "unary",       "binbcast",    "reduce",
+    "tri",         "ssm",         "wkv",         "gated_delta_net",
+    "solve_tri",   "rope",        "conv",        "upscale",
+    "argsort",     "pool",        "misc",
 };
 
 const ggml_base_sources = [_][]const u8{
@@ -1363,6 +1368,8 @@ fn embedMetalKernel(b: *std.Build, kind: []const u8) std.Build.LazyPath {
     run.addFileArg(b.path(metal ++ "/kernels/common.h"));
     run.addFileArg(b.path(metal ++ "/kernels/dequantize.h"));
     run.addFileArg(b.path(metal ++ "/kernels/quantize.h"));
+    run.addFileArg(b.path(metal ++ "/kernels/fa_common.metal"));
+    run.addFileArg(b.path(metal ++ "/kernels/fa_vec_common.metal"));
     run.addFileArg(b.path(b.fmt(metal ++ "/kernels/{s}.metal", .{kind})));
 
     return out_asm;

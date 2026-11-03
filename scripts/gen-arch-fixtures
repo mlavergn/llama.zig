@@ -24,7 +24,9 @@
 # them: neither has a usable implementation. Granite-Switch, eagle3 and
 # DFlash need more than the recipe's keys and tensors, and
 # `harness/arch_fixtures_draft.cpp` writes them, with a Gemma-style DFlash
-# and a Qwen3.5 whose full-attention projections are fused (since v0.5.0).
+# and a Qwen3.5 whose full-attention projections are fused (since v0.5.0),
+# and clef, which the recipe skips and the user-data path cannot build, and a
+# ModernBERT decision model (since v0.6.0).
 #
 # Usage: scripts/gen-arch-fixtures [out-dir] [seed]
 #   Default out-dir zig-out/arch-fixtures, seed 42.
@@ -80,7 +82,7 @@ if [ "$rc" -ne 0 ] || [ "$n" -eq 0 ]; then
 fi
 # The architectures `-o` skipped, and the four its loops skip silently.
 extra=$( { grep 'unsupported, skipping' "$tmp/run.log" | sed 's/^save_models: \([^ ]*\) model.*/\1/'; printf '%s\n' gemma4 gemma4-assistant; } \
-         | grep -v -x -e clip -e gptj -e graniteswitch -e eagle3 -e dflash | sort -u )
+         | grep -v -x -e clip -e gptj -e graniteswitch -e eagle3 -e dflash -e clef | sort -u )
 : > "$tmp/extra.log"
 for a in $extra; do
     # One process each: the C++ asserts on some, and an abort ends the process.
@@ -99,7 +101,12 @@ for a in rwkv6 rwkv6qwen2 rwkv7 arwkv7; do
 done
 "$tmp/extra" "$OUT" "$SEED" --variant hs64nogate arwkv7 >> "$tmp/extra.log" 2>&1 \
     || [ "$?" -le 1 ] || echo "failed arwkv7 (hs64nogate): the C++ aborted" >> "$tmp/extra.log"
-# Granite-Switch, eagle3 and DFlash, which the recipe cannot build at all:
+# The k-pool indexers at a top_k that selects (see arch_fixtures_extra.cpp).
+for a in glm5-next qwen4exp; do
+    "$tmp/extra" "$OUT" "$SEED" --variant topk8 "$a" >> "$tmp/extra.log" 2>&1 \
+        || [ "$?" -le 1 ] || echo "failed $a (topk8): the C++ aborted" >> "$tmp/extra.log"
+done
+# Granite-Switch, eagle3, DFlash and clef, which the recipe cannot build at all:
 # see the header of harness/arch_fixtures_draft.cpp.
 "$tmp/draft" "$OUT" "$SEED" >> "$tmp/extra.log" 2>&1 \
     || echo "failed arch_fixtures_draft: exit $?" >> "$tmp/extra.log"

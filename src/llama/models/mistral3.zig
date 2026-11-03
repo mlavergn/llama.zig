@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mistral3.cpp` at v0.5.0 (`7fe450e19`):
+//! Ported from `llama.cpp/src/models/mistral3.cpp` at v0.6.0 (`d81235049`):
 //! `llama_model_mistral3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -19,7 +19,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_mistral3`'s `load_arch_hparams` (models/mistral3.cpp:3 @7fe450e19).
+/// Ports `llama_model_mistral3`'s `load_arch_hparams` (models/mistral3.cpp:3 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -49,7 +49,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_mistral3`'s `load_arch_tensors` (models/mistral3.cpp:29 @7fe450e19).
+/// Ports `llama_model_mistral3`'s `load_arch_tensors` (models/mistral3.cpp:29 @d81235049).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -115,8 +115,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_mistral3`'s `build_arch_graph` (models/mistral3.cpp:89
-/// @7fe450e19) and the constructor of its `graph` (models/mistral3.cpp:93
-/// @7fe450e19).
+/// @d81235049) and the constructor of its `graph` (models/mistral3.cpp:93
+/// @d81235049).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

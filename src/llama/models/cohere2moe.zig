@@ -7,8 +7,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/cohere2moe.cpp` at v0.5.0
-//! (`7fe450e19`): `llama_model_cohere2moe`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/cohere2moe.cpp` at v0.6.0
+//! (`d81235049`): `llama_model_cohere2moe`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` and its
 //! `graph_mtp`.
 
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_cohere2moe`'s `load_arch_hparams` (models/cohere2moe.cpp:3 @7fe450e19).
+/// Ports `llama_model_cohere2moe`'s `load_arch_hparams` (models/cohere2moe.cpp:3 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -74,7 +74,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_cohere2moe`'s `load_arch_tensors` (models/cohere2moe.cpp:40 @7fe450e19).
+/// Ports `llama_model_cohere2moe`'s `load_arch_tensors` (models/cohere2moe.cpp:40 @d81235049).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -124,7 +124,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `load_arch_tensors`'s `load_block_trunk` lambda
-/// (models/cohere2moe.cpp:74 @7fe450e19).
+/// (models/cohere2moe.cpp:74 @d81235049).
 fn loadBlockTrunk(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(i)];
@@ -155,7 +155,7 @@ fn loadBlockTrunk(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc:
 }
 
 /// Ports `load_arch_tensors`'s `load_block_mtp` lambda
-/// (models/cohere2moe.cpp:102 @7fe450e19).
+/// (models/cohere2moe.cpp:102 @d81235049).
 fn loadBlockMtp(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
@@ -194,7 +194,7 @@ fn loadBlockMtp(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *
 }
 
 /// Ports `llama_model_cohere2moe`'s `build_arch_graph` (models/cohere2moe.cpp:145
-/// @7fe450e19): the MTP draft head for that graph type, the main model
+/// @d81235049): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -202,7 +202,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_cohere2moe`'s `graph`
-/// (models/cohere2moe.cpp:152 @7fe450e19).
+/// (models/cohere2moe.cpp:152 @d81235049).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -332,7 +332,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_cohere2moe`'s `graph_mtp`
-/// (models/cohere2moe.cpp:291 @7fe450e19).
+/// (models/cohere2moe.cpp:291 @d81235049).
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -365,6 +365,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     // The C++'s TODO: make this static with `ggml_build_forward_select`,
     // as `build_inp_embd` does.
     var tok_embd: *Tensor = undefined;
+    b.ubatch.assertEmbdOrToken("models/cohere2moe.cpp", 320);
     if (b.ubatch.token != null) {
         const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
         tok_embd = c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
@@ -452,7 +453,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_post_ffn", il);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/cohere2moe.cpp", 418, "head_norm_w && \"COHERE2MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
+    impl.assert(head_norm_w != null, "models/cohere2moe.cpp", 419, "head_norm_w && \"COHERE2MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
     cur = b.buildNorm(cur, head_norm_w, null, cohere2moe_norm_type, -1);
 
     b.cb(cur, "h_nextn", -1);
@@ -462,7 +463,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_shared_head_norm", -1);
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
-    impl.assert(head_w != null, "models/cohere2moe.cpp", 428, "head_w && \"COHERE2MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    impl.assert(head_w != null, "models/cohere2moe.cpp", 429, "head_w && \"COHERE2MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
     cur = b.buildLoraMm(head_w.?, cur, if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else null);
 
     if (hp.f_logit_scale != 0.0) {

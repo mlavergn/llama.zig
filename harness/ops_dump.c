@@ -477,49 +477,59 @@ int main(int argc, char ** argv) {
         }
     }
 
-    puts("=== matmul, the IQ panel path ===");
+    puts("=== matmul, the tiled path ===");
     {
-        /* iqp.cpp: the grid-based IQ types' batched mul_mat, which x86 takes
-         * from AVX2 on (ggml_cpu_iqp_supports_mul_mat) once src0 has a
-         * multiple of 8 rows and src1 at least 8 columns -- a shape the sweep
-         * above, at 1, 2 and 7 columns, never reaches. Elsewhere the same
-         * shapes run through vec_dot.
+        /* tiled/tiled.cpp (v0.6.0, replacing iqp.cpp): the K-quants' and grid
+         * IQ types' mul_mat and mul_mat_id as an integer GEMM, which x86
+         * takes from AVX2 on once src1 has at least 8 columns (or an expert
+         * at least 8 routed rows) -- shapes the sweep above, at 1, 2 and 7
+         * columns, never reaches. Elsewhere these run through vec_dot.
          *
-         * 8 columns are two whole gemm tiles; 11 add a three-row gemv tail;
-         * [9, 2] batches src1 over ne12; 64 rows give three threads more
-         * row groups than chunks. For MUL_MAT_ID, ids drawn as
-         * (i * 7919) % 4 route 2 x 15 rows to the four experts as 8, 7, 7, 8
-         * -- two on the panel path, two below its threshold of 8, in one
-         * node -- and 2 x 19 as 10, 9, 9, 10, which ends each panel expert
-         * on a short tile; that one once with src1 per expert slot and once
-         * broadcast (ne11 = 1). */
-        static const enum ggml_type iqtypes[] = {
-            GGML_TYPE_IQ2_XXS, GGML_TYPE_IQ2_XS, GGML_TYPE_IQ2_S, GGML_TYPE_IQ3_XXS,
-            GGML_TYPE_IQ3_S, GGML_TYPE_IQ1_S, GGML_TYPE_IQ1_M, GGML_TYPE_IQ4_XS,
+         * MUL_MAT: 33 columns is the standard path (more than 16, a ragged
+         * 16-column band); 40 rows end on a half microtile. 9 and 16 columns
+         * are the narrow path, whose K extent is 512 at ne00 = 512 (two
+         * slabs), 768 at 768 (three) and 256 at 1280 (one slab, which takes
+         * the NK=1 microtile on the narrow path). [9, 2] clamps a window at
+         * the batch boundary; [512 x 160] x 64 gives three threads several
+         * chunks each. MUL_MAT_ID: ids (i * 7919) % 4 route 2 x 15 rows as
+         * 8, 7, 7, 8 (two experts tiled, two below the floor, in one node),
+         * 2 x 40 as 20 each (the standard path), the second once broadcast
+         * (ne11 = 1); 160 rows per expert are three row groups of 64. */
+        static const enum ggml_type ttypes[] = {
+            GGML_TYPE_Q6_K, GGML_TYPE_Q5_K, GGML_TYPE_Q4_K, GGML_TYPE_Q3_K, GGML_TYPE_Q2_K,
+            GGML_TYPE_IQ4_XS, GGML_TYPE_IQ2_XXS, GGML_TYPE_IQ2_XS, GGML_TYPE_IQ2_S, GGML_TYPE_IQ3_XXS,
+            GGML_TYPE_IQ3_S, GGML_TYPE_IQ1_S, GGML_TYPE_IQ1_M,
         };
-        for (size_t qi = 0; qi < sizeof iqtypes / sizeof iqtypes[0]; qi++) {
-            const enum ggml_type t = iqtypes[qi];
+        for (size_t qi = 0; qi < sizeof ttypes / sizeof ttypes[0]; qi++) {
+            const enum ggml_type t = ttypes[qi];
             const char * tn = ggml_type_name(t);
             char label[96];
 
-            static const int ncols[] = { 8, 11 };
-            for (size_t ci = 0; ci < sizeof ncols / sizeof ncols[0]; ci++) {
-                snprintf(label, sizeof label, "iqp mul_mat %s [512 x 16] x %d", tn, ncols[ci]);
-                run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, t, 512, 16),
-                                                 ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, ncols[ci])), 0, 1.0f);
+            snprintf(label, sizeof label, "tiled mul_mat %s [512 x 40] x 33", tn);
+            run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, t, 512, 40),
+                                             ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, 33)), 0, 1.0f);
+            static const int nk[] = { 512, 768, 1280 };
+            static const int ncols[] = { 9, 16 };
+            for (size_t ki = 0; ki < sizeof nk / sizeof nk[0]; ki++) {
+                for (size_t ci = 0; ci < sizeof ncols / sizeof ncols[0]; ci++) {
+                    snprintf(label, sizeof label, "tiled mul_mat %s [%d x 24] x %d", tn, nk[ki], ncols[ci]);
+                    run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, t, nk[ki], 24),
+                                                     ggml_new_tensor_2d(ctx, GGML_TYPE_F32, nk[ki], ncols[ci])), 0, 1.0f);
+                }
             }
-            snprintf(label, sizeof label, "iqp mul_mat %s [512 x 64] x 9", tn);
-            run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, t, 512, 64),
-                                             ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, 9)), 0, 1.0f);
-            snprintf(label, sizeof label, "iqp mul_mat %s [512 x 16] x [9, 2]", tn);
+            snprintf(label, sizeof label, "tiled mul_mat %s [512 x 160] x 64", tn);
+            run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, t, 512, 160),
+                                             ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, 64)), 0, 1.0f);
+            snprintf(label, sizeof label, "tiled mul_mat %s [512 x 16] x [9, 2]", tn);
             run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, t, 512, 16),
                                              ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 512, 9, 2)), 0, 1.0f);
 
-            static const int ntok[] = { 15, 19, 19 };
+            static const int ntok[] = { 15, 40, 40 };
             static const int nb11[] = { 2, 2, 1 };
+            static const int nrow[] = { 16, 160, 16 };
             for (size_t k = 0; k < sizeof ntok / sizeof ntok[0]; k++) {
-                snprintf(label, sizeof label, "iqp mul_mat_id %s [512 x 16 x 4] b=[%d, %d]", tn, nb11[k], ntok[k]);
-                run_amp(label, ggml_mul_mat_id(ctx, ggml_new_tensor_3d(ctx, t, 512, 16, 4),
+                snprintf(label, sizeof label, "tiled mul_mat_id %s [512 x %d x 4] b=[%d, %d]", tn, nrow[k], nb11[k], ntok[k]);
+                run_amp(label, ggml_mul_mat_id(ctx, ggml_new_tensor_3d(ctx, t, 512, nrow[k], 4),
                                                     ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 512, nb11[k], ntok[k]),
                                                     ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 2, ntok[k])), 4, 1.0f);
             }
@@ -631,6 +641,9 @@ int main(int argc, char ** argv) {
 
     puts("=== backward passes ===");
     R(ggml_soft_max_ext_back(ctx, a2, b2, 0.5f, 0.0f));
+    /* 0.5 scales exactly, so where the scale is applied cannot show; 0.37
+     * is what tells v0.6.0's `scale * (dy - dot) * y` from v0.5.0's order. */
+    R(ggml_soft_max_ext_back(ctx, a2, b2, 0.37f, 0.0f));
     {
         struct ggml_tensor * q   = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 64, 4, 6);
         struct ggml_tensor * pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 6);
@@ -690,6 +703,54 @@ int main(int argc, char ** argv) {
             R(ggml_rms_norm(ctx, ggml_view_2d(ctx, big, 8, 4, big->nb[1], 0), 1e-5f));
         }
         R(ggml_out_prod(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 4, 8), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 6, 8)));
+    }
+
+    puts("=== activations, bf16 ===");
+    {
+        /* v0.6.0's BF16 arms of the unary and GLU ops and of scale: a scalar
+         * loop each, f32 math narrowed back to BF16. 8 rows, so three
+         * threads split them unevenly. */
+        struct ggml_tensor * hb = ggml_new_tensor_2d(ctx, GGML_TYPE_BF16, 64, 8);
+        struct ggml_tensor * gb = ggml_new_tensor_2d(ctx, GGML_TYPE_BF16, 64, 8);
+        R(ggml_gelu(ctx, hb));
+        R(ggml_gelu_quick(ctx, hb));
+        R(ggml_gelu_erf(ctx, hb));
+        R(ggml_silu(ctx, hb));
+        RW(ggml_gelu(ctx, hb));
+        RW(ggml_gelu_quick(ctx, hb));
+        RW(ggml_gelu_erf(ctx, hb));
+        RW(ggml_silu(ctx, hb));
+        R(ggml_swiglu(ctx, hb));
+        R(ggml_swiglu_swapped(ctx, hb));
+        R(ggml_geglu(ctx, hb));
+        R(ggml_reglu(ctx, hb));
+        R(ggml_geglu_erf(ctx, hb));
+        R(ggml_geglu_quick(ctx, hb));
+        R(ggml_swiglu_split(ctx, hb, gb));
+        R(ggml_geglu_split(ctx, hb, gb));
+        R(ggml_reglu_split(ctx, hb, gb));
+        R(ggml_geglu_erf_split(ctx, hb, gb));
+        R(ggml_geglu_quick_split(ctx, hb, gb));
+        RW(ggml_geglu(ctx, hb));
+        RW(ggml_swiglu_split(ctx, hb, gb));
+        RW(ggml_geglu_quick_split(ctx, hb, gb));
+        R(ggml_scale(ctx, hb, 2.5f));
+        R(ggml_scale_bias(ctx, hb, 2.5f, -1.25f));
+        RW(ggml_scale_bias(ctx, hb, 0.37f, 0.11f));
+        {   /* A fused and an unfused `s*x + b` differ in the last f32 bit,
+             * which BF16 keeps only where it straddles a rounding boundary:
+             * about one element in 10^5, so 2^20 of them -- the case that
+             * can tell `scaleBf16`'s fusion is right. gelu's `1 + A*x*x`
+             * the same way. */
+            struct ggml_tensor * big = ggml_new_tensor_2d(ctx, GGML_TYPE_BF16, 1024, 1024);
+            R(ggml_scale_bias(ctx, big, 0.37f, 0.11f));
+            R(ggml_gelu(ctx, big));
+            RW(ggml_geglu_split(ctx, big, big));
+        }
+        /* BF16 src1 widened into the F32 work buffer: only against an F32
+         * src0, whose vec_dot_type is F32 (ggml-cpu.cpp's supports_op). */
+        R(ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64, 16), ggml_new_tensor_2d(ctx, GGML_TYPE_BF16, 64, 5)));
+        R(ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64, 16), ggml_new_tensor_3d(ctx, GGML_TYPE_BF16, 64, 9, 2)));
     }
 
     puts("=== convolution ===");
@@ -796,6 +857,23 @@ int main(int argc, char ** argv) {
                 ggml_flash_attn_ext_add_sinks(o, ggml_scale(ctx, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4), 4.0f));
                 run_amp(kt == 0 ? "flash_attn_ext tiled f16 alibi+softcap+sinks" : "flash_attn_ext tiled f32 alibi+softcap+sinks", o, 0, 1.0f);
             }
+        }
+        /* Head size 36: not a whole number of f32 vectors on x86 (8 or 16
+         * lanes), so before v0.6.0 x86 took the one-chunk path here, and
+         * now takes the tiled one with simd_gemm's masked tail; on ARM (4
+         * lanes) it was tiled all along. 150 keys end on a ragged KV tile,
+         * which with softcap is where v0.6.0 moved the softcap ahead of the
+         * -inf padding. */
+        for (int kt = 0; kt < 2; kt++) {
+            const enum ggml_type tkv = kt == 0 ? GGML_TYPE_F16 : GGML_TYPE_F32;
+            struct ggml_tensor * qt = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 36, 70, 4, 1);
+            struct ggml_tensor * kt_ = ggml_new_tensor_4d(ctx, tkv, 36, 150, 2, 1);
+            struct ggml_tensor * vt = ggml_new_tensor_4d(ctx, tkv, 36, 150, 2, 1);
+            struct ggml_tensor * mt = ggml_cast(ctx, ggml_diag_mask_inf(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 150, 70), 80), GGML_TYPE_F16);
+            run_amp(kt == 0 ? "flash_attn_ext tiled d36 f16" : "flash_attn_ext tiled d36 f32",
+                    ggml_flash_attn_ext(ctx, qt, kt_, vt, mt, 0.125f, 0.0f, 0.0f), 0, 1.0f);
+            run_amp(kt == 0 ? "flash_attn_ext tiled d36 f16 softcap" : "flash_attn_ext tiled d36 f32 softcap",
+                    ggml_flash_attn_ext(ctx, qt, kt_, vt, NULL, 0.125f, 0.0f, 30.0f), 0, 1.0f);
         }
         /* No flash_attn_back case: its constructor aborts at ggml.c:5523,
          * "TODO: adapt to ggml_flash_attn_ext() changes", so no public graph

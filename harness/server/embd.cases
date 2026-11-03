@@ -20,6 +20,25 @@ POST /v1/embeddings {"content": "hello"}
 POST /v1/embeddings {"nothing": "here"}
 POST /v1/embeddings {"input": ""}
 POST /v1/embeddings {"input": []}
+# v0.6.0: an entry may be an OAI content array, {"content": [parts]}, and
+# an invalid entry or JSON type is a 400 (upstream's test_embedding.py)
+POST /v1/embeddings {"input": ["hello world", {"content": [{"type": "text", "text": "hello "}, {"type": "text", "text": "world"}]}]}
+POST /v1/embeddings {"input": {"content": [{"type": "text", "text": "string"}]}}
+POST /v1/embeddings {"input": ["string1", {"prompt_string": "string2"}, {"content": [{"type": "text", "text": "string3"}]}]}
+POST /v1/embeddings {"input": {"prompt_string": "string"}}
+POST /v1/embeddings {"input": {"content": "string"}}
+POST /v1/embeddings {"input": {"content": [{"type": "unknown"}]}}
+POST /v1/embeddings {"input": {"content": [{"type": "text"}]}}
+POST /v1/embeddings {"input": {"content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]}}
+POST /v1/embeddings {"input": {"content": [{"type": "input_audio", "input_audio": {"data": "AAAA", "format": "wav"}}]}}
+POST /v1/embeddings {"input": {"content": [{"type": "input_video", "input_video": {"url": "data:video/mp4;base64,AAAA"}}]}}
+POST /v1/embeddings {"input": {"content": []}}
+POST /v1/embeddings {"input": [{"nope": 1}]}
+POST /v1/embeddings {"input": True}
+POST /v1/embeddings {"input": true}
+POST /v1/embeddings {"input": 3}
+POST /v1/embeddings {"input": "hello", "encoding_format": 1}
+POST /embeddings {"content": [{"content": [{"type": "text", "text": "a"}]}, [9707, 1879]]}
 # (a completion on an embeddings server samples logits it never computed:
 # the reference itself answers differently run to run, so it is not a case)
 POST /rerank {"query": "a", "documents": ["b"]}
@@ -53,3 +72,15 @@ POST /rerank {"documents": ["a"]}
 POST /rerank {"query": "q", "documents": "a"}
 POST /rerank {"query": "q", "documents": [1, 2]}
 # (an embedding from the rank head is the reference's own run-to-run noise)
+
+# v0.6.0: a causal reranker (Qwen3's RANK pooling over a KV cache) splits its
+# prompt across ubatches, where it used to refuse anything over -ub; and an
+# embedding or rerank task no longer reuses the cached prompt
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --rerank -b 64 -ub 16 -lv 4
+!fulllog
+POST /rerank {"query": "What is a panda? Tell me everything you know about this animal and where it lives.", "documents": ["The giant panda is a bear native to South Central China, characterised by its bold black-and-white coat.", "hi"]}
+POST /rerank {"query": "What is a panda? Tell me everything you know about this animal and where it lives.", "documents": ["The giant panda is a bear native to South Central China, characterised by its bold black-and-white coat."]}
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --embedding --pooling last -lv 4
+!fulllog
+POST /embeddings {"content": "the same prompt twice, which a completion would find in the cache"}
+POST /embeddings {"content": "the same prompt twice, which a completion would find in the cache"}

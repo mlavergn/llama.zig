@@ -7,7 +7,7 @@
 //! Ports `llama.cpp/common/reasoning-budget.cpp` and
 //! `llama.cpp/common/reasoning-budget.h`, with `common_utf8_is_complete` from
 //! `llama.cpp/common/unicode.cpp` and the `common_aho_corasick` constructor
-//! from `llama.cpp/common/trie.cpp` (v0.5.0, `7fe450e19`). Each declaration
+//! from `llama.cpp/common/trie.cpp` (v0.6.0, `d81235049`). Each declaration
 //! names what it ports and the line it began at.
 //!
 //! # A second copy, on purpose
@@ -46,7 +46,7 @@ fn oom() noreturn {
     unreachable;
 }
 
-/// Ports `common_reasoning_budget_state` (reasoning-budget.h:10 @7fe450e19).
+/// Ports `common_reasoning_budget_state` (reasoning-budget.h:10 @d81235049).
 pub const State = enum(c_int) {
     idle, // waiting for start sequence
     counting, // counting down tokens
@@ -74,7 +74,7 @@ fn tokenPiece(vocab: ?*const c.llama_vocab, token: c.llama_token, buf: []u8) []c
     return buf[0..@intCast(n)];
 }
 
-/// Ports `common_utf8_is_complete` (common/unicode.cpp:77 @7fe450e19): whether `s`
+/// Ports `common_utf8_is_complete` (common/unicode.cpp:77 @d81235049): whether `s`
 /// does not end inside a UTF-8 sequence.
 pub fn utf8IsComplete(s: []const u8) bool {
     if (s.len == 0) return true;
@@ -89,7 +89,7 @@ pub fn utf8IsComplete(s: []const u8) bool {
     return false;
 }
 
-/// Ports the `common_aho_corasick` constructor (trie.cpp:77 @7fe450e19) over a
+/// Ports the `common_aho_corasick` constructor (trie.cpp:77 @d81235049) over a
 /// trie already built: failure links in breadth-first order, the longest
 /// pattern ending at each state, the alphabet. `cli/json/trie.zig`'s
 /// `AhoCorasick.init` takes strings; the matchers here insert token ids.
@@ -148,14 +148,14 @@ fn findChild(node: trie.Trie.Node, cpt: u32) ?usize {
     return null;
 }
 
-/// Ports `token_matcher` (reasoning-budget.cpp:14 @7fe450e19): every
+/// Ports `token_matcher` (reasoning-budget.cpp:14 @d81235049): every
 /// sequence at once, through one automaton.
 const TokenMatcher = struct {
     seqs: [][]c.llama_token,
     ac: trie.AhoCorasick,
     state: usize = 0,
 
-    /// Ports `token_matcher` (reasoning-budget.cpp:19 @7fe450e19), the
+    /// Ports `token_matcher` (reasoning-budget.cpp:19 @d81235049), the
     /// constructor: `collect` then `build_trie`.
     fn init(seqs_in: []const []const c.llama_token) !TokenMatcher {
         const seqs = try collect(seqs_in);
@@ -175,7 +175,7 @@ const TokenMatcher = struct {
         self.ac.deinit();
     }
 
-    /// Ports `collect` (reasoning-budget.cpp:21 @7fe450e19): the non-empty
+    /// Ports `collect` (reasoning-budget.cpp:21 @d81235049): the non-empty
     /// sequences, first occurrence of each.
     fn collect(seqs: []const []const c.llama_token) ![][]c.llama_token {
         var res: std.ArrayList([]c.llama_token) = .empty;
@@ -189,7 +189,7 @@ const TokenMatcher = struct {
         return res.toOwnedSlice(gpa);
     }
 
-    /// Ports `advance` (reasoning-budget.cpp:40 @7fe450e19).
+    /// Ports `advance` (reasoning-budget.cpp:40 @d81235049).
     ///
     /// Return: the index into `seqs` of the longest sequence ending at this
     /// token, or -1.
@@ -200,13 +200,13 @@ const TokenMatcher = struct {
         return p;
     }
 
-    /// Ports `reset` (reasoning-budget.cpp:49 @7fe450e19).
+    /// Ports `reset` (reasoning-budget.cpp:49 @d81235049).
     fn reset(self: *TokenMatcher) void {
         self.state = 0;
     }
 };
 
-/// Ports `common_reasoning_budget_ctx` (reasoning-budget.cpp:52 @7fe450e19).
+/// Ports `common_reasoning_budget_ctx` (reasoning-budget.cpp:52 @d81235049).
 const Ctx = struct {
     vocab: ?*const c.llama_vocab,
 
@@ -236,12 +236,12 @@ fn ctxOf(smpl: ?*const c.llama_sampler) *Ctx {
     return @ptrCast(@alignCast(smpl.?.ctx.?));
 }
 
-/// Ports `common_reasoning_budget_name` (reasoning-budget.cpp:70 @7fe450e19).
+/// Ports `common_reasoning_budget_name` (reasoning-budget.cpp:70 @d81235049).
 fn name(_: ?*const c.llama_sampler) callconv(.c) [*c]const u8 {
     return "reasoning-budget";
 }
 
-/// Ports `common_reasoning_budget_accept` (reasoning-budget.cpp:74 @7fe450e19).
+/// Ports `common_reasoning_budget_accept` (reasoning-budget.cpp:74 @d81235049).
 fn accept(smpl: ?*c.llama_sampler, token: c.llama_token) callconv(.c) void {
     const ctx = ctxOf(smpl);
     const func = "common_reasoning_budget_accept";
@@ -328,7 +328,7 @@ fn accept(smpl: ?*c.llama_sampler, token: c.llama_token) callconv(.c) void {
     }
 }
 
-/// Ports `common_reasoning_budget_apply` (reasoning-budget.cpp:166 @7fe450e19):
+/// Ports `common_reasoning_budget_apply` (reasoning-budget.cpp:166 @d81235049):
 /// while forcing, every logit but the forced token's goes to -inf.
 fn apply(smpl: ?*c.llama_sampler, cur_p: ?*c.llama_token_data_array) callconv(.c) void {
     const ctx = ctxOf(smpl);
@@ -349,7 +349,7 @@ fn apply(smpl: ?*c.llama_sampler, cur_p: ?*c.llama_token_data_array) callconv(.c
     }
 }
 
-/// Ports `common_reasoning_budget_reset` (reasoning-budget.cpp:188 @7fe450e19).
+/// Ports `common_reasoning_budget_reset` (reasoning-budget.cpp:188 @d81235049).
 fn reset(smpl: ?*c.llama_sampler) callconv(.c) void {
     const ctx = ctxOf(smpl);
     ctx.state = .idle;
@@ -360,12 +360,12 @@ fn reset(smpl: ?*c.llama_sampler) callconv(.c) void {
     ctx.end_match = -1;
 }
 
-/// Ports `common_reasoning_budget_free` (reasoning-budget.cpp:205 @7fe450e19).
+/// Ports `common_reasoning_budget_free` (reasoning-budget.cpp:205 @d81235049).
 fn free(smpl: ?*c.llama_sampler) callconv(.c) void {
     ctxOf(smpl).destroy();
 }
 
-/// Ports `common_reasoning_budget_i` (reasoning-budget.cpp:209 @7fe450e19).
+/// Ports `common_reasoning_budget_i` (reasoning-budget.cpp:209 @d81235049).
 var iface: c.struct_llama_sampler_i = blk: {
     var i = std.mem.zeroes(c.struct_llama_sampler_i);
     i.name = name;
@@ -377,7 +377,7 @@ var iface: c.struct_llama_sampler_i = blk: {
     break :blk i;
 };
 
-/// Ports `common_reasoning_budget_clone` (reasoning-budget.cpp:224 @7fe450e19):
+/// Ports `common_reasoning_budget_clone` (reasoning-budget.cpp:224 @d81235049):
 /// a copy of the context. The matchers are rebuilt from their sequences,
 /// which `collect` already left unique and non-empty, so the automaton is
 /// the same one; the walk state is copied.
@@ -394,7 +394,7 @@ fn clone(smpl: ?*const c.llama_sampler) callconv(.c) ?*c.llama_sampler {
     return res;
 }
 
-/// Ports `common_reasoning_budget_init_state` (reasoning-budget.cpp:233 @7fe450e19).
+/// Ports `common_reasoning_budget_init_state` (reasoning-budget.cpp:233 @d81235049).
 fn initState(
     vocab: ?*const c.llama_vocab,
     start_seqs: []const []const c.llama_token,
@@ -422,7 +422,7 @@ fn initState(
     return c.llama_sampler_init(&iface, ctx).?;
 }
 
-/// Ports `common_reasoning_budget_init` (reasoning-budget.cpp:261 @7fe450e19).
+/// Ports `common_reasoning_budget_init` (reasoning-budget.cpp:261 @d81235049).
 ///
 /// Parameters:
 /// - `vocab`: for UTF-8 boundary detection; can be null.
@@ -444,13 +444,13 @@ pub fn init(
     return initState(vocab, start_seqs, end_seqs, forced_tokens, budget, initial_state);
 }
 
-/// Ports `common_reasoning_budget_get_state` (reasoning-budget.cpp:271 @7fe450e19).
+/// Ports `common_reasoning_budget_get_state` (reasoning-budget.cpp:271 @d81235049).
 pub fn getState(smpl: ?*const c.llama_sampler) State {
     if (smpl == null) return .idle;
     return ctxOf(smpl).state;
 }
 
-/// Ports `common_reasoning_budget_get_end_match` (reasoning-budget.cpp:278 @7fe450e19).
+/// Ports `common_reasoning_budget_get_end_match` (reasoning-budget.cpp:278 @d81235049).
 ///
 /// Return: the end sequence that moved the sampler to DONE, or null if none
 /// was recorded; borrowed from the sampler.
@@ -461,7 +461,7 @@ pub fn getEndMatch(smpl: ?*const c.llama_sampler) ?[]const c.llama_token {
     return ctx.end_matcher.seqs[@intCast(ctx.end_match)];
 }
 
-/// Ports `common_reasoning_budget_force` (reasoning-budget.cpp:291 @7fe450e19):
+/// Ports `common_reasoning_budget_force` (reasoning-budget.cpp:291 @d81235049):
 /// moves a counting sampler into FORCING.
 ///
 /// Return: whether the transition happened.

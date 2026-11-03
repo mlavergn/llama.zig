@@ -404,6 +404,45 @@ def base_cases():
     c.append(("stream-http10", [("send", b"GET /stream HTTP/1.0\r\n" + H + b"\r\n"), ("resp",)]))
     c.append(("stream-abandoned", [("send", req("GET /stream-wait HTTP/1.1")), ("upto", b"first\n"), ("sleep", 300), ("close",)]))
     c.append(simple("stream-abandoned-done", req("GET /wait-complete HTTP/1.1")))
+    # cpp-httplib 0.58/0.59: pipelined requests are served from the stream's
+    # buffer, the connection closes after any response saying `Connection:
+    # close`, and a rejected request line or header ends it
+    c.append(("pipelined-3", [("send", req("GET /echo?n=1 HTTP/1.1") + req("POST /echo HTTP/1.1", "Content-Length: 2", body=b"n2")
+                                       + req("GET /echo?n=3 HTTP/1.1")), ("resp",), ("resp",), ("resp",)]))
+    c.append(("pipelined-badline", [("send", req("BREW / HTTP/1.1") + req("GET /health HTTP/1.1")), ("resp",), ("resp",)]))
+    c.append(("pipelined-after-404", [("send", req("GET /nope HTTP/1.1") + req("GET /health HTTP/1.1")), ("resp",), ("resp",)]))
+    c.append(("keepalive-after-badheader", [("send", req("GET /echo HTTP/1.1", "NoColon")), ("resp",), ("send", req("GET /health HTTP/1.1")), ("resp",)]))
+    c.append(("keepalive-after-500", [("send", req("GET /status?code=500&body=x HTTP/1.1")), ("resp",), ("send", req("GET /health HTTP/1.1")), ("resp",)]))
+    # RFC 9112 2.2: one empty line before a request line is skipped
+    c.append(simple("leading-crlf", b"\r\n" + req("GET /echo?lead=1 HTTP/1.1")))
+    c.append(simple("leading-crlf-2", b"\r\n\r\n" + req("GET /echo?lead=2 HTTP/1.1")))
+    c.append(("body-then-crlf", [("send", req("POST /echo HTTP/1.1", "Content-Length: 2", body=b"ok") + b"\r\n"), ("resp",),
+                                 ("send", req("GET /echo?after=1 HTTP/1.1")), ("resp",)]))
+    c.append(("leading-crlf-eof", [("send", b"\r\n"), ("shut",), ("eof",)]))
+    # the request target is visible characters and obs-text only
+    c.append(simple("target-tab", b"GET /ec\tho HTTP/1.1\r\n" + H + b"\r\n"))
+    c.append(simple("target-ctl", b"GET /echo?a=\x01 HTTP/1.1\r\n" + H + b"\r\n"))
+    c.append(simple("target-del", b"GET /echo\x7f HTTP/1.1\r\n" + H + b"\r\n"))
+    c.append(simple("target-cr", b"GET /echo?a=\rb HTTP/1.1\r\n" + H + b"\r\n"))
+    c.append(simple("target-obs-text", b"GET /echo?u=\xc3\xa9 HTTP/1.1\r\n" + H + b"\r\n"))
+    # a Content-Length that is not a decimal length is a 400 on any route
+    c.append(simple("cl-plus", req("GET /echo HTTP/1.1", "Content-Length: +2", body=b"ok")))
+    c.append(simple("cl-list", req("POST /echo HTTP/1.1", "Content-Length: 2, 2", body=b"ok")))
+    c.append(simple("cl-empty", req("GET /health HTTP/1.1", "Content-Length:")))
+    c.append(simple("cl-space-inside", req("GET /health HTTP/1.1", "Content-Length: 1 2")))
+    c.append(("cl-bad-keepalive", [("send", req("GET /health HTTP/1.1", "Content-Length: x")), ("resp",), ("send", req("GET /health HTTP/1.1")), ("resp",)]))
+    # a whole q-value or none
+    c.append(simple("accept-q-suffix", req("GET /echo HTTP/1.1", "Accept: text/html;q=1.0x")))
+    c.append(simple("accept-q-exp", req("GET /echo HTTP/1.1", "Accept: text/html;q=0.5e1")))
+    c.append(simple("accept-q-ok", req("GET /echo HTTP/1.1", "Accept: text/html;q=0.500, */*;q=0")))
+    # a body from CPPHTTPLIB_SEND_BUFSIZ is written apart from the head
+    c.append(simple("echo-large", post("/echo", b"L" * 20000, ct="text/plain")))
+    c.append(simple("echo-16383", post("/echo", b"M" * 16300, ct="text/plain")))
+    c.append(("echo-large-keepalive", [("send", post("/echo", b"K" * 30000, ct="text/plain")), ("resp",), ("send", req("GET /health HTTP/1.1")), ("resp",)]))
+    c.append(("echo-large-head", [("send", b"HEAD /status?body=" + b"h" * 17000 + b" HTTP/1.1\r\n" + H + b"\r\n"), ("head",),
+                                  ("send", req("GET /health HTTP/1.1")), ("resp",)]))
+    # server-http.cpp v0.6.0: with the UI on, no /sw.js route
+    c.append(simple("sw-js-ui-on", req("GET /sw.js HTTP/1.1")))
     return c
 
 
@@ -453,6 +492,7 @@ def prefix_cases():
     c.append(simple("api-root", req("GET /api HTTP/1.1", k)))
     c.append(simple("options", req("OPTIONS /api/echo HTTP/1.1", "Origin: http://x")))
     c.append(simple("cors-fixed", req("GET /api/health HTTP/1.1", k, "Origin: http://x")))
+    c.append(simple("sw-js-prefixed", req("GET /api/sw.js HTTP/1.1", k)))
     c.append(("prefixed-stream", [("send", req("GET /api/stream HTTP/1.1", k)), ("resp",)]))
     return c
 
@@ -463,6 +503,12 @@ def small_cases():
     c.append(simple("post", post("/echo", b"x", "Authorization: Bearer abc")))
     c.append(simple("health", req("GET /health HTTP/1.1")))
     c.append(("stream", [("send", req("GET /stream HTTP/1.1", "Authorization: abc")), ("resp",)]))
+    # server-http.cpp v0.6.0: with the UI off ("auto"), /sw.js is a worker
+    # that removes itself; "reuse" has it on, and an API key
+    c.append(simple("sw-js", req("GET /sw.js HTTP/1.1", "Authorization: Bearer abc")))
+    c.append(simple("sw-js-nokey", req("GET /sw.js HTTP/1.1")))
+    c.append(simple("sw-js-post", post("/sw.js", b"{}", "Authorization: Bearer abc")))
+    c.append(("sw-js-head", [("send", req("HEAD /sw.js HTTP/1.1", "Authorization: Bearer abc")), ("head",)]))
     return c
 
 

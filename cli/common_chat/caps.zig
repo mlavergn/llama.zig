@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/jinja/caps.h` and `llama.cpp/common/jinja/caps.cpp`
-//! (llama.cpp v0.5.0, `7fe450e19`): `jinja`'s `caps`, `caps_get` and its
+//! (llama.cpp v0.6.0, `d81235049`): `jinja`'s `caps`, `caps_get` and its
 //! `caps_try_execute`. `caps_apply_preserve_reasoning` and
 //! `caps_apply_reasoning_effort` live in `template.zig`, beside the
 //! rendering they set up. Each declaration names what it ports and the line
@@ -33,8 +33,8 @@ const Error = exception.Error;
 const Template = template.Template;
 const Render = template.Render;
 
-/// Ports `jinja`'s `caps` (caps.h:10 @7fe450e19).
-/// `g_jinja_debug` (runtime.h:15 @7fe450e19): the engine's debug switch,
+/// Ports `jinja`'s `caps` (caps.h:10 @d81235049).
+/// `g_jinja_debug` (runtime.h:15 @d81235049): the engine's debug switch,
 /// off unless a debugger sets it.
 pub var jinja_debug: bool = false;
 
@@ -52,7 +52,7 @@ pub const Caps = struct {
     /// One entry of `to_map`.
     pub const Entry = struct { name: []const u8, value: bool };
 
-    /// Ports `to_map` (caps.cpp:87 @7fe450e19), in the `std`'s `map`'s order:
+    /// Ports `to_map` (caps.cpp:87 @d81235049), in the `std`'s `map`'s order:
     /// sorted by name.
     pub fn toMap(self: Caps) [9]Entry {
         return .{
@@ -68,7 +68,7 @@ pub const Caps = struct {
         };
     }
 
-    /// Ports `to_string` (caps.cpp:101 @7fe450e19).
+    /// Ports `to_string` (caps.cpp:101 @d81235049).
     ///
     /// Return: owned by `a`.
     pub fn toString(self: Caps, a: Allocator) Error![]u8 {
@@ -111,7 +111,7 @@ const Probe = struct {
 /// What a probe sets on the context after the JSON, as `ctx_fn` does.
 const CtxFn = enum { none, preserve_reasoning, reasoning_effort };
 
-/// Ports `caps_try_execute` (caps.cpp:35 @7fe450e19): `messages` and
+/// Ports `caps_try_execute` (caps.cpp:35 @d81235049): `messages` and
 /// `tools` bound with empty BOS and EOS and a generation prompt, the
 /// context adjusted, the template run with statistics on. A render that
 /// fails leaves an empty result, as upstream catches and ignores it.
@@ -186,7 +186,7 @@ fn toolCallMessages(comptime args: []const u8, comptime second_call: bool) []con
         "{\"role\":\"user\",\"content\":\"User message\"}]";
 }
 
-/// Ports `caps_get` (caps.cpp:111 @7fe450e19): the template rendered over
+/// Ports `caps_get` (caps.cpp:111 @d81235049): the template rendered over
 /// the probes, each capability read off what the render touched.
 pub fn capsGet(tmpl: *const Template) Error!Caps {
     const gpa = tmpl.gpa;
@@ -303,7 +303,7 @@ pub fn capsGet(tmpl: *const Template) Error!Caps {
         result.supports_reasoning_effort = p.used(effort);
     }
 
-    // `JJ_DEBUG` (runtime.h:13 @7fe450e19): printed only under the engine's own debug switch
+    // `JJ_DEBUG` (runtime.h:13 @d81235049): printed only under the engine's own debug switch
     // (`g_jinja_debug`), which nothing sets -- never through `common_log`
     if (jinja_debug) {
         var arena_state = std.heap.ArenaAllocator.init(gpa);

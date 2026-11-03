@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** Our own code, written against libllama's C ABI. It follows
-//! the shape of `llama.cpp/tools/cli/cli-context.cpp` (v0.5.0, `7fe450e19`) --
+//! the shape of `llama.cpp/tools/cli/cli-context.cpp` (v0.6.0, `d81235049`) --
 //! load, tokenize, build a sampler chain, decode in a loop -- but shares no
 //! code with it and is far smaller, because it does one-shot completion only.
 //!
@@ -67,12 +67,12 @@ pub const Stop = enum {
 /// What a chat turn generates with, beyond the session's own sampler: the
 /// parts of upstream's server task that `common_chat_templates_apply` fills
 /// in for a chat request (`oaicompat_chat_params_parse`,
-/// tools/server/server-common.cpp:1151 @7fe450e19). Everything is borrowed
+/// tools/server/server-common.cpp:1265 @d81235049). Everything is borrowed
 /// for the call.
 pub const TurnOptions = struct {
     /// Tokens printed with their special spelling; every other control token
     /// prints as nothing, as the server's `accept_special_token` decides
-    /// (tools/server/server-context.cpp:3800 @7fe450e19).
+    /// (tools/server/server-context.cpp:4130 @d81235049).
     preserved: []const c.llama_token = &.{},
     /// Stop strings: the reply ends where one appears, and it is not sent.
     stops: []const []const u8 = &.{},
@@ -114,7 +114,7 @@ pub const Session = struct {
     /// `GET_ROWS`, whose weights stay in host memory). Measured on a GB10 with
     /// Qwen3.5-2B: decode 7.59 ms/token without a pool, 7.03 with one, 6.75 at
     /// one thread. Upstream's CLI attaches one in `common_threadpools`'s `init`
-    /// (common/common.cpp:1785 @7fe450e19). Null if creation failed, which leaves
+    /// (common/common.cpp:1755 @d81235049). Null if creation failed, which leaves
     /// libllama's per-call pools, as upstream does.
     threadpool: ?*c.struct_ggml_threadpool = null,
     /// Borrowed from the caller's `Args`; not owned.
@@ -152,8 +152,8 @@ pub const Session = struct {
         /// `common_params::tensor_split`, 128 zeros until `--fit` writes it.
         tensor_split: [128]f32 = @splat(0),
         /// `common_params::tensor_buft_overrides`, padded with empty entries
-        /// to `llama_max_tensor_buft_overrides` (common/arg.cpp:941
-        /// @7fe450e19).
+        /// to `llama_max_tensor_buft_overrides` (common/arg.cpp:947
+        /// @d81235049).
         tensor_buft_overrides: []c.llama_model_tensor_buft_override,
         /// The regexes the overrides point at.
         patterns: fit.Patterns,
@@ -183,7 +183,7 @@ pub const Session = struct {
         errdefer load.patterns.deinit();
         @memset(load.tensor_buft_overrides, .{ .pattern = null, .buft = null });
 
-        // `common_model_params_to_llama` (common/common.cpp:1679 @7fe450e19).
+        // `common_model_params_to_llama` (common/common.cpp:1649 @d81235049).
         // `load_mode` and v0.4.0's `lazy_mode` stay libllama's defaults,
         // `AUTO` both, which are `common_params`' too: `--load-mode` and
         // `--lazy-mode` are not among the flags this CLI takes.
@@ -204,8 +204,8 @@ pub const Session = struct {
         // then shrinks it where that would not fit in memory.
         if (settings.n_ctx >= 0) ctx_params.n_ctx = @intCast(settings.n_ctx);
         if (settings.n_batch > 0) ctx_params.n_batch = @intCast(settings.n_batch);
-        // `server_output_limits` (tools/server/server-context.cpp:41
-        // @7fe450e19), which upstream's `llama-cli` reaches through the
+        // `server_output_limits` (tools/server/server-context.cpp:42
+        // @d81235049), which upstream's `llama-cli` reaches through the
         // server it drives: one sequence and no draft model, so one output
         // in a batch and one per sequence -- all this binary ever reads.
         // libllama's default of 0 sizes the output buffer for the whole
@@ -266,7 +266,7 @@ pub const Session = struct {
         const sampler = try buildSampler(settings, vocab);
         errdefer c.llama_sampler_free(sampler);
 
-        // `common_sampler_init` (common/sampling.cpp:187 @7fe450e19): a grammar
+        // `common_sampler_init` (common/sampling.cpp:191 @d81235049): a grammar
         // that does not parse fails the sampler, and with it the run. The
         // output-format prefill that follows there needs the chat template's
         // generation prompt, which a raw completion does not have.
@@ -438,8 +438,8 @@ pub const Session = struct {
     /// Without a grammar or a reasoning budget this is `llama_sampler_sample`
     /// over the chain. With either it is upstream's `common_sampler_sample`
     /// with `grammar_first` false, as its callers pass it
-    /// (common/sampling.cpp:594 @7fe450e19), then `common_sampler_accept`
-    /// (common/sampling.cpp:467 @7fe450e19): the budget, when there is one,
+    /// (common/sampling.cpp:602 @d81235049), then `common_sampler_accept`
+    /// (common/sampling.cpp:473 @d81235049): the budget, when there is one,
     /// edits the logits first; the chain picks a token; if the grammar
     /// rejects it, the logits are reloaded and the budget and grammar applied
     /// before the chain picks again -- which draws from the RNG a second time
@@ -482,7 +482,7 @@ pub const Session = struct {
         return id;
     }
 
-    /// `common_sampler`'s `set_logits` (common/sampling.cpp:130 @7fe450e19), on
+    /// `common_sampler`'s `set_logits` (common/sampling.cpp:134 @d81235049), on
     /// its CPU path: one candidate per vocabulary entry, from the last row of
     /// logits.
     fn setLogits(self: *Self) !void {
@@ -585,7 +585,7 @@ pub const Session = struct {
     /// a wrong answer.
     ///
     /// The reply goes to `sink` as upstream's server sends it
-    /// (`process_token`, tools/server/server-context.cpp:1833 @7fe450e19): each
+    /// (`process_token`, tools/server/server-context.cpp:1966 @d81235049): each
     /// token's piece, special only for a preserved token, joins the text; while
     /// the text ends inside a UTF-8 sequence nothing is sent; a stop string
     /// ends the reply where it begins and is not sent; and text that could be
@@ -719,7 +719,7 @@ pub const Session = struct {
         return .{
             .prompt_tokens = d.n_p_eval,
             // 1e3 / t_ms * n, as `llama_perf_context_print` computes it
-            // (llama-context.cpp:4353 @7fe450e19).
+            // (llama-context.cpp:4431 @d81235049).
             .prompt_per_second = if (d.t_p_eval_ms > 0)
                 1e3 / d.t_p_eval_ms * @as(f64, @floatFromInt(d.n_p_eval))
             else
@@ -757,7 +757,7 @@ pub const Session = struct {
     }
 };
 
-/// Ports `validate_utf8` (tools/server/server-common.cpp:903 @7fe450e19): the
+/// Ports `validate_utf8` (tools/server/server-common.cpp:944 @d81235049): the
 /// length of `text` without a multi-byte character cut off at its end.
 pub fn validUtf8Len(text: []const u8) usize {
     const len = text.len;
@@ -776,10 +776,10 @@ pub fn validUtf8Len(text: []const u8) usize {
     return len;
 }
 
-/// Ports `server_slot`'s `find_stopping_strings` (tools/server/server-context.cpp:567 @7fe450e19): where the first stop string begins in `text`. A full stop
+/// Ports `server_slot`'s `find_stopping_strings` (tools/server/server-context.cpp:605 @d81235049): where the first stop string begins in `text`. A full stop
 /// looks only at the end the last token could have completed; otherwise this
 /// finds a stop string's beginning at the very end of `text`
-/// (`string_find_partial_stop`, common/common.h:858 @7fe450e19).
+/// (`string_find_partial_stop`, common/common.h:867 @d81235049).
 ///
 /// Return: the offset, or null.
 pub fn findStop(stops: []const []const u8, text: []const u8, last_token_size: usize, is_full_stop: bool) ?usize {
@@ -797,7 +797,7 @@ pub fn findStop(stops: []const []const u8, text: []const u8, last_token_size: us
     return stop_pos;
 }
 
-/// Ports `string_find_partial_stop` (common/common.h:858 @7fe450e19).
+/// Ports `string_find_partial_stop` (common/common.h:867 @d81235049).
 fn partialStop(str: []const u8, stop: []const u8) ?usize {
     if (str.len == 0 or stop.len == 0) return null;
     const last_char = str[str.len - 1];
@@ -823,7 +823,7 @@ pub const Timings = struct {
     generated_per_second: f64,
 };
 
-/// Ports the warmup in `common_init_from_params` (common/common.cpp:1436 @7fe450e19).
+/// Ports the warmup in `common_init_from_params` (common/common.cpp:1399 @d81235049).
 ///
 /// Runs one throwaway decode so the one-time costs -- Metal pipeline
 /// compilation, buffer allocation, first-touch page faults -- happen *before*
@@ -916,7 +916,7 @@ fn warmUp(model: *c.llama_model, ctx: *c.llama_context, vocab: *const c.llama_vo
 ///
 /// **There is deliberately no greedy short-circuit.** `--temp 0` looks like it
 /// should mean "add `llama_sampler_init_greedy` and skip the rest", and that
-/// is wrong: `llama_sampler_temp_impl` (llama-sampler.cpp:265 @7fe450e19) already does the
+/// is wrong: `llama_sampler_temp_impl` (llama-sampler.cpp:265 @d81235049) already does the
 /// argmax when `temp <= 0`, and it does it *after* the penalty sampler has
 /// altered the logits. Short-circuiting would make `--temp 0 --repeat-penalty
 /// 1.1` pick a different token from upstream, on a path where both look

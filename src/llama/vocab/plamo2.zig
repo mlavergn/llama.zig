@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.5.0 (`7fe450e19`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.6.0 (`d81235049`).
 //!
 //! The C++ builds its table from `std::unordered_map`s, but iterates only
 //! one of them, and only to collect its keys, which it then sorts by their
@@ -37,7 +37,7 @@ const path_num_tokens = 2;
 const invalid_score: i32 = -20000000;
 const unknown_score: i32 = -10000000;
 
-/// Ports `llm_tokenizer_plamo2` (llama-vocab.cpp:1367 @7fe450e19).
+/// Ports `llm_tokenizer_plamo2` (llama-vocab.cpp:1397 @d81235049).
 pub const Tokenizer = struct {
     /// `bytes_`: the token for each byte value.
     bytes: [256]Token,
@@ -178,8 +178,8 @@ pub const Tokenizer = struct {
         self.table.deinit(allocator);
     }
 
-    /// Ports `llm_tokenizer_plamo2`'s `encode` (llama-vocab.cpp:1509
-    /// @7fe450e19), appending to `output` as the session does.
+    /// Ports `llm_tokenizer_plamo2`'s `encode` (llama-vocab.cpp:1539
+    /// @d81235049), appending to `output` as the session does.
     ///
     /// Return: nothing; `error.Thrown` is not raised but kept for the
     /// tokenizers' common shape.

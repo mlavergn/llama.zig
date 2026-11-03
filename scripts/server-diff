@@ -169,6 +169,8 @@ LOG_MASKS = [
     r" *\d+(\.\d+)? ms",                       # timings, with their padding
     r" *\d+(\.\d+)? tokens per second",
     r"took \d+\.\d+ seconds",                 # the fit's time
+    r"in \d+\.\d+ sec \(max single = \d+\.\d+ sec\)",  # Metal's library load (v0.6.0)
+    r"library in \d+\.\d+ sec",              # and each library's, at debug verbosity
     r"0x[0-9a-f]+",                              # %p
     r"port \d+", r"127\.0\.0\.1:\d+",
     r", \d+ MiB free\)",

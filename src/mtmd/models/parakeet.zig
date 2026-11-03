@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/parakeet.cpp` at v0.5.0
-//! (`7fe450e19`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/parakeet.cpp` at v0.6.0
+//! (`d81235049`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -18,9 +18,9 @@ const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// `PARAKEET_LOCAL_ATTN_THRESHOLD` (parakeet.cpp:3 @7fe450e19).
+/// `PARAKEET_LOCAL_ATTN_THRESHOLD` (parakeet.cpp:3 @d81235049).
 const parakeet_local_attn_threshold: c_int = 8192;
-/// `PARAKEET_LOCAL_ATTN_WINDOW` (parakeet.cpp:4 @7fe450e19).
+/// `PARAKEET_LOCAL_ATTN_WINDOW` (parakeet.cpp:4 @d81235049).
 const parakeet_local_attn_window: c_int = 128;
 
 /// `1.0f / std::sqrt(d_head)` with an `int` `d_head`: the double overload,
@@ -29,7 +29,7 @@ fn invSqrt(d_head: c_int) f32 {
     return @floatCast(1.0 / @sqrt(@as(f64, @floatFromInt(d_head))));
 }
 
-/// Ports `build` (parakeet.cpp:7 @7fe450e19), a member of
+/// Ports `build` (parakeet.cpp:7 @d81235049), a member of
 /// `clip_graph_parakeet`: conv
 /// subsampling and the conformer encoder.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
@@ -293,8 +293,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
                     const n_frame = ne(rel_pos_scores, 1);
                     const n_head_r = ne(rel_pos_scores, 2); // `n_head` upstream, shadowing the outer one
 
-                    rel_pos_scores = c.ggml_pad(ctx0, rel_pos_scores, 1, 0, 0, 0);
-                    rel_pos_scores = c.ggml_roll(ctx0, rel_pos_scores, 1, 0, 0, 0);
+                    rel_pos_scores = c.ggml_pad_ext(ctx0, rel_pos_scores, 1, 0, 0, 0, 0, 0, 0, 0);
 
                     rel_pos_scores = c.ggml_reshape_3d(ctx0, rel_pos_scores, n_frame, pos_window + 1, n_head_r);
                     rel_pos_scores = c.ggml_cont(ctx0, rel_pos_scores);
@@ -362,9 +361,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
             // use ggml_ssm_conv for f32 precision
             const dw_pad = @divTrunc(hparams.audio_conv_kernel_size - 1, 2);
-            cur = c.ggml_pad(ctx0, cur, dw_pad, 0, 0, 0);
-            cur = c.ggml_roll(ctx0, cur, dw_pad, 0, 0, 0);
-            cur = c.ggml_pad(ctx0, cur, dw_pad, 0, 0, 0);
+            cur = c.ggml_pad_ext(ctx0, cur, dw_pad, dw_pad, 0, 0, 0, 0, 0, 0);
             _ = c.ggml_format_name(cur, "enc_%d_conv_dw_pad", il);
 
             cur = c.ggml_ssm_conv(ctx0, cur, layer.conv_dw_w);

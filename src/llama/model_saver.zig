@@ -11,7 +11,7 @@
 //!   nests, for the order `add_tensors_from_model` walks them in
 //! - `llama.cpp/src/llama-vocab.cpp` -- `llama_vocab::get_bpe_merges`
 //!
-//! All at v0.5.0 (`7fe450e19`). `llama_model_save_to_file`, which lives in
+//! All at v0.6.0 (`d81235049`). `llama_model_save_to_file`, which lives in
 //! `llama.cpp/src/llama.cpp`, is `api/quant.zig`'s.
 //!
 //! # Scope
@@ -68,7 +68,8 @@ fn oom() noreturn {
     impl.abort("llama-model-saver.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_saver_supports_arch` (llama-model-saver.cpp:16 @7fe450e19).
+/// Ports `llama_model_saver_supports_arch` (llama-model-saver.cpp:16 @d81235049).
+/// Clef's head tensors are not saved.
 ///
 /// Parameters:
 /// - `a`: the architecture.
@@ -76,13 +77,13 @@ fn oom() noreturn {
 /// Return: whether the saver can write a model of it.
 pub fn supportsArch(a: arch.Arch) bool {
     return switch (a) {
-        .gemma3n, .bitnet, .t5, .apertus, .step35 => false,
+        .gemma3n, .bitnet, .t5, .apertus, .step35, .clef => false,
         else => true,
     };
 }
 
 /// `add_tensors_from_model`'s model-level tensors, in its order
-/// (llama-model-saver.cpp:451 @7fe450e19), after `tok_embd`.
+/// (llama-model-saver.cpp:467 @d81235049), after `tok_embd`.
 const model_fields = [_][]const u8{
     "type_embd",      "pos_embd",        "tok_norm",        "tok_norm_b",   "output_norm",   "output_norm_b",
     "output",         "output_b",        "output_norm_enc", "output_s",     "output_in_s",   "output_res_score",
@@ -91,7 +92,7 @@ const model_fields = [_][]const u8{
     "hc_head_norm",   "hc_head_down",    "hc_head_up",
 };
 
-/// `llama_model`'s tensors (llama-model.h:612 @7fe450e19) that
+/// `llama_model`'s tensors (llama-model.h:636 @d81235049) that
 /// `add_tensors_from_model` does not write.
 const model_unsaved = [_][]const u8{
     "conv1d",                 "conv1d_b",            "altup_proj",           "altup_unembd_proj",
@@ -99,96 +100,98 @@ const model_unsaved = [_][]const u8{
     "d2t",                    "dspark_markov_w1",    "dspark_markov_w2",     "dspark_markov_w2_s",
     "dspark_conf_proj",       "dspark_conf_proj_b",  "dflash_selector_prev", "dflash_selector_next",
     "dflash_selector_hidden", "dense_2_out_layers",  "dense_2_out_layers_b", "dense_3_out_layers",
+    "cls_norm_b",
 };
 
-/// Mirrors `llama_layer` (llama-model.h:254 @7fe450e19) read as an array of
-/// tensor pointers, with its nested `llama_layer_posnet` (llama-model.h:166
-/// @7fe450e19), `llama_layer_convnext` (llama-model.h:201 @7fe450e19),
-/// `llama_layer_shortconv` (llama-model.h:217 @7fe450e19),
-/// `llama_layer_nextn` (llama-model.h:223 @7fe450e19) and
-/// `llama_layer_switch_lora` (llama-model.h:236 @7fe450e19) in place.
+/// Mirrors `llama_layer` (llama-model.h:261 @d81235049) read as an array of
+/// tensor pointers, with its nested `llama_layer_posnet` (llama-model.h:168
+/// @d81235049), `llama_layer_convnext` (llama-model.h:203 @d81235049),
+/// `llama_layer_shortconv` (llama-model.h:219 @d81235049),
+/// `llama_layer_nextn` (llama-model.h:225 @d81235049) and
+/// `llama_layer_switch_lora` (llama-model.h:243 @d81235049) in place.
 pub const layer_fields = [_][]const u8{
     // BEGIN layer_fields
-    "attn_norm",              "attn_norm_b",            "attn_norm_2",              "attn_norm_2_b",
-    "attn_q_norm",            "attn_q_norm_b",          "attn_k_norm",              "attn_k_norm_b",
-    "attn_out_norm",          "attn_out_norm_b",        "attn_q_a_norm",            "attn_kv_a_norm",
-    "attn_sub_norm",          "attn_post_norm",         "ffn_sub_norm",             "attn_norm_cross",
-    "attn_norm_enc",          "ssm_norm",               "ssm_dt_norm",              "ssm_b_norm",
-    "ssm_c_norm",             "wq",                     "wk",                       "wv",
-    "wo",                     "wqkv",                   "wg",                       "wq_a",
-    "wq_b",                   "wkv_a_mqa",              "wkv_b",                    "wkv",
-    "wk_b",                   "wv_b",                   "wqkv_b",                   "wo_a",
-    "wo_b",                   "wq_cross",               "wk_cross",                 "wv_cross",
-    "wo_cross",               "wq_enc",                 "wk_enc",                   "wv_enc",
-    "wo_enc",                 "wqkv_gate",              "attn_rel_b",               "attn_rel_b_enc",
-    "attn_rel_b_cross",       "ffn_norm",               "ffn_norm_b",               "ffn_post_norm",
-    "ffn_post_norm_1",        "ffn_post_norm_2",        "ffn_pre_norm_2",           "layer_out_norm",
-    "layer_out_norm_b",       "ffn_norm_exps",          "ffn_norm_enc",             "ffn_gate",
-    "ffn_down",               "ffn_up",                 "ffn_gate_enc",             "ffn_down_enc",
-    "ffn_up_enc",             "ffn_gate_inp",           "ffn_gate_inp_s",           "ffn_gate_exps",
-    "ffn_down_exps",          "ffn_up_exps",            "ffn_gate_up_exps",         "ffn_gate_inp_b",
-    "ffn_gate_exps_b",        "ffn_down_exps_b",        "ffn_up_exps_b",            "ffn_gate_up_exps_b",
-    "ffn_gate_exps_s",        "ffn_down_exps_s",        "ffn_up_exps_s",            "ffn_latent_down",
-    "ffn_latent_up",          "ffn_gate_inp_shexp",     "ffn_gate_shexp",           "ffn_down_shexp",
-    "ffn_up_shexp",           "ffn_gate_chexps",        "ffn_down_chexps",          "ffn_up_chexps",
-    "ffn_gate_b",             "ffn_down_b",             "ffn_up_b",                 "ffn_act",
-    "ffn_exp_probs_b",        "ffn_exp_probs_b_vl",     "ffn_gate_tid2eid",         "dflash_attn_conv_base",
-    "dflash_attn_conv_proj",  "dflash_ffn_conv_base",   "dflash_ffn_conv_proj",     "ssm_in",
-    "ssm_x",                  "ssm_dt",                 "ssm_out",                  "ssm_conv1d",
-    "ssm_a",                  "ssm_d",                  "ssm_conv1d_b",             "ssm_dt_b",
-    "ssm_beta_alpha",         "ssm_alpha",              "time_mix_w1",              "time_mix_w2",
-    "time_mix_lerp_x",        "time_mix_lerp_w",        "time_mix_lerp_k",          "time_mix_lerp_v",
-    "time_mix_lerp_r",        "time_mix_lerp_g",        "time_mix_lerp_fused",      "time_mix_first",
-    "time_mix_decay",         "time_mix_decay_w1",      "time_mix_decay_w2",        "time_mix_key",
-    "time_mix_key_b",         "time_mix_value",         "time_mix_value_b",         "time_mix_receptance",
-    "time_mix_receptance_b",  "time_mix_gate",          "time_mix_w0",              "time_mix_a0",
-    "time_mix_a1",            "time_mix_a2",            "time_mix_v0",              "time_mix_v1",
-    "time_mix_v2",            "time_mix_g1",            "time_mix_g2",              "time_mix_k_k",
-    "time_mix_k_a",           "time_mix_r_k",           "time_mix_ln",              "time_mix_ln_b",
-    "time_mix_output",        "channel_mix_lerp_k",     "channel_mix_lerp_r",       "channel_mix_key",
-    "channel_mix_receptance", "channel_mix_value",      "rope_long",                "rope_short",
-    "rope_freqs",             "wq_s",                   "wk_s",                     "wv_s",
-    "wo_s",                   "wqkv_s",                 "wqkv_gate_s",              "ffn_gate_s",
-    "ffn_up_s",               "ffn_down_s",             "ffn_gate_shexp_s",         "ffn_up_shexp_s",
-    "ffn_down_shexp_s",       "ssm_in_s",               "ssm_out_s",                "ssm_alpha_s",
-    "ssm_beta_s",             "wq_in_s",                "wk_in_s",                  "wv_in_s",
-    "wo_in_s",                "wqkv_in_s",              "wqkv_gate_in_s",           "ffn_gate_in_s",
-    "ffn_up_in_s",            "ffn_down_in_s",          "ffn_gate_exps_in_s",       "ffn_down_exps_in_s",
-    "ffn_up_exps_in_s",       "ffn_gate_shexp_in_s",    "ffn_up_shexp_in_s",        "ffn_down_shexp_in_s",
-    "ssm_in_in_s",            "ssm_out_in_s",           "ssm_alpha_in_s",           "ssm_beta_in_s",
-    "per_layer_inp_gate",     "per_layer_proj",         "per_layer_post_norm",      "altup_correct_coef",
-    "altup_correct_scale",    "altup_predict_coef",     "altup_router",             "altup_router_norm",
-    "laurel_l",               "laurel_r",               "laurel_post_norm",         "attn_sinks",
-    "attn_kv_norm",           "hc_attn_fn",             "hc_attn_base",             "hc_attn_scale",
-    "hc_ffn_fn",              "hc_ffn_base",            "hc_ffn_scale",             "attn_comp_wkv",
-    "attn_comp_wgate",        "attn_comp_ape",          "attn_comp_norm",           "indexer_comp_wkv",
-    "indexer_comp_wgate",     "indexer_comp_ape",       "indexer_comp_norm",        "visexp_attn_wqkv",
-    "visexp_attn_wo",         "visexp_ffn_gate",        "visexp_ffn_down",          "visexp_ffn_up",
-    "ffn_act_alpha_n",        "ffn_act_alpha_p",        "ffn_act_beta",             "ffn_act_eps",
-    "ssm_q_conv",             "ssm_k_conv",             "ssm_v_conv",               "ssm_f_a",
-    "ssm_f_b",                "ssm_beta",               "ssm_g_a",                  "ssm_g_b",
-    "ssm_o_norm",             "ssm_g",                  "attn_res_score",           "ffn_res_score",
-    "ffn_routed_down",        "ffn_routed_up",          "ffn_routed_norm",          "indexer_k_norm",
-    "indexer_k_norm_b",       "indexer_proj",           "indexer_attn_k",           "indexer_attn_q_b",
-    "index_q_proj",           "index_k_proj",           "index_q_norm",             "index_k_norm",
-    "hc_attn_norm",           "hc_attn_down",           "hc_attn_up",               "hc_attn_inject",
-    "hc_ffn_norm",            "hc_ffn_down",            "hc_ffn_up",                "hc_ffn_inject",
-    "ple_key",                "ple_value",              "ple_norm_key",             "ple_norm_query",
-    "ple_norm_conv",          "ple_conv1d",             "out_scale",                "posnet.norm1",
-    "posnet.norm1_b",         "posnet.conv1",           "posnet.conv1_b",           "posnet.norm2",
-    "posnet.norm2_b",         "posnet.conv2",           "posnet.conv2_b",           "posnet.attn_norm",
-    "posnet.attn_norm_b",     "posnet.attn_q",          "posnet.attn_q_b",          "posnet.attn_k",
-    "posnet.attn_k_b",        "posnet.attn_v",          "posnet.attn_v_b",          "posnet.attn_o",
-    "posnet.attn_o_b",        "posnet.norm",            "posnet.norm_b",            "convnext.dw",
-    "convnext.dw_b",          "convnext.norm",          "convnext.norm_b",          "convnext.pw1",
-    "convnext.pw1_b",         "convnext.pw2",           "convnext.pw2_b",           "convnext.gamma",
-    "shortconv.in_proj",      "shortconv.conv",         "shortconv.out_proj",       "nextn.eh_proj",
-    "nextn.eh_proj_s",        "nextn.eh_proj_in_s",     "nextn.embed_tokens",       "nextn.enorm",
-    "nextn.hnorm",            "nextn.shared_head_head", "nextn.shared_head_head_s", "nextn.shared_head_head_in_s",
-    "nextn.shared_head_norm", "switch_lora.a_q",        "switch_lora.b_q",          "switch_lora.a_k",
-    "switch_lora.b_k",        "switch_lora.a_v",        "switch_lora.b_v",          "switch_lora.a_o",
-    "switch_lora.b_o",        "switch_lora.a_gate",     "switch_lora.b_gate",       "switch_lora.a_up",
-    "switch_lora.b_up",       "switch_lora.a_down",     "switch_lora.b_down",
+    "attn_norm",                "attn_norm_b",                 "attn_norm_2",            "attn_norm_2_b",
+    "attn_q_norm",              "attn_q_norm_b",               "attn_k_norm",            "attn_k_norm_b",
+    "attn_out_norm",            "attn_out_norm_b",             "attn_q_a_norm",          "attn_kv_a_norm",
+    "attn_sub_norm",            "attn_post_norm",              "ffn_sub_norm",           "attn_norm_cross",
+    "attn_norm_enc",            "ssm_norm",                    "ssm_dt_norm",            "ssm_b_norm",
+    "ssm_c_norm",               "wq",                          "wk",                     "wv",
+    "wo",                       "wqkv",                        "wg",                     "wq_a",
+    "wq_b",                     "wkv_a_mqa",                   "wkv_b",                  "wkv",
+    "wk_b",                     "wv_b",                        "wqkv_b",                 "wo_a",
+    "wo_b",                     "wq_cross",                    "wk_cross",               "wv_cross",
+    "wo_cross",                 "wq_enc",                      "wk_enc",                 "wv_enc",
+    "wo_enc",                   "wqkv_gate",                   "attn_rel_b",             "attn_rel_b_enc",
+    "attn_rel_b_cross",         "ffn_norm",                    "ffn_norm_b",             "ffn_post_norm",
+    "ffn_post_norm_1",          "ffn_post_norm_2",             "ffn_pre_norm_2",         "layer_out_norm",
+    "layer_out_norm_b",         "ffn_norm_exps",               "ffn_norm_enc",           "ffn_gate",
+    "ffn_down",                 "ffn_up",                      "ffn_gate_enc",           "ffn_down_enc",
+    "ffn_up_enc",               "ffn_gate_inp",                "ffn_gate_inp_s",         "ffn_gate_exps",
+    "ffn_down_exps",            "ffn_up_exps",                 "ffn_gate_up_exps",       "ffn_gate_inp_b",
+    "ffn_gate_exps_b",          "ffn_down_exps_b",             "ffn_up_exps_b",          "ffn_gate_up_exps_b",
+    "ffn_gate_exps_s",          "ffn_down_exps_s",             "ffn_up_exps_s",          "ffn_latent_down",
+    "ffn_latent_up",            "ffn_gate_inp_shexp",          "ffn_gate_shexp",         "ffn_down_shexp",
+    "ffn_up_shexp",             "ffn_gate_chexps",             "ffn_down_chexps",        "ffn_up_chexps",
+    "ffn_gate_b",               "ffn_down_b",                  "ffn_up_b",               "ffn_act",
+    "ffn_exp_probs_b",          "ffn_exp_probs_b_vl",          "ffn_gate_tid2eid",       "dflash_attn_conv_base",
+    "dflash_attn_conv_proj",    "dflash_ffn_conv_base",        "dflash_ffn_conv_proj",   "ssm_in",
+    "ssm_x",                    "ssm_dt",                      "ssm_out",                "ssm_conv1d",
+    "ssm_a",                    "ssm_d",                       "ssm_conv1d_b",           "ssm_dt_b",
+    "ssm_beta_alpha",           "ssm_alpha",                   "time_mix_w1",            "time_mix_w2",
+    "time_mix_lerp_x",          "time_mix_lerp_w",             "time_mix_lerp_k",        "time_mix_lerp_v",
+    "time_mix_lerp_r",          "time_mix_lerp_g",             "time_mix_lerp_fused",    "time_mix_first",
+    "time_mix_decay",           "time_mix_decay_w1",           "time_mix_decay_w2",      "time_mix_key",
+    "time_mix_key_b",           "time_mix_value",              "time_mix_value_b",       "time_mix_receptance",
+    "time_mix_receptance_b",    "time_mix_gate",               "time_mix_w0",            "time_mix_a0",
+    "time_mix_a1",              "time_mix_a2",                 "time_mix_v0",            "time_mix_v1",
+    "time_mix_v2",              "time_mix_g1",                 "time_mix_g2",            "time_mix_k_k",
+    "time_mix_k_a",             "time_mix_r_k",                "time_mix_ln",            "time_mix_ln_b",
+    "time_mix_output",          "channel_mix_lerp_k",          "channel_mix_lerp_r",     "channel_mix_key",
+    "channel_mix_receptance",   "channel_mix_value",           "rope_long",              "rope_short",
+    "rope_freqs",               "wq_s",                        "wk_s",                   "wv_s",
+    "wo_s",                     "wqkv_s",                      "wqkv_gate_s",            "ffn_gate_s",
+    "ffn_up_s",                 "ffn_down_s",                  "ffn_gate_shexp_s",       "ffn_up_shexp_s",
+    "ffn_down_shexp_s",         "ssm_in_s",                    "ssm_out_s",              "ssm_alpha_s",
+    "ssm_beta_s",               "wq_in_s",                     "wk_in_s",                "wv_in_s",
+    "wo_in_s",                  "wqkv_in_s",                   "wqkv_gate_in_s",         "ffn_gate_in_s",
+    "ffn_up_in_s",              "ffn_down_in_s",               "ffn_gate_exps_in_s",     "ffn_down_exps_in_s",
+    "ffn_up_exps_in_s",         "ffn_gate_shexp_in_s",         "ffn_up_shexp_in_s",      "ffn_down_shexp_in_s",
+    "ssm_in_in_s",              "ssm_out_in_s",                "ssm_alpha_in_s",         "ssm_beta_in_s",
+    "per_layer_inp_gate",       "per_layer_proj",              "per_layer_post_norm",    "altup_correct_coef",
+    "altup_correct_scale",      "altup_predict_coef",          "altup_router",           "altup_router_norm",
+    "laurel_l",                 "laurel_r",                    "laurel_post_norm",       "attn_sinks",
+    "attn_kv_norm",             "hc_attn_fn",                  "hc_attn_base",           "hc_attn_scale",
+    "hc_ffn_fn",                "hc_ffn_base",                 "hc_ffn_scale",           "attn_comp_wkv",
+    "attn_comp_wgate",          "attn_comp_ape",               "attn_comp_norm",         "indexer_comp_wkv",
+    "indexer_comp_wgate",       "indexer_comp_ape",            "indexer_comp_norm",      "visexp_attn_wqkv",
+    "visexp_attn_wo",           "visexp_ffn_gate",             "visexp_ffn_down",        "visexp_ffn_up",
+    "ffn_act_alpha_n",          "ffn_act_alpha_p",             "ffn_act_beta",           "ffn_act_eps",
+    "ssm_q_conv",               "ssm_k_conv",                  "ssm_v_conv",             "ssm_f_a",
+    "ssm_f_b",                  "ssm_beta",                    "ssm_g_a",                "ssm_g_b",
+    "ssm_o_norm",               "ssm_g",                       "attn_res_score",         "ffn_res_score",
+    "ffn_routed_down",          "ffn_routed_up",               "ffn_routed_norm",        "indexer_k_norm",
+    "indexer_k_norm_b",         "indexer_proj",                "indexer_attn_k",         "indexer_attn_q_b",
+    "indexer_kpool_gate",       "indexer_kpool_ape",           "index_q_proj",           "index_k_proj",
+    "index_q_norm",             "index_k_norm",                "hc_attn_norm",           "hc_attn_down",
+    "hc_attn_up",               "hc_attn_inject",              "hc_ffn_norm",            "hc_ffn_down",
+    "hc_ffn_up",                "hc_ffn_inject",               "ple_key",                "ple_value",
+    "ple_norm_key",             "ple_norm_query",              "ple_norm_conv",          "ple_conv1d",
+    "out_scale",                "posnet.norm1",                "posnet.norm1_b",         "posnet.conv1",
+    "posnet.conv1_b",           "posnet.norm2",                "posnet.norm2_b",         "posnet.conv2",
+    "posnet.conv2_b",           "posnet.attn_norm",            "posnet.attn_norm_b",     "posnet.attn_q",
+    "posnet.attn_q_b",          "posnet.attn_k",               "posnet.attn_k_b",        "posnet.attn_v",
+    "posnet.attn_v_b",          "posnet.attn_o",               "posnet.attn_o_b",        "posnet.norm",
+    "posnet.norm_b",            "convnext.dw",                 "convnext.dw_b",          "convnext.norm",
+    "convnext.norm_b",          "convnext.pw1",                "convnext.pw1_b",         "convnext.pw2",
+    "convnext.pw2_b",           "convnext.gamma",              "shortconv.in_proj",      "shortconv.conv",
+    "shortconv.out_proj",       "nextn.eh_proj",               "nextn.eh_proj_s",        "nextn.eh_proj_in_s",
+    "nextn.embed_tokens",       "nextn.enorm",                 "nextn.hnorm",            "nextn.shared_head_head",
+    "nextn.shared_head_head_s", "nextn.shared_head_head_in_s", "nextn.shared_head_norm", "nextn.hc_head_norm",
+    "nextn.hc_head_down",       "nextn.hc_head_up",            "switch_lora.a_q",        "switch_lora.b_q",
+    "switch_lora.a_k",          "switch_lora.b_k",             "switch_lora.a_v",        "switch_lora.b_v",
+    "switch_lora.a_o",          "switch_lora.b_o",             "switch_lora.a_gate",     "switch_lora.b_gate",
+    "switch_lora.a_up",         "switch_lora.b_up",            "switch_lora.a_down",     "switch_lora.b_down",
     // END layer_fields
 };
 
@@ -247,7 +250,7 @@ const KeyZ = struct {
     }
 };
 
-/// Ports `llama_model_saver` (llama-model-saver.h:12 @7fe450e19), built from
+/// Ports `llama_model_saver` (llama-model-saver.h:12 @d81235049), built from
 /// a model.
 pub const Saver = struct {
     gguf_ctx: *c.gguf_context,
@@ -256,7 +259,7 @@ pub const Saver = struct {
     arch: arch.Arch,
 
     /// Ports the constructor of `llama_model_saver` from a model
-    /// (llama-model-saver.cpp:29 @7fe450e19).
+    /// (llama-model-saver.cpp:30 @d81235049).
     ///
     /// Parameters:
     /// - `model`: the model; borrowed for the saver's life.
@@ -264,12 +267,12 @@ pub const Saver = struct {
     /// Return: the saver; free it with `deinit`.
     pub fn init(model: *const Model) Saver {
         const ctx = c.gguf_init_empty().?;
-        impl.assert(supportsArch(model.arch), "llama-model-saver.cpp", 31, "llama_model_saver_supports_arch(model->arch)");
+        impl.assert(supportsArch(model.arch), "llama-model-saver.cpp", 32, "llama_model_saver_supports_arch(model->arch)");
         return .{ .gguf_ctx = ctx, .model = model, .arch = model.arch };
     }
 
-    /// Ports the destructor of `llama_model_saver` (llama-model-saver.cpp:37
-    /// @7fe450e19).
+    /// Ports the destructor of `llama_model_saver` (llama-model-saver.cpp:38
+    /// @d81235049).
     ///
     /// Return: nothing.
     pub fn deinit(self: *Saver) void {
@@ -285,7 +288,7 @@ pub const Saver = struct {
     }
 
     /// Ports the scalar overloads `add_kv`, `add_kv`, `add_kv`, `add_kv` and
-    /// `add_kv` (llama-model-saver.cpp:43, 47, 51, 55, 59 @7fe450e19) -- for
+    /// `add_kv` (llama-model-saver.cpp:44, 48, 52, 56, 60 @d81235049) -- for
     /// uint32_t, int32_t, uint64_t, float and bool -- chosen by the value's
     /// type.
     fn addScalar(self: *Saver, kv: arch.Kv, value: anytype) void {
@@ -300,14 +303,14 @@ pub const Saver = struct {
         }
     }
 
-    /// Ports the `const char *` overload of `add_kv` (llama-model-saver.cpp:63
-    /// @7fe450e19).
+    /// Ports the `const char *` overload of `add_kv` (llama-model-saver.cpp:64
+    /// @d81235049).
     fn addCStr(self: *Saver, kv: arch.Kv, value: [*:0]const u8) void {
         const k = self.key(kv);
         c.gguf_set_val_str(self.gguf_ctx, k.ptr(), value);
     }
 
-    /// Ports the container `add_kv` (llama-model-saver.cpp:75 @7fe450e19) for
+    /// Ports the container `add_kv` (llama-model-saver.cpp:76 @d81235049) for
     /// a `std::string`: nothing when it is empty.
     fn addString(self: *Saver, kv: arch.Kv, value: []const u8) void {
         if (value.len == 0) return;
@@ -316,12 +319,12 @@ pub const Saver = struct {
         self.addCStr(kv, z.ptr);
     }
 
-    /// Ports the container `add_kv` (llama-model-saver.cpp:75 @7fe450e19) for
+    /// Ports the container `add_kv` (llama-model-saver.cpp:76 @d81235049) for
     /// an array: per layer, `n_layer()` values, written as one scalar when
     /// they all agree; nothing when there are none.
     fn addArr(self: *Saver, kv: arch.Kv, comptime T: type, value: []const T, per_layer: bool) void {
         const n_values: usize = if (per_layer) self.model.hparams.nLayer() else value.len;
-        impl.assert(n_values <= value.len, "llama-model-saver.cpp", 78, "n_values <= value.size()");
+        impl.assert(n_values <= value.len, "llama-model-saver.cpp", 79, "n_values <= value.size()");
 
         if (n_values == 0) return;
 
@@ -354,7 +357,7 @@ pub const Saver = struct {
     }
 
     /// Ports the `std::vector<std::string>` overload of `add_kv`
-    /// (llama-model-saver.cpp:123 @7fe450e19): written even when empty.
+    /// (llama-model-saver.cpp:124 @d81235049): written even when empty.
     fn addStrArr(self: *Saver, kv: arch.Kv, value: []const []const u8) void {
         const tmp = allocator.alloc([*c]const u8, value.len) catch oom();
         defer allocator.free(tmp);
@@ -371,19 +374,23 @@ pub const Saver = struct {
         c.gguf_set_arr_str(self.gguf_ctx, k.ptr(), if (tmp.len == 0) null else tmp.ptr, tmp.len);
     }
 
-    /// Ports `add_tensor` (llama-model-saver.cpp:131 @7fe450e19).
+    /// Ports `add_tensor` (llama-model-saver.cpp:132 @d81235049).
     fn addTensor(self: *Saver, tensor: ?*const Tensor) void {
         const t = tensor orelse return;
         if (c.gguf_find_tensor(self.gguf_ctx, &t.name) >= 0) {
             const name = std.mem.sliceTo(&t.name, 0);
             impl.assert(std.mem.eql(u8, name, "rope_freqs.weight") or std.mem.eql(u8, name, "rope_factors_long.weight") or
-                std.mem.eql(u8, name, "rope_factors_short.weight"), "llama-model-saver.cpp", 139, "tensor_name == \"rope_freqs.weight\" || tensor_name == \"rope_factors_long.weight\" || tensor_name == \"rope_factors_short.weight\"");
+                std.mem.eql(u8, name, "rope_factors_short.weight"), "llama-model-saver.cpp", 140, "tensor_name == \"rope_freqs.weight\" || tensor_name == \"rope_factors_long.weight\" || tensor_name == \"rope_factors_short.weight\"");
             return;
         }
         c.gguf_add_tensor(self.gguf_ctx, t);
     }
 
-    /// Ports `add_kv_from_model` (llama-model-saver.cpp:145 @7fe450e19).
+    /// Ports `add_kv_from_model` (llama-model-saver.cpp:146 @d81235049). The
+    /// precision policy's names are written in `prec_src1`'s order, which
+    /// in the C++ is a pointer-keyed `std::unordered_map`'s and so not
+    /// reproducible from run to run; here it is the order the loader found
+    /// them, `tensors_by_name`'s.
     ///
     /// Parameters:
     /// - `exc`: receives the `std::out_of_range` an unnamed rope scaling
@@ -429,6 +436,21 @@ pub const Saver = struct {
 
         self.addString(.general_architecture, model.archName());
         self.addString(.general_name, model.name.items);
+
+        if (model.prec_policy.prec_src1.count() != 0) {
+            const src1 = &model.prec_policy.prec_src1;
+            const names = allocator.alloc([]const u8, src1.count()) catch oom();
+            defer allocator.free(names);
+            const values = allocator.alloc(i8, src1.count()) catch oom();
+            defer allocator.free(values);
+            for (src1.keys(), src1.values(), 0..) |w, prec, i| {
+                names[i] = std.mem.sliceTo(c.ggml_get_name(w), 0);
+                values[i] = if (prec == c.GGML_PREC_Q8) 0 else 1;
+            }
+            self.addStrArr(.general_tensor_extra_name, names);
+            const k = self.key(.general_tensor_extra_prec_a4);
+            c.gguf_set_arr_data(self.gguf_ctx, k.ptr(), c.GGUF_TYPE_BOOL, values.ptr, values.len);
+        }
 
         self.addScalar(.vocab_size, vocab.nTokens());
         self.addScalar(.context_length, hp.n_ctx_train);
@@ -518,6 +540,8 @@ pub const Saver = struct {
         self.addScalar(.attention_indexer_key_length, hp.indexer_head_size);
         self.addScalar(.attention_indexer_top_k, hp.indexer_top_k);
         self.addScalar(.attention_indexer_block_size, hp.indexer_block_size);
+        self.addScalar(.attention_indexer_kpool, hp.indexer_kpool);
+        self.addScalar(.attention_indexer_kpool_select_tail, hp.indexer_kpool_select_tail);
         self.addScalar(.attention_indexer_local_blocks, hp.indexer_local_blocks);
         self.addArr(.attention_indexer_types, u32, &hp.is_indexer_full_impl, true);
         self.addArr(.attention_recurrent_layers, u32, &hp.is_recr_impl, true);
@@ -620,7 +644,7 @@ pub const Saver = struct {
         self.addScalar(.tokenizer_add_prefix, vocab.add_space_prefix);
         self.addScalar(.tokenizer_remove_extra_ws, vocab.remove_extra_whitespaces);
         // `std::vector<char>`: no branch of the template matches it.
-        if (vocab.precompiled_charsmap.items.len != 0) impl.abort("llama-model-saver.cpp", 115, "fatal error");
+        if (vocab.precompiled_charsmap.items.len != 0) impl.abort("llama-model-saver.cpp", 116, "fatal error");
         if (vocab.special_fim_pre_id != vm.vocab.token_null) self.addScalar(.tokenizer_fim_pre_id, @as(u32, @bitCast(vocab.special_fim_pre_id)));
         if (vocab.special_fim_suf_id != vm.vocab.token_null) self.addScalar(.tokenizer_fim_suf_id, @as(u32, @bitCast(vocab.special_fim_suf_id)));
         if (vocab.special_fim_mid_id != vm.vocab.token_null) self.addScalar(.tokenizer_fim_mid_id, @as(u32, @bitCast(vocab.special_fim_mid_id)));
@@ -658,7 +682,7 @@ pub const Saver = struct {
         self.addScalar(.dense_3_feat_out, hp.dense_3_feat_out);
     }
 
-    /// Ports `add_tensors_from_model` (llama-model-saver.cpp:451 @7fe450e19).
+    /// Ports `add_tensors_from_model` (llama-model-saver.cpp:467 @d81235049).
     /// Looped architectures alias physical tensors across cache slots, so
     /// each layer tensor is saved once, by pointer.
     ///
@@ -689,7 +713,7 @@ pub const Saver = struct {
         }
     }
 
-    /// Ports `save` to a path (llama-model-saver.cpp:499 @7fe450e19).
+    /// Ports `save` to a path (llama-model-saver.cpp:515 @d81235049).
     ///
     /// Parameters:
     /// - `path_model`: where to write.
@@ -700,7 +724,7 @@ pub const Saver = struct {
     }
 };
 
-/// Ports `llama_vocab`'s `get_bpe_merges` (llama-vocab.cpp:4189 @7fe450e19):
+/// Ports `llama_vocab`'s `get_bpe_merges` (llama-vocab.cpp:4244 @d81235049):
 /// each merge as `left right`, at its rank; a rank no pair holds stays
 /// empty.
 ///

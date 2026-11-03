@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmvf.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/mmvf.cuh` at v0.5.0 (`7fe450e19`), the host
+//! `llama.cpp/ggml/src/ggml-cuda/mmvf.cuh` at v0.6.0 (`d81235049`), the host
 //! half. The kernel, `mul_mat_vec_f`, stays CUDA.
 //!
 //! `ggml_cuda_op_mul_mat_vec_f`, the row-split entry point, is not ported:
@@ -13,6 +13,7 @@ const std = @import("std");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
+const mmf = @import("mmf.zig");
 
 const c = impl.c;
 const cu = common.cu;
@@ -20,7 +21,7 @@ const Tensor = c.ggml_tensor;
 const half = kernels.half;
 const bf16 = kernels.bf16;
 
-/// Ports `MMVF_MAX_BATCH_SIZE` (mmvf.cuh:3 @7fe450e19).
+/// Ports `MMVF_MAX_BATCH_SIZE` (mmvf.cuh:3 @d81235049).
 pub const max_batch_size = 8;
 
 fn i32Of(x: i64) c_int {
@@ -60,7 +61,7 @@ fn mmvfKernel(comptime T: type, comptime A: type, comptime ncols_dst: comptime_i
     return kernels.get("mmvf", kernels.tmpl("mul_mat_vec_f", &.{ kernels.typeName(T), kernels.typeName(A), kernels.int(ncols_dst), kernels.int(block_size), kernels.boolean(has_fusion), kernels.boolean(is_multi_token_id) }));
 }
 
-/// Ports `mul_mat_vec_f_switch_fusion` (mmvf.cu:387 @7fe450e19).
+/// Ports `mul_mat_vec_f_switch_fusion` (mmvf.cu:388 @d81235049).
 fn switchFusion(comptime T: type, comptime A: type, comptime ncols_dst: comptime_int, comptime block_size: comptime_int, comptime is_multi_token_id: bool, a: *const Args, block_dims: kernels.Dim3, block_nums: kernels.Dim3, nbytes_shared: c_int, stream: cu.cudaStream_t) void {
     const p: kernels.LaunchParams = .{ .grid = block_nums, .block = block_dims, .shmem = @intCast(nbytes_shared), .stream = stream };
 
@@ -84,7 +85,7 @@ fn switchFusion(comptime T: type, comptime A: type, comptime ncols_dst: comptime
     kernels.launchPdl(comptime mmvfKernel(T, A, ncols_dst, block_size, false, is_multi_token_id), p, args);
 }
 
-/// Ports `launch_mul_mat_vec_f_cuda` (mmvf.cu:418 @7fe450e19).
+/// Ports `launch_mul_mat_vec_f_cuda` (mmvf.cu:419 @d81235049).
 fn launchMulMatVecF(
     comptime T: type,
     comptime A: type,
@@ -178,7 +179,7 @@ fn launchMulMatVecF(
     }
 }
 
-/// Ports `mul_mat_vec_f_cuda_switch_ncols_dst` (mmvf.cu:513 @7fe450e19).
+/// Ports `mul_mat_vec_f_cuda_switch_ncols_dst` (mmvf.cu:514 @d81235049).
 fn switchNcolsDst(comptime T: type, comptime A: type, x: ?*const anyopaque, y: ?*const f32, ids: ?*const i32, fusion: common.MmFusionArgsDevice, dst: ?*f32, ncols: i64, nrows: i64, ncols_dst: i64, stride_row: i64, stride_col_y: i64, stride_col_dst: i64, nchannels_x: i64, nchannels_y: i64, nchannels_dst: i64, stride_channel_x: i64, stride_channel_y: i64, stride_channel_dst: i64, nsamples_x: i64, nsamples_dst: i64, stride_sample_x: i64, stride_sample_y: i64, stride_sample_dst: i64, ids_stride: i64, stream: cu.cudaStream_t) void {
     const has_ids = ids != null;
 
@@ -200,7 +201,7 @@ fn switchNcolsDst(comptime T: type, comptime A: type, x: ?*const anyopaque, y: ?
     }
 }
 
-/// Ports `mul_mat_vec_f_cuda` (mmvf.cu:610 @7fe450e19). Note its
+/// Ports `mul_mat_vec_f_cuda` (mmvf.cu:611 @d81235049). Note its
 /// `stride_col_dst` parameter is `int`, unlike its neighbours.
 fn mulMatVecFCuda(comptime T: type, x: ?*const anyopaque, y: ?*const f32, ids: ?*const i32, fusion: common.MmFusionArgsDevice, dst: ?*f32, ncols: i64, nrows: i64, ncols_dst: i64, stride_row: i64, stride_col_y: i64, stride_col_dst: c_int, nchannels_x: i64, nchannels_y: i64, nchannels_dst: i64, stride_channel_x: i64, stride_channel_y: i64, stride_channel_dst: i64, nsamples_x: i64, nsamples_dst: i64, stride_sample_x: i64, stride_sample_y: i64, stride_sample_dst: i64, ids_stride: i64, prec: c.enum_ggml_prec, stream: cu.cudaStream_t) void {
     if (T == half) {
@@ -212,7 +213,7 @@ fn mulMatVecFCuda(comptime T: type, x: ?*const anyopaque, y: ?*const f32, ids: ?
     switchNcolsDst(T, f32, x, y, ids, fusion, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst, nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
 }
 
-/// Ports `ggml_cuda_mul_mat_vec_f` (mmvf.cu:634 @7fe450e19).
+/// Ports `ggml_cuda_mul_mat_vec_f` (mmvf.cu:635 @d81235049).
 pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor, fusion: ?*const common.MmFusionArgsHost) void {
     impl.assert(src1.type == c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
     impl.assert(ids == null or ids.?.type == c.GGML_TYPE_I32, "!ids ||  ids->type == GGML_TYPE_I32");
@@ -307,8 +308,12 @@ pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
     }
 }
 
-/// Ports `ggml_cuda_should_use_mmvf` (mmvf.cu:792 @7fe450e19), NVIDIA arms.
-pub fn shouldUseMmvf(ty: c.enum_ggml_type, x: c_int, src0_ne: *const [4]i64, src0_nb: *const [4]usize, ne11: i64) bool {
+/// Ports `ggml_cuda_should_use_mmvf` (mmvf.cu:793 @d81235049), NVIDIA arms;
+/// every other vendor's arm ends in `ne11 <= MMVF_MAX_BATCH_SIZE`. Since
+/// v0.6.0 it takes the warp size, to ask `mmf.zig` whether MMF can take a
+/// small F16 or BF16 matrix: MMF needs whole row tiles, and where it
+/// cannot, MMVF still beats cuBLAS at a small batch.
+pub fn shouldUseMmvf(ty: c.enum_ggml_type, x: c_int, warp_size: c_int, src0_ne: *const [4]i64, src0_nb: *const [4]usize, ne11: i64) bool {
     if (@rem(src0_ne[0], 2) != 0) return false;
 
     const ts = c.ggml_type_size(ty);
@@ -327,27 +332,35 @@ pub fn shouldUseMmvf(ty: c.enum_ggml_type, x: c_int, src0_ne: *const [4]i64, src
                 if (x >= common.cc.turing) return ne11 <= 4;
                 return ne11 <= 3;
             }
-            return ne11 <= 8;
+            return ne11 <= max_batch_size;
         },
         c.GGML_TYPE_F16 => {
             if (common.cc.isNvidia(x)) {
                 const src0_small = (src0_ne[1] <= 512 or src0_ne[2] * src0_ne[3] == 1);
+                // MMF needs full row tiles, for other row counts MMVF still beats cuBLAS at small batch size
+                if (src0_small and !mmf.shouldUseMmf(ty, x, warp_size, src0_ne, src0_nb, @truncate(ne11), false)) {
+                    return ne11 <= max_batch_size;
+                }
                 if (common.ampereMmaAvailable(x)) return src0_small and ne11 == 1;
                 if (x >= common.cc.ada_lovelace) return src0_small and ne11 <= 4;
                 if (common.fp16MmaHardwareAvailable(x)) return src0_small and ne11 <= 3;
-                return ne11 <= 8;
+                return ne11 <= max_batch_size;
             }
-            return ne11 <= 8;
+            return ne11 <= max_batch_size;
         },
         c.GGML_TYPE_BF16 => {
             if (common.cc.isNvidia(x)) {
                 const src0_small = (src0_ne[1] <= 512 or src0_ne[2] * src0_ne[3] == 1);
+                // MMF needs full row tiles, for other row counts MMVF still beats cuBLAS at small batch size
+                if (src0_small and !mmf.shouldUseMmf(ty, x, warp_size, src0_ne, src0_nb, @truncate(ne11), false)) {
+                    return ne11 <= max_batch_size;
+                }
                 if (common.ampereMmaAvailable(x)) return src0_small and ne11 == 1;
                 if (x >= common.cc.ada_lovelace) return src0_small and ne11 <= 4;
                 if (common.bf16MmaHardwareAvailable(x)) return src0_small and ne11 <= 3;
-                return ne11 <= 8;
+                return ne11 <= max_batch_size;
             }
-            return ne11 <= 8;
+            return ne11 <= max_batch_size;
         },
         else => return false,
     }

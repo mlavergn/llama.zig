@@ -307,7 +307,6 @@ const State = struct {
     applies: std.AutoHashMapUnmanaged(i64, Kept) = .empty,
     /// Owns every kept apply's result.
     keep_arena: std.heap.ArenaAllocator = .init(gpa),
-    undefined_maps: usize = 0,
 };
 
 var models: std.StringHashMapUnmanaged(*anyopaque) = .empty;
@@ -402,10 +401,6 @@ fn parseRecord(st: *State, a: Allocator, r: *const Value) !void {
     try guarded(blk: {
         var m = chat.parse.pegParse(gpa, arena, input, partial, &params) catch |e| break :blk e;
         defer m.deinit(gpa);
-        if (chat.parse.last_parse_undefined) {
-            st.undefined_maps += 1;
-            break :blk line("undefined_mapping", .{});
-        }
         break :blk showMsg(&m);
     });
 }
@@ -518,5 +513,4 @@ pub fn main(init: std.process.Init) !void {
         out.clearRetainingCapacity();
     }
     _ = fclose(file);
-    if (st.undefined_maps != 0) std.debug.print("undefined mappings skipped: {d}\n", .{st.undefined_maps});
 }

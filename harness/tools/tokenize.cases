@@ -4,6 +4,8 @@
 # common_init turns on log timestamps, which differ run to run.
 !mask s/^[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} /T /
 !mask /^ggml_metal_/d
+# v0.6.0: the Metal libraries are compiled at -lv 4 with their timing logged
+!mask s/(ggml_metal_library_compile_all: loaded [0-9]+ libraries from [a-z ]+ in )[0-9.]+ sec \(max single = [0-9.]+ sec\)/\1X sec (max single = X sec)/
 
 --help
 --usage
@@ -15,37 +17,37 @@
 # worker thread before printing its usage with a direct fprintf, and which
 # reaches stderr first is the scheduler's choice -- the log first on the
 # Mac, last on the GB10, every time on each.
---bogus
--p hello
--m
--m $VOCAB/ggml-vocab-llama-spm.gguf -c
--m $VOCAB/ggml-vocab-llama-spm.gguf -c abc -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf -c 99999999999 -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf -fa maybe -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --temp x -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --repeat-penalty 0 -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --repeat-last-n -3 -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf -ctk q9 -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --rope-scaling sideways -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf -lm wrong -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf -lzm wrong -p x
+!fail --bogus
+!fail -p hello
+!fail -m
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -c
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -c abc -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -c 99999999999 -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -fa maybe -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --temp x -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --repeat-penalty 0 -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --repeat-last-n -3 -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -ctk q9 -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --rope-scaling sideways -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -lm wrong -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -lzm wrong -p x
 -m $VOCAB/ggml-vocab-llama-spm.gguf --lazy-mode on -lzm off -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf -ncffn -1 -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --n-cpu-ffn x -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --numa wrong -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf -dev nosuchdevice -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf -ot "x=nosuchbuft" -p x
-~ -m $VOCAB/ggml-vocab-llama-spm.gguf --override-kv broken -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --lora-scaled a.gguf -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --control-vector-layer-range 1 -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf -l 15043x1 -p x
-~ -m $VOCAB/ggml-vocab-llama-spm.gguf --cpu-range 9999- -p x
-~ -m $VOCAB/ggml-vocab-llama-spm.gguf --cpu-mask 0xZZ -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --prio 9 -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf --fit sometimes -p x
--m $VOCAB/ggml-vocab-llama-spm.gguf -f /nonexistent/prompt.txt
--m $VOCAB/ggml-vocab-llama-spm.gguf
--m /nonexistent/model.gguf -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -ncffn -1 -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --n-cpu-ffn x -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --numa wrong -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -dev nosuchdevice -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -ot "x=nosuchbuft" -p x
+!fail ~ -m $VOCAB/ggml-vocab-llama-spm.gguf --override-kv broken -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --lora-scaled a.gguf -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --control-vector-layer-range 1 -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -l 15043x1 -p x
+!fail ~ -m $VOCAB/ggml-vocab-llama-spm.gguf --cpu-range 9999- -p x
+!fail ~ -m $VOCAB/ggml-vocab-llama-spm.gguf --cpu-mask 0xZZ -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --prio 9 -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --fit sometimes -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf -f /nonexistent/prompt.txt
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf
+!fail -m /nonexistent/model.gguf -p x
 
 # Tokenizing
 -m $VOCAB/ggml-vocab-llama-spm.gguf -p "Hello world"
@@ -60,8 +62,8 @@
 -m $VOCAB/ggml-vocab-falcon.gguf -p "Ünïcödé 字 🙂" -p "second wins"
 -m $VOCAB/ggml-vocab-deepseek-coder.gguf -p "def f(x):\n    return x" -lv 4 -t 3 -c 64 -b 32 -ub 16 --seed 7 --temp 0.3 --top-k 5 --samplers "top_k;Temp;nucleus;bogus" --sampler-seq kxq
 # the options v0.4.1 removed in favour of --load-mode, and --log-jsonl
--m $VOCAB/ggml-vocab-gpt-2.gguf -p hi --mlock
--m $VOCAB/ggml-vocab-gpt-2.gguf -p hi --no-mmap
--m $VOCAB/ggml-vocab-gpt-2.gguf -p hi -dio
+!fail -m $VOCAB/ggml-vocab-gpt-2.gguf -p hi --mlock
+!fail -m $VOCAB/ggml-vocab-gpt-2.gguf -p hi --no-mmap
+!fail -m $VOCAB/ggml-vocab-gpt-2.gguf -p hi -dio
 !mask s/"time":[0-9]+/"time":T/g
---log-jsonl -m /nonexistent/model.gguf -p hi
+!fail --log-jsonl -m /nonexistent/model.gguf -p hi

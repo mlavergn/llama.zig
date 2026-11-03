@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/mimo-audio.cpp` at v0.5.0
-//! (`7fe450e19`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/mimo-audio.cpp` at v0.6.0
+//! (`d81235049`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -19,7 +19,7 @@ const gpa = impl.gpa;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// The `add_pos` lambda (mimo-audio.cpp:51 @7fe450e19) of `build`. `ctx` is
+/// The `add_pos` lambda (mimo-audio.cpp:51 @d81235049) of `build`. `ctx` is
 /// the positions tensor.
 fn addPos(ctx: ?*anyopaque, g: *graph.Graph, x: T, layer: *const model_mod.Layer) T {
     _ = layer;
@@ -27,11 +27,11 @@ fn addPos(ctx: ?*anyopaque, g: *graph.Graph, x: T, layer: *const model_mod.Layer
     return c.ggml_rope_ext(g.ctx0, x, inp_pos, null, g.d_head, c.GGML_ROPE_TYPE_NEOX, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 }
 
-/// `skip_capture_il` (mimo-audio.cpp:42 @7fe450e19): encoder_skip_layer_id=3
+/// `skip_capture_il` (mimo-audio.cpp:42 @d81235049): encoder_skip_layer_id=3
 /// (1-indexed) captures the output of layer index 2.
 const skip_capture_il: c_int = 2;
 
-/// The `callback_layer_out` lambda (mimo-audio.cpp:45 @7fe450e19) of `build`. `ctx` is the `skip_hidden` it writes.
+/// The `callback_layer_out` lambda (mimo-audio.cpp:45 @d81235049) of `build`. `ctx` is the `skip_hidden` it writes.
 fn captureSkip(ctx: ?*anyopaque, g: *graph.Graph, layer_cur: T, il: c_int) void {
     _ = g;
     const skip_hidden: *T = @ptrCast(@alignCast(ctx.?));
@@ -40,12 +40,12 @@ fn captureSkip(ctx: ?*anyopaque, g: *graph.Graph, layer_cur: T, il: c_int) void 
     }
 }
 
-/// The `apply_local_rope` lambda (mimo-audio.cpp:158 @7fe450e19) of `build`.
+/// The `apply_local_rope` lambda (mimo-audio.cpp:158 @d81235049) of `build`.
 fn applyLocalRope(g: *const graph.Graph, x: T, local_pos: T, local_rope_theta: f32) T {
     return c.ggml_rope_ext(g.ctx0, x, local_pos, null, g.d_head, c.GGML_ROPE_TYPE_NEOX, 0, local_rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 }
 
-/// Ports `build` (mimo-audio.cpp:3 @7fe450e19), a member of
+/// Ports `build` (mimo-audio.cpp:3 @d81235049), a member of
 /// `clip_graph_mimo_audio`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

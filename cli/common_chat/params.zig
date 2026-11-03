@@ -5,7 +5,7 @@
 //!
 //! Ports `common_chat_params` from `llama.cpp/common/chat.h` and
 //! `common_grammar_trigger` with its type from `llama.cpp/common/common.h`
-//! (llama.cpp v0.5.0, `7fe450e19`). Each declaration names what it ports and
+//! (llama.cpp v0.6.0, `d81235049`). Each declaration names what it ports and
 //! the line it began at.
 //!
 //! # Ownership
@@ -18,10 +18,10 @@ const msg_mod = @import("msg.zig");
 
 const Allocator = std.mem.Allocator;
 
-/// Ports `common_grammar_trigger_type` (common/common.h:143 @7fe450e19).
+/// Ports `common_grammar_trigger_type` (common/common.h:146 @d81235049).
 pub const TriggerType = enum(c_int) { token, word, pattern, pattern_full };
 
-/// Ports `common_grammar_trigger` (common/common.h:150 @7fe450e19).
+/// Ports `common_grammar_trigger` (common/common.h:153 @d81235049).
 pub const GrammarTrigger = struct {
     type: TriggerType,
     value: []const u8,
@@ -29,7 +29,7 @@ pub const GrammarTrigger = struct {
     token: i32 = -1,
 };
 
-/// Ports `common_chat_params` (chat.h:269 @7fe450e19).
+/// Ports `common_chat_params` (chat.h:269 @d81235049).
 pub const ChatParams = struct {
     format: msg_mod.Format = .content_only,
     prompt: []const u8 = "",

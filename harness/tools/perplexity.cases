@@ -23,14 +23,17 @@
 -m $PLAIN -f $DATA/text.txt -c 64 -b 128 --chunks 4
 -m $PLAIN -f $DATA/text.txt -c 64 -b 32 --chunks 3
 -m $PLAIN -f $DATA/text.txt -c 64 --chunks 3 --ppl-output-type 1
+# with the default -b, n_parallel = 2048/64 puts 32 sequences in the KV cache and
+# the strided decode fails on both sides (find_slot): an error path, nothing computed
 -m $PLAIN -f $DATA/text.txt -c 64 --chunks 3 --ppl-stride 32
+-m $PLAIN -f $DATA/text.txt -c 64 -b 64 --chunks 3 --ppl-stride 32
 -m $PLAIN -f $DATA/text.txt -c 64 --chunks 3 --ppl-stride 16 --ppl-output-type 1 -b 32
 -m $PLAIN -f $DATA/text.txt -c 64 --chunks 4 --kl-divergence-base base.kld
 -m $PLAIN -f $DATA/text.txt -c 64 -b 128 --chunks 4 --kl-divergence-base base2.kld
--m $HOME/.cache/zigtrain/gguf/plain-d6_sft_001499.gguf -c 64 --kl-divergence --kl-divergence-base base.kld
--m $HOME/.cache/zigtrain/gguf/plain-d6_sft_001499.gguf -c 64 -b 128 --kl-divergence --kl-divergence-base base2.kld
+-m $PLAIN_SFT -c 64 --kl-divergence --kl-divergence-base base.kld
+-m $PLAIN_SFT -c 64 -b 128 --kl-divergence --kl-divergence-base base2.kld
 -m $PLAIN -c 64 --kl-divergence --kl-divergence-base base.kld
--m $HOME/.cache/zigtrain/gguf/plain-d6_sft_001499.gguf -c 32 --kl-divergence --kl-divergence-base base.kld
+-m $PLAIN_SFT -c 32 --kl-divergence --kl-divergence-base base.kld
 -m $PLAIN -c 64 --kl-divergence
 -m $PLAIN -c 64 --kl-divergence --kl-divergence-base $DATA/bogus.kld
 -m $PLAIN -c 64 --kl-divergence --kl-divergence-base /nonexistent.kld
@@ -45,10 +48,10 @@
 -m $PLAIN -f $DATA/mc.bin -c 512 --multiple-choice -np 2
 -m $PLAIN -f $DATA/short.txt -c 64 --multiple-choice
 -m $PLAIN -f $DATA/short.txt -c 512
--m $PLAIN -f $DATA/text.txt -c 0
+!fail -m $PLAIN -f $DATA/text.txt -c 0
 -m $ROOT/Qwen3-0.6B-Q8_0.gguf -f $DATA/text.txt -c 128 --chunks 2
 -m $ROOT/Qwen3-0.6B-Q8_0.gguf -f $DATA/hs.txt -c 512 --hellaswag --hellaswag-tasks 4
-~ -m /nonexistent.gguf -f $DATA/text.txt
+!fail ~ -m /nonexistent.gguf -f $DATA/text.txt
 
 # --log-jsonl (v0.4.1): every log line one JSON object on stdout, and the
 # memory breakdown one `fit_memory_breakdown` record, whatever the
@@ -63,4 +66,4 @@
 --log-jsonl -m $PLAIN -f $DATA/text.txt -c 64 --chunks 2
 --log-jsonl -m $PLAIN -f $DATA/text.txt -c 64 --chunks 2 -lv 4
 -m $PLAIN -f $DATA/text.txt -c 64 --chunks 2 --log-jsonl --no-log-jsonl
---log-jsonl -m /nonexistent.gguf -f $DATA/text.txt
+!fail --log-jsonl -m /nonexistent.gguf -f $DATA/text.txt

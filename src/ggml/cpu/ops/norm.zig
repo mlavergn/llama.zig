@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.5.0 (`7fe450e19`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.6.0 (`d81235049`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Accumulator types are not uniform, and each is reproduced
@@ -34,7 +34,7 @@ const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 
-/// Mirrors `ggml_float` (vec.h:15 @7fe450e19).
+/// Mirrors `ggml_float` (vec.h:15 @d81235049).
 const GgmlFloat = f64;
 
 const Stride = isize;
@@ -46,7 +46,7 @@ extern fn fmaxf(x: f32, y: f32) f32;
 /// Byte offset `i*nb`; see `common.byteOff`.
 const at = common.byteOff;
 
-/// Ports `ggml_compute_forward_norm_f32` (ops.cpp:3827 @7fe450e19), both arms
+/// Ports `ggml_compute_forward_norm_f32` (ops.cpp:4010 @d81235049), both arms
 /// of its contiguous path: vDSP under `GGML_USE_ACCELERATE`, otherwise
 /// `ggml_vec_cvar_f32`, which centres `y` and returns the variance.
 fn normF32(params: *const ComputeParams, dst: *Tensor) void {
@@ -125,7 +125,7 @@ fn normF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_norm` (ops.cpp:3896 @7fe450e19).
+/// Ports `ggml_compute_forward_norm` (ops.cpp:4079 @d81235049).
 pub export fn ggml_compute_forward_norm(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -135,11 +135,11 @@ pub export fn ggml_compute_forward_norm(params: *const ComputeParams, dst: *Tens
     }
 }
 
-/// Ports `ggml_rms_norm_fuse_op` (ops.cpp:3918 @7fe450e19): the fusions that
+/// Ports `ggml_rms_norm_fuse_op` (ops.cpp:4101 @d81235049): the fusions that
 /// can ride along with the `rms_norm` pass.
 const RmsNormFuseOp = enum { none, mul };
 
-/// Ports `ggml_compute_forward_rms_norm_f32` (ops.cpp:3924 @7fe450e19), the
+/// Ports `ggml_compute_forward_rms_norm_f32` (ops.cpp:4107 @d81235049), the
 /// `template <ggml_rms_norm_fuse_op FUSE_OP>` form.
 ///
 /// With `.mul`, `src1` is whichever operand of `dst_fused` is not the
@@ -210,7 +210,10 @@ fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ComputeParams, dst
                     }
                 } else {
                     const n = @as(usize, @intCast(l.ne00));
-                    @memcpy(y[0..n], x[0..n]);
+                    // The allocator runs this op in place when its source dies
+                    // here, so `y == x`: a self-`memcpy` the C tolerates and
+                    // Zig's `@memcpy` rejects in a safe build.
+                    if (y != x) @memcpy(y[0..n], x[0..n]);
                     vec.scale_f32(l.ne00, y, scale);
                 }
             }
@@ -218,7 +221,7 @@ fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ComputeParams, dst
     }
 }
 
-/// Ports `ggml_compute_forward_rms_norm` (ops.cpp:3989 @7fe450e19).
+/// Ports `ggml_compute_forward_rms_norm` (ops.cpp:4172 @d81235049).
 pub export fn ggml_compute_forward_rms_norm(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -228,7 +231,7 @@ pub export fn ggml_compute_forward_rms_norm(params: *const ComputeParams, dst: *
     }
 }
 
-/// Ports `ggml_compute_forward_rms_norm_mul_fused` (ops.cpp:4009 @7fe450e19):
+/// Ports `ggml_compute_forward_rms_norm_mul_fused` (ops.cpp:4192 @d81235049):
 /// `dst_mul = rms_norm(src0) * src1` in one pass, without materialising the
 /// `rms_norm` result.
 pub export fn ggml_compute_forward_rms_norm_mul_fused(params: *const ComputeParams, dst_rms_norm: *Tensor, dst_mul: ?*Tensor) callconv(.c) void {
@@ -244,7 +247,7 @@ pub export fn ggml_compute_forward_rms_norm_mul_fused(params: *const ComputePara
     }
 }
 
-/// Ports `ggml_compute_forward_rms_norm_back_f32` (ops.cpp:4031 @7fe450e19).
+/// Ports `ggml_compute_forward_rms_norm_back_f32` (ops.cpp:4214 @d81235049).
 ///
 /// The C's long derivation comment ends at
 /// `dx = (dz + x*(-sum_xdz/sum_eps)) * rrms`; see ggml-org/ggml#1491 for why
@@ -316,7 +319,7 @@ fn rmsNormBackF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_rms_norm_back` (ops.cpp:4188 @7fe450e19).
+/// Ports `ggml_compute_forward_rms_norm_back` (ops.cpp:4371 @d81235049).
 pub export fn ggml_compute_forward_rms_norm_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -326,7 +329,7 @@ pub export fn ggml_compute_forward_rms_norm_back(params: *const ComputeParams, d
     }
 }
 
-/// Ports `ggml_compute_forward_group_norm_f32` (ops.cpp:4208 @7fe450e19).
+/// Ports `ggml_compute_forward_group_norm_f32` (ops.cpp:4391 @d81235049).
 ///
 /// Threads split over groups, not rows. The mean and variance are divided in
 /// `double` and only then narrowed, as the C's `float = double / int64_t` is.
@@ -416,7 +419,7 @@ fn groupNormF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_group_norm` (ops.cpp:4283 @7fe450e19).
+/// Ports `ggml_compute_forward_group_norm` (ops.cpp:4466 @d81235049).
 pub export fn ggml_compute_forward_group_norm(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -426,7 +429,7 @@ pub export fn ggml_compute_forward_group_norm(params: *const ComputeParams, dst:
     }
 }
 
-/// Ports `ggml_compute_forward_l2_norm_f32` (ops.cpp:4303 @7fe450e19).
+/// Ports `ggml_compute_forward_l2_norm_f32` (ops.cpp:4486 @d81235049).
 ///
 /// `sqrtf(sum)` takes a `float`, so the `double` sum is narrowed **before**
 /// the square root, not after.
@@ -469,7 +472,8 @@ fn l2NormF32(params: *const ComputeParams, dst: *Tensor) void {
 
                 if (l.nb00 == @sizeOf(f32) and l.nb0 == @sizeOf(f32)) {
                     const n = @as(usize, @intCast(l.ne00)) * @sizeOf(f32);
-                    @memcpy(y[0..n], x[0..n]);
+                    // In place when the allocator reuses the source; see above.
+                    if (y != x) @memcpy(y[0..n], x[0..n]);
                     vec.scale_f32(l.ne00, @ptrCast(@alignCast(y)), scale);
                 } else {
                     j00 = 0;
@@ -483,7 +487,7 @@ fn l2NormF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_l2_norm` (ops.cpp:4351 @7fe450e19).
+/// Ports `ggml_compute_forward_l2_norm` (ops.cpp:4534 @d81235049).
 pub export fn ggml_compute_forward_l2_norm(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

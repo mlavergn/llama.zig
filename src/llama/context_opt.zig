@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-context.cpp` (v0.5.0, `7fe450e19`):
+//! Ported from `llama.cpp/src/llama-context.cpp` (v0.6.0, `d81235049`):
 //! `llama_set_param` and `llama_context`'s `opt_init`, `opt_epoch_iter` and
 //! `opt_epoch`. They are methods of `llama_context` in the C++; here they
 //! are free functions over `*Context`, the same split as
@@ -41,7 +41,7 @@ const Model = model_mod.Model;
 const Exception = impl.Exception;
 const Tensor = c.ggml_tensor;
 
-/// Mirrors `ctx_type_to_graph_type` (llama-context.cpp:28 @7fe450e19),
+/// Mirrors `ctx_type_to_graph_type` (llama-context.cpp:28 @d81235049),
 /// which `context.zig` keeps file-private.
 fn ctxTypeToGraphType(ctx_type: c.enum_llama_context_type) graph.GraphType {
     return switch (ctx_type) {
@@ -51,7 +51,7 @@ fn ctxTypeToGraphType(ctx_type: c.enum_llama_context_type) graph.GraphType {
     };
 }
 
-/// Ports `llama_set_param` (llama-context.cpp:3466 @7fe450e19).
+/// Ports `llama_set_param` (llama-context.cpp:3517 @d81235049).
 ///
 /// Parameters:
 /// - `tensor`: a weight, or null.
@@ -82,7 +82,7 @@ fn setLayerParams(comptime T: type, layer: *T, param_filter: c.llama_opt_param_f
     }
 }
 
-/// Ports `opt_init` (llama-context.cpp:3482 @7fe450e19), a method of
+/// Ports `opt_init` (llama-context.cpp:3533 @d81235049), a method of
 /// `llama_context`.
 ///
 /// Parameters:
@@ -93,23 +93,31 @@ fn setLayerParams(comptime T: type, layer: *T, param_filter: c.llama_opt_param_f
 ///
 /// Return: nothing.
 pub fn optInit(self: *Context, model: *Model, lopt_params: c.struct_llama_opt_params) void {
-    impl.assert(self.opt_ctx == null, "llama-context.cpp", 3483, "!opt_ctx");
+    impl.assert(self.opt_ctx == null, "llama-context.cpp", 3534, "!opt_ctx");
     model.hparams.n_ctx_train = if (lopt_params.n_ctx_train > 0) lopt_params.n_ctx_train else self.nCtx();
     const n_batch = @min(self.nBatch(), model.hparams.n_ctx_train);
     const n_ubatch = @min(self.nUbatch(), n_batch);
-    impl.assert(model.hparams.n_ctx_train % n_batch == 0, "llama-context.cpp", 3487, "model->hparams.n_ctx_train % n_batch == 0");
-    impl.assert(n_batch % n_ubatch == 0, "llama-context.cpp", 3488, "n_batch % n_ubatch == 0");
+    impl.assert(model.hparams.n_ctx_train % n_batch == 0, "llama-context.cpp", 3538, "model->hparams.n_ctx_train % n_batch == 0");
+    impl.assert(n_batch % n_ubatch == 0, "llama-context.cpp", 3539, "n_batch % n_ubatch == 0");
 
     if (self.cparams.flash_attn) {
         impl.logInfo("%s: disabling flash attention, FLASH_ATTN_EXT has no backward pass\n", .{"opt_init"});
         self.cparams.flash_attn = false;
-
-        // Without flash attention the graph changes: reserve again. What
-        // the reserve throws escapes `llama_opt_init`, so it terminates.
-        self.sched_need_reserve = true;
-        var exc: Exception = .{};
-        self.schedReserve(&exc) catch exc.terminate("llama-context.cpp", 3496);
     }
+
+    // Gradients cannot flow through the KV cache, so attention reads the
+    // current ubatch's K and V directly.
+    if (n_ubatch == self.cparams.n_ctx) {
+        self.cparams.training = true;
+    } else {
+        impl.logWarn("%s: n_ubatch (%u) != n_ctx (%u), the K and V projections will not receive gradients\n", .{ "opt_init", n_ubatch, self.cparams.n_ctx });
+    }
+
+    // The training graph differs: reserve again. What the reserve throws
+    // escapes `llama_opt_init`, so it terminates.
+    self.sched_need_reserve = true;
+    var exc: Exception = .{};
+    self.schedReserve(&exc) catch exc.terminate("llama-context.cpp", 3555);
 
     var opt_params = c.ggml_opt_default_params(self.sched, c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY);
     opt_params.opt_period = @intCast(n_batch / n_ubatch);
@@ -140,7 +148,7 @@ pub fn optInit(self: *Context, model: *Model, lopt_params: c.struct_llama_opt_pa
     for (model.layers) |*layer| setLayerParams(model_mod.Layer, layer, param_filter, param_filter_ud);
 }
 
-/// Ports `opt_epoch_iter` (llama-context.cpp:3532 @7fe450e19), a method of
+/// Ports `opt_epoch_iter` (llama-context.cpp:3590 @d81235049), a method of
 /// `llama_context`.
 ///
 /// Runs one datapoint — a context's worth of tokens — through the model in
@@ -175,7 +183,7 @@ fn optEpochIter(
     t_loop_start: i64,
 ) void {
     const func = "opt_epoch_iter";
-    impl.assert(self.opt_ctx != null, "llama-context.cpp", 3543, "opt_ctx");
+    impl.assert(self.opt_ctx != null, "llama-context.cpp", 3601, "opt_ctx");
     const n_ctx: u32 = self.model.hparams.n_ctx_train;
     const n_batch = @min(self.nBatch(), n_ctx);
     const n_ubatch = @min(self.nUbatch(), n_batch);
@@ -194,10 +202,15 @@ fn optEpochIter(
             batch.logits[pos_batch] = 1;
         }
 
-        const n_seq_max: u32 = if (self.cparams.kv_unified) cparams_mod.max_seq else self.cparams.n_seq_max;
-        if (!self.balloc.initBatch(batch.*, &self.model.vocab, null, self.model.hparams.nEmbdInp(), n_seq_max, true)) {
-            impl.logError("%s: failed to initialize batch\n", .{func});
-            return;
+        // the C++'s TODO: use llama_batch_ext here
+        {
+            const compat = self.batchExtCreate();
+            defer compat.destroy();
+            batch_mod.compatInit(compat, batch.*, 0);
+            if (!self.balloc.initBatch(compat, &self.model.vocab, true)) {
+                impl.logError("%s: failed to initialize batch\n", .{func});
+                return;
+            }
         }
 
         const n_tokens_all = self.balloc.getNTokens();
@@ -219,7 +232,7 @@ fn optEpochIter(
         // reserve output buffer
         if (self.outputReserve(@intCast(n_outputs_all)) < n_outputs_all) {
             impl.logError("%s: could not reserve space for batch with %d outputs\n", .{ func, n_outputs_all });
-            impl.abort("llama-context.cpp", 3582, "TODO: handle this error");
+            impl.abort("llama-context.cpp", 3644, "TODO: handle this error");
         }
 
         var pos_batch: u32 = 0;
@@ -261,12 +274,12 @@ fn optEpochIter(
             res.setInputs(ubatch);
             {
                 const labels: *Tensor = c.ggml_opt_labels(self.opt_ctx);
-                impl.assert(labels.ne[1] == n_ubatch, "llama-context.cpp", 3623, "labels->ne[1] == n_ubatch");
+                impl.assert(labels.ne[1] == n_ubatch, "llama-context.cpp", 3685, "labels->ne[1] == n_ubatch");
                 _ = c.ggml_set_zero(labels);
                 const onef: f32 = 1.0;
                 for (0..n_ubatch) |pos_ubatch| {
                     const ilabel = pos_ctx + pos_batch + pos_ubatch;
-                    impl.assert(labels_sparse[ilabel] < labels.ne[0], "llama-context.cpp", 3628, "labels_sparse[ilabel] < labels->ne[0]");
+                    impl.assert(labels_sparse[ilabel] < labels.ne[0], "llama-context.cpp", 3690, "labels_sparse[ilabel] < labels->ne[0]");
                     const off: usize = @intCast(@as(i64, @intCast(pos_ubatch)) * labels.ne[0] + labels_sparse[ilabel]);
                     c.ggml_backend_tensor_set(labels, &onef, off * @sizeOf(f32), @sizeOf(f32));
                 }
@@ -283,7 +296,7 @@ fn optEpochIter(
     }
 }
 
-/// Ports `opt_epoch` (llama-context.cpp:3643 @7fe450e19), a method of
+/// Ports `opt_epoch` (llama-context.cpp:3705 @d81235049), a method of
 /// `llama_context`.
 ///
 /// Parameters:
@@ -310,8 +323,8 @@ pub fn optEpoch(
     const n_ubatch = @min(self.cparams.n_ubatch, n_batch);
     const ndata = c.ggml_opt_dataset_ndata(dataset);
 
-    impl.assert(idata_split >= 0, "llama-context.cpp", 3655, "idata_split >= 0");
-    impl.assert(idata_split <= ndata, "llama-context.cpp", 3656, "idata_split <= ndata");
+    impl.assert(idata_split >= 0, "llama-context.cpp", 3717, "idata_split >= 0");
+    impl.assert(idata_split <= ndata, "llama-context.cpp", 3718, "idata_split <= ndata");
 
     const ubatch_per_ctx: u32 = n_ctx / n_ubatch;
 

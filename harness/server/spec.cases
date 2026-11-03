@@ -15,6 +15,15 @@ POST /completion {"prompt": "The capital of France is", "n_predict": 16, "temper
 POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "n_probs": 2}
 POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "stop": [" 9"]}
 POST /completion {"prompt": "Once upon a time", "n_predict": 24, "temperature": 1.0, "seed": 11}
+
+# v0.6.0: a probabilistic draft (--spec-draft-sampling) fills its candidate
+# distributions, and above temperature 0 the target verifies by rejection;
+# at 0 it still samples and matches
+!server -m $QWEN3 -md $QWEN3 -c 2048 -np 1 --no-jinja --spec-type draft-simple --spec-draft-n-max 4 --spec-draft-sampling probabilistic -lv 4
+!fulllog
+POST /completion {"prompt": "Once upon a time", "n_predict": 24, "temperature": 1.0, "seed": 11}
+POST /completion {"prompt": "The capital of France is", "n_predict": 16, "temperature": 0.7, "seed": 5, "n_probs": 2}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0}
 GET /slots
 
 !server -m $QWEN3 -c 2048 -np 1 --no-jinja --spec-type ngram-mod,ngram-map-k --spec-ngram-mod-n-match 4 --spec-ngram-mod-n-min 2 --spec-ngram-mod-n-max 8 --spec-ngram-map-k-size-n 2 --spec-ngram-map-k-size-m 6 -lv 4

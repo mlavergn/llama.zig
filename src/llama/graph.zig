@@ -12,7 +12,7 @@
 //!   `llama_relative_position_bucket`
 //! - `llama.cpp/src/llama-impl.h` -- `llama_mul_mat_hadamard`
 //!
-//! All at v0.5.0 (`7fe450e19`).
+//! All at v0.6.0 (`d81235049`).
 //!
 //! # Scope
 //!
@@ -60,10 +60,10 @@ fn oom() noreturn {
     impl.abort("llama-graph.cpp", 0, "out of memory");
 }
 
-/// `LLAMA_MAX_LAYERS` (llama-hparams.h:11 @7fe450e19).
+/// `LLAMA_MAX_LAYERS` (llama-hparams.h:11 @d81235049).
 const max_layers = hparams_mod.max_layers;
 
-/// Mirrors `llm_graph_type` (llama-graph.h:37 @7fe450e19).
+/// Mirrors `llm_graph_type` (llama-graph.h:38 @d81235049).
 pub const GraphType = enum(c_int) {
     default,
     encoder,
@@ -71,7 +71,7 @@ pub const GraphType = enum(c_int) {
     decoder_mtp,
 };
 
-/// Mirrors `llm_fused_op` (llama-graph.h:44 @7fe450e19).
+/// Mirrors `llm_fused_op` (llama-graph.h:45 @d81235049).
 pub const FusedOp = enum(c_int) {
     flash_attn,
     gdn_ar,
@@ -82,7 +82,7 @@ pub const FusedOp = enum(c_int) {
     dsv4_hc_post,
 };
 
-/// Mirrors `llm_ffn_op_type` (llama-graph.h:54 @7fe450e19).
+/// Mirrors `llm_ffn_op_type` (llama-graph.h:55 @d81235049).
 pub const FfnOp = enum(c_int) {
     none = 0,
     silu,
@@ -96,20 +96,20 @@ pub const FfnOp = enum(c_int) {
     situ,
 };
 
-/// Mirrors `llm_ffn_gate_type` (llama-graph.h:67 @7fe450e19).
+/// Mirrors `llm_ffn_gate_type` (llama-graph.h:68 @d81235049).
 pub const FfnGate = enum(c_int) {
     seq,
     par,
 };
 
-/// Mirrors `llm_norm_type` (llama-graph.h:72 @7fe450e19).
+/// Mirrors `llm_norm_type` (llama-graph.h:73 @d81235049).
 pub const NormType = enum(c_int) {
     norm,
     rms,
     group,
 };
 
-/// Mirrors `llama_cross` (llama-graph.h:79 @7fe450e19): the encoder's
+/// Mirrors `llama_cross` (llama-graph.h:80 @d81235049): the encoder's
 /// output, for a decoder's cross-attention.
 pub const Cross = struct {
     n_embd: i64 = 0,
@@ -151,7 +151,7 @@ pub const Cross = struct {
 // -----------------------------------------------------------------------------
 // Inputs
 
-/// Mirrors `llm_graph_input_i` (llama-graph.h:101 @7fe450e19).
+/// Mirrors `llm_graph_input_i` (llama-graph.h:102 @d81235049).
 pub const Input = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
@@ -187,44 +187,106 @@ pub const Input = struct {
 };
 
 /// `LLAMA_GRAPH_INPUT_DEBUG`, read in `llm_graph_input_i`'s constructor
-/// (llama-graph.h:101 @7fe450e19).
+/// (llama-graph.h:102 @d81235049).
 fn inputDebug() c_int {
     const v = std.c.getenv("LLAMA_GRAPH_INPUT_DEBUG") orelse return 0;
     return impl.atoi(v);
 }
 
-/// Ports `llm_graph_input_embd` (llama-graph.h:127 @7fe450e19).
+/// Ports `llm_graph_input_embd` (llama-graph.h:128 @d81235049).
 pub const InpEmbd = struct {
     /// I32 `[n_batch]`.
     tokens: ?*Tensor = null,
     /// F32 `[n_embd, n_batch]`.
     embd: ?*Tensor = null,
+    /// I32 `[n_tok_rows]`, the mixed path: the token rows' ids.
+    mixed_tokens: ?*Tensor = null,
+    /// I64 `[n_tok_rows]`, the mixed path: the token rows' batch indices.
+    mixed_slots: ?*Tensor = null,
+    /// F32 `[n_embd, n_batch]`, the mixed path: the embedding rows, the
+    /// token rows overwritten.
+    mixed_embd: ?*Tensor = null,
+    /// F32 `[1, n_batch]`: `scale_tok` for a token row, 1 for an embedding.
+    scale_rows: ?*Tensor = null,
+
+    scale_tok: f32 = 1.0,
+
     n_embd: i64,
 
-    /// Ports `llm_graph_input_embd`'s `set_input` (llama-graph.cpp:69 @7fe450e19).
+    /// Ports `llm_graph_input_embd`'s `set_input` (llama-graph.cpp:69 @d81235049).
     pub fn setInput(self: *InpEmbd, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         if (ubatch.token != null) {
             const n_tokens: usize = ubatch.n_tokens;
             c.ggml_backend_tensor_set(self.tokens, ubatch.token, 0, n_tokens * c.ggml_element_size(self.tokens));
         }
-        if (ubatch.embd != null) {
+        if (ubatch.embd != null and self.embd != null and !ubatch.isMixed()) {
             impl.assert(self.n_embd == self.embd.?.ne[0], "llama-graph.cpp", 77, "n_embd == embd->ne[0]");
             const n_tokens: usize = ubatch.n_tokens;
             c.ggml_backend_tensor_set(self.embd, ubatch.embd, 0, n_tokens * @as(usize, @intCast(self.n_embd)) * c.ggml_element_size(self.embd));
         }
+
+        if (ubatch.isMixed() and self.embd != null) {
+            impl.assert(self.mixed_tokens != null and self.mixed_slots != null and self.mixed_embd != null, "llama-graph.cpp", 85, "mixed_tokens && mixed_slots && mixed_embd && \"mixed token/embd ubatch is not supported here\"");
+
+            var ids: std.ArrayList(i32) = .empty;
+            defer ids.deinit(allocator);
+            var slots: std.ArrayList(i64) = .empty;
+            defer slots.deinit(allocator);
+            for (0..ubatch.n_tokens) |i| {
+                if (ubatch.type[i] == 0) {
+                    ids.append(allocator, ubatch.token[i]) catch oom();
+                    slots.append(allocator, @intCast(i)) catch oom();
+                }
+            }
+            impl.assert(@as(i64, @intCast(ids.items.len)) == self.mixed_tokens.?.ne[0], "llama-graph.cpp", 95, "(int64_t) ids.size() == mixed_tokens->ne[0]");
+            impl.assert(self.n_embd == self.mixed_embd.?.ne[0], "llama-graph.cpp", 96, "n_embd == mixed_embd->ne[0]");
+
+            c.ggml_backend_tensor_set(self.mixed_tokens, if (ids.items.len == 0) null else ids.items.ptr, 0, c.ggml_nbytes(self.mixed_tokens));
+            c.ggml_backend_tensor_set(self.mixed_slots, if (slots.items.len == 0) null else slots.items.ptr, 0, c.ggml_nbytes(self.mixed_slots));
+            c.ggml_backend_tensor_set(self.mixed_embd, ubatch.embd, 0, c.ggml_nbytes(self.mixed_embd));
+        }
+
+        if (self.scale_rows != null) {
+            const n_tokens: usize = ubatch.n_tokens;
+
+            const data = allocator.alloc(f32, n_tokens) catch oom();
+            defer allocator.free(data);
+            for (0..n_tokens) |i| {
+                const is_embd = ubatch.token == null or (ubatch.isMixed() and ubatch.type[i] != 0);
+                data[i] = if (is_embd) 1.0 else self.scale_tok;
+            }
+            c.ggml_backend_tensor_set(self.scale_rows, data.ptr, 0, c.ggml_nbytes(self.scale_rows));
+        }
     }
 
-    /// Ports `llm_graph_input_embd`'s `can_reuse` (llama-graph.cpp:85 @7fe450e19).
+    /// Ports `llm_graph_input_embd`'s `can_reuse` (llama-graph.cpp:127 @d81235049).
     pub fn canReuse(self: *InpEmbd, params: *const Params) bool {
         var res = true;
         res = res and ((params.ubatch.token == null) or (self.tokens != null and self.tokens.?.ne[0] == params.ubatch.n_tokens));
         res = res and ((params.ubatch.embd == null) or (self.embd != null and self.embd.?.ne[1] == params.ubatch.n_tokens));
+        res = res and ((self.mixed_tokens == null) or self.mixed_tokens.?.ne[0] == nTokRows(&params.ubatch));
+        res = res and ((self.mixed_embd == null) or self.mixed_embd.?.ne[1] == params.ubatch.n_tokens);
+        res = res and ((self.scale_rows == null) or self.scale_rows.?.ne[1] == params.ubatch.n_tokens);
         return res;
     }
 };
 
-/// Ports `llm_graph_input_embd_h` (llama-graph.h:143 @7fe450e19): the MTP
+/// Ports `llm_graph_n_tok_rows` (llama-graph.cpp:116 @d81235049): the token
+/// rows of the mixed path; a ubatch that is not mixed is sized for the
+/// worst case, all of them.
+fn nTokRows(ubatch: *const Ubatch) i64 {
+    if (!ubatch.isMixed()) {
+        return ubatch.n_tokens;
+    }
+    var n: i64 = 0;
+    for (0..ubatch.n_tokens) |i| {
+        n += @intFromBool(ubatch.type[i] == 0);
+    }
+    return n;
+}
+
+/// Ports `llm_graph_input_embd_h` (llama-graph.h:150 @d81235049): the MTP
 /// head's token embeddings and hidden states.
 pub const InpEmbdH = struct {
     tokens: ?*Tensor = null,
@@ -232,27 +294,28 @@ pub const InpEmbdH = struct {
     h: ?*Tensor = null,
     n_embd: i64,
 
-    /// Ports `llm_graph_input_embd_h`'s `set_input` (llama-graph.cpp:94 @7fe450e19).
+    /// Ports `llm_graph_input_embd_h`'s `set_input` (llama-graph.cpp:139 @d81235049).
     pub fn setInput(self: *InpEmbdH, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
+        ubatch.assertEmbdOrToken("llama-graph.cpp", 140);
         const n_tokens: usize = ubatch.n_tokens;
         const n_embd: usize = @intCast(self.n_embd);
         if (ubatch.token != null) {
             c.ggml_backend_tensor_set(self.tokens, ubatch.token, 0, n_tokens * c.ggml_element_size(self.tokens));
         } else {
             // Multimodal embeddings come through here.
-            impl.assert(ubatch.embd != null, "llama-graph.cpp", 101, "ubatch->embd");
-            impl.assert(self.n_embd == self.embd.?.ne[0], "llama-graph.cpp", 102, "n_embd == embd->ne[0]");
+            impl.assert(ubatch.embd != null, "llama-graph.cpp", 148, "ubatch->embd");
+            impl.assert(self.n_embd == self.embd.?.ne[0], "llama-graph.cpp", 149, "n_embd == embd->ne[0]");
             c.ggml_backend_tensor_set(self.embd, ubatch.embd, 0, n_tokens * n_embd * c.ggml_element_size(self.h));
         }
         // The hidden state is always provided as an embedding.
         if (ubatch.embd != null) {
-            impl.assert(self.n_embd == self.h.?.ne[0], "llama-graph.cpp", 111, "n_embd == h->ne[0]");
+            impl.assert(self.n_embd == self.h.?.ne[0], "llama-graph.cpp", 158, "n_embd == h->ne[0]");
             c.ggml_backend_tensor_set(self.h, ubatch.embd, 0, n_tokens * n_embd * c.ggml_element_size(self.h));
         }
     }
 
-    /// Ports `llm_graph_input_embd_h`'s `can_reuse` (llama-graph.cpp:117 @7fe450e19).
+    /// Ports `llm_graph_input_embd_h`'s `can_reuse` (llama-graph.cpp:164 @d81235049).
     pub fn canReuse(self: *InpEmbdH, params: *const Params) bool {
         var res = true;
         res = res and ((params.ubatch.token == null) or (self.tokens != null and self.tokens.?.ne[0] == params.ubatch.n_tokens));
@@ -262,41 +325,29 @@ pub const InpEmbdH = struct {
     }
 };
 
-/// Ports `llm_graph_input_pos` (llama-graph.h:159 @7fe450e19).
+/// Ports `llm_graph_input_pos` (llama-graph.h:166 @d81235049).
 pub const InpPos = struct {
     /// I32 `[n_batch]`.
     pos: ?*Tensor = null,
     n_pos_per_embd: u32 = 1,
 
-    /// Ports `llm_graph_input_pos`'s `set_input` (llama-graph.cpp:127 @7fe450e19).
+    /// Ports `llm_graph_input_pos`'s `set_input` (llama-graph.cpp:174 @d81235049).
+    /// The batch allocator has already expanded a text token's position to
+    /// M-RoPE's `[p, p, p, 0]`.
     pub fn setInput(self: *InpPos, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         if (ubatch.pos == null or self.pos == null) return;
         const n_tokens: usize = ubatch.n_tokens;
-        if (ubatch.token != null and self.n_pos_per_embd == 4) {
-            // M-RoPE with text tokens: the first three dimensions are the
-            // 1D positions, the fourth is zero.
-            const pos_data = allocator.alloc(i32, n_tokens * self.n_pos_per_embd) catch oom();
-            defer allocator.free(pos_data);
-            for (0..n_tokens) |i| {
-                pos_data[i] = ubatch.pos[i];
-                pos_data[n_tokens + i] = ubatch.pos[i];
-                pos_data[2 * n_tokens + i] = ubatch.pos[i];
-                pos_data[3 * n_tokens + i] = 0;
-            }
-            c.ggml_backend_tensor_set(self.pos, pos_data.ptr, 0, pos_data.len * c.ggml_element_size(self.pos));
-        } else {
-            c.ggml_backend_tensor_set(self.pos, ubatch.pos, 0, n_tokens * self.n_pos_per_embd * c.ggml_element_size(self.pos));
-        }
+        c.ggml_backend_tensor_set(self.pos, ubatch.pos, 0, n_tokens * self.n_pos_per_embd * c.ggml_element_size(self.pos));
     }
 
-    /// Ports `llm_graph_input_pos`'s `can_reuse` (llama-graph.cpp:149 @7fe450e19).
+    /// Ports `llm_graph_input_pos`'s `can_reuse` (llama-graph.cpp:182 @d81235049).
     pub fn canReuse(self: *InpPos, params: *const Params) bool {
         return self.pos.?.ne[0] == @as(i64, params.ubatch.n_tokens) * self.n_pos_per_embd;
     }
 };
 
-/// Ports `llm_graph_input_attn_temp` (llama-graph.h:174 @7fe450e19):
+/// Ports `llm_graph_input_attn_temp` (llama-graph.h:181 @d81235049):
 /// Llama 4's attention temperature tuning, a per-token scale on Q.
 pub const InpAttnTemp = struct {
     /// F32 `[1, 1, n_batch]`.
@@ -305,8 +356,8 @@ pub const InpAttnTemp = struct {
     f_attn_temp_scale: f32,
     f_attn_temp_offset: f32,
 
-    /// Ports `llm_graph_input_attn_temp`'s `set_input` (llama-graph.cpp:157
-    /// @7fe450e19). The C++ takes the logarithm and what follows it in
+    /// Ports `llm_graph_input_attn_temp`'s `set_input` (llama-graph.cpp:190
+    /// @d81235049). The C++ takes the logarithm and what follows it in
     /// double, and its compiler may contract the multiply-add there; no
     /// fixture sets a temperature scale, so nothing yet says which.
     pub fn setInput(self: *InpAttnTemp, ubatch_: ?*const Ubatch) void {
@@ -314,8 +365,8 @@ pub const InpAttnTemp = struct {
         if (ubatch.pos == null or self.attn_scale == null) return;
         const n_tokens: usize = ubatch.n_tokens;
 
-        impl.assert(self.f_attn_temp_scale != 0.0, "llama-graph.cpp", 161, "f_attn_temp_scale != 0.0f");
-        impl.assert(self.n_attn_temp_floor_scale != 0, "llama-graph.cpp", 162, "n_attn_temp_floor_scale != 0");
+        impl.assert(self.f_attn_temp_scale != 0.0, "llama-graph.cpp", 194, "f_attn_temp_scale != 0.0f");
+        impl.assert(self.n_attn_temp_floor_scale != 0, "llama-graph.cpp", 195, "n_attn_temp_floor_scale != 0");
 
         const attn_scale_data = allocator.alloc(f32, n_tokens) catch oom();
         defer allocator.free(attn_scale_data);
@@ -332,24 +383,24 @@ pub const InpAttnTemp = struct {
 /// `std::log` on a double: libm's `log`, as the C++ calls it.
 const cLog = @extern(*const fn (f64) callconv(.c) f64, .{ .name = "log" });
 
-/// Ports `llm_graph_input_out_ids` (llama-graph.h:217 @7fe450e19).
+/// Ports `llm_graph_input_out_ids` (llama-graph.h:224 @d81235049).
 pub const InpOutIds = struct {
     /// I32 `[n_outputs]`.
     out_ids: ?*Tensor = null,
     n_outputs: u32,
 
-    /// Ports `llm_graph_input_out_ids`'s `set_input` (llama-graph.cpp:199 @7fe450e19).
+    /// Ports `llm_graph_input_out_ids`'s `set_input` (llama-graph.cpp:232 @d81235049).
     pub fn setInput(self: *InpOutIds, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
-        impl.assert(self.out_ids != null, "llama-graph.cpp", 200, "out_ids");
+        impl.assert(self.out_ids != null, "llama-graph.cpp", 233, "out_ids");
         const n_tokens: u32 = ubatch.n_tokens;
-        impl.assert(c.ggml_backend_buffer_is_host(self.out_ids.?.buffer), "llama-graph.cpp", 204, "ggml_backend_buffer_is_host(out_ids->buffer)");
+        impl.assert(c.ggml_backend_buffer_is_host(self.out_ids.?.buffer), "llama-graph.cpp", 237, "ggml_backend_buffer_is_host(out_ids->buffer)");
         const data: [*]i32 = @ptrCast(@alignCast(self.out_ids.?.data));
         if (self.n_outputs == n_tokens) {
             for (0..n_tokens) |i| data[i] = @intCast(i);
             return;
         }
-        impl.assert(ubatch.output != null, "llama-graph.cpp", 215, "ubatch->output");
+        impl.assert(ubatch.output != null, "llama-graph.cpp", 248, "ubatch->output");
         var n_outputs: usize = 0;
         for (0..n_tokens) |i| {
             if (ubatch.output[i] != 0) {
@@ -359,19 +410,19 @@ pub const InpOutIds = struct {
         }
     }
 
-    /// Ports `llm_graph_input_out_ids`'s `can_reuse` (llama-graph.cpp:226 @7fe450e19).
+    /// Ports `llm_graph_input_out_ids`'s `can_reuse` (llama-graph.cpp:259 @d81235049).
     pub fn canReuse(self: *InpOutIds, params: *const Params) bool {
         return self.n_outputs == params.n_outputs;
     }
 };
 
-/// Ports `llm_graph_input_mean` (llama-graph.h:237 @7fe450e19).
+/// Ports `llm_graph_input_mean` (llama-graph.h:244 @d81235049).
 pub const InpMean = struct {
     /// F32 `[n_batch, n_batch]`.
     mean: ?*Tensor = null,
     cparams: Cparams,
 
-    /// Ports `llm_graph_input_mean`'s `set_input` (llama-graph.cpp:234 @7fe450e19).
+    /// Ports `llm_graph_input_mean`'s `set_input` (llama-graph.cpp:267 @d81235049).
     pub fn setInput(self: *InpMean, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         if (!(self.cparams.embeddings and (self.cparams.pooling_type == c.LLAMA_POOLING_TYPE_MEAN or
@@ -381,8 +432,8 @@ pub const InpMean = struct {
         const n_seq_tokens: usize = ubatch.n_seq_tokens;
         const n_seqs_unq: usize = ubatch.n_seqs_unq;
 
-        impl.assert(self.mean != null, "llama-graph.cpp", 243, "mean");
-        impl.assert(c.ggml_backend_buffer_is_host(self.mean.?.buffer), "llama-graph.cpp", 244, "ggml_backend_buffer_is_host(mean->buffer)");
+        impl.assert(self.mean != null, "llama-graph.cpp", 276, "mean");
+        impl.assert(c.ggml_backend_buffer_is_host(self.mean.?.buffer), "llama-graph.cpp", 277, "ggml_backend_buffer_is_host(mean->buffer)");
 
         const data: [*]f32 = @ptrCast(@alignCast(self.mean.?.data));
         @memset(@as([*]u8, @ptrCast(self.mean.?.data))[0 .. n_tokens * n_seqs_unq * c.ggml_element_size(self.mean)], 0);
@@ -414,14 +465,14 @@ pub const InpMean = struct {
     }
 };
 
-/// Ports `llm_graph_input_cls` (llama-graph.h:249 @7fe450e19).
+/// Ports `llm_graph_input_cls` (llama-graph.h:256 @d81235049).
 pub const InpCls = struct {
     /// I32 `[n_batch]`.
     cls: ?*Tensor = null,
     cparams: Cparams,
     arch: Arch,
 
-    /// Ports `llm_graph_input_cls`'s `set_input` (llama-graph.cpp:280 @7fe450e19).
+    /// Ports `llm_graph_input_cls`'s `set_input` (llama-graph.cpp:313 @d81235049).
     pub fn setInput(self: *InpCls, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const n_tokens: usize = ubatch.n_tokens;
@@ -429,8 +480,8 @@ pub const InpCls = struct {
         const pt = self.cparams.pooling_type;
         if (!(self.cparams.embeddings and (pt == c.LLAMA_POOLING_TYPE_CLS or pt == c.LLAMA_POOLING_TYPE_RANK or pt == c.LLAMA_POOLING_TYPE_LAST))) return;
 
-        impl.assert(self.cls != null, "llama-graph.cpp", 289, "cls");
-        impl.assert(c.ggml_backend_buffer_is_host(self.cls.?.buffer), "llama-graph.cpp", 290, "ggml_backend_buffer_is_host(cls->buffer)");
+        impl.assert(self.cls != null, "llama-graph.cpp", 322, "cls");
+        impl.assert(c.ggml_backend_buffer_is_host(self.cls.?.buffer), "llama-graph.cpp", 323, "ggml_backend_buffer_is_host(cls->buffer)");
 
         const data: [*]u32 = @ptrCast(@alignCast(self.cls.?.data));
         @memset(@as([*]u8, @ptrCast(self.cls.?.data))[0 .. n_seqs_unq * c.ggml_element_size(self.cls)], 0);
@@ -443,7 +494,7 @@ pub const InpCls = struct {
         @memset(target_row, -1);
 
         const last = pt == c.LLAMA_POOLING_TYPE_LAST or
-            (pt == c.LLAMA_POOLING_TYPE_RANK and (self.arch == .qwen3 or self.arch == .qwen3vl));
+            (pt == c.LLAMA_POOLING_TYPE_RANK and self.cparams.causal_attn);
 
         for (0..n_tokens) |i| {
             const pos = ubatch.pos[i];
@@ -463,60 +514,59 @@ pub const InpCls = struct {
     }
 };
 
-/// Ports `llm_graph_input_rs` (llama-graph.h:262 @7fe450e19): which
+/// Ports `llm_graph_input_rs` (llama-graph.h:269 @d81235049): which
 /// recurrent states each sequence copies from.
 pub const InpRs = struct {
     /// I32 `[n_rs]`.
     s_copy: ?*Tensor = null,
     /// I32 `[n_seqs]`.
     s_copy_main: ?*Tensor = null,
-    /// I32 `[n_rs - n_seqs]`.
-    s_copy_extra: ?*Tensor = null,
+    /// I32 `[n_rs - 1]`.
+    s_copy_tail: ?*Tensor = null,
     mctx: *const memory_recurrent.RecurrentContext,
     head: u32 = 0,
     rs_z: i32 = 0,
 
-    /// Ports `llm_graph_input_rs`'s `set_input` (llama-graph.cpp:329 @7fe450e19).
+    /// Ports `llm_graph_input_rs`'s `set_input` (llama-graph.cpp:362 @d81235049).
     pub fn setInput(self: *InpRs, _: ?*const Ubatch) void {
         const n_rs = self.mctx.getNRs();
         if (self.s_copy) |s_copy| {
-            impl.assert(c.ggml_backend_buffer_is_host(s_copy.buffer), "llama-graph.cpp", 335, "ggml_backend_buffer_is_host(s_copy->buffer)");
+            impl.assert(c.ggml_backend_buffer_is_host(s_copy.buffer), "llama-graph.cpp", 368, "ggml_backend_buffer_is_host(s_copy->buffer)");
             const data: [*]i32 = @ptrCast(@alignCast(s_copy.data));
             // Copy destinations are always between head and head + n.
             for (0..n_rs) |i| data[i] = self.mctx.sCopy(@intCast(i));
         }
     }
 
-    /// Ports `llm_graph_input_rs`'s `can_reuse` (llama-graph.cpp:345 @7fe450e19).
+    /// Ports `llm_graph_input_rs`'s `can_reuse` (llama-graph.cpp:378 @d81235049).
     pub fn canReuse(self: *InpRs, params: *const Params) bool {
         const mctx = params.mctx.?.cast(memory_recurrent.RecurrentContext);
         self.mctx = mctx;
         var res = true;
         res = res and self.s_copy.?.ne[0] == mctx.getNRs();
         res = res and self.s_copy_main.?.ne[0] == params.ubatch.n_seqs;
-        res = res and self.s_copy_extra.?.ne[0] == @as(i64, mctx.getNRs()) - params.ubatch.n_seqs;
         res = res and self.head == mctx.getHead();
         res = res and self.rs_z == mctx.getRsZ();
         return res;
     }
 };
 
-/// Ports `llm_graph_input_pos_bucket` (llama-graph.h:189 @7fe450e19): the
+/// Ports `llm_graph_input_pos_bucket` (llama-graph.h:196 @d81235049): the
 /// relative-position buckets of an encoder's tokens, among themselves.
 pub const InpPosBucket = struct {
     /// I32 `[n_batch, n_batch]`.
     pos_bucket: ?*Tensor = null,
     hparams: *const Hparams,
 
-    /// Ports `llm_graph_input_pos_bucket`'s `set_input` (llama-graph.cpp:176 @7fe450e19).
+    /// Ports `llm_graph_input_pos_bucket`'s `set_input` (llama-graph.cpp:209 @d81235049).
     pub fn setInput(self: *InpPosBucket, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const pb = self.pos_bucket orelse return;
         const n_tokens: usize = ubatch.n_tokens;
 
-        impl.assert(c.ggml_backend_buffer_is_host(pb.buffer), "llama-graph.cpp", 180, "ggml_backend_buffer_is_host(pos_bucket->buffer)");
+        impl.assert(c.ggml_backend_buffer_is_host(pb.buffer), "llama-graph.cpp", 213, "ggml_backend_buffer_is_host(pos_bucket->buffer)");
         // The C++'s TODO: use ubatch->n_seqs instead of failing.
-        impl.assert(!ubatch.equalSeqs(), "llama-graph.cpp", 181, "!ubatch->equal_seqs()");
+        impl.assert(!ubatch.equalSeqs(), "llama-graph.cpp", 214, "!ubatch->equal_seqs()");
 
         const data: [*]i32 = @ptrCast(@alignCast(pb.data));
 
@@ -528,7 +578,7 @@ pub const InpPosBucket = struct {
     }
 };
 
-/// Ports `llm_graph_input_pos_bucket_kv` (llama-graph.h:201 @7fe450e19): the
+/// Ports `llm_graph_input_pos_bucket_kv` (llama-graph.h:208 @d81235049): the
 /// relative-position buckets of a decoder's tokens against its KV cache.
 pub const InpPosBucketKv = struct {
     /// I32 `[n_kv, n_batch]`.
@@ -536,20 +586,20 @@ pub const InpPosBucketKv = struct {
     hparams: *const Hparams,
     mctx: *const kv_cache.KvCacheContext,
 
-    /// Ports `llm_graph_input_pos_bucket_kv`'s `set_input` (llama-graph.cpp:193 @7fe450e19).
+    /// Ports `llm_graph_input_pos_bucket_kv`'s `set_input` (llama-graph.cpp:226 @d81235049).
     pub fn setInput(self: *InpPosBucketKv, ubatch: ?*const Ubatch) void {
         if (self.pos_bucket) |pb| self.mctx.setInputPosBucket(pb, ubatch.?);
     }
 };
 
-/// Ports `llm_graph_input_cross_embd` (llama-graph.h:285 @7fe450e19): the
+/// Ports `llm_graph_input_cross_embd` (llama-graph.h:292 @d81235049): the
 /// encoder's output, as the decoder's cross-attention reads it.
 pub const InpCrossEmbd = struct {
     /// F32 `[n_embd, n_outputs_enc]`.
     cross_embd: ?*Tensor = null,
     cross: *const Cross,
 
-    /// Ports `llm_graph_input_cross_embd`'s `set_input` (llama-graph.cpp:363 @7fe450e19).
+    /// Ports `llm_graph_input_cross_embd`'s `set_input` (llama-graph.cpp:395 @d81235049).
     pub fn setInput(self: *InpCrossEmbd, _: ?*const Ubatch) void {
         const ce = self.cross_embd orelse return;
         if (self.cross.v_embd.items.len == 0) return;
@@ -558,7 +608,7 @@ pub const InpCrossEmbd = struct {
     }
 };
 
-/// Ports `llm_graph_input_attn_cross` (llama-graph.h:646 @7fe450e19): which
+/// Ports `llm_graph_input_attn_cross` (llama-graph.h:653 @d81235049): which
 /// encoder tokens each decoder token may attend, by sequence.
 pub const InpAttnCross = struct {
     /// F32/F16 `[n_outputs_enc, n_batch, 1, 1]`.
@@ -573,7 +623,7 @@ pub const InpAttnCross = struct {
     fn fillMask(self: *const InpAttnCross, comptime T: type, data: [*]T, n_enc: usize, ubatch: *const Ubatch) void {
         const n_tokens: usize = ubatch.n_tokens;
         for (0..n_tokens) |i| {
-            impl.assert(self.cross.seq_ids_enc.items.len != 0, "llama-graph.cpp", 1065, "!cross->seq_ids_enc.empty() && \"llama_encode must be called first\"");
+            impl.assert(self.cross.seq_ids_enc.items.len != 0, "llama-graph.cpp", 1102, "!cross->seq_ids_enc.empty() && \"llama_encode must be called first\"");
             for (0..n_enc) |j| {
                 var f: f32 = -std.math.inf(f32);
 
@@ -588,17 +638,17 @@ pub const InpAttnCross = struct {
         }
     }
 
-    /// Ports `llm_graph_input_attn_cross`'s `set_input` (llama-graph.cpp:1053 @7fe450e19).
+    /// Ports `llm_graph_input_attn_cross`'s `set_input` (llama-graph.cpp:1090 @d81235049).
     pub fn setInput(self: *InpAttnCross, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
-        impl.assert(self.cross_kq_mask != null, "llama-graph.cpp", 1054, "cross_kq_mask");
+        impl.assert(self.cross_kq_mask != null, "llama-graph.cpp", 1091, "cross_kq_mask");
         const m = self.cross_kq_mask.?;
 
         const n_enc: usize = @intCast(m.ne[0]);
 
-        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "llama-graph.cpp", 1059, "ggml_backend_buffer_is_host(cross_kq_mask->buffer)");
+        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "llama-graph.cpp", 1096, "ggml_backend_buffer_is_host(cross_kq_mask->buffer)");
         // The C++'s TODO: use ubatch->n_seqs instead of failing.
-        impl.assert(!ubatch.equalSeqs(), "llama-graph.cpp", 1060, "!ubatch->equal_seqs()");
+        impl.assert(!ubatch.equalSeqs(), "llama-graph.cpp", 1097, "!ubatch->equal_seqs()");
 
         if (m.type == c.GGML_TYPE_F16) {
             self.fillMask(u16, @ptrCast(@alignCast(m.data)), n_enc, ubatch);
@@ -608,7 +658,7 @@ pub const InpAttnCross = struct {
     }
 };
 
-/// Ports `print_mask` (llama-graph.cpp:374 @7fe450e19): the top-left 20 by
+/// Ports `print_mask` (llama-graph.cpp:406 @d81235049): the top-left 20 by
 /// 20 corner of an attention mask, at debug level.
 fn printMask(comptime T: type, data: [*]const T, n_tokens: i64, n_kv: i64, n_swa: i64, swa_type: hparams_mod.SwaType) void {
     const func = "print_mask";
@@ -647,7 +697,7 @@ fn printMask(comptime T: type, data: [*]const T, n_tokens: i64, n_kv: i64, n_swa
     }
 }
 
-/// Ports `llm_graph_input_attn_no_cache` (llama-graph.h:298 @7fe450e19): the
+/// Ports `llm_graph_input_attn_no_cache` (llama-graph.h:305 @d81235049): the
 /// masks of attention within the batch, for a model without a KV cache.
 /// There, the number of KV values is the number of tokens in the batch.
 pub const InpAttnNoCache = struct {
@@ -718,25 +768,25 @@ pub const InpAttnNoCache = struct {
         }
     }
 
-    /// Ports `llm_graph_input_attn_no_cache`'s `set_input` (llama-graph.cpp:409 @7fe450e19).
+    /// Ports `llm_graph_input_attn_no_cache`'s `set_input` (llama-graph.cpp:441 @d81235049).
     pub fn setInput(self: *InpAttnNoCache, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
-        impl.assert(self.self_kq_mask != null, "llama-graph.cpp", 451, "self_kq_mask");
+        impl.assert(self.self_kq_mask != null, "llama-graph.cpp", 483, "self_kq_mask");
         const m = self.self_kq_mask.?;
-        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "llama-graph.cpp", 452, "ggml_backend_buffer_is_host(self_kq_mask->buffer)");
+        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "llama-graph.cpp", 484, "ggml_backend_buffer_is_host(self_kq_mask->buffer)");
         self.fill(m, ubatch, 0, .none);
 
         const swa_type: hparams_mod.SwaType = @fromBackingInt(@intCast(self.hparams.swa_type));
         if (swa_type != .none) {
-            impl.assert(self.self_kq_mask_swa != null, "llama-graph.cpp", 460, "self_kq_mask_swa");
+            impl.assert(self.self_kq_mask_swa != null, "llama-graph.cpp", 492, "self_kq_mask_swa");
             const ms = self.self_kq_mask_swa.?;
-            impl.assert(c.ggml_backend_buffer_is_host(ms.buffer), "llama-graph.cpp", 461, "ggml_backend_buffer_is_host(self_kq_mask_swa->buffer)");
+            impl.assert(c.ggml_backend_buffer_is_host(ms.buffer), "llama-graph.cpp", 493, "ggml_backend_buffer_is_host(self_kq_mask_swa->buffer)");
             self.fill(ms, ubatch, self.hparams.n_swa, swa_type);
         }
     }
 };
 
-/// Ports `llm_graph_input_attn_kv` (llama-graph.h:321 @7fe450e19).
+/// Ports `llm_graph_input_attn_kv` (llama-graph.h:328 @d81235049).
 pub const InpAttnKv = struct {
     /// I64 `[n_batch]`.
     self_k_idxs: ?*Tensor = null,
@@ -761,10 +811,15 @@ pub const InpAttnKv = struct {
         return self.self_kq_mask_cnv;
     }
 
-    /// Ports `llm_graph_input_attn_kv`'s `set_input` (llama-graph.cpp:470 @7fe450e19).
+    /// Ports `llm_graph_input_attn_kv`'s `set_input` (llama-graph.cpp:502 @d81235049).
     pub fn setInput(self: *InpAttnKv, ubatch: ?*const Ubatch) void {
-        self.mctx.setInputKIdxs(self.self_k_idxs.?, ubatch.?);
-        self.mctx.setInputVIdxs(self.self_v_idxs.?, ubatch.?);
+        // the idxs are left unallocated when training bypasses the KV cache
+        if (self.self_k_idxs) |t| {
+            if (t.buffer != null) self.mctx.setInputKIdxs(t, ubatch.?);
+        }
+        if (self.self_v_idxs) |t| {
+            if (t.buffer != null) self.mctx.setInputVIdxs(t, ubatch.?);
+        }
         // The mask is left unallocated when the graph only stores K/V.
         if (self.self_kq_mask) |m| {
             if (m.buffer != null) self.mctx.setInputKqMask(m, ubatch.?, self.cparams.causal_attn);
@@ -777,7 +832,7 @@ pub const InpAttnKv = struct {
         }
     }
 
-    /// Ports `llm_graph_input_attn_kv`'s `can_reuse` (llama-graph.cpp:489 @7fe450e19).
+    /// Ports `llm_graph_input_attn_kv`'s `can_reuse` (llama-graph.cpp:526 @d81235049).
     pub fn canReuse(self: *InpAttnKv, params: *const Params) bool {
         const mctx = params.mctx.?.cast(kv_cache.KvCacheContext);
         self.mctx = mctx;
@@ -788,7 +843,7 @@ pub const InpAttnKv = struct {
     }
 };
 
-/// Ports `llm_graph_input_attn_kv_msa` (llama-graph.h:465 @7fe450e19): the
+/// Ports `llm_graph_input_attn_kv_msa` (llama-graph.h:472 @d81235049): the
 /// standard K/V attention input against an MSA cache's base cache, plus the
 /// destination indices for its indexer key cache. The C++ derives from
 /// `llm_graph_input_attn_kv`; here that is `base`, which `build_attn`
@@ -806,14 +861,14 @@ pub const InpAttnKvMsa = struct {
         return self.base.getKqMask();
     }
 
-    /// Ports `llm_graph_input_attn_kv_msa`'s `set_input` (llama-graph.cpp:534 @7fe450e19).
+    /// Ports `llm_graph_input_attn_kv_msa`'s `set_input` (llama-graph.cpp:571 @d81235049).
     pub fn setInput(self: *InpAttnKvMsa, ubatch: ?*const Ubatch) void {
         self.base.setInput(ubatch);
 
         if (self.self_k_idxs_idx) |t| self.mctx_msa.getIdx().setInputKIdxs(t, ubatch.?);
     }
 
-    /// Ports `llm_graph_input_attn_kv_msa`'s `can_reuse` (llama-graph.cpp:542 @7fe450e19).
+    /// Ports `llm_graph_input_attn_kv_msa`'s `can_reuse` (llama-graph.cpp:579 @d81235049).
     pub fn canReuse(self: *InpAttnKvMsa, params: *const Params) bool {
         self.mctx_msa = params.mctx.?.cast(kv_cache_msa.MsaContext);
 
@@ -831,7 +886,7 @@ pub const InpAttnKvMsa = struct {
     }
 };
 
-/// Ports `llm_graph_input_attn_k` (llama-graph.h:363 @7fe450e19): a cache
+/// Ports `llm_graph_input_attn_k` (llama-graph.h:370 @d81235049): a cache
 /// that stores K alone, MLA's compressed latent, from which V is a view.
 pub const InpAttnK = struct {
     /// I64 `[n_batch]`.
@@ -850,20 +905,20 @@ pub const InpAttnK = struct {
         return self.self_kq_mask_cnv;
     }
 
-    /// Ports `llm_graph_input_attn_k`'s `set_input` (llama-graph.cpp:504 @7fe450e19).
+    /// Ports `llm_graph_input_attn_k`'s `set_input` (llama-graph.cpp:541 @d81235049).
     pub fn setInput(self: *InpAttnK, ubatch: ?*const Ubatch) void {
         self.mctx.setInputKIdxs(self.self_k_idxs.?, ubatch.?);
         self.mctx.setInputKqMask(self.self_kq_mask.?, ubatch.?, self.cparams.causal_attn);
     }
 
-    /// Ports `llm_graph_input_attn_k`'s `can_reuse` (llama-graph.cpp:510 @7fe450e19).
+    /// Ports `llm_graph_input_attn_k`'s `can_reuse` (llama-graph.cpp:547 @d81235049).
     pub fn canReuse(self: *InpAttnK, params: *const Params) bool {
         self.mctx = params.mctx.?.cast(kv_cache.KvCacheContext);
         return self.canReuseImpl(params);
     }
 
-    /// Ports `llm_graph_input_attn_k`'s `can_reuse_impl` (llama-graph.cpp:516
-    /// @7fe450e19): `can_reuse` without re-binding the memory context.
+    /// Ports `llm_graph_input_attn_k`'s `can_reuse_impl` (llama-graph.cpp:553
+    /// @d81235049): `can_reuse` without re-binding the memory context.
     pub fn canReuseImpl(self: *const InpAttnK, params: *const Params) bool {
         var res = true;
         res = res and self.self_k_idxs.?.ne[0] == params.ubatch.n_tokens;
@@ -872,7 +927,7 @@ pub const InpAttnK = struct {
     }
 };
 
-/// Ports `llm_graph_input_attn_k_dsa` (llama-graph.h:397 @7fe450e19): a
+/// Ports `llm_graph_input_attn_k_dsa` (llama-graph.h:404 @d81235049): a
 /// K-only MLA cache, as `llm_graph_input_attn_k`, beside the lightning
 /// indexer's key cache, with the indexer's Hadamard rotation.
 pub const InpAttnKDsa = struct {
@@ -904,7 +959,7 @@ pub const InpAttnKDsa = struct {
         return self.self_kq_mask_lid;
     }
 
-    /// Ports `llm_graph_input_attn_k_dsa`'s `set_input` (llama-graph.cpp:560 @7fe450e19).
+    /// Ports `llm_graph_input_attn_k_dsa`'s `set_input` (llama-graph.cpp:597 @d81235049).
     pub fn setInput(self: *InpAttnKDsa, ubatch: ?*const Ubatch) void {
         self.mctx.getMla().setInputKIdxs(self.self_k_idxs_mla.?, ubatch.?);
 
@@ -920,14 +975,14 @@ pub const InpAttnKDsa = struct {
         }
     }
 
-    /// Ports `llm_graph_input_attn_k_dsa`'s `can_reuse` (llama-graph.cpp:575 @7fe450e19).
+    /// Ports `llm_graph_input_attn_k_dsa`'s `can_reuse` (llama-graph.cpp:612 @d81235049).
     pub fn canReuse(self: *InpAttnKDsa, params: *const Params) bool {
         self.mctx = params.mctx.?.cast(kv_cache_dsa.DsaContext);
         return self.canReuseImpl(params);
     }
 
-    /// Ports `llm_graph_input_attn_k_dsa`'s `can_reuse_impl` (llama-graph.cpp:581
-    /// @7fe450e19): `can_reuse` without re-binding the memory context.
+    /// Ports `llm_graph_input_attn_k_dsa`'s `can_reuse_impl` (llama-graph.cpp:618
+    /// @d81235049): `can_reuse` without re-binding the memory context.
     pub fn canReuseImpl(self: *const InpAttnKDsa, params: *const Params) bool {
         var res = true;
         res = res and self.self_k_idxs_mla.?.ne[0] == params.ubatch.n_tokens;
@@ -938,7 +993,7 @@ pub const InpAttnKDsa = struct {
     }
 };
 
-/// Ports `llm_graph_input_attn_k_dsa_iswa` (llama-graph.h:439 @7fe450e19):
+/// Ports `llm_graph_input_attn_k_dsa_iswa` (llama-graph.h:446 @d81235049):
 /// the DSA input for the full-attention layers and a K-only input for the
 /// SWA layers. It owns both.
 pub const InpAttnKDsaIswa = struct {
@@ -958,14 +1013,14 @@ pub const InpAttnKDsaIswa = struct {
         allocator.destroy(self.inp_swa);
     }
 
-    /// Ports `llm_graph_input_attn_k_dsa_iswa`'s `set_input` (llama-graph.cpp:593 @7fe450e19).
+    /// Ports `llm_graph_input_attn_k_dsa_iswa`'s `set_input` (llama-graph.cpp:630 @d81235049).
     pub fn setInput(self: *InpAttnKDsaIswa, ubatch: ?*const Ubatch) void {
         self.inp_dsa.setInput(ubatch);
         self.inp_swa.setInput(ubatch);
     }
 
-    /// Ports `llm_graph_input_attn_k_dsa_iswa`'s `can_reuse` (llama-graph.cpp:598
-    /// @7fe450e19): re-binds both halves to the new context.
+    /// Ports `llm_graph_input_attn_k_dsa_iswa`'s `can_reuse` (llama-graph.cpp:635
+    /// @d81235049): re-binds both halves to the new context.
     pub fn canReuse(self: *InpAttnKDsaIswa, params: *const Params) bool {
         const mctx = params.mctx.?.cast(kv_cache_dsa_iswa.DsaIswaContext);
         self.mctx = mctx;
@@ -980,7 +1035,7 @@ pub const InpAttnKDsaIswa = struct {
     }
 };
 
-/// Ports `llm_graph_input_attn_kv_iswa` (llama-graph.h:484 @7fe450e19): the
+/// Ports `llm_graph_input_attn_kv_iswa` (llama-graph.h:491 @d81235049): the
 /// indices, masks and rotations of both halves of an iSWA cache.
 pub const InpAttnKvIswa = struct {
     /// I64 `[n_batch]`.
@@ -1029,8 +1084,8 @@ pub const InpAttnKvIswa = struct {
         return if (x.buffer != null) x else null;
     }
 
-    /// Ports `llm_graph_input_attn_kv_iswa`'s `set_input` (llama-graph.cpp:612
-    /// @7fe450e19): each half's tensors are set only when allocated, since a
+    /// Ports `llm_graph_input_attn_kv_iswa`'s `set_input` (llama-graph.cpp:649
+    /// @d81235049): each half's tensors are set only when allocated, since a
     /// model may have no layers on one side of the window.
     pub fn setInput(self: *InpAttnKvIswa, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
@@ -1059,7 +1114,7 @@ pub const InpAttnKvIswa = struct {
         if (allocated(self.self_v_rot_swa)) |r| swa.setInputVRot(r);
     }
 
-    /// Ports `llm_graph_input_attn_kv_iswa`'s `can_reuse` (llama-graph.cpp:655 @7fe450e19).
+    /// Ports `llm_graph_input_attn_kv_iswa`'s `can_reuse` (llama-graph.cpp:692 @d81235049).
     pub fn canReuse(self: *InpAttnKvIswa, params: *const Params) bool {
         const mctx = params.mctx.?.cast(kv_cache_iswa.IswaContext);
         self.mctx = mctx;
@@ -1076,7 +1131,7 @@ pub const InpAttnKvIswa = struct {
     }
 };
 
-/// Ports `llm_graph_input_attn_k_iswa` (llama-graph.h:530 @7fe450e19): the
+/// Ports `llm_graph_input_attn_k_iswa` (llama-graph.h:537 @d81235049): the
 /// indices, masks and rotations of both halves of a K-only iSWA cache,
 /// whose K serves as V too (MLA-style attention).
 pub const InpAttnKIswa = struct {
@@ -1114,8 +1169,8 @@ pub const InpAttnKIswa = struct {
         return if (x.buffer != null) x else null;
     }
 
-    /// Ports `llm_graph_input_attn_k_iswa`'s `set_input` (llama-graph.cpp:685
-    /// @7fe450e19): either half's tensors may be unallocated when the model
+    /// Ports `llm_graph_input_attn_k_iswa`'s `set_input` (llama-graph.cpp:722
+    /// @d81235049): either half's tensors may be unallocated when the model
     /// has no layers on that side of the window.
     pub fn setInput(self: *InpAttnKIswa, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
@@ -1136,7 +1191,7 @@ pub const InpAttnKIswa = struct {
         if (allocated(self.self_k_rot_swa)) |r| swa.setInputKRot(r);
     }
 
-    /// Ports `llm_graph_input_attn_k_iswa`'s `can_reuse` (llama-graph.cpp:714 @7fe450e19).
+    /// Ports `llm_graph_input_attn_k_iswa`'s `can_reuse` (llama-graph.cpp:751 @d81235049).
     pub fn canReuse(self: *InpAttnKIswa, params: *const Params) bool {
         const mctx = params.mctx.?.cast(kv_cache_iswa.IswaContext);
         self.mctx = mctx;
@@ -1152,7 +1207,7 @@ pub const InpAttnKIswa = struct {
     }
 };
 
-/// Ports `llm_graph_input_dsv4_raw` (llama-graph.h:571 @7fe450e19): DSV4's
+/// Ports `llm_graph_input_dsv4_raw` (llama-graph.h:578 @d81235049): DSV4's
 /// raw inputs are SWA-only, but their mask may be stream-shaped, so raw K
 /// can be concatenated with the compressed K in one attention op. It is
 /// not an input of its own; `InpDsv4` owns and sets it.
@@ -1173,7 +1228,7 @@ pub const InpDsv4Raw = struct {
         return self.self_kq_mask_cnv;
     }
 
-    /// Ports `llm_graph_input_dsv4_raw`'s `set_input` (llama-graph.cpp:983 @7fe450e19).
+    /// Ports `llm_graph_input_dsv4_raw`'s `set_input` (llama-graph.cpp:1020 @d81235049).
     pub fn setInput(self: *InpDsv4Raw, ubatch: ?*const Ubatch) void {
         if (self.self_k_idxs) |t| {
             if (t.buffer != null) self.mctx.setInputKIdxs(t);
@@ -1185,8 +1240,8 @@ pub const InpDsv4Raw = struct {
     }
 };
 
-/// Mirrors `llm_graph_input_dsv4`'s `comp_input` (llama-graph.h:599
-/// @7fe450e19): one compressor's plan, as graph inputs. A plan's empty
+/// Mirrors `llm_graph_input_dsv4`'s `comp_input` (llama-graph.h:606
+/// @d81235049): one compressor's plan, as graph inputs. A plan's empty
 /// index list is no tensor at all.
 pub const InpDsv4Comp = struct {
     /// I32 `[n_state]`.
@@ -1214,8 +1269,8 @@ pub const InpDsv4Comp = struct {
     k_rot: ?*Tensor = null,
 };
 
-/// Ports `dsv4_set_i64` and `dsv4_set_i32` (llama-graph.cpp:742, 751
-/// @7fe450e19): an allocated index input from its plan list.
+/// Ports `dsv4_set_i64` and `dsv4_set_i32` (llama-graph.cpp:779, 788
+/// @d81235049): an allocated index input from its plan list.
 fn dsv4SetIdx(comptime T: type, dst_: ?*Tensor, src: []const T, comptime line: c_int) void {
     const dst = dst_ orelse return;
     if (dst.buffer == null) return;
@@ -1224,21 +1279,21 @@ fn dsv4SetIdx(comptime T: type, dst_: ?*Tensor, src: []const T, comptime line: c
     c.ggml_backend_tensor_set(dst, src.ptr, 0, src.len * c.ggml_element_size(dst));
 }
 
-/// Ports `dsv4_set_kq_mask` (llama-graph.cpp:760 @7fe450e19): each query
+/// Ports `dsv4_set_kq_mask` (llama-graph.cpp:797 @d81235049): each query
 /// token sees its completed compressed rows and none past them.
 fn dsv4SetKqMask(dst_: ?*Tensor, plan: *const kv_cache_dsv4.CompPlan, n_tokens: u32, n_stream: i64) void {
     const dst = dst_ orelse return;
     if (dst.buffer == null) return;
 
-    impl.assert(dst.type == c.GGML_TYPE_F32 or dst.type == c.GGML_TYPE_F16, "llama-graph.cpp", 769, "dst->type == GGML_TYPE_F32 || dst->type == GGML_TYPE_F16");
-    impl.assert(n_stream > 0, "llama-graph.cpp", 770, "n_stream > 0");
-    impl.assert(@rem(@as(i64, n_tokens), n_stream) == 0, "llama-graph.cpp", 771, "n_tokens%n_stream == 0");
-    impl.assert(dst.ne[0] == plan.n_kv, "llama-graph.cpp", 772, "dst->ne[0] == plan.n_kv");
-    impl.assert(dst.ne[1] == @divTrunc(@as(i64, n_tokens), n_stream), "llama-graph.cpp", 773, "dst->ne[1] == (int64_t) n_tokens/n_stream");
-    impl.assert(dst.ne[2] == 1, "llama-graph.cpp", 774, "dst->ne[2] == 1");
-    impl.assert(dst.ne[3] == n_stream, "llama-graph.cpp", 775, "dst->ne[3] == n_stream");
-    impl.assert(@as(i64, @intCast(plan.n_visible.items.len)) == @as(i64, n_tokens), "llama-graph.cpp", 776, "(int64_t) plan.n_visible.size() == (int64_t) n_tokens");
-    impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-graph.cpp", 777, "ggml_backend_buffer_is_host(dst->buffer)");
+    impl.assert(dst.type == c.GGML_TYPE_F32 or dst.type == c.GGML_TYPE_F16, "llama-graph.cpp", 806, "dst->type == GGML_TYPE_F32 || dst->type == GGML_TYPE_F16");
+    impl.assert(n_stream > 0, "llama-graph.cpp", 807, "n_stream > 0");
+    impl.assert(@rem(@as(i64, n_tokens), n_stream) == 0, "llama-graph.cpp", 808, "n_tokens%n_stream == 0");
+    impl.assert(dst.ne[0] == plan.n_kv, "llama-graph.cpp", 809, "dst->ne[0] == plan.n_kv");
+    impl.assert(dst.ne[1] == @divTrunc(@as(i64, n_tokens), n_stream), "llama-graph.cpp", 810, "dst->ne[1] == (int64_t) n_tokens/n_stream");
+    impl.assert(dst.ne[2] == 1, "llama-graph.cpp", 811, "dst->ne[2] == 1");
+    impl.assert(dst.ne[3] == n_stream, "llama-graph.cpp", 812, "dst->ne[3] == n_stream");
+    impl.assert(@as(i64, @intCast(plan.n_visible.items.len)) == @as(i64, n_tokens), "llama-graph.cpp", 813, "(int64_t) plan.n_visible.size() == (int64_t) n_tokens");
+    impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-graph.cpp", 814, "ggml_backend_buffer_is_host(dst->buffer)");
 
     const ne0: usize = @intCast(dst.ne[0]);
     if (dst.type == c.GGML_TYPE_F32) {
@@ -1258,13 +1313,13 @@ fn dsv4SetKqMask(dst_: ?*Tensor, plan: *const kv_cache_dsv4.CompPlan, n_tokens: 
     }
 }
 
-/// Ports `dsv4_build_raw_kq_mask` (llama-graph.cpp:804 @7fe450e19).
+/// Ports `dsv4_build_raw_kq_mask` (llama-graph.cpp:841 @d81235049).
 fn dsv4BuildRawKqMask(ctx: *c.ggml_context, mctx: *const kv_cache_dsv4.RawContext, ubatch: *const Ubatch, cparams: *const Cparams, n_stream: i64) *Tensor {
     const n_kv: i64 = mctx.getNKv();
     const n_tokens: i64 = ubatch.n_tokens;
 
-    impl.assert(n_stream > 0, "llama-graph.cpp", 813, "n_stream > 0");
-    impl.assert(@rem(n_tokens, n_stream) == 0, "llama-graph.cpp", 814, "n_tokens%n_stream == 0");
+    impl.assert(n_stream > 0, "llama-graph.cpp", 850, "n_stream > 0");
+    impl.assert(@rem(n_tokens, n_stream) == 0, "llama-graph.cpp", 851, "n_tokens%n_stream == 0");
 
     const ty: c.enum_ggml_type = if (cparams.flash_attn) c.GGML_TYPE_F16 else c.GGML_TYPE_F32;
 
@@ -1274,12 +1329,12 @@ fn dsv4BuildRawKqMask(ctx: *c.ggml_context, mctx: *const kv_cache_dsv4.RawContex
     return res;
 }
 
-/// Ports `dsv4_can_reuse_raw_kq_mask` (llama-graph.cpp:825 @7fe450e19).
+/// Ports `dsv4_can_reuse_raw_kq_mask` (llama-graph.cpp:862 @d81235049).
 fn dsv4CanReuseRawKqMask(kq_mask: *const Tensor, mctx: *const kv_cache_dsv4.RawContext, ubatch: *const Ubatch, n_stream: i64) bool {
     const n_kv: i64 = mctx.getNKv();
     const n_tokens: i64 = ubatch.n_tokens;
 
-    impl.assert(n_stream > 0, "llama-graph.cpp", 833, "n_stream > 0");
+    impl.assert(n_stream > 0, "llama-graph.cpp", 870, "n_stream > 0");
 
     var res = true;
     res = res and (kq_mask.ne[0] == n_kv);
@@ -1289,17 +1344,17 @@ fn dsv4CanReuseRawKqMask(kq_mask: *const Tensor, mctx: *const kv_cache_dsv4.RawC
     return res;
 }
 
-/// Ports `dsv4_set_comp_inputs` (llama-graph.cpp:867 @7fe450e19).
+/// Ports `dsv4_set_comp_inputs` (llama-graph.cpp:904 @d81235049).
 fn dsv4SetCompInputs(inp: *const InpDsv4Comp, plan: *const kv_cache_dsv4.CompPlan, name: [*:0]const u8, debug: bool, n_tokens: u32, n_stream: i64) void {
-    dsv4SetIdx(i32, inp.state_pos, plan.state_pos.items, 753);
-    dsv4SetIdx(i32, inp.state_persist_src_idxs, plan.state_persist_src_idxs.items, 753);
-    dsv4SetIdx(i32, inp.state_persist_dst_idxs, plan.state_persist_dst_idxs.items, 753);
-    dsv4SetIdx(i32, inp.state_restore_src_idxs, plan.state_restore_src_idxs.items, 753);
-    dsv4SetIdx(i32, inp.state_restore_dst_idxs, plan.state_restore_dst_idxs.items, 753);
-    dsv4SetIdx(i32, inp.state_snapshot_src_idxs, plan.state_snapshot_src_idxs.items, 753);
-    dsv4SetIdx(i32, inp.state_snapshot_dst_idxs, plan.state_snapshot_dst_idxs.items, 753);
-    dsv4SetIdx(i32, inp.state_read_idxs, plan.state_read_idxs.items, 753);
-    dsv4SetIdx(i64, inp.state_write_idxs, plan.state_write_idxs.items, 744);
+    dsv4SetIdx(i32, inp.state_pos, plan.state_pos.items, 793);
+    dsv4SetIdx(i32, inp.state_persist_src_idxs, plan.state_persist_src_idxs.items, 793);
+    dsv4SetIdx(i32, inp.state_persist_dst_idxs, plan.state_persist_dst_idxs.items, 793);
+    dsv4SetIdx(i32, inp.state_restore_src_idxs, plan.state_restore_src_idxs.items, 793);
+    dsv4SetIdx(i32, inp.state_restore_dst_idxs, plan.state_restore_dst_idxs.items, 793);
+    dsv4SetIdx(i32, inp.state_snapshot_src_idxs, plan.state_snapshot_src_idxs.items, 793);
+    dsv4SetIdx(i32, inp.state_snapshot_dst_idxs, plan.state_snapshot_dst_idxs.items, 793);
+    dsv4SetIdx(i32, inp.state_read_idxs, plan.state_read_idxs.items, 793);
+    dsv4SetIdx(i64, inp.state_write_idxs, plan.state_write_idxs.items, 784);
     dsv4SetIdx(i32, inp.state_write_pos, plan.state_write_pos.items, 753);
     dsv4SetKqMask(inp.kq_mask, plan, n_tokens, n_stream);
 
@@ -1312,17 +1367,17 @@ fn dsv4SetCompInputs(inp: *const InpDsv4Comp, plan: *const kv_cache_dsv4.CompPla
     }
 }
 
-/// Ports `dsv4_can_reuse_tensor_1d` (llama-graph.cpp:894 @7fe450e19).
+/// Ports `dsv4_can_reuse_tensor_1d` (llama-graph.cpp:931 @d81235049).
 fn dsv4CanReuseTensor1d(t: ?*Tensor, ne0: usize) bool {
     if (t) |x| return x.ne[0] == @as(i64, @intCast(ne0));
     return ne0 == 0;
 }
 
-/// Ports `dsv4_can_reuse_kq_mask` (llama-graph.cpp:898 @7fe450e19).
+/// Ports `dsv4_can_reuse_kq_mask` (llama-graph.cpp:935 @d81235049).
 fn dsv4CanReuseKqMask(t: ?*Tensor, plan: *const kv_cache_dsv4.CompPlan, n_tokens: u32, n_stream: i64) bool {
     if (plan.n_kv == 0) return t == null;
 
-    impl.assert(n_stream > 0, "llama-graph.cpp", 907, "n_stream > 0");
+    impl.assert(n_stream > 0, "llama-graph.cpp", 944, "n_stream > 0");
 
     const x = t orelse return false;
     return x.ne[0] == plan.n_kv and
@@ -1331,7 +1386,7 @@ fn dsv4CanReuseKqMask(t: ?*Tensor, plan: *const kv_cache_dsv4.CompPlan, n_tokens
         x.ne[3] == n_stream;
 }
 
-/// Ports `dsv4_can_reuse_comp_input` (llama-graph.cpp:916 @7fe450e19).
+/// Ports `dsv4_can_reuse_comp_input` (llama-graph.cpp:953 @d81235049).
 fn dsv4CanReuseCompInput(inp: *const InpDsv4Comp, plan: *const kv_cache_dsv4.CompPlan, n_tokens: u32, n_stream: i64) bool {
     var res = true;
     res = res and dsv4CanReuseTensor1d(inp.state_pos, plan.state_pos.items.len);
@@ -1348,7 +1403,7 @@ fn dsv4CanReuseCompInput(inp: *const InpDsv4Comp, plan: *const kv_cache_dsv4.Com
     return res;
 }
 
-/// Ports `dsv4_build_input_1d` (llama-graph.cpp:937 @7fe450e19): no
+/// Ports `dsv4_build_input_1d` (llama-graph.cpp:974 @d81235049): no
 /// tensor for an empty list.
 fn dsv4BuildInput1d(ctx: *c.ggml_context, ty: c.enum_ggml_type, ne0: usize, comptime prefix: []const u8, name: []const u8, comptime suffix: []const u8) ?*Tensor {
     if (ne0 == 0) return null;
@@ -1361,7 +1416,7 @@ fn dsv4BuildInput1d(ctx: *c.ggml_context, ty: c.enum_ggml_type, ne0: usize, comp
     return res;
 }
 
-/// Ports `dsv4_build_comp_inputs` (llama-graph.cpp:953 @7fe450e19): the
+/// Ports `dsv4_build_comp_inputs` (llama-graph.cpp:990 @d81235049): the
 /// mask is f16 where its attention is fused -- flash attention for CSA and
 /// HCA, the fused lightning indexer for its own.
 fn dsv4BuildCompInputs(ctx: *c.ggml_context, inp: *InpDsv4Comp, plan: *const kv_cache_dsv4.CompPlan, name: []const u8, cparams: *const Cparams, n_stream: i64) void {
@@ -1379,8 +1434,8 @@ fn dsv4BuildCompInputs(ctx: *c.ggml_context, inp: *InpDsv4Comp, plan: *const kv_
     if (plan.n_kv > 0) {
         const n_tokens: i64 = @intCast(plan.n_visible.items.len);
 
-        impl.assert(n_stream > 0, "llama-graph.cpp", 974, "n_stream > 0");
-        impl.assert(@rem(n_tokens, n_stream) == 0, "llama-graph.cpp", 975, "n_tokens%n_stream == 0");
+        impl.assert(n_stream > 0, "llama-graph.cpp", 1011, "n_stream > 0");
+        impl.assert(@rem(n_tokens, n_stream) == 0, "llama-graph.cpp", 1012, "n_tokens%n_stream == 0");
 
         const is_lid = std.mem.eql(u8, name, "lid");
         const use_f16 = (!is_lid and cparams.flash_attn) or (is_lid and cparams.fused_lid);
@@ -1393,7 +1448,7 @@ fn dsv4BuildCompInputs(ctx: *c.ggml_context, inp: *InpDsv4Comp, plan: *const kv_
     }
 }
 
-/// Ports `llm_graph_input_dsv4` (llama-graph.h:597 @7fe450e19): the raw
+/// Ports `llm_graph_input_dsv4` (llama-graph.h:604 @d81235049): the raw
 /// cache's inputs and each compressor's plan.
 pub const InpDsv4 = struct {
     inp_raw: *InpDsv4Raw,
@@ -1422,7 +1477,7 @@ pub const InpDsv4 = struct {
         allocator.destroy(self.inp_raw);
     }
 
-    /// Ports `llm_graph_input_dsv4`'s `set_input` (llama-graph.cpp:997 @7fe450e19).
+    /// Ports `llm_graph_input_dsv4`'s `set_input` (llama-graph.cpp:1034 @d81235049).
     pub fn setInput(self: *InpDsv4, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const plan_csa = self.mctx.getCsaPlanFor(ubatch);
@@ -1448,7 +1503,7 @@ pub const InpDsv4 = struct {
         }
     }
 
-    /// Ports `llm_graph_input_dsv4`'s `can_reuse` (llama-graph.cpp:1023 @7fe450e19).
+    /// Ports `llm_graph_input_dsv4`'s `can_reuse` (llama-graph.cpp:1060 @d81235049).
     pub fn canReuse(self: *InpDsv4, params: *const Params) bool {
         const mctx = params.mctx.?.cast(kv_cache_dsv4.Dsv4Context);
 
@@ -1480,7 +1535,7 @@ pub const InpDsv4 = struct {
     }
 };
 
-/// Ports `llm_graph_input_mem_hybrid` (llama-graph.h:661 @7fe450e19).
+/// Ports `llm_graph_input_mem_hybrid` (llama-graph.h:668 @d81235049).
 pub const InpMemHybrid = struct {
     inp_attn: *InpAttnKv,
     inp_rs: *InpRs,
@@ -1499,7 +1554,7 @@ pub const InpMemHybrid = struct {
         allocator.destroy(self.inp_rs);
     }
 
-    /// Ports `llm_graph_input_mem_hybrid`'s `set_input` (llama-graph.cpp:1089 @7fe450e19).
+    /// Ports `llm_graph_input_mem_hybrid`'s `set_input` (llama-graph.cpp:1126 @d81235049).
     pub fn setInput(self: *InpMemHybrid, ubatch: ?*const Ubatch) void {
         const attn = self.mctx.getAttn();
         attn.setInputKIdxs(self.inp_attn.self_k_idxs.?, ubatch.?);
@@ -1511,13 +1566,13 @@ pub const InpMemHybrid = struct {
         const recr = self.mctx.getRecr();
         const n_rs = recr.getNRs();
         if (self.inp_rs.s_copy) |s_copy| {
-            impl.assert(c.ggml_backend_buffer_is_host(s_copy.buffer), "llama-graph.cpp", 1106, "ggml_backend_buffer_is_host(inp_rs->s_copy->buffer)");
+            impl.assert(c.ggml_backend_buffer_is_host(s_copy.buffer), "llama-graph.cpp", 1143, "ggml_backend_buffer_is_host(inp_rs->s_copy->buffer)");
             const data: [*]i32 = @ptrCast(@alignCast(s_copy.data));
             for (0..n_rs) |i| data[i] = recr.sCopy(@intCast(i));
         }
     }
 
-    /// Ports `llm_graph_input_mem_hybrid`'s `can_reuse` (llama-graph.cpp:1116 @7fe450e19).
+    /// Ports `llm_graph_input_mem_hybrid`'s `can_reuse` (llama-graph.cpp:1153 @d81235049).
     pub fn canReuse(self: *InpMemHybrid, params: *const Params) bool {
         const mctx = params.mctx.?.cast(memory_hybrid.HybridContext);
         self.mctx = mctx;
@@ -1527,14 +1582,13 @@ pub const InpMemHybrid = struct {
         res = res and canReuseKqMask(self.inp_attn.self_kq_mask.?, mctx.getAttn(), &params.ubatch, &params.cparams);
         res = res and self.inp_rs.s_copy.?.ne[0] == recr.getNRs();
         res = res and self.inp_rs.s_copy_main.?.ne[0] == params.ubatch.n_seqs;
-        res = res and self.inp_rs.s_copy_extra.?.ne[0] == @as(i64, recr.getNRs()) - params.ubatch.n_seqs;
         res = res and self.inp_rs.head == recr.getHead();
         res = res and self.inp_rs.rs_z == recr.getRsZ();
         return res;
     }
 };
 
-/// Ports `llm_graph_input_mem_hybrid_iswa` (llama-graph.h:717 @7fe450e19):
+/// Ports `llm_graph_input_mem_hybrid_iswa` (llama-graph.h:724 @d81235049):
 /// a hybrid memory's inputs with an iSWA attention half.
 pub const InpMemHybridIswa = struct {
     inp_attn: *InpAttnKvIswa,
@@ -1555,7 +1609,7 @@ pub const InpMemHybridIswa = struct {
     }
 
     /// Ports `llm_graph_input_mem_hybrid_iswa`'s `set_input`
-    /// (llama-graph.cpp:1182 @7fe450e19): each half's tensors are set only
+    /// (llama-graph.cpp:1217 @d81235049): each half's tensors are set only
     /// when allocated, since a model may have no layers on one side of the
     /// window.
     pub fn setInput(self: *InpMemHybridIswa, ubatch_: ?*const Ubatch) void {
@@ -1585,7 +1639,7 @@ pub const InpMemHybridIswa = struct {
         const recr = self.mctx.getRecr();
         const n_rs = recr.getNRs();
         if (self.inp_rs.s_copy) |s_copy| {
-            impl.assert(c.ggml_backend_buffer_is_host(s_copy.buffer), "llama-graph.cpp", 1224, "ggml_backend_buffer_is_host(inp_rs->s_copy->buffer)");
+            impl.assert(c.ggml_backend_buffer_is_host(s_copy.buffer), "llama-graph.cpp", 1259, "ggml_backend_buffer_is_host(inp_rs->s_copy->buffer)");
             const data: [*]i32 = @ptrCast(@alignCast(s_copy.data));
             // Copy destinations are always between head and head + n.
             for (0..n_rs) |i| data[i] = recr.sCopy(@intCast(i));
@@ -1593,7 +1647,7 @@ pub const InpMemHybridIswa = struct {
     }
 
     /// Ports `llm_graph_input_mem_hybrid_iswa`'s `can_reuse`
-    /// (llama-graph.cpp:1234 @7fe450e19). Unlike the plain iSWA input's,
+    /// (llama-graph.cpp:1269 @d81235049). Unlike the plain iSWA input's,
     /// the masks are checked whether or not they are allocated.
     pub fn canReuse(self: *InpMemHybridIswa, params: *const Params) bool {
         const mctx = params.mctx.?.cast(memory_hybrid_iswa.HybridIswaContext);
@@ -1612,14 +1666,13 @@ pub const InpMemHybridIswa = struct {
 
         res = res and self.inp_rs.s_copy.?.ne[0] == recr.getNRs();
         res = res and self.inp_rs.s_copy_main.?.ne[0] == params.ubatch.n_seqs;
-        res = res and self.inp_rs.s_copy_extra.?.ne[0] == @as(i64, recr.getNRs()) - params.ubatch.n_seqs;
         res = res and self.inp_rs.head == recr.getHead();
         res = res and self.inp_rs.rs_z == recr.getRsZ();
         return res;
     }
 };
 
-/// Ports `llm_graph_input_mem_hybrid_k` (llama-graph.h:689 @7fe450e19): a
+/// Ports `llm_graph_input_mem_hybrid_k` (llama-graph.h:696 @d81235049): a
 /// hybrid memory whose attention half is a K-only (MLA) cache.
 pub const InpMemHybridK = struct {
     inp_attn: *InpAttnK,
@@ -1639,7 +1692,7 @@ pub const InpMemHybridK = struct {
         allocator.destroy(self.inp_rs);
     }
 
-    /// Ports `llm_graph_input_mem_hybrid_k`'s `set_input` (llama-graph.cpp:1142 @7fe450e19).
+    /// Ports `llm_graph_input_mem_hybrid_k`'s `set_input` (llama-graph.cpp:1178 @d81235049).
     pub fn setInput(self: *InpMemHybridK, ubatch: ?*const Ubatch) void {
         const attn = self.mctx.getAttn();
         attn.setInputKIdxs(self.inp_attn.self_k_idxs.?, ubatch.?);
@@ -1648,13 +1701,13 @@ pub const InpMemHybridK = struct {
         const recr = self.mctx.getRecr();
         const n_rs = recr.getNRs();
         if (self.inp_rs.s_copy) |s_copy| {
-            impl.assert(c.ggml_backend_buffer_is_host(s_copy.buffer), "llama-graph.cpp", 1150, "ggml_backend_buffer_is_host(inp_rs->s_copy->buffer)");
+            impl.assert(c.ggml_backend_buffer_is_host(s_copy.buffer), "llama-graph.cpp", 1186, "ggml_backend_buffer_is_host(inp_rs->s_copy->buffer)");
             const data: [*]i32 = @ptrCast(@alignCast(s_copy.data));
             for (0..n_rs) |i| data[i] = recr.sCopy(@intCast(i));
         }
     }
 
-    /// Ports `llm_graph_input_mem_hybrid_k`'s `can_reuse` (llama-graph.cpp:1160 @7fe450e19).
+    /// Ports `llm_graph_input_mem_hybrid_k`'s `can_reuse` (llama-graph.cpp:1196 @d81235049).
     pub fn canReuse(self: *InpMemHybridK, params: *const Params) bool {
         const mctx = params.mctx.?.cast(memory_hybrid.HybridContext);
         self.mctx = mctx;
@@ -1664,14 +1717,13 @@ pub const InpMemHybridK = struct {
         res = res and canReuseKqMask(self.inp_attn.self_kq_mask.?, mctx.getAttn(), &params.ubatch, &params.cparams);
         res = res and self.inp_rs.s_copy.?.ne[0] == recr.getNRs();
         res = res and self.inp_rs.s_copy_main.?.ne[0] == params.ubatch.n_seqs;
-        res = res and self.inp_rs.s_copy_extra.?.ne[0] == @as(i64, recr.getNRs()) - params.ubatch.n_seqs;
         res = res and self.inp_rs.head == recr.getHead();
         res = res and self.inp_rs.rs_z == recr.getRsZ();
         return res;
     }
 };
 
-/// Ports `llm_graph_input_sampling` (llama-graph.h:745 @7fe450e19).
+/// Ports `llm_graph_input_sampling` (llama-graph.h:752 @d81235049).
 pub const InpSampling = struct {
     samplers: SamplerMap,
 
@@ -1679,8 +1731,8 @@ pub const InpSampling = struct {
         self.samplers.deinit();
     }
 
-    /// Ports `llm_graph_input_sampling`'s `set_input` (llama-graph.cpp:1270
-    /// @7fe450e19): only the samplers of the ubatch's outputs.
+    /// Ports `llm_graph_input_sampling`'s `set_input` (llama-graph.cpp:1304
+    /// @d81235049): only the samplers of the ubatch's outputs.
     ///
     /// The C++ walks a `std`'s `unordered_set` of the active sequences; each
     /// sampler's `backend_set_input` touches only its own state, so the
@@ -1698,7 +1750,7 @@ pub const InpSampling = struct {
         }
     }
 
-    /// Ports `llm_graph_input_sampling`'s `can_reuse` (llama-graph.cpp:1293 @7fe450e19).
+    /// Ports `llm_graph_input_sampling`'s `can_reuse` (llama-graph.cpp:1327 @d81235049).
     pub fn canReuse(self: *InpSampling, params: *const Params) bool {
         if (self.samplers.items.items.len != params.samplers.items.items.len) return false;
         for (params.samplers.items.items) |e| {
@@ -1760,7 +1812,7 @@ pub const SamplerMap = struct {
         return false;
     }
 
-    /// Ports `llm_graph_params`'s `samplers_equal` (llama-graph.h:792 @7fe450e19).
+    /// Ports `llm_graph_params`'s `samplers_equal` (llama-graph.h:801 @d81235049).
     pub fn eql(lhs: *const SamplerMap, rhs: *const SamplerMap) bool {
         if (lhs.items.items.len != rhs.items.items.len) return false;
         for (lhs.items.items) |e| {
@@ -1770,7 +1822,7 @@ pub const SamplerMap = struct {
     }
 };
 
-/// Ports `build_attn_inp_kq_mask` (llama-graph.cpp:29 @7fe450e19).
+/// Ports `build_attn_inp_kq_mask` (llama-graph.cpp:29 @d81235049).
 fn buildAttnInpKqMask(ctx: *c.ggml_context, mctx: *const kv_cache.KvCacheContext, ubatch: *const Ubatch, cparams: *const Cparams) *Tensor {
     const n_kv: i64 = mctx.getNKv();
     const n_tokens: i64 = ubatch.n_tokens;
@@ -1783,7 +1835,7 @@ fn buildAttnInpKqMask(ctx: *c.ggml_context, mctx: *const kv_cache.KvCacheContext
     return res;
 }
 
-/// Ports `can_reuse_kq_mask` (llama-graph.cpp:48 @7fe450e19).
+/// Ports `can_reuse_kq_mask` (llama-graph.cpp:48 @d81235049).
 fn canReuseKqMask(kq_mask: *const Tensor, mctx: *const kv_cache.KvCacheContext, ubatch: *const Ubatch, cparams: *const Cparams) bool {
     const n_kv: i64 = mctx.getNKv();
     const n_tokens: i64 = ubatch.n_tokens;
@@ -1799,14 +1851,14 @@ fn canReuseKqMask(kq_mask: *const Tensor, mctx: *const kv_cache.KvCacheContext, 
 // -----------------------------------------------------------------------------
 // Parameters and results
 
-/// The `llm_graph_cb` callback (llama-graph.h:768 @7fe450e19): called on
+/// The `llm_graph_cb` callback (llama-graph.h:775 @d81235049): called on
 /// every named tensor as the graph is built.
 pub const Callback = struct {
     ctx: ?*anyopaque = null,
     func: ?*const fn (ctx: ?*anyopaque, ubatch: *const Ubatch, cur: *Tensor, name: [*:0]const u8, il: c_int) void = null,
 };
 
-/// Mirrors `llm_graph_params` (llama-graph.h:772 @7fe450e19).
+/// Mirrors `llm_graph_params` (llama-graph.h:779 @d81235049).
 pub const Params = struct {
     arch: Arch = .unknown,
     hparams: *const Hparams,
@@ -1820,6 +1872,7 @@ pub const Params = struct {
     loras: ?*const adapter.Loras = null,
     mctx: ?memory.Context = null,
     cross: ?*const Cross = null,
+    prec_policy: ?*const model_mod.PrecPolicy = null,
     samplers: SamplerMap = .{},
     n_outputs: u32 = 0,
     cb: Callback = .{},
@@ -1841,7 +1894,7 @@ pub const Params = struct {
         self.samplers.deinit();
     }
 
-    /// Ports `llm_graph_params`'s `allow_reuse` (llama-graph.h:815 @7fe450e19):
+    /// Ports `llm_graph_params`'s `allow_reuse` (llama-graph.h:824 @d81235049):
     /// whether `other` would build a graph of the same topology.
     pub fn allowReuse(self: *const Params, other: *const Params) bool {
         const u = &self.ubatch;
@@ -1852,6 +1905,7 @@ pub const Params = struct {
             u.n_seq_tokens == o.n_seq_tokens and
             u.n_seqs == o.n_seqs and
             u.n_seqs_unq == o.n_seqs_unq and
+            u.isMixed() == o.isMixed() and
             ((u.token == null and o.token == null) or
                 (u.embd == null and o.embd == null) or
                 (u.token != null and o.token != null and u.embd != null and o.embd != null));
@@ -1889,14 +1943,14 @@ pub const Params = struct {
     }
 };
 
-/// Mirrors `llm_graph_fused_node` (llama-graph.h:887 @7fe450e19).
+/// Mirrors `llm_graph_fused_node` (llama-graph.h:897 @d81235049).
 pub const FusedNode = struct {
     op: FusedOp,
     tensor: *Tensor,
     il: c_int,
 };
 
-/// Ports `llm_graph_result` (llama-graph.h:893 @7fe450e19): a built graph,
+/// Ports `llm_graph_result` (llama-graph.h:903 @d81235049): a built graph,
 /// its inputs, and the tensors the context reads back.
 pub const Result = struct {
     t_inp_tokens: ?*Tensor = null,
@@ -1926,7 +1980,7 @@ pub const Result = struct {
     params: ?Params = null,
     debug: c_int = 0,
 
-    /// Ports the constructor of `llm_graph_result` (llama-graph.cpp:1311 @7fe450e19).
+    /// Ports the constructor of `llm_graph_result` (llama-graph.cpp:1345 @d81235049).
     ///
     /// Return: the result, the caller's to `destroy`.
     pub fn create(max_nodes: i64) *Result {
@@ -1957,7 +2011,7 @@ pub const Result = struct {
         self.inputs.clearRetainingCapacity();
     }
 
-    /// Ports `llm_graph_result`'s `get_max_nodes` (llama-graph.cpp:1318 @7fe450e19).
+    /// Ports `llm_graph_result`'s `get_max_nodes` (llama-graph.cpp:1352 @d81235049).
     pub fn getMaxNodes(self: *const Result) i64 {
         return self.max_nodes;
     }
@@ -1984,7 +2038,7 @@ pub const Result = struct {
         return self.t_inp_tokens;
     }
 
-    /// Ports `llm_graph_result`'s `reset` (llama-graph.cpp:1322 @7fe450e19).
+    /// Ports `llm_graph_result`'s `reset` (llama-graph.cpp:1356 @d81235049).
     pub fn reset(self: *Result) void {
         self.t_inp_tokens = null;
         self.t_inp_embd = null;
@@ -2016,12 +2070,12 @@ pub const Result = struct {
         self.gf = c.ggml_new_graph_custom(self.ctx_compute, n_nodes, false);
     }
 
-    /// Ports `llm_graph_result`'s `set_inputs` (llama-graph.cpp:1356 @7fe450e19).
+    /// Ports `llm_graph_result`'s `set_inputs` (llama-graph.cpp:1390 @d81235049).
     pub fn setInputs(self: *Result, ubatch: ?*const Ubatch) void {
         for (self.inputs.items) |inp| inp.vtable.setInput(inp.ptr, ubatch);
     }
 
-    /// Ports `llm_graph_result`'s `set_outputs` (llama-graph.cpp:1362 @7fe450e19).
+    /// Ports `llm_graph_result`'s `set_outputs` (llama-graph.cpp:1396 @d81235049).
     pub fn setOutputs(self: *Result, params: *const Params) void {
         if (self.t_logits) |t| c.ggml_set_output(t);
         if (self.t_embd) |t| c.ggml_set_output(t);
@@ -2029,7 +2083,7 @@ pub const Result = struct {
         if (self.t_h_nextn) |t| c.ggml_set_output(t);
         for (params.cparams.embeddings_layer_inp, 0..) |want, il| {
             if (want) {
-                impl.assert(self.t_layer_inp[il] != null, "llama-graph.cpp", 1379, "t_layer_inp[il] != nullptr && \"layer input tensor is null\"");
+                impl.assert(self.t_layer_inp[il] != null, "llama-graph.cpp", 1413, "t_layer_inp[il] != nullptr && \"layer input tensor is null\"");
                 c.ggml_set_output(self.t_layer_inp[il]);
             }
         }
@@ -2039,7 +2093,7 @@ pub const Result = struct {
         for (self.t_candidates.items) |t| if (t) |x| c.ggml_set_output(x);
     }
 
-    /// Ports `llm_graph_result`'s `can_reuse` (llama-graph.cpp:1406 @7fe450e19):
+    /// Ports `llm_graph_result`'s `can_reuse` (llama-graph.cpp:1440 @d81235049):
     /// whether this graph can serve `params` once its inputs are updated.
     pub fn canReuse(self: *Result, params: *const Params) bool {
         const prev = if (self.params) |*p| p else return false;
@@ -2058,7 +2112,7 @@ pub const Result = struct {
         return res;
     }
 
-    /// Ports `llm_graph_result`'s `add_input` (llama-graph.cpp:1438 @7fe450e19):
+    /// Ports `llm_graph_result`'s `add_input` (llama-graph.cpp:1472 @d81235049):
     /// the result takes ownership.
     ///
     /// Return: `p`.
@@ -2067,12 +2121,12 @@ pub const Result = struct {
         return p;
     }
 
-    /// Ports `llm_graph_result`'s `add_fused_node` (llama-graph.cpp:1443 @7fe450e19).
+    /// Ports `llm_graph_result`'s `add_fused_node` (llama-graph.cpp:1477 @d81235049).
     pub fn addFusedNode(self: *Result, node: FusedNode) void {
         self.fused_nodes.append(allocator, node) catch oom();
     }
 
-    /// Ports `llm_graph_result`'s `set_params` (llama-graph.cpp:1447 @7fe450e19):
+    /// Ports `llm_graph_result`'s `set_params` (llama-graph.cpp:1481 @d81235049):
     /// keep a copy of the parameters the graph was built with.
     pub fn setParams(self: *Result, params: *const Params) void {
         if (self.params) |*p| p.deinit();
@@ -2080,7 +2134,7 @@ pub const Result = struct {
     }
 };
 
-/// Ports `llama_mul_mat_hadamard` (llama-impl.h:57 @7fe450e19).
+/// Ports `llama_mul_mat_hadamard` (llama-impl.h:57 @d81235049).
 pub fn mulMatHadamard(ctx: *c.ggml_context, cur: *Tensor, rot: *Tensor) *Tensor {
     const n = rot.ne[0];
     var res: *Tensor = if (!c.ggml_is_contiguous(cur))
@@ -2095,7 +2149,7 @@ pub fn mulMatHadamard(ctx: *c.ggml_context, cur: *Tensor, rot: *Tensor) *Tensor 
 
 extern "c" fn log(x: f64) f64;
 
-/// Ports `llama_relative_position_bucket` (llama-graph.cpp:3890 @7fe450e19).
+/// Ports `llama_relative_position_bucket` (llama-graph.cpp:4010 @d81235049).
 ///
 /// The C++ computes the large-distance bucket for every position, and for
 /// a distance of 0 that is `floorf(-inf)` converted to `int32_t`, which is
@@ -2132,7 +2186,7 @@ pub fn relativePositionBucket(x: i32, y: i32, n_buckets_: u64, bidirectional: bo
 // -----------------------------------------------------------------------------
 // Building
 
-/// `llm_graph_get_rows_fn` (llama-graph.h:976 @7fe450e19): how `build_rs`
+/// `llm_graph_get_rows_fn` (llama-graph.h:986 @d81235049): how `build_rs`
 /// gathers the states a ubatch reads. The C++'s is a `std::function`, and
 /// Mamba's capture what the scan reads; `context` is that capture.
 pub const GetRowsFn = struct {
@@ -2152,7 +2206,7 @@ fn ggmlGetRows(_: ?*const anyopaque, ctx: *c.ggml_context, states: *Tensor, ids:
     return c.ggml_get_rows(ctx, states, ids);
 }
 
-/// Mirrors `llm_graph_qkv` (llama-graph.h:978 @7fe450e19).
+/// Mirrors `llm_graph_qkv` (llama-graph.h:988 @d81235049).
 pub const Qkv = struct {
     /// `[n_embd_head, n_head, n_tokens]`.
     q: *Tensor,
@@ -2162,7 +2216,7 @@ pub const Qkv = struct {
     v: *Tensor,
 };
 
-/// Ports `llm_graph_context` (llama-graph.h:984 @7fe450e19): the state an
+/// Ports `llm_graph_context` (llama-graph.h:994 @d81235049): the state an
 /// architecture's graph is built with, and the builders it shares.
 pub const Builder = struct {
     arch: Arch,
@@ -2209,6 +2263,7 @@ pub const Builder = struct {
     loras: ?*const adapter.Loras,
     mctx: ?memory.Context,
     cross: ?*const Cross,
+    prec_policy: ?*const model_mod.PrecPolicy,
     samplers: *const SamplerMap,
 
     cb_func: Callback,
@@ -2216,8 +2271,8 @@ pub const Builder = struct {
     ctx0: *c.ggml_context,
     gf: *c.ggml_cgraph,
 
-    /// Ports the constructor of `llm_graph_context` (llama-graph.cpp:1455
-    /// @7fe450e19).
+    /// Ports the constructor of `llm_graph_context` (llama-graph.cpp:1489
+    /// @d81235049).
     ///
     /// Parameters:
     /// - `params`: what the graph is built from; borrowed for the builder's
@@ -2266,6 +2321,7 @@ pub const Builder = struct {
             .loras = params.loras,
             .mctx = params.mctx,
             .cross = params.cross,
+            .prec_policy = params.prec_policy,
             .samplers = &params.samplers,
             .cb_func = params.cb,
             .res = res,
@@ -2274,12 +2330,12 @@ pub const Builder = struct {
         };
     }
 
-    /// Ports `llm_graph_context`'s `cb` (llama-graph.cpp:1500 @7fe450e19).
+    /// Ports `llm_graph_context`'s `cb` (llama-graph.cpp:1535 @d81235049).
     pub fn cb(self: *const Builder, cur: *Tensor, name: [*:0]const u8, il: c_int) void {
         if (self.cb_func.func) |f| f(self.cb_func.ctx, self.ubatch, cur, name, il);
     }
 
-    /// Ports `llm_graph_context`'s `build_cvec` (llama-graph.cpp:1508 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_cvec` (llama-graph.cpp:1543 @d81235049).
     pub fn buildCvec(self: *const Builder, cur: *Tensor, il: c_int) *Tensor {
         return self.cvec.?.applyTo(self.ctx0, cur, il);
     }
@@ -2288,11 +2344,13 @@ pub const Builder = struct {
         return if (self.loras) |l| l.items.items else &.{};
     }
 
-    /// Ports `llm_graph_context`'s `build_lora_mm` (llama-graph.cpp:1514
-    /// @7fe450e19): a matrix product, with the per-tensor scale and every
-    /// active LoRA's delta.
+    /// Ports `llm_graph_context`'s `build_lora_mm` (llama-graph.cpp:1549
+    /// @d81235049): a matrix product, with the model's precision policy, the
+    /// per-tensor scale and every active LoRA's delta.
     pub fn buildLoraMm(self: *const Builder, w: *Tensor, cur: *Tensor, w_s: ?*Tensor) *Tensor {
         var res = c.ggml_mul_mat(self.ctx0, w, cur);
+        if (self.prec_policy) |pp| _ = pp.apply(res);
+        if (w.type == c.GGML_TYPE_NVFP4) _ = c.ggml_prec_set_acc(res, c.GGML_PREC_BF16);
         if (w_s) |s| res = c.ggml_mul(self.ctx0, res, s);
         for (self.lorasOf()) |lora| {
             const lw = lora.lora.getWeight(w) orelse continue;
@@ -2304,9 +2362,11 @@ pub const Builder = struct {
         return res;
     }
 
-    /// Ports `llm_graph_context`'s `build_lora_mm_id` (llama-graph.cpp:1545 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_lora_mm_id` (llama-graph.cpp:1588 @d81235049).
     pub fn buildLoraMmId(self: *const Builder, w: *Tensor, cur: *Tensor, ids: *Tensor, w_s: ?*Tensor) *Tensor {
         var res = c.ggml_mul_mat_id(self.ctx0, w, cur, ids);
+        if (self.prec_policy) |pp| _ = pp.apply(res);
+        if (w.type == c.GGML_TYPE_NVFP4) _ = c.ggml_prec_set_acc(res, c.GGML_PREC_BF16);
         if (w_s) |ws| {
             const n_expert = ws.ne[0];
             const n_tokens = cur.ne[2];
@@ -2327,7 +2387,7 @@ pub const Builder = struct {
         return res;
     }
 
-    /// Ports `llm_graph_context`'s `build_norm` (llama-graph.cpp:1583 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_norm` (llama-graph.cpp:1634 @d81235049).
     pub fn buildNorm(self: *const Builder, cur_: *Tensor, mw: ?*Tensor, mb: ?*Tensor, ty: NormType, il: c_int) *Tensor {
         var cur = cur_;
         switch (ty) {
@@ -2348,7 +2408,7 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `llm_graph_context`'s `build_qkv` (llama-graph.cpp:1619 @7fe450e19):
+    /// Ports `llm_graph_context`'s `build_qkv` (llama-graph.cpp:1670 @d81235049):
     /// the Q, K and V projections, fused or separate, biased and clamped
     /// where the model says, every head `n_embd_head` wide.
     pub fn buildQkv(self: *const Builder, layer: *const model_mod.Layer, cur: *Tensor, n_embd_head: i64, n_head: i64, n_head_kv: i64, il: c_int) Qkv {
@@ -2356,7 +2416,7 @@ pub const Builder = struct {
     }
 
     /// Ports `llm_graph_context`'s `build_qkv` overload with separate Q, K
-    /// and V head shapes (llama-graph.cpp:1633 @7fe450e19). With `reshape`
+    /// and V head shapes (llama-graph.cpp:1684 @d81235049). With `reshape`
     /// false it returns contiguous 2-d projections before any clamp or
     /// reshape, and names none of them.
     pub fn buildQkvHeads(
@@ -2462,7 +2522,7 @@ pub const Builder = struct {
         return false;
     }
 
-    /// Ports `llm_graph_context`'s `build_ffn` (llama-graph.cpp:1748 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_ffn` (llama-graph.cpp:1799 @d81235049).
     pub fn buildFfn(
         self: *const Builder,
         cur_: *Tensor,
@@ -2486,12 +2546,12 @@ pub const Builder = struct {
         const nvfp4 = c.GGML_TYPE_NVFP4;
 
         // NVFP4's `*_s` must not follow a LoRA residual or a bias.
-        impl.assert(up_s == null or up_b == null or up == null or up.?.type != nvfp4, "llama-graph.cpp", 1779, "!up_s || !up_b || !up || up->type != GGML_TYPE_NVFP4");
-        impl.assert(gate_s == null or gate_b == null or gate == null or gate.?.type != nvfp4, "llama-graph.cpp", 1780, "!gate_s || !gate_b || !gate || gate->type != GGML_TYPE_NVFP4");
-        impl.assert(down_s == null or down_b == null or down == null or down.?.type != nvfp4, "llama-graph.cpp", 1781, "!down_s || !down_b || !down || down->type != GGML_TYPE_NVFP4");
-        impl.assert(up_s == null or up == null or up.?.type != nvfp4 or !self.hasLora(up), "llama-graph.cpp", 1782, "!up_s || !up || up->type != GGML_TYPE_NVFP4 || !has_lora(up)");
-        impl.assert(gate_s == null or gate == null or gate.?.type != nvfp4 or !self.hasLora(gate), "llama-graph.cpp", 1783, "!gate_s || !gate || gate->type != GGML_TYPE_NVFP4 || !has_lora(gate)");
-        impl.assert(down_s == null or down == null or down.?.type != nvfp4 or !self.hasLora(down), "llama-graph.cpp", 1784, "!down_s || !down || down->type != GGML_TYPE_NVFP4 || !has_lora(down)");
+        impl.assert(up_s == null or up_b == null or up == null or up.?.type != nvfp4, "llama-graph.cpp", 1830, "!up_s || !up_b || !up || up->type != GGML_TYPE_NVFP4");
+        impl.assert(gate_s == null or gate_b == null or gate == null or gate.?.type != nvfp4, "llama-graph.cpp", 1831, "!gate_s || !gate_b || !gate || gate->type != GGML_TYPE_NVFP4");
+        impl.assert(down_s == null or down_b == null or down == null or down.?.type != nvfp4, "llama-graph.cpp", 1832, "!down_s || !down_b || !down || down->type != GGML_TYPE_NVFP4");
+        impl.assert(up_s == null or up == null or up.?.type != nvfp4 or !self.hasLora(up), "llama-graph.cpp", 1833, "!up_s || !up || up->type != GGML_TYPE_NVFP4 || !has_lora(up)");
+        impl.assert(gate_s == null or gate == null or gate.?.type != nvfp4 or !self.hasLora(gate), "llama-graph.cpp", 1834, "!gate_s || !gate || gate->type != GGML_TYPE_NVFP4 || !has_lora(gate)");
+        impl.assert(down_s == null or down == null or down.?.type != nvfp4 or !self.hasLora(down), "llama-graph.cpp", 1835, "!down_s || !down || down->type != GGML_TYPE_NVFP4 || !has_lora(down)");
 
         var tmp = if (up) |u| self.buildLoraMm(u, cur, null) else cur;
         self.cb(tmp, "ffn_up", il);
@@ -2534,7 +2594,7 @@ pub const Builder = struct {
                         const limit = self.hparams.swiglu_clamp_shexp[@intCast(il)];
                         const eps: f32 = 1e-6;
                         if (limit > eps) {
-                            if (self.arch == .deepseek4 or (self.arch == .dflash and self.hparams.dsv4_hc_mult > 0)) {
+                            if (self.arch == .deepseek4 or self.arch == .glm5_next or (self.arch == .dflash and self.hparams.dsv4_hc_mult > 0)) {
                                 cur = c.ggml_swiglu_clamp(ctx, cur, tmp, limit);
                             } else {
                                 tmp = c.ggml_clamp(ctx, tmp, -limit, limit);
@@ -2599,7 +2659,7 @@ pub const Builder = struct {
                     self.cb(cur, "ffn_swiglu_oai", il);
                     type_gate = .seq;
                 } else {
-                    impl.abort("llama-graph.cpp", 1902, "LLM_FFN_SWIGLU_OAI_MOE requires a parallel gate");
+                    impl.abort("llama-graph.cpp", 1953, "LLM_FFN_SWIGLU_OAI_MOE requires a parallel gate");
                 }
             },
             .geglu => {
@@ -2610,8 +2670,8 @@ pub const Builder = struct {
                 cur = c.ggml_reglu(ctx, cur);
                 self.cb(cur, "ffn_reglu", il);
             },
-            .situ => impl.abort("llama-graph.cpp", 1915, "not yet supported"),
-            .none => impl.abort("llama-graph.cpp", 1917, "fatal error"),
+            .situ => impl.abort("llama-graph.cpp", 1966, "not yet supported"),
+            .none => impl.abort("llama-graph.cpp", 1968, "fatal error"),
         }
 
         if (gate != null and type_gate == .par) {
@@ -2636,8 +2696,8 @@ pub const Builder = struct {
     }
 
     /// The arguments past `cur` of `build_moe_ffn`, which has two
-    /// overloads. The shorter `build_moe_ffn` (llama-graph.cpp:1949
-    /// @7fe450e19) has no biases and forwards `nullptr` for them; here the
+    /// overloads. The shorter `build_moe_ffn` (llama-graph.cpp:2000
+    /// @d81235049) has no biases and forwards `nullptr` for them; here the
     /// defaults are that `nullptr`, and the trailing defaults are the C++'s.
     pub const MoeFfn = struct {
         gate_inp: ?*Tensor,
@@ -2664,8 +2724,8 @@ pub const Builder = struct {
         selected_experts_in: ?*Tensor = null,
     };
 
-    /// Ports `llm_graph_context`'s `build_moe_ffn` (llama-graph.cpp:1993
-    /// @7fe450e19): route each token to its top experts, run them, and sum
+    /// Ports `llm_graph_context`'s `build_moe_ffn` (llama-graph.cpp:2044
+    /// @d81235049): route each token to its top experts, run them, and sum
     /// their outputs by the router's weights.
     ///
     /// Return: `[n_embd, n_tokens]`, contiguous.
@@ -2697,7 +2757,7 @@ pub const Builder = struct {
             .sigmoid => c.ggml_sigmoid(ctx, logits), // [n_expert, n_tokens]
             .softmax_weight => logits, // [n_expert, n_tokens]
             .sqrt_softplus => c.ggml_sqrt(ctx, c.ggml_softplus(ctx, logits)), // [n_expert, n_tokens]
-            else => impl.abort("llama-graph.cpp", 2058, "fatal error"),
+            else => impl.abort("llama-graph.cpp", 2109, "fatal error"),
         };
         self.cb(probs, "ffn_moe_probs", il);
 
@@ -2857,7 +2917,7 @@ pub const Builder = struct {
                     const limit = hp.swiglu_clamp_exp[@intCast(il)];
                     const eps: f32 = 1e-6;
                     if (limit > eps) {
-                        if (self.arch == .maple or self.arch == .deepseek4 or (self.arch == .dflash and hp.dsv4_hc_mult > 0) or self.arch == .hy_v4) {
+                        if (self.arch == .maple or self.arch == .deepseek4 or self.arch == .glm5_next or (self.arch == .dflash and hp.dsv4_hc_mult > 0) or self.arch == .hy_v4) {
                             cur = c.ggml_swiglu_clamp(ctx, cur, up, limit);
                         } else {
                             up = c.ggml_clamp(ctx, up, -limit, limit);
@@ -2883,7 +2943,7 @@ pub const Builder = struct {
             },
             .situ => {
                 // situ(gate, up) = beta*tanh(gate/beta)*sigmoid(gate) * lb*tanh(up/lb)
-                impl.assert(has_gate, "llama-graph.cpp", 2255, "has_gate");
+                impl.assert(has_gate, "llama-graph.cpp", 2306, "has_gate");
                 const beta = hp.situ_beta;
                 const lb = hp.situ_linear_beta;
 
@@ -2920,12 +2980,12 @@ pub const Builder = struct {
             },
             .relu_sqr => {
                 // The C++'s TODO: gated squared ReLU.
-                if (has_gate) impl.abort("llama-graph.cpp", 2294, "fatal error: gated squared relu not implemented");
+                if (has_gate) impl.abort("llama-graph.cpp", 2345, "fatal error: gated squared relu not implemented");
                 cur = c.ggml_relu(ctx, cur);
                 cur = c.ggml_sqr(ctx, cur);
                 self.cb(cur, "ffn_moe_relu_sqr", il);
             },
-            else => impl.abort("llama-graph.cpp", 2301, "fatal error"),
+            else => impl.abort("llama-graph.cpp", 2352, "fatal error"),
         }
 
         var experts = self.buildLoraMmId(a.down_exps, cur, selected_experts, a.down_exps_s); // [n_embd, n_expert_used, n_tokens]
@@ -2980,14 +3040,42 @@ pub const Builder = struct {
     // -------------------------------------------------------------------------
     // Inputs
 
-    /// Ports `llm_graph_context`'s `build_inp_embd` (llama-graph.cpp:2362
-    /// @7fe450e19): the token embeddings, or the embeddings given, chosen by
-    /// the batch at compute time.
+    /// `build_inp_embd` with `tok_scale` at its default, 1.
     pub fn buildInpEmbd(self: *const Builder, tok_embd: *Tensor) *Tensor {
+        return self.buildInpEmbdScaled(tok_embd, 1.0);
+    }
+
+    /// The token rows' embeddings, LoRA deltas and padding: `build_inp_embd`'s
+    /// `build_tok` lambda.
+    fn buildTok(self: *const Builder, tok_embd: *Tensor, ids: *Tensor) *Tensor {
         const ctx = self.ctx0;
         const n_embd_inp: i64 = self.hparams.nEmbdInp();
         const n_embd: i64 = self.hparams.n_embd;
-        std.debug.assert(n_embd_inp >= n_embd);
+        var cur = c.ggml_get_rows(ctx, tok_embd, ids);
+        for (self.lorasOf()) |lora| {
+            const lw = lora.lora.getWeight(tok_embd) orelse continue;
+            const scale = lw.getScale(lora.lora.alpha, lora.scale);
+            const delta = c.ggml_scale(ctx, c.ggml_mul_mat(ctx, lw.b, c.ggml_get_rows(ctx, lw.a, ids)), scale);
+            cur = c.ggml_add(ctx, cur, delta);
+        }
+        if (n_embd_inp != n_embd) cur = c.ggml_pad(ctx, cur, @intCast(@as(i64, self.hparams.nEmbdInp()) - n_embd), 0, 0, 0);
+        return cur;
+    }
+
+    /// Ports `llm_graph_context`'s `build_inp_embd` (llama-graph.cpp:2413
+    /// @d81235049): the token embeddings, the embeddings given, or -- for a
+    /// mixed ubatch -- the given ones with the token rows written over them,
+    /// chosen by the batch at compute time.
+    ///
+    /// Parameters:
+    /// - `tok_embd`: the token embedding table.
+    /// - `tok_scale`: a scale for the token rows only.
+    ///
+    /// Return: `[n_embd, n_tokens]`.
+    pub fn buildInpEmbdScaled(self: *const Builder, tok_embd: *Tensor, tok_scale: f32) *Tensor {
+        const ctx = self.ctx0;
+        const n_embd_inp: i64 = self.hparams.nEmbdInp();
+        const n_embd: i64 = self.hparams.n_embd;
 
         const inp = allocator.create(InpEmbd) catch oom();
         inp.* = .{ .n_embd = n_embd_inp };
@@ -3001,36 +3089,65 @@ pub const Builder = struct {
         self.cb(inp.embd.?, "inp_embd", -1);
         c.ggml_set_input(inp.embd);
 
-        // Select one of the two inputs, by the batch's contents.
-        var inps: [2]*Tensor = undefined;
+        // Select one of the three inputs, by the batch's contents.
+        var inps: [3]?*Tensor = .{ null, null, null };
 
         // The token embeddings path.
-        {
-            var cur = c.ggml_get_rows(ctx, tok_embd, inp.tokens);
-            for (self.lorasOf()) |lora| {
-                const lw = lora.lora.getWeight(tok_embd) orelse continue;
-                const scale = lw.getScale(lora.lora.alpha, lora.scale);
-                const delta = c.ggml_scale(ctx, c.ggml_mul_mat(ctx, lw.b, c.ggml_get_rows(ctx, lw.a, inp.tokens)), scale);
-                cur = c.ggml_add(ctx, cur, delta);
-            }
-            if (n_embd_inp != n_embd) cur = c.ggml_pad(ctx, cur, @intCast(@as(i64, self.hparams.nEmbdInp()) - n_embd), 0, 0, 0);
-            inps[0] = cur;
-        }
+        inps[0] = self.buildTok(tok_embd, inp.tokens.?);
+
         // The vector embeddings path.
         inps[1] = inp.embd.?;
 
-        std.debug.assert(c.ggml_are_same_shape(inps[0], inps[1]));
-        std.debug.assert(c.ggml_are_same_stride(inps[0], inps[1]));
+        // The mixed path: set_rows the token rows into a copy of the
+        // embedding rows, with inputs of its own, as select branches must
+        // not share tensors.
+        const has_mixed = arch_mod.supportsMixedBatch(self.arch) and self.cparams.ctx_type == c.LLAMA_CONTEXT_TYPE_DEFAULT;
+        if (has_mixed) {
+            const n_tok_rows = nTokRows(self.ubatch);
 
-        var cur = c.ggml_build_forward_select(self.gf, @ptrCast(&inps), inps.len, if (self.ubatch.token != null) 0 else 1);
+            inp.mixed_tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, n_tok_rows);
+            self.cb(inp.mixed_tokens.?, "inp_mixed_tokens", -1);
+            c.ggml_set_input(inp.mixed_tokens);
+
+            inp.mixed_slots = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I64, n_tok_rows);
+            self.cb(inp.mixed_slots.?, "inp_mixed_slots", -1);
+            c.ggml_set_input(inp.mixed_slots);
+
+            inp.mixed_embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_embd_inp, self.ubatch.n_tokens);
+            self.cb(inp.mixed_embd.?, "inp_mixed_embd", -1);
+            c.ggml_set_input(inp.mixed_embd);
+
+            // set_rows writes into its destination, so it gets a copy
+            inps[2] = c.ggml_set_rows(ctx, c.ggml_dup(ctx, inp.mixed_embd), self.buildTok(tok_embd, inp.mixed_tokens.?), inp.mixed_slots);
+        }
+
+        const idx: c_int = if (self.ubatch.isMixed()) 2 else if (self.ubatch.token != null) 0 else 1;
+
+        var cur = c.ggml_build_forward_select(self.gf, @ptrCast(&inps), if (has_mixed) 3 else 2, idx);
         if (n_embd_inp != n_embd) cur = c.ggml_view_2d(ctx, cur, n_embd, self.n_tokens, cur.*.nb[1], 0);
 
         self.res.t_inp_embd = cur;
 
-        // Granite scales; for deepstack models, only token inputs are.
-        if (self.hparams.f_embedding_scale != 0.0 and (self.ubatch.token != null or self.hparams.n_deepstack_layers == 0)) {
+        // For deepstack models only the token inputs (text) are scaled; raw
+        // embeddings are taken to be multimodal inputs.
+        const scale_tok_only = self.hparams.f_embedding_scale != 0.0 and self.hparams.n_deepstack_layers > 0;
+
+        // Granite
+        if (self.hparams.f_embedding_scale != 0.0 and !scale_tok_only) {
             if (!c.ggml_is_contiguous(cur)) cur = c.ggml_cont(ctx, cur);
             cur = c.ggml_scale(ctx, cur, self.hparams.f_embedding_scale);
+        }
+
+        // Scale the token rows only, after the select, so the graph is the
+        // same whatever the batch holds.
+        inp.scale_tok = tok_scale * (if (scale_tok_only) self.hparams.f_embedding_scale else 1.0);
+        if (inp.scale_tok != 1.0) {
+            inp.scale_rows = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 1, self.ubatch.n_tokens);
+            self.cb(inp.scale_rows.?, "inp_scale_rows", -1);
+            c.ggml_set_input(inp.scale_rows);
+
+            if (!c.ggml_is_contiguous(cur)) cur = c.ggml_cont(ctx, cur);
+            cur = c.ggml_mul(ctx, cur, inp.scale_rows);
         }
 
         self.cb(cur, "embd", -1);
@@ -3041,7 +3158,7 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `llm_graph_context`'s `build_inp_pos` (llama-graph.cpp:2451 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_inp_pos` (llama-graph.cpp:2540 @d81235049).
     pub fn buildInpPos(self: *const Builder) *Tensor {
         const inp = allocator.create(InpPos) catch oom();
         inp.* = .{ .n_pos_per_embd = self.hparams.nPosPerEmbd() };
@@ -3052,8 +3169,8 @@ pub const Builder = struct {
         return inp.pos.?;
     }
 
-    /// Ports `llm_graph_context`'s `build_inp_attn_scale` (llama-graph.cpp:2465
-    /// @7fe450e19): Llama 4's temperature-tuning scale, `[1, 1, n_tokens]`
+    /// Ports `llm_graph_context`'s `build_inp_attn_scale` (llama-graph.cpp:2554
+    /// @d81235049): Llama 4's temperature-tuning scale, `[1, 1, n_tokens]`
     /// so it broadcasts over Q.
     pub fn buildInpAttnScale(self: *const Builder) *Tensor {
         const hp = self.hparams;
@@ -3073,8 +3190,8 @@ pub const Builder = struct {
         return inp.attn_scale.?;
     }
 
-    /// Ports `llm_graph_context`'s `build_inp_out_ids` (llama-graph.cpp:2480
-    /// @7fe450e19). Always built, even when every token is an output, so the
+    /// Ports `llm_graph_context`'s `build_inp_out_ids` (llama-graph.cpp:2569
+    /// @d81235049). Always built, even when every token is an output, so the
     /// graph's topology does not depend on the output count.
     pub fn buildInpOutIds(self: *const Builder) *Tensor {
         const inp = allocator.create(InpOutIds) catch oom();
@@ -3086,7 +3203,7 @@ pub const Builder = struct {
         return inp.out_ids.?;
     }
 
-    /// Ports `llm_graph_context`'s `build_inp_mean` (llama-graph.cpp:2502 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_inp_mean` (llama-graph.cpp:2591 @d81235049).
     pub fn buildInpMean(self: *const Builder) *Tensor {
         const inp = allocator.create(InpMean) catch oom();
         inp.* = .{ .cparams = self.cparams.* };
@@ -3097,7 +3214,7 @@ pub const Builder = struct {
         return inp.mean.?;
     }
 
-    /// Ports `llm_graph_context`'s `build_inp_cls` (llama-graph.cpp:2516 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_inp_cls` (llama-graph.cpp:2605 @d81235049).
     pub fn buildInpCls(self: *const Builder) *Tensor {
         const inp = allocator.create(InpCls) catch oom();
         inp.* = .{ .cparams = self.cparams.*, .arch = self.arch };
@@ -3111,7 +3228,7 @@ pub const Builder = struct {
     // -------------------------------------------------------------------------
     // Attention
 
-    /// Ports `llm_graph_context`'s `build_attn_mha` (llama-graph.cpp:2602 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_attn_mha` (llama-graph.cpp:2691 @d81235049).
     ///
     /// `n_kv_max` bounds the finite entries of every mask row, letting a
     /// backend run flash attention over them alone; 0 for a dense mask.
@@ -3124,7 +3241,10 @@ pub const Builder = struct {
 
         // Split the batch into streams if needed.
         const n_stream = k.ne[3];
-        q = c.ggml_view_4d(ctx, q, q.ne[0], q.ne[1], @divTrunc(q.ne[2], n_stream), n_stream, q.nb[1], q.nb[2], q.nb[3] / @as(usize, @intCast(n_stream)), 0);
+        // The stream dimension steps over one stream's tokens, ne[2]/n_stream
+        // rows of stride nb[2]: nb[3]/n_stream is that only for a contiguous
+        // q, and nope-only MLA (glm5-next) passes a permuted one.
+        q = c.ggml_view_4d(ctx, q, q.ne[0], q.ne[1], @divTrunc(q.ne[2], n_stream), n_stream, q.nb[1], q.nb[2], q.nb[2] *% @as(usize, @intCast(@divTrunc(q.ne[2], n_stream))), 0);
 
         q = c.ggml_permute(ctx, q, 0, 2, 1, 3);
         k = c.ggml_permute(ctx, k, 0, 2, 1, 3);
@@ -3133,7 +3253,7 @@ pub const Builder = struct {
         var cur: *Tensor = undefined;
         const use_flash_attn = self.cparams.flash_attn and kq_b == null;
         if (use_flash_attn) {
-            impl.assert(kq_b == null, "llama-graph.cpp", 2628, "kq_b == nullptr && \"Flash attention does not support KQ bias yet\"");
+            impl.assert(kq_b == null, "llama-graph.cpp", 2720, "kq_b == nullptr && \"Flash attention does not support KQ bias yet\"");
             if (v_trans) v = c.ggml_transpose(ctx, v);
             // Without a KV cache, as in a non-causal embedding model.
             if (k.type == c.GGML_TYPE_F32) k = c.ggml_cast(ctx, k, c.GGML_TYPE_F16);
@@ -3143,7 +3263,7 @@ pub const Builder = struct {
             self.res.addFusedNode(.{ .op = .flash_attn, .tensor = cur, .il = il });
 
             c.ggml_flash_attn_ext_add_sinks(cur, sinks);
-            impl.assert(n_kv_max >= 0 and n_kv_max <= std.math.maxInt(i32), "llama-graph.cpp", 2648, "n_kv_max >= 0 && n_kv_max <= INT32_MAX");
+            impl.assert(n_kv_max >= 0 and n_kv_max <= std.math.maxInt(i32), "llama-graph.cpp", 2740, "n_kv_max >= 0 && n_kv_max <= INT32_MAX");
             c.ggml_flash_attn_ext_set_n_kv_max(cur, @intCast(n_kv_max));
             _ = c.ggml_prec_set_acc(cur, c.GGML_PREC_F32);
 
@@ -3216,11 +3336,11 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `build_attn_inp_kv_impl` (llama-graph.cpp:2818 @7fe450e19).
+    /// Ports `build_attn_inp_kv_impl` (llama-graph.cpp:2910 @d81235049).
     fn buildAttnInpKvImpl(self: *const Builder, mctx_cur: *const kv_cache.KvCacheContext) *InpAttnKv {
         const inp = allocator.create(InpAttnKv) catch oom();
         inp.* = .{ .hparams = self.hparams, .cparams = self.cparams.*, .mctx = mctx_cur };
-        impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) == .none, "llama-graph.cpp", 2828, "hparams.swa_type == LLAMA_SWA_TYPE_NONE && \"Use llama_kv_cache_iswa for SWA\"");
+        impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) == .none, "llama-graph.cpp", 2920, "hparams.swa_type == LLAMA_SWA_TYPE_NONE && \"Use llama_kv_cache_iswa for SWA\"");
         inp.self_k_idxs = mctx_cur.buildInputKIdxs(self.ctx0, self.ubatch);
         inp.self_v_idxs = mctx_cur.buildInputVIdxs(self.ctx0, self.ubatch);
         inp.self_kq_mask = buildAttnInpKqMask(self.ctx0, mctx_cur, self.ubatch, self.cparams);
@@ -3230,14 +3350,14 @@ pub const Builder = struct {
         return inp;
     }
 
-    /// Ports `llm_graph_context`'s `build_attn_inp_kv` (llama-graph.cpp:2843 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_attn_inp_kv` (llama-graph.cpp:2935 @d81235049).
     pub fn buildAttnInpKv(self: *const Builder) *InpAttnKv {
         const mctx_cur = self.mctx.?.cast(kv_cache.KvCacheContext);
         return self.res.addInput(InpAttnKv, self.buildAttnInpKvImpl(mctx_cur));
     }
 
-    /// Ports `llm_graph_context`'s `build_attn_inp_kv_msa` (llama-graph.cpp:3360
-    /// @7fe450e19): the base cache's input, and the indexer cache's
+    /// Ports `llm_graph_context`'s `build_attn_inp_kv_msa` (llama-graph.cpp:3469
+    /// @d81235049): the base cache's input, and the indexer cache's
     /// destination indices when MSA is on.
     pub fn buildAttnInpKvMsa(self: *const Builder, msa_enabled: bool) *InpAttnKvMsa {
         const mctx_cur = self.mctx.?.cast(kv_cache_msa.MsaContext);
@@ -3249,7 +3369,7 @@ pub const Builder = struct {
         const mctx_idx = mctx_cur.getIdx();
 
         {
-            impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) == .none, "llama-graph.cpp", 3369, "hparams.swa_type == LLAMA_SWA_TYPE_NONE && \"Use llama_kv_cache_iswa for SWA\"");
+            impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) == .none, "llama-graph.cpp", 3478, "hparams.swa_type == LLAMA_SWA_TYPE_NONE && \"Use llama_kv_cache_iswa for SWA\"");
 
             inp.base.self_k_idxs = mctx_base.buildInputKIdxs(self.ctx0, self.ubatch);
             inp.base.self_v_idxs = mctx_base.buildInputVIdxs(self.ctx0, self.ubatch);
@@ -3303,7 +3423,9 @@ pub const Builder = struct {
     }
 
     /// Ports `llm_graph_context`'s `build_attn` over a KV cache
-    /// (llama-graph.cpp:2851 @7fe450e19): store K and V, attend, project.
+    /// (llama-graph.cpp:2943 @d81235049): store K and V, attend, project.
+    /// Training bypasses the cache -- gradients cannot flow through it --
+    /// and attends the ubatch's own K and V.
     fn buildAttnKv(
         self: *const Builder,
         inp: *InpAttnKv,
@@ -3320,7 +3442,7 @@ pub const Builder = struct {
         il: c_int,
     ) *Tensor {
         const ctx = self.ctx0;
-        impl.assert(v_mla == null, "llama-graph.cpp", 2864, "v_mla == nullptr");
+        impl.assert(v_mla == null, "llama-graph.cpp", 2956, "v_mla == nullptr");
         var q_cur = q_cur_;
         var k_cur = k_cur_;
         var v_cur = v_cur_;
@@ -3339,13 +3461,21 @@ pub const Builder = struct {
 
         const mctx_cur = inp.mctx;
 
-        // Store to the KV cache.
-        c.ggml_build_forward_expand(self.gf, mctx_cur.cpyK(ctx, k_cur, inp.getKIdxs(), il));
-        c.ggml_build_forward_expand(self.gf, mctx_cur.cpyV(ctx, v_cur, inp.getVIdxs(), il));
+        var k: *Tensor = undefined;
+        var v: *Tensor = undefined;
+        if (self.cparams.training) {
+            impl.assert(mctx_cur.getNKv() == self.n_tokens, "llama-graph.cpp", 2981, "mctx_cur->get_n_kv() == n_tokens");
+            k = k_cur;
+            v = v_cur;
+        } else {
+            // Store to the KV cache.
+            c.ggml_build_forward_expand(self.gf, mctx_cur.cpyK(ctx, k_cur, inp.getKIdxs(), il));
+            c.ggml_build_forward_expand(self.gf, mctx_cur.cpyV(ctx, v_cur, inp.getVIdxs(), il));
+            k = mctx_cur.getK(ctx, il);
+            v = mctx_cur.getV(ctx, il);
+        }
 
         const kq_mask = inp.getKqMask();
-        const k = mctx_cur.getK(ctx, il);
-        const v = mctx_cur.getV(ctx, il);
 
         var cur = self.buildAttnMha(q_cur, k, v, kq_b, kq_mask, sinks, v_mla, 0, kq_scale, il);
         self.cb(cur, "kqv_out", il);
@@ -3365,8 +3495,8 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `llm_graph_context`'s `build_attn_inp_no_cache` (llama-graph.cpp:2740
-    /// @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_attn_inp_no_cache` (llama-graph.cpp:2832
+    /// @d81235049).
     pub fn buildAttnInpNoCache(self: *const Builder) *InpAttnNoCache {
         const inp = allocator.create(InpAttnNoCache) catch oom();
         inp.* = .{ .hparams = self.hparams, .cparams = self.cparams.*, .debug = inputDebug() };
@@ -3396,7 +3526,7 @@ pub const Builder = struct {
     }
 
     /// Ports `llm_graph_context`'s `build_attn` without a cache
-    /// (llama-graph.cpp:2766 @7fe450e19): attention within the batch.
+    /// (llama-graph.cpp:2858 @d81235049): attention within the batch.
     fn buildAttnNoCache(
         self: *const Builder,
         inp: *InpAttnNoCache,
@@ -3440,12 +3570,12 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `build_attn_inp_k_impl` (llama-graph.cpp:2926 @7fe450e19).
+    /// Ports `build_attn_inp_k_impl` (llama-graph.cpp:3027 @d81235049).
     fn buildAttnInpKImpl(self: *const Builder, mctx_cur: *const kv_cache.KvCacheContext) *InpAttnK {
         const inp = allocator.create(InpAttnK) catch oom();
         inp.* = .{ .hparams = self.hparams, .cparams = self.cparams.*, .mctx = mctx_cur };
 
-        impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) == .none, "llama-graph.cpp", 2936, "hparams.swa_type == LLAMA_SWA_TYPE_NONE && \"Use llama_kv_cache_iswa for SWA\"");
+        impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) == .none, "llama-graph.cpp", 3037, "hparams.swa_type == LLAMA_SWA_TYPE_NONE && \"Use llama_kv_cache_iswa for SWA\"");
 
         inp.self_k_idxs = mctx_cur.buildInputKIdxs(self.ctx0, self.ubatch);
 
@@ -3455,14 +3585,14 @@ pub const Builder = struct {
         return inp;
     }
 
-    /// Ports `llm_graph_context`'s `build_attn_inp_k` (llama-graph.cpp:2947 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_attn_inp_k` (llama-graph.cpp:3048 @d81235049).
     pub fn buildAttnInpK(self: *const Builder) *InpAttnK {
         const mctx_cur = self.mctx.?.cast(kv_cache.KvCacheContext);
         return self.res.addInput(InpAttnK, self.buildAttnInpKImpl(mctx_cur));
     }
 
     /// Ports `llm_graph_context`'s `build_attn` over a K-only cache
-    /// (llama-graph.cpp:2955 @7fe450e19): V is a view of the cached K, as
+    /// (llama-graph.cpp:3056 @d81235049): V is a view of the cached K, as
     /// wide as `v_cur`.
     fn buildAttnK(
         self: *const Builder,
@@ -3518,7 +3648,7 @@ pub const Builder = struct {
     }
 
     /// Ports `llm_graph_context`'s `build_attn` over a DSA cache
-    /// (llama-graph.cpp:3013 @7fe450e19): the K-only attention of
+    /// (llama-graph.cpp:3114 @d81235049): the K-only attention of
     /// `build_attn` over `llm_graph_input_attn_k`, with the mask narrowed to
     /// the keys the lightning indexer chose.
     ///
@@ -3598,7 +3728,7 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `build_attn_inp_k_dsa_impl` (llama-graph.cpp:3302 @7fe450e19).
+    /// Ports `build_attn_inp_k_dsa_impl` (llama-graph.cpp:3411 @d81235049).
     fn buildAttnInpKDsaImpl(self: *const Builder, mctx_cur: *const kv_cache_dsa.DsaContext) *InpAttnKDsa {
         const inp = allocator.create(InpAttnKDsa) catch oom();
         inp.* = .{ .hparams = self.hparams, .cparams = self.cparams.*, .mctx = mctx_cur };
@@ -3627,14 +3757,14 @@ pub const Builder = struct {
         return inp;
     }
 
-    /// Ports `llm_graph_context`'s `build_attn_inp_k_dsa` (llama-graph.cpp:3334 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_attn_inp_k_dsa` (llama-graph.cpp:3443 @d81235049).
     pub fn buildAttnInpKDsa(self: *const Builder) *InpAttnKDsa {
         const mctx_cur = self.mctx.?.cast(kv_cache_dsa.DsaContext);
         return self.res.addInput(InpAttnKDsa, self.buildAttnInpKDsaImpl(mctx_cur));
     }
 
-    /// Ports `llm_graph_context`'s `build_attn_inp_k_dsa_iswa` (llama-graph.cpp:3342
-    /// @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_attn_inp_k_dsa_iswa` (llama-graph.cpp:3451
+    /// @d81235049).
     pub fn buildAttnInpKDsaIswa(self: *const Builder) *InpAttnKDsaIswa {
         const mctx_cur = self.mctx.?.cast(kv_cache_dsa_iswa.DsaIswaContext);
 
@@ -3656,8 +3786,8 @@ pub const Builder = struct {
         return self.res.addInput(InpAttnKDsaIswa, inp);
     }
 
-    /// Ports `llm_graph_context`'s `build_inp_cross_embd` (llama-graph.cpp:2530
-    /// @7fe450e19): the encoder's output when there is one, else a tensor
+    /// Ports `llm_graph_context`'s `build_inp_cross_embd` (llama-graph.cpp:2619
+    /// @d81235049): the encoder's output when there is one, else a tensor
     /// of its worst-case shape.
     pub fn buildInpCrossEmbd(self: *const Builder) *Tensor {
         const cross = self.cross.?;
@@ -3680,7 +3810,7 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `llm_graph_context`'s `build_inp_pos_bucket_enc` (llama-graph.cpp:2555 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_inp_pos_bucket_enc` (llama-graph.cpp:2644 @d81235049).
     pub fn buildInpPosBucketEnc(self: *const Builder) *Tensor {
         const inp = allocator.create(InpPosBucket) catch oom();
         inp.* = .{ .hparams = self.hparams };
@@ -3695,7 +3825,7 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `llm_graph_context`'s `build_inp_pos_bucket_dec` (llama-graph.cpp:2569 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_inp_pos_bucket_dec` (llama-graph.cpp:2658 @d81235049).
     pub fn buildInpPosBucketDec(self: *const Builder) *Tensor {
         const mctx_cur = self.mctx.?.cast(kv_cache.KvCacheContext);
 
@@ -3714,8 +3844,8 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `llm_graph_context`'s `build_pos_bias` (llama-graph.cpp:2587
-    /// @7fe450e19): the learned bias of each relative-position bucket, as
+    /// Ports `llm_graph_context`'s `build_pos_bias` (llama-graph.cpp:2676
+    /// @d81235049): the learned bias of each relative-position bucket, as
     /// a `[n_kv, n_tokens, n_head]` attention bias.
     pub fn buildPosBias(self: *const Builder, pos_bucket: *Tensor, attn_rel_b: *Tensor) *Tensor {
         const ctx = self.ctx0;
@@ -3733,7 +3863,7 @@ pub const Builder = struct {
         return pos_bias;
     }
 
-    /// Ports `llm_graph_context`'s `build_attn_inp_cross` (llama-graph.cpp:3243 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_attn_inp_cross` (llama-graph.cpp:3352 @d81235049).
     pub fn buildAttnInpCross(self: *const Builder) *InpAttnCross {
         const cross = self.cross.?;
         const inp = allocator.create(InpAttnCross) catch oom();
@@ -3753,7 +3883,7 @@ pub const Builder = struct {
     }
 
     /// Ports `llm_graph_context`'s `build_attn` over the encoder's output
-    /// (llama-graph.cpp:3259 @7fe450e19): K and V come from the encoder,
+    /// (llama-graph.cpp:3368 @d81235049): K and V come from the encoder,
     /// nothing is cached.
     fn buildAttnCross(
         self: *const Builder,
@@ -3792,8 +3922,8 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `llm_graph_context`'s `build_attn_inp_kv_iswa` (llama-graph.cpp:3391
-    /// @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_attn_inp_kv_iswa` (llama-graph.cpp:3500
+    /// @d81235049).
     pub fn buildAttnInpKvIswa(self: *const Builder) *InpAttnKvIswa {
         const mctx_cur = self.mctx.?.cast(kv_cache_iswa.IswaContext);
         return self.res.addInput(InpAttnKvIswa, self.buildAttnInpKvIswaImpl(mctx_cur));
@@ -3815,7 +3945,7 @@ pub const Builder = struct {
         }
 
         {
-            impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) != .none, "llama-graph.cpp", 3405, "hparams.swa_type != LLAMA_SWA_TYPE_NONE && \"Use llama_kv_cache for non-SWA\"");
+            impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) != .none, "llama-graph.cpp", 3514, "hparams.swa_type != LLAMA_SWA_TYPE_NONE && \"Use llama_kv_cache for non-SWA\"");
 
             const swa = mctx_cur.getSwa();
             inp.self_k_idxs_swa = swa.buildInputKIdxs(self.ctx0, self.ubatch);
@@ -3835,9 +3965,11 @@ pub const Builder = struct {
     }
 
     /// Ports `llm_graph_context`'s `build_attn` over an iSWA cache
-    /// (llama-graph.cpp:3089 @7fe450e19): the layer's side of the window
+    /// (llama-graph.cpp:3190 @d81235049): the layer's side of the window
     /// picks the half. `k_cur` and `v_cur` are null for a layer that reads
-    /// another layer's cells and stores nothing.
+    /// another layer's cells and stores nothing. Training attends the
+    /// ubatch's own K and V, a whole sequence, and stores them only for the
+    /// layers later ones read (`n_layer_kv_from_start`).
     fn buildAttnKvIswa(
         self: *const Builder,
         inp: *InpAttnKvIswa,
@@ -3879,21 +4011,33 @@ pub const Builder = struct {
         const mctx_iswa = inp.mctx;
         const mctx_cur = if (is_swa) mctx_iswa.getSwa() else mctx_iswa.getBase();
 
-        // Store to the KV cache, where there is anything to store.
-        if (k_cur) |k| {
-            const k_idxs = if (is_swa) inp.getKIdxsSwa() else inp.getKIdxs();
-            c.ggml_build_forward_expand(self.gf, mctx_cur.cpyK(ctx, k, k_idxs, il));
+        // The whole sequence fits the batch in training.
+        const use_kv_cur = self.cparams.training and k_cur != null and v_cur != null;
+        if (use_kv_cur) {
+            impl.assert(mctx_cur.getNKv() == self.n_tokens, "llama-graph.cpp", 3239, "mctx_cur->get_n_kv() == n_tokens");
         }
-        if (v_cur) |v| {
-            const v_idxs = if (is_swa) inp.getVIdxsSwa() else inp.getVIdxs();
-            c.ggml_build_forward_expand(self.gf, mctx_cur.cpyV(ctx, v, v_idxs, il));
+
+        const store_kv = !use_kv_cur or self.hparams.n_layer_kv_from_start >= 0;
+
+        // Store to the KV cache, where there is anything to store.
+        if (store_kv) {
+            if (k_cur) |k| {
+                const k_idxs = if (is_swa) inp.getKIdxsSwa() else inp.getKIdxs();
+                c.ggml_build_forward_expand(self.gf, mctx_cur.cpyK(ctx, k, k_idxs, il));
+            }
+        }
+        if (store_kv) {
+            if (v_cur) |v| {
+                const v_idxs = if (is_swa) inp.getVIdxsSwa() else inp.getVIdxs();
+                c.ggml_build_forward_expand(self.gf, mctx_cur.cpyV(ctx, v, v_idxs, il));
+            }
         }
 
         const kq_mask = if (is_swa) inp.getKqMaskSwa() else inp.getKqMask();
 
         const q = q_cur;
-        const k = mctx_cur.getK(ctx, il);
-        const v = mctx_cur.getV(ctx, il);
+        const k = if (use_kv_cur) k_cur.? else mctx_cur.getK(ctx, il);
+        const v = if (use_kv_cur) v_cur.? else mctx_cur.getV(ctx, il);
 
         var cur = self.buildAttnMha(q, k, v, kq_b, kq_mask, sinks, v_mla, 0, kq_scale, il);
         self.cb(cur, "kqv_out", il);
@@ -3907,8 +4051,8 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `llm_graph_context`'s `build_attn_inp_k_iswa` (llama-graph.cpp:3423
-    /// @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_attn_inp_k_iswa` (llama-graph.cpp:3532
+    /// @d81235049).
     pub fn buildAttnInpKIswa(self: *const Builder) *InpAttnKIswa {
         const mctx_cur = self.mctx.?.cast(kv_cache_iswa.IswaContext);
 
@@ -3924,7 +4068,7 @@ pub const Builder = struct {
         }
 
         {
-            impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) != .none, "llama-graph.cpp", 3436, "hparams.swa_type != LLAMA_SWA_TYPE_NONE && \"Use llama_kv_cache for non-SWA\"");
+            impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) != .none, "llama-graph.cpp", 3545, "hparams.swa_type != LLAMA_SWA_TYPE_NONE && \"Use llama_kv_cache for non-SWA\"");
 
             const swa = mctx_cur.getSwa();
             inp.self_k_idxs_swa = swa.buildInputKIdxs(self.ctx0, self.ubatch);
@@ -3941,7 +4085,7 @@ pub const Builder = struct {
     }
 
     /// Ports `llm_graph_context`'s `build_attn` over a K-only iSWA cache
-    /// (llama-graph.cpp:3176 @7fe450e19): the cached K serves as V, viewed
+    /// (llama-graph.cpp:3285 @d81235049): the cached K serves as V, viewed
     /// at `v_cur`'s width. `k_cur` is null for a layer that stores nothing.
     fn buildAttnKIswa(
         self: *const Builder,
@@ -4003,8 +4147,8 @@ pub const Builder = struct {
         return cur;
     }
 
-    /// Ports `llm_graph_context`'s `build_inp_dsv4` (llama-graph.cpp:3451
-    /// @7fe450e19): the raw cache's indices, mask and rotation, then each
+    /// Ports `llm_graph_context`'s `build_inp_dsv4` (llama-graph.cpp:3560
+    /// @d81235049): the raw cache's indices, mask and rotation, then each
     /// compressor's plan as inputs.
     pub fn buildInpDsv4(self: *const Builder) *InpDsv4 {
         const mctx_cur = self.mctx.?.cast(kv_cache_dsv4.Dsv4Context);
@@ -4015,7 +4159,7 @@ pub const Builder = struct {
 
         const n_stream = mctx_cur.getCsaPlanFor(self.ubatch).n_stream;
 
-        impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) != .none, "llama-graph.cpp", 3459, "hparams.swa_type != LLAMA_SWA_TYPE_NONE && \"DSV4 expects SWA raw cache\"");
+        impl.assert(@as(hparams_mod.SwaType, @fromBackingInt(@intCast(self.hparams.swa_type))) != .none, "llama-graph.cpp", 3568, "hparams.swa_type != LLAMA_SWA_TYPE_NONE && \"DSV4 expects SWA raw cache\"");
 
         inp_raw.self_k_idxs = raw_ctx.buildInputKIdxs(self.ctx0, self.ubatch);
         inp_raw.self_kq_mask = dsv4BuildRawKqMask(self.ctx0, raw_ctx, self.ubatch, self.cparams, n_stream);
@@ -4039,19 +4183,19 @@ pub const Builder = struct {
     // Recurrent
 
     /// Ports `llm_graph_context`'s `build_rs` over explicit state indices
-    /// (llama-graph.cpp:3478 @7fe450e19).
+    /// (llama-graph.cpp:3587 @d81235049).
     pub fn buildRsRaw(
         self: *const Builder,
         s: *Tensor,
+        state_copy: *Tensor,
         state_copy_main: *Tensor,
-        state_copy_extra: *Tensor,
         state_size: i32,
         n_seqs: i32,
         n_rs: u32,
         rs_head: u32,
         rs_size: u32,
         rs_zero: i32,
-        get_state_rows: GetRowsFn,
+        get_state_rows: ?GetRowsFn,
     ) *Tensor {
         _ = rs_size;
         const ctx = self.ctx0;
@@ -4063,19 +4207,29 @@ pub const Builder = struct {
         const state_zero = c.ggml_view_1d(ctx, states, state_size * has_zero, @as(usize, @intCast(@as(i64, rs_zero) * has_zero)) * states.*.nb[1]);
         c.ggml_build_forward_expand(self.gf, c.ggml_scale_inplace(ctx, state_zero, 0));
 
-        // Copy states: {state_size, rs_size} -> {state_size, n_seqs}; the
-        // destinations are all between rs_head and rs_head + n_rs.
-        const output_states = get_state_rows.call(ctx, states, state_copy_main);
+        // Copy states, the destinations all between rs_head and rs_head +
+        // n_rs: one gather of states j0..n_rs (the C++'s `i0`; the
+        // ubatch's, then the extra ones), sized by n_rs so the reserve
+        // covers every split. {state_size, rs_size} -> {state_size, n_rs - j0}
+        const j0: i64 = @as(i64, n_rs) - state_copy.ne[0];
+
+        const states_all = c.ggml_get_rows(ctx, states, state_copy);
+
+        const output_states = if (get_state_rows) |g|
+            g.call(ctx, states, state_copy_main)
+        else
+            c.ggml_view_2d(ctx, states_all, state_size, n_seqs, states_all.*.nb[1], 0);
         c.ggml_build_forward_expand(self.gf, output_states);
 
-        // Copy the extra states, which will not change further.
-        const states_extra = c.ggml_get_rows(ctx, states, state_copy_extra);
+        // Copy the extra states, which will not change further (between
+        // n_seqs and n_rs).
+        const states_extra = c.ggml_view_2d(ctx, states_all, state_size, @as(i64, n_rs) - n_seqs, states_all.*.nb[1], @as(usize, @bitCast(@as(i64, n_seqs) - j0)) *% states_all.*.nb[1]);
         c.ggml_build_forward_expand(self.gf, c.ggml_cpy(ctx, states_extra, c.ggml_view_2d(ctx, s, state_size, @as(i64, n_rs) - n_seqs, s.nb[1], (@as(usize, rs_head) + @as(usize, @intCast(n_seqs))) * s.nb[1])));
 
         return output_states;
     }
 
-    /// Ports `build_rs_inp_impl` (llama-graph.cpp:3514 @7fe450e19).
+    /// Ports `build_rs_inp_impl` (llama-graph.cpp:3630 @d81235049).
     fn buildRsInpImpl(self: *const Builder, mctx_cur: *const memory_recurrent.RecurrentContext) *InpRs {
         const inp = allocator.create(InpRs) catch oom();
         inp.* = .{ .mctx = mctx_cur };
@@ -4085,26 +4239,31 @@ pub const Builder = struct {
         c.ggml_set_input(inp.s_copy);
         _ = c.ggml_set_name(inp.s_copy, "rs_s_copy");
         inp.s_copy_main = c.ggml_view_1d(self.ctx0, inp.s_copy, n_seqs, 0);
-        inp.s_copy_extra = c.ggml_view_1d(self.ctx0, inp.s_copy, n_rs - n_seqs, @as(usize, @intCast(n_seqs)) * inp.s_copy.?.nb[0]);
+        inp.s_copy_tail = c.ggml_view_1d(self.ctx0, inp.s_copy, n_rs - 1, inp.s_copy.?.nb[0]);
         inp.head = mctx_cur.getHead();
         inp.rs_z = mctx_cur.getRsZ();
         return inp;
     }
 
-    /// Ports `llm_graph_context`'s `build_rs_inp` (llama-graph.cpp:3537 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_rs_inp` (llama-graph.cpp:3653 @d81235049).
     pub fn buildRsInp(self: *const Builder) *InpRs {
         const mctx_cur = self.mctx.?.cast(memory_recurrent.RecurrentContext);
         return self.res.addInput(InpRs, self.buildRsInpImpl(mctx_cur));
     }
 
-    /// Ports `llm_graph_context`'s `build_rs` over an input (llama-graph.cpp:3545 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_rs` over an input (llama-graph.cpp:3661
+    /// @d81235049). A custom getter reads the ubatch's states straight from
+    /// the cache, so the gather skips the first state: it still holds the
+    /// `n_rs - n_seqs` extra states, and copies none for a one-sequence
+    /// ubatch.
     pub fn buildRs(self: *const Builder, inp: *const InpRs, s: *Tensor, state_size: i32, n_seqs: i32, get_state_rows: ?GetRowsFn) *Tensor {
         const kv_state = inp.mctx;
-        return self.buildRsRaw(s, inp.s_copy_main.?, inp.s_copy_extra.?, state_size, n_seqs, kv_state.getNRs(), kv_state.getHead(), kv_state.getSize(), kv_state.getRsZ(), get_state_rows orelse ggml_get_rows_fn);
+        const state_copy = if (get_state_rows != null) inp.s_copy_tail.? else inp.s_copy.?;
+        return self.buildRsRaw(s, state_copy, inp.s_copy_main.?, state_size, n_seqs, kv_state.getNRs(), kv_state.getHead(), kv_state.getSize(), kv_state.getRsZ(), get_state_rows);
     }
 
     /// Ports `llm_graph_context`'s `build_rwkv_token_shift_load`
-    /// (llama-graph.cpp:3558 @7fe450e19): each sequence's token-shift
+    /// (llama-graph.cpp:3678 @d81235049): each sequence's token-shift
     /// state, `{n_embd, token_shift_count, n_seqs}`.
     pub fn buildRwkvTokenShiftLoad(self: *const Builder, inp: *const InpRs, ubatch: *const Ubatch, il: c_int) *Tensor {
         const mctx_cur = self.mctx.?.cast(memory_recurrent.RecurrentContext);
@@ -4121,7 +4280,7 @@ pub const Builder = struct {
     }
 
     /// Ports `llm_graph_context`'s `build_rwkv_token_shift_store`
-    /// (llama-graph.cpp:3579 @7fe450e19): the copy of the new token-shift
+    /// (llama-graph.cpp:3699 @d81235049): the copy of the new token-shift
     /// state into the sequences' cells, for the caller to expand.
     pub fn buildRwkvTokenShiftStore(self: *const Builder, token_shift: *Tensor, ubatch: *const Ubatch, il: c_int) *Tensor {
         const mctx_cur = self.mctx.?.cast(memory_recurrent.RecurrentContext);
@@ -4139,7 +4298,7 @@ pub const Builder = struct {
         );
     }
 
-    /// Ports `llm_graph_context`'s `build_inp_mem_hybrid` (llama-graph.cpp:3599 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_inp_mem_hybrid` (llama-graph.cpp:3719 @d81235049).
     pub fn buildInpMemHybrid(self: *const Builder) *InpMemHybrid {
         const mctx_cur = self.mctx.?.cast(memory_hybrid.HybridContext);
         const inp_rs = self.buildRsInpImpl(mctx_cur.getRecr());
@@ -4150,7 +4309,7 @@ pub const Builder = struct {
     }
 
     /// Ports `llm_graph_context`'s `build_inp_mem_hybrid_iswa`
-    /// (llama-graph.cpp:3621 @7fe450e19): the recurrent input, and both
+    /// (llama-graph.cpp:3741 @d81235049): the recurrent input, and both
     /// halves' indices and masks for the attention -- without the
     /// rotations `build_attn_inp_kv_iswa` adds.
     pub fn buildInpMemHybridIswa(self: *const Builder) *InpMemHybridIswa {
@@ -4187,7 +4346,7 @@ pub const Builder = struct {
         return self.res.addInput(InpMemHybridIswa, inp);
     }
 
-    /// Ports `llm_graph_context`'s `build_inp_mem_hybrid_k` (llama-graph.cpp:3610 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_inp_mem_hybrid_k` (llama-graph.cpp:3730 @d81235049).
     pub fn buildInpMemHybridK(self: *const Builder) *InpMemHybridK {
         const mctx_cur = self.mctx.?.cast(memory_hybrid.HybridContext);
         const inp_rs = self.buildRsInpImpl(mctx_cur.getRecr());
@@ -4200,11 +4359,11 @@ pub const Builder = struct {
     // -------------------------------------------------------------------------
     // Pooling, sampling, dense output
 
-    /// Ports `llm_graph_context`'s `build_dense_out` (llama-graph.cpp:3652 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_dense_out` (llama-graph.cpp:3772 @d81235049).
     pub fn buildDenseOut(self: *const Builder, dense_2: ?*Tensor, dense_2_b: ?*Tensor, dense_3: ?*Tensor) void {
         if (!self.cparams.embeddings or !(dense_2 != null or dense_2_b != null or dense_3 != null)) return;
         var cur = if (self.res.t_embd_pooled) |t| t else self.res.t_embd;
-        impl.assert(cur != null, "llama-graph.cpp", 3660, "cur != nullptr && \"missing t_embd_pooled/t_embd\"");
+        impl.assert(cur != null, "llama-graph.cpp", 3780, "cur != nullptr && \"missing t_embd_pooled/t_embd\"");
         if (dense_2) |d| cur = c.ggml_mul_mat(self.ctx0, d, cur);
         if (dense_2_b) |b| cur = c.ggml_add(self.ctx0, cur, b);
         if (dense_3) |d| cur = c.ggml_mul_mat(self.ctx0, d, cur);
@@ -4213,12 +4372,12 @@ pub const Builder = struct {
         c.ggml_build_forward_expand(self.gf, cur);
     }
 
-    /// Ports `llm_graph_context`'s `build_pooling` (llama-graph.cpp:3677 @7fe450e19).
+    /// Ports `llm_graph_context`'s `build_pooling` (llama-graph.cpp:3797 @d81235049).
     pub fn buildPooling(self: *const Builder, cls: ?*Tensor, cls_b: ?*Tensor, cls_out: ?*Tensor, cls_out_b: ?*Tensor, cls_norm: ?*Tensor) void {
         if (!self.cparams.embeddings) return;
         const ctx = self.ctx0;
         const inp = self.res.t_embd;
-        impl.assert(inp != null, "llama-graph.cpp", 3699, "inp != nullptr && \"missing result_norm/result_embd tensor\"");
+        impl.assert(inp != null, "llama-graph.cpp", 3819, "inp != nullptr && \"missing result_norm/result_embd tensor\"");
 
         var cur: *Tensor = undefined;
         switch (self.pooling_type) {
@@ -4232,7 +4391,9 @@ pub const Builder = struct {
                 cur = c.ggml_get_rows(ctx, inp, inp_cls);
             },
             c.LLAMA_POOLING_TYPE_RANK => {
-                if (self.arch == .modern_bert) {
+                // ModernBERT with classifier_pooling = "mean" pools by the mean
+                // first, then applies the prediction head and classifier.
+                if (self.hparams.pooling_type_cls == c.LLAMA_POOLING_TYPE_MEAN) {
                     const inp_mean = self.buildInpMean();
                     cur = c.ggml_mul_mat(ctx, c.ggml_cont(ctx, c.ggml_transpose(ctx, inp)), inp_mean);
                 } else {
@@ -4254,7 +4415,7 @@ pub const Builder = struct {
                 // The Qwen3 reranker's softmax.
                 if (self.arch == .qwen3 or self.arch == .qwen3vl) cur = c.ggml_soft_max(ctx, cur);
             },
-            else => impl.abort("llama-graph.cpp", 3767, "unknown pooling type"),
+            else => impl.abort("llama-graph.cpp", 3887, "unknown pooling type"),
         }
 
         self.cb(cur, "result_embd_pooled", -1);
@@ -4262,8 +4423,8 @@ pub const Builder = struct {
         c.ggml_build_forward_expand(self.gf, cur);
     }
 
-    /// Ports `llm_graph_context`'s `build_sampling` (llama-graph.cpp:3777
-    /// @7fe450e19): the backend samplers' graph, one row per output.
+    /// Ports `llm_graph_context`'s `build_sampling` (llama-graph.cpp:3897
+    /// @d81235049): the backend samplers' graph, one row per output.
     pub fn buildSampling(self: *const Builder) void {
         if (self.samplers.items.items.len == 0 or self.res.t_logits == null) return;
         const ctx = self.ctx0;
@@ -4300,7 +4461,7 @@ pub const Builder = struct {
         self.res.t_sampled_logits.appendNTimes(allocator, null, n_rows) catch oom();
         self.res.t_candidates.appendNTimes(allocator, null, n_rows) catch oom();
 
-        impl.assert(self.res.t_logits != null, "llama-graph.cpp", 3802, "res->t_logits != nullptr && \"missing t_logits tensor\"");
+        impl.assert(self.res.t_logits != null, "llama-graph.cpp", 3922, "res->t_logits != nullptr && \"missing t_logits tensor\"");
 
         // A dummy row keeps the single-output graph static whichever
         // samplers are active.

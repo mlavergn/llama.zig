@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/granite-speech.cpp` at v0.5.0
-//! (`7fe450e19`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/granite-speech.cpp` at v0.6.0
+//! (`d81235049`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -19,7 +19,7 @@ const nb = graph.nb;
 
 extern fn sqrtf(x: f32) f32;
 
-/// Ports `build` (granite-speech.cpp:5 @7fe450e19), a member of
+/// Ports `build` (granite-speech.cpp:5 @d81235049), a member of
 /// `clip_graph_granite_speech`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
@@ -160,9 +160,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
             }
             g.cb(x, "conv_glu", il);
 
-            x = c.ggml_pad(ctx0, x, conv_pad, 0, 0, 0);
-            x = c.ggml_roll(ctx0, x, conv_pad, 0, 0, 0);
-            x = c.ggml_pad(ctx0, x, conv_pad, 0, 0, 0);
+            x = c.ggml_pad_ext(ctx0, x, conv_pad, conv_pad, 0, 0, 0, 0, 0, 0);
             x = c.ggml_ssm_conv(ctx0, x, layer.conv_dw_w);
             g.cb(x, "conv_dw", il);
 
@@ -202,7 +200,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
                 } else {
                     concat_result = c.ggml_concat(ctx0, concat_result, cur, 0);
                 }
-                const name = impl.stringFormat(gpa, "feature_layer_%d", .{il + 1}) catch impl.abort("granite-speech.cpp", 194, "out of memory");
+                const name = impl.stringFormat(gpa, "feature_layer_%d", .{il + 1}) catch impl.abort("granite-speech.cpp", 192, "out of memory");
                 defer gpa.free(name);
                 g.cb(concat_result, name.ptr, il);
             }

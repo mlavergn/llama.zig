@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/ngram-mod.h` and `llama.cpp/common/ngram-mod.cpp`
-//! at v0.5.0 (`7fe450e19`). Each declaration names the C++ it replaces and
+//! at v0.6.0 (`d81235049`). Each declaration names the C++ it replaces and
 //! the line it began at.
 //!
 //! # Collisions
@@ -16,12 +16,12 @@
 
 const std = @import("std");
 
-/// Ports `common_ngram_mod` (ngram-mod.h:13 @7fe450e19).
+/// Ports `common_ngram_mod` (ngram-mod.h:13 @d81235049).
 pub const Mod = struct {
     /// `entry_t`: a token.
     pub const Entry = i32;
 
-    /// Ports `EMPTY` (ngram-mod.h:16 @7fe450e19), a member of `common_ngram_mod`.
+    /// Ports `EMPTY` (ngram-mod.h:16 @d81235049), a member of `common_ngram_mod`.
     pub const empty_entry: Entry = -1;
 
     allocator: std.mem.Allocator,
@@ -30,7 +30,7 @@ pub const Mod = struct {
     used: usize,
     entries: []Entry,
 
-    /// Ports `common_ngram_mod` (ngram-mod.cpp:9 @7fe450e19), the
+    /// Ports `common_ngram_mod` (ngram-mod.cpp:9 @d81235049), the
     /// constructor: `size` empty slots.
     ///
     /// Parameters:
@@ -57,7 +57,7 @@ pub const Mod = struct {
         return .{ .allocator = allocator, .n = self.n, .used = self.used, .entries = try allocator.dupe(Entry, self.entries) };
     }
 
-    /// Ports `idx` (ngram-mod.cpp:15 @7fe450e19), a member of
+    /// Ports `idx` (ngram-mod.cpp:15 @d81235049), a member of
     /// `common_ngram_mod`: each token is widened to `size_t` with its sign,
     /// as the C++ converts it.
     ///
@@ -77,7 +77,7 @@ pub const Mod = struct {
         return @intCast(res);
     }
 
-    /// Ports `add` (ngram-mod.cpp:27 @7fe450e19), a member of
+    /// Ports `add` (ngram-mod.cpp:27 @d81235049), a member of
     /// `common_ngram_mod`: the token after the n-gram, `tokens[n]`.
     ///
     /// Parameters:
@@ -92,7 +92,7 @@ pub const Mod = struct {
         self.entries[i] = tokens[self.n];
     }
 
-    /// Ports `get` (ngram-mod.cpp:37 @7fe450e19), a member of
+    /// Ports `get` (ngram-mod.cpp:37 @d81235049), a member of
     /// `common_ngram_mod`.
     ///
     /// Parameters:
@@ -105,32 +105,32 @@ pub const Mod = struct {
         return self.entries[i];
     }
 
-    /// Ports `reset` (ngram-mod.cpp:43 @7fe450e19), a member of
+    /// Ports `reset` (ngram-mod.cpp:43 @d81235049), a member of
     /// `common_ngram_mod`.
     pub fn reset(self: *Mod) void {
         @memset(self.entries, empty_entry);
         self.used = 0;
     }
 
-    /// Ports `get_n` (ngram-mod.cpp:48 @7fe450e19), a member of
+    /// Ports `get_n` (ngram-mod.cpp:48 @d81235049), a member of
     /// `common_ngram_mod`.
     pub fn getN(self: *const Mod) usize {
         return self.n;
     }
 
-    /// Ports `get_used` (ngram-mod.cpp:52 @7fe450e19), a member of
+    /// Ports `get_used` (ngram-mod.cpp:52 @d81235049), a member of
     /// `common_ngram_mod`.
     pub fn getUsed(self: *const Mod) usize {
         return self.used;
     }
 
-    /// Ports `size` (ngram-mod.cpp:56 @7fe450e19), a member of
+    /// Ports `size` (ngram-mod.cpp:56 @d81235049), a member of
     /// `common_ngram_mod`.
     pub fn size(self: *const Mod) usize {
         return self.entries.len;
     }
 
-    /// Ports `size_bytes` (ngram-mod.cpp:60 @7fe450e19), a member of
+    /// Ports `size_bytes` (ngram-mod.cpp:60 @d81235049), a member of
     /// `common_ngram_mod`.
     pub fn sizeBytes(self: *const Mod) usize {
         return self.entries.len * @sizeOf(Entry);

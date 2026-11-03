@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/ling3.cpp` (llama.cpp v0.5.0,
-//! `7fe450e19`), new at v0.5.0. The parser is built in the order clang
+//! Ports `llama.cpp/common/parsers/ling3.cpp` (llama.cpp v0.6.0,
+//! `d81235049`), new at v0.5.0. The parser is built in the order clang
 //! evaluates the C++ expressions, left to right, since a parser's id is its
 //! position.
 
@@ -46,6 +46,7 @@ const Build = struct {
     inputs: *const GenerationParams,
     think_open: bool,
     has_tools: bool,
+    has_response_format: bool,
     extract_reasoning: bool,
 
     // per tool, while its parameters are visited
@@ -83,6 +84,13 @@ const Build = struct {
 
         // a trailing end-of-turn token is consumed instead of leaking into content
         const tail = try b.plus(try b.optional(try p.content(try b.until(ROLE_END))), try b.optional(try b.literal(ROLE_END)));
+
+        // the think block must close before the JSON, so the turn cannot end inside the reasoning
+        if (self.has_response_format) {
+            const closed_reasoning = try b.plus(try b.plus(try b.literal(THINK_START), think_body), try b.literal(THINK_END));
+            const response_format = try p.content(try b.schemaJson(try b.json(), "response-format", &self.inputs.json_schema, false));
+            return b.plus(try b.plus(opener, try b.shl(closed_reasoning, response_format)), end);
+        }
 
         if (!self.has_tools or self.inputs.tool_choice == .none) {
             return b.plus(try b.plus(try b.plus(opener, reasoning), tail), end);
@@ -179,7 +187,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_ling3` (parsers/ling3.cpp:11 @7fe450e19).
+/// Ports `common_chat_params_init_ling3` (parsers/ling3.cpp:11 @d81235049).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -238,14 +246,16 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     }
 
     const has_tools = parsers.hasTools(&inputs.tools);
+    const has_response_format = parsers.hasResponseFormat(&inputs.json_schema);
     const extract_reasoning = inputs.reasoning_format != .none;
-    const include_grammar = has_tools and inputs.tool_choice != .none;
+    const include_grammar = has_response_format or (has_tools and inputs.tool_choice != .none);
 
     var build: Build = .{
         .a = a,
         .inputs = inputs,
         .think_open = think_open,
         .has_tools = has_tools,
+        .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
     var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
@@ -254,7 +264,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     data.parser = try parsers.save(a, &arena);
 
     if (include_grammar) {
-        data.grammar_lazy = inputs.tool_choice != .required;
+        data.grammar_lazy = !has_response_format and inputs.tool_choice != .required;
         data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
         try data.addWordTrigger(a, CALL_START);
     }

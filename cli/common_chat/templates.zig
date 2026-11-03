@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports the template half of `llama.cpp/common/chat.cpp` (llama.cpp v0.5.0,
-//! `7fe450e19`): `common_chat_templates` and its init, free, source and
+//! Ports the template half of `llama.cpp/common/chat.cpp` (llama.cpp v0.6.0,
+//! `d81235049`): `common_chat_templates` and its init, free, source and
 //! explicit flag; `common_chat_templates_inputs`; `common_chat_verify_template`;
 //! `common_chat_format_single` and `common_chat_format_example`;
 //! `common_chat_templates_get_caps`;
@@ -53,7 +53,7 @@ const Caps = caps_mod.Caps;
 /// One `chat_template_kwargs` entry: a name and the JSON text of its value.
 pub const KwArg = struct { key: []const u8, value: []const u8 };
 
-/// Ports `common_chat_templates_inputs` (chat.h:249 @7fe450e19). Everything
+/// Ports `common_chat_templates_inputs` (chat.h:249 @d81235049). Everything
 /// is borrowed for the duration of the call it is passed to.
 pub const TemplatesInputs = struct {
     messages: []const Msg = &.{},
@@ -91,7 +91,7 @@ pub const ModelInfo = struct {
     add_eos: bool = false,
 };
 
-/// Ports `common_token_to_piece` (common/common.cpp:1898 @7fe450e19), the
+/// Ports `common_token_to_piece` (common/common.cpp:1841 @d81235049), the
 /// `special` arm: a token's text through libllama's port.
 ///
 /// Return: owned by `a`.
@@ -131,7 +131,7 @@ pub fn modelInfo(a: Allocator, model: *const anyopaque) Error!ModelInfo {
     return info;
 }
 
-/// Ports `CHATML_TEMPLATE_SRC` (chat.cpp:715 @7fe450e19).
+/// Ports `CHATML_TEMPLATE_SRC` (chat.cpp:715 @d81235049).
 pub const chatml_template_src =
     "{%- for message in messages -%}\n" ++
     "  {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' -}}\n" ++
@@ -140,7 +140,7 @@ pub const chatml_template_src =
     "  {{- '<|im_start|>assistant\n' -}}\n" ++
     "{%- endif -%}";
 
-/// Ports `common_chat_templates` (chat.cpp:337 @7fe450e19).
+/// Ports `common_chat_templates` (chat.cpp:337 @d81235049).
 pub const Templates = struct {
     gpa: Allocator,
     add_bos: bool,
@@ -151,7 +151,7 @@ pub const Templates = struct {
     template_default: Template,
     template_tool_use: ?Template,
 
-    /// Ports `common_chat_templates_free` (chat.cpp:723 @7fe450e19).
+    /// Ports `common_chat_templates_free` (chat.cpp:723 @d81235049).
     pub fn deinit(self: *Templates) void {
         self.template_default.deinit();
         if (self.template_tool_use) |*t| t.deinit();
@@ -159,7 +159,7 @@ pub const Templates = struct {
     }
 };
 
-/// Ports `common_chat_templates_init` (chat.cpp:757 @7fe450e19): the model's
+/// Ports `common_chat_templates_init` (chat.cpp:757 @d81235049): the model's
 /// templates, or the override, with the vocabulary's BOS and EOS, and two
 /// known template bugs patched.
 ///
@@ -271,12 +271,12 @@ fn vocabToken(piece: ?[]const u8, name: []const u8, jinja_variable_name: []const
     return "";
 }
 
-/// Ports `common_chat_templates_was_explicit` (chat.cpp:727 @7fe450e19).
+/// Ports `common_chat_templates_was_explicit` (chat.cpp:727 @d81235049).
 pub fn wasExplicit(tmpls: *const Templates) bool {
     return tmpls.has_explicit_template;
 }
 
-/// Ports `common_chat_templates_source` (chat.cpp:744 @7fe450e19): the
+/// Ports `common_chat_templates_source` (chat.cpp:744 @d81235049): the
 /// default template's source, or the `tool_use` one's ("" without one).
 pub fn source(tmpls: *const Templates, variant: []const u8) []const u8 {
     if (variant.len != 0) {
@@ -289,7 +289,7 @@ pub fn source(tmpls: *const Templates, variant: []const u8) []const u8 {
     return tmpls.template_default.source();
 }
 
-/// Ports `common_chat_templates_get_caps` (chat.cpp:1525 @7fe450e19): the
+/// Ports `common_chat_templates_get_caps` (chat.cpp:1531 @d81235049): the
 /// tool-use template's capabilities when there is one, the default's
 /// otherwise, sorted by name as the `std`'s `map` is.
 pub fn getCaps(tmpls: *const Templates) [9]Caps.Entry {
@@ -308,7 +308,7 @@ pub fn capsValue(entries: [9]Caps.Entry, name: []const u8) bool {
 }
 
 /// Ports `common_chat_templates_support_enable_thinking` (chat.cpp:358
-/// @7fe450e19): whether one user turn applied with thinking on reports
+/// @d81235049): whether one user turn applied with thinking on reports
 /// that the template thinks.
 pub fn supportEnableThinking(gpa: Allocator, tmpls: *const Templates) Error!bool {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
@@ -325,13 +325,13 @@ pub fn supportEnableThinking(gpa: Allocator, tmpls: *const Templates) Error!bool
     return params.supports_thinking;
 }
 
-/// Ports `common_chat_prompt_preset` (chat.h:384 @7fe450e19).
+/// Ports `common_chat_prompt_preset` (chat.h:384 @d81235049).
 pub const PromptPreset = struct {
     system: []const u8,
     user: []const u8,
 };
 
-/// Ports `common_chat_get_asr_prompt` (chat.cpp:731 @7fe450e19).
+/// Ports `common_chat_get_asr_prompt` (chat.cpp:731 @d81235049).
 pub fn getAsrPrompt(tmpls: ?*const Templates) PromptPreset {
     if (tmpls) |t| {
         if (parsers.lfm2.isLfm2Template(t.template_default.source())) {
@@ -341,7 +341,7 @@ pub fn getAsrPrompt(tmpls: ?*const Templates) PromptPreset {
     return .{ .system = "", .user = "Transcribe audio to text" };
 }
 
-/// Ports `common_chat_verify_template` (chat.cpp:638 @7fe450e19): whether
+/// Ports `common_chat_verify_template` (chat.cpp:638 @d81235049): whether
 /// one user turn applies, through Jinja or through libllama's built-in
 /// template families.
 pub fn verifyTemplate(gpa: Allocator, tmpl: []const u8, use_jinja: bool) Error!bool {
@@ -373,7 +373,7 @@ fn verifyJinja(gpa: Allocator, tmpl: []const u8) Error!void {
     _ = try apply(arena_state.allocator(), &tmpls, &inputs);
 }
 
-/// Ports `common_chat_format_single` (chat.cpp:664 @7fe450e19): what adding
+/// Ports `common_chat_format_single` (chat.cpp:664 @d81235049): what adding
 /// `new_msg` to `past_msg` adds to the rendered conversation.
 ///
 /// Return: owned by the arena `a`.
@@ -406,7 +406,7 @@ pub fn formatSingle(a: Allocator, tmpls: *const Templates, past_msg: []const Msg
     return ss.items;
 }
 
-/// Ports `common_chat_format_example` (chat.cpp:694 @7fe450e19): a short
+/// Ports `common_chat_format_example` (chat.cpp:694 @d81235049): a short
 /// fixed conversation rendered, for the log.
 ///
 /// Return: owned by the arena `a`.
@@ -435,7 +435,7 @@ fn isStr(v: *const Value, s: []const u8) bool {
     return v.isString() and std.mem.eql(u8, v.string, s);
 }
 
-/// Ports `workaround`'s `map_developer_role_to_system` (chat.cpp:1004 @7fe450e19).
+/// Ports `workaround`'s `map_developer_role_to_system` (chat.cpp:1004 @d81235049).
 fn mapDeveloperRoleToSystem(a: Allocator, messages: *Value) Error!void {
     var it = messages.items();
     while (it.next()) |item| {
@@ -448,7 +448,7 @@ fn mapDeveloperRoleToSystem(a: Allocator, messages: *Value) Error!void {
 }
 
 /// Ports `workaround`'s `system_message_not_supported` (chat.cpp:1016
-/// @7fe450e19): a leading system message merged into the next one, or
+/// @d81235049): a leading system message merged into the next one, or
 /// dropped when it is alone.
 fn systemMessageNotSupported(a: Allocator, messages: *Value) Error!void {
     if (messages.empty()) return;
@@ -470,7 +470,7 @@ fn systemMessageNotSupported(a: Allocator, messages: *Value) Error!void {
     }
 }
 
-/// Ports `workaround`'s `requires_non_null_content` (chat.cpp:1032 @7fe450e19).
+/// Ports `workaround`'s `requires_non_null_content` (chat.cpp:1032 @d81235049).
 fn requiresNonNullContent(a: Allocator, messages: *Value) Error!void {
     util.ggmlAssert(messages.isArray(), "messages.is_array()");
     var it = messages.items();
@@ -483,7 +483,7 @@ fn requiresNonNullContent(a: Allocator, messages: *Value) Error!void {
     }
 }
 
-/// Ports `workaround`'s `func_args_not_string` (chat.cpp:1041 @7fe450e19): a
+/// Ports `workaround`'s `func_args_not_string` (chat.cpp:1041 @d81235049): a
 /// tool call's string arguments parsed, for a template that reads them as
 /// an object.
 fn funcArgsNotString(a: Allocator, messages: *Value) Error!void {
@@ -510,7 +510,7 @@ fn funcArgsNotString(a: Allocator, messages: *Value) Error!void {
     }
 }
 
-/// Ports `workaround`'s `trim_all_content` (chat.cpp:1066 @7fe450e19): each
+/// Ports `workaround`'s `trim_all_content` (chat.cpp:1066 @d81235049): each
 /// message's content, reasoning and text parts trimmed.
 ///
 /// Return: copies owned by `a`.
@@ -534,7 +534,7 @@ fn trimAllContent(a: Allocator, messages: []const Msg) Error![]Msg {
 // -----------------------------------------------------------------------------
 // apply
 
-/// Ports `common_chat_try_specialized_template` (chat.cpp:1090 @7fe450e19):
+/// Ports `common_chat_try_specialized_template` (chat.cpp:1090 @d81235049):
 /// a hand-written parser for the templates the auto-parser cannot read,
 /// chosen by what the source holds.
 ///
@@ -548,6 +548,12 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
     {
         log.dbg("Using specialized template: Ministral/Magistral Large 3\n", .{});
         return try parsers.ministral3.init(a, tmpl, params);
+    }
+
+    // LLM-jp-4.1 - GPT-OSS dialect (spaces after special tokens, <|end|>-separated parallel calls)
+    if (has(src, "chat_format=llm-jp-harmony-v1")) {
+        log.dbg("Using specialized template: LLM-jp Harmony v1\n", .{});
+        return try parsers.llm_jp_harmony.init(a, tmpl, params);
     }
 
     // GPT-OSS - has unique channel-based structure that needs dedicated handler
@@ -705,7 +711,7 @@ fn sortedKwargs(a: Allocator, kwargs: []const KwArg) Error![]KwArg {
     return sorted;
 }
 
-/// Ports `common_chat_templates_apply_jinja` (chat.cpp:1225 @7fe450e19).
+/// Ports `common_chat_templates_apply_jinja` (chat.cpp:1231 @d81235049).
 fn applyJinja(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesInputs) Error!ChatParams {
     var params: GenerationParams = .{};
     params.tools = try msg_mod.toolsToJsonOaicompat(a, inputs.tools);
@@ -859,7 +865,7 @@ fn autoParse(a: Allocator, tmpl: *const Template, params: *const GenerationParam
     return auto_params;
 }
 
-/// Ports `common_chat_templates_apply_legacy` (chat.cpp:1369 @7fe450e19):
+/// Ports `common_chat_templates_apply_legacy` (chat.cpp:1375 @d81235049):
 /// the conversation through libllama's built-in template families, and the
 /// grammar from the JSON schema.
 fn applyLegacy(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesInputs) Error!ChatParams {
@@ -926,7 +932,7 @@ fn applyLegacy(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesIn
     return params;
 }
 
-/// Ports `common_chat_templates_apply` (chat.cpp:1434 @7fe450e19): the
+/// Ports `common_chat_templates_apply` (chat.cpp:1440 @d81235049): the
 /// conversation rendered, and how to read the reply.
 ///
 /// Parameters:

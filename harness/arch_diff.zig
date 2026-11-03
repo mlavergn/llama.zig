@@ -5,7 +5,7 @@
 //! `harness/arch_ref.cpp`, beside the Zig through `src/llama/harness_root.zig`, and
 //! asks both the same questions:
 //!
-//! - every architecture's name and its five predicates, and `llm_arch_all`;
+//! - every architecture's name and its six predicates, and `llm_arch_all`;
 //! - `llm_arch_from_string` on every name and on near misses;
 //! - every metadata key's name for every architecture, bare and with a
 //!   suffix;
@@ -74,7 +74,8 @@ fn flags(a: A.Arch) c_int {
         @as(c_int, @intFromBool(A.isHybrid(a))) << 1 |
         @as(c_int, @intFromBool(A.isDiffusion(a))) << 2 |
         @as(c_int, @intFromBool(A.supportsRsRollback(a))) << 3 |
-        @as(c_int, @intFromBool(A.supportsSmTensor(a))) << 4;
+        @as(c_int, @intFromBool(A.supportsSmTensor(a))) << 4 |
+        @as(c_int, @intFromBool(A.supportsMixedBatch(a))) << 5;
 }
 
 // -----------------------------------------------------------------------------

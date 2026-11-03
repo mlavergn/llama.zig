@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.5.0
-//! (`7fe450e19`): `ggml_backend_vk_device_supports_op`. The device vtable
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.6.0
+//! (`d81235049`): `ggml_backend_vk_device_supports_op`. The device vtable
 //! answers this AND-ed with `ops.ported`, so the scheduler sends nothing to
 //! host code the port does not have yet.
 
@@ -38,7 +38,7 @@ const quant_types = [_]c.ggml_type{
 /// The types a CPY converts f32 to and from.
 const cpy_types = [_]c.ggml_type{ c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0, c.GGML_TYPE_IQ4_NL };
 
-/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15024 @7fe450e19).
+/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15324 @d81235049).
 pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
     const device = m.device.getDevice(dev_idx);
 
@@ -107,6 +107,8 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
                 !(m.op_pipeline.dim01Contiguous(s(op, 1)) or isAny(s(op, 1).type, &.{ F32, F16 }))) return false;
             // No bf16 x f16 shader, nor an fp16->bf16 copy shader.
             if (t0 == BF16 and s(op, 1).type == F16) return false;
+            // BF16 in src1 is only served by the BF16 x BF16 pipelines
+            if (s(op, 1).type == BF16 and t0 != BF16) return false;
             return true;
         },
         c.GGML_OP_FLASH_ATTN_EXT => {
@@ -163,7 +165,7 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
             if (!c.ggml_is_contiguous(op) or !c.ggml_is_contiguous(s(op, 0))) return false;
             // pipeline_argsort_large_f32 requires vulkan memory model.
             if (device.vulkan_memory_model) return true;
-            return op.ne[0] <= (@as(i64, 1) << @intCast(device.max_workgroup_size_log2));
+            return op.ne[0] <= (@as(i64, 1) << @intCast(@min(device.max_workgroup_size_log2, m.device.num_argsort_pipelines - 1)));
         },
         c.GGML_OP_TOP_K => {
             if (!c.ggml_is_contiguous(op) or !c.ggml_is_contiguous(s(op, 0))) return false;

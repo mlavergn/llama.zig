@@ -6,7 +6,7 @@
 // Decisions 25 and 27). This compiles the unmodified engine and renders a
 // template the way `common_chat_template` and
 // `common_chat_template_direct_apply_impl` do (chat.h:58, chat.cpp:905
-// @7fe450e19): `lexer::tokenize`, `parse_from_tokens`, a `context` over the
+// @d81235049): `lexer::tokenize`, `parse_from_tokens`, a `context` over the
 // lexer's source, `global_from_json` with input marking on, `runtime::execute`
 // and `gather_string_parts`.
 //
@@ -80,7 +80,7 @@ extern "C" int jinja_ref_render(const char * tmpl, size_t tmpl_len, const char *
 }
 
 // The capabilities `jinja::caps_get` reads off `tmpl`, as
-// `common_chat_template`'s constructor computes them (chat.h:59 @7fe450e19),
+// `common_chat_template`'s constructor computes them (chat.h:59 @d81235049),
 // in `caps::to_map`'s order: one byte each. Returns 1 if the template fails
 // to lex or parse.
 extern "C" int jinja_ref_caps(const char * tmpl, size_t tmpl_len, unsigned char * out) {

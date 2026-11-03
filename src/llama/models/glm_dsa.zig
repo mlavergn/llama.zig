@@ -10,8 +10,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/glm-dsa.cpp` at v0.5.0
-//! (`7fe450e19`): `GLM_5_2_DEFAULT_INDEXER_TYPES`, `llama_model_glm_dsa`'s
+//! Ported from `llama.cpp/src/models/glm-dsa.cpp` at v0.6.0
+//! (`d81235049`): `GLM_5_2_DEFAULT_INDEXER_TYPES`, `llama_model_glm_dsa`'s
 //! `load_arch_hparams`, `load_arch_tensors` and `build_arch_graph`, and its
 //! `graph` and `graph_mtp`.
 
@@ -28,7 +28,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Mirrors `GLM_5_2_DEFAULT_INDEXER_TYPES` (models/glm-dsa.cpp:6 @7fe450e19):
+/// Mirrors `GLM_5_2_DEFAULT_INDEXER_TYPES` (models/glm-dsa.cpp:6 @d81235049):
 /// GLM-5.2's indexer types, a full indexer every fourth layer after the
 /// first two
 /// (https://huggingface.co/zai-org/GLM-5.2/blob/main/config.json#L26).
@@ -41,7 +41,7 @@ const glm_5_2_default_indexer_types: [hparams_mod.max_layers]u32 = blk: {
     break :blk t;
 };
 
-/// Ports `llama_model_glm_dsa`'s `load_arch_hparams` (models/glm-dsa.cpp:29 @7fe450e19).
+/// Ports `llama_model_glm_dsa`'s `load_arch_hparams` (models/glm-dsa.cpp:29 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -91,7 +91,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_glm_dsa`'s `load_arch_tensors` (models/glm-dsa.cpp:74 @7fe450e19).
+/// Ports `llama_model_glm_dsa`'s `load_arch_tensors` (models/glm-dsa.cpp:74 @d81235049).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -231,12 +231,13 @@ const variant: deepseek32.Variant = .{
     .line_prev_top_k = 364,
     .line_mtp = 541,
     .line_mtp_inp = 573,
-    .line_mtp_head_norm = 752,
-    .line_mtp_head = 763,
+    .line_mtp_embd_or_token = 582,
+    .line_mtp_head_norm = 753,
+    .line_mtp_head = 764,
 };
 
 /// Ports `llama_model_glm_dsa`'s `build_arch_graph` (models/glm-dsa.cpp:189
-/// @7fe450e19): the MTP draft head for that graph type, the main model
+/// @d81235049): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -244,7 +245,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_glm_dsa`'s `graph`
-/// (models/glm-dsa.cpp:196 @7fe450e19): DeepSeek V3.2's, with the indexer
+/// (models/glm-dsa.cpp:196 @d81235049): DeepSeek V3.2's, with the indexer
 /// roped in the normal layout and the shared indexer layers reusing the
 /// previous full layer's top-k.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
@@ -252,7 +253,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_glm_dsa`'s `graph_mtp`
-/// (models/glm-dsa.cpp:539 @7fe450e19): DeepSeek V3.2's, whose DSA indexer
+/// (models/glm-dsa.cpp:539 @d81235049): DeepSeek V3.2's, whose DSA indexer
 /// does not run either.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     deepseek32.buildGraphMtp(variant, model, b);

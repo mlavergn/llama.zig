@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.5.0
-//! (`7fe450e19`), where they are new. Each declaration below names the C++
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.6.0
+//! (`d81235049`), where they are new. Each declaration below names the C++
 //! it replaces and the line it began at.
 //!
 //! # One sign bit per weight
@@ -85,7 +85,7 @@ inline fn colScales(b: *const blocks.block_q1_0x4) [4]f32 {
     };
 }
 
-/// Ports `ggml_gemv_q1_0_4x4_q8_0_generic` (ggml-cpu/repack.cpp:1368 @7fe450e19).
+/// Ports `ggml_gemv_q1_0_4x4_q8_0_generic` (ggml-cpu/repack.cpp:1368 @d81235049).
 pub export fn ggml_gemv_q1_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     _ = bs;
     _ = nr;
@@ -131,7 +131,7 @@ pub export fn ggml_gemv_q1_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx
     }
 }
 
-/// Ports `ggml_gemv_q1_0_4x8_q8_0_generic` (ggml-cpu/repack.cpp:1431 @7fe450e19).
+/// Ports `ggml_gemv_q1_0_4x8_q8_0_generic` (ggml-cpu/repack.cpp:1431 @d81235049).
 pub export fn ggml_gemv_q1_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     _ = bs;
     _ = nr;
@@ -178,7 +178,7 @@ pub export fn ggml_gemv_q1_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx
     }
 }
 
-/// Ports `ggml_gemm_q1_0_4x4_q8_0_generic` (ggml-cpu/repack.cpp:2513 @7fe450e19).
+/// Ports `ggml_gemm_q1_0_4x4_q8_0_generic` (ggml-cpu/repack.cpp:2513 @d81235049).
 pub export fn ggml_gemm_q1_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     const qk: c_int = QK1_0;
     const nb: usize = @intCast(@divTrunc(n, qk));
@@ -244,7 +244,7 @@ pub export fn ggml_gemm_q1_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx
     }
 }
 
-/// Ports `ggml_gemm_q1_0_4x8_q8_0_generic` (ggml-cpu/repack.cpp:2598 @7fe450e19).
+/// Ports `ggml_gemm_q1_0_4x8_q8_0_generic` (ggml-cpu/repack.cpp:2598 @d81235049).
 pub export fn ggml_gemm_q1_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     const qk: c_int = QK1_0;
     const nb: usize = @intCast(@divTrunc(n, qk));

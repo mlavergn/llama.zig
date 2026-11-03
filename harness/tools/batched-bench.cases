@@ -13,7 +13,7 @@
 -m $FIX/qwen3-dense.gguf -c 256 -npp 16 -ntg 8 -npl 1,2,4 -pps -kvu
 -m $FIX/qwen3-dense.gguf -c 256 -npp 16 -ntg 4 -npl 2,3 -tgs
 -m $FIX/llama-dense.gguf -c 128 -b 8 -ub 4 -npp 12,100 -ntg 6 -npl 1,8 --output-format jsonl
--m $FIX/llama-dense.gguf -c 128 -npp 12 -ntg 6 -npl 1 --output-format csv
+!fail -m $FIX/llama-dense.gguf -c 128 -npp 12 -ntg 6 -npl 1 --output-format csv
 -m $FIX/mamba-dense.gguf -c 256 -npp 8 -ntg 4 -npl 1,2 -t 2
 -m $FIX/qwen3moe-moe.gguf -c 256 -npp 8 -ntg 4 -npl 2 -ngl 0 -fa off
-~ -m /nonexistent/model.gguf -npp 8 -ntg 4 -npl 1
+!fail ~ -m /nonexistent/model.gguf -npp 8 -ntg 4 -npl 1

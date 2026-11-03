@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/conformer.cpp` at v0.5.0
-//! (`7fe450e19`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/conformer.cpp` at v0.6.0
+//! (`d81235049`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -16,7 +16,7 @@ const c = impl.c;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// Ports `build` (conformer.cpp:3 @7fe450e19), a member of
+/// Ports `build` (conformer.cpp:3 @d81235049), a member of
 /// `clip_graph_conformer`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
@@ -150,8 +150,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
                 const pos_len = ne(matrix_bd, 0);
                 const q_len = ne(matrix_bd, 1);
                 const h = ne(matrix_bd, 2);
-                matrix_bd = c.ggml_pad(ctx0, matrix_bd, 1, 0, 0, 0);
-                matrix_bd = c.ggml_roll(ctx0, matrix_bd, 1, 0, 0, 0);
+                matrix_bd = c.ggml_pad_ext(ctx0, matrix_bd, 1, 0, 0, 0, 0, 0, 0, 0);
                 matrix_bd = c.ggml_reshape_3d(ctx0, matrix_bd, q_len, pos_len + 1, h);
                 matrix_bd = c.ggml_view_3d(ctx0, matrix_bd, q_len, pos_len, h, nb(matrix_bd, 1), nb(matrix_bd, 2), nb(matrix_bd, 0) * @as(usize, @intCast(q_len)));
                 matrix_bd = c.ggml_cont_3d(ctx0, matrix_bd, pos_len, q_len, h);

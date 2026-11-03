@@ -2,9 +2,12 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-batch.cpp` (v0.5.0, `7fe450e19`):
-//! `llama_batch_get_one`, `llama_batch_init` and `llama_batch_free`, its
-//! three unmangled exports. The bodies are `batch.zig`'s.
+//! Ported from `llama.cpp/src/llama-batch.cpp` (v0.6.0, `d81235049`):
+//! `llama_batch_get_one`, `llama_batch_init` and `llama_batch_free`, the
+//! twelve `llama_batch_ext_*` functions of `llama.h`'s extended batch API,
+//! and `llama_batch_ext_set_decision_order`, which `llama-ext.h` declares
+//! with C++ linkage and `exports.zig` therefore leaves unexported. The
+//! bodies are `batch.zig`'s.
 //!
 //! Each function has the C signature and is `pub`, not `export`: the
 //! in-process harnesses call these beside the C++ that defines the same
@@ -13,22 +16,128 @@
 const std = @import("std");
 const impl = @import("../impl.zig");
 const batch = @import("../batch.zig");
+const context = @import("context.zig");
 
 const c = impl.c;
+const BatchExt = batch.BatchExt;
 
-/// Ports `llama_batch_get_one` (llama-batch.cpp:931 @7fe450e19).
+/// The port's batch behind a `llama_batch_ext *`.
+pub fn batchOf(b: ?*const c.struct_llama_batch_ext) *BatchExt {
+    return @ptrCast(@alignCast(@constCast(b.?)));
+}
+
+/// Ports `llama_batch_get_one` (llama-batch.cpp:1051 @d81235049).
 pub fn llama_batch_get_one(tokens: [*c]c.llama_token, n_tokens: i32) callconv(.c) c.struct_llama_batch {
     return batch.batchGetOne(tokens, n_tokens);
 }
 
-/// Ports `llama_batch_init` (llama-batch.cpp:945 @7fe450e19).
+/// Ports `llama_batch_init` (llama-batch.cpp:1065 @d81235049).
 pub fn llama_batch_init(n_tokens: i32, embd: i32, n_seq_max: i32) callconv(.c) c.struct_llama_batch {
     return batch.batchInit(n_tokens, embd, n_seq_max);
 }
 
-/// Ports `llama_batch_free` (llama-batch.cpp:975 @7fe450e19).
+/// Ports `llama_batch_free` (llama-batch.cpp:1095 @d81235049).
 pub fn llama_batch_free(b: c.struct_llama_batch) callconv(.c) void {
     batch.batchFree(b);
+}
+
+/// Ports `llama_batch_ext_init` (llama-batch.cpp:1272 @d81235049).
+pub fn llama_batch_ext_init(ctx: ?*c.struct_llama_context) callconv(.c) ?*c.struct_llama_batch_ext {
+    return @ptrCast(context.ctxOf(ctx).batchExtCreate());
+}
+
+/// Ports `llama_batch_ext_free` (llama-batch.cpp:1276 @d81235049).
+pub fn llama_batch_ext_free(b: ?*c.struct_llama_batch_ext) callconv(.c) void {
+    if (b != null) batchOf(b).destroy();
+}
+
+/// Ports `llama_batch_ext_clear` (llama-batch.cpp:1280 @d81235049).
+pub fn llama_batch_ext_clear(b: ?*c.struct_llama_batch_ext) callconv(.c) void {
+    batchOf(b).clear();
+}
+
+/// Ports `llama_batch_ext_add` (llama-batch.cpp:1284 @d81235049).
+pub fn llama_batch_ext_add(b: ?*c.struct_llama_batch_ext, seq_id: c.llama_seq_id) callconv(.c) i32 {
+    return batchOf(b).addToken(seq_id);
+}
+
+/// Ports `llama_batch_ext_add_token` (llama-batch.cpp:1288 @d81235049).
+pub fn llama_batch_ext_add_token(b: ?*c.struct_llama_batch_ext, seq_id: c.llama_seq_id, id: c.llama_token) callconv(.c) i32 {
+    const self = batchOf(b);
+    const idx = self.addToken(seq_id);
+    if (idx < 0) {
+        return idx;
+    }
+    if (!self.setTokenId(idx, id)) {
+        return -2;
+    }
+    return idx;
+}
+
+/// Ports `llama_batch_ext_add_embd` (llama-batch.cpp:1299 @d81235049).
+pub fn llama_batch_ext_add_embd(b: ?*c.struct_llama_batch_ext, seq_id: c.llama_seq_id, embd: c.struct_llama_embd) callconv(.c) i32 {
+    const self = batchOf(b);
+    const idx = self.addToken(seq_id);
+    if (idx < 0) {
+        return idx;
+    }
+    if (!self.setTokenEmbd(idx, embd)) {
+        return -2;
+    }
+    return idx;
+}
+
+/// Ports `llama_batch_ext_add_seq` (llama-batch.cpp:1310 @d81235049).
+pub fn llama_batch_ext_add_seq(b: ?*c.struct_llama_batch_ext, idx: i32, seq_id: c.llama_seq_id) callconv(.c) bool {
+    return batchOf(b).addSeq(idx, seq_id);
+}
+
+/// Ports `llama_batch_ext_set_pos` (llama-batch.cpp:1314 @d81235049).
+pub fn llama_batch_ext_set_pos(b: ?*c.struct_llama_batch_ext, idx: i32, pos: [*c]const c.llama_pos) callconv(.c) bool {
+    return batchOf(b).setTokenPos(idx, pos);
+}
+
+/// Ports `llama_batch_ext_set_embd_token` (llama-batch.cpp:1318 @d81235049).
+pub fn llama_batch_ext_set_embd_token(b: ?*c.struct_llama_batch_ext, idx: i32, embd: c.struct_llama_embd) callconv(.c) bool {
+    return batchOf(b).setTokenEmbd(idx, embd);
+}
+
+/// Ports `llama_batch_ext_set_embd_state` (llama-batch.cpp:1322 @d81235049):
+/// not implemented upstream yet, and always false.
+pub fn llama_batch_ext_set_embd_state(b: ?*c.struct_llama_batch_ext, idx: i32, embd: c.struct_llama_embd) callconv(.c) bool {
+    _ = b;
+    _ = idx;
+    _ = embd;
+    return false;
+}
+
+/// Ports `llama_batch_ext_set_output_embd` (llama-batch.cpp:1330 @d81235049).
+pub fn llama_batch_ext_set_output_embd(b: ?*c.struct_llama_batch_ext, idx: i32, value: bool) callconv(.c) bool {
+    return batchOf(b).setOutput(idx, value);
+}
+
+/// Ports `llama_batch_ext_set_output_logits` (llama-batch.cpp:1334 @d81235049).
+pub fn llama_batch_ext_set_output_logits(b: ?*c.struct_llama_batch_ext, idx: i32, value: bool) callconv(.c) bool {
+    return batchOf(b).setOutput(idx, value);
+}
+
+/// `llama-ext.h`'s `enum llama_decision_order` (llama-ext.h:107
+/// @d81235049): which entries a joint decision head (clef) reads. A run of
+/// entries with one value is a span, spans are separated by `none`, and an
+/// option belongs to the last question before it.
+pub const llama_decision_order = enum(c_uint) {
+    none = 0,
+    question_noul = 1,
+    question_choice = 2,
+    question_score = 3,
+    option = 4,
+    _,
+};
+
+/// Ports `llama_batch_ext_set_decision_order` (llama-batch.cpp:1338
+/// @d81235049), from `llama-ext.h`: C++ linkage, so not exported.
+pub fn llama_batch_ext_set_decision_order(b: ?*c.struct_llama_batch_ext, idx: i32, order: llama_decision_order) callconv(.c) bool {
+    return batchOf(b).setDecisionOrder(idx, @bitCast(@backingInt(order)));
 }
 
 // -----------------------------------------------------------------------------

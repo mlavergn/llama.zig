@@ -5,11 +5,11 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cuh` at v0.5.0 (`7fe450e19`). The
+//! `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cuh` at v0.6.0 (`d81235049`). The
 //! kernels -- `ssm_scan_f32`, `ssm_scan_f32_group` and the four
 //! `ssm_ssd_*` kernels -- stay CUDA. The SSD arm is the C's
-//! `!defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)` one, which this
-//! build compiles.
+//! `!defined(GGML_USE_HIP)` one (v0.6.0 dropped its MUSA exclusion), which
+//! this build compiles. v0.6.0 added `d_state == 96` to Mamba-2.
 //!
 //! # The cuBLAS handle's stream
 //!
@@ -28,15 +28,15 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `SSM_SSD_MIN_TOKENS` (ssm-scan.cu:15 @7fe450e19).
+/// Ports `SSM_SSD_MIN_TOKENS` (ssm-scan.cu:15 @d81235049).
 const ssd_min_tokens = 128;
-/// Ports `SSM_SSD_DT_BLOCK` (ssm-scan.cu:18 @7fe450e19).
+/// Ports `SSM_SSD_DT_BLOCK` (ssm-scan.cu:18 @d81235049).
 const ssd_dt_block = 256;
-/// Ports `SSM_SSD_DT_MAX_ITEMS` (ssm-scan.cu:19 @7fe450e19).
+/// Ports `SSM_SSD_DT_MAX_ITEMS` (ssm-scan.cu:19 @d81235049).
 const ssd_dt_max_items = 32;
-/// Ports `SSM_SSD_MAX_TOKENS` (ssm-scan.cu:22 @7fe450e19).
+/// Ports `SSM_SSD_MAX_TOKENS` (ssm-scan.cu:22 @d81235049).
 const ssd_max_tokens = ssd_dt_block * ssd_dt_max_items;
-/// Ports `SSM_SSD_CHUNK_SIZE` (ssm-scan.cu:25 @7fe450e19).
+/// Ports `SSM_SSD_CHUNK_SIZE` (ssm-scan.cu:25 @d81235049).
 const ssd_chunk_size = 256;
 
 const int_max: usize = std.math.maxInt(c_int);
@@ -62,7 +62,7 @@ fn at(p: anytype, off: i64) @TypeOf(p) {
     return if (off >= 0) p + @as(usize, @intCast(off)) else p - @as(usize, @intCast(-off));
 }
 
-/// Ports `ssm_scan_f32_cuda` (ssm-scan.cu:239 @7fe450e19).
+/// Ports `ssm_scan_f32_cuda` (ssm-scan.cu:245 @d81235049).
 fn ssmScanF32Cuda(
     src0: ?*const anyopaque,
     src1: ?*const anyopaque,
@@ -98,7 +98,18 @@ fn ssmScanF32Cuda(
     // NOTE: if you change conditions here, be sure to update the corresponding supports_op condition!
     if (src3_nb1 == @sizeOf(f32)) {
         // Mamba-2
-        if (d_state == 128) {
+        if (d_state == 96) {
+            const threads = 96;
+            const num_warps = threads / common.warp_size;
+
+            const blocks: kernels.Dim3 = .{ .x = dim(@divTrunc(n_head * head_dim + (num_warps - 1), num_warps)), .y = dim(n_seq), .z = 1 };
+            kernels.launchPdl(kernels.get("ssm-scan", kernels.tmpl("ssm_scan_f32_group", &.{ kernels.int(96 / common.warp_size), kernels.int(96) })), .{
+                .grid = blocks,
+                .block = .{ .x = threads },
+                .shmem = 0,
+                .stream = stream,
+            }, ptrs ++ nbs ++ .{ s_off, n_head, head_dim, n_group, n_tok, K });
+        } else if (d_state == 128) {
             const threads = 128;
             const num_warps = threads / common.warp_size;
 
@@ -121,7 +132,7 @@ fn ssmScanF32Cuda(
                 .stream = stream,
             }, ptrs ++ nbs ++ .{ s_off, n_head, head_dim, n_group, n_tok, K });
         } else {
-            impl.abort("doesn't support d_state!=(128 or 256).");
+            impl.abort("doesn't support d_state!=(96, 128 or 256).");
         }
     } else {
         // Mamba-1
@@ -148,7 +159,7 @@ fn scanKernel(comptime threads: comptime_int, comptime l: comptime_int) kernels.
     return kernels.get("ssm-scan", kernels.tmpl("ssm_scan_f32", &.{ kernels.ulong(threads), kernels.ulong(16), kernels.ulong(l) }));
 }
 
-/// Ports `ssm_scan_ssd_f32_cuda` (ssm-scan.cu:576 @7fe450e19): the SSD
+/// Ports `ssm_scan_ssd_f32_cuda` (ssm-scan.cu:592 @d81235049): the SSD
 /// dispatch for Mamba-2 prefill. All strides are in elements, not bytes.
 fn ssmScanSsdF32Cuda(
     ctx: *common.Context,
@@ -364,7 +375,7 @@ fn ssmScanSsdF32Cuda(
     }
 }
 
-/// Ports `ggml_cuda_op_ssm_scan` (ssm-scan.cu:767 @7fe450e19).
+/// Ports `ggml_cuda_op_ssm_scan` (ssm-scan.cu:783 @d81235049).
 pub fn opSsmScan(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]); // s
     const src1 = impl.one(Tensor, dst.src[1]); // x

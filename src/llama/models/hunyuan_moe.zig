@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/hunyuan-moe.cpp` at v0.5.0
-//! (`7fe450e19`): `llama_model_hunyuan_moe`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/hunyuan-moe.cpp` at v0.6.0
+//! (`d81235049`): `llama_model_hunyuan_moe`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_hunyuan_moe`'s `load_arch_hparams` (models/hunyuan-moe.cpp:3 @7fe450e19).
+/// Ports `llama_model_hunyuan_moe`'s `load_arch_hparams` (models/hunyuan-moe.cpp:3 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -35,7 +35,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_hunyuan_moe`'s `load_arch_tensors` (models/hunyuan-moe.cpp:14 @7fe450e19).
+/// Ports `llama_model_hunyuan_moe`'s `load_arch_tensors` (models/hunyuan-moe.cpp:14 @d81235049).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -78,13 +78,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_hunyuan_moe`'s `build_arch_graph` (models/hunyuan-moe.cpp:52 @7fe450e19).
+/// Ports `llama_model_hunyuan_moe`'s `build_arch_graph` (models/hunyuan-moe.cpp:52 @d81235049).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_hunyuan_moe`'s `graph`
-/// (models/hunyuan-moe.cpp:56 @7fe450e19).
+/// (models/hunyuan-moe.cpp:56 @d81235049).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

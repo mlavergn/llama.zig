@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/gemma4a.cpp` at v0.5.0 (`7fe450e19`).
+//! Ports `llama.cpp/tools/mtmd/models/gemma4a.cpp` at v0.6.0 (`d81235049`).
 //! Each declaration names what it ports and the line it began at.
 //!
 //! Upstream overrides the virtual `build_mm`; here `build` installs
@@ -24,17 +24,14 @@ extern fn sqrtf(x: f32) f32;
 extern fn logf(x: f32) f32;
 extern fn expf(x: f32) f32;
 
-/// The `extract_blocks` lambda (gemma4a.cpp:122 @7fe450e19) of `build`:
-/// K/V block context through an overlapping view. Pad to S*B elements,
-/// roll right by P to create left-padding, then view with stride C in the
-/// block dimension.
+/// The `extract_blocks` lambda (gemma4a.cpp:122 @d81235049) of `build`:
+/// K/V block context through an overlapping view. Left pad by P and right
+/// pad to S*B elements, then view with stride C in the block dimension.
 fn extractBlocks(g: *const graph.Graph, t_in: T, S: i64, B: i64, P: i64, C: i64, n_pos: i64) T {
     const ctx0 = g.ctx0;
-    // [D, H, N] -> pad to S*B -> roll right by P -> cont (materialize)
+    // [D, H, N] -> left pad by P, right pad to S*B
     const pad_kv = S * B - n_pos;
-    var t = c.ggml_pad(ctx0, t_in, 0, 0, @intCast(pad_kv), 0); // [D, H, S*B]
-    t = c.ggml_roll(ctx0, t, 0, 0, @intCast(P), 0); // left-pad by P
-    t = c.ggml_cont(ctx0, t); // materialize roll (removes view offset)
+    var t = c.ggml_pad_ext(ctx0, t_in, 0, 0, 0, 0, @truncate(P), @truncate(pad_kv - P), 0, 0); // [D, H, S*B]
     // Overlapping view: stride for B dim is C positions, not S
     // ne = [D, H, S, B], data_size = D*H*S*B*sizeof = source_nbytes (exact fit)
     // nb1=D*sizeof, nb2=D*H*sizeof, nb3=C*D*H*sizeof (overlap: C < S)
@@ -43,7 +40,7 @@ fn extractBlocks(g: *const graph.Graph, t_in: T, S: i64, B: i64, P: i64, C: i64,
     return t;
 }
 
-/// Ports `build` (gemma4a.cpp:11 @7fe450e19), a member of
+/// Ports `build` (gemma4a.cpp:11 @d81235049), a member of
 /// `clip_graph_gemma4a`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
@@ -241,9 +238,8 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
                 x = c.ggml_cont(ctx0, c.ggml_transpose(ctx0, x));
             }
 
-            // Causal depthwise Conv1D via ggml_ssm_conv (pad+roll for left-only padding).
-            x = c.ggml_pad(ctx0, x, 4, 0, 0, 0);
-            x = c.ggml_roll(ctx0, x, 4, 0, 0, 0);
+            // Causal depthwise Conv1D via ggml_ssm_conv, left padded only.
+            x = c.ggml_pad_ext(ctx0, x, 4, 0, 0, 0, 0, 0, 0, 0);
             x = c.ggml_ssm_conv(ctx0, x, layer.conv_dw_w);
             if (layer.conv_dw_b != null) {
                 x = c.ggml_add(ctx0, x, layer.conv_dw_b);
@@ -293,7 +289,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     return g.gf;
 }
 
-/// Ports `build_mm` (gemma4a.cpp:279 @7fe450e19), a member of
+/// Ports `build_mm` (gemma4a.cpp:276 @d81235049), a member of
 /// `clip_graph_gemma4a`: a Gemma4ClippableLinear clamps its input and
 /// output to the bounds the model file records for that weight.
 ///

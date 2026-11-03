@@ -9,6 +9,7 @@
 //! Usage:
 //!   metal_embed <kind> <out.metal> <out.s> <ggml-common.h> <ggml-metal-impl.h>
 //!               <kernels/common.h> <kernels/dequantize.h> <kernels/quantize.h>
+//!               <kernels/fa_common.metal> <kernels/fa_vec_common.metal>
 //!               <kernels/{kind}.metal>
 
 const std = @import("std");
@@ -19,6 +20,8 @@ const stripped_includes = [_][]const u8{
     "#include \"common.h\"",
     "#include \"dequantize.h\"",
     "#include \"quantize.h\"",
+    "#include \"fa_common.metal\"",
+    "#include \"fa_vec_common.metal\"",
 };
 
 /// Sentinel in `kernels/dequantize.h` marking where `ggml-common.h` belongs.
@@ -38,7 +41,7 @@ pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    if (args.len != 10) return error.BadUsage;
+    if (args.len != 12) return error.BadUsage;
 
     const kind = args[1];
     const out_metal = args[2];
@@ -56,7 +59,11 @@ pub fn main(init: std.process.Init) !void {
     defer gpa.free(dequantize);
     const quantize = try cwd.readFileAlloc(io, args[8], gpa, limit);
     defer gpa.free(quantize);
-    const source = try cwd.readFileAlloc(io, args[9], gpa, limit);
+    const fa_common = try cwd.readFileAlloc(io, args[9], gpa, limit);
+    defer gpa.free(fa_common);
+    const fa_vec_common = try cwd.readFileAlloc(io, args[10], gpa, limit);
+    defer gpa.free(fa_vec_common);
+    const source = try cwd.readFileAlloc(io, args[11], gpa, limit);
     defer gpa.free(source);
 
     // Only prepend the headers this kernel actually includes. Prepending all of
@@ -73,6 +80,16 @@ pub fn main(init: std.process.Init) !void {
     }
     if (std.mem.find(u8, source, "#include \"quantize.h\"") != null) {
         try joined.appendSlice(gpa, quantize);
+        try joined.append(gpa, '\n');
+    }
+    // The flash-attention kernels share two bodies since v0.6.0, prepended in
+    // the order ggml-metal/CMakeLists.txt:106-113 tests for them.
+    if (std.mem.find(u8, source, "#include \"fa_common.metal\"") != null) {
+        try joined.appendSlice(gpa, fa_common);
+        try joined.append(gpa, '\n');
+    }
+    if (std.mem.find(u8, source, "#include \"fa_vec_common.metal\"") != null) {
+        try joined.appendSlice(gpa, fa_vec_common);
         try joined.append(gpa, '\n');
     }
     try joined.appendSlice(gpa, source);

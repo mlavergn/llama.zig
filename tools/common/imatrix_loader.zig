@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/imatrix-loader.cpp` and the struct and keys of
-//! `common/imatrix-loader.h` (v0.5.0, `7fe450e19`). Each declaration names
+//! `common/imatrix-loader.h` (v0.6.0, `d81235049`). Each declaration names
 //! what it ports and the line it began at.
 //!
 //! # `std::map` order
@@ -19,18 +19,23 @@ const log = @import("log.zig");
 const strings = @import("strings.zig");
 
 /// `LLM_KV_IMATRIX_DATASETS`, `LLM_KV_IMATRIX_CHUNK_COUNT`, `LLM_KV_IMATRIX_CHUNK_SIZE`
-/// (imatrix-loader.h:8, 9, 10 @7fe450e19).
+/// (imatrix-loader.h:8, 9, 10 @d81235049).
 pub const kv_datasets = "imatrix.datasets";
 pub const kv_chunk_count = "imatrix.chunk_count";
 pub const kv_chunk_size = "imatrix.chunk_size";
+/// `LLM_KV_IMATRIX_STATS_SCHEMA`, `LLM_KV_IMATRIX_N_LAYER_NEXTN`
+/// (imatrix-loader.h:11, 12 @d81235049).
+pub const kv_stats_schema = "imatrix.stats_schema";
+pub const kv_n_layer_nextn = "imatrix.n_layer_nextn";
 
-/// Ports `common_imatrix_entry` (imatrix-loader.h:12 @7fe450e19).
+/// Ports `common_imatrix_entry` (imatrix-loader.h:14 @d81235049).
 pub const Entry = struct {
     sums: std.ArrayList(f32) = .empty,
+    activations: std.ArrayList(f32) = .empty,
     counts: std.ArrayList(i64) = .empty,
 };
 
-/// Ports `common_imatrix` (imatrix-loader.h:17 @7fe450e19).
+/// Ports `common_imatrix` (imatrix-loader.h:20 @d81235049).
 pub const Imatrix = struct {
     allocator: std.mem.Allocator,
     /// `entries`, by name.
@@ -38,6 +43,7 @@ pub const Imatrix = struct {
     datasets: std.ArrayList([]const u8) = .empty,
     chunk_count: i32 = 0,
     chunk_size: i32 = 0,
+    n_layer_nextn: i32 = 0,
     is_legacy: bool = false,
     has_metadata: bool = false,
 
@@ -51,6 +57,7 @@ pub const Imatrix = struct {
         while (it.next()) |kv| {
             self.allocator.free(kv.key_ptr.*);
             kv.value_ptr.sums.deinit(self.allocator);
+            kv.value_ptr.activations.deinit(self.allocator);
             kv.value_ptr.counts.deinit(self.allocator);
         }
         self.entries.deinit(self.allocator);
@@ -117,7 +124,7 @@ const In = struct {
     }
 };
 
-/// Ports `common_imatrix_load_legacy` (imatrix-loader.cpp:10 @7fe450e19).
+/// Ports `common_imatrix_load_legacy` (imatrix-loader.cpp:10 @d81235049).
 fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     const func = "common_imatrix_load_legacy";
     const f = fopen(fname.ptr, "rb") orelse {
@@ -192,7 +199,7 @@ fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     return true;
 }
 
-/// Ports `common_imatrix_load` (imatrix-loader.cpp:82 @7fe450e19).
+/// Ports `common_imatrix_load` (imatrix-loader.cpp:82 @d81235049).
 ///
 /// Parameters:
 /// - `fname`: a GGUF imatrix, or the legacy format if it does not parse as one.
@@ -219,6 +226,7 @@ pub fn load(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     const datasets_key = c.gguf_find_key(ctx_gguf, kv_datasets);
     const chunk_count_key = c.gguf_find_key(ctx_gguf, kv_chunk_count);
     const chunk_size_key = c.gguf_find_key(ctx_gguf, kv_chunk_size);
+    const nextn_key = c.gguf_find_key(ctx_gguf, kv_n_layer_nextn);
 
     if (datasets_key != -1 and c.gguf_get_kv_type(ctx_gguf, datasets_key) == c.GGUF_TYPE_ARRAY and
         c.gguf_get_arr_type(ctx_gguf, datasets_key) == c.GGUF_TYPE_STRING)
@@ -233,9 +241,10 @@ pub fn load(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     imatrix.has_metadata = (datasets_key != -1 and chunk_count_key != -1 and chunk_size_key != -1);
     imatrix.chunk_count = if (chunk_count_key != -1) @bitCast(c.gguf_get_val_u32(ctx_gguf, chunk_count_key)) else 0;
     imatrix.chunk_size = if (chunk_size_key != -1) @bitCast(c.gguf_get_val_u32(ctx_gguf, chunk_size_key)) else 0;
+    imatrix.n_layer_nextn = if (nextn_key != -1) @bitCast(c.gguf_get_val_u32(ctx_gguf, nextn_key)) else 0;
 
-    // `sums_counts_for`: name -> (in_sum2, counts), walked in name order.
-    const Pair = struct { sums: ?*c.ggml_tensor = null, counts: ?*c.ggml_tensor = null };
+    // `sums_counts_for`: name -> `sum_tensors`, walked in name order.
+    const Pair = struct { in_sum: ?*c.ggml_tensor = null, sums: ?*c.ggml_tensor = null, counts: ?*c.ggml_tensor = null };
     var sums_counts_for: std.StringArrayHashMapUnmanaged(Pair) = .empty;
     defer {
         for (sums_counts_for.keys()) |k| a.free(k);
@@ -247,7 +256,14 @@ pub fn load(fname: [:0]const u8, imatrix: *Imatrix) !bool {
         const name = std.mem.sliceTo(&t.*.name, 0);
         if (name.len == 0) continue;
 
-        if (strings.removeSuffix(name, ".in_sum2")) |base| {
+        if (strings.removeSuffix(name, ".in_sum")) |base| {
+            const gop = try sums_counts_for.getOrPut(a, base);
+            if (!gop.found_existing) {
+                gop.key_ptr.* = try a.dupe(u8, base);
+                gop.value_ptr.* = .{};
+            }
+            gop.value_ptr.in_sum = t;
+        } else if (strings.removeSuffix(name, ".in_sum2")) |base| {
             const gop = try sums_counts_for.getOrPut(a, base);
             if (!gop.found_existing) {
                 gop.key_ptr.* = try a.dupe(u8, base);
@@ -273,10 +289,11 @@ pub fn load(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     sums_counts_for.sort(SortCtx{ .keys = sums_counts_for.keys() });
 
     for (sums_counts_for.keys(), sums_counts_for.values()) |name, sc| {
-        const in_sum2 = sc.sums orelse null;
-        const counts = sc.counts orelse null;
+        const in_sum = sc.in_sum;
+        const in_sum2 = sc.sums;
+        const counts = sc.counts;
 
-        if (in_sum2 == null or counts == null) {
+        if (in_sum2 == null or counts == null or (in_sum != null and c.ggml_nelements(in_sum) != c.ggml_nelements(in_sum2))) {
             log.err("%s: mismatched sums and counts for %.*s\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
             return false;
         }
@@ -299,6 +316,14 @@ pub fn load(fname: [:0]const u8, imatrix: *Imatrix) !bool {
         try e.counts.resize(a, ncounts);
         // `std::lround`: half away from zero.
         for (e.counts.items, counts_data[0..ncounts]) |*dst, v| dst.* = @intFromFloat(@round(v));
+
+        if (in_sum) |t| {
+            if (c.ggml_nelements(t) == @as(i64, @intCast(nval))) {
+                const act_data: [*]const f32 = @ptrCast(@alignCast(t.*.data));
+                try e.activations.resize(a, nval);
+                @memcpy(e.activations.items, act_data[0..nval]);
+            }
+        }
     }
 
     return true;

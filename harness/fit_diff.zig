@@ -283,7 +283,7 @@ const required = [_][]const u8{
     "user has requested full context size",
     "which is <= the min. context size",
     "context size set by user to",
-    "context size unset -> using",
+    "context size unset and KV cache not unified -> using",
     "was unable to fit model into system memory",
     "filling dense layers back-to-front",
     "filling dense-only layers back-to-front",

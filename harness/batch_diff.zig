@@ -7,6 +7,13 @@
 //! memory -- a table both sides' `seq_pos_min`/`seq_pos_max` read -- and
 //! compares:
 //!
+//! - since v0.6.0, the `llama_batch_ext` each side builds -- from a
+//!   `llama_batch` through `llama_batch_compat::init`, or call by call
+//!   through the twelve `llama_batch_ext_*` functions and
+//!   `llama_batch_ext_set_decision_order` -- every return value, and every
+//!   entry: id, embedding offset, output flag, decision order, the four
+//!   positions and the sequence ids in the `unordered_set`'s iteration
+//!   order; the embedding array; `n_embd`;
 //! - **everything logged**, level included, with `%p` values masked to
 //!   null or non-null: the errors and warning `init` raises, and under
 //!   `LLAMA_BATCH_DEBUG` the whole batch and ubatch dumps;
@@ -56,15 +63,39 @@ const RefUbatch = extern struct {
     seq_id_unq: [*c]c.llama_seq_id = null,
     seq_idx: [*c]i32 = null,
     output: [*c]i8 = null,
+    type: [*c]i8 = null,
+    decision_order: [*c]i32 = null,
     holder: ?*anyopaque = null,
 };
+
+const RefExtToken = extern struct {
+    id: c.llama_token,
+    has_embd: i32,
+    embd_off: u64,
+    output: i32,
+    decision_order: i32,
+    pos: [4]c.llama_pos,
+    n_seq: i32,
+    seq: [B.max_seq + 8]c.llama_seq_id,
+};
+
+const RefExt = c.struct_llama_batch_ext;
 
 extern fn ref_mem_set(s: c_int, p_min: c.llama_pos, p_max: c.llama_pos) void;
 extern fn ref_mem_min(s: c_int) c.llama_pos;
 extern fn ref_mem_max(s: c_int) c.llama_pos;
-extern fn ref_new(n_pos_per_embd: u32) *anyopaque;
+extern fn ref_new(n_pos_per_embd: u32, allow_mixed: c_int) *anyopaque;
 extern fn ref_delete(a: *anyopaque) void;
-extern fn ref_init(a: *anyopaque, batch: *const c.llama_batch, vocab: *const c.llama_vocab, use_memory: c_int, n_embd: u32, n_seq_max: u32, output_all: c_int) c_int;
+extern fn ref_init(a: *anyopaque, batch: *const RefExt, vocab: *const c.llama_vocab, output_all: c_int) c_int;
+extern fn ref_ext_new(n_tokens_max: usize, n_embd_inp: usize, n_embd_inp_enc: usize, n_seq_max: c.llama_seq_id, use_memory: c_int, n_vocab: c.llama_token, n_pos_per_embd: usize) *RefExt;
+extern fn ref_ext_free(b: *RefExt) void;
+extern fn ref_compat_init(b: *RefExt, batch: *const c.llama_batch, n_embd_row: usize) void;
+extern fn ref_ext_set_decision_order(b: *RefExt, idx: i32, order: i32) c_int;
+extern fn ref_ext_n_tokens(b: *const RefExt) usize;
+extern fn ref_ext_n_embd(b: *const RefExt) usize;
+extern fn ref_ext_embd(b: *const RefExt, data: *[*c]const f32) usize;
+extern fn ref_ext_token(b: *const RefExt, i: usize, out: *RefExtToken) void;
+extern fn ref_ubatch_batch_idxs(u: *const RefUbatch, idxs: *[*c]const i32) usize;
 extern fn ref_get_batch(a: *anyopaque, out: *c.llama_batch) void;
 extern fn ref_n_tokens(a: *anyopaque) u32;
 extern fn ref_n_outputs(a: *anyopaque) u32;
@@ -272,6 +303,111 @@ const Gen = struct {
         return items[self.below(items.len)];
     }
 
+    /// An embedding argument: `n_rows * n_embd` floats of `width` in all,
+    /// mostly; sometimes a wrong width or a null pointer.
+    fn embdArg(self: Gen, width: usize, other: usize) c.struct_llama_embd {
+        var total = if (self.chance(15)) other else width;
+        if (self.chance(8)) total = 1 + self.below(9);
+        var rows: usize = 1;
+        if (total > 1 and self.chance(30)) {
+            const d = 1 + self.below(@min(total, 4));
+            if (total % d == 0) rows = d;
+        }
+        const data = self.ar.alloc(f32, @max(total, 1)) catch unreachable;
+        for (data) |*x| x.* = self.r.float(f32) * 2 - 1;
+        return .{ .data = if (self.chance(4)) null else data.ptr, .n_rows = rows, .n_embd = total / rows };
+    }
+
+    /// A random extended batch built through the C API on both sides, each
+    /// call's answer and log compared: token, embedding, mixed or
+    /// token-and-embedding entries, with positions, extra sequences, output
+    /// flags and decision orders, and every kind of bad argument.
+    fn extInput(self: Gen, n_pos: u32, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) ExtInput {
+        memClear();
+        const n_embd_inp: usize = 1 + self.below(6);
+        const n_embd_inp_enc: usize = if (self.chance(30)) 1 + self.below(8) else n_embd_inp;
+        const n_seq_max: i32 = self.pick(i32, &.{ 1, 1, 2, 3, 4, 8 });
+        const n_tokens_max: usize = if (self.chance(15)) 1 + self.below(6) else 64;
+        const use_memory = self.chance(60);
+        const e = Exts.create(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, use_memory, @intCast(self.n_vocab), n_pos);
+
+        var next: [8]c.llama_pos = @splat(0);
+        if (use_memory) {
+            for (0..@intCast(n_seq_max)) |s| {
+                if (self.chance(40)) continue;
+                const lo: c.llama_pos = @intCast(self.below(10));
+                const hi = lo + @as(c.llama_pos, @intCast(self.below(10)));
+                ref_mem_set(@intCast(s), lo, hi);
+                next[s] = hi + 1;
+            }
+        }
+
+        // 0 tokens, 1 embeddings, 2 mixed, 3 both on every entry
+        const kind = self.below(4);
+        const n = 1 + self.below(if (self.chance(10)) 40 else 12);
+        for (0..n) |_| {
+            var seq: i32 = @intCast(self.below(@intCast(n_seq_max)));
+            if (self.chance(4)) seq = self.pick(i32, &.{ -1, n_seq_max, n_seq_max + 7 });
+            const as_embd = kind == 1 or (kind == 2 and self.chance(50));
+            var idx: i32 = undefined;
+            if (kind == 3) {
+                idx = both(e, "llama_batch_ext_add_token", .{ seq, @as(c.llama_token, @intCast(self.below(self.n_vocab))) }, ref_log, port_log);
+                if (idx >= 0) _ = both(e, "llama_batch_ext_set_embd_token", .{ idx, self.embdArg(n_embd_inp, n_embd_inp_enc) }, ref_log, port_log);
+            } else if (as_embd) {
+                idx = both(e, "llama_batch_ext_add_embd", .{ seq, self.embdArg(n_embd_inp, n_embd_inp_enc) }, ref_log, port_log);
+            } else if (self.chance(5)) {
+                // an entry with neither, which `init` refuses
+                idx = both(e, "llama_batch_ext_add", .{seq}, ref_log, port_log);
+            } else {
+                var id: c.llama_token = @intCast(self.below(self.n_vocab));
+                if (self.chance(4)) id = self.pick(c.llama_token, &.{ -1, @intCast(self.n_vocab), std.math.minInt(i32) });
+                idx = both(e, "llama_batch_ext_add_token", .{ seq, id }, ref_log, port_log);
+            }
+            if (idx < 0) continue;
+
+            const s: usize = @intCast(seq);
+            // positions: one for a token, n_pos for an embedding
+            if (!self.chance(8)) {
+                var pos: [4]c.llama_pos = .{ next[s], @intCast(self.below(5)), @intCast(self.below(5)), 0 };
+                if (self.chance(5)) pos[0] -= 1;
+                const step: c.llama_pos = if (n_pos > 1 and self.chance(20)) @intCast(1 + self.below(3)) else if (as_embd and n_pos > 1 and self.chance(30)) 0 else 1;
+                next[s] = pos[0] + step;
+                const pp: [*c]const c.llama_pos = if (self.chance(4)) null else &pos;
+                _ = both(e, "llama_batch_ext_set_pos", .{ idx, pp }, ref_log, port_log);
+            }
+            if (self.chance(15)) {
+                // another sequence, kept in step with the first in memory
+                var other: i32 = @intCast(self.below(@intCast(n_seq_max)));
+                if (self.chance(10)) other = self.pick(i32, &.{ -1, n_seq_max });
+                var at = idx;
+                if (self.chance(10)) at = self.pick(i32, &.{ -1, idx + 1, 1000 });
+                if (other >= 0 and use_memory) ref_mem_set(other, ref_mem_min(seq), ref_mem_max(seq));
+                _ = both(e, "llama_batch_ext_add_seq", .{ at, other }, ref_log, port_log);
+            }
+            if (self.chance(40)) {
+                const flag = self.chance(80);
+                if (self.chance(50)) {
+                    _ = both(e, "llama_batch_ext_set_output_logits", .{ idx, flag }, ref_log, port_log);
+                } else {
+                    _ = both(e, "llama_batch_ext_set_output_embd", .{ idx, flag }, ref_log, port_log);
+                }
+            }
+            if (self.chance(20)) setDecisionOrder(e, if (self.chance(10)) -1 else idx, @intCast(self.below(5)));
+            if (self.chance(5)) _ = both(e, "llama_batch_ext_set_embd_state", .{ idx, self.embdArg(n_embd_inp, n_embd_inp) }, ref_log, port_log);
+            if (self.chance(4)) _ = both(e, "llama_batch_ext_set_embd_token", .{ if (self.chance(50)) idx else @as(i32, 9999), self.embdArg(n_embd_inp, n_embd_inp_enc) }, ref_log, port_log);
+            if (self.chance(2)) {
+                log_target = ref_log;
+                c.llama_batch_ext_clear(e.ref);
+                log_target = port_log;
+                PA.llama_batch_ext_clear(portExt(e));
+                log_target = null;
+                @memset(&next, 0);
+            }
+        }
+        compareExt("llama_batch_ext_* calls", e);
+        return .{ .exts = e, .output_all = self.chance(20) };
+    }
+
     /// One random input batch for an allocator with `n_pos_per_embd`
     /// positions per token. Sets the memory table as a side effect.
     fn input(self: Gen, n_pos_per_embd: u32) Input {
@@ -444,7 +580,11 @@ const Gen = struct {
             for (toks.items, 0..) |t, i| b.setSeqs(i, t.set);
         } else if (self.chance(30)) {
             const ns = self.ar.alloc(i32, n) catch unreachable;
-            for (ns) |*x| x.* = if (self.chance(10)) 0 else 1;
+            // never 0 since v0.6.0: a token in no sequence makes upstream's
+            // `init` point `seq_id[i]` at the end of its flat id array, and
+            // the splits read `seq_id[i][0]` there -- past the end, or
+            // through null when no token has a sequence
+            for (ns) |*x| x.* = 1;
             b.n_seq_id = ns;
         }
 
@@ -485,8 +625,12 @@ const Gen = struct {
                         p[i] -= 1;
                     },
                     3 => if (b.seq_id) |s| {
-                        if (b.n_seq_id.?[i] > 0) {
-                            const at = self.below(@intCast(b.n_seq_id.?[i]));
+                        // with generated positions, `llama_batch_compat::init`
+                        // indexes its position vector by the first id
+                        // unchecked: leave that one valid
+                        const lo: usize = if (b.pos == null) 1 else 0;
+                        if (b.n_seq_id.?[i] > lo) {
+                            const at = lo + self.below(@as(usize, @intCast(b.n_seq_id.?[i])) - lo);
                             s[i][at] = if (self.chance(30)) -1 else @as(c.llama_seq_id, @intCast(n_seq_max + self.below(3)));
                         }
                     },
@@ -498,10 +642,8 @@ const Gen = struct {
                         const d: c.llama_pos = @as(c.llama_pos, @intCast(self.below(5))) - 2;
                         ref_mem_set(s, ref_mem_min(s), ref_mem_max(s) + d);
                     },
-                    6 => if (b.seq_id != null) {
-                        // keeps seq_id[i][0], which the C++ still reads
-                        b.n_seq_id.?[i] = 0;
-                    },
+                    // a token in no sequence: see `n_seq_id` above
+                    6 => {},
                     7 => n_seq_max = self.pick(u32, &.{ 257, 1000 }),
                     8 => if (b.seq_id != null) {
                         // join another sequence to this token
@@ -531,6 +673,39 @@ const Gen = struct {
         return .{ .batch = b.cbatch(), .n_embd = n_embd, .n_seq_max = n_seq_max, .output_all = output_all, .use_memory = use_memory };
     }
 };
+
+// -----------------------------------------------------------------------------
+// Extended batches, call by call
+
+const PA = harness_root.api.batch;
+
+fn portExt(e: Exts) *c.struct_llama_batch_ext {
+    return @ptrCast(e.port);
+}
+
+/// Calls the C API function `name` on both sides' batches, logs captured,
+/// and compares the answers.
+fn both(e: Exts, comptime name: []const u8, args: anytype, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) i32 {
+    log_target = ref_log;
+    const r = @call(.auto, @field(c, name), .{e.ref} ++ args);
+    log_target = port_log;
+    const p = @call(.auto, @field(PA, name), .{portExt(e)} ++ args);
+    log_target = null;
+    const ri: i32 = if (@TypeOf(r) == bool) @intFromBool(r) else r;
+    const pi: i32 = if (@TypeOf(p) == bool) @intFromBool(p) else p;
+    _ = expectInt(name, ri, pi);
+    tally.ext_calls += 1;
+    return ri;
+}
+
+fn setDecisionOrder(e: Exts, idx: i32, order: i32) void {
+    const r = ref_ext_set_decision_order(e.ref, idx, order);
+    const p = PA.llama_batch_ext_set_decision_order(portExt(e), idx, @fromBackingInt(@intCast(@as(c_uint, @bitCast(order)))));
+    _ = expectInt("llama_batch_ext_set_decision_order", r, @intFromBool(p));
+    tally.ext_calls += 1;
+}
+
+const ExtInput = struct { exts: Exts, output_all: bool };
 
 // -----------------------------------------------------------------------------
 // Comparing
@@ -585,6 +760,14 @@ fn compareUbatch(what: []const u8, r: *const RefUbatch, p: *const B.Ubatch, n_em
     if (sameNull("seq_id_unq", r.seq_id_unq, p.seq_id_unq)) sameArray(c.llama_seq_id, "seq_id_unq", r.seq_id_unq, p.seq_id_unq, r.n_seqs_unq);
     if (sameNull("seq_idx", r.seq_idx, p.seq_idx)) sameArray(i32, "seq_idx", r.seq_idx, p.seq_idx, B.max_seq);
     if (sameNull("output", r.output, p.output)) sameArray(i8, "output", r.output, p.output, n);
+    if (sameNull("type", r.type, p.type)) sameArray(i8, "type", r.type, p.type, n);
+    if (sameNull("decision_order", r.decision_order, p.decision_order)) sameArray(i32, "decision_order", r.decision_order, p.decision_order, n);
+    {
+        var ri: [*c]const i32 = null;
+        const rn = ref_ubatch_batch_idxs(r, &ri);
+        const pi: []const i32 = if (p.data) |d| d.batch_idxs.items else &.{};
+        if (expectInt("batch_idxs size", @intCast(rn), @intCast(pi.len))) sameArray(i32, "batch_idxs", ri, pi.ptr, rn);
+    }
     if (failures != before) fail("  in {s}", .{what});
 }
 
@@ -598,34 +781,73 @@ fn compareState(ra: *anyopaque, pa: *B.BatchAllocr) void {
     }
 }
 
-fn compareSanitized(ra: *anyopaque, pa: *B.BatchAllocr, in: c.llama_batch) void {
+/// The flat batch each side built from its extended batch: every array is
+/// the allocator's own now, so the comparison is by content.
+fn compareSanitized(ra: *anyopaque, pa: *B.BatchAllocr, n_pos: u32) void {
     results += 1;
     var r: c.llama_batch = undefined;
     ref_get_batch(ra, &r);
     const p = pa.getBatch().*;
     const n: usize = @intCast(r.n_tokens);
-    _ = expectInt("batch.n_tokens", r.n_tokens, p.n_tokens);
-    checks += 1;
-    if (r.token != in.token or p.token != in.token) fail("batch.token is not the caller's", .{});
-    if (r.embd != in.embd or p.embd != in.embd) fail("batch.embd is not the caller's", .{});
-    // a given array stays the caller's on both sides; a generated one is
-    // compared by content
-    inline for (.{ "pos", "n_seq_id", "seq_id", "logits" }) |f| {
-        checks += 1;
-        const given = @field(in, f) != null;
-        if (given and (@field(r, f) != @field(in, f) or @field(p, f) != @field(in, f))) {
-            // `logits` is replaced when output_all overrides the flags
-            if ((@field(r, f) == @field(in, f)) != (@field(p, f) == @field(in, f))) fail("batch.{s}: one side kept the caller's array", .{f});
-        }
-    }
-    sameArray(c.llama_pos, "batch.pos", r.pos, p.pos, n);
+    if (!expectInt("batch.n_tokens", r.n_tokens, p.n_tokens)) return;
+    if (sameNull("batch.token", r.token, p.token)) sameArray(c.llama_token, "batch.token", r.token, p.token, n);
+    if (sameNull("batch.embd", r.embd, p.embd)) sameArray(f32, "batch.embd", r.embd, p.embd, n * pa.n_embd);
+    sameArray(c.llama_pos, "batch.pos", r.pos, p.pos, n * n_pos);
     sameArray(i32, "batch.n_seq_id", r.n_seq_id, p.n_seq_id, n);
     for (0..n) |i| sameArray(c.llama_seq_id, "batch.seq_id[i]", r.seq_id[i], p.seq_id[i], @intCast(@max(0, r.n_seq_id[i])));
-    if (in.seq_id == null) {
-        checks += 1;
-        if (r.seq_id[n] != null or p.seq_id[n] != null) fail("batch.seq_id is not null-terminated", .{});
-    }
+    checks += 1;
+    if (r.seq_id[n] != null or p.seq_id[n] != null) fail("batch.seq_id is not null-terminated", .{});
     sameArray(i8, "batch.logits", r.logits, p.logits, n);
+}
+
+/// A `llama_batch_ext` on each side.
+const Exts = struct {
+    ref: *RefExt,
+    port: *B.BatchExt,
+
+    fn create(n_tokens_max: usize, n_embd_inp: usize, n_embd_inp_enc: usize, n_seq_max: c.llama_seq_id, use_memory: bool, n_vocab: c.llama_token, n_pos_per_embd: usize) Exts {
+        return .{
+            .ref = ref_ext_new(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, @intFromBool(use_memory), n_vocab, n_pos_per_embd),
+            .port = B.BatchExt.create(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, if (use_memory) port_memory else null, n_vocab, n_pos_per_embd),
+        };
+    }
+
+    fn destroy(self: Exts) void {
+        ref_ext_free(self.ref);
+        self.port.destroy();
+    }
+};
+
+/// Every entry of both extended batches.
+fn compareExt(what: []const u8, e: Exts) void {
+    results += 1;
+    const before = failures;
+    const n = ref_ext_n_tokens(e.ref);
+    if (!expectInt("ext n_tokens", @intCast(n), @intCast(e.port.tokens.items.len))) {
+        fail("  in {s}", .{what});
+        return;
+    }
+    _ = expectInt("ext n_embd", @intCast(ref_ext_n_embd(e.ref)), @intCast(e.port.n_embd));
+    var rd: [*c]const f32 = null;
+    const rn = ref_ext_embd(e.ref, &rd);
+    if (expectInt("ext embd size", @intCast(rn), @intCast(e.port.embd.items.len))) sameArray(f32, "ext embd", rd, e.port.embd.items.ptr, rn);
+    var order: [B.max_seq + 8]c.llama_seq_id = undefined;
+    for (0..n) |i| {
+        var rt: RefExtToken = undefined;
+        ref_ext_token(e.ref, i, &rt);
+        const pt = &e.port.tokens.items[i];
+        if (!expectInt("ext id", rt.id, pt.id)) break;
+        if (!expectInt("ext has_embd", rt.has_embd, @intFromBool(pt.has_embd))) break;
+        if (!expectInt("ext embd_off", rt.embd_off, pt.embd_off)) break;
+        if (!expectInt("ext output", rt.output, @intFromBool(pt.output))) break;
+        if (!expectInt("ext decision_order", rt.decision_order, pt.decision_order)) break;
+        sameArray(c.llama_pos, "ext pos", &rt.pos, &pt.pos, 4);
+        const pn = pt.seq_ids.count();
+        if (!expectInt("ext n_seq", rt.n_seq, @intCast(pn))) break;
+        pt.seq_ids.ordered(order[0..pn]);
+        sameArray(c.llama_seq_id, "ext seq_ids (iteration order)", &rt.seq, &order, pn);
+    }
+    if (failures != before) fail("  in {s}", .{what});
 }
 
 fn compareOutIds(what: []const u8, ra: *anyopaque, pa: *B.BatchAllocr) void {
@@ -735,14 +957,28 @@ const Vocabs = struct {
     port: *const harness_root.vocab.Vocab,
 };
 
+/// Builds each side's extended batch from `in.batch` through
+/// `llama_batch_compat::init` and runs `runExt` on them.
+fn runBatch(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, in: Input, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) void {
+    const e = Exts.create(1 << 24, in.n_embd, in.n_embd, @intCast(in.n_seq_max), in.use_memory, @intCast(v.port.nTokens()), pa.n_pos_per_embd);
+    defer e.destroy();
+    log_target = ref_log;
+    ref_compat_init(e.ref, &in.batch, 0);
+    log_target = port_log;
+    B.compatInit(e.port, in.batch, 0);
+    log_target = null;
+    compareExt("llama_batch_compat::init", e);
+    runExt(g, ra, pa, v, e, in.output_all, ref_log, port_log);
+}
+
 /// Runs `init` on both allocators and compares; on success, runs every
 /// split mode.
-fn runBatch(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, in: Input, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) void {
+fn runExt(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, e: Exts, output_all: bool, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) void {
     results += 1;
     log_target = ref_log;
-    const rok = ref_init(ra, &in.batch, v.ref, @intFromBool(in.use_memory), in.n_embd, in.n_seq_max, @intFromBool(in.output_all));
+    const rok = ref_init(ra, e.ref, v.ref, @intFromBool(output_all));
     log_target = port_log;
-    const pok = pa.initBatch(in.batch, v.port, if (in.use_memory) port_memory else null, in.n_embd, in.n_seq_max, in.output_all);
+    const pok = pa.initBatch(e.port, v.port, output_all);
     log_target = null;
     if (!expectInt("init", rok, @intFromBool(pok))) return;
     compareState(ra, pa);
@@ -751,7 +987,11 @@ fn runBatch(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, in: Input, r
         return;
     }
     tally.accepted += 1;
-    compareSanitized(ra, pa, in.batch);
+    if (pa.is_embd_vec.items.len != 0) tally.mixed += 1;
+    if (pa.decision_order.items.len != 0) tally.decision += 1;
+    if (pa.n_pos_per_embd > 1 and pa.batch.embd != null) tally.mrope_embd += 1;
+    compareSanitized(ra, pa, pa.n_pos_per_embd);
+    const n_embd = pa.n_embd;
 
     const sizes = [_]u32{ 1, 2, 3, 4, 5, 7, 8, 16, 64, 1000 };
     const r = g;
@@ -761,17 +1001,17 @@ fn runBatch(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, in: Input, r
         }
     }.f;
 
-    runSplit(ra, pa, .{ .simple = pickN(r, 2) }, in.n_embd, ref_log, port_log, true);
-    runSplit(ra, pa, .{ .equal = .{ .n_ubatch = pickN(r, 3), .sequential = false, .n_keep_tail = 0 } }, in.n_embd, ref_log, port_log, true);
-    runSplit(ra, pa, .{ .equal = .{ .n_ubatch = pickN(r, 4), .sequential = true, .n_keep_tail = 0 } }, in.n_embd, ref_log, port_log, true);
+    runSplit(ra, pa, .{ .simple = pickN(r, 2) }, n_embd, ref_log, port_log, true);
+    runSplit(ra, pa, .{ .equal = .{ .n_ubatch = pickN(r, 3), .sequential = false, .n_keep_tail = 0 } }, n_embd, ref_log, port_log, true);
+    runSplit(ra, pa, .{ .equal = .{ .n_ubatch = pickN(r, 4), .sequential = true, .n_keep_tail = 0 } }, n_embd, ref_log, port_log, true);
     {
         const keep: u32 = if (r) |x| @intCast(1 + x.below(3)) else 2;
         var nu = pickN(r, 6);
         if (nu <= keep) nu = keep + 1 + (if (r) |x| @as(u32, @intCast(x.below(4))) else 0);
         const seq = if (r) |x| x.chance(50) else false;
-        runSplit(ra, pa, .{ .equal = .{ .n_ubatch = nu, .sequential = seq, .n_keep_tail = keep } }, in.n_embd, ref_log, port_log, true);
+        runSplit(ra, pa, .{ .equal = .{ .n_ubatch = nu, .sequential = seq, .n_keep_tail = keep } }, n_embd, ref_log, port_log, true);
     }
-    runSplit(ra, pa, .{ .seq = pickN(r, 5) }, in.n_embd, ref_log, port_log, true);
+    runSplit(ra, pa, .{ .seq = pickN(r, 5) }, n_embd, ref_log, port_log, true);
     // two modes on one reset: whatever the first left unused
     if (r) |x| {
         if (x.chance(30)) {
@@ -780,20 +1020,26 @@ fn runBatch(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, in: Input, r
             var rr: RefUbatch = .{};
             ref_split_simple(ra, 2, &rr);
             var pp = pa.splitSimple(2);
-            compareUbatch("split_simple(2) before split_equal", &rr, &pp, in.n_embd);
+            compareUbatch("split_simple(2) before split_equal", &rr, &pp, n_embd);
             ref_ubatch_free(&rr);
             pp.release();
-            runSplit(ra, pa, .{ .equal = .{ .n_ubatch = 3, .sequential = false, .n_keep_tail = 0 } }, in.n_embd, ref_log, port_log, false);
+            runSplit(ra, pa, .{ .equal = .{ .n_ubatch = 3, .sequential = false, .n_keep_tail = 0 } }, n_embd, ref_log, port_log, false);
         }
     }
 }
 
-const Tally = struct { accepted: usize = 0, rejected: usize = 0, sessions: usize = 0, endless: usize = 0 };
+const Tally = struct { accepted: usize = 0, rejected: usize = 0, sessions: usize = 0, endless: usize = 0, ext_calls: usize = 0, mixed: usize = 0, decision: usize = 0, mrope_embd: usize = 0 };
 var tally: Tally = .{};
 
 /// One allocator per side, several batches through it, then a reserve and
 /// splits on the cleared allocator.
 fn session(name: []const u8, n_pos_per_embd: u32, v: Vocabs, g: ?Gen, inputs: []const Input, n_random: usize) void {
+    sessionMixed(name, n_pos_per_embd, false, v, g, inputs, n_random, 0);
+}
+
+/// `session`, with mixed batches allowed or not, and `n_ext` random
+/// extended batches built call by call after the `llama_batch` inputs.
+fn sessionMixed(name: []const u8, n_pos_per_embd: u32, allow_mixed: bool, v: Vocabs, g: ?Gen, inputs: []const Input, n_random: usize, n_ext: usize) void {
     session_name = name;
     session_failures = 0;
     tally.sessions += 1;
@@ -803,15 +1049,22 @@ fn session(name: []const u8, n_pos_per_embd: u32, v: Vocabs, g: ?Gen, inputs: []
     var port_log: std.ArrayList(u8) = .empty;
     defer port_log.deinit(gpa);
 
-    const ra = ref_new(n_pos_per_embd);
+    const ra = ref_new(n_pos_per_embd, @intFromBool(allow_mixed));
     defer ref_delete(ra);
-    var pa = B.BatchAllocr.init(n_pos_per_embd);
+    var pa = B.BatchAllocr.init(n_pos_per_embd, allow_mixed);
     defer pa.deinit();
 
     for (inputs) |in| runBatch(g, ra, &pa, v, in, &ref_log, &port_log);
     // random inputs are generated one at a time, each setting the memory
     // table it runs against
     for (0..n_random) |_| runBatch(g, ra, &pa, v, g.?.input(n_pos_per_embd), &ref_log, &port_log);
+    for (0..n_ext) |_| {
+        const e = g.?.extInput(n_pos_per_embd, &ref_log, &port_log);
+        defer e.exts.destroy();
+        // an empty batch aborts `init`, which `checkAborts` covers
+        if (ref_ext_n_tokens(e.exts.ref) == 0) continue;
+        runExt(g, ra, &pa, v, e.exts, e.output_all, &ref_log, &port_log);
+    }
 
     const nst: u32 = if (g) |x| @intCast(x.below(9)) else 3;
     const nsq: u32 = if (g) |x| @intCast(1 + x.below(if (x.chance(10)) 256 else 8)) else 2;
@@ -968,28 +1221,37 @@ fn abortsInChild(body: *const fn (side: c_int) void, side: c_int) bool {
     return (status & 0x7f) == sigabrt;
 }
 
+fn abortExts(b: *const c.llama_batch) Exts {
+    const e = Exts.create(1 << 24, 0, 0, 1, false, @intCast(abort_vocab.port.nTokens()), 1);
+    ref_compat_init(e.ref, b, 0);
+    B.compatInit(e.port, b.*, 0);
+    return e;
+}
+
 fn emptyBatch(side: c_int) void {
     var tok = [_]c.llama_token{1};
     const b = B.batchGetOne(&tok, 0);
+    const e = abortExts(&b);
     if (side == 0) {
-        _ = ref_init(ref_new(1), &b, abort_vocab.ref, 0, 0, 1, 0);
+        _ = ref_init(ref_new(1, 0), e.ref, abort_vocab.ref, 0);
     } else {
-        var pa = B.BatchAllocr.init(1);
-        _ = pa.initBatch(b, abort_vocab.port, null, 0, 1, false);
+        var pa = B.BatchAllocr.init(1, false);
+        _ = pa.initBatch(e.port, abort_vocab.port, false);
     }
 }
 
 fn keepTailTooLong(side: c_int) void {
     var tok = [_]c.llama_token{ 1, 2, 3 };
     const b = B.batchGetOne(&tok, 3);
+    const e = abortExts(&b);
     if (side == 0) {
-        const ra = ref_new(1);
-        _ = ref_init(ra, &b, abort_vocab.ref, 0, 0, 1, 0);
+        const ra = ref_new(1, 0);
+        _ = ref_init(ra, e.ref, abort_vocab.ref, 0);
         var r: RefUbatch = .{};
         ref_split_equal(ra, 2, 0, 2, &r);
     } else {
-        var pa = B.BatchAllocr.init(1);
-        _ = pa.initBatch(b, abort_vocab.port, null, 0, 1, false);
+        var pa = B.BatchAllocr.init(1, false);
+        _ = pa.initBatch(e.port, abort_vocab.port, false);
         _ = pa.splitEqual(2, false, 2);
     }
 }
@@ -1108,10 +1370,16 @@ pub fn main(init: std.process.Init) !void {
             const n_pos: u32 = g.pick(u32, &.{ 1, 1, 1, 1, 1, 1, 1, 4, 4, 3 });
             session(std.fmt.bufPrint(&name_buf, "random {d} (seed {d})", .{ i, seed }) catch "random", n_pos, v, g, &.{}, 1 + g.below(3));
         }
+        for (0..md.sessions) |i| {
+            _ = arena.reset(.retain_capacity);
+            const n_pos: u32 = g.pick(u32, &.{ 1, 1, 1, 4, 4 });
+            sessionMixed(std.fmt.bufPrint(&name_buf, "ext {d} (seed {d})", .{ i, seed }) catch "ext", n_pos, g.chance(70), v, g, &.{}, 0, 1 + g.below(3));
+        }
     }
     _ = unsetenv("LLAMA_BATCH_DEBUG");
 
-    std.debug.print("  {d} sessions, {d} batches accepted, {d} rejected; {d} endless split_equal runs agreed to their cap\n", .{ tally.sessions, tally.accepted, tally.rejected, tally.endless });
+    std.debug.print("  {d} sessions, {d} batches accepted, {d} rejected; {d} endless split_equal runs agreed to their cap; {d} llama_batch_ext calls\n", .{ tally.sessions, tally.accepted, tally.rejected, tally.endless, tally.ext_calls });
+    std.debug.print("  accepted: {d} mixed token/embedding batches, {d} with decision orders, {d} M-RoPE embedding batches\n", .{ tally.mixed, tally.decision, tally.mrope_embd });
     std.debug.print("  errors and warnings the C++ raised:\n", .{});
     for (reached.keys(), reached.values()) |k, n| std.debug.print("    {d:>7}  {s}\n", .{ n, k });
 

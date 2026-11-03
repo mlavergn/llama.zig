@@ -8,8 +8,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/hrm-text.cpp` at v0.5.0
-//! (`7fe450e19`): `llama_model_hrm_text`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/hrm-text.cpp` at v0.6.0
+//! (`d81235049`): `llama_model_hrm_text`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_stack`.
 
@@ -27,7 +27,7 @@ const Tensor = c.ggml_tensor;
 
 const src = "models/hrm-text.cpp";
 
-/// Ports `llama_model_hrm_text`'s `load_arch_hparams` (models/hrm-text.cpp:6 @7fe450e19).
+/// Ports `llama_model_hrm_text`'s `load_arch_hparams` (models/hrm-text.cpp:6 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -57,7 +57,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_hrm_text`'s `load_arch_tensors` (models/hrm-text.cpp:34 @7fe450e19).
+/// Ports `llama_model_hrm_text`'s `load_arch_tensors` (models/hrm-text.cpp:34 @d81235049).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -70,7 +70,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
     }
 
-    self.hrm_z_l_init = try self.createTensor(.{ .tensor = .hrm_z_l_init }, &.{l.n_embd}, 0, exc);
+    self.hrm_z_l_init = try self.createTensor(.{ .tensor = .hrm_z_l_init, .bid = 0 }, &.{l.n_embd}, 0, exc);
 
     const lps: i32 = @intCast(hp.n_hrm_layers_per_stack);
     const n_l: i32 = @intCast(hp.n_hrm_l_cycles);
@@ -120,13 +120,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_hrm_text`'s `build_arch_graph` (models/hrm-text.cpp:88 @7fe450e19).
+/// Ports `llama_model_hrm_text`'s `build_arch_graph` (models/hrm-text.cpp:88 @d81235049).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports `llama_model_hrm_text::graph`'s `build_stack` (models/hrm-text.cpp:93
-/// @7fe450e19): one stack invocation, `lps` pre-norm decoder layers in the
+/// @d81235049): one stack invocation, `lps` pre-norm decoder layers in the
 /// cache slots from `slot_base`, then the parameterless final norm.
 fn buildStack(model: *const Model, b: *const graph.Builder, inp_attn: *graph.InpAttnKv, inp_pos: *Tensor, cur_: *Tensor, slot_base: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -198,7 +198,7 @@ fn buildStack(model: *const Model, b: *const graph.Builder, inp_attn: *graph.Inp
 }
 
 /// Ports the constructor of `llama_model_hrm_text`'s `graph`
-/// (models/hrm-text.cpp:168 @7fe450e19).
+/// (models/hrm-text.cpp:168 @d81235049).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = &model.hparams;

@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.5.0
-//! (`7fe450e19`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.6.0
+//! (`d81235049`).
 //!
 //! # Why this one is assembly
 //!
@@ -43,7 +43,7 @@ extern fn ggml_gemm_q4_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *c
 
 const c = impl.c;
 
-/// Ports `ggml_gemm_q4_0_4x4_q8_0` (arch/arm/repack.cpp:1970 @7fe450e19).
+/// Ports `ggml_gemm_q4_0_4x4_q8_0` (arch/arm/repack.cpp:1970 @d81235049).
 ///
 /// Parameters:
 /// - `n`: the reduction length; `nb = n / 32` blocks.

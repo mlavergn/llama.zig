@@ -26,6 +26,7 @@ printf '/image %s\ndescribe it\n/clear\nhello\n/quit\n' "$IMG" > "$DATA/repl-ima
 printf '/audio %s\nwhat is this\n/quit\n' "$DATA/tone16k.wav" > "$DATA/repl-audio.txt"
 printf '/image\n/image /nonexistent/x.png\n/video %s\n   \nhi\n/exit\n' "$IMG" > "$DATA/repl-errors.txt"
 printf '/image %s\ndescribe it\nand then?\n/quit\n' "$IMG" > "$DATA/repl-two.txt"
+printf '/image %s\ndescribe it\n' "$IMG" > "$DATA/repl-eof.txt"
 # line editing: backspace, cursor left and insert, home/end, delete, a
 # history recall, then the result is sent
 printf 'abd\177c\033[Dx\033[H>\033[F<\033[3~\nsecond\n\033[A\033[A\033[B\n/quit\n' > "$DATA/repl-edit.txt"

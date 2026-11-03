@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/qwen3-coder.cpp` (llama.cpp v0.5.0,
-//! `7fe450e19`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/qwen3-coder.cpp` (llama.cpp v0.6.0,
+//! `d81235049`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -171,7 +171,7 @@ const Starts = struct {
     }
 };
 
-/// Ports `common_chat_params_init_qwen3_coder` (qwen3-coder.cpp:3 @7fe450e19).
+/// Ports `common_chat_params_init_qwen3_coder` (qwen3-coder.cpp:3 @d81235049).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

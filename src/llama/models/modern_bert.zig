@@ -5,9 +5,16 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.5.0
-//! (`7fe450e19`): `llama_model_modern_bert`'s `load_arch_hparams`,
-//! `load_arch_tensors` and `build_arch_graph`, and its `graph`; and from
+//! A decision model (since v0.6.0) puts `n_layer_decision` blocks of a
+//! head after the encoder: plain pre-norm blocks with biases and no
+//! positional encoding, evaluated once per question type with that type's
+//! embedding added, each ending in the classifier, so the output is one
+//! score per question type.
+//!
+//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.6.0
+//! (`d81235049`): `N_DECISION_TYPES`, `llama_model_modern_bert`'s
+//! `load_arch_hparams`, `load_arch_tensors` and `build_arch_graph`, and
+//! its `graph` with `build_decision_head`; and from
 //! `llama.cpp/src/llama-model.cpp`, `llm_ffn_op_type_from_string`, which
 //! only this architecture calls.
 
@@ -24,7 +31,11 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1042 @7fe450e19):
+/// Ports `N_DECISION_TYPES` (models/modern-bert.cpp:4 @d81235049): the
+/// question types of a decision model -- choice, score and noul.
+const n_decision_types: u32 = 3;
+
+/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1061 @d81235049):
 /// the GGUF `<arch>.hidden_activation` strings that map cleanly to a gated
 /// feed-forward op.
 const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
@@ -37,7 +48,7 @@ const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
     .{ "reglu", .reglu },
 };
 
-/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:1052 @7fe450e19).
+/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:1071 @d81235049).
 ///
 /// Parameters:
 /// - `name`: the activation's name.
@@ -49,7 +60,7 @@ fn ffnOpTypeFromString(name: []const u8, fallback: graph.FfnOp) graph.FfnOp {
     return fallback;
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:3 @7fe450e19).
+/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:6 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -73,6 +84,23 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         hp.llm_ffn_op = @backingInt(ffnOpTypeFromString(hidden_act, .geglu));
     }
 
+    // GGUFs without a classifier pooling type use mean (gte-reranker-modernbert-base).
+    if (hp.pooling_type_cls == c.LLAMA_POOLING_TYPE_UNSPECIFIED) {
+        hp.pooling_type_cls = c.LLAMA_POOLING_TYPE_MEAN;
+    }
+
+    if (try meta.getKey(u32, .decision_block_count, false, exc)) |v| hp.n_layer_decision = v;
+    if (hp.n_layer_decision > 0) {
+        if (hp.n_layer_decision >= hp.nLayer()) {
+            return exc.throw(.runtime_error, "invalid number of decision blocks", .{});
+        }
+        // The head's blocks always use full attention.
+        var il: u32 = hp.nLayer() - hp.n_layer_decision;
+        while (il < hp.nLayer()) : (il += 1) hp.is_swa_impl[il] = 0;
+        // The output is one score per question type.
+        hp.n_embd_out_impl = n_decision_types;
+    }
+
     self.type = switch (hp.nLayer()) {
         12 => .@"47m", // granite-embedding-small
         22 => .@"149m", // modern-bert-base
@@ -81,7 +109,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:34 @7fe450e19).
+/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:55 @d81235049).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -92,8 +120,10 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
     self.output_norm = try self.createTensor(.{ .tensor = .output_norm, .suffix = "weight" }, &.{l.n_embd}, 0, exc);
 
+    const n_layer_enc: i32 = l.n_layer - @as(i32, @intCast(hp.n_layer_decision));
+
     var i: i32 = 0;
-    while (i < l.n_layer) : (i += 1) {
+    while (i < n_layer_enc) : (i += 1) {
         const layer = &self.layers[@intCast(i)];
 
         if (i != 0) {
@@ -115,21 +145,57 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.cls_out_b = try self.createTensor(.{ .tensor = .cls_out, .suffix = "bias" }, &.{hp.n_cls_out}, nr, exc);
     self.cls = try self.createTensor(.{ .tensor = .cls, .suffix = "weight" }, &.{ l.n_embd, l.n_embd }, nr, exc);
     self.cls_norm = try self.createTensor(.{ .tensor = .cls_norm, .suffix = "weight" }, &.{l.n_embd}, nr, exc);
+
+    if (hp.n_layer_decision == 0) return;
+
+    // The decision head: plain pre-norm blocks with biases.
+    i = n_layer_enc;
+    while (i < l.n_layer) : (i += 1) {
+        const layer = &self.layers[@intCast(i)];
+        const n_ff_head: i64 = hp.nFf(@intCast(i));
+
+        layer.attn_norm = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
+        layer.attn_norm_b = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "bias", .bid = i }, &.{l.n_embd}, 0, exc);
+
+        layer.wqkv = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "weight", .bid = i }, &.{ l.n_embd, 3 * l.n_embd }, 0, exc);
+        layer.wqkv_b = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "bias", .bid = i }, &.{3 * l.n_embd}, 0, exc);
+        layer.wo = try self.createTensor(.{ .tensor = .attn_out, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd }, 0, exc);
+        layer.wo_b = try self.createTensor(.{ .tensor = .attn_out, .suffix = "bias", .bid = i }, &.{l.n_embd}, 0, exc);
+
+        layer.ffn_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
+        layer.ffn_norm_b = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "bias", .bid = i }, &.{l.n_embd}, 0, exc);
+        layer.ffn_up = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ff_head }, 0, exc);
+        layer.ffn_up_b = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "bias", .bid = i }, &.{n_ff_head}, 0, exc);
+        layer.ffn_down = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "weight", .bid = i }, &.{ n_ff_head, l.n_embd }, 0, exc);
+        layer.ffn_down_b = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "bias", .bid = i }, &.{l.n_embd}, 0, exc);
+    }
+
+    if (l.n_token_types != n_decision_types) {
+        return exc.throw(.runtime_error, "decision model must have one token type per question type", .{});
+    }
+    self.type_embd = try self.createTensor(.{ .tensor = .token_types, .suffix = "weight" }, &.{ l.n_embd, l.n_token_types }, 0, exc);
+
+    self.cls_b = try self.createTensor(.{ .tensor = .cls, .suffix = "bias" }, &.{l.n_embd}, 0, exc);
+    self.cls_norm_b = try self.createTensor(.{ .tensor = .cls_norm, .suffix = "bias" }, &.{l.n_embd}, 0, exc);
+
+    if (self.cls == null or self.cls_norm == null or self.cls_out == null or self.cls_out_b == null) {
+        return exc.throw(.runtime_error, "decision model is missing the scorer tensors", .{});
+    }
 }
 
-/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:68 @7fe450e19).
+/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:128 @d81235049).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_modern_bert`'s `graph`
-/// (models/modern-bert.cpp:72 @7fe450e19).
+/// (models/modern-bert.cpp:132 @d81235049).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/modern-bert.cpp", 75, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/modern-bert.cpp", 135, "n_embd_head == hparams.n_embd_head_k()");
 
     const inp_pos = b.buildInpPos();
 
@@ -145,8 +211,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     const inp_attn = b.buildAttnInpNoCache();
 
+    const n_layer_dec: c_int = @intCast(hp.n_layer_decision);
+    const n_layer_enc: c_int = @as(c_int, @intCast(b.n_layer)) - n_layer_dec;
+
     var il: c_int = 0;
-    while (il < b.n_layer) : (il += 1) {
+    while (il < n_layer_enc) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
         const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
         const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
@@ -204,8 +273,74 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     cur = b.buildNorm(cur, model.output_norm, null, .norm, -1);
     b.cb(cur, "final_norm_out", -1);
 
+    if (n_layer_dec > 0) {
+        cur = buildDecisionHead(model, b, cur, inp_attn, inp_out_ids);
+    }
+
     b.res.t_embd = cur;
     c.ggml_build_forward_expand(b.gf, cur);
+}
+
+/// Ports `llama_model_modern_bert::graph`'s `build_decision_head`
+/// (models/modern-bert.cpp:242 @d81235049): one score per question type for
+/// each output token, read at the option markers by the caller. The
+/// question type is not a graph input, so the head is evaluated once per
+/// type.
+fn buildDecisionHead(model: *const Model, b: *const graph.Builder, inp: *Tensor, inp_attn: *graph.InpAttnNoCache, inp_out_ids: *Tensor) *Tensor {
+    const ctx = b.ctx0;
+    const hp = b.hparams;
+    const n_embd_head: i64 = hp.nEmbdHeadV(0);
+    const n_layer: c_int = @intCast(b.n_layer);
+    const n_layer_enc: c_int = n_layer - @as(c_int, @intCast(hp.n_layer_decision));
+    const type_embd = model.type_embd.?;
+
+    var scores: ?*Tensor = null;
+
+    var it: u32 = 0;
+    while (it < n_decision_types) : (it += 1) {
+        const type_row = c.ggml_view_1d(ctx, type_embd, b.n_embd, it * type_embd.nb[1]);
+        var inpL: *Tensor = c.ggml_add(ctx, inp, type_row);
+
+        var il: c_int = n_layer_enc;
+        while (il < n_layer) : (il += 1) {
+            const layer = &model.layers[@intCast(il)];
+
+            var cur = b.buildNorm(inpL, layer.attn_norm, layer.attn_norm_b, .norm, il);
+            b.cb(cur, "attn_norm", il);
+
+            // No positional encoding in the head.
+            const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, b.n_head_kv, il);
+
+            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
+            b.cb(cur, "kqv_out", il);
+
+            if (il == n_layer - 1) {
+                cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+                inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            }
+
+            const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpL);
+            b.cb(ffn_inp, "ffn_inp", il);
+
+            cur = b.buildNorm(ffn_inp, layer.ffn_norm, layer.ffn_norm_b, .norm, il);
+            b.cb(cur, "ffn_norm", il);
+
+            cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, null, null, null, layer.ffn_down, layer.ffn_down_b, null, null, .relu, .seq, il);
+
+            inpL = c.ggml_add(ctx, cur, ffn_inp);
+        }
+
+        // The scorer.
+        var cur = b.buildNorm(inpL, model.cls_norm, model.cls_norm_b, .norm, -1);
+        cur = c.ggml_add(ctx, b.buildLoraMm(model.cls.?, cur, null), model.cls_b);
+        cur = c.ggml_gelu_erf(ctx, cur);
+        cur = c.ggml_add(ctx, b.buildLoraMm(model.cls_out.?, cur, null), model.cls_out_b);
+
+        scores = if (scores) |s| c.ggml_concat(ctx, s, cur, 0) else cur;
+    }
+    b.cb(scores.?, "decision_scores", -1);
+
+    return scores.?;
 }
 
 // -----------------------------------------------------------------------------

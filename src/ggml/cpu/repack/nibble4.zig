@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.5.0
-//! (`7fe450e19`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.6.0
+//! (`d81235049`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # Why these two share a file
@@ -21,7 +21,7 @@
 //! # `mxfp4`'s exponent is computed, not looked up
 //!
 //! `GGML_CPU_E8M0_TO_FP32_HALF` has a table arm and a compute arm, and the
-//! table is **x86-only** (simd-mappings.h:133 @7fe450e19), the `#else` arm. On ARM the compute arm is
+//! table is **x86-only** (simd-mappings.h:133 @d81235049), the `#else` arm. On ARM the compute arm is
 //! what expands, so this calls `impl.e8m0ToFp32Half` — the same choice
 //! `cpu/quants/legacy.zig` made.
 //!
@@ -64,7 +64,7 @@ inline fn colScale(comptime fmt: Fmt, blk: anytype, j: usize) f32 {
 /// `ggml_gemv_iq4_nl_8x8_q8_0_generic`,
 /// `ggml_gemv_mxfp4_4x4_q8_0_generic` and
 /// `ggml_gemv_mxfp4_8x8_q8_0_generic`
-/// (ggml-cpu/repack.cpp:1122, 1160, 1198, 1236 @7fe450e19).
+/// (ggml-cpu/repack.cpp:1122, 1160, 1198, 1236 @d81235049).
 fn gemv(
     comptime fmt: Fmt,
     comptime ncols_interleaved: i32,
@@ -123,7 +123,7 @@ fn gemv(
 /// `ggml_gemm_iq4_nl_8x8_q8_0_generic`,
 /// `ggml_gemm_mxfp4_4x4_q8_0_generic` and
 /// `ggml_gemm_mxfp4_8x8_q8_0_generic`
-/// (ggml-cpu/repack.cpp:2219, 2275, 2319, 2363 @7fe450e19).
+/// (ggml-cpu/repack.cpp:2219, 2275, 2319, 2363 @d81235049).
 fn gemm(
     comptime fmt: Fmt,
     comptime ncols_interleaved: i32,

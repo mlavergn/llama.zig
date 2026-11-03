@@ -5,7 +5,7 @@
 //!
 //! Ports `llama.cpp/tools/mtmd/mtmd-helper.cpp` and
 //! `llama.cpp/tools/mtmd/mtmd-helper-common.h`, plus the C types of
-//! `llama.cpp/tools/mtmd/mtmd-helper.h`, at v0.5.0 (`7fe450e19`). Each
+//! `llama.cpp/tools/mtmd/mtmd-helper.h`, at v0.6.0 (`d81235049`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # The build ported
@@ -51,16 +51,29 @@ const seek_end: c_int = 2;
 // -----------------------------------------------------------------------------
 // mtmd-helper.h
 
-/// Ports `mtmd_helper_bitmap_wrapper` (mtmd-helper.h:51 @7fe450e19).
+/// Ports `mtmd_helper_bitmap_wrapper` (mtmd-helper.h:51 @d81235049).
 pub const BitmapWrapper = extern struct {
     bitmap: ?*mtmd.Bitmap,
     video_ctx: ?*anyopaque,
 };
 
-/// Ports `mtmd_helper_post_decode_callback` (mtmd-helper.h:120 @7fe450e19).
-pub const PostDecodeCallback = ?*const fn (c.llama_batch, ?*anyopaque) callconv(.c) i32;
+/// Ports `mtmd_helper_embd_batch` (mtmd-helper.h:121 @d81235049), new at
+/// v0.6.0: one decoded sub-batch of embeddings, passed to
+/// `mtmd_helper_post_decode_callback`.
+pub const EmbdBatchView = extern struct {
+    n_tokens: i32,
+    embd: ?[*]const f32, // [n_tokens, n_embd]
+    n_embd: i32,
+    pos: ?[*]const c.llama_pos, // [n_pos, n_tokens], section-major
+    n_pos: i32, // 4 for M-RoPE models, 1 otherwise
+    seq_id: c.llama_seq_id,
+};
 
-/// Ports `mtmd_helper_video_info` (mtmd-helper.h:145 @7fe450e19).
+/// Ports `mtmd_helper_post_decode_callback` (mtmd-helper.h:130 @d81235049):
+/// since v0.6.0 it takes the sub-batch's view, not a `llama_batch`.
+pub const PostDecodeCallback = ?*const fn (?*const EmbdBatchView, ?*anyopaque) callconv(.c) i32;
+
+/// Ports `mtmd_helper_video_info` (mtmd-helper.h:155 @d81235049).
 pub const VideoInfo = extern struct {
     width: u32,
     height: u32,
@@ -68,14 +81,14 @@ pub const VideoInfo = extern struct {
     n_frames: i32,
 };
 
-/// Ports `mtmd_helper_video_init_params` (mtmd-helper.h:26 @7fe450e19).
+/// Ports `mtmd_helper_video_init_params` (mtmd-helper.h:26 @d81235049).
 pub const VideoInitParams = extern struct {
     fps_target: f32, // desired output fps; <= 0 means use the video's native fps, defaulted to 4.0f
     ffmpeg_bin_dir: ?[*:0]const u8, // directory containing ffmpeg/ffprobe binaries; NULL means search PATH
     timestamp_interval_ms: i64, // interval for adding timestamp as text chunk (example: "[10m50.5s]"); <= 0 means no timestamp, defaulted to 5000ms
 };
 
-/// Ports `mtmd_helper_init_opt` (mtmd-helper.h:36 @7fe450e19): the options
+/// Ports `mtmd_helper_init_opt` (mtmd-helper.h:36 @d81235049): the options
 /// of `mtmd_helper_bitmap_init_from_*()`.
 pub const InitOpt = extern struct {
     video_params: VideoInitParams,
@@ -92,14 +105,14 @@ fn defaultCallback(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: 
     _ = fflush(f);
 }
 
-/// Ports `mtmd_helper_logger` (mtmd-helper-common.h:20 @7fe450e19): the
+/// Ports `mtmd_helper_logger` (mtmd-helper-common.h:21 @d81235049): the
 /// helpers' logger, separate from libmtmd's.
 pub const Logger = struct {
     default_callback: c.ggml_log_callback = defaultCallback,
     log_callback: c.ggml_log_callback = defaultCallback,
     log_callback_user_data: ?*anyopaque = null,
 
-    /// `log` (mtmd-helper-common.h:51 @7fe450e19): format into 128 bytes,
+    /// `log` (mtmd-helper-common.h:52 @d81235049): format into 128 bytes,
     /// or a heap buffer when that is too short.
     pub fn log(self: *const Logger, level: c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
         var buffer: [128]u8 = undefined;
@@ -119,7 +132,7 @@ pub const Logger = struct {
     }
 };
 
-/// `g_logger` (mtmd-helper-common.h:60 @7fe450e19): one instance for both
+/// `g_logger` (mtmd-helper-common.h:61 @d81235049): one instance for both
 /// helper translation units.
 pub var g_logger: Logger = .{};
 
@@ -139,139 +152,137 @@ pub fn logErr(comptime fmt: [*:0]const u8, args: anytype) void {
 // -----------------------------------------------------------------------------
 // mtmd-helper-common.h: the embedding batch
 
-/// Ports `decode_embd_batch` (mtmd-helper-common.h:73 @7fe450e19): a
-/// `llama_batch` over precomputed embeddings.
+/// Ports `decode_embd_batch` (mtmd-helper-common.h:74 @d81235049): precomputed
+/// embeddings and their positions, rendered into a `llama_batch_ext` one
+/// sub-batch at a time. Since v0.6.0 it no longer is a `llama_batch`.
 pub const EmbdBatch = struct {
     n_pos_per_embd: c_int,
     n_mmproj_embd: c_int,
-    pos: std.ArrayList(c.llama_pos) = .empty,
-    pos_view: std.ArrayList(c.llama_pos) = .empty, // used by mrope
-    n_seq_id: std.ArrayList(i32) = .empty,
-    seq_id_0: std.ArrayList(c.llama_seq_id) = .empty,
-    seq_ids: std.ArrayList(?[*]c.llama_seq_id) = .empty,
+    n_tokens: i32,
+    embd: ?[*]const f32, // [n_tokens, n_mmproj_embd], not owned
+    pos: std.ArrayList(c.llama_pos) = .empty, // [n_pos_per_embd, n_tokens], section-major
+    pos_view: std.ArrayList(c.llama_pos) = .empty, // sliced positions of the last get_view()
     logits: std.ArrayList(i8) = .empty,
-    batch: c.llama_batch = undefined,
+    seq_id: c.llama_seq_id = 0,
 
-    /// The constructor `decode_embd_batch` (mtmd-helper-common.h:83 @7fe450e19). Heap-allocated:
-    /// `batch` points into the struct's own vectors.
-    pub fn create(embd: ?[*]f32, n_tokens: i32, n_pos_per_embd: c_int, n_mmproj_embd: c_int) *EmbdBatch {
-        impl.ggmlAssert(n_tokens > 0 and n_pos_per_embd > 0 and n_mmproj_embd > 0, "mtmd-helper-common.h", 84, "n_tokens > 0 && n_pos_per_embd > 0 && n_mmproj_embd > 0");
+    batch: ?*c.struct_llama_batch_ext = null, // rendered sub-batch, see render()
+
+    /// The constructor `decode_embd_batch` (mtmd-helper-common.h:86 @d81235049).
+    /// Heap-allocated, as the callers hold it by pointer.
+    pub fn create(embd: ?[*]const f32, n_tokens: i32, n_pos_per_embd: c_int, n_mmproj_embd: c_int) *EmbdBatch {
+        impl.ggmlAssert(n_tokens > 0 and n_pos_per_embd > 0 and n_mmproj_embd > 0, "mtmd-helper-common.h", 88, "n_tokens > 0 && n_pos_per_embd > 0 && n_mmproj_embd > 0");
         const self = gpa.create(EmbdBatch) catch oom();
-        self.* = .{ .n_pos_per_embd = n_pos_per_embd, .n_mmproj_embd = n_mmproj_embd };
+        self.* = .{ .n_pos_per_embd = n_pos_per_embd, .n_mmproj_embd = n_mmproj_embd, .n_tokens = n_tokens, .embd = embd };
         const n: usize = @intCast(n_tokens);
         resizeZero(c.llama_pos, &self.pos, n * @as(usize, @intCast(n_pos_per_embd)));
-        resizeZero(i32, &self.n_seq_id, n);
-        self.seq_ids.appendNTimes(gpa, null, n + 1) catch oom();
         resizeZero(i8, &self.logits, n);
-        resizeZero(c.llama_seq_id, &self.seq_id_0, 1);
-        self.seq_ids.items[n] = null;
-        self.batch = .{
-            .n_tokens = n_tokens,
-            .token = null,
-            .embd = embd,
-            .pos = self.pos.items.ptr,
-            .n_seq_id = self.n_seq_id.items.ptr,
-            .seq_id = @ptrCast(self.seq_ids.items.ptr),
-            .logits = self.logits.items.ptr,
-        };
         return self;
     }
 
+    /// The destructor: `batch`'s `llama_batch_ext_ptr` frees it.
     pub fn destroy(self: *EmbdBatch) void {
+        if (self.batch) |b| lapi.batch.llama_batch_ext_free(b);
         self.pos.deinit(gpa);
         self.pos_view.deinit(gpa);
-        self.n_seq_id.deinit(gpa);
-        self.seq_id_0.deinit(gpa);
-        self.seq_ids.deinit(gpa);
         self.logits.deinit(gpa);
         gpa.destroy(self);
     }
 
-    /// `set_position_normal` (mtmd-helper-common.h:102 @7fe450e19).
+    /// `set_position_normal` (mtmd-helper-common.h:93 @d81235049).
     pub fn setPositionNormal(self: *EmbdBatch, pos_0: c.llama_pos, seq_id: c.llama_seq_id) void {
-        self.seq_id_0.items[0] = seq_id;
+        self.seq_id = seq_id;
         var i: i32 = 0;
-        while (i < self.batch.n_tokens) : (i += 1) {
-            const k: usize = @intCast(i);
-            self.batch.pos[k] = pos_0 +% i;
-            self.batch.n_seq_id[k] = 1;
-            self.batch.seq_id[k] = self.seq_id_0.items.ptr;
-            self.batch.logits[k] = 0;
+        while (i < self.n_tokens) : (i += 1) {
+            self.pos.items[@intCast(i)] = pos_0 +% i;
         }
     }
 
-    /// `set_position_mrope_2d` (mtmd-helper-common.h:113 @7fe450e19): M-RoPE
+    /// `set_position_mrope_2d` (mtmd-helper-common.h:101 @d81235049): M-RoPE
     /// for image.
     pub fn setPositionMrope2d(self: *EmbdBatch, rel_pos: []const mtmd.DecoderPos, seq_id: c.llama_seq_id) void {
-        impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 114, "n_pos_per_embd == 4");
-        impl.ggmlAssert(rel_pos.len != 0 and @as(i32, @truncate(@as(isize, @intCast(rel_pos.len)))) == self.batch.n_tokens, "mtmd-helper-common.h", 115, "!rel_pos.empty() && (int32_t)rel_pos.size() == batch.n_tokens");
-        self.seq_id_0.items[0] = seq_id;
-        const n_tokens: usize = @intCast(self.batch.n_tokens);
-        for (0..n_tokens) |idx| {
+        impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 102, "n_pos_per_embd == 4");
+        impl.ggmlAssert(rel_pos.len != 0 and @as(i32, @truncate(@as(isize, @intCast(rel_pos.len)))) == self.n_tokens, "mtmd-helper-common.h", 103, "!rel_pos.empty() && (int32_t)rel_pos.size() == n_tokens");
+        self.seq_id = seq_id;
+        const n: usize = @intCast(self.n_tokens);
+        for (0..n) |idx| {
             self.pos.items[idx] = @bitCast(rel_pos[idx].t);
-            self.pos.items[idx + n_tokens] = @bitCast(rel_pos[idx].y);
-            self.pos.items[idx + n_tokens * 2] = @bitCast(rel_pos[idx].x);
-            self.pos.items[idx + n_tokens * 3] = @bitCast(rel_pos[idx].z);
-        }
-        for (0..n_tokens) |i| {
-            self.batch.n_seq_id[i] = 1;
-            self.batch.seq_id[i] = self.seq_id_0.items.ptr;
-            self.batch.logits[i] = 0;
+            self.pos.items[idx + n] = @bitCast(rel_pos[idx].y);
+            self.pos.items[idx + n * 2] = @bitCast(rel_pos[idx].x);
+            self.pos.items[idx + n * 3] = @bitCast(rel_pos[idx].z);
         }
     }
 
-    /// `set_position_mrope_1d` (mtmd-helper-common.h:133 @7fe450e19): M-RoPE
+    /// `set_position_mrope_1d` (mtmd-helper-common.h:116 @d81235049): M-RoPE
     /// for audio.
     pub fn setPositionMrope1d(self: *EmbdBatch, pos_0: c.llama_pos, seq_id: c.llama_seq_id) void {
-        impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 134, "n_pos_per_embd == 4");
-        self.seq_id_0.items[0] = seq_id;
-        const n_tokens: usize = @intCast(self.batch.n_tokens);
-        for (0..n_tokens) |idx| {
+        impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 117, "n_pos_per_embd == 4");
+        self.seq_id = seq_id;
+        const n: usize = @intCast(self.n_tokens);
+        for (0..n) |idx| {
             const p = pos_0 +% @as(i32, @intCast(idx));
             self.pos.items[idx] = p;
-            self.pos.items[idx + n_tokens] = p;
-            self.pos.items[idx + n_tokens * 2] = p;
-            self.pos.items[idx + n_tokens * 3] = p;
-        }
-        for (0..n_tokens) |i| {
-            self.batch.n_seq_id[i] = 1;
-            self.batch.seq_id[i] = self.seq_id_0.items.ptr;
-            self.batch.logits[i] = 0;
+            self.pos.items[idx + n] = p;
+            self.pos.items[idx + n * 2] = p;
+            self.pos.items[idx + n * 3] = p;
         }
     }
 
-    /// `get_view` (mtmd-helper-common.h:151 @7fe450e19): `n_tokens` tokens
-    /// from `offset`; an M-RoPE view copies its positions into `pos_view`.
-    pub fn getView(self: *EmbdBatch, offset: c_int, n_tokens: c_int) c.llama_batch {
-        impl.ggmlAssert(offset >= 0 and n_tokens > 0 and offset + n_tokens <= self.batch.n_tokens, "mtmd-helper-common.h", 152, "offset >= 0 && n_tokens > 0 && offset + n_tokens <= batch.n_tokens");
+    /// `get_view` (mtmd-helper-common.h:130 @d81235049): describes the
+    /// entries `[offset, offset + n)` with section-major positions, copied
+    /// into `pos_view`; valid until the next call.
+    pub fn getView(self: *EmbdBatch, offset: c_int, n: c_int) EmbdBatchView {
+        impl.ggmlAssert(offset >= 0 and n > 0 and offset + n <= self.n_tokens, "mtmd-helper-common.h", 131, "offset >= 0 && n > 0 && offset + n <= n_tokens");
         const off: usize = @intCast(offset);
-        const n: usize = @intCast(n_tokens);
-        var pos_ptr: [*]c.llama_pos = undefined;
+        const nn: usize = @intCast(n);
         self.pos_view.clearRetainingCapacity();
-        self.pos_view.ensureTotalCapacity(gpa, n * @as(usize, @intCast(self.n_pos_per_embd))) catch oom();
-        if (self.n_pos_per_embd > 1) {
-            // mrope
-            // for example, with layout of src: 1234...1234...1234...1234...
-            //       offset 2 will give us dst: 34...34...34...34...
-            var i: usize = 0;
-            while (i < @as(usize, @intCast(self.n_pos_per_embd))) : (i += 1) {
-                const src_idx = i * @as(usize, @intCast(self.batch.n_tokens)) + off;
-                self.pos_view.appendSliceAssumeCapacity(self.pos.items[src_idx..][0..n]);
-            }
-            pos_ptr = self.pos_view.items.ptr;
-        } else {
-            // normal
-            pos_ptr = self.pos.items.ptr + off;
+        self.pos_view.ensureTotalCapacity(gpa, nn * @as(usize, @intCast(self.n_pos_per_embd))) catch oom();
+        var j: usize = 0;
+        while (j < @as(usize, @intCast(self.n_pos_per_embd))) : (j += 1) {
+            const src = j * @as(usize, @intCast(self.n_tokens)) + off;
+            self.pos_view.appendSliceAssumeCapacity(self.pos.items[src..][0..nn]);
         }
         return .{
-            .n_tokens = n_tokens,
-            .token = null,
-            .embd = if (self.batch.embd) |e| e + off * @as(usize, @intCast(self.n_mmproj_embd)) else null,
-            .pos = pos_ptr,
-            .n_seq_id = self.batch.n_seq_id + off,
-            .seq_id = self.batch.seq_id + off,
-            .logits = self.batch.logits + off,
+            .n_tokens = n,
+            .embd = if (self.embd) |e| e + off * @as(usize, @intCast(self.n_mmproj_embd)) else null,
+            .n_embd = self.n_mmproj_embd,
+            .pos = self.pos_view.items.ptr,
+            .n_pos = self.n_pos_per_embd,
+            .seq_id = self.seq_id,
         };
+    }
+
+    /// `render` (mtmd-helper-common.h:149 @d81235049): the entries
+    /// `[offset, offset + n)` as a batch this object owns, ready for
+    /// `llama_process`.
+    pub fn render(self: *EmbdBatch, lctx: ?*c.struct_llama_context, offset: c_int, n: c_int) ?*c.struct_llama_batch_ext {
+        impl.ggmlAssert(offset >= 0 and n > 0 and offset + n <= self.n_tokens, "mtmd-helper-common.h", 150, "offset >= 0 && n > 0 && offset + n <= n_tokens");
+        if (self.batch == null) {
+            self.batch = lapi.batch.llama_batch_ext_init(lctx);
+        }
+        lapi.batch.llama_batch_ext_clear(self.batch);
+        const n_tokens: usize = @intCast(self.n_tokens);
+        var i: usize = @intCast(offset);
+        while (i < @as(usize, @intCast(offset + n))) : (i += 1) {
+            const e: c.struct_llama_embd = .{
+                .data = if (self.embd) |p| p + i * @as(usize, @intCast(self.n_mmproj_embd)) else null,
+                .n_rows = 1,
+                .n_embd = @intCast(self.n_mmproj_embd),
+            };
+            const idx = lapi.batch.llama_batch_ext_add_embd(self.batch, self.seq_id, e);
+            impl.ggmlAssert(idx >= 0, "mtmd-helper-common.h", 158, "idx >= 0");
+
+            var p = [_]c.llama_pos{ 0, 0, 0, 0 }; // GGML_MROPE_SECTIONS
+            var j: usize = 0;
+            while (j < @as(usize, @intCast(self.n_pos_per_embd))) : (j += 1) {
+                p[j] = self.pos.items[j * n_tokens + i];
+            }
+            _ = lapi.batch.llama_batch_ext_set_pos(self.batch, idx, &p);
+
+            if (self.logits.items[i] != 0) {
+                _ = lapi.batch.llama_batch_ext_set_output_logits(self.batch, idx, true);
+            }
+        }
+        return self.batch;
     }
 };
 
@@ -288,7 +299,7 @@ fn resizeZero(comptime T: type, list: *std.ArrayList(T), n: usize) void {
 // -----------------------------------------------------------------------------
 // mtmd-helper.cpp
 
-/// Ports `mtmd_helper_log_set` (mtmd-helper.cpp:56 @7fe450e19): the
+/// Ports `mtmd_helper_log_set` (mtmd-helper.cpp:56 @d81235049): the
 /// helpers' logger and libmtmd's together.
 pub fn mtmd_helper_log_set(log_callback_in: c.ggml_log_callback, user_data: ?*anyopaque) callconv(.c) void {
     const log_callback = log_callback_in orelse g_logger.default_callback;
@@ -297,7 +308,7 @@ pub fn mtmd_helper_log_set(log_callback_in: c.ggml_log_callback, user_data: ?*an
     mtmd.mtmd_log_set(log_callback, user_data);
 }
 
-/// Ports `mtmd_helper_get_n_tokens` (mtmd-helper.cpp:69 @7fe450e19).
+/// Ports `mtmd_helper_get_n_tokens` (mtmd-helper.cpp:69 @d81235049).
 pub fn mtmd_helper_get_n_tokens(chunks: *const mtmd.InputChunks) callconv(.c) usize {
     var n_tokens: usize = 0;
     var i: usize = 0;
@@ -308,7 +319,7 @@ pub fn mtmd_helper_get_n_tokens(chunks: *const mtmd.InputChunks) callconv(.c) us
     return n_tokens;
 }
 
-/// Ports `mtmd_helper_get_n_pos` (mtmd-helper.cpp:78 @7fe450e19).
+/// Ports `mtmd_helper_get_n_pos` (mtmd-helper.cpp:78 @d81235049).
 pub fn mtmd_helper_get_n_pos(chunks: *const mtmd.InputChunks) callconv(.c) c.llama_pos {
     var n_pos: c.llama_pos = 0;
     var i: usize = 0;
@@ -319,15 +330,15 @@ pub fn mtmd_helper_get_n_pos(chunks: *const mtmd.InputChunks) callconv(.c) c.lla
     return n_pos;
 }
 
-/// Ports `mtmd_helper_image_get_decoder_pos` (mtmd-helper.cpp:87 @7fe450e19).
+/// Ports `mtmd_helper_image_get_decoder_pos` (mtmd-helper.cpp:87 @d81235049).
 pub fn mtmd_helper_image_get_decoder_pos(chunks: *const mtmd.ImageTokens, pos_0: c.llama_pos, out_pos: [*]mtmd.DecoderPos) callconv(.c) void {
     const n_tokens = mtmd.mtmd_image_tokens_get_n_tokens(chunks);
     for (0..n_tokens) |i| out_pos[i] = mtmd.mtmd_image_tokens_get_decoder_pos(chunks, pos_0, i);
 }
 
-/// Ports `mtmd_helper_decode_image_chunk` (mtmd-helper.cpp:118 @7fe450e19):
+/// Ports `mtmd_helper_decode_image_chunk` (mtmd-helper.cpp:118 @d81235049):
 /// decodes media embeddings already computed, in batches of `n_batch`.
-/// `scope_non_causal` (mtmd-helper.cpp:95 @7fe450e19) is the `defer`.
+/// `scope_non_causal` (mtmd-helper.cpp:95 @d81235049) is the `defer`.
 pub fn mtmd_helper_decode_image_chunk(
     ctx: *Context,
     lctx: ?*c.struct_llama_context,
@@ -388,19 +399,19 @@ pub fn mtmd_helper_decode_image_chunk(
     while (i_batch < n_img_batches) { // split into batches
         const pos_offset = i_batch * n_batch;
         const n_tokens_batch = @min(n_batch, n_tokens - pos_offset);
-        const batch_embd_view = batch_embd.getView(pos_offset, n_tokens_batch);
 
         logInf("decoding %s batch %d/%d, n_tokens_batch = %d\n", .{ name, i_batch + 1, n_img_batches, n_tokens_batch });
 
         const t1 = c.ggml_time_ms();
-        var ret = lapi.context.llama_decode(lctx, batch_embd_view);
+        var ret = lapi.context.llama_process(lctx, c.LLAMA_PROCESS_TYPE_DECODE, batch_embd.render(lctx, pos_offset, n_tokens_batch));
         if (ret != 0) {
             logErr("failed to decode %s\n", .{name});
             return ret;
         }
 
         if (callback) |cb| {
-            ret = cb(batch_embd_view, user_data);
+            const view = batch_embd.getView(pos_offset, n_tokens_batch);
+            ret = cb(&view, user_data);
             if (ret != 0) {
                 logErr("post-decode callback failed\n", .{});
                 return ret;
@@ -418,7 +429,8 @@ pub fn mtmd_helper_decode_image_chunk(
     return 0;
 }
 
-/// Ports `mtmd_helper_eval_chunk_single` (mtmd-helper.cpp:202 @7fe450e19).
+/// Ports `mtmd_helper_eval_chunk_single` (mtmd-helper.cpp:202 @d81235049):
+/// since v0.6.0 a text chunk goes through a `llama_batch_ext`.
 pub fn mtmd_helper_eval_chunk_single(
     ctx: *Context,
     lctx: ?*c.struct_llama_context,
@@ -432,37 +444,37 @@ pub fn mtmd_helper_eval_chunk_single(
     var n_past = n_past_in;
     impl.ggmlAssert(n_batch > 0, "mtmd-helper.cpp", 210, "n_batch > 0");
     var ret: i32 = undefined;
-    var text_batch = lapi.batch.llama_batch_init(n_batch, 0, 1);
     const chunk_type = mtmd.mtmd_input_chunk_get_type(chunk);
 
     if (chunk_type == .text) {
         var n_tokens: usize = 0;
         const tokens = mtmd.mtmd_input_chunk_get_tokens_text(chunk, &n_tokens);
+        // LOG_INF("decoding text chunk, n_tokens = %zu\n", n_tokens);
+        const text_batch = lapi.batch.llama_batch_ext_init(lctx);
+        defer lapi.batch.llama_batch_ext_free(text_batch);
         var i: usize = 0;
         while (i < n_tokens) { // split into batches
-            text_batch.n_tokens = 0; // clear the batch
-            while (i < n_tokens and text_batch.n_tokens < n_batch) : (i += 1) {
-                const j: usize = @intCast(text_batch.n_tokens);
-                text_batch.token[j] = tokens.?[i];
-                text_batch.pos[j] = n_past;
+            lapi.batch.llama_batch_ext_clear(text_batch);
+            var n_added: i32 = 0;
+            var idx: i32 = -1;
+            while (i < n_tokens and n_added < n_batch) : (i += 1) {
+                idx = lapi.batch.llama_batch_ext_add_token(text_batch, seq_id, tokens.?[i]);
+                impl.ggmlAssert(idx >= 0, "mtmd-helper.cpp", 226, "idx >= 0");
+                const pos: c.llama_pos = n_past;
                 n_past +%= 1;
-                text_batch.n_seq_id[j] = 1;
-                text_batch.seq_id[j][0] = seq_id;
-                text_batch.logits[j] = 0;
-
-                text_batch.n_tokens += 1;
+                _ = lapi.batch.llama_batch_ext_set_pos(text_batch, idx, &pos);
+                n_added += 1;
             }
             const is_last_token = (i == n_tokens);
             if (logits_last and is_last_token) {
-                text_batch.logits[@intCast(text_batch.n_tokens - 1)] = 1;
+                _ = lapi.batch.llama_batch_ext_set_output_logits(text_batch, idx, true);
             }
-            ret = lapi.context.llama_decode(lctx, text_batch);
+            ret = lapi.context.llama_process(lctx, c.LLAMA_PROCESS_TYPE_DECODE, text_batch);
             if (ret != 0) {
                 logErr("failed to decode text\n", .{});
-                lapi.batch.llama_batch_free(text_batch);
                 return ret;
             }
-            new_n_past.* +%= text_batch.n_tokens;
+            new_n_past.* +%= n_added;
         }
     } else if (chunk_type == .image or chunk_type == .audio) {
         const name: [*:0]const u8 = if (chunk_type == .image) "image" else "audio";
@@ -473,7 +485,6 @@ pub fn mtmd_helper_eval_chunk_single(
         ret = mtmd.mtmd_encode_chunk(ctx, chunk);
         if (ret != 0) {
             logErr("failed to encode %s slice\n", .{name});
-            lapi.batch.llama_batch_free(text_batch);
             return ret;
         }
 
@@ -483,18 +494,16 @@ pub fn mtmd_helper_eval_chunk_single(
         ret = mtmd_helper_decode_image_chunk(ctx, lctx, chunk, embd, n_past, seq_id, n_batch, new_n_past, null, null);
         if (ret != 0) {
             logErr("failed to decode %s\n", .{name});
-            lapi.batch.llama_batch_free(text_batch);
             return ret;
         }
     } else {
-        impl.abort("mtmd-helper.cpp", 268, "chunk type not supported");
+        impl.abort("mtmd-helper.cpp", 264, "chunk type not supported");
     }
 
-    lapi.batch.llama_batch_free(text_batch);
     return 0;
 }
 
-/// Ports `mtmd_helper_eval_chunks` (mtmd-helper.cpp:275 @7fe450e19).
+/// Ports `mtmd_helper_eval_chunks` (mtmd-helper.cpp:270 @d81235049).
 pub fn mtmd_helper_eval_chunks(
     ctx: *Context,
     lctx: ?*c.struct_llama_context,
@@ -527,7 +536,7 @@ pub fn mtmd_helper_eval_chunks(
     return 0;
 }
 
-/// Ports `is_audio_file` (mtmd-helper.cpp:306 @7fe450e19), a member of `audio_helpers`.
+/// Ports `is_audio_file` (mtmd-helper.cpp:301 @d81235049), a member of `audio_helpers`.
 fn isAudioFile(buf: []const u8) bool {
     if (buf.len < 12) return false;
 
@@ -542,14 +551,14 @@ fn isAudioFile(buf: []const u8) bool {
     return is_wav or is_mp3 or is_flac;
 }
 
-/// `decode_audio_from_buf` (mtmd-helper.cpp:325 @7fe450e19), a member of `audio_helpers`,
+/// `decode_audio_from_buf` (mtmd-helper.cpp:320 @d81235049), a member of `audio_helpers`,
 /// which is miniaudio's decoder, in `vendor/`.
 fn decodeAudioFromBuf(buf: []const u8, target_sample_rate: c_int, out: *std.ArrayList(f32)) bool {
     return vendor.miniaudio.decodeAudioFromBuf(gpa, buf, target_sample_rate, out);
 }
 
 /// SHA-256 of `buf` in lowercase hex: `hash_sha256_hex` (vendor/hash/hash.cpp:19
-/// @7fe450e19), the standard digest.
+/// @d81235049), the standard digest.
 fn sha256Hex(buf: []const u8) [64:0]u8 {
     var digest: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(buf, &digest, .{});
@@ -563,7 +572,7 @@ fn sha256Hex(buf: []const u8) [64:0]u8 {
     return out;
 }
 
-/// Ports `mtmd_helper_bitmap_init_from_buf` (mtmd-helper.cpp:377 @7fe450e19):
+/// Ports `mtmd_helper_bitmap_init_from_buf` (mtmd-helper.cpp:372 @d81235049):
 /// audio by its magic bytes, else an image stb_image can read. The ID is
 /// the buffer's SHA-256 unless `placeholder`. `opt` is only read by the
 /// video paths, which this build does not compile.
@@ -613,7 +622,7 @@ pub fn mtmd_helper_bitmap_init_from_buf(ctx: *const Context, buf_ptr: ?[*]const 
     return .{ .bitmap = null, .video_ctx = null };
 }
 
-/// Ports `mtmd_helper_bitmap_init_from_file` (mtmd-helper.cpp:464 @7fe450e19).
+/// Ports `mtmd_helper_bitmap_init_from_file` (mtmd-helper.cpp:459 @d81235049).
 pub fn mtmd_helper_bitmap_init_from_file(ctx: *const Context, fname: [*:0]const u8, placeholder: bool, opt: InitOpt) callconv(.c) BitmapWrapper {
     const f = openFile(fname) orelse return .{ .bitmap = null, .video_ctx = null };
 
@@ -666,25 +675,25 @@ fn openFile(fname: [*:0]const u8) ?*anyopaque {
     return f;
 }
 
-/// Ports `mtmd_helper_support_video` (mtmd-helper.cpp:509 @7fe450e19): video
+/// Ports `mtmd_helper_support_video` (mtmd-helper.cpp:504 @d81235049): video
 /// is not compiled in.
 pub fn mtmd_helper_support_video(ctx: ?*const Context) callconv(.c) bool {
     _ = ctx;
     return false;
 }
 
-/// Ports `mtmd_helper_video_init_params_default` (mtmd-helper.cpp:862
-/// @7fe450e19).
+/// Ports `mtmd_helper_video_init_params_default` (mtmd-helper.cpp:867
+/// @d81235049).
 pub fn mtmd_helper_video_init_params_default() callconv(.c) VideoInitParams {
     return .{ .fps_target = 4.0, .ffmpeg_bin_dir = null, .timestamp_interval_ms = 5000 };
 }
 
-/// Ports `mtmd_helper_init_opt_default` (mtmd-helper.cpp:870 @7fe450e19).
+/// Ports `mtmd_helper_init_opt_default` (mtmd-helper.cpp:875 @d81235049).
 pub fn mtmd_helper_init_opt_default() callconv(.c) InitOpt {
     return .{ .video_params = mtmd_helper_video_init_params_default() };
 }
 
-/// Ports `mtmd_helper_video_init` (mtmd-helper.cpp:927 @7fe450e19), its
+/// Ports `mtmd_helper_video_init` (mtmd-helper.cpp:932 @d81235049), its
 /// `#else` arm.
 pub fn mtmd_helper_video_init(mctx: ?*const Context, path: ?[*:0]const u8, params: VideoInitParams) callconv(.c) ?*anyopaque {
     _ = mctx;
@@ -694,7 +703,7 @@ pub fn mtmd_helper_video_init(mctx: ?*const Context, path: ?[*:0]const u8, param
     return null;
 }
 
-/// Ports `mtmd_helper_video_init_from_buf` (mtmd-helper.cpp:962 @7fe450e19),
+/// Ports `mtmd_helper_video_init_from_buf` (mtmd-helper.cpp:967 @d81235049),
 /// its `#else` arm.
 pub fn mtmd_helper_video_init_from_buf(mctx: ?*const Context, buf: ?[*]const u8, len: usize, params: VideoInitParams) callconv(.c) ?*anyopaque {
     _ = mctx;
@@ -705,32 +714,32 @@ pub fn mtmd_helper_video_init_from_buf(mctx: ?*const Context, buf: ?[*]const u8,
     return null;
 }
 
-/// Ports `mtmd_helper_video_free` (mtmd-helper.cpp:998 @7fe450e19), its
+/// Ports `mtmd_helper_video_free` (mtmd-helper.cpp:1003 @d81235049), its
 /// `#else` arm.
 pub fn mtmd_helper_video_free(ctx: ?*anyopaque) callconv(.c) void {
     _ = ctx;
     logErr("%s: video is not supported in this build (MTMD_VIDEO is set to OFF)\n", .{"mtmd_helper_video_free"});
 }
 
-/// Ports `mtmd_helper_video_get_info` (mtmd-helper.cpp:1009 @7fe450e19), its
+/// Ports `mtmd_helper_video_get_info` (mtmd-helper.cpp:1014 @d81235049), its
 /// `#else` arm.
 pub fn mtmd_helper_video_get_info(ctx: ?*const anyopaque) callconv(.c) VideoInfo {
     _ = ctx;
-    impl.ggmlAssert(false, "mtmd-helper.cpp", 1014, "false && \"video is not supported in this build (MTMD_VIDEO is set to OFF)\"");
+    impl.ggmlAssert(false, "mtmd-helper.cpp", 1019, "false && \"video is not supported in this build (MTMD_VIDEO is set to OFF)\"");
     unreachable;
 }
 
-/// Ports `mtmd_helper_video_read_next` (mtmd-helper.cpp:1018 @7fe450e19), its
+/// Ports `mtmd_helper_video_read_next` (mtmd-helper.cpp:1023 @d81235049), its
 /// `#else` arm.
 pub fn mtmd_helper_video_read_next(ctx: ?*anyopaque, out_bitmap: ?*?*mtmd.Bitmap, out_text: ?*?[*:0]u8) callconv(.c) i32 {
     _ = ctx;
     _ = out_bitmap;
     _ = out_text;
-    impl.ggmlAssert(false, "mtmd-helper.cpp", 1027, "false && \"video is not supported in this build (MTMD_VIDEO is set to OFF)\"");
+    impl.ggmlAssert(false, "mtmd-helper.cpp", 1032, "false && \"video is not supported in this build (MTMD_VIDEO is set to OFF)\"");
     unreachable;
 }
 
-/// Ports `mtmd_helper_model_can_chat` (mtmd-helper.cpp:1031 @7fe450e19): a
+/// Ports `mtmd_helper_model_can_chat` (mtmd-helper.cpp:1036 @d81235049): a
 /// TTS-only model, which has no chat template, cannot chat.
 pub fn mtmd_helper_model_can_chat(lctx: ?*const c.struct_llama_context, mctx: ?*const Context) callconv(.c) bool {
     const m = mctx orelse return true;

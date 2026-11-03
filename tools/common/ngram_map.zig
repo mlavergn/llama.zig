@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/ngram-map.h` and `llama.cpp/common/ngram-map.cpp`
-//! at v0.5.0 (`7fe450e19`). Each declaration names the C++ it replaces and
+//! at v0.6.0 (`d81235049`). Each declaration names the C++ it replaces and
 //! the line it began at.
 //!
 //! # Two algorithms
@@ -26,12 +26,12 @@ const std = @import("std");
 const c = @import("tools_h");
 const log = @import("log.zig");
 
-/// Ports `LCG_FACTOR` (ngram-map.cpp:11 @7fe450e19): the multiplier, near
+/// Ports `LCG_FACTOR` (ngram-map.cpp:11 @d81235049): the multiplier, near
 /// `(sqrt(5) - 1) / 2 * 2^32`. `unsigned long` in the C++; only its low 32
 /// bits reach the `uint32_t` hash.
 const lcg_factor: u32 = 2654435761;
 
-/// Ports `common_ngram_map_hash` (ngram-map.cpp:14 @7fe450e19): the LCG hash
+/// Ports `common_ngram_map_hash` (ngram-map.cpp:14 @d81235049): the LCG hash
 /// of `len` tokens at `start`.
 fn mapHash(tokens: []const c.llama_token, start: usize, len: usize) u32 {
     var hash: u32 = 0;
@@ -41,7 +41,7 @@ fn mapHash(tokens: []const c.llama_token, start: usize, len: usize) u32 {
     return hash;
 }
 
-/// Ports `common_tokens_to_str` (ngram-map.cpp:23 @7fe450e19): `length`
+/// Ports `common_tokens_to_str` (ngram-map.cpp:23 @d81235049): `length`
 /// tokens at `start` as `[v0, v1, ...]`.
 ///
 /// Return: the text, NUL-terminated, the allocator's.
@@ -59,7 +59,7 @@ fn tokensToStr(allocator: std.mem.Allocator, inp: []const c.llama_token, start: 
     return out.toOwnedSliceSentinel(allocator, 0);
 }
 
-/// Ports `common_ngram_simple_config` (ngram-map.h:24 @7fe450e19).
+/// Ports `common_ngram_simple_config` (ngram-map.h:24 @d81235049).
 pub const SimpleConfig = struct {
     /// size of n-grams to lookup in self-mode
     size_ngram: u16,
@@ -67,7 +67,7 @@ pub const SimpleConfig = struct {
     size_mgram: u16,
 };
 
-/// Ports `common_ngram_simple_draft` (ngram-map.cpp:49 @7fe450e19): search
+/// Ports `common_ngram_simple_draft` (ngram-map.cpp:49 @d81235049): search
 /// the history backwards for its last `size_ngram` tokens (the sampled one
 /// last) and return up to `size_mgram` tokens that followed.
 ///
@@ -139,19 +139,19 @@ pub fn simpleDraft(allocator: std.mem.Allocator, config: SimpleConfig, tokens: [
     return draft_tokens;
 }
 
-/// Ports `COMMON_NGRAM_MAX_VALUES` (ngram-map.h:39 @7fe450e19): the m-gram
+/// Ports `COMMON_NGRAM_MAX_VALUES` (ngram-map.h:39 @d81235049): the m-gram
 /// values kept per key.
 pub const max_values = 4;
 
-/// Ports `COMMON_NGRAM_HASH_MAP_SIZE` (ngram-map.h:42 @7fe450e19): entries in
+/// Ports `COMMON_NGRAM_HASH_MAP_SIZE` (ngram-map.h:42 @d81235049): entries in
 /// the map from n-gram hash to history index.
 pub const hash_map_size = 262144;
 
-/// Ports `COMMON_NGRAM_MAX_VALUE_COUNT` (ngram-map.cpp:119 @7fe450e19): the
+/// Ports `COMMON_NGRAM_MAX_VALUE_COUNT` (ngram-map.cpp:119 @d81235049): the
 /// most a key or value count reaches.
 const max_value_count = 16380;
 
-/// Ports `common_ngram_map_value` (ngram-map.h:45 @7fe450e19): one m-gram
+/// Ports `common_ngram_map_value` (ngram-map.h:45 @d81235049): one m-gram
 /// seen after a key.
 pub const Value = struct {
     /// index of value m-gram in token-history (0 if unused)
@@ -162,7 +162,7 @@ pub const Value = struct {
     n_accepted: i16 = -1,
 };
 
-/// Ports `common_ngram_map_key` (ngram-map.h:52 @7fe450e19): one n-gram seen
+/// Ports `common_ngram_map_key` (ngram-map.h:52 @d81235049): one n-gram seen
 /// more than once.
 pub const Key = struct {
     /// index of key n-gram in token-history
@@ -175,7 +175,7 @@ pub const Key = struct {
     values: [max_values]Value = @splat(.{}),
 };
 
-/// Ports `common_ngram_map` (ngram-map.h:61 @7fe450e19).
+/// Ports `common_ngram_map` (ngram-map.h:61 @d81235049).
 pub const Map = struct {
     allocator: std.mem.Allocator,
 
@@ -213,7 +213,7 @@ pub const Map = struct {
     /// index of the last ngram added to key_map
     key_map_last_idx: u32 = 0,
 
-    /// Ports `common_ngram_map` (ngram-map.h:72 @7fe450e19), the
+    /// Ports `common_ngram_map` (ngram-map.h:72 @d81235049), the
     /// constructor: an empty map with every hash entry 0.
     ///
     /// Parameters:
@@ -256,7 +256,7 @@ fn matchAt(inp: []const c.llama_token, at: usize, key_tokens: []const c.llama_to
     return true;
 }
 
-/// Ports `common_ngram_map_begin` (ngram-map.cpp:121 @7fe450e19): a new
+/// Ports `common_ngram_map_begin` (ngram-map.cpp:121 @d81235049): a new
 /// generation over `tokens`; when the history shrank, drop the keys, values
 /// and hash entries past the point it shrank to.
 ///
@@ -360,7 +360,7 @@ pub fn begin(map: *Map, tokens: []const c.llama_token) void {
     map.size_last_begin = size_begin;
 }
 
-/// Ports `common_ngram_map_draft` (ngram-map.cpp:221 @7fe450e19): find the
+/// Ports `common_ngram_map_draft` (ngram-map.cpp:221 @d81235049): find the
 /// key ending in `sampled`, update its statistics, and draft the m-gram
 /// after it -- its first value with keys alone, otherwise the most frequent
 /// value when it dominates the others.
@@ -641,7 +641,7 @@ pub fn draft(map: *Map, inp: []const c.llama_token, sampled: c.llama_token, draf
     map.last_draft_value_idx = @intCast(slot_max); // value used for draft generation.
 }
 
-/// Ports `common_ngram_map_accept` (ngram-map.cpp:518 @7fe450e19): record
+/// Ports `common_ngram_map_accept` (ngram-map.cpp:518 @d81235049): record
 /// how many tokens of the last draft were accepted, which caps the next
 /// draft from the same value.
 ///

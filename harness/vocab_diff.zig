@@ -691,6 +691,66 @@ const edits = struct {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "test");
     }
 
+    /// The v0.6.0 pre-tokenizers on the GPT-2 vocabulary: mmBERT's
+    /// Metaspace split (escaped spaces, a word per escaped space) and its
+    /// `<mask>` attribute, and GLM-5's ChatGLM-4 pattern with
+    /// `ignore_merges`.
+    fn preMmbert(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "mmbert");
+    }
+
+    fn preGlm5(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "glm5");
+        appendNormal(ctx, &.{ "zqzq", "\u{120}zqzq" });
+    }
+
+    fn preGlm4(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "glm4");
+        appendNormal(ctx, &.{ "zqzq", "\u{120}zqzq" });
+    }
+
+    /// Whole-word tokens no merge reaches, which only `ignore_merges` emits.
+    fn appendNormal(ctx: *c.gguf_context, words: []const []const u8) void {
+        var toks: std.ArrayList([]const u8) = .empty;
+        findStrs(ctx, "tokenizer.ggml.tokens", &toks);
+        toks.appendSlice(gpa, words) catch unreachable;
+        setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
+        const tk = c.gguf_find_key(ctx, "tokenizer.ggml.token_type");
+        if (tk >= 0) {
+            var types: std.ArrayList(i32) = .empty;
+            const tp: [*]const i32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, tk)));
+            types.appendSlice(gpa, tp[0..c.gguf_get_arr_n(ctx, tk)]) catch unreachable;
+            for (words) |_| types.append(gpa, c.LLAMA_TOKEN_TYPE_NORMAL) catch unreachable;
+            setI32s(ctx, "tokenizer.ggml.token_type", types.items);
+        }
+    }
+
+    /// The v0.6.0 PLaMo-2 tokenize: BOS and EOS added as asked, and a
+    /// `</s>` that is a normal token beside `<|plamo:eos|>`.
+    fn plamo2Special(ctx: *c.gguf_context) void {
+        plamo2(ctx);
+        var toks: std.ArrayList([]const u8) = .empty;
+        findStrs(ctx, "tokenizer.ggml.tokens", &toks);
+        toks.append(gpa, "</s>") catch unreachable;
+        setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
+        const tk = c.gguf_find_key(ctx, "tokenizer.ggml.token_type");
+        var types: std.ArrayList(i32) = .empty;
+        const tp: [*]const i32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, tk)));
+        types.appendSlice(gpa, tp[0..c.gguf_get_arr_n(ctx, tk)]) catch unreachable;
+        types.append(gpa, c.LLAMA_TOKEN_TYPE_CONTROL) catch unreachable;
+        setI32s(ctx, "tokenizer.ggml.token_type", types.items);
+        const sk = c.gguf_find_key(ctx, "tokenizer.ggml.scores");
+        var scores: std.ArrayList(f32) = .empty;
+        const sp: [*]const f32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, sk)));
+        scores.appendSlice(gpa, sp[0..c.gguf_get_arr_n(ctx, sk)]) catch unreachable;
+        scores.append(gpa, 0) catch unreachable;
+        setF32s(ctx, "tokenizer.ggml.scores", scores.items);
+        c.gguf_set_val_u32(ctx, "tokenizer.ggml.bos_token_id", 1);
+        c.gguf_set_val_u32(ctx, "tokenizer.ggml.eos_token_id", 2);
+        c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_bos_token", true);
+        c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_eos_token", true);
+    }
+
     fn badPre(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "no-such-pre");
     }
@@ -761,6 +821,9 @@ pub fn main(init: std.process.Init) !void {
     const gpt2 = by_name.get("ggml-vocab-gpt-2.gguf") orelse return error.MissingGpt2Vocab;
     const spm = by_name.get("ggml-vocab-llama-spm.gguf") orelse return error.MissingSpmVocab;
     const ugm = by_name.get("ggml-vocab-nomic-bert-moe.gguf") orelse return error.MissingUgmVocab;
+    const gemma4 = by_name.get("ggml-vocab-gemma-4.gguf") orelse return error.MissingGemma4Vocab;
+    // words only `ignore_merges` (GLM-4/5 since v0.6.0) keeps whole
+    for ([_][]const u8{ "zqzq zqzq\nzqzq", "a zqzq, zqzqzq" }) |t| try corpus.append(gpa, t);
     const synthetic = [_]Case{
         .{ .name = "synthetic-rwkv", .path = derive(dir, gpt2, "rwkv", edits.rwkv) },
         .{ .name = "synthetic-plamo2", .path = derive(dir, gpt2, "plamo2", edits.plamo2) },
@@ -779,6 +842,11 @@ pub fn main(init: std.process.Init) !void {
         .{ .name = "synthetic-pre-hy-v4", .path = derive(dir, gpt2, "pre-hy-v4", edits.preHyV4) },
         .{ .name = "synthetic-pre-spark2-5", .path = derive(dir, gpt2, "pre-spark2-5", edits.preSpark25) },
         .{ .name = "synthetic-pre-ufakzeka", .path = derive(dir, gpt2, "pre-ufakzeka", edits.preUfakzeka) },
+        .{ .name = "synthetic-pre-mmbert", .path = derive(dir, gpt2, "pre-mmbert", edits.preMmbert) },
+        .{ .name = "synthetic-pre-mmbert-gemma4", .path = derive(dir, gemma4, "pre-mmbert-gemma4", edits.preMmbert) },
+        .{ .name = "synthetic-pre-glm5", .path = derive(dir, gpt2, "pre-glm5", edits.preGlm5) },
+        .{ .name = "synthetic-pre-glm4", .path = derive(dir, gpt2, "pre-glm4", edits.preGlm4) },
+        .{ .name = "synthetic-plamo2-special", .path = derive(dir, gpt2, "plamo2-special", edits.plamo2Special) },
         .{ .name = "synthetic-test-bpe", .path = derive(dir, gpt2, "test-bpe", edits.testType) },
         .{ .name = "synthetic-test-spm", .path = derive(dir, spm, "test-spm", edits.testType) },
         .{ .name = "error-model", .path = derive(dir, gpt2, "bad-model", edits.badModel) },

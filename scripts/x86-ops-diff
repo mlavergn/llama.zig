@@ -19,8 +19,8 @@
 #   X86_AGENT, ZUPDATER   as scripts/win-run takes them
 #   X86_BUILD_ONLY=1             stop after building the three .exe files
 #   X86_PORT_ENV=NAME=VALUE      set in the ported side's environment only,
-#                                for negative tests: GGML_NO_IQ_PANEL=1 must
-#                                make the `iqp` lines differ
+#                                for negative tests: GGML_CPU_TILED_MM=0 must
+#                                make the `tiled` lines differ
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2

@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ported from the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/fattn-common.cuh` at v0.5.0 (`7fe450e19`),
+//! `llama.cpp/ggml/src/ggml-cuda/fattn-common.cuh` at v0.6.0 (`d81235049`),
 //! plus `amd_mfma_available` and `amd_wmma_available` from
 //! `llama.cpp/ggml/src/ggml-cuda/common.cuh`. The kernels --
 //! `flash_attn_mask_to_KV_max`, `flash_attn_stream_k_fixup_uniform`,
@@ -40,7 +40,7 @@ extern fn powf(x: f32, y: f32) f32;
 extern fn log2f(x: f32) f32;
 extern fn floorf(x: f32) f32;
 
-/// Ports `FATTN_KQ_STRIDE` (fattn-common.cuh:9 @7fe450e19).
+/// Ports `FATTN_KQ_STRIDE` (fattn-common.cuh:9 @d81235049).
 pub const kq_stride = 256;
 
 /// `sizeof(half)`.
@@ -56,36 +56,36 @@ const Float2 = extern struct { x: f32, y: f32 };
 // -----------------------------------------------------------------------------
 // AMD predicates
 
-/// `GGML_CUDA_CC_GFX909` (common.cuh:72 @7fe450e19), a GCN APU.
+/// `GGML_CUDA_CC_GFX909` (common.cuh:72 @d81235049), a GCN APU.
 const cc_gfx909 = common.cc.offset_amd + 0x909;
-/// `GGML_CUDA_CC_GFX90C` (common.cuh:73 @7fe450e19), a GCN APU.
+/// `GGML_CUDA_CC_GFX90C` (common.cuh:73 @d81235049), a GCN APU.
 const cc_gfx90c = common.cc.offset_amd + 0x90c;
-/// `GGML_CUDA_CC_CDNA1` (common.cuh:74 @7fe450e19).
+/// `GGML_CUDA_CC_CDNA1` (common.cuh:74 @d81235049).
 const cc_cdna1 = common.cc.offset_amd + 0x908;
-/// `GGML_CUDA_CC_RDNA1` (common.cuh:80 @7fe450e19).
+/// `GGML_CUDA_CC_RDNA1` (common.cuh:80 @d81235049).
 const cc_rdna1 = common.cc.offset_amd + 0x1010;
-/// `GGML_CUDA_CC_RDNA3` (common.cuh:82 @7fe450e19).
+/// `GGML_CUDA_CC_RDNA3` (common.cuh:82 @d81235049).
 const cc_rdna3 = common.cc.offset_amd + 0x1100;
-/// `GGML_CUDA_CC_RDNA3_5` (common.cuh:83 @7fe450e19).
+/// `GGML_CUDA_CC_RDNA3_5` (common.cuh:83 @d81235049).
 const cc_rdna3_5 = common.cc.offset_amd + 0x1150;
-/// `GGML_CUDA_CC_RDNA4` (common.cuh:84 @7fe450e19).
+/// `GGML_CUDA_CC_RDNA4` (common.cuh:84 @d81235049).
 const cc_rdna4 = common.cc.offset_amd + 0x1200;
 
-/// Ports `GGML_CUDA_CC_IS_GCN_APU` (common.cuh:94 @7fe450e19): the two GCN
+/// Ports `GGML_CUDA_CC_IS_GCN_APU` (common.cuh:94 @d81235049): the two GCN
 /// APUs whose compute capabilities fall inside the CDNA range.
 fn isGcnApu(x: c_int) bool {
     return x == cc_gfx909 or x == cc_gfx90c;
 }
 
-/// Ports `amd_mfma_available` (common.cuh:348 @7fe450e19), the
+/// Ports `amd_mfma_available` (common.cuh:348 @d81235049), the
 /// `!GGML_HIP_NO_MMQ_MFMA` arm, which is the CDNA test: ports
-/// `GGML_CUDA_CC_IS_CDNA` (common.cuh:96 @7fe450e19). False for every CUDA
+/// `GGML_CUDA_CC_IS_CDNA` (common.cuh:96 @d81235049). False for every CUDA
 /// compute capability.
 pub fn amdMfmaAvailable(x: c_int) bool {
     return !isGcnApu(x) and x >= cc_cdna1 and x < cc_rdna1;
 }
 
-/// Ports `amd_wmma_available` (common.cuh:356 @7fe450e19):
+/// Ports `amd_wmma_available` (common.cuh:356 @d81235049):
 /// `GGML_CUDA_CC_IS_RDNA4(cc) || GGML_CUDA_CC_IS_RDNA3(cc)`. False for every
 /// CUDA compute capability.
 pub fn amdWmmaAvailable(x: c_int) bool {
@@ -125,14 +125,14 @@ fn u32Of(x: anytype) u32 {
 // -----------------------------------------------------------------------------
 // F16 scratch
 
-/// Ports `ggml_cuda_flash_attn_ext_f16_extra_data` (fattn-common.cuh:47 @7fe450e19).
+/// Ports `ggml_cuda_flash_attn_ext_f16_extra_data` (fattn-common.cuh:47 @d81235049).
 pub const F16ExtraData = struct {
     K: usize = 0,
     V: usize = 0,
     end: usize = 0,
 };
 
-/// Ports `ggml_cuda_flash_attn_ext_get_f16_extra_data` (fattn-common.cuh:53 @7fe450e19):
+/// Ports `ggml_cuda_flash_attn_ext_get_f16_extra_data` (fattn-common.cuh:53 @d81235049):
 /// where in `dst`'s allocation, past `dst`'s own bytes, the F16 copies of K
 /// and V go. Computed from `dst->data`, so the buffer type's size (asked
 /// with whatever `data` the tensor has then) and the launch agree only
@@ -219,16 +219,23 @@ pub const LaunchArgs = struct {
     /// length; no default, as the C has none.
     use_sparse: bool,
     warp_size: c_int = common.warp_size,
+    /// Since v0.6.0: the kernel preloads K/V asynchronously (two pipeline
+    /// stages, no sparse gather), which on a DGX Spark makes whole tiles
+    /// preferable to stream-k after a mask scan.
+    async_kv_preload: bool = false,
 };
 
-/// Ports `should_use_stream_k` (fattn-common.cuh:1140 @7fe450e19), the
+/// Ports `should_use_stream_k` (fattn-common.cuh:1149 @d81235049), the
 /// lambda in `launch_fattn`: whether a stream-k kernel takes the stream-k
 /// decomposition or whole tiles, which for short contexts can be faster
-/// because it skips the fixup.
-fn shouldUseStreamK(cc: c_int, ntiles_dst: c_int, max_blocks: c_int, DKQ: c_int) bool {
+/// because it skips the fixup. `prefer_whole_tiles` is the lambda's capture.
+fn shouldUseStreamK(prefer_whole_tiles: bool, cc: c_int, ntiles_dst: c_int, max_blocks: c_int, DKQ: c_int) bool {
     const tiles_nwaves = @divTrunc(ntiles_dst + max_blocks - 1, max_blocks);
     const tiles_efficiency_percent = @divTrunc(100 * ntiles_dst, max_blocks * tiles_nwaves);
 
+    if (prefer_whole_tiles and tiles_efficiency_percent >= 75) {
+        return false;
+    }
     if (common.cc.isNvidia(cc) and cc >= common.cc.ada_lovelace) {
         return true;
     }
@@ -238,7 +245,7 @@ fn shouldUseStreamK(cc: c_int, ntiles_dst: c_int, max_blocks: c_int, DKQ: c_int)
     return tiles_efficiency_percent < 75;
 }
 
-/// Ports `launch_fattn` (fattn-common.cuh:976 @7fe450e19).
+/// Ports `launch_fattn` (fattn-common.cuh:981 @d81235049).
 ///
 /// Parameters:
 /// - `library`: the translation unit the calling case is instantiated in;
@@ -389,7 +396,8 @@ pub fn launchFattn(
     // Optional optimization where the mask is scanned to determine whether part of the calculation can be skipped.
     // Only worth the overhead if there is at lease one FATTN_KQ_STRIDE x FATTN_KQ_STRIDE square to be skipped or
     //     multiple sequences of possibly different lengths.
-    if (!a.use_sparse and mask != null and @rem(K.ne[1], kq_stride) == 0 and (Q.ne[1] >= 1024 or Q.ne[3] > 1)) {
+    const scan_mask = !a.use_sparse and mask != null and @rem(K.ne[1], kq_stride) == 0 and (Q.ne[1] >= 1024 or Q.ne[3] > 1);
+    if (scan_mask) {
         const m = mask.?;
         const s31 = i64Of(m.nb[1] / sizeof_half2);
         const s33 = i64Of(m.nb[3] / sizeof_half2);
@@ -420,8 +428,11 @@ pub fn launchFattn(
 
     var blocks_num: kernels.Dim3 = .{};
     if (a.stream_k) {
+        // Stream-K splits the work before the mask scan is applied, so skipped KV tiles make the blocks uneven.
+        const prefer_whole_tiles = common.cc.isNvidia(cc) and cc == common.cc.dgx_spark and a.async_kv_preload and scan_mask;
+
         const max_blocks = max_blocks_per_sm * nsm;
-        const use_stream_k = shouldUseStreamK(cc, ntiles_dst, max_blocks, i32Of(Q.ne[0]));
+        const use_stream_k = shouldUseStreamK(prefer_whole_tiles, cc, ntiles_dst, max_blocks, i32Of(Q.ne[0]));
 
         blocks_num.x = u32Of(ntiles_dst);
         blocks_num.y = 1;

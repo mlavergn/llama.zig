@@ -91,9 +91,9 @@ const common_sources = [_][]const u8{
     "common/parsers/gigachat-v3.cpp",      "common/parsers/gpt-oss.cpp",
     "common/parsers/kimi-k2.cpp",          "common/parsers/kimi-k3.cpp",
     "common/parsers/ling3.cpp",            "common/parsers/lfm2.cpp",
-    "common/parsers/minicpm5.cpp",         "common/parsers/minimax-m3.cpp",
-    "common/parsers/ministral3.cpp",       "common/parsers/muse-glimmer.cpp",
-    "common/parsers/qwen3-coder.cpp",
+    "common/parsers/llm-jp-harmony.cpp",   "common/parsers/minicpm5.cpp",
+    "common/parsers/minimax-m3.cpp",       "common/parsers/ministral3.cpp",
+    "common/parsers/muse-glimmer.cpp",     "common/parsers/qwen3-coder.cpp",
 };
 
 /// `llama.cpp.zmake`'s `server_context_sources`, `server_impl_sources` and
@@ -103,9 +103,9 @@ const server_sources = [_][]const u8{
     "tools/server/server-queue.cpp",   "tools/server/server-common.cpp",
     "tools/server/server-context.cpp", "tools/server/server-stream.cpp",
     "tools/server/server-tools.cpp",   "tools/server/server-mcp.cpp",
-    "tools/server/server-schema.cpp",  "tools/server/server.cpp",
-    "tools/server/server-http.cpp",    "tools/server/server-models.cpp",
-    "tools/server/main.cpp",
+    "tools/server/server-schema.cpp",  "tools/server/server-decision.cpp",
+    "tools/server/server.cpp",         "tools/server/server-http.cpp",
+    "tools/server/server-models.cpp",  "tools/server/main.cpp",
 };
 
 /// `llama.cpp.zmake`'s `httplib_defines`.

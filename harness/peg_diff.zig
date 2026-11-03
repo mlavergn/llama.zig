@@ -29,9 +29,9 @@
 //! batch whose child dies is rerun one case per child; a case that kills
 //! the reference is skipped on both sides and counted.
 //!
-//! Where the C++ is undefined -- the base mapper writing through a
-//! `current_tool` it has destroyed (see `chat_peg.zig`) -- the port says so
-//! and that one mapping is not compared, counted.
+//! A tool-related node after a `tool-close` -- undefined in the C++ until
+//! v0.6.0 cleared `current_tool` there (see `chat_peg.zig`) -- is compared
+//! like any other, and some mapping must reach one.
 //!
 //! Usage: peg_diff [case substring]
 //!   PEG_DIFF_SEED=n    the generators' seed (default 1)
@@ -730,7 +730,7 @@ fn msgText(m: *const chat.Msg) []u8 {
     return s.toOwnedSlice(gpa) catch oom();
 }
 
-var ub_skipped: usize = 0;
+var after_close: usize = 0;
 
 fn mapperText(ctx: *peg.ParseContext, result: *const peg.ParseResult, kind: cpeg.Mapper.Kind) ![]u8 {
     var m: chat.Msg = .{};
@@ -738,7 +738,7 @@ fn mapperText(ctx: *peg.ParseContext, result: *const peg.ParseResult, kind: cpeg
     var mapper = cpeg.Mapper.init(gpa, &m, kind);
     defer mapper.deinit();
     const r = mapper.fromAst(&ctx.ast, result);
-    if (mapper.ub) return error.Undefined;
+    if (mapper.after_close) after_close += 1;
     try r;
     return msgText(&m);
 }
@@ -766,13 +766,9 @@ fn parseRecords(arena: *const peg.Arena, input: []const u8, flags: u32, comptime
             defer gpa.free(s);
             rec(out, "M{d}:G:{s}", .{ k, s });
         } else |e| {
-            if (e == error.Undefined) {
-                rec(out, "M{d}:UB", .{k});
-            } else {
-                const t = errText(e);
-                defer gpa.free(t);
-                rec(out, "M{d}:E:{s}", .{ k, t });
-            }
+            const t = errText(e);
+            defer gpa.free(t);
+            rec(out, "M{d}:E:{s}", .{ k, t });
         }
     }
 }
@@ -1796,8 +1792,8 @@ pub fn main(init: std.process.Init) !void {
         addCase("minimax", 0, mm, inputsFor(mm, &.{}, 40, 40));
     }
     // the base mapper's state machine, node orders a grammar rarely
-    // produces: a close before any name (the C++ reads a destroyed tool
-    // call after it), arguments before the name, a string value left open
+    // produces: a close before any name (and a tool node after it,
+    // undefined in the C++ until v0.6.0), arguments before the name, a string value left open
     {
         const orders = [_][]const Op{
             &.{ .tool_open, .tool_close, .tool_name, .tool_arg_name, .tool_arg_string_value },
@@ -1806,6 +1802,10 @@ pub fn main(init: std.process.Init) !void {
             &.{ .tool_open, .tool_arg_name, .tool_arg_value, .tool_arg_close, .tool_name, .tool_close, .tool_id },
             &.{ .tool_open, .tool_id, .tool_open, .tool_name, .tool_arg_string_value, .tool_arg_string_value, .tool_arg_close },
             &.{ .tool_name, .tool_open, .tool_arg_value, .tool_close, .tool_close },
+            // a named call kept, then a nameless one closed and a tool node
+            // after it: v0.6.0 clears current_tool, so nothing reaches the first
+            &.{ .tool_open, .tool_name, .tool_close, .tool_open, .tool_close, .tool_name, .tool_arg_name, .tool_arg_string_value },
+            &.{ .tool_open, .tool_name, .tool_args, .tool_close, .tool_open, .tool_close, .tool_args, .tool_id },
         };
         const texts = [_][]const u8{ "{\"a\": 1}", "x", "\"q\" ", "", "'s'", "{'k': True}", "N", "\xc3\xa9", "{\"a\": \"\\\"{\"", "\"\\\"{" };
         for (orders) |order| {
@@ -1965,10 +1965,6 @@ pub fn main(init: std.process.Init) !void {
                 const a: []const u8 = if (j < ref.items.len) ref.items[j] else "<missing>";
                 const b: []const u8 = if (j < port.items.len) port.items[j] else "<missing>";
                 if (std.mem.startsWith(u8, a, "I:")) input = a[2..];
-                if (b.len >= 4 and b[0] == 'M' and std.mem.eql(u8, b[2..], ":UB")) {
-                    ub_skipped += 1;
-                    continue;
-                }
                 checks += 1;
                 if (std.mem.startsWith(u8, a, "P") or std.mem.startsWith(u8, a, "Q")) n_parses += 1;
                 if (std.mem.startsWith(u8, a, "G:G:") or std.mem.startsWith(u8, a, "L:G:")) n_grammars += 1;
@@ -2037,8 +2033,8 @@ pub fn main(init: std.process.Init) !void {
             missing += 1;
         }
     }
-    if (filter == null and ub_skipped == 0) {
-        std.debug.print("FAIL: no input reached the base mapper's destroyed tool call\n", .{});
+    if (filter == null and after_close == 0) {
+        std.debug.print("FAIL: no mapping saw a tool node after a tool-close\n", .{});
         missing += 1;
     }
 
@@ -2046,5 +2042,5 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("FAIL: {d} of {d} checks differ over {d} cases\n", .{ failures, checks, cases.items.len });
         std.process.exit(1);
     }
-    std.debug.print("PASS: {d} checks over {d} cases ({d} parses, {d} grammars, {d} mapped messages with tool calls -- {d}, {d}, {d} by mapper -- {d} errors; {d} reference crashes and {d} undefined mappings skipped), cli/peg and chat_peg.zig identical to peg-parser.cpp and chat-peg-parser.cpp\n", .{ checks, cases.items.len, n_parses, n_grammars, n_tool_calls, per_mapper[0], per_mapper[1], per_mapper[2], n_errors, crashed, ub_skipped });
+    std.debug.print("PASS: {d} checks over {d} cases ({d} parses, {d} grammars, {d} mapped messages with tool calls -- {d}, {d}, {d} by mapper -- {d} errors; {d} reference crashes skipped; {d} mappings past a tool-close), cli/peg and chat_peg.zig identical to peg-parser.cpp and chat-peg-parser.cpp\n", .{ checks, cases.items.len, n_parses, n_grammars, n_tool_calls, per_mapper[0], per_mapper[1], per_mapper[2], n_errors, crashed, after_close });
 }

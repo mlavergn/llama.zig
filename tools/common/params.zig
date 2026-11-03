@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ports `common_cpu_params`, `common_params_sampling`, `common_params_model`
-//! and `common_params` from `llama.cpp/common/common.h` (v0.5.0,
-//! `7fe450e19`) -- the members the tools' options and the tools themselves
+//! and `common_params` from `llama.cpp/common/common.h` (v0.6.0,
+//! `d81235049`) -- the members the tools' options and the tools themselves
 //! touch, with upstream's defaults, and the server's: its block of
 //! `common_params`, `common_params_speculative` with its draft and n-gram
 //! sub-structs, and the reasoning and chat-template members its options set.
@@ -20,7 +20,7 @@
 const std = @import("std");
 const c = @import("tools_h");
 
-/// Ports `llama_example` (common/common.h:84 @7fe450e19).
+/// Ports `llama_example` (common/common.h:87 @d81235049).
 pub const Example = enum(c_int) {
     batched,
     debug,
@@ -50,7 +50,7 @@ pub const Example = enum(c_int) {
     tokenize,
 };
 
-/// Ports `common_sampler_type` (common/common.h:115 @7fe450e19).
+/// Ports `common_sampler_type` (common/common.h:118 @d81235049).
 pub const SamplerType = enum(c_int) {
     none = 0,
     dry = 1,
@@ -65,7 +65,7 @@ pub const SamplerType = enum(c_int) {
     top_n_sigma = 11,
     adaptive_p = 12,
 
-    /// Ports `common_sampler_type_to_chr` (sampling.cpp:795 @7fe450e19).
+    /// Ports `common_sampler_type_to_chr` (sampling.cpp:925 @d81235049).
     pub fn toChr(self: SamplerType) u8 {
         return switch (self) {
             .dry => 'd',
@@ -83,7 +83,7 @@ pub const SamplerType = enum(c_int) {
         };
     }
 
-    /// Ports `common_sampler_type_to_str` (sampling.cpp:812 @7fe450e19).
+    /// Ports `common_sampler_type_to_str` (sampling.cpp:942 @d81235049).
     pub fn toStr(self: SamplerType) []const u8 {
         return switch (self) {
             .dry => "dry",
@@ -102,7 +102,7 @@ pub const SamplerType = enum(c_int) {
     }
 };
 
-/// Ports `common_params_sampling_config` (common/common.h:156 @7fe450e19).
+/// Ports `common_params_sampling_config` (common/common.h:159 @d81235049).
 pub const SamplingConfig = struct {
     pub const samplers: u64 = 1 << 0;
     pub const top_k: u64 = 1 << 1;
@@ -118,13 +118,13 @@ pub const SamplingConfig = struct {
     pub const mirostat_eta: u64 = 1 << 11;
 };
 
-/// Ports `dimre_method` (common/common.h:132 @7fe450e19).
+/// Ports `dimre_method` (common/common.h:135 @d81235049).
 pub const DimreMethod = enum { pca, mean };
 
-/// Ports `common_grammar_type` (common/common.h:187 @7fe450e19).
+/// Ports `common_grammar_type` (common/common.h:190 @d81235049).
 pub const GrammarType = enum { none, user, output_format, tool_calls };
 
-/// Ports `common_speculative_type` (common/common.h:171 @7fe450e19).
+/// Ports `common_speculative_type` (common/common.h:174 @d81235049).
 pub const SpeculativeType = enum(c_int) {
     none, // no speculative decoding
     draft_simple, // standalone draft model speculative decoding
@@ -139,7 +139,7 @@ pub const SpeculativeType = enum(c_int) {
     ngram_cache, // self-speculative decoding with 3-level n-gram cache
     count, // number of types, unknown type
 
-    /// Ports `common_speculative_type_to_str` (speculative.cpp:2246 @7fe450e19).
+    /// Ports `common_speculative_type_to_str` (speculative.cpp:2307 @d81235049).
     pub fn toStr(self: SpeculativeType) []const u8 {
         return switch (self) {
             .none => "none",
@@ -158,7 +158,7 @@ pub const SpeculativeType = enum(c_int) {
     }
 };
 
-/// Ports `common_reasoning_format` (common/common.h:419 @7fe450e19).
+/// Ports `common_reasoning_format` (common/common.h:424 @d81235049).
 pub const ReasoningFormat = enum(c_int) {
     none,
     auto, // Same as deepseek, using `message.reasoning_content`
@@ -226,7 +226,7 @@ pub const StringMap = struct {
     }
 };
 
-/// Ports `common_cpu_params` (common/common.h:68 @7fe450e19).
+/// Ports `common_cpu_params` (common/common.h:71 @d81235049).
 pub const CpuParams = struct {
     n_threads: i32 = -1,
     cpumask: [c.GGML_MAX_N_THREADS]bool = @splat(false), // CPU affinity mask.
@@ -236,7 +236,7 @@ pub const CpuParams = struct {
     poll: u32 = 50, // Polling (busywait) level (0 - no polling, 100 - mostly polling)
 };
 
-/// Ports `common_adapter_lora_info` (common/common.h:50 @7fe450e19).
+/// Ports `common_adapter_lora_info` (common/common.h:53 @d81235049).
 pub const LoraInfo = struct {
     path: [:0]const u8,
     scale: f32,
@@ -245,23 +245,23 @@ pub const LoraInfo = struct {
     ptr: ?*c.llama_adapter_lora = null,
 };
 
-/// Ports `common_control_vector_load_info` (common/common.h:1105 @7fe450e19).
+/// Ports `common_control_vector_load_info` (common/common.h:1198 @d81235049).
 pub const ControlVectorLoadInfo = struct {
     strength: f32,
     fname: [:0]const u8,
 };
 
-/// Ports `common_grammar_trigger_type` (common/common.h:143 @7fe450e19).
+/// Ports `common_grammar_trigger_type` (common/common.h:146 @d81235049).
 pub const GrammarTriggerType = enum(c_int) { token, word, pattern, pattern_full, _ };
 
-/// Ports `common_grammar_trigger` (common/common.h:150 @7fe450e19).
+/// Ports `common_grammar_trigger` (common/common.h:153 @d81235049).
 pub const GrammarTrigger = struct {
     type: GrammarTriggerType,
     value: []const u8 = "",
     token: c.llama_token = c.LLAMA_TOKEN_NULL,
 };
 
-/// Ports `common_params_sampling` (common/common.h:224 @7fe450e19): the
+/// Ports `common_params_sampling` (common/common.h:227 @d81235049): the
 /// members an option sets, and those the server fills in per request and
 /// `common_sampler_init` reads.
 pub const Sampling = struct {
@@ -324,7 +324,7 @@ pub const Sampling = struct {
     backend_sampling: bool = false,
 };
 
-/// Ports `common_params_model` (common/common.h:302 @7fe450e19).
+/// Ports `common_params_model` (common/common.h:305 @d81235049).
 pub const Model = struct {
     path: []const u8 = "", // model local path
     url: []const u8 = "", // model url to download
@@ -332,7 +332,7 @@ pub const Model = struct {
     hf_file: []const u8 = "", // HF file
     docker_repo: []const u8 = "", // Docker repo
 
-    /// Ports `get_name` (common/common.h:309 @7fe450e19), a member of
+    /// Ports `get_name` (common/common.h:312 @d81235049), a member of
     /// `common_params_model`.
     ///
     /// Return: the repository if there is one, else the path; borrowed.
@@ -342,14 +342,14 @@ pub const Model = struct {
         return self.path;
     }
 
-    /// Ports `empty` (common/common.h:319 @7fe450e19), a member of
+    /// Ports `empty` (common/common.h:322 @d81235049), a member of
     /// `common_params_model`.
     pub fn empty(self: *const Model) bool {
         return self.getName().len == 0;
     }
 };
 
-/// Ports `common_params_speculative_draft` (common/common.h:325 @7fe450e19):
+/// Ports `common_params_speculative_draft` (common/common.h:328 @d81235049):
 /// draft-model-based speculative decoding parameters. `ctx_tgt` and
 /// `ctx_dft` are the server's to set, later.
 pub const SpeculativeDraft = struct {
@@ -360,6 +360,8 @@ pub const SpeculativeDraft = struct {
     p_min: f32 = 0.0, // minimum speculative decoding probability (greedy)
 
     backend_sampling: bool = true, // offload draft sampling to the backend (default: on)
+
+    probabilistic: bool = false, // sample the draft and verify by rejection, instead of argmax and match
 
     mparams: Model = .{},
 
@@ -379,7 +381,7 @@ pub const SpeculativeDraft = struct {
     tensor_buft_overrides: std.ArrayList(c.llama_model_tensor_buft_override) = .empty,
 };
 
-/// Ports `common_params_speculative_ngram_mod` (common/common.h:352 @7fe450e19).
+/// Ports `common_params_speculative_ngram_mod` (common/common.h:357 @d81235049).
 pub const SpeculativeNgramMod = struct {
     n_match: i32 = 24,
 
@@ -387,20 +389,20 @@ pub const SpeculativeNgramMod = struct {
     n_min: i32 = 48,
 };
 
-/// Ports `common_params_speculative_ngram_map` (common/common.h:359 @7fe450e19).
+/// Ports `common_params_speculative_ngram_map` (common/common.h:364 @d81235049).
 pub const SpeculativeNgramMap = struct {
     size_n: u16 = 12, // ngram size for lookup
     size_m: u16 = 48, // mgram size for speculative tokens
     min_hits: u16 = 1, // minimum hits at ngram/mgram lookup for mgram to be proposed
 };
 
-/// Ports `common_params_speculative_ngram_cache` (common/common.h:365 @7fe450e19).
+/// Ports `common_params_speculative_ngram_cache` (common/common.h:370 @d81235049).
 pub const SpeculativeNgramCache = struct {
     lookup_cache_static: []const u8 = "", // path of static ngram cache file for lookup decoding
     lookup_cache_dynamic: []const u8 = "", // path of dynamic ngram cache file for lookup decoding
 };
 
-/// Ports `common_params_speculative` (common/common.h:370 @7fe450e19).
+/// Ports `common_params_speculative` (common/common.h:375 @d81235049).
 /// `types` starts as `{ none }`, set by `Params.init`.
 pub const Speculative = struct {
     types: std.ArrayList(SpeculativeType) = .empty,
@@ -418,19 +420,19 @@ pub const Speculative = struct {
 
     ngram_cache: SpeculativeNgramCache = .{},
 
-    /// Ports `has_dft` (common/common.h:386 @7fe450e19), a member of
+    /// Ports `has_dft` (common/common.h:391 @d81235049), a member of
     /// `common_params_speculative`: whether a draft model is named.
     pub fn hasDft(self: *const Speculative) bool {
         return !self.draft.mparams.empty();
     }
 
-    /// Ports `has_synth` (common/common.h:390 @7fe450e19), a member of
+    /// Ports `has_synth` (common/common.h:395 @d81235049), a member of
     /// `common_params_speculative`.
     pub fn hasSynth(self: *const Speculative) bool {
         return self.synth_len != -1.0 or self.synth_rates.items.len != 0;
     }
 
-    /// Ports `need_n_rs_seq` (common/common.h:394 @7fe450e19), a member of
+    /// Ports `need_n_rs_seq` (common/common.h:399 @d81235049), a member of
     /// `common_params_speculative`.
     ///
     /// Return: `draft.n_max` when a type keeps recurrent state per draft
@@ -443,7 +445,7 @@ pub const Speculative = struct {
     }
 };
 
-/// Ports `common_params` (common/common.h:448 @7fe450e19), the members the tools'
+/// Ports `common_params` (common/common.h:453 @d81235049), the members the tools'
 /// options and the tools themselves reach.
 pub const Params = struct {
     arena: std.mem.Allocator,
@@ -558,6 +560,7 @@ pub const Params = struct {
     no_op_offload: bool = false, // globally disable offload host tensor operations to device
     no_extra_bufts: bool = false, // disable extra buffer types (used for weight repacking)
     no_host: bool = false, // bypass host buffer allowing extra buffers to be used
+    load_mtp: bool = false, // load MTP/NextN layers
 
     cache_type_k: c.ggml_type = c.GGML_TYPE_F16, // KV cache data type for the K
     cache_type_v: c.ggml_type = c.GGML_TYPE_F16, // KV cache data type for the V
@@ -678,6 +681,7 @@ pub const Params = struct {
     process_output: bool = false, // collect data for the output tensor
     compute_ppl: bool = true, // whether to compute perplexity
     show_statistics: bool = false, // show imatrix statistics per tensor
+    activation_statistics: bool = false, // generate data to calculate activation based statistics
     parse_special: bool = false, // whether to parse special tokens during imatrix tokenization
 
     n_pca_batch: c_int = 100,

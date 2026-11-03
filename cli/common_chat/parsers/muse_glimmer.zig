@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/muse-glimmer.cpp` (llama.cpp v0.5.0,
-//! `7fe450e19`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/muse-glimmer.cpp` (llama.cpp v0.6.0,
+//! `d81235049`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -31,6 +31,7 @@ const Build = struct {
     a: Allocator,
     inputs: *const GenerationParams,
     has_tools: bool,
+    has_response_format: bool,
     extract_reasoning: bool,
     include_grammar: bool,
     cb: *ChatBuilder = undefined,
@@ -57,6 +58,18 @@ const Build = struct {
 
         const recipient = try b.optional(try b.literal(" to=user"));
         const final_msg = try b.rule("final", try b.plus(try b.plus(recipient, try b.literal("<|message|>")), try p.content(try b.untilOneOf(&.{ "<|eot|>", "<|eom|>" }))), false);
+
+        if (self.has_response_format) {
+            const response_json = try p.content(try b.schemaJson(try b.json(), "response-format-schema", &self.inputs.json_schema, false));
+            const head = try b.plus(recipient, try b.literal("<|message|>"));
+            var fenced = try b.plus(try b.literal("```json"), try b.space());
+            fenced = try b.plus(fenced, response_json);
+            fenced = try b.plus(fenced, try b.space());
+            fenced = try b.plus(fenced, try b.literal("```"));
+            const response_format = try b.rule("response-format", try b.plus(head, try b.orr(fenced, response_json)), false);
+
+            return b.plus(try b.plus(try b.zeroOrMore(try b.plus(start, analysis)), start), response_format);
+        }
 
         if (self.has_tools and self.inputs.tool_choice != .none) {
             self.string_value = try b.acOne(try b.plus(try p.toolArgStringValue(try b.until("</atem:parameter>")), try p.toolArgClose(try b.literal("</atem:parameter>"))), "</atem:parameter>");
@@ -131,7 +144,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_muse_glimmer` (parsers/muse-glimmer.cpp:10 @7fe450e19).
+/// Ports `common_chat_params_init_muse_glimmer` (parsers/muse-glimmer.cpp:10 @d81235049).
 /// The generation prompt is just `<|start|>assistant`; the model emits its
 /// own ` to=...<|message|>`.
 ///
@@ -172,13 +185,15 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     const extract_reasoning = inputs.reasoning_format != .none;
 
     const has_tools = parsers.hasTools(&inputs.tools);
-    // Constrained grammar whenever tools are offered.
-    const include_grammar = has_tools and inputs.tool_choice != .none;
+    const has_response_format = !inputs.json_schema.isNull() and inputs.json_schema.isObject();
+    // Constrained grammar whenever tools are offered or a response format is requested.
+    const include_grammar = has_response_format or (has_tools and inputs.tool_choice != .none);
 
     var build: Build = .{
         .a = a,
         .inputs = inputs,
         .has_tools = has_tools,
+        .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
         .include_grammar = include_grammar,
     };
@@ -188,7 +203,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     data.parser = try parsers.save(a, &arena);
 
     if (include_grammar) {
-        data.grammar_lazy = inputs.tool_choice != .required;
+        data.grammar_lazy = !(has_response_format or (has_tools and inputs.tool_choice == .required));
         data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
         try data.grammar_triggers.append(a, .{
             .type = .pattern,

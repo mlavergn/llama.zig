@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cuh` at v0.5.0 (`7fe450e19`). The
+//! `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cuh` at v0.6.0 (`d81235049`). The
 //! kernels -- `dsv4_hc_comb_f32`, `dsv4_hc_pre_f32<gated>`,
 //! `dsv4_hc_post_f32<has_comb>` -- stay CUDA. All three launch through
 //! `ggml_cuda_kernel_launch` (PDL).
@@ -17,7 +17,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `DSV4_HC` (dsv4-hc.cu:5 @7fe450e19).
+/// Ports `DSV4_HC` (dsv4-hc.cu:5 @d81235049).
 const hc_n = 4;
 
 /// An `int64_t` into a `dim3` member, which is `unsigned int`.
@@ -35,7 +35,7 @@ fn srcOf(dst: *const Tensor, i: usize) *const Tensor {
     return impl.one(Tensor, dst.src[i]);
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_comb` (dsv4-hc.cu:197 @7fe450e19).
+/// Ports `ggml_cuda_op_dsv4_hc_comb` (dsv4-hc.cu:197 @d81235049).
 pub fn opDsv4HcComb(ctx: *common.Context, dst: *Tensor) void {
     const mixes = srcOf(dst, 0);
     const scale = srcOf(dst, 1);
@@ -73,7 +73,7 @@ pub fn opDsv4HcComb(ctx: *common.Context, dst: *Tensor) void {
     });
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_pre` (dsv4-hc.cu:240 @7fe450e19). Op params
+/// Ports `ggml_cuda_op_dsv4_hc_pre` (dsv4-hc.cu:240 @d81235049). Op params
 /// slot 0 is a scale the sum is multiplied by and slot 1 says whether the
 /// weights are gated: `ggml_dsv4_hc_pre_gated` gives one weight per
 /// element, put through a sigmoid in the kernel, where the plain op gives
@@ -110,7 +110,7 @@ pub fn opDsv4HcPre(ctx: *common.Context, dst: *Tensor) void {
     });
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_post` (dsv4-hc.cu:275 @7fe450e19). A null
+/// Ports `ggml_cuda_op_dsv4_hc_post` (dsv4-hc.cu:275 @d81235049). A null
 /// `comb` (`src[3]`) is the identity: each stream adds its own residual,
 /// through `dsv4_hc_post_f32<false>`, which never reads `comb` or its
 /// strides, both passed as zero.

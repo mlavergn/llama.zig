@@ -34,6 +34,15 @@ const c = harness_root.impl.c;
 const M = harness_root.model;
 const api = harness_root.api.context;
 
+/// `llama_batch_ext_set_decision_order` in `libllama-ref.a`, which
+/// `llama-ext.h` declares with C++ linkage: the name is `nm`'s (the enum is
+/// passed as its `unsigned int`).
+extern fn _Z34llama_batch_ext_set_decision_orderP15llama_batch_exti20llama_decision_order(b: ?*c.struct_llama_batch_ext, idx: i32, order: c_uint) bool;
+
+fn ref_ext_set_decision_order(b: ?*c.struct_llama_batch_ext, idx: i32, order: i32) c_int {
+    return @intFromBool(_Z34llama_batch_ext_set_decision_orderP15llama_batch_exti20llama_decision_order(b, idx, @bitCast(order)));
+}
+
 const gpa = std.heap.c_allocator;
 
 var checks: usize = 0;
@@ -119,6 +128,16 @@ fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
         r.print(gpa, " flags {x}\n", .{node.flags}) catch unreachable;
         flushStream();
         return false;
+    }
+    // A node without GGML_TENSOR_FLAG_COMPUTE -- an unselected branch of
+    // `ggml_build_forward_select`, such as v0.6.0's mixed-batch input when
+    // the ubatch is not mixed -- is skipped by every backend (ggml-cpu.c:3137,
+    // ggml-metal-ops.cpp:218 @d81235049): its bytes are the allocator's
+    // leftovers on either side. The flags above are compared, so a node one
+    // side computes and the other does not still differs.
+    if ((node.flags & c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
+        r.print(gpa, " flags {x} h -\n", .{node.flags}) catch unreachable;
+        return true;
     }
     r.print(gpa, " flags {x} h {x}\n", .{ node.flags, tensorHash(node) }) catch unreachable;
     return true;
@@ -445,6 +464,81 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         }
         State.positions(mem, n_seq);
 
+        // Since v0.6.0: the extended batch through `llama_process` -- tokens
+        // with decision-order spans, then tokens and embeddings mixed, which
+        // an architecture that picks weights by the input kind refuses.
+        if (draft.kind == .none) {
+            const AB = if (A == c) c else harness_root.api.batch;
+            note("causal_attn {}", .{A.llama_get_causal_attn(ctx)});
+            const eb = AB.llama_batch_ext_init(ctx) orelse {
+                note("batch_ext_init failed", .{});
+                return;
+            };
+            defer AB.llama_batch_ext_free(eb);
+            const n_pos: usize = if (MA.llama_model_rope_type(@ptrCast(model)) == c.LLAMA_ROPE_TYPE_MROPE or MA.llama_model_rope_type(@ptrCast(model)) == c.LLAMA_ROPE_TYPE_IMROPE) 4 else 1;
+            const orders = [_]i32{ 1, 1, 0, 4, 4, 0, 4 };
+            for (0..7) |k| {
+                const idx = AB.llama_batch_ext_add_token(eb, 0, tokens[(k + 2) % tokens.len]);
+                const p = [_]i32{ pos + @as(i32, @intCast(k)), 0, 0, 0 };
+                _ = AB.llama_batch_ext_set_pos(eb, idx, &p);
+                _ = AB.llama_batch_ext_set_output_logits(eb, idx, k >= 2);
+                if (A == c) {
+                    _ = ref_ext_set_decision_order(eb, idx, orders[k]);
+                } else {
+                    _ = harness_root.api.batch.llama_batch_ext_set_decision_order(eb, idx, @fromBackingInt(@intCast(@as(c_uint, @intCast(orders[k])))));
+                }
+            }
+            ret = A.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, eb);
+            note("process ext: {d}", .{ret});
+            if (ret == 0) {
+                pos += 7;
+                if (embeddings) {
+                    if (!pooled) for (0..7) |k| Out.row("embd", A.llama_get_embeddings_ith(ctx, @intCast(k)), n_embd, @intCast(k));
+                } else {
+                    for (0..7) |k| Out.row("logits", A.llama_get_logits_ith(ctx, @intCast(k)), n_vocab, @intCast(k));
+                }
+            }
+            State.positions(mem, n_seq);
+
+            AB.llama_batch_ext_clear(eb);
+            const n_embd_inp: usize = @intCast(MA.llama_model_n_embd_inp(@ptrCast(model)));
+            const rows = gpa.alloc(f32, 2 * n_embd_inp) catch unreachable;
+            defer gpa.free(rows);
+            fillFeatures(rows, 31 + round);
+            for (0..5) |k| {
+                const as_embd = k == 1 or k == 2;
+                const idx = if (as_embd)
+                    AB.llama_batch_ext_add_embd(eb, 0, .{ .data = rows.ptr + (k - 1) * n_embd_inp, .n_rows = 1, .n_embd = n_embd_inp })
+                else
+                    AB.llama_batch_ext_add_token(eb, 0, tokens[k]);
+                const pk = pos + @as(i32, @intCast(k));
+                const p = if (n_pos > 1 and as_embd) [_]i32{ pk, pk, pk, 0 } else [_]i32{ pk, 0, 0, 0 };
+                _ = AB.llama_batch_ext_set_pos(eb, idx, &p);
+                _ = AB.llama_batch_ext_set_output_embd(eb, idx, true);
+            }
+            ret = A.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, eb);
+            note("process mixed: {d}", .{ret});
+            if (ret == 0) {
+                pos += 5;
+                if (embeddings) {
+                    if (!pooled) for (0..5) |k| Out.row("embd", A.llama_get_embeddings_ith(ctx, @intCast(k)), n_embd, @intCast(k));
+                } else {
+                    for (0..5) |k| Out.row("logits", A.llama_get_logits_ith(ctx, @intCast(k)), n_vocab, @intCast(k));
+                }
+            }
+            note("process type 7: {d}", .{A.llama_process(ctx, 7, eb)});
+            State.positions(mem, n_seq);
+            // The cells the mixed batch wrote -- a row's token id among them,
+            // which an embedding row must not carry.
+            {
+                const ssz = S.llama_state_seq_get_size(ctx, 0);
+                const sbuf = gpa.alloc(u8, @max(ssz, 1)) catch unreachable;
+                defer gpa.free(sbuf);
+                const sn = S.llama_state_seq_get_data(ctx, sbuf.ptr, ssz, 0);
+                note("state after mixed: {d} {x}", .{ sn, hashBytes(sbuf.ptr, sn) });
+            }
+        }
+
         if (round == 0) {
             restoreState(S, ctx, tokens, saved.items);
             State.positions(mem, n_seq);
@@ -544,6 +638,65 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             const ret_i = A.llama_decode(ctx, b);
             note("decode over injected: {d}", .{ret_i});
             if (ret_i == 0) Out.row("logits", A.llama_get_logits_ith(ctx, 0), n_vocab, 0);
+        }
+
+        // `check_causal_attn_toggle` (tests/test-llama-archs.cpp:583
+        // @d81235049): non-causal decodes of n_ubatch/2 and n_ubatch tokens,
+        // a flip that must not need a scheduler reserve.
+        if (round == 1 and draft.kind == .none) {
+            const AB = if (A == c) c else harness_root.api.batch;
+            var cpos: i32 = A.llama_memory_seq_pos_max(mem, 0) + 1;
+            // n_ubatch, or what the context still has room for
+            const room = @as(i32, @intCast(A.llama_n_ctx(ctx))) - cpos;
+            const n_ub: i32 = @min(@as(i32, @intCast(A.llama_n_ubatch(ctx))), @divTrunc(room * 2, 3));
+            if (n_ub >= 2) {
+                A.llama_set_causal_attn(ctx, false);
+                note("causal_attn {}", .{A.llama_get_causal_attn(ctx)});
+                for ([_]i32{ @divTrunc(n_ub, 2), n_ub }) |nt| {
+                    const tb = AB.llama_batch_ext_init(ctx) orelse break;
+                    defer AB.llama_batch_ext_free(tb);
+                    for (0..@intCast(nt)) |k| {
+                        const idx = AB.llama_batch_ext_add_token(tb, 0, tokens[k % tokens.len]);
+                        const p = [_]i32{ cpos, 0, 0, 0 };
+                        cpos += 1;
+                        _ = AB.llama_batch_ext_set_pos(tb, idx, &p);
+                        // the last token only: "n_outputs_max 5" caps them
+                        _ = AB.llama_batch_ext_set_output_logits(tb, idx, @as(i32, @intCast(k)) + 1 == nt);
+                    }
+                    const rc = A.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, tb);
+                    note("process non-causal {d}: {d}", .{ nt, rc });
+                    if (rc != 0) break;
+                    if (embeddings) {
+                        if (!pooled) Out.row("embd", A.llama_get_embeddings_ith(ctx, nt - 1), n_embd, nt - 1);
+                    } else {
+                        Out.row("logits", A.llama_get_logits_ith(ctx, nt - 1), n_vocab, nt - 1);
+                    }
+                }
+                A.llama_set_causal_attn(ctx, true);
+                State.positions(mem, n_seq);
+            }
+        }
+
+        // Since v0.6.0 a failed sequence restore zeroes the K/V and
+        // recurrent rows it wrote -- attention still reads free cells -- and
+        // a hybrid memory undoes its attention half when the recurrent half
+        // fails: a restore cut in the middle and one cut at its tail, each
+        // followed by a decode over the cleared sequence.
+        if (draft.kind == .none and !enc_dec) {
+            const ssz = S.llama_state_seq_get_size(ctx, 0);
+            const sbuf = gpa.alloc(u8, @max(ssz, 1)) catch unreachable;
+            defer gpa.free(sbuf);
+            const sn = S.llama_state_seq_get_data(ctx, sbuf.ptr, ssz, 0);
+            for ([_]usize{ sn / 2, sn -| 16 }) |cut| {
+                note("seq set cut at {d}/{d}: {d}", .{ cut, sn, S.llama_state_seq_set_data(ctx, sbuf.ptr, cut, 0) });
+                State.positions(mem, n_seq);
+                b.n_tokens = 0;
+                batchAdd(&b, tokens[1], A.llama_memory_seq_pos_max(mem, 0) + 1, &.{0}, true);
+                const rc = A.llama_decode(ctx, b);
+                note("decode after cut restore: {d}", .{rc});
+                if (rc == 0 and !embeddings) Out.row("logits", A.llama_get_logits_ith(ctx, 0), n_vocab, 0);
+                note("seq set full: {d}", .{S.llama_state_seq_set_data(ctx, sbuf.ptr, sn, 0)});
+            }
         }
 
         A.llama_memory_clear(mem, true);
@@ -966,6 +1119,13 @@ pub fn main(init: std.process.Init) !void {
     c.ggml_log_set(logCb, null);
     c.llama_backend_init();
 
+    // CONTEXT_DIFF_SIDE=ref|port loads and runs that side alone: a side
+    // that aborts while loading must not take the other's run with it,
+    // or a port load abort reads as the C++'s.
+    const side_only: ?[]const u8 = if (std.c.getenv("CONTEXT_DIFF_SIDE")) |one| std.mem.span(one) else null;
+    const load_ref = side_only == null or !std.mem.eql(u8, side_only.?, "port");
+    const load_port = side_only == null or std.mem.eql(u8, side_only.?, "port");
+
     for (model_cfgs) |mc| {
         if (only_model) |o| {
             if (!std.mem.eql(u8, mc.name, o)) continue;
@@ -978,7 +1138,7 @@ pub fn main(init: std.process.Init) !void {
         var port_load: std.ArrayList(u8) = .empty;
         defer port_load.deinit(gpa);
         rec = &ref_load;
-        const rm = c.llama_model_load_from_file(path.ptr, mp) orelse {
+        const rm_opt: ?*c.struct_llama_model = if (!load_ref) null else c.llama_model_load_from_file(path.ptr, mp) orelse {
             // The last lines say why, as for the port below.
             var lines = std.mem.splitBackwardsScalar(u8, std.mem.trimEnd(u8, ref_load.items, "\n"), '\n');
             var tail: [3][]const u8 = undefined;
@@ -988,14 +1148,14 @@ pub fn main(init: std.process.Init) !void {
             while (n > 0) : (n -= 1) std.debug.print("    ref: {s}\n", .{tail[n - 1]});
             std.process.exit(1);
         };
-        defer c.llama_model_free(rm);
+        defer if (rm_opt) |m| c.llama_model_free(m);
         var splits: std.ArrayList([:0]const u8) = .empty;
         defer {
             for (splits.items) |s| gpa.free(s);
             splits.deinit(gpa);
         }
         rec = &port_load;
-        const pm = M.loadFromFileImpl(.{ .path = path }, &splits, null, null, mp) orelse {
+        const pm_opt: ?*M.Model = if (!load_port) null else M.loadFromFileImpl(.{ .path = path }, &splits, null, null, mp) orelse {
             // The last lines say why: an architecture without a ported
             // `load_arch_hparams` stops with a message naming it, which is
             // how `scripts/arch-model-diff` tells unported from broken.
@@ -1007,9 +1167,9 @@ pub fn main(init: std.process.Init) !void {
             while (n > 0) : (n -= 1) std.debug.print("    port: {s}\n", .{tail[n - 1]});
             std.process.exit(1);
         };
-        defer M.destroy(pm);
+        defer if (pm_opt) |m| M.destroy(m);
         rec = null;
-        {
+        if (load_ref and load_port) {
             var rn = normalize(ref_load.items);
             defer rn.deinit(gpa);
             var pn = normalize(port_load.items);
@@ -1020,24 +1180,41 @@ pub fn main(init: std.process.Init) !void {
             std.debug.print("  {s:<40} {s:<4} {d:>7} lines\n", .{ try std.fmt.bufPrint(&nb, "{s}: load", .{mc.name}), if (failures == before) "ok" else "FAIL", std.mem.count(u8, rn.items, "\n") });
         }
 
-        if (std.mem.startsWith(u8, mc.name, "tensor")) splitStates(rm, pm);
+        if (load_ref and load_port and std.mem.startsWith(u8, mc.name, "tensor")) splitStates(rm_opt.?, pm_opt.?);
 
-        const vocab = c.llama_model_get_vocab(rm);
-        const n_vocab: usize = @intCast(c.llama_vocab_n_tokens(vocab));
+        // Whichever side is loaded answers for the vocabulary.
+        const VA = struct {
+            fn vocabOf(r: ?*c.struct_llama_model, p_: ?*M.Model) ?*const c.struct_llama_vocab {
+                return if (r) |m| c.llama_model_get_vocab(m) else harness_root.api.model.llama_model_get_vocab(@ptrCast(p_.?));
+            }
+            fn nTokens(r: bool, v: ?*const c.struct_llama_vocab) i32 {
+                return if (r) c.llama_vocab_n_tokens(v) else harness_root.api.vocab.llama_vocab_n_tokens(v);
+            }
+            fn vtype(r: bool, v: ?*const c.struct_llama_vocab) c.enum_llama_vocab_type {
+                return if (r) c.llama_vocab_type(v) else harness_root.api.vocab.llama_vocab_type(v);
+            }
+        };
+        const rm: *c.struct_llama_model = if (rm_opt) |m| m else @ptrCast(pm_opt.?);
+        const pm: *M.Model = if (pm_opt) |m| m else undefined;
+        const vocab = VA.vocabOf(rm_opt, pm_opt);
+        const n_vocab: usize = @intCast(VA.nTokens(load_ref, vocab));
         var tokens: [256]i32 = undefined;
         // `scripts/arch-model-diff`'s fixtures have no tokenizer
         // (`no_vocab`), so they get a fixed sequence of ids instead, spread
         // over the whole vocabulary.
-        const nt: c_int = if (c.llama_vocab_type(vocab) == c.LLAMA_VOCAB_TYPE_NONE) blk: {
+        const nt: c_int = if (VA.vtype(load_ref, vocab) == c.LLAMA_VOCAB_TYPE_NONE) blk: {
             const n = 24;
             for (0..n) |k| tokens[k] = @intCast((k * 37 + 11) % n_vocab);
             break :blk n;
-        } else c.llama_tokenize(vocab, prompt_text, prompt_text.len, &tokens, tokens.len, true, false);
+        } else if (load_ref)
+            c.llama_tokenize(vocab, prompt_text, prompt_text.len, &tokens, tokens.len, true, false)
+        else
+            harness_root.api.vocab.llama_tokenize(vocab, prompt_text, prompt_text.len, &tokens, tokens.len, true, false);
         if (nt <= 8) {
             std.debug.print("FAIL: tokenizing the prompt gave {d}\n", .{nt});
             std.process.exit(1);
         }
-        const n_embd: usize = @intCast(c.llama_model_n_embd_out(rm));
+        const n_embd: usize = @intCast(if (load_ref) c.llama_model_n_embd_out(rm) else harness_root.api.model.llama_model_n_embd_out(rm));
 
         // A first context initializes what each backend initializes once
         // per process, which logs.
@@ -1047,8 +1224,7 @@ pub fn main(init: std.process.Init) !void {
             p.n_ctx = 256;
             // A port-only run must not run the C++ at all, or a fixture the
             // C++ aborts on would abort here and read as the port's abort.
-            const port_only = if (std.c.getenv("CONTEXT_DIFF_SIDE")) |one| std.mem.eql(u8, std.mem.span(one), "port") else false;
-            if (port_only) {
+            if (!load_ref) {
                 if (api.llama_init_from_model(@ptrCast(pm), p)) |ctx| {
                     memoryless = api.llama_get_memory(ctx) == null;
                     api.llama_free(ctx);

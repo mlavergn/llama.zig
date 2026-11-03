@@ -115,6 +115,16 @@ fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
         const v: *c.ggml_tensor = node.view_src;
         r.print(gpa, " view {s}+{d}", .{ std.mem.sliceTo(&v.name, 0), node.view_offs }) catch unreachable;
     }
+    // A node without GGML_TENSOR_FLAG_COMPUTE -- an unselected branch of
+    // `ggml_build_forward_select`, such as v0.6.0's mixed-batch input when
+    // the ubatch is not mixed -- is skipped by every backend (ggml-cpu.c:3137,
+    // ggml-metal-ops.cpp:218 @d81235049): its bytes are the allocator's
+    // leftovers on either side. The flags above are compared, so a node one
+    // side computes and the other does not still differs.
+    if ((node.flags & c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
+        r.print(gpa, " flags {x} h -\n", .{node.flags}) catch unreachable;
+        return true;
+    }
     r.print(gpa, " flags {x} h {x}\n", .{ node.flags, tensorHash(node) }) catch unreachable;
     return true;
 }

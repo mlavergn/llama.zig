@@ -50,6 +50,25 @@ n=$(nm -gUj "$tmp/ref_metal.o" | sed 's/^_//' | grep -c '^ref_ggml_backend')
 echo "reference: $n exports renamed to ref_*"
 [ "$n" -eq 6 ] || { echo "FAIL: expected 6 renamed exports, got $n" >&2; exit 1; }
 
+# The reordering pass (v0.5.0) and the mat-mul dispatch predicates:
+# `ggml-metal-common.cpp` with its fourteen exports renamed (v0.6.0 added
+# the five few-row MMA ones), so `graph_optimize`'s order can be compared on
+# the fusion probes and each predicate asked directly. Its
+# `ggml_metal_fusion_max` stays ours, compared on its own below.
+#
+# The renames go to the reference fusion table too: since v0.6.0 its
+# MUL_MAT + ADD check asks `ggml_metal_op_mul_mat_use_mma` and
+# `_may_use_mma`, and without them it would ask ours, and a fault in those
+# would move both sides of the fusion comparison together.
+CRENAME=()
+for f in ggml_metal_op_mul_mat_use_fwht ggml_metal_op_mul_mat_use_mm ggml_metal_op_mul_mat_id_use_mm \
+         ggml_metal_op_mul_mat_use_mma ggml_metal_op_mul_mat_may_use_mma ggml_metal_mul_mv_mma_kind \
+         ggml_metal_mul_mv_mma_rt ggml_metal_mul_mv_mma_k_step \
+         ggml_mem_ranges_init ggml_mem_ranges_free ggml_mem_ranges_reset ggml_mem_ranges_add \
+         ggml_mem_ranges_check ggml_graph_optimize; do
+    CRENAME+=(-D$f=ref_$f)
+done
+
 # The fusion table (v0.4.1): the reference `ggml-metal-fusion.cpp` with all
 # 18 of its exports renamed, beside ours (v0.5.0 dropped `_all` and added
 # `_get_id` and `_add_alloc_deps`). Its helpers -- ggml.c's
@@ -61,7 +80,7 @@ for f in get_id add_alloc_deps info_init info_free info_enabled info_stats info_
          info_stats_init info_stats_reset info_stats_get info_labels_init next max; do
     FRENAME+=(-Dggml_metal_fusion_$f=ref_ggml_metal_fusion_$f)
 done
-"${CXX[@]}" "${FRENAME[@]}" -c llama.cpp/ggml/src/ggml-metal/ggml-metal-fusion.cpp \
+"${CXX[@]}" "${FRENAME[@]}" "${CRENAME[@]}" -c llama.cpp/ggml/src/ggml-metal/ggml-metal-fusion.cpp \
     -o "$tmp/ref_fusion.o" 2>"$tmp/err" \
     || { echo "FAIL: cannot compile the renamed reference ggml-metal-fusion.cpp" >&2; head -10 "$tmp/err" >&2; exit 1; }
 n=$(nm -gUj "$tmp/ref_fusion.o" | sed 's/^_//' | grep -c '^ref_ggml_metal_fusion_')
@@ -69,22 +88,19 @@ nplain=$(nm -gUj "$tmp/ref_fusion.o" | sed 's/^_//' | grep -c '^ggml_metal_fusio
 echo "reference: $n fusion exports renamed to ref_*"
 [ "$n" -eq 18 ] && [ "$nplain" -eq 0 ] || { echo "FAIL: expected 18 renamed fusion exports and none left, got $n and $nplain" >&2; exit 1; }
 
-# The reordering pass (v0.5.0): `ggml-metal-common.cpp` with its nine exports
-# renamed, so `graph_optimize`'s order can be compared on the fusion probes.
-# Its `ggml_metal_fusion_max` stays ours, compared on its own above.
-CRENAME=()
-for f in ggml_metal_op_mul_mat_use_fwht ggml_metal_op_mul_mat_use_mm ggml_metal_op_mul_mat_id_use_mm \
-         ggml_mem_ranges_init ggml_mem_ranges_free ggml_mem_ranges_reset ggml_mem_ranges_add \
-         ggml_mem_ranges_check ggml_graph_optimize; do
-    CRENAME+=(-D$f=ref_$f)
-done
 "${CXX[@]}" "${CRENAME[@]}" -c llama.cpp/ggml/src/ggml-metal/ggml-metal-common.cpp \
     -o "$tmp/ref_common.o" 2>"$tmp/err" \
     || { echo "FAIL: cannot compile the renamed reference ggml-metal-common.cpp" >&2; head -10 "$tmp/err" >&2; exit 1; }
 n=$(nm -gUj "$tmp/ref_common.o" | sed 's/^_//' | grep -v '^_Z' | grep -c '^ref_')
 nplain=$(nm -gUj "$tmp/ref_common.o" | sed 's/^_//' | grep -v '^_Z\|^ref_' | grep -c .)
 echo "reference: $n common exports renamed to ref_*"
-[ "$n" -eq 9 ] && [ "$nplain" -eq 0 ] || { echo "FAIL: expected 9 renamed common exports and none left, got $n and $nplain" >&2; exit 1; }
+[ "$n" -eq 14 ] && [ "$nplain" -eq 0 ] || { echo "FAIL: expected 14 renamed common exports and none left, got $n and $nplain" >&2; exit 1; }
+
+# The reference fusion table must call the renamed predicates, not ours.
+for f in ggml_metal_op_mul_mat_use_mma ggml_metal_op_mul_mat_may_use_mma; do
+    nm -uj "$tmp/ref_fusion.o" | sed 's/^_//' | grep -qx "ref_$f" \
+        || { echo "FAIL: the reference fusion table does not call ref_$f" >&2; exit 1; }
+done
 
 # The op encoders (v0.5.0): `ggml-metal-ops.cpp` with **all** of its exports
 # renamed -- read off a first compile, so the list cannot drift -- for the

@@ -5,9 +5,9 @@
  * Why it exists: `src/ggml/metal/device_c.zig` hand-declares
  * `ggml_metal_device_props` rather than importing `ggml-metal-device.h`,
  * because that header would have to go into `impl.zig`'s single `cImport`
- * and widen the `c` namespace every ported file sees. The struct is 19
- * fields of which the port reads seven; the other twelve exist only to
- * place those seven at the right offsets.
+ * and widen the `c` namespace every ported file sees. The struct is 18
+ * fields since v0.6.0 dropped `supports_gpu_family_apple7`, and most of
+ * them exist only to place the few the port reads at the right offsets.
  *
  * `CLAUDE.md` calls hand-transcription "the single largest source of
  * silent error", and this is the shape of error it means: a field typed
@@ -96,7 +96,6 @@ int main() {
         F(has_tensor),
         F(use_residency_sets),
         F(use_shared_buffers),
-        F(supports_gpu_family_apple7),
         F(device_id),
         F(gpu_family),
         F(op_offload_min_batch_size),
@@ -270,12 +269,19 @@ int main() {
             { "FC_TOPK_MOE", (long) FC_TOPK_MOE },
             { "FC_MOE_REDUCE", (long) FC_MOE_REDUCE },
             { "FC_DSV4_HC", (long) FC_DSV4_HC },
+            { "FC_PAD", (long) FC_PAD },
+            { "FC_FLASH_ATTN_EXT_TENSOR", (long) FC_FLASH_ATTN_EXT_TENSOR },
+            { "FC_LIGHTNING_INDEXER", (long) FC_LIGHTNING_INDEXER },
+            { "FC_MUL_MV_MMA", (long) FC_MUL_MV_MMA },
             { "OP_FLASH_ATTN_EXT_NQPSG", (long) OP_FLASH_ATTN_EXT_NQPSG },
             { "OP_FLASH_ATTN_EXT_NCPSG", (long) OP_FLASH_ATTN_EXT_NCPSG },
+            { "OP_FLASH_ATTN_EXT_TENSOR_NQPSG", (long) OP_FLASH_ATTN_EXT_TENSOR_NQPSG },
+            { "OP_FLASH_ATTN_EXT_TENSOR_NQPSG_LARGE", (long) OP_FLASH_ATTN_EXT_TENSOR_NQPSG_LARGE },
+            { "OP_FLASH_ATTN_EXT_TENSOR_NCPSG", (long) OP_FLASH_ATTN_EXT_TENSOR_NCPSG },
+            { "OP_FLASH_ATTN_EXT_TENSOR_NSG", (long) OP_FLASH_ATTN_EXT_TENSOR_NSG },
             { "OP_FLASH_ATTN_EXT_VEC_NQPSG", (long) OP_FLASH_ATTN_EXT_VEC_NQPSG },
             { "OP_FLASH_ATTN_EXT_VEC_NCPSG", (long) OP_FLASH_ATTN_EXT_VEC_NCPSG },
             { "OP_LIGHTNING_INDEXER_DK", (long) OP_LIGHTNING_INDEXER_DK },
-            { "OP_LIGHTNING_INDEXER_NH", (long) OP_LIGHTNING_INDEXER_NH },
             { "OP_LIGHTNING_INDEXER_NHPTG", (long) OP_LIGHTNING_INDEXER_NHPTG },
             { "OP_LIGHTNING_INDEXER_NKPSG", (long) OP_LIGHTNING_INDEXER_NKPSG },
             { "OP_LIGHTNING_INDEXER_NSG", (long) OP_LIGHTNING_INDEXER_NSG },
@@ -316,6 +322,8 @@ int main() {
             { "OP_SSM_SCAN_SSD_CS", (long) OP_SSM_SCAN_SSD_CS },
             { "OP_SSM_SCAN_SSD_HD", (long) OP_SSM_SCAN_SSD_HD },
             { "OP_SSM_SCAN_SSD_NSG", (long) OP_SSM_SCAN_SSD_NSG },
+            { "GGML_METAL_FWHT_TG_MIN_N", (long) GGML_METAL_FWHT_TG_MIN_N },
+            { "GGML_METAL_FWHT_TG_NT", (long) GGML_METAL_FWHT_TG_NT },
             { "N_MM_NK_TOTAL", (long) N_MM_NK_TOTAL }
         };
         const size_t wn = sizeof(want) / sizeof(*want);

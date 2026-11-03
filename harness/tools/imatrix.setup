@@ -1,7 +1,11 @@
 #!/bin/bash
 # Writes imatrix's inputs into $DATA: a text to collect over, and an MoE
 # arch fixture given a tokenizer by harness/tools/add_vocab.c, since no
-# local model with a vocabulary has experts. Run by scripts/tools-diff.
+# local model with a vocabulary has experts; a Qwen3.5 fixture given an MTP
+# block, and an MTP-only draft of it, by harness/tools/imatrix_mtp.c, since
+# no fixture has NextN layers; and synthetic imatrix files by
+# harness/tools/imatrix_gen.c, for the statistics arms a collection cannot
+# reach. Run by scripts/tools-diff.
 set -eu
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 bin="$DATA/add_vocab"
@@ -12,6 +16,17 @@ zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/add_vocab.c
     "$ROOT/zig-out/lib/libggml.a" -lc++ "${PLATFORM_LIBS[@]}" -o "$bin"
 "$bin" "$ROOT/zig-out/arch-fixtures/qwen3moe-moe.gguf" "$DATA/moe.gguf"
 "$bin" "$ROOT/zig-out/arch-fixtures/llama-dense.gguf" "$DATA/dense.gguf"
+"$bin" "$ROOT/zig-out/arch-fixtures/qwen35-dense.gguf" "$DATA/qwen35.gguf"
+# tied embeddings: the output matmul reads token_embd.weight
+"$bin" "$ROOT/zig-out/arch-fixtures/gemma-dense.gguf" "$DATA/tied.gguf"
+for tool in imatrix_mtp imatrix_gen; do
+    zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/$tool.c" \
+        "$ROOT/zig-out/lib/libggml.a" -lc++ "${PLATFORM_LIBS[@]}" -o "$DATA/$tool"
+done
+"$DATA/imatrix_mtp" "$DATA/qwen35.gguf" "$DATA/qwen35-mtp.gguf" "$DATA/qwen35-draft.gguf"
+for v in nextn nextn-nokey gap special mixed badact chunk64; do
+    "$DATA/imatrix_gen" "$v" "$DATA/gen-$v.gguf"
+done
 cat "$ROOT/llama.cpp/README.md" "$ROOT/llama.cpp/docs/build.md" > "$DATA/text.txt"
 # the fixtures' vocabulary has a byte token for the newline only
 LC_ALL=C tr -cd '\12\40-\176' < "$DATA/text.txt" > "$DATA/ascii.txt"

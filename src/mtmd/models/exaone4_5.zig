@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/exaone4_5.cpp` at v0.5.0 (`7fe450e19`).
+//! Ports `llama.cpp/tools/mtmd/models/exaone4_5.cpp` at v0.6.0 (`d81235049`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -11,7 +11,7 @@ const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
 
-/// Ports `build` (exaone4_5.cpp:4 @7fe450e19), a member of `clip_graph_exaone4_5`.
+/// Ports `build` (exaone4_5.cpp:4 @d81235049), a member of `clip_graph_exaone4_5`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

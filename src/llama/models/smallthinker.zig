@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/smallthinker.cpp` at v0.5.0
-//! (`7fe450e19`): `llama_model_smallthinker`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/smallthinker.cpp` at v0.6.0
+//! (`d81235049`): `llama_model_smallthinker`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph<iswa>`.
 
 const std = @import("std");
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_smallthinker`'s `load_arch_hparams` (models/smallthinker.cpp:3 @7fe450e19).
+/// Ports `llama_model_smallthinker`'s `load_arch_hparams` (models/smallthinker.cpp:3 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -57,7 +57,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_smallthinker`'s `load_arch_tensors` (models/smallthinker.cpp:30 @7fe450e19).
+/// Ports `llama_model_smallthinker`'s `load_arch_tensors` (models/smallthinker.cpp:30 @d81235049).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -97,7 +97,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_smallthinker`'s `build_arch_graph` (models/smallthinker.cpp:66 @7fe450e19).
+/// Ports `llama_model_smallthinker`'s `build_arch_graph` (models/smallthinker.cpp:66 @d81235049).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (@as(hparams_mod.SwaType, @fromBackingInt(@intCast(model.hparams.swa_type))) == .standard) {
         buildGraph(true, model, b);
@@ -107,7 +107,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_smallthinker`'s `graph<iswa>`
-/// (models/smallthinker.cpp:75 @7fe450e19).
+/// (models/smallthinker.cpp:75 @d81235049).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

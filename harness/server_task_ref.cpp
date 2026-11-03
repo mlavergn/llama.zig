@@ -18,6 +18,7 @@
 #include "server-task.h"
 #include "server-schema.h"
 #include "server-chat.h"
+#include "server-decision.h"
 #include "chat.h"
 #include "common.h"
 #include "log.h"
@@ -687,10 +688,9 @@ static void run(const std::string & op, const std::string & payload) {
             const llama_vocab * vocab = llama_model_get_vocab(text_model);
             llama_tokens toks = common_tokenize(vocab, j.at("prompt").get<std::string>(), true, true);
             llama_memory_clear(llama_get_memory(text_ctx), true);
-            llama_batch batch = llama_batch_init((int) toks.size(), 0, 1);
-            for (size_t i = 0; i < toks.size(); i++) common_batch_add(batch, toks[i], (llama_pos) i, {0}, true);
-            if (llama_decode(text_ctx, batch) != 0) throw std::runtime_error("decode failed");
-            llama_batch_free(batch);
+            common_batch batch(text_ctx);
+            for (size_t i = 0; i < toks.size(); i++) batch.add(toks[i], (llama_pos) i, 0, true);
+            if (llama_process(text_ctx, LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) throw std::runtime_error("decode failed");
             for (const auto & nt : j.at("n_top")) {
                 const int idx = j.value("idx", -1);
                 auto cur = get_token_probabilities(text_ctx, idx, nt.get<size_t>());
@@ -816,6 +816,132 @@ static void run(const std::string & op, const std::string & payload) {
         v.push_back(std::move(t));
         s += " ids " + std::to_string(server_task::get_list_id(v).size());
         line(s);
+    } else if (op == "D") {
+        // a /v1/systemone request through a decision model's context (one of
+        // the vocabularies, loaded vocab-only, carries the metadata): the
+        // questions and the state parsed, every task filled, the tasks
+        // grouped, and each answer formatted from scores taken in order from
+        // the record's pool
+        guarded([&] {
+            const llama_model * model = vocab_models.at(j.value("v", 0));
+            line("decision_type " + std::to_string((int) common_get_decision_type(model)));
+            server_decision_context dc;
+            dc.init(model);
+            line(std::string("flags share") + (dc.can_share_prompt() ? "1" : "0") + " joint" + (dc.is_joint() ? "1" : "0") +
+                 " images" + (dc.can_use_images() ? "1" : "0") + " type" + std::to_string((int) dc.type));
+            if (dc.type == COMMON_DECISION_TYPE_NONE) {
+                return;
+            }
+            const json body = j.at("body");
+            const auto questions = dc.parse_questions(body);
+            for (const auto & q : questions) {
+                std::string s = "q " + q.id + " " + std::to_string((int) q.type) + " " + q.instructions.dump();
+                for (const auto & o : q.options) s += " [" + o.key + "|" + o.description.dump() + "]";
+                str("question", s);
+                line("variants " + std::to_string(dc.n_variants(q)));
+            }
+            std::vector<raw_buffer> files;
+            const json state = dc.parse_state(body, files);
+            str("state", state.dump());
+            for (const auto & f : files) {
+                line("file " + std::to_string(f.size()) + " " + std::to_string(fnv(f.data(), f.size())));
+            }
+            // the model is vocab-only: a request with files would tokenize them through mtmd
+            if (!files.empty()) {
+                return;
+            }
+            std::vector<server_task> tasks;
+            auto show_task = [&](const server_task & t) {
+                std::string s = "task " + std::to_string(t.id) + " labels" + toks_str(t.decision.labels) + " markers" + toks_str(t.decision.markers) +
+                                " column" + std::to_string(t.decision.column) + " pointer" + std::to_string(t.decision.pointer) +
+                                " first" + std::to_string(t.decision.pos_first()) + " order" + toks_str(t.decision.order) +
+                                " n_scores" + std::to_string(t.decision.n_scores) +
+                                " embd" + (t.need_embd() ? "1" : "0") + " logits" + (t.need_logits() ? "1" : "0");
+                line(s);
+                show_tokens("prompt", t.tokens);
+            };
+            int id = 100;
+            if (dc.is_joint()) {
+                server_task t(SERVER_TASK_TYPE_DECISION);
+                t.id = id++;
+                dc.fill_task_joint(state, questions, files, nullptr, init_opt, t);
+                show_task(t);
+                tasks.push_back(std::move(t));
+            } else {
+                for (const auto & q : questions) {
+                    for (size_t v = 0; v < dc.n_variants(q); v++) {
+                        server_task t(SERVER_TASK_TYPE_DECISION);
+                        t.id = id++;
+                        dc.fill_task(state, questions, q, v, files, nullptr, init_opt, t);
+                        show_task(t);
+                        tasks.push_back(std::move(t));
+                    }
+                }
+            }
+            // the outputs each task reads: its labels, its markers, or for a joint head one per option
+            std::vector<size_t> n_out;
+            for (const auto & t : tasks) {
+                n_out.push_back(!t.decision.labels.empty() ? t.decision.labels.size() : !t.decision.markers.empty() ? t.decision.markers.size() : (size_t) t.decision.n_scores);
+            }
+            const auto pool = j.value("pool", std::vector<float>());
+            size_t i_pool = 0;
+            auto take = [&](size_t n) {
+                std::vector<float> v;
+                for (size_t k = 0; k < n; k++) v.push_back(pool.empty() ? 0.0f : pool[i_pool++ % pool.size()]);
+                return v;
+            };
+            const int nan_at = j.value("nan_at", -1);
+            size_t i_task = 0;
+            size_t i_score = 0;
+            int n_answer = 0;
+            for (const auto & q : questions) {
+                std::vector<std::vector<float>> scores;
+                if (dc.is_joint()) {
+                    auto all = take(n_out[0]);
+                    scores.emplace_back(all.begin() + std::min(all.size(), i_score), all.begin() + std::min(all.size(), i_score + q.options.size()));
+                    i_score += q.options.size();
+                } else {
+                    for (size_t v = 0; v < dc.n_variants(q); v++) scores.push_back(take(n_out[i_task++]));
+                }
+                if (n_answer++ == nan_at && !scores.empty() && !scores[0].empty()) scores[0][0] = NAN;
+                if (j.value("short", false) && !scores.empty() && !scores[0].empty()) scores[0].pop_back();
+                guarded([&] { str("answer", dc.format_answer(q, scores).dump()); });
+            }
+            if (dc.can_share_prompt()) {
+                auto groups = server_decision_group_tasks(std::move(tasks), j.value("n_slots", 1));
+                for (const auto & g : groups) {
+                    std::string s = "group " + std::to_string(g.id) + " shared" + std::to_string(g.n_tokens_shared) + " n" + std::to_string(g.tokens.size());
+                    for (const auto & ch : g.child_tasks) s += " " + std::to_string(ch.id) + ":" + std::to_string(ch.id_parent) + ":" + std::to_string(ch.tokens.size());
+                    line(s);
+                }
+            }
+        });
+    } else if (op == "DR") {
+        guarded([&] {
+            server_task_result_decision r;
+            r.index = j.value("index", 0);
+            r.n_tokens = j.value("n_tokens", 0);
+            r.scores = j.value("scores", std::vector<float>());
+            str("decision_result", r.to_json().dump());
+        });
+    } else if (op == "MA") {
+        guarded([&] {
+            const auto out_mod = server_model_output_modalities((common_decision_type) j.value("type", 0));
+            str("arch", server_model_architecture_json(j.value("image", false), j.value("audio", false), j.value("video", false), out_mod).dump());
+        });
+    } else if (op == "OE") {
+        guarded([&] {
+            server_chat_params opt = make_chat_opt(j);
+            const llama_vocab * vocab = vocab_at(j);
+            server_tokens t = tokenize_oai_content_array(vocab, j.value("mtmd", false) ? mctx : nullptr, opt, j.at("content"),
+                                                         j.value("add_special", true), j.value("parse_special", true), init_opt);
+            show_tokens("oe", t);
+        });
+        guarded([&] {
+            server_tokens t = tokenize_input_subprompt(vocab_at(j), j.value("mtmd", false) ? mctx : nullptr, j.at("content"),
+                                                       j.value("add_special", true), j.value("parse_special", true), init_opt);
+            show_tokens("sub", t);
+        });
     } else {
         str("bad_op", op);
     }

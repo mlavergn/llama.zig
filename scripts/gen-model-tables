@@ -26,7 +26,7 @@ from upstream_pin import COMMIT, TAG
 OUT = "src/llama/model_table.zig"
 
 # Case groups whose return reads the model; model.zig ports these.
-CONDITIONAL = {"LLM_ARCH_DFLASH", "LLM_ARCH_GLM4", "LLM_ARCH_GLM4_MOE", "LLM_ARCH_HUNYUAN_VL"}
+CONDITIONAL = {"LLM_ARCH_BAILINGMOE3", "LLM_ARCH_DFLASH", "LLM_ARCH_GLM4", "LLM_ARCH_GLM4_MOE", "LLM_ARCH_HUNYUAN_VL"}
 
 hdr = open(HDR).read()
 src = open(SRC).read()

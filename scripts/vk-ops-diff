@@ -22,7 +22,15 @@
 # a real decode through it. Shapes upstream's list lacks need extra cases
 # (`harness/vk_ops_diff.c`, `extra_cases`): the misaligned set_rows leaf,
 # split-k and large-tile matmuls, a second fused bias in `src[0]`, sparse
-# flash attention with no GQA (the scalar path's N == 1 arm).
+# flash attention with no GQA (the scalar path's N == 1 arm); since v0.6.0
+# sparse flash attention over q8_0 below the 16x break-even, HC_POST_GATE
+# refused for a biased scale, conv_2d/conv_3d with a misaligned input and
+# output, and a matmul whose staged src1 a soft_max or sparse flash
+# attention overwrote in between. `test-backend-ops` does not see
+# descriptor-set reuse (v0.6.0): an injection that reused every set whose
+# binding count matched passed ADD and GET_ROWS on llvmpipe -- a case
+# computes on fresh buffers, and freeing the last case's drops the cached
+# bindings. `vk-node-diff`'s decodes and `vk-parity-cli` reach it.
 # `supports_op` must agree both ways; before the swap a refusal was only
 # counted.
 #

@@ -19,6 +19,7 @@ pub const result = @import("result.zig");
 pub const schema = @import("schema.zig");
 pub const subproc = @import("subproc.zig");
 pub const queue = @import("queue.zig");
+pub const decision = @import("decision.zig");
 
 // -----------------------------------------------------------------------------
 // Unit Tests

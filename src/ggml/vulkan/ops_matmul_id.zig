@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.5.0
-//! (`7fe450e19`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.6.0
+//! (`d81235049`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -54,7 +54,7 @@ fn yStagedDst(src1: *const Tensor, f16_type: c.ggml_type, row_stride: u32, ne11:
     return t;
 }
 
-/// Ports `ggml_vk_mul_mat_id_q_f16` (ggml-vulkan.cpp:7064 @7fe450e19).
+/// Ports `ggml_vk_mul_mat_id_q_f16` (ggml-vulkan.cpp:7304 @d81235049).
 pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, ids: *const Tensor, dst: *Tensor) void {
     const dim01 = m.op_pipeline.dim01Contiguous;
     impl.assert(dim01(src1) or src1.type == c.GGML_TYPE_F32 or src1.type == c.GGML_TYPE_F16, "ggml_vk_dim01_contiguous(src1) || src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16");
@@ -315,9 +315,17 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     }
     m.context.syncBuffers(ctx, subctx);
 
-    var stride_batch_x: u32 = @truncate(ne00 *% ne01);
+    const x_range: u64 = if (qx_needs_dequant) x_sz else c.ggml_nbytes(src0);
+    const y_range: u64 = if (qy_needs_dequant or quantize_y) y_sz else c.ggml_nbytes(src1);
+
+    var stride_batch_x: u32 = if (qx_needs_dequant) @truncate(ne00 *% ne01) else mm.batchStride(src0);
     const stride_b_y: u32 = if (y_needs_k_padding) y_staged_row_stride else @truncate(ne10);
-    var stride_batch_y: u32 = if (y_needs_k_padding) y_staged_row_stride *% @as(u32, @truncate(ne11)) else @truncate(ne10 *% ne11);
+    var stride_batch_y: u32 = if (y_needs_k_padding)
+        y_staged_row_stride *% @as(u32, @truncate(ne11))
+    else if (qy_needs_dequant or quantize_y)
+        @truncate(ne10 *% ne11)
+    else
+        mm.batchStride(src1);
     if (!dim01(src0) and !qx_needs_dequant) stride_batch_x = @truncate(src0.nb[0] / typeSizeOf(src0.type));
     if (!dim01(src1) and !qy_needs_dequant and !quantize_y) stride_batch_y = @truncate(src1.nb[0] / typeSizeOf(src1.type));
 
@@ -326,8 +334,8 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
         ctx,
         subctx,
         pipeline,
-        sub(d_X, x_buf_offset, x_sz),
-        sub(d_Y, y_buf_offset, y_sz),
+        sub(d_X, x_buf_offset, x_range),
+        sub(d_Y, y_buf_offset, y_range),
         sub(d_D, d_buf_offset, d_sz),
         sub(qi.buf, qi.offset, ids_sz),
         expert_count_buf,
@@ -353,7 +361,7 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     ctx.prealloc_split_k_need_sync = true;
 }
 
-/// Ports `ggml_vk_mul_mat_vec_id_q_f16` (ggml-vulkan.cpp:7434 @7fe450e19):
+/// Ports `ggml_vk_mul_mat_vec_id_q_f16` (ggml-vulkan.cpp:7677 @d81235049):
 /// one matrix-vector dispatch per token row, the expert read from `ids`,
 /// with a fused ADD_ID bias or MUL scale and a second scale.
 pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
@@ -479,7 +487,8 @@ pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.C
         }
     }
 
-    var stride_batch_y: u32 = @truncate(ne10 *% ne11);
+    const stride_batch_x: u32 = if (qx_needs_dequant) @truncate(ne00 *% ne01) else mm.batchStride(src0);
+    var stride_batch_y: u32 = if (qy_needs_dequant or quantize_y) @truncate(ne10 *% ne11) else mm.batchStride(src1);
     if (!dim01(src1) and !qy_needs_dequant) stride_batch_y = @truncate(src1.nb[2] / typeSizeOf(src1.type));
 
     const max_groups_x = limits.maxComputeWorkGroupCount[0];
@@ -516,7 +525,7 @@ pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.C
             .stride_a = @truncate(ne10),
             .stride_b = @truncate(ne10),
             .stride_d = @truncate(ne01),
-            .batch_stride_a = @truncate(ne00 *% ne01),
+            .batch_stride_a = stride_batch_x,
             .batch_stride_b = stride_batch_y,
             .batch_stride_d = @truncate(ne20 *% ne21),
             .fusion_flags = fusion_flags,
@@ -532,7 +541,7 @@ pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.C
     if (y_non_contig or quantize_y) ctx.prealloc_y_need_sync = true;
 }
 
-/// Ports `ggml_vk_mul_mat_id` (ggml-vulkan.cpp:7677 @7fe450e19).
+/// Ports `ggml_vk_mul_mat_id` (ggml-vulkan.cpp:7921 @d81235049).
 pub fn mulMatId(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
     const dst = at(cgraph, node_idx);
     if (ops.useMulMatVecId(cgraph, node_idx)) {

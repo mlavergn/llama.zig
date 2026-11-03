@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/batched-bench/batched-bench.cpp` at v0.5.0
-//! (`7fe450e19`). Each declaration names the C++ it replaces and the line it
+//! Ported from `llama.cpp/tools/batched-bench/batched-bench.cpp` at v0.6.0
+//! (`d81235049`). Each declaration names the C++ it replaces and the line it
 //! began at. The tokens are the C library's `rand()` from its default seed,
 //! as upstream's are, so both decode the same batches.
 
@@ -22,32 +22,21 @@ comptime {
 
 extern fn rand() c_int;
 
-/// Ports `print_usage` (batched-bench.cpp:12 @7fe450e19).
+/// Ports `print_usage` (batched-bench.cpp:12 @d81235049).
 fn printUsage(argv: []const [:0]const u8) void {
     log.out("\nexample usage:\n", .{});
     log.out("\n    %s -m model.gguf -c 2048 -b 2048 -ub 512 -npp 128,256,512 -ntg 128,256 -npl 1,2,4,8,16,32 [-pps]\n", .{argv[0].ptr});
     log.out("\n", .{});
 }
 
-/// The `decode_helper` lambda (batched-bench.cpp:82 @7fe450e19): `batch` in
-/// views of `n_batch` tokens.
-fn decodeHelper(ctx: ?*c.llama_context, batch: *c.llama_batch, n_batch: i32, synchronize: bool) bool {
+/// The `decode_helper` lambda (batched-bench.cpp:82 @d81235049): `batch` in
+/// sub-batches of `n_batch` tokens.
+fn decodeHelper(ctx: ?*c.llama_context, batch: *tc.common.Batch, n_batch: i32, synchronize: bool) bool {
     var i: i32 = 0;
-    while (i < batch.n_tokens) : (i += n_batch) {
-        const n_tokens = @min(n_batch, batch.n_tokens - i);
-        const off: usize = @intCast(i);
+    while (i < batch.size()) : (i += n_batch) {
+        const n_tokens = @min(n_batch, batch.size() - i);
 
-        const batch_view: c.llama_batch = .{
-            .n_tokens = n_tokens,
-            .token = batch.token + off,
-            .embd = null,
-            .pos = batch.pos + off,
-            .n_seq_id = batch.n_seq_id + off,
-            .seq_id = batch.seq_id + off,
-            .logits = batch.logits + off,
-        };
-
-        const ret = c.llama_decode(ctx, batch_view);
+        const ret = c.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.getSubBatch(i, n_tokens));
         if (ret != 0) {
             log.err("failed to decode the batch, n_batch = %d, ret = %d\n", .{ n_batch, ret });
             return false;
@@ -58,7 +47,7 @@ fn decodeHelper(ctx: ?*c.llama_context, batch: *c.llama_batch, n_batch: i32, syn
     return true;
 }
 
-/// Ports `llama_batched_bench` (batched-bench.cpp:21 @7fe450e19).
+/// Ports `llama_batched_bench` (batched-bench.cpp:21 @d81235049).
 fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "llama_batched_bench";
     var params = try tc.params.Params.init(a);
@@ -107,13 +96,14 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 
     const n_kv_max: i32 = @intCast(c.llama_n_ctx(ctx));
 
-    var batch = c.llama_batch_init(n_kv_max, 0, 1);
+    var batch = tc.common.Batch.init(a, ctx);
+    defer batch.deinit();
     const n_batch: i32 = @intCast(ctx_params.n_batch);
 
     // warm up
     {
         var i: c_int = 0;
-        while (i < 16) : (i += 1) tc.common.batchAdd(&batch, @rem(rand(), n_vocab), i, &.{0}, false);
+        while (i < 16) : (i += 1) _ = batch.add(@rem(rand(), n_vocab), i, 0, false);
 
         if (!decodeHelper(ctx, &batch, n_batch, true)) {
             log.err("%s: llama_decode() failed\n", .{func});
@@ -140,12 +130,12 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 
                 if (n_ctx_req > n_kv_max) continue;
 
-                tc.common.batchClear(&batch);
+                batch.clear();
 
                 var j: i32 = 0;
                 while (j < (if (is_pp_shared != 0) 1 else pl)) : (j += 1) {
                     var i: i32 = 0;
-                    while (i < pp) : (i += 1) tc.common.batchAdd(&batch, @rem(rand(), n_vocab), i, &.{j}, i == pp - 1);
+                    while (i < pp) : (i += 1) _ = batch.add(@rem(rand(), n_vocab), i, j, i == pp - 1);
                 }
 
                 c.llama_memory_clear(mem, false);
@@ -169,8 +159,8 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 
                     if (!params.kv_unified) {
                         // run one dummy token to apply the memory copy
-                        tc.common.batchClear(&batch);
-                        tc.common.batchAdd(&batch, @rem(rand(), n_vocab), pp + 0, &.{0}, true);
+                        batch.clear();
+                        _ = batch.add(@rem(rand(), n_vocab), pp + 0, 0, true);
                         if (!decodeHelper(ctx, &batch, n_batch, true)) {
                             log.err("%s: llama_decode() failed\n", .{func});
                             c.llama_free(ctx);
@@ -190,8 +180,8 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                     while (jj < pl) : (jj += 1) {
                         var i: i32 = 0;
                         while (i < tg) : (i += 1) {
-                            tc.common.batchClear(&batch);
-                            tc.common.batchAdd(&batch, @rem(rand(), n_vocab), pp + i, &.{jj}, true);
+                            batch.clear();
+                            _ = batch.add(@rem(rand(), n_vocab), pp + i, jj, true);
                             if (!decodeHelper(ctx, &batch, n_batch, true)) {
                                 log.err("%s: llama_decode() failed\n", .{func});
                                 c.llama_free(ctx);
@@ -205,9 +195,9 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                     // 0123 0123 0123 ...
                     var i: i32 = 0;
                     while (i < tg) : (i += 1) {
-                        tc.common.batchClear(&batch);
+                        batch.clear();
                         var jj: i32 = 0;
-                        while (jj < pl) : (jj += 1) tc.common.batchAdd(&batch, @rem(rand(), n_vocab), pp + i, &.{jj}, true);
+                        while (jj < pl) : (jj += 1) _ = batch.add(@rem(rand(), n_vocab), pp + i, jj, true);
                         if (!decodeHelper(ctx, &batch, n_batch, true)) {
                             log.err("%s: llama_decode() failed\n", .{func});
                             c.llama_free(ctx);
@@ -247,8 +237,6 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     log.out("\n", .{});
     c.llama_perf_context_print(ctx);
 
-    c.llama_batch_free(batch);
-
     c.llama_free(ctx);
     c.llama_model_free(model);
 
@@ -257,7 +245,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     return 0;
 }
 
-/// Ports `main` (tools/batched-bench/main.cpp:3 @7fe450e19).
+/// Ports `main` (tools/batched-bench/main.cpp:3 @d81235049).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmvq.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/mmvq.cuh` at v0.5.0 (`7fe450e19`), the host
+//! `llama.cpp/ggml/src/ggml-cuda/mmvq.cuh` at v0.6.0 (`d81235049`), the host
 //! half; the `VDR_*_MMVQ` constants are `vecdotq.cuh`'s. The kernels,
 //! `mul_mat_vec_q` and `mul_mat_vec_q_moe`, stay CUDA.
 //!
@@ -22,10 +22,10 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `MMVQ_MAX_BATCH_SIZE` (mmvq.cuh:3 @7fe450e19).
+/// Ports `MMVQ_MAX_BATCH_SIZE` (mmvq.cuh:3 @d81235049).
 pub const max_batch_size = 8;
 
-/// Ports `get_vdr_mmvq` (mmvq.cu:69 @7fe450e19), with the `VDR_*_MMVQ`
+/// Ports `get_vdr_mmvq` (mmvq.cu:69 @d81235049), with the `VDR_*_MMVQ`
 /// constants of `vecdotq.cuh`.
 fn getVdrMmvq(comptime ty: c.enum_ggml_type) comptime_int {
     return switch (ty) {
@@ -54,18 +54,19 @@ fn getVdrMmvq(comptime ty: c.enum_ggml_type) comptime_int {
     };
 }
 
-/// Ports `mmvq_parameter_table_id` (mmvq.cu:96 @7fe450e19).
+/// Ports `mmvq_parameter_table_id` (mmvq.cu:96 @d81235049).
 const TableId = enum(c_int) { generic = 0, turing, gcn, rdna2, rdna3_0, rdna4, gb10 };
 
-/// Ports the host `get_device_table_id` (mmvq.cu:124 @7fe450e19), NVIDIA arms.
+/// Ports the host `get_device_table_id` (mmvq.cu:124 @d81235049), NVIDIA
+/// arms. Since v0.6.0 Volta takes the Turing table too.
 fn getDeviceTableId(x: c_int) TableId {
     const h = common.highestCompiledArch(x);
-    if (common.cc.isNvidia(x) and h >= common.cc.turing and h < common.cc.ampere) return .turing;
+    if (common.cc.isNvidia(x) and h >= common.cc.volta and h < common.cc.ampere) return .turing;
     if (common.cc.isNvidia(x) and h == common.cc.dgx_spark) return .gb10;
     return .generic;
 }
 
-/// Ports `get_mmvq_mmid_max_batch_pascal_older` (mmvq.cu:150 @7fe450e19).
+/// Ports `get_mmvq_mmid_max_batch_pascal_older` (mmvq.cu:150 @d81235049).
 fn mmidMaxBatchPascalOlder(ty: c.enum_ggml_type) c_int {
     return switch (ty) {
         c.GGML_TYPE_IQ1_S => 6,
@@ -93,7 +94,7 @@ fn mmidMaxBatchPascalOlder(ty: c.enum_ggml_type) c_int {
     };
 }
 
-/// Ports `get_mmvq_mmid_max_batch_turing_plus` (mmvq.cu:177 @7fe450e19).
+/// Ports `get_mmvq_mmid_max_batch_turing_plus` (mmvq.cu:177 @d81235049).
 fn mmidMaxBatchTuringPlus(ty: c.enum_ggml_type) c_int {
     return switch (ty) {
         c.GGML_TYPE_IQ2_S => 7,
@@ -107,7 +108,7 @@ fn mmidMaxBatchTuringPlus(ty: c.enum_ggml_type) c_int {
     };
 }
 
-/// Ports `get_mmvq_mmid_max_batch` (mmvq.cu:285 @7fe450e19), NVIDIA arms.
+/// Ports `get_mmvq_mmid_max_batch` (mmvq.cu:285 @d81235049), NVIDIA arms.
 pub fn getMmidMaxBatch(ty: c.enum_ggml_type, x: c_int) c_int {
     // NVIDIA: Volta, Ada Lovelace, and Blackwell always use MMVQ for MUL_MAT_ID.
     if (common.cc.isNvidia(x)) {
@@ -118,7 +119,7 @@ pub fn getMmidMaxBatch(ty: c.enum_ggml_type, x: c_int) c_int {
     return max_batch_size;
 }
 
-/// Ports `ggml_cuda_should_use_mmvq` (mmvq.cu:318 @7fe450e19), NVIDIA arms.
+/// Ports `ggml_cuda_should_use_mmvq` (mmvq.cu:318 @d81235049), NVIDIA arms.
 pub fn shouldUseMmvq(ty: c.enum_ggml_type, x: c_int, ne11: i64) bool {
     if (!c.ggml_is_quantized(ty)) return false;
     // k-quants cost more to decode and mvq redoes that per column, so MMQ
@@ -164,7 +165,7 @@ pub fn shouldUseMmvq(ty: c.enum_ggml_type, x: c_int, ne11: i64) bool {
     return ne11 <= max_batch_size;
 }
 
-/// Ports `calc_nwarps` (mmvq.cu:452 @7fe450e19), the NVIDIA tables; the
+/// Ports `calc_nwarps` (mmvq.cu:452 @d81235049), the NVIDIA tables; the
 /// AMD tables are unreachable from `getDeviceTableId` here.
 fn calcNwarps(ty: c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, small_k: bool, halve_iters: bool) c_int {
     switch (table_id) {
@@ -211,7 +212,7 @@ fn calcNwarps(ty: c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, small_k
     }
 }
 
-/// Ports `calc_rows_per_block` (mmvq.cu:579 @7fe450e19).
+/// Ports `calc_rows_per_block` (mmvq.cu:579 @d81235049).
 fn calcRowsPerBlock(ncols_dst: c_int, table_id: TableId, small_k: bool, nwarps: c_int) c_int {
     if (table_id == .generic or table_id == .gcn or table_id == .turing or table_id == .gb10) {
         return switch (ncols_dst) {
@@ -223,7 +224,7 @@ fn calcRowsPerBlock(ncols_dst: c_int, table_id: TableId, small_k: bool, nwarps: 
     return 1;
 }
 
-/// Ports `calc_launch_params` (mmvq.cu:999 @7fe450e19).
+/// Ports `calc_launch_params` (mmvq.cu:1012 @d81235049).
 fn calcLaunchParams(ty: c.enum_ggml_type, ncols_dst: c_int, nrows_x: c_int, nchannels_dst: c_int, nsamples_or_ntokens: c_int, warp_size: c_int, table_id: TableId, small_k: bool, halve_iters: bool) [2]kernels.Dim3 {
     const nwarps = calcNwarps(ty, ncols_dst, table_id, small_k, halve_iters);
     const rpb = calcRowsPerBlock(ncols_dst, table_id, small_k, nwarps);
@@ -262,7 +263,7 @@ fn mmvqKernel(comptime ty: c.enum_ggml_type, comptime ncols_dst: comptime_int, c
     return kernels.get("mmvq", kernels.tmpl("mul_mat_vec_q", &.{ kernels.ggmlType(ty), kernels.int(ncols_dst), kernels.boolean(has_fusion), kernels.boolean(small_k), kernels.boolean(halve_iters) }));
 }
 
-/// Ports `mul_mat_vec_q_switch_fusion` (mmvq.cu:1011 @7fe450e19).
+/// Ports `mul_mat_vec_q_switch_fusion` (mmvq.cu:1024 @d81235049).
 fn switchFusion(comptime ty: c.enum_ggml_type, comptime ncols_dst: comptime_int, comptime small_k: bool, comptime halve_iters: bool, a: *const Common, dims: [2]kernels.Dim3, nbytes_shared: c_int, stream: cu.cudaStream_t) void {
     const f = a.fusion;
     const has_fusion = f.gate != null or f.x_bias != null or f.gate_bias != null or f.x_scale != null or f.gate_scale != null;
@@ -285,14 +286,15 @@ fn switchFusion(comptime ty: c.enum_ggml_type, comptime ncols_dst: comptime_int,
     kernels.launchPdl(comptime mmvqKernel(ty, ncols_dst, false, small_k, halve_iters), p, args);
 }
 
-/// Ports `mul_mat_vec_q_moe_launch` (mmvq.cu:1043 @7fe450e19). The kernel
+/// Ports `mul_mat_vec_q_moe_launch` (mmvq.cu:1056 @d81235049). The kernel
 /// takes the fusion arguments by value either way; `has_fusion` picks the
-/// instantiation that reads them.
+/// instantiation that reads them. A shared expert (v0.6.0) is one more
+/// channel of blocks, the last, which the kernel points at its weights.
 fn moeLaunch(comptime ty: c.enum_ggml_type, a: *const Common, nrows_x: u32, ncols_dst: u32, warp_size: c_int, nchannels_dst: c_int, stream: cu.cudaStream_t) void {
     const rows_per_block = 2; // 2 gives best perf based on tuning
     const nblocks_rows: i64 = @divTrunc(@as(i64, nrows_x) + rows_per_block - 1, rows_per_block);
     const p: kernels.LaunchParams = .{
-        .grid = .{ .x = @intCast(nblocks_rows), .y = @bitCast(nchannels_dst) },
+        .grid = .{ .x = @intCast(nblocks_rows), .y = @bitCast(nchannels_dst + @intFromBool(a.fusion.shared_up != null)) },
         .block = .{ .x = @bitCast(warp_size), .y = ncols_dst },
         .stream = stream,
     };
@@ -323,7 +325,7 @@ fn contains(list: []const c.enum_ggml_type, t: c.enum_ggml_type) bool {
     return false;
 }
 
-/// Ports `mul_mat_vec_q_switch_ncols_dst` (mmvq.cu:1076 @7fe450e19).
+/// Ports `mul_mat_vec_q_switch_ncols_dst` (mmvq.cu:1089 @d81235049).
 fn switchNcolsDst(
     comptime ty: c.enum_ggml_type,
     vx: ?*const anyopaque,
@@ -449,14 +451,16 @@ fn switchNcolsDst(
             // identical kernel, so the C launches the unhalved one.
             const c_promoted = comptime calcNwarps(ty, c_ncols_dst, .gb10, false, true) != calcNwarps(ty, c_ncols_dst, .gb10, false, false);
 
+            // A shared expert (v0.6.0) is one more channel of blocks, the last.
+            const nchannels_launch = nchannels_dst + @intFromBool(fusion.shared_up != null);
             if (use_small_k) {
-                const dims = calcLaunchParams(ty, c_ncols_dst, nrows_x, nchannels_dst, nsamples_dst, warp_size, table_id, true, false);
+                const dims = calcLaunchParams(ty, c_ncols_dst, nrows_x, nchannels_launch, nsamples_dst, warp_size, table_id, true, false);
                 switchFusion(ty, c_ncols_dst, true, false, &a, dims, 0, stream);
             } else if (halve and c_promoted) {
-                const dims = calcLaunchParams(ty, c_ncols_dst, nrows_x, nchannels_dst, nsamples_dst, warp_size, table_id, false, true);
+                const dims = calcLaunchParams(ty, c_ncols_dst, nrows_x, nchannels_launch, nsamples_dst, warp_size, table_id, false, true);
                 switchFusion(ty, c_ncols_dst, false, true, &a, dims, 0, stream);
             } else {
-                const dims = calcLaunchParams(ty, c_ncols_dst, nrows_x, nchannels_dst, nsamples_dst, warp_size, table_id, false, false);
+                const dims = calcLaunchParams(ty, c_ncols_dst, nrows_x, nchannels_launch, nsamples_dst, warp_size, table_id, false, false);
                 switchFusion(ty, c_ncols_dst, false, false, &a, dims, 0, stream);
             }
         },
@@ -468,7 +472,7 @@ fn switchNcolsDst(
     }
 }
 
-/// Ports `mul_mat_vec_q_switch_type` (mmvq.cu:1268 @7fe450e19).
+/// Ports `mul_mat_vec_q_switch_type` (mmvq.cu:1281 @d81235049).
 fn switchType(vx: ?*const anyopaque, type_x: c.enum_ggml_type, vy: ?*const anyopaque, ids: ?*const i32, fusion: common.MmFusionArgsDevice, dst: ?*f32, ncols_x: c_int, nrows_x: c_int, ncols_dst: c_int, stride_row_x: c_int, stride_col_y: c_int, stride_col_dst: c_int, nchannels_x: c_int, nchannels_y: c_int, nchannels_dst: c_int, stride_channel_x: c_int, stride_channel_y: c_int, stride_channel_dst: c_int, nsamples_x: c_int, nsamples_dst: c_int, stride_sample_x: c_int, stride_sample_y: c_int, stride_sample_dst: c_int, ids_stride: c_int, stream: cu.cudaStream_t) void {
     switch (type_x) {
         inline c.GGML_TYPE_Q1_0,
@@ -503,7 +507,7 @@ fn i32Of(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `ggml_cuda_mul_mat_vec_q` (mmvq.cu:1421 @7fe450e19).
+/// Ports `ggml_cuda_mul_mat_vec_q` (mmvq.cu:1434 @d81235049).
 pub fn mulMatVecQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor, fusion: ?*const common.MmFusionArgsHost) void {
     impl.assert(src1.type == c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
     impl.assert(dst.type == c.GGML_TYPE_F32, "        dst->type  == GGML_TYPE_F32");
@@ -546,6 +550,25 @@ pub fn mulMatVecQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
         impl.assert(ids != null or dst.ne[1] == 1, "  ids || dst->ne[1] == 1");
         // Scale fusion is only allowed for NVFP4 currently.
         impl.assert((f.x_scale == null and f.gate_scale == null) or src0.type == c.GGML_TYPE_NVFP4, "(fusion->x_scale == nullptr && fusion->gate_scale == nullptr) || src0->type == GGML_TYPE_NVFP4");
+
+        if (f.shared_up) |su| {
+            impl.assert(ids != null and f.gate != null and f.shared_gate != null and f.shared_dst != null, "ids && fusion->gate && fusion->shared_gate && fusion->shared_dst");
+            impl.assert(f.x_bias == null and f.gate_bias == null and f.x_scale == null and f.gate_scale == null, "!fusion->x_bias && !fusion->gate_bias && !fusion->x_scale && !fusion->gate_scale");
+            impl.assert(ne11 == 1 and ne03 == 1 and ne13 == 1, "ne11 == 1 && ne03 == 1 && ne13 == 1");
+            const sg = f.shared_gate.?;
+            const sd = f.shared_dst.?;
+            impl.assert(su.type == src0.type and sg.type == src0.type, "fusion->shared_up->type == src0->type && fusion->shared_gate->type == src0->type");
+            impl.assert(c.ggml_are_same_shape(su, sg), "ggml_are_same_shape(fusion->shared_up, fusion->shared_gate)");
+            impl.assert(c.ggml_is_contiguous(su) and c.ggml_is_contiguous(sg), "ggml_is_contiguous(fusion->shared_up) && ggml_is_contiguous(fusion->shared_gate)");
+            impl.assert(su.ne[0] == ne00 and su.ne[1] == ne01, "fusion->shared_up->ne[0] == ne00 && fusion->shared_up->ne[1] == ne01");
+            impl.assert(su.nb[1] == src0.nb[1] and c.ggml_is_matrix(su), "fusion->shared_up->nb[1] == nb01 && ggml_is_matrix(fusion->shared_up)");
+            impl.assert(sd.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous(sd), "fusion->shared_dst->type == GGML_TYPE_F32 && ggml_is_contiguous(fusion->shared_dst)");
+            impl.assert(sd.ne[0] == dst.ne[0] and sd.ne[1] == ne2, "fusion->shared_dst->ne[0] == ne0 && fusion->shared_dst->ne[1] == ne2");
+            fusion_local.shared_up = su.data;
+            fusion_local.shared_gate = sg.data;
+            fusion_local.shared_dst = @ptrCast(@alignCast(sd.data));
+            fusion_local.shared_stride_col_dst = @truncate(sd.nb[1] / ts_dst);
+        }
 
         if (f.x_bias) |b| {
             impl.assert(b.type == c.GGML_TYPE_F32, "fusion->x_bias->type == GGML_TYPE_F32");

@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port by itself.** It gathers the port of
-//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` at v0.5.0 (`7fe450e19`),
+//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` at v0.6.0 (`d81235049`),
 //! the x86 counterpart of `quants/arm/`: that file's 27 exports, at the
 //! `__AVX2__` arms x86-64-v3 compiles. `arch-fallback.h` adds one more: on x86 the real
 //! `ggml_vec_dot_q2_0_q8_0` is `quants.c`'s generic body. `legacy.zig` ports

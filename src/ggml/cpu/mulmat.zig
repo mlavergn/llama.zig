@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.5.0, `7fe450e19`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.6.0, `d81235049`),
 //! the section beginning at line 1162. Each function names the C it replaces
 //! and the line it began at.
 //!
@@ -40,7 +40,7 @@ const traits = @import("traits.zig");
 const features = @import("features.zig");
 const convert = @import("convert.zig");
 const threading = @import("threading.zig");
-const iqp = @import("iqp.zig");
+const tiled = @import("tiled.zig");
 const c = impl.c;
 
 const Tensor = defs.Tensor;
@@ -76,7 +76,7 @@ inline fn min(a: i64, b: i64) i64 {
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_mul_mat
 
-/// Ports `ggml_compute_forward_mul_mat_one_chunk` (ggml-cpu.c:1165 @7fe450e19).
+/// Ports `ggml_compute_forward_mul_mat_one_chunk` (ggml-cpu.c:1165 @d81235049).
 ///
 /// Computes the rectangle `[ir0_start, ir0_end) x [ir1_start, ir1_end)` of the
 /// result, tiling 16x16 so a tile of `dst` stays in cache across the inner
@@ -196,7 +196,7 @@ fn oneChunk(
     }
 }
 
-/// Ports `ggml_compute_forward_mul_mat` (ggml-cpu.c:1255 @7fe450e19).
+/// Ports `ggml_compute_forward_mul_mat` (ggml-cpu.c:1255 @d81235049).
 ///
 /// Parameters:
 /// - `params`: this thread's index, count, and work buffer.
@@ -211,6 +211,11 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
     const hint = impl.getOpParamsI32(dst, 1);
     if (hint == c.GGML_HINT_SRC0_IS_HADAMARD and !params.use_ref) {
         ggml_compute_forward_fwht(params, dst);
+        return;
+    }
+
+    // If tiled is supported, it will execute the full op here and we return
+    if (tiled.ggml_compute_forward_mul_mat_tiled(params, dst)) {
         return;
     }
 
@@ -244,7 +249,7 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
 
     // First llamafile attempt: src1 is already contiguous and already the
     // type the kernel wants, so nothing needs staging.
-    if (features.use_llamafile and src1_cont) {
+    if (features.use_llamafile and !params.use_ref and src1_cont) {
         var ok = true;
         outer: for (0..@intCast(l.ne13)) |j13| {
             for (0..@intCast(l.ne12)) |j12| {
@@ -282,9 +287,11 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
         const nbw3 = nbw2 * @as(usize, @intCast(l.ne12));
 
         std.debug.assert(params.wsize >= @as(usize, @intCast(l.ne13)) * nbw3);
-        impl.assert(src1.type == c.GGML_TYPE_F32 or src1.type == c.GGML_TYPE_F16, "src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16");
-        // the F16 path below writes plain floats into wdata, so it needs an F32 vec_dot_type
-        impl.assert(src1.type == c.GGML_TYPE_F32 or vec_dot_type == c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32 || vec_dot_type == GGML_TYPE_F32");
+        // src1 is either packed from F32 into vec_dot_type, or widened from F16 or BF16 into the F32 work buffer
+        const widen = src1.type != c.GGML_TYPE_F32;
+
+        impl.assert(!widen or vec_dot_type == c.GGML_TYPE_F32, "!widen || vec_dot_type == GGML_TYPE_F32");
+        impl.assert(!widen or src1.type == c.GGML_TYPE_F16 or src1.type == c.GGML_TYPE_BF16, "!widen || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16");
 
         // Every thread walks every row and converts its own slice of the
         // columns, rather than taking whole rows round-robin. Block-quantised
@@ -304,10 +311,12 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
                         @as(usize, @intCast(block_start)) * nbw0;
                     const n_block = (block_end - block_start) * bs;
 
-                    if (src1.type == c.GGML_TYPE_F32) {
-                        from_float.?(@ptrCast(@alignCast(src)), dstw, n_block);
-                    } else {
+                    if (src1.type == c.GGML_TYPE_F16) {
                         convert.ggml_cpu_fp16_to_fp32(@ptrCast(@alignCast(src)), @ptrCast(@alignCast(dstw)), n_block);
+                    } else if (src1.type == c.GGML_TYPE_BF16) {
+                        convert.ggml_cpu_bf16_to_fp32(@ptrCast(@alignCast(src)), @ptrCast(@alignCast(dstw)), n_block);
+                    } else {
+                        from_float.?(@ptrCast(@alignCast(src)), dstw, n_block);
                     }
                 }
             }
@@ -322,16 +331,9 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
 
     threading.ggml_barrier(params.threadpool.?);
 
-    // The IQ panel gemm (`iqp.zig`). It has to come after the barrier: it
-    // consumes src1's q8_K rows from the work buffer.
-    if (iqp.ggml_cpu_iqp_supports_mul_mat(dst) and !params.use_ref) {
-        iqp.ggml_compute_forward_mul_mat_iqp(params, dst);
-        return;
-    }
-
     // Second llamafile attempt, now that src1 has been staged into `wdata` in
     // the kernel's own type.
-    if (features.use_llamafile and src1.type != vec_dot_type) {
+    if (features.use_llamafile and !params.use_ref and src1.type != vec_dot_type) {
         const wdata: [*]const u8 = @ptrCast(params.wdata.?);
         const row_size = types.ggml_row_size(vec_dot_type, l.ne10);
 
@@ -423,7 +425,7 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_mul_mat_id
 
-/// Ports `struct mmid_row_mapping` (ggml-cpu.c:1474 @7fe450e19).
+/// Ports `struct mmid_row_mapping` (ggml-cpu.c:1478 @d81235049).
 pub const RowMapping = extern struct {
     /// The selected expert's index within the row.
     i1: i32,
@@ -431,12 +433,12 @@ pub const RowMapping = extern struct {
     i2: i32,
 };
 
-/// Ports the `MMID_MATRIX_ROW` macro (ggml-cpu.c:1472 @7fe450e19).
+/// Ports the `MMID_MATRIX_ROW` macro (ggml-cpu.c:1476 @d81235049).
 inline fn matrixRow(matrix_rows: [*]RowMapping, ids: *const Tensor, row_id: i64, idx1: i64) *RowMapping {
     return &matrix_rows[@intCast(row_id * ids.ne[0] * ids.ne[1] + idx1)];
 }
 
-/// Ports `incr_ptr_aligned` (ggml-cpu.c:1542 @7fe450e19).
+/// Ports `incr_ptr_aligned` (ggml-cpu.c:1546 @d81235049).
 ///
 /// Carves a sub-allocation out of the work buffer and advances the cursor.
 /// Distinct from the identically named helper in `ggml.c`, which the graph
@@ -454,7 +456,7 @@ fn incrPtrAligned(p: *[*]u8, size: usize, alignment: usize) [*]u8 {
     return ptr;
 }
 
-/// Ports `ggml_compute_forward_mul_mat_id_one_chunk` (ggml-cpu.c:1479 @7fe450e19).
+/// Ports `ggml_compute_forward_mul_mat_id_one_chunk` (ggml-cpu.c:1483 @d81235049).
 ///
 /// The mul_mat_id counterpart of `oneChunk`. It takes more arguments because
 /// the expert grouping is computed once by thread zero and shared, rather than
@@ -541,7 +543,7 @@ fn idOneChunk(
     }
 }
 
-/// Ports `ggml_compute_forward_mul_mat_id` (ggml-cpu.c:1550 @7fe450e19).
+/// Ports `ggml_compute_forward_mul_mat_id` (ggml-cpu.c:1554 @d81235049).
 ///
 /// A mixture-of-experts product: `src[2]` names, per row of `src1`, which
 /// matrix in `src0`'s third dimension that row should be multiplied by.
@@ -613,16 +615,9 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
         defs.cache_line_size,
     );
 
-    // The IQ panel gemm (`iqp.zig`). Each expert's eligibility is decided
-    // below, but the panels are reserved for the whole node: `ggml_graph_plan`
-    // sizes them without `params`, and `use_ref` only skips the dispatch.
-    const use_iqp = iqp.ggml_cpu_iqp_supports_mul_mat_id(dst) and !params.use_ref;
-
-    var iqp_panels: ?[*]u8 = null;
-
-    if (use_iqp) {
-        iqp_panels = incrPtrAligned(&wdata_cur, @as(usize, @intCast(nth)) * iqp.ggml_cpu_iqp_scratch_size(dst), 64);
-    }
+    // Tiled matmul (see tiled.h); per-thread work buffers, 0 bytes when disabled. The
+    // reservation is unconditional, the per expert eligibility is decided at dispatch time
+    const tiled_scratch = incrPtrAligned(&wdata_cur, tiled.ggml_tiled_wdata_size(nth, dst), 64);
 
     impl.assert(
         params.wsize >= @intFromPtr(wdata_cur) - @intFromPtr(params.wdata.?),
@@ -697,16 +692,15 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
         const cne1 = matrix_row_counts[@intCast(cur_a)];
         if (cne1 == 0) continue;
 
-        if (use_iqp and iqp.ggml_cpu_iqp_mul_mat_id_min_batch(cne1)) {
-            iqp.ggml_compute_forward_mul_mat_id_iqp(
-                params,
-                dst,
-                cur_a,
-                cne1,
-                @ptrCast(matrixRow(matrix_rows, ids, cur_a, 0)),
-                iqp_panels,
-            );
-
+        // tiled takes over if profitable for this expert (see tiled.h)
+        if (tiled.ggml_compute_forward_mul_mat_id_tiled(
+            params,
+            dst,
+            cur_a,
+            cne1,
+            @ptrCast(matrixRow(matrix_rows, ids, cur_a, 0)),
+            tiled_scratch,
+        )) {
             continue;
         }
 

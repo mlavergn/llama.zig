@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/vendor/stb/stb_image.h` (stb_image v2.30) at v0.5.0
-//! (`7fe450e19`), the memory-loading path only. Each declaration names the
+//! Ports `llama.cpp/vendor/stb/stb_image.h` (stb_image v2.30) at v0.6.0
+//! (`d81235049`), the memory-loading path only. Each declaration names the
 //! function it ports and the line it began at.
 //!
 //! # As `mtmd-helper.cpp` compiles it
@@ -14,7 +14,7 @@
 //!
 //! - **no SIMD on aarch64** (`STBI_NEON` is opt-in), and on x86 the SSE2
 //!   kernels are documented bit-identical to the scalar ones this file
-//!   ports (`stbi__idct_simd`, `stbi__YCbCr_to_RGB_simd`: stb_image.h:2528, 3657 @7fe450e19);
+//!   ports (`stbi__idct_simd`, `stbi__YCbCr_to_RGB_simd`: stb_image.h:2528, 3657 @d81235049);
 //! - **`pow(float, float)` is C++'s float overload**, `powf`, in the HDR to
 //!   LDR conversion -- a C build would call the double `pow`;
 //! - `STBI_ASSERT` is `assert`, compiled out under `NDEBUG`.
@@ -55,7 +55,7 @@ const max_dimensions: u32 = 1 << 24;
 /// such a load's shape and outcome but not its pixels.
 pub threadlocal var read_indeterminate: bool = false;
 
-/// Ports `stbi_load_from_memory` (stb_image.h:1429 @7fe450e19).
+/// Ports `stbi_load_from_memory` (stb_image.h:1429 @d81235049).
 ///
 /// Parameters:
 /// - `gpa`: allocates the pixels and every intermediate buffer.
@@ -78,7 +78,7 @@ pub fn loadFromMemory(gpa: std.mem.Allocator, buffer: []const u8, req_comp: c_in
 // -----------------------------------------------------------------------------
 // the context
 
-/// Ports `stbi__context` (stb_image.h:820 @7fe450e19), for memory only.
+/// Ports `stbi__context` (stb_image.h:820 @d81235049), for memory only.
 const Context = struct {
     gpa: std.mem.Allocator,
     img_x: u32 = 0,
@@ -92,7 +92,7 @@ const Context = struct {
     /// `stbi__g_failure_reason`.
     failure: ?[]const u8 = null,
 
-    /// Ports `stbi__err` (stb_image.h:978 @7fe450e19).
+    /// Ports `stbi__err` (stb_image.h:978 @d81235049).
     fn err(self: *Context, str: []const u8) c_int {
         self.failure = str;
         return 0;
@@ -104,12 +104,12 @@ const Context = struct {
         return null;
     }
 
-    /// Ports `stbi__rewind` (stb_image.h:886 @7fe450e19).
+    /// Ports `stbi__rewind` (stb_image.h:886 @d81235049).
     fn rewind(self: *Context) void {
         self.pos = 0;
     }
 
-    /// Ports `stbi__get8` (stb_image.h:1614 @7fe450e19).
+    /// Ports `stbi__get8` (stb_image.h:1614 @d81235049).
     fn get8(self: *Context) u8 {
         if (self.pos < self.buf.len) {
             const v = self.buf[self.pos];
@@ -119,12 +119,12 @@ const Context = struct {
         return 0;
     }
 
-    /// Ports `stbi__at_eof` (stb_image.h:1628 @7fe450e19).
+    /// Ports `stbi__at_eof` (stb_image.h:1628 @d81235049).
     fn atEof(self: *const Context) bool {
         return self.pos >= self.buf.len;
     }
 
-    /// Ports `stbi__skip` (stb_image.h:1644 @7fe450e19).
+    /// Ports `stbi__skip` (stb_image.h:1644 @d81235049).
     fn skip(self: *Context, n: c_int) void {
         if (n == 0) return; // already there!
         if (n < 0) {
@@ -134,7 +134,7 @@ const Context = struct {
         self.pos += @intCast(n);
     }
 
-    /// Ports `stbi__getn` (stb_image.h:1666 @7fe450e19).
+    /// Ports `stbi__getn` (stb_image.h:1666 @d81235049).
     fn getn(self: *Context, out: []u8) bool {
         if (self.pos <= self.buf.len and out.len <= self.buf.len - self.pos) {
             @memcpy(out, self.buf[self.pos..][0..out.len]);
@@ -144,25 +144,25 @@ const Context = struct {
         return false;
     }
 
-    /// Ports `stbi__get16be` (stb_image.h:1694 @7fe450e19).
+    /// Ports `stbi__get16be` (stb_image.h:1694 @d81235049).
     fn get16be(self: *Context) c_int {
         const z: c_int = self.get8();
         return (z << 8) + self.get8();
     }
 
-    /// Ports `stbi__get32be` (stb_image.h:1704 @7fe450e19).
+    /// Ports `stbi__get32be` (stb_image.h:1704 @d81235049).
     fn get32be(self: *Context) u32 {
         const z: u32 = @intCast(self.get16be());
         return (z << 16) +% @as(u32, @intCast(self.get16be()));
     }
 
-    /// Ports `stbi__get16le` (stb_image.h:1714 @7fe450e19).
+    /// Ports `stbi__get16le` (stb_image.h:1714 @d81235049).
     fn get16le(self: *Context) c_int {
         const z: c_int = self.get8();
         return z + (@as(c_int, self.get8()) << 8);
     }
 
-    /// Ports `stbi__get32le` (stb_image.h:1722 @7fe450e19).
+    /// Ports `stbi__get32le` (stb_image.h:1722 @d81235049).
     fn get32le(self: *Context) u32 {
         var z: u32 = @intCast(self.get16le());
         z +%= @as(u32, @intCast(self.get16le())) << 16;
@@ -180,19 +180,19 @@ const Context = struct {
         if (p) |q| self.gpa.free(q);
     }
 
-    /// Ports `stbi__malloc_mad2` (stb_image.h:1048 @7fe450e19).
+    /// Ports `stbi__malloc_mad2` (stb_image.h:1048 @d81235049).
     fn mallocMad2(self: *Context, a: c_int, b: c_int, add: c_int) ?[]u8 {
         if (!mad2sizesValid(a, b, add)) return null;
         return self.alloc(@intCast(a * b + add));
     }
 
-    /// Ports `stbi__malloc_mad3` (stb_image.h:1055 @7fe450e19).
+    /// Ports `stbi__malloc_mad3` (stb_image.h:1055 @d81235049).
     fn mallocMad3(self: *Context, a: c_int, b: c_int, c: c_int, add: c_int) ?[]u8 {
         if (!mad3sizesValid(a, b, c, add)) return null;
         return self.alloc(@intCast(a * b * c + add));
     }
 
-    /// Ports `stbi__malloc_mad4` (stb_image.h:1062 @7fe450e19).
+    /// Ports `stbi__malloc_mad4` (stb_image.h:1062 @d81235049).
     fn mallocMad4(self: *Context, a: c_int, b: c_int, c: c_int, d: c_int, add: c_int) ?[]u8 {
         if (!mad4sizesValid(a, b, c, d, add)) return null;
         return self.alloc(@intCast(a * b * c * d + add));
@@ -253,7 +253,7 @@ const Context = struct {
         return tgaLoadImpl(self, x, y, comp, req_comp);
     }
 
-    /// Ports `stbi__load_main` (stb_image.h:1137 @7fe450e19), with `bpc` 8.
+    /// Ports `stbi__load_main` (stb_image.h:1137 @d81235049), with `bpc` 8.
     /// Return: the pixels and their bits per channel, 8 or 16.
     fn loadMain(self: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int, bits: *c_int) ?[]u8 {
         bits.* = 8; // default is 8 so most paths don't have to be changed
@@ -283,7 +283,7 @@ const Context = struct {
         return self.errpuc("unknown image type");
     }
 
-    /// Ports `stbi__load_and_postprocess_8bit` (stb_image.h:1260 @7fe450e19).
+    /// Ports `stbi__load_and_postprocess_8bit` (stb_image.h:1260 @d81235049).
     fn loadAndPostprocess8bit(self: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int) ?[]u8 {
         var bits: c_int = 8;
         const result = self.loadMain(x, y, comp, req_comp, &bits) orelse return null;
@@ -291,7 +291,7 @@ const Context = struct {
         return result;
     }
 
-    /// Ports `stbi__convert_16_to_8` (stb_image.h:1190 @7fe450e19): the top
+    /// Ports `stbi__convert_16_to_8` (stb_image.h:1190 @d81235049): the top
     /// byte of each native-order sample.
     fn convert16to8(self: *Context, orig: []u8, w: c_int, h: c_int, channels: c_int) ?[]u8 {
         const img_len: usize = @intCast(w * h * channels);
@@ -304,7 +304,7 @@ const Context = struct {
         return reduced;
     }
 
-    /// Ports `stbi__convert_format` (stb_image.h:1755 @7fe450e19).
+    /// Ports `stbi__convert_format` (stb_image.h:1755 @d81235049).
     fn convertFormat(self: *Context, data: []u8, img_n: c_int, req_comp: c_int, x: u32, y: u32) ?[]u8 {
         if (req_comp == img_n) return data;
         const good = self.mallocMad3(req_comp, @bitCast(x), @bitCast(y), 0) orelse {
@@ -390,7 +390,7 @@ const Context = struct {
         return good;
     }
 
-    /// Ports `stbi__convert_format16` (stb_image.h:1812 @7fe450e19), over
+    /// Ports `stbi__convert_format16` (stb_image.h:1812 @d81235049), over
     /// native-order 16-bit samples.
     fn convertFormat16(self: *Context, data: []u8, img_n: c_int, req_comp: c_int, x: u32, y: u32) ?[]u8 {
         if (req_comp == img_n) return data;
@@ -470,7 +470,7 @@ const Context = struct {
         return good;
     }
 
-    /// Ports `stbi__hdr_to_ldr` (stb_image.h:1884 @7fe450e19). `pow` is the
+    /// Ports `stbi__hdr_to_ldr` (stb_image.h:1884 @d81235049). `pow` is the
     /// C++ float overload, and `pow(...) * 255 + 0.5f` contracts into one
     /// fused multiply-add.
     fn hdrToLdr(self: *Context, data_in: ?[]f32, x: c_int, y: c_int, comp: c_int) ?[]u8 {
@@ -512,7 +512,7 @@ fn validCombo(combo: c_int) bool {
     };
 }
 
-/// `stbi__h2l_gamma_i` and `stbi__h2l_scale_i` (stb_image.h:1579 @7fe450e19).
+/// `stbi__h2l_gamma_i` and `stbi__h2l_scale_i` (stb_image.h:1579 @d81235049).
 const h2l_gamma_i: f32 = 1.0 / 2.2;
 const h2l_scale_i: f32 = 1.0;
 
@@ -524,43 +524,43 @@ fn wr16(buf: []u8, i: usize, v: u16) void {
     std.mem.writeInt(u16, buf[i * 2 ..][0..2], v, .native);
 }
 
-/// Ports `stbi__addsizes_valid` (stb_image.h:1002 @7fe450e19).
+/// Ports `stbi__addsizes_valid` (stb_image.h:1002 @d81235049).
 fn addsizesValid(a: c_int, b: c_int) bool {
     if (b < 0) return false;
     return a <= std.math.maxInt(c_int) - b;
 }
 
-/// Ports `stbi__mul2sizes_valid` (stb_image.h:1014 @7fe450e19).
+/// Ports `stbi__mul2sizes_valid` (stb_image.h:1014 @d81235049).
 fn mul2sizesValid(a: c_int, b: c_int) bool {
     if (a < 0 or b < 0) return false;
     if (b == 0) return true; // mul-by-0 is always safe
     return a <= @divTrunc(std.math.maxInt(c_int), b);
 }
 
-/// Ports `stbi__mad2sizes_valid` (stb_image.h:1024 @7fe450e19).
+/// Ports `stbi__mad2sizes_valid` (stb_image.h:1024 @d81235049).
 fn mad2sizesValid(a: c_int, b: c_int, add: c_int) bool {
     return mul2sizesValid(a, b) and addsizesValid(a * b, add);
 }
 
-/// Ports `stbi__mad3sizes_valid` (stb_image.h:1031 @7fe450e19).
+/// Ports `stbi__mad3sizes_valid` (stb_image.h:1031 @d81235049).
 fn mad3sizesValid(a: c_int, b: c_int, c: c_int, add: c_int) bool {
     return mul2sizesValid(a, b) and mul2sizesValid(a * b, c) and addsizesValid(a * b * c, add);
 }
 
-/// Ports `stbi__mad4sizes_valid` (stb_image.h:1039 @7fe450e19).
+/// Ports `stbi__mad4sizes_valid` (stb_image.h:1039 @d81235049).
 fn mad4sizesValid(a: c_int, b: c_int, c: c_int, d: c_int, add: c_int) bool {
     return mul2sizesValid(a, b) and mul2sizesValid(a * b, c) and
         mul2sizesValid(a * b * c, d) and addsizesValid(a * b * c * d, add);
 }
 
-/// Ports `stbi__addints_valid` (stb_image.h:1070 @7fe450e19).
+/// Ports `stbi__addints_valid` (stb_image.h:1070 @d81235049).
 fn addintsValid(a: c_int, b: c_int) bool {
     if ((a >= 0) != (b >= 0)) return true; // a and b have different signs, so no overflow
     if (a < 0 and b < 0) return a >= std.math.minInt(c_int) - b;
     return a <= std.math.maxInt(c_int) - b;
 }
 
-/// Ports `stbi__mul2shorts_valid` (stb_image.h:1078 @7fe450e19).
+/// Ports `stbi__mul2shorts_valid` (stb_image.h:1078 @d81235049).
 fn mul2shortsValid(a: c_int, b: c_int) bool {
     if (b == 0 or b == -1) return true; // multiplication by 0 is always 0; check for -1 so SHRT_MIN/b doesn't overflow
     if ((a >= 0) == (b >= 0)) return a <= @divTrunc(@as(c_int, std.math.maxInt(i16)), b);
@@ -568,12 +568,12 @@ fn mul2shortsValid(a: c_int, b: c_int) bool {
     return a >= @divTrunc(@as(c_int, std.math.minInt(i16)), b);
 }
 
-/// Ports `stbi__compute_y` (stb_image.h:1746 @7fe450e19).
+/// Ports `stbi__compute_y` (stb_image.h:1746 @d81235049).
 fn computeY(r: c_int, g: c_int, b: c_int) u8 {
     return @truncate(@as(c_uint, @bitCast(((r * 77) + (g * 150) + (29 * b)) >> 8)));
 }
 
-/// Ports `stbi__compute_y_16` (stb_image.h:1803 @7fe450e19).
+/// Ports `stbi__compute_y_16` (stb_image.h:1803 @d81235049).
 fn computeY16(r: c_int, g: c_int, b: c_int) u16 {
     return @truncate(@as(c_uint, @bitCast(((r * 77) + (g * 150) + (29 * b)) >> 8)));
 }
@@ -583,7 +583,7 @@ fn computeY16(r: c_int, g: c_int, b: c_int) u16 {
 
 const fast_bits = 9;
 
-/// Ports `stbi__huffman` (stb_image.h:1947 @7fe450e19).
+/// Ports `stbi__huffman` (stb_image.h:1947 @d81235049).
 const Huffman = struct {
     fast: [1 << fast_bits]u8 = @splat(0),
     code: [256]u16 = @splat(0),
@@ -593,7 +593,7 @@ const Huffman = struct {
     delta: [17]c_int = @splat(0), // old 'firstsymbol' - old 'firstcode'
 };
 
-/// One of the components of `stbi__jpeg` (stb_image.h:2001 @7fe450e19).
+/// One of the components of `stbi__jpeg` (stb_image.h:2001 @d81235049).
 const JpegComp = struct {
     id: c_int = 0,
     h: c_int = 0,
@@ -613,7 +613,7 @@ const JpegComp = struct {
     coeff_h: c_int = 0,
 };
 
-/// Ports `stbi__jpeg` (stb_image.h:2001 @7fe450e19).
+/// Ports `stbi__jpeg` (stb_image.h:2001 @d81235049).
 const Jpeg = struct {
     s: *Context,
     huff_dc: [4]Huffman = @splat(.{}),
@@ -651,7 +651,7 @@ const Jpeg = struct {
     restart_interval: c_int = 0,
     todo: c_int = 0,
 
-    /// Ports `stbi__grow_buffer_unsafe` (stb_image.h:2075 @7fe450e19).
+    /// Ports `stbi__grow_buffer_unsafe` (stb_image.h:2075 @d81235049).
     fn growBufferUnsafe(j: *Jpeg) void {
         while (true) {
             const b: u32 = if (j.nomore) 0 else j.s.get8();
@@ -670,7 +670,7 @@ const Jpeg = struct {
         }
     }
 
-    /// Ports `stbi__jpeg_huff_decode` (stb_image.h:2097 @7fe450e19).
+    /// Ports `stbi__jpeg_huff_decode` (stb_image.h:2097 @d81235049).
     fn huffDecode(j: *Jpeg, h: *const Huffman) c_int {
         if (j.code_bits < 16) j.growBufferUnsafe();
 
@@ -711,7 +711,7 @@ const Jpeg = struct {
         return h.values[@intCast(c)];
     }
 
-    /// Ports `stbi__extend_receive` (stb_image.h:2153 @7fe450e19).
+    /// Ports `stbi__extend_receive` (stb_image.h:2153 @d81235049).
     fn extendReceive(j: *Jpeg, n: c_int) c_int {
         if (j.code_bits < n) j.growBufferUnsafe();
         if (j.code_bits < n) return 0; // ran out of bits from stream, return 0s intead of continuing
@@ -724,7 +724,7 @@ const Jpeg = struct {
         return @as(c_int, @bitCast(k)) +% (jbias[@intCast(n)] & (sgn - 1));
     }
 
-    /// Ports `stbi__jpeg_get_bits` (stb_image.h:2169 @7fe450e19).
+    /// Ports `stbi__jpeg_get_bits` (stb_image.h:2169 @d81235049).
     fn getBits(j: *Jpeg, n: c_int) c_int {
         if (j.code_bits < n) j.growBufferUnsafe();
         if (j.code_bits < n) return 0;
@@ -735,7 +735,7 @@ const Jpeg = struct {
         return @bitCast(k);
     }
 
-    /// Ports `stbi__jpeg_get_bit` (stb_image.h:2181 @7fe450e19).
+    /// Ports `stbi__jpeg_get_bit` (stb_image.h:2181 @d81235049).
     fn getBit(j: *Jpeg) bool {
         if (j.code_bits < 1) j.growBufferUnsafe();
         if (j.code_bits < 1) return false;
@@ -745,7 +745,7 @@ const Jpeg = struct {
         return k & 0x80000000 != 0;
     }
 
-    /// Ports `stbi__jpeg_decode_block` (stb_image.h:2210 @7fe450e19).
+    /// Ports `stbi__jpeg_decode_block` (stb_image.h:2210 @d81235049).
     fn decodeBlock(j: *Jpeg, data: *[64]i16, hdc: *const Huffman, hac: *const Huffman, fac: *const [1 << fast_bits]i16, b: usize, dequant: *const [64]u16) bool {
         if (j.code_bits < 16) j.growBufferUnsafe();
         const t = j.huffDecode(hdc);
@@ -798,7 +798,7 @@ const Jpeg = struct {
         return true;
     }
 
-    /// Ports `stbi__jpeg_decode_block_prog_dc` (stb_image.h:2265 @7fe450e19).
+    /// Ports `stbi__jpeg_decode_block_prog_dc` (stb_image.h:2265 @d81235049).
     fn decodeBlockProgDc(j: *Jpeg, data: []i16, hdc: *const Huffman, b: usize) bool {
         if (j.spec_end != 0) return j.s.err("can't merge dc and ac") != 0;
 
@@ -823,7 +823,7 @@ const Jpeg = struct {
         return true;
     }
 
-    /// Ports `stbi__jpeg_decode_block_prog_ac` (stb_image.h:2295 @7fe450e19).
+    /// Ports `stbi__jpeg_decode_block_prog_ac` (stb_image.h:2295 @d81235049).
     fn decodeBlockProgAc(j: *Jpeg, data: []i16, hac: *const Huffman, fac: *const [1 << fast_bits]i16) bool {
         if (j.spec_start == 0) return j.s.err("can't merge dc and ac") != 0;
 
@@ -935,7 +935,7 @@ const Jpeg = struct {
         return true;
     }
 
-    /// Ports `stbi__get_marker` (stb_image.h:2919 @7fe450e19).
+    /// Ports `stbi__get_marker` (stb_image.h:2919 @d81235049).
     fn getMarker(j: *Jpeg) u8 {
         if (j.marker != marker_none) {
             const x = j.marker;
@@ -948,7 +948,7 @@ const Jpeg = struct {
         return x;
     }
 
-    /// Ports `stbi__jpeg_reset` (stb_image.h:2936 @7fe450e19).
+    /// Ports `stbi__jpeg_reset` (stb_image.h:2936 @d81235049).
     fn reset(j: *Jpeg) void {
         j.code_bits = 0;
         j.code_buffer = 0;
@@ -973,7 +973,7 @@ const Jpeg = struct {
         return true;
     }
 
-    /// Ports `stbi__parse_entropy_coded_data` (stb_image.h:2949 @7fe450e19).
+    /// Ports `stbi__parse_entropy_coded_data` (stb_image.h:2949 @d81235049).
     fn parseEntropyCodedData(z: *Jpeg) bool {
         z.reset();
         if (!z.progressive) {
@@ -1075,7 +1075,7 @@ const Jpeg = struct {
         }
     }
 
-    /// Ports `stbi__jpeg_finish` (stb_image.h:3080 @7fe450e19): dequantize
+    /// Ports `stbi__jpeg_finish` (stb_image.h:3080 @d81235049): dequantize
     /// and IDCT a progressive image's coefficients.
     fn finish(z: *Jpeg) void {
         if (!z.progressive) return;
@@ -1089,7 +1089,7 @@ const Jpeg = struct {
                 while (i < w) : (i += 1) {
                     const off: usize = @intCast(64 * (i + j * z.img_comp[n].coeff_w));
                     const data: *[64]i16 = z.img_comp[n].coeff.?[off..][0..64];
-                    // `stbi__jpeg_dequantize` (stb_image.h:3073 @7fe450e19)
+                    // `stbi__jpeg_dequantize` (stb_image.h:3073 @d81235049)
                     const dq = &z.dequant[@intCast(z.img_comp[n].tq)];
                     for (0..64) |q| data[q] = @truncate(@as(c_int, data[q]) *% dq[q]);
                     const doff: usize = @intCast(z.img_comp[n].w2 * j * 8 + i * 8);
@@ -1099,7 +1099,7 @@ const Jpeg = struct {
         }
     }
 
-    /// Ports `stbi__process_marker` (stb_image.h:3099 @7fe450e19).
+    /// Ports `stbi__process_marker` (stb_image.h:3099 @d81235049).
     fn processMarker(z: *Jpeg, m: c_int) bool {
         const s = z.s;
         switch (m) {
@@ -1190,7 +1190,7 @@ const Jpeg = struct {
         return s.err("unknown marker") != 0;
     }
 
-    /// Ports `stbi__process_scan_header` (stb_image.h:3203 @7fe450e19).
+    /// Ports `stbi__process_scan_header` (stb_image.h:3203 @d81235049).
     fn processScanHeader(z: *Jpeg) bool {
         const s = z.s;
         const ls = s.get16be();
@@ -1229,7 +1229,7 @@ const Jpeg = struct {
         return true;
     }
 
-    /// Ports `stbi__free_jpeg_components` (stb_image.h:3242 @7fe450e19).
+    /// Ports `stbi__free_jpeg_components` (stb_image.h:3242 @d81235049).
     fn freeComponents(z: *Jpeg, ncomp: usize) void {
         for (z.img_comp[0..ncomp]) |*c| {
             if (c.data) |d| z.s.gpa.free(d);
@@ -1241,7 +1241,7 @@ const Jpeg = struct {
         }
     }
 
-    /// Ports `stbi__process_frame_header` (stb_image.h:3264 @7fe450e19).
+    /// Ports `stbi__process_frame_header` (stb_image.h:3264 @d81235049).
     fn processFrameHeader(z: *Jpeg, scan: Scan) bool {
         const s = z.s;
         var h_max: c_int = 1;
@@ -1344,7 +1344,7 @@ const Jpeg = struct {
         return true;
     }
 
-    /// Ports `stbi__decode_jpeg_header` (stb_image.h:3365 @7fe450e19).
+    /// Ports `stbi__decode_jpeg_header` (stb_image.h:3365 @d81235049).
     fn decodeHeader(z: *Jpeg, scan: Scan) bool {
         z.jfif = false;
         z.app14_color_transform = -1; // valid values are 0,1,2
@@ -1367,7 +1367,7 @@ const Jpeg = struct {
         return true;
     }
 
-    /// Ports `stbi__skip_jpeg_junk_at_end` (stb_image.h:3389 @7fe450e19).
+    /// Ports `stbi__skip_jpeg_junk_at_end` (stb_image.h:3389 @d81235049).
     fn skipJunkAtEnd(j: *Jpeg) u8 {
         // some JPEGs have junk at end, skip over it but if we find what looks
         // like a valid marker, resume there
@@ -1386,7 +1386,7 @@ const Jpeg = struct {
         return marker_none;
     }
 
-    /// Ports `stbi__decode_jpeg_image` (stb_image.h:3412 @7fe450e19): decode
+    /// Ports `stbi__decode_jpeg_image` (stb_image.h:3412 @d81235049): decode
     /// to YCbCr.
     fn decodeImage(j: *Jpeg) bool {
         for (&j.img_comp) |*c| {
@@ -1439,13 +1439,13 @@ fn shl32(x: u32, n: c_int) u32 {
     return if (n >= 32) 0 else x << @intCast(n);
 }
 
-/// `stbi__bmask` (stb_image.h:2094 @7fe450e19): (1 << n) - 1.
+/// `stbi__bmask` (stb_image.h:2094 @d81235049): (1 << n) - 1.
 const bmask = [17]u32{ 0, 1, 3, 7, 15, 31, 63, 127, 255, 511, 1023, 2047, 4095, 8191, 16383, 32767, 65535 };
 
-/// `stbi__jbias` (stb_image.h:2149 @7fe450e19): bias[n] = (-1<<n) + 1.
+/// `stbi__jbias` (stb_image.h:2149 @d81235049): bias[n] = (-1<<n) + 1.
 const jbias = [16]c_int{ 0, -1, -3, -7, -15, -31, -63, -127, -255, -511, -1023, -2047, -4095, -8191, -16383, -32767 };
 
-/// `stbi__jpeg_dezigzag` (stb_image.h:2194 @7fe450e19), with the padding
+/// `stbi__jpeg_dezigzag` (stb_image.h:2194 @d81235049), with the padding
 /// that lets corrupt input sample past the end.
 const jpeg_dezigzag = [64 + 15]u8{
     0,  1,  8,  16, 9,  2,  3,  10,
@@ -1461,7 +1461,7 @@ const jpeg_dezigzag = [64 + 15]u8{
     63, 63, 63, 63, 63, 63, 63,
 };
 
-/// Ports `stbi__build_huffman` (stb_image.h:2003 @7fe450e19).
+/// Ports `stbi__build_huffman` (stb_image.h:2003 @d81235049).
 fn buildHuffman(s: *Context, h: *Huffman, count: *const [16]c_int) bool {
     var k: usize = 0;
     // build size list for each symbol (from JPEG spec)
@@ -1509,7 +1509,7 @@ fn buildHuffman(s: *Context, h: *Huffman, count: *const [16]c_int) bool {
     return true;
 }
 
-/// Ports `stbi__build_fast_ac` (stb_image.h:2050 @7fe450e19): a table that
+/// Ports `stbi__build_fast_ac` (stb_image.h:2050 @d81235049): a table that
 /// decodes both magnitude and value of small ACs in one go.
 fn buildFastAc(fast_ac: *[1 << fast_bits]i16, h: *const Huffman) void {
     for (0..(1 << fast_bits)) |i| {
@@ -1534,23 +1534,23 @@ fn buildFastAc(fast_ac: *[1 << fast_bits]i16, h: *const Huffman) void {
     }
 }
 
-/// Ports `stbi__clamp` (stb_image.h:2416 @7fe450e19).
+/// Ports `stbi__clamp` (stb_image.h:2416 @d81235049).
 fn clamp(x: c_int) u8 {
     if (x < 0) return 0;
     if (x > 255) return 255;
     return @intCast(x);
 }
 
-/// `stbi__f2f` (stb_image.h:2426 @7fe450e19): `x * 4096` in float, then
+/// `stbi__f2f` (stb_image.h:2426 @d81235049): `x * 4096` in float, then
 /// `+ 0.5` in double.
 fn f2f(comptime x: f32) c_int {
     return @intFromFloat(@as(f64, x * 4096) + 0.5);
 }
 
-/// The products of `STBI__IDCT_1D` (stb_image.h:2430 @7fe450e19).
+/// The products of `STBI__IDCT_1D` (stb_image.h:2430 @d81235049).
 const Idct = struct { t0: c_int, t1: c_int, t2: c_int, t3: c_int, x0: c_int, x1: c_int, x2: c_int, x3: c_int };
 
-/// Ports `STBI__IDCT_1D` (stb_image.h:2430 @7fe450e19), derived from
+/// Ports `STBI__IDCT_1D` (stb_image.h:2430 @d81235049), derived from
 /// jidctint's DCT_ISLOW. Wrapping, as corrupt coefficients overflow the C's
 /// `int`.
 fn idct1d(s0: c_int, s1: c_int, s2: c_int, s3: c_int, s4: c_int, s5: c_int, s6: c_int, s7: c_int) Idct {
@@ -1591,7 +1591,7 @@ fn idct1d(s0: c_int, s1: c_int, s2: c_int, s3: c_int, s4: c_int, s5: c_int, s6: 
     return .{ .t0 = t0, .t1 = t1, .t2 = t2, .t3 = t3, .x0 = x0, .x1 = x1, .x2 = x2, .x3 = x3 };
 }
 
-/// Ports `stbi__idct_block` (stb_image.h:2467 @7fe450e19).
+/// Ports `stbi__idct_block` (stb_image.h:2467 @d81235049).
 fn idctBlock(out: [*]u8, out_stride: usize, data: *const [64]i16) void {
     var val: [64]c_int = undefined;
 
@@ -1645,7 +1645,7 @@ fn idctBlock(out: [*]u8, out_stride: usize, data: *const [64]i16) void {
 
 const ResampleKind = enum { row1, v2, h2, hv2, generic };
 
-/// Ports `stbi__resample` (stb_image.h:3856 @7fe450e19); the lines are
+/// Ports `stbi__resample` (stb_image.h:3856 @d81235049); the lines are
 /// offsets into the component's data.
 const Resample = struct {
     kind: ResampleKind,
@@ -1668,7 +1668,7 @@ fn div16(x: c_int) u8 {
 
 /// Ports `resample_row_1`, `stbi__resample_row_v_2`, `stbi__resample_row_h_2`,
 /// `stbi__resample_row_hv_2` and `stbi__resample_row_generic`
-/// (stb_image.h:3456, 3465, 3475, 3505, 3646 @7fe450e19).
+/// (stb_image.h:3456, 3465, 3475, 3505, 3646 @d81235049).
 ///
 /// Return: the row, `in_near` itself for `row1`, else `out`.
 fn resampleRow(kind: ResampleKind, out: []u8, in_near: []const u8, in_far: []const u8, w: usize, hs: usize) []const u8 {
@@ -1729,14 +1729,14 @@ fn resampleRow(kind: ResampleKind, out: []u8, in_near: []const u8, in_far: []con
     }
 }
 
-/// `stbi__float2fixed` (stb_image.h:3659 @7fe450e19) of the four YCbCr
+/// `stbi__float2fixed` (stb_image.h:3659 @d81235049) of the four YCbCr
 /// constants: `x * 4096.0f + 0.5f`, truncated, shifted left by 8.
 const fixed_1_40200: c_int = 5743 << 8;
 const fixed_0_71414: c_int = 2925 << 8;
 const fixed_0_34414: c_int = 1410 << 8;
 const fixed_1_77200: c_int = 7258 << 8;
 
-/// Ports `stbi__YCbCr_to_RGB_row` (stb_image.h:3660 @7fe450e19): the
+/// Ports `stbi__YCbCr_to_RGB_row` (stb_image.h:3660 @d81235049): the
 /// reduced-precision conversion the SIMD kernels match.
 fn ycbcrToRgbRow(out: []u8, y: []const u8, pcb: []const u8, pcr: []const u8, count: usize, step: usize) void {
     var o: usize = 0;
@@ -1758,14 +1758,14 @@ fn ycbcrToRgbRow(out: []u8, y: []const u8, pcb: []const u8, pcr: []const u8, cou
     }
 }
 
-/// Ports `stbi__blinn_8x8` (stb_image.h:3859 @7fe450e19): a rounded
+/// Ports `stbi__blinn_8x8` (stb_image.h:3859 @d81235049): a rounded
 /// 0..255 * 0..255 multiplication.
 fn blinn8x8(x: u8, y: u8) u8 {
     const t: c_uint = @as(c_uint, x) * y + 128;
     return @truncate((t + (t >> 8)) >> 8);
 }
 
-/// Ports `load_jpeg_image` (stb_image.h:3865 @7fe450e19).
+/// Ports `load_jpeg_image` (stb_image.h:3865 @d81235049).
 fn loadJpegImage(z: *Jpeg, out_x: *c_int, out_y: *c_int, comp: *c_int, req_comp: c_int) ?[]u8 {
     const s = z.s;
     s.img_n = 0; // make cleanup safe
@@ -1935,7 +1935,7 @@ fn jpegNew(s: *Context) ?*Jpeg {
     return j;
 }
 
-/// Ports `stbi__jpeg_test` (stb_image.h:4042 @7fe450e19).
+/// Ports `stbi__jpeg_test` (stb_image.h:4042 @d81235049).
 fn jpegTestImpl(s: *Context) bool {
     const j = jpegNew(s) orelse return s.err("outofmem") != 0;
     defer s.gpa.destroy(j);
@@ -1951,7 +1951,7 @@ const zfast_bits = 9;
 const zfast_mask = (1 << zfast_bits) - 1;
 const znsyms = 288; // number of symbols in literal/length alphabet
 
-/// Ports `stbi__zhuffman` (stb_image.h:4105 @7fe450e19).
+/// Ports `stbi__zhuffman` (stb_image.h:4105 @d81235049).
 const Zhuffman = struct {
     fast: [1 << zfast_bits]u16 = @splat(0),
     firstcode: [16]u16 = @splat(0),
@@ -1962,7 +1962,7 @@ const Zhuffman = struct {
 };
 
 /// Ports `stbi__bitreverse16` and `stbi__bit_reverse` (stb_image.h:4107,
-/// 4116 @7fe450e19).
+/// 4116 @d81235049).
 fn bitReverse(v: c_int, bits: c_int) c_int {
     var n = v;
     n = ((n & 0xAAAA) >> 1) | ((n & 0x5555) << 1);
@@ -1972,7 +1972,7 @@ fn bitReverse(v: c_int, bits: c_int) c_int {
     return n >> @intCast(16 - bits);
 }
 
-/// Ports `stbi__zbuild_huffman` (stb_image.h:4124 @7fe450e19).
+/// Ports `stbi__zbuild_huffman` (stb_image.h:4124 @d81235049).
 fn zbuildHuffman(s: *Context, z: *Zhuffman, sizelist: []const u8) bool {
     var k: c_int = 0;
     var next_code: [16]c_int = undefined;
@@ -2018,7 +2018,7 @@ fn zbuildHuffman(s: *Context, z: *Zhuffman, sizelist: []const u8) bool {
     return true;
 }
 
-/// Ports `stbi__zbuf` (stb_image.h:4190 @7fe450e19).
+/// Ports `stbi__zbuf` (stb_image.h:4190 @d81235049).
 const Zbuf = struct {
     s: *Context,
     zbuffer: []const u8,
@@ -2035,12 +2035,12 @@ const Zbuf = struct {
     z_length: Zhuffman = .{},
     z_distance: Zhuffman = .{},
 
-    /// Ports `stbi__zeof` (stb_image.h:4192 @7fe450e19).
+    /// Ports `stbi__zeof` (stb_image.h:4192 @d81235049).
     fn zeof(a: *const Zbuf) bool {
         return a.zpos >= a.zbuffer.len;
     }
 
-    /// Ports `stbi__zget8` (stb_image.h:4197 @7fe450e19).
+    /// Ports `stbi__zget8` (stb_image.h:4197 @d81235049).
     fn zget8(a: *Zbuf) u8 {
         if (a.zeof()) return 0;
         const v = a.zbuffer[a.zpos];
@@ -2048,7 +2048,7 @@ const Zbuf = struct {
         return v;
     }
 
-    /// Ports `stbi__fill_bits` (stb_image.h:4202 @7fe450e19).
+    /// Ports `stbi__fill_bits` (stb_image.h:4202 @d81235049).
     fn fillBits(a: *Zbuf) void {
         while (true) {
             if (a.num_bits < 32 and a.code_buffer >= (@as(u32, 1) << @intCast(a.num_bits))) {
@@ -2061,7 +2061,7 @@ const Zbuf = struct {
         }
     }
 
-    /// Ports `stbi__zreceive` (stb_image.h:4214 @7fe450e19).
+    /// Ports `stbi__zreceive` (stb_image.h:4214 @d81235049).
     fn zreceive(a: *Zbuf, n: c_int) c_uint {
         if (a.num_bits < n) a.fillBits();
         const k = a.code_buffer & ((@as(u32, 1) << @intCast(n)) -% 1);
@@ -2070,7 +2070,7 @@ const Zbuf = struct {
         return k;
     }
 
-    /// Ports `stbi__zhuffman_decode_slowpath` (stb_image.h:4224 @7fe450e19).
+    /// Ports `stbi__zhuffman_decode_slowpath` (stb_image.h:4224 @d81235049).
     fn decodeSlowpath(a: *Zbuf, z: *const Zhuffman) c_int {
         // not resolved by fast table, so compute it the slow way
         const k = bitReverse(@bitCast(a.code_buffer & 0xffff), 16);
@@ -2089,7 +2089,7 @@ const Zbuf = struct {
         return z.value[@intCast(b)];
     }
 
-    /// Ports `stbi__zhuffman_decode` (stb_image.h:4243 @7fe450e19).
+    /// Ports `stbi__zhuffman_decode` (stb_image.h:4243 @d81235049).
     fn decode(a: *Zbuf, z: *const Zhuffman) c_int {
         if (a.num_bits < 16) {
             if (a.zeof()) {
@@ -2118,7 +2118,7 @@ const Zbuf = struct {
         return a.decodeSlowpath(z);
     }
 
-    /// Ports `stbi__zexpand` (stb_image.h:4273 @7fe450e19): make room for
+    /// Ports `stbi__zexpand` (stb_image.h:4273 @d81235049): make room for
     /// `n` more bytes, doubling the limit as the C does.
     fn zexpand(a: *Zbuf, n: usize) bool {
         if (!a.z_expandable) return a.s.err("output buffer limit") != 0;
@@ -2134,7 +2134,7 @@ const Zbuf = struct {
         return true;
     }
 
-    /// Ports `stbi__parse_huffman_block` (stb_image.h:4309 @7fe450e19).
+    /// Ports `stbi__parse_huffman_block` (stb_image.h:4309 @d81235049).
     fn parseHuffmanBlock(a: *Zbuf) bool {
         while (true) {
             var z = a.decode(&a.z_length);
@@ -2174,7 +2174,7 @@ const Zbuf = struct {
         }
     }
 
-    /// Ports `stbi__compute_huffman_codes` (stb_image.h:4359 @7fe450e19).
+    /// Ports `stbi__compute_huffman_codes` (stb_image.h:4359 @d81235049).
     fn computeHuffmanCodes(a: *Zbuf) bool {
         const length_dezigzag = [19]u8{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
         var z_codelength: Zhuffman = .{};
@@ -2224,7 +2224,7 @@ const Zbuf = struct {
         return true;
     }
 
-    /// Ports `stbi__parse_uncompressed_block` (stb_image.h:4409 @7fe450e19).
+    /// Ports `stbi__parse_uncompressed_block` (stb_image.h:4409 @d81235049).
     fn parseUncompressedBlock(a: *Zbuf) bool {
         var header: [4]u8 = undefined;
         if (a.num_bits & 7 != 0) _ = a.zreceive(a.num_bits & 7); // discard
@@ -2254,7 +2254,7 @@ const Zbuf = struct {
         return true;
     }
 
-    /// Ports `stbi__parse_zlib_header` (stb_image.h:4438 @7fe450e19).
+    /// Ports `stbi__parse_zlib_header` (stb_image.h:4438 @d81235049).
     fn parseZlibHeader(a: *Zbuf) bool {
         const cmf: c_int = a.zget8();
         const cm = cmf & 15;
@@ -2266,7 +2266,7 @@ const Zbuf = struct {
         return true;
     }
 
-    /// Ports `stbi__parse_zlib` (stb_image.h:4481 @7fe450e19).
+    /// Ports `stbi__parse_zlib` (stb_image.h:4481 @d81235049).
     fn parseZlib(a: *Zbuf, parse_header: bool) bool {
         if (parse_header) {
             if (!a.parseZlibHeader()) return false;
@@ -2297,14 +2297,14 @@ const Zbuf = struct {
     }
 };
 
-/// `stbi__zlength_base`, `stbi__zlength_extra`, `stbi__zdist_base` and `stbi__zdist_extra` (stb_image.h:4295, 4300, 4303, 4306 @7fe450e19).
+/// `stbi__zlength_base`, `stbi__zlength_extra`, `stbi__zdist_base` and `stbi__zdist_extra` (stb_image.h:4295, 4300, 4303, 4306 @d81235049).
 const zlength_base = [31]c_int{ 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258, 0, 0 };
 const zlength_extra = [31]c_int{ 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0, 0, 0 };
 const zdist_base = [32]c_int{ 1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577, 0, 0 };
 const zdist_extra = [32]c_int{ 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 0, 0 };
 
 /// `stbi__zdefault_length` and `stbi__zdefault_distance` (stb_image.h:4452,
-/// 4464 @7fe450e19).
+/// 4464 @d81235049).
 const zdefault_length: [znsyms]u8 = blk: {
     var t: [znsyms]u8 = undefined;
     for (0..144) |i| t[i] = 8;
@@ -2316,8 +2316,14 @@ const zdefault_length: [znsyms]u8 = blk: {
 const zdefault_distance: [32]u8 = @splat(5);
 
 /// Ports `stbi_zlib_decode_malloc_guesssize_headerflag` (stb_image.h:4541
-/// @7fe450e19). Return: the inflated bytes, owned by the caller.
-fn zlibDecodeGuesssizeHeaderflag(s: *Context, buffer: []const u8, initial_size: usize, parse_header: bool) ?[]u8 {
+/// @d81235049). Return: the inflated bytes, owned by the caller.
+///
+/// `initial_size` is the C's `int`: the PNG decoder passes its `uint32_t`
+/// guess, so a guess past `INT_MAX` arrives negative and `stbi__malloc`'s
+/// `size_t` of it fails, returning NULL with no failure reason set.
+fn zlibDecodeGuesssizeHeaderflag(s: *Context, buffer: []const u8, initial_size_c: c_int, parse_header: bool) ?[]u8 {
+    if (initial_size_c < 0) return null; // stbi__malloc((size_t) initial_size) fails
+    const initial_size: usize = @intCast(initial_size_c);
     var a: Zbuf = .{ .s = s, .zbuffer = buffer, .limit = initial_size };
     a.zout.ensureTotalCapacityPrecise(s.gpa, initial_size) catch return null;
     if (a.parseZlib(parse_header)) return a.zout.toOwnedSlice(s.gpa) catch null;
@@ -2328,7 +2334,7 @@ fn zlibDecodeGuesssizeHeaderflag(s: *Context, buffer: []const u8, initial_size: 
 // -----------------------------------------------------------------------------
 // PNG
 
-/// The PNG decoder's state, `stbi__png` (stb_image.h:4635 @7fe450e19).
+/// The PNG decoder's state, `stbi__png` (stb_image.h:4635 @d81235049).
 const Png = struct {
     s: *Context,
     idata: ?[]u8 = null,
@@ -2337,7 +2343,7 @@ const Png = struct {
     depth: c_int = 0,
 };
 
-/// The filter types from `STBI__F_none` (stb_image.h:4639 @7fe450e19).
+/// The filter types from `STBI__F_none` (stb_image.h:4639 @d81235049).
 const f_none = 0;
 const f_sub = 1;
 const f_up = 2;
@@ -2345,10 +2351,10 @@ const f_avg = 3;
 const f_paeth = 4;
 const f_avg_first = 5; // synthetic filter used for first scanline to avoid needing a dummy row of 0s
 
-/// `first_row_filter` (stb_image.h:4648 @7fe450e19).
+/// `first_row_filter` (stb_image.h:4648 @d81235049).
 const first_row_filter = [5]u8{ f_none, f_sub, f_none, f_avg_first, f_sub };
 
-/// Ports `stbi__paeth` (stb_image.h:4657 @7fe450e19).
+/// Ports `stbi__paeth` (stb_image.h:4657 @d81235049).
 fn paeth(a: c_int, b: c_int, c: c_int) c_int {
     const thresh = c * 3 - (a + b);
     const lo = if (a < b) a else b;
@@ -2358,10 +2364,10 @@ fn paeth(a: c_int, b: c_int, c: c_int) c_int {
     return t1;
 }
 
-/// `stbi__depth_scale_table` (stb_image.h:4670 @7fe450e19).
+/// `stbi__depth_scale_table` (stb_image.h:4670 @d81235049).
 const depth_scale_table = [9]u8{ 0, 0xff, 0x55, 0, 0x11, 0, 0, 0, 0x01 };
 
-/// Ports `stbi__create_png_alpha_expand8` (stb_image.h:4675 @7fe450e19): add
+/// Ports `stbi__create_png_alpha_expand8` (stb_image.h:4675 @d81235049): add
 /// an all-255 alpha channel; `dest` may be `src`, so it runs backwards.
 fn createPngAlphaExpand8(dest: []u8, src: []const u8, x: usize, img_n: c_int) void {
     var i = x;
@@ -2382,7 +2388,7 @@ fn createPngAlphaExpand8(dest: []u8, src: []const u8, x: usize, img_n: c_int) vo
     }
 }
 
-/// Ports `stbi__create_png_image_raw` (stb_image.h:4696 @7fe450e19).
+/// Ports `stbi__create_png_image_raw` (stb_image.h:4696 @d81235049).
 fn createPngImageRaw(a: *Png, raw_in: []const u8, out_n: c_int, x: u32, y: u32, depth: c_int, color: c_int) bool {
     const s = a.s;
     const bytes: u32 = if (depth == 16) 2 else 1;
@@ -2526,7 +2532,7 @@ fn createPngImageRaw(a: *Png, raw_in: []const u8, out_n: c_int, x: u32, y: u32, 
     return true;
 }
 
-/// Ports `stbi__create_png_image` (stb_image.h:4861 @7fe450e19), with the
+/// Ports `stbi__create_png_image` (stb_image.h:4861 @d81235049), with the
 /// de-interlacing.
 fn createPngImage(a: *Png, image_data_in: []const u8, out_n: c_int, depth: c_int, color: c_int, interlaced: bool) bool {
     const s = a.s;
@@ -2567,7 +2573,7 @@ fn createPngImage(a: *Png, image_data_in: []const u8, out_n: c_int, depth: c_int
 }
 
 /// Ports `stbi__compute_transparency` and `stbi__compute_transparency16`
-/// (stb_image.h:4906, 4931 @7fe450e19).
+/// (stb_image.h:4906, 4931 @d81235049).
 fn computeTransparency(z: *Png, tc: [3]u16, out_n: c_int, sixteen: bool) void {
     const s = z.s;
     const pixel_count: usize = @as(usize, s.img_x) * s.img_y;
@@ -2593,7 +2599,7 @@ fn computeTransparency(z: *Png, tc: [3]u16, out_n: c_int, sixteen: bool) void {
     }
 }
 
-/// Ports `stbi__expand_png_palette` (stb_image.h:4956 @7fe450e19).
+/// Ports `stbi__expand_png_palette` (stb_image.h:4956 @d81235049).
 fn expandPngPalette(a: *Png, palette: *const [1024]u8, pal_img_n: c_int) bool {
     const s = a.s;
     const pixel_count: u32 = s.img_x *% s.img_y;
@@ -2613,7 +2619,7 @@ fn pngType(comptime t: *const [4]u8) u32 {
     return (@as(u32, t[0]) << 24) + (@as(u32, t[1]) << 16) + (@as(u32, t[2]) << 8) + t[3];
 }
 
-/// Ports `stbi__parse_png_file` (stb_image.h:5078 @7fe450e19), for loading.
+/// Ports `stbi__parse_png_file` (stb_image.h:5078 @d81235049), for loading.
 fn parsePngFile(z: *Png, req_comp: c_int) bool {
     const s = z.s;
     var palette: [1024]u8 = undefined;
@@ -2732,7 +2738,7 @@ fn parsePngFile(z: *Png, req_comp: c_int) bool {
                 // initial guess for decoded data size to avoid unnecessary reallocs
                 const bpl: u32 = (s.img_x * @as(u32, @intCast(z.depth)) + 7) / 8; // bytes per line, per component
                 const raw_len: u32 = bpl *% s.img_y *% @as(u32, @intCast(s.img_n)) +% s.img_y;
-                z.expanded = zlibDecodeGuesssizeHeaderflag(s, z.idata.?[0..ioff], raw_len, !is_iphone);
+                z.expanded = zlibDecodeGuesssizeHeaderflag(s, z.idata.?[0..ioff], @bitCast(raw_len), !is_iphone);
                 if (z.expanded == null) return false; // zlib should set error
                 s.gpa.free(z.idata.?);
                 z.idata = null;
@@ -2780,10 +2786,10 @@ fn parsePngFile(z: *Png, req_comp: c_int) bool {
 }
 
 /// `stbi__parse_png_file`'s static `invalid_chunk` (stb_image.h:5247
-/// @7fe450e19): the failure reason points into it, so it outlives the call.
+/// @d81235049): the failure reason points into it, so it outlives the call.
 threadlocal var invalid_chunk: [24]u8 = "XXXX PNG chunk not known".*;
 
-/// Ports `stbi__check_png_header` (stb_image.h:4621 @7fe450e19).
+/// Ports `stbi__check_png_header` (stb_image.h:4621 @d81235049).
 fn checkPngHeader(s: *Context) bool {
     const png_sig = [8]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
     for (png_sig) |b| {
@@ -2795,14 +2801,14 @@ fn checkPngHeader(s: *Context) bool {
 // -----------------------------------------------------------------------------
 // the format tests and loaders, as `Context` methods
 
-/// Ports `stbi__png_test` (stb_image.h:5302 @7fe450e19).
+/// Ports `stbi__png_test` (stb_image.h:5302 @d81235049).
 fn pngTestImpl(s: *Context) bool {
     const r = checkPngHeader(s);
     s.rewind();
     return r;
 }
 
-/// Ports `stbi__do_png` and `stbi__png_load` (stb_image.h:5263, 5295 @7fe450e19).
+/// Ports `stbi__do_png` and `stbi__png_load` (stb_image.h:5263, 5295 @d81235049).
 fn pngLoadImpl(s: *Context, x: *c_int, y: *c_int, n: *c_int, req_comp: c_int, bits: *c_int) ?[]u8 {
     var p: Png = .{ .s = s };
     var result: ?[]u8 = null;
@@ -2834,7 +2840,7 @@ fn pngLoadImpl(s: *Context, x: *c_int, y: *c_int, n: *c_int, req_comp: c_int, bi
     return result;
 }
 
-/// Ports `stbi__bmp_test_raw` and `stbi__bmp_test` (stb_image.h:5346, 5361 @7fe450e19).
+/// Ports `stbi__bmp_test_raw` and `stbi__bmp_test` (stb_image.h:5346, 5361 @d81235049).
 fn bmpTestImpl(s: *Context) bool {
     const r = blk: {
         if (s.get8() != 'B') break :blk false;
@@ -2850,7 +2856,7 @@ fn bmpTestImpl(s: *Context) bool {
     return r;
 }
 
-/// Ports `stbi__high_bit` (stb_image.h:5370 @7fe450e19).
+/// Ports `stbi__high_bit` (stb_image.h:5370 @d81235049).
 fn highBit(z_in: c_uint) c_int {
     var z = z_in;
     var n: c_int = 0;
@@ -2875,7 +2881,7 @@ fn highBit(z_in: c_uint) c_int {
     return n;
 }
 
-/// Ports `stbi__bitcount` (stb_image.h:5382 @7fe450e19).
+/// Ports `stbi__bitcount` (stb_image.h:5382 @d81235049).
 fn bitcount(a_in: c_uint) c_int {
     var a = a_in;
     a = (a & 0x55555555) + ((a >> 1) & 0x55555555); // max 2
@@ -2886,7 +2892,7 @@ fn bitcount(a_in: c_uint) c_int {
     return @intCast(a & 0xff);
 }
 
-/// Ports `stbi__shiftsigned` (stb_image.h:5395 @7fe450e19): extract an
+/// Ports `stbi__shiftsigned` (stb_image.h:5395 @d81235049): extract an
 /// N-bit value and extend it to the full 8-bit range.
 fn shiftsigned(v_in: c_uint, shift: c_int, bits: c_int) c_int {
     const mul_table = [9]c_uint{ 0, 0xff, 0x55, 0x49, 0x11, 0x21, 0x41, 0x81, 0x01 };
@@ -2902,7 +2908,7 @@ fn shiftsigned(v_in: c_uint, shift: c_int, bits: c_int) c_int {
     return @bitCast((v *% mul_table[b]) >> shift_table[b]);
 }
 
-/// Ports `stbi__bmp_data` (stb_image.h:5420 @7fe450e19).
+/// Ports `stbi__bmp_data` (stb_image.h:5420 @d81235049).
 const BmpData = struct {
     bpp: c_int = 0,
     offset: c_int = 0,
@@ -2915,7 +2921,7 @@ const BmpData = struct {
     extra_read: c_int = 0,
 };
 
-/// Ports `stbi__bmp_set_mask_defaults` (stb_image.h:5422 @7fe450e19).
+/// Ports `stbi__bmp_set_mask_defaults` (stb_image.h:5422 @d81235049).
 fn bmpSetMaskDefaults(info: *BmpData, compress: c_int) void {
     // BI_BITFIELDS specifies masks explicitly, don't override
     if (compress == 3) return;
@@ -2940,7 +2946,7 @@ fn bmpSetMaskDefaults(info: *BmpData, compress: c_int) void {
     }
 }
 
-/// Ports `stbi__bmp_parse_header` (stb_image.h:5448 @7fe450e19).
+/// Ports `stbi__bmp_parse_header` (stb_image.h:5448 @d81235049).
 fn bmpParseHeader(s: *Context, info: *BmpData) bool {
     if (s.get8() != 'B' or s.get8() != 'M') return s.err("not BMP") != 0;
     _ = s.get32le(); // discard filesize
@@ -3016,7 +3022,7 @@ fn bmpParseHeader(s: *Context, info: *BmpData) bool {
     return true;
 }
 
-/// Ports `stbi__bmp_load` (stb_image.h:5531 @7fe450e19).
+/// Ports `stbi__bmp_load` (stb_image.h:5531 @d81235049).
 fn bmpLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int) ?[]u8 {
     var pal: [256][4]u8 = @splat(@splat(0));
     var psize: c_int = 0;
@@ -3244,7 +3250,7 @@ fn bmpLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int)
     return result;
 }
 
-/// Ports `stbi__tga_get_comp` (stb_image.h:5739 @7fe450e19).
+/// Ports `stbi__tga_get_comp` (stb_image.h:5739 @d81235049).
 fn tgaGetComp(bits_per_pixel: c_int, is_grey: bool, is_rgb16: ?*bool) c_int {
     // only RGB or RGBA (incl. 16bit) or grey allowed
     if (is_rgb16) |p| p.* = false;
@@ -3260,7 +3266,7 @@ fn tgaGetComp(bits_per_pixel: c_int, is_grey: bool, is_rgb16: ?*bool) c_int {
     }
 }
 
-/// Ports `stbi__tga_test` (stb_image.h:5820 @7fe450e19).
+/// Ports `stbi__tga_test` (stb_image.h:5820 @d81235049).
 fn tgaTestImpl(s: *Context) bool {
     const res = blk: {
         _ = s.get8(); // discard Offset
@@ -3288,7 +3294,7 @@ fn tgaTestImpl(s: *Context) bool {
     return res;
 }
 
-/// Ports `stbi__tga_read_rgb16` (stb_image.h:5852 @7fe450e19).
+/// Ports `stbi__tga_read_rgb16` (stb_image.h:5852 @d81235049).
 fn tgaReadRgb16(s: *Context, out: []u8) void {
     const px: u16 = @truncate(@as(c_uint, @bitCast(s.get16le())));
     const five_bit_mask: u16 = 31;
@@ -3301,7 +3307,7 @@ fn tgaReadRgb16(s: *Context, out: []u8) void {
     out[2] = @intCast(@divTrunc(b * 255, 31));
 }
 
-/// Ports `stbi__tga_load` (stb_image.h:5871 @7fe450e19).
+/// Ports `stbi__tga_load` (stb_image.h:5871 @d81235049).
 fn tgaLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int) ?[]u8 {
     //   read in the TGA header stuff
     const tga_offset: c_int = s.get8();
@@ -3449,14 +3455,14 @@ fn tgaLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int)
     return tga_data;
 }
 
-/// Ports `stbi__psd_test` (stb_image.h:6081 @7fe450e19).
+/// Ports `stbi__psd_test` (stb_image.h:6081 @d81235049).
 fn psdTestImpl(s: *Context) bool {
     const r = s.get32be() == 0x38425053;
     s.rewind();
     return r;
 }
 
-/// Ports `stbi__psd_decode_rle` (stb_image.h:6088 @7fe450e19).
+/// Ports `stbi__psd_decode_rle` (stb_image.h:6088 @d81235049).
 fn psdDecodeRle(s: *Context, out: []u8, start: usize, pixel_count: c_int) bool {
     var count: c_int = 0;
     var p = start;
@@ -3490,7 +3496,7 @@ fn psdDecodeRle(s: *Context, out: []u8, start: usize, pixel_count: c_int) bool {
     return true;
 }
 
-/// Ports `stbi__psd_load` (stb_image.h:6126 @7fe450e19), at `bpc` 8.
+/// Ports `stbi__psd_load` (stb_image.h:6126 @d81235049), at `bpc` 8.
 fn psdLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int) ?[]u8 {
     // Check identifier
     if (s.get32be() != 0x38425053) return s.errpuc("not PSD"); // "8BPS"
@@ -3613,7 +3619,7 @@ fn toU8(f: f32) u8 {
     return @truncate(@as(c_uint, @bitCast(@as(c_int, @intFromFloat(f)))));
 }
 
-/// Ports `stbi__pic_is4` (stb_image.h:6336 @7fe450e19).
+/// Ports `stbi__pic_is4` (stb_image.h:6336 @d81235049).
 fn picIs4(s: *Context, str: *const [4]u8) bool {
     for (str) |ch| {
         if (s.get8() != ch) return false;
@@ -3621,7 +3627,7 @@ fn picIs4(s: *Context, str: *const [4]u8) bool {
     return true;
 }
 
-/// Ports `stbi__pic_test_core` and `stbi__pic_test` (stb_image.h:6346, 6541 @7fe450e19).
+/// Ports `stbi__pic_test_core` and `stbi__pic_test` (stb_image.h:6346, 6541 @d81235049).
 fn picTestImpl(s: *Context) bool {
     const r = blk: {
         if (!picIs4(s, "\x53\x80\xF6\x34")) break :blk false;
@@ -3633,10 +3639,10 @@ fn picTestImpl(s: *Context) bool {
     return r;
 }
 
-/// Ports `stbi__pic_packet` (stb_image.h:6365 @7fe450e19).
+/// Ports `stbi__pic_packet` (stb_image.h:6365 @d81235049).
 const PicPacket = struct { size: u8 = 0, type: u8 = 0, channel: u8 = 0 };
 
-/// Ports `stbi__readval` (stb_image.h:6367 @7fe450e19).
+/// Ports `stbi__readval` (stb_image.h:6367 @d81235049).
 fn readval(s: *Context, channel: u8, dest: []u8) bool {
     var mask: u8 = 0x80;
     for (0..4) |i| {
@@ -3649,7 +3655,7 @@ fn readval(s: *Context, channel: u8, dest: []u8) bool {
     return true;
 }
 
-/// Ports `stbi__copyval` (stb_image.h:6381 @7fe450e19).
+/// Ports `stbi__copyval` (stb_image.h:6381 @d81235049).
 fn copyval(channel: u8, dest: []u8, src: []const u8) void {
     var mask: u8 = 0x80;
     for (0..4) |i| {
@@ -3658,7 +3664,7 @@ fn copyval(channel: u8, dest: []u8, src: []const u8) void {
     }
 }
 
-/// Ports `stbi__pic_load_core` (stb_image.h:6390 @7fe450e19).
+/// Ports `stbi__pic_load_core` (stb_image.h:6390 @d81235049).
 fn picLoadCore(s: *Context, width: c_int, height: c_int, comp: *c_int, result: []u8) bool {
     var act_comp: u8 = 0;
     var num_packets: usize = 0;
@@ -3756,7 +3762,7 @@ fn picLoadCore(s: *Context, width: c_int, height: c_int, comp: *c_int, result: [
     return true;
 }
 
-/// Ports `stbi__pic_load` (stb_image.h:6500 @7fe450e19).
+/// Ports `stbi__pic_load` (stb_image.h:6500 @d81235049).
 fn picLoadImpl(s: *Context, px: *c_int, py: *c_int, comp: *c_int, req_comp_in: c_int) ?[]u8 {
     for (0..92) |_| _ = s.get8();
 
@@ -3803,10 +3809,10 @@ fn picLoadImpl(s: *Context, px: *c_int, py: *c_int, comp: *c_int, req_comp_in: c
     return null;
 }
 
-/// Ports `stbi__gif_lzw` (stb_image.h:6558 @7fe450e19).
+/// Ports `stbi__gif_lzw` (stb_image.h:6558 @d81235049).
 const GifLzw = struct { prefix: i16 = 0, first: u8 = 0, suffix: u8 = 0 };
 
-/// Ports `stbi__gif` (stb_image.h:6578 @7fe450e19).
+/// Ports `stbi__gif` (stb_image.h:6578 @d81235049).
 const Gif = struct {
     w: c_int = 0,
     h: c_int = 0,
@@ -3840,7 +3846,7 @@ const Gif = struct {
     }
 };
 
-/// Ports `stbi__gif_test_raw` and `stbi__gif_test` (stb_image.h:6580, 6590 @7fe450e19).
+/// Ports `stbi__gif_test_raw` and `stbi__gif_test` (stb_image.h:6580, 6590 @d81235049).
 fn gifTestImpl(s: *Context) bool {
     const r = blk: {
         if (s.get8() != 'G' or s.get8() != 'I' or s.get8() != 'F' or s.get8() != '8') break :blk false;
@@ -3853,7 +3859,7 @@ fn gifTestImpl(s: *Context) bool {
     return r;
 }
 
-/// Ports `stbi__gif_parse_colortable` (stb_image.h:6597 @7fe450e19).
+/// Ports `stbi__gif_parse_colortable` (stb_image.h:6597 @d81235049).
 fn gifParseColortable(s: *Context, pal: *[256][4]u8, num_entries: c_int, transp: c_int) void {
     for (0..@intCast(num_entries)) |i| {
         pal[i][2] = s.get8();
@@ -3863,7 +3869,7 @@ fn gifParseColortable(s: *Context, pal: *[256][4]u8, num_entries: c_int, transp:
     }
 }
 
-/// Ports `stbi__gif_header` (stb_image.h:6608 @7fe450e19), not for info.
+/// Ports `stbi__gif_header` (stb_image.h:6608 @d81235049), not for info.
 fn gifHeader(s: *Context, g: *Gif, comp: *c_int) bool {
     if (s.get8() != 'G' or s.get8() != 'I' or s.get8() != 'F' or s.get8() != '8') return s.err("not GIF") != 0;
 
@@ -3888,7 +3894,7 @@ fn gifHeader(s: *Context, g: *Gif, comp: *c_int) bool {
     return true;
 }
 
-/// Ports `stbi__out_gif_code` (stb_image.h:6654 @7fe450e19), with the
+/// Ports `stbi__out_gif_code` (stb_image.h:6654 @d81235049), with the
 /// prefix recursion as a loop over a stack of codes.
 fn outGifCode(g: *Gif, code_in: u16) void {
     var stack: [8192]u16 = undefined;
@@ -3934,7 +3940,7 @@ fn outGifCode(g: *Gif, code_in: u16) void {
     }
 }
 
-/// Ports `stbi__process_gif_raster` (stb_image.h:6691 @7fe450e19).
+/// Ports `stbi__process_gif_raster` (stb_image.h:6691 @d81235049).
 fn processGifRaster(s: *Context, g: *Gif) bool {
     const lzw_cs = s.get8();
     if (lzw_cs > 12) return false;
@@ -4010,7 +4016,7 @@ fn processGifRaster(s: *Context, g: *Gif) bool {
     }
 }
 
-/// Ports `stbi__gif_load_next` (stb_image.h:6778 @7fe450e19), for the first
+/// Ports `stbi__gif_load_next` (stb_image.h:6778 @d81235049), for the first
 /// frame. Return: `.frame`, `.end` for the stream's terminator, or `.fail`.
 fn gifLoadFirst(s: *Context, g: *Gif, comp: *c_int) enum { frame, end, fail } {
     // on first frame, any non-written pixels get the background colour (non-transparent)
@@ -4128,7 +4134,7 @@ fn gifLoadFirst(s: *Context, g: *Gif, comp: *c_int) enum { frame, end, fail } {
     }
 }
 
-/// Ports `stbi__gif_load` (stb_image.h:7048 @7fe450e19).
+/// Ports `stbi__gif_load` (stb_image.h:7048 @d81235049).
 fn gifLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int) ?[]u8 {
     const g = s.gpa.create(Gif) catch return s.errpuc("outofmem");
     defer s.gpa.destroy(g);
@@ -4152,7 +4158,7 @@ fn gifLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int)
     return u;
 }
 
-/// Ports `stbi__hdr_test_core` and `stbi__hdr_test` (stb_image.h:7087, 7097 @7fe450e19).
+/// Ports `stbi__hdr_test_core` and `stbi__hdr_test` (stb_image.h:7087, 7097 @d81235049).
 fn hdrTestImpl(s: *Context) bool {
     const sigs = [_][]const u8{ "#?RADIANCE\n", "#?RGBE\n" };
     for (sigs) |sig| {
@@ -4171,7 +4177,7 @@ fn hdrTestImpl(s: *Context) bool {
 
 const hdr_buflen = 1024;
 
-/// Ports `stbi__hdr_gettoken` (stb_image.h:7109 @7fe450e19). Return: the
+/// Ports `stbi__hdr_gettoken` (stb_image.h:7109 @d81235049). Return: the
 /// token, borrowed from `buffer`.
 fn hdrGettoken(z: *Context, buffer: *[hdr_buflen]u8) []const u8 {
     var len: usize = 0;
@@ -4193,7 +4199,7 @@ fn hdrGettoken(z: *Context, buffer: *[hdr_buflen]u8) []const u8 {
     return buffer[0 .. std.mem.indexOfScalar(u8, buffer[0..len], 0) orelse len];
 }
 
-/// Ports `stbi__hdr_convert` (stb_image.h:7131 @7fe450e19).
+/// Ports `stbi__hdr_convert` (stb_image.h:7131 @d81235049).
 fn hdrConvert(output: []f32, input: *const [4]u8, req_comp: c_int) void {
     if (input[3] != 0) {
         // Exponent
@@ -4258,7 +4264,7 @@ fn strtolInt(tok: []const u8, end: *usize) c_int {
     return @truncate(r);
 }
 
-/// Ports `stbi__hdr_load` (stb_image.h:7158 @7fe450e19).
+/// Ports `stbi__hdr_load` (stb_image.h:7158 @d81235049).
 fn hdrLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp_in: c_int) ?[]f32 {
     var buffer: [hdr_buflen]u8 = undefined;
     var valid = false;
@@ -4425,7 +4431,7 @@ fn hdrLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp_in: c_i
     return hdr_data;
 }
 
-/// Ports `stbi__pnm_test` (stb_image.h:7494 @7fe450e19).
+/// Ports `stbi__pnm_test` (stb_image.h:7494 @d81235049).
 fn pnmTestImpl(s: *Context) bool {
     const p = s.get8();
     const t = s.get8();
@@ -4436,12 +4442,12 @@ fn pnmTestImpl(s: *Context) bool {
     return true;
 }
 
-/// Ports `stbi__pnm_isspace` (stb_image.h:7543 @7fe450e19).
+/// Ports `stbi__pnm_isspace` (stb_image.h:7543 @d81235049).
 fn pnmIsspace(c: u8) bool {
     return c == ' ' or c == '\t' or c == '\n' or c == 0x0b or c == 0x0c or c == '\r';
 }
 
-/// Ports `stbi__pnm_skip_whitespace` (stb_image.h:7548 @7fe450e19).
+/// Ports `stbi__pnm_skip_whitespace` (stb_image.h:7548 @d81235049).
 fn pnmSkipWhitespace(s: *Context, c: *u8) void {
     while (true) {
         while (!s.atEof() and pnmIsspace(c.*)) c.* = s.get8();
@@ -4452,7 +4458,7 @@ fn pnmSkipWhitespace(s: *Context, c: *u8) void {
     }
 }
 
-/// Ports `stbi__pnm_getinteger` (stb_image.h:7567 @7fe450e19). `char` is
+/// Ports `stbi__pnm_getinteger` (stb_image.h:7567 @d81235049). `char` is
 /// signed on Apple aarch64 and x86, unsigned on aarch64 Linux; the
 /// comparison `*c > '7'` only differs for bytes 0x80 and up, which are
 /// above '7' unsigned and below it signed.
@@ -4471,7 +4477,7 @@ fn pnmGetinteger(s: *Context, c: *u8) c_int {
 
 const char_signed = @typeInfo(c_char).int.signedness == .signed;
 
-/// Ports `stbi__pnm_info` (stb_image.h:7581 @7fe450e19).
+/// Ports `stbi__pnm_info` (stb_image.h:7581 @d81235049).
 fn pnmInfo(s: *Context, x: *c_int, y: *c_int, comp: *c_int) c_int {
     s.rewind();
 
@@ -4502,7 +4508,7 @@ fn pnmInfo(s: *Context, x: *c_int, y: *c_int, comp: *c_int) c_int {
     return 8;
 }
 
-/// Ports `stbi__pnm_load` (stb_image.h:7506 @7fe450e19).
+/// Ports `stbi__pnm_load` (stb_image.h:7506 @d81235049).
 fn pnmLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int, bits: *c_int) ?[]u8 {
     var ix: c_int = 0;
     var iy: c_int = 0;
@@ -4540,7 +4546,7 @@ fn pnmLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int,
     return out;
 }
 
-/// Ports `stbi__jpeg_load` (stb_image.h:4028 @7fe450e19).
+/// Ports `stbi__jpeg_load` (stb_image.h:4028 @d81235049).
 fn jpegLoadImpl(s: *Context, x: *c_int, y: *c_int, comp: *c_int, req_comp: c_int) ?[]u8 {
     const j = jpegNew(s) orelse return s.errpuc("outofmem");
     defer s.gpa.destroy(j);

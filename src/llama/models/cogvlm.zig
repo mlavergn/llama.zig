@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/cogvlm.cpp` at v0.5.0 (`7fe450e19`):
+//! Ported from `llama.cpp/src/models/cogvlm.cpp` at v0.6.0 (`d81235049`):
 //! `llama_model_cogvlm`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_cogvlm`'s `load_arch_hparams` (src/models/cogvlm.cpp:3 @7fe450e19).
+/// Ports `llama_model_cogvlm`'s `load_arch_hparams` (src/models/cogvlm.cpp:3 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -31,7 +31,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_cogvlm`'s `load_arch_tensors` (src/models/cogvlm.cpp:12 @7fe450e19).
+/// Ports `llama_model_cogvlm`'s `load_arch_tensors` (src/models/cogvlm.cpp:12 @d81235049).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -71,13 +71,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_cogvlm`'s `build_arch_graph` (src/models/cogvlm.cpp:49 @7fe450e19).
+/// Ports `llama_model_cogvlm`'s `build_arch_graph` (src/models/cogvlm.cpp:49 @d81235049).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_cogvlm`'s `graph` (src/models/cogvlm.cpp:53
-/// @7fe450e19).
+/// @d81235049).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -94,6 +94,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_attn = b.buildAttnInpKv();
 
     // Input tokens are text; an input embedding vector is an image.
+    b.ubatch.assertEmbdOrToken("models/cogvlm.cpp", 73);
     const is_text = b.ubatch.token != null;
 
     var il: c_int = 0;

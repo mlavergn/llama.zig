@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/conv2d-dw.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/conv2d-dw.cuh` at v0.5.0 (`7fe450e19`).
+//! `llama.cpp/ggml/src/ggml-cuda/conv2d-dw.cuh` at v0.6.0 (`d81235049`).
 //! The kernel, `conv2d_dw_kernel`, stays CUDA.
 
 const std = @import("std");
@@ -14,15 +14,17 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_CONV2D_DW_BLOCK_SIZE` (conv2d-dw.cuh:4 @7fe450e19).
+/// Ports `CUDA_CONV2D_DW_BLOCK_SIZE` (conv2d-dw.cuh:4 @d81235049).
 const block_size = 256;
 
-/// Ports `ggml_cuda_op_conv2d_dw` (conv2d-dw.cu:119 @7fe450e19).
+/// Ports `ggml_cuda_op_conv2d_dw` (conv2d-dw.cu:120 @d81235049). Since
+/// v0.6.0 the kernel may be F16; the input and output stay F32.
 pub fn opConv2dDw(ctx: *common.Context, dst: *Tensor) void {
     const kernel = impl.one(Tensor, dst.src[0]);
     const input = impl.one(Tensor, dst.src[1]);
 
-    impl.assert(kernel.type == c.GGML_TYPE_F32 and input.type == c.GGML_TYPE_F32 and dst.type == c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F32 && input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
+    impl.assert(kernel.type == c.GGML_TYPE_F16 or kernel.type == c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
+    impl.assert(input.type == c.GGML_TYPE_F32 and dst.type == c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
     const w_d: ?*const anyopaque = kernel.data;
     const x_d: ?*const anyopaque = input.data;
     const y_d: ?*anyopaque = dst.data;
@@ -51,9 +53,17 @@ pub fn opConv2dDw(ctx: *common.Context, dst: *Tensor) void {
     const p: kernels.LaunchParams = .{ .grid = .{ .x = @bitCast(blocks) }, .block = .{ .x = block_size }, .shmem = 0, .stream = st };
     const args = .{ x_d, w_d, y_d, in_w, in_h, out_w, out_h, kernel_w, kernel_h, stride_x, stride_y, padding_x, padding_y, dilation_x, dilation_y, channels, batches };
     if (c.ggml_is_contiguous(input)) {
-        kernels.launch(kernels.get("conv2d-dw", "conv2d_dw_kernel<float, whcn_layout>"), p, args);
+        if (kernel.type == c.GGML_TYPE_F16) {
+            kernels.launch(kernels.get("conv2d-dw", "conv2d_dw_kernel<__half, whcn_layout>"), p, args);
+        } else {
+            kernels.launch(kernels.get("conv2d-dw", "conv2d_dw_kernel<float, whcn_layout>"), p, args);
+        }
     } else if (c.ggml_is_contiguous_channels(input)) {
-        kernels.launch(kernels.get("conv2d-dw", "conv2d_dw_kernel<float, cwhn_layout>"), p, args);
+        if (kernel.type == c.GGML_TYPE_F16) {
+            kernels.launch(kernels.get("conv2d-dw", "conv2d_dw_kernel<__half, cwhn_layout>"), p, args);
+        } else {
+            kernels.launch(kernels.get("conv2d-dw", "conv2d_dw_kernel<float, cwhn_layout>"), p, args);
+        }
     } else {
         impl.abort("Unsupported memory layout for conv_2d_dw");
     }

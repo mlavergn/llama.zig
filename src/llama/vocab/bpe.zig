@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.5.0 (`7fe450e19`): the
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.6.0 (`d81235049`): the
 //! tokenizer and its pattern table, the session, and the two sessions that
 //! extend it, `hybriddna` and `whitespace`.
 //!
@@ -33,7 +33,7 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `dna_kmer_marker` (llama-vocab.cpp:1651 @7fe450e19): U+E000.
+/// Ports `dna_kmer_marker` (llama-vocab.cpp:1681 @d81235049): U+E000.
 pub const dna_kmer_marker = "\xee\x80\x80";
 
 const Patterns = struct {
@@ -42,7 +42,7 @@ const Patterns = struct {
 };
 
 /// Ports `llm_tokenizer_bpe`'s constructor's `switch` (llama-vocab.cpp:283
-/// @7fe450e19), generated.
+/// @d81235049), generated.
 fn patterns(pre: PreType) Patterns {
     return switch (pre) {
         .llama3 => .{ .exprs = &.{
@@ -167,6 +167,10 @@ fn patterns(pre: PreType) Patterns {
         .gemma4 => .{ .exprs = &.{
             "[^\\n]+|[\\n]+",
         }, .byte_encode = false },
+        // as Gemma 4's; `tokenize` splits the words
+        .mmbert => .{ .exprs = &.{
+            "[^\\n]+|[\\n]+",
+        }, .byte_encode = false },
         .sarvam_moe => .{ .exprs = &.{
             "[^\\n]+|[\\n]+",
         }, .byte_encode = false },
@@ -186,7 +190,7 @@ fn patterns(pre: PreType) Patterns {
     };
 }
 
-/// Ports `llm_tokenizer_bpe` (llama-vocab.cpp:280 @7fe450e19).
+/// Ports `llm_tokenizer_bpe` (llama-vocab.cpp:280 @d81235049).
 pub const Tokenizer = struct {
     regex_exprs: []const []const u8,
     /// GPT-2 byte encoding; false for SPM-style BPE over raw UTF-8.
@@ -203,7 +207,7 @@ pub const Tokenizer = struct {
     pub fn deinit(_: *Tokenizer) void {}
 };
 
-/// Ports `llm_bigram_bpe` (llama-vocab.cpp:264 @7fe450e19). `text` is a
+/// Ports `llm_bigram_bpe` (llama-vocab.cpp:264 @d81235049). `text` is a
 /// span of the word, which the two symbols are adjacent parts of.
 const Bigram = struct {
     left: i32,
@@ -228,7 +232,7 @@ const Symbol = struct {
 /// Which session `llama_vocab::impl`'s `tokenize` builds.
 const Mode = enum { plain, hybriddna, whitespace };
 
-/// Ports `llm_tokenizer_bpe_session` (llama-vocab.cpp:577 @7fe450e19),
+/// Ports `llm_tokenizer_bpe_session` (llama-vocab.cpp:584 @d81235049),
 /// and through `mode` the two sessions derived from it.
 pub const Session = struct {
     vocab: *const Vocab,
@@ -239,7 +243,7 @@ pub const Session = struct {
     work_queue: libcxx.PriorityQueue(Bigram, void, bigramLess) = .{ .ctx = {} },
 
     /// The session `llama_vocab::impl`'s `tokenize` makes for `vocab`'s
-    /// tokenizer model (llama-vocab.cpp:3486 @7fe450e19).
+    /// tokenizer model (llama-vocab.cpp:3525 @d81235049).
     ///
     /// Return: the session; free it with `deinit`.
     pub fn init(vocab: *const Vocab, tokenizer: *const Tokenizer) Session {
@@ -258,7 +262,7 @@ pub const Session = struct {
     /// Ports `llm_tokenizer_bpe_session`'s `append_bos`.
     pub fn appendBos(self: *const Session, output: *std.ArrayList(Token)) void {
         if (self.vocab.add_bos) {
-            impl.assert(self.vocab.special_bos_id != token_null, "llama-vocab.cpp", 588, "vocab.token_bos() != LLAMA_TOKEN_NULL");
+            impl.assert(self.vocab.special_bos_id != token_null, "llama-vocab.cpp", 595, "vocab.token_bos() != LLAMA_TOKEN_NULL");
             output.append(allocator, self.vocab.special_bos_id) catch oom();
         }
     }
@@ -266,7 +270,7 @@ pub const Session = struct {
     /// Ports `llm_tokenizer_bpe_session`'s `append_eos`.
     pub fn appendEos(self: *const Session, output: *std.ArrayList(Token)) void {
         if (self.vocab.add_eos) {
-            impl.assert(self.vocab.special_eos_id != token_null, "llama-vocab.cpp", 597, "vocab.token_eos() != LLAMA_TOKEN_NULL");
+            impl.assert(self.vocab.special_eos_id != token_null, "llama-vocab.cpp", 604, "vocab.token_eos() != LLAMA_TOKEN_NULL");
             output.append(allocator, self.vocab.special_eos_id) catch oom();
         }
     }
@@ -305,8 +309,9 @@ pub const Session = struct {
         self.work_queue.push(allocator, .{ .left = left, .right = right, .text = t, .rank = rank_found, .size = lt.len + rt.len }) catch oom();
     }
 
-    /// Ports `llm_tokenizer_bpe_session`'s `tokenize` (llama-vocab.cpp:619
-    /// @7fe450e19).
+    /// Ports `llm_tokenizer_bpe_session`'s `tokenize` (llama-vocab.cpp:626
+    /// @d81235049). mmBERT's Metaspace pre-tokenizer: a text starts with an
+    /// escaped space, and each escaped space starts a new word.
     fn tokenizeBpe(self: *Session, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
         const vocab = self.vocab;
         var final_prev_index: i32 = -1;
@@ -320,6 +325,34 @@ pub const Session = struct {
         self.symbols_final.clearRetainingCapacity();
         const tok_pre = vocab.pre_type;
 
+        if (tok_pre == .mmbert) {
+            const space = "\xe2\x96\x81";
+            var words: unicode.Words = .{};
+            var tmp: std.ArrayList(u8) = .empty;
+            defer tmp.deinit(allocator);
+            for (0..word_collection.len()) |w| {
+                const word0 = word_collection.get(w);
+                if (std.mem.findNone(u8, word0, "\n") == null) {
+                    words.buf.appendSlice(allocator, word0) catch oom();
+                    words.ends.append(allocator, words.buf.items.len) catch oom();
+                    continue;
+                }
+                tmp.clearRetainingCapacity();
+                if (!std.mem.startsWith(u8, word0, space)) tmp.appendSlice(allocator, space) catch oom();
+                tmp.appendSlice(allocator, word0) catch oom();
+                const word = tmp.items;
+                var start: usize = 0;
+                while (start < word.len) {
+                    const end = std.mem.findPos(u8, word, start + space.len, space) orelse word.len;
+                    words.buf.appendSlice(allocator, word[start..end]) catch oom();
+                    words.ends.append(allocator, words.buf.items.len) catch oom();
+                    start = end;
+                }
+            }
+            word_collection.deinit();
+            word_collection = words;
+        }
+
         for (0..word_collection.len()) |w| {
             const word = word_collection.get(w);
             self.work_queue.clear();
@@ -331,7 +364,7 @@ pub const Session = struct {
             if (vocab.ignore_merges and vocab.textToToken(word) != token_null) {
                 self.symbols.append(allocator, .{ .prev = -1, .next = -1, .text = word }) catch oom();
                 offset = word.len;
-            } else if (tok_pre == .gemma4 and std.mem.findNone(u8, word, "\n") == null) {
+            } else if ((tok_pre == .gemma4 or tok_pre == .mmbert) and std.mem.findNone(u8, word, "\n") == null) {
                 // fix for gemma 4, ref: https://github.com/ggml-org/llama.cpp/pull/21343
                 if (vocab.textToToken(word) != token_null) {
                     self.symbols.append(allocator, .{ .prev = -1, .next = -1, .text = word }) catch oom();
@@ -427,8 +460,8 @@ pub const Session = struct {
         }
     }
 
-    /// Ports `llm_tokenizer_hybriddna_session`'s `tokenize` (llama-vocab.cpp:1656
-    /// @7fe450e19): `<dna>` spans become fixed-length k-mers, the rest BPE.
+    /// Ports `llm_tokenizer_hybriddna_session`'s `tokenize` (llama-vocab.cpp:1686
+    /// @d81235049): `<dna>` spans become fixed-length k-mers, the rest BPE.
     fn tokenizeHybridDna(self: *Session, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
         const vocab = self.vocab;
         const open_tag = "<dna>";
@@ -495,8 +528,8 @@ pub const Session = struct {
         return if (tok != token_null) tok else oov_id;
     }
 
-    /// Ports `llm_tokenizer_whitespace_session`'s `tokenize` (llama-vocab.cpp:1733
-    /// @7fe450e19): whitespace dropped, each run between lowercased if the
+    /// Ports `llm_tokenizer_whitespace_session`'s `tokenize` (llama-vocab.cpp:1763
+    /// @d81235049): whitespace dropped, each run between lowercased if the
     /// normalizer says so, and BPE'd alone.
     fn tokenizeWhitespace(self: *Session, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
         const lowercase = self.vocab.normalizer_opts.lowercase;

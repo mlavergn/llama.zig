@@ -704,15 +704,16 @@ fn runDecode(params: *params_mod.Params) !u8 {
     {
         var n: usize = 0;
         for (inp) |v| n += v.len;
-        var b = c.llama_batch_init(@intCast(n), 0, 1);
+        _ = &n;
+        var b = tc.common.Batch.init(gpa, ctx_tgt);
+        defer b.deinit();
         for (0..n_seq) |s| {
             var i: usize = 0;
-            while (i + 1 < inp[s].len) : (i += 1) tc.common.batchAdd(&b, inp[s][i], @intCast(i), &.{@intCast(s)}, false);
+            while (i + 1 < inp[s].len) : (i += 1) _ = b.add(inp[s][i], @intCast(i), @intCast(s), false);
         }
-        const rc = c.llama_decode(ctx_tgt, b);
+        const rc = c.llama_process(ctx_tgt, c.LLAMA_PROCESS_TYPE_DECODE, b.get());
         _ = printf("prefill rc=%d\n", rc);
-        _ = printf("process prefill %d\n", @as(c_int, @intFromBool(spec_mod.process(spec, b))));
-        c.llama_batch_free(b);
+        _ = printf("process prefill %d\n", @as(c_int, @intFromBool(spec_mod.process(spec, &b))));
     }
 
     const id_last = try gpa.alloc(c.llama_token, n_seq);
@@ -733,9 +734,17 @@ fn runDecode(params: *params_mod.Params) !u8 {
     }
 
     const vocab = c.llama_model_get_vocab(model_tgt);
-    var batch_tgt = c.llama_batch_init(@intCast(c.llama_n_batch(ctx_tgt)), 0, 1);
-    defer c.llama_batch_free(batch_tgt);
+    var batch_tgt = tc.common.Batch.init(gpa, ctx_tgt);
+    defer batch_tgt.deinit();
     const n_predict: c_int = if (params.n_predict < 0) 32 else params.n_predict;
+    // verify by rejection, as the server does at temp > 0: the drafters keep their candidates
+    const reject = c.getenv("SPEC_REJECT") != null;
+    const draft_q = try gpa.alloc(spec_mod.Candidates, n_seq);
+    for (draft_q) |*q| q.* = .empty;
+    defer {
+        for (draft_q) |*q| spec_mod.freeCandidates(q);
+        gpa.free(draft_q);
+    }
 
     var it: c_int = 0;
     while (it < 4 * n_predict) : (it += 1) {
@@ -747,14 +756,21 @@ fn runDecode(params: *params_mod.Params) !u8 {
             n_draft_max = @min(n_draft_max, n_predict - n_gen[s] - 1);
             n_draft_max = @max(n_draft_max, 0);
             draft[s].clearRetainingCapacity();
+            spec_mod.truncateCandidates(&draft_q[s], 0);
             if (spec != null) {
-                spec_mod.getDraftParams(spec, @intCast(s)).* = .{ .drafting = true, .n_max = n_draft_max, .pos0 = n_past[s], .id_last = id_last[s], .prompt = prompt_tgt[s].items, .result = &draft[s] };
+                const dp = spec_mod.getDraftParams(spec, @intCast(s));
+                dp.* = .{ .drafting = true, .n_max = n_draft_max, .pos0 = n_past[s], .id_last = id_last[s], .prompt = prompt_tgt[s].items, .result = &draft[s] };
+                if (reject) {
+                    dp.result_q = &draft_q[s];
+                    dp.temp = params.sampling.temp;
+                    dp.seed = params.sampling.seed;
+                }
             }
         }
         if (!any) break;
         spec_mod.draft(spec);
 
-        tc.common.batchClear(&batch_tgt);
+        batch_tgt.clear();
         const idxs = try gpa.alloc(std.ArrayList(i32), n_seq);
         defer gpa.free(idxs);
         for (0..n_seq) |s| {
@@ -763,21 +779,30 @@ fn runDecode(params: *params_mod.Params) !u8 {
             const sid: c.llama_seq_id = @intCast(s);
             _ = printf("it %d seq %d pos %d last %d", it, sid, n_past[s], id_last[s]);
             printTokens(" draft", draft[s].items);
+            if (reject) {
+                var h = fnv0;
+                for (draft_q[s].items) |q| {
+                    const n: usize = q.items.len;
+                    h = fnv(std.mem.asBytes(&n), h);
+                    h = fnv(std.mem.sliceAsBytes(q.items), h);
+                }
+                _ = printf(" q %zu %016llx", draft_q[s].items.len, h);
+            }
             _ = printf("\n");
             if (ctx_dft != null) _ = c.llama_memory_seq_rm(c.llama_get_memory(ctx_dft), sid, n_past[s], -1);
-            try idxs[s].append(gpa, batch_tgt.n_tokens);
-            tc.common.batchAdd(&batch_tgt, id_last[s], n_past[s], &.{sid}, true);
+            try idxs[s].append(gpa, batch_tgt.size());
+            _ = batch_tgt.add(id_last[s], n_past[s], sid, true);
             for (draft[s].items, 0..) |d, i| {
-                try idxs[s].append(gpa, batch_tgt.n_tokens);
-                tc.common.batchAdd(&batch_tgt, d, n_past[s] + 1 + @as(c_int, @intCast(i)), &.{sid}, true);
+                try idxs[s].append(gpa, batch_tgt.size());
+                _ = batch_tgt.add(d, n_past[s] + 1 + @as(c_int, @intCast(i)), sid, true);
             }
         }
-        const rc = c.llama_decode(ctx_tgt, batch_tgt);
+        const rc = c.llama_process(ctx_tgt, c.LLAMA_PROCESS_TYPE_DECODE, batch_tgt.get());
         if (rc != 0) {
             _ = printf("decode rc=%d\n", rc);
             break;
         }
-        if (!spec_mod.process(spec, batch_tgt)) {
+        if (!spec_mod.process(spec, &batch_tgt)) {
             _ = printf("process failed\n");
             break;
         }
@@ -786,7 +811,15 @@ fn runDecode(params: *params_mod.Params) !u8 {
             if (done[s]) continue;
             const sid: c.llama_seq_id = @intCast(s);
             const keep: ?*sampling.Sampler = if (@mod(it, 3) == 1) smpl[s].clone() else null;
-            const ids = try smpl[s].sampleAndAcceptNIdxs(gpa, ctx_tgt, idxs[s].items, draft[s].items, false);
+            // the server's rule: rejection only over candidates for every drafted token
+            const use_rejection = reject and draft_q[s].items.len != 0 and draft_q[s].items.len == draft[s].items.len;
+            const ids = if (use_rejection) blk: {
+                const qs = try gpa.alloc([]const c.llama_token_data, draft_q[s].items.len);
+                defer gpa.free(qs);
+                for (qs, draft_q[s].items) |*d, q| d.* = q.items;
+                break :blk try smpl[s].sampleAndAcceptNRejection(gpa, ctx_tgt, idxs[s].items, draft[s].items, qs, false);
+            } else try smpl[s].sampleAndAcceptNIdxs(gpa, ctx_tgt, idxs[s].items, draft[s].items, false);
+            if (use_rejection) _ = printf("  rejection\n");
             printTokens("  ids", ids);
             _ = printf(" acc %zu last %d\n", ids.len - 1, smpl[s].last());
             printCands(smpl[s], sid);

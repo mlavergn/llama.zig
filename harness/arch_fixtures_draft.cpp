@@ -1,6 +1,10 @@
-// Not a port. Writes fixtures for the three architectures upstream's
-// `test-llama-archs.cpp` cannot: graniteswitch, eagle3 and dflash -- and
-// one variant of an architecture it can, Qwen3.5 with fused QKV.
+// Not a port. Writes fixtures for the four architectures upstream's
+// `test-llama-archs.cpp` cannot: graniteswitch, eagle3, dflash and clef --
+// and variants of architectures it can: Qwen3.5 with fused QKV, and a
+// ModernBERT decision model. Clef is built as the qwen35 it extends and
+// written under its own name (`rename_prefix`), its decision head added as
+// extra tensors, because its `load_arch_tensors` sizes the head from
+// tensors it finds in the file.
 //
 // `llama.cpp/tests/test-llama-archs.cpp` is included unmodified, as
 // `harness/arch_fixtures_extra.cpp` does, so `get_gguf_ctx` and
@@ -65,7 +69,22 @@ struct Extra {
     }
 };
 
-static bool decode_check(const std::string & path) {
+// `common_batch_add` as `common/common.cpp` had it at v0.5.0, which v0.6.0
+// replaced with `common_batch` over `llama_batch_ext`; a plain
+// `llama_batch` is still what `llama_decode` takes.
+static void batch_add(llama_batch & batch, llama_token id, llama_pos pos, bool logits) {
+    GGML_ASSERT(batch.seq_id[batch.n_tokens] && "llama_batch size exceeded");
+    batch.token   [batch.n_tokens] = id;
+    batch.pos     [batch.n_tokens] = pos;
+    batch.n_seq_id[batch.n_tokens] = 1;
+    batch.seq_id  [batch.n_tokens][0] = 0;
+    batch.logits  [batch.n_tokens] = logits;
+    batch.n_tokens++;
+}
+
+// `embeddings`: a model with no LM head (clef, a ModernBERT decision
+// model), which is checked for an embeddings output instead of logits.
+static bool decode_check(const std::string & path, bool embeddings = false) {
     llama_model_params mp = llama_model_default_params();
     mp.progress_callback = silent_model_load_progress;
     ggml_backend_dev_t devs[2] = { ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU), nullptr };
@@ -78,6 +97,7 @@ static bool decode_check(const std::string & path) {
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = 0;
     cp.n_ubatch = 64;
+    cp.embeddings = embeddings;
     llama_context * ctx = llama_init_from_model(model, cp);
     if (!ctx) {
         printf("failed %s: the C++ cannot create a context\n", path.c_str());
@@ -87,11 +107,19 @@ static bool decode_check(const std::string & path) {
     const int n_vocab = llama_vocab_n_tokens(llama_model_get_vocab(model));
     llama_batch b = llama_batch_init(32, 0, 1);
     for (int k = 0; k < 24; k++) {
-        common_batch_add(b, (k * 37 + 11) % n_vocab, k, {0}, k == 23);
+        batch_add(b, (k * 37 + 11) % n_vocab, k, k == 23);
     }
     const int ret = llama_decode(ctx, b);
     bool ok = ret == 0;
-    if (ok) {
+    if (ok && embeddings) {
+        const float * e = llama_get_embeddings(ctx);
+        ok = e != nullptr;
+        if (ok) {
+            printf("checked %s: decode ok, embedding[0] %g\n", path.c_str(), e[0]);
+        } else {
+            printf("failed %s: no embeddings\n", path.c_str());
+        }
+    } else if (ok) {
         const float * l = llama_get_logits_ith(ctx, -1);
         int best = 0;
         for (int j = 1; j < n_vocab; j++) if (l[j] > l[best]) best = j;
@@ -107,7 +135,8 @@ static bool decode_check(const std::string & path) {
 
 static bool write_fixture(llm_arch arch, const std::string & name, size_t seed, const std::string & dir,
         const std::function<void(gguf_context *)> & edit_meta,
-        const std::function<void(Extra &, llama_model *)> & add_tensors, bool moe = false) {
+        const std::function<void(Extra &, llama_model *)> & add_tensors, bool moe = false,
+        const std::function<void(gguf_context *)> & edit_out = nullptr, bool embeddings = false) {
     gguf_context_ptr meta = get_gguf_ctx(arch, moe);
     edit_meta(meta.get());
 
@@ -129,6 +158,9 @@ static bool write_fixture(llm_arch arch, const std::string & name, size_t seed, 
 
     gguf_context * out = gguf_init_empty();
     gguf_set_kv(out, meta.get());
+    if (edit_out) {
+        edit_out(out);
+    }
     for (const auto & [tname, t] : llama_internal_get_tensor_map(model)) {
         if (gguf_find_tensor(out, tname.c_str()) >= 0 || extra.replaces.count(tname)) {
             continue;
@@ -148,10 +180,66 @@ static bool write_fixture(llm_arch arch, const std::string & name, size_t seed, 
         return false;
     }
     printf("wrote %s\n", path.c_str());
-    return decode_check(path);
+    return decode_check(path, embeddings);
 }
 
 static void none_tensors(Extra &, llama_model *) {}
+
+// Moves every key under `from` to the same name under `to`, so a model
+// built as one architecture can be written as another that loads the same
+// backbone (clef over qwen35).
+static void rename_prefix(gguf_context * g, const std::string & from, const std::string & to) {
+    std::vector<std::string> keys;
+    for (int64_t i = 0; i < gguf_get_n_kv(g); i++) {
+        const std::string k = gguf_get_key(g, i);
+        if (k.rfind(from, 0) == 0) {
+            keys.push_back(k);
+        }
+    }
+    for (const std::string & k : keys) {
+        const int64_t i = gguf_find_key(g, k.c_str());
+        const std::string nk = to + k.substr(from.size());
+        const char * n = nk.c_str();
+        switch (gguf_get_kv_type(g, i)) {
+            case GGUF_TYPE_UINT8:   gguf_set_val_u8  (g, n, gguf_get_val_u8  (g, i)); break;
+            case GGUF_TYPE_INT8:    gguf_set_val_i8  (g, n, gguf_get_val_i8  (g, i)); break;
+            case GGUF_TYPE_UINT16:  gguf_set_val_u16 (g, n, gguf_get_val_u16 (g, i)); break;
+            case GGUF_TYPE_INT16:   gguf_set_val_i16 (g, n, gguf_get_val_i16 (g, i)); break;
+            case GGUF_TYPE_UINT32:  gguf_set_val_u32 (g, n, gguf_get_val_u32 (g, i)); break;
+            case GGUF_TYPE_INT32:   gguf_set_val_i32 (g, n, gguf_get_val_i32 (g, i)); break;
+            case GGUF_TYPE_FLOAT32: gguf_set_val_f32 (g, n, gguf_get_val_f32 (g, i)); break;
+            case GGUF_TYPE_UINT64:  gguf_set_val_u64 (g, n, gguf_get_val_u64 (g, i)); break;
+            case GGUF_TYPE_INT64:   gguf_set_val_i64 (g, n, gguf_get_val_i64 (g, i)); break;
+            case GGUF_TYPE_FLOAT64: gguf_set_val_f64 (g, n, gguf_get_val_f64 (g, i)); break;
+            case GGUF_TYPE_BOOL:    gguf_set_val_bool(g, n, gguf_get_val_bool(g, i)); break;
+            // Copied out first: adding a key may move the storage they point into.
+            case GGUF_TYPE_STRING: {
+                const std::string v = gguf_get_val_str(g, i);
+                gguf_set_val_str(g, n, v.c_str());
+            } break;
+            case GGUF_TYPE_ARRAY: {
+                const gguf_type at = gguf_get_arr_type(g, i);
+                const size_t    na = gguf_get_arr_n(g, i);
+                if (at == GGUF_TYPE_STRING) {
+                    std::vector<std::string> v(na);
+                    std::vector<const char *> p(na);
+                    for (size_t j = 0; j < na; j++) v[j] = gguf_get_arr_str(g, i, j);
+                    for (size_t j = 0; j < na; j++) p[j] = v[j].c_str();
+                    gguf_set_arr_str(g, n, p.data(), na);
+                } else {
+                    const char * d = (const char *) gguf_get_arr_data(g, i);
+                    const size_t es = at == GGUF_TYPE_UINT64 || at == GGUF_TYPE_INT64 || at == GGUF_TYPE_FLOAT64 ? 8
+                                    : at == GGUF_TYPE_UINT32 || at == GGUF_TYPE_INT32 || at == GGUF_TYPE_FLOAT32 ? 4
+                                    : at == GGUF_TYPE_UINT16 || at == GGUF_TYPE_INT16 ? 2 : 1;
+                    const std::vector<char> v(d, d + na*es);
+                    gguf_set_arr_data(g, n, at, v.data(), na);
+                }
+            } break;
+            default: GGML_ABORT("rename_prefix: unknown type of %s", k.c_str());
+        }
+        gguf_remove_key(g, k.c_str());
+    }
+}
 
 int main(int argc, char ** argv) {
     if (argc < 3) {
@@ -284,18 +372,21 @@ int main(int argc, char ** argv) {
             }
         });
     });
-    // A Gemma-style DFlash backbone, new at v0.5.0 (models/dflash.cpp:7, 107,
-    // 573 @7fe450e19): an embedding and an attention scale, a GELU FFN, K
+    // A Gemma-style DFlash backbone, new at v0.5.0 (models/dflash.cpp:7, 108,
+    // 571 @d81235049): an embedding and an attention scale, a GELU FFN, K
     // and V sharing one projection (no attn_v, V RMS-normed bare), and no
     // output head -- the token embedding stands in for it. The recipe
     // already writes the post norms, the per-layer output scale and
-    // rope_freqs, so every DFlash fixture has those.
+    // rope_freqs, so every DFlash fixture has those. Since v0.6.0 it also
+    // carries an attention value scale, which scales the attention output;
+    // the other DFlash fixtures have none, so both arms run.
     run([&] {
         return write_fixture(df, "dflash-gemma", seed, dir, [&](gguf_context * m) {
             df_meta(m);
             gguf_remove_key(m, kv(df, "attention.sliding_window").c_str());
             gguf_set_val_f32(m, kv(df, "embedding_scale").c_str(), 16.0f);
             gguf_set_val_f32(m, kv(df, "attention.scale").c_str(), 0.0625f);
+            gguf_set_val_f32(m, kv(df, "attention.value_scale").c_str(), 0.75f);
             gguf_set_val_str(m, kv(df, "hidden_activation").c_str(), "gelu_pytorch_tanh");
         }, [&](Extra & x, llama_model * model) {
             for (const auto & [tname, t] : llama_internal_get_tensor_map(model)) {
@@ -310,7 +401,7 @@ int main(int argc, char ** argv) {
     // Qwen3.5 with its full-attention layers' Q (and Q gate), K and V fused
     // into one attn_qkv, which create_tensor_qkv takes when the file has it.
     // v0.5.0 splits that tensor across devices by its own segments
-    // (llama-model.cpp:605, 691 @7fe450e19): the recipe writes the three
+    // (llama-model.cpp:610, 700 @d81235049): the recipe writes the three
     // separately, so without this no fixture reaches them.
     run([&] {
         return write_fixture(LLM_ARCH_QWEN35, "qwen35-fusedqkv", seed, dir, [&](gguf_context *) {
@@ -392,6 +483,88 @@ int main(int argc, char ** argv) {
     run([&] { return dspark("dflash-dspark-bonus", true); });
     run([&] { return dspark("dflash-dspark", false); });
     run([&] { return dspark("dflash-dspark-noconf", false, false); });
+
+    // clef, new at v0.6.0 (models/clef.cpp:7, 25 @d81235049): a Qwen3.5
+    // backbone with a joint decision head. Upstream's recipe skips it ("TODO
+    // decision head tensors") and the user-data path cannot build it, since
+    // load_arch_tensors sizes the head from tensors it finds in the file. So
+    // the model is built as qwen35 -- whose recipe keys clef reads unchanged
+    // -- and written as clef, the head's tensors added: a width of 64 over
+    // two heads, a 96-wide FFN, one routing block and one joint block.
+    run([&] {
+        const int64_t n_embd = 256, n_embd_h = 64, n_ff_h = 96;
+        return write_fixture(LLM_ARCH_QWEN35, "clef-dense", seed, dir, [&](gguf_context *) {
+        }, [&](Extra & x, llama_model * model) {
+            // qwen35's optional embeddings projection is n_embd wide in the
+            // recipe; clef's output is one score, so the file carries none
+            for (const auto & [tname, t] : llama_internal_get_tensor_map(model)) {
+                if (tname.rfind("cls.", 0) == 0) x.replaces.insert(tname);
+            }
+            auto norm = [&](const std::string & n, int64_t size) {
+                x.f32((n + ".weight").c_str(), {size}, seed);
+                x.f32((n + ".bias").c_str(),   {size}, seed);
+            };
+            auto attn = [&](const std::string & p) {
+                for (const char * s : {"q", "k", "v", "o"}) {
+                    x.f32((p + s + ".weight").c_str(), {n_embd_h, n_embd_h}, seed);
+                    x.f32((p + s + ".bias").c_str(),   {n_embd_h},           seed);
+                }
+            };
+            for (int il = 0; il < 2; il++) {
+                const std::string blk = "dec.blk." + std::to_string(il) + ".";
+                if (il < 1) {
+                    norm(blk + "cross_attn_norm_kv", n_embd_h);
+                } else {
+                    norm(blk + "attn_norm", n_embd_h);
+                    attn(blk + "attn_");
+                }
+                norm(blk + "cross_attn_norm", n_embd_h);
+                attn(blk + "cross_attn_");
+                norm(blk + "ffn_norm", n_embd_h);
+                x.f32((blk + "ffn_up.weight").c_str(),   {n_embd_h, n_ff_h}, seed);
+                x.f32((blk + "ffn_up.bias").c_str(),     {n_ff_h},           seed);
+                x.f32((blk + "ffn_down.weight").c_str(), {n_ff_h, n_embd_h}, seed);
+                x.f32((blk + "ffn_down.bias").c_str(),   {n_embd_h},         seed);
+            }
+            norm("decision.hidden_norm",         n_embd);
+            norm("decision.option_summary_norm", n_embd_h);
+            norm("decision.field_norm",          n_embd_h);
+            norm("decision.option_norm",         n_embd_h);
+            for (const char * p : {"memory", "question", "option_question", "global", "option_context", "option_lexical"}) {
+                x.f32((std::string("decision.proj_") + p + ".weight").c_str(), {n_embd, n_embd_h}, seed);
+            }
+            x.f32("decision.scales",            {3},                       seed);
+            x.f32("token_types.weight",         {n_embd_h, 3},             seed);
+            x.f32("decision.scorer.weight",     {4*n_embd_h, n_embd_h},    seed);
+            x.f32("decision.scorer.bias",       {n_embd_h},                seed);
+            x.f32("decision.scorer_out.weight", {n_embd_h, 1},             seed);
+            x.f32("decision.scorer_out.bias",   {1},                       seed);
+        }, false, [&](gguf_context * g) {
+            rename_prefix(g, "qwen35.", "clef.");
+            gguf_set_val_str(g, "general.architecture", "clef");
+            gguf_set_val_u32(g, "clef.decision.routing_block_count", 1);
+            gguf_set_val_u32(g, "clef.decision.block_count",         1);
+            gguf_set_val_u32(g, "clef.decision.head_count",          2);
+        }, true);
+    });
+
+    // A ModernBERT decision model, new at v0.6.0 (models/modern-bert.cpp:6,
+    // 55, 242 @d81235049): the recipe's second block becomes the head's --
+    // LayerNorms, QKV, output and FFN all with biases, the FFN not gated --
+    // over three token types, scored through the classifier. The user-data
+    // path builds all of it from the keys.
+    run([&] {
+        return write_fixture(LLM_ARCH_MODERN_BERT, "modern-bert-decision", seed, dir, [&](gguf_context * m) {
+            // four blocks: the recipe's SWA pattern (2, dense first) makes
+            // blocks 1 and 3 SWA, so the encoder keeps one and the head's
+            // block is one load_arch_hparams must turn dense. With two, the
+            // head takes the only SWA block and the C++ asserts on the
+            // unused SWA mask's buffer.
+            gguf_set_val_u32(m, "modern-bert.block_count", 4);
+            gguf_set_val_u32(m, "modern-bert.decision.block_count", 1);
+            gguf_set_val_u32(m, "tokenizer.ggml.token_type_count", 3);
+        }, none_tensors, false, nullptr, true);
+    });
 
     llama_backend_free();
     return failed == 0 ? 0 : 1;

@@ -639,8 +639,161 @@ def records():
     for v in ([{"event": "e", "data": {"x": 1}}, {"data": 1}], {"event": "e", "data": "é"}, {"x": "\udcff"}, [], 5, None,
               [{"event": 3, "data": 1}], {"event": "only"}):
         yield "SSE", v
-    for t in range(14):
+    for t in range(15):
         yield "TK", {"type": t, "seed": rng.choice([4294967295, 7, 4294967294]), "children": rng.randint(0, 3)}
+    # on a generator state of their own, so the records before them stay as they were
+    saved = rng.getstate()
+    rng.seed(int(os.environ.get("SERVER_TASK_SEED", "1")) * 7919 + 11)
+    for kind, payload in decision_records():
+        yield kind, payload
+    rng.setstate(saved)
+
+
+# ---------------------------------------------------------------------------
+# v0.6.0: the typed decision API, the model architecture object, /embeddings
+# content arrays
+
+# harness/server/decision.setup's models, after VOCABS on the command line
+# (loaded vocab-only, they carry the decision metadata): the working types,
+# then the three whose metadata does not load
+DEC_NAMES = ["OPENJEV", "LEV", "NIMBLE", "KEV", "CLEF", "LAYA", "UNKNOWN", "NOTMPL", "BADTEMP"]
+DEC_FIXTURES = []
+
+
+def dec_value(depth=0):
+    k = rng.random()
+    if depth > 2 or k < 0.35:
+        return rng.choice([word(), "", "x <|im_start|> y", "<|box_start|>", "<<clef:sep>>", MARKER, "  pad ", "é"])
+    if k < 0.45:
+        return rng.choice([None, True, False, 0, -3, 1.5, 1e30])
+    if k < 0.7:
+        return [dec_value(depth + 1) for _ in range(rng.randint(0, 3))]
+    return {rng.choice(["b", "a", "zz", "", "k", "k2", "é"]): dec_value(depth + 1) for _ in range(rng.randint(0, 3))}
+
+
+def dec_question():
+    t = rng.choice(["choice", "choice", "score", "noul", "noul", "bogus", None])
+    q = {}
+    if t is not None:
+        q["type"] = t
+    if rng.random() < 0.95:
+        q["instructions"] = dec_value() if rng.random() < 0.3 else word() or "q"
+    k = rng.random()
+    if t == "choice":
+        n = rng.choice([1, 2, 3, 5, 9, 27, 0])
+        if k < 0.9:
+            q["criteria"] = {rng.choice(["k", "opt", "a", "z", "x"]) + str(i): (dec_value() if rng.random() < 0.5 else None) for i in range(n)}
+        elif k < 0.95:
+            q["criteria"] = [1, 2]
+    elif t == "score":
+        n = rng.choice([1, 2, 3, 4, 6, 10, 11])
+        if k < 0.9:
+            q["criteria"] = [dec_value() if rng.random() < 0.3 else word() for _ in range(n)]
+        elif k < 0.95:
+            q["criteria"] = {"a": 1}
+    elif t == "noul":
+        if k < 0.4:
+            q["criteria"] = {key: dec_value() for key in rng.sample(["true", "false", "maybe"], rng.randint(0, 3))}
+        elif k < 0.45:
+            q["criteria"] = [1]
+    return q
+
+
+def dec_state():
+    k = rng.random()
+    if k < 0.4:
+        return rng.choice([word(), "I was charged twice.", "<|box_end|> tricky <|im_end|>", "a" * 120])
+    if k < 0.6:
+        return dec_value()
+    msgs = []
+    for _ in range(rng.randint(0, 3)):
+        m = {"role": rng.choice(["user", "assistant"])}
+        if rng.random() < 0.5:
+            parts = [rng.choice([{"type": "text", "text": word()}, {"type": "image_url", "image_url": {"url": "data:image/png;base64," + B64_1}},
+                                 {"type": "image_url", "image_url": "data:image/png;base64," + B64_1}, {"type": "other"}, 5])
+                     for _ in range(rng.randint(0, 3))]
+            m["content"] = parts
+        else:
+            m["content"] = word()
+        msgs.append(m)
+    return {"messages": msgs, "extra": 1} if rng.random() < 0.5 else msgs
+
+
+def decision_records():
+    base = len(VOCABS)
+    pool = lambda: [rng.choice([rng.uniform(-8, 8), rng.uniform(-80, 80), 0.0, 1.0, 1.0, -1e30, 3.4e38]) for _ in range(rng.randint(1, 600))]
+    std_q = {"route": {"type": "choice", "instructions": "Which team should handle this?",
+                       "criteria": {"billing": "payments and refunds", "shipping": None, "technical": None}},
+             "urgency": {"type": "score", "instructions": "How urgent is this?", "criteria": ["can wait", "this week", "today", "right now"]},
+             "angry": {"type": "noul", "instructions": "Is the customer angry?"}}
+    for d, name in enumerate(DEC_NAMES):
+        yield "D", {"v": base + d, "body": {"state": "I was charged twice for my order last week.", "questions": std_q},
+                    "pool": pool(), "n_slots": 2}
+    yield "D", {"v": 0, "body": {"state": "s", "questions": std_q}}
+    # every throw of parse_questions, parse_state and fill_task_joint, with the rest valid
+    one = {"q": {"type": "noul", "instructions": "x"}}
+    many = {"q": {"type": "choice", "instructions": "x", "criteria": {f"o{i}": None for i in range(53)}}}
+    for v, body in ((0, {"state": "s", "questions": {"q": "not an object"}}),
+                    (0, {"state": "s", "questions": many}),
+                    (1, {"state": "s", "questions": {"q": {"type": "choice", "instructions": "x", "criteria": {f"o{i}": None for i in range(300)}}}}),
+                    (0, {"state": "s", "questions": one, "images": "x"}),
+                    (0, {"state": "s", "questions": one, "images": ["http://x/y.png"]}),
+                    (0, {"state": "s", "questions": one, "images": [3]}),
+                    (0, {"state": "s", "questions": one, "images": ["data:image/png;base64," + B64_1] * 9}),
+                    (0, {"state": "s", "questions": one, "videos": ["v"]}),
+                    (0, {"state": [{"role": "user", "content": [{"type": "image_url", "image_url": "http://x"}]}], "questions": one}),
+                    (4, {"state": "s", "questions": {"q": {"type": "choice", "instructions": "x", "criteria": {"": None, "b": None}}}}),
+                    (4, {"state": "s", "questions": {"q": {"type": "noul", "instructions": ""}}}),
+                    (5, {"state": "s", "questions": {"q": {"type": "choice", "instructions": "x" * 400, "criteria": {f"o{i}": "y " * 60 for i in range(9)}}}})):
+        yield "D", {"v": base + v, "body": body, "pool": pool(), "n_slots": 2}
+    # a score of 8 to 10 levels on every type: decision_confidence_score's
+    # distance is vectorized eight at a time from 8, its tail fused
+    for d in range(6):
+        for n in (2, 3, 5, 6, 7, 8, 9, 10):
+            q = {"s": {"type": "score", "instructions": "rate", "criteria": [f"level {i}" for i in range(n)]}}
+            for _ in range(2):
+                yield "D", {"v": base + d, "body": {"state": word() or "s", "questions": q}, "pool": pool(), "n_slots": 1}
+            # mild scores, so no probability is exactly 0 or 1 and every product rounds
+            for _ in range(3):
+                yield "D", {"v": base + d, "body": {"state": word() or "s", "questions": q},
+                            "pool": [rng.uniform(-1.5, 1.5) for _ in range(64)], "n_slots": 1}
+    for _ in range(N):
+        body = {}
+        if rng.random() < 0.95:
+            body["state"] = dec_state()
+        if rng.random() < 0.95:
+            body["questions"] = {rng.choice(["q", "a", "b", "route", "é", ""]) + str(i): dec_question() for i in range(rng.randint(0, 4))}
+            if rng.random() < 0.03:
+                body["questions"] = rng.choice([[], "x", {}])
+        if rng.random() < 0.1:
+            body["images"] = rng.choice([[], None, "x", ["data:image/png;base64," + B64_1], ["http://x/y.png"], [3],
+                                         ["data:image/png;base64," + B64_1] * 9])
+        if rng.random() < 0.05:
+            body["videos"] = rng.choice([[], None, ["v"]])
+        yield "D", {"v": base + rng.randrange(6), "body": body, "pool": pool(), "n_slots": rng.choice([1, 2, 3, 8]),
+                    "nan_at": rng.choice([-1, -1, -1, 0, 1]), "short": rng.random() < 0.05}
+    for _ in range(N // 3):
+        yield "DR", {"index": rng.randint(0, 9), "n_tokens": rng.randint(0, 999),
+                     "scores": [rng.uniform(-50, 50) for _ in range(rng.randint(0, 6))]}
+    for t in range(8):
+        for img, aud, vid in ((False, False, False), (True, False, True), (True, True, True)):
+            yield "MA", {"type": t, "image": img, "audio": aud, "video": vid}
+    parts = lambda: [rng.choice([{"type": "text", "text": word()}, {"type": "text"}, {"type": "text", "text": MARKER},
+                                 {"type": "image_url", "image_url": {"url": "data:image/png;base64," + B64_1}},
+                                 {"type": "input_audio", "input_audio": {"data": "AAAA", "format": "wav"}},
+                                 {"type": "input_video", "input_video": {"url": "data:video/mp4;base64,AAAA"}},
+                                 {"type": "video_url", "video_url": {"url": "x"}}, {"type": "unknown"}, {}])
+                     for _ in range(rng.randint(0, 4))]
+    for _ in range(N // 2):
+        content = parts() if rng.random() < 0.9 else rng.choice(["string", 5, None, {"a": 1}])
+        opt = chat_opt()
+        mtmd = rng.random() < 0.3
+        if not mtmd:
+            # a server allows media only with a projector: upstream's
+            # process_mtmd_prompt dereferences a null context
+            opt["allow_image"] = opt["allow_audio"] = opt["allow_video"] = False
+        yield "OE", {"v": rng.randrange(len(VOCABS)), "tmpl": "chatml", "opt": opt, "content": content,
+                     "mtmd": mtmd, "add_special": rng.random() < 0.7, "parse_special": rng.random() < 0.7}
 
 
 # ---------------------------------------------------------------------------
@@ -987,6 +1140,17 @@ def chat_step4():
 # ---------------------------------------------------------------------------
 
 COVERAGE = [
+    # v0.6.0: the decision API (server-decision.cpp) and /embeddings content arrays
+    "\"state\" must be provided", "\"questions\" must be a non-empty object", ": must be an object",
+    "\"instructions\" must be provided", "\"criteria\" must be a non-empty object",
+    "\"criteria\" must be an array of 2 to 10 levels", "\"criteria\" must be an object",
+    "\"type\" must be one of: choice, score, noul", "too many options (", "\"videos\" is not supported",
+    "\"images\" must be an array", "images must be data URLs", "too many images, the maximum is",
+    "decision result does not match the number of options", "the model could not evaluate the decision",
+    "the instructions and the options of a question must not be empty",
+    "unsupported decision model type: foo", "decision model has no \"systemone\" template",
+    "invalid decision temperature:", "\"decisions\"", "\"input_modalities\"", "\"content\" must be an array",
+    "\"scores\"", "\"noul\"", "\"confidence\"", "\"legend\"", "group ",
     "Value must be between", "Grammar trigger word should be marked as preserved token",
     "no triggers set for lazy grammar", "dry_sequence_breakers must be a non-empty", "'lora' must be an array",
     "Unknown reasoning format", "Unknown chat format", "JSON schema conversion failed", "\"prompt\" is required",
@@ -1094,6 +1258,15 @@ def main():
     open(MEDIA_DIR + "img1.png", "wb").write(IMG1)
     open(MEDIA_DIR + "sub/img2.png", "wb").write(IMG2)
 
+    # the decision models (harness/server/decision.setup)
+    dec_data = os.path.join(out, "decision")
+    os.makedirs(dec_data, exist_ok=True)
+    if subprocess.run(["harness/server/decision.setup"], env=dict(os.environ, DATA=dec_data)).returncode != 0:
+        print("FAIL: harness/server/decision.setup", file=sys.stderr)
+        sys.exit(2)
+    dec_env = dict(l.strip().split("=", 1) for l in open(os.path.join(dec_data, "setup.env")) if "=" in l)
+    DEC_FIXTURES[:] = [dec_env[f"DEC{n}"] for n in DEC_NAMES]
+
     recs = list(records())
     inp = os.path.join(out, "input.txt")
     with open(inp, "w", encoding="utf-8", errors="surrogatepass") as f:
@@ -1118,6 +1291,7 @@ def main():
              "-cflags", "-std=c++17", "-w", "--", "harness/server_task_ref.cpp",
              "llama.cpp/tools/server/server-common.cpp", "llama.cpp/tools/server/server-task.cpp",
              "llama.cpp/tools/server/server-schema.cpp", "llama.cpp/tools/server/server-chat.cpp",
+             "llama.cpp/tools/server/server-decision.cpp",
              "zig-out/lib/libllama-common-ref.a", "zig-out/lib/libmtmd-ref.a", "zig-out/lib/libllama-ref.a",
              "zig-out/lib/libggml.a", "-lc++", "-lc"] + platform_libs("exe"),
             "could not build harness/server_task_ref.cpp")
@@ -1137,7 +1311,7 @@ def main():
         sides = {}
         for name, exe in (("ref", ref), ("port", port)):
             t = os.path.join(out, f"{name}{pi}.txt")
-            r = run([exe, pinp, t, text_model, mmproj] + VOCABS, f"the {name} failed (or leaked) on pass {pi}", env=env)
+            r = run([exe, pinp, t, text_model, mmproj] + VOCABS + DEC_FIXTURES, f"the {name} failed (or leaked) on pass {pi}", env=env)
             sides[name] = (mask(open(t, encoding="utf-8", errors="replace").read()), mask(r.stderr.decode(errors="replace")))
             open(os.path.join(out, f"{name}{pi}.log"), "w").write(r.stderr.decode(errors="replace"))
         ref_all += sides["ref"][0]

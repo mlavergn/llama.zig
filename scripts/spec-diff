@@ -145,12 +145,35 @@ CASES = [
     case("mtp-gemma4-2seq-cpu", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
                                  "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0", "-dev", "none", "-devd", "none",
                                  "--spec-draft-n-max", "4"] + FIX),
+    # probabilistic drafting verified by rejection (v0.6.0): the server's path at temp > 0
+    case("draft-simple-reject", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "--spec-draft-sampling", "probabilistic",
+                                 "-p", T3, "-n", "40", "--temp", "0.8", "--spec-draft-n-max", "6"] + COMMON,
+         {"SPEC_REJECT": "1"}),
+    case("draft-simple-reject-grammar", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "--spec-draft-sampling",
+                                         "probabilistic", "-p", T1, "-n", "24", "--temp", "1.1",
+                                         "--grammar", "root ::= [a-z ]+ \".\""] + COMMON,
+         {"SPEC_REJECT": "1"}),
+    # a grammar the model fights, so the target's candidates mostly break it and the mask matters
+    case("draft-simple-reject-grammar-digits", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "--spec-draft-sampling",
+                                                "probabilistic", "-p", T1, "-n", "40", "--temp", "1.5", "--top-k", "100",
+                                                "--grammar", "root ::= [0-9 ]+"] + COMMON,
+         {"SPEC_REJECT": "1"}),
+    case("draft-simple-reject-greedy-draft", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-np", "2", "-p", T1 + "|" + T3,
+                                              "-n", "24", "--temp", "0.8"] + COMMON,
+         {"SPEC_REJECT": "1"}),
+    case("mtp-reject", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
+                        "--spec-draft-sampling", "probabilistic", "-p", IDS, "-n", "16", "--temp", "0.7",
+                        "--spec-draft-n-max", "4"] + FIX,
+         {"SPEC_REJECT": "1"}),
     case("dspark-noconf", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dspark-noconf.gguf", "--spec-type",
                            "draft-dspark", "-p", IDS, "-n", "8", "--temp", "0", "--spec-draft-p-min", "0.5"] + FIXV),
 ]
 
 # Cases where upstream itself aborts, and the port must abort alike.
-EXPECT_ABORT = {"ngram-cache-missing"}
+# Since v0.6.0 dflash-novocab is one: a draft without a mask token puts
+# LLAMA_TOKEN_NULL in the noise block, which common_batch takes for an
+# embedding entry with no data, and get_sub_batch aborts.
+EXPECT_ABORT = {"ngram-cache-missing", "dflash-novocab"}
 
 # Each must appear in some reference transcript (stdout or stderr).
 PHRASES = [
@@ -214,10 +237,15 @@ PHRASES = [
     "loading draft model",
     "getting device memory data for the extra model",
     "rb force 1",
+    "  rejection",
+    "failed to add embedding at index",
 ]
 
 MASKS = [
     (re.compile(r"took [0-9.]+ (ms|seconds)"), "took T"),
+    # v0.6.0's Metal backend compiles its libraries at start-up and says how long each took
+    (re.compile(r"library in [0-9.]+ sec"), "library in T sec"),
+    (re.compile(r"embedded data in [0-9.]+ sec \(max single = [0-9.]+ sec\)"), "embedded data in T sec (max single = T sec)"),
     (re.compile(r"0x[0-9a-f]+"), "0xP"),
     (re.compile(r"dur\(b,g,a\) = [0-9., ]+ ms"), "dur(b,g,a) = T ms"),
     (re.compile(r"\d+\.\d+ ms(?: per token)?"), "T ms"),

@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports the rest of `common_params_parser_init` (arg.cpp:1391 @7fe450e19)
-//! from `llama.cpp/common/arg.cpp` (v0.5.0, `7fe450e19`), as
+//! Ports the rest of `common_params_parser_init` (arg.cpp:1397 @d81235049)
+//! from `llama.cpp/common/arg.cpp` (v0.6.0, `d81235049`), as
 //! `arg_options.zig` describes, with the helpers its handlers call:
 //! `parse_tensor_buffer_overrides`, `kv_cache_type_from_str`,
 //! `get_all_kv_cache_types`, `parse_device_list`,
@@ -13,8 +13,8 @@
 //! `llm_add_n_cpu_ffn_overrides`. Each names what it ports and the line it
 //! began at.
 //!
-//! `--rpc` -- added only when `llama_supports_rpc()`, never here, though the
-//! question is still asked -- is not among them. The multimodal projector's
+//! `--rpc` is there, refusing every value, since this build has no RPC
+//! backend. The multimodal projector's
 //! options (`mmproj_examples`) are, for `llama-mtmd-cli`, `llama-tts` and
 //! `llama-server`.
 
@@ -34,7 +34,7 @@ const throw = arg.throw;
 const throwStr = arg.throwStr;
 const S = [:0]const u8;
 
-/// Ports `list_builtin_chat_templates` (arg.cpp:1319 @7fe450e19): libllama's
+/// Ports `list_builtin_chat_templates` (arg.cpp:1325 @d81235049): libllama's
 /// built-in template names, comma-separated.
 pub fn listBuiltinChatTemplates(a: std.mem.Allocator) ![:0]const u8 {
     const n = c.llama_chat_builtin_templates(null, 0);
@@ -48,7 +48,7 @@ pub fn listBuiltinChatTemplates(a: std.mem.Allocator) ![:0]const u8 {
     return msg.toOwnedSliceSentinel(a, 0);
 }
 
-/// `mmproj_examples` (arg.cpp:60 @7fe450e19): the examples that load an
+/// `mmproj_examples` (arg.cpp:60 @d81235049): the examples that load an
 /// mmproj.
 pub const mmproj_examples = [_]params_mod.Example{ .mtmd, .server, .cli, .tts };
 
@@ -58,14 +58,14 @@ fn tf(b: bool) [*:0]const u8 {
     return if (b) "true" else "false";
 }
 
-/// Ports `kv_cache_types` (arg.cpp:304 @7fe450e19).
+/// Ports `kv_cache_types` (arg.cpp:304 @d81235049).
 const kv_cache_types = [_]c.ggml_type{
     c.GGML_TYPE_F32,    c.GGML_TYPE_F16,  c.GGML_TYPE_BF16,
     c.GGML_TYPE_Q8_0,   c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1,
     c.GGML_TYPE_IQ4_NL, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1,
 };
 
-/// Ports `kv_cache_type_from_str` (arg.cpp:316 @7fe450e19).
+/// Ports `kv_cache_type_from_str` (arg.cpp:316 @d81235049).
 pub fn kvCacheTypeFromStr(s: []const u8) !c.ggml_type {
     for (kv_cache_types) |t| {
         if (std.mem.eql(u8, std.mem.span(c.ggml_type_name(t)), s)) return t;
@@ -74,7 +74,7 @@ pub fn kvCacheTypeFromStr(s: []const u8) !c.ggml_type {
     return throwStr(std.fmt.bufPrint(&buf, "Unsupported cache type: {s}", .{s}) catch "Unsupported cache type");
 }
 
-/// Ports `get_all_kv_cache_types` (arg.cpp:325 @7fe450e19).
+/// Ports `get_all_kv_cache_types` (arg.cpp:325 @d81235049).
 pub fn allKvCacheTypes(a: std.mem.Allocator) ![:0]const u8 {
     var s: std.ArrayList(u8) = .empty;
     for (kv_cache_types, 0..) |t, i| {
@@ -84,7 +84,7 @@ pub fn allKvCacheTypes(a: std.mem.Allocator) ![:0]const u8 {
     return a.dupeSentinel(u8, s.items, 0);
 }
 
-/// Ports `parse_device_list` (arg.cpp:1116 @7fe450e19).
+/// Ports `parse_device_list` (arg.cpp:1122 @d81235049).
 pub fn parseDeviceList(p: *Params, value: []const u8) !std.ArrayList(c.ggml_backend_dev_t) {
     var devices: std.ArrayList(c.ggml_backend_dev_t) = .empty;
     const dev_names = try strings.split(p.arena, value, ',');
@@ -106,7 +106,7 @@ pub fn parseDeviceList(p: *Params, value: []const u8) !std.ArrayList(c.ggml_back
     return devices;
 }
 
-/// Ports `common_print_available_devices` (arg.cpp:1138 @7fe450e19).
+/// Ports `common_print_available_devices` (arg.cpp:1144 @d81235049).
 pub fn printAvailableDevices(a: std.mem.Allocator) !void {
     const MiB: usize = 1024 * 1024;
     var devices: std.ArrayList(c.ggml_backend_dev_t) = .empty;
@@ -132,7 +132,7 @@ pub fn printAvailableDevices(a: std.mem.Allocator) !void {
     }
 }
 
-/// Ports `parse_tensor_buffer_overrides` (arg.cpp:252 @7fe450e19).
+/// Ports `parse_tensor_buffer_overrides` (arg.cpp:252 @d81235049).
 pub fn parseTensorBufferOverrides(p: *Params, value: []const u8, overrides_out: *std.ArrayList(c.llama_model_tensor_buft_override)) !void {
     c.ggml_backend_load_all();
 
@@ -179,20 +179,20 @@ pub fn parseTensorBufferOverrides(p: *Params, value: []const u8, overrides_out: 
     }
 }
 
-/// Ports `LLM_FFN_EXPS_REGEX` (common/common.h:1131 @7fe450e19).
+/// Ports `LLM_FFN_EXPS_REGEX` (common/common.h:1224 @d81235049).
 pub const llm_ffn_exps_regex = "\\.ffn_(up|down|gate|gate_up)_(ch|)exps";
 
-/// Ports `LLM_FFN_DENSE_REGEX` (common/common.h:1133 @7fe450e19).
+/// Ports `LLM_FFN_DENSE_REGEX` (common/common.h:1226 @d81235049).
 const llm_ffn_dense_regex = "\\.ffn_(up|down|gate)\\.";
 
-/// Ports `llm_ffn_block_regex` (common/common.h:1135 @7fe450e19).
+/// Ports `llm_ffn_block_regex` (common/common.h:1228 @d81235049).
 ///
 /// Return: `blk\.<idx><ffn_regex>`, the arena's.
 fn llmFfnBlockRegex(p: *Params, idx: c_int, ffn_regex: []const u8) ![:0]const u8 {
     return std.fmt.allocPrintSentinel(p.arena, "blk\\.{d}{s}", .{ idx, ffn_regex }, 0);
 }
 
-/// Ports `llm_add_n_cpu_ffn_overrides` (common/common.h:1143 @7fe450e19):
+/// Ports `llm_add_n_cpu_ffn_overrides` (common/common.h:1236 @d81235049):
 /// one CPU buffer-type override per layer below `n`. The C keeps the
 /// patterns alive in a static list; here the arena does.
 pub fn llmAddNCpuFfnOverrides(p: *Params, n: c_int, ffn_regex: []const u8, overrides: *std.ArrayList(c.llama_model_tensor_buft_override)) !void {
@@ -225,9 +225,9 @@ fn splitCommaSlash(a: std.mem.Allocator, s: []const u8) !std.ArrayList([:0]const
     return out;
 }
 
-/// Ports `string_split` (common/common.h:803 @7fe450e19): each field as
+/// Ports `string_split` (common/common.h:810 @d81235049): each field as
 /// `std::getline` cuts them -- no empty last field -- read by `operator>>`,
-/// 0 where it reads nothing.
+/// which throws where it reads nothing or overflows.
 fn splitInts(a: std.mem.Allocator, s: []const u8) !std.ArrayList(i32) {
     var out: std.ArrayList(i32) = .empty;
     var fields = std.mem.splitScalar(u8, s, ',');
@@ -240,7 +240,9 @@ fn splitInts(a: std.mem.Allocator, s: []const u8) !std.ArrayList(i32) {
         const st = i;
         if (i < field.len and (field[i] == '+' or field[i] == '-')) i += 1;
         while (i < field.len and std.ascii.isDigit(field[i])) i += 1;
-        try out.append(a, std.fmt.parseInt(i32, field[st..i], 10) catch 0);
+        const v = std.fmt.parseInt(i32, field[st..i], 10) catch
+            return arg.throw("invalid value: \"%.*s\"", .{ @as(c_int, @intCast(field.len)), field.ptr });
+        try out.append(a, v);
     }
     return out;
 }
@@ -519,11 +521,14 @@ pub fn add(ctx: *Context) !void {
             q.video_ffmpeg_bin_dir = try arg.dupe(q, value);
         }
     }.f } }).setExamples(&mmproj_examples).setEnv("LLAMA_ARG_VIDEO_FFMPEG_DIR"));
-    // arg.cpp:2676: `--rpc` is added only with an RPC backend, which this
-    // build never has -- but the C asks, and asking initialises the backend
-    // registry, so every device's start-up log happens here, at the
-    // verbosity in force before the command line is read.
-    if (c.llama_supports_rpc()) return throwStr("an RPC backend is not supported by this port");
+    // arg.cpp:2682: `--rpc` is always added; an RPC backend, which this build
+    // never has, is asked for only when the option is given.
+    try ctx.add((Arg{ .args = &.{"--rpc"}, .value_hint = "SERVERS", .help = "comma-separated list of RPC servers (host:port)", .handler = .{ .string = struct {
+        fn f(_: *Params, _: S) !void {
+            if (!c.llama_supports_rpc()) return throwStr("RPC not supported in this build");
+            return throwStr("an RPC backend is not supported by this port");
+        }
+    }.f } }).setEnv("LLAMA_ARG_RPC"));
     // arg.cpp:2686
     try ctx.add((Arg{ .args = &.{ "-lm", "--load-mode" }, .value_hint = "MODE", .help = "model loading mode (default: auto)\n- auto: mmap, unless a device does not support it\n- none: no special loading mode\n- mmap: memory-map model (if mmap disabled, slower load but may reduce pageouts if not using mlock)\n- mlock: force system to keep model in RAM rather than swapping or compressing\n- mmap+mlock: mmap + force system to keep model in RAM rather than swapping or compressing\n- dio: use DirectIO if available\n", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -589,7 +594,7 @@ pub fn add(ctx: *Context) !void {
         .handler = .{
             .void_ = struct {
                 fn f(q: *Params) !void {
-                    // `llm_ffn_exps_cpu_override` (common/common.h:1139 @7fe450e19)
+                    // `llm_ffn_exps_cpu_override` (common/common.h:1232 @d81235049)
                     try q.tensor_buft_overrides.append(q.arena, .{ .pattern = llm_ffn_exps_regex, .buft = c.ggml_backend_cpu_buffer_type() });
                 }
             }.f,
@@ -895,6 +900,12 @@ pub fn add(ctx: *Context) !void {
     try ctx.add((Arg{ .args = &.{"--process-output"}, .help = try ctx.fmt("collect data for the output tensor (default: %s)", .{tf(p.process_output)}), .handler = .{ .void_ = struct {
         fn f(q: *Params) !void {
             q.process_output = true;
+        }
+    }.f } }).setExamples(&.{.imatrix}));
+    // arg.cpp:3186
+    try ctx.add((Arg{ .args = &.{"--nextn"}, .help = try ctx.fmt("collect data for MTP/NextN layers (default: %s)", .{tf(p.load_mtp)}), .handler = .{ .void_ = struct {
+        fn f(q: *Params) !void {
+            q.load_mtp = true;
         }
     }.f } }).setExamples(&.{.imatrix}));
     // arg.cpp:3179

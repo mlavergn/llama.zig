@@ -247,7 +247,7 @@ static bool no_callback(int i, struct ggml_tensor * t1, struct ggml_tensor * t2,
     return true;
 }
 
-/* `graph_copy_dup_tensor` (ggml-backend.cpp:2149 @7fe450e19) records a
+/* `graph_copy_dup_tensor` (ggml-backend.cpp:2305 @d81235049) records a
  * node's copy only after copying its sources, so `ggml_cast`'s `src[1]`,
  * the node itself, comes back NULL in the copy. Put it back; see the file
  * comment. */
@@ -652,6 +652,110 @@ static struct ggml_tensor * build_fa_sparse_no_gqa(struct ggml_context * ctx, st
     return out;
 }
 
+/* v0.6.0: sparse flash attention over a quantized cache breaks even only
+ * at a 16x reduction off coopmat2 (`min_ratio`). Upstream's quantized
+ * sparse cases all sit exactly at 16x, which takes the sparse path with
+ * any ratio up to 16; this one is at 8x with a GQA of 8, so the scalar
+ * and coopmat1 arms must stay dense -- and coopmat2 too, whose sparse
+ * gather reads only f16. */
+static struct ggml_tensor * build_fa_sparse_q8_0_ratio8(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    const int64_t hs = 128, kv = 8192, n_kv_max = 1024, nh = 8;
+    struct ggml_tensor * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, hs, 1, nh, 1);
+    struct ggml_tensor * k = ggml_new_tensor_4d(ctx, GGML_TYPE_Q8_0, hs, kv, 1, 1);
+    struct ggml_tensor * v = ggml_new_tensor_4d(ctx, GGML_TYPE_Q8_0, hs, kv, 1, 1);
+    struct ggml_tensor * m = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, kv, 1, 1, 1);
+    ggml_set_name(m, "sparse_mask:1024");
+    struct ggml_tensor * out = ggml_flash_attn_ext(ctx, q, k, v, m, 1.0f / sqrtf((float) hs), 0.0f, 0.0f);
+    ggml_flash_attn_ext_set_n_kv_max(out, (int32_t) n_kv_max);
+    ggml_prec_set_acc(out, GGML_PREC_F32);
+    *cmp = out;
+    return out;
+}
+
+/* v0.6.0's HC_POST_GATE fuses scale -> sigmoid -> scale into the
+ * DSV4_HC_POST that reads it, but only when neither scale has a bias.
+ * Upstream's gated cases have none, so dropping the check passed them;
+ * here the inner scale carries one and both sides must run the chain
+ * unfused. */
+static struct ggml_tensor * build_hc_post_gate_bias(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    const int64_t n_embd = 31, hc = 4, nt = 17;
+    struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, nt);
+    struct ggml_tensor * residual = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_embd, hc, nt);
+    struct ggml_tensor * p = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc, nt);
+    struct ggml_tensor * post = ggml_scale(ctx, ggml_sigmoid(ctx, ggml_scale_bias(ctx, p, 1.0f / (float) hc, 0.5f)), 2.0f);
+    struct ggml_tensor * comb = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, hc, hc, nt);
+    struct ggml_tensor * out = ggml_dsv4_hc_post(ctx, x, residual, post, comb);
+    *cmp = out;
+    return out;
+}
+
+/* v0.6.0's conv_2d and conv_3d push their bindings' misalignment
+ * (`knl_offset`, `src_offset`, `dst_offset`) where v0.5.0 asserted there
+ * was none. Upstream's cases misalign only the kernel (`kernel_offset`),
+ * so zeroing `src_offset` passed all 1,966 CONV_2D and 276 CONV_3D cases.
+ * Here the input is a leaf placed one element into its storage and, for
+ * conv_2d, the output too: a node given a `view_src` before allocation,
+ * which `ggml_backend_alloc_ctx_tensors` places through
+ * `ggml_backend_view_init` as it does a leaf. */
+static struct ggml_tensor * misaligned_in(struct ggml_context * ctx, int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3) {
+    struct ggml_tensor * storage = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ne0 * ne1 * ne2 * ne3 + 1);
+    struct ggml_tensor * t = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, ne0, ne1, ne2, ne3);
+    t->view_src = storage;
+    t->view_offs = ggml_type_size(GGML_TYPE_F32);
+    return t;
+}
+static struct ggml_tensor * build_conv_2d_misaligned(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    /* Created first: the allocator places tensors in creation order, and
+     * a view's storage must already be placed. 19 x 17 x 5 x 2 is the
+     * output's size at stride, padding and dilation 1. */
+    struct ggml_tensor * storage = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 19 * 17 * 5 * 2 + 3);
+    struct ggml_tensor * kernel = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 8, 5);
+    struct ggml_tensor * input = misaligned_in(ctx, 19, 17, 8, 2);
+    struct ggml_tensor * out = ggml_conv_2d_direct(ctx, kernel, input, 1, 1, 1, 1, 1, 1);
+    GGML_ASSERT(ggml_nelements(out) + 3 == ggml_nelements(storage));
+    out->view_src = storage;
+    out->view_offs = 3 * ggml_type_size(GGML_TYPE_F32);
+    *cmp = storage;
+    return out;
+}
+static struct ggml_tensor * build_conv_3d_misaligned(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    const int64_t IC = 4, OC = 3, N = 2;
+    struct ggml_tensor * kernel = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 3, IC * OC);
+    struct ggml_tensor * input = misaligned_in(ctx, 9, 7, 5, IC * N);
+    struct ggml_tensor * out = ggml_conv_3d_direct(ctx, kernel, input, 1, 1, 1, 1, 1, 1, 1, 1, 1, (int) IC, (int) N, (int) OC);
+    *cmp = out;
+    return out;
+}
+
+/* v0.6.0: a large soft_max's partial results, and flash attention's mask
+ * bits and sparse index list, are written into `prealloc_y`, which may
+ * hold a matmul's converted src1 (f16 for coopmat, q8_1 for integer dot);
+ * each now forgets that conversion. Here a q4_0 matmul converts X, the
+ * soft_max (or sparse flash attention) runs, and a second q4_0 matmul of
+ * the same X follows: without the reset it skips the conversion and reads
+ * the overwritten buffer. Upstream's cases compute one op per graph and
+ * cannot see it. Reached where src1 is staged in `prealloc_y` -- the
+ * coopmat2, KHR coopmat and integer-dot arms -- and inert elsewhere. */
+static struct ggml_tensor * build_prealloc_y_reuse(struct ggml_context * ctx, struct ggml_tensor ** cmp, bool fa) {
+    struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 256, 8);
+    struct ggml_tensor * m1 = ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_0, 256, 64), x);
+    struct ggml_tensor * mid;
+    if (fa) {
+        struct ggml_tensor * fa_cmp;
+        mid = ggml_sum_rows(ctx, ggml_reshape_2d(ctx, build_fa_sparse_no_gqa(ctx, &fa_cmp), 128, 1));
+    } else {
+        mid = ggml_sum_rows(ctx, ggml_soft_max(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 20000, 8)));
+        mid = ggml_reshape_2d(ctx, mid, 1, 8);
+    }
+    struct ggml_tensor * t = ggml_add(ctx, m1, mid);
+    struct ggml_tensor * m2 = ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_0, 256, 64), x);
+    struct ggml_tensor * out = ggml_add(ctx, t, m2);
+    *cmp = out;
+    return out;
+}
+static struct ggml_tensor * build_prealloc_y_soft_max(struct ggml_context * c, struct ggml_tensor ** t) { return build_prealloc_y_reuse(c, t, false); }
+static struct ggml_tensor * build_prealloc_y_fa_sparse(struct ggml_context * c, struct ggml_tensor ** t) { return build_prealloc_y_reuse(c, t, true); }
+
 /* Shapes and patterns upstream's list lacks; each later layer of the port
  * adds the cases its host code needs. */
 static int extra_cases(const char * filter) {
@@ -663,6 +767,12 @@ static int extra_cases(const char * filter) {
         { "MUL_MAT",           "f16 1024x1024x256, large tiles",                    build_mm_large_tiles },
         { "MUL_MAT_VEC_FUSION", "mul_mat+add+add, second bias in src[0]",           build_mm_bias_swapped },
         { "FLASH_ATTN_EXT",    "sparse n_kv_max=512, no GQA, N == 1",               build_fa_sparse_no_gqa },
+        { "FLASH_ATTN_EXT",    "sparse n_kv_max=1024 over q8_0 at 8x, GQA 8",       build_fa_sparse_q8_0_ratio8 },
+        { "DSV4_HC_POST",      "gated hc_post, bias on the inner scale",            build_hc_post_gate_bias },
+        { "CONV_2D",           "conv_2d, input and output one element misaligned",  build_conv_2d_misaligned },
+        { "CONV_3D",           "conv_3d, input one element misaligned",             build_conv_3d_misaligned },
+        { "SOFT_MAX",          "q4_0 matmul, 20000-column soft_max, matmul of the same src1", build_prealloc_y_soft_max },
+        { "FLASH_ATTN_EXT",    "q4_0 matmul, sparse flash attention, matmul of the same src1", build_prealloc_y_fa_sparse },
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

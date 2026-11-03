@@ -7,15 +7,17 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma4.cpp` at v0.5.0 (`7fe450e19`):
+//! Ported from `llama.cpp/src/models/gemma4.cpp` at v0.6.0 (`d81235049`):
 //! `llama_model_gemma4`'s `load_arch_hparams`, `load_arch_tensors` and
-//! `build_arch_graph`, its `graph` and the graph's helpers.
+//! `build_arch_graph`, its `graph` and the graph's helpers, and
+//! `llm_graph_input_gemma4_ple`.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
 const graph = @import("../graph.zig");
+const batch = @import("../batch.zig");
 const hparams_mod = @import("../hparams.zig");
 
 const c = impl.c;
@@ -24,7 +26,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma4`'s `load_arch_hparams` (models/gemma4.cpp:3 @7fe450e19).
+/// Ports `llama_model_gemma4`'s `load_arch_hparams` (models/gemma4.cpp:4 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -62,7 +64,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_gemma4`'s `load_arch_tensors` (models/gemma4.cpp:36 @7fe450e19).
+/// Ports `llama_model_gemma4`'s `load_arch_tensors` (models/gemma4.cpp:37 @d81235049).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -176,27 +178,67 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma4`'s `build_arch_graph` (models/gemma4.cpp:143 @7fe450e19).
+/// Ports `llama_model_gemma4`'s `build_arch_graph` (models/gemma4.cpp:144 @d81235049).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const g: Graph = .{ .model = model, .b = b, .n_embd_per_layer = b.hparams.n_embd_per_layer };
     g.build();
 }
 
-/// Ports `gemma4_view_2d_slice` (models/gemma4.cpp:148 @7fe450e19): the 2D
+/// Ports `gemma4_view_2d_slice` (models/gemma4.cpp:149 @d81235049): the 2D
 /// slice of a 3D tensor at `idx` along its third dimension.
 fn view2dSlice(ctx: *c.ggml_context, x: *Tensor, idx: c_int) *Tensor {
-    impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma4.cpp", 149, "idx < (int) x->ne[2]");
+    impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma4.cpp", 150, "idx < (int) x->ne[2]");
     return c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], c.ggml_row_size(x.type, x.ne[0]), @intCast(idx * x.ne[0] * x.ne[1] * @as(i64, @intCast(c.ggml_element_size(x)))));
 }
 
-/// Ports `llama_model_gemma4`'s `graph` (src/models/models.h:869 @7fe450e19).
+/// Ports `llm_graph_input_gemma4_ple` (models/gemma4.cpp:437 @d81235049):
+/// the per-layer embeddings' token ids, which also prefetch the rows they
+/// select when the per-layer table may be prefetched.
+const InpPle = struct {
+    /// I32 `[n_tokens]`, or null on the multimodal path.
+    tokens: ?*Tensor = null,
+
+    model: *const Model,
+
+    /// Ports `llm_graph_input_gemma4_ple`'s `set_input`
+    /// (models/gemma4.cpp:441 @d81235049).
+    pub fn setInput(self: *InpPle, ubatch_: ?*const batch.Ubatch) void {
+        const ubatch = ubatch_.?;
+        const ple = self.model.per_layer_tok_embd.?;
+
+        const prefetch = self.model.canPrefetch(ple);
+
+        if (ubatch.token != null) {
+            if (prefetch) {
+                impl.prefetchRows(ple, ubatch.token, ubatch.n_tokens);
+            }
+            c.ggml_backend_tensor_set(self.tokens, ubatch.token, 0, ubatch.n_tokens * c.ggml_element_size(self.tokens));
+        } else if (prefetch) {
+            // [TAG_GEMMA4_IMG_PADDING]
+            const padding: i32 = 0;
+            impl.prefetchRows(ple, @ptrCast(&padding), 1);
+        }
+    }
+
+    /// Ports `llm_graph_input_gemma4_ple`'s `can_reuse`
+    /// (models/gemma4.cpp:458 @d81235049).
+    pub fn canReuse(self: *InpPle, params: *const graph.Params) bool {
+        if (params.ubatch.token != null) {
+            const t = self.tokens orelse return false;
+            return t.ne[0] == params.ubatch.n_tokens;
+        }
+        return self.tokens == null;
+    }
+};
+
+/// Ports `llama_model_gemma4`'s `graph` (src/models/models.h:875 @d81235049).
 const Graph = struct {
     model: *const Model,
     b: *const graph.Builder,
     n_embd_per_layer: i64,
 
     /// Ports the constructor of `llama_model_gemma4`'s `graph`
-    /// (models/gemma4.cpp:154 @7fe450e19).
+    /// (models/gemma4.cpp:155 @d81235049).
     fn build(self: *const Graph) void {
         const model = self.model;
         const b = self.b;
@@ -205,11 +247,9 @@ const Graph = struct {
         const cp = b.cparams;
         const n_tokens = b.n_tokens;
 
-        var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
-
         // Important: do not normalize weights for raw embeddings input (i.e.
-        // encoded image embeddings).
-        inpL = c.ggml_scale(ctx, inpL, if (b.ubatch.token != null) impl.sqrtf(@floatFromInt(b.n_embd)) else 1.0);
+        // encoded image embeddings): `build_inp_embd` scales the token rows only.
+        var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, impl.sqrtf(@floatFromInt(b.n_embd)));
         b.cb(inpL, "inp_scaled", -1);
 
         // The positions.
@@ -233,7 +273,7 @@ const Graph = struct {
             const layer = &model.layers[@intCast(il)];
             const ilu: u32 = @intCast(il);
             const n_embd_head: i64 = hp.nEmbdHeadK(ilu);
-            impl.assert(n_embd_head == hp.nEmbdHeadV(ilu), "models/gemma4.cpp", 186, "n_embd_head == hparams.n_embd_head_v(il)");
+            impl.assert(n_embd_head == hp.nEmbdHeadV(ilu), "models/gemma4.cpp", 185, "n_embd_head == hparams.n_embd_head_v(il)");
 
             const n_head: i64 = hp.nHead(ilu);
             const n_head_kv: i64 = hp.nHeadKv(ilu);
@@ -460,8 +500,9 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma4`'s `graph`'s `build_inp_per_layer`
-    /// (models/gemma4.cpp:440 @7fe450e19): equivalent to the Python code's
-    /// `get_per_layer_inputs()`.
+    /// (models/gemma4.cpp:469 @d81235049): equivalent to the Python code's
+    /// `get_per_layer_inputs()`. In a mixed ubatch the embedding rows carry
+    /// token id 0, the padding row the multimodal path below reads.
     ///
     /// Return: `[n_embd_per_layer, n_layer, n_tokens]`.
     fn buildInpPerLayer(self: *const Graph) *Tensor {
@@ -469,11 +510,12 @@ const Graph = struct {
         const ctx = b.ctx0;
         const model = self.model;
 
+        const inp = impl.allocator.create(InpPle) catch impl.abort("models/gemma4.cpp", 470, "out of memory");
+        inp.* = .{ .model = model };
+
         var inp_per_layer: *Tensor = undefined;
         const tok_embd_scale = impl.sqrtf(@floatFromInt(self.n_embd_per_layer));
         if (b.ubatch.token != null) {
-            const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma4.cpp", 441, "out of memory");
-            inp.* = .{ .n_embd = b.n_embd };
             inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.ubatch.n_tokens);
             c.ggml_set_input(inp.tokens);
             b.res.t_inp_tokens = inp.tokens;
@@ -482,9 +524,8 @@ const Graph = struct {
             inp_per_layer = c.ggml_reshape_3d(ctx, inp_per_layer, self.n_embd_per_layer, b.n_layer, b.n_tokens);
             inp_per_layer = c.ggml_scale(ctx, inp_per_layer, tok_embd_scale);
             b.cb(inp_per_layer, "inp_per_layer_selected", -1);
-
-            _ = b.res.addInput(graph.InpEmbd, inp);
         } else {
+            // [TAG_GEMMA4_IMG_PADDING]
             // The multimodal embedding path uses the padding token's (ID 0)
             // embedding.
             // TODO: verify if this is the correct behavior in transformers
@@ -500,11 +541,12 @@ const Graph = struct {
             inp_per_layer = c.ggml_reshape_3d(ctx, inp_per_layer, self.n_embd_per_layer, b.n_layer, 1);
             b.cb(inp_per_layer, "inp_per_layer_multimodal", -1);
         }
+        _ = b.res.addInput(InpPle, inp);
         return inp_per_layer;
     }
 
     /// Ports `llama_model_gemma4`'s `graph`'s `project_per_layer_inputs`
-    /// (models/gemma4.cpp:478 @7fe450e19): equivalent to the Python code's
+    /// (models/gemma4.cpp:508 @d81235049): equivalent to the Python code's
     /// `project_per_layer_inputs()`, the per-layer inputs with `n_layer` as
     /// the last dimension, from `inp_batch` `[n_embd, n_tokens]` and
     /// `build_inp_per_layer`'s `[n_embd_per_layer, n_layer, n_tokens]`.

@@ -287,6 +287,13 @@ POST /embeddings {"content": [{"prompt_string": "What is this: <__media__>\n", "
 POST /v1/embeddings {"input": {"prompt_string": "x <__media__>", "multimodal_data": ["$PNG2"]}}
 POST /embeddings {"content": [{"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["malformed"]}]}
 POST /embeddings {"content": [{"prompt_string": "What is this:\n", "multimodal_data": ["base64"]}]}
+# v0.6.0: an OAI content array, its media parts loaded as in a chat message
+# (upstream's test_vision_embeddings_oai_content)
+POST /v1/embeddings {"input": [{"content": [{"type": "text", "text": "What is this: "}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}, {"type": "text", "text": "\n"}]}, {"prompt_string": "What is this: <__media__>\n", "multimodal_data": ["$PNG1"]}, "What is this: \n"]}
+POST /v1/embeddings {"input": {"content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG2"}}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,$PNG1"}}]}}
+POST /v1/embeddings {"input": {"content": [{"type": "input_audio", "input_audio": {"data": "$WAV", "format": "wav"}}]}}
+POST /v1/embeddings {"input": {"content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,$JUNK"}}]}}
+POST /v1/embeddings {"input": {"content": [{"type": "text", "text": "a <__media__> b"}]}}
 
 # text-only servers refuse media
 !server -m $MM/text-qwen3.gguf -c 4096 -np 1 --chat-template chatml --no-warmup --slot-save-path ./

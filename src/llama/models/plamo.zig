@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/plamo.cpp` at v0.5.0 (`7fe450e19`):
+//! Ported from `llama.cpp/src/models/plamo.cpp` at v0.6.0 (`d81235049`):
 //! `llama_model_plamo`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -19,7 +19,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_plamo`'s `load_arch_hparams` (models/plamo.cpp:3 @7fe450e19).
+/// Ports `llama_model_plamo`'s `load_arch_hparams` (models/plamo.cpp:3 @d81235049).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -30,7 +30,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_plamo`'s `load_arch_tensors` (models/plamo.cpp:12 @7fe450e19).
+/// Ports `llama_model_plamo`'s `load_arch_tensors` (models/plamo.cpp:12 @d81235049).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -55,13 +55,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_plamo`'s `build_arch_graph` (models/plamo.cpp:35 @7fe450e19).
+/// Ports `llama_model_plamo`'s `build_arch_graph` (models/plamo.cpp:35 @d81235049).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_plamo`'s `graph` (models/plamo.cpp:39
-/// @7fe450e19).
+/// @d81235049).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

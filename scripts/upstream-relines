@@ -58,6 +58,16 @@ HELPERS = [
     ("tools/llama_bench.zig", r"ggmlAssert\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/llama-bench/llama-bench.cpp"),
     ("tools/imatrix.zig", r"ggmlAssert\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/imatrix/imatrix.cpp"),
     ("tools/perplexity.zig", r"ggmlAssert\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/perplexity/perplexity.cpp"),
+    # Found at v0.6.0: six more helpers of this shape had never been listed,
+    # so their lines stayed at A through every sync since they were written.
+    ("tools/common/speculative.zig", r"assertC\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "common/speculative.cpp"),
+    ("tools/common/speculative_draft.zig", r"assertC\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "common/speculative.cpp"),
+    ("src/llama/graph.zig", r"dsv4SetIdx\((?:[^,()]+, ){3}(\d+)", "src/llama-graph.cpp"),
+    ("tools/server/queue.zig", r"ggmlAssert\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/server/server-queue.cpp"),
+    ("tools/server/schema.zig", r"evalHandled\((?:[^,()]+, ){3}(\d+)", "tools/server/server-schema.cpp"),
+    ("tools/server/schema.zig", r"tokenizeIn\([^,()]+, (\d+)", "tools/server/server-schema.cpp"),
+    ("tools/server/task.zig", r"updateBuf\((?:[^,()]+, ){5}(\d+)", "common/common.cpp"),
+    ("tools/server/task.zig", r"loadBuf\((?:[^,()]+, ){4}(\d+)", "common/common.cpp"),
 ]
 
 AREA = [

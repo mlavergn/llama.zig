@@ -3,11 +3,12 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/lightning-indexer.cu` at v0.5.0
-//! (`7fe450e19`), the host half. The kernels,
-//! `lightning_indexer_kernel_wmma` and `lightning_indexer_kernel_vec`, stay
-//! CUDA. The HIP/MUSA arm, which always takes the vector kernel, is not
-//! compiled here.
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/lightning-indexer.cu` at v0.6.0
+//! (`d81235049`), the host half. The kernels,
+//! `lightning_indexer_kernel_wmma`, `lightning_indexer_kernel_vec` and
+//! (v0.6.0, for four heads) `lightning_indexer_kernel_tile`, stay CUDA. The
+//! HIP/MUSA arm, which always takes the vector kernel, is not compiled
+//! here.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -66,7 +67,11 @@ fn shapeCase(comptime n_head: i64, use_wmma: bool, k_type: c.enum_ggml_type, n_k
     }
 }
 
-/// Ports `ggml_cuda_lightning_indexer` (lightning-indexer.cu:400 @7fe450e19).
+/// Ports `LIGHTNING_INDEXER_TILE_TOKENS` (lightning-indexer.cu:240 @d81235049):
+/// tokens scored per block by the tile kernel.
+const tile_tokens = 8;
+
+/// Ports `ggml_cuda_lightning_indexer` (lightning-indexer.cu:549 @d81235049).
 pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
     const q = impl.one(Tensor, dst.src[0]);
     const k = impl.one(Tensor, dst.src[1]);
@@ -121,12 +126,28 @@ pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
         shapeCase(64, use_wmma, k.type, n_kv, n_batch, n_stream, stream, args);
     } else if (n_embd == 128 and n_head == 32) {
         shapeCase(32, use_wmma, k.type, n_kv, n_batch, n_stream, stream, args);
+    } else if (n_embd == 128 and n_head == 4 and n_batch >= tile_tokens) {
+        // too few heads for a wmma tile, the tile kernel shares the keys across the tokens
+        const warps_per_block = 8;
+        const k_vecs_per_block = 64;
+
+        const num_kv_blocks = @divTrunc(n_kv + k_vecs_per_block - 1, k_vecs_per_block);
+        const num_batch_blocks = @divTrunc(n_batch + tile_tokens - 1, tile_tokens);
+        const p: kernels.LaunchParams = .{
+            .grid = .{ .x = @bitCast(num_kv_blocks), .y = @bitCast(num_batch_blocks), .z = @bitCast(n_stream) },
+            .block = .{ .x = 32, .y = warps_per_block },
+            .stream = stream,
+        };
+        launchCase("tile", k_vecs_per_block, 4, &vec_types, k.type, p, args);
+    } else if (n_embd == 128 and n_head == 4) {
+        // a batch smaller than a token tile, or MUSA, use vector kernel
+        shapeCase(4, false, k.type, n_kv, n_batch, n_stream, stream, args);
     } else {
         impl.abort("fatal error");
     }
 }
 
-/// Ports `ggml_cuda_lightning_indexer_supported` (lightning-indexer.cu:536 @7fe450e19).
+/// Ports `ggml_cuda_lightning_indexer_supported` (lightning-indexer.cu:726 @d81235049).
 pub fn supported(device: c_int, dst: *const Tensor) bool {
     _ = device;
     const q = impl.one(Tensor, dst.src[0]);
@@ -134,7 +155,7 @@ pub fn supported(device: c_int, dst: *const Tensor) bool {
 
     if (q.ne[0] != 128) return false;
 
-    if (q.ne[1] != 64 and q.ne[1] != 32) return false;
+    if (q.ne[1] != 64 and q.ne[1] != 32 and q.ne[1] != 4) return false;
 
     // alignment checks
     for ([_]*const Tensor{ q, k }) |t| {

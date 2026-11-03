@@ -53,7 +53,7 @@ int main(void) {
     cmp_s("concat: name", zz_kargs_name(0), "concat");
     cmp("concat: sizeof", zz_kargs_sizeof(0), sizeof(ggml_metal_kargs_concat));
     cmp("concat: alignof", zz_kargs_alignof(0), alignof(ggml_metal_kargs_concat));
-    cmp("concat: field count", zz_kargs_nfields(0), 25);
+    cmp("concat: field count", zz_kargs_nfields(0), 26);
     snprintf(lbl, sizeof lbl, "concat.ne00 offset");
     cmp(lbl, zz_kargs_field_offset(0, 0), offsetof(ggml_metal_kargs_concat, ne00));
     snprintf(lbl, sizeof lbl, "concat.ne00 width");
@@ -204,6 +204,12 @@ int main(void) {
     cmp(lbl, zz_kargs_field_size(0, 24), sizeof(((ggml_metal_kargs_concat *) 0)->dim));
     snprintf(lbl, sizeof lbl, "concat field 24 name");
     cmp_s(lbl, zz_kargs_field_name(0, 24), "dim");
+    snprintf(lbl, sizeof lbl, "concat.nc0 offset");
+    cmp(lbl, zz_kargs_field_offset(0, 25), offsetof(ggml_metal_kargs_concat, nc0));
+    snprintf(lbl, sizeof lbl, "concat.nc0 width");
+    cmp(lbl, zz_kargs_field_size(0, 25), sizeof(((ggml_metal_kargs_concat *) 0)->nc0));
+    snprintf(lbl, sizeof lbl, "concat field 25 name");
+    cmp_s(lbl, zz_kargs_field_name(0, 25), "nc0");
 
     /* unary */
     cmp_s("unary: name", zz_kargs_name(1), "unary");
@@ -5003,7 +5009,7 @@ int main(void) {
     cmp_s("pad: name", zz_kargs_name(47), "pad");
     cmp("pad: sizeof", zz_kargs_sizeof(47), sizeof(ggml_metal_kargs_pad));
     cmp("pad: alignof", zz_kargs_alignof(47), alignof(ggml_metal_kargs_pad));
-    cmp("pad: field count", zz_kargs_nfields(47), 16);
+    cmp("pad: field count", zz_kargs_nfields(47), 20);
     snprintf(lbl, sizeof lbl, "pad.ne00 offset");
     cmp(lbl, zz_kargs_field_offset(47, 0), offsetof(ggml_metal_kargs_pad, ne00));
     snprintf(lbl, sizeof lbl, "pad.ne00 width");
@@ -5100,6 +5106,30 @@ int main(void) {
     cmp(lbl, zz_kargs_field_size(47, 15), sizeof(((ggml_metal_kargs_pad *) 0)->nb3));
     snprintf(lbl, sizeof lbl, "pad field 15 name");
     cmp_s(lbl, zz_kargs_field_name(47, 15), "nb3");
+    snprintf(lbl, sizeof lbl, "pad.lp0 offset");
+    cmp(lbl, zz_kargs_field_offset(47, 16), offsetof(ggml_metal_kargs_pad, lp0));
+    snprintf(lbl, sizeof lbl, "pad.lp0 width");
+    cmp(lbl, zz_kargs_field_size(47, 16), sizeof(((ggml_metal_kargs_pad *) 0)->lp0));
+    snprintf(lbl, sizeof lbl, "pad field 16 name");
+    cmp_s(lbl, zz_kargs_field_name(47, 16), "lp0");
+    snprintf(lbl, sizeof lbl, "pad.lp1 offset");
+    cmp(lbl, zz_kargs_field_offset(47, 17), offsetof(ggml_metal_kargs_pad, lp1));
+    snprintf(lbl, sizeof lbl, "pad.lp1 width");
+    cmp(lbl, zz_kargs_field_size(47, 17), sizeof(((ggml_metal_kargs_pad *) 0)->lp1));
+    snprintf(lbl, sizeof lbl, "pad field 17 name");
+    cmp_s(lbl, zz_kargs_field_name(47, 17), "lp1");
+    snprintf(lbl, sizeof lbl, "pad.lp2 offset");
+    cmp(lbl, zz_kargs_field_offset(47, 18), offsetof(ggml_metal_kargs_pad, lp2));
+    snprintf(lbl, sizeof lbl, "pad.lp2 width");
+    cmp(lbl, zz_kargs_field_size(47, 18), sizeof(((ggml_metal_kargs_pad *) 0)->lp2));
+    snprintf(lbl, sizeof lbl, "pad field 18 name");
+    cmp_s(lbl, zz_kargs_field_name(47, 18), "lp2");
+    snprintf(lbl, sizeof lbl, "pad.lp3 offset");
+    cmp(lbl, zz_kargs_field_offset(47, 19), offsetof(ggml_metal_kargs_pad, lp3));
+    snprintf(lbl, sizeof lbl, "pad.lp3 width");
+    cmp(lbl, zz_kargs_field_size(47, 19), sizeof(((ggml_metal_kargs_pad *) 0)->lp3));
+    snprintf(lbl, sizeof lbl, "pad field 19 name");
+    cmp_s(lbl, zz_kargs_field_name(47, 19), "lp3");
 
     /* pad_reflect_1d */
     cmp_s("pad_reflect_1d: name", zz_kargs_name(48), "pad_reflect_1d");

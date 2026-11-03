@@ -192,6 +192,14 @@ fn buildList(v: Variant, n_layer: u32, n_expert: u32) TensorList {
                     l.addf("blk.{d}.ffn_down.bias", .{i}, .{ 256, 2, 1, 1 }, f32_);
                     l.addf("blk.{d}.attn_output.weight.x", .{i}, .{ 256, 2, 1, 1 }, h16);
                     l.addf("blk.{d}.int.weight", .{i}, .{ 256, 2, 1, 1 }, c.GGML_TYPE_I32);
+                    // the names v0.6.0's GLM5-Next rules keep at F32 or Q8_0
+                    inline for (.{
+                        "hc_attn_fn",              "indexer.attn_q_b",       "indexer.attn_k", "indexer.proj",
+                        "indexer_compressor_gate", "indexer_compressor_ape", "ssm_f_a",        "ssm_f_b",
+                        "ssm_g_a",                 "ssm_g_b",                "ssm_beta",       "attn_kv_a_mqa",
+                        "attn_k_b",                "attn_v_b",               "attn_q_a",       "attn_q_b",
+                        "nextn.eh_proj",
+                    }) |nm| l.addf("blk.{d}." ++ nm ++ ".weight", .{i}, .{ 512, 512, 1, 1 }, h16);
                 }
                 l.addf("blk.{d}.attn_output.weight", .{i}, .{ if (i % 3 == 1) 40 else n_embd, n_embd, 1, 1 }, h16);
                 l.addf("blk.{d}.ffn_gate.weight", .{i}, .{ n_embd, 13824, 1, 1 }, h16);
@@ -437,7 +445,7 @@ fn typeRules(quick: bool) void {
 
     // The architectures the rules name, under every descriptor, parameter
     // set and list.
-    const archs = [_][:0]const u8{ "llama", "falcon", "bailingmoe3", "qwen35", "qwen2", "deepseek2" };
+    const archs = [_][:0]const u8{ "llama", "falcon", "bailingmoe3", "qwen35", "qwen2", "deepseek2", "glm5-next" };
     const layer_counts = [_]u32{ 1, 8, 32, 80 };
     const heads = [_][2]u32{ .{ 32, 32 }, .{ 32, 8 }, .{ 32, 4 }, .{ 32, 0 } };
     const experts = [_]u32{ 0, 4, 8, 16 };
@@ -1285,7 +1293,7 @@ fn saverRuns(dir: []const u8, models: []const [:0]const u8, vocab_files: []const
     // Fixtures saved and nothing else: since v0.5.0 the saver writes the
     // SWA pattern per layer, skips null special ids, the hrm.* keys and
     // `hrm_z_l_init`, and saves each tensor of a looped model's aliased
-    // cache slots once (llama-model-saver.cpp:145, 451 @7fe450e19).
+    // cache slots once (llama-model-saver.cpp:146, 467 @d81235049).
     for (save_files) |m| saveBoth(dir, m, 0, false);
     // Every upstream vocabulary, vocab-only. Through v0.3.0 this compared
     // each tokenizer's tokens, scores, types, merges and special ids as
@@ -1338,7 +1346,7 @@ fn saveBoth(dir: []const u8, m: [:0]const u8, ngl: i32, vocab_only: bool) void {
             // And since v0.4.0 a vocab-only save aborts in upstream on any
             // file: `add_kv_from_model` asks `hparams.n_ff_exp()`, now an
             // accessor bounded by `n_layer_all`, which `load_hparams` never
-            // reads for vocab-only (llama-hparams.cpp:79 @7fe450e19).
+            // reads for vocab-only (llama-hparams.cpp:79 @d81235049).
             var nb0: [256]u8 = undefined;
             const job: SaveJob = .{ .rm = rm, .pm = pm, .out = ref_out };
             const why = if (hasCharsmap(m)) "charsmap" else "vocab-only";
