@@ -12171,3 +12171,104 @@ llvmpipe in a Linux container (`vk-backend-diff` and `vk-ops-diff`,
 4,899 sweep cases, port against reference, on bits). JWHLPTOP is
 unreachable, so its AVX-512 items carry forward again, now with the
 tiled AVX-512 and VNNI arms.
+
+## The v0.6.0 pickup
+
+Both machines reached over the link; JWHLPTOP is no longer even paired
+with this Mac (`zigupdater peers` lists only `spark-dbff` and
+`DESKTOP-BR7J5S9`), so item 11 carries forward again. The updater binary
+is now `zigupdater`: `scripts/win-run`'s default still names `zupdater`,
+so both runs passed `ZUPDATER=`. The two pickups ran at once and shared
+the Mac's one updater Host, so each drove its machine in short sessions
+and left long jobs under `nohup`.
+
+### GB10: items 1-8
+
+The GB10's checkout held the v0.5.0 pickup's eight fixes uncommitted, each
+byte-equal to `72485ec`: kept in a stash and a tarball, as at v0.5.0,
+then fast-forwarded over bundles (llamazig `e9c4b5b..38978d0`, zmake
+`2d5f20e..6c51ea3`, zigjinja `79ff891..060187a`); both `llama.cpp`
+checkouts fetched `v0.6.0`. Zig 0.17.1 and CUDA 13.0.88 there.
+
+- **The blind CUDA port compiled after one fix**: six compile errors, one
+  cause -- the 4-head lightning indexer asked for a wmma kernel key
+  upstream never instantiates. Every argument size matched at first
+  launch; `gen-fattn-config` and `gen-mmq-config` equal the Mac's.
+  `cuda-ops-diff` 17,682 / 17,682 bit-identical, 0 SUPPORTS, 14 NONDET as
+  before, every named case found; `cuda-backend-diff` 6,092 and 18,248
+  answers; `cuda-node-diff` per node and fused on Qwen3.5, on a ~1,500-token
+  Qwen3 prompt (new `NODE_DUMP_CTX`: `node_dump.c` capped prompts at 512),
+  on the four new fixtures and four Q4_0 MoE fixtures; `cuda-parity-cli`
+  6/6. The unfused hc path does not run on CUDA (the fused DSV4 ops are on).
+- **libllama did not build on aarch64 Linux**: `mmap.zig`'s
+  `PrefetchVirtualMemory` pointer was analysed on every target, and
+  `callconv(.winapi)` is a calling convention LLVM refuses there. It is a
+  `void` off Windows now.
+- **Vulkan, four arms**: `vk-repro`, `vk-ops-diff` 19,789 / 19,789 per arm,
+  `vk-backend-diff` and `vk-node-diff` (both also with descriptor reuse
+  off), `vk-parity-cli`; COUNT_EQUAL, which segfaulted on llvmpipe, passes
+  on the GPU; the shader table has the 26 `*_q8_1_cm1` variants.
+- **Linux arm64 CPU set and server set**: `ops-diff` 1,048, `repack-diff`,
+  `node-diff`, `parity-port-cpu`, `host-arms-diff`, `arch-model-diff` 171
+  pass and the two known `REF-ABORT`s, `context-diff` 4,673,315 checks on
+  CUDA, `vocab-diff`, `loader-diff` 398,229 (with new direct-I/O cases),
+  `quant-diff`, `gemma4-assistant-diff`, `tools-diff server` 195,
+  `server-task-diff` 6,342, `http-diff` 318, `spec-diff` 43, `cnv-diff`
+  36, `chat-parse-diff` 52,718, `peg-diff`, `jinja-diff`, and `server-diff`
+  all 23 files, 1,638 checks.
+- **Injections**: CUDA 31 (conv3d's split three ways): 21 caught, 8
+  escaped, 2 inert. A lowered `split_k` cap escaped all 276 of upstream's
+  `CONV_3D` shapes (none splits past 16) and `use_blas` off escaped them too
+  (cuBLAS and the implicit GEMM agree bit for bit at small widths); two new
+  extras, a 27-way split and a pointwise kernel at IC 512, catch both. The
+  other escapes have no case upstream either: an F16 SCALE, a biased scale
+  after RMS_NORM, an F16 Hadamard input, iq4_nl's extra block index,
+  `mulMatId`'s slice path, `getJMax`'s sizing. Vulkan 8: 5 caught, 3
+  escaped, among them the descriptor-cache reset PLAN expected
+  `vk-node-diff` or `vk-parity-cli` to catch.
+- **Gate changes for a unified-memory GPU**: `mtmd-diff` and `server-diff`
+  mask free memory read live (as `tools-diff` already did); `tools-diff`
+  takes `$GPU_DEV` (`MTL0` on macOS, `CUDA0` on Linux) for the cases that
+  name a device; a racy libc++abi line in `imatrix`, `bench` and
+  `mtmd-cli` cases is compared unordered.
+
+**Open on the GB10:**
+
+- **`mtmd-diff`'s `qwen3tts` and `qwen3tts_shared` CPU node passes, 2 of
+  264.** Not a port bug: upstream's `qwen3tts-gen.cpp:698` creates
+  `out_code_cache` with `ggml_new_tensor_2d(I32, 1, 16)` and never
+  initialises it, so `cache_set`'s CONCAT and GET_ROWS hash fifteen rows of
+  each side's allocator leftovers; every later node matches, and the
+  reference does not reproduce against itself there. Either the harness
+  skips those rows or they are recorded as nondeterministic on Linux --
+  Marc's decision.
+- **`server-diff decision`'s parallel block** differs upstream against
+  upstream on the GB10 (3 of 3 runs), as `parallel` did at v0.5.0: CUDA
+  batches concurrent requests by timing. Recorded, not masked.
+- `fit-diff` 65/68: the three real-device cases differ only in live free
+  memory, as at v0.5.0.
+- `make ui` cannot run there (`npm ci`: the GB10's node is too old); the
+  Mac's bundle was carried.
+
+### DESKTOP-BR7J5S9: items 9-10
+
+`make x86-gates` at `x86_64_v3`: `x86-quants-diff` 28 kernels,
+`x86-repack-diff` 129 checks, `x86-ops-diff` 1,126 lines, `x86-node-diff`
+5,797 lines; `win-host-diffs` all four parts; `mtmd-image-diff`
+cross-built, `glm5v` 329 / 329 of 3,401. **The tiled kernels have their
+first bit-exact gate**: 117 `tiled mul_mat` lines (13 types, 9 shapes), 39
+`tiled mul_mat_id`, the four FA d36 lines, the two f32 x bf16 `mul_mat`
+lines and the BF16 activations are all in the laptop's output, and
+`GGML_CPU_TILED_MM=0` made exactly those 156 lines differ per thread count
+and nothing else. 8 injections into the tiled code: 7 caught, 1 inert by
+construction (the narrow-K extent). No existing float `mul_mat` reached
+sgemm's new `ne00 % 8` tail: six cases were added to `ops_dump.c` (f32,
+f16, bf16 at ne00 36 and 5), and they pass on the Mac at all five CPUs
+(1,060 op results).
+
+Not exercised: `log.ttyEnableAnsi`'s console arm and the
+`PROGRAMDATA`/`APPDATA` config paths, because the tools beyond
+`llama-gguf-split` still do not build for Windows (`log.zig`'s
+`clock_gettime`, `fs_stat.zig`'s `std.c.Stat` -- as recorded at the Stage
+9 and 10 pickup); `PrefetchVirtualMemory` ran at model load but nothing
+compares it. Item 10, the server's Windows port, stays open.

@@ -88,6 +88,13 @@ for env in "${scenarios[@]}"; do
     # The memory logger prints Vulkan handles and host pointers, which move
     # run to run.
     sed -i -E '/^ggml_vulkan memory: /s/0x[0-9a-f]+/0x(addr)/g' "$tmp/ref.txt" "$tmp/port.txt"
+    # VK_BACKEND_DIFF_OUT=<prefix> keeps both answers of scenario k as
+    # <prefix>.<k>.{ref,port}, so named lines can be found afterwards.
+    if [ -n "${VK_BACKEND_DIFF_OUT:-}" ]; then
+        k=$(( ${k:--1} + 1 ))
+        { echo "# $label"; cat "$tmp/ref.txt"; } > "$VK_BACKEND_DIFF_OUT.$k.ref"
+        { echo "# $label"; cat "$tmp/port.txt"; } > "$VK_BACKEND_DIFF_OUT.$k.port"
+    fi
     lines=$(wc -l < "$tmp/ref.txt" | tr -d ' ')
     # Every scenario is meant to finish. Two sides that abort the same way
     # agree, and that agreement says nothing: a harness that trips an

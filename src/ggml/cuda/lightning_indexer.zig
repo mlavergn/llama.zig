@@ -41,9 +41,11 @@ fn launchCase(comptime family: []const u8, comptime k_vecs_per_block: c_int, com
     impl.abort("fatal error");
 }
 
+/// `n_head == 4` has no wmma instantiation (upstream's four-head arm names
+/// only the tile and vec kernels), so its wmma branch must not be analysed.
 fn shapeCase(comptime n_head: i64, use_wmma: bool, k_type: c.enum_ggml_type, n_kv: c_int, n_batch: c_int, n_stream: c_int, stream: common.cu.cudaStream_t, args: anytype) void {
     const warps_per_block = 8;
-    if (use_wmma) {
+    if (n_head != 4 and use_wmma) {
         // use wmma kernel
         const k_vecs_per_block = 32;
         const num_kv_blocks = @divTrunc(n_kv + k_vecs_per_block - 1, k_vecs_per_block);

@@ -2165,6 +2165,13 @@ v0.5.0", has what each area changed.
 
 ### Pickup for the v0.6.0 sync
 
+**Run 2026-11-03: items 1–9 clear** (`NOTES.md`, "The v0.6.0 pickup").
+Still open: `mtmd-diff`'s two `qwen3tts` CPU node passes, which hash
+upstream's uninitialised `out_code_cache` (a harness decision for Marc);
+`server-diff decision`'s parallel block, which differs upstream against
+upstream on the GB10; item 10, the server's Windows port; item 11,
+JWHLPTOP, which is no longer paired; and the gaps and Mac items below.
+
 Upstream `v0.6.0` (`d81235049`). The CUDA host changes were ported on the
 Mac and have **never compiled against a toolkit** (they type-check for
 aarch64 Linux against real CUDA 13 headers and a fake toolkit); the Vulkan

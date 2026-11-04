@@ -78,7 +78,7 @@
 # v0.4.1: without -mmdev the projector follows --device, so -dev none
 # keeps it off the GPU too
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 -dev none -lv 5
--m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 -dev none -mmdev MTL0 -lv 5
+-m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 -dev none -mmdev $GPU_DEV -lv 5
 
 # -j and -jf (Stage 10 step 3b): the schema becomes an output-format
 # grammar, which constrains the reply; malformed JSON throws nlohmann's

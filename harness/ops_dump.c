@@ -444,6 +444,25 @@ int main(int argc, char ** argv) {
         run_amp("mul_mat f32 x f32 [512 x 16] x 8",
                 ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, 16),
                                   ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, 8)), 0, 1.0f);
+
+        /* v0.6.0: on x86 tinyBLAS no longer refuses `k % KN` (sgemm.cpp:568)
+         * and gemm_bloc finishes a row with a masked load_partial step
+         * (sgemm.cpp:654) -- reached only when ne00 is not a multiple of 8
+         * (AVX2's KN; 16 at AVX-512), which no other float mul_mat here is.
+         * 36 is four whole blocks of 8 plus 4 (two of 16 plus 4); 5 is the
+         * tail alone. 16 rows, so matmul's m % 4 tiling accepts it; F16 and
+         * BF16 reach the kernel after src1 is converted to their
+         * vec_dot_type. Elsewhere these run through vec_dot. */
+        static const enum ggml_type ftypes[] = { GGML_TYPE_F32, GGML_TYPE_F16, GGML_TYPE_BF16 };
+        static const int kt[] = { 36, 5 };
+        for (size_t fi = 0; fi < sizeof ftypes / sizeof ftypes[0]; fi++) {
+            for (size_t ki = 0; ki < sizeof kt / sizeof kt[0]; ki++) {
+                char label[96];
+                snprintf(label, sizeof label, "mul_mat %s x f32 [%d x 16] x 8 (k tail)", ggml_type_name(ftypes[fi]), kt[ki]);
+                run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, ftypes[fi], kt[ki], 16),
+                                                 ggml_new_tensor_2d(ctx, GGML_TYPE_F32, kt[ki], 8)), 0, 1.0f);
+            }
+        }
     }
 
     {

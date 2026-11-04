@@ -183,6 +183,9 @@ LOG_MASKS = [
     r"vs\. \d+ MiB of free device memory",
     r"will leave -?\d+ [<>]=? \d+ MiB",
     r"final available_memory_kb: \d+", r" - \d+ MiB free$",
+    # and the same two columns in a --log-format json `fit_memory_breakdown`
+    # record (the router's jsonlog child, v0.6.0)
+    r'"free":\d+', r'"unaccounted":-?\d+',
 ]
 
 

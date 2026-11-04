@@ -947,7 +947,9 @@ pub fn prefetchRanges(mr: []MemoryRange) void {
     } else sysconf(_SC_PAGESIZE);
     if (page_size <= 0) return;
 
-    var pvm: ?win32.PrefetchVirtualMemoryFn = null;
+    // Not `?win32.PrefetchVirtualMemoryFn` everywhere: its `callconv(.winapi)`
+    // is `aarch64_aapcs_win` on aarch64 Linux, which LLVM cannot lower.
+    var pvm: if (is_windows) ?win32.PrefetchVirtualMemoryFn else void = if (is_windows) null else {};
     if (comptime is_windows) {
         const kernel32 = win32.GetModuleHandleW(std.unicode.utf8ToUtf16LeStringLiteral("kernel32.dll"));
         const sym = if (kernel32) |k| win32.GetProcAddress(k, "PrefetchVirtualMemory") else null;

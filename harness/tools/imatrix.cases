@@ -31,7 +31,9 @@
 -m $PLAIN -f $DATA/text.txt -c 64 --chunks 2 --output-format gguf -o out2.bin
 -m $DATA/moe.gguf -f $DATA/ascii.txt -c 32 --chunks 4 -o moe.gguf
 -m $DATA/moe.gguf -f $DATA/ascii.txt -c 32 -b 64 --chunks 3 --output-format dat -o moe.dat
-!fail -m $DATA/moe.gguf -f $DATA/text.txt -c 32 --chunks 2 -o crash.gguf
+# `~`: libc++abi's uncaught-exception line and the log thread's lines race
+# (the GB10 put it at line 3 on one side and 7 on the other)
+!fail ~ -m $DATA/moe.gguf -f $DATA/text.txt -c 32 --chunks 2 -o crash.gguf
 -m $DATA/dense.gguf -f $DATA/ascii.txt -c 32 --chunks 3 --process-output --parse-special -o dense.gguf -lv 5
 -m $PLAIN -f $DATA/text.txt -c 64 --chunks 2 --in-file imatrix.gguf -o cont.gguf
 -m $PLAIN --in-file imatrix.gguf,p.gguf -o comb.gguf

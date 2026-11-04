@@ -49,7 +49,7 @@
 !fail -m $PLAIN -p 16 -n 0 -r 1 -ot a=BOGUS
 !fail -m $PLAIN -p 16 -n 0 -r 1 -ot noequals -r 1
 -m $PLAIN -p 16 -n 0 -r 1 -dev none
--m $PLAIN -p 16 -n 0 -r 1 -dev MTL0,auto
+-m $PLAIN -p 16 -n 0 -r 1 -dev $GPU_DEV,auto
 !fail -m $PLAIN -p 16 -n 0 -r 1 -dev bogus
 -m $PLAIN -p 16 -n 0 -r 1 -C 0x3 --cpu-strict 1 --poll 0
 -m $PLAIN -p 8-16+8 -n 1-4*2 -r 1 -o csv

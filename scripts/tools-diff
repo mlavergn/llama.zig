@@ -30,7 +30,7 @@
 # The prefixes combine as `!fail ~ <args>`.
 #
 # The names substituted into a case line ($FIX, $VOCAB, $PLAIN, $MM, $DATA,
-# $ROOT, ...) are expanded with IFS set to a newline only: a checkout path
+# $GPU_DEV, $ROOT, ...) are expanded with IFS set to a newline only: a checkout path
 # with a space in it would otherwise split into two arguments on both sides
 # alike, and every case over a model would compare two failed loads.
 #
@@ -62,7 +62,10 @@ PLAIN="${PLAIN:-$HOME/.cache/zigtrain/gguf/plain-d6_base_005000.gguf}"
 # where the zigtrain models live elsewhere both sides failed to load it.
 PLAIN_SFT="${PLAIN_SFT:-$(dirname "$PLAIN")/plain-d6_sft_001499.gguf}"
 MM="$ROOT/zig-out/mmproj-fixtures"
-export FIX VOCAB PLAIN PLAIN_SFT MM
+# The GPU device's name, for the cases that name one (-dev, -mmdev): Metal's
+# on macOS, CUDA's on Linux, where the tools build with CUDA by default.
+GPU_DEV="${GPU_DEV:-$([ "$(uname -s)" = Darwin ] && echo MTL0 || echo CUDA0)}"
+export FIX VOCAB PLAIN PLAIN_SFT MM GPU_DEV
 # A case file over a model that is not there compares two failed loads, and
 # passes: on the GB10 at v0.5.0, gguf-split did, with the model gone.
 grep -qE '\$PLAIN([^_A-Z]|$)' "$cases" && [ ! -f "$PLAIN" ] && { echo "FAIL: missing $PLAIN, which $cases uses" >&2; exit 2; }

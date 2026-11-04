@@ -489,6 +489,16 @@ const Edit = struct {
     fn mmapExplicit(p: *c.llama_model_params) void {
         p.load_mode = c.LLAMA_LOAD_MODE_MMAP;
     }
+    /// Direct I/O: `O_DIRECT` reads through the bounded, aligned staging
+    /// buffer on Linux (`readAlignedChunk`); macOS reports alignment 1
+    /// and reads as without it.
+    fn directIo(p: *c.llama_model_params) void {
+        p.load_mode = c.LLAMA_LOAD_MODE_DIRECT_IO;
+    }
+    fn directIoCpu(p: *c.llama_model_params) void {
+        p.load_mode = c.LLAMA_LOAD_MODE_DIRECT_IO;
+        p.n_gpu_layers = 0;
+    }
     fn noExtraBufts(p: *c.llama_model_params) void {
         p.use_extra_bufts = false;
         p.n_gpu_layers = 0;
@@ -586,6 +596,10 @@ const Edit = struct {
     fn lazyOnMlock(p: *c.llama_model_params) void {
         p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
         p.load_mode = c.LLAMA_LOAD_MODE_MMAP_MLOCK;
+    }
+    fn lazyOnDirectIo(p: *c.llama_model_params) void {
+        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = c.LLAMA_LOAD_MODE_DIRECT_IO;
     }
     fn lazyOnCheck(p: *c.llama_model_params) void {
         p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
@@ -1155,6 +1169,8 @@ pub fn main(init: std.process.Init) !void {
             .{ "tensors: no mmap", Edit.noMmap },
             .{ "tensors: no mmap, cpu", Edit.noMmapCpu },
             .{ "tensors: mmap explicit", Edit.mmapExplicit },
+            .{ "tensors: direct io", Edit.directIo },
+            .{ "tensors: direct io, cpu", Edit.directIoCpu },
             .{ "tensors: no extra buffer types", Edit.noExtraBufts },
             .{ "tensors: no host buffer", Edit.noHost },
             .{ "tensors: check tensors", Edit.checkTensors },
@@ -1196,6 +1212,7 @@ pub fn main(init: std.process.Init) !void {
             .{ "lazy: on, no mmap, cpu", Edit.lazyOnNoMmapCpu },
             .{ "lazy: on, no alloc", Edit.lazyOnNoAlloc },
             .{ "lazy: on, mlock", Edit.lazyOnMlock },
+            .{ "lazy: on, direct io", Edit.lazyOnDirectIo },
             .{ "lazy: on, check tensors", Edit.lazyOnCheck },
         };
         inline for (variants) |v| {

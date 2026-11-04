@@ -134,18 +134,28 @@ int main(int argc, char ** argv) {
     if (!model) return 1;
 
     const struct llama_vocab * vocab = llama_model_get_vocab(model);
-    llama_token toks[512];
+    /* NODE_DUMP_CTX raises the prompt cap, n_ctx, n_batch and n_ubatch
+     * together (default 512, the gates' setting): cuda-node-diff's long-prompt
+     * run needs a prompt of 1024+ tokens decoded as one ubatch. */
+    static llama_token toks[8192];
+    const char * ctx_env = getenv("NODE_DUMP_CTX");
+    const int cap = ctx_env ? atoi(ctx_env) : 512;
+    if (cap <= 0 || cap > 8192) {
+        fprintf(stderr, "%s: NODE_DUMP_CTX must be 1..8192\n", argv[0]);
+        return 2;
+    }
     const int n = strncmp(argv[2], "tokens:", 7) == 0
-        ? parse_token_ids(argv[2] + 7, toks, 512)
-        : llama_tokenize(vocab, argv[2], (int) strlen(argv[2]), toks, 512, true, true);
+        ? parse_token_ids(argv[2] + 7, toks, cap)
+        : llama_tokenize(vocab, argv[2], (int) strlen(argv[2]), toks, cap, true, true);
     if (n <= 0) {
         fprintf(stderr, "%s: no tokens from the prompt\n", argv[0]);
         return 1;
     }
 
     struct llama_context_params cp = llama_context_default_params();
-    cp.n_ctx = 512;
-    cp.n_batch = 512;
+    cp.n_ctx = (uint32_t) cap;
+    cp.n_batch = (uint32_t) cap;
+    if (ctx_env) cp.n_ubatch = (uint32_t) cap;
     cp.n_threads = cp.n_threads_batch = atoi(argv[3]);
     if (!gpu) {
         cp.offload_kqv = false;

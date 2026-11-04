@@ -439,6 +439,20 @@ static struct ggml_tensor * build_fa_scan(struct ggml_context * ctx, struct ggml
     return *cmp = out;
 }
 
+/* CONV_3D (v0.6.0) shapes upstream's list does not reach: a pointwise F16
+ * kernel, which `ggml_cuda_op_conv3d` hands to cuBLAS, and an F16 one with
+ * IC * KW * KH * KD = 1728 over 64 output positions, whose implicit GEMM
+ * splits K 27 ways (the cap is 32) -- upstream's shapes never split past
+ * 16, so a lowered cap passed all 276 of them. */
+static struct ggml_tensor * build_conv3d(struct ggml_context * ctx, struct ggml_tensor ** cmp,
+                                         int64_t IW, int64_t K, int64_t IC, int64_t OC, int64_t N) {
+    struct ggml_tensor * input = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, IW, IW, IW, IC * N);
+    struct ggml_tensor * kernel = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, K, K, K, IC * OC);
+    return *cmp = ggml_conv_3d_direct(ctx, kernel, input, 1, 1, 1, 0, 0, 0, 1, 1, 1, (int) IC, (int) N, (int) OC);
+}
+static struct ggml_tensor * build_conv3d_pointwise(struct ggml_context * c, struct ggml_tensor ** t) { return build_conv3d(c, t, 8, 1, 512, 48, 2); }
+static struct ggml_tensor * build_conv3d_split_k(struct ggml_context * c, struct ggml_tensor ** t) { return build_conv3d(c, t, 6, 3, 64, 32, 1); }
+
 static void run_extra(ggml_backend_t backend, extra_build build, unsigned char ** result, size_t * nbytes, int * n_nodes) {
     struct ggml_init_params params = { 64 * ggml_tensor_overhead() + ggml_graph_overhead(), NULL, true };
     struct ggml_context * ctx = ggml_init(params);
@@ -501,7 +515,8 @@ static bool extra_case(const char * name, extra_build build) {
  * `MUL_MAT_ID` batches are 1, 4, 5, 17, 32 and 129, so none sits on the
  * MMVQ/MMQ boundary at 8 (`get_mmvq_mmid_max_batch`). Since v0.6.0 also
  * the four-head lightning indexer at its tile threshold and a
- * flash-attention case that scans its mask with two pipeline stages. */
+ * flash-attention case that scans its mask with two pipeline stages, and
+ * CONV_3D's cuBLAS and split-k arms. */
 static int extra_cases(const char * filter) {
     static const struct { const char * op; const char * name; extra_build build; } cases[] = {
         { "MEAN", "MEAN(ne=[65536,1,1,1])", build_mean_65536 },
@@ -517,6 +532,8 @@ static int extra_cases(const char * filter) {
         { "LIGHTNING_INDEXER", "LIGHTNING_INDEXER(nh=4,nb=9,f16)", build_li4_f16_9 },
         { "LIGHTNING_INDEXER", "LIGHTNING_INDEXER(nh=4,nb=9,q8_0)", build_li4_q8_0_9 },
         { "FLASH_ATTN_EXT", "FLASH_ATTN_EXT(hs=128,nh=8,nr2=4,kv=4096,nb=1024,mask scan)", build_fa_scan },
+        { "CONV_3D", "CONV_3D(f16 kernel,pointwise,IC=512,OC=48,N=2)", build_conv3d_pointwise },
+        { "CONV_3D", "CONV_3D(f16 kernel,K=3,IC=64,OC=32,6^3,split_k=27)", build_conv3d_split_k },
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
