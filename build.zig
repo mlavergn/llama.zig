@@ -360,10 +360,6 @@ pub fn build(b: *std.Build) !void {
     // Build options
     const options = b.addOptions();
 
-    // const app_bundle_id = b.option([]const u8, "appBundleId", "Set the appBundleId to use for sandbox contexts") orelse "ai.cloneable";
-    // options.addOption([]const u8, "appBundleId", app_bundle_id);
-    // cfg.app_bundle_id = app_bundle_id;
-
     const test_filter = b.option([]const u8, "test-filter", "Run unit tests that match filter") orelse "";
     options.addOption([]const u8, "test_filter", test_filter);
 

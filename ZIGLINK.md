@@ -10,7 +10,7 @@ Remote gate machines, reached over the ziglink protocol through `zupdater`.
 | `ziglink` | `../ziglink/zig-out/bin/ziglink` | Library's own CLI; not paired here, not used |
 
 - `zupdater` is built on `../ziglink`: same wire, same `tty`/`push`.
-- Data dir: `~/.marclavergne/updater` (`peers.zon`, `bin/`, `cache/`).
+- Data dir: `zupdater`'s, `~/.<org>/updater` for the organization its branding names (`peers.zon`, `bin/`, `cache/`).
 
 ## Agents
 
