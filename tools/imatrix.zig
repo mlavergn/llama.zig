@@ -1637,9 +1637,7 @@ fn nextnCollectorInit(model: ?*c.llama_model, params: *const Params, own_lm_head
 }
 
 fn nowNs() i128 {
-    var ts: std.c.timespec = undefined;
-    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts);
-    return @as(i128, ts.sec) * 1_000_000_000 + ts.nsec;
+    return @import("tools_common").clock.monotonicNs();
 }
 
 /// Ports `compute_imatrix` (imatrix.cpp:1423 @620d2225c).

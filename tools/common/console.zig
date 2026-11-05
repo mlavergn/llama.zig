@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports the POSIX arms of `llama.cpp/common/console.cpp` at v0.7.0
-//! (`620d2225c`) as far as `llama-mtmd-cli` reaches them: `init`,
+//! Ports `llama.cpp/common/console.cpp` at v0.7.0 (`620d2225c`), its POSIX
+//! and `_WIN32` arms side by side, as far as `llama-mtmd-cli` reaches them: `init`,
 //! `cleanup`, `set_display`, `readline` with both its readers, and every
 //! helper `readline_advanced` calls. Each declaration names the C++ it
 //! replaces and the line it began at.
@@ -12,10 +12,7 @@
 //! # Not ported
 //!
 //! The completion callback (no ported tool sets one), the spinner and
-//! `console::log`/`error` (`llama-mtmd-cli` calls none of them), and the
-//! Windows arms: there `readline` falls back to reading UTF-8 lines from the
-//! C library's `stdin`, which is `readline_simple`'s POSIX arm. `PLAN.md`'s
-//! Windows pickup records the console's `ReadConsoleInputW` reader.
+//! `console::log`/`error` (`llama-mtmd-cli` calls none of them).
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -35,7 +32,8 @@ const ansi_color_gray = "\x1b[90m";
 const ansi_color_reset = "\x1b[0m";
 const ansi_bold = "\x1b[1m";
 
-const weof: u32 = std.math.maxInt(u32); // WEOF, as `char32_t`
+// WEOF, as `char32_t`: `wint_t` is 16 bits on Windows
+const weof: u32 = if (is_windows) 0xFFFF else std.math.maxInt(u32);
 
 extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
 extern fn fclose(f: ?*anyopaque) c_int;
@@ -60,6 +58,78 @@ var current_display: Display = .reset;
 var out_stream: ?*anyopaque = null; // `stdout` until `init`
 var tty: ?*anyopaque = null;
 var initial_state: std.c.termios = undefined;
+/// Ports `hConsole` (console.cpp:78 @620d2225c).
+var h_console: win32.HANDLE = null;
+
+/// Ports `KEY_ARROW_LEFT`, `KEY_ARROW_RIGHT`, `KEY_ARROW_UP`, `KEY_ARROW_DOWN`,
+/// `KEY_HOME`, `KEY_END`, `KEY_CTRL_ARROW_LEFT`, `KEY_CTRL_ARROW_RIGHT`,
+/// `KEY_DELETE` (console.cpp:55, 56, 57, 58, 59, 60, 61, 62, 63 @620d2225c):
+/// private-use values for keys Windows reports with no character.
+const key_arrow_left: u32 = 0xE000;
+const key_arrow_right: u32 = 0xE001;
+const key_arrow_up: u32 = 0xE002;
+const key_arrow_down: u32 = 0xE003;
+const key_home: u32 = 0xE004;
+const key_end: u32 = 0xE005;
+const key_ctrl_arrow_left: u32 = 0xE006;
+const key_ctrl_arrow_right: u32 = 0xE007;
+const key_delete: u32 = 0xE008;
+
+/// The Win32 and CRT surface `console.cpp`'s `_WIN32` arms call.
+const win32 = struct {
+    const HANDLE = ?*anyopaque;
+    const invalid_handle: HANDLE = @ptrFromInt(std.math.maxInt(usize));
+    const std_input_handle: u32 = @bitCast(@as(i32, -10));
+    const std_output_handle: u32 = @bitCast(@as(i32, -11));
+    const std_error_handle: u32 = @bitCast(@as(i32, -12));
+    const enable_line_input: u32 = 0x2;
+    const enable_echo_input: u32 = 0x4;
+    const enable_virtual_terminal_processing: u32 = 0x4;
+    const cp_utf8: u32 = 65001;
+    const o_wtext: c_int = 0x10000;
+    const o_u8text: c_int = 0x40000;
+    const key_event: u16 = 1;
+    const ctrl_mask: u32 = 0x8 | 0x4; // LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED
+    const vk_end: u16 = 0x23;
+    const vk_home: u16 = 0x24;
+    const vk_left: u16 = 0x25;
+    const vk_up: u16 = 0x26;
+    const vk_right: u16 = 0x27;
+    const vk_down: u16 = 0x28;
+    const vk_delete: u16 = 0x2E;
+
+    const Coord = extern struct { x: i16, y: i16 };
+    const ScreenBufferInfo = extern struct {
+        size: Coord,
+        cursor: Coord,
+        attributes: u16,
+        window: extern struct { left: i16, top: i16, right: i16, bottom: i16 },
+        maximum_window_size: Coord,
+    };
+    /// An `INPUT_RECORD`, read as its `KEY_EVENT_RECORD` arm.
+    const InputRecord = extern struct {
+        event_type: u16,
+        key_down: i32,
+        repeat_count: u16,
+        virtual_key_code: u16,
+        virtual_scan_code: u16,
+        unicode_char: u16,
+        control_key_state: u32,
+    };
+
+    extern "kernel32" fn GetStdHandle(which: u32) callconv(.winapi) HANDLE;
+    extern "kernel32" fn GetConsoleMode(console: HANDLE, mode: *u32) callconv(.winapi) c_int;
+    extern "kernel32" fn SetConsoleMode(console: HANDLE, mode: u32) callconv(.winapi) c_int;
+    extern "kernel32" fn SetConsoleOutputCP(codepage: u32) callconv(.winapi) c_int;
+    extern "kernel32" fn ReadConsoleInputW(console: HANDLE, record: *InputRecord, n: u32, count: *u32) callconv(.winapi) c_int;
+    extern "kernel32" fn GetConsoleScreenBufferInfo(console: HANDLE, info: *ScreenBufferInfo) callconv(.winapi) c_int;
+    extern "kernel32" fn SetConsoleCursorPosition(console: HANDLE, position: Coord) callconv(.winapi) c_int;
+    extern "kernel32" fn WriteConsoleA(console: HANDLE, text: [*]const u8, n: u32, written: *u32, reserved: ?*anyopaque) callconv(.winapi) c_int;
+    extern "kernel32" fn WideCharToMultiByte(codepage: u32, flags: u32, wide: [*]const u16, n: c_int, multi: ?[*]u8, size: c_int, default: ?[*]const u8, used: ?*c_int) callconv(.winapi) c_int;
+    extern "c" fn _setmode(fd: c_int, mode: c_int) c_int;
+    extern "c" fn _fileno(stream: ?*anyopaque) c_int;
+    extern "c" fn fgetwc(stream: ?*anyopaque) u16;
+};
 
 fn out() ?*anyopaque {
     return out_stream orelse io.cStdout();
@@ -67,14 +137,49 @@ fn out() ?*anyopaque {
 
 const lc_all: c_int = if (builtin.os.tag.isDarwin()) 0 else 6;
 
-/// Ports `init` (console.cpp:90 @620d2225c), the POSIX arm.
+/// Ports `init` (console.cpp:90 @620d2225c), its `_WIN32` arm.
+fn initWindows() void {
+    // Windows-specific console initialization
+    var mode: u32 = 0;
+    h_console = win32.GetStdHandle(win32.std_output_handle);
+    if (h_console == win32.invalid_handle or win32.GetConsoleMode(h_console, &mode) == 0) {
+        h_console = win32.GetStdHandle(win32.std_error_handle);
+        if (h_console != win32.invalid_handle and win32.GetConsoleMode(h_console, &mode) == 0) {
+            h_console = null;
+            simple_io = true;
+        }
+    }
+    if (h_console != null) {
+        // Check conditions combined to reduce nesting
+        if (advanced_display and mode & win32.enable_virtual_terminal_processing == 0 and
+            win32.SetConsoleMode(h_console, mode | win32.enable_virtual_terminal_processing) == 0)
+        {
+            advanced_display = false;
+        }
+        // Set console output codepage to UTF8
+        _ = win32.SetConsoleOutputCP(win32.cp_utf8);
+    }
+    const con_in = win32.GetStdHandle(win32.std_input_handle);
+    if (con_in != win32.invalid_handle and win32.GetConsoleMode(con_in, &mode) != 0) {
+        // Set console input codepage to UTF16
+        _ = win32._setmode(win32._fileno(io.cStdin()), win32.o_wtext);
+
+        // Set ICANON (ENABLE_LINE_INPUT) and ECHO (ENABLE_ECHO_INPUT)
+        if (simple_io) {
+            mode |= win32.enable_line_input | win32.enable_echo_input;
+        } else {
+            mode &= ~(win32.enable_line_input | win32.enable_echo_input);
+        }
+        if (win32.SetConsoleMode(con_in, mode) == 0) simple_io = true;
+    }
+    if (simple_io) _ = win32._setmode(win32._fileno(io.cStdin()), win32.o_u8text);
+}
+
+/// Ports `init` (console.cpp:90 @620d2225c).
 pub fn init(use_simple_io: bool, use_advanced_display: bool) void {
     advanced_display = use_advanced_display;
     simple_io = use_simple_io;
-    if (comptime is_windows) {
-        simple_io = true;
-        return;
-    }
+    if (comptime is_windows) return initWindows();
     // POSIX-specific console initialization
     if (!simple_io) {
         _ = std.c.tcgetattr(std.posix.STDIN_FILENO, &initial_state);
@@ -128,9 +233,53 @@ pub fn setDisplay(display: Display) void {
     }
 }
 
-/// Ports `getchar32` (console.cpp:201 @620d2225c), the POSIX arm: a 32-bit
-/// `wchar_t`, so no surrogate handling.
+/// Ports `getchar32` (console.cpp:201 @620d2225c), its `_WIN32` arm: a key
+/// event, a special key as one of the `key_*` values, a surrogate pair joined.
+fn getchar32Windows() u32 {
+    const console = win32.GetStdHandle(win32.std_input_handle);
+    var high_surrogate: u32 = 0;
+
+    while (true) {
+        var record: win32.InputRecord = undefined;
+        var count: u32 = 0;
+        if (win32.ReadConsoleInputW(console, &record, 1, &count) == 0 or count == 0) return weof;
+
+        if (record.event_type == win32.key_event and record.key_down != 0) {
+            const wc: u32 = record.unicode_char;
+            if (wc == 0) {
+                const ctrl_pressed = record.control_key_state & win32.ctrl_mask != 0;
+                switch (record.virtual_key_code) {
+                    win32.vk_left => return if (ctrl_pressed) key_ctrl_arrow_left else key_arrow_left,
+                    win32.vk_right => return if (ctrl_pressed) key_ctrl_arrow_right else key_arrow_right,
+                    win32.vk_up => return key_arrow_up,
+                    win32.vk_down => return key_arrow_down,
+                    win32.vk_home => return key_home,
+                    win32.vk_end => return key_end,
+                    win32.vk_delete => return key_delete,
+                    else => continue,
+                }
+            }
+
+            if (wc >= 0xD800 and wc <= 0xDBFF) { // Check if wc is a high surrogate
+                high_surrogate = wc;
+                continue;
+            }
+            if (wc >= 0xDC00 and wc <= 0xDFFF) { // Check if wc is a low surrogate
+                if (high_surrogate != 0) { // Check if we have a high surrogate
+                    return ((high_surrogate - 0xD800) << 10) + (wc - 0xDC00) + 0x10000;
+                }
+            }
+
+            high_surrogate = 0; // Reset the high surrogate
+            return wc;
+        }
+    }
+}
+
+/// Ports `getchar32` (console.cpp:201 @620d2225c); the POSIX arm has a
+/// 32-bit `wchar_t`, so no surrogate handling.
 fn getchar32() u32 {
+    if (comptime is_windows) return getchar32Windows();
     const wc = getwchar();
     if (wc == weof) return weof;
     return wc;
@@ -138,16 +287,61 @@ fn getchar32() u32 {
 
 /// Ports `pop_cursor` (console.cpp:266 @620d2225c).
 fn popCursor() void {
+    if (comptime is_windows) {
+        if (h_console != null) {
+            var info: win32.ScreenBufferInfo = undefined;
+            _ = win32.GetConsoleScreenBufferInfo(h_console, &info);
+
+            var position = info.cursor;
+            if (position.x == 0) {
+                position.x = info.size.x - 1;
+                position.y -= 1;
+            } else {
+                position.x -= 1;
+            }
+
+            _ = win32.SetConsoleCursorPosition(h_console, position);
+            return;
+        }
+    }
     _ = fputc('\x08', out());
 }
 
 /// Ports `estimateWidth` (console.cpp:287 @620d2225c).
 fn estimateWidth(codepoint: u32) c_int {
+    if (comptime is_windows) return 1;
     return wcwidth(codepoint);
 }
 
-/// Ports `put_codepoint` (console.cpp:296 @620d2225c), the POSIX arm.
+/// Ports `put_codepoint` (console.cpp:296 @620d2225c), its `_WIN32` arm:
+/// the width is how far the console moved the cursor.
+fn putCodepointWindows(utf8: []const u8, expected_width: c_int) c_int {
+    var info: win32.ScreenBufferInfo = undefined;
+    if (win32.GetConsoleScreenBufferInfo(h_console, &info) == 0) {
+        // go with the default
+        return expected_width;
+    }
+    const initial = info.cursor;
+    var written: u32 = @intCast(utf8.len);
+    _ = win32.WriteConsoleA(h_console, utf8.ptr, written, &written, null);
+
+    var new_info: win32.ScreenBufferInfo = undefined;
+    _ = win32.GetConsoleScreenBufferInfo(h_console, &new_info);
+
+    // Figure out our real position if we're in the last column
+    if (utf8[0] != 0x09 and initial.x == new_info.size.x - 1) {
+        _ = win32.WriteConsoleA(h_console, " \x08", 2, &written, null);
+        _ = win32.GetConsoleScreenBufferInfo(h_console, &new_info);
+    }
+
+    var width: c_int = @as(c_int, new_info.cursor.x) - initial.x;
+    if (width < 0) width += new_info.size.x;
+    return width;
+}
+
+/// Ports `put_codepoint` (console.cpp:296 @620d2225c).
 fn putCodepoint(utf8: []const u8, expected_width: c_int) c_int {
+    if (comptime is_windows) return putCodepointWindows(utf8, expected_width);
     // We can trust expectedWidth if we've got one
     if (expected_width >= 0 or tty == null) {
         _ = fwrite(utf8.ptr, utf8.len, 1, out());
@@ -180,8 +374,13 @@ fn putCodepoint(utf8: []const u8, expected_width: c_int) c_int {
     return width;
 }
 
-/// Ports `replace_last` (console.cpp:357 @620d2225c), the POSIX arm.
+/// Ports `replace_last` (console.cpp:357 @620d2225c).
 fn replaceLast(ch: u8) void {
+    if (comptime is_windows) {
+        popCursor();
+        _ = putCodepoint(&.{ch}, 1);
+        return;
+    }
     _ = fprintf(out(), "\x08%c", @as(c_int, ch));
 }
 
@@ -435,6 +634,27 @@ fn isSpaceCodepoint(cp: u32) bool {
 /// Ports `move_cursor` (console.cpp:667 @620d2225c), the POSIX arm.
 fn moveCursor(delta: c_int) void {
     if (delta == 0) return;
+    if (comptime is_windows) {
+        if (h_console != null) {
+            var info: win32.ScreenBufferInfo = undefined;
+            _ = win32.GetConsoleScreenBufferInfo(h_console, &info);
+            const width: c_int = info.size.x;
+            var new_x: c_int = @as(c_int, info.cursor.x) + delta;
+            var new_y: c_int = info.cursor.y;
+
+            while (new_x >= width) {
+                new_x -= width;
+                new_y += 1;
+            }
+            while (new_x < 0) {
+                new_x += width;
+                new_y -= 1;
+            }
+
+            _ = win32.SetConsoleCursorPosition(h_console, .{ .x = @intCast(new_x), .y = @intCast(new_y) });
+        }
+        return;
+    }
     if (delta < 0) {
         var i: c_int = 0;
         while (i < -delta) : (i += 1) _ = fprintf(out(), "\x08");
@@ -493,6 +713,24 @@ const History = struct {
 };
 
 var history: History = .{};
+
+/// Ports the `history_prev` lambda (console.cpp:771 @620d2225c).
+fn historyPrev(a: std.mem.Allocator, ed: *Editor) !void {
+    if (!history.isViewing()) try history.beginViewing(a, ed.line.items);
+    if (history.prev()) |nl| try ed.setLineContents(nl);
+}
+
+/// Ports the `history_next` lambda (console.cpp:781 @620d2225c).
+fn historyNext(a: std.mem.Allocator, ed: *Editor) !void {
+    if (history.isViewing()) {
+        if (history.next()) |nl| {
+            const copy = try a.dupe(u8, nl);
+            defer a.free(copy);
+            if (history.viewing_idx >= history.entries.items.len) history.endViewing();
+            try ed.setLineContents(copy);
+        }
+    }
+}
 
 /// Ports `readline_advanced` (console.cpp:754 @620d2225c): a line edited
 /// in place with the cursor keys, backspace and history. A submitted line
@@ -560,17 +798,9 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
                 } else if (code == 'A' or code == 'B') {
                     // up/down
                     if (code == 'A') {
-                        if (!history.isViewing()) try history.beginViewing(a, line.items);
-                        if (history.prev()) |nl| try ed.setLineContents(nl);
+                        try historyPrev(a, &ed);
                     } else {
-                        if (history.isViewing()) {
-                            if (history.next()) |nl| {
-                                const copy = try a.dupe(u8, nl);
-                                defer a.free(copy);
-                                if (history.viewing_idx >= history.entries.items.len) history.endViewing();
-                                try ed.setLineContents(copy);
-                            }
-                        }
+                        try historyNext(a, &ed);
                     }
                     is_special_char = false;
                 } else if ((code == '~' or (code >= 'A' and code <= 'Z') or (code >= 'a' and code <= 'z')) and params.items.len != 0) {
@@ -599,6 +829,34 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
                     if (code == weof) break;
                     if ((code >= 'A' and code <= 'Z') or (code >= 'a' and code <= 'z') or code == '~') break;
                 }
+            }
+        } else if (is_windows and input_char >= key_arrow_left and input_char <= key_delete) {
+            switch (input_char) {
+                key_arrow_left => if (ed.char_pos > 0) {
+                    const w = ed.widths.items[ed.char_pos - 1];
+                    moveCursor(-w);
+                    ed.char_pos -= 1;
+                    ed.byte_pos = prevUtf8CharPos(line.items, ed.byte_pos);
+                },
+                key_arrow_right => if (ed.char_pos < ed.widths.items.len) {
+                    const w = ed.widths.items[ed.char_pos];
+                    moveCursor(w);
+                    ed.char_pos += 1;
+                    ed.byte_pos = nextUtf8CharPos(line.items, ed.byte_pos);
+                },
+                key_ctrl_arrow_left => ed.moveWordLeft(),
+                key_ctrl_arrow_right => ed.moveWordRight(),
+                key_home => ed.moveToLineStart(),
+                key_end => ed.moveToLineEnd(),
+                key_delete => ed.deleteAtCursor(),
+                key_arrow_up => {
+                    try historyPrev(a, &ed);
+                    is_special_char = false;
+                },
+                else => {
+                    try historyNext(a, &ed);
+                    is_special_char = false;
+                },
             }
         } else if (input_char == 0x08 or input_char == 0x7F) { // Backspace
             if (ed.char_pos > 0) {
@@ -700,23 +958,57 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
     return has_more;
 }
 
-/// Ports `readline_simple` (console.cpp:1048 @620d2225c), the POSIX arm:
 /// `std::getline(std::cin, line)` over the C library's `stdin`, which
 /// libc++'s `cin` shares.
-fn readlineSimple(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_input_in: bool) !bool {
-    var multiline_input = multiline_input_in;
-    line.clearRetainingCapacity();
+///
+/// Return: false when the stream is bad or at its end.
+fn readLinePosix(a: std.mem.Allocator, line: *std.ArrayList(u8)) !bool {
     var buf: ?[*]u8 = null;
     var cap: usize = 0;
     defer free(buf);
     const n = getline(&buf, &cap, io.cStdin());
-    if (n < 0) {
-        // Input stream is bad or EOF received
-        return false;
-    }
+    if (n < 0) return false;
     var got = buf.?[0..@intCast(n)];
     if (got.len != 0 and got[got.len - 1] == '\n') got = got[0 .. got.len - 1];
     try line.appendSlice(a, got);
+    return true;
+}
+
+/// `std::getline(std::wcin, wline)`, then upstream's `wstring_to_utf8`
+/// (common/common.cpp:895 @620d2225c): `stdin` is in a wide text mode here, which `init`
+/// set. An end of input after some characters still yields them.
+///
+/// Return: false when the stream is bad or at its end.
+fn readLineWindows(a: std.mem.Allocator, line: *std.ArrayList(u8)) !bool {
+    var wline: std.ArrayList(u16) = .empty;
+    defer wline.deinit(a);
+    var any = false;
+    while (true) {
+        const wc = win32.fgetwc(io.cStdin());
+        if (wc == weof) break;
+        any = true;
+        if (wc == '\n') break;
+        try wline.append(a, wc);
+    }
+    if (!any) return false;
+    if (wline.items.len == 0) return true;
+    const n: c_int = @intCast(wline.items.len);
+    const size = win32.WideCharToMultiByte(win32.cp_utf8, 0, wline.items.ptr, n, null, 0, null, null);
+    const start = line.items.len;
+    try line.resize(a, start + @as(usize, @intCast(size)));
+    _ = win32.WideCharToMultiByte(win32.cp_utf8, 0, wline.items.ptr, n, line.items[start..].ptr, size, null, null);
+    return true;
+}
+
+/// Ports `readline_simple` (console.cpp:1048 @620d2225c).
+fn readlineSimple(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_input_in: bool) !bool {
+    var multiline_input = multiline_input_in;
+    line.clearRetainingCapacity();
+    const got_line = if (comptime is_windows) try readLineWindows(a, line) else try readLinePosix(a, line);
+    if (!got_line) {
+        // Input stream is bad or EOF received
+        return false;
+    }
     if (line.items.len != 0) {
         const last = line.items[line.items.len - 1];
         if (last == '/') { // Always return control on '/' symbol

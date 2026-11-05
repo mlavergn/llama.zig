@@ -106,7 +106,7 @@ fn writeStderr(text: []const u8) void {
 
 /// `write(2, bytes, n)`. On Windows `std.c.write` takes a `HANDLE`, so this
 /// is the CRT's `_write` on descriptor 2 there, as MinGW's `write` is.
-fn writeFd2(bytes: []const u8) isize {
+pub fn writeFd2(bytes: []const u8) isize {
     if (comptime @import("builtin").os.tag == .windows) {
         const crt_write = @extern(*const fn (c_int, [*]const u8, c_uint) callconv(.c) c_int, .{ .name = "_write" });
         return crt_write(2, bytes.ptr, @intCast(@min(bytes.len, std.math.maxInt(c_int))));

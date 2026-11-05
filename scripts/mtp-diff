@@ -55,6 +55,11 @@ before_abort() {
         | perl -ne 'if (/^llama_graph_n_input_tensors:/) { push @r, $_ } else { print sort @r; @r = (); print } END { print sort @r }'
 }
 
+# On Linux an abort attaches gdb, whose `[New LWP n]` lines differ every run
+# and land in the transcript before_abort compares: the glm4moe fixture failed
+# there on thread ids alone (v0.7.0's GB10 pickup).
+export GGML_NO_BACKTRACE=1
+
 pass=0; fail=0; aborts=0
 for f in "$DIR"/mtp/*.gguf; do
     [ -f "$f" ] || continue

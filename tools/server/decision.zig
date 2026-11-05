@@ -26,11 +26,12 @@
 //! `std::log(double)` do: Zig's own differ in the last bit. Three sums are
 //! fused as clang compiles them, read from the reference's disassembly and
 //! held by `server-diff decision`: a score's expected value (scalar,
-//! fused), `decision_confidence_score`'s distance (vectorized eight at a
-//! time with rounded products, the tail fused) and
+//! fused), `decision_confidence_score`'s distance (vectorized in groups of
+//! `score_group` with rounded products, the tail fused) and
 //! `decision_confidence_entropy`'s sum (scalar, fused).
 
 const std = @import("std");
+const builtin = @import("builtin");
 const json = @import("json");
 const chat = @import("common_chat");
 const tc = @import("tools_common");
@@ -1401,6 +1402,15 @@ fn confidenceChoice(probs: []const f64) f64 {
     return @max(0.0, (p_max - uniform) / (1.0 - uniform));
 }
 
+/// The group `decision_confidence_score`'s loop vectorizes in, which clang
+/// picks from the CPU model: 8 on the Apple cores with
+/// `max_interleave_factor_4`, 4 at aarch64 `generic`, read from each
+/// reference's disassembly (`fmul.2d`, two registers a step at `generic`).
+/// **Not `simd.strict_loop`'s group**, which goes the other way for that
+/// `f32` loop. A 7-option score is what tells 4 from 8.
+const score_group: usize = if (builtin.cpu.arch == .aarch64 and
+    !std.Target.aarch64.featureSetHas(builtin.cpu.features, .max_interleave_factor_4)) 4 else 8;
+
 /// Ports `decision_confidence_score` (server-decision.cpp:1130 @620d2225c).
 fn confidenceScore(probs: []const f64) f64 {
     if (probs.len < 2) {
@@ -1412,11 +1422,12 @@ fn confidenceScore(probs: []const f64) f64 {
 
     // mean distance to the mode, relative to the one of a uniform distribution around its center
     //
-    // As the reference compiles it: from 8 elements the loop is vectorized
-    // eight at a time, those products rounded and added in order, and only
-    // the `n % 8` left over are fused (read from the disassembly; the
-    // division in the second sum keeps it plain either way).
-    const n_vec = if (n >= 8) n - n % 8 else 0;
+    // As the reference compiles it: from `score_group` elements the loop is
+    // vectorized that many at a time, those products rounded and added in
+    // order, and only the `n % score_group` left over are fused (read from
+    // the disassembly; the division in the second sum keeps it plain either
+    // way).
+    const n_vec = if (n >= score_group) n - n % score_group else 0;
     var dist: f64 = 0.0;
     var dist_uniform: f64 = 0.0;
     for (0..n) |i| {

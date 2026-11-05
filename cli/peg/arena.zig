@@ -330,7 +330,7 @@ pub const ParseContext = struct {
     pub fn initTokens(gpa: Allocator, input: []const u8, tokens: []const i32, flags: u32) Error!ParseContext {
         if (!(tokens.len == 0 or tokens.len == input.len)) {
             const text = "GGML_ASSERT(this->tokens.empty() || this->tokens.size() == this->input.size()) failed\n";
-            _ = std.c.write(2, text.ptr, text.len);
+            _ = errors.writeFd2(text);
             std.c.abort();
         }
         var self = try init(gpa, input, flags);

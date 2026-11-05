@@ -7,12 +7,13 @@
 //! `void` on Linux (Zig 0.17 declares no glibc `struct stat`), so nothing
 //! that named it compiled there. On Linux this asks the kernel with
 //! `statx`, as `tools/quantize.zig`'s `sameFile` already did, which is what
-//! glibc's own `stat` does underneath; elsewhere it is libc's `stat`.
+//! glibc's own `stat` does underneath; on Windows the CRT's `_wstat64`, the
+//! path widened from UTF-8; elsewhere it is libc's `stat`.
 
 const std = @import("std");
 const builtin = @import("builtin");
 
-/// The file type bits of `st_mode`: the same on Linux and Darwin.
+/// The file type bits of `st_mode`: the same on Linux, Darwin and the CRT.
 pub const IFMT: u32 = 0o170000;
 pub const IFDIR: u32 = 0o040000;
 pub const IFREG: u32 = 0o100000;
@@ -25,6 +26,46 @@ pub const Info = struct {
 };
 
 extern "c" fn lstat(path: [*:0]const u8, buf: *std.c.Stat) c_int;
+
+/// The CRT's `struct _stat64`.
+const WinStat = extern struct {
+    dev: u32,
+    ino: u16,
+    mode: u16,
+    nlink: i16,
+    uid: i16,
+    gid: i16,
+    rdev: u32,
+    size: i64,
+    atime: i64,
+    mtime: i64,
+    ctime: i64,
+};
+
+extern "c" fn _wstat64(path: [*:0]const u16, buf: *WinStat) c_int;
+extern "c" fn _errno() *c_int;
+
+/// `ENOENT`, for a path `_wstat64` cannot be asked about.
+const win_enoent: c_int = 2;
+
+/// `stat` on Windows. The CRT has no `lstat`, so a symlink is always
+/// followed; and it refuses a directory named with a trailing separator,
+/// which MinGW's own `stat` strips, so this does too, short of a root.
+fn statWindows(path: [*:0]const u8, out: *Info) c_int {
+    var name: []const u8 = std.mem.span(path);
+    while (name.len > 1 and (name[name.len - 1] == '/' or name[name.len - 1] == '\\') and name[name.len - 2] != ':') {
+        name = name[0 .. name.len - 1];
+    }
+    var wide: [std.os.windows.PATH_MAX_WIDE + 1]u16 = undefined;
+    if (name.len >= wide.len) return win_enoent;
+    const n = std.unicode.utf8ToUtf16Le(&wide, name) catch return win_enoent;
+    wide[n] = 0;
+    var st: WinStat = undefined;
+    const wide_path: [*:0]const u16 = @ptrCast(&wide);
+    if (_wstat64(wide_path, &st) != 0) return _errno().*;
+    out.* = .{ .mode = st.mode, .size = @intCast(st.size) };
+    return 0;
+}
 
 /// `stat(path)`, or `lstat(path)` when `follow` is false.
 ///
@@ -44,6 +85,7 @@ pub fn statErrno(path: [*:0]const u8, follow: bool, out: *Info) c_int {
         out.* = .{ .mode = sx.mode, .size = sx.size };
         return 0;
     }
+    if (comptime builtin.os.tag == .windows) return statWindows(path, out);
     var st: std.c.Stat = undefined;
     const rc = if (follow) std.c.stat(path, &st) else lstat(path, &st);
     if (rc != 0) return std.c._errno().*;

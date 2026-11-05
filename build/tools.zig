@@ -240,8 +240,9 @@ pub fn add(b: *std.Build, opts: Options) !void {
         tools_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
     }
     // Our `llama-server` (Stage 10, Decision 65), over the same modules as
-    // the mtmd tools: it takes images and audio once step 8 lands.
-    {
+    // the mtmd tools: it takes images and audio once step 8 lands. Not built
+    // for Windows: its port there is out of scope (Marc, 2026-11-04).
+    if (opts.target.result.os.tag != .windows) {
         const mod = b.createModule(.{
             .root_source_file = b.path("tools/server/main.zig"),
             .target = opts.target,

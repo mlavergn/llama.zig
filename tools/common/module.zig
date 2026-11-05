@@ -41,6 +41,7 @@ pub const console = @import("console.zig");
 pub const chat = @import("chat.zig");
 pub const subproc = @import("subproc.zig");
 pub const fs_stat = @import("fs_stat.zig");
+pub const clock = @import("clock.zig");
 
 /// `LLM_KV_SPLIT_NO`, `LLM_KV_SPLIT_COUNT`, `LLM_KV_SPLIT_TENSORS_COUNT`
 /// (common/common.h:1232, 1233, 1234 @620d2225c).

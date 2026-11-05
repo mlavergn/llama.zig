@@ -214,9 +214,7 @@ pub fn setTimestamps(on: bool) void {
 
 /// `t_us`, the system clock in microseconds (common/log.cpp:37 @620d2225c).
 fn tUs() i64 {
-    var ts: std.c.timespec = undefined;
-    _ = std.c.clock_gettime(std.c.CLOCK.REALTIME, &ts);
-    return @as(i64, ts.sec) * 1000000 + @divTrunc(@as(i64, ts.nsec), 1000);
+    return @import("clock.zig").realtimeUs();
 }
 
 /// `common_log_main`'s first call constructs the logger, which starts its

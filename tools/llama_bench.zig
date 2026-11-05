@@ -56,9 +56,7 @@ fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void
 
 /// Ports `get_time_ns` (llama-bench.cpp:40 @620d2225c).
 fn getTimeNs() u64 {
-    var ts: std.c.timespec = undefined;
-    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts);
-    return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
+    return @import("tools_common").clock.monotonicNs();
 }
 
 /// Ports `tensor_buft_override_equal` (llama-bench.cpp:45 @620d2225c).

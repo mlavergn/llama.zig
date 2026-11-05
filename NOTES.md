@@ -12728,3 +12728,78 @@ stashed. Fixes went Mac first and were carried back as whole files.
   stack. On the silicon, the `q2_0` FMA split (2,036/2,400) and F16C off
   (1,920/2,400 in two quantizers, all on the NaN pattern) were caught.
 - **JWHLPTOP**: unpaired; the AVX-512 items carry forward again.
+
+## The v0.7.0 pickup
+
+Finished on the GB10 on 2026-11-05, over the link, on `sync-v0.7.0-wip`:
+its source equals `0acdb2c` apart from docs, `Makefile` quoting, the version,
+`xcframework/` and `win-run`, and `scripts/server-diff`'s colour fix, which
+was carried before the run reached it. 60 steps; every non-zero one below.
+
+| Step | Result |
+|---|---|
+| `server-task-diff` | **A real port bug.** 1 of 361 decision answers: `confidence` off in its last digits, every probability identical |
+| `mtp-diff` | **The gate.** 30 pass; `glm4moe` failed on `[New LWP n]` lines. With the fix: 30 pass, 2 aborting alike |
+| `mtmd-gates` | **Setup.** `mtmd-decode-diff`'s corpus was not there yet, and make stopped before `mtmd-diff` |
+| `mtmd-diff` | 302 identical, 2 different: `qwen3tts.cpu.nodes` and `qwen3tts_shared.cpu.nodes`, the v0.6.0 pair |
+| `server-diff` `sleep`, `parallel`, `decision` | Differ upstream against itself; below |
+
+**`decision_confidence_score` had the Mac's vectorization hard-coded.**
+`dist += probs[i] * fabs(i - mode)` is a strict reduction: rounded in whole
+groups, fused in the tail. The port took 8, read from the Mac's disassembly.
+The GB10's reference does `cmp x9, #4`, `and x10, x9, #~3`, two `fmul.2d` a
+step: 4. So a 7-option score ran fully fused in the port and half rounded in
+the reference, and that is the one answer in 361 that differed. **It is not
+`simd.strict_loop`'s group**, which is 4 on Apple and 8 at `generic` for its
+`f32` loop: this `f64` loop goes the other way, so `score_group` was measured
+on its own. x86_64 keeps 8, unmeasured; `llama-server` is not gated there.
+
+**`mtp-diff` compared a debugger's output.** On Linux an abort attaches gdb,
+and `before_abort` kept its `[New LWP n]` lines, different every run. The
+Mac prints none, so it read 1 both-abort there and 2 failures here.
+`GGML_NO_BACKTRACE=1`, which upstream and the port both honour, leaves the
+same assertion and the same transcript on both sides, GPU and CPU.
+
+**Three `server-diff` files cannot speak for the port on the GB10.** Each was
+run alone three times against the reference and eleven (`sleep` three) against
+itself:
+
+| File | Port vs upstream | Upstream vs itself | Cases |
+|---|---|---|---|
+| `sleep` | 2 of 3 fail | 3 of 3 fail | lines 6-7: a 1-second idle timeout races the first request |
+| `parallel` | 3 of 3 fail | 10 of 11 fail | lines 10, 24, 39, 48, all in `!parallel` blocks |
+| `decision` | 2 of 3 fail | 8 of 11 fail | lines 145, 146, the one `!parallel` block |
+
+`parallel:10` and `decision:145` first appeared on the port side only; eight
+more self runs reproduced both, so no case differs in the port alone. Every
+other case in those files matched in every run. **A real fault in these cases
+would look the same there**: the Mac's pass is what covers them.
+
+`peg-diff` reads 4,977,729 checks here and 5,000,139 on the Mac, the same
+before and after these changes: which random cases the reference skips at its
+10 s alarm differs by machine.
+
+**Windows, after the v0.7.0 commit.** `llama-cli` had not built for Windows
+since Stage 9: `cli/peg/arena.zig` called `std.c.write(2, ...)`, which takes a
+`HANDLE` there, and no gate cross-builds the CLI. Only `llama-gguf-split` of
+the tools built. Now `llama-cli` and twelve tools do: `tools/common/clock.zig`
+for `clock_gettime`, a `_wstat64` arm in `fs_stat.zig`, and every `_WIN32` arm
+of `console.cpp`, which `console.zig` had stubbed down to simple I/O.
+`llama-cli.exe` matched `raw_completion` over `libllama-ref` on the laptop on
+all six `parity-cli` prompts, greedy, 32 tokens, a one-off from a scratchpad.
+`push` merges stderr into the stream and ConPTY repeats a letter at the
+80-column wrap (`attr` / `ract`): compare on the generated text, by column.
+**The console arms have run in no terminal**: nothing scripted reaches
+`ReadConsoleInputW`. `tools-diff` does not run on Windows, by decision. On
+Linux the shared changes passed `tools-diff` for `tokenize`, `imatrix`,
+`perplexity`, `bench` and `mtmd-cli`, `test-cli` and `peg-diff`.
+
+**The link.** `zigupdater`'s unbranded build keeps its peers in
+`~/.example/updater`. With `--data-dir ~/.marclavergne/updater` neither agent
+connected in 100 s; with the default both did within 20 s, and that store's
+`peers.zon` gained them at that moment. Why is unknown. `zigupdater peers`
+listed neither beforehand, so only `tty` says who can connect.
+
+Zig moved during this pickup, from `/usr/local/inferise/zig` to
+`/usr/local/marclavergne/zig`, and reports `0.17.0+1`. `make validate` passed
+on it; the Mac gates before it ran on `0.17.0`, the GB10 still has `0.17.0`.
