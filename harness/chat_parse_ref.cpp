@@ -16,10 +16,10 @@
 //                                        source, flags, example, verify, and
 //                                        the differential analysis of the template
 //   apply   {t, in, keep?}               common_chat_templates_apply
-//   parser  {id, text}                   a saved PEG arena, loaded once
-//   parse   {p | a, format, gen, input_hex, partial}
-//                                        common_chat_parse with a loaded parser,
-//                                        or with what apply record `a` produced
+//   parse   {a, input_hex, partial}      common_chat_peg_parse with the parser
+//                                        and parser params apply record `a`
+//                                        produced (a saved parser cannot be
+//                                        loaded since v0.7.0)
 //   diff, ucp, acs, seg, cv              the auto-parser helpers
 // Output: per record `== <n> <op>`, then `key value` lines, every string
 // escaped onto one line; `E <class> <what>` for an exception; `L <level>
@@ -37,6 +37,7 @@
 #include "llama.h"
 #include "log.h"
 #include "peg-parser.h"
+#include "peg_save.h"
 
 #include <dlfcn.h>
 #include <time.h>
@@ -215,9 +216,18 @@ static template_params read_template_params(const common_json & j) {
     return p;
 }
 
+// The prompt: its text, then every part as upstream produced it, an empty
+// one included.
+static void show_prompt(const common_chat_prompt & p) {
+    kv("prompt", p.str());
+    for (const auto & part : p.parts) {
+        kv(part.is_input ? "prompt.input" : "prompt.template", part.text);
+    }
+}
+
 static void show_params(const common_chat_params & p) {
     guarded([&] { kv("format", common_chat_format_name(p.format)); });
-    kv("prompt", p.prompt);
+    show_prompt(p.prompt);
     kv("grammar", p.grammar);
     flag("lazy", p.grammar_lazy);
     kv("gen", p.generation_prompt);
@@ -235,8 +245,15 @@ static void show_params(const common_chat_params & p) {
     for (const auto & t : p.additional_stops) {
         kv("stop", t);
     }
-    kv("parser", p.parser);
-    guarded([&] { kv("delims", p.message_delimiters.to_json().dump()); });
+    guarded([&] { kv("parser", p.parser.empty() ? std::string() : harness_peg_save(p.parser)); });
+    // the form `common_chat_msg_delimiters::to_json` wrote until v0.7.0 removed it
+    guarded([&] {
+        common_json d = common_json::array();
+        for (const auto & x : p.message_delimiters.delimiters) {
+            d.push_back({ { "role", common_chat_role_to_string(x.role) }, { "delimiter", x.delimiter } });
+        }
+        kv("delims", d.dump());
+    });
 }
 
 static void show_msg(const common_chat_msg & m) {
@@ -321,7 +338,6 @@ static void show_diff(const diff_split & d) {
 
 struct state {
     std::map<int, common_chat_templates_ptr>  tmpls;
-    std::map<int, common_peg_arena>           parsers;
     std::map<int, common_chat_params>         applies;
 };
 
@@ -389,40 +405,17 @@ static void run(state & st, size_t n, const common_json & r) {
                 }
             });
         }
-    } else if (op == "parser") {
-        common_peg_arena a;
-        guarded([&] {
-            a.load(r.at("text").get<std::string>());
-            line("loaded");
-        });
-        st.parsers[r.at("id").get<int>()] = std::move(a);
     } else if (op == "parse") {
         std::string input = unhex(r.at("input_hex").get<std::string>());
         bool        partial = r.at("partial").get<bool>();
-        common_chat_parser_params params;
-        if (r.contains("a")) {
-            auto it = st.applies.find(r.at("a").get<int>());
-            if (it == st.applies.end()) {
-                line("no_apply");
-                flush_logs();
-                return;
-            }
-            params = common_chat_parser_params(it->second);
-            int key = -1 - r.at("a").get<int>();
-            if (st.parsers.find(key) == st.parsers.end()) {
-                // what the server does: an empty parser is left empty, not loaded
-                common_peg_arena a;
-                if (!it->second.parser.empty()) {
-                    a.load(it->second.parser);
-                }
-                st.parsers[key] = std::move(a);
-            }
-            guarded([&] { show_msg(common_chat_peg_parse(st.parsers.at(key), input, partial, params)); });
-        } else {
-            params.format            = (common_chat_format) r.at("format").get<int>();
-            params.generation_prompt = r.at("gen").get<std::string>();
-            guarded([&] { show_msg(common_chat_peg_parse(st.parsers.at(r.at("p").get<int>()), input, partial, params)); });
+        auto it = st.applies.find(r.at("a").get<int>());
+        if (it == st.applies.end()) {
+            line("no_apply");
+            flush_logs();
+            return;
         }
+        common_chat_parser_params params(it->second);
+        guarded([&] { show_msg(common_chat_peg_parse(it->second.parser, common_chat_input(input), partial, params)); });
     } else if (op == "diff") {
         show_diff(calculate_diff_split(r.at("l").get<std::string>(), r.at("r").get<std::string>()));
     } else if (op == "ucp") {
@@ -455,10 +448,10 @@ static void run(state & st, size_t n, const common_json & r) {
 }
 
 // Whether a record before the start of a resumed run rebuilds state the
-// records after it read: templates, parsers, kept applies.
+// records after it read: templates, kept applies.
 static bool builds_state(const common_json & r) {
     std::string op = r.at("op").get<std::string>();
-    return op == "tmpl" || op == "parser" || (op == "apply" && r.contains("keep"));
+    return op == "tmpl" || (op == "apply" && r.contains("keep"));
 }
 
 // Usage: chat_parse_ref <records> <transcript> <log scratch file> [start].

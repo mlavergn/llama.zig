@@ -15,12 +15,15 @@
 #   and the architecture fixtures (scripts/gen-arch-fixtures).
 #   FIT_DIFF_OUT=<dir> keeps both transcripts of every case.
 #   FIT_DIFF_KEEP=<path> keeps the harness binary; FIT_DIFF_O=ReleaseSafe
-#   builds it with safety checks.
+#   builds it with safety checks. FIT_DIFF_LIB=<dir> links libllama-ref.a and
+#   libggml.a from <dir> instead of zig-out/lib (a `zig build reference -p`
+#   prefix), so a run reads nothing another gate may be rebuilding.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
-for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
+LIB="${FIT_DIFF_LIB:-zig-out/lib}"
+for lib in "$LIB/libllama-ref.a" "$LIB/libggml.a"; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
 done
 
@@ -65,7 +68,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/fit_diff" -O"${FIT_DIFF_O:-fast}" 
     --dep llama -Mfit=cli/fit.zig \
     --dep llama_c -Mllama=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/fit_dev.o" "$tmp/fit.o" "$tmp/log.o" "$tmp/json.o" "$tmp/fit_ref.o" \
-    zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
+    "$LIB/libllama-ref.a" "$LIB/libggml.a" -lc++ \
     "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 

@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.6.0
-//! (`d81235049`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.7.0
+//! (`620d2225c`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. A device is created once per index and lives for the process, as
 //! the C++'s `vk_instance.devices[]` shared pointers do; the C++ destroys
 //! them from a static destructor at exit, which the port does not reproduce.
@@ -26,18 +26,18 @@ const glslc = m.instance.glslc;
 
 const type_count = c.GGML_TYPE_COUNT;
 
-/// Ports `mul_mat_vec_max_cols` and `p021_max_gqa_ratio` (ggml-vulkan-types.h:383, 385 @d81235049).
+/// Ports `mul_mat_vec_max_cols` and `p021_max_gqa_ratio` (ggml-vulkan-types.h:362, 364 @620d2225c).
 pub const mul_mat_vec_max_cols = 8;
 pub const p021_max_gqa_ratio = 8;
 
-/// Ports `dmmv_wg_sizes` (ggml-vulkan-types.h:423 @d81235049).
+/// Ports `dmmv_wg_sizes` (ggml-vulkan-types.h:402 @620d2225c).
 pub const DmmvWgSize = enum(u32) { subgroup, large };
 pub const dmmv_wg_size_count = 2;
 
-/// Ports `FaCodePath` (ggml-vulkan-types.h:429 @d81235049).
+/// Ports `FaCodePath` (ggml-vulkan-types.h:408 @620d2225c).
 pub const FaCodePath = enum(u32) { scalar, coopmat1, coopmat2 };
 
-/// Ports `vk_fa_pipeline_state` (ggml-vulkan-types.h:435 @d81235049). The C++
+/// Ports `vk_fa_pipeline_state` (ggml-vulkan-types.h:414 @620d2225c). The C++
 /// keys a `std::map` on it; only lookup and iteration are needed, so the
 /// port hashes it.
 pub const FaPipelineState = struct {
@@ -59,13 +59,13 @@ pub const FaPipelineState = struct {
     v_type: c.ggml_type,
 };
 
-/// Ports `vk_conv2d_pipeline_state` (ggml-vulkan-types.h:455 @d81235049).
+/// Ports `vk_conv2d_pipeline_state` (ggml-vulkan-types.h:434 @620d2225c).
 pub const Conv2dPipelineState = struct { s0: u32, s1: u32, p0: u32, p1: u32, d0: u32, d1: u32, KW: u32, KH: u32, aligned: u32 };
 
-/// Ports `vk_conv3d_pipeline_state` (ggml-vulkan-types.h:469 @d81235049).
+/// Ports `vk_conv3d_pipeline_state` (ggml-vulkan-types.h:448 @620d2225c).
 pub const Conv3dPipelineState = struct { s0: u32, s1: u32, s2: u32, p0: u32, p1: u32, p2: u32, d0: u32, d1: u32, d2: u32, KW: u32, KH: u32, KD: u32, aligned: u32 };
 
-/// Ports `vk_solve_tri_pipeline_state` (ggml-vulkan-types.h:483 @d81235049).
+/// Ports `vk_solve_tri_pipeline_state` (ggml-vulkan-types.h:462 @620d2225c).
 pub const SolveTriPipelineState = struct { N: u32, K: u32 };
 
 /// The key of `pipeline_xe_fa_decode_dual_phases`: head sizes of Q·K and
@@ -81,22 +81,22 @@ pub fn PipelineMap(comptime K: type) type {
 }
 
 /// Ports `num_argsort_pipelines`, `num_topk_moe_pipelines` and
-/// `num_topk_pipelines` (ggml-vulkan-types.h:502, 504, 506 @d81235049).
+/// `num_topk_pipelines` (ggml-vulkan-types.h:481, 483, 485 @620d2225c).
 pub const num_argsort_pipelines = 11;
 pub const num_topk_moe_pipelines = 10;
 pub const num_topk_pipelines = 11;
 
-/// Ports `CONV_SHAPE_COUNT` (ggml-vulkan-types.h:406 @d81235049).
+/// Ports `CONV_SHAPE_COUNT` (ggml-vulkan-types.h:385 @620d2225c).
 pub const conv_shape_count = 4;
 
-/// Ports `vk_command_buffer` (ggml-vulkan-types.h:323 @d81235049).
+/// Ports `vk_command_buffer` (ggml-vulkan-types.h:302 @620d2225c).
 pub const CommandBuffer = struct {
     buf: vk.VkCommandBuffer = null,
     use_counter: u64 = 0,
     in_use: bool = false,
 };
 
-/// Ports `vk_command_pool` (ggml-vulkan-types.h:331 @d81235049). The C++ keeps
+/// Ports `vk_command_pool` (ggml-vulkan-types.h:310 @620d2225c). The C++ keeps
 /// its buffers in a `std::deque` so pointers to them survive growth; here
 /// each is its own allocation.
 pub const CommandPool = struct {
@@ -104,7 +104,7 @@ pub const CommandPool = struct {
     cmd_buffers: std.ArrayList(*CommandBuffer) = .empty,
     q: ?*Queue = null,
 
-    /// Ports `vk_command_pool`'s `init` (ggml-vulkan-types.h:1042 @d81235049).
+    /// Ports `vk_command_pool`'s `init` (ggml-vulkan-types.h:1019 @620d2225c).
     pub fn init(self: *CommandPool, device: *Device, q: *Queue) void {
         self.clearBuffers();
         self.q = q;
@@ -114,7 +114,7 @@ pub const CommandPool = struct {
         common.checkOrAbort(d.vkCreateCommandPool.?(device.device, &info, null, &self.pool), "vk::Device::createCommandPool");
     }
 
-    /// Ports `vk_command_pool`'s `destroy` (ggml-vulkan-types.h:1052 @d81235049).
+    /// Ports `vk_command_pool`'s `destroy` (ggml-vulkan-types.h:1029 @620d2225c).
     pub fn destroy(self: *CommandPool, device: vk.VkDevice) void {
         d.vkDestroyCommandPool.?(device, self.pool, null);
         self.pool = null;
@@ -126,7 +126,7 @@ pub const CommandPool = struct {
         self.cmd_buffers.clearRetainingCapacity();
     }
 
-    /// Ports `vk_command_pool`'s `buffers_in_use` (ggml-vulkan-types.h:342 @d81235049).
+    /// Ports `vk_command_pool`'s `buffers_in_use` (ggml-vulkan-types.h:321 @620d2225c).
     pub fn buffersInUse(self: *const CommandPool) usize {
         var n: usize = 0;
         for (self.cmd_buffers.items) |b| n += @intFromBool(b.in_use);
@@ -136,7 +136,7 @@ pub const CommandPool = struct {
 
 /// Ports `vk_queue_handle` with its two implementations,
 /// `vk_queue_handle_synchronized` and `vk_queue_handle_unsynchronized`
-/// (ggml-vulkan-types.h:348, 358, 366 @d81235049): a queue that serialises its
+/// (ggml-vulkan-types.h:327, 337, 345 @620d2225c): a queue that serialises its
 /// own submissions unless the driver synchronises it internally.
 /// `device_submit_mutex`, set on NVIDIA, serialises submissions across
 /// every queue of the device, around a driver bug.
@@ -156,7 +156,7 @@ pub const QueueHandle = struct {
     }
 };
 
-/// Ports `vk_queue` (ggml-vulkan-types.h:372 @d81235049).
+/// Ports `vk_queue` (ggml-vulkan-types.h:351 @620d2225c).
 pub const Queue = struct {
     queue_family_index: u32 = 0,
     handle: *QueueHandle,
@@ -193,7 +193,7 @@ pub const RecursiveMutex = struct {
     }
 };
 
-/// Ports `lightning_indexer_k_types` (ggml-vulkan-types.h:666 @d81235049): the
+/// Ports `lightning_indexer_k_types` (ggml-vulkan-types.h:645 @620d2225c): the
 /// K types the lightning-indexer shader decodes.
 pub const lightning_indexer_k_types = [_]c.ggml_type{
     c.GGML_TYPE_F32,
@@ -207,16 +207,15 @@ pub const lightning_indexer_k_types = [_]c.ggml_type{
     c.GGML_TYPE_IQ4_NL,
 };
 
-/// Ports `ggml_vk_lightning_indexer_k_type_supported` (ggml-vulkan.cpp:151 @d81235049).
+/// Ports `ggml_vk_lightning_indexer_k_type_supported` (ggml-vulkan.cpp:146 @620d2225c).
 pub fn lightningIndexerKTypeSupported(t: c.ggml_type) bool {
     return std.mem.indexOfScalar(c.ggml_type, &lightning_indexer_k_types, t) != null;
 }
 
-/// Ports `vk_device_struct` (ggml-vulkan-types.h:680 @d81235049).
+/// Ports `vk_device_struct` (ggml-vulkan-types.h:659 @620d2225c).
 pub const Device = struct {
     mutex: RecursiveMutex = .{},
     queue_submit_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
-    pinned_memory_mutex: std.c.pthread_rwlock_t = .{},
 
     // Guards compile_pending, all_pipelines, and the dynamic pipeline maps.
     // Lock order is device->mutex -> compile_mutex, never the reverse.
@@ -397,20 +396,22 @@ pub const Device = struct {
     pipeline_repeat_i32: ?*Pipeline = null,
     pipeline_repeat_back_f32: ?*Pipeline = null,
     pipeline_repeat_i16: ?*Pipeline = null,
-    pipeline_cpy_f32_f32: ?*Pipeline = null,
+    pipeline_cpy_32: ?*Pipeline = null,
     pipeline_cpy_f32_f16: ?*Pipeline = null,
-    pipeline_cpy_f16_f16: ?*Pipeline = null,
+    pipeline_cpy_16: ?*Pipeline = null,
     pipeline_cpy_f16_f32: ?*Pipeline = null,
     pipeline_cpy_f32_bf16: ?*Pipeline = null,
     pipeline_cpy_bf16_f32: ?*Pipeline = null,
+    pipeline_cpy_bf16_f16: ?*Pipeline = null,
     pipeline_cpy_f32_i32: ?*Pipeline = null,
     pipeline_cpy_i32_f32: ?*Pipeline = null,
-    pipeline_contig_cpy_f32_f32: ?*Pipeline = null,
+    pipeline_contig_cpy_32: ?*Pipeline = null,
     pipeline_contig_cpy_f32_f16: ?*Pipeline = null,
-    pipeline_contig_cpy_f16_f16: ?*Pipeline = null,
+    pipeline_contig_cpy_16: ?*Pipeline = null,
     pipeline_contig_cpy_f16_f32: ?*Pipeline = null,
     pipeline_contig_cpy_f32_bf16: ?*Pipeline = null,
     pipeline_contig_cpy_bf16_f32: ?*Pipeline = null,
+    pipeline_contig_cpy_bf16_f16: ?*Pipeline = null,
     pipeline_contig_cpy_f32_i32: ?*Pipeline = null,
     pipeline_contig_cpy_i32_f32: ?*Pipeline = null,
     pipeline_cpy_f32_quant: [type_count]?*Pipeline = @splat(null),
@@ -552,6 +553,7 @@ pub const Device = struct {
     pipeline_snake_bf16: ?*Pipeline = null,
     pipeline_pool1d_f32: ?*Pipeline = null,
     pipeline_pool2d_f32: ?*Pipeline = null,
+    pipeline_pool2d_subgroup_f32: ?*Pipeline = null,
     pipeline_rwkv_wkv6_f32: ?*Pipeline = null,
     pipeline_rwkv_wkv7_f32: ?*Pipeline = null,
     pipeline_gated_linear_attn_f32: ?*Pipeline = null,
@@ -596,8 +598,6 @@ pub const Device = struct {
 
     all_pipelines: std.ArrayList(*Pipeline) = .empty,
 
-    pinned_memory: std.ArrayList(m.buffer.PinnedMemory) = .empty,
-
     fence: vk.VkFence = null,
     sync_staging: ?*m.buffer.Buffer = null,
 
@@ -620,7 +620,7 @@ pub const Device = struct {
     }
 };
 
-/// Ports `vk_instance_t`'s `devices` (ggml-vulkan-types.h:1349 @d81235049).
+/// Ports `vk_instance_t`'s `devices` (ggml-vulkan-types.h:1332 @620d2225c).
 pub var devices: [common.max_devices]?*Device = @splat(null);
 
 /// `std::make_shared<vk_device_struct>()`: every pipeline slot null.
@@ -645,7 +645,7 @@ pub fn matmulPipelines(device: *Device, key: m.pipeline.MatmulPipelineKey) *m.pi
     return gop.value_ptr.*;
 }
 
-/// Ports `ggml_vk_find_queue_family_index` (ggml-vulkan.cpp:984 @d81235049).
+/// Ports `ggml_vk_find_queue_family_index` (ggml-vulkan.cpp:979 @620d2225c).
 fn findQueueFamilyIndex(props: []const vk.VkQueueFamilyProperties, required: vk.VkQueueFlags, avoid: vk.VkQueueFlags, compute_index: i32, min_num_queues: u32) u32 {
     const qfsize: u32 = @intCast(props.len);
     const other = struct {
@@ -712,7 +712,7 @@ fn queueFlagsString(flags: vk.VkQueueFlags, buf: []u8) [:0]const u8 {
     return buf[0..w.end :0];
 }
 
-/// Ports `ggml_vk_create_queue` (ggml-vulkan.cpp:1030 @d81235049).
+/// Ports `ggml_vk_create_queue` (ggml-vulkan.cpp:1025 @620d2225c).
 fn createQueue(device: *Device, queue_family_index: u32, queue_index: u32, stage_flags: vk.VkPipelineStageFlags, transfer_only: bool) *Queue {
     device.lock();
     defer device.unlock();
@@ -736,7 +736,7 @@ fn createQueue(device: *Device, queue_family_index: u32, queue_index: u32, stage
     return q;
 }
 
-/// Ports `ggml_vk_create_aliased_queue` (ggml-vulkan.cpp:1064 @d81235049):
+/// Ports `ggml_vk_create_aliased_queue` (ggml-vulkan.cpp:1059 @620d2225c):
 /// a second queue record over the same `VkQueue`, with its own pool.
 fn createAliasedQueue(device: *Device, source: *const Queue) *Queue {
     device.lock();
@@ -752,7 +752,7 @@ fn createAliasedQueue(device: *Device, source: *const Queue) *Queue {
     return q;
 }
 
-/// Ports `ggml_vk_intel_shader_core_count` (ggml-vulkan.cpp:16271 @d81235049).
+/// Ports `ggml_vk_intel_shader_core_count` (ggml-vulkan.cpp:16366 @620d2225c).
 fn intelShaderCoreCount(vkdev: vk.VkPhysicalDevice) u32 {
     var props = common.structure(vk.VkPhysicalDeviceProperties2, vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
     d.vkGetPhysicalDeviceProperties2.?(vkdev, &props);
@@ -767,7 +767,8 @@ fn intelShaderCoreCount(vkdev: vk.VkPhysicalDevice) u32 {
         0x56A0, 0x5690 => 32, // A770, A770M
         0xE212 => 16, // Pro B50
         0xE20C => 18, // B570
-        0xE20B, 0xE211 => 20, // B580, Pro B60
+        0xE20B, 0xE211, 0xE222 => 20, // B580, Pro B60, Pro B65
+        0xE223 => 32, // Pro B70
         0xB080 => 12, // PTL Xe3 LPG 2x6 (12 subslices)
         else => 0,
     };
@@ -799,13 +800,20 @@ fn link(last: **vk.VkBaseOutStructure, next: anytype) void {
     last.* = @ptrCast(next);
 }
 
-/// Ports `ggml_vk_get_device` (ggml-vulkan.cpp:3992 @d81235049): creates
-/// the logical device for index `idx` on first use, and returns it.
+/// `ggml_vk_get_device`'s function-local `static std::mutex mutex`.
+var get_device_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+
+/// Ports `ggml_vk_get_device` (ggml-vulkan.cpp:3990 @620d2225c): creates
+/// the logical device for index `idx` on first use, and returns it. One
+/// lock covers the whole construction, and the device is published only
+/// once it is fully built, so concurrent first calls build it once.
 pub fn getDevice(idx: usize) *Device {
+    _ = std.c.pthread_mutex_lock(&get_device_mutex);
+    defer _ = std.c.pthread_mutex_unlock(&get_device_mutex);
+
     if (devices[idx]) |dev| return dev;
 
     const device = newDevice();
-    devices[idx] = device;
 
     const dev_num = m.instance.instance.device_indices.items[idx];
 
@@ -1352,14 +1360,14 @@ pub fn getDevice(idx: usize) *Device {
         device.async_use_transfer_queue = false;
     }
 
+    var fence_info = common.structure(vk.VkFenceCreateInfo, vk.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
+    common.checkOrAbort(d.vkCreateFence.?(device.device, &fence_info, null, &device.fence), "vk::Device::createFence");
+
     device.buffer_type = .{
         .iface = m.buffer.buffer_type_iface,
         .device = c.ggml_backend_reg_dev_get(m.backend.reg(), idx),
         .context = m.buffer.BufferTypeCtx.create(device.name, device),
     };
-
-    var fence_info = common.structure(vk.VkFenceCreateInfo, vk.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
-    common.checkOrAbort(d.vkCreateFence.?(device.device, &fence_info, null, &device.fence), "vk::Device::createFence");
 
     device.idx = idx;
     device.serialize_submissions = common.envSet("GGML_VK_SERIALIZE_SUBMISSIONS");
@@ -1375,6 +1383,9 @@ pub fn getDevice(idx: usize) *Device {
     } else if (common.envSet("GGML_VK_FORCE_MMVQ")) {
         device.mmvq_mode = 1;
     }
+
+    // publish the device only when it is fully built
+    devices[idx] = device;
 
     return device;
 }

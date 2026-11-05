@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `common_chat_template` (llama.cpp v0.6.0, `d81235049`,
+//! Ports `common_chat_template` (llama.cpp v0.7.0, `620d2225c`,
 //! `llama.cpp/common/chat.h`), the rendering half of
 //! `llama.cpp/common/chat.cpp` -- `format_time`,
 //! `common_chat_template_direct_apply_impl`,
@@ -22,8 +22,15 @@
 //! jinja-diff` holds to upstream, and with every bound string marked input,
 //! as `global_from_json(ctx, json, true)` marks it: zigjinja follows
 //! llama.cpp's builtins for a marked string, so marking is part of getting
-//! the same text, not only of trusting it. The marks are dropped from the
-//! result; upstream's `common_chat_params`'s `prompt` is a plain string too.
+//! the same text, not only of trusting it. The marks reach the result as
+//! `common_chat_prompt`'s parts, as upstream's do.
+//!
+//! An empty string is a part of its own wherever upstream keeps one -- an
+//! empty input string between template text, an empty `bos_token` before
+//! message text -- since zigjinja's rendered text carries empty runs too
+//! (`provenance.empty_template`); the add-BOS and add-EOS trims see them
+//! when they come first or last. None, undefined, a dict and an empty list
+//! output no part, as upstream gathers none for them.
 //!
 //! A string bound as input loses any provenance sentinel byte it held
 //! (`cli/chat.zig`'s `sanitize`), where upstream keeps it; a template whose
@@ -40,6 +47,9 @@ const jinja = @import("zigjinja");
 const exception = @import("exception.zig");
 const msg_mod = @import("msg.zig");
 const caps_mod = @import("caps.zig");
+const prompt_mod = @import("prompt.zig");
+const params_mod = @import("params.zig");
+const autoparser = @import("autoparser/module.zig");
 
 const Allocator = std.mem.Allocator;
 const Value = json.Value;
@@ -47,6 +57,7 @@ const Error = exception.Error;
 const throw = exception.throw;
 
 pub const Caps = caps_mod.Caps;
+pub const Prompt = prompt_mod.Prompt;
 
 /// What a failed render's `what()` begins with; see the file's header.
 pub const jinja_failure_prefix = "jinja: ";
@@ -55,7 +66,7 @@ pub const jinja_failure_prefix = "jinja: ";
 // generation_params
 
 /// Ports `autoparser`'s `generation_params` (chat-auto-parser.h:54
-/// @d81235049): what a template is rendered with and a parser built for.
+/// @620d2225c): what a template is rendered with and a parser built for.
 /// Every JSON value and string is owned by the allocator of the call that
 /// built it, an arena.
 pub const GenerationParams = struct {
@@ -78,7 +89,7 @@ pub const GenerationParams = struct {
     add_inference: bool = false,
     mark_input: bool = true,
 
-    /// Ports `has_continuation` (chat-auto-parser.h:75 @d81235049).
+    /// Ports `has_continuation` (chat-auto-parser.h:75 @620d2225c).
     pub fn hasContinuation(self: *const GenerationParams) bool {
         return self.continue_final_message != .none and !self.continue_msg.empty();
     }
@@ -99,7 +110,7 @@ pub const GenerationParams = struct {
 // common_chat_template
 
 /// Ports `lexer`'s `tokenize`'s source normalisation (lexer.cpp:32
-/// @d81235049): `\r\n` and `\r` as `\n`, then one trailing newline of the
+/// @620d2225c): `\r\n` and `\r` as `\n`, then one trailing newline of the
 /// original dropped. This is `common_chat_template::source()`, which every
 /// template-detection `find` reads.
 ///
@@ -119,9 +130,15 @@ pub fn normalizeSource(a: Allocator, source: []const u8) Error![]u8 {
     return out.toOwnedSlice(a);
 }
 
-/// Ports `common_chat_template` (chat.h:51 @d81235049): a template's source
-/// parsed, its BOS and EOS spellings, and the capabilities `caps_get` reads
-/// off it.
+/// Ports `common_chat_params_init_fn` (chat.h:32 @620d2225c): builds the
+/// prompt and parser for a template that has a dedicated handler (see
+/// `parsers/`).
+pub const ParamsInitFn = *const fn (a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error!params_mod.ChatParams;
+
+/// Ports `common_chat_template` (chat.h:59 @620d2225c): a template's source
+/// parsed, its BOS and EOS spellings, the capabilities `caps_get` reads off
+/// it, and how it is applied -- a dedicated handler, or the differential
+/// analysis run once here.
 pub const Template = struct {
     gpa: Allocator,
     /// The source as given, which zigjinja renders.
@@ -131,10 +148,21 @@ pub const Template = struct {
     bos_tok: []u8,
     eos_tok: []u8,
     caps: Caps,
+    /// Dedicated handler picked once from the source, null when the
+    /// differential autoparser is used.
+    params_init: ?ParamsInitFn = null,
+    /// Differential analysis, run once here when there is no dedicated
+    /// handler. Null when there is one, or when the analysis failed, in
+    /// which case `analysis_error` says why. Lives in `analysis_arena`.
+    analysis: ?*autoparser.Autoparser = null,
+    analysis_error: []u8 = &.{},
+    analysis_arena: ?*std.heap.ArenaAllocator = null,
 
-    /// Ports `common_chat_template`'s constructor (chat.h:58 @d81235049):
-    /// parses the source, failing as upstream's lexer and parser fail, and
-    /// runs `caps_get` over it.
+    /// Ports `common_chat_template`'s constructor (chat.cpp:1245
+    /// @620d2225c): parses the source, failing as upstream's lexer and
+    /// parser fail, runs `caps_get` over it, picks the dedicated handler,
+    /// and failing that runs the analysis -- whose failure is kept for
+    /// `apply` to report, so a bad template still loads.
     ///
     /// Return: owned by `gpa`; release with `deinit`. `error.RuntimeError`
     /// when the source does not parse, its `what()` zigjinja's rather than
@@ -154,10 +182,36 @@ pub const Template = struct {
         self.eos_tok = try gpa.dupe(u8, eos_token);
         try checkParses(gpa, self.raw);
         self.caps = try caps_mod.capsGet(&self);
+        // LOG_INF("%s: caps:\n%s\n", __func__, this->caps.to_string().c_str());
+
+        self.params_init = @import("templates.zig").detectParamsInit(self.src);
+        if (self.params_init != null) return self;
+
+        // The analysis depends only on the template, so run it once here instead of on every apply.
+        // A failure is kept for apply to report, so a bad template still loads like it did before.
+        const arena = try gpa.create(std.heap.ArenaAllocator);
+        arena.* = .init(gpa);
+        self.analysis_arena = arena;
+        const ap = try arena.allocator().create(autoparser.Autoparser);
+        ap.* = .{};
+        autoparser.analyzeTemplate(ap, arena.allocator(), &self) catch |e| {
+            if (e == error.OutOfMemory) return error.OutOfMemory;
+            self.analysis_error = try gpa.dupe(u8, exception.what(e));
+            arena.deinit();
+            gpa.destroy(arena);
+            self.analysis_arena = null;
+            return self;
+        };
+        self.analysis = ap;
         return self;
     }
 
     pub fn deinit(self: *Template) void {
+        if (self.analysis_arena) |arena| {
+            arena.deinit();
+            self.gpa.destroy(arena);
+        }
+        self.gpa.free(self.analysis_error);
         self.gpa.free(self.raw);
         self.gpa.free(self.src);
         self.gpa.free(self.bos_tok);
@@ -165,22 +219,22 @@ pub const Template = struct {
         self.* = undefined;
     }
 
-    /// Ports `source` (chat.h:71 @d81235049).
+    /// Ports `source` (chat.h:80 @620d2225c).
     pub fn source(self: *const Template) []const u8 {
         return self.src;
     }
 
-    /// Ports `bos_token` (chat.h:72 @d81235049).
+    /// Ports `bos_token` (chat.h:81 @620d2225c).
     pub fn bosToken(self: *const Template) []const u8 {
         return self.bos_tok;
     }
 
-    /// Ports `eos_token` (chat.h:73 @d81235049).
+    /// Ports `eos_token` (chat.h:82 @620d2225c).
     pub fn eosToken(self: *const Template) []const u8 {
         return self.eos_tok;
     }
 
-    /// Ports `original_caps` (chat.h:75 @d81235049).
+    /// Ports `original_caps` (chat.h:84 @620d2225c).
     pub fn originalCaps(self: *const Template) Caps {
         return self.caps;
     }
@@ -238,11 +292,12 @@ const NoFree = struct {
 
 /// Upstream's rendering of a non-string `{{ }}` value; `cli/chat.zig`'s
 /// `upstreamOutput`, which `make jinja-diff` holds to
-/// `gather_string_parts_recursive` (runtime.h:717 @d81235049).
+/// `gather_string_parts_recursive` (runtime.h:713 @620d2225c).
 fn upstreamOutput(allocator: Allocator, val: jinja.Value) jinja.Value {
     return switch (val) {
         .boolean => |b| .{ .string = if (b) "True" else "False" },
-        .null, .undefined, .dict => .{ .string = "" },
+        // nothing, not even an empty part: llama.cpp gathers no part for them
+        .null, .undefined, .dict => .{ .string = noPart() },
         .list => gatherList(allocator, val) catch val,
         // a float's `as_string`: `std::to_string`, trailing zeros trimmed
         .float => .{ .string = jinja.llama_repr.LlamaRepr.asString(allocator, val) catch return val },
@@ -250,9 +305,18 @@ fn upstreamOutput(allocator: Allocator, val: jinja.Value) jinja.Value {
     };
 }
 
+/// An empty string that outputs no part at all, where an unmarked empty
+/// string outputs an empty template part (zigjinja's `empty_template`).
+fn noPart() []const u8 {
+    const record = jinja.provenance.active orelse return "";
+    return record.mark("", &.{}) catch "";
+}
+
 fn gatherList(allocator: Allocator, val: jinja.Value) !jinja.Value {
     var pieces: std.ArrayList([]const u8) = .empty;
     try gather(allocator, val, &pieces);
+    // a list of nothing gathers no part; an empty string in it is one
+    if (pieces.items.len == 0) return .{ .string = noPart() };
     if (jinja.provenance.active) |record| {
         if (try record.concat(pieces.items)) |joined| return .{ .string = joined };
     }
@@ -278,9 +342,6 @@ pub const Render = struct {
     no_free: NoFree,
     record: jinja.provenance.Provenance,
     vars: std.StringHashMap(jinja.Value),
-    /// The marked runs of the last `run`'s text, kept only while
-    /// `mark_capture` is set; owned by the capture's allocator.
-    marked_parts: []const jinja.provenance.Part,
 
     /// Parameters:
     /// - `gpa`: backs everything the render allocates.
@@ -293,7 +354,6 @@ pub const Render = struct {
         const a = if (keep_addresses) self.no_free.allocator() else self.arena_state.allocator();
         self.record = jinja.provenance.Provenance.init(gpa);
         self.vars = std.StringHashMap(jinja.Value).init(a);
-        self.marked_parts = &.{};
     }
 
     pub fn deinit(self: *Render) void {
@@ -321,7 +381,7 @@ pub const Render = struct {
         return .{ .string = try self.alloc().dupe(u8, try sanitize(self.alloc(), s)) };
     }
 
-    /// Ports `from_json` (value.cpp:1412 @d81235049): a JSON value as the
+    /// Ports `from_json` (value.cpp:1424 @620d2225c): a JSON value as the
     /// engine's, every string marked input when `mark_input`.
     pub fn fromJson(self: *Render, v: *const Value, mark_input: bool) Error!jinja.Value {
         const a = self.alloc();
@@ -350,7 +410,7 @@ pub const Render = struct {
         };
     }
 
-    /// Ports `global_from_json` (value.cpp:1509 @d81235049): each member of
+    /// Ports `global_from_json` (value.cpp:1521 @620d2225c): each member of
     /// the object bound in order, a later one replacing an earlier binding.
     pub fn bindJson(self: *Render, obj: *const Value, mark_input: bool) Error!void {
         if (!obj.isObject()) return throw(error.RuntimeError, "global_from_json: input JSON value must be an object", .{});
@@ -362,6 +422,42 @@ pub const Render = struct {
     /// Return: the text, owned by `out`. `error.RuntimeError` with
     /// `jinja_failure_prefix` when the template fails or raises.
     pub fn run(self: *Render, tmpl: *const Template, out: Allocator) Error![]u8 {
+        return out.dupe(u8, try self.render(tmpl));
+    }
+
+    /// Runs `tmpl` over the bound variables, as `run`, keeping the runs:
+    /// `gather_string_parts` (runtime.h:750 @620d2225c), its consecutive
+    /// parts of one kind joined.
+    ///
+    /// Return: the prompt, its list and texts owned by `out`.
+    pub fn runPrompt(self: *Render, tmpl: *const Template, out: Allocator) Error!Prompt {
+        const text = try self.render(tmpl);
+        var result: Prompt = .{};
+        // text with no mark in it: one template part, or none when empty
+        const parts = self.record.partsOf(text) orelse {
+            if (text.len != 0) try result.parts.append(out, .{ .text = try out.dupe(u8, text), .is_input = false });
+            return result;
+        };
+        var at: usize = 0;
+        for (parts) |part| {
+            // every part, an empty one included, as upstream keeps it
+            const run_text = text[at..][0..part.len];
+            at += part.len;
+            const is_input = part.input;
+            const n = result.parts.items.len;
+            if (n != 0 and result.parts.items[n - 1].is_input == is_input) {
+                const last = &result.parts.items[n - 1];
+                last.text = try std.mem.concat(out, u8, &.{ last.text, run_text });
+            } else {
+                try result.parts.append(out, .{ .text = try out.dupe(u8, run_text), .is_input = is_input });
+            }
+        }
+        return result;
+    }
+
+    /// The text, sentinels decoded, in this render's allocator; its runs
+    /// are the record's, keyed by the decoded text.
+    fn render(self: *Render, tmpl: *const Template) Error![]const u8 {
         const a = self.alloc();
         if (std.mem.findAny(u8, tmpl.raw, &jinja.provenance.sentinels) != null)
             return throw(error.RuntimeError, jinja_failure_prefix ++ "the template holds a provenance sentinel byte", .{});
@@ -384,12 +480,11 @@ pub const Render = struct {
         var compiled = compiler_inst.compile(parsed, false) catch |e| return failure(e);
         defer compiled.deinit();
         const rendered = compiled.render(&ctx, a) catch |e| return failure(e);
-        const text = self.record.decode(rendered) catch |e| return failure(e);
-        if (mark_capture) |cap| {
-            var one: [1]jinja.provenance.Part = undefined;
-            self.marked_parts = try cap.allocator.dupe(jinja.provenance.Part, self.record.partsOrTemplate(text, &one));
-        }
-        return out.dupe(u8, text);
+        const decoded = self.record.decode(rendered) catch |e| return failure(e);
+        // text with no input in it is `rendered` itself: copied before the
+        // deferred deinits run, which may free it; it has no runs to look up
+        if (decoded.ptr == rendered.ptr) return a.dupe(u8, rendered);
+        return decoded;
     }
 };
 
@@ -411,7 +506,7 @@ fn sanitize(a: Allocator, text: []const u8) Error![]const u8 {
     return out.items;
 }
 
-/// Ports `caps_apply_preserve_reasoning` (caps.cpp:22 @d81235049).
+/// Ports `caps_apply_preserve_reasoning` (caps.cpp:22 @620d2225c).
 pub fn capsApplyPreserveReasoning(r: *Render, enabled: bool) Error!void {
     try r.set("preserve_thinking", .{ .boolean = enabled });
     try r.set("clear_thinking", .{ .boolean = !enabled });
@@ -419,7 +514,7 @@ pub fn capsApplyPreserveReasoning(r: *Render, enabled: bool) Error!void {
     try r.set("drop_thinking", .{ .boolean = !enabled });
 }
 
-/// Ports `caps_apply_reasoning_effort` (caps.cpp:29 @d81235049): one value
+/// Ports `caps_apply_reasoning_effort` (caps.cpp:29 @620d2225c): one value
 /// under both names, so a use of either counts against it.
 ///
 /// Return: the value bound.
@@ -444,7 +539,7 @@ pub fn now() i64 {
 
 const month_abbrev = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
-/// Ports `format_time` (chat.cpp:36 @d81235049) for the two formats it is
+/// Ports `format_time` (chat.cpp:37 @620d2225c) for the two formats it is
 /// given, `%b %d %Y` and `%d %b %Y`, in the C locale and local time.
 ///
 /// Return: owned by `a`.
@@ -461,7 +556,7 @@ pub fn formatTime(a: Allocator, t: i64, comptime day_first: bool) Error![]u8 {
         std.fmt.allocPrint(a, "{s} {d:0>2} {d}", .{ month, day, year_day.year });
 }
 
-/// Ports `common_chat_extra_context` (chat.cpp:1080 @d81235049):
+/// Ports `common_chat_extra_context` (chat.cpp:1065 @620d2225c):
 /// `datetime` and `date_string`, today's date two ways.
 ///
 /// Return: an object owned by `a`.
@@ -473,10 +568,12 @@ pub fn extraContext(a: Allocator) Error!Value {
     return ctx;
 }
 
-/// Ports `common_chat_template_direct_apply_impl` (chat.cpp:905
-/// @d81235049): `inputs` rendered through `tmpl`, each override replacing
-/// what `inputs` would have bound, and a BOS or EOS the vocabulary adds
-/// itself cut from the ends.
+/// Ports `common_chat_template_direct_apply_impl` (chat.cpp:877
+/// @620d2225c): `inputs` rendered through `tmpl`, each override replacing
+/// what `inputs` would have bound, `bos_token` and `eos_token` bound last as
+/// template text -- they come from the model, not from the user -- and a
+/// BOS or EOS the vocabulary adds itself cut from a template part at
+/// either end.
 ///
 /// Parameters:
 /// - `a`: an arena; the result and every temporary are its.
@@ -484,7 +581,7 @@ pub fn extraContext(a: Allocator) Error!Value {
 ///   null, `inputs.messages` normalised for the template's content caps.
 /// - `tools_override`, `additional_context`: likewise.
 ///
-/// Return: the text.
+/// Return: the text, split into template and input parts.
 pub fn directApplyImpl(
     a: Allocator,
     tmpl: *const Template,
@@ -492,7 +589,7 @@ pub fn directApplyImpl(
     messages_override: ?*const Value,
     tools_override: ?*const Value,
     additional_context: ?*const Value,
-) Error![]u8 {
+) Error!Prompt {
     var inp = Value.emptyObject();
     if (messages_override) |m| {
         try inp.set(a, "messages", try m.clone(a));
@@ -528,90 +625,36 @@ pub fn directApplyImpl(
         if (v.isString() and !v.empty()) _ = try capsApplyReasoningEffort(&r, v.string);
     }
     try r.bindJson(&inp, inputs.mark_input);
-    if (mark_capture != null) try markTokens(&r, &inp);
 
-    const full = try r.run(tmpl, a);
-    var result = full;
-    if (inputs.add_bos and std.mem.startsWith(u8, result, tmpl.bos_tok)) {
-        result = result[tmpl.bos_tok.len..];
+    // bos/eos come from the model, not from the user
+    try r.set("bos_token", try r.string(tmpl.bos_tok));
+    try r.set("eos_token", try r.string(tmpl.eos_tok));
+
+    var result = try r.runPrompt(tmpl, a);
+
+    // TODO: improve this later
+    if (inputs.add_bos and result.parts.items.len != 0) {
+        const first = &result.parts.items[0];
+        if (!first.is_input and std.mem.startsWith(u8, first.text, tmpl.bos_tok)) {
+            first.text = first.text[tmpl.bos_tok.len..];
+        }
     }
-    if (inputs.add_eos and std.mem.endsWith(u8, result, tmpl.eos_tok)) {
-        result = result[0 .. result.len - tmpl.eos_tok.len];
-    }
-    if (mark_capture) |cap| {
-        const lo = @intFromPtr(result.ptr) - @intFromPtr(full.ptr);
-        try cap.renders.append(cap.allocator, .{
-            .text = result,
-            .parts = try clipParts(cap.allocator, r.marked_parts, lo, lo + result.len),
-        });
+    if (inputs.add_eos and result.parts.items.len != 0) {
+        const last = &result.parts.items[result.parts.items.len - 1];
+        if (!last.is_input and std.mem.endsWith(u8, last.text, tmpl.eos_tok)) {
+            last.text = last.text[0 .. last.text.len - tmpl.eos_tok.len];
+        }
     }
     return result;
 }
 
-// -----------------------------------------------------------------------------
-// Trust marks, for a host that tokenizes by them
-
-/// **Not a port.** Upstream's `common_chat_params::prompt` is a plain
-/// string, and its server tokenizes the whole of it with `parse_special`.
-/// `llama-cli` does not (SPEC.md 5.2): it tokenizes every run of message
-/// text with `parse_special` off, so it needs the marks the render drops.
-/// While this is set, every `directApplyImpl` records its text and the runs
-/// the engine marked as input, and binds `bos_token` and `eos_token` as
-/// provenance tokens -- input to every propagation rule, so the text is the
-/// same; the host decides what an exact token run is worth, as `cli/chat.zig`
-/// does. Null, the default and every other host's, records nothing.
-pub threadlocal var mark_capture: ?*MarkCapture = null;
-
-/// What `mark_capture` collects over one `templates.apply`.
-pub const MarkCapture = struct {
-    /// Owns `renders` and each record's `parts`; an arena in practice.
-    allocator: Allocator,
-    /// Every render, in the order `directApplyImpl` returned them -- the
-    /// analysis probes first, the prompt's own last.
-    renders: std.ArrayList(Marked) = .empty,
-};
-
-/// One render's text and its runs, which cover it exactly.
-pub const Marked = struct {
-    /// Borrowed from the render's arena.
-    text: []const u8,
-    parts: []const jinja.provenance.Part,
-};
-
-/// `bos_token` and `eos_token` as provenance tokens, when they are the
-/// strings `inp` bound -- a kwarg of either name replaces them, and stays
-/// plain input.
-fn markTokens(r: *Render, inp: *const Value) Error!void {
-    for ([_][]const u8{ "bos_token", "eos_token" }) |name| {
-        const v = inp.at(name) catch continue;
-        if (!v.isString()) continue;
-        try r.set(name, .{ .string = try r.record.markToken(try sanitize(r.alloc(), v.string)) });
-    }
-}
-
-/// The runs of `parts` that fall in `[lo, hi)`, clipped to it.
-fn clipParts(a: Allocator, parts: []const jinja.provenance.Part, lo: usize, hi: usize) Error![]const jinja.provenance.Part {
-    var out: std.ArrayList(jinja.provenance.Part) = .empty;
-    var at: usize = 0;
-    for (parts) |p| {
-        const start = @max(at, lo);
-        const end = @min(at + p.len, hi);
-        at += p.len;
-        if (end <= start) continue;
-        var q = p;
-        q.len = end - start;
-        try out.append(a, q);
-    }
-    return out.items;
-}
-
-/// Ports `common_chat_template_direct_apply` (chat.cpp:968 @d81235049).
-pub fn directApply(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error![]u8 {
+/// Ports `common_chat_template_direct_apply` (chat.cpp:953 @620d2225c).
+pub fn directApply(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error!Prompt {
     return directApplyImpl(a, tmpl, inputs, null, null, null);
 }
 
-/// Ports `common_chat_template_generation_prompt_impl` (chat.cpp:974
-/// @d81235049): what `add_generation_prompt` appends, as the difference
+/// Ports `common_chat_template_generation_prompt_impl` (chat.cpp:959
+/// @620d2225c): what `add_generation_prompt` appends, as the difference
 /// between a render without it and one with.
 ///
 /// Return: owned by `a`.
@@ -622,21 +665,21 @@ pub fn generationPromptImpl(
     messages_override: ?*const Value,
     tools_override: ?*const Value,
     additional_context: ?*const Value,
-) Error![]u8 {
+) Error![]const u8 {
     var params = inputs.*;
     params.add_generation_prompt = false;
     params.continue_final_message = .none;
-    const no_gen_prompt = try directApplyImpl(a, tmpl, &params, messages_override, tools_override, additional_context);
+    const no_gen_prompt = try (try directApplyImpl(a, tmpl, &params, messages_override, tools_override, additional_context)).str(a);
     params.add_generation_prompt = true;
-    const gen_prompt = try directApplyImpl(a, tmpl, &params, messages_override, tools_override, additional_context);
+    const gen_prompt = try (try directApplyImpl(a, tmpl, &params, messages_override, tools_override, additional_context)).str(a);
     var prefix_len: usize = 0;
     const min_size = @min(no_gen_prompt.len, gen_prompt.len);
     while (prefix_len < min_size and no_gen_prompt[prefix_len] == gen_prompt[prefix_len]) prefix_len += 1;
     return gen_prompt[prefix_len..];
 }
 
-/// Ports `common_chat_template_generation_prompt` (chat.cpp:996 @d81235049).
-pub fn generationPrompt(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error![]u8 {
+/// Ports `common_chat_template_generation_prompt` (chat.cpp:981 @620d2225c).
+pub fn generationPrompt(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error![]const u8 {
     return generationPromptImpl(a, tmpl, inputs, null, null, null);
 }
 
@@ -662,6 +705,6 @@ test "a template renders its messages" {
     defer t.deinit();
     var p: GenerationParams = .{ .add_generation_prompt = true };
     p.messages = try json.parse(a, "[{\"role\":\"user\",\"content\":\"hi\"}]");
-    try std.testing.expectEqualStrings("<user>hi<a>", try directApply(a, &t, &p));
+    try std.testing.expectEqualStrings("<user>hi<a>", try (try directApply(a, &t, &p)).str(a));
     try std.testing.expectEqualStrings("<a>", try generationPrompt(a, &t, &p));
 }

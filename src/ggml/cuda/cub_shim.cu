@@ -7,7 +7,7 @@
 // file is the only CUDA host code the port writes in C++. It wraps exactly
 // the calls upstream makes and nothing else:
 //
-// - `llama.cpp/ggml/src/ggml-cuda/argsort.cu` (v0.6.0, `d81235049`),
+// - `llama.cpp/ggml/src/ggml-cuda/argsort.cu` (v0.7.0, `620d2225c`),
 //   `argsort_f32_i32_cuda_cub` (argsort.cu:45): `DeviceRadixSort`,
 //   `DeviceSegmentedRadixSort` and `DeviceSegmentedSort`, `SortPairs` and
 //   `SortPairsDescending`, each called once to size the temporary storage
@@ -47,8 +47,9 @@ using namespace cub;
 // argsort.cu's `STRIDED_ITERATOR_AVAILABLE` needs CCCL >= 3.1. Upstream
 // then passes a strided counting iterator as the segment offsets instead of
 // an `int *` -- a different instantiation. Fail loudly rather than wrap the
-// wrong one.
-#if (CCCL_MAJOR_VERSION >= 3 && CCCL_MINOR_VERSION >= 1)
+// wrong one. The test is argsort.cu's own since v0.7.0 (argsort.cu:6), which
+// no longer misses a major version above 3 with a minor below 1.
+#if (CCCL_MAJOR_VERSION > 3 || (CCCL_MAJOR_VERSION == 3 && CCCL_MINOR_VERSION >= 1))
 #    error "CCCL >= 3.1: argsort.cu uses cuda::make_strided_iterator offsets; cub_shim.cu wraps the int * form"
 #endif
 

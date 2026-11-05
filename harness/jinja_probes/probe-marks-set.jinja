@@ -1,0 +1,7 @@
+{#- Input marks survive `set`, outside a loop and in a loop body's own scope, and a namespace. -#}
+{%- set first = messages[0].content -%}
+{{ first + '|' }}{{ '<' + first }}
+{%- for m in messages -%}
+{%- set name = m.role -%}{%- set text = m['content'] -%}{{- name + '[ARGS]' + text }}|{{ '[TOOL_CALLS]' + m.role }}
+{%- set ns = namespace(last=m.content) -%}{{ ns.last ~ '#' }}{%- set item = m -%}{{ item.content + '/' + item['role'] }}
+{%- endfor -%}

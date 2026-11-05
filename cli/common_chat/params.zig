@@ -5,7 +5,7 @@
 //!
 //! Ports `common_chat_params` from `llama.cpp/common/chat.h` and
 //! `common_grammar_trigger` with its type from `llama.cpp/common/common.h`
-//! (llama.cpp v0.6.0, `d81235049`). Each declaration names what it ports and
+//! (llama.cpp v0.7.0, `620d2225c`). Each declaration names what it ports and
 //! the line it began at.
 //!
 //! # Ownership
@@ -14,14 +14,16 @@
 //! that built it took, an arena: nothing here is freed singly.
 
 const std = @import("std");
+const peg = @import("peg");
 const msg_mod = @import("msg.zig");
+const prompt_mod = @import("prompt.zig");
 
 const Allocator = std.mem.Allocator;
 
-/// Ports `common_grammar_trigger_type` (common/common.h:146 @d81235049).
+/// Ports `common_grammar_trigger_type` (common/common.h:146 @620d2225c).
 pub const TriggerType = enum(c_int) { token, word, pattern, pattern_full };
 
-/// Ports `common_grammar_trigger` (common/common.h:153 @d81235049).
+/// Ports `common_grammar_trigger` (common/common.h:153 @620d2225c).
 pub const GrammarTrigger = struct {
     type: TriggerType,
     value: []const u8,
@@ -29,10 +31,10 @@ pub const GrammarTrigger = struct {
     token: i32 = -1,
 };
 
-/// Ports `common_chat_params` (chat.h:269 @d81235049).
+/// Ports `common_chat_params` (chat.h:298 @620d2225c).
 pub const ChatParams = struct {
     format: msg_mod.Format = .content_only,
-    prompt: []const u8 = "",
+    prompt: prompt_mod.Prompt = .{},
     grammar: []const u8 = "",
     grammar_lazy: bool = false,
     generation_prompt: []const u8 = "",
@@ -44,8 +46,10 @@ pub const ChatParams = struct {
     grammar_triggers: std.ArrayList(GrammarTrigger) = .empty,
     preserved_tokens: std.ArrayList([]const u8) = .empty,
     additional_stops: std.ArrayList([]const u8) = .empty,
-    /// The PEG parser, serialized (`common_peg_arena`'s `save`).
-    parser: []const u8 = "",
+    /// The PEG parser; null for the empty arena. Built in the same
+    /// allocator as everything else here, so it needs no `deinit` of its
+    /// own when that allocator is an arena.
+    parser: ?peg.Arena = null,
     message_delimiters: msg_mod.MsgDelimiters = .{},
 
     /// `push_back` of each of `items` onto `list`.

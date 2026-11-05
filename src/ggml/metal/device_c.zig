@@ -9,7 +9,7 @@
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-context.h`
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-ops.h`
 //!
-//! all at v0.6.0 (`d81235049`).
+//! all at v0.7.0 (`620d2225c`).
 //!
 //! # Why these are hand-written rather than imported
 //!
@@ -48,7 +48,7 @@ const c = impl.c;
 pub const Tensor = c.ggml_tensor;
 pub const CGraph = c.ggml_cgraph;
 
-/// Mirrors `enum ggml_metal_device_id` (ggml-metal-device.h:261 @d81235049).
+/// Mirrors `enum ggml_metal_device_id` (ggml-metal-device.h:261 @620d2225c).
 ///
 /// Written by `scripts/gen-tuning-table`, in the enum's own order: until
 /// v0.4.1 the tuning table indexed it, and the props field below still has
@@ -78,30 +78,30 @@ pub const DeviceId = enum(c_uint) {
     a18_pro,
 };
 
-/// Mirrors `ggml_metal_device_t` (ggml-metal-device.h:14 @d81235049): an
+/// Mirrors `ggml_metal_device_t` (ggml-metal-device.h:14 @620d2225c): an
 /// opaque handle whose definition lives in the Objective-C.
 pub const Device = opaque {};
-/// Mirrors `ggml_metal_buffer_t` (ggml-metal-device.h:351 @d81235049).
+/// Mirrors `ggml_metal_buffer_t` (ggml-metal-device.h:351 @620d2225c).
 pub const Buffer = opaque {};
-/// Mirrors `ggml_metal_event_t` (ggml-metal-device.h:313 @d81235049).
+/// Mirrors `ggml_metal_event_t` (ggml-metal-device.h:313 @620d2225c).
 pub const Event = opaque {};
-/// Mirrors `ggml_metal_t` (ggml-metal-context.h:13 @d81235049).
+/// Mirrors `ggml_metal_t` (ggml-metal-context.h:13 @620d2225c).
 pub const Context = opaque {};
 
-/// Mirrors `ggml_metal_library_t` (ggml-metal-device.h:98 @d81235049).
+/// Mirrors `ggml_metal_library_t` (ggml-metal-device.h:98 @620d2225c).
 pub const Library = opaque {};
-/// Mirrors `ggml_metal_pipeline_t` (ggml-metal-device.h:33 @d81235049).
+/// Mirrors `ggml_metal_pipeline_t` (ggml-metal-device.h:33 @620d2225c).
 pub const Pipeline = opaque {};
-/// Mirrors `ggml_metal_cv_t` (ggml-metal-device.h:20 @d81235049): a
+/// Mirrors `ggml_metal_cv_t` (ggml-metal-device.h:20 @620d2225c): a
 /// wrapper over `MTLFunctionConstantValues`.
 pub const Cv = opaque {};
-/// Mirrors `ggml_metal_pipelines_t` (ggml-metal-device.h:39 @d81235049).
+/// Mirrors `ggml_metal_pipelines_t` (ggml-metal-device.h:39 @620d2225c).
 /// The struct behind it is ours — `library.zig` defines it, since
 /// `ggml-metal-device.cpp` did.
 pub const Pipelines = opaque {};
 
 /// Mirrors `struct ggml_metal_pipeline_with_params` (ggml-metal-device.h:47
-/// @d81235049).
+/// @620d2225c).
 ///
 /// **Returned by value by all 76 `get_pipeline_*` functions**, which makes
 /// its ABI load-bearing: it is 40 bytes with interior padding, and Zig
@@ -124,7 +124,7 @@ pub const PipelineWithParams = extern struct {
 };
 
 /// Mirrors `struct ggml_metal_device_props` (ggml-metal-device.h:288
-/// @d81235049). v0.6.0 dropped `supports_gpu_family_apple7`, the last of
+/// @620d2225c). v0.6.0 dropped `supports_gpu_family_apple7`, the last of
 /// the `bool` run; the byte becomes padding before `device_id`, so every
 /// later offset is unchanged and only `struct-layout`'s field count sees
 /// the difference.
@@ -163,7 +163,7 @@ pub extern fn ggml_metal_device_id_token(id: DeviceId) [*c]const u8;
 pub extern fn ggml_metal_device_get(device: c_int, n_devices: c_int) ?*Device;
 pub extern fn ggml_metal_device_get_props(dev: *Device) *const DeviceProps;
 /// `ggml_metal_device_get_fusion_info` (ggml-metal-device.h:345
-/// @d81235049): the device-owned fusion info, defined in `fusion.zig` and
+/// @620d2225c): the device-owned fusion info, defined in `fusion.zig` and
 /// created by `ggml-metal-device.m`.
 pub extern fn ggml_metal_device_get_fusion_info(dev: *Device) ?*@import("fusion.zig").Info;
 pub extern fn ggml_metal_device_event_init(dev: *Device) ?*Event;
@@ -181,11 +181,11 @@ pub extern fn ggml_metal_cv_set_int16(cv: *Cv, value: i16, idx: i32) void;
 pub extern fn ggml_metal_cv_set_int32(cv: *Cv, value: i32, idx: i32) void;
 pub extern fn ggml_metal_cv_set_bool(cv: *Cv, value: bool, idx: i32) void;
 
-/// `ggml_metal_pipeline_init` (ggml-metal-device.h:35 @d81235049).
+/// `ggml_metal_pipeline_init` (ggml-metal-device.h:35 @620d2225c).
 ///
 /// Lives in the `.m`; it only `calloc`s the wrapper and leaves `obj` nil,
 /// which is why the unit tests can make real handles without a device.
-/// `struct ggml_metal_buffer_id` (ggml-metal-device.h:9 @d81235049).
+/// `struct ggml_metal_buffer_id` (ggml-metal-device.h:9 @620d2225c).
 ///
 /// A Metal buffer handle and a byte offset into it. 16 bytes, which is one
 /// of the shapes the Zig 0.16 by-value-struct ABI bug does **not** affect
@@ -199,11 +199,11 @@ pub const BufferId = extern struct {
     offs: usize,
 };
 
-/// `ggml_metal_cmd_buf_t` (ggml-metal-device.h:67 @d81235049) — an opaque
+/// `ggml_metal_cmd_buf_t` (ggml-metal-device.h:67 @620d2225c) — an opaque
 /// `id<MTLCommandBuffer>`, which the C spells as `void *`.
 pub const CmdBuf = ?*anyopaque;
 
-/// `ggml_metal_encoder_t` (ggml-metal-device.h:73 @d81235049).
+/// `ggml_metal_encoder_t` (ggml-metal-device.h:73 @620d2225c).
 pub const Encoder = opaque {};
 
 // The encoder surface `ggml-metal-ops.cpp` drives. All of it lives in
@@ -222,13 +222,13 @@ pub extern fn ggml_metal_encoder_memory_barrier(encoder: *Encoder) void;
 pub extern fn ggml_metal_encoder_end_encoding(encoder: *Encoder) void;
 
 /// `ggml_metal_pipeline_max_theads_per_threadgroup`
-/// (ggml-metal-device.h:61 @d81235049). The misspelling is upstream's.
+/// (ggml-metal-device.h:61 @620d2225c). The misspelling is upstream's.
 pub extern fn ggml_metal_pipeline_max_theads_per_threadgroup(pipeline: PipelineWithParams) c_int;
 
-/// `ggml_metal_device_get_library` (ggml-metal-device.h:326 @d81235049).
+/// `ggml_metal_device_get_library` (ggml-metal-device.h:326 @620d2225c).
 pub extern fn ggml_metal_device_get_library(dev: *Device) ?*Library;
 
-/// `ggml_metal_buffer_get_id` (ggml-metal-device.h:370 @d81235049).
+/// `ggml_metal_buffer_get_id` (ggml-metal-device.h:370 @620d2225c).
 pub extern fn ggml_metal_buffer_get_id(buf: *Buffer, t: *const c.ggml_tensor) BufferId;
 
 pub extern fn ggml_metal_pipeline_init() ?*Pipeline;

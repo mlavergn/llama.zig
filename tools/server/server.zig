@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/server/server.cpp` at v0.6.0 (`d81235049`):
+//! Ports `llama.cpp/tools/server/server.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_server(argc, argv)`, `llama_server(params, argc, argv)` -- the
 //! model, the HTTP context, the route table, the 403 handlers, shutdown and
 //! the signal handler -- `ex_wrapper` and `llama_server_terminate`. Each
@@ -56,7 +56,7 @@ const lc_numeric: c_int = if (builtin.os.tag.isDarwin()) 4 else if (builtin.os.t
 // -----------------------------------------------------------------------------
 // shutdown
 
-/// Ports `shutdown_handler` (server.cpp:25 @d81235049): what a signal does,
+/// Ports `shutdown_handler` (server.cpp:25 @620d2225c): what a signal does,
 /// set once the server is up.
 var shutdown_handler: ?*const fn (signal: c_int) void = null;
 /// What `shutdown_handler` acts on.
@@ -64,12 +64,12 @@ var shutdown_ctx_server: ?*context.ServerContext = null;
 /// The `mcp_mgr` `shutdown_handler` and `clean_up` shut down.
 var shutdown_mcp: ?*mcp_mod.Mcp = null;
 
-/// Ports `is_terminating` (server.cpp:26 @d81235049).
+/// Ports `is_terminating` (server.cpp:26 @620d2225c).
 var is_terminating: std.atomic.Value(bool) = .init(false);
 
 extern fn exit(code: c_int) noreturn;
 
-/// Ports `signal_handler` (server.cpp:28 @d81235049).
+/// Ports `signal_handler` (server.cpp:28 @620d2225c).
 fn signalHandler(sig: std.posix.SIG) callconv(.c) void {
     const signal: c_int = @intCast(@backingInt(sig));
     if (is_terminating.swap(true, .seq_cst)) {
@@ -82,7 +82,7 @@ fn signalHandler(sig: std.posix.SIG) callconv(.c) void {
     if (shutdown_handler) |h| h(signal);
 }
 
-/// The single-model `shutdown_handler` lambda (server.cpp:500 @d81235049):
+/// The single-model `shutdown_handler` lambda (server.cpp:500 @620d2225c):
 /// unblocks `start_loop()`.
 fn shutdownSingleModel(_: c_int) void {
     if (shutdown_mcp) |m| m.shutdown();
@@ -94,7 +94,7 @@ fn shutdownSingleModel(_: c_int) void {
 var shutdown_models_routes: ?*models_mod.ModelsRoutes = null;
 var shutdown_ctx_http: ?*http.Context = null;
 
-/// The router's `shutdown_handler` lambda (server.cpp:443 @d81235049):
+/// The router's `shutdown_handler` lambda (server.cpp:443 @620d2225c):
 /// disconnects the SSE clients and stops the HTTP server, which ends the
 /// router's wait on its thread.
 fn shutdownRouter(_: c_int) void {
@@ -106,7 +106,7 @@ fn shutdownRouter(_: c_int) void {
     if (shutdown_ctx_http) |h| h.stop();
 }
 
-/// Ports `llama_server_terminate` (server.cpp:46 @d81235049): for the CLI.
+/// Ports `llama_server_terminate` (server.cpp:46 @620d2225c): for the CLI.
 pub fn terminate() void {
     if (shutdown_handler) |h| h(0);
 }
@@ -114,7 +114,7 @@ pub fn terminate() void {
 // -----------------------------------------------------------------------------
 // ex_wrapper
 
-/// Ports `ex_wrapper` (server.cpp:55 @d81235049): a route that never
+/// Ports `ex_wrapper` (server.cpp:55 @620d2225c): a route that never
 /// throws -- an exception becomes an error response, 400 for
 /// `std::invalid_argument` and `common_json_error`, 500 for anything else.
 const ExWrapper = struct {
@@ -191,7 +191,7 @@ const ExWrapper = struct {
     }
 };
 
-/// The `res_403` handler (server.cpp:328 @d81235049): for disabled features.
+/// The `res_403` handler (server.cpp:328 @620d2225c): for disabled features.
 fn res403(_: ?*anyopaque, _: *const http.Req) anyerror!*http.Res {
     const res = try http.Res.create(gpa);
     errdefer res.destroy();
@@ -210,7 +210,7 @@ fn res403(_: ?*anyopaque, _: *const http.Req) anyerror!*http.Res {
 // -----------------------------------------------------------------------------
 // llama_server
 
-/// Ports `llama_server` (server.cpp:93 @d81235049), the overload taking
+/// Ports `llama_server` (server.cpp:93 @620d2225c), the overload taking
 /// `argc` and `argv`.
 ///
 /// Parameters:
@@ -288,7 +288,7 @@ fn httpParams(p: *const Params) http.Params {
     };
 }
 
-/// Ports `llama_server` (server.cpp:131 @d81235049), the overload taking
+/// Ports `llama_server` (server.cpp:131 @620d2225c), the overload taking
 /// the parsed parameters and the child state. `argv` is null when the CLI
 /// runs it.
 fn runParams(a: std.mem.Allocator, params: *Params, argv: ?[]const [:0]const u8, child: *models_mod.Child) !u8 {
@@ -594,7 +594,7 @@ fn runParams(a: std.mem.Allocator, params: *Params, argv: ?[]const [:0]const u8,
     if (models_routes) |mr| {
         srv(.inf, func, "%s", .{@as([*:0]const u8, "starting server in router mode. models will be automatically loaded on-demand\n")});
 
-        // the router's `clean_up` lambda (server.cpp:424 @d81235049)
+        // the router's `clean_up` lambda (server.cpp:424 @620d2225c)
         const RouterCleanUp = struct {
             fn run(m: *models_mod.ModelsRoutes) void {
                 srv(.inf, "operator()", "%s: cleaning up before exit...\n", .{@as([*:0]const u8, "operator()")});
@@ -704,7 +704,7 @@ fn runParams(a: std.mem.Allocator, params: *Params, argv: ?[]const [:0]const u8,
     return 0;
 }
 
-/// Registers `signal_handler` (server.cpp:511 @d81235049) for SIGINT and
+/// Registers `signal_handler` (server.cpp:511 @620d2225c) for SIGINT and
 /// SIGTERM, unless the CLI runs the server.
 fn registerSignals(is_run_by_cli: bool) void {
     if (!is_run_by_cli) {
@@ -720,21 +720,13 @@ fn registerSignals(is_run_by_cli: bool) void {
     }
 }
 
-/// The `uses_default_port` block (server.cpp:524 @d81235049): a
-/// "listening on" line per address, and the default-port notice.
+/// Part of `llama_server` (server.cpp:131 @620d2225c): the "listening on"
+/// loop, a line per address.
 fn logListening(a: std.mem.Allocator, ctx_http: *const http.Context) !void {
     const func = "llama_server";
-    var uses_default_port = false;
     for (ctx_http.listening_addresses.items) |address| {
         const z = try a.dupeSentinel(u8, address, 0);
         srv(.inf, func, "listening on %s\n", .{z.ptr});
-        uses_default_port = uses_default_port or std.mem.endsWith(u8, address, ":8080");
-    }
-
-    // TODO: remove this in the future
-    // check the string to also handle the .sock case
-    if (uses_default_port) {
-        srv(.wrn, func, "%s", .{@as([*:0]const u8, "notice: server default port will be changed to :9931 in a future release (ref: https://github.com/ggml-org/llama.cpp/pull/26508)\n")});
     }
 }
 

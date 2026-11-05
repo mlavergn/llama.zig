@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-metal/ggml-metal-device.cpp` at
-//! v0.6.0 (`d81235049`). Each declaration below names the C++ it replaces
+//! v0.7.0 (`620d2225c`). Each declaration below names the C++ it replaces
 //! and the line it began at.
 //!
 //! # What this file is
@@ -117,7 +117,7 @@ inline fn srcOpt(op: *const Tensor, i: usize) ?*const Tensor {
 // -----------------------------------------------------------------------------
 // The device singleton
 
-/// Ports `ggml_metal_device_get` (ggml-metal-device.cpp:22 @d81235049).
+/// Ports `ggml_metal_device_get` (ggml-metal-device.cpp:22 @620d2225c).
 ///
 /// **The C leaks deliberately and so does this.** Its `static
 /// std::vector<ggml_metal_device_ptr> devs` is appended to on *every*
@@ -146,7 +146,7 @@ pub export fn ggml_metal_device_get(device: c_int, n_devices: c_int) callconv(.c
 // The pipeline cache
 
 /// Ports `struct ggml_metal_pipelines` (ggml-metal-device.cpp:30
-/// @d81235049).
+/// @620d2225c).
 ///
 /// The C's `std::unordered_map<std::string, ggml_metal_pipeline_t>`. The
 /// keys are kernel names the caller owns only transiently, so each is
@@ -156,7 +156,7 @@ const Pipelines = struct {
 };
 
 /// Ports `ggml_metal_pipelines_init` (ggml-metal-device.cpp:34
-/// @d81235049).
+/// @620d2225c).
 pub export fn ggml_metal_pipelines_init() callconv(.c) ?*mc.Pipelines {
     const res = allocator.create(Pipelines) catch impl.abort("metal: out of memory allocating the pipeline cache");
     res.* = .{};
@@ -164,7 +164,7 @@ pub export fn ggml_metal_pipelines_init() callconv(.c) ?*mc.Pipelines {
 }
 
 /// Ports `ggml_metal_pipelines_free` (ggml-metal-device.cpp:40
-/// @d81235049).
+/// @620d2225c).
 pub export fn ggml_metal_pipelines_free(ppls: ?*mc.Pipelines) callconv(.c) void {
     const p = ppls orelse return;
     const self: *Pipelines = @ptrCast(@alignCast(p));
@@ -178,7 +178,7 @@ pub export fn ggml_metal_pipelines_free(ppls: ?*mc.Pipelines) callconv(.c) void 
 }
 
 /// Ports `ggml_metal_pipelines_add` (ggml-metal-device.cpp:52
-/// @d81235049).
+/// @620d2225c).
 ///
 /// The C's `data[name] = pipeline` replaces silently; so does this, and
 /// the replaced pipeline is **not** freed — matching the C, where
@@ -196,7 +196,7 @@ pub export fn ggml_metal_pipelines_add(ppls: *mc.Pipelines, name: [*:0]const u8,
 }
 
 /// Ports `ggml_metal_pipelines_get` (ggml-metal-device.cpp:56
-/// @d81235049).
+/// @620d2225c).
 ///
 /// Return: the cached pipeline, or null when the name is absent.
 /// Borrowed; the cache owns it.
@@ -214,7 +214,7 @@ pub export fn ggml_metal_pipelines_get(ppls: *mc.Pipelines, name: [*:0]const u8)
 // carries them.
 
 /// Ports `ggml_metal_library_get_pipeline_base` (ggml-metal-device.cpp:64
-/// @d81235049).
+/// @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_base(lib: *mc.Library, op: c.enum_ggml_op) callconv(.c) Pwp {
     const op_str = switch (op) {
         c.GGML_OP_ADD_ID => "add_id",
@@ -230,7 +230,7 @@ pub export fn ggml_metal_library_get_pipeline_base(lib: *mc.Library, op: c.enum_
 }
 
 /// Ports `ggml_metal_library_get_pipeline_cpy` (ggml-metal-device.cpp:85
-/// @d81235049).
+/// @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_cpy(lib: *mc.Library, tsrc: c.enum_ggml_type, tdst: c.enum_ggml_type) callconv(.c) Pwp {
     var base: Name = .{};
     var name: Name = .{};
@@ -242,7 +242,7 @@ pub export fn ggml_metal_library_get_pipeline_cpy(lib: *mc.Library, tsrc: c.enum
 
 /// The body `ggml_metal_library_get_pipeline_pool_1d` and
 /// `ggml_metal_library_get_pipeline_pool_2d` share
-/// (ggml-metal-device.cpp:100, 125 @d81235049) -- the C writes it out
+/// (ggml-metal-device.cpp:100, 125 @620d2225c) -- the C writes it out
 /// twice, differing only in the `1d` or `2d` in the kernel name.
 fn poolPipeline(comptime dim: []const u8, lib: *mc.Library, op: *const Tensor, op_pool: c.enum_ggml_op_pool) Pwp {
     const src0 = src(op, 0);
@@ -264,19 +264,19 @@ fn poolPipeline(comptime dim: []const u8, lib: *mc.Library, op: *const Tensor, o
 }
 
 /// Ports `ggml_metal_library_get_pipeline_pool_1d` (ggml-metal-device.cpp:100
-/// @d81235049).
+/// @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_pool_1d(lib: *mc.Library, op: *const Tensor, op_pool: c.enum_ggml_op_pool) callconv(.c) Pwp {
     return poolPipeline("1d", lib, op, op_pool);
 }
 
 /// Ports `ggml_metal_library_get_pipeline_pool_2d` (ggml-metal-device.cpp:125
-/// @d81235049).
+/// @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_pool_2d(lib: *mc.Library, op: *const Tensor, op_pool: c.enum_ggml_op_pool) callconv(.c) Pwp {
     return poolPipeline("2d", lib, op, op_pool);
 }
 
 /// Ports `ggml_metal_library_get_pipeline_get_rows`
-/// (ggml-metal-device.cpp:150 @d81235049).
+/// (ggml-metal-device.cpp:150 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_get_rows(lib: *mc.Library, tsrc: c.enum_ggml_type) callconv(.c) Pwp {
     var base: Name = .{};
     var name: Name = .{};
@@ -287,7 +287,7 @@ pub export fn ggml_metal_library_get_pipeline_get_rows(lib: *mc.Library, tsrc: c
 }
 
 /// Ports `ggml_metal_library_get_pipeline_set_rows`
-/// (ggml-metal-device.cpp:165 @d81235049).
+/// (ggml-metal-device.cpp:165 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_set_rows(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const tsrc = src(op, 0).type;
     const tidx = src(op, 1).type;
@@ -302,7 +302,7 @@ pub export fn ggml_metal_library_get_pipeline_set_rows(lib: *mc.Library, op: *co
 }
 
 /// Ports `ggml_metal_library_get_pipeline_diag` (ggml-metal-device.cpp:184
-/// @d81235049).
+/// @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_diag(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const src0 = src(op, 0);
     const n: c_int = @intCast(src0.ne[0]);
@@ -321,7 +321,7 @@ pub export fn ggml_metal_library_get_pipeline_diag(lib: *mc.Library, op: *const 
 }
 
 /// Ports `ggml_metal_library_get_pipeline_repeat`
-/// (ggml-metal-device.cpp:204 @d81235049).
+/// (ggml-metal-device.cpp:204 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_repeat(lib: *mc.Library, tsrc: c.enum_ggml_type) callconv(.c) Pwp {
     var base: Name = .{};
     var name: Name = .{};
@@ -332,7 +332,7 @@ pub export fn ggml_metal_library_get_pipeline_repeat(lib: *mc.Library, tsrc: c.e
 }
 
 /// Ports `ggml_metal_library_get_pipeline_concat`
-/// (ggml-metal-device.cpp:219 @d81235049).
+/// (ggml-metal-device.cpp:219 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_concat(lib: *mc.Library, tsrc: c.enum_ggml_type) callconv(.c) Pwp {
     var base: Name = .{};
     var name: Name = .{};
@@ -343,7 +343,7 @@ pub export fn ggml_metal_library_get_pipeline_concat(lib: *mc.Library, tsrc: c.e
 }
 
 /// Ports `ggml_metal_library_get_pipeline_unary`
-/// (ggml-metal-device.cpp:234 @d81235049).
+/// (ggml-metal-device.cpp:234 @620d2225c).
 ///
 /// The widest op switch in the file: nine ops plus twenty-two
 /// `GGML_UNARY_OP_*`, all onto one kernel specialised by an `op` constant.
@@ -416,7 +416,7 @@ pub export fn ggml_metal_library_get_pipeline_unary(lib: *mc.Library, op: *const
 }
 
 /// Ports `ggml_metal_library_get_pipeline_glu`
-/// (ggml-metal-device.cpp:306 @d81235049).
+/// (ggml-metal-device.cpp:306 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_glu(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const src0 = src(op, 0);
     impl.assert(c.ggml_is_contiguous_1(src0), "ggml_is_contiguous_1(op->src[0])");
@@ -444,7 +444,7 @@ pub export fn ggml_metal_library_get_pipeline_glu(lib: *mc.Library, op: *const T
 }
 
 /// Ports `ggml_metal_library_get_pipeline_sum`
-/// (ggml-metal-device.cpp:339 @d81235049).
+/// (ggml-metal-device.cpp:339 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_sum(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_SUM, "op->op == GGML_OP_SUM");
 
@@ -457,7 +457,7 @@ pub export fn ggml_metal_library_get_pipeline_sum(lib: *mc.Library, op: *const T
 }
 
 /// Ports `ggml_metal_library_get_pipeline_sum_rows`
-/// (ggml-metal-device.cpp:356 @d81235049).
+/// (ggml-metal-device.cpp:356 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_sum_rows(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const src0 = src(op, 0);
     impl.assert(c.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(op->src[0])");
@@ -500,7 +500,7 @@ pub export fn ggml_metal_library_get_pipeline_sum_rows(lib: *mc.Library, op: *co
 }
 
 /// Ports `ggml_metal_library_get_pipeline_cumsum_blk`
-/// (ggml-metal-device.cpp:400 @d81235049).
+/// (ggml-metal-device.cpp:400 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_cumsum_blk(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_CUMSUM, "op->op == GGML_OP_CUMSUM");
 
@@ -513,7 +513,7 @@ pub export fn ggml_metal_library_get_pipeline_cumsum_blk(lib: *mc.Library, op: *
 }
 
 /// Ports `ggml_metal_library_get_pipeline_cumsum_add`
-/// (ggml-metal-device.cpp:417 @d81235049).
+/// (ggml-metal-device.cpp:417 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_cumsum_add(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_CUMSUM, "op->op == GGML_OP_CUMSUM");
 
@@ -526,7 +526,7 @@ pub export fn ggml_metal_library_get_pipeline_cumsum_add(lib: *mc.Library, op: *
 }
 
 /// Ports `ggml_metal_library_get_pipeline_tri`
-/// (ggml-metal-device.cpp:434 @d81235049).
+/// (ggml-metal-device.cpp:434 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_tri(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const src0 = src(op, 0);
     impl.assert(op.op == c.GGML_OP_TRI, "op->op == GGML_OP_TRI");
@@ -544,7 +544,7 @@ pub export fn ggml_metal_library_get_pipeline_tri(lib: *mc.Library, op: *const T
 }
 
 /// Ports `ggml_metal_library_get_pipeline_soft_max`
-/// (ggml-metal-device.cpp:456 @d81235049).
+/// (ggml-metal-device.cpp:456 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_soft_max(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const src1 = srcOpt(op, 1);
     impl.assert(
@@ -568,7 +568,7 @@ pub export fn ggml_metal_library_get_pipeline_soft_max(lib: *mc.Library, op: *co
 }
 
 /// Ports `ggml_metal_library_get_pipeline_lightning_indexer`
-/// (ggml-metal-device.cpp:483 @d81235049).
+/// (ggml-metal-device.cpp:483 @620d2225c).
 ///
 /// Since v0.6.0 the head count is a function constant rather than the
 /// fixed `OP_LIGHTNING_INDEXER_NH` the encoder used to assert, and the
@@ -598,7 +598,7 @@ pub export fn ggml_metal_library_get_pipeline_lightning_indexer(lib: *mc.Library
 }
 
 /// Ports `ggml_metal_library_get_pipeline_dsv4_hc`
-/// (ggml-metal-device.cpp:510 @d81235049).
+/// (ggml-metal-device.cpp:510 @620d2225c).
 ///
 /// Since v0.5.0 it takes the tensor, not the op: `HC_PRE` picks the gated
 /// kernel from op_params slot 1 and specialises on the number of
@@ -645,7 +645,7 @@ pub export fn ggml_metal_library_get_pipeline_dsv4_hc(lib: *mc.Library, op: *con
 }
 
 /// Ports `ggml_metal_library_get_pipeline_ssm_conv`
-/// (ggml-metal-device.cpp:550 @d81235049).
+/// (ggml-metal-device.cpp:550 @620d2225c).
 ///
 /// The kernel width `nc` and whether a fused SILU follows are function
 /// constants since v0.5.0, and both are in the cache key.
@@ -679,7 +679,7 @@ pub export fn ggml_metal_library_get_pipeline_ssm_conv(lib: *mc.Library, op: *co
 }
 
 /// Ports `ggml_metal_library_get_pipeline_ssm_conv_batched`
-/// (ggml-metal-device.cpp:584 @d81235049).
+/// (ggml-metal-device.cpp:584 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_ssm_conv_batched(lib: *mc.Library, op: *const Tensor, ssm_conv_bs: c_int, nc: i32, use_silu: bool) callconv(.c) Pwp {
     const src0 = src(op, 0);
     const src1 = src(op, 1);
@@ -711,7 +711,7 @@ pub export fn ggml_metal_library_get_pipeline_ssm_conv_batched(lib: *mc.Library,
 }
 
 /// Ports `ggml_metal_library_get_pipeline_ssm_scan`
-/// (ggml-metal-device.cpp:619 @d81235049).
+/// (ggml-metal-device.cpp:619 @620d2225c).
 ///
 /// `tail` picks the `_tail` variant, which scans the tokens left after the
 /// SSD kernel's whole chunks.
@@ -741,7 +741,7 @@ pub export fn ggml_metal_library_get_pipeline_ssm_scan(lib: *mc.Library, op: *co
 }
 
 /// Ports `ggml_metal_library_get_pipeline_ssm_scan_ssd_mma`
-/// (ggml-metal-device.cpp:645 @d81235049).
+/// (ggml-metal-device.cpp:645 @620d2225c).
 ///
 /// The chunked SSD scan for Mamba-2 heads of `OP_SSM_SCAN_SSD_HD`, on
 /// simdgroup matrix tiles.
@@ -763,7 +763,7 @@ pub export fn ggml_metal_library_get_pipeline_ssm_scan_ssd_mma(lib: *mc.Library,
 }
 
 /// Ports `ggml_metal_library_get_pipeline_rwkv`
-/// (ggml-metal-device.cpp:666 @d81235049).
+/// (ggml-metal-device.cpp:666 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_rwkv(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const src0 = src(op, 0);
 
@@ -796,7 +796,7 @@ pub export fn ggml_metal_library_get_pipeline_rwkv(lib: *mc.Library, op: *const 
 }
 
 /// Ports `ggml_metal_library_get_pipeline_gated_delta_net`
-/// (ggml-metal-device.cpp:704 @d81235049).
+/// (ggml-metal-device.cpp:704 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_gated_delta_net(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const src0 = src(op, 0);
     const src2 = src(op, 2);
@@ -838,7 +838,7 @@ pub export fn ggml_metal_library_get_pipeline_gated_delta_net(lib: *mc.Library, 
 }
 
 /// Ports `ggml_metal_library_get_pipeline_solve_tri`
-/// (ggml-metal-device.cpp:742 @d81235049).
+/// (ggml-metal-device.cpp:742 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_solve_tri(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const src0 = src(op, 0);
     const src1 = src(op, 1);
@@ -871,7 +871,7 @@ pub export fn ggml_metal_library_get_pipeline_solve_tri(lib: *mc.Library, op: *c
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mv_ext`
-/// (ggml-metal-device.cpp:772 @d81235049).
+/// (ggml-metal-device.cpp:772 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_mul_mv_ext(
     lib: *mc.Library,
     op: *const Tensor,
@@ -916,23 +916,23 @@ pub export fn ggml_metal_library_get_pipeline_mul_mv_ext(
 }
 
 /// Ports `GGML_METAL_MIN_THREADGROUPS` (ggml-metal-device.cpp:807
-/// @d81235049): threadgroups needed to fill the GPU. The C defines it
+/// @620d2225c): threadgroups needed to fill the GPU. The C defines it
 /// twice, here and in `ggml-metal-ops.cpp` (both marked `TODO: dedup`);
 /// `ops.zig`'s `min_threadgroups` is the other.
 const min_threadgroups: i64 = 128;
 
-/// Ports `GGML_METAL_MMA_TILE` (ggml-metal-device.cpp:810 @d81235049):
+/// Ports `GGML_METAL_MMA_TILE` (ggml-metal-device.cpp:810 @620d2225c):
 /// the few-row MMA kernels' 8x8 simdgroup matrices.
 const mma_tile: c_int = 8;
-/// Ports `GGML_METAL_MMA_NT_MAX` (ggml-metal-device.cpp:811 @d81235049).
+/// Ports `GGML_METAL_MMA_NT_MAX` (ggml-metal-device.cpp:811 @620d2225c).
 const mma_nt_max: c_int = 4;
-/// Ports `GGML_METAL_MMA_SMEM_MAX` (ggml-metal-device.cpp:812 @d81235049).
+/// Ports `GGML_METAL_MMA_SMEM_MAX` (ggml-metal-device.cpp:812 @620d2225c).
 const mma_smem_max: c_int = 16384;
 
 /// Ports `GGML_METAL_MMA_FEW_ROWS`, `GGML_METAL_MMA_MANY_ROWS`,
 /// `GGML_METAL_MMA_NSG_FEW_ROWS`, `GGML_METAL_MMA_NSG_MID_ROWS` and
 /// `GGML_METAL_MMA_NSG_MANY_ROWS` (ggml-metal-device.cpp:815, 816, 817,
-/// 818, 819 @d81235049): simdgroups per threadgroup for at most 64, at
+/// 818, 819 @620d2225c): simdgroups per threadgroup for at most 64, at
 /// most 6144, and more `src0` rows.
 const mma_few_rows: i64 = 64;
 const mma_many_rows: i64 = 6144;
@@ -941,7 +941,7 @@ const mma_nsg_mid_rows: c_int = 16;
 const mma_nsg_many_rows: c_int = 8;
 
 /// Ports `struct ggml_metal_mma_tiling` (ggml-metal-device.cpp:821
-/// @d81235049).
+/// @620d2225c).
 const MmaTiling = struct {
     /// Simdgroups per threadgroup, each over a slice of K.
     nsg: c_int,
@@ -952,7 +952,7 @@ const MmaTiling = struct {
 };
 
 /// Ports `ggml_metal_halve_to_limit` (ggml-metal-device.cpp:828
-/// @d81235049): halves `n` while it is above `limit`.
+/// @620d2225c): halves `n` while it is above `limit`.
 fn halveToLimit(n_in: c_int, limit: i64) c_int {
     var n = n_in;
     while (n > 1 and n > limit) {
@@ -962,14 +962,14 @@ fn halveToLimit(n_in: c_int, limit: i64) c_int {
 }
 
 /// Ports `ggml_metal_mul_mv_mma_smem` (ggml-metal-device.cpp:835
-/// @d81235049): one 8x8 float simdgroup matrix per output tile.
+/// @620d2225c): one 8x8 float simdgroup matrix per output tile.
 fn mulMvMmaSmem(nsg: c_int, nt: c_int, rt: c_int) usize {
     const tile_bytes: usize = 8 * 8 * @sizeOf(f32);
     return @as(usize, @intCast(nsg * nt * rt)) * tile_bytes;
 }
 
 /// Ports `ggml_metal_op_mul_mat_mma_tiling` (ggml-metal-device.cpp:843
-/// @d81235049).
+/// @620d2225c).
 ///
 /// Fewer `src0` rows take more simdgroups per threadgroup (a finer K
 /// split) to fill the GPU; the tiles narrow when the K-slice reduction
@@ -1000,7 +1000,7 @@ fn mulMatMmaTiling(op: *const Tensor) MmaTiling {
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mv_mma_auto`
-/// (ggml-metal-device.cpp:869 @d81235049): the pipeline for the tiling,
+/// (ggml-metal-device.cpp:869 @620d2225c): the pipeline for the tiling,
 /// with fewer simdgroups when the device cannot run that many threads.
 pub export fn ggml_metal_library_get_pipeline_mul_mv_mma_auto(lib: *mc.Library, op: *const Tensor, add: bool) callconv(.c) Pwp {
     var tiling = mulMatMmaTiling(op);
@@ -1015,7 +1015,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mv_mma_auto(lib: *mc.Library, 
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mv_mma`
-/// (ggml-metal-device.cpp:881 @d81235049).
+/// (ggml-metal-device.cpp:881 @620d2225c).
 ///
 /// The few-row MMA mat-mul of `mul_mv_mma.metal`: `nt` 8-row `src0` tiles
 /// by `rt` 8-row `src1` tiles per threadgroup, and, when `add`, the
@@ -1077,7 +1077,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mv_mma(
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mm`
-/// (ggml-metal-device.cpp:924 @d81235049).
+/// (ggml-metal-device.cpp:924 @620d2225c).
 ///
 /// The tile shape and shared-memory budget depend on whether the device
 /// has the tensor instructions, which is why this one asks the device for
@@ -1159,7 +1159,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mm(lib: *mc.Library, op: *cons
 /// The `(nsg, nr0, smem, split)` a quantized `mul_mv` kernel wants, by
 /// weight type -- the quantized arms of
 /// `ggml_metal_library_get_pipeline_mul_mv` (ggml-metal-device.cpp:986
-/// @d81235049), whose switch is at its line 845, and of
+/// @620d2225c), whose switch is at its line 845, and of
 /// `ggml_metal_library_get_pipeline_mul_mv_id`, which repeats them.
 ///
 /// The C writes 23 `case` blocks assigning two or three locals each; this
@@ -1234,7 +1234,7 @@ fn mvShapeQuantBase(t: c.enum_ggml_type, log_type: c.enum_ggml_type) MvShape {
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mv`
-/// (ggml-metal-device.cpp:986 @d81235049).
+/// (ggml-metal-device.cpp:986 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_mul_mv(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const src0 = src(op, 0);
     const src1 = src(op, 1);
@@ -1316,7 +1316,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mv(lib: *mc.Library, op: *cons
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mm_id_amax_part`
-/// (ggml-metal-device.cpp:1228 @d81235049): stage one of `MUL_MAT_ID`'s
+/// (ggml-metal-device.cpp:1228 @620d2225c): stage one of `MUL_MAT_ID`'s
 /// `src[1]` rescale, a partial max per threadgroup.
 pub export fn ggml_metal_library_get_pipeline_mul_mm_id_amax_part(lib: *mc.Library) callconv(.c) Pwp {
     var base: Name = .{};
@@ -1332,7 +1332,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mm_id_amax_part(lib: *mc.Libra
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mm_id_amax`
-/// (ggml-metal-device.cpp:1245 @d81235049): stage two, the reduction of
+/// (ggml-metal-device.cpp:1245 @620d2225c): stage two, the reduction of
 /// the partial maxima into the two scale factors.
 pub export fn ggml_metal_library_get_pipeline_mul_mm_id_amax(lib: *mc.Library) callconv(.c) Pwp {
     var base: Name = .{};
@@ -1348,23 +1348,39 @@ pub export fn ggml_metal_library_get_pipeline_mul_mm_id_amax(lib: *mc.Library) c
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mm_id_map0`
-/// (ggml-metal-device.cpp:1262 @d81235049).
+/// (ggml-metal-device.cpp:1262 @620d2225c).
+///
+/// Since v0.7.0 the expert count reaches the kernel as a function constant
+/// (`FC_MUL_MM + 7`) rather than through the arguments, and the
+/// threadgroup memory holds, per expert, an entry count and a base offset
+/// before the staging of the ids.
 pub export fn ggml_metal_library_get_pipeline_mul_mm_id_map0(lib: *mc.Library, ne02: c_int, ne20: c_int) callconv(.c) Pwp {
     var base: Name = .{};
     var name: Name = .{};
     base.set("kernel_mul_mm_id_map0_ne20_{d}", .{ne20});
     name.set("{s}_ne02={d}", .{ base.str(), ne02 });
 
-    var res = getOrCompile(lib, &base, &name, null);
+    var res = mc.ggml_metal_library_get_pipeline(lib, name.z());
+    if (res.pipeline == null) {
+        const cv = mc.ggml_metal_cv_init().?;
+        defer mc.ggml_metal_cv_free(cv);
 
-    res.smem = @as(usize, @intCast(ne02)) * @as(usize, @intCast(ne20)) * @sizeOf(u16);
+        mc.ggml_metal_cv_set_int32(cv, ne02, fc.FC_MUL_MM + 7);
+
+        res = mc.ggml_metal_library_compile_pipeline(lib, base.z(), name.z(), cv);
+    }
+
+    // per expert: entry count + base offset, followed by the staging of the ids of ntg tokens
+    const n02: usize = @intCast(ne02);
+    const n20: usize = @intCast(ne20);
+    res.smem = 2 * n02 * @sizeOf(u32) + n02 * n20 * @sizeOf(u16);
     res.smem = impl.pad(res.smem, 16);
 
     return res;
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mm_id`
-/// (ggml-metal-device.cpp:1280 @d81235049).
+/// (ggml-metal-device.cpp:1286 @620d2225c).
 ///
 /// An F32 `src[1]` precision (op_params slot 3) selects the specialisation
 /// that reads the amax rescale factors (`FC_MUL_MM + 6`).
@@ -1402,7 +1418,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mm_id(lib: *mc.Library, op: *c
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mv_id`
-/// (ggml-metal-device.cpp:1312 @d81235049).
+/// (ggml-metal-device.cpp:1318 @620d2225c).
 ///
 /// The quantized arms are `mul_mv`'s, to the value; the float arm differs
 /// in having no `_short` path, so `ne00 < 32` is not special-cased.
@@ -1470,7 +1486,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mv_id(lib: *mc.Library, op: *c
 }
 
 /// Ports `ggml_metal_library_get_pipeline_argmax`
-/// (ggml-metal-device.cpp:1543 @d81235049).
+/// (ggml-metal-device.cpp:1549 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_argmax(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const src0 = src(op, 0);
     impl.assert(src0.type == c.GGML_TYPE_F32, "op->src[0]->type == GGML_TYPE_F32");
@@ -1491,7 +1507,7 @@ pub export fn ggml_metal_library_get_pipeline_argmax(lib: *mc.Library, op: *cons
 
 /// The `ggml_sort_order` spelling the four argsort kernel names carry --
 /// the switch inside `ggml_metal_library_get_pipeline_argsort`
-/// (ggml-metal-device.cpp:1564 @d81235049) and its three twins.
+/// (ggml-metal-device.cpp:1570 @620d2225c) and its three twins.
 ///
 /// The C repeats this switch four times, `"undefined"` initialiser and
 /// all. The initialiser is dead in every copy -- the `default` aborts --
@@ -1505,7 +1521,7 @@ fn sortOrderName(order: c.enum_ggml_sort_order) []const u8 {
 }
 
 /// Ports `ggml_metal_library_get_pipeline_argsort`
-/// (ggml-metal-device.cpp:1564 @d81235049).
+/// (ggml-metal-device.cpp:1570 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_argsort(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_ARGSORT, "op->op == GGML_OP_ARGSORT");
 
@@ -1521,7 +1537,7 @@ pub export fn ggml_metal_library_get_pipeline_argsort(lib: *mc.Library, op: *con
 }
 
 /// Ports `ggml_metal_library_get_pipeline_argsort_merge`
-/// (ggml-metal-device.cpp:1590 @d81235049).
+/// (ggml-metal-device.cpp:1596 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_argsort_merge(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_ARGSORT, "op->op == GGML_OP_ARGSORT");
 
@@ -1537,7 +1553,7 @@ pub export fn ggml_metal_library_get_pipeline_argsort_merge(lib: *mc.Library, op
 }
 
 /// Ports `ggml_metal_library_get_pipeline_fwht`
-/// (ggml-metal-device.cpp:1616 @d81235049). The kernel is named for the
+/// (ggml-metal-device.cpp:1622 @620d2225c). The kernel is named for the
 /// `src[1]` type since v0.5.0, which reads an F16 source directly.
 pub export fn ggml_metal_library_get_pipeline_fwht(lib: *mc.Library, n: c_int, tsrc: c.enum_ggml_type) callconv(.c) Pwp {
     var base: Name = .{};
@@ -1549,7 +1565,7 @@ pub export fn ggml_metal_library_get_pipeline_fwht(lib: *mc.Library, n: c_int, t
 }
 
 /// Ports `ggml_metal_library_get_pipeline_top_k`
-/// (ggml-metal-device.cpp:1632 @d81235049).
+/// (ggml-metal-device.cpp:1638 @620d2225c).
 ///
 /// note: reuse the argsort kernel for the bitonic top_k fallback
 pub export fn ggml_metal_library_get_pipeline_top_k(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
@@ -1567,7 +1583,7 @@ pub export fn ggml_metal_library_get_pipeline_top_k(lib: *mc.Library, op: *const
 }
 
 /// Ports `ggml_metal_library_get_pipeline_top_k_radix`
-/// (ggml-metal-device.cpp:1659 @d81235049).
+/// (ggml-metal-device.cpp:1665 @620d2225c).
 ///
 /// The radix-select top_k, `kernel_top_k_<src>_<dst>`, with no function
 /// constants.
@@ -1583,7 +1599,7 @@ pub export fn ggml_metal_library_get_pipeline_top_k_radix(lib: *mc.Library, op: 
 }
 
 /// Ports `ggml_metal_library_get_pipeline_top_k_merge`
-/// (ggml-metal-device.cpp:1676 @d81235049).
+/// (ggml-metal-device.cpp:1682 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_top_k_merge(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_TOP_K, "op->op == GGML_OP_TOP_K");
 
@@ -1598,7 +1614,7 @@ pub export fn ggml_metal_library_get_pipeline_top_k_merge(lib: *mc.Library, op: 
 }
 
 /// Ports `ggml_metal_library_get_pipeline_topk_moe`
-/// (ggml-metal-device.cpp:1702 @d81235049): the fused MoE routing kernel,
+/// (ggml-metal-device.cpp:1708 @620d2225c): the fused MoE routing kernel,
 /// specialised on the expert count, `k` and the renormalisation.
 pub export fn ggml_metal_library_get_pipeline_topk_moe(lib: *mc.Library, n_expert: i32, top_k: i32, with_norm: bool) callconv(.c) Pwp {
     var base: Name = .{};
@@ -1622,7 +1638,7 @@ pub export fn ggml_metal_library_get_pipeline_topk_moe(lib: *mc.Library, n_exper
 }
 
 /// Ports `ggml_metal_library_get_pipeline_moe_reduce`
-/// (ggml-metal-device.cpp:1725 @d81235049): the fused MoE output
+/// (ggml-metal-device.cpp:1731 @620d2225c): the fused MoE output
 /// reduction, specialised on the number of experts used.
 pub export fn ggml_metal_library_get_pipeline_moe_reduce(lib: *mc.Library, n_expert_used: i32) callconv(.c) Pwp {
     var base: Name = .{};
@@ -1644,7 +1660,7 @@ pub export fn ggml_metal_library_get_pipeline_moe_reduce(lib: *mc.Library, n_exp
 }
 
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_pad`
-/// (ggml-metal-device.cpp:1745 @d81235049).
+/// (ggml-metal-device.cpp:1751 @620d2225c).
 ///
 /// The C leaves eight `ggml_metal_cv_set_*` calls commented out here and
 /// in `_blk` below, keeping the constant indices they would use. Only the
@@ -1679,7 +1695,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_pad(
 }
 
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_kv_f16`
-/// (ggml-metal-device.cpp:1788 @d81235049).
+/// (ggml-metal-device.cpp:1794 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_kv_f16(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_FLASH_ATTN_EXT, "op->op == GGML_OP_FLASH_ATTN_EXT");
 
@@ -1690,7 +1706,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_kv_f16(lib: *mc.Lib
 }
 
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_blk`
-/// (ggml-metal-device.cpp:1805 @d81235049).
+/// (ggml-metal-device.cpp:1811 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_blk(
     lib: *mc.Library,
     op: *const Tensor,
@@ -1719,11 +1735,14 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_blk(
 }
 
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_tensor`
-/// (ggml-metal-device.cpp:1848 @d81235049).
+/// (ggml-metal-device.cpp:1854 @620d2225c).
 ///
-/// The tensor-API flash-attention kernel of `fa_f16.metal`, compiled only
-/// where `GGML_METAL_HAS_TENSOR` is defined: F16 K and V of one of six
-/// head-size pairs, specialised on which optional inputs are present.
+/// The tensor-API flash-attention kernel -- of `fa_tensor.metal` since
+/// v0.7.0, `fa_f16.metal` before -- compiled only where
+/// `GGML_METAL_HAS_TENSOR` is defined: F16 or (since v0.7.0) BF16 K and V
+/// of one of six head-size pairs, specialised on which optional inputs are
+/// present. Any other K type (a quantized one the KV-to-F16 pass converts)
+/// takes the F16 kernel.
 pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_tensor(
     lib: *mc.Library,
     op: *const Tensor,
@@ -1739,7 +1758,9 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_tensor(
 
     var base: Name = .{};
     var name: Name = .{};
-    base.set("kernel_flash_attn_ext_tensor_f16_dk{d}_dv{d}", .{ dk, dv });
+    const type_name: []const u8 = if (src(op, 1).type == c.GGML_TYPE_BF16) "bf16" else "f16";
+
+    base.set("kernel_flash_attn_ext_tensor_{s}_dk{d}_dv{d}", .{ type_name, dk, dv });
     name.set("{s}_mask={d}_sinks={d}_bias={d}_scap={d}", .{
         base.str(),
         @intFromBool(has_mask),
@@ -1765,7 +1786,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_tensor(
 }
 
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext`
-/// (ggml-metal-device.cpp:1883 @d81235049).
+/// (ggml-metal-device.cpp:1891 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_flash_attn_ext(
     lib: *mc.Library,
     op: *const Tensor,
@@ -1830,7 +1851,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext(
 }
 
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_vec_idx`
-/// (ggml-metal-device.cpp:1950 @d81235049).
+/// (ggml-metal-device.cpp:1958 @620d2225c).
 ///
 /// Gathers each mask row's finite entries into an index list, for the
 /// sparse vec kernel (`ggml_flash_attn_ext_set_n_kv_max`).
@@ -1845,7 +1866,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_vec_idx(lib: *mc.Li
 }
 
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_vec`
-/// (ggml-metal-device.cpp:1970 @d81235049).
+/// (ggml-metal-device.cpp:1978 @620d2225c).
 ///
 /// The only selection function that consults the tuning table: a
 /// `(nqpsg, ne)` pair equal to the baseline for this `(dk, dv)` is left
@@ -1927,7 +1948,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_vec(
 }
 
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_vec_reduce`
-/// (ggml-metal-device.cpp:2044 @d81235049).
+/// (ggml-metal-device.cpp:2052 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_vec_reduce(
     lib: *mc.Library,
     op: *const Tensor,
@@ -1956,8 +1977,8 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_vec_reduce(
 }
 
 /// The `op` constant the four `bin` ops share -- the switch inside
-/// `ggml_metal_library_get_pipeline_bin` (ggml-metal-device.cpp:2074
-/// @d81235049) and its twin in `_bin_one`.
+/// `ggml_metal_library_get_pipeline_bin` (ggml-metal-device.cpp:2082
+/// @620d2225c) and its twin in `_bin_one`.
 ///
 /// These four are literals in the C, not named constants, and they are the
 /// same switch in `_bin` and `_bin_one`.
@@ -1972,7 +1993,7 @@ fn binOpNum(op: c.enum_ggml_op) c_int {
 }
 
 /// Ports `ggml_metal_library_get_pipeline_bin`
-/// (ggml-metal-device.cpp:2074 @d81235049).
+/// (ggml-metal-device.cpp:2082 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_bin(lib: *mc.Library, op: *const Tensor, n_fuse: i32) callconv(.c) Pwp {
     const src0 = src(op, 0);
     const src1 = src(op, 1);
@@ -2020,7 +2041,7 @@ pub export fn ggml_metal_library_get_pipeline_bin(lib: *mc.Library, op: *const T
 }
 
 /// Ports `ggml_metal_library_get_pipeline_bin_one`
-/// (ggml-metal-device.cpp:2120 @d81235049).
+/// (ggml-metal-device.cpp:2128 @620d2225c).
 ///
 /// Note the C sets only three of the four `FC_BIN` constants here, leaving
 /// `+ 3` (`is_cb`) at the kernel's own default.
@@ -2048,7 +2069,7 @@ pub export fn ggml_metal_library_get_pipeline_bin_one(lib: *mc.Library, op: c.en
 }
 
 /// Ports `ggml_metal_library_get_pipeline_l2_norm`
-/// (ggml-metal-device.cpp:2153 @d81235049).
+/// (ggml-metal-device.cpp:2161 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_l2_norm(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_L2_NORM, "op->op == GGML_OP_L2_NORM");
 
@@ -2072,7 +2093,7 @@ pub export fn ggml_metal_library_get_pipeline_l2_norm(lib: *mc.Library, op: *con
 }
 
 /// Ports `ggml_metal_library_get_pipeline_group_norm`
-/// (ggml-metal-device.cpp:2178 @d81235049).
+/// (ggml-metal-device.cpp:2186 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_group_norm(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_GROUP_NORM, "op->op == GGML_OP_GROUP_NORM");
     impl.assert(c.ggml_is_contiguous(src(op, 0)), "ggml_is_contiguous(op->src[0])");
@@ -2090,7 +2111,7 @@ pub export fn ggml_metal_library_get_pipeline_group_norm(lib: *mc.Library, op: *
 }
 
 /// Ports `ggml_metal_library_get_pipeline_norm`
-/// (ggml-metal-device.cpp:2199 @d81235049). Since v0.5.0 every norm
+/// (ggml-metal-device.cpp:2207 @620d2225c). Since v0.5.0 every norm
 /// kernel is compiled with `FC_NORM + 0` (use the fused scale) false.
 pub export fn ggml_metal_library_get_pipeline_norm(lib: *mc.Library, op: *const Tensor, n_fuse: c_int) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_NORM or op.op == c.GGML_OP_RMS_NORM, "op->op is NORM or RMS_NORM");
@@ -2134,7 +2155,7 @@ pub export fn ggml_metal_library_get_pipeline_norm(lib: *mc.Library, op: *const 
 }
 
 /// Ports `ggml_metal_library_get_pipeline_norm_scale`
-/// (ggml-metal-device.cpp:2247 @d81235049).
+/// (ggml-metal-device.cpp:2255 @620d2225c).
 ///
 /// NORM/RMS_NORM + SCALE: the norm-and-multiply kernel specialised to
 /// multiply by `args.scale` instead of reading a weight. Its cache key
@@ -2172,7 +2193,7 @@ pub export fn ggml_metal_library_get_pipeline_norm_scale(lib: *mc.Library, op: *
 }
 
 /// Ports `ggml_metal_library_get_pipeline_rope`
-/// (ggml-metal-device.cpp:2283 @d81235049).
+/// (ggml-metal-device.cpp:2291 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_rope(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_ROPE or op.op == c.GGML_OP_ROPE_BACK, "op->op is ROPE or ROPE_BACK");
 
@@ -2224,7 +2245,7 @@ pub export fn ggml_metal_library_get_pipeline_rope(lib: *mc.Library, op: *const 
 }
 
 /// Ports `ggml_metal_library_get_pipeline_im2col`
-/// (ggml-metal-device.cpp:2327 @d81235049).
+/// (ggml-metal-device.cpp:2335 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_im2col(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_IM2COL, "op->op == GGML_OP_IM2COL");
 
@@ -2254,7 +2275,7 @@ pub export fn ggml_metal_library_get_pipeline_im2col(lib: *mc.Library, op: *cons
 }
 
 /// Ports `ggml_metal_library_get_pipeline_conv_transpose_1d`
-/// (ggml-metal-device.cpp:2358 @d81235049).
+/// (ggml-metal-device.cpp:2366 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_conv_transpose_1d(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_CONV_TRANSPOSE_1D, "op->op == GGML_OP_CONV_TRANSPOSE_1D");
 
@@ -2276,7 +2297,7 @@ pub export fn ggml_metal_library_get_pipeline_conv_transpose_1d(lib: *mc.Library
 }
 
 /// Ports `ggml_metal_library_get_pipeline_col2im_1d`
-/// (ggml-metal-device.cpp:2381 @d81235049).
+/// (ggml-metal-device.cpp:2389 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_col2im_1d(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_COL2IM_1D, "op->op == GGML_OP_COL2IM_1D");
 
@@ -2296,7 +2317,7 @@ pub export fn ggml_metal_library_get_pipeline_col2im_1d(lib: *mc.Library, op: *c
 }
 
 /// Ports `ggml_metal_library_get_pipeline_snake`
-/// (ggml-metal-device.cpp:2401 @d81235049).
+/// (ggml-metal-device.cpp:2409 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_snake(lib: *mc.Library, @"type": c.enum_ggml_type) callconv(.c) Pwp {
     impl.assert(
         @"type" == c.GGML_TYPE_F32 or @"type" == c.GGML_TYPE_F16 or @"type" == c.GGML_TYPE_BF16,
@@ -2312,7 +2333,7 @@ pub export fn ggml_metal_library_get_pipeline_snake(lib: *mc.Library, @"type": c
 }
 
 /// Ports `ggml_metal_library_get_pipeline_conv_transpose_2d`
-/// (ggml-metal-device.cpp:2418 @d81235049).
+/// (ggml-metal-device.cpp:2426 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_conv_transpose_2d(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_CONV_TRANSPOSE_2D, "op->op == GGML_OP_CONV_TRANSPOSE_2D");
 
@@ -2334,7 +2355,7 @@ pub export fn ggml_metal_library_get_pipeline_conv_transpose_2d(lib: *mc.Library
 }
 
 /// Ports `ggml_metal_library_get_pipeline_conv_2d`
-/// (ggml-metal-device.cpp:2441 @d81235049).
+/// (ggml-metal-device.cpp:2449 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_conv_2d(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_CONV_2D, "op->op == GGML_OP_CONV_2D");
 
@@ -2355,7 +2376,7 @@ pub export fn ggml_metal_library_get_pipeline_conv_2d(lib: *mc.Library, op: *con
 }
 
 /// Ports `ggml_metal_library_get_pipeline_conv_2d_dw`
-/// (ggml-metal-device.cpp:2463 @d81235049).
+/// (ggml-metal-device.cpp:2471 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_conv_2d_dw(lib: *mc.Library, op: *const Tensor, tiled: bool) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_CONV_2D_DW, "op->op == GGML_OP_CONV_2D_DW");
 
@@ -2379,7 +2400,7 @@ pub export fn ggml_metal_library_get_pipeline_conv_2d_dw(lib: *mc.Library, op: *
 }
 
 /// Ports `ggml_metal_library_get_pipeline_conv_3d`
-/// (ggml-metal-device.cpp:2486 @d81235049).
+/// (ggml-metal-device.cpp:2494 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_conv_3d(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_CONV_3D, "op->op == GGML_OP_CONV_3D");
 
@@ -2400,7 +2421,7 @@ pub export fn ggml_metal_library_get_pipeline_conv_3d(lib: *mc.Library, op: *con
 }
 
 /// Ports `ggml_metal_library_get_pipeline_upscale`
-/// (ggml-metal-device.cpp:2508 @d81235049).
+/// (ggml-metal-device.cpp:2516 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_upscale(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_UPSCALE, "op->op == GGML_OP_UPSCALE");
 
@@ -2437,7 +2458,7 @@ pub export fn ggml_metal_library_get_pipeline_upscale(lib: *mc.Library, op: *con
 }
 
 /// Ports `ggml_metal_library_get_pipeline_roll`
-/// (ggml-metal-device.cpp:2542 @d81235049).
+/// (ggml-metal-device.cpp:2550 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_roll(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_ROLL, "op->op == GGML_OP_ROLL");
 
@@ -2450,7 +2471,7 @@ pub export fn ggml_metal_library_get_pipeline_roll(lib: *mc.Library, op: *const 
 }
 
 /// Ports `ggml_metal_library_get_pipeline_pad`
-/// (ggml-metal-device.cpp:2559 @d81235049).
+/// (ggml-metal-device.cpp:2567 @620d2225c).
 ///
 /// v0.6.0 dropped the `_4` variant (`res.c4` is never set now) and added
 /// circular padding, op_params slot 8, as a function constant in the
@@ -2479,7 +2500,7 @@ pub export fn ggml_metal_library_get_pipeline_pad(lib: *mc.Library, op: *const T
 }
 
 /// Ports `ggml_metal_library_get_pipeline_pad_reflect_1d`
-/// (ggml-metal-device.cpp:2584 @d81235049).
+/// (ggml-metal-device.cpp:2592 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_pad_reflect_1d(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_PAD_REFLECT_1D, "op->op == GGML_OP_PAD_REFLECT_1D");
 
@@ -2492,7 +2513,7 @@ pub export fn ggml_metal_library_get_pipeline_pad_reflect_1d(lib: *mc.Library, o
 }
 
 /// Ports `ggml_metal_library_get_pipeline_arange`
-/// (ggml-metal-device.cpp:2601 @d81235049).
+/// (ggml-metal-device.cpp:2609 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_arange(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_ARANGE, "op->op == GGML_OP_ARANGE");
 
@@ -2505,7 +2526,7 @@ pub export fn ggml_metal_library_get_pipeline_arange(lib: *mc.Library, op: *cons
 }
 
 /// Ports `ggml_metal_library_get_pipeline_timestep_embedding`
-/// (ggml-metal-device.cpp:2618 @d81235049).
+/// (ggml-metal-device.cpp:2626 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_timestep_embedding(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_TIMESTEP_EMBEDDING, "op->op == GGML_OP_TIMESTEP_EMBEDDING");
 
@@ -2518,7 +2539,7 @@ pub export fn ggml_metal_library_get_pipeline_timestep_embedding(lib: *mc.Librar
 }
 
 /// Ports `ggml_metal_library_get_pipeline_opt_step_adamw`
-/// (ggml-metal-device.cpp:2635 @d81235049).
+/// (ggml-metal-device.cpp:2643 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_opt_step_adamw(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_OPT_STEP_ADAMW, "op->op == GGML_OP_OPT_STEP_ADAMW");
 
@@ -2531,7 +2552,7 @@ pub export fn ggml_metal_library_get_pipeline_opt_step_adamw(lib: *mc.Library, o
 }
 
 /// Ports `ggml_metal_library_get_pipeline_opt_step_sgd`
-/// (ggml-metal-device.cpp:2652 @d81235049).
+/// (ggml-metal-device.cpp:2660 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_opt_step_sgd(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_OPT_STEP_SGD, "op->op == GGML_OP_OPT_STEP_SGD");
 
@@ -2544,7 +2565,7 @@ pub export fn ggml_metal_library_get_pipeline_opt_step_sgd(lib: *mc.Library, op:
 }
 
 /// Ports `ggml_metal_library_get_pipeline_silu_back`
-/// (ggml-metal-device.cpp:2669 @d81235049).
+/// (ggml-metal-device.cpp:2677 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_silu_back(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_SILU_BACK, "op->op == GGML_OP_SILU_BACK");
 
@@ -2557,7 +2578,7 @@ pub export fn ggml_metal_library_get_pipeline_silu_back(lib: *mc.Library, op: *c
 }
 
 /// Ports `ggml_metal_library_get_pipeline_memset`
-/// (ggml-metal-device.cpp:2686 @d81235049).
+/// (ggml-metal-device.cpp:2694 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_memset(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.type == c.GGML_TYPE_I64, "op->type == GGML_TYPE_I64");
 
@@ -2570,7 +2591,7 @@ pub export fn ggml_metal_library_get_pipeline_memset(lib: *mc.Library, op: *cons
 }
 
 /// Ports `ggml_metal_library_get_pipeline_count_equal`
-/// (ggml-metal-device.cpp:2703 @d81235049).
+/// (ggml-metal-device.cpp:2711 @620d2225c).
 pub export fn ggml_metal_library_get_pipeline_count_equal(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_COUNT_EQUAL, "op->op == GGML_OP_COUNT_EQUAL");
 

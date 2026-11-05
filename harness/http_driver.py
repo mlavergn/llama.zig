@@ -443,6 +443,53 @@ def base_cases():
                                   ("send", req("GET /health HTTP/1.1")), ("resp",)]))
     # server-http.cpp v0.6.0: with the UI on, no /sw.js route
     c.append(simple("sw-js-ui-on", req("GET /sw.js HTTP/1.1")))
+    # cpp-httplib 0.60: more than one Host field line, or a Host value that
+    # is not uri-host [":" port], is a 400 that closes the connection; it is
+    # checked after the framing and before Accept and Range
+    # ("get-header-cases" above sends a second, lower-case Host since then)
+    c.append(simple("get-header-cases-1host", req("GET /echo HTTP/1.1", "X-Dup: 1", "x-dup: 2", "X-Empty:", "X-Spaces:   a b   ")))
+    c.append(simple("host-dup", req("GET /echo HTTP/1.1", "Host: x")))
+    c.append(simple("host-dup-case", req("GET /echo HTTP/1.1", "HOST: y")))
+    c.append(simple("host-dup-empty", req("GET /echo HTTP/1.1", "Host:")))
+    c.append(simple("host-none", b"GET /echo HTTP/1.1\r\nX-A: 1\r\n\r\n"))
+    c.append(simple("host-empty", b"GET /echo HTTP/1.1\r\nHost:\r\n\r\n"))
+    c.append(simple("host-http10-none", b"GET /echo HTTP/1.0\r\n\r\n"))
+    c.append(simple("host-all-ok", b"GET /echo HTTP/1.1\r\nHost: aZ09-._~!$&'()*+,;=%:[]\r\n\r\n"))
+    c.append(simple("host-v6-port", b"GET /echo HTTP/1.1\r\nHost: [::1]:8080\r\n\r\n"))
+    for name, v in [("slash", b"x/y"), ("at", b"user@x"), ("space", b"a b"), ("quote", b'"x"'), ("hash", b"x#y"),
+                    ("question", b"x?y"), ("backslash", b"x\\y"), ("lt", b"<x>"), ("caret", b"x^y"), ("brace", b"{x}"),
+                    ("pipe", b"x|y"), ("backtick", b"x`y"), ("obs-text", b"caf\xc3\xa9")]:
+        c.append(simple("host-bad-" + name, b"GET /echo HTTP/1.1\r\nHost: " + v + b"\r\n\r\n"))
+    c.append(("host-dup-keepalive", [("send", req("GET /health HTTP/1.1", "Host: x")), ("resp",), ("send", req("GET /health HTTP/1.1")), ("resp",)]))
+    c.append(("host-dup-pipelined", [("send", req("GET /health HTTP/1.1", "Host: x") + req("GET /health HTTP/1.1")), ("resp",), ("resp",)]))
+    c.append(simple("host-dup-range-bad", req("GET /echo HTTP/1.1", "Host: x", "Range: items=0-1")))
+    c.append(simple("host-bad-cl-bad", b"GET /echo HTTP/1.1\r\nHost: x/y\r\nContent-Length: +1\r\n\r\nx"))
+    c.append(simple("host-dup-expect", req("POST /echo HTTP/1.1", "Host: x", "Content-Length: 4", "Expect: 100-continue")))
+    c.append(simple("host-dup-websocket", req("GET /echo HTTP/1.1", "Host: y", "Upgrade: websocket", "Connection: Upgrade",
+                                              "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version: 13")))
+    # cpp-httplib 0.61: an Accept quoted-string is dropped before parsing, a
+    # quoted-pair with it, an unclosed one to the end
+    c.append(simple("accept-quoted-comma", req("GET /echo HTTP/1.1", 'Accept: text/html;x="a,b", application/json')))
+    c.append(simple("accept-quoted-semi", req("GET /echo HTTP/1.1", 'Accept: text/html;x="a;q=7";q=0.5')))
+    c.append(simple("accept-quoted-pair", req("GET /echo HTTP/1.1", 'Accept: text/html;x="a\\",foo", */*')))
+    c.append(simple("accept-quoted-unclosed", req("GET /echo HTTP/1.1", 'Accept: text/html;x="abc, foo')))
+    c.append(simple("accept-quoted-only", req("GET /echo HTTP/1.1", 'Accept: "foo"')))
+    c.append(simple("accept-quoted-bad-after", req("GET /echo HTTP/1.1", 'Accept: text/html;x="y", foo')))
+    c.append(simple("accept-quoted-two-lines", req("GET /echo HTTP/1.1", 'Accept: text/html;x="a', 'Accept: b", foo')))
+    c.append(simple("accept-quoted-mediatype", req("GET /echo HTTP/1.1", 'Accept: te"x,y"xt/html')))
+    # cpp-httplib 0.60: the range unit is case-insensitive, and a suffix
+    # longer than the representation selects all of it
+    c.append(simple("range-unit-upper", req("GET /status?code=206&body=0123456789 HTTP/1.1", "Range: BYTES=2-5")))
+    c.append(simple("range-unit-mixed", req("GET /status?code=206&body=0123456789 HTTP/1.1", "Range: Bytes=-3")))
+    c.append(simple("range-unit-alt", req("GET /status?code=206&body=0123456789&ct=text/x HTTP/1.1", "Range: bYtEs=0-1,7-")))
+    c.append(simple("range-unit-short", req("GET /status?code=206&body=0123456789 HTTP/1.1", "Range: BYTES=")))
+    c.append(simple("range-suffix-long", req("GET /status?code=206&body=0123456789 HTTP/1.1", "Range: bytes=-20")))
+    c.append(simple("range-suffix-exact", req("GET /status?code=206&body=0123456789 HTTP/1.1", "Range: bytes=-10")))
+    c.append(simple("range-suffix-11", req("GET /status?code=206&body=0123456789 HTTP/1.1", "Range: bytes=-11")))
+    c.append(simple("range-suffix-zero", req("GET /status?code=206&body=0123456789 HTTP/1.1", "Range: bytes=-0")))
+    c.append(simple("range-suffix-long-multi", req("GET /status?code=206&body=0123456789&ct=text/x HTTP/1.1", "Range: bytes=-99, 0-1")))
+    c.append(simple("range-suffix-long-200", req("GET /echo HTTP/1.1", "Range: bytes=-100000")))
+    c.append(simple("range-suffix-huge", req("GET /status?code=206&body=0123456789 HTTP/1.1", "Range: bytes=-99999999999999999999")))
     return c
 
 
@@ -475,6 +522,9 @@ def key_cases():
     c.append(simple("post-nokey-body", post("/echo", b"secret")))
     c.append(("keepalive-401", [("send", req("GET /echo HTTP/1.1")), ("resp",), ("send", req("GET /health HTTP/1.1")), ("resp",)]))
     c.append(simple("stream-key", req("GET /stream HTTP/1.1", "Authorization: Bearer k2")))
+    # cpp-httplib 0.60: a duplicate Host is refused before the middleware
+    c.append(simple("host-dup-nokey", req("GET /echo HTTP/1.1", "Host: x")))
+    c.append(simple("host-bad-key", b"GET /echo HTTP/1.1\r\nHost: a/b\r\nAuthorization: Bearer k2\r\n\r\n"))
     return c
 
 

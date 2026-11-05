@@ -22,11 +22,15 @@
 #
 # What it cannot see
 # ------------------
-# Ops whose host code is not ported yet: the port's `supports_op` refuses
-# them, the test reports "not supported", and the gate counts them rather
-# than failing. `PORTED_ONLY=0` (the default) prints that count; the gate is
-# complete only when it reaches zero. And the multi-device paths, which need
-# a second device.
+# The multi-device paths, which need a second device.
+#
+# Until the swap, ops whose host code was not ported yet were refused by the
+# port's `supports_op` and counted ("not ported yet"), not failed. Since the
+# swap (Decision 48) `supports_op` is the C's predicate alone, so the port
+# refusing what the reference accepts is a regression -- the op silently
+# leaves the GPU -- and since v0.7.0 it fails the gate: a `supports_op` that
+# put UNARY back to contiguous-only passed it, 6 refusals counted, at the
+# v0.7.0 GB10 pickup.
 #
 # Usage: scripts/cuda-ops-diff [test-backend-ops args, e.g. -o SCALE]
 # Requires: zig build reference cuda-ref --release=fast --prefix zig-out/cuda-port
@@ -89,7 +93,9 @@ echo "  ${passed:-0/0 tests passed}, bit-identical; $nsupp cases not supported b
 bit=$(sed -nE 's/^cuda_ops_diff: .* differing in ([0-9]+) cases.*/\1/p' "$tmp/out.log")
 bit=${bit:-1}
 sup=$(grep -cE '^SUPPORTS' "$tmp/out.log")
-if [ "$rc" -ne 0 ] || [ "$bit" -ne 0 ] || [ "$sup" -ne 0 ]; then
+unported=$(grep -cE '^UNPORTED' "$tmp/out.log")
+[ "$unported" -ne 0 ] && grep -E '^UNPORTED' "$tmp/out.log" | sort | uniq -c | head -10
+if [ "$rc" -ne 0 ] || [ "$bit" -ne 0 ] || [ "$sup" -ne 0 ] || [ "$unported" -ne 0 ]; then
     [ "$rc" -ne 0 ] && { echo "test-backend-ops exited $rc"; grep -E 'CUDA kernel|CUDA error|GGML_ASSERT|FAIL|Assert|error' "$tmp/out.log" | head -10; }
     echo "FAIL: the ported CUDA backend differs from the reference"
     exit 1

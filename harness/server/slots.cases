@@ -45,3 +45,24 @@ GET /slots
 POST /slots/0?action=save {"filename": "s0.bin"}
 POST /props {}
 GET /metrics
+
+# v0.7.0 (#30567): with no slot named, an empty slot is taken before the
+# least recently used one; children of an n_cmpl request save the states
+# they overwrite to the prompt cache. --slot-save-path from its environment
+# variable (#30272)
+!env LLAMA_ARG_SLOT_SAVE_PATH=./
+!server -m $QWEN3 -c 2048 -np 3 --no-jinja --slot-prompt-similarity 0 -lv 4
+!fulllog
+POST /completion {"prompt": "Alpha beta gamma", "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": "One two three", "n_predict": 2, "temperature": 0}
+GET /slots
+POST /completion {"prompt": "Red green blue", "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": "North south east", "n_predict": 2, "temperature": 0}
+GET /slots
+POST /slots/1?action=erase
+POST /completion {"prompt": "Monday Tuesday", "n_predict": 2, "temperature": 0}
+GET /slots
+POST /completion {"prompt": "Once upon a time", "n_predict": 4, "temperature": 0, "n_cmpl": 3}
+GET /slots
+POST /slots/0?action=save {"filename": "env.bin"}
+!noenv

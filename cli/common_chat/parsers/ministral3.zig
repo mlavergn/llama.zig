@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/ministral3.cpp` (llama.cpp v0.6.0,
-//! `d81235049`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/ministral3.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -72,21 +72,21 @@ const Build = struct {
         return b.plus(generation_prompt, try b.shl(reasoning, try p.content(try b.rest())));
     }
 
-    fn tool(self: *Build, t: *Value) Error!void {
+    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
         const function = t.at("function") catch |e| return util.fromJson(e);
         const name = try parsers.functionName(t);
         const schema = try msg_mod.toolParameters(self.a, function);
-        const rule = self.buildTool(name, &schema) catch |e| return util.fromPeg(e);
+        const rule = self.buildTool(tool_index, name, &schema) catch |e| return util.fromPeg(e);
         self.cb.b.orAssign(&self.tool_choice, rule) catch |e| return util.fromPeg(e);
     }
 
-    fn buildTool(self: *Build, name: []const u8, schema: *const Value) chat_peg.Error!ParserId {
+    fn buildTool(self: *Build, tool_index: usize, name: []const u8, schema: *const Value) chat_peg.Error!ParserId {
         const p = self.cb;
         const b = &p.b;
         const open = try p.toolOpen(try b.plusLit(try p.toolName(try b.literal(name)), "[ARGS]"));
-        const schema_name = try std.mem.concat(self.a, u8, &.{ "tool-", name, "-schema" });
+        const schema_name = try parsers.indexName(self.a, "tool-", tool_index, "-schema");
         const body = try b.plus(open, try p.toolArgs(try b.schemaJson(try b.json(), schema_name, schema, false)));
-        return b.rule(try std.mem.concat(self.a, u8, &.{ "tool-", name }), body, false);
+        return b.rule(try parsers.indexName(self.a, "tool-", tool_index, ""), body, false);
     }
 };
 
@@ -146,7 +146,7 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
     return adjusted_messages;
 }
 
-/// Ports `common_chat_params_init_ministral_3` (parsers/ministral3.cpp:3 @d81235049).
+/// Ports `common_chat_params_init_ministral_3` (parsers/ministral3.cpp:3 @620d2225c).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -177,7 +177,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
             try gp.appendSlice(a, try m.renderContent(a, "\n\n"));
         }
         data.generation_prompt = gp.items;
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     var build: Build = .{
@@ -187,14 +187,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
-    var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-
-    data.parser = try parsers.save(a, &arena);
+    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    const arena = &data.parser.?;
 
     if (build.include_grammar) {
         data.grammar_lazy = has_tools and inputs.tool_choice == .auto;
-        data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
+        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, "[TOOL_CALLS]");
     }
 

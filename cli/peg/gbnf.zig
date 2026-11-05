@@ -8,7 +8,7 @@
 //! Ports `common_peg_arena::build_grammar`, `collect_reachable_rules` and the
 //! GBNF helpers `gbnf_escape_char_class`, `gbnf_char_class`,
 //! `gbnf_ac_grammar`, `gbnf_excluding_grammar` and `gbnf_including_grammar`
-//! from `llama.cpp/common/peg-parser.cpp` (llama.cpp v0.6.0, `d81235049`).
+//! from `llama.cpp/common/peg-parser.cpp` (llama.cpp v0.7.0, `620d2225c`).
 //! Each declaration names what it ports and the line it began at.
 //!
 //! The rules go to the builder in the rule map's iteration order -- libc++'s
@@ -32,7 +32,7 @@ const trie = json.trie;
 /// The JSON schema converter's builder, which the grammar is written to.
 pub const GrammarBuilder = s2g.GrammarBuilder;
 
-/// Ports `gbnf_escape_char_class` (peg-parser.cpp:1389 @d81235049).
+/// Ports `gbnf_escape_char_class` (peg-parser.cpp:1389 @620d2225c).
 fn escapeCharClass(out: *std.ArrayList(u8), a: Allocator, c: u32) Error!void {
     if (c == '-' or c == ']' or c == '[' or c == '\\') return out.appendSlice(a, &.{ '\\', @intCast(c) });
     if (c == '\n') return out.appendSlice(a, "\\n");
@@ -44,7 +44,7 @@ fn escapeCharClass(out: *std.ArrayList(u8), a: Allocator, c: u32) Error!void {
     return out.print(a, "\\U{X:0>8}", .{c});
 }
 
-/// Ports `gbnf_char_class` (peg-parser.cpp:1439 @d81235049).
+/// Ports `gbnf_char_class` (peg-parser.cpp:1439 @620d2225c).
 fn charClass(a: Allocator, chars: []const u32, negate: bool) Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     try out.appendSlice(a, if (negate) "[^" else "[");
@@ -58,9 +58,9 @@ const Bucket = struct { dest: usize, chars: std.ArrayList(u32) };
 
 const Mode = enum { excluding, including };
 
-/// Ports `gbnf_ac_grammar` (peg-parser.cpp:1447 @d81235049), with the two
-/// rule bodies of `gbnf_excluding_grammar` (peg-parser.cpp:1502 @d81235049)
-/// and `gbnf_including_grammar` (peg-parser.cpp:1524 @d81235049) chosen by
+/// Ports `gbnf_ac_grammar` (peg-parser.cpp:1447 @620d2225c), with the two
+/// rule bodies of `gbnf_excluding_grammar` (peg-parser.cpp:1502 @620d2225c)
+/// and `gbnf_including_grammar` (peg-parser.cpp:1524 @620d2225c) chosen by
 /// `mode`: one rule per non-matching state of the automaton over
 /// `strings`.
 ///
@@ -125,7 +125,7 @@ fn acGrammar(a: Allocator, builder: *GrammarBuilder, prefix: []const u8, strings
     return S.name(a, prefix, 0);
 }
 
-/// Ports `collect_reachable_rules` (peg-parser.cpp:1545 @d81235049): the
+/// Ports `collect_reachable_rules` (peg-parser.cpp:1545 @620d2225c): the
 /// names of every rule reachable from `rule`, references followed.
 fn collectReachableRules(a: Allocator, arena: *const Arena, rule: ParserId, reachable: *std.StringHashMapUnmanaged(void)) Error!void {
     var visited: std.StringHashMapUnmanaged(void) = .empty;
@@ -262,7 +262,7 @@ fn lessBytes(_: void, x: []const u8, y: []const u8) bool {
     return std.mem.order(u8, x, y) == .lt;
 }
 
-/// Ports `build_grammar` (peg-parser.cpp:1606 @d81235049), a member of
+/// Ports `build_grammar` (peg-parser.cpp:1606 @620d2225c), a member of
 /// `common_peg_arena`: every reachable rule, then `root` -- the root parser,
 /// or, lazily, the trigger rules as alternatives.
 ///

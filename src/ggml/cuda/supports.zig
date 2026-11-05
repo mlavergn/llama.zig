@@ -2,12 +2,12 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.6.0
-//! (`d81235049`): `ggml_backend_cuda_device_supports_op`, the CUDA arms
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.7.0
+//! (`620d2225c`): `ggml_backend_cuda_device_supports_op`, the CUDA arms
 //! (the `GGML_USE_MUSA` exclusions compile out; `GGML_CUDA_USE_CUB` is
-//! defined, so `TOP_K` and `ARGSORT` are unconditional; `TOP_K` gained its
-//! own `#if` at v0.4.0, whose `GGML_CUDA_USE_CUB` arm is still `true`;
-//! v0.6.0's shared-memory bound on `ARGSORT` is the bitonic-only arm).
+//! defined, so `ARGSORT` takes its CUB arm -- v0.6.0's shared-memory bound
+//! is the bitonic-only one -- and since v0.7.0 both it and `TOP_K`, which
+//! lost its `#if`, accept any row of at most `INT_MAX` elements).
 //! v0.6.0 also dropped the `GGML_USE_MUSA` exclusion on
 //! `GATED_DELTA_NET`, which was already `true` here.
 //!
@@ -36,7 +36,11 @@ fn src(op: *const Tensor, i: usize) *const Tensor {
 
 /// `ggml_cuda_lightning_indexer_supported`; see `lightning_indexer.zig`.
 const lightningIndexerSupported = lightning_indexer.supported;
-/// Ports `ggml_backend_cuda_device_supports_op` (ggml-cuda.cu:5252 @d81235049).
+/// Ports `ggml_backend_cuda_device_supports_op` (ggml-cuda.cu:5419 @620d2225c).
+/// v0.7.0: `UNARY` takes any strides for F16, F32 and BF16 (the kernels
+/// index by stride now), `CLAMP` and `ROLL` take non-contiguous views,
+/// `SWIGLU_OAI` refuses F16, and `TOP_K`/`ARGSORT` are bounded by
+/// `INT_MAX` columns.
 pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
     const dev_ctx = backend.deviceCtx(dev);
 
@@ -76,9 +80,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
             c.GGML_UNARY_OP_TRUNC,
             => {
                 if (src(op, 0).type == c.GGML_TYPE_BF16 and c.ggml_get_unary_op(op) == c.GGML_UNARY_OP_XIELU) return false;
-                // TODO: should become:
-                //return ggml_is_contiguous_rows(op->src[0]);
-                return c.ggml_is_contiguous(src(op, 0));
+                return src(op, 0).type == c.GGML_TYPE_F16 or src(op, 0).type == c.GGML_TYPE_F32 or src(op, 0).type == c.GGML_TYPE_BF16;
             },
             else => return false,
         },
@@ -96,6 +98,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
                 {
                     return false;
                 }
+                if (src(op, 0).type == c.GGML_TYPE_F16 and c.ggml_get_glu_op(op) == c.GGML_GLU_OP_SWIGLU_OAI) return false;
                 return c.ggml_is_contiguous_1(src(op, 0));
             },
             else => return false,
@@ -249,10 +252,10 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
         c.GGML_OP_SQRT,
         c.GGML_OP_SIN,
         c.GGML_OP_COS,
-        c.GGML_OP_CLAMP,
         c.GGML_OP_LOG,
         => return true,
         c.GGML_OP_SCALE => return (src(op, 0).type == c.GGML_TYPE_F32 or src(op, 0).type == c.GGML_TYPE_BF16) and op.type == src(op, 0).type,
+        c.GGML_OP_CLAMP => return c.ggml_is_contiguous_rows(src(op, 0)),
         c.GGML_OP_ADD, c.GGML_OP_SUB, c.GGML_OP_MUL, c.GGML_OP_DIV => {
             if (src(op, 0).type == c.GGML_TYPE_BF16 or src(op, 1).type == c.GGML_TYPE_BF16 or op.type == c.GGML_TYPE_BF16) {
                 return src(op, 0).type == c.GGML_TYPE_BF16 and op.type == c.GGML_TYPE_BF16 and
@@ -281,7 +284,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
         c.GGML_OP_SSM_CONV => return @mod(src(op, 0).ne[1], 128) == 0,
         c.GGML_OP_CONT, c.GGML_OP_DIAG_MASK_INF, c.GGML_OP_SOFT_MAX => return true,
         c.GGML_OP_SOFT_MAX_BACK => return impl.getOpParamsF32(op, 1) == 0.0,
-        c.GGML_OP_ROLL => return src(op, 0).type == c.GGML_TYPE_F32 and c.ggml_is_contiguous(src(op, 0)),
+        c.GGML_OP_ROLL => return src(op, 0).type == c.GGML_TYPE_F32,
         c.GGML_OP_ROPE, c.GGML_OP_ROPE_BACK => return src(op, 0).nb[0] == c.ggml_type_size(src(op, 0).type) and c.ggml_is_contiguous_2(src(op, 0)),
         c.GGML_OP_IM2COL, c.GGML_OP_IM2COL_3D, c.GGML_OP_CONV_2D => return c.ggml_is_contiguous(src(op, 0)) and c.ggml_is_contiguous(src(op, 1)),
         c.GGML_OP_CONV_3D => return (src(op, 0).type == c.GGML_TYPE_F16 or src(op, 0).type == c.GGML_TYPE_F32) and
@@ -292,7 +295,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
         c.GGML_OP_CONV_TRANSPOSE_2D, c.GGML_OP_POOL_1D, c.GGML_OP_POOL_2D => return true,
         c.GGML_OP_ACC => return c.ggml_is_contiguous(src(op, 0)) and c.ggml_is_contiguous(src(op, 1)),
         c.GGML_OP_SUM => return c.ggml_is_contiguous_rows(src(op, 0)),
-        c.GGML_OP_TOP_K, c.GGML_OP_ARGSORT => return true,
+        c.GGML_OP_TOP_K, c.GGML_OP_ARGSORT => return src(op, 0).ne[0] <= std.math.maxInt(c_int),
         c.GGML_OP_SUM_ROWS => return src(op, 0).type == c.GGML_TYPE_F32 and op.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous_rows(src(op, 0)),
         c.GGML_OP_MEAN => return src(op, 0).type == c.GGML_TYPE_F32 and op.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous_rows(src(op, 0)),
         c.GGML_OP_GROUP_NORM => return c.ggml_is_contiguous(src(op, 0)),

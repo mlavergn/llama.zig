@@ -17,6 +17,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 static struct ggml_context * ctx;
 
@@ -46,6 +48,40 @@ static void dump(const char * label, const struct ggml_tensor * t) {
 }
 
 #define D(expr) dump(#expr, (expr))
+
+/* Runs `fn` in a forked child and reports whether it aborted: the C's
+ * GGML_ASSERTs are part of what a constructor does, and an assertion the port
+ * dropped would let it build a node the C refuses. */
+static void dies(const char * label, void (*fn)(void)) {
+    fflush(stdout);
+    pid_t pid = fork();
+    if (pid == 0) {
+        freopen("/dev/null", "w", stderr);
+        fn();
+        _exit(0);
+    }
+    int st = 0;
+    waitpid(pid, &st, 0);
+    printf("%-28s %s\n", label, WIFSIGNALED(st) ? "aborted" : "returned");
+}
+
+/* v0.7.0 (#30135): a negative offset passed through `size_t` used to wrap
+ * into an out-of-bounds `int32_t` slot; `ggml_acc_impl` now asserts it. */
+static void acc_negative_offset(void) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4);
+    struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 8);
+    ggml_acc(ctx, a, b, 32, 128, 128, (size_t) -4);
+}
+static void acc_offset_limit(void) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4);
+    struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 8);
+    ggml_acc(ctx, a, b, 32, 128, 128, (size_t) 1 << 30);
+}
+static void acc_offset_below_limit(void) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4);
+    struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 8);
+    ggml_acc_inplace(ctx, a, b, 32, 128, 128, ((size_t) 1 << 30) - 4);
+}
 
 int main(void) {
     struct ggml_init_params p = { 256u * 1024u * 1024u, NULL, true /*no_alloc*/ };
@@ -77,6 +113,9 @@ int main(void) {
     D(ggml_add_inplace(ctx, a2, b2));
     D(ggml_add1(ctx, a2, scal));
     D(ggml_acc(ctx, a2, vec, 32, 64, 96, 16));
+    dies("ggml_acc offset -4", acc_negative_offset);
+    dies("ggml_acc offset 1<<30", acc_offset_limit);
+    dies("ggml_acc offset (1<<30)-4", acc_offset_below_limit);
     D(ggml_sub(ctx, a2, b2));
     D(ggml_mul(ctx, a2, b2));
     D(ggml_div(ctx, a2, b2));
@@ -214,6 +253,14 @@ int main(void) {
         D(ggml_im2col(ctx, k2, im, 2, 2, 1, 1, 1, 1, true, GGML_TYPE_F16));
         D(ggml_conv_1d(ctx, k1, sg, 1, 1, 1));
         D(ggml_conv_1d_ph(ctx, k1, sg, 1, 1));
+        /* batched (v0.7.0, #28738): the matmul's rows are [OC, N, OL] and a
+         * permute plus a cont bring them to [N, OC, OL]; the permute's
+         * strides are what a wrong axis order would change */
+        struct ggml_tensor * sg3 = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 32, 4, 3);
+        D(ggml_conv_1d(ctx, k1, sg3, 1, 1, 1));
+        D(ggml_conv_1d(ctx, k1, sg3, 2, 0, 1)->src[0]);
+        D(ggml_conv_1d(ctx, k1, sg3, 1, 2, 2)->src[0]->src[0]);
+        D(ggml_conv_1d_ph(ctx, k1, sg3, 1, 1));
         /* depthwise: one kernel per channel, so ne[1] must be 1 */
         struct ggml_tensor * k1dw = ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 3, 1, 4);
         D(ggml_conv_1d_dw(ctx, k1dw, sg, 1, 1, 1));

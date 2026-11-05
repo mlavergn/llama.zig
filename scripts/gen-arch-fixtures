@@ -26,7 +26,17 @@
 # `harness/arch_fixtures_draft.cpp` writes them, with a Gemma-style DFlash
 # and a Qwen3.5 whose full-attention projections are fused (since v0.5.0),
 # and clef, which the recipe skips and the user-data path cannot build, and a
-# ModernBERT decision model (since v0.6.0).
+# ModernBERT decision model (since v0.6.0), and vllm-decision2 and an LFM2
+# decision model (since v0.7.0).
+#
+# Since v0.7.0 the architectures with an MTP (NextN) head also get a fixture
+# with one NextN block, `--variant mtp`, in `<out-dir>/mtp/`: the C++ loads a
+# file holding NextN tensors only with `load_mtp`, which `arch-model-diff`
+# never sets, so `scripts/mtp-diff` runs them. DeepSeek V4 and MiMo-2 have
+# none (see `harness/arch_fixtures_extra.cpp`). The closing count includes
+# them. And `--variant gdnrep2` gives the Qwen3.5 and Qwen3-Next families two
+# value heads per key head, the only shape in which prism.hadamard permutes
+# the gated delta net's value heads (`context-diff --hadamard` on them).
 #
 # Usage: scripts/gen-arch-fixtures [out-dir] [seed]
 #   Default out-dir zig-out/arch-fixtures, seed 42.
@@ -82,7 +92,7 @@ if [ "$rc" -ne 0 ] || [ "$n" -eq 0 ]; then
 fi
 # The architectures `-o` skipped, and the four its loops skip silently.
 extra=$( { grep 'unsupported, skipping' "$tmp/run.log" | sed 's/^save_models: \([^ ]*\) model.*/\1/'; printf '%s\n' gemma4 gemma4-assistant; } \
-         | grep -v -x -e clip -e gptj -e graniteswitch -e eagle3 -e dflash -e clef | sort -u )
+         | grep -v -x -e clip -e gptj -e graniteswitch -e eagle3 -e dflash -e clef -e vllm-decision2 | sort -u )
 : > "$tmp/extra.log"
 for a in $extra; do
     # One process each: the C++ asserts on some, and an abort ends the process.
@@ -105,8 +115,30 @@ done
 for a in glm5-next qwen4exp; do
     "$tmp/extra" "$OUT" "$SEED" --variant topk8 "$a" >> "$tmp/extra.log" 2>&1 \
         || [ "$?" -le 1 ] || echo "failed $a (topk8): the C++ aborted" >> "$tmp/extra.log"
+    # With a NextN block, for the MTP graphs (see arch_fixtures_extra.cpp),
+    # in mtp/: the C++ loads them only with load_mtp, which
+    # scripts/arch-model-diff does not set; scripts/mtp-diff runs them.
+    mkdir -p "$OUT/mtp"
+    for v in mtp mtptopk8; do
+        "$tmp/extra" "$OUT/mtp" "$SEED" --variant $v "$a" >> "$tmp/extra.log" 2>&1 \
+            || [ "$?" -le 1 ] || echo "failed $a ($v): the C++ aborted" >> "$tmp/extra.log"
+    done
 done
-# Granite-Switch, eagle3, DFlash and clef, which the recipe cannot build at all:
+# The other architectures with an MTP head, with a NextN block, in mtp/ too
+# (see arch_fixtures_extra.cpp).
+for a in qwen35 qwen35moe qwen3next deepseek2 deepseek32 glm-dsa glm4moe bailingmoe3 cohere2moe hy_v3 step35 nemotron_h_moe; do
+    "$tmp/extra" "$OUT/mtp" "$SEED" --variant mtp "$a" >> "$tmp/extra.log" 2>&1 \
+        || [ "$?" -le 1 ] || echo "failed $a (mtp): the C++ aborted" >> "$tmp/extra.log"
+done
+# The gated delta nets with two value heads per key head (see arch_fixtures_extra.cpp).
+for a in qwen35 qwen35moe qwen3next; do
+    "$tmp/extra" "$OUT" "$SEED" --variant gdnrep2 "$a" >> "$tmp/extra.log" 2>&1 \
+        || [ "$?" -le 1 ] || echo "failed $a (gdnrep2): the C++ aborted" >> "$tmp/extra.log"
+done
+# K2 Horizon's single value expert, softmax routing, no output gate (see arch_fixtures_extra.cpp).
+"$tmp/extra" "$OUT" "$SEED" --variant mova1 k2-horizon >> "$tmp/extra.log" 2>&1 \
+    || [ "$?" -le 1 ] || echo "failed k2-horizon (mova1): the C++ aborted" >> "$tmp/extra.log"
+# Granite-Switch, eagle3, DFlash, clef and vllm-decision2, which the recipe cannot build at all:
 # see the header of harness/arch_fixtures_draft.cpp.
 "$tmp/draft" "$OUT" "$SEED" >> "$tmp/extra.log" 2>&1 \
     || echo "failed arch_fixtures_draft: exit $?" >> "$tmp/extra.log"

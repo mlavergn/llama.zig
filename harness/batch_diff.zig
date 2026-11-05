@@ -57,6 +57,7 @@ const RefUbatch = extern struct {
     n_pos: u32 = 0,
     token: [*c]c.llama_token = null,
     embd: [*c]f32 = null,
+    embd_state: [*c]f32 = null,
     pos: [*c]c.llama_pos = null,
     n_seq_id: [*c]i32 = null,
     seq_id: [*c][*c]c.llama_seq_id = null,
@@ -72,6 +73,8 @@ const RefExtToken = extern struct {
     id: c.llama_token,
     has_embd: i32,
     embd_off: u64,
+    has_state: i32,
+    state_off: u64,
     output: i32,
     decision_order: i32,
     pos: [4]c.llama_pos,
@@ -93,6 +96,9 @@ extern fn ref_compat_init(b: *RefExt, batch: *const c.llama_batch, n_embd_row: u
 extern fn ref_ext_set_decision_order(b: *RefExt, idx: i32, order: i32) c_int;
 extern fn ref_ext_n_tokens(b: *const RefExt) usize;
 extern fn ref_ext_n_embd(b: *const RefExt) usize;
+extern fn ref_ext_set_n_embd_state(b: *RefExt, n: usize) void;
+extern fn ref_ext_n_embd_state(b: *const RefExt) usize;
+extern fn ref_ext_state(b: *const RefExt, data: *[*c]const f32) usize;
 extern fn ref_ext_embd(b: *const RefExt, data: *[*c]const f32) usize;
 extern fn ref_ext_token(b: *const RefExt, i: usize, out: *RefExtToken) void;
 extern fn ref_ubatch_batch_idxs(u: *const RefUbatch, idxs: *[*c]const i32) usize;
@@ -243,6 +249,10 @@ const Input = struct {
     n_seq_max: u32,
     output_all: bool,
     use_memory: bool,
+    /// v0.7.0: a token batch that carries an embedding beside each token,
+    /// for a context that takes it as a state embedding (`llama_batch`'s
+    /// legacy MTP hook batches): the extended batch's `n_embd_state`.
+    n_embd_state: u32 = 0,
 };
 
 /// A batch under construction, its arrays in an arena.
@@ -329,7 +339,11 @@ const Gen = struct {
         const n_seq_max: i32 = self.pick(i32, &.{ 1, 1, 2, 3, 4, 8 });
         const n_tokens_max: usize = if (self.chance(15)) 1 + self.below(6) else 64;
         const use_memory = self.chance(60);
-        const e = Exts.create(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, use_memory, @intCast(self.n_vocab), n_pos);
+        // v0.7.0: a context that takes state embeddings (MTP, LiliCorr),
+        // and then mostly every entry given one, sometimes some
+        const n_embd_state: usize = if (self.chance(40)) 1 + self.below(6) else 0;
+        const state_all = n_embd_state > 0 and self.chance(70);
+        const e = Exts.create(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, use_memory, @intCast(self.n_vocab), n_pos, n_embd_state);
 
         var next: [8]c.llama_pos = @splat(0);
         if (use_memory) {
@@ -393,7 +407,12 @@ const Gen = struct {
                 }
             }
             if (self.chance(20)) setDecisionOrder(e, if (self.chance(10)) -1 else idx, @intCast(self.below(5)));
-            if (self.chance(5)) _ = both(e, "llama_batch_ext_set_embd_state", .{ idx, self.embdArg(n_embd_inp, n_embd_inp) }, ref_log, port_log);
+            if ((state_all and !self.chance(4)) or self.chance(10)) {
+                const w = if (n_embd_state > 0) n_embd_state else n_embd_inp;
+                _ = both(e, "llama_batch_ext_set_embd_state", .{ if (self.chance(5)) @as(i32, 9999) else idx, self.embdArg(w, n_embd_inp) }, ref_log, port_log);
+                // a second state for the entry, which is refused
+                if (self.chance(5)) _ = both(e, "llama_batch_ext_set_embd_state", .{ idx, self.embdArg(w, n_embd_inp) }, ref_log, port_log);
+            }
             if (self.chance(4)) _ = both(e, "llama_batch_ext_set_embd_token", .{ if (self.chance(50)) idx else @as(i32, 9999), self.embdArg(n_embd_inp, n_embd_inp_enc) }, ref_log, port_log);
             if (self.chance(2)) {
                 log_target = ref_log;
@@ -553,11 +572,18 @@ const Gen = struct {
         const n = toks.items.len;
         var b: Builder = .{ .ar = self.ar, .n = n };
 
-        if (embd_input) {
+        // v0.7.0: sometimes a token batch carries an embedding per token
+        // too, the legacy MTP hook batch, read as a state embedding by a
+        // context that takes one and as an embedding otherwise
+        const token_and_embd = !embd_input and n_embd > 0 and self.chance(15);
+        var n_embd_state: u32 = 0;
+        if (embd_input or token_and_embd) {
             const e = self.ar.alloc(f32, n * n_embd) catch unreachable;
             for (e) |*x| x.* = self.r.float(f32) * 2 - 1;
             b.embd = e;
-        } else {
+            if (token_and_embd and self.chance(70)) n_embd_state = n_embd;
+        }
+        if (!embd_input) {
             const t = self.ar.alloc(c.llama_token, n) catch unreachable;
             for (t) |*x| x.* = @intCast(self.below(self.n_vocab));
             b.token = t;
@@ -670,7 +696,7 @@ const Gen = struct {
             }
         }
 
-        return .{ .batch = b.cbatch(), .n_embd = n_embd, .n_seq_max = n_seq_max, .output_all = output_all, .use_memory = use_memory };
+        return .{ .batch = b.cbatch(), .n_embd = n_embd, .n_seq_max = n_seq_max, .output_all = output_all, .use_memory = use_memory, .n_embd_state = n_embd_state };
     }
 };
 
@@ -731,7 +757,7 @@ fn sameArray(comptime T: type, what: []const u8, a: [*c]const T, b: [*c]const T,
     }
 }
 
-fn compareUbatch(what: []const u8, r: *const RefUbatch, p: *const B.Ubatch, n_embd: u32) void {
+fn compareUbatch(what: []const u8, r: *const RefUbatch, p: *const B.Ubatch, n_embd: u32, n_embd_state: u32) void {
     results += 1;
     const before = failures;
     _ = expectInt("b_equal_seqs", r.b_equal_seqs, p.b_equal_seqs);
@@ -748,6 +774,7 @@ fn compareUbatch(what: []const u8, r: *const RefUbatch, p: *const B.Ubatch, n_em
     const n = r.n_tokens;
     if (sameNull("token", r.token, p.token)) sameArray(c.llama_token, "token", r.token, p.token, n);
     if (sameNull("embd", r.embd, p.embd)) sameArray(f32, "embd", r.embd, p.embd, @as(usize, n) * n_embd);
+    if (sameNull("embd_state", r.embd_state, p.embd_state)) sameArray(f32, "embd_state", r.embd_state, p.embd_state, @as(usize, n) * n_embd_state);
     if (sameNull("pos", r.pos, p.pos)) sameArray(c.llama_pos, "pos", r.pos, p.pos, @as(usize, n) * r.n_pos);
     const have_nsid = sameNull("n_seq_id", r.n_seq_id, p.n_seq_id);
     if (have_nsid) sameArray(i32, "n_seq_id", r.n_seq_id, p.n_seq_id, n);
@@ -805,11 +832,14 @@ const Exts = struct {
     ref: *RefExt,
     port: *B.BatchExt,
 
-    fn create(n_tokens_max: usize, n_embd_inp: usize, n_embd_inp_enc: usize, n_seq_max: c.llama_seq_id, use_memory: bool, n_vocab: c.llama_token, n_pos_per_embd: usize) Exts {
-        return .{
+    fn create(n_tokens_max: usize, n_embd_inp: usize, n_embd_inp_enc: usize, n_seq_max: c.llama_seq_id, use_memory: bool, n_vocab: c.llama_token, n_pos_per_embd: usize, n_embd_state: usize) Exts {
+        const self: Exts = .{
             .ref = ref_ext_new(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, @intFromBool(use_memory), n_vocab, n_pos_per_embd),
             .port = B.BatchExt.create(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, if (use_memory) port_memory else null, n_vocab, n_pos_per_embd),
         };
+        ref_ext_set_n_embd_state(self.ref, n_embd_state);
+        self.port.n_embd_state = n_embd_state;
+        return self;
     }
 
     fn destroy(self: Exts) void {
@@ -831,6 +861,10 @@ fn compareExt(what: []const u8, e: Exts) void {
     var rd: [*c]const f32 = null;
     const rn = ref_ext_embd(e.ref, &rd);
     if (expectInt("ext embd size", @intCast(rn), @intCast(e.port.embd.items.len))) sameArray(f32, "ext embd", rd, e.port.embd.items.ptr, rn);
+    _ = expectInt("ext n_embd_state", @intCast(ref_ext_n_embd_state(e.ref)), @intCast(e.port.n_embd_state));
+    var rs: [*c]const f32 = null;
+    const rsn = ref_ext_state(e.ref, &rs);
+    if (expectInt("ext state size", @intCast(rsn), @intCast(e.port.state.items.len))) sameArray(f32, "ext state", rs, e.port.state.items.ptr, rsn);
     var order: [B.max_seq + 8]c.llama_seq_id = undefined;
     for (0..n) |i| {
         var rt: RefExtToken = undefined;
@@ -839,6 +873,8 @@ fn compareExt(what: []const u8, e: Exts) void {
         if (!expectInt("ext id", rt.id, pt.id)) break;
         if (!expectInt("ext has_embd", rt.has_embd, @intFromBool(pt.has_embd))) break;
         if (!expectInt("ext embd_off", rt.embd_off, pt.embd_off)) break;
+        if (!expectInt("ext has_state", rt.has_state, @intFromBool(pt.has_state))) break;
+        if (!expectInt("ext state_off", rt.state_off, pt.state_off)) break;
         if (!expectInt("ext output", rt.output, @intFromBool(pt.output))) break;
         if (!expectInt("ext decision_order", rt.decision_order, pt.decision_order)) break;
         sameArray(c.llama_pos, "ext pos", &rt.pos, &pt.pos, 4);
@@ -928,7 +964,7 @@ fn runSplit(ra: *anyopaque, pa: *B.BatchAllocr, sp: Split, n_embd: u32, ref_log:
             .equal => |e| std.fmt.bufPrint(&name_buf, "split_equal({d}, {}, {d}) #{d}", .{ e.n_ubatch, e.sequential, e.n_keep_tail, i }),
             .seq => |n| std.fmt.bufPrint(&name_buf, "split_seq({d}) #{d}", .{ n, i }),
         } catch "split";
-        compareUbatch(name, r, p, n_embd);
+        compareUbatch(name, r, p, n_embd, pa.n_embd_state);
         ref_ubatch_free(r);
         p.release();
     }
@@ -943,7 +979,7 @@ fn runReserve(ra: *anyopaque, pa: *B.BatchAllocr, n_seq_tokens: u32, n_seqs: u32
     var p = pa.ubatchReserve(n_seq_tokens, n_seqs);
     log_target = null;
     var name_buf: [64]u8 = undefined;
-    compareUbatch(std.fmt.bufPrint(&name_buf, "ubatch_reserve({d}, {d})", .{ n_seq_tokens, n_seqs }) catch "ubatch_reserve", &r, &p, 0);
+    compareUbatch(std.fmt.bufPrint(&name_buf, "ubatch_reserve({d}, {d})", .{ n_seq_tokens, n_seqs }) catch "ubatch_reserve", &r, &p, 0, 0);
     ref_ubatch_free(&r);
     p.release();
     compareState(ra, pa);
@@ -960,7 +996,7 @@ const Vocabs = struct {
 /// Builds each side's extended batch from `in.batch` through
 /// `llama_batch_compat::init` and runs `runExt` on them.
 fn runBatch(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, in: Input, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) void {
-    const e = Exts.create(1 << 24, in.n_embd, in.n_embd, @intCast(in.n_seq_max), in.use_memory, @intCast(v.port.nTokens()), pa.n_pos_per_embd);
+    const e = Exts.create(1 << 24, in.n_embd, in.n_embd, @intCast(in.n_seq_max), in.use_memory, @intCast(v.port.nTokens()), pa.n_pos_per_embd, in.n_embd_state);
     defer e.destroy();
     log_target = ref_log;
     ref_compat_init(e.ref, &in.batch, 0);
@@ -989,6 +1025,7 @@ fn runExt(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, e: Exts, outpu
     tally.accepted += 1;
     if (pa.is_embd_vec.items.len != 0) tally.mixed += 1;
     if (pa.decision_order.items.len != 0) tally.decision += 1;
+    if (pa.state_vec.items.len != 0) tally.state += 1;
     if (pa.n_pos_per_embd > 1 and pa.batch.embd != null) tally.mrope_embd += 1;
     compareSanitized(ra, pa, pa.n_pos_per_embd);
     const n_embd = pa.n_embd;
@@ -1020,7 +1057,7 @@ fn runExt(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, e: Exts, outpu
             var rr: RefUbatch = .{};
             ref_split_simple(ra, 2, &rr);
             var pp = pa.splitSimple(2);
-            compareUbatch("split_simple(2) before split_equal", &rr, &pp, n_embd);
+            compareUbatch("split_simple(2) before split_equal", &rr, &pp, n_embd, pa.n_embd_state);
             ref_ubatch_free(&rr);
             pp.release();
             runSplit(ra, pa, .{ .equal = .{ .n_ubatch = 3, .sequential = false, .n_keep_tail = 0 } }, n_embd, ref_log, port_log, false);
@@ -1028,7 +1065,7 @@ fn runExt(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, e: Exts, outpu
     }
 }
 
-const Tally = struct { accepted: usize = 0, rejected: usize = 0, sessions: usize = 0, endless: usize = 0, ext_calls: usize = 0, mixed: usize = 0, decision: usize = 0, mrope_embd: usize = 0 };
+const Tally = struct { accepted: usize = 0, rejected: usize = 0, sessions: usize = 0, endless: usize = 0, ext_calls: usize = 0, mixed: usize = 0, decision: usize = 0, mrope_embd: usize = 0, state: usize = 0 };
 var tally: Tally = .{};
 
 /// One allocator per side, several batches through it, then a reserve and
@@ -1222,7 +1259,7 @@ fn abortsInChild(body: *const fn (side: c_int) void, side: c_int) bool {
 }
 
 fn abortExts(b: *const c.llama_batch) Exts {
-    const e = Exts.create(1 << 24, 0, 0, 1, false, @intCast(abort_vocab.port.nTokens()), 1);
+    const e = Exts.create(1 << 24, 0, 0, 1, false, @intCast(abort_vocab.port.nTokens()), 1, 0);
     ref_compat_init(e.ref, b, 0);
     B.compatInit(e.port, b.*, 0);
     return e;
@@ -1379,7 +1416,7 @@ pub fn main(init: std.process.Init) !void {
     _ = unsetenv("LLAMA_BATCH_DEBUG");
 
     std.debug.print("  {d} sessions, {d} batches accepted, {d} rejected; {d} endless split_equal runs agreed to their cap; {d} llama_batch_ext calls\n", .{ tally.sessions, tally.accepted, tally.rejected, tally.endless, tally.ext_calls });
-    std.debug.print("  accepted: {d} mixed token/embedding batches, {d} with decision orders, {d} M-RoPE embedding batches\n", .{ tally.mixed, tally.decision, tally.mrope_embd });
+    std.debug.print("  accepted: {d} mixed token/embedding batches, {d} with decision orders, {d} M-RoPE embedding batches, {d} with state embeddings\n", .{ tally.mixed, tally.decision, tally.mrope_embd, tally.state });
     std.debug.print("  errors and warnings the C++ raised:\n", .{});
     for (reached.keys(), reached.values()) |k, n| std.debug.print("    {d:>7}  {s}\n", .{ n, k });
 

@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `common_params_parser_init` (arg.cpp:1397 @d81235049) from
-//! `llama.cpp/common/arg.cpp` (v0.6.0, `d81235049`): every option an example
+//! Ports `common_params_parser_init` (arg.cpp:1397 @620d2225c) from
+//! `llama.cpp/common/arg.cpp` (v0.7.0, `620d2225c`): every option an example
 //! this project ports admits -- `common`'s, and `tokenize`'s, `fit_params`',
 //! `export_lora`'s, `bench`'s, `cvector_generator`'s, `imatrix`'s,
 //! `perplexity`'s, `results`', `mtmd`'s, `tts`' and `server`'s own -- in the
@@ -56,7 +56,7 @@ fn ed(b: bool) [*:0]const u8 {
 /// A value hint or a spelling.
 const S = [:0]const u8;
 
-/// Ports `read_file` (arg.cpp:67 @d81235049).
+/// Ports `read_file` (arg.cpp:67 @620d2225c).
 pub fn readFile(p: *Params, fname: [:0]const u8) ![]const u8 {
     const f = std.c.fopen(fname.ptr, "r") orelse return throw("error: failed to open file '%s'\n", .{fname.ptr});
     defer _ = std.c.fclose(f);
@@ -89,7 +89,7 @@ fn jsonSchemaGrammar(q: *Params, text: []const u8) !void {
     q.sampling.grammar = grammar;
 }
 
-/// Ports `parse_csv_row` (arg.cpp:1353 @d81235049).
+/// Ports `parse_csv_row` (arg.cpp:1353 @620d2225c).
 pub fn parseCsvRow(a: std.mem.Allocator, input: []const u8) !std.ArrayList([:0]const u8) {
     var fields: std.ArrayList([:0]const u8) = .empty;
     var field: std.ArrayList(u8) = .empty;
@@ -145,7 +145,7 @@ fn stoull(a: std.mem.Allocator, s: []const u8) !u64 {
 }
 extern fn strtoull(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulonglong;
 
-/// Ports `parse_cpu_range` (common/common.cpp:315 @d81235049).
+/// Ports `parse_cpu_range` (common/common.cpp:315 @620d2225c).
 pub fn parseCpuRange(a: std.mem.Allocator, range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !bool {
     const func = "parse_cpu_range";
     const dash_loc = std.mem.indexOfScalar(u8, range, '-') orelse {
@@ -179,7 +179,7 @@ pub fn parseCpuRange(a: std.mem.Allocator, range: []const u8, boolmask: *[c.GGML
     return true;
 }
 
-/// Ports `parse_cpu_mask` (common/common.cpp:352 @d81235049).
+/// Ports `parse_cpu_mask` (common/common.cpp:352 @620d2225c).
 pub fn parseCpuMask(mask: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) bool {
     // Discard potential 0x prefix
     var start_i: usize = 0;
@@ -268,124 +268,124 @@ fn addPart1(ctx: *Context) !void {
     const chars_z: [*:0]const u8 = @ptrCast(sampler_type_chars.items.ptr);
     const names_z: [*:0]const u8 = @ptrCast(sampler_type_names.items.ptr);
 
-    // arg.cpp:1440
+    // arg.cpp:1446
     try ctx.add((Arg{ .args = &.{ "-h", "--help", "--usage" }, .help = "print usage and exit", .handler = .{ .void_ = struct {
         fn f(q: *Params) !void {
             q.usage = true;
         }
     }.f } }).setExamples(&.{ .common, .download }));
-    // arg.cpp:1447
+    // arg.cpp:1453
     try ctx.add(.{ .args = &.{"--version"}, .help = "show version and build info", .handler = .{ .void_ = struct {
         fn f(_: *Params) !void {
             build_info.print(c.llama_version(), io.cStderr());
             exit(0);
         }
     }.f } });
-    // arg.cpp:1455
+    // arg.cpp:1461
     try ctx.add(.{ .args = &.{ "-cl", "--cache-list" }, .help = "show list of models in cache", .handler = .{ .void_ = struct {
         fn f(_: *Params) !void {
             return throwStr("the model cache is not supported by this port");
         }
     }.f } });
-    // arg.cpp:1467
+    // arg.cpp:1473
     try ctx.add(.{ .args = &.{"--completion-bash"}, .help = "print source-able bash completion script for llama.cpp", .handler = .{ .void_ = struct {
         fn f(q: *Params) !void {
             q.completion = true;
         }
     }.f } });
-    // arg.cpp:1513
+    // arg.cpp:1519
     try ctx.add((Arg{ .args = &.{ "-t", "--threads" }, .value_hint = "N", .help = try ctx.fmt("number of CPU threads to use during generation (default: %d)", .{p.cpuparams.n_threads}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.cpuparams.n_threads = value;
             if (q.cpuparams.n_threads <= 0) q.cpuparams.n_threads = @intCast(std.Thread.getCpuCount() catch 0);
         }
     }.f } }).setEnv("LLAMA_ARG_THREADS"));
-    // arg.cpp:1523
+    // arg.cpp:1529
     try ctx.add(.{ .args = &.{ "-tb", "--threads-batch" }, .value_hint = "N", .help = "number of threads to use during batch and prompt processing (default: same as --threads)", .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.cpuparams_batch.n_threads = value;
             if (q.cpuparams_batch.n_threads <= 0) q.cpuparams_batch.n_threads = @intCast(std.Thread.getCpuCount() catch 0);
         }
     }.f } });
-    // arg.cpp:1533
+    // arg.cpp:1539
     try ctx.add(.{ .args = &.{ "-C", "--cpu-mask" }, .value_hint = "M", .help = "CPU affinity mask: arbitrarily long hex. Complements cpu-range (default: \"\")", .handler = .{ .string = struct {
         fn f(q: *Params, mask: S) !void {
             q.cpuparams.mask_valid = true;
             if (!parseCpuMask(mask, &q.cpuparams.cpumask)) return throwStr("invalid cpumask");
         }
     }.f } });
-    // arg.cpp:1543
+    // arg.cpp:1549
     try ctx.add(.{ .args = &.{ "-Cr", "--cpu-range" }, .value_hint = "lo-hi", .help = "range of CPUs for affinity. Complements --cpu-mask", .handler = .{ .string = struct {
         fn f(q: *Params, range: S) !void {
             q.cpuparams.mask_valid = true;
             if (!try parseCpuRange(q.arena, range, &q.cpuparams.cpumask)) return throwStr("invalid range");
         }
     }.f } });
-    // arg.cpp:1553
+    // arg.cpp:1559
     try ctx.add(.{ .args = &.{"--cpu-strict"}, .value_hint = "<0|1>", .help = try ctx.fmt("use strict CPU placement (default: %u)\n", .{@as(c_uint, @intFromBool(p.cpuparams.strict_cpu))}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.cpuparams.strict_cpu = try arg.stoul(value) != 0;
         }
     }.f } });
-    // arg.cpp:1560
+    // arg.cpp:1566
     try ctx.add(.{ .args = &.{"--prio"}, .value_hint = "N", .help = try ctx.fmt("set process/thread priority : low(-1), normal(0), medium(1), high(2), realtime(3) (default: %d)\n", .{@as(c_int, @intCast(p.cpuparams.priority))}), .handler = .{ .int = struct {
         fn f(q: *Params, prio: c_int) !void {
             if (prio < c.GGML_SCHED_PRIO_LOW or prio > c.GGML_SCHED_PRIO_REALTIME) return throwStr("invalid value");
             q.cpuparams.priority = @intCast(prio);
         }
     }.f } });
-    // arg.cpp:1570
+    // arg.cpp:1576
     try ctx.add(.{ .args = &.{"--poll"}, .value_hint = "<0...100>", .help = try ctx.fmt("use polling level to wait for work (0 - no polling, default: %u)\n", .{@as(c_uint, p.cpuparams.poll)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.cpuparams.poll = @truncate(try arg.stoul(value));
         }
     }.f } });
-    // arg.cpp:1577
+    // arg.cpp:1583
     try ctx.add(.{ .args = &.{ "-Cb", "--cpu-mask-batch" }, .value_hint = "M", .help = "CPU affinity mask: arbitrarily long hex. Complements cpu-range-batch (default: same as --cpu-mask)", .handler = .{ .string = struct {
         fn f(q: *Params, mask: S) !void {
             q.cpuparams_batch.mask_valid = true;
             if (!parseCpuMask(mask, &q.cpuparams_batch.cpumask)) return throwStr("invalid cpumask");
         }
     }.f } });
-    // arg.cpp:1587
+    // arg.cpp:1593
     try ctx.add(.{ .args = &.{ "-Crb", "--cpu-range-batch" }, .value_hint = "lo-hi", .help = "ranges of CPUs for affinity. Complements --cpu-mask-batch", .handler = .{ .string = struct {
         fn f(q: *Params, range: S) !void {
             q.cpuparams_batch.mask_valid = true;
             if (!try parseCpuRange(q.arena, range, &q.cpuparams_batch.cpumask)) return throwStr("invalid range");
         }
     }.f } });
-    // arg.cpp:1597
+    // arg.cpp:1603
     try ctx.add(.{ .args = &.{"--cpu-strict-batch"}, .value_hint = "<0|1>", .help = "use strict CPU placement (default: same as --cpu-strict)", .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.cpuparams_batch.strict_cpu = value != 0;
         }
     }.f } });
-    // arg.cpp:1604
+    // arg.cpp:1610
     try ctx.add(.{ .args = &.{"--prio-batch"}, .value_hint = "N", .help = try ctx.fmt("set process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: %d)\n", .{@as(c_int, @intCast(p.cpuparams_batch.priority))}), .handler = .{ .int = struct {
         fn f(q: *Params, prio: c_int) !void {
             if (prio < 0 or prio > 3) return throwStr("invalid value");
             q.cpuparams_batch.priority = @intCast(prio);
         }
     }.f } });
-    // arg.cpp:1614
+    // arg.cpp:1620
     try ctx.add(.{ .args = &.{"--poll-batch"}, .value_hint = "<0|1>", .help = "use polling to wait for work (default: same as --poll)", .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.cpuparams_batch.poll = @bitCast(value);
         }
     }.f } });
-    // arg.cpp:1621
+    // arg.cpp:1627
     try ctx.add((Arg{ .args = &.{ "-lcs", "--lookup-cache-static" }, .value_hint = "FNAME", .help = "path to static lookup cache to use for lookup decoding (not updated by generation)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.speculative.ngram_cache.lookup_cache_static = try arg.dupe(q, value);
         }
     }.f } }).setExamples(&.{ .lookup, .server }));
-    // arg.cpp:1628
+    // arg.cpp:1634
     try ctx.add((Arg{ .args = &.{ "-lcd", "--lookup-cache-dynamic" }, .value_hint = "FNAME", .help = "path to dynamic lookup cache to use for lookup decoding (updated by generation)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.speculative.ngram_cache.lookup_cache_dynamic = try arg.dupe(q, value);
         }
     }.f } }).setExamples(&.{ .lookup, .server }));
-    // arg.cpp:1635
+    // arg.cpp:1641
     try ctx.add((Arg{
         .args = &.{ "-c", "--ctx-size" },
         .value_hint = "N",
@@ -400,13 +400,13 @@ fn addPart1(ctx: *Context) !void {
             }.f,
         },
     }).setEnv("LLAMA_ARG_CTX_SIZE"));
-    // arg.cpp:1646
+    // arg.cpp:1652
     try ctx.add((Arg{ .args = &.{"--kv-unified-per-slot"}, .value_hint = "N", .help = "context limit per parallel slot (default: unset, behavior unchanged).\nwhen set without -c/--ctx-size, the shared KV pool is sized to n_parallel*N", .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.kv_unified_per_slot = value;
         }
     }.f } }).setEnv("LLAMA_ARG_KV_UNIFIED_PER_SLOT").setExamples(&.{.server}));
-    // arg.cpp:1654
+    // arg.cpp:1660
     try ctx.add((Arg{ .args = &.{ "-n", "--predict", "--n-predict" }, .value_hint = "N", .help = if (ex == .completion)
         try ctx.fmt("number of tokens to predict (default: %d, -1 = infinity, -2 = until context filled)", .{p.n_predict})
     else
@@ -415,74 +415,75 @@ fn addPart1(ctx: *Context) !void {
             q.n_predict = value;
         }
     }.f } }).setEnv("LLAMA_ARG_N_PREDICT"));
-    // arg.cpp:1665
+    // arg.cpp:1671
     try ctx.add((Arg{ .args = &.{ "-b", "--batch-size" }, .value_hint = "N", .help = try ctx.fmt("logical maximum batch size (default: %d)", .{p.n_batch}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.n_batch = value;
         }
     }.f } }).setEnv("LLAMA_ARG_BATCH"));
-    // arg.cpp:1672
+    // arg.cpp:1678
     try ctx.add((Arg{ .args = &.{ "-ub", "--ubatch-size" }, .value_hint = "N", .help = try ctx.fmt("physical maximum batch size (default: %d)", .{p.n_ubatch}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.n_ubatch = value;
         }
     }.f } }).setEnv("LLAMA_ARG_UBATCH"));
-    // arg.cpp:1679
+    // arg.cpp:1685
     try ctx.add(.{ .args = &.{"--keep"}, .value_hint = "N", .help = try ctx.fmt("number of tokens to keep from the initial prompt (default: %d, -1 = all)", .{p.n_keep}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.n_keep = value;
         }
     }.f } });
-    // arg.cpp:1686
+    // arg.cpp:1692
     try ctx.add((Arg{ .args = &.{"--swa-full"}, .help = try ctx.fmt("use full-size SWA cache (default: %s)\n[(more info)](https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)", .{tf(p.swa_full)}), .handler = .{ .void_ = struct {
         fn f(q: *Params) !void {
             q.swa_full = true;
         }
     }.f } }).setEnv("LLAMA_ARG_SWA_FULL"));
-    // arg.cpp:1694
+    // arg.cpp:1700
     try ctx.add((Arg{ .args = &.{ "-ctxcp", "--ctx-checkpoints", "--swa-checkpoints" }, .value_hint = "N", .help = try ctx.fmt("max number of context checkpoints to create per slot (default: %d)[(more info)](https://github.com/ggml-org/llama.cpp/pull/15293)", .{p.n_ctx_checkpoints}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.n_ctx_checkpoints = value;
         }
     }.f } }).setEnv("LLAMA_ARG_CTX_CHECKPOINTS").setExamples(&.{ .server, .cli }));
-    // arg.cpp:1702
+    // arg.cpp:1708
     try ctx.add((Arg{ .args = &.{ "-cms", "--checkpoint-min-step" }, .value_hint = "N", .help = try ctx.fmt("minimum spacing between context checkpoints in tokens (default: %d, 0 = no minimum)", .{p.checkpoint_min_step}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             if (value < 0) return throwStr("checkpoint-min-step must be non-negative");
             q.checkpoint_min_step = value;
         }
     }.f } }).setEnv("LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT").setExamples(&.{.server}));
-    // arg.cpp:1712
-    try ctx.add((Arg{ .args = &.{ "-cram", "--cache-ram" }, .value_hint = "N", .help = try ctx.fmt("set the maximum cache size in MiB (default: %d, -1 - no limit, 0 - disable)[(more info)](https://github.com/ggml-org/llama.cpp/pull/16391)", .{p.cache_ram_mib}), .handler = .{ .int = struct {
+    // arg.cpp:1718
+    try ctx.add((Arg{ .args = &.{ "-cram", "--cache-ram" }, .value_hint = "N", .help = try ctx.fmt("set the maximum cache size in MiB (default: %d, 0 for decision models, -1 - no limit, 0 - disable)[(more info)](https://github.com/ggml-org/llama.cpp/pull/16391)", .{p.cache_ram_mib}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.cache_ram_mib = value;
+            q.cache_ram_explicit = true;
         }
     }.f } }).setEnv("LLAMA_ARG_CACHE_RAM").setExamples(&.{ .server, .cli }));
-    // arg.cpp:1720
+    // arg.cpp:1727
     try ctx.add((Arg{ .args = &.{ "-kvu", "--kv-unified" }, .args_neg = &.{ "-no-kvu", "--no-kv-unified" }, .help = "use single unified KV buffer shared across all sequences (default: enabled if number of slots is auto)", .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {
             q.kv_unified = value;
         }
-    }.f } }).setEnv("LLAMA_ARG_KV_UNIFIED").setExamples(&.{ .server, .perplexity, .batched, .bench, .parallel }));
-    // arg.cpp:1728
+    }.f } }).setEnv("LLAMA_ARG_KV_UNIFIED").setExamples(&.{ .server, .perplexity, .batched, .bench, .parallel, .speculative }));
+    // arg.cpp:1735
     try ctx.add((Arg{ .args = &.{"--cache-idle-slots"}, .args_neg = &.{"--no-cache-idle-slots"}, .help = "save idle slots to the prompt cache on new task, and clear them when using unified KV (default: enabled, requires cache-ram)", .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {
             q.cache_idle_slots = value;
         }
     }.f } }).setEnv("LLAMA_ARG_CACHE_IDLE_SLOTS").setExamples(&.{.server}));
-    // arg.cpp:1736
+    // arg.cpp:1743
     try ctx.add((Arg{ .args = &.{"--context-shift"}, .args_neg = &.{"--no-context-shift"}, .help = try ctx.fmt("whether to use context shift on infinite text generation (default: %s)", .{ed(p.ctx_shift)}), .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {
             q.ctx_shift = value;
         }
     }.f } }).setExamples(&.{ .completion, .cli, .server, .imatrix, .perplexity }).setEnv("LLAMA_ARG_CONTEXT_SHIFT"));
-    // arg.cpp:1744
+    // arg.cpp:1751
     try ctx.add((Arg{ .args = &.{"--chunks"}, .value_hint = "N", .help = try ctx.fmt("max number of chunks to process (default: %d, -1 = all)", .{p.n_chunks}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.n_chunks = value;
         }
     }.f } }).setExamples(&.{ .imatrix, .perplexity, .retrieval }));
-    // arg.cpp:1751
+    // arg.cpp:1758
     try ctx.add((Arg{ .args = &.{ "-fa", "--flash-attn" }, .value_hint = "[on|off|auto]", .help = try ctx.fmt("set Flash Attention use ('on', 'off', or 'auto', default: '%s')", .{c.llama_flash_attn_type_name(p.flash_attn_type)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             if (arg.isTruthy(value)) {
@@ -496,26 +497,26 @@ fn addPart1(ctx: *Context) !void {
             }
         }
     }.f } }).setEnv("LLAMA_ARG_FLASH_ATTN"));
-    // arg.cpp:1766
+    // arg.cpp:1773
     try ctx.add((Arg{ .args = &.{ "-p", "--prompt" }, .value_hint = "PROMPT", .help = "prompt to start generation with; for system message, use -sys", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.prompt = try arg.dupe(q, value);
         }
     }.f } }).setExcludes(&.{.server}));
-    // arg.cpp:1773
+    // arg.cpp:1780
     try ctx.add((Arg{ .args = &.{ "-sys", "--system-prompt" }, .value_hint = "PROMPT", .help = "system prompt to use with model (if applicable, depending on chat template)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.system_prompt = try arg.dupe(q, value);
         }
     }.f } }).setExamples(&.{ .completion, .cli, .diffusion, .mtmd }));
-    // arg.cpp:1780
+    // arg.cpp:1787
     try ctx.add((Arg{ .args = &.{"--perf"}, .args_neg = &.{"--no-perf"}, .help = try ctx.fmt("whether to enable internal libllama performance timings (default: %s)", .{tf(p.no_perf)}), .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {
             q.no_perf = !value;
             q.sampling.no_perf = !value;
         }
     }.f } }).setEnv("LLAMA_ARG_PERF"));
-    // arg.cpp:1797
+    // arg.cpp:1804
     try ctx.add((Arg{
         .args = &.{ "-f", "--file" },
         .value_hint = "FNAME",
@@ -532,7 +533,7 @@ fn addPart1(ctx: *Context) !void {
             }.f,
         },
     }).setExcludes(&.{.server}));
-    // arg.cpp:1819
+    // arg.cpp:1826
     try ctx.add((Arg{ .args = &.{"--in-file"}, .value_hint = "FNAME", .help = "an input file (use comma-separated values to specify multiple files)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             const items = try parseCsvRow(q.arena, value);
@@ -543,7 +544,7 @@ fn addPart1(ctx: *Context) !void {
             }
         }
     }.f } }).setExamples(&.{.imatrix}));
-    // arg.cpp:1832
+    // arg.cpp:1839
     try ctx.add((Arg{
         .args = &.{ "-bf", "--binary-file" },
         .value_hint = "FNAME",
@@ -561,37 +562,37 @@ fn addPart1(ctx: *Context) !void {
             }.f,
         },
     }).setExcludes(&.{.server}));
-    // arg.cpp:1848
+    // arg.cpp:1855
     try ctx.add(.{ .args = &.{ "-e", "--escape" }, .args_neg = &.{"--no-escape"}, .help = try ctx.fmt("whether to process escapes sequences (\\n, \\r, \\t, \\', \\\", \\\\) (default: %s)", .{tf(p.escape)}), .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {
             q.escape = value;
         }
     }.f } });
-    // arg.cpp:1884
+    // arg.cpp:1891
     try ctx.add((Arg{ .args = &.{ "-r", "--reverse-prompt" }, .value_hint = "PROMPT", .help = "halt generation at PROMPT, return control in interactive mode\n", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             try q.antiprompt.append(q.arena, try arg.dupe(q, value));
         }
     }.f } }).setExamples(&.{ .completion, .cli, .server }));
-    // arg.cpp:1891
+    // arg.cpp:1898
     try ctx.add((Arg{ .args = &.{ "-sp", "--special" }, .help = try ctx.fmt("special tokens output enabled (default: %s)", .{tf(p.special)}), .handler = .{ .void_ = struct {
         fn f(q: *Params) !void {
             q.special = true;
         }
     }.f } }).setExamples(&.{ .completion, .cli, .server }));
-    // arg.cpp:1963
+    // arg.cpp:1970
     try ctx.add((Arg{ .args = &.{"--warmup"}, .args_neg = &.{"--no-warmup"}, .help = try ctx.fmt("whether to perform warmup with an empty run (default: %s)", .{ed(p.warmup)}), .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {
             q.warmup = value;
         }
     }.f } }).setExamples(&.{ .completion, .cli, .server, .mtmd, .embedding, .retrieval, .perplexity, .debug }));
-    // arg.cpp:1971
+    // arg.cpp:1978
     try ctx.add((Arg{ .args = &.{"--spm-infill"}, .help = try ctx.fmt("use Suffix/Prefix/Middle pattern for infill (instead of Prefix/Suffix/Middle) as some models prefer this. (default: %s)", .{ed(p.spm_infill)}), .handler = .{ .void_ = struct {
         fn f(q: *Params) !void {
             q.spm_infill = true;
         }
     }.f } }).setExamples(&.{.server}));
-    // arg.cpp:1981
+    // arg.cpp:1988
     try ctx.add((Arg{ .args = &.{"--samplers"}, .value_hint = "SAMPLERS", .help = try ctx.fmt("samplers that will be used for generation in the order, separated by ';'\n(default: %s)", .{names_z}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             var names: std.ArrayList([]const u8) = .empty;
@@ -601,79 +602,79 @@ fn addPart1(ctx: *Context) !void {
             q.sampling.user_sampling_config |= SamplingConfig.samplers;
         }
     }.f } }).setSampling());
-    // arg.cpp:1990
+    // arg.cpp:1997
     try ctx.add((Arg{ .args = &.{ "-s", "--seed" }, .value_hint = "SEED", .help = try ctx.fmt("RNG seed (default: %d, use random seed for %d)", .{ @as(c_uint, p.sampling.seed), @as(c_uint, c.LLAMA_DEFAULT_SEED) }), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.seed = @truncate(try arg.stoul(value));
         }
     }.f } }).setSampling());
-    // arg.cpp:1997
+    // arg.cpp:2004
     try ctx.add((Arg{ .args = &.{ "--sampler-seq", "--sampling-seq" }, .value_hint = "SEQUENCE", .help = try ctx.fmt("simplified sequence for samplers that will be used (default: %s)", .{chars_z}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.samplers = try samplerTypesFromChars(q, value);
         }
     }.f } }).setSampling());
-    // arg.cpp:2004
+    // arg.cpp:2011
     try ctx.add((Arg{ .args = &.{"--ignore-eos"}, .help = "ignore end of stream token and continue generating (implies --logit-bias EOS-inf)", .handler = .{ .void_ = struct {
         fn f(q: *Params) !void {
             q.sampling.ignore_eos = true;
         }
     }.f } }).setSampling());
-    // arg.cpp:2011
+    // arg.cpp:2018
     try ctx.add((Arg{ .args = &.{ "--temp", "--temperature" }, .value_hint = "N", .help = try ctx.fmt("temperature (default: %.2f)", .{@as(f64, p.sampling.temp)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.temp = @max(try arg.stof(value), 0.0);
             q.sampling.user_sampling_config |= SamplingConfig.temp;
         }
     }.f } }).setSampling().setEnv("LLAMA_ARG_TEMPERATURE"));
-    // arg.cpp:2020
+    // arg.cpp:2027
     try ctx.add((Arg{ .args = &.{"--top-k"}, .value_hint = "N", .help = try ctx.fmt("top-k sampling (default: %d, 0 = disabled)", .{p.sampling.top_k}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.sampling.top_k = value;
             q.sampling.user_sampling_config |= SamplingConfig.top_k;
         }
     }.f } }).setSampling().setEnv("LLAMA_ARG_TOP_K"));
-    // arg.cpp:2028
+    // arg.cpp:2035
     try ctx.add((Arg{ .args = &.{"--top-p"}, .value_hint = "N", .help = try ctx.fmt("top-p sampling (default: %.2f, 1.0 = disabled)", .{@as(f64, p.sampling.top_p)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.top_p = try arg.stof(value);
             q.sampling.user_sampling_config |= SamplingConfig.top_p;
         }
     }.f } }).setSampling().setEnv("LLAMA_ARG_TOP_P"));
-    // arg.cpp:2036
+    // arg.cpp:2043
     try ctx.add((Arg{ .args = &.{"--min-p"}, .value_hint = "N", .help = try ctx.fmt("min-p sampling (default: %.2f, 0.0 = disabled)", .{@as(f64, p.sampling.min_p)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.min_p = try arg.stof(value);
             q.sampling.user_sampling_config |= SamplingConfig.min_p;
         }
     }.f } }).setSampling().setEnv("LLAMA_ARG_MIN_P"));
-    // arg.cpp:2044
+    // arg.cpp:2051
     try ctx.add((Arg{ .args = &.{ "--top-nsigma", "--top-n-sigma" }, .value_hint = "N", .help = try ctx.fmt("top-n-sigma sampling (default: %.2f, -1.0 = disabled)", .{@as(f64, p.sampling.top_n_sigma)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.top_n_sigma = try arg.stof(value);
         }
     }.f } }).setSampling());
-    // arg.cpp:2051
+    // arg.cpp:2058
     try ctx.add((Arg{ .args = &.{"--xtc-probability"}, .value_hint = "N", .help = try ctx.fmt("xtc probability (default: %.2f, 0.0 = disabled)", .{@as(f64, p.sampling.xtc_probability)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.xtc_probability = try arg.stof(value);
             q.sampling.user_sampling_config |= SamplingConfig.xtc_probability;
         }
     }.f } }).setSampling());
-    // arg.cpp:2059
+    // arg.cpp:2066
     try ctx.add((Arg{ .args = &.{"--xtc-threshold"}, .value_hint = "N", .help = try ctx.fmt("xtc threshold (default: %.2f, 1.0 = disabled)", .{@as(f64, p.sampling.xtc_threshold)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.xtc_threshold = try arg.stof(value);
             q.sampling.user_sampling_config |= SamplingConfig.xtc_threshold;
         }
     }.f } }).setSampling());
-    // arg.cpp:2067
+    // arg.cpp:2074
     try ctx.add((Arg{ .args = &.{ "--typical", "--typical-p" }, .value_hint = "N", .help = try ctx.fmt("locally typical sampling, parameter p (default: %.2f, 1.0 = disabled)", .{@as(f64, p.sampling.typ_p)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.typ_p = try arg.stof(value);
         }
     }.f } }).setSampling());
-    // arg.cpp:2074
+    // arg.cpp:2081
     try ctx.add((Arg{ .args = &.{"--repeat-last-n"}, .value_hint = "N", .help = try ctx.fmt("last n tokens to consider for penalize (default: %d, 0 = disabled)", .{p.sampling.penalty_last_n}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             if (value < 0) return throw("error: invalid repeat-last-n = %d\n", .{value});
@@ -682,7 +683,7 @@ fn addPart1(ctx: *Context) !void {
             q.sampling.user_sampling_config |= SamplingConfig.penalty_last_n;
         }
     }.f } }).setSampling());
-    // arg.cpp:2086
+    // arg.cpp:2093
     try ctx.add((Arg{ .args = &.{"--repeat-penalty"}, .value_hint = "N", .help = try ctx.fmt("penalize repeat sequence of tokens (default: %.2f, 1.0 = disabled)", .{@as(f64, p.sampling.penalty_repeat)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             const penalty_repeat = try arg.stof(value);
@@ -693,7 +694,7 @@ fn addPart1(ctx: *Context) !void {
             q.sampling.user_sampling_config |= SamplingConfig.penalty_repeat;
         }
     }.f } }).setSampling().setEnv("LLAMA_ARG_REPEAT_PENALTY"));
-    // arg.cpp:2100
+    // arg.cpp:2107
     try ctx.add((Arg{ .args = &.{"--presence-penalty"}, .value_hint = "N", .help = try ctx.fmt("repeat alpha presence penalty (default: %.2f, 0.0 = disabled)", .{@as(f64, p.sampling.penalty_present)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             const penalty_present = try arg.stof(value);
@@ -701,7 +702,7 @@ fn addPart1(ctx: *Context) !void {
             q.sampling.penalty_present = penalty_present;
         }
     }.f } }).setSampling().setEnv("LLAMA_ARG_PRESENCE_PENALTY"));
-    // arg.cpp:2111
+    // arg.cpp:2118
     try ctx.add((Arg{ .args = &.{"--frequency-penalty"}, .value_hint = "N", .help = try ctx.fmt("repeat alpha frequency penalty (default: %.2f, 0.0 = disabled)", .{@as(f64, p.sampling.penalty_freq)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             const penalty_freq = try arg.stof(value);
@@ -709,33 +710,33 @@ fn addPart1(ctx: *Context) !void {
             q.sampling.penalty_freq = penalty_freq;
         }
     }.f } }).setSampling().setEnv("LLAMA_ARG_FREQUENCY_PENALTY"));
-    // arg.cpp:2122
+    // arg.cpp:2129
     try ctx.add((Arg{ .args = &.{"--dry-multiplier"}, .value_hint = "N", .help = try ctx.fmt("set DRY sampling multiplier (default: %.2f, 0.0 = disabled)", .{@as(f64, p.sampling.dry_multiplier)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.dry_multiplier = try arg.stof(value);
         }
     }.f } }).setSampling());
-    // arg.cpp:2129
+    // arg.cpp:2136
     try ctx.add((Arg{ .args = &.{"--dry-base"}, .value_hint = "N", .help = try ctx.fmt("set DRY sampling base value (default: %.2f)", .{@as(f64, p.sampling.dry_base)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             const potential_base = try arg.stof(value);
             if (potential_base >= 1.0) q.sampling.dry_base = potential_base;
         }
     }.f } }).setSampling());
-    // arg.cpp:2140
+    // arg.cpp:2147
     try ctx.add((Arg{ .args = &.{"--dry-allowed-length"}, .value_hint = "N", .help = try ctx.fmt("set allowed length for DRY sampling (default: %d)", .{p.sampling.dry_allowed_length}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.sampling.dry_allowed_length = value;
         }
     }.f } }).setSampling());
-    // arg.cpp:2147
+    // arg.cpp:2154
     try ctx.add((Arg{ .args = &.{"--dry-penalty-last-n"}, .value_hint = "N", .help = try ctx.fmt("set DRY penalty for the last n tokens (default: %d, 0 = disable)", .{p.sampling.dry_penalty_last_n}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             if (value < 0) return throw("error: invalid dry-penalty-last-n = %d\n", .{value});
             q.sampling.dry_penalty_last_n = value;
         }
     }.f } }).setSampling());
-    // arg.cpp:2157
+    // arg.cpp:2164
     const breakers = try dryBreakersText(p);
     try ctx.add((Arg{ .args = &.{"--dry-sequence-breaker"}, .value_hint = "STRING", .help = try ctx.fmt("add sequence breaker for DRY sampling, clearing out default breakers (%.*s) in the process; use \"none\" to not use any sequence breakers\n", .{ @as(c_int, @intCast(breakers.len)), breakers.ptr }), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -750,91 +751,91 @@ fn addPart1(ctx: *Context) !void {
             }
         }
     }.f } }).setSampling());
-    // arg.cpp:2183
+    // arg.cpp:2190
     try ctx.add((Arg{ .args = &.{"--adaptive-target"}, .value_hint = "N", .help = try ctx.fmt("adaptive-p: select tokens near this probability (valid range 0.0 to 1.0; negative = disabled) (default: %.2f)\n[(more info)](https://github.com/ggml-org/llama.cpp/pull/17927)", .{@as(f64, p.sampling.adaptive_target)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.adaptive_target = try arg.stof(value);
         }
     }.f } }).setSampling());
-    // arg.cpp:2193
+    // arg.cpp:2200
     try ctx.add((Arg{ .args = &.{"--adaptive-decay"}, .value_hint = "N", .help = try ctx.fmt("adaptive-p: decay rate for target adaptation over time. lower values are more reactive, higher values are more stable.\n(valid range 0.0 to 0.99) (default: %.2f)", .{@as(f64, p.sampling.adaptive_decay)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.adaptive_decay = try arg.stof(value);
         }
     }.f } }).setSampling());
-    // arg.cpp:2203
+    // arg.cpp:2210
     try ctx.add((Arg{ .args = &.{"--dynatemp-range"}, .value_hint = "N", .help = try ctx.fmt("dynamic temperature range (default: %.2f, 0.0 = disabled)", .{@as(f64, p.sampling.dynatemp_range)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.dynatemp_range = try arg.stof(value);
         }
     }.f } }).setSampling());
-    // arg.cpp:2210
+    // arg.cpp:2217
     try ctx.add((Arg{ .args = &.{"--dynatemp-exp"}, .value_hint = "N", .help = try ctx.fmt("dynamic temperature exponent (default: %.2f)", .{@as(f64, p.sampling.dynatemp_exponent)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.dynatemp_exponent = try arg.stof(value);
         }
     }.f } }).setSampling());
-    // arg.cpp:2217
+    // arg.cpp:2224
     try ctx.add((Arg{ .args = &.{"--mirostat"}, .value_hint = "N", .help = try ctx.fmt("use Mirostat sampling.\nTop K, Nucleus and Locally Typical samplers are ignored if used.\n(default: %d, 0 = disabled, 1 = Mirostat, 2 = Mirostat 2.0)", .{p.sampling.mirostat}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.sampling.mirostat = value;
             q.sampling.user_sampling_config |= SamplingConfig.mirostat;
         }
     }.f } }).setSampling());
-    // arg.cpp:2226
+    // arg.cpp:2233
     try ctx.add((Arg{ .args = &.{"--mirostat-lr"}, .value_hint = "N", .help = try ctx.fmt("Mirostat learning rate, parameter eta (default: %.2f)", .{@as(f64, p.sampling.mirostat_eta)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.mirostat_eta = try arg.stof(value);
             q.sampling.user_sampling_config |= SamplingConfig.mirostat_eta;
         }
     }.f } }).setSampling());
-    // arg.cpp:2234
+    // arg.cpp:2241
     try ctx.add((Arg{ .args = &.{"--mirostat-ent"}, .value_hint = "N", .help = try ctx.fmt("Mirostat target entropy, parameter tau (default: %.2f)", .{@as(f64, p.sampling.mirostat_tau)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.mirostat_tau = try arg.stof(value);
             q.sampling.user_sampling_config |= SamplingConfig.mirostat_tau;
         }
     }.f } }).setSampling());
-    // arg.cpp:2242
+    // arg.cpp:2249
     try ctx.add((Arg{ .args = &.{ "-l", "--logit-bias" }, .value_hint = "TOKEN_ID(+/-)BIAS", .help = "modifies the likelihood of token appearing in the completion,\ni.e. `--logit-bias 15043+1` to increase likelihood of token ' Hello',\nor `--logit-bias 15043-1` to decrease likelihood of token ' Hello'", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             const bias = parseLogitBias(value) orelse return throwStr("invalid input format");
             try q.sampling.logit_bias.append(q.arena, bias);
         }
     }.f } }).setSampling());
-    // arg.cpp:2264
+    // arg.cpp:2271
     try ctx.add((Arg{ .args = &.{"--grammar"}, .value_hint = "GRAMMAR", .help = "BNF-like grammar to constrain generations (see samples in grammars/ dir)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.grammar_type = .user;
             q.sampling.grammar = try arg.dupe(q, value);
         }
     }.f } }).setSampling());
-    // arg.cpp:2271
+    // arg.cpp:2278
     try ctx.add((Arg{ .args = &.{"--grammar-file"}, .value_hint = "FNAME", .help = "file to read grammar from", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.sampling.grammar = try readFile(q, value);
             q.sampling.grammar_type = .user;
         }
     }.f } }).setSampling());
-    // arg.cpp:2278
+    // arg.cpp:2285
     try ctx.add((Arg{ .args = &.{ "-j", "--json-schema" }, .value_hint = "SCHEMA", .help = "JSON schema to constrain generations (https://json-schema.org/), e.g. `{\"type\": \"object\"}` for any JSON object", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             try jsonSchemaGrammar(q, value);
         }
     }.f } }).setSampling());
-    // arg.cpp:2285
+    // arg.cpp:2292
     try ctx.add((Arg{ .args = &.{ "-jf", "--json-schema-file" }, .value_hint = "FILE", .help = "File containing a JSON schema to constrain generations (https://json-schema.org/), e.g. `{\"type\": \"object\"}` for any JSON object", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             try jsonSchemaGrammar(q, try readFile(q, value));
         }
     }.f } }).setSampling());
-    // arg.cpp:2302
+    // arg.cpp:2309
     try ctx.add((Arg{ .args = &.{ "-bs", "--backend-sampling" }, .help = "enable backend sampling (experimental) (default: disabled)", .handler = .{ .void_ = struct {
         fn f(q: *Params) !void {
             q.sampling.backend_sampling = true;
         }
     }.f } }).setSampling().setEnv("LLAMA_ARG_BACKEND_SAMPLING"));
-    // arg.cpp:2309
+    // arg.cpp:2316
     try ctx.add((Arg{ .args = &.{"--pooling"}, .value_hint = "{none,mean,cls,last,rank}", .help = "pooling type for embeddings, use model default if unspecified", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             if (std.mem.eql(u8, value, "none")) {

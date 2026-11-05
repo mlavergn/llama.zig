@@ -26,7 +26,13 @@
 # sparse flash attention over q8_0 below the 16x break-even, HC_POST_GATE
 # refused for a biased scale, conv_2d/conv_3d with a misaligned input and
 # output, and a matmul whose staged src1 a soft_max or sparse flash
-# attention overwrote in between. `test-backend-ops` does not see
+# attention overwrote in between; since v0.7.0 a BF16 src1 on the matrix
+# path over f32, f16, q4_0 and q4_K (upstream's bf16-activation cases are
+# all vector-path shapes), and MUL_MAT_ID with
+# experts repeated in a row and with experts spanning several tiles
+# (upstream's duplicate-id cases are disabled), and POOL_2D windows 4, 8
+# and 16 wide, the subgroup shader's threshold on smaller subgroups.
+# `test-backend-ops` does not see
 # descriptor-set reuse (v0.6.0): an injection that reused every set whose
 # binding count matched passed ADD and GET_ROWS on llvmpipe -- a case
 # computes on fresh buffers, and freeing the last case's drops the cached

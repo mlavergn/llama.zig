@@ -3,9 +3,10 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.6.0
-//! (`d81235049`): `ggml_cuda_should_fuse_rope_set_rows`,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.7.0
+//! (`620d2225c`): `ggml_cuda_should_fuse_rope_set_rows`,
 //! `ggml_cuda_should_fuse_rms_norm_mul_rope`, `ggml_cuda_try_gdn_cache_fusion`,
+//! `ggml_cuda_try_ssm_scan_cache_fusion`,
 //! `ggml_cuda_topk_moe_fusion`, `ggml_cuda_check_fusion_memory_ranges`,
 //! `ggml_cuda_match_moe_weighted_reduction`, `ggml_cuda_can_fuse` and
 //! `ggml_cuda_try_fuse`; and the C++ overloads of
@@ -29,6 +30,7 @@ const unary = @import("unary.zig");
 const softcap = @import("softcap.zig");
 const snake = @import("snake.zig");
 const gated_delta_net = @import("gated_delta_net.zig");
+const ssm_scan = @import("ssm_scan.zig");
 const topk_moe = @import("topk_moe.zig");
 const moe_weighted_reduction = @import("moe_weighted_reduction.zig");
 
@@ -51,7 +53,7 @@ fn src(t: *const Tensor, i: usize) *Tensor {
 const canFuseSubgraph = ggml_graph.canFuseSubgraph;
 const checkEdges = ggml_graph.checkEdges;
 
-/// Ports `ggml_cuda_should_fuse_rope_set_rows` (ggml-cuda.cu:2725 @d81235049).
+/// Ports `ggml_cuda_should_fuse_rope_set_rows` (ggml-cuda.cu:2803 @620d2225c).
 fn shouldFuseRopeSetRows(rope_t: *const Tensor, view: *const Tensor, set_rows: *const Tensor) bool {
     if (rope_t.op != c.GGML_OP_ROPE or view.op != c.GGML_OP_VIEW or set_rows.op != c.GGML_OP_SET_ROWS) return false;
     // ne3 not tested
@@ -66,7 +68,7 @@ fn shouldFuseRopeSetRows(rope_t: *const Tensor, view: *const Tensor, set_rows: *
     return true;
 }
 
-/// Ports `ggml_cuda_should_fuse_rms_norm_mul_rope` (ggml-cuda.cu:2759 @d81235049).
+/// Ports `ggml_cuda_should_fuse_rms_norm_mul_rope` (ggml-cuda.cu:2837 @620d2225c).
 fn shouldFuseRmsNormMulRope(rms_norm: *const Tensor, mul: *const Tensor, rope_t: *const Tensor) bool {
     if (rms_norm.op != c.GGML_OP_RMS_NORM or mul.op != c.GGML_OP_MUL or rope_t.op != c.GGML_OP_ROPE) return false;
 
@@ -100,14 +102,14 @@ fn shouldFuseRmsNormMulRope(rms_norm: *const Tensor, mul: *const Tensor, rope_t:
     return true;
 }
 
-/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2611 @d81235049), for the
+/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2682 @620d2225c), for the
 /// gated-delta-net match; `graph.zig` has its own copy for the compute loop.
 fn isViewOrNoop(t: *const Tensor) bool {
     return c.ggml_is_empty(t) or t.op == c.GGML_OP_RESHAPE or t.op == c.GGML_OP_TRANSPOSE or
         t.op == c.GGML_OP_VIEW or t.op == c.GGML_OP_PERMUTE or t.op == c.GGML_OP_NONE;
 }
 
-/// Ports `ggml_cuda_try_gdn_cache_fusion` (ggml-cuda.cu:2813 @d81235049):
+/// Ports `ggml_cuda_try_gdn_cache_fusion` (ggml-cuda.cu:2891 @620d2225c):
 /// match gated_delta_net + the strided cpy that scatters its state
 /// snapshots into the cache, so the kernel can write them and skip the cpy.
 fn tryGdnCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy: *gated_delta_net.FusedCache) c_int {
@@ -157,7 +159,67 @@ fn tryGdnCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy: *g
     return skip;
 }
 
-/// Ports `ggml_cuda_topk_moe_fusion` (ggml-cuda.cu:2875 @d81235049).
+/// Ports `ggml_cuda_try_ssm_scan_cache_fusion` (ggml-cuda.cu:2954
+/// @620d2225c), new at v0.7.0: match ssm_scan + the strided cpy that
+/// scatters its state snapshots into the cache, so the kernel writes them
+/// and skips the cpy. Only the Mamba-2 kernels (the group scan and SSD)
+/// write to the cache, and only for one sequence.
+fn trySsmScanCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy: *ssm_scan.FusedCache) c_int {
+    const ssm = node(cgraph, node_idx);
+    // the kernel skips the snapshot tail, so the scan output must not be a graph output
+    if (ssm.op != c.GGML_OP_SSM_SCAN or ssm.type != c.GGML_TYPE_F32 or (ssm.flags & c.GGML_TENSOR_FLAG_OUTPUT) != 0) return 0;
+
+    const K: i64 = impl.getOpParamsI32(ssm, 0); // snapshot slot count
+
+    const s_t = src(ssm, 0);
+    const x = src(ssm, 1);
+    const A = src(ssm, 3);
+
+    const d_state = s_t.ne[0];
+    const D = d_state * s_t.ne[1] * x.ne[1]; // d_state * head_dim * n_head
+    const n_tok = x.ne[2];
+    const n_seqs = x.ne[3];
+
+    // only the mamba-2 kernels (group scan and SSD) write to the cache; mamba-1 still uses the cpy
+    if (A.nb[1] != @sizeOf(f32) or (d_state != 96 and d_state != 128 and d_state != 256)) return 0;
+
+    // the scan reads its input rows from the cache (picked by ids), so with more than one seq a seq can read a row that another seq writes in the same launch
+    if (n_seqs != 1) return 0;
+
+    const n_written = @min(n_tok, K);
+    const tail_off = c.ggml_row_size(c.GGML_TYPE_F32, c.ggml_nelements(x));
+
+    // snapshot cpy is the first real node after the scan (skip views/no-ops)
+    var cpy: ?*const Tensor = null;
+    var skip: c_int = 0;
+    var j = node_idx + 1;
+    while (j < cgraph.n_nodes and cpy == null) : (j += 1) {
+        const n = node(cgraph, j);
+        if (isViewOrNoop(n)) continue;
+        if (n.op != c.GGML_OP_CPY or (n.flags & c.GGML_TENSOR_FLAG_OUTPUT) != 0) return 0;
+        cpy = n;
+        skip = j - node_idx;
+    }
+    const cp = cpy orelse return 0;
+
+    const s = src(cp, 0); // view of the scan snapshot tail
+    const d = src(cp, 1); // cache view the kernel writes to
+
+    // src must be this scan's snapshot tail (contiguous, at the tail offset)
+    if (s.op != c.GGML_OP_VIEW or s.view_src != ssm or s.view_offs != tail_off or !c.ggml_is_contiguous(s)) return 0;
+
+    // dst is the [D, n_seqs, n_written] cache view; require nb[1] == D, the per-seq stride the kernel takes from src0->nb[3]
+    const expected_ne = [4]i64{ D, n_seqs, n_written, 1 };
+    if (d.op != c.GGML_OP_VIEW or d.type != c.GGML_TYPE_F32 or d.data == null or
+        !std.mem.eql(i64, &expected_ne, &d.ne) or
+        d.nb[0] != c.ggml_type_size(c.GGML_TYPE_F32) or d.nb[1] != c.ggml_row_size(c.GGML_TYPE_F32, D)) return 0;
+
+    fused_state_cpy.data = @ptrCast(@alignCast(d.data)); // rollback slot 0 (newest)
+    fused_state_cpy.slot_stride = if (K > 1) @intCast(d.nb[2] / @sizeOf(f32)) else 0;
+    return skip;
+}
+
+/// Ports `ggml_cuda_topk_moe_fusion` (ggml-cuda.cu:3026 @620d2225c).
 pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.Args) bool {
     args.sigmoid = false;
     args.sqrt_softplus = false;
@@ -288,7 +350,7 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
     return true;
 }
 
-/// Ports `ggml_cuda_check_fusion_memory_ranges` (ggml-cuda.cu:3030 @d81235049):
+/// Ports `ggml_cuda_check_fusion_memory_ranges` (ggml-cuda.cu:3181 @620d2225c):
 /// whether the write (out) nodes overwrite the read nodes in operation.
 fn checkFusionMemoryRanges(cgraph: *const CGraph, node_idx: c_int, node_count: c_int, out_nodes: []const c_int, is_topk_moe: bool) bool {
     const S = struct {
@@ -341,12 +403,12 @@ fn checkFusionMemoryRanges(cgraph: *const CGraph, node_idx: c_int, node_count: c
     return is_ok;
 }
 
-/// Ports `MOE_WEIGHTED_REDUCTION_MAX_EXPERTS` (ggml-cuda.cu:3096 @d81235049).
+/// Ports `MOE_WEIGHTED_REDUCTION_MAX_EXPERTS` (ggml-cuda.cu:3247 @620d2225c).
 /// The long form spans 2*k + 1 nodes. `ggml_can_fuse_subgraph` accepts at
 /// most 31 nodes, so k <= 15; larger values use the per-operation path.
 const moe_weighted_reduction_max_experts = 15;
 
-/// Ports `ggml_cuda_moe_weighted_reduction_match` (ggml-cuda.cu:3098 @d81235049).
+/// Ports `ggml_cuda_moe_weighted_reduction_match` (ggml-cuda.cu:3249 @620d2225c).
 pub const MoeWeightedReductionMatch = struct {
     experts: ?*const Tensor = null,
     expert_scale: ?*const Tensor = null,
@@ -355,7 +417,7 @@ pub const MoeWeightedReductionMatch = struct {
     node_count: c_int = 0,
 };
 
-/// Ports `ggml_cuda_match_moe_weighted_reduction` (ggml-cuda.cu:3106 @d81235049),
+/// Ports `ggml_cuda_match_moe_weighted_reduction` (ggml-cuda.cu:3257 @620d2225c),
 /// with its `split_mul`, `is_weights` and `is_experts` lambdas. The C's
 /// `std::vector`s are bounded by `moe_weighted_reduction_max_experts`, so
 /// they are fixed buffers here.
@@ -486,7 +548,7 @@ fn opsEqual(a: []const Op, b: []const Op) bool {
     return std.mem.eql(Op, a, b);
 }
 
-/// Ports `ggml_cuda_can_fuse` (ggml-cuda.cu:3239 @d81235049). The C's
+/// Ports `ggml_cuda_can_fuse` (ggml-cuda.cu:3390 @620d2225c). The C's
 /// `NDEBUG`-only assertion on `unary_ops.size()` compiles out.
 fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: []const UnaryOp) bool {
     const mul_mat_bias_glu_ops = [_]Op{ c.GGML_OP_MUL_MAT, c.GGML_OP_ADD, c.GGML_OP_MUL_MAT, c.GGML_OP_ADD, c.GGML_OP_GLU };
@@ -688,7 +750,7 @@ fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: [
     return false;
 }
 
-/// Ports `ggml_cuda_match_shared_expert` (ggml-cuda.cu:1827 @d81235049),
+/// Ports `ggml_cuda_match_shared_expert` (ggml-cuda.cu:1898 @620d2225c),
 /// new at v0.6.0: whether the routed experts' gate/up/GLU at `routed_idx`
 /// and a shared expert's at `shared_idx` can run as one MMVQ launch --
 /// both pairs fusable, the same quantized weight shape, the shared input
@@ -791,25 +853,15 @@ fn getBiasTensor(bias_node: *const Tensor, mul_node: *const Tensor, op_bias: Op)
     return src(bias_node, 1);
 }
 
-/// `GGML_CUDA_DISABLE_FUSION`, which `try_fuse` and `graph_optimize` each
-/// read once into a function-local `static`.
-pub const DisableFusion = struct {
-    pub var value: bool = false;
-    fn run() void {
-        if (std.c.getenv("GGML_CUDA_DISABLE_FUSION")) |e| value = common.atoi(e) != 0;
-    }
-    pub const once = common.Once(run);
-};
-
 fn srcOpt(t: *const Tensor, i: usize) ?*const Tensor {
     return if (t.src[i]) |s| s else null;
 }
 
-/// Ports `ggml_cuda_try_fuse` (ggml-cuda.cu:3506 @d81235049): try and fuse
-/// nodes, and return the number of nodes to skip.
+/// Ports `ggml_cuda_try_fuse` (ggml-cuda.cu:3657 @620d2225c): try and fuse
+/// nodes, and return the number of nodes to skip. v0.7.0 added the
+/// `SSM_SCAN -> CPY` cache fusion, beside the gated-delta-net one.
 pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
-    DisableFusion.once.call();
-    if (DisableFusion.value) return 0;
+    if (common.fusionDisabled()) return 0;
 
     const nd = node(cgraph, i);
 
@@ -851,6 +903,16 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
         const nodes_to_skip = tryGdnCacheFusion(cgraph, i, &fused_state_cpy);
         if (nodes_to_skip > 0) {
             gated_delta_net.opGatedDeltaNetFusedCache(cuda_ctx, nd, fused_state_cpy);
+            return nodes_to_skip;
+        }
+    }
+
+    // ssm_scan -> cpy: scatter recurrent-state snapshots into the cache
+    if (nd.op == c.GGML_OP_SSM_SCAN) {
+        var fused_state_cpy: ssm_scan.FusedCache = undefined;
+        const nodes_to_skip = trySsmScanCacheFusion(cgraph, i, &fused_state_cpy);
+        if (nodes_to_skip > 0) {
+            ssm_scan.opSsmScanFusedCache(cuda_ctx, nd, fused_state_cpy);
             return nodes_to_skip;
         }
     }

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmid.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/mmid.cuh` at v0.6.0 (`d81235049`). The
+//! `llama.cpp/ggml/src/ggml-cuda/mmid.cuh` at v0.7.0 (`620d2225c`). The
 //! kernel, `mm_ids_helper`, stays CUDA.
 
 const std = @import("std");
@@ -14,7 +14,7 @@ const kernels = @import("kernels.zig");
 
 const cu = common.cu;
 
-/// Ports `launch_mm_ids_helper` (mmid.cu:131 @d81235049).
+/// Ports `launch_mm_ids_helper` (mmid.cu:131 @620d2225c).
 fn launchMmIdsHelper(
     comptime n_expert_used_template: comptime_int,
     ids: ?*const i32,
@@ -50,7 +50,7 @@ fn launchMmIdsHelper(
     }, .{ ids, ids_src1, ids_dst, expert_bounds, n_tokens, n_expert_used_var, nchannels_y, si1, sis1, write_inverse });
 }
 
-/// Ports `ggml_cuda_launch_mm_ids_helper` (mmid.cu:150 @d81235049).
+/// Ports `ggml_cuda_launch_mm_ids_helper` (mmid.cu:150 @620d2225c).
 pub fn launchMmIdsHelperDispatch(
     ids: ?*const i32,
     ids_src1: ?*i32,

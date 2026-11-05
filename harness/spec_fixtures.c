@@ -16,8 +16,14 @@
 // fixed LCG rather than that harness's, which only both sides' agreeing
 // needs.
 //
+// With --decision it writes metadata-only files for common_get_gguf_info
+// (v0.7.0): every decision type name upstream knows, an unknown one, one
+// stored as a number, a context length of the wrong type, and files with
+// no or an empty architecture.
+//
 // Usage: spec_fixtures <in.gguf> <out.gguf>
 //        spec_fixtures --gemma4 <dir>
+//        spec_fixtures --decision <dir>
 
 #include "gguf.h"
 #include "ggml.h"
@@ -183,8 +189,46 @@ static int write_gemma4(const char * dir) {
     return 0;
 }
 
+static int write_meta(const char * dir, const char * name, const char * arch, const char * type, int type_u32, int ctx_u64) {
+    char path[1024], k[128];
+    struct gguf_context * m = gguf_init_empty();
+    if (arch) gguf_set_val_str(m, "general.architecture", arch);
+    const char * a = arch ? arch : "llama";
+    snprintf(k, sizeof(k), "%s.decision.type", a);
+    if (type) gguf_set_val_str(m, k, type);
+    if (type_u32) gguf_set_val_u32(m, k, 3);
+    snprintf(k, sizeof(k), "%s.context_length", a);
+    if (ctx_u64) gguf_set_val_u64(m, k, 4096); else gguf_set_val_u32(m, k, 1234);
+    // common_speculative_types_from_gguf reads it from every non-DFlash file
+    snprintf(k, sizeof(k), "%s.block_count", a);
+    gguf_set_val_u32(m, k, 1);
+    snprintf(path, sizeof(path), "%s/%s.gguf", dir, name);
+    const bool ok = gguf_write_to_file(m, path, false);
+    gguf_free(m);
+    return ok ? 0 : 1;
+}
+
+static int write_decision(const char * dir) {
+    const char * names[] = { "openjev", "lev", "kev", "nimble", "laya", "clef", "pplx-decider", "vllm-decision2", "vllm-d3",
+                             "lfm2-d1", "lfm2-d1-omni", "bogus", "" };
+    char name[64];
+    int rc = 0;
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        snprintf(name, sizeof(name), "decision-%zu", i);
+        rc |= write_meta(dir, name, "llama", names[i], 0, 0);
+    }
+    rc |= write_meta(dir, "decision-none", "llama", NULL, 0, 0);
+    rc |= write_meta(dir, "decision-u32", "llama", NULL, 1, 0);
+    rc |= write_meta(dir, "decision-ctx64", "llama", "laya", 0, 1);
+    rc |= write_meta(dir, "decision-noarch", NULL, "laya", 0, 0);
+    rc |= write_meta(dir, "decision-emptyarch", "", "laya", 0, 0);
+    printf("%s: decision metadata files\n", dir);
+    return rc;
+}
+
 int main(int argc, char ** argv) {
     if (argc == 3 && strcmp(argv[1], "--gemma4") == 0) return write_gemma4(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--decision") == 0) return write_decision(argv[2]);
     if (argc != 3) {
         fprintf(stderr, "usage: %s in.gguf out.gguf\n", argv[0]);
         return 2;

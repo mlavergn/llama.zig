@@ -78,6 +78,11 @@
 -m $FIX/qwen3moe-moe.gguf,$FIX/llama-dense.gguf -p 16 -n 0 -r 1 -o jsonl
 -m $PLAIN -p 8 -n 2 -r 1 --progress
 -m $PLAIN -p 8 -n 2 -r 1 -fitt 1024 -fitc 64
+# v0.7.0 (#28331): -fitc above what the test processes is the context fit
+# keeps (n_ctx = max(n_prompt + n_gen + n_depth, fit_min_ctx)); the verbose
+# log's context size shows it
+-m $PLAIN -p 8 -n 2 -r 1 -fitt 1024 -fitc 3000 -v
+-m $PLAIN -p 8 -n 2 -r 1 -fitt 1024 -fitc 4 -v
 !fail -m /nonexistent.gguf -p 8 -n 0 -r 1
 # --repack reaches the model: in the verbose log, the CPU_REPACK buffer is
 # there or not, and the second value reloads the model (equal_mparams).

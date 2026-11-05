@@ -6,7 +6,7 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` and
-//! `llama.cpp/ggml/include/ggml-vulkan.h` at v0.6.0 (`d81235049`). The C++
+//! `llama.cpp/ggml/include/ggml-vulkan.h` at v0.7.0 (`620d2225c`). The C++
 //! is written against `vulkan.hpp`, a header-only C++ wrapper over the C API
 //! in `vulkan_core.h`; what it adds that changes behaviour is reproduced here
 //! -- the dispatcher, exceptions on a failed `VkResult`, and the
@@ -24,16 +24,16 @@ pub const vk = @import("vulkan_c");
 /// in ggml.
 pub const allocator = std.heap.c_allocator;
 
-/// Ports `GGML_VK_NAME` (ggml-vulkan.h:10 @d81235049).
+/// Ports `GGML_VK_NAME` (ggml-vulkan.h:10 @620d2225c).
 pub const name = "Vulkan";
 
-/// Ports `GGML_VK_MAX_DEVICES` (ggml-vulkan.h:11 @d81235049).
+/// Ports `GGML_VK_MAX_DEVICES` (ggml-vulkan.h:11 @620d2225c).
 pub const max_devices = 16;
 
 /// The PCI vendor ids the C++ defines for itself. Ports `VK_VENDOR_ID_AMD`,
 /// `VK_VENDOR_ID_APPLE`, `VK_VENDOR_ID_INTEL`, `VK_VENDOR_ID_NVIDIA`,
 /// `VK_VENDOR_ID_QUALCOMM` and `VK_VENDOR_ID_SAMSUNG`
-/// (ggml-vulkan-types.h:202, 204, 206, 208, 210, 212 @d81235049).
+/// (ggml-vulkan-types.h:181, 183, 185, 187, 189, 191 @620d2225c).
 pub const vendor_id = struct {
     pub const amd = 0x1002;
     pub const apple = 0x106b;
@@ -62,7 +62,7 @@ const global_commands = [_][:0]const u8{
 };
 
 /// Ports `vulkan.hpp`'s `DispatchLoaderDynamic`, the C++'s
-/// `ggml_vk_default_dispatcher_instance` (ggml-vulkan.cpp:5177 @d81235049):
+/// `ggml_vk_default_dispatcher_instance` (ggml-vulkan.cpp:5180 @620d2225c):
 /// one function pointer per command the host layer calls, each field named
 /// after its command and typed by its `PFN_`.
 ///

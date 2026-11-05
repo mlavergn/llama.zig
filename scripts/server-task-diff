@@ -21,16 +21,20 @@ The records, generated here from a fixed seed:
       parts as data URIs, bare base64 and file:// under a media path; and
       through Jinja over every template in models/templates/ (tools, tool
       choice, schemas, reasoning, kwargs, continuation, pure content)
-- CS  a Jinja chat request through the schema into a task_result_state,
-      then R partials and a final fed a reply in pieces: the request's own
-      PEG parser, streamed (Stage 10 step 4)
+- CS  a Jinja chat request into its chat session (dumped whole, and what
+      it applies to a task's sampling), through the schema into a task
+      with the session applied, and into a task_result_state; then R
+      partials and a final fed a reply in pieces, as text or tokenized
+      (common_chat_input_tokenize): the request's own PEG parser, streamed
+      (Stage 10 step 4; v0.7.0's chat session)
 - RC, AC, TC  server-chat.cpp's conversions: Responses, Anthropic and
       transcriptions requests into /chat/completions bodies
 - T   tokenize_input_prompts / tokenize_mixed over six vocabularies, and
       with an mmproj; M  process_mtmd_prompt; ST  server_tokens ops
 - U   validate_utf8 and is_valid_utf8 over every 1- and 2-byte string and
       3- and 4-byte strings over the bytes that matter
-- S/R task_result_state and every result type in every response format,
+- S/R task_result_state (over the default session) and every result type
+      in every response format,
       partials streamed through a state; the SSE formatters
 - E, GT, F, K, I, Q, G, PC, PIPE, L, J, SSE, RND, TK -- error responses,
       grammar triggers, embeddings and rerank responses, infill and rerank
@@ -482,13 +486,16 @@ def targeted():
         yield ("C", {"v": 0, "tmpl": tmpl, "opt": {}, "body": {"messages": [{"role": "system", "content": "s"}, u, a, u]}})
     yield "ST", {"tokens": [5, 6, 7], "ops": [["serialize", 1000], ["serialize", 6], ["serialize", 7, 1, 2], ["serialize", 7, 0, 7]]}
     probs = [{"tok": 5, "prob": 0.5, "text": "h\u00e9", "probs": [{"tok": 6, "txt": "x\u00e9", "prob": 0.25}]}]
-    yield "S", {"id": 999, "parser": {"format": 0}}
+    # v0.7.0: a state's chat session parses each final once (feed() or
+    # finish() after finish() is a GGML_ASSERT), so every final gets a fresh one
     for post in (False, True):
+        yield "S", {"id": 999, "parser": {"format": 0}}
         yield "R", {"kind": "partial", "state": 999, "f": {"content": "a", "n_decoded": 1, "post_sampling_probs": post, "probs": probs}}
         yield "R", {"kind": "final", "state": 999, "f": {"content": "ab", "post_sampling_probs": post, "probs": probs}}
     for rt in (0, 1, 2, 3, 4, 6):
         for stop in range(4):
             for stream in (False, True):
+                yield "S", {"id": 999, "parser": {"format": 0}}
                 yield "R", {"kind": "final", "state": 999, "f": {"content": "c", "res_type": rt, "stop": stop, "stream": stream,
                                                                  "stopping_word": "###" if stop == 2 else "", "verbose": stop == 0}}
     MiB = 1 << 20
@@ -1043,6 +1050,9 @@ def chat_step4():
             reply = rng.choice(REPLIES)
             res_type = rng.choice([1, 1, 3, 6, 0])
             stream = rng.random() < 0.6
+            # v0.7.0: the session parses text and tokens; a tokenized
+            # chunk carries the tokens common_chat_input_tokenize gives
+            tok = rng.random() < 0.5
             pos = 0
             k = 0
             while pos < len(reply):
@@ -1050,11 +1060,11 @@ def chat_step4():
                 piece = reply[pos:pos + n]
                 pos += n
                 k += 1
-                yield "R", {"kind": "partial", "state": sid, "index": 0, "f": {"content": piece, "n_decoded": k, "res_type": res_type,
-                                                                              "model": "m", "cmpl_id": "chatcmpl-x"}}
-            yield "R", {"kind": "final", "state": sid, "index": 0, "f": {"content": reply, "stream": stream, "res_type": res_type,
-                                                                        "stop": rng.choice([1, 1, 2, 3]), "model": "m",
-                                                                        "cmpl_id": "chatcmpl-x", "n_decoded": k}}
+                yield "R", {"kind": "partial", "state": sid, "index": 0, "v": 0, "f": {"content": piece, "n_decoded": k, "res_type": res_type,
+                                                                                      "model": "m", "cmpl_id": "chatcmpl-x", "tokenize": tok}}
+            yield "R", {"kind": "final", "state": sid, "index": 0, "v": 0, "f": {"content": "" if stream and tok else reply, "stream": stream, "res_type": res_type,
+                                                                                "stop": rng.choice([1, 1, 2, 3]), "model": "m",
+                                                                                "cmpl_id": "chatcmpl-x", "n_decoded": k, "tokenize": tok}}
             sid += 1
     # each family's own syntax, so its mapper reads tool calls
     own = {"google-gemma-4-31B-it.jinja": REPLIES[13], "MiniMax-M3.jinja": REPLIES[14], "Qwen-Qwen3-0.6B.jinja": REPLIES[4]}
@@ -1063,10 +1073,10 @@ def chat_step4():
             yield "CS", {"v": 0, "tmpl_file": os.path.join(TEMPLATES_DIR, t), "opt": J(reasoning_format=3),
                          "body": {"messages": [u], "tools": [TOOL_W, TOOL_T], "parallel_tool_calls": True}, "id": sid}
             for k, pos in enumerate(range(0, len(reply), 5)):
-                yield "R", {"kind": "partial", "state": sid, "index": 0, "f": {"content": reply[pos:pos + 5], "n_decoded": k + 1,
-                                                                              "res_type": 1, "model": "m", "cmpl_id": "chatcmpl-x"}}
-            yield "R", {"kind": "final", "state": sid, "index": 0, "f": {"content": reply, "stream": stream, "res_type": 1,
-                                                                        "stop": 1, "model": "m", "cmpl_id": "chatcmpl-x"}}
+                yield "R", {"kind": "partial", "state": sid, "index": 0, "v": 0, "f": {"content": reply[pos:pos + 5], "n_decoded": k + 1,
+                                                                                      "res_type": 1, "model": "m", "cmpl_id": "chatcmpl-x", "tokenize": stream}}
+            yield "R", {"kind": "final", "state": sid, "index": 0, "v": 0, "f": {"content": "" if stream else reply, "stream": stream, "res_type": 1,
+                                                                                "stop": 1, "model": "m", "cmpl_id": "chatcmpl-x", "tokenize": stream}}
             sid += 1
     # an explicit continuation: the state's first parse, of nothing, through
     # the request's own parser, so the prefill is not sent again
@@ -1082,6 +1092,26 @@ def chat_step4():
                                                                               "model": "m", "cmpl_id": "chatcmpl-x"}}
             yield "R", {"kind": "final", "state": sid, "index": 0, "f": {"content": " is sunny</think>\n\nYes.", "stream": True,
                                                                         "res_type": 1, "stop": 1, "model": "m", "cmpl_id": "chatcmpl-x"}}
+            sid += 1
+    # v0.7.0: the session's additional stops reach the task's antiprompt
+    # (server_task::apply_chat_session), and the request's own sampler keys
+    # the session owns are dropped from the parameters
+    for t in ("inclusionai-ling-3.0-flash.jinja", "ibm-granite-granite-4.1.jinja", "poolside-Laguna-XS-2.1.jinja"):
+        yield "CS", {"v": 0, "tmpl_file": os.path.join(TEMPLATES_DIR, t), "opt": J(reasoning_format=3),
+                     "body": {"messages": [u], "tools": [TOOL_W], "stop": ["###"]}, "id": sid}
+        yield "R", {"kind": "final", "state": sid, "index": 0, "v": 0, "f": {"content": "Sure.", "res_type": 1, "stop": 1,
+                                                                            "model": "m", "cmpl_id": "chatcmpl-x"}}
+        sid += 1
+    for extra in ({"preserved_tokens": ["<|im_start|>"]}, {"grammar_triggers": [{"type": 1, "value": "hello"}], "grammar_lazy": True},
+                  {"grammar_lazy": True}, {"grammar": "root ::= \"a\""}, {"json_schema": {"type": "string"}},
+                  {"preserved_tokens": ["<|im_start|>"], "grammar_triggers": [{"type": 1, "value": "<|im_start|>"}]}):
+        for tools in ([], [TOOL_W]):
+            body = {"messages": [u], **extra}
+            if tools:
+                if "grammar" in extra:
+                    continue
+                body["tools"] = tools
+            yield "CS", {"v": 0, "tmpl_file": q3, "opt": J(reasoning_format=3), "body": body, "id": sid}
             sid += 1
     # every response format over a reply with reasoning and two tool calls
     for res_type in (0, 1, 3, 6):
@@ -1153,7 +1183,7 @@ COVERAGE = [
     "\"scores\"", "\"noul\"", "\"confidence\"", "\"legend\"", "group ",
     "Value must be between", "Grammar trigger word should be marked as preserved token",
     "no triggers set for lazy grammar", "dry_sequence_breakers must be a non-empty", "'lora' must be an array",
-    "Unknown reasoning format", "Unknown chat format", "JSON schema conversion failed", "\"prompt\" is required",
+    "Unknown reasoning format", "JSON schema conversion failed", "\"prompt\" is required",
     "Only no echo is supported", "Unsupported param", "tools param requires --jinja flag",
     "tool_choice param requires --jinja flag", "Cannot use both json_schema and grammar",
     "response_format type must be one of", "'messages' is required", "Expected 'messages' to be an array",
@@ -1167,12 +1197,12 @@ COVERAGE = [
     "must not be empty", "Invalid token", "Chunk not found", "Unsupported server tokens state version",
     "Unexpected end of server tokens state", "Trailing data in server tokens state",
     "Cannot restore media tokens without an mmproj", "Failed to load image or audio file", "event: ",
-    "this custom template is not supported", "byte: \\x", "Field 'chat_format'", "Field 'json_schema'",
+    "this custom template is not supported", "byte: \\x", "Field 'json_schema'",
     "Cannot continue an assistant message that contains tool calls",
     "completion_probabilities", "prompt_progress", "__verbose", "tool_calls\":[", "llamacpp:prompt_tokens_total",
     "spec_decode_num_accepted_tokens_per_pos_total{position=", "response.output_text.delta", "content_block_start",
     "message_stop", "transcript.text.done", "n_restored", "n_written", "alora_invocation_tokens", "router_clone",
-    "restored_bad", "n_prompts 2", "media_marker", "chat_format\":0", "cache 1", "load 0", "load 1", "pipe w1 r1",
+    "restored_bad", "n_prompts 2", "media_marker", "cache 1", "load 0", "load 1", "pipe w1 r1",
     # Stage 10 step 4
     "'input' is required", "does not support 'previous_response_id'", "'Input text' requires 'text'",
     "'image_url' is required", "'input_file' is not supported", "'type' must be one of 'input_text'",
@@ -1183,16 +1213,19 @@ COVERAGE = [
     "'tools' must be an array of objects", "No input file found for transcription",
     "Only 'json' response_format is supported", "stoul: no conversion", "stof: no conversion", "out of range",
     "__metadata_user_id", "thinking_budget_tokens", "Perform ASR", "Transcribe audio to text", "cch=fffff",
-    "chat_parser", "\"tool_calls\":[{", "reasoning_content", "Cannot use custom grammar constraints with tools",
+    "\"tool_calls\":[{", "reasoning_content", "Cannot use custom grammar constraints with tools",
     "logprobs is not supported with tools + stream", "Unable to generate parser", "reasoning_budget_end_tags",
-    "\"parse_tool_calls\":true", "grammar_lazy\":true", "chat_format\":2", "chat_format\":3", "chat_format\":4",
+    # v0.7.0: the chat session (#30210), its format applied to the task,
+    # its sampling, tokenized chunks
+    "sp.grammar_lazy\":true", "\"has_template\":false", "\"format\":\"peg-native\"",
+    "chat_format_int\":2", "chat_format_int\":3", "chat_format_int\":4", "\"chat_format\":\"peg-gemma4\"", "ctoks ",
     "does not match the expected", "response.function_call_arguments.delta", "tool_use",
 ]
 LOG_COVERAGE = [
     "Wrong type supplied for parameter", "prompt is already in the cache",
     "making room for prompt cache entry", "removing obsolete cached prompt", "exceeds cache size limit",
     "cache token limit", "found better prompt", "unable to match sampler by name",
-    "unable to match sampler by char", "Converted grammar", "JSON schema:", "chat format: ", "reasoning budget: tokens=",
+    "unable to match sampler by char", "Converted grammar", "JSON schema:", "reasoning budget: tokens=",
     "No parser definition detected", "Parsed message", "Grammar (tool_calls)", "Grammar (", "n_prefix_take",
     "loading image from local file", "cache state:",
     "unsupported Responses tool type", "anthropic string not as expected", "Forcing pure content template",

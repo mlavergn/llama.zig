@@ -9,7 +9,7 @@
 //! `server_chat_convert_anthropic_to_oai` and
 //! `convert_transcriptions_to_chatcmpl` from
 //! `llama.cpp/tools/server/server-chat.cpp` and
-//! `llama.cpp/tools/server/server-chat.h` (llama.cpp v0.6.0, `d81235049`);
+//! `llama.cpp/tools/server/server-chat.h` (llama.cpp v0.7.0, `620d2225c`);
 //! the file's fourth function, `server_chat_msg_diff_to_json_oaicompat`, is
 //! `result.zig`'s. Each declaration names what it ports and the line it
 //! began at.
@@ -72,7 +72,7 @@ fn arrayOf(a: Allocator, v: Value) Error!Value {
 // the Responses API
 
 /// Ports `server_chat_convert_responses_to_chatcmpl` (server-chat.cpp:6
-/// @d81235049): an OpenAI Responses request as a `/chat/completions` one --
+/// @620d2225c): an OpenAI Responses request as a `/chat/completions` one --
 /// `instructions` a system message, each input item a message (an output
 /// item, a function call or a reasoning item following an assistant
 /// message merged into it), function tools unwrapped, `max_output_tokens`
@@ -391,7 +391,7 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
 // the Anthropic Messages API
 
 /// Ports `normalize_anthropic_billing_header` (server-chat.cpp:326
-/// @d81235049): the five-character `cch=` stamp of an
+/// @620d2225c): the five-character `cch=` stamp of an
 /// `x-anthropic-billing-header:` system prompt overwritten with `f`s, so it
 /// does not break prefix caching. Any other prompt is left alone.
 ///
@@ -442,7 +442,7 @@ fn imageUrlOf(a: Allocator, source: *const Value) Error!?Value {
 }
 
 /// Ports `server_chat_convert_anthropic_to_oai` (server-chat.cpp:348
-/// @d81235049): an Anthropic Messages request as a `/chat/completions`
+/// @620d2225c): an Anthropic Messages request as a `/chat/completions`
 /// one -- the system prompt a message, content blocks as parts, thinking
 /// blocks as reasoning, `tool_use` blocks as tool calls and `tool_result`
 /// blocks as tool messages after their turn; tools, `tool_choice`,
@@ -744,7 +744,7 @@ pub fn stof(s: []const u8) Error!f32 {
 }
 
 /// Ports `convert_transcriptions_to_chatcmpl` (server-chat.cpp:651
-/// @d81235049): a transcription request -- its form fields as JSON, its
+/// @620d2225c): a transcription request -- its form fields as JSON, its
 /// uploaded `file` -- as a `/chat/completions` body: the template's ASR
 /// preset as the system and user messages, the prompt ending in the media
 /// marker, and the form's string fields typed.

@@ -8,7 +8,7 @@
 //! leaves one record -- `ok`, a dump, a query's answer, or `E:` and the
 //! `what()` of what was thrown -- and every record must be identical.
 //!
-//! Five corpora:
+//! Six corpora:
 //!
 //! - **documents**: random valid JSON text -- every value type, deep and
 //!   shallow nesting, escapes, surrogate pairs, raw UTF-8, duplicate keys,
@@ -28,6 +28,15 @@
 //! - **mutations**: random sequences of every accessor and modifier
 //!   `json.h` offers over random values, strings and keys with invalid
 //!   UTF-8 among them, so `dump` must throw where upstream throws.
+//! - **deep**: documents nested 127 to 100,000 levels -- arrays, objects,
+//!   both alternating, with and without siblings -- parsed, copied,
+//!   compared with variants that differ (or, for a number written another
+//!   way, do not) at one level, dumped compact and newline-only at any
+//!   depth and indented where the text stays small, cut short, and
+//!   destroyed; and values built 120 to 320 deep by copies around strings
+//!   and keys that are not UTF-8, so `dump` throws from below the bound.
+//!   Since v0.7.0 nlohmann copies, compares and dumps a value nested past
+//!   128 levels without the call stack; so must the port.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -1265,6 +1274,309 @@ fn mutationProgram(p: *Prog, r: std.Random) void {
     };
 }
 
+// -----------------------------------------------------------------------------
+// deep nesting
+
+/// One level of a deeply nested document: a container, the text of its
+/// other elements before and after the child that leads further down, and,
+/// for an object, the child's key (already quoted and escaped).
+const Level = struct {
+    object: bool,
+    key: []const u8 = "\"k\"",
+    before: []const u8 = "",
+    after: []const u8 = "",
+};
+
+const deep_depths = [_]usize{ 1, 127, 128, 129, 130, 255, 257, 300, 513, 1000, 1100, 5000, 10_000, 100_000 };
+
+const deep_keys = [_][]const u8{ "\"k\"", "\"\"", "\"\\u00e9\"", "\"\xe2\x82\xac\"", "\"a\\\"b\"", "\"\\t\\n\"", "\"\\uD83D\\uDE00\"", "\"\x7f\"" };
+const deep_leaves = [_][]const u8{ "1", "1.0", "-0", "0.0", "\"leaf\"", "\"\\u00ff\\u0001\"", "\"\xc3\xa9\"", "true", "null", "[]", "{}", "18446744073709551615", "-9223372036854775808", "1e300" };
+const deep_array_sibs = [_][]const u8{ "1", "\"x\"", "null", "[]", "{}", "[1,[2]]", "{\"a\":{}}", "2.5", "\"\\u20ac\"" };
+const deep_object_sibs = [_][]const u8{ "\"a\":1", "\"b\":\"x\"", "\"c\":null", "\"d\":[]", "\"e\":{}", "\"f\":[1,{\"g\":2}]", "\"\\u00e9\":2.5" };
+
+/// A document `levels.len` containers deep around `leaf`.
+fn deepText(gpa: std.mem.Allocator, out: *std.ArrayList(u8), levels: []const Level, leaf: []const u8) void {
+    out.clearRetainingCapacity();
+    for (levels) |l| {
+        out.append(gpa, if (l.object) '{' else '[') catch oom();
+        out.appendSlice(gpa, l.before) catch oom();
+        if (l.object) {
+            out.appendSlice(gpa, l.key) catch oom();
+            out.append(gpa, ':') catch oom();
+        }
+    }
+    out.appendSlice(gpa, leaf) catch oom();
+    var i = levels.len;
+    while (i > 0) {
+        i -= 1;
+        out.appendSlice(gpa, levels[i].after) catch oom();
+        out.append(gpa, if (levels[i].object) '}' else ']') catch oom();
+    }
+}
+
+/// `depth` levels in one of five shapes: arrays only, objects only,
+/// alternating, alternating with siblings, or random with siblings.
+fn deepLevels(gpa: std.mem.Allocator, r: std.Random, depth: usize, shape: u8) []Level {
+    const ls = gpa.alloc(Level, depth) catch oom();
+    for (ls, 0..) |*l, i| {
+        l.* = .{ .object = switch (shape) {
+            0 => false,
+            1 => true,
+            2, 3 => i % 2 == 1,
+            else => r.boolean(),
+        } };
+        if (l.object) l.key = deep_keys[r.uintLessThan(usize, deep_keys.len)];
+        if (shape >= 3 and r.uintLessThan(u8, 3) != 0) {
+            const sibs: []const []const u8 = if (l.object) &deep_object_sibs else &deep_array_sibs;
+            if (r.boolean()) l.before = std.fmt.allocPrint(gpa, "{s},", .{sibs[r.uintLessThan(usize, sibs.len)]}) catch oom();
+            if (r.boolean()) l.after = std.fmt.allocPrint(gpa, ",{s}", .{sibs[r.uintLessThan(usize, sibs.len)]}) catch oom();
+        }
+    }
+    return ls;
+}
+
+/// Pushes the reads of a deep register: compact and newline-only dumps at
+/// any depth, indented ones where the text stays small (an indented dump
+/// is quadratic in the depth), the iteration, the query.
+fn deepReads(p: *Prog, reg: u8, depth: usize) void {
+    for ([_]i32{ -1, 0 }) |ind| {
+        p.op(.dump);
+        p.u8_(reg);
+        p.i32_(ind);
+        p.op(.dump_safe);
+        p.u8_(reg);
+        p.i32_(ind);
+    }
+    if (depth <= 1100) {
+        for ([_]i32{ 1, 2, 4 }) |ind| {
+            p.op(.dump);
+            p.u8_(reg);
+            p.i32_(ind);
+        }
+        // past column 512 the indent is spaces, whatever indent_char is
+        for ([_][3]u8{ .{ 1, 0, 'x' }, .{ 0, 1, '\t' }, .{ 1, 2, ' ' } }) |raw| {
+            p.op(.dump_raw);
+            p.u8_(reg);
+            p.i32_(if (raw[2] == 'x') 2 else 1);
+            p.u8_(raw[0]);
+            p.u8_(raw[1]);
+            p.u8_(raw[2]);
+        }
+    }
+    p.op(.dump_raw);
+    p.u8_(reg);
+    p.i32_(-1);
+    p.u8_(1);
+    p.u8_(0);
+    p.u8_(' ');
+    p.op(.query);
+    p.u8_(reg);
+    p.op(.iter);
+    p.u8_(reg);
+}
+
+fn eqBoth(p: *Prog, x: u8, y: u8) void {
+    p.op(.eq);
+    p.u8_(x);
+    p.u8_(y);
+    p.op(.eq);
+    p.u8_(y);
+    p.u8_(x);
+}
+
+/// One deep document through every operation the deep-nesting backport
+/// bounds: parse, copy, compare, dump, destroy (each register's old value
+/// is destroyed when the next one replaces it), and against a variant that
+/// differs -- or, for a number written another way, does not -- at one
+/// level, usually near the bottom.
+fn deepProgram(gpa: std.mem.Allocator, p: *Prog, r: std.Random, text: *std.ArrayList(u8), depth: usize, shape: u8) void {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const levels = deepLevels(arena, r, depth, shape);
+    const leaf_i = r.uintLessThan(usize, deep_leaves.len);
+    const leaf = deep_leaves[leaf_i];
+
+    p.reset();
+    deepText(gpa, text, levels, leaf);
+    p.op(.parse);
+    p.u8_(0);
+    p.str(text.items);
+    p.op(.parse_nt);
+    p.u8_(1);
+    p.str(text.items);
+    eqBoth(p, 0, 1);
+    p.op(.assign);
+    p.u8_(2);
+    p.u8_(0);
+    eqBoth(p, 2, 0);
+    deepReads(p, 2, depth);
+
+    // the copy of a copy, and a value pushed into an array
+    p.op(.set_array);
+    p.u8_(6);
+    p.op(.push);
+    p.u8_(6);
+    p.u8_(2);
+    p.op(.insert);
+    p.u8_(6);
+    p.u8_(2);
+    eqBoth(p, 6, 2);
+    p.op(.at_idx);
+    p.u8_(7);
+    p.u8_(6);
+    p.u64_(0);
+    eqBoth(p, 7, 0);
+    p.op(.dump);
+    p.u8_(6);
+    p.i32_(-1);
+
+    // variants, each at one level
+    for (0..6) |_| {
+        const variant = arena.dupe(Level, levels) catch oom();
+        var vleaf = leaf;
+        const at = if (r.boolean()) depth - 1 - r.uintLessThan(usize, @min(depth, 4)) else r.uintLessThan(usize, depth);
+        const l = &variant[at];
+        switch (r.uintLessThan(u8, 7)) {
+            // a different leaf; 1 and 1.0, -0 and 0.0 are equal
+            0 => vleaf = switch (leaf_i) {
+                0 => "1.0",
+                1 => "1",
+                2 => "0.0",
+                3 => "-0",
+                else => deep_leaves[r.uintLessThan(usize, deep_leaves.len)],
+            },
+            // another key
+            1 => if (l.object) {
+                l.key = "\"k2\"";
+            } else {
+                l.after = ",0";
+            },
+            // one more element
+            2 => l.after = std.fmt.allocPrint(arena, "{s},{s}", .{ l.after, if (l.object) "\"z\":0" else "0" }) catch oom(),
+            // one element fewer
+            3 => if (l.before.len > 0) {
+                l.before = "";
+            } else if (l.after.len > 0) {
+                l.after = "";
+            } else {
+                l.before = if (l.object) "\"y\":1," else "1,";
+            },
+            // the other kind of container
+            4 => l.* = .{ .object = !l.object },
+            // the same members in another order
+            5 => if (l.object and (l.before.len > 0 or l.after.len > 0)) {
+                const b = l.before;
+                l.before = if (l.after.len > 0) arena.dupe(u8, l.after[1..]) catch oom() else "";
+                if (l.before.len > 0) l.before = std.fmt.allocPrint(arena, "{s},", .{l.before}) catch oom();
+                l.after = if (b.len > 0) std.fmt.allocPrint(arena, ",{s}", .{b[0 .. b.len - 1]}) catch oom() else "";
+            } else {
+                l.* = .{ .object = true, .before = "\"a\":1,", .key = "\"k\"" };
+            },
+            // a number written another way
+            else => l.after = if (l.object) ",\"n\":1" else ",1",
+        }
+        if (r.boolean()) {
+            // and the same change made to the original's copy, for an equal pair
+            const twin = arena.dupe(Level, levels) catch oom();
+            twin[at] = l.*;
+            if (std.mem.eql(u8, l.after, ",1") or std.mem.eql(u8, l.after, ",\"n\":1"))
+                twin[at].after = if (l.object) ",\"n\":1.0" else ",1.0";
+            deepText(gpa, text, twin, vleaf);
+            p.op(.parse);
+            p.u8_(4);
+            p.str(text.items);
+        } else {
+            p.op(.assign);
+            p.u8_(4);
+            p.u8_(0);
+        }
+        deepText(gpa, text, variant, vleaf);
+        p.op(.parse);
+        p.u8_(3);
+        p.str(text.items);
+        eqBoth(p, 3, 4);
+        p.op(.dump);
+        p.u8_(3);
+        p.i32_(-1);
+    }
+
+    // cut short: the partial tree is destroyed on the way out of the parser
+    deepText(gpa, text, levels, leaf);
+    const cut = text.items[0 .. text.items.len - 1 - r.uintLessThan(usize, @min(depth, text.items.len - 1))];
+    p.op(.parse);
+    p.u8_(5);
+    p.str(cut);
+    p.op(.parse_nt);
+    p.u8_(5);
+    p.str(cut);
+    p.op(.query);
+    p.u8_(5);
+}
+
+/// A value built by copies, one level at a time, around a string that is
+/// not UTF-8, with keys that are not either: `dump` throws from deep inside,
+/// and `dump_safe` and the error handlers replace or drop.
+fn deepBuiltProgram(p: *Prog, r: std.Random, depth: usize) void {
+    p.reset();
+    p.op(.set_string);
+    p.u8_(0);
+    p.str(([_][]const u8{ "a\xffb", "\xc3", "ok\xe2\x82\xac", "\xed\xa0\x80" })[r.uintLessThan(usize, 4)]);
+    for (0..depth) |i| {
+        if (r.boolean()) {
+            p.op(.set_array);
+            p.u8_(1);
+            if (r.boolean()) {
+                p.op(.push);
+                p.u8_(1);
+                p.u8_(3);
+            }
+            p.op(.push);
+            p.u8_(1);
+            p.u8_(0);
+        } else {
+            p.op(.set_object);
+            p.u8_(1);
+            p.op(.set_item);
+            p.u8_(1);
+            p.str(if (r.uintLessThan(u8, 40) == 0) "k\xff" else if (i % 7 == 0) "\xc3\xa9" else "k");
+            p.u8_(0);
+        }
+        p.op(.assign);
+        p.u8_(0);
+        p.u8_(1);
+        if (i == depth / 2) {
+            p.op(.assign);
+            p.u8_(3);
+            p.u8_(0);
+        }
+    }
+    p.op(.assign);
+    p.u8_(2);
+    p.u8_(0);
+    eqBoth(p, 0, 2);
+    eqBoth(p, 0, 1);
+    eqBoth(p, 0, 3);
+    for ([_]i32{ -1, 0, 2 }) |ind| {
+        p.op(.dump);
+        p.u8_(2);
+        p.i32_(ind);
+        p.op(.dump_safe);
+        p.u8_(2);
+        p.i32_(ind);
+        for (0..3) |h| {
+            p.op(.dump_raw);
+            p.u8_(2);
+            p.i32_(ind);
+            p.u8_(@intCast(h % 2));
+            p.u8_(@intCast(h));
+            p.u8_('x');
+        }
+    }
+    p.op(.iter);
+    p.u8_(2);
+}
+
 /// The handwritten texts: each of the lexer's and parser's messages, and
 /// the quirks they show.
 const fixed_texts = [_][]const u8{
@@ -1379,6 +1691,28 @@ pub fn main() !void {
         p.reset();
         mutationProgram(&p, r);
         compare(gpa, "mutations", p.buf.items);
+    }
+
+    // deep nesting: past the 128 levels nlohmann's copy, comparison and
+    // dump descend before they finish iteratively, up to 100,000 deep
+    var text: std.ArrayList(u8) = .empty;
+    defer text.deinit(gpa);
+    for (deep_depths) |depth| {
+        for (0..5) |shape| {
+            deepProgram(gpa, &p, r, &text, depth, @intCast(shape));
+            compare(gpa, "deep", p.buf.items);
+        }
+    }
+    for (0..24) |_| {
+        deepBuiltProgram(&p, r, r.intRangeAtMost(usize, 120, 320));
+        compare(gpa, "deep-built", p.buf.items);
+    }
+    // a million deep, arrays only and objects only: deep enough that the
+    // port's smallest recursive frame -- a destroy or an array `==` that
+    // descended without bound -- would overflow the stack
+    for (0..2) |shape| {
+        deepProgram(gpa, &p, r, &text, 1_000_000, @intCast(shape));
+        compare(gpa, "deep", p.buf.items);
     }
 
     if (failures != 0) {

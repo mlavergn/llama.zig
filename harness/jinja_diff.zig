@@ -21,9 +21,9 @@
 //!   propagation rules (`chat.zig`'s header). A byte ours trusts and
 //!   upstream marks is the injection both exist to stop; a byte ours
 //!   untrusts and upstream trusts is a template control token tokenized as
-//!   text. The one exception is ours by design: `bos_token` and `eos_token`
-//!   themselves are re-trusted, where upstream marks every bound variable as
-//!   input, those two included.
+//!   text. No exception: since v0.7.0 upstream binds `bos_token` and
+//!   `eos_token` unmarked, after the input (`jinja_ref.cpp`), and so does
+//!   `chat.zig`; until then they were marked upstream and re-trusted here.
 //!
 //! Then the probes: the conversations upstream's capability check
 //! (`common/jinja/caps.cpp`) and differential analysis
@@ -53,7 +53,7 @@ const json_mod = @import("json");
 const jinja = @import("zigjinja");
 const inputs = @import("inputs");
 
-extern fn jinja_ref_render(tmpl: [*]const u8, tmpl_len: usize, vars: [*]const u8, vars_len: usize, out: *?[*]u8, out_len: *usize, input: *?[*]u8) c_int;
+extern fn jinja_ref_render(tmpl: [*]const u8, tmpl_len: usize, vars: [*]const u8, vars_len: usize, out: *?[*]u8, out_len: *usize, input: *?[*]u8, parts: *?[*]u8) c_int;
 extern fn jinja_ref_free(p: ?*anyopaque) void;
 extern fn jinja_ref_caps(tmpl: [*]const u8, tmpl_len: usize, out: *[9]u8) c_int;
 
@@ -103,11 +103,21 @@ const conversations = [_]Conversation{
         .{ .role = "user", .content = "One." },
         .{ .role = "user", .content = "Two." },
     } },
+    // Empty contents, first and in the middle: upstream keeps each as an
+    // empty input part between template parts (v0.7.0's prompt parts show
+    // them), so the part lists must agree, not only the bytes.
+    .{ .name = "empty", .messages = &.{
+        .{ .role = "user", .content = "" },
+        .{ .role = "assistant", .content = "" },
+        .{ .role = "user", .content = "Hi" },
+    } },
 };
 
 /// One render's outcome on one side.
 const Outcome = union(enum) {
-    ok: struct { text: []const u8, input: []const u8 },
+    /// `parts`: every part as gathered, an empty one included -- "I<len>,"
+    /// for input, "T<len>," for template text.
+    ok: struct { text: []const u8, input: []const u8, parts: []const u8 },
     failed: []const u8,
 };
 
@@ -139,18 +149,20 @@ fn refRender(source: []const u8, conv: Conversation) !Outcome {
     var out: ?[*]u8 = null;
     var out_len: usize = 0;
     var input: ?[*]u8 = null;
-    const rc = jinja_ref_render(source.ptr, source.len, json.ptr, json.len, &out, &out_len, &input);
+    var parts: ?[*]u8 = null;
+    const rc = jinja_ref_render(source.ptr, source.len, json.ptr, json.len, &out, &out_len, &input, &parts);
     defer jinja_ref_free(out);
     defer jinja_ref_free(input);
+    defer jinja_ref_free(parts);
     if (rc != 0) return .{ .failed = try gpa.dupe(u8, std.mem.span(@as([*:0]u8, @ptrCast(out.?)))) };
     return .{ .ok = .{
         .text = try gpa.dupe(u8, out.?[0..out_len]),
         .input = try gpa.dupe(u8, input.?[0..out_len]),
+        .parts = try gpa.dupe(u8, std.mem.span(@as([*:0]u8, @ptrCast(parts.?)))),
     } };
 }
 
-/// Ours, flattened: the text and, per byte, 1 where it is untrusted and 2
-/// where it is `bos_token`/`eos_token` itself, which `chat.zig` re-trusts.
+/// Ours, flattened: the text and, per byte, 1 where it is untrusted.
 fn portRender(source: []const u8, conv: Conversation) !Outcome {
     var t = try chat.Template.init(gpa, source);
     defer t.deinit();
@@ -162,11 +174,13 @@ fn portRender(source: []const u8, conv: Conversation) !Outcome {
     defer chat.freeSegments(gpa, segs);
     var text: std.ArrayList(u8) = .empty;
     var untrusted: std.ArrayList(u8) = .empty;
+    var parts: std.ArrayList(u8) = .empty;
     for (segs) |seg| {
         try text.appendSlice(gpa, seg.text);
-        try untrusted.appendNTimes(gpa, if (seg.token) 2 else @intFromBool(!seg.trusted), seg.text.len);
+        try untrusted.appendNTimes(gpa, @intFromBool(!seg.trusted), seg.text.len);
+        try parts.print(gpa, "{s}{d},", .{ if (seg.trusted) "T" else "I", seg.text.len });
     }
-    return .{ .ok = .{ .text = try text.toOwnedSlice(gpa), .input = try untrusted.toOwnedSlice(gpa) } };
+    return .{ .ok = .{ .text = try text.toOwnedSlice(gpa), .input = try untrusted.toOwnedSlice(gpa), .parts = try parts.toOwnedSlice(gpa) } };
 }
 
 /// Where ours failed: `chat.zig` folds every engine error into
@@ -318,9 +332,11 @@ fn refProbe(source: []const u8, vars: []const u8) !ProbeOutcome {
     var out: ?[*]u8 = null;
     var out_len: usize = 0;
     var input: ?[*]u8 = null;
-    const rc = jinja_ref_render(source.ptr, source.len, vars.ptr, vars.len, &out, &out_len, &input);
+    var parts: ?[*]u8 = null;
+    const rc = jinja_ref_render(source.ptr, source.len, vars.ptr, vars.len, &out, &out_len, &input, &parts);
     defer jinja_ref_free(out);
     defer jinja_ref_free(input);
+    defer jinja_ref_free(parts);
     if (rc != 0) return .{ .failed = try gpa.dupe(u8, std.mem.span(@as([*:0]u8, @ptrCast(out.?)))) };
     return .{ .ok = try gpa.dupe(u8, out.?[0..out_len]) };
 }
@@ -419,7 +435,7 @@ fn runProbes(filter: []const u8) !struct { renders: usize, differ: usize, caps_d
     return .{ .renders = renders, .differ = differ, .caps_differ = caps_differ, .caps = caps_n };
 }
 
-const Verdict = enum { same, both_failed, text, trust, port_failed, ref_failed };
+const Verdict = enum { same, both_failed, text, trust, parts, port_failed, ref_failed };
 
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
@@ -452,13 +468,15 @@ pub fn main(init: std.process.Init) !void {
                             verdict = .text;
                             detail_at = std.mem.indexOfDiff(u8, r.text, p.text);
                         } else for (r.input, p.input, 0..) |ri, pu, i| {
-                            // 2, a re-trusted bos or eos, agrees with upstream's input mark only.
-                            const agrees = if (pu == 2) ri == 1 else ri == pu;
-                            if (!agrees) {
+                            if (ri != pu) {
                                 verdict = .trust;
                                 detail_at = i;
                                 break;
                             }
+                        } else if (!std.mem.eql(u8, r.parts, p.parts)) {
+                            // the same bytes and marks, split differently:
+                            // an empty input part kept or dropped
+                            verdict = .parts;
                         }
                     },
                 },
@@ -469,6 +487,7 @@ pub fn main(init: std.process.Init) !void {
                 .both_failed => 'x',
                 .text => 'T',
                 .trust => '!',
+                .parts => 'P',
                 .port_failed => 'E',
                 .ref_failed => 'R',
             };
@@ -486,6 +505,10 @@ pub fn main(init: std.process.Init) !void {
                         .text => {
                             snippet("ref ", ref.ok.text, detail_at.?);
                             snippet("port", port.ok.text, detail_at.?);
+                            // `JINJA_DIFF_FULL` prints both whole renders, for a filtered run.
+                            if (std.c.getenv("JINJA_DIFF_FULL") != null) {
+                                std.debug.print("      ref  full:\n{s}\n      port full:\n{s}\n", .{ ref.ok.text, port.ok.text });
+                            }
                         },
                         .trust => {
                             const at = detail_at.?;
@@ -495,6 +518,7 @@ pub fn main(init: std.process.Init) !void {
                             });
                             snippet("at  ", ref.ok.text, at);
                         },
+                        .parts => std.debug.print("      ref  parts {s}\n      port parts {s}\n", .{ ref.ok.parts, port.ok.parts }),
                         .port_failed => std.debug.print("      port: {s}\n", .{port.failed}),
                         .ref_failed => std.debug.print("      ref:  {s}\n", .{ref.failed}),
                         else => {},
@@ -534,8 +558,8 @@ pub fn main(init: std.process.Init) !void {
     var renders: usize = 0;
     for (std.enums.values(Verdict)) |v| renders += counts.get(v);
     std.debug.print(
-        \\  conversations: {d} (= same, x both raise, T text, ! trust, E ours raises, R upstream raises)
-        \\  identical {d}, both raise {d}, text differs {d}, trust {d}, ours raises {d}, upstream raises {d}
+        \\  conversations: {d} (= same, x both raise, T text, ! trust, P parts, E ours raises, R upstream raises)
+        \\  identical {d}, both raise {d}, text differs {d}, trust {d}, parts differ {d}, ours raises {d}, upstream raises {d}
         \\
     , .{
         conversations.len,
@@ -543,6 +567,7 @@ pub fn main(init: std.process.Init) !void {
         counts.get(.both_failed),
         counts.get(.text),
         counts.get(.trust),
+        counts.get(.parts),
         counts.get(.port_failed),
         counts.get(.ref_failed),
     });

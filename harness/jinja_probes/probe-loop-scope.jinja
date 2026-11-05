@@ -1,0 +1,17 @@
+{#- v0.7.0: each loop iteration runs in its own scope. A `set` in the body reaches neither the next iteration nor the code after the loop; a namespace is shared; an `else` block runs in the enclosing scope. -#}
+{%- set x = 'outer' -%}
+{%- set ns = namespace(n=0, last='none') -%}
+{%- for m in messages -%}
+[{{ x }}|{{ y is defined }}|{{ z | default('nz') }}]
+{%- set x = m.role -%}{%- set y = loop.index -%}
+{%- if loop.first -%}{%- set z = 'first' -%}{%- endif -%}
+({{ z | default('nz') }})
+{%- set ns.n = ns.n + 1 -%}{%- set ns.last = x -%}
+{%- for k in [1, 2] -%}<{{ k }}{{ x }}{{ w is defined }}>{%- set w = k -%}{%- set x = 'inner' -%}{%- endfor -%}
+{{ x }}{{ w is defined }}
+{%- set fresh = namespace(c=0) -%}{%- set fresh.c = fresh.c + loop.index -%}{{ fresh.c }}
+{%- set blk -%}b{{ loop.index }}{%- endset -%}{{ blk }}
+{%- endfor -%}
+|after: {{ x }} {{ y is defined }} {{ z is defined }} {{ w is defined }} {{ m is defined }} {{ blk is defined }} {{ loop is defined }} {{ ns.n }} {{ ns.last }}
+{%- for i in [] -%}{%- else -%}{%- set e = 'else' -%}{%- endfor %} {{ e | default('no-else') }}
+{%- for a, b in [[1, 2], [3, 4]] if a > 0 -%}{%- if loop.first -%}{%- set p = a -%}{%- endif -%}{{ p | default('np') }}{{ b }}{%- endfor %} {{ p is defined }}

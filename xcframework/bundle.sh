@@ -6,7 +6,9 @@
 # GGML_METAL_EMBED_LIBRARY=OFF, a build this project never makes. The headers
 # come from the pinned llama.cpp/, the module map and Info.plist are
 # upstream's text, so `verify.sh compat` can require every file but the
-# binary to be byte-identical to upstream's own xcframework.
+# binary to be byte-identical to upstream's own xcframework. Its paths are
+# quoted where upstream's are not, since this checkout's may hold a space;
+# what it writes is unchanged.
 #
 #   bundle.sh <llama.cpp root> <framework-parent-dir> <min-os> <ios|macos|visionos|tvos>
 #
@@ -18,45 +20,45 @@ framework_name="llama"
 
 if [[ "$platform" == "macos" ]]; then
     # macOS versioned structure uses versioned directories
-    mkdir -p ${build_dir}/${framework_name}.framework/Versions/A/Headers
-    mkdir -p ${build_dir}/${framework_name}.framework/Versions/A/Modules
-    mkdir -p ${build_dir}/${framework_name}.framework/Versions/A/Resources
+    mkdir -p "${build_dir}/${framework_name}.framework/Versions/A/Headers"
+    mkdir -p "${build_dir}/${framework_name}.framework/Versions/A/Modules"
+    mkdir -p "${build_dir}/${framework_name}.framework/Versions/A/Resources"
 
     # Create symbolic links
-    ln -sf A ${build_dir}/${framework_name}.framework/Versions/Current
-    ln -sf Versions/Current/Headers ${build_dir}/${framework_name}.framework/Headers
-    ln -sf Versions/Current/Modules ${build_dir}/${framework_name}.framework/Modules
-    ln -sf Versions/Current/Resources ${build_dir}/${framework_name}.framework/Resources
-    ln -sf Versions/Current/${framework_name} ${build_dir}/${framework_name}.framework/${framework_name}
+    ln -sf A "${build_dir}/${framework_name}.framework/Versions/Current"
+    ln -sf Versions/Current/Headers "${build_dir}/${framework_name}.framework/Headers"
+    ln -sf Versions/Current/Modules "${build_dir}/${framework_name}.framework/Modules"
+    ln -sf Versions/Current/Resources "${build_dir}/${framework_name}.framework/Resources"
+    ln -sf Versions/Current/${framework_name} "${build_dir}/${framework_name}.framework/${framework_name}"
 
-    header_path=${build_dir}/${framework_name}.framework/Versions/A/Headers/
-    module_path=${build_dir}/${framework_name}.framework/Versions/A/Modules/
+    header_path="${build_dir}/${framework_name}.framework/Versions/A/Headers/"
+    module_path="${build_dir}/${framework_name}.framework/Versions/A/Modules/"
 else
     # iOS/VisionOS/tvOS use a flat structure
-    mkdir -p ${build_dir}/${framework_name}.framework/Headers
-    mkdir -p ${build_dir}/${framework_name}.framework/Modules
-    rm -rf ${build_dir}/${framework_name}.framework/Versions
+    mkdir -p "${build_dir}/${framework_name}.framework/Headers"
+    mkdir -p "${build_dir}/${framework_name}.framework/Modules"
+    rm -rf "${build_dir}/${framework_name}.framework/Versions"
 
-    header_path=${build_dir}/${framework_name}.framework/Headers/
-    module_path=${build_dir}/${framework_name}.framework/Modules/
+    header_path="${build_dir}/${framework_name}.framework/Headers/"
+    module_path="${build_dir}/${framework_name}.framework/Modules/"
 fi
 
-cp "$src"/include/llama.h             ${header_path}
-cp "$src"/ggml/include/ggml.h         ${header_path}
-cp "$src"/ggml/include/ggml-opt.h     ${header_path}
-cp "$src"/ggml/include/ggml-alloc.h   ${header_path}
-cp "$src"/ggml/include/ggml-backend.h ${header_path}
-cp "$src"/ggml/include/ggml-metal.h   ${header_path}
-cp "$src"/ggml/include/ggml-cpu.h     ${header_path}
-cp "$src"/ggml/include/ggml-blas.h    ${header_path}
-cp "$src"/ggml/include/gguf.h         ${header_path}
-cp "$src"/tools/mtmd/mtmd.h           ${header_path}
-cp "$src"/tools/mtmd/mtmd-helper.h    ${header_path}
+cp "$src"/include/llama.h             "${header_path}"
+cp "$src"/ggml/include/ggml.h         "${header_path}"
+cp "$src"/ggml/include/ggml-opt.h     "${header_path}"
+cp "$src"/ggml/include/ggml-alloc.h   "${header_path}"
+cp "$src"/ggml/include/ggml-backend.h "${header_path}"
+cp "$src"/ggml/include/ggml-metal.h   "${header_path}"
+cp "$src"/ggml/include/ggml-cpu.h     "${header_path}"
+cp "$src"/ggml/include/ggml-blas.h    "${header_path}"
+cp "$src"/ggml/include/gguf.h         "${header_path}"
+cp "$src"/tools/mtmd/mtmd.h           "${header_path}"
+cp "$src"/tools/mtmd/mtmd-helper.h    "${header_path}"
 
 # Upstream's module map, verbatim. `link "c++"` is upstream's; this binary
 # needs no C++ runtime, and an app autolinking libc++ through it loses
 # nothing.
-cat > ${module_path}module.modulemap << EOF
+cat > "${module_path}module.modulemap" << EOF
 framework module llama {
     umbrella "Headers"
 
@@ -108,7 +110,7 @@ case "$platform" in
     *) echo "bundle.sh: unknown platform $platform" >&2; exit 2 ;;
 esac
 
-cat > ${plist_path} << EOF
+cat > "${plist_path}" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">

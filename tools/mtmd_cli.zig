@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/mtmd/mtmd-cli.cpp` at v0.6.0 (`d81235049`).
+//! Ported from `llama.cpp/tools/mtmd/mtmd-cli.cpp` at v0.7.0 (`620d2225c`).
 //! Each declaration names the C++ it replaces and the line it began at.
 //!
 //! # What differs
@@ -11,8 +11,10 @@
 //! - `MTMD_DEBUG_GRAPH` installs upstream's `common_debug_cb_eval`, from
 //!   `common/debug.cpp`, which is not ported: with it set this refuses to
 //!   run rather than silently not printing the graph.
-//! - `--jinja`: `tools/common/chat.zig` ports the legacy chat-template path,
-//!   which is this tool's default; the Jinja applier is not ported.
+//! - Chat templates are `cli/common_chat`'s (`common_chat_templates_init`,
+//!   `common_chat_format_single`, `common_chat_format_example`), as the
+//!   server's: since v0.7.0 building a template runs its differential
+//!   analysis, which logs at debug.
 //! - Video: the reference is built without `MTMD_VIDEO`, so there are no
 //!   video helpers on either side.
 
@@ -23,7 +25,7 @@ const c = tc.c;
 const log = tc.log;
 const arg = tc.arg;
 const console = tc.console;
-const chat = tc.chat;
+const chat = @import("common_chat");
 
 comptime {
     // libllama and libmtmd, compiled in (see `build/tools.zig`).
@@ -43,7 +45,7 @@ extern fn _exit(code: c_int) noreturn;
 const lc_numeric: c_int = if (builtin.os.tag.isDarwin()) 4 else if (builtin.os.tag == .windows) 4 else 1;
 
 // Ports `g_is_generating`, `g_is_interrupted` (mtmd-cli.cpp:31, 32
-// @d81235049): volatile, because of signal being an interrupt
+// @620d2225c): volatile, because of signal being an interrupt
 var g_is_generating_: bool = false;
 var g_is_interrupted_: bool = false;
 
@@ -57,7 +59,7 @@ fn isInterrupted() bool {
     return @as(*volatile bool, &g_is_interrupted_).*;
 }
 
-/// Ports `show_additional_info` (mtmd-cli.cpp:40 @d81235049).
+/// Ports `show_additional_info` (mtmd-cli.cpp:40 @620d2225c).
 fn showAdditionalInfo(argv: []const [:0]const u8) void {
     log.out("Experimental CLI for multimodal\n\n" ++
         "Usage: %s [options] -m <model> --mmproj <mmproj> --image <image> --audio <audio> -p <prompt>\n\n" ++
@@ -67,7 +69,7 @@ fn showAdditionalInfo(argv: []const [:0]const u8) void {
         "  to disable using GPU for mmproj model, add --no-mmproj-offload\n", .{argv[0].ptr});
 }
 
-/// Ports `sigint_handler` (mtmd-cli.cpp:53 @d81235049).
+/// Ports `sigint_handler` (mtmd-cli.cpp:53 @620d2225c).
 fn sigintHandler(signo: std.posix.SIG) callconv(.c) void {
     if (signo == std.posix.SIG.INT) {
         if (isGenerating()) {
@@ -80,13 +82,13 @@ fn sigintHandler(signo: std.posix.SIG) callconv(.c) void {
     }
 }
 
-/// Ports `inject_test_response_marker` (mtmd-cli.cpp:69 @d81235049): only
+/// Ports `inject_test_response_marker` (mtmd-cli.cpp:69 @620d2225c): only
 /// used by upstream's tests.sh to capture the response.
 fn injectTestResponseMarker() void {
     if (getenv("MTMD_TEST_RESPONSE_MARKER")) |env| log.out("%s\n", .{env});
 }
 
-/// Ports `mtmd_cli_context` (mtmd-cli.cpp:76 @d81235049).
+/// Ports `mtmd_cli_context` (mtmd-cli.cpp:76 @620d2225c).
 const CliContext = struct {
     a: std.mem.Allocator,
     ctx_vision: ?*c.mtmd_context = null,
@@ -107,7 +109,7 @@ const CliContext = struct {
     mbatch: ?*c.mtmd_batch = null,
 
     // chat template
-    tmpls: chat.Templates = undefined,
+    tmpls: chat.templates.Templates = undefined,
     chat_history: std.ArrayList(chat.Msg) = .empty,
     use_jinja: bool = false,
 
@@ -117,7 +119,7 @@ const CliContext = struct {
     n_threads: c_int = 1,
     n_past: c.llama_pos = 0,
 
-    /// Ports the constructor `mtmd_cli_context` (mtmd-cli.cpp:109 @d81235049). Every failure is the
+    /// Ports the constructor `mtmd_cli_context` (mtmd-cli.cpp:109 @620d2225c). Every failure is the
     /// C++'s `exit(1)`, which runs no destructor.
     fn init(self: *CliContext, gpa: std.mem.Allocator, a: std.mem.Allocator, params: *tc.params.Params) !void {
         const llama_init = try tc.init.initFromParams(gpa, params, false);
@@ -153,10 +155,13 @@ const CliContext = struct {
             tc.cExit(1);
         }
 
-        self.tmpls = try chat.Templates.init(a, model, params.chat_template);
+        var info = try chat.templates.modelInfo(a, @ptrCast(model.?));
+        self.tmpls = try chat.templates.init(a, &info, params.chat_template, "", "");
         self.use_jinja = params.use_jinja;
         self.chat_history.clearRetainingCapacity();
-        const example = try a.dupeSentinel(u8, try self.tmpls.formatExample(a, params.use_jinja), 0);
+        var kwargs: std.ArrayList(chat.templates.KwArg) = .empty;
+        for (params.default_template_kwargs.entries.items) |e| try kwargs.append(a, .{ .key = e.key, .value = e.value });
+        const example = try a.dupeSentinel(u8, try chat.templates.formatExample(a, &self.tmpls, params.use_jinja, kwargs.items), 0);
         log.inf("%s: chat template example:\n%s\n", .{ "mtmd_cli_context", example.ptr });
 
         // load antiprompt tokens for legacy templates
@@ -176,7 +181,7 @@ const CliContext = struct {
         };
     }
 
-    /// Ports the destructor of `mtmd_cli_context` (mtmd-cli.cpp:150 @d81235049), then the members in
+    /// Ports the destructor of `mtmd_cli_context` (mtmd-cli.cpp:150 @620d2225c), then the members in
     /// reverse order of declaration.
     fn deinit(self: *CliContext) void {
         self.smpl.destroy();
@@ -187,7 +192,7 @@ const CliContext = struct {
         if (self.ctx_vision) |v| c.mtmd_free(v);
     }
 
-    /// Ports `init_vision_context` (mtmd-cli.cpp:154 @d81235049).
+    /// Ports `init_vision_context` (mtmd-cli.cpp:154 @620d2225c).
     fn initVisionContext(self: *CliContext, params: *tc.params.Params) void {
         const clip_path = self.a.dupeSentinel(u8, params.mmproj.path, 0) catch tc.cExit(1);
         var mparams = c.mtmd_context_params_default();
@@ -228,13 +233,13 @@ const CliContext = struct {
         self.init_opt.video_params.ffmpeg_bin_dir = if (self.video_ffmpeg_bin_dir.len == 0) null else self.video_ffmpeg_bin_dir.ptr;
     }
 
-    /// Ports `check_antiprompt` (mtmd-cli.cpp:193 @d81235049).
+    /// Ports `check_antiprompt` (mtmd-cli.cpp:193 @620d2225c).
     fn checkAntiprompt(self: *const CliContext, generated_tokens: []const c.llama_token) bool {
         if (self.antiprompt_tokens.len == 0 or generated_tokens.len < self.antiprompt_tokens.len) return false;
         return std.mem.eql(c.llama_token, generated_tokens[generated_tokens.len - self.antiprompt_tokens.len ..], self.antiprompt_tokens);
     }
 
-    /// Ports `load_media` (mtmd-cli.cpp:204 @d81235049).
+    /// Ports `load_media` (mtmd-cli.cpp:204 @620d2225c).
     fn loadMedia(self: *CliContext, fname: []const u8) !bool {
         const f = try self.a.dupeSentinel(u8, fname, 0);
         const res = c.mtmd_helper_bitmap_init_from_file(self.ctx_vision, f.ptr, false, self.init_opt);
@@ -244,7 +249,7 @@ const CliContext = struct {
     }
 };
 
-/// Ports `generate_response` (mtmd-cli.cpp:217 @d81235049).
+/// Ports `generate_response` (mtmd-cli.cpp:217 @620d2225c).
 fn generateResponse(ctx: *CliContext, n_predict: c_int) !c_int {
     const a = ctx.a;
     var generated_tokens: std.ArrayList(c.llama_token) = .empty;
@@ -288,16 +293,16 @@ fn generateResponse(ctx: *CliContext, n_predict: c_int) !c_int {
     return 0;
 }
 
-/// Ports `chat_add_and_format` (mtmd-cli.cpp:260 @d81235049).
+/// Ports `chat_add_and_format` (mtmd-cli.cpp:260 @620d2225c).
 fn chatAddAndFormat(ctx: *CliContext, new_msg: chat.Msg) ![]const u8 {
     const a = ctx.a;
     log.dbg("chat_add_and_format: new_msg.role='%s', new_msg.content='%s'\n", .{ (try a.dupeSentinel(u8, new_msg.role, 0)).ptr, (try a.dupeSentinel(u8, new_msg.content, 0)).ptr });
-    const formatted = try ctx.tmpls.formatSingle(a, ctx.chat_history.items, new_msg, std.mem.eql(u8, new_msg.role, "user"), ctx.use_jinja);
+    const formatted = try chat.templates.formatSingle(a, &ctx.tmpls, ctx.chat_history.items, new_msg, std.mem.eql(u8, new_msg.role, "user"), ctx.use_jinja);
     try ctx.chat_history.append(a, new_msg);
     return formatted;
 }
 
-/// Ports `eval_message` (mtmd-cli.cpp:270 @d81235049).
+/// Ports `eval_message` (mtmd-cli.cpp:270 @620d2225c).
 fn evalMessage(ctx: *CliContext, msg: chat.Msg) !c_int {
     const a = ctx.a;
     injectTestResponseMarker();
@@ -437,8 +442,53 @@ fn stringStrip(s: []const u8) []const u8 {
     return std.mem.trim(u8, s, " \t\n\r\x0b\x0c");
 }
 
+/// `common/chat.cpp`'s `LOG_DBG`, `LOG_INF`, `LOG_WRN` and `LOG_ERR`, which
+/// `cli/common_chat/log.zig` hands its host as finished lines: into
+/// `common_log` at the macro's level, as the server wires them.
+fn chatLogSink(level: chat.log.Level, text: []const u8) void {
+    var buf: [4096]u8 = undefined;
+    const z = std.fmt.bufPrintSentinel(&buf, "{s}", .{text}, 0) catch return chatLogSinkHeap(level, text);
+    chatLog(level, z.ptr);
+}
+
+fn chatLogSinkHeap(level: chat.log.Level, text: []const u8) void {
+    const z = std.heap.c_allocator.dupeSentinel(u8, text, 0) catch return;
+    defer std.heap.c_allocator.free(z);
+    chatLog(level, z.ptr);
+}
+
+fn chatLog(level: chat.log.Level, z: [*:0]const u8) void {
+    switch (level) {
+        .debug => log.dbg("%s", .{z}),
+        .info => log.inf("%s", .{z}),
+        .warn => log.wrn("%s", .{z}),
+        .err => log.err("%s", .{z}),
+    }
+}
+
+/// `chat.h`'s message helpers' `LOG_WRN` and `LOG_ERR` (`msg.zig`'s own sink).
+fn chatMsgLogSink(level: chat.msg.Level, text: []const u8) void {
+    chatLogSink(if (level == .warn) .warn else .err, text);
+}
+
+/// Whether `LOG_DBG` prints at the current verbosity.
+fn chatDebugOn() bool {
+    return log.level_debug <= log.verbosity_thold;
+}
+
+/// `common_chat_verify_template(tmpl, true)`, for `--chat-template` at parse time.
+fn verifyJinjaTemplate(_: std.mem.Allocator, tmpl: []const u8) anyerror!bool {
+    return chat.templates.verifyTemplate(std.heap.c_allocator, tmpl, true);
+}
+
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     _ = setlocale(lc_numeric, "C");
+
+    // cli/common_chat into common_log, as upstream's common/chat.cpp logs
+    chat.log.sink = chatLogSink;
+    chat.log.debug_on = chatDebugOn;
+    chat.msg.log_sink = chatMsgLogSink;
+    arg.verify_jinja_template = verifyJinjaTemplate;
 
     c.ggml_time_init();
 
@@ -486,7 +536,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
     const System = struct {
         /// The `eval_system_prompt_if_present` lambda (mtmd-cli.cpp:475
-        /// @d81235049).
+        /// @620d2225c).
         fn evalIfPresent(cx: *CliContext, p: *const tc.params.Params) !c_int {
             if (p.system_prompt.len == 0) return 0;
             return evalMessage(cx, .{ .role = "system", .content = p.system_prompt });
@@ -591,7 +641,7 @@ const win32 = struct {
 };
 
 /// The Windows arm of the Ctrl+C handling, `console_ctrl_handler`
-/// (mtmd-cli.cpp:466 @d81235049).
+/// (mtmd-cli.cpp:466 @620d2225c).
 fn consoleCtrlHandler(ctrl_type: u32) callconv(.winapi) c_int {
     const ctrl_c_event: u32 = 0;
     if (ctrl_type == ctrl_c_event) {
@@ -601,7 +651,7 @@ fn consoleCtrlHandler(ctrl_type: u32) callconv(.winapi) c_int {
     return 0;
 }
 
-/// Ports `main` (mtmd-cli.cpp:424 @d81235049).
+/// Ports `main` (mtmd-cli.cpp:424 @620d2225c).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

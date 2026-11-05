@@ -10,9 +10,10 @@ replays the same records in its own process and writes a transcript, and
 the two must agree line for line: for a template, its capabilities, source,
 explicit flag, ASR prompt, `support_enable_thinking`, the formatted example,
 `verify_template` and every field the differential analysis reads off it;
-for an apply, the format, prompt, grammar, laziness, generation prompt,
-thinking tags, triggers, preserved tokens, extra stops, the serialized
-parser and the message delimiters; for a parse, the message, every field;
+for an apply, the format, prompt (its text and its template and input
+runs), grammar, laziness, generation prompt, thinking tags, triggers,
+preserved tokens, extra stops, the parser (as JSON, `harness/peg_save.h`)
+and the message delimiters; for a parse, the message, every field;
 for the auto-parser helpers, their results; every exception's class and
 `what()`; every INF/WRN/ERR line logged.
 
@@ -25,7 +26,9 @@ The records:
   translation unit to wrappers that call the real thing and write what they
   were given. The plain builds must pass on the reference; the recording
   builds must pass too, and what they wrote -- templates, applies, every
-  prefix `test_peg_parser` parses, the helpers' inputs -- is replayed.
+  prefix `test_peg_parser` feeds its chat session, the helpers' inputs -- is
+  replayed. Since v0.7.0 a parser cannot be saved and loaded, so a parse is
+  replayed through the apply that made its parser.
 - **Every template in `llama.cpp/models/templates/`**, applied over sampled
   conversations (system and developer roles, typed content parts, tool calls
   and responses, reasoning, a trailing assistant turn to continue), with and
@@ -114,6 +117,9 @@ COVERAGE = [
     "caps supports_preserve_reasoning=1", "caps supports_reasoning_effort=1", "caps supports_parallel_tool_calls=0",
     "enable_thinking 1", "verify 0", "init_failed", "asr.system Perform ASR.",
     "MARKER ", "output_A ",
+    # v0.7.0's two dedicated parsers
+    "L W TranslateGemma: source_lang_code not set in chat_template_kwargs, defaulting to en-GB",
+    "think_start <ifm|think_faster>", "think_start <ifm|think_fast>", "trigger 1 -1 <ifm|tool_calls>",
 ]
 
 
@@ -266,7 +272,10 @@ SCHEMAS = [
 ]
 
 WORDS = ["Hello!", "What's the weather in Paris?", "  spaced  \n", "héllo 世界 🙂", "Compute 2+2",
-         "<think>not really</think>", "line one\nline two", ""]
+         "<think>not really</think>", "line one\nline two", "",
+         # v0.7.0: a BOS and an EOS spelled in user input, which the add-BOS
+         # and add-EOS trims of a template part must leave alone
+         "<s>Hi", "Bye</s>"]
 
 
 # parameters that are no JSON at all: common_chat_tools_to_json_oaicompat throws
@@ -334,7 +343,12 @@ def gen_inputs(rng):
     kwargs = []
     if rng.random() < 0.25:
         kv = rng.choice([("reasoning_effort", "\"low\""), ("reasoning_effort", "\"high\""), ("preserve_reasoning", "true"),
-                         ("enable_thinking", "false"), ("custom", "{\"x\": 1}"), ("bad", "{oops")])
+                         ("enable_thinking", "false"), ("custom", "{\"x\": 1}"), ("bad", "{oops"),
+                         # v0.7.0: K2 Horizon's call formats and effort tiers,
+                         # TranslateGemma's language codes
+                         ("tool_call_format", "\"json\""), ("tool_call_format", "\"xml_typed\""),
+                         ("reasoning_effort", "\"medium\""), ("source_lang_code", "\"fr\""),
+                         ("target_lang_code", "\"de-DE\"")])
         kwargs.append(list(kv))
     grammar = ""
     if rng.random() < 0.06:
@@ -356,6 +370,15 @@ def gen_inputs(rng):
         "add_eos": False,
         "force_pure_content": rng.random() < 0.05,
     }
+
+
+# v0.7.0: K2 Horizon's call formats and effort tiers, TranslateGemma's
+# language codes
+EXTRA_KWARGS = [("tool_call_format", "\"json\""), ("tool_call_format", "\"xml_typed\""),
+                ("reasoning_effort", "\"low\""), ("reasoning_effort", "\"medium\""),
+                ("source_lang_code", "\"fr\""), ("target_lang_code", "\"de-DE\""),
+                # an empty input string, which upstream keeps as a part
+                ("empty_kw", "\"\"")]
 
 
 SYNTHETIC = [
@@ -441,13 +464,14 @@ def mutate(rng, data):
 
 def make_records(rec_path):
     records = []
-    stats = {"tmpl": 0, "apply": 0, "parse": 0, "helper": 0}
+    stats = {"tmpl": 0, "apply": 0, "parse": 0, "helper": 0, "unmatched": 0}
     tmpl_ids = {}
-    parser_ids = {}
     seen = set()
-    recorded_inputs = []          # (pid, format, gen, input bytes)
+    apply_idx = {}                # (t, inputs) -> the apply record
+    apply_of = {}                 # (parser, format, generation prompt) -> the apply that made it
+    recorded_inputs = []          # (apply index, format, input bytes)
     pool_by_src = {}              # template source -> replies parsed by its parsers
-    src_of_parser = {}
+    src_of_apply = {}
 
     def add(r):
         records.append(r)
@@ -464,18 +488,15 @@ def make_records(rec_path):
             stats["tmpl"] += 1
         return tmpl_ids[key]
 
-    def parser(text):
-        if text not in parser_ids:
-            parser_ids[text] = len(parser_ids)
-            add({"op": "parser", "id": parser_ids[text], "text": text})
-        return parser_ids[text]
-
-    def parse(pid, fmt, gen, data, partial):
-        key = (pid, fmt, gen, data, partial)
+    def parse(idx, data, partial):
+        # a parser cannot be loaded since v0.7.0: every parse names the
+        # apply whose parser and parser params it uses
+        key = ("parse", idx, data, partial)
         if key in seen:
             return
         seen.add(key)
-        add({"op": "parse", "p": pid, "format": fmt, "gen": gen, "input_hex": hexs(data), "partial": partial})
+        records[idx]["keep"] = True
+        add({"op": "parse", "a": idx, "input_hex": hexs(data), "partial": partial})
         stats["parse"] += 1
 
     if rec_path:
@@ -491,21 +512,26 @@ def make_records(rec_path):
                 if r["t"] not in old_ids:
                     continue
                 key = ("apply", old_ids[r["t"]], json.dumps(r["in"], sort_keys=True))
-                if "parser_out" in r and r["parser_out"]:
-                    src_of_parser[r["parser_out"]] = old_src[r["t"]]
-                if key in seen:
-                    continue
-                seen.add(key)
-                add({"op": "apply", "t": old_ids[r["t"]], "in": r["in"]})
-                stats["apply"] += 1
+                if key not in apply_idx:
+                    seen.add(key)
+                    apply_idx[key] = add({"op": "apply", "t": old_ids[r["t"]], "in": r["in"]})
+                    stats["apply"] += 1
+                idx = apply_idx[key]
+                if r.get("parser_out"):
+                    apply_of.setdefault((r["parser_out"], r["format_out"], r["gen_out"]), idx)
+                    src_of_apply[idx] = old_src[r["t"]]
             elif op == "parse":
                 if not r["parser"]:
                     continue
-                pid = parser(r["parser"])
+                idx = apply_of.get((r["parser"], r["format"], r["gen"]))
+                if idx is None:
+                    # a parser a test built itself, not through a template
+                    stats["unmatched"] += 1
+                    continue
                 data = bytes.fromhex(r["input_hex"])
-                parse(pid, r["format"], r["gen"], data, r["partial"])
-                recorded_inputs.append((pid, r["format"], r["gen"], data))
-                src = src_of_parser.get(r["parser"])
+                parse(idx, data, r["partial"])
+                recorded_inputs.append((idx, r["format"], data))
+                src = src_of_apply.get(idx)
                 if src is not None and not r["partial"]:
                     pool_by_src.setdefault(src, set()).add(data)
             else:
@@ -522,12 +548,12 @@ def make_records(rec_path):
             for item in recorded_inputs:
                 by_format.setdefault(item[1], set()).add(item[0])
             for _ in range(MUT):
-                pid, fmt, gen, data = rng.choice(recorded_inputs)
-                parse(pid, fmt, gen, mutate(rng, data), rng.random() < 0.5)
+                idx, fmt, data = rng.choice(recorded_inputs)
+                parse(idx, mutate(rng, data), rng.random() < 0.5)
             for _ in range(MUT // 4):
-                pid, fmt, gen, data = rng.choice(recorded_inputs)
+                idx, fmt, data = rng.choice(recorded_inputs)
                 other = rng.choice(sorted(by_format[fmt]))
-                parse(other, fmt, gen, data, rng.random() < 0.3)
+                parse(other, data, rng.random() < 0.3)
 
     # every template in models/templates, and a few made up for the arms
     # no real one reaches
@@ -543,14 +569,29 @@ def make_records(rec_path):
     # A model's vocabulary in place of the given BOS and EOS: llama-spm adds
     # BOS itself, so a template that writes it has it cut from the prompt
     vocab = os.path.join(ROOT, "llama.cpp/models/ggml-vocab-llama-spm.gguf")
-    with_model = {"synthetic-bos-eos", "meta-llama-Llama-3.1-8B-Instruct.jinja", "Qwen3.5-4B.jinja"}
+    with_model = {"synthetic-bos-eos", "synthetic-input-ends", "meta-llama-Llama-3.1-8B-Instruct.jinja", "Qwen3.5-4B.jinja"}
     sources.append(("synthetic-bos-eos", "{{ bos_token }}{% for m in messages %}[{{ m.role }}]{{ m.content }}{% endfor %}"
                     "{% if add_generation_prompt %}[assistant]{% endif %}{{ eos_token }}"))
+    # v0.7.0: the prompt opens and closes with message text, an input part:
+    # the add-BOS and add-EOS trims look only at a template part
+    sources.append(("synthetic-input-ends", "{% for m in messages %}{{ m.content }}{% endfor %}"))
+    # an empty input string first and last (the `empty_kw` kwarg): upstream
+    # keeps it as a part, and the add-BOS and add-EOS trims then leave the
+    # template text after and before it alone
+    sources.append(("synthetic-empty-input-edges",
+                    "{{ empty_kw }}{{ bos_token }}{% for m in messages %}[{{ m.role }}]{{ m.content }}{% endfor %}"
+                    "{% if add_generation_prompt %}[assistant]{% endif %}{{ eos_token }}{{ empty_kw }}"))
+    # a vocabulary that adds EOS too, for the add-EOS trim
+    vocab_eos = os.path.join(ROOT, "llama.cpp/models/ggml-vocab-nomic-bert-moe.gguf")
+    with_model_eos = {"synthetic-empty-input-edges", "synthetic-input-ends"}
+    with_model.add("synthetic-empty-input-edges")
     expanded = []
     for name, src in sources:
         expanded.append((name, src, None))
         if name in with_model:
             expanded.append((name + "+model", src, vocab))
+        if name in with_model_eos:
+            expanded.append((name + "+model-eos", src, vocab_eos))
     for name, src, model in expanded:
         if FILTER not in name:
             continue
@@ -573,6 +614,21 @@ def make_records(rec_path):
                 cut = data[:trng.randint(0, len(data))]
                 add({"op": "parse", "a": idx, "input_hex": hexs(cut), "partial": True})
                 stats["parse"] += 2
+        # every kwarg a dedicated parser reads, once each, with tools: one
+        # random kwarg per apply reaches each too rarely to rely on
+        for kv in EXTRA_KWARGS:
+            inputs = gen_inputs(trng)
+            inputs["kwargs"] = [list(kv)]
+            inputs["use_jinja"] = True
+            if not inputs["tools"]:
+                inputs["tools"] = TOOLS[:2]
+            inputs["tool_choice"] = 0
+            idx = add({"op": "apply", "t": t, "in": inputs, "keep": True})
+            stats["apply"] += 1
+            for reply in trng.sample(pool, min(2, len(pool))) + trng.sample(GENERIC_REPLIES, 1):
+                data = reply if isinstance(reply, bytes) else reply.encode()
+                add({"op": "parse", "a": idx, "input_hex": hexs(data), "partial": False})
+                stats["parse"] += 1
     return records, stats
 
 
@@ -680,7 +736,8 @@ def main():
         for r in records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"records: {len(records)} ({stats['tmpl']} templates, {stats['apply']} applies, "
-          f"{stats['parse']} parses, {stats['helper']} helper calls)")
+          f"{stats['parse']} parses, {stats['helper']} helper calls; {stats['unmatched']} recorded parses "
+          f"over a parser no template made, not replayable)")
 
     env = dict(os.environ, TZ="UTC")
     t0 = time.time()

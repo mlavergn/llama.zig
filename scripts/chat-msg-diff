@@ -181,11 +181,7 @@ def records():
         yield "C", v
     for v in [True, False, "reasoning_content", "content", "", None, 1, "auto", [], {}]:
         yield "K", v
-    for _ in range(N // 4):
-        ds = [rng.choice([{"role": rng.choice(ROLES), "delimiter": word()}, {"role": "user"}, {"delimiter": "x"},
-                          junk(), {"role": junk(), "delimiter": "y"}, {"role": "user", "delimiter": junk()}])
-              for _ in range(rng.randint(0, 4))]
-        yield "D", ds if rng.random() > 0.1 else junk()
+    # "D", common_chat_msg_delimiters_parse and to_json: removed upstream at v0.7.0
     for _ in range(N // 2):
         toks = [rng.randint(0, 5) for _ in range(rng.randint(0, 14))]
         delims = [{"role": rng.choice(["user", "assistant", "system", "tool", "x"]), "delimiter": "d",

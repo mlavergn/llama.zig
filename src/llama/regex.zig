@@ -21,7 +21,7 @@
 //! # Why port a regex engine
 //!
 //! A lazy grammar's trigger patterns are `std::regex`es, compiled in
-//! `llama_grammar_init_impl` (llama-grammar.cpp:1215 @d81235049), and *where* a match starts and
+//! `llama_grammar_init_impl` (llama-grammar.cpp:1215 @620d2225c), and *where* a match starts and
 //! which capture group is first non-empty decide what text the grammar is
 //! fed. ECMAScript fixes most of that, but libc++ is the reference, quirks
 //! included: an unescaped `]` or `}` outside a class is a parse error, `.`

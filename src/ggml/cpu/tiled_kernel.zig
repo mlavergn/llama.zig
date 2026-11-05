@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cpu/tiled/tiled-kernel.h` and
-//! `llama.cpp/ggml/src/ggml-cpu/tiled/tiled-kernel.cpp` (v0.6.0,
-//! `d81235049`), new at v0.6.0 and replacing `iqp.cpp`. Each declaration
+//! `llama.cpp/ggml/src/ggml-cpu/tiled/tiled-kernel.cpp` (v0.7.0,
+//! `620d2225c`), new at v0.6.0 and replacing `iqp.cpp`. Each declaration
 //! names the C it replaces and the line it began at; the driver that calls
 //! these is `tiled.zig`.
 //!
@@ -53,26 +53,26 @@ const impl = @import("../impl.zig");
 const qblocks = @import("../quants/blocks.zig");
 const c = impl.c;
 
-/// Ports `TILED_TILE_K` (tiled-kernel.h:22 @d81235049): one `QK_K` block.
+/// Ports `TILED_TILE_K` (tiled-kernel.h:22 @620d2225c): one `QK_K` block.
 pub const tile_k = 256;
 
-/// Ports `TILED_TILE_ROWS` (tiled-kernel.h:23 @d81235049): the most rows a
+/// Ports `TILED_TILE_ROWS` (tiled-kernel.h:23 @620d2225c): the most rows a
 /// window holds; ragged at the edges.
 pub const tile_rows = 256;
 
-/// Ports `TILED_MICRO` (tiled-kernel.h:24 @d81235049): the microtile edge,
+/// Ports `TILED_MICRO` (tiled-kernel.h:24 @620d2225c): the microtile edge,
 /// and the granularity of `q8_K`'s `bsums`.
 pub const micro = 16;
 
-/// Ports `TILED_WS_SLOT` (tiled-kernel.h:25 @d81235049): one thread's
+/// Ports `TILED_WS_SLOT` (tiled-kernel.h:25 @620d2225c): one thread's
 /// workspace, a clean 512 KB.
 pub const ws_slot = 512 * 1024;
 
-/// Ports `NB_MAX` (tiled-kernel.h:31 @d81235049): the most subblocks a
+/// Ports `NB_MAX` (tiled-kernel.h:31 @620d2225c): the most subblocks a
 /// 256-element block has (16-wide ones).
 pub const nb_max = tile_k / 16;
 
-/// Ports `struct tiled_tile_src0` (tiled-kernel.h:30 @d81235049): the weight
+/// Ports `struct tiled_tile_src0` (tiled-kernel.h:30 @620d2225c): the weight
 /// side of a window, shared by every format.
 ///
 /// `scales` and `mins` are sized for 16-wide subblocks; the 32-wide formats
@@ -91,7 +91,7 @@ pub const TileSrc0 = extern struct {
     mins: [tile_rows * nb_max]i32,
 };
 
-/// Ports `struct tiled_tile_src1` (tiled-kernel.h:41 @d81235049): the
+/// Ports `struct tiled_tile_src1` (tiled-kernel.h:41 @620d2225c): the
 /// activation side, built from `q8_K` rows.
 pub const TileSrc1 = extern struct {
     /// `q8` codes, one byte per element; transposed for `vpdpbusd` on VNNI.
@@ -102,7 +102,7 @@ pub const TileSrc1 = extern struct {
     d: [tile_rows]f32,
 };
 
-/// Ports `struct tiled_ws` (tiled-kernel.h:51 @d81235049): one thread's
+/// Ports `struct tiled_ws` (tiled-kernel.h:51 @620d2225c): one thread's
 /// workspace, carved out of `wdata`.
 pub const Ws = extern struct {
     src0: TileSrc0,
@@ -225,7 +225,7 @@ inline fn dpbusd512(src: i32x16, a: u8x64, b: i8x64) i32x16 {
     return out;
 }
 
-/// The lambda `hsum256_epi32` (tiled-kernel.cpp:248 @d81235049): the eight
+/// The lambda `hsum256_epi32` (tiled-kernel.cpp:248 @620d2225c): the eight
 /// lanes summed, wrapping. Integer addition commutes, so the C's shuffle
 /// order does not matter.
 inline fn hsum(v: i32x8) i32 {
@@ -243,8 +243,8 @@ inline fn hsum(v: i32x8) i32 {
 // `_mm_packus_epi16` only values in [119, 137], and `sign32`'s `v ^ m - m`
 // is the negation the scalar spells out. One portable body serves both.
 
-/// Ports `tiled_unpk_nib4` (tiled-kernel.h:129 @d81235049), the scalar arm,
-/// and so `tiled_unpk_nib4` (tiled-kernel.h:68 @d81235049), the `__AVX2__`
+/// Ports `tiled_unpk_nib4` (tiled-kernel.h:129 @620d2225c), the scalar arm,
+/// and so `tiled_unpk_nib4` (tiled-kernel.h:68 @620d2225c), the `__AVX2__`
 /// one: packed 4-bit codes to low and high nibbles.
 pub inline fn unpkNib4(src: [*]const u8, lo: [*]u8, hi: [*]u8) void {
     const v = load(u8x32, src);
@@ -252,30 +252,30 @@ pub inline fn unpkNib4(src: [*]const u8, lo: [*]u8, hi: [*]u8) void {
     store(u8x32, hi, v >> @splat(4));
 }
 
-/// Ports `tiled_unpk_2bit` (tiled-kernel.h:133 @d81235049), and its
-/// `__AVX2__` arm `tiled_unpk_2bit` (tiled-kernel.h:75 @d81235049): the
+/// Ports `tiled_unpk_2bit` (tiled-kernel.h:133 @620d2225c), and its
+/// `__AVX2__` arm `tiled_unpk_2bit` (tiled-kernel.h:75 @620d2225c): the
 /// 2-bit values at bit offset `S`.
 pub inline fn unpk2bit(comptime S: u3, src: [*]const u8, dst: [*]u8) void {
     store(u8x32, dst, (load(u8x32, src) >> @splat(S)) & @as(u8x32, @splat(3)));
 }
 
-/// Ports `tiled_unpk_or` (tiled-kernel.h:137 @d81235049), and its `__AVX2__`
-/// arm `tiled_unpk_or` (tiled-kernel.h:81 @d81235049): ORs the `M`-bit
+/// Ports `tiled_unpk_or` (tiled-kernel.h:137 @620d2225c), and its `__AVX2__`
+/// arm `tiled_unpk_or` (tiled-kernel.h:81 @620d2225c): ORs the `M`-bit
 /// value at bit offset `S` of `src` into bit offset `D` of `dst`.
 pub inline fn unpkOr(comptime S: u3, comptime D: u3, comptime M: u8, dst: [*]u8, src: [*]const u8) void {
     const v = ((load(u8x32, src) >> @splat(S)) & @as(u8x32, @splat(M))) << @splat(D);
     store(u8x32, dst, load(u8x32, dst) | v);
 }
 
-/// Ports `tiled_lut8` (tiled-kernel.h:140 @d81235049), and its `__AVX2__`
-/// arm `tiled_lut8` (tiled-kernel.h:93 @d81235049): `dst[j] = lut[src[j]]`
+/// Ports `tiled_lut8` (tiled-kernel.h:140 @620d2225c), and its `__AVX2__`
+/// arm `tiled_lut8` (tiled-kernel.h:93 @620d2225c): `dst[j] = lut[src[j]]`
 /// for 16 bytes.
 pub inline fn lut8(lut: *const [16]u8, src: [*]const u8, dst: [*]u8) void {
     for (0..16) |j| dst[j] = lut[src[j]];
 }
 
-/// Ports `tiled_unpk_sign32` (tiled-kernel.h:143 @d81235049), and its
-/// `__AVX2__` arm `tiled_unpk_sign32` (tiled-kernel.h:101 @d81235049): 32
+/// Ports `tiled_unpk_sign32` (tiled-kernel.h:143 @620d2225c), and its
+/// `__AVX2__` arm `tiled_unpk_sign32` (tiled-kernel.h:101 @620d2225c): 32
 /// grid magnitudes and four sign bytes to codes biased by 128.
 pub inline fn unpkSign32(g: [4]u64, signs: [*]const u8, dst32: [*]u8) void {
     for (0..4) |l| {
@@ -287,8 +287,8 @@ pub inline fn unpkSign32(g: [4]u64, signs: [*]const u8, dst32: [*]u8) void {
     }
 }
 
-/// Ports `tiled_unpk_tern8` (tiled-kernel.h:155 @d81235049), and its
-/// `__AVX2__` arm `tiled_unpk_tern8` (tiled-kernel.h:119 @d81235049): eight
+/// Ports `tiled_unpk_tern8` (tiled-kernel.h:155 @620d2225c), and its
+/// `__AVX2__` arm `tiled_unpk_tern8` (tiled-kernel.h:119 @620d2225c): eight
 /// ternary grid bytes to `128 + delta + 8 * (int8_t) src[j]`.
 pub inline fn unpkTern8(src: *const [8]u8, delta: i8, dst: [*]u8) void {
     for (0..8) |j| {
@@ -327,7 +327,7 @@ const Geometry = struct {
     }
 };
 
-/// Ports `tiled_run_microtile_scalar` (tiled-kernel.cpp:16 @d81235049): the
+/// Ports `tiled_run_microtile_scalar` (tiled-kernel.cpp:16 @620d2225c): the
 /// reference, exact integer subdots per subblock, folded into `f32` one
 /// subblock at a time. The `#else` arm of `tiled_run_microtile`, never
 /// reached (see the file header), so plain.
@@ -391,7 +391,7 @@ fn microScalar(
     }
 }
 
-/// Ports `tiled_run_micro_vnni_8x16` (tiled-kernel.cpp:95 @d81235049): an
+/// Ports `tiled_run_micro_vnni_8x16` (tiled-kernel.cpp:95 @620d2225c): an
 /// 8x16 band, `s1 += scales * (raw - BIAS * bsums)` and `s2 += mins * bsums`
 /// per subblock in `i32`, then `d*s1 - dmin*s2` per row.
 fn microVnni8x16(
@@ -477,7 +477,7 @@ fn microVnni8x16(
     }
 }
 
-/// Ports `tiled_run_microtile_vnni` (tiled-kernel.cpp:201 @d81235049): a
+/// Ports `tiled_run_microtile_vnni` (tiled-kernel.cpp:201 @620d2225c): a
 /// 16x16 microtile as two 8x16 band passes.
 fn microVnni(
     comptime SUBBLK: usize,
@@ -500,7 +500,7 @@ fn microVnni(
     microVnni8x16(SUBBLK, HAS_MIN, BIAS, NK, src0, src1, r + 8, j, num_k, slab, buf, bs);
 }
 
-/// Ports `tiled_run_microtile_avx2` (tiled-kernel.cpp:227 @d81235049): the
+/// Ports `tiled_run_microtile_avx2` (tiled-kernel.cpp:227 @620d2225c): the
 /// existing `vec_dot` algorithms over an 8-column group, one row at a time.
 ///
 /// `SUBBLK` 32: one `maddubs` per subblock and column under a broadcast
@@ -649,7 +649,7 @@ fn microAvx2(
     }
 }
 
-/// Ports `tiled_run_microtile` (tiled-kernel.cpp:511 @d81235049): one 16x16
+/// Ports `tiled_run_microtile` (tiled-kernel.cpp:511 @620d2225c): one 16x16
 /// microtile over one 256-K slab, accumulated into `buf` (`j`-major, row
 /// width `buf_stride`). `num_k == 1` takes the `NK = 1` instantiation, the
 /// narrow path the runtime-strided `NK = 0` one.
@@ -692,10 +692,10 @@ pub fn runMicrotile(
 // -----------------------------------------------------------------------------
 // The repacks
 
-/// Ports `tiled_repack_src1` (tiled-kernel.cpp:577 @d81235049), the
+/// Ports `tiled_repack_src1` (tiled-kernel.cpp:577 @620d2225c), the
 /// `__AVX512VNNI__` arm, `tiled_repack_src1` (tiled-kernel.cpp:646
-/// @d81235049), the `__AVX2__` one, and `tiled_repack_src1`
-/// (tiled-kernel.cpp:663 @d81235049), the empty `#else`.
+/// @620d2225c), the `__AVX2__` one, and `tiled_repack_src1`
+/// (tiled-kernel.cpp:663 @620d2225c), the empty `#else`.
 ///
 /// VNNI transposes each 16x16 block of `i32` words of a 16-row band in
 /// place, giving the `[kg%16][kg/16][row][4]` layout `vpdpbusd` reads (the C
@@ -737,7 +737,7 @@ pub fn repackSrc1(comptime a: Arm, src1: *TileSrc1, row0: c_int, num_k: c_int, b
 }
 
 /// Ports `tiled_byte_sum_32` and `tiled_byte_sum_16`
-/// (tiled-kernel.cpp:670, 679 @d81235049): `n` unsigned bytes summed, which
+/// (tiled-kernel.cpp:670, 679 @620d2225c): `n` unsigned bytes summed, which
 /// `maddubs` by one then `madd` by one computes exactly.
 inline fn byteSum(comptime n: usize, p: [*]const u8) i32 {
     var s: i32 = 0;
@@ -745,7 +745,7 @@ inline fn byteSum(comptime n: usize, p: [*]const u8) i32 {
     return s;
 }
 
-/// Ports `tiled_repack_src0` (tiled-kernel.cpp:692 @d81235049): for the
+/// Ports `tiled_repack_src0` (tiled-kernel.cpp:692 @620d2225c): for the
 /// act-bias formats, each row's correction `128 * sum_s scales[s] *
 /// (sum of the debiased weights of subblock s)`, stored in `mins[r][0]`. Only
 /// under `__AVX2__`, which the VNNI arm's targets also define; a no-op

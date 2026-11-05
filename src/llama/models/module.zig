@@ -3,8 +3,8 @@
 //!
 //! **Not a port.** Upstream gives each architecture a class deriving from
 //! `llama_model_base` and overriding three virtuals -- `load_arch_hparams`,
-//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:801, 802, 803
-//! @d81235049) -- and `llama_model_mapping` (llama-model.cpp:43 @d81235049) picks the
+//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:893, 894, 895
+//! @620d2225c) -- and `llama_model_mapping` (llama-model.cpp:43 @620d2225c) picks the
 //! class. Here a class is a file exporting those three functions, and
 //! `forArch` is the mapping. An architecture with no entry is one the port
 //! has not reached: loading it stops at `error.Unported`, which
@@ -70,6 +70,7 @@ pub const gemma3n = @import("gemma3n.zig");
 pub const gemma4 = @import("gemma4.zig");
 pub const gemma4_assistant = @import("gemma4_assistant.zig");
 pub const gemma_embedding = @import("gemma_embedding.zig");
+pub const gemma_embedding2 = @import("gemma_embedding2.zig");
 pub const glm4 = @import("glm4.zig");
 pub const glm4_moe = @import("glm4_moe.zig");
 pub const glm_dsa = @import("glm_dsa.zig");
@@ -95,6 +96,7 @@ pub const jais2 = @import("jais2.zig");
 pub const jamba = @import("jamba.zig");
 pub const jina_bert_v2 = @import("jina_bert_v2.zig");
 pub const jina_bert_v3 = @import("jina_bert_v3.zig");
+pub const k2_horizon = @import("k2_horizon.zig");
 pub const kimi_k3 = @import("kimi_k3.zig");
 pub const kimi_linear = @import("kimi_linear.zig");
 pub const laguna = @import("laguna.zig");
@@ -105,6 +107,7 @@ pub const llada_moe = @import("llada_moe.zig");
 pub const llama = @import("llama.zig");
 pub const llama4 = @import("llama4.zig");
 pub const maincoder = @import("maincoder.zig");
+pub const maion_coder = @import("maion_coder.zig");
 pub const mamba = @import("mamba.zig");
 pub const mamba2 = @import("mamba2.zig");
 pub const mamba_base = @import("mamba_base.zig");
@@ -149,6 +152,7 @@ pub const qwen2 = @import("qwen2.zig");
 pub const qwen2moe = @import("qwen2moe.zig");
 pub const qwen2vl = @import("qwen2vl.zig");
 pub const qwen3 = @import("qwen3.zig");
+pub const vllm_decision2 = @import("vllm_decision2.zig");
 pub const qwen35 = @import("qwen35.zig");
 pub const qwen35moe = @import("qwen35moe.zig");
 pub const qwen3moe = @import("qwen3moe.zig");
@@ -248,6 +252,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .gemma4 => entryOf(gemma4),
         .gemma4_assistant => entryOf(gemma4_assistant),
         .gemma_embedding => entryOf(gemma_embedding),
+        .gemma_embedding2 => entryOf(gemma_embedding2),
         .glm4 => entryOf(glm4),
         .glm4_moe => entryOf(glm4_moe),
         .glm_dsa => entryOf(glm_dsa),
@@ -273,6 +278,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .jamba => entryOf(jamba),
         .jina_bert_v2 => entryOf(jina_bert_v2),
         .jina_bert_v3 => entryOf(jina_bert_v3),
+        .k2_horizon => entryOf(k2_horizon),
         .kimi_k3 => entryOf(kimi_k3),
         .kimi_linear => entryOf(kimi_linear),
         .laguna => entryOf(laguna),
@@ -284,6 +290,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .llama4 => entryOf(llama4),
         .llama_embed => .{ .loadArchHparams = llama.loadArchHparams, .loadArchTensors = llama.loadArchTensors, .buildArchGraph = llama.buildArchGraphEmbed },
         .maincoder => entryOf(maincoder),
+        .maion_coder => entryOf(maion_coder),
         .mamba => entryOf(mamba),
         .mamba2 => entryOf(mamba2),
         .maple => entryOf(maple),
@@ -327,6 +334,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .qwen2moe => entryOf(qwen2moe),
         .qwen2vl => entryOf(qwen2vl),
         .qwen3 => entryOf(qwen3),
+        .vllm_decision2 => entryOf(vllm_decision2),
         .qwen35 => entryOf(qwen35),
         .qwen35moe => entryOf(qwen35moe),
         .qwen3moe => entryOf(qwen3moe),

@@ -154,10 +154,9 @@ static json params_extra(const task_params & p) {
         {"reasoning_control", p.sampling.reasoning_control},
         {"reasoning_budget_tokens", p.sampling.reasoning_budget_tokens},
         {"lists", lists},
-        {"chat_format_int", (int) p.chat_parser_params.format},
-        {"parse_tool_calls", p.chat_parser_params.parse_tool_calls},
-        {"is_continuation", p.chat_parser_params.is_continuation},
-        {"echo", p.chat_parser_params.echo},
+        {"chat_format_int", (int) p.chat_format},
+        {"reasoning_format_int", (int) p.reasoning_format},
+        {"n_message_spans", p.message_spans.spans.size()},
         {"n_logit_bias", p.sampling.logit_bias.size()},
     };
 }
@@ -203,13 +202,54 @@ static llama_tokens tokens_of(const json & j, const char * key) {
     return j.contains(key) ? j.at(key).get<std::vector<int>>() : llama_tokens();
 }
 
+// a result's generated text: plain, or tokenized over the record's
+// vocabulary (common_chat_input_tokenize) when it says "tokenize"
+static common_chat_input content_of(const json & j, const json & f) {
+    const std::string text = f.value("content", std::string());
+    if (f.value("tokenize", false)) {
+        common_chat_input in = common_chat_input_tokenize(vocab_at(j), text);
+        std::string toks;
+        for (auto t : in.tokens) toks += std::to_string(t) + " ";
+        line("ctoks " + toks);
+        return in;
+    }
+    return common_chat_input(text);
+}
+
+// what a chat session holds, and what it applies to a task's sampling
+static json session_json(const common_chat_session & s) {
+    json parts = json::array();
+    for (const auto & p : s.prompt().parts) parts.push_back(json::array({p.text, p.is_input}));
+    common_params_sampling sp;
+    s.apply_sampling(sp);
+    json triggers = json::array();
+    for (const auto & t : sp.grammar_triggers) triggers.push_back(json::array({(int) t.type, t.value, t.token}));
+    return json {
+        {"has_template", s.has_template()},
+        {"format", common_chat_format_name(s.format())},
+        {"parts", parts},
+        {"grammar", s.grammar()},
+        {"generation_prompt", s.generation_prompt()},
+        {"thinking_start_tag", s.thinking_start_tag()},
+        {"thinking_end_tags", s.thinking_end_tags()},
+        {"additional_stops", s.additional_stops()},
+        {"msg", json::array({s.msg().role, s.msg().content, s.msg().reasoning_content})},
+        {"parser_empty", s.parser().empty()},
+        {"sp.grammar", json::array({(int) sp.grammar.type, sp.grammar.grammar})},
+        {"sp.grammar_lazy", sp.grammar_lazy},
+        {"sp.generation_prompt", sp.generation_prompt},
+        {"sp.preserved_tokens", std::vector<int>(sp.preserved_tokens.begin(), sp.preserved_tokens.end())},
+        {"sp.grammar_triggers", triggers},
+    };
+}
+
 static void run_result(const json & j) {
     const std::string kind = j.at("kind").get<std::string>();
     const json f = j.value("f", json::object());
     std::unique_ptr<server_task_result> r;
     if (kind == "final") {
         auto * x = new server_task_result_cmpl_final();
-        x->content = f.value("content", std::string());
+        x->content = content_of(j, f);
         x->tokens = tokens_of(f, "tokens");
         x->stream = f.value("stream", false);
         x->include_usage = f.value("include_usage", false);
@@ -236,7 +276,7 @@ static void run_result(const json & j) {
         r.reset(x);
     } else if (kind == "partial") {
         auto * x = new server_task_result_cmpl_partial();
-        x->content = f.value("content", std::string());
+        x->content = content_of(j, f);
         x->tokens = tokens_of(f, "tokens");
         x->n_decoded = f.value("n_decoded", 0);
         x->n_prompt_tokens = f.value("n_prompt_tokens", 0);
@@ -354,7 +394,6 @@ static void run_result(const json & j) {
     if (st >= 0) {
         guarded([&] { r->update(*states.at(st)); });
         const auto & s = *states.at(st);
-        str("state.text", s.generated_text);
         str("state.content", s.chat_msg.content);
         line(std::string("state.flags ") + (s.thinking_block_started ? "1" : "0") + (s.text_block_started ? "1" : "0") + (s.oai_resp_created ? "1" : "0"));
     }
@@ -552,7 +591,9 @@ static void run(const std::string & op, const std::string & payload) {
             server_chat_params opt = make_chat_opt(j);
             json body = j.at("body");
             std::vector<raw_buffer> files;
-            guarded([&] { str("chat", oaicompat_chat_params_parse(body, opt, files).dump()); });
+            common_chat_session session;
+            guarded([&] { str("chat", oaicompat_chat_params_parse(vocab_at(j), body, opt, files, session).dump()); });
+            str("session", session_json(session).dump());
             str("body", body.dump());
             for (const auto & f : files) {
                 line("file " + std::to_string(f.size()) + " " + std::to_string(fnv(f.data(), f.size())));
@@ -566,13 +607,18 @@ static void run(const std::string & op, const std::string & payload) {
             server_chat_params opt = make_chat_opt(j);
             json body = j.at("body");
             std::vector<raw_buffer> files;
-            json parsed = oaicompat_chat_params_parse(body, opt, files);
+            common_chat_session session;
+            json parsed = oaicompat_chat_params_parse(vocab_at(j), body, opt, files, session);
             str("chat", parsed.dump());
+            str("session", session_json(session).dump());
             json pj = {{"v", j.value("v", 0)}, {"data", parsed}};
             server_task task(SERVER_TASK_TYPE_COMPLETION);
             task.params = eval_params(pj);
+            task.tokens = server_tokens(common_tokenize(vocab_at(j), parsed.at("prompt").get<std::string>(), true, true), false);
+            task.apply_chat_session(session);
             str("extra", params_extra(task.params).dump());
-            states[j.at("id").get<int>()] = std::make_unique<task_result_state>(task.create_state());
+            str("params", task.params.to_json(false).dump());
+            states[j.at("id").get<int>()] = std::make_unique<task_result_state>(session);
             const auto & st = *states[j.at("id").get<int>()];
             str("state.init", st.chat_msg.content);
             str("state.role", st.chat_msg.role);
@@ -643,16 +689,9 @@ static void run(const std::string & op, const std::string & payload) {
             str("trigger", t.to_json().dump());
         });
     } else if (op == "S") {
-        const json & p = j.at("parser");
-        server_task task(SERVER_TASK_TYPE_COMPLETION);
-        task.params.chat_parser_params.format = (common_chat_format) p.value("format", 0);
-        task.params.chat_parser_params.generation_prompt = p.value("generation_prompt", std::string());
-        task.params.chat_parser_params.is_continuation = p.value("is_continuation", false);
-        task.params.chat_parser_params.echo = p.value("echo", false);
-        task.params.chat_parser_params.reasoning_format = (common_reasoning_format) p.value("reasoning_format", 0);
-        task.params.chat_parser_params.reasoning_in_content = p.value("reasoning_in_content", false);
+        // a state over the default (untemplated) session: plain content
         guarded([&] {
-            states[j.at("id").get<int>()] = std::make_unique<task_result_state>(task.create_state());
+            states[j.at("id").get<int>()] = std::make_unique<task_result_state>();
             const auto & s = *states[j.at("id").get<int>()];
             str("state.init", s.chat_msg.content);
             str("state.role", s.chat_msg.role);

@@ -161,6 +161,20 @@ int main(int argc, char ** argv) {
         cp.offload_kqv = false;
         cp.op_offload = false;
     }
+    /* NODE_DUMP_KV names the KV cache type (`bf16`, `q8_0`, ...; default
+     * f16): the Metal flash-attention kernel is chosen by it -- since
+     * v0.7.0 a BF16 cache takes the tensor-API kernel, which only an exact
+     * comparison can tell from the kernel it falls back to. */
+    const char * kv_env = getenv("NODE_DUMP_KV");
+    if (kv_env) {
+        int t = 0;
+        while (t < GGML_TYPE_COUNT && !(ggml_type_name((enum ggml_type) t) && strcmp(ggml_type_name((enum ggml_type) t), kv_env) == 0)) t++;
+        if (t == GGML_TYPE_COUNT) {
+            fprintf(stderr, "%s: NODE_DUMP_KV: no type named %s\n", argv[0], kv_env);
+            return 2;
+        }
+        cp.type_k = cp.type_v = (enum ggml_type) t;
+    }
     if (!fused) {
         cp.cb_eval = observe;
         cp.cb_eval_user_data = NULL;

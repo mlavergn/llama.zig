@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.6.0, `d81235049`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.7.0, `620d2225c`),
 //! the tables at line 78 and the converters at line 3440. Each declaration
 //! names the C it replaces and the line it began at.
 //!
@@ -12,12 +12,13 @@
 //! The C bodies are mostly `#if defined(__F16C__)` and `#elif
 //! defined(__riscv_zvfh)` blocks over a scalar tail. On ARM none of them
 //! compile and only the tail survives. On x86-64-v3 the F16C blocks do, and
-//! they are **not** the tail's arithmetic for every input: `vcvtps2ph` keeps a
-//! NaN's payload where the software narrowing does not, and `vcvtph2ps`
-//! quiets a signalling NaN where the table the tail reads does not. So the
-//! blocks call the instructions -- LLVM's `vcvtps2ph` intrinsic, and the
-//! vector `fpext` that lowers to `vcvtph2ps` -- and the tails stay software.
-//! See the note on `cpuFp32ToFp16` below.
+//! they are **not** the software arithmetic for every input: `vcvtps2ph` keeps
+//! a NaN's payload where the software narrowing does not, and `vcvtph2ps`
+//! quiets a signalling NaN where the table does not. So the blocks call the
+//! instructions -- LLVM's `vcvtps2ph` intrinsic, and the vector `fpext` that
+//! lowers to `vcvtph2ps`. Since v0.7.0 the narrowing tail takes F16C too
+//! (`GGML_CPU_FP32_TO_FP16` under `__F16C__`); the widening tail stays on the
+//! table. See the notes on `cpuFp16ToFp32` and `cpuFp32ToFp16` below.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -35,13 +36,13 @@ const has_f16c = builtin.cpu.arch == .x86_64 and
 // still-C++ half of the backend reaches them through `simd-mappings.h`:
 // `GGML_CPU_UE4M3_TO_FP32` indexes `ggml_table_f32_ue4m3` directly on NEON.
 
-/// Ports `ggml_table_f32_f16` (ggml-cpu.c:81 @d81235049). 256 KB.
+/// Ports `ggml_table_f32_f16` (ggml-cpu.c:81 @620d2225c). 256 KB.
 pub export var ggml_table_f32_f16: [1 << 16]f32 = @splat(0);
 
-/// Ports `ggml_table_f32_e8m0_half` (ggml-cpu.c:84 @d81235049). 1 KB.
+/// Ports `ggml_table_f32_e8m0_half` (ggml-cpu.c:84 @620d2225c). 1 KB.
 pub export var ggml_table_f32_e8m0_half: [1 << 8]f32 = @splat(0);
 
-/// Ports `ggml_table_f32_ue4m3` (ggml-cpu.c:87 @d81235049). 1 KB.
+/// Ports `ggml_table_f32_ue4m3` (ggml-cpu.c:87 @620d2225c). 1 KB.
 pub export var ggml_table_f32_ue4m3: [1 << 8]f32 = @splat(0);
 
 /// The GELU tables, still C++ in `ggml-cpu/vec.cpp` but filled here because
@@ -59,8 +60,8 @@ const ggml_table_gelu_quick_f16 = &vec.ggml_table_gelu_quick_f16;
 // `GGML_CPU_FP32_TO_FP16` differently on this target, and the asymmetry is
 // easy to miss, so each direction is named separately here.
 
-/// Ports `GGML_CPU_FP16_TO_FP32` (simd-mappings.h:44 @d81235049), the NEON
-/// arm, and `ggml_lookup_fp16_to_fp32` (simd-mappings.h:147 @d81235049),
+/// Ports `GGML_CPU_FP16_TO_FP32` (simd-mappings.h:44 @620d2225c), the NEON
+/// arm, and `ggml_lookup_fp16_to_fp32` (simd-mappings.h:157 @620d2225c),
 /// every other.
 ///
 /// On ARM the C widens through `__fp16`, a hardware conversion; elsewhere it
@@ -73,15 +74,29 @@ pub inline fn cpuFp16ToFp32(h: c.ggml_fp16_t) f32 {
     return ggml_table_f32_f16[h];
 }
 
-/// Ports `GGML_CPU_FP32_TO_FP16` (simd-mappings.h:157 @d81235049).
+/// Ports `GGML_CPU_FP32_TO_FP16` and `GGML_CPU_FP32_TO_FP16`
+/// (simd-mappings.h:150, 167 @620d2225c): the F16C arm on x86-64-v3 and up,
+/// and the fallback everywhere else.
 ///
-/// **Not** the hardware narrowing, despite the direction above. The NEON block
-/// in `simd-mappings.h` defines `GGML_CPU_COMPUTE_FP32_TO_FP16` but never
-/// promotes it to `GGML_CPU_FP32_TO_FP16`, so the fallback at line 157 wins
-/// and the C ends up in `ggml_compute_fp32_to_fp16` -- the software routine
+/// **Not** the hardware narrowing on ARM, despite the direction above. The
+/// NEON block in `simd-mappings.h` defines `GGML_CPU_COMPUTE_FP32_TO_FP16` but
+/// never promotes it to `GGML_CPU_FP32_TO_FP16`, so the fallback wins and the
+/// C ends up in `ggml_compute_fp32_to_fp16` -- the software routine
 /// `src/ggml/impl.zig` already ports. Substituting `@floatCast` here would
 /// change the bytes for subnormals and for NaN payloads.
+///
+/// On x86 with F16C, since v0.7.0 (#30270, #30342), it *is* the hardware:
+/// `_cvtss_sh(x, 0)`, one lane of `vcvtps2ph` at round-to-nearest. That
+/// differs from the software routine only on a NaN, whose payload it keeps
+/// where the software writes `0x7E00`. Every ported site of the C's
+/// `GGML_CPU_FP32_TO_FP16` calls this; the one `GGML_FP32_TO_FP16` in
+/// `ops.cpp` (the f16 `swiglu`) calls `impl.fp32ToFp16` directly.
 pub inline fn cpuFp32ToFp16(f: f32) c.ggml_fp16_t {
+    if (comptime has_f16c) {
+        const v: @Vector(4, f32) = .{ f, 0, 0, 0 };
+        const h: @Vector(8, u16) = @bitCast(@"llvm.x86.vcvtps2ph.128"(v, round_nearest));
+        return h[0];
+    }
     return impl.fp32ToFp16(f);
 }
 
@@ -91,7 +106,7 @@ pub inline fn cpuFp32ToFp16(f: f32) c.ggml_fp16_t {
 // These are what the traits table's `from_float` slots point at for the
 // non-quantised types.
 
-/// Ports `ggml_cpu_fp32_to_fp32` (ggml-cpu.c:3476 @d81235049).
+/// Ports `ggml_cpu_fp32_to_fp32` (ggml-cpu.c:3476 @620d2225c).
 ///
 /// Parameters:
 /// - `x`: source row.
@@ -117,9 +132,10 @@ const has_avx512f = builtin.cpu.arch == .x86_64 and std.Target.x86.featureSetHas
 /// `_MM_FROUND_TO_NEAREST_INT`, the rounding immediate the C passes.
 const round_nearest: i32 = 0;
 
-/// Ports `ggml_cpu_fp32_to_fp16` (ggml-cpu.c:3480 @d81235049): with F16C,
+/// Ports `ggml_cpu_fp32_to_fp16` (ggml-cpu.c:3480 @620d2225c): with F16C,
 /// blocks of sixteen under `__AVX512F__`, then eight and four, through
-/// `vcvtps2ph`, then the software tail.
+/// `vcvtps2ph`, then the tail through `GGML_CPU_FP32_TO_FP16` -- F16C again
+/// since v0.7.0. The s390x `__VXE__` block v0.7.0 adds is not a target here.
 pub export fn ggml_cpu_fp32_to_fp16(x: [*c]const f32, y: [*c]c.ggml_fp16_t, n: i64) void {
     const nn: usize = @intCast(n);
     var i: usize = 0;
@@ -143,7 +159,7 @@ pub export fn ggml_cpu_fp32_to_fp16(x: [*c]const f32, y: [*c]c.ggml_fp16_t, n: i
     while (i < nn) : (i += 1) y[i] = cpuFp32ToFp16(x[i]);
 }
 
-/// Ports `ggml_cpu_fp16_to_fp32` (ggml-cpu.c:3513 @d81235049): with F16C,
+/// Ports `ggml_cpu_fp16_to_fp32` (ggml-cpu.c:3519 @620d2225c): with F16C,
 /// blocks of sixteen under `__AVX512F__`, then eight and four, through
 /// `vcvtph2ps`, then the tail through `GGML_CPU_FP16_TO_FP32`.
 pub export fn ggml_cpu_fp16_to_fp32(x: [*c]const c.ggml_fp16_t, y: [*c]f32, n: i64) void {
@@ -168,12 +184,12 @@ pub export fn ggml_cpu_fp16_to_fp32(x: [*c]const c.ggml_fp16_t, y: [*c]f32, n: i
     while (i < nn) : (i += 1) y[i] = cpuFp16ToFp32(x[i]);
 }
 
-/// Ports `ggml_cpu_fp32_to_bf16` (ggml-cpu.c:3567 @d81235049).
+/// Ports `ggml_cpu_fp32_to_bf16` (ggml-cpu.c:3573 @620d2225c).
 pub export fn ggml_cpu_fp32_to_bf16(x: [*c]const f32, y: [*c]c.ggml_bf16_t, n: i64) void {
     for (0..@intCast(n)) |i| y[i] = .{ .bits = impl.fp32ToBf16(x[i]) };
 }
 
-/// Ports `ggml_cpu_bf16_to_fp32` (ggml-cpu.c:3581 @d81235049).
+/// Ports `ggml_cpu_bf16_to_fp32` (ggml-cpu.c:3587 @620d2225c).
 ///
 /// The `__AVX2__` arm widens eight at a time by shifting each `u16` left 16
 /// bits, and its `__AVX512F__` block sixteen, which is exactly what the
@@ -182,7 +198,7 @@ pub export fn ggml_cpu_bf16_to_fp32(x: [*c]const c.ggml_bf16_t, y: [*c]f32, n: i
     for (0..@intCast(n)) |i| y[i] = impl.bf16ToFp32(x[i].bits);
 }
 
-/// Ports `ggml_cpu_fp32_to_i32` (ggml-cpu.c:3574 @d81235049).
+/// Ports `ggml_cpu_fp32_to_i32` (ggml-cpu.c:3580 @620d2225c).
 ///
 /// The C writes `y[i] = x[i]`, a float-to-int conversion: truncation toward
 /// zero, and undefined once the value leaves `int32_t`'s range. `impl.truncTo`
@@ -195,7 +211,7 @@ pub export fn ggml_cpu_fp32_to_i32(x: [*c]const f32, y: [*c]i32, n: i64) void {
 // -----------------------------------------------------------------------------
 // Table initialisation
 
-/// Ports the table-filling block of `ggml_cpu_init` (ggml-cpu.c:3859 @d81235049).
+/// Ports the table-filling block of `ggml_cpu_init` (ggml-cpu.c:3865 @620d2225c).
 ///
 /// Called once, under the critical section `ggml_cpu_init` holds. Fills the
 /// f16 fan-out table, both GELU tables, and the two 256-entry
@@ -217,16 +233,16 @@ pub fn initTables() void {
     }
 }
 
-/// Ports `GELU_COEF_A` (vec.h:963 @d81235049).
+/// Ports `GELU_COEF_A` (vec.h:963 @620d2225c).
 const gelu_coef_a: f32 = 0.044715;
 
-/// Ports `GELU_QUICK_COEF` (vec.h:964 @d81235049).
+/// Ports `GELU_QUICK_COEF` (vec.h:964 @620d2225c).
 const gelu_quick_coef: f32 = -1.702;
 
-/// Ports `SQRT_2_OVER_PI` (vec.h:965 @d81235049).
+/// Ports `SQRT_2_OVER_PI` (vec.h:965 @620d2225c).
 const sqrt_2_over_pi: f32 = 0.79788456080286535587989211986876;
 
-/// Ports `ggml_gelu_f32` (vec.h:968 @d81235049).
+/// Ports `ggml_gelu_f32` (vec.h:968 @620d2225c).
 ///
 /// `static inline` in a header the port cannot import, and used only to fill
 /// the table above, so it lives here rather than being reached across.
@@ -234,7 +250,7 @@ fn gelu(x: f32) f32 {
     return 0.5 * x * (1.0 + std.math.tanh(sqrt_2_over_pi * x * (1.0 + gelu_coef_a * x * x)));
 }
 
-/// Ports `ggml_gelu_quick_f32` (vec.h:1030 @d81235049).
+/// Ports `ggml_gelu_quick_f32` (vec.h:1030 @620d2225c).
 fn geluQuick(x: f32) f32 {
     return x * (1.0 / (1.0 + @exp(gelu_quick_coef * x)));
 }

@@ -13,7 +13,7 @@
 //! `common_chat_templates_apply` from `llama.cpp/common/chat.h` and
 //! `llama.cpp/common/chat.cpp`, over `cli/common_chat/templates.zig`'s
 //! port of both arms; and `base64::encode` from
-//! `llama.cpp/common/base64.hpp` (llama.cpp v0.6.0, `d81235049`). Each
+//! `llama.cpp/common/base64.hpp` (llama.cpp v0.7.0, `620d2225c`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # Remote media
@@ -36,15 +36,15 @@ const Obj = common.Obj;
 const throw = common.throw;
 const jsonValue = common.jsonValue;
 const jsonValueJson = common.jsonValueJson;
-const GrammarTrigger = common.GrammarTrigger;
+const c = common.c;
 
-/// `DIRECTORY_SEPARATOR` (common/common.h:31 @d81235049).
+/// `DIRECTORY_SEPARATOR` (common/common.h:31 @620d2225c).
 const directory_separator: u8 = if (@import("builtin").os.tag == .windows) '\\' else '/';
 
 // -----------------------------------------------------------------------------
 // /completions
 
-/// Ports `oaicompat_completion_params_parse` (server-common.cpp:1077 @d81235049):
+/// Ports `oaicompat_completion_params_parse` (server-common.cpp:1082 @620d2225c):
 /// an OpenAI `/completions` body as llama.cpp's own parameters.
 ///
 /// Return: owned by `a`.
@@ -105,7 +105,7 @@ fn copyRemaining(a: Allocator, llama_params: *Value, body: *const Value) Error!v
 // -----------------------------------------------------------------------------
 // media
 
-/// Ports `fs_validate_filename` (common/common.cpp:800 @d81235049): no control
+/// Ports `fs_validate_filename` (common/common.cpp:800 @620d2225c): no control
 /// characters, no lookalikes of path syntax, no `..`, no leading or
 /// trailing space and no trailing dot.
 pub fn fsValidateFilename(filename: []const u8, allow_subdirs: bool) bool {
@@ -207,7 +207,7 @@ fn readFile(a: Allocator, path: []const u8) Error!?[]u8 {
     return try data.toOwnedSlice(a);
 }
 
-/// Ports `handle_media` (server-common.cpp:1120 @d81235049): a media URL --
+/// Ports `handle_media` (server-common.cpp:1125 @620d2225c): a media URL --
 /// `http(s)://`, `file://` under `media_path`, a `data:` URI, or bare
 /// base64 -- as bytes appended to `out_files`.
 ///
@@ -216,7 +216,7 @@ fn readFile(a: Allocator, path: []const u8) Error!?[]u8 {
 pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u8, media_path: []const u8) Error!void {
     if (media_path.len != 0) {
         // should already be enforced by arg.cpp, but checking just in case
-        common.ggmlAssert(media_path[media_path.len - 1] == directory_separator, "server-common.cpp", 1126, "media_path.back() == DIRECTORY_SEPARATOR");
+        common.ggmlAssert(media_path[media_path.len - 1] == directory_separator, "server-common.cpp", 1131, "media_path.back() == DIRECTORY_SEPARATOR");
     }
 
     if (std.mem.startsWith(u8, url, "http")) {
@@ -296,7 +296,7 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
 // -----------------------------------------------------------------------------
 // chat templates
 
-/// Ports `common_chat_templates` (chat.cpp:337 @d81235049), through
+/// Ports `common_chat_templates` (chat.cpp:306 @620d2225c), through
 /// `cli/common_chat/templates.zig`: the model's templates (or the
 /// override) parsed by the Jinja engine, which both arms render from.
 pub const Templates = chat.templates.Templates;
@@ -371,7 +371,7 @@ pub const KwMap = struct {
     }
 };
 
-/// Ports `common_chat_templates_inputs` (chat.h:249 @d81235049), as the
+/// Ports `common_chat_templates_inputs` (chat.h:256 @620d2225c), as the
 /// conversion builds it: lists it grows and the kwargs map it merges into.
 /// The messages and tools are owned by the allocator the conversion used.
 pub const ChatTemplatesInputs = struct {
@@ -393,7 +393,7 @@ pub const ChatTemplatesInputs = struct {
     force_pure_content: bool = false,
 };
 
-/// Ports `common_chat_params` (chat.h:269 @d81235049): `templates.zig`'s.
+/// Ports `common_chat_params` (chat.h:298 @620d2225c): `templates.zig`'s.
 /// Every string and list is owned by the allocator `chatTemplatesApply`
 /// took.
 pub const ChatParams = chat.params.ChatParams;
@@ -410,14 +410,22 @@ pub fn schemaToGrammar(a: Allocator, schema: *const Value) Error![]u8 {
     };
 }
 
-/// Ports `common_chat_templates_apply` (chat.cpp:1440 @d81235049): the
+/// Ports `common_chat_templates_apply` (chat.cpp:1496 @620d2225c): the
 /// conversation rendered through Jinja (`--jinja`, with the parsers and
 /// grammars the template's analysis gives) or through libllama's built-in
 /// template families (`--no-jinja`), both `templates.zig`'s.
 ///
 /// Return: owned by `a`, which must be an arena.
 pub fn chatTemplatesApply(a: Allocator, tmpls: *const Templates, inputs: *const ChatTemplatesInputs) Error!ChatParams {
-    const in: chat.templates.TemplatesInputs = .{
+    const in = try chatTemplatesInputs(a, inputs);
+    return chat.templates.apply(a, tmpls, &in);
+}
+
+/// `common_chat_templates_inputs` as `templates.zig` takes it.
+///
+/// Return: borrows `inputs`; the kwargs are `a`'s.
+fn chatTemplatesInputs(a: Allocator, inputs: *const ChatTemplatesInputs) Error!chat.templates.TemplatesInputs {
+    return .{
         .messages = inputs.messages.items,
         .grammar = inputs.grammar,
         .json_schema = inputs.json_schema,
@@ -434,7 +442,6 @@ pub fn chatTemplatesApply(a: Allocator, tmpls: *const Templates, inputs: *const 
         .add_eos = inputs.add_eos,
         .force_pure_content = inputs.force_pure_content,
     };
-    return chat.templates.apply(a, tmpls, &in);
 }
 
 /// `caps["supports_parallel_tool_calls"]` of `common_chat_templates_get_caps`
@@ -446,7 +453,7 @@ pub fn chatTemplatesGetCaps(tmpls: *const Templates) bool {
 // -----------------------------------------------------------------------------
 // /chat/completions
 
-/// Ports `server_chat_params` (server-common.h:337 @d81235049): the global
+/// Ports `server_chat_params` (server-common.h:337 @620d2225c): the global
 /// parameters for chat formatting and parsing.
 pub const ServerChatParams = struct {
     use_jinja: bool,
@@ -464,10 +471,12 @@ pub const ServerChatParams = struct {
     force_pure_content: bool = false,
 };
 
-/// Ports `oaicompat_chat_params_parse` (server-common.cpp:1265 @d81235049): an
+/// Ports `oaicompat_chat_params_parse` (server-common.cpp:1270 @620d2225c): an
 /// OpenAI `/chat/completions` body as llama.cpp's own parameters -- the
 /// conversation rendered into `prompt`, every media part decoded into
-/// `out_files` and replaced in `body` by the media marker.
+/// `out_files` and replaced in `body` by the media marker -- and the chat
+/// session that rendered it, which owns the grammar, triggers and parser
+/// the server applies to each task (`Task.applyChatSession`).
 ///
 /// Parameters:
 /// - `body`: the request, owned by `a`; its messages' media parts are
@@ -475,7 +484,9 @@ pub const ServerChatParams = struct {
 /// - `out_files`: grows; each file owned by `a`.
 ///
 /// Return: owned by `a`.
-pub fn oaicompatChatParamsParse(a: Allocator, body: *Value, opt: *const ServerChatParams, out_files: *std.ArrayList([]u8)) Error!Value {
+/// - `out_session`: replaced by the request's session, owned by the
+///   session's allocator; the caller deinits it.
+pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const c.llama_vocab, body: *Value, opt: *const ServerChatParams, out_files: *std.ArrayList([]u8), out_session: *chat.session.Session) Error!Value {
     var arena_state = std.heap.ArenaAllocator.init(a);
     defer arena_state.deinit();
     const ar = arena_state.allocator();
@@ -571,7 +582,7 @@ pub fn oaicompatChatParamsParse(a: Allocator, body: *Value, opt: *const ServerCh
     inputs.parallel_tool_calls = jsonValue(body, "parallel_tool_calls", bool, caps_parallel);
     inputs.add_generation_prompt = jsonValue(body, "add_generation_prompt", bool, true);
     inputs.continue_final_message = if (body.contains("continue_final_message"))
-        chat.msg.continuationParse(try body.at("continue_final_message"))
+        try chat.msg.continuationParse(try body.at("continue_final_message"))
     else
         .none;
     const msgs = inputs.messages.items;
@@ -603,7 +614,6 @@ pub fn oaicompatChatParamsParse(a: Allocator, body: *Value, opt: *const ServerCh
         if (body.contains("grammar")) {
             return throw(error.InvalidArgument, "Cannot use custom grammar constraints with tools.", .{});
         }
-        try llama_params.set(a, "parse_tool_calls", .{ .boolean = true });
     }
 
     // merge the template args provided from command line with the args provided in the user request
@@ -639,33 +649,14 @@ pub fn oaicompatChatParamsParse(a: Allocator, body: *Value, opt: *const ServerCh
     inputs.force_pure_content = opt.force_pure_content;
 
     // Apply chat template to the list of messages
-    const chat_params = try chatTemplatesApply(ar, opt.tmpls, &inputs);
-
-    try llama_params.set(a, "chat_format", try Value.from(a, @as(c_int, @backingInt(chat_params.format))));
-    try llama_params.set(a, "prompt", try Value.initString(a, chat_params.prompt));
-    if (chat_params.grammar.len != 0) {
-        try llama_params.set(a, "grammar", try Value.initString(a, chat_params.grammar));
-        try llama_params.set(a, "grammar_type", try Value.initString(a, "tool_calls"));
-    }
-    try llama_params.set(a, "grammar_lazy", .{ .boolean = chat_params.grammar_lazy });
-    var grammar_triggers = Value.emptyArray();
-    errdefer grammar_triggers.deinit(a);
-    for (chat_params.grammar_triggers.items) |trigger| {
-        const ct: GrammarTrigger = .{ .type = @backingInt(trigger.type), .value = trigger.value, .token = trigger.token };
-        try grammar_triggers.pushBack(a, try ct.toJson(a));
-    }
-    try llama_params.set(a, "grammar_triggers", grammar_triggers);
-    grammar_triggers = .null;
-    try llama_params.set(a, "preserved_tokens", try common.from(a, chat_params.preserved_tokens.items));
-    try llama_params.set(a, "generation_prompt", try Value.initString(a, chat_params.generation_prompt));
-    for (chat_params.additional_stops.items) |stop| {
-        try (try llama_params.index(a, "stop")).pushBack(a, try Value.initString(a, stop));
-    }
-    if (chat_params.parser.len != 0) {
-        try llama_params.set(a, "chat_parser", try Value.initString(a, chat_params.parser));
+    {
+        const in = try chatTemplatesInputs(ar, &inputs);
+        const session = try chat.session.Session.init(out_session.gpa, opt.tmpls, vocab, &in, .{ .echo = jsonValue(body, "echo", bool, false) });
+        out_session.deinit();
+        out_session.* = session;
     }
 
-    try llama_params.set(a, "message_delimiters", try chat_params.message_delimiters.toJson(a));
+    try llama_params.set(a, "prompt", try Value.initString(a, try out_session.prompt().str(ar)));
 
     // Reasoning budget: pass parameters through to sampling layer
     {
@@ -675,10 +666,10 @@ pub fn oaicompatChatParamsParse(a: Allocator, body: *Value, opt: *const ServerCh
             reasoning_budget = opt.reasoning_budget;
         }
 
-        if (chat_params.thinking_end_tags.items.len != 0) {
+        if (out_session.thinkingEndTags().len != 0) {
             try llama_params.set(a, "reasoning_budget_tokens", try Value.from(a, reasoning_budget));
-            try llama_params.set(a, "reasoning_budget_start_tag", try Value.initString(a, chat_params.thinking_start_tag));
-            try llama_params.set(a, "reasoning_budget_end_tags", try common.from(a, chat_params.thinking_end_tags.items));
+            try llama_params.set(a, "reasoning_budget_start_tag", try Value.initString(a, out_session.thinkingStartTag()));
+            try llama_params.set(a, "reasoning_budget_end_tags", try common.from(a, out_session.thinkingEndTags()));
             try llama_params.set(a, "reasoning_budget_message", try Value.initString(a, jsonValue(body, "reasoning_budget_message", []const u8, opt.reasoning_budget_message)));
             try llama_params.set(a, "reasoning_control", .{ .boolean = jsonValue(body, "reasoning_control", bool, false) });
         }
@@ -700,10 +691,19 @@ pub fn oaicompatChatParamsParse(a: Allocator, body: *Value, opt: *const ServerCh
     // See "launch_slot_with_task()" for a complete list of params supported by llama.cpp
     try copyRemaining(a, &llama_params, body);
 
+    // the session owns these, the server applies them with server_task::apply_chat_session()
+    for ([_][]const u8{ "grammar_lazy", "grammar_triggers", "preserved_tokens" }) |key| {
+        try llama_params.erase(a, key);
+    }
+    if (out_session.grammar().len != 0) {
+        try llama_params.erase(a, "grammar");
+        try llama_params.erase(a, "json_schema");
+    }
+
     return llama_params;
 }
 
-/// Ports `oaicompat_content_load_media` (server-common.cpp:1192 @d81235049):
+/// Ports `oaicompat_content_load_media` (server-common.cpp:1197 @620d2225c):
 /// load the media files of an OAI content array, then replace each media
 /// part with a media marker text part.
 ///
@@ -753,7 +753,7 @@ fn oaicompatContentLoadMedia(a: Allocator, ar: Allocator, content: *Value, opt: 
     }
 }
 
-/// Ports `tokenize_oai_content_array` (server-common.cpp:1245 @d81235049):
+/// Ports `tokenize_oai_content_array` (server-common.cpp:1250 @620d2225c):
 /// an `/embeddings` input in the shape of a chat message's content array --
 /// the text parts concatenated, the media parts through
 /// `process_mtmd_prompt`.
@@ -804,7 +804,7 @@ fn setMediaMarker(a: Allocator, p: *Value, key: []const u8) Error!void {
 // -----------------------------------------------------------------------------
 // responses
 
-/// Ports the `encode` overload over a buffer (base64.hpp:171 @d81235049): the
+/// Ports the `encode` overload over a buffer (base64.hpp:171 @620d2225c): the
 /// standard alphabet, padded.
 ///
 /// Return: owned by `a`.
@@ -815,7 +815,7 @@ pub fn base64Encode(a: Allocator, data: []const u8) Error![]u8 {
     return out;
 }
 
-/// Ports `format_embeddings_response_oaicompat` (server-common.cpp:1494 @d81235049).
+/// Ports `format_embeddings_response_oaicompat` (server-common.cpp:1489 @620d2225c).
 ///
 /// Return: owned by `a`.
 pub fn formatEmbeddingsResponseOaicompat(a: Allocator, request: *const Value, model_name: []const u8, embeddings: *Value, use_base64: bool) Error!Value {
@@ -873,7 +873,7 @@ fn scoreGreater(ctx: ScoreCtx, x: Value, y: Value) bool {
     return jsonValue(&x, ctx.label, f64, 0.0) > jsonValue(&y, ctx.label, f64, 0.0);
 }
 
-/// Ports `format_response_rerank` (server-common.cpp:1540 @d81235049): the
+/// Ports `format_response_rerank` (server-common.cpp:1535 @620d2225c): the
 /// ranks sorted by score (libc++'s `std::sort`, ties in its order), cut to
 /// `top_n`; TEI's bare array or the Jina-style object.
 ///

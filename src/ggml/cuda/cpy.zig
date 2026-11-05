@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/cpy.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/cpy.cuh` at v0.6.0 (`d81235049`). The
+//! `llama.cpp/ggml/src/ggml-cuda/cpy.cuh` at v0.7.0 (`620d2225c`). The
 //! kernels -- `cpy_scalar`, `cpy_scalar_transpose`, `cpy_scalar_contiguous`,
 //! `cpy_f32_q`, `cpy_q_f32` -- stay CUDA. The MUSA `mudnnMemcpyAsync` arm
 //! is not ported: this build is CUDA only.
@@ -27,16 +27,16 @@ const Tensor = c.ggml_tensor;
 const half = kernels.half;
 const bf16 = kernels.bf16;
 
-/// Ports `CUDA_CPY_BLOCK_SIZE` (cpy.cuh:3 @d81235049).
+/// Ports `CUDA_CPY_BLOCK_SIZE` (cpy.cuh:3 @620d2225c).
 const block_size = 64;
 
-/// Ports `CUDA_CPY_TILE_DIM_2D` (cpy.cu:10 @d81235049).
+/// Ports `CUDA_CPY_TILE_DIM_2D` (cpy.cu:10 @620d2225c).
 const tile_dim_2d = 32;
 
-/// Ports `CUDA_CPY_BLOCK_NM` (cpy.cu:11 @d81235049).
+/// Ports `CUDA_CPY_BLOCK_NM` (cpy.cu:11 @620d2225c).
 const block_nm = 8;
 
-/// Ports `CUDA_CPY_BLOCK_ROWS` (cpy.cu:12 @d81235049).
+/// Ports `CUDA_CPY_BLOCK_ROWS` (cpy.cu:12 @620d2225c).
 const block_rows = 8;
 
 const int_max = std.math.maxInt(c_int);
@@ -68,7 +68,7 @@ const Args = struct {
     nb13: i64,
 };
 
-/// Ports `ggml_cpy_scalar_contiguous_cuda` (cpy.cu:195 @d81235049).
+/// Ports `ggml_cpy_scalar_contiguous_cuda` (cpy.cu:195 @620d2225c).
 fn cpyScalarContiguousCuda(comptime S: type, comptime D: type, cx: ?*const anyopaque, cdst: ?*anyopaque, ne: i64, stream: cu.cudaStream_t) void {
     const num_blocks: i64 = @divTrunc(ne + block_size - 1, block_size);
     impl.assert(num_blocks <= int_max, "num_blocks <= INT_MAX");
@@ -85,7 +85,7 @@ fn kernelArgs(cx: ?*const anyopaque, cdst: ?*anyopaque, a: Args) struct { ?*cons
     return .{ cx, cdst, a.ne, a.ne00, a.ne01, a.ne02, a.nb00, a.nb01, a.nb02, a.nb03, a.ne10, a.ne11, a.ne12, a.nb10, a.nb11, a.nb12, a.nb13 };
 }
 
-/// Ports `ggml_cpy_scalar_cuda` (cpy.cu:206 @d81235049) with its
+/// Ports `ggml_cpy_scalar_cuda` (cpy.cu:206 @620d2225c) with its
 /// `launch_scalar_generic` lambda.
 fn cpyScalarCuda(comptime S: type, comptime D: type, comptime transposed: bool, cx: ?*const anyopaque, cdst: ?*anyopaque, a: Args, stream: cu.cudaStream_t) void {
     const launchScalarGeneric = struct {
@@ -140,12 +140,12 @@ fn cpyScalarCuda(comptime S: type, comptime D: type, comptime transposed: bool, 
 }
 
 /// Ports the six quantizing launchers, which differ only in the block
-/// function and its size: `ggml_cpy_f32_q8_0_cuda` (cpy.cu:250 @d81235049),
-/// `ggml_cpy_f32_q4_0_cuda` (cpy.cu:273 @d81235049),
-/// `ggml_cpy_f32_q4_1_cuda` (cpy.cu:299 @d81235049),
-/// `ggml_cpy_f32_q5_0_cuda` (cpy.cu:325 @d81235049),
-/// `ggml_cpy_f32_q5_1_cuda` (cpy.cu:351 @d81235049) and
-/// `ggml_cpy_f32_iq4_nl_cuda` (cpy.cu:377 @d81235049).
+/// function and its size: `ggml_cpy_f32_q8_0_cuda` (cpy.cu:250 @620d2225c),
+/// `ggml_cpy_f32_q4_0_cuda` (cpy.cu:273 @620d2225c),
+/// `ggml_cpy_f32_q4_1_cuda` (cpy.cu:299 @620d2225c),
+/// `ggml_cpy_f32_q5_0_cuda` (cpy.cu:325 @620d2225c),
+/// `ggml_cpy_f32_q5_1_cuda` (cpy.cu:351 @620d2225c) and
+/// `ggml_cpy_f32_iq4_nl_cuda` (cpy.cu:377 @620d2225c).
 fn cpyF32QCuda(comptime blck: []const u8, comptime qk: comptime_int, comptime qk_name: []const u8, cx: ?*const anyopaque, cdst: ?*anyopaque, a: Args, stream: cu.cudaStream_t) void {
     impl.assert(@rem(a.ne, qk) == 0, "ne % " ++ qk_name ++ " == 0");
     const num_blocks: i64 = @divTrunc(@divTrunc(a.ne, qk) + block_size - 1, block_size);
@@ -159,10 +159,10 @@ fn cpyF32QCuda(comptime blck: []const u8, comptime qk: comptime_int, comptime qk
 }
 
 /// Ports the five dequantizing launchers: `ggml_cpy_q8_0_f32_cuda`
-/// (cpy.cu:262 @d81235049), `ggml_cpy_q4_0_f32_cuda` (cpy.cu:285
-/// @d81235049), `ggml_cpy_q4_1_f32_cuda` (cpy.cu:311 @d81235049),
-/// `ggml_cpy_q5_0_f32_cuda` (cpy.cu:337 @d81235049) and
-/// `ggml_cpy_q5_1_f32_cuda` (cpy.cu:363 @d81235049). None asserts
+/// (cpy.cu:262 @620d2225c), `ggml_cpy_q4_0_f32_cuda` (cpy.cu:285
+/// @620d2225c), `ggml_cpy_q4_1_f32_cuda` (cpy.cu:311 @620d2225c),
+/// `ggml_cpy_q5_0_f32_cuda` (cpy.cu:337 @620d2225c) and
+/// `ggml_cpy_q5_1_f32_cuda` (cpy.cu:363 @620d2225c). None asserts
 /// divisibility, as in the C.
 fn cpyQF32Cuda(comptime blck: []const u8, comptime qk: comptime_int, cx: ?*const anyopaque, cdst: ?*anyopaque, a: Args, stream: cu.cudaStream_t) void {
     const num_blocks: i64 = @divTrunc(@divTrunc(a.ne, qk) + block_size - 1, block_size);
@@ -189,7 +189,7 @@ const Memcpy2d = struct {
     dpitch: usize = 0,
 };
 
-/// Ports `ggml_cuda_cpy_as_memcpy_2d` (cpy.cu:391 @d81235049): whether a
+/// Ports `ggml_cuda_cpy_as_memcpy_2d` (cpy.cu:391 @620d2225c): whether a
 /// same-type copy reduces to `height` rows of `width` contiguous bytes, so
 /// it can use `cudaMemcpy2DAsync` instead of the scalar kernel.
 fn cpyAsMemcpy2d(src0: *const Tensor, src1: *const Tensor, m: *Memcpy2d) bool {
@@ -229,7 +229,7 @@ fn cpyAsMemcpy2d(src0: *const Tensor, src1: *const Tensor, m: *Memcpy2d) bool {
     return m.spitch >= m.width and m.dpitch >= m.width;
 }
 
-/// Ports `ggml_cuda_cpy` (cpy.cu:429 @d81235049).
+/// Ports `ggml_cuda_cpy` (cpy.cu:429 @620d2225c).
 ///
 /// Parameters:
 /// - `ctx`: the backend context whose stream is used.
@@ -405,7 +405,7 @@ pub fn cpy(ctx: *common.Context, src0: *const Tensor, src1: *Tensor) void {
     }
 }
 
-/// Ports `ggml_cuda_dup` (cpy.cu:623 @d81235049), which serves `DUP` and
+/// Ports `ggml_cuda_dup` (cpy.cu:623 @620d2225c), which serves `DUP` and
 /// `CONT`.
 pub fn dup(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);

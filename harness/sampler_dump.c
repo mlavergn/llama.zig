@@ -884,6 +884,23 @@ static struct llama_sampler * make_backend(int i, const char ** label, int32_t n
             llama_sampler_chain_add(c, llama_sampler_init_top_k(40));
             llama_sampler_chain_add(c, llama_sampler_init_dist(11));
             return c;
+        case 8:
+            *label = "temp0-greedy";
+            // v0.7.0 (#29797): common's chain at temperature zero ends in
+            // greedy, not dist, and the filters before it leave candidates,
+            // so greedy's argmax is a position the candidates map back.
+            llama_sampler_chain_add(c, llama_sampler_init_top_k(40));
+            llama_sampler_chain_add(c, llama_sampler_init_top_p(0.9f, 1));
+            llama_sampler_chain_add(c, llama_sampler_init_min_p(0.05f, 1));
+            llama_sampler_chain_add(c, llama_sampler_init_temp_ext(0.0f, 0.0f, 1.0f));
+            llama_sampler_chain_add(c, llama_sampler_init_greedy());
+            return c;
+        case 9:
+            *label = "topk1-greedy";
+            // ... and after a final top-k of 1.
+            llama_sampler_chain_add(c, llama_sampler_init_top_k(1));
+            llama_sampler_chain_add(c, llama_sampler_init_greedy());
+            return c;
         default:
             llama_sampler_free(c);
             return NULL;

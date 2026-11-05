@@ -137,8 +137,8 @@ static_assert(offsetof(vk_mat_mat_id_push_constants, ne11) == 48, "vk_mat_mat_id
 static_assert(sizeof(((vk_mat_mat_id_push_constants *)0)->ne11) == 4, "vk_mat_mat_id_push_constants::ne11 size");
 static_assert(offsetof(vk_mat_mat_id_push_constants, n_experts) == 52, "vk_mat_mat_id_push_constants::n_experts");
 static_assert(sizeof(((vk_mat_mat_id_push_constants *)0)->n_experts) == 4, "vk_mat_mat_id_push_constants::n_experts size");
-static_assert(offsetof(vk_mat_mat_id_push_constants, hoist_row_ids) == 56, "vk_mat_mat_id_push_constants::hoist_row_ids");
-static_assert(sizeof(((vk_mat_mat_id_push_constants *)0)->hoist_row_ids) == 4, "vk_mat_mat_id_push_constants::hoist_row_ids size");
+static_assert(offsetof(vk_mat_mat_id_push_constants, row_ids_offset) == 56, "vk_mat_mat_id_push_constants::row_ids_offset");
+static_assert(sizeof(((vk_mat_mat_id_push_constants *)0)->row_ids_offset) == 4, "vk_mat_mat_id_push_constants::row_ids_offset size");
 static_assert(sizeof(vk_mat_vec_id_push_constants) == 48, "vk_mat_vec_id_push_constants");
 static_assert(offsetof(vk_mat_vec_id_push_constants, ncols) == 0, "vk_mat_vec_id_push_constants::ncols");
 static_assert(sizeof(((vk_mat_vec_id_push_constants *)0)->ncols) == 4, "vk_mat_vec_id_push_constants::ncols size");
@@ -387,7 +387,7 @@ static_assert(offsetof(vk_op_dsv4_hc_post_push_constants, gate_scale_in) == 84, 
 static_assert(sizeof(((vk_op_dsv4_hc_post_push_constants *)0)->gate_scale_in) == 4, "vk_op_dsv4_hc_post_push_constants::gate_scale_in size");
 static_assert(offsetof(vk_op_dsv4_hc_post_push_constants, gate_scale_out) == 88, "vk_op_dsv4_hc_post_push_constants::gate_scale_out");
 static_assert(sizeof(((vk_op_dsv4_hc_post_push_constants *)0)->gate_scale_out) == 4, "vk_op_dsv4_hc_post_push_constants::gate_scale_out size");
-static_assert(sizeof(vk_op_count_experts_push_constants) == 36, "vk_op_count_experts_push_constants");
+static_assert(sizeof(vk_op_count_experts_push_constants) == 40, "vk_op_count_experts_push_constants");
 static_assert(offsetof(vk_op_count_experts_push_constants, ne00) == 0, "vk_op_count_experts_push_constants::ne00");
 static_assert(sizeof(((vk_op_count_experts_push_constants *)0)->ne00) == 4, "vk_op_count_experts_push_constants::ne00 size");
 static_assert(offsetof(vk_op_count_experts_push_constants, ne01) == 4, "vk_op_count_experts_push_constants::ne01");
@@ -400,12 +400,14 @@ static_assert(offsetof(vk_op_count_experts_push_constants, a_offset) == 16, "vk_
 static_assert(sizeof(((vk_op_count_experts_push_constants *)0)->a_offset) == 4, "vk_op_count_experts_push_constants::a_offset size");
 static_assert(offsetof(vk_op_count_experts_push_constants, n_experts) == 20, "vk_op_count_experts_push_constants::n_experts");
 static_assert(sizeof(((vk_op_count_experts_push_constants *)0)->n_experts) == 4, "vk_op_count_experts_push_constants::n_experts size");
-static_assert(offsetof(vk_op_count_experts_push_constants, hoist_row_ids) == 24, "vk_op_count_experts_push_constants::hoist_row_ids");
-static_assert(sizeof(((vk_op_count_experts_push_constants *)0)->hoist_row_ids) == 4, "vk_op_count_experts_push_constants::hoist_row_ids size");
-static_assert(offsetof(vk_op_count_experts_push_constants, ne00mp) == 28, "vk_op_count_experts_push_constants::ne00mp");
+static_assert(offsetof(vk_op_count_experts_push_constants, ne00mp) == 24, "vk_op_count_experts_push_constants::ne00mp");
 static_assert(sizeof(((vk_op_count_experts_push_constants *)0)->ne00mp) == 4, "vk_op_count_experts_push_constants::ne00mp size");
-static_assert(offsetof(vk_op_count_experts_push_constants, ne00L) == 32, "vk_op_count_experts_push_constants::ne00L");
+static_assert(offsetof(vk_op_count_experts_push_constants, ne00L) == 28, "vk_op_count_experts_push_constants::ne00L");
 static_assert(sizeof(((vk_op_count_experts_push_constants *)0)->ne00L) == 4, "vk_op_count_experts_push_constants::ne00L size");
+static_assert(offsetof(vk_op_count_experts_push_constants, row_tile_size) == 32, "vk_op_count_experts_push_constants::row_tile_size");
+static_assert(sizeof(((vk_op_count_experts_push_constants *)0)->row_tile_size) == 4, "vk_op_count_experts_push_constants::row_tile_size size");
+static_assert(offsetof(vk_op_count_experts_push_constants, row_ids_offset) == 36, "vk_op_count_experts_push_constants::row_ids_offset");
+static_assert(sizeof(((vk_op_count_experts_push_constants *)0)->row_ids_offset) == 4, "vk_op_count_experts_push_constants::row_ids_offset size");
 static_assert(sizeof(vk_op_glu_push_constants) == 108, "vk_op_glu_push_constants");
 static_assert(offsetof(vk_op_glu_push_constants, N) == 0, "vk_op_glu_push_constants::N");
 static_assert(sizeof(((vk_op_glu_push_constants *)0)->N) == 4, "vk_op_glu_push_constants::N size");

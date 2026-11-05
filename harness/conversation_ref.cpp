@@ -15,19 +15,19 @@
 // pieces -- `llama.cpp.zmake`'s libllama decodes, and upstream's
 // `llama-common` (`libllama-common-ref.a`, `zig build tools-ref`) does the
 // rest, as upstream's `llama-cli` reaches it through the server it runs:
-//   - `common_chat_templates_init` and `common_chat_templates_apply`
-//     (chat.cpp:757, 1440 @d81235049) render the request
-//     `oaicompat_chat_params_parse` (tools/server/server-common.cpp:1265
-//     @d81235049) builds from a body of `messages` alone;
-//   - `common_sampler` (common/sampling.cpp:191 @d81235049) samples, with the
-//     reasoning budget the server's schema builds (server-schema.cpp:387
-//     @d81235049);
+//   - `common_chat_templates_init` (chat.cpp:729 @620d2225c) and a
+//     `common_chat_session` (chat.cpp:1683 @620d2225c) render the request
+//     `oaicompat_chat_params_parse` (tools/server/server-common.cpp:1270
+//     @620d2225c) builds from a body of `messages` alone;
+//   - `common_sampler` (common/sampling.cpp:191 @620d2225c) samples, with the
+//     grammar fields the session applies and the reasoning budget the
+//     server's schema builds (server-schema.cpp:335 @620d2225c);
 //   - each piece is held back and cut at stop strings as `process_token`
-//     (server-context.cpp:1966 @d81235049) does, then parsed with
-//     `common_chat_parse` and diffed with `compute_diffs` as
-//     `update_chat_msg` (server-task.cpp:162 @d81235049) does;
+//     (server-context.cpp:1976 @620d2225c) does, then fed to the session
+//     and diffed with `compute_diffs` as `update_chat_msg`
+//     (server-task.cpp:159 @620d2225c) does;
 //   - the display is upstream's own `ui::assistant_turn` and `ui::show_error`
-//     (tools/cli/cli-ui.h @d81235049) over `console`, included, not copied.
+//     (tools/cli/cli-ui.h @620d2225c) over `console`, included, not copied.
 // Deliberately not our CLI recompiled -- that would compare the CLI against
 // itself.
 //
@@ -35,19 +35,14 @@
 //   - every byte our CLI writes: replies on stdout; the loading line, the
 //     banner, the `> ` marker, the slash-command answers, the cut-off notes
 //     and the error sentence on stderr;
-//   - the trust split: upstream's input marks, runs of one mark tokenized
-//     separately, `parse_special` off for input. Upstream's own prompt is a
-//     plain string, so the marks come from a second render of the same
-//     bindings `common_chat_template_direct_apply_impl` (chat.cpp:905
-//     @d81235049) makes, through `common/jinja`, which must equal
-//     `common_chat_templates_apply`'s prompt byte for byte or the run fails.
-//     `bos_token` and `eos_token` are re-trusted only when a part is exactly
-//     their text; a message reading exactly `</s>` would be told apart by
-//     ours and not here, so the scripts never send one;
+//   - the trust split: upstream's input marks, the session prompt's parts
+//     (v0.7.0), runs of one mark tokenized separately, `parse_special` off
+//     for input. `bos_token` and `eos_token` are bound as template text
+//     since v0.7.0, as ours are;
 //   - the cache report our CLI writes under `LLAMAZIG_CNV_TRACE` -- tokens
 //     kept and tokens decoded, per turn -- the one place prefix reuse shows;
 //   - `--fit`, as upstream's `common_init_result` runs it before loading:
-//     `common_fit_params` (common/fit.cpp:879 @d81235049) over the buffers
+//     `common_fit_params` (common/fit.cpp:879 @620d2225c) over the buffers
 //     `common_params` lends the model parameters, at `llama-cli`'s log
 //     verbosity, its error line flushed to stderr before the load; and the
 //     context size and GPU layers it left, which the trace reports once;
@@ -77,11 +72,6 @@
 #include "fit.h"
 #include "log.h"
 #include "sampling.h"
-#include "jinja/caps.h"
-#include "jinja/lexer.h"
-#include "jinja/parser.h"
-#include "jinja/runtime.h"
-#include "jinja/value.h"
 #include "json.h"
 #include "llama.h"
 
@@ -96,6 +86,7 @@
 #include <exception>
 #include <iomanip>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -125,82 +116,21 @@ static void quiet_log(enum ggml_log_level level, const char * text, void *) {
     }
 }
 
-static std::string format_time(const char * format) {
-    auto        now        = std::chrono::system_clock::now();
-    auto        time       = std::chrono::system_clock::to_time_t(now);
-    auto        local_time = *std::localtime(&time);
-    std::ostringstream ss;
-    ss << std::put_time(&local_time, format);
-    return ss.str();
-}
-
-// The bindings `common_chat_template_direct_apply_impl` makes for this
-// request, rendered through `common/jinja` with every bound string marked
-// input, split into runs of one trust level as cli/conversation.zig splits
-// ours: adjacent parts with the same mark merge, and a bound token stays a
-// run of its own.
-static bool render_marked(const std::string & src, const std::vector<common_chat_msg> & history,
-                          const std::string & bos, const std::string & eos, bool add_bos, bool add_eos,
-                          bool enable_thinking, const std::map<std::string, std::string> & kwargs,
-                          std::vector<run> & runs) {
-    runs.clear();
-    try {
-        jinja::lexer lexer;
-        auto lexed = lexer.tokenize(src);
-        jinja::program prog = jinja::parse_from_tokens(lexed);
-        jinja::context ctx(lexed.source);
-
-        json extra = json::object();
-        extra["datetime"]    = format_time("%b %d %Y");
-        extra["date_string"] = format_time("%d %b %Y");
-        for (const auto & [k, v] : kwargs) {
-            extra[k] = json::parse(v);
+// The session's prompt split into runs of one trust level, as
+// cli/conversation.zig splits ours: template parts trusted, input parts not,
+// an empty part dropped and the runs either side of it joined.
+static std::vector<run> prompt_runs(const common_chat_prompt & prompt) {
+    std::vector<run> runs;
+    for (const auto & part : prompt.parts) {
+        if (part.text.empty()) continue;
+        const bool trusted = !part.is_input;
+        if (!runs.empty() && runs.back().trusted == trusted) {
+            runs.back().text += part.text;
+        } else {
+            runs.push_back({ part.text, trusted });
         }
-        json inp = json{
-            {"messages", common_chat_msgs_to_json_oaicompat(history)},
-            {"bos_token", bos},
-            {"eos_token", eos},
-            {"enable_thinking", enable_thinking},
-        };
-        for (const auto & [k, v] : extra.items()) {
-            inp[k] = v;
-        }
-        inp["add_generation_prompt"] = true;
-        if (inp.contains("preserve_reasoning") && inp["preserve_reasoning"].is_boolean()) {
-            jinja::caps_apply_preserve_reasoning(ctx, inp["preserve_reasoning"].get<bool>());
-        }
-        if (inp.contains("reasoning_effort") && inp["reasoning_effort"].is_string() && !inp["reasoning_effort"].empty()) {
-            jinja::caps_apply_reasoning_effort(ctx, inp["reasoning_effort"].get<std::string>());
-        }
-        jinja::global_from_json(ctx, inp, true);
-        jinja::runtime runtime(ctx);
-        const jinja::value  results = runtime.execute(prog);
-        const jinja::string text    = jinja::runtime::gather_string_parts(results)->as_string();
-        bool last_token = false;
-        for (const auto & part : text.parts) {
-            if (part.val.empty()) continue;
-            const bool token   = part.is_input && ((!bos.empty() && part.val == bos) || (!eos.empty() && part.val == eos));
-            const bool trusted = !part.is_input || token;
-            if (!runs.empty() && runs.back().trusted == trusted && !token && !last_token) {
-                runs.back().text += part.val;
-            } else {
-                runs.push_back({ part.val, trusted });
-            }
-            last_token = token;
-        }
-    } catch (const std::exception &) {
-        return false;
     }
-    // `add_bos`/`add_eos`: the vocabulary adds them, so the render loses them.
-    if (add_bos && !bos.empty() && !runs.empty() && string_starts_with(runs.front().text, bos)) {
-        runs.front().text.erase(0, bos.size());
-        if (runs.front().text.empty()) runs.erase(runs.begin());
-    }
-    if (add_eos && !eos.empty() && !runs.empty() && string_ends_with(runs.back().text, eos)) {
-        runs.back().text.resize(runs.back().text.size() - eos.size());
-        if (runs.back().text.empty()) runs.pop_back();
-    }
-    return true;
+    return runs;
 }
 
 static std::vector<llama_token> tokenize(const llama_vocab * vocab, const std::vector<run> & runs) {
@@ -256,7 +186,7 @@ static int fail(const char * sentence) {
     return 1;
 }
 
-// tools/server/server-common.cpp:944 @d81235049, which is not in llama-common.
+// tools/server/server-common.cpp:949 @620d2225c, which is not in llama-common.
 static size_t validate_utf8(const std::string & text) {
     size_t len = text.size();
     if (len == 0) return 0;
@@ -273,7 +203,7 @@ static size_t validate_utf8(const std::string & text) {
     return len;
 }
 
-// server_slot::find_stopping_strings (server-context.cpp:605 @d81235049).
+// server_slot::find_stopping_strings (server-context.cpp:610 @620d2225c).
 static size_t find_stopping_strings(const std::vector<std::string> & stops, const std::string & text,
                                     size_t last_token_size, bool is_full_stop) {
     size_t stop_pos = std::string::npos;
@@ -368,7 +298,7 @@ int main(int argc, char ** argv) {
     chat_opts opts;
     if (!parse_chat_flags(argc, argv, n_pos + 1, opts)) return 2;
 
-    common_log_set_verbosity_thold(LOG_LEVEL_ERROR); // tools/cli/cli.cpp:36 @d81235049
+    common_log_set_verbosity_thold(LOG_LEVEL_ERROR); // tools/cli/cli.cpp:36 @620d2225c
     console::init(/* simple_io */ true, opts.color);
     llama_log_set(quiet_log, nullptr);
     llama_backend_init();
@@ -376,7 +306,7 @@ int main(int argc, char ** argv) {
     fprintf(stderr, "loading %s ...\n", model_path);
 
     // The buffers `common_params` lends the model parameters
-    // (common/common.cpp:1649 @d81235049), padded as common/arg.cpp:947 @d81235049 pads
+    // (common/common.cpp:1671 @620d2225c), padded as common/arg.cpp:947 @620d2225c pads
     // the overrides.
     std::vector<float> tensor_split(128, 0.0f);
     std::vector<llama_model_tensor_buft_override> tbo(llama_max_tensor_buft_overrides(), { nullptr, nullptr });
@@ -388,7 +318,7 @@ int main(int argc, char ** argv) {
     cp.n_ctx   = n_ctx_set ? (uint32_t) n_ctx_arg : 0;
     cp.n_batch = 2048;
     cp.no_perf = true;
-    // server_output_limits (tools/server/server-context.cpp:42 @d81235049):
+    // server_output_limits (tools/server/server-context.cpp:42 @620d2225c):
     // one sequence, no draft.
     cp.n_outputs_max         = 1;
     cp.n_outputs_max_per_seq = 1;
@@ -423,7 +353,7 @@ int main(int argc, char ** argv) {
         fclose(f);
     }
 
-    // The server's chat options (server-context.cpp:1582 @d81235049).
+    // The server's chat options (server-context.cpp:1598 @620d2225c).
     common_chat_templates_ptr tmpls;
     bool enable_thinking_default = false;
     try {
@@ -432,10 +362,7 @@ int main(int argc, char ** argv) {
     } catch (const std::exception & e) {
         return fail(e.what());
     }
-    const std::string tmpl_src = common_chat_templates_source(tmpls.get());
     const auto        caps     = common_chat_templates_get_caps(tmpls.get());
-    const std::string bos      = llama_vocab_bos(vocab) != LLAMA_TOKEN_NULL ? common_token_to_piece(vocab, llama_vocab_bos(vocab), true) : "";
-    const std::string eos      = llama_vocab_eos(vocab) != LLAMA_TOKEN_NULL ? common_token_to_piece(vocab, llama_vocab_eos(vocab), true) : "";
     const uint32_t    n_ctx    = llama_n_ctx(ctx);
 
     std::vector<common_chat_msg> history;
@@ -491,7 +418,7 @@ int main(int argc, char ** argv) {
             history.push_back(m);
         }
 
-        // The request (server-common.cpp:1265 @d81235049).
+        // The request (server-common.cpp:1270 @620d2225c).
         common_chat_templates_inputs inputs;
         inputs.messages              = history;
         inputs.use_jinja             = true;
@@ -506,33 +433,15 @@ int main(int argc, char ** argv) {
             if (et->second == "true") inputs.enable_thinking = true;
             else if (et->second == "false") inputs.enable_thinking = false;
         }
-        common_chat_params params;
+        // `oaicompat_chat_params_parse`'s session (server-common.cpp:1433 @620d2225c)
+        std::optional<common_chat_session> session;
         try {
-            params = common_chat_templates_apply(tmpls.get(), inputs);
+            session.emplace(tmpls.get(), vocab, inputs, common_chat_session_params{});
         } catch (const std::exception & e) {
             rc = fail(e.what());
             break;
         }
-
-        std::vector<run> runs;
-        if (!render_marked(tmpl_src, history, bos, eos, llama_vocab_get_add_bos(vocab), llama_vocab_get_add_eos(vocab),
-                           inputs.enable_thinking, opts.kwargs, runs)) {
-            rc = fail("TemplateFailed");
-            break;
-        }
-        {
-            std::string joined;
-            for (const auto & r : runs) joined += r.text;
-            if (joined != params.prompt) {
-                if (string_starts_with(params.prompt, joined)) {
-                    runs.push_back({ params.prompt.substr(joined.size()), true });
-                } else {
-                    fprintf(stderr, "conversation_ref: the marked render is not common_chat_templates_apply's prompt\n");
-                    rc = 3;
-                    break;
-                }
-            }
-        }
+        const std::vector<run> runs = prompt_runs(session->prompt());
         const std::vector<llama_token> tokens = tokenize(vocab, runs);
         if (tokens.size() >= n_ctx) { rc = fail("the prompt is longer than the context -- raise -c or shorten it"); break; }
 
@@ -555,20 +464,16 @@ int main(int argc, char ** argv) {
         if (trace) fprintf(stderr, "[turn: kept %zu, decoding %zu]\n", decoded.size(), suffix.size());
         decoded.insert(decoded.end(), suffix.begin(), suffix.end());
 
-        // The server task (server-schema.cpp @d81235049): the generation
-        // prompt, the preserved tokens that are one token, and the budget
+        // The server task (server-schema.cpp @620d2225c): the session's
+        // grammar, generation prompt and preserved tokens, and the budget
         // fields when the template has an end-of-thinking tag.
         common_params_sampling sp;
-        sp.temp              = 0.0f;
-        sp.generation_prompt = params.generation_prompt;
-        for (const auto & t : params.preserved_tokens) {
-            auto ids = common_tokenize(vocab, t, false, true);
-            if (ids.size() == 1) sp.preserved_tokens.insert(ids[0]);
-        }
+        sp.temp = 0.0f;
+        session->apply_sampling(sp);
         sp.reasoning_budget_tokens = opts.budget;
-        if (!params.thinking_end_tags.empty()) {
-            sp.reasoning_budget_start = common_tokenize(vocab, params.thinking_start_tag, false, true);
-            for (const auto & tag : params.thinking_end_tags) {
+        if (!session->thinking_end_tags().empty()) {
+            sp.reasoning_budget_start = common_tokenize(vocab, session->thinking_start_tag(), false, true);
+            for (const auto & tag : session->thinking_end_tags()) {
                 if (!tag.empty()) sp.reasoning_budget_end.push_back(common_tokenize(vocab, tag, false, true));
             }
             if (!sp.reasoning_budget_end.empty()) {
@@ -582,15 +487,9 @@ int main(int argc, char ** argv) {
         }
         common_sampler * smpl = common_sampler_init(model, sp);
 
-        common_chat_parser_params pp(params);
-        pp.reasoning_format     = opts.reasoning_format;
-        pp.reasoning_in_content = opts.reasoning_format == COMMON_REASONING_FORMAT_DEEPSEEK_LEGACY;
-        if (!params.parser.empty()) pp.parser.load(params.parser);
-
-        std::string     text;     // slot.generated_text
+        std::string     text;     // slot.generated.text
         size_t          n_sent = 0;
-        std::string     sent;     // task_result_state::generated_text
-        common_chat_msg msg_prv;  // task_result_state::chat_msg
+        common_chat_msg msg_prv = session->msg();  // task_result_state::chat_msg
         std::string     content, reasoning;
         bool            failed = false;
 
@@ -598,9 +497,10 @@ int main(int argc, char ** argv) {
         {
             ui::assistant_turn a;
             // update_chat_msg and generate_completion's handling of the deltas.
-            auto update = [&](bool is_partial) -> bool {
+            auto update = [&](const std::string & added, bool is_partial) -> bool {
                 try {
-                    common_chat_msg new_msg = common_chat_parse(sent, is_partial, pp);
+                    common_chat_input chunk(added);
+                    common_chat_msg new_msg = is_partial ? session->feed(chunk) : session->finish(chunk);
                     if (!new_msg.empty()) {
                         auto diffs = common_chat_msg_diff::compute_diffs(msg_prv, new_msg);
                         msg_prv = new_msg;
@@ -640,17 +540,17 @@ int main(int argc, char ** argv) {
                     size_t pos = std::min(n_sent, text.size());
                     const std::string str_test = text.substr(pos);
                     bool send = true;
-                    size_t stop_pos = find_stopping_strings(params.additional_stops, str_test, token_str.size(), true);
+                    size_t stop_pos = find_stopping_strings(session->additional_stops(), str_test, token_str.size(), true);
                     if (stop_pos != std::string::npos) {
                         text.erase(pos + stop_pos);
                         stopped = true;
-                    } else if (find_stopping_strings(params.additional_stops, str_test, token_str.size(), false) != std::string::npos) {
+                    } else if (find_stopping_strings(session->additional_stops(), str_test, token_str.size(), false) != std::string::npos) {
                         send = false;
                     }
                     if (send && text.size() > n_sent) {
-                        sent += text.substr(n_sent);
+                        const std::string added = text.substr(n_sent);
                         n_sent = text.size();
-                        if (!update(true)) { stop = REJECTED; break; }
+                        if (!update(added, true)) { stop = REJECTED; break; }
                     }
                 }
                 if (stopped) { stop = WORD; break; }
@@ -661,7 +561,7 @@ int main(int argc, char ** argv) {
                 decoded.push_back(id);
                 batch = llama_batch_get_one(&id, 1);
             }
-            if (rc == 0 && !failed) update(false);
+            if (rc == 0 && !failed) update("", false);
         }
         common_sampler_free(smpl);
         if (rc != 0) break;

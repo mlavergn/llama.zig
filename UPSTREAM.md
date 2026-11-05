@@ -6,17 +6,18 @@ behind it is `MAINTENANCE.md`; the procedure a sync follows is `SYNC.md`.
 ## Basis
 
 ```
-basis: v0.6.0 d81235049384534c167caea52b85a694f6103d14 b11429
+basis: v0.7.0 620d2225cc436ab0b001e3200e590e3b286ef9ab b11669
 ```
 
 | | |
 |---|---|
 | Upstream | `https://github.com/ggml-org/llama.cpp` (the submodule's `origin`, and `.gitmodules`) |
-| Tag | `v0.6.0`, released 2026-10-05 |
-| Commit | `d81235049384534c167caea52b85a694f6103d14`; citations carry `@d81235049` |
-| Build tag | `b11429` |
-| ggml version | `0.26.0` (ggml/CMakeLists.txt), which `ggml_version()` returns |
+| Tag | `v0.7.0`, released 2026-10-15 |
+| Commit | `620d2225cc436ab0b001e3200e590e3b286ef9ab`; citations carry `@620d2225c` |
+| Build tag | `b11669` |
+| ggml version | `0.27.0` (ggml/CMakeLists.txt), which `ggml_version()` returns |
 | Recorded in | `build/upstream.zig`, `llama.cpp.zmake/build.zig`, `src/ggml/runtime.zig`, `src/llama/api/llama.zig`; `scripts/check-reference-pin` holds them to the submodule |
+| zigjinja | `64b621f` (v3.1.7, on its remote), a path dependency (`../zigjinja`, zigbuildx's `.clone`); the pickups fast-forward their checkout to it |
 
 The `basis:` line is the machine-readable one: tag, full commit, build tag.
 
@@ -28,7 +29,8 @@ The `basis:` line is the machine-readable one: tag, full commit, build tag.
 | `v0.3.0` | `v0.4.0` (`5266f24da`, `b10809`) | 2026-10-28 | `0.4.0` | `a67ea88` | 456 touched citations, 217 unmapped hunks, 29 uncited files; 7,601 citations repinned; 529 line literals moved; Mac gates all pass (`NOTES.md`, "Upstream sync v0.3.0 → v0.4.0") | GB10: clear (`7c9cbc1`; `lint` not run, no `zlint` there) · DESKTOP-BR7J5S9: clear (`7c9cbc1`; `quant-diff` has no Windows mode) · JWHLPTOP: **open**, unreachable 2026-10-28 |
 | `v0.4.0` | `v0.4.1` (`b29c606e2`, `b10964`) | 2026-10-29 | `0.4.1` | `d4f0a16` | 197 touched citations, 168 unmapped hunks, 43 uncited files; 7,231 citation sites repinned; 316 line literals moved; three architectures (hy_v4, maple, spark2_5), the Metal fusion table, the Vulkan matmul refactor; Mac gates (`NOTES.md`, "Upstream sync v0.4.0 → v0.4.1") | GB10: clear (`0.4.1+1`; three gate fixes, `diag_f16` found) · DESKTOP-BR7J5S9: clear (`0.4.1+1`) · JWHLPTOP: **open** (with v0.4.0's AVX-512 items), unreachable 2026-10-29 |
 | `v0.4.1` | `v0.5.0` (`7fe450e19`, `b11146`) | 2026-11-01 | `0.5.0` | `e9c4b5b` | 762 touched citations (461 of them Vulkan's file split), 246 unmapped hunks, 24 uncited files; 9,560 citation sites repinned; 388 line literals moved; one architecture (`hrm_text`), one `llama.h` function, one op form (`ggml_dsv4_hc_pre_gated`), the q1_0 repack, the Metal tuning rewrite and four fusions, the Vulkan split, the `ling3` chat parser; Mac gates (`NOTES.md`, "Upstream sync v0.4.1 → v0.5.0") | GB10: clear (`NOTES.md`, "The v0.5.0 pickup") · DESKTOP-BR7J5S9: clear, apart from `http-diff` and `tools-diff server`, which wait for the server's Windows port · JWHLPTOP: **open**, unreachable (Marc, 2026-11-01), carrying v0.4.0's and v0.4.1's AVX-512 items |
-| `v0.5.0` | `v0.6.0` (`d81235049`, `b11429`) | 2026-11-03 | `0.6.0` | (this commit) | 760 touched citations, 413 unmapped hunks, 42 uncited files (after the `upstream-map` extent fix; 757/416 before); 9,584 citation sites repinned; 599 line literals moved by `upstream-relines` and the rest by hand; two architectures (`clef`, `glm5-next`), two projector types (`ling3vl`, `glm5v`), 14 `llama.h` functions (`llama_batch_ext`, `llama_process`, `llama_get_causal_attn`), `ggml_backend_buft_alloc_buffer_n`/`get_alloc_size_n`, `ggml-cpu/tiled` replacing `iqp`, the Metal MMA mat-vec and FA tensor path, the CUDA `CONV_3D` path and shared-expert fusion, the Vulkan coopmat1 integer-dot mmq, the `/v1/systemone` decision API, the `llm-jp-harmony` chat parser; Mac gates (`NOTES.md`, "Upstream sync v0.5.0 → v0.6.0") | GB10: clear (`0.6.0+1`; one CUDA and one Linux build fix; open: `mtmd-diff`'s two `qwen3tts` CPU passes over upstream's uninitialised `out_code_cache`, and `server-diff decision`'s parallel block, upstream against itself) · DESKTOP-BR7J5S9: clear (`0.6.0+1`; the tiled kernels' first gate), apart from the server's Windows port · JWHLPTOP: **open**, no longer paired, carrying v0.4.0's through v0.6.0's AVX-512 items |
+| `v0.5.0` | `v0.6.0` (`d81235049`, `b11429`) | 2026-11-03 | `0.6.0` | `38978d0` | 760 touched citations, 413 unmapped hunks, 42 uncited files (after the `upstream-map` extent fix; 757/416 before); 9,584 citation sites repinned; 599 line literals moved by `upstream-relines` and the rest by hand; two architectures (`clef`, `glm5-next`), two projector types (`ling3vl`, `glm5v`), 14 `llama.h` functions (`llama_batch_ext`, `llama_process`, `llama_get_causal_attn`), `ggml_backend_buft_alloc_buffer_n`/`get_alloc_size_n`, `ggml-cpu/tiled` replacing `iqp`, the Metal MMA mat-vec and FA tensor path, the CUDA `CONV_3D` path and shared-expert fusion, the Vulkan coopmat1 integer-dot mmq, the `/v1/systemone` decision API, the `llm-jp-harmony` chat parser; Mac gates (`NOTES.md`, "Upstream sync v0.5.0 → v0.6.0") | GB10: clear (`0.6.0+1`; one CUDA and one Linux build fix; open: `mtmd-diff`'s two `qwen3tts` CPU passes over upstream's uninitialised `out_code_cache`, and `server-diff decision`'s parallel block, upstream against itself) · DESKTOP-BR7J5S9: clear (`0.6.0+1`; the tiled kernels' first gate), apart from the server's Windows port · JWHLPTOP: **open**, no longer paired, carrying v0.4.0's through v0.6.0's AVX-512 items |
+| `v0.6.0` | `v0.7.0` (`620d2225c`, `b11669`) | 2026-11-04 | `0.7.0` | (this commit) | 770 touched citations, 336 unmapped hunks, 27 uncited files; 9,450 citation sites repinned; 772 line literals moved by `upstream-relines` and 156 more by hand (its 22, and 134 in classes it misses); four architectures (`k2-horizon`, `maion-coder`, `gemma-embedding2`, `vllm-decision2`: 157), five projector types (68), the MoE cache, `prism.hadamard`, the scheduler's copy and realloc callbacks, the PLaMo-3 tokenizer and Unigram NFC, the chat API refactor and two chat parsers, cpp-httplib 0.61.0, slot checkpoints and draft state, the decision API's five new types; `llama.h` 255 exports unchanged; paths with a space fixed in the `Makefile`s and `xcframework/`; Mac gates (`NOTES.md`, "Upstream sync v0.6.0 → v0.7.0") | GB10: CUDA clear (one blind kernel key fixed; two `cuda-ops-diff` gate fixes) and Vulkan clear on all four arms, both run **before this commit** from a snapshot of the tree; the Linux arm64 CPU set clear, the server set **open** (running at commit time) · DESKTOP-BR7J5S9: clear (x86 gates on silicon, `win-host-diffs`, the 1M-deep `json-diff`), apart from the server's Windows port · JWHLPTOP: **open**, unpaired, carrying v0.4.0's through v0.7.0's AVX-512 items |
 
 ## Deferred
 
@@ -42,6 +44,9 @@ each with its reason (MAINTENANCE.md, Decision 8).
 | `v0.6.0` | `llama-cli`'s `--spec-draft-sampling` and `--rpc` | our `llama-cli` has no speculative decoding and no RPC backend; `cli/upstream_flags.zig` reports both as real flags not yet supported. The tools that parse through `tools/common/` take `--spec-draft-sampling` |
 | `v0.6.0` | zigjinja: `dict()`/`namespace()` positional arguments, and `map`/`selectattr`/`rejectattr`/`join`/`sort`/`min`/`max` over array attributes, digit-string and bool indexes | no model template reaches them: `jinja-diff`'s 78 templates agree without them. The two probes that show them are kept out of the gate |
 | `v0.6.0` | the order `llama_model_saver` writes `general.tensor_extra.*` in | upstream iterates a pointer-keyed `std::unordered_map`, so its order depends on addresses and is not reproducible run to run; the port writes in `tensors_by_name` order. No gate has a file with those keys |
+| `v0.7.0` | `llama-cli`'s `--moe-cache-mib` and `--spec-draft-n-ubatch` | the same reasoning as `-lzm` and `--spec-draft-sampling`: our `llama-cli` has no loading flags and no speculative decoding; `cli/upstream_flags.zig` reports both as real flags not yet supported. The tools that parse through `tools/common/` take both |
+| `v0.7.0` | `common_perf_print`'s "graph reallocs" line (sampling.cpp:588) | no ported tool or server path calls `common_perf_print`; the counters it prints are ported (`llama_perf_context_data.n_reallocs_same`/`_diff`) and the server prints its own line |
+| `v0.7.0` | `llama-imatrix`'s NextN and draft collection (10 `tools-diff` cases marked `!fail`) | upstream itself aborts on every one: the MTP graph needs a state embedding and `imatrix.cpp` never sets one. Re-enable the cases when upstream fixes it |
 | before `v0.3.0` (`0.0.23`) | CUDA's `allreduce.cu` pipeline (`ggml_cuda_ar_pipeline_init`/`_free`); v0.5.0's changes there are HIP enablement and added `CUDA_CHECK`s | the tensor-parallel all-reduce's `internal` arm reports failure and falls back to the meta backend's butterfly with the C's own warning, exactly as the C does when its pipeline fails to start; the GB10 has a single GPU, so no machine here could gate a ported pipeline. Recorded at v0.5.0, where it was first listed |
 
 ## Scope
@@ -63,5 +68,8 @@ Every upstream path falls in one of four classes.
   `iq-grids`; the goldens (`vecdot-golden`, `vec-golden`, `quants-golden`);
   the arch and mmproj fixtures.
 - **Not ported**: the other backends (Hexagon, OpenCL, SYCL, OpenVINO, RPC,
-  CANN, MUSA, HIP, zDNN, WebGPU, ET), `examples/`, `tools/server`,
-  `tools/ui`, and `common/` beyond what `cli/` and `tools/common/` mirror.
+  CANN, MUSA, HIP, zDNN, WebGPU, ET), KleidiAI, `examples/`, `tests/`,
+  `tools/ui` (built by npm and embedded, not ported), and `common/` beyond
+  what `cli/` and `tools/common/` mirror. `tools/server` has been ported
+  since Stage 10 (`tools/server/`, with cpp-httplib in
+  `tools/server/httplib/`).

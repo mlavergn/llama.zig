@@ -1,16 +1,16 @@
 #!/bin/bash
 # Output parity between the port's own libraries and llamazig.xcframework.
 #
-#   smoke.sh compare <label> <cpu|gpu> <outdir> <model> <npred> <ref-cmd> <test-cmd>
+#   smoke.sh compare <label> <cpu|gpu> <outdir> <model> <npred> <ref-cmd> <test-cmd>...
 #   smoke.sh sim-udid <device-name>
 #   smoke.sh device <label> <outdir> <model> <ref-cmd> <log>
 #
 # `compare` runs both commands -- `<cmd> <model> <prompt> <npred> <mode>` --
 # over parity-port's six prompts and requires identical stdout. `ref-cmd` is
-# `test/driver.c` linked against `zig build reference`; `test-cmd` is
-# `test/smoke.swift` linked against the framework, on the host or through
-# `xcrun simctl spawn`. The commands are word-split, so their paths must not
-# contain spaces.
+# `test/driver.c` linked against `zig build reference`, one path; `test-cmd`
+# is `test/smoke.swift` linked against the framework, on the host or through
+# `xcrun simctl spawn <udid>` -- every argument after `ref-cmd`, each one a
+# word of the command, so no path is word-split and any may hold a space.
 #
 # `device` compares what the iOS app in `test/device` printed on a phone --
 # one `SMOKE <mode> <n> <base64>` line per prompt and device, read from
@@ -31,15 +31,18 @@ PROMPTS=(
 )
 
 compare() {
-    local label="$1" mode="$2" out="$3" model="$4" npred="$5" ref="$6" test="$7"
+    [ "$#" -ge 7 ] || { echo "usage: smoke.sh compare <label> <mode> <outdir> <model> <npred> <ref-cmd> <test-cmd>..." >&2; exit 2; }
+    local label="$1" mode="$2" out="$3" model="$4" npred="$5" ref="$6"
+    shift 6
+    local test=("$@")
     mkdir -p "$out"
     [ -f "$model" ] || { echo "FAIL: missing model $model" >&2; exit 2; }
     local pass=0 fail=0 i=0 p a b
     for p in "${PROMPTS[@]}"; do
         i=$((i + 1))
         a="$out/$label-$mode-$i.ref.txt"; b="$out/$label-$mode-$i.test.txt"
-        $ref "$model" "$p" "$npred" "$mode" > "$a" 2> "$a.log"; local rc_ref=$?
-        $test "$model" "$p" "$npred" "$mode" > "$b" 2> "$b.log"; local rc_test=$?
+        "$ref" "$model" "$p" "$npred" "$mode" > "$a" 2> "$a.log"; local rc_ref=$?
+        "${test[@]}" "$model" "$p" "$npred" "$mode" > "$b" 2> "$b.log"; local rc_test=$?
         printf '  %-8s %-4s %-36s ' "$label" "$mode" "$(echo "$p" | cut -c1-34)"
         if [ "$rc_ref" -ne 0 ] || [ "$rc_test" -ne 0 ]; then
             echo "FAIL (exit: ref=$rc_ref test=$rc_test; see $b.log)"; fail=$((fail + 1))
@@ -71,7 +74,7 @@ device() {
         for p in "${PROMPTS[@]}"; do
             i=$((i + 1))
             a="$out/$label-$mode-$i.ref.txt"; b="$out/$label-$mode-$i.test.txt"
-            $ref "$model" "$p" 32 "$mode" > "$a" 2> "$a.log"
+            "$ref" "$model" "$p" 32 "$mode" > "$a" 2> "$a.log"
             line=$(grep -m1 "^SMOKE $mode $i " "$log" | cut -d' ' -f4)
             printf '%s' "$line" | base64 -D > "$b"
             printf '  %-8s %-4s %-36s ' "$label" "$mode" "$(echo "$p" | cut -c1-34)"

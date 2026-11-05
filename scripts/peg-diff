@@ -5,14 +5,15 @@
 # Upstream's libllama-common (`zig build common-ref`, which this runs) holds
 # the C++ unmodified; harness/peg_ref.cpp interprets a bytecode of builder
 # calls over it, and harness/peg_diff.zig the same bytecode over the port,
-# and every record -- the build, the arena's dump, save and GBNF, every
+# and every record -- the build, the arena's dump, JSON form and GBNF, every
 # parse complete, lenient and of every prefix with its AST, the three chat
 # mappers' messages, the tagged parser, the debug trace, the class and
 # what() of every exception -- must be identical. The cases are upstream's
 # own: its PEG tests are compiled with harness/peg_rec.h force-included,
 # which records every parser they build and every input they parse, and
 # must still pass; then random descriptions, chat grammars over random
-# tools, Gemma 4- and MiniMax-M3-shaped grammars, and saved arenas mutated.
+# tools, and Gemma 4- and MiniMax-M3-shaped grammars (upstream removed the
+# arena's save and load at v0.7.0, and with them the mutated saved arenas).
 # See harness/peg_diff.zig.
 #
 # Usage: scripts/peg-diff [case label substring]
@@ -49,7 +50,7 @@ CXX=(zig c++ "${GATE_CC[@]}" -std=c++17 -O2 -DNDEBUG -w
      -I llama.cpp -I llama.cpp/include -I llama.cpp/common
      -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/vendor)
 TESTS=(llama.cpp/tests/peg-parser/test-basic.cpp llama.cpp/tests/peg-parser/test-gbnf-generation.cpp
-       llama.cpp/tests/peg-parser/test-json-parser.cpp llama.cpp/tests/peg-parser/test-json-serialization.cpp
+       llama.cpp/tests/peg-parser/test-json-parser.cpp
        llama.cpp/tests/peg-parser/test-python-dict-parser.cpp llama.cpp/tests/peg-parser/test-unicode.cpp
        llama.cpp/tests/peg-parser/simple-tokenize.cpp)
 

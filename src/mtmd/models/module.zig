@@ -1,6 +1,6 @@
 //! The per-model encoder graphs (`llama.cpp/tools/mtmd/models/`), and
-//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.6.0,
-//! `d81235049`), which picks one by projector type.
+//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.7.0,
+//! `620d2225c`), which picks one by projector type.
 //!
 //! Each file here ports the `models/*.cpp` of the same name (hyphens become
 //! underscores) and exposes `build(g, params)`: the class's `build()`, run
@@ -44,6 +44,7 @@ pub const minicpmv = @import("minicpmv.zig");
 pub const minimax_m3 = @import("minimax_m3.zig");
 pub const mobilenetv5 = @import("mobilenetv5.zig");
 pub const muse_glimmer = @import("muse_glimmer.zig");
+pub const nemotron_omni = @import("nemotron_omni.zig");
 pub const nemotron_v2_vl = @import("nemotron_v2_vl.zig");
 pub const paddleocr = @import("paddleocr.zig");
 pub const parakeet = @import("parakeet.zig");
@@ -77,11 +78,11 @@ pub const Built = struct {
     }
 };
 
-/// The `support_batch()` override of each builder (models.h @d81235049),
+/// The `support_batch()` override of each builder (models.h @620d2225c),
 /// or null for a projector `clip_get_graph_builder` has no builder for.
 pub fn supportBatch(t: names.ProjectorType) ?bool {
     return switch (t) {
-        .gemma3, .idefics3, .lfm2, .janus_pro, .phi4 => false,
+        .gemma3, .idefics3, .cohere2v, .lfm2, .d1omni_v, .janus_pro, .phi4 => false,
         .gemma3nv => false,
         .gemma4v => true,
         .gemma4uv => false,
@@ -97,9 +98,10 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .muse_glimmer => false,
         .step3vl => false,
         .minicpmv => false,
-        .minicpmv4_6 => false,
+        .minicpmv4_6, .minicpmv4_7 => false,
         .internvl => true,
         .nemotron_v2_vl => false,
+        .nemotron_omni => false,
         .llama4 => false,
         .ultravox, .voxtral, .qwen2a, .glma, .meralion, .music_flamingo => false,
         .kimivl => false,
@@ -111,7 +113,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .mlp, .mlp_norm, .ldp, .ldpv2, .glm_edge => false,
         .deepseekocr => true,
         .deepseekocr2 => true,
-        .lfm2a => false,
+        .lfm2a, .d1omni_a => false,
         .gemma4a => false,
         .gemma4ua => false,
         .granite_speech => false,
@@ -130,7 +132,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
     };
 }
 
-/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:932 @d81235049) and the
+/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:953 @620d2225c) and the
 /// builder's `build()`.
 pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*const clip.EncodeParams) clip.Error!Built {
     const img = &imgs.entries.items[0];
@@ -139,7 +141,7 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
     // TODO [QWEN_VIDEO]: improve this in the future
     g.n_batch = @intCast(imgs.entries.items.len);
     const gf: ?*c.ggml_cgraph = switch (ctx.projType()) {
-        .gemma3, .idefics3, .lfm2, .janus_pro, .phi4 => try siglip.build(&g, params),
+        .gemma3, .idefics3, .cohere2v, .lfm2, .d1omni_v, .janus_pro, .phi4 => try siglip.build(&g, params),
         .gemma3nv => try mobilenetv5.build(&g, params),
         .gemma4v => try gemma4v.build(&g, params),
         .gemma4uv => try gemma4uv.build(&g, params),
@@ -155,9 +157,10 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .muse_glimmer => try muse_glimmer.build(&g, params),
         .step3vl => try step3vl.build(&g, params),
         .minicpmv => try minicpmv.build(&g, params),
-        .minicpmv4_6 => try minicpmv.build4_6(&g, params),
+        .minicpmv4_6, .minicpmv4_7 => try minicpmv.build4_6(&g, params),
         .internvl => try internvl.build(&g, params),
         .nemotron_v2_vl => try nemotron_v2_vl.build(&g, params),
+        .nemotron_omni => try nemotron_omni.build(&g, params),
         .llama4 => try llama4.build(&g, params),
         .ultravox, .voxtral, .qwen2a, .glma, .meralion, .music_flamingo => try whisper_enc.build(&g, params),
         .kimivl => try kimivl.build(&g, params),
@@ -169,7 +172,7 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .mlp, .mlp_norm, .ldp, .ldpv2, .glm_edge => try llava.build(&g, params),
         .deepseekocr => try deepseekocr.build(&g, params),
         .deepseekocr2 => try deepseekocr2.build(&g, params),
-        .lfm2a => try conformer.build(&g, params),
+        .lfm2a, .d1omni_a => try conformer.build(&g, params),
         .gemma4a => try gemma4a.build(&g, params),
         .gemma4ua => try gemma4ua.build(&g, params),
         .granite_speech => try granite_speech.build(&g, params),
@@ -184,12 +187,12 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .yasa2 => try yasa2.build(&g, params),
         .parakeet => try parakeet.build(&g, params),
         .granite4_vision => try granite4_vision.build(&g, params),
-        else => impl.abort("clip.cpp", 1150, "missing cgraph builder"),
+        else => impl.abort("clip.cpp", 1179, "missing cgraph builder"),
     };
     return .{ .gf = gf, .support_batch = supportBatch(ctx.projType()).?, .ctx0 = g.ctx0 };
 }
 
-/// Ports `c2w_state_slot` (models/qwen3tts-gen.cpp @d81235049): a persisted
+/// Ports `c2w_state_slot` (models/qwen3tts-gen.cpp @620d2225c): a persisted
 /// state slot of a gen-audio decoder.
 pub const StateSlot = struct {
     name: [:0]const u8,
@@ -197,7 +200,7 @@ pub const StateSlot = struct {
     ne1: i64,
 };
 
-/// Ports `list_gen_state_slots` (mtmd/clip.cpp:4468 @d81235049). The caller
+/// Ports `list_gen_state_slots` (mtmd/clip.cpp:4580 @620d2225c). The caller
 /// frees the slice with `freeSlots`.
 pub fn genStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod.Model) clip.Error![]StateSlot {
     return switch (model.proj_type) {

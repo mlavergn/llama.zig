@@ -178,7 +178,9 @@ int main(int argc, char **argv) {
     llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.95f, 0));
     llama_sampler_chain_add(smpl, llama_sampler_init_min_p(0.05f, 0));
     llama_sampler_chain_add(smpl, llama_sampler_init_temp_ext(temp, 0.0f, 1.0f));
-    llama_sampler_chain_add(smpl, llama_sampler_init_dist(seed));
+    // common_sampler_init (common/sampling.cpp:191 @620d2225c): greedy for a
+    // temperature-zero chain, a draw from the distribution otherwise
+    llama_sampler_chain_add(smpl, temp == 0.0f ? llama_sampler_init_greedy() : llama_sampler_init_dist(seed));
 
     struct llama_sampler *grmr = NULL;
     llama_token_data *cur = NULL;

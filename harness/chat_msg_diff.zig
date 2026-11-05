@@ -134,13 +134,8 @@ fn opC(j: *Value) !void {
     try line("choice {d}", .{@backingInt(choice)});
 }
 
-fn opD(j: *Value) !void {
-    var d = try chat.msg.delimitersParse(gpa, j);
-    defer d.deinit(gpa);
-    try line("n {d}", .{d.delimiters.items.len});
-    const s = try dumpOwned(try d.toJson(gpa), -1);
-    defer gpa.free(s);
-    try str("json", s);
+fn opK(j: *Value) !void {
+    try line("continuation {d}", .{@backingInt(try chat.msg.continuationParse(j))});
 }
 
 fn ints(gpa_: std.mem.Allocator, v: *Value) !std.ArrayList(i32) {
@@ -231,8 +226,7 @@ fn run(op: u8, payload: []const u8) !void {
         'M' => try guarded(opM(&j)),
         'T' => try guarded(opT(&j)),
         'C' => try guarded(opC(&j)),
-        'K' => try line("continuation {d}", .{@backingInt(chat.msg.continuationParse(&j))}),
-        'D' => try guarded(opD(&j)),
+        'K' => try guarded(opK(&j)),
         'S' => try guarded(opS(&j)),
         'F' => try guarded(opF(&j)),
         'R' => try guarded(opR(&j)),

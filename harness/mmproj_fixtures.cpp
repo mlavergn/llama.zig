@@ -8,7 +8,7 @@
 // each projector type's keys and tensor shapes here are read off
 // `llama.cpp/tools/mtmd/clip.cpp` (`load_hparams`, `load_tensors`,
 // `clip_n_mmproj_embd`) and the graph builders under `models/`, at
-// v0.6.0 (`d81235049`). Weights are small and random (fixed seed per
+// v0.7.0 (`620d2225c`). Weights are small and random (fixed seed per
 // type), so a fixture checks plumbing and numerics, not output quality.
 //
 // Every projector targets n_embd 256, the arch fixtures' width. The text
@@ -25,8 +25,9 @@
 //   projector  mmproj-path  text-model-path  modality  inputs
 // where modality is vision|audio|vision+audio|tts-qwen3|tts-pocket, or
 // expect-fail for a type upstream declares but cannot load, and inputs lists
-// what to feed, `;`-separated: `img:WxH,...` for images, `aud:N,...` audio
-// sample counts, `tts:N` generation steps. `check` runs each line in a
+// what to feed, `;`-separated: `img:WxH,...` for images, `vid:WxHxN,...` for
+// N mergeable frames of one video (v0.7.0), `aud:N,...` audio sample counts,
+// `tts:N` generation steps. `check` runs each line in a
 // child process (`one`), so an upstream abort is reported, not fatal.
 
 #include "ggml.h"
@@ -69,6 +70,8 @@ struct G {
     ggml_context * ctx = nullptr;
     std::mt19937 rng;
     std::set<std::string> seen;
+    // tensors a derived fixture leaves out: built as usual, never written
+    std::set<std::string> drop;
 
     G(const std::string & n, uint32_t seed) : name(n), rng(seed) {
         g = gguf_init_empty();
@@ -118,7 +121,7 @@ struct G {
             int32_t * p = (int32_t *) x->data;
             for (int64_t i = 0; i < n; i++) p[i] = (int32_t) i;
         }
-        gguf_add_tensor(g, x);
+        if (!drop.count(tname)) gguf_add_tensor(g, x);
         return x;
     }
     // a matmul weight: rows of `in`, `out` of them, scaled for unit-ish activations
@@ -513,7 +516,7 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_LLAVA_PROJ, 2, "weight"), H, N_TEXT);
         g.bias(fmt(TN_LLAVA_PROJ, 2, "bias"), N_TEXT);
     };
-    f.push_back({"qwen2vl_merger", "qwen2vl", "vision", "img:64x64,96x48", [qwen2vl_like](G & g) {
+    f.push_back({"qwen2vl_merger", "qwen2vl", "vision", "img:64x64,96x48;vid:64x64x3", [qwen2vl_like](G & g) {
         qwen2vl_like(g, "qwen2vl_merger", false, 0);
     }});
     f.push_back({"qwen2.5vl_merger", "qwen2vl", "vision", "img:64x64,128x80", [qwen2vl_like](G & g) {
@@ -1052,7 +1055,7 @@ static std::vector<Fixture> fixtures() {
     // --- DeepSeek-OCR: a SAM ViT-B at a hardcoded 1024 px / patch 16 (640
     // and 768 px tiles), its neck and two stride-2 convs, then a CLIP or a
     // Qwen2 encoder. Since v0.5.0 the loader reads as many SAM blocks as
-    // sam.block_count says (clip.cpp:3270 @d81235049); through v0.4.1
+    // sam.block_count says (clip.cpp:3360 @620d2225c); through v0.4.1
     // n_sam_layers was a model constant, 12. Only the 3 the key names are
     // written, so a loader that still reads 12 fails; block 2 is global
     // over 64x64 patches
@@ -1869,7 +1872,7 @@ static std::vector<Fixture> fixtures() {
     }});
     f.push_back({"qwen3tts_shared", "qwen3tts", "tts-qwen3", "tts:3", [qwen3tts](G & g) { qwen3tts(g, true); }});
 
-    // --- v0.5.0's loader range checks (clip.cpp:1420, 1472 @d81235049): a
+    // --- v0.5.0's loader range checks (clip.cpp:1450, 1507 @620d2225c): a
     // good fixture with one key edited out of range must fail to load, each
     // with its own message, where through v0.4.1 the first indexed past the
     // layers and the second inserted the merger nowhere
@@ -1889,6 +1892,102 @@ static std::vector<Fixture> fixtures() {
     // the merger insertion layer must lie in [0, n_layer)
     variant("minicpmv4_6", "minicpmv4_6-insert-oob", [](G & g) { g.ai32(KEY_WIN_ATTN_LAYER_INDEXES, {2}); });
     variant("minicpmv4_6", "minicpmv4_6-insert-neg", [](G & g) { g.ai32(KEY_WIN_ATTN_LAYER_INDEXES, {-1}); });
+
+    // --- added at v0.7.0 (`620d2225c`): the five new projector types, last
+    // so every earlier fixture keeps its seed. Three are an older type's
+    // fixture with the projector renamed and what the new arm adds.
+    auto build_of = [&f](const std::string & base) -> std::function<void(G &)> {
+        for (const Fixture & x : f) {
+            if (x.type == base) return x.build;
+        }
+        GGML_ABORT("no fixture %s", base.c_str());
+    };
+    // d1omni_v: LFM2's tiles and thumbnail without separators, the exact
+    // gelu in the projector, the refined image stretched (PAD_NONE), and the
+    // resize algorithm read from the GGUF. 600x300 is past should_tile's
+    // threshold, so it tiles.
+    f.push_back({"d1omni_v", "qwen3", "vision", "img:64x64,200x120,600x300", [lfm2 = build_of("lfm2")](G & g) {
+        lfm2(g);
+        g.str(KEY_PROJ_TYPE, "d1omni_v");
+        g.str(KEY_IMAGE_RESIZE_ALGO, "lanczos");
+    }});
+    // d1omni_a: LFM2-A's conformer with a residual norm/down/up block after
+    // the projector, no position embeddings (the encoder's assert allows
+    // none now), and audio cut to 30 s and padded to 0.5 s
+    f.push_back({"d1omni_a", "qwen3", "audio", "aud:16000,40000,3000,500000", [lfm2a = build_of("lfm2a")](G & g) {
+        const int H2 = 96;
+        g.drop.insert(fmt(TN_POS_EMBD, "a"));
+        lfm2a(g);
+        g.str(KEY_PROJ_TYPE, "d1omni_a");
+        g.norm(fmt(TN_MM_AUDIO_MLP, 4, "weight"), N_TEXT);
+        g.bias(fmt(TN_MM_AUDIO_MLP, 4, "bias"), N_TEXT);
+        g.w(fmt(TN_MM_AUDIO_MLP, 5, "weight"), N_TEXT, H2);
+        g.bias(fmt(TN_MM_AUDIO_MLP, 5, "bias"), H2);
+        g.w(fmt(TN_MM_AUDIO_MLP, 6, "weight"), H2, N_TEXT);
+        g.bias(fmt(TN_MM_AUDIO_MLP, 6, "bias"), N_TEXT);
+    }});
+    // nemotron_omni: Nemotron v2 VL's register-token ViT at dynamic size
+    // (bilinear-resized positions), the exact gelu, and a 6-channel patch
+    // kernel over two stacked frames for video: three frames make a pair and
+    // a lone frame padded inside the graph
+    f.push_back({"nemotron_omni", "qwen3", "vision", "img:32x32,64x40,40x96;vid:32x32x3", [](G & g) {
+        const int E = 32, P = 8, S = 32, H = 64, M = 2;
+        vision(g, "nemotron_omni", S, P);
+        hp(g, "vision", E, 64, 2, 2, N_TEXT);
+        g.u32(KEY_PROJ_SCALE_FACTOR, M);
+        g.u32(KEY_IMAGE_MIN_PIXELS, 4 * P * P * M * M);
+        g.u32(KEY_IMAGE_MAX_PIXELS, 48 * P * P * M * M);
+        patch_embd(g, P, E, (S / P) * (S / P));
+        g.t(TN_PATCH_EMBD_1, {P, P, 6, E}, 1.0f / std::sqrt((float) (P * P * 6)));
+        g.t(TN_CLASS_EMBD, {E, 3}, 0.05f); // three registers
+        vit_layers(g, "v", 2, E, 64, 2);
+        g.norm(fmt(TN_MVLM_PROJ_MLP, 0, "weight"), 4 * E);
+        g.w(fmt(TN_MVLM_PROJ_MLP, 1, "weight"), 4 * E, H);
+        g.w(fmt(TN_MVLM_PROJ_MLP, 3, "weight"), H, N_TEXT);
+    }});
+    // minicpmv4_7: MiniCPM-V 4.6's encoder, the overview and slices in one
+    // canvas chunk with v.tok_embd_sep's separators appended after each
+    // tile, max_slice_nums from the GGUF, decoded with M-RoPE so the canvas
+    // positions are read
+    f.push_back({"minicpmv4_7", "qwen3vl", "vision", "img:64x64,160x96,48x200,40x40,200x160", [m46 = build_of("minicpmv4_6")](G & g) {
+        m46(g);
+        g.str(KEY_PROJ_TYPE, "minicpmv4_7");
+        g.u32(KEY_MAX_SLICE_NUMS, 4);
+        g.t(TN_TOK_EMBD_SEP, {N_TEXT, 4}, 0.1f);
+    }});
+    // cohere2v: a SigLIP ViT on square tiles, the grid with the least
+    // upscale, tiles then a thumbnail, and a SwiGLU projector (swapped
+    // halves). Its text model holds the three image tokens.
+    f.push_back({"cohere2v", "qwen3-c2v", "vision", "img:32x32,100x60,20x70,90x30", [](G & g) {
+        const int E = 64, P = 8, S = 32, H = 128;
+        vision(g, "cohere2v", S, P);
+        hp(g, "vision", E, 128, 4, 2, N_TEXT);
+        g.u32(KEY_PROJ_SCALE_FACTOR, 2);
+        g.u32(KEY_PREPROC_MAX_TILES, 6);
+        patch_embd(g, P, E, (S / P) * (S / P));
+        vit_layers(g, "v", 2, E, 128, 4);
+        g.w(fmt(TN_LLAVA_PROJ, 1, "weight"), E * 4, 2 * H);
+        g.bias(fmt(TN_LLAVA_PROJ, 1, "bias"), 2 * H);
+        g.w(fmt(TN_LLAVA_PROJ, 2, "weight"), H, N_TEXT);
+        g.bias(fmt(TN_LLAVA_PROJ, 2, "bias"), N_TEXT);
+    }});
+    // pplx-decider: a Qwen-VL mmproj may carry its own pixel limits, which
+    // the loader reads unless custom token limits are set; these sit far
+    // inside set_limit_image_tokens' defaults, so every size resizes
+    f.push_back({"qwen2.5vl-pixels", "qwen2vl", "vision", "img:64x64,128x80,200x40", [q25 = build_of("qwen2.5vl_merger")](G & g) {
+        q25(g);
+        g.u32(KEY_IMAGE_MIN_PIXELS, 16 * 16 * 16);
+        g.u32(KEY_IMAGE_MAX_PIXELS, 16 * 16 * 40);
+    }});
+    // the new load errors: a resize algorithm the loader does not know, a
+    // tile count out of [1, 256], and a 4.7 without its separators
+    variant("d1omni_v", "d1omni_v-bad-algo", [](G & g) { g.str(KEY_IMAGE_RESIZE_ALGO, "nearest"); });
+    variant("cohere2v", "cohere2v-tiles-zero", [](G & g) { g.u32(KEY_PREPROC_MAX_TILES, 0); });
+    variant("cohere2v", "cohere2v-tiles-257", [](G & g) { g.u32(KEY_PREPROC_MAX_TILES, 257); });
+    f.push_back({"minicpmv4_7-no-sep", "qwen3vl", "expect-fail", "img:64x64", [m47 = build_of("minicpmv4_7")](G & g) {
+        g.drop.insert(TN_TOK_EMBD_SEP);
+        m47(g);
+    }});
 
     return f;
 }
@@ -1915,7 +2014,14 @@ static const std::vector<std::string> k_specials = {
     "<tts_text_eod>", "<|codec_language_english|>", "<|bos_before_voice|>", "<|audio_bos|>",
 };
 
-static bool write_text_model(const std::string & in, const std::string & out, bool codec, int deepstack = 0, bool mrope = false) {
+// cohere2v's image tokens (mtmd.cpp's init_vision): its text model trades
+// the TTS tokens, which no vision projector looks up, for these
+static const std::vector<std::string> k_specials_c2v = {
+    "<|START_OF_IMG|>", "<|END_OF_IMG|>", "<|IMG_LINE_BREAK|>",
+};
+
+static bool write_text_model(const std::string & in, const std::string & out, bool codec, int deepstack = 0, bool mrope = false,
+                             bool c2v = false) {
     ggml_context * ctx = nullptr;
     gguf_init_params ip = { false, &ctx };
     gguf_context * src = gguf_init_from_file(in.c_str(), ip);
@@ -1936,7 +2042,16 @@ static bool write_text_model(const std::string & in, const std::string & out, bo
     add("\xe2\x96\x81", 1);
     for (int ch = 0x21; ch <= 0x7e; ch++) add(std::string(1, (char) ch), 1);
     add("<0x0A>", 6);
-    for (const auto & s : k_specials) add(s, 3);
+    if (c2v) {
+        // every special up to the first TTS one, then cohere2v's
+        for (const auto & s : k_specials) {
+            if (s == "<|codec_bos|>") break;
+            add(s, 3);
+        }
+        for (const auto & s : k_specials_c2v) add(s, 3);
+    } else {
+        for (const auto & s : k_specials) add(s, 3);
+    }
     if (codec) {
         // qwen3-tts samples codec_0 + code: the rest of the vocabulary
         int i = 0;
@@ -1982,7 +2097,7 @@ static bool write_text_model(const std::string & in, const std::string & out, bo
 }
 
 static int cmd_gen(const std::string & arch_dir, const std::string & out_dir, const std::string & filter) {
-    struct Text { const char * key; const char * fixture; bool codec; int deepstack; bool mrope = false; };
+    struct Text { const char * key; const char * fixture; bool codec; int deepstack; bool mrope = false; bool c2v = false; };
     const Text texts[] = {
         { "qwen3", "qwen3-dense", false, 0 },
         { "qwen2vl", "qwen2vl-dense", false, 0 },
@@ -1996,10 +2111,12 @@ static int cmd_gen(const std::string & arch_dir, const std::string & out_dir, co
         // the slots checkpoint and must skip a media chunk's batch
         { "qwen35", "qwen35-dense", false, 0 },
         { "gemma3", "gemma3-dense", false, 0 },
+        // v0.7.0: cohere2v's image tokens in the vocabulary
+        { "qwen3-c2v", "qwen3-dense", false, 0, false, true },
     };
     for (const auto & t : texts) {
         const std::string out = out_dir + "/text-" + t.key + ".gguf";
-        if (!write_text_model(arch_dir + "/" + t.fixture + ".gguf", out, t.codec, t.deepstack, t.mrope)) return 1;
+        if (!write_text_model(arch_dir + "/" + t.fixture + ".gguf", out, t.codec, t.deepstack, t.mrope, t.c2v)) return 1;
     }
 
     FILE * man = fopen((out_dir + "/manifest.txt").c_str(), "w");
@@ -2066,9 +2183,11 @@ static std::vector<std::string> split(const std::string & s, char d) {
 }
 
 // encode every media chunk of one prompt; returns "" or the failure
-static std::string run_media(mtmd_context * mctx, llama_model * model, std::vector<mtmd_bitmap *> & bitmaps) {
+// (`adjacent`: the markers with no text between them, so mergeable video
+// frames can merge)
+static std::string run_media(mtmd_context * mctx, llama_model * model, std::vector<mtmd_bitmap *> & bitmaps, bool adjacent = false) {
     std::string prompt = "describe:";
-    for (size_t i = 0; i < bitmaps.size(); i++) prompt += std::string(" ") + mtmd_default_marker();
+    for (size_t i = 0; i < bitmaps.size(); i++) prompt += std::string(adjacent ? "" : " ") + mtmd_default_marker();
     prompt += " ok";
     mtmd_input_text text = { prompt.c_str(), prompt.size(), true, true };
     mtmd_input_chunks * chunks = mtmd_input_chunks_init();
@@ -2206,6 +2325,25 @@ static std::string check_one(const std::vector<std::string> & m, bool gpu) {
                 mtmd_bitmap_free(bms[0]);
                 if (!err.empty()) {
                     err = sz + ": " + err;
+                    break;
+                }
+            }
+        } else if (kv[0] == "vid") {
+            // WxHxN: N frames of one video, each mergeable with the next
+            for (const auto & sz : split(kv[1], ',')) {
+                const auto whn = split(sz, 'x');
+                const int W = atoi(whn[0].c_str()), H = atoi(whn[1].c_str()), N = atoi(whn[2].c_str());
+                std::vector<mtmd_bitmap *> bms;
+                for (int k = 0; k < N; k++) {
+                    std::vector<unsigned char> px((size_t) W * H * 3);
+                    for (auto & p : px) p = (unsigned char) (rng() & 0xff);
+                    bms.push_back(mtmd_bitmap_init(W, H, px.data()));
+                    mtmd_bitmap_set_mergeable(bms.back(), true);
+                }
+                err = run_media(mctx, model, bms, true);
+                for (auto * b : bms) mtmd_bitmap_free(b);
+                if (!err.empty()) {
+                    err = "vid " + sz + ": " + err;
                     break;
                 }
             }

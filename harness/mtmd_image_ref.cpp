@@ -64,6 +64,7 @@ struct ref_hparams {
     float   image_std[3];
     int32_t dsv4_max_n_token;
     int32_t dsv4_max_wh_ratio;
+    int32_t max_slice_nums; // v0.7.0
 };
 
 typedef void (*ref_log_fn)(int level, const char * text, void * user_data);
@@ -134,6 +135,7 @@ int ref_preprocess(int kind, int proj_type, const ref_hparams * hp, const uint8_
     h.image_pad_ov         = (pad_style) hp->image_pad_ov;
     h.dsv4_max_n_token     = hp->dsv4_max_n_token;
     h.dsv4_max_wh_ratio    = hp->dsv4_max_wh_ratio;
+    h.max_slice_nums       = hp->max_slice_nums;
 
     std::unique_ptr<mtmd_image_preprocessor> pp;
     switch (kind) {
@@ -152,6 +154,7 @@ int ref_preprocess(int kind, int proj_type, const ref_hparams * hp, const uint8_
         case 12: pp = std::make_unique<mtmd_image_preprocessor_muse_glimmer>(&ctx); break;
         case 13: pp = std::make_unique<mtmd_image_preprocessor_deepseek4v>(&ctx); break;
         case 14: pp = std::make_unique<mtmd_image_preprocessor_glm5v>(&ctx); break;
+        case 15: pp = std::make_unique<mtmd_image_preprocessor_cohere2v>(&ctx); break;
         default: return 1;
     }
 

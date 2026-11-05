@@ -10,7 +10,7 @@
 //!   `llama_kv_cache_iswa_context`
 //! - `llama.cpp/src/llama-kv-cache-iswa.cpp` -- their bodies
 //!
-//! All at v0.6.0 (`d81235049`).
+//! All at v0.7.0 (`620d2225c`).
 
 const std = @import("std");
 const impl = @import("impl.zig");
@@ -55,7 +55,7 @@ const ChainedFilter = struct {
     }
 };
 
-/// Ports `llama_kv_cache_iswa` (llama-kv-cache-iswa.h:14 @d81235049): two
+/// Ports `llama_kv_cache_iswa` (llama-kv-cache-iswa.h:14 @620d2225c): two
 /// `llama_kv_cache`s, the first for the non-SWA layers and the second for
 /// the SWA layers.
 pub const KvCacheIswa = struct {
@@ -64,8 +64,8 @@ pub const KvCacheIswa = struct {
     kv_swa: *KvCache,
 
     /// Ports the constructor of `llama_kv_cache_iswa` that takes the
-    /// hyperparameters (llama-kv-cache-iswa.cpp:34 @d81235049); the one
-    /// that does not (llama-kv-cache-iswa.cpp:14 @d81235049) passes the
+    /// hyperparameters (llama-kv-cache-iswa.cpp:34 @620d2225c); the one
+    /// that does not (llama-kv-cache-iswa.cpp:14 @620d2225c) passes the
     /// model's, which is `hparams = null` here.
     ///
     /// Parameters:
@@ -142,14 +142,14 @@ pub const KvCacheIswa = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `clear` (llama-kv-cache-iswa.cpp:108 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `clear` (llama-kv-cache-iswa.cpp:108 @620d2225c).
     pub fn clear(self: *KvCacheIswa, data: bool) void {
         self.kv_base.clear(data);
         self.kv_swa.clear(data);
     }
 
     /// Ports `llama_kv_cache_iswa`'s `seq_rm` (llama-kv-cache-iswa.cpp:113
-    /// @d81235049): both halves, whatever the first answers.
+    /// @620d2225c): both halves, whatever the first answers.
     pub fn seqRm(self: *KvCacheIswa, seq_id: i32, p0: i32, p1: i32) bool {
         var res = true;
         res = res and self.kv_base.seqRm(seq_id, p0, p1);
@@ -157,61 +157,60 @@ pub const KvCacheIswa = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `seq_cp` (llama-kv-cache-iswa.cpp:122 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `seq_cp` (llama-kv-cache-iswa.cpp:122 @620d2225c).
     pub fn seqCp(self: *KvCacheIswa, seq_id_src: i32, seq_id_dst: i32, p0: i32, p1: i32) void {
         self.kv_base.seqCp(seq_id_src, seq_id_dst, p0, p1);
         self.kv_swa.seqCp(seq_id_src, seq_id_dst, p0, p1);
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `seq_keep` (llama-kv-cache-iswa.cpp:127 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `seq_keep` (llama-kv-cache-iswa.cpp:127 @620d2225c).
     pub fn seqKeep(self: *KvCacheIswa, seq_id: i32) void {
         self.kv_base.seqKeep(seq_id);
         self.kv_swa.seqKeep(seq_id);
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `seq_add` (llama-kv-cache-iswa.cpp:132 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `seq_add` (llama-kv-cache-iswa.cpp:132 @620d2225c).
     pub fn seqAdd(self: *KvCacheIswa, seq_id: i32, p0: i32, p1: i32, shift: i32) void {
         self.kv_base.seqAdd(seq_id, p0, p1, shift);
         self.kv_swa.seqAdd(seq_id, p0, p1, shift);
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `seq_div` (llama-kv-cache-iswa.cpp:137 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `seq_div` (llama-kv-cache-iswa.cpp:137 @620d2225c).
     pub fn seqDiv(self: *KvCacheIswa, seq_id: i32, p0: i32, p1: i32, d: c_int) void {
         self.kv_base.seqDiv(seq_id, p0, p1, d);
         self.kv_swa.seqDiv(seq_id, p0, p1, d);
     }
 
     /// Ports `llama_kv_cache_iswa`'s `seq_pos_min` (llama-kv-cache-iswa.cpp:142
-    /// @d81235049): the base cache is a superset of the SWA cache, so the
+    /// @620d2225c): the base cache is a superset of the SWA cache, so the
     /// SWA cache answers.
     pub fn seqPosMin(self: *const KvCacheIswa, seq_id: i32) i32 {
         return self.kv_swa.seqPosMin(seq_id);
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `seq_pos_max` (llama-kv-cache-iswa.cpp:147 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `seq_pos_max` (llama-kv-cache-iswa.cpp:147 @620d2225c).
     pub fn seqPosMax(self: *const KvCacheIswa, seq_id: i32) i32 {
         return self.kv_swa.seqPosMax(seq_id);
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `memory_breakdown` (llama-kv-cache-iswa.cpp:151 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `memory_breakdown` (llama-kv-cache-iswa.cpp:151 @620d2225c).
     pub fn memoryBreakdown(self: *const KvCacheIswa, out: *std.ArrayList(memory.BuftSize)) void {
         self.kv_base.memoryBreakdown(out);
         self.kv_swa.memoryBreakdown(out);
     }
 
     /// Ports `llama_kv_cache_iswa`'s `init_batch` (llama-kv-cache-iswa.cpp:159
-    /// @d81235049): a simple split when the cache is unified, then an equal
-    /// split; each must place every ubatch in both caches.
+    /// @620d2225c): a simple split when the cache is unified, then an equal
+    /// split -- a sequence split under `embd_all`, which keeps each sequence
+    /// whole; each must place every ubatch in both caches.
     pub fn initBatch(self: *KvCacheIswa, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *IswaContext {
-        _ = embd_all;
-
         // First the simple split, which needs a unified cache.
         if (self.unified) {
-            if (self.tryPrepare(balloc, n_ubatch, false)) |ctx| return ctx;
+            if (self.tryPrepare(balloc, n_ubatch, false, false)) |ctx| return ctx;
         }
 
         // Then the equal split.
-        if (self.tryPrepare(balloc, n_ubatch, true)) |ctx| return ctx;
+        if (self.tryPrepare(balloc, n_ubatch, true, embd_all)) |ctx| return ctx;
 
         // The C++'s TODO: try other splitting strategies, once the batches
         // are flexible enough for it.
@@ -219,12 +218,12 @@ pub const KvCacheIswa = struct {
     }
 
     /// One `do { ... } while (false)` block of `init_batch`.
-    fn tryPrepare(self: *KvCacheIswa, balloc: *batch.BatchAllocr, n_ubatch: u32, equal: bool) ?*IswaContext {
+    fn tryPrepare(self: *KvCacheIswa, balloc: *batch.BatchAllocr, n_ubatch: u32, equal: bool, embd_all: bool) ?*IswaContext {
         balloc.splitReset();
 
         var ubatches: std.ArrayList(Ubatch) = .empty;
         while (true) {
-            const ub = if (equal) balloc.splitEqual(n_ubatch, !self.unified, 0) else balloc.splitSimple(n_ubatch);
+            const ub = if (!equal) balloc.splitSimple(n_ubatch) else if (embd_all) balloc.splitSeq(n_ubatch) else balloc.splitEqual(n_ubatch, !self.unified, 0);
             if (ub.n_tokens == 0) break;
             ubatches.append(allocator, ub) catch oom();
         }
@@ -262,42 +261,44 @@ pub const KvCacheIswa = struct {
         return IswaContext.createBatch(self, sinfos_base, sinfos_swa, ubatches);
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `init_full` (llama-kv-cache-iswa.cpp:245 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `init_full` (llama-kv-cache-iswa.cpp:243 @620d2225c).
     pub fn initFull(self: *KvCacheIswa) *IswaContext {
         return IswaContext.createFull(self);
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `init_update` (llama-kv-cache-iswa.cpp:249 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `init_update` (llama-kv-cache-iswa.cpp:247 @620d2225c).
     pub fn initUpdate(self: *KvCacheIswa, lctx: *anyopaque, optimize: bool) *IswaContext {
         return IswaContext.createUpdate(self, lctx, optimize);
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `get_can_shift` (llama-kv-cache-iswa.cpp:253
-    /// @d81235049): only when both can and the two are the same size.
+    /// Ports `llama_kv_cache_iswa`'s `get_can_shift` (llama-kv-cache-iswa.cpp:251
+    /// @620d2225c): only when both can and the two are the same size.
     pub fn getCanShift(self: *const KvCacheIswa) bool {
         return self.kv_base.getCanShift() and
             self.kv_swa.getCanShift() and
             self.kv_base.getSize() == self.kv_swa.getSize();
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `state_write` (llama-kv-cache-iswa.cpp:259 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `state_write` (llama-kv-cache-iswa.cpp:257
+    /// @620d2225c): the base cache, which skips itself for a partial state,
+    /// then the SWA one.
     pub fn stateWrite(self: *const KvCacheIswa, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
-        if (flags & c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY == 0) try self.kv_base.stateWrite(w, seq_id, flags, exc);
+        try self.kv_base.stateWrite(w, seq_id, flags, exc);
         try self.kv_swa.stateWrite(w, seq_id, flags, exc);
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `state_read` (llama-kv-cache-iswa.cpp:267 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `state_read` (llama-kv-cache-iswa.cpp:262 @620d2225c).
     pub fn stateRead(self: *KvCacheIswa, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
-        if (flags & c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY == 0) try self.kv_base.stateRead(r, seq_id, flags, exc);
+        try self.kv_base.stateRead(r, seq_id, flags, exc);
         try self.kv_swa.stateRead(r, seq_id, flags, exc);
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `get_base` (llama-kv-cache-iswa.cpp:275 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `get_base` (llama-kv-cache-iswa.cpp:267 @620d2225c).
     pub fn getBase(self: *const KvCacheIswa) *KvCache {
         return self.kv_base;
     }
 
-    /// Ports `llama_kv_cache_iswa`'s `get_swa` (llama-kv-cache-iswa.cpp:279 @d81235049).
+    /// Ports `llama_kv_cache_iswa`'s `get_swa` (llama-kv-cache-iswa.cpp:271 @620d2225c).
     pub fn getSwa(self: *const KvCacheIswa) *KvCache {
         return self.kv_swa;
     }
@@ -397,7 +398,7 @@ pub const KvCacheIswa = struct {
     }
 };
 
-/// `GGML_PAD` (ggml.h:267 @d81235049) for a power-of-two `n`.
+/// `GGML_PAD` (ggml.h:267 @620d2225c) for a power-of-two `n`.
 fn padTo(x: u32, comptime n: u32) u32 {
     return (x +% (n - 1)) & ~@as(u32, n - 1);
 }
@@ -422,7 +423,7 @@ fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
     return out;
 }
 
-/// Ports `llama_kv_cache_iswa_context` (llama-kv-cache-iswa.h:100 @d81235049).
+/// Ports `llama_kv_cache_iswa_context` (llama-kv-cache-iswa.h:100 @620d2225c).
 pub const IswaContext = struct {
     /// The index of the next ubatch to process.
     i_next: usize = 0,
@@ -432,7 +433,7 @@ pub const IswaContext = struct {
     status: memory.Status,
 
     /// Ports the error constructor of `llama_kv_cache_iswa_context`
-    /// (llama-kv-cache-iswa.cpp:287 @d81235049).
+    /// (llama-kv-cache-iswa.cpp:279 @620d2225c).
     pub fn createStatus(status: memory.Status) *IswaContext {
         const self = allocator.create(IswaContext) catch oom();
         self.* = .{ .status = status };
@@ -440,7 +441,7 @@ pub const IswaContext = struct {
     }
 
     /// Ports the full-cache constructor of `llama_kv_cache_iswa_context`
-    /// (llama-kv-cache-iswa.cpp:296 @d81235049).
+    /// (llama-kv-cache-iswa.cpp:288 @620d2225c).
     pub fn createFull(kv: *KvCacheIswa) *IswaContext {
         const self = allocator.create(IswaContext) catch oom();
         const b = kv.getBase().initFull();
@@ -450,7 +451,7 @@ pub const IswaContext = struct {
     }
 
     /// Ports the update constructor of `llama_kv_cache_iswa_context`
-    /// (llama-kv-cache-iswa.cpp:289 @d81235049).
+    /// (llama-kv-cache-iswa.cpp:281 @620d2225c).
     pub fn createUpdate(kv: *KvCacheIswa, lctx: *anyopaque, optimize: bool) *IswaContext {
         const self = allocator.create(IswaContext) catch oom();
         const b = kv.getBase().initUpdate(lctx, optimize);
@@ -460,7 +461,7 @@ pub const IswaContext = struct {
     }
 
     /// Ports the batch constructor of `llama_kv_cache_iswa_context`
-    /// (llama-kv-cache-iswa.cpp:305 @d81235049): each half gets its own copy
+    /// (llama-kv-cache-iswa.cpp:297 @620d2225c): each half gets its own copy
     /// of the ubatches, as the C++ copies them.
     pub fn createBatch(kv: *KvCacheIswa, sinfos_base: std.ArrayList(SlotInfo), sinfos_swa: std.ArrayList(SlotInfo), ubatches: std.ArrayList(Ubatch)) *IswaContext {
         const self = allocator.create(IswaContext) catch oom();
@@ -478,7 +479,7 @@ pub const IswaContext = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache_iswa_context`'s `next` (llama-kv-cache-iswa.cpp:319 @d81235049).
+    /// Ports `llama_kv_cache_iswa_context`'s `next` (llama-kv-cache-iswa.cpp:311 @620d2225c).
     pub fn next(self: *IswaContext) bool {
         std.debug.assert(self.status == .success);
         _ = self.ctx_base.?.next();
@@ -487,8 +488,8 @@ pub const IswaContext = struct {
         return self.i_next < self.ubatches.items.len;
     }
 
-    /// Ports `llama_kv_cache_iswa_context`'s `apply` (llama-kv-cache-iswa.cpp:332
-    /// @d81235049): both halves apply, whatever the first answers.
+    /// Ports `llama_kv_cache_iswa_context`'s `apply` (llama-kv-cache-iswa.cpp:324
+    /// @620d2225c): both halves apply, whatever the first answers.
     pub fn apply(self: *IswaContext) bool {
         std.debug.assert(!memory.statusIsFail(self.status));
         var res = true;
@@ -497,24 +498,24 @@ pub const IswaContext = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache_iswa_context`'s `get_status` (llama-kv-cache-iswa.cpp:343 @d81235049).
+    /// Ports `llama_kv_cache_iswa_context`'s `get_status` (llama-kv-cache-iswa.cpp:335 @620d2225c).
     pub fn getStatus(self: *const IswaContext) memory.Status {
         return self.status;
     }
 
-    /// Ports `llama_kv_cache_iswa_context`'s `get_ubatch` (llama-kv-cache-iswa.cpp:347 @d81235049).
+    /// Ports `llama_kv_cache_iswa_context`'s `get_ubatch` (llama-kv-cache-iswa.cpp:339 @620d2225c).
     pub fn getUbatch(self: *const IswaContext) *const Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
 
-    /// Ports `llama_kv_cache_iswa_context`'s `get_base` (llama-kv-cache-iswa.cpp:353 @d81235049).
+    /// Ports `llama_kv_cache_iswa_context`'s `get_base` (llama-kv-cache-iswa.cpp:345 @620d2225c).
     pub fn getBase(self: *const IswaContext) *const KvCacheContext {
         std.debug.assert(self.status == .success);
         return self.ctx_base.?;
     }
 
-    /// Ports `llama_kv_cache_iswa_context`'s `get_swa` (llama-kv-cache-iswa.cpp:359 @d81235049).
+    /// Ports `llama_kv_cache_iswa_context`'s `get_swa` (llama-kv-cache-iswa.cpp:351 @620d2225c).
     pub fn getSwa(self: *const IswaContext) *const KvCacheContext {
         std.debug.assert(self.status == .success);
         return self.ctx_swa.?;

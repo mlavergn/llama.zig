@@ -1,0 +1,3 @@
+{#- llama.cpp's `safe` of none, a boolean, an integer and a float: their `string` (an integer's is its JSON). -#}
+{%- set n = messages|length -%}
+[{{ none|safe }}][{{ (n > 0)|safe }}][{{ n|safe }}][{{ (n / 4)|safe }}][{{ ((n|safe) + '!') }}][{{ (none|safe) ~ '.' }}]

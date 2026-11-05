@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma4-assistant.cpp` at v0.6.0
-//! (`d81235049`): `llama_model_gemma4_assistant`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/gemma4-assistant.cpp` at v0.7.0
+//! (`620d2225c`): `llama_model_gemma4_assistant`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -25,7 +25,7 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llama_model_gemma4_assistant`'s `load_arch_hparams`
-/// (models/gemma4-assistant.cpp:3 @d81235049).
+/// (models/gemma4-assistant.cpp:3 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -48,7 +48,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_gemma4_assistant`'s `load_arch_tensors`
-/// (models/gemma4-assistant.cpp:21 @d81235049).
+/// (models/gemma4-assistant.cpp:21 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -113,13 +113,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_gemma4_assistant`'s `build_arch_graph`
-/// (models/gemma4-assistant.cpp:80 @d81235049).
+/// (models/gemma4-assistant.cpp:80 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma4_assistant`'s `graph`
-/// (models/gemma4-assistant.cpp:84 @d81235049).
+/// (models/gemma4-assistant.cpp:84 @620d2225c).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -127,10 +127,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_embd_backbone: i64 = hp.nEmbdInp();
 
     var inp_tokens: *Tensor = undefined;
+    var inp_embd: *Tensor = undefined;
     var inp_h: *Tensor = undefined;
     {
-        const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma4-assistant.cpp", 91, "out of memory");
-        inp.* = .{ .n_embd = n_embd_backbone };
+        const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/gemma4-assistant.cpp", 92, "out of memory");
+        inp.* = .{ .n_embd = n_embd_backbone, .n_embd_state = n_embd_backbone };
 
         inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.ubatch.n_tokens);
         b.cb(inp.tokens.?, "inp_tokens", -1);
@@ -139,19 +140,24 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.res.t_inp_tokens = inp.tokens;
 
         inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_embd_backbone, b.ubatch.n_tokens);
-        b.cb(inp.embd.?, "inp_h", -1);
+        b.cb(inp.embd.?, "inp_embd", -1);
         c.ggml_set_input(inp.embd);
-        inp_h = inp.embd.?;
+        inp_embd = inp.embd.?;
         b.res.t_inp_embd = inp.embd;
 
-        _ = b.res.addInput(graph.InpEmbd, inp);
+        inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_embd_backbone, b.ubatch.n_tokens);
+        b.cb(inp.h.?, "inp_h", -1);
+        c.ggml_set_input(inp.h);
+        inp_h = inp.h.?;
+
+        _ = b.res.addInput(graph.InpEmbdH, inp);
     }
 
-    impl.assert(cp.ctx_other != null, "models/gemma4-assistant.cpp", 108, "cparams.ctx_other != nullptr");
+    impl.assert(cp.ctx_other != null, "models/gemma4-assistant.cpp", 114, "cparams.ctx_other != nullptr");
     const ctx_other: *const context_mod.Context = @ptrCast(@alignCast(cp.ctx_other.?));
     const model_other = ctx_other.getModel();
 
-    var x: *Tensor = c.ggml_get_rows(ctx, model_other.tok_embd, inp_tokens);
+    var x: *Tensor = if (b.ubatch.token != null) c.ggml_get_rows(ctx, model_other.tok_embd, inp_tokens) else inp_embd;
     x = c.ggml_scale(ctx, x, impl.sqrtf(@floatFromInt(n_embd_backbone)));
     b.cb(x, "inp_embd_target", -1);
 
@@ -234,7 +240,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.cb(h_next, "h_nextn", -1);
     b.res.t_h_nextn = h_next;
 
-    c.ggml_build_forward_expand(b.gf, logits);
     c.ggml_build_forward_expand(b.gf, h_next);
 }
 

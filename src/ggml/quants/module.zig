@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! The files here together replace `llama.cpp/ggml/src/ggml-quants.c` (v0.6.0,
-//! `d81235049`), 5,667 lines and 79 exported symbols. Each names the section of
+//! The files here together replace `llama.cpp/ggml/src/ggml-quants.c` (v0.7.0,
+//! `620d2225c`), 5,667 lines and 79 exported symbols. Each names the section of
 //! that file it covers.
 //!
 //! **This file is not a port**: it is a barrel, and `testing.zig` and

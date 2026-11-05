@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/muse-glimmer.cpp` (llama.cpp v0.6.0,
-//! `d81235049`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/muse-glimmer.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -38,6 +38,7 @@ const Build = struct {
     string_value: ParserId = undefined,
     tool_choice: ParserId = undefined,
     name: []const u8 = "",
+    tool_index: usize = 0,
     arg_rules: std.ArrayList(ParserId) = .empty,
 
     fn parser(self: *Build, p: *ChatBuilder) chat_peg.Error!ParserId {
@@ -93,14 +94,15 @@ const Build = struct {
         return b.plus(try b.plus(try b.zeroOrMore(try b.plus(start, analysis)), start), final_msg);
     }
 
-    fn tool(self: *Build, t: *Value) Error!void {
+    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
+        self.tool_index = tool_index;
         const function = t.at("function") catch |e| return util.fromJson(e);
         self.name = try parsers.functionName(t);
         self.arg_rules = .empty;
         try parsers.foreachParameter(self.a, function, self, param);
         const tool_parser = self.buildTool() catch |e| return util.fromPeg(e);
         const b = &self.cb.b;
-        const rule = b.rule(try std.mem.concat(self.a, u8, &.{ "tool-", self.name }), tool_parser, false) catch |e| return util.fromPeg(e);
+        const rule = b.rule(try parsers.indexName(self.a, "tool-", self.tool_index, ""), tool_parser, false) catch |e| return util.fromPeg(e);
         b.orAssign(&self.tool_choice, rule) catch |e| return util.fromPeg(e);
     }
 
@@ -123,19 +125,19 @@ const Build = struct {
         return p.tool(try b.shl(head, try p.toolClose(close)));
     }
 
-    fn param(self: *Build, prop: *const json.schema.Property, doc: *peg.SharedDoc) Error!void {
-        const r = self.buildParam(prop, doc) catch |e| return util.fromPeg(e);
+    fn param(self: *Build, param_index: usize, prop: *const json.schema.Property, doc: *peg.SharedDoc) Error!void {
+        const r = self.buildParam(param_index, prop, doc) catch |e| return util.fromPeg(e);
         try self.arg_rules.append(self.a, r);
     }
 
-    fn buildParam(self: *Build, prop: *const json.schema.Property, doc: *peg.SharedDoc) chat_peg.Error!ParserId {
+    fn buildParam(self: *Build, param_index: usize, prop: *const json.schema.Property, doc: *peg.SharedDoc) chat_peg.Error!ParserId {
         const p = self.cb;
         const b = &p.b;
         var value_parser = try b.eps();
         if (prop.schema.mayBeString()) {
             value_parser = self.string_value;
         } else {
-            const schema_name = try std.mem.concat(self.a, u8, &.{ "tool-", self.name, "-arg-", prop.name, "-schema" });
+            const schema_name = try parsers.argName(self.a, self.tool_index, param_index, "-schema");
             value_parser = try b.plus(try p.toolArgJsonValue(try b.schemaDoc(try b.json(), schema_name, doc, prop.schema, false)), try p.toolArgClose(try b.literal("</atem:parameter>")));
         }
         var open = try b.plus(try b.literal("<atem:parameter name=\""), try p.toolArgName(try b.literal(prop.name)));
@@ -144,7 +146,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_muse_glimmer` (parsers/muse-glimmer.cpp:10 @d81235049).
+/// Ports `common_chat_params_init_muse_glimmer` (parsers/muse-glimmer.cpp:10 @620d2225c).
 /// The generation prompt is just `<|start|>assistant`; the model emits its
 /// own ` to=...<|message|>`.
 ///
@@ -179,7 +181,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
             try gp.appendSlice(a, try m.renderContent(a, "\n\n"));
         }
         data.generation_prompt = gp.items;
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     const extract_reasoning = inputs.reasoning_format != .none;
@@ -197,14 +199,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .extract_reasoning = extract_reasoning,
         .include_grammar = include_grammar,
     };
-    var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-
-    data.parser = try parsers.save(a, &arena);
+    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !(has_response_format or (has_tools and inputs.tool_choice == .required));
-        data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
+        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.grammar_triggers.append(a, .{
             .type = .pattern,
             .value = "(?:^|<\\|start\\|>assistant)( to=(?!self<\\|message\\|>)(?!user<\\|message\\|>)[^<]*?<\\|message\\|>)",

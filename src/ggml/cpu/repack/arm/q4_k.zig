@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.6.0
-//! (`d81235049`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.7.0
+//! (`620d2225c`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # Three sums, not one
@@ -61,7 +61,7 @@ inline fn loadq16(p: [*]const i16) i16x8 {
 
 const m4b: u8x16 = @splat(0x0f);
 
-/// Ports `ggml_gemv_q4_K_8x4_q8_K` (arch/arm/repack.cpp:594 @d81235049).
+/// Ports `ggml_gemv_q4_K_8x4_q8_K` (arch/arm/repack.cpp:594 @620d2225c).
 pub export fn ggml_gemv_q4_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q4_K_8x4_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
@@ -167,7 +167,7 @@ pub export fn ggml_gemv_q4_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     }
 }
 
-/// Ports `ggml_gemv_q4_K_8x8_q8_K` (arch/arm/repack.cpp:727 @d81235049).
+/// Ports `ggml_gemv_q4_K_8x8_q8_K` (arch/arm/repack.cpp:727 @620d2225c).
 ///
 /// Not the `8x4` kernel with a constant changed. It works in **column
 /// pairs**: four accumulators rather than two, activations loaded as a
@@ -281,7 +281,7 @@ pub export fn ggml_gemv_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     }
 }
 
-/// Ports `ggml_gemm_q4_K_8x4_q8_K` (arch/arm/repack.cpp:3467 @d81235049).
+/// Ports `ggml_gemm_q4_K_8x4_q8_K` (arch/arm/repack.cpp:3467 @620d2225c).
 ///
 /// Eight accumulators, laid out as `2 * row + col_group`: four rows of the
 /// `q8_Kx4` block against two groups of four columns. The lane index of

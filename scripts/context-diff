@@ -12,6 +12,8 @@
 # return value and every output row's bits. See harness/context_diff.zig.
 #
 # Usage: scripts/context-diff [model.gguf] [--quick] [--case substring]
+#   [--model moe-cache|host-experts|...] [--hadamard|--hadamard-tied]
+#   [--section-order zyxt] [--target model.gguf]   (see harness/context_diff.zig)
 #   Requires: zig build reference --release=fast
 #   The model defaults to the first Qwen3.5 model in the repository root.
 set -u
@@ -23,8 +25,10 @@ for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
 done
 
 model=""
+explicit_model=0
 if [ $# -gt 0 ] && [ "${1%.gguf}" != "$1" ]; then
     model="$1"
+    explicit_model=1
     shift
 fi
 if [ -z "$model" ]; then
@@ -58,4 +62,36 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
     "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 
-CONTEXT_DIFF_TMP="$tmp" "$tmp/context_diff" "$model" "$@"
+# Without a model named, the default run also covers v0.7.0's features on
+# fixtures from scripts/gen-arch-fixtures, each required: the MoE cache and
+# host-resident experts on deepseek2's 64 experts, prism.hadamard (latent and
+# tied) on a hybrid MoE and a dense model, the GDN grouped-head permutation
+# under it (the gdnrep2 variant), the M-RoPE section order on the
+# Qwen3.5 model, and a DFlash draft that reads its head from a target.
+extra=0
+if [ $explicit_model = 0 ] && [ $# = 0 ]; then
+    FIXTURES="${ARCH_FIXTURES:-zig-out/arch-fixtures}"
+    for f in deepseek2-moe qwen3moe-moe qwen35moe-moe qwen35moe-gdnrep2-moe llama-dense dflash-gemma qwen3-dense; do
+        [ -f "$FIXTURES/$f.gguf" ] || { echo "FAIL: no $FIXTURES/$f.gguf -- run 'make arch-fixtures'" >&2; exit 2; }
+    done
+    extra=1
+fi
+
+status=0
+CONTEXT_DIFF_TMP="$tmp" "$tmp/context_diff" "$model" "$@" || status=1
+if [ $extra = 1 ]; then
+    run() { echo "== context_diff $*"; CONTEXT_DIFF_TMP="$tmp" MOE_CACHE_SIZE="${MOE_CACHE_SIZE:-2000000}" "$tmp/context_diff" "$@" || status=1; }
+    run "$FIXTURES/deepseek2-moe.gguf" --model moe-cache
+    run "$FIXTURES/deepseek2-moe.gguf" --model host-experts
+    MOE_CACHE_SIZE=4000000 run "$FIXTURES/qwen3moe-moe.gguf" --hadamard --model moe-cache --case-exact default
+    run "$FIXTURES/qwen35moe-moe.gguf" --hadamard --model gpu
+    run "$FIXTURES/qwen35moe-moe.gguf" --hadamard --model cpu --case-exact default
+    # The GDN grouped-head permutation is built only with two or more value
+    # heads per key head (gdn_v_grouped, perm_rep > 1): the recipe's fixtures
+    # have one, so only the gdnrep2 variant reaches it.
+    run "$FIXTURES/qwen35moe-gdnrep2-moe.gguf" --hadamard --model gpu
+    run "$FIXTURES/llama-dense.gguf" --hadamard-tied --model gpu
+    run "$model" --section-order zyxt --model gpu --case-exact default
+    run "$FIXTURES/dflash-gemma.gguf" --target "$FIXTURES/qwen3-dense.gguf" --model gpu --case-exact default
+fi
+exit $status

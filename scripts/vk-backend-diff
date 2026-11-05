@@ -20,6 +20,13 @@
 # `GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM` reaches the staging and pinned
 # transfer paths -- its device-local-only types 0 and 1.
 #
+# Since v0.7.0 a host buffer is shared by every device when there is more
+# than one and all of them can import host memory (`multi_device`): plain
+# aligned memory each device imports on first use. Only the memory logger
+# shows which path ran -- the data reads back the same either way -- so the
+# multi-device scenarios run with it on: `0,1` on the GB10, and `0,0`, the
+# one physical device listed twice, which is how llvmpipe alone reaches it.
+#
 # Usage: scripts/vk-backend-diff
 # Requires:
 #   zig build reference vk-ref --release=fast -Dvulkan -Dcuda=false --prefix zig-out/vk-port
@@ -73,6 +80,9 @@ scenarios=(
     "GGML_VK_SERIALIZE_SUBMISSIONS=1"
     "GGML_VK_DISABLE_ASYNC=1"
     "GGML_VK_PERF_LOGGER=1 GGML_VK_MEMORY_LOGGER=1"
+    "GGML_VK_VISIBLE_DEVICES=0,0"
+    "GGML_VK_VISIBLE_DEVICES=0,0 GGML_VK_MEMORY_LOGGER=1"
+    "GGML_VK_VISIBLE_DEVICES=0,1 GGML_VK_MEMORY_LOGGER=1"
 )
 
 # A side that aborts must abort the same way on both; gdb's backtrace would

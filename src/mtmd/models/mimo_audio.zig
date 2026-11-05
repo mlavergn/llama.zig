@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/mimo-audio.cpp` at v0.6.0
-//! (`d81235049`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/mimo-audio.cpp` at v0.7.0
+//! (`620d2225c`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -19,7 +19,7 @@ const gpa = impl.gpa;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// The `add_pos` lambda (mimo-audio.cpp:51 @d81235049) of `build`. `ctx` is
+/// The `add_pos` lambda (mimo-audio.cpp:46 @620d2225c) of `build`. `ctx` is
 /// the positions tensor.
 fn addPos(ctx: ?*anyopaque, g: *graph.Graph, x: T, layer: *const model_mod.Layer) T {
     _ = layer;
@@ -27,11 +27,11 @@ fn addPos(ctx: ?*anyopaque, g: *graph.Graph, x: T, layer: *const model_mod.Layer
     return c.ggml_rope_ext(g.ctx0, x, inp_pos, null, g.d_head, c.GGML_ROPE_TYPE_NEOX, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 }
 
-/// `skip_capture_il` (mimo-audio.cpp:42 @d81235049): encoder_skip_layer_id=3
+/// `skip_capture_il` (mimo-audio.cpp:37 @620d2225c): encoder_skip_layer_id=3
 /// (1-indexed) captures the output of layer index 2.
 const skip_capture_il: c_int = 2;
 
-/// The `callback_layer_out` lambda (mimo-audio.cpp:45 @d81235049) of `build`. `ctx` is the `skip_hidden` it writes.
+/// The `callback_layer_out` lambda (mimo-audio.cpp:40 @620d2225c) of `build`. `ctx` is the `skip_hidden` it writes.
 fn captureSkip(ctx: ?*anyopaque, g: *graph.Graph, layer_cur: T, il: c_int) void {
     _ = g;
     const skip_hidden: *T = @ptrCast(@alignCast(ctx.?));
@@ -40,12 +40,12 @@ fn captureSkip(ctx: ?*anyopaque, g: *graph.Graph, layer_cur: T, il: c_int) void 
     }
 }
 
-/// The `apply_local_rope` lambda (mimo-audio.cpp:158 @d81235049) of `build`.
+/// The `apply_local_rope` lambda (mimo-audio.cpp:151 @620d2225c) of `build`.
 fn applyLocalRope(g: *const graph.Graph, x: T, local_pos: T, local_rope_theta: f32) T {
     return c.ggml_rope_ext(g.ctx0, x, local_pos, null, g.d_head, c.GGML_ROPE_TYPE_NEOX, 0, local_rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 }
 
-/// Ports `build` (mimo-audio.cpp:3 @d81235049), a member of
+/// Ports `build` (mimo-audio.cpp:3 @620d2225c), a member of
 /// `clip_graph_mimo_audio`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
@@ -77,13 +77,8 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     _ = c.ggml_set_name(inp_pos, "mimo_audio_positions");
     c.ggml_set_input(inp_pos);
 
-    const full_mask = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, n_pos, n_pos);
-    _ = c.ggml_set_name(full_mask, "mimo_audio_full_mask");
-    c.ggml_set_input(full_mask);
-
-    const window_mask = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, n_pos, n_pos);
-    _ = c.ggml_set_name(window_mask, "mimo_audio_window_mask");
-    c.ggml_set_input(window_mask);
+    const full_mask = g.buildInpAttnMask(n_pos, n_pos, 0);
+    const window_mask = g.buildInpAttnMask(n_pos, n_pos, 1);
 
     const attn_mask_layers = gpa.alloc(T, @intCast(n_layer)) catch oom();
     defer gpa.free(attn_mask_layers);
@@ -91,7 +86,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         m.* = if (hparams.wa_pattern_mode.items[il] == -1) full_mask else window_mask;
     }
 
-    impl.ggmlAssert(n_layer > skip_capture_il, "mimo-audio.cpp", 43, "n_layer > skip_capture_il");
+    impl.ggmlAssert(n_layer > skip_capture_il, "mimo-audio.cpp", 38, "n_layer > skip_capture_il");
     var skip_hidden: T = null;
 
     // the skip connection below must be added before the post-transformer  norm,
@@ -105,7 +100,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     inpL = g.buildVit(inpL, n_pos, .normal, hparams.ffn_op, null, .{ .ctx = inp_pos, .f = addPos }, opts);
     inpL = c.ggml_reshape_2d(ctx0, inpL, n_embd, n_pos); // build_vit restores a (size-1) batch dim
 
-    impl.ggmlAssert(skip_hidden != null, "mimo-audio.cpp", 59, "skip_hidden != nullptr");
+    impl.ggmlAssert(skip_hidden != null, "mimo-audio.cpp", 54, "skip_hidden != nullptr");
     inpL = c.ggml_add(ctx0, inpL, skip_hidden);
 
     inpL = g.buildNorm(inpL, model.post_ln_w, model.post_ln_b, .normal, g.eps, -1);
@@ -127,10 +122,10 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     var codes: std.ArrayList(T) = .empty;
     defer codes.deinit(gpa);
     {
-        impl.ggmlAssert(model.rvq_codebook != null, "mimo-audio.cpp", 80, "model.rvq_codebook != nullptr");
+        impl.ggmlAssert(model.rvq_codebook != null, "mimo-audio.cpp", 75, "model.rvq_codebook != nullptr");
         const dim = ne(model.rvq_codebook, 0);
-        impl.ggmlAssert(dim == ne(inpL, 0), "mimo-audio.cpp", 82, "dim == inpL->ne[0]");
-        impl.ggmlAssert(@as(i64, @intCast(hparams.rvq_codebook_size.items.len)) == ne(model.rvq_codebook, 2), "mimo-audio.cpp", 83, "(int64_t) hparams.rvq_codebook_size.size() == model.rvq_codebook->ne[2]");
+        impl.ggmlAssert(dim == ne(inpL, 0), "mimo-audio.cpp", 77, "dim == inpL->ne[0]");
+        impl.ggmlAssert(@as(i64, @intCast(hparams.rvq_codebook_size.items.len)) == ne(model.rvq_codebook, 2), "mimo-audio.cpp", 78, "(int64_t) hparams.rvq_codebook_size.size() == model.rvq_codebook->ne[2]");
 
         var residual = inpL; // [dim, n_pos_ds]
 
@@ -157,11 +152,11 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     // convert codes to LLM embeddings
     var code_embd_sum: T = null;
     {
-        impl.ggmlAssert(model.mm_a_code_embd != null, "mimo-audio.cpp", 111, "model.mm_a_code_embd != nullptr");
+        impl.ggmlAssert(model.mm_a_code_embd != null, "mimo-audio.cpp", 106, "model.mm_a_code_embd != nullptr");
         const dim = ne(model.mm_a_code_embd, 0);
         const vocab = ne(model.mm_a_code_embd, 1);
-        impl.ggmlAssert(@as(i64, @intCast(codes.items.len)) == ne(model.mm_a_code_embd, 2), "mimo-audio.cpp", 114, "(int64_t) codes.size() == model.mm_a_code_embd->ne[2]");
-        impl.ggmlAssert(dim == ne(inpL, 0), "mimo-audio.cpp", 115, "dim == inpL->ne[0]");
+        impl.ggmlAssert(@as(i64, @intCast(codes.items.len)) == ne(model.mm_a_code_embd, 2), "mimo-audio.cpp", 109, "(int64_t) codes.size() == model.mm_a_code_embd->ne[2]");
+        impl.ggmlAssert(dim == ne(inpL, 0), "mimo-audio.cpp", 110, "dim == inpL->ne[0]");
 
         for (codes.items, 0..) |code_i, i| {
             var table_i = c.ggml_view_2d(ctx0, model.mm_a_code_embd, dim, vocab, nb(model.mm_a_code_embd, 1), i * nb(model.mm_a_code_embd, 2));
@@ -184,7 +179,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     var projected: T = undefined;
     {
         const group_size = hparams.audio_local_group_size;
-        impl.ggmlAssert(group_size > 0, "mimo-audio.cpp", 139, "group_size > 0");
+        impl.ggmlAssert(group_size > 0, "mimo-audio.cpp", 134, "group_size > 0");
         const n_pos_ds = ne(code_embd_sum, 1);
         const n_groups = @divTrunc(n_pos_ds + group_size - 1, group_size);
         const n_padded = n_groups * group_size;
@@ -198,9 +193,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         _ = c.ggml_set_name(local_pos, "mimo_audio_local_positions");
         c.ggml_set_input(local_pos);
 
-        const local_mask = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, n_padded, n_padded);
-        _ = c.ggml_set_name(local_mask, "mimo_audio_local_mask");
-        c.ggml_set_input(local_mask);
+        const local_mask = g.buildInpAttnMask(n_padded, n_padded, 2);
 
         const local_rope_theta: f32 = 640000.0; // audio_config.rope_theta (differs from the encoder's)
 

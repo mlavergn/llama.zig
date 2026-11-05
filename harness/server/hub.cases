@@ -44,6 +44,10 @@ GET /props
 # redirects are followed; no ranges; a split model's parts, all of them
 !server -m $CWD/dl/tiny5.gguf -mu $MOCK/redirect/tiny5.gguf -c 256 -np 1
 !mocklog
+# cpp-httplib 0.60: the redirect's Location is followed as written, not
+# percent-decoded first
+!server -m $CWD/dl/tiny5e.gguf -mu $MOCK/redirect-esc/tiny5.gguf -c 256 -np 1
+!mocklog
 !server -m $CWD/dl/tiny4.gguf -mu $MOCK/noranges/tiny4.gguf -c 256 -np 1
 !mocklog
 !server -m $CWD/dl/parts-00001-of-00002.gguf -mu $MOCK/files/parts-00001-of-00002.gguf -c 256 -np 1

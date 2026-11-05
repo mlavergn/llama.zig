@@ -1,9 +1,12 @@
-//! The PLaMo-2 tokenizer: a suffix table over the vocabulary, then a
-//! dynamic program for the cheapest segmentation, with byte fallback.
+//! The PLaMo-2 and PLaMo-3 tokenizer: a suffix table over the vocabulary,
+//! then a dynamic program for the cheapest segmentation, with byte fallback.
+//! PLaMo-3 (v0.7.0) first cuts the text into segments -- `<|plamo:...|>`
+//! markers, runs of a repeated character or of spaces, and U+EE00 -- and
+//! runs the program on each.
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.6.0 (`d81235049`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.7.0 (`620d2225c`).
 //!
 //! The C++ builds its table from `std::unordered_map`s, but iterates only
 //! one of them, and only to collect its keys, which it then sorts by their
@@ -37,8 +40,10 @@ const path_num_tokens = 2;
 const invalid_score: i32 = -20000000;
 const unknown_score: i32 = -10000000;
 
-/// Ports `llm_tokenizer_plamo2` (llama-vocab.cpp:1397 @d81235049).
+/// Ports `llm_tokenizer_plamo2` (llama-vocab.cpp:1415 @620d2225c).
 pub const Tokenizer = struct {
+    /// `pre_segment_`: true for PLaMo-3.
+    pre_segment: bool,
     /// `bytes_`: the token for each byte value.
     bytes: [256]Token,
     /// `to_suffix_id_`: (code point, piece id) to suffix id.
@@ -46,12 +51,17 @@ pub const Tokenizer = struct {
     /// `table_`: [piece_length, token_id, score, piece_id] rows.
     table: std.ArrayList([4]i32) = .empty,
 
-    /// Ports `llm_tokenizer_plamo2`'s `build`.
+    /// Ports `llm_tokenizer_plamo2`'s constructor and `build`.
+    ///
+    /// Parameters:
+    /// - `vocab`: the vocabulary.
+    /// - `pre_segment`: whether to pre-segment (PLaMo-3).
+    /// - `exc`: receives what is thrown.
     ///
     /// Return: the tokenizer, or `error.Thrown` -- a byte with no token, or
     /// a code point `unicode_cpt_to_utf8` refuses.
-    pub fn init(vocab: *const Vocab, exc: *impl.Exception) impl.Thrown!Tokenizer {
-        var t: Tokenizer = .{ .bytes = @splat(0) };
+    pub fn init(vocab: *const Vocab, pre_segment: bool, exc: *impl.Exception) impl.Thrown!Tokenizer {
+        var t: Tokenizer = .{ .pre_segment = pre_segment, .bytes = @splat(0) };
         errdefer t.deinit();
 
         var arena_state = std.heap.ArenaAllocator.init(allocator);
@@ -178,17 +188,92 @@ pub const Tokenizer = struct {
         self.table.deinit(allocator);
     }
 
-    /// Ports `llm_tokenizer_plamo2`'s `encode` (llama-vocab.cpp:1539
-    /// @d81235049), appending to `output` as the session does.
+    /// Ports `llm_tokenizer_plamo2`'s `encode` (llama-vocab.cpp:1557
+    /// @620d2225c), appending to `output` as the session does.
     ///
     /// Return: nothing; `error.Thrown` is not raised but kept for the
     /// tokenizers' common shape.
     pub fn encode(self: *const Tokenizer, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
         _ = exc;
-        const all = unicode.cptsFromUtf8(text);
-        defer allocator.free(all);
-        // Skip the first code point if it is a BOM (Byte Order Mark)
-        const unicode_data = if (all.len != 0 and all[0] == 0xFEFF) all[1..] else all;
+        const unicode_data = unicode.cptsFromUtf8(text);
+        defer allocator.free(unicode_data);
+        // The PLaMo-3 tokenizer keeps a leading U+FEFF in the input.
+        if (!self.pre_segment) {
+            const skip: usize = @intFromBool(unicode_data.len != 0 and unicode_data[0] == 0xFEFF);
+            self.encodeCpts(unicode_data[skip..], output);
+            return;
+        }
+
+        const n = unicode_data.len;
+        const cut = allocator.alloc(bool, n + 1) catch oom();
+        defer allocator.free(cut);
+        @memset(cut, false);
+
+        // pass 1: <|plamo:...|>
+        {
+            const prefix = [_]u32{ '<', '|', 'p', 'l', 'a', 'm', 'o', ':' };
+            const prefix_len = prefix.len;
+            var i: usize = 0;
+            while (i + prefix_len <= n) {
+                if (!std.mem.eql(u32, &prefix, unicode_data[i..][0..prefix_len])) {
+                    i += 1;
+                    continue;
+                }
+                // An empty body is valid.
+                var j = i + prefix_len;
+                // Treat U+001C..U+001F as whitespace (equivalent to Python \s).
+                while (j < n and j - (i + prefix_len) < 64 and unicode_data[j] != '|' and
+                    (unicode_data[j] < 0x1C or unicode_data[j] > 0x1F) and
+                    !unicode.cptFlagsFromCpt(unicode_data[j]).is_whitespace)
+                {
+                    j += 1;
+                }
+                if (j + 1 < n and unicode_data[j] == '|' and unicode_data[j + 1] == '>') {
+                    cut[i] = true;
+                    cut[j + 2] = true;
+                    i = j + 2;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+
+        // pass 2: runs of repeated characters / spaces (a run never crosses a boundary from pass 1)
+        {
+            var i: usize = 0;
+            while (i < n) {
+                const ch = unicode_data[i];
+                var run: usize = 1;
+                while (i + run < n and unicode_data[i + run] == ch and !cut[i + run]) run += 1;
+
+                const is_repeated_chars = ch != '\n' and run >= 4;
+                const is_spaces = ch == ' ' and run >= 2;
+                if (is_repeated_chars or is_spaces) {
+                    cut[i] = true;
+                    cut[i + run] = true;
+                }
+
+                // a run that does not match cannot match at any later position either (it only gets shorter)
+                i += run;
+            }
+        }
+
+        var seg_start: usize = 0;
+        var seg_end: usize = 0;
+        while (seg_end <= n) : (seg_end += 1) {
+            // U+EE00 is the tokenizer's private-use boundary marker; literal occurrences split segments and are not emitted.
+            const is_boundary = seg_end < n and unicode_data[seg_end] == 0xEE00;
+            if (seg_end == n or cut[seg_end] or is_boundary) {
+                if (seg_start < seg_end) self.encodeCpts(unicode_data[seg_start..seg_end], output);
+                seg_start = seg_end + @intFromBool(is_boundary);
+            }
+        }
+    }
+
+    /// Ports `llm_tokenizer_plamo2`'s `encode_cpts` (llama-vocab.cpp:1639
+    /// @620d2225c): the dynamic program over one run of code points,
+    /// appending to `output`.
+    fn encodeCpts(self: *const Tokenizer, unicode_data: []const u32, output: *std.ArrayList(Token)) void {
         if (unicode_data.len == 0) return;
 
         const data_len = unicode_data.len;

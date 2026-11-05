@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/plamo2.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/plamo2.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_plamo2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` with `build_plamo2_attn_layer` and
 //! `build_plamo2_mamba_layer`.
@@ -27,7 +27,7 @@ fn dtDim(n_embd: u32) i64 {
     return @max(64, @as(c_int, @bitCast(n_embd / 16)));
 }
 
-/// Ports `llama_model_plamo2`'s `load_arch_hparams` (models/plamo2.cpp:4 @d81235049).
+/// Ports `llama_model_plamo2`'s `load_arch_hparams` (models/plamo2.cpp:4 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -62,7 +62,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
 }
 
-/// Ports `llama_model_plamo2`'s `load_arch_tensors` (models/plamo2.cpp:35 @d81235049).
+/// Ports `llama_model_plamo2`'s `load_arch_tensors` (models/plamo2.cpp:35 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -136,12 +136,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_plamo2`'s `build_arch_graph` (models/plamo2.cpp:106 @d81235049).
+/// Ports `llama_model_plamo2`'s `build_arch_graph` (models/plamo2.cpp:106 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_plamo2`'s `graph` (models/plamo2.cpp:110 @d81235049).
+/// Ports the constructor of `llama_model_plamo2`'s `graph` (models/plamo2.cpp:110 @620d2225c).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -224,12 +224,10 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     c.ggml_set_output(cur);
 
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports `llama_model_plamo2::graph`'s `build_plamo2_attn_layer`
-/// (models/plamo2.cpp:203 @d81235049).
+/// (models/plamo2.cpp:201 @620d2225c).
 fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos: *Tensor, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -281,7 +279,7 @@ fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos:
 }
 
 /// Ports `llama_model_plamo2::graph`'s `build_plamo2_mamba_layer`
-/// (models/plamo2.cpp:258 @d81235049).
+/// (models/plamo2.cpp:256 @620d2225c).
 fn buildPlamo2MambaLayer(b: *const graph.Builder, inp: *const graph.InpRs, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -301,11 +299,11 @@ fn buildPlamo2MambaLayer(b: *const graph.Builder, inp: *const graph.InpRs, cur_:
 
     const n_seq_tokens: i64 = ubatch.n_seq_tokens;
 
-    impl.assert(n_seqs != 0, "models/plamo2.cpp", 277, "n_seqs != 0");
-    impl.assert(ubatch.equalSeqs(), "models/plamo2.cpp", 278, "ubatch.equal_seqs()");
-    impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/plamo2.cpp", 279, "ubatch.n_tokens == n_seq_tokens * n_seqs");
-    impl.assert(@rem(d_inner, n_heads) == 0, "models/plamo2.cpp", 280, "d_inner % n_heads == 0");
-    impl.assert(n_group == 0, "models/plamo2.cpp", 281, "n_group == 0");
+    impl.assert(n_seqs != 0, "models/plamo2.cpp", 275, "n_seqs != 0");
+    impl.assert(ubatch.equalSeqs(), "models/plamo2.cpp", 276, "ubatch.equal_seqs()");
+    impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/plamo2.cpp", 277, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(@rem(d_inner, n_heads) == 0, "models/plamo2.cpp", 278, "d_inner % n_heads == 0");
+    impl.assert(n_group == 0, "models/plamo2.cpp", 279, "n_group == 0");
 
     const conv_states_all = mctx_cur.getRL(il);
     const ssm_states_all = mctx_cur.getSL(il);

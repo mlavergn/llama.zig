@@ -2,13 +2,20 @@
 """Generate src/llama/unicode_data.zig from llama.cpp/src/unicode-data.cpp.
 
 The C++ is itself generated (by upstream's scripts/gen-unicode-data.py) and is
-nothing but five tables: code-point range flags, the whitespace set, the
-lower- and upper-case maps, and the NFD ranges. ~7,000 lines of numbers are
+nothing but eight tables: code-point range flags, the whitespace set, the
+lower- and upper-case maps, the NFD ranges, and (since v0.7.0) the canonical
+combining classes, decompositions and compositions NFC reads. ~7,000 lines of numbers are
 not something to transcribe by hand, so this reads them out of the C++ and
 writes the same tables as Zig arrays, in the same order.
 
 `scripts/unicode-diff` is what checks the result: it compares every flag,
-case mapping and NFD result for every code point against the C++.
+case mapping, NFD and NFC result for every code point against the C++.
+
+The three canonical tables are `std::unordered_map`s, which the C++ only
+ever `find`s in, so their order carries nothing: they are written here
+sorted by key for a binary search. An `unordered_map` built from an
+initializer list keeps the first of two equal keys; the script refuses a
+duplicate rather than reproduce that silently.
 
 Usage: scripts/gen-unicode-data   (run from the repository root)
 """
@@ -51,6 +58,27 @@ def main():
     nfd = nums(block(text, "unicode_ranges_nfd"))
 
     assert len(flags) % 2 == 0 and len(lower) % 2 == 0 and len(upper) % 2 == 0 and len(nfd) % 3 == 0
+
+    ccc = [(int(a, 16), int(b)) for a, b in
+           re.findall(r"\{(0x[0-9A-Fa-f]+),\s*(\d+)\}", block(text, "unicode_combining_class"))]
+    dec = [(int(a, 16), int(b, 16), int(c, 16)) for a, b, c in
+           re.findall(r"\{(0x[0-9A-Fa-f]+),\s*\{(0x[0-9A-Fa-f]+),\s*(0x[0-9A-Fa-f]+)\}\}",
+                      block(text, "unicode_decomposition"))]
+    comp = [(int(a, 16), int(b, 16)) for a, b in
+            re.findall(r"\{(0x[0-9A-Fa-f]+)ULL,\s*(0x[0-9A-Fa-f]+)\}", block(text, "unicode_composition"))]
+    for name, rows in (("unicode_combining_class", ccc), ("unicode_decomposition", dec),
+                       ("unicode_composition", comp)):
+        # every `{` that opens an entry must have been parsed
+        n_entries = block(text, name).count("\n{")
+        if n_entries != len(rows):
+            sys.exit(f"{name}: parsed {len(rows)} of {n_entries} entries")
+        keys = [r[0] for r in rows]
+        if len(set(keys)) != len(keys):
+            sys.exit(f"{name}: duplicate key")
+    assert all(0 < c < 256 for _, c in ccc)
+    ccc.sort()
+    dec.sort()
+    comp.sort()
 
     out = []
     w = out.append
@@ -102,9 +130,34 @@ def main():
     w("};")
     w("")
 
+    w(f"/// Ports `unicode_combining_class` {cite('unicode_combining_class')}:")
+    w("/// every code point whose canonical combining class is not 0, sorted by")
+    w("/// code point (the C++'s is an `unordered_map`, only ever `find`-ed).")
+    w("pub const combining_class = [_]struct { u32, u8 }{")
+    for cpt, c in ccc:
+        w(f"    .{{ 0x{cpt:06X}, {c} }},")
+    w("};")
+    w("")
+    w(f"/// Ports `unicode_decomposition` {cite('unicode_decomposition')}: each")
+    w("/// canonical decomposition as one or two code points (the second 0 when")
+    w("/// there is one), sorted by the decomposed code point.")
+    w("pub const decomposition = [_][3]u32{")
+    for cpt, a, b in dec:
+        w(f"    .{{ 0x{cpt:06X}, 0x{a:06X}, 0x{b:06X} }},")
+    w("};")
+    w("")
+    w(f"/// Ports `unicode_composition` {cite('unicode_composition')}: the pair")
+    w("/// `first << 32 | second` to its primary composite, sorted by key.")
+    w("pub const composition = [_]struct { u64, u32 }{")
+    for key, cpt in comp:
+        w(f"    .{{ 0x{key:016X}, 0x{cpt:06X} }},")
+    w("};")
+    w("")
+
     open(OUT, "w").write("\n".join(out))
     print(f"wrote {OUT}: {len(flags) // 2} flag ranges, {len(whitespace)} whitespace, "
-          f"{len(lower) // 2} lower, {len(upper) // 2} upper, {len(nfd) // 3} nfd")
+          f"{len(lower) // 2} lower, {len(upper) // 2} upper, {len(nfd) // 3} nfd, "
+          f"{len(ccc)} ccc, {len(dec)} decompositions, {len(comp)} compositions")
 
 
 main()

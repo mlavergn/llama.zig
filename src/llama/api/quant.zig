@@ -9,7 +9,7 @@
 //! - `llama.cpp/src/llama.cpp` -- `llama_model_save_to_file`, which lives
 //!   there rather than in `llama-model-saver.cpp`
 //!
-//! All at v0.6.0 (`d81235049`). The work is `quant.zig`'s and
+//! All at v0.7.0 (`620d2225c`). The work is `quant.zig`'s and
 //! `model_saver.zig`'s.
 //!
 //! Each function has the C signature and is `pub`, not `export`: the
@@ -29,12 +29,12 @@ fn span(p: [*c]const u8) [:0]const u8 {
     return std.mem.span(z);
 }
 
-/// Ports `llama_model_quantize_default_params` (llama-quant.cpp:1399 @d81235049).
+/// Ports `llama_model_quantize_default_params` (llama-quant.cpp:1404 @620d2225c).
 pub fn llama_model_quantize_default_params() callconv(.c) c.llama_model_quantize_params {
     return quant.defaultParams();
 }
 
-/// Ports `llama_model_quantize` (llama-quant.cpp:1421 @d81235049): every
+/// Ports `llama_model_quantize` (llama-quant.cpp:1426 @620d2225c): every
 /// exception is caught, logged and reported as 1.
 pub fn llama_model_quantize(fname_inp: [*c]const u8, fname_out: [*c]const u8, params: [*c]const c.llama_model_quantize_params) callconv(.c) u32 {
     var exc: impl.Exception = .{};
@@ -45,7 +45,7 @@ pub fn llama_model_quantize(fname_inp: [*c]const u8, fname_out: [*c]const u8, pa
     return 0;
 }
 
-/// Ports `llama_model_save_to_file` (src/llama.cpp:499 @d81235049). Nothing
+/// Ports `llama_model_save_to_file` (src/llama.cpp:499 @620d2225c). Nothing
 /// catches what the saver throws, so it terminates.
 pub fn llama_model_save_to_file(model: ?*const c.struct_llama_model, path_model: [*c]const u8) callconv(.c) void {
     var ms = model_saver.Saver.init(ctx_api.modelOf(model));

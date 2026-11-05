@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/granite-swa.cpp` at v0.6.0
-//! (`d81235049`): `llama_model_granite_swa`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/granite-swa.cpp` at v0.7.0
+//! (`620d2225c`): `llama_model_granite_swa`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_attention_layer` and `build_layer_ffn`.
 
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_granite_swa`'s `load_arch_hparams` (models/granite-swa.cpp:5 @d81235049).
+/// Ports `llama_model_granite_swa`'s `load_arch_hparams` (models/granite-swa.cpp:5 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -84,7 +84,7 @@ fn oom() noreturn {
     impl.abort("models/granite-swa.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_granite_swa`'s `load_arch_tensors` (models/granite-swa.cpp:56 @d81235049).
+/// Ports `llama_model_granite_swa`'s `load_arch_tensors` (models/granite-swa.cpp:56 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -151,13 +151,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_granite_swa`'s `build_arch_graph` (models/granite-swa.cpp:117 @d81235049).
+/// Ports `llama_model_granite_swa`'s `build_arch_graph` (models/granite-swa.cpp:117 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_granite_swa`'s `graph`
-/// (models/granite-swa.cpp:121 @d81235049).
+/// (models/granite-swa.cpp:121 @620d2225c).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -220,12 +220,10 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     cur = c.ggml_scale(ctx, cur, 1.0 / hp.f_logit_scale);
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports `llama_model_granite_swa`'s `graph`'s `build_attention_layer`
-/// (models/granite-swa.cpp:200 @d81235049).
+/// (models/granite-swa.cpp:198 @620d2225c).
 fn buildAttentionLayer(
     b: *const graph.Builder,
     cur_: *Tensor,
@@ -264,7 +262,7 @@ fn buildAttentionLayer(
 }
 
 /// Ports `llama_model_granite_swa`'s `graph`'s `build_layer_ffn`
-/// (models/granite-swa.cpp:241 @d81235049).
+/// (models/granite-swa.cpp:239 @620d2225c).
 fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;

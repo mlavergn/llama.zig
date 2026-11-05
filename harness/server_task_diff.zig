@@ -169,10 +169,9 @@ fn paramsExtra(p: *const task.TaskParams) !Value {
     try o.put("reasoning_control", p.sampling.reasoning_control);
     try o.put("reasoning_budget_tokens", p.sampling.reasoning_budget_tokens);
     try o.put("lists", lists.done());
-    try o.put("chat_format_int", p.chat_parser_params.format);
-    try o.put("parse_tool_calls", p.chat_parser_params.parse_tool_calls);
-    try o.put("is_continuation", p.chat_parser_params.is_continuation);
-    try o.put("echo", p.chat_parser_params.echo);
+    try o.put("chat_format_int", @as(c_int, @backingInt(p.chat_format)));
+    try o.put("reasoning_format_int", @as(c_int, @backingInt(p.reasoning_format)));
+    try o.put("n_message_spans", p.message_spans.spans.items.len);
     try o.put("n_logit_bias", p.sampling.logit_bias.items.len);
     return o.done();
 }
@@ -243,6 +242,68 @@ fn bucket(b: *common.Metrics.Bucket, f: *const Value, k: []const u8) !void {
     b.time = try (try bj.atIndex(2)).get(u64);
 }
 
+/// A result's generated text: plain, or tokenized over the record's
+/// vocabulary (`common_chat_input_tokenize`) when it says "tokenize".
+fn contentOf(a: std.mem.Allocator, j: *const Value, f: *const Value) !chat.input.Input {
+    const text = try f.value("content", []const u8, "");
+    if (try f.value("tokenize", bool, false)) {
+        const in = try chat.input.tokenize(a, (try vocabAt(j)).?, text);
+        var toks: std.ArrayList(u8) = .empty;
+        try toks.appendSlice(ra(), "ctoks ");
+        for (in.tokens.items) |t| try toks.print(ra(), "{d} ", .{t});
+        try line(toks.items);
+        return in;
+    }
+    return chat.input.Input.fromText(a, text);
+}
+
+/// What a chat session holds, and what it applies to a task's sampling,
+/// as `session_json` writes it.
+fn sessionJson(s: *const chat.session.Session) !Value {
+    const a = ra();
+    var parts = Value.emptyArray();
+    for (s.prompt().parts.items) |p| {
+        var pair = Value.emptyArray();
+        try pair.pushBack(a, try Value.initString(a, p.text));
+        try pair.pushBack(a, .{ .boolean = p.is_input });
+        try parts.pushBack(a, pair);
+    }
+    var sp: tools.params.Sampling = .{};
+    try s.applySampling(a, &sp);
+    var triggers = Value.emptyArray();
+    for (sp.grammar_triggers.items) |t| {
+        var tr = Value.emptyArray();
+        try tr.pushBack(a, try Value.from(a, @as(c_int, @backingInt(t.type))));
+        try tr.pushBack(a, try Value.initString(a, t.value));
+        try tr.pushBack(a, try Value.from(a, t.token));
+        try triggers.pushBack(a, tr);
+    }
+    var msg = Value.emptyArray();
+    try msg.pushBack(a, try Value.initString(a, s.msg().role));
+    try msg.pushBack(a, try Value.initString(a, s.msg().content));
+    try msg.pushBack(a, try Value.initString(a, s.msg().reasoning_content));
+    var g = Value.emptyArray();
+    try g.pushBack(a, try Value.from(a, @as(c_int, @backingInt(sp.grammar_type))));
+    try g.pushBack(a, try Value.initString(a, sp.grammar));
+    var o = common.Obj.init(a);
+    try o.put("has_template", s.hasTemplate());
+    try o.put("format", s.format().name());
+    try o.put("parts", parts);
+    try o.put("grammar", s.grammar());
+    try o.put("generation_prompt", s.generationPrompt());
+    try o.put("thinking_start_tag", s.thinkingStartTag());
+    try o.put("thinking_end_tags", s.thinkingEndTags());
+    try o.put("additional_stops", s.additionalStops());
+    try o.put("msg", msg);
+    try o.put("parser_empty", s.parser() == null or s.parser().?.empty());
+    try o.put("sp.grammar", g);
+    try o.put("sp.grammar_lazy", sp.grammar_lazy);
+    try o.put("sp.generation_prompt", sp.generation_prompt);
+    try o.put("sp.preserved_tokens", sp.preserved_tokens.items);
+    try o.put("sp.grammar_triggers", triggers);
+    return o.done();
+}
+
 fn runResult(j: *const Value) !void {
     const kind = try (try j.at("kind")).get([]const u8);
     var fv = try member(ra(), j, "f", Value.emptyObject());
@@ -255,7 +316,7 @@ fn runResult(j: *const Value) !void {
         holder = r;
         const a = r.alloc();
         const x = &r.kind.cmpl_final;
-        x.content = try a.dupe(u8, try f.value("content", []const u8, ""));
+        x.content = try contentOf(a, j, f);
         x.tokens = try tokensOf(a, f, "tokens");
         x.stream = try f.value("stream", bool, false);
         x.include_usage = try f.value("include_usage", bool, false);
@@ -282,7 +343,7 @@ fn runResult(j: *const Value) !void {
         holder = r;
         const a = r.alloc();
         const x = &r.kind.cmpl_partial;
-        x.content = try a.dupe(u8, try f.value("content", []const u8, ""));
+        x.content = try contentOf(a, j, f);
         x.tokens = try tokensOf(a, f, "tokens");
         x.n_decoded = try f.value("n_decoded", i32, 0);
         x.n_prompt_tokens = try f.value("n_prompt_tokens", i32, 0);
@@ -420,9 +481,14 @@ fn runResult(j: *const Value) !void {
     try linef("is_error {d} is_stop {d}", .{ @intFromBool(r.isError()), @intFromBool(r.isStop()) });
     const st = try j.value("state", i64, -1);
     if (st >= 0) {
-        const s = states.get(st).?;
+        // a state whose CS threw (v0.7.0: the session's constructor parses a
+        // continuation's prefill, and may throw) is missing: std::map::at
+        // throws, once inside the reference's update guard and once outside
+        const s = states.get(st) orelse {
+            try guarded(common.throw(error.RuntimeError, "map::at:  key not found", .{}));
+            return common.throw(error.RuntimeError, "map::at:  key not found", .{});
+        };
         try guarded(r.update(s));
-        try str("state.text", s.generated_text.items);
         try str("state.content", s.chat_msg.content);
         try linef("state.flags {d}{d}{d}", .{ @intFromBool(s.thinking_block_started), @intFromBool(s.text_block_started), @intFromBool(s.oai_resp_created) });
     }
@@ -767,7 +833,10 @@ fn opC(j: *Value) !void {
         for (files.items) |f| gpa.free(f);
         files.deinit(gpa);
     }
-    try guarded(chatParse(&body, &opt, &files));
+    var session = try chat.session.Session.initEmpty(gpa);
+    defer session.deinit();
+    try guarded(chatParse(j, &body, &opt, &files, &session));
+    try str("session", try dumpV(&(try sessionJson(&session))));
     try str("body", try dumpV(&body));
     for (files.items) |f| {
         try linef("file {d} {d}", .{ f.len, fnv(f) });
@@ -781,8 +850,11 @@ fn opCS(j: *Value) !void {
     const opt = try makeChatOpt(j);
     var body = try (try j.at("body")).clone(a);
     var files: std.ArrayList([]u8) = .empty;
-    const parsed = try oaicompat.oaicompatChatParamsParse(a, &body, &opt, &files);
+    var session = try chat.session.Session.initEmpty(gpa);
+    defer session.deinit();
+    const parsed = try oaicompat.oaicompatChatParamsParse(a, try vocabAt(j), &body, &opt, &files, &session);
     try str("chat", try dumpV(&parsed));
+    try str("session", try dumpV(&(try sessionJson(&session))));
     var pj = Value.emptyObject();
     try pj.set(a, "v", try Value.from(a, try j.value("v", c_int, 0)));
     try pj.set(a, "data", parsed);
@@ -790,8 +862,12 @@ fn opCS(j: *Value) !void {
     defer t.deinit(gpa);
     const ta = try t.arenaAlloc(gpa);
     t.params = try evalParams(ta, &pj);
+    t.tokens.deinit();
+    t.tokens = try ServerTokens.fromTokens(gpa, try common.tokenize(ta, try vocabAt(j), try (try parsed.at("prompt")).get([]const u8), true, true), false);
+    try t.applyChatSession(gpa, &session);
     try str("extra", try dumpV(&(try paramsExtra(&t.params))));
-    try newStateQuiet(&t, try (try j.at("id")).get(i64));
+    try str("params", try dumpOwned(try t.params.toJson(gpa, false)));
+    try newStateQuiet(&session, try (try j.at("id")).get(i64));
 }
 
 fn opRC(j: *Value) !void {
@@ -821,8 +897,8 @@ fn opTCConv(j: *Value, tmpls: *const oaicompat.Templates, file: ?[]const u8, fil
     try str("conv", try dumpV(&(try sd.convert.transcriptionsToChatcmpl(ra(), try j.at("body"), tmpls, file, files))));
 }
 
-fn chatParse(body: *Value, opt: *const oaicompat.ServerChatParams, files: *std.ArrayList([]u8)) !void {
-    try str("chat", try dumpOwned(try oaicompat.oaicompatChatParamsParse(gpa, body, opt, files)));
+fn chatParse(j: *const Value, body: *Value, opt: *const oaicompat.ServerChatParams, files: *std.ArrayList([]u8), session: *chat.session.Session) !void {
+    try str("chat", try dumpOwned(try oaicompat.oaicompatChatParamsParse(gpa, try vocabAt(j), body, opt, files, session)));
 }
 
 fn opT(j: *Value) !void {
@@ -875,24 +951,16 @@ fn opGT(j: *Value) !void {
 }
 
 fn opS(j: *Value) !void {
-    const p = try j.at("parser");
-    var t = task.Task.initType(.completion);
-    defer t.deinit(gpa);
-    const a = try t.arenaAlloc(gpa);
-    t.params.chat_parser_params.format = try p.value("format", c_int, 0);
-    t.params.chat_parser_params.generation_prompt = try a.dupe(u8, try p.value("generation_prompt", []const u8, ""));
-    t.params.chat_parser_params.is_continuation = try p.value("is_continuation", bool, false);
-    t.params.chat_parser_params.echo = try p.value("echo", bool, false);
-    t.params.chat_parser_params.reasoning_format = @fromBackingInt(@intCast(try p.value("reasoning_format", c_int, 0)));
-    t.params.chat_parser_params.reasoning_in_content = try p.value("reasoning_in_content", bool, false);
-    try guarded(newState(&t, try (try j.at("id")).get(i64)));
+    // a state over the default (untemplated) session: plain content
+    try guarded(newState(try (try j.at("id")).get(i64)));
 }
 
-/// `newState` without the ids line, as `CS` writes it.
-fn newStateQuiet(t: *const task.Task, id: i64) !void {
+/// `newState` from a request's session, without the ids line, as `CS`
+/// writes it.
+fn newStateQuiet(session: *const chat.session.Session, id: i64) !void {
     const s = try gpa.create(task.TaskResultState);
     errdefer gpa.destroy(s);
-    s.* = try t.createState(gpa);
+    s.* = try task.TaskResultState.init(gpa, session);
     if (try states.fetchPut(gpa, id, s)) |old| {
         old.value.deinit(gpa);
         gpa.destroy(old.value);
@@ -901,10 +969,10 @@ fn newStateQuiet(t: *const task.Task, id: i64) !void {
     try str("state.role", s.chat_msg.role);
 }
 
-fn newState(t: *const task.Task, id: i64) !void {
+fn newState(id: i64) !void {
     const s = try gpa.create(task.TaskResultState);
     errdefer gpa.destroy(s);
-    s.* = try t.createState(gpa);
+    s.* = try task.TaskResultState.init(gpa, null);
     if (try states.fetchPut(gpa, id, s)) |old| {
         old.value.deinit(gpa);
         gpa.destroy(old.value);

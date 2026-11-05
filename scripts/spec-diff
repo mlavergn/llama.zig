@@ -22,6 +22,8 @@ list that drifted away from an arm fails instead of passing on nothing.
 Usage: scripts/spec-diff [case-substring ...]
   SPEC_DIFF_OUT=<dir>   keep every case's transcripts there
   SPEC_DIFF_NOBUILD=1   use the binaries already in zig-out/spec-diff
+  SPEC_DIFF_PREFIX=<p>  build into and run from <p>/spec-diff instead of zig-out, so a
+                        run touches nothing another gate reads from zig-out
 """
 
 import os
@@ -54,10 +56,13 @@ FIX = ["-lv", "4", "--no-log-timestamps", "-s", "7", "-c", "256"]
 FIXV = ["-lv", "5", "--no-log-timestamps", "-s", "7", "-c", "256"]
 FX = "@FX"
 FX_SOURCES = ["dflash-dense", "dflash-iswa", "dflash2", "dflash-dspark", "dflash-dspark-bonus", "dflash-dspark-noconf",
-              "eagle3-dense", "eagle3-d2t"]
+              "eagle3-dense", "eagle3-d2t", "dflash-lilicorr", "dflash-lilicorr-wide"]
 
 GGUFS = ":".join([f"{F}/dflash-dense.gguf", f"{F}/dflash-dspark.gguf", f"{F}/dflash2.gguf", f"{F}/eagle3-dense.gguf",
-                  Q, f"{F}/qwen35-dense.gguf", f"{F}/step35-moe.gguf", "/nonexistent.gguf"])
+                  Q, f"{F}/qwen35-dense.gguf", f"{F}/step35-moe.gguf", "/nonexistent.gguf",
+                  # v0.7.0's common_get_gguf_info: spec_fixtures --decision's metadata, and a file that is no GGUF
+                  "scripts/spec-diff"] + [f"@FX/decision-{i}.gguf" for i in range(13)] +
+                 [f"@FX/decision-{n}.gguf" for n in ("none", "u32", "ctx64", "noarch", "emptyarch")])
 
 
 def case(name, args, env=None, mode="run"):
@@ -165,6 +170,44 @@ CASES = [
                         "--spec-draft-sampling", "probabilistic", "-p", IDS, "-n", "16", "--temp", "0.7",
                         "--spec-draft-n-max", "4"] + FIX,
          {"SPEC_REJECT": "1"}),
+    # v0.7.0: greedy selection for an eligible temperature-zero chain (sampling.cpp:402), and where it is not
+    case("greedy-topk1", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T3, "-n", "24", "--temp", "0.8",
+                          "--samplers", "temperature;top_k", "--top-k", "1"] + COMMON),
+    case("temp0-nprobs", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T3, "-n", "16", "--temp", "0"] + COMMON,
+         {"SPEC_N_PROBS": "3"}),
+    case("temp0-dynatemp", ["-m", Q, "--spec-type", "ngram-simple", "-p", T1, "-n", "16", "--temp", "0",
+                            "--dynatemp-range", "0.5"] + COMMON),
+    case("topk1-not-last", ["-m", Q, "--spec-type", "ngram-simple", "-p", T1, "-n", "16", "--temp", "0.8",
+                            "--samplers", "top_k;temperature", "--top-k", "1"] + COMMON),
+    # v0.7.0: the draft context's own n_ubatch (DFlash's feature injection chunks by it) and the MoE cache
+    case("dflash-n-ubatch", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dense.gguf", "--spec-type", "draft-dflash",
+                             "-p", IDS, "-n", "16", "--temp", "0", "--spec-draft-n-ubatch", "4"] + FIXV),
+    case("draft-simple-n-ubatch", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T1, "-n", "16", "--temp", "0",
+                                   "--spec-draft-n-ubatch", "64"] + COMMON),
+    # the experts in host memory, the target cached on the GPU; the draft (the same model) must not ask for a cache
+    case("moe-cache", ["-m", f"{F}/qwen3moe-moe.gguf", "-md", f"{F}/qwen3moe-moe.gguf", "--spec-type", "draft-simple", "-p", IDS,
+                       "-n", "8", "--temp", "0", "--cpu-moe", "--moe-cache-mib", "64"] + FIX),
+    # v0.7.0: the MTP drafter catches up an embedding prefill (an image's rows) instead of skipping it
+    case("mtp-gemma4-embd", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
+                             "-p", IDS, "-n", "16", "--temp", "0"] + FIX,
+         {"SPEC_PREFILL_EMBD": "1"}),
+    # v0.7.0: LiliCorr (lilicorr.candidate_topk), a DFlash whose head reads the draft's own projected
+    # embeddings of the last block as a state input and walks a candidate lattice, as DFlash2 does
+    case("lilicorr", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-lilicorr.gguf", "--spec-type", "draft-dflash",
+                      "-p", IDS, "-n", "16", "--temp", "0"] + FIXV),
+    case("lilicorr-pmin-nmax2", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-lilicorr.gguf", "--spec-type",
+                                 "draft-dflash", "-p", IDS, "-n", "16", "--temp", "0", "--spec-draft-n-max", "2",
+                                 "--spec-draft-p-min", "0.265"] + FIXV),
+    case("lilicorr-wide-2seq", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-lilicorr-wide.gguf", "--spec-type",
+                                "draft-dflash", "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0"] + FIXV),
+    # v0.7.0: the server's common_context_can_seq_rm probe on each context; a draft context with a
+    # state input (MTP, LiliCorr) decodes the probe with zero state rows
+    case("seq-rm-mtp", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
+                        "-p", IDS, "-n", "8", "--temp", "0"] + FIX, {"SPEC_SEQ_RM": "1"}),
+    case("seq-rm-lilicorr", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-lilicorr.gguf", "--spec-type",
+                             "draft-dflash", "-p", IDS, "-n", "8", "--temp", "0"] + FIXV, {"SPEC_SEQ_RM": "1"}),
+    case("seq-rm-draft-simple", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T1, "-n", "8", "--temp", "0"] + COMMON,
+         {"SPEC_SEQ_RM": "1"}),
     case("dspark-noconf", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dspark-noconf.gguf", "--spec-type",
                            "draft-dspark", "-p", IDS, "-n", "8", "--temp", "0", "--spec-draft-p-min", "0.5"] + FIXV),
 ]
@@ -239,6 +282,18 @@ PHRASES = [
     "rb force 1",
     "  rejection",
     "failed to add embedding at index",
+    # v0.7.0
+    "-> greedy  seed=",
+    "-> temp-ext -> dist  seed=",
+    "cparams ubatch=512/4 ",
+    "moe_cache=67108864/0",
+    "MoE cache size =",
+    "decision 11 n_ctx_train 1234",
+    "decision 5 n_ctx_train 0",
+    "runtime_error: Grammar trigger word should be marked as preserved token",
+    "runtime_error: Error: no triggers set for lazy grammar!",
+    "stdo on, written",
+    "seq_rm dft=",
 ]
 
 MASKS = [
@@ -324,9 +379,11 @@ def run(cmd, what):
 
 def main():
     picks = sys.argv[1:]
+    prefix = os.environ.get("SPEC_DIFF_PREFIX") or "zig-out"
+    bindir = f"{prefix}/spec-diff"
     if not os.environ.get("SPEC_DIFF_NOBUILD"):
-        run(["zig", "build", "spec-diff", "--release=fast"], "could not build the harnesses (zig build spec-diff)")
-    for p in ["zig-out/spec-diff/spec_ref", "zig-out/spec-diff/spec_diff", "zig-out/spec-diff/spec_fixtures", Q]:
+        run(["zig", "build", "spec-diff", "--release=fast", "-p", prefix], "could not build the harnesses (zig build spec-diff)")
+    for p in [f"{bindir}/spec_ref", f"{bindir}/spec_diff", f"{bindir}/spec_fixtures", Q]:
         if not os.path.exists(p):
             print(f"FAIL: missing {p}", file=sys.stderr)
             sys.exit(2)
@@ -344,8 +401,9 @@ def main():
     fxdir = os.path.join(out, "fx")
     os.makedirs(fxdir, exist_ok=True)
     for name in FX_SOURCES:
-        run(["zig-out/spec-diff/spec_fixtures", f"{F}/{name}.gguf", f"{fxdir}/{name}.gguf"], f"could not rewrite {name}")
-    run(["zig-out/spec-diff/spec_fixtures", "--gemma4", fxdir], "could not write the Gemma 4 pair")
+        run([f"{bindir}/spec_fixtures", f"{F}/{name}.gguf", f"{fxdir}/{name}.gguf"], f"could not rewrite {name}")
+    run([f"{bindir}/spec_fixtures", "--gemma4", fxdir], "could not write the Gemma 4 pair")
+    run([f"{bindir}/spec_fixtures", "--decision", fxdir], "could not write the decision metadata files")
 
     t0 = time.time()
     failed = []
@@ -359,13 +417,13 @@ def main():
             e = dict(os.environ)
             e["SPEC_TMP"] = tmp
             for k, v in env.items():
-                e[k] = v.replace("@TMP", tmp)
+                e[k] = v.replace("@TMP", tmp).replace("@FX", fxdir)
             args = [a.replace("@FX", fxdir) for a in args]
             if mode == "api":
                 # the same files on both sides
                 for f in os.listdir(tmp):
                     os.unlink(os.path.join(tmp, f))
-            cmd = ["perl", "-e", "alarm shift; exec @ARGV", "300", f"zig-out/spec-diff/{exe}", mode] + args
+            cmd = ["perl", "-e", "alarm shift; exec @ARGV", "300", f"{bindir}/{exe}", mode] + args
             r = subprocess.run(cmd, capture_output=True, env=e)
             o = r.stdout.decode("utf-8", "replace")
             er = r.stderr.decode("utf-8", "replace")

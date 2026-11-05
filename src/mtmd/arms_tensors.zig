@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports the model-specific switch of `clip_model_loader::load_tensors`
-//! and `clip_n_mmproj_embd` from `llama.cpp/tools/mtmd/clip.cpp` at v0.6.0
-//! (`d81235049`). Each declaration names what it ports and the line it
+//! and `clip_n_mmproj_embd` from `llama.cpp/tools/mtmd/clip.cpp` at v0.7.0
+//! (`620d2225c`). Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # Order is part of the contract
@@ -91,8 +91,8 @@ fn loadClampInfo(tl: *TensorLoader) Error!void {
     }
 }
 
-/// Ports the model-specific switch of `load_tensors` (mtmd/clip.cpp:2130
-/// @d81235049), the `switch (model.proj_type)` at its line 2366.
+/// Ports the model-specific switch of `load_tensors` (mtmd/clip.cpp:2208
+/// @620d2225c), the `switch (model.proj_type)` at its line 2445.
 pub fn load(tl: *TensorLoader) Error!void {
     const func = "load_tensors";
     const model = &tl.ctx_clip.model;
@@ -177,7 +177,7 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.mm_model_ln_post_w = try get(tl, names.TN_MINICPMV_LN, .{ s("post"), W }, true);
             model.mm_model_ln_post_b = try get(tl, names.TN_MINICPMV_LN, .{ s("post"), B }, true);
         },
-        .minicpmv4_6 => {
+        .minicpmv4_6, .minicpmv4_7 => {
             // the `get_merger_tensor` lambda: required only with a 4x merge
             const mr = hparams.n_merge == 4;
 
@@ -206,6 +206,7 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.mm_ffn_up_b = try get(tl, names.TN_MM_UP, .{B}, false);
             model.mm_ffn_down_w = try get(tl, names.TN_MM_DOWN, .{W}, true);
             model.mm_ffn_down_b = try get(tl, names.TN_MM_DOWN, .{B}, false);
+            model.tok_embd_sep = try tl.getTensor(names.TN_TOK_EMBD_SEP, model.proj_type == .minicpmv4_7);
         },
         .glm_edge => {
             model.mm_model_adapter_conv_w = try get(tl, names.TN_GLM_ADAPER_CONV, .{W}, true);
@@ -280,7 +281,7 @@ pub fn load(tl: *TensorLoader) Error!void {
         .yasa2 => {
             // reuse tensors already loaded by the common section
             // (TN_PATCH_EMBD and TN_PATCH_BIAS have the same tensor names)
-            impl.ggmlAssert(model.patch_embeddings_0 != null, "clip.cpp", 2568, "model.patch_embeddings_0 && \"yasa2 requires v.patch_embd.weight\"");
+            impl.ggmlAssert(model.patch_embeddings_0 != null, "clip.cpp", 2649, "model.patch_embeddings_0 && \"yasa2 requires v.patch_embd.weight\"");
             model.yasa_patch_w = model.patch_embeddings_0;
             model.yasa_patch_b = model.patch_bias;
             model.yasa_patch_ln_w = try tl.getTensor(names.TN_YASA_PATCH_LN_W, false);
@@ -458,7 +459,13 @@ pub fn load(tl: *TensorLoader) Error!void {
         .idefics3 => {
             model.mm_fc_w = try get(tl, names.TN_MM_PROJECTOR, .{W}, true);
         },
-        .lfm2 => {
+        .cohere2v => {
+            model.mm_1_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), W }, true);
+            model.mm_1_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), B }, true);
+            model.mm_2_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), W }, true);
+            model.mm_2_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), B }, true);
+        },
+        .lfm2, .d1omni_v => {
             model.mm_input_norm_w = try tl.getTensor(names.TN_MM_INP_NORM, false);
             model.mm_input_norm_b = try tl.getTensor(names.TN_MM_INP_NORM_B, false);
             model.mm_1_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), W }, true);
@@ -857,7 +864,7 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.mm_3_w = try get(tl, names.TN_MVLM_PROJ_MLP, .{ ci(3), W }, true);
             model.mm_3_b = try get(tl, names.TN_MVLM_PROJ_MLP, .{ ci(3), B }, true);
         },
-        .nemotron_v2_vl => {
+        .nemotron_v2_vl, .nemotron_omni => {
             model.mm_0_w = try get(tl, names.TN_MVLM_PROJ_MLP, .{ ci(0), W }, true);
             model.mm_1_w = try get(tl, names.TN_MVLM_PROJ_MLP, .{ ci(1), W }, true);
             model.mm_3_w = try get(tl, names.TN_MVLM_PROJ_MLP, .{ ci(3), W }, true);
@@ -1013,7 +1020,7 @@ pub fn load(tl: *TensorLoader) Error!void {
         .gemma4ua => {
             model.mm_input_proj_w = try get(tl, names.TN_A_MM_INP_PROJ, .{W}, true);
         },
-        .lfm2a => {
+        .lfm2a, .d1omni_a => {
             for ([_]usize{ 0, 2, 3, 5, 6 }) |i| {
                 model.pre_encode_conv_X_w[i] = try get(tl, names.TN_CONV1D, .{ ci(i), W }, true);
                 model.pre_encode_conv_X_b[i] = try get(tl, names.TN_CONV1D, .{ ci(i), B }, true);
@@ -1027,6 +1034,16 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.mm_1_b = try get(tl, names.TN_MM_AUDIO_MLP, .{ ci(1), B }, true);
             model.mm_3_w = try get(tl, names.TN_MM_AUDIO_MLP, .{ ci(3), W }, true);
             model.mm_3_b = try get(tl, names.TN_MM_AUDIO_MLP, .{ ci(3), B }, true);
+
+            // residual block after the projector: norm, down, up
+            if (model.proj_type == .d1omni_a) {
+                model.mm_4_w = try get(tl, names.TN_MM_AUDIO_MLP, .{ ci(4), W }, true);
+                model.mm_4_b = try get(tl, names.TN_MM_AUDIO_MLP, .{ ci(4), B }, true);
+                model.mm_5_w = try get(tl, names.TN_MM_AUDIO_MLP, .{ ci(5), W }, true);
+                model.mm_5_b = try get(tl, names.TN_MM_AUDIO_MLP, .{ ci(5), B }, true);
+                model.mm_6_w = try get(tl, names.TN_MM_AUDIO_MLP, .{ ci(6), W }, true);
+                model.mm_6_b = try get(tl, names.TN_MM_AUDIO_MLP, .{ ci(6), B }, true);
+            }
 
             var ilc: c_int = 0;
             while (ilc < hparams.n_layer) : (ilc += 1) {
@@ -1200,7 +1217,7 @@ pub fn load(tl: *TensorLoader) Error!void {
                 try loadQfLayer(tl, &b.qf_proj_layers.items[0], prefix, bid);
             }
         },
-        else => impl.ggmlAssert(false, "clip.cpp", 3623, "false && \"unknown projector type\""),
+        else => impl.ggmlAssert(false, "clip.cpp", 3724, "false && \"unknown projector type\""),
     }
 }
 
@@ -1242,7 +1259,7 @@ inline fn neI(t: T, i: usize) c_int {
     return @truncate(graph.ne(t, i));
 }
 
-/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:5978 @d81235049): the embedding
+/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:6109 @620d2225c): the embedding
 /// size of the projector's output, which must be the text model's.
 pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
     const m = &ctx.model;
@@ -1252,7 +1269,7 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .mlp, .phi4, .pixtral, .lightonocr, .dots_ocr, .dots3note_v, .dots3note_a => neI(m.mm_2_w, 1),
         .mlp_norm => neI(m.mm_3_b, 0),
         .minicpmv => neI(m.mm_model_proj, 0),
-        .minicpmv4_6 => neI(m.mm_ffn_down_w, 1),
+        .minicpmv4_6, .minicpmv4_7 => neI(m.mm_ffn_down_w, 1),
         .glm_edge => neI(m.mm_model_mlp_3_w, 1),
         .minimax_m3 => neI(m.mm_merger_fc2_b, 0),
         .muse_glimmer => neI(m.mm_2_w, 1),
@@ -1267,15 +1284,16 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .idefics3 => neI(m.mm_fc_w, 1),
         .ultravox, .voxtral, .music_flamingo => neI(m.mm_2_w, 1),
         .meralion => neI(m.mm_3_w, 1), // out_proj output dim
-        .internvl, .nemotron_v2_vl => neI(m.mm_3_w, 1),
+        .internvl, .nemotron_v2_vl, .nemotron_omni => neI(m.mm_3_w, 1),
         .llama4 => neI(m.mm_model_proj, 1),
         .qwen2a => neI(m.mm_fc_w, 1),
         .qwen3a => neI(m.mm_2_w, 1),
-        .glma, .lfm2, .kimivl, .paddleocr, .kimik25, .yasa2, .deepseek4v => neI(m.mm_2_w, 1),
+        .glma, .lfm2, .d1omni_v, .kimivl, .paddleocr, .kimik25, .yasa2, .deepseek4v, .cohere2v => neI(m.mm_2_w, 1),
         .hunyuanvl => neI(m.mm_model_proj, 1),
         .cogvlm => neI(m.mm_4h_to_h_w, 1),
         .deepseekocr, .deepseekocr2 => neI(m.mm_fc_w, 1),
         .lfm2a => neI(m.position_embeddings, 0),
+        .d1omni_a => neI(m.mm_3_w, 1),
         .granite_speech => neI(m.qf_proj_blocks.items[0].qf_proj_linear_w, 1),
         // `size_t * int`, narrowed to the `int` return
         .granite4_vision => @truncate(@as(i64, @intCast(m.qf_proj_blocks.items.len *% @as(usize, @bitCast(@as(i64, m.hparams.projection_dim)))))),
@@ -1286,7 +1304,7 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .pockettts_spkenc => neI(m.spk_proj_w, 1),
         .pockettts_gen => neI(m.gen_input_lin_w, 1),
         .parakeet => neI(m.mm_1_w, 1),
-        else => impl.abort("clip.cpp", 6081, "Unknown projector type"),
+        else => impl.abort("clip.cpp", 6218, "Unknown projector type"),
     };
 }
 

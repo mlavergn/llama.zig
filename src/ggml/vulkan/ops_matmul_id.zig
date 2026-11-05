@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.6.0
-//! (`d81235049`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.7.0
+//! (`620d2225c`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -54,7 +54,11 @@ fn yStagedDst(src1: *const Tensor, f16_type: c.ggml_type, row_stride: u32, ne11:
     return t;
 }
 
-/// Ports `ggml_vk_mul_mat_id_q_f16` (ggml-vulkan.cpp:7304 @d81235049).
+/// Ports `ggml_vk_mul_mat_id_q_f16` (ggml-vulkan.cpp:7352 @620d2225c). The
+/// `count_experts` prepass writes a row map -- a tile count, each tile's
+/// expert and start, then `bn` packed row ids per tile -- and the matmul
+/// runs one workgroup row per tile, so an expert used by many tokens is
+/// split across tiles rather than looped over.
 pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, ids: *const Tensor, dst: *Tensor) void {
     const dim01 = m.op_pipeline.dim01Contiguous;
     impl.assert(dim01(src1) or src1.type == c.GGML_TYPE_F32 or src1.type == c.GGML_TYPE_F16, "ggml_vk_dim01_contiguous(src1) || src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16");
@@ -73,23 +77,13 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     const nei1: u64 = @intCast(ids.ne[1]);
     const nbi0: u32 = @truncate(ids.nb[0]);
     const nbi1: u32 = @truncate(ids.nb[1]);
-    const nbi2: u32 = @truncate(ids.nb[2]);
     const ne20: u64 = @intCast(dst.ne[0]);
     const ne21: u64 = @intCast(dst.ne[1]);
     const n_as = ne02;
-    // n_as counts, n_as offsets, one total, then one packed row id per (expert, token).
-    // Hoisting requires 16-bit indices for the packing and a table that fits one binding.
-    const hoisted_row_id_words: u64 = 2 *% n_as +% 1 +% nei0 *% nei1;
-    // 1024 matches MAX_EXPERTS in count_experts.comp and LLAMA_MAX_EXPERTS.
-    // It costs 3 * 1024 * 4 = 12 KiB of shared memory, within the 16 KiB
-    // Vulkan guarantees.
-    const hoist_row_ids = n_as <= 1024 and nei0 <= 0xffff and nei1 <= 0xffff and
-        hoisted_row_id_words *% @sizeOf(u32) <= limits.maxStorageBufferRange;
     const prec: c.ggml_prec = @intCast(dst.op_params[0]);
 
     var qx = mm.Source.pinned(ctx, src0);
     var qy = mm.Source.pinned(ctx, src1);
-    var qi = mm.Source.pinned(ctx, ids);
 
     // Reformat and convert to fp16 if non-contiguous, or for coopmat2 for better perf
     const x_non_contig = (dev.coopmat2 and src0.type == c.GGML_TYPE_F32) or !dim01(src0);
@@ -112,51 +106,48 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
         y_decode_vector_staging = supported and !is_aligned;
     }
 
-    const y_non_contig = y_decode_vector_staging or
-        (dev.coopmat2 and src1.type == c.GGML_TYPE_F32) or
-        // Intel coopmat1: force f32->f16 conversion so the f16 B-type quant pipeline is used.
-        (dev.coopmat_support and !dev.coopmat2 and
-            dev.vendor_id == m.common.vendor_id.intel and
-            c.ggml_is_quantized(src0.type) and src1.type == c.GGML_TYPE_F32) or
-        (src0.type == c.GGML_TYPE_BF16 and src1.type != c.GGML_TYPE_BF16) or
-        !dim01(src1);
+    const can_quantize_y = dev.integer_dot_product and src1.type == c.GGML_TYPE_F32 and
+        c.ggml_is_contiguous(src1) and (ne11 *% ne10) % 4 == 0;
+    // Intel coopmat1 matrix cores prefer f16 activations for quantized weights
+    const prefer_f16_b = dev.coopmat_support and !dev.coopmat2 and
+        dev.vendor_id == m.common.vendor_id.intel and
+        c.ggml_is_quantized(src0.type) and src1.type == c.GGML_TYPE_F32;
 
-    const y_f32_kernel = src1.type == c.GGML_TYPE_F32 and !y_non_contig;
+    const y_kernel_type = mm.mulMatBType(ctx, src0.type, src1, f16_type, prec, true, can_quantize_y, prefer_f16_b);
 
-    var quantize_y = dev.integer_dot_product and src1.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous(src1) and !y_non_contig and (ne11 *% ne10) % 4 == 0;
+    const quantize_y = y_kernel_type == c.GGML_TYPE_Q8_1;
+    const y_f32_kernel = y_kernel_type == c.GGML_TYPE_F32;
 
-    // Check for mmq first
-    var mmp_map: ?[]const MatmulPipelinePair = if (quantize_y) mm.getMulMatMatPipelineMap(ctx, src0.type, c.GGML_TYPE_Q8_1, prec, true) else null;
-    if (mmp_map == null) {
-        // Fall back to f16 dequant mul mat
-        mmp_map = mm.getMulMatMatPipelineMap(ctx, src0.type, if (y_non_contig) f16_type else src1.type, prec, true);
-        quantize_y = false;
-    }
+    var mmp_map: ?[]const MatmulPipelinePair = mm.getMulMatMatPipelineMap(ctx, src0.type, y_kernel_type, prec, true);
 
     const qx_needs_dequant = mmp_map == null or x_non_contig;
-    var qy_needs_dequant = !quantize_y and ((src1.type != f16_type and !y_f32_kernel) or y_non_contig);
 
     if (qx_needs_dequant) {
-        // Fall back to dequant + f16 mulmat
-        mmp_map = mm.getMulMatMatPipelineMap(ctx, f16_type, if (y_f32_kernel) c.GGML_TYPE_F32 else f16_type, prec, true);
+        // dequant src0 to f16
+        mmp_map = mm.getMulMatMatPipelineMap(ctx, f16_type, y_kernel_type, prec, true);
     }
+
+    impl.assert(mmp_map != null, "mmp_map != nullptr");
+    const mp = mmp_map.?;
 
     // Coopmat2 MUL_MAT_ID BK specialization constants in ggml_vk_load_shaders are at most 64.
     const y_staged_row_stride: u32 = if (dev.coopmat2 and !quantize_y) @truncate(alignSize(ne10, 64)) else @truncate(ne10);
     const y_needs_k_padding = ne10 != y_staged_row_stride;
-    const y_needs_reformat = y_non_contig or y_needs_k_padding;
-    qy_needs_dequant = qy_needs_dequant or y_needs_k_padding;
 
-    // Not implemented
-    impl.assert(y_needs_reformat or !qy_needs_dequant, "y_needs_reformat || !qy_needs_dequant");
-
-    impl.assert(mmp_map != null, "mmp_map != nullptr");
-    const mp = mmp_map.?;
+    const y_needs_reformat = !quantize_y and (!dim01(src1) or y_kernel_type != src1.type or
+        y_decode_vector_staging or y_needs_k_padding);
+    const qy_needs_dequant = y_needs_reformat;
 
     const kpad: u32 = if (quantize_y) 0 else @truncate(alignSize(ne10, mm.guessMatmulPipelineAlignMap(ctx, mp, @truncate(ne01), @truncate(nei1), true)));
     const aligned = !quantize_y and ne10 == kpad and ne01 > 8 and nei1 > 8;
 
     var pipeline = mm.guessMatmulPipelineMap(ctx, mp, @truncate(ne01), @truncate(nei1), aligned, true);
+
+    const bn = pipeline.wg_denoms[1];
+    const max_tiles = mm.mulMatIdMaxTiles(n_as, nei0 *% nei1, bn);
+    const row_ids_offset: u64 = 1 +% 2 *% max_tiles;
+    const row_map_words: u64 = row_ids_offset +% max_tiles *% bn;
+
     if (c.ggml_nbytes(src0) > limits.maxStorageBufferRange) pipeline = mm.get64bIndexingPipeline(pipeline);
 
     const x_ne: u64 = @intCast(c.ggml_nelements(src0));
@@ -169,7 +160,6 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     const y_sz: u64 = if (quantize_y)
         alignSize(y_ne, 128) * typeSizeOf(c.GGML_TYPE_Q8_1) / blck(c.GGML_TYPE_Q8_1)
     else if (y_f32_kernel) @sizeOf(f32) * y_ne else @sizeOf(c.ggml_fp16_t) * y_ne;
-    const ids_sz: u64 = nbi2;
     const d_sz = @sizeOf(f32) * d_ne;
 
     const to_fp16_vk_0 = if (x_non_contig) m.op_pipeline.getCpyPipeline(ctx, src0, null, f16_type) else mm.getToFp16(ctx, src0.type);
@@ -190,7 +180,7 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     const to_q8_1: ?*Pipeline = if (quantize_y) mm.getQuantizePipeline(ctx, c.GGML_TYPE_Q8_1) else null;
 
     const count_experts = dev.pipeline_count_experts.?;
-    const expert_data_size: u64 = @sizeOf(u32) *% (if (hoist_row_ids) hoisted_row_id_words else n_as);
+    const expert_data_size: u64 = @sizeOf(u32) *% row_map_words;
 
     {
         if ((qx_needs_dequant and x_sz > limits.maxStorageBufferRange) or
@@ -223,7 +213,6 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     const d_buf_offset = m.buffer.tensorOffset(dst) + dst.view_offs;
     qx.resolve(src0);
     qy.resolve(src1);
-    qi.resolve(ids);
 
     var d_X: *Buffer = undefined;
     var x_buf_offset: u64 = 0;
@@ -253,6 +242,8 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
         if (ctx.prealloc_x_need_sync) m.context.syncBuffers(ctx, subctx);
     }
 
+    const d_ids = m.context.tensorSubbuffer(ctx, ids, true);
+
     // Count how many times each expert is used
     const expert_count_buf = sub(ctx.prealloc_split_k, 0, expert_data_size);
     if (ctx.prealloc_split_k_need_sync) m.context.syncBuffers(ctx, subctx);
@@ -265,12 +256,13 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
             .nb01 = @truncate(nbi1 / its),
             .a_offset = @truncate(m.context.getMisalignBytes(ctx, ids) / its),
             .n_experts = @truncate(n_as),
-            .hoist_row_ids = @intFromBool(hoist_row_ids),
             .ne00mp = 0,
             .ne00L = 0,
+            .row_tile_size = bn,
+            .row_ids_offset = @truncate(row_ids_offset),
         };
         ops.initPushconstFastdiv(&pc);
-        m.context.dispatch(ctx, subctx, count_experts, &.{ sub(qi.buf, qi.offset, ids_sz), expert_count_buf }, &pc, .{ if (hoist_row_ids) 1 else @as(u32, @truncate(n_as)), 1, 1 });
+        m.context.dispatch(ctx, subctx, count_experts, &.{ d_ids, expert_count_buf }, &pc, .{ 1, 1, 1 });
     }
 
     if (x_non_contig) {
@@ -337,7 +329,7 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
         sub(d_X, x_buf_offset, x_range),
         sub(d_Y, y_buf_offset, y_range),
         sub(d_D, d_buf_offset, d_sz),
-        sub(qi.buf, qi.offset, ids_sz),
+        d_ids,
         expert_count_buf,
         @truncate(ne01),
         @truncate(ne21),
@@ -353,7 +345,8 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
         @truncate(nei1),
         @truncate(nbi1 / typeSizeOf(ids.type)),
         @truncate(ne11),
-        hoist_row_ids,
+        @truncate(row_ids_offset),
+        @truncate(max_tiles),
     );
 
     if (x_non_contig or qx_needs_dequant) ctx.prealloc_x_need_sync = true;
@@ -361,7 +354,7 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     ctx.prealloc_split_k_need_sync = true;
 }
 
-/// Ports `ggml_vk_mul_mat_vec_id_q_f16` (ggml-vulkan.cpp:7677 @d81235049):
+/// Ports `ggml_vk_mul_mat_vec_id_q_f16` (ggml-vulkan.cpp:7701 @620d2225c):
 /// one matrix-vector dispatch per token row, the expert read from `ids`,
 /// with a fused ADD_ID bias or MUL scale and a second scale.
 pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
@@ -541,7 +534,7 @@ pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.C
     if (y_non_contig or quantize_y) ctx.prealloc_y_need_sync = true;
 }
 
-/// Ports `ggml_vk_mul_mat_id` (ggml-vulkan.cpp:7921 @d81235049).
+/// Ports `ggml_vk_mul_mat_id` (ggml-vulkan.cpp:7948 @620d2225c).
 pub fn mulMatId(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
     const dst = at(cgraph, node_idx);
     if (ops.useMulMatVecId(cgraph, node_idx)) {

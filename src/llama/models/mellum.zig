@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mellum.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/mellum.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_mellum`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>`.
 
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_mellum`'s `load_arch_hparams` (models/mellum.cpp:3 @d81235049).
+/// Ports `llama_model_mellum`'s `load_arch_hparams` (models/mellum.cpp:3 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -30,13 +30,19 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     if (try meta.getKey(u32, .attention_sliding_window, false, exc)) |v| hp.n_swa = v;
 
+    hp.expert_weights_norm = true;
+    hp.expert_gating_func = @backingInt(hparams_mod.ExpertGatingFunc.softmax);
+    if (try meta.getKey(bool, .expert_weights_norm, false, exc)) |v| hp.expert_weights_norm = v;
+    if (try meta.getKey(u32, .expert_gating_func, false, exc)) |v| hp.expert_gating_func = v;
+
     if (hp.n_swa > 0) {
         hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
 
         try self.loadSwaPattern(ml, 4, false, exc);
 
         hp.rope_freq_base_train_swa = hp.rope_freq_base_train;
-        hp.rope_freq_scale_train_swa = hp.rope_freq_scale_train;
+        // The sliding-window layers take plain RoPE, without YaRN.
+        hp.rope_freq_scale_train_swa = 1.0;
 
         if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
     } else {
@@ -49,7 +55,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_mellum`'s `load_arch_tensors` (models/mellum.cpp:27 @d81235049).
+/// Ports `llama_model_mellum`'s `load_arch_tensors` (models/mellum.cpp:32 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -59,6 +65,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     // Output.
     self.output_norm = try self.createTensor(.{ .tensor = .output_norm, .suffix = "weight" }, &.{l.n_embd}, 0, exc);
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
+
+    if (l.n_expert == 0) {
+        return exc.throw(.runtime_error, "n_expert must be > 0 for Mellum", .{});
+    }
+    if (l.n_expert_used == 0) {
+        return exc.throw(.runtime_error, "n_expert_used must be > 0 for Mellum", .{});
+    }
 
     var i: i32 = 0;
     while (i < l.n_layer) : (i += 1) {
@@ -76,13 +89,6 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
         layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_expert }, 0, exc);
 
-        if (l.n_expert == 0) {
-            return exc.throw(.runtime_error, "n_expert must be > 0 for Mellum", .{});
-        }
-        if (l.n_expert_used == 0) {
-            return exc.throw(.runtime_error, "n_expert_used must be > 0 for Mellum", .{});
-        }
-
         const n_ff_exp: i64 = if (hp.nFfExp(0) != 0) hp.nFfExp(0) else @divTrunc(l.n_ff, l.n_expert_used);
 
         layer.ffn_gate_exps = try self.createTensor(.{ .tensor = .ffn_gate_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ff_exp, l.n_expert }, 0, exc);
@@ -91,7 +97,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_mellum`'s `build_arch_graph` (models/mellum.cpp:66 @d81235049).
+/// Ports `llama_model_mellum`'s `build_arch_graph` (models/mellum.cpp:71 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (@as(hparams_mod.SwaType, @fromBackingInt(@intCast(model.hparams.swa_type))) == .standard) {
         return buildGraph(true, model, b);
@@ -100,14 +106,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_mellum`'s `graph<iswa>`
-/// (models/mellum.cpp:74 @d81235049).
+/// (models/mellum.cpp:79 @620d2225c).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/mellum.cpp", 77, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/mellum.cpp", 78, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/mellum.cpp", 82, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/mellum.cpp", 83, "n_embd_head == n_rot");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 
@@ -143,16 +149,16 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 
             const is_swa = hp.isSwa(@intCast(il));
 
-            if (is_swa) {
-                // The sliding-window layers take regular RoPE without YaRN
-                // scaling: freq_scale and attn_factor 1, and ext_factor 0
-                // to skip a few unnecessary computations.
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, 1.0, 0.0, 1.0, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, 1.0, 0.0, 1.0, b.beta_fast, b.beta_slow);
-            } else {
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            }
+            // The sliding-window layers take plain RoPE, without YaRN.
+            const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
+            const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
+            const ext_factor_l: f32 = if (is_swa) 0.0 else b.ext_factor;
+            const attn_factor_l: f32 = if (is_swa) 1.0 else b.attn_factor;
+            const beta_fast_l: f32 = if (is_swa) 32.0 else b.beta_fast;
+            const beta_slow_l: f32 = if (is_swa) 1.0 else b.beta_slow;
+
+            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, ext_factor_l, attn_factor_l, beta_fast_l, beta_slow_l);
+            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, ext_factor_l, attn_factor_l, beta_fast_l, beta_slow_l);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);
@@ -179,9 +185,9 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
             .n_expert = b.n_expert,
             .n_expert_used = b.n_expert_used,
             .type_op = .silu,
-            .norm_w = true,
+            .norm_w = hp.expert_weights_norm,
             .w_scale = hp.expert_weights_scale,
-            .gating_op = .softmax,
+            .gating_op = @fromBackingInt(@intCast(hp.expert_gating_func)),
             .up_exps_s = layer.ffn_up_exps_s,
             .gate_exps_s = layer.ffn_gate_exps_s,
             .down_exps_s = layer.ffn_down_exps_s,
@@ -210,8 +216,6 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

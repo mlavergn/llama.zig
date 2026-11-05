@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/pad.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/pad.cuh` at v0.6.0 (`d81235049`). The
+//! `llama.cpp/ggml/src/ggml-cuda/pad.cuh` at v0.7.0 (`620d2225c`). The
 //! kernel, `pad_f32`, stays CUDA.
 
 const std = @import("std");
@@ -16,11 +16,12 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_PAD_BLOCK_SIZE` (pad.cuh:3 @d81235049).
+/// Ports `CUDA_PAD_BLOCK_SIZE` (pad.cuh:3 @620d2225c).
 const block_size = 256;
 
-/// Ports `pad_f32_cuda` (pad.cu:64 @d81235049), which launches with
-/// `<<<>>>`.
+/// Ports `pad_f32_cuda` (pad.cu:67 @620d2225c), which launches with
+/// `<<<>>>`. Since v0.7.0 the grid's y and z are capped at 65535 and the
+/// kernel strides over larger `ne1` and `ne2 * ne3`.
 fn padF32Cuda(
     src: ?*const anyopaque,
     s00: usize,
@@ -44,7 +45,7 @@ fn padF32Cuda(
     stream: cu.cudaStream_t,
 ) void {
     const num_blocks: c_int = @divTrunc(ne0 + block_size - 1, block_size);
-    const grid: kernels.Dim3 = .{ .x = @bitCast(num_blocks), .y = @bitCast(ne1), .z = @bitCast(ne2 *% ne3) };
+    const grid: kernels.Dim3 = .{ .x = @bitCast(num_blocks), .y = @bitCast(@min(ne1, 65535)), .z = @bitCast(@min(ne2 *% ne3, 65535)) };
     kernels.launch(kernels.get("pad", "pad_f32"), .{ .grid = grid, .block = .{ .x = block_size }, .stream = stream }, .{
         src,      s00, s01, s02, s03, dst,
         lp0,      rp0, lp1, rp1, lp2, rp2,
@@ -53,7 +54,7 @@ fn padF32Cuda(
     });
 }
 
-/// Ports `ggml_cuda_op_pad` (pad.cu:76 @d81235049).
+/// Ports `ggml_cuda_op_pad` (pad.cu:79 @620d2225c).
 pub fn opPad(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;

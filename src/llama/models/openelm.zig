@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/openelm.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/openelm.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_openelm`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_openelm`'s `load_arch_hparams` (models/openelm.cpp:3 @d81235049).
+/// Ports `llama_model_openelm`'s `load_arch_hparams` (models/openelm.cpp:3 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -34,7 +34,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_openelm`'s `load_arch_tensors` (models/openelm.cpp:15 @d81235049).
+/// Ports `llama_model_openelm`'s `load_arch_tensors` (models/openelm.cpp:15 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -69,8 +69,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_openelm`'s `build_arch_graph` (models/openelm.cpp:46 @d81235049)
-/// and the constructor of its `graph` (models/openelm.cpp:50 @d81235049).
+/// Ports `llama_model_openelm`'s `build_arch_graph` (models/openelm.cpp:46 @620d2225c)
+/// and the constructor of its `graph` (models/openelm.cpp:50 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -167,8 +167,6 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

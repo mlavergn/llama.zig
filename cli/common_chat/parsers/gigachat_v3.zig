@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/gigachat-v3.cpp` (llama.cpp v0.6.0,
-//! `d81235049`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/gigachat-v3.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -39,22 +39,21 @@ const Build = struct {
         if (self.has_tools and self.inputs.tool_choice != .none) {
             // Build a choice of all available tools
             var tool_choice = try b.choiceEmpty();
-            var it = @constCast(&self.inputs.tools).items();
-            while (it.next()) |item| {
-                const tool = item.value;
+            for (0..self.inputs.tools.size()) |i| {
+                const tool = self.inputs.tools.atIndex(i) catch |e| return util.toPeg(util.fromJson(e));
                 const function = tool.at("function") catch |e| return util.toPeg(util.fromJson(e));
                 const name = parsers.functionName(tool) catch |e| return util.toPeg(e);
                 const schema = msg_mod.toolParameters(self.a, function) catch |e| return util.toPeg(e);
 
                 const quoted_name = try b.plusLit(try b.litPlus("\"", try p.toolName(try b.literal(name))), "\"");
                 const tool_name = try b.jsonMember("name", quoted_name);
-                const schema_name = try std.mem.concat(self.a, u8, &.{ "tool-", name, "-schema" });
+                const schema_name = try parsers.indexName(self.a, "tool-", i, "-schema");
                 const tool_args = try b.jsonMember("arguments", try p.toolArgs(try b.schemaJson(try b.json(), schema_name, &schema, false)));
 
                 const tool_open = try p.toolOpen(try b.shl(try b.literal("{"), tool_name));
 
                 const body = try b.shlLit(try b.shl(try b.shlLit(tool_open, ","), tool_args), "}");
-                try b.orAssign(&tool_choice, try b.rule(try std.mem.concat(self.a, u8, &.{ "tool-", name }), body, false));
+                try b.orAssign(&tool_choice, try b.rule(try parsers.indexName(self.a, "tool-", i, ""), body, false));
             }
 
             // Define the tool call structure
@@ -74,7 +73,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_gigachat_v3` (parsers/gigachat-v3.cpp:3 @d81235049).
+/// Ports `common_chat_params_init_gigachat_v3` (parsers/gigachat-v3.cpp:3 @620d2225c).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -89,7 +88,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     if (inputs.hasContinuation()) {
         const m = &inputs.continue_msg;
         data.generation_prompt = try std.mem.concat(a, u8, &.{ "assistant<|role_sep|>\n", try m.renderContent(a, "\n\n") });
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     const has_tools = parsers.hasTools(&inputs.tools);
@@ -100,14 +99,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .include_grammar = has_tools and inputs.tool_choice != .none,
     };
 
-    var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-
-    data.parser = try parsers.save(a, &arena);
+    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    const arena = &data.parser.?;
 
     if (build.include_grammar) {
         data.grammar_lazy = has_tools and inputs.tool_choice == .auto;
-        data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
+        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, tool_call_start_prefix);
     }
     return data;
@@ -132,7 +129,7 @@ test "GigaChat3-10B-A1.8B.jinja applies with a tool and builds a parser and a gr
     p.tools = try json.parse(a, "[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]");
     const data = try init(a, &t, &p);
     try std.testing.expectEqual(.peg_native, data.format);
-    try std.testing.expect(data.prompt.len > 0);
-    try std.testing.expect(data.parser.len > 0);
+    try std.testing.expect(data.prompt.parts.items.len > 0);
+    try std.testing.expect(data.parser != null);
     try std.testing.expect(data.grammar.len > 0);
 }

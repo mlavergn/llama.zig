@@ -149,10 +149,11 @@ fi
 port_obj() { [ "$1" = archive ] || echo "$tmp/meta_$1.o"; }
 
 # The end-to-end configs -- devices | opts | port build. Two to four devices,
-# Metal beside the CPU, uneven and zero tensor_split entries, a small ubatch.
-# CPU-only lists are absent because the reference crashes on them: with
-# every simple buffer host-resident, graph_compute's `s_copy_main` FIXME
-# (ggml-backend-meta.cpp:1997) skips views of leaves it should slice.
+# Metal beside the CPU, uneven and zero tensor_split entries, a small ubatch,
+# and CPU-only lists. Those were absent through v0.6.0 because the reference
+# crashed on them: with every simple buffer host-resident, graph_compute's
+# `s_copy_main` FIXME skipped views of leaves it should slice. v0.7.0's host
+# views (#30217, [TAG_META_HOST_VIEWS]) replaced it.
 # devices | opts | port build
 CONFIGS=(
     "mm||ReleaseFast"
@@ -165,6 +166,8 @@ CONFIGS=(
     "mmmm|ubatch=4|ReleaseFast"
     "mmm||ReleaseSafe"
     "mm|split=0:1|ReleaseSafe"
+    "cc||ReleaseFast"
+    "ccc|split=2:1:1|ReleaseFast"
 )
 [ $QUICK -eq 1 ] && CONFIGS=("mmm||ReleaseFast")
 if [ $SWAPPED -eq 1 ]; then

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama.cpp` (v0.6.0, `d81235049`): every
+//! Ported from `llama.cpp/src/llama.cpp` (v0.7.0, `620d2225c`): every
 //! unmangled export of that file but `llama_model_save_to_file`. The loading
 //! itself -- `llama_model_load_from_file_impl` and what it calls -- is
 //! `model.zig`'s; the template engine is `chat.zig`'s.
@@ -30,25 +30,25 @@ extern "c" fn strlen(s: [*c]const u8) usize;
 /// configures: the pinned tag without its `v`. It must equal
 /// `build/upstream.zig`'s `version`, which `scripts/check-reference-pin`
 /// asserts.
-pub const version = "0.6.0";
+pub const version = "0.7.0";
 
 fn oom() noreturn {
     impl.abort("llama.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_flash_attn_type_name` (src/llama.cpp:38 @d81235049); the table
+/// Ports `llama_flash_attn_type_name` (src/llama.cpp:38 @620d2225c); the table
 /// is `context.flashAttnTypeName`'s.
 pub fn llama_flash_attn_type_name(flash_attn_type: c.enum_llama_flash_attn_type) callconv(.c) [*c]const u8 {
     return context.flashAttnTypeName(flash_attn_type).ptr;
 }
 
-/// Ports `llama_load_mode_name` (src/llama.cpp:50 @d81235049); the table is
+/// Ports `llama_load_mode_name` (src/llama.cpp:50 @620d2225c); the table is
 /// `model.loadModeName`'s.
 pub fn llama_load_mode_name(load_mode: c.enum_llama_load_mode) callconv(.c) [*c]const u8 {
     return model_mod.loadModeName(load_mode).ptr;
 }
 
-/// Ports `llama_load_mode_from_str` (src/llama.cpp:68 @d81235049). An unknown
+/// Ports `llama_load_mode_from_str` (src/llama.cpp:68 @620d2225c). An unknown
 /// name aborts, `GGML_ABORT`, since v0.6.0.
 pub fn llama_load_mode_from_str(str: [*c]const u8) callconv(.c) c.enum_llama_load_mode {
     if (strcmp(str, "auto") == 0) return c.LLAMA_LOAD_MODE_AUTO;
@@ -60,49 +60,49 @@ pub fn llama_load_mode_from_str(str: [*c]const u8) callconv(.c) c.enum_llama_loa
     c.ggml_abort("llama.cpp", 75, "unknown load mode: %s", str);
 }
 
-/// Ports `llama_sampler_chain_default_params` (src/llama.cpp:78 @d81235049).
+/// Ports `llama_sampler_chain_default_params` (src/llama.cpp:78 @620d2225c).
 pub fn llama_sampler_chain_default_params() callconv(.c) c.struct_llama_sampler_chain_params {
     return .{ .no_perf = true };
 }
 
-/// Ports `llama_max_devices` (src/llama.cpp:86 @d81235049).
+/// Ports `llama_max_devices` (src/llama.cpp:86 @620d2225c).
 pub fn llama_max_devices() callconv(.c) usize {
     return 16;
 }
 
-/// Ports `llama_max_tensor_buft_overrides` (src/llama.cpp:90 @d81235049).
+/// Ports `llama_max_tensor_buft_overrides` (src/llama.cpp:90 @620d2225c).
 pub fn llama_max_tensor_buft_overrides() callconv(.c) usize {
     return 4096;
 }
 
-/// Ports `llama_supports_mmap` (src/llama.cpp:94 @d81235049).
+/// Ports `llama_supports_mmap` (src/llama.cpp:94 @620d2225c).
 pub fn llama_supports_mmap() callconv(.c) bool {
     return mmap.Mmap.supported;
 }
 
-/// Ports `llama_supports_mlock` (src/llama.cpp:98 @d81235049).
+/// Ports `llama_supports_mlock` (src/llama.cpp:98 @620d2225c).
 pub fn llama_supports_mlock() callconv(.c) bool {
     return mmap.Mlock.supported;
 }
 
-/// Ports `llama_supports_gpu_offload` (src/llama.cpp:102 @d81235049); the body
+/// Ports `llama_supports_gpu_offload` (src/llama.cpp:102 @620d2225c); the body
 /// is `model.supportsGpuOffload`'s.
 pub fn llama_supports_gpu_offload() callconv(.c) bool {
     return model_mod.supportsGpuOffload();
 }
 
-/// Ports `llama_supports_rpc` (src/llama.cpp:111 @d81235049); the body is
+/// Ports `llama_supports_rpc` (src/llama.cpp:111 @620d2225c); the body is
 /// `model.supportsRpc`'s.
 pub fn llama_supports_rpc() callconv(.c) bool {
     return model_mod.supportsRpc();
 }
 
-/// Ports `llama_version` (src/llama.cpp:118 @d81235049).
+/// Ports `llama_version` (src/llama.cpp:118 @620d2225c).
 pub fn llama_version() callconv(.c) [*c]const u8 {
     return version;
 }
 
-/// Ports `llama_backend_init` (src/llama.cpp:122 @d81235049): ggml's clock, its
+/// Ports `llama_backend_init` (src/llama.cpp:122 @620d2225c): ggml's clock, its
 /// f16 tables through a throwaway context, and every backend.
 pub fn llama_backend_init() callconv(.c) void {
     c.ggml_time_init();
@@ -117,7 +117,7 @@ pub fn llama_backend_init() callconv(.c) void {
     if (c.ggml_backend_reg_count() == 0) c.ggml_backend_load_all();
 }
 
-/// Ports `llama_numa_init` (src/llama.cpp:137 @d81235049): the CPU backend's
+/// Ports `llama_numa_init` (src/llama.cpp:137 @620d2225c): the CPU backend's
 /// own NUMA setup, found by name.
 pub fn llama_numa_init(numa: c.enum_ggml_numa_strategy) callconv(.c) void {
     if (numa != c.GGML_NUMA_STRATEGY_DISABLED) {
@@ -130,19 +130,19 @@ pub fn llama_numa_init(numa: c.enum_ggml_numa_strategy) callconv(.c) void {
     }
 }
 
-/// Ports `llama_backend_free` (src/llama.cpp:149 @d81235049).
+/// Ports `llama_backend_free` (src/llama.cpp:149 @620d2225c).
 pub fn llama_backend_free() callconv(.c) void {
     c.ggml_quantize_free();
 }
 
-/// Ports `llama_time_us` (src/llama.cpp:153 @d81235049).
+/// Ports `llama_time_us` (src/llama.cpp:153 @620d2225c).
 pub fn llama_time_us() callconv(.c) i64 {
     return c.ggml_time_us();
 }
 
 /// The shared tail of the loading entry points, which the C++ spells as
 /// one call to `llama_model_load_from_file_impl` (src/llama.cpp:380
-/// @d81235049): exactly one source, counted as the C++ counts them, or
+/// @620d2225c): exactly one source, counted as the C++ counts them, or
 /// none for its error message.
 ///
 /// Parameters:
@@ -183,7 +183,7 @@ fn freeSplits(splits: *std.ArrayList([:0]const u8)) void {
     splits.deinit(impl.allocator);
 }
 
-/// Ports `llama_model_init_from_user` (src/llama.cpp:447 @d81235049): a model
+/// Ports `llama_model_init_from_user` (src/llama.cpp:447 @620d2225c): a model
 /// from metadata, its tensors' data supplied by the caller, never mapped.
 pub fn llama_model_init_from_user(
     metadata: ?*c.struct_gguf_context,
@@ -200,20 +200,20 @@ pub fn llama_model_init_from_user(
     return loadImpl(metadata, set_tensor_data, set_tensor_data_ud, "", &splits, null, params);
 }
 
-/// Ports `llama_load_model_from_file` (src/llama.cpp:460 @d81235049):
+/// Ports `llama_load_model_from_file` (src/llama.cpp:460 @620d2225c):
 /// deprecated.
 pub fn llama_load_model_from_file(path_model: [*c]const u8, params: c.struct_llama_model_params) callconv(.c) ?*c.struct_llama_model {
     return llama_model_load_from_file(path_model, params);
 }
 
-/// Ports `llama_model_load_from_file` (src/llama.cpp:466 @d81235049).
+/// Ports `llama_model_load_from_file` (src/llama.cpp:466 @620d2225c).
 pub fn llama_model_load_from_file(path_model: [*c]const u8, params: c.struct_llama_model_params) callconv(.c) ?*c.struct_llama_model {
     var splits: std.ArrayList([:0]const u8) = .empty;
     defer freeSplits(&splits);
     return loadImpl(null, null, null, std.mem.span(@as([*:0]const u8, @ptrCast(path_model))), &splits, null, params);
 }
 
-/// Ports `llama_model_load_from_splits` (src/llama.cpp:473 @d81235049): the
+/// Ports `llama_model_load_from_splits` (src/llama.cpp:473 @620d2225c): the
 /// first path is the model, and the list replaces the naming scheme.
 pub fn llama_model_load_from_splits(paths: [*c][*c]const u8, n_paths: usize, params: c.struct_llama_model_params) callconv(.c) ?*c.struct_llama_model {
     if (n_paths == 0) {
@@ -230,7 +230,7 @@ pub fn llama_model_load_from_splits(paths: [*c][*c]const u8, n_paths: usize, par
     return loadImpl(null, null, null, splits.items[0], &splits, null, params);
 }
 
-/// Ports `llama_model_load_from_file_ptr` (src/llama.cpp:489 @d81235049): a
+/// Ports `llama_model_load_from_file_ptr` (src/llama.cpp:489 @620d2225c): a
 /// model read from an open file, which stays the caller's.
 pub fn llama_model_load_from_file_ptr(file: ?*c.FILE, params: c.struct_llama_model_params) callconv(.c) ?*c.struct_llama_model {
     if (file == null) {
@@ -242,7 +242,7 @@ pub fn llama_model_load_from_file_ptr(file: ?*c.FILE, params: c.struct_llama_mod
     return loadImpl(null, null, null, "", &splits, file, params);
 }
 
-/// Ports `llama_chat_apply_template` (src/llama.cpp:510 @d81235049): the
+/// Ports `llama_chat_apply_template` (src/llama.cpp:510 @620d2225c): the
 /// conversation formatted with the built-in template `tmpl` names or
 /// resembles -- ChatML when it is null -- and `strncpy`ed into `buf`, so
 /// the copy is NUL-padded when it is shorter than `length` and not
@@ -274,7 +274,7 @@ pub fn llama_chat_apply_template(
     return res;
 }
 
-/// Ports `llama_split_path` (src/llama.cpp:545 @d81235049):
+/// Ports `llama_split_path` (src/llama.cpp:545 @620d2225c):
 /// `<prefix>-<n>-of-<count>.gguf`, numbered from 1.
 ///
 /// Return: the length written, or 0 when it did not fit.
@@ -284,7 +284,7 @@ pub fn llama_split_path(split_path: [*c]u8, maxlen: usize, path_prefix: [*c]cons
     return written;
 }
 
-/// Ports `llama_split_prefix` (src/llama.cpp:570 @d81235049): `split_path`
+/// Ports `llama_split_prefix` (src/llama.cpp:570 @620d2225c): `split_path`
 /// without the postfix `llama_split_path` gives `split_no` of
 /// `split_count`, copied as far as `maxlen` allows.
 ///
@@ -310,7 +310,7 @@ pub fn llama_split_prefix(split_prefix: [*c]u8, maxlen: usize, split_path: [*c]c
 /// `llama_print_system_info`'s function-local `static std::string`.
 var system_info: std.ArrayList(u8) = .empty;
 
-/// Ports `llama_print_system_info` (src/llama.cpp:599 @d81235049): every
+/// Ports `llama_print_system_info` (src/llama.cpp:599 @620d2225c): every
 /// backend registry's features, as `name : key = value | ...`.
 ///
 /// Return: the text, valid until the next call.

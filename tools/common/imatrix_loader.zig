@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/imatrix-loader.cpp` and the struct and keys of
-//! `common/imatrix-loader.h` (v0.6.0, `d81235049`). Each declaration names
+//! `common/imatrix-loader.h` (v0.7.0, `620d2225c`). Each declaration names
 //! what it ports and the line it began at.
 //!
 //! # `std::map` order
@@ -19,23 +19,23 @@ const log = @import("log.zig");
 const strings = @import("strings.zig");
 
 /// `LLM_KV_IMATRIX_DATASETS`, `LLM_KV_IMATRIX_CHUNK_COUNT`, `LLM_KV_IMATRIX_CHUNK_SIZE`
-/// (imatrix-loader.h:8, 9, 10 @d81235049).
+/// (imatrix-loader.h:8, 9, 10 @620d2225c).
 pub const kv_datasets = "imatrix.datasets";
 pub const kv_chunk_count = "imatrix.chunk_count";
 pub const kv_chunk_size = "imatrix.chunk_size";
 /// `LLM_KV_IMATRIX_STATS_SCHEMA`, `LLM_KV_IMATRIX_N_LAYER_NEXTN`
-/// (imatrix-loader.h:11, 12 @d81235049).
+/// (imatrix-loader.h:11, 12 @620d2225c).
 pub const kv_stats_schema = "imatrix.stats_schema";
 pub const kv_n_layer_nextn = "imatrix.n_layer_nextn";
 
-/// Ports `common_imatrix_entry` (imatrix-loader.h:14 @d81235049).
+/// Ports `common_imatrix_entry` (imatrix-loader.h:14 @620d2225c).
 pub const Entry = struct {
     sums: std.ArrayList(f32) = .empty,
     activations: std.ArrayList(f32) = .empty,
     counts: std.ArrayList(i64) = .empty,
 };
 
-/// Ports `common_imatrix` (imatrix-loader.h:20 @d81235049).
+/// Ports `common_imatrix` (imatrix-loader.h:20 @620d2225c).
 pub const Imatrix = struct {
     allocator: std.mem.Allocator,
     /// `entries`, by name.
@@ -124,7 +124,7 @@ const In = struct {
     }
 };
 
-/// Ports `common_imatrix_load_legacy` (imatrix-loader.cpp:10 @d81235049).
+/// Ports `common_imatrix_load_legacy` (imatrix-loader.cpp:10 @620d2225c).
 fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     const func = "common_imatrix_load_legacy";
     const f = fopen(fname.ptr, "rb") orelse {
@@ -199,7 +199,7 @@ fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     return true;
 }
 
-/// Ports `common_imatrix_load` (imatrix-loader.cpp:82 @d81235049).
+/// Ports `common_imatrix_load` (imatrix-loader.cpp:82 @620d2225c).
 ///
 /// Parameters:
 /// - `fname`: a GGUF imatrix, or the legacy format if it does not parse as one.

@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/ling3.cpp` (llama.cpp v0.6.0,
-//! `d81235049`), new at v0.5.0. The parser is built in the order clang
+//! Ports `llama.cpp/common/parsers/ling3.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`), new at v0.5.0. The parser is built in the order clang
 //! evaluates the C++ expressions, left to right, since a parser's id is its
 //! position.
 
@@ -52,6 +52,7 @@ const Build = struct {
     // per tool, while its parameters are visited
     cb: *ChatBuilder = undefined,
     name: []const u8 = "",
+    tool_index: usize = 0,
     arg_close: ParserId = undefined,
     arg_string: ParserId = undefined,
     required_args: std.ArrayList(ParserId) = .empty,
@@ -117,7 +118,8 @@ const Build = struct {
         return b.plus(try b.plus(try b.plus(try b.plus(try b.plus(opener, reasoning), content), tools), tail), end);
     }
 
-    fn tool(self: *Build, t: *Value) Error!void {
+    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
+        self.tool_index = tool_index;
         const p = self.cb;
         const b = &p.b;
         const function = t.at("function") catch |e| return util.fromJson(e);
@@ -129,13 +131,13 @@ const Build = struct {
 
         // required arguments in any order (as Qwen3-Coder does), then
         // optional ones in any order and number
-        var args = p.permute(try std.mem.concat(self.a, u8, &.{ "ling3-", self.name, "-args" }), self.required_args.items) catch |e| return util.fromPeg(e);
+        var args = p.permute(try parsers.indexName(self.a, "ling3-", self.tool_index, "-args"), self.required_args.items) catch |e| return util.fromPeg(e);
         if (self.optional_args.items.len != 0) {
             args = b.plus(args, b.zeroOrMore(b.choice(self.optional_args.items) catch |e| return util.fromPeg(e)) catch |e| return util.fromPeg(e)) catch |e| return util.fromPeg(e);
         }
 
         const call = buildCall(p, self.name, args) catch |e| return util.fromPeg(e);
-        const rule = b.rule(try std.mem.concat(self.a, u8, &.{ "ling3-tool-", self.name }), call, false) catch |e| return util.fromPeg(e);
+        const rule = b.rule(try parsers.indexName(self.a, "ling3-tool-", self.tool_index, ""), call, false) catch |e| return util.fromPeg(e);
         b.orAssign(&self.tool_choices, rule) catch |e| return util.fromPeg(e);
     }
 
@@ -148,15 +150,15 @@ const Build = struct {
         return p.tool(try b.plus(with_args, close));
     }
 
-    fn param(self: *Build, prm: *const json.schema.Property, doc: *peg.SharedDoc) Error!void {
-        const r = self.buildParam(prm, doc) catch |e| return util.fromPeg(e);
+    fn param(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) Error!void {
+        const r = self.buildParam(param_index, prm, doc) catch |e| return util.fromPeg(e);
         try (if (prm.required) &self.required_args else &self.optional_args).append(self.a, r);
     }
 
-    fn buildParam(self: *Build, prm: *const json.schema.Property, doc: *peg.SharedDoc) chat_peg.Error!ParserId {
+    fn buildParam(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) chat_peg.Error!ParserId {
         const p = self.cb;
         const b = &p.b;
-        const rule_name = try std.mem.concat(self.a, u8, &.{ "ling3-arg-", self.name, "-", prm.name });
+        const rule_name = try std.fmt.allocPrint(self.a, "ling3-arg-{d}-{d}", .{ self.tool_index, param_index });
 
         const types = prm.schema.valueTypes();
 
@@ -187,7 +189,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_ling3` (parsers/ling3.cpp:11 @d81235049).
+/// Ports `common_chat_params_init_ling3` (parsers/ling3.cpp:11 @620d2225c).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -229,7 +231,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
             try gp.appendSlice(a, try m.renderContent(a, "\n\n"));
         }
         data.generation_prompt = gp.items;
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     // The generation prompt pre-opens the think block when thinking is on, so
@@ -258,14 +260,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
-    var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-
-    data.parser = try parsers.save(a, &arena);
+    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !has_response_format and inputs.tool_choice != .required;
-        data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
+        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, CALL_START);
     }
 

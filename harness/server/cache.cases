@@ -40,3 +40,34 @@ POST /completion {"prompt": "The quick brown fox", "n_predict": 6, "temperature"
 POST /completion {"prompt": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.", "n_predict": 6, "temperature": 0, "message_delimiters": [{"role": "user", "delimiter": "The quick"}]}
 POST /completion {"prompt": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the mat.", "n_predict": 6, "temperature": 0, "message_delimiters": [{"role": "user", "delimiter": "The quick"}]}
 GET /slots
+
+# v0.7.0 (#26004): a slot file carries the slot's context checkpoints after
+# the llama state payload ("SCKP"), so a hybrid slot restored from it can
+# still roll back to one; a checkpoint restored from a file that no longer
+# loads falls back to re-processing instead of aborting
+!server -m $QWEN35 -c 2048 -np 2 -b 32 -ub 32 --no-jinja --ctx-checkpoints 4 --checkpoint-min-step 16 --slot-save-path ./ -lv 4
+!fulllog
+POST /completion {"prompt": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.", "n_predict": 6, "temperature": 0, "id_slot": 0}
+POST /slots/0?action=save {"filename": "ck.bin"}
+POST /slots/1?action=restore {"filename": "ck.bin"}
+GET /slots
+POST /completion {"prompt": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy cat. Then", "n_predict": 6, "temperature": 0, "id_slot": 1}
+POST /slots/0?action=erase
+POST /slots/0?action=restore {"filename": "ck.bin"}
+POST /completion {"prompt": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the mat.", "n_predict": 6, "temperature": 0, "id_slot": 0}
+POST /slots/1?action=save {"filename": "ck1.bin"}
+GET /slots
+# fewer checkpoints allowed than the file holds (-ub 32 above: two per
+# prompt): the oldest are dropped on restore; and a slot with no checkpoint writes no appendix, which reads
+# back as none
+!server -m $QWEN35 -c 2048 -np 2 --no-jinja --ctx-checkpoints 1 --checkpoint-min-step 16 --slot-save-path ./ -lv 4
+!fulllog
+POST /slots/0?action=restore {"filename": "ck.bin"}
+POST /completion {"prompt": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the mat.", "n_predict": 6, "temperature": 0, "id_slot": 0}
+POST /slots/1?action=restore {"filename": "ck1.bin"}
+!server -m $QWEN35 -c 2048 -np 1 --no-jinja --ctx-checkpoints 0 --slot-save-path ./ -lv 4
+!fulllog
+POST /completion {"prompt": "The quick brown fox jumps over the lazy dog.", "n_predict": 4, "temperature": 0}
+POST /slots/0?action=save {"filename": "nock.bin"}
+POST /slots/0?action=restore {"filename": "nock.bin"}
+POST /slots/0?action=restore {"filename": "ck.bin"}

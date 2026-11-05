@@ -54,7 +54,8 @@ void ref_audio_set_log(ggml_log_callback cb, void * ud) {
     g_logger_state.log_callback_user_data = ud;
 }
 
-// the eleven preprocessors, in mtmd-audio.h's order
+// the twelve preprocessors, in mtmd-audio.h's order -- d1omni (v0.7.0) last,
+// as the Zig `audio.Kind` keeps it
 static mtmd_audio_preprocessor * make(int kind, const clip_ctx * ctx) {
     switch (kind) {
         case 0:  return new mtmd_audio_preprocessor_whisper(ctx);
@@ -68,6 +69,7 @@ static mtmd_audio_preprocessor * make(int kind, const clip_ctx * ctx) {
         case 8:  return new mtmd_audio_preprocessor_qwen3tts_spk(ctx);
         case 9:  return new mtmd_audio_preprocessor_pockettts(ctx);
         case 10: return new mtmd_audio_preprocessor_parakeet((clip_ctx *) ctx);
+        case 11: return new mtmd_audio_preprocessor_d1omni(ctx);
         default: return nullptr;
     }
 }

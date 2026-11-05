@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen3vl.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/qwen3vl.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_qwen3vl`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. `llama_model_qwen3tts`
 //! (`llama.cpp/src/models/qwen3tts.cpp`) adds nothing of its own, so the
@@ -23,7 +23,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_qwen3vl`'s `load_arch_hparams` (src/models/qwen3vl.cpp:3 @d81235049).
+/// Ports `llama_model_qwen3vl`'s `load_arch_hparams` (src/models/qwen3vl.cpp:3 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     if (try ml.meta.getKey(u32, .num_deepstack_layers, false, exc)) |v| hp.n_deepstack_layers = v;
@@ -38,7 +38,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen3vl`'s `load_arch_tensors` (src/models/qwen3vl.cpp:16 @d81235049).
+/// Ports `llama_model_qwen3vl`'s `load_arch_tensors` (src/models/qwen3vl.cpp:16 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -80,13 +80,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_qwen3vl`'s `build_arch_graph` (src/models/qwen3vl.cpp:56 @d81235049).
+/// Ports `llama_model_qwen3vl`'s `build_arch_graph` (src/models/qwen3vl.cpp:56 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_qwen3vl`'s `graph` (src/models/qwen3vl.cpp:60
-/// @d81235049).
+/// @620d2225c).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -199,8 +199,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

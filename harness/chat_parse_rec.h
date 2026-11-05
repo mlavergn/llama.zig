@@ -9,8 +9,8 @@
 // `common_chat_templates_init`, `common_chat_templates_apply`,
 // `common_chat_parse`, `common_chat_peg_parse`, and the auto-parser helpers
 // `calculate_diff_split`, `until_common_prefix`, `after_common_suffix`,
-// `segmentize_markers` and `compare_variants`, to the `rec_*` wrappers
-// below. Each calls the real function and appends what it was given, as one
+// `segmentize_markers` and `compare_variants`, and the `common_chat_session`
+// class, to the `rec_*` wrappers below. Each calls the real function and appends what it was given, as one
 // JSON line, to the file named by `CHAT_PARSE_REC`: the records
 // `harness/chat_parse_ref.cpp` and `harness/chat_parse_diff.zig` both replay.
 // The tests still run against the real code and must still pass.
@@ -28,6 +28,7 @@
 #include "json.h"
 #include "log.h"
 #include "peg-parser.h"
+#include "peg_save.h"
 
 #if __has_include("server-chat.h")
 #include "server-chat.h"
@@ -148,16 +149,25 @@ inline common_json template_params(const ::template_params & p) {
     return j;
 }
 
-inline void parse_record(const common_peg_arena & arena, const std::string & input, bool is_partial,
-                         const common_chat_parser_params & params) {
+inline std::string saved(const common_peg_arena & arena) {
+    return arena.empty() ? std::string() : harness_peg_save(arena);
+}
+
+inline void parse_record(const std::string & parser, common_chat_format format, const std::string & gen,
+                         const std::string & input, bool is_partial) {
     common_json j = common_json::object();
     j["op"]        = "parse";
-    j["format"]    = (int) params.format;
-    j["gen"]       = params.generation_prompt;
-    j["parser"]    = arena.empty() ? std::string() : arena.save();
+    j["format"]    = (int) format;
+    j["gen"]       = gen;
+    j["parser"]    = parser;
     j["input_hex"] = hex(input);
     j["partial"]   = is_partial;
     write(j);
+}
+
+inline void parse_record(const common_peg_arena & arena, const common_chat_input & input, bool is_partial,
+                         const common_chat_parser_params & params) {
+    parse_record(saved(arena), params.format, params.generation_prompt.text, input.text, is_partial);
 }
 
 }  // namespace chat_parse_rec
@@ -195,8 +205,10 @@ inline common_chat_params rec_common_chat_templates_apply(const struct common_ch
     j["in"] = chat_parse_rec::inputs(inputs);
     try {
         auto params = common_chat_templates_apply(tmpls, inputs);
-        // which template a parser came from, for the script to pair outputs with it
-        j["parser_out"] = params.parser;
+        // which apply a parser came from, for the script to pair parses with it
+        j["parser_out"] = chat_parse_rec::saved(params.parser);
+        j["format_out"] = (int) params.format;
+        j["gen_out"]    = params.generation_prompt;
         chat_parse_rec::write(j);
         return params;
     } catch (...) {
@@ -205,17 +217,81 @@ inline common_chat_params rec_common_chat_templates_apply(const struct common_ch
     }
 }
 
-inline common_chat_msg rec_common_chat_peg_parse(const common_peg_arena & src_parser, const std::string & input,
+inline common_chat_msg rec_common_chat_peg_parse(const common_peg_arena & src_parser, const common_chat_input & input,
                                                  bool is_partial, const common_chat_parser_params & params) {
     chat_parse_rec::parse_record(src_parser, input, is_partial, params);
     return common_chat_peg_parse(src_parser, input, is_partial, params);
 }
 
-inline common_chat_msg rec_common_chat_parse(const std::string & input, bool is_partial,
+inline common_chat_msg rec_common_chat_parse(const common_chat_input & input, bool is_partial,
                                              const common_chat_parser_params & params) {
     chat_parse_rec::parse_record(params.parser, input, is_partial, params);
     return common_chat_parse(input, is_partial, params);
 }
+
+// A chat session (v0.7.0) applies and parses inside chat.cpp, where nothing
+// is renamed: its constructor is recorded as the apply it makes, and every
+// feed and finish as the parse of the reply so far it makes -- the
+// constructor's own parse of a continued message's prefill included.
+class rec_common_chat_session : public common_chat_session {
+  public:
+    rec_common_chat_session() = default;
+
+    rec_common_chat_session(const common_chat_templates *        tmpls,
+                            const llama_vocab *                  vocab,
+                            const common_chat_templates_inputs & inputs,
+                            const common_chat_session_params &   params = {})
+    try : common_chat_session(tmpls, vocab, inputs, params) {
+        auto it = chat_parse_rec::ids().find(tmpls);
+        if (it == chat_parse_rec::ids().end()) {
+            return;
+        }
+        recorded = true;
+        parser_text = chat_parse_rec::saved(parser());
+        common_json j = common_json::object();
+        j["op"]         = "apply";
+        j["t"]          = it->second;
+        j["in"]         = chat_parse_rec::inputs(inputs);
+        j["parser_out"] = parser_text;
+        j["format_out"] = (int) format();
+        j["gen_out"]    = generation_prompt();
+        chat_parse_rec::write(j);
+        if (inputs.continue_final_message != COMMON_CHAT_CONTINUATION_NONE && !params.echo) {
+            chat_parse_rec::parse_record(parser_text, format(), generation_prompt(), "", true);
+        }
+    } catch (...) {
+        auto it = chat_parse_rec::ids().find(tmpls);
+        if (it != chat_parse_rec::ids().end()) {
+            common_json j = common_json::object();
+            j["op"] = "apply";
+            j["t"]  = it->second;
+            j["in"] = chat_parse_rec::inputs(inputs);
+            chat_parse_rec::write(j);
+        }
+        throw;
+    }
+
+    const common_chat_msg & feed(const common_chat_input & chunk) {
+        reply += chunk.text;
+        if (recorded) {
+            chat_parse_rec::parse_record(parser_text, format(), generation_prompt(), reply, true);
+        }
+        return common_chat_session::feed(chunk);
+    }
+
+    const common_chat_msg & finish(const common_chat_input & chunk = {}) {
+        reply += chunk.text;
+        if (recorded) {
+            chat_parse_rec::parse_record(parser_text, format(), generation_prompt(), reply, false);
+        }
+        return common_chat_session::finish(chunk);
+    }
+
+  private:
+    bool        recorded = false;
+    std::string parser_text;
+    std::string reply;
+};
 
 inline diff_split rec_calculate_diff_split(const std::string & left, const std::string & right) {
     common_json j = common_json::object();
@@ -281,3 +357,4 @@ inline std::optional<compare_variants_result> rec_compare_variants(const common_
 #define after_common_suffix         rec_after_common_suffix
 #define segmentize_markers          rec_segmentize_markers
 #define compare_variants            rec_compare_variants
+#define common_chat_session         rec_common_chat_session

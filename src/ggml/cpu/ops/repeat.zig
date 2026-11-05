@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.6.0 (`d81235049`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.7.0 (`620d2225c`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # These are byte moves, typed only by width
@@ -32,8 +32,8 @@ const ComputeParams = common.ComputeParams;
 /// Byte offset `i*nb`; see `common.byteOff`.
 const at = common.byteOff;
 
-/// Ports `ggml_compute_forward_repeat_f32` (ops.cpp:1698 @d81235049) and
-/// `ggml_compute_forward_repeat_f16` (ops.cpp:1742 @d81235049).
+/// Ports `ggml_compute_forward_repeat_f32` (ops.cpp:1698 @620d2225c) and
+/// `ggml_compute_forward_repeat_f16` (ops.cpp:1742 @620d2225c).
 ///
 /// The two are the same loop nest over a different element width; the `f16`
 /// one inlines the row copy where the `f32` one calls `ggml_vec_cpy_f32`. Both
@@ -93,7 +93,7 @@ fn repeatT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_repeat` (ops.cpp:1789 @d81235049).
+/// Ports `ggml_compute_forward_repeat` (ops.cpp:1789 @620d2225c).
 pub export fn ggml_compute_forward_repeat(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -104,7 +104,7 @@ pub export fn ggml_compute_forward_repeat(params: *const ComputeParams, dst: *Te
     }
 }
 
-/// Ports `ggml_compute_forward_repeat_back_f32` (ops.cpp:1822 @d81235049).
+/// Ports `ggml_compute_forward_repeat_back_f32` (ops.cpp:1822 @620d2225c).
 fn repeatBackF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -171,7 +171,7 @@ fn repeatBackF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_repeat_back` (ops.cpp:1880 @d81235049).
+/// Ports `ggml_compute_forward_repeat_back` (ops.cpp:1880 @620d2225c).
 pub export fn ggml_compute_forward_repeat_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -181,7 +181,7 @@ pub export fn ggml_compute_forward_repeat_back(params: *const ComputeParams, dst
     }
 }
 
-/// Ports `ggml_compute_forward_concat_any` (ops.cpp:1899 @d81235049): whole
+/// Ports `ggml_compute_forward_concat_any` (ops.cpp:1899 @620d2225c): whole
 /// rows by `memcpy`, for any type including quantized ones.
 fn concatAny(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
@@ -245,9 +245,9 @@ fn concatAny(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_concat_i8` (ops.cpp:1951 @d81235049),
-/// `ggml_compute_forward_concat_f16` (ops.cpp:1994 @d81235049) and
-/// `ggml_compute_forward_concat_f32` (ops.cpp:2037 @d81235049).
+/// Ports `ggml_compute_forward_concat_i8` (ops.cpp:1951 @620d2225c),
+/// `ggml_compute_forward_concat_f16` (ops.cpp:1994 @620d2225c) and
+/// `ggml_compute_forward_concat_f32` (ops.cpp:2037 @620d2225c).
 ///
 /// Three copies of one element-at-a-time loop, differing only in the element
 /// width they assert and move.
@@ -296,7 +296,7 @@ fn concatT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_concat` (ops.cpp:2080 @d81235049).
+/// Ports `ggml_compute_forward_concat` (ops.cpp:2080 @620d2225c).
 pub export fn ggml_compute_forward_concat(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

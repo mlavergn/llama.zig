@@ -1,0 +1,5 @@
+{#- v0.7.0's google-translategemma template writes adjacent string literals, which are one string: 'a' 'b' is 'ab'. -#}
+{%- for m in messages -%}
+{{ '<' 'turn' '>' + m.role + ': '
+   "said " 'this' }}{{ m.content | trim }}{{ ('|' '|') | length }}
+{%- endfor -%}

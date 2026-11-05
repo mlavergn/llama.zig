@@ -5,7 +5,7 @@
 //!
 //! Ports `common_chat_parser_params`, `common_chat_parse` and
 //! `common_chat_peg_parse` from `llama.cpp/common/chat.h` and
-//! `llama.cpp/common/chat.cpp` (llama.cpp v0.6.0, `d81235049`). Each
+//! `llama.cpp/common/chat.cpp` (llama.cpp v0.7.0, `620d2225c`). Each
 //! declaration names what it ports and the line it began at.
 
 const std = @import("std");
@@ -13,50 +13,29 @@ const json = @import("json");
 const peg = @import("peg");
 const exception = @import("exception.zig");
 const msg_mod = @import("msg.zig");
-const params_mod = @import("params.zig");
 const chat_peg = @import("chat_peg.zig");
 const util = @import("util.zig");
 const log = @import("log.zig");
+const input_mod = @import("input.zig");
 
 const Allocator = std.mem.Allocator;
 const Error = exception.Error;
 const Msg = msg_mod.Msg;
+const Input = input_mod.Input;
 
-/// Ports `common_chat_parser_params` (chat.h:287 @d81235049): per-message
+/// Ports `common_chat_parser_params` (chat.h:341 @620d2225c): per-message
 /// parsing syntax, derived from `common_chat_params`.
 pub const ParserParams = struct {
     format: msg_mod.Format = .content_only,
-    reasoning_format: msg_mod.ReasoningFormat = .none, // TODO: refactor this to "bool parse_reasoning"
-    // Whether reasoning_content should be inlined in the content (e.g. for reasoning_format=deepseek in stream mode)
-    reasoning_in_content: bool = false,
-    generation_prompt: []const u8 = "",
-    parse_tool_calls: bool = true,
-    is_continuation: bool = false,
-    echo: bool = false, // Include assistant prefilled msg in output
+    /// Borrowed.
+    generation_prompt: ?*const Input = null,
     debug: bool = false, // Enable debug output for PEG parser
     /// `common_peg_arena parser`: null for the empty arena. Borrowed.
     parser: ?*const peg.Arena = null,
-
-    /// Ports its constructor from `common_chat_params` (chat.h:299 @d81235049):
-    /// the format and the generation prompt; the parser is loaded apart
-    /// (`loadParser`), as the C++'s caller does.
-    pub fn fromChatParams(p: *const params_mod.ChatParams) ParserParams {
-        return .{ .format = p.format, .generation_prompt = p.generation_prompt };
-    }
 };
 
-/// `common_peg_arena::load(text)` into a fresh arena.
-///
-/// Return: owned by `gpa`; release with `deinit`.
-pub fn loadParser(gpa: Allocator, text: []const u8) Error!peg.Arena {
-    var arena = peg.Arena.init(gpa) catch |e| return util.fromPeg(e);
-    errdefer arena.deinit();
-    peg.serialize.load(&arena, text) catch |e| return util.fromPeg(e);
-    return arena;
-}
-
-/// Ports `common_chat_parse` (chat.cpp:1447 @d81235049).
-pub fn parse(gpa: Allocator, input: []const u8, is_partial: bool, params: *const ParserParams) Error!Msg {
+/// Ports `common_chat_parse` (chat.cpp:1599 @620d2225c).
+pub fn parse(gpa: Allocator, input: *const Input, is_partial: bool, params: *const ParserParams) Error!Msg {
     return pegParse(gpa, params.parser, input, is_partial, params);
 }
 
@@ -72,7 +51,7 @@ fn mapperKind(format: msg_mod.Format) chat_peg.Mapper.Kind {
     };
 }
 
-/// Ports `common_chat_peg_parse` (chat.cpp:1453 @d81235049): the reply,
+/// Ports `common_chat_peg_parse` (chat.cpp:1605 @620d2225c): the reply,
 /// with the generation prompt in front, parsed leniently and mapped to an
 /// assistant message. A partial reply that fails past its start still maps
 /// what it matched; anything else that fails throws.
@@ -82,12 +61,14 @@ fn mapperKind(format: msg_mod.Format) chat_peg.Mapper.Kind {
 /// - `src_parser`: the parser; null or empty for content only.
 ///
 /// Return: the message. `error.RuntimeError` when the reply does not match.
-pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: []const u8, is_partial: bool, params: *const ParserParams) Error!Msg {
+pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: *const Input, is_partial: bool, params: *const ParserParams) Error!Msg {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const a = arena_state.allocator();
 
     const empty = if (src_parser) |p| p.empty() else true;
+    // upstream builds this once, a function-local static; building it again
+    // each time gives the same arena
     var built: ?peg.Arena = null;
     defer if (built) |*b| b.deinit();
     if (empty) {
@@ -96,15 +77,13 @@ pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: []const u8
     }
     const parser: *const peg.Arena = if (built) |*b| b else src_parser.?;
 
-    const effective_input = if (params.generation_prompt.len == 0)
-        input
-    else
-        try std.mem.concat(a, u8, &.{ params.generation_prompt, input });
+    var effective_input = try input.clone(a);
+    if (params.generation_prompt) |gp| try effective_input.prependInput(gp);
 
     var flags: u32 = peg.Flags.lenient;
     if (params.debug) flags |= peg.Flags.debug;
 
-    var ctx = peg.ParseContext.init(a, effective_input, flags) catch |e| return util.fromPeg(e);
+    var ctx = peg.ParseContext.initTokens(a, effective_input.text.items, effective_input.tokens.items, flags) catch |e| return util.fromPeg(e);
     defer ctx.deinit();
     const result = parser.parse(&ctx, 0) catch |e| return util.fromPeg(e);
 
@@ -120,8 +99,8 @@ pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: []const u8
             }
             return msg;
         }
-        log.wrn("{s}: unparsed {s} output: {s}\n", .{ "common_chat_peg_parse", params.format.name(), try util.substrFrom(effective_input, result.end) });
-        log.dbg("{s}: full {s} output triggering error:\n=== BEGIN ===\n{s}\n=== END ===\n", .{ "common_chat_peg_parse", params.format.name(), effective_input });
+        log.wrn("{s}: unparsed {s} output: {s}\n", .{ "common_chat_peg_parse", params.format.name(), try util.substrFrom(ctx.input, result.end) });
+        log.dbg("{s}: full {s} output triggering error:\n=== BEGIN ===\n{s}\n=== END ===\n", .{ "common_chat_peg_parse", params.format.name(), ctx.input });
         return exception.throw(error.RuntimeError, "The model produced output that does not match the expected {s} format", .{params.format.name()});
     }
 
@@ -161,8 +140,12 @@ test {
 
 test "without a parser the reply is all content" {
     const a = std.testing.allocator;
-    const params: ParserParams = .{ .generation_prompt = "<a>" };
-    var msg = try parse(a, "hello", false, &params);
+    var gp = try Input.fromText(a, "<a>");
+    defer gp.deinit();
+    var in = try Input.fromText(a, "hello");
+    defer in.deinit();
+    const params: ParserParams = .{ .generation_prompt = &gp };
+    var msg = try parse(a, &in, false, &params);
     defer msg.deinit(a);
     try std.testing.expectEqualStrings("assistant", msg.role);
     try std.testing.expectEqualStrings("<a>hello", msg.content);

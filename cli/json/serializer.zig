@@ -6,7 +6,7 @@
 //! `dump_integer`, `dump_float`, `hex_bytes` and `decode` -- and
 //! `basic_json::dump` from `llama.cpp/vendor/nlohmann/json.hpp`, and
 //! `common_json::dump`/`dump_safe` from `llama.cpp/common/json.cpp`
-//! (llama.cpp v0.6.0, `d81235049`). Each declaration names what it ports and
+//! (llama.cpp v0.7.0, `620d2225c`). Each declaration names what it ports and
 //! the line it began at. The number text is `dtoa.zig`'s.
 //!
 //! The C writes strings through a 512-byte buffer it flushes only at a code
@@ -42,11 +42,11 @@ pub const Options = struct {
     error_handler: ErrorHandler = .strict,
 };
 
-/// `UTF8_ACCEPT` and `UTF8_REJECT` (json.hpp:18779, 18780 @d81235049).
+/// `UTF8_ACCEPT` and `UTF8_REJECT` (json.hpp:18789, 18790 @620d2225c).
 const utf8_accept: u8 = 0;
 const utf8_reject: u8 = 1;
 
-/// The table of `decode` (json.hpp:19621 @d81235049): a byte's class, then
+/// The table of `decode` (json.hpp:19872 @620d2225c): a byte's class, then
 /// the transitions, Bjoern Hoehrmann's UTF-8 automaton.
 const utf8d = [400]u8{
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 00..1F
@@ -65,7 +65,7 @@ const utf8d = [400]u8{
     1, 3, 1, 1, 1, 1, 1, 3, 1, 3, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // s7..s8
 };
 
-/// Ports `decode` (json.hpp:19621 @d81235049), a member of `serializer`:
+/// Ports `decode` (json.hpp:19872 @620d2225c), a member of `serializer`:
 /// one step of the automaton.
 fn decode(state: *u8, codep: *u32, byte: u8) u8 {
     const t = utf8d[byte];
@@ -77,7 +77,7 @@ fn decode(state: *u8, codep: *u32, byte: u8) u8 {
     return state.*;
 }
 
-/// Ports `hex_bytes` (json.hpp:19398 @d81235049): two uppercase digits.
+/// Ports `hex_bytes` (json.hpp:19649 @620d2225c): two uppercase digits.
 fn hexByte(byte: u8) [2]u8 {
     const nibble_to_hex = "0123456789ABCDEF";
     return .{ nibble_to_hex[byte / 16], nibble_to_hex[byte % 16] };
@@ -89,7 +89,7 @@ fn appendU16(out: *std.ArrayList(u8), a: std.mem.Allocator, cp: u16) !void {
     try out.appendSlice(a, &.{ '\\', 'u', hex[cp >> 12], hex[(cp >> 8) & 0xF], hex[(cp >> 4) & 0xF], hex[cp & 0xF] });
 }
 
-/// Ports `dump_escaped` (json.hpp:19112 @d81235049): `s` without its
+/// Ports `dump_escaped` (json.hpp:19363 @620d2225c): `s` without its
 /// quotes, escaped as JSON, with `\b \t \n \f \r \" \\` short, other
 /// controls as `\u00xx`, and -- with `ensure_ascii` -- everything from
 /// U+007F up as `\uxxxx`, astral code points as a surrogate pair.
@@ -196,7 +196,7 @@ pub fn dumpEscaped(out: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8,
     }
 }
 
-/// Ports `dump_float` (json.hpp:19520 @d81235049): `null` for NaN and the
+/// Ports `dump_float` (json.hpp:19771 @620d2225c): `null` for NaN and the
 /// infinities, `to_chars` otherwise.
 fn dumpFloat(out: *std.ArrayList(u8), a: std.mem.Allocator, x: f64) !void {
     if (!std.math.isFinite(x)) return out.appendSlice(a, "null");
@@ -216,12 +216,15 @@ fn indentBy(out: *std.ArrayList(u8), a: std.mem.Allocator, c: u8, n: usize) !voi
     try out.appendNTimes(a, ' ', n - k);
 }
 
-/// Ports `serializer`'s `dump` (json.hpp:18828 @d81235049): one value,
-/// recursively. Integers are `dump_integer` (json.hpp:19435 @d81235049),
+/// Ports `serializer`'s `dump` (json.hpp:18842 @620d2225c): one value,
+/// recursively, up to `dump_depth_limit` levels deep; a container nested
+/// deeper is written by `dumpIteratively` without the call stack, in the
+/// same bytes. Integers are `dump_integer` (json.hpp:19686 @620d2225c),
 /// which is plain decimal.
-fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize) Error!void {
+fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize, depth: usize) Error!void {
     switch (val.*) {
         .object => |m| {
+            if (depth >= dump_depth_limit) return dumpIteratively(out, a, val, pretty_print, opts, indent_step, current_indent);
             const ms = m.members.items;
             if (ms.len == 0) return out.appendSlice(a, "{}");
             if (pretty_print) {
@@ -232,7 +235,7 @@ fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, p
                     try out.append(a, '"');
                     try dumpEscaped(out, a, mem.key, opts.ensure_ascii, opts.error_handler);
                     try out.appendSlice(a, "\": ");
-                    try dumpValue(out, a, &mem.value, true, opts, indent_step, new_indent);
+                    try dumpValue(out, a, &mem.value, true, opts, indent_step, new_indent, depth + 1);
                     if (i + 1 < ms.len) try out.appendSlice(a, ",\n");
                 }
                 try out.append(a, '\n');
@@ -244,13 +247,14 @@ fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, p
                     try out.append(a, '"');
                     try dumpEscaped(out, a, mem.key, opts.ensure_ascii, opts.error_handler);
                     try out.appendSlice(a, "\":");
-                    try dumpValue(out, a, &mem.value, false, opts, indent_step, current_indent);
+                    try dumpValue(out, a, &mem.value, false, opts, indent_step, current_indent, depth + 1);
                     if (i + 1 < ms.len) try out.append(a, ',');
                 }
                 try out.append(a, '}');
             }
         },
         .array => |arr| {
+            if (depth >= dump_depth_limit) return dumpIteratively(out, a, val, pretty_print, opts, indent_step, current_indent);
             const xs = arr.items;
             if (xs.len == 0) return out.appendSlice(a, "[]");
             if (pretty_print) {
@@ -258,7 +262,7 @@ fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, p
                 const new_indent = current_indent + indent_step;
                 for (xs, 0..) |*x, i| {
                     try indentBy(out, a, opts.indent_char, new_indent);
-                    try dumpValue(out, a, x, true, opts, indent_step, new_indent);
+                    try dumpValue(out, a, x, true, opts, indent_step, new_indent, depth + 1);
                     if (i + 1 < xs.len) try out.appendSlice(a, ",\n");
                 }
                 try out.append(a, '\n');
@@ -267,7 +271,7 @@ fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, p
             } else {
                 try out.append(a, '[');
                 for (xs, 0..) |*x, i| {
-                    try dumpValue(out, a, x, false, opts, indent_step, current_indent);
+                    try dumpValue(out, a, x, false, opts, indent_step, current_indent, depth + 1);
                     if (i + 1 < xs.len) try out.append(a, ',');
                 }
                 try out.append(a, ']');
@@ -287,7 +291,105 @@ fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, p
     }
 }
 
-/// Ports `basic_json`'s `dump` (json.hpp:21313 @d81235049): `val` as text,
+/// Ports `dump_depth_limit` (json.hpp:19127 @620d2225c): how many levels
+/// `dumpValue` descends before it hands over to `dumpIteratively`.
+const dump_depth_limit: usize = 128;
+
+/// Ports `dump_frame` (json.hpp:19133 @620d2225c): a container that has
+/// been opened but not closed yet. `next` is the element to write next,
+/// the C's `object_it` or `array_it` as an index.
+const DumpFrame = struct {
+    /// the object or array being serialized
+    value: *const Value,
+    next: usize = 0,
+    /// the indentation of the container itself, for its closing bracket
+    current_indent: usize,
+    /// the indentation of the container's elements
+    child_indent: usize,
+};
+
+/// Ports `dump_iteratively` (json.hpp:19161 @620d2225c): `val` and
+/// everything below it, in the bytes `dumpValue` writes, keeping the
+/// containers it has entered on an explicit stack instead of the call
+/// stack. Reached only for a value nested deeper than `dump_depth_limit`.
+fn dumpIteratively(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize) Error!void {
+    // Scalars, empty containers and binary values are written by
+    // dumpValueShallow alone: only a container with elements is pushed.
+    var stack: std.ArrayList(DumpFrame) = .empty;
+    defer stack.deinit(a);
+
+    try dumpValueShallow(out, a, val, pretty_print, opts, indent_step, current_indent, &stack);
+
+    while (stack.items.len > 0) {
+        const frame = &stack.items[stack.items.len - 1];
+        const len = switch (frame.value.*) {
+            .object => |m| m.members.items.len,
+            else => frame.value.array.items.len,
+        };
+
+        if (frame.next == len) {
+            if (pretty_print) {
+                try out.append(a, '\n');
+                try indentBy(out, a, opts.indent_char, frame.current_indent);
+            }
+            try out.append(a, if (frame.value.* == .object) '}' else ']');
+            _ = stack.pop();
+            continue;
+        }
+
+        // the separator goes in front of every element but the first, which
+        // puts exactly one between each pair and none at the end
+        if (frame.next != 0) {
+            if (pretty_print) try out.appendSlice(a, ",\n") else try out.append(a, ',');
+        }
+        if (pretty_print) try indentBy(out, a, opts.indent_char, frame.child_indent);
+
+        const element: *const Value = switch (frame.value.*) {
+            .object => |*m| blk: {
+                const mem = &m.members.items[frame.next];
+                try out.append(a, '"');
+                try dumpEscaped(out, a, mem.key, opts.ensure_ascii, opts.error_handler);
+                try out.appendSlice(a, if (pretty_print) "\": " else "\":");
+                break :blk &mem.value;
+            },
+            else => &frame.value.array.items[frame.next],
+        };
+        frame.next += 1;
+
+        // read everything needed from the frame before this: entering a
+        // container pushes another one and can move them all
+        const element_indent = frame.child_indent;
+        try dumpValueShallow(out, a, element, pretty_print, opts, indent_step, element_indent, &stack);
+    }
+}
+
+/// Ports `dump_value` (json.hpp:19286 @620d2225c): `val`, but not the
+/// elements of a container. An object or array with elements is opened and
+/// pushed onto `stack` for `dumpIteratively` to walk; anything else is
+/// written out in full by `dumpValue`.
+fn dumpValueShallow(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize, stack: *std.ArrayList(DumpFrame)) Error!void {
+    const open: u8 = switch (val.*) {
+        .object => |m| if (m.members.items.len != 0) '{' else 0,
+        .array => |arr| if (arr.items.len != 0) '[' else 0,
+        else => 0,
+    };
+    if (open == 0) {
+        // a scalar or an empty container: dump writes it without descending
+        return dumpValue(out, a, val, pretty_print, opts, indent_step, current_indent, 0);
+    }
+
+    var child_indent = current_indent;
+    if (pretty_print) {
+        try out.appendSlice(a, &.{ open, '\n' });
+        // variable to hold indentation for the elements
+        child_indent = current_indent + indent_step;
+    } else {
+        try out.append(a, open);
+    }
+    try stack.append(a, .{ .value = val, .current_indent = current_indent, .child_indent = child_indent });
+}
+
+/// Ports `basic_json`'s `dump` (json.hpp:22136 @620d2225c): `val` as text,
 /// appended to `out`.
 ///
 /// Parameters:
@@ -300,13 +402,13 @@ fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, p
 /// UTF-8 under `.strict`; `error.OutOfMemory`.
 pub fn dumpTo(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, opts: Options) Error!void {
     if (opts.indent >= 0) {
-        try dumpValue(out, a, val, true, opts, @intCast(opts.indent), 0);
+        try dumpValue(out, a, val, true, opts, @intCast(opts.indent), 0, 0);
     } else {
-        try dumpValue(out, a, val, false, opts, 0, 0);
+        try dumpValue(out, a, val, false, opts, 0, 0, 0);
     }
 }
 
-/// Ports `common_json`'s `dump` (json.cpp:339 @d81235049): strict about
+/// Ports `common_json`'s `dump` (json.cpp:339 @620d2225c): strict about
 /// UTF-8, non-ASCII written as is.
 ///
 /// Parameters:
@@ -319,7 +421,7 @@ pub fn dump(a: std.mem.Allocator, val: *const Value, indent: i32) Error![]u8 {
     return dumpOptions(a, val, .{ .indent = indent });
 }
 
-/// Ports `common_json`'s `dump_safe` (json.cpp:343 @d81235049): as `dump`,
+/// Ports `common_json`'s `dump_safe` (json.cpp:343 @620d2225c): as `dump`,
 /// with invalid UTF-8 replaced by U+FFFD, so it cannot fail but for memory.
 ///
 /// Return: the text, owned by the caller.
@@ -386,4 +488,36 @@ test "dump indents nested containers" {
     defer a.free(c);
     const compact = "{\"a\":1.5,\"b\":[null,{}]}";
     try std.testing.expectEqualStrings(compact, c);
+}
+
+test "dump_iteratively writes the bytes dump writes" {
+    const a = std.testing.allocator;
+    var leaf = Value.emptyObject();
+    try leaf.set(a, "s", try Value.from(a, "\xc3\xa9"));
+    try leaf.set(a, "e", Value.emptyArray());
+    var v = leaf;
+    defer v.deinit(a);
+    for (0..40) |i| {
+        var outer = if (i % 3 == 0) Value.emptyObject() else Value.emptyArray();
+        if (i % 3 == 0) {
+            try outer.set(a, "x", try Value.from(a, i));
+            try outer.set(a, "k", v);
+        } else {
+            try outer.pushBack(a, v);
+            try outer.pushBack(a, Value.emptyObject());
+            try outer.pushBack(a, try Value.from(a, 1.5));
+        }
+        v = outer;
+    }
+    for ([_]i32{ -1, 0, 1, 4 }) |indent| {
+        const opts: Options = .{ .indent = indent, .indent_char = 'x', .ensure_ascii = indent == 1 };
+        const step: usize = if (indent >= 0) @intCast(indent) else 0;
+        var rec: std.ArrayList(u8) = .empty;
+        defer rec.deinit(a);
+        try dumpValue(&rec, a, &v, indent >= 0, opts, step, 3, 0);
+        var it: std.ArrayList(u8) = .empty;
+        defer it.deinit(a);
+        try dumpIteratively(&it, a, &v, indent >= 0, opts, step, 3);
+        try std.testing.expectEqualStrings(rec.items, it.items);
+    }
 }

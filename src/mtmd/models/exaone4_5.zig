@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/exaone4_5.cpp` at v0.6.0 (`d81235049`).
+//! Ports `llama.cpp/tools/mtmd/models/exaone4_5.cpp` at v0.7.0 (`620d2225c`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -11,7 +11,7 @@ const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
 
-/// Ports `build` (exaone4_5.cpp:4 @d81235049), a member of `clip_graph_exaone4_5`.
+/// Ports `build` (exaone4_5.cpp:4 @620d2225c), a member of `clip_graph_exaone4_5`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -72,11 +72,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         _ = c.ggml_set_name(inv_window_idx, "inv_window_idx");
         c.ggml_set_input(inv_window_idx);
 
-        window_mask = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, n_pos, n_pos);
-        _ = c.ggml_set_name(window_mask, "window_mask");
-        c.ggml_set_input(window_mask);
-
-        if (g.flash_attn_type == .enabled) window_mask = c.ggml_cast(ctx0, window_mask, c.GGML_TYPE_F16);
+        window_mask = g.buildInpAttnMask(n_pos, n_pos, 0);
     }
 
     var inpL = inp;
@@ -97,7 +93,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         g.cb(cur, "ln1", il);
 
         {
-            impl.ggmlAssert(layer.qkv_w != null, "exaone4_5.cpp", 88, "layer.qkv_w != nullptr");
+            impl.ggmlAssert(layer.qkv_w != null, "exaone4_5.cpp", 82, "layer.qkv_w != nullptr");
             cur = g.buildMm(layer.qkv_w, cur);
             if (layer.qkv_b != null) cur = c.ggml_add(ctx0, cur, layer.qkv_b);
 

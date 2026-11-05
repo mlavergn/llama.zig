@@ -6,7 +6,7 @@
 //!
 //! **Not a port.** The files it re-exports port parts of
 //! `llama.cpp/vendor/cpp-httplib/httplib.cpp` and `httplib.h` (cpp-httplib
-//! 0.59.0, vendored at v0.6.0, `d81235049`); each names its own.
+//! 0.61.0, vendored at v0.7.0, `620d2225c`); each names its own.
 
 const std = @import("std");
 

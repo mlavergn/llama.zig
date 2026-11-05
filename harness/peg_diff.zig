@@ -4,10 +4,10 @@
 //! **Not a port.** Both sides run the same programs: `harness/peg_ref.cpp`
 //! interprets them over upstream's builder, this file over the port's, and
 //! every record must be byte-identical. A program is a list of cases; a
-//! case is a parser -- a description of builder calls, or a serialized
-//! arena to load -- and the inputs to run it over. Per case: the build's
-//! outcome, the arena's `dump`, its `save`, its GBNF eager and lazy, the
-//! saved arena loaded and saved again; per input, the parse complete and
+//! case is a parser -- a description of builder calls -- and the inputs to
+//! run it over. Per case: the build's outcome, the arena's `dump`, its JSON
+//! form (`harness/peg_serialize.zig`; upstream's `save` until v0.7.0), its
+//! GBNF eager and lazy; per input, the parse complete and
 //! lenient and of every prefix (the partial state a stream sees), each
 //! with its AST, the three chat mappers' messages and the exceptions on
 //! the way, the tagged parser's three entry points, and the debug trace.
@@ -18,10 +18,11 @@
 //! The parsers: every one upstream's PEG tests build, recorded as they run
 //! (`harness/peg_rec.h`, `ref_peg_upstream`) together with the inputs they
 //! parse; random descriptions over every builder call; chat grammars in the
-//! shapes upstream's templates take, over random tools; Gemma 4- and
-//! MiniMax-M3-shaped grammars for their mappers; and saved arenas, mutated,
-//! for `from_json`. The inputs: the recorded ones, strings derived from the
-//! grammar itself, and both mutated.
+//! shapes upstream's templates take, over random tools; and Gemma 4- and
+//! MiniMax-M3-shaped grammars for their mappers. Upstream removed
+//! `load`/`from_json` at v0.7.0, and with them the mutated saved arenas
+//! this gate fed them. The inputs: the recorded ones, strings derived from
+//! the grammar itself, and both mutated.
 //!
 //! The reference runs in forked children, a batch at a time: a
 //! left-recursive grammar recurses until the stack runs out, upstream and
@@ -45,6 +46,7 @@ const json = @import("json");
 const peg = @import("peg");
 const chat = @import("common_chat");
 const cpeg = chat.chat_peg;
+const peg_serialize = @import("peg_serialize.zig");
 
 extern fn ref_peg_run(prog: [*]const u8, len: usize, out_len: *usize) [*]u8;
 extern fn ref_peg_upstream(out_len: *usize) [*]u8;
@@ -802,13 +804,6 @@ fn grammarText(a: *const peg.Arena, lazy: bool) anyerror![]u8 {
     return peg.gbnf.grammar(gpa, a, lazy, .{});
 }
 
-fn reloadText(saved: []const u8) anyerror![]u8 {
-    var b = try peg.Arena.init(gpa);
-    defer b.deinit();
-    try peg.serialize.load(&b, saved);
-    return peg.serialize.save(gpa, &b);
-}
-
 fn dumpRoot(a: *const peg.Arena) anyerror![]u8 {
     return a.dump(gpa, a.root);
 }
@@ -817,26 +812,14 @@ fn dumpRoot(a: *const peg.Arena) anyerror![]u8 {
 fn runPortCase(kind: u8, text: []const u8, inputs: []const Input, out: *Records) void {
     var arena_opt: ?peg.Arena = null;
     defer if (arena_opt) |*a| a.deinit();
-    if (kind == 3) {
-        var a = peg.Arena.init(gpa) catch oom();
-        if (peg.serialize.load(&a, text)) {
-            arena_opt = a;
-            rec(out, "B:ok", .{});
-        } else |e| {
-            a.deinit();
-            const t = errText(e);
-            defer gpa.free(t);
-            rec(out, "B:E:{s}", .{t});
-        }
-    } else {
-        if (portBuild(text)) |a| {
-            arena_opt = a;
-            rec(out, "B:ok", .{});
-        } else |e| {
-            const t = errText(e);
-            defer gpa.free(t);
-            rec(out, "B:E:{s}", .{t});
-        }
+    _ = kind;
+    if (portBuild(text)) |a| {
+        arena_opt = a;
+        rec(out, "B:ok", .{});
+    } else |e| {
+        const t = errText(e);
+        defer gpa.free(t);
+        rec(out, "B:E:{s}", .{t});
     }
     defer rec(out, "\x01", .{});
     const a = &(arena_opt orelse return);
@@ -844,7 +827,7 @@ fn runPortCase(kind: u8, text: []const u8, inputs: []const Input, out: *Records)
     const d = guardText(dumpRoot(a));
     defer gpa.free(d);
     rec(out, "D:{s}", .{d});
-    const saved = guardText(peg.serialize.save(gpa, a));
+    const saved = guardText(peg_serialize.save(gpa, a));
     defer gpa.free(saved);
     rec(out, "S:{s}", .{saved});
     const g = guardText(grammarText(a, false));
@@ -853,11 +836,6 @@ fn runPortCase(kind: u8, text: []const u8, inputs: []const Input, out: *Records)
     const l = guardText(grammarText(a, true));
     defer gpa.free(l);
     rec(out, "L:{s}", .{l});
-    if (std.mem.startsWith(u8, saved, "G:")) {
-        const rl = guardText(reloadText(saved[2..]));
-        defer gpa.free(rl);
-        rec(out, "R:{s}", .{rl});
-    }
     for (inputs) |in| {
         rec(out, "I:{s}", .{in.text});
         if (in.modes & MODE_FULL != 0) parseRecords(a, in.text, peg.Flags.none, "P0:", .{}, out);
@@ -1350,7 +1328,10 @@ fn genRandom() []const u8 {
     var last: u32 = 0;
     for (0..n) |_| last = genExpr(&d, 0, &avail);
     if (chance(40)) last = d.seq(&.{ last, d.leaf(.end) });
-    d.setRoot(last);
+    // now and then no root at all: a parse throws, `dump` of the root reads
+    // past the parsers -- the arms the loaded arenas reached until v0.7.0
+    // removed `load`
+    if (!chance(2)) d.setRoot(last);
     return d.buf.items;
 }
 
@@ -1603,110 +1584,32 @@ fn inputsFor(ops: []const u8, given: []const []const u8, n_derived: usize, n_mut
     return list.items;
 }
 
-/// A saved arena with one thing in it changed, for `from_json`.
-fn mutateSaved(text: []const u8) []const u8 {
-    var v = json.parse(gpa, text) catch return text;
-    defer v.deinit(gpa);
-    for (0..1 + below(2)) |_| mutateValue(&v, 0);
-    return json.dump(gpa, &v, -1) catch text;
-}
-
-fn junkValue() json.Value {
-    return switch (below(9)) {
-        0 => .null,
-        1 => .{ .boolean = chance(50) },
-        2 => .{ .number_integer = -1 },
-        3 => .{ .number_unsigned = 4000000000 },
-        4 => .{ .number_float = 2.5 },
-        5 => json.Value.initString(gpa, pick([]const u8, &.{ "", "x", "literal", "rule", "chars", "\"" })) catch oom(),
-        6 => json.Value.emptyArray(),
-        7 => .{ .number_unsigned = below(40) },
-        else => json.Value.emptyObject(),
-    };
-}
-
-fn mutateValue(v: *json.Value, depth: usize) void {
-    switch (v.*) {
-        .object => |*m| {
-            const n = m.members.items.len;
-            if (n == 0 or chance(15)) {
-                const key = pick([]const u8, &.{ "type", "child", "children", "name", "literal", "delimiter", "delimiters", "ranges", "root", "rules", "trigger", "min_count", "start" });
-                v.set(gpa, key, junkValue()) catch oom();
-                return;
-            }
-            const i = below(n);
-            if (chance(20) and depth > 0) {
-                _ = m.erase(gpa, gpa.dupe(u8, m.members.items[i].key) catch oom());
-                return;
-            }
-            const child = &m.members.items[i].value;
-            if (chance(35)) {
-                child.deinit(gpa);
-                child.* = junkValue();
-                if (std.mem.eql(u8, m.members.items[i].key, "type")) {
-                    child.deinit(gpa);
-                    child.* = json.Value.initString(gpa, pick([]const u8, &.{ "epsilon", "start", "end", "literal", "sequence", "choice", "repetition", "and", "not", "any", "space", "chars", "string", "until", "schema", "rule", "ref", "atomic", "tag", "gbnf", "ac", "bogus" })) catch oom();
-                }
-            } else mutateValue(child, depth + 1);
-        },
-        .array => |*a| {
-            if (a.items.len == 0 or chance(15)) {
-                a.append(gpa, junkValue()) catch oom();
-                return;
-            }
-            const i = below(a.items.len);
-            if (chance(15)) {
-                var x = a.orderedRemove(i);
-                x.deinit(gpa);
-                return;
-            }
-            mutateValue(&a.items[i], depth + 1);
-        },
-        else => {
-            v.deinit(gpa);
-            v.* = junkValue();
-        },
-    }
-}
-
 // -----------------------------------------------------------------------------
 // Coverage: every arm must appear in some reference record
 
 const required_phrases = [_][]const u8{
-    "B:E:RE:Rule not found: ",                             "RE:ac parser requires at least one delimiter",
-    "RE:No root parser set",                               "OR:vector",
-    "Parser variant JSON missing or invalid 'type' field", "literal parser missing or invalid 'literal' field",
-    "sequence parser missing or invalid 'children' field", "choice parser missing or invalid 'children' field",
-    "repetition parser missing required fields",           "and parser missing 'child' field",
-    "not parser missing 'child' field",                    "chars parser missing required fields",
-    "char_range missing 'start' or 'end' field",           "string parser missing delimiter field.",
-    "string parser delimiter is empty.",                   "until parser missing or invalid 'delimiters' field",
-    "schema parser missing required fields",               "rule parser missing required fields",
-    "ref parser missing or invalid 'name' field",          "tag parser missing required fields",
-    "gbnf parser missing required fields",                 "ac parser requires 'child' and a non-empty 'delimiters' array",
-    "Unknown parser type: ",                               "JSON missing or invalid 'rules' object",
-    "references invalid parser ID: ",                      "Root references invalid parser ID: ",
-    "JE:[json.exception.type_error.302]",                  "JE:[json.exception.type_error.316]",
-    "Epsilon",                                             "Start",
-    "End",                                                 "Literal(",
-    "Sequence(",                                           "Choice(",
-    "Repetition(",                                         ", unbounded)",
-    "And(",                                                "Not(",
-    "Atomic(",                                             "Gbnf(",
-    "Ac(",                                                 "Any",
-    "Space",                                               "CharRepeat(",
-    "String(",                                             "Until(",
-    "Schema(",                                             "Rule(",
-    "Ref(",                                                "Tag(",
-    "[cycle]",                                             "until-",
-    "ac-",                                                 "need_more_input",
-    "SEQ -> NEED_MORE",                                    "REPEAT -> NEED_MORE (not enough",
-    "CHOICE -> FAIL",                                      "REPEAT: empty match",
-    "TAG: ",                                               "REPEAT: at end of input",
-    "M0:G:",                                               "\x1eget_weather\x1d{",
-    "M1:G:",                                               "M2:G:",
-    "\x1d\"",                                              "T2:G:success",
-    "\\U0001F600",                                         "{2,4}",
+    "B:E:RE:Rule not found: ",            "RE:ac parser requires at least one delimiter",
+    "RE:No root parser set",              "OR:vector",
+    "JE:[json.exception.type_error.316]", "Epsilon",
+    "Start",                              "End",
+    "Literal(",                           "Sequence(",
+    "Choice(",                            "Repetition(",
+    ", unbounded)",                       "And(",
+    "Not(",                               "Atomic(",
+    "Gbnf(",                              "Ac(",
+    "Any",                                "Space",
+    "CharRepeat(",                        "String(",
+    "Until(",                             "Schema(",
+    "Rule(",                              "Tag(",
+    "[cycle]",                            "until-",
+    "ac-",                                "need_more_input",
+    "SEQ -> NEED_MORE",                   "REPEAT -> NEED_MORE (not enough",
+    "CHOICE -> FAIL",                     "REPEAT: empty match",
+    "TAG: ",                              "REPEAT: at end of input",
+    "M0:G:",                              "\x1eget_weather\x1d{",
+    "M1:G:",                              "M2:G:",
+    "\x1d\"",                             "T2:G:success",
+    "\\U0001F600",                        "{2,4}",
 };
 
 fn envUsize(name: [*:0]const u8, def: usize) usize {
@@ -1749,7 +1652,6 @@ pub fn main(init: std.process.Init) !void {
     // -------------------------------------------------------------------------
     // upstream's parsers and inputs, from its own tests
 
-    var saved_texts: std.ArrayList([]const u8) = .empty;
     {
         var buf: std.ArrayList(u8) = .empty;
         if (!runForked(null, &buf, 120)) {
@@ -1830,77 +1732,6 @@ pub fn main(init: std.process.Init) !void {
     for (0..3000 * scale) |_| {
         const ops = genRandom();
         addCase("random", 0, ops, inputsFor(ops, &.{}, 3, 3));
-    }
-
-    // saved arenas, loaded back as they are and mutated
-    for (cases.items) |c| {
-        if (c.kind == 3) continue;
-        var a = portBuild(c.text) catch {
-            if (harness_msg) |m| {
-                gpa.free(m);
-                harness_msg = null;
-            }
-            continue;
-        };
-        defer a.deinit();
-        const s = peg.serialize.save(gpa, &a) catch continue;
-        saved_texts.append(gpa, s) catch oom();
-    }
-    {
-        const base = saved_texts.items.len;
-        for (0..1500 * scale) |i| {
-            const src = saved_texts.items[(i * 7919) % base];
-            const text = if (i % 5 == 0) src else mutateSaved(src);
-            const ins = [_][]const u8{ "", "a", "{\"a\": [1, true]}", "<tool_call>{\"name\":\"get_weather\"}</tool_call>", "hello world" };
-            var inputs: std.ArrayList(Input) = .empty;
-            for (ins) |t| inputs.append(gpa, .{ .text = t, .modes = MODE_FULL | MODE_LENIENT | MODE_TAGGED }) catch oom();
-            addCase("load", 3, text, inputs.items);
-        }
-        // every field of every parser type missing, then of the wrong type
-        const specs = [_][]const u8{
-            "{\"type\":\"literal\",\"literal\":\"a\"}",
-            "{\"type\":\"sequence\",\"children\":[0]}",
-            "{\"type\":\"choice\",\"children\":[0]}",
-            "{\"type\":\"repetition\",\"child\":0,\"min_count\":0,\"max_count\":1}",
-            "{\"type\":\"and\",\"child\":0}",
-            "{\"type\":\"not\",\"child\":0}",
-            "{\"type\":\"chars\",\"pattern\":\"[a]\",\"ranges\":[{\"start\":97,\"end\":97}],\"negated\":false,\"min_count\":1,\"max_count\":-1}",
-            "{\"type\":\"string\",\"delimiter\":\"\\\"\"}",
-            "{\"type\":\"until\",\"delimiters\":[\"x\"]}",
-            "{\"type\":\"schema\",\"child\":0,\"name\":\"s\",\"raw\":false}",
-            "{\"type\":\"rule\",\"name\":\"r\",\"child\":0,\"trigger\":false}",
-            "{\"type\":\"ref\",\"name\":\"r\"}",
-            "{\"type\":\"atomic\",\"child\":0}",
-            "{\"type\":\"tag\",\"child\":0,\"tag\":\"t\"}",
-            "{\"type\":\"gbnf\",\"child\":0,\"grammar\":\"g\"}",
-            "{\"type\":\"ac\",\"child\":0,\"delimiters\":[\"x\"]}",
-        };
-        const junk = [_][]const u8{ "null", "\"\"", "\"ab\"", "-1", "2.5", "[]", "{}", "true", "[{}]", "[{\"start\":1}]", "[\"x\",1]", "18446744073709551615" };
-        for (specs) |spec| {
-            var v = json.parse(gpa, spec) catch unreachable;
-            defer v.deinit(gpa);
-            const n = v.object.members.items.len;
-            for (0..n) |fi| {
-                const key = v.object.members.items[fi].key;
-                if (std.mem.eql(u8, key, "type")) continue;
-                for (0..junk.len + 1) |ji| {
-                    var w = v.clone(gpa) catch oom();
-                    defer w.deinit(gpa);
-                    if (ji == junk.len) {
-                        w.erase(gpa, key) catch oom();
-                    } else {
-                        const jv = json.parse(gpa, junk[ji]) catch unreachable;
-                        w.set(gpa, key, jv) catch oom();
-                    }
-                    const body = json.dump(gpa, &w, -1) catch oom();
-                    const text = std.fmt.allocPrint(gpa, "{{\"parsers\":[{{\"type\":\"any\"}},{s}],\"rules\":{{\"r\":0}},\"root\":1}}", .{body}) catch oom();
-                    addCase("load-field", 3, text, &.{.{ .text = "ab\"x", .modes = MODE_FULL | MODE_LENIENT }});
-                }
-            }
-        }
-        for ([_][]const u8{ "", "[]", "{}", "not json", "{\"parsers\":[],\"rules\":{},\"root\":18446744073709551615}", "{\"parsers\":{},\"rules\":{},\"root\":0}", "{\"parsers\":[],\"rules\":[],\"root\":0}", "{\"parsers\":[],\"rules\":{}}", "{\"parsers\":[{\"type\":\"any\"}],\"rules\":{\"r\":3},\"root\":0}", "{\"parsers\":[{\"type\":\"any\"}],\"rules\":{},\"root\":9}" }) |t| {
-            addCase("load-hand", 3, t, &.{.{ .text = "x", .modes = MODE_FULL }});
-        }
     }
 
     std.debug.print("cases: {d} upstream, {d} generated\n", .{ n_upstream, cases.items.len - n_upstream });

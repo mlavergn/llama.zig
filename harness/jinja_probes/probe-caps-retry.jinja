@@ -1,0 +1,10 @@
+{#- v0.7.0: a template that requires a thinking field on every assistant turn, as K2 Horizon's does: caps_get retries its probe once with an empty reasoning_content added. -#}
+{%- for m in messages -%}
+{%- if m.role == 'assistant' and m.reasoning_content is not defined -%}{{ raise_exception('assistant turn without reasoning_content') }}{%- endif -%}
+<{{ m.role }}>
+{%- if m.reasoning_content is defined -%}<think>{{ m.reasoning_content }}</think>{%- endif -%}
+{%- if m.content is string -%}{{ m.content }}{%- endif -%}
+{%- if m.tool_calls is defined -%}{%- for tc in m.tool_calls -%}[call {{ tc.function.name }} {{ tc.function.arguments | tojson }}]{%- endfor -%}{%- endif -%}
+{%- endfor -%}
+{%- if tools -%}{%- for t in tools -%}(tool {{ t.function.name }}){%- endfor -%}{%- endif -%}
+{%- if add_generation_prompt -%}<assistant>{%- endif -%}

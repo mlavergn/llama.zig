@@ -8,7 +8,8 @@
 //
 // Input: one record per line, `<op> <payload>`, where the payload is JSON on
 // one line. Ops: M messages, T tools, C tool_choice, K continuation,
-// D delimiters, S split, F diff, R reasoning format, P tool parameters.
+// S split, F diff, R reasoning format, P tool parameters. (D, the message
+// delimiters' JSON form, went with upstream's v0.7.0.)
 
 #include "chat.h"
 #include "json.h"
@@ -107,13 +108,8 @@ static void run(char op, const std::string & payload) {
         case 'C': guarded([&] {
             line("choice " + std::to_string((int) common_chat_tool_choice_parse_oaicompat(j.get<std::string>())));
         }); break;
-        case 'K':
+        case 'K': guarded([&] {
             line("continuation " + std::to_string((int) common_chat_continuation_parse(j)));
-            break;
-        case 'D': guarded([&] {
-            auto d = common_chat_msg_delimiters_parse(j);
-            line("n " + std::to_string(d.delimiters.size()));
-            str("json", d.to_json().dump());
         }); break;
         case 'S': guarded([&] {
             common_chat_msg_delimiters d;

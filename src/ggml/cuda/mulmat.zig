@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.6.0
-//! (`d81235049`): `batched_mul_mat_traits`, `ggml_cuda_mul_mat_cublas_impl`,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.7.0
+//! (`620d2225c`): `batched_mul_mat_traits`, `ggml_cuda_mul_mat_cublas_impl`,
 //! `ggml_cuda_mul_mat_cublas`, `ggml_cuda_should_fuse_mul_mat`,
 //! `ggml_cuda_should_fuse_mul_mat_vec_{f,q}`, `ggml_cuda_mul_mat`,
 //! `ggml_cuda_mul_mat_id_needs_sync` and `ggml_cuda_mul_mat_id`. The kernel
@@ -33,7 +33,7 @@ fn i32Of(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `batched_mul_mat_traits` (ggml-cuda.cu:1363 @d81235049), for each `T`.
+/// Ports `batched_mul_mat_traits` (ggml-cuda.cu:1408 @620d2225c), for each `T`.
 const Traits = struct {
     cuda_type_size: usize,
     compute_type: cu.cublasComputeType_t,
@@ -60,12 +60,17 @@ fn traitsOf(comptime t: c.enum_ggml_type) Traits {
     };
 }
 
-/// Ports `ggml_cuda_mul_mat_cublas_impl` (ggml-cuda.cu:1408 @d81235049).
+/// Ports `ggml_cuda_mul_mat_cublas_impl` (ggml-cuda.cu:1453 @620d2225c).
+/// Since v0.7.0 `dst`'s leading dimension is `nb1 / sizeof(float)`, not
+/// `ne0`: an F32 chunk from `mulMatCublas` keeps the full destination's row
+/// stride.
 fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const traits = comptime traitsOf(compute_type);
     const ts_cuda = traits.cuda_type_size;
 
-    impl.assert(c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    // F32 chunks can have padding between rows to preserve the original destination stride.
+    impl.assert(c.ggml_is_contiguous(dst) or
+        (compute_type == c.GGML_TYPE_F32 and c.ggml_is_contiguous_1(dst)), "ggml_is_contiguous(dst) || (compute_type == GGML_TYPE_F32 && ggml_is_contiguous_1(dst))");
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -75,9 +80,9 @@ fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Contex
     const ne11 = src1.ne[1];
     const ne12 = src1.ne[2];
     const ne13 = src1.ne[3];
-    const ne0 = dst.ne[0];
     const ne1 = dst.ne[1];
 
+    const ldc: i64 = @intCast(dst.nb[1] / @sizeOf(f32));
     const ne_dst = c.ggml_nelements(dst);
     const main_stream = ctx.stream();
     const cublas_h = ctx.cublasHandle();
@@ -205,9 +210,9 @@ fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Contex
     const r3 = @divTrunc(ne13, ne03);
 
     if (compute_type == c.GGML_TYPE_F32 and ne12 == 1 and ne13 == 1) {
-        common.cublasCheck(cu.cublasSgemm_v2(cublas_h, cu.CUBLAS_OP_T, cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), @ptrCast(@alignCast(alpha)), @ptrCast(@alignCast(src0_ptr)), i32Of(s01), @ptrCast(@alignCast(src1_ptr)), i32Of(s11), @ptrCast(@alignCast(beta)), @ptrCast(@alignCast(dst_ptr)), i32Of(ne0)), "cublasSgemm(...)", @src());
+        common.cublasCheck(cu.cublasSgemm_v2(cublas_h, cu.CUBLAS_OP_T, cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), @ptrCast(@alignCast(alpha)), @ptrCast(@alignCast(src0_ptr)), i32Of(s01), @ptrCast(@alignCast(src1_ptr)), i32Of(s11), @ptrCast(@alignCast(beta)), @ptrCast(@alignCast(dst_ptr)), i32Of(ldc)), "cublasSgemm(...)", @src());
     } else if (ne12 == 1 and ne13 == 1) {
-        common.cublasCheck(cu.cublasGemmEx(cublas_h, cu.CUBLAS_OP_T, cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, src0_ptr, cu_data_type_a, i32Of(s01), src1_ptr, cu_data_type_b, i32Of(s11), beta, dst_ptr, cu_data_type, i32Of(ne0), cu_compute_type, cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmEx(...)", @src());
+        common.cublasCheck(cu.cublasGemmEx(cublas_h, cu.CUBLAS_OP_T, cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, src0_ptr, cu_data_type_a, i32Of(s01), src1_ptr, cu_data_type_b, i32Of(s11), beta, dst_ptr, cu_data_type, i32Of(ldc), cu_compute_type, cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmEx(...)", @src());
     } else if (r2 == 1 and r3 == 1 and is_src0_cont_2 and is_src1_cont_2) {
         // with a [0, 2, 1, 3] perm. and ne02==1 the matrix strides need to be
         // determined from dim 3:
@@ -216,7 +221,7 @@ fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Contex
 
         // there is no broadcast and src0, src1 are contiguous across dims
         // 2, 3: use cublasGemmStridedBatchedEx
-        common.cublasCheck(cu.cublasGemmStridedBatchedEx(cublas_h, cu.CUBLAS_OP_T, cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, src0_ptr, cu_data_type_a, i32Of(s01), sma, src1_ptr, cu_data_type_b, i32Of(s11), smb, beta, dst_ptr, cu_data_type, i32Of(ne0), ne1 * ne0, i32Of(ne12 * ne13), cu_compute_type, cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmStridedBatchedEx(...)", @src());
+        common.cublasCheck(cu.cublasGemmStridedBatchedEx(cublas_h, cu.CUBLAS_OP_T, cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, src0_ptr, cu_data_type_a, i32Of(s01), sma, src1_ptr, cu_data_type_b, i32Of(s11), smb, beta, dst_ptr, cu_data_type, i32Of(ldc), ne1 * ldc, i32Of(ne12 * ne13), cu_compute_type, cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmStridedBatchedEx(...)", @src());
     } else {
         // use cublasGemmBatchedEx
         const ne23 = ne12 * ne13;
@@ -246,7 +251,7 @@ fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Contex
         common.cudaCheck(cu.cudaGetLastError(), "cudaGetLastError()", @src());
 
         const ps = ptrs_src.get().?;
-        common.cublasCheck(cu.cublasGemmBatchedEx(cublas_h, cu.CUBLAS_OP_T, cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, ps + 0 * @as(usize, @intCast(ne23)), cu_data_type_a, i32Of(s01), ps + 1 * @as(usize, @intCast(ne23)), cu_data_type_b, i32Of(s11), beta, @ptrCast(ptrs_dst.get().?), cu_data_type, i32Of(ne0), i32Of(ne23), cu_compute_type, cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmBatchedEx(...)", @src());
+        common.cublasCheck(cu.cublasGemmBatchedEx(cublas_h, cu.CUBLAS_OP_T, cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, ps + 0 * @as(usize, @intCast(ne23)), cu_data_type_a, i32Of(s01), ps + 1 * @as(usize, @intCast(ne23)), cu_data_type_b, i32Of(s11), beta, @ptrCast(ptrs_dst.get().?), cu_data_type, i32Of(ldc), i32Of(ne23), cu_compute_type, cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmBatchedEx(...)", @src());
     }
 
     // Convert output back to F32 if needed
@@ -256,7 +261,9 @@ fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Contex
     }
 }
 
-/// Ports `ggml_cuda_mul_mat_cublas` (ggml-cuda.cu:1621 @d81235049).
+/// Ports `ggml_cuda_mul_mat_cublas` (ggml-cuda.cu:1666 @620d2225c). Since
+/// v0.7.0 an F32 product over an F16 or BF16 `src0` whose F32 copy would
+/// pass 512 MiB is done in chunks of `src0` rows, each converted on its own.
 pub fn mulMatCublas(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const x = common.info().devices[@intCast(ctx.device)].cc;
     const prec: c.enum_ggml_prec = @bitCast(impl.getOpParamsI32(dst, 0));
@@ -300,6 +307,35 @@ pub fn mulMatCublas(ctx: *common.Context, src0: *const Tensor, src1: *const Tens
         }
     }
 
+    const max_src0_convert_size: usize = 512 * 1024 * 1024;
+    const src0_f32_size = @as(usize, @bitCast(c.ggml_nelements(src0))) * @sizeOf(f32);
+
+    if (compute_type == c.GGML_TYPE_F32 and
+        (src0.type == c.GGML_TYPE_F16 or src0.type == c.GGML_TYPE_BF16) and
+        src0_f32_size > max_src0_convert_size)
+    {
+        const f32_row_size = src0_f32_size / @as(usize, @bitCast(src0.ne[1]));
+        const rows_per_chunk: i64 = @max(1, @as(i64, @bitCast(max_src0_convert_size / f32_row_size)));
+
+        if (rows_per_chunk < src0.ne[1]) {
+            // `i01` is a Zig type name; `j01` is the C's `i01`.
+            var src0_chunk = src0.*;
+            var dst_chunk = dst.*;
+
+            var j01: i64 = 0;
+            while (j01 < src0.ne[1]) : (j01 += rows_per_chunk) {
+                src0_chunk.ne[1] = @min(rows_per_chunk, src0.ne[1] - j01);
+                src0_chunk.data = @as([*]u8, @ptrCast(src0.data.?)) + @as(usize, @intCast(j01)) * src0.nb[1];
+
+                dst_chunk.ne[0] = src0_chunk.ne[1];
+                dst_chunk.data = @as([*]u8, @ptrCast(dst.data.?)) + @as(usize, @intCast(j01)) * dst.nb[0];
+
+                mulMatCublasImpl(c.GGML_TYPE_F32, ctx, &src0_chunk, src1, &dst_chunk);
+            }
+            return;
+        }
+    }
+
     switch (compute_type) {
         c.GGML_TYPE_F32 => mulMatCublasImpl(c.GGML_TYPE_F32, ctx, src0, src1, dst),
         c.GGML_TYPE_BF16 => mulMatCublasImpl(c.GGML_TYPE_BF16, ctx, src0, src1, dst),
@@ -308,7 +344,7 @@ pub fn mulMatCublas(ctx: *common.Context, src0: *const Tensor, src1: *const Tens
     }
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat` (ggml-cuda.cu:1676 @d81235049).
+/// Ports `ggml_cuda_should_fuse_mul_mat` (ggml-cuda.cu:1747 @620d2225c).
 pub fn shouldFuseMulMat(ffn_up: *const Tensor, ffn_gate: *const Tensor, glu: *const Tensor, ffn_up_bias: ?*const Tensor, ffn_gate_bias: ?*const Tensor, ffn_up_scale: ?*const Tensor, ffn_gate_scale: ?*const Tensor) bool {
     const has_bias = ffn_up_bias != null or ffn_gate_bias != null;
     const has_scale = ffn_up_scale != null or ffn_gate_scale != null;
@@ -371,7 +407,7 @@ pub fn shouldFuseMulMat(ffn_up: *const Tensor, ffn_gate: *const Tensor, glu: *co
     return true;
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat_vec_f` (ggml-cuda.cu:1770 @d81235049).
+/// Ports `ggml_cuda_should_fuse_mul_mat_vec_f` (ggml-cuda.cu:1841 @620d2225c).
 pub fn shouldFuseMulMatVecF(tensor: *const Tensor) bool {
     const src0 = impl.one(Tensor, tensor.src[0]);
     const src1 = impl.one(Tensor, tensor.src[1]);
@@ -393,7 +429,7 @@ pub fn shouldFuseMulMatVecF(tensor: *const Tensor) bool {
     return use_mul_mat_vec_f;
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat_vec_q` (ggml-cuda.cu:1798 @d81235049).
+/// Ports `ggml_cuda_should_fuse_mul_mat_vec_q` (ggml-cuda.cu:1869 @620d2225c).
 pub fn shouldFuseMulMatVecQ(tensor: *const Tensor) bool {
     const src0 = impl.one(Tensor, tensor.src[0]);
     const src1 = impl.one(Tensor, tensor.src[1]);
@@ -415,7 +451,7 @@ pub fn shouldFuseMulMatVecQ(tensor: *const Tensor) bool {
     return use_mul_mat_vec_q;
 }
 
-/// Ports `ggml_cuda_mul_mat` (ggml-cuda.cu:1879 @d81235049).
+/// Ports `ggml_cuda_mul_mat` (ggml-cuda.cu:1950 @620d2225c).
 pub fn mulMat(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const ne01 = src0.ne[1];
     const ne11 = src1.ne[1];
@@ -473,7 +509,7 @@ pub fn mulMat(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ds
     mulMatCublas(ctx, src0, src1, dst);
 }
 
-/// Ports `ggml_cuda_mul_mat_id_needs_sync` (ggml-cuda.cu:1936 @d81235049).
+/// Ports `ggml_cuda_mul_mat_id_needs_sync` (ggml-cuda.cu:2007 @620d2225c).
 pub fn mulMatIdNeedsSync(dst: *const Tensor, x: c_int) bool {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -495,7 +531,7 @@ pub fn mulMatIdNeedsSync(dst: *const Tensor, x: c_int) bool {
     return true;
 }
 
-/// Ports `ggml_cuda_mul_mat_id` (ggml-cuda.cu:1965 @d81235049).
+/// Ports `ggml_cuda_mul_mat_id` (ggml-cuda.cu:2036 @620d2225c).
 pub fn mulMatId(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

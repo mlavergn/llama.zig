@@ -8,8 +8,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek32.cpp` at v0.6.0
-//! (`d81235049`): `llama_model_deepseek32`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek32.cpp` at v0.7.0
+//! (`620d2225c`): `llama_model_deepseek32`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` and
 //! `graph_mtp`.
 
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_deepseek32`'s `load_arch_hparams` (models/deepseek32.cpp:6 @d81235049).
+/// Ports `llama_model_deepseek32`'s `load_arch_hparams` (models/deepseek32.cpp:6 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -71,20 +71,15 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deepseek32`'s `load_arch_tensors` (models/deepseek32.cpp:46 @d81235049).
+/// Ports `llama_model_deepseek32`'s `load_arch_tensors` (models/deepseek32.cpp:46 @620d2225c).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
 
-    const mtp_only = hp.n_layer_nextn > 0 and ml.getWeight("blk.0.attn_norm.weight") == null;
-    var probe_buf: [64]u8 = undefined;
-    const mtp_probe = std.fmt.bufPrint(&probe_buf, "blk.{d}.nextn.eh_proj.weight", .{l.n_layer}) catch unreachable;
-    const trunk_only = hp.n_layer_nextn > 0 and ml.getWeight(mtp_probe) == null;
-    const trunk_flags: u32 = if (mtp_only) nr else 0;
-    var mtp_flags: u32 = if (trunk_only) nr else 0;
-
-    if (!ml.load_mtp) mtp_flags |= loader.tensor_skip;
+    const nf = self.nextnFlags(ml, .attn_norm);
+    const trunk_flags = nf.trunk;
+    const mtp_flags = nf.mtp;
 
     const is_mla = hp.isMla();
     if (!is_mla) {
@@ -190,8 +185,8 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_deepseek32`'s `build_arch_graph` (models/deepseek32.cpp:155
-/// @d81235049): the MTP draft head for that graph type, the main model
+/// Ports `llama_model_deepseek32`'s `build_arch_graph` (models/deepseek32.cpp:149
+/// @620d2225c): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(variant, model, b);
@@ -231,14 +226,14 @@ const variant: Variant = .{
     .name = "DEEPSEEK32",
     .indexer_rope_type = c.LLAMA_ROPE_TYPE_NEOX,
     .shared_indexers = false,
-    .line_is_mla = 165,
-    .line_n_rot = 180,
-    .line_ext_factor = 189,
-    .line_mtp = 497,
-    .line_mtp_inp = 529,
-    .line_mtp_embd_or_token = 538,
-    .line_mtp_head_norm = 709,
-    .line_mtp_head = 720,
+    .line_is_mla = 159,
+    .line_n_rot = 174,
+    .line_ext_factor = 183,
+    .line_mtp = 489,
+    .line_mtp_inp = 521,
+    .line_mtp_embd_or_token = 530,
+    .line_mtp_head_norm = 701,
+    .line_mtp_head = 712,
 };
 
 /// The YaRN pre-scaling both graphs share: the KQ scale, from the
@@ -251,7 +246,7 @@ fn mlaKqScale(b: *const graph.Builder, n_embd_head_k: i64) f32 {
 }
 
 /// Ports the constructor of `llama_model_deepseek32`'s `graph`
-/// (models/deepseek32.cpp:162 @d81235049), and with `v` GLM-DSA's.
+/// (models/deepseek32.cpp:156 @620d2225c), and with `v` GLM-DSA's.
 pub fn buildGraph(comptime v: Variant, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -400,7 +395,7 @@ pub fn buildGraph(comptime v: Variant, model: *const Model, b: *const graph.Buil
         // When unmasked nextn embeddings are requested, `t_h_nextn` must
         // keep every row, so the early output masking is skipped here and
         // applied after the final norm instead.
-        if (il == b.n_layer - 1 and (!b.cparams.embeddings_nextn or b.cparams.embeddings_nextn_masked)) {
+        if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
             cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
             inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
@@ -443,7 +438,7 @@ pub fn buildGraph(comptime v: Variant, model: *const Model, b: *const graph.Buil
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;
 
-    if (b.cparams.embeddings_nextn and !b.cparams.embeddings_nextn_masked) {
+    if (b.cropAfterNextn(inp_out_ids)) {
         cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
@@ -455,8 +450,6 @@ pub fn buildGraph(comptime v: Variant, model: *const Model, b: *const graph.Buil
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// The lightning indexer block of `graph`'s constructor, which GLM-DSA's
@@ -600,7 +593,7 @@ pub fn buildMoe(b: *const graph.Builder, layer: *const model_mod.Layer, cur: *Te
 }
 
 /// Ports the constructor of `llama_model_deepseek32`'s `graph_mtp`
-/// (models/deepseek32.cpp:495 @d81235049): the `LLM_GRAPH_TYPE_DECODER_MTP`
+/// (models/deepseek32.cpp:487 @620d2225c): the `LLM_GRAPH_TYPE_DECODER_MTP`
 /// draft head, the DeepSeek family's NextN/MTP layer -- `enorm(embed) +
 /// hnorm(prev_hidden)`, concatenated, through `eh_proj`, then a whole
 /// decoder block of dense MLA and the sigmoid-gated MoE with its shared
@@ -641,7 +634,7 @@ pub fn buildGraphMtp(comptime v: Variant, model: *const Model, b: *const graph.B
 
     // The C++'s TODO: extract into a common `build_inp_embd_h`.
     const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort(v.file, v.line_mtp_inp, "out of memory");
-    inp.* = .{ .n_embd = hp.n_embd };
+    inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
     inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
     c.ggml_set_input(inp.tokens);
@@ -804,7 +797,6 @@ pub fn buildGraphMtp(comptime v: Variant, model: *const Model, b: *const graph.B
     b.cb(cur, "result_output", -1);
 
     b.res.t_logits = cur;
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

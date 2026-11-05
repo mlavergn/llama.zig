@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ports parts of `llama.cpp/vendor/cpp-httplib/httplib.cpp` and
-//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.59.0, vendored
-//! at v0.6.0, `d81235049`). Each declaration names what it ports and the
+//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.61.0, vendored
+//! at v0.7.0, `620d2225c`). Each declaration names what it ports and the
 //! line it began at.
 //!
 //! # Memory
@@ -27,7 +27,7 @@ const Range = detail.Range;
 const SocketStream = socket.SocketStream;
 const LineReader = socket.LineReader;
 
-/// Ports `FormData` (httplib.h:1460 @d81235049): one file part.
+/// Ports `FormData` (httplib.h:1459 @620d2225c): one file part.
 pub const FormData = struct {
     name: []const u8 = "",
     content: std.ArrayList(u8) = .empty,
@@ -36,21 +36,21 @@ pub const FormData = struct {
     headers: Headers = .{},
 };
 
-/// Ports `FormField` (httplib.h:1468 @d81235049): one text part.
+/// Ports `FormField` (httplib.h:1467 @620d2225c): one text part.
 pub const FormField = struct {
     name: []const u8 = "",
     content: std.ArrayList(u8) = .empty,
     headers: Headers = .{},
 };
 
-/// Ports `MultipartFormData` (httplib.h:1484 @d81235049): the parts of a
+/// Ports `MultipartFormData` (httplib.h:1483 @620d2225c): the parts of a
 /// `multipart/form-data` body, in the order sent.
 pub const MultipartFormData = struct {
     fields: detail.OrderedMultimap(FormField, false) = .{},
     files: detail.OrderedMultimap(FormData, false) = .{},
 };
 
-/// Ports `Request` (httplib.h:1757 @d81235049): the members the server
+/// Ports `Request` (httplib.h:1756 @620d2225c): the members the server
 /// fills and reads.
 pub const Request = struct {
     a: std.mem.Allocator,
@@ -80,13 +80,13 @@ pub const Request = struct {
     /// it when the body is actually read.
     expect_100_continue_pending: bool = false,
 
-    /// Ports `has_header` (httplib.cpp:6868 @d81235049), a member of
+    /// Ports `has_header` (httplib.cpp:6944 @620d2225c), a member of
     /// `Request`.
     pub fn hasHeader(self: *const Request, key: []const u8) bool {
         return detail.hasHeader(&self.headers, key);
     }
 
-    /// Ports `get_header_value` (httplib.cpp:6872 @d81235049), a member of
+    /// Ports `get_header_value` (httplib.cpp:6948 @620d2225c), a member of
     /// `Request`.
     pub fn getHeaderValue(self: *const Request, key: []const u8) []const u8 {
         return detail.getHeaderValue(&self.headers, key);
@@ -98,7 +98,7 @@ pub const Request = struct {
         return detail.getHeaderValueU64(&self.headers, key, 0, &invalid);
     }
 
-    /// Ports `is_multipart_form_data` (httplib.cpp:6923 @d81235049), a
+    /// Ports `is_multipart_form_data` (httplib.cpp:6999 @620d2225c), a
     /// member of `Request`.
     pub fn isMultipartFormData(self: *const Request) error{OutOfMemory}!bool {
         const content_type = self.getHeaderValue("Content-Type");
@@ -113,7 +113,7 @@ pub const Request = struct {
     }
 };
 
-/// `DataSink` (httplib.h:1509 @d81235049): where a content provider writes,
+/// `DataSink` (httplib.h:1508 @620d2225c): where a content provider writes,
 /// bound by the writer that runs it.
 pub const DataSink = struct {
     ctx: *anyopaque,
@@ -130,7 +130,7 @@ pub const DataSink = struct {
 };
 
 /// `ContentProviderWithoutLength`, behind `ContentProviderAdapter`
-/// (httplib.cpp:5483 @d81235049): called with the offset written so far
+/// (httplib.cpp:5549 @620d2225c): called with the offset written so far
 /// and a sink. An error is an exception thrown out of the provider.
 pub const ContentProvider = struct {
     ctx: ?*anyopaque,
@@ -144,7 +144,7 @@ pub const Releaser = struct {
     func: *const fn (ctx: ?*anyopaque, success: bool) void,
 };
 
-/// Ports `Response` (httplib.h:1832 @d81235049): the members the server
+/// Ports `Response` (httplib.h:1831 @620d2225c): the members the server
 /// fills. `content_length_` stays 0 and the content coding `None`: the
 /// server's handlers set neither a known-length provider nor a file.
 pub const Response = struct {
@@ -166,19 +166,19 @@ pub const Response = struct {
         }
     }
 
-    /// Ports `has_header` (httplib.cpp:7027 @d81235049), a member of
+    /// Ports `has_header` (httplib.cpp:7102 @620d2225c), a member of
     /// `Response`: unlike `Request`'s, no name is prohibited.
     pub fn hasHeader(self: *const Response, key: []const u8) bool {
         return self.headers.find(key) != null;
     }
 
-    /// Ports `get_header_value` (httplib.cpp:7031 @d81235049), a member of
+    /// Ports `get_header_value` (httplib.cpp:7106 @620d2225c), a member of
     /// `Response`.
     pub fn getHeaderValue(self: *const Response, key: []const u8) []const u8 {
         return detail.getHeaderValue(&self.headers, key);
     }
 
-    /// Ports `set_header` (httplib.cpp:7041 @d81235049), a member of
+    /// Ports `set_header` (httplib.cpp:7116 @620d2225c), a member of
     /// `Response`: appends, so a name set twice is sent twice; an invalid
     /// name or value is dropped. Both strings are copied.
     pub fn setHeader(self: *Response, key: []const u8, val: []const u8) error{OutOfMemory}!void {
@@ -186,9 +186,9 @@ pub const Response = struct {
         _ = try self.headers.emplace(self.a, try self.a.dupe(u8, key), try self.a.dupe(u8, val));
     }
 
-    /// Ports `set_content` (httplib.cpp:7069 @d81235049), a member of
-    /// `Response`, and the overload over a string (httplib.cpp:7079
-    /// @d81235049): replaces the body and every `Content-Type`.
+    /// Ports `set_content` (httplib.cpp:7144 @620d2225c), a member of
+    /// `Response`, and the overload over a string (httplib.cpp:7154
+    /// @620d2225c): replaces the body and every `Content-Type`.
     pub fn setContent(self: *Response, s: []const u8, content_type: []const u8) error{OutOfMemory}!void {
         self.body.clearRetainingCapacity();
         try self.body.appendSlice(self.a, s);
@@ -196,7 +196,7 @@ pub const Response = struct {
         try self.setHeader("Content-Type", content_type);
     }
 
-    /// Ports `set_chunked_content_provider` (httplib.cpp:7118 @d81235049),
+    /// Ports `set_chunked_content_provider` (httplib.cpp:7193 @620d2225c),
     /// a member of `Response`.
     pub fn setChunkedContentProvider(self: *Response, content_type: []const u8, provider: ContentProvider, releaser: ?Releaser) error{OutOfMemory}!void {
         try self.setHeader("Content-Type", content_type);
@@ -210,7 +210,7 @@ pub const Response = struct {
 // -----------------------------------------------------------------------------
 // Header lines
 
-/// Ports `parse_header` (httplib.cpp:1165 @d81235049): `name: value`, the
+/// Ports `parse_header` (httplib.cpp:1186 @620d2225c): `name: value`, the
 /// value's surrounding spaces and tabs dropped.
 ///
 /// Return: the two, borrowed from `line`, or null where the C returns false.
@@ -231,7 +231,7 @@ pub fn parseHeader(line: []const u8) ?struct { key: []const u8, val: []const u8 
     return .{ .key = line[0..key_end], .val = val };
 }
 
-/// Ports `read_headers` (httplib.cpp:3472 @d81235049): field lines up to
+/// Ports `read_headers` (httplib.cpp:3491 @620d2225c): field lines up to
 /// the blank one, each at most `CPPHTTPLIB_HEADER_MAX_LENGTH`, at most
 /// `CPPHTTPLIB_HEADER_MAX_COUNT` of them, and no two `Content-Length`s that
 /// differ.
@@ -274,7 +274,7 @@ const prohibited_trailers = [_][]const u8{
     "content-range",     "trailer",
 };
 
-/// Ports `parse_trailers` (httplib.cpp:1210 @d81235049): field lines after
+/// Ports `parse_trailers` (httplib.cpp:1231 @620d2225c): field lines after
 /// the last chunk, until the blank one, kept in `dest` only where
 /// `Trailer` declared them. At most `CPPHTTPLIB_HEADER_MAX_COUNT` names are
 /// declared, and every field received counts toward the same limit.
@@ -322,10 +322,10 @@ fn parseTrailers(a: std.mem.Allocator, lr: *LineReader, dest: *Headers, src_head
 // -----------------------------------------------------------------------------
 // Request bodies
 
-/// Ports `ReadContentResult` (httplib.cpp:3615 @d81235049).
+/// Ports `ReadContentResult` (httplib.cpp:3652 @620d2225c).
 const ReadContentResult = enum { success, payload_too_large, err };
 
-/// Ports `ChunkedDecoder` (httplib.h:3918 @d81235049): a chunked body's
+/// Ports `ChunkedDecoder` (httplib.h:3924 @620d2225c): a chunked body's
 /// payload, one chunk-size line and its data at a time.
 const ChunkedDecoder = struct {
     strm: *SocketStream,
@@ -333,7 +333,7 @@ const ChunkedDecoder = struct {
     finished: bool = false,
     line_buf: [64]u8 = undefined,
 
-    /// Ports `read_payload` (httplib.cpp:10792 @d81235049), a member of
+    /// Ports `read_payload` (httplib.cpp:10883 @620d2225c), a member of
     /// `ChunkedDecoder`. The chunk-size line is read up to its terminator,
     /// never past it: only a chunk extension of visible characters, spaces
     /// and tabs may follow the size.
@@ -397,7 +397,7 @@ const ChunkedDecoder = struct {
         return n;
     }
 
-    /// Ports `parse_trailers_into` (httplib.cpp:10874 @d81235049), a member
+    /// Ports `parse_trailers_into` (httplib.cpp:10965 @620d2225c), a member
     /// of `ChunkedDecoder`.
     fn parseTrailersInto(self: *ChunkedDecoder, a: std.mem.Allocator, dest: *Headers, src_headers: *const Headers) error{OutOfMemory}!bool {
         var lr = LineReader.init(a, self.strm, &self.line_buf);
@@ -407,9 +407,9 @@ const ChunkedDecoder = struct {
     }
 };
 
-/// Ports `read_content_with_length` (httplib.cpp:3621 @d81235049), with
-/// the `BodyReader` it reads through (`BodyReader::read`, httplib.cpp:7172
-/// @d81235049): `len` bytes, failing past `payload_max_length`.
+/// Ports `read_content_with_length` (httplib.cpp:3658 @620d2225c), with
+/// the `BodyReader` it reads through (`BodyReader::read`, httplib.cpp:7247
+/// @620d2225c): `len` bytes, failing past `payload_max_length`.
 fn readContentWithLength(strm: *SocketStream, len: usize, out: anytype, payload_max_length: usize) !ReadContentResult {
     var buf: [detail.recv_bufsiz]u8 = undefined;
     var bytes_read: usize = 0;
@@ -428,8 +428,8 @@ fn readContentWithLength(strm: *SocketStream, len: usize, out: anytype, payload_
     return .success;
 }
 
-/// Ports `read_content_without_length` (httplib.cpp:3663 @d81235049): to
-/// end of stream.
+/// Ports `read_content_without_length` (httplib.cpp:3700 @620d2225c): to
+/// end of stream. A `payload_max_length` of 0 is no limit, since 0.60.0.
 fn readContentWithoutLength(strm: *SocketStream, payload_max_length: usize, out: anytype) !ReadContentResult {
     var buf: [detail.recv_bufsiz]u8 = undefined;
     var r: usize = 0;
@@ -438,14 +438,16 @@ fn readContentWithoutLength(strm: *SocketStream, payload_max_length: usize, out:
         if (n == 0) return .success;
         if (n < 0) return .err;
         const un: usize = @intCast(n);
-        if (r > payload_max_length or payload_max_length - r < un) return .payload_too_large;
+        if (payload_max_length > 0 and
+            (r > payload_max_length or payload_max_length - r < un)) return .payload_too_large;
         if (!try out.receive(buf[0..un])) return .err;
         r += un;
     }
 }
 
-/// Ports `read_content_chunked` (httplib.cpp:3688 @d81235049): the chunks,
-/// then the trailers into `req.trailers`.
+/// Ports `read_content_chunked` (httplib.cpp:3726 @620d2225c): the chunks,
+/// then the trailers into `req.trailers`. A `payload_max_length` of 0 is
+/// no limit, since 0.60.0.
 fn readContentChunked(strm: *SocketStream, req: anytype, payload_max_length: usize, out: anytype) !ReadContentResult {
     var dec: ChunkedDecoder = .{ .strm = strm };
     var buf: [detail.recv_bufsiz]u8 = undefined;
@@ -458,18 +460,19 @@ fn readContentChunked(strm: *SocketStream, req: anytype, payload_max_length: usi
             return .success;
         }
         const un: usize = @intCast(n);
-        if (total_len > payload_max_length or payload_max_length - total_len < un) return .payload_too_large;
+        if (payload_max_length > 0 and
+            (total_len > payload_max_length or payload_max_length - total_len < un)) return .payload_too_large;
         if (!try out.receive(buf[0..un])) return .err;
         total_len += un;
     }
 }
 
-/// Ports `read_content` (httplib.cpp:3821 @d81235049) over a request, with
-/// `prepare_content_receiver` (httplib.cpp:3766 @d81235049): a body framed
+/// Ports `read_content` (httplib.cpp:3860 @620d2225c) over a request, with
+/// `prepare_content_receiver` (httplib.cpp:3805 @620d2225c): a body framed
 /// by chunks, by `Content-Length`, or by the end of the stream. With
 /// `decompress`, a coding this build cannot decode answers 415 -- no
-/// decompressor is compiled in (`create_decompressor`, httplib.cpp:3342
-/// @d81235049), so every one it knows is such a coding.
+/// decompressor is compiled in (`create_decompressor`, httplib.cpp:3363
+/// @620d2225c), so every one it knows is such a coding.
 ///
 /// `out` has `receive([]const u8) !bool`. `req` is any message with `a`,
 /// `headers` and `trailers`: a server's request, or a client's response
@@ -517,26 +520,26 @@ pub fn readContent(strm: *SocketStream, req: anytype, payload_max_length: usize,
     return ret;
 }
 
-/// Ports `has_framed_body` (httplib.cpp:5326 @d81235049).
+/// Ports `has_framed_body` (httplib.cpp:5392 @620d2225c).
 pub fn hasFramedBody(req: *const Request) bool {
     return detail.isChunkedTransferEncoding(&req.headers) or req.getHeaderValueU64("Content-Length") > 0;
 }
 
-/// Ports `is_connection_persistent` (httplib.cpp:5331 @d81235049).
+/// Ports `is_connection_persistent` (httplib.cpp:5397 @620d2225c).
 pub fn isConnectionPersistent(req: *const Request) bool {
     if (detail.hasHeaderToken(&req.headers, "Connection", "close")) return false;
     if (std.mem.eql(u8, req.version, "HTTP/1.0") and !detail.hasHeaderToken(&req.headers, "Connection", "keep-alive")) return false;
     return true;
 }
 
-/// Ports `expect_content` (httplib.cpp:5340 @d81235049).
+/// Ports `expect_content` (httplib.cpp:5406 @620d2225c).
 pub fn expectContent(req: *const Request) bool {
     const m = req.method;
     if (std.mem.eql(u8, m, "POST") or std.mem.eql(u8, m, "PUT") or std.mem.eql(u8, m, "PATCH") or std.mem.eql(u8, m, "DELETE")) return true;
     return hasFramedBody(req);
 }
 
-/// Ports `FormDataParser` (httplib.cpp:4561 @d81235049): a
+/// Ports `FormDataParser` (httplib.cpp:4625 @620d2225c): a
 /// `multipart/form-data` body, fed in pieces, as a state machine over its
 /// own buffer.
 pub const FormDataParser = struct {
@@ -738,7 +741,7 @@ pub const FormDataParser = struct {
 // -----------------------------------------------------------------------------
 // Ranges
 
-/// Ports `coalesce_ranges` (httplib.cpp:5082 @d81235049): ranges sorted by
+/// Ports `coalesce_ranges` (httplib.cpp:5146 @620d2225c): ranges sorted by
 /// start with libc++'s `std::sort`, normalized, overlapping or adjacent ones
 /// merged -- identical ones kept.
 fn coalesceRanges(a: std.mem.Allocator, ranges: *std.ArrayList(Range), content_length: usize) error{OutOfMemory}!void {
@@ -776,7 +779,7 @@ fn coalesceRanges(a: std.mem.Allocator, ranges: *std.ArrayList(Range), content_l
     ranges.* = coalesced;
 }
 
-/// Ports `range_error` (httplib.cpp:5138 @d81235049): whether a 2xx
+/// Ports `range_error` (httplib.cpp:5202 @620d2225c): whether a 2xx
 /// response's requested ranges cannot be served -- out of bounds, more than
 /// `CPPHTTPLIB_RANGE_MAX_COUNT`, or overlapping more than twice. Normalizes
 /// and coalesces them otherwise; a streamed body drops them.
@@ -797,8 +800,10 @@ pub fn rangeError(req: *Request, res: *Response) error{OutOfMemory}!bool {
                 r.first = 0;
                 r.second = content_len;
             }
+            // RFC 9110 14.1.2: a suffix-length longer than the representation
+            // selects the entire representation (0.60.0)
             if (r.first == -1) {
-                r.first = content_len - r.second;
+                r.first = @max(0, content_len - r.second);
                 r.second = content_len - 1;
             }
             if (r.second == -1 or r.second >= content_len) r.second = content_len - 1;
@@ -817,20 +822,20 @@ pub fn rangeError(req: *Request, res: *Response) error{OutOfMemory}!bool {
     return false;
 }
 
-/// Ports `get_range_offset_and_length` (httplib.cpp:5215 @d81235049).
+/// Ports `get_range_offset_and_length` (httplib.cpp:5281 @620d2225c).
 pub fn getRangeOffsetAndLength(r: Range) struct { offset: usize, length: usize } {
     return .{ .offset = @intCast(r.first), .length = @as(usize, @intCast(r.second - r.first)) + 1 };
 }
 
-/// Ports `make_content_range_header_field` (httplib.cpp:5225 @d81235049).
+/// Ports `make_content_range_header_field` (httplib.cpp:5291 @620d2225c).
 ///
 /// Return: allocated by `a`.
 pub fn makeContentRangeHeaderField(a: std.mem.Allocator, offset: usize, length: usize, content_length: usize) error{OutOfMemory}![]u8 {
     return std.fmt.allocPrint(a, "bytes {d}-{d}/{d}", .{ offset, offset + length - 1, content_length });
 }
 
-/// Ports `make_multipart_data_boundary` (httplib.cpp:4894 @d81235049), with
-/// `random_string` (httplib.cpp:4873 @d81235049): 16 random alphanumerics.
+/// Ports `make_multipart_data_boundary` (httplib.cpp:4958 @620d2225c), with
+/// `random_string` (httplib.cpp:4937 @620d2225c): 16 random alphanumerics.
 /// The C draws them from an `mt19937` seeded by `std::random_device`, so
 /// no two runs agree on it; neither do these.
 pub fn makeMultipartDataBoundary(a: std.mem.Allocator) error{OutOfMemory}![]u8 {
@@ -843,8 +848,8 @@ pub fn makeMultipartDataBoundary(a: std.mem.Allocator) error{OutOfMemory}![]u8 {
     return std.mem.concat(a, u8, &.{ "--cpp-httplib-multipart-data-", &out });
 }
 
-/// Ports `process_multipart_ranges_data` (httplib.cpp:5240 @d81235049) as
-/// `make_multipart_ranges_data` (httplib.cpp:5276 @d81235049) runs it: each
+/// Ports `process_multipart_ranges_data` (httplib.cpp:5306 @620d2225c) as
+/// `make_multipart_ranges_data` (httplib.cpp:5342 @620d2225c) runs it: each
 /// range of `body` as its own part.
 ///
 /// Return: the multipart body, allocated by `a`.
@@ -876,7 +881,7 @@ pub fn makeMultipartRangesData(a: std.mem.Allocator, ranges: []const Range, boun
 // -----------------------------------------------------------------------------
 // Writing
 
-/// Ports `write_response_line` (httplib.cpp:3895 @d81235049).
+/// Ports `write_response_line` (httplib.cpp:3934 @620d2225c).
 pub fn writeResponseLine(strm: anytype, status: c_int) isize {
     var buf: [128]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, "HTTP/1.1 {d} {s}\r\n", .{ status, detail.statusMessage(status) }) catch |err| switch (err) {
@@ -885,7 +890,7 @@ pub fn writeResponseLine(strm: anytype, status: c_int) isize {
     return strm.write(s);
 }
 
-/// Ports `write_headers` (httplib.cpp:3904 @d81235049): each valid field as
+/// Ports `write_headers` (httplib.cpp:3943 @620d2225c): each valid field as
 /// its own write, then the blank line; an invalid one is skipped.
 pub fn writeHeaders(a: std.mem.Allocator, strm: anytype, headers: *const Headers) error{OutOfMemory}!isize {
     var write_len: isize = 0;
@@ -903,7 +908,7 @@ pub fn writeHeaders(a: std.mem.Allocator, strm: anytype, headers: *const Headers
     return write_len;
 }
 
-/// Ports `write_data` (httplib.cpp:3930 @d81235049): until all of `d` is
+/// Ports `write_data` (httplib.cpp:3969 @620d2225c): until all of `d` is
 /// out.
 pub fn writeData(strm: anytype, d: []const u8) bool {
     var offset: usize = 0;
@@ -915,8 +920,8 @@ pub fn writeData(strm: anytype, d: []const u8) bool {
     return true;
 }
 
-/// Ports `write_content_chunked` (httplib.cpp:4128 @d81235049) with the
-/// identity coder (`nocompressor::compress`, httplib.cpp:3058 @d81235049):
+/// Ports `write_content_chunked` (httplib.cpp:4167 @620d2225c) with the
+/// identity coder (`nocompressor::compress`, httplib.cpp:3079 @620d2225c):
 /// calls the provider until it says `done`, each non-empty write as one
 /// chunk, then `0\r\n\r\n`. Before each call the peer must still be there.
 ///
@@ -969,11 +974,11 @@ pub fn writeContentChunked(a: std.mem.Allocator, strm: *SocketStream, provider: 
     return true;
 }
 
-/// Ports `write_content_with_progress` (httplib.cpp:3941 @d81235049), as
-/// `write_content` (httplib.cpp:4021 @d81235049) calls it with no progress: a
+/// Ports `write_content_with_progress` (httplib.cpp:3980 @620d2225c), as
+/// `write_content` (httplib.cpp:4060 @620d2225c) calls it with no progress: a
 /// body framed by `length`, written raw. The server reaches it with a
-/// chunked provider (through `ContentProviderAdapter`, httplib.cpp:5483
-/// @d81235049, which drops the length) once its error handler gave a
+/// chunked provider (through `ContentProviderAdapter`, httplib.cpp:5549
+/// @620d2225c, which drops the length) once its error handler gave a
 /// streamed response a body, and so a `Content-Length` (Stage 10 step 6:
 /// a 404 through the CORS proxy).
 ///

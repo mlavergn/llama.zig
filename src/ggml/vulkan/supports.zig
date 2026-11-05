@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.6.0
-//! (`d81235049`): `ggml_backend_vk_device_supports_op`. The device vtable
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.7.0
+//! (`620d2225c`): `ggml_backend_vk_device_supports_op`. The device vtable
 //! answers this AND-ed with `ops.ported`, so the scheduler sends nothing to
 //! host code the port does not have yet.
 
@@ -38,7 +38,7 @@ const quant_types = [_]c.ggml_type{
 /// The types a CPY converts f32 to and from.
 const cpy_types = [_]c.ggml_type{ c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0, c.GGML_TYPE_IQ4_NL };
 
-/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15324 @d81235049).
+/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15412 @620d2225c).
 pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
     const device = m.device.getDevice(dev_idx);
 
@@ -94,6 +94,11 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
         c.GGML_OP_MUL_MAT, c.GGML_OP_MUL_MAT_ID => {
             const t0 = s(op, 0).type;
             if (op.op == c.GGML_OP_MUL_MAT_ID) {
+                if (!m.ops.useMulMatVecIdTensor(op)) {
+                    const ids = s(op, 2);
+                    // Shaders store row IDs as uint16_t slot and token indices.
+                    if (ids.ne[0] > @as(i64, std.math.maxInt(u16)) + 1 or ids.ne[1] > @as(i64, std.math.maxInt(u16)) + 1) return false;
+                }
                 const ti: usize = @intCast(t0);
                 // Not enough shared memory for row_ids and the result tile: fall back to CPU
                 if (!device.mul_mat_id_s[ti] and !device.mul_mat_id_m[ti] and !device.mul_mat_id_l[ti]) return false;
@@ -107,8 +112,8 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
                 !(m.op_pipeline.dim01Contiguous(s(op, 1)) or isAny(s(op, 1).type, &.{ F32, F16 }))) return false;
             // No bf16 x f16 shader, nor an fp16->bf16 copy shader.
             if (t0 == BF16 and s(op, 1).type == F16) return false;
-            // BF16 in src1 is only served by the BF16 x BF16 pipelines
-            if (s(op, 1).type == BF16 and t0 != BF16) return false;
+            // BF16 in src1 (widened to F32/F16) is only wired up for MUL_MAT
+            if (s(op, 1).type == BF16 and t0 != BF16 and op.op != c.GGML_OP_MUL_MAT) return false;
             return true;
         },
         c.GGML_OP_FLASH_ATTN_EXT => {

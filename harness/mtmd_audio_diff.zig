@@ -85,6 +85,10 @@ const configs = [_]Config{
     .{ .name = "pockettts", .kind = .pockettts, .n_mel = 0, .n_fft = 0, .window = 0, .hop = 0, .sr = 24000, .mimi_downsample = 16, .chunk_samples = 1920 },
     .{ .name = "parakeet-80", .kind = .parakeet, .n_mel = 80, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000 },
     .{ .name = "parakeet-128-win512", .kind = .parakeet, .n_mel = 128, .n_fft = 512, .window = 512, .hop = 160, .sr = 16000 },
+    // v0.7.0: the conformer's, cut at 30 s (the chunk) and padded to 0.5 s;
+    // the odd one's hop does not divide its padded lengths
+    .{ .name = "d1omni", .kind = .d1omni, .n_mel = 128, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000, .chunk_samples = 480000 },
+    .{ .name = "d1omni-odd", .kind = .d1omni, .n_mel = 64, .n_fft = 400, .window = 300, .hop = 150, .sr = 12000, .chunk_samples = 360000 },
 };
 
 // -----------------------------------------------------------------------------

@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/pockettts-spkenc.cpp` at v0.6.0
-//! (`d81235049`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/pockettts-spkenc.cpp` at v0.7.0
+//! (`620d2225c`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -19,7 +19,7 @@ const gpa = impl.gpa;
 const T = graph.T;
 const ne = graph.ne;
 
-/// Ports `tfm_layer_forward` (pockettts-spkenc.cpp:7 @d81235049), a member
+/// Ports `tfm_layer_forward` (pockettts-spkenc.cpp:7 @620d2225c), a member
 /// of `clip_graph_pockettts_spkenc`: a pre-norm block with layer scale on
 /// both residual paths, see mimi_transformer.py.
 fn tfmLayerForward(g: *const graph.Graph, cur_in: T, layer: *const model_mod.Layer, inp_pos: T, kq_mask: T, il: c_int) T {
@@ -53,7 +53,7 @@ fn tfmLayerForward(g: *const graph.Graph, cur_in: T, layer: *const model_mod.Lay
     return cur;
 }
 
-/// Ports `build` (pockettts-spkenc.cpp:39 @d81235049), a member of
+/// Ports `build` (pockettts-spkenc.cpp:39 @620d2225c), a member of
 /// `clip_graph_pockettts_spkenc`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
@@ -80,9 +80,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     c.ggml_set_input(inp_pos);
 
     // the mimi transformer is causal with a sliding window, see _build_attention_mask()
-    const kq_mask = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, ne(cur, 1), ne(cur, 1));
-    _ = c.ggml_set_name(kq_mask, "kq_mask");
-    c.ggml_set_input(kq_mask);
+    const kq_mask = g.buildInpAttnMask(ne(cur, 1), ne(cur, 1), 0);
 
     var il: c_int = 0;
     while (il < g.n_layer) : (il += 1) {

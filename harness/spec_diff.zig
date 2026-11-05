@@ -183,6 +183,9 @@ fn apiGguf() void {
         const t = spec_mod.typesFromGguf(gpa, z) catch unreachable;
         const s = spec_mod.typeNameStr(gpa, t) catch unreachable;
         _ = printf("from_gguf %s -> '%s'\n", z.ptr, s.ptr);
+        // v0.7.0: common_get_gguf_info replaces common_get_decision_type(fname)
+        const info = tc.common.getGgufInfo(path);
+        _ = printf("gguf_info %s -> decision %d n_ctx_train %u\n", z.ptr, @backingInt(info.decision_type), info.n_ctx_train);
     }
 }
 
@@ -462,6 +465,40 @@ fn apiSamplerTables() void {
     while (t <= 13) : (t += 1) _ = printf("type %d %s %c\n", t, typeStr(t), typeChr(t));
 }
 
+// v0.7.0's common_sampling_add_preserved_tokens and common_sampling_add_grammar_triggers
+fn printSamplingLists(s: *const params_mod.Sampling) void {
+    _ = printf("  preserved");
+    for (s.preserved_tokens.items) |t| _ = printf(" %d", t);
+    _ = printf("\n  triggers");
+    for (s.grammar_triggers.items) |t| _ = printf(" {%d '%.*s' %d}", @backingInt(t.type), @as(c_int, @intCast(t.value.len)), t.value.ptr, t.token);
+    _ = printf("\n");
+}
+
+fn apiSamplingLists(vocab: ?*const c.llama_vocab) void {
+    if (vocab == null) return;
+    const pres = [_][]const u8{ "<think>", "</think>", "hello world", "<|im_start|>", "", "<tool_call>", "</think>", " the", "the" };
+    var k: usize = 0;
+    while (k < 6) : (k += 1) {
+        var s: params_mod.Sampling = .{};
+        s.grammar_lazy = k % 2 == 1;
+        sampling.addPreservedTokens(gpa, &s, vocab, pres[0 .. (k * 2) % pres.len]) catch unreachable;
+        var trig: std.ArrayList(params_mod.GrammarTrigger) = .empty;
+        if (k >= 1) trig.append(gpa, .{ .type = .word, .value = "<think>" }) catch unreachable;
+        if (k >= 2) trig.append(gpa, .{ .type = .word, .value = "hello world" }) catch unreachable;
+        if (k >= 3) trig.append(gpa, .{ .type = .pattern, .value = "a|b" }) catch unreachable;
+        if (k >= 3) trig.append(gpa, .{ .type = .token, .value = "x", .token = 42 }) catch unreachable;
+        if (k == 4) trig.append(gpa, .{ .type = .word, .value = "the" }) catch unreachable;
+        if (k == 5) trig.append(gpa, .{ .type = .pattern_full, .value = "^x$" }) catch unreachable;
+        if (k == 1) trig.clearRetainingCapacity();
+        _ = printf("sampling lists %d lazy=%d\n", @as(c_int, @intCast(k)), @as(c_int, @intFromBool(s.grammar_lazy)));
+        sampling.addGrammarTriggers(gpa, &s, vocab, trig.items) catch |e| switch (e) {
+            error.Runtime => _ = printf("  runtime_error: %.*s\n", @as(c_int, @intCast(tc.arg.what().len)), tc.arg.what().ptr),
+            else => unreachable,
+        };
+        printSamplingLists(&s);
+    }
+}
+
 // the self-speculative drafters through the public API, without a model
 fn apiSpec() void {
     var g: StreamGen = .{ .x = 23 };
@@ -552,6 +589,12 @@ fn runApi(vocab: ?*const c.llama_vocab) void {
     apiReasoningBudget(vocab);
     apiUtf8();
     apiSamplerTables();
+    apiSamplingLists(vocab);
+    // v0.7.0's common_log_set_stdo: off, a line is written nowhere; on again, the next one is
+    tc.log.setStdo(false);
+    tc.log.inf("%s: stdo off, not written\n", .{@as([*:0]const u8, "run_api")});
+    tc.log.setStdo(true);
+    tc.log.inf("%s: stdo on, written\n", .{@as([*:0]const u8, "run_api")});
     apiSpec();
 }
 
@@ -624,10 +667,20 @@ fn runDecode(params: *params_mod.Params) !u8 {
         var params_dft = spec_mod.baseParamsToSpeculative(params);
         const mp = try gpa.dupeSentinel(u8, params_dft.model.path, 0);
         _ = printf("params_dft model='%s' ngl=%d split=%d ctk=%d ctv=%d outs=%d per_seq=%d embd=%d pool=%d threads=%d/%d\n", mp.ptr, params_dft.n_gpu_layers, @as(c_int, @intCast(params_dft.split_mode)), @as(c_int, @intCast(params_dft.cache_type_k)), @as(c_int, @intCast(params_dft.cache_type_v)), params_dft.n_outputs_max, params_dft.n_outputs_max_per_seq, @as(c_int, @intFromBool(params_dft.embedding)), @as(c_int, @intCast(params_dft.pooling_type)), params_dft.cpuparams.n_threads, params_dft.cpuparams_batch.n_threads);
+        // v0.7.0: the draft's own n_ubatch and no MoE cache, beside the target's context parameters
+        const cp_tgt = tc.common.contextParamsToLlama(params);
+        const cp_dft = tc.common.contextParamsToLlama(&params_dft);
+        _ = printf("cparams ubatch=%u/%u moe_cache=%zu/%zu\n", cp_tgt.n_ubatch, cp_dft.n_ubatch, cp_tgt.moe_cache_size, cp_dft.moe_cache_size);
         spec_init = try spec_mod.initFromParams(&params_dft, model_tgt, ctx_tgt);
         params.speculative.draft.ctx_tgt = ctx_tgt;
         params.speculative.draft.ctx_dft = spec_init.context();
         _ = printf("draft model=%d ctx=%d\n", @as(c_int, @intFromBool(spec_init.model() != null)), @as(c_int, @intFromBool(spec_init.context() != null)));
+        // SPEC_SEQ_RM: the server's probe of both contexts, before anything is decoded; a draft
+        // context with a state input decodes it with zeros (v0.7.0's common_batch_set_zero_state)
+        if (c.getenv("SPEC_SEQ_RM") != null) {
+            _ = printf("seq_rm tgt=%d\n", @backingInt(tc.common.contextCanSeqRm(ctx_tgt)));
+            if (spec_init.context()) |cd| _ = printf("seq_rm dft=%d\n", @backingInt(tc.common.contextCanSeqRm(cd)));
+        }
     }
     const ctx_dft = params.speculative.draft.ctx_dft;
 
@@ -671,6 +724,8 @@ fn runDecode(params: *params_mod.Params) !u8 {
         try params.sampling.grammar_triggers.append(gpa, .{ .type = .token, .token = c.atoi(t) });
     }
     if (c.getenv("SPEC_TOOL_GRAMMAR") != null and params.sampling.grammar.len != 0) params.sampling.grammar_type = .tool_calls;
+    // --n-probs is the server's and completion's option, not this example's
+    if (c.getenv("SPEC_N_PROBS")) |v| params.sampling.n_probs = c.atoi(v);
     for (0..n_seq) |s| {
         smpl[s] = sampling.init(model_tgt, &params.sampling) catch |e| switch (e) {
             error.OutOfMemory => return e,
@@ -707,9 +762,35 @@ fn runDecode(params: *params_mod.Params) !u8 {
         _ = &n;
         var b = tc.common.Batch.init(gpa, ctx_tgt);
         defer b.deinit();
-        for (0..n_seq) |s| {
-            var i: usize = 0;
-            while (i + 1 < inp[s].len) : (i += 1) _ = b.add(inp[s][i], @intCast(i), @intCast(s), false);
+        // SPEC_PREFILL_EMBD: the prefill as embedding rows, as an image's are, a
+        // fixed pattern per position (v0.7.0's MTP drafter catches them up too)
+        var embd: []f32 = &.{};
+        defer gpa.free(embd);
+        if (c.getenv("SPEC_PREFILL_EMBD") != null) {
+            const n_embd: usize = @intCast(c.llama_model_n_embd_inp(model_tgt));
+            var n_rows: usize = 0;
+            for (0..n_seq) |s| n_rows += if (inp[s].len > 0) inp[s].len - 1 else 0;
+            embd = try gpa.alloc(f32, n_rows * n_embd);
+            for (0..n_rows) |r| {
+                for (0..n_embd) |j| embd[r * n_embd + j] = @as(f32, @floatFromInt((r * 31 + j * 7) % 97)) / 97.0 - 0.5;
+            }
+            var r: usize = 0;
+            for (0..n_seq) |s| {
+                var i: usize = 0;
+                while (i + 1 < inp[s].len) : ({
+                    i += 1;
+                    r += 1;
+                }) {
+                    const p: c.llama_pos = @intCast(i);
+                    const pos = [4]c.llama_pos{ p, p, p, 0 };
+                    _ = b.addEmbd(.{ .data = embd.ptr + r * n_embd, .n_rows = 1, .n_embd = n_embd }, &pos, @intCast(s), false);
+                }
+            }
+        } else {
+            for (0..n_seq) |s| {
+                var i: usize = 0;
+                while (i + 1 < inp[s].len) : (i += 1) _ = b.add(inp[s][i], @intCast(i), @intCast(s), false);
+            }
         }
         const rc = c.llama_process(ctx_tgt, c.LLAMA_PROCESS_TYPE_DECODE, b.get());
         _ = printf("prefill rc=%d\n", rc);

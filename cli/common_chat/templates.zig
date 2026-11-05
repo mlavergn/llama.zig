@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports the template half of `llama.cpp/common/chat.cpp` (llama.cpp v0.6.0,
-//! `d81235049`): `common_chat_templates` and its init, free, source and
+//! Ports the template half of `llama.cpp/common/chat.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`): `common_chat_templates` and its init, free, source and
 //! explicit flag; `common_chat_templates_inputs`; `common_chat_verify_template`;
 //! `common_chat_format_single` and `common_chat_format_example`;
 //! `common_chat_templates_get_caps`;
@@ -48,12 +48,13 @@ const Msg = msg_mod.Msg;
 const Template = template.Template;
 const GenerationParams = template.GenerationParams;
 const ChatParams = params_mod.ChatParams;
+const Prompt = @import("prompt.zig").Prompt;
 const Caps = caps_mod.Caps;
 
 /// One `chat_template_kwargs` entry: a name and the JSON text of its value.
 pub const KwArg = struct { key: []const u8, value: []const u8 };
 
-/// Ports `common_chat_templates_inputs` (chat.h:249 @d81235049). Everything
+/// Ports `common_chat_templates_inputs` (chat.h:256 @620d2225c). Everything
 /// is borrowed for the duration of the call it is passed to.
 pub const TemplatesInputs = struct {
     messages: []const Msg = &.{},
@@ -91,7 +92,7 @@ pub const ModelInfo = struct {
     add_eos: bool = false,
 };
 
-/// Ports `common_token_to_piece` (common/common.cpp:1841 @d81235049), the
+/// Ports `common_token_to_piece` (common/common.cpp:1865 @620d2225c), the
 /// `special` arm: a token's text through libllama's port.
 ///
 /// Return: owned by `a`.
@@ -131,7 +132,7 @@ pub fn modelInfo(a: Allocator, model: *const anyopaque) Error!ModelInfo {
     return info;
 }
 
-/// Ports `CHATML_TEMPLATE_SRC` (chat.cpp:715 @d81235049).
+/// Ports `CHATML_TEMPLATE_SRC` (chat.cpp:687 @620d2225c).
 pub const chatml_template_src =
     "{%- for message in messages -%}\n" ++
     "  {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' -}}\n" ++
@@ -140,7 +141,7 @@ pub const chatml_template_src =
     "  {{- '<|im_start|>assistant\n' -}}\n" ++
     "{%- endif -%}";
 
-/// Ports `common_chat_templates` (chat.cpp:337 @d81235049).
+/// Ports `common_chat_templates` (chat.cpp:306 @620d2225c).
 pub const Templates = struct {
     gpa: Allocator,
     add_bos: bool,
@@ -151,7 +152,7 @@ pub const Templates = struct {
     template_default: Template,
     template_tool_use: ?Template,
 
-    /// Ports `common_chat_templates_free` (chat.cpp:723 @d81235049).
+    /// Ports `common_chat_templates_free` (chat.cpp:695 @620d2225c).
     pub fn deinit(self: *Templates) void {
         self.template_default.deinit();
         if (self.template_tool_use) |*t| t.deinit();
@@ -159,7 +160,7 @@ pub const Templates = struct {
     }
 };
 
-/// Ports `common_chat_templates_init` (chat.cpp:757 @d81235049): the model's
+/// Ports `common_chat_templates_init` (chat.cpp:729 @620d2225c): the model's
 /// templates, or the override, with the vocabulary's BOS and EOS, and two
 /// known template bugs patched.
 ///
@@ -271,12 +272,12 @@ fn vocabToken(piece: ?[]const u8, name: []const u8, jinja_variable_name: []const
     return "";
 }
 
-/// Ports `common_chat_templates_was_explicit` (chat.cpp:727 @d81235049).
+/// Ports `common_chat_templates_was_explicit` (chat.cpp:699 @620d2225c).
 pub fn wasExplicit(tmpls: *const Templates) bool {
     return tmpls.has_explicit_template;
 }
 
-/// Ports `common_chat_templates_source` (chat.cpp:744 @d81235049): the
+/// Ports `common_chat_templates_source` (chat.cpp:716 @620d2225c): the
 /// default template's source, or the `tool_use` one's ("" without one).
 pub fn source(tmpls: *const Templates, variant: []const u8) []const u8 {
     if (variant.len != 0) {
@@ -289,7 +290,7 @@ pub fn source(tmpls: *const Templates, variant: []const u8) []const u8 {
     return tmpls.template_default.source();
 }
 
-/// Ports `common_chat_templates_get_caps` (chat.cpp:1531 @d81235049): the
+/// Ports `common_chat_templates_get_caps` (chat.cpp:1761 @620d2225c): the
 /// tool-use template's capabilities when there is one, the default's
 /// otherwise, sorted by name as the `std`'s `map` is.
 pub fn getCaps(tmpls: *const Templates) [9]Caps.Entry {
@@ -307,8 +308,8 @@ pub fn capsValue(entries: [9]Caps.Entry, name: []const u8) bool {
     return false;
 }
 
-/// Ports `common_chat_templates_support_enable_thinking` (chat.cpp:358
-/// @d81235049): whether one user turn applied with thinking on reports
+/// Ports `common_chat_templates_support_enable_thinking` (chat.cpp:327
+/// @620d2225c): whether one user turn applied with thinking on reports
 /// that the template thinks.
 pub fn supportEnableThinking(gpa: Allocator, tmpls: *const Templates) Error!bool {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
@@ -325,13 +326,13 @@ pub fn supportEnableThinking(gpa: Allocator, tmpls: *const Templates) Error!bool
     return params.supports_thinking;
 }
 
-/// Ports `common_chat_prompt_preset` (chat.h:384 @d81235049).
+/// Ports `common_chat_prompt_preset` (chat.h:485 @620d2225c).
 pub const PromptPreset = struct {
     system: []const u8,
     user: []const u8,
 };
 
-/// Ports `common_chat_get_asr_prompt` (chat.cpp:731 @d81235049).
+/// Ports `common_chat_get_asr_prompt` (chat.cpp:703 @620d2225c).
 pub fn getAsrPrompt(tmpls: ?*const Templates) PromptPreset {
     if (tmpls) |t| {
         if (parsers.lfm2.isLfm2Template(t.template_default.source())) {
@@ -341,7 +342,7 @@ pub fn getAsrPrompt(tmpls: ?*const Templates) PromptPreset {
     return .{ .system = "", .user = "Transcribe audio to text" };
 }
 
-/// Ports `common_chat_verify_template` (chat.cpp:638 @d81235049): whether
+/// Ports `common_chat_verify_template` (chat.cpp:610 @620d2225c): whether
 /// one user turn applies, through Jinja or through libllama's built-in
 /// template families.
 pub fn verifyTemplate(gpa: Allocator, tmpl: []const u8, use_jinja: bool) Error!bool {
@@ -373,7 +374,7 @@ fn verifyJinja(gpa: Allocator, tmpl: []const u8) Error!void {
     _ = try apply(arena_state.allocator(), &tmpls, &inputs);
 }
 
-/// Ports `common_chat_format_single` (chat.cpp:664 @d81235049): what adding
+/// Ports `common_chat_format_single` (chat.cpp:636 @620d2225c): what adding
 /// `new_msg` to `past_msg` adds to the rendered conversation.
 ///
 /// Return: owned by the arena `a`.
@@ -387,7 +388,7 @@ pub fn formatSingle(a: Allocator, tmpls: *const Templates, past_msg: []const Msg
     if (past_msg.len != 0) {
         inputs.messages = past_msg;
         inputs.add_generation_prompt = false;
-        fmt_past_msg = (try apply(a, tmpls, &inputs)).prompt;
+        fmt_past_msg = try (try apply(a, tmpls, &inputs)).prompt.str(a);
     }
     var ss: std.ArrayList(u8) = .empty;
     // if the past_msg ends with a newline, we must preserve it in the formatted version
@@ -400,13 +401,13 @@ pub fn formatSingle(a: Allocator, tmpls: *const Templates, past_msg: []const Msg
     all[past_msg.len] = new_msg;
     inputs.messages = all;
     inputs.add_generation_prompt = add_ass;
-    const fmt_new_msg = (try apply(a, tmpls, &inputs)).prompt;
+    const fmt_new_msg = try (try apply(a, tmpls, &inputs)).prompt.str(a);
     // get the diff part
     try ss.appendSlice(a, try util.substr(fmt_new_msg, fmt_past_msg.len, fmt_new_msg.len -% fmt_past_msg.len));
     return ss.items;
 }
 
-/// Ports `common_chat_format_example` (chat.cpp:694 @d81235049): a short
+/// Ports `common_chat_format_example` (chat.cpp:666 @620d2225c): a short
 /// fixed conversation rendered, for the log.
 ///
 /// Return: owned by the arena `a`.
@@ -424,7 +425,7 @@ pub fn formatExample(a: Allocator, tmpls: *const Templates, use_jinja: bool, cha
         .chat_template_kwargs = chat_template_kwargs,
         .messages = &msgs,
     };
-    return (try apply(a, tmpls, &inputs)).prompt;
+    return (try apply(a, tmpls, &inputs)).prompt.str(a);
 }
 
 // -----------------------------------------------------------------------------
@@ -435,7 +436,7 @@ fn isStr(v: *const Value, s: []const u8) bool {
     return v.isString() and std.mem.eql(u8, v.string, s);
 }
 
-/// Ports `workaround`'s `map_developer_role_to_system` (chat.cpp:1004 @d81235049).
+/// Ports `workaround`'s `map_developer_role_to_system` (chat.cpp:989 @620d2225c).
 fn mapDeveloperRoleToSystem(a: Allocator, messages: *Value) Error!void {
     var it = messages.items();
     while (it.next()) |item| {
@@ -447,8 +448,8 @@ fn mapDeveloperRoleToSystem(a: Allocator, messages: *Value) Error!void {
     }
 }
 
-/// Ports `workaround`'s `system_message_not_supported` (chat.cpp:1016
-/// @d81235049): a leading system message merged into the next one, or
+/// Ports `workaround`'s `system_message_not_supported` (chat.cpp:1001
+/// @620d2225c): a leading system message merged into the next one, or
 /// dropped when it is alone.
 fn systemMessageNotSupported(a: Allocator, messages: *Value) Error!void {
     if (messages.empty()) return;
@@ -470,7 +471,7 @@ fn systemMessageNotSupported(a: Allocator, messages: *Value) Error!void {
     }
 }
 
-/// Ports `workaround`'s `requires_non_null_content` (chat.cpp:1032 @d81235049).
+/// Ports `workaround`'s `requires_non_null_content` (chat.cpp:1017 @620d2225c).
 fn requiresNonNullContent(a: Allocator, messages: *Value) Error!void {
     util.ggmlAssert(messages.isArray(), "messages.is_array()");
     var it = messages.items();
@@ -483,7 +484,7 @@ fn requiresNonNullContent(a: Allocator, messages: *Value) Error!void {
     }
 }
 
-/// Ports `workaround`'s `func_args_not_string` (chat.cpp:1041 @d81235049): a
+/// Ports `workaround`'s `func_args_not_string` (chat.cpp:1026 @620d2225c): a
 /// tool call's string arguments parsed, for a template that reads them as
 /// an object.
 fn funcArgsNotString(a: Allocator, messages: *Value) Error!void {
@@ -510,7 +511,7 @@ fn funcArgsNotString(a: Allocator, messages: *Value) Error!void {
     }
 }
 
-/// Ports `workaround`'s `trim_all_content` (chat.cpp:1066 @d81235049): each
+/// Ports `workaround`'s `trim_all_content` (chat.cpp:1051 @620d2225c): each
 /// message's content, reasoning and text parts trimmed.
 ///
 /// Return: copies owned by `a`.
@@ -534,12 +535,30 @@ fn trimAllContent(a: Allocator, messages: []const Msg) Error![]Msg {
 // -----------------------------------------------------------------------------
 // apply
 
-/// Ports `common_chat_try_specialized_template` (chat.cpp:1090 @d81235049):
-/// a hand-written parser for the templates the auto-parser cannot read,
-/// chosen by what the source holds.
-///
-/// Return: null when none applies.
-pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const u8, params: *GenerationParams) Error!?ChatParams {
+/// Ports `common_chat_params_init_lfm2_tokens` (chat.cpp:1075 @620d2225c).
+fn initLfm2Tokens(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error!ChatParams {
+    return parsers.lfm2.init(a, tmpl, inputs, true);
+}
+
+/// Ports `common_chat_params_init_lfm2_5` (chat.cpp:1079 @620d2225c).
+fn initLfm25(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error!ChatParams {
+    return parsers.lfm2.init(a, tmpl, inputs, false);
+}
+
+/// Ports `common_chat_params_init_gemma4_legacy` (chat.cpp:1084 @620d2225c):
+/// older gemma4 templates need their tool responses rewritten before
+/// rendering.
+fn initGemma4Legacy(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error!ChatParams {
+    var adjusted = try inputs.clone(a);
+    try parsers.gemma4.convertToolResponses(a, &adjusted.messages);
+    return parsers.gemma4.init(a, tmpl, &adjusted);
+}
+
+/// Ports `common_chat_template_detect_params_init` (chat.cpp:1092
+/// @620d2225c): the dedicated handler for a template, picked from its
+/// source, or null for the autoparser. Order matters: the first match
+/// wins, and later checks assume the earlier ones did not match.
+pub fn detectParamsInit(src: []const u8) ?template.ParamsInitFn {
     const has = util.contains;
     // Ministral/Mistral Large 3 - uses special reasoning structure fixes, can't use autoparser
     // Note: Mistral Small 3.2 uses [CALL_ID] which Ministral doesn't have, so we can distinguish them
@@ -547,32 +566,32 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
         has(src, "[ARGS]") and !has(src, "[CALL_ID]"))
     {
         log.dbg("Using specialized template: Ministral/Magistral Large 3\n", .{});
-        return try parsers.ministral3.init(a, tmpl, params);
+        return parsers.ministral3.init;
     }
 
     // LLM-jp-4.1 - GPT-OSS dialect (spaces after special tokens, <|end|>-separated parallel calls)
     if (has(src, "chat_format=llm-jp-harmony-v1")) {
         log.dbg("Using specialized template: LLM-jp Harmony v1\n", .{});
-        return try parsers.llm_jp_harmony.init(a, tmpl, params);
+        return parsers.llm_jp_harmony.init;
     }
 
     // GPT-OSS - has unique channel-based structure that needs dedicated handler
     if (has(src, "<|channel|>")) {
         log.dbg("Using specialized template: GPT-OSS\n", .{});
-        return try parsers.gpt_oss.init(a, tmpl, params);
+        return parsers.gpt_oss.init;
     }
 
     // Muse Glimmer format using " to=<recipient>" recipients and <|eom|>/<|eot|> message terminators.
     if (has(src, "<atem:function_calls>") and has(src, "<|eom|>")) {
         log.dbg("Using specialized template: Muse Glimmer\n", .{});
-        return try parsers.muse_glimmer.init(a, tmpl, params);
+        return parsers.muse_glimmer.init;
     }
 
     // Functionary v3.2 - uses recipient-based format with >>>recipient\n{content}
     // Detection: template has ">>>all" for content and ">>>" prefix for tool calls
     if (has(src, ">>>all") and has(src, ">>>${recipient}")) {
         log.dbg("Using specialized template: Functionary v3.2\n", .{});
-        return try parsers.functionary_v3_2.init(a, tmpl, params);
+        return parsers.functionary_v3_2.init;
     }
 
     // Kimi K2 Thinking - uses unique tool call ID format: functions.<name>:<index>
@@ -581,7 +600,7 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
         has(src, "<|tool_call_begin|>"))
     {
         log.dbg("Using specialized template: Kimi K2 Thinking\n", .{});
-        return try parsers.kimi_k2.init(a, tmpl, params);
+        return parsers.kimi_k2.init;
     }
 
     // Kimi K3 - the <|open|>/<|close|>/<|end_of_msg|> markers are unique to it
@@ -589,7 +608,16 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
         has(src, "<|end_of_msg|>"))
     {
         log.dbg("Using specialized template: Kimi K3\n", .{});
-        return try parsers.kimi_k3.init(a, tmpl, params);
+        return parsers.kimi_k3.init;
+    }
+
+    // K2 Horizon - <|ifm|im_start|> turns, <ifm|think*> reasoning picked by reasoning_effort and
+    // <ifm|tool_calls> sections; the three think tag pairs defeat the autoparser's reasoning detection
+    if (has(src, "<|ifm|im_start|>") and
+        has(src, "<ifm|tool_calls>"))
+    {
+        log.dbg("Using specialized template: K2 Horizon\n", .{});
+        return parsers.k2_horizon.init;
     }
 
     // Ling 3.0 / Bailing V3 - <role>X</role> sections with <arg_key>/<arg_value> tagged
@@ -598,7 +626,7 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
         has(src, "<arg_key>"))
     {
         log.dbg("Using specialized template: Ling 3.0 (Bailing V3)\n", .{});
-        return try parsers.ling3.init(a, tmpl, params);
+        return parsers.ling3.init;
     }
 
     // Cohere2 MoE / North Code - marker-wrapped format with <|START_TEXT|> content and
@@ -608,12 +636,12 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
         has(src, "<|START_ACTION|>"))
     {
         log.dbg("Using specialized template: Cohere2 MoE\n", .{});
-        return try parsers.cohere2moe.init(a, tmpl, params);
+        return parsers.cohere2moe.init;
     }
 
     if (parsers.lfm2.isLfm2Template(src)) {
         log.dbg("Using specialized template: LFM2\n", .{});
-        return try parsers.lfm2.init(a, tmpl, params, true);
+        return initLfm2Tokens;
     }
 
     // LFM2.5 format detection: template uses plain "List of tools: [...]" with no special tokens
@@ -621,7 +649,7 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
         !has(src, "<|tool_list_start|>"))
     {
         log.dbg("Using specialized template: LFM2.5\n", .{});
-        return try parsers.lfm2.init(a, tmpl, params, false);
+        return initLfm25;
     }
 
     // GigaChatV3 format detection
@@ -630,7 +658,7 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
         !has(src, "<|function_call|>"))
     {
         log.dbg("Using specialized template: GigaChatV3\n", .{});
-        return try parsers.gigachat_v3.init(a, tmpl, params);
+        return parsers.gigachat_v3.init;
     }
 
     // MiniMax-M3: the namespace token "]<]minimax[>[" collides with the autoparser's
@@ -640,7 +668,7 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
         has(src, "<invoke name="))
     {
         log.dbg("Using specialized template: MiniMax-M3\n", .{});
-        return try parsers.minimax_m3.init(a, tmpl, params);
+        return parsers.minimax_m3.init;
     }
 
     // DeepSeek V3.2/V4 format detection: template defines dsml_token and uses it for tool calls.
@@ -652,18 +680,18 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
             has(src, "tool_calls")))
     {
         log.dbg("Using specialized template: DeepSeek V3.2/V4\n", .{});
-        return try parsers.deepseek.init(a, tmpl, params);
+        return parsers.deepseek.init;
     }
 
     // Gemma4 format detection
     if (has(src, "'<|tool_call>call:'")) {
+        log.dbg("Using specialized template: Gemma4\n", .{});
         if (!has(src, "{#- OpenAI Chat Completions:")) {
-            // apply workarounds if using the older gemma4 templates
             log.wrn("{s}: detected an outdated gemma4 chat template, applying compatibility workarounds. " ++
-                "Consider updating to the official template.\n", .{"common_chat_try_specialized_template"});
-            try parsers.gemma4.convertToolResponses(a, &params.messages);
+                "Consider updating to the official template.\n", .{"common_chat_template_detect_params_init"});
+            return initGemma4Legacy;
         }
-        return try parsers.gemma4.init(a, tmpl, params);
+        return parsers.gemma4.init;
     }
 
     // MiniCPM5 - XML tool calls with <function name="..."><param name="...">...</param></function>
@@ -672,7 +700,15 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
         has(src, "<param name=\""))
     {
         log.dbg("Using specialized template: MiniCPM5\n", .{});
-        return try parsers.minicpm5.init(a, tmpl, params);
+        return parsers.minicpm5.init;
+    }
+
+    // TranslateGemma - user content must follow a custom schema with language codes
+    if (has(src, "[source_lang_code]") and
+        has(src, "[target_lang_code]"))
+    {
+        log.dbg("Using specialized template: TranslateGemma\n", .{});
+        return parsers.translate_gemma.init;
     }
 
     // Qwen3-Coder XML tool calls, also used by Nemotron Nano 3, Qwen3.5 and StepFun-3.5-Flash
@@ -683,10 +719,19 @@ pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, src: []const 
         !has(src, "'<tool_call><function=' ~ tool_call.name ~ '>'"))
     {
         log.dbg("Using specialized template: Qwen3-Coder\n", .{});
-        return try parsers.qwen3_coder.init(a, tmpl, params);
+        return parsers.qwen3_coder.init;
     }
 
     return null;
+}
+
+/// Ports `common_chat_try_specialized_template` (chat.cpp:1277
+/// @620d2225c): the template's dedicated handler, run, when it has one.
+///
+/// Return: null when it has none.
+pub fn trySpecializedTemplate(a: Allocator, tmpl: *const Template, params: *const GenerationParams) Error!?ChatParams {
+    const init_fn = tmpl.params_init orelse return null;
+    return try init_fn(a, tmpl, params);
 }
 
 /// `std::map<std::string, std::string>`'s iteration: by key, bytewise; a
@@ -711,7 +756,7 @@ fn sortedKwargs(a: Allocator, kwargs: []const KwArg) Error![]KwArg {
     return sorted;
 }
 
-/// Ports `common_chat_templates_apply_jinja` (chat.cpp:1231 @d81235049).
+/// Ports `common_chat_templates_apply_jinja` (chat.cpp:1286 @620d2225c).
 fn applyJinja(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesInputs) Error!ChatParams {
     var params: GenerationParams = .{};
     params.tools = try msg_mod.toolsToJsonOaicompat(a, inputs.tools);
@@ -806,17 +851,19 @@ fn applyJinja(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesInp
         data.prompt = try template.directApplyImpl(a, tmpl, &params_copy, null, null, null);
         data.generation_prompt = try template.generationPromptImpl(a, tmpl, &params, null, null, null);
         data.format = .peg_native;
-        var arena = chat_peg.buildChatPegParser(a, data.generation_prompt, pureContentParser) catch |e| return util.fromPeg(e);
-        defer arena.deinit();
-        data.parser = try parsers.save(a, &arena);
+        data.parser = chat_peg.buildChatPegParser(a, data.generation_prompt, pureContentParser) catch |e| return util.fromPeg(e);
         return data;
     }
 
-    if (try trySpecializedTemplate(a, tmpl, src, &params)) |result| {
+    if (try trySpecializedTemplate(a, tmpl, &params)) |result| {
         return result;
     }
 
-    return autoParse(a, tmpl, &params) catch |e| {
+    const ap = tmpl.analysis orelse {
+        return throw(error.InvalidArgument, "Unable to generate parser for this template. Automatic parser generation failed: {s}", .{tmpl.analysis_error});
+    };
+
+    return autoParse(a, tmpl, &params, ap) catch |e| {
         if (e == error.OutOfMemory) return error.OutOfMemory;
         return exception.rethrow(error.InvalidArgument, e, "Unable to generate parser for this template. Automatic parser generation failed: ", "");
     };
@@ -829,11 +876,9 @@ fn pureContentParser(generation_prompt: []const u8, p: *chat_peg.ChatBuilder) ch
 
 /// The `try` block of `common_chat_templates_apply_jinja`: the differential
 /// auto-parser, the message delimiters it found and the thinking tags.
-fn autoParse(a: Allocator, tmpl: *const Template, params: *const GenerationParams) Error!ChatParams {
+fn autoParse(a: Allocator, tmpl: *const Template, params: *const GenerationParams, ap: *const autoparser.Autoparser) Error!ChatParams {
     log.dbg("{s}: using differential autoparser\n", .{"common_chat_templates_apply_jinja"});
-    var ap: autoparser.Autoparser = .{};
-    try autoparser.analyzeTemplate(&ap, a, tmpl);
-    var auto_params = try autoparser.generateParserAnalyzed(a, tmpl, params, &ap);
+    var auto_params = try autoparser.generateParserAnalyzed(a, tmpl, params, ap);
 
     var delimiters: msg_mod.MsgDelimiters = .{};
     if (ap.assistant_start.len != 0) {
@@ -854,9 +899,7 @@ fn autoParse(a: Allocator, tmpl: *const Template, params: *const GenerationParam
             try auto_params.thinking_end_tags.append(a, end_tag);
         }
     }
-    var arena = peg.Arena.init(a) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-    peg.serialize.load(&arena, auto_params.parser) catch |e| return util.fromPeg(e);
+    const arena = &auto_params.parser.?;
     if (log.debugEnabled()) {
         const dumped = arena.dump(a, arena.root) catch |e| return util.fromPeg(e);
         // `%s` of each `c_str()`: up to its first NUL
@@ -865,7 +908,7 @@ fn autoParse(a: Allocator, tmpl: *const Template, params: *const GenerationParam
     return auto_params;
 }
 
-/// Ports `common_chat_templates_apply_legacy` (chat.cpp:1375 @d81235049):
+/// Ports `common_chat_templates_apply_legacy` (chat.cpp:1431 @620d2225c):
 /// the conversation through libllama's built-in template families, and the
 /// grammar from the JSON schema.
 fn applyLegacy(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesInputs) Error!ChatParams {
@@ -922,7 +965,7 @@ fn applyLegacy(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesIn
     }
 
     var params: ChatParams = .{};
-    params.prompt = buf[0..@intCast(res)];
+    params.prompt = try Prompt.fromText(a, buf[0..@intCast(res)]);
     if (inputs.json_schema.len != 0) {
         const schema = json.parse(a, inputs.json_schema) catch |e| return util.fromJson(e);
         params.grammar = json.schema_to_grammar.jsonSchemaToGrammar(a, &schema, false) catch |e| return util.fromSchema(e);
@@ -932,7 +975,7 @@ fn applyLegacy(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesIn
     return params;
 }
 
-/// Ports `common_chat_templates_apply` (chat.cpp:1440 @d81235049): the
+/// Ports `common_chat_templates_apply` (chat.cpp:1496 @620d2225c): the
 /// conversation rendered, and how to read the reply.
 ///
 /// Parameters:

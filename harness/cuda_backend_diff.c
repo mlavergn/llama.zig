@@ -238,8 +238,8 @@ static void record_alloc_dep(void * user_data, struct ggml_tensor * tensor, stru
 
 enum gating { GATE_SOFTMAX, GATE_SIGMOID, GATE_SQRT_SOFTPLUS, GATE_SOFTMAX_WEIGHT };
 
-/* test-backend-ops' `test_topk_moe` graph (test-backend-ops.cpp:7024
- * @d81235049), plus, unless `at_end`, a consumer of the ids and one of the
+/* test-backend-ops' `test_topk_moe` graph (test-backend-ops.cpp:7324
+ * @620d2225c), plus, unless `at_end`, a consumer of the ids and one of the
  * weights after the chain, as a MoE layer has. Its context memory is
  * zeroed, so `nodes[n_nodes]` -- which graph_optimize names as the
  * dependency target of a chain that ends the graph -- reads as null. */
@@ -284,8 +284,8 @@ static struct ggml_cgraph * build_topk_moe(struct ggml_context * ctx, int64_t n_
     return gf;
 }
 
-/* test-backend-ops' `test_moe_reduce` graph (test-backend-ops.cpp:7123
- * @d81235049) in its test-mode node order, plus a consumer. */
+/* test-backend-ops' `test_moe_reduce` graph (test-backend-ops.cpp:7423
+ * @620d2225c) in its test-mode node order, plus a consumer. */
 static struct ggml_cgraph * build_moe_reduce(struct ggml_context * ctx, int64_t n_embd, int64_t n_used, int64_t n_tokens, bool expert_scale) {
     struct ggml_cgraph * gf = ggml_new_graph(ctx);
     struct ggml_tensor * experts = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_embd, n_used, n_tokens);
@@ -315,8 +315,8 @@ static struct ggml_cgraph * build_moe_reduce(struct ggml_context * ctx, int64_t 
     return gf;
 }
 
-/* test-backend-ops' `test_mul_mat_id_shared` graph (test-backend-ops.cpp:5437
- * @d81235049) -- routed experts' gate/up/GLU over a reshaped input and a
+/* test-backend-ops' `test_mul_mat_id_shared` graph (test-backend-ops.cpp:5682
+ * @620d2225c) -- routed experts' gate/up/GLU over a reshaped input and a
  * shared expert's over the same input -- with `n_between` unrelated nodes
  * expanded between the two, and with `blocker` another routed gate/up pair
  * among them instead. v0.6.0's graph_optimize moves the shared expert's
@@ -417,7 +417,7 @@ static void ask_graph_optimize(ggml_backend_dev_t dev) {
                 const bool bias = v & 1, norm = v & 2, scale = v & 4, at_end = v & 8;
                 /* A norm chain that ends the graph, with no SCALE after it:
                  * ggml_cuda_topk_moe_fusion reads nodes[n_nodes]->op there
-                 * (ggml-cuda.cu:3022 @d81235049), a NULL in this zeroed
+                 * (ggml-cuda.cu:3173 @620d2225c), a NULL in this zeroed
                  * graph, and upstream segfaults -- the port, ported as
                  * written, alike (measured on the GB10, each side alone). */
                 if (norm && !scale && at_end) continue;

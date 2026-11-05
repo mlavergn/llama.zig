@@ -1,10 +1,11 @@
-// Not a port. Writes fixtures for the four architectures upstream's
-// `test-llama-archs.cpp` cannot: graniteswitch, eagle3, dflash and clef --
-// and variants of architectures it can: Qwen3.5 with fused QKV, and a
-// ModernBERT decision model. Clef is built as the qwen35 it extends and
-// written under its own name (`rename_prefix`), its decision head added as
-// extra tensors, because its `load_arch_tensors` sizes the head from
-// tensors it finds in the file.
+// Not a port. Writes fixtures for the five architectures upstream's
+// `test-llama-archs.cpp` cannot: graniteswitch, eagle3, dflash, clef and
+// vllm-decision2 -- and variants of architectures it can: Qwen3.5 with fused
+// QKV, a ModernBERT and an LFM2 decision model. Clef is built as the qwen35 it
+// extends and written under its own name (`rename_prefix`), its decision
+// head added as extra tensors, because its `load_arch_tensors` sizes the
+// head from tensors it finds in the file; vllm-decision2 likewise over
+// qwen3.
 //
 // `llama.cpp/tests/test-llama-archs.cpp` is included unmodified, as
 // `harness/arch_fixtures_extra.cpp` does, so `get_gguf_ctx` and
@@ -24,6 +25,7 @@
 #undef main
 
 #include "llama-model.h"
+#include "llama-ext.h"
 
 #include <cstdlib>
 #include <functional>
@@ -133,10 +135,63 @@ static bool decode_check(const std::string & path, bool embeddings = false) {
     return ok;
 }
 
+// LiliCorr's lattice (models/dflash.cpp:641 @620d2225c) builds only for a
+// token batch of exactly one block per sequence that carries state
+// embeddings, as common/speculative.cpp drafts: so a LiliCorr fixture is
+// also run that way once, and must produce the lattice.
+static bool lilicorr_check(const std::string & path, int block_size, int top_k) {
+    llama_model_params mp = llama_model_default_params();
+    mp.progress_callback = silent_model_load_progress;
+    ggml_backend_dev_t devs[2] = { ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU), nullptr };
+    mp.devices = devs;
+    llama_model * model = llama_model_load_from_file(path.c_str(), mp);
+    if (!model) {
+        printf("failed %s: the C++ cannot load it\n", path.c_str());
+        return false;
+    }
+    llama_context_params cp = llama_context_default_params();
+    cp.n_ctx = 0;
+    cp.n_ubatch = 64;
+    llama_context * ctx = llama_init_from_model(model, cp);
+    if (!ctx) {
+        printf("failed %s: the C++ cannot create a context\n", path.c_str());
+        llama_model_free(model);
+        return false;
+    }
+    llama_set_embeddings_nextn(ctx, true, false);
+    const int n_embd = llama_model_n_embd(model);
+    const int n_vocab = llama_vocab_n_tokens(llama_model_get_vocab(model));
+    std::vector<float> state((size_t) block_size * n_embd);
+    for (size_t i = 0; i < state.size(); i++) {
+        state[i] = (float) ((i * 2654435761u) % 2003) / 1001.0f - 1.0f;
+    }
+    llama_batch_ext * eb = llama_batch_ext_init(ctx);
+    bool ok = eb != nullptr;
+    for (int k = 0; ok && k < block_size; k++) {
+        const int32_t idx = llama_batch_ext_add_token(eb, 0, (k * 37 + 11) % n_vocab);
+        const llama_pos pos[4] = { k, 0, 0, 0 };
+        ok = idx >= 0 && llama_batch_ext_set_pos(eb, idx, pos) &&
+            llama_batch_ext_set_embd_state(eb, idx, { state.data() + (size_t) k * n_embd, 1, (size_t) n_embd });
+    }
+    const int ret = ok ? llama_process(ctx, LLAMA_PROCESS_TYPE_DECODE, eb) : -100;
+    const float * lattice = ret == 0 ? llama_get_embeddings_nextn(ctx) : nullptr;
+    if (lattice) {
+        // row 1: the first drafted position's best candidate, and its score from the anchor
+        printf("checked %s: lilicorr lattice ok, row 1 candidate %g score %g\n", path.c_str(), lattice[n_embd], lattice[n_embd + top_k]);
+    } else {
+        printf("failed %s: lilicorr process returned %d\n", path.c_str(), ret);
+    }
+    if (eb) llama_batch_ext_free(eb);
+    llama_free(ctx);
+    llama_model_free(model);
+    return lattice != nullptr;
+}
+
 static bool write_fixture(llm_arch arch, const std::string & name, size_t seed, const std::string & dir,
         const std::function<void(gguf_context *)> & edit_meta,
         const std::function<void(Extra &, llama_model *)> & add_tensors, bool moe = false,
-        const std::function<void(gguf_context *)> & edit_out = nullptr, bool embeddings = false) {
+        const std::function<void(gguf_context *)> & edit_out = nullptr, bool embeddings = false,
+        bool check = true) {
     gguf_context_ptr meta = get_gguf_ctx(arch, moe);
     edit_meta(meta.get());
 
@@ -180,6 +235,9 @@ static bool write_fixture(llm_arch arch, const std::string & name, size_t seed, 
         return false;
     }
     printf("wrote %s\n", path.c_str());
+    if (!check) {
+        return true;
+    }
     return decode_check(path, embeddings);
 }
 
@@ -344,9 +402,11 @@ int main(int argc, char ** argv) {
     // DFlash2: the dynamic convolution around every attention and FFN block,
     // the target's logit transforms, and the selector lattice -- kernel 3
     // over groups of 64 channels, a rank-16 selector over the top 4
-    // candidates, blocks of 4. The conv and selector tensors are extra
-    // tensors: load_arch_tensors creates them only when the file already has
-    // `selector_hidden.weight`.
+    // candidates, blocks of 4. The selector tensors are extra tensors:
+    // load_arch_tensors creates them only when the file already has
+    // `selector_hidden.weight`. Since v0.7.0 it creates the conv tensors
+    // from the conv keys alone (models/dflash.cpp:153, 324 @620d2225c), so
+    // the user-data path builds those.
     run([&] {
         return write_fixture(df, "dflash2", seed, dir, [&](gguf_context * m) {
             df_meta(m);
@@ -358,28 +418,64 @@ int main(int argc, char ** argv) {
             gguf_set_val_u32(m, kv(df, "selector_top_k").c_str(), 4);
             gguf_set_val_f32(m, kv(df, "logit_scale").c_str(), 0.5f);
             gguf_set_val_f32(m, kv(df, "final_logit_softcapping").c_str(), 30.0f);
-        }, [&](Extra & x, llama_model * model) {
+        }, [&](Extra & x, llama_model *) {
             x.f32("selector_predecessor.weight", {16, 128}, seed);
             x.f32("selector_successor.weight",   {16, 128}, seed);
             x.f32("selector_hidden.weight",      {256, 16}, seed);
-            const int n_layer = llama_model_n_layer(model);
-            for (int il = 0; il < n_layer; il++) {
-                const std::string blk = "blk." + std::to_string(il) + ".";
-                x.f32((blk + "attn_conv_base").c_str(),        {256, 3, 2}, seed);
-                x.f32((blk + "attn_conv_proj.weight").c_str(), {256, 24},   seed);
-                x.f32((blk + "ffn_conv_base").c_str(),         {256, 3, 2}, seed);
-                x.f32((blk + "ffn_conv_proj.weight").c_str(),  {256, 24},   seed);
-            }
         });
     });
-    // A Gemma-style DFlash backbone, new at v0.5.0 (models/dflash.cpp:7, 108,
-    // 571 @d81235049): an embedding and an attention scale, a GELU FFN, K
-    // and V sharing one projection (no attn_v, V RMS-normed bare), and no
-    // output head -- the token embedding stands in for it. The recipe
-    // already writes the post norms, the per-layer output scale and
+    // DFlash2's dynamic convolution without the selector: since v0.7.0 the
+    // conv keys alone make load_arch_tensors create the conv tensors
+    // (models/dflash.cpp:153, 324 @620d2225c), where before they needed
+    // `selector_hidden.weight` in the file.
+    run([&] {
+        return write_fixture(df, "dflash2-conv", seed, dir, [&](gguf_context * m) {
+            df_meta(m);
+            gguf_remove_key(m, kv(df, "attention.sliding_window").c_str());
+            gguf_set_val_u32(m, kv(df, "block_size").c_str(), 4);
+            gguf_set_val_u32(m, kv(df, "conv_kernel_size").c_str(), 3);
+            gguf_set_val_u32(m, kv(df, "conv_group_size").c_str(), 64);
+        }, none_tensors);
+    });
+    // LiliCorr, new at v0.7.0 (models/dflash.cpp:7, 121, 641 @620d2225c): a
+    // lattice scorer over each block's top-4 candidates, blocks of 4. Its
+    // keys are all it needs: load_arch_tensors creates every lilicorr.* and
+    // blk.{n_layer_all + i}.* tensor from them, so the user-data path builds
+    // the head. `dflash-lilicorr` has a 64-wide head over two heads and one
+    // layer, so the token embeddings go through token_proj; `-wide` is as
+    // wide as the decoder (no token_proj), with two layers over four heads,
+    // the top 3 of blocks of 5. Each is also run once as a LiliCorr draft
+    // block (lilicorr_check), which the plain decode check never reaches.
+    auto lilicorr = [&](const char * name, uint32_t hidden, uint32_t heads, uint32_t layers, uint32_t top_k, uint32_t block) {
+        const bool ok = write_fixture(df, name, seed, dir, [&](gguf_context * m) {
+            df_meta(m);
+            gguf_remove_key(m, kv(df, "attention.sliding_window").c_str());
+            gguf_set_val_u32(m, kv(df, "block_size").c_str(), block);
+            gguf_set_val_u32(m, "lilicorr.hidden_size",     hidden);
+            gguf_set_val_u32(m, "lilicorr.candidate_topk",  top_k);
+            gguf_set_val_u32(m, "lilicorr.num_heads",       heads);
+            gguf_set_val_u32(m, "lilicorr.num_layers",      layers);
+            gguf_set_val_f32(m, "lilicorr.vector_eps",      1.0e-6f);
+            gguf_set_val_f32(m, "lilicorr.logit_scale",     8.0f);
+            gguf_set_val_u32(m, "lilicorr.factor_dim",      32);
+            gguf_set_val_u32(m, "lilicorr.mlp_hidden_size", 96);
+        }, none_tensors);
+        return ok && lilicorr_check(dir + "/" + name + ".gguf", (int) block, (int) top_k);
+    };
+    run([&] { return lilicorr("dflash-lilicorr", 64, 2, 1, 4, 4); });
+    run([&] { return lilicorr("dflash-lilicorr-wide", 256, 4, 2, 3, 5); });
+    // A Gemma-style DFlash backbone, new at v0.5.0 (models/dflash.cpp:7, 121,
+    // 807 @620d2225c): an embedding and an attention scale, a GELU FFN, K
+    // and V sharing one projection (no attn_v, V RMS-normed bare). The
+    // recipe already writes the post norms, the per-layer output scale and
     // rope_freqs, so every DFlash fixture has those. Since v0.6.0 it also
     // carries an attention value scale, which scales the attention output;
-    // the other DFlash fixtures have none, so both arms run.
+    // the other DFlash fixtures have none, so both arms run. Until v0.7.0 it
+    // had no output head and the token embedding stood in for it; #30111
+    // removed that fallback (a draft without a head shares the target's
+    // through ctx_other, and Gemma DSpark conversions now require
+    // lm_head.weight), so it keeps the recipe's head, and `dflash-nohead`
+    // holds the fallback's removal.
     run([&] {
         return write_fixture(df, "dflash-gemma", seed, dir, [&](gguf_context * m) {
             df_meta(m);
@@ -390,18 +486,29 @@ int main(int argc, char ** argv) {
             gguf_set_val_str(m, kv(df, "hidden_activation").c_str(), "gelu_pytorch_tanh");
         }, [&](Extra & x, llama_model * model) {
             for (const auto & [tname, t] : llama_internal_get_tensor_map(model)) {
-                const bool attn_v = tname.find(".attn_v.") != std::string::npos;
-                const bool output = tname.rfind("output.", 0) == 0;
-                if (attn_v || output) {
+                if (tname.find(".attn_v.") != std::string::npos) {
                     x.replaces.insert(tname);
                 }
             }
         });
     });
+    // A DFlash with token embeddings and no output head (#30111,
+    // models/dflash.cpp:246 @620d2225c): its decoder takes the target's
+    // head through ctx_other and asserts on one (dflash.cpp:1056) without
+    // it. Until v0.7.0 its own token embedding stood in. A token decode
+    // without a target aborts in the C++, so it gets no decode check.
+    run([&] {
+        return write_fixture(df, "dflash-nohead", seed, dir, [&](gguf_context * m) {
+            df_meta(m);
+            gguf_remove_key(m, kv(df, "attention.sliding_window").c_str());
+        }, [&](Extra & x, llama_model *) {
+            x.replaces.insert("output.weight");
+        }, false, nullptr, false, false);
+    });
     // Qwen3.5 with its full-attention layers' Q (and Q gate), K and V fused
     // into one attn_qkv, which create_tensor_qkv takes when the file has it.
     // v0.5.0 splits that tensor across devices by its own segments
-    // (llama-model.cpp:610, 700 @d81235049): the recipe writes the three
+    // (llama-model.cpp:623, 713 @620d2225c): the recipe writes the three
     // separately, so without this no fixture reaches them.
     run([&] {
         return write_fixture(LLM_ARCH_QWEN35, "qwen35-fusedqkv", seed, dir, [&](gguf_context *) {
@@ -484,7 +591,7 @@ int main(int argc, char ** argv) {
     run([&] { return dspark("dflash-dspark", false); });
     run([&] { return dspark("dflash-dspark-noconf", false, false); });
 
-    // clef, new at v0.6.0 (models/clef.cpp:7, 25 @d81235049): a Qwen3.5
+    // clef, new at v0.6.0 (models/clef.cpp:7, 25 @620d2225c): a Qwen3.5
     // backbone with a joint decision head. Upstream's recipe skips it ("TODO
     // decision head tensors") and the user-data path cannot build it, since
     // load_arch_tensors sizes the head from tensors it finds in the file. So
@@ -548,8 +655,35 @@ int main(int argc, char ** argv) {
         }, true);
     });
 
+    // vllm-decision2, new at v0.7.0 (models/vllm-decision2.cpp:7, 17
+    // @620d2225c): a Qwen3 backbone with a decision head. Upstream's recipe
+    // skips it ("TODO decision head tensors"), and its load_arch_tensors
+    // sizes the head from `decision.key` in the file, so it is built as
+    // qwen3 -- whose recipe keys, layer_norm_epsilon among them, it reads
+    // unchanged -- and written as vllm-decision2, the head's tensors added
+    // at a width of 64.
+    run([&] {
+        const int64_t n_embd = 256, n_embd_h = 64;
+        return write_fixture(LLM_ARCH_QWEN3, "vllm-decision2-dense", seed, dir, [&](gguf_context *) {
+        }, [&](Extra & x, llama_model *) {
+            for (const char * n : {"decision.option_norm", "decision.query_norm"}) {
+                x.f32((std::string(n) + ".weight").c_str(), {n_embd}, seed);
+                x.f32((std::string(n) + ".bias").c_str(),   {n_embd}, seed);
+            }
+            x.f32("decision.key.weight",        {n_embd, n_embd_h}, seed);
+            x.f32("decision.query.weight",      {n_embd, n_embd_h}, seed);
+            x.f32("decision.option_mlp.weight", {n_embd, n_embd_h}, seed);
+            x.f32("decision.option_mlp.bias",   {n_embd_h},         seed);
+            x.f32("decision.query_mlp.weight",  {n_embd, n_embd_h}, seed);
+            x.f32("decision.scorer_out.weight", {n_embd_h, 1},      seed);
+        }, false, [&](gguf_context * g) {
+            rename_prefix(g, "qwen3.", "vllm-decision2.");
+            gguf_set_val_str(g, "general.architecture", "vllm-decision2");
+        }, true);
+    });
+
     // A ModernBERT decision model, new at v0.6.0 (models/modern-bert.cpp:6,
-    // 55, 242 @d81235049): the recipe's second block becomes the head's --
+    // 61, 248 @620d2225c): the recipe's second block becomes the head's --
     // LayerNorms, QKV, output and FFN all with biases, the FFN not gated --
     // over three token types, scored through the classifier. The user-data
     // path builds all of it from the keys.
@@ -564,6 +698,37 @@ int main(int argc, char ** argv) {
             gguf_set_val_u32(m, "modern-bert.decision.block_count", 1);
             gguf_set_val_u32(m, "tokenizer.ggml.token_type_count", 3);
         }, none_tensors, false, nullptr, true);
+    });
+
+    // An LFM2 decision model (LiquidAI's d1-omni), new at v0.7.0
+    // (models/lfm2.cpp:29, 53, 413 @620d2225c): four blocks, the first two
+    // -- an attention and a short convolution, as the recipe has them --
+    // the non-causal trunk, the last two the head: LayerNorms, fused QKV,
+    // output and an ungated FFN narrower than the trunk's, all with biases,
+    // over three token types, scored through the classifier. No sliding
+    // window: the trunk's no-cache attention input has no SWA mask. The
+    // user-data path builds all of it from the keys.
+    run([&] {
+        const llm_arch lf = LLM_ARCH_LFM2;
+        return write_fixture(lf, "lfm2-decision", seed, dir, [&](gguf_context * m) {
+            gguf_set_val_u32(m, kv(lf, "block_count").c_str(), 4);
+            gguf_set_val_u32(m, kv(lf, "decision.block_count").c_str(), 2);
+            gguf_set_val_bool(m, kv(lf, "attention.causal").c_str(), false);
+            gguf_remove_key(m, kv(lf, "attention.sliding_window").c_str());
+            const uint32_t heads[4] = {2, 0, 2, 2};
+            gguf_set_arr_data(m, kv(lf, "attention.head_count").c_str(), GGUF_TYPE_UINT32, heads, 4);
+            gguf_set_arr_data(m, kv(lf, "attention.head_count_kv").c_str(), GGUF_TYPE_UINT32, heads, 4);
+            const uint32_t ff[4] = {384, 384, 192, 192};
+            gguf_set_arr_data(m, kv(lf, "feed_forward_length").c_str(), GGUF_TYPE_UINT32, ff, 4);
+            gguf_set_val_u32(m, "tokenizer.ggml.token_type_count", 3);
+        }, [&](Extra & x, llama_model * model) {
+            // the user-data path also builds ColBERT's optional dense_2
+            // projection, n_embd_out (3 scores here) wide, which no decision
+            // model has: its graph would project the scores again
+            for (const auto & [tname, t] : llama_internal_get_tensor_map(model)) {
+                if (tname.rfind("dense_2.", 0) == 0) x.replaces.insert(tname);
+            }
+        }, false, nullptr, true);
     });
 
     llama_backend_free();

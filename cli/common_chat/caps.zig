@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/jinja/caps.h` and `llama.cpp/common/jinja/caps.cpp`
-//! (llama.cpp v0.6.0, `d81235049`): `jinja`'s `caps`, `caps_get` and its
+//! (llama.cpp v0.7.0, `620d2225c`): `jinja`'s `caps`, `caps_get` and its
 //! `caps_try_execute`. `caps_apply_preserve_reasoning` and
 //! `caps_apply_reasoning_effort` live in `template.zig`, beside the
 //! rendering they set up. Each declaration names what it ports and the line
@@ -33,8 +33,8 @@ const Error = exception.Error;
 const Template = template.Template;
 const Render = template.Render;
 
-/// Ports `jinja`'s `caps` (caps.h:10 @d81235049).
-/// `g_jinja_debug` (runtime.h:15 @d81235049): the engine's debug switch,
+/// Ports `jinja`'s `caps` (caps.h:10 @620d2225c).
+/// `g_jinja_debug` (runtime.h:15 @620d2225c): the engine's debug switch,
 /// off unless a debugger sets it.
 pub var jinja_debug: bool = false;
 
@@ -52,7 +52,7 @@ pub const Caps = struct {
     /// One entry of `to_map`.
     pub const Entry = struct { name: []const u8, value: bool };
 
-    /// Ports `to_map` (caps.cpp:87 @d81235049), in the `std`'s `map`'s order:
+    /// Ports `to_map` (caps.cpp:106 @620d2225c), in the `std`'s `map`'s order:
     /// sorted by name.
     pub fn toMap(self: Caps) [9]Entry {
         return .{
@@ -68,7 +68,7 @@ pub const Caps = struct {
         };
     }
 
-    /// Ports `to_string` (caps.cpp:101 @d81235049).
+    /// Ports `to_string` (caps.cpp:120 @620d2225c).
     ///
     /// Return: owned by `a`.
     pub fn toString(self: Caps, a: Allocator) Error![]u8 {
@@ -111,48 +111,84 @@ const Probe = struct {
 /// What a probe sets on the context after the JSON, as `ctx_fn` does.
 const CtxFn = enum { none, preserve_reasoning, reasoning_effort };
 
-/// Ports `caps_try_execute` (caps.cpp:35 @d81235049): `messages` and
+/// Ports `caps_try_execute` (caps.cpp:35 @620d2225c): `messages` and
 /// `tools` bound with empty BOS and EOS and a generation prompt, the
 /// context adjusted, the template run with statistics on. A render that
-/// fails leaves an empty result, as upstream catches and ignores it.
+/// fails leaves an empty result, as upstream catches and ignores it -- but
+/// first it is retried once with an empty `reasoning_content` on every
+/// assistant turn that lacks one, for templates that require a thinking
+/// field on each (K2 Horizon's). `p` holds the last attempt.
 fn tryExecute(p: *Probe, gpa: Allocator, tmpl: *const Template, messages_json: []const u8, tools_json: ?[]const u8, ctx_fn: CtxFn) Error!?jinja.Value {
-    p.r.init(gpa, true);
-    p.stats = jinja.stats.Stats.init(gpa);
-    const a = p.r.alloc();
-    var vars = Value.emptyObject();
-    try vars.set(a, "messages", try json.parse(a, messages_json));
-    try vars.set(a, "tools", if (tools_json) |t| try json.parse(a, t) else Value.emptyArray());
-    try vars.set(a, "bos_token", try Value.from(a, ""));
-    try vars.set(a, "eos_token", try Value.from(a, ""));
-    try vars.set(a, "add_generation_prompt", try Value.from(a, true));
-    try p.r.bindJson(&vars, true);
+    var attempt: usize = 0;
+    while (true) : (attempt += 1) {
+        p.* = .{ .r = undefined, .stats = jinja.stats.Stats.init(gpa) };
+        p.r.init(gpa, true);
+        const a = p.r.alloc();
+        var msgs = try json.parse(a, messages_json);
+        if (attempt == 1) _ = try addEmptyReasoning(a, &msgs);
+        // whether a failed first attempt has anything to retry with
+        const retryable = attempt == 0 and try addEmptyReasoning(null, &msgs);
 
-    var effort: ?jinja.Value = null;
-    switch (ctx_fn) {
-        .none => {},
-        .preserve_reasoning => {
-            try p.r.set("enable_thinking", .{ .boolean = true });
-            try template.capsApplyPreserveReasoning(&p.r, true);
-        },
-        .reasoning_effort => {
-            try p.r.set("enable_thinking", .{ .boolean = true });
-            effort = try template.capsApplyReasoningEffort(&p.r, "low");
-        },
-    }
-    p.messages = p.r.vars.get("messages").?;
-    p.tools = p.r.vars.get("tools").?;
+        var vars = Value.emptyObject();
+        try vars.set(a, "messages", msgs);
+        try vars.set(a, "tools", if (tools_json) |t| try json.parse(a, t) else Value.emptyArray());
+        try vars.set(a, "bos_token", try Value.from(a, ""));
+        try vars.set(a, "eos_token", try Value.from(a, ""));
+        try vars.set(a, "add_generation_prompt", try Value.from(a, true));
+        try p.r.bindJson(&vars, true);
 
-    jinja.stats.active = &p.stats;
-    defer jinja.stats.active = null;
-    if (p.r.run(tmpl, a)) |text| {
-        p.result = text;
-        p.success = true;
-    } else |e| {
-        if (e == error.OutOfMemory) return error.OutOfMemory;
-        p.result = "";
-        p.success = false;
+        var effort: ?jinja.Value = null;
+        switch (ctx_fn) {
+            .none => {},
+            .preserve_reasoning => {
+                try p.r.set("enable_thinking", .{ .boolean = true });
+                try template.capsApplyPreserveReasoning(&p.r, true);
+            },
+            .reasoning_effort => {
+                try p.r.set("enable_thinking", .{ .boolean = true });
+                effort = try template.capsApplyReasoningEffort(&p.r, "low");
+            },
+        }
+        p.messages = p.r.vars.get("messages").?;
+        p.tools = p.r.vars.get("tools").?;
+
+        jinja.stats.active = &p.stats;
+        defer jinja.stats.active = null;
+        if (p.r.run(tmpl, a)) |text| {
+            p.result = text;
+            p.success = true;
+        } else |e| {
+            if (e == error.OutOfMemory) return error.OutOfMemory;
+            p.result = "";
+            p.success = false;
+        }
+
+        // some templates require a thinking field on every assistant turn (e.g. K2 Horizon):
+        // retry once with an empty reasoning_content on the assistant turns that lack one
+        if (!p.success and retryable) {
+            p.deinit();
+            continue;
+        }
+        return effort;
     }
-    return effort;
+}
+
+/// The retry's edit inside `caps_try_execute` (caps.cpp:35 @620d2225c):
+/// `reasoning_content: ""` on every assistant message that has none.
+/// With `a` null it only reports whether there is one to add.
+///
+/// Return: whether a message lacked it.
+fn addEmptyReasoning(a: ?Allocator, msgs: *Value) Error!bool {
+    var added = false;
+    var it = msgs.items();
+    while (it.next()) |item| {
+        const msg = item.value;
+        if (msg.isObject() and std.mem.eql(u8, try msg.value("role", []const u8, ""), "assistant") and !msg.contains("reasoning_content")) {
+            if (a) |alloc| try msg.set(alloc, "reasoning_content", try Value.from(alloc, ""));
+            added = true;
+        }
+    }
+    return added;
 }
 
 /// `v->at(i)` on a list, null when it is not one or too short.
@@ -186,7 +222,7 @@ fn toolCallMessages(comptime args: []const u8, comptime second_call: bool) []con
         "{\"role\":\"user\",\"content\":\"User message\"}]";
 }
 
-/// Ports `caps_get` (caps.cpp:111 @d81235049): the template rendered over
+/// Ports `caps_get` (caps.cpp:130 @620d2225c): the template rendered over
 /// the probes, each capability read off what the render touched.
 pub fn capsGet(tmpl: *const Template) Error!Caps {
     const gpa = tmpl.gpa;
@@ -303,7 +339,7 @@ pub fn capsGet(tmpl: *const Template) Error!Caps {
         result.supports_reasoning_effort = p.used(effort);
     }
 
-    // `JJ_DEBUG` (runtime.h:13 @d81235049): printed only under the engine's own debug switch
+    // `JJ_DEBUG` (runtime.h:13 @620d2225c): printed only under the engine's own debug switch
     // (`g_jinja_debug`), which nothing sets -- never through `common_log`
     if (jinja_debug) {
         var arena_state = std.heap.ArenaAllocator.init(gpa);

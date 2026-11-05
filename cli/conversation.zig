@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! **Mostly not a port.** Upstream's `llama-cli` (v0.6.0, `d81235049`) is a
+//! **Mostly not a port.** Upstream's `llama-cli` (v0.7.0, `620d2225c`) is a
 //! client of a `llama-server` it runs in-process: it posts the conversation
 //! to `/v1/chat/completions` and prints the `reasoning_content` and `content`
 //! deltas of the stream (`llama.cpp/tools/cli/cli-context.cpp`). This file
@@ -12,19 +12,20 @@
 //!
 //! - **the request**: what upstream's server makes of a body holding only
 //!   `messages` -- `Chat.init` and `Chat.inputs`, after
-//!   `oaicompat_chat_params_parse` (tools/server/server-common.cpp:1265 @d81235049)
-//!   and the chat options `load_model` (tools/server/server-context.cpp:1107 @d81235049)
-//!   sets from the command line;
-//! - **the stream**: every piece of reply parsed partially and diffed
-//!   against the last parse, then parsed whole at the end -- `Reply`, after
-//!   `update_chat_msg` (tools/server/server-task.cpp:162 @d81235049);
+//!   `oaicompat_chat_params_parse` (tools/server/server-common.cpp:1270 @620d2225c)
+//!   and the chat options `load_model` (tools/server/server-context.cpp:1116 @620d2225c)
+//!   sets from the command line, applied through a `common_chat_session`;
+//! - **the stream**: every piece of reply fed to the session, which parses it
+//!   partially, and diffed against the last message, then parsed whole at
+//!   the end -- `Reply`, after `update_chat_msg`
+//!   (tools/server/server-task.cpp:159 @620d2225c);
 //! - **the display**: `ui::assistant_turn`, whose port is `Display`.
 //!
 //! One deliberate difference: upstream's server tokenizes the rendered
 //! prompt whole with `parse_special`, so a message spelling a control token
-//! becomes one. This tokenizes every run the template marked as message
-//! text with `parse_special` off (SPEC.md 5.2), using the marks
-//! `template.zig` records under `mark_capture`.
+//! becomes one. This tokenizes every input part of the session's prompt
+//! (`common_chat_prompt`, whose parts carry the marks since v0.7.0) with
+//! `parse_special` off (SPEC.md 5.2).
 
 const std = @import("std");
 const common_chat = @import("common_chat");
@@ -38,7 +39,6 @@ const c = session_mod.c;
 const Allocator = std.mem.Allocator;
 const Msg = common_chat.Msg;
 const templates = common_chat.templates;
-const template = common_chat.template;
 const KwArg = templates.KwArg;
 
 /// Failures of the chat layer, told apart from the session's.
@@ -75,7 +75,7 @@ fn setError(text: []const u8) !void {
 /// Replays the command line's writes to upstream's `default_template_kwargs`
 /// -- a `std::map` from a name to the JSON text of its value -- and adds the
 /// `preserve_reasoning` default added when nothing set it, at the end of
-/// `common_params_parse_ex` (common/arg.cpp:768 @d81235049).
+/// `common_params_parse_ex` (common/arg.cpp:768 @620d2225c).
 ///
 /// Parameters:
 /// - `a`: owns the result; an arena in practice.
@@ -129,11 +129,11 @@ fn find(map: []const KwArg, key: []const u8) ?[]const u8 {
 // -----------------------------------------------------------------------------
 // The display
 
-/// Ports `assistant_turn` (tools/cli/cli-ui.h:187 @d81235049), in namespace
+/// Ports `assistant_turn` (tools/cli/cli-ui.h:187 @620d2225c), in namespace
 /// `ui`, with the part of `console` it drives: reasoning opens with
 /// `[Start thinking]` and closes with `[End thinking]` when the answer
 /// begins, and under `--color` is written grey -- the markers too -- as
-/// `DISPLAY_TYPE_REASONING`'s colour in `set_display` (common/console.cpp:174 @d81235049).
+/// `DISPLAY_TYPE_REASONING`'s colour in `set_display` (common/console.cpp:174 @620d2225c).
 pub const Display = struct {
     out: *std.Io.Writer,
     /// `console`'s `advanced_display`: whether set_display writes anything.
@@ -159,7 +159,7 @@ pub const Display = struct {
         try self.setDisplay(.reset);
     }
 
-    /// Ports `assistant_turn`'s `push` (tools/cli/cli-ui.h:198 @d81235049).
+    /// Ports `assistant_turn`'s `push` (tools/cli/cli-ui.h:198 @620d2225c).
     pub fn push(self: *Display, m: Mode, buffer: []const u8) !void {
         if (m != self.mode) {
             try self.addNewlineIfNeeded();
@@ -191,7 +191,7 @@ pub const Display = struct {
         try self.addNewlineIfNeeded();
     }
 
-    /// Ports `assistant_turn`'s `add_newline_if_needed` (tools/cli/cli-ui.h:226 @d81235049).
+    /// Ports `assistant_turn`'s `add_newline_if_needed` (tools/cli/cli-ui.h:226 @620d2225c).
     fn addNewlineIfNeeded(self: *Display) !void {
         if (!self.trailing_newline) {
             try self.log("\n");
@@ -199,7 +199,7 @@ pub const Display = struct {
         }
     }
 
-    /// Ports `ui`'s `show_error` (tools/cli/cli-ui.h:234 @d81235049) as a reply
+    /// Ports `ui`'s `show_error` (tools/cli/cli-ui.h:234 @620d2225c) as a reply
     /// shows it: `console::error`, in red under `--color`, the colour before
     /// it restored.
     pub fn showError(self: *Display, title: []const u8) !void {
@@ -218,7 +218,7 @@ pub const Display = struct {
         try self.out.writeAll(s[0..end_at]);
     }
 
-    /// Ports `console`'s `set_display` (common/console.cpp:174 @d81235049) for
+    /// Ports `console`'s `set_display` (common/console.cpp:174 @620d2225c) for
     /// the three kinds a reply uses.
     fn setDisplay(self: *Display, kind: Kind) !void {
         if (!self.color or self.current == kind) return;
@@ -235,18 +235,18 @@ pub const Display = struct {
 // -----------------------------------------------------------------------------
 // The reply
 
-/// One reply, read as the server's stream would carry it: each piece joins
-/// the text, the text is parsed as a partial message and the difference from
-/// the last parse is shown; `finish` parses it whole. The reasoning and the
-/// answer shown are what the history keeps, as `generate_completion`
-/// (tools/cli/cli-context.cpp:350 @d81235049) collects them.
+/// One reply, read as the server's stream would carry it: each piece is fed
+/// to the chat session, which parses the reply so far as a partial message,
+/// and the difference from the last message is shown; `finish` parses it
+/// whole. The reasoning and the answer shown are what the history keeps, as
+/// `generate_completion` (tools/cli/cli-context.cpp:350 @620d2225c)
+/// collects them.
 pub const Reply = struct {
     gpa: Allocator,
     display: *Display,
-    params: *const common_chat.parse.ParserParams,
-    /// Every piece sent so far: `task_result_state::generated_text`.
-    text: std.ArrayList(u8) = .empty,
-    /// The last parse: `task_result_state::chat_msg`.
+    /// `task_result_state::chat_session`: owns the reply so far.
+    session: *common_chat.session.Session,
+    /// The last message shown: `task_result_state::chat_msg`.
     msg: Msg = .{},
     /// What the display was given: `generated_content`.
     content: std.ArrayList(u8) = .empty,
@@ -254,8 +254,13 @@ pub const Reply = struct {
     /// Set once a parse has failed and the error has been shown.
     failed: bool = false,
 
+    /// Parameters:
+    /// - `session`: the chat session; must outlive the reply.
+    pub fn init(gpa: Allocator, display: *Display, session: *common_chat.session.Session) !Reply {
+        return .{ .gpa = gpa, .display = display, .session = session, .msg = try session.msg().clone(gpa) };
+    }
+
     pub fn deinit(self: *Reply) void {
-        self.text.deinit(self.gpa);
         self.msg.deinit(self.gpa);
         self.content.deinit(self.gpa);
         self.reasoning.deinit(self.gpa);
@@ -268,30 +273,37 @@ pub const Reply = struct {
 
     fn onText(ctx: *anyopaque, text: []const u8) anyerror!bool {
         const self: *Reply = @ptrCast(@alignCast(ctx));
-        try self.text.appendSlice(self.gpa, text);
-        return self.update(true);
+        return self.update(text, true);
     }
 
     /// The final, whole parse.
-    pub fn finish(self: *Reply) !void {
-        if (self.failed) return;
-        _ = try self.update(false);
+    pub fn finish(self: *Reply) !bool {
+        if (self.failed) return false;
+        return self.update("", false);
     }
 
-    /// Ports `task_result_state`'s `update_chat_msg` (tools/server/server-task.cpp:162 @d81235049)
-    /// and what `generate_completion` does with the diffs: a
-    /// reasoning delta, then a content delta, each shown when not empty; tool
-    /// call deltas reach nobody, as upstream's CLI reads neither. A parse that
-    /// throws ends the stream with its error, as the server's stream does.
+    /// Ports `task_result_state`'s `update_chat_msg`
+    /// (tools/server/server-task.cpp:159 @620d2225c) and what
+    /// `generate_completion` does with the diffs: a reasoning delta, then a
+    /// content delta, each shown when not empty; tool call deltas reach
+    /// nobody, as upstream's CLI reads neither. A parse that throws ends the
+    /// stream with its error, as the server's stream does.
+    ///
+    /// The server feeds each piece with the token that produced it; this
+    /// feeds the text alone. Nothing in the parser reads the tokens yet, so
+    /// the messages are the same.
     ///
     /// Return: false when the parse failed.
-    fn update(self: *Reply, is_partial: bool) !bool {
-        var new_msg = common_chat.parse.parse(self.gpa, self.text.items, is_partial, self.params) catch |e| {
+    fn update(self: *Reply, text: []const u8, is_partial: bool) !bool {
+        var added = try common_chat.input.Input.fromText(self.gpa, text);
+        defer added.deinit();
+        const parsed = (if (is_partial) self.session.feed(&added) else self.session.finish(&added)) catch |e| {
             if (e == error.OutOfMemory) return e;
             return self.reject(e);
         };
+        if (parsed.empty()) return true;
+        var new_msg = try parsed.clone(self.gpa);
         defer new_msg.deinit(self.gpa);
-        if (new_msg.empty()) return true;
         var diffs = common_chat.msg.computeDiffs(self.gpa, &self.msg, &new_msg) catch |e| {
             if (e == error.OutOfMemory) return e;
             return self.reject(e);
@@ -391,7 +403,7 @@ pub const Chat = struct {
         self.history.clearRetainingCapacity();
     }
 
-    /// `add_system_prompt` (tools/cli/cli-context.cpp:278 @d81235049).
+    /// `add_system_prompt` (tools/cli/cli-context.cpp:278 @620d2225c).
     fn addSystem(self: *Chat) !void {
         if (self.system.len != 0) try self.push("system", self.system, "");
     }
@@ -427,8 +439,8 @@ pub const Chat = struct {
         try self.history.append(self.gpa, m);
     }
 
-    /// The request `oaicompat_chat_params_parse` (tools/server/server-common.cpp:1265
-    /// @d81235049) builds for a body of `messages` alone: no tools, no
+    /// The request `oaicompat_chat_params_parse` (tools/server/server-common.cpp:1270
+    /// @620d2225c) builds for a body of `messages` alone: no tools, no
     /// schema, a generation prompt, the server's reasoning format, its
     /// thinking switch -- which an `enable_thinking` kwarg overrides -- and
     /// its kwargs.
@@ -474,53 +486,36 @@ pub const Chat = struct {
         const a = arena_state.allocator();
 
         const in = try self.inputs();
-        var capture: template.MarkCapture = .{ .allocator = a };
-        template.mark_capture = &capture;
-        const applied = templates.apply(a, &self.tmpls, &in);
-        template.mark_capture = null;
-        const params = applied catch |e| return fail(e);
+        // `oaicompat_chat_params_parse`'s session, over the model's vocabulary
+        var chat_session = common_chat.session.Session.init(self.gpa, &self.tmpls, @ptrCast(session.vocab), &in, .{}) catch |e| return fail(e);
+        defer chat_session.deinit();
 
-        if (params.prompt.len == 0 and self.history.items.len != 0) return Error.EmptyRender;
-        const segments = try segmentsFor(a, &capture, params.prompt);
+        const prompt = chat_session.prompt();
+        const prompt_text = try prompt.str(a);
+        if (prompt_text.len == 0 and self.history.items.len != 0) return Error.EmptyRender;
+        const segments = try segmentsFor(a, prompt);
         if (echo) |w| {
-            try w.writeAll(params.prompt);
+            try w.writeAll(prompt_text);
             try w.flush();
         }
 
-        // The server task's token-level `preserved_tokens`
-        // (tools/server/server-schema.cpp:341 @d81235049): a preserved token
-        // counts only when it is one token.
-        var preserved: std.ArrayList(c.llama_token) = .empty;
-        for (params.preserved_tokens.items) |t| {
-            const ids = try session.tokenizeText(t, .{ .add_special = false, .parse_special = true });
-            defer session.allocator.free(ids);
-            if (ids.len == 1) try preserved.append(a, ids[0]);
-        }
-
-        const rbudget = try self.budget(a, session, &params);
+        const rbudget = try self.budget(a, session, &chat_session);
         defer if (rbudget) |rb| c.llama_sampler_free(rb);
 
-        var parser = common_chat.parse.loadParser(self.gpa, params.parser) catch |e| return fail(e);
-        defer parser.deinit();
-        var pp = common_chat.parse.ParserParams.fromChatParams(&params);
-        pp.parser = &parser;
-        pp.reasoning_format = self.settings.reasoning_format;
-        // `params_from_json_cmpl`'s post-processing: a stream, so only
-        // deepseek-legacy keeps the reasoning in the content.
-        pp.reasoning_in_content = self.settings.reasoning_format == .deepseek_legacy;
-
-        var r: Reply = .{ .gpa = self.gpa, .display = display, .params = &pp };
+        var r = try Reply.init(self.gpa, display, &chat_session);
         defer r.deinit();
         try display.begin();
         const n = session.generateTurn(segments, .{
-            .preserved = preserved.items,
-            .stops = params.additional_stops.items,
+            // the session's token-level `preserved_tokens`: a preserved
+            // token counts only when it is one token
+            .preserved = chat_session.preserved_tokens.items,
+            .stops = chat_session.additionalStops(),
             .rbudget = rbudget,
         }, r.sink()) catch |e| {
             try display.end();
             return e;
         };
-        try r.finish();
+        _ = try r.finish();
         try display.end();
 
         try self.push("assistant", r.content.items, r.reasoning.items);
@@ -528,17 +523,17 @@ pub const Chat = struct {
     }
 
     /// The reasoning budget sampler `common_sampler_init`
-    /// (common/sampling.cpp:191 @d81235049) builds from the server task's
+    /// (common/sampling.cpp:191 @620d2225c) builds from the server task's
     /// budget fields: only for a template with an end-of-thinking tag, only
     /// when there is a budget (or a lazy grammar), and fed the generation
     /// prompt's tokens so a template that opens the block itself starts it
     /// counting.
     ///
     /// Return: the sampler, or null.
-    fn budget(self: *const Chat, a: Allocator, session: *session_mod.Session, params: *const common_chat.params.ChatParams) !?*c.llama_sampler {
-        if (params.thinking_end_tags.items.len == 0) return null;
+    fn budget(self: *const Chat, a: Allocator, session: *session_mod.Session, cs: *const common_chat.session.Session) !?*c.llama_sampler {
+        if (cs.thinkingEndTags().len == 0) return null;
         const n_budget = self.settings.reasoning_budget;
-        if (!(params.grammar_lazy or n_budget >= 0)) return null;
+        if (!(cs.grammar_lazy or n_budget >= 0)) return null;
 
         const tok = struct {
             fn run(al: Allocator, s: *session_mod.Session, text: []const u8) ![]c.llama_token {
@@ -548,9 +543,9 @@ pub const Chat = struct {
             }
         }.run;
 
-        const start = try tok(a, session, params.thinking_start_tag);
+        const start = try tok(a, session, cs.thinkingStartTag());
         var ends: std.ArrayList([]const c.llama_token) = .empty;
-        for (params.thinking_end_tags.items) |tag| {
+        for (cs.thinkingEndTags()) |tag| {
             if (tag.len != 0) try ends.append(a, try tok(a, session, tag));
         }
         if (start.len == 0 or ends.items.len == 0) return null;
@@ -572,7 +567,7 @@ pub const Chat = struct {
 
         // The generation prompt's tokens, less a leading one some tokenizers
         // add as a space before a special token.
-        const gp = params.generation_prompt;
+        const gp = cs.generationPrompt();
         if (gp.len != 0) {
             const ids = try tok(a, session, gp);
             for (ids, 0..) |id, i| {
@@ -594,39 +589,20 @@ fn isSpace(ch: u8) bool {
     return ch == ' ' or (ch >= '\t' and ch <= '\r');
 }
 
-/// The rendered prompt split into runs of one trust level, from the marks
-/// `template.zig` recorded while `templates.apply` ran: the longest render
-/// the prompt begins with -- the prompt's own, which the analysis probes
-/// before it cannot outgrow -- and, after it, whatever a parser appended
-/// itself (Gemma 4's `<|turn>model\n`), which is template text.
+/// The rendered prompt split into runs of one trust level: its parts, a
+/// template part trusted -- special tokens parsed -- and an input part not.
 ///
-/// Return: segments borrowing from `capture` and `prompt`, allocated in `a`.
-/// `Error.MarkingLost` when no render matches, which fails closed.
-fn segmentsFor(a: Allocator, capture: *const template.MarkCapture, prompt: []const u8) ![]chat.Segment {
-    var best: ?template.Marked = null;
-    var i = capture.renders.items.len;
-    while (i > 0) {
-        i -= 1;
-        const r = capture.renders.items[i];
-        if (!std.mem.startsWith(u8, prompt, r.text)) continue;
-        if (best == null or r.text.len > best.?.text.len) best = r;
-    }
-    const m = best orelse return Error.MarkingLost;
+/// Return: segments borrowing from `prompt`, allocated in `a`.
+fn segmentsFor(a: Allocator, prompt: *const common_chat.prompt.Prompt) ![]chat.Segment {
     var out: std.ArrayList(chat.Segment) = .empty;
-    var at: usize = 0;
-    for (m.parts) |part| {
-        const run = m.text[at..][0..part.len];
-        at += part.len;
-        if (run.len == 0) continue;
-        // The only input runs that are control tokens are the two bound as tokens.
-        try out.append(a, .{ .text = run, .trusted = !part.input or part.token, .token = part.token });
+    for (prompt.parts.items) |part| {
+        if (part.text.len == 0) continue;
+        try out.append(a, .{ .text = part.text, .trusted = !part.is_input });
     }
-    if (at != m.text.len) return Error.MarkingLost;
-    if (prompt.len > m.text.len) try out.append(a, .{ .text = prompt[m.text.len..], .trusted = true });
     return out.items;
 }
 
-/// Ports `tty_can_use_colors` (common/common.cpp:1049 @d81235049): `--color
+/// Ports `tty_can_use_colors` (common/common.cpp:1049 @620d2225c): `--color
 /// auto`'s answer.
 ///
 /// Parameters:

@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/cohere2moe.cpp` (llama.cpp v0.6.0,
-//! `d81235049`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/cohere2moe.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -99,7 +99,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_cohere2moe` (parsers/cohere2moe.cpp:19 @d81235049).
+/// Ports `common_chat_params_init_cohere2moe` (parsers/cohere2moe.cpp:19 @620d2225c).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -138,7 +138,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
             data.generation_prompt = try std.mem.concat(a, u8, &.{ data.generation_prompt, THINK_END, TEXT_START, try m.renderContent(a, "\n\n") });
         }
 
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     var build: Build = .{
@@ -147,14 +147,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
-    var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-
-    data.parser = try parsers.save(a, &arena);
+    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !has_response_format and inputs.tool_choice == .auto;
-        data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
+        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
 
         data.grammar_triggers = .empty;
         try data.addWordTrigger(a, ACTION_START);
@@ -182,7 +180,7 @@ test "Cohere2MoE.jinja applies with a tool and builds a parser and a grammar" {
     p.tools = try json.parse(a, "[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]");
     const data = try init(a, &t, &p);
     try std.testing.expectEqual(.peg_native, data.format);
-    try std.testing.expect(data.prompt.len > 0);
-    try std.testing.expect(data.parser.len > 0);
+    try std.testing.expect(data.prompt.parts.items.len > 0);
+    try std.testing.expect(data.parser != null);
     try std.testing.expect(data.grammar.len > 0);
 }

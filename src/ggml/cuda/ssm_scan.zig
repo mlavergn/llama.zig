@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cuh` at v0.6.0 (`d81235049`). The
+//! `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cuh` at v0.7.0 (`620d2225c`). The
 //! kernels -- `ssm_scan_f32`, `ssm_scan_f32_group` and the four
 //! `ssm_ssd_*` kernels -- stay CUDA. The SSD arm is the C's
 //! `!defined(GGML_USE_HIP)` one (v0.6.0 dropped its MUSA exclusion), which
@@ -28,15 +28,15 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `SSM_SSD_MIN_TOKENS` (ssm-scan.cu:15 @d81235049).
+/// Ports `SSM_SSD_MIN_TOKENS` (ssm-scan.cu:15 @620d2225c).
 const ssd_min_tokens = 128;
-/// Ports `SSM_SSD_DT_BLOCK` (ssm-scan.cu:18 @d81235049).
+/// Ports `SSM_SSD_DT_BLOCK` (ssm-scan.cu:18 @620d2225c).
 const ssd_dt_block = 256;
-/// Ports `SSM_SSD_DT_MAX_ITEMS` (ssm-scan.cu:19 @d81235049).
+/// Ports `SSM_SSD_DT_MAX_ITEMS` (ssm-scan.cu:19 @620d2225c).
 const ssd_dt_max_items = 32;
-/// Ports `SSM_SSD_MAX_TOKENS` (ssm-scan.cu:22 @d81235049).
+/// Ports `SSM_SSD_MAX_TOKENS` (ssm-scan.cu:22 @620d2225c).
 const ssd_max_tokens = ssd_dt_block * ssd_dt_max_items;
-/// Ports `SSM_SSD_CHUNK_SIZE` (ssm-scan.cu:25 @d81235049).
+/// Ports `SSM_SSD_CHUNK_SIZE` (ssm-scan.cu:25 @620d2225c).
 const ssd_chunk_size = 256;
 
 const int_max: usize = std.math.maxInt(c_int);
@@ -62,7 +62,21 @@ fn at(p: anytype, off: i64) @TypeOf(p) {
     return if (off >= 0) p + @as(usize, @intCast(off)) else p - @as(usize, @intCast(-off));
 }
 
-/// Ports `ssm_scan_f32_cuda` (ssm-scan.cu:245 @d81235049).
+/// Ports `ggml_cuda_ssm_scan_fused_cache` (ssm-scan.cuh:4 @620d2225c): the
+/// fused kernel's recurrent-state output, strides in elements (the per-seq
+/// stride is always the state row size, set in-kernel). New at v0.7.0, for
+/// the `SSM_SCAN -> CPY` fusion `fusion.zig` matches.
+pub const FusedCache = struct {
+    /// Rollback slot 0.
+    data: [*]f32,
+    /// Between rollback slots.
+    slot_stride: i64,
+};
+
+/// Ports `ssm_scan_f32_cuda` (ssm-scan.cu:245 @620d2225c). Since v0.7.0 the
+/// Mamba-2 kernels take the state's base and the bytes between rollback
+/// slots instead of `s_off`, so that the fused path can point them into the
+/// cache; Mamba-1 still takes `s_off`.
 fn ssmScanF32Cuda(
     src0: ?*const anyopaque,
     src1: ?*const anyopaque,
@@ -91,8 +105,13 @@ fn ssmScanF32Cuda(
     n_tok: i64,
     n_seq: i64,
     K: i64,
+    cache: ?*const FusedCache,
     stream: cu.cudaStream_t,
 ) void {
+    // when fused, the states go straight into the recurrent cache and the dst tail is left alone
+    const s_base: ?*anyopaque = if (cache) |ch| @ptrCast(ch.data) else @ptrCast(@as([*]u8, @ptrCast(dst.?)) + @as(usize, @bitCast(s_off)));
+    const s_slot_bytes: i64 = if (cache) |ch| ch.slot_stride * @sizeOf(f32) else n_seq * @as(i64, src0_nb3);
+
     const ptrs = .{ src0, src1, src2, src3, src4, src5, src6, dst };
     const nbs = .{ src0_nb2, src0_nb3, src1_nb2, src1_nb3, src2_nb1, src2_nb2, src3_nb1, src4_nb2, src4_nb3, src5_nb2, src5_nb3 };
     // NOTE: if you change conditions here, be sure to update the corresponding supports_op condition!
@@ -108,7 +127,7 @@ fn ssmScanF32Cuda(
                 .block = .{ .x = threads },
                 .shmem = 0,
                 .stream = stream,
-            }, ptrs ++ nbs ++ .{ s_off, n_head, head_dim, n_group, n_tok, K });
+            }, ptrs ++ nbs ++ .{ s_base, s_slot_bytes, n_head, head_dim, n_group, n_tok, K });
         } else if (d_state == 128) {
             const threads = 128;
             const num_warps = threads / common.warp_size;
@@ -119,7 +138,7 @@ fn ssmScanF32Cuda(
                 .block = .{ .x = threads },
                 .shmem = 0,
                 .stream = stream,
-            }, ptrs ++ nbs ++ .{ s_off, n_head, head_dim, n_group, n_tok, K });
+            }, ptrs ++ nbs ++ .{ s_base, s_slot_bytes, n_head, head_dim, n_group, n_tok, K });
         } else if (d_state == 256) { // Falcon-H1
             const threads = 256;
             const num_warps = threads / common.warp_size;
@@ -130,7 +149,7 @@ fn ssmScanF32Cuda(
                 .block = .{ .x = threads },
                 .shmem = 0,
                 .stream = stream,
-            }, ptrs ++ nbs ++ .{ s_off, n_head, head_dim, n_group, n_tok, K });
+            }, ptrs ++ nbs ++ .{ s_base, s_slot_bytes, n_head, head_dim, n_group, n_tok, K });
         } else {
             impl.abort("doesn't support d_state!=(96, 128 or 256).");
         }
@@ -159,8 +178,10 @@ fn scanKernel(comptime threads: comptime_int, comptime l: comptime_int) kernels.
     return kernels.get("ssm-scan", kernels.tmpl("ssm_scan_f32", &.{ kernels.ulong(threads), kernels.ulong(16), kernels.ulong(l) }));
 }
 
-/// Ports `ssm_scan_ssd_f32_cuda` (ssm-scan.cu:592 @d81235049): the SSD
+/// Ports `ssm_scan_ssd_f32_cuda` (ssm-scan.cu:597 @620d2225c): the SSD
 /// dispatch for Mamba-2 prefill. All strides are in elements, not bytes.
+/// Since v0.7.0 the caller passes the state, `s_cur`: the dst state tail,
+/// or the cache when fused.
 fn ssmScanSsdF32Cuda(
     ctx: *common.Context,
     src0_d: ?*const anyopaque,
@@ -181,7 +202,7 @@ fn ssmScanSsdF32Cuda(
     B_stride_seq: c_int,
     C_stride_tok: c_int,
     C_stride_seq: c_int,
-    s_off: i64,
+    s_cur: [*]f32,
     d_state: i64,
     head_dim: i64,
     n_head: i64,
@@ -223,8 +244,6 @@ fn ssmScanSsdF32Cuda(
     const X_dt = X_dt_buf.get().?;
     const B_weighted = B_w_buf.get().?;
     const C_scaled = C_s_buf.get().?;
-    // write state directly to dst
-    const s_cur: [*]f32 = @ptrCast(@alignCast(@as([*]u8, @ptrCast(dst_d)) + @as(usize, @intCast(s_off))));
 
     // Step 1: softplus(dt) and parallel prefix sum over full sequence
     {
@@ -375,8 +394,10 @@ fn ssmScanSsdF32Cuda(
     }
 }
 
-/// Ports `ggml_cuda_op_ssm_scan` (ssm-scan.cu:783 @d81235049).
-pub fn opSsmScan(ctx: *common.Context, dst: *Tensor) void {
+/// Ports `ggml_cuda_op_ssm_scan_impl` (ssm-scan.cu:788 @620d2225c), the
+/// body v0.7.0 moved out of `ggml_cuda_op_ssm_scan` so that the fused entry
+/// point can pass a cache.
+fn opSsmScanImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedCache) void {
     const src0 = impl.one(Tensor, dst.src[0]); // s
     const src1 = impl.one(Tensor, dst.src[1]); // x
     const src2 = impl.one(Tensor, dst.src[2]); // dt
@@ -472,7 +493,7 @@ pub fn opSsmScan(ctx: *common.Context, dst: *Tensor) void {
             int(src4.nb[3] / f),
             int(src5.nb[2] / f),
             int(src5.nb[3] / f),
-            s_off,
+            if (cache) |ch| ch.data else @ptrCast(@alignCast(@as([*]u8, @ptrCast(dst_d.?)) + @as(usize, @bitCast(s_off)))),
             nc,
             nr,
             nh,
@@ -482,5 +503,16 @@ pub fn opSsmScan(ctx: *common.Context, dst: *Tensor) void {
         );
         return;
     }
-    ssmScanF32Cuda(src0_d, src1_d, src2_d, src3_d, src4_d, src5_d, src6_d, dst_d, int(src0.nb[2]), int(src0.nb[3]), int(src1.nb[2]), int(src1.nb[3]), int(src2.nb[1]), int(src2.nb[2]), int(src3.nb[1]), int(src4.nb[2]), int(src4.nb[3]), int(src5.nb[2]), int(src5.nb[3]), s_off, nc, nr, nh, ng, n_t, n_s, K, stream);
+    ssmScanF32Cuda(src0_d, src1_d, src2_d, src3_d, src4_d, src5_d, src6_d, dst_d, int(src0.nb[2]), int(src0.nb[3]), int(src1.nb[2]), int(src1.nb[3]), int(src2.nb[1]), int(src2.nb[2]), int(src3.nb[1]), int(src4.nb[2]), int(src4.nb[3]), int(src5.nb[2]), int(src5.nb[3]), s_off, nc, nr, nh, ng, n_t, n_s, K, cache, stream);
+}
+
+/// Ports `ggml_cuda_op_ssm_scan` (ssm-scan.cu:883 @620d2225c).
+pub fn opSsmScan(ctx: *common.Context, dst: *Tensor) void {
+    opSsmScanImpl(ctx, dst, null);
+}
+
+/// Ports `ggml_cuda_op_ssm_scan_fused_cache` (ssm-scan.cu:887 @620d2225c):
+/// the same op, writing the state snapshots into the cache instead of dst.
+pub fn opSsmScanFusedCache(ctx: *common.Context, dst: *Tensor, cache: FusedCache) void {
+    opSsmScanImpl(ctx, dst, &cache);
 }

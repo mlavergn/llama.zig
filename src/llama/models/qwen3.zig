@@ -3,9 +3,10 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen3.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/qwen3.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_qwen3`'s `load_arch_hparams`, `load_arch_tensors` and
-//! `build_arch_graph`, and its `graph`.
+//! `build_arch_graph`, and its `graph` with `build_backbone`, which
+//! `vllm_decision2.zig`'s graph builds on.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -19,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_qwen3`'s `load_arch_hparams` (models/qwen3.cpp:3 @d81235049).
+/// Ports `llama_model_qwen3`'s `load_arch_hparams` (models/qwen3.cpp:3 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -33,7 +34,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen3`'s `load_arch_tensors` (models/qwen3.cpp:15 @d81235049).
+/// Ports `llama_model_qwen3`'s `load_arch_tensors` (models/qwen3.cpp:15 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -70,20 +71,38 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_qwen3`'s `build_arch_graph` (models/qwen3.cpp:49 @d81235049).
+/// Ports `llama_model_qwen3`'s `build_arch_graph` (models/qwen3.cpp:49 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_qwen3`'s `graph` (models/qwen3.cpp:53
-/// @d81235049).
+/// @620d2225c): the backbone and the LM head.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+    var cur = buildBackbone(model, b);
+
+    // The LM head.
+    cur = b.buildLoraMm(model.output.?, cur, model.output_s);
+
+    b.cb(cur, "result_output", -1);
+    b.res.t_logits = cur;
+}
+
+/// Ports `llama_model_qwen3::graph`'s `build_backbone` (models/qwen3.cpp:63
+/// @620d2225c): the layers and the final norm. The C++'s `no_build`
+/// constructor (src/models/models.h:602 @620d2225c), which gives a derived
+/// graph the helpers without this body, needs no counterpart: a derived
+/// graph calls this with the same `Builder`.
+///
+/// Return: the normed hidden state, `[n_embd, n_outputs]`, also set as
+/// `t_embd`.
+pub fn buildBackbone(model: *const Model, b: *const graph.Builder) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/qwen3.cpp", 56, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/qwen3.cpp", 57, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/qwen3.cpp", 66, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/qwen3.cpp", 67, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -158,13 +177,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "result_norm", -1);
     b.res.t_embd = cur;
 
-    // The LM head.
-    cur = b.buildLoraMm(model.output.?, cur, model.output_s);
-
-    b.cb(cur, "result_output", -1);
-    b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
+    return cur;
 }
 
 // -----------------------------------------------------------------------------

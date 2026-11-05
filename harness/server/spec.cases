@@ -42,3 +42,24 @@ POST /completion {"prompt": "a b c d e f g a b c d e f g a b c d e f g a b c", "
 POST /completion {"prompt": "one two three one two three one two three one", "n_predict": 16, "temperature": 0}
 POST /completion {"prompt": "1 2 3 4 1 2 3 5 1 2 3 4 1 2 3 5 1 2 3 4 1 2 3", "n_predict": 24, "temperature": 0}
 POST /completion {"prompt": "Once upon a time there was a cat. Once upon a time there was a dog. Once upon a time there was", "n_predict": 24, "temperature": 1.0, "seed": 5}
+
+# v0.7.0 (#30574): a slot file carries the draft context's state and the
+# drafter's ("SDFT") after the checkpoints; restored into a server whose
+# draft does not match, the draft starts empty. --spec-draft-n-ubatch
+# (#30459) sizes the draft context's ubatch on its own
+!server -m $QWEN3 -md $QWEN3 -c 2048 -np 2 --no-jinja --spec-type draft-simple --spec-draft-n-max 4 --spec-draft-n-ubatch 8 --slot-save-path ./ -lv 4
+!fulllog
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "id_slot": 0}
+POST /slots/0?action=save {"filename": "dft.bin"}
+POST /slots/1?action=restore {"filename": "dft.bin"}
+POST /completion {"prompt": "Count: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11", "n_predict": 12, "temperature": 0, "id_slot": 1}
+GET /slots
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --slot-save-path ./ -lv 4
+!fulllog
+POST /slots/0?action=restore {"filename": "dft.bin"}
+POST /completion {"prompt": "Count: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11", "n_predict": 12, "temperature": 0, "id_slot": 0}
+POST /slots/0?action=save {"filename": "nodft.bin"}
+!server -m $QWEN3 -md $QWEN3 -c 2048 -np 1 --no-jinja --spec-type draft-simple --spec-draft-n-max 4 --slot-save-path ./ -lv 4
+!fulllog
+POST /slots/0?action=restore {"filename": "nodft.bin"}
+POST /completion {"prompt": "Count: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12", "n_predict": 12, "temperature": 0, "id_slot": 0}

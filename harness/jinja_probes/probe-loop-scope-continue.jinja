@@ -1,0 +1,10 @@
+{#- v0.7.0: per-iteration scope with `continue` and `break`, and a macro called from the body. -#}
+{%- macro show(v) -%}{{ v }}{%- set inside = 1 -%}{%- endmacro -%}
+{%- set acc = 'start' -%}
+{%- for m in messages + messages -%}
+{{ acc }}:{{ show(loop.index) }}
+{%- set acc = acc ~ loop.index -%}
+{%- if loop.index is divisibleby 2 -%}{%- continue -%}{%- endif -%}
+{%- if loop.index > 5 -%}{%- break -%}{%- endif -%}
+/{{ acc }}
+{%- endfor %} {{ acc }} {{ inside is defined }}

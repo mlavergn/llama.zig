@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/kimi-k3.cpp` (llama.cpp v0.6.0,
-//! `d81235049`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/kimi-k3.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -99,17 +99,17 @@ const Build = struct {
         return b.plus(try b.plus(try b.plus(try b.plus(try b.plus(start, reasoning), response), tools), trailer), end);
     }
 
-    fn tool(self: *Build, t: *Value) Error!void {
+    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
         const function = t.at("function") catch |e| return util.fromJson(e);
         const name = try parsers.functionName(t);
         const schema = try msg_mod.toolParameters(self.a, function);
-        const call = self.buildTool(name, &schema) catch |e| return util.fromPeg(e);
+        const call = self.buildTool(tool_index, name, &schema) catch |e| return util.fromPeg(e);
         const b = &self.cb.b;
-        const rule = b.rule(try std.mem.concat(self.a, u8, &.{ "kimi-k3-tool-", name }), call, false) catch |e| return util.fromPeg(e);
+        const rule = b.rule(try parsers.indexName(self.a, "kimi-k3-tool-", tool_index, ""), call, false) catch |e| return util.fromPeg(e);
         b.orAssign(&self.tool_choices, rule) catch |e| return util.fromPeg(e);
     }
 
-    fn buildTool(self: *Build, name: []const u8, schema: *const Value) chat_peg.Error!ParserId {
+    fn buildTool(self: *Build, tool_index: usize, name: []const u8, schema: *const Value) chat_peg.Error!ParserId {
         const p = self.cb;
         const b = &p.b;
 
@@ -124,6 +124,7 @@ const Build = struct {
                 error.OutOfMemory, error.JsonError => unreachable,
             };
             var arg_choices = try b.choiceEmpty();
+            var param_index: usize = 0;
             var it = props.items();
             while (it.next()) |prop| {
                 const key = try self.a.dupe(u8, prop.key);
@@ -148,7 +149,8 @@ const Build = struct {
                 body = try b.plus(body, try b.literal(sep));
                 body = try b.plus(body, value);
                 body = try b.plus(body, try p.toolArgClose(try b.literal(arg_end)));
-                const rule_name = try std.mem.concat(self.a, u8, &.{ "kimi-k3-arg-", name, "-", key });
+                const rule_name = try std.fmt.allocPrint(self.a, "kimi-k3-arg-{d}-{d}", .{ tool_index, param_index });
+                param_index += 1;
                 try b.orAssign(&arg_choices, try b.rule(rule_name, try p.toolArg(body), false));
             }
             args = try b.zeroOrMore(arg_choices);
@@ -164,7 +166,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_kimi_k3` (parsers/kimi-k3.cpp:8 @d81235049).
+/// Ports `common_chat_params_init_kimi_k3` (parsers/kimi-k3.cpp:8 @620d2225c).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -204,18 +206,16 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
             try gp.appendSlice(a, try m.renderContent(a, "\n\n"));
         }
         data.generation_prompt = gp.items;
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     var build: Build = .{ .a = a, .inputs = inputs, .has_tools = has_tools, .extract_reasoning = extract_reasoning };
-    var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-
-    data.parser = try parsers.save(a, &arena);
+    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = inputs.tool_choice != .required;
-        data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
+        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, tools_start);
     }
 

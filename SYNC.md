@@ -122,6 +122,9 @@ deleted files, and new architectures, ops, flags and `llama.h` symbols.
 
 1. Check out `B` in `llama.cpp/` and in `llama.cpp.zmake/llama.cpp`, and
    update `.gitmodules`. `scripts/check-reference-pin` must pass.
+   Set `build.zig.zon`'s `.version` to `B` without the `v` **now**, not at
+   the commit: the tree is at `B` from here on, and its version says so
+   while the sync is in progress (Step 10 only checks it).
 2. If upstream added, moved or deleted sources, update
    `llama.cpp.zmake/build.zig` and `build/llamacpp.zig`. Rebuild the zmake
    reference and `zig build reference` (`libllama-ref.a`), both
@@ -282,10 +285,24 @@ gate itself is what is wrong. In that case, say so in `NOTES.md`.
 ### Step 9: pickups
 
 These must clear before the next sync (M7), so drive them now. The commit
-from Step 10 has to reach GitHub first.
+from Step 10 has to reach GitHub first -- or, to start them beside Step 7's
+Mac pass, as v0.7.0 did, carry the uncommitted tree over as a commit object
+(`git commit-tree` from a scratch index, never on a branch) in a bundle onto
+a local branch there, and carry every fix back to the Mac before the commit
+(`NOTES.md`, "Upstream sync v0.6.0 → v0.7.0").
+
+The machines are reached through `../zigupdater`'s `zigupdater`: `tty
+<agent>` for a shell (it needs a terminal: drive it from a script through
+`script -q /dev/null zigupdater tty <agent>`, one command line per
+session, long jobs under `nohup`) and `push <agent> <exe> --run` for
+programs. The link moves executables only, so files travel as a tar inside
+a small carrier program that writes it out (rebuild the carrier with a
+changing `-D`, since `zig cc` does not see an `.incbin`'d file as an
+input). The Mac has one updater Host: two pushes at once refuse each other,
+which `scripts/win-run` retries.
 
 - **GB10** (`spark-dbff`, checkout `~/src/mlavergn/llama.zig`, through
-  `zupdater tty`; memory: driving-agents-tty). Move `llama.cpp/` and the
+  `zigupdater tty`; memory: driving-agents-tty). Move `llama.cpp/` and the
   zmake checkout to the new commit before anything else:
   - the Step 5 regenerations, with the results committed back from the Mac;
   - `cuda-ops-diff`, `cuda-node-diff` (per node and fused),
@@ -313,9 +330,10 @@ blocker. Do not start the next sync over an open pickup.
 
 ### Step 10: version and commit
 
-- **Version:** a sync sets `build.zig.zon` to `B` without the `v`
-  (`0.4.0`). Any other commit (the tooling, a pickup fix) adds the next
-  `+N` to the current basis (`0.3.0+1`).
+- **Version:** a sync has set `build.zig.zon` to `B` without the `v`
+  (`0.4.0`) since Step 3; check it. Any other commit (the tooling, a pickup
+  fix) adds the next `+N` to the current basis (`0.3.0+1`), set when that
+  work starts.
 - **Message:** `v<version> sync upstream B (<B-short-sha>)`, followed by the
   attribution line from the system reminder. For a pickup fix:
   `v<version> pickup fix for upstream B`.

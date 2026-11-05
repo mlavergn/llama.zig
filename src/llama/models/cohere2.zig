@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/cohere2.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/cohere2.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_cohere2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_cohere2`'s `load_arch_hparams` (models/cohere2.cpp:3 @d81235049).
+/// Ports `llama_model_cohere2`'s `load_arch_hparams` (models/cohere2.cpp:3 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -44,7 +44,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_cohere2`'s `load_arch_tensors` (models/cohere2.cpp:21 @d81235049).
+/// Ports `llama_model_cohere2`'s `load_arch_tensors` (models/cohere2.cpp:21 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -70,13 +70,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_cohere2`'s `build_arch_graph` (models/cohere2.cpp:46 @d81235049).
+/// Ports `llama_model_cohere2`'s `build_arch_graph` (models/cohere2.cpp:46 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_cohere2`'s `graph`
-/// (models/cohere2.cpp:50 @d81235049).
+/// (models/cohere2.cpp:50 @620d2225c).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -171,8 +171,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

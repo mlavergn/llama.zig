@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/exaone4.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/exaone4.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_exaone4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>`.
 
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_exaone4`'s `load_arch_hparams` (models/exaone4.cpp:3 @d81235049).
+/// Ports `llama_model_exaone4`'s `load_arch_hparams` (models/exaone4.cpp:3 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -47,7 +47,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_exaone4`'s `load_arch_tensors` (models/exaone4.cpp:24 @d81235049).
+/// Ports `llama_model_exaone4`'s `load_arch_tensors` (models/exaone4.cpp:24 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -100,7 +100,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_exaone4`'s `build_arch_graph` (models/exaone4.cpp:73 @d81235049).
+/// Ports `llama_model_exaone4`'s `build_arch_graph` (models/exaone4.cpp:73 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (b.hparams.swa_type == @backingInt(hparams_mod.SwaType.standard)) {
         buildGraph(true, model, b);
@@ -110,7 +110,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_exaone4`'s `graph<iswa>`
-/// (models/exaone4.cpp:82 @d81235049).
+/// (models/exaone4.cpp:82 @620d2225c).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -201,8 +201,6 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

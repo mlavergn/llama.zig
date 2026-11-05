@@ -5,12 +5,18 @@
 //! `unicode-data.cpp`, so both sides run in one process on the same input:
 //!
 //! - **Every code point**, 0 to 0x10FFFF and a few beyond: the flags,
-//!   `tolower`, `is_han`, NFD, and the UTF-8 encoding or its refusal.
+//!   `tolower`, `is_han`, NFD, NFC, and the UTF-8 encoding or its refusal.
+//! - **NFC over sequences** (v0.7.0): the whole range as one vector, every
+//!   canonical decomposition re-fed with marks around it, Hangul jamo runs,
+//!   and random runs of starters and combining marks -- composition,
+//!   reordering and blocking.
 //! - **UTF-8 decoding**: every one- and two-byte string, three- and
 //!   four-byte strings over the lead bytes and a set of trailing bytes
 //!   chosen to sit on each boundary, and random byte strings -- through the
 //!   single-sequence decoder, the whole-string one and the flags-of-string
-//!   one.
+//!   one. Since v0.7.0 that sweep is what holds the overlong and
+//!   above-U+10FFFF rejections: every two-byte string, and the boundary
+//!   trails, reach each of them.
 //! - **The byte map**, both directions, over every byte and every one- and
 //!   two-byte string.
 //! - **`unicode_regex_split`**, for every pre-tokenizer pattern set in
@@ -35,6 +41,7 @@ extern fn ref_uni_tolower(cpt: u32) u32;
 extern fn ref_uni_is_han(cpt: u32) c_int;
 extern fn ref_uni_len_utf8(c: u8) usize;
 extern fn ref_uni_nfd(in: [*]const u32, n: usize, out: [*]u32) void;
+extern fn ref_uni_nfc(in: [*]const u32, n: usize, out: [*]u32, cap: usize) usize;
 extern fn ref_uni_cpt_to_utf8(cpt: u32, out: [*]u8) c_int;
 extern fn ref_uni_cpts_from_utf8(s: [*]const u8, n: usize, out: [*]u32) usize;
 extern fn ref_uni_cpt_from_utf8(s: [*]const u8, n: usize, offset: *usize, cpt: *u32) c_int;
@@ -97,11 +104,73 @@ fn sweepCodepoints() void {
         if (r != z) fail("nfd U+{X:0>4}: ref U+{X:0>4} zig U+{X:0>4}", .{ c, r, z });
     }
 
+    // NFC, each code point alone, then the whole range as one vector.
+    for (all) |c| compareNfc(&.{c});
+    compareNfc(all);
+
     for (0..256) |b| {
         checks += 1;
         const r = ref_uni_len_utf8(@intCast(b));
         const z = unicode.lenUtf8(@intCast(b));
         if (r != z) fail("len_utf8 0x{X:0>2}: ref {d} zig {d}", .{ b, r, z });
+    }
+}
+
+/// One NFC result compared, on every code point.
+fn compareNfc(in: []const u32) void {
+    checks += 1;
+    const cap = in.len * 4 + 4;
+    const rbuf = gpa.alloc(u32, cap) catch unreachable;
+    defer gpa.free(rbuf);
+    const rn = ref_uni_nfc(in.ptr, in.len, rbuf.ptr, cap);
+    const z = unicode.cptsNormalizeNfc(in);
+    defer gpa.free(z);
+    if (rn > cap or !std.mem.eql(u32, rbuf[0..rn], z)) {
+        fail("nfc {any}: ref {any} zig {any}", .{ in[0..@min(in.len, 8)], rbuf[0..@min(rn, 8, cap)], z[0..@min(z.len, 8)] });
+    }
+}
+
+/// NFC over sequences: every decomposable code point with marks before and
+/// after it, Hangul jamo in every arrangement the composer tests, and random
+/// runs drawn from starters, marks of several classes and jamo.
+fn sweepNfc(r: std.Random) void {
+    // Marks of classes 202, 216, 220, 230, 232 and 0-class blockers.
+    const marks = [_]u32{ 0x0300, 0x0301, 0x0308, 0x0327, 0x0328, 0x031B, 0x0323, 0x0315, 0x0345, 0x0342, 0x05B0, 0x0F71, 0x0F72, 0x0F80, 0x3099, 0x309A, 0x1D165, 0x1D16E, 0x0670 };
+    const starters = [_]u32{ 'A', 'a', 'e', 'o', 'u', 'U', 'C', 0x00C5, 0x00E9, 0x01B0, 0x0391, 0x03B9, 0x0418, 0x0928, 0x09C7, 0x0B47, 0x0BC6, 0x0CC6, 0x0D46, 0x0DD9, 0x1025, 0x304B, 0x30AB, 0x1100, 0x1112, 0x1113, 0x1161, 0x1175, 0x1176, 0x11A7, 0x11A8, 0x11C2, 0x11C3, 0xAC00, 0xAC01, 0xD7A3, 0xD788, 0x212B, 0x2126, 0x0344, 0x0F73, 0x1E9B, 0x1FED, 0x2ADC, 0xFB2C, 0x1D15E, 0x110AB, 0x11131, 0x1611E, 0x16D67, ' ', '0' };
+    var seq: [24]u32 = undefined;
+    var c: u32 = 0;
+    while (c < 0x110000) : (c += 1) {
+        if (c >= 0xAC00 and c < 0xAC00 + 11172 and c % 97 != 0) continue;
+        const one = [1]u32{c};
+        var ref_single: [16]u32 = undefined;
+        const n = ref_uni_nfc(&one, 1, &ref_single, ref_single.len);
+        // Only the code points NFC changes or that are marks are interesting.
+        if (n == 1 and ref_single[0] == c and ref_uni_flags(c) & 0x10 == 0) continue;
+        seq[0] = c;
+        compareNfc(seq[0..1]);
+        for (0..3) |_| {
+            const k = 1 + r.uintLessThan(usize, 4);
+            seq[0] = starters[r.uintLessThan(usize, starters.len)];
+            seq[1] = c;
+            for (seq[2 .. 2 + k]) |*m| m.* = marks[r.uintLessThan(usize, marks.len)];
+            compareNfc(seq[0 .. 2 + k]);
+            compareNfc(seq[1 .. 2 + k]);
+        }
+    }
+    // Jamo: L, V, T, LV, LVT and out-of-range neighbours in every pair.
+    const jamo = [_]u32{ 0x10FF, 0x1100, 0x1112, 0x1113, 0x1160, 0x1161, 0x1175, 0x1176, 0x11A7, 0x11A8, 0x11C2, 0x11C3, 0xABFF, 0xAC00, 0xAC01, 0xAC1B, 0xAC1C, 0xD7A3, 0xD7A4, 0x0301 };
+    for (jamo) |a| for (jamo) |b| {
+        compareNfc(&.{ a, b });
+        for (jamo) |d| compareNfc(&.{ a, b, d });
+    };
+    for (0..200000) |_| {
+        const n = r.uintLessThan(usize, seq.len + 1);
+        for (seq[0..n]) |*x| x.* = switch (r.uintLessThan(u8, 4)) {
+            0 => starters[r.uintLessThan(usize, starters.len)],
+            1, 2 => marks[r.uintLessThan(usize, marks.len)],
+            else => jamo[r.uintLessThan(usize, jamo.len)],
+        };
+        compareNfc(seq[0..n]);
     }
 }
 
@@ -252,8 +321,8 @@ const synthetic = [_]Set{
 /// Code points and short runs random text is built from: one or more for
 /// every branch of every custom splitter and every collapse category.
 const pool = [_][]const u8{
-    "a",        "Z",        "q",        "7",            "0",        " ",   " ",    "  ",    "\t",    "\n", "\r", "\r\n", "\x0B", "'", "'s", "'S", "'re", "'LL", "'d", "'x",
-    ".",        ",",        "!",        "?",            "-",        "_",   "$",    "+",     "<",     "|",  "~",  "`",    "\\",   "/", "@",  "#",  "(",   ")",   "[",  "]",
+    "a",          "Z",        "q",        "7",            "0",        " ",   " ",    "  ",    "\t",    "\n", "\r", "\r\n", "\x0B", "'", "'s", "'S", "'re", "'LL", "'d", "'x",
+    ".",          ",",        "!",        "?",            "-",        "_",   "$",    "+",     "<",     "|",  "~",  "`",    "\\",   "/", "@",  "#",  "(",   ")",   "[",  "]",
     "é",
     "ß",
     "İ",
@@ -261,7 +330,7 @@ const pool = [_][]const u8{
     "ж",
     "ǅ",
     "ʰ",
-    "\u{0301}", "\u{0308}",
+    "\u{0301}",   "\u{0308}",
     "中",
     "一",
     "龥",
@@ -275,16 +344,19 @@ const pool = [_][]const u8{
     "１",
     "！",
     "。",
-    "\u{00A0}", "\u{2028}", "\u{3000}", "\u{0085}",     "\u{200B}",
+    "\u{00A0}",   "\u{2028}", "\u{3000}", "\u{0085}",     "\u{200B}",
     "😀",
-    "\u{200D}",
+    "\u{200D}",   "\u{200C}",
+    "ſ",
+    "'ſ",
+    "'\u{017F}t",
     "€",
     "©",
     "\u{FFFD}",
     "ﬁ",
     "Ⅻ",
     "½",
-    "\x00",     "\xff",     "\xc3",     "\xed\xa0\x80", "\xc0\x80", "123", "4567", "Hello", "world",
+    "\x00",       "\xff",     "\xc3",     "\xed\xa0\x80", "\xc0\x80", "123", "4567", "Hello", "world",
 };
 
 /// Rare: a code point above U+10FFFF, which `unicode_cpt_to_utf8` refuses.
@@ -346,6 +418,8 @@ pub fn main() !void {
     const r = prng.random();
 
     sweepCodepoints();
+    const c_cpts = checks;
+    sweepNfc(r);
     const c0 = checks;
     sweepDecode(r);
     const c1 = checks;
@@ -355,6 +429,10 @@ pub fn main() !void {
     const sets = parseSets(inputs.sets);
     var corpus: std.ArrayList([]const u8) = .empty;
     var seen: std.StringHashMapUnmanaged(void) = .empty;
+    // The empty text, which since v0.7.0 returns before any pattern is
+    // compiled -- the malformed synthetic ones included.
+    try corpus.append(gpa, "");
+    try seen.put(gpa, "", {});
     for (inputs.corpus) |text| {
         var it = std.mem.splitSequence(u8, text, "\n__ggml_vocab_test__\n");
         while (it.next()) |s| {
@@ -376,8 +454,8 @@ pub fn main() !void {
         for (corpus.items) |text| compareSplit(text, set, false);
     }
 
-    std.debug.print("  code points  {d} checks\n  decoding     {d}\n  byte map     {d}\n  regex split  {d} ({d} sets + {d} synthetic, {d} upstream + 1500 random texts)\n", .{
-        c0, c1 - c0, c2 - c1, checks - c2, sets.len, synthetic.len, n_upstream,
+    std.debug.print("  code points  {d} checks\n  nfc          {d}\n  decoding     {d}\n  byte map     {d}\n  regex split  {d} ({d} sets + {d} synthetic, {d} upstream + 1500 random texts)\n", .{
+        c_cpts, c0 - c_cpts, c1 - c0, c2 - c1, checks - c2, sets.len, synthetic.len, n_upstream,
     });
     if (failures == 0) {
         std.debug.print("PASS: {d} unicode results identical, Zig vs unicode.cpp\n", .{checks});

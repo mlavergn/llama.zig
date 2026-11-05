@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/arwkv7.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/arwkv7.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_arwkv7`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. The time mix is in
 //! `rwkv7_base.zig`.
@@ -24,12 +24,12 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llama_model_arwkv7`'s `load_arch_hparams` (models/arwkv7.cpp:3
-/// @d81235049): the same keys and size table as RWKV-7.
+/// @620d2225c): the same keys and size table as RWKV-7.
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     try rwkv7.loadHparams(self, ml, exc);
 }
 
-/// Ports `llama_model_arwkv7`'s `load_arch_tensors` (models/arwkv7.cpp:46 @d81235049).
+/// Ports `llama_model_arwkv7`'s `load_arch_tensors` (models/arwkv7.cpp:46 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -79,13 +79,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_arwkv7`'s `build_arch_graph` (models/arwkv7.cpp:116 @d81235049).
+/// Ports `llama_model_arwkv7`'s `build_arch_graph` (models/arwkv7.cpp:116 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_arwkv7`'s `graph`
-/// (models/arwkv7.cpp:120 @d81235049): one token shift, before the time
+/// (models/arwkv7.cpp:120 @620d2225c): one token shift, before the time
 /// mix only.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
@@ -159,8 +159,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

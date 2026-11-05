@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/ling3vl.cpp`, new at v0.6.0
-//! (`d81235049`), and the `clip_graph_ling3vl` declaration in
+//! Ports `llama.cpp/tools/mtmd/models/ling3vl.cpp`, new at v0.7.0
+//! (`620d2225c`), and the `clip_graph_ling3vl` declaration in
 //! `llama.cpp/tools/mtmd/models/models.h`. Each declaration names what it
 //! ports and the line it began at.
 
@@ -23,15 +23,15 @@ const PosCtx = struct {
     mrope_sections: [4]c_int,
 };
 
-/// The M-RoPE lambda `build` passes to `build_vit` (ling3vl.cpp:58 @d81235049).
+/// The M-RoPE lambda `build` passes to `build_vit` (ling3vl.cpp:58 @620d2225c).
 fn addPos(ctx: ?*anyopaque, g: *graph.Graph, cur: T, layer: *const model_mod.Layer) T {
     _ = layer;
     const p: *PosCtx = @ptrCast(@alignCast(ctx.?));
     return c.ggml_rope_multi(g.ctx0, cur, p.positions, null, @divTrunc(g.d_head, 2), &p.mrope_sections, c.GGML_ROPE_TYPE_VISION, 32768, 10000, 1, 0, 1, 32, 1);
 }
 
-/// Ports `build` (ling3vl.cpp:3 @d81235049), a member of `clip_graph_ling3vl`
-/// (mtmd/models/models.h:53 @d81235049), which derives from `clip_graph_qwen3vl` for
+/// Ports `build` (ling3vl.cpp:3 @620d2225c), a member of `clip_graph_ling3vl`
+/// (mtmd/models/models.h:53 @620d2225c), which derives from `clip_graph_qwen3vl` for
 /// `build_inp_with_temporal_merge` alone.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

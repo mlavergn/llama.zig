@@ -35,10 +35,27 @@
 # compiler_rt goes in so the CPU path computes with the same math the gated
 # port does; no C++ runtime goes in, since neither library references one.
 
+# Every recipe line runs under -e and pipefail, so a failure anywhere in a
+# multi-command line -- a `for` over architectures, a `cmd | grep` -- fails
+# the target. macOS's /usr/bin/make is GNU Make 3.81, which ignores
+# .SHELLFLAGS (3.82 added it) and runs `$(SHELL) -c`, so there the flags go
+# in SHELL itself; a newer make takes them from .SHELLFLAGS. Measured: under
+# 3.81 with .SHELLFLAGS alone, `false; echo after` printed and succeeded.
+ifeq ($(MAKE_VERSION),3.81)
+SHELL := /bin/bash -eo pipefail
+else
 SHELL := /bin/bash
 .SHELLFLAGS := -eo pipefail -c
+endif
 
-ROOT       := $(abspath $(CURDIR)/..)
+# The checkout's path may hold a space ("Macintosh HD"), and make splits
+# target names and function arguments on whitespace. So targets and
+# prerequisites are paths relative to this directory, where make runs
+# (`make -C xcframework`), and the absolute forms below appear only in
+# recipes, always double-quoted -- several recipes `cd` elsewhere first. No
+# path-taking make function ($(abspath), $(dir), $(wildcard), ...) is given
+# one of them.
+ROOT       := $(shell cd .. && pwd -P)
 B          := $(CURDIR)/build
 XCF        := $(B)/llama.xcframework
 UPSTREAM   := $(B)/upstream/build-apple/llama.xcframework
@@ -173,11 +190,17 @@ zig_arch = $(if $(filter arm64,$(1)),aarch64,x86_64)
 # $(1): build, $(2): arch
 part_cpu = $(if $(filter arm64,$(2)),$($(1)_CPU),x86_64_v3)
 
-# Runs a command that must fail, and fails if it does not.
-# $(1): the command; $(2): what the injected fault is.
-expect_fail = if ( $(1) ) > $(B)/neg/last.log 2>&1; then \
-        echo "NEGATIVE TEST ESCAPED: $(2)"; cat $(B)/neg/last.log; exit 1; \
-    else echo "  caught: $(2) -- $$(grep -m1 -E 'FAIL|error|differ' $(B)/neg/last.log)"; fi
+# Runs a command that must fail, and fails if it does not -- or if it fails
+# for another reason than the fault: its output must match $(3), the message
+# that names that fault. (The mtmd_* fault was once caught only because its
+# dylib carried another SDK version than upstream's.)
+# $(1): the command; $(2): what the injected fault is; $(3): an extended
+# regular expression for the failure it must produce, with no comma or quote.
+expect_fail = if ( $(1) ) > "$(B)/neg/last.log" 2>&1; then \
+        echo "NEGATIVE TEST ESCAPED: $(2)"; cat "$(B)/neg/last.log"; exit 1; \
+    elif ! grep -Eq '$(3)' "$(B)/neg/last.log"; then \
+        echo "NEGATIVE TEST FAILED FOR ANOTHER REASON: $(2) -- want /$(3)/"; cat "$(B)/neg/last.log"; exit 1; \
+    else echo "  caught: $(2) -- $$(grep -m1 -E '$(3)' "$(B)/neg/last.log")"; fi
 
 .PHONY: all xcframework $(BUILDS) part verify $(addprefix verify-,$(BUILDS)) upstream compat negative \
         ref-driver smoke-macos dropin-macos smoke-sim smoke-device swiftui pkg-test zip port-gates check clean
@@ -192,52 +215,54 @@ P = $(B)/$(BUILD)/$(ARCH)
 part:
 	@printf '\n== %s %s: zig build xcframework -Dtarget=%s-%s -Dcpu=%s ==\n' $(BUILD) $(ARCH) \
 	    $(call zig_arch,$(ARCH)) $($(BUILD)_OS) $(call part_cpu,$(BUILD),$(ARCH))
-	cd $(ROOT) && $(ZIG) build xcframework -Dblas -Dtarget=$(call zig_arch,$(ARCH))-$($(BUILD)_OS) \
-	    -Dcpu=$(call part_cpu,$(BUILD),$(ARCH)) --release=fast --prefix $(P)/zig
+	cd "$(ROOT)" && "$(ZIG)" build xcframework -Dblas -Dtarget=$(call zig_arch,$(ARCH))-$($(BUILD)_OS) \
+	    -Dcpu=$(call part_cpu,$(BUILD),$(ARCH)) --release=fast --prefix "$(P)/zig"
 	@# A probe link with --verbose-link names the libcompiler_rt.a Zig built
 	@# for this target; the build API does not expose it. It is not
 	@# optional: a `zig cc` link -- every bit-exact gate, and `make port` --
 	@# takes expf, logf, sinf, cosf, exp2f from it rather than libSystem, and
 	@# with Apple's libm instead 3 of 6 CPU prompts diverged from the port.
 	@# A fresh cache dir forces the link to run, so the line is always
-	@# printed.
-	rm -rf $(P)/rt && mkdir -p $(P)/rt
-	printf 'int main(void) { return 0; }\n' > $(P)/rt/probe.c
-	cd $(P)/rt && $(ZIG) build-exe probe.c -lc -target $(call zig_arch,$(ARCH))-$($(BUILD)_OS) \
+	@# printed. The --verbose-link line is split on spaces, so the path it
+	@# names -- Zig's global cache, under $$HOME -- must hold none; the
+	@# count check below fails if it does.
+	rm -rf "$(P)/rt" && mkdir -p "$(P)/rt"
+	printf 'int main(void) { return 0; }\n' > "$(P)/rt/probe.c"
+	cd "$(P)/rt" && "$(ZIG)" build-exe probe.c -lc -target $(call zig_arch,$(ARCH))-$($(BUILD)_OS) \
 	    -mcpu $(call part_cpu,$(BUILD),$(ARCH)) -OReleaseFast --cache-dir cache --verbose-link 2>&1 \
 	    | tr ' ' '\n' | grep -E '/libcompiler_rt\.a$$' > paths.txt
-	test "$$(wc -l < $(P)/rt/paths.txt)" -eq 1 || { echo "FAIL: probe found: $$(cat $(P)/rt/paths.txt)"; exit 1; }
-	cp $$(cat $(P)/rt/paths.txt) $(P)/rt/
+	test "$$(wc -l < "$(P)/rt/paths.txt")" -eq 1 || { echo "FAIL: probe found: $$(cat "$(P)/rt/paths.txt")"; exit 1; }
+	cp "$$(cat "$(P)/rt/paths.txt")" "$(P)/rt/"
 	@printf -- '-- prelink and link\n'
 	xcrun ld -r -arch $(ARCH) -platform_version $($(BUILD)_LD) $($(BUILD)_MIN) $$(xcrun --sdk $($(BUILD)_SDK) --show-sdk-version) \
 	    -exported_symbols_list exports.txt \
-	    -force_load $(P)/zig/lib/libggml.a -force_load $(P)/zig/lib/libmtmd.a \
-	    $(P)/rt/libcompiler_rt.a -o $(P)/llama.o
+	    -force_load "$(P)/zig/lib/libggml.a" -force_load "$(P)/zig/lib/libmtmd.a" \
+	    "$(P)/rt/libcompiler_rt.a" -o "$(P)/llama.o"
 	xcrun --sdk $($(BUILD)_SDK) clang -dynamiclib -target $(ARCH)-apple-$($(BUILD)_CLANG_OS) \
-	    -isysroot "$$(xcrun --sdk $($(BUILD)_SDK) --show-sdk-path)" $(P)/llama.o \
+	    -isysroot "$$(xcrun --sdk $($(BUILD)_SDK) --show-sdk-path)" "$(P)/llama.o" \
 	    -framework Foundation -framework Metal -framework Accelerate \
-	    -install_name $(call install_name,$(BUILD)) -o $(P)/llama.dylib
+	    -install_name $(call install_name,$(BUILD)) -o "$(P)/llama.dylib"
 
 # A build: its architectures, joined, in upstream's bundle, with its dSYM.
 $(BUILDS): %:
 	@for a in $($*_ARCHS); do $(MAKE) --no-print-directory part BUILD=$* ARCH=$$a; done
 	@printf '\n== %s: framework ==\n' $*
-	rm -rf $(B)/$*/framework $(B)/$*/dSYMs && mkdir -p $(B)/$*/framework $(B)/$*/dSYMs
-	./bundle.sh $(ROOT)/llama.cpp $(B)/$*/framework $($*_MIN) $($*_BUNDLE)
-	BIN=$(B)/$*/framework/llama.framework/$(call bin_path,$*); \
-	xcrun lipo -create $(foreach a,$($*_ARCHS),$(B)/$*/$(a)/llama.dylib) -output $$BIN; \
+	rm -rf "$(B)/$*/framework" "$(B)/$*/dSYMs" && mkdir -p "$(B)/$*/framework" "$(B)/$*/dSYMs"
+	./bundle.sh "$(ROOT)/llama.cpp" "$(B)/$*/framework" $($*_MIN) $($*_BUNDLE)
+	BIN="$(B)/$*/framework/llama.framework/$(call bin_path,$*)"; \
+	xcrun lipo -create $(foreach a,$($*_ARCHS),"$(B)/$*/$(a)/llama.dylib") -output "$$BIN"; \
 	if [ -n "$($*_VTOOL)" ]; then \
-	    xcrun vtool -set-build-version $($*_VTOOL) $($*_MIN) $($*_MIN) -replace -output $$BIN $$BIN; \
+	    xcrun vtool -set-build-version $($*_VTOOL) $($*_MIN) $($*_MIN) -replace -output "$$BIN" "$$BIN"; \
 	fi; \
-	xcrun dsymutil $$BIN -o $(B)/$*/dSYMs/llama.dSYM; \
-	xcrun strip -S $$BIN -o $(B)/$*/stripped && mv $(B)/$*/stripped $$BIN
+	xcrun dsymutil "$$BIN" -o "$(B)/$*/dSYMs/llama.dSYM"; \
+	xcrun strip -S "$$BIN" -o "$(B)/$*/stripped" && mv "$(B)/$*/stripped" "$$BIN"
 
 xcframework: $(BUILDS)
 	@printf '\n== xcframework ==\n'
-	rm -rf $(XCF)
+	rm -rf "$(XCF)"
 	xcrun xcodebuild -create-xcframework \
-	    $(foreach s,$(BUILDS),-framework $(B)/$(s)/framework/llama.framework -debug-symbols $(B)/$(s)/dSYMs/llama.dSYM) \
-	    -output $(XCF)
+	    $(foreach s,$(BUILDS),-framework "$(B)/$(s)/framework/llama.framework" -debug-symbols "$(B)/$(s)/dSYMs/llama.dSYM") \
+	    -output "$(XCF)"
 
 # -----------------------------------------------------------------------------
 # Gates
@@ -246,108 +271,113 @@ verify: xcframework
 	@printf '\n== verify ==\n'
 	@$(MAKE) --no-print-directory $(addprefix verify-,$(BUILDS))
 	@printf -- '-- xcframework\n'
-	./verify.sh xcframework $(XCF)
+	./verify.sh xcframework "$(XCF)"
 
 $(addprefix verify-,$(BUILDS)): verify-%:
 	@printf -- '-- %s\n' $*
 	@for a in $($*_ARCHS); do \
-	    ./verify.sh platform $($*_PLAT) $($*_MIN) $(B)/$*/$$a/zig/lib/libggml.a $(B)/$*/$$a/zig/lib/libmtmd.a \
-	        $(B)/$*/$$a/rt/libcompiler_rt.a $(B)/$*/$$a/llama.o; \
-	    ./verify.sh symbols $(B)/$*/$$a/llama.o; \
-	    ./verify.sh link $($*_SDK) $$a-apple-$($*_CLANG_OS) $(XCF)/$($*_XCF_ID) $(B)/test/stub-$*-$$a; \
+	    ./verify.sh platform $($*_PLAT) $($*_MIN) "$(B)/$*/$$a/zig/lib/libggml.a" "$(B)/$*/$$a/zig/lib/libmtmd.a" \
+	        "$(B)/$*/$$a/rt/libcompiler_rt.a" "$(B)/$*/$$a/llama.o"; \
+	    ./verify.sh symbols "$(B)/$*/$$a/llama.o"; \
+	    ./verify.sh link $($*_SDK) $$a-apple-$($*_CLANG_OS) "$(XCF)/$($*_XCF_ID)" "$(B)/test/stub-$*-$$a"; \
 	done
-	./verify.sh plist $(XCF)/$($*_XCF_ID)/llama.framework/$(if $(filter macos,$*),Versions/A/Resources/Info.plist,Info.plist)
-	./verify.sh dsym $(XCF)/$($*_XCF_ID)/llama.framework/$(call bin_path,$*) $(XCF)/$($*_XCF_ID)/dSYMs/llama.dSYM
+	./verify.sh plist "$(XCF)/$($*_XCF_ID)/llama.framework/$(if $(filter macos,$*),Versions/A/Resources/Info.plist,Info.plist)"
+	./verify.sh dsym "$(XCF)/$($*_XCF_ID)/llama.framework/$(call bin_path,$*)" "$(XCF)/$($*_XCF_ID)/dSYMs/llama.dSYM"
 
 # Upstream's own xcframework, by its own script, over a copy of the pinned
 # sources -- `git archive`, so nothing is written under ../llama.cpp. It
 # needs CMake: `make -C .. cmake` puts one in ../.tools.
 CMAKE_BIN := $(ROOT)/.tools/cmake-4.4.3-macos-universal/CMake.app/Contents/bin
 upstream:
-	@printf '\n== upstream: build-xcframework.sh at %s ==\n' $$(git -C $(ROOT)/llama.cpp rev-parse --short HEAD)
-	rm -rf $(B)/upstream && mkdir -p $(B)/upstream
-	git -C $(ROOT)/llama.cpp archive HEAD | tar -x -C $(B)/upstream
-	cd $(B)/upstream && PATH="$(CMAKE_BIN):$$PATH" ./build-xcframework.sh > $(B)/upstream.log 2>&1 \
-	    || { tail -30 $(B)/upstream.log; exit 1; }
-	git -C $(ROOT)/llama.cpp rev-parse HEAD > $(B)/upstream/COMMIT
-	@ls -d $(UPSTREAM)
+	@printf '\n== upstream: build-xcframework.sh at %s ==\n' $$(git -C "$(ROOT)/llama.cpp" rev-parse --short HEAD)
+	rm -rf "$(B)/upstream" && mkdir -p "$(B)/upstream"
+	git -C "$(ROOT)/llama.cpp" archive HEAD | tar -x -C "$(B)/upstream"
+	cd "$(B)/upstream" && PATH="$(CMAKE_BIN):$$PATH" ./build-xcframework.sh > "$(B)/upstream.log" 2>&1 \
+	    || { tail -30 "$(B)/upstream.log"; exit 1; }
+	git -C "$(ROOT)/llama.cpp" rev-parse HEAD > "$(B)/upstream/COMMIT"
+	@ls -d "$(UPSTREAM)"
 
 compat:
 	@printf '\n== compat: ours against upstream ==\n'
-	@test -d $(UPSTREAM) || { echo "FAIL: no $(UPSTREAM) -- run 'make upstream'"; exit 1; }
+	@test -d "$(UPSTREAM)" || { echo "FAIL: no $(UPSTREAM) -- run 'make upstream'"; exit 1; }
 	@# A build at an older pin is a different upstream: the headers differ
 	@# by the sync, and compat would report the version gap as ours.
-	@test "$$(cat $(B)/upstream/COMMIT 2>/dev/null)" = "$$(git -C $(ROOT)/llama.cpp rev-parse HEAD)" \
+	@test "$$(cat "$(B)/upstream/COMMIT" 2>/dev/null)" = "$$(git -C "$(ROOT)/llama.cpp" rev-parse HEAD)" \
 	    || { echo "FAIL: $(UPSTREAM) is not at llama.cpp's HEAD -- run 'make upstream'"; exit 1; }
-	./verify.sh compat $(XCF) $(UPSTREAM)
+	./verify.sh compat "$(XCF)" "$(UPSTREAM)"
 
 # Every structural gate, fed an input with one fault injected.
 NEG_O := $(B)/macos/arm64
 negative: xcframework
 	@printf '\n== negative tests ==\n'
-	rm -rf $(B)/neg && mkdir -p $(B)/neg
+	rm -rf "$(B)/neg" && mkdir -p "$(B)/neg"
 	@# Fault: wrong platform -- the simulator object checked as a device one.
-	@$(call expect_fail,./verify.sh platform $(ios-device_PLAT) $(IOS_MIN) $(B)/ios-sim/arm64/llama.o,simulator object passed as iOS device)
+	@$(call expect_fail,./verify.sh platform $(ios-device_PLAT) $(IOS_MIN) "$(B)/ios-sim/arm64/llama.o",simulator object passed as iOS device,llama.o are not platform 2 minos 16.4)
 	@# Fault: wrong minimum OS.
-	@$(call expect_fail,./verify.sh platform $(macos_PLAT) 15.0 $(NEG_O)/llama.o,macOS $(MACOS_MIN) object passed as minos 15.0)
+	@$(call expect_fail,./verify.sh platform $(macos_PLAT) 15.0 "$(NEG_O)/llama.o",macOS $(MACOS_MIN) object passed as minos 15.0,llama.o are not platform 1 minos 15.0)
 	@# Fault: no exports list, so every internal symbol stays global.
 	xcrun ld -r -arch arm64 -platform_version macos $(MACOS_MIN) $$(xcrun --sdk macosx --show-sdk-version) \
-	    -force_load $(NEG_O)/zig/lib/libggml.a -force_load $(NEG_O)/zig/lib/libmtmd.a \
-	    $(NEG_O)/rt/libcompiler_rt.a -o $(B)/neg/noexports.o
-	@$(call expect_fail,./verify.sh symbols $(B)/neg/noexports.o,prelink without -exported_symbols_list)
+	    -force_load "$(NEG_O)/zig/lib/libggml.a" -force_load "$(NEG_O)/zig/lib/libmtmd.a" \
+	    "$(NEG_O)/rt/libcompiler_rt.a" -o "$(B)/neg/noexports.o"
+	@$(call expect_fail,./verify.sh symbols "$(B)/neg/noexports.o",prelink without -exported_symbols_list,symbols: exported outside exports.txt)
 	@# Fault: -keep_private_externs, so nothing is localized.
 	xcrun ld -r -arch arm64 -platform_version macos $(MACOS_MIN) $$(xcrun --sdk macosx --show-sdk-version) \
 	    -keep_private_externs -exported_symbols_list exports.txt \
-	    -force_load $(NEG_O)/zig/lib/libggml.a -force_load $(NEG_O)/zig/lib/libmtmd.a \
-	    $(NEG_O)/rt/libcompiler_rt.a -o $(B)/neg/private.o
-	@$(call expect_fail,./verify.sh symbols $(B)/neg/private.o,prelink with -keep_private_externs)
+	    -force_load "$(NEG_O)/zig/lib/libggml.a" -force_load "$(NEG_O)/zig/lib/libmtmd.a" \
+	    "$(NEG_O)/rt/libcompiler_rt.a" -o "$(B)/neg/private.o"
+	@$(call expect_fail,./verify.sh symbols "$(B)/neg/private.o",prelink with -keep_private_externs,symbols: [0-9]+ symbols still private external)
 	@# Fault: compiler_rt left out, so expf and friends come from Apple's libm.
 	xcrun ld -r -arch arm64 -platform_version macos $(MACOS_MIN) $$(xcrun --sdk macosx --show-sdk-version) \
 	    -exported_symbols_list exports.txt \
-	    -force_load $(NEG_O)/zig/lib/libggml.a -force_load $(NEG_O)/zig/lib/libmtmd.a \
-	    -o $(B)/neg/nocrt.o
-	@$(call expect_fail,./verify.sh symbols $(B)/neg/nocrt.o,prelink without compiler_rt)
+	    -force_load "$(NEG_O)/zig/lib/libggml.a" -force_load "$(NEG_O)/zig/lib/libmtmd.a" \
+	    -o "$(B)/neg/nocrt.o"
+	@$(call expect_fail,./verify.sh symbols "$(B)/neg/nocrt.o",prelink without compiler_rt,symbols: _expf is not defined inside the object)
 	@# Fault: libmtmd left out, so the mtmd_* API is missing.
 	xcrun ld -r -arch arm64 -platform_version macos $(MACOS_MIN) $$(xcrun --sdk macosx --show-sdk-version) \
-	    -exported_symbols_list exports.txt -force_load $(NEG_O)/zig/lib/libggml.a \
-	    $(NEG_O)/rt/libcompiler_rt.a -o $(B)/neg/nomtmd.o
-	@$(call expect_fail,./verify.sh symbols $(B)/neg/nomtmd.o,prelink without libmtmd)
+	    -exported_symbols_list exports.txt -force_load "$(NEG_O)/zig/lib/libggml.a" \
+	    "$(NEG_O)/rt/libcompiler_rt.a" -o "$(B)/neg/nomtmd.o"
+	@$(call expect_fail,./verify.sh symbols "$(B)/neg/nomtmd.o",prelink without libmtmd,symbols: _(llama|mtmd)_[a-z_]+ is not exported)
 	@# Fault: a malformed Info.plist.
-	sed 's#</dict>##' $(XCF)/ios-arm64/llama.framework/Info.plist > $(B)/neg/Info.plist
-	@$(call expect_fail,./verify.sh plist $(B)/neg/Info.plist,Info.plist missing </dict>)
+	sed 's#</dict>##' "$(XCF)/ios-arm64/llama.framework/Info.plist" > "$(B)/neg/Info.plist"
+	@$(call expect_fail,./verify.sh plist "$(B)/neg/Info.plist",Info.plist missing </dict>,plist: .*neg/Info.plist does not lint)
 	@# Fault: a dSYM from another build.
-	@$(call expect_fail,./verify.sh dsym $(XCF)/ios-arm64/llama.framework/llama $(XCF)/tvos-arm64/dSYMs/llama.dSYM,dSYM of the tvOS binary for the iOS one)
+	@$(call expect_fail,./verify.sh dsym "$(XCF)/ios-arm64/llama.framework/llama" "$(XCF)/tvos-arm64/dSYMs/llama.dSYM",dSYM of the tvOS binary for the iOS one,dsym: UUIDs differ)
 	@# Fault: an xcframework with a slice missing.
-	xcrun xcodebuild -create-xcframework -framework $(B)/macos/framework/llama.framework -framework $(B)/ios-device/framework/llama.framework \
-	    -output $(B)/neg/two.xcframework > /dev/null
-	@$(call expect_fail,./verify.sh xcframework $(B)/neg/two.xcframework,xcframework without five of its slices)
-	@if [ -d $(UPSTREAM) ]; then $(MAKE) --no-print-directory negative-compat; fi
+	xcrun xcodebuild -create-xcframework -framework "$(B)/macos/framework/llama.framework" -framework "$(B)/ios-device/framework/llama.framework" \
+	    -output "$(B)/neg/two.xcframework" > /dev/null
+	@$(call expect_fail,./verify.sh xcframework "$(B)/neg/two.xcframework",xcframework without five of its slices,xcframework: libraries are .ios-arm64:ios::arm64 macos-arm64_x86_64:macos::arm64.x86_64 .)
+	@if [ -d "$(UPSTREAM)" ]; then $(MAKE) --no-print-directory negative-compat; fi
 	@echo "  PASS: every gate failed on its injected fault"
 
 # compat's own faults, against a copy of ours with one thing changed.
 .PHONY: negative-compat
 negative-compat:
 	@# Fault: one header differs.
-	rm -rf $(B)/neg/hdr && cp -R $(XCF) $(B)/neg/hdr
-	chmod u+w $(B)/neg/hdr/ios-arm64/llama.framework/Headers/llama.h
-	echo '// edited' >> $(B)/neg/hdr/ios-arm64/llama.framework/Headers/llama.h
-	@$(call expect_fail,./verify.sh compat $(B)/neg/hdr $(UPSTREAM),a header that is not upstream's)
+	rm -rf "$(B)/neg/hdr" && cp -R "$(XCF)" "$(B)/neg/hdr"
+	chmod u+w "$(B)/neg/hdr/ios-arm64/llama.framework/Headers/llama.h"
+	echo '// edited' >> "$(B)/neg/hdr/ios-arm64/llama.framework/Headers/llama.h"
+	@$(call expect_fail,./verify.sh compat "$(B)/neg/hdr" "$(UPSTREAM)",a header that is not upstream's,compat: ios-arm64: ./Headers/llama.h is not upstream)
 	@# Fault: our own module name, as the static framework had.
-	rm -rf $(B)/neg/mod && cp -R $(XCF) $(B)/neg/mod
-	sed -i '' 's/^framework module llama/framework module llamazig/' $(B)/neg/mod/tvos-arm64/llama.framework/Modules/module.modulemap
-	@$(call expect_fail,./verify.sh compat $(B)/neg/mod $(UPSTREAM),module renamed)
+	rm -rf "$(B)/neg/mod" && cp -R "$(XCF)" "$(B)/neg/mod"
+	sed -i '' 's/^framework module llama/framework module llamazig/' "$(B)/neg/mod/tvos-arm64/llama.framework/Modules/module.modulemap"
+	@$(call expect_fail,./verify.sh compat "$(B)/neg/mod" "$(UPSTREAM)",module renamed,compat: tvos-arm64: ./Modules/module.modulemap is not upstream)
 	@# Fault: an API function no longer exported.
-	rm -rf $(B)/neg/api && cp -R $(XCF) $(B)/neg/api
-	grep -v '^_mtmd_' exports.txt > $(B)/neg/exports-nomtmd.txt
-	xcrun clang -dynamiclib -target arm64-apple-macos$(MACOS_MIN) $(NEG_O)/llama.o \
-	    -framework Foundation -framework Metal -framework Accelerate -Wl,-exported_symbols_list,$(B)/neg/exports-nomtmd.txt \
-	    -install_name @rpath/llama.framework/Versions/Current/llama -o $(B)/neg/arm64.dylib
-	xcrun lipo -create $(B)/neg/arm64.dylib $(B)/macos/x86_64/llama.dylib -output $(B)/neg/api/macos-arm64_x86_64/llama.framework/Versions/A/llama
-	@$(call expect_fail,./verify.sh compat $(B)/neg/api $(UPSTREAM),mtmd_* not exported on macOS arm64)
+	rm -rf "$(B)/neg/api" && cp -R "$(XCF)" "$(B)/neg/api"
+	grep -v '^_mtmd_' exports.txt > "$(B)/neg/exports-nomtmd.txt"
+	@# Linked as the slices are, against the macOS SDK named explicitly: a
+	@# bare `xcrun clang` takes SDKROOT's default, which on a machine whose
+	@# default is the Command Line Tools stamps another SDK version, and compat
+	@# then caught the binary's identity rather than the missing exports.
+	xcrun --sdk macosx clang -dynamiclib -target arm64-apple-macos$(MACOS_MIN) \
+	    -isysroot "$$(xcrun --sdk macosx --show-sdk-path)" "$(NEG_O)/llama.o" \
+	    -framework Foundation -framework Metal -framework Accelerate "-Wl,-exported_symbols_list,$(B)/neg/exports-nomtmd.txt" \
+	    -install_name @rpath/llama.framework/Versions/Current/llama -o "$(B)/neg/arm64.dylib"
+	xcrun lipo -create "$(B)/neg/arm64.dylib" "$(B)/macos/x86_64/llama.dylib" -output "$(B)/neg/api/macos-arm64_x86_64/llama.framework/Versions/A/llama"
+	@$(call expect_fail,./verify.sh compat "$(B)/neg/api" "$(UPSTREAM)",mtmd_* not exported on macOS arm64,compat: macos-arm64_x86_64 arm64: [0-9]+ header-declared symbols upstream exports and ours does not: _mtmd_)
 	@# Fault: the device binary not re-marked by vtool, so its SDK field differs.
-	rm -rf $(B)/neg/vt && cp -R $(XCF) $(B)/neg/vt
-	cp $(B)/tvos-device/arm64/llama.dylib $(B)/neg/vt/tvos-arm64/llama.framework/llama
-	@$(call expect_fail,./verify.sh compat $(B)/neg/vt $(UPSTREAM),tvOS binary without vtool)
+	rm -rf "$(B)/neg/vt" && cp -R "$(XCF)" "$(B)/neg/vt"
+	cp "$(B)/tvos-device/arm64/llama.dylib" "$(B)/neg/vt/tvos-arm64/llama.framework/llama"
+	@$(call expect_fail,./verify.sh compat "$(B)/neg/vt" "$(UPSTREAM)",tvOS binary without vtool,compat: tvos-arm64: binary identity differs:.*sdk=16.4 .*sdk=[0-9.]+)
 
 # -----------------------------------------------------------------------------
 # Smoke tests
@@ -360,37 +390,39 @@ negative-compat:
 # whatever CPU they are run at. driver-<cpu>: apple_m1 for macOS and the
 # simulators, apple_a7 for the iOS device.
 DRIVER_CPUS := apple_m1 apple_a7
-ref-driver: $(addprefix $(B)/test/driver-,$(DRIVER_CPUS))
+ref-driver: $(addprefix build/test/driver-,$(DRIVER_CPUS))
 
 # build/upstream.zig names the pin: a driver built at an older release is a
 # different reference, and the smoke would report the version gap as a port bug.
-$(B)/test/driver-%: test/driver.c $(ROOT)/build/upstream.zig
+# The target is relative (make splits targets on spaces); the recipe `cd`s to
+# the root, so it writes the absolute path, not $@.
+build/test/driver-%: test/driver.c ../build/upstream.zig
 	@printf '\n== reference driver for %s (zig build reference -Dblas -Dcpu=%s) ==\n' $* $*
-	cd $(ROOT) && $(HOST_ZIG) build reference --release=fast -Dblas -Dcpu=$* --prefix $(B)/ref-$*
-	mkdir -p $(B)/test
-	cd $(ROOT) && $(HOST_ZIG) cc -mcpu=$* $(CURDIR)/test/driver.c -o $@ -std=c11 \
-	    -I llama.cpp/include -I llama.cpp/ggml/include $(B)/ref-$*/lib/libllama.a $(B)/ref-$*/lib/libggml.a \
+	cd "$(ROOT)" && "$(HOST_ZIG)" build reference --release=fast -Dblas -Dcpu=$* --prefix "$(B)/ref-$*"
+	mkdir -p "$(B)/test"
+	cd "$(ROOT)" && "$(HOST_ZIG)" cc -mcpu=$* "$(CURDIR)/test/driver.c" -o "$(B)/test/driver-$*" -std=c11 \
+	    -I llama.cpp/include -I llama.cpp/ggml/include "$(B)/ref-$*/lib/libllama.a" "$(B)/ref-$*/lib/libggml.a" \
 	    -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
 	    -F "$$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks"
 
 MACOS_FW := $(XCF)/$(macos_XCF_ID)
 
-smoke-macos: xcframework $(B)/test/driver-apple_m1
+smoke-macos: xcframework build/test/driver-apple_m1
 	@printf '\n== smoke: macOS ==\n'
-	xcrun --sdk macosx swiftc -O -target arm64-apple-macos$(MACOS_MIN) -F $(MACOS_FW) -framework llama \
-	    -Xlinker -rpath -Xlinker $(MACOS_FW) \
-	    -module-cache-path $(B)/test/modules test/smoke.swift -o $(B)/test/smoke-macos
-	./smoke.sh compare macos gpu $(B)/test/out $(MODEL) $(NPRED) $(B)/test/driver-apple_m1 $(B)/test/smoke-macos
-	./smoke.sh compare macos cpu $(B)/test/out $(MODEL) $(NPRED) $(B)/test/driver-apple_m1 $(B)/test/smoke-macos
+	xcrun --sdk macosx swiftc -O -target arm64-apple-macos$(MACOS_MIN) -F "$(MACOS_FW)" -framework llama \
+	    -Xlinker -rpath -Xlinker "$(MACOS_FW)" \
+	    -module-cache-path "$(B)/test/modules" test/smoke.swift -o "$(B)/test/smoke-macos"
+	./smoke.sh compare macos gpu "$(B)/test/out" "$(MODEL)" $(NPRED) "$(B)/test/driver-apple_m1" "$(B)/test/smoke-macos"
+	./smoke.sh compare macos cpu "$(B)/test/out" "$(MODEL)" $(NPRED) "$(B)/test/driver-apple_m1" "$(B)/test/smoke-macos"
 	@printf -- '-- negative: one token of the reference altered\n'
-	mkdir -p $(B)/neg
-	sed '1s/./X/' $(B)/test/out/macos-gpu-1.ref.txt > $(B)/neg/altered.txt
-	@$(call expect_fail,cmp $(B)/neg/altered.txt $(B)/test/out/macos-gpu-1.test.txt,altered reference token)
+	mkdir -p "$(B)/neg"
+	sed '1s/./X/' "$(B)/test/out/macos-gpu-1.ref.txt" > "$(B)/neg/altered.txt"
+	@$(call expect_fail,cmp "$(B)/neg/altered.txt" "$(B)/test/out/macos-gpu-1.test.txt",altered reference token,macos-gpu-1.test.txt differ: char 1)
 	@printf -- '-- app C++ beside the framework\n'
 	xcrun --sdk macosx clang++ -std=c++17 -target arm64-apple-macos$(MACOS_MIN) -fmodules -fcxx-modules \
-	    -fmodules-cache-path=$(B)/test/modules -F $(MACOS_FW) -framework llama -Wl,-rpath,$(MACOS_FW) \
-	    test/coexist.cpp -o $(B)/test/coexist
-	$(B)/test/coexist 2>/dev/null
+	    "-fmodules-cache-path=$(B)/test/modules" -F "$(MACOS_FW)" -framework llama "-Wl,-rpath,$(MACOS_FW)" \
+	    test/coexist.cpp -o "$(B)/test/coexist"
+	"$(B)/test/coexist" 2>/dev/null
 
 # The binary drop-in: test/smoke.swift linked against *upstream's*
 # framework, in an app-style layout with the framework beside it under
@@ -399,37 +431,39 @@ smoke-macos: xcframework $(B)/test/driver-apple_m1
 # and their host layer are upstream's own source on both sides) and ours
 # must equal the port's driver. Upstream's CPU path is not ours -- its macOS
 # slice compiles ggml-cpu generic, see README -- so CPU is reported only.
-dropin-macos: xcframework $(B)/test/driver-apple_m1
+dropin-macos: xcframework build/test/driver-apple_m1
 	@printf '\n== drop-in: an app linked against upstream'"'"'s framework, run on ours ==\n'
-	@test -d $(UPSTREAM) || { echo "FAIL: no $(UPSTREAM) -- run 'make upstream'"; exit 1; }
-	rm -rf $(B)/dropin && mkdir -p $(B)/dropin/up/Frameworks $(B)/dropin/ours/Frameworks
-	xcrun --sdk macosx swiftc -O -target arm64-apple-macos$(MACOS_MIN) -F $(UPSTREAM)/$(macos_XCF_ID) -framework llama \
+	@test -d "$(UPSTREAM)" || { echo "FAIL: no $(UPSTREAM) -- run 'make upstream'"; exit 1; }
+	rm -rf "$(B)/dropin" && mkdir -p "$(B)/dropin/up/Frameworks" "$(B)/dropin/ours/Frameworks"
+	xcrun --sdk macosx swiftc -O -target arm64-apple-macos$(MACOS_MIN) -F "$(UPSTREAM)/$(macos_XCF_ID)" -framework llama \
 	    -Xlinker -rpath -Xlinker @executable_path/Frameworks \
-	    -module-cache-path $(B)/dropin/modules test/smoke.swift -o $(B)/dropin/smoke
-	cp $(B)/dropin/smoke $(B)/dropin/up/smoke && cp $(B)/dropin/smoke $(B)/dropin/ours/smoke
-	cp -R $(UPSTREAM)/$(macos_XCF_ID)/llama.framework $(B)/dropin/up/Frameworks/
-	cp -R $(MACOS_FW)/llama.framework $(B)/dropin/ours/Frameworks/
-	cmp $(B)/dropin/up/smoke $(B)/dropin/ours/smoke
-	./smoke.sh compare upstream gpu $(B)/dropin/out $(MODEL) $(NPRED) $(B)/dropin/up/smoke $(B)/dropin/ours/smoke
-	./smoke.sh compare port gpu $(B)/dropin/out $(MODEL) $(NPRED) $(B)/test/driver-apple_m1 $(B)/dropin/ours/smoke
-	./smoke.sh compare port cpu $(B)/dropin/out $(MODEL) $(NPRED) $(B)/test/driver-apple_m1 $(B)/dropin/ours/smoke
+	    -module-cache-path "$(B)/dropin/modules" test/smoke.swift -o "$(B)/dropin/smoke"
+	cp "$(B)/dropin/smoke" "$(B)/dropin/up/smoke" && cp "$(B)/dropin/smoke" "$(B)/dropin/ours/smoke"
+	cp -R "$(UPSTREAM)/$(macos_XCF_ID)/llama.framework" "$(B)/dropin/up/Frameworks/"
+	cp -R "$(MACOS_FW)/llama.framework" "$(B)/dropin/ours/Frameworks/"
+	cmp "$(B)/dropin/up/smoke" "$(B)/dropin/ours/smoke"
+	./smoke.sh compare upstream gpu "$(B)/dropin/out" "$(MODEL)" $(NPRED) "$(B)/dropin/up/smoke" "$(B)/dropin/ours/smoke"
+	./smoke.sh compare port gpu "$(B)/dropin/out" "$(MODEL)" $(NPRED) "$(B)/test/driver-apple_m1" "$(B)/dropin/ours/smoke"
+	./smoke.sh compare port cpu "$(B)/dropin/out" "$(MODEL)" $(NPRED) "$(B)/test/driver-apple_m1" "$(B)/dropin/ours/smoke"
 	@printf -- '-- CPU, upstream'"'"'s framework against ours (reported, not a gate)\n'
-	./smoke.sh compare upstream cpu $(B)/dropin/out $(MODEL) $(NPRED) $(B)/dropin/up/smoke $(B)/dropin/ours/smoke || true
+	./smoke.sh compare upstream cpu "$(B)/dropin/out" "$(MODEL)" $(NPRED) "$(B)/dropin/up/smoke" "$(B)/dropin/ours/smoke" || true
 
-# One simulator: $(1) label, $(2) build, $(3) device name.
+# One simulator: $(1) label, $(2) build, $(3) device name. The test command
+# is `xcrun simctl spawn <udid> <binary>`, given to smoke.sh as separate
+# arguments so the binary's path may hold a space.
 define smoke_sim
-	xcrun --sdk $($(2)_SDK) swiftc -O -target arm64-apple-$($(2)_CLANG_OS) -F $(XCF)/$($(2)_XCF_ID) -framework llama \
-	    -Xlinker -rpath -Xlinker $(XCF)/$($(2)_XCF_ID) \
-	    -module-cache-path $(B)/test/modules test/smoke.swift -o $(B)/test/smoke-$(1)
+	xcrun --sdk $($(2)_SDK) swiftc -O -target arm64-apple-$($(2)_CLANG_OS) -F "$(XCF)/$($(2)_XCF_ID)" -framework llama \
+	    -Xlinker -rpath -Xlinker "$(XCF)/$($(2)_XCF_ID)" \
+	    -module-cache-path "$(B)/test/modules" test/smoke.swift -o "$(B)/test/smoke-$(1)"
 	UDID=$$(./smoke.sh sim-udid "$(3)"); \
 	test -n "$$UDID" || { echo "FAIL: no available simulator named $(3)"; exit 1; }; \
 	STATE=$$(xcrun simctl list devices | grep "$$UDID" | sed -E 's/.*\((Booted|Shutdown)\).*/\1/'); \
 	xcrun simctl bootstatus $$UDID -b > /dev/null; \
 	trap '[ "$$STATE" = Booted ] || xcrun simctl shutdown '$$UDID EXIT; \
-	./smoke.sh compare $(1) cpu $(B)/test/out $(MODEL) $(NPRED) $(B)/test/driver-apple_m1 "xcrun simctl spawn $$UDID $(B)/test/smoke-$(1)"
+	./smoke.sh compare $(1) cpu "$(B)/test/out" "$(MODEL)" $(NPRED) "$(B)/test/driver-apple_m1" xcrun simctl spawn $$UDID "$(B)/test/smoke-$(1)"
 endef
 
-smoke-sim: xcframework $(B)/test/driver-apple_m1
+smoke-sim: xcframework build/test/driver-apple_m1
 	@printf '\n== smoke: iOS simulator (%s) ==\n' "$(SIM_DEVICE)"
 	$(call smoke_sim,ios-sim,ios-sim,$(SIM_DEVICE))
 	@printf '\n== smoke: tvOS simulator (%s) ==\n' "$(TV_DEVICE)"
@@ -445,34 +479,34 @@ smoke-sim: xcframework $(B)/test/driver-apple_m1
 # libraries here -- CPU and Metal both, since the Mac's Metal computes the
 # same bits as the phone's (measured on an iPhone 15). The app carries the
 # increased-memory-limit entitlement a 2B model needs (README, "Memory").
-smoke-device: xcframework $(B)/test/driver-apple_a7
+smoke-device: xcframework build/test/driver-apple_a7
 	@printf '\n== smoke: iOS device (%s) ==\n' "$(DEVICE_ID)"
-	rm -rf $(B)/device && mkdir -p $(B)/device
-	cp -R test/device/DeviceSmoke.xcodeproj test/device/App test/device/DeviceSmoke.entitlements $(B)/device/
-	ln $(MODEL) $(B)/device/App/model.gguf 2>/dev/null || cp $(MODEL) $(B)/device/App/model.gguf
-	cp -R $(XCF) $(B)/device/
-	cd $(B)/device && xcrun xcodebuild build -quiet -project DeviceSmoke.xcodeproj -scheme DeviceSmoke -configuration Release \
-	    -destination 'platform=iOS,id=$(DEVICE_ID)' -derivedDataPath $(B)/device-dd -allowProvisioningUpdates \
-	    DEVELOPMENT_TEAM=$(TEAM) SMOKE_BUNDLE_ID=$(DEVICE_APP) > $(B)/device-build.log 2>&1 \
-	    || { grep -m5 'error:' $(B)/device-build.log; exit 1; }
+	rm -rf "$(B)/device" && mkdir -p "$(B)/device"
+	cp -R test/device/DeviceSmoke.xcodeproj test/device/App test/device/DeviceSmoke.entitlements "$(B)/device/"
+	ln "$(MODEL)" "$(B)/device/App/model.gguf" 2>/dev/null || cp "$(MODEL)" "$(B)/device/App/model.gguf"
+	cp -R "$(XCF)" "$(B)/device/"
+	cd "$(B)/device" && xcrun xcodebuild build -quiet -project DeviceSmoke.xcodeproj -scheme DeviceSmoke -configuration Release \
+	    -destination 'platform=iOS,id=$(DEVICE_ID)' -derivedDataPath "$(B)/device-dd" -allowProvisioningUpdates \
+	    DEVELOPMENT_TEAM=$(TEAM) SMOKE_BUNDLE_ID=$(DEVICE_APP) > "$(B)/device-build.log" 2>&1 \
+	    || { grep -m5 'error:' "$(B)/device-build.log"; exit 1; }
 	@# Embedding signs the copy, so its bytes are not ours; its UUID is.
-	test "$$(xcrun dwarfdump --uuid $(B)/device-dd/Build/Products/Release-iphoneos/DeviceSmoke.app/Frameworks/llama.framework/llama | cut -d' ' -f2)" = \
-	     "$$(xcrun dwarfdump --uuid $(XCF)/ios-arm64/llama.framework/llama | cut -d' ' -f2)" \
+	test "$$(xcrun dwarfdump --uuid "$(B)/device-dd/Build/Products/Release-iphoneos/DeviceSmoke.app/Frameworks/llama.framework/llama" | cut -d' ' -f2)" = \
+	     "$$(xcrun dwarfdump --uuid "$(XCF)/ios-arm64/llama.framework/llama" | cut -d' ' -f2)" \
 	    || { echo "FAIL: our llama.framework is not embedded in the app"; exit 1; }
-	xcrun devicectl device install app --device $(DEVICE_ID) $(B)/device-dd/Build/Products/Release-iphoneos/DeviceSmoke.app > /dev/null
+	xcrun devicectl device install app --device $(DEVICE_ID) "$(B)/device-dd/Build/Products/Release-iphoneos/DeviceSmoke.app" > /dev/null
 	@# The first launch after an install has come back with none of the
 	@# app's output on the console while the app ran to completion; one more
 	@# launch, if so.
 	for attempt in 1 2; do \
 	    xcrun devicectl device process launch --device $(DEVICE_ID) --console --terminate-existing $(DEVICE_APP) \
-	        > $(B)/device-run.log 2>&1 || true; \
-	    grep -q '^SMOKE-DEVICE' $(B)/device-run.log && break; \
+	        > "$(B)/device-run.log" 2>&1 || true; \
+	    grep -q '^SMOKE-DEVICE' "$(B)/device-run.log" && break; \
 	done
-	./smoke.sh device device $(B)/test/out $(MODEL) $(B)/test/driver-apple_a7 $(B)/device-run.log
+	./smoke.sh device device "$(B)/test/out" "$(MODEL)" "$(B)/test/driver-apple_a7" "$(B)/device-run.log"
 	@printf -- '-- negative: one token of the device output altered\n'
-	mkdir -p $(B)/neg
-	sed '1s/./X/' $(B)/test/out/device-gpu-1.test.txt > $(B)/neg/device-altered.txt
-	@$(call expect_fail,cmp $(B)/test/out/device-gpu-1.ref.txt $(B)/neg/device-altered.txt,altered device token)
+	mkdir -p "$(B)/neg"
+	sed '1s/./X/' "$(B)/test/out/device-gpu-1.test.txt" > "$(B)/neg/device-altered.txt"
+	@$(call expect_fail,cmp "$(B)/test/out/device-gpu-1.ref.txt" "$(B)/neg/device-altered.txt",altered device token,device-altered.txt differ: char 1)
 
 # Upstream's own consumer, examples/llama.swiftui, untouched: copied with its
 # project, which names ../../build-apple/llama.xcframework, and that path made
@@ -484,28 +518,28 @@ smoke-device: xcframework $(B)/test/driver-apple_a7
 LAUNCH_WAIT ?= 8
 swiftui: xcframework
 	@printf '\n== swiftui: upstream'"'"'s examples/llama.swiftui against ours ==\n'
-	rm -rf $(B)/swiftui && mkdir -p $(B)/swiftui/examples $(B)/swiftui/build-apple
-	git -C $(ROOT)/llama.cpp archive HEAD examples/llama.swiftui | tar -x -C $(B)/swiftui
-	ln -s $(XCF) $(B)/swiftui/build-apple/llama.xcframework
-	cd $(B)/swiftui/examples/llama.swiftui && xcrun xcodebuild build -quiet -project llama.swiftui.xcodeproj \
+	rm -rf "$(B)/swiftui" && mkdir -p "$(B)/swiftui/examples" "$(B)/swiftui/build-apple"
+	git -C "$(ROOT)/llama.cpp" archive HEAD examples/llama.swiftui | tar -x -C "$(B)/swiftui"
+	ln -s "$(XCF)" "$(B)/swiftui/build-apple/llama.xcframework"
+	cd "$(B)/swiftui/examples/llama.swiftui" && xcrun xcodebuild build -quiet -project llama.swiftui.xcodeproj \
 	    -scheme llama.swiftui -configuration Release -destination 'generic/platform=iOS Simulator' \
-	    -derivedDataPath $(B)/swiftui-dd CODE_SIGNING_ALLOWED=NO > $(B)/swiftui-sim.log 2>&1 \
-	    || { grep -m5 'error:' $(B)/swiftui-sim.log; exit 1; }
+	    -derivedDataPath "$(B)/swiftui-dd" CODE_SIGNING_ALLOWED=NO > "$(B)/swiftui-sim.log" 2>&1 \
+	    || { grep -m5 'error:' "$(B)/swiftui-sim.log"; exit 1; }
 	@echo "  built for the iOS simulator"
-	cd $(B)/swiftui/examples/llama.swiftui && xcrun xcodebuild build -quiet -project llama.swiftui.xcodeproj \
+	cd "$(B)/swiftui/examples/llama.swiftui" && xcrun xcodebuild build -quiet -project llama.swiftui.xcodeproj \
 	    -scheme llama.swiftui -configuration Release -destination 'platform=iOS,id=$(DEVICE_ID)' \
-	    -derivedDataPath $(B)/swiftui-dd -allowProvisioningUpdates \
-	    DEVELOPMENT_TEAM=$(TEAM) PRODUCT_BUNDLE_IDENTIFIER=$(SWIFTUI_APP) > $(B)/swiftui-device.log 2>&1 \
-	    || { grep -m5 'error:' $(B)/swiftui-device.log; exit 1; }
-	APP=$(B)/swiftui-dd/Build/Products/Release-iphoneos/llama.swiftui.app; \
-	test "$$(xcrun dwarfdump --uuid $$APP/Frameworks/llama.framework/llama | cut -d' ' -f2)" = \
-	     "$$(xcrun dwarfdump --uuid $(XCF)/ios-arm64/llama.framework/llama | cut -d' ' -f2)" \
+	    -derivedDataPath "$(B)/swiftui-dd" -allowProvisioningUpdates \
+	    DEVELOPMENT_TEAM=$(TEAM) PRODUCT_BUNDLE_IDENTIFIER=$(SWIFTUI_APP) > "$(B)/swiftui-device.log" 2>&1 \
+	    || { grep -m5 'error:' "$(B)/swiftui-device.log"; exit 1; }
+	APP="$(B)/swiftui-dd/Build/Products/Release-iphoneos/llama.swiftui.app"; \
+	test "$$(xcrun dwarfdump --uuid "$$APP/Frameworks/llama.framework/llama" | cut -d' ' -f2)" = \
+	     "$$(xcrun dwarfdump --uuid "$(XCF)/ios-arm64/llama.framework/llama" | cut -d' ' -f2)" \
 	    || { echo "FAIL: the app did not embed our framework's binary"; exit 1; }; \
-	xcrun devicectl device install app --device $(DEVICE_ID) $$APP > /dev/null
-	xcrun devicectl device process launch --device $(DEVICE_ID) --terminate-existing $(SWIFTUI_APP) > $(B)/swiftui-launch.log 2>&1
+	xcrun devicectl device install app --device $(DEVICE_ID) "$$APP" > /dev/null
+	xcrun devicectl device process launch --device $(DEVICE_ID) --terminate-existing $(SWIFTUI_APP) > "$(B)/swiftui-launch.log" 2>&1
 	sleep $(LAUNCH_WAIT)
-	xcrun devicectl device info processes --device $(DEVICE_ID) > $(B)/swiftui-procs.txt 2>&1
-	grep -q 'llama.swiftui.app/llama.swiftui' $(B)/swiftui-procs.txt \
+	xcrun devicectl device info processes --device $(DEVICE_ID) > "$(B)/swiftui-procs.txt" 2>&1
+	grep -q 'llama.swiftui.app/llama.swiftui' "$(B)/swiftui-procs.txt" \
 	    || { echo "FAIL: llama.swiftui is not running $(LAUNCH_WAIT) s after launch"; exit 1; }
 	@echo "  built, installed and running on $(DEVICE_ID) after $(LAUNCH_WAIT) s"
 
@@ -514,36 +548,36 @@ swiftui: xcframework
 
 pkg-test: xcframework
 	@printf '\n== package: macOS ==\n'
-	swift build --package-path test/pkg --scratch-path $(B)/pkg/swiftpm -c release
-	$(B)/pkg/swiftpm/release/pkgtest-run
+	swift build --package-path test/pkg --scratch-path "$(B)/pkg/swiftpm" -c release
+	"$(B)/pkg/swiftpm/release/pkgtest-run"
 	@printf '\n== package: iOS simulator ==\n'
 	cd test/pkg && xcrun xcodebuild build -quiet -scheme PkgTest -destination 'generic/platform=iOS Simulator' \
-	    -derivedDataPath $(B)/pkg/dd
+	    -derivedDataPath "$(B)/pkg/dd"
 	@echo "  built PkgTest for the iOS simulator"
 	@printf -- '-- negative: the package before the xcframework is built\n'
-	rm -rf $(B)/neg/pkg && mkdir -p $(B)/neg/pkg/xcframework/test/pkg
-	cp Package.swift $(B)/neg/pkg/xcframework/
-	cp -R test/pkg/Package.swift test/pkg/Sources $(B)/neg/pkg/xcframework/test/pkg/
-	@$(call expect_fail,swift build --package-path $(B)/neg/pkg/xcframework/test/pkg --scratch-path $(B)/neg/pkg/swiftpm,package resolved with no xcframework built)
-	grep -q 'llama.xcframework' $(B)/neg/last.log || { echo "FAIL: the error does not name the xcframework"; exit 1; }
+	rm -rf "$(B)/neg/pkg" && mkdir -p "$(B)/neg/pkg/xcframework/test/pkg"
+	cp Package.swift "$(B)/neg/pkg/xcframework/"
+	cp -R test/pkg/Package.swift test/pkg/Sources "$(B)/neg/pkg/xcframework/test/pkg/"
+	@$(call expect_fail,swift build --package-path "$(B)/neg/pkg/xcframework/test/pkg" --scratch-path "$(B)/neg/pkg/swiftpm",package resolved with no xcframework built,error: local binary target .llama. at .*/build/llama.xcframework. does not contain a binary artifact)
+	grep -q 'llama.xcframework' "$(B)/neg/last.log" || { echo "FAIL: the error does not name the xcframework"; exit 1; }
 
 zip: xcframework
 	@printf '\n== zip ==\n'
-	rm -f $(XCF).zip
-	cd $(B) && ditto -c -k --keepParent llama.xcframework llama.xcframework.zip
-	swift package compute-checksum $(XCF).zip | tee $(XCF).zip.sha256
-	@ls -la $(XCF).zip
+	rm -f "$(XCF).zip"
+	cd "$(B)" && ditto -c -k --keepParent llama.xcframework llama.xcframework.zip
+	swift package compute-checksum "$(XCF).zip" | tee "$(XCF).zip.sha256"
+	@ls -la "$(XCF).zip"
 
 # -----------------------------------------------------------------------------
 
 port-gates:
 	@printf '\n== port gates: make validate ops-diff ==\n'
-	$(MAKE) -C $(ROOT) validate ops-diff
+	$(MAKE) -C "$(ROOT)" validate ops-diff
 
 check: verify negative smoke-macos smoke-sim pkg-test zip port-gates
-	@if [ -d $(UPSTREAM) ]; then $(MAKE) --no-print-directory compat dropin-macos; \
+	@if [ -d "$(UPSTREAM)" ]; then $(MAKE) --no-print-directory compat dropin-macos; \
 	else echo "  (no build/upstream: compat and dropin-macos skipped -- 'make upstream' builds it)"; fi
 	@printf '\n== check: all passed ==\n'
 
 clean:
-	rm -rf $(B) .build .swiftpm test/pkg/.build test/pkg/.swiftpm
+	rm -rf "$(B)" .build .swiftpm test/pkg/.build test/pkg/.swiftpm

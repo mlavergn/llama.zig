@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/mimovl.cpp` at v0.6.0 (`d81235049`).
+//! Ports `llama.cpp/tools/mtmd/models/mimovl.cpp` at v0.7.0 (`620d2225c`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -14,7 +14,7 @@ const c = impl.c;
 
 extern fn sqrtf(x: f32) f32;
 
-/// Ports `build_mm` (mimovl.cpp:3 @d81235049), a member of
+/// Ports `build_mm` (mimovl.cpp:3 @620d2225c), a member of
 /// `clip_graph_mimovl`: every matmul at F32 precision.
 pub fn buildMm(g: *const graph.Graph, w: graph.T, x: graph.T) graph.T {
     const cur = c.ggml_mul_mat(g.ctx0, w, x);
@@ -22,7 +22,7 @@ pub fn buildMm(g: *const graph.Graph, w: graph.T, x: graph.T) graph.T {
     return cur;
 }
 
-/// The `reorder` lambda (mimovl.cpp:100 @d81235049): permutes patches at
+/// The `reorder` lambda (mimovl.cpp:94 @620d2225c): permutes patches at
 /// merge-unit granularity, keeping each group's (h, w) order.
 fn reorder(g: *graph.Graph, x: graph.T, idx: graph.T, merge_unit: c_int, n_units: c_int, n_pos: c_int, batch_size: c_int) graph.T {
     var y = c.ggml_reshape_2d(g.ctx0, x, g.n_embd * merge_unit, n_units);
@@ -30,7 +30,7 @@ fn reorder(g: *graph.Graph, x: graph.T, idx: graph.T, merge_unit: c_int, n_units
     return c.ggml_reshape_3d(g.ctx0, y, g.n_embd, n_pos, batch_size);
 }
 
-/// Ports `build` (mimovl.cpp:22 @d81235049), a member of `clip_graph_mimovl`.
+/// Ports `build` (mimovl.cpp:22 @620d2225c), a member of `clip_graph_mimovl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     g.mm_hook = buildMm;
@@ -102,14 +102,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const idx_col = c.ggml_cast(ctx0, idx_col_f, c.GGML_TYPE_I32);
     const idx_col_inv = c.ggml_argsort(ctx0, idx_col_f, c.GGML_SORT_ORDER_ASC);
 
-    const window_mask = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, n_pos, n_pos);
-    _ = c.ggml_set_name(window_mask, "mimovl_window_mask");
-    c.ggml_set_input(window_mask);
-
-    const window_mask_attn = if (g.flash_attn_type == .enabled)
-        c.ggml_cast(ctx0, window_mask, c.GGML_TYPE_F16)
-    else
-        window_mask;
+    const window_mask = g.buildInpAttnMask(n_pos, n_pos, 0);
 
     var inpL = inp;
     var prev_mode: i32 = -1;
@@ -160,9 +153,9 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         g.cb(Kcur, "Kcur_rope", il);
 
         // Full layers: plain attention. Windowed layers: banded mask and per-head sinks.
-        const mask = if (is_full) null else window_mask_attn;
+        const mask = if (is_full) null else window_mask;
         const sinks = if (is_full) null else layer.attn_sinks;
-        if (!is_full) impl.ggmlAssert(layer.attn_sinks != null, "mimovl.cpp", 157, "layer.attn_sinks != nullptr");
+        if (!is_full) impl.ggmlAssert(layer.attn_sinks != null, "mimovl.cpp", 151, "layer.attn_sinks != nullptr");
         const attn_out = g.buildAttn(layer.o_w, layer.o_b, Qcur, Kcur, Vcur, mask, attn_scale, il, sinks);
         g.cb(attn_out, "attn_out", il);
 

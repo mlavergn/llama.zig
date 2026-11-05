@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.6.0 (`d81235049`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.7.0 (`620d2225c`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Two kernels reach the matmul
@@ -37,6 +37,7 @@
 
 const std = @import("std");
 const impl = @import("../../impl.zig");
+const convert = @import("../convert.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");
 const threading = @import("../threading.zig");
@@ -46,7 +47,7 @@ const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 const fp16 = c.ggml_fp16_t;
 
-/// Ports `ggml_compute_forward_mul_mat` (ggml-cpu.c:1255 @d81235049), which
+/// Ports `ggml_compute_forward_mul_mat` (ggml-cpu.c:1255 @620d2225c), which
 /// `cpu/mulmat.zig` provides. Declared rather than imported so the call below
 /// reads like the C's.
 extern fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *Tensor) void;
@@ -74,7 +75,7 @@ inline fn zeroDst(dst: *Tensor) void {
 // ggml_compute_forward_conv_transpose_1d
 
 /// Ports `ggml_compute_forward_conv_transpose_1d_f16_f32` and
-/// `ggml_compute_forward_conv_transpose_1d_f32` (ops.cpp:6516, 6604 @d81235049).
+/// `ggml_compute_forward_conv_transpose_1d_f32` (ops.cpp:6587, 6675 @620d2225c).
 ///
 /// The two differ only in the kernel element type, which the work buffer
 /// takes too, and so in which dot product they call. One function over a
@@ -183,7 +184,7 @@ fn convTranspose1d(comptime T: type, params: *const ComputeParams, dst: *Tensor)
     }
 }
 
-/// Ports `ggml_compute_forward_conv_transpose_1d` (ops.cpp:6692 @d81235049).
+/// Ports `ggml_compute_forward_conv_transpose_1d` (ops.cpp:6763 @620d2225c).
 pub export fn ggml_compute_forward_conv_transpose_1d(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -241,7 +242,7 @@ const Im2col = struct {
     }
 };
 
-/// Ports `ggml_compute_forward_im2col_f32` (ops.cpp:6718 @d81235049).
+/// Ports `ggml_compute_forward_im2col_f32` (ops.cpp:6789 @620d2225c).
 ///
 /// src0: kernel [OC, IC, KH, KW]; src1: image [N, IC, IH, IW];
 /// dst: result [N, OH, OW, IC*KH*KW].
@@ -297,7 +298,7 @@ fn im2colF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_im2col_f16` (ops.cpp:6794 @d81235049).
+/// Ports `ggml_compute_forward_im2col_f16` (ops.cpp:6865 @620d2225c).
 ///
 /// The same walk as `im2colF32`, writing `f16`, from an `f16` or `f32` image.
 fn im2colF16(params: *const ComputeParams, dst: *Tensor) void {
@@ -345,7 +346,7 @@ fn im2colF16(params: *const ComputeParams, dst: *Tensor) void {
                             if (iih < 0 or iih >= g.ih or iiw < 0 or iiw >= g.iw) {
                                 dst_data[di] = 0;
                             } else if (is_f32) {
-                                dst_data[di] = impl.fp32ToFp16(src_data_f32[uz(iih * g.iw + iiw)]);
+                                dst_data[di] = convert.cpuFp32ToFp16(src_data_f32[uz(iih * g.iw + iiw)]);
                             } else {
                                 dst_data[di] = src_data_f16[uz(iih * g.iw + iiw)];
                             }
@@ -357,7 +358,7 @@ fn im2colF16(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_im2col` (ops.cpp:6874 @d81235049).
+/// Ports `ggml_compute_forward_im2col` (ops.cpp:6945 @620d2225c).
 pub export fn ggml_compute_forward_im2col(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     switch (dst.type) {
         c.GGML_TYPE_F16 => im2colF16(params, dst),
@@ -366,7 +367,7 @@ pub export fn ggml_compute_forward_im2col(params: *const ComputeParams, dst: *Te
     }
 }
 
-/// Ports `ggml_compute_forward_im2col_back_f32` (ops.cpp:6895 @d81235049).
+/// Ports `ggml_compute_forward_im2col_back_f32` (ops.cpp:6966 @620d2225c).
 ///
 /// Note the roles swap against `im2col`: the image geometry comes from `dst`
 /// and the kernel's from `src1`. `%` and `/` on a negative offset truncate
@@ -460,7 +461,7 @@ pub export fn ggml_compute_forward_im2col_back_f32(params: *const ComputeParams,
 // ggml_compute_forward_im2col_3d
 
 /// Ports `ggml_compute_forward_im2col_3d_f16` and
-/// `ggml_compute_forward_im2col_3d_f32` (ops.cpp:6993, 7083 @d81235049).
+/// `ggml_compute_forward_im2col_3d_f32` (ops.cpp:7064, 7154 @620d2225c).
 ///
 /// src0: kernel [OC*IC, KD, KH, KW]; src1: image [N*IC, ID, IH, IW];
 /// dst: result [N*OD, OH, OW, IC * KD * KH * KW].
@@ -559,7 +560,7 @@ fn im2col3d(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_im2col_3d` (ops.cpp:7171 @d81235049).
+/// Ports `ggml_compute_forward_im2col_3d` (ops.cpp:7242 @620d2225c).
 pub export fn ggml_compute_forward_im2col_3d(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     switch (dst.type) {
         c.GGML_TYPE_F16 => im2col3d(fp16, params, dst),
@@ -571,7 +572,7 @@ pub export fn ggml_compute_forward_im2col_3d(params: *const ComputeParams, dst: 
 // -----------------------------------------------------------------------------
 // The matmul the convolutions lower to
 
-/// Ports `ggml_call_mul_mat` (ops.cpp:7190 @d81235049).
+/// Ports `ggml_call_mul_mat` (ops.cpp:7261 @620d2225c).
 ///
 /// Builds three contiguous 2-D tensors on the stack around caller-owned
 /// buffers and hands them to `ggml_compute_forward_mul_mat`: `a` is
@@ -615,7 +616,7 @@ fn callMulMat(@"type": c.ggml_type, params: *const ComputeParams, m: i64, n: i64
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_col2im_1d
 
-/// Ports `ggml_compute_forward_col2im_1d_impl` (ops.cpp:7245 @d81235049).
+/// Ports `ggml_compute_forward_col2im_1d_impl` (ops.cpp:7316 @620d2225c).
 ///
 /// Scatter-add columns [K*OC, T_in] -> signal [T_out, OC], where
 /// T_out = (T_in - 1)*s + K - 2*p, done as a gather: each output reads
@@ -674,7 +675,7 @@ fn col2im1d(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_col2im_1d` (ops.cpp:7298 @d81235049).
+/// Ports `ggml_compute_forward_col2im_1d` (ops.cpp:7369 @620d2225c).
 ///
 /// The C's abort message carries the type number through a format string;
 /// `impl.abort` takes a literal, so the number is dropped.
@@ -696,11 +697,11 @@ inline fn storeElement(kernel_type: c.ggml_type, element_ptr: [*]u8, src_val: f3
     if (kernel_type == c.GGML_TYPE_F32) {
         @as(*f32, @ptrCast(@alignCast(element_ptr))).* = src_val;
     } else if (kernel_type == c.GGML_TYPE_F16) {
-        @as(*fp16, @ptrCast(@alignCast(element_ptr))).* = impl.fp32ToFp16(src_val);
+        @as(*fp16, @ptrCast(@alignCast(element_ptr))).* = convert.cpuFp32ToFp16(src_val);
     }
 }
 
-/// Ports `ggml_compute_forward_conv_2d_impl` (ops.cpp:7312 @d81235049).
+/// Ports `ggml_compute_forward_conv_2d_impl` (ops.cpp:7383 @620d2225c).
 ///
 /// kernel [KW, KH, IC, OC], src [W, H, C, N], dst [OW, OH, OC, N]. Patches
 /// are im2col'd into the work buffer in batches sized to fit it, multiplied
@@ -830,7 +831,7 @@ fn conv2dImpl(params: *const ComputeParams, kernel: *const Tensor, src: *const T
     }
 }
 
-/// Ports `ggml_compute_forward_conv_2d` (ops.cpp:7437 @d81235049).
+/// Ports `ggml_compute_forward_conv_2d` (ops.cpp:7508 @620d2225c).
 pub export fn ggml_compute_forward_conv_2d(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -841,7 +842,7 @@ pub export fn ggml_compute_forward_conv_2d(params: *const ComputeParams, dst: *T
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_conv_3d
 
-/// Ports `ggml_compute_forward_conv_3d_impl` (ops.cpp:7449 @d81235049).
+/// Ports `ggml_compute_forward_conv_3d_impl` (ops.cpp:7520 @620d2225c).
 ///
 /// The `conv_2d` scheme with a depth axis. Channels and batch arrive in
 /// `op_params` rather than the shapes, since both are folded into `ne[3]`.
@@ -978,7 +979,7 @@ fn conv3dImpl(params: *const ComputeParams, kernel: *const Tensor, src: *const T
     }
 }
 
-/// Ports `ggml_compute_forward_conv_3d` (ops.cpp:7581 @d81235049).
+/// Ports `ggml_compute_forward_conv_3d` (ops.cpp:7652 @620d2225c).
 pub export fn ggml_compute_forward_conv_3d(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -988,7 +989,7 @@ pub export fn ggml_compute_forward_conv_3d(params: *const ComputeParams, dst: *T
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_conv_transpose_2d
 
-/// Ports `ggml_compute_forward_conv_transpose_2d_impl` (ops.cpp:7590 @d81235049).
+/// Ports `ggml_compute_forward_conv_transpose_2d_impl` (ops.cpp:7661 @620d2225c).
 ///
 /// Batched over `src1`'s `ne[3]`: each image is permuted into its own slice
 /// of the work buffer, and every thread's output channels are computed for
@@ -1114,7 +1115,7 @@ fn convTranspose2d(comptime T: type, params: *const ComputeParams, dst: *Tensor)
     }
 }
 
-/// Ports `ggml_compute_forward_conv_transpose_2d` (ops.cpp:7700 @d81235049).
+/// Ports `ggml_compute_forward_conv_transpose_2d` (ops.cpp:7771 @620d2225c).
 pub export fn ggml_compute_forward_conv_transpose_2d(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -1128,7 +1129,7 @@ pub export fn ggml_compute_forward_conv_transpose_2d(params: *const ComputeParam
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_conv_2d_dw
 
-/// Ports `struct ggml_conv_2d_dw_params` (ops.cpp:7724 @d81235049).
+/// Ports `struct ggml_conv_2d_dw_params` (ops.cpp:7795 @620d2225c).
 ///
 /// The strides, paddings and dilations are `int` in the C; widened here,
 /// since every use multiplies them into an `int64_t` anyway.
@@ -1149,7 +1150,7 @@ const Conv2dDwParams = struct {
     dilation_y: i64,
 };
 
-/// Ports `ggml_conv_2d_dw_knl_f32` (ops.cpp:7741 @d81235049): one kernel
+/// Ports `ggml_conv_2d_dw_knl_f32` (ops.cpp:7812 @620d2225c): one kernel
 /// element, widened if the kernel is `f16`.
 inline fn conv2dDwKnlF32(data: [*]const u8, i: i64, @"type": c.ggml_type) f32 {
     if (@"type" == c.GGML_TYPE_F16) {
@@ -1158,7 +1159,7 @@ inline fn conv2dDwKnlF32(data: [*]const u8, i: i64, @"type": c.ggml_type) f32 {
     return @as([*]const f32, @ptrCast(@alignCast(data)))[uz(i)];
 }
 
-/// Ports `ggml_compute_forward_conv_2d_dw_cwhn` (ops.cpp:7748 @d81235049),
+/// Ports `ggml_compute_forward_conv_2d_dw_cwhn` (ops.cpp:7819 @620d2225c),
 /// the `GGML_SIMD` NEON arm.
 ///
 /// Channels-last. With an `f32` kernel the C takes four channels at a time
@@ -1217,7 +1218,7 @@ fn conv2dDwCwhn(params: *const ComputeParams, src: *const Tensor, kernel: *const
     }
 }
 
-/// Ports `ggml_compute_forward_conv_2d_dw_whcn` (ops.cpp:7831 @d81235049).
+/// Ports `ggml_compute_forward_conv_2d_dw_whcn` (ops.cpp:7902 @620d2225c).
 ///
 /// Channels-first, scalar. `sum += k * s` is one expression, so it fuses.
 fn conv2dDwWhcn(params: *const ComputeParams, src: *const Tensor, kernel: *const Tensor, dst: *Tensor, p: Conv2dDwParams) void {
@@ -1267,7 +1268,7 @@ fn conv2dDwWhcn(params: *const ComputeParams, src: *const Tensor, kernel: *const
     }
 }
 
-/// Ports `ggml_compute_forward_conv_2d_dw` (ops.cpp:7874 @d81235049).
+/// Ports `ggml_compute_forward_conv_2d_dw` (ops.cpp:7945 @620d2225c).
 pub export fn ggml_compute_forward_conv_2d_dw(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const kernel = impl.one(Tensor, dst.src[0]);
     const src = impl.one(Tensor, dst.src[1]);

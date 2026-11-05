@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.6.0 (`d81235049`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.7.0 (`620d2225c`).
 //!
 //! The work queue is a `std::priority_queue` with a float comparator, so
 //! among equal scores -- and around a NaN score, where the comparator is no
@@ -25,7 +25,7 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `llm_symbol` (llama-vocab.cpp:81 @d81235049), with the text as an
+/// Ports `llm_symbol` (llama-vocab.cpp:81 @620d2225c), with the text as an
 /// offset into the string being tokenized.
 pub const Symbol = struct {
     prev: i32,
@@ -34,7 +34,7 @@ pub const Symbol = struct {
     n: usize,
 };
 
-/// Ports `llm_bigram_spm` (llama-vocab.cpp:97 @d81235049).
+/// Ports `llm_bigram_spm` (llama-vocab.cpp:97 @620d2225c).
 const Bigram = struct {
     left: i32,
     right: i32,
@@ -47,7 +47,7 @@ fn bigramLess(_: void, l: Bigram, r: Bigram) bool {
     return (l.score < r.score) or (l.score == r.score and l.left > r.left);
 }
 
-/// Ports `llm_tokenizer_spm_session` (llama-vocab.cpp:115 @d81235049).
+/// Ports `llm_tokenizer_spm_session` (llama-vocab.cpp:115 @620d2225c).
 const Session = struct {
     vocab: *const Vocab,
     text: []const u8,
@@ -111,7 +111,7 @@ const Session = struct {
 };
 
 /// Ports `llm_tokenizer_spm_session`'s `tokenize` (llama-vocab.cpp:118
-/// @d81235049).
+/// @620d2225c).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary.

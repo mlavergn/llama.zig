@@ -1,9 +1,9 @@
-//! The SigLIP vision encoder, with the gemma3, idefics3, lfm2, janus-pro and
-//! phi4 projectors.
+//! The SigLIP vision encoder, with the gemma3, idefics3, cohere2v, lfm2,
+//! d1omni_v, janus-pro and phi4 projectors.
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/siglip.cpp` at v0.6.0 (`d81235049`).
+//! Ports `llama.cpp/tools/mtmd/models/siglip.cpp` at v0.7.0 (`620d2225c`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -11,7 +11,7 @@ const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const c = impl.c;
 
-/// Ports `build` (siglip.cpp:3 @d81235049), a member of `clip_graph_siglip`.
+/// Ports `build` (siglip.cpp:3 @620d2225c), a member of `clip_graph_siglip`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -22,7 +22,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const inp = g.buildInp();
 
     var learned_pos_embd = model.position_embeddings;
-    if (pt == .lfm2 or pt == .phi4) learned_pos_embd = g.resizePositionEmbeddings(graph.default_interpolation_mode);
+    if (pt == .lfm2 or pt == .d1omni_v or pt == .phi4) learned_pos_embd = g.resizePositionEmbeddings(graph.default_interpolation_mode);
 
     var cur = g.buildVit(inp, g.n_patches, .normal, hparams.ffn_op, learned_pos_embd, null, .{});
 
@@ -51,7 +51,16 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         const scale_factor = hparams.n_merge;
         cur = g.buildPatchMergePermute(cur, scale_factor);
         cur = g.buildMm(model.mm_fc_w, cur);
-    } else if (pt == .lfm2) {
+    } else if (pt == .cohere2v) {
+        // tiles are square, so the pixel shuffle is the same as Idefics3
+        cur = g.buildPatchMergePermute(cur, hparams.n_merge);
+        cur = g.buildMm(model.mm_1_w, cur);
+        cur = c.ggml_add(ctx0, cur, model.mm_1_b);
+        // linear_1 output is [x, gate], HF computes silu(gate) * x
+        cur = c.ggml_swiglu_swapped(ctx0, cur);
+        cur = g.buildMm(model.mm_2_w, cur);
+        cur = c.ggml_add(ctx0, cur, model.mm_2_b);
+    } else if (pt == .lfm2 or pt == .d1omni_v) {
         // pixel unshuffle block
         const scale_factor = hparams.n_merge;
         cur = g.buildPatchMergePermute(cur, scale_factor);
@@ -63,13 +72,14 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         }
         if (model.mm_input_norm_b != null) cur = c.ggml_add(ctx0, cur, model.mm_input_norm_b);
 
-        cur = g.buildFfn(cur, model.mm_1_w, model.mm_1_b, null, null, model.mm_2_w, model.mm_2_b, .gelu, -1);
+        // d1-omni uses the exact gelu in the projector
+        cur = g.buildFfn(cur, model.mm_1_w, model.mm_1_b, null, null, model.mm_2_w, model.mm_2_b, if (pt == .d1omni_v) .gelu_erf else .gelu, -1);
     } else if (pt == .janus_pro) {
         cur = g.buildFfn(cur, model.mm_0_w, model.mm_0_b, null, null, model.mm_1_w, model.mm_1_b, hparams.ffn_op, -1);
     } else if (pt == .phi4) {
         cur = g.buildFfn(cur, model.mm_0_w, model.mm_0_b, null, null, model.mm_2_w, model.mm_2_b, .gelu, -1);
     } else {
-        impl.abort("siglip.cpp", 87, "SigLIP: Unsupported projector type");
+        impl.abort("siglip.cpp", 98, "SigLIP: Unsupported projector type");
     }
 
     // build the graph

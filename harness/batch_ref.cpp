@@ -74,6 +74,7 @@ struct ref_ubatch {
 
     llama_token  *  token;
     float        *  embd;
+    float        *  embd_state;
     llama_pos    *  pos;
     int32_t      *  n_seq_id;
     llama_seq_id ** seq_id;
@@ -91,6 +92,8 @@ struct ref_ext_token {
     llama_token  id;
     int32_t      has_embd;
     uint64_t     embd_off;
+    int32_t      has_state;
+    uint64_t     state_off;
     int32_t      output;
     int32_t      decision_order;
     llama_pos    pos[4];
@@ -108,6 +111,7 @@ static void export_ubatch(const llama_ubatch & u, ref_ubatch * out) {
     out->n_pos        = h->n_pos;
     out->token        = h->token;
     out->embd         = h->embd;
+    out->embd_state   = h->embd_state;
     out->pos          = h->pos;
     out->n_seq_id     = h->n_seq_id;
     out->seq_id       = h->seq_id;
@@ -148,6 +152,17 @@ int ref_ext_set_decision_order(llama_batch_ext * b, int32_t idx, int32_t order) 
 }
 
 size_t ref_ext_n_tokens(const llama_batch_ext * b) { return b->tokens.size(); }
+
+// v0.7.0's state width: the test constructor sets none, the context
+// constructor one per context type (llama_batch_ext_select_n_embd_state), so
+// the harness sets it as a context would.
+void ref_ext_set_n_embd_state(llama_batch_ext * b, size_t n) { const_cast<size_t &>(b->n_embd_state) = n; }
+size_t ref_ext_n_embd_state(const llama_batch_ext * b) { return b->n_embd_state; }
+
+size_t ref_ext_state(const llama_batch_ext * b, const float ** data) {
+    *data = b->state.data();
+    return b->state.size();
+}
 size_t ref_ext_n_embd(const llama_batch_ext * b) { return b->n_embd; }
 
 size_t ref_ext_embd(const llama_batch_ext * b, const float ** data) {
@@ -160,6 +175,8 @@ void ref_ext_token(const llama_batch_ext * b, size_t i, ref_ext_token * out) {
     out->id = t.id;
     out->has_embd = t.has_embd;
     out->embd_off = t.embd_off;
+    out->has_state = t.has_state;
+    out->state_off = t.state_off;
     out->output = t.output;
     out->decision_order = t.decision_order;
     for (int j = 0; j < 4; ++j) out->pos[j] = t.pos[j];

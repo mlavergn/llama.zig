@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/ui/ui.cpp.in` and `llama.cpp/tools/ui/ui.h.in`
-//! (v0.6.0, `d81235049`) -- the templates upstream's
+//! (v0.7.0, `620d2225c`) -- the templates upstream's
 //! `llama.cpp/scripts/ui-assets.cmake` fills with the built SvelteKit bundle.
 //! The bundle itself is never ported: it is JavaScript, CSS and images the
 //! browser runs, and travels as data, as the Metal kernels do.
@@ -19,15 +19,15 @@
 const std = @import("std");
 const generated = @import("ui_assets");
 
-/// Ports `llama_ui_asset` (ui.h.in:11 @d81235049): one embedded file. `data`
+/// Ports `llama_ui_asset` (ui.h.in:11 @620d2225c): one embedded file. `data`
 /// carries `size`.
 pub const Asset = generated.Asset;
 
-/// `LLAMA_UI_HAS_ASSETS` (ui.h.in:9 @d81235049): defined only when assets
+/// `LLAMA_UI_HAS_ASSETS` (ui.h.in:9 @620d2225c): defined only when assets
 /// were embedded.
 pub const has_assets = generated.assets.len > 0;
 
-/// Ports `llama_ui_find_asset` (ui.cpp.in:12 @d81235049): the asset named
+/// Ports `llama_ui_find_asset` (ui.cpp.in:12 @620d2225c): the asset named
 /// `name`, by a linear search as the C's.
 ///
 /// Parameters:
@@ -42,14 +42,14 @@ pub fn findAsset(name: []const u8) ?*const Asset {
     return null;
 }
 
-/// Ports `llama_ui_get_assets` (ui.cpp.in:25 @d81235049).
+/// Ports `llama_ui_get_assets` (ui.cpp.in:25 @620d2225c).
 ///
 /// Return: the whole table, static; empty without a UI.
 pub fn getAssets() []const Asset {
     return &generated.assets;
 }
 
-/// Ports `llama_ui_use_gzip` (ui.cpp.in:34 @d81235049): whether every
+/// Ports `llama_ui_use_gzip` (ui.cpp.in:34 @620d2225c): whether every
 /// asset is stored gzip-compressed and served with `Content-Encoding: gzip`.
 pub fn useGzip() bool {
     return generated.use_gzip;

@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.6.0
-//! (`d81235049`), where they are new. Each declaration below names the C++
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.7.0
+//! (`620d2225c`), where they are new. Each declaration below names the C++
 //! it replaces and the line it began at.
 //!
 //! # Which arm compiles where
@@ -44,7 +44,7 @@ extern fn ggml_gemv_q1_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *c
 extern fn ggml_gemm_q1_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
 extern fn ggml_gemm_q1_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
 
-/// Ports `table_q1_signs` (arch/arm/repack.cpp:61 @d81235049): for each
+/// Ports `table_q1_signs` (arch/arm/repack.cpp:61 @620d2225c): for each
 /// byte, eight bytes of `+1` where a bit is set and `-1` (`0xff`) where it
 /// is clear, bit `j` in byte `j`. The C builds it with the `B1`..`B8`
 /// token-pasting macros; this computes the same 256 words.
@@ -62,7 +62,7 @@ const table_q1_signs: [256]u64 = blk: {
     break :blk t;
 };
 
-/// Ports `ggml_q1_0_unpack_pair` (arch/arm/repack.cpp:63 @d81235049):
+/// Ports `ggml_q1_0_unpack_pair` (arch/arm/repack.cpp:63 @620d2225c):
 /// `vcombine_u8(vcreate_u8(table[bits0]), vcreate_u8(table[bits1]))`.
 inline fn unpackPair(bits0: u8, bits1: u8) i8x16 {
     const lo: i8x8 = @bitCast(table_q1_signs[bits0]);
@@ -87,7 +87,7 @@ inline fn scales4(d: *const [4]c.ggml_half) f32x4 {
     return neon.cvt_f32_f16(neon.load_f16x4(@ptrCast(d)));
 }
 
-/// Ports `ggml_gemv_q1_0_4x4_q8_0` (arch/arm/repack.cpp:1844 @d81235049).
+/// Ports `ggml_gemv_q1_0_4x4_q8_0` (arch/arm/repack.cpp:1844 @620d2225c).
 pub export fn ggml_gemv_q1_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q1_0_4x4_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const qk: c_int = QK1_0;
@@ -134,7 +134,7 @@ pub export fn ggml_gemv_q1_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
     }
 }
 
-/// Ports `ggml_gemv_q1_0_4x8_q8_0` (arch/arm/repack.cpp:1905 @d81235049).
+/// Ports `ggml_gemv_q1_0_4x8_q8_0` (arch/arm/repack.cpp:1905 @620d2225c).
 pub export fn ggml_gemv_q1_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q1_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const qk: c_int = QK1_0;
@@ -185,7 +185,7 @@ pub export fn ggml_gemv_q1_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
     }
 }
 
-/// Ports `ggml_gemm_q1_0_4x4_q8_0` (arch/arm/repack.cpp:5302 @d81235049).
+/// Ports `ggml_gemm_q1_0_4x4_q8_0` (arch/arm/repack.cpp:5302 @620d2225c).
 pub export fn ggml_gemm_q1_0_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemm_q1_0_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     const qk: c_int = QK1_0;
@@ -238,7 +238,7 @@ pub export fn ggml_gemm_q1_0_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const
     }
 }
 
-/// Ports `ggml_gemm_q1_0_4x8_q8_0` (arch/arm/repack.cpp:5380 @d81235049),
+/// Ports `ggml_gemm_q1_0_4x8_q8_0` (arch/arm/repack.cpp:5380 @620d2225c),
 /// the `__ARM_FEATURE_MATMUL_INT8` arm.
 pub export fn ggml_gemm_q1_0_4x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_i8mm) return ggml_gemm_q1_0_4x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);

@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.6.0 (`d81235049`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.7.0 (`620d2225c`).
 //!
 //! The C++ keeps each node's children in a `std::map<char, naive_trie>` and
 //! never iterates it, so the order of children is unobservable. Here every
@@ -18,7 +18,7 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `naive_trie` (llama-vocab.cpp:29 @d81235049).
+/// Ports `naive_trie` (llama-vocab.cpp:29 @620d2225c).
 pub const Trie = struct {
     pub const Node = struct {
         has_value: bool = false,

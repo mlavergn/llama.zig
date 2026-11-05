@@ -32,7 +32,8 @@ Each case file, harness/server/<name>.cases, is a sequence of lines:
                           second connection. The control's answer is
                           compared whole; of the stream, its status and how
                           it ended, since where a forced end lands is timing
-    !sleep <seconds>      wait before the next line
+    !sleep <seconds>      wait before the next line; inside !parallel, start
+                          the next request that long after the block
     !fulllog              compare the running servers' whole logs, masked,
                           once they stop (at the next !server or the end):
                           the slots' decisions -- LRU picks, cache reuse,
@@ -114,6 +115,8 @@ Usage: scripts/server-diff <name> [--self]
   SERVER_DIFF_NOBUILD=1  use the binaries already in zig-out
   SERVER_DIFF_OUT=<dir>  keep both transcripts there
   SERVER_DIFF_FAILFAST=1 stop at the first difference (fault injection)
+  SERVER_REF_BIN, SERVER_PORT_BIN  use these llama-server binaries (with
+                         SERVER_DIFF_NOBUILD=1: a fault built to a private prefix)
 """
 
 import json
@@ -165,7 +168,10 @@ MONITOR_LINE = re.compile(r"srv +run: (instance name=|force-killing)")
 # Lines an HTTP thread logs, left out of a whole-log comparison.
 HTTP_THREAD_LINES = r"srv +stop: |srv +evict_and_ca|srv +server_strea|DELETE /v1/stream conv_id|srv +operator\(\): got (another )?exception|srv +operator\(\): \(CORS\)|unauthorized: Invalid API Key"
 LOG_MASKS = [
-    r"^\d+\.\d{2}\.\d{3}\.\d{3} ",           # common_log timestamps
+    # common_log timestamps, after any colour codes a previous line's message
+    # left open: since v0.7.0 the differential analysis's "Phase N" lines,
+    # logged at template init (debug, colourised), each start with ESC[0m.
+    r"^(?:\x1b\[[0-9;]*m)*\d+\.\d{2}\.\d{3}\.\d{3} ",
     r" *\d+(\.\d+)? ms",                       # timings, with their padding
     r" *\d+(\.\d+)? tokens per second",
     r"took \d+\.\d+ seconds",                 # the fit's time
@@ -542,8 +548,11 @@ def main():
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
         if rc != 0:
             die(f"could not build ({' '.join(steps)})")
-    ref_bin = os.path.join(ROOT, "zig-out", "tools-ref", "bin", "llama-server")
-    port_bin = ref_bin if self_mode else os.path.join(ROOT, "zig-out", "bin", "llama-server")
+    # SERVER_REF_BIN / SERVER_PORT_BIN: binaries built elsewhere (fault
+    # injection builds to a private prefix, so a fault never sits in the
+    # shared tree while a gate waits for the lock)
+    ref_bin = os.environ.get("SERVER_REF_BIN") or os.path.join(ROOT, "zig-out", "tools-ref", "bin", "llama-server")
+    port_bin = ref_bin if self_mode else (os.environ.get("SERVER_PORT_BIN") or os.path.join(ROOT, "zig-out", "bin", "llama-server"))
     for b in (ref_bin, port_bin):
         if not os.access(b, os.X_OK):
             die(f"missing {b}")
@@ -614,6 +623,7 @@ def main():
     n = fails = 0
     started = False
     parallel = None  # the requests of an open !parallel block
+    parallel_delay = 0.0  # a !sleep inside it: the next request's start delay
     abandon_next = False
     control_next = None  # the action of a pending !control
 
@@ -627,7 +637,9 @@ def main():
             got[s] = [None] * len(batch)
 
             def one(i, s=s):
-                _, method, path, body = batch[i]
+                _, method, path, body = batch[i][:4]
+                if len(batch[i]) > 4 and batch[i][4]:
+                    time.sleep(batch[i][4])
                 try:
                     hs = {k: expand_side(v, s) for k, v in headers.items()}
                     path, body = expand_side(path, s), expand_side(body, s)
@@ -649,7 +661,7 @@ def main():
                     t.start()
                 for t in ts:
                     t.join()
-        for i, (where, method, path, _) in enumerate(batch):
+        for i, (where, method, path, *_) in enumerate(batch):
             for s in sides:
                 transcripts[s].append(f"## {where} {method} {path}\n{got[s][i]}")
             n += 1
@@ -771,7 +783,12 @@ def main():
                 control_next = line[len("!control "):].strip()
                 continue
             if line.startswith("!sleep "):
-                time.sleep(float(line.split()[1]))
+                if parallel is not None:
+                    # inside !parallel: the next request starts this long
+                    # after the block does
+                    parallel_delay = float(line.split()[1])
+                else:
+                    time.sleep(float(line.split()[1]))
                 continue
             if line.strip() == "!fulllog":
                 fulllog = where
@@ -944,7 +961,8 @@ def main():
                     print(f"DIFF {where}: {method} {path} (abandoned)")
                     show_diff(got["ref"].splitlines(), got["port"].splitlines())
             elif parallel is not None:
-                parallel.append((where, method, path, body))
+                parallel.append((where, method, path, body, parallel_delay))
+                parallel_delay = 0.0
             else:
                 run_requests([(where, method, path, body)])
         compare_full_logs()

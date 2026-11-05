@@ -1,0 +1,7 @@
+{#- v0.7.0 prompt parts: an empty template string before input and between two
+    inputs is a part of its own upstream, as an empty input string between
+    template text is; the part lists must agree, not only the bytes. -#}
+{{- '' }}{{ messages[0]['content'] }}
+{%- set e = '' %}
+{%- for m in messages %}{{ m['content'] }}{{ e }}{{ m['role'] }}[{{ m['content'] }}]{% endfor %}
+{{- '' -}}

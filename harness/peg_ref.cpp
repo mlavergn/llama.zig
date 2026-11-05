@@ -5,8 +5,8 @@
 // `common/chat-peg-parser.cpp`, unmodified, from `libllama-common-ref.a`.
 // `ref_peg_run` interprets a program -- the same bytecode
 // `harness/peg_diff.zig` runs through the port -- and returns one record per
-// result: the build's outcome, the arena's dump, its saved JSON, its GBNF
-// both ways, the arena loaded back and saved again, and for every input
+// result: the build's outcome, the arena's dump, its JSON form
+// (`harness_peg_save`), its GBNF both ways, and for every input
 // every parse -- complete, lenient, every prefix -- with its AST, the three
 // chat mappers' messages, the tags, and the debug trace written to stderr.
 // Every exception is a record too, its class and `what()`.
@@ -15,7 +15,7 @@
 // `harness/peg_rec.h` force-included, which records every parser they build
 // and every input they parse, and `ref_peg_upstream` runs them and hands the
 // recordings over -- after replaying each through upstream's builder and
-// requiring the arena it gives to save exactly as the test's own did.
+// requiring the arena it gives to serialize exactly as the test's own did.
 
 #define PEG_REC_NO_RENAME
 #include "peg_rec.h"
@@ -503,14 +503,9 @@ void run_case(reader & r, writer & w) {
 
     writer cw;
     std::optional<common_peg_arena> arena;
+    (void) kind;
     try {
-        if (kind == 3) {
-            common_peg_arena a;
-            a.load(text);
-            arena = std::move(a);
-        } else {
-            arena = build_from(text);
-        }
+        arena = build_from(text);
         cw.rec("B:ok");
     } catch (...) {
         cw.rec("B:E:" + err(std::current_exception()));
@@ -519,17 +514,9 @@ void run_case(reader & r, writer & w) {
         const auto & a = *arena;
         cw.rec("N:" + std::to_string(a.size()));
         cw.rec("D:" + guard([&] { return a.dump(a.root()); }));
-        std::string saved = guard([&] { return a.save(); });
-        cw.rec("S:" + saved);
+        cw.rec("S:" + guard([&] { return harness_peg_save(a); }));
         cw.rec("G:" + guard([&] { return grammar(a, false); }));
         cw.rec("L:" + guard([&] { return grammar(a, true); }));
-        if (saved.rfind("G:", 0) == 0) {
-            cw.rec("R:" + guard([&] {
-                common_peg_arena b;
-                b.load(saved.substr(2));
-                return b.save();
-            }));
-        }
         for (const auto & [input, modes] : inputs) {
             cw.rec("I:" + input);
             if (modes & 1) parse_records(a, input, COMMON_PEG_PARSE_FLAG_NONE, "P0:", cw);

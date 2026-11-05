@@ -2371,6 +2371,104 @@ checkouts to `v0.6.0` and `zigjinja` to v3.1.4 (`060187a`) first.
 
 ---
 
+### Pickup for the v0.7.0 sync
+
+**Run 2026-11-04, before the sync commit: items 1–7 and 9 clear; item 8 half done.** CUDA (`NOTES.md`, "Upstream sync v0.6.0 → v0.7.0"): one blind key fixed (`cu++filt` spells the anonymous namespace `<unnamed>`), `cuda-ops-diff` 18,539/18,539, `cuda-backend-diff` four environments, `cuda-node-diff` per node and fused on four models, `cuda-parity-cli` 6/6, the MoE cache on CUDA, 20 of 26 injections caught. Vulkan: `vk-ops-diff` 20,543/20,543 on all four arms, `vk-node-diff` and `vk-repro` 2,898 nodes and 33 fused on each, `vk-backend-diff` 28/28, `vk-parity-cli` 6/6 ×4, 3 injections caught and 1 inert. Linux arm64: the CPU set clear (`ops-diff` 1,104, `repack-diff` 141, CPU `node-diff`, `parity-port-cpu`, `host-arms-diff`, `vocab-diff`, `loader-diff`, `quant-diff`, `gemma4-assistant-diff`); the model and server gates were still running at commit time, and `mtmd-decode-diff`'s corpus (made with macOS `sips` and `afconvert`) was carried from the Mac. Windows: all of item 9 clear. Still open: the rest of item 8, item 10 (the server's Windows port) and item 11 (JWHLPTOP, unpaired).
+
+Upstream `v0.7.0` (`620d2225c`). Unlike earlier syncs, the GB10 pickup
+**started before the sync commit**, in parallel with the Mac's combined
+gate pass: the Mac's working tree went over as a commit object
+(`2ba50bc`, made with a scratch index, never on a branch) in a git
+bundle inside a carrier executable, onto a local branch
+`sync-v0.7.0-wip`; fixes found there were made on the Mac and carried
+back as whole files, so the sync commit holds them. After the commit,
+the GB10 fast-forwards `master` to it and drops the branch. Move both
+`llama.cpp` checkouts to `v0.7.0` and `zigjinja` to v3.1.7 (`64b621f`)
+first. `NOTES.md`, "Upstream sync v0.6.0 → v0.7.0", has what each area
+changed.
+
+**GB10 (`spark-dbff`, `~/src/mlavergn/llama.zig`)**
+
+1. **CUDA build** (port and `-Dcuda-port=false`), the first compile of
+   this sync's blind host changes: the kernel keys written blind
+   (`gated_delta_net_cuda<…, (int)4>`, the anonymous-namespace
+   `gdn_single`, `unary_op_kernel_strided`, `xielu_kernel<__nv_bfloat16>`,
+   `fwht_cuda_block<1024..8192>`, `pool2d_nchw_kernel_warp`, the five
+   `top_k_radix_*`), every first-launch argument check,
+   `gen-fattn-config` and `gen-mmq-config` unchanged, and `nvcc`'s
+   `sizeof(shared<16,V>)` and GDN-args layout asserts.
+2. **`cuda-ops-diff`**: 0 BITDIFF, 0 SUPPORTS; the chunked GDN cases, the
+   eight SSM-scan cache fusions, TOP_K at every algorithm boundary,
+   HADAMARD 1024–8192, PAD past 65535, the norm family at 65536, strided
+   CLAMP/ROLL/UNARY, large pool windows, very large N, and the three new
+   EXTRA cases.
+3. **`cuda-backend-diff`**: four environments (`physical`, `3`,
+   `pinned0`, `nopinned`).
+4. **`cuda-node-diff`** per node and fused on Qwen3.5 (a prompt of 64+
+   tokens reaches the chunked GDN), a Mamba-2 fixture, a TOP_K model;
+   **`cuda-parity-cli`** 6/6.
+5. **The MoE cache's expert copies**, unreachable on Metal (host expert
+   weights are read in place): `scripts/context-diff` with `--model
+   moe-cache` and `--model host-experts` on `deepseek2-moe`, and over two
+   GPUs when a machine has them.
+6. **CUDA injections** (~30, in `NOTES.md`'s CUDA list).
+7. **Vulkan, four arms**: `vk-repro` (the variant list changed: `cpy_32`,
+   `cpy_16`, `cpy_bf16_f16`, `contig_cpy_bf16_f16`, `pool2d_subgroup_f32`,
+   `ACC_F16`), `vk-push-layout` (1,485 facts), `vk-backend-diff` (28
+   environments; the `0,0`/`0,1` memory-logger scenarios must show
+   `VK_EXT_external_memory_host` on both devices, or the multi-device path
+   went untested), `vk-ops-diff` (the ten new EXTRA cases, the big-N
+   MUL_MAT cases -- record whether the GPU is deterministic, llvmpipe was
+   not --, RMS_NORM family at 65536, POOL_2D, TOP_K `inf`, the sparse and
+   BF16 FLASH_ATTN_EXT sets, f32×bf16 MUL_MAT, cm2 sparse FA on the
+   coopmat2 arm), `vk-node-diff` per node and fused, `vk-parity-cli` 6/6;
+   the four Vulkan injections (sparse gather on cm2, the N-chunk B offset,
+   `ballots_sh`, NVIDIA `rm_id`).
+8. **The Linux arm64 CPU set and server set**: `ops-diff`, `repack-diff`,
+   CPU `node-diff`, `parity-port-cpu`, `host-arms-diff`,
+   `arch-model-diff` and `mtp-diff`, `context-diff`, `vocab-diff`
+   (PLaMo-3 and NFC on Linux), `loader-diff`, `quant-diff`,
+   `mtmd-gates`, `tools-diff`, `server-task-diff`, `http-diff`,
+   `spec-diff`, `cnv-diff`, `chat-parse-diff`, `peg-diff`, `jinja-diff`,
+   `json-diff`, `server-diff` (all files).
+
+**DESKTOP-BR7J5S9 (Windows x86_64)**
+
+9. `make x86-gates` at `x86_64_v3`: the new AVX2 `q2_0` dot product and
+   F16C `GGML_CPU_FP32_TO_FP16` (its NaN pattern), `x86-repack-diff`,
+   `x86-ops-diff`, `x86-node-diff`; `win-host-diffs` (NFC under 16-bit
+   `wchar_t`, `PrefetchVirtualMemory`'s entries); `WIN_X86=1
+   scripts/json-diff` (1M-deep JSON on a 1 MB main stack). Pre-checked on
+   the Mac under amd64 emulation (quants, repack, ops identical).
+10. The server's Windows port, still open from v0.5.0.
+
+**JWHLPTOP**
+
+11. Not paired: the AVX-512 items from v0.4.0 on carry forward, now with
+    `q2_0`'s AVX2 kernel (which AVX-512 builds compile too).
+
+**Gaps found, no machine needed**
+
+- No fixture reaches DeepSeek V4's or MiMo-2's MTP head, the Prism
+  Hadamard inverse in the qwen35 MTP head, DFlash's shared target head
+  through `ctx_other` in `arch-model-diff`, or the decision models'
+  load-time errors.
+- `arch-model-diff`'s crash split compares abort messages only;
+  `mtp-diff` also compares the transcript up to the abort.
+- `upstream-relines` should take the models area's checker (every
+  `impl.assert`/`impl.abort` literal against B's text) and the server's
+  four helpers; the repin should reach `harness/`.
+- The blind CUDA type-check (real CUDA 13 headers from NVIDIA's wheels and
+  a fake toolkit) lives only in a session scratchpad; making it
+  `scripts/cuda-typecheck`, fetching into `.tools/`, is Marc's call
+  (vendor headers).
+- Closed from v0.6.0's list: NextN layers now have fixtures (`mtp-diff`,
+  16 of them); the space-in-path breakage in `make buildmacos`, zmake's
+  `make ui` and `xcframework/` is fixed; the visionOS simulator smoke ran
+  (6/6).
+
+---
+
 ## Risk register
 
 | Risk | Impact | Mitigation |

@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/bailingmoe3.cpp` at v0.6.0
-//! (`d81235049`): `llama_model_bailingmoe3`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/bailingmoe3.cpp` at v0.7.0
+//! (`620d2225c`): `llama_model_bailingmoe3`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`,
 //! `bailingmoe3_causal_conv1d`, and its `graph` and `graph_mtp`.
 
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_bailingmoe3`'s `load_arch_hparams` (models/bailingmoe3.cpp:6 @d81235049).
+/// Ports `llama_model_bailingmoe3`'s `load_arch_hparams` (models/bailingmoe3.cpp:6 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -72,7 +72,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_bailingmoe3`'s `load_arch_tensors` (models/bailingmoe3.cpp:47 @d81235049).
+/// Ports `llama_model_bailingmoe3`'s `load_arch_tensors` (models/bailingmoe3.cpp:47 @620d2225c).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -100,14 +100,9 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     const n_ff_exp: i64 = hp.nFfExp(0);
     const n_ff_shexp: i64 = hp.n_ff_shexp;
 
-    const mtp_only = hp.n_layer_nextn > 0 and ml.getWeight("blk.0.attn_norm.weight") == null;
-    var probe_buf: [64]u8 = undefined;
-    const mtp_probe = std.fmt.bufPrint(&probe_buf, "blk.{d}.nextn.eh_proj.weight", .{l.n_layer}) catch unreachable;
-    const trunk_only = hp.n_layer_nextn > 0 and ml.getWeight(mtp_probe) == null;
-    const trunk_flags: u32 = if (mtp_only) nr else 0;
-    var mtp_flags: u32 = if (trunk_only) nr else 0;
-
-    if (!ml.load_mtp) mtp_flags |= loader.tensor_skip;
+    const nf = self.nextnFlags(ml, .attn_norm);
+    const trunk_flags = nf.trunk;
+    const mtp_flags = nf.mtp;
 
     var il: i32 = 0;
     while (il < l.n_layer) : (il += 1) {
@@ -159,7 +154,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// The MLA tensors, which `load_arch_tensors` (models/bailingmoe3.cpp:47
-/// @d81235049) loads alike for the trunk's attention layers and the MTP
+/// @620d2225c) loads alike for the trunk's attention layers and the MTP
 /// block.
 fn loadMla(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i64, n_head: i64, q_lora_rank: i64, kv_lora_rank: i64, qk_rope_head_dim: i64, qk_head_dim: i64, v_head_dim: i64, exc: *Exception) Thrown!void {
     if (q_lora_rank > 0) {
@@ -178,7 +173,7 @@ fn loadMla(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i
 }
 
 /// The MoE tensors, routed and shared, which `load_arch_tensors`
-/// (models/bailingmoe3.cpp:47 @d81235049) loads alike for the trunk's MoE
+/// (models/bailingmoe3.cpp:47 @620d2225c) loads alike for the trunk's MoE
 /// layers and the MTP block.
 fn loadMoe(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i64, n_expert: i64, n_ff_exp: i64, n_ff_shexp: i64, exc: *Exception) Thrown!void {
     layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = il }, &.{ n_embd, n_expert }, flags, exc);
@@ -194,16 +189,16 @@ fn loadMoe(self: *Model, layer: *model_mod.Layer, il: i32, flags: u32, n_embd: i
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_bailingmoe3`'s `build_arch_graph` (models/bailingmoe3.cpp:162
-/// @d81235049): the MTP draft head for that graph type, the main model
+/// Ports `llama_model_bailingmoe3`'s `build_arch_graph` (models/bailingmoe3.cpp:156
+/// @620d2225c): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
     return buildGraph(model, b);
 }
 
-/// Ports `bailingmoe3_causal_conv1d` (models/bailingmoe3.cpp:169
-/// @d81235049): the short convolution of one of Q (`qkv` 0), K (1) or V
+/// Ports `bailingmoe3_causal_conv1d` (models/bailingmoe3.cpp:163
+/// @620d2225c): the short convolution of one of Q (`qkv` 0), K (1) or V
 /// (2), its projection in front, its slice of the conv state in front of
 /// the input, and the last `d_conv - 1` columns written back -- one
 /// snapshot per rollback slot when `n_rs_seq` keeps any.
@@ -261,8 +256,8 @@ const MlaDims = struct {
 };
 
 /// The gated MLA attention of a trunk attention layer in `graph`
-/// (models/bailingmoe3.cpp:219 @d81235049) and of the MTP block in
-/// `graph_mtp` (models/bailingmoe3.cpp:424 @d81235049), the same lines:
+/// (models/bailingmoe3.cpp:213 @620d2225c) and of the MTP block in
+/// `graph_mtp` (models/bailingmoe3.cpp:417 @620d2225c), the same lines:
 /// Q through the optional low-rank pair, the latent and its RoPE key, Q
 /// absorbing `wk_b`, MQA over the K-only cache with `wv_b` decompressing
 /// its output, then the per-head sigmoid gate and the output projection.
@@ -321,8 +316,8 @@ fn buildMlaAttn(b: *const graph.Builder, layer: *const model_mod.Layer, inp_attn
 }
 
 /// The routed experts plus the shared experts, of the trunk's MoE layers in
-/// `graph` (models/bailingmoe3.cpp:219 @d81235049) and of the MTP block in
-/// `graph_mtp` (models/bailingmoe3.cpp:424 @d81235049).
+/// `graph` (models/bailingmoe3.cpp:213 @620d2225c) and of the MTP block in
+/// `graph_mtp` (models/bailingmoe3.cpp:417 @620d2225c).
 fn buildMoe(b: *const graph.Builder, layer: *const model_mod.Layer, cur: *Tensor, il: c_int) *Tensor {
     const hp = b.hparams;
     const moe = b.buildMoeFfn(cur, .{
@@ -342,7 +337,7 @@ fn buildMoe(b: *const graph.Builder, layer: *const model_mod.Layer, cur: *Tensor
     return c.ggml_add(b.ctx0, moe, shared);
 }
 
-/// Ports the constructor of `llama_model_bailingmoe3`'s `graph` (models/bailingmoe3.cpp:219 @d81235049).
+/// Ports the constructor of `llama_model_bailingmoe3`'s `graph` (models/bailingmoe3.cpp:213 @620d2225c).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -366,9 +361,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
     const n_tokens = b.n_tokens;
 
-    impl.assert(n_seqs > 0, "models/bailingmoe3.cpp", 248, "n_seqs > 0");
-    impl.assert(b.ubatch.equalSeqs(), "models/bailingmoe3.cpp", 249, "ubatch.equal_seqs()");
-    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/bailingmoe3.cpp", 250, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(n_seqs > 0, "models/bailingmoe3.cpp", 242, "n_seqs > 0");
+    impl.assert(b.ubatch.equalSeqs(), "models/bailingmoe3.cpp", 243, "ubatch.equal_seqs()");
+    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/bailingmoe3.cpp", 244, "ubatch.n_tokens == n_seq_tokens * n_seqs");
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
@@ -422,7 +417,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(cur, "mla_out", il);
         }
 
-        if (il == b.n_layer - 1 and b.cparams.embeddings_nextn_masked) {
+        if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
             cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
             inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
@@ -446,7 +441,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;
 
-    if (!b.cparams.embeddings_nextn_masked) cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+    if (b.cropAfterNextn(inp_out_ids)) cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
 
     b.cb(cur, "result_norm", -1);
     b.res.t_embd = cur;
@@ -454,42 +449,43 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     cur = c.ggml_mul_mat(ctx, model.output, cur);
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports the constructor of `llama_model_bailingmoe3`'s `graph_mtp`
-/// (models/bailingmoe3.cpp:424 @d81235049): the NextN draft head.
+/// (models/bailingmoe3.cpp:417 @620d2225c): the NextN draft head.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn == 1, "models/bailingmoe3.cpp", 426, "hparams.n_layer_nextn == 1 && \"BailingMoE3 MTP requires one NextN layer\"");
+    impl.assert(hp.n_layer_nextn == 1, "models/bailingmoe3.cpp", 419, "hparams.n_layer_nextn == 1 && \"BailingMoE3 MTP requires one NextN layer\"");
 
     const il: c_int = @as(c_int, @intCast(hp.nLayer())) + b.cparams.nextn_layer_offset;
-    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/bailingmoe3.cpp", 431, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range\"");
+    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/bailingmoe3.cpp", 424, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range\"");
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, "models/bailingmoe3.cpp", 434, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/bailingmoe3.cpp", 435, "layer.nextn.enorm && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/bailingmoe3.cpp", 436, "layer.nextn.hnorm && \"MTP block missing nextn.hnorm\"");
-    impl.assert(layer.nextn.shared_head_norm != null, "models/bailingmoe3.cpp", 437, "layer.nextn.shared_head_norm && \"MTP block missing final norm\"");
+    impl.assert(layer.nextn.eh_proj != null, "models/bailingmoe3.cpp", 427, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, "models/bailingmoe3.cpp", 428, "layer.nextn.enorm && \"MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, "models/bailingmoe3.cpp", 429, "layer.nextn.hnorm && \"MTP block missing nextn.hnorm\"");
+    impl.assert(layer.nextn.shared_head_norm != null, "models/bailingmoe3.cpp", 430, "layer.nextn.shared_head_norm && \"MTP block missing final norm\"");
 
     const d = MlaDims.of(hp);
 
-    const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/bailingmoe3.cpp", 447, "out of memory");
-    inp.* = .{ .n_embd = hp.n_embd };
+    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/bailingmoe3.cpp", 440, "out of memory");
+    inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
     inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
     c.ggml_set_input(inp.tokens);
-    inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.n_embd, b.n_tokens);
+    inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
     c.ggml_set_input(inp.embd);
-    _ = c.ggml_set_name(inp.embd, "mtp_h_input");
+    inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.n_embd, b.n_tokens);
+    c.ggml_set_input(inp.h);
+    _ = c.ggml_set_name(inp.h, "mtp_h_input");
 
-    const tok_embd = c.ggml_get_rows(ctx, model.tok_embd, inp.tokens);
-    const h_norm = b.buildNorm(inp.embd.?, layer.nextn.hnorm, null, .rms, il);
+    const tok_embd: *Tensor = if (b.ubatch.token != null) c.ggml_get_rows(ctx, model.tok_embd, inp.tokens) else inp.embd.?;
+    const h_norm = b.buildNorm(inp.h.?, layer.nextn.hnorm, null, .rms, il);
     const e_norm = b.buildNorm(tok_embd, layer.nextn.enorm, null, .rms, il);
     var cur: *Tensor = c.ggml_mul_mat(ctx, layer.nextn.eh_proj, c.ggml_concat(ctx, e_norm, h_norm, 0));
     b.cb(cur, "mtp_eh_proj", il);
 
-    _ = b.res.addInput(graph.InpEmbd, inp);
+    _ = b.res.addInput(graph.InpEmbdH, inp);
 
     const inp_pos = b.buildInpPos();
     const inp_out_ids = b.buildInpOutIds();
@@ -514,7 +510,6 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     cur = c.ggml_mul_mat(ctx, model.output, cur);
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

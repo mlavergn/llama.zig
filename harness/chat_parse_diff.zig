@@ -17,6 +17,7 @@ const peg = @import("peg");
 const jinja = @import("zigjinja");
 const chat = @import("common_chat");
 const llama = @import("llama");
+const peg_serialize = @import("peg_serialize.zig");
 
 const Allocator = std.mem.Allocator;
 const Value = json.Value;
@@ -202,9 +203,15 @@ fn readTemplateParams(a: Allocator, j: *const Value) !chat.autoparser.TemplatePa
     };
 }
 
+/// `show_prompt`: the text, then every part, an empty one included.
+fn showPrompt(a: Allocator, p: *const chat.prompt.Prompt) !void {
+    try kv("prompt", try p.str(a));
+    for (p.parts.items) |part| try kv(if (part.is_input) "prompt.input" else "prompt.template", part.text);
+}
+
 fn showParams(a: Allocator, p: *const chat.params.ChatParams) !void {
     try kv("format", p.format.name());
-    try kv("prompt", p.prompt);
+    try showPrompt(a, &p.prompt);
     try kv("grammar", p.grammar);
     try flag("lazy", p.grammar_lazy);
     try kv("gen", p.generation_prompt);
@@ -218,12 +225,24 @@ fn showParams(a: Allocator, p: *const chat.params.ChatParams) !void {
     }
     for (p.preserved_tokens.items) |t| try kv("preserved", t);
     for (p.additional_stops.items) |t| try kv("stop", t);
-    try kv("parser", p.parser);
+    try guarded(showParser(a, p));
     try guarded(showDelims(a, p));
 }
 
+fn showParser(a: Allocator, p: *const chat.params.ChatParams) !void {
+    const text = if (p.parser) |*arena| (if (arena.empty()) "" else try peg_serialize.save(a, arena)) else "";
+    try kv("parser", text);
+}
+
+/// The form `common_chat_msg_delimiters::to_json` wrote until v0.7.0.
 fn showDelims(a: Allocator, p: *const chat.params.ChatParams) !void {
-    const v = try p.message_delimiters.toJson(a);
+    var v = Value.emptyArray();
+    for (p.message_delimiters.delimiters.items) |d| {
+        var o = Value.emptyObject();
+        try o.set(a, "role", try Value.from(a, d.role.toString()));
+        try o.set(a, "delimiter", try Value.from(a, d.delimiter));
+        try v.pushBack(a, o);
+    }
     try kv("delims", try json.dump(a, &v, -1));
 }
 
@@ -298,12 +317,10 @@ fn showDiff(d: chat.autoparser.DiffSplit) !void {
 
 const Kept = struct {
     params: chat.params.ChatParams,
-    parser: ?peg.Arena = null,
 };
 
 const State = struct {
     tmpls: std.AutoHashMapUnmanaged(i64, chat.templates.Templates) = .empty,
-    parsers: std.AutoHashMapUnmanaged(i64, peg.Arena) = .empty,
     applies: std.AutoHashMapUnmanaged(i64, Kept) = .empty,
     /// Owns every kept apply's result.
     keep_arena: std.heap.ArenaAllocator = .init(gpa),
@@ -329,7 +346,8 @@ fn tmplRecord(st: *State, a: Allocator, r: *const Value) !void {
             mp.vocab_only = true;
             const z = try gpa.dupeSentinel(u8, path, 0);
             const m = llama.api.llama.llama_model_load_from_file(z.ptr, mp) orelse return error.ModelLoad;
-            try models.put(gpa, path, @ptrCast(m));
+            // the key outlives the record it was read from
+            try models.put(gpa, try gpa.dupe(u8, path), @ptrCast(m));
             break :blk @as(*anyopaque, m);
         };
         info = try chat.templates.modelInfo(gpa, model);
@@ -381,25 +399,17 @@ fn applyRecord(st: *State, a: Allocator, n: usize, r: *const Value) !void {
 }
 
 fn parseRecord(st: *State, a: Allocator, r: *const Value) !void {
-    const input = try unhex(a, try str(r, "input_hex"));
+    const text = try unhex(a, try str(r, "input_hex"));
     const partial = try boolean(r, "partial");
-    var params: chat.parse.ParserParams = .{};
-    var arena: *const peg.Arena = undefined;
-    if (r.contains("a")) {
-        const kept = st.applies.getPtr(try int(r, "a")) orelse return line("no_apply", .{});
-        params = chat.parse.ParserParams.fromChatParams(&kept.params);
-        if (kept.parser == null) {
-            // an empty parser is left empty, not loaded, as the server does
-            kept.parser = if (kept.params.parser.len == 0) try peg.Arena.init(gpa) else try chat.parse.loadParser(gpa, kept.params.parser);
-        }
-        arena = &kept.parser.?;
-    } else {
-        params.format = @fromBackingInt(@intCast(try int(r, "format")));
-        params.generation_prompt = try str(r, "gen");
-        arena = st.parsers.getPtr(try int(r, "p")) orelse return line("no_parser", .{});
-    }
+    const kept = st.applies.getPtr(try int(r, "a")) orelse return line("no_apply", .{});
+    // `common_chat_parser_params(params)`: the format, and the generation
+    // prompt as input without tokens
+    var gen = try chat.input.Input.fromText(a, kept.params.generation_prompt);
+    const params: chat.parse.ParserParams = .{ .format = kept.params.format, .generation_prompt = &gen };
+    var input = try chat.input.Input.fromText(a, text);
+    const arena: ?*const peg.Arena = if (kept.params.parser) |*p| p else null;
     try guarded(blk: {
-        var m = chat.parse.pegParse(gpa, arena, input, partial, &params) catch |e| break :blk e;
+        var m = chat.parse.pegParse(gpa, arena, &input, partial, &params) catch |e| break :blk e;
         defer m.deinit(gpa);
         break :blk showMsg(&m);
     });
@@ -423,15 +433,6 @@ fn run(st: *State, a: Allocator, n: usize, r: *const Value) !void {
         try tmplRecord(st, a, r);
     } else if (std.mem.eql(u8, op, "apply")) {
         try applyRecord(st, a, n, r);
-    } else if (std.mem.eql(u8, op, "parser")) {
-        const id = try int(r, "id");
-        if (chat.parse.loadParser(gpa, try str(r, "text"))) |arena| {
-            try st.parsers.put(gpa, id, arena);
-            try line("loaded", .{});
-        } else |e| {
-            try guarded(e);
-            try st.parsers.put(gpa, id, try peg.Arena.init(gpa));
-        }
     } else if (std.mem.eql(u8, op, "parse")) {
         try parseRecord(st, a, r);
     } else if (std.mem.eql(u8, op, "diff")) {
@@ -457,10 +458,10 @@ extern "c" fn fflush(f: *FILE) c_int;
 extern "c" fn fclose(f: *FILE) c_int;
 
 /// Whether a record before the start of a resumed run rebuilds state the
-/// records after it read: templates, parsers, kept applies.
+/// records after it read: templates, kept applies.
 fn buildsState(r: *const Value) bool {
     const op = str(r, "op") catch return false;
-    if (std.mem.eql(u8, op, "tmpl") or std.mem.eql(u8, op, "parser")) return true;
+    if (std.mem.eql(u8, op, "tmpl")) return true;
     return std.mem.eql(u8, op, "apply") and r.contains("keep");
 }
 

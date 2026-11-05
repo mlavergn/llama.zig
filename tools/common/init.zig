@@ -7,7 +7,7 @@
 //! `common_init_sampler_from_model`, `common_control_vector_load`,
 //! `common_set_adapter_lora`, `common_threadpools::init`,
 //! `ggml_threadpool_params_from_cpu_params` and `set_process_priority` from
-//! `llama.cpp/common/common.cpp` (v0.6.0, `d81235049`). Each declaration
+//! `llama.cpp/common/common.cpp` (v0.7.0, `620d2225c`). Each declaration
 //! names what it ports and the line it began at.
 //!
 //! # The sampler, for the tools
@@ -48,7 +48,7 @@ fn comErr(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype)
     log.err(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
 }
 
-/// Ports `common_init_result` (common/common.h:973 @d81235049).
+/// Ports `common_init_result` (common/common.h:987 @620d2225c).
 pub const InitResult = struct {
     model: ?*c.llama_model = null,
     context: ?*c.llama_context = null,
@@ -57,12 +57,12 @@ pub const InitResult = struct {
     threadpool: ?*c.ggml_threadpool = null,
     threadpool_batch: ?*c.ggml_threadpool = null,
 
-    /// Ports `reset_samplers` (common/common.cpp:1389 @d81235049), a member of `common_init_result`.
+    /// Ports `reset_samplers` (common/common.cpp:1399 @620d2225c), a member of `common_init_result`.
     fn resetSamplers(self: *InitResult) void {
         for (self.samplers.items) |s| c.llama_sampler_reset(s.get());
     }
 
-    /// Ports `sampler` (common/common.cpp:1382 @d81235049), a member of
+    /// Ports `sampler` (common/common.cpp:1392 @620d2225c), a member of
     /// `common_init_result`.
     ///
     /// Return: the sampler for `seq_id`, or null past the last; owned by
@@ -82,7 +82,7 @@ pub const InitResult = struct {
     }
 };
 
-/// Ports `common_init_sampler_from_model` (common/common.cpp:1088 @d81235049): the
+/// Ports `common_init_sampler_from_model` (common/common.cpp:1088 @620d2225c): the
 /// model's recommended sampling, where the command line set none.
 fn initSamplerFromModel(p: *Params, model: ?*const c.llama_model) !void {
     const sp = &p.sampling;
@@ -149,7 +149,7 @@ pub fn samplerInit(p: *Params, model: ?*const c.llama_model) !*sampling.Sampler 
     return sampling.init(model, &p.sampling);
 }
 
-/// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1731 @d81235049).
+/// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1755 @620d2225c).
 fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
     var tpp: c.ggml_threadpool_params = undefined;
     c.ggml_threadpool_params_init(&tpp, cp.n_threads); // setup the defaults
@@ -160,7 +160,7 @@ fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
     return tpp;
 }
 
-/// Ports `init` (common/common.cpp:1755 @d81235049), a member of `common_threadpools`.
+/// Ports `init` (common/common.cpp:1779 @620d2225c), a member of `common_threadpools`.
 fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) void {
     const func = "init";
     comInf(func, "llama threadpool init, n_threads = %d\n", .{p.cpuparams.n_threads});
@@ -199,7 +199,7 @@ fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) v
 extern fn setpriority(which: c_int, who: c_uint, prio: c_int) c_int;
 extern fn strerror(e: c_int) [*:0]const u8;
 
-/// Ports `set_process_priority` (common/common.cpp:263 @d81235049), the POSIX arm;
+/// Ports `set_process_priority` (common/common.cpp:263 @620d2225c), the POSIX arm;
 /// Windows has its own, through `SetPriorityClass`.
 pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     if (prio == c.GGML_SCHED_PRIO_NORMAL) return true;
@@ -237,10 +237,10 @@ pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     return true;
 }
 
-/// Ports `common_control_vector_data` (common/common.h:1191 @d81235049).
+/// Ports `common_control_vector_data` (common/common.h:1209 @620d2225c).
 const ControlVectorData = struct { n_embd: i32, data: std.ArrayList(f32) };
 
-/// Ports `common_control_vector_load_one` (common/common.cpp:1945 @d81235049).
+/// Ports `common_control_vector_load_one` (common/common.cpp:1969 @620d2225c).
 fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoadInfo) !ControlVectorData {
     const func = "common_control_vector_load_one";
     var result: ControlVectorData = .{ .n_embd = -1, .data = .empty };
@@ -320,7 +320,7 @@ fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoad
     return result;
 }
 
-/// Ports `common_control_vector_load` (common/common.cpp:2030 @d81235049).
+/// Ports `common_control_vector_load` (common/common.cpp:2054 @620d2225c).
 fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVectorLoadInfo) !ControlVectorData {
     const func = "common_control_vector_load";
     var result: ControlVectorData = .{ .n_embd = -1, .data = .empty };
@@ -353,7 +353,7 @@ fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVect
     return result;
 }
 
-/// Ports `common_init_result` (common/common.cpp:1230 @d81235049), a member of `common_init_result`.
+/// Ports `common_init_result` (common/common.cpp:1239 @620d2225c), a member of `common_init_result`.
 fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitResult) !void {
     const a = p.arena;
     var mparams = common.modelParamsToLlama(p);
@@ -413,7 +413,9 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
     // these decision models return a score for each token via the embeddings output
     // TODO: maybe improve this in the future
     const decision_type = common.getDecisionType(model);
-    if (decision_type == .laya or decision_type == .kev or decision_type == .clef) {
+    if (decision_type == .laya or decision_type == .kev or decision_type == .clef or
+        decision_type == .lfm2_d1_omni or decision_type == .vllm_decision2)
+    {
         p.embedding = true;
         p.pooling_type = c.LLAMA_POOLING_TYPE_NONE;
 
@@ -510,7 +512,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
 
 const io_ = @import("io.zig");
 
-/// Ports `common_init_from_params` (common/common.cpp:1399 @d81235049).
+/// Ports `common_init_from_params` (common/common.cpp:1417 @620d2225c).
 ///
 /// Return: the model and context, either null where loading failed, having
 /// logged why. The caller owns the result.
@@ -573,7 +575,7 @@ pub fn initFromParams(gpa: std.mem.Allocator, p: *Params, model_only: bool) !Ini
     }
 
     if (!p.lora_init_without_apply) {
-        // `common_set_adapter_lora` (common/common.cpp:1637 @d81235049)
+        // `common_set_adapter_lora` (common/common.cpp:1659 @620d2225c)
         var loras: std.ArrayList(?*c.llama_adapter_lora) = .empty;
         var scales: std.ArrayList(f32) = .empty;
         for (p.lora_adapters.items) |la| {
@@ -614,6 +616,9 @@ pub fn initFromParams(gpa: std.mem.Allocator, p: *Params, model_only: bool) !Ini
             tmp.shrinkRetainingCapacity(@min(tmp.items.len, @as(usize, @intCast(p.n_batch))));
             var batch = common.batchGetOne(gpa, lctx, tmp.items);
             defer batch.deinit();
+            var zeros: std.ArrayList(f32) = .empty;
+            defer zeros.deinit(gpa);
+            common.batchSetZeroState(gpa, &batch, model, &zeros);
             _ = c.llama_process(lctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.get());
         }
         c.llama_memory_clear(c.llama_get_memory(lctx), true);

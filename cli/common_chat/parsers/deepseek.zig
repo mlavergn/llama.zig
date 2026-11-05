@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/deepseek.cpp` (llama.cpp v0.6.0,
-//! `d81235049`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/deepseek.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -45,7 +45,7 @@ fn role(m: *const Value) Error![]const u8 {
     return m.value("role", []const u8, "") catch |e| util.fromJson(e);
 }
 
-/// Ports `deepseek_v4_sort_tool_results` (parsers/deepseek.cpp:6 @d81235049): each
+/// Ports `deepseek_v4_sort_tool_results` (parsers/deepseek.cpp:6 @620d2225c): each
 /// run of user and tool messages with its tool results put in the order of
 /// the preceding assistant message's tool calls, matched by id.
 ///
@@ -148,6 +148,7 @@ const Build = struct {
     cb: *ChatBuilder = undefined,
     tool_choice: ParserId = undefined,
     name: []const u8 = "",
+    tool_index: usize = 0,
     required_parsers: std.ArrayList(ParserId) = .empty,
     optional_parsers: std.ArrayList(ParserId) = .empty,
 
@@ -222,7 +223,8 @@ const Build = struct {
         return b.plus(try b.plus(try b.plus(try b.plus(generation_prompt, reasoning), content_before_tools), tool_calls), end);
     }
 
-    fn tool(self: *Build, t: *Value) Error!void {
+    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
+        self.tool_index = tool_index;
         const function = t.at("function") catch |e| return util.fromJson(e);
         self.name = try parsers.functionName(t);
         self.required_parsers = .empty;
@@ -231,8 +233,8 @@ const Build = struct {
         self.finishTool() catch |e| return util.fromPeg(e);
     }
 
-    fn param(self: *Build, prm: *const json.schema.Property, doc: *peg.SharedDoc) Error!void {
-        const named_arg = self.buildParam(prm, doc) catch |e| return util.fromPeg(e);
+    fn param(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) Error!void {
+        const named_arg = self.buildParam(param_index, prm, doc) catch |e| return util.fromPeg(e);
         if (prm.required) {
             try self.required_parsers.append(self.a, named_arg);
         } else {
@@ -240,7 +242,7 @@ const Build = struct {
         }
     }
 
-    fn buildParam(self: *Build, prm: *const json.schema.Property, doc: *peg.SharedDoc) chat_peg.Error!ParserId {
+    fn buildParam(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) chat_peg.Error!ParserId {
         const p = self.cb;
         const b = &p.b;
         const is_string = prm.schema.mayBeString();
@@ -251,10 +253,10 @@ const Build = struct {
         const value = if (is_string)
             try p.toolArgStringValue(try b.until(PARAM_END))
         else
-            try p.toolArgJsonValue(try b.schemaDoc(try b.json(), try std.mem.concat(self.a, u8, &.{ "tool-", self.name, "-arg-", prm.name, "-schema" }), doc, prm.schema, false));
+            try p.toolArgJsonValue(try b.schemaDoc(try b.json(), try parsers.argName(self.a, self.tool_index, param_index, "-schema"), doc, prm.schema, false));
         const arg = try p.toolArg(try b.plus(try b.plus(open, value), try p.toolArgClose(try b.literal(PARAM_END))));
 
-        return b.rule(try std.mem.concat(self.a, u8, &.{ "tool-", self.name, "-arg-", prm.name }), arg, false);
+        return b.rule(try parsers.argName(self.a, self.tool_index, param_index, ""), arg, false);
     }
 
     fn finishTool(self: *Build) chat_peg.Error!void {
@@ -282,11 +284,11 @@ const Build = struct {
         const body = try b.plus(try b.plus(try b.plus(open, invoke_body), try b.space()), try p.toolClose(try b.literal(INVOKE_END)));
         const func_parser = try p.tool(body);
 
-        try b.orAssign(&self.tool_choice, try b.rule(try std.mem.concat(self.a, u8, &.{ "tool-", self.name }), func_parser, false));
+        try b.orAssign(&self.tool_choice, try b.rule(try parsers.indexName(self.a, "tool-", self.tool_index, ""), func_parser, false));
     }
 };
 
-/// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:69 @d81235049).
+/// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:69 @620d2225c).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -349,7 +351,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
             }
         }
 
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     const require_tools = inputs.tool_choice == .required;
@@ -366,14 +368,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .require_tools = require_tools,
         .has_tool_calls = has_tool_calls,
     };
-    var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-
-    data.parser = try parsers.save(a, &arena);
+    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = has_tools and !require_tools;
-        data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
+        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, fc_start);
     }
 
@@ -399,7 +399,7 @@ test "deepseek-ai-DeepSeek-V3.2.jinja applies with a tool and builds a parser an
     p.tools = try json.parse(a, "[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]");
     const data = try init(a, &t, &p);
     try std.testing.expectEqual(.peg_native, data.format);
-    try std.testing.expect(data.prompt.len > 0);
-    try std.testing.expect(data.parser.len > 0);
+    try std.testing.expect(data.prompt.parts.items.len > 0);
+    try std.testing.expect(data.parser != null);
     try std.testing.expect(data.grammar.len > 0);
 }

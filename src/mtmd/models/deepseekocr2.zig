@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/deepseekocr2.cpp` at v0.6.0
-//! (`d81235049`).
+//! Ports `llama.cpp/tools/mtmd/models/deepseekocr2.cpp` at v0.7.0
+//! (`620d2225c`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -18,14 +18,14 @@ const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// The `add_rope` lambda (deepseekocr2.cpp:50 @d81235049) of `build`.
+/// The `add_rope` lambda (deepseekocr2.cpp:48 @620d2225c) of `build`.
 fn addRope(ctx: ?*anyopaque, g: *graph.Graph, x: T, layer: *const model_mod.Layer) T {
     _ = layer;
     const inp_pos: *T = @ptrCast(@alignCast(ctx.?));
     return c.ggml_rope_ext(g.ctx0, x, inp_pos.*, null, g.d_head, c.GGML_ROPE_TYPE_NEOX, 131072, 1000000, 1, 0, 1, 0, 0);
 }
 
-/// Ports `build` (deepseekocr2.cpp:3 @d81235049), a member of `clip_graph_deepseekocr2`.
+/// Ports `build` (deepseekocr2.cpp:3 @620d2225c), a member of `clip_graph_deepseekocr2`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -68,9 +68,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         const seq_len = ne(inp, 1);
 
         // qwen2 encoder attention mask
-        const attn_mask = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, seq_len, seq_len);
-        _ = c.ggml_set_name(attn_mask, "qwen2_attn_mask");
-        c.ggml_set_input(attn_mask);
+        const attn_mask = g.buildInpAttnMask(seq_len, seq_len, 0);
 
         var inp_pos: T = c.ggml_cast(ctx0, c.ggml_arange(ctx0, 0, @floatFromInt(seq_len), 1), c.GGML_TYPE_I32);
 

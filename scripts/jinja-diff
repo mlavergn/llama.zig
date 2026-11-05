@@ -60,19 +60,28 @@ mkdir "$tmp/inputs"
 
 [ -f "$GATE_GGML" ] || { echo "missing $GATE_GGML -- run 'zig build reference --release=fast'" >&2; exit 2; }
 
-# `chat.zig` imports llama.h through `c.zig`; nothing here calls into it.
+[ -f "$GATE_LLAMA_REF" ] || { echo "missing $GATE_LLAMA_REF -- run 'zig build reference --release=fast'" >&2; exit 2; }
+
+# `chat.zig` imports llama.h through `c.zig`, and `cli/common_chat` reaches
+# libllama's module (`peg` and the chat input's tokenizer import it), as
+# build.zig wires them; one translation serves as both `llama_h` and
+# libllama's `llama_c`. Nothing here calls into libllama.
 zig translate-c "${GATE_TC[@]}" -I llama.cpp/include -I llama.cpp/ggml/include \
     src/llama/c_import.h >"$tmp/llama_h.zig" 2>"$tmp/terr" \
     || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
 
 # zigjinja as build.zig.zon takes it: the sibling checkout, by path.
+# libllama-ref for the two C helpers the port's model loader calls by name.
 zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/jinja_diff$GATE_SUFFIX" -Ofast -lc \
     --dep chat --dep zigjinja --dep inputs --dep common_chat --dep json -Mroot=harness/jinja_diff.zig \
-    --dep zigjinja --dep llama_h -Mchat=cli/chat.zig \
-    --dep json --dep zigjinja -Mcommon_chat=cli/common_chat/module.zig -Mjson=cli/json/module.zig \
-    -Mzigjinja=../zigjinja/src/root.zig -Mllama_h="$tmp/llama_h.zig" \
+    --dep zigjinja --dep llama_h=llama_c -Mchat=cli/chat.zig \
+    --dep json --dep peg --dep llama --dep zigjinja -Mcommon_chat=cli/common_chat/module.zig \
+    --dep json --dep llama -Mpeg=cli/peg/module.zig \
+    --dep llama -Mjson=cli/json/module.zig \
+    -Mzigjinja=../zigjinja/src/root.zig \
+    --dep llama_c -Mllama=src/llama/harness_root.zig -Mllama_c="$tmp/llama_h.zig" \
     -Minputs="$tmp/inputs/inputs.zig" \
-    "${OBJS[@]}" "$GATE_GGML" -lc++ \
+    "${OBJS[@]}" "$GATE_LLAMA_REF" "$GATE_GGML" -lc++ \
     ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
 

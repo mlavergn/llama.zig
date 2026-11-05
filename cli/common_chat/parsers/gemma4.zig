@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/gemma4.cpp` (llama.cpp v0.6.0,
-//! `d81235049`): `workaround::gemma4_model_turn_builder`,
+//! Ports `llama.cpp/common/parsers/gemma4.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`): `workaround::gemma4_model_turn_builder`,
 //! `workaround::convert_tool_responses_gemma4` and
 //! `common_chat_params_init_gemma4`. The parser is built in the order clang
 //! evaluates the C++ expressions, left to right, since a parser's id is its
@@ -43,7 +43,7 @@ fn member(m: *const Value, key: []const u8) Error!*Value {
     return m.at(key) catch |e| util.fromJson(e);
 }
 
-/// Ports `workaround`'s `gemma4_model_turn_builder` (parsers/gemma4.cpp:15 @d81235049):
+/// Ports `workaround`'s `gemma4_model_turn_builder` (parsers/gemma4.cpp:15 @620d2225c):
 /// an assistant turn with tool calls, the tool results after it and the
 /// final assistant message, folded into one message.
 const ModelTurnBuilder = struct {
@@ -55,7 +55,7 @@ const ModelTurnBuilder = struct {
     content: Value = .null,
     reasoning_content: Value = .null,
 
-    /// Ports `collect` (parsers/gemma4.cpp:25 @d81235049).
+    /// Ports `collect` (parsers/gemma4.cpp:25 @620d2225c).
     fn collect(self: *ModelTurnBuilder) Error!void {
         const a = self.a;
         // Collect the first assistant message
@@ -91,7 +91,7 @@ const ModelTurnBuilder = struct {
         }
     }
 
-    /// Ports `collect_result` (parsers/gemma4.cpp:54 @d81235049).
+    /// Ports `collect_result` (parsers/gemma4.cpp:54 @620d2225c).
     fn collectResult(self: *ModelTurnBuilder, curr: *const Value) Error!void {
         const a = self.a;
         var response: Value = .null;
@@ -130,7 +130,7 @@ const ModelTurnBuilder = struct {
         self.tool_responses.pushBack(a, entry) catch |e| return util.fromJson(e);
     }
 
-    /// Ports `build` (parsers/gemma4.cpp:89 @d81235049).
+    /// Ports `build` (parsers/gemma4.cpp:89 @620d2225c).
     fn build(self: *ModelTurnBuilder) Error!Value {
         const a = self.a;
         try self.collect();
@@ -150,7 +150,7 @@ const ModelTurnBuilder = struct {
         return msg;
     }
 
-    /// Ports `has_content` (parsers/gemma4.cpp:108 @d81235049).
+    /// Ports `has_content` (parsers/gemma4.cpp:108 @620d2225c).
     fn hasContent(msg: *const Value) bool {
         if (!msg.contains("content")) return false;
         const content = msg.at("content") catch |err| switch (err) {
@@ -162,7 +162,7 @@ const ModelTurnBuilder = struct {
         return false;
     }
 
-    /// Ports `has_tool_calls` (parsers/gemma4.cpp:122 @d81235049).
+    /// Ports `has_tool_calls` (parsers/gemma4.cpp:122 @620d2225c).
     fn hasToolCalls(msg: *const Value) bool {
         if (!msg.contains("tool_calls")) return false;
         const tc = msg.at("tool_calls") catch |err| switch (err) {
@@ -173,7 +173,7 @@ const ModelTurnBuilder = struct {
 };
 
 /// Ports `workaround`'s `convert_tool_responses_gemma4` (parsers/gemma4.cpp:127
-/// @d81235049): each assistant turn with tool calls, the `tool` messages
+/// @620d2225c): each assistant turn with tool calls, the `tool` messages
 /// after it and the final assistant reply, as one assistant message with
 /// `tool_responses`, as the older Gemma 4 templates expect.
 pub fn convertToolResponses(a: Allocator, messages: *Value) Error!void {
@@ -305,13 +305,13 @@ const Build = struct {
         return b.plus(start, try b.oneOrMore(message));
     }
 
-    fn tool(self: *Build, t: *Value) Error!void {
+    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
         _ = t.at("function") catch |e| return util.fromJson(e);
         const name = try parsers.functionName(t);
-        self.toolPeg(name) catch |e| return util.fromPeg(e);
+        self.toolPeg(tool_index, name) catch |e| return util.fromPeg(e);
     }
 
-    fn toolPeg(self: *Build, name: []const u8) chat_peg.Error!void {
+    fn toolPeg(self: *Build, tool_index: usize, name: []const u8) chat_peg.Error!void {
         const p = self.cb;
         const b = &p.b;
         // TODO @aldehir : need to extend json-schema-to-grammar to produce more than JSON rules
@@ -319,11 +319,11 @@ const Build = struct {
         const open = try p.toolOpen(try b.plus(try p.toolName(try b.literal(name)), try b.peek(try b.literal("{"))));
         const args = try p.toolArgs(try b.ref("gemma4-dict"));
         const t = try p.tool(try b.sequence(&.{ open, args }));
-        try b.orAssign(&self.tool_choice, try b.rule(try std.mem.concat(self.a, u8, &.{ "tool-", name }), t, false));
+        try b.orAssign(&self.tool_choice, try b.rule(try parsers.indexName(self.a, "tool-", tool_index, ""), t, false));
     }
 };
 
-/// Ports `common_chat_params_init_gemma4` (parsers/gemma4.cpp:151 @d81235049).
+/// Ports `common_chat_params_init_gemma4` (parsers/gemma4.cpp:151 @620d2225c).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -332,12 +332,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     data.prompt = try template.directApplyImpl(a, tmpl, inputs, null, null, null);
     data.generation_prompt = try template.generationPromptImpl(a, tmpl, inputs, null, null, null);
 
-    if (inputs.add_generation_prompt and std.mem.endsWith(u8, data.prompt, "<turn|>\n")) {
+    if (inputs.add_generation_prompt and std.mem.endsWith(u8, try data.prompt.str(a), "<turn|>\n")) {
         // This may happen if the model generates content + tool_call, the
         // template does not add the model's next turn and confuses the model
         // from emitting its proper reasoning token sequence.
         data.generation_prompt = "<|turn>model\n";
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     try data.message_delimiters.add(a, .user, "<|turn>user");
@@ -353,13 +353,13 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     if (inputs.hasContinuation()) {
         const m = &inputs.continue_msg;
 
-        const head: []const u8 = if (std.mem.endsWith(u8, data.prompt, "<turn|>\n")) "<|turn>model\n" else "";
+        const head: []const u8 = if (std.mem.endsWith(u8, try data.prompt.str(a), "<turn|>\n")) "<|turn>model\n" else "";
         data.generation_prompt = try std.mem.concat(a, u8, &.{ head, "<|channel>thought\n", m.reasoning_content });
         if (inputs.continue_final_message == .content) {
             data.generation_prompt = try std.mem.concat(a, u8, &.{ data.generation_prompt, "<channel|>", try m.renderContent(a, "\n\n") });
         }
 
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     const has_tools = parsers.hasTools(&inputs.tools);
@@ -374,14 +374,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
-    var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-
-    data.parser = try parsers.save(a, &arena);
+    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !(has_response_format or (has_tools and inputs.tool_choice == .required));
-        data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
+        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, "<|tool_call>");
     }
 
@@ -424,7 +422,7 @@ test "google-gemma-4-31B-it.jinja applies with a tool and builds a parser and a 
     p.tools = try json.parse(a, "[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]");
     const data = try init(a, &t, &p);
     try std.testing.expectEqual(.peg_gemma4, data.format);
-    try std.testing.expect(data.prompt.len > 0);
-    try std.testing.expect(data.parser.len > 0);
+    try std.testing.expect(data.prompt.parts.items.len > 0);
+    try std.testing.expect(data.parser != null);
     try std.testing.expect(data.grammar.len > 0);
 }

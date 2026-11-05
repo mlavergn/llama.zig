@@ -11,7 +11,7 @@
 //!   nests, for the order `add_tensors_from_model` walks them in
 //! - `llama.cpp/src/llama-vocab.cpp` -- `llama_vocab::get_bpe_merges`
 //!
-//! All at v0.6.0 (`d81235049`). `llama_model_save_to_file`, which lives in
+//! All at v0.7.0 (`620d2225c`). `llama_model_save_to_file`, which lives in
 //! `llama.cpp/src/llama.cpp`, is `api/quant.zig`'s.
 //!
 //! # Scope
@@ -68,8 +68,8 @@ fn oom() noreturn {
     impl.abort("llama-model-saver.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_saver_supports_arch` (llama-model-saver.cpp:16 @d81235049).
-/// Clef's head tensors are not saved.
+/// Ports `llama_model_saver_supports_arch` (llama-model-saver.cpp:16 @620d2225c).
+/// Clef's and vllm-decision2's head tensors are not saved.
 ///
 /// Parameters:
 /// - `a`: the architecture.
@@ -77,13 +77,13 @@ fn oom() noreturn {
 /// Return: whether the saver can write a model of it.
 pub fn supportsArch(a: arch.Arch) bool {
     return switch (a) {
-        .gemma3n, .bitnet, .t5, .apertus, .step35, .clef => false,
+        .gemma3n, .bitnet, .t5, .apertus, .step35, .clef, .vllm_decision2 => false,
         else => true,
     };
 }
 
 /// `add_tensors_from_model`'s model-level tensors, in its order
-/// (llama-model-saver.cpp:467 @d81235049), after `tok_embd`.
+/// (llama-model-saver.cpp:472 @620d2225c), after `tok_embd`.
 const model_fields = [_][]const u8{
     "type_embd",      "pos_embd",        "tok_norm",        "tok_norm_b",   "output_norm",   "output_norm_b",
     "output",         "output_b",        "output_norm_enc", "output_s",     "output_in_s",   "output_res_score",
@@ -92,23 +92,32 @@ const model_fields = [_][]const u8{
     "hc_head_norm",   "hc_head_down",    "hc_head_up",
 };
 
-/// `llama_model`'s tensors (llama-model.h:636 @d81235049) that
+/// `llama_model`'s tensors (llama-model.h:693 @620d2225c) that
 /// `add_tensors_from_model` does not write.
 const model_unsaved = [_][]const u8{
-    "conv1d",                 "conv1d_b",            "altup_proj",           "altup_unembd_proj",
-    "per_layer_model_proj",   "per_layer_proj_norm", "fc",                   "fc_s",
-    "d2t",                    "dspark_markov_w1",    "dspark_markov_w2",     "dspark_markov_w2_s",
-    "dspark_conf_proj",       "dspark_conf_proj_b",  "dflash_selector_prev", "dflash_selector_next",
-    "dflash_selector_hidden", "dense_2_out_layers",  "dense_2_out_layers_b", "dense_3_out_layers",
+    "conv1d",                     "conv1d_b",                    "altup_proj",                   "altup_unembd_proj",
+    "per_layer_model_proj",       "per_layer_proj_norm",         "fc",                           "fc_s",
+    "d2t",                        "dspark_markov_w1",            "dspark_markov_w2",             "dspark_markov_w2_s",
+    "dspark_conf_proj",           "dspark_conf_proj_b",          "dflash_selector_prev",         "dflash_selector_next",
+    "dflash_selector_hidden",     "dense_2_out_layers",          "dense_2_out_layers_b",         "dense_3_out_layers",
     "cls_norm_b",
+    // v0.7.0: DFlash's LiliCorr heads (models/dflash.cpp), not written either.
+                    "lilicorr_token_proj",         "lilicorr_token_proj_b",        "lilicorr_token_proj_s",
+    "lilicorr_pass_hidden_proj",  "lilicorr_pass_hidden_proj_b", "lilicorr_pass_hidden_proj_s",  "lilicorr_feature_norm",
+    "lilicorr_feature_norm_b",    "lilicorr_feature_mlp_1",      "lilicorr_feature_mlp_1_b",     "lilicorr_feature_mlp_3",
+    "lilicorr_feature_mlp_3_b",   "lilicorr_slot_embedding",     "lilicorr_rank_embedding",      "lilicorr_attention_bias",
+    "lilicorr_context_proj",      "lilicorr_context_proj_b",     "lilicorr_context_proj_s",      "lilicorr_output_norm",
+    "lilicorr_anchor_norm",       "lilicorr_factor_input_proj",  "lilicorr_factor_input_proj_b", "lilicorr_out_head",
+    "lilicorr_out_head_b",        "lilicorr_in_head",            "lilicorr_in_head_b",           "lilicorr_anchor_out_head",
+    "lilicorr_anchor_out_head_b",
 };
 
-/// Mirrors `llama_layer` (llama-model.h:261 @d81235049) read as an array of
-/// tensor pointers, with its nested `llama_layer_posnet` (llama-model.h:168
-/// @d81235049), `llama_layer_convnext` (llama-model.h:203 @d81235049),
-/// `llama_layer_shortconv` (llama-model.h:219 @d81235049),
-/// `llama_layer_nextn` (llama-model.h:225 @d81235049) and
-/// `llama_layer_switch_lora` (llama-model.h:243 @d81235049) in place.
+/// Mirrors `llama_layer` (llama-model.h:262 @620d2225c) read as an array of
+/// tensor pointers, with its nested `llama_layer_posnet` (llama-model.h:169
+/// @620d2225c), `llama_layer_convnext` (llama-model.h:204 @620d2225c),
+/// `llama_layer_shortconv` (llama-model.h:220 @620d2225c),
+/// `llama_layer_nextn` (llama-model.h:226 @620d2225c) and
+/// `llama_layer_switch_lora` (llama-model.h:244 @620d2225c) in place.
 pub const layer_fields = [_][]const u8{
     // BEGIN layer_fields
     "attn_norm",                "attn_norm_b",                 "attn_norm_2",            "attn_norm_2_b",
@@ -122,20 +131,24 @@ pub const layer_fields = [_][]const u8{
     "wk_b",                     "wv_b",                        "wqkv_b",                 "wo_a",
     "wo_b",                     "wq_cross",                    "wk_cross",               "wv_cross",
     "wo_cross",                 "wq_enc",                      "wk_enc",                 "wv_enc",
-    "wo_enc",                   "wqkv_gate",                   "attn_rel_b",             "attn_rel_b_enc",
-    "attn_rel_b_cross",         "ffn_norm",                    "ffn_norm_b",             "ffn_post_norm",
-    "ffn_post_norm_1",          "ffn_post_norm_2",             "ffn_pre_norm_2",         "layer_out_norm",
-    "layer_out_norm_b",         "ffn_norm_exps",               "ffn_norm_enc",           "ffn_gate",
-    "ffn_down",                 "ffn_up",                      "ffn_gate_enc",           "ffn_down_enc",
-    "ffn_up_enc",               "ffn_gate_inp",                "ffn_gate_inp_s",         "ffn_gate_exps",
-    "ffn_down_exps",            "ffn_up_exps",                 "ffn_gate_up_exps",       "ffn_gate_inp_b",
-    "ffn_gate_exps_b",          "ffn_down_exps_b",             "ffn_up_exps_b",          "ffn_gate_up_exps_b",
-    "ffn_gate_exps_s",          "ffn_down_exps_s",             "ffn_up_exps_s",          "ffn_latent_down",
-    "ffn_latent_up",            "ffn_gate_inp_shexp",          "ffn_gate_shexp",         "ffn_down_shexp",
-    "ffn_up_shexp",             "ffn_gate_chexps",             "ffn_down_chexps",        "ffn_up_chexps",
-    "ffn_gate_b",               "ffn_down_b",                  "ffn_up_b",               "ffn_act",
-    "ffn_exp_probs_b",          "ffn_exp_probs_b_vl",          "ffn_gate_tid2eid",       "dflash_attn_conv_base",
-    "dflash_attn_conv_proj",    "dflash_ffn_conv_base",        "dflash_ffn_conv_proj",   "ssm_in",
+    "wo_enc",                   "wqkv_gate",                   "attn_v_gate",            "attn_v_gate_b",
+    "attn_v_exps",              "attn_rel_b",                  "attn_rel_b_enc",         "attn_rel_b_cross",
+    "ffn_norm",                 "ffn_norm_b",                  "ffn_post_norm",          "ffn_post_norm_1",
+    "ffn_post_norm_2",          "ffn_pre_norm_2",              "layer_out_norm",         "layer_out_norm_b",
+    "ffn_norm_exps",            "ffn_norm_enc",                "ffn_gate",               "ffn_down",
+    "ffn_up",                   "ffn_gate_enc",                "ffn_down_enc",           "ffn_up_enc",
+    "ffn_gate_inp",             "ffn_gate_inp_s",              "ffn_gate_exps",          "ffn_down_exps",
+    "ffn_up_exps",              "ffn_gate_up_exps",            "ffn_gate_inp_b",         "ffn_gate_exps_b",
+    "ffn_down_exps_b",          "ffn_up_exps_b",               "ffn_gate_up_exps_b",     "ffn_gate_exps_s",
+    "ffn_down_exps_s",          "ffn_up_exps_s",               "ffn_latent_down",        "ffn_latent_up",
+    "ffn_gate_inp_shexp",       "ffn_gate_shexp",              "ffn_down_shexp",         "ffn_up_shexp",
+    "ffn_gate_chexps",          "ffn_down_chexps",             "ffn_up_chexps",          "ffn_gate_b",
+    "ffn_down_b",               "ffn_up_b",                    "ffn_act",                "ffn_exp_probs_b",
+    "ffn_exp_probs_b_vl",       "ffn_gate_tid2eid",            "dflash_attn_conv_base",  "dflash_attn_conv_proj",
+    "dflash_ffn_conv_base",     "dflash_ffn_conv_proj",        "lilicorr_attn_norm",     "lilicorr_mlp_norm",
+    "lilicorr_attn_in_proj",    "lilicorr_attn_in_proj_b",     "lilicorr_attn_out_proj", "lilicorr_attn_out_proj_b",
+    "lilicorr_attn_out_proj_s", "lilicorr_mlp_0",              "lilicorr_mlp_0_b",       "lilicorr_mlp_0_s",
+    "lilicorr_mlp_2",           "lilicorr_mlp_2_b",            "lilicorr_mlp_2_s",       "ssm_in",
     "ssm_x",                    "ssm_dt",                      "ssm_out",                "ssm_conv1d",
     "ssm_a",                    "ssm_d",                       "ssm_conv1d_b",           "ssm_dt_b",
     "ssm_beta_alpha",           "ssm_alpha",                   "time_mix_w1",            "time_mix_w2",
@@ -250,7 +263,7 @@ const KeyZ = struct {
     }
 };
 
-/// Ports `llama_model_saver` (llama-model-saver.h:12 @d81235049), built from
+/// Ports `llama_model_saver` (llama-model-saver.h:12 @620d2225c), built from
 /// a model.
 pub const Saver = struct {
     gguf_ctx: *c.gguf_context,
@@ -259,7 +272,7 @@ pub const Saver = struct {
     arch: arch.Arch,
 
     /// Ports the constructor of `llama_model_saver` from a model
-    /// (llama-model-saver.cpp:30 @d81235049).
+    /// (llama-model-saver.cpp:31 @620d2225c).
     ///
     /// Parameters:
     /// - `model`: the model; borrowed for the saver's life.
@@ -267,12 +280,12 @@ pub const Saver = struct {
     /// Return: the saver; free it with `deinit`.
     pub fn init(model: *const Model) Saver {
         const ctx = c.gguf_init_empty().?;
-        impl.assert(supportsArch(model.arch), "llama-model-saver.cpp", 32, "llama_model_saver_supports_arch(model->arch)");
+        impl.assert(supportsArch(model.arch), "llama-model-saver.cpp", 33, "llama_model_saver_supports_arch(model->arch)");
         return .{ .gguf_ctx = ctx, .model = model, .arch = model.arch };
     }
 
-    /// Ports the destructor of `llama_model_saver` (llama-model-saver.cpp:38
-    /// @d81235049).
+    /// Ports the destructor of `llama_model_saver` (llama-model-saver.cpp:39
+    /// @620d2225c).
     ///
     /// Return: nothing.
     pub fn deinit(self: *Saver) void {
@@ -288,7 +301,7 @@ pub const Saver = struct {
     }
 
     /// Ports the scalar overloads `add_kv`, `add_kv`, `add_kv`, `add_kv` and
-    /// `add_kv` (llama-model-saver.cpp:44, 48, 52, 56, 60 @d81235049) -- for
+    /// `add_kv` (llama-model-saver.cpp:45, 49, 53, 57, 61 @620d2225c) -- for
     /// uint32_t, int32_t, uint64_t, float and bool -- chosen by the value's
     /// type.
     fn addScalar(self: *Saver, kv: arch.Kv, value: anytype) void {
@@ -303,14 +316,14 @@ pub const Saver = struct {
         }
     }
 
-    /// Ports the `const char *` overload of `add_kv` (llama-model-saver.cpp:64
-    /// @d81235049).
+    /// Ports the `const char *` overload of `add_kv` (llama-model-saver.cpp:65
+    /// @620d2225c).
     fn addCStr(self: *Saver, kv: arch.Kv, value: [*:0]const u8) void {
         const k = self.key(kv);
         c.gguf_set_val_str(self.gguf_ctx, k.ptr(), value);
     }
 
-    /// Ports the container `add_kv` (llama-model-saver.cpp:76 @d81235049) for
+    /// Ports the container `add_kv` (llama-model-saver.cpp:77 @620d2225c) for
     /// a `std::string`: nothing when it is empty.
     fn addString(self: *Saver, kv: arch.Kv, value: []const u8) void {
         if (value.len == 0) return;
@@ -319,12 +332,12 @@ pub const Saver = struct {
         self.addCStr(kv, z.ptr);
     }
 
-    /// Ports the container `add_kv` (llama-model-saver.cpp:76 @d81235049) for
+    /// Ports the container `add_kv` (llama-model-saver.cpp:77 @620d2225c) for
     /// an array: per layer, `n_layer()` values, written as one scalar when
     /// they all agree; nothing when there are none.
     fn addArr(self: *Saver, kv: arch.Kv, comptime T: type, value: []const T, per_layer: bool) void {
         const n_values: usize = if (per_layer) self.model.hparams.nLayer() else value.len;
-        impl.assert(n_values <= value.len, "llama-model-saver.cpp", 79, "n_values <= value.size()");
+        impl.assert(n_values <= value.len, "llama-model-saver.cpp", 80, "n_values <= value.size()");
 
         if (n_values == 0) return;
 
@@ -357,7 +370,7 @@ pub const Saver = struct {
     }
 
     /// Ports the `std::vector<std::string>` overload of `add_kv`
-    /// (llama-model-saver.cpp:124 @d81235049): written even when empty.
+    /// (llama-model-saver.cpp:125 @620d2225c): written even when empty.
     fn addStrArr(self: *Saver, kv: arch.Kv, value: []const []const u8) void {
         const tmp = allocator.alloc([*c]const u8, value.len) catch oom();
         defer allocator.free(tmp);
@@ -374,19 +387,19 @@ pub const Saver = struct {
         c.gguf_set_arr_str(self.gguf_ctx, k.ptr(), if (tmp.len == 0) null else tmp.ptr, tmp.len);
     }
 
-    /// Ports `add_tensor` (llama-model-saver.cpp:132 @d81235049).
+    /// Ports `add_tensor` (llama-model-saver.cpp:133 @620d2225c).
     fn addTensor(self: *Saver, tensor: ?*const Tensor) void {
         const t = tensor orelse return;
         if (c.gguf_find_tensor(self.gguf_ctx, &t.name) >= 0) {
             const name = std.mem.sliceTo(&t.name, 0);
             impl.assert(std.mem.eql(u8, name, "rope_freqs.weight") or std.mem.eql(u8, name, "rope_factors_long.weight") or
-                std.mem.eql(u8, name, "rope_factors_short.weight"), "llama-model-saver.cpp", 140, "tensor_name == \"rope_freqs.weight\" || tensor_name == \"rope_factors_long.weight\" || tensor_name == \"rope_factors_short.weight\"");
+                std.mem.eql(u8, name, "rope_factors_short.weight"), "llama-model-saver.cpp", 141, "tensor_name == \"rope_freqs.weight\" || tensor_name == \"rope_factors_long.weight\" || tensor_name == \"rope_factors_short.weight\"");
             return;
         }
         c.gguf_add_tensor(self.gguf_ctx, t);
     }
 
-    /// Ports `add_kv_from_model` (llama-model-saver.cpp:146 @d81235049). The
+    /// Ports `add_kv_from_model` (llama-model-saver.cpp:147 @620d2225c). The
     /// precision policy's names are written in `prec_src1`'s order, which
     /// in the C++ is a pointer-keyed `std::unordered_map`'s and so not
     /// reproducible from run to run; here it is the order the loader found
@@ -459,8 +472,9 @@ pub const Saver = struct {
         self.addScalar(.block_count, hp.n_layer_all);
         self.addScalar(.leading_dense_block_count, hp.n_layer_dense_lead);
         self.addArr(.feed_forward_length, u32, &hp.n_ff_arr, true);
-        self.addScalar(.expert_feed_forward_length, hp.nFfExp(0));
+        self.addArr(.expert_feed_forward_length, u32, &hp.n_ff_exp_arr, true);
         self.addScalar(.expert_latent_length, hp.n_expert_latent);
+        self.addScalar(.moe_latent_size, hp.moe_latent_size);
         self.addScalar(.expert_shared_feed_forward_length, hp.n_ff_shexp);
         self.addScalar(.expert_chunk_feed_forward_length, hp.n_ff_chexp);
         self.addArr(.swiglu_clamp_exp, f32, hp.swiglu_clamp_exp[0..hp.n_layer_all], false);
@@ -510,6 +524,8 @@ pub const Saver = struct {
         self.addScalar(.attention_layernorm_rms_eps, hp.f_norm_rms_eps);
         self.addScalar(.attention_groupnorm_eps, hp.f_norm_group_eps);
         self.addScalar(.attention_groupnorm_groups, hp.n_norm_groups);
+        self.addScalar(.attention_value_expert_count, hp.n_value_expert);
+        self.addScalar(.attention_value_expert_used_count, hp.n_value_expert_used);
         self.addScalar(.attention_causal, hp.causal_attn);
         self.addScalar(.attention_q_lora_rank, hp.n_lora_q);
         self.addScalar(.attention_kv_lora_rank, hp.n_lora_kv);
@@ -593,6 +609,7 @@ pub const Saver = struct {
         self.addScalar(.rope_dimension_count, hp.n_rot_full);
         self.addScalar(.rope_dimension_count_swa, hp.n_rot_swa);
         self.addArr(.rope_dimension_sections, c_int, &hp.rope_sections, false);
+        self.addString(.rope_section_order, try model_mod.ropeSectionOrderName(hp.rope_section_order, exc));
         self.addScalar(.rope_freq_base, hp.rope_freq_base_train);
         self.addScalar(.rope_freq_base_swa, hp.rope_freq_base_train_swa);
         self.addString(.rope_scaling_type, try model_mod.ropeScalingTypeName(hp.rope_scaling_type_train, exc));
@@ -644,7 +661,7 @@ pub const Saver = struct {
         self.addScalar(.tokenizer_add_prefix, vocab.add_space_prefix);
         self.addScalar(.tokenizer_remove_extra_ws, vocab.remove_extra_whitespaces);
         // `std::vector<char>`: no branch of the template matches it.
-        if (vocab.precompiled_charsmap.items.len != 0) impl.abort("llama-model-saver.cpp", 116, "fatal error");
+        if (vocab.precompiled_charsmap.items.len != 0) impl.abort("llama-model-saver.cpp", 117, "fatal error");
         if (vocab.special_fim_pre_id != vm.vocab.token_null) self.addScalar(.tokenizer_fim_pre_id, @as(u32, @bitCast(vocab.special_fim_pre_id)));
         if (vocab.special_fim_suf_id != vm.vocab.token_null) self.addScalar(.tokenizer_fim_suf_id, @as(u32, @bitCast(vocab.special_fim_suf_id)));
         if (vocab.special_fim_mid_id != vm.vocab.token_null) self.addScalar(.tokenizer_fim_mid_id, @as(u32, @bitCast(vocab.special_fim_mid_id)));
@@ -682,7 +699,7 @@ pub const Saver = struct {
         self.addScalar(.dense_3_feat_out, hp.dense_3_feat_out);
     }
 
-    /// Ports `add_tensors_from_model` (llama-model-saver.cpp:467 @d81235049).
+    /// Ports `add_tensors_from_model` (llama-model-saver.cpp:472 @620d2225c).
     /// Looped architectures alias physical tensors across cache slots, so
     /// each layer tensor is saved once, by pointer.
     ///
@@ -713,7 +730,7 @@ pub const Saver = struct {
         }
     }
 
-    /// Ports `save` to a path (llama-model-saver.cpp:515 @d81235049).
+    /// Ports `save` to a path (llama-model-saver.cpp:520 @620d2225c).
     ///
     /// Parameters:
     /// - `path_model`: where to write.
@@ -724,7 +741,7 @@ pub const Saver = struct {
     }
 };
 
-/// Ports `llama_vocab`'s `get_bpe_merges` (llama-vocab.cpp:4244 @d81235049):
+/// Ports `llama_vocab`'s `get_bpe_merges` (llama-vocab.cpp:4357 @620d2225c):
 /// each merge as `left right`, at its rank; a rank no pair holds stays
 /// empty.
 ///

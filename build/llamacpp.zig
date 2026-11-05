@@ -173,15 +173,15 @@ fn llamaCModule(b: *std.Build, opts: Options) *std.Build.Module {
 /// becomes a `ggml_metallib_<name>_{start,end}` symbol pair that the Obj-C
 /// device layer reads at runtime.
 const metal_kernels = [_][]const u8{
-    "fa_aux",      "fa_f16",      "fa_f32",      "fa_q4_0",
-    "fa_q4_1",     "fa_q5_0",     "fa_q5_1",     "fa_q8_0",
-    "fa_vec_f16",  "fa_vec_f32",  "fa_vec_q4_0", "fa_vec_q4_1",
-    "fa_vec_q5_0", "fa_vec_q5_1", "fa_vec_q8_0", "mul_mv",
-    "mul_mv_mma",  "mul_mm",      "quantize",    "softmax",
-    "norm",        "unary",       "binbcast",    "reduce",
-    "tri",         "ssm",         "wkv",         "gated_delta_net",
-    "solve_tri",   "rope",        "conv",        "upscale",
-    "argsort",     "pool",        "misc",
+    "fa_aux",          "fa_f16",      "fa_f32",      "fa_q4_0",
+    "fa_q4_1",         "fa_q5_0",     "fa_q5_1",     "fa_q8_0",
+    "fa_tensor",       "fa_vec_f16",  "fa_vec_f32",  "fa_vec_q4_0",
+    "fa_vec_q4_1",     "fa_vec_q5_0", "fa_vec_q5_1", "fa_vec_q8_0",
+    "mul_mv",          "mul_mv_mma",  "mul_mm",      "quantize",
+    "softmax",         "norm",        "unary",       "binbcast",
+    "reduce",          "tri",         "ssm",         "wkv",
+    "gated_delta_net", "solve_tri",   "rope",        "conv",
+    "upscale",         "argsort",     "pool",        "misc",
 };
 
 const ggml_base_sources = [_][]const u8{
@@ -280,6 +280,7 @@ const llama_ref_sources = [_][]const u8{
     "src/llama-kv-cache-msa.cpp",
     "src/llama-kv-cache-dsv4.cpp",
     "src/llama-memory.cpp",
+    "src/llama-moe-cache.cpp",
     "src/llama-memory-hybrid.cpp",
     "src/llama-memory-hybrid-iswa.cpp",
     "src/llama-memory-hybrid-idx.cpp",

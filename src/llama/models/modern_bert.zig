@@ -11,8 +11,8 @@
 //! embedding added, each ending in the classifier, so the output is one
 //! score per question type.
 //!
-//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.6.0
-//! (`d81235049`): `N_DECISION_TYPES`, `llama_model_modern_bert`'s
+//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.7.0
+//! (`620d2225c`): `N_DECISION_TYPES`, `llama_model_modern_bert`'s
 //! `load_arch_hparams`, `load_arch_tensors` and `build_arch_graph`, and
 //! its `graph` with `build_decision_head`; and from
 //! `llama.cpp/src/llama-model.cpp`, `llm_ffn_op_type_from_string`, which
@@ -31,15 +31,21 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `N_DECISION_TYPES` (models/modern-bert.cpp:4 @d81235049): the
+/// Ports `N_DECISION_TYPES` (models/modern-bert.cpp:4 @620d2225c): the
 /// question types of a decision model -- choice, score and noul.
 const n_decision_types: u32 = 3;
 
-/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1061 @d81235049):
-/// the GGUF `<arch>.hidden_activation` strings that map cleanly to a gated
-/// feed-forward op.
+/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1091 @620d2225c):
+/// the GGUF activation names, mapped to the gated feed-forward op the graph
+/// builders use. `"gelu"` is the exact (erf) variant.
 const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
-    .{ "gelu", .geglu },
+    .{ "gelu", .geglu_erf },
+    .{ "gelu_python", .geglu_erf },
+    .{ "gelu_pytorch_tanh", .geglu },
+    .{ "gelu_new", .geglu },
+    .{ "gelu_fast", .geglu },
+    .{ "gelu_accurate", .geglu },
+    .{ "gelu_python_tanh", .geglu },
     .{ "geglu", .geglu },
     .{ "silu", .swiglu },
     .{ "swish", .swiglu },
@@ -48,7 +54,7 @@ const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
     .{ "reglu", .reglu },
 };
 
-/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:1071 @d81235049).
+/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:1114 @620d2225c).
 ///
 /// Parameters:
 /// - `name`: the activation's name.
@@ -60,7 +66,7 @@ fn ffnOpTypeFromString(name: []const u8, fallback: graph.FfnOp) graph.FfnOp {
     return fallback;
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:6 @d81235049).
+/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:6 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -79,14 +85,20 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
     // Some ModernBert derivatives (e.g. IBM Granite Embedding 97m R2) use
     // SiLU/SwiGLU in the FFN instead of the default GELU/GeGLU.
-    hp.llm_ffn_op = @backingInt(graph.FfnOp.geglu);
+    hp.llm_ffn_op = @backingInt(graph.FfnOp.geglu_erf);
     if (try meta.getKey([]const u8, .hidden_act, false, exc)) |hidden_act| {
-        hp.llm_ffn_op = @backingInt(ffnOpTypeFromString(hidden_act, .geglu));
+        hp.llm_ffn_op = @backingInt(ffnOpTypeFromString(hidden_act, .geglu_erf));
     }
 
     // GGUFs without a classifier pooling type use mean (gte-reranker-modernbert-base).
     if (hp.pooling_type_cls == c.LLAMA_POOLING_TYPE_UNSPECIFIED) {
         hp.pooling_type_cls = c.LLAMA_POOLING_TYPE_MEAN;
+    }
+
+    // GGUFs without a classifier activation use gelu, the transformers
+    // default.
+    if (try meta.getKey([]const u8, .classifier_activation, false, exc) == null) {
+        hp.act_cls = c.GGML_UNARY_OP_GELU_ERF;
     }
 
     if (try meta.getKey(u32, .decision_block_count, false, exc)) |v| hp.n_layer_decision = v;
@@ -109,7 +121,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:55 @d81235049).
+/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:61 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -183,19 +195,19 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:128 @d81235049).
+/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:134 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_modern_bert`'s `graph`
-/// (models/modern-bert.cpp:132 @d81235049).
+/// (models/modern-bert.cpp:138 @620d2225c).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/modern-bert.cpp", 135, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/modern-bert.cpp", 141, "n_embd_head == hparams.n_embd_head_k()");
 
     const inp_pos = b.buildInpPos();
 
@@ -282,7 +294,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_modern_bert::graph`'s `build_decision_head`
-/// (models/modern-bert.cpp:242 @d81235049): one score per question type for
+/// (models/modern-bert.cpp:248 @620d2225c): one score per question type for
 /// each output token, read at the option markers by the caller. The
 /// question type is not a graph input, so the head is evaluated once per
 /// type.

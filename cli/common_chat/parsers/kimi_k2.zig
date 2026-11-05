@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/kimi-k2.cpp` (llama.cpp v0.6.0,
-//! `d81235049`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/kimi-k2.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -86,11 +86,11 @@ const Build = struct {
         return b.plus(x, end);
     }
 
-    fn tool(self: *Build, t: *Value) Error!void {
-        self.toolPeg(t) catch |e| return util.fromPeg(e);
+    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
+        self.toolPeg(tool_index, t) catch |e| return util.fromPeg(e);
     }
 
-    fn toolPeg(self: *Build, t: *Value) chat_peg.Error!void {
+    fn toolPeg(self: *Build, tool_index: usize, t: *Value) chat_peg.Error!void {
         const p = self.cb;
         const b = &p.b;
         const function = t.at("function") catch |e| return util.toPeg(util.fromJson(e));
@@ -105,15 +105,15 @@ const Build = struct {
         const tool_id = try p.toolId(id);
 
         const open = try p.toolOpen(try b.plus(tool_id, try b.literal(ARGS_BEGIN)));
-        const schema_name = try std.mem.concat(self.a, u8, &.{ "tool-", name, "-schema" });
+        const schema_name = try parsers.indexName(self.a, "tool-", tool_index, "-schema");
         const with_args = try b.plus(open, try p.toolArgs(try b.schemaJson(try b.json(), schema_name, &schema, false)));
         const tool_parser = try p.tool(try b.plus(with_args, try p.toolClose(try b.optional(try b.literal(CALL_END)))));
 
-        try b.orAssign(&self.tool_choice, try b.rule(try std.mem.concat(self.a, u8, &.{ "tool-", name }), tool_parser, false));
+        try b.orAssign(&self.tool_choice, try b.rule(try parsers.indexName(self.a, "tool-", tool_index, ""), tool_parser, false));
     }
 };
 
-/// Ports `common_chat_params_init_kimi_k2` (parsers/kimi-k2.cpp:5 @d81235049).
+/// Ports `common_chat_params_init_kimi_k2` (parsers/kimi-k2.cpp:5 @620d2225c).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -148,18 +148,16 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
             data.generation_prompt = try std.mem.concat(a, u8, &.{ data.generation_prompt, THINK_END, try m.renderContent(a, "\n\n") });
         }
 
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     var build: Build = .{ .a = a, .inputs = inputs, .has_tools = has_tools, .extract_reasoning = extract_reasoning };
-    var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-
-    data.parser = try parsers.save(a, &arena);
+    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = inputs.tool_choice == .auto;
-        data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
+        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, "<|tool_call_begin|>");
     }
 
@@ -185,7 +183,7 @@ test "Kimi-K2-Thinking.jinja applies with a tool and builds a parser and a gramm
     p.tools = try json.parse(a, "[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]");
     const data = try init(a, &t, &p);
     try std.testing.expectEqual(.peg_native, data.format);
-    try std.testing.expect(data.prompt.len > 0);
-    try std.testing.expect(data.parser.len > 0);
+    try std.testing.expect(data.prompt.parts.items.len > 0);
+    try std.testing.expect(data.parser != null);
     try std.testing.expect(data.grammar.len > 0);
 }

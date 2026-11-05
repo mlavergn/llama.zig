@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ports parts of `llama.cpp/tools/server/server-common.cpp` and
-//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.6.0,
-//! `d81235049`). The rest of that pair is `tokens.zig` (`server_tokens` and
+//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.7.0,
+//! `620d2225c`). The rest of that pair is `tokens.zig` (`server_tokens` and
 //! prompt tokenization), `oaicompat.zig` (the OpenAI request conversions and
 //! response formatters) and `subproc.zig` (`server_subproc`). Each
 //! declaration names what it ports and the line it began at.
@@ -65,7 +65,7 @@ pub fn ggmlAssert(ok: bool, comptime file: [*:0]const u8, comptime line: c_int, 
 pub const SrvLevel = enum { dbg, trc, inf, wrn, err };
 
 /// Ports `SRV_DBG`, `SRV_TRC`, `SRV_INF`, `SRV_WRN` and `SRV_ERR`
-/// (server-common.h:33, 34, 35, 36, 37 @d81235049): the message
+/// (server-common.h:33, 34, 35, 36, 37 @620d2225c): the message
 /// prefixed `srv  %12.*s: ` with the calling function's name.
 pub fn srv(comptime level: SrvLevel, comptime func: []const u8, comptime fmt: []const u8, args: anytype) void {
     const f = "srv  %12.*s: " ++ fmt;
@@ -96,7 +96,7 @@ pub fn freeZ(z: [*:0]const u8) void {
 // -----------------------------------------------------------------------------
 // json_value
 
-/// Ports `json_value` (server-common.h:43 @d81235049) for a scalar `T`:
+/// Ports `json_value` (server-common.h:43 @620d2225c) for a scalar `T`:
 /// the member `key` as `T`, or `default_value` when it is absent or null,
 /// or -- with a warning -- when it does not convert.
 ///
@@ -239,7 +239,7 @@ pub const Obj = struct {
 // -----------------------------------------------------------------------------
 // errors
 
-/// Ports `error_type` (server-common.h:58 @d81235049).
+/// Ports `error_type` (server-common.h:58 @620d2225c).
 pub const ErrorType = enum(c_int) {
     invalid_request,
     authentication,
@@ -251,7 +251,7 @@ pub const ErrorType = enum(c_int) {
     exceed_context_size, // custom error
 };
 
-/// Ports `format_error_response` (server-common.cpp:36 @d81235049).
+/// Ports `format_error_response` (server-common.cpp:36 @620d2225c).
 ///
 /// Return: `{"code", "message", "type"}`, owned by the caller.
 pub fn formatErrorResponse(a: Allocator, message: []const u8, ty: ErrorType) Error!Value {
@@ -302,22 +302,22 @@ pub fn formatErrorResponse(a: Allocator, message: []const u8, ty: ErrorType) Err
 // -----------------------------------------------------------------------------
 // grammar triggers
 
-/// Ports `common_grammar_trigger_type` (common/common.h:146 @d81235049). The
+/// Ports `common_grammar_trigger_type` (common/common.h:146 @620d2225c). The
 /// server casts any integer to it, so it is kept as one.
 pub const trigger_type_token: c_int = 0;
 pub const trigger_type_word: c_int = 1;
 pub const trigger_type_pattern: c_int = 2;
 pub const trigger_type_pattern_full: c_int = 3;
 
-/// Ports `common_grammar_trigger` (common/common.h:153 @d81235049), as
-/// `server_grammar_trigger` (server-common.h:70 @d81235049) wraps it.
+/// Ports `common_grammar_trigger` (common/common.h:153 @620d2225c), as
+/// `server_grammar_trigger` (server-common.h:70 @620d2225c) wraps it.
 pub const GrammarTrigger = struct {
     type: c_int = 0,
     value: []const u8 = "",
     token: Token = token_null,
 
     /// Ports `server_grammar_trigger`'s constructor from JSON
-    /// (server-common.h:70 @d81235049).
+    /// (server-common.h:70 @620d2225c).
     ///
     /// Return: `value` is `a`'s.
     pub fn fromJson(a: Allocator, in: *const Value) Error!GrammarTrigger {
@@ -330,7 +330,7 @@ pub const GrammarTrigger = struct {
         return t;
     }
 
-    /// Ports `server_grammar_trigger`'s `to_json` (server-common.h:83 @d81235049).
+    /// Ports `server_grammar_trigger`'s `to_json` (server-common.h:83 @620d2225c).
     ///
     /// Return: owned by the caller.
     pub fn toJson(self: GrammarTrigger, a: Allocator) Error!Value {
@@ -359,7 +359,7 @@ pub fn randomDevice() u32 {
     return std.mem.readInt(u32, &b, .little);
 }
 
-/// Ports `random_string` (server-common.cpp:111 @d81235049): 32 characters of
+/// Ports `random_string` (server-common.cpp:111 @620d2225c): 32 characters of
 /// `[0-9A-Za-z]` from an `mt19937` seeded by the random device.
 ///
 /// Return: owned by the caller.
@@ -371,14 +371,14 @@ pub fn randomString(a: Allocator) Error![]u8 {
     return result;
 }
 
-/// Ports `gen_chatcmplid` (server-common.cpp:126 @d81235049).
+/// Ports `gen_chatcmplid` (server-common.cpp:126 @620d2225c).
 pub fn genChatcmplid(a: Allocator) Error![]u8 {
     const r = try randomString(a);
     defer a.free(r);
     return std.mem.concat(a, u8, &.{ "chatcmpl-", r });
 }
 
-/// Ports `gen_tool_call_id` (server-common.cpp:130 @d81235049).
+/// Ports `gen_tool_call_id` (server-common.cpp:130 @620d2225c).
 pub fn genToolCallId(a: Allocator) Error![]u8 {
     return randomString(a);
 }
@@ -403,7 +403,7 @@ fn initMediaMarker() void {
     media_marker = std.fmt.bufPrintSentinel(&media_marker_buf, "<__media_{s}__>", .{r}, 0) catch "";
 }
 
-/// Ports `get_media_marker` (server-common.cpp:134 @d81235049): fixed for the
+/// Ports `get_media_marker` (server-common.cpp:134 @620d2225c): fixed for the
 /// process's life, from `LLAMA_MEDIA_MARKER` when set.
 pub fn getMediaMarker() [:0]const u8 {
     // a function-local static: initialized once, thread-safe
@@ -420,20 +420,20 @@ pub fn getMediaMarker() [:0]const u8 {
 // model output modalities
 
 /// Ports `server_model_output_modalities` (server-common.cpp:150
-/// @d81235049): output modalities for `architecture.output_modalities` in
+/// @620d2225c): output modalities for `architecture.output_modalities` in
 /// GET /models.
 ///
 /// Return: static strings.
 pub fn serverModelOutputModalities(decision_type: tools.common.DecisionType) []const []const u8 {
     return switch (decision_type) {
-        .openjev, .lev, .kev, .nimble, .laya, .clef => &.{"decisions"},
+        .openjev, .lev, .kev, .nimble, .laya, .clef, .pplx_decider, .vllm_decision2, .vllm_d3, .lfm2_d1, .lfm2_d1_omni => &.{"decisions"},
         // fallback when there is no decision type or the metadata is bad
         else => &.{"text"},
     };
 }
 
-/// Ports `server_model_architecture_json` (server-common.cpp:165
-/// @d81235049): the architecture object of GET /models; shared by the
+/// Ports `server_model_architecture_json` (server-common.cpp:170
+/// @620d2225c): the architecture object of GET /models; shared by the
 /// direct server and the router.
 ///
 /// Return: owned by `a`.
@@ -468,7 +468,7 @@ pub fn serverModelArchitectureJson(a: Allocator, inp_image: bool, inp_audio: boo
 /// `common_adapter_lora_info`, as the server's LoRA helpers read it.
 pub const LoraInfo = tools.params.LoraInfo;
 
-/// Ports `lora_all_alora` (server-common.cpp:191 @d81235049).
+/// Ports `lora_all_alora` (server-common.cpp:196 @620d2225c).
 pub fn loraAllAlora(loras: []const LoraInfo) bool {
     var found_alora = false;
     for (loras) |lora| {
@@ -482,12 +482,12 @@ pub fn loraAllAlora(loras: []const LoraInfo) bool {
     return found_alora;
 }
 
-/// Ports `lora_should_clear_cache` (server-common.cpp:204 @d81235049).
+/// Ports `lora_should_clear_cache` (server-common.cpp:209 @620d2225c).
 pub fn loraShouldClearCache(current: []const LoraInfo, next: []const LoraInfo) bool {
     // This should always be called after determining that the two sets are
     // _not_ equal. This assert is therefore some slightly wasted work and
     // should be safe to remove as long as this method is called correctly.
-    ggmlAssert(!areLoraEqual(current, next), "server-common.cpp", 211, "!are_lora_equal(current, next)");
+    ggmlAssert(!areLoraEqual(current, next), "server-common.cpp", 216, "!are_lora_equal(current, next)");
 
     return (!(loraEnabledEmpty(current) or loraAllAlora(current)) or !loraAllAlora(next));
 }
@@ -528,7 +528,7 @@ pub const LoraMap = struct {
     }
 };
 
-/// Ports `parse_lora_request` (server-common.cpp:218 @d81235049).
+/// Ports `parse_lora_request` (server-common.cpp:223 @620d2225c).
 ///
 /// Return: owned by `a`.
 pub fn parseLoraRequest(a: Allocator, data: *Value) Error!LoraMap {
@@ -546,7 +546,7 @@ pub fn parseLoraRequest(a: Allocator, data: *Value) Error!LoraMap {
     return lora;
 }
 
-/// Ports `are_lora_equal` (server-common.cpp:231 @d81235049).
+/// Ports `are_lora_equal` (server-common.cpp:236 @620d2225c).
 pub fn areLoraEqual(l1: []const LoraInfo, l2: []const LoraInfo) bool {
     if (l1.len != l2.len) {
         return false;
@@ -560,7 +560,7 @@ pub fn areLoraEqual(l1: []const LoraInfo, l2: []const LoraInfo) bool {
     return true;
 }
 
-/// Ports `lora_get_enabled_ids` (server-common.cpp:246 @d81235049).
+/// Ports `lora_get_enabled_ids` (server-common.cpp:251 @620d2225c).
 ///
 /// Return: owned by `a`.
 pub fn loraGetEnabledIds(a: Allocator, loras: []const LoraInfo) Error![]usize {
@@ -577,7 +577,7 @@ pub fn loraGetEnabledIds(a: Allocator, loras: []const LoraInfo) Error![]usize {
 // -----------------------------------------------------------------------------
 // json helpers
 
-/// Ports `json_is_array_of_numbers` (server-common.cpp:848 @d81235049).
+/// Ports `json_is_array_of_numbers` (server-common.cpp:853 @620d2225c).
 pub fn jsonIsArrayOfNumbers(data: *const Value) bool {
     if (data.isArray()) {
         for (data.array.items) |*e| {
@@ -590,7 +590,7 @@ pub fn jsonIsArrayOfNumbers(data: *const Value) bool {
     return false;
 }
 
-/// Ports `json_is_array_of_mixed_numbers_strings` (server-common.cpp:860 @d81235049).
+/// Ports `json_is_array_of_mixed_numbers_strings` (server-common.cpp:865 @620d2225c).
 pub fn jsonIsArrayOfMixedNumbersStrings(data: *const Value) bool {
     var seen_string = false;
     var seen_number = false;
@@ -606,7 +606,7 @@ pub fn jsonIsArrayOfMixedNumbersStrings(data: *const Value) bool {
     return false;
 }
 
-/// Ports `json_is_array_and_contains_numbers` (server-common.cpp:875 @d81235049).
+/// Ports `json_is_array_and_contains_numbers` (server-common.cpp:880 @620d2225c).
 pub fn jsonIsArrayAndContainsNumbers(data: *const Value) bool {
     if (data.isArray()) {
         for (data.array.items) |*e| {
@@ -619,7 +619,7 @@ pub fn jsonIsArrayAndContainsNumbers(data: *const Value) bool {
     return false;
 }
 
-/// Ports `json_get_nested_values` (server-common.cpp:887 @d81235049): each
+/// Ports `json_get_nested_values` (server-common.cpp:892 @620d2225c): each
 /// path's value, keyed by the path, when every key along it exists.
 ///
 /// Return: owned by `a`.
@@ -648,7 +648,7 @@ pub fn jsonGetNestedValues(a: Allocator, paths: []const []const u8, js: *const V
 // -----------------------------------------------------------------------------
 // utf-8
 
-/// Ports `validate_utf8` (server-common.cpp:944 @d81235049): the length of
+/// Ports `validate_utf8` (server-common.cpp:949 @620d2225c): the length of
 /// the longest prefix that does not end inside a multi-byte character.
 pub fn validateUtf8(text: []const u8) usize {
     const len = text.len;
@@ -678,7 +678,7 @@ pub fn validateUtf8(text: []const u8) usize {
     return len;
 }
 
-/// Ports `is_valid_utf8` (server-common.cpp:1745 @d81235049): lead bytes and
+/// Ports `is_valid_utf8` (server-common.cpp:1740 @620d2225c): lead bytes and
 /// continuation tags only; overlong forms and surrogates pass.
 pub fn isValidUtf8(str: []const u8) bool {
     var i: usize = 0;
@@ -716,7 +716,7 @@ pub fn isValidUtf8(str: []const u8) bool {
 // -----------------------------------------------------------------------------
 // stats and metrics
 
-/// Ports `server_slot_stats` (server-common.h:393 @d81235049): shared between
+/// Ports `server_slot_stats` (server-common.h:395 @620d2225c): shared between
 /// a slot and its task results.
 pub const SlotStats = struct {
     n_prompt_cached: u64 = 0,
@@ -735,35 +735,35 @@ pub const SlotStats = struct {
     t_prompt_last: i64 = 0,
     t_gen_last: i64 = 0,
 
-    /// Ports `update_prompt_start` (server-common.h:411 @d81235049).
+    /// Ports `update_prompt_start` (server-common.h:413 @620d2225c).
     pub fn updatePromptStart(self: *SlotStats) void {
-        ggmlAssert(self.t_start == 0, "server-common.h", 412, "t_start == 0");
+        ggmlAssert(self.t_start == 0, "server-common.h", 414, "t_start == 0");
         self.t_start = c.ggml_time_us();
     }
 
-    /// Ports `set_prompt_last` (server-common.h:415 @d81235049).
+    /// Ports `set_prompt_last` (server-common.h:417 @620d2225c).
     pub fn setPromptLast(self: *SlotStats, t_us: i64) void {
-        ggmlAssert(self.t_start > 0, "server-common.h", 416, "t_start > 0");
+        ggmlAssert(self.t_start > 0, "server-common.h", 418, "t_start > 0");
         self.t_prompt_last = t_us;
     }
 
-    /// Ports `update_prompt_last` (server-common.h:419 @d81235049).
+    /// Ports `update_prompt_last` (server-common.h:421 @620d2225c).
     pub fn updatePromptLast(self: *SlotStats) void {
         self.setPromptLast(c.ggml_time_us());
     }
 
-    /// Ports `update_gen_last` (server-common.h:422 @d81235049).
+    /// Ports `update_gen_last` (server-common.h:424 @620d2225c).
     pub fn updateGenLast(self: *SlotStats) void {
-        ggmlAssert(self.t_prompt_last > 0, "server-common.h", 423, "t_prompt_last > 0");
+        ggmlAssert(self.t_prompt_last > 0, "server-common.h", 425, "t_prompt_last > 0");
         self.t_gen_last = c.ggml_time_us();
     }
 
-    /// Ports `t_elapsed_us` (server-common.h:428 @d81235049).
+    /// Ports `t_elapsed_us` (server-common.h:430 @620d2225c).
     pub fn tElapsedUs(self: *const SlotStats) i64 {
         return c.ggml_time_us() - self.t_start;
     }
 
-    /// Ports `t_prompt_ms` (server-common.h:431 @d81235049).
+    /// Ports `t_prompt_ms` (server-common.h:433 @620d2225c).
     pub fn tPromptMs(self: *const SlotStats) f64 {
         if (self.t_prompt_last == 0) {
             return 0.0; // the prompt is not processed yet
@@ -771,7 +771,7 @@ pub const SlotStats = struct {
         return @as(f64, @floatFromInt(self.t_prompt_last - self.t_start)) / 1000.0;
     }
 
-    /// Ports `t_gen_us` (server-common.h:437 @d81235049).
+    /// Ports `t_gen_us` (server-common.h:439 @620d2225c).
     pub fn tGenUs(self: *const SlotStats) i64 {
         if (self.t_gen_last == 0) {
             return 0; // the generation is not started yet
@@ -780,44 +780,44 @@ pub const SlotStats = struct {
         return @max(1, self.t_gen_last - self.t_prompt_last);
     }
 
-    /// Ports `t_gen_ms` (server-common.h:444 @d81235049).
+    /// Ports `t_gen_ms` (server-common.h:446 @620d2225c).
     pub fn tGenMs(self: *const SlotStats) f64 {
         return @as(f64, @floatFromInt(self.tGenUs())) / 1000.0;
     }
 
-    /// Ports `n_gen_steps` (server-common.h:450 @d81235049).
+    /// Ports `n_gen_steps` (server-common.h:452 @620d2225c).
     pub fn nGenSteps(self: *const SlotStats) u64 {
         return if (self.n_gen > 0) self.n_gen - 1 else 0;
     }
 
-    /// Ports `t_prompt_per_token_ms` (server-common.h:456 @d81235049).
+    /// Ports `t_prompt_per_token_ms` (server-common.h:458 @620d2225c).
     pub fn tPromptPerTokenMs(self: *const SlotStats) f64 {
         return if (self.n_prompt_processed > 0) self.tPromptMs() / @as(f64, @floatFromInt(self.n_prompt_processed)) else 0.0;
     }
 
-    /// Ports `t_gen_per_token_ms` (server-common.h:459 @d81235049).
+    /// Ports `t_gen_per_token_ms` (server-common.h:461 @620d2225c).
     pub fn tGenPerTokenMs(self: *const SlotStats) f64 {
         return if (self.nGenSteps() > 0) self.tGenMs() / @as(f64, @floatFromInt(self.nGenSteps())) else 0.0;
     }
 
-    /// Ports `n_prompt_tps` (server-common.h:462 @d81235049).
+    /// Ports `n_prompt_tps` (server-common.h:464 @620d2225c).
     pub fn nPromptTps(self: *const SlotStats) f64 {
         const t_ms = self.tPromptMs();
         return if (t_ms > 0.0) 1e3 / t_ms * @as(f64, @floatFromInt(self.n_prompt_processed)) else 0.0;
     }
 
-    /// Ports `n_gen_tps` (server-common.h:466 @d81235049).
+    /// Ports `n_gen_tps` (server-common.h:468 @620d2225c).
     pub fn nGenTps(self: *const SlotStats) f64 {
         const t_ms = self.tGenMs();
         return if (t_ms > 0.0) 1e3 / t_ms * @as(f64, @floatFromInt(self.nGenSteps())) else 0.0;
     }
 
-    /// Ports `is_set` (server-common.h:472 @d81235049).
+    /// Ports `is_set` (server-common.h:474 @620d2225c).
     pub fn isSet(self: *const SlotStats) bool {
         return self.t_start > 0;
     }
 
-    /// Ports `server_slot_stats`'s `to_json` (server-common.cpp:84 @d81235049).
+    /// Ports `server_slot_stats`'s `to_json` (server-common.cpp:84 @620d2225c).
     ///
     /// Return: owned by `a`.
     pub fn toJson(self: *const SlotStats, a: Allocator) Error!Value {
@@ -844,23 +844,23 @@ pub const SlotStats = struct {
     }
 };
 
-/// Ports `server_metrics` (server-common.h:481 @d81235049): server-global and
+/// Ports `server_metrics` (server-common.h:483 @620d2225c): server-global and
 /// cumulative.
 pub const Metrics = struct {
-    /// Ports `server_metrics`'s `bucket` (server-common.h:484 @d81235049).
+    /// Ports `server_metrics`'s `bucket` (server-common.h:486 @620d2225c).
     pub const Bucket = struct {
         count: u64 = 0, // number of tokens
         steps: u64 = 0, // number of decode steps,
         // this excludes first generated token (logits from prompt batch)
         time: u64 = 0, // in microseconds
 
-        /// Ports `n_per_second` (server-common.h:491 @d81235049): the rate uses
+        /// Ports `n_per_second` (server-common.h:493 @620d2225c): the rate uses
         /// the decode steps, so that "free" tokens do not inflate it.
         pub fn nPerSecond(self: Bucket) f64 {
             return if (self.time > 0) @as(f64, @floatFromInt(self.steps)) / @as(f64, @floatFromInt(self.time)) * 1e6 else 0.0;
         }
 
-        /// Ports `add` (server-common.h:495 @d81235049).
+        /// Ports `add` (server-common.h:497 @620d2225c).
         pub fn add(self: *Bucket, n: u64, n_steps: u64, t_us: u64) void {
             self.count +%= n;
             self.steps +%= n_steps;
@@ -891,24 +891,24 @@ pub const Metrics = struct {
     n_draft_verif_steps: u64 = 0, // Total draft token verification steps by the target model
     n_accepted_per_pos: std.ArrayList(u64) = .empty, // Accepted tokens per draft position
 
-    /// Ports `init` (server-common.h:523 @d81235049).
+    /// Ports `init` (server-common.h:525 @620d2225c).
     pub fn init(self: *Metrics) void {
         self.t_start = c.ggml_time_us();
     }
 
-    /// Ports `reset_bucket` (server-common.h:527 @d81235049).
+    /// Ports `reset_bucket` (server-common.h:529 @620d2225c).
     pub fn resetBucket(self: *Metrics) void {
         self.prompt_bucket = .{};
         self.predict_bucket = .{};
     }
 
-    /// Ports `add_prompt` (server-common.h:532 @d81235049).
+    /// Ports `add_prompt` (server-common.h:534 @620d2225c).
     pub fn addPrompt(self: *Metrics, n_tokens: u64, t_us: u64) void {
         self.prompt.add(n_tokens, n_tokens, t_us);
         self.prompt_bucket.add(n_tokens, n_tokens, t_us);
     }
 
-    /// Ports `add_prompt_cached` (server-common.h:537 @d81235049).
+    /// Ports `add_prompt_cached` (server-common.h:539 @620d2225c).
     pub fn addPromptCached(self: *Metrics, n_tokens: u64) void {
         self.n_prompt_cached +%= n_tokens;
     }
@@ -935,7 +935,7 @@ fn logitGreater(_: void, x: TokenData, y: TokenData) bool {
     return x.logit > y.logit;
 }
 
-/// Ports `get_token_probabilities` (server-common.cpp:1591 @d81235049): the
+/// Ports `get_token_probabilities` (server-common.cpp:1586 @620d2225c): the
 /// candidates at output `idx`, the leading `n_top` sorted by logit
 /// (libc++'s `partial_sort`), with their softmax.
 ///
@@ -987,7 +987,7 @@ pub fn getTokenProbabilities(a: Allocator, ctx: ?*c.llama_context, idx: c_int, n
 
 extern fn expf(x: f32) f32;
 
-/// Ports `safe_json_to_str` (server-common.cpp:1643 @d81235049): compact, with
+/// Ports `safe_json_to_str` (server-common.cpp:1638 @620d2225c): compact, with
 /// bad UTF-8 replaced instead of throwing.
 ///
 /// Return: owned by `a`.
@@ -995,9 +995,9 @@ pub fn safeJsonToStr(a: Allocator, data: *const Value) error{OutOfMemory}![]u8 {
     return json.dumpSafe(a, data, -1);
 }
 
-/// Ports the `tokens_to_str` overload over a vocabulary (server-common.cpp:1663
-/// @d81235049), through the iterator template (server-common.cpp:1649
-/// @d81235049): every token's piece, concatenated.
+/// Ports the `tokens_to_str` overload over a vocabulary (server-common.cpp:1658
+/// @620d2225c), through the iterator template (server-common.cpp:1644
+/// @620d2225c): every token's piece, concatenated.
 ///
 /// Return: owned by `a`.
 pub fn tokensToStr(a: Allocator, vocab: ?*const c.llama_vocab, tokens: []const Token) Error![]u8 {
@@ -1011,13 +1011,13 @@ pub fn tokensToStr(a: Allocator, vocab: ?*const c.llama_vocab, tokens: []const T
     return ret.toOwnedSlice(a);
 }
 
-/// Ports the `tokens_to_str` overload over a context (server-common.cpp:1658 @d81235049).
+/// Ports the `tokens_to_str` overload over a context (server-common.cpp:1653 @620d2225c).
 pub fn tokensToStrCtx(a: Allocator, ctx: ?*c.llama_context, tokens: []const Token) Error![]u8 {
     const model = c.llama_get_model(ctx);
     return tokensToStr(a, c.llama_model_get_vocab(model), tokens);
 }
 
-/// Ports `common_tokenize` (common/common.cpp:1813 @d81235049).
+/// Ports `common_tokenize` (common/common.cpp:1837 @620d2225c).
 ///
 /// Return: owned by `a`.
 pub fn tokenize(a: Allocator, vocab: ?*const c.llama_vocab, text: []const u8, add_special: bool, parse_special: bool) Error![]Token {
@@ -1032,14 +1032,14 @@ pub fn tokenize(a: Allocator, vocab: ?*const c.llama_vocab, text: []const u8, ad
     if (n_tokens < 0) {
         result = try a.realloc(result, @intCast(-n_tokens));
         const check = c.llama_tokenize(vocab, text.ptr, @truncate(@as(i64, @intCast(text.len))), result.ptr, @intCast(result.len), add_special, parse_special);
-        ggmlAssert(check == -n_tokens, "common.cpp", 1828, "check == -n_tokens");
+        ggmlAssert(check == -n_tokens, "common.cpp", 1852, "check == -n_tokens");
     } else {
         result = try a.realloc(result, @intCast(n_tokens));
     }
     return result;
 }
 
-/// Ports `common_detokenize` (common/common.cpp:1863 @d81235049), the overload
+/// Ports `common_detokenize` (common/common.cpp:1887 @620d2225c), the overload
 /// over a vocabulary.
 ///
 /// Return: owned by `a`.
@@ -1050,14 +1050,14 @@ pub fn detokenize(a: Allocator, vocab: ?*const c.llama_vocab, tokens: []const To
     if (n_chars < 0) {
         text = try a.realloc(text, @intCast(-n_chars));
         n_chars = c.llama_detokenize(vocab, tokens.ptr, @intCast(tokens.len), text.ptr, @intCast(text.len), false, special);
-        ggmlAssert(n_chars <= @as(i32, @intCast(text.len)), "common.cpp", 1870, "n_chars <= (int32_t)text.size()"); // whitespace trimming is performed after per-token detokenization
+        ggmlAssert(n_chars <= @as(i32, @intCast(text.len)), "common.cpp", 1894, "n_chars <= (int32_t)text.size()"); // whitespace trimming is performed after per-token detokenization
     }
 
     // NOTE: the original tokenizer decodes bytes after collecting the pieces.
     return a.realloc(text, @intCast(n_chars));
 }
 
-/// Ports `common_token_to_piece` (common/common.cpp:1841 @d81235049), the
+/// Ports `common_token_to_piece` (common/common.cpp:1865 @620d2225c), the
 /// overload over a vocabulary, with `special = true`, the default.
 pub fn piece(a: Allocator, vocab: ?*const c.llama_vocab, t: Token) Error![]u8 {
     // the first try fits libc++'s short-string buffer
@@ -1067,13 +1067,13 @@ pub fn piece(a: Allocator, vocab: ?*const c.llama_vocab, t: Token) Error![]u8 {
         const out = try a.alloc(u8, @intCast(-n_chars));
         errdefer a.free(out);
         const check = c.llama_token_to_piece(vocab, t, out.ptr, -n_chars, 0, true);
-        ggmlAssert(check == -n_chars, "common.cpp", 1848, "check == -n_chars");
+        ggmlAssert(check == -n_chars, "common.cpp", 1872, "check == -n_chars");
         return out;
     }
     return a.dupe(u8, buf[0..@intCast(n_chars)]);
 }
 
-/// Ports `tokens_to_output_formatted_string` (server-common.cpp:1668 @d81235049):
+/// Ports `tokens_to_output_formatted_string` (server-common.cpp:1663 @620d2225c):
 /// the token's piece, or `byte: \xNN` for a lone byte of a multi-byte
 /// character.
 ///
@@ -1098,7 +1098,7 @@ pub fn tokensToOutputFormattedString(a: Allocator, ctx: ?*const c.llama_context,
 // -----------------------------------------------------------------------------
 // SSE
 
-/// Ports `format_oai_sse` (server-common.cpp:1685 @d81235049): one `data:`
+/// Ports `format_oai_sse` (server-common.cpp:1680 @620d2225c): one `data:`
 /// event per array element, or one for the value.
 ///
 /// Return: owned by `a`.
@@ -1121,7 +1121,7 @@ fn sendSingle(a: Allocator, ss: *std.ArrayList(u8), data: *const Value) Error!vo
     try ss.appendSlice(a, "\n\n"); // required by RFC 8895 - A message is terminated by a blank line (two line terminators in a row).
 }
 
-/// Ports `format_oai_resp_sse` (server-common.cpp:1704 @d81235049): `event:`
+/// Ports `format_oai_resp_sse` (server-common.cpp:1699 @620d2225c): `event:`
 /// and `data:` lines from each `{event, data}`.
 ///
 /// Return: owned by `a`.
@@ -1147,7 +1147,7 @@ fn sendEvent(a: Allocator, ss: *std.ArrayList(u8), event_obj: *const Value) Erro
     try ss.appendSlice(a, "\n\n");
 }
 
-/// Ports `format_anthropic_sse` (server-common.cpp:1722 @d81235049): an
+/// Ports `format_anthropic_sse` (server-common.cpp:1717 @620d2225c): an
 /// `event:` line where the item has both `event` and `data`, a bare `data:`
 /// otherwise.
 ///
@@ -1174,7 +1174,7 @@ fn sendAnthropic(a: Allocator, ss: *std.ArrayList(u8), event_obj: *const Value) 
 // -----------------------------------------------------------------------------
 // server_pipe
 
-/// Ports `server_pipe` (server-common.h:595 @d81235049): a queue between two
+/// Ports `server_pipe` (server-common.h:597 @620d2225c): a queue between two
 /// threads, with a close flag for each side and an optional bound.
 pub fn Pipe(comptime T: type) type {
     return struct {
@@ -1220,19 +1220,19 @@ pub fn Pipe(comptime T: type) type {
             return v;
         }
 
-        /// Ports `close_write` (server-common.h:606 @d81235049).
+        /// Ports `close_write` (server-common.h:608 @620d2225c).
         pub fn closeWrite(self: *Self) void {
             self.writer_closed.store(true, .monotonic);
             _ = std.c.pthread_cond_broadcast(&self.cv);
         }
 
-        /// Ports `close_read` (server-common.h:611 @d81235049).
+        /// Ports `close_read` (server-common.h:613 @620d2225c).
         pub fn closeRead(self: *Self) void {
             self.reader_closed.store(true, .monotonic);
             _ = std.c.pthread_cond_broadcast(&self.cv);
         }
 
-        /// Ports `read` (server-common.h:618 @d81235049). `close_on_stop`:
+        /// Ports `read` (server-common.h:620 @620d2225c). `close_on_stop`:
         /// should_stop means the reader is gone for good, so the writer is
         /// told the pipe is broken; otherwise it is a per-read deadline.
         ///
@@ -1266,7 +1266,7 @@ pub fn Pipe(comptime T: type) type {
             }
         }
 
-        /// Ports `write` (server-common.h:640 @d81235049).
+        /// Ports `write` (server-common.h:642 @620d2225c).
         ///
         /// Return: false when the reader is gone (a broken pipe).
         pub fn write(self: *Self, data: T) Error!bool {

@@ -22,7 +22,9 @@
 -m $PLAIN --positive-file $DATA/pos2.txt --negative-file $DATA/neg2.txt --pca-iter 30 --pca-batch 10 -t 3 -o pca2.gguf
 -m $ROOT/Qwen3-0.6B-Q8_0.gguf --positive-file $DATA/pos2.txt --negative-file $DATA/neg2.txt --method mean -o qwen3.gguf
 -m $ROOT/Qwen3-0.6B-Q8_0.gguf --positive-file $DATA/pos.txt --negative-file $DATA/neg.txt --pca-iter 20 --pca-batch 5 -o qwen3-pca.gguf
-!fail -m $ROOT/Qwen3.5-2B-Q4_K_M.gguf --positive-file $DATA/pos.txt --negative-file $DATA/neg.txt --method mean -o qwen35.gguf
+# v0.7.0: the hybrid Qwen3.5 runs to the end (it aborted at v0.6.0), both
+# sides writing the same control vector
+-m $ROOT/Qwen3.5-2B-Q4_K_M.gguf --positive-file $DATA/pos.txt --negative-file $DATA/neg.txt --method mean -o qwen35.gguf
 !fail -m $PLAIN --positive-file $DATA/nonexistent.txt --negative-file $DATA/neg.txt -o x.gguf
 !fail -m $PLAIN --positive-file $DATA/pos.txt --negative-file $DATA/neg.txt --pca-iter 25 --pca-batch 10
 !fail -m $PLAIN --method bogus

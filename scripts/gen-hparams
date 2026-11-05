@@ -50,6 +50,10 @@ def enum_values(text):
 
 enums = enum_values(hdr)
 enums.update(enum_values(llama_h))
+# ggml.h's `enum ggml_unary_op` alone, since v0.7.0's `act_cls`: other ggml.h
+# enums initialize with shifts, which enum_values does not evaluate.
+enums.update(enum_values(re.search(r"enum ggml_unary_op \{.*?\};",
+                                   open("llama.cpp/ggml/include/ggml.h").read(), re.S).group(0)))
 
 head = re.search(r"^struct llama_hparams \{", hdr, re.M)
 struct_line = hdr.count("\n", 0, head.start()) + 1
@@ -64,6 +68,7 @@ SCALAR = {
     "llama_swa_type": "c_int", "llama_non_causal_type": "c_int",
     "enum llama_pooling_type": "c_int", "enum llama_rope_type": "c_int",
     "enum llama_rope_scaling_type": "c_int", "enum llm_ffn_op_type": "c_int",
+    "enum llama_rope_section_order": "c_int", "enum ggml_unary_op": "c_int",
     "struct llama_hparams_posnet": "Posnet", "struct llama_hparams_convnext": "Convnext",
 }
 

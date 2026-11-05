@@ -313,7 +313,7 @@ var grammar_error: std.ArrayList(u8) = .empty;
 
 /// Resolves `--grammar`, `--grammar-file`, `--json-schema` or
 /// `--json-schema-file` to GBNF, as their handlers in upstream's
-/// `common_params_parser_init` (common/arg.cpp:1397 @d81235049) do: a schema is parsed
+/// `common_params_parser_init` (common/arg.cpp:1397 @620d2225c) do: a schema is parsed
 /// with `common_json::parse` and converted with `json_schema_to_grammar`,
 /// whose warnings go to stderr.
 ///
@@ -331,7 +331,7 @@ fn resolveGrammar(gpa: std.mem.Allocator, io: std.Io, src: cli.args.GrammarSourc
         .gbnf => |g| return g,
         .gbnf_file, .schema_file => |path| readFile(gpa, io, path) catch |e| {
             if (e == error.OutOfMemory) return e;
-            // the message of `read_file` (common/arg.cpp:67 @d81235049), newline included
+            // the message of `read_file` (common/arg.cpp:67 @620d2225c), newline included
             try grammar_error.print(gpa, "error: failed to open file '{s}'\n", .{path});
             return error.GrammarSource;
         },

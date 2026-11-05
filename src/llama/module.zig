@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** Everything under `src/llama/` is a port of C++ in the
-//! pinned reference checkout, v0.6.0 (`d81235049`), or of the libc++ it was
+//! pinned reference checkout, v0.7.0 (`620d2225c`), or of the libc++ it was
 //! compiled against; each file states its sources.
 //!
 //! # The swap
@@ -72,6 +72,7 @@ test {
     _ = @import("memory_hybrid_idx.zig");
     _ = @import("graph.zig");
     _ = @import("context.zig");
+    _ = @import("moe_cache.zig");
     _ = @import("context_state.zig");
     _ = @import("meta_split.zig");
     _ = @import("api/module.zig");

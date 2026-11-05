@@ -25,6 +25,7 @@ serves, from <root>:
     /etag/<tag>/<name>    ETag "<tag>"
     /noranges/<name>      Accept-Ranges: none
     /redirect/<name>      302 to /files/<name>
+    /redirect-esc/<name>  the same, the name's first letter percent-encoded
     /flaky/<name>         the first GET sends half the body and closes;
                           later ones (a Range resume) are whole
     /trunc/<name>         every GET sends half the body and closes
@@ -40,6 +41,7 @@ Accept), in a fixed order -- so two mocks, one per side, can be compared.
 import hashlib
 import http.server
 import json
+import urllib.parse
 import os
 import socketserver
 import sys
@@ -172,7 +174,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if len(parts) >= 3 and parts[1] == "status":
             return self.send_json(int(parts[2]), {"error": f"status {parts[2]}"})
         kind = parts[1] if len(parts) > 2 else ""
-        name = parts[-1]
+        # a file name may arrive percent-encoded (redirect-esc), and is served
+        # either way; the log keeps the raw path
+        name = urllib.parse.unquote(parts[-1])
         full = os.path.join(ROOT, "files", name)
         if not os.path.isfile(full):
             return self.send_json(404, {"error": "no such file"})
@@ -186,9 +190,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_file(data, etag='"' + parts[2] + '"')
         if kind == "noranges":
             return self.send_file(data, etag=etag, ranges=False)
-        if kind == "redirect":
+        if kind in ("redirect", "redirect-esc"):
             self.send_response(302)
-            self.send_header("Location", "/files/" + name)
+            # redirect-esc spells the name's first letter as %XX: since
+            # cpp-httplib 0.60 the client follows the Location as written,
+            # 0.59 decoded it first (!mocklog shows which)
+            self.send_header("Location", "/files/" + (name if kind == "redirect" else "%%%02X" % ord(name[0]) + name[1:]))
             self.send_header("Content-Length", "0")
             self.end_headers()
             return

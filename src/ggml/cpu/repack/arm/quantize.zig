@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.6.0
-//! (`d81235049`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.7.0
+//! (`620d2225c`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # The max is a vector tree, and the order is load-bearing
@@ -38,7 +38,7 @@ const c = impl.c;
 const f32x4 = neon.f32x4;
 
 /// Ports `ggml_quantize_mat_q8_0_4x4` and `ggml_quantize_mat_q8_0_4x8`
-/// (arch/arm/repack.cpp:69, 137 @d81235049).
+/// (arch/arm/repack.cpp:69, 137 @620d2225c).
 fn quantizeMat(comptime blck: i64, x: [*]const f32, vy: *anyopaque, k: i64) void {
     const nb = @divTrunc(k, 32);
     const y: [*]blocks.block_q8_0x4 = @ptrCast(@alignCast(vy));

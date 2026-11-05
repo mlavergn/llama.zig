@@ -49,3 +49,17 @@ POST /completion {"prompt": "The capital of France is", "n_predict": 8, "tempera
 POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 8, "temperature": 0, "id_slot": 1}
 POST /completion {"prompt": "Once upon a time", "n_predict": 8, "temperature": 0, "id_slot": 2}
 !end
+
+# v0.7.0 (#30295): a request pinned to a busy slot leaves it untouched and
+# waits; it no longer saves the running state to the prompt cache and loads
+# a cached one over it mid-generation (upstream's
+# test_pinned_request_on_busy_slot)
+!server -m $QWEN3 -c 4096 -np 1 --no-jinja --cache-ram 64 -lv 4
+POST /completion {"prompt": "Once upon a time a dragon named Ember guarded a golden key in a deep cave. Once upon a time a dragon named Ember guarded a golden key in a deep cave. Once upon a time a dragon named Ember guarded a golden key in a deep cave.", "n_predict": 4, "temperature": 0, "id_slot": 0}
+POST /completion {"prompt": "To bake bread, mix flour, water and salt, then", "n_predict": 4, "temperature": 0, "id_slot": 0}
+POST /completion {"prompt": "Once upon a time a dragon named Ember guarded a golden key in a deep cave. Once upon a time a dragon named Ember guarded a golden key in a deep cave. Once upon a time a dragon named Ember guarded a golden key in a deep cave.", "n_predict": 4, "temperature": 0, "id_slot": 0}
+!parallel
+POST /completion {"prompt": "To bake bread, mix flour, water and salt, then", "n_predict": 200, "ignore_eos": true, "temperature": 0, "id_slot": 0, "stream": true}
+!sleep 0.3
+POST /completion {"prompt": "Once upon a time a dragon named Ember guarded a golden key in a deep cave. Once upon a time a dragon named Ember guarded a golden key in a deep cave. Once upon a time a dragon named Ember guarded a golden key in a deep cave. The dragon", "n_predict": 4, "temperature": 0, "id_slot": 0}
+!end

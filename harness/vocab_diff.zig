@@ -22,9 +22,11 @@
 //!   all four `remove_special` x `unparse_special`, with `clean_spaces`
 //!   reached wherever the model sets it.
 //!
-//! The vocabulary types no real file covers -- RWKV, PLaMo-2, `hybriddna`, `test`,
-//! `whitespace`, `none` -- and the load-time error paths are synthesized
-//! from upstream's files with the gguf writer, into the directory given.
+//! The vocabulary types no real file covers -- RWKV, PLaMo-2, PLaMo-3,
+//! `hybriddna`, `test`, `whitespace`, `none` -- the pre-tokenizers and
+//! normalizer options no real file sets (K2 Horizon, Unigram NFC), and the
+//! load-time error paths are synthesized from upstream's files with the gguf
+//! writer, into the directory given.
 //!
 //! Usage: vocab_diff <tmpdir> <file.gguf | corpus.inp>...
 
@@ -120,25 +122,25 @@ const Corpus = struct {
 
 const pool = [_][]const u8{
     // Texts where the overlap cases' equal-length tokens meet.
-    "xyzwab",              "zwabxy",         "abxyzw",            "wabqxyzw",    "QQRRSS", "RRSSQQRR",
+    "xyzwab",              "zwabxy",         "abxyzw",                                                                          "wabqxyzw",         "QQRRSS",                   "RRSSQQRR",
     // DNA spans whose tail pads to a k-mer the vocabulary has.
     "<dna>ACGTACGT</dna>", "x<dna>acgtacgt", "<dna>gt</dna>tail",
     // PLaMo-2 pieces whose scores tie only after rounding.
-    "pq",          "xpqx",
+                                                                  "pq",               "xpqx",
     // UGM text where a known pair competes with a lone known char plus an
     // unknown one.
-      "ac",
+                        "ac",
     "zacz",
     // An lstrip token after nothing but spaces.
                    " <mask>",        "  <mask> x",
     // An RWKV escape with a high byte after it.
-           "\\x\xc3\xa9", "a",      "Z",
-    "q",                   "7",              "0",                 " ",           "  ",     "   ",
-    "\t",                  "\n",             "\n\n",              "\r\n",        "'",      "'s",
-    "'S",                  "'re",            "'LL",               "'d",          ".",      ",",
-    "!",                   "?",              "-",                 "_",           "$",      "+",
-    "<",                   ">",              "|",                 "~",           "`",      "\\",
-    "/",                   "@",              "#",                 "(",           ")",      "[",
+                                                                         "\\x\xc3\xa9",      "a",                        "Z",
+    "q",                   "7",              "0",                                                                               " ",                "  ",                       "   ",
+    "\t",                  "\n",             "\n\n",                                                                            "\r\n",             "'",                        "'s",
+    "'S",                  "'re",            "'LL",                                                                             "'d",               ".",                        ",",
+    "!",                   "?",              "-",                                                                               "_",                "$",                        "+",
+    "<",                   ">",              "|",                                                                               "~",                "`",                        "\\",
+    "/",                   "@",              "#",                                                                               "(",                ")",                        "[",
     "]",                   "{",              "}",
     "é",
     "ß",
@@ -164,10 +166,22 @@ const pool = [_][]const u8{
     "©",
     "\u{FFFD}",
     "ﬁ",
-    "123",                 "4567",           "Hello",             "world",       "the",    " the",
+    "123",                 "4567",           "Hello",                                                                           "world",            "the",                      " the",
     "▁",
-    "<0x41>",              "\xff",           "\xc3",              "\x00",        "ACGT",   "<dna>",
+    "<0x41>",              "\xff",           "\xc3",                                                                            "\x00",             "ACGT",                     "<dna>",
     "</dna>",              "acgtn",
+    // v0.7.0: PLaMo-3's pre-segmentation -- `<|plamo:...|>` markers (empty,
+    // with whitespace, U+001C, too long), runs of repeats and spaces, the
+    // U+EE00 boundary, newline runs it leaves alone.
+             "<|plamo:x|>",                                                                     "<|plamo:|>",       "<|plamo:a b|>",            "<|plamo:\x1c|>",
+    "<|plamo:",            "|>",             "<|plamo:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|>", "aaaa",             "aaaaaaa",                  "    ",
+    "\n\n\n\n\n",          "\u{EE00}",       "\u{FEFF}",
+    // v0.7.0: NFC -- decomposed and reordered marks, Hangul jamo, singletons.
+                                                                           "e\u{0301}",        "A\u{030A}",                "a\u{0323}\u{0302}",
+    "a\u{0302}\u{0323}",   "\u{212B}",       "\u{0344}",                                                                        "\u{1100}\u{1161}", "\u{1100}\u{1161}\u{11A8}", "\u{AC00}\u{11A8}",
+    "\u{0F73}",
+    // v0.7.0: K2 Horizon's letter runs and long s.
+               "\u{200C}",       "\u{200D}",                                                                        "\u{017F}",         "'\u{017F}",
 };
 
 fn randomText(r: std.Random, buf: *std.ArrayList(u8), specials: []const []const u8) []const u8 {
@@ -529,6 +543,60 @@ const edits = struct {
         setF32s(ctx, "tokenizer.ggml.scores", scores.items);
     }
 
+    /// Tokens appended with their types and scores, all three arrays kept
+    /// the same length.
+    fn appendTyped(ctx: *c.gguf_context, words: []const []const u8, ty: i32, score: f32) void {
+        var toks: std.ArrayList([]const u8) = .empty;
+        findStrs(ctx, "tokenizer.ggml.tokens", &toks);
+        toks.appendSlice(gpa, words) catch unreachable;
+        setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
+        const tk = c.gguf_find_key(ctx, "tokenizer.ggml.token_type");
+        var types: std.ArrayList(i32) = .empty;
+        const tp: [*]const i32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, tk)));
+        types.appendSlice(gpa, tp[0..c.gguf_get_arr_n(ctx, tk)]) catch unreachable;
+        types.appendNTimes(gpa, ty, words.len) catch unreachable;
+        setI32s(ctx, "tokenizer.ggml.token_type", types.items);
+        const sk = c.gguf_find_key(ctx, "tokenizer.ggml.scores");
+        var scores: std.ArrayList(f32) = .empty;
+        const sp: [*]const f32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, sk)));
+        scores.appendSlice(gpa, sp[0..c.gguf_get_arr_n(ctx, sk)]) catch unreachable;
+        scores.appendNTimes(gpa, score, words.len) catch unreachable;
+        setF32s(ctx, "tokenizer.ggml.scores", scores.items);
+    }
+
+    /// The v0.7.0 PLaMo-3 tokenizer: PLaMo-2's vocabulary with pieces that
+    /// span what the pre-segmentation cuts -- so cutting or not changes the
+    /// tokens -- and the PLaMo FIM and file-separator tokens.
+    fn plamo3(ctx: *c.gguf_context) void {
+        plamo2(ctx);
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "plamo3");
+        appendTyped(ctx, &.{ "<|plamo:fim_prefix|>", "<|plamo:fim_suffix|>", "<|plamo:fim_middle|>", "<|plamo:file_separator|>" }, c.LLAMA_TOKEN_TYPE_CONTROL, 0);
+        appendTyped(ctx, &.{
+            "aa",       "aaa",      "aaaa",      "aaaaa",     "  ",   "   ",      " a", "a ", "x<|",   "|>x", "<|plamo:x|>", "<|plamo:", "x|>", "|>",
+            "\u{FEFF}", "\u{EE00}", "\u{EE00}a", "a\u{EE00}", "\n\n", "\n\n\n\n", "<|", ":",  "plamo", "x\n", "\nx",
+        }, c.LLAMA_TOKEN_TYPE_NORMAL, -1.5);
+    }
+
+    /// The v0.7.0 Unigram NFC option on a vocabulary with no charsmap, so
+    /// nothing but NFC composes: precomposed pieces beside their parts.
+    fn ugmNfc(ctx: *c.gguf_context) void {
+        ugmScores(ctx);
+        appendTyped(ctx, &.{ "\u{00E9}", "e", "\u{0301}", "\u{00C5}", "A", "\u{030A}", "\u{AC00}", "\u{AC01}", "\u{1100}", "\u{1161}", "\u{11A8}", "\u{1EAD}", "\u{0323}", "\u{0302}", "\u{0308}" }, c.LLAMA_TOKEN_TYPE_NORMAL, -2.0);
+        c.gguf_set_val_bool(ctx, "tokenizer.ggml.normalizer.nfc", true);
+    }
+
+    /// ... and on a real Unigram vocabulary with its charsmap.
+    fn ugmNfcCharsmap(ctx: *c.gguf_context) void {
+        c.gguf_set_val_bool(ctx, "tokenizer.ggml.normalizer.nfc", true);
+    }
+
+    /// The v0.7.0 K2 Horizon pre-tokenizer on the GPT-2 vocabulary, with its
+    /// end-of-turn token.
+    fn preK2Horizon(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "k2-horizon");
+        appendNormal(ctx, &.{"<|ifm|im_end|>"});
+    }
+
     fn appendTokens(ctx: *c.gguf_context, extra: []const []const u8) void {
         var toks: std.ArrayList([]const u8) = .empty;
         findStrs(ctx, "tokenizer.ggml.tokens", &toks);
@@ -824,6 +892,16 @@ pub fn main(init: std.process.Init) !void {
     const gemma4 = by_name.get("ggml-vocab-gemma-4.gguf") orelse return error.MissingGemma4Vocab;
     // words only `ignore_merges` (GLM-4/5 since v0.6.0) keeps whole
     for ([_][]const u8{ "zqzq zqzq\nzqzq", "a zqzq, zqzqzq" }) |t| try corpus.append(gpa, t);
+    // a leading BOM, which PLaMo-2 drops and PLaMo-3 (v0.7.0) keeps
+    for ([_][]const u8{ "\u{FEFF}hello", "\u{FEFF}", "\u{FEFF}\u{FEFF}aaaa" }) |t| try corpus.append(gpa, t);
+    // PLaMo-3's marker body at its 64-code-point limit and one past it, and
+    // newline runs, each between pieces that span the cut
+    for ([_][]const u8{
+        "x<|plamo:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|>x",
+        "x<|plamo:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|>x",
+        "x\n\n\n\nx",
+        "x\n\n\n\n\nx",
+    }) |t| try corpus.append(gpa, t);
     const synthetic = [_]Case{
         .{ .name = "synthetic-rwkv", .path = derive(dir, gpt2, "rwkv", edits.rwkv) },
         .{ .name = "synthetic-plamo2", .path = derive(dir, gpt2, "plamo2", edits.plamo2) },
@@ -847,6 +925,10 @@ pub fn main(init: std.process.Init) !void {
         .{ .name = "synthetic-pre-glm5", .path = derive(dir, gpt2, "pre-glm5", edits.preGlm5) },
         .{ .name = "synthetic-pre-glm4", .path = derive(dir, gpt2, "pre-glm4", edits.preGlm4) },
         .{ .name = "synthetic-plamo2-special", .path = derive(dir, gpt2, "plamo2-special", edits.plamo2Special) },
+        .{ .name = "synthetic-plamo3", .path = derive(dir, gpt2, "plamo3", edits.plamo3) },
+        .{ .name = "synthetic-ugm-nfc", .path = derive(dir, gpt2, "ugm-nfc", edits.ugmNfc) },
+        .{ .name = "synthetic-ugm-nfc-charsmap", .path = derive(dir, ugm, "ugm-nfc-charsmap", edits.ugmNfcCharsmap) },
+        .{ .name = "synthetic-pre-k2-horizon", .path = derive(dir, gpt2, "pre-k2-horizon", edits.preK2Horizon) },
         .{ .name = "synthetic-test-bpe", .path = derive(dir, gpt2, "test-bpe", edits.testType) },
         .{ .name = "synthetic-test-spm", .path = derive(dir, spm, "test-spm", edits.testType) },
         .{ .name = "error-model", .path = derive(dir, gpt2, "bad-model", edits.badModel) },

@@ -175,6 +175,9 @@ static void api_gguf() {
         if (!path.empty()) {
             auto t = common_speculative_types_from_gguf(path);
             printf("from_gguf %s -> '%s'\n", path.c_str(), common_speculative_type_name_str(t).c_str());
+            // v0.7.0: common_get_gguf_info replaces common_get_decision_type(fname)
+            const auto info = common_get_gguf_info(path);
+            printf("gguf_info %s -> decision %d n_ctx_train %u\n", path.c_str(), (int) info.decision_type, info.n_ctx_train);
         }
         a = b + 1;
     }
@@ -414,6 +417,41 @@ static void api_sampler_tables() {
     for (int t = 0; t <= 13; t++) printf("type %d %s %c\n", t, common_sampler_type_to_str((common_sampler_type) t).c_str(), common_sampler_type_to_chr((common_sampler_type) t));
 }
 
+// v0.7.0's common_sampling_add_preserved_tokens and common_sampling_add_grammar_triggers
+static void print_sampling_lists(const common_params_sampling & s) {
+    printf("  preserved");
+    for (auto t : s.preserved_tokens) printf(" %d", t);
+    printf("\n  triggers");
+    for (const auto & t : s.grammar_triggers) printf(" {%d '%s' %d}", (int) t.type, t.value.c_str(), t.token);
+    printf("\n");
+}
+
+static void api_sampling_lists(const llama_vocab * vocab) {
+    if (!vocab) return;
+    const std::vector<std::string> pres = { "<think>", "</think>", "hello world", "<|im_start|>", "", "<tool_call>", "</think>", " the", "the" };
+    for (int k = 0; k < 6; k++) {
+        common_params_sampling s;
+        s.grammar_lazy = k % 2 == 1;
+        std::vector<std::string> p(pres.begin(), pres.begin() + (k * 2) % pres.size());
+        common_sampling_add_preserved_tokens(s, vocab, p);
+        std::vector<common_grammar_trigger> trig;
+        if (k >= 1) trig.push_back({ COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<think>" });
+        if (k >= 2) trig.push_back({ COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "hello world" });
+        if (k >= 3) trig.push_back({ COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "a|b" });
+        if (k >= 3) { common_grammar_trigger t; t.type = COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN; t.value = "x"; t.token = 42; trig.push_back(t); }
+        if (k == 4) trig.push_back({ COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "the" });
+        if (k == 5) trig.push_back({ COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL, "^x$" });
+        if (k == 1) trig.clear();
+        printf("sampling lists %d lazy=%d\n", k, (int) s.grammar_lazy);
+        try {
+            common_sampling_add_grammar_triggers(s, vocab, trig);
+        } catch (const std::exception & e) {
+            printf("  runtime_error: %s\n", e.what());
+        }
+        print_sampling_lists(s);
+    }
+}
+
 // the self-speculative drafters through the public API, without a model
 static void api_spec() {
     stream_gen g(23);
@@ -499,6 +537,12 @@ static void run_api(const common_params & params, const llama_vocab * vocab) {
     api_reasoning_budget(vocab);
     api_utf8();
     api_sampler_tables();
+    api_sampling_lists(vocab);
+    // v0.7.0's common_log_set_stdo: off, a line is written nowhere; on again, the next one is
+    common_log_set_stdo(common_log_main(), false);
+    LOG_INF("%s: stdo off, not written\n", __func__);
+    common_log_set_stdo(common_log_main(), true);
+    LOG_INF("%s: stdo on, written\n", __func__);
     api_spec();
     (void) params;
 }
@@ -560,10 +604,20 @@ static int run_decode(common_params & params) {
             params_dft.model.path.c_str(), params_dft.n_gpu_layers, (int) params_dft.split_mode, (int) params_dft.cache_type_k, (int) params_dft.cache_type_v,
             params_dft.n_outputs_max, params_dft.n_outputs_max_per_seq, (int) params_dft.embedding, (int) params_dft.pooling_type,
             params_dft.cpuparams.n_threads, params_dft.cpuparams_batch.n_threads);
+        // v0.7.0: the draft's own n_ubatch and no MoE cache, beside the target's context parameters
+        const llama_context_params cp_tgt = common_context_params_to_llama(params);
+        const llama_context_params cp_dft = common_context_params_to_llama(params_dft);
+        printf("cparams ubatch=%u/%u moe_cache=%zu/%zu\n", cp_tgt.n_ubatch, cp_dft.n_ubatch, cp_tgt.moe_cache_size, cp_dft.moe_cache_size);
         spec_init = common_speculative_init_from_params(params_dft, model_tgt, ctx_tgt);
         params.speculative.draft.ctx_tgt = ctx_tgt;
         params.speculative.draft.ctx_dft = spec_init->context();
         printf("draft model=%d ctx=%d\n", (int) (spec_init->model() != nullptr), (int) (spec_init->context() != nullptr));
+        // SPEC_SEQ_RM: the server's probe of both contexts, before anything is decoded; a draft
+        // context with a state input decodes it with zeros (v0.7.0's common_batch_set_zero_state)
+        if (getenv("SPEC_SEQ_RM")) {
+            printf("seq_rm tgt=%d\n", (int) common_context_can_seq_rm(ctx_tgt));
+            if (spec_init->context()) printf("seq_rm dft=%d\n", (int) common_context_can_seq_rm(spec_init->context()));
+        }
     }
     llama_context * ctx_dft = params.speculative.draft.ctx_dft;
 
@@ -605,6 +659,8 @@ static int run_decode(common_params & params) {
     if (const char * t = getenv("SPEC_TRIGGER_FULL"))    { params.sampling.grammar_lazy = true; params.sampling.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL, t}); }
     if (const char * t = getenv("SPEC_TRIGGER_TOKEN"))   { params.sampling.grammar_lazy = true; common_grammar_trigger tr; tr.type = COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN; tr.token = atoi(t); params.sampling.grammar_triggers.push_back(tr); }
     if (getenv("SPEC_TOOL_GRAMMAR") && !params.sampling.grammar.grammar.empty()) params.sampling.grammar.type = COMMON_GRAMMAR_TYPE_TOOL_CALLS;
+    // --n-probs is the server's and completion's option, not this example's
+    if (const char * v = getenv("SPEC_N_PROBS")) params.sampling.n_probs = atoi(v);
     for (int s = 0; s < n_seq; s++) {
         try {
             smpl[s] = common_sampler_init(model_tgt, params.sampling);
@@ -635,8 +691,29 @@ static int run_decode(common_params & params) {
         for (auto & v : inp) n += (int) v.size();
         (void) n;
         common_batch b(ctx_tgt);
-        for (int s = 0; s < n_seq; s++) {
-            for (size_t i = 0; i + 1 < inp[s].size(); i++) b.add(inp[s][i], (llama_pos) i, s, false);
+        // SPEC_PREFILL_EMBD: the prefill as embedding rows, as an image's are, a
+        // fixed pattern per position (v0.7.0's MTP drafter catches them up too)
+        std::vector<float> embd;
+        const bool as_embd = getenv("SPEC_PREFILL_EMBD") != nullptr;
+        if (as_embd) {
+            const size_t n_embd = (size_t) llama_model_n_embd_inp(model_tgt);
+            size_t n_rows = 0;
+            for (int s = 0; s < n_seq; s++) n_rows += inp[s].size() > 0 ? inp[s].size() - 1 : 0;
+            embd.resize(n_rows * n_embd);
+            for (size_t r = 0; r < n_rows; r++) {
+                for (size_t j = 0; j < n_embd; j++) embd[r * n_embd + j] = (float) (int) ((r * 31 + j * 7) % 97) / 97.0f - 0.5f;
+            }
+            size_t r = 0;
+            for (int s = 0; s < n_seq; s++) {
+                for (size_t i = 0; i + 1 < inp[s].size(); i++, r++) {
+                    const llama_pos pos[4] = { (llama_pos) i, (llama_pos) i, (llama_pos) i, 0 };
+                    b.add_embd({ embd.data() + r * n_embd, 1, n_embd }, pos, s, false);
+                }
+            }
+        } else {
+            for (int s = 0; s < n_seq; s++) {
+                for (size_t i = 0; i + 1 < inp[s].size(); i++) b.add(inp[s][i], (llama_pos) i, s, false);
+            }
         }
         int rc = llama_process(ctx_tgt, LLAMA_PROCESS_TYPE_DECODE, b.get());
         printf("prefill rc=%d\n", rc);

@@ -1,0 +1,98 @@
+#!/bin/bash
+# The MTP (NextN) draft heads against the C++, over fixtures with a NextN
+# block. `scripts/arch-model-diff` cannot reach them: its harness creates
+# target contexts only, and an MTP graph is built only in an MTP context
+# fed the target's hidden state. See the header of harness/mtp_diff.zig.
+#
+# Usage: scripts/mtp-diff [fixture-dir] [name-substring...]
+#   Runs every fixture in <fixture-dir>/mtp (`scripts/gen-arch-fixtures`
+#   writes them there for the k-pool architectures, `--variant mtp` and
+#   `mtptopk8`) whose name contains one of the substrings, on the GPU and
+#   the CPU. They stay out of <fixture-dir> itself because the C++ loads a
+#   file with NextN tensors only with load_mtp, which arch-model-diff's
+#   harness does not set.
+#   ARCH_DIFF_PORT / ARCH_DIFF_LIBS as for scripts/arch-model-diff.
+# Requires: zig build reference --release=fast, scripts/gen-arch-fixtures
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+DIR="zig-out/arch-fixtures"
+if [ $# -gt 0 ] && [ -d "$1" ]; then DIR="$1"; shift; fi
+PORT=${ARCH_DIFF_PORT:-src/llama}
+LIBS=${ARCH_DIFF_LIBS:-zig-out/lib}
+for lib in "$LIBS/libllama-ref.a" "$LIBS/libggml.a"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+. scripts/platform-libs
+platform_libs exe
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    "$PORT/c_import.h" >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+zig build-exe -mcpu baseline -femit-bin="$tmp/mtp_diff" -Ofast -lc \
+    --dep harness_root -Mroot=harness/mtp_diff.zig \
+    --dep llama_c -Mharness_root="$PORT/harness_root.zig" -Mllama_c="$tmp/llama_c.zig" \
+    "$LIBS/libllama-ref.a" "$LIBS/libggml.a" -lc++ \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+# The assertion a run aborted on, without the file it was raised in (as in
+# scripts/arch-model-diff).
+abort_of() {
+    grep -m1 -o 'GGML_ASSERT(.*) failed\|GGML_ABORT.*' "$1" | head -1
+}
+
+# A one-side transcript up to its abort, normalized as harness/mtp_diff.zig's
+# `normalize` does -- each run of input-tensor lines sorted, their order
+# being a hash map's -- without the abort's own lines and backtrace.
+before_abort() {
+    grep -v -E '^ggml_metal_library_compile_pipeline:|GGML_ASSERT\(|GGML_ABORT|^[0-9]+ +[^ ]+ +0x[0-9a-f]+ |^(ref|port): [0-9]+ nodes' "$1" \
+        | sed -E 's/reserve took [0-9.]+ ms/reserve took N ms/; s/^(ggml_metal_log_allocated_size:[^(]*)\(.*/\1(N)/; s/available_memory_kb: .*/available_memory_kb: N/; s/[0-9]+ MiB free/N MiB free/; s/0x[0-9a-fA-F]*/0xP/g' \
+        | perl -ne 'if (/^llama_graph_n_input_tensors:/) { push @r, $_ } else { print sort @r; @r = (); print } END { print sort @r }'
+}
+
+pass=0; fail=0; aborts=0
+for f in "$DIR"/mtp/*.gguf; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f" .gguf)
+    if [ $# -gt 0 ]; then
+        hit=0
+        for s in "$@"; do [ "${name#*"$s"}" != "$name" ] && hit=1; done
+        [ "$hit" -eq 1 ] || continue
+    fi
+    for m in ${MTP_DIFF_MODELS:-gpu cpu}; do
+        "$tmp/mtp_diff" "$f" "$m" > "$tmp/out" 2>&1
+        rc=$?
+        ra=""; pa=""
+        if [ "$rc" -ge 128 ]; then
+            # A crash: each side alone. Where the C++ and the port abort on
+            # the same assertion, they agree on everything before it (the
+            # glm4moe CPU fixture's M-RoPE section check, in ggml, which both
+            # sides reach); anything else fails.
+            MTP_DIFF_SIDE=ref "$tmp/mtp_diff" "$f" "$m" > "$tmp/ref.out" 2>&1; rr=$?
+            MTP_DIFF_SIDE=port "$tmp/mtp_diff" "$f" "$m" > "$tmp/port.out" 2>&1; rp=$?
+            ra=$(abort_of "$tmp/ref.out"); pa=$(abort_of "$tmp/port.out")
+            if [ "$rr" -lt 128 ] || [ "$rp" -lt 128 ] || [ -z "$ra" ] || [ "$ra" != "$pa" ]; then ra=""; fi
+            # And everything before the abort must agree.
+            if [ -n "$ra" ] && ! cmp -s <(before_abort "$tmp/ref.out") <(before_abort "$tmp/port.out"); then
+                ra=""
+                diff <(before_abort "$tmp/ref.out") <(before_abort "$tmp/port.out") | head -4 > "$tmp/out"
+            fi
+        fi
+        if [ "$rc" -eq 0 ]; then
+            pass=$((pass + 1)); printf '  %-28s %s %s\n' "$name" "$m" "$(tail -1 "$tmp/out")"
+        elif [ -n "$ra" ]; then
+            aborts=$((aborts + 1)); printf '  %-28s %s both abort on %s\n' "$name" "$m" "$(echo "$ra" | cut -c1-90)"
+        else
+            fail=$((fail + 1)); printf '  %-28s %s FAIL\n' "$name" "$m"
+            grep -A2 -m1 '^FAIL' "$tmp/out" | sed 's/^/      /'
+            tail -3 "$tmp/out" | sed 's/^/      /'
+        fi
+    done
+done
+echo "mtp-diff: $pass pass, $fail fail, $aborts both-abort"
+[ "$fail" -eq 0 ] && [ "$pass" -gt 0 ]

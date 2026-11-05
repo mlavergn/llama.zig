@@ -100,7 +100,7 @@ gate_link() {
     local bin
     bin="$(find "$fwdir/llama.framework" -name llama -type f | head -1)"
     if otool -L "$bin" | grep 'libc++' > /dev/null; then fail "link: $bin depends on libc++.dylib"; fi
-    echo "  link: stub links for $target; framework depends on $(otool -L "$bin" | grep -v ':$' | awk '{print $1}' | grep -v '^@rpath/llama' | xargs -n1 basename | sort -u | tr '\n' ' ')"
+    echo "  link: stub links for $target; framework depends on $(otool -L "$bin" | grep -v ':$' | awk '{print $1}' | grep -v '^@rpath/llama' | sed 's#.*/##' | sort -u | tr '\n' ' ')"
 }
 
 gate_plist() {

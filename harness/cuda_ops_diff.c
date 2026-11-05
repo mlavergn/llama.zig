@@ -21,7 +21,7 @@
  * Two departures from a straight `ggml_backend_compare_graph_backend`:
  *
  * - **Whole-graph cases give the reference a graph it can fuse.**
- *   `ggml_backend_graph_copy` (ggml-backend.cpp:2366 @d81235049) fills the
+ *   `ggml_backend_graph_copy` (ggml-backend.cpp:2323 @620d2225c) fills the
  *   copy's `nodes[]` directly and never builds its use counts, so the second
  *   backend of a comparison can never fuse -- harmless upstream, where that
  *   backend is the CPU, and fatal here, where it would compare the port's
@@ -31,7 +31,7 @@
  *   into a fresh graph: same nodes, same order, real use counts.
  * - **The copy keeps `ggml_cast`'s self-reference.** `ggml_cast` builds a
  *   `CPY` whose `src[1]` is the node itself, and `graph_copy_dup_tensor`
- *   (ggml-backend.cpp:2305 @d81235049) records a node's copy only after
+ *   (ggml-backend.cpp:2262 @620d2225c) records a node's copy only after
  *   copying its sources, so the self-reference comes back as
  *   the still-empty slot: the copy's `src[1]` is NULL. Upstream's CPU never
  *   reads it; the reference CUDA backend dispatches `CPY` as
@@ -104,6 +104,7 @@ static long n_supports_missing; /* reference yes, port no: not ported yet */
 static long n_supports_asked;
 static long n_nondet_cases;
 static long n_fallback_graphs;
+static long n_topk_order;
 static _Thread_local bool last_fell_back;
 
 static _Thread_local ggml_backend_t ref_backends[16];
@@ -164,6 +165,64 @@ struct wrapped {
     bool differs;
 };
 
+static int cmp_i32(const void * a, const void * b) {
+    const int32_t x = *(const int32_t *) a, y = *(const int32_t *) b;
+    return (x > y) - (x < y);
+}
+
+static int cmp_u32(const void * a, const void * b) {
+    const uint32_t x = *(const uint32_t *) a, y = *(const uint32_t *) b;
+    return (x > y) - (x < y);
+}
+
+/* `ggml_top_k`'s indices are "in no particular order" (ggml.h), and since
+ * v0.7.0 CUDA sends more shapes to radix select, whose `top_k_radix_gather`
+ * places each index at an `atomicAdd`ed position: the order changes from run
+ * to run, and the reference agreeing with itself twice is luck -- 11 cases
+ * failed so on the first GB10 run. So a TOP_K node whose bytes differ is
+ * compared as upstream's test compares it: per row, the same set of indices,
+ * or -- where ties make the choice free -- the same multiset of selected
+ * input values (by bits) with no index twice. A pass on that is counted, not
+ * failed. Both nodes' `src[0]` hold the same input.
+ * Return: whether the rows agree as sets. */
+static bool top_k_rows_agree(struct ggml_tensor * t1, struct ggml_tensor * t2, const unsigned char * a, const unsigned char * b) {
+    if (t1->op != GGML_OP_TOP_K || t1->type != GGML_TYPE_I32 || t1->src[0] == NULL || t2->src[0] == NULL ||
+        t1->src[0]->type != GGML_TYPE_F32 || !ggml_is_contiguous(t1) || !ggml_is_contiguous(t1->src[0])) {
+        return false;
+    }
+    const int64_t k = t1->ne[0], rows = ggml_nrows(t1), cols = t1->src[0]->ne[0];
+    float * src = (float *) malloc(ggml_nbytes(t1->src[0]));
+    ggml_backend_tensor_get(t1->src[0], src, 0, ggml_nbytes(t1->src[0]));
+    int32_t * ia = (int32_t *) malloc(k * sizeof(int32_t));
+    int32_t * ib = (int32_t *) malloc(k * sizeof(int32_t));
+    uint32_t * va = (uint32_t *) malloc(k * sizeof(uint32_t));
+    uint32_t * vb = (uint32_t *) malloc(k * sizeof(uint32_t));
+    bool agree = true;
+    for (int64_t r = 0; agree && r < rows; r++) {
+        memcpy(ia, a + r * k * sizeof(int32_t), k * sizeof(int32_t));
+        memcpy(ib, b + r * k * sizeof(int32_t), k * sizeof(int32_t));
+        qsort(ia, k, sizeof(int32_t), cmp_i32);
+        qsort(ib, k, sizeof(int32_t), cmp_i32);
+        if (memcmp(ia, ib, k * sizeof(int32_t)) == 0) {
+            continue;
+        }
+        for (int64_t c = 0; agree && c < k; c++) {
+            agree = ia[c] >= 0 && ia[c] < cols && ib[c] >= 0 && ib[c] < cols && (c == 0 || (ia[c] != ia[c - 1] && ib[c] != ib[c - 1]));
+            if (agree) {
+                memcpy(&va[c], &src[r * cols + ia[c]], sizeof(uint32_t));
+                memcpy(&vb[c], &src[r * cols + ib[c]], sizeof(uint32_t));
+            }
+        }
+        if (agree) {
+            qsort(va, k, sizeof(uint32_t), cmp_u32);
+            qsort(vb, k, sizeof(uint32_t), cmp_u32);
+            agree = memcmp(va, vb, k * sizeof(uint32_t)) == 0;
+        }
+    }
+    free(src); free(ia); free(ib); free(va); free(vb);
+    return agree;
+}
+
 static bool bit_compare(int node_index, struct ggml_tensor * t1, struct ggml_tensor * t2, void * user_data) {
     struct wrapped * w = (struct wrapped *) user_data;
     const size_t n = ggml_nbytes(t1);
@@ -173,7 +232,9 @@ static bool bit_compare(int node_index, struct ggml_tensor * t1, struct ggml_ten
         ggml_backend_tensor_get(t1, a, 0, n);
         ggml_backend_tensor_get(t2, b, 0, n);
         n_compared_nodes++;
-        if (memcmp(a, b, n) != 0) {
+        if (memcmp(a, b, n) != 0 && top_k_rows_agree(t1, t2, a, b)) {
+            n_topk_order++;
+        } else if (memcmp(a, b, n) != 0) {
             size_t first = 0;
             while (a[first] == b[first]) {
                 first++;
@@ -350,6 +411,53 @@ static struct ggml_tensor * build_gdn_cache(struct ggml_context * ctx, struct gg
     return ggml_cpy(ctx, snap, dst);
 }
 
+/* v0.7.0's chunked gated-delta-net kernel (`gated-delta-net-mma.cu`) on the
+ * same snapshot-copy pattern: 128-wide heads, 16 of them, 64 tokens and
+ * K = 3 < n_tokens, so the fused cache write goes through `gdn_single`
+ * (its `state_out` is the cache). It writes only slot 0, the final state,
+ * as `ggml_gated_delta_net` now allows; the other slots keep their input
+ * data on both sides. Upstream's chunked cases have K = 1 and no copy. */
+static struct ggml_tensor * build_gdn_mma_cache(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    const int64_t S = 128, H = 16, T = 64, NS = 1, K = 3;
+    const int64_t D = S * S * H;
+    struct ggml_tensor * q     = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, S, H, T, NS);
+    struct ggml_tensor * k     = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, S, H, T, NS);
+    struct ggml_tensor * v     = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, S, H, T, NS);
+    struct ggml_tensor * g     = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 1, H, T, NS);
+    struct ggml_tensor * beta  = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 1, H, T, NS);
+    struct ggml_tensor * state = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, S, S, H, NS);
+    struct ggml_tensor * cache = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, D, NS + 1, K + 1);
+    struct ggml_tensor * out = ggml_gated_delta_net(ctx, q, k, v, g, beta, state, K);
+    const size_t tail = ggml_row_size(GGML_TYPE_F32, S * H * T * NS);
+    struct ggml_tensor * snap = ggml_view_3d(ctx, out, D, NS, K, D * sizeof(float), D * NS * sizeof(float), tail);
+    struct ggml_tensor * dst  = ggml_view_3d(ctx, cache, D, NS, K, cache->nb[1], cache->nb[2], 0);
+    *cmp = cache;
+    return ggml_cpy(ctx, snap, dst);
+}
+
+/* TOP_K at 600 columns over 64 rows: past the bitonic-short width (512)
+ * and within the few-rows width (1024), but with more rows than the GB10's
+ * 48 SMs, so v0.7.0's selection sends it to radix select. Upstream's rows
+ * in that width number 2 or 6. */
+static struct ggml_tensor * build_top_k_many_rows(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 600, 64);
+    return *cmp = ggml_top_k(ctx, a, 16);
+}
+
+/* MUL_MAT with an F16 src0 whose F32 copy passes 512 MiB, at
+ * `GGML_PREC_F32`: v0.7.0's cuBLAS path converts and multiplies it in
+ * chunks of src0 rows, each writing a strided slice of dst (its `ldc` is
+ * the full row). Upstream's very-large-N cases compute in F16 on a device
+ * with fast FP16, so none reaches the chunks; here 8400001 rows split
+ * 8388608 + 11393. */
+static struct ggml_tensor * build_mul_mat_f32_chunks(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 16, 8400001);
+    struct ggml_tensor * b = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 16, 32);
+    struct ggml_tensor * out = ggml_mul_mat(ctx, a, b);
+    ggml_prec_set_acc(out, GGML_PREC_F32);
+    return *cmp = out;
+}
+
 static void fill(float * p, size_t n, uint32_t seed) {
     uint32_t x = seed;
     for (size_t i = 0; i < n; i++) {
@@ -471,6 +579,13 @@ static void run_extra(ggml_backend_t backend, extra_build build, unsigned char *
     *nbytes = ggml_nbytes(cmp);
     *result = (unsigned char *) malloc(*nbytes);
     ggml_backend_tensor_get(cmp, *result, 0, *nbytes);
+    // TOP_K's indices are in no particular order (see top_k_rows_agree):
+    // compare each row sorted. The extra's input has no ties.
+    if (cmp->op == GGML_OP_TOP_K) {
+        for (int64_t r = 0; r < ggml_nrows(cmp); r++) {
+            qsort(*result + r * cmp->nb[1], cmp->ne[0], sizeof(int32_t), cmp_i32);
+        }
+    }
     *n_nodes = ggml_graph_n_nodes(gf);
     ggml_backend_buffer_free(buf);
     ggml_free(ctx);
@@ -516,13 +631,19 @@ static bool extra_case(const char * name, extra_build build) {
  * MMVQ/MMQ boundary at 8 (`get_mmvq_mmid_max_batch`). Since v0.6.0 also
  * the four-head lightning indexer at its tile threshold and a
  * flash-attention case that scans its mask with two pipeline stages, and
- * CONV_3D's cuBLAS and split-k arms. */
+ * CONV_3D's cuBLAS and split-k arms. Since v0.7.0 the chunked
+ * gated-delta-net kernel writing the snapshot cache, TOP_K's radix arm for
+ * more rows than SMs at a width bitonic would otherwise take, and the F32
+ * cuBLAS chunks. */
 static int extra_cases(const char * filter) {
     static const struct { const char * op; const char * name; extra_build build; } cases[] = {
         { "MEAN", "MEAN(ne=[65536,1,1,1])", build_mean_65536 },
         { "MEAN", "MEAN(ne=[65537,1,1,1])", build_mean_65537 },
         { "MEAN", "MEAN(ne=[262144,1,1,1])", build_mean_262144 },
         { "GATED_DELTA_NET", "GATED_DELTA_NET+CPY(K=3,n_tokens=4,strided cache)", build_gdn_cache },
+        { "GATED_DELTA_NET", "GATED_DELTA_NET+CPY(S=128,H=16,K=3,n_tokens=64,chunked kernel)", build_gdn_mma_cache },
+        { "TOP_K", "TOP_K(ne=[600,64,1,1],k=16,more rows than SMs)", build_top_k_many_rows },
+        { "MUL_MAT", "MUL_MAT(f16 x f32,m=8400001,n=32,k=16,prec=f32,cuBLAS chunks)", build_mul_mat_f32_chunks },
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_0,n_tokens=8)", build_mmid_q4_0_8 },
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_0,n_tokens=9)", build_mmid_q4_0_9 },
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_K,n_tokens=8)", build_mmid_q4_k_8 },
@@ -559,6 +680,7 @@ static void report(void) {
     printf("cuda_ops_diff: %ld nodes compared on bits, %ld differing in %ld cases, %ld reference-nondeterministic cases\n",
            n_compared_nodes, n_bitdiff_nodes, n_bitdiff_cases, n_nondet_cases);
     printf("cuda_ops_diff: %ld whole-graph cases compared on the plain copy\n", n_fallback_graphs);
+    printf("cuda_ops_diff: %ld TOP_K nodes equal only as per-row sets (unordered by contract)\n", n_topk_order);
     printf("cuda_ops_diff: supports_op asked %ld times: %ld claimed beyond the reference, %ld not ported yet\n",
            n_supports_asked, n_supports_extra, n_supports_missing);
 }

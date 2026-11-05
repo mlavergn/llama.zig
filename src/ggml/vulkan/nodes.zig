@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.6.0
-//! (`d81235049`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.7.0
+//! (`620d2225c`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -28,7 +28,7 @@ fn nodeAt(cgraph: *const CGraph, i: c_int) *c.ggml_tensor {
     return cgraph.nodes[@intCast(i)].?;
 }
 
-/// Ports `ggml_vk_preallocate_buffers` (ggml-vulkan.cpp:12045 @d81235049):
+/// Ports `ggml_vk_preallocate_buffers` (ggml-vulkan.cpp:12132 @620d2225c):
 /// grows the scratch buffers to the sizes the recorded ops asked for,
 /// first submitting and waiting for whatever already uses them.
 pub fn preallocateBuffers(ctx: *BackendCtx, subctx: ?*Context) void {
@@ -90,7 +90,7 @@ fn overlapsUnsynced(node: *const c.ggml_tensor, unsynced: []const *const c.ggml_
     return false;
 }
 
-/// Ports `ggml_vk_build_graph` (ggml-vulkan.cpp:12183 @d81235049): records
+/// Ports `ggml_vk_build_graph` (ggml-vulkan.cpp:12270 @620d2225c): records
 /// one node (or fused run) into the compute context, after a barrier if it
 /// depends on unsynchronised work; submits the batch if asked.
 ///
@@ -206,7 +206,7 @@ fn syncLogNodes(ctx: *BackendCtx, cgraph: *const CGraph, node_idx: c_int) void {
     }
 }
 
-/// Ports `ggml_vk_compute_forward` (ggml-vulkan.cpp:12761 @d81235049):
+/// Ports `ggml_vk_compute_forward` (ggml-vulkan.cpp:12848 @620d2225c):
 /// submits the context node `tensor_idx` was recorded into, unless it was
 /// already, and runs the host copies of a finished one.
 pub fn computeForward(ctx: *BackendCtx, cgraph: *const CGraph, tensor_idx: c_int, almost_ready: bool) void {

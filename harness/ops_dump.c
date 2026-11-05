@@ -211,6 +211,12 @@ static void run_amp(const char * label, struct ggml_tensor * node, int64_t bound
         fill_inputs(ggml_graph_node(gf, i), bound);
     }
 
+    /* The plan is part of what is compared: `ggml_get_n_tasks` decides how
+     * many threads run each node and `ggml_graph_plan` the work buffer, and
+     * neither shows in a result a single-op graph computes -- an op planned
+     * for one thread computes the same bits. */
+    const struct ggml_cplan plan = ggml_graph_plan(gf, n_threads, NULL);
+
     enum ggml_status st;
     if (run_use_ref) {
         struct ggml_cplan cp = ggml_graph_plan(gf, n_threads, NULL);
@@ -228,8 +234,8 @@ static void run_amp(const char * label, struct ggml_tensor * node, int64_t bound
     }
 
     const size_t nb = ggml_nbytes(node);
-    printf("%-34s amp=%-4g type=%-8s ne=[%lld,%lld,%lld,%lld] bytes=%zu hash=%016llx",
-           label, (double) amp, ggml_type_name(node->type),
+    printf("%-34s amp=%-4g plan=%d/%zu type=%-8s ne=[%lld,%lld,%lld,%lld] bytes=%zu hash=%016llx",
+           label, (double) amp, plan.n_threads, plan.work_size, ggml_type_name(node->type),
            (long long) node->ne[0], (long long) node->ne[1],
            (long long) node->ne[2], (long long) node->ne[3],
            nb, (unsigned long long) fnv1a(node->data, nb));
@@ -383,6 +389,12 @@ int main(int argc, char ** argv) {
     RW(ggml_xielu(ctx, a2, 0.5f, 1.5f, 0.25f, 1e-6f));
     RW(ggml_leaky_relu(ctx, a2, 0.01f, false));
     RW(ggml_clamp(ctx, a2, -0.5f, 0.5f));
+    {   /* v0.7.0 (#29517): a strided view and a permuted one */
+        struct ggml_tensor * fb = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 12, 6, 3, 2);
+        R(ggml_clamp(ctx, ggml_view_4d(ctx, fb, 8, 4, 3, 2, fb->nb[1], fb->nb[2], fb->nb[3], fb->nb[1]), -0.5f, 0.5f));
+        R(ggml_clamp(ctx, ggml_permute(ctx, fb, 0, 2, 1, 3), -0.25f, 0.25f));
+        R(ggml_clamp(ctx, ggml_view_3d(ctx, fb, 5, 6, 6, fb->nb[1], fb->nb[2], 0), -0.1f, 0.6f));
+    }
     RW(ggml_step(ctx, a2));
     RW(ggml_abs(ctx, a2));
     RW(ggml_sqr(ctx, a2));
@@ -399,6 +411,17 @@ int main(int argc, char ** argv) {
     R(ggml_geglu_erf(ctx, a2));
     R(ggml_geglu_quick(ctx, a2));
     R(ggml_swiglu_oai(ctx, a2, b2, 1.702f, 7.0f));
+    /* v0.7.0 (#29200): an F16 arm, split and fused, and wide inputs so the
+     * `limit` clamps on both operands fire */
+    {
+        struct ggml_tensor * h = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 16, 5);
+        struct ggml_tensor * g = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 16, 5);
+        R(ggml_swiglu_oai(ctx, h, g, 1.702f, 7.0f));
+        R(ggml_swiglu_oai(ctx, h, NULL, 1.702f, 7.0f));
+        RW(ggml_swiglu_oai(ctx, h, g, 1.702f, 7.0f));
+        RW(ggml_swiglu_oai(ctx, h, NULL, 0.5f, 3.0f));
+        RW(ggml_swiglu_oai(ctx, a2, NULL, 0.5f, 3.0f));
+    }
 
     puts("=== reductions ===");
     R(ggml_sum(ctx, a3));
@@ -608,6 +631,16 @@ int main(int argc, char ** argv) {
     R(ggml_upscale(ctx, a4, 2, GGML_SCALE_MODE_NEAREST));
     R(ggml_upscale_ext(ctx, a4, 24, 20, 8, 2, GGML_SCALE_MODE_BILINEAR));
     R(ggml_pad(ctx, a4, 2, 3, 0, 0));
+    /* v0.7.0 (#30526) splits pad's rows over threads and copies a contiguous
+     * row whole: padding on every axis, a negative (cropping) pad on axis 0,
+     * a non-contiguous source, and the circular arm */
+    R(ggml_pad_ext(ctx, a4, 1, 2, 1, 1, 1, 0, 0, 1));
+    R(ggml_pad_ext(ctx, a4, -2, 1, 0, 2, -1, 0, 0, 0));
+    R(ggml_pad_ext(ctx, a4, 3, -4, 0, 0, 0, 0, 0, 0));
+    R(ggml_pad_ext(ctx, ggml_transpose(ctx, a2), 1, 2, 2, 1, 0, 0, 0, 0));
+    R(ggml_pad_ext(ctx, ggml_permute(ctx, a3, 0, 2, 1, 3), 2, 0, 1, 0, 1, 1, 0, 0));
+    R(ggml_pad_ext_circular(ctx, a4, 1, 2, 3, 1, 1, 0, 0, 1));
+    R(ggml_pad_circular(ctx, a3, 2, 1, 1, 0));
     R(ggml_pad_reflect_1d(ctx, a2, 3, 5));
 
     puts("=== pooling ===");
@@ -651,6 +684,14 @@ int main(int argc, char ** argv) {
                      ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 3)), 10);
     RB(ggml_set_rows(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_Q8_0, 64, 10), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64, 3),
                      ggml_new_tensor_1d(ctx, GGML_TYPE_I64, 3)), 10);
+    /* v0.7.0 (#30454): SET_ROWS is planned for every thread, and an F16
+     * source converts through a per-thread row of the work buffer */
+    RB(ggml_set_rows(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64, 12), ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 64, 7),
+                     ggml_new_tensor_1d(ctx, GGML_TYPE_I64, 7)), 12);
+    RB(ggml_set_rows(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_Q8_0, 64, 12), ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 64, 7),
+                     ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 7)), 12);
+    RB(ggml_set_rows(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 64, 12), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64, 7),
+                     ggml_new_tensor_1d(ctx, GGML_TYPE_I64, 7)), 12);
     {
         struct ggml_tensor * tf = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 64, 100);
         RB(ggml_get_rows(ctx, tf, ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 7)), 100);
@@ -714,6 +755,13 @@ int main(int argc, char ** argv) {
         R(ggml_swiglu_split(ctx, h2, g2));
         RW(ggml_gelu(ctx, h2));
         R(ggml_clamp(ctx, h2, -0.5f, 0.5f));
+        /* v0.7.0 (#29517): CLAMP on a non-contiguous view, rows addressed
+         * through all three outer strides */
+        {
+            struct ggml_tensor * hb = ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 12, 6, 3);
+            R(ggml_clamp(ctx, ggml_view_3d(ctx, hb, 8, 4, 3, hb->nb[1], hb->nb[2], 2 * hb->nb[0]), -0.5f, 0.5f));
+            R(ggml_clamp(ctx, ggml_permute(ctx, hb, 0, 2, 1, 3), -0.25f, 0.25f));
+        }
         R(ggml_soft_max(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 33, 5)));
         R(ggml_norm(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 33, 5), 1e-5f));
         {   /* rows contiguous, tensor not: norm's other path */
@@ -773,6 +821,12 @@ int main(int argc, char ** argv) {
     }
 
     puts("=== convolution ===");
+    {
+        /* v0.7.0 (#28738): batched input, whose rows used to come out in
+         * the wrong order */
+        R(ggml_conv_1d(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 3, 4, 5), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 17, 4, 3), 1, 1, 1));
+        R(ggml_conv_1d(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 4, 5), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 17, 4, 2), 2, 0, 2));
+    }
     {
         struct ggml_tensor * k2  = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 3, 3, 3, 4);
         struct ggml_tensor * k2f = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 3, 4);

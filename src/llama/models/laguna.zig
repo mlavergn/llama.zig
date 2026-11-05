@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/laguna.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/laguna.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_laguna`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -24,10 +24,13 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_laguna`'s `load_arch_hparams` (models/laguna.cpp:9 @d81235049).
+/// Ports `llama_model_laguna`'s `load_arch_hparams` (models/laguna.cpp:9 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
+
+    if (try meta.getKey(f32, .rope_scaling_yarn_beta_fast, false, exc)) |v| hp.yarn_beta_fast = v;
+    if (try meta.getKey(f32, .rope_scaling_yarn_beta_slow, false, exc)) |v| hp.yarn_beta_slow = v;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     hp.n_layer_dense_lead = (try meta.getKey(u32, .leading_dense_block_count, true, exc)).?;
@@ -83,7 +86,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_laguna`'s `load_arch_tensors` (models/laguna.cpp:65 @d81235049).
+/// Ports `llama_model_laguna`'s `load_arch_tensors` (models/laguna.cpp:68 @620d2225c).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -136,7 +139,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         if (gate_meta) |gm| {
             n_gate_out = gm.ne[1];
             if (n_gate_out != n_gate_per_head and n_gate_out != n_gate_per_elem) {
-                c.ggml_abort("models/laguna.cpp", 117, "Laguna: unexpected attention gate width %lld at layer %d (expected %lld per-head or %lld per-element)", @as(c_longlong, n_gate_out), @as(c_int, i), @as(c_longlong, n_gate_per_head), @as(c_longlong, n_gate_per_elem));
+                c.ggml_abort("models/laguna.cpp", 120, "Laguna: unexpected attention gate width %lld at layer %d (expected %lld per-head or %lld per-element)", @as(c_longlong, n_gate_out), @as(c_int, i), @as(c_longlong, n_gate_per_head), @as(c_longlong, n_gate_per_elem));
             }
         } else {
             n_gate_out = n_gate_per_head;
@@ -167,7 +170,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_laguna`'s `build_arch_graph` (models/laguna.cpp:148 @d81235049).
+/// Ports `llama_model_laguna`'s `build_arch_graph` (models/laguna.cpp:151 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     // XS.2 is hybrid SWA and takes the interleaved-SWA KV input; M.1 is
     // all full attention and takes the plain one. The C++ picks the input,
@@ -177,12 +180,12 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_laguna`'s `graph`
-/// (models/laguna.cpp:152 @d81235049).
+/// (models/laguna.cpp:155 @620d2225c).
 fn buildGraph(comptime has_swa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/laguna.cpp", 154, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/laguna.cpp", 157, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
     // No MuP embedding scale: laguna omits it, where afmoe scales by
@@ -340,8 +343,6 @@ fn buildGraph(comptime has_swa: bool, model: *const Model, b: *const graph.Build
     cur = b.buildLoraMm(model.output.?, cur, null);
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

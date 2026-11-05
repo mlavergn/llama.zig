@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/youtuvl.cpp` at v0.6.0 (`d81235049`).
+//! Ports `llama.cpp/tools/mtmd/models/youtuvl.cpp` at v0.7.0 (`620d2225c`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -14,7 +14,7 @@ const model_mod = @import("../model.zig");
 const c = impl.c;
 const T = graph.T;
 
-/// Ports `build` (youtuvl.cpp:3 @d81235049), a member of `clip_graph_youtuvl`.
+/// Ports `build` (youtuvl.cpp:3 @620d2225c), a member of `clip_graph_youtuvl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -80,15 +80,10 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         _ = c.ggml_set_name(inv_window_idx, "inv_window_idx");
         c.ggml_set_input(inv_window_idx);
         // mask for window attention
-        window_mask = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, n_pos, n_pos);
-        _ = c.ggml_set_name(window_mask, "window_mask");
-        c.ggml_set_input(window_mask);
-
-        // if flash attn is used, we need to pad the mask and cast to f16
-        if (g.flash_attn_type == .enabled) window_mask = c.ggml_cast(ctx0, window_mask, c.GGML_TYPE_F16);
+        window_mask = g.buildInpAttnMask(n_pos, n_pos, 0);
 
         // inpL shape: [n_embd, n_patches_x * n_patches_y, batch_size]
-        impl.ggmlAssert(batch_size == 1, "youtuvl.cpp", 82, "batch_size == 1");
+        impl.ggmlAssert(batch_size == 1, "youtuvl.cpp", 75, "batch_size == 1");
         inpL = c.ggml_reshape_2d(ctx0, inpL, n_embd * 4, @divTrunc(g.n_patches_x * g.n_patches_y * batch_size, 4));
         inpL = c.ggml_get_rows(ctx0, inpL, inv_window_idx);
         inpL = c.ggml_reshape_3d(ctx0, inpL, n_embd, g.n_patches_x * g.n_patches_y, batch_size);
@@ -144,7 +139,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         window_idx = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_I32, @divTrunc(n_pos, spatial_merge_unit));
         _ = c.ggml_set_name(window_idx, "window_idx");
         c.ggml_set_input(window_idx);
-        impl.ggmlAssert(batch_size == 1, "youtuvl.cpp", 149, "batch_size == 1");
+        impl.ggmlAssert(batch_size == 1, "youtuvl.cpp", 142, "batch_size == 1");
         embeddings = c.ggml_reshape_2d(ctx0, embeddings, n_embd * spatial_merge_unit, @divTrunc(n_patches, spatial_merge_unit));
         embeddings = c.ggml_get_rows(ctx0, embeddings, window_idx);
         embeddings = c.ggml_reshape_3d(ctx0, embeddings, n_embd, n_patches, batch_size);

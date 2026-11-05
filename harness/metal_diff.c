@@ -457,24 +457,37 @@ static void mma_predicates_diff(void) {
         ggml_free(ctx);
     }
 
-    /* MUL_MAT_ID's matrix-matrix break-even, at expert-id rows either side of 32 */
+    /* MUL_MAT_ID's matrix-matrix break-even, at expert-id rows either side
+     * of 32 -- and, since v0.7.0, at expert counts either side of the 1024
+     * the id-map kernel's one threadgroup takes */
     {
         struct ggml_context * ctx = ggml_init(ip);
         const int64_t ne21s[] = { 1, 31, 32, 33 };
         const int64_t ne00s2[] = { 32, 64 };
+        const int64_t ne02s[] = { 4, 1023, 1024, 1025 };
+        int id_mm_true = 0, id_mm_false_experts = 0;
         for (int i = 0; i < 4; i++) {
             for (int j = 0; j < 2; j++) {
-                struct ggml_tensor * w   = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne00s2[j], 16, 4);
-                struct ggml_tensor * x   = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne00s2[j], 2, ne21s[i]);
-                struct ggml_tensor * ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 2, ne21s[i]);
-                struct ggml_tensor * t = ggml_mul_mat_id(ctx, w, x, ids);
-                for (int sm = 0; sm <= 1; sm++) {
-                    snprintf(lbl, sizeof lbl, "id_use_mm(ne00=%lld ne21=%lld sm=%d)", (long long) ne00s2[j], (long long) ne21s[i], sm);
-                    cmp_i(lbl, ggml_metal_op_mul_mat_id_use_mm(t, sm), ref_ggml_metal_op_mul_mat_id_use_mm(t, sm));
+                for (int e = 0; e < 4; e++) {
+                    struct ggml_tensor * w   = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne00s2[j], 16, ne02s[e]);
+                    struct ggml_tensor * x   = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne00s2[j], 2, ne21s[i]);
+                    struct ggml_tensor * ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 2, ne21s[i]);
+                    struct ggml_tensor * t = ggml_mul_mat_id(ctx, w, x, ids);
+                    for (int sm = 0; sm <= 1; sm++) {
+                        snprintf(lbl, sizeof lbl, "id_use_mm(ne00=%lld ne02=%lld ne21=%lld sm=%d)",
+                                 (long long) ne00s2[j], (long long) ne02s[e], (long long) ne21s[i], sm);
+                        const bool u = ggml_metal_op_mul_mat_id_use_mm(t, sm);
+                        cmp_i(lbl, u, ref_ggml_metal_op_mul_mat_id_use_mm(t, sm));
+                        id_mm_true += u;
+                        id_mm_false_experts += !u && sm && ne00s2[j] >= 64 && ne21s[i] >= 32 && ne02s[e] > 1024;
+                    }
                 }
             }
         }
         ggml_free(ctx);
+        checks += 2;
+        if (id_mm_true == 0)          { printf("  id_use_mm never true\n"); fails++; }
+        if (id_mm_false_experts == 0) { printf("  id_use_mm never refused an expert count\n"); fails++; }
     }
 
     /* the Hadamard hint: widths with and without a kernel, F32 and F16 src1
@@ -509,6 +522,62 @@ static void mma_predicates_diff(void) {
     if (mma_may_true == 0)    { printf("  may_use_mma never true\n"); fails++; }
     if (fwht_true == 0)       { printf("  use_fwht never true\n"); fails++; }
     if (fwht_false_wide == 0) { printf("  use_fwht never refused a wide width for its budget\n"); fails++; }
+}
+
+/* MUL_MAT_ID's two id-map scratch regions, swept over expert counts,
+ * experts used and tokens. Since v0.7.0 ("fix mul_mat_id with duplicate
+ * ids") the first is a tile list bounded by
+ * `ggml_metal_op_mul_mat_id_max_tiles`, whose three arms -- the bound
+ * clamped to the entry count, the per-expert partial tiles bounded by the
+ * experts, and by the entries -- each need a shape of their own; the
+ * second holds one padding slot per expert. Both sides also allocate the
+ * sum through `get_alloc_size`, compared too. A zero-token op is in the
+ * sweep: the C's bound goes negative there and its `size_t` product wraps,
+ * which the port must reproduce. */
+static void mul_mat_id_extra_diff(ggml_backend_buffer_type_t bt_a, ggml_backend_buffer_type_t bt_b) {
+    printf("=== Metal MUL_MAT_ID id-map scratch: ported vs reference ===\n");
+
+    struct ggml_init_params ip = { 64u * 1024u * 1024u, NULL, true };
+    char lbl[160];
+
+    const int64_t ne02s[] = { 1, 2, 8, 32, 64, 128, 1024 };
+    const int64_t ne20s[] = { 1, 2, 4, 8 };
+    const int64_t ne21s[] = { 0, 1, 3, 7, 16, 31, 32, 33, 40, 64, 512 };
+    int clamped = 0, by_experts = 0, by_entries = 0;
+
+    for (size_t a = 0; a < sizeof ne02s / sizeof *ne02s; a++) {
+        struct ggml_context * ctx = ggml_init(ip);
+        for (size_t b = 0; b < sizeof ne20s / sizeof *ne20s; b++) {
+            if (ne20s[b] > ne02s[a]) continue;
+            for (size_t c = 0; c < sizeof ne21s / sizeof *ne21s; c++) {
+                const int64_t ne02 = ne02s[a], ne20 = ne20s[b], ne21 = ne21s[c];
+                struct ggml_tensor * w   = ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 64, 32, ne02);
+                struct ggml_tensor * x   = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 64, ne20, ne21);
+                struct ggml_tensor * ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, ne20, ne21);
+                struct ggml_tensor * t   = ggml_mul_mat_id(ctx, w, x, ids);
+
+                const int64_t n_rows = ne20*ne21;
+                const int64_t tiles  = (n_rows + 31)/32 + (ne02 < n_rows ? ne02 : n_rows) - 1;
+                clamped    += n_rows < tiles;
+                by_experts += ne02 < n_rows;
+                by_entries += ne02 >= n_rows && n_rows > 0;
+
+                snprintf(lbl, sizeof lbl, "id extra_tpe(ne02=%lld ne20=%lld ne21=%lld)", (long long) ne02, (long long) ne20, (long long) ne21);
+                cmp_sz(lbl, ggml_metal_op_mul_mat_id_extra_tpe(t), ref_ggml_metal_op_mul_mat_id_extra_tpe(t));
+                snprintf(lbl, sizeof lbl, "id extra_ids(ne02=%lld ne20=%lld ne21=%lld)", (long long) ne02, (long long) ne20, (long long) ne21);
+                cmp_sz(lbl, ggml_metal_op_mul_mat_id_extra_ids(t), ref_ggml_metal_op_mul_mat_id_extra_ids(t));
+                snprintf(lbl, sizeof lbl, "id get_alloc_size(ne02=%lld ne20=%lld ne21=%lld)", (long long) ne02, (long long) ne20, (long long) ne21);
+                cmp_sz(lbl, ggml_backend_buft_get_alloc_size(bt_a, t), ggml_backend_buft_get_alloc_size(bt_b, t));
+            }
+        }
+        ggml_free(ctx);
+    }
+
+    /* each arm of the tile bound must have been reached, or the sweep tests less than it says */
+    checks += 3;
+    if (clamped == 0)    { printf("  max_tiles never clamped to the entry count\n"); fails++; }
+    if (by_experts == 0) { printf("  max_tiles never bounded by the experts\n"); fails++; }
+    if (by_entries == 0) { printf("  max_tiles never bounded by the entries\n"); fails++; }
 }
 
 static void fusion_diff(ggml_backend_buffer_type_t buft) {
@@ -987,8 +1056,8 @@ int main(void) {
     struct ggml_context *ctx = ggml_init(ip);
     if (!ctx) { printf("FAIL: no ggml context\n"); return 1; }
 
-    struct ggml_tensor *probes[48];
-    const char *labels[48];
+    struct ggml_tensor *probes[64];
+    const char *labels[64];
     int n = 0;
 
     /* plain, no extra */
@@ -1066,10 +1135,10 @@ int main(void) {
          * vec kernel's (dk, dv) list decides whether the index scratch is
          * allocated -- v0.5.0 added (96, 64) -- and so do the bound and
          * the KV type. One pair off the list, one over the 4096 bound. */
-        const int64_t dks[]  = { 96, 96, 128, 80, 128, 576 };
-        const int64_t dvs[]  = { 96, 64, 128, 80, 128, 512 };
-        const int32_t nkv[]  = { 256, 256, 512, 256, 5000, 1024 };
-        for (int i = 0; i < 6; i++) {
+        const int64_t dks[]  = { 96, 96, 128, 80, 128, 576, 128 };
+        const int64_t dvs[]  = { 96, 64, 128, 80, 128, 512,  96 };
+        const int32_t nkv[]  = { 256, 256, 512, 256, 5000, 1024, 256 };
+        for (int i = 0; i < 7; i++) {
             struct ggml_tensor *q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, dks[i], 1, 8, 1);
             struct ggml_tensor *k = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, dks[i], 8192, 8, 1);
             struct ggml_tensor *v = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, dvs[i], 8192, 8, 1);
@@ -1077,9 +1146,33 @@ int main(void) {
             struct ggml_tensor *t = ggml_flash_attn_ext(ctx, q, k, v, m, 1.0f/8.0f, 0.0f, 0.0f);
             if (t) {
                 ggml_flash_attn_ext_set_n_kv_max(t, nkv[i]);
-                static char buf[6][64];
+                static char buf[7][64];
                 snprintf(buf[i], sizeof buf[i], "FLASH_ATTN_EXT sparse dk=%lld dv=%lld n_kv_max=%d",
                          (long long) dks[i], (long long) dvs[i], nkv[i]);
+                probes[n] = t; labels[n] = buf[i]; n++;
+            }
+        }
+    }
+
+    {
+        /* quantized KV and the upfront dequantise to F16: since v0.7.0 a
+         * batch under 32 rows dequantises when the head is 512 or wider
+         * and the batch is too big for the vec kernel (20 rows), so the
+         * pad scratch is sized for F16 rows there. Rows either side of
+         * both thresholds, at head sizes either side of 512. */
+        const int64_t dks[]  = { 576, 576, 576, 576, 512, 128, 128 };
+        const int64_t dvs[]  = { 512, 512, 512, 512, 512, 128, 128 };
+        const int64_t n01s[] = {   8,  19,  24,  32,  24,  24,  32 };
+        for (int i = 0; i < 7; i++) {
+            struct ggml_tensor *q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, dks[i], n01s[i], 8, 1);
+            struct ggml_tensor *k = ggml_new_tensor_4d(ctx, GGML_TYPE_Q8_0, dks[i], 4096, 1, 1);
+            struct ggml_tensor *v = ggml_new_tensor_4d(ctx, GGML_TYPE_Q8_0, dvs[i], 4096, 1, 1);
+            struct ggml_tensor *m = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 4096, n01s[i], 1, 1);
+            struct ggml_tensor *t = ggml_flash_attn_ext(ctx, q, k, v, m, 1.0f/8.0f, 0.0f, 0.0f);
+            if (t) {
+                static char buf[7][64];
+                snprintf(buf[i], sizeof buf[i], "FLASH_ATTN_EXT q8_0 dk=%lld ne01=%lld",
+                         (long long) dks[i], (long long) n01s[i]);
                 probes[n] = t; labels[n] = buf[i]; n++;
             }
         }
@@ -1141,6 +1234,7 @@ int main(void) {
     }
 
     mma_predicates_diff();
+    mul_mat_id_extra_diff(bt_a, bt_b);
 
     backend_a = ggml_backend_dev_init(dev_a, NULL);
     backend_b = ggml_backend_dev_init(dev_b, NULL);

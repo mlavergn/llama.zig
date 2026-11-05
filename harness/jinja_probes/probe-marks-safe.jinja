@@ -1,0 +1,4 @@
+{#- llama.cpp's `safe` gives a string back -- a string itself, marks and all -- so input stays input through `"Use '"|safe + name` (functionary v3.1) and `name + '[ARGS]' + arguments|tojson|safe` (Ministral 3, Devstral). -#}
+{%- for m in messages -%}
+{{ "Use '"|safe + m.content + "' to '"|safe + m.role + "'"|safe }}|{{ m.role + '[ARGS]' + (m|tojson|safe) }}|{{ (m.content|safe) + '.' }}|{{ m.content|safe }}
+{%- endfor -%}

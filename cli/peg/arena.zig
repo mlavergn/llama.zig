@@ -7,7 +7,7 @@
 //! Ports the parser types, `common_peg_ast_arena`, `common_peg_parse_context`,
 //! `common_peg_arena` and `parser_executor` from
 //! `llama.cpp/common/peg-parser.h` and `llama.cpp/common/peg-parser.cpp`
-//! (llama.cpp v0.6.0, `d81235049`). Each declaration names what it ports and
+//! (llama.cpp v0.7.0, `620d2225c`). Each declaration names what it ports and
 //! the line it began at. The builder is `builder.zig`, the GBNF export
 //! `gbnf.zig`, the serialization `serialize.zig`.
 //!
@@ -35,22 +35,22 @@ const Allocator = std.mem.Allocator;
 pub const Error = errors.Error;
 const raise = errors.raise;
 
-/// Ports `common_peg_parser_id` (peg-parser.h:19 @d81235049).
+/// Ports `common_peg_parser_id` (peg-parser.h:20 @620d2225c).
 pub const ParserId = usize;
-/// Ports `COMMON_PEG_INVALID_PARSER_ID` (peg-parser.h:20 @d81235049).
+/// Ports `COMMON_PEG_INVALID_PARSER_ID` (peg-parser.h:21 @620d2225c).
 pub const invalid_parser_id: ParserId = std.math.maxInt(usize);
-/// Ports `common_peg_ast_id` (peg-parser.h:22 @d81235049).
+/// Ports `common_peg_ast_id` (peg-parser.h:23 @620d2225c).
 pub const AstId = usize;
-/// Ports `COMMON_PEG_INVALID_AST_ID` (peg-parser.h:23 @d81235049).
+/// Ports `COMMON_PEG_INVALID_AST_ID` (peg-parser.h:24 @620d2225c).
 pub const invalid_ast_id: AstId = std.math.maxInt(usize);
 
-/// Ports `common_peg_parse_result_type` (peg-parser.h:67 @d81235049).
+/// Ports `common_peg_parse_result_type` (peg-parser.h:68 @620d2225c).
 pub const ResultType = enum(c_int) {
     fail = 0,
     success = 1,
     need_more_input = 2,
 
-    /// Ports `common_peg_parse_result_type_name` (peg-parser.cpp:21 @d81235049).
+    /// Ports `common_peg_parse_result_type_name` (peg-parser.cpp:21 @620d2225c).
     pub fn name(self: ResultType) []const u8 {
         return switch (self) {
             .fail => "fail",
@@ -60,7 +60,7 @@ pub const ResultType = enum(c_int) {
     }
 };
 
-/// Ports `common_peg_parse_flags` (peg-parser.h:162 @d81235049), as a bit
+/// Ports `common_peg_parse_flags` (peg-parser.h:163 @620d2225c), as a bit
 /// set.
 pub const Flags = struct {
     pub const none: u32 = 0;
@@ -68,14 +68,14 @@ pub const Flags = struct {
     pub const debug: u32 = 1 << 1;
 };
 
-/// Ports `common_peg_invalid_utf8` (peg-parser.h:76 @d81235049): a run of
+/// Ports `common_peg_invalid_utf8` (peg-parser.h:77 @620d2225c): a run of
 /// input bytes that does not decode as UTF-8, by its position in the input.
 pub const InvalidUtf8 = struct {
     pos: usize,
     len: usize,
 };
 
-/// Ports `common_peg_ast_node` (peg-parser.h:81 @d81235049).
+/// Ports `common_peg_ast_node` (peg-parser.h:82 @620d2225c).
 pub const AstNode = struct {
     id: AstId,
     rule: []const u8,
@@ -89,7 +89,7 @@ pub const AstNode = struct {
     /// the invalid UTF-8 inside the node, in ascending order
     invalid_utf8: []const InvalidUtf8 = &.{},
 
-    /// Ports `sanitized_text` (peg-parser.cpp:169 @d81235049), a member of
+    /// Ports `sanitized_text` (peg-parser.cpp:169 @620d2225c), a member of
     /// `common_peg_ast_node`: the text with every invalid run replaced by
     /// U+FFFD.
     ///
@@ -113,7 +113,7 @@ pub const AstNode = struct {
     }
 };
 
-/// Ports `common_peg_ast_arena` (peg-parser.h:103 @d81235049): the nodes a
+/// Ports `common_peg_ast_arena` (peg-parser.h:104 @620d2225c): the nodes a
 /// parse produced, by id.
 pub const AstArena = struct {
     gpa: Allocator,
@@ -132,7 +132,7 @@ pub const AstArena = struct {
         self.mem.deinit();
     }
 
-    /// Ports `add_node` (peg-parser.h:106 @d81235049), a member of
+    /// Ports `add_node` (peg-parser.h:107 @620d2225c), a member of
     /// `common_peg_ast_arena`. The names, the child list and the invalid
     /// runs are copied.
     ///
@@ -164,7 +164,7 @@ pub const AstArena = struct {
         return id;
     }
 
-    /// Ports `get` (peg-parser.h:121 @d81235049), a member of
+    /// Ports `get` (peg-parser.h:122 @620d2225c), a member of
     /// `common_peg_ast_arena`: `nodes_.at(id)`.
     ///
     /// Return: borrowed until the next `addNode` or `clear`; `OutOfRange`
@@ -174,7 +174,7 @@ pub const AstArena = struct {
         return &self.nodes.items[id];
     }
 
-    /// Ports `find_by_tag` (peg-parser.cpp:137 @d81235049): the first
+    /// Ports `find_by_tag` (peg-parser.cpp:137 @620d2225c): the first
     /// descendant with `tag`, depth first, `max_depth` levels down.
     ///
     /// Return: its id, or `invalid_ast_id`.
@@ -190,7 +190,7 @@ pub const AstArena = struct {
         return invalid_ast_id;
     }
 
-    /// Ports `find_by_rule` (peg-parser.cpp:153 @d81235049): as `findByTag`,
+    /// Ports `find_by_rule` (peg-parser.cpp:153 @620d2225c): as `findByTag`,
     /// matching the rule name.
     ///
     /// Return: its id, or `invalid_ast_id`.
@@ -206,7 +206,7 @@ pub const AstArena = struct {
         return invalid_ast_id;
     }
 
-    /// Ports `visit` (peg-parser.cpp:188 @d81235049), the overload taking an
+    /// Ports `visit` (peg-parser.cpp:188 @620d2225c), the overload taking an
     /// id: the node, then its children, depth first.
     ///
     /// Parameters:
@@ -219,24 +219,24 @@ pub const AstArena = struct {
         for (node.children) |child| try self.visit(child, ctx, f);
     }
 
-    /// Ports `visit` (peg-parser.cpp:199 @d81235049), the overload taking a
+    /// Ports `visit` (peg-parser.cpp:199 @620d2225c), the overload taking a
     /// result: every node it carries.
     pub fn visitResult(self: *const AstArena, result: *const ParseResult, ctx: anytype, comptime f: fn (@TypeOf(ctx), *const AstNode) Error!void) Error!void {
         for (result.nodes) |node| try self.visit(node, ctx, f);
     }
 
-    /// Ports `size` (peg-parser.h:126 @d81235049).
+    /// Ports `size` (peg-parser.h:127 @620d2225c).
     pub fn size(self: *const AstArena) usize {
         return self.nodes.items.len;
     }
 
-    /// Ports `clear` (peg-parser.h:128 @d81235049).
+    /// Ports `clear` (peg-parser.h:129 @620d2225c).
     pub fn clear(self: *AstArena) void {
         self.nodes.clearRetainingCapacity();
         _ = self.mem.reset(.retain_capacity);
     }
 
-    /// Ports `dump` (peg-parser.cpp:857 @d81235049): every node and, under
+    /// Ports `dump` (peg-parser.cpp:857 @620d2225c): every node and, under
     /// it, its children, indented -- so a node appears once for itself and
     /// once more under each ancestor.
     ///
@@ -248,7 +248,7 @@ pub const AstArena = struct {
         return out.toOwnedSlice(gpa);
     }
 
-    /// Ports `bfs_node` (peg-parser.cpp:840 @d81235049).
+    /// Ports `bfs_node` (peg-parser.cpp:840 @620d2225c).
     fn bfsNode(self: *const AstArena, gpa: Allocator, out: *std.ArrayList(u8), node: *const AstNode, indent: c_int) Error!void {
         var i: c_int = 0;
         while (i < indent) : (i += 1) try out.appendSlice(gpa, "  ");
@@ -260,7 +260,7 @@ pub const AstArena = struct {
     }
 };
 
-/// Ports `common_peg_parse_result` (peg-parser.h:136 @d81235049).
+/// Ports `common_peg_parse_result` (peg-parser.h:137 @620d2225c).
 pub const ParseResult = struct {
     type: ResultType = .fail,
     start: usize = 0,
@@ -292,17 +292,22 @@ pub const ParseResult = struct {
     }
 };
 
-/// Ports `common_peg_parse_context` (peg-parser.h:184 @d81235049).
+/// Ports `common_peg_parse_context` (peg-parser.h:185 @620d2225c).
 pub const ParseContext = struct {
     gpa: Allocator,
-    input: []u8,
+    input: []u8, // [h,   e,  l,  l,  o,  _,  w,  o,  r,  l,  d]
+    /// One entry per input byte: the token that begins there, -1
+    /// (`LLAMA_TOKEN_NULL`) inside a token's text; empty when the input
+    /// came without tokens. Nothing in the parser reads it yet, as in
+    /// upstream.
+    tokens: []i32 = &.{}, // [id, -1, -1, -1, -1, id, -1, -1, -1, -1, -1]
     flags: u32,
     ast: AstArena,
     parse_depth: c_int = 0,
     /// the node lists results carry
     scratch: std.heap.ArenaAllocator,
 
-    /// Ports `common_peg_parse_context` (peg-parser.h:194 @d81235049), the
+    /// Ports `common_peg_parse_context` (peg-parser.h:196 @620d2225c), the
     /// constructor taking input, which it copies.
     ///
     /// Return: the context; `deinit` frees it.
@@ -316,8 +321,27 @@ pub const ParseContext = struct {
         };
     }
 
+    /// Ports `common_peg_parse_context` (peg-parser.h:199 @620d2225c), the
+    /// constructor taking input and its tokens, both copied: `tokens` is
+    /// empty or one per input byte, a `GGML_ASSERT` kept in every build
+    /// mode.
+    ///
+    /// Return: the context; `deinit` frees it.
+    pub fn initTokens(gpa: Allocator, input: []const u8, tokens: []const i32, flags: u32) Error!ParseContext {
+        if (!(tokens.len == 0 or tokens.len == input.len)) {
+            const text = "GGML_ASSERT(this->tokens.empty() || this->tokens.size() == this->input.size()) failed\n";
+            _ = std.c.write(2, text.ptr, text.len);
+            std.c.abort();
+        }
+        var self = try init(gpa, input, flags);
+        errdefer self.deinit();
+        self.tokens = try gpa.dupe(i32, tokens);
+        return self;
+    }
+
     /// Frees the input copy, the AST and the scratch space.
     pub fn deinit(self: *ParseContext) void {
+        self.gpa.free(self.tokens);
         self.gpa.free(self.input);
         self.ast.deinit();
         self.scratch.deinit();
@@ -332,7 +356,7 @@ pub const ParseContext = struct {
     }
 };
 
-/// Ports `char_range` (peg-parser.h:241 @d81235049), a member of
+/// Ports `char_range` (peg-parser.h:248 @620d2225c), a member of
 /// `common_peg_chars_parser`.
 pub const CharRange = struct {
     start: u32,
@@ -373,7 +397,7 @@ pub const SharedDoc = struct {
     }
 };
 
-/// Ports `common_peg_parser_variant` (peg-parser.h:302 @d81235049), each
+/// Ports `common_peg_parser_variant` (peg-parser.h:309 @620d2225c), each
 /// arm one of the variant's structs, in its order.
 pub const Parser = union(enum) {
     /// `common_peg_epsilon_parser`
@@ -419,7 +443,7 @@ pub const Parser = union(enum) {
     /// `common_peg_ac_parser`
     ac: struct { child: ParserId, delimiters: []const []const u8 },
 
-    /// Ports `common_peg_chars_parser` (peg-parser.h:240 @d81235049).
+    /// Ports `common_peg_chars_parser` (peg-parser.h:247 @620d2225c).
     pub const Chars = struct {
         pattern: []const u8,
         ranges: []const CharRange,
@@ -428,7 +452,7 @@ pub const Parser = union(enum) {
         max_count: c_int,
     };
 
-    /// Ports `common_peg_schema_parser` (peg-parser.h:262 @d81235049). A
+    /// Ports `common_peg_schema_parser` (peg-parser.h:269 @620d2225c). A
     /// deserialized one has neither document nor node.
     pub const Schema = struct {
         child: ParserId,
@@ -453,7 +477,7 @@ pub const Parser = union(enum) {
     }
 };
 
-/// Ports `common_peg_arena` (peg-parser.h:326 @d81235049): the parsers, the
+/// Ports `common_peg_arena` (peg-parser.h:333 @620d2225c): the parsers, the
 /// named rules and the root.
 pub const Arena = struct {
     gpa: Allocator,
@@ -479,13 +503,67 @@ pub const Arena = struct {
         self.mem.deinit();
     }
 
+    /// The C++ copy of a `common_peg_arena`: every parser's payload copied
+    /// into a new arena, the schema documents shared, the rules inserted in
+    /// the source's iteration order. libc++'s copy of an `unordered_map`
+    /// rehashes to the source's bucket count first, which this does not;
+    /// the order only matters to a grammar built from the copy, and nothing
+    /// builds one from a copy.
+    ///
+    /// Return: owned by `gpa`; `deinit` frees it.
+    pub fn clone(self: *const Arena, gpa: Allocator) Error!Arena {
+        var out = try Arena.init(gpa);
+        errdefer out.deinit();
+        const a = out.alloc();
+        try out.parsers.ensureTotalCapacity(gpa, self.parsers.items.len);
+        for (self.parsers.items) |p| {
+            const q: Parser = switch (p) {
+                .epsilon, .start, .end, .any, .space, .string, .repetition, .and_, .not_, .atomic => p,
+                .literal => |l| .{ .literal = try a.dupe(u8, l) },
+                .sequence => |c| .{ .sequence = try a.dupe(ParserId, c) },
+                .choice => |c| .{ .choice = try a.dupe(ParserId, c) },
+                .chars => |c| .{ .chars = .{
+                    .pattern = try a.dupe(u8, c.pattern),
+                    .ranges = try a.dupe(CharRange, c.ranges),
+                    .negated = c.negated,
+                    .min_count = c.min_count,
+                    .max_count = c.max_count,
+                } },
+                .until => |d| .{ .until = try dupeStrings(a, d) },
+                .schema => |sc| .{ .schema = .{
+                    .child = sc.child,
+                    .name = try a.dupe(u8, sc.name),
+                    .doc = if (sc.doc) |d| d.retain() else null,
+                    .node = sc.node,
+                    .raw = sc.raw,
+                } },
+                .rule => |r| .{ .rule = .{ .name = try a.dupe(u8, r.name), .child = r.child, .trigger = r.trigger } },
+                .ref => |r| .{ .ref = try a.dupe(u8, r) },
+                .tag => |t| .{ .tag = .{ .child = t.child, .tag = try a.dupe(u8, t.tag) } },
+                .gbnf => |g| .{ .gbnf = .{ .child = g.child, .grammar = try a.dupe(u8, g.grammar) } },
+                .ac => |c| .{ .ac = .{ .child = c.child, .delimiters = try dupeStrings(a, c.delimiters) } },
+            };
+            out.parsers.appendAssumeCapacity(q);
+        }
+        var it = self.rules.iterator();
+        while (it.next()) |e| try out.addRule(e.key, e.value.*);
+        out.root = self.root;
+        return out;
+    }
+
+    fn dupeStrings(a: Allocator, list: []const []const u8) Error![]const []const u8 {
+        const out = try a.alloc([]const u8, list.len);
+        for (list, out) |s, *o| o.* = try a.dupe(u8, s);
+        return out;
+    }
+
     /// The allocator parser payloads live in; never stored, since an arena
     /// moves.
     pub fn alloc(self: *Arena) Allocator {
         return self.mem.allocator();
     }
 
-    /// Ports `get` (peg-parser.h:332 @d81235049), a member of
+    /// Ports `get` (peg-parser.h:339 @620d2225c), a member of
     /// `common_peg_arena`: `parsers_.at(id)`.
     ///
     /// Return: borrowed until the next `addParser`; `OutOfRange` past the
@@ -495,17 +573,17 @@ pub const Arena = struct {
         return &self.parsers.items[id];
     }
 
-    /// Ports `size` (peg-parser.h:335 @d81235049), a member of `common_peg_arena`.
+    /// Ports `size` (peg-parser.h:342 @620d2225c), a member of `common_peg_arena`.
     pub fn size(self: *const Arena) usize {
         return self.parsers.items.len;
     }
 
-    /// Ports `empty` (peg-parser.h:336 @d81235049), a member of `common_peg_arena`.
+    /// Ports `empty` (peg-parser.h:343 @620d2225c), a member of `common_peg_arena`.
     pub fn empty(self: *const Arena) bool {
         return self.parsers.items.len == 0;
     }
 
-    /// Ports `add_parser` (peg-parser.cpp:207 @d81235049).
+    /// Ports `add_parser` (peg-parser.cpp:207 @620d2225c).
     ///
     /// Return: the new parser's id.
     pub fn addParser(self: *Arena, parser: Parser) Error!ParserId {
@@ -514,13 +592,13 @@ pub const Arena = struct {
         return id;
     }
 
-    /// Ports `add_rule` (peg-parser.cpp:213 @d81235049): `rules_[name] = id`.
+    /// Ports `add_rule` (peg-parser.cpp:213 @620d2225c): `rules_[name] = id`.
     pub fn addRule(self: *Arena, name: []const u8, id: ParserId) Error!void {
         const slot = try self.rules.getOrPut(name, id);
         slot.value.* = id;
     }
 
-    /// Ports `get_rule` (peg-parser.cpp:217 @d81235049).
+    /// Ports `get_rule` (peg-parser.cpp:217 @620d2225c).
     ///
     /// Return: the rule's parser id; `RuntimeError` when there is none.
     pub fn getRule(self: *const Arena, name: []const u8) Error!ParserId {
@@ -528,12 +606,12 @@ pub const Arena = struct {
         return raise(error.RuntimeError, &.{ "Rule not found: ", name });
     }
 
-    /// Ports `has_rule` (peg-parser.h:339 @d81235049).
+    /// Ports `has_rule` (peg-parser.h:346 @620d2225c).
     pub fn hasRule(self: *const Arena, name: []const u8) bool {
         return self.rules.get(name) != null;
     }
 
-    /// Ports `parse` (peg-parser.cpp:818 @d81235049), the overload taking
+    /// Ports `parse` (peg-parser.cpp:818 @620d2225c), the overload taking
     /// the root.
     ///
     /// Return: the result; its node list is borrowed from `ctx`.
@@ -542,7 +620,7 @@ pub const Arena = struct {
         return self.parseAt(self.root, ctx, start);
     }
 
-    /// Ports `parse` (peg-parser.cpp:825 @d81235049), the overload taking
+    /// Ports `parse` (peg-parser.cpp:825 @620d2225c), the overload taking
     /// an id.
     pub fn parseAt(self: *const Arena, id: ParserId, ctx: *ParseContext, start: usize) Error!ParseResult {
         const parser = try self.get(id);
@@ -550,7 +628,7 @@ pub const Arena = struct {
         return exec.run(parser.*);
     }
 
-    /// Ports `resolve_ref` (peg-parser.cpp:832 @d81235049).
+    /// Ports `resolve_ref` (peg-parser.cpp:832 @620d2225c).
     fn resolveRef(self: *Arena, id: ParserId) Error!ParserId {
         const parser = try self.get(id);
         return switch (parser.*) {
@@ -559,7 +637,7 @@ pub const Arena = struct {
         };
     }
 
-    /// Ports `resolve_refs` (peg-parser.cpp:865 @d81235049): every child
+    /// Ports `resolve_refs` (peg-parser.cpp:865 @620d2225c): every child
     /// that is a reference becomes the rule it names, and so does the root.
     pub fn resolveRefs(self: *Arena) Error!void {
         for (0..self.parsers.items.len) |i| {
@@ -575,7 +653,7 @@ pub const Arena = struct {
         if (self.root != invalid_parser_id) self.root = try self.resolveRef(self.root);
     }
 
-    /// Ports `dump` (peg-parser.cpp:914 @d81235049): a parser as text, a
+    /// Ports `dump` (peg-parser.cpp:914 @620d2225c): a parser as text, a
     /// parser met twice on the way down printed as `[cycle]`.
     ///
     /// Return: owned by the caller.
@@ -588,7 +666,7 @@ pub const Arena = struct {
         return out.toOwnedSlice(gpa);
     }
 
-    /// Ports `dump_impl` (peg-parser.cpp:919 @d81235049).
+    /// Ports `dump_impl` (peg-parser.cpp:919 @620d2225c).
     fn dumpImpl(self: *const Arena, gpa: Allocator, out: *std.ArrayList(u8), id: ParserId, visited: *std.AutoHashMapUnmanaged(ParserId, void)) Error!void {
         if (visited.contains(id)) return out.appendSlice(gpa, "[cycle]");
         try visited.put(gpa, id, {});
@@ -690,7 +768,7 @@ pub fn isCSpace(c: u8) bool {
     return c == ' ' or (c >= '\t' and c <= '\r');
 }
 
-/// Ports `is_hex_digit` (peg-parser.cpp:30 @d81235049).
+/// Ports `is_hex_digit` (peg-parser.cpp:30 @620d2225c).
 pub fn isHexDigit(c: u8) bool {
     return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
 }
@@ -698,7 +776,7 @@ pub fn isHexDigit(c: u8) bool {
 /// `debug_indent`'s spaces, for any depth a stack can reach.
 const spaces: [1 << 16]u8 = @splat(' ');
 
-/// Ports `parser_executor` (peg-parser.cpp:225 @d81235049): one parser run
+/// Ports `parser_executor` (peg-parser.cpp:225 @620d2225c): one parser run
 /// at one position.
 const Executor = struct {
     arena: *const Arena,
@@ -748,13 +826,13 @@ const Executor = struct {
         };
     }
 
-    /// Ports `debug_indent` (peg-parser.cpp:233 @d81235049).
+    /// Ports `debug_indent` (peg-parser.cpp:233 @620d2225c).
     fn indent(self: *const Executor) []const u8 {
         const n: usize = @intCast(@max(self.ctx.parse_depth, 0) * 2);
         return spaces[0..@min(n, spaces.len)];
     }
 
-    /// Ports `debug_input_snippet` (peg-parser.cpp:235 @d81235049).
+    /// Ports `debug_input_snippet` (peg-parser.cpp:235 @620d2225c).
     fn snippet(self: *const Executor, gpa: Allocator, pos: usize) Error![]u8 {
         const len = 60;
         const input = self.ctx.input;
@@ -775,7 +853,7 @@ const Executor = struct {
         return self.arena.dump(std.heap.smp_allocator, id);
     }
 
-    /// Ports the executor's arm for `common_peg_literal_parser` (peg-parser.cpp:277 @d81235049).
+    /// Ports the executor's arm for `common_peg_literal_parser` (peg-parser.cpp:277 @620d2225c).
     fn literal(self: *Executor, lit: []const u8) ParseResult {
         var pos = self.start_pos;
         const input = self.ctx.input;
@@ -790,7 +868,7 @@ const Executor = struct {
         return span(.success, self.start_pos, pos);
     }
 
-    /// Ports the executor's arm for `common_peg_sequence_parser` (peg-parser.cpp:295 @d81235049).
+    /// Ports the executor's arm for `common_peg_sequence_parser` (peg-parser.cpp:295 @620d2225c).
     fn sequence(self: *Executor, children: []const ParserId) Error!ParseResult {
         const ctx = self.ctx;
         const a = std.heap.smp_allocator;
@@ -833,7 +911,7 @@ const Executor = struct {
         return self.withNodes(.success, self.start_pos, pos, nodes.items, invalid_utf8.items);
     }
 
-    /// Ports the executor's arm for `common_peg_choice_parser` (peg-parser.cpp:349 @d81235049).
+    /// Ports the executor's arm for `common_peg_choice_parser` (peg-parser.cpp:349 @620d2225c).
     fn choice(self: *Executor, children: []const ParserId) Error!ParseResult {
         const ctx = self.ctx;
         const a = std.heap.smp_allocator;
@@ -863,7 +941,7 @@ const Executor = struct {
         return res(.fail, self.start_pos);
     }
 
-    /// Ports the executor's arm for `common_peg_repetition_parser` (peg-parser.cpp:384 @d81235049).
+    /// Ports the executor's arm for `common_peg_repetition_parser` (peg-parser.cpp:384 @620d2225c).
     fn repetition(self: *Executor, child: ParserId, min_count: c_int, max_count: c_int) Error!ParseResult {
         const ctx = self.ctx;
         const a = std.heap.smp_allocator;
@@ -927,13 +1005,13 @@ const Executor = struct {
         return self.withNodes(.success, self.start_pos, pos, nodes.items, invalid_utf8.items);
     }
 
-    /// Ports the executor's arm for `common_peg_and_parser` (peg-parser.cpp:478 @d81235049).
+    /// Ports the executor's arm for `common_peg_and_parser` (peg-parser.cpp:478 @620d2225c).
     fn andParser(self: *Executor, child: ParserId) Error!ParseResult {
         const result = try self.arena.parseAt(child, self.ctx, self.start_pos);
         return res(result.type, self.start_pos);
     }
 
-    /// Ports the executor's arm for `common_peg_not_parser` (peg-parser.cpp:484 @d81235049).
+    /// Ports the executor's arm for `common_peg_not_parser` (peg-parser.cpp:484 @620d2225c).
     fn notParser(self: *Executor, child: ParserId) Error!ParseResult {
         const result = try self.arena.parseAt(child, self.ctx, self.start_pos);
         if (result.success()) return res(.fail, self.start_pos);
@@ -941,7 +1019,7 @@ const Executor = struct {
         return res(.success, self.start_pos);
     }
 
-    /// Ports the executor's arm for `common_peg_any_parser` (peg-parser.cpp:501 @d81235049):
+    /// Ports the executor's arm for `common_peg_any_parser` (peg-parser.cpp:501 @620d2225c):
     /// one UTF-8 code point.
     fn any(self: *Executor) ParseResult {
         const r = trie.parseUtf8Codepoint(self.ctx.input, self.start_pos);
@@ -952,14 +1030,14 @@ const Executor = struct {
         }
     }
 
-    /// Ports the executor's arm for `common_peg_space_parser` (peg-parser.cpp:517 @d81235049).
+    /// Ports the executor's arm for `common_peg_space_parser` (peg-parser.cpp:517 @620d2225c).
     fn space(self: *Executor) ParseResult {
         var pos = self.start_pos;
         while (pos < self.ctx.input.len and isCSpace(self.ctx.input[pos])) pos += 1;
         return span(.success, self.start_pos, pos);
     }
 
-    /// Ports the executor's arm for `common_peg_chars_parser` (peg-parser.cpp:531 @d81235049).
+    /// Ports the executor's arm for `common_peg_chars_parser` (peg-parser.cpp:531 @620d2225c).
     fn chars(self: *Executor, p: Parser.Chars) ParseResult {
         const ctx = self.ctx;
         var pos = self.start_pos;
@@ -994,7 +1072,7 @@ const Executor = struct {
         return span(.success, self.start_pos, pos);
     }
 
-    /// Ports `handle_escape_sequence` (peg-parser.cpp:595 @d81235049).
+    /// Ports `handle_escape_sequence` (peg-parser.cpp:595 @620d2225c).
     fn handleEscapeSequence(ctx: *ParseContext, start: usize, pos: *usize, delimiter: u8) ParseResult {
         const save = pos.*;
         pos.* += 1;
@@ -1019,7 +1097,7 @@ const Executor = struct {
         return res(.fail, start);
     }
 
-    /// Ports `handle_unicode_escape` (peg-parser.cpp:626 @d81235049).
+    /// Ports `handle_unicode_escape` (peg-parser.cpp:626 @620d2225c).
     fn handleUnicodeEscape(ctx: *ParseContext, start: usize, pos: *usize) ParseResult {
         pos.* += 1;
         for (0..4) |_| {
@@ -1033,7 +1111,7 @@ const Executor = struct {
         return span(.success, start, pos.*);
     }
 
-    /// Ports the executor's arm for `common_peg_string_parser` (peg-parser.cpp:643 @d81235049):
+    /// Ports the executor's arm for `common_peg_string_parser` (peg-parser.cpp:643 @620d2225c):
     /// string content up to an unescaped delimiter, which it leaves.
     fn string(self: *Executor, delimiter: u8) ParseResult {
         const ctx = self.ctx;
@@ -1058,7 +1136,7 @@ const Executor = struct {
         return span(.need_more_input, self.start_pos, pos);
     }
 
-    /// Ports the executor's arm for `common_peg_until_parser` (peg-parser.cpp:685 @d81235049):
+    /// Ports the executor's arm for `common_peg_until_parser` (peg-parser.cpp:685 @620d2225c):
     /// everything before the first delimiter, or before a delimiter's prefix
     /// at the end of the input. Bytes that do not decode are consumed and
     /// recorded -- a delimiter cannot start inside them -- except a sequence
@@ -1093,8 +1171,8 @@ const Executor = struct {
         return self.withNodes(.success, self.start_pos, last_valid_pos, &.{}, invalid_utf8.items);
     }
 
-    /// Ports the executor's arms for `common_peg_rule_parser` (peg-parser.cpp:738 @d81235049)
-    /// and `common_peg_tag_parser` (peg-parser.cpp:765 @d81235049): the
+    /// Ports the executor's arms for `common_peg_rule_parser` (peg-parser.cpp:738 @620d2225c)
+    /// and `common_peg_tag_parser` (peg-parser.cpp:765 @620d2225c): the
     /// child, and a node for it unless it failed; the node and the result
     /// both carry the child's invalid UTF-8.
     fn named(self: *Executor, child: ParserId, rule: []const u8, tag: []const u8) Error!ParseResult {
@@ -1117,13 +1195,13 @@ const Executor = struct {
         return self.named(child, "", tag);
     }
 
-    /// Ports the executor's arm for `common_peg_ref_parser` (peg-parser.cpp:795 @d81235049).
+    /// Ports the executor's arm for `common_peg_ref_parser` (peg-parser.cpp:795 @620d2225c).
     fn ref(self: *Executor, name: []const u8) Error!ParseResult {
         const rule_id = try self.arena.getRule(name);
         return self.arena.parseAt(rule_id, self.ctx, self.start_pos);
     }
 
-    /// Ports the executor's arm for `common_peg_atomic_parser` (peg-parser.cpp:800 @d81235049):
+    /// Ports the executor's arm for `common_peg_atomic_parser` (peg-parser.cpp:800 @620d2225c):
     /// a partial match carries no nodes.
     fn atomic(self: *Executor, child: ParserId) Error!ParseResult {
         var result = try self.arena.parseAt(child, self.ctx, self.start_pos);

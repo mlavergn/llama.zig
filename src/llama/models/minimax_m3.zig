@@ -10,12 +10,12 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/minimax-m3.cpp` at v0.6.0
-//! (`d81235049`): `llama_model_minimax_m3`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/minimax-m3.cpp` at v0.7.0
+//! (`620d2225c`): `llama_model_minimax_m3`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` with
 //! `build_attn_msa_fa`, and `llm_graph_input_msa`, which upstream defines
-//! in the model's own file. `msa_params` (src/models/models.h:2253
-//! @d81235049) is not kept on the model: its three fields are the
+//! in the model's own file. `msa_params` (src/models/models.h:2332
+//! @620d2225c) is not kept on the model: its three fields are the
 //! hyperparameters they are loaded from, read where the graph needs them.
 
 const std = @import("std");
@@ -33,7 +33,7 @@ const Tensor = c.ggml_tensor;
 const Ubatch = @import("../batch.zig").Ubatch;
 const MsaContext = kv_cache_msa.MsaContext;
 
-/// Ports `llama_model_minimax_m3`'s `load_arch_hparams` (src/models/minimax-m3.cpp:13 @d81235049).
+/// Ports `llama_model_minimax_m3`'s `load_arch_hparams` (src/models/minimax-m3.cpp:13 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -60,7 +60,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_minimax_m3`'s `load_arch_tensors` (src/models/minimax-m3.cpp:41 @d81235049).
+/// Ports `llama_model_minimax_m3`'s `load_arch_tensors` (src/models/minimax-m3.cpp:41 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -114,18 +114,18 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_minimax_m3`'s `build_arch_graph` (src/models/minimax-m3.cpp:92 @d81235049).
+/// Ports `llama_model_minimax_m3`'s `build_arch_graph` (src/models/minimax-m3.cpp:92 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// `GGML_PAD` (ggml.h:267 @d81235049) over `int64_t`: a mask, so for a
+/// `GGML_PAD` (ggml.h:267 @620d2225c) over `int64_t`: a mask, so for a
 /// block size that is not a power of two it is not a round-up, as in the C.
 fn padI64(x: i64, n: i64) i64 {
     return (x +% n -% 1) & ~(n -% 1);
 }
 
-/// Ports `llm_graph_input_msa` (src/models/minimax-m3.cpp:96 @d81235049): the
+/// Ports `llm_graph_input_msa` (src/models/minimax-m3.cpp:96 @620d2225c): the
 /// per-ubatch maps between positions and cells that MSA's block selection
 /// reads, and the bias that forces the local blocks.
 const InpMsa = struct {
@@ -145,7 +145,7 @@ const InpMsa = struct {
     blk: c_int,
     local: c_int,
 
-    /// Ports `llm_graph_input_msa`'s `set_input` (src/models/minimax-m3.cpp:101 @d81235049).
+    /// Ports `llm_graph_input_msa`'s `set_input` (src/models/minimax-m3.cpp:101 @620d2225c).
     pub fn setInput(self: *InpMsa, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         if (self.pos_slot_i) |t| self.mctx.setInputPosSlot(t, ubatch);
@@ -176,7 +176,7 @@ const InpMsa = struct {
     }
 
     /// Ports `llm_graph_input_msa`'s `can_reuse` (src/models/minimax-m3.cpp:126
-    /// @d81235049): valid while the tensors' dimensions still match the new
+    /// @620d2225c): valid while the tensors' dimensions still match the new
     /// ubatch and cache window, and the ubatch is in the same regime --
     /// decode graphs have `pos_slot_f`, batch graphs `cell_blk`.
     pub fn canReuse(self: *InpMsa, params: *const graph.Params) bool {
@@ -221,7 +221,7 @@ const InpMsa = struct {
 };
 
 /// Ports `llama_model_minimax_m3`'s `graph`'s `build_attn_msa_fa`
-/// (src/models/minimax-m3.cpp:176 @d81235049): one flash-attention call for
+/// (src/models/minimax-m3.cpp:176 @620d2225c): one flash-attention call for
 /// every GQA group -- and at a multi-stream decode, every stream -- by
 /// mapping them onto its sequence dimension, `ne[3]`.
 ///
@@ -267,7 +267,7 @@ var warned_no_fa = false;
 var warned_unified = false;
 
 /// Ports the constructor of `llama_model_minimax_m3`'s `graph`
-/// (src/models/minimax-m3.cpp:210 @d81235049). Partial rotary: the head size
+/// (src/models/minimax-m3.cpp:210 @620d2225c). Partial rotary: the head size
 /// is not `n_rot`, so that is not asserted.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
@@ -648,8 +648,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/clamp.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/clamp.cuh` at v0.6.0 (`d81235049`). The
+//! `llama.cpp/ggml/src/ggml-cuda/clamp.cuh` at v0.7.0 (`620d2225c`). The
 //! kernel, `op_clamp_kernel`, stays CUDA.
 //!
 //! For `F16` the bounds are converted to `half` on the host, `(half)min`,
@@ -19,7 +19,7 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `CUDA_CLAMP_BLOCK_SIZE` (clamp.cuh:3 @d81235049).
+/// Ports `CUDA_CLAMP_BLOCK_SIZE` (clamp.cuh:3 @620d2225c).
 const block_size = 256;
 
 /// `(half) x`.
@@ -27,17 +27,36 @@ fn toHalf(x: f32) half {
     return @fromBackingInt(@intCast(@as(u16, @bitCast(@as(f16, @floatCast(x))))));
 }
 
-/// Ports `clamp_cuda` (clamp.cu:19 @d81235049), which launches with `<<<>>>`.
-fn clampCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, min: T, max: T, k: c_int, stream: cu.cudaStream_t) void {
-    const num_blocks: c_int = @divTrunc(k + block_size - 1, block_size);
-    kernels.launch(kernels.get("clamp", kernels.tmpl("op_clamp_kernel", &.{kernels.typeName(T)})), .{
-        .grid = .{ .x = @bitCast(num_blocks) },
-        .block = .{ .x = block_size },
-        .stream = stream,
-    }, .{ x, dst, min, max, k });
+/// `size_t` into a `uint32_t` parameter.
+fn u32Of(x: usize) u32 {
+    return @truncate(x);
 }
 
-/// Ports `ggml_cuda_op_clamp` (clamp.cu:25 @d81235049).
+/// Ports `clamp_cuda` (clamp.cu:30 @620d2225c), which launches with `<<<>>>`.
+/// Since v0.7.0 `src0` and `dst` may be views: rows are contiguous, dims
+/// 1..3 follow the strides, in elements, and the kernel divides the flat
+/// index with `fast_div_modulo`.
+fn clampCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, min: T, max: T, src0: *const Tensor, t: *const Tensor, stream: cu.cudaStream_t) void {
+    const k: i64 = c.ggml_nelements(src0);
+    const ts: usize = @sizeOf(T);
+    impl.assert(k <= std.math.maxInt(u32), "k <= std::numeric_limits<uint32_t>::max()");
+
+    const ne0 = common.initFastdivValues(@bitCast(src0.ne[0]));
+    const ne1 = common.initFastdivValues(@bitCast(src0.ne[1]));
+    const ne2 = common.initFastdivValues(@bitCast(src0.ne[2]));
+
+    const num_blocks: i64 = @divTrunc(k + block_size - 1, block_size);
+    kernels.launch(kernels.get("clamp", kernels.tmpl("op_clamp_kernel", &.{kernels.typeName(T)})), .{
+        .grid = .{ .x = @truncate(@as(u64, @bitCast(num_blocks))) },
+        .block = .{ .x = block_size },
+        .stream = stream,
+    }, .{
+        x,                      dst,                    min,                    max,                 @as(u32, @intCast(k)), ne0,                 ne1, ne2,
+        u32Of(src0.nb[1] / ts), u32Of(src0.nb[2] / ts), u32Of(src0.nb[3] / ts), u32Of(t.nb[1] / ts), u32Of(t.nb[2] / ts),   u32Of(t.nb[3] / ts),
+    });
+}
+
+/// Ports `ggml_cuda_op_clamp` (clamp.cu:46 @620d2225c).
 pub fn opClamp(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
@@ -47,14 +66,14 @@ pub fn opClamp(ctx: *common.Context, dst: *Tensor) void {
     impl.assert(src0.type == c.GGML_TYPE_F32 or src0.type == c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
     impl.assert(dst.type == c.GGML_TYPE_F32 or dst.type == c.GGML_TYPE_F16, " dst->type == GGML_TYPE_F32 ||  dst->type == GGML_TYPE_F16");
     impl.assert(src0.type == dst.type, "src0->type == dst->type");
+    impl.assert(c.ggml_is_contiguous_rows(src0) and c.ggml_is_contiguous_rows(dst), "ggml_is_contiguous_rows(src0) && ggml_is_contiguous_rows(dst)");
 
     const min: f32 = @bitCast(dst.op_params[0]);
     const max: f32 = @bitCast(dst.op_params[1]);
 
-    const k: c_int = @truncate(c.ggml_nelements(src0));
     if (src0.type == c.GGML_TYPE_F16) {
-        clampCuda(half, src0_d, dst_d, toHalf(min), toHalf(max), k, stream);
+        clampCuda(half, src0_d, dst_d, toHalf(min), toHalf(max), src0, dst, stream);
     } else {
-        clampCuda(f32, src0_d, dst_d, min, max, k, stream);
+        clampCuda(f32, src0_d, dst_d, min, max, src0, dst, stream);
     }
 }

@@ -4,7 +4,7 @@
 //!
 //! **Not a port of a file.** Each function here reproduces one Intel
 //! intrinsic that `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` or
-//! `arch/x86/repack.cpp` (v0.6.0, `d81235049`) calls, and is named after it
+//! `arch/x86/repack.cpp` (v0.7.0, `620d2225c`) calls, and is named after it
 //! with the leading underscore dropped: `_mm256_maddubs_epi16` is
 //! `mm256_maddubs_epi16`. The semantics are Intel's.
 //!
@@ -328,6 +328,15 @@ pub inline fn mm_loadu_si128(p: *const anyopaque) m128i {
     return v.*;
 }
 
+/// `_mm_loadl_epi64`: eight bytes, no alignment, into the low half; the high
+/// half is zero.
+pub inline fn mm_loadl_epi64(p: *const anyopaque) m128i {
+    var rp = p;
+    _ = &rp;
+    const v: *align(1) const i64 = @ptrCast(rp);
+    return .{ v.*, 0 };
+}
+
 pub inline fn mm256_storeu_si256(p: *anyopaque, a: m256i) void {
     const v: *align(1) m256i = @ptrCast(p);
     v.* = a;
@@ -430,7 +439,7 @@ pub inline fn mm256_castsi256_si128(a: m256i) m128i {
     return .{ a[0], a[1] };
 }
 
-/// `MM256_SET_M128I` (arch/x86/quants.c:26 @d81235049) and
+/// `MM256_SET_M128I` (arch/x86/quants.c:26 @620d2225c) and
 /// `_mm256_set_m128i`: the first operand high, the second low.
 pub inline fn mm256_set_m128i(hi: m128i, lo: m128i) m256i {
     return .{ lo[0], lo[1], hi[0], hi[1] };
@@ -676,6 +685,13 @@ pub inline fn mm256_cmpeq_epi8(a: m256i, b: m256i) m256i {
 /// `_mm256_cvtepu8_epi16`: sixteen bytes zero-extended.
 pub inline fn mm256_cvtepu8_epi16(a: m128i) m256i {
     return as(m256i, @as(@Vector(16, u16), as(u8x16, a)));
+}
+
+/// `_mm256_cvtepu8_epi32`: the low eight bytes zero-extended.
+pub inline fn mm256_cvtepu8_epi32(a: m128i) m256i {
+    const b = as(u8x16, a);
+    const lo: @Vector(8, u8) = .{ b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7] };
+    return as(m256i, @as(@Vector(8, u32), lo));
 }
 
 /// `_mm256_cvtepi16_epi32`: eight `i16` sign-extended.

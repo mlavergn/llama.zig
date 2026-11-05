@@ -42,6 +42,7 @@ const RefHparams = extern struct {
     image_std: [3]f32 = .{ 0.5, 0.5, 0.5 },
     dsv4_max_n_token: i32 = 0,
     dsv4_max_wh_ratio: i32 = 0,
+    max_slice_nums: i32 = 9, // v0.7.0
 };
 
 extern fn ref_preprocess(kind: c_int, proj_type: c_int, hp: *const RefHparams, rgb: ?[*]const u8, nx: c_int, ny: c_int, out: *?[*]u8, out_len: *usize) c_int;
@@ -92,6 +93,7 @@ fn toHparams(rh: *const RefHparams) !model.Hparams {
     h.image_pad_ov = @fromBackingInt(@intCast(rh.image_pad_ov));
     h.dsv4_max_n_token = rh.dsv4_max_n_token;
     h.dsv4_max_wh_ratio = rh.dsv4_max_wh_ratio;
+    h.max_slice_nums = rh.max_slice_nums;
     return h;
 }
 
@@ -238,6 +240,10 @@ const sizes = [_][2]c_int{
     // exactly 8 tokens of 14-pixel patches merged 2x2 (6272 pixels) with
     // neither edge aligned, where glm5v's `>= min_px` keeps the scale at 1
     .{ 98, 64 },   .{ 64, 98 },
+    // v0.7.0: at minicpmv's 448 / 56, the overview's resize lands an edge
+    // on an odd multiple of half the alignment (476 = 8.5 * 56, 364 =
+    // 6.5 * 56), where its round-half-to-even and std::round part
+       .{ 100, 113 },  .{ 100, 151 },
 };
 
 const clip_mean = [3]f32{ 0.48145466, 0.4578275, 0.40821073 };
@@ -267,9 +273,16 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
             };
         },
         .llava_uhd, .minicpmv, .internvl => {
-            for ([_]bool{ false, true }) |pins| for ([_]i32{ 1, 2 }) |merge| for ([_][2]i32{ .{ 1, 0 }, .{ 0, 1 }, .{ 2, 2 } }) |algos| for ([_][2]i32{ .{ 1, 0 }, .{ 2, 1 }, .{ 0, 2 } }) |pads| {
+            // v0.7.0: minicpmv at the 4x merge too (its slice align is
+            // patch * 4 whatever the merge), and max_slice_nums rotating
+            // through the default, smaller caps and 0 (which means 9)
+            var n_var: usize = 0;
+            for ([_]bool{ false, true }) |pins| for ([_]i32{ 1, 2, 4 }) |merge| for ([_][2]i32{ .{ 1, 0 }, .{ 0, 1 }, .{ 2, 2 } }) |algos| for ([_][2]i32{ .{ 1, 0 }, .{ 2, 1 }, .{ 0, 2 } }) |pads| {
                 if (kind == .internvl and !pins) continue;
+                if (merge == 4 and kind != .minicpmv) continue;
                 var h = base;
+                h.max_slice_nums = ([_]i32{ 9, 4, 0, 2 })[n_var % 4];
+                n_var += 1;
                 h.image_size = if (kind == .llava_uhd) 336 else 448;
                 h.patch_size = 14;
                 h.n_merge = merge;
@@ -434,6 +447,23 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_resize_pad = 1;
                 h.image_pad_color = .{ 1, 2, 3, 0 };
                 try out.append(gpa, .{ h, .glm5v, "glm5v" });
+            };
+        },
+        .cohere2v => {
+            // as load_hparams sets it: the refined image stretched
+            // (PAD_NONE); tile counts from one (never tiled) to the cap's
+            // edge, and tile sizes either side of the test sizes
+            for ([_]i32{ 32, 64, 364 }) |is| for ([_]i32{ 1, 2, 6, 12, 256 }) |mt| for ([_][2]i32{ .{ 1, 1 }, .{ 2, 0 } }) |algos| {
+                var h = base;
+                h.image_size = is;
+                h.patch_size = 14;
+                h.n_merge = 2;
+                h.preproc_max_tiles = mt;
+                h.image_resize_algo_rf = algos[0];
+                h.image_resize_algo_ov = algos[1];
+                h.image_pad_rf = 0;
+                h.image_pad_ov = 0;
+                try out.append(gpa, .{ h, .cohere2v, "cohere2v" });
             };
         },
     }

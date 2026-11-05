@@ -89,11 +89,12 @@ const common_sources = [_][]const u8{
     "common/parsers/cohere2moe.cpp",       "common/parsers/deepseek.cpp",
     "common/parsers/functionary-v3-2.cpp", "common/parsers/gemma4.cpp",
     "common/parsers/gigachat-v3.cpp",      "common/parsers/gpt-oss.cpp",
-    "common/parsers/kimi-k2.cpp",          "common/parsers/kimi-k3.cpp",
-    "common/parsers/ling3.cpp",            "common/parsers/lfm2.cpp",
-    "common/parsers/llm-jp-harmony.cpp",   "common/parsers/minicpm5.cpp",
-    "common/parsers/minimax-m3.cpp",       "common/parsers/ministral3.cpp",
-    "common/parsers/muse-glimmer.cpp",     "common/parsers/qwen3-coder.cpp",
+    "common/parsers/k2-horizon.cpp",       "common/parsers/kimi-k2.cpp",
+    "common/parsers/kimi-k3.cpp",          "common/parsers/ling3.cpp",
+    "common/parsers/lfm2.cpp",             "common/parsers/llm-jp-harmony.cpp",
+    "common/parsers/minicpm5.cpp",         "common/parsers/minimax-m3.cpp",
+    "common/parsers/ministral3.cpp",       "common/parsers/muse-glimmer.cpp",
+    "common/parsers/qwen3-coder.cpp",      "common/parsers/translate-gemma.cpp",
 };
 
 /// `llama.cpp.zmake`'s `server_context_sources`, `server_impl_sources` and
@@ -197,6 +198,20 @@ pub fn add(b: *std.Build, opts: Options) !void {
         .sdk = opts.sdk,
         .reference = opts.reference,
     });
+    // Stage 9's modules, for the server's data layer (`tools/server/module.zig`)
+    // and `llama-mtmd-cli`'s chat templates (`common_chat_templates_init`):
+    // `json` is `cli_fit`'s `cli/json/` under the name `cli/common_chat/`
+    // imports (`tools/server/json_module.zig` says why).
+    const json_module = b.createModule(.{ .root_source_file = b.path("tools/server/json_module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
+    json_module.addImport("cli_fit", fit_module);
+    const peg_module = b.createModule(.{ .root_source_file = b.path("cli/peg/module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
+    peg_module.addImport("json", json_module);
+    peg_module.addImport("llama", opts.reference.llama.root_module);
+    const chat_module = b.createModule(.{ .root_source_file = b.path("cli/common_chat/module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
+    chat_module.addImport("json", json_module);
+    chat_module.addImport("peg", peg_module);
+    chat_module.addImport("llama", opts.reference.llama.root_module);
+    if (opts.jinja) |j| chat_module.addImport("zigjinja", j);
     for (tools ++ mtmd_tools, 0..) |t, ti| {
         const mod = b.createModule(.{
             .root_source_file = b.path(t.port),
@@ -215,7 +230,10 @@ pub fn add(b: *std.Build, opts: Options) !void {
         // libllama's module, compiled in as the CLI does: referencing it
         // exports `llama.h`, and it links `libggml` itself.
         mod.addImport("llama", opts.reference.llama.root_module);
-        if (ti >= tools.len) mod.addImport("mtmd", mtmd_module);
+        if (ti >= tools.len) {
+            mod.addImport("mtmd", mtmd_module);
+            mod.addImport("common_chat", chat_module);
+        }
         llamacpp.addSdkPaths(b, mod, opts.sdk);
         llamacpp.addLibgcc(b, mod);
         const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod });
@@ -237,19 +255,6 @@ pub fn add(b: *std.Build, opts: Options) !void {
         mod.addImport("llama", opts.reference.llama.root_module);
         mod.addImport("mtmd", mtmd_module);
         mod.addImport("ui_assets", opts.ui.port_module);
-        // Stage 9's modules, for the data layer (`tools/server/module.zig`):
-        // `json` is `cli_fit`'s `cli/json/` under the name `cli/common_chat/`
-        // imports (`tools/server/json_module.zig` says why).
-        const json_module = b.createModule(.{ .root_source_file = b.path("tools/server/json_module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
-        json_module.addImport("cli_fit", fit_module);
-        const peg_module = b.createModule(.{ .root_source_file = b.path("cli/peg/module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
-        peg_module.addImport("json", json_module);
-        peg_module.addImport("llama", opts.reference.llama.root_module);
-        const chat_module = b.createModule(.{ .root_source_file = b.path("cli/common_chat/module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
-        chat_module.addImport("json", json_module);
-        chat_module.addImport("peg", peg_module);
-        chat_module.addImport("llama", opts.reference.llama.root_module);
-        if (opts.jinja) |j| chat_module.addImport("zigjinja", j);
         mod.addImport("json", json_module);
         mod.addImport("common_chat", chat_module);
         mod.addImport("peg", peg_module);

@@ -93,6 +93,7 @@ const Api = struct {
     mtmd_bitmap_init_from_audio: *const fn (usize, ?[*]const f32) callconv(.c) P,
     mtmd_bitmap_free: *const fn (OptP) callconv(.c) void,
     mtmd_bitmap_set_id: *const fn (P, ?[*:0]const u8) callconv(.c) void,
+    mtmd_bitmap_set_mergeable: *const fn (P, bool) callconv(.c) void,
     mtmd_bitmap_get_id: *const fn (P) callconv(.c) [*:0]const u8,
     mtmd_bitmap_get_nx: *const fn (P) callconv(.c) u32,
     mtmd_bitmap_get_ny: *const fn (P) callconv(.c) u32,
@@ -507,6 +508,17 @@ fn runMedia(x: *const Ctx, tmp: []const u8, inputs: []const u8, vision: bool, au
         for (placeholders.items) |b| api.mtmd_bitmap_free(b);
         placeholders.deinit(x.a);
     }
+    // v0.7.0: the frames of one video, mergeable, each with its placeholder
+    var frames: std.ArrayList(P) = .empty;
+    defer {
+        for (frames.items) |b| api.mtmd_bitmap_free(b);
+        frames.deinit(x.a);
+    }
+    var frame_placeholders: std.ArrayList(P) = .empty;
+    defer {
+        for (frame_placeholders.items) |b| api.mtmd_bitmap_free(b);
+        frame_placeholders.deinit(x.a);
+    }
 
     var groups = std.mem.splitScalar(u8, inputs, ';');
     while (groups.next()) |g| {
@@ -525,6 +537,25 @@ fn runMedia(x: *const Ctx, tmp: []const u8, inputs: []const u8, vision: bool, au
                 api.mtmd_bitmap_set_id(b, (std.fmt.bufPrintSentinel(&idb, "img{d}x{d}", .{ nx, ny }, 0) catch unreachable).ptr);
                 try bitmaps.append(x.a, b);
                 try placeholders.append(x.a, api.mtmd_bitmap_init(nx, ny, null));
+            } else if (std.mem.eql(u8, kind, "vid")) {
+                // WxHxN: N frames, each its own image, all mergeable
+                var dims = std.mem.splitScalar(u8, it, 'x');
+                const nx = try std.fmt.parseInt(u32, dims.next() orelse continue, 10);
+                const ny = try std.fmt.parseInt(u32, dims.next() orelse continue, 10);
+                const nf = try std.fmt.parseInt(u32, dims.next() orelse continue, 10);
+                for (0..nf) |k| {
+                    const px = try makeImage(x.a, nx, ny);
+                    defer x.a.free(px);
+                    // a different picture per frame, the same size
+                    for (px, 0..) |*p, j| p.* +%= @truncate(k * 37 + j % 5);
+                    const b = api.mtmd_bitmap_init(nx, ny, px.ptr);
+                    api.mtmd_bitmap_set_id(b, "video");
+                    api.mtmd_bitmap_set_mergeable(b, true);
+                    try frames.append(x.a, b);
+                    const ph = api.mtmd_bitmap_init(nx, ny, null);
+                    api.mtmd_bitmap_set_mergeable(ph, true);
+                    try frame_placeholders.append(x.a, ph);
+                }
             } else if (std.mem.eql(u8, kind, "aud")) {
                 const n = try std.fmt.parseInt(usize, it, 10);
                 const s = try makeAudio(x.a, n);
@@ -561,6 +592,12 @@ fn runMedia(x: *const Ctx, tmp: []const u8, inputs: []const u8, vision: bool, au
 
     try tokenizeAndRun(x, bitmaps.items, true);
     try tokenizeAndRun(x, placeholders.items, false);
+    // the frames' markers side by side, so the tokenizer merges them
+    if (frames.items.len != 0) {
+        print("video {d} frames\n", .{frames.items.len});
+        try tokenizeAndRunAdjacent(x, frames.items, true, true);
+        try tokenizeAndRunAdjacent(x, frame_placeholders.items, false, true);
+    }
     try tokenizeParts(x, placeholders.items, true);
     try tokenizeParts(x, placeholders.items, false);
 
@@ -629,12 +666,22 @@ fn tokenizeParts(x: *const Ctx, bitmaps: []const P, add_special: bool) !void {
 }
 
 fn tokenizeAndRun(x: *const Ctx, bitmaps: []const P, run: bool) !void {
+    return tokenizeAndRunAdjacent(x, bitmaps, run, false);
+}
+
+/// `tokenizeAndRun`, with `adjacent` the markers written with no text
+/// between them, as a video's frames are.
+fn tokenizeAndRunAdjacent(x: *const Ctx, bitmaps: []const P, run: bool, adjacent: bool) !void {
     const api = x.api;
     if (bitmaps.len == 0) return;
     var prompt: std.ArrayList(u8) = .empty;
     defer prompt.deinit(x.a);
     try prompt.appendSlice(x.a, "Look:");
-    for (0..bitmaps.len) |i| try prompt.print(x.a, " item {d} <__media__>\n", .{i});
+    for (0..bitmaps.len) |i| {
+        if (adjacent) {
+            try prompt.appendSlice(x.a, "<__media__>");
+        } else try prompt.print(x.a, " item {d} <__media__>\n", .{i});
+    }
     try prompt.appendSlice(x.a, "describe them.");
     const text: M.InputText = .{ .text = prompt.items.ptr, .text_len = prompt.items.len, .add_special = true, .parse_special = true };
     const chunks = api.mtmd_input_chunks_init();

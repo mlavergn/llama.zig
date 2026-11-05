@@ -1293,7 +1293,7 @@ fn saverRuns(dir: []const u8, models: []const [:0]const u8, vocab_files: []const
     // Fixtures saved and nothing else: since v0.5.0 the saver writes the
     // SWA pattern per layer, skips null special ids, the hrm.* keys and
     // `hrm_z_l_init`, and saves each tensor of a looped model's aliased
-    // cache slots once (llama-model-saver.cpp:146, 467 @d81235049).
+    // cache slots once (llama-model-saver.cpp:147, 472 @620d2225c).
     for (save_files) |m| saveBoth(dir, m, 0, false);
     // Every upstream vocabulary, vocab-only. Through v0.3.0 this compared
     // each tokenizer's tokens, scores, types, merges and special ids as
@@ -1346,7 +1346,7 @@ fn saveBoth(dir: []const u8, m: [:0]const u8, ngl: i32, vocab_only: bool) void {
             // And since v0.4.0 a vocab-only save aborts in upstream on any
             // file: `add_kv_from_model` asks `hparams.n_ff_exp()`, now an
             // accessor bounded by `n_layer_all`, which `load_hparams` never
-            // reads for vocab-only (llama-hparams.cpp:79 @d81235049).
+            // reads for vocab-only (llama-hparams.cpp:79 @620d2225c).
             var nb0: [256]u8 = undefined;
             const job: SaveJob = .{ .rm = rm, .pm = pm, .out = ref_out };
             const why = if (hasCharsmap(m)) "charsmap" else "vocab-only";

@@ -6,10 +6,11 @@
 //!
 //! - `llama.cpp/src/llama-memory.h` -- `llama_memory_params`,
 //!   `llama_memory_status`, `llama_memory_context_i` and `llama_memory_i`
-//! - `llama.cpp/src/llama-memory.cpp` -- `llama_memory_status_combine` and
-//!   `llama_memory_status_is_fail`
+//! - `llama.cpp/src/llama-memory.cpp` -- `llama_memory_status_combine`,
+//!   `llama_memory_status_is_fail`, `llama_memory_buffers_writer` and
+//!   `llama_memory_get_buffers`
 //!
-//! All at v0.6.0 (`d81235049`).
+//! All at v0.7.0 (`620d2225c`).
 //!
 //! # Interfaces, not classes
 //!
@@ -28,7 +29,7 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 
-/// Mirrors `llama_memory_params` (llama-memory.h:17 @d81235049).
+/// Mirrors `llama_memory_params` (llama-memory.h:17 @620d2225c).
 pub const Params = struct {
     type_k: c.enum_ggml_type,
     type_v: c.enum_ggml_type,
@@ -38,7 +39,7 @@ pub const Params = struct {
     mem_other: ?Memory,
 };
 
-/// Mirrors `llama_memory_status` (llama-memory.h:30 @d81235049).
+/// Mirrors `llama_memory_status` (llama-memory.h:30 @620d2225c).
 pub const Status = enum(c_int) {
     success = 0,
     no_update,
@@ -46,7 +47,7 @@ pub const Status = enum(c_int) {
     failed_compute,
 };
 
-/// Ports `llama_memory_status_combine` (llama-memory.cpp:3 @d81235049): a
+/// Ports `llama_memory_status_combine` (llama-memory.cpp:9 @620d2225c): a
 /// failure wins, else an update in either is an update.
 pub fn statusCombine(s0: Status, s1: Status) Status {
     var has_update = false;
@@ -63,7 +64,7 @@ pub fn statusCombine(s0: Status, s1: Status) Status {
     return if (has_update) .success else .no_update;
 }
 
-/// Ports `llama_memory_status_is_fail` (llama-memory.cpp:44 @d81235049).
+/// Ports `llama_memory_status_is_fail` (llama-memory.cpp:50 @620d2225c).
 pub fn statusIsFail(status: Status) bool {
     return switch (status) {
         .success, .no_update => false,
@@ -91,10 +92,10 @@ pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: c.ggml_backend_buffer_t
         }
         if (@intFromPtr(list.items[pos].buft) > @intFromPtr(buft)) break;
     }
-    list.insert(impl.allocator, pos, .{ .buft = buft, .size = size }) catch impl.abort("llama-memory.h", 119, "out of memory");
+    list.insert(impl.allocator, pos, .{ .buft = buft, .size = size }) catch impl.abort("llama-memory.h", 120, "out of memory");
 }
 
-/// Mirrors `llama_memory_context_i` (llama-memory.h:51 @d81235049): the
+/// Mirrors `llama_memory_context_i` (llama-memory.h:51 @620d2225c): the
 /// memory's view for one batch -- its ubatches, in order, and the state
 /// each needs.
 pub const Context = struct {
@@ -144,7 +145,7 @@ pub const Context = struct {
     }
 };
 
-/// Mirrors `llama_memory_i` (llama-memory.h:73 @d81235049).
+/// Mirrors `llama_memory_i` (llama-memory.h:73 @620d2225c).
 pub const Memory = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
@@ -251,6 +252,57 @@ pub const LayerMap = struct {
         return self.func.?(self.ctx, il);
     }
 };
+
+/// Ports `llama_memory_buffers_writer` (llama-memory.cpp:68 @620d2225c): a
+/// state sink that keeps no data, only the buffers of the tensors a state
+/// write visits.
+const BuffersWriter = struct {
+    /// `std::set<ggml_backend_buffer_t>`: kept sorted by address.
+    buffers: std.ArrayList(c.ggml_backend_buffer_t) = .empty,
+    size: usize = 0,
+
+    fn write(ptr: *anyopaque, src: []const u8, _: *Exception) Thrown!void {
+        const self: *BuffersWriter = @ptrCast(@alignCast(ptr));
+        self.size += src.len;
+    }
+
+    fn writeTensor(ptr: *anyopaque, tensor: *const c.ggml_tensor, _: usize, n: usize, _: *Exception) Thrown!void {
+        const self: *BuffersWriter = @ptrCast(@alignCast(ptr));
+        const buf = tensor.buffer;
+        var at: usize = 0;
+        while (at < self.buffers.items.len and @intFromPtr(self.buffers.items[at]) < @intFromPtr(buf)) at += 1;
+        if (at == self.buffers.items.len or self.buffers.items[at] != buf) {
+            self.buffers.insert(impl.allocator, at, buf) catch impl.abort("llama-memory.cpp", 0, "out of memory");
+        }
+        self.size += n;
+    }
+
+    fn nBytes(ptr: *anyopaque) usize {
+        const self: *BuffersWriter = @ptrCast(@alignCast(ptr));
+        return self.size;
+    }
+
+    const vtable: io.Writer.VTable = .{ .write = write, .writeTensor = writeTensor, .nBytes = nBytes };
+};
+
+/// Ports `llama_memory_get_buffers` (llama-memory.cpp:86 @620d2225c), from
+/// `llama-ext.h`: the backend buffers a state write of this memory would
+/// touch; an empty cache reports none.
+///
+/// Parameters:
+/// - `mem`: the memory.
+/// - `exc`: receives what the state write throws.
+///
+/// Return: the buffers in address order, the caller's to free with
+/// `impl.allocator`; or `error.Thrown`.
+pub fn getBuffers(mem: Memory, exc: *Exception) Thrown![]c.ggml_backend_buffer_t {
+    var writer: BuffersWriter = .{};
+    errdefer writer.buffers.deinit(impl.allocator);
+
+    try mem.stateWrite(.{ .ptr = &writer, .vtable = &BuffersWriter.vtable }, -1, 0, exc);
+
+    return writer.buffers.toOwnedSlice(impl.allocator) catch impl.abort("llama-memory.cpp", 0, "out of memory");
+}
 
 // -----------------------------------------------------------------------------
 // Unit Tests

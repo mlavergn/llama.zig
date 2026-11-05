@@ -15,6 +15,14 @@
 # `harness/sched_dump.c` stands up two stub devices that differ only in which
 # ops they claim, so where each node lands is a direct readout of the passes.
 #
+# Since v0.7.0 it also holds the copy and realloc callbacks
+# (`ggml_backend_sched_set_copy_callback`, `_set_realloc_callback`), which
+# libllama's MoE cache drives: a third stub, ACC, takes offloaded ADDs over
+# weights in a CPU buffer, and the harness prints every callback, its
+# arguments, what the split's other input already holds when a weight is
+# offered (host weights are copied last), and the result of a callback that
+# copies half a weight itself.
+#
 # Usage: scripts/sched-diff
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -53,7 +61,8 @@ zig cc -mcpu=baseline harness/sched_dump.c -o "$tmp/port" -std=c11 -w "${INC[@]}
 "$tmp/port" > "$tmp/port.txt" 2>/dev/null
 
 if diff -u "$tmp/ref.txt" "$tmp/port.txt" > "$tmp/diff.txt"; then
-    printf 'PASS: %d scheduler assignments identical\n' "$(grep -c -- '->' "$tmp/ref.txt")"
+    printf 'PASS: %d scheduler assignments and %d callback calls identical\n' \
+        "$(grep -c -- '->' "$tmp/ref.txt")" "$(grep -c -- '_cb #' "$tmp/ref.txt")"
     exit 0
 fi
 

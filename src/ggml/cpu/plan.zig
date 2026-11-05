@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.6.0, `d81235049`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.7.0, `620d2225c`),
 //! `ggml_get_n_tasks` at line 2220 and `ggml_graph_plan` at line 2781. Each
 //! function names the C it replaces and the line it began at.
 //!
@@ -35,20 +35,20 @@ const CGraph = defs.CGraph;
 /// op, in which case its answer replaces the whole switch below.
 extern fn ggml_cpu_extra_work_size(n_threads: c_int, op: *const Tensor, size: *usize) bool;
 
-/// Ports `GGML_IM2COL_WORK_SIZE` (ops.h:23 @d81235049).
+/// Ports `GGML_IM2COL_WORK_SIZE` (ops.h:23 @620d2225c).
 const im2col_work_size: usize = 16 * 1024 * 1024;
 
-/// Ports `GGML_FA_TILE_Q` and `GGML_FA_TILE_KV` (ggml-cpu/common.h:10 @d81235049).
+/// Ports `GGML_FA_TILE_Q` and `GGML_FA_TILE_KV` (ggml-cpu/common.h:10 @620d2225c).
 const fa_tile_q: i64 = 64;
 const fa_tile_kv: i64 = 64;
 
-/// Ports `GGML_SOFT_MAX_UNROLL` (vec.h:49 @d81235049).
+/// Ports `GGML_SOFT_MAX_UNROLL` (vec.h:49 @620d2225c).
 const soft_max_unroll: i64 = 4;
 
-/// Ports `GGML_N_TASKS_MAX` (ggml.h:2735 @d81235049).
+/// Ports `GGML_N_TASKS_MAX` (ggml.h:2741 @620d2225c).
 const n_tasks_max: c_int = -1;
 
-/// Ports `ggml_up` (ggml-impl.h:68 @d81235049).
+/// Ports `ggml_up` (ggml-impl.h:68 @620d2225c).
 inline fn up(n: i64, m: i64) i64 {
     impl.assert(m & (m - 1) == 0, "(m & (m - 1)) == 0");
     return (n + m - 1) & ~(m - 1);
@@ -58,7 +58,7 @@ inline fn min(a: i64, b: i64) i64 {
     return if (a < b) a else b;
 }
 
-/// Ports `ggml_get_n_tasks` (ggml-cpu.c:2249 @d81235049).
+/// Ports `ggml_get_n_tasks` (ggml-cpu.c:2249 @620d2225c).
 ///
 /// Parameters:
 /// - `node`: the graph node to plan for.
@@ -71,13 +71,15 @@ pub fn getNTasks(node: *Tensor, n_threads: c_int) c_int {
 
     const n_tasks: c_int = switch (node.op) {
         // Parallel over rows: every one of these splits its work by thread.
-        c.GGML_OP_CPY, c.GGML_OP_DUP, c.GGML_OP_CONT, c.GGML_OP_ADD, c.GGML_OP_ADD_ID, c.GGML_OP_ADD1, c.GGML_OP_ACC, c.GGML_OP_CUMSUM, c.GGML_OP_TRI, c.GGML_OP_FILL, c.GGML_OP_COUNT_EQUAL, c.GGML_OP_SOLVE_TRI, c.GGML_OP_GATED_DELTA_NET, c.GGML_OP_DSV4_HC_COMB, c.GGML_OP_DSV4_HC_PRE, c.GGML_OP_DSV4_HC_POST, c.GGML_OP_SILU_BACK, c.GGML_OP_MUL, c.GGML_OP_DIV, c.GGML_OP_NORM, c.GGML_OP_RMS_NORM, c.GGML_OP_RMS_NORM_BACK, c.GGML_OP_L2_NORM, c.GGML_OP_GROUP_NORM, c.GGML_OP_CONCAT, c.GGML_OP_MUL_MAT, c.GGML_OP_MUL_MAT_ID, c.GGML_OP_OUT_PROD, c.GGML_OP_GET_ROWS, c.GGML_OP_SET_ROWS, c.GGML_OP_DIAG_MASK_ZERO, c.GGML_OP_DIAG_MASK_INF, c.GGML_OP_SOFT_MAX_BACK, c.GGML_OP_ROPE, c.GGML_OP_ROPE_BACK, c.GGML_OP_ADD_REL_POS, c.GGML_OP_IM2COL, c.GGML_OP_IM2COL_BACK, c.GGML_OP_IM2COL_3D, c.GGML_OP_CONV_2D, c.GGML_OP_CONV_3D, c.GGML_OP_CONV_2D_DW, c.GGML_OP_COL2IM_1D, c.GGML_OP_CONV_TRANSPOSE_1D, c.GGML_OP_CONV_TRANSPOSE_2D, c.GGML_OP_UPSCALE, c.GGML_OP_PAD, c.GGML_OP_PAD_REFLECT_1D, c.GGML_OP_ROLL, c.GGML_OP_ARANGE, c.GGML_OP_TIMESTEP_EMBEDDING, c.GGML_OP_ARGSORT, c.GGML_OP_TOP_K, c.GGML_OP_FLASH_ATTN_EXT, c.GGML_OP_FLASH_ATTN_BACK, c.GGML_OP_SSM_CONV, c.GGML_OP_SSM_SCAN, c.GGML_OP_LIGHTNING_INDEXER, c.GGML_OP_CROSS_ENTROPY_LOSS, c.GGML_OP_CROSS_ENTROPY_LOSS_BACK, c.GGML_OP_OPT_STEP_ADAMW, c.GGML_OP_OPT_STEP_SGD => n_threads,
+        c.GGML_OP_CPY, c.GGML_OP_DUP, c.GGML_OP_CONT, c.GGML_OP_ADD, c.GGML_OP_ADD_ID, c.GGML_OP_ADD1, c.GGML_OP_ACC, c.GGML_OP_CUMSUM, c.GGML_OP_TRI, c.GGML_OP_FILL, c.GGML_OP_COUNT_EQUAL, c.GGML_OP_SOLVE_TRI, c.GGML_OP_GATED_DELTA_NET, c.GGML_OP_DSV4_HC_COMB, c.GGML_OP_DSV4_HC_PRE, c.GGML_OP_DSV4_HC_POST, c.GGML_OP_SILU_BACK, c.GGML_OP_MUL, c.GGML_OP_DIV, c.GGML_OP_NORM, c.GGML_OP_RMS_NORM, c.GGML_OP_RMS_NORM_BACK, c.GGML_OP_L2_NORM, c.GGML_OP_GROUP_NORM, c.GGML_OP_CONCAT, c.GGML_OP_MUL_MAT, c.GGML_OP_MUL_MAT_ID, c.GGML_OP_OUT_PROD, c.GGML_OP_SET_ROWS, c.GGML_OP_DIAG_MASK_ZERO, c.GGML_OP_DIAG_MASK_INF, c.GGML_OP_SOFT_MAX_BACK, c.GGML_OP_ROPE, c.GGML_OP_ROPE_BACK, c.GGML_OP_ADD_REL_POS, c.GGML_OP_IM2COL, c.GGML_OP_IM2COL_BACK, c.GGML_OP_IM2COL_3D, c.GGML_OP_CONV_2D, c.GGML_OP_CONV_3D, c.GGML_OP_CONV_2D_DW, c.GGML_OP_COL2IM_1D, c.GGML_OP_CONV_TRANSPOSE_1D, c.GGML_OP_CONV_TRANSPOSE_2D, c.GGML_OP_UPSCALE, c.GGML_OP_PAD, c.GGML_OP_PAD_REFLECT_1D, c.GGML_OP_ROLL, c.GGML_OP_ARANGE, c.GGML_OP_TIMESTEP_EMBEDDING, c.GGML_OP_ARGSORT, c.GGML_OP_TOP_K, c.GGML_OP_FLASH_ATTN_EXT, c.GGML_OP_FLASH_ATTN_BACK, c.GGML_OP_SSM_CONV, c.GGML_OP_SSM_SCAN, c.GGML_OP_LIGHTNING_INDEXER, c.GGML_OP_CROSS_ENTROPY_LOSS, c.GGML_OP_CROSS_ENTROPY_LOSS_BACK, c.GGML_OP_OPT_STEP_ADAMW, c.GGML_OP_OPT_STEP_SGD => n_threads,
 
         // Single-threaded, either because the op is cheap or because no
-        // one has written the parallel form. `GET_ROWS` and `SET_ROWS`
-        // could use more threads; the C notes that launching them costs
-        // more than it saves once a GPU is carrying the model.
-        c.GGML_OP_SUB, c.GGML_OP_SQR, c.GGML_OP_SQRT, c.GGML_OP_LOG, c.GGML_OP_SIN, c.GGML_OP_COS, c.GGML_OP_SUM, c.GGML_OP_SUM_ROWS, c.GGML_OP_MEAN, c.GGML_OP_ARGMAX, c.GGML_OP_REPEAT, c.GGML_OP_REPEAT_BACK, c.GGML_OP_LEAKY_RELU, c.GGML_OP_SCALE, c.GGML_OP_SET, c.GGML_OP_RESHAPE, c.GGML_OP_VIEW, c.GGML_OP_PERMUTE, c.GGML_OP_TRANSPOSE, c.GGML_OP_GET_ROWS_BACK, c.GGML_OP_DIAG, c.GGML_OP_CLAMP, c.GGML_OP_POOL_1D, c.GGML_OP_POOL_2D, c.GGML_OP_POOL_2D_BACK, c.GGML_OP_WIN_PART, c.GGML_OP_WIN_UNPART, c.GGML_OP_GET_REL_POS, c.GGML_OP_NONE => 1,
+        // one has written the parallel form. `GET_ROWS` could use more
+        // threads; the C notes that launching them costs more than it saves
+        // once a GPU is carrying the model. `SET_ROWS` sat beside it until
+        // v0.7.0 (#30454), which planned its per-thread F16 conversion rows
+        // for one thread while every thread ran it.
+        c.GGML_OP_GET_ROWS, c.GGML_OP_SUB, c.GGML_OP_SQR, c.GGML_OP_SQRT, c.GGML_OP_LOG, c.GGML_OP_SIN, c.GGML_OP_COS, c.GGML_OP_SUM, c.GGML_OP_SUM_ROWS, c.GGML_OP_MEAN, c.GGML_OP_ARGMAX, c.GGML_OP_REPEAT, c.GGML_OP_REPEAT_BACK, c.GGML_OP_LEAKY_RELU, c.GGML_OP_SCALE, c.GGML_OP_SET, c.GGML_OP_RESHAPE, c.GGML_OP_VIEW, c.GGML_OP_PERMUTE, c.GGML_OP_TRANSPOSE, c.GGML_OP_GET_ROWS_BACK, c.GGML_OP_DIAG, c.GGML_OP_CLAMP, c.GGML_OP_POOL_1D, c.GGML_OP_POOL_2D, c.GGML_OP_POOL_2D_BACK, c.GGML_OP_WIN_PART, c.GGML_OP_WIN_UNPART, c.GGML_OP_GET_REL_POS, c.GGML_OP_NONE => 1,
 
         c.GGML_OP_UNARY => switch (types.ggml_get_unary_op(node)) {
             c.GGML_UNARY_OP_ABS,
@@ -162,7 +164,7 @@ pub fn getNTasks(node: *Tensor, n_threads: c_int) c_int {
     return n_tasks;
 }
 
-/// Ports `ggml_graph_plan` (ggml-cpu.c:2811 @d81235049).
+/// Ports `ggml_graph_plan` (ggml-cpu.c:2811 @620d2225c).
 ///
 /// Parameters:
 /// - `cgraph`: the graph to plan.

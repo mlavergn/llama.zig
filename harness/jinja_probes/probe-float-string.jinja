@@ -1,0 +1,13 @@
+{#- v0.7.0: a float's `string` and `safe` write Python's str(): the shortest digits that read back, fixed for 1e-4 <= |v| < 1e16, else d.ddde+XX, and nan, inf, -inf. `{{ v }}` stays std::to_string with the trailing zeros trimmed. -#}
+{%- set vals = [0.1, 0.5, 1.0, 2.5, 100.0, 0.0001, 0.00001, 0.00012, 1234.5678, 0.1 + 0.2, 1.0 / 3.0, 2.0 / 3.0, 5|float, 0.0 - 1.5, '0.3'|float,
+  '1e16'|float, '1e15'|float, '9999999999999998'|float, '9999999999999999'|float, '123456789012345678.0'|float, '1e-5'|float, '0.000099999'|float,
+  '1e22'|float, '1e23'|float, '-1e23'|float, '2.2250738585072014e-308'|float, '1.7976931348623157e308'|float, '1e-300'|float / '2e23'|float,
+  '8.98846567431158e307'|float, '9007199254740993'|float, '0.30000000000000004'|float, '123456.789e3'|float, '-0.0'|float,
+  'nan'|float, 'inf'|float, '-inf'|float] -%}
+{%- for v in vals -%}
+[{{ v|string }}|{{ v|safe }}]
+{%- endfor %}
+{%- for v in vals if v < ('1e300'|float) and v > ('-1e300'|float) -%}
+<{{ v }}>
+{%- endfor %}
+{{ (0.25|string) ~ '|' ~ ((1.0 / 3.0)|string|length) }}

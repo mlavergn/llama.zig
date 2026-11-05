@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.6.0, `d81235049`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.7.0, `620d2225c`),
 //! the row functions at lines 25-125. Each function names the C it replaces
 //! and the line it began at.
 //!
@@ -51,37 +51,37 @@ const ref = struct {
     extern fn quantize_row_iq4_xs_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
 };
 
-/// Ports `quantize_row_q1_0` (ggml-cpu/quants.c:25 @d81235049).
+/// Ports `quantize_row_q1_0` (ggml-cpu/quants.c:25 @620d2225c).
 pub export fn quantize_row_q1_0(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     ref.quantize_row_q1_0_ref(x, y, k);
 }
 
-/// Ports `quantize_row_q2_0` (ggml-cpu/quants.c:29 @d81235049).
+/// Ports `quantize_row_q2_0` (ggml-cpu/quants.c:29 @620d2225c).
 pub export fn quantize_row_q2_0(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     ref.quantize_row_q2_0_ref(x, y, k);
 }
 
-/// Ports `quantize_row_q4_0` (ggml-cpu/quants.c:33 @d81235049).
+/// Ports `quantize_row_q4_0` (ggml-cpu/quants.c:33 @620d2225c).
 pub export fn quantize_row_q4_0(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     ref.quantize_row_q4_0_ref(x, y, k);
 }
 
-/// Ports `quantize_row_q4_1` (ggml-cpu/quants.c:37 @d81235049).
+/// Ports `quantize_row_q4_1` (ggml-cpu/quants.c:37 @620d2225c).
 pub export fn quantize_row_q4_1(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     ref.quantize_row_q4_1_ref(x, y, k);
 }
 
-/// Ports `quantize_row_q5_0` (ggml-cpu/quants.c:41 @d81235049).
+/// Ports `quantize_row_q5_0` (ggml-cpu/quants.c:41 @620d2225c).
 pub export fn quantize_row_q5_0(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     ref.quantize_row_q5_0_ref(x, y, k);
 }
 
-/// Ports `quantize_row_q5_1` (ggml-cpu/quants.c:45 @d81235049).
+/// Ports `quantize_row_q5_1` (ggml-cpu/quants.c:45 @620d2225c).
 pub export fn quantize_row_q5_1(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     ref.quantize_row_q5_1_ref(x, y, k);
 }
 
-/// Ports `quantize_row_q8_0_generic` (ggml-cpu/quants.c:49 @d81235049).
+/// Ports `quantize_row_q8_0_generic` (ggml-cpu/quants.c:49 @620d2225c).
 ///
 /// `_generic` because `arch/arm/quants.c` provides the NEON `quantize_row_q8_0`
 /// this target actually uses. Unreachable here, and exported because the symbol
@@ -90,22 +90,22 @@ pub export fn quantize_row_q8_0_generic(x: [*c]const f32, y: ?*anyopaque, k: i64
     ref.quantize_row_q8_0_ref(x, y, k);
 }
 
-/// Ports `quantize_row_q8_1_generic` (ggml-cpu/quants.c:53 @d81235049).
+/// Ports `quantize_row_q8_1_generic` (ggml-cpu/quants.c:53 @620d2225c).
 pub export fn quantize_row_q8_1_generic(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     ref.quantize_row_q8_1_ref(x, y, k);
 }
 
-/// Ports `quantize_row_mxfp4` (ggml-cpu/quants.c:57 @d81235049).
+/// Ports `quantize_row_mxfp4` (ggml-cpu/quants.c:57 @620d2225c).
 pub export fn quantize_row_mxfp4(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     ref.quantize_row_mxfp4_ref(x, y, k);
 }
 
-/// Ports `quantize_row_nvfp4` (ggml-cpu/quants.c:61 @d81235049).
+/// Ports `quantize_row_nvfp4` (ggml-cpu/quants.c:61 @620d2225c).
 pub export fn quantize_row_nvfp4(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     ref.quantize_row_nvfp4_ref(x, y, k);
 }
 
-/// Ports `quantize_row_q2_K` (ggml-cpu/quants.c:71 @d81235049).
+/// Ports `quantize_row_q2_K` (ggml-cpu/quants.c:71 @620d2225c).
 ///
 /// The K-quant forwarders assert `k % QK_K == 0` before delegating, where the
 /// legacy ones do not. Kept, because the reference quantizer would otherwise
@@ -115,54 +115,54 @@ pub export fn quantize_row_q2_K(x: [*c]const f32, vy: ?*anyopaque, k: i64) void 
     ref.quantize_row_q2_K_ref(x, vy, k);
 }
 
-/// Ports `quantize_row_q3_K` (ggml-cpu/quants.c:77 @d81235049).
+/// Ports `quantize_row_q3_K` (ggml-cpu/quants.c:77 @620d2225c).
 pub export fn quantize_row_q3_K(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
     impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
     ref.quantize_row_q3_K_ref(x, vy, k);
 }
 
-/// Ports `quantize_row_q4_K` (ggml-cpu/quants.c:83 @d81235049).
+/// Ports `quantize_row_q4_K` (ggml-cpu/quants.c:83 @620d2225c).
 pub export fn quantize_row_q4_K(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
     impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
     ref.quantize_row_q4_K_ref(x, vy, k);
 }
 
-/// Ports `quantize_row_q5_K` (ggml-cpu/quants.c:91 @d81235049).
+/// Ports `quantize_row_q5_K` (ggml-cpu/quants.c:91 @620d2225c).
 pub export fn quantize_row_q5_K(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
     impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
     ref.quantize_row_q5_K_ref(x, vy, k);
 }
 
-/// Ports `quantize_row_q6_K` (ggml-cpu/quants.c:99 @d81235049).
+/// Ports `quantize_row_q6_K` (ggml-cpu/quants.c:99 @620d2225c).
 pub export fn quantize_row_q6_K(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
     impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
     ref.quantize_row_q6_K_ref(x, vy, k);
 }
 
-/// Ports `quantize_row_tq1_0` (ggml-cpu/quants.c:107 @d81235049).
+/// Ports `quantize_row_tq1_0` (ggml-cpu/quants.c:107 @620d2225c).
 pub export fn quantize_row_tq1_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
     impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
     ref.quantize_row_tq1_0_ref(x, vy, k);
 }
 
-/// Ports `quantize_row_tq2_0` (ggml-cpu/quants.c:113 @d81235049).
+/// Ports `quantize_row_tq2_0` (ggml-cpu/quants.c:113 @620d2225c).
 pub export fn quantize_row_tq2_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
     impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
     ref.quantize_row_tq2_0_ref(x, vy, k);
 }
 
-/// Ports `quantize_row_q8_K_generic` (ggml-cpu/quants.c:121 @d81235049).
+/// Ports `quantize_row_q8_K_generic` (ggml-cpu/quants.c:121 @620d2225c).
 pub export fn quantize_row_q8_K_generic(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     ref.quantize_row_q8_K_ref(x, y, k);
 }
 
-/// Ports `quantize_row_iq4_nl` (ggml-cpu/quants.c:1331 @d81235049).
+/// Ports `quantize_row_iq4_nl` (ggml-cpu/quants.c:1331 @620d2225c).
 pub export fn quantize_row_iq4_nl(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     impl.assert(@rem(k, c.QK4_NL) == 0, "k % QK4_NL == 0");
     ref.quantize_row_iq4_nl_ref(x, y, k);
 }
 
-/// Ports `quantize_row_iq4_xs` (ggml-cpu/quants.c:1336 @d81235049).
+/// Ports `quantize_row_iq4_xs` (ggml-cpu/quants.c:1336 @620d2225c).
 pub export fn quantize_row_iq4_xs(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
     ref.quantize_row_iq4_xs_ref(x, y, k);

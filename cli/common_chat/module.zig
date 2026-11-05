@@ -27,6 +27,9 @@ pub const parsers = @import("parsers/module.zig");
 pub const autoparser = @import("autoparser/module.zig");
 pub const templates = @import("templates.zig");
 pub const parse = @import("parse.zig");
+pub const prompt = @import("prompt.zig");
+pub const input = @import("input.zig");
+pub const session = @import("session.zig");
 
 pub const Error = exception.Error;
 pub const what = exception.what;
@@ -64,4 +67,7 @@ test {
     _ = autoparser;
     _ = templates;
     _ = parse;
+    _ = prompt;
+    _ = input;
+    _ = session;
 }

@@ -8,7 +8,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/common.h` — `type_conversion_table` and
 //!   `get_thread_range`
 //!
-//! at v0.6.0 (`d81235049`).
+//! at v0.7.0 (`620d2225c`).
 //!
 //! `cpu/binary_ops.zig` and `cpu/unary_ops.zig` each carry their own copy of
 //! these two, because each states its own provenance and the C has them in a
@@ -18,6 +18,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const impl = @import("../../impl.zig");
+const convert = @import("../convert.zig");
 const defs = @import("../defs.zig");
 const threading = @import("../threading.zig");
 const simd = @import("../simd.zig");
@@ -89,7 +90,7 @@ pub inline fn barrier(params: *const ComputeParams) void {
 }
 
 /// Ports the `to_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:48 @d81235049).
+/// (ggml-cpu/common.h:48 @620d2225c).
 ///
 /// Parameters:
 /// - `T`: the element type, one of `f32`, `ggml_fp16_t`, `ggml_bf16_t`, `i32`.
@@ -107,7 +108,7 @@ pub inline fn toF32(comptime T: type, v: T) f32 {
 }
 
 /// Ports the `from_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:48 @d81235049).
+/// (ggml-cpu/common.h:48 @620d2225c).
 ///
 /// Parameters:
 /// - `T`: the element type to produce.
@@ -117,7 +118,7 @@ pub inline fn toF32(comptime T: type, v: T) f32 {
 pub inline fn fromF32(comptime T: type, v: f32) T {
     return switch (T) {
         f32 => v,
-        c.ggml_fp16_t => impl.fp32ToFp16(v),
+        c.ggml_fp16_t => convert.cpuFp32ToFp16(v),
         c.ggml_bf16_t => .{ .bits = impl.fp32ToBf16(v) },
         // `f32_to_i32` is a C cast, which truncates toward zero and is
         // undefined out of range; `@intFromFloat` would panic instead, so the
@@ -127,7 +128,7 @@ pub inline fn fromF32(comptime T: type, v: f32) T {
     };
 }
 
-/// Ports `get_thread_range` (ggml-cpu/common.h:74 @d81235049).
+/// Ports `get_thread_range` (ggml-cpu/common.h:74 @620d2225c).
 ///
 /// Parameters:
 /// - `params`: the thread index and count.
@@ -149,7 +150,7 @@ pub inline fn min64(a: i64, b: i64) i64 {
     return @min(a, b);
 }
 
-/// `CACHE_LINE_SIZE_F32` (ggml-cpu/ops.h:20 @d81235049), the stride between
+/// `CACHE_LINE_SIZE_F32` (ggml-cpu/ops.h:20 @620d2225c), the stride between
 /// per-thread scratch slots in `params.wdata`.
 ///
 /// `CACHE_LINE_SIZE` is 64 on this target -- the `#else` arm of ops.h:12-18,

@@ -65,6 +65,9 @@ POST /embeddings {"content": "short"}
 !fulllog
 POST /rerank {"query": "What is a panda?", "documents": ["hi", "The giant panda is a bear native to China.", "Pandas eat bamboo."]}
 POST /rerank {"query": "What is a panda?", "documents": ["hi", "The giant panda is a bear native to China."], "top_n": 1}
+# v0.7.0 (#30498): an embedding or rerank slot is cleared on release, its
+# state never reused or cached
+GET /slots
 POST /reranking {"query": "What is a panda?", "texts": ["hi", "The giant panda is a bear."], "return_text": true}
 POST /v1/rerank {"query": "q", "documents": []}
 POST /v1/reranking {"query": 3, "documents": ["a"]}

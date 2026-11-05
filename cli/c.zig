@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** This is the translation of
-//! `llama.cpp/include/llama.h` (v0.6.0, `d81235049`), and nothing else:
+//! `llama.cpp/include/llama.h` (v0.7.0, `620d2225c`), and nothing else:
 //! `c_import.h`, which `build.zig` translates as the `llama_h` module, since
 //! Zig 0.17 has no `@cImport`.
 //!

@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.6.0 (`d81235049`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.7.0 (`620d2225c`).
 //!
 //! Scores are summed in `double`, as there -- "to make tokenization results
 //! exactly the same as in the HF tokenizer". Nothing is multiplied, so no
@@ -25,7 +25,7 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `llm_tokenizer_ugm` (llama-vocab.cpp:933 @d81235049).
+/// Ports `llm_tokenizer_ugm` (llama-vocab.cpp:938 @620d2225c).
 pub const Tokenizer = struct {
     /// U+2581, the escaped space.
     pub const escaped_space = "\xE2\x96\x81";
@@ -92,7 +92,7 @@ pub const Tokenizer = struct {
     }
 };
 
-/// Ports `xcda_array_view` (llama-vocab.cpp:1163 @d81235049).
+/// Ports `xcda_array_view` (llama-vocab.cpp:1181 @620d2225c).
 const XcdaView = struct {
     xcda: []const u8,
 
@@ -136,8 +136,14 @@ const NormalizationResult = struct {
     consumed_input: usize,
 };
 
-/// Ports `llm_tokenizer_ugm_session`'s `tokenize` (llama-vocab.cpp:1013
-/// @d81235049).
+/// Ports `llm_tokenizer_ugm_session`'s `tokenize` (llama-vocab.cpp:1018
+/// @620d2225c).
+///
+/// Since v0.7.0 a vocabulary with `tokenizer.ggml.normalizer.nfc` set has
+/// its text NFC-normalized before the charsmap sees it. The C++ catches
+/// `std::invalid_argument` around that and normalizes the raw text instead;
+/// only `unicode_cpt_to_utf8` could throw it there, on a code point no
+/// decode or composition can now produce, but the fallback is kept.
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary.
@@ -154,7 +160,25 @@ pub fn tokenize(vocab: *const Vocab, tokenizer: *const Tokenizer, text: []const 
     // normalize the input first
     var normalized: std.ArrayList(u8) = .empty;
     defer normalized.deinit(allocator);
-    try normalize(vocab, tokenizer, text, &normalized, exc);
+    if (vocab.normalizer_opts.nfc) {
+        const cpts = unicode.cptsFromUtf8(text);
+        defer allocator.free(cpts);
+        const nfc = unicode.cptsNormalizeNfc(cpts);
+        defer allocator.free(nfc);
+        var canonical: std.ArrayList(u8) = .empty;
+        defer canonical.deinit(allocator);
+        const encoded = for (nfc) |cpt| {
+            unicode.appendCptUtf8(&canonical, cpt) catch break false;
+        } else true;
+        if (encoded) {
+            try normalize(vocab, tokenizer, canonical.items, &normalized, exc);
+        } else {
+            // Use the existing UGM normalization path for malformed input.
+            try normalize(vocab, tokenizer, text, &normalized, exc);
+        }
+    } else {
+        try normalize(vocab, tokenizer, text, &normalized, exc);
+    }
     const norm = normalized.items;
     const input_len = norm.len;
     if (input_len == 0) return;
@@ -239,8 +263,8 @@ pub fn tokenize(vocab: *const Vocab, tokenizer: *const Tokenizer, text: []const 
     std.mem.reverse(Token, output.items[output_size..]);
 }
 
-/// Ports `llm_tokenizer_ugm_session`'s `normalize` (llama-vocab.cpp:1108
-/// @d81235049).
+/// Ports `llm_tokenizer_ugm_session`'s `normalize` (llama-vocab.cpp:1126
+/// @620d2225c).
 fn normalize(vocab: *const Vocab, tokenizer: *const Tokenizer, input: []const u8, normalized: *std.ArrayList(u8), exc: *impl.Exception) impl.Thrown!void {
     normalized.clearRetainingCapacity();
     normalized.ensureTotalCapacity(allocator, input.len * 3) catch oom();
@@ -278,8 +302,8 @@ fn normalize(vocab: *const Vocab, tokenizer: *const Tokenizer, input: []const u8
     if (shall_append_space) normalized.appendSlice(allocator, space) catch oom();
 }
 
-/// Ports `llm_tokenizer_ugm_session`'s `normalize_prefix` (llama-vocab.cpp:1201
-/// @d81235049): a user-defined token passes through whole; else the
+/// Ports `llm_tokenizer_ugm_session`'s `normalize_prefix` (llama-vocab.cpp:1219
+/// @620d2225c): a user-defined token passes through whole; else the
 /// longest XCDA match is replaced; else one code point passes through, or
 /// an invalid byte becomes U+FFFD.
 fn normalizePrefix(tokenizer: *const Tokenizer, input: []const u8, input_offset: usize, exc: *impl.Exception) impl.Thrown!NormalizationResult {

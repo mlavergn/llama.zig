@@ -7,7 +7,7 @@
 //! `llama.cpp/tools/server/server-schema.h` (namespace `server_schema`),
 //! and `common_sampler_types_from_names` and
 //! `common_sampler_types_from_chars` from `llama.cpp/common/sampling.cpp`
-//! (llama.cpp v0.6.0, `d81235049`). Each declaration names what it ports and
+//! (llama.cpp v0.7.0, `620d2225c`). Each declaration names what it ports and
 //! the line it began at.
 //!
 //! # The field classes
@@ -21,17 +21,16 @@
 //! # Where a field's own evaluation is gated on the log level
 //!
 //! `SRV_DBG` and `SRV_TRC` evaluate their arguments only when the message
-//! would print. Two of those arguments can throw -- the JSON schema's
-//! `dump(2)` (on invalid UTF-8) and `common_chat_format_name` (on a format
-//! that is no format) -- so whether a request is refused depends on the
-//! log verbosity, upstream and here alike.
+//! would print. The JSON schema's `dump(2)` can throw (on invalid UTF-8),
+//! so whether a request is refused depends on the log verbosity, upstream
+//! and here alike.
 //!
-//! # `chat_parser`
+//! # The chat fields
 //!
-//! The field loads a serialized PEG arena (`common_peg_arena::load`,
-//! `cli/peg/serialize.zig`), so a malformed one is refused here as
-//! upstream refuses it; the text is kept for the chat parse, whose PEG arm
-//! is Stage 9 step 4's (see `task.zig`).
+//! Since v0.7.0 a chat request's format, grammar, triggers and parser live
+//! in its chat session, which `Task.applyChatSession` applies; the schema
+//! keeps `reasoning_format`, and `continue_final_message` and `echo` only
+//! for their type checks.
 
 const std = @import("std");
 const json = @import("json");
@@ -40,7 +39,6 @@ const tools = @import("tools_common");
 const common = @import("common.zig");
 const task = @import("task.zig");
 const oaicompat = @import("oaicompat.zig");
-const peg = @import("peg");
 
 const c = tools.c;
 const log = tools.log;
@@ -53,7 +51,7 @@ const TaskParams = task.TaskParams;
 const SamplerType = task.SamplerType;
 const GrammarTrigger = common.GrammarTrigger;
 
-/// Ports `field_eval_context` (server-schema.h:18 @d81235049), with what the
+/// Ports `field_eval_context` (server-schema.h:18 @620d2225c), with what the
 /// handlers' lambdas capture.
 pub const EvalContext = struct {
     /// the task's arena: everything a handler sets is allocated here
@@ -64,10 +62,10 @@ pub const EvalContext = struct {
     logit_bias_eog: ?[]const c.llama_logit_bias = null,
 };
 
-/// Ports `field_handler` (server-schema.h:25 @d81235049).
+/// Ports `field_handler` (server-schema.h:25 @620d2225c).
 pub const Handler = *const fn (ctx: *EvalContext, data: *const Value) Error!void;
 
-/// Ports `field_num` (server-schema.h:48 @d81235049): a number, clamped to
+/// Ports `field_num` (server-schema.h:48 @620d2225c): a number, clamped to
 /// `[min, max]`, or refused outside it when the limits are hard.
 pub fn Num(comptime T: type) type {
     return struct {
@@ -90,7 +88,7 @@ pub const Kind = union(enum) {
     nested: []const Field,
 };
 
-/// Ports `field` (server-schema.h:27 @d81235049): a request member, its
+/// Ports `field` (server-schema.h:27 @620d2225c): a request member, its
 /// aliases in the order they are tried, and how it is read.
 pub const Field = struct {
     name: []const []const u8,
@@ -117,7 +115,7 @@ extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 // -----------------------------------------------------------------------------
 // eval() implementations
 
-/// Ports `handle_with_catch` (server-schema.cpp:577 @d81235049): any
+/// Ports `handle_with_catch` (server-schema.cpp:518 @620d2225c): any
 /// exception a field throws becomes `std::invalid_argument("Field '<name>':
 /// <what>")`.
 fn handleWithCatch(name: []const u8, r: Error!void) Error!void {
@@ -134,7 +132,7 @@ fn handleWithCatch(name: []const u8, r: Error!void) Error!void {
     };
 }
 
-/// Ports `has_value` (server-schema.cpp:586 @d81235049): a null value is
+/// Ports `has_value` (server-schema.cpp:527 @620d2225c): a null value is
 /// absent, so a client can send null for the server's default.
 fn hasValue(data: *const Value, n: []const u8) bool {
     return data.contains(n) and !(data.at(n) catch |err| switch (err) {
@@ -148,7 +146,7 @@ fn clamp(comptime T: type, min: T, max: T, v: T) T {
     return if (min < lo) lo else min;
 }
 
-/// Ports `field_num`'s `eval` (server-schema.cpp:591 @d81235049), the template's.
+/// Ports `field_num`'s `eval` (server-schema.cpp:532 @620d2225c), the template's.
 fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
         if (hasValue(data, n)) {
@@ -180,8 +178,8 @@ fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, da
     }
 }
 
-/// Ports `field_str`'s `eval` (server-schema.cpp:612 @d81235049) and
-/// `field_json`'s `eval` (server-schema.cpp:639 @d81235049), which are the same.
+/// Ports `field_str`'s `eval` (server-schema.cpp:553 @620d2225c) and
+/// `field_json`'s `eval` (server-schema.cpp:580 @620d2225c), which are the same.
 fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const Value, comptime line: c_int) Error!void {
     common.ggmlAssert(f.custom_handler != null, "server-schema.cpp", line, "custom_handler");
     for (f.name) |n| {
@@ -192,7 +190,7 @@ fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const Value, comptime 
     }
 }
 
-/// Ports `field_bool`'s `eval` (server-schema.cpp:624 @d81235049).
+/// Ports `field_bool`'s `eval` (server-schema.cpp:565 @620d2225c).
 fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
         if (hasValue(data, n)) {
@@ -211,7 +209,7 @@ fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const Value) 
     }
 }
 
-/// Ports `field_nested`'s `eval` (server-schema.cpp:651 @d81235049): the
+/// Ports `field_nested`'s `eval` (server-schema.cpp:592 @620d2225c): the
 /// subfields, evaluated on the member's object.
 fn evalNested(f: *const Field, subfields: []const Field, ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
@@ -236,8 +234,8 @@ pub fn eval(f: *const Field, ctx: *EvalContext, data: *const Value) Error!void {
         .num_i64 => |n| try evalNum(i64, f, n, ctx, data),
         .num_u32 => |n| try evalNum(u32, f, n, ctx, data),
         .num_f32 => |n| try evalNum(f32, f, n, ctx, data),
-        .str => try evalHandled(f, ctx, data, 613),
-        .json => try evalHandled(f, ctx, data, 640),
+        .str => try evalHandled(f, ctx, data, 554),
+        .json => try evalHandled(f, ctx, data, 581),
         .boolean => |v| try evalBool(f, v, ctx, data),
         .nested => |subs| try evalNested(f, subs, ctx, data),
     }
@@ -339,67 +337,47 @@ fn convertSchema(ctx: *EvalContext, data: *const Value) Error!void {
     ctx.params.sampling.grammar = grammar_str;
 }
 
-fn hChatFormat(ctx: *EvalContext, data: *const Value) Error!void {
-    ctx.params.chat_parser_params.format = try (try data.at("chat_format")).get(c_int);
-    if (log.verbosity_thold >= log.level_trace) {
-        const name = try task.chatFormatName(ctx.params.chat_parser_params.format);
-        const z = common.dupZ(name);
-        defer common.freeZ(z);
-        common.srv(.trc, "operator()", "chat format: %s\n", .{z});
-    }
-}
-
 fn hReasoningFormat(ctx: *EvalContext, data: *const Value) Error!void {
-    const reasoning_format = try chat.ReasoningFormat.fromName(try (try data.at("reasoning_format")).get([]const u8));
-    ctx.params.chat_parser_params.reasoning_format = reasoning_format;
-    ctx.params.chat_parser_params.reasoning_in_content = ctx.params.stream and (reasoning_format == .deepseek_legacy);
+    ctx.params.reasoning_format = try chat.ReasoningFormat.fromName(try (try data.at("reasoning_format")).get([]const u8));
 }
 
-fn hGenerationPrompt(ctx: *EvalContext, data: *const Value) Error!void {
-    const s = try ctx.a.dupe(u8, try (try data.at("generation_prompt")).get([]const u8));
-    ctx.params.chat_parser_params.generation_prompt = s;
-    ctx.params.sampling.generation_prompt = s;
+fn hContinueFinalMessage(_: *EvalContext, data: *const Value) Error!void {
+    _ = try chat.msg.continuationParse(try data.at("continue_final_message"));
 }
 
-fn hChatParser(ctx: *EvalContext, data: *const Value) Error!void {
-    // `parser.load(text)`: loaded here for its refusals, and kept as text
-    // until the chat parse runs it (Stage 9 step 4, see `task.zig`)
-    const text = try (try data.at("chat_parser")).get([]const u8);
-    var arena = peg.Arena.init(ctx.a) catch return error.OutOfMemory;
-    defer arena.deinit();
-    peg.serialize.load(&arena, text) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return throw(error.RuntimeError, "{s}", .{peg.what(e)}),
-    };
-    // an arena with no parsers is the empty one: the pure-content parser
-    ctx.params.chat_parser_params.parser = if (arena.empty()) "" else try ctx.a.dupe(u8, text);
-}
-
-fn hContinueFinalMessage(ctx: *EvalContext, data: *const Value) Error!void {
-    const continuation = chat.msg.continuationParse(try data.at("continue_final_message"));
-    ctx.params.chat_parser_params.is_continuation = continuation != .none;
+fn hEcho(_: *EvalContext, data: *const Value) Error!void {
+    _ = try (try data.at("echo")).get(bool);
 }
 
 fn hPreservedTokens(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 344, "ctx.vocab != nullptr");
-    var it = (try data.at("preserved_tokens")).items();
-    while (it.next()) |t| {
-        const ids = try tokenizeIn(ctx, 344, try t.value.get([]const u8), false, true);
-        if (ids.len == 1) {
-            try task.preserveToken(ctx.a, &ctx.params.sampling, ids[0]);
-        }
-    }
+    const tokens = try (try data.at("preserved_tokens")).getSlice(ctx.a, []const u8);
+    // `common_sampling_add_preserved_tokens` (sampling.cpp:1055 @620d2225c)
+    common.ggmlAssert(ctx.vocab != null, "sampling.cpp", 1056, "vocab != nullptr");
+    try chat.session.addPreservedTokens(ctx.a, &ctx.params.sampling.preserved_tokens, ctx.vocab.?, tokens);
 }
 
 fn hGrammarTriggers(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 356, "ctx.vocab != nullptr");
-    const s = &ctx.params.sampling;
+    var triggers: std.ArrayList(tools.params.GrammarTrigger) = .empty;
     var it = (try data.at("grammar_triggers")).items();
     while (it.next()) |t| {
         const ct = try GrammarTrigger.fromJson(ctx.a, t.value);
-        if (ct.type == common.trigger_type_word) {
-            const word = ct.value;
-            const ids = try tokenizeIn(ctx, 356, word, false, true);
+        try triggers.append(ctx.a, .{ .type = try triggerType(ct.type), .value = ct.value, .token = ct.token });
+    }
+    try addGrammarTriggers(ctx, triggers.items);
+}
+
+/// Ports `common_sampling_add_grammar_triggers` (sampling.cpp:1065
+/// @620d2225c) over `tools_common`'s sampling parameters, whose trigger
+/// type, unlike `common_chat`'s, holds any integer a request sends:
+/// `cli/common_chat/session.zig`'s `addGrammarTriggers` is the same
+/// function over that module's types.
+fn addGrammarTriggers(ctx: *EvalContext, triggers: []const tools.params.GrammarTrigger) Error!void {
+    common.ggmlAssert(ctx.vocab != null, "sampling.cpp", 1066, "vocab != nullptr");
+    const s = &ctx.params.sampling;
+    for (triggers) |trigger| {
+        if (trigger.type == .word) {
+            const word = trigger.value;
+            const ids = try common.tokenize(ctx.a, ctx.vocab, word, false, true);
             if (ids.len == 1) {
                 const token = ids[0];
                 if (std.mem.indexOfScalar(Token, s.preserved_tokens.items, token) == null) {
@@ -410,7 +388,7 @@ fn hGrammarTriggers(ctx: *EvalContext, data: *const Value) Error!void {
                 try s.grammar_triggers.append(ctx.a, .{ .type = .word, .value = word });
             }
         } else {
-            try s.grammar_triggers.append(ctx.a, .{ .type = try triggerType(ct.type), .value = ct.value, .token = ct.token });
+            try s.grammar_triggers.append(ctx.a, trigger);
         }
     }
     if (s.grammar_lazy and s.grammar_triggers.items.len == 0) {
@@ -432,12 +410,12 @@ fn triggerType(t: c_int) Error!tools.params.GrammarTriggerType {
 }
 
 fn hReasoningBudgetStartTag(ctx: *EvalContext, data: *const Value) Error!void {
-    const toks = try tokenizeIn(ctx, 394, try (try data.at("reasoning_budget_start_tag")).get([]const u8), false, true);
+    const toks = try tokenizeIn(ctx, 342, try (try data.at("reasoning_budget_start_tag")).get([]const u8), false, true);
     ctx.params.sampling.reasoning_budget_start = .fromOwnedSlice(toks);
 }
 
 fn hReasoningBudgetEndTags(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 394, "ctx.vocab != nullptr");
+    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 342, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     s.reasoning_budget_end = .empty;
     if (data.contains("reasoning_budget_end_tags")) {
@@ -445,25 +423,25 @@ fn hReasoningBudgetEndTags(ctx: *EvalContext, data: *const Value) Error!void {
         while (it.next()) |t| {
             const tag = try t.value.get([]const u8);
             if (tag.len != 0) {
-                try s.reasoning_budget_end.append(ctx.a, .fromOwnedSlice(try tokenizeIn(ctx, 402, tag, false, true)));
+                try s.reasoning_budget_end.append(ctx.a, .fromOwnedSlice(try tokenizeIn(ctx, 350, tag, false, true)));
             }
         }
     } else if (data.contains("reasoning_budget_end_tag")) {
         const tag = try (try data.at("reasoning_budget_end_tag")).get([]const u8);
         if (tag.len != 0) {
-            try s.reasoning_budget_end.append(ctx.a, .fromOwnedSlice(try tokenizeIn(ctx, 402, tag, false, true)));
+            try s.reasoning_budget_end.append(ctx.a, .fromOwnedSlice(try tokenizeIn(ctx, 350, tag, false, true)));
         }
     }
 }
 
 fn hReasoningBudgetMessage(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 422, "ctx.vocab != nullptr");
+    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 370, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     if (s.reasoning_budget_end.items.len != 0) {
         var end_tag: std.ArrayList(Token) = .fromOwnedSlice(try ctx.a.dupe(Token, s.reasoning_budget_end.items[0].items));
         const message = common.jsonValue(data, "reasoning_budget_message", []const u8, "");
         if (message.len != 0) {
-            const message_tokens = try tokenizeIn(ctx, 422, message, false, true);
+            const message_tokens = try tokenizeIn(ctx, 370, message, false, true);
             try end_tag.insertSlice(ctx.a, 0, message_tokens);
         }
         s.reasoning_budget_forced = end_tag;
@@ -486,7 +464,7 @@ fn parseBias(v: *const Value, bias: *f32) Error!bool {
 }
 
 fn hLogitBias(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 437, "ctx.vocab != nullptr");
+    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 385, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     s.logit_bias = .empty;
     const logit_bias = try data.at("logit_bias");
@@ -524,7 +502,7 @@ fn hLogitBias(ctx: *EvalContext, data: *const Value) Error!void {
 }
 
 fn hIgnoreEos(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.logit_bias_eog != null, "server-schema.cpp", 478, "ctx.logit_bias_eog != nullptr");
+    common.ggmlAssert(ctx.logit_bias_eog != null, "server-schema.cpp", 426, "ctx.logit_bias_eog != nullptr");
     const s = &ctx.params.sampling;
     s.ignore_eos = try (try data.at("ignore_eos")).get(bool);
     if (s.ignore_eos) {
@@ -565,7 +543,7 @@ fn dupeStrings(a: Allocator, xs: []const []const u8) Error![]const []const u8 {
     return out;
 }
 
-/// Ports `common_sampler_types_from_names` (sampling.cpp:959 @d81235049): each
+/// Ports `common_sampler_types_from_names` (sampling.cpp:963 @620d2225c): each
 /// name, lower-cased, by its canonical spelling or an alias; an unknown
 /// one is warned about and skipped.
 pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) Error!std.ArrayList(SamplerType) {
@@ -606,7 +584,7 @@ pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) Error!std.
     return samplers;
 }
 
-/// Ports `common_sampler_types_from_chars` (sampling.cpp:1021 @d81235049).
+/// Ports `common_sampler_types_from_chars` (sampling.cpp:1025 @620d2225c).
 pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) Error!std.ArrayList(SamplerType) {
     const all = [_]SamplerType{ .dry, .top_k, .typical_p, .top_p, .top_n_sigma, .min_p, .temperature, .xtc, .infill, .penalties, .adaptive_p };
     var samplers: std.ArrayList(SamplerType) = .empty;
@@ -627,7 +605,7 @@ pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) Error!std.ArrayLis
 // -----------------------------------------------------------------------------
 // the table
 
-/// Ports `make_llama_cmpl_schema` (server-schema.cpp:11 @d81235049): the
+/// Ports `make_llama_cmpl_schema` (server-schema.cpp:11 @620d2225c): the
 /// llama.cpp-specific completion schema, every field pointing into
 /// `params`.
 ///
@@ -703,14 +681,9 @@ pub fn makeLlamaCmplSchema(a: Allocator, params_base: *const tools.params.Params
         // Chat parser params
         //
 
-        // TODO: change this to string field instead
-        .{ .name = &.{"chat_format"}, .desc = "Chat format used internally by the server", .kind = .json, .custom_handler = hChatFormat },
         .{ .name = &.{"reasoning_format"}, .desc = "Reasoning format for chain-of-thought models", .kind = .str, .custom_handler = hReasoningFormat },
-        .{ .name = &.{"generation_prompt"}, .desc = "Generation prompt appended to the chat template output", .kind = .str, .custom_handler = hGenerationPrompt },
-        .{ .name = &.{"parse_tool_calls"}, .desc = "Whether to parse tool calls from the generated output", .kind = .{ .boolean = &params.chat_parser_params.parse_tool_calls } },
-        .{ .name = &.{"chat_parser"}, .desc = "Chat parser configuration string", .kind = .str, .custom_handler = hChatParser },
         .{ .name = &.{"continue_final_message"}, .desc = "Whether to continue the final message of the chat template", .kind = .json, .custom_handler = hContinueFinalMessage },
-        .{ .name = &.{"echo"}, .desc = "Whether to echo the input tokens in the output", .kind = .{ .boolean = &params.chat_parser_params.echo } },
+        .{ .name = &.{"echo"}, .desc = "Whether to include the continued assistant message in the output", .kind = .json, .custom_handler = hEcho },
 
         //
         // Token-level fields (require vocab)
@@ -731,7 +704,7 @@ pub fn makeLlamaCmplSchema(a: Allocator, params_base: *const tools.params.Params
     return a.dupe(Field, &fields);
 }
 
-/// Ports `eval_llama_cmpl_schema` (server-schema.cpp:519 @d81235049): a
+/// Ports `eval_llama_cmpl_schema` (server-schema.cpp:467 @620d2225c): a
 /// request's parameters -- the command line's defaults, every field the
 /// request carries applied over them in the table's order, then the
 /// derived ones.
@@ -763,7 +736,7 @@ pub fn evalLlamaCmplSchema(
     // enabling this will output extra debug information in the HTTP responses from the server
     params.verbose = params_base.verbosity > 9;
 
-    params.chat_parser_params.reasoning_format = @fromBackingInt(@intCast(@backingInt(params_base.reasoning_format)));
+    params.reasoning_format = @fromBackingInt(@intCast(@backingInt(params_base.reasoning_format)));
 
     // create context and schema
     var ctx: EvalContext = .{ .a = a, .params = &params, .params_base = params_base };
@@ -775,13 +748,6 @@ pub fn evalLlamaCmplSchema(
     // eval all fields in the schema
     for (schema) |*f| {
         try eval(f, &ctx, data);
-    }
-
-    // post-processing
-    {
-        // if "reasoning_format" is not provided, its handler will not be called, we will need to handle it here
-        const reasoning_format = params.chat_parser_params.reasoning_format;
-        params.chat_parser_params.reasoning_in_content = params.stream and (reasoning_format == .deepseek_legacy);
     }
 
     // debugging

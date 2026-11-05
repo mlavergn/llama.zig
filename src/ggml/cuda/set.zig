@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/set.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/set.cuh` at v0.6.0 (`d81235049`). It has no
+//! `llama.cpp/ggml/src/ggml-cuda/set.cuh` at v0.7.0 (`620d2225c`). It has no
 //! kernel of its own.
 
 const std = @import("std");
@@ -21,7 +21,7 @@ fn opParamSize(dst: *const Tensor, i: usize) usize {
     return @bitCast(@as(i64, impl.getOpParamsI32(dst, i)));
 }
 
-/// Ports `ggml_cuda_op_set` (set.cu:4 @d81235049).
+/// Ports `ggml_cuda_op_set` (set.cu:4 @620d2225c).
 pub fn opSet(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

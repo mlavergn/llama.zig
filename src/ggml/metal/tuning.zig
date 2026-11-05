@@ -7,7 +7,7 @@
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.cpp` — the logic
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.h`   — the types and buckets
 //!
-//! both at v0.6.0 (`d81235049`). `tuning_table.zig` holds the 1,033
+//! both at v0.7.0 (`620d2225c`). `tuning_table.zig` holds the 1,033
 //! generated rows.
 //!
 //! # This file had to go first, and `PLAN.md` said otherwise
@@ -44,24 +44,24 @@ const c = impl.c;
 pub const Cfg = table.Cfg;
 pub const Key = table.Key;
 
-/// Mirrors `FA_VEC_NE11_BUCKETS` (ggml-metal-tuning.h:14 @d81235049): KV
+/// Mirrors `FA_VEC_NE11_BUCKETS` (ggml-metal-tuning.h:14 @620d2225c): KV
 /// length buckets. The Q>1 crossover is head-size dependent, so the KV
 /// axis is bucketed rather than thresholded once.
 const fa_vec_ne11_buckets = [_]i32{ 1024, 4096, 16384 };
 
-/// Mirrors `FA_VEC_NE01_BUCKETS` (ggml-metal-tuning.h:15 @d81235049):
+/// Mirrors `FA_VEC_NE01_BUCKETS` (ggml-metal-tuning.h:15 @620d2225c):
 /// query rows, splitting decode (== 1) from batch (>= 2).
 const fa_vec_ne01_buckets = [_]i32{ 2, 3, 4, 5 };
 
-/// Mirrors `FA_VEC_NE11_DEFAULT` (ggml-metal-tuning.h:29 @d81235049): the
+/// Mirrors `FA_VEC_NE11_DEFAULT` (ggml-metal-tuning.h:29 @620d2225c): the
 /// `ne11_b` value a domain-default row carries.
 const fa_vec_ne11_default: i8 = -1;
-/// Mirrors `FA_VEC_DOMAIN_DECODE` (ggml-metal-tuning.h:30 @d81235049).
+/// Mirrors `FA_VEC_DOMAIN_DECODE` (ggml-metal-tuning.h:30 @620d2225c).
 const fa_vec_domain_decode: i8 = 0;
-/// Mirrors `FA_VEC_DOMAIN_BATCH` (ggml-metal-tuning.h:31 @d81235049).
+/// Mirrors `FA_VEC_DOMAIN_BATCH` (ggml-metal-tuning.h:31 @620d2225c).
 const fa_vec_domain_batch: i8 = 1;
 
-/// Ports `fa_vec_ne11_bucket` (ggml-metal-tuning.cpp:9 @d81235049).
+/// Ports `fa_vec_ne11_bucket` (ggml-metal-tuning.cpp:9 @620d2225c).
 ///
 /// Parameters:
 /// - `ne11`: the KV length.
@@ -74,7 +74,7 @@ pub fn ne11Bucket(ne11: i64) c_int {
     return fa_vec_ne11_buckets.len;
 }
 
-/// Ports `fa_vec_ne01_bucket` (ggml-metal-tuning.cpp:18 @d81235049).
+/// Ports `fa_vec_ne01_bucket` (ggml-metal-tuning.cpp:18 @620d2225c).
 ///
 /// Parameters:
 /// - `ne01`: the query-row count.
@@ -87,12 +87,13 @@ pub fn ne01Bucket(ne01: i64) c_int {
     return fa_vec_ne01_buckets.len;
 }
 
-/// Ports `fa_vec_baseline_ne` (ggml-metal-tuning.cpp:27 @d81235049): the
+/// Ports `fa_vec_baseline_ne` (ggml-metal-tuning.cpp:27 @620d2225c): the
 /// `NE` baked into each `(dk, dv)` baseline instantiation in
 /// `kernels/fa_vec_*.metal` (`fa.metal` until v0.6.0 split it).
 ///
-/// The C writes eleven `if`s and a default; this is the same table as a
-/// `switch` on the pair. Hand-maintained there and here — it mirrors the
+/// The C writes twelve `if`s and a default; this is the same table as a
+/// `switch` on the pair. v0.7.0's `(128, 96)` returns 4, the default's
+/// value, so its arm changes no answer; it is written out to match. Hand-maintained there and here — it mirrors the
 /// Metal source, which is never ported.
 ///
 /// Parameters:
@@ -105,7 +106,7 @@ pub fn baselineNe(dk: c_int, dv: c_int) c_int {
         32 => if (dv == 32) 4 else 4,
         64 => if (dv == 64) 2 else 4,
         96 => if (dv == 96 or dv == 64) 4 else 4,
-        128 => if (dv == 128) 1 else 4,
+        128 => if (dv == 128) 1 else if (dv == 96) 4 else 4,
         192 => if (dv == 192 or dv == 128) 2 else 4,
         256 => if (dv == 256) 1 else 4,
         320 => if (dv == 256) 2 else 4,
@@ -115,7 +116,7 @@ pub fn baselineNe(dk: c_int, dv: c_int) c_int {
     };
 }
 
-/// Ports `fa_vec_baseline_cfg` (ggml-metal-tuning.cpp:64 @d81235049).
+/// Ports `fa_vec_baseline_cfg` (ggml-metal-tuning.cpp:67 @620d2225c).
 pub fn baselineCfg(dk: c_int, dv: c_int) Cfg {
     return .{ .Q = 1, .NE = @intCast(baselineNe(dk, dv)) };
 }
@@ -123,7 +124,7 @@ pub fn baselineCfg(dk: c_int, dv: c_int) Cfg {
 var g_override_set: bool = false;
 var g_override_cfg: Cfg = .{ .Q = 1, .NE = 4 };
 
-/// Ports `fa_vec_set_override` (ggml-metal-tuning.cpp:1119 @d81235049).
+/// Ports `fa_vec_set_override` (ggml-metal-tuning.cpp:1122 @620d2225c).
 ///
 /// `pub` because `metal/backend.zig` exposes it through the registry's
 /// `get_proc_address`, which `test-backend-ops` uses to sweep the FA
@@ -137,12 +138,12 @@ pub fn setOverride(cfg: Cfg) void {
     g_override_set = true;
 }
 
-/// Ports `fa_vec_clear_override` (ggml-metal-tuning.cpp:1124 @d81235049).
+/// Ports `fa_vec_clear_override` (ggml-metal-tuning.cpp:1127 @620d2225c).
 pub fn clearOverride() void {
     g_override_set = false;
 }
 
-/// Ports `find_cfg` (ggml-metal-tuning.cpp:1128 @d81235049).
+/// Ports `find_cfg` (ggml-metal-tuning.cpp:1131 @620d2225c).
 ///
 /// The C compares keys with `memcmp` over all eight bytes, which its own
 /// `static_assert(sizeof(fa_vec_key_t) == 8)` exists to license. The key
@@ -155,7 +156,7 @@ fn findCfg(k: Key) ?Cfg {
     return null;
 }
 
-/// Ports `fa_vec_pick` (ggml-metal-tuning.cpp:1137 @d81235049).
+/// Ports `fa_vec_pick` (ggml-metal-tuning.cpp:1140 @620d2225c).
 ///
 /// Since v0.5.0 the table is keyed by GPU family: the exact bucket, then
 /// the `ne01` domain default with `ne11` collapsed, then the baseline. An

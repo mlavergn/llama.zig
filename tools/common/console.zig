@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports the POSIX arms of `llama.cpp/common/console.cpp` at v0.6.0
-//! (`d81235049`) as far as `llama-mtmd-cli` reaches them: `init`,
+//! Ports the POSIX arms of `llama.cpp/common/console.cpp` at v0.7.0
+//! (`620d2225c`) as far as `llama-mtmd-cli` reaches them: `init`,
 //! `cleanup`, `set_display`, `readline` with both its readers, and every
 //! helper `readline_advanced` calls. Each declaration names the C++ it
 //! replaces and the line it began at.
@@ -24,7 +24,7 @@ const io = @import("io.zig");
 
 const is_windows = builtin.os.tag == .windows;
 
-/// Ports `display_type` (console.h:11 @d81235049).
+/// Ports `display_type` (console.h:11 @620d2225c).
 pub const Display = enum(c_int) { reset = 0, info, prompt, reasoning, user_input, err };
 
 const ansi_color_red = "\x1b[31m";
@@ -53,7 +53,7 @@ extern fn ioctl(fd: c_int, req: c_ulong, ...) c_int;
 extern fn getline(lineptr: *?[*]u8, n: *usize, f: ?*anyopaque) isize;
 extern fn free(p: ?*anyopaque) void;
 
-// Ports `advanced_display` and the console state (console.cpp:71 @d81235049)
+// Ports `advanced_display` and the console state (console.cpp:71 @620d2225c)
 var advanced_display: bool = false;
 var simple_io: bool = true;
 var current_display: Display = .reset;
@@ -67,7 +67,7 @@ fn out() ?*anyopaque {
 
 const lc_all: c_int = if (builtin.os.tag.isDarwin()) 0 else 6;
 
-/// Ports `init` (console.cpp:90 @d81235049), the POSIX arm.
+/// Ports `init` (console.cpp:90 @620d2225c), the POSIX arm.
 pub fn init(use_simple_io: bool, use_advanced_display: bool) void {
     advanced_display = use_advanced_display;
     simple_io = use_simple_io;
@@ -92,7 +92,7 @@ pub fn init(use_simple_io: bool, use_advanced_display: bool) void {
     _ = setlocale(lc_all, "");
 }
 
-/// Ports `cleanup` (console.cpp:152 @d81235049).
+/// Ports `cleanup` (console.cpp:152 @620d2225c).
 pub fn cleanup() void {
     // Reset console display
     setDisplay(.reset);
@@ -109,7 +109,7 @@ pub fn cleanup() void {
     }
 }
 
-/// Ports `set_display` (console.cpp:174 @d81235049): emit an ANSI code
+/// Ports `set_display` (console.cpp:174 @620d2225c): emit an ANSI code
 /// only when the display changes. The log is synchronous here, so
 /// `common_log_flush` has nothing to flush.
 pub fn setDisplay(display: Display) void {
@@ -128,7 +128,7 @@ pub fn setDisplay(display: Display) void {
     }
 }
 
-/// Ports `getchar32` (console.cpp:201 @d81235049), the POSIX arm: a 32-bit
+/// Ports `getchar32` (console.cpp:201 @620d2225c), the POSIX arm: a 32-bit
 /// `wchar_t`, so no surrogate handling.
 fn getchar32() u32 {
     const wc = getwchar();
@@ -136,17 +136,17 @@ fn getchar32() u32 {
     return wc;
 }
 
-/// Ports `pop_cursor` (console.cpp:266 @d81235049).
+/// Ports `pop_cursor` (console.cpp:266 @620d2225c).
 fn popCursor() void {
     _ = fputc('\x08', out());
 }
 
-/// Ports `estimateWidth` (console.cpp:287 @d81235049).
+/// Ports `estimateWidth` (console.cpp:287 @620d2225c).
 fn estimateWidth(codepoint: u32) c_int {
     return wcwidth(codepoint);
 }
 
-/// Ports `put_codepoint` (console.cpp:296 @d81235049), the POSIX arm.
+/// Ports `put_codepoint` (console.cpp:296 @620d2225c), the POSIX arm.
 fn putCodepoint(utf8: []const u8, expected_width: c_int) c_int {
     // We can trust expectedWidth if we've got one
     if (expected_width >= 0 or tty == null) {
@@ -180,12 +180,12 @@ fn putCodepoint(utf8: []const u8, expected_width: c_int) c_int {
     return width;
 }
 
-/// Ports `replace_last` (console.cpp:357 @d81235049), the POSIX arm.
+/// Ports `replace_last` (console.cpp:357 @620d2225c), the POSIX arm.
 fn replaceLast(ch: u8) void {
     _ = fprintf(out(), "\x08%c", @as(c_int, ch));
 }
 
-/// Ports `decode_utf8` (console.cpp:366 @d81235049).
+/// Ports `decode_utf8` (console.cpp:366 @620d2225c).
 fn decodeUtf8(input: []const u8, pos: usize, advance: *usize) u32 {
     const ch: u32 = input[pos];
     if ((ch & 0x80) == 0) {
@@ -227,7 +227,7 @@ fn decodeUtf8(input: []const u8, pos: usize, advance: *usize) u32 {
     return 0xFFFD; // replacement character for invalid input
 }
 
-/// Ports `append_utf8` (console.cpp:412 @d81235049).
+/// Ports `append_utf8` (console.cpp:412 @620d2225c).
 fn appendUtf8(a: std.mem.Allocator, ch: u32, o: *std.ArrayList(u8)) !void {
     if (ch <= 0x7F) {
         try o.append(a, @intCast(ch));
@@ -242,7 +242,7 @@ fn appendUtf8(a: std.mem.Allocator, ch: u32, o: *std.ArrayList(u8)) !void {
     }
 }
 
-/// Ports `prev_utf8_char_pos` (console.cpp:433 @d81235049).
+/// Ports `prev_utf8_char_pos` (console.cpp:433 @620d2225c).
 fn prevUtf8CharPos(line: []const u8, pos_in: usize) usize {
     if (pos_in == 0) return 0;
     var pos = pos_in - 1;
@@ -250,7 +250,7 @@ fn prevUtf8CharPos(line: []const u8, pos_in: usize) usize {
     return pos;
 }
 
-/// Ports `next_utf8_char_pos` (console.cpp:442 @d81235049).
+/// Ports `next_utf8_char_pos` (console.cpp:442 @620d2225c).
 fn nextUtf8CharPos(line: []const u8, pos_in: usize) usize {
     if (pos_in >= line.len) return line.len;
     var pos = pos_in + 1;
@@ -281,7 +281,7 @@ const Editor = struct {
         return tail_width;
     }
 
-    /// Ports `delete_at_cursor` (console.cpp:457 @d81235049).
+    /// Ports `delete_at_cursor` (console.cpp:457 @620d2225c).
     fn deleteAtCursor(self: *Editor) void {
         if (self.char_pos >= self.widths.items.len) return;
 
@@ -300,7 +300,7 @@ const Editor = struct {
         moveCursor(-(tail_width + w));
     }
 
-    /// Ports `clear_current_line` (console.cpp:485 @d81235049).
+    /// Ports `clear_current_line` (console.cpp:485 @620d2225c).
     fn clearCurrentLine(self: *const Editor) void {
         var total_width: c_int = 0;
         for (self.widths.items) |w| total_width += if (w > 0) w else 1;
@@ -312,7 +312,7 @@ const Editor = struct {
         }
     }
 
-    /// Ports `set_line_contents` (console.cpp:498 @d81235049), with no
+    /// Ports `set_line_contents` (console.cpp:498 @620d2225c), with no
     /// cursor position: only history recall calls it here.
     fn setLineContents(self: *Editor, new_line: []const u8) !void {
         self.moveToLineStart();
@@ -340,7 +340,7 @@ const Editor = struct {
         }
     }
 
-    /// Ports `move_to_line_start` (console.cpp:530 @d81235049).
+    /// Ports `move_to_line_start` (console.cpp:530 @620d2225c).
     fn moveToLineStart(self: *Editor) void {
         var back_width: c_int = 0;
         for (self.widths.items[0..self.char_pos]) |w| back_width += w;
@@ -349,7 +349,7 @@ const Editor = struct {
         self.byte_pos = 0;
     }
 
-    /// Ports `move_to_line_end` (console.cpp:540 @d81235049).
+    /// Ports `move_to_line_end` (console.cpp:540 @620d2225c).
     fn moveToLineEnd(self: *Editor) void {
         var forward_width: c_int = 0;
         for (self.widths.items[self.char_pos..]) |w| forward_width += w;
@@ -358,7 +358,7 @@ const Editor = struct {
         self.byte_pos = self.line.items.len;
     }
 
-    /// Ports `move_word_left` (console.cpp:582 @d81235049).
+    /// Ports `move_word_left` (console.cpp:582 @620d2225c).
     fn moveWordLeft(self: *Editor) void {
         if (self.char_pos == 0) return;
 
@@ -383,7 +383,7 @@ const Editor = struct {
         self.byte_pos = new_byte_pos;
     }
 
-    /// Ports `move_word_right` (console.cpp:620 @d81235049).
+    /// Ports `move_word_right` (console.cpp:620 @620d2225c).
     fn moveWordRight(self: *Editor) void {
         if (self.char_pos >= self.widths.items.len) return;
 
@@ -408,7 +408,7 @@ const Editor = struct {
     }
 };
 
-/// Ports `has_ctrl_modifier` (console.cpp:550 @d81235049): a `5` among the
+/// Ports `has_ctrl_modifier` (console.cpp:550 @620d2225c): a `5` among the
 /// `;`-separated parameters.
 fn hasCtrlModifier(params: []const u8) bool {
     var it = std.mem.splitScalar(u8, params, ';');
@@ -427,12 +427,12 @@ fn hasCtrlModifier(params: []const u8) bool {
     return false;
 }
 
-/// Ports `is_space_codepoint` (console.cpp:578 @d81235049).
+/// Ports `is_space_codepoint` (console.cpp:578 @620d2225c).
 fn isSpaceCodepoint(cp: u32) bool {
     return iswspace(cp) != 0;
 }
 
-/// Ports `move_cursor` (console.cpp:667 @d81235049), the POSIX arm.
+/// Ports `move_cursor` (console.cpp:667 @620d2225c), the POSIX arm.
 fn moveCursor(delta: c_int) void {
     if (delta == 0) return;
     if (delta < 0) {
@@ -444,7 +444,7 @@ fn moveCursor(delta: c_int) void {
     }
 }
 
-/// Ports `history_t` (console.cpp:700 @d81235049): the lines read so far.
+/// Ports `history_t` (console.cpp:700 @620d2225c): the lines read so far.
 const History = struct {
     entries: std.ArrayList([]u8) = .empty,
     viewing_idx: usize = std.math.maxInt(usize),
@@ -494,7 +494,7 @@ const History = struct {
 
 var history: History = .{};
 
-/// Ports `readline_advanced` (console.cpp:754 @d81235049): a line edited
+/// Ports `readline_advanced` (console.cpp:754 @620d2225c): a line edited
 /// in place with the cursor keys, backspace and history. A submitted line
 /// always ends with a newline.
 fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_input: bool) !bool {
@@ -700,7 +700,7 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
     return has_more;
 }
 
-/// Ports `readline_simple` (console.cpp:1048 @d81235049), the POSIX arm:
+/// Ports `readline_simple` (console.cpp:1048 @620d2225c), the POSIX arm:
 /// `std::getline(std::cin, line)` over the C library's `stdin`, which
 /// libc++'s `cin` shares.
 fn readlineSimple(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_input_in: bool) !bool {
@@ -734,7 +734,7 @@ fn readlineSimple(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_inpu
     return multiline_input;
 }
 
-/// Ports `readline` (console.cpp:1082 @d81235049).
+/// Ports `readline` (console.cpp:1082 @620d2225c).
 ///
 /// Return: whether more input follows (a multi-line continuation).
 pub fn readline(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_input: bool) !bool {

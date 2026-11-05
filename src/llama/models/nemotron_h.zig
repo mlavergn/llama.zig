@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nemotron-h.cpp` at v0.6.0
-//! (`d81235049`): `llama_model_nemotron_h`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/nemotron-h.cpp` at v0.7.0
+//! (`620d2225c`): `llama_model_nemotron_h`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_attention_layer` and `build_ffn_layer`, which Nemotron-H MoE
 //! shares.
@@ -32,7 +32,7 @@ fn divI64(a: i64, b: i64) i64 {
 }
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_hparams`
-/// (models/nemotron-h.cpp:5 @d81235049).
+/// (models/nemotron-h.cpp:5 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -83,15 +83,15 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_tensors`
-/// (models/nemotron-h.cpp:49 @d81235049).
+/// (models/nemotron-h.cpp:49 @620d2225c).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
 
-    const mtp_only = hp.n_layer_nextn > 0 and ml.getWeight("blk.0.attn_norm.weight") == null;
-    const trunk_flags: u32 = if (mtp_only) nr else 0;
-    const mtp_flags: u32 = if (!ml.load_mtp) loader.tensor_skip else 0;
+    const nf = self.nextnFlags(ml, .attn_norm);
+    const trunk_flags = nf.trunk;
+    const mtp_flags = nf.mtp;
 
     // The Mamba-2 mixer's SSM parameters.
     const d_conv: i64 = hp.ssm_d_conv;
@@ -151,20 +151,29 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
             layer.wo_b = try self.createTensor(.{ .tensor = .attn_out, .suffix = "bias", .bid = i }, &.{l.n_embd}, nr, exc);
         } else {
             if (l.n_expert != 0) {
+                // The router says how many experts the layer has, at most
+                // `n_expert`.
+                const tn_router: loader.Tn = .{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i };
+                const tn_router_name = tn_router.str();
+                const router_meta = ml.getTensorMeta(tn_router_name.slice());
+                const n_expert_layer: i64 = if (router_meta) |m| m.ne[1] else l.n_expert;
+                if (n_expert_layer < hp.nExpertUsed(iu) or n_expert_layer > l.n_expert) {
+                    return exc.throw(.runtime_error, "Invalid per-layer Nemotron expert count", .{});
+                }
                 // The per-layer n_ff_exp, or n_ff / n_expert_used where the
                 // file has none (the older GGUFs).
                 const n_ff_exp_i: i64 = if (hp.nFfExp(iu) != 0) hp.nFfExp(iu) else divI64(hp.nFf(iu), hp.nExpertUsed(iu));
                 const n_ff_shexp: i64 = hp.n_ff_shexp;
 
-                layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_expert }, trunk_flags, exc);
-                layer.ffn_exp_probs_b = try self.createTensor(.{ .tensor = .ffn_exp_probs_b, .suffix = "bias", .bid = i }, &.{l.n_expert}, trunk_flags, exc);
+                layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_expert_layer }, trunk_flags, exc);
+                layer.ffn_exp_probs_b = try self.createTensor(.{ .tensor = .ffn_exp_probs_b, .suffix = "bias", .bid = i }, &.{n_expert_layer}, trunk_flags, exc);
 
                 // The MoE branch.
                 layer.ffn_latent_down = try self.createTensor(.{ .tensor = .ffn_latent_down, .suffix = "weight", .bid = i }, &.{ l.n_embd, moe_n_embd }, nr, exc);
                 layer.ffn_latent_up = try self.createTensor(.{ .tensor = .ffn_latent_up, .suffix = "weight", .bid = i }, &.{ moe_n_embd, l.n_embd }, nr, exc);
 
-                layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ n_ff_exp_i, moe_n_embd, l.n_expert }, trunk_flags, exc);
-                layer.ffn_up_exps = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "weight", .bid = i }, &.{ moe_n_embd, n_ff_exp_i, l.n_expert }, trunk_flags, exc);
+                layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ n_ff_exp_i, moe_n_embd, n_expert_layer }, trunk_flags, exc);
+                layer.ffn_up_exps = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "weight", .bid = i }, &.{ moe_n_embd, n_ff_exp_i, n_expert_layer }, trunk_flags, exc);
 
                 // The shared expert branch.
                 layer.ffn_down_shexp = try self.createTensor(.{ .tensor = .ffn_down_shexp, .suffix = "weight", .bid = i }, &.{ n_ff_shexp, l.n_embd }, trunk_flags, exc);
@@ -219,23 +228,32 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         layer.ffn_up_exps = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "weight", .bid = i }, &.{ moe_n_embd, n_ff_exp, l.n_expert }, mtp_flags, exc);
         layer.ffn_down_shexp = try self.createTensor(.{ .tensor = .ffn_down_shexp, .suffix = "weight", .bid = i }, &.{ n_ff_shexp, l.n_embd }, mtp_flags, exc);
         layer.ffn_up_shexp = try self.createTensor(.{ .tensor = .ffn_up_shexp, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ff_shexp }, mtp_flags, exc);
+
+        layer.ffn_down_exps_s = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "scale", .bid = i }, &.{l.n_expert}, mtp_flags | nr, exc);
+        layer.ffn_up_exps_s = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "scale", .bid = i }, &.{l.n_expert}, mtp_flags | nr, exc);
+        layer.ffn_down_exps_in_s = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "input_scale", .bid = i }, &.{l.n_expert}, mtp_flags | nr, exc);
+        layer.ffn_up_exps_in_s = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "input_scale", .bid = i }, &.{l.n_expert}, mtp_flags | nr, exc);
+        layer.ffn_down_shexp_s = try self.createTensor(.{ .tensor = .ffn_down_shexp, .suffix = "scale", .bid = i }, &.{1}, mtp_flags | nr, exc);
+        layer.ffn_up_shexp_s = try self.createTensor(.{ .tensor = .ffn_up_shexp, .suffix = "scale", .bid = i }, &.{1}, mtp_flags | nr, exc);
+        layer.ffn_down_shexp_in_s = try self.createTensor(.{ .tensor = .ffn_down_shexp, .suffix = "input_scale", .bid = i }, &.{1}, mtp_flags | nr, exc);
+        layer.ffn_up_shexp_in_s = try self.createTensor(.{ .tensor = .ffn_up_shexp, .suffix = "input_scale", .bid = i }, &.{1}, mtp_flags | nr, exc);
     }
 }
 
 /// Ports `llama_model_nemotron_h`'s `build_arch_graph`
-/// (models/nemotron-h.cpp:184 @d81235049).
+/// (models/nemotron-h.cpp:198 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_nemotron_h`'s `graph`
-/// (models/nemotron-h.cpp:188 @d81235049).
+/// (models/nemotron-h.cpp:202 @620d2225c).
 pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const cp = b.cparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h.cpp", 191, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h.cpp", 205, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
     c.ggml_build_forward_expand(b.gf, inpL);
@@ -268,7 +286,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             cur = buildFfnLayer(model, b, cur, il);
         }
 
-        if (il == b.n_layer - 1 and cp.embeddings_nextn_masked and !extract_final_inp) {
+        if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids) and !extract_final_inp) {
             cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
             inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
@@ -285,7 +303,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     if (extract_final_inp) {
         b.res.t_layer_inp[n_layer] = cur;
 
-        if (cp.embeddings_nextn_masked) {
+        if (b.cropBeforeNextn(inp_out_ids)) {
             cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
         }
     }
@@ -296,7 +314,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;
 
-    if (!cp.embeddings_nextn_masked) {
+    if (b.cropAfterNextn(inp_out_ids)) {
         cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
@@ -307,12 +325,10 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_attention_layer`
-/// (models/nemotron-h.cpp:266 @d81235049): attention without RoPE.
+/// (models/nemotron-h.cpp:278 @620d2225c): attention without RoPE.
 fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_attn: *graph.InpAttnKv, n_embd_head: i64, il: c_int) *Tensor {
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -325,7 +341,7 @@ fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tens
 }
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_ffn_layer`
-/// (models/nemotron-h.cpp:282 @d81235049): a squared-ReLU FFN, or the
+/// (models/nemotron-h.cpp:294 @620d2225c): a squared-ReLU FFN, or the
 /// mixture of experts beside a shared expert.
 fn buildFfnLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -353,7 +369,8 @@ fn buildFfnLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il
             .gate_exps = null, // no gate
             .down_exps = layer.ffn_down_exps.?,
             .exp_probs_b = layer.ffn_exp_probs_b,
-            .n_expert = b.n_expert,
+            // The layer's own expert count, which may be below `n_expert`.
+            .n_expert = layer.ffn_up_exps.?.ne[2],
             .n_expert_used = hp.nExpertUsed(@intCast(il)),
             .type_op = .relu_sqr,
             .norm_w = hp.expert_weights_norm,

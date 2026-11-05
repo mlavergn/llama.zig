@@ -25,9 +25,11 @@ LINT_FILES := $(filter-out $(LINT_EXCLUDE),build.zig $(shell find $(LINT_DIRS) -
 
 .DEFAULT_GOAL := build
 
-.PHONY: test distclean build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff json-diff schema-diff peg-diff chat-msg-diff chat-parse-diff spec-diff server-diff server-task-diff http-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat web ui validate xcframework xcframework-check perf perf-cpu
+.PHONY: test distclean build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff json-diff schema-diff peg-diff chat-msg-diff chat-parse-diff spec-diff server-diff server-task-diff http-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff mtp-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat web ui validate xcframework xcframework-check perf perf-cpu
 
-CMAKE ?= $(firstword $(wildcard $(CURDIR)/.tools/cmake-*/CMake.app/Contents/bin/cmake) cmake)
+# $(shell), not $(wildcard): make splits a function's arguments on spaces, and
+# the checkout may live under a path with one ("/Volumes/Macintosh HD").
+CMAKE ?= $(or $(shell ls -d "$(CURDIR)"/.tools/cmake-*/CMake.app/Contents/bin/cmake 2>/dev/null | head -1),cmake)
 
 MACOS_FLAGS = -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_SYSROOT=macosx -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=OFF -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF
 
@@ -69,7 +71,7 @@ cmake:
 	mkdir -p .tools
 	cd .tools; curl -sSL -o cmake.tar.gz https://github.com/Kitware/CMake/releases/download/v4.4.3/cmake-4.4.3-macos-universal.tar.gz
 	cd .tools; tar xzf cmake.tar.gz && rm cmake.tar.gz
-	$(CMAKE) --version
+	"$(CMAKE)" --version
 
 # Clone the pinned llama.cpp reference checkout.
 # The release the port is synced to, from build/upstream.zig (UPSTREAM.md).
@@ -119,13 +121,13 @@ buildios:
 # Build llama.cpp for macOS with Apple clang; the control build.
 buildmacos:
 	-mkdir -p cmake-build/apple
-	cd cmake-build/apple; $(CMAKE) $(CURDIR)/llama.cpp -G "Unix Makefiles" $(MACOS_FLAGS)
+	cd cmake-build/apple; "$(CMAKE)" "$(CURDIR)/llama.cpp" -G "Unix Makefiles" $(MACOS_FLAGS)
 	cd cmake-build/apple; make -j
 
 # Build the same sources with zig cc.
 buildmacos-zig:
 	-mkdir -p cmake-build/zig
-	cd cmake-build/zig; $(CMAKE) $(CURDIR)/llama.cpp -G "Unix Makefiles" $(MACOS_FLAGS) -DCMAKE_C_COMPILER=$(ZIG_CC) -DCMAKE_CXX_COMPILER=$(ZIG_CXX) -DCMAKE_ASM_COMPILER=$(ZIG_CC)
+	cd cmake-build/zig; "$(CMAKE)" "$(CURDIR)/llama.cpp" -G "Unix Makefiles" $(MACOS_FLAGS) "-DCMAKE_C_COMPILER=$(ZIG_CC)" "-DCMAKE_CXX_COMPILER=$(ZIG_CXX)" "-DCMAKE_ASM_COMPILER=$(ZIG_CC)"
 	cd cmake-build/zig; make -j
 
 # Build the llama.cpp reference libraries with the Zig toolchain.
@@ -320,7 +322,7 @@ sampler-diff:
 # PLAN.md, Decision 55), so it runs on the GB10 and not on this Mac's
 # Metal. See the header of scripts/vk-repro.
 VK_TOOLS = $(CURDIR)/.tools/vulkan
-VK_FLAGS = -Dvulkan -Dglslc=$(VK_TOOLS)/bin/glslc -Dvulkan-include=$(VK_TOOLS)/include
+VK_FLAGS = -Dvulkan "-Dglslc=$(VK_TOOLS)/bin/glslc" "-Dvulkan-include=$(VK_TOOLS)/include"
 
 vk-toolchain:
 	./scripts/vk-toolchain
@@ -594,6 +596,14 @@ arch-model-diff:
 	zig build reference --release=fast
 	@[ -d zig-out/arch-fixtures ] || ./scripts/gen-arch-fixtures
 	./scripts/arch-model-diff zig-out/arch-fixtures $(ARGS)
+
+# The MTP (NextN) draft heads, which arch-model-diff's target-only harness
+# cannot build: the fixtures under zig-out/arch-fixtures/mtp/, since v0.7.0.
+# ARGS=<substring...> narrows it. See scripts/mtp-diff.
+mtp-diff:
+	zig build reference --release=fast
+	@[ -d zig-out/arch-fixtures/mtp ] || ./scripts/gen-arch-fixtures
+	./scripts/mtp-diff zig-out/arch-fixtures $(ARGS)
 
 # The Gemma 4 assistant over a Gemma 4 target, which arch-model-diff cannot
 # reach. See scripts/gemma4-assistant-diff.

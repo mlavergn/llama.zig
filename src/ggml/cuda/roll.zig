@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/roll.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/roll.cuh` at v0.6.0 (`d81235049`). The
+//! `llama.cpp/ggml/src/ggml-cuda/roll.cuh` at v0.7.0 (`620d2225c`). The
 //! kernel, `roll_f32_cuda` (a `__global__`, despite the name), stays CUDA.
 
 const std = @import("std");
@@ -14,11 +14,12 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_ROLL_BLOCK_SIZE` (roll.cuh:3 @d81235049).
+/// Ports `CUDA_ROLL_BLOCK_SIZE` (roll.cuh:3 @620d2225c).
 const block_size = 256;
 
-/// Ports `ggml_cuda_op_roll` (roll.cu:45 @d81235049), which launches with
-/// `<<<>>>`.
+/// Ports `ggml_cuda_op_roll` (roll.cu:49 @620d2225c), which launches with
+/// `<<<>>>`. Since v0.7.0 the kernel reads the source through its byte
+/// strides, so a non-contiguous view rolls as it is.
 pub fn opRoll(ctx: *common.Context, dst: *Tensor) void {
     const s0: c_int = dst.op_params[0];
     const s1: c_int = dst.op_params[1];
@@ -34,6 +35,11 @@ pub fn opRoll(ctx: *common.Context, dst: *Tensor) void {
     const ne01 = src0.ne[1];
     const ne02 = src0.ne[2];
     const ne03 = src0.ne[3];
+    // `size_t` into the kernel's `int64_t` parameters.
+    const nb00: i64 = @bitCast(src0.nb[0]);
+    const nb01: i64 = @bitCast(src0.nb[1]);
+    const nb02: i64 = @bitCast(src0.nb[2]);
+    const nb03: i64 = @bitCast(src0.nb[3]);
 
     impl.assert(src0.type == c.GGML_TYPE_F32, "dst->src[0]->type == GGML_TYPE_F32");
     impl.assert(c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(dst->src[0], dst)");
@@ -47,5 +53,5 @@ pub fn opRoll(ctx: *common.Context, dst: *Tensor) void {
         .grid = .{ .x = @truncate(@as(u64, @bitCast(num_blocks))) },
         .block = .{ .x = block_size },
         .stream = stream,
-    }, .{ src0_d, dst_d, ne00, ne01, ne02, ne03, s0, s1, s2, s3 });
+    }, .{ src0_d, dst_d, ne00, ne01, ne02, ne03, nb00, nb01, nb02, nb03, s0, s1, s2, s3 });
 }

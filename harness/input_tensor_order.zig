@@ -1,7 +1,7 @@
 //! The order-free comparison of `llama_graph_n_input_tensors`'s log lines.
 //!
 //! **Not a port.** Since v0.5.0 every graph reserve logs each input tensor
-//! and the nodes that read it (llama-context.cpp:586 @d81235049), iterating
+//! and the nodes that read it (llama-context.cpp:676 @620d2225c), iterating
 //! an `std::unordered_map` keyed on the tensor's address. The order is the
 //! addresses', which differ between the C++ and the port -- and between any
 //! two runs of either -- so the block is compared as a multiset: every

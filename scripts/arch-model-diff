@@ -86,23 +86,38 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
 #   overwritten before it is copied to the GPU, and the decoder's GET_ROWS
 #   on `attn_rel_b` reads whatever is there -- [0, 7] in the encoder,
 #   +-2.1e9 in the decoder, different in every process. The logits agree,
-#   since the cells read are masked. Metal only: on CUDA the same case is a
+#   since the cells read are masked -- unless the index is far enough out
+#   that the GPU faults ("command buffer failed with status 5") or the
+#   process segfaults, which since v0.7.0 the harness's "q8_0 cache, attn rot
+#   off" case reaches: run alone, the C++ by itself segfaulted twice in three
+#   runs and failed the command buffer once, each with a different
+#   transcript. Both q8_0 cases are skipped. Metal only: on CUDA the same case is a
 #   deterministic upstream abort -- `supports_op` claims every CONT and
 #   `ggml_cuda_cpy` has no non-contiguous q8_0-to-q8_0 path -- which the
 #   crash split counts as `+1abort`.
 KNOWN_NONDET=()
 if [ "$(uname -s)" = Darwin ]; then
     KNOWN_NONDET+=("t5-dense gpu q8_0 cache")
+    KNOWN_NONDET+=("t5-dense gpu q8_0 cache, attn rot off")
 fi
 
+# The skipped cases of a fixture and model configuration, one per line.
 skip_for() {
     local name=$1 m=$2 k
     for k in "${KNOWN_NONDET[@]}"; do
         if [ "${k%% *}" = "$name" ]; then
             local rest=${k#* }
-            if [ "${rest%% *}" = "$m" ]; then echo "${rest#* }"; return; fi
+            if [ "${rest%% *}" = "$m" ]; then echo "${rest#* }"; fi
         fi
     done
+}
+
+# Whether case $1 is one of the skipped cases in $skip.
+is_skipped() {
+    local s
+    [ -n "${skip:-}" ] || return 1
+    while IFS= read -r s; do [ "$1" = "$s" ] && return 0; done <<< "$skip"
+    return 1
 }
 
 # The assertion a run aborted on, without the file it was raised in: the
@@ -122,7 +137,7 @@ crash_split() {
     split=ok; split_why=""
     while IFS= read -r cs; do
         # A case the C++ is nondeterministic in stays out here too.
-        [ -n "${skip:-}" ] && [ "$cs" = "$skip" ] && continue
+        is_skipped "$cs" && continue
         total=$((total + 1))
         CONTEXT_DIFF_TMP="$tmp/state" "$tmp/context_diff" "$f" --model "$m" --case-exact "$cs" ${ARCH_DIFF_ARGS:-} > "$tmp/one.out" 2>&1
         local r=$?
@@ -177,12 +192,18 @@ for f in "$DIR"/*.gguf; do
     for m in $models; do
         mkdir -p "$tmp/state"
         skip=$(skip_for "$name" "$m")
+        n_skip=0
         if [ -n "$skip" ]; then
-            CONTEXT_DIFF_TMP="$tmp/state" "$tmp/context_diff" "$f" --model "$m" --skip-case "$skip" ${ARCH_DIFF_ARGS:-} > "$tmp/out" 2>&1
+            # The harness leaves out one case by name; with skipped cases
+            # the cases run one at a time instead, through the crash split
+            # below, which leaves out every one.
+            n_skip=$(printf '%s\n' "$skip" | wc -l | tr -d ' ')
+            : > "$tmp/out"
+            rc=255
         else
             CONTEXT_DIFF_TMP="$tmp/state" "$tmp/context_diff" "$f" --model "$m" ${ARCH_DIFF_ARGS:-} > "$tmp/out" 2>&1
+            rc=$?
         fi
-        rc=$?
         if grep -q '(not ported)' "$tmp/out"; then
             status=UNPORTED
             break
@@ -195,7 +216,7 @@ for f in "$DIR"/*.gguf; do
             case $split in
                 ok) detail="$detail $m:$split_ok+${split_aborts}abort"
                     [ "$split_crashes" -gt 0 ] && detail="$detail+${split_crashes}refcrash"
-                    [ -n "$skip" ] && detail="$detail+1nondet"
+                    [ -n "$skip" ] && detail="$detail+${n_skip}nondet"
                     continue ;;
                 refabort) status=REFABORT; detail="$m: $split_why"; break ;;
                 *) status=FAIL; detail="$m: $split_why"; cp "$tmp/out" "$tmp/fail-$name-$m.log"; break ;;
@@ -214,7 +235,7 @@ for f in "$DIR"/*.gguf; do
         fi
         cases=$(grep -c ' ok ' "$tmp/out")
         detail="$detail $m:$cases"
-        [ -n "$skip" ] && detail="$detail+1nondet"
+        [ -n "$skip" ] && detail="$detail+${n_skip}nondet"
     done
     case $status in
         PASS)     pass=$((pass + 1));         printf '  %-28s PASS %s\n' "$name" "$detail" ;;

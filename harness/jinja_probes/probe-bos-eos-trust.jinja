@@ -1,0 +1,6 @@
+{#- v0.7.0: bos_token and eos_token come from the model and are bound unmarked, after the input: every string built from them alone is template text, and one built from them and input follows the input rules (replace and split keep a mark only when the whole source was input). -#}
+{{ bos_token }}{{ bos_token | trim }}{{ eos_token | upper | lower }}{{ bos_token | replace('s', 's') }}
+{%- for m in messages -%}
+{{ (bos_token + m.content) | replace('x', 'y') }}|{{ (m.content ~ eos_token).split('<')[0] }}|{{ (eos_token + eos_token) | replace('/', '/') }}|{{ [bos_token, m.role] | join(':') }}
+{%- endfor -%}
+{{ (bos_token ~ eos_token).split('>') | join('>') }}{{ '%s-%s' | format(bos_token, eos_token) }}

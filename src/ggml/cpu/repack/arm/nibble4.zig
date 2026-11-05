@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.6.0
-//! (`d81235049`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.7.0
+//! (`620d2225c`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # The codebook is a table-lookup instruction
@@ -76,7 +76,7 @@ inline fn colScales(comptime fmt: Fmt, bl: anytype) f32x4 {
 }
 
 /// Ports `ggml_gemv_iq4_nl_4x4_q8_0` and `ggml_gemv_mxfp4_4x4_q8_0`
-/// (arch/arm/repack.cpp:449, 519 @d81235049).
+/// (arch/arm/repack.cpp:449, 519 @620d2225c).
 fn gemv(comptime fmt: Fmt, comptime BlockX: type, n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     _ = bs;
     _ = nr;
@@ -123,7 +123,7 @@ fn gemv(comptime fmt: Fmt, comptime BlockX: type, n: c_int, s: [*]f32, bs: usize
 }
 
 /// Ports `ggml_gemm_iq4_nl_4x4_q8_0` and `ggml_gemm_mxfp4_4x4_q8_0`
-/// (arch/arm/repack.cpp:3310, 3386 @d81235049).
+/// (arch/arm/repack.cpp:3310, 3386 @620d2225c).
 fn gemm(comptime fmt: Fmt, comptime BlockX: type, n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     const nb = @divTrunc(n, 32);
     const ncols_interleaved: c_int = 4;

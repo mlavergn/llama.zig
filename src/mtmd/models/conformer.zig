@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/conformer.cpp` at v0.6.0
-//! (`d81235049`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/conformer.cpp` at v0.7.0
+//! (`620d2225c`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -16,7 +16,7 @@ const c = impl.c;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// Ports `build` (conformer.cpp:3 @d81235049), a member of
+/// Ports `build` (conformer.cpp:3 @620d2225c), a member of
 /// `clip_graph_conformer`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
@@ -29,7 +29,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const n_frames = g.img.nx();
     const n_pos = @divTrunc(n_frames, 2);
     const n_pos_embd = @divTrunc(@divTrunc(@divTrunc(n_frames + 1, 2) + 1, 2) + 1, 2) * 2 - 1;
-    impl.ggmlAssert(ne(model.position_embeddings, 1) >= n_pos, "conformer.cpp", 7, "model.position_embeddings->ne[1] >= n_pos");
+    impl.ggmlAssert(model.position_embeddings == null or ne(model.position_embeddings, 1) >= n_pos, "conformer.cpp", 7, "!model.position_embeddings || model.position_embeddings->ne[1] >= n_pos");
 
     const pos_emb = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, 512, n_pos_embd);
     _ = c.ggml_set_name(pos_emb, "pos_emb");
@@ -189,7 +189,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
             // TODO @ngxson : support this ops in ggml
             {
                 const d = @divTrunc(ne(x, 0), 2);
-                const gate = c.ggml_sigmoid(ctx0, c.ggml_view_2d(ctx0, x, d, ne(x, 1), nb(x, 1), @as(usize, @intCast(d)) * nb(x, 0)));
+                const gate = c.ggml_sigmoid(ctx0, c.ggml_cont(ctx0, c.ggml_view_2d(ctx0, x, d, ne(x, 1), nb(x, 1), @as(usize, @intCast(d)) * nb(x, 0))));
                 x = c.ggml_mul(ctx0, c.ggml_view_2d(ctx0, x, d, ne(x, 1), nb(x, 1), 0), gate);
                 x = c.ggml_cont(ctx0, c.ggml_transpose(ctx0, x));
             }
@@ -230,6 +230,13 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     cur = g.buildNorm(cur, model.mm_0_w, model.mm_0_b, .normal, 1e-5, -1);
     g.cb(cur, "audio_adapter.model.{}", 0);
     cur = g.buildFfn(cur, model.mm_1_w, model.mm_1_b, null, null, model.mm_3_w, model.mm_3_b, .gelu_erf, -1);
+
+    // d1omni_a: residual block after the projector
+    if (model.mm_4_w != null) {
+        var x = g.buildNorm(cur, model.mm_4_w, model.mm_4_b, .normal, 1e-5, -1);
+        x = g.buildFfn(x, model.mm_5_w, model.mm_5_b, null, null, model.mm_6_w, model.mm_6_b, .gelu_erf, -1);
+        cur = c.ggml_add(ctx0, cur, x);
+    }
 
     g.cb(cur, "projected", -1);
 

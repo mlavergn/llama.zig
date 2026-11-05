@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/glm4-moe.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/glm4-moe.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_glm4_moe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_glm4_moe`'s `load_arch_hparams` (models/glm4-moe.cpp:3 @d81235049).
+/// Ports `llama_model_glm4_moe`'s `load_arch_hparams` (models/glm4-moe.cpp:3 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -51,24 +51,19 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_glm4_moe`'s `load_arch_tensors` (models/glm4-moe.cpp:28 @d81235049).
+/// Ports `llama_model_glm4_moe`'s `load_arch_tensors` (models/glm4-moe.cpp:28 @620d2225c).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const n_expert_shared: i64 = hp.n_expert_shared;
     const nr = loader.tensor_not_required;
 
-    const mtp_only = hp.n_layer_nextn > 0 and ml.getWeight("blk.0.attn_norm.weight") == null;
-    var probe_buf: [64]u8 = undefined;
-    const mtp_probe = std.fmt.bufPrint(&probe_buf, "blk.{d}.nextn.eh_proj.weight", .{l.n_layer}) catch unreachable;
-    const trunk_only = hp.n_layer_nextn > 0 and ml.getWeight(mtp_probe) == null;
-    const trunk_flags: u32 = if (mtp_only) nr else 0;
-    var mtp_flags: u32 = if (trunk_only) nr else 0;
+    const nf = self.nextnFlags(ml, .attn_norm);
+    const trunk_flags = nf.trunk;
+    const mtp_flags = nf.mtp;
 
-    if (!ml.load_mtp) mtp_flags |= loader.tensor_skip;
-
-    impl.assert(hp.n_expert > 0, "models/glm4-moe.cpp", 42, "hparams.n_expert > 0 && \"n_expert must be > 0 for GLM4_MOE MoE layers\"");
-    impl.assert(hp.nExpertUsed(0) > 0, "models/glm4-moe.cpp", 43, "hparams.n_expert_used() > 0 && \"n_expert_used must be > 0 for GLM4_MOE MoE layers\"");
+    impl.assert(hp.n_expert > 0, "models/glm4-moe.cpp", 36, "hparams.n_expert > 0 && \"n_expert must be > 0 for GLM4_MOE MoE layers\"");
+    impl.assert(hp.nExpertUsed(0) > 0, "models/glm4-moe.cpp", 37, "hparams.n_expert_used() > 0 && \"n_expert_used must be > 0 for GLM4_MOE MoE layers\"");
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -145,8 +140,8 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_glm4_moe`'s `build_arch_graph` (models/glm4-moe.cpp:125
-/// @d81235049): the MTP draft head for that graph type, the main model
+/// Ports `llama_model_glm4_moe`'s `build_arch_graph` (models/glm4-moe.cpp:119
+/// @620d2225c): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -154,28 +149,28 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_glm4_moe`'s `graph_mtp`
-/// (models/glm4-moe.cpp:132 @d81235049).
+/// (models/glm4-moe.cpp:126 @620d2225c).
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn > 0, "models/glm4-moe.cpp", 134, "hparams.n_layer_nextn > 0 && \"GLM4_MOE MTP requires n_layer_nextn > 0\"");
-    impl.assert(hp.n_layer_nextn == 1, "models/glm4-moe.cpp", 135, "hparams.n_layer_nextn == 1 && \"GLM4_MOE MTP currently only supports a single MTP block\"");
+    impl.assert(hp.n_layer_nextn > 0, "models/glm4-moe.cpp", 128, "hparams.n_layer_nextn > 0 && \"GLM4_MOE MTP requires n_layer_nextn > 0\"");
+    impl.assert(hp.n_layer_nextn == 1, "models/glm4-moe.cpp", 129, "hparams.n_layer_nextn == 1 && \"GLM4_MOE MTP currently only supports a single MTP block\"");
 
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 138, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 132, "n_embd_head == hparams.n_embd_head_k()");
 
     const il: c_int = @as(c_int, @intCast(hp.nLayer())) + b.cparams.nextn_layer_offset;
-    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/glm4-moe.cpp", 143, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
+    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/glm4-moe.cpp", 137, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
 
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, "models/glm4-moe.cpp", 147, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/glm4-moe.cpp", 148, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/glm4-moe.cpp", 149, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
-    impl.assert(layer.ffn_gate_inp != null, "models/glm4-moe.cpp", 150, "layer.ffn_gate_inp  && \"MTP block missing ffn_gate_inp\"");
+    impl.assert(layer.nextn.eh_proj != null, "models/glm4-moe.cpp", 141, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, "models/glm4-moe.cpp", 142, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, "models/glm4-moe.cpp", 143, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
+    impl.assert(layer.ffn_gate_inp != null, "models/glm4-moe.cpp", 144, "layer.ffn_gate_inp  && \"MTP block missing ffn_gate_inp\"");
 
-    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/glm4-moe.cpp", 152, "out of memory");
-    inp.* = .{ .n_embd = hp.n_embd };
+    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/glm4-moe.cpp", 146, "out of memory");
+    inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
     inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
     c.ggml_set_input(inp.tokens);
@@ -184,7 +179,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     c.ggml_set_input(inp.embd);
 
     var tok_embd: *Tensor = undefined;
-    b.ubatch.assertEmbdOrToken("models/glm4-moe.cpp", 161);
+    b.ubatch.assertEmbdOrToken("models/glm4-moe.cpp", 155);
     if (b.ubatch.token != null) {
         const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
         tok_embd = c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
@@ -278,7 +273,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_post_ffn", il);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/glm4-moe.cpp", 266, "head_norm_w && \"GLM4_MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
+    impl.assert(head_norm_w != null, "models/glm4-moe.cpp", 260, "head_norm_w && \"GLM4_MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
 
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
     b.cb(cur, "h_nextn", -1);
@@ -289,23 +284,22 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "models/glm4-moe.cpp", 283, "head_w && \"GLM4_MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    impl.assert(head_w != null, "models/glm4-moe.cpp", 277, "head_w && \"GLM4_MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
 
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
 
     b.res.t_logits = cur;
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports the constructor of `llama_model_glm4_moe`'s `graph`
-/// (models/glm4-moe.cpp:292 @d81235049).
+/// (models/glm4-moe.cpp:285 @620d2225c).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 295, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 288, "n_embd_head == hparams.n_embd_head_k()");
 
     var sections: [4]c_int = undefined;
     @memcpy(&sections, hp.rope_sections[0..4]);
@@ -315,7 +309,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const use_mrope = hp.useMrope();
     if (b.ubatch.embd != null and !use_mrope) {
         // Stopped here rather than give wrong results.
-        impl.abort("models/glm4-moe.cpp", 308, "This GGUF does not support multimodal. Please reconvert it.");
+        impl.abort("models/glm4-moe.cpp", 301, "This GGUF does not support multimodal. Please reconvert it.");
     }
 
     // The positions.
@@ -367,7 +361,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
             cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
         }
-        if (il == b.n_layer - 1 and (!b.cparams.embeddings_nextn or b.cparams.embeddings_nextn_masked)) {
+        if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
             cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
             inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
@@ -421,7 +415,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;
 
-    if (b.cparams.embeddings_nextn and !b.cparams.embeddings_nextn_masked) {
+    if (b.cropAfterNextn(inp_out_ids)) {
         cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
@@ -433,8 +427,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

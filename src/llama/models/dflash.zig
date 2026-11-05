@@ -13,7 +13,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/dflash.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/dflash.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_dflash`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph<is_enc>` with `build_inp_embd_enc`,
 //! `build_dspark_markov_head`, and `graph_dsv4`, which builds on
@@ -40,7 +40,7 @@ fn oom() noreturn {
     impl.abort("models/dflash.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_dflash`'s `load_arch_hparams` (models/dflash.cpp:7 @d81235049).
+/// Ports `llama_model_dflash`'s `load_arch_hparams` (models/dflash.cpp:7 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -72,6 +72,27 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(u32, .dflash_conv_group_size, false, exc)) |v| hp.dflash_conv_group_size = v;
     if (try meta.getKey(u32, .dflash_selector_rank, false, exc)) |v| hp.dflash_selector_rank = v;
     if (try meta.getKey(u32, .dflash_selector_top_k, false, exc)) |v| hp.dflash_selector_top_k = v;
+    // LiliCorr: a lattice scorer over each block's top-k candidates. The
+    // rest of its keys are required once its hidden size is there.
+    const has_lilicorr = blk: {
+        const v = try meta.getKey(u32, .lilicorr_hidden_size, false, exc) orelse break :blk false;
+        hp.lilicorr_hidden_size = v;
+        break :blk true;
+    };
+    if (try meta.getKey(u32, .lilicorr_candidate_topk, has_lilicorr, exc)) |v| hp.lilicorr_candidate_topk = v;
+    if (try meta.getKey(u32, .lilicorr_num_heads, has_lilicorr, exc)) |v| hp.lilicorr_num_heads = v;
+    if (try meta.getKey(u32, .lilicorr_num_layers, has_lilicorr, exc)) |v| hp.lilicorr_layers = v;
+    if (try meta.getKey(f32, .lilicorr_vector_eps, has_lilicorr, exc)) |v| hp.lilicorr_vector_eps = v;
+    if (try meta.getKey(f32, .lilicorr_logit_scale, has_lilicorr, exc)) |v| hp.lilicorr_logit_scale = v;
+    // `(uint64_t) top_k * (top_k + 1)`: the `+ 1` wraps in `uint32_t`.
+    if (has_lilicorr and (hp.dflash_block_size < 2 or hp.lilicorr_hidden_size == 0 or
+        hp.lilicorr_num_heads == 0 or hp.lilicorr_hidden_size % hp.lilicorr_num_heads != 0 or
+        hp.lilicorr_candidate_topk == 0 or hp.lilicorr_layers == 0 or
+        hp.dflash_selector_top_k > 0 or
+        @as(u64, hp.lilicorr_candidate_topk) * @as(u64, hp.lilicorr_candidate_topk +% 1) > hp.n_embd))
+    {
+        return exc.throw(.runtime_error, "invalid LiLiCorr DFlash metadata", .{});
+    }
 
     const ids = (try meta.getArrList(i32, .target_layers, false, exc)) orelse {
         return exc.throw(.runtime_error, "DFlash model requires 'target_layers' in GGUF metadata", .{});
@@ -115,7 +136,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         _ = try meta.getArr(u32, .attention_compress_ratios, &hp.dsv4_compress_ratios, false, exc);
 
         // Against a division by zero.
-        impl.assert(hp.dsv4_o_group_count > 0, "models/dflash.cpp", 72, "hparams.dsv4_o_group_count > 0");
+        impl.assert(hp.dsv4_o_group_count > 0, "models/dflash.cpp", 85, "hparams.dsv4_o_group_count > 0");
 
         if (hp.expert_gating_func != @backingInt(hparams_mod.ExpertGatingFunc.sqrt_softplus)) {
             return exc.throw(.runtime_error, "DSpark DSV4 draft expects sqrtsoftplus MoE scoring", .{});
@@ -127,7 +148,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
             }
         }
 
-        impl.assert(hp.n_swa > 0, "models/dflash.cpp", 83, "hparams.n_swa > 0");
+        impl.assert(hp.n_swa > 0, "models/dflash.cpp", 96, "hparams.n_swa > 0");
         hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
         hp.setSwaPattern(0, false);
         il = 0;
@@ -157,7 +178,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_dflash`'s `load_arch_tensors` (models/dflash.cpp:108 @d81235049).
+/// Ports `llama_model_dflash`'s `load_arch_tensors` (models/dflash.cpp:121 @620d2225c).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -195,6 +216,10 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     // DFlash2: a conv around each attention and FFN block, and a selector
     // that scores candidate transitions between block positions.
     const selector_meta = ml.getTensorMeta("selector_hidden.weight");
+    const conv_meta = hp.dflash_conv_kernel_size > 0 and hp.dflash_conv_group_size > 0;
+    if (conv_meta and @rem(l.n_embd, @as(i64, hp.dflash_conv_group_size)) != 0) {
+        return exc.throw(.runtime_error, "DFlash hidden size must be divisible by conv_group_size", .{});
+    }
     if (selector_meta != null) {
         const rank: i64 = hp.dflash_selector_rank;
         if (rank <= 0 or hp.dflash_block_size <= 0 or hp.dflash_selector_top_k <= 0 or
@@ -217,6 +242,71 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         impl.logInfo("%s: DFlash2 conv kernel = %u, group = %u, selector rank = %u, top-k = %u\n", .{ func, hp.dflash_conv_kernel_size, hp.dflash_conv_group_size, hp.dflash_selector_rank, hp.dflash_selector_top_k });
     }
 
+    // LiliCorr's scorer: its blocks are numbered past the decoder's, and
+    // its layers' weights live in the first `lilicorr_layers` layers.
+    if (hp.lilicorr_layers > 0) {
+        const hidden: i64 = hp.lilicorr_hidden_size;
+        const top_k: i64 = hp.lilicorr_candidate_topk;
+        const heads: i64 = hp.lilicorr_num_heads;
+        const factor_v: i64 = (try ml.meta.getKey(u32, .lilicorr_factor_dim, true, exc)).?;
+        const mlp: i64 = (try ml.meta.getKey(u32, .lilicorr_mlp_hidden_size, true, exc)).?;
+        const slots: i64 = @as(i64, hp.dflash_block_size) - 1;
+        // `int + uint32_t`, in `uint32_t`.
+        const feature_bid: i32 = @bitCast(@as(u32, @bitCast(l.n_layer_all)) +% hp.lilicorr_layers);
+        if (factor_v == 0 or mlp == 0 or hp.lilicorr_layers > self.layers.len) {
+            return exc.throw(.runtime_error, "invalid LiLiCorr head dimensions", .{});
+        }
+        if (hidden != l.n_embd) {
+            self.lilicorr_token_proj = try self.createTensor(.{ .tensor = .lilicorr_token_proj, .suffix = "weight" }, &.{ l.n_embd, hidden }, 0, exc);
+            self.lilicorr_token_proj_b = try self.createTensor(.{ .tensor = .lilicorr_token_proj, .suffix = "bias" }, &.{hidden}, 0, exc);
+            self.lilicorr_token_proj_s = try self.createTensor(.{ .tensor = .lilicorr_token_proj, .suffix = "scale" }, &.{1}, nr, exc);
+        }
+        self.lilicorr_pass_hidden_proj = try self.createTensor(.{ .tensor = .lilicorr_pass_hidden_proj, .suffix = "weight" }, &.{ hp.n_embd, hidden }, 0, exc);
+        self.lilicorr_pass_hidden_proj_b = try self.createTensor(.{ .tensor = .lilicorr_pass_hidden_proj, .suffix = "bias" }, &.{hidden}, 0, exc);
+        self.lilicorr_pass_hidden_proj_s = try self.createTensor(.{ .tensor = .lilicorr_pass_hidden_proj, .suffix = "scale" }, &.{1}, nr, exc);
+        self.lilicorr_feature_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = feature_bid }, &.{5}, 0, exc);
+        self.lilicorr_feature_norm_b = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "bias", .bid = feature_bid }, &.{5}, 0, exc);
+        self.lilicorr_feature_mlp_1 = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "weight", .bid = feature_bid }, &.{ 5, hidden }, 0, exc);
+        self.lilicorr_feature_mlp_1_b = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "bias", .bid = feature_bid }, &.{hidden}, 0, exc);
+        self.lilicorr_feature_mlp_3 = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "weight", .bid = feature_bid }, &.{ hidden, hidden }, 0, exc);
+        self.lilicorr_feature_mlp_3_b = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "bias", .bid = feature_bid }, &.{hidden}, 0, exc);
+        self.lilicorr_slot_embedding = try self.createTensor(.{ .tensor = .lilicorr_slot_embd, .suffix = "weight" }, &.{ hidden, slots }, 0, exc);
+        self.lilicorr_rank_embedding = try self.createTensor(.{ .tensor = .lilicorr_rank_embd, .suffix = "weight" }, &.{ hidden, top_k }, 0, exc);
+        self.lilicorr_attention_bias = try self.createTensor(.{ .tensor = .lilicorr_attn_bias, .suffix = "bias" }, &.{ slots * top_k, slots * top_k, heads }, 0, exc);
+        self.lilicorr_context_proj = try self.createTensor(.{ .tensor = .lilicorr_context_proj, .suffix = "weight" }, &.{ l.n_embd, hidden }, 0, exc);
+        self.lilicorr_context_proj_b = try self.createTensor(.{ .tensor = .lilicorr_context_proj, .suffix = "bias" }, &.{hidden}, 0, exc);
+        self.lilicorr_context_proj_s = try self.createTensor(.{ .tensor = .lilicorr_context_proj, .suffix = "scale" }, &.{1}, nr, exc);
+        var li: u32 = 0;
+        while (li < hp.lilicorr_layers) : (li += 1) {
+            const bid: i32 = @bitCast(@as(u32, @bitCast(l.n_layer_all)) +% li);
+            const i: i32 = @bitCast(li);
+            const layer = &self.layers[li];
+            layer.lilicorr_attn_norm = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "weight", .bid = bid }, &.{hidden}, 0, exc);
+            layer.lilicorr_mlp_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = bid }, &.{hidden}, 0, exc);
+            layer.lilicorr_attn_in_proj = try self.createTensor(.{ .tensor = .lilicorr_attn_in_proj, .suffix = "weight", .bid = i }, &.{ hidden, 3 * hidden }, 0, exc);
+            layer.lilicorr_attn_in_proj_b = try self.createTensor(.{ .tensor = .lilicorr_attn_in_proj, .suffix = "bias", .bid = i }, &.{3 * hidden}, 0, exc);
+            layer.lilicorr_attn_out_proj = try self.createTensor(.{ .tensor = .attn_out, .suffix = "weight", .bid = bid }, &.{ hidden, hidden }, 0, exc);
+            layer.lilicorr_attn_out_proj_b = try self.createTensor(.{ .tensor = .attn_out, .suffix = "bias", .bid = bid }, &.{hidden}, 0, exc);
+            layer.lilicorr_attn_out_proj_s = try self.createTensor(.{ .tensor = .attn_out, .suffix = "scale", .bid = bid }, &.{1}, nr, exc);
+            layer.lilicorr_mlp_0 = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "weight", .bid = bid }, &.{ hidden, mlp }, 0, exc);
+            layer.lilicorr_mlp_0_b = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "bias", .bid = bid }, &.{mlp}, 0, exc);
+            layer.lilicorr_mlp_0_s = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "scale", .bid = bid }, &.{1}, nr, exc);
+            layer.lilicorr_mlp_2 = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "weight", .bid = bid }, &.{ mlp, hidden }, 0, exc);
+            layer.lilicorr_mlp_2_b = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "bias", .bid = bid }, &.{hidden}, 0, exc);
+            layer.lilicorr_mlp_2_s = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "scale", .bid = bid }, &.{1}, nr, exc);
+        }
+        self.lilicorr_output_norm = try self.createTensor(.{ .tensor = .lilicorr_output_norm, .suffix = "weight" }, &.{hidden}, 0, exc);
+        self.lilicorr_anchor_norm = try self.createTensor(.{ .tensor = .lilicorr_anchor_norm, .suffix = "weight" }, &.{hidden}, 0, exc);
+        self.lilicorr_factor_input_proj = try self.createTensor(.{ .tensor = .lilicorr_factor_input_proj, .suffix = "weight" }, &.{ 3 * hidden, hidden }, 0, exc);
+        self.lilicorr_factor_input_proj_b = try self.createTensor(.{ .tensor = .lilicorr_factor_input_proj, .suffix = "bias" }, &.{hidden}, 0, exc);
+        self.lilicorr_out_head = try self.createTensor(.{ .tensor = .lilicorr_out_head, .suffix = "weight" }, &.{ hidden, factor_v }, 0, exc);
+        self.lilicorr_out_head_b = try self.createTensor(.{ .tensor = .lilicorr_out_head, .suffix = "bias" }, &.{factor_v}, 0, exc);
+        self.lilicorr_in_head = try self.createTensor(.{ .tensor = .lilicorr_in_head, .suffix = "weight" }, &.{ hidden, factor_v }, 0, exc);
+        self.lilicorr_in_head_b = try self.createTensor(.{ .tensor = .lilicorr_in_head, .suffix = "bias" }, &.{factor_v}, 0, exc);
+        self.lilicorr_anchor_out_head = try self.createTensor(.{ .tensor = .lilicorr_anchor_out_head, .suffix = "weight" }, &.{ hidden, factor_v }, 0, exc);
+        self.lilicorr_anchor_out_head_b = try self.createTensor(.{ .tensor = .lilicorr_anchor_out_head, .suffix = "bias" }, &.{factor_v}, 0, exc);
+    }
+
     self.fc = try self.createTensor(.{ .tensor = .fc, .suffix = "weight" }, &.{ n_embd_inp, l.n_embd }, 0, exc);
     self.fc_s = try self.createTensor(.{ .tensor = .fc, .suffix = "scale" }, &.{1}, nr, exc);
     // The encoder's hidden_norm, after fc.
@@ -228,11 +318,9 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     // full-vocabulary drafts can share the target's through ctx_other. A
     // draft with its own embeddings and head references no target tensors,
     // so it can run on devices the target does not use (e.g. -devd with a
-    // tensor-split target).
+    // tensor-split target). Since v0.7.0 a draft with no head of its own
+    // never falls back to its token embeddings.
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, n_vocab_draft }, nr, exc);
-    if (self.output == null and self.tok_embd != null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, n_vocab_draft }, loader.tensor_duplicated, exc);
-    }
 
     if (hp.dsv4_hc_mult > 0) {
         const q_lora_rank: i64 = hp.n_lora_q;
@@ -312,7 +400,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         layer.ffn_down = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "weight", .bid = i }, &.{ l.n_ff, l.n_embd }, 0, exc);
         layer.ffn_up = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_ff }, 0, exc);
 
-        if (selector_meta != null) {
+        if (conv_meta) {
             const kernel: i64 = hp.dflash_conv_kernel_size;
             const groups: i64 = @divTrunc(l.n_embd, @as(i64, hp.dflash_conv_group_size));
             const projected = 2 * kernel * groups;
@@ -324,7 +412,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_dflash`'s `build_arch_graph` (models/dflash.cpp:1035 @d81235049).
+/// Ports `llama_model_dflash`'s `build_arch_graph` (models/dflash.cpp:1282 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     switch (params.gtype) {
         .encoder => buildGraphEnc(model, b),
@@ -339,7 +427,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
                 buildGraphDec(false, model, b);
             }
         },
-        else => impl.abort("models/dflash.cpp", 1046, "invalid graph type"),
+        else => impl.abort("models/dflash.cpp", 1293, "invalid graph type"),
     }
 }
 
@@ -351,7 +439,7 @@ fn otherModel(b: *const graph.Builder) *const Model {
 }
 
 /// Ports `llama_model_dflash`'s `graph<true>`'s `build_inp_embd_enc`
-/// (models/dflash.cpp:263 @d81235049): the target model's features, its
+/// (models/dflash.cpp:337 @620d2225c): the target model's features, its
 /// chosen layers concatenated, given as the batch's embeddings.
 fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
     const hp = b.hparams;
@@ -372,7 +460,7 @@ fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph<true>`
-/// (models/dflash.cpp:280 @d81235049): the encoder, the target model's
+/// (models/dflash.cpp:354 @620d2225c): the encoder, the target model's
 /// features through the fusion layer and its norm.
 fn buildGraphEnc(model: *const Model, b: *const graph.Builder) void {
     var cur = buildInpEmbdEnc(b);
@@ -397,17 +485,17 @@ fn stoi(s: [:0]const u8) i64 {
     // strtol saturates at LONG_MIN and LONG_MAX, both past int's range.
     const v = strtol(s.ptr, &end, 10);
     if (@intFromPtr(end) == @intFromPtr(s.ptr)) {
-        c.ggml_abort("models/dflash.cpp", 313, "terminating due to uncaught exception of type std::invalid_argument: stoi: no conversion");
+        c.ggml_abort("models/dflash.cpp", 387, "terminating due to uncaught exception of type std::invalid_argument: stoi: no conversion");
     }
     if (v < std.math.minInt(c_int) or v > std.math.maxInt(c_int)) {
-        c.ggml_abort("models/dflash.cpp", 313, "terminating due to uncaught exception of type std::out_of_range: stoi: out of range");
+        c.ggml_abort("models/dflash.cpp", 387, "terminating due to uncaught exception of type std::out_of_range: stoi: out of range");
     }
     return v;
 }
 
 extern "c" fn strtol(s: [*:0]const u8, end: *[*c]u8, base: c_int) c_long;
 
-/// Ports `build_dspark_markov_head` (models/dflash.cpp:296 @d81235049):
+/// Ports `build_dspark_markov_head` (models/dflash.cpp:370 @620d2225c):
 /// DSpark's Markov bias on the draft logits, chained through each block's
 /// positions, and the confidence head beside it, which is optional.
 fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *Tensor) void {
@@ -416,7 +504,7 @@ fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *
 
     const w1 = model.dspark_markov_w1;
     const w2 = model.dspark_markov_w2;
-    impl.assert(w1 != null and w2 != null, "models/dflash.cpp", 302, "w1 && w2 && \"DSpark markov weights not loaded\"");
+    impl.assert(w1 != null and w2 != null, "models/dflash.cpp", 376, "w1 && w2 && \"DSpark markov weights not loaded\"");
 
     // The confidence head is optional.
     const has_conf = model.dspark_conf_proj != null;
@@ -427,9 +515,9 @@ fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *
     const n_tok = base.ne[1];
 
     const it = model.gguf_kv.get("dflash.block_size");
-    impl.assert(it != null, "models/dflash.cpp", 312, "it != model.gguf_kv.end() && \"DSpark draft requires 'dflash.block_size' in GGUF metadata\"");
+    impl.assert(it != null, "models/dflash.cpp", 386, "it != model.gguf_kv.end() && \"DSpark draft requires 'dflash.block_size' in GGUF metadata\"");
     const block_size = stoi(it.?.*);
-    impl.assert(block_size > 0, "models/dflash.cpp", 314, "block_size > 0");
+    impl.assert(block_size > 0, "models/dflash.cpp", 388, "block_size > 0");
 
     // The bonus anchor of SpecForge's exports: slot 0 is a bonus token, not
     // a prediction slot.
@@ -438,7 +526,7 @@ fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *
     const i_draft_beg: i64 = if (sample_from_anchor) 0 else 1;
 
     const n_blocks: i64 = b.ubatch.n_seqs_unq;
-    impl.assert(n_blocks > 0 and @rem(n_tok, n_blocks) == 0, "models/dflash.cpp", 322, "n_blocks > 0 && n_tok % n_blocks == 0 && \"DSpark markov head requires equal-size blocks\"");
+    impl.assert(n_blocks > 0 and @rem(n_tok, n_blocks) == 0, "models/dflash.cpp", 396, "n_blocks > 0 && n_tok % n_blocks == 0 && \"DSpark markov head requires equal-size blocks\"");
     // The tokens per block in this ubatch at run time (the anchor and the
     // drafted positions), bounded by the training block_size.
     const block_drafts = @divTrunc(n_tok, n_blocks);
@@ -462,7 +550,7 @@ fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *
         // (unread) confidence column is padding.
         cat = c.ggml_cont(ctx, c.ggml_view_2d(ctx, base, n_vocab, n_blocks, base_stride, 0));
         if (has_conf) {
-            cat_conf = c.ggml_sigmoid(ctx, c.ggml_cont(ctx, c.ggml_view_2d(ctx, base, 1, n_blocks, base_stride, 0)));
+            cat_conf = c.ggml_sigmoid(ctx, c.ggml_view_2d(ctx, base, 1, n_blocks, base_stride, 0));
         }
     }
 
@@ -534,7 +622,7 @@ fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *
     c.ggml_build_forward_expand(b.gf, out);
 }
 
-/// Ports `build_dflash2_conv` (models/dflash.cpp:409 @d81235049): DFlash2's
+/// Ports `build_dflash2_conv` (models/dflash.cpp:483 @620d2225c): DFlash2's
 /// causal convolution within each block, its `kernel_size` taps weighted by
 /// a static base plus the token's own dynamic coefficients, one weight per
 /// group of `group_size` channels. `side` picks the input (0) or output (1)
@@ -549,8 +637,8 @@ fn buildDflash2Conv(b: *const graph.Builder, hidden_: *Tensor, dynamic_: ?*Tenso
     const group_size: i64 = hp.dflash_conv_group_size;
     const n_groups = @divTrunc(hidden_size, group_size);
 
-    impl.assert(n_blocks > 0 and @rem(n_tokens, n_blocks) == 0, "models/dflash.cpp", 423, "n_blocks > 0 && n_tokens % n_blocks == 0");
-    impl.assert(dynamic_ != null and base_ != null and side >= 0 and side < 2, "models/dflash.cpp", 424, "dynamic && base && side >= 0 && side < 2");
+    impl.assert(n_blocks > 0 and @rem(n_tokens, n_blocks) == 0, "models/dflash.cpp", 497, "n_blocks > 0 && n_tokens % n_blocks == 0");
+    impl.assert(dynamic_ != null and base_ != null and side >= 0 and side < 2, "models/dflash.cpp", 498, "dynamic && base && side >= 0 && side < 2");
     var dynamic = dynamic_.?;
     const base = base_.?;
 
@@ -600,7 +688,7 @@ fn buildDflash2Conv(b: *const graph.Builder, hidden_: *Tensor, dynamic_: ?*Tenso
     return result.?;
 }
 
-/// Ports `build_dflash2_selector` (models/dflash.cpp:476 @d81235049):
+/// Ports `build_dflash2_selector` (models/dflash.cpp:550 @620d2225c):
 /// DFlash2's selector, the top-k candidates at every block position and
 /// the pairwise transition scores between neighbouring positions' sets,
 /// packed into the nextn output slot for the walk on the CPU.
@@ -615,8 +703,8 @@ fn buildDflash2Selector(b: *const graph.Builder, model: *const Model, tokens_: ?
     const top_k: i64 = hp.dflash_selector_top_k;
     const rank: i64 = hp.dflash_selector_rank;
     const n_blocks: i64 = b.ubatch.n_seqs_unq;
-    impl.assert(n_blocks > 0 and @rem(n_tokens, n_blocks) == 0, "models/dflash.cpp", 487, "n_blocks > 0 && n_tokens % n_blocks == 0");
-    impl.assert(res.t_logits.?.ne[1] == n_tokens, "models/dflash.cpp", 488, "res->t_logits->ne[1] == n_tokens");
+    impl.assert(n_blocks > 0 and @rem(n_tokens, n_blocks) == 0, "models/dflash.cpp", 561, "n_blocks > 0 && n_tokens % n_blocks == 0");
+    impl.assert(res.t_logits.?.ne[1] == n_tokens, "models/dflash.cpp", 562, "res->t_logits->ne[1] == n_tokens");
     const tokens = tokens_ orelse return;
 
     const t_logits = res.t_logits.?;
@@ -677,8 +765,8 @@ const Selector = struct {
     unary_blk: *Tensor,
     gate_blk: *Tensor,
 
-    /// Ports `build_dflash2_selector`'s `score_run` (models/dflash.cpp:511
-    /// @d81235049): a position's score reads only the candidate sets at
+    /// Ports `build_dflash2_selector`'s `score_run` (models/dflash.cpp:585
+    /// @620d2225c): a position's score reads only the candidate sets at
     /// pos - 1 and pos, so a run of positions has no internal dependency
     /// and scores in one batched matmul.
     fn scoreRun(self: *const Selector, beg_pos: i64, n_pos: i64, pred_ids: *Tensor) *Tensor {
@@ -714,7 +802,162 @@ const Selector = struct {
     }
 };
 
-/// `graph<false>`'s `build_rope` lambda (models/dflash.cpp:596 @d81235049):
+/// Ports `build_lilicorr_scores` (models/dflash.cpp:641 @620d2225c):
+/// LiliCorr's lattice. Every drafted position's top-k candidates, ordered by
+/// logit, become nodes -- their token embeddings, the position's hidden
+/// state, five rank features and a slot and rank embedding -- which a small
+/// transformer attends across under a learned bias. Each node's factors then
+/// score the transitions from the previous position's candidates (from the
+/// block's anchor for the first), packed beside the candidate ids into the
+/// nextn output slot for the walk on the CPU.
+fn buildLilicorrScores(b: *const graph.Builder, model: *const Model, tok_embd: *Tensor, anchors_: ?*Tensor) void {
+    const ctx = b.ctx0;
+    const res = b.res;
+
+    const hp = b.hparams;
+    const n_tokens: i64 = b.n_tokens;
+    const n_embd: i64 = b.n_embd;
+
+    const hidden: i64 = hp.lilicorr_hidden_size;
+    const top_k: i64 = hp.lilicorr_candidate_topk;
+    const heads: i64 = hp.lilicorr_num_heads;
+    const n_blocks: i64 = b.ubatch.n_seqs_unq;
+    impl.assert(n_blocks > 0 and @rem(n_tokens, n_blocks) == 0, "models/dflash.cpp", 654, "n_blocks > 0 && n_tokens % n_blocks == 0");
+    impl.assert(res.t_logits.?.ne[1] == n_tokens, "models/dflash.cpp", 655, "res->t_logits->ne[1] == n_tokens");
+    impl.assert(anchors_ != null, "models/dflash.cpp", 656, "anchors && tok_embd");
+    const anchors = anchors_.?;
+
+    const t_logits = res.t_logits.?;
+    const tokens_per_block = @divTrunc(n_tokens, n_blocks);
+    const block_size: i64 = hp.dflash_block_size;
+    const row_used = top_k + top_k * top_k;
+    const slots = block_size - 1;
+    const nodes = slots * top_k;
+    const factor_dim: i64 = model.lilicorr_out_head.?.ne[1];
+    impl.assert(tokens_per_block == block_size, "models/dflash.cpp", 664, "tokens_per_block == block_size");
+
+    var candidates: *Tensor = c.ggml_top_k(ctx, t_logits, @intCast(top_k));
+    const logits_rows: *Tensor = c.ggml_reshape_3d(ctx, t_logits, 1, t_logits.ne[0], n_tokens);
+    const candidate_logits: *Tensor = c.ggml_reshape_2d(ctx, c.ggml_get_rows(ctx, logits_rows, candidates), top_k, n_tokens);
+    // The rank features and embeddings need the candidates in descending
+    // logit order.
+    const order: *Tensor = c.ggml_argsort(ctx, candidate_logits, c.GGML_SORT_ORDER_DESC);
+    const candidate_rows: *Tensor = c.ggml_reshape_3d(ctx, candidates, 1, top_k, n_tokens);
+    candidates = c.ggml_reshape_2d(ctx, c.ggml_get_rows(ctx, candidate_rows, order), top_k, n_tokens);
+    const prob_rows: *Tensor = c.ggml_reshape_3d(ctx, c.ggml_soft_max(ctx, t_logits), 1, t_logits.ne[0], n_tokens);
+    const probs: *Tensor = c.ggml_reshape_2d(ctx, c.ggml_get_rows(ctx, prob_rows, candidates), top_k, n_tokens);
+
+    var cand_run: *Tensor = c.ggml_reshape_3d(ctx, candidates, top_k, @divTrunc(n_tokens, n_blocks), n_blocks);
+    var probs_run: *Tensor = c.ggml_reshape_3d(ctx, probs, top_k, @divTrunc(n_tokens, n_blocks), n_blocks);
+    cand_run = c.ggml_cont(ctx, c.ggml_view_3d(ctx, cand_run, top_k, slots, n_blocks, cand_run.nb[1], cand_run.nb[2], cand_run.nb[1]));
+    probs_run = c.ggml_cont(ctx, c.ggml_view_3d(ctx, probs_run, top_k, slots, n_blocks, probs_run.nb[1], probs_run.nb[2], probs_run.nb[1]));
+
+    const lp: *Tensor = c.ggml_log(ctx, probs_run);
+    const lp_blk: *Tensor = c.ggml_reshape_3d(ctx, lp, top_k, slots, n_blocks);
+    const top_lp: *Tensor = c.ggml_view_3d(ctx, lp_blk, 1, slots, n_blocks, lp_blk.nb[1], lp_blk.nb[2], 0);
+    const relative: *Tensor = c.ggml_sub(ctx, lp_blk, top_lp);
+    var feature: *Tensor = c.ggml_reshape_4d(ctx, lp_blk, 1, top_k, slots, n_blocks);
+
+    var rank: *Tensor = c.ggml_arange(ctx, 0, @floatFromInt(top_k), 1);
+    rank = c.ggml_repeat(ctx, c.ggml_reshape_3d(ctx, rank, top_k, 1, 1), lp_blk);
+    const first: *Tensor = c.ggml_scale_bias(ctx, c.ggml_step(ctx, rank), -1.0, 1.0);
+
+    // The initializer list builds the scaled rank before any concat.
+    const items = [_]*Tensor{ probs_run, relative, c.ggml_scale(ctx, rank, if (top_k == 1) 0.0 else 1.0 / @as(f32, @floatFromInt(top_k - 1))), first };
+    for (items) |item| {
+        feature = c.ggml_concat(ctx, feature, c.ggml_reshape_4d(ctx, item, 1, top_k, slots, n_blocks), 0);
+    }
+    feature = c.ggml_reshape_2d(ctx, feature, 5, nodes * n_blocks);
+
+    const embeds: *Tensor = c.ggml_get_rows(ctx, tok_embd, c.ggml_reshape_1d(ctx, cand_run, nodes * n_blocks));
+    const token_states: *Tensor = if (n_embd == hidden) embeds else c.ggml_add(ctx, b.buildLoraMm(model.lilicorr_token_proj.?, embeds, model.lilicorr_token_proj_s), model.lilicorr_token_proj_b);
+
+    const pass_blk: *Tensor = c.ggml_reshape_3d(ctx, res.t_embd, n_embd, block_size, n_blocks);
+    const passes: *Tensor = c.ggml_reshape_2d(ctx, c.ggml_cont(ctx, c.ggml_view_3d(ctx, pass_blk, n_embd, slots, n_blocks, pass_blk.nb[1], pass_blk.nb[2], pass_blk.nb[1])), n_embd, slots * n_blocks);
+
+    var pass_states: *Tensor = c.ggml_add(ctx, b.buildLoraMm(model.lilicorr_pass_hidden_proj.?, passes, model.lilicorr_pass_hidden_proj_s), model.lilicorr_pass_hidden_proj_b);
+
+    pass_states = c.ggml_reshape_4d(ctx, pass_states, hidden, 1, slots, n_blocks);
+    pass_states = c.ggml_reshape_2d(ctx, c.ggml_repeat_4d(ctx, pass_states, hidden, top_k, slots, n_blocks), hidden, nodes * n_blocks);
+
+    var feature_states: *Tensor = c.ggml_norm(ctx, feature, 1.0e-5);
+    feature_states = c.ggml_add(ctx, c.ggml_mul(ctx, feature_states, model.lilicorr_feature_norm), model.lilicorr_feature_norm_b);
+    feature_states = c.ggml_silu(ctx, c.ggml_add(ctx, b.buildLoraMm(model.lilicorr_feature_mlp_1.?, feature_states, null), model.lilicorr_feature_mlp_1_b));
+    feature_states = c.ggml_add(ctx, b.buildLoraMm(model.lilicorr_feature_mlp_3.?, feature_states, null), model.lilicorr_feature_mlp_3_b);
+
+    const slot: *Tensor = c.ggml_reshape_4d(ctx, model.lilicorr_slot_embedding, hidden, 1, slots, 1);
+    const rank_embd: *Tensor = c.ggml_reshape_4d(ctx, model.lilicorr_rank_embedding, hidden, top_k, 1, 1);
+    var pos: *Tensor = c.ggml_add(ctx, c.ggml_repeat_4d(ctx, slot, hidden, top_k, slots, n_blocks), c.ggml_repeat_4d(ctx, rank_embd, hidden, top_k, slots, n_blocks));
+    pos = c.ggml_reshape_2d(ctx, pos, hidden, nodes * n_blocks);
+
+    var x: *Tensor = c.ggml_add(ctx, c.ggml_add(ctx, token_states, pass_states), feature_states);
+    x = c.ggml_add(ctx, x, pos);
+    const anchor_blk: *Tensor = c.ggml_reshape_3d(ctx, anchors, n_embd, block_size, n_blocks);
+    const anchor: *Tensor = c.ggml_reshape_2d(ctx, c.ggml_cont(ctx, c.ggml_view_3d(ctx, anchor_blk, n_embd, 1, n_blocks, anchor_blk.nb[1], anchor_blk.nb[2], 0)), n_embd, n_blocks);
+    var anchor_state: *Tensor = c.ggml_add(ctx, b.buildLoraMm(model.lilicorr_context_proj.?, anchor, model.lilicorr_context_proj_s), model.lilicorr_context_proj_b);
+
+    const head_dim = @divTrunc(hidden, heads);
+    var layer_i: u32 = 0;
+    while (layer_i < hp.lilicorr_layers) : (layer_i += 1) {
+        const weights = &model.layers[layer_i];
+        const attn_input: *Tensor = c.ggml_mul(ctx, c.ggml_rms_norm(ctx, x, hp.f_norm_rms_eps), weights.lilicorr_attn_norm);
+        var qkv: *Tensor = c.ggml_add(ctx, b.buildLoraMm(weights.lilicorr_attn_in_proj.?, attn_input, null), weights.lilicorr_attn_in_proj_b);
+        qkv = c.ggml_reshape_3d(ctx, qkv, 3 * hidden, nodes, n_blocks);
+        const hd: usize = @intCast(head_dim);
+        const hid: usize = @intCast(hidden);
+        const q: *Tensor = c.ggml_cont(ctx, c.ggml_view_4d(ctx, qkv, head_dim, nodes, heads, n_blocks, qkv.nb[1], hd * qkv.nb[0], qkv.nb[2], 0));
+        const k: *Tensor = c.ggml_cont(ctx, c.ggml_view_4d(ctx, qkv, head_dim, nodes, heads, n_blocks, qkv.nb[1], hd * qkv.nb[0], qkv.nb[2], hid * qkv.nb[0]));
+        const v: *Tensor = c.ggml_view_4d(ctx, qkv, head_dim, nodes, heads, n_blocks, qkv.nb[1], hd * qkv.nb[0], qkv.nb[2], 2 * hid * qkv.nb[0]);
+        const attn: *Tensor = c.ggml_soft_max_ext(ctx, c.ggml_mul_mat(ctx, k, q), model.lilicorr_attention_bias, 1.0 / impl.sqrtf(@floatFromInt(head_dim)), 0.0);
+        var joined: *Tensor = c.ggml_out_prod(ctx, v, c.ggml_transpose(ctx, attn));
+        joined = c.ggml_permute(ctx, joined, 0, 2, 1, 3);
+        var attn_output: *Tensor = c.ggml_cont_2d(ctx, joined, hidden, nodes * n_blocks);
+        attn_output = c.ggml_add(ctx, b.buildLoraMm(weights.lilicorr_attn_out_proj.?, attn_output, weights.lilicorr_attn_out_proj_s), weights.lilicorr_attn_out_proj_b);
+        x = c.ggml_add(ctx, x, attn_output);
+        var mlp: *Tensor = c.ggml_mul(ctx, c.ggml_rms_norm(ctx, x, hp.f_norm_rms_eps), weights.lilicorr_mlp_norm);
+        mlp = c.ggml_silu(ctx, c.ggml_add(ctx, b.buildLoraMm(weights.lilicorr_mlp_0.?, mlp, weights.lilicorr_mlp_0_s), weights.lilicorr_mlp_0_b));
+        mlp = c.ggml_add(ctx, b.buildLoraMm(weights.lilicorr_mlp_2.?, mlp, weights.lilicorr_mlp_2_s), weights.lilicorr_mlp_2_b);
+        x = c.ggml_add(ctx, x, mlp);
+    }
+
+    x = c.ggml_mul(ctx, c.ggml_rms_norm(ctx, x, hp.f_norm_rms_eps), model.lilicorr_output_norm);
+    anchor_state = c.ggml_mul(ctx, c.ggml_rms_norm(ctx, anchor_state, hp.f_norm_rms_eps), model.lilicorr_anchor_norm);
+    var anchor_nodes: *Tensor = c.ggml_reshape_3d(ctx, anchor_state, hidden, 1, n_blocks);
+    anchor_nodes = c.ggml_reshape_2d(ctx, c.ggml_repeat_4d(ctx, anchor_nodes, hidden, nodes, n_blocks, 1), hidden, nodes * n_blocks);
+    var factor_in: *Tensor = c.ggml_concat(ctx, x, anchor_nodes, 0);
+    factor_in = c.ggml_concat(ctx, factor_in, c.ggml_mul(ctx, x, anchor_nodes), 0);
+    var factors: *Tensor = c.ggml_add(ctx, b.buildLoraMm(model.lilicorr_factor_input_proj.?, factor_in, null), model.lilicorr_factor_input_proj_b);
+    factors = c.ggml_silu(ctx, factors);
+
+    var out: *Tensor = c.ggml_add(ctx, b.buildLoraMm(model.lilicorr_out_head.?, factors, null), model.lilicorr_out_head_b);
+    out = c.ggml_reshape_4d(ctx, c.ggml_l2_norm(ctx, out, hp.lilicorr_vector_eps), factor_dim, top_k, slots, n_blocks);
+
+    var in: *Tensor = c.ggml_add(ctx, b.buildLoraMm(model.lilicorr_in_head.?, factors, null), model.lilicorr_in_head_b);
+    in = c.ggml_reshape_4d(ctx, c.ggml_l2_norm(ctx, in, hp.lilicorr_vector_eps), factor_dim, top_k, slots, n_blocks);
+
+    var anchor_out: *Tensor = c.ggml_add(ctx, b.buildLoraMm(model.lilicorr_anchor_out_head.?, anchor_state, null), model.lilicorr_anchor_out_head_b);
+    anchor_out = c.ggml_l2_norm(ctx, anchor_out, hp.lilicorr_vector_eps);
+    anchor_out = c.ggml_reshape_3d(ctx, anchor_out, factor_dim, 1, n_blocks);
+
+    const first_in: *Tensor = c.ggml_cont(ctx, c.ggml_view_4d(ctx, in, factor_dim, top_k, 1, n_blocks, in.nb[1], in.nb[2], in.nb[3], 0));
+    const first_score: *Tensor = c.ggml_scale(ctx, c.ggml_mul_mat(ctx, first_in, c.ggml_reshape_4d(ctx, anchor_out, factor_dim, 1, 1, n_blocks)), hp.lilicorr_logit_scale);
+    var scores: *Tensor = c.ggml_pad(ctx, c.ggml_reshape_3d(ctx, first_score, top_k, 1, n_blocks), @intCast(top_k * top_k - top_k), 0, 0, 0);
+    if (slots > 1) {
+        const next: *Tensor = c.ggml_cont(ctx, c.ggml_view_4d(ctx, in, factor_dim, top_k, slots - 1, n_blocks, in.nb[1], in.nb[2], in.nb[3], in.nb[2]));
+        const previous: *Tensor = c.ggml_cont(ctx, c.ggml_view_4d(ctx, out, factor_dim, top_k, slots - 1, n_blocks, out.nb[1], out.nb[2], out.nb[3], 0));
+        const score: *Tensor = c.ggml_scale(ctx, c.ggml_mul_mat(ctx, next, previous), hp.lilicorr_logit_scale);
+        scores = c.ggml_concat(ctx, scores, c.ggml_reshape_3d(ctx, score, top_k * top_k, slots - 1, n_blocks), 1);
+    }
+
+    const row: *Tensor = c.ggml_concat(ctx, c.ggml_cast(ctx, c.ggml_reshape_3d(ctx, cand_run, top_k, slots, n_blocks), c.GGML_TYPE_F32), scores, 0);
+    var packed_: *Tensor = c.ggml_pad_ext(ctx, row, 0, @intCast(n_embd - row_used), 1, 0, 0, 0, 0, 0);
+    packed_ = c.ggml_reshape_2d(ctx, packed_, n_embd, n_tokens);
+    b.cb(packed_, "lilicorr_lattice", -1);
+    res.t_h_nextn = packed_;
+    c.ggml_build_forward_expand(b.gf, packed_);
+}
+
+/// `graph<false>`'s `build_rope` lambda (models/dflash.cpp:832 @620d2225c):
 /// drafts for M-RoPE targets use the degenerate sections, the temporal
 /// dimension only; the others take the first layer's `rope_freqs`, if any.
 fn buildRope(model: *const Model, b: *const graph.Builder, sections: *[4]c_int, cur: *Tensor, pos: *Tensor) *Tensor {
@@ -726,7 +969,7 @@ fn buildRope(model: *const Model, b: *const graph.Builder, sections: *[4]c_int, 
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph<false>`
-/// (models/dflash.cpp:571 @d81235049): the decoder, in one of two modes by
+/// (models/dflash.cpp:807 @620d2225c): the decoder, in one of two modes by
 /// the batch's type. An embedding batch is fused target features, projected
 /// and written into the K/V cache; a token batch is a noise block, diffused
 /// by attending over the committed tokens and the block's masks to draft
@@ -737,7 +980,7 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
     const n_embd_inp: i64 = hp.nEmbdInpEnc();
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/dflash.cpp", 575, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/dflash.cpp", 811, "n_embd_head == hparams.n_embd_head_k()");
 
     const inp_pos = b.buildInpPos();
 
@@ -752,7 +995,7 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
     @memcpy(&sections, hp.rope_sections[0..4]);
 
     // KV cache injection.
-    b.ubatch.assertEmbdOrToken("models/dflash.cpp", 607);
+    b.ubatch.assertEmbdOrToken("models/dflash.cpp", 843);
     if (b.ubatch.embd != null) {
         const inp = allocator.create(graph.InpEmbd) catch oom();
         inp.* = .{ .n_embd = n_embd_inp };
@@ -821,6 +1064,10 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
         }
 
         b.res.t_embd = inp_g;
+        if (model.lilicorr_pass_hidden_proj != null) {
+            // The context features, exposed for LiliCorr to retrieve.
+            b.res.t_h_nextn = inp_g;
+        }
 
         c.ggml_build_forward_expand(b.gf, inp_g);
         return;
@@ -830,29 +1077,41 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
     // (shared through ctx_other).
     var tok_embd = model.tok_embd;
     if (tok_embd == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 681, "cparams.ctx_other != nullptr");
+        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 921, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
 
-        impl.assert(model_other.tok_embd != null, "models/dflash.cpp", 684, "model_other->tok_embd != nullptr && \"DFlash decoder requires the target model's token embeddings\"");
+        impl.assert(model_other.tok_embd != null, "models/dflash.cpp", 924, "model_other->tok_embd != nullptr && \"DFlash decoder requires the target model's token embeddings\"");
         tok_embd = model_other.tok_embd;
     }
 
-    const inp = allocator.create(graph.InpEmbd) catch oom();
-    inp.* = .{ .n_embd = b.n_embd };
+    const inp_tokens: *Tensor = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
+    c.ggml_set_input(inp_tokens);
+    b.res.t_inp_tokens = inp_tokens;
 
-    inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
-    c.ggml_set_input(inp.tokens);
-    b.res.t_inp_tokens = inp.tokens;
+    const lilicorr = isLilicorrBlock(model, b);
+    var inp_anchor: ?*Tensor = null;
+    if (lilicorr) {
+        // LiliCorr: the context features, through inp_anchor, for the
+        // lattice scorer.
+        const inp = allocator.create(graph.InpEmbdH) catch oom();
+        inp.* = .{ .n_embd = b.n_embd, .n_embd_state = b.n_embd };
+        inp.tokens = inp_tokens;
+        inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, b.n_embd, b.n_tokens);
+        c.ggml_set_input(inp.h);
+        inp_anchor = inp.h;
+        _ = b.res.addInput(graph.InpEmbdH, inp);
+    } else {
+        const inp = allocator.create(graph.InpEmbd) catch oom();
+        inp.* = .{ .n_embd = b.n_embd };
+        inp.tokens = inp_tokens;
+        _ = b.res.addInput(graph.InpEmbd, inp);
+    }
 
-    const inp_tokens = inp.tokens.?;
-
-    var inpL: *Tensor = c.ggml_get_rows(ctx, tok_embd, inp.tokens);
+    var inpL: *Tensor = c.ggml_get_rows(ctx, tok_embd, inp_tokens);
     if (hp.f_embedding_scale != 0.0) {
         inpL = c.ggml_scale(ctx, inpL, hp.f_embedding_scale);
     }
     b.cb(inpL, "inp_noise_embd", -1);
-
-    _ = b.res.addInput(graph.InpEmbd, inp);
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
@@ -952,9 +1211,9 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
     var output = model.output;
     var output_s = model.output_s;
     if (output == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 807, "cparams.ctx_other != nullptr");
+        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1056, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
-        impl.assert(model_other.output != null, "models/dflash.cpp", 809, "model_other->output != nullptr && \"DFlash decoder requires the target model's output projection\"");
+        impl.assert(model_other.output != null, "models/dflash.cpp", 1058, "model_other->output != nullptr && \"DFlash decoder requires the target model's output projection\"");
         output = model_other.output;
         output_s = model_other.output_s;
     }
@@ -982,8 +1241,8 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
         const n_outputs = cur.ne[1];
         const n_vocab: i64 = model.vocab.nTokens();
 
-        impl.assert(d2t.type == c.GGML_TYPE_I64, "models/dflash.cpp", 835, "model.d2t->type == GGML_TYPE_I64");
-        impl.assert(d2t.ne[0] == n_draft_vocab, "models/dflash.cpp", 836, "model.d2t->ne[0] == n_draft_vocab");
+        impl.assert(d2t.type == c.GGML_TYPE_I64, "models/dflash.cpp", 1084, "model.d2t->type == GGML_TYPE_I64");
+        impl.assert(d2t.ne[0] == n_draft_vocab, "models/dflash.cpp", 1085, "model.d2t->ne[0] == n_draft_vocab");
 
         const logits: *Tensor = c.ggml_fill(ctx, c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, 1, n_vocab, n_outputs), -std.math.inf(f32));
         cur = c.ggml_set_rows(ctx, logits, c.ggml_reshape_3d(ctx, cur, 1, n_draft_vocab, n_outputs), c.ggml_reshape_3d(ctx, d2t, n_draft_vocab, 1, 1));
@@ -992,8 +1251,6 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
 
-    c.ggml_build_forward_expand(b.gf, cur);
-
     // DSpark: the draft logits biased by the Markov head.
     if (model.dspark_markov_w1 != null) {
         buildDsparkMarkovHead(b, model, inp_tokens);
@@ -1001,22 +1258,34 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
 
     if (model.dflash_selector_hidden != null) {
         buildDflash2Selector(b, model, inp_tokens);
+    } else if (lilicorr) {
+        buildLilicorrScores(b, model, tok_embd.?, inp_anchor);
     }
+}
+
+/// `graph<false>`'s LiliCorr condition, tested where it sets `inp_anchor`
+/// (models/dflash.cpp:932 @620d2225c) and again before calling
+/// `build_lilicorr_scores` (models/dflash.cpp:1104 @620d2225c): a LiliCorr
+/// draft, a token batch carrying state embeddings, and exactly one block
+/// per sequence.
+fn isLilicorrBlock(model: *const Model, b: *const graph.Builder) bool {
+    return model.lilicorr_pass_hidden_proj != null and b.ubatch.embd_state != null and
+        b.n_tokens == @as(i64, b.hparams.dflash_block_size) * @as(i64, b.ubatch.n_seqs_unq);
 }
 
 /// `cparams.ctx_other`'s model, or the draft's own tensor when it has one:
 /// the token embeddings for `graph_dsv4`.
 fn dsv4TokEmbd(model: *const Model, b: *const graph.Builder) *Tensor {
     if (model.tok_embd) |t| return t;
-    impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 920, "cparams.ctx_other != nullptr");
+    impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1169, "cparams.ctx_other != nullptr");
     const model_other = otherModel(b);
 
-    impl.assert(model_other.tok_embd != null, "models/dflash.cpp", 923, "model_other->tok_embd != nullptr && \"DSpark decoder requires the target model's token embeddings\"");
+    impl.assert(model_other.tok_embd != null, "models/dflash.cpp", 1172, "model_other->tok_embd != nullptr && \"DSpark decoder requires the target model's token embeddings\"");
     return model_other.tok_embd.?;
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph_dsv4`
-/// (models/dflash.cpp:862 @d81235049): the DeepSeek-V4 DSpark decoder, in
+/// (models/dflash.cpp:1111 @620d2225c): the DeepSeek-V4 DSpark decoder, in
 /// the same two modes as the DFlash one. An embedding batch is the
 /// encoder's fused target features: each stage projects them through its
 /// `wkv` and writes K into the draft's ring cache. A token batch is a noise
@@ -1037,7 +1306,7 @@ fn buildGraphDsv4(model: *const Model, b: *const graph.Builder) void {
     const inp_attn = b.buildAttnInpKIswa();
 
     // KV cache injection: the fused target features from the encoder.
-    b.ubatch.assertEmbdOrToken("models/dflash.cpp", 874);
+    b.ubatch.assertEmbdOrToken("models/dflash.cpp", 1123);
     if (b.ubatch.embd != null) {
         const inp = allocator.create(graph.InpEmbd) catch oom();
         inp.* = .{ .n_embd = n_embd_inp };
@@ -1170,9 +1439,9 @@ fn buildGraphDsv4(model: *const Model, b: *const graph.Builder) void {
     var output = model.output;
     var output_s = model.output_s;
     if (output == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1017, "cparams.ctx_other != nullptr");
+        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1266, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
-        impl.assert(model_other.output != null, "models/dflash.cpp", 1019, "model_other->output != nullptr && \"DSpark decoder requires the target model's output projection\"");
+        impl.assert(model_other.output != null, "models/dflash.cpp", 1268, "model_other->output != nullptr && \"DSpark decoder requires the target model's output projection\"");
         output = model_other.output;
         output_s = model_other.output_s;
     }
@@ -1180,8 +1449,6 @@ fn buildGraphDsv4(model: *const Model, b: *const graph.Builder) void {
     cur = b.buildLoraMm(output.?, cur, output_s);
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 
     if (model.dspark_markov_w1 != null) {
         buildDsparkMarkovHead(b, model, inp_tokens);

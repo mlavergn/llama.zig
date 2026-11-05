@@ -41,6 +41,17 @@ void ref_uni_nfd(const uint32_t * in, size_t n, uint32_t * out) {
     std::memcpy(out, r.data(), n * sizeof(uint32_t));
 }
 
+// `out` must hold `cap` code points. Return: the number of code points
+// written, or the length needed when it exceeds `cap` (nothing written).
+size_t ref_uni_nfc(const uint32_t * in, size_t n, uint32_t * out, size_t cap) {
+    std::vector<uint32_t> v(in, in + n);
+    std::vector<uint32_t> r = unicode_cpts_normalize_nfc(v);
+    if (r.size() <= cap) {
+        std::memcpy(out, r.data(), r.size() * sizeof(uint32_t));
+    }
+    return r.size();
+}
+
 // Return: the length written to `out`, or -1 for std::invalid_argument.
 int ref_uni_cpt_to_utf8(uint32_t cpt, char * out) {
     try {

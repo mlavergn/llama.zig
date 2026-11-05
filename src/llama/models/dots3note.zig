@@ -11,8 +11,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/dots3note.cpp` at v0.6.0
-//! (`d81235049`): `llama_model_dots3note`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/dots3note.cpp` at v0.7.0
+//! (`620d2225c`): `llama_model_dots3note`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`. The C++
 //! notes it was adapted from `deepseek32.cpp` (the DSA indexer and absorbed
 //! MLA) and `step35.cpp` (the head-wise output gate).
@@ -31,7 +31,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_dots3note`'s `load_arch_hparams` (src/models/dots3note.cpp:8 @d81235049).
+/// Ports `llama_model_dots3note`'s `load_arch_hparams` (src/models/dots3note.cpp:8 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -76,7 +76,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_dots3note`'s `load_arch_tensors` (src/models/dots3note.cpp:48 @d81235049).
+/// Ports `llama_model_dots3note`'s `load_arch_tensors` (src/models/dots3note.cpp:48 @620d2225c).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     _ = ml;
     const l = self.loadLocals();
@@ -187,14 +187,14 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_dots3note`'s `build_arch_graph` (src/models/dots3note.cpp:148 @d81235049).
+/// Ports `llama_model_dots3note`'s `build_arch_graph` (src/models/dots3note.cpp:148 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     _ = params;
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_dots3note`'s `graph`
-/// (src/models/dots3note.cpp:152 @d81235049).
+/// (src/models/dots3note.cpp:152 @620d2225c).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -395,8 +395,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

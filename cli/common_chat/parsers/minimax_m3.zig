@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/minimax-m3.cpp` (llama.cpp v0.6.0,
-//! `d81235049`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/minimax-m3.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -107,22 +107,22 @@ const Build = struct {
         return b.plus(try b.plus(try b.plus(try b.plus(generation_prompt, reasoning), content_before_tools), tool_calls), end);
     }
 
-    fn tool(self: *Build, t: *Value) Error!void {
+    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
         const function = t.at("function") catch |e| return util.fromJson(e);
         const name = try parsers.functionName(t);
         const params = try msg_mod.toolParameters(self.a, function);
         self.doc = peg.SharedDoc.fromJson(self.a, &params) catch |e| return util.fromPeg(e);
         defer self.doc.release();
-        const rule = self.buildTool(name) catch |e| return util.fromPeg(e);
+        const rule = self.buildTool(tool_index, name) catch |e| return util.fromPeg(e);
         self.cb.b.orAssign(&self.tool_choice, rule) catch |e| return util.fromPeg(e);
     }
 
-    fn buildTool(self: *Build, name: []const u8) chat_peg.Error!ParserId {
+    fn buildTool(self: *Build, tool_index: usize, name: []const u8) chat_peg.Error!ParserId {
         const p = self.cb;
         const b = &p.b;
         var invoke_body = try b.eps();
         switch (self.doc.doc.root.*) {
-            .object => |*o| invoke_body = try self.membersOf(o, try self.cat(&.{ "tool-", name, "-arg" })),
+            .object => |*o| invoke_body = try self.membersOf(o, try parsers.indexName(self.a, "tool-", tool_index, "-arg")),
             else => {},
         }
 
@@ -133,7 +133,7 @@ const Build = struct {
         func = try b.plus(func, try p.toolClose(try b.literal(invoke_end)));
         const func_parser = try p.tool(func);
 
-        return b.rule(try self.cat(&.{ "tool-", name }), func_parser, false);
+        return b.rule(try parsers.indexName(self.a, "tool-", tool_index, ""), func_parser, false);
     }
 
     fn cat(self: *Build, parts: []const []const u8) chat_peg.Error![]u8 {
@@ -195,8 +195,8 @@ const Build = struct {
         const b = &self.cb.b;
         var required_elements: std.ArrayList(ParserId) = .empty;
         var optional_elements: std.ArrayList(ParserId) = .empty;
-        for (object.properties) |prop| {
-            const element = try self.elementOf(prop.name, prop.schema, try self.cat(&.{ rule_prefix, "-", prop.name }));
+        for (object.properties, 0..) |prop, i| {
+            const element = try self.elementOf(prop.name, prop.schema, try std.fmt.allocPrint(self.a, "{s}-{d}", .{ rule_prefix, i }));
             try (if (prop.required) &required_elements else &optional_elements).append(self.a, element);
         }
 
@@ -216,7 +216,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_minimax_m3` (parsers/minimax-m3.cpp:3 @d81235049).
+/// Ports `common_chat_params_init_minimax_m3` (parsers/minimax-m3.cpp:3 @620d2225c).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -255,7 +255,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
             try gp.appendSlice(a, try m.renderContent(a, "\n\n"));
         }
         data.generation_prompt = gp.items;
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     var build: Build = .{
@@ -266,14 +266,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
-    var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-
-    data.parser = try parsers.save(a, &arena);
+    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !(has_response_format or (has_tools and inputs.tool_choice == .required));
-        data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
+        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, fc_start);
     }
 
@@ -302,6 +300,6 @@ test "MiniMax-M3 expands nested arguments" {
     );
     const data = try init(a, &t, &p);
     try std.testing.expectEqual(.peg_minimax_m3, data.format);
-    try std.testing.expect(std.mem.indexOf(u8, data.parser, "tool-f-arg-l-item") != null);
-    try std.testing.expect(std.mem.indexOf(u8, data.parser, "tool-f-arg-u-1") != null);
+    try std.testing.expect(data.parser.?.hasRule("tool-0-arg-1-item"));
+    try std.testing.expect(data.parser.?.hasRule("tool-0-arg-2"));
 }

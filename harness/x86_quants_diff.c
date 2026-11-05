@@ -1,6 +1,7 @@
-// Diff every x86 quant kernel against the reference C, on bits: the 27
-// exports of `arch/x86/quants.c`, and `ggml_vec_dot_q2_0_q8_0`, which on x86
-// is `quants.c`'s generic body under the real name (`arch-fallback.h:86`).
+// Diff every x86 quant kernel against the reference C, on bits: the 28
+// exports of `arch/x86/quants.c`. Until v0.7.0 `ggml_vec_dot_q2_0_q8_0` was
+// `quants.c`'s generic body under the real name; since #30447 it is the
+// AVX2 kernel there.
 //
 // Not a port. This is a gate, driven by `scripts/x86-quants-diff`.
 //
@@ -315,6 +316,16 @@ static void fill_x(float * x, int k, int qk, int pattern) {
     } else if (pattern == 3) {
         const int b = (int)(rng() % (uint64_t)(k / qk));
         for (int i = 0; i < qk; i++) x[b * qk + i] = 0.0f;
+    } else if (pattern == 4) {
+        // a block of NaNs with a payload: its scale is that NaN, and since
+        // v0.7.0 `GGML_CPU_FP32_TO_FP16` is F16C's `vcvtps2ph` here, which
+        // keeps the payload's top bits where the software narrowing writes
+        // 0x7E00 -- the only inputs on which the two differ
+        const uint32_t nan_bits = 0x7fc12345u;
+        float nan;
+        memcpy(&nan, &nan_bits, sizeof(nan));
+        const int b = (int)(rng() % (uint64_t)(k / qk));
+        for (int i = 0; i < qk; i++) x[b * qk + i] = nan;
     }
 }
 
@@ -326,7 +337,7 @@ static int run_quant(const quant_case * qc, int trials) {
         uint8_t * a = malloc(qc->blk * (size_t)nb);
         uint8_t * r = malloc(qc->blk * (size_t)nb);
         for (int t = 0; t < trials; t++) {
-            fill_x(x, k, qc->qk, t % 4);
+            fill_x(x, k, qc->qk, t % 5);
             memset(a, 0xa5, qc->blk * (size_t)nb);
             memset(r, 0xa5, qc->blk * (size_t)nb);
             qc->ref(x, r, k);
@@ -336,7 +347,7 @@ static int run_quant(const quant_case * qc, int trials) {
                 if (failures < 3) {
                     size_t at = 0;
                     while (a[at] == r[at]) at++;
-                    printf("  %s k=%d t%d p%d: byte %zu: ref %02x port %02x\n", qc->name, k, t, t % 4, at, r[at], a[at]);
+                    printf("  %s k=%d t%d p%d: byte %zu: ref %02x port %02x\n", qc->name, k, t, t % 5, at, r[at], a[at]);
                 }
                 failures++;
             }

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! **Not a port.** Our own code. It covers the ground `common_chat_templates`
-//! does in `llama.cpp/common/chat.cpp` (v0.6.0, `d81235049`) -- find the
+//! does in `llama.cpp/common/chat.cpp` (v0.7.0, `620d2225c`) -- find the
 //! model's template, bind the conversation to it, render -- but shares no code
 //! with it, and renders through `zigjinja` rather than upstream's bundled
 //! Jinja.
@@ -50,11 +50,12 @@
 //! them by concatenation, which most do.
 //!
 //! Two bound values *are* control tokens: `bos_token` and `eos_token`, which
-//! templates emit by name. Upstream marks them input with everything else.
-//! Here they are bound as provenance *tokens* -- input for every propagation
-//! rule, but told apart at the end -- and only their own bytes are
-//! re-trusted. Matching their spelling is not enough: a message that reads
-//! exactly `</s>` stays untrusted.
+//! templates emit by name. They come from the model, not the user, so
+//! upstream binds them after the input with `ctx.set_val`, unmarked
+//! (`common_chat_template_direct_apply_impl`, chat.cpp:877 @620d2225c), and
+//! so does this file: they are template text for every propagation rule.
+//! Only their own bytes are trusted -- matching their spelling is not
+//! enough: a message that reads exactly `</s>` stays untrusted.
 
 const std = @import("std");
 const jinja = @import("zigjinja");
@@ -119,8 +120,10 @@ pub const Segment = struct {
     /// True for text the template wrote and for `bos_token`/`eos_token`.
     /// False for everything that came from a message.
     trusted: bool,
-    /// Whether this run is `bos_token` or `eos_token` itself, which upstream
-    /// marks as input and this file re-trusts.
+    /// Whether this run is an input run re-trusted as a token (a provenance
+    /// record's `markToken`). `applySegments` binds none since v0.7.0, where
+    /// upstream stopped marking `bos_token` and `eos_token`; a caller that
+    /// marks its own tokens (`conversation.zig`) still sets it.
     token: bool = false,
 };
 
@@ -168,7 +171,8 @@ fn segment(
     for (parts) |part| {
         const run = text[at..][0..part.len];
         at += part.len;
-        if (run.len == 0) continue;
+        // An empty run is kept, as upstream keeps an empty part; it adds no
+        // token.
         // The only input runs that are control tokens are the two we bound as tokens.
         try out.append(arena, .{ .text = run, .trusted = !part.input or part.token, .token = part.token });
     }
@@ -177,7 +181,7 @@ fn segment(
 
 /// Upstream's rendering of a non-string `{{ }}` value.
 ///
-/// `gather_string_parts_recursive` (common/jinja/runtime.h:717 @d81235049)
+/// `gather_string_parts_recursive` (common/jinja/runtime.h:713 @620d2225c)
 /// writes a boolean as `True`/`False`, a list as its items' renderings run
 /// together, and none, undefined and dicts as nothing. zigjinja follows its own
 /// conventions there, so the chat path translates. Installed as
@@ -192,7 +196,8 @@ fn segment(
 fn upstreamOutput(allocator: std.mem.Allocator, val: jinja.Value) jinja.Value {
     return switch (val) {
         .boolean => |b| .{ .string = if (b) "True" else "False" },
-        .null, .undefined, .dict => .{ .string = "" },
+        // nothing, not even an empty part: llama.cpp gathers no part for them
+        .null, .undefined, .dict => .{ .string = noPart() },
         .list => gatherList(allocator, val) catch val,
         // a float's `as_string`: `std::to_string`, trailing zeros trimmed
         .float => .{ .string = jinja.llama_repr.LlamaRepr.asString(allocator, val) catch return val },
@@ -201,9 +206,18 @@ fn upstreamOutput(allocator: std.mem.Allocator, val: jinja.Value) jinja.Value {
 }
 
 /// A list's items rendered and run together, marks kept.
+/// An empty string that outputs no part at all, where an unmarked empty
+/// string outputs an empty template part (zigjinja's `empty_template`).
+fn noPart() []const u8 {
+    const record = jinja.provenance.active orelse return "";
+    return record.mark("", &.{}) catch "";
+}
+
 fn gatherList(allocator: std.mem.Allocator, val: jinja.Value) !jinja.Value {
     var pieces: std.ArrayList([]const u8) = .empty;
     try gather(allocator, val, &pieces);
+    // a list of nothing gathers no part; an empty string in it is one
+    if (pieces.items.len == 0) return .{ .string = noPart() };
     if (jinja.provenance.active) |record| {
         if (try record.concat(pieces.items)) |joined| return .{ .string = joined };
     }
@@ -347,15 +361,16 @@ pub const Template = struct {
         defer jinja.provenance.active = null;
 
         // Every bound string is input, as upstream's `global_from_json(ctx,
-        // json, true)` marks them; bos and eos as tokens, which `segment` re-trusts.
+        // json, true)` marks them -- except bos and eos, which upstream sets
+        // after it with `ctx.set_val`, unmarked; see the header.
         var msgs = try messagesValue(arena, messages);
         try record.markValue(&msgs);
 
         var vars = std.StringHashMap(jinja.Value).init(arena);
         try vars.put("messages", msgs);
         try vars.put("add_generation_prompt", .{ .boolean = opts.add_generation_prompt });
-        try vars.put("bos_token", .{ .string = try record.markToken(try sanitize(arena, opts.bos_token)) });
-        try vars.put("eos_token", .{ .string = try record.markToken(try sanitize(arena, opts.eos_token)) });
+        try vars.put("bos_token", .{ .string = try sanitize(arena, opts.bos_token) });
+        try vars.put("eos_token", .{ .string = try sanitize(arena, opts.eos_token) });
 
         var ctx = jinja.context.Context.init(&env, vars, "chat", arena) catch
             return Error.TemplateFailed;
@@ -606,7 +621,7 @@ test "a filter chain does not launder message content into trust" {
     }
 }
 
-test "bos and eos are the only re-trusted expression values" {
+test "bos and eos are the only trusted expression values" {
     var t = try Template.init(testing.allocator, "{{ bos_token }}{{ messages[0].content }}");
     defer t.deinit();
 
@@ -632,8 +647,8 @@ test "a message spelled exactly like the EOS token stays untrusted" {
     defer freeSegments(testing.allocator, segs);
 
     try testing.expectEqual(@as(usize, 2), segs.len);
-    try testing.expect(!segs[0].trusted and !segs[0].token);
-    try testing.expect(segs[1].trusted and segs[1].token);
+    try testing.expect(!segs[0].trusted);
+    try testing.expect(segs[1].trusted);
 }
 
 test "content cannot forge a trust boundary with sentinel bytes" {

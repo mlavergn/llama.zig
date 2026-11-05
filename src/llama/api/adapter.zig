@@ -10,7 +10,7 @@
 //! - `llama.cpp/src/llama-context.cpp` -- `llama_set_adapters_lora` and
 //!   `llama_set_adapter_cvec`
 //!
-//! All at v0.6.0 (`d81235049`).
+//! All at v0.7.0 (`620d2225c`).
 //!
 //! Each function has the C signature and is `pub`, not `export`: the
 //! in-process harnesses call these beside the C++ that defines the same
@@ -46,20 +46,20 @@ fn printStr(buf: [*c]u8, buf_size: usize, s: []const u8) i32 {
     return c.snprintf(buf, buf_size, "%.*s", @as(c_int, @intCast(s.len)), s.ptr);
 }
 
-/// Ports `llama_adapter_lora_init` (llama-adapter.cpp:425 @d81235049).
+/// Ports `llama_adapter_lora_init` (llama-adapter.cpp:429 @620d2225c).
 pub fn llama_adapter_lora_init(model: ?*c.struct_llama_model, path_lora: [*c]const u8) callconv(.c) ?*c.struct_llama_adapter_lora {
     const a = adapter.loraInit(ctx_api.modelOf(model), @ptrCast(path_lora)) orelse return null;
     return @ptrCast(a);
 }
 
-/// Ports `llama_adapter_lora_init_from_file_ptr` (llama-adapter.cpp:440
-/// @d81235049): the adapter read from `file`'s current position.
+/// Ports `llama_adapter_lora_init_from_file_ptr` (llama-adapter.cpp:444
+/// @620d2225c): the adapter read from `file`'s current position.
 pub fn llama_adapter_lora_init_from_file_ptr(model: ?*c.struct_llama_model, file: ?*c.FILE) callconv(.c) ?*c.struct_llama_adapter_lora {
     const a = adapter.loraInitFromFilePtr(ctx_api.modelOf(model), file) orelse return null;
     return @ptrCast(a);
 }
 
-/// Ports `llama_adapter_meta_val_str` (llama-adapter.cpp:460 @d81235049).
+/// Ports `llama_adapter_meta_val_str` (llama-adapter.cpp:464 @620d2225c).
 ///
 /// Return: the length `snprintf` reports, or -1 with `buf` emptied when the
 /// key is absent.
@@ -72,12 +72,12 @@ pub fn llama_adapter_meta_val_str(a: ?*const c.struct_llama_adapter_lora, key: [
     return c.snprintf(buf, buf_size, "%s", v.*.ptr);
 }
 
-/// Ports `llama_adapter_meta_count` (llama-adapter.cpp:471 @d81235049).
+/// Ports `llama_adapter_meta_count` (llama-adapter.cpp:475 @620d2225c).
 pub fn llama_adapter_meta_count(a: ?*const c.struct_llama_adapter_lora) callconv(.c) i32 {
     return @truncate(@as(i64, @intCast(loraOf(a).gguf_kv.count())));
 }
 
-/// Ports `llama_adapter_meta_key_by_index` (llama-adapter.cpp:475 @d81235049).
+/// Ports `llama_adapter_meta_key_by_index` (llama-adapter.cpp:479 @620d2225c).
 ///
 /// Return: the length `snprintf` reports, or -1 with `buf` emptied when `i`
 /// is out of range.
@@ -90,7 +90,7 @@ pub fn llama_adapter_meta_key_by_index(a: ?*const c.struct_llama_adapter_lora, i
     return printStr(buf, buf_size, metaAt(l, @intCast(i)).key);
 }
 
-/// Ports `llama_adapter_meta_val_str_by_index` (llama-adapter.cpp:487 @d81235049).
+/// Ports `llama_adapter_meta_val_str_by_index` (llama-adapter.cpp:491 @620d2225c).
 ///
 /// Return: the length `snprintf` reports, or -1 with `buf` emptied when `i`
 /// is out of range.
@@ -103,42 +103,42 @@ pub fn llama_adapter_meta_val_str_by_index(a: ?*const c.struct_llama_adapter_lor
     return c.snprintf(buf, buf_size, "%s", metaAt(l, @intCast(i)).value.ptr);
 }
 
-/// Ports `llama_adapter_lora_free` (llama-adapter.cpp:499 @d81235049).
+/// Ports `llama_adapter_lora_free` (llama-adapter.cpp:503 @620d2225c).
 pub fn llama_adapter_lora_free(a: ?*c.struct_llama_adapter_lora) callconv(.c) void {
     adapter.loraFree(if (a == null) null else loraOf(a));
 }
 
-/// Ports `llama_adapter_get_alora_n_invocation_tokens` (llama-adapter.cpp:512
-/// @d81235049).
+/// Ports `llama_adapter_get_alora_n_invocation_tokens` (llama-adapter.cpp:516
+/// @620d2225c).
 pub fn llama_adapter_get_alora_n_invocation_tokens(a: ?*const c.struct_llama_adapter_lora) callconv(.c) u64 {
     if (a == null) return 0;
     return loraOf(a).alora_invocation_tokens.items.len;
 }
 
-/// Ports `llama_adapter_get_alora_invocation_tokens` (llama-adapter.cpp:519
-/// @d81235049).
+/// Ports `llama_adapter_get_alora_invocation_tokens` (llama-adapter.cpp:523
+/// @620d2225c).
 ///
 /// Return: the tokens, borrowed from the adapter; null when the vector
 /// never allocated, as an empty `std::vector`'s `data()` is.
 pub fn llama_adapter_get_alora_invocation_tokens(a: ?*const c.struct_llama_adapter_lora) callconv(.c) [*c]const c.llama_token {
-    impl.assert(a != null, "llama-adapter.cpp", 520, "adapter");
+    impl.assert(a != null, "llama-adapter.cpp", 524, "adapter");
     const toks = &loraOf(a).alora_invocation_tokens;
     if (toks.capacity == 0) return null;
     return toks.items.ptr;
 }
 
-/// Ports `llama_set_adapters_lora` (llama-context.cpp:4135 @d81235049).
+/// Ports `llama_set_adapters_lora` (llama-context.cpp:4355 @620d2225c).
 ///
 /// Return: 0.
 pub fn llama_set_adapters_lora(ctx: ?*c.struct_llama_context, adapters: [*c]?*c.struct_llama_adapter_lora, n_adapters: usize, scales: [*c]f32) callconv(.c) i32 {
     if (adapters == null or scales == null) {
-        impl.assert(n_adapters == 0, "llama-context.cpp", 4141, "n_adapters == 0 && \"invalid llama_set_adapters_lora call\"");
+        impl.assert(n_adapters == 0, "llama-context.cpp", 4361, "n_adapters == 0 && \"invalid llama_set_adapters_lora call\"");
     }
     ctx_api.ctxOf(ctx).setAdaptersLora(@ptrCast(adapters), n_adapters, scales);
     return 0;
 }
 
-/// Ports `llama_set_adapter_cvec` (llama-context.cpp:4149 @d81235049).
+/// Ports `llama_set_adapter_cvec` (llama-context.cpp:4369 @620d2225c).
 ///
 /// Return: 0 when the control vector was applied, -1 otherwise.
 pub fn llama_set_adapter_cvec(ctx: ?*c.struct_llama_context, data: [*c]const f32, len: usize, n_embd: i32, il_start: i32, il_end: i32) callconv(.c) i32 {

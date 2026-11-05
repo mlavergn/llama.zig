@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/fattn-mma-f16.cuh` at v0.6.0 (`d81235049`).
+//! `llama.cpp/ggml/src/ggml-cuda/fattn-mma-f16.cuh` at v0.7.0 (`620d2225c`).
 //! v0.4.1's `fattn-swizzle.cuh` is gone since v0.5.0; its host half, the
 //! K/V tile stride, is `ggml_cuda_fattn_mma_get_swizzled` and, since
 //! v0.6.0, one inline line in `ggml_cuda_flash_attn_ext_mma_f16_case`.
@@ -35,7 +35,7 @@ const Tensor = c.ggml_tensor;
 /// `sizeof(half2)`.
 const sizeof_half2 = 4;
 
-/// Ports `fattn_mma_config` (fattn-mma-f16.cuh:10 @d81235049).
+/// Ports `fattn_mma_config` (fattn-mma-f16.cuh:10 @620d2225c).
 pub const Config = struct {
     /// Number of threads per CUDA block.
     nthreads: c_int,
@@ -65,7 +65,7 @@ fn lookup(t: *const table.MmaTable, DKQ: c_int, DV: c_int, ncols: c_int) Config 
     return lookup(t.fallthrough.?, DKQ, DV, ncols);
 }
 
-/// Ports the host `ggml_cuda_fattn_mma_get_config` (fattn-mma-f16.cuh:234 @d81235049).
+/// Ports the host `ggml_cuda_fattn_mma_get_config` (fattn-mma-f16.cuh:234 @620d2225c).
 /// The `amd_mfma_available` and `amd_wmma_available` arms, which pick the
 /// CDNA and RDNA tables, are false for every CUDA compute capability; those
 /// tables are not generated.
@@ -80,7 +80,7 @@ fn getConfig(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) Config {
     return lookup(&table.mma_volta, DKQ, DV, ncols);
 }
 
-/// Ports `get_cols_per_warp` (fattn-mma-f16.cuh:340 @d81235049).
+/// Ports `get_cols_per_warp` (fattn-mma-f16.cuh:340 @620d2225c).
 fn getColsPerWarp(cc: c_int) c_int {
     if (common.turingMmaAvailable(cc) or fattn_common.amdWmmaAvailable(cc) or fattn_common.amdMfmaAvailable(cc)) {
         return 16;
@@ -90,8 +90,8 @@ fn getColsPerWarp(cc: c_int) c_int {
     }
 }
 
-/// Ports the host `ggml_cuda_fattn_mma_get_nstages` (fattn-mma-f16.cuh:365 @d81235049),
-/// with `ggml_cuda_fattn_mma_get_nstages_target` (fattn-mma-f16.cuh:316 @d81235049)
+/// Ports the host `ggml_cuda_fattn_mma_get_nstages` (fattn-mma-f16.cuh:365 @620d2225c),
+/// with `ggml_cuda_fattn_mma_get_nstages_target` (fattn-mma-f16.cuh:316 @620d2225c)
 /// inlined.
 fn getNstages(DKQ: c_int, DV: c_int, ncols1: c_int, ncols2: c_int, cc: c_int) c_int {
     return if (common.cpAsyncAvailable(cc) and ncols2 >= 2) getConfig(DKQ, DV, ncols1 * ncols2, cc).nstages_target else 0;
@@ -136,7 +136,7 @@ fn library(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols
         "fattn";
 }
 
-/// Ports the host `ggml_cuda_fattn_mma_get_swizzled` (fattn-mma-f16.cuh:349 @d81235049):
+/// Ports the host `ggml_cuda_fattn_mma_get_swizzled` (fattn-mma-f16.cuh:349 @620d2225c):
 /// a K/V shared-memory tile is XOR-swizzled instead of padded by four
 /// `half2` when there is ldmatrix (Turing and later) and both the K and the
 /// V batch are a multiple of 32 `half2`. The kernels compute the same at
@@ -150,7 +150,7 @@ fn getSwizzled(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) bool {
         @rem(cfg.nbatch_K2, 32) == 0 and @rem(cfg.nbatch_V2, 32) == 0;
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_mma_f16_may_use_sparse` (fattn-mma-f16.cuh:1788 @d81235049):
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16_may_use_sparse` (fattn-mma-f16.cuh:1788 @620d2225c):
 /// the `(DKQ, DV, ncols1, ncols2)` instantiations that have a sparse-gather
 /// kernel, `use_sparse = true`. `fattn.zig`'s `ncols1` switch asks it too,
 /// at compile time, and `getBestKernel` at run time.
@@ -174,7 +174,7 @@ fn kernel(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1
     }));
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_mma_f16_case` (fattn-mma-f16.cuh:2008 @d81235049).
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16_case` (fattn-mma-f16.cuh:2008 @620d2225c).
 ///
 /// The C raises each kernel's dynamic shared-memory limit once per device
 /// behind a function-local `static bool[GGML_CUDA_MAX_DEVICES]`, one per

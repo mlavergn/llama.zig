@@ -55,27 +55,26 @@ test "a task and its streamed results go through the queues and the reader's sta
     t.id = q.getNewId();
     const a = try t.arenaAlloc(gpa);
     t.params = try task_mod.TaskParams.init(a);
-    t.params.chat_parser_params.generation_prompt = "<g>";
     const id = t.id;
     try reader.postTask(t, false);
 
     const p = try result_mod.Result.create(gpa, .cmpl_partial);
     p.id = id;
-    p.kind.cmpl_partial.content = "he";
+    p.kind.cmpl_partial.content = try .fromText(p.alloc(), "he");
     p.kind.cmpl_partial.n_decoded = 1;
     try resp.send(p);
     const f = try result_mod.Result.create(gpa, .cmpl_final);
     f.id = id;
-    f.kind.cmpl_final.content = "llo";
+    f.kind.cmpl_final.content = try .fromText(f.alloc(), "llo");
     try resp.send(f);
 
     const r1 = (try reader.next(NeverStop{})).?;
     defer r1.destroy(gpa);
     try std.testing.expect(!r1.isStop());
-    try std.testing.expectEqualStrings("<g>he", r1.kind.cmpl_partial.oaicompat_msg_diffs.items[0].content_delta);
+    try std.testing.expectEqualStrings("he", r1.kind.cmpl_partial.oaicompat_msg_diffs.items[0].content_delta);
     const r2 = (try reader.next(NeverStop{})).?;
     defer r2.destroy(gpa);
     try std.testing.expect(r2.isStop());
-    try std.testing.expectEqualStrings("<g>hello", r2.kind.cmpl_final.oaicompat_msg.content);
+    try std.testing.expectEqualStrings("hello", r2.kind.cmpl_final.oaicompat_msg.content);
     try std.testing.expect(!reader.hasNext());
 }

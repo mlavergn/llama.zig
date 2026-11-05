@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/openai-moe.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/openai-moe.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_openai_moe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_openai_moe`'s `load_arch_hparams` (models/openai-moe.cpp:3 @d81235049).
+/// Ports `llama_model_openai_moe`'s `load_arch_hparams` (models/openai-moe.cpp:3 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -44,7 +44,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_openai_moe`'s `load_arch_tensors` (models/openai-moe.cpp:22 @d81235049).
+/// Ports `llama_model_openai_moe`'s `load_arch_tensors` (models/openai-moe.cpp:22 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const n_ff_exp: i64 = self.hparams.nFfExp(0);
@@ -81,13 +81,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_openai_moe`'s `build_arch_graph` (models/openai-moe.cpp:58 @d81235049).
+/// Ports `llama_model_openai_moe`'s `build_arch_graph` (models/openai-moe.cpp:58 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_openai_moe`'s `graph`
-/// (models/openai-moe.cpp:62 @d81235049).
+/// (models/openai-moe.cpp:62 @620d2225c).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -134,7 +134,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
             b.cb(cur, "attn_out", il);
         }
-        if (il == b.n_layer - 1 and b.cparams.embeddings_nextn_masked) {
+        if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
             // Skip computing the output of unused tokens.
             cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
             inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
@@ -177,7 +177,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     b.res.t_h_nextn = cur;
 
-    if (!b.cparams.embeddings_nextn_masked) {
+    if (b.cropAfterNextn(inp_out_ids)) {
         cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
@@ -191,8 +191,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

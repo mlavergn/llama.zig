@@ -247,7 +247,7 @@ static bool no_callback(int i, struct ggml_tensor * t1, struct ggml_tensor * t2,
     return true;
 }
 
-/* `graph_copy_dup_tensor` (ggml-backend.cpp:2305 @d81235049) records a
+/* `graph_copy_dup_tensor` (ggml-backend.cpp:2262 @620d2225c) records a
  * node's copy only after copying its sources, so `ggml_cast`'s `src[1]`,
  * the node itself, comes back NULL in the copy. Put it back; see the file
  * comment. */
@@ -756,6 +756,60 @@ static struct ggml_tensor * build_prealloc_y_reuse(struct ggml_context * ctx, st
 static struct ggml_tensor * build_prealloc_y_soft_max(struct ggml_context * c, struct ggml_tensor ** t) { return build_prealloc_y_reuse(c, t, false); }
 static struct ggml_tensor * build_prealloc_y_fa_sparse(struct ggml_context * c, struct ggml_tensor ** t) { return build_prealloc_y_reuse(c, t, true); }
 
+/* v0.7.0: a BF16 src1 reaches MUL_MAT's matrix-matrix path whatever src0
+ * is, through `ggml_vk_mul_mat_b_type` -- widened to F32 where an F32 B
+ * pipeline exists, converted through the new `cpy_bf16_f16` where only
+ * the f16 one does. Upstream's f32 x bf16 cases have n of 1 and 8, both
+ * taken by the vector kernel, so no case reaches the matrix path. */
+static struct ggml_tensor * build_mm_b(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum ggml_type ta, enum ggml_type tb, int64_t m, int64_t n, int64_t k) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, ta, k, m);
+    struct ggml_tensor * b = ggml_new_tensor_2d(ctx, tb, k, n);
+    struct ggml_tensor * out = ggml_mul_mat(ctx, a, b);
+    *cmp = out;
+    return out;
+}
+static struct ggml_tensor * build_mm_f32_bf16(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_b(c, t, GGML_TYPE_F32, GGML_TYPE_BF16, 64, 32, 256); }
+static struct ggml_tensor * build_mm_f16_bf16(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_b(c, t, GGML_TYPE_F16, GGML_TYPE_BF16, 64, 32, 256); }
+static struct ggml_tensor * build_mm_q4_0_bf16(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_b(c, t, GGML_TYPE_Q4_0, GGML_TYPE_BF16, 64, 32, 256); }
+static struct ggml_tensor * build_mm_q4_k_bf16(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_b(c, t, GGML_TYPE_Q4_K, GGML_TYPE_BF16, 64, 48, 512); }
+
+/* v0.7.0: MUL_MAT_ID's prepass handles an expert repeated within a token's
+ * row, and splits each expert's rows into tiles of the matmul's BN.
+ * Upstream's duplicate-id cases (`test_mul_mat_id_dup`) are disabled
+ * until CUDA supports them, so none runs; here six slots over four experts
+ * repeat two of them in every row, past the vector path's 8 tokens, and a
+ * second case gives each expert ~150 rows, several tiles each. */
+static struct ggml_tensor * build_mm_id(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum ggml_type ta, int64_t n_as, int64_t n_used, int64_t n_tokens) {
+    const int64_t k = 256, m = 64;
+    struct ggml_tensor * as = ggml_new_tensor_3d(ctx, ta, k, m, n_as);
+    struct ggml_tensor * b = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, k, n_used, n_tokens);
+    struct ggml_tensor * ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, n_used, n_tokens);
+    char name[32];
+    snprintf(name, sizeof(name), "ids:%d", (int) n_as);
+    ggml_set_name(ids, name);
+    struct ggml_tensor * out = ggml_mul_mat_id(ctx, as, b, ids);
+    *cmp = out;
+    return out;
+}
+static struct ggml_tensor * build_mm_id_dup_q4_0(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_id(c, t, GGML_TYPE_Q4_0, 4, 6, 33); }
+static struct ggml_tensor * build_mm_id_dup_f16(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_id(c, t, GGML_TYPE_F16, 4, 6, 33); }
+static struct ggml_tensor * build_mm_id_tiles_q4_0(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_id(c, t, GGML_TYPE_Q4_0, 4, 2, 300); }
+
+/* v0.7.0: POOL_2D takes the subgroup shader when the window is at least
+ * the subgroup size. Upstream's windows are 1, 3, 32, 64 and 128 wide, so
+ * on a device whose subgroups are 4, 8 or 16 lanes none sits at the
+ * threshold, and `>` for `>=` passed them all on llvmpipe. One window
+ * each at 4, 8 and 16; averaged, whose sum order the shader choice moves. */
+static struct ggml_tensor * build_pool2d_w(struct ggml_context * ctx, struct ggml_tensor ** cmp, int k0) {
+    struct ggml_tensor * a = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 67 * k0 + 5, 7, 3, 2);
+    struct ggml_tensor * out = ggml_pool_2d(ctx, a, GGML_OP_POOL_AVG, k0, 2, k0, 1, 0.0f, 0.0f);
+    *cmp = out;
+    return out;
+}
+static struct ggml_tensor * build_pool2d_w4(struct ggml_context * c, struct ggml_tensor ** t) { return build_pool2d_w(c, t, 4); }
+static struct ggml_tensor * build_pool2d_w8(struct ggml_context * c, struct ggml_tensor ** t) { return build_pool2d_w(c, t, 8); }
+static struct ggml_tensor * build_pool2d_w16(struct ggml_context * c, struct ggml_tensor ** t) { return build_pool2d_w(c, t, 16); }
+
 /* Shapes and patterns upstream's list lacks; each later layer of the port
  * adds the cases its host code needs. */
 static int extra_cases(const char * filter) {
@@ -773,6 +827,16 @@ static int extra_cases(const char * filter) {
         { "CONV_3D",           "conv_3d, input one element misaligned",             build_conv_3d_misaligned },
         { "SOFT_MAX",          "q4_0 matmul, 20000-column soft_max, matmul of the same src1", build_prealloc_y_soft_max },
         { "FLASH_ATTN_EXT",    "q4_0 matmul, sparse flash attention, matmul of the same src1", build_prealloc_y_fa_sparse },
+        { "MUL_MAT",           "f32 x bf16 64x32x256, matrix path",                build_mm_f32_bf16 },
+        { "MUL_MAT",           "f16 x bf16 64x32x256, matrix path",                build_mm_f16_bf16 },
+        { "MUL_MAT",           "q4_0 x bf16 64x32x256, matrix path",               build_mm_q4_0_bf16 },
+        { "MUL_MAT",           "q4_K x bf16 64x48x512, matrix path",               build_mm_q4_k_bf16 },
+        { "MUL_MAT_ID",        "q4_0, 6 slots over 4 experts, duplicates, 33 tokens", build_mm_id_dup_q4_0 },
+        { "MUL_MAT_ID",        "f16, 6 slots over 4 experts, duplicates, 33 tokens",  build_mm_id_dup_f16 },
+        { "MUL_MAT_ID",        "q4_0, 2 slots over 4 experts, 300 tokens",           build_mm_id_tiles_q4_0 },
+        { "POOL_2D",           "avg pool, window 4 wide",                         build_pool2d_w4 },
+        { "POOL_2D",           "avg pool, window 8 wide",                         build_pool2d_w8 },
+        { "POOL_2D",           "avg pool, window 16 wide",                        build_pool2d_w16 },
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

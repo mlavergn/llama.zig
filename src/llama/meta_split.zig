@@ -8,7 +8,7 @@
 //! - `llama.cpp/src/llama-model.h` -- `llama_meta_device_get_split_state_userdata`
 //! - `llama.cpp/src/llama-model.cpp` -- `llama_meta_device_get_split_state`
 //!
-//! All at v0.6.0 (`d81235049`).
+//! All at v0.7.0 (`620d2225c`).
 //!
 //! # Gating
 //!
@@ -28,8 +28,8 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 const SplitState = c.struct_ggml_backend_meta_split_state;
 
-/// Ports `llama_meta_device_get_split_state_userdata` (llama-model.h:616
-/// @d81235049).
+/// Ports `llama_meta_device_get_split_state_userdata` (llama-model.h:635
+/// @620d2225c).
 pub const Userdata = extern struct {
     n_devices: usize = 0,
     model: ?*const Model = null,
@@ -45,6 +45,7 @@ const axis_partial: c_uint = c.GGML_BACKEND_SPLIT_AXIS_PARTIAL;
 const pattern_sources = [_][]const u8{
     "blk\\.\\d*\\.attn_q.weight", // q_weight
     "blk\\.\\d*\\.attn_(k|v).weight", // kv_weight
+    "blk\\.\\d*\\.attn_v_exps.weight", // v_exps_weight, K2 Horizon's MoVA
     "blk\\.\\d*\\.attn_qkv.weight", // qkv_weight
     "blk\\.\\d*\\.attn_q\\.bias", // q_bias
     "blk\\.\\d*\\.attn_(k|v)\\.bias", // kv_bias
@@ -88,6 +89,7 @@ const pattern_sources = [_][]const u8{
 const P = enum(u8) {
     q_weight,
     kv_weight,
+    v_exps_weight,
     qkv_weight,
     q_bias,
     kv_bias,
@@ -164,7 +166,7 @@ const Ctx = struct {
     }
 };
 
-/// `tensor_config` (llama-model.cpp:430 @d81235049).
+/// `tensor_config` (llama-model.cpp:439 @620d2225c).
 const TensorConfig = struct {
     axis: c_uint,
     tensor_axis_0: *const Tensor,
@@ -184,7 +186,7 @@ fn stoull(s: []const u8) u64 {
     var v: u64 = 0;
     const start = i;
     while (i < s.len and std.ascii.isDigit(s[i])) : (i += 1) v = v *% 10 +% (s[i] - '0');
-    if (i == start) impl.abort("llama-model.cpp", 460, "std::stoull: no conversion");
+    if (i == start) impl.abort("llama-model.cpp", 469, "std::stoull: no conversion");
     return v;
 }
 
@@ -195,7 +197,7 @@ fn lcm(a: i64, b: i64) i64 {
     return @intCast(aa / std.math.gcd(aa, bb) * bb);
 }
 
-/// The `get_tensor_config_impl` lambda (llama-model.cpp:439 @d81235049).
+/// The `get_tensor_config_impl` lambda (llama-model.cpp:448 @620d2225c).
 fn configImpl(cx: *const Ctx, axis: c_uint, suffix: []const u8, suffix_fallback: []const u8) TensorConfig {
     const hparams = &cx.model.hparams;
     const n_devices = cx.ud.n_devices;
@@ -221,12 +223,12 @@ fn configImpl(cx: *const Ctx, axis: c_uint, suffix: []const u8, suffix_fallback:
     var rotation: usize = 0;
     const name = cx.name;
     if (name.len >= 4 and std.mem.eql(u8, name[0..4], "blk.")) {
-        const length_prefix = std.mem.indexOfScalarPos(u8, name, 4, '.') orelse impl.abort("llama-model.cpp", 458, "GGML_ASSERT(length_prefix != std::string::npos) failed");
+        const length_prefix = std.mem.indexOfScalarPos(u8, name, 4, '.') orelse impl.abort("llama-model.cpp", 467, "GGML_ASSERT(length_prefix != std::string::npos) failed");
         prefix = name[0 .. length_prefix + 1];
         il = @truncate(stoull(name[4..@min(name.len, 4 + length_prefix)]));
         rotation = getIlEff(hparams, il) % n_devices;
     } else if (name.len >= 6 and std.mem.eql(u8, name[0..6], "cache_")) {
-        const layer_index_start = std.mem.indexOfPos(u8, name, 6, "_l") orelse impl.abort("llama-model.cpp", 464, "GGML_ASSERT(layer_index_start != std::string::npos) failed");
+        const layer_index_start = std.mem.indexOfPos(u8, name, 6, "_l") orelse impl.abort("llama-model.cpp", 473, "GGML_ASSERT(layer_index_start != std::string::npos) failed");
         il = @truncate(stoull(name[layer_index_start + 2 ..]));
         prefix = std.fmt.bufPrint(&prefix_buf, "blk.{d}.", .{il}) catch unreachable;
         rotation = getIlEff(hparams, il) % n_devices;
@@ -244,15 +246,15 @@ fn configImpl(cx: *const Ctx, axis: c_uint, suffix: []const u8, suffix_fallback:
         tensor_axis_0 = cx.model.getTensor(full);
     }
     if (tensor_axis_0 == null) {
-        impl.assert(suffix_fallback.len != 0, "llama-model.cpp", 474, "!suffix_fallback.empty()");
+        impl.assert(suffix_fallback.len != 0, "llama-model.cpp", 483, "!suffix_fallback.empty()");
         const full = std.fmt.bufPrint(&nb, "{s}{s}", .{ prefix, suffix_fallback }) catch unreachable;
         tensor_axis_0 = cx.model.getTensor(full);
     }
-    impl.assert(tensor_axis_0 != null, "llama-model.cpp", 477, "tensor_axis_0 != nullptr");
+    impl.assert(tensor_axis_0 != null, "llama-model.cpp", 486, "tensor_axis_0 != nullptr");
     return .{ .axis = axis, .tensor_axis_0 = tensor_axis_0.?, .il = il, .rotation = rotation };
 }
 
-/// The `get_tensor_config` lambda (llama-model.cpp:481 @d81235049).
+/// The `get_tensor_config` lambda (llama-model.cpp:490 @620d2225c).
 fn tensorConfig(cx: *const Ctx) TensorConfig {
     if (cx.model.arch == .hrm_text) {
         // aliased cache slots cannot satisfy the meta-split invariants, so replicate all tensors
@@ -276,6 +278,9 @@ fn tensorConfig(cx: *const Ctx) TensorConfig {
 
     // Standard attention.
     if (cx.m(.q_weight) or cx.m(.kv_weight)) return configImpl(cx, axis_1, "attn_output.weight", "ssm_out.weight");
+    // the routed value experts `{n_embd, n_embd_v_gqa, n_expert}` produce V,
+    // so they split as attn_v does
+    if (cx.m(.v_exps_weight)) return configImpl(cx, axis_1, "attn_output.weight", "");
     if (cx.m(.q_bias) or cx.m(.kv_bias)) return configImpl(cx, axis_0, "attn_output.weight", "ssm_out.weight");
     if (cx.m(.qkv_weight)) return configImpl(cx, axis_1, "attn_output.weight", "ssm_out.weight");
     if (cx.m(.qkv_bias)) return configImpl(cx, axis_0, "attn_output.weight", "ssm_out.weight");
@@ -311,7 +316,7 @@ fn tensorConfig(cx: *const Ctx) TensorConfig {
         return configImpl(cx, axis_1, "", "");
     }
     if (cx.m(.output_bias)) {
-        impl.assert(cx.model.getTensor("output.weight") != null, "llama-model.cpp", 601, "output_weight != nullptr");
+        impl.assert(cx.model.getTensor("output.weight") != null, "llama-model.cpp", 614, "output_weight != nullptr");
         return configImpl(cx, axis_0, "", "");
     }
 
@@ -324,7 +329,7 @@ fn segs(out: *[max_segments]Segment, list: []const Segment) usize {
     return list.len;
 }
 
-/// The `get_split_segments` lambda (llama-model.cpp:610 @d81235049): a
+/// The `get_split_segments` lambda (llama-model.cpp:623 @620d2225c): a
 /// model's fused tensors in their segments.
 fn splitSegments(cx: *const Ctx, axis: usize, il: u32, out: *[max_segments]Segment) usize {
     const hparams = &cx.model.hparams;
@@ -336,8 +341,8 @@ fn splitSegments(cx: *const Ctx, axis: usize, il: u32, out: *[max_segments]Segme
         if (!hparams.isRecr(il) and (cx.m(.qkv_weight) or cx.m(.qkv_bias))) {
             const n_embd: i64 = hparams.nHead(il) *% hparams.nEmbdHeadK(il) *% 2;
             const n_embd_gqa: i64 = hparams.nEmbdVGqa(il);
-            impl.assert(hparams.nEmbdKGqa(il) == n_embd_gqa, "llama-model.cpp", 619, "hparams.n_embd_k_gqa(il) == n_embd_gqa");
-            impl.assert(t.ne[axis] == n_embd + 2 * n_embd_gqa, "llama-model.cpp", 620, "tensor->ne[axis] == n_embd + 2*n_embd_gqa");
+            impl.assert(hparams.nEmbdKGqa(il) == n_embd_gqa, "llama-model.cpp", 632, "hparams.n_embd_k_gqa(il) == n_embd_gqa");
+            impl.assert(t.ne[axis] == n_embd + 2 * n_embd_gqa, "llama-model.cpp", 633, "tensor->ne[axis] == n_embd + 2*n_embd_gqa");
             return segs(out, &.{ .{ .ne = n_embd, .nr = 1 }, .{ .ne = n_embd_gqa, .nr = 2 } });
         }
 
@@ -354,7 +359,7 @@ fn splitSegments(cx: *const Ctx, axis: usize, il: u32, out: *[max_segments]Segme
         // on the scale of K.
         if (a == .qwen3next) {
             if (cx.m(.qkv_weight) or cx.m(.ssm_conv1d)) {
-                impl.assert(t.ne[axis] == 2 * key_dim + value_dim, "llama-model.cpp", 636, "tensor->ne[axis] == 2*key_dim + value_dim");
+                impl.assert(t.ne[axis] == 2 * key_dim + value_dim, "llama-model.cpp", 649, "tensor->ne[axis] == 2*key_dim + value_dim");
                 return segs(out, &.{ .{ .ne = key_dim, .nr = 2 }, .{ .ne = value_dim, .nr = 1 } });
             }
             if (cx.m(.r_cache)) return segs(out, &.{ .{ .ne = key_dim * d_conv_1, .nr = 2 }, .{ .ne = value_dim * d_conv_1, .nr = 1 } });
@@ -362,7 +367,7 @@ fn splitSegments(cx: *const Ctx, axis: usize, il: u32, out: *[max_segments]Segme
             const head_ratio = @divTrunc(n_v_heads, n_k_heads);
             const hr: u32 = @truncate(@as(u64, @bitCast(head_ratio)));
             if (cx.m(.qkv_weight) or cx.m(.ssm_conv1d)) {
-                impl.assert(t.ne[axis] == 2 * key_dim + value_dim, "llama-model.cpp", 645, "tensor->ne[axis] == 2*key_dim + value_dim");
+                impl.assert(t.ne[axis] == 2 * key_dim + value_dim, "llama-model.cpp", 658, "tensor->ne[axis] == 2*key_dim + value_dim");
                 return segs(out, &.{.{ .ne = key_dim, .nr = 2 +% hr }});
             }
             if (cx.m(.attn_gate_weight) or cx.m(.ssm_out_weight)) return segs(out, &.{.{ .ne = key_dim, .nr = hr }});
@@ -374,7 +379,7 @@ fn splitSegments(cx: *const Ctx, axis: usize, il: u32, out: *[max_segments]Segme
         // The FFN is the same for both.
         if (cx.m(.ffn_gate_up_weight)) {
             const n_ff_exp: i64 = hparams.nFfExp(il);
-            impl.assert(t.ne[axis] == 2 * n_ff_exp, "llama-model.cpp", 666, "tensor->ne[axis] == 2*n_ff_exp");
+            impl.assert(t.ne[axis] == 2 * n_ff_exp, "llama-model.cpp", 679, "tensor->ne[axis] == 2*n_ff_exp");
             return segs(out, &.{.{ .ne = n_ff_exp, .nr = 2 }});
         }
         return segs(out, &.{.{ .ne = t.ne[axis], .nr = 1 }});
@@ -384,7 +389,7 @@ fn splitSegments(cx: *const Ctx, axis: usize, il: u32, out: *[max_segments]Segme
         const n_embd_q: i64 = hparams.nHead(il) *% hparams.nEmbdHeadK(il);
         const n_embd_k: i64 = hparams.nEmbdKGqa(il);
         const n_embd_v: i64 = hparams.nEmbdVGqa(il);
-        impl.assert(t.ne[axis] == n_embd_q + n_embd_k + n_embd_v, "llama-model.cpp", 676, "tensor->ne[axis] == n_embd_q + n_embd_k + n_embd_v");
+        impl.assert(t.ne[axis] == n_embd_q + n_embd_k + n_embd_v, "llama-model.cpp", 689, "tensor->ne[axis] == n_embd_q + n_embd_k + n_embd_v");
         if (n_embd_k == n_embd_v) {
             return segs(out, &.{ .{ .ne = n_embd_q, .nr = 1 }, .{ .ne = n_embd_k, .nr = 2 } });
         }
@@ -400,7 +405,7 @@ fn splitSegments(cx: *const Ctx, axis: usize, il: u32, out: *[max_segments]Segme
     }
     if (cx.m(.ffn_gate_up_weight)) {
         const n_ff_exp: i64 = hparams.nFfExp(il);
-        impl.assert(t.ne[axis] == 2 * n_ff_exp, "llama-model.cpp", 694, "tensor->ne[axis] == 2*n_ff_exp");
+        impl.assert(t.ne[axis] == 2 * n_ff_exp, "llama-model.cpp", 707, "tensor->ne[axis] == 2*n_ff_exp");
         return segs(out, &.{.{ .ne = n_ff_exp, .nr = 2 }});
     }
     return segs(out, &.{.{ .ne = t.ne[axis], .nr = 1 }});
@@ -410,7 +415,7 @@ fn fill(out: *[max_segments]i64, n: usize, v: i64) void {
     for (out[0..n]) |*g| g.* = v;
 }
 
-/// The `get_split_granularity` lambda (llama-model.cpp:700 @d81235049).
+/// The `get_split_granularity` lambda (llama-model.cpp:713 @620d2225c).
 fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, out: *[max_segments]i64) void {
     const hparams = &cx.model.hparams;
     const t = cx.tensor;
@@ -441,7 +446,7 @@ fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, 
         const granularity_q = lcm(n_embd_q, blck_size_perf);
         const granularity_head = @divTrunc(granularity_q, @as(i64, hparams.nEmbdHeadK(il)));
         if (cx.m(.attn_sinks)) {
-            impl.assert(n_segments == 1, "llama-model.cpp", 738, "segments.size() == 1");
+            impl.assert(n_segments == 1, "llama-model.cpp", 751, "segments.size() == 1");
             if (cx.is_dsv4) {
                 out[0] = hparams.nHead(il) / hparams.dsv4_o_group_count;
                 return;
@@ -452,27 +457,27 @@ fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, 
 
         if (cx.is_dsv4) {
             if (cx.m(.attn_q_b_weight)) {
-                impl.assert(n_segments == 1, "llama-model.cpp", 747, "segments.size() == 1");
+                impl.assert(n_segments == 1, "llama-model.cpp", 760, "segments.size() == 1");
                 // The grouped output projection needs whole groups of heads.
                 const n_head_group: i64 = hparams.nHead(il) / hparams.dsv4_o_group_count;
                 out[0] = n_head_group * hparams.nEmbdHeadK(il);
                 return;
             }
             if (cx.m(.attn_out_a_weight)) {
-                impl.assert(n_segments == 1, "llama-model.cpp", 753, "segments.size() == 1");
+                impl.assert(n_segments == 1, "llama-model.cpp", 766, "segments.size() == 1");
                 out[0] = 1;
                 return;
             }
             if (cx.m(.attn_out_b_weight)) {
-                impl.assert(n_segments == 1, "llama-model.cpp", 757, "segments.size() == 1");
+                impl.assert(n_segments == 1, "llama-model.cpp", 770, "segments.size() == 1");
                 // The boundaries align with wo_a's per-group split.
-                impl.assert(@rem(@as(i64, hparams.dsv4_o_lora_rank), blck_size) == 0, "llama-model.cpp", 759, "hparams.dsv4_o_lora_rank % blck_size == 0");
+                impl.assert(@rem(@as(i64, hparams.dsv4_o_lora_rank), blck_size) == 0, "llama-model.cpp", 772, "hparams.dsv4_o_lora_rank % blck_size == 0");
                 out[0] = hparams.dsv4_o_lora_rank;
                 return;
             }
         }
         if (cx.m(.q_weight) or cx.m(.q_bias)) {
-            impl.assert(n_segments == 1, "llama-model.cpp", 764, "segments.size() == 1");
+            impl.assert(n_segments == 1, "llama-model.cpp", 777, "segments.size() == 1");
             // Q gate tensors double the granularity.
             const a = cx.model.arch;
             if (a == .qwen3next or a == .qwen35 or a == .qwen35moe or a == .clef or a == .qwen4exp) {
@@ -483,12 +488,12 @@ fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, 
             return;
         }
         if (cx.m(.attn_out_weight)) {
-            impl.assert(n_segments == 1, "llama-model.cpp", 774, "segments.size() == 1");
+            impl.assert(n_segments == 1, "llama-model.cpp", 787, "segments.size() == 1");
             out[0] = granularity_head * hparams.nEmbdHeadV(il);
             return;
         }
         if (cx.m(.attn_gate_weight)) {
-            impl.assert(n_segments == 1, "llama-model.cpp", 778, "segments.size() == 1");
+            impl.assert(n_segments == 1, "llama-model.cpp", 791, "segments.size() == 1");
             out[0] = if (t.ne[1] == hparams.nHead(il)) granularity_head else granularity_q;
             return;
         }
@@ -498,8 +503,8 @@ fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, 
         // V tensors align to whole V heads at Q and K's head scale, so all
         // three stay in step per device.
         const granularity_v = @divTrunc(granularity_kv, @as(i64, hparams.nEmbdHeadK(il))) * hparams.nEmbdHeadV(il);
-        if (cx.m(.kv_weight) or cx.m(.kv_bias) or cx.m(.kv_cache)) {
-            impl.assert(n_segments == 1, "llama-model.cpp", 793, "segments.size() == 1");
+        if (cx.m(.kv_weight) or cx.m(.v_exps_weight) or cx.m(.kv_bias) or cx.m(.kv_cache)) {
+            impl.assert(n_segments == 1, "llama-model.cpp", 807, "segments.size() == 1");
             const is_v = std.mem.indexOf(u8, cx.name, "attn_v") != null or std.mem.indexOf(u8, cx.name, "cache_v") != null;
             out[0] = if (is_v) granularity_v else granularity_kv;
             return;
@@ -520,7 +525,7 @@ fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, 
                 out[2] = granularity_v;
                 return;
             }
-            impl.assert(n_segments == 2, "llama-model.cpp", 808, "segments.size() == 2");
+            impl.assert(n_segments == 2, "llama-model.cpp", 822, "segments.size() == 2");
             out[0] = granularity_q;
             out[1] = granularity_kv;
             return;
@@ -533,18 +538,18 @@ fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, 
         cx.m(.ffn_gate_shexp_weight) or cx.m(.ffn_down_shexp_weight))
     {
         const blck_size_perf = lcm(blck_size, 128);
-        impl.assert(n_segments == 1, "llama-model.cpp", 822, "segments.size() == 1");
+        impl.assert(n_segments == 1, "llama-model.cpp", 836, "segments.size() == 1");
         out[0] = blck_size_perf;
         return;
     }
 
     // Everything else.
-    impl.assert(n_segments == 1, "llama-model.cpp", 827, "segments.size() == 1");
+    impl.assert(n_segments == 1, "llama-model.cpp", 841, "segments.size() == 1");
     out[0] = 1;
 }
 
-/// Ports `llama_meta_device_get_split_state` (llama-model.cpp:379
-/// @d81235049): which slice of `tensor` each device holds.
+/// Ports `llama_meta_device_get_split_state` (llama-model.cpp:387
+/// @620d2225c): which slice of `tensor` each device holds.
 ///
 /// Parameters:
 /// - `tensor`: a weight or a memory tensor, by its name.
@@ -607,9 +612,9 @@ pub fn getSplitState(tensor: ?*const Tensor, userdata: ?*anyopaque) callconv(.c)
         split_state.nr[0] = 1;
         split_state.n_segments = 1;
         if (split_state.axis == axis_partial) {
-            impl.assert(tc.tensor_axis_0 != t, "llama-model.cpp", 872, "tc.tensor_axis_0 != tensor");
+            impl.assert(tc.tensor_axis_0 != t, "llama-model.cpp", 886, "tc.tensor_axis_0 != tensor");
             const source = getSplitState(tc.tensor_axis_0, userdata);
-            impl.assert(source.axis < c.GGML_MAX_DIMS, "llama-model.cpp", 874, "source_split_state.axis >= 0 && source_split_state.axis < GGML_MAX_DIMS");
+            impl.assert(source.axis < c.GGML_MAX_DIMS, "llama-model.cpp", 888, "source_split_state.axis >= 0 && source_split_state.axis < GGML_MAX_DIMS");
             for (0..n_devices) |j| {
                 for (0..source.n_segments) |is| {
                     split_state.ne[j] += source.ne[is * n_devices + j] * source.nr[is];

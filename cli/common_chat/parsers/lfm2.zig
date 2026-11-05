@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/lfm2.cpp` (llama.cpp v0.6.0,
-//! `d81235049`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/lfm2.cpp` (llama.cpp v0.7.0,
+//! `620d2225c`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -34,7 +34,7 @@ const think_start = "<think>";
 const think_end = "</think>";
 const gen_prompt = "<|im_start|>assistant\n";
 
-/// Ports `is_lfm2_template` (parsers/lfm2.cpp:5 @d81235049): the tool list wrapped
+/// Ports `is_lfm2_template` (parsers/lfm2.cpp:5 @620d2225c): the tool list wrapped
 /// in `<|tool_list_start|>` and `<|tool_list_end|>`.
 pub fn isLfm2Template(src: []const u8) bool {
     return util.contains(src, "<|tool_list_start|>") and util.contains(src, "<|tool_list_end|>");
@@ -72,7 +72,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_lfm2` (parsers/lfm2.cpp:14 @d81235049).
+/// Ports `common_chat_params_init_lfm2` (parsers/lfm2.cpp:14 @620d2225c).
 /// `tool_list_tokens` preserves LFM2's system tool-list markers; LFM2.5
 /// renders without them.
 ///
@@ -125,7 +125,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
             try gp.appendSlice(a, try m.renderContent(a, "\n\n"));
         }
         data.generation_prompt = gp.items;
-        data.prompt = try std.mem.concat(a, u8, &.{ data.prompt, data.generation_prompt });
+        try data.prompt.append(a, data.generation_prompt, false);
     }
 
     var build: Build = .{
@@ -134,14 +134,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_tools = has_tools,
         .has_response_format = has_response_format,
     };
-    var arena = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
-    defer arena.deinit();
-
-    data.parser = try parsers.save(a, &arena);
+    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !(has_response_format or (has_tools and inputs.tool_choice == .required));
-        data.grammar = try parsers.grammar(a, &arena, data.grammar_lazy);
+        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, tool_call_start);
     }
 
@@ -169,5 +167,5 @@ test "LFM2's template is detected and parses" {
     p.messages = try json.parse(a, "[{\"role\":\"user\",\"content\":\"hi\"}]");
     const data = try init(a, &t, &p, true);
     try std.testing.expectEqual(.peg_native, data.format);
-    try std.testing.expect(data.parser.len != 0);
+    try std.testing.expect(data.parser != null);
 }

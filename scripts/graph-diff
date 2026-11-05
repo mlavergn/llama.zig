@@ -71,7 +71,7 @@ fi
 
 nodes=$(grep -c "op=" "$tmp/ref.txt")
 if diff -u "$tmp/ref.txt" "$tmp/port.txt" > "$tmp/diff.txt"; then
-    echo "PASS: $nodes nodes identical"
+    echo "PASS: $nodes nodes and $(grep -cE ' (aborted|returned)$' "$tmp/ref.txt") assertion checks identical"
     exit 0
 fi
 

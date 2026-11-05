@@ -1,6 +1,8 @@
 //! Barrel for `cli/peg/`: upstream's PEG parser -- the combinators, the
-//! arena they build, partial parsing over a stream, the AST, GBNF export
-//! and the JSON form a parser travels in.
+//! arena they build, partial parsing over a stream, the AST and GBNF
+//! export. Upstream dropped the arena's JSON form (`save` and `load`) at
+//! v0.7.0; the gates keep a serializer of their own,
+//! `harness/peg_serialize.zig`.
 //!
 //! # Provenance
 //!
@@ -37,7 +39,6 @@ pub const errors = @import("errors.zig");
 pub const arena = @import("arena.zig");
 pub const builder = @import("builder.zig");
 pub const gbnf = @import("gbnf.zig");
-pub const serialize = @import("serialize.zig");
 
 pub const Error = errors.Error;
 pub const what = errors.what;
@@ -69,5 +70,4 @@ test {
     _ = arena;
     _ = builder;
     _ = gbnf;
-    _ = serialize;
 }

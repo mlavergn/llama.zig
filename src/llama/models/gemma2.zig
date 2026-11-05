@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma2.cpp` at v0.6.0 (`d81235049`):
+//! Ported from `llama.cpp/src/models/gemma2.cpp` at v0.7.0 (`620d2225c`):
 //! `llama_model_gemma2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma2`'s `load_arch_hparams` (models/gemma2.cpp:3 @d81235049).
+/// Ports `llama_model_gemma2`'s `load_arch_hparams` (models/gemma2.cpp:3 @620d2225c).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -53,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadK(0)));
 }
 
-/// Ports `llama_model_gemma2`'s `load_arch_tensors` (models/gemma2.cpp:30 @d81235049).
+/// Ports `llama_model_gemma2`'s `load_arch_tensors` (models/gemma2.cpp:30 @620d2225c).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -81,13 +81,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma2`'s `build_arch_graph` (models/gemma2.cpp:56 @d81235049).
+/// Ports `llama_model_gemma2`'s `build_arch_graph` (models/gemma2.cpp:56 @620d2225c).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma2`'s `graph`
-/// (models/gemma2.cpp:60 @d81235049).
+/// (models/gemma2.cpp:60 @620d2225c).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -180,8 +180,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
-
-    c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

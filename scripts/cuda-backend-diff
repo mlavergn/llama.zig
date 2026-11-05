@@ -3,9 +3,14 @@
 # reference: `metal-diff` for CUDA. See harness/cuda_backend_diff.c for what is
 # asked and why `cuda-ops-diff` cannot see it.
 #
-# Runs twice: on the physical device, and with `GGML_CUDA_DEVICES=3` -- three
-# virtual devices on the one GB10 -- so per-device answers are compared for a
-# device index other than 0.
+# Runs four times: on the physical device; with `GGML_CUDA_DEVICES=3` --
+# three virtual devices on the one GB10 -- so per-device answers are compared
+# for a device index other than 0; and, since v0.7.0 read the backend's
+# environment once and turned three variables into flags (`atoi != 0`), with
+# `GGML_CUDA_NO_PINNED=0` (set but off: pinned host buffers stay on, where
+# v0.6.0 turned them off) and with `GGML_CUDA_NO_PINNED=1
+# GGML_OP_OFFLOAD_MIN_BATCH=8` (no pinned host buffer; the offload threshold
+# moved onto one of the probed batch sizes).
 #
 # Usage: scripts/cuda-backend-diff
 # Requires: zig build reference cuda-ref --release=fast --prefix zig-out/cuda-port
@@ -36,13 +41,15 @@ zig c++ "$tmp/h.o" -o "$tmp/cuda_backend_diff" "$PORT_LIB" "$REF_LIB" \
     || { echo "FAIL: could not link the harness" >&2; grep -m5 error "$tmp/ld.log" >&2; exit 1; }
 
 fail=0
-for devices in "" 3; do
-    label=${devices:-physical}
-    if [ -n "$devices" ]; then
-        GGML_CUDA_DEVICES=$devices "$tmp/cuda_backend_diff" > "$tmp/out.txt" 2>/dev/null
-    else
-        "$tmp/cuda_backend_diff" > "$tmp/out.txt" 2>/dev/null
-    fi
+for setting in "" "GGML_CUDA_DEVICES=3" "GGML_CUDA_NO_PINNED=0" "GGML_CUDA_NO_PINNED=1 GGML_OP_OFFLOAD_MIN_BATCH=8"; do
+    case "$setting" in
+        "") label=physical ;;
+        GGML_CUDA_DEVICES=3) label=3 ;;
+        GGML_CUDA_NO_PINNED=0) label=pinned0 ;;
+        *) label=nopinned ;;
+    esac
+    # shellcheck disable=SC2086 # the setting is a list of NAME=value words
+    env $setting "$tmp/cuda_backend_diff" > "$tmp/out.txt" 2>/dev/null
     rc=$?
     [ -n "${CUDA_BACKEND_DIFF_OUT:-}" ] && cp "$tmp/out.txt" "$CUDA_BACKEND_DIFF_OUT.$label"
     [ "$rc" -eq 0 ] || { echo "FAIL ($label): harness exited $rc"; fail=1; continue; }

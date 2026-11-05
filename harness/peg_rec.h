@@ -27,6 +27,7 @@
 #include "json-schema-to-grammar.h"
 #include "json.h"
 #include "peg-parser.h"
+#include "peg_save.h"
 
 #include "../llama.cpp/tests/testing.h"
 
@@ -44,6 +45,7 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 // The opcodes, shared with harness/peg_ref.cpp and harness/peg_diff.zig.
@@ -489,7 +491,7 @@ inline rec_parser operator|(const std::string & s, const rec_parser & p) { retur
 
 inline std::string rec_save(const common_peg_arena & a) {
     try {
-        return "S:" + a.save();
+        return "S:" + harness_peg_save(a);
     } catch (const std::exception & e) {
         return std::string("E:") + e.what();
     }

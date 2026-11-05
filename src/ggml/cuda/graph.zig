@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.6.0
-//! (`d81235049`): `ggml_cuda_compute_forward`, the `USE_CUDA_GRAPH` helpers,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.7.0
+//! (`620d2225c`): `ggml_cuda_compute_forward`, the `USE_CUDA_GRAPH` helpers,
 //! `ggml_cuda_graph_evaluate_and_capture`, `ggml_backend_cuda_graph_compute`
 //! and `ggml_backend_cuda_graph_optimize`.
 //!
@@ -93,7 +93,7 @@ const cudaCheck = common.cudaCheck;
 // -----------------------------------------------------------------------------
 // Dispatch
 
-/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2123 @d81235049).
+/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2194 @620d2225c).
 fn computeForward(ctx: *Context, dst: *Tensor) bool {
     switch (dst.op) {
         c.GGML_OP_REPEAT => binbcast.opRepeat(ctx, dst),
@@ -238,7 +238,7 @@ const mulMatIdNeedsSync = mulmat.mulMatIdNeedsSync;
 // -----------------------------------------------------------------------------
 // CUDA graphs
 
-/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2611 @d81235049).
+/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2682 @620d2225c).
 fn isViewOrNoop(t: *const Tensor) bool {
     return c.ggml_is_empty(t) or t.op == c.GGML_OP_RESHAPE or t.op == c.GGML_OP_TRANSPOSE or
         t.op == c.GGML_OP_VIEW or t.op == c.GGML_OP_PERMUTE or t.op == c.GGML_OP_NONE;
@@ -248,7 +248,9 @@ fn nodes(cgraph: *impl.CGraph) []*Tensor {
     return @ptrCast(cgraph.nodes[0..@intCast(cgraph.n_nodes)]);
 }
 
-/// Ports `ggml_cuda_graph_check_compability` (ggml-cuda.cu:2617 @d81235049).
+/// Ports `ggml_cuda_graph_check_compability` (ggml-cuda.cu:2693 @620d2225c).
+/// Its debug line was `#ifndef NDEBUG` through v0.6.0, compiled out of the
+/// release reference; v0.7.0 gates it on `GGML_CUDA_GRAPH_DEBUG` instead.
 fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
     var use_cuda_graph = true;
     for (nodes(cgraph)) |node| {
@@ -261,6 +263,9 @@ fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
                 // the mul_mat_id fallback path synchronizes the stream, so
                 // CUDA graphs cannot be used
                 use_cuda_graph = false;
+                if (common.graphDebugEnabled()) {
+                    impl.logDebug("%s: disabling CUDA graphs due to unsupported node type\n", .{"ggml_cuda_graph_check_compability"});
+                }
             }
         }
 
@@ -269,19 +274,21 @@ fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
     return use_cuda_graph;
 }
 
-/// Ports `ggml_cuda_graph_get_key` (ggml-cuda.cu:2650 @d81235049).
+/// Ports `ggml_cuda_graph_get_key` (ggml-cuda.cu:2726 @620d2225c).
 fn graphGetKey(cgraph: *impl.CGraph) ?*const anyopaque {
     return cgraph.nodes[0];
 }
 
-/// Ports `ggml_cuda_graph_update_required` (ggml-cuda.cu:2654 @d81235049).
+/// Ports `ggml_cuda_graph_update_required` (ggml-cuda.cu:2730 @620d2225c).
 fn graphUpdateRequired(cuda_ctx: *Context, cgraph: *impl.CGraph) bool {
     var res = false;
 
     const graph = cuda_ctx.cudaGraph(graphGetKey(cgraph));
 
     if (cgraph.uid != 0 and cgraph.uid == graph.uid) {
-        impl.logDebug("CUDA Graph id %zu reused\n", .{cgraph.uid});
+        if (common.graphDebugEnabled()) {
+            impl.logDebug("CUDA Graph id %zu reused\n", .{cgraph.uid});
+        }
         impl.assert(graph.node_props.items.len == @as(usize, @intCast(cgraph.n_nodes)), "(int)graph->node_props.size() == cgraph->n_nodes");
         return false;
     }
@@ -319,8 +326,9 @@ fn graphUpdateRequired(cuda_ctx: *Context, cgraph: *impl.CGraph) bool {
     return res;
 }
 
-/// Ports `ggml_cuda_graph_update_executable` (ggml-cuda.cu:2696 @d81235049),
-/// the CUDA 12 arm.
+/// Ports `ggml_cuda_graph_update_executable` (ggml-cuda.cu:2774 @620d2225c),
+/// the CUDA 12 arm. Its debug line, `#ifndef NDEBUG` through v0.6.0, is
+/// `GGML_CUDA_GRAPH_DEBUG`'s since v0.7.0.
 fn graphUpdateExecutable(cuda_ctx: *Context, graph_key: ?*const anyopaque) void {
     const graph = cuda_ctx.cudaGraph(graph_key);
 
@@ -328,6 +336,10 @@ fn graphUpdateExecutable(cuda_ctx: *Context, graph_key: ?*const anyopaque) void 
     const stat = cu.cudaGraphExecUpdate(graph.instance, graph.graph, &result_info);
 
     if (stat == cu.cudaErrorGraphExecUpdateFailure) {
+        if (common.graphDebugEnabled()) {
+            impl.logDebug("%s: CUDA graph update failed\n", .{"ggml_cuda_graph_update_executable"});
+        }
+
         // The pre-existing graph exec cannot be updated due to violated
         // constraints, so clear the error and re-instantiate.
         _ = cu.cudaGetLastError();
@@ -339,13 +351,13 @@ fn graphUpdateExecutable(cuda_ctx: *Context, graph_key: ?*const anyopaque) void 
     }
 }
 
-/// Ports `ggml_cuda_graph_set_enabled` (ggml-cuda.cu:4504 @d81235049).
+/// Ports `ggml_cuda_graph_set_enabled` (ggml-cuda.cu:4668 @620d2225c).
 fn graphSetEnabled(cuda_ctx: *Context, graph_key: ?*const anyopaque) bool {
     const graph = cuda_ctx.cudaGraph(graph_key);
 
     if (graph.graph == null) {
         if (common.info().devices[@intCast(cuda_ctx.device)].cc < common.cc.volta) {
-            if (!graph.disable_due_to_gpu_arch) {
+            if (!graph.disable_due_to_gpu_arch and common.graphDebugEnabled()) {
                 impl.logDebug("%s: disabling CUDA graphs due to GPU architecture\n", .{"ggml_cuda_graph_set_enabled"});
             }
             graph.disable_due_to_gpu_arch = true;
@@ -384,7 +396,7 @@ const Concurrency = struct {
     }
 };
 
-/// Ports `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4285 @d81235049).
+/// Ports `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4449 @620d2225c).
 fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_graph: bool, cuda_graph_update_required: bool, graph_key: ?*const anyopaque) void {
     var graph_evaluated_or_captured = false;
 
@@ -496,7 +508,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_gr
 }
 
 /// The C's "restore original node order within each concurrent region"
-/// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4285 @d81235049).
+/// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4449 @620d2225c).
 fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     var node_to_idx: std.AutoHashMapUnmanaged(*const Tensor, usize) = .empty;
     defer node_to_idx.deinit(allocator);
@@ -534,7 +546,7 @@ fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     }
 }
 
-/// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:4520 @d81235049).
+/// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:4684 @620d2225c).
 pub fn graphCompute(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgraph) callconv(.c) c.enum_ggml_status {
     const cuda_ctx = backend.backendCtx(backend_c);
     const cgraph: *impl.CGraph = @ptrCast(@alignCast(cgraph_c));
@@ -558,7 +570,9 @@ pub fn graphCompute(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgrap
                 // Warmup: need at least 2 calls with no property change on the 2nd call
                 if (!properties_changed) {
                     graph.warmup_complete = true;
-                    impl.logDebug("%s: CUDA graph warmup complete\n", .{"ggml_backend_cuda_graph_compute"});
+                    if (common.graphDebugEnabled()) {
+                        impl.logDebug("%s: CUDA graph warmup complete\n", .{"ggml_backend_cuda_graph_compute"});
+                    }
                     use_cuda_graph = true;
                     cuda_graph_update_required = true;
                 }
@@ -567,7 +581,9 @@ pub fn graphCompute(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgrap
                 if (properties_changed) {
                     // Properties changed - reset warmup, execute directly until stable again
                     graph.warmup_complete = false;
-                    impl.logDebug("%s: CUDA graph warmup reset\n", .{"ggml_backend_cuda_graph_compute"});
+                    if (common.graphDebugEnabled()) {
+                        impl.logDebug("%s: CUDA graph warmup reset\n", .{"ggml_backend_cuda_graph_compute"});
+                    }
                 } else {
                     use_cuda_graph = true;
                     cuda_graph_update_required = graph.instance == null;
@@ -619,7 +635,7 @@ fn appendOps(buf: *[16]c.enum_ggml_op, n: *usize, items: []const c.enum_ggml_op)
     }
 }
 
-/// `graph_optimize`'s `add_alloc_deps` lambda (ggml-cuda.cu:4609 @d81235049):
+/// `graph_optimize`'s `add_alloc_deps` lambda (ggml-cuda.cu:4777 @620d2225c):
 /// keeps every node in `[start, last_node)` and each of its sources alive
 /// until `nodes[last_node]`.
 fn addAllocDeps(
@@ -650,7 +666,7 @@ const GraphOpt = struct {
     const once = common.Once(init);
 };
 
-/// Ports `ggml_backend_cuda_graph_optimize` (ggml-cuda.cu:4604 @d81235049),
+/// Ports `ggml_backend_cuda_graph_optimize` (ggml-cuda.cu:4772 @620d2225c),
 /// with its `add_alloc_deps` lambda.
 ///
 /// Its first pass (v0.6.0) moves a shared expert's gate/up/GLU, wherever
@@ -683,8 +699,8 @@ pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgra
     const cuda_ctx = backend.backendCtx(backend_c);
     const cgraph: *impl.CGraph = @ptrCast(@alignCast(cgraph_c));
 
-    fusion.DisableFusion.once.call();
-    if (!fusion.DisableFusion.value) {
+    const disable_fusion = common.fusionDisabled();
+    if (!disable_fusion) {
         const params = impl.one(c.struct_ggml_backend_graph_optimize_params, params_c);
         const add_alloc_dep = params.add_alloc_dep.?;
         // add alloc deps for performance positive fusions. This may increase the overall compute buffer size.

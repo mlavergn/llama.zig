@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-push-constants.h` at v0.6.0
-//! (`d81235049`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-push-constants.h` at v0.7.0
+//! (`620d2225c`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0.
 
 const std = @import("std");
@@ -34,7 +34,7 @@ fn f32Param(t: *const Tensor, i: usize) f32 {
     return @bitCast(t.op_params[i]);
 }
 
-/// Ports `ggml_vk_make_rope_constants` (ggml-vulkan.cpp:10694 @d81235049).
+/// Ports `ggml_vk_make_rope_constants` (ggml-vulkan.cpp:10771 @620d2225c).
 pub fn makeRopeConstants(dst: *const Tensor, src0: *const Tensor, has_ff: bool, backprop: bool, set_rows_stride: u32) push.Rope {
     const op = dst.op_params;
     const n_dims = op[1];
@@ -102,12 +102,12 @@ fn bindingOf(ctx: *const BackendCtx, t: *const Tensor, buf: **m.buffer.Buffer, o
     offset.* = m.buffer.tensorOffset(t) + t.view_offs;
 }
 
-/// Ports `ggml_vk_rms_norm_push_constants` (ggml-vulkan-push-constants.h:1122 @d81235049).
+/// Ports `ggml_vk_rms_norm_push_constants` (ggml-vulkan-push-constants.h:1123 @620d2225c).
 fn rmsNormPushConstants(src0: *const Tensor, src1: *const Tensor, dst: *const Tensor, eps: f32, num_partials: u32) push.Binary {
     return ops.binaryPc(u32Of(c.ggml_nelements(src0)), src0, src1, dst, eps, 0, @bitCast(num_partials));
 }
 
-/// Ports `ggml_vk_rms_norm_finish` (ggml-vulkan.cpp:10742 @d81235049).
+/// Ports `ggml_vk_rms_norm_finish` (ggml-vulkan.cpp:10819 @620d2225c).
 fn rmsNormFinish(ctx: *BackendCtx, src0: *const Tensor) void {
     if (ctx.do_add_rms_partials_offset_calculation) {
         ctx.prealloc_size_add_rms_partials_offset += ops.rmsPartialsSize(ctx, src0);
@@ -116,7 +116,7 @@ fn rmsNormFinish(ctx: *BackendCtx, src0: *const Tensor) void {
     }
 }
 
-/// Ports `ggml_vk_rms_norm` (ggml-vulkan.cpp:10750 @d81235049): plain, or
+/// Ports `ggml_vk_rms_norm` (ggml-vulkan.cpp:10827 @620d2225c): plain, or
 /// heading whichever fusion `fused_rms_norm_mode` names -- MUL; MUL and ADD
 /// (and a second MUL); MUL and ROPE (and the SET_ROWS a view of the rope
 /// feeds); or the SET_ROWS a view of the norm feeds.
@@ -140,7 +140,11 @@ pub fn rmsNorm(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_i
             m.context.tensorSubbuffer(ctx, src0, true),
             m.context.tensorSubbuffer(ctx, set_rows, true),
             m.context.tensorSubbuffer(ctx, indices, false),
-        }, &pc, .{ u32Of(src0.ne[1]), u32Of(src0.ne[2]), u32Of(src0.ne[3]) });
+        }, &pc, .{
+            u32Of(src0.ne[1]),
+            @min(u32Of(src0.ne[2]), ctx.device.properties.limits.maxComputeWorkGroupCount[1]),
+            @min(u32Of(src0.ne[3]), ctx.device.properties.limits.maxComputeWorkGroupCount[2]),
+        });
         rmsNormFinish(ctx, src0);
         return;
     }
@@ -181,7 +185,11 @@ pub fn rmsNorm(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_i
                 m.context.tensorSubbuffer(ctx, dst, true),
                 m.context.tensorSubbuffer(ctx, residual, false),
                 m.context.tensorSubbuffer(ctx, post_scale, false),
-            }, &pc, .{ u32Of(src0.ne[1]), u32Of(src0.ne[2]), u32Of(src0.ne[3]) });
+            }, &pc, .{
+                u32Of(src0.ne[1]),
+                @min(u32Of(src0.ne[2]), ctx.device.properties.limits.maxComputeWorkGroupCount[1]),
+                @min(u32Of(src0.ne[3]), ctx.device.properties.limits.maxComputeWorkGroupCount[2]),
+            });
         }
         rmsNormFinish(ctx, src0);
         return;
@@ -249,7 +257,10 @@ pub fn rmsNorm(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_i
         const s = rms.src[0].*;
         var subs: [max_tensors]Subbuffer = undefined;
         for (&subs, 0..) |*sb, i| sb.* = m.context.subbuffer(ctx, buf[i], offset[i]);
-        m.context.dispatch(ctx, subctx, pipeline, &subs, &pc, .{ u32Of(s.ne[1]), u32Of(s.ne[2]), u32Of(s.ne[3]) });
+        var elements: [3]u32 = .{ u32Of(s.ne[1]), u32Of(s.ne[2]), u32Of(s.ne[3]) };
+        elements[1] = @min(elements[1], ctx.device.properties.limits.maxComputeWorkGroupCount[1]);
+        elements[2] = @min(elements[2], ctx.device.properties.limits.maxComputeWorkGroupCount[2]);
+        m.context.dispatch(ctx, subctx, pipeline, &subs, &pc, elements);
     } else {
         impl.assert(mode == .mul or mode == .count, "ctx->fused_rms_norm_mode == RMS_NORM_MUL || ctx->fused_rms_norm_mode == RMS_NORM_COUNT");
         ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_RMS_NORM, bin);
@@ -258,8 +269,8 @@ pub fn rmsNorm(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_i
     rmsNormFinish(ctx, src0);
 }
 
-/// Ports `ggml_vk_op_f32_wkv` (ggml-vulkan.cpp:10046 @d81235049) with
-/// `ggml_vk_rwkv_wkv6` and `ggml_vk_rwkv_wkv7` (ggml-vulkan.cpp:10087, 10105 @d81235049).
+/// Ports `ggml_vk_op_f32_wkv` (ggml-vulkan.cpp:10123 @620d2225c) with
+/// `ggml_vk_rwkv_wkv6` and `ggml_vk_rwkv_wkv7` (ggml-vulkan.cpp:10164, 10182 @620d2225c).
 pub fn rwkvWkv(ctx: *BackendCtx, subctx: *Context, dst: *Tensor, version: u32) void {
     impl.assert(version == 6 or version == 7, "version == 6 || version == 7");
     const num_srcs: usize = if (version == 6) 6 else 7;
@@ -282,7 +293,7 @@ pub fn rwkvWkv(ctx: *BackendCtx, subctx: *Context, dst: *Tensor, version: u32) v
     m.context.dispatch(ctx, subctx, pipeline, bufs[0 .. num_srcs + 1], &pc, .{ pc.B *% pc.H, 1, 1 });
 }
 
-/// Ports `ggml_vk_gated_linear_attn` (ggml-vulkan.cpp:10123 @d81235049).
+/// Ports `ggml_vk_gated_linear_attn` (ggml-vulkan.cpp:10200 @620d2225c).
 pub fn gatedLinearAttn(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
     const s0 = dst.src[0].*;
     const n_seqs = u32Of(dst.src[4].*.ne[1]);
@@ -299,7 +310,7 @@ pub fn gatedLinearAttn(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
     m.context.dispatch(ctx, subctx, pipeline, &bufs, &pc, .{ u32Of(@as(i64, @intCast(dst.src[4].*.ne[1])) *% s0.ne[1]), 1, 1 });
 }
 
-/// Ports `ggml_vk_lightning_indexer` (ggml-vulkan.cpp:10158 @d81235049): one
+/// Ports `ggml_vk_lightning_indexer` (ggml-vulkan.cpp:10235 @620d2225c): one
 /// score per (kv cell, token, stream) from the indexer's q, k, head weights
 /// and mask.
 pub fn lightningIndexer(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
@@ -353,7 +364,7 @@ pub fn lightningIndexer(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
     }, &pc, .{ n_tiles_kv, n_tiles_t, n_streams });
 }
 
-/// Ports `ggml_vk_gated_delta_net` (ggml-vulkan.cpp:10207 @d81235049).
+/// Ports `ggml_vk_gated_delta_net` (ggml-vulkan.cpp:10284 @620d2225c).
 pub fn gatedDeltaNet(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
     const src_q = dst.src[0].*;
     const src_v = dst.src[2].*;
@@ -398,7 +409,7 @@ pub fn gatedDeltaNet(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
     m.context.dispatch(ctx, subctx, pipeline, &bufs, &pc, .{ H, n_seqs, S_v });
 }
 
-/// Ports `ggml_vk_ssm_scan` (ggml-vulkan.cpp:10264 @d81235049): Mamba-2 only.
+/// Ports `ggml_vk_ssm_scan` (ggml-vulkan.cpp:10341 @620d2225c): Mamba-2 only.
 pub fn ssmScan(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
     const src0 = dst.src[0].*;
     const src1 = dst.src[1].*;
@@ -454,7 +465,7 @@ pub fn ssmScan(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
     m.context.dispatch(ctx, subctx, pipeline, &bufs, &pc, .{ num_workgroups_x, n_seq, 1 });
 }
 
-/// Ports `ggml_vk_ssm_conv` (ggml-vulkan.cpp:10321 @d81235049): plain, or
+/// Ports `ggml_vk_ssm_conv` (ggml-vulkan.cpp:10398 @620d2225c): plain, or
 /// fused with SILU, or with a bias ADD and SILU.
 pub fn ssmConv(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_idx: c_int) void {
     const conv = at(cgraph, node_idx);
@@ -489,7 +500,7 @@ pub fn ssmConv(ctx: *BackendCtx, subctx: *Context, cgraph: *const CGraph, node_i
 }
 
 /// Ports `ggml_vk_op_f32_opt_step_adamw` and `ggml_vk_opt_step_adamw`
-/// (ggml-vulkan.cpp:10354, 10395 @d81235049).
+/// (ggml-vulkan.cpp:10431, 10472 @620d2225c).
 pub fn optStepAdamw(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
     const x = dst.src[0];
     const g = dst.src[1];
@@ -518,7 +529,7 @@ pub fn optStepAdamw(ctx: *BackendCtx, subctx: *Context, dst: *Tensor) void {
     }, &pc, .{ n, 1, 1 });
 }
 
-/// Ports `ggml_vk_opt_step_sgd` (ggml-vulkan.cpp:10404 @d81235049).
+/// Ports `ggml_vk_opt_step_sgd` (ggml-vulkan.cpp:10481 @620d2225c).
 pub fn optStepSgd(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, src2: *const Tensor, dst: *Tensor) void {
     const n = u32Of(c.ggml_nelements(dst.src[0]));
     ops.opF32(ctx, subctx, src0, src1, src2, null, dst, c.GGML_OP_OPT_STEP_SGD, push.Op{ .KX = n, .KY = 0, .param1 = 0, .param2 = 0, .param3 = 0, .param4 = 0 });

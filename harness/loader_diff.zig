@@ -669,6 +669,130 @@ const Fixture = struct {
     fn nemotronNoEps(ctx: *c.gguf_context) void {
         _ = c.gguf_remove_key(ctx, "nemotron_h.attention.layer_norm_epsilon");
     }
+    /// v0.7.0: a section order needs M-RoPE, which nemotron_h has not.
+    fn nemotronSectionOrder(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "nemotron_h.rope.section_order", "zyxt");
+    }
+    /// v0.7.0: prism.hadamard on an architecture not verified to apply it.
+    fn nemotronHadamard(ctx: *c.gguf_context) void {
+        Hadamard.base(ctx, 1, false);
+    }
+};
+
+/// v0.7.0's `prism.hadamard` metadata (llama-model.cpp:2030 @620d2225c),
+/// on Qwen3.5: a valid base, then one fault at a time, each a throw of
+/// `load_hparams_hadamard`'s.
+const Hadamard = struct {
+    fn base(ctx: *c.gguf_context, version: u32, tied: bool) void {
+        c.gguf_set_val_u32(ctx, "prism.hadamard.version", version);
+        c.gguf_set_val_bool(ctx, "prism.hadamard.tied_output", tied);
+        c.gguf_set_val_u32(ctx, "prism.hadamard.block_size", 64);
+        c.gguf_set_val_str(ctx, "prism.hadamard.transform", "normalized-sylvester-walsh-hadamard");
+        c.gguf_set_val_str(ctx, "prism.hadamard.axis", "input-last-dimension");
+        c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "identity");
+        setStrs(ctx, "prism.hadamard.weight_names", &.{ "blk.0.attn_qkv.weight", "blk.0.ffn_up.weight", "blk.3.attn_output.weight", "blk.0.ssm_out.weight" });
+    }
+    fn identity(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+    }
+    fn tiedLatent(ctx: *c.gguf_context) void {
+        base(ctx, 2, true);
+        setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{"token_embd.weight"});
+        c.gguf_set_val_bool(ctx, "prism.hadamard.gdn_v_grouped", true);
+    }
+    fn explicit(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+        c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "explicit");
+        setI32s(ctx, "prism.hadamard.sign_widths", &.{ 64, 128 });
+        var v: [192]i32 = undefined;
+        for (&v, 0..) |*x, i| x.* = if (i % 3 == 0) -1 else 1;
+        setI32s(ctx, "prism.hadamard.sign_values", &v);
+    }
+    fn badVersion(ctx: *c.gguf_context) void {
+        base(ctx, 3, false);
+    }
+    fn v2Untied(ctx: *c.gguf_context) void {
+        base(ctx, 2, false);
+    }
+    fn v1Tied(ctx: *c.gguf_context) void {
+        base(ctx, 1, true);
+    }
+    fn tiedNoVersion(ctx: *c.gguf_context) void {
+        c.gguf_set_val_bool(ctx, "prism.hadamard.tied_output", true);
+    }
+    fn tiedNoLatent(ctx: *c.gguf_context) void {
+        base(ctx, 2, true);
+    }
+    fn latentUntied(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+        setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{"token_embd.weight"});
+    }
+    fn blockNotPow2(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+        c.gguf_set_val_u32(ctx, "prism.hadamard.block_size", 48);
+    }
+    fn noBlock(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+        _ = c.gguf_remove_key(ctx, "prism.hadamard.block_size");
+    }
+    fn badTransform(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+        c.gguf_set_val_str(ctx, "prism.hadamard.transform", "walsh");
+    }
+    fn badAxis(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+        c.gguf_set_val_str(ctx, "prism.hadamard.axis", "output");
+    }
+    fn badSignMode(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+        c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "random");
+    }
+    fn noWeights(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+        setStrs(ctx, "prism.hadamard.weight_names", &.{});
+    }
+    fn explicitNoWidths(ctx: *c.gguf_context) void {
+        explicit(ctx);
+        setI32s(ctx, "prism.hadamard.sign_widths", &.{});
+    }
+    fn explicitBadWidth(ctx: *c.gguf_context) void {
+        explicit(ctx);
+        setI32s(ctx, "prism.hadamard.sign_widths", &.{ 64, 96 });
+    }
+    fn explicitDupWidth(ctx: *c.gguf_context) void {
+        explicit(ctx);
+        setI32s(ctx, "prism.hadamard.sign_widths", &.{ 64, 64 });
+    }
+    fn explicitBadValue(ctx: *c.gguf_context) void {
+        explicit(ctx);
+        var v: [192]i32 = @splat(1);
+        v[70] = 2;
+        setI32s(ctx, "prism.hadamard.sign_values", &v);
+    }
+    fn explicitShort(ctx: *c.gguf_context) void {
+        explicit(ctx);
+        setI32s(ctx, "prism.hadamard.sign_widths", &.{64});
+    }
+    fn notFoldable(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+        setStrs(ctx, "prism.hadamard.weight_names", &.{ "blk.0.attn_qkv.weight", "blk.0.ssm_alpha.weight" });
+    }
+    fn badBlockName(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+        setStrs(ctx, "prism.hadamard.weight_names", &.{"blk..attn_q.weight"});
+    }
+    fn duplicateWeight(ctx: *c.gguf_context) void {
+        base(ctx, 1, false);
+        setStrs(ctx, "prism.hadamard.weight_names", &.{ "output.weight", "blk.2.ffn_down.weight", "output.weight" });
+    }
+    fn badInverse(ctx: *c.gguf_context) void {
+        base(ctx, 2, true);
+        setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{"output.weight"});
+    }
+    fn duplicateInverse(ctx: *c.gguf_context) void {
+        base(ctx, 2, true);
+        setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{ "token_embd.weight", "token_embd.weight" });
+    }
 };
 
 /// A tensor-less copy of `base`'s metadata with `edit` applied, written to
@@ -876,6 +1000,33 @@ const Qwen = struct {
         c.gguf_set_val_str(ctx, "general.architecture", "gptj");
     }
 
+    /// v0.7.0's `<arch>.classifier.activation`.
+    fn clsActGelu(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "qwen35.classifier.activation", "gelu");
+    }
+    fn clsActSilu(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "qwen35.classifier.activation", "silu");
+    }
+    /// v0.7.0's `<arch>.rope.section_order`, which Qwen3.5's M-RoPE takes.
+    fn sectionOrderZyxt(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "zyxt");
+    }
+    fn sectionOrderTyxz(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "tyxz");
+    }
+    fn sectionOrderBad(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "txyz");
+    }
+    fn sectionOrderU32(ctx: *c.gguf_context) void {
+        c.gguf_set_val_u32(ctx, "qwen35.rope.section_order", 1);
+    }
+    /// v0.7.0's MoVA counts (K2 Horizon), which only that architecture
+    /// reads: present here they change nothing but the metadata log.
+    fn valueExperts(ctx: *c.gguf_context) void {
+        c.gguf_set_val_u32(ctx, "qwen35.attention.value_expert_count", 8);
+        c.gguf_set_val_u32(ctx, "qwen35.attention.value_expert_used_count", 2);
+    }
+
     fn longValues(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "general.description", "line one\nline two, which is long enough to be cut off at forty bytes");
         c.gguf_set_val_str(ctx, "general.short", "a\nb");
@@ -1058,9 +1209,9 @@ pub fn main(init: std.process.Init) !void {
     }
 
     // v0.5.0's hyperparameter reads on fixtures, one key edited at a time:
-    // hrm_text's four hrm.* keys (models/hrm-text.cpp:6 @d81235049) and
+    // hrm_text's four hrm.* keys (models/hrm-text.cpp:6 @620d2225c) and
     // nemotron_h's RMS epsilon, which falls back to the LayerNorm one
-    // (models/nemotron-h.cpp:5 @d81235049).
+    // (models/nemotron-h.cpp:5 @620d2225c).
     if (hrm) |base| {
         runCase(.{ .name = "hrm_text: prefix_lm", .path = derive(dir, base, "hrm-prefix", Fixture.hrmPrefix), .vocab_only = false });
         runCase(.{ .name = "hrm_text: no l_cycles", .path = derive(dir, base, "hrm-nol", Fixture.hrmNoL), .vocab_only = false });
@@ -1070,6 +1221,8 @@ pub fn main(init: std.process.Init) !void {
     if (nemotron_h) |base| {
         runCase(.{ .name = "nemotron_h: no rms eps", .path = derive(dir, base, "nh-norms", Fixture.nemotronNoRms), .vocab_only = false });
         runCase(.{ .name = "nemotron_h: no eps", .path = derive(dir, base, "nh-noeps", Fixture.nemotronNoEps), .vocab_only = false });
+        runCase(.{ .name = "nemotron_h: rope section order", .path = derive(dir, base, "nh-order", Fixture.nemotronSectionOrder), .vocab_only = false });
+        runCase(.{ .name = "nemotron_h: hadamard", .path = derive(dir, base, "nh-hdmd", Fixture.nemotronHadamard), .vocab_only = false });
     }
 
     if (qwen) |base| {
@@ -1113,6 +1266,39 @@ pub fn main(init: std.process.Init) !void {
             .{ "no arch", Qwen.noArch },
             .{ "gptj", Qwen.gptj },
             .{ "long and odd values", Qwen.longValues },
+            // v0.7.0's keys
+            .{ "classifier activation gelu", Qwen.clsActGelu },
+            .{ "classifier activation silu", Qwen.clsActSilu },
+            .{ "rope section order zyxt", Qwen.sectionOrderZyxt },
+            .{ "rope section order tyxz", Qwen.sectionOrderTyxz },
+            .{ "rope section order unknown", Qwen.sectionOrderBad },
+            .{ "rope section order as u32", Qwen.sectionOrderU32 },
+            .{ "value expert counts", Qwen.valueExperts },
+            .{ "hadamard identity", Hadamard.identity },
+            .{ "hadamard tied latent", Hadamard.tiedLatent },
+            .{ "hadamard explicit", Hadamard.explicit },
+            .{ "hadamard version 3", Hadamard.badVersion },
+            .{ "hadamard v2 untied", Hadamard.v2Untied },
+            .{ "hadamard v1 tied", Hadamard.v1Tied },
+            .{ "hadamard tied, no version", Hadamard.tiedNoVersion },
+            .{ "hadamard tied, no latent", Hadamard.tiedNoLatent },
+            .{ "hadamard latent, untied", Hadamard.latentUntied },
+            .{ "hadamard block 48", Hadamard.blockNotPow2 },
+            .{ "hadamard no block", Hadamard.noBlock },
+            .{ "hadamard transform", Hadamard.badTransform },
+            .{ "hadamard axis", Hadamard.badAxis },
+            .{ "hadamard sign mode", Hadamard.badSignMode },
+            .{ "hadamard no weights", Hadamard.noWeights },
+            .{ "hadamard explicit, no widths", Hadamard.explicitNoWidths },
+            .{ "hadamard explicit, bad width", Hadamard.explicitBadWidth },
+            .{ "hadamard explicit, duplicate width", Hadamard.explicitDupWidth },
+            .{ "hadamard explicit, bad value", Hadamard.explicitBadValue },
+            .{ "hadamard explicit, short", Hadamard.explicitShort },
+            .{ "hadamard not foldable", Hadamard.notFoldable },
+            .{ "hadamard bad block name", Hadamard.badBlockName },
+            .{ "hadamard duplicate weight", Hadamard.duplicateWeight },
+            .{ "hadamard bad inverse", Hadamard.badInverse },
+            .{ "hadamard duplicate inverse", Hadamard.duplicateInverse },
         };
         inline for (edits, 0..) |e, i| {
             var nb: [32]u8 = undefined;

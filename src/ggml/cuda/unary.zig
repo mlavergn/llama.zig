@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/unary.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/unary.cuh` at v0.6.0 (`d81235049`). The
+//! `llama.cpp/ggml/src/ggml-cuda/unary.cuh` at v0.7.0 (`620d2225c`). The
 //! kernels -- `unary_op_kernel`, `unary_gated_op_kernel`,
 //! `swiglu_oai_kernel`, `swiglu_clamp_kernel`, `xielu_kernel`,
 //! `silu_back_kernel`, `leaky_relu_kernel` -- stay CUDA.
@@ -36,7 +36,7 @@ const half = kernels.half;
 /// Ports `CUDA_NEG_BLOCK_SIZE`, `CUDA_SILU_BLOCK_SIZE`,
 /// `CUDA_SILU_BACK_BLOCK_SIZE`, `CUDA_RELU_BLOCK_SIZE`,
 /// `CUDA_GLU_BLOCK_SIZE` and `CUDA_XIELU_BLOCK_SIZE`
-/// (unary.cuh:4, 7, 8, 10, 19, 20 @d81235049). All 256.
+/// (unary.cuh:4, 7, 8, 10, 19, 20 @620d2225c). All 256.
 const neg_block_size = 256;
 const silu_block_size = 256;
 const silu_back_block_size = 256;
@@ -100,7 +100,7 @@ fn offset(comptime T: type, p: ?*anyopaque, n: i64) ?*anyopaque {
     return @ptrCast(base + @as(usize, @intCast(n)) * @sizeOf(T));
 }
 
-/// Ports `unary_cuda` (unary.cu:131 @d81235049).
+/// Ports `unary_cuda` (unary.cu:131 @620d2225c).
 fn unaryCuda(comptime op: Op, comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, stream: cu.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(k + neg_block_size - 1, neg_block_size);
     kernels.launchPdl(unaryKernel(op, T), .{
@@ -110,24 +110,51 @@ fn unaryCuda(comptime op: Op, comptime T: type, x: ?*const anyopaque, dst: ?*any
     }, .{ x, dst, k });
 }
 
-/// Ports `ggml_cuda_op_unary` (unary.cu:138 @d81235049).
+fn unaryStridedKernel(comptime op: Op, comptime T: type) kernels.Kernel {
+    return comptime kernels.get("unary", kernels.tmpl("unary_op_kernel_strided", &.{ "&op_" ++ @tagName(op), kernels.typeName(T) }));
+}
+
+/// Ports `unary_cuda_strided` (unary.cu:159 @620d2225c), new at v0.7.0:
+/// the same op over a source of any strides, writing a contiguous `dst`.
+fn unaryCudaStrided(comptime op: Op, comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, ne00: i64, ne01: i64, ne02: i64, nb00: usize, nb01: usize, nb02: usize, nb03: usize, stream: cu.cudaStream_t) void {
+    const num_blocks: c_int = @divTrunc(k + neg_block_size - 1, neg_block_size);
+    kernels.launchPdl(unaryStridedKernel(op, T), .{
+        .grid = .{ .x = @bitCast(num_blocks) },
+        .block = .{ .x = neg_block_size },
+        .stream = stream,
+    }, .{ x, dst, k, ne00, ne01, ne02, nb00, nb01, nb02, nb03 });
+}
+
+/// Ports `ggml_cuda_op_unary` (unary.cu:166 @620d2225c). Since v0.7.0 a
+/// non-contiguous source takes `unary_cuda_strided` instead of asserting.
 fn opUnaryImpl(comptime op: Op, ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
     const dst_d: ?*anyopaque = dst.data;
-    const stream = ctx.stream();
 
-    impl.assert(c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    const stream = ctx.stream();
 
     impl.assert(src0.type == c.GGML_TYPE_F32 or src0.type == c.GGML_TYPE_F16 or src0.type == c.GGML_TYPE_BF16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16 || src0->type == GGML_TYPE_BF16");
     impl.assert(src0.type == dst.type, "src0->type == dst->type");
 
-    if (src0.type == c.GGML_TYPE_F16) {
-        unaryCuda(op, half, src0_d, dst_d, int(c.ggml_nelements(src0)), stream);
-    } else if (src0.type == c.GGML_TYPE_BF16) {
-        unaryCuda(op, kernels.bf16, src0_d, dst_d, int(c.ggml_nelements(src0)), stream);
+    if (c.ggml_is_contiguous(src0)) {
+        if (src0.type == c.GGML_TYPE_F16) {
+            unaryCuda(op, half, src0_d, dst_d, int(c.ggml_nelements(src0)), stream);
+        } else if (src0.type == c.GGML_TYPE_BF16) {
+            unaryCuda(op, kernels.bf16, src0_d, dst_d, int(c.ggml_nelements(src0)), stream);
+        } else {
+            unaryCuda(op, f32, src0_d, dst_d, int(c.ggml_nelements(src0)), stream);
+        }
     } else {
-        unaryCuda(op, f32, src0_d, dst_d, int(c.ggml_nelements(src0)), stream);
+        const ne = src0.ne;
+        const nb = src0.nb;
+        if (src0.type == c.GGML_TYPE_F16) {
+            unaryCudaStrided(op, half, src0_d, dst_d, int(c.ggml_nelements(src0)), ne[0], ne[1], ne[2], nb[0], nb[1], nb[2], nb[3], stream);
+        } else if (src0.type == c.GGML_TYPE_BF16) {
+            unaryCudaStrided(op, kernels.bf16, src0_d, dst_d, int(c.ggml_nelements(src0)), ne[0], ne[1], ne[2], nb[0], nb[1], nb[2], nb[3], stream);
+        } else {
+            unaryCudaStrided(op, f32, src0_d, dst_d, int(c.ggml_nelements(src0)), ne[0], ne[1], ne[2], nb[0], nb[1], nb[2], nb[3], stream);
+        }
     }
 }
 
@@ -140,15 +167,15 @@ fn opUnaryImpl(comptime op: Op, ctx: *common.Context, dst: *Tensor) void {
 /// `ggml_cuda_op_log`, `ggml_cuda_op_elu`, `ggml_cuda_op_floor`,
 /// `ggml_cuda_op_ceil`, `ggml_cuda_op_round`, `ggml_cuda_op_trunc`,
 /// `ggml_cuda_op_expm1` and `ggml_cuda_op_softplus`
-/// (unary.cu:158, 162, 166, 170, 174, 178, 182, 186, 190, 194, 198, 202,
-/// 206, 210, 214, 218, 222, 226, 230, 234, 238, 242, 246, 250, 254, 258
-/// @d81235049): each is `ggml_cuda_op_unary<op_NAME>`.
+/// (unary.cu:201, 205, 209, 213, 217, 221, 225, 229, 233, 237, 241, 245,
+/// 249, 253, 257, 261, 265, 269, 273, 277, 281, 285, 289, 293, 297, 301
+/// @620d2225c): each is `ggml_cuda_op_unary<op_NAME>`.
 pub fn opUnary(comptime op: Op, ctx: *common.Context, dst: *Tensor) void {
     comptime std.debug.assert(op != .relu_sqr); // only the fused path uses it
     opUnaryImpl(op, ctx, dst);
 }
 
-/// Ports `unary_gated_cuda` (unary.cu:281 @d81235049).
+/// Ports `unary_gated_cuda` (unary.cu:324 @620d2225c).
 fn unaryGatedCuda(comptime op: Op, comptime T: type, x: ?*const anyopaque, g: ?*const anyopaque, dst: ?*anyopaque, k: i64, n: i64, o0: i64, o1: i64, stream: cu.cudaStream_t) void {
     const num_blocks: i64 = @divTrunc(k + glu_block_size - 1, glu_block_size);
     kernels.launchPdl(gatedKernel(op, T), .{
@@ -164,7 +191,7 @@ fn strideOf(comptime T: type, o: i64) i64 {
     return @bitCast(@as(u64, @bitCast(o)) / @sizeOf(T));
 }
 
-/// Ports `ggml_cuda_op_unary_gated` (unary.cu:288 @d81235049).
+/// Ports `ggml_cuda_op_unary_gated` (unary.cu:331 @620d2225c).
 fn opUnaryGated(comptime op: Op, ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1_opt: ?*const Tensor = dst.src[1];
@@ -230,14 +257,14 @@ fn opUnaryGated(comptime op: Op, ctx: *common.Context, dst: *Tensor) void {
 
 /// Ports `ggml_cuda_op_reglu`, `ggml_cuda_op_geglu`, `ggml_cuda_op_swiglu`,
 /// `ggml_cuda_op_geglu_erf` and `ggml_cuda_op_geglu_quick`
-/// (unary.cu:350, 354, 358, 362, 366 @d81235049): `ggml_cuda_op_unary_gated`
+/// (unary.cu:393, 397, 401, 405, 409 @620d2225c): `ggml_cuda_op_unary_gated`
 /// with `op_relu`, `op_gelu`, `op_silu`, `op_gelu_erf` and `op_gelu_quick`.
 pub fn opGated(comptime op: Op, ctx: *common.Context, dst: *Tensor) void {
     comptime std.debug.assert(op == .relu or op == .gelu or op == .silu or op == .gelu_erf or op == .gelu_quick);
     opUnaryGated(op, ctx, dst);
 }
 
-/// Ports `swiglu_oai_cuda` (unary.cu:391 @d81235049), which launches with
+/// Ports `swiglu_oai_cuda` (unary.cu:434 @620d2225c), which launches with
 /// `<<<>>>`, not PDL.
 fn swigluOaiCuda(x: ?*const anyopaque, g: ?*const anyopaque, dst: ?*anyopaque, k: i64, n: i64, o0: i64, o1: i64, alpha: f32, limit: f32, stream: cu.cudaStream_t) void {
     const num_blocks: i64 = @divTrunc(k + glu_block_size - 1, glu_block_size);
@@ -248,7 +275,7 @@ fn swigluOaiCuda(x: ?*const anyopaque, g: ?*const anyopaque, dst: ?*anyopaque, k
     }, .{ x, g, dst, k, n, o0, o1, alpha, limit });
 }
 
-/// Ports `ggml_cuda_op_swiglu_oai` (unary.cu:396 @d81235049).
+/// Ports `ggml_cuda_op_swiglu_oai` (unary.cu:439 @620d2225c).
 pub fn opSwigluOai(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1_opt: ?*const Tensor = dst.src[1];
@@ -292,8 +319,8 @@ pub fn opSwigluOai(ctx: *common.Context, dst: *Tensor) void {
     swigluOaiCuda(src0_p, src1_p, dst_d, c.ggml_nelements(dst), nc, strideOf(f32, src0_o), strideOf(f32, src1_o), alpha, limit, stream);
 }
 
-/// Ports `swiglu_clamp_cuda` (unary.cu:457 @d81235049), which launches
-/// `swiglu_clamp_kernel` (unary.cu:443 @d81235049) with `<<<>>>`, not PDL.
+/// Ports `swiglu_clamp_cuda` (unary.cu:500 @620d2225c), which launches
+/// `swiglu_clamp_kernel` (unary.cu:486 @620d2225c) with `<<<>>>`, not PDL.
 fn swigluClampCuda(comptime T: type, gate: ?*const anyopaque, up: ?*const anyopaque, dst: ?*anyopaque, k: i64, n: i64, o0: i64, o1: i64, limit: f32, stream: cu.cudaStream_t) void {
     const num_blocks: i64 = @divTrunc(k + glu_block_size - 1, glu_block_size);
     kernels.launch(comptime kernels.get("unary", kernels.tmpl("swiglu_clamp_kernel", &.{kernels.typeName(T)})), .{
@@ -303,7 +330,7 @@ fn swigluClampCuda(comptime T: type, gate: ?*const anyopaque, up: ?*const anyopa
     }, .{ gate, up, dst, k, n, o0, o1, limit });
 }
 
-/// Ports `ggml_cuda_op_swiglu_clamp` (unary.cu:462 @d81235049).
+/// Ports `ggml_cuda_op_swiglu_clamp` (unary.cu:505 @620d2225c).
 pub fn opSwigluClamp(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1_opt: ?*const Tensor = dst.src[1];
@@ -357,7 +384,7 @@ pub fn opSwigluClamp(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `xielu_cuda` (unary.cu:537 @d81235049).
+/// Ports `xielu_cuda` (unary.cu:580 @620d2225c).
 fn xieluCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, alpha_n: f32, alpha_p: f32, beta: f32, eps: f32, stream: cu.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(k + xielu_block_size, xielu_block_size);
     kernels.launch(kernels.get("unary", kernels.tmpl("xielu_kernel", &.{kernels.typeName(T)})), .{
@@ -367,7 +394,8 @@ fn xieluCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int,
     }, .{ x, dst, k, alpha_n, alpha_p, beta, eps });
 }
 
-/// Ports `ggml_cuda_op_xielu` (unary.cu:542 @d81235049).
+/// Ports `ggml_cuda_op_xielu` (unary.cu:585 @620d2225c), with v0.7.0's BF16
+/// arm (which `supports_op` still refuses).
 pub fn opXielu(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
@@ -376,8 +404,8 @@ pub fn opXielu(ctx: *common.Context, dst: *Tensor) void {
 
     impl.assert(c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
 
-    impl.assert(src0.type == c.GGML_TYPE_F32 or src0.type == c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
-    impl.assert(dst.type == c.GGML_TYPE_F32 or dst.type == c.GGML_TYPE_F16, " dst->type == GGML_TYPE_F32 ||  dst->type == GGML_TYPE_F16");
+    impl.assert(src0.type == c.GGML_TYPE_F32 or src0.type == c.GGML_TYPE_F16 or src0.type == c.GGML_TYPE_BF16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16 || src0->type == GGML_TYPE_BF16");
+    impl.assert(dst.type == c.GGML_TYPE_F32 or dst.type == c.GGML_TYPE_F16 or dst.type == c.GGML_TYPE_BF16, " dst->type == GGML_TYPE_F32 ||  dst->type == GGML_TYPE_F16 ||  dst->type == GGML_TYPE_BF16");
     impl.assert(src0.type == dst.type, "src0->type == dst->type");
 
     const alpha_n = impl.getOpParamsF32(dst, 1);
@@ -387,12 +415,14 @@ pub fn opXielu(ctx: *common.Context, dst: *Tensor) void {
 
     if (src0.type == c.GGML_TYPE_F16) {
         xieluCuda(half, src0_d, dst_d, int(c.ggml_nelements(src0)), alpha_n, alpha_p, beta, eps, stream);
+    } else if (src0.type == c.GGML_TYPE_BF16) {
+        xieluCuda(kernels.bf16, src0_d, dst_d, int(c.ggml_nelements(src0)), alpha_n, alpha_p, beta, eps, stream);
     } else {
         xieluCuda(f32, src0_d, dst_d, int(c.ggml_nelements(src0)), alpha_n, alpha_p, beta, eps, stream);
     }
 }
 
-/// Ports `silu_back_cuda` (unary.cu:587 @d81235049). The C divides by
+/// Ports `silu_back_cuda` (unary.cu:632 @620d2225c). The C divides by
 /// `CUDA_SILU_BLOCK_SIZE` after adding `CUDA_SILU_BACK_BLOCK_SIZE - 1`; both
 /// are 256.
 fn siluBackCuda(comptime T: type, grad: ?*const anyopaque, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, stream: cu.cudaStream_t) void {
@@ -404,7 +434,7 @@ fn siluBackCuda(comptime T: type, grad: ?*const anyopaque, x: ?*const anyopaque,
     }, .{ grad, x, dst, k });
 }
 
-/// Ports `ggml_cuda_op_silu_back` (unary.cu:592 @d81235049).
+/// Ports `ggml_cuda_op_silu_back` (unary.cu:637 @620d2225c).
 pub fn opSiluBack(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]); // input from forward pass
     const src1 = impl.one(Tensor, dst.src[1]); // grads of forward pass output
@@ -428,7 +458,7 @@ pub fn opSiluBack(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `leaky_relu_cuda` (unary.cu:633 @d81235049).
+/// Ports `leaky_relu_cuda` (unary.cu:678 @620d2225c).
 fn leakyReluCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, negative_slope: f32, stream: cu.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(k + relu_block_size - 1, relu_block_size);
     kernels.launch(kernels.get("unary", kernels.tmpl("leaky_relu_kernel", &.{kernels.typeName(T)})), .{
@@ -438,7 +468,7 @@ fn leakyReluCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_
     }, .{ x, dst, k, negative_slope });
 }
 
-/// Ports `ggml_cuda_op_leaky_relu` (unary.cu:638 @d81235049).
+/// Ports `ggml_cuda_op_leaky_relu` (unary.cu:683 @620d2225c).
 pub fn opLeakyRelu(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
@@ -460,7 +490,7 @@ pub fn opLeakyRelu(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_cuda_op_unary_mul_impl` (unary.cu:663 @d81235049).
+/// Ports `ggml_cuda_op_unary_mul_impl` (unary.cu:708 @620d2225c).
 fn opUnaryMulImpl(comptime op: Op, ctx: *common.Context, unary_node: *Tensor, mul_node: *Tensor) void {
     // unary_node: UNARY op applied to unary_node->src[0]
     // mul_node:   MUL(a, b) where one of a/b is unary_node
@@ -495,7 +525,7 @@ fn opUnaryMulImpl(comptime op: Op, ctx: *common.Context, unary_node: *Tensor, mu
     }
 }
 
-/// Ports `ggml_cuda_op_unary_mul` (unary.cu:703 @d81235049), the fused
+/// Ports `ggml_cuda_op_unary_mul` (unary.cu:748 @620d2225c), the fused
 /// unary + `MUL`.
 pub fn opUnaryMul(ctx: *common.Context, unary_node: *Tensor, mul_node: *Tensor) void {
     switch (c.ggml_get_unary_op(unary_node)) {
@@ -506,7 +536,7 @@ pub fn opUnaryMul(ctx: *common.Context, unary_node: *Tensor, mul_node: *Tensor) 
     }
 }
 
-/// Ports `ggml_cuda_op_relu_sqr` (unary.cu:721 @d81235049), the fused
+/// Ports `ggml_cuda_op_relu_sqr` (unary.cu:766 @620d2225c), the fused
 /// `RELU` + `SQR`.
 pub fn opReluSqr(ctx: *common.Context, relu_node: *Tensor, sqr_node: *Tensor) void {
     const src = impl.one(Tensor, relu_node.src[0]);

@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports two switches of `llama.cpp/tools/mtmd/clip.cpp` at v0.6.0
-//! (`d81235049`): the one that sets each projector's graph inputs in
+//! Ports two switches of `llama.cpp/tools/mtmd/clip.cpp` at v0.7.0
+//! (`620d2225c`): the one that sets each projector's graph inputs in
 //! `clip_encode`, and `clip_n_output_tokens`'s token counts. Each
 //! declaration names what it ports and the line it began at.
 //!
@@ -90,7 +90,7 @@ const NormalF32 = struct {
     }
 };
 
-/// `CLIP_ALIGN` (clip-impl.h:439 @d81235049), over `int`.
+/// `CLIP_ALIGN` (clip-impl.h:442 @620d2225c), over `int`.
 fn clipAlign(x: c_int, n: c_int) c_int {
     return @divTrunc(x + n - 1, n) * n;
 }
@@ -113,8 +113,8 @@ fn usz(x: anytype) usize {
 
 const lowest = -std.math.floatMax(f32);
 
-/// Ports the per-projector input switch of `clip_encode` (mtmd/clip.cpp:4476
-/// @d81235049), entered at mtmd/clip.cpp:4644.
+/// Ports the per-projector input switch of `clip_encode` (mtmd/clip.cpp:4588
+/// @620d2225c), entered at mtmd/clip.cpp:4770.
 ///
 /// Return: false where the C++ `return false`s out of `clip_encode` (a
 /// qwen3tts code out of range), having logged why.
@@ -202,7 +202,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
                     off += usz(s);
                 }
             }
-            st.setInputF32("muse_glimmer_sp_mask", sp_mask);
+            try st.setInputAttnMask(sp_mask, 0);
 
             // pixel-shuffle gather (original order): f*f spatial neighbours grouped
             var dsp: std.ArrayList(i32) = .empty;
@@ -247,7 +247,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             for (omega, 0..) |*o, i| o.* = 1.0 / powf(base_freq, @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(q)));
             st.setInputF32("omega", omega);
         },
-        .minicpmv4_6 => {
+        .minicpmv4_6, .minicpmv4_7 => {
             const is_4x = hparams.n_merge == 2;
 
             // SigLIP position buckets (same as resampler path)
@@ -291,7 +291,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
                         for (0..4) |j| window_mask_data[(wi * 4 + i) * np + (wi * 4 + j)] = 0.0;
                     }
                 }
-                st.setInputF32("vit_merger_window_mask", window_mask_data);
+                try st.setInputAttnMask(window_mask_data, 0);
 
                 // ViT merger 2x2 downsample indices
                 const names_v = [_][*:0]const u8{ "vit_merger_ds_idx_0", "vit_merger_ds_idx_1", "vit_merger_ds_idx_2", "vit_merger_ds_idx_3" };
@@ -465,8 +465,8 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
                             var dx: c_int = 0;
                             while (dx < win_w) : (dx += 1) {
                                 const src = (y + dy) * pw + (x + dx);
-                                impl.ggmlAssert(src < @as(c_int, @intCast(idx.len)), "clip.cpp", 4985, "src < (int)idx.size()");
-                                impl.ggmlAssert(dst < @as(c_int, @intCast(inv_idx.len)), "clip.cpp", 4986, "dst < (int)inv_idx.size()");
+                                impl.ggmlAssert(src < @as(c_int, @intCast(idx.len)), "clip.cpp", 5112, "src < (int)idx.size()");
+                                impl.ggmlAssert(dst < @as(c_int, @intCast(inv_idx.len)), "clip.cpp", 5113, "dst < (int)inv_idx.size()");
                                 idx[usz(src)] = dst;
                                 inv_idx[usz(dst)] = src;
                                 dst += 1;
@@ -486,7 +486,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
 
                 st.setInputI32("window_idx", idx);
                 st.setInputI32("inv_window_idx", inv_idx);
-                st.setInputF32("window_mask", mask);
+                try st.setInputAttnMask(mask, 0);
             } else {
                 for (idx, 0..) |*v, i| v.* = @intCast(i);
             }
@@ -595,7 +595,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
 
             // Banded 1D sliding-window mask
             const window = hparams.attn_window_size;
-            impl.ggmlAssert(window > 0, "clip.cpp", 5104, "window > 0");
+            impl.ggmlAssert(window > 0, "clip.cpp", 5231, "window > 0");
             const mask = try allocF32(npf * npf, lowest);
             defer gpa.free(mask);
             var q: c_int = 0;
@@ -609,7 +609,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             st.setInputI32("mimovl_positions_row", positions_row);
             st.setInputI32("mimovl_positions_col", positions_col);
             st.setInputF32("mimovl_idx_col", idx_col);
-            st.setInputF32("mimovl_window_mask", mask);
+            try st.setInputAttnMask(mask, 0);
         },
         .pixtral, .kimivl, .kimik25, .lightonocr => {
             // set the 2D positions
@@ -702,7 +702,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
         },
         .pockettts_gen => {
             if (params.gen_process == .gen_wav) {
-                impl.ggmlAssert(params.feats != null, "clip.cpp", 5228, "params->feats != nullptr");
+                impl.ggmlAssert(params.feats != null, "clip.cpp", 5355, "params->feats != nullptr");
                 st.setInputF32("inp_feats", params.feats.?.items);
                 // positions and mask are derived in-graph from the persisted counter
                 try st.setGenStateIn();
@@ -734,7 +734,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             st.setInputI32("pos_y", pos_y);
         },
         .deepseekocr, .deepseekocr2 => {
-            impl.ggmlAssert((pos_w == pos_h) or (pos_h >= pos_w and @rem(pos_h, pos_w) == 0), "clip.cpp", 5262, "(pos_w == pos_h) || (pos_h >= pos_w && pos_h % pos_w == 0)");
+            impl.ggmlAssert((pos_w == pos_h) or (pos_h >= pos_w and @rem(pos_h, pos_w) == 0), "clip.cpp", 5389, "(pos_w == pos_h) || (pos_h >= pos_w && pos_h % pos_w == 0)");
 
             const window = hparams.attn_window_size;
             const pos = pos_w;
@@ -772,22 +772,22 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
                         qwen2_mask[usz(i) * sl + usz(j)] = if (zero) 0.0 else -1e9;
                     }
                 }
-                st.setInputF32("qwen2_attn_mask", qwen2_mask);
+                try st.setInputAttnMask(qwen2_mask, 0);
             }
         },
-        .gemma3, .gemma3nv, .idefics3, .internvl, .nemotron_v2_vl, .qwen2a, .qwen3a, .glma, .ultravox, .lfm2, .voxtral, .meralion, .music_flamingo, .janus_pro, .phi4, .cogvlm, .yasa2, .gemma4ua, .qwen3tts_spkenc => {
+        .gemma3, .gemma3nv, .idefics3, .cohere2v, .internvl, .nemotron_v2_vl, .nemotron_omni, .qwen2a, .qwen3a, .glma, .ultravox, .lfm2, .d1omni_v, .voxtral, .meralion, .music_flamingo, .janus_pro, .phi4, .cogvlm, .yasa2, .gemma4ua, .qwen3tts_spkenc => {
             // do nothing
         },
         .qwen3tts_gen => {
             if (params.gen_process == .gen_wav) {
-                impl.ggmlAssert(params.codes != null, "clip.cpp", 5339, "params->codes != nullptr");
+                impl.ggmlAssert(params.codes != null, "clip.cpp", 5469, "params->codes != nullptr");
                 const codes_in = params.codes.?.items;
 
                 // frame-major input to group-major, rear-padded with code 0 up to one window
                 const n_codes: i64 = graph.ne(model.gen_code_head_w, 2) + 1;
                 const n_frames_w: i64 = hparams.wav_tfm_swa;
                 const n_frames: i64 = @divTrunc(@as(i64, @intCast(codes_in.len)), n_codes);
-                impl.ggmlAssert(n_frames > 0 and n_frames <= n_frames_w, "clip.cpp", 5345, "n_frames > 0 && n_frames <= n_frames_w");
+                impl.ggmlAssert(n_frames > 0 and n_frames <= n_frames_w, "clip.cpp", 5475, "n_frames > 0 && n_frames <= n_frames_w");
 
                 // codes are used as ggml_get_rows indices, so check them against the codebook vocab
                 const vocab_first = graph.ne(model.c2w.quant_first_cb_w, 1);
@@ -838,12 +838,12 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
         .hunyuanvl => {
             // the 2D position embedding with the reference's sf=(target+0.1)/n_grid
             // bilinear sampling, computed on the CPU
-            impl.ggmlAssert(model.position_embeddings != null, "clip.cpp", 5395, "model.position_embeddings != nullptr");
+            impl.ggmlAssert(model.position_embeddings != null, "clip.cpp", 5525, "model.position_embeddings != nullptr");
             const src_t = model.position_embeddings;
             const n_embd: i64 = graph.ne(src_t, 0);
             const n_pos_e: i64 = graph.ne(src_t, 1); // = n_grid * n_grid
             const n_grid: c_int = @intCast(lround(sqrt(@floatFromInt(n_pos_e))));
-            impl.ggmlAssert(@as(i64, n_grid) * n_grid == n_pos_e, "clip.cpp", 5400, "(int64_t)n_grid * n_grid == n_pos");
+            impl.ggmlAssert(@as(i64, n_grid) * n_grid == n_pos_e, "clip.cpp", 5530, "(int64_t)n_grid * n_grid == n_pos");
             const out_w = pos_w; // pw
             const out_h = pos_h; // ph
             const ne0 = usz(n_embd);
@@ -916,7 +916,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             st.setInputI32("pos_w", pos_data);
         },
         .dots3note_a => {
-            impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 5472, "imgs.entries.size() == 1");
+            impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 5602, "imgs.entries.size() == 1");
             const np = @divTrunc(imgs.entries.items[0].nx() + 7, 8); // 3x stride-2 conv2d
             const positions = try allocI32(usz(np), 0);
             defer gpa.free(positions);
@@ -924,7 +924,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             st.setInputI32("positions", positions);
         },
         .gemma4a => {
-            impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 5482, "imgs.entries.size() == 1");
+            impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 5612, "imgs.entries.size() == 1");
             const img0 = &imgs.entries.items[0];
             // Compute n_pos matching SSCP output: two stride-2 convs
             var np = img0.nx();
@@ -981,7 +981,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             }
         },
         .mimo_audio => {
-            impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 5532, "imgs.entries.size() == 1");
+            impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 5662, "imgs.entries.size() == 1");
             const n_frames = imgs.entries.items[0].nx();
             const np = @divTrunc(n_frames - 1, 2) + 1; // matches conv1(s=1)+conv2(s=2) output length
             const npu = usz(np);
@@ -992,7 +992,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             st.setInputI32("mimo_audio_positions", positions);
 
             const window = hparams.attn_window_size;
-            impl.ggmlAssert(window > 0, "clip.cpp", 5543, "window > 0");
+            impl.ggmlAssert(window > 0, "clip.cpp", 5673, "window > 0");
 
             const neg_inf = lowest;
             const full_mask = try allocF32(npu * npu, 0);
@@ -1008,14 +1008,14 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
                     window_mask[usz(q) * npu + usz(k)] = if (causal_ok and (q - k) <= window) 0.0 else neg_inf;
                 }
             }
-            st.setInputF32("mimo_audio_full_mask", full_mask);
-            st.setInputF32("mimo_audio_window_mask", window_mask);
+            try st.setInputAttnMask(full_mask, 0);
+            try st.setInputAttnMask(window_mask, 1);
 
             // input_local_transformer: block-diagonal mask + in-group positions
             {
                 const n_pos_ds = @divTrunc(np - 2, 2) + 1; // matches downsample conv (k=2,s=2,p=0)
                 const group_size = hparams.audio_local_group_size;
-                impl.ggmlAssert(group_size > 0, "clip.cpp", 5562, "group_size > 0");
+                impl.ggmlAssert(group_size > 0, "clip.cpp", 5692, "group_size > 0");
                 const n_groups = @divTrunc(n_pos_ds + group_size - 1, group_size);
                 const n_padded = n_groups * group_size;
                 const npd = usz(n_padded);
@@ -1035,11 +1035,11 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
                         local_mask[usz(qq) * npd + usz(k)] = if (same_group) 0.0 else neg_inf;
                     }
                 }
-                st.setInputF32("mimo_audio_local_mask", local_mask);
+                try st.setInputAttnMask(local_mask, 2);
             }
         },
-        .lfm2a => {
-            impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 5584, "imgs.entries.size() == 1");
+        .lfm2a, .d1omni_a => {
+            impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 5715, "imgs.entries.size() == 1");
             const n_frames = nOutputTokens(ctx, &imgs.entries.items[0]);
 
             const d_model: c_int = 512;
@@ -1065,7 +1065,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             st.setInputF32("pos_emb", pos_emb);
         },
         .parakeet => {
-            impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 5605, "imgs.entries.size() == 1");
+            impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 5736, "imgs.entries.size() == 1");
             const attn_mask = c.ggml_graph_get_tensor(gf, "attn_mask");
             const n_q: c_int = @intCast(attn_mask.*.ne[1]);
             const n_k: c_int = @intCast(attn_mask.*.ne[0]);
@@ -1220,7 +1220,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
                 }
             }
         },
-        else => impl.abort("clip.cpp", 5803, "Unknown projector type"),
+        else => impl.abort("clip.cpp", 5934, "Unknown projector type"),
     }
     return true;
 }
@@ -1259,8 +1259,8 @@ fn minicpmvPositions(pos_h: c_int, pos_w: c_int) clip.Error![]i32 {
     return positions;
 }
 
-/// The `make_ds_idx` lambda of the MiniCPM-V 4.6 arm (mtmd/clip.cpp:4779
-/// @d81235049). The caller frees the slice.
+/// The `make_ds_idx` lambda of the MiniCPM-V 4.6 arm (mtmd/clip.cpp:4906
+/// @620d2225c). The caller frees the slice.
 fn makeDsIdx(off_r: c_int, off_c: c_int, ds_h: c_int, ds_w: c_int, stride_w: c_int) clip.Error![]i32 {
     const idx = try allocI32(usz(@max(ds_h * ds_w, 0)), 0);
     var i: c_int = 0;
@@ -1271,8 +1271,8 @@ fn makeDsIdx(off_r: c_int, off_c: c_int, ds_h: c_int, ds_w: c_int, stride_w: c_i
     return idx;
 }
 
-/// The `make_win_idx` lambda of the Granite4 Vision arm (mtmd/clip.cpp:5734
-/// @d81235049): raster to window order, `dst[w*win*win + p]` the source
+/// The `make_win_idx` lambda of the Granite4 Vision arm (mtmd/clip.cpp:5865
+/// @620d2225c): raster to window order, `dst[w*win*win + p]` the source
 /// index. The caller frees the slice.
 fn makeWinIdx(side: c_int, win: c_int) clip.Error![]i32 {
     const nn = @divTrunc(side, win);
@@ -1297,7 +1297,7 @@ fn makeWinIdx(side: c_int, win: c_int) clip.Error![]i32 {
     return idx;
 }
 
-/// The `make_unwin_idx` lambda (mtmd/clip.cpp:5753 @d81235049).
+/// The `make_unwin_idx` lambda (mtmd/clip.cpp:5884 @620d2225c).
 fn makeUnwinIdx(side: c_int, win: c_int) clip.Error![]i32 {
     const fwd = try makeWinIdx(side, win);
     defer gpa.free(fwd);
@@ -1306,7 +1306,7 @@ fn makeUnwinIdx(side: c_int, win: c_int) clip.Error![]i32 {
     return inv;
 }
 
-/// The `make_spatial_idx` lambda (mtmd/clip.cpp:5762 @d81235049).
+/// The `make_spatial_idx` lambda (mtmd/clip.cpp:5893 @620d2225c).
 fn makeSpatialIdx(side: c_int, offset: i32) clip.Error![]i32 {
     const off_y = (offset >> 1) & 1;
     const off_x = offset & 1;
@@ -1326,20 +1326,20 @@ fn g4vName(buf: *[96]u8, bid: usize, comptime suffix: [*:0]const u8) [*:0]const 
     return @ptrCast(buf);
 }
 
-/// The `upload` lambda (mtmd/clip.cpp:5776 @d81235049): the same permutation
+/// The `upload` lambda (mtmd/clip.cpp:5907 @620d2225c): the same permutation
 /// for every tile of the stacked image.
 fn upload(gf: ?*c.ggml_cgraph, name: [*:0]const u8, idx: []const i32) void {
     const t = c.ggml_graph_get_tensor(gf, name);
-    impl.ggmlAssert(t != null, "clip.cpp", 5779, "t");
-    impl.ggmlAssert(@rem(c.ggml_nelements(t), @as(i64, @intCast(idx.len))) == 0, "clip.cpp", 5779, "ggml_nelements(t) % (int64_t) idx.size() == 0");
+    impl.ggmlAssert(t != null, "clip.cpp", 5910, "t");
+    impl.ggmlAssert(@rem(c.ggml_nelements(t), @as(i64, @intCast(idx.len))) == 0, "clip.cpp", 5910, "ggml_nelements(t) % (int64_t) idx.size() == 0");
     const n_rep: usize = @intCast(@as(c_int, @truncate(@as(i64, @intCast(@as(usize, @intCast(c.ggml_nelements(t))) / idx.len)))));
-    const buf = gpa.alloc(i32, idx.len * n_rep) catch impl.abort("clip.cpp", 5787, "std::bad_alloc");
+    const buf = gpa.alloc(i32, idx.len * n_rep) catch impl.abort("clip.cpp", 5918, "std::bad_alloc");
     defer gpa.free(buf);
     for (0..n_rep) |i| @memcpy(buf[i * idx.len ..][0..idx.len], idx);
     c.ggml_backend_tensor_set(t, buf.ptr, 0, c.ggml_nbytes(t));
 }
 
-/// Ports `clip_n_output_tokens` (mtmd/clip.cpp:4141 @d81235049): the number of
+/// Ports `clip_n_output_tokens` (mtmd/clip.cpp:4246 @620d2225c): the number of
 /// embeddings the projector produces for `img`.
 pub fn nOutputTokens(ctx: *const clip.Ctx, img: *const impl.ImageF32) c_int {
     const params = &ctx.model.hparams;
@@ -1368,11 +1368,11 @@ pub fn nOutputTokens(ctx: *const clip.Ctx, img: *const impl.ImageF32) c_int {
                 n_patches = switch (params.minicpmv_version) {
                     2 => 96,
                     3, 4, 5, 6, 100045 => 64,
-                    else => impl.abort("clip.cpp", 4194, "Unknown minicpmv version"),
+                    else => impl.abort("clip.cpp", 4299, "Unknown minicpmv version"),
                 };
             }
         },
-        .minicpmv4_6 => {
+        .minicpmv4_6, .minicpmv4_7 => {
             n_patches = @divTrunc(n_patches, params.n_merge * params.n_merge);
         },
         .qwen2vl, .qwen25vl, .qwen3vl, .ling3vl, .exaone4_5, .mimovl, .minimax_m3, .glm4v, .glm5v, .youtuvl, .muse_glimmer => {
@@ -1386,7 +1386,7 @@ pub fn nOutputTokens(ctx: *const clip.Ctx, img: *const impl.ImageF32) c_int {
             const y_patch = @divTrunc(img.ny(), params.patch_size * params.n_merge);
             n_patches = x_patch * y_patch;
         },
-        .gemma3, .gemma4v, .gemma4uv, .idefics3, .internvl, .nemotron_v2_vl, .llama4 => {
+        .gemma3, .gemma4v, .gemma4uv, .idefics3, .cohere2v, .internvl, .nemotron_v2_vl, .nemotron_omni, .llama4 => {
             // both X and Y are downscaled by the scale factor
             const scale_factor = ctx.model.hparams.n_merge;
             n_patches = @divTrunc(n_patches, scale_factor * scale_factor);
@@ -1395,7 +1395,7 @@ pub fn nOutputTokens(ctx: *const clip.Ctx, img: *const impl.ImageF32) c_int {
             // MobileNetV5 MSFA adapter always outputs fixed 16x16 resolution
             n_patches = @divTrunc(ctx.model.hparams.image_size, ctx.model.hparams.patch_size);
         },
-        .lfm2, .kimivl, .kimik25 => {
+        .lfm2, .d1omni_v, .kimivl, .kimik25 => {
             // dynamic size
             const out_patch_size = params.patch_size * ctx.model.hparams.n_merge;
             const x_patch = @divTrunc(clipAlign(img.nx(), out_patch_size), out_patch_size);
@@ -1434,7 +1434,7 @@ pub fn nOutputTokens(ctx: *const clip.Ctx, img: *const impl.ImageF32) c_int {
 
             const proj_stack_factor = ctx.model.hparams.proj_stack_factor;
             if (ctx.model.audioHasStackFrames()) {
-                impl.ggmlAssert(proj_stack_factor > 0, "clip.cpp", 4297, "proj_stack_factor > 0");
+                impl.ggmlAssert(proj_stack_factor > 0, "clip.cpp", 4406, "proj_stack_factor > 0");
                 const n_len = clipAlign(n_patches, proj_stack_factor);
                 n_patches = @divTrunc(n_len, proj_stack_factor);
             }
@@ -1494,7 +1494,7 @@ pub fn nOutputTokens(ctx: *const clip.Ctx, img: *const impl.ImageF32) c_int {
             n_patches = @divTrunc(n_patches, 16);
             if (img.add_viewsep) n_patches += 1; // view separator, appended only after the global view
         },
-        .lfm2a => {
+        .lfm2a, .d1omni_a => {
             n_patches = @divTrunc(@divTrunc(@divTrunc(img.nx() + 1, 2) + 1, 2) + 1, 2);
         },
         .gemma4a => {
@@ -1554,8 +1554,10 @@ pub fn nOutputTokens(ctx: *const clip.Ctx, img: *const impl.ImageF32) c_int {
                 n_patches += u.out_h * (u.out_w + 1);
             }
         },
-        else => impl.abort("clip.cpp", 4444, "unsupported projector type"),
+        else => impl.abort("clip.cpp", 4554, "unsupported projector type"),
     }
+
+    n_patches += @intCast(impl.suffixRows(img.suffix_type).len);
 
     return n_patches;
 }

@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/minicpmv.cpp` at v0.6.0 (`d81235049`).
+//! Ports `llama.cpp/tools/mtmd/models/minicpmv.cpp` at v0.7.0 (`620d2225c`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -14,7 +14,7 @@ const c = impl.c;
 
 extern fn sqrtf(x: f32) f32;
 
-/// Ports `build` (minicpmv.cpp:3 @d81235049), a member of `clip_graph_minicpmv`.
+/// Ports `build` (minicpmv.cpp:3 @620d2225c), a member of `clip_graph_minicpmv`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -106,7 +106,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     return g.gf;
 }
 
-/// The `add_i32_input` lambda (minicpmv.cpp:124 @d81235049): a named I32 input.
+/// The `add_i32_input` lambda (minicpmv.cpp:124 @620d2225c): a named I32 input.
 fn addI32Input(g: *graph.Graph, name: [*:0]const u8, n: c_int) graph.T {
     const t = c.ggml_new_tensor_1d(g.ctx0, c.GGML_TYPE_I32, n);
     _ = c.ggml_set_name(t, name);
@@ -114,7 +114,7 @@ fn addI32Input(g: *graph.Graph, name: [*:0]const u8, n: c_int) graph.T {
     return t;
 }
 
-/// The `build_vit_layers` lambda (minicpmv.cpp:180 @d81235049): layers
+/// The `build_vit_layers` lambda (minicpmv.cpp:175 @620d2225c): layers
 /// `[il_begin, il_end)` of the ViT over `n_pos_layer` tokens, with optional
 /// layer scales.
 fn buildVitLayers(g: *graph.Graph, input_in: graph.T, il_begin: c_int, il_end: c_int, n_pos_layer: i64) graph.T {
@@ -173,7 +173,7 @@ fn buildVitLayers(g: *graph.Graph, input_in: graph.T, il_begin: c_int, il_end: c
     return input;
 }
 
-/// Ports `build` (minicpmv.cpp:116 @d81235049), a member of `clip_graph_minicpmv4_6`.
+/// Ports `build` (minicpmv.cpp:116 @620d2225c), a member of `clip_graph_minicpmv4_6`.
 pub fn build4_6(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -207,10 +207,7 @@ pub fn build4_6(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?
         // so each window-major group of 4 tokens only attends to itself)
         vit_merger_window_idx = addI32Input(g, "vit_merger_window_idx", n_pos);
         vit_merger_inv_window_idx = addI32Input(g, "vit_merger_inv_window_idx", n_pos);
-        vit_merger_window_mask = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, n_pos, n_pos);
-        _ = c.ggml_set_name(vit_merger_window_mask, "vit_merger_window_mask");
-        c.ggml_set_input(vit_merger_window_mask);
-        if (g.flash_attn_type == .enabled) vit_merger_window_mask = c.ggml_cast(ctx0, vit_merger_window_mask, c.GGML_TYPE_F16);
+        vit_merger_window_mask = g.buildInpAttnMask(n_pos, n_pos, 0);
 
         // ViT merger 2x2 downsample gather indices
         vit_merger_ds_idx_0 = addI32Input(g, "vit_merger_ds_idx_0", n_ds);
@@ -332,6 +329,8 @@ pub fn build4_6(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?
 
         inpL = cur;
     }
+
+    inpL = g.buildSuffix(inpL);
 
     c.ggml_build_forward_expand(g.gf, inpL);
     return g.gf;

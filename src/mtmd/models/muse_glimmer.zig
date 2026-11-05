@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/muse-glimmer.cpp` at v0.6.0 (`d81235049`).
+//! Ports `llama.cpp/tools/mtmd/models/muse-glimmer.cpp` at v0.7.0 (`620d2225c`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -13,7 +13,7 @@ const graph = @import("../graph.zig");
 const kimivl = @import("kimivl.zig");
 const c = impl.c;
 
-/// The `inp_i32` lambda (mtmd/models/muse-glimmer.cpp:21 @d81235049): a named I32 input.
+/// The `inp_i32` lambda (mtmd/models/muse-glimmer.cpp:21 @620d2225c): a named I32 input.
 fn inpI32(g: *graph.Graph, name: [*:0]const u8, n: i64) graph.T {
     const t = c.ggml_new_tensor_1d(g.ctx0, c.GGML_TYPE_I32, n);
     _ = c.ggml_set_name(t, name);
@@ -21,7 +21,7 @@ fn inpI32(g: *graph.Graph, name: [*:0]const u8, n: i64) graph.T {
     return t;
 }
 
-/// Ports `build` (mtmd/models/muse-glimmer.cpp:14 @d81235049), a member of `clip_graph_muse_glimmer`.
+/// Ports `build` (mtmd/models/muse-glimmer.cpp:14 @620d2225c), a member of `clip_graph_muse_glimmer`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -40,9 +40,8 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const inv_perm = inpI32(g, "muse_glimmer_inv_perm", n_tok);
     const ds_perm = inpI32(g, "muse_glimmer_ds_perm", n_tok);
 
-    const sp_mask = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, n_tok, n_tok);
-    _ = c.ggml_set_name(sp_mask, "muse_glimmer_sp_mask");
-    c.ggml_set_input(sp_mask);
+    // block-diagonal window mask (sparse layers), f16 with flash attn
+    const sp_mask = g.buildInpAttnMask(n_tok, n_tok, 0);
 
     // patchify via build_inp (conv2d over raw pixels) + bilinear-resized learned pos-emb
     var x = g.buildInp(); // [n_embd, n_tok, 1]

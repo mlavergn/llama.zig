@@ -8,8 +8,8 @@
 //! Ports `server_subproc`, `server_subproc::waiter`,
 //! `server_subproc_stream` and `server_reserve_stdout` from
 //! `llama.cpp/tools/server/server-common.cpp` and
-//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.6.0,
-//! `d81235049`), their POSIX arms. Each declaration names what it ports
+//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.7.0,
+//! `620d2225c`), their POSIX arms. Each declaration names what it ports
 //! and the line it began at.
 //!
 //! # Generic over `common_subproc`
@@ -47,14 +47,14 @@ fn setNonBlocking(fd: c_int) void {
     _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, @as(c_int, 0)) | O_NONBLOCK);
 }
 
-/// Ports `server_subproc_stream` (server-common.h:657 @d81235049): a
+/// Ports `server_subproc_stream` (server-common.h:659 @620d2225c): a
 /// child server writes its state commands to stdout and its logs to stderr.
 pub const Stream = enum(u1) {
     stdout,
     stderr,
 };
 
-/// `SERVER_SUBPROC_STREAMS` (server-common.h:660 @d81235049).
+/// `SERVER_SUBPROC_STREAMS` (server-common.h:662 @620d2225c).
 pub const n_streams = 2;
 
 extern fn dup2(old: c_int, new: c_int) c_int;
@@ -62,7 +62,7 @@ extern fn fflush(f: ?*anyopaque) c_int;
 extern fn fdopen(fd: c_int, mode: [*:0]const u8) ?*anyopaque;
 const F_DUPFD_CLOEXEC: c_int = if (@import("builtin").os.tag.isDarwin()) 67 else 1030;
 
-/// Ports `server_reserve_stdout` (server-common.cpp:1929 @d81235049), its
+/// Ports `server_reserve_stdout` (server-common.cpp:1924 @620d2225c), its
 /// POSIX arm: gives the current stdout to the caller as a stream of its
 /// own, and sends everything else written to stdout to stderr. The
 /// reserved stream is not inherited, so grandchildren get stdout and
@@ -70,14 +70,14 @@ const F_DUPFD_CLOEXEC: c_int = if (@import("builtin").os.tag.isDarwin()) 67 else
 pub fn reserveStdout() *anyopaque {
     _ = fflush(tools.io.cStdout());
     const fd = fcntl(fileno(tools.io.cStdout()), F_DUPFD_CLOEXEC, @as(c_int, 0));
-    common.ggmlAssert(fd >= 0, "server-common.cpp", 1941, "fd >= 0");
+    common.ggmlAssert(fd >= 0, "server-common.cpp", 1936, "fd >= 0");
     _ = dup2(fileno(tools.io.cStderr()), fileno(tools.io.cStdout()));
     const f = fdopen(fd, "w");
-    common.ggmlAssert(f != null, "server-common.cpp", 1945, "f");
+    common.ggmlAssert(f != null, "server-common.cpp", 1940, "f");
     return f.?;
 }
 
-/// Ports `server_subproc` (server-common.h:668 @d81235049) over a
+/// Ports `server_subproc` (server-common.h:670 @620d2225c) over a
 /// `common_subproc`-like `P` (see the file's doc comment).
 pub fn Subproc(comptime P: type) type {
     return struct {
@@ -89,22 +89,22 @@ pub fn Subproc(comptime P: type) type {
         out_handles: [n_streams]isize = .{ -1, -1 }, // fd on POSIX, HANDLE on Windows; taken lazily from sproc
         out_closed: [n_streams]bool = .{ false, false },
 
-        /// Ports `is_alive` (server-common.h:672 @d81235049).
+        /// Ports `is_alive` (server-common.h:674 @620d2225c).
         pub fn isAlive(self: *Self) bool {
             return self.sproc.alive();
         }
 
-        /// Ports `terminate` (server-common.h:673 @d81235049).
+        /// Ports `terminate` (server-common.h:675 @620d2225c).
         pub fn terminate(self: *Self) void {
             self.sproc.terminate();
         }
 
-        /// Ports `join` (server-common.h:674 @d81235049).
+        /// Ports `join` (server-common.h:676 @620d2225c).
         pub fn join(self: *Self) c_int {
             return self.sproc.join();
         }
 
-        /// Ports `server_subproc`'s `has_output` (server-common.cpp:1949 @d81235049): true when
+        /// Ports `server_subproc`'s `has_output` (server-common.cpp:1944 @620d2225c): true when
         /// both output pipes of the child are available; the first call
         /// makes each non-blocking.
         pub fn hasOutput(self: *Self) bool {
@@ -124,13 +124,13 @@ pub fn Subproc(comptime P: type) type {
             return true;
         }
 
-        /// Ports `server_subproc`'s `output_closed` (server-common.cpp:1976 @d81235049):
+        /// Ports `server_subproc`'s `output_closed` (server-common.cpp:1971 @620d2225c):
         /// true once both output pipes are closed.
         pub fn outputClosed(self: *const Self) bool {
             return self.out_closed[@backingInt(Stream.stdout)] and self.out_closed[@backingInt(Stream.stderr)];
         }
 
-        /// Ports `server_subproc`'s `read_output` (server-common.cpp:1980 @d81235049): a
+        /// Ports `server_subproc`'s `read_output` (server-common.cpp:1975 @620d2225c): a
         /// non-blocking read from one output pipe.
         ///
         /// Return: the bytes read, 0 when nothing is available, -1 when the
@@ -163,34 +163,34 @@ pub fn Subproc(comptime P: type) type {
     };
 }
 
-/// Ports `server_subproc`'s `waiter` (server-common.h:687 @d81235049): a
+/// Ports `server_subproc`'s `waiter` (server-common.h:689 @620d2225c): a
 /// self-pipe to wake a `poll` on the children's output.
 pub const Waiter = struct {
     wake_fd: [2]c_int = .{ -1, -1 }, // POSIX self-pipe
 
-    /// Ports the constructor of `server_subproc`'s `waiter` (server-common.cpp:2023 @d81235049).
+    /// Ports the constructor of `server_subproc`'s `waiter` (server-common.cpp:2018 @620d2225c).
     pub fn init() Waiter {
         var fds: [2]c_int = undefined;
-        common.ggmlAssert(pipe(&fds) == 0, "server-common.cpp", 2026, "pipe(fds) == 0");
+        common.ggmlAssert(pipe(&fds) == 0, "server-common.cpp", 2021, "pipe(fds) == 0");
         for (fds) |fd| {
             setNonBlocking(fd);
         }
         return .{ .wake_fd = fds };
     }
 
-    /// Ports the destructor of `server_subproc`'s `waiter` (server-common.cpp:2035 @d81235049).
+    /// Ports the destructor of `server_subproc`'s `waiter` (server-common.cpp:2030 @620d2225c).
     pub fn deinit(self: *Waiter) void {
         _ = close(self.wake_fd[0]);
         _ = close(self.wake_fd[1]);
     }
 
-    /// Ports `server_subproc::waiter`'s `wake` (server-common.cpp:2042 @d81235049): thread-safe.
+    /// Ports `server_subproc::waiter`'s `wake` (server-common.cpp:2037 @620d2225c): thread-safe.
     pub fn wake(self: *Waiter) void {
         const ch: u8 = 1;
         _ = write(self.wake_fd[1], (&ch)[0..1].ptr, 1);
     }
 
-    /// Ports `server_subproc::waiter`'s `wait` (server-common.cpp:2049 @d81235049), its POSIX
+    /// Ports `server_subproc::waiter`'s `wait` (server-common.cpp:2044 @620d2225c), its POSIX
     /// arm: until a child has output on an open pipe (or a broken pipe),
     /// `wake()` is called, or `timeout_ms` passes (forever when negative).
     ///

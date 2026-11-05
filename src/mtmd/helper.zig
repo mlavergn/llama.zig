@@ -5,7 +5,7 @@
 //!
 //! Ports `llama.cpp/tools/mtmd/mtmd-helper.cpp` and
 //! `llama.cpp/tools/mtmd/mtmd-helper-common.h`, plus the C types of
-//! `llama.cpp/tools/mtmd/mtmd-helper.h`, at v0.6.0 (`d81235049`). Each
+//! `llama.cpp/tools/mtmd/mtmd-helper.h`, at v0.7.0 (`620d2225c`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # The build ported
@@ -51,13 +51,13 @@ const seek_end: c_int = 2;
 // -----------------------------------------------------------------------------
 // mtmd-helper.h
 
-/// Ports `mtmd_helper_bitmap_wrapper` (mtmd-helper.h:51 @d81235049).
+/// Ports `mtmd_helper_bitmap_wrapper` (mtmd-helper.h:51 @620d2225c).
 pub const BitmapWrapper = extern struct {
     bitmap: ?*mtmd.Bitmap,
     video_ctx: ?*anyopaque,
 };
 
-/// Ports `mtmd_helper_embd_batch` (mtmd-helper.h:121 @d81235049), new at
+/// Ports `mtmd_helper_embd_batch` (mtmd-helper.h:121 @620d2225c), new at
 /// v0.6.0: one decoded sub-batch of embeddings, passed to
 /// `mtmd_helper_post_decode_callback`.
 pub const EmbdBatchView = extern struct {
@@ -69,11 +69,11 @@ pub const EmbdBatchView = extern struct {
     seq_id: c.llama_seq_id,
 };
 
-/// Ports `mtmd_helper_post_decode_callback` (mtmd-helper.h:130 @d81235049):
+/// Ports `mtmd_helper_post_decode_callback` (mtmd-helper.h:130 @620d2225c):
 /// since v0.6.0 it takes the sub-batch's view, not a `llama_batch`.
 pub const PostDecodeCallback = ?*const fn (?*const EmbdBatchView, ?*anyopaque) callconv(.c) i32;
 
-/// Ports `mtmd_helper_video_info` (mtmd-helper.h:155 @d81235049).
+/// Ports `mtmd_helper_video_info` (mtmd-helper.h:155 @620d2225c).
 pub const VideoInfo = extern struct {
     width: u32,
     height: u32,
@@ -81,14 +81,14 @@ pub const VideoInfo = extern struct {
     n_frames: i32,
 };
 
-/// Ports `mtmd_helper_video_init_params` (mtmd-helper.h:26 @d81235049).
+/// Ports `mtmd_helper_video_init_params` (mtmd-helper.h:26 @620d2225c).
 pub const VideoInitParams = extern struct {
     fps_target: f32, // desired output fps; <= 0 means use the video's native fps, defaulted to 4.0f
     ffmpeg_bin_dir: ?[*:0]const u8, // directory containing ffmpeg/ffprobe binaries; NULL means search PATH
     timestamp_interval_ms: i64, // interval for adding timestamp as text chunk (example: "[10m50.5s]"); <= 0 means no timestamp, defaulted to 5000ms
 };
 
-/// Ports `mtmd_helper_init_opt` (mtmd-helper.h:36 @d81235049): the options
+/// Ports `mtmd_helper_init_opt` (mtmd-helper.h:36 @620d2225c): the options
 /// of `mtmd_helper_bitmap_init_from_*()`.
 pub const InitOpt = extern struct {
     video_params: VideoInitParams,
@@ -105,14 +105,14 @@ fn defaultCallback(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: 
     _ = fflush(f);
 }
 
-/// Ports `mtmd_helper_logger` (mtmd-helper-common.h:21 @d81235049): the
+/// Ports `mtmd_helper_logger` (mtmd-helper-common.h:21 @620d2225c): the
 /// helpers' logger, separate from libmtmd's.
 pub const Logger = struct {
     default_callback: c.ggml_log_callback = defaultCallback,
     log_callback: c.ggml_log_callback = defaultCallback,
     log_callback_user_data: ?*anyopaque = null,
 
-    /// `log` (mtmd-helper-common.h:52 @d81235049): format into 128 bytes,
+    /// `log` (mtmd-helper-common.h:52 @620d2225c): format into 128 bytes,
     /// or a heap buffer when that is too short.
     pub fn log(self: *const Logger, level: c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
         var buffer: [128]u8 = undefined;
@@ -132,7 +132,7 @@ pub const Logger = struct {
     }
 };
 
-/// `g_logger` (mtmd-helper-common.h:61 @d81235049): one instance for both
+/// `g_logger` (mtmd-helper-common.h:61 @620d2225c): one instance for both
 /// helper translation units.
 pub var g_logger: Logger = .{};
 
@@ -152,7 +152,7 @@ pub fn logErr(comptime fmt: [*:0]const u8, args: anytype) void {
 // -----------------------------------------------------------------------------
 // mtmd-helper-common.h: the embedding batch
 
-/// Ports `decode_embd_batch` (mtmd-helper-common.h:74 @d81235049): precomputed
+/// Ports `decode_embd_batch` (mtmd-helper-common.h:74 @620d2225c): precomputed
 /// embeddings and their positions, rendered into a `llama_batch_ext` one
 /// sub-batch at a time. Since v0.6.0 it no longer is a `llama_batch`.
 pub const EmbdBatch = struct {
@@ -167,7 +167,7 @@ pub const EmbdBatch = struct {
 
     batch: ?*c.struct_llama_batch_ext = null, // rendered sub-batch, see render()
 
-    /// The constructor `decode_embd_batch` (mtmd-helper-common.h:86 @d81235049).
+    /// The constructor `decode_embd_batch` (mtmd-helper-common.h:86 @620d2225c).
     /// Heap-allocated, as the callers hold it by pointer.
     pub fn create(embd: ?[*]const f32, n_tokens: i32, n_pos_per_embd: c_int, n_mmproj_embd: c_int) *EmbdBatch {
         impl.ggmlAssert(n_tokens > 0 and n_pos_per_embd > 0 and n_mmproj_embd > 0, "mtmd-helper-common.h", 88, "n_tokens > 0 && n_pos_per_embd > 0 && n_mmproj_embd > 0");
@@ -188,7 +188,7 @@ pub const EmbdBatch = struct {
         gpa.destroy(self);
     }
 
-    /// `set_position_normal` (mtmd-helper-common.h:93 @d81235049).
+    /// `set_position_normal` (mtmd-helper-common.h:93 @620d2225c).
     pub fn setPositionNormal(self: *EmbdBatch, pos_0: c.llama_pos, seq_id: c.llama_seq_id) void {
         self.seq_id = seq_id;
         var i: i32 = 0;
@@ -197,7 +197,7 @@ pub const EmbdBatch = struct {
         }
     }
 
-    /// `set_position_mrope_2d` (mtmd-helper-common.h:101 @d81235049): M-RoPE
+    /// `set_position_mrope_2d` (mtmd-helper-common.h:101 @620d2225c): M-RoPE
     /// for image.
     pub fn setPositionMrope2d(self: *EmbdBatch, rel_pos: []const mtmd.DecoderPos, seq_id: c.llama_seq_id) void {
         impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 102, "n_pos_per_embd == 4");
@@ -212,7 +212,7 @@ pub const EmbdBatch = struct {
         }
     }
 
-    /// `set_position_mrope_1d` (mtmd-helper-common.h:116 @d81235049): M-RoPE
+    /// `set_position_mrope_1d` (mtmd-helper-common.h:116 @620d2225c): M-RoPE
     /// for audio.
     pub fn setPositionMrope1d(self: *EmbdBatch, pos_0: c.llama_pos, seq_id: c.llama_seq_id) void {
         impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 117, "n_pos_per_embd == 4");
@@ -227,7 +227,7 @@ pub const EmbdBatch = struct {
         }
     }
 
-    /// `get_view` (mtmd-helper-common.h:130 @d81235049): describes the
+    /// `get_view` (mtmd-helper-common.h:130 @620d2225c): describes the
     /// entries `[offset, offset + n)` with section-major positions, copied
     /// into `pos_view`; valid until the next call.
     pub fn getView(self: *EmbdBatch, offset: c_int, n: c_int) EmbdBatchView {
@@ -251,7 +251,7 @@ pub const EmbdBatch = struct {
         };
     }
 
-    /// `render` (mtmd-helper-common.h:149 @d81235049): the entries
+    /// `render` (mtmd-helper-common.h:149 @620d2225c): the entries
     /// `[offset, offset + n)` as a batch this object owns, ready for
     /// `llama_process`.
     pub fn render(self: *EmbdBatch, lctx: ?*c.struct_llama_context, offset: c_int, n: c_int) ?*c.struct_llama_batch_ext {
@@ -299,7 +299,7 @@ fn resizeZero(comptime T: type, list: *std.ArrayList(T), n: usize) void {
 // -----------------------------------------------------------------------------
 // mtmd-helper.cpp
 
-/// Ports `mtmd_helper_log_set` (mtmd-helper.cpp:56 @d81235049): the
+/// Ports `mtmd_helper_log_set` (mtmd-helper.cpp:56 @620d2225c): the
 /// helpers' logger and libmtmd's together.
 pub fn mtmd_helper_log_set(log_callback_in: c.ggml_log_callback, user_data: ?*anyopaque) callconv(.c) void {
     const log_callback = log_callback_in orelse g_logger.default_callback;
@@ -308,7 +308,7 @@ pub fn mtmd_helper_log_set(log_callback_in: c.ggml_log_callback, user_data: ?*an
     mtmd.mtmd_log_set(log_callback, user_data);
 }
 
-/// Ports `mtmd_helper_get_n_tokens` (mtmd-helper.cpp:69 @d81235049).
+/// Ports `mtmd_helper_get_n_tokens` (mtmd-helper.cpp:69 @620d2225c).
 pub fn mtmd_helper_get_n_tokens(chunks: *const mtmd.InputChunks) callconv(.c) usize {
     var n_tokens: usize = 0;
     var i: usize = 0;
@@ -319,7 +319,7 @@ pub fn mtmd_helper_get_n_tokens(chunks: *const mtmd.InputChunks) callconv(.c) us
     return n_tokens;
 }
 
-/// Ports `mtmd_helper_get_n_pos` (mtmd-helper.cpp:78 @d81235049).
+/// Ports `mtmd_helper_get_n_pos` (mtmd-helper.cpp:78 @620d2225c).
 pub fn mtmd_helper_get_n_pos(chunks: *const mtmd.InputChunks) callconv(.c) c.llama_pos {
     var n_pos: c.llama_pos = 0;
     var i: usize = 0;
@@ -330,15 +330,15 @@ pub fn mtmd_helper_get_n_pos(chunks: *const mtmd.InputChunks) callconv(.c) c.lla
     return n_pos;
 }
 
-/// Ports `mtmd_helper_image_get_decoder_pos` (mtmd-helper.cpp:87 @d81235049).
+/// Ports `mtmd_helper_image_get_decoder_pos` (mtmd-helper.cpp:87 @620d2225c).
 pub fn mtmd_helper_image_get_decoder_pos(chunks: *const mtmd.ImageTokens, pos_0: c.llama_pos, out_pos: [*]mtmd.DecoderPos) callconv(.c) void {
     const n_tokens = mtmd.mtmd_image_tokens_get_n_tokens(chunks);
     for (0..n_tokens) |i| out_pos[i] = mtmd.mtmd_image_tokens_get_decoder_pos(chunks, pos_0, i);
 }
 
-/// Ports `mtmd_helper_decode_image_chunk` (mtmd-helper.cpp:118 @d81235049):
+/// Ports `mtmd_helper_decode_image_chunk` (mtmd-helper.cpp:118 @620d2225c):
 /// decodes media embeddings already computed, in batches of `n_batch`.
-/// `scope_non_causal` (mtmd-helper.cpp:95 @d81235049) is the `defer`.
+/// `scope_non_causal` (mtmd-helper.cpp:95 @620d2225c) is the `defer`.
 pub fn mtmd_helper_decode_image_chunk(
     ctx: *Context,
     lctx: ?*c.struct_llama_context,
@@ -429,7 +429,7 @@ pub fn mtmd_helper_decode_image_chunk(
     return 0;
 }
 
-/// Ports `mtmd_helper_eval_chunk_single` (mtmd-helper.cpp:202 @d81235049):
+/// Ports `mtmd_helper_eval_chunk_single` (mtmd-helper.cpp:202 @620d2225c):
 /// since v0.6.0 a text chunk goes through a `llama_batch_ext`.
 pub fn mtmd_helper_eval_chunk_single(
     ctx: *Context,
@@ -503,7 +503,7 @@ pub fn mtmd_helper_eval_chunk_single(
     return 0;
 }
 
-/// Ports `mtmd_helper_eval_chunks` (mtmd-helper.cpp:270 @d81235049).
+/// Ports `mtmd_helper_eval_chunks` (mtmd-helper.cpp:270 @620d2225c).
 pub fn mtmd_helper_eval_chunks(
     ctx: *Context,
     lctx: ?*c.struct_llama_context,
@@ -536,7 +536,7 @@ pub fn mtmd_helper_eval_chunks(
     return 0;
 }
 
-/// Ports `is_audio_file` (mtmd-helper.cpp:301 @d81235049), a member of `audio_helpers`.
+/// Ports `is_audio_file` (mtmd-helper.cpp:301 @620d2225c), a member of `audio_helpers`.
 fn isAudioFile(buf: []const u8) bool {
     if (buf.len < 12) return false;
 
@@ -551,14 +551,14 @@ fn isAudioFile(buf: []const u8) bool {
     return is_wav or is_mp3 or is_flac;
 }
 
-/// `decode_audio_from_buf` (mtmd-helper.cpp:320 @d81235049), a member of `audio_helpers`,
+/// `decode_audio_from_buf` (mtmd-helper.cpp:320 @620d2225c), a member of `audio_helpers`,
 /// which is miniaudio's decoder, in `vendor/`.
 fn decodeAudioFromBuf(buf: []const u8, target_sample_rate: c_int, out: *std.ArrayList(f32)) bool {
     return vendor.miniaudio.decodeAudioFromBuf(gpa, buf, target_sample_rate, out);
 }
 
 /// SHA-256 of `buf` in lowercase hex: `hash_sha256_hex` (vendor/hash/hash.cpp:19
-/// @d81235049), the standard digest.
+/// @620d2225c), the standard digest.
 fn sha256Hex(buf: []const u8) [64:0]u8 {
     var digest: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(buf, &digest, .{});
@@ -572,7 +572,7 @@ fn sha256Hex(buf: []const u8) [64:0]u8 {
     return out;
 }
 
-/// Ports `mtmd_helper_bitmap_init_from_buf` (mtmd-helper.cpp:372 @d81235049):
+/// Ports `mtmd_helper_bitmap_init_from_buf` (mtmd-helper.cpp:372 @620d2225c):
 /// audio by its magic bytes, else an image stb_image can read. The ID is
 /// the buffer's SHA-256 unless `placeholder`. `opt` is only read by the
 /// video paths, which this build does not compile.
@@ -622,7 +622,7 @@ pub fn mtmd_helper_bitmap_init_from_buf(ctx: *const Context, buf_ptr: ?[*]const 
     return .{ .bitmap = null, .video_ctx = null };
 }
 
-/// Ports `mtmd_helper_bitmap_init_from_file` (mtmd-helper.cpp:459 @d81235049).
+/// Ports `mtmd_helper_bitmap_init_from_file` (mtmd-helper.cpp:459 @620d2225c).
 pub fn mtmd_helper_bitmap_init_from_file(ctx: *const Context, fname: [*:0]const u8, placeholder: bool, opt: InitOpt) callconv(.c) BitmapWrapper {
     const f = openFile(fname) orelse return .{ .bitmap = null, .video_ctx = null };
 
@@ -675,7 +675,7 @@ fn openFile(fname: [*:0]const u8) ?*anyopaque {
     return f;
 }
 
-/// Ports `mtmd_helper_support_video` (mtmd-helper.cpp:504 @d81235049): video
+/// Ports `mtmd_helper_support_video` (mtmd-helper.cpp:504 @620d2225c): video
 /// is not compiled in.
 pub fn mtmd_helper_support_video(ctx: ?*const Context) callconv(.c) bool {
     _ = ctx;
@@ -683,17 +683,17 @@ pub fn mtmd_helper_support_video(ctx: ?*const Context) callconv(.c) bool {
 }
 
 /// Ports `mtmd_helper_video_init_params_default` (mtmd-helper.cpp:867
-/// @d81235049).
+/// @620d2225c).
 pub fn mtmd_helper_video_init_params_default() callconv(.c) VideoInitParams {
     return .{ .fps_target = 4.0, .ffmpeg_bin_dir = null, .timestamp_interval_ms = 5000 };
 }
 
-/// Ports `mtmd_helper_init_opt_default` (mtmd-helper.cpp:875 @d81235049).
+/// Ports `mtmd_helper_init_opt_default` (mtmd-helper.cpp:875 @620d2225c).
 pub fn mtmd_helper_init_opt_default() callconv(.c) InitOpt {
     return .{ .video_params = mtmd_helper_video_init_params_default() };
 }
 
-/// Ports `mtmd_helper_video_init` (mtmd-helper.cpp:932 @d81235049), its
+/// Ports `mtmd_helper_video_init` (mtmd-helper.cpp:932 @620d2225c), its
 /// `#else` arm.
 pub fn mtmd_helper_video_init(mctx: ?*const Context, path: ?[*:0]const u8, params: VideoInitParams) callconv(.c) ?*anyopaque {
     _ = mctx;
@@ -703,7 +703,7 @@ pub fn mtmd_helper_video_init(mctx: ?*const Context, path: ?[*:0]const u8, param
     return null;
 }
 
-/// Ports `mtmd_helper_video_init_from_buf` (mtmd-helper.cpp:967 @d81235049),
+/// Ports `mtmd_helper_video_init_from_buf` (mtmd-helper.cpp:967 @620d2225c),
 /// its `#else` arm.
 pub fn mtmd_helper_video_init_from_buf(mctx: ?*const Context, buf: ?[*]const u8, len: usize, params: VideoInitParams) callconv(.c) ?*anyopaque {
     _ = mctx;
@@ -714,14 +714,14 @@ pub fn mtmd_helper_video_init_from_buf(mctx: ?*const Context, buf: ?[*]const u8,
     return null;
 }
 
-/// Ports `mtmd_helper_video_free` (mtmd-helper.cpp:1003 @d81235049), its
+/// Ports `mtmd_helper_video_free` (mtmd-helper.cpp:1003 @620d2225c), its
 /// `#else` arm.
 pub fn mtmd_helper_video_free(ctx: ?*anyopaque) callconv(.c) void {
     _ = ctx;
     logErr("%s: video is not supported in this build (MTMD_VIDEO is set to OFF)\n", .{"mtmd_helper_video_free"});
 }
 
-/// Ports `mtmd_helper_video_get_info` (mtmd-helper.cpp:1014 @d81235049), its
+/// Ports `mtmd_helper_video_get_info` (mtmd-helper.cpp:1014 @620d2225c), its
 /// `#else` arm.
 pub fn mtmd_helper_video_get_info(ctx: ?*const anyopaque) callconv(.c) VideoInfo {
     _ = ctx;
@@ -729,7 +729,7 @@ pub fn mtmd_helper_video_get_info(ctx: ?*const anyopaque) callconv(.c) VideoInfo
     unreachable;
 }
 
-/// Ports `mtmd_helper_video_read_next` (mtmd-helper.cpp:1023 @d81235049), its
+/// Ports `mtmd_helper_video_read_next` (mtmd-helper.cpp:1023 @620d2225c), its
 /// `#else` arm.
 pub fn mtmd_helper_video_read_next(ctx: ?*anyopaque, out_bitmap: ?*?*mtmd.Bitmap, out_text: ?*?[*:0]u8) callconv(.c) i32 {
     _ = ctx;
@@ -739,7 +739,7 @@ pub fn mtmd_helper_video_read_next(ctx: ?*anyopaque, out_bitmap: ?*?*mtmd.Bitmap
     unreachable;
 }
 
-/// Ports `mtmd_helper_model_can_chat` (mtmd-helper.cpp:1036 @d81235049): a
+/// Ports `mtmd_helper_model_can_chat` (mtmd-helper.cpp:1036 @620d2225c): a
 /// TTS-only model, which has no chat template, cannot chat.
 pub fn mtmd_helper_model_can_chat(lctx: ?*const c.struct_llama_context, mctx: ?*const Context) callconv(.c) bool {
     const m = mctx orelse return true;
